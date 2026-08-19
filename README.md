@@ -98,6 +98,34 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
+## Supabase authentication
+
+The application requires these environment variables:
+
+- `SUPABASE_URL`: the project URL from Supabase project settings
+- `SUPABASE_PUBLISHABLE_KEY`: the frontend-safe publishable key (never use a
+  service-role or secret key in the browser)
+
+Apply the access-profile migrations to the linked Supabase project with:
+
+```bash
+supabase db push
+```
+
+In Supabase Dashboard, enable both the Email and Google providers under
+Authentication. Add the deployed application URL to the Supabase Auth Redirect
+URLs allow-list.
+
+For Google OAuth, the **Authorized redirect URI** in Google Cloud must be
+exactly:
+
+```text
+https://<project-ref>.supabase.co/auth/v1/callback
+```
+
+Do not put the application URL in the Google Cloud callback field. The
+application URL belongs only in the Supabase redirect allow-list.
+
 Use build and validation commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
 
 The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
