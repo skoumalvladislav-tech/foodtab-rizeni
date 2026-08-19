@@ -43,6 +43,13 @@
       "when": 1787008073339,
       "tag": "0005_polite_metal_master",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787169718431,
+      "tag": "0006_talented_captain_midlands",
+      "breakpoints": true
     }
   ]
 }

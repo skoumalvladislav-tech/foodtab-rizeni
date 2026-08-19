@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const branches = sqliteTable("branches", {
   id: text("id").primaryKey(),
@@ -97,6 +97,32 @@ export const weeklyMenuDocuments = sqliteTable("weekly_menu_documents", {
   uploadedBy: text("uploaded_by").notNull(),
   uploadedAt: text("uploaded_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const shifts = sqliteTable(
+  "shifts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    branchId: text("branch_id").notNull(),
+    department: text("department", { enum: ["bar", "kuchyne"] }).notNull(),
+    shiftDate: text("shift_date").notNull(),
+    startTime: text("start_time").notNull(),
+    endTime: text("end_time").notNull(),
+    employeeUserId: text("employee_user_id"),
+    employeeName: text("employee_name").notNull(),
+    employeeEmail: text("employee_email").notNull(),
+    isPlaceholder: integer("is_placeholder", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_shifts_branch_date").on(table.branchId, table.shiftDate),
+    index("idx_shifts_employee_email").on(table.employeeEmail),
+  ],
+);
 
 export const appUsers = sqliteTable("app_users", {
   id: integer("id").primaryKey({ autoIncrement: true }),

@@ -8,6 +8,15 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  formatMonthLabel,
+  getMonthGrid,
+  groupByDate,
+  nextMonth,
+  prevMonth,
+  type RosterMember,
+  type ShiftRow,
+} from "../lib/shift-calendar";
 
 type NavId =
   | "overview"
@@ -139,6 +148,7 @@ const accessRoles = [
 
 const accessModules = [
   ["attendance", "Docházka"],
+  ["shifts", "Směny"],
   ["tasks", "Úkoly"],
   ["communication", "Komunikace"],
   ["recipes", "Recepty"],
@@ -1023,6 +1033,11 @@ export default function Dashboard({
               clockedIn={clockedIn}
               now={now}
               attendance={attendance}
+              branches={branches}
+              apiFetch={apiFetch}
+              canUse={canUse}
+              userEmail={userEmail}
+              userBranchId={branchId}
             />
           )}
           {active === "tasks" && (
@@ -1498,28 +1513,187 @@ function TaskRow({
   );
 }
 
+type ShiftDraft = {
+  department: "bar" | "kuchyne";
+  startTime: string;
+  endTime: string;
+  note: string;
+  employeeSource: "registered" | "new";
+  employeeUserId?: string;
+  employeeName?: string;
+  employeeEmail?: string;
+};
+
+function monthKey(year: number, month: number) {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+function formatDayLabel(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Intl.DateTimeFormat("cs-CZ", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(year, month - 1, day));
+}
+
 function Attendance({
   clockedIn,
   now,
   attendance,
+  branches,
+  apiFetch,
+  canUse,
+  userEmail,
+  userBranchId,
 }: {
   clockedIn: boolean;
   now: Date;
   attendance: () => void;
+  branches: Branch[];
+  apiFetch: AuthorizedFetch;
+  canUse: (permission: string) => boolean;
+  userEmail: string;
+  userBranchId: string | null;
 }) {
-  const rows = [
-    ["Po 17. 8.", "14:00–23:00", "Vedoucí směny", "Dnes"],
-    ["Út 18. 8.", "Volno", "—", ""],
-    ["St 19. 8.", "10:00–18:00", "Provozní", ""],
-    ["Čt 20. 8.", "12:00–22:00", "Vedoucí směny", ""],
-    ["Pá 21. 8.", "14:00–00:00", "Vedoucí směny", ""],
-  ];
+  const canManageShifts = canUse("shifts");
+  const [cursor, setCursor] = useState(() => {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() + 1 };
+  });
+  const [selectedBranchId, setSelectedBranchId] = useState(
+    (userBranchId && userBranchId !== "company"
+      ? userBranchId
+      : branches[0]?.id) || "",
+  );
+  const [departmentFilter, setDepartmentFilter] = useState<
+    "all" | "bar" | "kuchyne"
+  >("all");
+  const [shiftRows, setShiftRows] = useState<ShiftRow[]>([]);
+  const [roster, setRoster] = useState<RosterMember[]>([]);
+  const [loadedKey, setLoadedKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const requestKey = `${selectedBranchId}|${monthKey(cursor.year, cursor.month)}`;
+  const loading = loadedKey !== requestKey;
+
+  useEffect(() => {
+    if (!selectedBranchId) return;
+    let cancelled = false;
+    apiFetch(
+      `/api/shifts?branchId=${encodeURIComponent(selectedBranchId)}&month=${monthKey(cursor.year, cursor.month)}`,
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        const data = (await response.json()) as {
+          shifts?: ShiftRow[];
+          roster?: RosterMember[];
+          error?: string;
+        };
+        if (!response.ok)
+          throw new Error(data.error || "Směny se nepodařilo načíst.");
+        if (!cancelled) {
+          setShiftRows(data.shifts ?? []);
+          setRoster(data.roster ?? []);
+          setError("");
+        }
+      })
+      .catch(
+        (reason: unknown) =>
+          !cancelled &&
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Směny se nepodařilo načíst.",
+          ),
+      )
+      .finally(() => !cancelled && setLoadedKey(requestKey));
+    return () => {
+      cancelled = true;
+    };
+  }, [apiFetch, selectedBranchId, cursor.year, cursor.month, requestKey]);
+
+  const visibleRows = useMemo(
+    () =>
+      departmentFilter === "all"
+        ? shiftRows
+        : shiftRows.filter((row) => row.department === departmentFilter),
+    [shiftRows, departmentFilter],
+  );
+  const shiftsByDate = useMemo(() => groupByDate(visibleRows), [visibleRows]);
+  const dayShifts = selectedDate ? (shiftsByDate[selectedDate] ?? []) : [];
+
+  async function createShift(draft: ShiftDraft) {
+    if (!selectedDate || !selectedBranchId) return;
+    setSaving(true);
+    setError("");
+    try {
+      const response = await apiFetch("/api/shifts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          branchId: selectedBranchId,
+          shiftDate: selectedDate,
+          ...draft,
+        }),
+      });
+      const data = (await response.json()) as {
+        shift?: ShiftRow;
+        error?: string;
+      };
+      if (!response.ok || !data.shift)
+        throw new Error(data.error || "Směnu se nepodařilo uložit.");
+      setShiftRows((current) => [...current, data.shift as ShiftRow]);
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Směnu se nepodařilo uložit.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteShift(id: number) {
+    setSaving(true);
+    setError("");
+    try {
+      const response = await apiFetch("/api/shifts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "delete", id }),
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !data.ok)
+        throw new Error(data.error || "Směnu se nepodařilo smazat.");
+      setShiftRows((current) => current.filter((row) => row.id !== id));
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Směnu se nepodařilo smazat.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <>
       <Intro
         eyebrow="PERSONÁL"
         title="Směny a docházka"
-        description="Plánované směny, příchody a odpracované hodiny."
+        description={
+          canManageShifts
+            ? "Plánujte směny podle pobočky a střediska (bar, kuchyně)."
+            : "Přehled vlastních a kolegových směn v aktuálním měsíci."
+        }
         action={
           <button
             className={clockedIn ? "secondary" : "primary"}
@@ -1531,45 +1705,418 @@ function Attendance({
       />
       <Summary
         items={[
-          ["TENTO MĚSÍC", "126,5 h", "plán 168 h"],
           [
             "DNEŠNÍ PŘÍCHOD",
             clockedIn ? clock(now) : "—",
-            clockedIn ? "včas" : "směna od 14:00",
+            clockedIn ? "včas" : "nezaznamenáno",
           ],
-          ["DOVOLENÁ", "8 dní", "zbývá v roce 2026"],
-          ["PŘESČASY", "+3,5 h", "ke schválení"],
+          ["SMĚNY V MĚSÍCI", String(shiftRows.length), "napříč středisky"],
+          [
+            "MOJE SMĚNY",
+            String(
+              shiftRows.filter(
+                (row) => row.employeeEmail === userEmail.toLowerCase(),
+              ).length,
+            ),
+            "tento měsíc",
+          ],
         ]}
       />
       <section className="card wide">
         <CardHead
-          eyebrow="PLÁN"
-          title="Moje směny tento týden"
-          aside={<button className="outline">Požádat o změnu</button>}
+          eyebrow="ROZPIS SMĚN"
+          title={formatMonthLabel(cursor.year, cursor.month)}
+          aside={
+            <div className="calendar-toolbar">
+              <button
+                className="outline"
+                onClick={() => {
+                  const [y, m] = prevMonth(cursor.year, cursor.month);
+                  setCursor({ year: y, month: m });
+                  setSelectedDate(null);
+                }}
+              >
+                ← Předchozí
+              </button>
+              <button
+                className="outline"
+                onClick={() => {
+                  const [y, m] = nextMonth(cursor.year, cursor.month);
+                  setCursor({ year: y, month: m });
+                  setSelectedDate(null);
+                }}
+              >
+                Další →
+              </button>
+            </div>
+          }
         />
-        <div className="data-table">
-          <header>
-            <span>Den</span>
-            <span>Čas</span>
-            <span>Pozice</span>
-            <span>Stav</span>
-          </header>
-          {rows.map((row) => (
-            <div key={row[0]} className={row[3] ? "today" : ""}>
-              {row.map((cell, index) => (
-                <span key={index}>
-                  {index === 3 && cell ? (
-                    <b className="status">{cell}</b>
-                  ) : (
-                    cell
-                  )}
-                </span>
-              ))}
+        {branches.length > 1 && (
+          <section className="branch-tabs" aria-label="Výběr pobočky">
+            {branches.map((branch) => (
+              <button
+                key={branch.id}
+                className={selectedBranchId === branch.id ? "active" : ""}
+                onClick={() => {
+                  setSelectedBranchId(branch.id);
+                  setSelectedDate(null);
+                }}
+              >
+                <span>{branch.name.includes("Černá") ? "ČP" : "BB"}</span>
+                <div>
+                  <strong>{branch.name}</strong>
+                </div>
+              </button>
+            ))}
+          </section>
+        )}
+        <div className="filters">
+          {(
+            [
+              ["all", "Vše"],
+              ["bar", "Bar"],
+              ["kuchyne", "Kuchyně"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              className={departmentFilter === value ? "active" : ""}
+              onClick={() => setDepartmentFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {error && (
+          <p className="access-error" role="alert">
+            {error}
+          </p>
+        )}
+        {loading ? (
+          <p className="muted">Načítám směny…</p>
+        ) : (
+          <ShiftCalendarGrid
+            year={cursor.year}
+            month={cursor.month}
+            shiftsByDate={shiftsByDate}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            userEmail={userEmail}
+          />
+        )}
+      </section>
+      {selectedDate && (
+        <ShiftDayPanel
+          key={selectedDate}
+          date={selectedDate}
+          shifts={dayShifts}
+          editable={canManageShifts}
+          roster={roster}
+          userEmail={userEmail}
+          onCreate={createShift}
+          onDelete={deleteShift}
+          saving={saving}
+        />
+      )}
+    </>
+  );
+}
+
+function ShiftCalendarGrid({
+  year,
+  month,
+  shiftsByDate,
+  selectedDate,
+  onSelectDate,
+  userEmail,
+}: {
+  year: number;
+  month: number;
+  shiftsByDate: Record<string, ShiftRow[]>;
+  selectedDate: string | null;
+  onSelectDate: (date: string) => void;
+  userEmail: string;
+}) {
+  const grid = getMonthGrid(year, month);
+  const weekdays = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
+  return (
+    <div className="calendar-grid">
+      {weekdays.map((label, index) => (
+        <div key={label} className={`weekday ${index >= 5 ? "weekend" : ""}`}>
+          {label}
+        </div>
+      ))}
+      {grid.map((cell) => {
+        const dayShifts = shiftsByDate[cell.date] ?? [];
+        return (
+          <div
+            key={cell.date}
+            className={[
+              "calendar-day",
+              cell.isWeekend ? "weekend" : "",
+              !cell.inMonth ? "other-month" : "",
+              cell.isToday ? "today" : "",
+              selectedDate === cell.date ? "active" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            onClick={() => onSelectDate(cell.date)}
+          >
+            <b>{cell.day}</b>
+            {dayShifts.slice(0, 3).map((shift) => (
+              <span
+                key={shift.id}
+                className={[
+                  "shift-chip",
+                  shift.department,
+                  shift.employeeEmail === userEmail.toLowerCase()
+                    ? "mine"
+                    : "",
+                  shift.isPlaceholder ? "placeholder" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                {shift.startTime}–{shift.endTime} {shift.employeeName.split(" ")[0]}
+              </span>
+            ))}
+            {dayShifts.length > 3 && <small>+{dayShifts.length - 3} další</small>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ShiftDayPanel({
+  date,
+  shifts,
+  editable,
+  roster,
+  userEmail,
+  onCreate,
+  onDelete,
+  saving,
+}: {
+  date: string;
+  shifts: ShiftRow[];
+  editable: boolean;
+  roster: RosterMember[];
+  userEmail: string;
+  onCreate: (draft: ShiftDraft) => Promise<void>;
+  onDelete: (id: number) => void;
+  saving: boolean;
+}) {
+  const [department, setDepartment] = useState<"bar" | "kuchyne">("bar");
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("17:00");
+  const [note, setNote] = useState("");
+  const [source, setSource] = useState<"registered" | "new">("registered");
+  const [query, setQuery] = useState("");
+  const [selectedMember, setSelectedMember] = useState<RosterMember | null>(
+    null,
+  );
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+
+  const filteredRoster = roster.filter((member) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      member.fullName.toLowerCase().includes(q) ||
+      member.email.toLowerCase().includes(q)
+    );
+  });
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (source === "registered") {
+      if (!selectedMember) return;
+      await onCreate({
+        department,
+        startTime,
+        endTime,
+        note,
+        employeeSource: "registered",
+        employeeUserId: selectedMember.userId,
+      });
+      setSelectedMember(null);
+      setQuery("");
+    } else {
+      if (!newName.trim() || !newEmail.trim()) return;
+      await onCreate({
+        department,
+        startTime,
+        endTime,
+        note,
+        employeeSource: "new",
+        employeeName: newName.trim(),
+        employeeEmail: newEmail.trim(),
+      });
+      setNewName("");
+      setNewEmail("");
+    }
+    setNote("");
+  }
+
+  const grouped = {
+    bar: shifts.filter((s) => s.department === "bar"),
+    kuchyne: shifts.filter((s) => s.department === "kuchyne"),
+  };
+
+  return (
+    <section className="card action-form">
+      <CardHead eyebrow="DEN" title={formatDayLabel(date)} />
+      {(["bar", "kuchyne"] as const).map((dept) => (
+        <div key={dept} className="shift-day-department">
+          <h3>{dept === "bar" ? "Bar" : "Kuchyně"}</h3>
+          {grouped[dept].length === 0 && <p className="muted">Žádná směna.</p>}
+          {grouped[dept].map((shift) => (
+            <div
+              key={shift.id}
+              className={[
+                "shift-chip",
+                dept,
+                shift.employeeEmail === userEmail.toLowerCase() ? "mine" : "",
+                shift.isPlaceholder ? "placeholder" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <span>
+                {shift.startTime}–{shift.endTime} · {shift.employeeName}
+                {shift.isPlaceholder ? " (nový zaměstnanec)" : ""}
+              </span>
+              {editable && (
+                <button type="button" onClick={() => onDelete(shift.id)}>
+                  Smazat
+                </button>
+              )}
             </div>
           ))}
         </div>
-      </section>
-    </>
+      ))}
+      {editable && (
+        <form onSubmit={submit}>
+          <div className="form-grid">
+            <label>
+              <span>Středisko</span>
+              <select
+                value={department}
+                onChange={(event) =>
+                  setDepartment(event.target.value as "bar" | "kuchyne")
+                }
+              >
+                <option value="bar">Bar</option>
+                <option value="kuchyne">Kuchyně</option>
+              </select>
+            </label>
+            <label>
+              <span>Od</span>
+              <input
+                type="time"
+                required
+                value={startTime}
+                onChange={(event) => setStartTime(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Do</span>
+              <input
+                type="time"
+                required
+                value={endTime}
+                onChange={(event) => setEndTime(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>Poznámka</span>
+              <input
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                placeholder="Volitelné"
+              />
+            </label>
+          </div>
+          <div className="employee-source-toggle">
+            <button
+              type="button"
+              className={source === "registered" ? "active" : ""}
+              onClick={() => setSource("registered")}
+            >
+              Registrovaný zaměstnanec
+            </button>
+            <button
+              type="button"
+              className={source === "new" ? "active" : ""}
+              onClick={() => setSource("new")}
+            >
+              + Nový zaměstnanec
+            </button>
+          </div>
+          {source === "registered" ? (
+            <>
+              <input
+                placeholder="Hledat jméno nebo e-mail"
+                value={selectedMember ? selectedMember.fullName : query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setSelectedMember(null);
+                }}
+              />
+              {!selectedMember && query && (
+                <div className="employee-picker-results">
+                  {filteredRoster.length === 0 && (
+                    <span>Nikdo nenalezen.</span>
+                  )}
+                  {filteredRoster.map((member) => (
+                    <button
+                      type="button"
+                      key={member.userId}
+                      onClick={() => {
+                        setSelectedMember(member);
+                        setQuery(member.fullName);
+                      }}
+                    >
+                      {member.fullName} · {member.email}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="form-grid">
+              <label>
+                <span>Jméno</span>
+                <input
+                  required
+                  value={newName}
+                  onChange={(event) => setNewName(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>E-mail</span>
+                <input
+                  type="email"
+                  required
+                  value={newEmail}
+                  onChange={(event) => setNewEmail(event.target.value)}
+                />
+              </label>
+            </div>
+          )}
+          <footer>
+            <span>Směna se propíše zaměstnanci po přihlášení a schválení.</span>
+            <button
+              className="primary"
+              disabled={saving || (source === "registered" && !selectedMember)}
+            >
+              Přidat směnu
+            </button>
+          </footer>
+        </form>
+      )}
+    </section>
   );
 }
 
