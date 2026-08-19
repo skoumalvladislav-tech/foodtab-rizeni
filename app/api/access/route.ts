@@ -1,3 +1,6 @@
+import { and, eq } from "drizzle-orm";
+import { getDb } from "../../../db";
+import { shifts } from "../../../db/schema";
 import {
   authErrorResponse,
   authorizeFoodtabRequest,
@@ -15,6 +18,7 @@ const allowedRoles = new Set([
 ]);
 const allowedPermissions = new Set([
   "attendance",
+  "shifts",
   "tasks",
   "communication",
   "recipes",
@@ -127,6 +131,28 @@ export async function POST(request: Request) {
       .select(profileColumns)
       .single<FoodtabAccessProfile>();
     if (error) throw error;
+
+    if (payload.decision === "approved" && data.email) {
+      const normalizedEmail = data.email.trim().toLowerCase();
+      try {
+        await getDb()
+          .update(shifts)
+          .set({
+            employeeUserId: data.user_id,
+            isPlaceholder: false,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(
+            and(
+              eq(shifts.employeeEmail, normalizedEmail),
+              eq(shifts.isPlaceholder, true),
+            ),
+          );
+      } catch {
+        // Best-effort only — shift linking must not block the approval.
+      }
+    }
+
     return Response.json({ user: serializeUser(data) });
   } catch (error) {
     return authErrorResponse(error);

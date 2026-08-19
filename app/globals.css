@@ -1,18 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #202124;
-  --muted: #747474;
-  --green: #202124;
-  --green2: #343536;
-  --mint: #f3eee6;
-  --gold: #c7953e;
-  --paper: #f5f1ea;
-  --card: #fffcf7;
-  --line: #ded7ce;
-  --red: #7d3541;
-  --copper: #b85f45;
-  --shadow: 0 10px 32px rgba(32, 33, 36, 0.08);
+  --ink: #171f1c;
+  --muted: #686f80;
+  --green: #113328;
+  --green2: #1a503e;
+  --mint: #e3f5ec;
+  --gold: #da942b;
+  --paper: #f7f1e8;
+  --card: #fffefb;
+  --line: #dad6d2;
+  --red: #8a2838;
+  --copper: #cb6a32;
+  --shadow: 0 10px 32px rgba(17, 51, 40, 0.1);
 }
 
 * {
@@ -60,7 +60,7 @@ select:focus-visible {
       rgba(199, 150, 75, 0.18),
       transparent 28%
     ),
-    linear-gradient(145deg, #202124, #343536);
+    linear-gradient(145deg, #113328, #1a503e);
   display: grid;
   place-items: center;
   align-content: center;
@@ -93,7 +93,7 @@ select:focus-visible {
 .auth-brand small {
   display: block;
   margin-top: 6px;
-  color: #d9d1c6;
+  color: #d4cfcb;
   font-size: 8px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -144,7 +144,7 @@ select:focus-visible {
   width: 100%;
   height: 48px;
   padding: 0 13px;
-  border: 1px solid #d5d6cf;
+  border: 1px solid #d4d2d1;
   border-radius: 10px;
   background: white;
   font-size: 12px;
@@ -174,12 +174,12 @@ select:focus-visible {
   color: var(--green2) !important;
 }
 .auth-error {
-  background: #f7e6e2;
+  background: #f9e0e4;
   color: var(--red) !important;
 }
 .auth-divider {
   margin: 20px 0;
-  border-top: 1px solid #e2e0d9;
+  border-top: 1px solid #e0dddb;
   text-align: center;
 }
 .auth-divider span {
@@ -198,7 +198,7 @@ select:focus-visible {
 .auth-providers button {
   min-height: 44px;
   padding: 0 10px;
-  border: 1px solid #d6d5ce;
+  border: 1px solid #d4d2d0;
   border-radius: 9px;
   background: white;
   font-size: 9px;
@@ -216,7 +216,7 @@ select:focus-visible {
 .auth-security {
   margin: 18px 0 0 !important;
   padding-top: 15px;
-  border-top: 1px solid #e7e4dc;
+  border-top: 1px solid #e4e1df;
   font-size: 8px !important;
 }
 .auth-account {
@@ -242,7 +242,7 @@ select:focus-visible {
   width: 36px;
   height: 36px;
   margin: 24px auto 0;
-  border: 3px solid #d9e2dc;
+  border: 3px solid #e0dddb;
   border-top-color: var(--green2);
   border-radius: 50%;
   animation: auth-spin 0.8s linear infinite;
@@ -262,8 +262,8 @@ select:focus-visible {
   inset: 0 auto 0 0;
   width: 260px;
   padding: 25px 18px 18px;
-  background: #14271f;
-  color: #ebf0ed;
+  background: #063525;
+  color: #efedec;
   display: flex;
   flex-direction: column;
 }
@@ -280,7 +280,7 @@ select:focus-visible {
   display: grid;
   place-items: center;
   background: var(--gold);
-  color: #15271f;
+  color: #073526;
   font:
     800 23px Georgia,
     serif;
@@ -296,7 +296,7 @@ select:focus-visible {
 .brand small {
   display: block;
   margin-top: 5px;
-  color: #91a098;
+  color: #9c9895;
   font-size: 8px;
   letter-spacing: 0.17em;
   text-transform: uppercase;
@@ -311,7 +311,7 @@ select:focus-visible {
 .channels > p,
 .ai-side section > p {
   margin: 5px 11px 9px;
-  color: #788b81;
+  color: #86817d;
   font-size: 9px;
   font-weight: 850;
   letter-spacing: 0.16em;
@@ -327,7 +327,7 @@ select:focus-visible {
   border: 0;
   border-radius: 10px;
   background: transparent;
-  color: #abb9b1;
+  color: #b5b2af;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -342,7 +342,7 @@ select:focus-visible {
   color: white;
 }
 .main-nav button.active {
-  background: #25493b;
+  background: #0c6245;
   color: white;
   box-shadow: inset 3px 0 var(--gold);
 }
@@ -364,7 +364,7 @@ select:focus-visible {
   place-items: center;
   border-radius: 50%;
   background: var(--gold);
-  color: #14271f;
+  color: #063525;
   font-size: 9px;
 }
 .user-row {
@@ -380,7 +380,7 @@ select:focus-visible {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #d9e7dc;
+  background: #e3e0dd;
   color: var(--green);
   display: grid;
   place-items: center;
@@ -396,7 +396,7 @@ select:focus-visible {
   display: block;
   max-width: 132px;
   margin-top: 3px;
-  color: #82958b;
+  color: #908b87;
   font-size: 9px;
   white-space: nowrap;
   overflow: hidden;
@@ -405,7 +405,7 @@ select:focus-visible {
 .user-row button {
   border: 0;
   background: transparent;
-  color: #82958b;
+  color: #908b87;
   cursor: pointer;
 }
 .user-row .sign-out-button {
@@ -423,7 +423,7 @@ select:focus-visible {
 }
 .user-row .sign-out-button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color: #ffffff;
 }
 .user-row .sign-out-button:disabled {
   cursor: wait;
@@ -459,8 +459,8 @@ select:focus-visible {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #42946d;
-  box-shadow: 0 0 0 4px #e7f4eb;
+  background: #2aac76;
+  box-shadow: 0 0 0 4px #f0edeb;
 }
 .location select {
   max-width: 260px;
@@ -481,8 +481,8 @@ select:focus-visible {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #f7f5f0;
-  color: #777d78;
+  background: #f9f5ee;
+  color: #6b7489;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -492,7 +492,7 @@ select:focus-visible {
 .search kbd {
   margin-left: auto;
   padding: 2px 5px;
-  border: 1px solid #d3d2cb;
+  border: 1px solid #d1cfcd;
   border-radius: 5px;
   background: white;
   font-size: 9px;
@@ -602,13 +602,13 @@ select:focus-visible {
   font-size: 9px;
 }
 .secondary {
-  border: 1px solid #d9b5ae;
+  border: 1px solid #e2a5af;
   background: white;
   color: var(--red);
   box-shadow: none;
 }
 .outline {
-  border: 1px solid #b8c6bd;
+  border: 1px solid #c2bfbc;
   background: transparent;
   color: var(--green);
   box-shadow: none;
@@ -625,13 +625,13 @@ select:focus-visible {
 .pulse > header {
   padding-bottom: 13px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  color: #91a99f;
+  color: #a29d98;
   display: flex;
   justify-content: space-between;
   font-size: 9px;
 }
 .pulse > header > span {
-  color: #b9d7c4;
+  color: #cfc8c1;
   font-weight: 850;
   letter-spacing: 0.12em;
 }
@@ -641,7 +641,7 @@ select:focus-visible {
   height: 6px;
   margin-right: 7px;
   border-radius: 50%;
-  background: #63bd87;
+  background: #4bd59c;
   box-shadow: 0 0 0 4px rgba(99, 189, 135, 0.11);
 }
 .pulse > div {
@@ -660,7 +660,7 @@ select:focus-visible {
 }
 .pulse small {
   display: block;
-  color: #93a89f;
+  color: #a29d99;
   font-size: 8px;
   font-weight: 850;
   letter-spacing: 0.11em;
@@ -674,14 +674,14 @@ select:focus-visible {
   white-space: nowrap;
 }
 .pulse strong em {
-  color: #b9c7c1;
+  color: #c3c0bd;
   font-size: 13px;
   font-style: normal;
 }
 .pulse span {
   display: block;
   margin-top: 6px;
-  color: #a7bbb2;
+  color: #b6b1ac;
   font-size: 9px;
 }
 .progress {
@@ -730,14 +730,14 @@ select:focus-visible {
 .status {
   padding: 5px 8px;
   border-radius: 20px;
-  background: #f3eade;
-  color: #936128;
+  background: #f6ebdb;
+  color: #a14b1a;
   font-size: 8px;
   font-weight: 800;
 }
 .status.live {
   background: var(--mint);
-  color: #357358;
+  color: #23855c;
 }
 .shift-time {
   margin: 25px 0 16px;
@@ -749,7 +749,7 @@ select:focus-visible {
 .shift-time > i {
   width: 100%;
   min-width: 65px;
-  border-top: 1px dashed #c9c8c0;
+  border-top: 1px dashed #c7c4c2;
 }
 .shift-time small {
   display: block;
@@ -769,7 +769,7 @@ select:focus-visible {
 }
 .shift-meta {
   padding-top: 13px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   flex-wrap: wrap;
   gap: 13px;
@@ -777,7 +777,7 @@ select:focus-visible {
   font-size: 9px;
 }
 .shift-meta span:before {
-  content: "•";
+  content: "â€˘";
   margin-right: 6px;
   color: var(--gold);
 }
@@ -798,8 +798,8 @@ select:focus-visible {
   color: var(--gold);
 }
 .clock.clocked {
-  border: 1px solid #c6d4ca;
-  background: #e9f0eb;
+  border: 1px solid #d0cdca;
+  background: #eeeceb;
   color: var(--green);
 }
 .link {
@@ -816,7 +816,7 @@ select:focus-visible {
 .task-row {
   position: relative;
   min-height: 47px;
-  border-top: 1px solid #edeae4;
+  border-top: 1px solid #ebe8e6;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
@@ -830,7 +830,7 @@ select:focus-visible {
 .task-row > i {
   width: 19px;
   height: 19px;
-  border: 1px solid #c7c9c4;
+  border: 1px solid #bec3cf;
   border-radius: 6px;
   display: grid;
   place-items: center;
@@ -861,11 +861,11 @@ select:focus-visible {
 .task-row time.urgent {
   padding: 4px 6px;
   border-radius: 12px;
-  background: #f7eae6;
+  background: #f9ece4;
   color: var(--red);
 }
 .task-row.done strong {
-  color: #89918c;
+  color: #7e879c;
   text-decoration: line-through;
 }
 .avatars {
@@ -878,7 +878,7 @@ select:focus-visible {
   margin-left: -5px;
   border: 2px solid var(--card);
   border-radius: 50%;
-  background: #dfe8e1;
+  background: #e6e3e1;
   color: var(--green);
   display: grid;
   place-items: center;
@@ -893,7 +893,7 @@ select:focus-visible {
   min-height: 56px;
   margin-top: 9px;
   padding-top: 8px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -907,8 +907,8 @@ select:focus-visible {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  background: #f0e5d7;
-  color: #8b622d;
+  background: #f4e7d3;
+  color: #99681f;
   display: grid;
   place-items: center;
   font-size: 10px;
@@ -925,16 +925,16 @@ select:focus-visible {
   font-weight: 500;
 }
 .department > strong {
-  color: #9b702f;
+  color: #aa7320;
   font-size: 8px;
 }
 .department > strong.ok {
-  color: #3f845f;
+  color: #2a996b;
 }
 .notice article {
   margin-top: 16px;
   padding-top: 15px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 13px;
@@ -943,8 +943,8 @@ select:focus-visible {
   width: 33px;
   height: 33px;
   border-radius: 10px;
-  background: #f4e6d2;
-  color: #936128;
+  background: #f8e7ce;
+  color: #a14b1a;
   display: grid;
   place-items: center;
   font-weight: 900;
@@ -998,7 +998,7 @@ select:focus-visible {
 }
 .summary small {
   display: block;
-  color: #9bb0a7;
+  color: #aaa5a1;
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -1011,7 +1011,7 @@ select:focus-visible {
     serif;
 }
 .summary span {
-  color: #a8bbb3;
+  color: #b6b1ad;
   font-size: 9px;
 }
 .wide {
@@ -1024,7 +1024,7 @@ select:focus-visible {
 .data-table > div {
   min-height: 49px;
   padding: 0 14px;
-  border-bottom: 1px solid #ebe9e3;
+  border-bottom: 1px solid #e9e7e5;
   display: grid;
   grid-template-columns: 1.1fr 1fr 1.5fr 0.7fr;
   align-items: center;
@@ -1033,7 +1033,7 @@ select:focus-visible {
 .data-table > header {
   min-height: 34px;
   border-radius: 8px;
-  background: #f3f1eb;
+  background: #f6f0e8;
   color: var(--muted);
   font-size: 8px;
   font-weight: 800;
@@ -1041,7 +1041,7 @@ select:focus-visible {
   text-transform: uppercase;
 }
 .data-table > div.today {
-  background: #f4f7f3;
+  background: #f6f5f4;
 }
 .filters {
   display: flex;
@@ -1050,7 +1050,7 @@ select:focus-visible {
 }
 .filters button {
   padding: 5px 9px;
-  border: 1px solid #deddd6;
+  border: 1px solid #dcdad8;
   border-radius: 7px;
   background: white;
   font-size: 8px;
@@ -1068,7 +1068,7 @@ select:focus-visible {
   margin-top: 12px;
   padding: 17px 15px;
   border-radius: 10px;
-  background: #f5f3ed;
+  background: #f7f2eb;
   display: grid;
   grid-template-columns: 1.2fr 1fr auto;
   align-items: center;
@@ -1087,7 +1087,7 @@ select:focus-visible {
 }
 .checklist .progress {
   margin: 0;
-  background: #dfddd6;
+  background: #dddad8;
 }
 .checklist button {
   border: 0;
@@ -1118,7 +1118,7 @@ select:focus-visible {
 }
 .compose form > footer {
   padding-top: 12px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1155,7 +1155,7 @@ select:focus-visible {
   width: 26px;
   height: 26px;
   border-radius: 7px;
-  background: #eeeae2;
+  background: #f2eade;
   display: grid;
   place-items: center;
   font-size: 8px;
@@ -1185,13 +1185,13 @@ select:focus-visible {
 }
 .feed p {
   margin: 11px 0;
-  color: #454e49;
+  color: #4c4947;
   font-size: 11px;
   line-height: 1.6;
 }
 .feed footer {
   padding-top: 10px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   gap: 13px;
 }
@@ -1234,9 +1234,9 @@ select:focus-visible {
   width: 100%;
   height: 40px;
   padding: 0 11px;
-  border: 1px solid #d9d9d2;
+  border: 1px solid #d7d5d4;
   border-radius: 8px;
-  background: #fff;
+  background: #ffffff;
   font-size: 10px;
 }
 .action-form textarea {
@@ -1244,9 +1244,9 @@ select:focus-visible {
   min-height: 78px;
   margin-top: 14px;
   padding: 11px;
-  border: 1px solid #d9d9d2;
+  border: 1px solid #d7d5d4;
   border-radius: 8px;
-  background: #fff;
+  background: #ffffff;
   resize: vertical;
   font-size: 10px;
   line-height: 1.5;
@@ -1267,7 +1267,7 @@ select:focus-visible {
   margin-top: 7px;
   padding: 3px;
   border-radius: 9px;
-  background: #efede7;
+  background: #edebe9;
   display: flex;
   gap: 3px;
 }
@@ -1291,7 +1291,7 @@ select:focus-visible {
 .action-form form > footer {
   margin-top: 17px;
   padding-top: 14px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1312,7 +1312,7 @@ select:focus-visible {
   position: relative;
   min-height: 82px;
   padding: 13px 0;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
@@ -1326,7 +1326,7 @@ select:focus-visible {
 .assigned-row > i {
   width: 23px;
   height: 23px;
-  border: 1px solid #c7c9c4;
+  border: 1px solid #bec3cf;
   border-radius: 7px;
   color: transparent;
   display: grid;
@@ -1350,13 +1350,13 @@ select:focus-visible {
 .assigned-row header b {
   padding: 3px 6px;
   border-radius: 10px;
-  background: #f7e6e2;
+  background: #f9e0e4;
   color: var(--red);
   font-size: 7px;
 }
 .assigned-row p {
   margin: 5px 0;
-  color: #505954;
+  color: #484f61;
   font-size: 9px;
 }
 .assigned-row small {
@@ -1369,12 +1369,12 @@ select:focus-visible {
   white-space: nowrap;
 }
 .assigned-row.done strong {
-  color: #8d928f;
+  color: #828a9d;
   text-decoration: line-through;
 }
 .empty-state {
   padding: 28px 10px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   color: var(--muted);
   text-align: center;
   font-size: 10px;
@@ -1386,7 +1386,7 @@ select:focus-visible {
   margin: 14px 0 8px;
   padding: 13px;
   border-radius: 10px;
-  background: #f5f3ed;
+  background: #f7f2eb;
   display: grid;
   grid-template-columns: 1fr 1.5fr 1fr;
   align-items: end;
@@ -1414,7 +1414,7 @@ select:focus-visible {
 .route-badge span {
   padding: 4px 7px;
   border-radius: 12px;
-  background: #f0eee8;
+  background: #f5eee3;
   color: var(--green2);
   font-size: 7px;
   font-weight: 750;
@@ -1447,7 +1447,7 @@ select:focus-visible {
   width: 43px;
   height: 43px;
   border-radius: 11px;
-  background: #eeeae2;
+  background: #f2eade;
   color: var(--green);
   display: grid;
   place-items: center;
@@ -1471,7 +1471,7 @@ select:focus-visible {
 }
 .branch-tabs > button.active > span {
   background: var(--green);
-  color: #e7c785;
+  color: #f0c27c;
 }
 .recipe-textareas {
   display: grid;
@@ -1507,6 +1507,149 @@ select:focus-visible {
 .recipe-summary span {
   color: var(--muted);
   font-size: 8px;
+}
+.muted {
+  color: var(--muted);
+  font-size: 9px;
+}
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 14px;
+}
+.calendar-grid .weekday {
+  padding: 6px 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.calendar-grid .weekday.weekend {
+  color: var(--copper);
+}
+.calendar-day {
+  min-height: 92px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+.calendar-day.weekend {
+  background: var(--paper);
+}
+.calendar-day.other-month {
+  opacity: 0.45;
+}
+.calendar-day.today {
+  border-color: var(--green2);
+  box-shadow: inset 0 0 0 1px var(--green2);
+}
+.calendar-day.active {
+  border-color: var(--gold);
+  background: var(--mint);
+}
+.calendar-day > b {
+  font:
+    600 11px Georgia,
+    serif;
+  color: var(--green);
+}
+.shift-chip {
+  padding: 3px 6px;
+  border-radius: 6px;
+  border-left: 3px solid var(--gold);
+  background: #f6f0e8;
+  font-size: 8px;
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.shift-chip.kuchyne {
+  border-left-color: var(--green2);
+}
+.shift-chip.mine {
+  background: var(--mint);
+  border-left-color: var(--green);
+  font-weight: 700;
+}
+.shift-chip.placeholder {
+  border-left-style: dashed;
+  color: var(--muted);
+}
+.shift-chip button {
+  border: 0;
+  background: none;
+  color: var(--red);
+  font-size: 8px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.shift-day-department {
+  margin-bottom: 14px;
+}
+.shift-day-department h3 {
+  margin: 0 0 6px;
+  font:
+    600 11px Georgia,
+    serif;
+  color: var(--green);
+}
+.shift-day-department .shift-chip {
+  margin-bottom: 5px;
+  font-size: 9px;
+  padding: 6px 9px;
+}
+.employee-source-toggle {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+}
+.employee-source-toggle button {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  font-size: 9px;
+  cursor: pointer;
+}
+.employee-source-toggle button.active {
+  border-color: var(--green2);
+  background: var(--green2);
+  color: white;
+}
+.employee-picker-results {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 6px;
+}
+.employee-picker-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  background: white;
+  font-size: 10px;
+  cursor: pointer;
+}
+.employee-picker-results button:hover {
+  background: var(--mint);
 }
 .recipe-grid {
   display: grid;
@@ -1546,15 +1689,15 @@ select:focus-visible {
 .recipe-meta {
   margin: 14px 0;
   padding: 10px 0;
-  border-top: 1px solid #eceae4;
-  border-bottom: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
+  border-bottom: 1px solid #eae8e6;
   display: flex;
   gap: 8px;
 }
 .recipe-meta span {
   padding: 5px 8px;
   border-radius: 12px;
-  background: #f3f0e9;
+  background: #f6f0e6;
   color: var(--green2);
   font-size: 8px;
 }
@@ -1568,14 +1711,14 @@ select:focus-visible {
 }
 .recipe-detail p {
   margin: 5px 0 0;
-  color: #505954;
+  color: #484f61;
   white-space: pre-line;
   font-size: 9px;
   line-height: 1.55;
 }
 .recipe-card > footer {
   padding-top: 12px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1604,7 +1747,7 @@ select:focus-visible {
 }
 .menu-sheet > header {
   padding: 21px;
-  background: linear-gradient(135deg, #202124, #343536);
+  background: linear-gradient(135deg, #113328, #1a503e);
   color: white;
   display: flex;
   align-items: flex-start;
@@ -1612,10 +1755,10 @@ select:focus-visible {
   gap: 15px;
 }
 .menu-sheet.weekly > header {
-  background: linear-gradient(135deg, #765023, #a2763f);
+  background: linear-gradient(135deg, #813e18, #b37e2e);
 }
 .menu-sheet > header span {
-  color: #e4c27e;
+  color: #efbd73;
   font-size: 8px;
   font-weight: 850;
   letter-spacing: 0.12em;
@@ -1642,7 +1785,7 @@ select:focus-visible {
 .menu-line {
   min-height: 94px;
   padding: 16px 0;
-  border-bottom: 1px solid #eceae4;
+  border-bottom: 1px solid #eae8e6;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: start;
@@ -1653,8 +1796,8 @@ select:focus-visible {
   margin-bottom: 6px;
   padding: 4px 7px;
   border-radius: 10px;
-  background: #f1e6d6;
-  color: #8a5d28;
+  background: #f5e7d2;
+  color: #97481b;
   font-size: 7px;
   text-transform: uppercase;
 }
@@ -1675,7 +1818,7 @@ select:focus-visible {
 }
 .menu-line p {
   margin: 5px 0;
-  color: #58605c;
+  color: #4f5769;
   font-size: 9px;
   line-height: 1.45;
 }
@@ -1693,7 +1836,7 @@ select:focus-visible {
 }
 .menu-sheet > footer {
   padding: 13px 21px;
-  background: #f6f4ee;
+  background: #f8f3ec;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1710,7 +1853,7 @@ select:focus-visible {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .menu-item-form input[readonly] {
-  background: #f2f0ea;
+  background: #f6f0e6;
   color: var(--muted);
 }
 .pdf-menu-content {
@@ -1718,9 +1861,9 @@ select:focus-visible {
 }
 .current-pdf {
   padding: 15px;
-  border: 1px solid #e3d4bd;
+  border: 1px solid #ead5b6;
   border-radius: 11px;
-  background: #fbf7f0;
+  background: #fcf7ef;
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
@@ -1731,7 +1874,7 @@ select:focus-visible {
   width: 45px;
   height: 53px;
   border-radius: 7px;
-  background: #a46a35;
+  background: #b45925;
   color: white;
   display: grid;
   place-items: center;
@@ -1741,7 +1884,7 @@ select:focus-visible {
 }
 .current-pdf small {
   display: block;
-  color: #9b6b33;
+  color: #aa5524;
   font-size: 7px;
   font-weight: 850;
   letter-spacing: 0.1em;
@@ -1755,7 +1898,7 @@ select:focus-visible {
 }
 .current-pdf p {
   margin: 5px 0;
-  color: #555d58;
+  color: #4c5466;
   font-size: 9px;
   word-break: break-word;
 }
@@ -1767,9 +1910,9 @@ select:focus-visible {
 .empty-pdf {
   min-height: 100px;
   padding: 17px;
-  border: 1px dashed #d8c6aa;
+  border: 1px dashed #e1c7a1;
   border-radius: 11px;
-  background: #fbf7f0;
+  background: #fcf7ef;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -1781,7 +1924,7 @@ select:focus-visible {
 .pdf-upload-form {
   margin-top: 17px;
   padding-top: 17px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: grid;
   gap: 13px;
 }
@@ -1801,7 +1944,7 @@ select:focus-visible {
 .pdf-upload-form > label:not(.pdf-drop) input {
   height: 40px;
   padding: 0 11px;
-  border: 1px solid #d9d9d2;
+  border: 1px solid #d7d5d4;
   border-radius: 8px;
   background: white;
   font-size: 10px;
@@ -1810,9 +1953,9 @@ select:focus-visible {
   position: relative;
   min-height: 78px;
   padding: 13px;
-  border: 1px dashed #c9b28f;
+  border: 1px dashed #d5b483;
   border-radius: 10px;
-  background: #fcfaf5;
+  background: #fdf9f4;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1829,7 +1972,7 @@ select:focus-visible {
   height: 42px;
   margin: 0;
   border-radius: 6px;
-  background: #a46a35;
+  background: #b45925;
   color: white !important;
   display: grid !important;
   place-items: center;
@@ -1851,7 +1994,7 @@ select:focus-visible {
   padding: 10px;
   border-radius: 8px;
   background: var(--mint);
-  color: #476255;
+  color: #2e7b5b;
   font-size: 8px;
   line-height: 1.5;
 }
@@ -1870,7 +2013,7 @@ select:focus-visible {
   margin: 0;
   padding: 9px;
   border-radius: 7px;
-  background: #f9e8e4;
+  background: #fae3e7;
   color: var(--red);
   font-size: 8px;
 }
@@ -1881,7 +2024,7 @@ select:focus-visible {
 .pdf-history {
   margin-top: 17px;
   padding-top: 14px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
 }
 .pdf-history > small {
   color: var(--muted);
@@ -1894,7 +2037,7 @@ select:focus-visible {
   min-height: 37px;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid #eeeae3;
+  border-bottom: 1px solid #f3ebde;
   background: transparent;
   color: inherit;
   display: flex;
@@ -1907,7 +2050,7 @@ select:focus-visible {
   font-size: 8px;
 }
 .pdf-history button b {
-  color: #9b6b33;
+  color: #aa5524;
   font-size: 7px;
 }
 
@@ -1924,7 +2067,7 @@ select:focus-visible {
 }
 .ai-chat > header {
   padding: 17px 20px;
-  border-bottom: 1px solid #e9e7e1;
+  border-bottom: 1px solid #e7e5e3;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1934,7 +2077,7 @@ select:focus-visible {
   height: 36px;
   border-radius: 11px;
   background: var(--green);
-  color: #f0d6a2;
+  color: #f4d29e;
   display: grid;
   place-items: center;
   font:
@@ -1963,7 +2106,7 @@ select:focus-visible {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #51a774;
+  background: #36c288;
 }
 .ai-chat > header button {
   margin-left: auto;
@@ -1993,7 +2136,7 @@ select:focus-visible {
   margin: 0;
   padding: 12px 14px;
   border-radius: 4px 13px 13px 13px;
-  background: #f0eee8;
+  background: #f5eee3;
   font-size: 11px;
   line-height: 1.6;
 }
@@ -2005,9 +2148,9 @@ select:focus-visible {
 .message div > button {
   margin-top: 7px;
   padding: 6px 8px;
-  border: 1px solid #d9ded9;
+  border: 1px solid #dddbda;
   border-radius: 6px;
-  background: #fafbf9;
+  background: #fafafa;
   color: var(--green2);
   font-size: 8px;
   cursor: pointer;
@@ -2020,7 +2163,7 @@ select:focus-visible {
 }
 .prompts button {
   padding: 7px 10px;
-  border: 1px solid #dadcd6;
+  border: 1px solid #dad9d8;
   border-radius: 20px;
   background: white;
   font-size: 8px;
@@ -2034,9 +2177,9 @@ select:focus-visible {
   width: 100%;
   min-height: 74px;
   padding: 13px 50px 22px 13px;
-  border: 1px solid #cacdc7;
+  border: 1px solid #c2c7d2;
   border-radius: 11px;
-  background: #fbfaf7;
+  background: #fcfaf6;
   resize: none;
   font-size: 11px;
 }
@@ -2056,7 +2199,7 @@ select:focus-visible {
   position: absolute;
   left: 33px;
   bottom: 23px;
-  color: #90958f;
+  color: #848ca0;
   font-size: 7px;
 }
 .ai-side {
@@ -2072,7 +2215,7 @@ select:focus-visible {
   color: white;
 }
 .tip > span {
-  color: #e1b96f;
+  color: #eeb662;
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.13em;
@@ -2084,7 +2227,7 @@ select:focus-visible {
     serif;
 }
 .tip p {
-  color: #b6c5bd;
+  color: #c1bdba;
   font-size: 10px;
   line-height: 1.55;
 }
@@ -2093,7 +2236,7 @@ select:focus-visible {
   margin-bottom: 18px;
   padding: 30px 35px;
   border-radius: 16px;
-  background: linear-gradient(120deg, #202124, #343536);
+  background: linear-gradient(120deg, #113328, #1a503e);
   color: white;
   display: flex;
   align-items: center;
@@ -2103,7 +2246,7 @@ select:focus-visible {
   max-width: 570px;
 }
 .challenge span {
-  color: #e1b96f;
+  color: #eeb662;
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -2115,7 +2258,7 @@ select:focus-visible {
     serif;
 }
 .challenge p {
-  color: #b8c8c0;
+  color: #c4c0bc;
   font-size: 11px;
 }
 .challenge .progress {
@@ -2124,7 +2267,7 @@ select:focus-visible {
 .challenge small {
   display: block;
   margin-top: 7px;
-  color: #b8c8c0;
+  color: #c4c0bc;
   font-size: 8px;
 }
 .challenge > strong {
@@ -2133,7 +2276,7 @@ select:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.04);
-  color: #e5c07c;
+  color: #efbd72;
   display: grid;
   place-items: center;
   font:
@@ -2157,7 +2300,7 @@ select:focus-visible {
 }
 .leader {
   min-height: 58px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: grid;
   grid-template-columns: 26px auto 1fr auto;
   align-items: center;
@@ -2198,11 +2341,11 @@ select:focus-visible {
   font-size: 9px;
 }
 .leader > b small {
-  color: #4c966d;
+  color: #33af7b;
 }
 .reward {
   min-height: 66px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: grid;
   grid-template-columns: 53px 1fr auto;
   align-items: center;
@@ -2212,8 +2355,8 @@ select:focus-visible {
   width: 46px;
   height: 38px;
   border-radius: 9px;
-  background: #f0e7d9;
-  color: #916328;
+  background: #f4e8d5;
+  color: #9f6a1a;
   display: grid;
   place-items: center;
   font:
@@ -2222,7 +2365,7 @@ select:focus-visible {
 }
 .reward button {
   padding: 6px 8px;
-  border: 1px solid #d5d7d1;
+  border: 1px solid #d5d4d3;
   border-radius: 7px;
   background: white;
   font-size: 8px;
@@ -2252,7 +2395,7 @@ select:focus-visible {
     serif;
 }
 .report-metrics span {
-  color: #3d895f;
+  color: #279f6d;
   font-size: 9px;
 }
 .chart {
@@ -2260,13 +2403,13 @@ select:focus-visible {
   height: 310px;
   margin: 25px 0 15px;
   padding: 25px 15px;
-  border-left: 1px solid #e5e2dc;
-  border-bottom: 1px solid #e5e2dc;
+  border-left: 1px solid #e3e0de;
+  border-bottom: 1px solid #e3e0de;
   background: repeating-linear-gradient(
     to bottom,
     transparent 0,
     transparent 59px,
-    #eeece6 60px
+    #eceae8 60px
   );
 }
 .chart > div {
@@ -2280,7 +2423,7 @@ select:focus-visible {
   max-width: 31px;
   min-width: 7px;
   border-radius: 5px 5px 1px 1px;
-  background: linear-gradient(to top, #244f40, #78a08f);
+  background: linear-gradient(to top, #0d6648, #58c095);
   opacity: 0.86;
 }
 .chart footer {
@@ -2368,15 +2511,15 @@ select:focus-visible {
   display: block;
   height: 7px;
   border-radius: 7px;
-  background: #4f8a6d;
+  background: #37a275;
 }
 .finance-waterfall i.cost {
-  background: #d9c5a3;
+  background: #e3c599;
 }
 .finance-waterfall .result {
   margin-top: 3px;
   padding-top: 12px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
 }
 .finance-waterfall .result span,
 .finance-waterfall .result strong {
@@ -2386,7 +2529,7 @@ select:focus-visible {
 .finance-snapshot > footer {
   margin-top: 18px;
   padding-top: 13px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   justify-content: space-between;
   color: var(--muted);
@@ -2398,15 +2541,15 @@ select:focus-visible {
   height: 7px;
   margin-right: 5px;
   border-radius: 50%;
-  background: #4c966d;
+  background: #33af7b;
 }
 .branch-row {
   width: 100%;
   margin-top: 17px;
   padding: 14px 0;
   border: 0;
-  border-top: 1px solid #eceae4;
-  border-bottom: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
+  border-bottom: 1px solid #eae8e6;
   background: transparent;
   display: grid;
   grid-template-columns: auto 1fr auto auto;
@@ -2423,7 +2566,7 @@ select:focus-visible {
   height: 42px;
   border-radius: 11px;
   background: var(--green);
-  color: #e7c785;
+  color: #f0c27c;
   display: grid;
   place-items: center;
   font:
@@ -2464,7 +2607,7 @@ select:focus-visible {
   border-radius: 50%;
 }
 .branch-health i.ok {
-  background: #4c966d;
+  background: #33af7b;
 }
 .branch-health i.warn {
   background: var(--gold);
@@ -2494,9 +2637,9 @@ select:focus-visible {
 .company-apps > div > button {
   min-height: 64px;
   padding: 10px;
-  border: 1px solid #e4e2dc;
+  border: 1px solid #e2e0de;
   border-radius: 10px;
-  background: #faf9f5;
+  background: #fbf8f4;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
@@ -2526,7 +2669,7 @@ select:focus-visible {
   font-weight: 500;
 }
 .company-apps button > i {
-  color: #4c966d;
+  color: #33af7b;
   font-size: 7px;
   font-style: normal;
 }
@@ -2538,7 +2681,7 @@ select:focus-visible {
   min-height: 57px;
   padding: 8px 0;
   border: 0;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   background: transparent;
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -2551,7 +2694,7 @@ select:focus-visible {
   width: 29px;
   height: 29px;
   border-radius: 8px;
-  background: #eeeae2;
+  background: #f2eade;
   color: var(--green);
   display: grid;
   place-items: center;
@@ -2559,7 +2702,7 @@ select:focus-visible {
   font-weight: 850;
 }
 .agenda-list > button > span.urgent-mark {
-  background: #f7e6e2;
+  background: #f9e0e4;
   color: var(--red);
 }
 .agenda-list strong {
@@ -2589,7 +2732,7 @@ select:focus-visible {
   width: 105px;
   height: 105px;
   border-radius: 50%;
-  background: conic-gradient(var(--green2) 0 86%, #e4e3dd 86% 100%);
+  background: conic-gradient(var(--green2) 0 86%, #e2e0df 86% 100%);
   display: grid;
   place-items: center;
   position: relative;
@@ -2633,7 +2776,7 @@ select:focus-visible {
     serif;
 }
 .access-facts b.safe {
-  color: #3f845f;
+  color: #2a996b;
 }
 .access-facts b.warning {
   color: var(--red);
@@ -2650,7 +2793,7 @@ select:focus-visible {
 }
 .obligations > div {
   min-height: 53px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: grid;
   grid-template-columns: 50px 1fr auto;
   align-items: center;
@@ -2680,7 +2823,7 @@ select:focus-visible {
     serif;
 }
 .positive-value {
-  color: #3f845f;
+  color: #2a996b;
   font-weight: 800;
 }
 
@@ -2708,7 +2851,7 @@ select:focus-visible {
 .module-summary span {
   display: block;
   margin-top: 4px;
-  color: #a8bbb3;
+  color: #b6b1ad;
   font-size: 8px;
 }
 .module-grid {
@@ -2751,7 +2894,7 @@ select:focus-visible {
 .module-card footer {
   margin-top: 18px;
   padding-top: 12px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2781,7 +2924,7 @@ select:focus-visible {
   position: absolute;
   inset: 0;
   border-radius: 20px;
-  background: #d2d4cf;
+  background: #cacfd9;
   cursor: pointer;
   transition: 0.18s;
 }
@@ -2836,10 +2979,10 @@ select:focus-visible {
 }
 .security-card small,
 .security-card span {
-  color: #a8bbb3;
+  color: #b6b1ad;
 }
 .security-card strong {
-  color: #d9bc7d;
+  color: #e6b770;
 }
 .access-layout {
   display: grid;
@@ -2855,7 +2998,7 @@ select:focus-visible {
   min-height: 58px;
   padding: 8px 4px;
   border: 0;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   background: transparent;
   display: grid;
   grid-template-columns: auto 1.4fr 1fr auto 30px;
@@ -2897,11 +3040,11 @@ select:focus-visible {
 }
 .active-user {
   background: var(--mint);
-  color: #3f845f;
+  color: #2a996b;
 }
 .pending-user {
-  background: #f3eade;
-  color: #936128;
+  background: #f6ebdb;
+  color: #a14b1a;
 }
 .user-list em {
   color: var(--muted);
@@ -2912,7 +3055,7 @@ select:focus-visible {
 }
 .login-policy > div {
   min-height: 62px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2926,7 +3069,7 @@ select:focus-visible {
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: #eeeae2;
+  background: #f2eade;
   display: grid;
   place-items: center;
   font-size: 8px;
@@ -2934,7 +3077,7 @@ select:focus-visible {
 }
 .login-policy > div i.safe-check {
   background: var(--mint);
-  color: #3f845f;
+  color: #2a996b;
 }
 .login-policy > div b {
   font-size: 9px;
@@ -3004,7 +3147,7 @@ select:focus-visible {
   margin: 0 0 18px;
   padding: 11px 13px;
   border-radius: 9px;
-  background: #f8e8e4;
+  background: #fae2e6;
   color: var(--red);
   font-size: 9px;
 }
@@ -3030,9 +3173,9 @@ select:focus-visible {
 }
 .access-request {
   padding: 17px;
-  border: 1px solid #e1ded6;
+  border: 1px solid #dedbd9;
   border-radius: 12px;
-  background: #fbfaf6;
+  background: #fcf9f5;
 }
 .access-request > header {
   display: grid;
@@ -3087,7 +3230,7 @@ select:focus-visible {
   width: 100%;
   height: 40px;
   padding: 0 10px;
-  border: 1px solid #d8d8d1;
+  border: 1px solid #d6d4d3;
   border-radius: 8px;
   background: white;
   font-size: 9px;
@@ -3105,7 +3248,7 @@ select:focus-visible {
   position: relative;
   min-height: 31px;
   padding: 0 9px;
-  border: 1px solid #dddcd5;
+  border: 1px solid #dbd9d7;
   border-radius: 8px;
   background: white;
   display: flex;
@@ -3122,7 +3265,7 @@ select:focus-visible {
 .permission-picker label > i {
   width: 15px;
   height: 15px;
-  border: 1px solid #c8c9c4;
+  border: 1px solid #bec3cf;
   border-radius: 5px;
   color: transparent;
   display: grid;
@@ -3131,7 +3274,7 @@ select:focus-visible {
   font-style: normal;
 }
 .permission-picker label:has(input:checked) {
-  border-color: #a9c2b2;
+  border-color: #bbb5b0;
   background: var(--mint);
   color: var(--green);
 }
@@ -3143,7 +3286,7 @@ select:focus-visible {
 .access-request > footer {
   margin-top: 15px;
   padding-top: 13px;
-  border-top: 1px solid #e8e5de;
+  border-top: 1px solid #e5e3e1;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -3154,7 +3297,7 @@ select:focus-visible {
 .approved-users > div {
   min-height: 62px;
   padding: 8px 3px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: grid;
   grid-template-columns: auto 1.2fr 1fr auto auto;
   align-items: center;
@@ -3181,7 +3324,7 @@ select:focus-visible {
   margin: 12px 0 0;
   padding: 12px;
   border-radius: 9px;
-  background: #f5f1ea;
+  background: #f7f1e8;
   color: var(--muted);
   font-size: 8px;
   line-height: 1.55;
@@ -3193,8 +3336,8 @@ select:focus-visible {
 .security-notice {
   margin-bottom: 18px;
   padding: 16px 18px;
-  border-color: #bdd1c4;
-  background: #edf5ef;
+  border-color: #cbc7c3;
+  background: #f3f1ef;
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -3216,7 +3359,7 @@ select:focus-visible {
 }
 .security-notice p {
   margin: 5px 0 0;
-  color: #587064;
+  color: #69645f;
   font-size: 9px;
   line-height: 1.55;
 }
@@ -3224,7 +3367,7 @@ select:focus-visible {
 .install-hero {
   margin-bottom: 18px;
   padding: clamp(22px, 4vw, 42px);
-  background: linear-gradient(130deg, #163d30, #285b47);
+  background: linear-gradient(130deg, #094a34, #0e7553);
   color: white;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 230px;
@@ -3240,7 +3383,7 @@ select:focus-visible {
   height: 50px;
   border-radius: 14px;
   background: var(--gold);
-  color: #14271f;
+  color: #063525;
   display: grid;
   place-items: center;
   font:
@@ -3256,7 +3399,7 @@ select:focus-visible {
   font-size: 34px;
 }
 .install-hero small {
-  color: #b6c9bf;
+  color: #c4bfbb;
   font-size: 8px;
   font-weight: 850;
   letter-spacing: 0.14em;
@@ -3272,7 +3415,7 @@ select:focus-visible {
 .install-hero > div > p {
   max-width: 630px;
   margin: 0;
-  color: #b8c9c1;
+  color: #c4c0bd;
   font-size: 11px;
   line-height: 1.65;
 }
@@ -3287,7 +3430,7 @@ select:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.06);
-  color: #e6eee9;
+  color: #eceae8;
   font-size: 8px;
 }
 .phone-preview {
@@ -3295,9 +3438,9 @@ select:focus-visible {
   width: 214px;
   min-height: 390px;
   padding: 17px 16px;
-  border: 6px solid #0d1d17;
+  border: 6px solid #05251a;
   border-radius: 30px;
-  background: #fffcf7;
+  background: #fefcf8;
   color: var(--ink);
   box-shadow: 0 24px 55px rgba(0, 0, 0, 0.26);
   transform: rotate(2deg);
@@ -3307,7 +3450,7 @@ select:focus-visible {
   height: 5px;
   margin: -8px auto 17px;
   border-radius: 5px;
-  background: #13231c;
+  background: #063022;
   display: block;
 }
 .phone-brand {
@@ -3357,8 +3500,8 @@ select:focus-visible {
 .phone-preview > p {
   margin: 0;
   padding: 10px 0;
-  border-top: 1px solid #e9e6df;
-  color: #455049;
+  border-top: 1px solid #e6e4e2;
+  color: #4d4a48;
   font-size: 8px;
 }
 .phone-preview > p b {
@@ -3411,7 +3554,7 @@ select:focus-visible {
 }
 .device-settings > div {
   min-height: 70px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3427,7 +3570,7 @@ select:focus-visible {
   width: 33px;
   height: 33px;
   border-radius: 9px;
-  background: #eeeae2;
+  background: #f2eade;
   display: grid;
   place-items: center;
   font-size: 9px;
@@ -3435,7 +3578,7 @@ select:focus-visible {
 }
 .device-settings i.safe-check {
   background: var(--mint);
-  color: #3f845f;
+  color: #2a996b;
 }
 .device-settings b {
   font-size: 10px;
@@ -3453,7 +3596,7 @@ select:focus-visible {
 }
 .device-settings footer {
   padding-top: 14px;
-  border-top: 1px solid #eceae4;
+  border-top: 1px solid #eae8e6;
   color: var(--muted);
   font-size: 8px;
   line-height: 1.5;
@@ -3516,7 +3659,7 @@ select:focus-visible {
   bottom: 24px;
   padding: 13px 17px;
   border-radius: 10px;
-  background: #12271f;
+  background: #063324;
   color: white;
   display: flex;
   align-items: center;
@@ -3526,7 +3669,7 @@ select:focus-visible {
   animation: toast-in 0.25s ease;
 }
 .toast span {
-  color: #e1b96f;
+  color: #eeb662;
 }
 @keyframes toast-in {
   from {
@@ -3723,6 +3866,17 @@ select:focus-visible {
   }
   .branch-tabs {
     grid-template-columns: 1fr;
+  }
+  .calendar-grid {
+    grid-template-columns: repeat(7, minmax(34px, 1fr));
+    gap: 3px;
+  }
+  .calendar-day {
+    min-height: 56px;
+    padding: 4px;
+  }
+  .calendar-day .shift-chip {
+    font-size: 6px;
   }
   .menu-sheet > header {
     align-items: stretch;
