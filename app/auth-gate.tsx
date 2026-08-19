@@ -109,11 +109,12 @@ export default function AuthGate({
   async function sendEmailLink(event: FormEvent) {
     event.preventDefault();
     if (!supabase || !email.trim()) return;
+    const normalizedEmail = email.trim().toLowerCase();
     setBusy(true);
     setError("");
     setMessage("");
     const { error: signInError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
+      email: normalizedEmail,
       options: {
         shouldCreateUser: true,
         emailRedirectTo: window.location.origin,
@@ -133,14 +134,27 @@ export default function AuthGate({
     if (!supabase) return;
     setBusy(true);
     setError("");
-    const { error: providerError } = await supabase.auth.signInWithOAuth({
+    const { data, error: providerError } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: window.location.origin },
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: { prompt: "select_account" },
+        skipBrowserRedirect: true,
+      },
     });
     if (providerError) {
       setError(providerError.message);
       setBusy(false);
+      return;
     }
+    if (!data.url) {
+      setError(
+        "Google přihlášení se nepodařilo spustit. Zkontrolujte nastavení poskytovatele v Supabase.",
+      );
+      setBusy(false);
+      return;
+    }
+    window.location.assign(data.url);
   }
 
   async function signOut() {
@@ -276,7 +290,11 @@ export default function AuthGate({
           <span>nebo</span>
         </div>
         <div className="auth-providers">
-          <button disabled={busy} onClick={() => signInWithProvider("google")}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => signInWithProvider("google")}
+          >
             <b>G</b> Pokračovat přes Google
           </button>
         </div>

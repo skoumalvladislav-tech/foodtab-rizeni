@@ -459,7 +459,7 @@ export default function Dashboard({
   userRole: string;
   branchId: string | null;
   permissions: string[];
-  onSignOut: () => void;
+  onSignOut: () => void | Promise<void>;
 }) {
   const isAdministrator = userRole === "administrator";
   const canUse = useCallback(
@@ -485,6 +485,7 @@ export default function Dashboard({
         ? "Restaurace Černá Perla"
         : "Foodtab s.r.o. · Celá firma";
   const [active, setActive] = useState<NavId>("overview");
+  const [signingOut, setSigningOut] = useState(false);
   const [location, setLocation] = useState(initialLocation);
   const [branches, setBranches] = useState<Branch[]>(initialBranches);
   const [now, setNow] = useState(new Date());
@@ -947,11 +948,21 @@ export default function Dashboard({
             </small>
           </div>
           <button
-            onClick={onSignOut}
+            className="sign-out-button"
+            disabled={signingOut}
+            onClick={async () => {
+              setSigningOut(true);
+              try {
+                await onSignOut();
+              } finally {
+                setSigningOut(false);
+              }
+            }}
             aria-label="Odhlásit se"
             title="Odhlásit se"
           >
-            ↪
+            <span aria-hidden="true">↪</span>
+            {signingOut ? "Odhlašuji…" : "Odhlásit se"}
           </button>
         </div>
       </aside>
