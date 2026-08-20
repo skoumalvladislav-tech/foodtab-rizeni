@@ -498,6 +498,10 @@ export default function Dashboard({
   const [signingOut, setSigningOut] = useState(false);
   const [location, setLocation] = useState(initialLocation);
   const [branches, setBranches] = useState<Branch[]>(initialBranches);
+  const locationBranchId = useMemo(
+    () => branches.find((b) => b.name === location)?.id ?? null,
+    [branches, location],
+  );
   const [now, setNow] = useState(new Date());
   const [clockedIn, setClockedIn] = useState(false);
   const [tasks, setTasks] = useState(initialTasks);
@@ -1017,10 +1021,12 @@ export default function Dashboard({
         <main className="content">
           {active === "overview" && (
             <Overview
+              key={location}
               userName={userName}
               branches={branches}
               go={go}
               setLocation={setLocation}
+              location={location}
             />
           )}
           {active === "finance" && <CompanyFinance />}
@@ -1030,6 +1036,7 @@ export default function Dashboard({
           )}
           {active === "attendance" && (
             <Attendance
+              key={location}
               clockedIn={clockedIn}
               now={now}
               attendance={attendance}
@@ -1038,6 +1045,7 @@ export default function Dashboard({
               canUse={canUse}
               userEmail={userEmail}
               userBranchId={branchId}
+              activeBranchId={locationBranchId}
             />
           )}
           {active === "tasks" && (
@@ -1162,11 +1170,13 @@ function Overview({
   branches,
   go,
   setLocation,
+  location,
 }: {
   userName: string;
   branches: Branch[];
   go: (id: NavId) => void;
   setLocation: (value: string) => void;
+  location: string;
 }) {
   const branchDetails: Record<
     string,
@@ -1546,6 +1556,7 @@ function Attendance({
   canUse,
   userEmail,
   userBranchId,
+  activeBranchId,
 }: {
   clockedIn: boolean;
   now: Date;
@@ -1555,6 +1566,7 @@ function Attendance({
   canUse: (permission: string) => boolean;
   userEmail: string;
   userBranchId: string | null;
+  activeBranchId: string | null;
 }) {
   const canManageShifts = canUse("shifts");
   const [cursor, setCursor] = useState(() => {
@@ -1562,6 +1574,7 @@ function Attendance({
     return { year: d.getFullYear(), month: d.getMonth() + 1 };
   });
   const [selectedBranchId, setSelectedBranchId] = useState(
+    activeBranchId ||
     (userBranchId && userBranchId !== "company"
       ? userBranchId
       : branches[0]?.id) || "",
