@@ -212,7 +212,7 @@ const initialTasks: Task[] = [
     meta: "Sklad · Bar",
     time: "11:30",
     priority: false,
-    completed: true,
+    completed: false,
   },
   {
     id: 3,
@@ -1214,16 +1214,16 @@ function Overview({
     }
   > = {
     "restaurace-cerna-perla": {
-      team: "7 lidí na směně",
-      target: "49 000 Kč",
-      checklist: "78 %",
-      tasks: "1 čeká",
+      team: "zatím bez směny",
+      target: "— Kč",
+      checklist: "—",
+      tasks: "—",
     },
     "bernard-bar-tabor": {
-      team: "5 lidí na směně",
-      target: "35 600 Kč",
-      checklist: "66 %",
-      tasks: "2 čekají",
+      team: "zatím bez směny",
+      target: "— Kč",
+      checklist: "—",
+      tasks: "—",
     },
   };
   const isCompanyView = location === "Foodtab s.r.o. · Celá firma";
@@ -1260,27 +1260,27 @@ function Overview({
         <div>
           <Metric
             label="TRŽBY FIRMY"
-            value="1 264 800"
+            value="0"
             unit="Kč"
-            note="↗ 8,4 % proti červenci"
+            note="Zatím žádná data"
           />
           <Metric
             label="PROVOZNÍ VÝSLEDEK"
-            value="214 600"
+            value="0"
             unit="Kč"
-            note="Marže 17,0 %"
+            note="Zadejte první tržby ve financích"
           />
           <Metric
             label="POBOČKY"
             value={`${branches.length}`}
             unit="aktivní"
-            note="Obě pobočky v provozu"
+            note={`${branches.length} ${branches.length === 1 ? "pobočka" : "pobočky"} v systému`}
           />
           <Metric
             label="ZAMĚSTNANCI"
-            value="18"
+            value="0"
             unit="osob"
-            note="12 dnes na směně"
+            note="Přidejte uživatele v sekci Přístupy"
           />
         </div>
       </section>
@@ -1298,30 +1298,30 @@ function Overview({
           <div className="finance-waterfall">
             <div>
               <span>Tržby</span>
-              <strong>1 264 800 Kč</strong>
-              <i style={{ width: "100%" }} />
+              <strong>0 Kč</strong>
+              <i style={{ width: "0%" }} />
             </div>
             <div>
               <span>Provozní náklady</span>
-              <strong>− 710 200 Kč</strong>
-              <i className="cost" style={{ width: "56%" }} />
+              <strong>0 Kč</strong>
+              <i className="cost" style={{ width: "0%" }} />
             </div>
             <div>
               <span>Mzdy a odvody</span>
-              <strong>− 340 000 Kč</strong>
-              <i className="cost" style={{ width: "27%" }} />
+              <strong>0 Kč</strong>
+              <i className="cost" style={{ width: "0%" }} />
             </div>
             <div className="result">
               <span>Provozní výsledek</span>
-              <strong>214 600 Kč</strong>
-              <i style={{ width: "17%" }} />
+              <strong>0 Kč</strong>
+              <i style={{ width: "0%" }} />
             </div>
           </div>
           <footer>
             <span>
-              <i className="positive-dot" /> Cashflow v pořádku
+              <i /> Zatím žádná finanční data
             </span>
-            <span>3 závazky čekají na úhradu</span>
+            <span>Zadejte tržby ve financích →</span>
           </footer>
         </section>
 
@@ -1382,7 +1382,9 @@ function Overview({
               </div>
             );
           })}
-          <button className="add-branch">+ Přidat další pobočku</button>
+          <button className="add-branch" onClick={() => go("settings")}>
+            + Přidat další pobočku
+          </button>
         </section>
 
         <section className="card company-apps">
@@ -1397,10 +1399,10 @@ function Overview({
           />
           <div>
             {[
-              ["DO", "Docházka", "18 uživatelů"],
-              ["ÚK", "Úkoly", "7 otevřených"],
-              ["KO", "Komunikace", "3 nové zprávy"],
-              ["AI", "Gastro AI", "42 zdrojů"],
+              ["DO", "Docházka", "0 záznamů"],
+              ["ÚK", "Úkoly", "0 otevřených"],
+              ["KO", "Komunikace", "0 zpráv"],
+              ["AI", "Gastro AI", "připraveno"],
             ].map((app) => (
               <button
                 key={app[1]}
@@ -1430,27 +1432,27 @@ function Overview({
         <section className="card agenda-card">
           <CardHead eyebrow="AGENDA VEDENÍ" title="Co vyžaduje pozornost" />
           <div className="agenda-list">
-            <button>
-              <span className="urgent-mark">!</span>
-              <div>
-                <strong>Schválit podklady pro mzdy</strong>
-                <small>Termín dnes · 18 zaměstnanců</small>
-              </div>
-              <b>→</b>
-            </button>
-            <button>
-              <span>FA</span>
-              <div>
-                <strong>3 přijaté faktury k úhradě</strong>
-                <small>Celkem 64 280 Kč · splatnost do 20. 8.</small>
-              </div>
-              <b>→</b>
-            </button>
-            <button>
+            <button onClick={() => go("access")}>
               <span>UP</span>
               <div>
-                <strong>Dokončit přístupy vedoucích</strong>
-                <small>2 uživatelé bez vícefázového ověření</small>
+                <strong>Přidejte první uživatele</strong>
+                <small>Pozvěte tým přes sekci Přístupy</small>
+              </div>
+              <b>→</b>
+            </button>
+            <button onClick={() => go("finance")}>
+              <span>FI</span>
+              <div>
+                <strong>Zadejte první tržby</strong>
+                <small>Finance jsou zatím prázdné</small>
+              </div>
+              <b>→</b>
+            </button>
+            <button onClick={() => go("recipes")}>
+              <span>RE</span>
+              <div>
+                <strong>Importujte receptury</strong>
+                <small>Přidejte jídelní lístek a recepty</small>
               </div>
               <b>→</b>
             </button>
@@ -1469,21 +1471,21 @@ function Overview({
           />
           <div className="access-ring">
             <strong>
-              18<small>uživatelů</small>
+              0<small>uživatelů</small>
             </strong>
           </div>
           <div className="access-facts">
             <span>
-              <b>5</b> pracovních rolí
+              <b>0</b> pracovních rolí
             </span>
             <span>
-              <b>2</b> administrátoři
+              <b>0</b> administrátoři
             </span>
             <span>
-              <b className="safe">16</b> účtů v pořádku
+              <b className="safe">0</b> účtů v pořádku
             </span>
             <span>
-              <b className="warning">2</b> vyžadují kontrolu
+              <b>0</b> čekají na schválení
             </span>
           </div>
         </section>
@@ -3569,37 +3571,33 @@ function Motivation() {
       />
       <section className="challenge">
         <div>
-          <span>MĚSÍČNÍ VÝZVA · SRPEN</span>
+          <span suppressHydrationWarning>
+            MĚSÍČNÍ VÝZVA ·{" "}
+            {new Date().toLocaleDateString("cs-CZ", { month: "long" }).toUpperCase()}
+          </span>
           <h2>Dokonalý servis, každý den</h2>
           <p>
             Společně splňte 95 % provozních checklistů a získejte týmovou
             večeři.
           </p>
           <div className="progress">
-            <i style={{ width: "82%" }} />
+            <i style={{ width: "0%" }} />
           </div>
-          <small>82 % · zbývá 14 dní</small>
+          <small suppressHydrationWarning>
+            0 % · zbývá{" "}
+            {new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate()} dní
+          </small>
         </div>
         <strong>
-          82<small>%</small>
+          0<small>%</small>
         </strong>
       </section>
       <div className="two-column">
         <section className="card leaderboard">
           <CardHead eyebrow="TENTO MĚSÍC" title="Žebříček pochval" />
-          {people.map((person, index) => (
-            <div className="leader" key={person[0]}>
-              <span>{index + 1}</span>
-              <i>{person[4]}</i>
-              <div>
-                <strong>{person[0]}</strong>
-                <small>{person[1]}</small>
-              </div>
-              <b>
-                {person[2]} bodů<small>{person[3]} tento týden</small>
-              </b>
-            </div>
-          ))}
+          <div style={{ padding: "20px", color: "var(--muted)", fontSize: "13px", textAlign: "center" }}>
+            Zatím žádné pochvaly · udělte první pochvalu tlačítkem výše
+          </div>
         </section>
         <section className="card rewards">
           <CardHead eyebrow="ODMĚNY" title="Co si tým může vybrat" />
@@ -3614,7 +3612,9 @@ function Motivation() {
                 <strong>{reward[1]}</strong>
                 <small>{reward[2]}</small>
               </div>
-              <button>Vybrat</button>
+              <button onClick={() => alert(`Odměna "${reward[1]}" není ještě dostupná — přidejte zaměstnance a body.`)}>
+                Vybrat
+              </button>
             </div>
           ))}
         </section>
@@ -3629,15 +3629,15 @@ function CompanyFinance() {
       <Intro
         eyebrow="FOODTAB S.R.O. · FINANCE"
         title="Finance a výsledky"
-        description="Přehled firmy i jednotlivých poboček. Hodnoty jsou zatím ukázkové pro ověření prototypu."
-        action={<button className="outline">Exportovat přehled</button>}
+        description="Přehled firmy i jednotlivých poboček. Zadejte tržby a náklady pro sledování výsledků."
+        action={<button className="outline" onClick={() => alert("Export bude dostupný po zadání finančních dat.")}>Exportovat přehled</button>}
       />
       <section className="report-metrics">
         {[
-          ["TRŽBY SRPEN", "1,26 mil. Kč", "↗ 8,4 % proti červenci"],
-          ["PROVOZNÍ VÝSLEDEK", "214 600 Kč", "marže 17,0 %"],
-          ["PERSONÁLNÍ NÁKLADY", "26,9 %", "cíl pod 30 %"],
-          ["PENÍZE NA ÚČTECH", "486 200 Kč", "po odečtení závazků"],
+          ["TRŽBY TENTO MĚSÍC", "0 Kč", "Zatím žádná data"],
+          ["PROVOZNÍ VÝSLEDEK", "0 Kč", "Zadejte první tržby"],
+          ["PERSONÁLNÍ NÁKLADY", "— %", "Po přidání mezd"],
+          ["PENÍZE NA ÚČTECH", "0 Kč", "Aktualizujte zůstatek"],
         ].map((item) => (
           <div className="card" key={item[0]}>
             <small>{item[0]}</small>
@@ -3660,36 +3660,34 @@ function CompanyFinance() {
           />
           <div className="chart">
             <div>
-              {[42, 55, 48, 72, 66, 38, 52, 68, 76, 62, 84, 70, 92, 78].map(
-                (height, index) => (
-                  <i style={{ height: `${height}%` }} key={index} />
-                ),
-              )}
+              {Array.from({ length: 14 }).map((_, index) => (
+                <i style={{ height: "2%" }} key={index} />
+              ))}
             </div>
             <footer>
-              <span>4. 8.</span>
-              <span>8. 8.</span>
-              <span>12. 8.</span>
-              <span>17. 8.</span>
+              <span suppressHydrationWarning>
+                {new Date(Date.now() - 13 * 86400000).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })}
+              </span>
+              <span suppressHydrationWarning>
+                {new Date(Date.now() - 9 * 86400000).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })}
+              </span>
+              <span suppressHydrationWarning>
+                {new Date(Date.now() - 5 * 86400000).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })}
+              </span>
+              <span suppressHydrationWarning>
+                {new Date().toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })}
+              </span>
             </footer>
           </div>
         </section>
         <section className="card obligations">
           <CardHead eyebrow="ZÁVAZKY" title="Nejbližší platby" />
-          {[
-            ["18. 8.", "Bernard a.s.", "28 460 Kč"],
-            ["19. 8.", "Makro ČR", "21 820 Kč"],
-            ["20. 8.", "Energie", "14 000 Kč"],
-          ].map((row) => (
-            <div key={row[1]}>
-              <span>{row[0]}</span>
-              <strong>{row[1]}</strong>
-              <b>{row[2]}</b>
-            </div>
-          ))}
+          <div style={{ padding: "20px", color: "var(--muted)", fontSize: "13px", textAlign: "center" }}>
+            Zatím žádné závazky
+          </div>
           <footer>
             <span>Celkem ke schválení</span>
-            <strong>64 280 Kč</strong>
+            <strong>0 Kč</strong>
           </footer>
         </section>
       </div>
@@ -3706,17 +3704,17 @@ function CompanyFinance() {
             <span>
               <b>Restaurace Černá Perla</b>
             </span>
-            <span>744 800 Kč</span>
-            <span>625 100 Kč</span>
-            <span className="positive-value">+ 119 700 Kč</span>
+            <span>0 Kč</span>
+            <span>0 Kč</span>
+            <span>0 Kč</span>
           </div>
           <div>
             <span>
               <b>Bernard Bar Tábor</b>
             </span>
-            <span>520 000 Kč</span>
-            <span>425 100 Kč</span>
-            <span className="positive-value">+ 94 900 Kč</span>
+            <span>0 Kč</span>
+            <span>0 Kč</span>
+            <span>0 Kč</span>
           </div>
         </div>
       </section>
