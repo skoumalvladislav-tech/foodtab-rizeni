@@ -1608,16 +1608,43 @@ select:focus-visible {
   color: var(--muted);
   font-size: 9px;
 }
+/* ── Shift calendar toolbar ────────────────── */
 .calendar-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+
+/* ── View toggle ─────────────────────────── */
+.shift-view-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding-top: 4px;
+}
+.shift-view-toggle button {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.15s;
+}
+.shift-view-toggle button.active {
+  background: var(--green);
+  border-color: var(--green);
+  color: white;
+}
+
+/* ── Month view grid ─────────────────────── */
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
-  margin-top: 14px;
+  gap: 5px;
+  margin-top: 4px;
 }
 .calendar-grid .weekday {
   padding: 6px 0;
@@ -1632,47 +1659,82 @@ select:focus-visible {
   color: var(--copper);
 }
 .calendar-day {
-  min-height: 92px;
-  padding: 8px;
+  min-height: 80px;
+  padding: 7px 6px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--card);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.calendar-day:hover {
+  border-color: var(--green);
 }
 .calendar-day.weekend {
   background: var(--paper);
 }
 .calendar-day.other-month {
-  opacity: 0.45;
+  opacity: 0.35;
+  pointer-events: none;
 }
 .calendar-day.today {
   border-color: var(--green2);
-  box-shadow: inset 0 0 0 1px var(--green2);
+  box-shadow: inset 0 0 0 1.5px var(--green2);
 }
 .calendar-day.active {
   border-color: var(--gold);
   background: var(--mint);
 }
 .calendar-day > b {
-  font:
-    600 11px Georgia,
-    serif;
+  font: 700 11px/1 Georgia, serif;
   color: var(--green);
+  margin-bottom: 2px;
 }
+.calendar-day > small {
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ── Shift chip — base ───────────────────── */
 .shift-chip {
-  padding: 3px 6px;
-  border-radius: 6px;
-  border-left: 3px solid var(--gold);
-  background: #f1f5f9;
-  font-size: 8px;
-  color: var(--ink);
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  border-left: 3px solid var(--gold);
+  background: var(--paper);
+  font-size: 9px;
+  color: var(--ink);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.shift-chip .chip-initials {
+  font-weight: 800;
+  font-size: 8px;
+  flex-shrink: 0;
+}
+.shift-chip .chip-time {
+  color: var(--muted);
+  font-size: 8px;
+  flex-shrink: 0;
+}
+.shift-chip .chip-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.shift-chip .chip-dept {
+  font-size: 8px;
+  font-weight: 700;
+  opacity: 0.55;
+  flex-shrink: 0;
+  min-width: 42px;
 }
 .shift-chip.kuchyne {
   border-left-color: var(--green2);
@@ -1690,24 +1752,189 @@ select:focus-visible {
   border: 0;
   background: none;
   color: var(--red);
-  font-size: 8px;
+  font-size: 9px;
   cursor: pointer;
   padding: 2px 4px;
+  flex-shrink: 0;
 }
+
+/* ── Day panel (after click) ─────────────── */
 .shift-day-department {
   margin-bottom: 14px;
 }
 .shift-day-department h3 {
   margin: 0 0 6px;
-  font:
-    600 11px Georgia,
-    serif;
+  font: 600 11px Georgia, serif;
   color: var(--green);
 }
 .shift-day-department .shift-chip {
   margin-bottom: 5px;
+  font-size: 11px;
+  padding: 8px 10px;
+  white-space: normal;
+}
+.shift-day-department .shift-chip .chip-name {
+  flex: 1;
+}
+
+/* ── Week view ───────────────────────────── */
+.shift-week-wrap {
+  overflow: hidden;
+}
+.shift-week-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.shift-week-nav button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.shift-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.shift-week-day {
+  min-height: 140px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  padding: 8px 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.15s;
+}
+.shift-week-day:hover {
+  border-color: var(--green);
+}
+.shift-week-day.weekend { background: var(--paper); }
+.shift-week-day.other-month { opacity: 0.35; }
+.shift-week-day.today { border-color: var(--green2); box-shadow: inset 0 0 0 1.5px var(--green2); }
+.shift-week-day.active { border-color: var(--gold); background: var(--mint); }
+.week-day-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 3px;
+}
+.week-day-header small {
+  font-size: 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.week-day-header b {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.shift-week-day.today .week-day-header b {
+  color: var(--green);
+}
+.week-shift-count {
+  display: inline-block;
+  margin-top: 2px;
+  background: var(--green);
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 1px 5px;
+}
+.shift-chip.week-chip {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px 6px;
+  white-space: normal;
+}
+.shift-chip.week-chip .chip-time {
   font-size: 9px;
-  padding: 6px 9px;
+}
+.shift-chip.week-chip .chip-name {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* ── List view ───────────────────────────── */
+.shift-list-wrap {
+  padding: 0;
+}
+.shift-list-day {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.12s;
+  border-radius: 8px;
+}
+.shift-list-day:hover {
+  background: var(--paper);
+}
+.shift-list-day.today .shift-list-date b {
+  color: var(--green);
+}
+.shift-list-day.active {
+  background: var(--mint);
+}
+.shift-list-day.weekend .shift-list-date small {
+  color: var(--copper);
+}
+.shift-list-date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 40px;
+  padding-top: 2px;
+}
+.shift-list-date b {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+}
+.shift-list-date small {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+.shift-list-chips {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.shift-list-chips .shift-chip {
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+  white-space: normal;
+}
+.shift-list-chips .chip-time {
+  font-size: 11px;
+  margin-left: auto;
+}
+.shift-list-empty {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+  padding: 4px 0;
 }
 .employee-source-toggle {
   display: flex;
@@ -3963,17 +4190,32 @@ select:focus-visible {
   .branch-tabs {
     grid-template-columns: 1fr;
   }
+  /* Mobile: compact month grid (user can switch to list/week) */
   .calendar-grid {
-    grid-template-columns: repeat(7, minmax(34px, 1fr));
-    gap: 3px;
+    grid-template-columns: repeat(7, minmax(30px, 1fr));
+    gap: 2px;
   }
   .calendar-day {
-    min-height: 56px;
-    padding: 4px;
+    min-height: 48px;
+    padding: 4px 3px;
+    gap: 2px;
+    border-radius: 6px;
   }
+  .calendar-day > b { font-size: 10px; }
   .calendar-day .shift-chip {
-    font-size: 6px;
+    padding: 2px 3px;
+    gap: 2px;
   }
+  .calendar-day .chip-time { display: none; }
+  .shift-week-grid {
+    grid-template-columns: repeat(7, minmax(80px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 6px;
+  }
+  .shift-week-day { min-height: 100px; }
+  .week-day-header b { font-size: 15px; }
+  .shift-chip.week-chip .chip-name { font-size: 9px; }
+  .shift-list-chips .shift-chip { padding: 9px 10px; font-size: 13px; }
   .menu-sheet > header {
     align-items: stretch;
     flex-direction: column;

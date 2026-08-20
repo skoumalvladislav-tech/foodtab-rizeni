@@ -1899,53 +1899,267 @@ function ShiftCalendarGrid({
   onSelectDate: (date: string) => void;
   userEmail: string;
 }) {
+  const [view, setView] = useState<"month" | "week" | "list">("month");
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  useEffect(() => {
+    function pick() {
+      if (window.innerWidth < 680) setView("list");
+      else if (window.innerWidth < 1060) setView("week");
+      else setView("month");
+    }
+    pick();
+    window.addEventListener("resize", pick);
+    return () => window.removeEventListener("resize", pick);
+  }, []);
+
+  useEffect(() => {
+    const grid = getMonthGrid(year, month);
+    const weeks: (typeof grid)[] = [];
+    for (let i = 0; i < grid.length; i += 7) weeks.push(grid.slice(i, i + 7));
+    const today = new Date();
+    if (today.getFullYear() === year && today.getMonth() + 1 === month) {
+      const todayStr = `${year}-${String(month).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const idx = weeks.findIndex((w) => w.some((d) => d.date === todayStr));
+      setWeekOffset(Math.max(0, idx));
+    } else {
+      setWeekOffset(0);
+    }
+  }, [year, month]);
+
   const grid = getMonthGrid(year, month);
   const weekdays = ["Po", "Út", "St", "Čt", "Pá", "So", "Ne"];
-  return (
-    <div className="calendar-grid">
-      {weekdays.map((label, index) => (
-        <div key={label} className={`weekday ${index >= 5 ? "weekend" : ""}`}>
-          {label}
-        </div>
+  const weeks: (typeof grid)[] = [];
+  for (let i = 0; i < grid.length; i += 7) weeks.push(grid.slice(i, i + 7));
+  const currentWeek = weeks[Math.min(weekOffset, weeks.length - 1)] ?? [];
+  const monthDays = grid.filter((c) => c.inMonth);
+
+  function initials(name: string) {
+    return name
+      .split(/\s+/)
+      .map((w) => w[0] ?? "")
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  }
+
+  function chipClass(shift: ShiftRow) {
+    return [
+      "shift-chip",
+      shift.department,
+      shift.employeeEmail === userEmail.toLowerCase() ? "mine" : "",
+      shift.isPlaceholder ? "placeholder" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  const viewToggle = (
+    <div className="shift-view-toggle">
+      {(["month", "week", "list"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          className={view === v ? "active" : ""}
+          onClick={() => setView(v)}
+        >
+          {v === "month" ? "Měsíc" : v === "week" ? "Týden" : "Seznam"}
+        </button>
       ))}
-      {grid.map((cell) => {
-        const dayShifts = shiftsByDate[cell.date] ?? [];
-        return (
-          <div
-            key={cell.date}
-            className={[
-              "calendar-day",
-              cell.isWeekend ? "weekend" : "",
-              !cell.inMonth ? "other-month" : "",
-              cell.isToday ? "today" : "",
-              selectedDate === cell.date ? "active" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            onClick={() => onSelectDate(cell.date)}
+    </div>
+  );
+
+  /* ── LIST VIEW ─────────────────────────────── */
+  if (view === "list") {
+    const daysWithContent = monthDays.filter(
+      (c) => (shiftsByDate[c.date]?.length ?? 0) > 0 || c.isToday,
+    );
+    return (
+      <div className="shift-list-wrap">
+        {viewToggle}
+        {daysWithContent.length === 0 && (
+          <p className="muted" style={{ padding: "16px 0" }}>
+            Žádné směny v tomto měsíci. Klikněte na libovolný den a přidejte
+            první směnu.
+          </p>
+        )}
+        {monthDays.map((cell) => {
+          const dayShifts = shiftsByDate[cell.date] ?? [];
+          if (!dayShifts.length && !cell.isToday) return null;
+          const dow = (new Date(cell.date).getDay() + 6) % 7;
+          return (
+            <div
+              key={cell.date}
+              className={[
+                "shift-list-day",
+                cell.isToday ? "today" : "",
+                selectedDate === cell.date ? "active" : "",
+                cell.isWeekend ? "weekend" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() => onSelectDate(cell.date)}
+            >
+              <div className="shift-list-date">
+                <b>{cell.day}</b>
+                <small>{weekdays[dow]}</small>
+              </div>
+              <div className="shift-list-chips">
+                {dayShifts.length === 0 ? (
+                  <span className="shift-list-empty">
+                    Klikněte pro přidání směny
+                  </span>
+                ) : (
+                  dayShifts.map((shift) => (
+                    <span key={shift.id} className={chipClass(shift)}>
+                      <span className="chip-dept">
+                        {shift.department === "bar" ? "Bar" : "Kuchy."}
+                      </span>
+                      <span className="chip-name">{shift.employeeName}</span>
+                      <span className="chip-time">
+                        {shift.startTime}–{shift.endTime}
+                      </span>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  /* ── WEEK VIEW ─────────────────────────────── */
+  if (view === "week") {
+    return (
+      <div className="shift-week-wrap">
+        {viewToggle}
+        <div className="shift-week-nav">
+          <button
+            type="button"
+            className="outline"
+            onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
+            disabled={weekOffset === 0}
           >
-            <b>{cell.day}</b>
-            {dayShifts.slice(0, 3).map((shift) => (
-              <span
-                key={shift.id}
+            ← Předchozí týden
+          </button>
+          <span>
+            Týden {weekOffset + 1}&thinsp;/&thinsp;{weeks.length}
+          </span>
+          <button
+            type="button"
+            className="outline"
+            onClick={() =>
+              setWeekOffset((w) => Math.min(weeks.length - 1, w + 1))
+            }
+            disabled={weekOffset >= weeks.length - 1}
+          >
+            Další týden →
+          </button>
+        </div>
+        <div className="shift-week-grid">
+          {currentWeek.map((cell, i) => {
+            const dayShifts = shiftsByDate[cell.date] ?? [];
+            return (
+              <div
+                key={cell.date}
                 className={[
-                  "shift-chip",
-                  shift.department,
-                  shift.employeeEmail === userEmail.toLowerCase()
-                    ? "mine"
-                    : "",
-                  shift.isPlaceholder ? "placeholder" : "",
+                  "shift-week-day",
+                  cell.isWeekend ? "weekend" : "",
+                  !cell.inMonth ? "other-month" : "",
+                  cell.isToday ? "today" : "",
+                  selectedDate === cell.date ? "active" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
+                onClick={() => onSelectDate(cell.date)}
               >
-                {shift.startTime}–{shift.endTime} {shift.employeeName.split(" ")[0]}
-              </span>
-            ))}
-            {dayShifts.length > 3 && <small>+{dayShifts.length - 3} další</small>}
+                <div className="week-day-header">
+                  <small>{weekdays[i]}</small>
+                  <b>{cell.day}</b>
+                  {dayShifts.length > 0 && (
+                    <span className="week-shift-count">{dayShifts.length}</span>
+                  )}
+                </div>
+                {dayShifts.map((shift) => (
+                  <div
+                    key={shift.id}
+                    className={chipClass(shift) + " week-chip"}
+                  >
+                    <span className="chip-time">
+                      {shift.startTime}–{shift.endTime}
+                    </span>
+                    <strong className="chip-name">
+                      {shift.employeeName.split(" ")[0]}
+                    </strong>
+                  </div>
+                ))}
+                {dayShifts.length === 0 && (
+                  <span
+                    className="muted"
+                    style={{ fontSize: "11px", paddingTop: "4px" }}
+                  >
+                    volno
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  /* ── MONTH VIEW ────────────────────────────── */
+  return (
+    <div>
+      {viewToggle}
+      <div className="calendar-grid">
+        {weekdays.map((label, index) => (
+          <div
+            key={label}
+            className={`weekday ${index >= 5 ? "weekend" : ""}`}
+          >
+            {label}
           </div>
-        );
-      })}
+        ))}
+        {grid.map((cell) => {
+          const dayShifts = shiftsByDate[cell.date] ?? [];
+          return (
+            <div
+              key={cell.date}
+              className={[
+                "calendar-day",
+                cell.isWeekend ? "weekend" : "",
+                !cell.inMonth ? "other-month" : "",
+                cell.isToday ? "today" : "",
+                selectedDate === cell.date ? "active" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() => onSelectDate(cell.date)}
+            >
+              <b>{cell.day}</b>
+              {dayShifts.slice(0, 4).map((shift) => (
+                <span
+                  key={shift.id}
+                  className={chipClass(shift)}
+                  title={`${shift.employeeName} · ${shift.startTime}–${shift.endTime}`}
+                >
+                  <span className="chip-initials">
+                    {initials(shift.employeeName)}
+                  </span>
+                  <span className="chip-time">{shift.startTime}</span>
+                </span>
+              ))}
+              {dayShifts.length > 4 && (
+                <small>+{dayShifts.length - 4}</small>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
