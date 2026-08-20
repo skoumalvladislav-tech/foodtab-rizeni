@@ -498,6 +498,7 @@ export default function Dashboard({
   const [signingOut, setSigningOut] = useState(false);
   const [location, setLocation] = useState(initialLocation);
   const [branches, setBranches] = useState<Branch[]>(initialBranches);
+  const [allBranches, setAllBranches] = useState<Branch[]>(defaultBranches);
   const locationBranchId = useMemo(
     () => branches.find((b) => b.name === location)?.id ?? null,
     [branches, location],
@@ -627,7 +628,14 @@ export default function Dashboard({
           );
         }
         setClockedIn(data.lastAttendance?.action === "in");
-        if (data.branches?.length) setBranches(data.branches);
+        if (data.branches?.length) {
+          setAllBranches(data.branches);
+          setBranches(
+            isAdministrator || branchId === "company"
+              ? data.branches
+              : data.branches.filter((b: Branch) => b.id === branchId),
+          );
+        }
         if (data.assignedTasks) setAssignedTasks(data.assignedTasks);
         if (data.recipes) setRecipes(data.recipes);
         if (data.menuItems) setMenuItems(data.menuItems);
@@ -938,7 +946,9 @@ export default function Dashboard({
             >
               <span>{item.mark}</span>
               {item.label}
-              {item.id === "communication" && <b>3</b>}
+              {item.id === "communication" && posts.length > 0 && (
+                <b>{posts.length}</b>
+              )}
             </button>
           ))}
           <p className="spaced">SPRÁVA</p>
@@ -1014,7 +1024,13 @@ export default function Dashboard({
             </button>
             <div className="date">
               <strong suppressHydrationWarning>{clock(now)}</strong>
-              <span>pondělí 17. srpna</span>
+              <span suppressHydrationWarning>
+                {now.toLocaleDateString("cs-CZ", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                })}
+              </span>
             </div>
           </div>
         </header>
@@ -1052,6 +1068,7 @@ export default function Dashboard({
             <Tasks
               location={location}
               branches={branches}
+              allBranches={allBranches}
               tasks={tasks}
               assignedTasks={assignedTasks}
               completion={completion}
@@ -1064,6 +1081,7 @@ export default function Dashboard({
             <Communication
               location={location}
               branches={branches}
+              allBranches={allBranches}
               posts={posts}
               post={post}
               setPost={setPost}
@@ -1775,7 +1793,12 @@ function Attendance({
                   setSelectedDate(null);
                 }}
               >
-                <span>{branch.name.includes("Černá") ? "ČP" : "BB"}</span>
+                <span>{branch.name
+                  .split(/\s+/)
+                  .map((w) => w[0])
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2)}</span>
                 <div>
                   <strong>{branch.name}</strong>
                 </div>
@@ -2161,6 +2184,7 @@ function audienceName(
 function Tasks({
   location,
   branches,
+  allBranches,
   tasks,
   assignedTasks,
   completion,
@@ -2170,6 +2194,7 @@ function Tasks({
 }: {
   location: string;
   branches: Branch[];
+  allBranches: Branch[];
   tasks: Task[];
   assignedTasks: AssignedTask[];
   completion: number;
@@ -2305,7 +2330,7 @@ function Tasks({
                     onChange={(event) => setRecipient(event.target.value)}
                   >
                     {audienceType === "branch"
-                      ? branches.map((branch) => (
+                      ? allBranches.map((branch) => (
                           <option key={branch.id} value={branch.id}>
                             {branch.name}
                           </option>
@@ -2468,6 +2493,7 @@ function Checklist({
 function Communication({
   location,
   branches,
+  allBranches,
   posts,
   post,
   setPost,
@@ -2475,6 +2501,7 @@ function Communication({
 }: {
   location: string;
   branches: Branch[];
+  allBranches: Branch[];
   posts: Post[];
   post: string;
   setPost: (value: string) => void;
@@ -2552,7 +2579,7 @@ function Communication({
                     onChange={(event) => setRecipient(event.target.value)}
                   >
                     {audienceType === "branch"
-                      ? branches.map((branch) => (
+                      ? allBranches.map((branch) => (
                           <option key={branch.id} value={branch.id}>
                             {branch.name}
                           </option>
@@ -2606,7 +2633,12 @@ function Communication({
               className={channel === branch.id ? "active" : ""}
               onClick={() => setChannel(branch.id)}
             >
-              <span>{branch.name.includes("Černá") ? "ČP" : "BB"}</span>
+              <span>{branch.name
+                  .split(/\s+/)
+                  .map((w) => w[0])
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2)}</span>
               {branch.name}
             </button>
           ))}
@@ -2737,7 +2769,12 @@ function Recipes({
               setDraft((current) => ({ ...current, branchId: branch.id }));
             }}
           >
-            <span>{branch.name.includes("Černá") ? "ČP" : "BB"}</span>
+            <span>{branch.name
+                  .split(/\s+/)
+                  .map((w) => w[0])
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2)}</span>
             <div>
               <strong>{branch.name}</strong>
               <small>
@@ -3080,7 +3117,12 @@ function Menus({
                 setUploadError("");
               }}
             >
-              <span>{branch.name.includes("Černá") ? "ČP" : "BB"}</span>
+              <span>{branch.name
+                  .split(/\s+/)
+                  .map((w) => w[0])
+                  .join("")
+                  .toUpperCase()
+                  .slice(0, 2)}</span>
               <div>
                 <strong>{branch.name}</strong>
                 <small>
