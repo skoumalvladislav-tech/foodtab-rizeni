@@ -1109,6 +1109,48 @@ select:focus-visible {
   grid-column: 1/-1;
   padding: 20px;
 }
+.textarea-wrap {
+  position: relative;
+}
+.textarea-wrap textarea {
+  width: 100%;
+  min-height: 74px;
+  border: 0;
+  background: transparent;
+  resize: vertical;
+  font-size: 13px;
+  padding-right: 40px;
+}
+.voice-btn {
+  position: absolute;
+  right: 6px;
+  bottom: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.voice-btn:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.voice-btn.recording {
+  border-color: var(--red);
+  color: var(--red);
+  animation: pulse 1s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 .compose textarea {
   width: 100%;
   min-height: 74px;

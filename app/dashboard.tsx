@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -1199,7 +1200,6 @@ function Overview({
   const branchDetails: Record<
     string,
     {
-      initials: string;
       team: string;
       target: string;
       checklist: string;
@@ -1207,26 +1207,29 @@ function Overview({
     }
   > = {
     "restaurace-cerna-perla": {
-      initials: "ČP",
       team: "7 lidí na směně",
       target: "49 000 Kč",
       checklist: "78 %",
       tasks: "1 čeká",
     },
     "bernard-bar-tabor": {
-      initials: "BB",
       team: "5 lidí na směně",
       target: "35 600 Kč",
       checklist: "66 %",
       tasks: "2 čekají",
     },
   };
+  const isCompanyView = location === "Foodtab s.r.o. · Celá firma";
   return (
     <>
       <Intro
-        eyebrow="FOODTAB S.R.O. · CENTRÁLNÍ PŘEHLED"
+        eyebrow={isCompanyView ? "FOODTAB S.R.O. · CENTRÁLNÍ PŘEHLED" : location.toUpperCase()}
         title={`Dobré ráno, ${userName}.`}
-        description="Finance, provozovny, lidé a firemní aplikace na jednom místě."
+        description={
+          isCompanyView
+            ? "Finance, provozovny, lidé a firemní aplikace na jednom místě."
+            : "Přehled provozu, personálu a plnění cílů pro vaši pobočku."
+        }
         action={
           <button className="primary" onClick={() => go("finance")}>
             <span>FI</span> Otevřít finance
@@ -1238,7 +1241,14 @@ function Overview({
           <span>
             <i /> FIRMA V PROVOZU
           </span>
-          <small>Data za srpen 2026 · aktualizováno dnes</small>
+          <small suppressHydrationWarning>
+            Data za{" "}
+            {new Date().toLocaleDateString("cs-CZ", {
+              month: "long",
+              year: "numeric",
+            })}{" "}
+            · aktualizováno dnes
+          </small>
         </header>
         <div>
           <Metric
@@ -1333,7 +1343,14 @@ function Overview({
                     go("attendance");
                   }}
                 >
-                  <span className="branch-logo">{detail.initials}</span>
+                  <span className="branch-logo">
+                    {branch.name
+                      .split(/\s+/)
+                      .map((w) => w[0])
+                      .join("")
+                      .toUpperCase()
+                      .slice(0, 2)}
+                  </span>
                   <div>
                     <strong>{branch.name}</strong>
                     <small>Otevřeno · {detail.team}</small>
@@ -2514,6 +2531,36 @@ function Communication({
   const [audienceType, setAudienceType] = useState<AudienceType>("company");
   const [recipient, setRecipient] = useState("");
   const [channel, setChannel] = useState("all");
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  function toggleVoice() {
+    const SR =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    const rec = new SR();
+    rec.lang = "cs-CZ";
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (e: any) => {
+      const text = Array.from(e.results as any[])
+        .map((r: any) => r[0].transcript)
+        .join(" ");
+      setPost((post ? post + " " : "") + text);
+    };
+    rec.onend = () => setIsRecording(false);
+    rec.onerror = () => setIsRecording(false);
+    recognitionRef.current = rec;
+    rec.start();
+    setIsRecording(true);
+  }
+
   const filteredPosts = posts.filter(
     (item) =>
       channel === "all" ||
@@ -2525,7 +2572,7 @@ function Communication({
     setAudienceType(next);
     setRecipient(
       next === "branch"
-        ? branches[0]?.id || ""
+        ? allBranches[0]?.id || ""
         : next === "person"
           ? employees[0]?.email || ""
           : "",
@@ -2593,12 +2640,22 @@ function Communication({
                 </label>
               )}
             </div>
-            <textarea
-              value={post}
-              required
-              onChange={(event) => setPost(event.target.value)}
-              placeholder="Napište oznámení nebo přímý vzkaz…"
-            />
+            <div className="textarea-wrap">
+              <textarea
+                value={post}
+                required
+                onChange={(event) => setPost(event.target.value)}
+                placeholder="Napište oznámení nebo přímý vzkaz…"
+              />
+              <button
+                type="button"
+                className={`voice-btn${isRecording ? " recording" : ""}`}
+                onClick={toggleVoice}
+                title={isRecording ? "Zastavit nahrávání" : "Namluvit zprávu"}
+              >
+                {isRecording ? "◉" : "◎"}
+              </button>
+            </div>
             <footer>
               <span>
                 Adresát:{" "}
