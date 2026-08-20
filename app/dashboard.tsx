@@ -504,6 +504,13 @@ export default function Dashboard({
     () => branches.find((b) => b.name === location)?.id ?? null,
     [branches, location],
   );
+  useEffect(() => {
+    if (locationBranchId) {
+      document.documentElement.dataset.branch = locationBranchId;
+    } else {
+      delete document.documentElement.dataset.branch;
+    }
+  }, [locationBranchId]);
   const [now, setNow] = useState(new Date());
   const [clockedIn, setClockedIn] = useState(false);
   const [tasks, setTasks] = useState(initialTasks);

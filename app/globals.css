@@ -13,6 +13,51 @@
   --red: #dc2626;
   --copper: #f59e0b;
   --shadow: 0 4px 20px rgba(79, 70, 229, 0.08);
+  /* sidebar & topbar tokens */
+  --sidebar-bg: #1e1b4b;
+  --sidebar-active: #4f46e5;
+  --sidebar-text: #efedec;
+  --sidebar-muted: #9c9895;
+  --topbar-bg: rgba(248, 250, 252, 0.92);
+  --pulse-dot: #818cf8;
+  --pulse-ring: #e2e8f0;
+}
+
+/* ── Bernard Bar Tábor — tmavé téma ─────────────────── */
+[data-branch="bernard-bar-tabor"] {
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --green: #d97706;
+  --green2: #b45309;
+  --mint: rgba(217, 119, 6, 0.14);
+  --gold: #f59e0b;
+  --paper: #0d1117;
+  --card: #161b27;
+  --line: #262d3f;
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  --sidebar-bg: #070a12;
+  --sidebar-active: #d97706;
+  --sidebar-text: #e2e8f0;
+  --sidebar-muted: #475569;
+  --topbar-bg: rgba(13, 17, 23, 0.94);
+  --pulse-dot: #d97706;
+  --pulse-ring: #161b27;
+}
+
+/* ── Restaurace Černá Perla — světlé elegantní téma ─── */
+[data-branch="restaurace-cerna-perla"] {
+  --green: #7c3aed;
+  --green2: #6d28d9;
+  --mint: #f5f3ff;
+  --paper: #fafbff;
+  --card: #ffffff;
+  --line: #e5e0f5;
+  --shadow: 0 4px 20px rgba(124, 58, 237, 0.08);
+  --sidebar-bg: #1e1b4b;
+  --sidebar-active: #7c3aed;
+  --topbar-bg: rgba(250, 251, 255, 0.93);
+  --pulse-dot: #a78bfa;
+  --pulse-ring: #ede9fe;
 }
 
 * {
@@ -20,11 +65,13 @@
 }
 html {
   background: var(--paper);
+  transition: background-color 0.35s ease;
 }
 body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
+  transition: background-color 0.35s ease, color 0.35s ease;
   font-family:
     Inter,
     ui-sans-serif,
@@ -262,10 +309,11 @@ select:focus-visible {
   inset: 0 auto 0 0;
   width: 260px;
   padding: 25px 18px 18px;
-  background: #1e1b4b;
-  color: #efedec;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
   display: flex;
   flex-direction: column;
+  transition: background-color 0.35s ease;
 }
 .brand {
   display: flex;
@@ -296,7 +344,7 @@ select:focus-visible {
 .brand small {
   display: block;
   margin-top: 5px;
-  color: #9c9895;
+  color: var(--sidebar-muted);
   font-size: 8px;
   letter-spacing: 0.17em;
   text-transform: uppercase;
@@ -342,7 +390,7 @@ select:focus-visible {
   color: white;
 }
 .main-nav button.active {
-  background: #4f46e5;
+  background: var(--sidebar-active);
   color: white;
   box-shadow: inset 3px 0 var(--gold);
 }
@@ -445,11 +493,12 @@ select:focus-visible {
   height: 73px;
   padding: 0 34px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 253, 250, 0.92);
+  background: var(--topbar-bg);
   backdrop-filter: blur(16px);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  transition: background-color 0.35s ease, border-color 0.35s ease;
 }
 .location {
   display: flex;
@@ -460,16 +509,19 @@ select:focus-visible {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #818cf8;
-  box-shadow: 0 0 0 4px #f0edeb;
+  background: var(--pulse-dot);
+  box-shadow: 0 0 0 4px var(--pulse-ring);
+  transition: background-color 0.35s ease, box-shadow 0.35s ease;
 }
 .location select {
   max-width: 260px;
   border: 0;
   background: transparent;
+  color: var(--ink);
   font-size: 13px;
   font-weight: 750;
   cursor: pointer;
+  transition: color 0.35s ease;
 }
 .top-actions {
   display: flex;
@@ -709,6 +761,7 @@ select:focus-visible {
   border-radius: 14px;
   background: var(--card);
   box-shadow: var(--shadow);
+  transition: background-color 0.35s ease, border-color 0.35s ease;
 }
 .shift-card,
 .task-card,
