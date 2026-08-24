@@ -158,3 +158,88 @@ by zapsalo docházku na cizí pobočku.
 - `occurred_at` se **nezadává**, spoléhá se na `default now()`.
 - Čas se zobrazuje v zóně serveru, ne pobočky. Pro Prahu to sedí, u pobočky
   v jiné zóně by hodina neodpovídala. Provozní *den* je z databáze správně.
+
+---
+
+## 3. `/<rozsah>/ukoly` — úkoly a checklisty
+
+**Právo:** `tasks.read` na obojí; `tasks.manage` navíc na odškrtnutí úkolu.
+**Soubory:** `app/[rozsah]/ukoly/page.tsx`, `app/[rozsah]/ukoly/[beh]/page.tsx`,
+`app/[rozsah]/ukoly/akce.ts`
+
+### Dotazy — seznam
+
+**a) `public.tasks`**
+
+| Sloupec | Použití |
+|---|---|
+| `id`, `title`, `note` | zobrazení |
+| `tenant_id` | `eq` |
+| `branch_id` | `or(branch_id.eq.<pobocka>, branch_id.is.null)` — prázdné = celá firma |
+| `status` | `eq 'open'` |
+| `due_at` | řazení, zobrazení termínu |
+| `priority` | řazení; `'high'` = červený pruh |
+
+**b) `public.checklist_templates`** — `id`, `branch_id`, `name`, `department`,
+`schedule`; `eq tenant_id`, `eq active = true`, `or(branch_id.eq.<pobocka>, is.null)`.
+
+**c) `public.checklist_items`** — `id`, `template_id`; `in` podle šablon (počet položek).
+
+**d) `business_date(p_branch)`** — RPC, provozní den pobočky.
+
+**e) `public.checklist_runs`** — `id`, `template_id`, `status`;
+`eq branch_id`, `eq business_date`, `in template_id`.
+
+**f) `public.checklist_entries`** — `run_id`, `checked`; `in run_id` (postup).
+
+### Dotazy — vyplňování (`[beh]`)
+
+**g) `public.checklist_runs`** — `id`, `template_id`, `branch_id`,
+`business_date`, `status`; `eq id`.
+**h) `public.checklist_templates`** — `id`, `name`; `eq id`.
+**i) `public.checklist_items`** — `id`, `position`, `label`, `requires_value`,
+`value_type`, `value_unit`, `min_value`, `max_value`; `eq template_id`, `order position`.
+**j) `public.checklist_entries`** — `item_id`, `checked`, `value_number`,
+`value_text`; `eq run_id`.
+
+### Zápisy
+
+| Akce | Tabulka | Pole |
+|---|---|---|
+| Odškrtnutí úkolu | `tasks` **update** | `status='done'`, `done_at`, `done_by` = `employees.id` |
+| Spuštění checklistu | `checklist_runs` **upsert** | `tenant_id`, `branch_id`, `template_id`, `business_date`; `onConflict: template_id,branch_id,business_date`, `ignoreDuplicates` |
+| Zápis položky | `checklist_entries` **upsert** | `run_id`, `item_id`, `checked=true`, `value_number`, `value_text`, `employee_id`, `recorded_at`; `onConflict: run_id,item_id` |
+| Uzavření | `checklist_runs` **update** | `status='done'`, `finished_at` |
+
+Meze (`min_value`, `max_value`) a `value_type` se pro kontrolu čtou
+**z databáze** uvnitř akce, ne z formuláře — jinak by si je volající přepsal.
+
+### Vazby
+
+- `tasks.branch_id` → `branches.id`; **prázdné = firemní úroveň**
+- `tasks.done_by` → `employees.id`
+- `checklist_items.template_id` → `checklist_templates.id` (`on delete cascade`)
+- `checklist_runs.template_id` → `checklist_templates.id` (`on delete restrict`)
+- `checklist_runs.branch_id` → `branches.id`, **NOT NULL**
+- `checklist_entries.run_id` → `checklist_runs.id` (`on delete cascade`)
+- `checklist_entries.item_id` → `checklist_items.id` (`on delete restrict`)
+- Jedinečnost: `checklist_runs (template_id, branch_id, business_date)`,
+  `checklist_entries (run_id, item_id)`
+
+### Co stojí na RLS
+
+- `tasks_read`: `can_read_scoped('tasks.read')` **nebo** vlastní `employee_id`
+- `tasks_write`: `has_access('tasks.manage')` — proto tlačítko Hotovo jen s ním
+- `checklist_runs_write` a `checklist_entries_all`: `has_access('tasks.read')`,
+  tedy odškrtávat smí běžná směna, ne jen správce
+- Detail běhu se neověřuje v kódu — když běh není náš, RLS vrátí prázdno
+  a obrazovka řekne „nenalezen“. Rozdíl „není“ / „není váš“ se nerozlišuje.
+
+### Odhady a co chybí
+
+- **`value_type = 'photo'`** se vyplnit nedá — nahrávání souborů není hotové.
+  Položka se zobrazí s vysvětlením a přeskočí.
+- **Neúspěšná hodnota mimo meze** se projeví tím, že položka zůstane
+  neodškrtnutá. Chybová hláška u políčka chybí; serverová akce vrací `void`.
+- Odškrtnutý úkol z seznamu zmizí (`status = 'open'`), historie se nikde nezobrazuje.
+- `nullsFirst: false` u řazení podle `due_at` — úkoly bez termínu jdou naspod.
