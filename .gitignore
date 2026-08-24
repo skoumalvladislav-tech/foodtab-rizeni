@@ -48,3 +48,6 @@ deploy.env
 
 # Konfigurace Claude Code — nepatří do repozitáře
 .claude/
+
+# mezivýsledek inkrementální typové kontroly (tsc --noEmit)
+*.tsbuildinfo
