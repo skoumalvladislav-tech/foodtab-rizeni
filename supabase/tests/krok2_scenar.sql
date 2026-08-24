@@ -169,6 +169,31 @@ select pg_temp.check('cizí nevidí lístek',     (select count(*) from public.m
 select pg_temp.check('cizí nevidí pochvaly',   (select count(*) from public.praises) = 0);
 
 \echo ''
+\echo '== Smazání firmy ==========================================='
+-- Firma musí jít odstranit — kvůli omylem založené testovací firmě
+-- i kvůli žádosti o výmaz osobních údajů. Zakládáme druhou firmu
+-- naprázdno, ať se nedotkneme té testovací.
+set role authenticated;
+select set_config('test.user_id', '44444444-4444-4444-4444-444444444444', false);
+select app.create_tenant('Firma na smazání', '99999999') as tenant2 \gset
+reset role;
+
+select pg_temp.check('druhá firma vznikla',
+  (select count(*) from public.tenants) = 2);
+
+delete from public.tenants where id = :'tenant2';
+
+select pg_temp.check('firma se smazala i s rolemi a členstvím',
+  (select count(*) from public.tenants) = 1
+  and not exists (select 1 from public.roles where tenant_id = :'tenant2')
+  and not exists (select 1 from public.memberships where tenant_id = :'tenant2')
+  and not exists (select 1 from public.tenant_modules where tenant_id = :'tenant2')
+  and not exists (select 1 from public.audit_log where tenant_id = :'tenant2'));
+
+select pg_temp.check('testovací firma zůstala nedotčená',
+  (select count(*) from public.roles where tenant_id = :'tenant') = 7);
+
+\echo ''
 \echo '=========================================================='
 \echo ' KROK 2 — VŠECHNY KONTROLY PROŠLY'
 \echo '=========================================================='
