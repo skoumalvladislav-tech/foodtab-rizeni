@@ -476,14 +476,25 @@ export default function Dashboard({
     (permission: string) => isAdministrator || permissions.includes(permission),
     [isAdministrator, permissions],
   );
-  const apiFetch = useCallback<AuthorizedFetch>(
-    (input, init = {}) => {
-      const headers = new Headers(init.headers);
-      headers.set("authorization", `Bearer ${accessToken}`);
-      return fetch(input, { ...init, headers });
-    },
-    [accessToken],
-  );
+  // Fáze A: trasy /api/* jsou zrušené. Operations a access se podle
+  // CLAUDE.md nenahrazují vůbec, shifts a menu-pdf se přepíšou nad
+  // Supabase v dalších fázích. Do té doby nevoláme síť vůbec a vracíme
+  // odmítnutí, které si volající místa už umí přeložit do hlášky —
+  // všechna kontrolují response.ok a mají .catch. Dashboard tak ukazuje
+  // ukázková data a nic neukládá.
+  const apiFetch = useCallback<AuthorizedFetch>(() => {
+    // Token zatím nemá kam jít. Až trasy vzniknou nad Supabase, vrátí
+    // se sem hlavička Authorization.
+    void accessToken;
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          error: "Rozhraní zatím není napojené — čeká na Supabase.",
+        }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      ),
+    );
+  }, [accessToken]);
   const initialBranches =
     isAdministrator || branchId === "company"
       ? defaultBranches
