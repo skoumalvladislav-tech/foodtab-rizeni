@@ -61,23 +61,28 @@ jobs:
 
           # Návratový kód nestačí. run.sh posílá psql rourou přes grep
           # a sed, takže se chyba psql v návratovém kódu roury ztratí.
-          # Jediný spolehlivý důkaz jsou závěrečné hlášky obou scénářů.
+          # Jediný spolehlivý důkaz jsou závěrečné hlášky všech scénářů.
+          # Každý nový scénář v run.sh sem musí přibýt taky, jinak by mohl
+          # padat, aniž by si toho kdokoli všiml.
           chybi=0
 
           # Kotvíme na celý řádek. Prosté hledání "VŠECHNY KONTROLY PROŠLY"
-          # by se chytlo i na hlášku z kroku 2, která ji obsahuje jako část,
-          # a etapa 0 by mohla spadnout nepovšimnutě.
+          # by se chytlo i na hlášky z kroku 2 a 3, které ji obsahují jako
+          # část, a etapa 0 by mohla spadnout nepovšimnutě.
           grep -qE '^[[:space:]]*VŠECHNY KONTROLY PROŠLY[[:space:]]*$' vystup.txt \
             || { echo "CHYBÍ hláška: VŠECHNY KONTROLY PROŠLY (etapa 0)"; chybi=1; }
 
           grep -q 'KROK 2' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 2"; chybi=1; }
 
+          grep -q 'KROK 3' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 3"; chybi=1; }
+
           if [ "$chybi" -ne 0 ]; then
             echo "Scénáře neprošly celé."
             exit 1
           fi
-          echo "Oba scénáře doběhly."
+          echo "Všechny scénáře doběhly."
 
   nasazeni:
     name: Nasazení na Supabase
