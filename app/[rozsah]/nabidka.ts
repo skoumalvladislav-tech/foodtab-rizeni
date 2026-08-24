@@ -29,7 +29,7 @@ export type Polozka = {
 
 export const NABIDKA: Polozka[] = [
   { segment: 'moje-smeny', nazev: 'Moje směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true },
-  { segment: 'smeny', nazev: 'Rozpis směn', modul: 'provoz', pravo: 'shifts.manage', hotovo: false },
+  { segment: 'smeny', nazev: 'Rozpis směn', modul: 'provoz', pravo: 'shifts.read', hotovo: true },
   { segment: 'dochazka', nazev: 'Docházka', modul: 'provoz', pravo: 'attendance.read', hotovo: false },
   { segment: 'ukoly', nazev: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: false },
   { segment: 'komunikace', nazev: 'Komunikace', modul: 'provoz', pravo: 'communication.read', hotovo: false },
