@@ -243,3 +243,68 @@ Meze (`min_value`, `max_value`) a `value_type` se pro kontrolu čtou
   neodškrtnutá. Chybová hláška u políčka chybí; serverová akce vrací `void`.
 - Odškrtnutý úkol z seznamu zmizí (`status = 'open'`), historie se nikde nezobrazuje.
 - `nullsFirst: false` u řazení podle `due_at` — úkoly bez termínu jdou naspod.
+
+---
+
+## 4. `/<rozsah>/zpravy` — nástěnka
+
+**Právo:** `communication.read` na čtení, `communication.manage` na psaní.
+**Soubory:** `app/[rozsah]/zpravy/page.tsx`, `app/[rozsah]/zpravy/akce.ts`
+
+### Dotazy
+
+**a) `public.announcements`**
+
+| Sloupec | Použití |
+|---|---|
+| `id` | klíč, vazba na přečtení |
+| `tenant_id` | `eq` |
+| `branch_id` | `or(branch_id.eq.<pobocka>, branch_id.is.null)` — prázdné = celá firma |
+| `employee_id` | jen zobrazení štítku „osobní“; výběr řeší RLS |
+| `body` | text zprávy |
+| `pinned` | `order desc` — připnuté nahoře |
+| `author_id` | načítá se, ale jméno autora se **nedohledává** |
+| `created_at` | `order desc`, zobrazení |
+
+Limit 50 zpráv.
+
+**b) `public.announcement_reads`** — `announcement_id`;
+`eq user_id` = `auth.uid()`, `in announcement_id` podle načtených zpráv.
+
+### Zápisy
+
+| Akce | Tabulka | Pole |
+|---|---|---|
+| Přečteno | `announcement_reads` **upsert** | `announcement_id`, `user_id`; `onConflict: announcement_id,user_id`, `ignoreDuplicates` |
+| Nová zpráva | `announcements` **insert** | `tenant_id`, `branch_id` (= `scope.branchId`, tedy `null` na firemní úrovni), `body`, `pinned`, `author_id` |
+
+Úroveň nové zprávy se bere **z rozsahu v adrese**, ne z formuláře — jinak
+by šlo z pobočkové adresy poslat zprávu celé firmě.
+
+Přečtení se zapisuje **na kliknutí**, ne při vykreslení. Zápis jen proto,
+že si někdo otevřel stránku, do vykreslování nepatří.
+
+### Vazby
+
+- `announcements.branch_id` → `branches.id` (`on delete cascade`); prázdné = firemní
+- `announcements.employee_id` → `employees.id`; vyplněné = osobní zpráva
+- `announcements.author_id` → `profiles.user_id`
+- `announcement_reads.announcement_id` → `announcements.id` (`on delete cascade`)
+- `announcement_reads.user_id` → `profiles.user_id` (`on delete cascade`)
+- Primární klíč `announcement_reads (announcement_id, user_id)`
+
+### Co stojí na RLS
+
+- `announcements_read`: `can_read_scoped('communication.read')` **a zároveň**
+  (`employee_id is null` **nebo** vlastní **nebo** `communication.manage`).
+  Osobní zprávy cizích lidí tedy odfiltruje politika, ne dotaz.
+- `announcements_write`: `has_access('communication.manage', branch_id)`
+- `announcement_reads_own`: `user_id = auth.uid()` na čtení i zápis
+
+### Odhady
+
+- **Jméno autora se nezobrazuje.** `author_id` míří na `profiles.user_id`
+  a dohledání by znamenalo dotaz navíc do `profiles`; zadání ho nežádalo.
+- Nepřečtené se liší jen sytostí a tlačítkem, počítadlo nepřečtených není.
+- Zprávu nejde upravit ani smazat, jen napsat a přečíst.
+- Segment nabídky se přejmenoval z `komunikace` na `zpravy` podle zadání.

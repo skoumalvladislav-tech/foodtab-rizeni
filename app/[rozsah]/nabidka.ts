@@ -40,7 +40,7 @@ export const NABIDKA: Polozka[] = [
   { segment: 'smeny', nazev: 'Rozpis směn', modul: 'provoz', pravo: 'shifts.read', hotovo: true },
   { segment: 'dochazka', nazev: 'Docházka', modul: 'provoz', pravo: null, hotovo: true },
   { segment: 'ukoly', nazev: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true },
-  { segment: 'komunikace', nazev: 'Komunikace', modul: 'provoz', pravo: 'communication.read', hotovo: false },
+  { segment: 'zpravy', nazev: 'Nástěnka', modul: 'provoz', pravo: 'communication.read', hotovo: true },
   { segment: 'receptury', nazev: 'Receptury', modul: 'provoz', pravo: 'recipes.read', hotovo: false },
   { segment: 'listky', nazev: 'Jídelní lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false },
   { segment: 'motivace', nazev: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false },
