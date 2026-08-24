@@ -2,7 +2,16 @@ import 'server-only'
 
 import { cache } from 'react'
 
-import { getMyTenants, resolveScope, type Context, type Scope } from '@/lib/authz'
+import {
+  getMyTenants,
+  NeprihlasenError,
+  PristupOdepren,
+  requireScopedAccess,
+  resolveScope,
+  type Context,
+  type Permission,
+  type Scope,
+} from '@/lib/authz'
 
 /**
  * Která firma se právě zobrazuje.
@@ -35,5 +44,39 @@ export function bezpecnyRozsah(ctx: Context, rozsah?: string | null): Scope | nu
     return resolveScope(ctx, rozsah)
   } catch {
     return null
+  }
+}
+
+/**
+ * Výsledek vstupní kontroly stránky.
+ *
+ * Odmítnutí chodí z authz výjimkou, ale stránka z něj potřebuje hodnotu:
+ * na nepřihlášeného se odpovídá přesměrováním, a redirect() nesmí padnout
+ * uvnitř odchytávání, protože sám funguje tak, že výjimku vyhodí.
+ */
+export type Pristup =
+  | { stav: 'ok'; ctx: Context; scope: Scope }
+  | { stav: 'neprihlasen' }
+  | { stav: 'odepren' }
+
+/**
+ * Vstupní kontrola obrazovky uvnitř rozsahu.
+ *
+ * Tímhle začíná každá obrazovka. Vlastní rozhodnutí zůstává v authz
+ * a pod ním v databázi — tady se jen převádí tvar, aby si stránka mohla
+ * vybrat mezi přesměrováním a vysvětlením.
+ */
+export async function zkusPristup(
+  tenantId: string,
+  pravo: Permission,
+  rozsah?: string | null,
+): Promise<Pristup> {
+  try {
+    const { ctx, scope } = await requireScopedAccess(tenantId, pravo, rozsah)
+    return { stav: 'ok', ctx, scope }
+  } catch (duvod) {
+    if (duvod instanceof NeprihlasenError) return { stav: 'neprihlasen' }
+    if (duvod instanceof PristupOdepren) return { stav: 'odepren' }
+    throw duvod
   }
 }
