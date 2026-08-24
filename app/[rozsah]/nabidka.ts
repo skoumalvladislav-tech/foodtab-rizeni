@@ -22,7 +22,15 @@ export type Polozka = {
   segment: string
   nazev: string
   modul: ModuleKey
-  pravo: Permission
+  /**
+   * Právo, bez kterého se položka nekreslí.
+   *
+   * `null` znamená „stačí být členem firmy“. Je to pro obrazovky, které
+   * dělá každý sám za sebe — docházku si zapisuje i brigádník, který
+   * nemá právo vidět docházku ostatních. Politika attendance_insert to
+   * říká stejně: vlastní příchod si zapíše každý zaměstnanec s účtem.
+   */
+  pravo: Permission | null
   /** Hotové obrazovky se odkazují, ostatní se kreslí zašedle. */
   hotovo: boolean
 }
@@ -30,7 +38,7 @@ export type Polozka = {
 export const NABIDKA: Polozka[] = [
   { segment: 'moje-smeny', nazev: 'Moje směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true },
   { segment: 'smeny', nazev: 'Rozpis směn', modul: 'provoz', pravo: 'shifts.read', hotovo: true },
-  { segment: 'dochazka', nazev: 'Docházka', modul: 'provoz', pravo: 'attendance.read', hotovo: false },
+  { segment: 'dochazka', nazev: 'Docházka', modul: 'provoz', pravo: null, hotovo: true },
   { segment: 'ukoly', nazev: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: false },
   { segment: 'komunikace', nazev: 'Komunikace', modul: 'provoz', pravo: 'communication.read', hotovo: false },
   { segment: 'receptury', nazev: 'Receptury', modul: 'provoz', pravo: 'recipes.read', hotovo: false },
@@ -43,6 +51,8 @@ export const NABIDKA: Polozka[] = [
 
 export function viditelnaNabidka(ctx: Context): Polozka[] {
   return NABIDKA.filter(
-    (p) => isModuleActive(ctx, p.modul) && canSee(ctx, p.pravo),
+    (p) =>
+      isModuleActive(ctx, p.modul) &&
+      (p.pravo === null || canSee(ctx, p.pravo)),
   )
 }

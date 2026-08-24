@@ -80,3 +80,81 @@ Kdyby politika vracela míň, projeví se to jako prázdný rozpis, ne jako chyb
   s různým `day_starts_at` by se mohly rozejít o den na okraji okna.
   Jedna kotva je ale lepší než počítat datum v kódu.
 - `note` se zobrazuje celá. Delší poznámka rozbije řádek.
+
+---
+
+## 2. `/<rozsah>/dochazka` — příchod a odchod
+
+**Právo:** žádné jedno. Stránka je otevřená každému **členovi firmy**;
+`attendance.read` rozhoduje jen o tom, jestli uvidí i ostatní.
+**Soubory:** `app/[rozsah]/dochazka/page.tsx`, `app/[rozsah]/dochazka/akce.ts`
+
+### Dotazy
+
+**a) `public.employees`** — kdo jsem
+
+| Sloupec | Použití |
+|---|---|
+| `id` | vlastní zaměstnanec, klíč pro docházku |
+| `branch_id` | domovská pobočka, když rozsah je firemní |
+| `full_name` | zobrazení |
+| `tenant_id` | `eq` |
+| `user_id` | `eq` = `auth.uid()` |
+| `deleted_at` | `is null` |
+
+**b) `business_date(p_branch)`** — RPC, provozní den pobočky.
+Pobočka = `scope.branchId`, jinak `employees.branch_id`.
+
+**c) `public.attendance_events`** — moje poslední událost
+
+| Sloupec | Použití |
+|---|---|
+| `id`, `employee_id`, `branch_id` | |
+| `kind` | `'in'`/`'break_end'` = v práci, jinak mimo |
+| `occurred_at` | `order desc`, `limit 1` |
+
+**d) `public.attendance_events`** — dnešní stav
+
+| Sloupec | Použití |
+|---|---|
+| `tenant_id` | `eq` |
+| `business_date` | `eq` provozní den z RPC |
+| `branch_id` | `eq` při pobočkovém rozsahu |
+| `employee_id` | `eq` vlastní, když chybí `attendance.read` |
+| `occurred_at` | `order asc`; poslední záznam člověka = jeho stav |
+
+**e) `public.employees`** — `id`, `full_name` pro cizí `employee_id`.
+
+### Zápis
+
+`insert into public.attendance_events` s poli
+`tenant_id`, `branch_id`, `employee_id`, `kind` (`'in'`/`'out'`), `source: 'app'`.
+
+`business_date` se **nedoplňuje** — má ho na starost trigger
+`trg_attendance_business_date` (`before insert`, `app.set_business_date()`).
+
+Z formuláře jde jen `rozsah` a `druh`. Firma, pobočka i zaměstnanec se
+dohledávají znovu na serveru: politika `attendance_insert` hlídá
+`employee_id`, ale **pobočku ne**, takže podvržené `branch_id` z prohlížeče
+by zapsalo docházku na cizí pobočku.
+
+### Vazby
+
+- `attendance_events.employee_id` → `employees.id` (`on delete restrict`)
+- `attendance_events.branch_id` → `branches.id`, **NOT NULL**
+- `employees.user_id` → `profiles.user_id`
+
+### Co stojí na RLS
+
+- `attendance_read`: `can_read_scoped('attendance.read')` **nebo** vlastní
+  `employee_id`. Bez oprávnění tedy vrátí jen vlastní řádky i bez filtru.
+- `attendance_insert`: `has_access('attendance.manage')` **nebo**
+  `source = 'app'` a vlastní `employee_id`.
+
+### Odhady
+
+- **Pauzy** (`break_start`/`break_end`) se zapisovat nedají, jen se čtou.
+  Zadání mluvilo o příchodu a odchodu.
+- `occurred_at` se **nezadává**, spoléhá se na `default now()`.
+- Čas se zobrazuje v zóně serveru, ne pobočky. Pro Prahu to sedí, u pobočky
+  v jiné zóně by hodina neodpovídala. Provozní *den* je z databáze správně.
