@@ -50,9 +50,14 @@ $$;
 
 drop rule if exists audit_log_no_delete on public.audit_log;
 
+-- Mazání blokujeme, když firma pořád existuje — a taky u systémových
+-- záznamů, které k žádné firmě nepatří (tenant_id je prázdné). Ty by
+-- jinak propadly, protože poddotaz na neexistující firmu nic nenajde.
+-- Projde tedy jediný případ: řádek patřil firmě, která už zanikla.
 create rule audit_log_no_delete as
   on delete to public.audit_log
-  where exists (select 1 from public.tenants t where t.id = old.tenant_id)
+  where old.tenant_id is null
+     or exists (select 1 from public.tenants t where t.id = old.tenant_id)
   do instead nothing;
 
 comment on table public.audit_log is

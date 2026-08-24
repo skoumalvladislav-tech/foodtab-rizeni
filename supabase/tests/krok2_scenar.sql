@@ -193,6 +193,18 @@ select pg_temp.check('firma se smazala i s rolemi a členstvím',
 select pg_temp.check('testovací firma zůstala nedotčená',
   (select count(*) from public.roles where tenant_id = :'tenant') = 7);
 
+reset role;
+select set_config('test.user_id', '', false);
+select app.audit(null, 'system.test');
+select pg_temp.check('systémový záznam bez firmy vznikl',
+  exists (select 1 from public.audit_log
+          where tenant_id is null and action = 'system.test'));
+
+delete from public.audit_log where action = 'system.test';
+select pg_temp.check('systémový záznam bez firmy nejde smazat',
+  exists (select 1 from public.audit_log
+          where tenant_id is null and action = 'system.test'));
+
 \echo ''
 \echo '=========================================================='
 \echo ' KROK 2 — VŠECHNY KONTROLY PROŠLY'
