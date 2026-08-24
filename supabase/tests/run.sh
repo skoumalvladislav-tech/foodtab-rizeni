@@ -23,7 +23,7 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
 done
 
 echo
-for t in etapa0_scenar krok2_scenar; do
+for t in etapa0_scenar krok2_scenar krok3_scenar; do
   $PSQL -d "$DB" -f "$ROOT/supabase/tests/$t.sql" 2>&1 \
     | grep -E '^(==|psql.*(OK |SELHALO))| VŠECHNY| KROK' \
     | sed 's/^psql[^ ]* NOTICE: //'

@@ -14,6 +14,7 @@ zmizí.
 | `20260823120200_authz.sql` | Autorizační funkce a Row Level Security |
 | `20260823120300_tenant_setup.sql` | Založení firmy, vytváření a přijímání pozvánek |
 | `20260823130000_provoz.sql` | Směny, docházka, úkoly, checklisty, komunikace, receptury, lístky, motivace |
+| `20260824190000_fix_tenant_delete.sql` | Oprava: firma nešla smazat — trigger na základní modul blokoval kaskádu |
 
 Starší migrace (`20260818`–`20260820`) patří k rušenému modelu. Nechávají se
 v repu kvůli historii; `drop_legacy` je bezpečně uklidí i tam, kde už byly
@@ -125,13 +126,19 @@ a nikdo měsíce nepřijde na proč. U docházky se doplňuje sama triggerem.
 supabase/tests/run.sh
 ```
 
-Postaví čistou databázi, pustí všechny migrace a projde dva scénáře —
-celkem **55 kontrol**:
+Postaví čistou databázi, pustí všechny migrace a projde dva scénáře.
+Přesný počet kontrol schválně neuvádíme — s každou migrací se mění
+a zastaralé číslo v dokumentaci mate víc, než pomáhá. Aktuální stav
+vypíše samotný běh.
 
-- `etapa0_scenar.sql` (34) — založení firmy, pobočky, pozvánky e-mailem
-  i SMS, rozsah vedoucího, cizí uživatel, neměnnost auditu
-- `krok2_scenar.sql` (21) — provozní den, směny včetně brigádníka bez účtu,
+- `etapa0_scenar.sql` — založení firmy, pobočky, pozvánky e-mailem i SMS,
+  rozsah vedoucího, cizí uživatel, neměnnost auditu, smazání firmy
+- `krok2_scenar.sql` — provozní den, směny včetně brigádníka bez účtu,
   docházka, checklist s hodnotou, komunikace napříč úrovněmi, ceny, body
+
+Totéž běží při každé změně v `supabase/` na GitHubu
+(`.github/workflows/databaze.yml`), takže není potřeba mít lokálně
+PostgreSQL ani Docker.
 
 Soubor `00_harness.sql` napodobuje `auth.users` a `auth.uid()` pro lokální
 běh. V Supabase je dodává platforma a **tenhle soubor se tam nikdy nepouští**
