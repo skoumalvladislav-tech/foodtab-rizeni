@@ -4,16 +4,19 @@ import { NextResponse, type NextRequest } from 'next/server'
 /**
  * Obnova přihlašovací cookie při každém požadavku.
  *
+ * Soubor se jmenuje proxy.ts, ne middleware.ts: Next 16 starý název
+ * označil za zastaralý a vyžaduje vyvezenou funkci `proxy`.
+ *
  * Přístupový token od Supabase má krátkou platnost. Obnovuje se
  * obnovovacím tokenem v cookie — a protože Server Component cookie
- * zapisovat nesmí, musí to udělat middleware, který běží dřív.
+ * zapisovat nesmí, musí to udělat proxy, která běží dřív.
  * Bez něj by uživatele po vypršení tokenu vyhodilo z přihlášení.
  *
- * Middleware o přístupu NErozhoduje. Cookie umí kdokoli podvrhnout,
+ * Proxy o přístupu NErozhoduje. Cookie umí kdokoli podvrhnout,
  * takže jediné, co tady děláme, je obnova sezení. Kdo kam smí, řeší
  * lib/authz.ts proti databázi a Row Level Security nad ní.
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -41,7 +44,7 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  // Tenhle dotaz je celý smysl middlewaru: ověří token u Supabase
+  // Tenhle dotaz je celý smysl proxy: ověří token u Supabase
   // a když je po platnosti, obnoví ho a novou cookie přibalí k odpovědi.
   await supabase.auth.getUser()
 

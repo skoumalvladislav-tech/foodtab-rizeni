@@ -1,3 +1,15 @@
+/**
+ * PŘEDLOHA — nikam se nenapojuje.
+ *
+ * Pozůstatek původního rozhraní. Slouží už jen jako vzor, ze kterého
+ * se opisují jednotlivé obrazovky. Nic ho neimportuje a v aplikaci se
+ * nevykresluje.
+ *
+ * Data v něm jsou ukázková a apiFetch níž nevolá síť — trasy, na které
+ * odkazoval, jsou zrušené. Nepřidávejte sem nic nového. Nové obrazovky
+ * vznikají v app/<rozsah>/ nad daty z lib/supabase/server.ts, aby na ně
+ * platila Row Level Security.
+ */
 "use client";
 
 import {
