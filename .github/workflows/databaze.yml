@@ -1,12 +1,18 @@
 name: Databáze
 
 # Testy hlídají každou změnu ve schématu, nasazení jede jen z main.
+# Mezi cestami je i tenhle soubor, jinak by se úprava workflow sama
+# neověřila a chyba v něm by se ukázala až u příští změny schématu.
 on:
   push:
     branches: [main, etapa0-zaklad]
-    paths: ['supabase/**']
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/databaze.yml'
   pull_request:
-    paths: ['supabase/**']
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/databaze.yml'
 
 # Dvě nasazení naráz by si šla po krku nad jednou databází.
 concurrency:
@@ -41,7 +47,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client
 
-      - name: Devět migrací a 55 kontrol
+      - name: Migrace a scénáře proti PostgreSQL
         env:
           PGHOST: localhost
           PGPORT: '5432'
