@@ -37,10 +37,13 @@ type Zaznam = {
 
 export default async function VyplnitChecklist({
   params,
+  searchParams,
 }: {
   params: Promise<{ rozsah: string; beh: string }>;
+  searchParams: Promise<{ polozka?: string; chyba?: string }>;
 }) {
   const { rozsah, beh } = await params;
+  const { polozka: chybnaPolozka, chyba } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -255,6 +258,19 @@ export default async function VyplnitChecklist({
                     </button>
                   </form>
                 )}
+
+                {chybnaPolozka === p.id && chyba ? (
+                  <p
+                    role="alert"
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "13px",
+                      color: "var(--red)",
+                    }}
+                  >
+                    {popisChyby(chyba, p)}
+                  </p>
+                ) : null}
               </li>
             );
           })}
@@ -284,6 +300,27 @@ export default async function VyplnitChecklist({
       ) : null}
     </main>
   );
+}
+
+/**
+ * Hláška z ?chyba= u dotčené položky.
+ *
+ * Meze se skládají z položky samotné, ne z adresy — v adrese je jen
+ * důvod, takže se do hlášky nedá podstrčit cizí text.
+ */
+function popisChyby(kod: string, p: Polozka): string {
+  switch (kod) {
+    case "meze":
+      return `Hodnota je mimo povolený rozsah: ${mezeText(p)}.`;
+    case "cislo":
+      return "Zapište prosím číslo.";
+    case "prazdna":
+      return "Tahle položka chce hodnotu.";
+    case "foto":
+      return "Položka chce fotku. Nahrávání souborů zatím není hotové.";
+    default:
+      return "Hodnotu se nepodařilo zapsat.";
+  }
 }
 
 function mezeText(p: Polozka): string {

@@ -104,6 +104,25 @@ export default async function Zpravy({
     for (const c of cteni ?? []) prectene.add(c.announcement_id as string);
   }
 
+  // Jména autorů. Politika profiles_select_colleagues pouští profily lidí
+  // ze stejné firmy, takže dotaz projde; kdo se nenajde, zůstane bez jména.
+  const autori = new Map<string, string>();
+  const idAutoru = [
+    ...new Set(
+      zpravy.map((z) => z.author_id).filter((i): i is string => Boolean(i)),
+    ),
+  ];
+  if (idAutoru.length > 0) {
+    const { data: profily } = await supabase
+      .from("profiles")
+      .select("user_id, full_name")
+      .in("user_id", idAutoru);
+    for (const p of profily ?? []) {
+      const jmeno = String(p.full_name ?? "").trim();
+      if (jmeno !== "") autori.set(p.user_id as string, jmeno);
+    }
+  }
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
@@ -233,6 +252,7 @@ export default async function Zpravy({
                 >
                   {[
                     z.pinned ? "Připnuto" : null,
+                    z.author_id ? autori.get(z.author_id) : null,
                     firemni
                       ? "celá firma"
                       : scope.level === "tenant"

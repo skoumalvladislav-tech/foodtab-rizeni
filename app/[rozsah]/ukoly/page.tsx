@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { provozniDen } from "@/lib/provozni-den";
 import { getServerSupabase } from "@/lib/supabase/server";
@@ -41,10 +40,13 @@ type Sablona = {
 
 export default async function Ukoly({
   params,
+  searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
+  searchParams: Promise<{ ukol?: string; chyba?: string }>;
 }) {
   const { rozsah } = await params;
+  const { ukol: chybnyUkol, chyba } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -69,7 +71,6 @@ export default async function Ukoly({
   }
 
   const { ctx, scope } = pristup;
-  const muzeSpravovat = await hasAccess(tenantId, "tasks.manage", scope.branchId);
 
   /* --- 2. NAČTENÍ DAT ------------------------------------------- */
 
@@ -224,14 +225,31 @@ export default async function Ukoly({
                   .join(" · ")}
               </p>
 
-              {muzeSpravovat ? (
-                <form action={dokoncitUkol} style={{ marginTop: "10px" }}>
-                  <input type="hidden" name="rozsah" value={rozsah} />
-                  <input type="hidden" name="ukol" value={u.id} />
-                  <button type="submit" style={tlacitkoMale}>
-                    Hotovo
-                  </button>
-                </form>
+              {/*
+                Tlačítko se ukáže každému, kdo úkol vidí. O tom, jestli
+                ho smí zavřít, rozhoduje public.complete_task() — vedoucí,
+                adresát i jeho role. Ptát se dopředu přes canSee by
+                znamenalo mít pravidlo na dvou místech.
+              */}
+              <form action={dokoncitUkol} style={{ marginTop: "10px" }}>
+                <input type="hidden" name="rozsah" value={rozsah} />
+                <input type="hidden" name="ukol" value={u.id} />
+                <button type="submit" style={tlacitkoMale}>
+                  Hotovo
+                </button>
+              </form>
+
+              {chybnyUkol === u.id && chyba ? (
+                <p
+                  role="alert"
+                  style={{
+                    margin: "8px 0 0",
+                    fontSize: "13px",
+                    color: "var(--red)",
+                  }}
+                >
+                  {popisChyby(chyba)}
+                </p>
               ) : null}
             </li>
           ))}
@@ -343,6 +361,18 @@ const tlacitkoMale = {
   cursor: "pointer",
   textDecoration: "none",
 } as const;
+
+/** Hlášky z ?chyba= po neúspěšném zavření úkolu. */
+function popisChyby(kod: string): string {
+  switch (kod) {
+    case "cizi":
+      return "Tenhle úkol není váš.";
+    case "chybi":
+      return "Úkol už neexistuje.";
+    default:
+      return "Úkol se nepodařilo zavřít. Zkuste to prosím znovu.";
+  }
+}
 
 function denAcas(iso: string): string {
   const d = new Date(iso);

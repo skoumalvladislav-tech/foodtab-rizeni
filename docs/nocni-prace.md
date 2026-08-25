@@ -163,7 +163,9 @@ by zapsalo docházku na cizí pobočku.
 
 ## 3. `/<rozsah>/ukoly` — úkoly a checklisty
 
-**Právo:** `tasks.read` na obojí; `tasks.manage` navíc na odškrtnutí úkolu.
+**Právo:** `tasks.read` na zobrazení. Odškrtnutí úkolu se dopředu neptá —
+posoudí ho `complete_task()` v databázi (vedoucí, jmenovitý adresát, jeho
+role, nebo úkol bez adresáta).
 **Soubory:** `app/[rozsah]/ukoly/page.tsx`, `app/[rozsah]/ukoly/[beh]/page.tsx`,
 `app/[rozsah]/ukoly/akce.ts`
 
@@ -206,7 +208,7 @@ by zapsalo docházku na cizí pobočku.
 
 | Akce | Tabulka | Pole |
 |---|---|---|
-| Odškrtnutí úkolu | `tasks` **update** | `status='done'`, `done_at`, `done_by` = `employees.id` |
+| Odškrtnutí úkolu | **RPC** `public.complete_task(p_task)` | mění `status`, `done_at`, `done_by` uvnitř funkce |
 | Spuštění checklistu | `checklist_runs` **upsert** | `tenant_id`, `branch_id`, `template_id`, `business_date`; `onConflict: template_id,branch_id,business_date`, `ignoreDuplicates` |
 | Zápis položky | `checklist_entries` **upsert** | `run_id`, `item_id`, `checked=true`, `value_number`, `value_text`, `employee_id`, `recorded_at`; `onConflict: run_id,item_id` |
 | Uzavření | `checklist_runs` **update** | `status='done'`, `finished_at` |
@@ -229,7 +231,11 @@ Meze (`min_value`, `max_value`) a `value_type` se pro kontrolu čtou
 ### Co stojí na RLS
 
 - `tasks_read`: `can_read_scoped('tasks.read')` **nebo** vlastní `employee_id`
-- `tasks_write`: `has_access('tasks.manage')` — proto tlačítko Hotovo jen s ním
+- `tasks_write`: `has_access('tasks.manage')` — proto se úkol **nezavírá
+  updatem**, ale funkcí `complete_task()`, která mění jen tři sloupce
+  a povolení posuzuje sama (vedoucí, jmenovitý adresát, jeho role, nebo
+  úkol bez adresáta). Tlačítko Hotovo se proto ukazuje každému, kdo úkol
+  vidí, a odmítnutí přichází z databáze jako `insufficient_privilege`.
 - `checklist_runs_write` a `checklist_entries_all`: `has_access('tasks.read')`,
   tedy odškrtávat smí běžná směna, ne jen správce
 - Detail běhu se neověřuje v kódu — když běh není náš, RLS vrátí prázdno
@@ -239,8 +245,9 @@ Meze (`min_value`, `max_value`) a `value_type` se pro kontrolu čtou
 
 - **`value_type = 'photo'`** se vyplnit nedá — nahrávání souborů není hotové.
   Položka se zobrazí s vysvětlením a přeskočí.
-- **Neúspěšná hodnota mimo meze** se projeví tím, že položka zůstane
-  neodškrtnutá. Chybová hláška u políčka chybí; serverová akce vrací `void`.
+- **Neúspěšná hodnota** vrátí akci zpět na stránku s `?polozka=` a `?chyba=`
+  a hláška se vykreslí u dotčené položky. Serverově, bez stavu v prohlížeči.
+  V adrese je jen důvod, text hlášky se skládá z položky samotné.
 - Odškrtnutý úkol z seznamu zmizí (`status = 'open'`), historie se nikde nezobrazuje.
 - `nullsFirst: false` u řazení podle `due_at` — úkoly bez termínu jdou naspod.
 
@@ -270,6 +277,11 @@ Limit 50 zpráv.
 
 **b) `public.announcement_reads`** — `announcement_id`;
 `eq user_id` = `auth.uid()`, `in announcement_id` podle načtených zpráv.
+
+**c) `public.profiles`** — `user_id`, `full_name`; `in user_id` podle
+`author_id` ze zpráv. Politika `profiles_select_colleagues` pouští profily
+lidí ze stejné firmy. Kdo se nenajde nebo má prázdné jméno, zůstane bez
+podpisu — zpráva se kreslí dál.
 
 ### Zápisy
 
@@ -303,8 +315,7 @@ Přečtení se zapisuje **na kliknutí**, ne při vykreslení. Zápis jen proto,
 
 ### Odhady
 
-- **Jméno autora se nezobrazuje.** `author_id` míří na `profiles.user_id`
-  a dohledání by znamenalo dotaz navíc do `profiles`; zadání ho nežádalo.
+- **Jméno autora** se dohledává dotazem do `profiles` podle `author_id`.
 - Nepřečtené se liší jen sytostí a tlačítkem, počítadlo nepřečtených není.
 - Zprávu nejde upravit ani smazat, jen napsat a přečíst.
 - Segment nabídky se přejmenoval z `komunikace` na `zpravy` podle zadání.
@@ -324,6 +335,7 @@ dotazy v aplikaci.
 | `my_context(p_tenant)` | `lib/authz.ts` |
 | `has_access(p_tenant, p_permission, p_branch)` | `lib/authz.ts` |
 | `business_date(p_branch, p_at)` | `lib/provozni-den.ts` |
+| `complete_task(p_task)` | `app/[rozsah]/ukoly/akce.ts` |
 
 ### Tabulky a sloupce
 
@@ -340,6 +352,7 @@ dotazy v aplikaci.
 | `checklist_entries` | `run_id`, `item_id`, `checked`, `value_number`, `value_text`, `employee_id`, `recorded_at` |
 | `announcements` | `id`, `tenant_id`, `branch_id`, `employee_id`, `body`, `pinned`, `author_id`, `created_at` |
 | `announcement_reads` | `announcement_id`, `user_id` |
+| `profiles` | `user_id`, `full_name` (jméno autora zprávy) |
 
 `branches` a `tenants` se **nedotazují přímo** — názvy poboček chodí
 z `my_context()`, provozní den z `business_date()`.
@@ -349,7 +362,7 @@ z `my_context()`, provozní den z `business_date()`.
 | Tabulka | Operace |
 |---|---|
 | `attendance_events` | insert |
-| `tasks` | update (`status`, `done_at`, `done_by`) |
+| `tasks` | **ne přímo** — přes RPC `complete_task()` |
 | `checklist_runs` | upsert, update |
 | `checklist_entries` | upsert |
 | `announcements` | insert |

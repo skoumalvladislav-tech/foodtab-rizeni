@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 
 import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
@@ -55,7 +56,14 @@ async function zaklad(rozsah: string): Promise<Zaklad | null> {
   }
 }
 
-/** Odškrtnutí úkolu. Politika tasks_write vyžaduje tasks.manage. */
+/**
+ * Odškrtnutí úkolu.
+ *
+ * Jde přes public.complete_task(), ne přes update. Politika tasks_write
+ * žádá tasks.manage na jakoukoli změnu úkolu, takže adresát by si vlastní
+ * úkol zavřít nemohl. Funkce mění jen status, done_at a done_by a sama
+ * rozhodne, kdo na to má — aplikace se neptá dopředu, jen ukáže výsledek.
+ */
 export async function dokoncitUkol(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const ukolId = String(formData.get('ukol') ?? '')
@@ -65,15 +73,19 @@ export async function dokoncitUkol(formData: FormData): Promise<void> {
   if (!z) return
 
   const supabase = await getServerSupabase()
-  await supabase
-    .from('tasks')
-    .update({
-      status: 'done',
-      done_at: new Date().toISOString(),
-      done_by: z.employeeId,
-    })
-    .eq('id', ukolId)
-    .eq('tenant_id', z.tenantId)
+  const { error } = await supabase.rpc('complete_task', { p_task: ukolId })
+
+  if (error) {
+    // 42501 = insufficient_privilege, P0002 = no_data_found. Obojí funkce
+    // vyhazuje schválně; kód je spolehlivější než text hlášky.
+    const duvod =
+      error.code === '42501'
+        ? 'cizi'
+        : error.code === 'P0002'
+          ? 'chybi'
+          : 'nepovedlo'
+    redirect(`/${rozsah}/ukoly?ukol=${ukolId}&chyba=${duvod}`)
+  }
 
   revalidatePath(`/${rozsah}/ukoly`)
 }
@@ -114,8 +126,9 @@ export async function spustitChecklist(formData: FormData): Promise<void> {
  * Zápis jedné položky checklistu.
  *
  * Meze a typ hodnoty se čtou z databáze, ne z formuláře — jinak by si je
- * volající mohl přepsat. Když hodnota neprojde, zápis se neudělá; hláška
- * se pozná podle toho, že položka zůstane neodškrtnutá.
+ * volající mohl přepsat. Když hodnota neprojde, vracíme se zpět na
+ * stránku s ?polozka= a ?chyba=, aby se hláška dala vykreslit přímo
+ * u dotčené položky. Serverově, bez stavu na straně prohlížeče.
  */
 export async function zapsatPolozku(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
@@ -149,21 +162,36 @@ export async function zapsatPolozku(formData: FormData): Promise<void> {
   let valueNumber: number | null = null
   let valueText: string | null = null
 
-  if (polozka.requires_value) {
-    if (hodnotaRaw === '') return
+  // Důvod odmítnutí, se kterým se vrátíme zpět na stránku. Vlastní
+  // přesměrování je až za tímhle blokem: redirect() vyhazuje výjimku
+  // a uvnitř větvení by se hůř četlo, co se kdy stane.
+  let chyba: string | null = null
 
-    if (polozka.value_type === 'number') {
+  if (polozka.requires_value) {
+    if (hodnotaRaw === '') {
+      chyba = 'prazdna'
+    } else if (polozka.value_type === 'number') {
       const cislo = Number(hodnotaRaw.replace(',', '.'))
-      if (!Number.isFinite(cislo)) return
-      if (polozka.min_value !== null && cislo < polozka.min_value) return
-      if (polozka.max_value !== null && cislo > polozka.max_value) return
-      valueNumber = cislo
+      if (!Number.isFinite(cislo)) {
+        chyba = 'cislo'
+      } else if (
+        (polozka.min_value !== null && cislo < polozka.min_value) ||
+        (polozka.max_value !== null && cislo > polozka.max_value)
+      ) {
+        chyba = 'meze'
+      } else {
+        valueNumber = cislo
+      }
     } else if (polozka.value_type === 'text') {
       valueText = hodnotaRaw
     } else {
-      // 'photo' zatím neumíme nahrávat, takže položku nezapisujeme.
-      return
+      // 'photo' zatím neumíme nahrávat.
+      chyba = 'foto'
     }
+  }
+
+  if (chyba) {
+    redirect(`/${rozsah}/ukoly/${runId}?polozka=${itemId}&chyba=${chyba}`)
   }
 
   await supabase.from('checklist_entries').upsert(
