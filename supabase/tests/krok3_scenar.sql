@@ -126,10 +126,23 @@ update public.tenant_modules set status = 'active'
 where tenant_id = :'tenant' and module_key = 'finance';
 
 \echo ''
+\echo '== Provozní den z aplikace ================================'
+-- Obrazovka se nesmí ptát kalendáře serveru. Hodina začátku dne i časové
+-- pásmo patří pobočce, ne tomu, kde zrovna běží aplikace.
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+select pg_temp.check('účet ve 2:15 patří do včerejší uzávěrky i přes průzor',
+  public.business_date(:'perla', '2026-08-24 02:15+02'::timestamptz) = date '2026-08-23');
+select pg_temp.check('průzor vrací totéž co app.business_date',
+  public.business_date(:'bar', '2026-08-24 10:00+02'::timestamptz)
+    = app.business_date(:'bar', '2026-08-24 10:00+02'::timestamptz));
+
+\echo ''
 \echo '== Cizí uživatel =========================================='
 set role authenticated;
 select set_config('test.user_id', '33333333-3333-3333-3333-333333333333', false);
 
+select pg_temp.check('cizí se nedozví ani provozní den pobočky',
+  public.business_date(:'perla', now()) is null);
 select pg_temp.check('cizí nemá přístup nikam',
   public.has_access(:'tenant', 'shifts.read', :'perla') = false
   and public.has_access(:'tenant', 'shifts.read', null) = false);
@@ -137,6 +150,95 @@ select pg_temp.check('cizí nedostane kontext firmy',
   public.my_context(:'tenant') is null);
 select pg_temp.check('cizí nemá žádnou firmu',
   (select count(*) from public.my_tenants()) = 0);
+
+\echo ''
+\echo '== Odškrtnutí úkolu adresátem ============================='
+-- Kuchař ani číšník nemají tasks.manage. Přesto si musí odškrtnout úkol,
+-- který je zadaný jim — jinak by u nich musel stát vedoucí a klikat za ně.
+reset role;
+
+select id as jana from public.employees where full_name = 'Jana Kuchařka' \gset
+
+insert into auth.users (id, email, raw_user_meta_data)
+values ('55555555-5555-5555-5555-555555555555', 'cisnik@foodtab.cz',
+        '{"full_name":"Marek Číšník"}');
+
+insert into public.memberships (tenant_id, user_id, role_id, scope)
+select :'tenant', '55555555-5555-5555-5555-555555555555', r.id, 'branch'
+from public.roles r where r.tenant_id = :'tenant' and r.key = 'servis'
+returning id as clenstvi \gset
+
+insert into public.membership_branches (membership_id, branch_id)
+values (:'clenstvi', :'perla');
+
+insert into public.employees (tenant_id, branch_id, user_id, full_name)
+values (:'tenant', :'perla', '55555555-5555-5555-5555-555555555555', 'Marek Číšník')
+returning id as marek \gset
+
+insert into public.tasks (tenant_id, branch_id, employee_id, title)
+values (:'tenant', :'perla', :'marek', 'Doplnit ubrousky')
+returning id as ukol_marka \gset
+
+insert into public.tasks (tenant_id, branch_id, employee_id, title)
+values (:'tenant', :'perla', :'jana', 'Objednat maso')
+returning id as ukol_cizi \gset
+
+insert into public.tasks (tenant_id, branch_id, title)
+values (:'tenant', :'perla', 'Vynést sklo')
+returning id as ukol_nicii \gset
+
+select set_config('test.ukol_cizi',  :'ukol_cizi',  false);
+select set_config('test.ukol_marka', :'ukol_marka', false);
+
+set role authenticated;
+select set_config('test.user_id', '55555555-5555-5555-5555-555555555555', false);
+
+select pg_temp.check('číšník nemá tasks.manage',
+  public.has_access(:'tenant', 'tasks.manage', :'perla') = false);
+select pg_temp.check('číšník na svůj úkol vidí',
+  exists (select 1 from public.tasks where id = :'ukol_marka'));
+
+-- Politika zůstává přísná: přímý zápis do tabulky neprojde ani teď.
+update public.tasks set title = 'Přepsáno' where id = :'ukol_marka';
+select pg_temp.check('přímá změna úkolu číšníkovi neprojde',
+  (select title from public.tasks where id = :'ukol_marka') = 'Doplnit ubrousky');
+
+select public.complete_task(:'ukol_marka');
+select pg_temp.check('svůj úkol si číšník odškrtne',
+  (select status from public.tasks where id = :'ukol_marka') = 'done'
+  and (select done_by from public.tasks where id = :'ukol_marka') = :'marek'
+  and (select done_at from public.tasks where id = :'ukol_marka') is not null);
+
+select public.complete_task(:'ukol_marka');
+select pg_temp.check('druhé kliknutí nic nepokazí',
+  (select done_by from public.tasks where id = :'ukol_marka') = :'marek');
+
+select public.complete_task(:'ukol_nicii');
+select pg_temp.check('nezadaný úkol na jeho pobočce zavřít smí',
+  (select status from public.tasks where id = :'ukol_nicii') = 'done');
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.complete_task(current_setting('test.ukol_cizi')::uuid);
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: číšník zavřel cizí úkol'; end if;
+  raise notice '  OK    cizí úkol číšník nezavře';
+end $$;
+
+select set_config('test.user_id', '33333333-3333-3333-3333-333333333333', false);
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.complete_task(current_setting('test.ukol_marka')::uuid);
+  exception when no_data_found then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: cizí uživatel sáhl na úkol'; end if;
+  raise notice '  OK    cizímu uživateli úkol neexistuje';
+end $$;
 
 \echo ''
 \echo '== Nepřihlášený se nedostane k ničemu ====================='
