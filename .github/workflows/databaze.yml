@@ -5,7 +5,7 @@ name: Databáze
 # neověřila a chyba v něm by se ukázala až u příští změny schématu.
 on:
   push:
-    branches: [main, etapa0-zaklad]
+    branches: [main, etapa0-zaklad, kmen-nextjs]
     paths:
       - 'supabase/**'
       - '.github/workflows/databaze.yml'
