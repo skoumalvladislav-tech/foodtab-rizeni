@@ -308,3 +308,52 @@ Přečtení se zapisuje **na kliknutí**, ne při vykreslení. Zápis jen proto,
 - Nepřečtené se liší jen sytostí a tlačítkem, počítadlo nepřečtených není.
 - Zprávu nejde upravit ani smazat, jen napsat a přečíst.
 - Segment nabídky se přejmenoval z `komunikace` na `zpravy` podle zadání.
+
+---
+
+## Souhrn — všechno, na co se sahá
+
+Pro ranní ověření jedním dotazem. Sloupce jsou uvedené tak, jak je jmenují
+dotazy v aplikaci.
+
+### Funkce (RPC přes PostgREST, schéma `public`)
+
+| Funkce | Kde |
+|---|---|
+| `my_tenants()` | `lib/authz.ts` |
+| `my_context(p_tenant)` | `lib/authz.ts` |
+| `has_access(p_tenant, p_permission, p_branch)` | `lib/authz.ts` |
+| `business_date(p_branch, p_at)` | `lib/provozni-den.ts` |
+
+### Tabulky a sloupce
+
+| Tabulka | Sloupce |
+|---|---|
+| `employees` | `id`, `tenant_id`, `branch_id`, `user_id`, `full_name`, `deleted_at` |
+| `positions` | `id`, `label` |
+| `shifts` | `id`, `tenant_id`, `branch_id`, `employee_id`, `position_id`, `shift_date`, `starts_at`, `ends_at`, `status`, `note` |
+| `attendance_events` | `id`, `tenant_id`, `branch_id`, `employee_id`, `kind`, `occurred_at`, `business_date`, `source` |
+| `tasks` | `id`, `tenant_id`, `branch_id`, `title`, `note`, `due_at`, `priority`, `status`, `done_at`, `done_by` |
+| `checklist_templates` | `id`, `tenant_id`, `branch_id`, `name`, `department`, `schedule`, `active` |
+| `checklist_items` | `id`, `template_id`, `position`, `label`, `requires_value`, `value_type`, `value_unit`, `min_value`, `max_value` |
+| `checklist_runs` | `id`, `tenant_id`, `branch_id`, `template_id`, `business_date`, `status`, `finished_at` |
+| `checklist_entries` | `run_id`, `item_id`, `checked`, `value_number`, `value_text`, `employee_id`, `recorded_at` |
+| `announcements` | `id`, `tenant_id`, `branch_id`, `employee_id`, `body`, `pinned`, `author_id`, `created_at` |
+| `announcement_reads` | `announcement_id`, `user_id` |
+
+`branches` a `tenants` se **nedotazují přímo** — názvy poboček chodí
+z `my_context()`, provozní den z `business_date()`.
+
+### Zápisy
+
+| Tabulka | Operace |
+|---|---|
+| `attendance_events` | insert |
+| `tasks` | update (`status`, `done_at`, `done_by`) |
+| `checklist_runs` | upsert, update |
+| `checklist_entries` | upsert |
+| `announcements` | insert |
+| `announcement_reads` | upsert |
+
+Všechno jde přes `lib/supabase/server.ts` pod přihlášeným uživatelem.
+Servisní klíč se nikde nepoužívá.
