@@ -85,6 +85,24 @@ export type Permission = (typeof PERMISSIONS)[number]
 export const MODULES = ['provoz', 'finance', 'marketing', 'objednavky'] as const
 export type ModuleKey = (typeof MODULES)[number]
 
+/**
+ * Paleta pro odlišení poboček. V databázi je uložený klíč, ne odstín —
+ * konkrétní barvu určuje rozhraní, aby zůstala čitelná ve světlém
+ * i tmavém režimu. Odpovídá podmínce na sloupci `branches.color`.
+ */
+export const BRANCH_COLORS = [
+  'slate',
+  'indigo',
+  'violet',
+  'sky',
+  'teal',
+  'emerald',
+  'amber',
+  'rose',
+] as const
+
+export type BranchColor = (typeof BRANCH_COLORS)[number]
+
 /* ---------------------------------------------------------------------
  * Typy
  * ------------------------------------------------------------------ */
@@ -100,13 +118,22 @@ export type Scope = {
   branchSlug: string | null
 }
 
-export type Branch = { id: string; name: string; slug: string }
+export type Branch = { id: string; name: string; slug: string; color: BranchColor }
+
+/** Modul firmy. `active: false` = firma ho nemá — v rozcestníku zašedlý. */
+export type Module = {
+  key: ModuleKey
+  label: string
+  isBase: boolean
+  active: boolean
+}
 
 export type Context = {
   tenant: { id: string; name: string; currency: string; timezone: string }
   membership: { scope: ScopeLevel; status: 'active' | 'suspended' }
   role: { id: string; key: string; label: string; isOwner: boolean }
-  modules: { key: ModuleKey; label: string }[]
+  /** Všechny moduly Foodtabu, včetně těch, které firma nemá. */
+  modules: Module[]
   /** Jen pobočky, na které uživatel doopravdy vidí. */
   branches: Branch[]
   /** Co má uživatel někde ve firmě. Slouží k VYKRESLENÍ, ne k pouštění dál. */
@@ -208,8 +235,8 @@ export const getContext = cache(async (tenantId: string): Promise<Context | null
     tenant: Context['tenant']
     membership: { scope: string; status: string }
     role: Context['role']
-    modules: { key: string; label: string }[]
-    branches: Branch[]
+    modules: { key: string; label: string; isBase: boolean; active: boolean }[]
+    branches: { id: string; name: string; slug: string; color: string }[]
     permissions: string[]
   }
 
@@ -222,10 +249,17 @@ export const getContext = cache(async (tenantId: string): Promise<Context | null
       status: 'active',
     },
     role: raw.role,
-    modules: raw.modules.filter((m): m is { key: ModuleKey; label: string } =>
+    modules: (raw.modules ?? []).filter((m): m is Module =>
       (MODULES as readonly string[]).includes(m.key),
     ),
-    branches: raw.branches ?? [],
+    // Neznámý klíč barvy (třeba po ruční úpravě v databázi) spadne na
+    // neutrální odstín. Pobočka se kvůli barvě nikdy nesmí nevykreslit.
+    branches: (raw.branches ?? []).map((b) => ({
+      ...b,
+      color: ((BRANCH_COLORS as readonly string[]).includes(b.color)
+        ? b.color
+        : 'slate') as BranchColor,
+    })),
     permissions: (raw.permissions ?? []).filter((p): p is Permission =>
       (PERMISSIONS as readonly string[]).includes(p),
     ),
@@ -354,7 +388,12 @@ export async function requireScopedAccess(
  * ------------------------------------------------------------------ */
 
 export function isModuleActive(ctx: Context, module: ModuleKey): boolean {
-  return ctx.modules.some((m) => m.key === module)
+  return ctx.modules.some((m) => m.key === module && m.active)
+}
+
+/** Moduly, které firma má. Pro navigaci. */
+export function activeModules(ctx: Context): Module[] {
+  return ctx.modules.filter((m) => m.active)
 }
 
 export async function requireModule(tenantId: string, module: ModuleKey): Promise<Context> {

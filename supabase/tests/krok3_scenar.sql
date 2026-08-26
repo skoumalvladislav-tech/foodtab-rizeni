@@ -20,6 +20,7 @@ select id as perla  from public.branches where slug = 'cerna-perla' \gset
 select id as bar    from public.branches where slug = 'bernard-bar' \gset
 
 select set_config('test.tenant', :'tenant', false);
+select set_config('test.perla',  :'perla',  false);
 
 \echo ''
 \echo '== Katalog sedí s aplikací ================================'
@@ -85,6 +86,30 @@ select pg_temp.check('majitel vidí obě pobočky a má rozsah tenant',
   jsonb_array_length(public.my_context(:'tenant') -> 'branches') = 2
   and public.my_context(:'tenant') -> 'membership' ->> 'scope' = 'tenant');
 
+-- Barva odlišuje pobočky v hlavičce. Dvě pobočky nesmí začínat stejně,
+-- jinak by přepínač nepomohl proti tomu, kvůli čemu vznikl.
+select pg_temp.check('každá pobočka má barvu z palety',
+  not exists (
+    select 1 from jsonb_array_elements(public.my_context(:'tenant') -> 'branches') b
+    where coalesce(b ->> 'color', '') not in
+          ('slate','indigo','violet','sky','teal','emerald','amber','rose')));
+
+select pg_temp.check('pobočky nemají stejnou barvu',
+  (select count(distinct b ->> 'color')
+   from jsonb_array_elements(public.my_context(:'tenant') -> 'branches') b) = 2);
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    update public.branches set color = '#ff00ff'
+    where id = current_setting('test.perla')::uuid;
+  exception when check_violation then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: prošla barva mimo paletu'; end if;
+  raise notice '  OK    barva mimo paletu neprojde';
+end $$;
+
 select pg_temp.check('majitel je v kontextu označený jako vlastník',
   (public.my_context(:'tenant') -> 'role' ->> 'isOwner')::boolean);
 
@@ -97,10 +122,13 @@ select pg_temp.check('majitel má v seznamu tenantů právě tuhle firmu',
 -- Modul Finance je od scénáře etapy 0 zapnutý. Kontrolujeme, že se to
 -- projeví v kontextu — a hlavně že se vypnutí projeví taky. Schovaná
 -- položka v menu není zámek, ale nesmí zůstat svítit, když modul zhasne.
-select pg_temp.check('zapnutý modul je v kontextu i s oprávněními',
+select pg_temp.check('kontext nabízí všechny čtyři moduly',
+  jsonb_array_length(public.my_context(:'tenant') -> 'modules') = 4);
+
+select pg_temp.check('zapnutý modul je označený jako aktivní i s oprávněními',
   exists (
     select 1 from jsonb_array_elements(public.my_context(:'tenant') -> 'modules') m
-    where m ->> 'key' = 'finance')
+    where m ->> 'key' = 'finance' and (m ->> 'active')::boolean)
   and public.my_context(:'tenant') -> 'permissions' ? 'finance.read');
 
 reset role;
@@ -113,10 +141,12 @@ select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false)
 -- Majitel má jinak všechno. Přes vypnutý modul se ale nedostane taky.
 select pg_temp.check('pozastavený modul zavírá i majiteli',
   public.has_access(:'tenant', 'finance.read', null) = false);
-select pg_temp.check('pozastavený modul zmizí z kontextu',
-  not exists (
+-- Zůstane v seznamu, ale zašedlý. Rozcestník má ukázat, co si lze
+-- přikoupit; dovnitř se tím nikdo nedostane.
+select pg_temp.check('pozastavený modul je v kontextu jako neaktivní',
+  exists (
     select 1 from jsonb_array_elements(public.my_context(:'tenant') -> 'modules') m
-    where m ->> 'key' = 'finance'));
+    where m ->> 'key' = 'finance' and not (m ->> 'active')::boolean));
 select pg_temp.check('oprávnění vypnutého modulu zmizí z kontextu',
   not (public.my_context(:'tenant') -> 'permissions' ? 'finance.read'));
 
