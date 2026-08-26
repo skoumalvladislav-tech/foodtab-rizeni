@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Výstup starého vinext buildu. Nic ho už nevyrábí, ale kde po něm
+    // zbyl, tam by se eslint zakousl do desítek tisíc řádků cizího kódu.
+    // Dřív to řešil přepínač v npm skriptu, sem patří víc.
+    "dist/**",
   ]),
 ]);
 

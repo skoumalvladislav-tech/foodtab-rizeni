@@ -1,3 +1,15 @@
+/**
+ * PŘEDLOHA — nikam se nenapojuje.
+ *
+ * Novější podoba původního rozhraní z větve main (kalendář směn,
+ * barevná témata poboček, hlasové zprávy). Slouží jako vzor, ze kterého
+ * se opisuje vzhled. Nic ho neimportuje a v aplikaci se nevykresluje.
+ *
+ * POZOR: volá /api/operations, /api/access, /api/shifts a /api/menu-pdf —
+ * trasy, které v tomhle stromu neexistují. Spuštěný by tedy nefungoval.
+ * Nepřidávejte sem nic nového; nové obrazovky vznikají v app/<rozsah>/
+ * nad daty z lib/supabase/server.ts, aby na ně platila Row Level Security.
+ */
 "use client";
 
 import {

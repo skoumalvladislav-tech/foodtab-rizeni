@@ -1,0 +1,136 @@
+name: Databáze
+
+# Testy hlídají každou změnu ve schématu, nasazení jede jen z main.
+# Mezi cestami je i tenhle soubor, jinak by se úprava workflow sama
+# neověřila a chyba v něm by se ukázala až u příští změny schématu.
+on:
+  push:
+    branches: [main, etapa0-zaklad, kmen-nextjs]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/databaze.yml'
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/databaze.yml'
+
+# Dvě nasazení naráz by si šla po krku nad jednou databází.
+concurrency:
+  group: databaze-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  testy:
+    name: Migrace a scénáře
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Doinstalovat psql
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Migrace a scénáře proti PostgreSQL
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGUSER: postgres
+          PGPASSWORD: test
+          PGDATABASE: foodtab_test
+          LANG: C.UTF-8
+        run: |
+          set -o pipefail
+          bash supabase/tests/run.sh 2>&1 | tee vystup.txt
+
+          # Návratový kód nestačí. run.sh posílá psql rourou přes grep
+          # a sed, takže se chyba psql v návratovém kódu roury ztratí.
+          # Jediný spolehlivý důkaz jsou závěrečné hlášky všech scénářů.
+          # Každý nový scénář v run.sh sem musí přibýt taky, jinak by mohl
+          # padat, aniž by si toho kdokoli všiml.
+          chybi=0
+
+          # Kotvíme na celý řádek. Prosté hledání "VŠECHNY KONTROLY PROŠLY"
+          # by se chytlo i na hlášky z kroku 2 a 3, které ji obsahují jako
+          # část, a etapa 0 by mohla spadnout nepovšimnutě.
+          grep -qE '^[[:space:]]*VŠECHNY KONTROLY PROŠLY[[:space:]]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: VŠECHNY KONTROLY PROŠLY (etapa 0)"; chybi=1; }
+
+          grep -q 'KROK 2' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 2"; chybi=1; }
+
+          grep -q 'KROK 3' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 3"; chybi=1; }
+
+          if [ "$chybi" -ne 0 ]; then
+            echo "Scénáře neprošly celé."
+            exit 1
+          fi
+          echo "Všechny scénáře doběhly."
+
+  # Tajemství se nedají číst v podmínce úlohy — kontext `secrets` tam
+  # GitHub nenabízí. Přečte je proto tahle úloha jako proměnné prostředí
+  # a výsledek předá dál jako výstup, na který se v podmínce ptát smí.
+  # Bez toho by push do main bez nastavených tajemství skončil červeně.
+  tajemstvi:
+    name: Jsou nastavená tajemství?
+    needs: testy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      pripraveno: ${{ steps.kontrola.outputs.pripraveno }}
+
+    steps:
+      - name: Ověřit tajemství
+        id: kontrola
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          HESLO: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PROJEKT: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -n "$TOKEN" ] && [ -n "$HESLO" ] && [ -n "$PROJEKT" ]; then
+            echo "pripraveno=true" >> "$GITHUB_OUTPUT"
+            echo "Tajemství jsou nastavená, nasazení proběhne."
+          else
+            echo "pripraveno=false" >> "$GITHUB_OUTPUT"
+            echo "Tajemství nejsou nastavená — nasazení se přeskočí."
+            echo "Migrace se zatím pouštějí ručně: supabase db push"
+          fi
+
+  nasazeni:
+    name: Nasazení na Supabase
+    needs: [testy, tajemstvi]
+    # Když tajemství chybí, úloha se přeskočí (šedě), ne spadne.
+    if: needs.tajemstvi.outputs.pripraveno == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Propojit projekt a nasadit migrace
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase db push --yes
