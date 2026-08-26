@@ -82,7 +82,7 @@ export const NABIDKA: Polozka[] = [
 export const NASTAVENI: Polozka[] = [
   { segment: 'nastaveni/firma', nazev: 'Firma', kratky: 'Firma', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
   { segment: 'nastaveni/pobocky', nazev: 'Pobočky', kratky: 'Pobočky', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
-  { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'clovek' },
+  { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
   { segment: 'nastaveni/role', nazev: 'Role', kratky: 'Role', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'clovek' },
   { segment: 'nastaveni/moduly', nazev: 'Moduly', kratky: 'Moduly', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
 ]
