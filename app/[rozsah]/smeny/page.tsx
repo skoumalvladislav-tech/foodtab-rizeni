@@ -179,7 +179,7 @@ export default async function Rozpis({
               style={{
                 margin: "0 0 8px",
                 fontSize: "14px",
-                color: "var(--green)",
+                color: "var(--branch)",
                 position: "sticky",
                 top: 0,
               }}
@@ -209,7 +209,7 @@ export default async function Rozpis({
                       background: obsazena ? "var(--card)" : "transparent",
                       border: obsazena
                         ? "1px solid var(--line)"
-                        : "1px dashed var(--copper)",
+                        : "1px dashed var(--warn)",
                       borderRadius: "12px",
                       padding: "12px 14px",
                       display: "flex",
@@ -233,7 +233,7 @@ export default async function Rozpis({
                         style={{
                           display: "block",
                           fontSize: "15px",
-                          color: obsazena ? "var(--ink)" : "var(--copper)",
+                          color: obsazena ? "var(--ink)" : "var(--warn)",
                         }}
                       >
                         {obsazena ? jmeno : "Neobsazeno"}

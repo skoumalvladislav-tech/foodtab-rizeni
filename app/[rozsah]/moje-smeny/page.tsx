@@ -195,7 +195,7 @@ export default async function MojeSmeny({
                 background: "var(--card)",
                 border: "1px solid var(--line)",
                 borderLeft: `4px solid ${
-                  s.status === "confirmed" ? "var(--green2)" : "var(--gold)"
+                  s.status === "confirmed" ? "var(--good)" : "var(--warn)"
                 }`,
                 borderRadius: "14px",
                 boxShadow: "var(--shadow)",
@@ -221,7 +221,7 @@ export default async function MojeSmeny({
                 style={{
                   margin: "6px 0 0",
                   fontSize: "14px",
-                  color: "var(--green2)",
+                  color: "var(--branch)",
                 }}
               >
                 {nazvyPobocek.get(s.branch_id) ?? "Jiná pobočka"}

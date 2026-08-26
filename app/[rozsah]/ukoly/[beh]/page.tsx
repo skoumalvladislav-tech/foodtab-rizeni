@@ -131,7 +131,7 @@ export default async function VyplnitChecklist({
     <main style={{ padding: "16px", paddingBottom: "32px" }}>
       <Link
         href={`/${rozsah}/ukoly`}
-        style={{ fontSize: "14px", color: "var(--green2)" }}
+        style={{ fontSize: "14px", color: "var(--accent)" }}
       >
         ← Zpět na úkoly
       </Link>
@@ -140,7 +140,7 @@ export default async function VyplnitChecklist({
         style={{
           margin: "12px 0 4px",
           fontSize: "18px",
-          color: "var(--green)",
+          color: "var(--branch)",
         }}
       >
         {nazev}
@@ -165,7 +165,7 @@ export default async function VyplnitChecklist({
               <li
                 key={p.id}
                 style={{
-                  background: splneno ? "var(--mint)" : "var(--card)",
+                  background: splneno ? "var(--branch-soft)" : "var(--card)",
                   border: "1px solid var(--line)",
                   borderRadius: "12px",
                   padding: "14px",
@@ -181,7 +181,7 @@ export default async function VyplnitChecklist({
                     style={{
                       margin: "4px 0 0",
                       fontSize: "13px",
-                      color: "var(--green2)",
+                      color: "var(--good)",
                     }}
                   >
                     {z?.value_number !== null && z?.value_number !== undefined
@@ -193,7 +193,7 @@ export default async function VyplnitChecklist({
                     style={{
                       margin: "8px 0 0",
                       fontSize: "13px",
-                      color: "var(--copper)",
+                      color: "var(--warn)",
                     }}
                   >
                     Položka chce fotku. Nahrávání souborů zatím není hotové.
@@ -248,8 +248,8 @@ export default async function VyplnitChecklist({
                         fontSize: "14px",
                         borderRadius: "10px",
                         border: "none",
-                        background: "var(--green)",
-                        color: "var(--mint)",
+                        background: "var(--branch)",
+                        color: "var(--card)",
                         cursor: "pointer",
                         whiteSpace: "nowrap",
                       }}
@@ -265,7 +265,7 @@ export default async function VyplnitChecklist({
                     style={{
                       margin: "8px 0 0",
                       fontSize: "13px",
-                      color: "var(--red)",
+                      color: "var(--bad)",
                     }}
                   >
                     {popisChyby(chyba, p)}
@@ -289,8 +289,8 @@ export default async function VyplnitChecklist({
               fontSize: "16px",
               borderRadius: "12px",
               border: "none",
-              background: "var(--green2)",
-              color: "var(--mint)",
+              background: "var(--good)",
+              color: "var(--card)",
               cursor: "pointer",
             }}
           >

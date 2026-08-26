@@ -191,7 +191,7 @@ export default async function Dochazka({
           style={{
             margin: "4px 0 0",
             fontSize: "18px",
-            color: jsemVPraci ? "var(--green2)" : "var(--muted)",
+            color: jsemVPraci ? "var(--good)" : "var(--muted)",
           }}
         >
           {jsemVPraci ? "Jste v práci" : "Nejste v práci"}
@@ -209,8 +209,8 @@ export default async function Dochazka({
               fontSize: "18px",
               borderRadius: "12px",
               border: "none",
-              background: jsemVPraci ? "var(--copper)" : "var(--green)",
-              color: "var(--mint)",
+              background: jsemVPraci ? "var(--warn)" : "var(--branch)",
+              color: "var(--card)",
               cursor: "pointer",
             }}
           >
@@ -274,7 +274,7 @@ export default async function Dochazka({
                   style={{
                     fontSize: "13px",
                     whiteSpace: "nowrap",
-                    color: vPraci ? "var(--green2)" : "var(--muted)",
+                    color: vPraci ? "var(--good)" : "var(--muted)",
                   }}
                 >
                   {popisDruhu(u.kind)} · {hodina(u.occurred_at)}

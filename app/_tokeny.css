@@ -1,0 +1,144 @@
+/* =====================================================================
+   Tokeny rozhraní — podle docs/rozvrzeni-nahled.html
+   =====================================================================
+   Světlý základ je tady v :root. Tmavý se opakuje dvakrát schválně:
+   jednou pod prefers-color-scheme se strážcem :root:not([data-theme="light"]),
+   podruhé pod :root[data-theme="dark"]. Bez toho by ruční přepínač
+   vyhrál jen v jednom směru — kdo má tmavý systém a chce světlo, by ho
+   nedostal.
+
+   Žádná barva se nedefinuje jen uvnitř media dotazu.
+   ===================================================================== */
+
+:root {
+  --paper:  #f4f6fb;
+  --card:   #ffffff;
+  --sunken: #eef1f8;
+  --ink:    #131a2b;
+  --muted:  #616d85;
+  --faint:  #8b96ab;
+  --line:   #dde3ee;
+  --line-2: #c9d2e3;
+  --accent: #4f46e5;
+  --accent-soft: #eceafe;
+  --good:   #0f766e;
+  --warn:   #b45309;
+  /* Předloha vlastní barvu pro chybu nemá. Doplněná ve stejném duchu:
+     tmavší odstín na světlém pozadí, světlejší na tmavém. */
+  --bad:    #b91c1c;
+  --shadow: 0 1px 2px rgba(19,26,43,.06), 0 8px 24px -12px rgba(19,26,43,.18);
+
+  /* Barvy poboček — klíč z branches.color. První tři jsou z předlohy,
+     zbylých pět dopočítané stejným způsobem: sytější tón na světlo,
+     světlejší na tmu, k tomu velmi bledý (resp. velmi tmavý) podklad. */
+  --b-slate:   #475569;  --b-slate-soft:   #e7ebf2;
+  --b-indigo:  #4f46e5;  --b-indigo-soft:  #eceafe;
+  --b-violet:  #7c3aed;  --b-violet-soft:  #f1ebfe;
+  --b-sky:     #0369a1;  --b-sky-soft:     #e2f1fb;
+  --b-teal:    #0f766e;  --b-teal-soft:    #ddf1ef;
+  --b-emerald: #047857;  --b-emerald-soft: #ddf3e9;
+  --b-amber:   #b45309;  --b-amber-soft:   #fdf0dc;
+  --b-rose:    #be123c;  --b-rose-soft:    #fce8ed;
+
+  /* Výchozí, než se doplní pobočka. Firemní úroveň má slate. */
+  --branch:      var(--b-slate);
+  --branch-soft: var(--b-slate-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:  #080c16;
+    --card:   #111827;
+    --sunken: #0d1420;
+    --ink:    #e9edf6;
+    --muted:  #97a2b8;
+    --faint:  #6c7891;
+    --line:   #212c40;
+    --line-2: #2c3950;
+    --accent: #8b87f5;
+    --accent-soft: #201f3d;
+    --good:   #5eead4;
+    --warn:   #fbbf24;
+    --bad:    #f87171;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+
+    --b-slate:   #94a3b8;  --b-slate-soft:   #1c2637;
+    --b-indigo:  #8b87f5;  --b-indigo-soft:  #221f42;
+    --b-violet:  #a78bfa;  --b-violet-soft:  #281a45;
+    --b-sky:     #56b6f0;  --b-sky-soft:     #10283b;
+    --b-teal:    #4fd1c5;  --b-teal-soft:    #0d2b2a;
+    --b-emerald: #45d19a;  --b-emerald-soft: #0c2c20;
+    --b-amber:   #f0a52a;  --b-amber-soft:   #33240d;
+    --b-rose:    #fb7a92;  --b-rose-soft:    #351320;
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper:  #080c16;
+  --card:   #111827;
+  --sunken: #0d1420;
+  --ink:    #e9edf6;
+  --muted:  #97a2b8;
+  --faint:  #6c7891;
+  --line:   #212c40;
+  --line-2: #2c3950;
+  --accent: #8b87f5;
+  --accent-soft: #201f3d;
+  --good:   #5eead4;
+  --warn:   #fbbf24;
+  --bad:    #f87171;
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+
+  --b-slate:   #94a3b8;  --b-slate-soft:   #1c2637;
+  --b-indigo:  #8b87f5;  --b-indigo-soft:  #221f42;
+  --b-violet:  #a78bfa;  --b-violet-soft:  #281a45;
+  --b-sky:     #56b6f0;  --b-sky-soft:     #10283b;
+  --b-teal:    #4fd1c5;  --b-teal-soft:    #0d2b2a;
+  --b-emerald: #45d19a;  --b-emerald-soft: #0c2c20;
+  --b-amber:   #f0a52a;  --b-amber-soft:   #33240d;
+  --b-rose:    #fb7a92;  --b-rose-soft:    #351320;
+}
+
+/* Klíč barvy z branches.color. Firemní úroveň zůstává na slate.
+   Bez :root schválně: <html> vykresluje kořenový layout, ale pobočku zná
+   až layout rozsahu. Atribut proto sedí na obalu uvnitř stránky, což by
+   selektor vázaný na :root nechytil. */
+[data-branch="slate"]   { --branch: var(--b-slate);   --branch-soft: var(--b-slate-soft); }
+[data-branch="indigo"]  { --branch: var(--b-indigo);  --branch-soft: var(--b-indigo-soft); }
+[data-branch="violet"]  { --branch: var(--b-violet);  --branch-soft: var(--b-violet-soft); }
+[data-branch="sky"]     { --branch: var(--b-sky);     --branch-soft: var(--b-sky-soft); }
+[data-branch="teal"]    { --branch: var(--b-teal);    --branch-soft: var(--b-teal-soft); }
+[data-branch="emerald"] { --branch: var(--b-emerald); --branch-soft: var(--b-emerald-soft); }
+[data-branch="amber"]   { --branch: var(--b-amber);   --branch-soft: var(--b-amber-soft); }
+[data-branch="rose"]    { --branch: var(--b-rose);    --branch-soft: var(--b-rose-soft); }
+
+/* ---------------------------------------------------------------------
+   Stará jména — VÝHRADNĚ pro odpojenou předlohu
+   ---------------------------------------------------------------------
+   Patří app/dashboard.tsx a komponentním stylům, které k ní zbyly dole
+   v globals.css. Nic jiného se na tahle jména odkazovat nemá — obrazovky
+   provozu jsou převedené na tokeny z předlohy.
+
+   Až předloha doslouží, smaže se s ní i tenhle blok.
+
+   Světlá i tmavá varianta jsou pokryté jedním zápisem: hodnota se
+   nevyhodnocuje tady, ale až v místě použití, takže var(--branch)
+   a spol. se samy převezmou z toho bloku tokenů, který zrovna platí.
+   Druhý blok pod media dotazem by jen opisoval totéž.
+   ------------------------------------------------------------------ */
+:root {
+  --green:  var(--branch);
+  --green2: var(--accent);
+  --mint:   var(--branch-soft);
+  --gold:   var(--warn);
+  --copper: var(--warn);
+  --red:    var(--bad);
+
+  --sidebar-bg:     var(--card);
+  --sidebar-active: var(--branch);
+  --sidebar-text:   var(--ink);
+  --sidebar-muted:  var(--muted);
+  --topbar-bg:      var(--card);
+  --pulse-dot:      var(--branch);
+  --pulse-ring:     var(--branch-soft);
+}

@@ -183,7 +183,7 @@ export default async function Ukoly({
                 background: "var(--card)",
                 border: "1px solid var(--line)",
                 borderLeft: `4px solid ${
-                  u.priority === "high" ? "var(--red)" : "var(--line)"
+                  u.priority === "high" ? "var(--warn)" : "var(--line)"
                 }`,
                 borderRadius: "12px",
                 padding: "14px",
@@ -245,7 +245,7 @@ export default async function Ukoly({
                   style={{
                     margin: "8px 0 0",
                     fontSize: "13px",
-                    color: "var(--red)",
+                    color: "var(--bad)",
                   }}
                 >
                   {popisChyby(chyba)}
@@ -356,8 +356,8 @@ const tlacitkoMale = {
   fontSize: "14px",
   borderRadius: "10px",
   border: "none",
-  background: "var(--green)",
-  color: "var(--mint)",
+  background: "var(--branch)",
+  color: "var(--card)",
   cursor: "pointer",
   textDecoration: "none",
 } as const;

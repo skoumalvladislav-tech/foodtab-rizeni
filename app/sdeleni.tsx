@@ -35,7 +35,7 @@ export default function Sdeleni({
         }}
       >
         <h1
-          style={{ margin: "0 0 12px", fontSize: "20px", color: "var(--green)" }}
+          style={{ margin: "0 0 12px", fontSize: "20px", color: "var(--branch)" }}
         >
           {nadpis}
         </h1>

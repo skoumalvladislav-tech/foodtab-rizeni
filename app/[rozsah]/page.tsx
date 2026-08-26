@@ -63,7 +63,7 @@ export default async function RozsahRozcestnik({
                 background: "var(--card)",
                 border: "1px solid var(--line)",
                 boxShadow: "var(--shadow)",
-                color: "var(--green)",
+                color: "var(--branch)",
                 textDecoration: "none",
                 fontSize: "16px",
               }}

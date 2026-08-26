@@ -198,8 +198,8 @@ export default async function Zpravy({
                 fontSize: "15px",
                 borderRadius: "10px",
                 border: "none",
-                background: "var(--green)",
-                color: "var(--mint)",
+                background: "var(--branch)",
+                color: "var(--card)",
                 cursor: "pointer",
               }}
             >
@@ -236,7 +236,7 @@ export default async function Zpravy({
                   background: "var(--card)",
                   border: "1px solid var(--line)",
                   borderLeft: z.pinned
-                    ? "4px solid var(--gold)"
+                    ? "4px solid var(--warn)"
                     : "1px solid var(--line)",
                   borderRadius: "12px",
                   padding: "14px",
@@ -282,7 +282,7 @@ export default async function Zpravy({
                     style={{
                       margin: "10px 0 0",
                       fontSize: "12px",
-                      color: "var(--green2)",
+                      color: "var(--good)",
                     }}
                   >
                     ✓ Přečteno
@@ -299,7 +299,7 @@ export default async function Zpravy({
                         borderRadius: "8px",
                         border: "1px solid var(--line)",
                         background: "transparent",
-                        color: "var(--green2)",
+                        color: "var(--good)",
                         cursor: "pointer",
                       }}
                     >

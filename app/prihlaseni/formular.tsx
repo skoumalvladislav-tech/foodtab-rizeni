@@ -72,7 +72,7 @@ export default function PrihlasovaciFormular({
           style={{
             margin: "0 0 8px",
             fontSize: "24px",
-            color: "var(--green)",
+            color: "var(--accent)",
           }}
         >
           Foodtab
@@ -96,7 +96,7 @@ export default function PrihlasovaciFormular({
                 background: "none",
                 border: "none",
                 padding: 0,
-                color: "var(--green2)",
+                color: "var(--accent)",
                 textDecoration: "underline",
                 cursor: "pointer",
                 fontSize: "14px",
@@ -156,7 +156,7 @@ export default function PrihlasovaciFormular({
                   role="alert"
                   style={{
                     margin: "12px 0 0",
-                    color: "var(--red)",
+                    color: "var(--bad)",
                     fontSize: "14px",
                   }}
                 >
@@ -174,8 +174,8 @@ export default function PrihlasovaciFormular({
                   fontSize: "16px",
                   borderRadius: "10px",
                   border: "none",
-                  background: "var(--green)",
-                  color: "var(--mint)",
+                  background: "var(--accent)",
+                  color: "var(--card)",
                   cursor: stav === "odesilam" ? "progress" : "pointer",
                   opacity: stav === "odesilam" ? 0.7 : 1,
                 }}
