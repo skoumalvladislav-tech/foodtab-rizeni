@@ -16,6 +16,10 @@ const eslintConfig = defineConfig([
     // zbyl, tam by se eslint zakousl do desítek tisíc řádků cizího kódu.
     // Dřív to řešil přepínač v npm skriptu, sem patří víc.
     "dist/**",
+    // Odpojená předloha rozhraní. Nic ji neimportuje a nevykresluje se;
+    // drží se schválně tak, jak vznikla na main, aby se z ní dal opisovat
+    // vzhled. Opravovat v ní pravidla lintu by znamenalo měnit vzor.
+    "app/dashboard.tsx",
   ]),
 ]);
 
