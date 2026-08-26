@@ -21,7 +21,9 @@
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 18px;
   height: 56px; padding: 0 18px;
-  background: var(--card); border-bottom: 1px solid var(--line);
+  background: var(--card);
+  border-bottom: 4px solid var(--branch);
+  box-shadow: inset 0 -1px 0 0 var(--line), var(--shadow);
 }
 .ft-brand { font-weight: 700; letter-spacing: -.02em; font-size: 17px;
             color: var(--ink); text-decoration: none; white-space: nowrap; }
@@ -55,7 +57,7 @@
 }
 .ft-ikona:hover { color: var(--ink); }
 .ft-ikona.ram { border-color: var(--line-2); }
-.ft-ikona:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ft-ikona:focus-visible { outline: 2px solid var(--branch); outline-offset: 1px; }
 
 .ft-divider { width: 1px; height: 24px; background: var(--line); flex: none; }
 
@@ -158,7 +160,29 @@
                       letter-spacing: .06em; }
 .ft-nav hr { border: 0; border-top: 1px solid var(--line); margin: 8px 2px; width: 100%; }
 
-.ft-main { flex: 1; min-width: 0; padding: 24px 28px; }
+.ft-main {
+  flex: 1; min-width: 0; padding: 24px 28px;
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--paper), var(--branch) 3%) 0%,
+    var(--paper) 8%
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ft-main {
+    background: linear-gradient(to bottom,
+      color-mix(in srgb, var(--paper), var(--branch) 1%) 0%,
+      var(--paper) 8%
+    );
+  }
+}
+
+:root[data-theme="dark"] .ft-main {
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--paper), var(--branch) 1%) 0%,
+    var(--paper) 8%
+  );
+}
 
 /* ---- Tablet: sloupec se scvrkne na ikonovou lištu 72 px --------- */
 @media (max-width: 1023px) {

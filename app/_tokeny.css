@@ -22,7 +22,7 @@
   --accent: #4f46e5;
   --accent-soft: #eceafe;
   --good:   #0f766e;
-  --warn:   #b45309;
+  --warn:   #ea580c;
   /* Předloha vlastní barvu pro chybu nemá. Doplněná ve stejném duchu:
      tmavší odstín na světlém pozadí, světlejší na tmavém. */
   --bad:    #b91c1c;
@@ -58,7 +58,7 @@
     --accent: #8b87f5;
     --accent-soft: #201f3d;
     --good:   #5eead4;
-    --warn:   #fbbf24;
+    --warn:   #f97316;
     --bad:    #f87171;
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
@@ -85,7 +85,7 @@
   --accent: #8b87f5;
   --accent-soft: #201f3d;
   --good:   #5eead4;
-  --warn:   #fbbf24;
+  --warn:   #f97316;
   --bad:    #f87171;
   --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
