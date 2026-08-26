@@ -95,3 +95,90 @@ export async function smazatZamestnance(
 
   revalidatePath(`/${rozsah}/nastaveni/lide`)
 }
+
+/**
+ * Vystavení pozvánky.
+ *
+ * Volá public.create_invitation, která je průzor do app schématu.
+ * Vrací {token, chyba} — token se zobrazí, chyba se řeší podle kódu.
+ */
+export async function vystavitPozvankuAction(formData: FormData): Promise<{
+  token?: string
+  chyba?: string
+}> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zamestnanecId = formData.get('zamestnanec')
+    ? String(formData.get('zamestnanec'))
+    : null
+  const email = String(formData.get('email') ?? '').trim()
+  const kanal = String(formData.get('kanal') ?? 'email')
+
+  if (!zamestnanecId) {
+    return { chyba: 'Vyberte zaměstnance' }
+  }
+
+  if (kanal === 'email' && !email) {
+    return { chyba: 'Zadejte e-mailovou adresu' }
+  }
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return { chyba: 'Chyba při načítání firmy' }
+
+  const pristup = await zkusPristup(tenantId, 'people.manage', rozsah)
+  if (pristup.stav !== 'ok') return { chyba: 'Nemáte oprávnění' }
+
+  const supabase = await getServerSupabase()
+
+  // Zjistit ID role — nyní se bere default role zaměstnance
+  // Později se bude vybírat v UI. Prozatím řekneme "zaměstnanec"
+  const { data: zaměstnanec } = await supabase
+    .from('employees')
+    .select('id')
+    .eq('id', zamestnanecId)
+    .eq('tenant_id', tenantId)
+    .single()
+
+  if (!zaměstnanec) {
+    return { chyba: 'Zaměstnanec nenalezen' }
+  }
+
+  // Procházíme přes RPC — public.create_invitation
+  const { data, error } = await supabase.rpc('create_invitation', {
+    p_tenant: tenantId,
+    p_role: null, // Později nastavit na vybranou roli
+    p_channel: kanal,
+    p_contact: email,
+    p_scope: 'branch',
+    p_branches: [],
+    p_employee: zamestnanecId,
+    p_valid_days: 7,
+  })
+
+  if (error) {
+    console.error('create_invitation error:', error)
+
+    // Chyby z SQL
+    if (error.code === '42501') {
+      return { chyba: 'Oprávnění zamítnuté (42501)' }
+    }
+    if (error.code === '23503') {
+      return { chyba: 'Zaměstnanec nebo role neexistuje (23503)' }
+    }
+    if (error.code === '23514') {
+      return { chyba: 'Omezení porušeno (23514)' }
+    }
+
+    return { chyba: error.message || 'Chyba při vystavení pozvánky' }
+  }
+
+  if (!data || data.length === 0) {
+    return { chyba: 'Pozvánka nebyla vystavena' }
+  }
+
+  // RPC vrací pole řádků [{ invitation_id, token }]
+  const { token } = data[0]
+
+  revalidatePath(`/${rozsah}/nastaveni/lide`)
+
+  return { token }
+}

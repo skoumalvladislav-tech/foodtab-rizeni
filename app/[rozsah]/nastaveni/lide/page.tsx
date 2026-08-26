@@ -4,6 +4,7 @@ import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import { upravitZamestnance, smazatZamestnance } from "./akce";
+import VystavitPozvankuFormular from "./vystaveni";
 
 export const dynamic = "force-dynamic";
 
@@ -223,6 +224,15 @@ export default async function NastaveniLide({
           </tbody>
         </table>
       </div>
+
+      {/* Vystavení pozvánky */}
+      <VystavitPozvankuFormular
+        rozsah={rozsah}
+        zamestnanci={(zamestnanci ?? []).filter((z) => !z.deleted_at).map((z) => ({
+          id: z.id,
+          full_name: z.full_name,
+        }))}
+      />
     </>
   );
 }
