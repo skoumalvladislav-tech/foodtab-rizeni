@@ -9,50 +9,117 @@ import {
 /**
  * Nabídka obrazovek.
  *
- * Jedno místo, ze kterého se skládá navigace i rozcestník. Položka se
- * nakreslí jen tehdy, když má firma zapnutý příslušný modul a uživatel
- * má právo ji vidět.
+ * Jedno místo, ze kterého se skládá vodorovná řada modulů, levý sloupec,
+ * spodní lišta na mobilu i rozcestník. Položka se nakreslí jen tehdy,
+ * když má firma zapnutý příslušný modul a uživatel má právo ji vidět.
  *
- * POZOR: tohle je jen o kreslení. Schovaná položka není zámek — každá
- * obrazovka si přístup ověřuje sama přes requireAccess. (Viz varování
- * u canSee v lib/authz.ts.)
+ * Tahle tabulka zároveň říká, který modul je vybraný: adresy zůstávají
+ * ve tvaru /<rozsah>/<obrazovka> a modul se z nich odvodí podle toho,
+ * ke kterému obrazovka patří.
+ *
+ * POZOR: je to jen o kreslení. Schovaná položka není zámek — každá
+ * obrazovka si přístup ověřuje sama. (Viz varování u canSee v authz.)
  */
+
+/** Klíče ikon. Tvary jsou v app/[rozsah]/ikona.tsx. */
+export type IkonaKlic =
+  | 'kalendar'
+  | 'hodiny'
+  | 'fajfka'
+  | 'zprava'
+  | 'clovek'
+  | 'kniha'
+  | 'kolo'
+  | 'tecky'
+
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */
   segment: string
   nazev: string
+  /** Zkrácený název do spodní lišty na mobilu, kde je málo místa. */
+  kratky: string
   modul: ModuleKey
   /**
    * Právo, bez kterého se položka nekreslí.
    *
    * `null` znamená „stačí být členem firmy“. Je to pro obrazovky, které
    * dělá každý sám za sebe — docházku si zapisuje i brigádník, který
-   * nemá právo vidět docházku ostatních. Politika attendance_insert to
-   * říká stejně: vlastní příchod si zapíše každý zaměstnanec s účtem.
+   * nemá právo vidět docházku ostatních.
    */
   pravo: Permission | null
-  /** Hotové obrazovky se odkazují, ostatní se kreslí zašedle. */
+  /** Hotové obrazovky se odkazují, ostatní se kreslí zašedle se štítkem. */
   hotovo: boolean
+  ikona: IkonaKlic
 }
 
 export const NABIDKA: Polozka[] = [
-  { segment: 'moje-smeny', nazev: 'Moje směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true },
-  { segment: 'smeny', nazev: 'Rozpis směn', modul: 'provoz', pravo: 'shifts.read', hotovo: true },
-  { segment: 'dochazka', nazev: 'Docházka', modul: 'provoz', pravo: null, hotovo: true },
-  { segment: 'ukoly', nazev: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true },
-  { segment: 'zpravy', nazev: 'Nástěnka', modul: 'provoz', pravo: 'communication.read', hotovo: true },
-  { segment: 'receptury', nazev: 'Receptury', modul: 'provoz', pravo: 'recipes.read', hotovo: false },
-  { segment: 'listky', nazev: 'Jídelní lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false },
-  { segment: 'motivace', nazev: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false },
-  { segment: 'finance', nazev: 'Finance', modul: 'finance', pravo: 'finance.read', hotovo: false },
-  { segment: 'marketing', nazev: 'Marketing', modul: 'marketing', pravo: 'marketing.read', hotovo: false },
-  { segment: 'nakup', nazev: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false },
+  { segment: 'moje-smeny', nazev: 'Moje směny', kratky: 'Moje', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
+  { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
+  { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny' },
+  { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
+  { segment: 'zpravy', nazev: 'Nástěnka', kratky: 'Zprávy', modul: 'provoz', pravo: 'communication.read', hotovo: true, ikona: 'zprava' },
+  { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
+  { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
+  { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },
+  { segment: 'finance', nazev: 'Přehled financí', kratky: 'Finance', modul: 'finance', pravo: 'finance.read', hotovo: false, ikona: 'kniha' },
+  { segment: 'marketing', nazev: 'Marketing', kratky: 'Marketing', modul: 'marketing', pravo: 'marketing.read', hotovo: false, ikona: 'kniha' },
+  { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
 ]
 
+/**
+ * Nastavení není modul.
+ *
+ * Moduly se kupují, nastavení je oprávnění uvnitř Provozu. Proto stojí
+ * stranou za oddělovačem a má vlastní seznam obrazovek — mezi záložkami
+ * by vypadalo jako něco k doplacení.
+ */
+export const NASTAVENI: Polozka[] = [
+  { segment: 'nastaveni/firma', nazev: 'Firma', kratky: 'Firma', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
+  { segment: 'nastaveni/pobocky', nazev: 'Pobočky', kratky: 'Pobočky', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
+  { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'clovek' },
+  { segment: 'nastaveni/role', nazev: 'Role', kratky: 'Role', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'clovek' },
+  { segment: 'nastaveni/moduly', nazev: 'Moduly', kratky: 'Moduly', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
+]
+
+/** Názvy modulů, když je databáze nedodá. */
+export const NAZVY_MODULU: Record<ModuleKey, string> = {
+  provoz: 'Provoz',
+  finance: 'Finance',
+  marketing: 'Marketing',
+  objednavky: 'Objednávky',
+}
+
+function smiVidet(ctx: Context, p: Polozka): boolean {
+  return p.pravo === null || canSee(ctx, p.pravo)
+}
+
+/** Obrazovky jednoho modulu, na které uživatel dosáhne. */
+export function polozkyModulu(ctx: Context, modul: ModuleKey): Polozka[] {
+  if (!isModuleActive(ctx, modul)) return []
+  return NABIDKA.filter((p) => p.modul === modul && smiVidet(ctx, p))
+}
+
+/** Obrazovky nastavení. Jen se settings.manage. */
+export function polozkyNastaveni(ctx: Context): Polozka[] {
+  return NASTAVENI.filter((p) => smiVidet(ctx, p))
+}
+
+/** Všechno, na co uživatel dosáhne, napříč zapnutými moduly. */
 export function viditelnaNabidka(ctx: Context): Polozka[] {
-  return NABIDKA.filter(
-    (p) =>
-      isModuleActive(ctx, p.modul) &&
-      (p.pravo === null || canSee(ctx, p.pravo)),
+  return NABIDKA.filter((p) => isModuleActive(ctx, p.modul) && smiVidet(ctx, p))
+}
+
+/**
+ * Ke kterému modulu patří obrazovka v adrese.
+ *
+ * Adresy zůstávají ploché, takže se vybraný modul nedá přečíst z cesty —
+ * odvozuje se odsud. Co nesedí na žádnou obrazovku (rozcestník, neznámý
+ * segment), spadne na provoz.
+ */
+export function modulPodleSegmentu(segment: string | null): ModuleKey {
+  if (!segment) return 'provoz'
+  const p = [...NABIDKA, ...NASTAVENI].find(
+    (x) => x.segment === segment || segment.startsWith(x.segment + '/'),
   )
+  return p?.modul ?? 'provoz'
 }
