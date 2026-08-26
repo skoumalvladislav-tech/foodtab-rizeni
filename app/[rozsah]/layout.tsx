@@ -1,11 +1,18 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 
-import { canSee, getContext, getUser, type Context } from "@/lib/authz";
+import {
+  canSee,
+  getContext,
+  getUser,
+  TENANT_SCOPE_SEGMENT,
+  type Context,
+} from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import Ram, { type ModulProp, type PolozkaProp } from "./ram";
+import type { RozsahProp } from "./prepinac-rozsahu";
 
 /**
  * Rám všech obrazovek uvnitř rozsahu.
@@ -70,6 +77,7 @@ export default async function RozsahLayout({
       ikona: p.ikona,
       hotovo: p.hotovo,
       modul: p.modul,
+      jenPobocka: p.jenPobocka,
     })),
   );
 
@@ -92,7 +100,29 @@ export default async function RozsahLayout({
     ikona: p.ikona,
     hotovo: p.hotovo,
     modul: p.modul,
+    jenPobocka: p.jenPobocka,
   }));
+
+  // Volby přepínače. „Celá firma“ jen tomu, kdo má firemní členství —
+  // vedoucí jedné pobočky ji vidět nemá a databáze by ho tam stejně
+  // nepustila. Pobočky jsou ty, které vrátilo my_context, tedy ty,
+  // na které uživatel doopravdy vidí.
+  const rozsahy: RozsahProp[] = [
+    ...(ctx.membership.scope === "tenant"
+      ? [
+          {
+            slug: TENANT_SCOPE_SEGMENT,
+            nazev: "Celá firma",
+            barva: "slate",
+          },
+        ]
+      : []),
+    ...ctx.branches.map((b) => ({
+      slug: b.slug,
+      nazev: b.name,
+      barva: b.color,
+    })),
+  ];
 
   return (
     <Ram
@@ -100,7 +130,9 @@ export default async function RozsahLayout({
       barva={barvaRozsahu(ctx, scope.branchId)}
       druh={scope.level === "tenant" ? "Rozsah" : "Pobočka"}
       nazevRozsahu={scope.branchName ?? ctx.tenant.name}
-      kratkyRozsah={scope.branchName ?? "Celá firma"}
+      rozsahy={rozsahy}
+      aktivniRozsah={scope.branchSlug ?? TENANT_SCOPE_SEGMENT}
+      segmentFirmy={TENANT_SCOPE_SEGMENT}
       nazevFirmy={ctx.tenant.name}
       iniciraly={iniciraly(user.email)}
       moduly={moduly}

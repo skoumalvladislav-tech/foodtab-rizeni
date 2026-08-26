@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import PrepinacRezimu from "@/app/prepinac-rezimu";
 import Ikona from "./ikona";
+import PrepinacRozsahu, { type RozsahProp } from "./prepinac-rozsahu";
 import type { IkonaKlic } from "./nabidka";
 
 /* ---------------------------------------------------------------------
@@ -34,6 +35,8 @@ export type PolozkaProp = {
   ikona: IkonaKlic;
   hotovo: boolean;
   modul: string;
+  /** Bez pobočky nedává smysl — při přepnutí na firmu se jde jinam. */
+  jenPobocka?: boolean;
 };
 
 export type RamProps = {
@@ -43,7 +46,11 @@ export type RamProps = {
   /** "Pobočka" nebo "Rozsah" — nad názvem v hlavičce sloupce. */
   druh: string;
   nazevRozsahu: string;
-  kratkyRozsah: string;
+  /** Volby přepínače: Celá firma (jen pro firemní členství) a pobočky. */
+  rozsahy: RozsahProp[];
+  aktivniRozsah: string;
+  /** Segment firemní úrovně z authz (TENANT_SCOPE_SEGMENT). */
+  segmentFirmy: string;
   nazevFirmy: string;
   iniciraly: string;
   moduly: ModulProp[];
@@ -61,7 +68,9 @@ export default function Ram({
   barva,
   druh,
   nazevRozsahu,
-  kratkyRozsah,
+  rozsahy,
+  aktivniRozsah,
+  segmentFirmy,
   nazevFirmy,
   iniciraly,
   moduly,
@@ -97,6 +106,28 @@ export default function Ram({
   const doListy = sloupec.length <= 5 ? sloupec.slice(0, 5) : sloupec.slice(0, DO_LISTY);
   const jeVice = sloupec.length > 5;
 
+  /**
+   * Kam vede přepnutí rozsahu.
+   *
+   * Držíme stejnou obrazovku. Podadresu zahazujeme — identifikátor běhu
+   * checklistu patří jiné pobočce a jinde by nic nenašel. A obrazovku,
+   * která se váže na pobočku, nahradíme na firemní úrovni první
+   * obrazovkou téhož modulu, ať se nepřistane na hlášce o přístupu.
+   */
+  function cilRozsahu(novy: string): string {
+    const zaklad = zde?.segment;
+    if (!zaklad) return `/${novy}`;
+
+    if (novy === segmentFirmy && zde.jenPobocka) {
+      const nahrada = polozky.find(
+        (p) => p.modul === zde.modul && p.hotovo && !p.jenPobocka,
+      );
+      return nahrada ? `/${novy}/${nahrada.segment}` : `/${novy}`;
+    }
+
+    return `/${novy}/${zaklad}`;
+  }
+
   return (
     <div className="ft-shell" data-branch={barva}>
       <header className="ft-topbar">
@@ -113,14 +144,11 @@ export default function Ram({
         <div className="ft-spacer" />
 
         <div className="ft-tools">
-          <Link
-            href={`/${rozsah}`}
-            className="ft-chip"
-            title={`${druh}: ${nazevRozsahu}`}
-          >
-            <span className="ft-swatch" />
-            <span>{kratkyRozsah}</span>
-          </Link>
+          <PrepinacRozsahu
+            rozsahy={rozsahy}
+            aktivni={aktivniRozsah}
+            cil={cilRozsahu}
+          />
 
           <PrepinacRezimu />
 

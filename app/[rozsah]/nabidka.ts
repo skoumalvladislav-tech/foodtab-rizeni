@@ -50,12 +50,18 @@ export type Polozka = {
   /** Hotové obrazovky se odkazují, ostatní se kreslí zašedle se štítkem. */
   hotovo: boolean
   ikona: IkonaKlic
+  /**
+   * Obrazovka se váže na konkrétní pobočku a na firemní úrovni nedává
+   * smysl. Při přepnutí rozsahu se místo ní jde na první obrazovku
+   * téhož modulu — ne na chybovou stránku.
+   */
+  jenPobocka?: boolean
 }
 
 export const NABIDKA: Polozka[] = [
   { segment: 'moje-smeny', nazev: 'Moje směny', kratky: 'Moje', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
   { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
-  { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny' },
+  { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny', jenPobocka: true },
   { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'zpravy', nazev: 'Nástěnka', kratky: 'Zprávy', modul: 'provoz', pravo: 'communication.read', hotovo: true, ikona: 'zprava' },
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
