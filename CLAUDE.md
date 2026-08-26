@@ -81,7 +81,7 @@ elegantnější řešení.
 |---|---|
 | Supabase projekt (test) | `foodtab-test`, ref `spekntcsuroqhehmjssv`, Frankfurt, tarif Pro |
 | Ostrý projekt | zatím neexistuje, vznikne jako `foodtab-prod` |
-| Repozitář | `C:\Users\vladi\foodtab-rizeni`, pracovní větev `etapa0-zaklad` |
+| Repozitář | `C:\Users\vladi\foodtab-rizeni`, pracovní větev `main` |
 | E-mail | Resend, `smtp.resend.com:465`, odesílatel `noreply@foodtab.cz` |
 | SMS brána | zatím žádná, telefon je v Auth vypnutý |
 | Zálohy | denní (Pro). PITR odložený až k modulu Finance |
