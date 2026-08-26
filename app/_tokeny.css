@@ -103,14 +103,38 @@
    Bez :root schválně: <html> vykresluje kořenový layout, ale pobočku zná
    až layout rozsahu. Atribut proto sedí na obalu uvnitř stránky, což by
    selektor vázaný na :root nechytil. */
-[data-branch="slate"]   { --branch: var(--b-slate);   --branch-soft: var(--b-slate-soft); }
-[data-branch="indigo"]  { --branch: var(--b-indigo);  --branch-soft: var(--b-indigo-soft); }
-[data-branch="violet"]  { --branch: var(--b-violet);  --branch-soft: var(--b-violet-soft); }
-[data-branch="sky"]     { --branch: var(--b-sky);     --branch-soft: var(--b-sky-soft); }
-[data-branch="teal"]    { --branch: var(--b-teal);    --branch-soft: var(--b-teal-soft); }
-[data-branch="emerald"] { --branch: var(--b-emerald); --branch-soft: var(--b-emerald-soft); }
-[data-branch="amber"]   { --branch: var(--b-amber);   --branch-soft: var(--b-amber-soft); }
-[data-branch="rose"]    { --branch: var(--b-rose);    --branch-soft: var(--b-rose-soft); }
+[data-branch="slate"]   {
+  --branch: var(--b-slate);   --branch-soft: var(--b-slate-soft);
+  --accent: var(--b-slate);   --accent-soft: var(--b-slate-soft);
+}
+[data-branch="indigo"]  {
+  --branch: var(--b-indigo);  --branch-soft: var(--b-indigo-soft);
+  --accent: var(--b-indigo);  --accent-soft: var(--b-indigo-soft);
+}
+[data-branch="violet"]  {
+  --branch: var(--b-violet);  --branch-soft: var(--b-violet-soft);
+  --accent: var(--b-violet);  --accent-soft: var(--b-violet-soft);
+}
+[data-branch="sky"]     {
+  --branch: var(--b-sky);     --branch-soft: var(--b-sky-soft);
+  --accent: var(--b-sky);     --accent-soft: var(--b-sky-soft);
+}
+[data-branch="teal"]    {
+  --branch: var(--b-teal);    --branch-soft: var(--b-teal-soft);
+  --accent: var(--b-teal);    --accent-soft: var(--b-teal-soft);
+}
+[data-branch="emerald"] {
+  --branch: var(--b-emerald); --branch-soft: var(--b-emerald-soft);
+  --accent: var(--b-emerald); --accent-soft: var(--b-emerald-soft);
+}
+[data-branch="amber"]   {
+  --branch: var(--b-amber);   --branch-soft: var(--b-amber-soft);
+  --accent: var(--b-amber);   --accent-soft: var(--b-amber-soft);
+}
+[data-branch="rose"]    {
+  --branch: var(--b-rose);    --branch-soft: var(--b-rose-soft);
+  --accent: var(--b-rose);    --accent-soft: var(--b-rose-soft);
+}
 
 /* ---------------------------------------------------------------------
    Stará jména — VÝHRADNĚ pro odpojenou předlohu

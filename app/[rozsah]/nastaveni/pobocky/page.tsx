@@ -211,7 +211,7 @@ export default async function NastaveniPobocek({
               />
 
               {jeDotcena && chyba ? (
-                <p role="alert" style={{ ...hlaska, color: "var(--bad)" }}>
+                <p role="alert" className="hlaska-chyba">
                   {popisChyby(chyba)}
                 </p>
               ) : null}

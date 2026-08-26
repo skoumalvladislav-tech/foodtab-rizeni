@@ -101,7 +101,7 @@ export default function VystavitPozvankuFormular({
               </label>
 
               {error && (
-                <p style={{ ...chybaHlaska, color: 'var(--bad)' }}>{error}</p>
+                <p className="hlaska-chyba">{error}</p>
               )}
 
               <button

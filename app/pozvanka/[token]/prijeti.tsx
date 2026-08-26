@@ -37,7 +37,7 @@ export default function PrijmoutPozvankuFormular({ token }: { token: string }) {
         Kliknutím na tlačítko níže potvrdíte, že chcete vstoupit do firmy.
       </p>
 
-      {error && <p style={{ ...chybaHlaska, color: 'var(--bad)' }}>{error}</p>}
+      {error && <p className="hlaska-chyba">{error}</p>}
 
       <button type="submit" disabled={loading} style={tlacitko}>
         {loading ? 'Přijímám…' : 'Přijmout pozvánku'}

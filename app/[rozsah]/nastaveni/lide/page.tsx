@@ -137,7 +137,7 @@ export default async function NastaveniLide({
             </select>
           </label>
 
-          {chyba && <p style={{ ...chybaHlaska, color: "var(--bad)" }}>{chyba}</p>}
+          {chyba && <p className="hlaska-chyba">{chyba}</p>}
           {ulozeno && <p style={{ ...chybaHlaska, color: "var(--good)" }}>Uloženo.</p>}
 
           <div style={{ display: "flex", gap: "12px" }}>

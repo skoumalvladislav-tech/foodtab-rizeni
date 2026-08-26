@@ -57,7 +57,21 @@
 }
 .ft-ikona:hover { color: var(--ink); }
 .ft-ikona.ram { border-color: var(--line-2); }
-.ft-ikona:focus-visible { outline: 2px solid var(--branch); outline-offset: 1px; }
+.ft-ikona:focus-visible {
+  outline: 2px solid var(--branch);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ft-ikona:focus-visible {
+    box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.3);
+  }
+}
+
+:root[data-theme="dark"] .ft-ikona:focus-visible {
+  box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.3);
+}
 
 .ft-divider { width: 1px; height: 24px; background: var(--line); flex: none; }
 
@@ -413,6 +427,43 @@ select:focus-visible {
 .auth-error {
   background: #f9e0e4;
   color: var(--red) !important;
+}
+
+/* Zprávy v rozsahu — plná výplň, ikona a slovo */
+.hlaska-chyba,
+.hlaska-vareni {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.hlaska-chyba::before,
+.hlaska-vareni::before {
+  content: attr(data-ikona);
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 11px;
+  opacity: 0.85;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.hlaska-chyba {
+  background: var(--red);
+  color: #ffffff;
+}
+.hlaska-chyba::before {
+  content: "⚠ Chyba:";
+}
+.hlaska-vareni {
+  background: var(--warn);
+  color: #ffffff;
+}
+.hlaska-vareni::before {
+  content: "ℹ Upozornění:";
 }
 .auth-divider {
   margin: 20px 0;
