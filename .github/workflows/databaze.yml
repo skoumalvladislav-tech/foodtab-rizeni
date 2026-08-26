@@ -84,10 +84,40 @@ jobs:
           fi
           echo "Všechny scénáře doběhly."
 
-  nasazeni:
-    name: Nasazení na Supabase
+  # Tajemství se nedají číst v podmínce úlohy — kontext `secrets` tam
+  # GitHub nenabízí. Přečte je proto tahle úloha jako proměnné prostředí
+  # a výsledek předá dál jako výstup, na který se v podmínce ptát smí.
+  # Bez toho by push do main bez nastavených tajemství skončil červeně.
+  tajemstvi:
+    name: Jsou nastavená tajemství?
     needs: testy
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      pripraveno: ${{ steps.kontrola.outputs.pripraveno }}
+
+    steps:
+      - name: Ověřit tajemství
+        id: kontrola
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          HESLO: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PROJEKT: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -n "$TOKEN" ] && [ -n "$HESLO" ] && [ -n "$PROJEKT" ]; then
+            echo "pripraveno=true" >> "$GITHUB_OUTPUT"
+            echo "Tajemství jsou nastavená, nasazení proběhne."
+          else
+            echo "pripraveno=false" >> "$GITHUB_OUTPUT"
+            echo "Tajemství nejsou nastavená — nasazení se přeskočí."
+            echo "Migrace se zatím pouštějí ručně: supabase db push"
+          fi
+
+  nasazeni:
+    name: Nasazení na Supabase
+    needs: [testy, tajemstvi]
+    # Když tajemství chybí, úloha se přeskočí (šedě), ne spadne.
+    if: needs.tajemstvi.outputs.pripraveno == 'true'
     runs-on: ubuntu-latest
 
     steps:
