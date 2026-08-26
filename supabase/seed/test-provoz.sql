@@ -29,6 +29,14 @@ declare
   v_poradi   int;
   v_smen     int := 0;
   v_lidi     int := 0;
+
+  -- První a druhá pobočka. Úkoly je potřebují rozlišit, směny ne.
+  v_pob1     uuid;
+  v_pob2     uuid;
+  v_adresat  uuid;
+  v_sablona  uuid;
+  v_ukolu    int := 0;
+  v_pridano  int := 0;
 begin
   ------------------------------------------------------------------
   -- Firma
@@ -174,6 +182,125 @@ begin
       and a.body like 'Ukázková data:%'
   );
 
-  raise notice 'Hotovo: % zaměstnanců ve firmě, % ukázkových směn na % dní.',
-    v_lidi, v_smen, c_dnu;
+  ------------------------------------------------------------------
+  -- Úkoly
+  --
+  -- Čtyři případy, na kterých se pozná, že rozsah a adresování fungují:
+  -- jmenovitě zadaný, bez adresáta na pobočce, firemní a na druhé
+  -- pobočce. Rozlišují se názvem, takže se při opakovaném běhu nezaloží
+  -- podruhé — a jednou zavřený úkol zůstane zavřený.
+  ------------------------------------------------------------------
+  select b.id into v_pob1
+  from public.branches b
+  where b.tenant_id = v_tenant and b.deleted_at is null and b.active
+  order by b.created_at
+  limit 1;
+
+  select b.id into v_pob2
+  from public.branches b
+  where b.tenant_id = v_tenant and b.deleted_at is null and b.active
+    and b.id <> v_pob1
+  order by b.created_at
+  limit 1;
+
+  -- Adresát jmenovitého úkolu. Bereme kohokoli z první pobočky.
+  -- Pozn.: vyzkoušet, že si úkol zavře adresát BEZ tasks.manage, jde až
+  -- s druhým skutečným účtem — seed uživatele v auth.users zakládat neumí.
+  select e.id into v_adresat
+  from public.employees e
+  where e.tenant_id = v_tenant
+    and e.branch_id = v_pob1
+    and e.deleted_at is null
+  order by e.created_at
+  limit 1;
+
+  if v_pob1 is not null then
+    insert into public.tasks
+      (tenant_id, branch_id, employee_id, title, note, due_at, priority, created_by)
+    select v_tenant, u.branch, u.emp, u.nazev, u.pozn, u.termin, u.priorita, v_autor
+    from (values
+      (v_pob1, v_adresat,
+       'Objednat maso na víkend',
+       'Ukázkový úkol zadaný konkrétnímu člověku.',
+       (now() + interval '1 day')::timestamptz, 'high'),
+      (v_pob1, null::uuid,
+       'Doplnit ubrousky na terasu',
+       'Ukázkový úkol bez adresáta — vezme ho, kdo má čas.',
+       (now() + interval '2 days')::timestamptz, 'normal'),
+      (null::uuid, null::uuid,
+       'Projít ceny dodavatelů',
+       'Ukázkový úkol pro celou firmu, nevisí na pobočce.',
+       (now() + interval '5 days')::timestamptz, 'normal')
+    ) as u(branch, emp, nazev, pozn, termin, priorita)
+    where not exists (
+      select 1 from public.tasks t
+      where t.tenant_id = v_tenant and t.title = u.nazev
+    );
+
+    get diagnostics v_ukolu = row_count;
+  end if;
+
+  if v_pob2 is not null then
+    insert into public.tasks
+      (tenant_id, branch_id, title, note, due_at, priority, created_by)
+    select v_tenant, v_pob2,
+           'Vyčistit odsávání nad grilem',
+           'Ukázkový úkol na druhé pobočce.',
+           now() + interval '3 days', 'normal', v_autor
+    where not exists (
+      select 1 from public.tasks t
+      where t.tenant_id = v_tenant
+        and t.title = 'Vyčistit odsávání nad grilem'
+    );
+
+    get diagnostics v_pridano = row_count;
+    v_ukolu := v_ukolu + v_pridano;
+  end if;
+
+  ------------------------------------------------------------------
+  -- Otevírací checklist
+  --
+  -- branch_id prázdné = šablona platí pro celou firmu, takže se nabídne
+  -- na obou pobočkách. Číselné položky mají meze, na kterých se pozná,
+  -- že se hodnota mimo rozsah odmítne.
+  ------------------------------------------------------------------
+  select t.id into v_sablona
+  from public.checklist_templates t
+  where t.tenant_id = v_tenant and t.name = 'Otevírací checklist'
+  limit 1;
+
+  if v_sablona is null then
+    insert into public.checklist_templates
+      (tenant_id, branch_id, name, department, schedule, active)
+    values (v_tenant, null, 'Otevírací checklist', 'provoz', 'opening', true)
+    returning id into v_sablona;
+  end if;
+
+  insert into public.checklist_items
+    (template_id, position, label, requires_value, value_type,
+     value_unit, min_value, max_value)
+  select v_sablona, p.poradi, p.popis, p.chce_hodnotu, p.typ,
+         p.jednotka, p.min_h, p.max_h
+  from (values
+    -- Meze jsou schválně úzké, ať je snadné trefit se vedle a vyzkoušet,
+    -- že se hodnota mimo rozsah odmítne.
+    (1::smallint, 'Teplota lednice v kuchyni', true, 'number'::text, '°C'::text,
+      2::numeric, 5::numeric),
+    (2::smallint, 'Teplota mrazáku', true, 'number'::text, '°C'::text,
+      -25::numeric, -18::numeric),
+    (3::smallint, 'Teplota lednice na baru', true, 'number'::text, '°C'::text,
+      2::numeric, 8::numeric),
+    (4::smallint, 'Zkontrolovat čistotu výčepu', false, null::text, null::text,
+      null::numeric, null::numeric),
+    (5::smallint, 'Spustit kávovar a propláchnout', false, null::text, null::text,
+      null::numeric, null::numeric)
+  ) as p(poradi, popis, chce_hodnotu, typ, jednotka, min_h, max_h)
+  where not exists (
+    select 1 from public.checklist_items i
+    where i.template_id = v_sablona and i.label = p.popis
+  );
+
+  raise notice 'Hotovo: % zaměstnanců, % směn na % dní, % úkolů, checklist %.',
+    v_lidi, v_smen, c_dnu, v_ukolu,
+    case when v_sablona is null then 'nezaložen' else 'připraven' end;
 end $$;
