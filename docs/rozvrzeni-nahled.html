@@ -1,0 +1,567 @@
+<title>Rozvržení Foodtabu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+
+<style>
+  /* ---- Tokeny -------------------------------------------------- */
+  :root {
+    --paper:  #f4f6fb;
+    --card:   #ffffff;
+    --sunken: #eef1f8;
+    --ink:    #131a2b;
+    --muted:  #616d85;
+    --faint:  #8b96ab;
+    --line:   #dde3ee;
+    --line-2: #c9d2e3;
+    --accent: #4f46e5;
+    --accent-soft: #eceafe;
+    --good:   #0f766e;
+    --warn:   #b45309;
+    --shadow: 0 1px 2px rgba(19,26,43,.06), 0 8px 24px -12px rgba(19,26,43,.18);
+
+    /* barvy poboček — klíč z branches.color */
+    --b-slate:  #475569;  --b-slate-soft:  #e7ebf2;
+    --b-indigo: #4f46e5;  --b-indigo-soft: #eceafe;
+    --b-amber:  #b45309;  --b-amber-soft:  #fdf0dc;
+
+    --branch:      var(--b-indigo);
+    --branch-soft: var(--b-indigo-soft);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:  #080c16;
+      --card:   #111827;
+      --sunken: #0d1420;
+      --ink:    #e9edf6;
+      --muted:  #97a2b8;
+      --faint:  #6c789194;
+      --faint:  #6c7891;
+      --line:   #212c40;
+      --line-2: #2c3950;
+      --accent: #8b87f5;
+      --accent-soft: #201f3d;
+      --good:   #5eead4;
+      --warn:   #fbbf24;
+      --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+
+      --b-slate:  #94a3b8;  --b-slate-soft:  #1c2637;
+      --b-indigo: #8b87f5;  --b-indigo-soft: #221f42;
+      --b-amber:  #f0a52a;  --b-amber-soft:  #33240d;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:  #080c16;
+    --card:   #111827;
+    --sunken: #0d1420;
+    --ink:    #e9edf6;
+    --muted:  #97a2b8;
+    --faint:  #6c7891;
+    --line:   #212c40;
+    --line-2: #2c3950;
+    --accent: #8b87f5;
+    --accent-soft: #201f3d;
+    --good:   #5eead4;
+    --warn:   #fbbf24;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+
+    --b-slate:  #94a3b8;  --b-slate-soft:  #1c2637;
+    --b-indigo: #8b87f5;  --b-indigo-soft: #221f42;
+    --b-amber:  #f0a52a;  --b-amber-soft:  #33240d;
+  }
+
+  :root[data-branch="slate"]  { --branch: var(--b-slate);  --branch-soft: var(--b-slate-soft); }
+  :root[data-branch="indigo"] { --branch: var(--b-indigo); --branch-soft: var(--b-indigo-soft); }
+  :root[data-branch="amber"]  { --branch: var(--b-amber);  --branch-soft: var(--b-amber-soft); }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 40px 24px 96px; }
+
+  /* ---- Hlavička ------------------------------------------------ */
+  .lede { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-end;
+          justify-content: space-between; margin-bottom: 40px; }
+  .lede h1 { font-size: clamp(28px, 4vw, 40px); line-height: 1.12; margin: 0 0 10px;
+             letter-spacing: -.02em; font-weight: 700; text-wrap: balance; }
+  .lede p { margin: 0; color: var(--muted); max-width: 56ch; }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+  .seg { display: flex; background: var(--card); border: 1px solid var(--line);
+         border-radius: 10px; padding: 3px; box-shadow: var(--shadow); }
+  .seg button {
+    font: inherit; font-size: 13px; font-weight: 500; color: var(--muted);
+    background: none; border: 0; padding: 7px 13px; border-radius: 7px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  }
+  .seg button:hover { color: var(--ink); }
+  .seg button[aria-pressed="true"] { background: var(--sunken); color: var(--ink); }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+  /* ---- Rám zařízení -------------------------------------------- */
+  .shot { margin-bottom: 44px; }
+  .shot-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  .shot-head h2 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+  .shot-head span { font-family: "IBM Plex Mono", ui-monospace, monospace;
+                    font-size: 12px; color: var(--faint); }
+
+  .wrap { overflow: hidden; border-radius: 14px; border: 1px solid var(--line-2);
+          box-shadow: var(--shadow); background: var(--card); }
+  .device { transform-origin: top left; background: var(--paper); overflow: hidden;
+            font-size: 14px; }
+
+  .w-desk { width: calc(1280px * var(--s-d)); height: calc(760px * var(--s-d)); }
+  .d-desk { width: 1280px; height: 760px; transform: scale(var(--s-d)); }
+  .w-tab  { width: calc(834px * var(--s-t)); height: calc(620px * var(--s-t)); }
+  .d-tab  { width: 834px; height: 620px; transform: scale(var(--s-t)); }
+  .w-mob  { width: calc(390px * var(--s-m)); height: calc(720px * var(--s-m)); }
+  .d-mob  { width: 390px; height: 720px; transform: scale(var(--s-m)); }
+
+  :root { --s-d: .87; --s-t: .87; --s-m: .87; }
+  @media (max-width: 1180px) { :root { --s-d: .72; } }
+  @media (max-width: 900px)  { :root { --s-d: .55; --s-t: .72; } }
+  @media (max-width: 660px)  { :root { --s-d: .40; --s-t: .52; --s-m: .78; } }
+  @media (max-width: 460px)  { :root { --s-d: .28; --s-t: .38; --s-m: .68; } }
+
+  .pair { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+
+  /* ---- Společné prvky rozhraní --------------------------------- */
+  .topbar { display: flex; align-items: center; gap: 18px; height: 56px; padding: 0 18px;
+            background: var(--card); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 700; letter-spacing: -.02em; font-size: 17px; }
+  .brand em { font-style: normal; color: var(--branch); }
+
+  .mods { display: flex; gap: 2px; align-items: center; }
+  .mod { padding: 7px 14px; border-radius: 8px; font-size: 13.5px; font-weight: 500;
+         color: var(--muted); white-space: nowrap; }
+  .mod.on { background: var(--branch-soft); color: var(--branch); font-weight: 600; }
+  .mod.off { color: var(--faint); position: relative; }
+  .mod.off::after { content: ""; position: absolute; inset: 6px 10px auto; height: 1px;
+                    background: currentColor; opacity: .28; top: 50%; }
+
+  .spacer { margin-left: auto; }
+  .tools { display: flex; align-items: center; gap: 10px; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500;
+          padding: 6px 11px; border: 1px solid var(--line-2); border-radius: 999px;
+          background: var(--card); color: var(--ink); }
+  .chip .swatch { background: var(--branch); }
+  .icon-btn { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
+              color: var(--muted); border: 1px solid transparent; }
+  .icon-btn.settings { border-color: var(--line-2); }
+  .divider { width: 1px; height: 24px; background: var(--line); }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--branch);
+            color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+  :root[data-theme="dark"] .avatar, :root:not([data-theme="light"]) .avatar { color: #0b1020; }
+
+  .body-row { display: flex; height: calc(100% - 56px); }
+
+  .side { width: 240px; flex: none; background: var(--card); border-right: 1px solid var(--line);
+          display: flex; flex-direction: column; }
+  .side-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+  .strip { height: 3px; border-radius: 2px; background: var(--branch); margin-bottom: 10px; }
+  .side-head b { display: block; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+  .side-head span { font-size: 11.5px; color: var(--faint); text-transform: uppercase;
+                    letter-spacing: .08em; }
+  .nav { padding: 10px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+           font-size: 13.5px; color: var(--muted); text-decoration: none; }
+  .nav a.on { background: var(--branch-soft); color: var(--branch); font-weight: 600; }
+  .nav a.soon { color: var(--faint); }
+  .nav a.soon small { margin-left: auto; font-size: 10.5px; text-transform: uppercase;
+                      letter-spacing: .06em; }
+  .nav hr { border: 0; border-top: 1px solid var(--line); margin: 8px 2px; }
+
+  .main { flex: 1; padding: 24px 28px; overflow: hidden; }
+  .main h3 { margin: 0 0 3px; font-size: 20px; letter-spacing: -.02em; }
+  .main .sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+
+  .week { display: flex; gap: 6px; margin-bottom: 18px; }
+  .day { flex: 1; text-align: center; padding: 8px 4px; border-radius: 9px;
+         border: 1px solid var(--line); background: var(--card); }
+  .day b { display: block; font-size: 15px; font-family: "IBM Plex Mono", monospace; }
+  .day span { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+  .day.on { background: var(--branch); border-color: var(--branch); }
+  .day.on b, .day.on span { color: #fff; }
+  :root[data-theme="dark"] .day.on b, :root[data-theme="dark"] .day.on span,
+  :root:not([data-theme="light"]) .day.on b, :root:not([data-theme="light"]) .day.on span { color: #0b1020; }
+
+  .rows { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--card); }
+  .row { display: flex; align-items: center; gap: 14px; padding: 12px 16px;
+         border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row .time { font-family: "IBM Plex Mono", monospace; font-size: 13px; font-variant-numeric: tabular-nums;
+               color: var(--ink); width: 108px; flex: none; }
+  .row .who { font-size: 13.5px; font-weight: 500; }
+  .row .role { font-size: 12px; color: var(--muted); }
+  .row .tag { margin-left: auto; font-size: 11.5px; padding: 3px 9px; border-radius: 999px;
+              border: 1px solid var(--line-2); color: var(--muted); white-space: nowrap; }
+  .row .tag.open { border-color: var(--warn); color: var(--warn); }
+  .row .tag.ok { border-color: var(--good); color: var(--good); }
+  .row.empty .who { color: var(--warn); }
+
+  /* rail (tablet) */
+  .rail { width: 72px; flex: none; background: var(--card); border-right: 1px solid var(--line);
+          display: flex; flex-direction: column; align-items: center; padding-top: 12px; gap: 4px; }
+  .rail .strip { width: 40px; height: 3px; margin-bottom: 8px; }
+  .rail a { width: 46px; height: 42px; border-radius: 9px; display: grid; place-items: center;
+            color: var(--muted); }
+  .rail a.on { background: var(--branch-soft); color: var(--branch); }
+
+  /* mobil */
+  .m-top { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+           background: var(--card); border-bottom: 1px solid var(--line); }
+  .m-mods { display: flex; gap: 6px; padding: 8px 14px; background: var(--card);
+            border-bottom: 1px solid var(--line); overflow: hidden; }
+  .m-mods .mod { padding: 5px 11px; font-size: 12.5px; }
+  .m-main { padding: 16px 14px; height: calc(100% - 52px - 41px - 62px); overflow: hidden; }
+  .m-bottom { height: 62px; display: flex; border-top: 1px solid var(--line); background: var(--card);
+              position: relative; }
+  .m-bottom a { flex: 1; display: flex; flex-direction: column; align-items: center;
+                justify-content: center; gap: 3px; font-size: 10px; color: var(--faint); }
+  .m-bottom a.on { color: var(--branch); }
+
+  svg.i { width: 17px; height: 17px; stroke: currentColor; fill: none;
+          stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .m-bottom svg.i { width: 20px; height: 20px; }
+
+  /* ---- Poznámky ------------------------------------------------ */
+  .notes { margin-top: 56px; border-top: 1px solid var(--line); padding-top: 32px; }
+  .notes h2 { font-size: 19px; margin: 0 0 20px; letter-spacing: -.02em; }
+  .notes dl { display: grid; gap: 18px; margin: 0;
+              grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .notes div { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+               padding: 16px 18px; }
+  .notes dt { font-weight: 600; font-size: 14px; margin-bottom: 5px; }
+  .notes dd { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .notes code { font-family: "IBM Plex Mono", monospace; font-size: 12.5px;
+                background: var(--sunken); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-cal"><rect x="3" y="4.5" width="14" height="13" rx="2"/><path d="M3 8.5h14M7 2.5v4M13 2.5v4"/></g>
+    <g id="i-clock"><circle cx="10" cy="10" r="7.5"/><path d="M10 6v4.3l2.8 1.7"/></g>
+    <g id="i-check"><path d="M4 10.5l3.6 3.5L16 5.5"/></g>
+    <g id="i-msg"><path d="M3.5 5.5a2 2 0 012-2h9a2 2 0 012 2v6a2 2 0 01-2 2H8l-4 3.2V5.5z"/></g>
+    <g id="i-user"><circle cx="10" cy="7" r="3.2"/><path d="M4 17c.7-3.2 3-4.6 6-4.6s5.3 1.4 6 4.6"/></g>
+    <g id="i-cog"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.6v2M10 15.4v2M17.4 10h-2M4.6 10h-2M15.2 4.8l-1.4 1.4M6.2 13.8l-1.4 1.4M15.2 15.2l-1.4-1.4M6.2 6.2L4.8 4.8"/></g>
+    <g id="i-sun"><circle cx="10" cy="10" r="3.6"/><path d="M10 2v2M10 16v2M18 10h-2M4 10H2M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4M15.7 15.7l-1.4-1.4M5.7 5.7L4.3 4.3"/></g>
+    <g id="i-book"><path d="M4 4.5h5.2c.9 0 1.8.6 1.8 1.6V17c0-.8-.9-1.4-1.8-1.4H4V4.5zM16 4.5h-5.2c-.9 0-1.8.6-1.8 1.6V17c0-.8.9-1.4 1.8-1.4H16V4.5z"/></g>
+    <g id="i-dots"><circle cx="5" cy="10" r="1.3"/><circle cx="10" cy="10" r="1.3"/><circle cx="15" cy="10" r="1.3"/></g>
+  </defs>
+</svg>
+
+<div class="page">
+
+  <header class="lede">
+    <div>
+      <h1>Rozvržení Foodtabu</h1>
+      <p>Moduly nahoře, obrazovky vlevo, obsah vedle. Přepni si režim a pobočku —
+         uvidíš, jak se barva propisuje do celého rozhraní.</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Režim">
+        <button type="button" data-theme-set="light"  aria-pressed="false">Světlý</button>
+        <button type="button" data-theme-set="dark"   aria-pressed="false">Tmavý</button>
+        <button type="button" data-theme-set="system" aria-pressed="true">Podle systému</button>
+      </div>
+      <div class="seg" role="group" aria-label="Rozsah">
+        <button type="button" data-branch-set="slate" aria-pressed="false">
+          <span class="swatch" style="background:var(--b-slate)"></span>Celá firma</button>
+        <button type="button" data-branch-set="indigo" aria-pressed="true">
+          <span class="swatch" style="background:var(--b-indigo)"></span>Černá Perla</button>
+        <button type="button" data-branch-set="amber" aria-pressed="false">
+          <span class="swatch" style="background:var(--b-amber)"></span>Bernard Bar</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ POČÍTAČ ============ -->
+  <section class="shot">
+    <div class="shot-head"><h2>Počítač</h2><span>1280 px</span></div>
+    <div class="wrap w-desk">
+      <div class="device d-desk">
+
+        <div class="topbar">
+          <div class="brand">Food<em>tab</em></div>
+          <nav class="mods">
+            <span class="mod on">Provoz</span>
+            <span class="mod off">Finance</span>
+            <span class="mod off">Marketing</span>
+            <span class="mod off">Objednávky</span>
+          </nav>
+          <div class="spacer"></div>
+          <div class="tools">
+            <span class="chip"><span class="swatch"></span><span data-branch-name>Restaurace Černá Perla</span></span>
+            <span class="icon-btn"><svg class="i"><use href="#i-sun"/></svg></span>
+            <span class="avatar">VS</span>
+            <span class="divider"></span>
+            <span class="icon-btn settings"><svg class="i"><use href="#i-cog"/></svg></span>
+          </div>
+        </div>
+
+        <div class="body-row">
+          <aside class="side">
+            <div class="side-head">
+              <div class="strip"></div>
+              <span data-branch-kind>Pobočka</span>
+              <b data-branch-name>Restaurace Černá Perla</b>
+            </div>
+            <nav class="nav">
+              <a href="#"><svg class="i"><use href="#i-cal"/></svg>Moje směny</a>
+              <a href="#" class="on"><svg class="i"><use href="#i-cal"/></svg>Rozpis směn</a>
+              <a href="#"><svg class="i"><use href="#i-clock"/></svg>Docházka</a>
+              <a href="#"><svg class="i"><use href="#i-check"/></svg>Úkoly a checklisty</a>
+              <a href="#"><svg class="i"><use href="#i-msg"/></svg>Nástěnka</a>
+              <hr>
+              <a href="#" class="soon"><svg class="i"><use href="#i-book"/></svg>Receptury <small>brzy</small></a>
+              <a href="#" class="soon"><svg class="i"><use href="#i-book"/></svg>Jídelní lístky <small>brzy</small></a>
+              <a href="#" class="soon"><svg class="i"><use href="#i-user"/></svg>Motivace <small>brzy</small></a>
+            </nav>
+          </aside>
+
+          <main class="main">
+            <h3>Rozpis směn</h3>
+            <p class="sub">Provozní den začíná v 05:00 — účet vystavený ve 2:15 patří do včerejška.</p>
+
+            <div class="week">
+              <div class="day on"><b>26</b><span>St</span></div>
+              <div class="day"><b>27</b><span>Čt</span></div>
+              <div class="day"><b>28</b><span>Pá</span></div>
+              <div class="day"><b>29</b><span>So</span></div>
+              <div class="day"><b>30</b><span>Ne</span></div>
+              <div class="day"><b>31</b><span>Po</span></div>
+              <div class="day"><b>1</b><span>Út</span></div>
+            </div>
+
+            <div class="rows">
+              <div class="row">
+                <span class="time">07:00–15:30</span>
+                <span><span class="who">Jana Kuchařová</span><br><span class="role">Kuchař</span></span>
+                <span class="tag ok">Potvrzeno</span>
+              </div>
+              <div class="row">
+                <span class="time">07:00–15:30</span>
+                <span><span class="who">Petr Novák</span><br><span class="role">Obsluha</span></span>
+                <span class="tag ok">Potvrzeno</span>
+              </div>
+              <div class="row">
+                <span class="time">15:00–23:30</span>
+                <span><span class="who">Eva Barová</span><br><span class="role">Barmanka</span></span>
+                <span class="tag">V plánu</span>
+              </div>
+              <div class="row">
+                <span class="time">18:00–23:00</span>
+                <span><span class="who">Tomáš Brigádník</span><br><span class="role">Výpomoc · bez účtu</span></span>
+                <span class="tag">V plánu</span>
+              </div>
+              <div class="row empty">
+                <span class="time">15:00–23:30</span>
+                <span><span class="who">Neobsazeno</span><br><span class="role">Kuchyně</span></span>
+                <span class="tag open">Chybí člověk</span>
+              </div>
+            </div>
+          </main>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TABLET + TELEFON ============ -->
+  <div class="pair">
+    <section class="shot">
+      <div class="shot-head"><h2>Tablet</h2><span>834 px</span></div>
+      <div class="wrap w-tab">
+        <div class="device d-tab">
+
+          <div class="topbar">
+            <div class="brand">Food<em>tab</em></div>
+            <nav class="mods">
+              <span class="mod on">Provoz</span>
+              <span class="mod off">Finance</span>
+              <span class="mod off">Marketing</span>
+              <span class="mod off">Objednávky</span>
+            </nav>
+            <div class="spacer"></div>
+            <div class="tools">
+              <span class="chip"><span class="swatch"></span><span data-branch-short>Černá Perla</span></span>
+              <span class="divider"></span>
+              <span class="icon-btn settings"><svg class="i"><use href="#i-cog"/></svg></span>
+            </div>
+          </div>
+
+          <div class="body-row">
+            <aside class="rail">
+              <div class="strip"></div>
+              <a href="#"><svg class="i"><use href="#i-cal"/></svg></a>
+              <a href="#" class="on"><svg class="i"><use href="#i-cal"/></svg></a>
+              <a href="#"><svg class="i"><use href="#i-clock"/></svg></a>
+              <a href="#"><svg class="i"><use href="#i-check"/></svg></a>
+              <a href="#"><svg class="i"><use href="#i-msg"/></svg></a>
+            </aside>
+
+            <main class="main">
+              <h3>Rozpis směn</h3>
+              <p class="sub">Středa 26. srpna</p>
+              <div class="rows">
+                <div class="row">
+                  <span class="time">07:00–15:30</span>
+                  <span><span class="who">Jana Kuchařová</span><br><span class="role">Kuchař</span></span>
+                  <span class="tag ok">Potvrzeno</span>
+                </div>
+                <div class="row">
+                  <span class="time">15:00–23:30</span>
+                  <span><span class="who">Eva Barová</span><br><span class="role">Barmanka</span></span>
+                  <span class="tag">V plánu</span>
+                </div>
+                <div class="row empty">
+                  <span class="time">15:00–23:30</span>
+                  <span><span class="who">Neobsazeno</span><br><span class="role">Kuchyně</span></span>
+                  <span class="tag open">Chybí člověk</span>
+                </div>
+              </div>
+            </main>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <section class="shot">
+      <div class="shot-head"><h2>Telefon</h2><span>390 px</span></div>
+      <div class="wrap w-mob">
+        <div class="device d-mob">
+
+          <div class="m-top">
+            <div class="brand">Food<em>tab</em></div>
+            <div class="spacer"></div>
+            <span class="chip"><span class="swatch"></span><span data-branch-short>Černá Perla</span></span>
+            <span class="icon-btn settings"><svg class="i"><use href="#i-cog"/></svg></span>
+          </div>
+
+          <div class="m-mods">
+            <span class="mod on">Provoz</span>
+            <span class="mod off">Finance</span>
+            <span class="mod off">Marketing</span>
+          </div>
+
+          <main class="m-main">
+            <h3 style="font-size:17px;margin:0 0 2px">Moje směny</h3>
+            <p class="sub" style="margin-bottom:14px">Příštích 14 dní</p>
+            <div class="rows">
+              <div class="row" style="padding:11px 13px">
+                <span class="time" style="width:auto">St 26. · 07:00</span>
+                <span class="tag ok">Dnes</span>
+              </div>
+              <div class="row" style="padding:11px 13px">
+                <span class="time" style="width:auto">Pá 28. · 15:00</span>
+                <span class="tag">V plánu</span>
+              </div>
+              <div class="row" style="padding:11px 13px">
+                <span class="time" style="width:auto">Ne 30. · 07:00</span>
+                <span class="tag">V plánu</span>
+              </div>
+              <div class="row" style="padding:11px 13px">
+                <span class="time" style="width:auto">Út 1. · 15:00</span>
+                <span class="tag">V plánu</span>
+              </div>
+            </div>
+          </main>
+
+          <nav class="m-bottom">
+            <a href="#" class="on"><svg class="i"><use href="#i-cal"/></svg>Směny</a>
+            <a href="#"><svg class="i"><use href="#i-clock"/></svg>Docházka</a>
+            <a href="#"><svg class="i"><use href="#i-check"/></svg>Úkoly</a>
+            <a href="#"><svg class="i"><use href="#i-msg"/></svg>Zprávy</a>
+            <a href="#"><svg class="i"><use href="#i-dots"/></svg>Více</a>
+          </nav>
+
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ POZNÁMKY ============ -->
+  <section class="notes">
+    <h2>Čtyři rozhodnutí, která v obrázku nejsou vidět</h2>
+    <dl>
+      <div>
+        <dt>Nastavení stojí stranou</dt>
+        <dd>Není to pátý modul. Moduly se kupují, nastavení je oprávnění
+            <code>settings.manage</code> uvnitř Provozu. Proto ozubené kolo za oddělovačem,
+            ne mezi záložkami — jinak by to vypadalo jako něco k doplacení.</dd>
+      </div>
+      <div>
+        <dt>Vypnutý modul je vidět, ale zašedlý</dt>
+        <dd>Firma má zatím jen Provoz. Ostatní se nekreslí jako mrtvé odkazy: zákazník má
+            vidět, co si může přikoupit. Dovnitř ho stejně nepustí databáze, ne jen menu.</dd>
+      </div>
+      <div>
+        <dt>Barva nikdy nestojí sama</dt>
+        <dd>Vedle barevné tečky je vždycky název pobočky. Deset procent mužů rozeznává barvy
+            hůř a v provozu se kouká na displej přes rameno — barva má upozornit, ne informovat.</dd>
+      </div>
+      <div>
+        <dt>Na telefonu se sloupec stěhuje dolů</dt>
+        <dd>Levý sloupec je na mobilu k ničemu — palec dosáhne na spodek. Pět nejčastějších
+            obrazovek modulu do spodní lišty, zbytek pod „Více“. Dotykové cíle 44 px,
+            protože se to bude ovládat mokrýma rukama.</dd>
+      </div>
+    </dl>
+  </section>
+
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var names = {
+      slate:  { long: "Celá firma",              short: "Celá firma",   kind: "Rozsah"  },
+      indigo: { long: "Restaurace Černá Perla",  short: "Černá Perla",  kind: "Pobočka" },
+      amber:  { long: "Bernard Bar Tábor",       short: "Bernard Bar",  kind: "Pobočka" }
+    };
+
+    function press(group, value, attr) {
+      document.querySelectorAll("[" + attr + "]").forEach(function (b) {
+        b.setAttribute("aria-pressed", String(b.getAttribute(attr) === value));
+      });
+    }
+
+    document.querySelectorAll("[data-theme-set]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var v = b.getAttribute("data-theme-set");
+        if (v === "system") { root.removeAttribute("data-theme"); }
+        else { root.setAttribute("data-theme", v); }
+        press(null, v, "data-theme-set");
+      });
+    });
+
+    document.querySelectorAll("[data-branch-set]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var v = b.getAttribute("data-branch-set");
+        root.setAttribute("data-branch", v);
+        press(null, v, "data-branch-set");
+        document.querySelectorAll("[data-branch-name]").forEach(function (n) { n.textContent = names[v].long; });
+        document.querySelectorAll("[data-branch-short]").forEach(function (n) { n.textContent = names[v].short; });
+        document.querySelectorAll("[data-branch-kind]").forEach(function (n) { n.textContent = names[v].kind; });
+      });
+    });
+
+    root.setAttribute("data-branch", "indigo");
+  })();
+</script>

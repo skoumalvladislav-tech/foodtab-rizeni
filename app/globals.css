@@ -1,63 +1,304 @@
 @import "tailwindcss";
 
+/* =====================================================================
+   Tokeny rozhraní — podle docs/rozvrzeni-nahled.html
+   =====================================================================
+   Světlý základ je tady v :root. Tmavý se opakuje dvakrát schválně:
+   jednou pod prefers-color-scheme se strážcem :root:not([data-theme="light"]),
+   podruhé pod :root[data-theme="dark"]. Bez toho by ruční přepínač
+   vyhrál jen v jednom směru — kdo má tmavý systém a chce světlo, by ho
+   nedostal.
+
+   Žádná barva se nedefinuje jen uvnitř media dotazu.
+   ===================================================================== */
+
 :root {
-  --ink: #0f172a;
-  --muted: #64748b;
-  --green: #4f46e5;
-  --green2: #4338ca;
-  --mint: #eef2ff;
-  --gold: #da942b;
-  --paper: #f8fafc;
-  --card: #ffffff;
-  --line: #e2e8f0;
-  --red: #dc2626;
-  --copper: #f59e0b;
-  --shadow: 0 4px 20px rgba(79, 70, 229, 0.08);
-  /* sidebar & topbar tokens */
-  --sidebar-bg: #1e1b4b;
-  --sidebar-active: #4f46e5;
-  --sidebar-text: #efedec;
-  --sidebar-muted: #9c9895;
-  --topbar-bg: rgba(248, 250, 252, 0.92);
-  --pulse-dot: #818cf8;
-  --pulse-ring: #e2e8f0;
+  --paper:  #f4f6fb;
+  --card:   #ffffff;
+  --sunken: #eef1f8;
+  --ink:    #131a2b;
+  --muted:  #616d85;
+  --faint:  #8b96ab;
+  --line:   #dde3ee;
+  --line-2: #c9d2e3;
+  --accent: #4f46e5;
+  --accent-soft: #eceafe;
+  --good:   #0f766e;
+  --warn:   #b45309;
+  /* Předloha vlastní barvu pro chybu nemá. Doplněná ve stejném duchu:
+     tmavší odstín na světlém pozadí, světlejší na tmavém. */
+  --bad:    #b91c1c;
+  --shadow: 0 1px 2px rgba(19,26,43,.06), 0 8px 24px -12px rgba(19,26,43,.18);
+
+  /* Barvy poboček — klíč z branches.color. První tři jsou z předlohy,
+     zbylých pět dopočítané stejným způsobem: sytější tón na světlo,
+     světlejší na tmu, k tomu velmi bledý (resp. velmi tmavý) podklad. */
+  --b-slate:   #475569;  --b-slate-soft:   #e7ebf2;
+  --b-indigo:  #4f46e5;  --b-indigo-soft:  #eceafe;
+  --b-violet:  #7c3aed;  --b-violet-soft:  #f1ebfe;
+  --b-sky:     #0369a1;  --b-sky-soft:     #e2f1fb;
+  --b-teal:    #0f766e;  --b-teal-soft:    #ddf1ef;
+  --b-emerald: #047857;  --b-emerald-soft: #ddf3e9;
+  --b-amber:   #b45309;  --b-amber-soft:   #fdf0dc;
+  --b-rose:    #be123c;  --b-rose-soft:    #fce8ed;
+
+  /* Výchozí, než se doplní pobočka. Firemní úroveň má slate. */
+  --branch:      var(--b-slate);
+  --branch-soft: var(--b-slate-soft);
 }
 
-/* ── Bernard Bar Tábor — tmavé téma ─────────────────── */
-[data-branch="bernard-bar-tabor"] {
-  --ink: #e2e8f0;
-  --muted: #94a3b8;
-  --green: #d97706;
-  --green2: #b45309;
-  --mint: rgba(217, 119, 6, 0.14);
-  --gold: #f59e0b;
-  --paper: #0d1117;
-  --card: #161b27;
-  --line: #262d3f;
-  --shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  --sidebar-bg: #070a12;
-  --sidebar-active: #d97706;
-  --sidebar-text: #e2e8f0;
-  --sidebar-muted: #475569;
-  --topbar-bg: rgba(13, 17, 23, 0.94);
-  --pulse-dot: #d97706;
-  --pulse-ring: #161b27;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:  #080c16;
+    --card:   #111827;
+    --sunken: #0d1420;
+    --ink:    #e9edf6;
+    --muted:  #97a2b8;
+    --faint:  #6c7891;
+    --line:   #212c40;
+    --line-2: #2c3950;
+    --accent: #8b87f5;
+    --accent-soft: #201f3d;
+    --good:   #5eead4;
+    --warn:   #fbbf24;
+    --bad:    #f87171;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+
+    --b-slate:   #94a3b8;  --b-slate-soft:   #1c2637;
+    --b-indigo:  #8b87f5;  --b-indigo-soft:  #221f42;
+    --b-violet:  #a78bfa;  --b-violet-soft:  #281a45;
+    --b-sky:     #56b6f0;  --b-sky-soft:     #10283b;
+    --b-teal:    #4fd1c5;  --b-teal-soft:    #0d2b2a;
+    --b-emerald: #45d19a;  --b-emerald-soft: #0c2c20;
+    --b-amber:   #f0a52a;  --b-amber-soft:   #33240d;
+    --b-rose:    #fb7a92;  --b-rose-soft:    #351320;
+  }
 }
 
-/* ── Restaurace Černá Perla — světlé elegantní téma ─── */
-[data-branch="restaurace-cerna-perla"] {
-  --green: #7c3aed;
-  --green2: #6d28d9;
-  --mint: #f5f3ff;
-  --paper: #fafbff;
-  --card: #ffffff;
-  --line: #e5e0f5;
-  --shadow: 0 4px 20px rgba(124, 58, 237, 0.08);
-  --sidebar-bg: #1e1b4b;
-  --sidebar-active: #7c3aed;
-  --topbar-bg: rgba(250, 251, 255, 0.93);
-  --pulse-dot: #a78bfa;
-  --pulse-ring: #ede9fe;
+:root[data-theme="dark"] {
+  --paper:  #080c16;
+  --card:   #111827;
+  --sunken: #0d1420;
+  --ink:    #e9edf6;
+  --muted:  #97a2b8;
+  --faint:  #6c7891;
+  --line:   #212c40;
+  --line-2: #2c3950;
+  --accent: #8b87f5;
+  --accent-soft: #201f3d;
+  --good:   #5eead4;
+  --warn:   #fbbf24;
+  --bad:    #f87171;
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+
+  --b-slate:   #94a3b8;  --b-slate-soft:   #1c2637;
+  --b-indigo:  #8b87f5;  --b-indigo-soft:  #221f42;
+  --b-violet:  #a78bfa;  --b-violet-soft:  #281a45;
+  --b-sky:     #56b6f0;  --b-sky-soft:     #10283b;
+  --b-teal:    #4fd1c5;  --b-teal-soft:    #0d2b2a;
+  --b-emerald: #45d19a;  --b-emerald-soft: #0c2c20;
+  --b-amber:   #f0a52a;  --b-amber-soft:   #33240d;
+  --b-rose:    #fb7a92;  --b-rose-soft:    #351320;
+}
+
+/* Klíč barvy z branches.color. Firemní úroveň zůstává na slate.
+   Bez :root schválně: <html> vykresluje kořenový layout, ale pobočku zná
+   až layout rozsahu. Atribut proto sedí na obalu uvnitř stránky, což by
+   selektor vázaný na :root nechytil. */
+[data-branch="slate"]   { --branch: var(--b-slate);   --branch-soft: var(--b-slate-soft); }
+[data-branch="indigo"]  { --branch: var(--b-indigo);  --branch-soft: var(--b-indigo-soft); }
+[data-branch="violet"]  { --branch: var(--b-violet);  --branch-soft: var(--b-violet-soft); }
+[data-branch="sky"]     { --branch: var(--b-sky);     --branch-soft: var(--b-sky-soft); }
+[data-branch="teal"]    { --branch: var(--b-teal);    --branch-soft: var(--b-teal-soft); }
+[data-branch="emerald"] { --branch: var(--b-emerald); --branch-soft: var(--b-emerald-soft); }
+[data-branch="amber"]   { --branch: var(--b-amber);   --branch-soft: var(--b-amber-soft); }
+[data-branch="rose"]    { --branch: var(--b-rose);    --branch-soft: var(--b-rose-soft); }
+
+/* ---------------------------------------------------------------------
+   Můstek na starší názvy
+   ---------------------------------------------------------------------
+   Obrazovky provozu a odpojená předloha app/dashboard.tsx se odkazují
+   na tokeny z původní palety. Aby se nevykreslily bez stylu, míří na
+   nová jména. Je to dočasné — až se vnitřky obrazovek přepíšou na nové
+   tokeny, celý tenhle blok zmizí.
+   ------------------------------------------------------------------ */
+:root {
+  --green:  var(--branch);
+  --green2: var(--accent);
+  --mint:   var(--branch-soft);
+  --gold:   var(--warn);
+  --copper: var(--warn);
+  --red:    var(--bad);
+
+  --sidebar-bg:     var(--card);
+  --sidebar-active: var(--branch);
+  --sidebar-text:   var(--ink);
+  --sidebar-muted:  var(--muted);
+  --topbar-bg:      var(--card);
+  --pulse-dot:      var(--branch);
+  --pulse-ring:     var(--branch-soft);
+}
+
+/* =====================================================================
+   Rám rozhraní — odstupy, poloměry a velikosti podle
+   docs/rozvrzeni-nahled.html
+
+   Body zlomu: do 640 mobil, 641–1023 tablet, od 1024 počítač.
+   Závazné rozměry: lišta 56, sloupec 240, ikonová lišta 72,
+   spodní lišta 62, dotykový cíl nejméně 44.
+   ===================================================================== */
+
+.ft-shell { min-height: 100dvh; display: flex; flex-direction: column; }
+
+.ft-i { width: 17px; height: 17px; stroke: currentColor; fill: none;
+        stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---- Horní lišta ---------------------------------------------- */
+.ft-topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 18px;
+  height: 56px; padding: 0 18px;
+  background: var(--card); border-bottom: 1px solid var(--line);
+}
+.ft-brand { font-weight: 700; letter-spacing: -.02em; font-size: 17px;
+            color: var(--ink); text-decoration: none; white-space: nowrap; }
+.ft-brand em { font-style: normal; color: var(--branch); }
+
+.ft-mods { display: flex; gap: 2px; align-items: center; min-width: 0; }
+.ft-mod {
+  padding: 7px 14px; border-radius: 8px; font-size: 13.5px; font-weight: 500;
+  color: var(--muted); white-space: nowrap; text-decoration: none;
+  background: none; border: 0; font-family: inherit; cursor: pointer;
+}
+.ft-mod:hover { color: var(--ink); }
+.ft-mod.on { background: var(--branch-soft); color: var(--branch); font-weight: 600; }
+.ft-mod.off { color: var(--faint); position: relative; cursor: not-allowed; }
+.ft-mod.off::after {
+  content: ""; position: absolute; inset: 6px 10px auto; height: 1px;
+  background: currentColor; opacity: .28; top: 50%;
+}
+
+.ft-spacer { margin-left: auto; }
+.ft-tools { display: flex; align-items: center; gap: 10px; }
+
+.ft-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 500; padding: 6px 11px;
+  border: 1px solid var(--line-2); border-radius: 999px;
+  background: var(--card); color: var(--ink); text-decoration: none;
+  white-space: nowrap; max-width: 240px;
+}
+.ft-chip > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.ft-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none;
+             background: var(--branch); }
+
+.ft-ikona {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: grid; place-items: center;
+  color: var(--muted); border: 1px solid transparent;
+  background: none; cursor: pointer; padding: 0;
+}
+.ft-ikona:hover { color: var(--ink); }
+.ft-ikona.ram { border-color: var(--line-2); }
+.ft-ikona:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.ft-divider { width: 1px; height: 24px; background: var(--line); flex: none; }
+
+.ft-avatar {
+  width: 28px; height: 28px; border-radius: 50%; background: var(--branch);
+  color: #fff; display: grid; place-items: center;
+  font-size: 12px; font-weight: 600; flex: none;
+}
+:root[data-theme="dark"] .ft-avatar { color: #0b1020; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ft-avatar { color: #0b1020; }
+}
+
+/* ---- Tělo a levý sloupec --------------------------------------- */
+.ft-body { display: flex; flex: 1; min-height: 0; }
+
+.ft-side {
+  width: 240px; flex: none; background: var(--card);
+  border-right: 1px solid var(--line);
+  display: flex; flex-direction: column;
+  position: sticky; top: 56px; height: calc(100dvh - 56px); overflow-y: auto;
+}
+.ft-side-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+.ft-strip { height: 3px; border-radius: 2px; background: var(--branch); margin-bottom: 10px; }
+.ft-side-head b { display: block; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+.ft-side-head span { font-size: 11.5px; color: var(--faint); text-transform: uppercase;
+                     letter-spacing: .08em; }
+
+.ft-nav { padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.ft-nav a, .ft-nav span.polozka {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 8px; font-size: 13.5px; color: var(--muted); text-decoration: none;
+}
+.ft-nav a:hover { color: var(--ink); background: var(--sunken); }
+.ft-nav a.on { background: var(--branch-soft); color: var(--branch); font-weight: 600; }
+.ft-nav a.on:hover { background: var(--branch-soft); color: var(--branch); }
+.ft-nav .soon { color: var(--faint); }
+.ft-nav .soon small { margin-left: auto; font-size: 10.5px; text-transform: uppercase;
+                      letter-spacing: .06em; }
+.ft-nav hr { border: 0; border-top: 1px solid var(--line); margin: 8px 2px; width: 100%; }
+
+.ft-main { flex: 1; min-width: 0; padding: 24px 28px; }
+
+/* ---- Tablet: sloupec se scvrkne na ikonovou lištu 72 px --------- */
+@media (max-width: 1023px) {
+  .ft-side { width: 72px; align-items: center; padding-top: 12px; }
+  .ft-side-head { padding: 0 0 8px; border-bottom: 0; width: 40px; }
+  .ft-side-head b, .ft-side-head span { display: none; }
+  .ft-nav { padding: 0; gap: 4px; align-items: center; width: 100%; }
+  .ft-nav a, .ft-nav span.polozka {
+    width: 46px; height: 42px; padding: 0; justify-content: center; gap: 0;
+  }
+  .ft-nav .stitek, .ft-nav .soon small { display: none; }
+  .ft-nav hr { width: 40px; }
+  .ft-main { padding: 20px 22px; }
+}
+
+/* ---- Mobil: sloupec dolů jako pevná lišta ----------------------- */
+.ft-mob-mods { display: none; }
+.ft-mob-bottom { display: none; }
+
+@media (max-width: 640px) {
+  .ft-topbar { height: 52px; padding: 0 14px; gap: 10px; }
+  .ft-topbar .ft-mods { display: none; }
+  .ft-side { display: none; }
+  .ft-main { padding: 16px 14px calc(62px + env(safe-area-inset-bottom) + 16px); }
+
+  /* Moduly jako vodorovně rolovatelná řádka pod lištou. */
+  .ft-mob-mods {
+    display: flex; gap: 6px; padding: 8px 14px;
+    background: var(--card); border-bottom: 1px solid var(--line);
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    position: sticky; top: 52px; z-index: 19;
+  }
+  .ft-mob-mods::-webkit-scrollbar { display: none; }
+  .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; flex: none; }
+
+  .ft-mob-bottom {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    height: calc(62px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--line); background: var(--card);
+  }
+  .ft-mob-bottom a {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 3px;
+    font-size: 10px; color: var(--faint); text-decoration: none;
+    /* Dotykový cíl nejméně 44 px — ovládá se to mokrýma rukama. */
+    min-height: 44px; padding: 0 2px;
+  }
+  .ft-mob-bottom a.on { color: var(--branch); }
+  .ft-mob-bottom a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                          max-width: 100%; }
+  .ft-mob-bottom .ft-i { width: 20px; height: 20px; }
+
+  /* Dotykové cíle v liště nahoře taky nejméně 44 px. */
+  .ft-ikona { width: 44px; height: 44px; }
+  .ft-chip { padding: 8px 11px; max-width: 150px; }
 }
 
 * {
@@ -72,14 +313,24 @@ body {
   background: var(--paper);
   color: var(--ink);
   transition: background-color 0.35s ease, color 0.35s ease;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
   font-family:
-    Inter,
+    var(--font-plex-sans),
     ui-sans-serif,
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+}
+
+/* Mono výhradně na časy, data a čísla ve sloupcích — kvůli tomu, aby
+   číslice měly stejnou šířku a nepodskakovaly pod sebou. */
+.mono {
+  font-family: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
+  font-variant-numeric: tabular-nums;
 }
 button,
 input,
