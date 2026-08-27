@@ -167,102 +167,157 @@ function TydenView({
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
 }) {
+  // Seřadit dny
+  const dnySerad = [...dny.keys()].sort();
+
+  // Sbírat všechny unikátní zaměstnance a jejich směny
+  const smenyPeOsobe = new Map<string | null, Map<string, Smena[]>>();
+  for (const [datum, smeny] of dny.entries()) {
+    for (const s of smeny) {
+      const osoba = s.employee_id;
+      if (!smenyPeOsobe.has(osoba)) {
+        smenyPeOsobe.set(osoba, new Map());
+      }
+      const denMap = smenyPeOsobe.get(osoba)!;
+      const seznam = denMap.get(datum) ?? [];
+      seznam.push(s);
+      denMap.set(datum, seznam);
+    }
+  }
+
+  // Seřadit osoby
+  const osoby = [...smenyPeOsobe.keys()].sort((a, b) => {
+    const jmenoA = a ? jmena.get(a) ?? "Neznámý" : "Neobsazeno";
+    const jmenoB = b ? jmena.get(b) ?? "Neznámý" : "Neobsazeno";
+    return jmenoA.localeCompare(jmenoB);
+  });
+
   return (
-    <div style={{ display: "grid", gap: "20px" }}>
-      {[...dny.entries()].map(([datum, denniSmeny]) => (
-        <section key={datum}>
-          <h3
-            style={{
-              margin: "0 0 8px",
-              fontSize: "14px",
-              color: "var(--branch)",
-              position: "sticky",
-              top: 0,
-            }}
-          >
-            {popisDne(datum, dnesni)}
-          </h3>
+    <div style={{ overflowX: "auto" }}>
+      <table
+        style={{
+          width: "100%",
+          borderCollapse: "collapse",
+          minWidth: "600px",
+          fontSize: "13px",
+        }}
+      >
+        <thead>
+          <tr style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
+            <th
+              style={{
+                padding: "8px 12px",
+                textAlign: "left",
+                fontWeight: 600,
+                color: "var(--branch)",
+                width: "120px",
+              }}
+            >
+              Osoba
+            </th>
+            {dnySerad.map((datum) => (
+              <th
+                key={datum}
+                style={{
+                  padding: "8px 12px",
+                  textAlign: "center",
+                  fontWeight: 500,
+                  color: "var(--ink)",
+                  borderLeft: "1px solid var(--line)",
+                  minWidth: "100px",
+                }}
+              >
+                <div style={{ fontSize: "12px", color: "var(--muted)" }}>
+                  {popisDneZkracene(datum, dnesni)}
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {osoby.map((osoba) => {
+            const jmeno = osoba ? jmena.get(osoba) ?? "Neznámý" : "Neobsazeno";
+            const smenyOsoby = smenyPeOsobe.get(osoba)!;
 
-          <ol
-            style={{
-              listStyle: "none",
-              margin: 0,
-              padding: 0,
-              display: "grid",
-              gap: "8px",
-            }}
-          >
-            {denniSmeny.map((s) => {
-              const obsazena = s.employee_id !== null;
-              const jmeno = obsazena ? (jmena.get(s.employee_id as string) ?? "Neznámý člověk") : null;
-
-              return (
-                <li
-                  key={s.id}
+            return (
+              <tr key={osoba ?? "null"} style={{ borderBottom: "1px solid var(--line)" }}>
+                <td
                   style={{
-                    background: obsazena ? "var(--card)" : "transparent",
-                    border: obsazena ? "1px solid var(--line)" : "1px dashed var(--warn)",
-                    borderRadius: "12px",
-                    padding: "12px 14px",
-                    display: "flex",
-                    gap: "12px",
-                    alignItems: "baseline",
+                    padding: "8px 12px",
+                    fontWeight: osoba ? 500 : 400,
+                    color: osoba ? "var(--ink)" : "var(--warn)",
                   }}
                 >
-                  <span
-                    style={{
-                      fontVariantNumeric: "tabular-nums",
-                      fontSize: "15px",
-                      color: "var(--ink)",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {hodina(s.starts_at)}–{hodina(s.ends_at)}
-                  </span>
-
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span
+                  {jmeno}
+                </td>
+                {dnySerad.map((datum) => {
+                  const smenyDne = smenyOsoby.get(datum) ?? [];
+                  return (
+                    <td
+                      key={`${osoba}-${datum}`}
                       style={{
-                        display: "block",
-                        fontSize: "15px",
-                        color: obsazena ? "var(--ink)" : "var(--warn)",
+                        padding: "8px 12px",
+                        textAlign: "center",
+                        borderLeft: "1px solid var(--line)",
+                        background:
+                          smenyDne.length > 0
+                            ? "var(--card)"
+                            : datum === dnesni
+                              ? "var(--sunken)"
+                              : "transparent",
                       }}
                     >
-                      {obsazena ? jmeno : "Neobsazeno"}
-                    </span>
-
-                    <span
-                      style={{
-                        display: "block",
-                        fontSize: "12px",
-                        color: "var(--muted)",
-                        marginTop: "2px",
-                      }}
-                    >
-                      {[
-                        s.position_id ? pozice.get(s.position_id) : null,
-                        rozsah.level === "tenant"
-                          ? (nazvyPobocek.get(s.branch_id) ?? "Jiná pobočka")
-                          : null,
-                        s.status === "planned" ? "zatím v plánu" : null,
-                        s.note
-                          ? s.note
-                              .replace(/^rozpis\s+/i, "")
-                              .split("\n")[0]
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-        </section>
-      ))}
+                      {smenyDne.length > 0 && (
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: "4px",
+                          }}
+                        >
+                          {smenyDne.map((s) => (
+                            <div
+                              key={s.id}
+                              style={{
+                                fontSize: "11px",
+                                padding: "4px 6px",
+                                background: "var(--branch-soft)",
+                                borderRadius: "4px",
+                                color: "var(--branch)",
+                                fontVariantNumeric: "tabular-nums",
+                              }}
+                            >
+                              {hodina(s.starts_at)}–{hodina(s.ends_at)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
+}
+
+function popisDneZkracene(datum: string, dnesni: string): string {
+  const d = new Date(`${datum}T00:00:00Z`);
+  const den = DNY[d.getUTCDay()];
+  const skratka = den.slice(0, 2).toUpperCase();
+  const cislo = d.getUTCDate();
+
+  if (datum === dnesni) return `Dnes\n${cislo}.`;
+
+  const dnes = new Date(`${dnesni}T00:00:00Z`);
+  const zitra = new Date(dnes);
+  zitra.setUTCDate(zitra.getUTCDate() + 1);
+  const zítraStr = zitra.toISOString().split("T")[0];
+  if (datum === zítraStr) return `Zítra\n${cislo}.`;
+
+  return `${skratka}\n${cislo}.`;
 }
 
 function DenView({

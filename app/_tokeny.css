@@ -37,7 +37,7 @@
   --b-sky:     #0369a1;  --b-sky-soft:     #e2f1fb;
   --b-teal:    #0f766e;  --b-teal-soft:    #ddf1ef;
   --b-emerald: #047857;  --b-emerald-soft: #ddf3e9;
-  --b-amber:   #b45309;  --b-amber-soft:   #fdf0dc;
+  --b-amber:   #92400e;  --b-amber-soft:   #fdf0dc;
   --b-rose:    #be123c;  --b-rose-soft:    #fce8ed;
 
   /* Výchozí, než se doplní pobočka. Firemní úroveň má slate. */
@@ -62,14 +62,14 @@
     --bad:    #f87171;
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
-    --b-slate:   #94a3b8;  --b-slate-soft:   #1c2637;
-    --b-indigo:  #8b87f5;  --b-indigo-soft:  #221f42;
-    --b-violet:  #a78bfa;  --b-violet-soft:  #281a45;
-    --b-sky:     #56b6f0;  --b-sky-soft:     #10283b;
-    --b-teal:    #4fd1c5;  --b-teal-soft:    #0d2b2a;
-    --b-emerald: #45d19a;  --b-emerald-soft: #0c2c20;
-    --b-amber:   #f0a52a;  --b-amber-soft:   #33240d;
-    --b-rose:    #fb7a92;  --b-rose-soft:    #351320;
+    --b-slate:   #cbd5e1;  --b-slate-soft:   #1c2637;
+    --b-indigo:  #c7c2ff;  --b-indigo-soft:  #221f42;
+    --b-violet:  #d8b4fe;  --b-violet-soft:  #281a45;
+    --b-sky:     #7dd3fc;  --b-sky-soft:     #10283b;
+    --b-teal:    #7ee8e0;  --b-teal-soft:    #0d2b2a;
+    --b-emerald: #86efac;  --b-emerald-soft: #0c2c20;
+    --b-amber:   #fcd34d;  --b-amber-soft:   #33240d;
+    --b-rose:    #fbcfe8;  --b-rose-soft:    #351320;
   }
 }
 
@@ -89,14 +89,14 @@
   --bad:    #f87171;
   --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
-  --b-slate:   #94a3b8;  --b-slate-soft:   #1c2637;
-  --b-indigo:  #8b87f5;  --b-indigo-soft:  #221f42;
-  --b-violet:  #a78bfa;  --b-violet-soft:  #281a45;
-  --b-sky:     #56b6f0;  --b-sky-soft:     #10283b;
-  --b-teal:    #4fd1c5;  --b-teal-soft:    #0d2b2a;
-  --b-emerald: #45d19a;  --b-emerald-soft: #0c2c20;
-  --b-amber:   #f0a52a;  --b-amber-soft:   #33240d;
-  --b-rose:    #fb7a92;  --b-rose-soft:    #351320;
+  --b-slate:   #cbd5e1;  --b-slate-soft:   #1c2637;
+  --b-indigo:  #c7c2ff;  --b-indigo-soft:  #221f42;
+  --b-violet:  #d8b4fe;  --b-violet-soft:  #281a45;
+  --b-sky:     #7dd3fc;  --b-sky-soft:     #10283b;
+  --b-teal:    #7ee8e0;  --b-teal-soft:    #0d2b2a;
+  --b-emerald: #86efac;  --b-emerald-soft: #0c2c20;
+  --b-amber:   #fcd34d;  --b-amber-soft:   #33240d;
+  --b-rose:    #fbcfe8;  --b-rose-soft:    #351320;
 }
 
 /* Klíč barvy z branches.color. Firemní úroveň zůstává na slate.
