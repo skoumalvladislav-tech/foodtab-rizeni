@@ -4,6 +4,7 @@ import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import RozpisView from "./rozpis";
 
 export const dynamic = "force-dynamic";
 
@@ -151,16 +152,8 @@ export default async function Rozpis({
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
-  // Seskupení po dnech. Dotaz je seřazený, takže stačí projít popořadě.
-  const dny = new Map<string, Smena[]>();
-  for (const s of smeny) {
-    const seznam = dny.get(s.shift_date);
-    if (seznam) seznam.push(s);
-    else dny.set(s.shift_date, [s]);
-  }
-
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <>
       <h2
         style={{
           margin: "0 0 16px",
@@ -169,134 +162,21 @@ export default async function Rozpis({
           fontWeight: 500,
         }}
       >
-        Rozpis na týden
+        Rozpis směn
       </h2>
-
-      <div style={{ display: "grid", gap: "20px" }}>
-        {[...dny.entries()].map(([datum, denniSmeny]) => (
-          <section key={datum}>
-            <h3
-              style={{
-                margin: "0 0 8px",
-                fontSize: "14px",
-                color: "var(--branch)",
-                position: "sticky",
-                top: 0,
-              }}
-            >
-              {popisDne(datum, odKdy)}
-            </h3>
-
-            <ol
-              style={{
-                listStyle: "none",
-                margin: 0,
-                padding: 0,
-                display: "grid",
-                gap: "8px",
-              }}
-            >
-              {denniSmeny.map((s) => {
-                const obsazena = s.employee_id !== null;
-                const jmeno = obsazena
-                  ? (jmena.get(s.employee_id as string) ?? "Neznámý člověk")
-                  : null;
-
-                return (
-                  <li
-                    key={s.id}
-                    style={{
-                      background: obsazena ? "var(--card)" : "transparent",
-                      border: obsazena
-                        ? "1px solid var(--line)"
-                        : "1px dashed var(--warn)",
-                      borderRadius: "12px",
-                      padding: "12px 14px",
-                      display: "flex",
-                      gap: "12px",
-                      alignItems: "baseline",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontVariantNumeric: "tabular-nums",
-                        fontSize: "15px",
-                        color: "var(--ink)",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {hodina(s.starts_at)}–{hodina(s.ends_at)}
-                    </span>
-
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span
-                        style={{
-                          display: "block",
-                          fontSize: "15px",
-                          color: obsazena ? "var(--ink)" : "var(--warn)",
-                        }}
-                      >
-                        {obsazena ? jmeno : "Neobsazeno"}
-                      </span>
-
-                      <span
-                        style={{
-                          display: "block",
-                          fontSize: "12px",
-                          color: "var(--muted)",
-                          marginTop: "2px",
-                        }}
-                      >
-                        {[
-                          s.position_id ? pozice.get(s.position_id) : null,
-                          scope.level === "tenant"
-                            ? (nazvyPobocek.get(s.branch_id) ?? "Jiná pobočka")
-                            : null,
-                          s.status === "planned" ? "zatím v plánu" : null,
-                          s.note ? s.note : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
-        ))}
-      </div>
-    </main>
+      <RozpisView
+        smeny={smeny}
+        dnesni={odKdy}
+        konec={doKdy}
+        jmena={jmena}
+        pozice={pozice}
+        nazvyPobocek={nazvyPobocek}
+        rozsah={{
+          level: scope.level,
+          branchId: scope.branchId ?? null,
+          branchName: scope.branchName ?? null,
+        }}
+      />
+    </>
   );
-}
-
-/* --- pomocné funkce ---------------------------------------------- */
-
-function hodina(cas: string): string {
-  return cas.slice(0, 5);
-}
-
-const DNY = [
-  "neděle",
-  "pondělí",
-  "úterý",
-  "středa",
-  "čtvrtek",
-  "pátek",
-  "sobota",
-];
-
-/**
- * Popis dne. Porovnává se s provozním dnem z databáze, ne s hodinami
- * serveru — proto se sem `dnesni` předává, místo aby se tu četl čas.
- */
-function popisDne(datum: string, dnesni: string): string {
-  const d = new Date(`${datum}T00:00:00Z`);
-  const cislo = `${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
-
-  if (datum === dnesni) return `Dnes · ${cislo}`;
-  if (datum === posunDatum(dnesni, 1)) return `Zítra · ${cislo}`;
-
-  const den = DNY[d.getUTCDay()];
-  return `${den.charAt(0).toUpperCase()}${den.slice(1)} · ${cislo}`;
 }
