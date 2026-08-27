@@ -23,6 +23,7 @@ type RozsahContext = {
 type Props = {
   smeny: Smena[];
   dnesni: string;
+  dayStartsAt: string;
   jmena: Map<string, string>;
   pozice: Map<string, string>;
   nazvyPobocek: Map<string, string>;
@@ -32,6 +33,7 @@ type Props = {
 export default function RozpisView({
   smeny,
   dnesni,
+  dayStartsAt,
   jmena,
   pozice,
   nazvyPobocek,
@@ -135,9 +137,16 @@ export default function RozpisView({
       )}
 
       {pohled === "den" && (
-        <div style={{ color: "var(--muted)", padding: "20px", textAlign: "center" }}>
-          Pohled Den — zatím není implementován
-        </div>
+        <DenView
+          smeny={smeny}
+          den={den}
+          dnesni={dnesni}
+          dayStartsAt={dayStartsAt}
+          jmena={jmena}
+          pozice={pozice}
+          nazvyPobocek={nazvyPobocek}
+          rozsah={rozsah}
+        />
       )}
     </main>
   );
@@ -254,6 +263,203 @@ function TydenView({
       ))}
     </div>
   );
+}
+
+function DenView({
+  smeny,
+  den,
+  dnesni,
+  dayStartsAt,
+  jmena,
+  pozice,
+  nazvyPobocek,
+  rozsah,
+}: {
+  smeny: Smena[];
+  den: string;
+  dnesni: string;
+  dayStartsAt: string;
+  jmena: Map<string, string>;
+  pozice: Map<string, string>;
+  nazvyPobocek: Map<string, string>;
+  rozsah: RozsahContext;
+}) {
+  // Smeny na daný den
+  const smenySeDnem = smeny.filter((s) => s.shift_date === den);
+
+  // Parsuj dayStartsAt (např. "05:00")
+  const [hodStart, minStart] = dayStartsAt.split(":").map(Number);
+  const osStart = hodStart * 60 + minStart; // v minutách od půlnoci
+  const osTotalMin = 24 * 60; // délka provozního dne (24 hodin)
+
+  // Pomocná funkce: převede čas HH:MM na minuty od osStart
+  const casNaMinuty = (cas: string): number => {
+    const [h, m] = cas.split(":").map(Number);
+    let casVMin = h * 60 + m;
+    // Pokud je čas "do zítřka" (menší než osStart), přičti 24 hodin
+    // (znamená to, že směna pokračuje do příštího provozního dne)
+    if (casVMin < osStart && h < 12) {
+      casVMin += 24 * 60;
+    }
+    return casVMin - osStart;
+  };
+
+  // Seřaď směny
+  const serazeno = [...smenySeDnem].sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+
+  // Identifikuj mezery — doby bez obsazení
+  const mezery: Array<{ od: number; do: number }> = [];
+  if (serazeno.length === 0) {
+    mezery.push({ od: 0, do: osTotalMin });
+  } else {
+    let posledniKonec = 0;
+    for (const s of serazeno) {
+      const zacatek = casNaMinuty(s.starts_at);
+      const konec = casNaMinuty(s.ends_at);
+      if (zacatek > posledniKonec) {
+        mezery.push({ od: posledniKonec, do: zacatek });
+      }
+      posledniKonec = Math.max(posledniKonec, konec);
+    }
+    if (posledniKonec < osTotalMin) {
+      mezery.push({ od: posledniKonec, do: osTotalMin });
+    }
+  }
+
+  // "Teď" indikátor — jen pro dnešní den
+  const ted = den === dnesni ? getTedMinuta(osStart) : null;
+
+  // Podíl (0–100%) — kolik procent dne uplynulo?
+  const tedProc = ted !== null ? (ted / osTotalMin) * 100 : null;
+
+  // Layout: 1200px = 24 hodin, 50px za hodinu
+  const pixelPerMin = 1200 / osTotalMin;
+  const rowHeight = 48;
+
+  return (
+    <div style={{ display: "grid", gap: "0px" }}>
+      {/* Záhlaví — časová osa */}
+      <div style={{ display: "flex", height: "32px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 5 }}>
+        <div style={{ width: "80px", flexShrink: 0, padding: "4px", fontSize: "11px", fontWeight: 600 }}>Čas</div>
+        <div style={{ flex: 1, position: "relative", minWidth: "1200px" }}>
+          {Array.from({ length: 24 }).map((_, i) => {
+            const h = (hodStart + i) % 24;
+            const x = i * (1200 / 24);
+            return (
+              <div
+                key={i}
+                style={{
+                  position: "absolute",
+                  left: `${x}px`,
+                  top: 0,
+                  width: "50px",
+                  height: "100%",
+                  borderLeft: "1px solid var(--line)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                }}
+              >
+                {String(h).padStart(2, "0")}:00
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Řady se směnami */}
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {serazeno.map((s, idx) => {
+          const obsazena = s.employee_id !== null;
+          const jmeno = obsazena ? jmena.get(s.employee_id as string) ?? "Neznámý" : "Neobsazeno";
+          const zacatek = casNaMinuty(s.starts_at);
+          const konec = casNaMinuty(s.ends_at);
+          const left = zacatek * pixelPerMin;
+          const width = (konec - zacatek) * pixelPerMin;
+
+          return (
+            <div key={s.id} style={{ display: "flex", height: `${rowHeight}px`, borderBottom: "1px solid var(--line)", position: "relative" }}>
+              <div style={{ width: "80px", flexShrink: 0, padding: "8px", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center" }}>
+                {jmeno}
+              </div>
+              <div style={{ flex: 1, position: "relative", minWidth: "1200px" }}>
+                {/* Pruh směny */}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${left}px`,
+                    top: "8px",
+                    width: `${width}px`,
+                    height: `${rowHeight - 16}px`,
+                    background: obsazena ? "var(--branch-soft)" : "var(--warn)",
+                    border: `1px solid ${obsazena ? "var(--branch)" : "var(--warn-dark)"}`,
+                    borderRadius: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: "0 4px",
+                    fontSize: "11px",
+                    color: obsazena ? "var(--branch)" : "var(--warn)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {hodina(s.starts_at)}–{hodina(s.ends_at)}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Mezery — horizontální pásy pod řadami */}
+      {mezery.length > 0 && (
+        <div style={{ display: "flex" }}>
+          <div style={{ width: "80px", flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: "1200px", position: "relative", height: `${mezery.length * rowHeight}px` }}>
+            {mezery.map((m, i) => (
+              <div
+                key={`gap-${i}`}
+                style={{
+                  position: "absolute",
+                  top: `${i * rowHeight}px`,
+                  left: `${m.od * pixelPerMin}px`,
+                  width: `${(m.do - m.od) * pixelPerMin}px`,
+                  height: `${rowHeight}px`,
+                  background: "rgba(100, 100, 100, 0.08)",
+                  borderTop: "1px dashed var(--line)",
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* "Teď" indikátor — svislá čára */}
+      {tedProc !== null && (
+        <div style={{ display: "flex", position: "absolute", top: 0, left: "80px", right: 0, height: "100%", pointerEvents: "none", zIndex: 3 }}>
+          <div
+            style={{
+              position: "absolute",
+              left: `${tedProc}%`,
+              top: 0,
+              bottom: 0,
+              width: "2px",
+              background: "var(--warn)",
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function getTedMinuta(osStart: number): number {
+  const ted = new Date();
+  const tedMin = ted.getHours() * 60 + ted.getMinutes();
+  return tedMin - osStart;
 }
 
 function MesicView({

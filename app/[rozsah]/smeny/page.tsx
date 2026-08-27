@@ -80,6 +80,15 @@ export default async function Rozpis({
     );
   }
 
+  // Načíst day_starts_at z databáze
+  const supabase = await getServerSupabase();
+  const { data: branchData } = await supabase
+    .from("branches")
+    .select("day_starts_at")
+    .eq("id", kotva)
+    .single();
+  const dayStartsAt = (branchData?.day_starts_at as string | undefined) ?? "05:00";
+
   const odKdy = await provozniDen(kotva);
   if (!odKdy) {
     return (
@@ -89,8 +98,6 @@ export default async function Rozpis({
     );
   }
   const doKdy = posunDatum(odKdy, DNU_DOPREDU - 1);
-
-  const supabase = await getServerSupabase();
 
   let dotaz = supabase
     .from("shifts")
@@ -167,6 +174,7 @@ export default async function Rozpis({
       <RozpisView
         smeny={smeny}
         dnesni={odKdy}
+        dayStartsAt={dayStartsAt}
         jmena={jmena}
         pozice={pozice}
         nazvyPobocek={nazvyPobocek}
