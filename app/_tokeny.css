@@ -28,17 +28,18 @@
   --bad:    #b91c1c;
   --shadow: 0 1px 2px rgba(19,26,43,.06), 0 8px 24px -12px rgba(19,26,43,.18);
 
-  /* Barvy poboček — klíč z branches.color. První tři jsou z předlohy,
-     zbylých pět dopočítané stejným způsobem: sytější tón na světlo,
-     světlejší na tmu, k tomu velmi bledý (resp. velmi tmavý) podklad. */
-  --b-slate:   #475569;  --b-slate-soft:   #e7ebf2;
-  --b-indigo:  #4f46e5;  --b-indigo-soft:  #eceafe;
-  --b-violet:  #7c3aed;  --b-violet-soft:  #f1ebfe;
-  --b-sky:     #0369a1;  --b-sky-soft:     #e2f1fb;
-  --b-teal:    #0f766e;  --b-teal-soft:    #ddf1ef;
-  --b-emerald: #047857;  --b-emerald-soft: #ddf3e9;
-  --b-amber:   #92400e;  --b-amber-soft:   #fdf0dc;
-  --b-rose:    #be123c;  --b-rose-soft:    #fce8ed;
+  /* Barvy poboček — klíč z branches.color.
+     --b-*: text na tmavém podkladu
+     --b-*-fill: pozadí pod bílým textem (tlačítka, štítky)
+     --b-*-soft: bledý podklad pro text v normální barvě */
+  --b-slate:   #475569;  --b-slate-fill:   #475569;  --b-slate-soft:   #e7ebf2;
+  --b-indigo:  #4f46e5;  --b-indigo-fill:  #4f46e5;  --b-indigo-soft:  #eceafe;
+  --b-violet:  #7c3aed;  --b-violet-fill:  #7c3aed;  --b-violet-soft:  #f1ebfe;
+  --b-sky:     #0369a1;  --b-sky-fill:     #0369a1;  --b-sky-soft:     #e2f1fb;
+  --b-teal:    #0f766e;  --b-teal-fill:    #0f766e;  --b-teal-soft:    #ddf1ef;
+  --b-emerald: #047857;  --b-emerald-fill: #047857;  --b-emerald-soft: #ddf3e9;
+  --b-amber:   #92400e;  --b-amber-fill:   #92400e;  --b-amber-soft:   #fdf0dc;
+  --b-rose:    #be123c;  --b-rose-fill:    #be123c;  --b-rose-soft:    #fce8ed;
 
   /* Výchozí, než se doplní pobočka. Firemní úroveň má slate. */
   --branch:      var(--b-slate);
@@ -62,14 +63,14 @@
     --bad:    #f87171;
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
-    --b-slate:   #cbd5e1;  --b-slate-soft:   #1c2637;
-    --b-indigo:  #c7c2ff;  --b-indigo-soft:  #221f42;
-    --b-violet:  #d8b4fe;  --b-violet-soft:  #281a45;
-    --b-sky:     #7dd3fc;  --b-sky-soft:     #10283b;
-    --b-teal:    #7ee8e0;  --b-teal-soft:    #0d2b2a;
-    --b-emerald: #86efac;  --b-emerald-soft: #0c2c20;
-    --b-amber:   #fcd34d;  --b-amber-soft:   #33240d;
-    --b-rose:    #fbcfe8;  --b-rose-soft:    #351320;
+    --b-slate:   #cbd5e1;  --b-slate-fill:   #1c2637;  --b-slate-soft:   #1c2637;
+    --b-indigo:  #c7c2ff;  --b-indigo-fill:  #221f42;  --b-indigo-soft:  #221f42;
+    --b-violet:  #d8b4fe;  --b-violet-fill:  #281a45;  --b-violet-soft:  #281a45;
+    --b-sky:     #7dd3fc;  --b-sky-fill:     #10283b;  --b-sky-soft:     #10283b;
+    --b-teal:    #7ee8e0;  --b-teal-fill:    #0d2b2a;  --b-teal-soft:    #0d2b2a;
+    --b-emerald: #86efac;  --b-emerald-fill: #0c2c20;  --b-emerald-soft: #0c2c20;
+    --b-amber:   #fcd34d;  --b-amber-fill:   #33240d;  --b-amber-soft:   #33240d;
+    --b-rose:    #fbcfe8;  --b-rose-fill:    #351320;  --b-rose-soft:    #351320;
   }
 }
 
@@ -89,14 +90,14 @@
   --bad:    #f87171;
   --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
-  --b-slate:   #cbd5e1;  --b-slate-soft:   #1c2637;
-  --b-indigo:  #c7c2ff;  --b-indigo-soft:  #221f42;
-  --b-violet:  #d8b4fe;  --b-violet-soft:  #281a45;
-  --b-sky:     #7dd3fc;  --b-sky-soft:     #10283b;
-  --b-teal:    #7ee8e0;  --b-teal-soft:    #0d2b2a;
-  --b-emerald: #86efac;  --b-emerald-soft: #0c2c20;
-  --b-amber:   #fcd34d;  --b-amber-soft:   #33240d;
-  --b-rose:    #fbcfe8;  --b-rose-soft:    #351320;
+  --b-slate:   #cbd5e1;  --b-slate-fill:   #1c2637;  --b-slate-soft:   #1c2637;
+  --b-indigo:  #c7c2ff;  --b-indigo-fill:  #221f42;  --b-indigo-soft:  #221f42;
+  --b-violet:  #d8b4fe;  --b-violet-fill:  #281a45;  --b-violet-soft:  #281a45;
+  --b-sky:     #7dd3fc;  --b-sky-fill:     #10283b;  --b-sky-soft:     #10283b;
+  --b-teal:    #7ee8e0;  --b-teal-fill:    #0d2b2a;  --b-teal-soft:    #0d2b2a;
+  --b-emerald: #86efac;  --b-emerald-fill: #0c2c20;  --b-emerald-soft: #0c2c20;
+  --b-amber:   #fcd34d;  --b-amber-fill:   #33240d;  --b-amber-soft:   #33240d;
+  --b-rose:    #fbcfe8;  --b-rose-fill:    #351320;  --b-rose-soft:    #351320;
 }
 
 /* Klíč barvy z branches.color. Firemní úroveň zůstává na slate.
@@ -104,35 +105,35 @@
    až layout rozsahu. Atribut proto sedí na obalu uvnitř stránky, což by
    selektor vázaný na :root nechytil. */
 [data-branch="slate"]   {
-  --branch: var(--b-slate);   --branch-soft: var(--b-slate-soft);
+  --branch: var(--b-slate);   --branch-fill: var(--b-slate-fill);   --branch-soft: var(--b-slate-soft);
   --accent: var(--b-slate);   --accent-soft: var(--b-slate-soft);
 }
 [data-branch="indigo"]  {
-  --branch: var(--b-indigo);  --branch-soft: var(--b-indigo-soft);
+  --branch: var(--b-indigo);  --branch-fill: var(--b-indigo-fill);  --branch-soft: var(--b-indigo-soft);
   --accent: var(--b-indigo);  --accent-soft: var(--b-indigo-soft);
 }
 [data-branch="violet"]  {
-  --branch: var(--b-violet);  --branch-soft: var(--b-violet-soft);
+  --branch: var(--b-violet);  --branch-fill: var(--b-violet-fill);  --branch-soft: var(--b-violet-soft);
   --accent: var(--b-violet);  --accent-soft: var(--b-violet-soft);
 }
 [data-branch="sky"]     {
-  --branch: var(--b-sky);     --branch-soft: var(--b-sky-soft);
+  --branch: var(--b-sky);     --branch-fill: var(--b-sky-fill);     --branch-soft: var(--b-sky-soft);
   --accent: var(--b-sky);     --accent-soft: var(--b-sky-soft);
 }
 [data-branch="teal"]    {
-  --branch: var(--b-teal);    --branch-soft: var(--b-teal-soft);
+  --branch: var(--b-teal);    --branch-fill: var(--b-teal-fill);    --branch-soft: var(--b-teal-soft);
   --accent: var(--b-teal);    --accent-soft: var(--b-teal-soft);
 }
 [data-branch="emerald"] {
-  --branch: var(--b-emerald); --branch-soft: var(--b-emerald-soft);
+  --branch: var(--b-emerald); --branch-fill: var(--b-emerald-fill); --branch-soft: var(--b-emerald-soft);
   --accent: var(--b-emerald); --accent-soft: var(--b-emerald-soft);
 }
 [data-branch="amber"]   {
-  --branch: var(--b-amber);   --branch-soft: var(--b-amber-soft);
+  --branch: var(--b-amber);   --branch-fill: var(--b-amber-fill);   --branch-soft: var(--b-amber-soft);
   --accent: var(--b-amber);   --accent-soft: var(--b-amber-soft);
 }
 [data-branch="rose"]    {
-  --branch: var(--b-rose);    --branch-soft: var(--b-rose-soft);
+  --branch: var(--b-rose);    --branch-fill: var(--b-rose-fill);    --branch-soft: var(--b-rose-soft);
   --accent: var(--b-rose);    --accent-soft: var(--b-rose-soft);
 }
 
