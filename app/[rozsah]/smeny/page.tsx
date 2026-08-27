@@ -167,7 +167,6 @@ export default async function Rozpis({
       <RozpisView
         smeny={smeny}
         dnesni={odKdy}
-        konec={doKdy}
         jmena={jmena}
         pozice={pozice}
         nazvyPobocek={nazvyPobocek}

@@ -271,6 +271,107 @@ begin
 end $$;
 
 \echo ''
+\echo '== Pozvánky přes průzor ==================================='
+-- Zvát lidi umí jen správce lidí. Číšník s rolí Servis ho nemá.
+set role authenticated;
+select set_config('test.user_id', '55555555-5555-5555-5555-555555555555', false);
+select id as role_kuchyne from public.roles
+ where tenant_id = :'tenant' and key = 'kuchyne' \gset
+select set_config('test.role_kuchyne', :'role_kuchyne', false);
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.create_invitation(
+      current_setting('test.tenant')::uuid,
+      current_setting('test.role_kuchyne')::uuid,
+      'email', 'kuchar@foodtab.cz');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: číšník vystavil pozvánku'; end if;
+  raise notice '  OK    kdo nespravuje lidi, pozvánku nevystaví';
+end $$;
+
+-- Majitel ano. Token dostane právě jednou.
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+select token as pozvanka from public.create_invitation(
+  :'tenant', :'role_kuchyne', 'email', 'kuchar@foodtab.cz') \gset
+
+select pg_temp.check('token má rozumnou délku',
+  length(:'pozvanka') = 64);
+
+-- Otisk čteme mimo roli authenticated — ta na ten sloupec od téhle
+-- migrace právo nemá, což je celý smysl kontroly o dva odstavce níž.
+reset role;
+select pg_temp.check('v databázi je jen otisk, ne token',
+  exists (select 1 from public.invitations i
+          where i.email = 'kuchar@foodtab.cz'
+            and i.token_hash = encode(sha256(convert_to(:'pozvanka', 'UTF8')), 'hex')));
+set role authenticated;
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+
+-- Otisk se přes API nečte ani správci lidí.
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform token_hash from public.invitations limit 1;
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: otisk tokenu šel přečíst'; end if;
+  raise notice '  OK    otisk tokenu se přes API nečte';
+end $$;
+
+-- Role s citlivým oprávněním nejde pozvat přes SMS.
+select id as role_provozni from public.roles
+ where tenant_id = :'tenant' and key = 'provozni' \gset
+select set_config('test.role_provozni', :'role_provozni', false);
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.create_invitation(
+      current_setting('test.tenant')::uuid,
+      current_setting('test.role_provozni')::uuid,
+      'sms', '+420601234567');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: citlivá role prošla přes SMS'; end if;
+  raise notice '  OK    citlivou roli nejde pozvat přes SMS';
+end $$;
+
+-- Přijetí pozvánky cizím uživatelem: vznikne členství.
+reset role;
+insert into auth.users (id, email, raw_user_meta_data)
+values ('66666666-6666-6666-6666-666666666666', 'kuchar@foodtab.cz',
+        '{"full_name":"Nový Kuchař"}');
+
+set role authenticated;
+select set_config('test.user_id', '66666666-6666-6666-6666-666666666666', false);
+select public.accept_invitation(:'pozvanka');
+
+select pg_temp.check('pozvaný se stal členem firmy',
+  public.my_context(:'tenant') is not null
+  and public.my_context(:'tenant') -> 'role' ->> 'key' = 'kuchyne');
+
+-- Spotřebovaná pozvánka je spotřebovaná. Kdyby token šel použít
+-- podruhé, stačilo by ho jednou zahlédnout přes rameno.
+select set_config('test.user_id', '33333333-3333-3333-3333-333333333333', false);
+select set_config('test.pozvanka', :'pozvanka', false);
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.accept_invitation(current_setting('test.pozvanka'));
+  exception when others then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: token prošel podruhé'; end if;
+  raise notice '  OK    tentýž token podruhé neprojde';
+end $$;
+
+\echo ''
 \echo '== Nepřihlášený se nedostane k ničemu ====================='
 reset role;
 set role anon;

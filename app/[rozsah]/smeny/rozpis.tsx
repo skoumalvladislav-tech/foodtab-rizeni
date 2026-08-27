@@ -23,7 +23,6 @@ type RozsahContext = {
 type Props = {
   smeny: Smena[];
   dnesni: string;
-  konec: string;
   jmena: Map<string, string>;
   pozice: Map<string, string>;
   nazvyPobocek: Map<string, string>;
@@ -33,7 +32,6 @@ type Props = {
 export default function RozpisView({
   smeny,
   dnesni,
-  konec,
   jmena,
   pozice,
   nazvyPobocek,
