@@ -36,10 +36,13 @@ type Smena = {
 
 export default async function Rozpis({
   params,
+  searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
+  searchParams: Promise<{ den?: string }>;
 }) {
   const { rozsah } = await params;
+  const { den: denZUrl } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -89,7 +92,7 @@ export default async function Rozpis({
     .single();
   const dayStartsAt = (branchData?.day_starts_at as string | undefined) ?? "05:00";
 
-  const odKdy = await provozniDen(kotva);
+  let odKdy = await provozniDen(kotva);
   if (!odKdy) {
     return (
       <Sdeleni nadpis="Nepodařilo se zjistit provozní den">
@@ -97,6 +100,12 @@ export default async function Rozpis({
       </Sdeleni>
     );
   }
+
+  // Pokud je v URL zadán konkrétní den, počítáme rozsah od něj
+  if (denZUrl) {
+    odKdy = denZUrl;
+  }
+
   const doKdy = posunDatum(odKdy, DNU_DOPREDU - 1);
 
   let dotaz = supabase
