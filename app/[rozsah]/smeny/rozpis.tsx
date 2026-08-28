@@ -2,6 +2,13 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 
+// Posun data (z lib/provozni-den.ts, duplikovaný pro klient)
+function posunDatum(datum: string, dnu: number): string {
+  const [r, m, d] = datum.split("-").map(Number);
+  const posunuty = new Date(Date.UTC(r, m - 1, d + dnu));
+  return posunuty.toISOString().slice(0, 10);
+}
+
 type Smena = {
   id: string;
   branch_id: string;
@@ -67,6 +74,72 @@ export default function RozpisView({
 
   return (
     <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      {/* Navigace — posun období */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "24px",
+          padding: "12px",
+          background: "var(--card)",
+          borderRadius: "8px",
+          border: "1px solid var(--line)",
+        }}
+      >
+        <button
+          onClick={() => updateUrl(pohled, posunDatum(den, pohled === "mesic" ? -30 : pohled === "tyden" ? -7 : -1))}
+          style={{
+            padding: "8px 12px",
+            background: "transparent",
+            border: "none",
+            color: "var(--branch)",
+            cursor: "pointer",
+            fontSize: "18px",
+            fontWeight: "bold",
+          }}
+        >
+          ‹
+        </button>
+
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--branch)" }}>
+            {popisObdobi(den, pohled, dnesni)}
+          </div>
+        </div>
+
+        <button
+          onClick={() => updateUrl(pohled, dnesni)}
+          style={{
+            padding: "6px 12px",
+            background: "var(--branch-soft)",
+            border: "1px solid var(--line)",
+            color: "var(--branch)",
+            cursor: "pointer",
+            fontSize: "12px",
+            fontWeight: 600,
+            borderRadius: "4px",
+          }}
+        >
+          Dnes
+        </button>
+
+        <button
+          onClick={() => updateUrl(pohled, posunDatum(den, pohled === "mesic" ? 30 : pohled === "tyden" ? 7 : 1))}
+          style={{
+            padding: "8px 12px",
+            background: "transparent",
+            border: "none",
+            color: "var(--branch)",
+            cursor: "pointer",
+            fontSize: "18px",
+            fontWeight: "bold",
+          }}
+        >
+          ›
+        </button>
+      </div>
+
       {/* Přepínač pohledů */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
         <button
@@ -301,6 +374,36 @@ function TydenView({
       </table>
     </div>
   );
+}
+
+function popisObdobi(den: string, pohled: "mesic" | "tyden" | "den", dnesni: string): string {
+  const d = new Date(`${den}T00:00:00Z`);
+
+  if (pohled === "mesic") {
+    const mesice = ["leden", "únor", "březen", "duben", "květen", "červen", "červenec", "srpen", "září", "říjen", "listopad", "prosinec"];
+    return `${mesice[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  }
+
+  if (pohled === "tyden") {
+    const pondelni = new Date(d);
+    pondelni.setUTCDate(d.getUTCDate() - d.getUTCDay() + (d.getUTCDay() === 0 ? -6 : 1));
+    const nedale = new Date(pondelni);
+    nedale.setUTCDate(pondelni.getUTCDate() + 6);
+
+    const mesice = ["leden", "únor", "březen", "duben", "květen", "červen", "červenec", "srpen", "září", "říjen", "listopad", "prosinec"];
+    const m1 = mesice[pondelni.getUTCMonth()];
+    const m2 = mesice[nedale.getUTCMonth()];
+
+    if (pondelni.getUTCMonth() === nedale.getUTCMonth()) {
+      return `${pondelni.getUTCDate()}.–${nedale.getUTCDate()}. ${m1}`;
+    } else {
+      return `${pondelni.getUTCDate()}. ${m1} – ${nedale.getUTCDate()}. ${m2}`;
+    }
+  }
+
+  const dny = ["neděle", "pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota"];
+  const mesice = ["ledna", "února", "března", "dubna", "května", "června", "července", "srpna", "září", "října", "listopadu", "prosince"];
+  return `${dny[d.getUTCDay()]} ${d.getUTCDate()}. ${mesice[d.getUTCMonth()]}`;
 }
 
 function popisDneZkracene(datum: string, dnesni: string): string {
