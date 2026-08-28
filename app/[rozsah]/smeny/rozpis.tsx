@@ -9,6 +9,13 @@ function posunDatum(datum: string, dnu: number): string {
   return posunuty.toISOString().slice(0, 10);
 }
 
+// Posun měsíce (měsíční aritmetika, ne ±30 dnů)
+function posunMesic(datum: string, mesicu: number): string {
+  const [r, m] = datum.split("-").map(Number);
+  const posunuty = new Date(Date.UTC(r, m - 1 + mesicu, 1));
+  return posunuty.toISOString().slice(0, 10);
+}
+
 type Smena = {
   id: string;
   branch_id: string;
@@ -88,7 +95,12 @@ export default function RozpisView({
         }}
       >
         <button
-          onClick={() => updateUrl(pohled, posunDatum(den, pohled === "mesic" ? -30 : pohled === "tyden" ? -7 : -1))}
+          onClick={() =>
+            updateUrl(
+              pohled,
+              pohled === "mesic" ? posunMesic(den, -1) : posunDatum(den, pohled === "tyden" ? -7 : -1)
+            )
+          }
           style={{
             padding: "8px 12px",
             background: "transparent",
@@ -125,7 +137,12 @@ export default function RozpisView({
         </button>
 
         <button
-          onClick={() => updateUrl(pohled, posunDatum(den, pohled === "mesic" ? 30 : pohled === "tyden" ? 7 : 1))}
+          onClick={() =>
+            updateUrl(
+              pohled,
+              pohled === "mesic" ? posunMesic(den, 1) : posunDatum(den, pohled === "tyden" ? 7 : 1)
+            )
+          }
           style={{
             padding: "8px 12px",
             background: "transparent",
