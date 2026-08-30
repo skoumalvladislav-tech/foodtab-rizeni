@@ -240,7 +240,7 @@ export default async function Ukoly({
                 <form action={dokoncitUkol} style={{ marginTop: "10px" }}>
                   <input type="hidden" name="rozsah" value={rozsah} />
                   <input type="hidden" name="ukol" value={u.id} />
-                  <button type="submit" style={tlacitkoMale}>
+                  <button type="submit" className="ft-tl ft-tl-hlavni ft-tl-male">
                     Hotovo
                   </button>
                 </form>
@@ -318,7 +318,8 @@ export default async function Ukoly({
                   {beh ? (
                     <Link
                       href={`/${rozsah}/ukoly/${beh.id}`}
-                      style={{ ...tlacitkoMale, display: "inline-block", marginTop: "10px" }}
+                      className="ft-tl ft-tl-hlavni ft-tl-male"
+                      style={{ marginTop: "10px" }}
                     >
                       {beh.status === "done" ? "Zobrazit" : "Pokračovat"}
                     </Link>
@@ -326,7 +327,7 @@ export default async function Ukoly({
                     <form action={spustitChecklist} style={{ marginTop: "10px" }}>
                       <input type="hidden" name="rozsah" value={rozsah} />
                       <input type="hidden" name="sablona" value={s.id} />
-                      <button type="submit" style={tlacitkoMale}>
+                      <button type="submit" className="ft-tl ft-tl-hlavni ft-tl-male">
                         Spustit
                       </button>
                     </form>
@@ -356,17 +357,6 @@ const seznam = {
   padding: 0,
   display: "grid",
   gap: "10px",
-} as const;
-
-const tlacitkoMale = {
-  padding: "10px 16px",
-  fontSize: "14px",
-  borderRadius: "10px",
-  border: "none",
-  background: "var(--branch)",
-  color: "var(--card)",
-  cursor: "pointer",
-  textDecoration: "none",
 } as const;
 
 /** Hlášky z ?chyba= po neúspěšném zavření úkolu. */

@@ -235,19 +235,7 @@ export default async function VyplnitChecklist({
                       />
                     ) : null}
 
-                    <button
-                      type="submit"
-                      style={{
-                        padding: "10px 16px",
-                        fontSize: "14px",
-                        borderRadius: "10px",
-                        border: "none",
-                        background: "var(--branch)",
-                        color: "var(--card)",
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                    <button type="submit" className="ft-tl ft-tl-hlavni ft-tl-male">
                       {p.requires_value ? "Zapsat" : "Odškrtnout"}
                     </button>
                   </form>
@@ -277,16 +265,8 @@ export default async function VyplnitChecklist({
           <input type="hidden" name="beh" value={run.id} />
           <button
             type="submit"
-            style={{
-              width: "100%",
-              padding: "14px",
-              fontSize: "16px",
-              borderRadius: "12px",
-              border: "none",
-              background: "var(--good)",
-              color: "var(--card)",
-              cursor: "pointer",
-            }}
+            className="ft-tl ft-tl-hlavni"
+            style={{ width: "100%" }}
           >
             Uzavřít checklist
           </button>

@@ -145,20 +145,13 @@ export default async function NastaveniLide({
           {ulozeno && <p style={{ ...chybaHlaska, color: "var(--good)" }}>Uloženo.</p>}
 
           <div style={{ display: "flex", gap: "12px" }}>
-            <button type="submit" style={tlacitko}>
+            <button type="submit" className="ft-tl ft-tl-hlavni">
               {upravuje ? "Uložit" : "Přidat"}
             </button>
             {upravuje && (
               <Link
                 href={`/${rozsah}/nastaveni/lide`}
-                style={{
-                  ...tlacitko,
-                  background: "var(--line-2)",
-                  color: "var(--ink)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  textDecoration: "none",
-                }}
+                className="ft-tl ft-tl-vedlejsi"
               >
                 Storno
               </Link>
@@ -207,7 +200,8 @@ export default async function NastaveniLide({
                 <td style={td}>
                   <Link
                     href={`/${rozsah}/nastaveni/lide?upravuji=${z.id}`}
-                    style={{ ...tabulkovyLink, textDecoration: "none" }}
+                    className="ft-tl ft-tl-vedlejsi ft-tl-male"
+                    style={{ marginRight: "8px" }}
                   >
                     Upravit
                   </Link>
@@ -217,7 +211,6 @@ export default async function NastaveniLide({
                       id={z.id}
                       rozsah={rozsah}
                       jmeno={z.full_name}
-                      styl={{ ...tabulkovyLink, color: "var(--warn)" }}
                     />
                   )}
                 </td>
@@ -279,17 +272,6 @@ const chybaHlaska = {
   fontSize: "13px",
 } as const;
 
-const tlacitko = {
-  padding: "11px 18px",
-  fontSize: "15px",
-  borderRadius: "10px",
-  border: "none",
-  background: "var(--branch)",
-  color: "var(--card)",
-  cursor: "pointer",
-  minHeight: "44px",
-} as const;
-
 const tabulka = {
   width: "100%",
   borderCollapse: "collapse" as const,
@@ -317,13 +299,4 @@ const tr = {
 
 const td = {
   padding: "12px",
-} as const;
-
-const tabulkovyLink = {
-  color: "var(--accent)",
-  background: "none",
-  border: "none",
-  cursor: "pointer",
-  fontSize: "13px",
-  marginRight: "12px",
 } as const;

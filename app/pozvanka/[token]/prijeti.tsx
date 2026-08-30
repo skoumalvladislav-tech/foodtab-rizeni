@@ -39,7 +39,7 @@ export default function PrijmoutPozvankuFormular({ token }: { token: string }) {
 
       {error && <p className="hlaska-chyba">{error}</p>}
 
-      <button type="submit" disabled={loading} style={tlacitko}>
+      <button type="submit" disabled={loading} className="ft-tl ft-tl-hlavni">
         {loading ? 'Přijímám…' : 'Přijmout pozvánku'}
       </button>
     </form>
@@ -69,14 +69,3 @@ const chybaHlaska = {
   fontSize: '13px',
 } as const
 
-const tlacitko = {
-  padding: '12px 18px',
-  fontSize: '16px',
-  borderRadius: '10px',
-  border: 'none',
-  background: 'var(--accent)',
-  color: 'white',
-  cursor: 'pointer',
-  minHeight: '44px',
-  fontWeight: '500',
-} as const

@@ -197,18 +197,7 @@ export default async function Zpravy({
                 <input type="checkbox" name="pripnout" value="ano" />
                 Připnout nahoru
               </label>
-              <button
-                type="submit"
-                style={{
-                  padding: "10px 18px",
-                  fontSize: "15px",
-                  borderRadius: "10px",
-                  border: "none",
-                  background: "var(--branch)",
-                  color: "var(--card)",
-                  cursor: "pointer",
-                }}
-              >
+              <button type="submit" className="ft-tl ft-tl-hlavni">
                 Odeslat
               </button>
             </div>
@@ -297,18 +286,7 @@ export default async function Zpravy({
                     <form action={oznacitPrectene} style={{ marginTop: "10px" }}>
                       <input type="hidden" name="rozsah" value={rozsah} />
                       <input type="hidden" name="zprava" value={z.id} />
-                      <button
-                        type="submit"
-                        style={{
-                          padding: "8px 14px",
-                          fontSize: "13px",
-                          borderRadius: "8px",
-                          border: "1px solid var(--line)",
-                          background: "transparent",
-                          color: "var(--good)",
-                          cursor: "pointer",
-                        }}
-                      >
+                      <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
                         Označit jako přečtené
                       </button>
                     </form>

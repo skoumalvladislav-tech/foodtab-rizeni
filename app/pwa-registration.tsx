@@ -69,7 +69,7 @@ export default function PwaRegistration() {
             <li>Zvolte <b>Přidat na plochu</b>.</li>
             <li>Potvrďte tlačítkem <b>Přidat</b>.</li>
           </ol>
-          <button className="primary" onClick={() => setShowIosHelp(false)}>Rozumím</button>
+          <button className="ft-tl ft-tl-hlavni" onClick={() => setShowIosHelp(false)}>Rozumím</button>
         </div>
       </section>
     </div>

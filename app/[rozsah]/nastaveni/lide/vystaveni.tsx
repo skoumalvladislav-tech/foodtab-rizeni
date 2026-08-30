@@ -107,11 +107,7 @@ export default function VystavitPozvankuFormular({
               <button
                 type="submit"
                 disabled={loading}
-                style={{
-                  ...tlacitko,
-                  opacity: loading ? 0.5 : 1,
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                }}
+                className="ft-tl ft-tl-hlavni"
               >
                 {loading ? 'Vystavuji…' : 'Vystavit pozvánku'}
               </button>
@@ -123,7 +119,7 @@ export default function VystavitPozvankuFormular({
               </p>
               <div style={tokenBox}>
                 <code style={tokenText}>{token}</code>
-                <button onClick={copyToken} style={kopirovatTlacitko}>
+                <button onClick={copyToken} className="ft-tl ft-tl-vedlejsi ft-tl-male">
                   {copied ? '✓ Zkopírováno' : 'Kopírovat'}
                 </button>
               </div>
@@ -131,7 +127,7 @@ export default function VystavitPozvankuFormular({
                 onClick={() => {
                   setToken(null)
                 }}
-                style={{ ...tlacitko, background: 'var(--line-2)', color: 'var(--ink)' }}
+                className="ft-tl ft-tl-vedlejsi"
               >
                 Nová pozvánka
               </button>
@@ -208,17 +204,6 @@ const chybaHlaska = {
   fontSize: '13px',
 } as const
 
-const tlacitko = {
-  padding: '11px 18px',
-  fontSize: '15px',
-  borderRadius: '10px',
-  border: 'none',
-  background: 'var(--branch)',
-  color: 'var(--card)',
-  cursor: 'pointer',
-  minHeight: '44px',
-} as const
-
 const vysledek = {
   display: 'grid',
   gap: '12px',
@@ -242,13 +227,3 @@ const tokenText = {
   color: 'var(--ink)',
 } as const
 
-const kopirovatTlacitko = {
-  padding: '8px 14px',
-  fontSize: '13px',
-  borderRadius: '8px',
-  border: 'none',
-  background: 'var(--branch)',
-  color: 'var(--card)',
-  cursor: 'pointer',
-  whiteSpace: 'nowrap' as const,
-} as const

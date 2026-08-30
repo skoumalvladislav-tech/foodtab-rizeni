@@ -1,9 +1,10 @@
 'use client'
 
-import type { CSSProperties } from 'react'
-
 /**
  * Tlačítko Smazat u řádku zaměstnance.
+ *
+ * Jediné místo v aplikaci s vzhledem .ft-tl-nebezpecne — mazání je
+ * jediná akce, která se rovná ztrátě. Běžná akce červenou nedostane.
  *
  * Klientské je jen kvůli potvrzovacímu dotazu. Vlastní mazání dělá
  * serverová akce, která si oprávnění ověří znovu — kdyby si někdo dotaz
@@ -15,7 +16,6 @@ export default function SmazatZamestnance({
   id,
   rozsah,
   jmeno,
-  styl,
 }: {
   /** Serverová akce z ./akce.ts. Předává se jako vlastnost. */
   akce: (formData: FormData) => Promise<void>
@@ -23,7 +23,6 @@ export default function SmazatZamestnance({
   rozsah: string
   /** Do dotazu, ať je vidět, o koho jde. */
   jmeno: string
-  styl: CSSProperties
 }) {
   return (
     <form
@@ -36,7 +35,7 @@ export default function SmazatZamestnance({
     >
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="rozsah" value={rozsah} />
-      <button type="submit" style={styl}>
+      <button type="submit" className="ft-tl ft-tl-nebezpecne ft-tl-male">
         Smazat
       </button>
     </form>

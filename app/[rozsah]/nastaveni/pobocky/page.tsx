@@ -220,7 +220,7 @@ export default async function NastaveniPobocek({
                 <p style={{ ...hlaska, color: "var(--good)" }}>Uloženo.</p>
               ) : null}
 
-              <button type="submit" style={tlacitko}>
+              <button type="submit" className="ft-tl ft-tl-hlavni" style={{ marginTop: "16px" }}>
                 Uložit
               </button>
             </form>
@@ -254,18 +254,6 @@ const pole = {
 const hlaska = {
   margin: "14px 0 0",
   fontSize: "13px",
-} as const;
-
-const tlacitko = {
-  marginTop: "16px",
-  padding: "11px 18px",
-  fontSize: "15px",
-  borderRadius: "10px",
-  border: "none",
-  background: "var(--branch)",
-  color: "var(--card)",
-  cursor: "pointer",
-  minHeight: "44px",
 } as const;
 
 function popisChyby(kod: string): string {

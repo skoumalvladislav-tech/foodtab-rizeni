@@ -381,6 +381,67 @@ select:focus-visible {
   outline-offset: 1px;
 }
 
+/* ---- Tlačítka ---------------------------------------------------- */
+/* Tři vzhledy na celou aplikaci a nic čtvrtého. Barva se tlačítku
+   nenastavuje na místě — přesně tak se paleta minule rozešla a Odchod
+   ze směny skončil v barvě varování.
+
+   Která je která:
+     .ft-tl-hlavni      to, kvůli čemu na obrazovku jdu (Odeslat, Odchod)
+     .ft-tl-vedlejsi    doprovod hlavní akce (Dnes, Měsíc/Týden/Den)
+     .ft-tl-nebezpecne  co nejde vzít zpět (mazání)
+
+   --pozor a --bad jsou stavové barvy, ne barvy akcí. --bad tu má jen
+   .ft-tl-nebezpecne, protože mazání je jediná akce, která se rovná
+   ztrátě. Běžná akce červenou nedostane, ani když je „důležitá“.
+
+   Obrys nesou i plné vzhledy: samotná výplň --mosaz-sv má proti krémové
+   ploše poměr 1,91, takže by tlačítko na světlém pozadí nebylo poznat
+   jako tlačítko. Hlídá to scripts/barvy.js. */
+
+.ft-tl {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; padding: 11px 18px; min-height: 44px;
+  font-size: 15px; font-weight: 500; line-height: 1.2;
+  border: 1px solid transparent; border-radius: 10px;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background .12s, border-color .12s, color .12s;
+}
+
+/* Malá varianta je rozměr, ne čtvrtý vzhled — barvy si nese dál z těch
+   tří. Používá se v seznamech, kde plné tlačítko rozhodí řádkování. */
+.ft-tl-male {
+  padding: 8px 14px; min-height: 36px; font-size: 13px; border-radius: 8px;
+}
+
+.ft-tl-hlavni {
+  background: var(--mosaz-sv); color: var(--mosaz-ink);
+  border-color: var(--mosaz);
+}
+.ft-tl-hlavni:hover { background: var(--mosaz); color: var(--accent-ink); }
+
+.ft-tl-vedlejsi {
+  background: transparent; color: var(--ink);
+  border-color: var(--muted);
+}
+.ft-tl-vedlejsi:hover { background: var(--sunken); }
+
+/* Zapnutá volba přepínače (Týden ze tří, Den ze tří). Pořád vedlejší
+   akce — jen je vidět, na které z nich zrovna stojím. Stav nese
+   aria-pressed, aby ho odečítač přečetl taky, ne jen oko. */
+.ft-tl-vedlejsi[aria-pressed="true"] {
+  background: var(--sunken); border-color: var(--ink); font-weight: 600;
+}
+
+.ft-tl-nebezpecne {
+  background: var(--bad); color: var(--card);
+  border-color: var(--bad);
+}
+.ft-tl-nebezpecne:hover { background: var(--bad); border-color: var(--ink); }
+
+.ft-tl:disabled,
+.ft-tl[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+
 .auth-screen {
   min-height: 100vh;
   padding: 42px 20px;

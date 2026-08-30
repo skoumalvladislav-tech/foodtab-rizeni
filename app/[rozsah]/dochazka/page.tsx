@@ -205,27 +205,18 @@ export default async function Dochazka({
           </p>
 
           {/*
-            Odchod je mosazný, ne v barvě --pozor. Píchnout odchod je ten
-            nejběžnější úkon dne, ne varování — červená by z konce směny
-            dělala poplach a otupila by barvu, kterou má obrazovka
-            vyhrazenou na skutečné problémy. Barva se přesto mezi stavy
-            mění, takže je na první pohled poznat, který úkon je na řadě.
+            Příchod i odchod jsou hlavní akce, ne varování. Píchnout
+            odchod je nejběžnější úkon dne; --pozor zůstává skutečným
+            problémům. Obě strany proto vypadají stejně — co je zrovna
+            na řadě, říká text tlačítka a stav nad ním.
           */}
           <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
             <input type="hidden" name="rozsah" value={rozsah} />
             <input type="hidden" name="druh" value={dalsiDruh} />
             <button
               type="submit"
-              style={{
-                width: "100%",
-                padding: "16px",
-                fontSize: "18px",
-                borderRadius: "12px",
-                border: "none",
-                background: jsemVPraci ? "var(--mosaz)" : "var(--branch)",
-                color: "var(--card)",
-                cursor: "pointer",
-              }}
+              className="ft-tl ft-tl-hlavni"
+              style={{ width: "100%", minHeight: "56px", fontSize: "18px" }}
             >
               {jsemVPraci ? "Odchod" : "Příchod"}
             </button>

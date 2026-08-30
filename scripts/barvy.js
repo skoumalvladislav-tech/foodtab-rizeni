@@ -239,6 +239,43 @@ function ctiObrysHledani(globals) {
   return null;
 }
 
+/** Tři vzhledy tlačítek z globals.css. Klíč = přípona třídy. */
+const VZHLEDY = [
+  ['hlavni', 'hlavní akce'],
+  ['vedlejsi', 'vedlejší akce'],
+  ['nebezpecne', 'nebezpečná akce'],
+];
+
+/**
+ * Jakými tokeny je obarvený jeden vzhled tlačítka.
+ *
+ * Čte se to z globals.css ze stejného důvodu jako obrys vyhledávání:
+ * kontrola napsaná na pevné tokeny by měřila barvy, které tlačítko
+ * nemusí mít, a přebarvení by prošlo. Vrací názvy tokenů bez dvou
+ * pomlček, nebo 'pruhledna' tam, kde je transparent.
+ */
+function ctiTlacitko(globals, vzhled) {
+  const blok = vyrez(globals, '.ft-tl-' + vzhled + ' {', '}');
+  if (!blok) return null;
+
+  const najdi = (vlastnost) => {
+    // Před názvem musí být hranice, jinak by 'color' chytilo
+    // i 'border-color' a vzhled by se měřil špatnou barvou.
+    const m = blok.match(new RegExp('(?:^|[;{\\s])' + vlastnost + '\\s*:\\s*([^;}]+)', 'm'));
+    if (!m) return null;
+    const hodnota = m[1];
+    const token = hodnota.match(/var\(--([a-z0-9-]+)\)/);
+    if (token) return token[1];
+    return hodnota.includes('transparent') ? 'pruhledna' : null;
+  };
+
+  return {
+    vypln: najdi('background'),
+    text: najdi('color'),
+    obrys: najdi('border-color'),
+  };
+}
+
 /* --- kontrola -------------------------------------------------------- */
 
 function main() {
@@ -297,6 +334,49 @@ function main() {
     zkus('--faint na --paper (jen výzdoba)', t('faint'), t('paper'), 3.0);
 
     console.log('  kontrast základu: ' + (overeno - predZakladem) + ' dvojic');
+
+    /* --- tlačítka ---------------------------------------------------
+       Tři vzhledy z globals.css. U každého se ptáme na dvě věci:
+       přečtu na něm text, a poznám vůbec, že je to tlačítko?
+
+       To druhé smí vyjít z výplně nebo z obrysu, stačí jedno z nich —
+       plná mosazná výplň má proti krémové ploše jen 1,91, takže hlavní
+       tlačítko drží ohraničení mosazný obrys. Kdyby zmizel obojí,
+       zůstane na světlém pozadí světlá skvrna bez hranice. */
+    const predTlacitky = overeno;
+
+    for (const [klic, popis] of VZHLEDY) {
+      const v = ctiTlacitko(globals, klic);
+      if (!v) { zavady.push('nenašel jsem .ft-tl-' + klic + ' v globals.css'); continue; }
+
+      const barva = (jmeno) => (!jmeno || jmeno === 'pruhledna' ? null : t(jmeno));
+      const vypln = barva(v.vypln);
+      const obrys = barva(v.obrys);
+      const text = barva(v.text);
+
+      for (const podklad of ['paper', 'card']) {
+        // Text se čte proti výplni; průhledné tlačítko ho má proti ploše pod sebou.
+        zkus(popis + ': text na ' + (vypln ? '--' + v.vypln : '--' + podklad),
+             text, vypln ?? t(podklad), 4.5);
+
+        // Ohraničení: výplň nebo obrys, stačí lepší z nich.
+        if (!vypln && !obrys) {
+          zavady.push(popis + ': nemá výplň ani obrys, na ploše ho nepoznám');
+          continue;
+        }
+        overeno++;
+        const nejlepsi = Math.max(
+          vypln ? pomer(vypln, t(podklad)) : 0,
+          obrys ? pomer(obrys, t(podklad)) : 0,
+        );
+        if (nejlepsi < 3.0) {
+          zavady.push(popis + ': plocha ani obrys proti --' + podklad +
+                      ' nedá 3,0 (nejlépe ' + nejlepsi.toFixed(2) + ')');
+        }
+      }
+    }
+
+    console.log('  tlačítka: ' + (overeno - predTlacitky) + ' dvojic ve třech vzhledech');
 
     // devět klíčů rozsahu
     const hlavicka = ['klíč     ', 'ink/rail', 'ink/r-2', 'tlum/r', 'tlum/r-2', 'mosaz', 'br/pap', 'ink/fill', 'fill/pap', 'br/soft', 'obrys/r', 'obrys/r2'];

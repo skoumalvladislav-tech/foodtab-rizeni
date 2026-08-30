@@ -91,16 +91,8 @@ export default function PrihlasovaciFormular({
             <button
               type="button"
               onClick={() => setStav("formular")}
-              style={{
-                marginTop: "24px",
-                background: "none",
-                border: "none",
-                padding: 0,
-                color: "var(--accent)",
-                textDecoration: "underline",
-                cursor: "pointer",
-                fontSize: "14px",
-              }}
+              className="ft-tl ft-tl-vedlejsi ft-tl-male"
+              style={{ marginTop: "24px" }}
             >
               Zadat jinou adresu
             </button>
@@ -167,18 +159,8 @@ export default function PrihlasovaciFormular({
               <button
                 type="submit"
                 disabled={stav === "odesilam"}
-                style={{
-                  width: "100%",
-                  marginTop: "20px",
-                  padding: "12px 16px",
-                  fontSize: "16px",
-                  borderRadius: "10px",
-                  border: "none",
-                  background: "var(--accent)",
-                  color: "var(--card)",
-                  cursor: stav === "odesilam" ? "progress" : "pointer",
-                  opacity: stav === "odesilam" ? 0.7 : 1,
-                }}
+                className="ft-tl ft-tl-hlavni"
+                style={{ width: "100%", marginTop: "20px" }}
               >
                 {stav === "odesilam" ? "Odesílám…" : "Poslat přihlašovací odkaz"}
               </button>

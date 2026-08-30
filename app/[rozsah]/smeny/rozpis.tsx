@@ -17,6 +17,15 @@ function posunMesic(datum: string, mesicu: number): string {
   return posunuty.toISOString().slice(0, 10);
 }
 
+type Pohled = "mesic" | "tyden" | "den";
+
+/** Volby přepínače nahoře. Pořadí od nejširšího po nejužší. */
+const POHLEDY: [Pohled, string][] = [
+  ["mesic", "Měsíc"],
+  ["tyden", "Týden"],
+  ["den", "Den"],
+];
+
 type Smena = {
   id: string;
   branch_id: string;
@@ -62,10 +71,10 @@ export default function RozpisView({
   const denZUrl = searchParams.get("den") ?? dnesni;
 
   // Validace
-  const pohled = (["mesic", "tyden", "den"].includes(pohledZUrl) ? pohledZUrl : "tyden") as "mesic" | "tyden" | "den";
+  const pohled = (POHLEDY.some(([k]) => k === pohledZUrl) ? pohledZUrl : "tyden") as Pohled;
   const den = denZUrl;
 
-  const updateUrl = (newPohled: "mesic" | "tyden" | "den", newDay: string) => {
+  const updateUrl = (newPohled: Pohled, newDay: string) => {
     const params = new URLSearchParams();
     params.set("pohled", newPohled);
     params.set("den", newDay);
@@ -102,15 +111,8 @@ export default function RozpisView({
               pohled === "mesic" ? posunMesic(den, -1) : posunDatum(den, pohled === "tyden" ? -7 : -1)
             )
           }
-          style={{
-            padding: "8px 12px",
-            background: "transparent",
-            border: "none",
-            color: "var(--branch)",
-            cursor: "pointer",
-            fontSize: "18px",
-            fontWeight: "bold",
-          }}
+          className="ft-tl ft-tl-vedlejsi ft-tl-male"
+          aria-label="Předchozí období"
         >
           ‹
         </button>
@@ -123,16 +125,7 @@ export default function RozpisView({
 
         <button
           onClick={() => updateUrl(pohled, dnesni)}
-          style={{
-            padding: "6px 12px",
-            background: "var(--branch-soft)",
-            border: "1px solid var(--line)",
-            color: "var(--branch)",
-            cursor: "pointer",
-            fontSize: "12px",
-            fontWeight: 600,
-            borderRadius: "4px",
-          }}
+          className="ft-tl ft-tl-vedlejsi ft-tl-male"
         >
           Dnes
         </button>
@@ -144,15 +137,8 @@ export default function RozpisView({
               pohled === "mesic" ? posunMesic(den, 1) : posunDatum(den, pohled === "tyden" ? 7 : 1)
             )
           }
-          style={{
-            padding: "8px 12px",
-            background: "transparent",
-            border: "none",
-            color: "var(--branch)",
-            cursor: "pointer",
-            fontSize: "18px",
-            fontWeight: "bold",
-          }}
+          className="ft-tl ft-tl-vedlejsi ft-tl-male"
+          aria-label="Následující období"
         >
           ›
         </button>
@@ -160,51 +146,16 @@ export default function RozpisView({
 
       {/* Přepínač pohledů */}
       <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-        <button
-          onClick={() => updateUrl("mesic", den)}
-          style={{
-            padding: "8px 16px",
-            borderRadius: "8px",
-            border: pohled === "mesic" ? "2px solid var(--branch)" : "1px solid var(--line)",
-            background: pohled === "mesic" ? "var(--branch-soft)" : "transparent",
-            color: pohled === "mesic" ? "var(--branch)" : "var(--muted)",
-            cursor: "pointer",
-            fontSize: "14px",
-            fontWeight: pohled === "mesic" ? 600 : 500,
-          }}
-        >
-          Měsíc
-        </button>
-        <button
-          onClick={() => updateUrl("tyden", den)}
-          style={{
-            padding: "8px 16px",
-            borderRadius: "8px",
-            border: pohled === "tyden" ? "2px solid var(--branch)" : "1px solid var(--line)",
-            background: pohled === "tyden" ? "var(--branch-soft)" : "transparent",
-            color: pohled === "tyden" ? "var(--branch)" : "var(--muted)",
-            cursor: "pointer",
-            fontSize: "14px",
-            fontWeight: pohled === "tyden" ? 600 : 500,
-          }}
-        >
-          Týden
-        </button>
-        <button
-          onClick={() => updateUrl("den", den)}
-          style={{
-            padding: "8px 16px",
-            borderRadius: "8px",
-            border: pohled === "den" ? "2px solid var(--branch)" : "1px solid var(--line)",
-            background: pohled === "den" ? "var(--branch-soft)" : "transparent",
-            color: pohled === "den" ? "var(--branch)" : "var(--muted)",
-            cursor: "pointer",
-            fontSize: "14px",
-            fontWeight: pohled === "den" ? 600 : 500,
-          }}
-        >
-          Den
-        </button>
+        {POHLEDY.map(([klic, nazev]) => (
+          <button
+            key={klic}
+            onClick={() => updateUrl(klic, den)}
+            className="ft-tl ft-tl-vedlejsi"
+            aria-pressed={pohled === klic}
+          >
+            {nazev}
+          </button>
+        ))}
       </div>
 
       {/* Obsah podle pohledu */}
@@ -395,7 +346,7 @@ function TydenView({
   );
 }
 
-function popisObdobi(den: string, pohled: "mesic" | "tyden" | "den"): string {
+function popisObdobi(den: string, pohled: Pohled): string {
   const d = new Date(`${den}T00:00:00Z`);
 
   if (pohled === "mesic") {
