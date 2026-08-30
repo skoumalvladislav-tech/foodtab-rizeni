@@ -1,6 +1,9 @@
 /* =====================================================================
-   Tokeny rozhraní — podle docs/rozvrzeni-nahled.html
+   Tokeny rozhraní — podle docs/vzhled-predloha.html
    =====================================================================
+   Krém a mosaz. Nahrazuje indigovou paletu z rozvrzeni-nahled.html;
+   rozvržení obrazovek se nemění, jen barvy a písmo.
+
    Světlý základ je tady v :root. Tmavý se opakuje dvakrát schválně:
    jednou pod prefers-color-scheme se strážcem :root:not([data-theme="light"]),
    podruhé pod :root[data-theme="dark"]. Bez toho by ruční přepínač
@@ -8,155 +11,242 @@
    nedostal.
 
    Žádná barva se nedefinuje jen uvnitř media dotazu.
+
+   V DATABÁZI JE KLÍČ, NE ODSTÍN. branches.color drží 'amber', 'teal', …
+   a který odstín k tomu klíči patří, rozhoduje výhradně tenhle soubor.
+   Přebarvení celé aplikace je proto změna hexadecimálních hodnot na
+   jednom místě, ne migrace. Nikdy neukládej do databáze konkrétní barvu.
    ===================================================================== */
 
 :root {
-  --paper:  #f4f6fb;
-  --card:   #ffffff;
-  --sunken: #eef1f8;
-  --ink:    #131a2b;
-  --muted:  #616d85;
-  --faint:  #8b96ab;
-  --line:   #dde3ee;
-  --line-2: #c9d2e3;
-  --accent: #4f46e5;
-  --accent-soft: #eceafe;
-  --good:   #0f766e;
-  --warn:   #ea580c;
-  /* Předloha vlastní barvu pro chybu nemá. Doplněná ve stejném duchu:
-     tmavší odstín na světlém pozadí, světlejší na tmavém. */
-  --bad:    #b91c1c;
-  --shadow: 0 1px 2px rgba(19,26,43,.06), 0 8px 24px -12px rgba(19,26,43,.18);
+  --paper:  #f6f2e9;
+  --card:   #fffdf7;
+  --sunken: #efe9dc;
+  --ink:    #16211c;
+  --muted:  #617066;
+  --faint:  #808f84;
+  --line:   #e4ddcc;
+  --line-2: #d3c9b3;
+
+  --mosaz:     #916624;
+  --mosaz-sv:  #d8ab4e;
+  --mosaz-ink: #17251e;
+
+  --dobre: #2c7657;  --dobre-bg: #dbeee4;
+  --pozor: #b04519;  --pozor-bg: #fbe4d8;
+  --bad:   #a3241d;  --bad-bg:   #fbe0dd;
+
+  --branch-ink:  #fffdf7;
+  --accent-soft: #f0e4cd;
+  --accent-ink:  #fffdf7;
+
+  --shadow: 0 1px 2px rgba(22,33,28,.07), 0 8px 24px -12px rgba(22,33,28,.20);
+
+  /* Barva rozsahu — tmavá plocha horní lišty a bočního sloupce.
+     Výchozí je firemní odstín; klíč pobočky ho přepíše níž. */
+  --rail:      #143126;
+  --rail-2:    #21483a;
+  --rail-ink:  #f1ece0;
+  --rail-tlum: #97b4aa;
+
+  /* Mosaz je přízvuk celého rozhraní: odkazy, nadpisky sekcí, zaměření.
+     Barva pobočky se na papírové ploše drží --branch-*, ne --accent —
+     jinak by každá obrazovka měnila odstín odkazů podle toho, na které
+     pobočce zrovna stojíte. */
+  --accent: var(--mosaz);
 
   /* Barvy poboček — klíč z branches.color.
-     --b-*: text na tmavém podkladu
-     --b-*-fill: pozadí pod bílým textem (tlačítka, štítky)
-     --b-*-soft: bledý podklad pro text v normální barvě */
-  --b-slate:   #475569;  --b-slate-fill:   #475569;  --b-slate-soft:   #e7ebf2;
-  --b-indigo:  #4f46e5;  --b-indigo-fill:  #4f46e5;  --b-indigo-soft:  #eceafe;
-  --b-violet:  #7c3aed;  --b-violet-fill:  #7c3aed;  --b-violet-soft:  #f1ebfe;
-  --b-sky:     #0369a1;  --b-sky-fill:     #0369a1;  --b-sky-soft:     #e2f1fb;
-  --b-teal:    #0f766e;  --b-teal-fill:    #0f766e;  --b-teal-soft:    #ddf1ef;
-  --b-emerald: #047857;  --b-emerald-fill: #047857;  --b-emerald-soft: #ddf3e9;
-  --b-amber:   #92400e;  --b-amber-fill:   #92400e;  --b-amber-soft:   #fdf0dc;
-  --b-rose:    #be123c;  --b-rose-fill:    #be123c;  --b-rose-soft:    #fce8ed;
+     --b-*:      text na papírové ploše (4,5:1 na --paper i --card)
+     --b-*-fill: výplň pod textem --branch-ink (3:1 proti okolní ploše)
+     --b-*-soft: bledý podklad pro text v barvě --branch
 
-  /* Výchozí, než se doplní pobočka. Firemní úroveň má slate. */
-  --branch:      var(--b-slate);
-  --branch-soft: var(--b-slate-soft);
+     V tmavém režimu je výplň středně světlá a text na ní tmavý. Skoro
+     černá výplň se světlým textem by sice text uhlídala, ale sama by se
+     od karty nelišila — a WCAG 1.4.11 chce 3:1 i pro tu plochu. */
+  --b-firma:    #277a61;  --b-firma-fill:    #277a61;  --b-firma-soft:    #e8f4f0;
+  --b-slate:    #5f6f7e;  --b-slate-fill:    #5f6f7e;  --b-slate-soft:    #eef3f7;
+  --b-indigo:   #6b64ab;  --b-indigo-fill:   #6b64ab;  --b-indigo-soft:   #f1f1f8;
+  --b-violet:   #8e58a4;  --b-violet-fill:   #8e58a4;  --b-violet-soft:   #f6f1f8;
+  --b-sky:      #3b738f;  --b-sky-fill:      #3b738f;  --b-sky-soft:      #ecf2f6;
+  --b-teal:     #2d787b;  --b-teal-fill:     #2d787b;  --b-teal-soft:     #eaf5f5;
+  --b-emerald:  #2d7b4f;  --b-emerald-fill:  #2d7b4f;  --b-emerald-soft:  #eaf5ee;
+  --b-amber:    #986030;  --b-amber-fill:    #986030;  --b-amber-soft:    #f6f1ed;
+  --b-rose:     #af4e60;  --b-rose-fill:     #af4e60;  --b-rose-soft:     #f8f1f2;
+
+  --branch:      var(--b-firma);
+  --branch-fill: var(--b-firma-fill);
+  --branch-soft: var(--b-firma-soft);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper:  #080c16;
-    --card:   #111827;
-    --sunken: #0d1420;
-    --ink:    #e9edf6;
-    --muted:  #97a2b8;
-    --faint:  #6c7891;
-    --line:   #212c40;
-    --line-2: #2c3950;
-    --accent: #8b87f5;
-    --accent-soft: #201f3d;
-    --good:   #5eead4;
-    --warn:   #f97316;
-    --bad:    #f87171;
+    --paper:  #0c1310;
+    --card:   #141d19;
+    --sunken: #101815;
+    --ink:    #e9efea;
+    --muted:  #93a89c;
+    --faint:  #6b7d73;
+    --line:   #1e2b25;
+    --line-2: #2a3b33;
+
+    --mosaz:     #d9ac54;
+    --mosaz-sv:  #eac878;
+    --mosaz-ink: #17251e;
+
+    --dobre: #5fc79c;  --dobre-bg: #0f2b22;
+    --pozor: #f0855a;  --pozor-bg: #33170c;
+    --bad:   #f4837c;  --bad-bg:   #331313;
+
+    --branch-ink:  #17251e;
+    --accent-soft: #2b2313;
+    --accent-ink:  #17251e;
+
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
-    --b-slate:   #cbd5e1;  --b-slate-fill:   #1c2637;  --b-slate-soft:   #1c2637;
-    --b-indigo:  #c7c2ff;  --b-indigo-fill:  #221f42;  --b-indigo-soft:  #221f42;
-    --b-violet:  #d8b4fe;  --b-violet-fill:  #281a45;  --b-violet-soft:  #281a45;
-    --b-sky:     #7dd3fc;  --b-sky-fill:     #10283b;  --b-sky-soft:     #10283b;
-    --b-teal:    #7ee8e0;  --b-teal-fill:    #0d2b2a;  --b-teal-soft:    #0d2b2a;
-    --b-emerald: #86efac;  --b-emerald-fill: #0c2c20;  --b-emerald-soft: #0c2c20;
-    --b-amber:   #fcd34d;  --b-amber-fill:   #33240d;  --b-amber-soft:   #33240d;
-    --b-rose:    #fbcfe8;  --b-rose-fill:    #351320;  --b-rose-soft:    #351320;
+    --b-firma:    #48927b;  --b-firma-fill:    #3c9a7e;  --b-firma-soft:    #121e1a;
+    --b-slate:    #778794;  --b-slate-fill:    #798d9e;  --b-slate-soft:    #151d24;
+    --b-indigo:   #847eb4;  --b-indigo-fill:   #8a84c0;  --b-indigo-soft:   #1b192b;
+    --b-violet:   #9f76af;  --b-violet-fill:   #a879ba;  --b-violet-soft:   #231728;
+    --b-sky:      #558ba6;  --b-sky-fill:      #4f92b3;  --b-sky-soft:      #131c21;
+    --b-teal:     #4b8f91;  --b-teal-fill:     #3f979a;  --b-teal-soft:     #111d1e;
+    --b-emerald:  #4b926a;  --b-emerald-fill:  #3f9b67;  --b-emerald-soft:  #111d16;
+    --b-amber:    #ab7a50;  --b-amber-fill:    #bd7b42;  --b-amber-soft:    #211a14;
+    --b-rose:     #b3727e;  --b-rose-fill:     #c17482;  --b-rose-soft:     #261619;
   }
 }
 
 :root[data-theme="dark"] {
-  --paper:  #080c16;
-  --card:   #111827;
-  --sunken: #0d1420;
-  --ink:    #e9edf6;
-  --muted:  #97a2b8;
-  --faint:  #6c7891;
-  --line:   #212c40;
-  --line-2: #2c3950;
-  --accent: #8b87f5;
-  --accent-soft: #201f3d;
-  --good:   #5eead4;
-  --warn:   #f97316;
-  --bad:    #f87171;
+  --paper:  #0c1310;
+  --card:   #141d19;
+  --sunken: #101815;
+  --ink:    #e9efea;
+  --muted:  #93a89c;
+  --faint:  #6b7d73;
+  --line:   #1e2b25;
+  --line-2: #2a3b33;
+
+  --mosaz:     #d9ac54;
+  --mosaz-sv:  #eac878;
+  --mosaz-ink: #17251e;
+
+  --dobre: #5fc79c;  --dobre-bg: #0f2b22;
+  --pozor: #f0855a;  --pozor-bg: #33170c;
+  --bad:   #f4837c;  --bad-bg:   #331313;
+
+  --branch-ink:  #17251e;
+  --accent-soft: #2b2313;
+  --accent-ink:  #17251e;
+
   --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
 
-  --b-slate:   #cbd5e1;  --b-slate-fill:   #1c2637;  --b-slate-soft:   #1c2637;
-  --b-indigo:  #c7c2ff;  --b-indigo-fill:  #221f42;  --b-indigo-soft:  #221f42;
-  --b-violet:  #d8b4fe;  --b-violet-fill:  #281a45;  --b-violet-soft:  #281a45;
-  --b-sky:     #7dd3fc;  --b-sky-fill:     #10283b;  --b-sky-soft:     #10283b;
-  --b-teal:    #7ee8e0;  --b-teal-fill:    #0d2b2a;  --b-teal-soft:    #0d2b2a;
-  --b-emerald: #86efac;  --b-emerald-fill: #0c2c20;  --b-emerald-soft: #0c2c20;
-  --b-amber:   #fcd34d;  --b-amber-fill:   #33240d;  --b-amber-soft:   #33240d;
-  --b-rose:    #fbcfe8;  --b-rose-fill:    #351320;  --b-rose-soft:    #351320;
-}
-
-/* Klíč barvy z branches.color. Firemní úroveň zůstává na slate.
-   Bez :root schválně: <html> vykresluje kořenový layout, ale pobočku zná
-   až layout rozsahu. Atribut proto sedí na obalu uvnitř stránky, což by
-   selektor vázaný na :root nechytil. */
-[data-branch="slate"]   {
-  --branch: var(--b-slate);   --branch-fill: var(--b-slate-fill);   --branch-soft: var(--b-slate-soft);
-  --accent: var(--b-slate);   --accent-soft: var(--b-slate-soft);
-}
-[data-branch="indigo"]  {
-  --branch: var(--b-indigo);  --branch-fill: var(--b-indigo-fill);  --branch-soft: var(--b-indigo-soft);
-  --accent: var(--b-indigo);  --accent-soft: var(--b-indigo-soft);
-}
-[data-branch="violet"]  {
-  --branch: var(--b-violet);  --branch-fill: var(--b-violet-fill);  --branch-soft: var(--b-violet-soft);
-  --accent: var(--b-violet);  --accent-soft: var(--b-violet-soft);
-}
-[data-branch="sky"]     {
-  --branch: var(--b-sky);     --branch-fill: var(--b-sky-fill);     --branch-soft: var(--b-sky-soft);
-  --accent: var(--b-sky);     --accent-soft: var(--b-sky-soft);
-}
-[data-branch="teal"]    {
-  --branch: var(--b-teal);    --branch-fill: var(--b-teal-fill);    --branch-soft: var(--b-teal-soft);
-  --accent: var(--b-teal);    --accent-soft: var(--b-teal-soft);
-}
-[data-branch="emerald"] {
-  --branch: var(--b-emerald); --branch-fill: var(--b-emerald-fill); --branch-soft: var(--b-emerald-soft);
-  --accent: var(--b-emerald); --accent-soft: var(--b-emerald-soft);
-}
-[data-branch="amber"]   {
-  --branch: var(--b-amber);   --branch-fill: var(--b-amber-fill);   --branch-soft: var(--b-amber-soft);
-  --accent: var(--b-amber);   --accent-soft: var(--b-amber-soft);
-}
-[data-branch="rose"]    {
-  --branch: var(--b-rose);    --branch-fill: var(--b-rose-fill);    --branch-soft: var(--b-rose-soft);
-  --accent: var(--b-rose);    --accent-soft: var(--b-rose-soft);
+  --b-firma:    #48927b;  --b-firma-fill:    #3c9a7e;  --b-firma-soft:    #121e1a;
+  --b-slate:    #778794;  --b-slate-fill:    #798d9e;  --b-slate-soft:    #151d24;
+  --b-indigo:   #847eb4;  --b-indigo-fill:   #8a84c0;  --b-indigo-soft:   #1b192b;
+  --b-violet:   #9f76af;  --b-violet-fill:   #a879ba;  --b-violet-soft:   #231728;
+  --b-sky:      #558ba6;  --b-sky-fill:      #4f92b3;  --b-sky-soft:      #131c21;
+  --b-teal:     #4b8f91;  --b-teal-fill:     #3f979a;  --b-teal-soft:     #111d1e;
+  --b-emerald:  #4b926a;  --b-emerald-fill:  #3f9b67;  --b-emerald-soft:  #111d16;
+  --b-amber:    #ab7a50;  --b-amber-fill:    #bd7b42;  --b-amber-soft:    #211a14;
+  --b-rose:     #b3727e;  --b-rose-fill:     #c17482;  --b-rose-soft:     #261619;
 }
 
 /* ---------------------------------------------------------------------
-   Stará jména — VÝHRADNĚ pro odpojenou předlohu
-   ---------------------------------------------------------------------
-   Patří app/dashboard.tsx a komponentním stylům, které k ní zbyly dole
-   v globals.css. Nic jiného se na tahle jména odkazovat nemá — obrazovky
-   provozu jsou převedené na tokeny z předlohy.
+   Klíč barvy z branches.color
 
-   Až předloha doslouží, smaže se s ní i tenhle blok.
+   Bez :root schválně: <html> vykresluje kořenový layout, ale pobočku zná
+   až layout rozsahu. Atribut proto sedí na obalu uvnitř stránky, což by
+   selektor vázaný na :root nechytil.
+
+   Klíč "firma" NENÍ pobočka. Firemní úroveň měla dřív "slate", jenže
+   slate dostane od přidělovacího spouštěče osmá pobočka — a od chvíle,
+   kdy se jím barví celá lišta, by firma a osmá pobočka vypadaly stejně.
+   Do databáze se "firma" nikdy neukládá; slate zůstává pobočkám.
+   ------------------------------------------------------------------ */
+[data-branch="firma"]    {
+  --rail: #143126; --rail-2: #21483a; --rail-tlum: #97b4aa;
+  --branch: var(--b-firma); --branch-fill: var(--b-firma-fill); --branch-soft: var(--b-firma-soft);
+}
+[data-branch="slate"]    {
+  --rail: #1c2429; --rail-2: #2b363e; --rail-tlum: #8fa1ae;
+  --branch: var(--b-slate); --branch-fill: var(--b-slate-fill); --branch-soft: var(--b-slate-soft);
+}
+[data-branch="indigo"]   {
+  --rail: #18172e; --rail-2: #262444; --rail-tlum: #8d8cab;
+  --branch: var(--b-indigo); --branch-fill: var(--b-indigo-fill); --branch-soft: var(--b-indigo-soft);
+}
+[data-branch="violet"]   {
+  --rail: #24172e; --rail-2: #372444; --rail-tlum: #9e8cab;
+  --branch: var(--b-violet); --branch-fill: var(--b-violet-fill); --branch-soft: var(--b-violet-soft);
+}
+[data-branch="sky"]      {
+  --rail: #132732; --rail-2: #203b49; --rail-tlum: #92a6b0;
+  --branch: var(--b-sky); --branch-fill: var(--b-sky-fill); --branch-soft: var(--b-sky-soft);
+}
+[data-branch="teal"]     {
+  --rail: #133232; --rail-2: #204949; --rail-tlum: #97b4b4;
+  --branch: var(--b-teal); --branch-fill: var(--b-teal-fill); --branch-soft: var(--b-teal-soft);
+}
+[data-branch="emerald"]  {
+  --rail: #133222; --rail-2: #204934; --rail-tlum: #97b4a6;
+  --branch: var(--b-emerald); --branch-fill: var(--b-emerald-fill); --branch-soft: var(--b-emerald-soft);
+}
+[data-branch="amber"]    {
+  --rail: #36240e; --rail-2: #503619; --rail-tlum: #b2a495;
+  --branch: var(--b-amber); --branch-fill: var(--b-amber-fill); --branch-soft: var(--b-amber-soft);
+}
+[data-branch="rose"]     {
+  --rail: #2f161b; --rail-2: #45232a; --rail-tlum: #ab8c92;
+  --branch: var(--b-rose); --branch-fill: var(--b-rose-fill); --branch-soft: var(--b-rose-soft);
+}
+
+/* Tmavý režim mění jen plochu lišty a sloupce. --branch-* se tu
+   nepřepisují: hodnoty --b-* se vyměnily už v základu výš. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) [data-branch="firma"]    { --rail: #081410; --rail-2: #0e221b; --rail-tlum: #7c9c91; }
+  :root:not([data-theme="light"]) [data-branch="slate"]    { --rail: #0b0f11; --rail-2: #13191d; --rail-tlum: #7c8f9c; }
+  :root:not([data-theme="light"]) [data-branch="indigo"]   { --rail: #0a0913; --rail-2: #111020; --rail-tlum: #7e7c9c; }
+  :root:not([data-theme="light"]) [data-branch="violet"]   { --rail: #0f0913; --rail-2: #1a1020; --rail-tlum: #8f7c9c; }
+  :root:not([data-theme="light"]) [data-branch="sky"]      { --rail: #081015; --rail-2: #0e1c23; --rail-tlum: #7c929c; }
+  :root:not([data-theme="light"]) [data-branch="teal"]     { --rail: #081515; --rail-2: #0e2323; --rail-tlum: #7c9c9c; }
+  :root:not([data-theme="light"]) [data-branch="emerald"]  { --rail: #08150e; --rail-2: #0e2318; --rail-tlum: #7c9c8c; }
+  :root:not([data-theme="light"]) [data-branch="amber"]    { --rail: #160f06; --rail-2: #26190a; --rail-tlum: #9c8d7c; }
+  :root:not([data-theme="light"]) [data-branch="rose"]     { --rail: #13090b; --rail-2: #211013; --rail-tlum: #9c7c83; }
+}
+
+:root[data-theme="dark"] [data-branch="firma"]    { --rail: #081410; --rail-2: #0e221b; --rail-tlum: #7c9c91; }
+:root[data-theme="dark"] [data-branch="slate"]    { --rail: #0b0f11; --rail-2: #13191d; --rail-tlum: #7c8f9c; }
+:root[data-theme="dark"] [data-branch="indigo"]   { --rail: #0a0913; --rail-2: #111020; --rail-tlum: #7e7c9c; }
+:root[data-theme="dark"] [data-branch="violet"]   { --rail: #0f0913; --rail-2: #1a1020; --rail-tlum: #8f7c9c; }
+:root[data-theme="dark"] [data-branch="sky"]      { --rail: #081015; --rail-2: #0e1c23; --rail-tlum: #7c929c; }
+:root[data-theme="dark"] [data-branch="teal"]     { --rail: #081515; --rail-2: #0e2323; --rail-tlum: #7c9c9c; }
+:root[data-theme="dark"] [data-branch="emerald"]  { --rail: #08150e; --rail-2: #0e2318; --rail-tlum: #7c9c8c; }
+:root[data-theme="dark"] [data-branch="amber"]    { --rail: #160f06; --rail-2: #26190a; --rail-tlum: #9c8d7c; }
+:root[data-theme="dark"] [data-branch="rose"]     { --rail: #13090b; --rail-2: #211013; --rail-tlum: #9c7c83; }
+
+/* ---------------------------------------------------------------------
+   Stará jména
+   ---------------------------------------------------------------------
+   --good a --warn jsou původní názvy stavových barev, které předloha
+   přejmenovala na --dobre a --pozor. Používá je 23 míst v hotových
+   obrazovkách, takže tady zůstávají jako most.
+
+   Blok pod nimi patří app/dashboard.tsx a komponentním stylům, které
+   k odpojené předloze zbyly dole v globals.css. Nic jiného se na ta
+   jména odkazovat nemá; až předloha doslouží, smaže se s ní i tohle.
 
    Světlá i tmavá varianta jsou pokryté jedním zápisem: hodnota se
    nevyhodnocuje tady, ale až v místě použití, takže var(--branch)
    a spol. se samy převezmou z toho bloku tokenů, který zrovna platí.
-   Druhý blok pod media dotazem by jen opisoval totéž.
    ------------------------------------------------------------------ */
 :root {
+  --good: var(--dobre);
+  --warn: var(--pozor);
+
   --green:  var(--branch);
   --green2: var(--accent);
   --mint:   var(--branch-soft);
-  --gold:   var(--warn);
-  --copper: var(--warn);
+  --gold:   var(--mosaz);
+  --copper: var(--mosaz);
   --red:    var(--bad);
 
   --sidebar-bg:     var(--card);
@@ -167,3 +257,4 @@
   --pulse-dot:      var(--branch);
   --pulse-ring:     var(--branch-soft);
 }
+

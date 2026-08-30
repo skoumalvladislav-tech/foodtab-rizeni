@@ -97,8 +97,8 @@
   padding: 6px 11px; border-radius: 7px; text-decoration: none; white-space: nowrap;
 }
 .ft-seg a:hover { color: var(--ink); background: var(--sunken); }
-.ft-seg a.on { background: var(--branch-fill); color: white; font-weight: 600; }
-.ft-seg a.on:hover { background: var(--branch-fill); color: white; }
+.ft-seg a.on { background: var(--branch-fill); color: var(--branch-ink); font-weight: 600; }
+.ft-seg a.on:hover { background: var(--branch-fill); color: var(--branch-ink); }
 .ft-seg a.on .ft-swatch { background: var(--card); }
 
 /* Sbalená podoba: od páté volby na počítači, na mobilu vždycky. */
@@ -134,7 +134,7 @@
   color: var(--ink); text-decoration: none; min-height: 44px;
 }
 .ft-rozsah-panel a:hover { background: var(--sunken); }
-.ft-rozsah-panel a.on { background: var(--branch-fill); color: white; font-weight: 600; }
+.ft-rozsah-panel a.on { background: var(--branch-fill); color: var(--branch-ink); font-weight: 600; }
 .ft-rozsah-panel a.on .ft-swatch { background: var(--card); }
 
 @media (max-width: 640px) {
