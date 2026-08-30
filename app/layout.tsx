@@ -1,14 +1,23 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { IBM_Plex_Mono, Archivo, Newsreader } from "next/font/google";
 
 import "./globals.css";
 import PwaRegistration from "./pwa-registration";
 
-const plexSans = IBM_Plex_Sans({
+const archivo = Archivo({
   subsets: ["latin", "latin-ext"],
   weight: ["400", "500", "600", "700"],
-  variable: "--font-plex-sans",
+  variable: "--font-archivo",
   display: "swap",
+  fallback: ["system-ui", "sans-serif"],
+});
+
+const newsreader = Newsreader({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "600"],
+  variable: "--font-newsreader",
+  display: "swap",
+  fallback: ["Georgia", "serif"],
 });
 
 // Mono jen na časy, data a čísla ve sloupcích. Číslice mají stejnou
@@ -74,7 +83,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="cs" className={`${plexSans.variable} ${plexMono.variable}`}>
+    <html lang="cs" className={`${archivo.variable} ${newsreader.variable} ${plexMono.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: REZIM_SKRIPT }} />
       </head>
