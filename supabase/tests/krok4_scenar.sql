@@ -197,12 +197,12 @@ select pg_temp.check('pobočka se pozná podle slug',
   exists (
     select 1 from pg_constraint c
     where c.conrelid = 'public.branches'::regclass and c.contype = 'u'
-      and pg_get_constraintdef(c) = 'UNIQUE (tenant_id, slug)'));
+      and pg_get_constraintdef(c.oid) = 'UNIQUE (tenant_id, slug)'));
 select pg_temp.check('role se pozná podle key',
   exists (
     select 1 from pg_constraint c
     where c.conrelid = 'public.roles'::regclass and c.contype = 'u'
-      and pg_get_constraintdef(c) = 'UNIQUE (tenant_id, key)'));
+      and pg_get_constraintdef(c.oid) = 'UNIQUE (tenant_id, key)'));
 
 \echo ''
 \echo '=========================================================='

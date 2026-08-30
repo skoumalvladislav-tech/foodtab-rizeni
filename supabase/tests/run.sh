@@ -10,23 +10,61 @@ DB="${PGDATABASE:-foodtab_test}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PSQL="psql -h $HOST -p $PORT -U $USER -v ON_ERROR_STOP=1 -q"
 
+VYSTUP="$(mktemp)"
+trap 'rm -f "$VYSTUP"' EXIT
+
+POCET=0
+
+# Spustí psql nad jedním souborem a NIKDY nespolkne chybu.
+#
+# Dřív šel výstup rovnou do grepu (a u migrací do /dev/null). Filtr
+# propouštěl jen řádky s OK a SELHALO, takže chybová hláška z psql
+# zmizela: běh se po prvním pádu tiše utnul, seed se nespustil a
+# závěrečný banner se nevypsal — a nikde nestálo proč. Test, který umí
+# spadnout a vypadat přitom jako průchod, je horší než žádný.
+#
+# Filtrovaný výpis je proto až tady, z uloženého souboru, a jen pro
+# čitelnost ÚSPĚŠNÉHO běhu. Při nenulovém návratovém kódu se vypíše
+# všechno, co psql řekl, a skript skončí nenulově.
+spustit() {
+  if $PSQL -d "$DB" -f "$1" > "$VYSTUP" 2>&1; then
+    return 0
+  fi
+  echo
+  echo '=========================================================='
+  echo " SELHALO: $(basename "$1")"
+  echo '=========================================================='
+  cat "$VYSTUP"
+  echo
+  echo "Do pádu prošlo kontrol: $POCET"
+  exit 1
+}
+
+# Kolik kontrol proběhlo v posledním souboru. Sčítá se přes celý běh,
+# aby byl useknutý běh vidět na první pohled podle nižšího čísla.
+pricist_kontroly() {
+  POCET=$(( POCET + $(grep -c 'OK    ' "$VYSTUP" || true) ))
+}
+
 dropdb -h "$HOST" -p "$PORT" -U "$USER" --if-exists "$DB"
 createdb -h "$HOST" -p "$PORT" -U "$USER" "$DB"
 
 # Napodobenina prostředí Supabase (auth.users, auth.uid, role). V produkci
 # tohle dodává samo Supabase — soubor se tam nikdy nepouští.
-$PSQL -d "$DB" -f "$ROOT/supabase/tests/00_harness.sql"
+spustit "$ROOT/supabase/tests/00_harness.sql"
 
 for f in "$ROOT"/supabase/migrations/*.sql; do
   printf '%-52s' "$(basename "$f")"
-  $PSQL -d "$DB" -f "$f" >/dev/null && echo "OK"
+  spustit "$f"
+  echo "OK"
 done
 
 echo
 for t in etapa0_scenar krok2_scenar krok3_scenar krok4_scenar; do
-  $PSQL -d "$DB" -f "$ROOT/supabase/tests/$t.sql" 2>&1 \
-    | grep -E '^(==|psql.*(OK |SELHALO))| VŠECHNY| KROK' \
-    | sed 's/^psql[^ ]* NOTICE: //'
+  spustit "$ROOT/supabase/tests/$t.sql"
+  grep -E '^(==|psql.*(OK |SELHALO))| VŠECHNY| KROK' "$VYSTUP" \
+    | sed 's/^psql[^ ]* NOTICE: //' || true
+  pricist_kontroly
 done
 
 # Seed testovacích dat. Není součástí migrací a v ostrém provozu se nepouští,
@@ -45,22 +83,26 @@ pocty() {
       || '/' || (select count(*) from public.announcements)"
 }
 
-$PSQL -d "$DB" -f "$ROOT/supabase/seed/test-provoz.sql" 2>&1 \
-  | sed -n 's/^psql[^ ]* NOTICE:  /  /p'
+spustit "$ROOT/supabase/seed/test-provoz.sql"
+sed -n 's/^psql[^ ]* NOTICE:  /  /p' "$VYSTUP" || true
 PRVNI="$(pocty)"
 echo "  OK    seed proběhl proti čisté databázi ($PRVNI)"
+POCET=$(( POCET + 1 ))
 
-$PSQL -d "$DB" -f "$ROOT/supabase/seed/test-provoz.sql" >/dev/null 2>&1
+spustit "$ROOT/supabase/seed/test-provoz.sql"
 DRUHY="$(pocty)"
 
 if [ "$PRVNI" = "$DRUHY" ]; then
   echo "  OK    opakovaný běh nic nezaložil podruhé"
+  POCET=$(( POCET + 1 ))
 else
   echo "SELHALO: opakovaný seed změnil data ($PRVNI → $DRUHY)"
+  echo "Do pádu prošlo kontrol: $POCET"
   exit 1
 fi
 
 echo
 echo '=========================================================='
-echo ' SEED — VŠECHNY KONTROLY PROŠLY'
+echo " SEED — VŠECHNY KONTROLY PROŠLY"
+echo " Kontrol celkem: $POCET"
 echo '=========================================================='
