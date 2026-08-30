@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { DNU_V_ROZPISU } from "@/lib/provozni-den";
+import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
 
 // Posun data (z lib/provozni-den.ts, duplikovaný pro klient)
 function posunDatum(datum: string, dnu: number): string {

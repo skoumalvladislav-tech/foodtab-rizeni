@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
-import { DNU_V_ROZPISU, posunDatum, provozniDen } from "@/lib/provozni-den";
+import { posunDatum, provozniDen } from "@/lib/provozni-den";
+import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
