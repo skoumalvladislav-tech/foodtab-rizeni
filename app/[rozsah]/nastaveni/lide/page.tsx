@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
-import { upravitZamestnance, smazatZamestnance } from "./akce";
+import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
 import SmazatZamestnance from "./smazani";
 import VystavitPozvankuFormular from "./vystaveni";
 
@@ -122,6 +123,11 @@ export default async function NastaveniLide({
   */
   const smiVidetSazby = !sazbyChyba && sazby.size > 0;
 
+  // Zadávat sazby je jiné právo než je vidět. payroll.manage v katalogu
+  // i v PERMISSIONS je, takže kontrola v aplikaci tady být může —
+  // rozhodnutí ale stejně padá v public.set_rate.
+  const smiZadavatSazby = await hasAccess(tenantId, "payroll.manage", null);
+
   return (
     <>
       <Nadpis
@@ -201,6 +207,80 @@ export default async function NastaveniLide({
           </div>
         </div>
       </form>
+
+      {/*
+        Sazba má vlastní formulář, ne políčko v tom nahoře. Zakládá
+        totiž nový řádek historie, ne úpravu zaměstnance — a „od kdy
+        platí“ je otázka, kterou u jména ani pobočky nikdo neřeší.
+      */}
+      {upravuje && smiZadavatSazby ? (
+        <form
+          action={nastavitSazbu}
+          style={{ ...formular, marginBottom: "24px" }}
+        >
+          <input type="hidden" name="rozsah" value={rozsah} />
+          <input type="hidden" name="zamestnanec" value={upravuje.id} />
+
+          <p style={{ margin: "0 0 4px", fontSize: "16px", color: "var(--ink)" }}>
+            Hodinová sazba — {upravuje.full_name}
+          </p>
+          <p
+            style={{
+              margin: "0 0 16px",
+              fontSize: "13px",
+              color: "var(--muted)",
+              maxWidth: "62ch",
+            }}
+          >
+            Zadáním vznikne nový záznam. Starý zůstane, takže se
+            už uzavřené měsíce nepřepočítají. Sazba platí od zadaného dne
+            dál.
+          </p>
+
+          <div
+            style={{
+              display: "grid",
+              gap: "16px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              maxWidth: "620px",
+            }}
+          >
+            <label style={formularLabel}>
+              <span>Sazba v Kč za hodinu *</span>
+              <input
+                name="koruny"
+                inputMode="decimal"
+                required
+                placeholder="220"
+                style={inputPole}
+              />
+            </label>
+
+            <label style={formularLabel}>
+              <span>Platí od *</span>
+              <input name="od" type="date" required style={inputPole} />
+            </label>
+
+            <label style={formularLabel}>
+              <span>Poznámka</span>
+              <input
+                name="poznamka"
+                maxLength={200}
+                placeholder="přidáno po zkušební době"
+                style={inputPole}
+              />
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            className="ft-tl ft-tl-hlavni"
+            style={{ marginTop: "16px" }}
+          >
+            Uložit sazbu
+          </button>
+        </form>
+      ) : null}
 
       {/* Seznam */}
       <div style={{ overflowX: "auto", marginTop: "32px" }}>

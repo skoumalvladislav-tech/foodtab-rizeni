@@ -102,6 +102,61 @@ export async function smazatZamestnance(formData: FormData): Promise<void> {
 }
 
 /**
+ * Zadání hodinové sazby.
+ *
+ * Zakládá NOVÝ řádek historie, nikdy nepřepisuje starý — sazba je
+ * historie, ne údaj u zaměstnance. Zvýšení od 1. října tak nesmí sáhnout
+ * na září a oprava překlepu se dělá dalším řádkem se stejným valid_from.
+ *
+ * O právu rozhoduje public.set_rate: bez payroll.manage vyhodí chybu
+ * a zapíše se nic. Kontrola tady je druhá linie, ne jediná.
+ *
+ * Částka přichází z formuláře v korunách, v databázi jsou haléře.
+ */
+export async function nastavitSazbu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zamestnanec = String(formData.get('zamestnanec') ?? '')
+  const korunyRaw = String(formData.get('koruny') ?? '').trim()
+  const odKdy = String(formData.get('od') ?? '').trim()
+  const poznamka = String(formData.get('poznamka') ?? '').trim()
+
+  if (!zamestnanec || korunyRaw === '' || odKdy === '') {
+    redirect(`/${rozsah}/nastaveni/lide?upravuji=${zamestnanec}&chyba=sazba-neuplna`)
+  }
+
+  // Čárka i tečka: kdo píše sazbu, píše ji tak, jak je zvyklý.
+  const korun = Number(korunyRaw.replace(',', '.'))
+  if (!Number.isFinite(korun) || korun < 0) {
+    redirect(`/${rozsah}/nastaveni/lide?upravuji=${zamestnanec}&chyba=sazba-cislo`)
+  }
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const pristup = await zkusPristup(tenantId, 'people.manage', rozsah)
+  if (pristup.stav !== 'ok') redirect('/')
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('set_rate', {
+    p_tenant: tenantId,
+    p_employee: zamestnanec,
+    p_haleru: Math.round(korun * 100),
+    p_valid_from: odKdy,
+    p_note: poznamka,
+  })
+
+  if (error) {
+    // 42501 = insufficient_privilege. Funkce ho vyhazuje schválně, když
+    // volajícímu chybí payroll.manage.
+    const duvod = error.code === '42501' ? 'sazba-pravo' : 'sazba-nepovedlo'
+    redirect(`/${rozsah}/nastaveni/lide?upravuji=${zamestnanec}&chyba=${duvod}`)
+  }
+
+  revalidatePath(`/${rozsah}/nastaveni/lide`)
+  redirect(`/${rozsah}/nastaveni/lide?ulozeno=1`)
+}
+
+/**
  * Vystavení pozvánky.
  *
  * Volá public.create_invitation, která je průzor do app schématu.
