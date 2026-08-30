@@ -60,7 +60,9 @@ export type Polozka = {
 }
 
 export const NABIDKA: Polozka[] = [
-  { segment: 'moje-smeny', nazev: 'Moje směny', kratky: 'Moje', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
+  // Moje směny se sloučily do Docházky — byly to dvě obrazovky o téže
+  // věci. Rozpis směn zůstává: to je rozpis všech, ne můj. Adresu
+  // /moje-smeny drží přesměrování v next.config.ts, ne položka tady.
   { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
   { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny', jenPobocka: true },
   { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
