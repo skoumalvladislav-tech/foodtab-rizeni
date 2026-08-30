@@ -1,0 +1,392 @@
+<!--
+  =====================================================================
+  ZÁVAZNÁ PŘEDLOHA VZHLEDU — odsouhlaseno 28. 8. 2026
+  =====================================================================
+  Tenhle soubor není návrh k diskusi. Popisuje, jak má aplikace
+  vypadat: krémový papír, tmavá lišta a boční sloupec v barvě rozsahu,
+  mosaz jako jediný zvýrazňovač, patkové nadpisy.
+
+  Zadání pro převod do aplikace je v docs/vzhled-zadani.md. Barvy tady
+  a barvy v app/_tokeny.css se musí shodovat — když se mění jedno,
+  mění se druhé.
+
+  Čísla v ukázce jsou vymyšlená. Nekopírujte je nikam.
+
+  Otevřít lokálně: stačí dvojklik, žádný server není potřeba.
+  Přepínače nahoře přepínají rozsah (firma / Perla / Bernard),
+  světlo-tma a šířku obrazovky.
+
+  Kontrast: všechny dvojice text-podklad projdou 4.5:1, plochy 3:1.
+  Ověřeno výpočtem, ne odhadem. Kdo mění odstín, přepočítá to znovu.
+  =====================================================================
+-->
+
+<title>Foodtab v zeleni a mosazi</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap">
+
+<style>
+:root{
+  --paper:#f6f2e9; --card:#fffdf7; --sunken:#efe9dc;
+  --ink:#16211c; --muted:#617066; --faint:#808f84;
+  --line:#e4ddcc; --line2:#d3c9b3;
+  --mosaz:#916624; --mosaz-sv:#d8ab4e;
+  --dobre:#2c7657; --dobre-bg:#dbeee4;
+  --pozor:#b04519; --pozor-bg:#fbe4d8;
+  --r:14px;
+  /* barva rozsahu: tmavá plocha lišty a sloupce + nádech papíru */
+  --rail:#143126; --rail-2:#21483a; --rail-ink:#f1ece0; --rail-tlum:#97b4aa;
+}
+:root[data-b="firma"]{--rail:#143126;--rail-2:#21483a;--rail-tlum:#97b4aa;--paper:#f5f2e8}
+:root[data-b="perla"]{--rail:#2f161b;--rail-2:#45232a;--rail-tlum:#ab8c92;--paper:#f7f0e9}
+:root[data-b="bar"]  {--rail:#36240e;--rail-2:#503619;--rail-tlum:#b2a495;--paper:#f8f3e6}
+
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0c1310; --card:#141d19; --sunken:#101815;
+  --ink:#e9efea; --muted:#93a89c; --faint:#6b7d73;
+  --line:#1e2b25; --line2:#2a3b33;
+  --mosaz:#d9ac54; --mosaz-sv:#eac878;
+  --dobre:#5fc79c; --dobre-bg:#0f2b22;
+  --pozor:#f0855a; --pozor-bg:#33170c;
+  --rail:#081410;--rail-2:#0e221b;--rail-tlum:#7c9c91}
+  :root:not([data-theme="light"])[data-b="perla"]{--rail:#13090b;--rail-2:#211013;--rail-tlum:#9c7c83;--paper:#0f0a0a}
+  :root:not([data-theme="light"])[data-b="bar"]{--rail:#160f06;--rail-2:#26190a;--rail-tlum:#9c8d7c;--paper:#100c05}}
+
+:root[data-theme="dark"]{
+  --paper:#0c1310; --card:#141d19; --sunken:#101815;
+  --ink:#e9efea; --muted:#93a89c; --faint:#6b7d73;
+  --line:#1e2b25; --line2:#2a3b33;
+  --mosaz:#d9ac54; --mosaz-sv:#eac878;
+  --dobre:#5fc79c; --dobre-bg:#0f2b22;
+  --pozor:#f0855a; --pozor-bg:#33170c;
+  --rail:#081410;--rail-2:#0e221b;--rail-tlum:#7c9c91}
+:root[data-theme="dark"][data-b="perla"]{--rail:#13090b;--rail-2:#211013;--rail-tlum:#9c7c83;--paper:#0f0a0a}
+:root[data-theme="dark"][data-b="bar"]{--rail:#160f06;--rail-2:#26190a;--rail-tlum:#9c8d7c;--paper:#100c05}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:Archivo,ui-sans-serif,system-ui,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
+.page{max-width:1140px;margin:0 auto;padding:38px 22px 84px}
+h1{font-family:Newsreader,Georgia,serif;font-weight:500;font-size:clamp(32px,5vw,50px);
+  margin:0 0 8px;letter-spacing:-.02em;line-height:1.05;text-wrap:balance}
+.uvod{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-end;justify-content:space-between;margin-bottom:30px}
+.uvod p{margin:0;color:var(--muted);max-width:52ch}
+.ovl{display:flex;gap:8px;flex-wrap:wrap}
+.seg{display:flex;background:var(--card);border:1px solid var(--line2);border-radius:11px;padding:3px}
+.seg button{font:inherit;font-size:13px;font-weight:600;color:var(--muted);background:none;border:0;
+  padding:7px 13px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.seg button[aria-pressed="true"]{background:var(--sunken);color:var(--ink)}
+.seg button:focus-visible{outline:2px solid var(--mosaz);outline-offset:1px}
+.tec{width:9px;height:9px;border-radius:50%;flex:none}
+
+.shot{margin-bottom:36px}
+.shot h2{font-size:12.5px;margin:0 0 10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--faint)}
+.ram{overflow:hidden;border-radius:16px;border:1px solid var(--line2);background:var(--card)}
+.dev{transform-origin:top left;background:var(--paper);overflow:hidden;font-size:14px}
+:root{--sd:.86;--sm:.86}
+@media(max-width:1140px){:root{--sd:.70}}
+@media(max-width:880px){:root{--sd:.53;--sm:.8}}
+@media(max-width:600px){:root{--sd:.37;--sm:.7}}
+.wd{width:calc(1280px*var(--sd));height:calc(800px*var(--sd))}
+.dd{width:1280px;height:800px;transform:scale(var(--sd))}
+.wm{width:calc(390px*var(--sm));height:calc(720px*var(--sm))}
+.dm{width:390px;height:720px;transform:scale(var(--sm))}
+
+/* ---------- horní lišta ---------- */
+.top{background:var(--rail);color:var(--rail-ink);display:flex;align-items:center;gap:18px;
+  height:60px;padding:0 20px}
+.znak{display:flex;align-items:center;gap:10px}
+.znak i{width:34px;height:34px;border-radius:9px;background:var(--mosaz-sv);color:#17251e;
+  display:grid;place-items:center;font-family:Newsreader,serif;font-size:20px;font-style:normal;font-weight:600}
+.znak b{font-family:Newsreader,serif;font-weight:500;font-size:20px;letter-spacing:-.01em}
+.moduly{display:flex;gap:3px;margin-left:8px}
+.mod{padding:7px 14px;border-radius:9px;font-size:13px;font-weight:600;color:var(--rail-tlum);white-space:nowrap}
+.mod.on{background:#ffffff1c;color:#fff}
+.mod.off{color:#ffffff40;text-decoration:line-through;text-decoration-thickness:1px}
+.pryc{margin-left:auto}
+.hled{width:250px;background:#ffffff12;border:1px solid #ffffff1f;border-radius:10px;
+  padding:8px 13px;color:var(--rail-tlum);font-size:12.5px}
+.prep{display:inline-flex;align-items:center;gap:9px;font-size:12.5px;font-weight:600;
+  background:#ffffff14;border:1px solid #ffffff20;border-radius:999px;padding:7px 14px;color:#fff}
+.prep .tec{background:var(--mosaz-sv)}
+.ozub{width:32px;height:32px;border-radius:9px;background:#ffffff12;display:grid;place-items:center;
+  font-size:12px;color:var(--rail-tlum);font-weight:700}
+.cara{width:1px;height:24px;background:#ffffff20}
+
+/* ---------- levý sloupec ---------- */
+.telo{display:flex;height:calc(100% - 60px)}
+.bok{width:234px;flex:none;background:var(--rail-2);color:var(--rail-ink);padding:16px 12px;
+  display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.skup{font-size:9.5px;text-transform:uppercase;letter-spacing:.15em;color:var(--rail-tlum);
+  padding:14px 10px 6px;font-weight:700}
+.bok a{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;
+  font-size:13.5px;font-weight:500;color:#d2ded7;text-decoration:none}
+.bok a i{width:25px;height:25px;border-radius:7px;background:#ffffff12;display:grid;place-items:center;
+  font-style:normal;font-size:9.5px;font-weight:700;color:var(--rail-tlum)}
+.bok a.on{background:var(--mosaz-sv);color:#17251e;font-weight:700}
+.bok a.on i{background:#ffffff2e;color:#fff}
+.bok a.brzy{color:#ffffff45}
+.bok .znacka{margin-left:auto;background:var(--mosaz-sv);color:#17251e;font-size:10px;
+  font-weight:700;padding:1px 7px;border-radius:999px}
+
+/* ---------- obsah ---------- */
+.obs{flex:1;padding:24px 26px;overflow:hidden}
+.oci{font-size:10.5px;text-transform:uppercase;letter-spacing:.14em;color:var(--mosaz);font-weight:700;margin-bottom:7px}
+h3{font-family:Newsreader,Georgia,serif;font-weight:500;font-size:38px;margin:0 0 4px;letter-spacing:-.02em;line-height:1.05}
+.podt{margin:0 0 18px;color:var(--muted);font-size:13.5px}
+
+.pas{background:var(--rail);color:var(--rail-ink);border-radius:var(--r);padding:17px 22px 19px;margin-bottom:16px}
+.pas-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
+.pas-h em{font-style:normal;font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:var(--rail-tlum);
+  display:inline-flex;align-items:center;gap:7px}
+.pas-h em::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--mosaz-sv)}
+.pas-h span{font-size:10px;color:var(--rail-tlum);letter-spacing:.04em}
+.kpi{display:grid;grid-template-columns:repeat(4,1fr)}
+.kpi>div{padding-right:20px;border-right:1px solid #ffffff1a}
+.kpi>div:last-child{border-right:0;padding-right:0}
+.kpi h4{margin:0 0 5px;font-size:9.5px;text-transform:uppercase;letter-spacing:.13em;color:var(--rail-tlum);font-weight:700}
+.kpi b{font-family:Newsreader,serif;font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1;
+  font-variant-numeric:tabular-nums}
+.kpi u{text-decoration:none;font-size:12px;color:#c2d2c9;margin-left:5px}
+.kpi p{margin:5px 0 0;font-size:11px;color:var(--rail-tlum)}
+
+.dva{display:grid;grid-template-columns:1.12fr 1fr;gap:15px}
+.kar{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:17px 19px}
+.kar-h{display:flex;align-items:baseline;justify-content:space-between}
+.kar-h .oci{margin:0}
+.kar-h a{font-size:11.5px;color:var(--mosaz);text-decoration:none;font-weight:700}
+.kar h5{font-family:Newsreader,serif;font-weight:500;font-size:23px;margin:2px 0 15px;letter-spacing:-.01em}
+.rad{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px}
+.rad b{font-weight:600;font-variant-numeric:tabular-nums}
+.pruh{height:7px;border-radius:99px;background:var(--sunken);margin-bottom:12px;overflow:hidden}
+.pruh i{display:block;height:100%;border-radius:99px}
+.itog{border-top:1px solid var(--line);margin-top:3px;padding-top:11px}
+.itog b{font-family:Newsreader,serif;font-size:20px;font-weight:500}
+
+.pob{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.pob:last-child{border-bottom:0}
+.ava{width:40px;height:40px;flex:none;border-radius:11px;display:grid;place-items:center;
+  font-size:12px;font-weight:700;color:#fff}
+.pob-t{flex:1;min-width:0}
+.pob-t b{display:block;font-size:13.5px;font-weight:600}
+.pob-t span{font-size:11.5px;color:var(--muted)}
+.stavy{display:flex;gap:16px;margin-top:8px}
+.stavy div{font-size:10.5px;color:var(--muted)}
+.stavy div b{display:block;font-size:12px;color:var(--ink);font-weight:600}
+.stavy div::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--dobre);margin-right:5px;vertical-align:1px}
+.stavy div.zle::before{background:var(--pozor)}
+.stavy div.zle b{color:var(--pozor)}
+.pob-c{text-align:right;font-size:11px;color:var(--muted)}
+.pob-c b{display:block;font-family:Newsreader,serif;font-size:18px;font-weight:500;color:var(--ink)}
+
+/* ---------- telefon ---------- */
+.mtop{background:var(--rail);color:var(--rail-ink);padding:13px 15px 14px}
+.mrada{display:flex;align-items:center;gap:10px}
+.mmod{display:flex;gap:5px;margin-top:12px;overflow:hidden}
+.mmod .mod{padding:5px 11px;font-size:12px}
+.mobs{padding:16px 15px;height:calc(100% - 116px - 66px);overflow:hidden}
+.mbot{height:66px;display:flex;border-top:1px solid var(--line);background:var(--card)}
+.mbot a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  font-size:9px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em}
+.mbot a i{font-style:normal;font-size:10.5px;font-weight:700;width:26px;height:26px;border-radius:8px;
+  background:var(--sunken);display:grid;place-items:center}
+.mbot a.on{color:var(--mosaz)}
+.mbot a.on i{background:var(--rail);color:var(--mosaz-sv)}
+.mkpi{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.mkpi div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.mkpi b{display:block;font-family:Newsreader,serif;font-size:29px;font-weight:500;line-height:1}
+.mkpi span{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);font-weight:700}
+.msm{display:flex;gap:11px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
+.msm:last-child{border-bottom:0}
+.mden{width:46px;flex:none;text-align:center;border-radius:11px;padding:5px 0;background:var(--sunken)}
+.mden b{display:block;font-family:Newsreader,serif;font-size:17px;font-weight:500;line-height:1.1}
+.mden span{font-size:9px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
+.msm.dnes .mden{background:var(--rail)}
+.msm.dnes .mden b{color:var(--mosaz-sv)}
+.msm.dnes .mden span{color:var(--rail-tlum)}
+
+.pozn{margin-top:44px;border-top:1px solid var(--line);padding-top:26px}
+.pozn h2{font-family:Newsreader,serif;font-weight:500;font-size:26px;margin:0 0 16px;letter-spacing:-.02em}
+.pozn dl{display:grid;gap:14px;margin:0;grid-template-columns:repeat(auto-fit,minmax(255px,1fr))}
+.pozn div{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:15px 17px}
+.pozn dt{font-weight:700;font-size:14px;margin-bottom:4px}
+.pozn dd{margin:0;font-size:13.5px;color:var(--muted)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="page">
+<header class="uvod">
+  <div>
+    <h1>Foodtab v zeleni a mosazi</h1>
+    <p>Moduly nahoře, obrazovky vlevo, obsah vedle. Přepni provozovnu —
+       zeleň, vínová a jantarová se vymění včetně nádechu papíru. Mosaz zůstává.</p>
+  </div>
+  <div class="ovl">
+    <div class="seg" role="group" aria-label="Režim">
+      <button type="button" data-t="light" aria-pressed="false">Světlý</button>
+      <button type="button" data-t="dark" aria-pressed="false">Tmavý</button>
+      <button type="button" data-t="system" aria-pressed="true">Systém</button>
+    </div>
+    <div class="seg" role="group" aria-label="Rozsah">
+      <button type="button" data-s="firma" aria-pressed="true"><span class="tec" style="background:#14342a"></span>Celá firma</button>
+      <button type="button" data-s="perla" aria-pressed="false"><span class="tec" style="background:#3b1f22"></span>Perla</button>
+      <button type="button" data-s="bar" aria-pressed="false"><span class="tec" style="background:#3c2a10"></span>Bar</button>
+    </div>
+  </div>
+</header>
+
+<section class="shot">
+  <h2>Počítač</h2>
+  <div class="ram wd"><div class="dev dd">
+
+    <div class="top">
+      <div class="znak"><i>F</i><b>foodtab</b></div>
+      <nav class="moduly">
+        <span class="mod on">Provoz</span><span class="mod off">Finance</span>
+        <span class="mod off">Marketing</span><span class="mod off">Objednávky</span>
+      </nav>
+      <div class="pryc"></div>
+      <span class="hled">Hledat nebo se zeptat Gastro AI</span>
+      <span class="prep"><span class="tec"></span><span data-dlouhy>Celá firma</span> ⌄</span>
+      <span class="cara"></span>
+      <span class="ozub">⚙</span>
+    </div>
+
+    <div class="telo">
+      <aside class="bok">
+        <div class="skup">Dnešní provoz</div>
+        <a href="#" class="on"><i>PŘ</i>Přehled</a>
+        <a href="#"><i>SM</i>Moje směny</a>
+        <a href="#"><i>RO</i>Rozpis směn</a>
+        <a href="#"><i>DO</i>Docházka</a>
+
+        <div class="skup">Práce</div>
+        <a href="#"><i>ÚK</i>Úkoly a checklisty</a>
+        <a href="#"><i>KO</i>Nástěnka<span class="znacka">3</span></a>
+
+        <div class="skup">Kuchyně</div>
+        <a href="#" class="brzy"><i>RE</i>Receptury</a>
+        <a href="#" class="brzy"><i>JL</i>Jídelní lístky</a>
+        <a href="#" class="brzy"><i>MO</i>Motivace</a>
+      </aside>
+
+      <main class="obs">
+        <div class="oci"><span data-dlouhy>Celá firma</span> · přehled dne</div>
+        <h3>Dobré ráno, Vladislave.</h3>
+        <p class="podt">Středa 26. srpna · provozní den začal v 05:00</p>
+
+        <div class="pas">
+          <div class="pas-h"><em>V provozu</em><span>aktualizováno před chvílí</span></div>
+          <div class="kpi">
+            <div><h4>Směny dnes</h4><b>7</b><u>na obou</u><p>Pět lidí právě v práci</p></div>
+            <div><h4>Rozpis</h4><b>133</b><u>směn</u><p>Do 14. září</p></div>
+            <div><h4>Checklisty</h4><b>4</b><u>ze šesti</u><p>Dva čekají na večerní směnu</p></div>
+            <div><h4>Úkoly</h4><b>3</b><u>otevřené</u><p>Nejbližší do 16:00</p></div>
+          </div>
+        </div>
+
+        <div class="dva">
+          <div class="kar">
+            <div class="kar-h"><div class="oci">Dnešní provoz</div><a href="#">Otevřít rozpis →</a></div>
+            <h5>Jak jde den</h5>
+            <div class="rad"><span>Obsazenost směn</span><b>7 ze 7</b></div>
+            <div class="pruh"><i style="width:100%;background:var(--dobre)"></i></div>
+            <div class="rad"><span>Checklisty hotové</span><b>66 %</b></div>
+            <div class="pruh"><i style="width:66%;background:var(--mosaz)"></i></div>
+            <div class="rad"><span>Úkoly do konce směny</span><b>3 ze 7</b></div>
+            <div class="pruh"><i style="width:43%;background:var(--mosaz)"></i></div>
+            <div class="itog"><div class="rad"><span>Odpracováno dnes</span><b>38 h 20 min</b></div></div>
+          </div>
+
+          <div class="kar">
+            <div class="kar-h"><div class="oci">Provozovny</div><span style="font-size:11px;color:var(--muted)">2 aktivní</span></div>
+            <h5>Stav poboček</h5>
+            <div class="pob">
+              <div class="ava" style="background:#3b1f22">ČP</div>
+              <div class="pob-t"><b>Restaurace Černá Perla</b><span>Otevřeno · 4 lidé na směně</span>
+                <div class="stavy"><div>Personál<b>pokrytý</b></div><div>Checklist<b>78 %</b></div>
+                  <div class="zle">Úkoly<b>1 čeká</b></div></div></div>
+              <div class="pob-c"><b>90</b>směn</div>
+            </div>
+            <div class="pob">
+              <div class="ava" style="background:#3c2a10">BB</div>
+              <div class="pob-t"><b>Bernard Bar Tábor</b><span>Otevřeno · 3 lidé na směně</span>
+                <div class="stavy"><div>Personál<b>pokrytý</b></div><div>Checklist<b>66 %</b></div>
+                  <div class="zle">Úkoly<b>2 čekají</b></div></div></div>
+              <div class="pob-c"><b>43</b>směn</div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+  </div></div>
+</section>
+
+<section class="shot">
+  <h2>Telefon</h2>
+  <div class="ram wm"><div class="dev dm">
+    <div class="mtop">
+      <div class="mrada">
+        <div class="znak"><i>F</i><b>foodtab</b></div>
+        <div class="pryc"></div>
+        <span class="prep"><span class="tec"></span><span data-kratky>Firma</span> ⌄</span>
+      </div>
+      <div class="mmod"><span class="mod on">Provoz</span><span class="mod off">Finance</span><span class="mod off">Marketing</span></div>
+    </div>
+    <main class="mobs">
+      <div class="oci">Dobré ráno</div>
+      <h3 style="font-size:27px">Vladislave</h3>
+      <p class="podt" style="margin-bottom:13px">Středa 26. srpna · 08:49</p>
+      <div class="mkpi">
+        <div><b>7</b><span>směn dnes</span></div>
+        <div><b>5</b><span>teď v práci</span></div>
+      </div>
+      <div class="oci" style="margin-bottom:5px">Moje směny</div>
+      <div class="msm dnes"><div class="mden"><b>26</b><span>St</span></div>
+        <div><div style="font-weight:600">10:00–22:00</div><div style="font-size:11.5px;color:var(--muted)">Černá Perla</div></div></div>
+      <div class="msm"><div class="mden"><b>28</b><span>Pá</span></div>
+        <div><div style="font-weight:600">15:00–23:30</div><div style="font-size:11.5px;color:var(--muted)">Bernard Bar</div></div></div>
+      <div class="msm"><div class="mden"><b>30</b><span>Ne</span></div>
+        <div><div style="font-weight:600">10:00–22:00</div><div style="font-size:11.5px;color:var(--muted)">Černá Perla</div></div></div>
+    </main>
+    <nav class="mbot">
+      <a href="#" class="on"><i>PŘ</i>Přehled</a>
+      <a href="#"><i>SM</i>Směny</a>
+      <a href="#"><i>ÚK</i>Úkoly</a>
+      <a href="#"><i>KO</i>Zprávy</a>
+      <a href="#"><i>···</i>Více</a>
+    </nav>
+  </div></div>
+</section>
+
+<section class="pozn">
+  <h2>Jak to drží pohromadě</h2>
+  <dl>
+    <div><dt>Barva se mění, mosaz ne</dt>
+    <dd>Provozovna určuje tmavou plochu — lištu, sloupec, pás — a jemný nádech papíru. Mosazný akcent zůstává ve všech, takže se aplikace pořád tváří jako Foodtab.</dd></div>
+    <div><dt>Osm barev z databáze, jinak namíchaných</dt>
+    <dd>Klíče v <em>branches.color</em> zůstávají stejné. Mění se jen jejich odstíny — místo sytých tónů tlumené, teplé. Žádná migrace, jen jiná čísla ve stylech.</dd></div>
+    <div><dt>Patky nahoře, bezpatky v provozu</dt>
+    <dd>Nadpisy a velká čísla patkovým písmem, ovládání a popisky bezpatkovým. Vypadá to jako podnik, ne jako správcovský nástroj — a čte se to na malém displeji dobře.</dd></div>
+  </dl>
+</section>
+</div>
+
+<script>
+(function(){
+  var r=document.documentElement;
+  var jm={firma:{d:"Celá firma",k:"Firma"},perla:{d:"Černá Perla",k:"Perla"},bar:{d:"Bernard Bar",k:"Bar"}};
+  function st(a,v){document.querySelectorAll("["+a+"]").forEach(function(b){
+    b.setAttribute("aria-pressed",String(b.getAttribute(a)===v));});}
+  document.querySelectorAll("[data-t]").forEach(function(b){b.addEventListener("click",function(){
+    var v=b.getAttribute("data-t");
+    if(v==="system"){r.removeAttribute("data-theme");}else{r.setAttribute("data-theme",v);}st("data-t",v);});});
+  document.querySelectorAll("[data-s]").forEach(function(b){b.addEventListener("click",function(){
+    var v=b.getAttribute("data-s");r.setAttribute("data-b",v);st("data-s",v);
+    document.querySelectorAll("[data-dlouhy]").forEach(function(x){x.textContent=jm[v].d;});
+    document.querySelectorAll("[data-kratky]").forEach(function(x){x.textContent=jm[v].k;});});});
+  r.setAttribute("data-b","firma");
+})();
+</script>
