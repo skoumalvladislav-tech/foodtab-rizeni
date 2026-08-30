@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
-import { posunDatum, provozniDen } from "@/lib/provozni-den";
+import { DNU_V_ROZPISU, posunDatum, provozniDen } from "@/lib/provozni-den";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
@@ -21,7 +21,6 @@ export const dynamic = "force-dynamic";
  * i bez uživatelského účtu.
  */
 
-const DNU_DOPREDU = 7;
 
 type Smena = {
   id: string;
@@ -107,7 +106,7 @@ export default async function Rozpis({
     odKdy = denZUrl;
   }
 
-  const doKdy = posunDatum(odKdy, DNU_DOPREDU - 1);
+  const doKdy = posunDatum(odKdy, DNU_V_ROZPISU - 1);
 
   let dotaz = supabase
     .from("shifts")

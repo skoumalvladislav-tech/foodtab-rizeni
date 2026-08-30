@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
+import { DNU_V_ROZPISU } from "@/lib/provozni-den";
 
 // Posun data (z lib/provozni-den.ts, duplikovaný pro klient)
 function posunDatum(datum: string, dnu: number): string {
@@ -116,7 +117,7 @@ export default function RozpisView({
 
         <div style={{ flex: 1, textAlign: "center" }}>
           <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--branch)" }}>
-            {popisObdobi(den, pohled, dnesni)}
+            {popisObdobi(den, pohled)}
           </div>
         </div>
 
@@ -394,7 +395,7 @@ function TydenView({
   );
 }
 
-function popisObdobi(den: string, pohled: "mesic" | "tyden" | "den", dnesni: string): string {
+function popisObdobi(den: string, pohled: "mesic" | "tyden" | "den"): string {
   const d = new Date(`${den}T00:00:00Z`);
 
   if (pohled === "mesic") {
@@ -403,20 +404,21 @@ function popisObdobi(den: string, pohled: "mesic" | "tyden" | "den", dnesni: str
   }
 
   if (pohled === "tyden") {
-    const pondelni = new Date(d);
-    pondelni.setUTCDate(d.getUTCDate() - d.getUTCDay() + (d.getUTCDay() === 0 ? -6 : 1));
-    const nedale = new Date(pondelni);
-    nedale.setUTCDate(pondelni.getUTCDate() + 6);
+    // Okno běží od zvoleného dne dopředu, ne od pondělí. Dotaz na směny
+    // to tak dělá taky — obojí čte DNU_V_ROZPISU, takže se to nemůže
+    // rozejít. Dřív se tady snapovalo na kalendářní týden a hlavička
+    // hlásila jiné dny, než byly ve sloupcích.
+    const konec = new Date(d);
+    konec.setUTCDate(d.getUTCDate() + DNU_V_ROZPISU - 1);
 
     const mesice = ["leden", "únor", "březen", "duben", "květen", "červen", "červenec", "srpen", "září", "říjen", "listopad", "prosinec"];
-    const m1 = mesice[pondelni.getUTCMonth()];
-    const m2 = mesice[nedale.getUTCMonth()];
+    const m1 = mesice[d.getUTCMonth()];
+    const m2 = mesice[konec.getUTCMonth()];
 
-    if (pondelni.getUTCMonth() === nedale.getUTCMonth()) {
-      return `${pondelni.getUTCDate()}.–${nedale.getUTCDate()}. ${m1}`;
-    } else {
-      return `${pondelni.getUTCDate()}. ${m1} – ${nedale.getUTCDate()}. ${m2}`;
+    if (d.getUTCMonth() === konec.getUTCMonth()) {
+      return `${d.getUTCDate()}.–${konec.getUTCDate()}. ${m1}`;
     }
+    return `${d.getUTCDate()}. ${m1} – ${konec.getUTCDate()}. ${m2}`;
   }
 
   const dny = ["neděle", "pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota"];

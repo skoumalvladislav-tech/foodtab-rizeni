@@ -27,6 +27,15 @@ export async function provozniDen(
 }
 
 /** Posun data ve tvaru YYYY-MM-DD o dny, bez ohledu na časové pásmo. */
+/**
+ * Kolik dní rozpis ukazuje.
+ *
+ * Čte to dotaz na směny i popisek období nad mřížkou. Když to bylo
+ * zapsané na dvou místech, rozešlo se: hlavička hlásila kalendářní týden
+ * (24.–30. srpen), zatímco sloupce byly od dneška (30. 8. – 5. 9.).
+ */
+export const DNU_V_ROZPISU = 7
+
 export function posunDatum(datum: string, dnu: number): string {
   const [r, m, d] = datum.split('-').map(Number)
   const posunuty = new Date(Date.UTC(r, m - 1, d + dnu))
