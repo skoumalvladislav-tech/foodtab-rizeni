@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 
 import {
-  canSee,
   getContext,
   getUser,
   TENANT_SCOPE_SEGMENT,
@@ -124,6 +123,14 @@ export default async function RozsahLayout({
     })),
   ];
 
+  // Ozubené kolo nevisí na settings.manage. Kdo má právo aspoň na jednu
+  // obrazovku nastavení — třeba jen na Lidi přes people.manage — se tam
+  // musí dostat, a to na tu obrazovku, kterou opravdu smí vidět.
+  const prvniNastaveni = nastaveni.find((p) => p.hotovo);
+  const cilNastaveni = prvniNastaveni
+    ? `/${rozsah}/${prvniNastaveni.segment}`
+    : null;
+
   return (
     <Ram
       rozsah={rozsah}
@@ -138,7 +145,7 @@ export default async function RozsahLayout({
       moduly={moduly}
       polozky={polozky}
       nastaveni={nastaveni}
-      muzeNastaveni={canSee(ctx, "settings.manage")}
+      cilNastaveni={cilNastaveni}
     >
       {children}
     </Ram>

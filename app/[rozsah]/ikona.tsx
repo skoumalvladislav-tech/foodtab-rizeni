@@ -36,6 +36,12 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <path d="M10 2.6v2M10 15.4v2M17.4 10h-2M4.6 10h-2M15.2 4.8l-1.4 1.4M6.2 13.8l-1.4 1.4M15.2 15.2l-1.4-1.4M6.2 6.2L4.8 4.8" />
     </>
   ),
+  lupa: (
+    <>
+      <circle cx="8.8" cy="8.8" r="5.3" />
+      <path d="M12.7 12.7L17 17" />
+    </>
+  ),
   tecky: (
     <>
       <circle cx="5" cy="10" r="1.3" />

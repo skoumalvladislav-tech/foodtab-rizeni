@@ -56,7 +56,7 @@ export type RamProps = {
   moduly: ModulProp[];
   polozky: PolozkaProp[];
   nastaveni: PolozkaProp[];
-  muzeNastaveni: boolean;
+  cilNastaveni: string | null;
   children: ReactNode;
 };
 
@@ -76,7 +76,7 @@ export default function Ram({
   moduly,
   polozky,
   nastaveni,
-  muzeNastaveni,
+  cilNastaveni,
   children,
 }: RamProps) {
   const cesta = usePathname() ?? "";
@@ -150,17 +150,26 @@ export default function Ram({
             cil={cilRozsahu}
           />
 
+          {/* Zatím jen pole. Nic nehledá a na žádný model se neptá —
+              až se bude připojovat, platí pravidlo 8 z CLAUDE.md:
+              mzdy a docházka do jazykového modelu nejdou. */}
+          <div className="ft-hledani" role="search">
+            <Ikona klic="lupa" />
+            <input
+              type="search"
+              placeholder="Hledat nebo se zeptat Gastro AI"
+              aria-label="Hledat nebo se zeptat Gastro AI"
+              disabled
+            />
+          </div>
+
           <PrepinacRezimu />
 
-          <span className="ft-avatar" title={nazevFirmy} aria-hidden="true">
-            {iniciraly}
-          </span>
-
-          {muzeNastaveni ? (
+          {cilNastaveni ? (
             <>
               <span className="ft-divider" />
               <Link
-                href={`/${rozsah}/nastaveni/pobocky`}
+                href={cilNastaveni}
                 className="ft-ikona ram"
                 title="Nastavení"
                 aria-label="Nastavení"
@@ -169,6 +178,10 @@ export default function Ram({
               </Link>
             </>
           ) : null}
+
+          <span className="ft-avatar" title={nazevFirmy} aria-hidden="true">
+            {iniciraly}
+          </span>
         </div>
       </header>
 

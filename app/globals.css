@@ -85,6 +85,39 @@
 }
 
 
+/* ---- Vyhledávání ------------------------------------------------ */
+/* Pole je zatím jen vzhled — nic nehledá a na model se neptá.
+   Proto je disabled: vypadat jako funkční ovládání a nedělat nic je
+   horší než přiznat, že se na tom pracuje. */
+.ft-hledani { position: relative; display: flex; align-items: center; flex: none; }
+.ft-hledani .ft-i {
+  position: absolute; left: 10px; width: 15px; height: 15px;
+  color: var(--rail-tlum); pointer-events: none;
+}
+.ft-hledani input {
+  width: 250px; height: 32px; padding: 0 11px 0 31px;
+  border-radius: 9px; border: 1px solid var(--rail-2);
+  background: var(--rail-2); color: var(--rail-ink);
+  font: inherit; font-size: 12.5px;
+}
+.ft-hledani input::placeholder { color: var(--rail-tlum); opacity: 1; }
+.ft-hledani input:disabled { cursor: not-allowed; }
+.ft-hledani input:focus-visible { outline: 2px solid var(--mosaz-sv); outline-offset: 1px; }
+
+@media (max-width: 1023px) {
+  .ft-hledani input { width: 168px; }
+}
+
+/* Na mobilu se pole sbalí pod lupu. Ikona zůstává na místě, mění se jen
+   šířka — kdyby se posouvala, poskočila by celá lišta. */
+@media (max-width: 640px) {
+  .ft-hledani .ft-i { left: 14px; }
+  .ft-hledani input {
+    width: 44px; height: 44px; border-radius: 999px; padding: 0 0 0 36px;
+  }
+  .ft-hledani input:focus { width: min(56vw, 240px); padding-right: 11px; }
+}
+
 /* ---- Přepínač rozsahu ------------------------------------------ */
 /* Vybraná volba je vyplněná svou barvou, ostatní mají jen obrys.
    data-branch sedí na každé volbě zvlášť, takže var(--branch) uvnitř

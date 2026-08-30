@@ -30,6 +30,7 @@ export type IkonaKlic =
   | 'clovek'
   | 'kniha'
   | 'kolo'
+  | 'lupa'
   | 'tecky'
 
 export type Polozka = {
