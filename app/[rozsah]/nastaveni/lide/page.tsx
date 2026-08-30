@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
@@ -5,6 +6,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import { upravitZamestnance, smazatZamestnance } from "./akce";
+import SmazatZamestnance from "./smazani";
 import VystavitPozvankuFormular from "./vystaveni";
 
 export const dynamic = "force-dynamic";
@@ -147,15 +149,19 @@ export default async function NastaveniLide({
               {upravuje ? "Uložit" : "Přidat"}
             </button>
             {upravuje && (
-              <button
-                type="button"
-                onClick={() => {
-                  window.location.href = `/${rozsah}/nastaveni/lide`;
+              <Link
+                href={`/${rozsah}/nastaveni/lide`}
+                style={{
+                  ...tlacitko,
+                  background: "var(--line-2)",
+                  color: "var(--ink)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  textDecoration: "none",
                 }}
-                style={{ ...tlacitko, background: "var(--line-2)", color: "var(--ink)" }}
               >
                 Storno
-              </button>
+              </Link>
             )}
           </div>
         </div>
@@ -199,26 +205,20 @@ export default async function NastaveniLide({
                 </td>
                 <td style={td}>{z.user_id ? "Ano" : "Ne"}</td>
                 <td style={td}>
-                  <button
-                    onClick={() => {
-                      window.location.href = `/${rozsah}/nastaveni/lide?upravuji=${z.id}`;
-                    }}
-                    style={tabulkovyLink}
+                  <Link
+                    href={`/${rozsah}/nastaveni/lide?upravuji=${z.id}`}
+                    style={{ ...tabulkovyLink, textDecoration: "none" }}
                   >
                     Upravit
-                  </button>
+                  </Link>
                   {!z.deleted_at && (
-                    <button
-                      onClick={async () => {
-                        if (confirm("Smazat zaměstnance? Data se neuloží zpátky.")) {
-                          await smazatZamestnance(z.id, rozsah);
-                          window.location.reload();
-                        }
-                      }}
-                      style={{ ...tabulkovyLink, color: "var(--warn)" }}
-                    >
-                      Smazat
-                    </button>
+                    <SmazatZamestnance
+                      akce={smazatZamestnance}
+                      id={z.id}
+                      rozsah={rozsah}
+                      jmeno={z.full_name}
+                      styl={{ ...tabulkovyLink, color: "var(--warn)" }}
+                    />
                   )}
                 </td>
               </tr>

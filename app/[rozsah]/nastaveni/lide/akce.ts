@@ -75,11 +75,16 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
 
 /**
  * Soft-delete zaměstnance.
+ *
+ * Bere FormData jako ostatní akce v tomhle souboru, aby šla pověsit
+ * rovnou na <form action={…}>. Volat ji z onClick nešlo: stránka je
+ * serverová a obsluha události se do prohlížeče nemá jak dostat.
  */
-export async function smazatZamestnance(
-  id: string,
-  rozsah: string
-): Promise<void> {
+export async function smazatZamestnance(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const rozsah = String(formData.get('rozsah') ?? '')
+  if (!id) return
+
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return
 
