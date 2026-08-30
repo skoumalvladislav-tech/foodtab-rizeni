@@ -113,7 +113,7 @@ export default async function RozsahLayout({
           {
             slug: TENANT_SCOPE_SEGMENT,
             nazev: "Celá firma",
-            barva: "slate",
+            barva: "firma",
           },
         ]
       : []),
@@ -148,11 +148,16 @@ export default async function RozsahLayout({
 /**
  * Klíč barvy pro rozsah.
  *
- * Firemní úroveň má neutrální odstín — barva patří pobočce, ne firmě.
+ * Firemní úroveň má vlastní klíč "firma", ne "slate". Slate je osmá
+ * barva, kterou přidělovací spouštěč dá osmé pobočce — a od chvíle, kdy
+ * se klíčem barví celá lišta a sloupec, by firma a osmá pobočka vypadaly
+ * úplně stejně. Do databáze se "firma" nikdy neukládá, žije jen tady
+ * a v _tokeny.css.
+ *
  * Vedle tečky je vždycky název, barva sama nikdy nenese informaci.
  */
 function barvaRozsahu(ctx: Context, branchId: string | null): string {
-  if (!branchId) return "slate";
+  if (!branchId) return "firma";
   return ctx.branches.find((b) => b.id === branchId)?.color ?? "slate";
 }
 
