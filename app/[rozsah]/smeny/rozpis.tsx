@@ -370,9 +370,10 @@ function TydenView({
                               style={{
                                 fontSize: "11px",
                                 padding: "4px 6px",
-                                background: "var(--branch-soft)",
+                                background: "var(--sunken)",
+                                border: "1px solid var(--line-2)",
                                 borderRadius: "4px",
-                                color: "var(--branch)",
+                                color: "var(--ink)",
                                 fontVariantNumeric: "tabular-nums",
                               }}
                             >
@@ -514,7 +515,7 @@ function DenView({
   return (
     <div style={{ display: "grid", gap: "0px" }}>
       {/* Záhlaví — časová osa */}
-      <div style={{ display: "flex", height: "32px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "var(--bg)", zIndex: 5 }}>
+      <div style={{ display: "flex", height: "32px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "var(--card)", zIndex: 5 }}>
         <div style={{ width: "80px", flexShrink: 0, padding: "4px", fontSize: "11px", fontWeight: 600 }}>Čas</div>
         <div style={{ flex: 1, position: "relative", minWidth: "1200px" }}>
           {Array.from({ length: 24 }).map((_, i) => {
@@ -568,14 +569,14 @@ function DenView({
                     top: "8px",
                     width: `${width}px`,
                     height: `${rowHeight - 16}px`,
-                    background: obsazena ? "var(--branch-soft)" : "var(--warn)",
-                    border: `1px solid ${obsazena ? "var(--branch)" : "var(--warn-dark)"}`,
+                    background: obsazena ? "var(--branch-soft)" : "var(--pozor-bg)",
+                    border: `1px solid ${obsazena ? "var(--branch)" : "var(--pozor)"}`,
                     borderRadius: "4px",
                     display: "flex",
                     alignItems: "center",
                     padding: "0 4px",
                     fontSize: "11px",
-                    color: obsazena ? "var(--branch)" : "var(--warn)",
+                    color: obsazena ? "var(--branch)" : "var(--pozor)",
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
