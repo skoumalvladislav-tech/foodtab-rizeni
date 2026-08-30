@@ -159,85 +159,87 @@ export default async function MojeSmeny({
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <>
       <Nadpis oci="Provoz" popis="Co vás čeká. Cizí směny jsou v rozpisu.">
         Moje směny
       </Nadpis>
 
-      <ol
-        style={{
-          listStyle: "none",
-          margin: 0,
-          padding: 0,
-          display: "grid",
-          gap: "12px",
-        }}
-      >
-        {smeny.map((s) => {
-          const semnou = kolegove
-            .filter(
-              (k) =>
-                k.branch_id === s.branch_id && k.shift_date === s.shift_date,
-            )
-            .map((k) => jmena.get(k.employee_id as string))
-            .filter((j): j is string => Boolean(j));
+      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+        <ol
+          style={{
+            listStyle: "none",
+            margin: 0,
+            padding: 0,
+            display: "grid",
+            gap: "12px",
+          }}
+        >
+          {smeny.map((s) => {
+            const semnou = kolegove
+              .filter(
+                (k) =>
+                  k.branch_id === s.branch_id && k.shift_date === s.shift_date,
+              )
+              .map((k) => jmena.get(k.employee_id as string))
+              .filter((j): j is string => Boolean(j));
 
-          return (
-            <li
-              key={s.id}
-              style={{
-                background: "var(--card)",
-                border: "1px solid var(--line)",
-                borderLeft: `4px solid ${
-                  s.status === "confirmed" ? "var(--good)" : "var(--warn)"
-                }`,
-                borderRadius: "14px",
-                boxShadow: "var(--shadow)",
-                padding: "16px",
-              }}
-            >
-              <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
-                {popisDne(s.shift_date)}
-              </p>
-
-              <p
+            return (
+              <li
+                key={s.id}
                 style={{
-                  margin: "4px 0 0",
-                  fontSize: "22px",
-                  color: "var(--ink)",
-                  fontVariantNumeric: "tabular-nums",
+                  background: "var(--card)",
+                  border: "1px solid var(--line)",
+                  borderLeft: `4px solid ${
+                    s.status === "confirmed" ? "var(--good)" : "var(--warn)"
+                  }`,
+                  borderRadius: "14px",
+                  boxShadow: "var(--shadow)",
+                  padding: "16px",
                 }}
               >
-                {hodina(s.starts_at)} – {hodina(s.ends_at)}
-              </p>
+                <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
+                  {popisDne(s.shift_date)}
+                </p>
 
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: "14px",
-                  color: "var(--branch)",
-                }}
-              >
-                {nazvyPobocek.get(s.branch_id) ?? "Jiná pobočka"}
-                {s.status === "planned" ? " · zatím v plánu" : ""}
-              </p>
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    fontSize: "22px",
+                    color: "var(--ink)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {hodina(s.starts_at)} – {hodina(s.ends_at)}
+                </p>
 
-              <p
-                style={{
-                  margin: "10px 0 0",
-                  fontSize: "13px",
-                  color: "var(--muted)",
-                }}
-              >
-                {semnou.length > 0
-                  ? `Se mnou: ${semnou.join(", ")}`
-                  : "Na směně jste sami."}
-              </p>
-            </li>
-          );
-        })}
-      </ol>
-    </main>
+                <p
+                  style={{
+                    margin: "6px 0 0",
+                    fontSize: "14px",
+                    color: "var(--branch)",
+                  }}
+                >
+                  {nazvyPobocek.get(s.branch_id) ?? "Jiná pobočka"}
+                  {s.status === "planned" ? " · zatím v plánu" : ""}
+                </p>
+
+                <p
+                  style={{
+                    margin: "10px 0 0",
+                    fontSize: "13px",
+                    color: "var(--muted)",
+                  }}
+                >
+                  {semnou.length > 0
+                    ? `Se mnou: ${semnou.join(", ")}`
+                    : "Na směně jste sami."}
+                </p>
+              </li>
+            );
+          })}
+        </ol>
+      </main>
+    </>
   );
 }
 

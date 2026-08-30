@@ -174,129 +174,131 @@ export default async function Dochazka({
   const ostatni = [...stavy.entries()].filter(([id]) => id !== ja.id);
 
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <>
       <Nadpis oci="Provoz" popis="Příchod a odchod za sebe. Kdo píchá za ostatní, potřebuje právo na docházku týmu.">
         Docházka
       </Nadpis>
 
-      {/* Vlastní píchačka */}
-      <section
-        style={{
-          background: "var(--card)",
-          border: "1px solid var(--line)",
-          borderRadius: "16px",
-          boxShadow: "var(--shadow)",
-          padding: "20px",
-        }}
-      >
-        <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
-          {scope.branchName}
-        </p>
-        <p
+      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+        {/* Vlastní píchačka */}
+        <section
           style={{
-            margin: "4px 0 0",
-            fontSize: "18px",
-            color: jsemVPraci ? "var(--good)" : "var(--muted)",
+            background: "var(--card)",
+            border: "1px solid var(--line)",
+            borderRadius: "16px",
+            boxShadow: "var(--shadow)",
+            padding: "20px",
           }}
         >
-          {jsemVPraci ? "Jste v práci" : "Nejste v práci"}
-          {posledni ? ` · od ${hodina(posledni.occurred_at)}` : ""}
-        </p>
-
-        {/*
-          Odchod je mosazný, ne v barvě --pozor. Píchnout odchod je ten
-          nejběžnější úkon dne, ne varování — červená by z konce směny
-          dělala poplach a otupila by barvu, kterou má obrazovka
-          vyhrazenou na skutečné problémy. Barva se přesto mezi stavy
-          mění, takže je na první pohled poznat, který úkon je na řadě.
-        */}
-        <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
-          <input type="hidden" name="rozsah" value={rozsah} />
-          <input type="hidden" name="druh" value={dalsiDruh} />
-          <button
-            type="submit"
+          <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
+            {scope.branchName}
+          </p>
+          <p
             style={{
-              width: "100%",
-              padding: "16px",
+              margin: "4px 0 0",
               fontSize: "18px",
-              borderRadius: "12px",
-              border: "none",
-              background: jsemVPraci ? "var(--mosaz)" : "var(--branch)",
-              color: "var(--card)",
-              cursor: "pointer",
+              color: jsemVPraci ? "var(--good)" : "var(--muted)",
             }}
           >
-            {jsemVPraci ? "Odchod" : "Příchod"}
-          </button>
-        </form>
-      </section>
+            {jsemVPraci ? "Jste v práci" : "Nejste v práci"}
+            {posledni ? ` · od ${hodina(posledni.occurred_at)}` : ""}
+          </p>
 
-      {/* Dnešní stav ostatních */}
-      <h2
-        style={{
-          margin: "24px 0 12px",
-          fontSize: "16px",
-          color: "var(--muted)",
-          fontWeight: 500,
-        }}
-      >
-        {vidiOstatni ? "Dnes na pobočce" : "Moje dnešní docházka"}
-      </h2>
+          {/*
+            Odchod je mosazný, ne v barvě --pozor. Píchnout odchod je ten
+            nejběžnější úkon dne, ne varování — červená by z konce směny
+            dělala poplach a otupila by barvu, kterou má obrazovka
+            vyhrazenou na skutečné problémy. Barva se přesto mezi stavy
+            mění, takže je na první pohled poznat, který úkon je na řadě.
+          */}
+          <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
+            <input type="hidden" name="rozsah" value={rozsah} />
+            <input type="hidden" name="druh" value={dalsiDruh} />
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                padding: "16px",
+                fontSize: "18px",
+                borderRadius: "12px",
+                border: "none",
+                background: jsemVPraci ? "var(--mosaz)" : "var(--branch)",
+                color: "var(--card)",
+                cursor: "pointer",
+              }}
+            >
+              {jsemVPraci ? "Odchod" : "Příchod"}
+            </button>
+          </form>
+        </section>
 
-      {!vidiOstatni ? (
-        <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-          {stavy.has(ja.id)
-            ? `Poslední záznam: ${popisDruhu(stavy.get(ja.id)!.kind)} v ${hodina(stavy.get(ja.id)!.occurred_at)}.`
-            : "Dnes zatím nemáte žádný záznam."}
-        </p>
-      ) : ostatni.length === 0 ? (
-        <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-          Kromě vás dnes zatím nikdo nic nezapsal.
-        </p>
-      ) : (
-        <ul
+        {/* Dnešní stav ostatních */}
+        <h2
           style={{
-            listStyle: "none",
-            margin: 0,
-            padding: 0,
-            display: "grid",
-            gap: "8px",
+            margin: "24px 0 12px",
+            fontSize: "16px",
+            color: "var(--muted)",
+            fontWeight: 500,
           }}
         >
-          {ostatni.map(([id, u]) => {
-            const vPraci = u.kind === "in" || u.kind === "break_end";
-            return (
-              <li
-                key={id}
-                style={{
-                  background: "var(--card)",
-                  border: "1px solid var(--line)",
-                  borderRadius: "12px",
-                  padding: "12px 14px",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                  alignItems: "baseline",
-                }}
-              >
-                <span style={{ fontSize: "15px", color: "var(--ink)" }}>
-                  {jmena.get(id) ?? "Neznámý člověk"}
-                </span>
-                <span
+          {vidiOstatni ? "Dnes na pobočce" : "Moje dnešní docházka"}
+        </h2>
+
+        {!vidiOstatni ? (
+          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+            {stavy.has(ja.id)
+              ? `Poslední záznam: ${popisDruhu(stavy.get(ja.id)!.kind)} v ${hodina(stavy.get(ja.id)!.occurred_at)}.`
+              : "Dnes zatím nemáte žádný záznam."}
+          </p>
+        ) : ostatni.length === 0 ? (
+          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+            Kromě vás dnes zatím nikdo nic nezapsal.
+          </p>
+        ) : (
+          <ul
+            style={{
+              listStyle: "none",
+              margin: 0,
+              padding: 0,
+              display: "grid",
+              gap: "8px",
+            }}
+          >
+            {ostatni.map(([id, u]) => {
+              const vPraci = u.kind === "in" || u.kind === "break_end";
+              return (
+                <li
+                  key={id}
                   style={{
-                    fontSize: "13px",
-                    whiteSpace: "nowrap",
-                    color: vPraci ? "var(--good)" : "var(--muted)",
+                    background: "var(--card)",
+                    border: "1px solid var(--line)",
+                    borderRadius: "12px",
+                    padding: "12px 14px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                    alignItems: "baseline",
                   }}
                 >
-                  {popisDruhu(u.kind)} · {hodina(u.occurred_at)}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </main>
+                  <span style={{ fontSize: "15px", color: "var(--ink)" }}>
+                    {jmena.get(id) ?? "Neznámý člověk"}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: "13px",
+                      whiteSpace: "nowrap",
+                      color: vPraci ? "var(--good)" : "var(--muted)",
+                    }}
+                  >
+                    {popisDruhu(u.kind)} · {hodina(u.occurred_at)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </main>
+    </>
   );
 }
 

@@ -44,57 +44,59 @@ export default async function RozsahRozcestnik({
   }
 
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <>
       <Nadpis oci="Foodtab" popis="Kam dál. Vidíte jen to, na co máte právo.">
         Rozcestník
       </Nadpis>
 
-      <div
-        style={{
-          display: "grid",
-          gap: "12px",
-          gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-        }}
-      >
-        {polozky.map((p) =>
-          p.hotovo ? (
-            <Link
-              key={p.segment}
-              href={`/${scope.branchSlug}/${p.segment}`}
-              style={{
-                display: "block",
-                padding: "20px 16px",
-                borderRadius: "14px",
-                background: "var(--card)",
-                border: "1px solid var(--line)",
-                boxShadow: "var(--shadow)",
-                color: "var(--branch)",
-                textDecoration: "none",
-                fontSize: "16px",
-              }}
-            >
-              {p.nazev}
-            </Link>
-          ) : (
-            <div
-              key={p.segment}
-              style={{
-                padding: "20px 16px",
-                borderRadius: "14px",
-                background: "transparent",
-                border: "1px dashed var(--line)",
-                color: "var(--muted)",
-                fontSize: "16px",
-              }}
-            >
-              {p.nazev}
-              <span style={{ display: "block", fontSize: "12px", marginTop: "4px" }}>
-                Připravujeme
-              </span>
-            </div>
-          ),
-        )}
-      </div>
-    </main>
+      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+        <div
+          style={{
+            display: "grid",
+            gap: "12px",
+            gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+          }}
+        >
+          {polozky.map((p) =>
+            p.hotovo ? (
+              <Link
+                key={p.segment}
+                href={`/${scope.branchSlug}/${p.segment}`}
+                style={{
+                  display: "block",
+                  padding: "20px 16px",
+                  borderRadius: "14px",
+                  background: "var(--card)",
+                  border: "1px solid var(--line)",
+                  boxShadow: "var(--shadow)",
+                  color: "var(--branch)",
+                  textDecoration: "none",
+                  fontSize: "16px",
+                }}
+              >
+                {p.nazev}
+              </Link>
+            ) : (
+              <div
+                key={p.segment}
+                style={{
+                  padding: "20px 16px",
+                  borderRadius: "14px",
+                  background: "transparent",
+                  border: "1px dashed var(--line)",
+                  color: "var(--muted)",
+                  fontSize: "16px",
+                }}
+              >
+                {p.nazev}
+                <span style={{ display: "block", fontSize: "12px", marginTop: "4px" }}>
+                  Připravujeme
+                </span>
+              </div>
+            ),
+          )}
+        </div>
+      </main>
+    </>
   );
 }
