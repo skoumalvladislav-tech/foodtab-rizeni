@@ -164,7 +164,7 @@ export default async function MojeSmeny({
         Moje směny
       </Nadpis>
 
-      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <div style={{ padding: "16px", paddingBottom: "32px" }}>
         <ol
           style={{
             listStyle: "none",
@@ -238,7 +238,7 @@ export default async function MojeSmeny({
             );
           })}
         </ol>
-      </main>
+      </div>
     </>
   );
 }

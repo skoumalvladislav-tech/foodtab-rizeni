@@ -12,6 +12,11 @@ import type { ReactNode } from "react";
  * jsou proto <p>, ne nadpis — kdyby to byl h2, měla by stránka nadpis
  * nižší úrovně dřív než ten hlavní.
  *
+ * Obal je <div>, ne <header>. Prohlížeč z <header> dělá orientační bod
+ * „záhlaví stránky“ i uvnitř <main> a v seznamu odečítače by pak stála
+ * dvě záhlaví — horní lišta a nadpis obrazovky — bez rozlišení, které
+ * je které. Záhlaví stránky je jen to v ram.tsx.
+ *
  * Podnadpisy uvnitř obrazovky jsou h2. Úrovně se nepřeskakují a nevybírají
  * se podle velikosti písma; velikost řeší CSS.
  */
@@ -30,13 +35,13 @@ export default function Nadpis({
   children: ReactNode;
 }) {
   return (
-    <header className="ft-hlava">
+    <div className="ft-hlava">
       <div>
         {oci ? <p className="ft-oci">{oci}</p> : null}
         <h1>{children}</h1>
         {popis ? <p className="ft-popis">{popis}</p> : null}
       </div>
       {vpravo ? <div className="ft-hlava-vpravo">{vpravo}</div> : null}
-    </header>
+    </div>
   );
 }

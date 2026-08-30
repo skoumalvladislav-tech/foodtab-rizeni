@@ -193,7 +193,13 @@ export default function Ram({
       </nav>
 
       <div className="ft-body">
-        <aside className="ft-side">
+        {/*
+          Sloupec je obyčejný <div>. Orientačním bodem v něm je <nav
+          aria-label="Obrazovky"> níž — kdyby byl sloupec <aside>, přidal
+          by k němu ještě „doplňkový obsah“, což navigace není, a odečítač
+          by v seznamu nabízel dvě položky místo jedné.
+        */}
+        <div className="ft-side">
           <div className="ft-side-head">
             <div className="ft-strip" />
             <span>{vNastaveni ? "Nastavení" : druh}</span>
@@ -228,8 +234,13 @@ export default function Ram({
               </span>
             ))}
           </nav>
-        </aside>
+        </div>
 
+        {/*
+          Jediný <main> v celé aplikaci. Obrazovky do něj vkládají obsah
+          a samy už žádný další nezakládají — dva vnořené by odečítači
+          zamotaly orientaci, protože hlavní oblast stránky je jedna.
+        */}
         <main className="ft-main">{children}</main>
       </div>
 

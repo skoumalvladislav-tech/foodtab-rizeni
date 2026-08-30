@@ -28,8 +28,10 @@ export default async function PrijmoutPozvankuPage({
   // Token existuje? Zjednoduší se Later, teď jen vrátíme formulář.
   // Validaci udělá accept_invitation sám.
 
+  // Stránka stojí mimo rám aplikace, takže hlavní oblast musí založit
+  // sama — jinak nemá odečítač na téhle adrese kam skočit.
   return (
-    <div
+    <main
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -55,6 +57,6 @@ export default async function PrijmoutPozvankuPage({
 
         <PrijmoutPozvankuFormular token={token} />
       </div>
-    </div>
+    </main>
   )
 }

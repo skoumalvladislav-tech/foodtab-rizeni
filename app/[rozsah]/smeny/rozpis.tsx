@@ -81,7 +81,7 @@ export default function RozpisView({
   }
 
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <div style={{ padding: "16px", paddingBottom: "32px" }}>
       {/* Navigace — posun období */}
       <div
         style={{
@@ -239,7 +239,7 @@ export default function RozpisView({
           rozsah={rozsah}
         />
       )}
-    </main>
+    </div>
   );
 }
 

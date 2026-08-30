@@ -134,7 +134,7 @@ export default async function Zpravy({
         Nástěnka
       </Nadpis>
 
-      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <div style={{ padding: "16px", paddingBottom: "32px" }}>
         {muzePsat ? (
           <form
             action={napsatZpravu}
@@ -318,7 +318,7 @@ export default async function Zpravy({
             })}
           </ul>
         )}
-      </main>
+      </div>
     </>
   );
 }

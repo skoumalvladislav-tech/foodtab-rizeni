@@ -40,7 +40,7 @@ export default async function RozsahLayout({
   const tenantId = await getCurrentTenantId();
   if (!tenantId) {
     return (
-      <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">
+      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě">
         Požádejte o pozvánku někoho, kdo firmu ve Foodtabu spravuje.
       </Sdeleni>
     );
@@ -49,7 +49,7 @@ export default async function RozsahLayout({
   const ctx = await getContext(tenantId);
   if (!ctx) {
     return (
-      <Sdeleni nadpis="Firmu se nepodařilo načíst">
+      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst">
         Zkuste to prosím za chvíli znovu. Pokud potíž trvá, ozvěte se
         správci firmy.
       </Sdeleni>
@@ -61,7 +61,7 @@ export default async function RozsahLayout({
   const scope = bezpecnyRozsah(ctx, rozsah);
   if (!scope) {
     return (
-      <Sdeleni nadpis="Sem nemáte přístup">
+      <Sdeleni samostatne nadpis="Sem nemáte přístup">
         Tahle část Foodtabu vám není otevřená. Pokud si myslíte, že by
         měla být, řekněte si správci firmy o úpravu role.
       </Sdeleni>

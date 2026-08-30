@@ -173,7 +173,7 @@ export default async function Ukoly({
         Úkoly a checklisty
       </Nadpis>
 
-      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <div style={{ padding: "16px", paddingBottom: "32px" }}>
         <h2 style={nadpisSekce}>Otevřené úkoly</h2>
 
         {ukoly.length === 0 ? (
@@ -336,7 +336,7 @@ export default async function Ukoly({
             })}
           </ul>
         )}
-      </main>
+      </div>
     </>
   );
 }

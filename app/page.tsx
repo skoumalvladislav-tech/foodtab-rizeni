@@ -21,7 +21,7 @@ export default async function Home() {
   const tenantId = await getCurrentTenantId();
   if (!tenantId) {
     return (
-      <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">
+      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě">
         Přihlášení proběhlo v pořádku, ale k žádné firmě zatím nemáte
         členství. Požádejte o pozvánku někoho, kdo firmu ve Foodtabu už
         spravuje.
@@ -32,7 +32,7 @@ export default async function Home() {
   const ctx = await getContext(tenantId);
   if (!ctx) {
     return (
-      <Sdeleni nadpis="Firmu se nepodařilo načíst">
+      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst">
         Zkuste to prosím za chvíli znovu. Pokud potíž trvá, ozvěte se
         správci firmy.
       </Sdeleni>
@@ -44,7 +44,7 @@ export default async function Home() {
   const scope = bezpecnyRozsah(ctx);
   if (!scope) {
     return (
-      <Sdeleni nadpis="Není kam vás pustit">
+      <Sdeleni samostatne nadpis="Není kam vás pustit">
         Vaše členství je vedené na pobočku, ale žádná vám zatím není
         přiřazená. Doplní ji správce firmy.
       </Sdeleni>

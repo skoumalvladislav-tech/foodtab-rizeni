@@ -129,7 +129,7 @@ export default async function VyplnitChecklist({
   const uzavreno = run.status === "done";
 
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <div style={{ padding: "16px", paddingBottom: "32px" }}>
       <Link
         href={`/${rozsah}/ukoly`}
         style={{ fontSize: "14px", color: "var(--accent)" }}
@@ -292,7 +292,7 @@ export default async function VyplnitChecklist({
           </button>
         </form>
       ) : null}
-    </main>
+    </div>
   );
 }
 

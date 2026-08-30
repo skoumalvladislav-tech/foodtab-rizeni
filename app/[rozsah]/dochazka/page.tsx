@@ -179,7 +179,7 @@ export default async function Dochazka({
         Docházka
       </Nadpis>
 
-      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <div style={{ padding: "16px", paddingBottom: "32px" }}>
         {/* Vlastní píchačka */}
         <section
           style={{
@@ -297,7 +297,7 @@ export default async function Dochazka({
             })}
           </ul>
         )}
-      </main>
+      </div>
     </>
   );
 }

@@ -9,13 +9,23 @@ import type { ReactNode } from "react";
  */
 export default function Sdeleni({
   nadpis,
+  samostatne = false,
   children,
 }: {
   nadpis: string;
+  /**
+   * Sdělení stojí samo, mimo rám aplikace — na rozcestí po přihlášení
+   * a v layoutu dřív, než se rám vůbec vykreslí. Jen tehdy je hlavní
+   * oblastí stránky, a tedy <main>. Uvnitř rámu hlavní oblast dodává
+   * .ft-main v ram.tsx a druhý <main> by odečítači zamotal orientaci.
+   */
+  samostatne?: boolean;
   children: ReactNode;
 }) {
+  const Obal = samostatne ? "main" : "div";
+
   return (
-    <main
+    <Obal
       style={{
         minHeight: "60dvh",
         display: "grid",
@@ -43,6 +53,6 @@ export default function Sdeleni({
           {children}
         </p>
       </div>
-    </main>
+    </Obal>
   );
 }
