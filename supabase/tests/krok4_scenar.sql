@@ -93,7 +93,12 @@ begin
   delete from public.recipes where tenant_id = v_tenant and name ilike 'svíčková%';
 end $$;
 
--- Rozpis: člověk + provozní den + pobočka. shift_date JE provozní den.
+-- Rozpis: člověk + provozní den + pobočka + začátek směny.
+--
+-- shift_date JE provozní den. starts_at je v klíči proto, aby šla zadat
+-- dělená směna — ráno a večer zvlášť je v gastru běžné, ne výjimka.
+-- Rozlišuje se tedy podle času začátku: tentýž znovu je nahrání
+-- dvakrát, jiný je druhá směna téhož dne.
 do $$
 declare v_tenant uuid; v_perla uuid; v_zam uuid; v_den date := date '2026-12-24'; v_ok boolean;
 begin
@@ -104,22 +109,32 @@ begin
 
   insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
     values (v_tenant, v_perla, v_zam, v_den, time '07:00', time '15:00');
+
+  -- Totéž ještě jednou = druhé spuštění importu. Nesmí projít, i když
+  -- se liší konec — o tom, co je táž směna, rozhoduje začátek.
   begin
     insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
-      values (v_tenant, v_perla, v_zam, v_den, time '15:00', time '23:00');
+      values (v_tenant, v_perla, v_zam, v_den, time '07:00', time '16:00');
     v_ok := false;
   exception when unique_violation then v_ok := true;
   end;
-  if not v_ok then raise exception 'SELHALO: rozpis šlo nahrát dvakrát'; end if;
-  raise notice '  OK    rozpis: druhá směna téhož člověka na tentýž den a pobočku neprojde';
+  if not v_ok then raise exception 'SELHALO: táž směna šla nahrát dvakrát'; end if;
+  raise notice '  OK    rozpis: táž směna (týž začátek) podruhé neprojde';
+
+  -- Dělená směna: tentýž člověk, tentýž den, tatáž pobočka, jiný
+  -- začátek. Tohle projít MUSÍ — kvůli tomu je starts_at v klíči.
+  insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
+    values (v_tenant, v_perla, v_zam, v_den, time '17:00', time '23:00');
+  raise notice '  OK    rozpis: dělená směna téhož dne projde';
 
   -- Neobsazená směna je „sem někoho potřebujeme“ a na jednom dni jich
   -- může být víc. Prázdné employee_id se v jedinečném indexu nerovná
-  -- prázdnému, takže je klíč neomezuje — a nesmí.
+  -- prázdnému, takže je klíč neomezuje — a nesmí. Schválně se stejným
+  -- začátkem, ať se ověří právě tohle, a ne rozdíl v čase.
   insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
     values (v_tenant, v_perla, null, v_den, time '07:00', time '15:00');
   insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
-    values (v_tenant, v_perla, null, v_den, time '15:00', time '23:00');
+    values (v_tenant, v_perla, null, v_den, time '07:00', time '15:00');
   raise notice '  OK    rozpis: neobsazených směn smí být na jednom dni víc';
 
   -- Tentýž člověk na druhé pobočce téhož dne projít musí: klíč je
