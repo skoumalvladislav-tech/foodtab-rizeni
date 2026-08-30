@@ -25,6 +25,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const TOKENY = path.join(import.meta.dirname, '..', 'app', '_tokeny.css');
+const GLOBALS = path.join(import.meta.dirname, '..', 'app', 'globals.css');
 const KLICE = ['firma', 'slate', 'indigo', 'violet', 'sky', 'teal', 'emerald', 'amber', 'rose'];
 const MEZ_DE = { svetlo: 15, tma: 14 };
 
@@ -214,12 +215,51 @@ function ctiRail(css, klic, tmavy) {
   return null;
 }
 
+/**
+ * Kterým tokenem je obarvený obrys vyhledávacího pole.
+ *
+ * Čte se to z globals.css, ne odsud napevno — právě v tom byla chyba,
+ * kterou to má chytat. Obrys měl `var(--rail-2)`, tedy tutéž barvu jako
+ * výplň pole: proti liště 1,31 a neohraničoval nic. Kontrola napsaná na
+ * pevný token by tohle nikdy neodhalila, protože by měřila barvu, kterou
+ * pole ve skutečnosti nemá.
+ *
+ * Vrací název tokenu bez dvou pomlček, nebo null, když se pravidlo nenajde.
+ */
+function ctiObrysHledani(globals) {
+  const blok = vyrez(globals, '.ft-hledani {', '}');
+  if (!blok) return null;
+  for (const radek of blok.split('\n')) {
+    if (radek.trim().startsWith('/*') || radek.trim().startsWith('*')) continue;
+    const i = radek.indexOf('border:');
+    if (i < 0) continue;
+    const m = radek.slice(i).match(/var\(--([a-z0-9-]+)\)/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 /* --- kontrola -------------------------------------------------------- */
 
 function main() {
   samokontrola();
 
   const css = fs.readFileSync(TOKENY, 'utf8');
+  const globals = fs.readFileSync(GLOBALS, 'utf8');
+  const obrysToken = ctiObrysHledani(globals);
+
+  /**
+   * Hodnota obrysu pro daný klíč. Tokeny rail, rail-2 a rail-tlum se mění
+   * po klíčích, ostatní se čtou ze základu.
+   */
+  const obrysBarva = (klic, tmavy, blok) => {
+    if (!obrysToken) return null;
+    const rail = ctiRail(css, klic, tmavy);
+    if (!rail) return null;
+    const poKlicich = { rail: rail[0], 'rail-2': rail[1], 'rail-tlum': rail[2] };
+    return poKlicich[obrysToken] ?? ctiToken(blok, obrysToken);
+  };
+
   const bloky = {
     svetlo: vyrez(css, ':root {', '@media (prefers-color-scheme: dark)'),
     tma: vyrez(css, ':root[data-theme="dark"] {', '/* ---'),
@@ -259,7 +299,7 @@ function main() {
     console.log('  kontrast základu: ' + (overeno - predZakladem) + ' dvojic');
 
     // devět klíčů rozsahu
-    const hlavicka = ['klíč     ', 'ink/rail', 'ink/r-2', 'tlum/r', 'tlum/r-2', 'mosaz', 'br/pap', 'ink/fill', 'fill/pap', 'br/soft'];
+    const hlavicka = ['klíč     ', 'ink/rail', 'ink/r-2', 'tlum/r', 'tlum/r-2', 'mosaz', 'br/pap', 'ink/fill', 'fill/pap', 'br/soft', 'obrys/r', 'obrys/r2'];
     console.log('\n  ' + hlavicka.map((h, i) => (i ? h.padStart(9) : h)).join(''));
 
     for (const k of KLICE) {
@@ -279,6 +319,13 @@ function main() {
         zkus(k + ' branch-ink/fill', t('branch-ink'), fill, 4.5),
         zkus(k + ' fill vs paper', fill, t('paper'), 3.0),
         zkus(k + ' branch/soft', br, soft, 4.5),
+        // Obrys vyhledávacího pole. Hranice ovládacího prvku podle WCAG
+        // 1.4.11 — musí být vidět proti liště za polem i proti vlastní
+        // výplni pole. Barva se bere ta, kterou obrys v globals.css
+        // opravdu má, ne napevno zvolená: právě záměna obrysu za barvu
+        // výplně byla ta chyba, kterou to má hlídat.
+        zkus(k + ' obrys hledání vs lišta', obrysBarva(k, rezim === 'tma', blok), r1, 3.0),
+        zkus(k + ' obrys hledání vs výplň pole', obrysBarva(k, rezim === 'tma', blok), r2, 3.0),
       ];
       console.log('  ' + k.padEnd(9) + hodnoty.map((v) => (v === null ? '—' : v.toFixed(2)).padStart(9)).join(''));
     }

@@ -95,7 +95,13 @@
 .ft-hledani {
   position: relative; display: flex; align-items: center; flex: none;
   height: 32px; border-radius: 9px;
-  background: var(--rail-2); border: 1px solid var(--rail-2);
+  background: var(--rail-2);
+  /* Obrys musí být vidět proti liště i proti vlastní výplni — WCAG
+     1.4.11 chce 3,0 pro hranici ovládacího prvku. Dřív tu byl --rail-2,
+     tedy táž barva jako výplň: proti liště 1,31, a neohraničoval nic.
+     --rail-tlum drží nejhůř 4,81 u všech devíti klíčů v obou režimech.
+     Hlídá to scripts/barvy.js. */
+  border: 1px solid var(--rail-tlum);
 }
 .ft-hledani .ft-i {
   position: absolute; left: 10px; width: 15px; height: 15px;
