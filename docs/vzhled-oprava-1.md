@@ -32,7 +32,24 @@ Obojí platí najednou a jedno druhé nenahrazuje:
 | otázka | měřítko | hranice |
 |---|---|---|
 | Přečtu ten text? | kontrastní poměr | 4,5 (text), 3,0 (plochy) |
-| Poznám ty dvě barvy od sebe? | ΔE2000 | 15 |
+| Poznám ty dvě barvy od sebe? | ΔE2000 | 15 (světlý), 14 (tmavý) |
+
+### Proč má tmavý režim nižší hranici
+
+ΔE2000 roste s tím, jak daleko jsou barvy od sebe ve světlosti i v sytosti.
+Tmavá lišta má ale obojí svázané: aby zůstala tmavá, musí mít nízkou
+světlost, a v nízké světlosti se do sRGB vejde jen málo sytosti. Devět
+odstínů se tam prostě nerozestoupí tak jako na světlém pozadí — je tam
+míň místa.
+
+Zvednout ΔE na 15 by v tmavém režimu šlo jedině tak, že by se lišta
+zesvětlila. Tím by ale přestala být tmavá, mosazná plocha aktivní položky
+by proti ní ztratila odstup a celý tmavý režim by se rozpadl. Rozlišitelnost
+lišty je vodítko, čitelnost textu je podmínka — a když jde jedno proti
+druhému, ustupuje vodítko.
+
+Proto 14. Není to změkčení pravidla, ale strop, který dává sRGB
+v téhle světlosti.
 
 ### Nové odstíny — světlý režim
 
@@ -79,7 +96,10 @@ Tmavý režim se dál píše dvakrát — pod `prefers-color-scheme` se strážc
 
 K dosavadním kontrastním kontrolám přidej **matici ΔE2000 mezi `--rail`
 všech devíti klíčů**, zvlášť pro světlý a pro tmavý režim. Nejmenší
-hodnota musí být nad 15. Do zprávy napiš tu nejmenší a u které dvojice.
+hodnota musí být nad 15 ve světlém a nad 14 v tmavém režimu — proč se
+hranice liší, je o kus výš. Do zprávy napiš tu nejmenší a u které dvojice.
+
+Spočítá to `node scripts/barvy.js`.
 
 Barva ale pořád nesmí nést informaci sama o sobě — vedle tečky je vždycky
 název. Tahle oprava dělá barvu použitelnou jako vodítko, ne jako sdělení.
