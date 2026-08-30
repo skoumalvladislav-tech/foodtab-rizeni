@@ -168,174 +168,176 @@ export default async function Ukoly({
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <>
       <Nadpis oci="Provoz" popis="Jednorázové úkoly a checklisty, které se opakují každou směnu.">
         Úkoly a checklisty
       </Nadpis>
 
-      <h2 style={nadpisSekce}>Otevřené úkoly</h2>
+      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+        <h2 style={nadpisSekce}>Otevřené úkoly</h2>
 
-      {ukoly.length === 0 ? (
-        <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-          Žádný otevřený úkol. Hotovo.
-        </p>
-      ) : (
-        <ul style={seznam}>
-          {ukoly.map((u) => (
-            <li
-              key={u.id}
-              style={{
-                background: "var(--card)",
-                border: "1px solid var(--line)",
-                borderLeft: `4px solid ${
-                  u.priority === "high" ? "var(--warn)" : "var(--line)"
-                }`,
-                borderRadius: "12px",
-                padding: "14px",
-              }}
-            >
-              <p style={{ margin: 0, fontSize: "15px", color: "var(--ink)" }}>
-                {u.title}
-              </p>
-
-              {u.note ? (
-                <p
-                  style={{
-                    margin: "4px 0 0",
-                    fontSize: "13px",
-                    color: "var(--muted)",
-                  }}
-                >
-                  {u.note}
-                </p>
-              ) : null}
-
-              <p
-                style={{
-                  margin: "6px 0 0",
-                  fontSize: "12px",
-                  color: "var(--muted)",
-                }}
-              >
-                {[
-                  u.branch_id === null
-                    ? "celá firma"
-                    : scope.level === "tenant"
-                      ? (nazvyPobocek.get(u.branch_id) ?? "jiná pobočka")
-                      : null,
-                  u.due_at ? `termín ${denAcas(u.due_at)}` : null,
-                  u.priority === "high" ? "přednostně" : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-
-              {/*
-                Tlačítko se ukáže každému, kdo úkol vidí. O tom, jestli
-                ho smí zavřít, rozhoduje public.complete_task() — vedoucí,
-                adresát i jeho role. Ptát se dopředu přes canSee by
-                znamenalo mít pravidlo na dvou místech.
-              */}
-              <form action={dokoncitUkol} style={{ marginTop: "10px" }}>
-                <input type="hidden" name="rozsah" value={rozsah} />
-                <input type="hidden" name="ukol" value={u.id} />
-                <button type="submit" style={tlacitkoMale}>
-                  Hotovo
-                </button>
-              </form>
-
-              {chybnyUkol === u.id && chyba ? (
-                <p
-                  role="alert"
-                  style={{
-                    margin: "8px 0 0",
-                    fontSize: "13px",
-                    color: "var(--bad)",
-                  }}
-                >
-                  {popisChyby(chyba)}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h2 style={{ ...nadpisSekce, marginTop: "28px" }}>Checklisty</h2>
-
-      {!branchId ? (
-        <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-          Checklisty se vedou po pobočkách. Přepněte se na konkrétní
-          pobočku.
-        </p>
-      ) : !den ? (
-        <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-          Nepodařilo se zjistit provozní den, takže checklisty nelze
-          zobrazit.
-        </p>
-      ) : sablony.length === 0 ? (
-        <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-          Pro tuhle pobočku není nastavený žádný checklist.
-        </p>
-      ) : (
-        <ul style={seznam}>
-          {sablony.map((s) => {
-            const beh = behy.get(s.id);
-            const celkem = poctyPolozek.get(s.id) ?? 0;
-
-            return (
+        {ukoly.length === 0 ? (
+          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+            Žádný otevřený úkol. Hotovo.
+          </p>
+        ) : (
+          <ul style={seznam}>
+            {ukoly.map((u) => (
               <li
-                key={s.id}
+                key={u.id}
                 style={{
                   background: "var(--card)",
                   border: "1px solid var(--line)",
+                  borderLeft: `4px solid ${
+                    u.priority === "high" ? "var(--warn)" : "var(--line)"
+                  }`,
                   borderRadius: "12px",
                   padding: "14px",
                 }}
               >
                 <p style={{ margin: 0, fontSize: "15px", color: "var(--ink)" }}>
-                  {s.name}
+                  {u.title}
                 </p>
+
+                {u.note ? (
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: "13px",
+                      color: "var(--muted)",
+                    }}
+                  >
+                    {u.note}
+                  </p>
+                ) : null}
+
                 <p
                   style={{
-                    margin: "4px 0 0",
+                    margin: "6px 0 0",
                     fontSize: "12px",
                     color: "var(--muted)",
                   }}
                 >
                   {[
-                    s.department,
-                    beh
-                      ? `${beh.hotovo} z ${celkem} hotovo`
-                      : `${celkem} položek`,
-                    beh?.status === "done" ? "uzavřeno" : null,
+                    u.branch_id === null
+                      ? "celá firma"
+                      : scope.level === "tenant"
+                        ? (nazvyPobocek.get(u.branch_id) ?? "jiná pobočka")
+                        : null,
+                    u.due_at ? `termín ${denAcas(u.due_at)}` : null,
+                    u.priority === "high" ? "přednostně" : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
 
-                {beh ? (
-                  <Link
-                    href={`/${rozsah}/ukoly/${beh.id}`}
-                    style={{ ...tlacitkoMale, display: "inline-block", marginTop: "10px" }}
+                {/*
+                  Tlačítko se ukáže každému, kdo úkol vidí. O tom, jestli
+                  ho smí zavřít, rozhoduje public.complete_task() — vedoucí,
+                  adresát i jeho role. Ptát se dopředu přes canSee by
+                  znamenalo mít pravidlo na dvou místech.
+                */}
+                <form action={dokoncitUkol} style={{ marginTop: "10px" }}>
+                  <input type="hidden" name="rozsah" value={rozsah} />
+                  <input type="hidden" name="ukol" value={u.id} />
+                  <button type="submit" style={tlacitkoMale}>
+                    Hotovo
+                  </button>
+                </form>
+
+                {chybnyUkol === u.id && chyba ? (
+                  <p
+                    role="alert"
+                    style={{
+                      margin: "8px 0 0",
+                      fontSize: "13px",
+                      color: "var(--bad)",
+                    }}
                   >
-                    {beh.status === "done" ? "Zobrazit" : "Pokračovat"}
-                  </Link>
-                ) : (
-                  <form action={spustitChecklist} style={{ marginTop: "10px" }}>
-                    <input type="hidden" name="rozsah" value={rozsah} />
-                    <input type="hidden" name="sablona" value={s.id} />
-                    <button type="submit" style={tlacitkoMale}>
-                      Spustit
-                    </button>
-                  </form>
-                )}
+                    {popisChyby(chyba)}
+                  </p>
+                ) : null}
               </li>
-            );
-          })}
-        </ul>
-      )}
-    </main>
+            ))}
+          </ul>
+        )}
+
+        <h2 style={{ ...nadpisSekce, marginTop: "28px" }}>Checklisty</h2>
+
+        {!branchId ? (
+          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+            Checklisty se vedou po pobočkách. Přepněte se na konkrétní
+            pobočku.
+          </p>
+        ) : !den ? (
+          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+            Nepodařilo se zjistit provozní den, takže checklisty nelze
+            zobrazit.
+          </p>
+        ) : sablony.length === 0 ? (
+          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+            Pro tuhle pobočku není nastavený žádný checklist.
+          </p>
+        ) : (
+          <ul style={seznam}>
+            {sablony.map((s) => {
+              const beh = behy.get(s.id);
+              const celkem = poctyPolozek.get(s.id) ?? 0;
+
+              return (
+                <li
+                  key={s.id}
+                  style={{
+                    background: "var(--card)",
+                    border: "1px solid var(--line)",
+                    borderRadius: "12px",
+                    padding: "14px",
+                  }}
+                >
+                  <p style={{ margin: 0, fontSize: "15px", color: "var(--ink)" }}>
+                    {s.name}
+                  </p>
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      fontSize: "12px",
+                      color: "var(--muted)",
+                    }}
+                  >
+                    {[
+                      s.department,
+                      beh
+                        ? `${beh.hotovo} z ${celkem} hotovo`
+                        : `${celkem} položek`,
+                      beh?.status === "done" ? "uzavřeno" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+
+                  {beh ? (
+                    <Link
+                      href={`/${rozsah}/ukoly/${beh.id}`}
+                      style={{ ...tlacitkoMale, display: "inline-block", marginTop: "10px" }}
+                    >
+                      {beh.status === "done" ? "Zobrazit" : "Pokračovat"}
+                    </Link>
+                  ) : (
+                    <form action={spustitChecklist} style={{ marginTop: "10px" }}>
+                      <input type="hidden" name="rozsah" value={rozsah} />
+                      <input type="hidden" name="sablona" value={s.id} />
+                      <button type="submit" style={tlacitkoMale}>
+                        Spustit
+                      </button>
+                    </form>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </main>
+    </>
   );
 }
 

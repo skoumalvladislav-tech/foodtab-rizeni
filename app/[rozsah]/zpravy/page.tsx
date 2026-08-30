@@ -129,195 +129,197 @@ export default async function Zpravy({
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
   return (
-    <main style={{ padding: "16px", paddingBottom: "32px" }}>
+    <>
       <Nadpis oci="Provoz" popis="Co se má vědět. Nejnovější nahoře.">
         Nástěnka
       </Nadpis>
 
-      {muzePsat ? (
-        <form
-          action={napsatZpravu}
-          style={{
-            background: "var(--card)",
-            border: "1px solid var(--line)",
-            borderRadius: "14px",
-            padding: "14px",
-            marginBottom: "20px",
-          }}
-        >
-          <input type="hidden" name="rozsah" value={rozsah} />
-          <label
-            htmlFor="text"
+      <main style={{ padding: "16px", paddingBottom: "32px" }}>
+        {muzePsat ? (
+          <form
+            action={napsatZpravu}
             style={{
-              display: "block",
-              fontSize: "13px",
-              color: "var(--muted)",
-              marginBottom: "6px",
+              background: "var(--card)",
+              border: "1px solid var(--line)",
+              borderRadius: "14px",
+              padding: "14px",
+              marginBottom: "20px",
             }}
           >
-            Nová zpráva pro{" "}
-            {scope.level === "tenant" ? "celou firmu" : scope.branchName}
-          </label>
-          <textarea
-            id="text"
-            name="text"
-            required
-            rows={3}
-            placeholder="Co mají vědět?"
+            <input type="hidden" name="rozsah" value={rozsah} />
+            <label
+              htmlFor="text"
+              style={{
+                display: "block",
+                fontSize: "13px",
+                color: "var(--muted)",
+                marginBottom: "6px",
+              }}
+            >
+              Nová zpráva pro{" "}
+              {scope.level === "tenant" ? "celou firmu" : scope.branchName}
+            </label>
+            <textarea
+              id="text"
+              name="text"
+              required
+              rows={3}
+              placeholder="Co mají vědět?"
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                fontSize: "16px",
+                borderRadius: "10px",
+                border: "1px solid var(--line)",
+                background: "var(--paper)",
+                color: "var(--ink)",
+                resize: "vertical",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: "10px",
+                gap: "12px",
+              }}
+            >
+              <label
+                style={{
+                  fontSize: "14px",
+                  color: "var(--muted)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <input type="checkbox" name="pripnout" value="ano" />
+                Připnout nahoru
+              </label>
+              <button
+                type="submit"
+                style={{
+                  padding: "10px 18px",
+                  fontSize: "15px",
+                  borderRadius: "10px",
+                  border: "none",
+                  background: "var(--branch)",
+                  color: "var(--card)",
+                  cursor: "pointer",
+                }}
+              >
+                Odeslat
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        {zpravy.length === 0 ? (
+          <Sdeleni nadpis="Nástěnka je prázdná">
+            {muzePsat
+              ? "Zatím tu nic není. Napište první zprávu."
+              : "Zatím tu nic není."}
+          </Sdeleni>
+        ) : (
+          <ul
             style={{
-              width: "100%",
-              padding: "10px 12px",
-              fontSize: "16px",
-              borderRadius: "10px",
-              border: "1px solid var(--line)",
-              background: "var(--paper)",
-              color: "var(--ink)",
-              resize: "vertical",
-            }}
-          />
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginTop: "10px",
+              listStyle: "none",
+              margin: 0,
+              padding: 0,
+              display: "grid",
               gap: "12px",
             }}
           >
-            <label
-              style={{
-                fontSize: "14px",
-                color: "var(--muted)",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-              }}
-            >
-              <input type="checkbox" name="pripnout" value="ano" />
-              Připnout nahoru
-            </label>
-            <button
-              type="submit"
-              style={{
-                padding: "10px 18px",
-                fontSize: "15px",
-                borderRadius: "10px",
-                border: "none",
-                background: "var(--branch)",
-                color: "var(--card)",
-                cursor: "pointer",
-              }}
-            >
-              Odeslat
-            </button>
-          </div>
-        </form>
-      ) : null}
+            {zpravy.map((z) => {
+              const jePrectena = prectene.has(z.id);
+              const firemni = z.branch_id === null;
 
-      {zpravy.length === 0 ? (
-        <Sdeleni nadpis="Nástěnka je prázdná">
-          {muzePsat
-            ? "Zatím tu nic není. Napište první zprávu."
-            : "Zatím tu nic není."}
-        </Sdeleni>
-      ) : (
-        <ul
-          style={{
-            listStyle: "none",
-            margin: 0,
-            padding: 0,
-            display: "grid",
-            gap: "12px",
-          }}
-        >
-          {zpravy.map((z) => {
-            const jePrectena = prectene.has(z.id);
-            const firemni = z.branch_id === null;
-
-            return (
-              <li
-                key={z.id}
-                style={{
-                  background: "var(--card)",
-                  border: "1px solid var(--line)",
-                  borderLeft: z.pinned
-                    ? "4px solid var(--warn)"
-                    : "1px solid var(--line)",
-                  borderRadius: "12px",
-                  padding: "14px",
-                  opacity: jePrectena ? 0.72 : 1,
-                }}
-              >
-                <p
+              return (
+                <li
+                  key={z.id}
                   style={{
-                    margin: 0,
-                    fontSize: "12px",
-                    color: "var(--muted)",
+                    background: "var(--card)",
+                    border: "1px solid var(--line)",
+                    borderLeft: z.pinned
+                      ? "4px solid var(--warn)"
+                      : "1px solid var(--line)",
+                    borderRadius: "12px",
+                    padding: "14px",
+                    opacity: jePrectena ? 0.72 : 1,
                   }}
                 >
-                  {[
-                    z.pinned ? "Připnuto" : null,
-                    z.author_id ? autori.get(z.author_id) : null,
-                    firemni
-                      ? "celá firma"
-                      : scope.level === "tenant"
-                        ? (nazvyPobocek.get(z.branch_id as string) ??
-                          "jiná pobočka")
-                        : null,
-                    z.employee_id ? "osobní" : null,
-                    datumACas(z.created_at),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-
-                <p
-                  style={{
-                    margin: "6px 0 0",
-                    fontSize: "15px",
-                    color: "var(--ink)",
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {z.body}
-                </p>
-
-                {jePrectena ? (
                   <p
                     style={{
-                      margin: "10px 0 0",
+                      margin: 0,
                       fontSize: "12px",
-                      color: "var(--good)",
+                      color: "var(--muted)",
                     }}
                   >
-                    ✓ Přečteno
+                    {[
+                      z.pinned ? "Připnuto" : null,
+                      z.author_id ? autori.get(z.author_id) : null,
+                      firemni
+                        ? "celá firma"
+                        : scope.level === "tenant"
+                          ? (nazvyPobocek.get(z.branch_id as string) ??
+                            "jiná pobočka")
+                          : null,
+                      z.employee_id ? "osobní" : null,
+                      datumACas(z.created_at),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </p>
-                ) : (
-                  <form action={oznacitPrectene} style={{ marginTop: "10px" }}>
-                    <input type="hidden" name="rozsah" value={rozsah} />
-                    <input type="hidden" name="zprava" value={z.id} />
-                    <button
-                      type="submit"
+
+                  <p
+                    style={{
+                      margin: "6px 0 0",
+                      fontSize: "15px",
+                      color: "var(--ink)",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {z.body}
+                  </p>
+
+                  {jePrectena ? (
+                    <p
                       style={{
-                        padding: "8px 14px",
-                        fontSize: "13px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--line)",
-                        background: "transparent",
+                        margin: "10px 0 0",
+                        fontSize: "12px",
                         color: "var(--good)",
-                        cursor: "pointer",
                       }}
                     >
-                      Označit jako přečtené
-                    </button>
-                  </form>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </main>
+                      ✓ Přečteno
+                    </p>
+                  ) : (
+                    <form action={oznacitPrectene} style={{ marginTop: "10px" }}>
+                      <input type="hidden" name="rozsah" value={rozsah} />
+                      <input type="hidden" name="zprava" value={z.id} />
+                      <button
+                        type="submit"
+                        style={{
+                          padding: "8px 14px",
+                          fontSize: "13px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--line)",
+                          background: "transparent",
+                          color: "var(--good)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Označit jako přečtené
+                      </button>
+                    </form>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </main>
+    </>
   );
 }
 
