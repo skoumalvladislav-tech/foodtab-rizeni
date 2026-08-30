@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
 
@@ -455,8 +456,19 @@ function DenView({
     }
   }
 
-  // "Teď" indikátor — jen pro dnešní den
-  const ted = den === dnesni ? getTedMinuta(osStart) : null;
+  // "Teď" indikátor — jen pro dnešní den a jen v prohlížeči.
+  //
+  // Čára se počítá z new Date(). Tahle komponenta je sice klientská, ale
+  // Next ji stejně vykreslí i na serveru, aby měl co poslat v HTML —
+  // a server má jiné hodiny a hlavně jiný okamžik než prohlížeč.
+  // Vyšlo tedy pokaždé jiné procento, obě vykreslení se rozešla a React
+  // hlásil neshodu při hydrataci.
+  //
+  // Na serveru i při prvním vykreslení v prohlížeči je proto null, tedy
+  // žádná čára — obojí vypadá stejně a hydratace sedne. Doplní se hned
+  // po připojení, kdy už se není s čím rozcházet.
+  const vProhlizeci = useVProhlizeci();
+  const ted = vProhlizeci && den === dnesni ? getTedMinuta(osStart) : null;
 
   // Podíl (0–100%) — kolik procent dne uplynulo?
   const tedProc = ted !== null ? (ted / osTotalMin) * 100 : null;
@@ -589,6 +601,30 @@ function getTedMinuta(osStart: number): number {
   const ted = new Date();
   const tedMin = ted.getHours() * 60 + ted.getMinutes();
   return tedMin - osStart;
+}
+
+/* Prázdné odhlášení. Musí to být stálá hodnota, jinak by se React
+   přihlašoval znovu při každém vykreslení. */
+const NEODEBIRAT = () => () => {};
+
+/**
+ * Běžíme už v prohlížeči?
+ *
+ * Vrací false na serveru i při prvním vykreslení v prohlížeči, teprve
+ * potom true. Obě strany tak vykreslí totéž a hydratace sedne; co se
+ * liší, se dopočítá až v druhém průchodu.
+ *
+ * Patří sem cokoli, co se ptá na aktuální čas — server má jiné hodiny
+ * i jiný okamžik než prohlížeč a nikdy se netrefí. Přes useState
+ * v efektu se to dělat nedá: nastavit stav rovnou v efektu spustí
+ * druhé vykreslení navíc a hlídá to i lint.
+ */
+function useVProhlizeci(): boolean {
+  return useSyncExternalStore(
+    NEODEBIRAT,
+    () => true,
+    () => false,
+  );
 }
 
 function MesicView({
