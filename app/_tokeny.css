@@ -44,10 +44,10 @@
 
   /* Barva rozsahu — tmavá plocha horní lišty a bočního sloupce.
      Výchozí je firemní odstín; klíč pobočky ho přepíše níž. */
-  --rail:      #143126;
-  --rail-2:    #21483a;
+  --rail:      #15241e;
+  --rail-2:    #233931;
   --rail-ink:  #f1ece0;
-  --rail-tlum: #97b4aa;
+  --rail-tlum: #87ab9f;
 
   /* Mosaz je přízvuk celého rozhraní: odkazy, nadpisky sekcí, zaměření.
      Barva pobočky se na papírové ploše drží --branch-*, ne --accent —
@@ -163,65 +163,65 @@
    Do databáze se "firma" nikdy neukládá; slate zůstává pobočkám.
    ------------------------------------------------------------------ */
 [data-branch="firma"]    {
-  --rail: #143126; --rail-2: #21483a; --rail-tlum: #97b4aa;
+  --rail: #15241e; --rail-2: #233931; --rail-tlum: #87ab9f;
   --branch: var(--b-firma); --branch-fill: var(--b-firma-fill); --branch-soft: var(--b-firma-soft);
 }
 [data-branch="slate"]    {
-  --rail: #1c2429; --rail-2: #2b363e; --rail-tlum: #8fa1ae;
+  --rail: #141724; --rail-2: #22273a; --rail-tlum: #8d94b0;
   --branch: var(--b-slate); --branch-fill: var(--b-slate-fill); --branch-soft: var(--b-slate-soft);
 }
 [data-branch="indigo"]   {
-  --rail: #18172e; --rail-2: #262444; --rail-tlum: #8d8cab;
+  --rail: #171763; --rail-2: #24247a; --rail-tlum: #9c9cba;
   --branch: var(--b-indigo); --branch-fill: var(--b-indigo-fill); --branch-soft: var(--b-indigo-soft);
 }
 [data-branch="violet"]   {
-  --rail: #24172e; --rail-2: #372444; --rail-tlum: #9e8cab;
+  --rail: #4d2c4d; --rail-2: #613b61; --rail-tlum: #cdb7cc;
   --branch: var(--b-violet); --branch-fill: var(--b-violet-fill); --branch-soft: var(--b-violet-soft);
 }
 [data-branch="sky"]      {
-  --rail: #132732; --rail-2: #203b49; --rail-tlum: #92a6b0;
+  --rail: #1d465e; --rail-2: #2a5974; --rail-tlum: #c6d1d7;
   --branch: var(--b-sky); --branch-fill: var(--b-sky-fill); --branch-soft: var(--b-sky-soft);
 }
 [data-branch="teal"]     {
-  --rail: #133232; --rail-2: #204949; --rail-tlum: #97b4b4;
+  --rail: #17524e; --rail-2: #246965; --rail-tlum: #d5e2e1;
   --branch: var(--b-teal); --branch-fill: var(--b-teal-fill); --branch-soft: var(--b-teal-soft);
 }
 [data-branch="emerald"]  {
-  --rail: #133222; --rail-2: #204934; --rail-tlum: #97b4a6;
+  --rail: #2b4e20; --rail-2: #3a642e; --rail-tlum: #cfdbcc;
   --branch: var(--b-emerald); --branch-fill: var(--b-emerald-fill); --branch-soft: var(--b-emerald-soft);
 }
 [data-branch="amber"]    {
-  --rail: #36240e; --rail-2: #503619; --rail-tlum: #b2a495;
+  --rail: #443419; --rail-2: #5a4726; --rail-tlum: #c9c0b1;
   --branch: var(--b-amber); --branch-fill: var(--b-amber-fill); --branch-soft: var(--b-amber-soft);
 }
 [data-branch="rose"]     {
-  --rail: #2f161b; --rail-2: #45232a; --rail-tlum: #ab8c92;
+  --rail: #311212; --rail-2: #481f1f; --rail-tlum: #b29090;
   --branch: var(--b-rose); --branch-fill: var(--b-rose-fill); --branch-soft: var(--b-rose-soft);
 }
 
 /* Tmavý režim mění jen plochu lišty a sloupce. --branch-* se tu
    nepřepisují: hodnoty --b-* se vyměnily už v základu výš. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) [data-branch="firma"]    { --rail: #081410; --rail-2: #0e221b; --rail-tlum: #7c9c91; }
-  :root:not([data-theme="light"]) [data-branch="slate"]    { --rail: #0b0f11; --rail-2: #13191d; --rail-tlum: #7c8f9c; }
-  :root:not([data-theme="light"]) [data-branch="indigo"]   { --rail: #0a0913; --rail-2: #111020; --rail-tlum: #7e7c9c; }
-  :root:not([data-theme="light"]) [data-branch="violet"]   { --rail: #0f0913; --rail-2: #1a1020; --rail-tlum: #8f7c9c; }
-  :root:not([data-theme="light"]) [data-branch="sky"]      { --rail: #081015; --rail-2: #0e1c23; --rail-tlum: #7c929c; }
-  :root:not([data-theme="light"]) [data-branch="teal"]     { --rail: #081515; --rail-2: #0e2323; --rail-tlum: #7c9c9c; }
-  :root:not([data-theme="light"]) [data-branch="emerald"]  { --rail: #08150e; --rail-2: #0e2318; --rail-tlum: #7c9c8c; }
-  :root:not([data-theme="light"]) [data-branch="amber"]    { --rail: #160f06; --rail-2: #26190a; --rail-tlum: #9c8d7c; }
-  :root:not([data-theme="light"]) [data-branch="rose"]     { --rail: #13090b; --rail-2: #211013; --rail-tlum: #9c7c83; }
+  :root:not([data-theme="light"]) [data-branch="firma"]    { --rail: #091611; --rail-2: #132921; --rail-tlum: #7a9f91; }
+  :root:not([data-theme="light"]) [data-branch="slate"]    { --rail: #0a0c1d; --rail-2: #131730; --rail-tlum: #8084a3; }
+  :root:not([data-theme="light"]) [data-branch="indigo"]   { --rail: #0b0b4c; --rail-2: #131360; --rail-tlum: #8989a9; }
+  :root:not([data-theme="light"]) [data-branch="violet"]   { --rail: #381d38; --rail-2: #482948; --rail-tlum: #b69ab6; }
+  :root:not([data-theme="light"]) [data-branch="sky"]      { --rail: #103246; --rail-2: #19415a; --rail-tlum: #a0b0ba; }
+  :root:not([data-theme="light"]) [data-branch="teal"]     { --rail: #153f3c; --rail-2: #1f514d; --rail-tlum: #acc3c1; }
+  :root:not([data-theme="light"]) [data-branch="emerald"]  { --rail: #182f0d; --rail-2: #254216; --rail-tlum: #9cb092; }
+  :root:not([data-theme="light"]) [data-branch="amber"]    { --rail: #2c210d; --rail-2: #403015; --rail-tlum: #aba08c; }
+  :root:not([data-theme="light"]) [data-branch="rose"]     { --rail: #370f0f; --rail-2: #4a1717; --rail-tlum: #ab8c8c; }
 }
 
-:root[data-theme="dark"] [data-branch="firma"]    { --rail: #081410; --rail-2: #0e221b; --rail-tlum: #7c9c91; }
-:root[data-theme="dark"] [data-branch="slate"]    { --rail: #0b0f11; --rail-2: #13191d; --rail-tlum: #7c8f9c; }
-:root[data-theme="dark"] [data-branch="indigo"]   { --rail: #0a0913; --rail-2: #111020; --rail-tlum: #7e7c9c; }
-:root[data-theme="dark"] [data-branch="violet"]   { --rail: #0f0913; --rail-2: #1a1020; --rail-tlum: #8f7c9c; }
-:root[data-theme="dark"] [data-branch="sky"]      { --rail: #081015; --rail-2: #0e1c23; --rail-tlum: #7c929c; }
-:root[data-theme="dark"] [data-branch="teal"]     { --rail: #081515; --rail-2: #0e2323; --rail-tlum: #7c9c9c; }
-:root[data-theme="dark"] [data-branch="emerald"]  { --rail: #08150e; --rail-2: #0e2318; --rail-tlum: #7c9c8c; }
-:root[data-theme="dark"] [data-branch="amber"]    { --rail: #160f06; --rail-2: #26190a; --rail-tlum: #9c8d7c; }
-:root[data-theme="dark"] [data-branch="rose"]     { --rail: #13090b; --rail-2: #211013; --rail-tlum: #9c7c83; }
+:root[data-theme="dark"] [data-branch="firma"]    { --rail: #091611; --rail-2: #132921; --rail-tlum: #7a9f91; }
+:root[data-theme="dark"] [data-branch="slate"]    { --rail: #0a0c1d; --rail-2: #131730; --rail-tlum: #8084a3; }
+:root[data-theme="dark"] [data-branch="indigo"]   { --rail: #0b0b4c; --rail-2: #131360; --rail-tlum: #8989a9; }
+:root[data-theme="dark"] [data-branch="violet"]   { --rail: #381d38; --rail-2: #482948; --rail-tlum: #b69ab6; }
+:root[data-theme="dark"] [data-branch="sky"]      { --rail: #103246; --rail-2: #19415a; --rail-tlum: #a0b0ba; }
+:root[data-theme="dark"] [data-branch="teal"]     { --rail: #153f3c; --rail-2: #1f514d; --rail-tlum: #acc3c1; }
+:root[data-theme="dark"] [data-branch="emerald"]  { --rail: #182f0d; --rail-2: #254216; --rail-tlum: #9cb092; }
+:root[data-theme="dark"] [data-branch="amber"]    { --rail: #2c210d; --rail-2: #403015; --rail-tlum: #aba08c; }
+:root[data-theme="dark"] [data-branch="rose"]     { --rail: #370f0f; --rail-2: #4a1717; --rail-tlum: #ab8c8c; }
 
 /* ---------------------------------------------------------------------
    Stará jména
