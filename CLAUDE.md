@@ -17,6 +17,9 @@ aby ho někdo cizí převzal bez dohledu.
 - `docs/etapa0-specifikace.md` — závazná specifikace základu
 - Plná verze včetně obrázků: https://claude.ai/code/artifact/b598a3a4-45e3-446c-97ec-397fad8cf5d3
 - `supabase/README.md` — jak funguje databáze a jak se zakládá firma
+- `docs/vzhled-zadani.md` a `docs/vzhled-oprava-1.md` — barvy, písmo a plochy;
+  oprava nahrazuje tabulky odstínů v §4.3 a §4.4 zadání
+- `docs/vzhled-predloha.html` — předloha vzhledu, otevírá se dvojklikem
 
 Když si nejsi jistý, jak se má něco chovat, hledej odpověď tam. Když tam
 není, zeptej se — nedomýšlej si pravidla provozu restaurace.
@@ -139,17 +142,47 @@ Když přidáváš tabulku nebo oprávnění, přidej k tomu kontrolu do
 `supabase/tests/etapa0_scenar.sql`. Kontrola má ověřovat, že se někdo
 **nedostane** tam, kam nemá — ne jen že šťastná cesta funguje.
 
+### Paleta
+
+```bash
+node scripts/barvy.js
+```
+
+Čte hodnoty z `app/_tokeny.css` a `app/globals.css` — kontroluje se to, co
+je opravdu v souborech, ne tabulka v zadání. Vrací 1, když něco spadne pod
+hranici, takže se dá pověsit do CI.
+
+Měří dvě různé věci a jedna druhou nenahrazuje:
+
+| otázka | měřítko | hranice |
+|---|---|---|
+| Přečtu ten text? | kontrastní poměr | 4,5 text, 3,0 plochy a obrysy |
+| Poznám ty dvě barvy od sebe? | ΔE2000 | **15 světlý, 14 tmavý** |
+
+Tmavý režim má nižší hranici proto, že tmavá lišta má svázanou světlost
+se sytostí: aby zůstala tmavá, vejde se do sRGB málo sytosti a devět
+odstínů se tam nerozestoupí jako na světlém pozadí. Zdůvodnění je
+v `docs/vzhled-oprava-1.md`.
+
+Kontrast sám by nestačil — měří jen rozdíl světlosti. Dvě zelené o stejné
+světlosti mají poměr 1,00 a od sebe je nepozná nikdo; přesně tak vznikla
+původní paleta, kde měly firma a emerald vzdálenost 2,4.
+
 ## Stav prací
 
-**Hotovo — etapa 0, krok 1:** firma, pobočky, pozice, lidé, role, moduly,
-pozvánky, audit, autorizační funkce, RLS, založení firmy a pozvánky.
+**Hotovo:** etapa 0 celá (firma, pobočky, lidé, role, moduly, pozvánky,
+audit, RLS), provozní tabulky, autorizační vrstva v aplikaci, rozpis směn
+ve třech pohledech, obrazovka Lidé a pozvánky, vzhled podle
+`docs/vzhled-predloha.html` a `docs/vzhled-oprava-1.md`. Rozpis
+srpen/září je nahraný se skutečnými časy.
 
-**Následuje — krok 2:** provozní tabulky (směny, docházka, úkoly, checklisty,
-komunikace, receptury, jídelní lístky, motivace) s RLS, kde `branch_id IS NULL`
-znamená firemní úroveň.
+**Následuje:** hydratační neshoda v denním pohledu — čára „teď" se počítá
+na serveru i v prohlížeči, takže se hodnoty nikdy netrefí. Dál kontrola
+zbylých obrazovek proti předloze, nahrávání rozpisu z Excelu a docházka
+proti plánu.
 
-**Pak:** autorizační vrstva v aplikaci, průvodce nastavením firmy, přepínač
-firma–pobočka, převod rozhraní ze starých ukázkových dat, nasazení.
+**Před ostrým provozem:** omezit `app.create_tenant`, noční záloha
+databáze mimo Supabase, klíče pro nasazování z GitHubu.
 
 ## Co se ruší ze starého kódu
 
