@@ -324,7 +324,7 @@ select:focus-visible {
       rgba(199, 150, 75, 0.18),
       transparent 28%
     ),
-    linear-gradient(145deg, #4f46e5, #4338ca);
+    linear-gradient(145deg, var(--rail-2), var(--rail));
   display: grid;
   place-items: center;
   align-content: center;
@@ -465,15 +465,15 @@ select:focus-visible {
   letter-spacing: 0.05em;
 }
 .hlaska-chyba {
-  background: var(--red);
-  color: #ffffff;
+  background: var(--bad-bg);
+  color: var(--bad);
 }
 .hlaska-chyba::before {
   content: "⚠ Chyba:";
 }
 .hlaska-vareni {
-  background: var(--warn);
-  color: #ffffff;
+  background: var(--pozor-bg);
+  color: var(--pozor);
 }
 .hlaska-vareni::before {
   content: "ℹ Upozornění:";
