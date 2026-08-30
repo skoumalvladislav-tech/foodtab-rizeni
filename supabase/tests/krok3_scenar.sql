@@ -33,7 +33,8 @@ select pg_temp.check('seznam oprávnění odpovídá lib/authz.ts',
     'attendance.read','banking.read','communication.manage',
     'communication.read','finance.manage','finance.read',
     'marketing.manage','marketing.publish','marketing.read',
-    'menus.manage','menus.read','motivation.manage','motivation.read',
+    'menu_ai.manage','menu_ai.use','menus.manage','menus.read',
+    'motivation.manage','motivation.read',
     'payroll.export','payroll.manage','people.manage','purchasing.manage',
     'purchasing.read','recipes.manage','recipes.read','settings.manage',
     'shifts.manage','shifts.read','tasks.manage','tasks.read'
@@ -41,7 +42,16 @@ select pg_temp.check('seznam oprávnění odpovídá lib/authz.ts',
 
 select pg_temp.check('seznam modulů odpovídá lib/authz.ts',
   (select array_agg(key order by key) from public.modules)
-    = array['finance','marketing','objednavky','provoz']::text[]);
+    = array['finance','marketing','menu','objednavky','provoz']::text[]);
+
+-- Receptury a jídelní lístky zůstávají v provozu. Tvorba menu je dílna
+-- na návrhy, ne místo, kde lístky bydlí — kdyby se ta čtyři oprávnění
+-- přestěhovala, vzalo by se právo lidem, kteří ho dnes mají, a lístky by
+-- zhasly každé firmě bez nového modulu. Viz docs/modul-menu-zadani.md.
+select pg_temp.check('recipes.* a menus.* zůstaly v provozu',
+  (select array_agg(module_key order by key) from public.permissions
+   where key in ('recipes.read','recipes.manage','menus.read','menus.manage'))
+    = array['provoz','provoz','provoz','provoz']::text[]);
 
 \echo ''
 \echo '== Průzor přeposílá stejné rozhodnutí ====================='
@@ -122,8 +132,8 @@ select pg_temp.check('majitel má v seznamu tenantů právě tuhle firmu',
 -- Modul Finance je od scénáře etapy 0 zapnutý. Kontrolujeme, že se to
 -- projeví v kontextu — a hlavně že se vypnutí projeví taky. Schovaná
 -- položka v menu není zámek, ale nesmí zůstat svítit, když modul zhasne.
-select pg_temp.check('kontext nabízí všechny čtyři moduly',
-  jsonb_array_length(public.my_context(:'tenant') -> 'modules') = 4);
+select pg_temp.check('kontext nabízí všech pět modulů',
+  jsonb_array_length(public.my_context(:'tenant') -> 'modules') = 5);
 
 select pg_temp.check('zapnutý modul je označený jako aktivní i s oprávněními',
   exists (
@@ -154,6 +164,60 @@ select pg_temp.check('oprávnění vypnutého modulu zmizí z kontextu',
 reset role;
 update public.tenant_modules set status = 'active'
 where tenant_id = :'tenant' and module_key = 'finance';
+
+\echo ''
+\echo '== Nezapnutý modul odmítá i přímé volání =================='
+-- Pravidlo 5. Finance výš se testovaly jako POZASTAVENÉ — řádek
+-- v tenant_modules existuje a má status 'suspended'. Tvorba menu je
+-- druhý případ: firma pro něj nemá řádek vůbec, protože ho migrace
+-- stávajícím firmám schválně nezaložila. Ten případ chodí databází
+-- jinudy (vnitřní spojení nenajde nic, místo aby našlo a zahodilo),
+-- takže se musí ověřit zvlášť.
+--
+-- „Přímé volání adresy“ v aplikaci znamená /<rozsah>/menu s vynechanou
+-- navigací. Ta obrazovka se ptá na menu_ai.use přes tenhle průzor, takže
+-- kontrola měří přesně to, co ji zavře.
+
+set role authenticated;
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+
+select pg_temp.check('modul menu je v katalogu',
+  exists (select 1 from public.modules
+          where key = 'menu' and not is_base and sort_order = 15));
+select pg_temp.check('stávající firma modul menu zapnutý nemá',
+  not exists (select 1 from public.tenant_modules
+              where tenant_id = :'tenant' and module_key = 'menu'));
+
+-- Tohle je jádro pravidla 5: majitel má jinak všechno, a přesto ho
+-- nezapnutý modul nepustí dál. Kdyby to prošlo, stačilo by opsat adresu.
+select pg_temp.check('nezapnutý modul zavírá menu_ai.use i majiteli',
+  public.has_access(:'tenant', 'menu_ai.use', null) = false);
+select pg_temp.check('nezapnutý modul zavírá i menu_ai.manage',
+  public.has_access(:'tenant', 'menu_ai.manage', null) = false);
+select pg_temp.check('nezapnutý modul zavírá i na pobočce',
+  public.has_access(:'tenant', 'menu_ai.use', :'perla') = false);
+select pg_temp.check('oprávnění nezapnutého modulu nejsou v kontextu',
+  not (public.my_context(:'tenant') -> 'permissions' ? 'menu_ai.use')
+  and not (public.my_context(:'tenant') -> 'permissions' ? 'menu_ai.manage'));
+select pg_temp.check('modul menu je v kontextu, ale zašedlý',
+  exists (
+    select 1 from jsonb_array_elements(public.my_context(:'tenant') -> 'modules') m
+    where m ->> 'key' = 'menu' and not (m ->> 'active')::boolean));
+
+-- A po zapnutí se otevře. Bez tohohle by kontrola výš prošla i tehdy,
+-- kdyby oprávnění nefungovalo vůbec.
+reset role;
+insert into public.tenant_modules (tenant_id, module_key) values (:'tenant', 'menu');
+
+set role authenticated;
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+select pg_temp.check('po zapnutí modulu majitel na menu_ai.use dosáhne',
+  public.has_access(:'tenant', 'menu_ai.use', null));
+
+-- Vracíme stav, ve kterém jsme ho našli: u stávajících firem vypnutý.
+reset role;
+delete from public.tenant_modules
+where tenant_id = :'tenant' and module_key = 'menu';
 
 \echo ''
 \echo '== Provozní den z aplikace ================================'

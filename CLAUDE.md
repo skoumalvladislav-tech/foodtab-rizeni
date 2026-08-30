@@ -35,7 +35,8 @@ elegantnější řešení.
 | Framework | Běžný Next.js. Odchod z `vinext` (předverze) |
 | Hosting | Hetzner + Coolify, Německo. Cloudflare jen jako DNS, TLS a ochrana |
 | Multitenance | `tenant_id` v každé tabulce od začátku. Rozhraní zůstává jednofiremní |
-| Moduly | `provoz` (vždy), `finance`, `marketing`, `objednavky`. Zapínají se za celou firmu |
+| Moduly | `provoz` (vždy), `menu`, `finance`, `marketing`, `objednavky`. Zapínají se za celou firmu |
+| Tvorba menu | Dílna na návrhy, ne úložiště. `recipes.*` a `menus.*` zůstávají v `provoz` |
 | Rozsah | Dvě úrovně: firma a pobočka. Počet poboček neomezený |
 | Lidé | Zaměstnanec může existovat **bez** uživatelského účtu (brigádník) |
 | Přístupy | Role a oprávnění jsou data firmy, ne kód. Vstup jen na pozvánku |

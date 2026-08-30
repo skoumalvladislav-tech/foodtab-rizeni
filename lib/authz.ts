@@ -78,11 +78,19 @@ export const PERMISSIONS = [
   // Objednávky
   'purchasing.read',
   'purchasing.manage',
+  // Tvorba menu
+  'menu_ai.use',
+  'menu_ai.manage',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]
 
-export const MODULES = ['provoz', 'finance', 'marketing', 'objednavky'] as const
+/**
+ * Moduly. Pořadí odpovídá sort_order v databázi, `menu` stojí za
+ * provozem — je to dílna na návrhy menu, ne místo, kde lístky bydlí.
+ * Receptury a jídelní lístky zůstávají v provozu.
+ */
+export const MODULES = ['provoz', 'menu', 'finance', 'marketing', 'objednavky'] as const
 export type ModuleKey = (typeof MODULES)[number]
 
 /**

@@ -68,6 +68,12 @@ export const NABIDKA: Polozka[] = [
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },
+  // Obrazovka zatím jen říká, že se modul připravuje — ale existuje,
+  // a proto je hotovo: true. Ten příznak znamená „adresa vede na
+  // vykreslenou stránku“, ne „funkce je hotová“. Kdyby byl false,
+  // záložka modulu by nikam nevedla a nebylo by co odmítnout vypnutým
+  // modulem, jak žádá pravidlo 5.
+  { segment: 'menu', nazev: 'Tvorba menu', kratky: 'Menu', modul: 'menu', pravo: 'menu_ai.use', hotovo: true, ikona: 'kniha' },
   { segment: 'finance', nazev: 'Přehled financí', kratky: 'Finance', modul: 'finance', pravo: 'finance.read', hotovo: false, ikona: 'kniha' },
   { segment: 'marketing', nazev: 'Marketing', kratky: 'Marketing', modul: 'marketing', pravo: 'marketing.read', hotovo: false, ikona: 'kniha' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
@@ -91,6 +97,7 @@ export const NASTAVENI: Polozka[] = [
 /** Názvy modulů, když je databáze nedodá. */
 export const NAZVY_MODULU: Record<ModuleKey, string> = {
   provoz: 'Provoz',
+  menu: 'Tvorba menu',
   finance: 'Finance',
   marketing: 'Marketing',
   objednavky: 'Objednávky',
