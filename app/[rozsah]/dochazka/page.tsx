@@ -3,6 +3,14 @@ import type { ReactNode } from "react";
 
 import { getContext, getUser, hasAccess } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
+import {
+  dnu,
+  hodinyAMinuty,
+  koruny,
+  nazevMesice,
+  prvniDenMesice,
+  sazbaZaHodinu,
+} from "@/lib/mzdy";
 import { provozniDen } from "@/lib/provozni-den";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
@@ -53,6 +61,15 @@ type Kolega = {
 
 /** Jak dopadla docházka u odpracované směny. */
 type StavDochazky = "uzavrena" | "neuzavrena" | "bez_zaznamu";
+
+/** Výsledek public.my_earnings — hotová čísla z databáze. */
+type Vydelek = {
+  odpracovano_minut: number;
+  vydelano_haleru: number;
+  dnu_bez_dochazky: number;
+  sazba_chybi: boolean;
+  hodinova_haleru: number | null;
+};
 
 export default async function Dochazka({
   params,
@@ -228,6 +245,26 @@ export default async function Dochazka({
     }
   }
 
+  /* --- 2c. VLASTNÍ VÝDĚLEK --------------------------------------- */
+
+  /*
+    Počítá databáze, sem chodí hotové číslo — nikdy cizí sazba a nikdy
+    podklady k dopočítání. Na vlastní mzdu není potřeba oprávnění.
+
+    Chyba se schválně nevyhazuje. Migrace se sazbami se nasazuje zvlášť
+    a než projde, funkce v databázi není; dlaždice se do té doby prostě
+    nekreslí a zbytek docházky funguje dál. Rozbít píchačku kvůli
+    nedeplojnuté funkci by byla horší varianta než chybějící dlaždice.
+  */
+  const mesic = prvniDenMesice(new Date());
+  const { data: vydelekData, error: vydelekChyba } = await supabase.rpc(
+    "my_earnings",
+    { p_tenant: tenantId, p_mesic: mesic },
+  );
+  const vydelek = vydelekChyba
+    ? null
+    : ((vydelekData?.[0] ?? null) as Vydelek | null);
+
   /* --- 2b. PÍCHAČKA A DNEŠNÍ STAV -------------------------------- */
 
   // Moje poslední událost — podle ní se rozhoduje, co nabídnout.
@@ -341,7 +378,10 @@ export default async function Dochazka({
           </Vysvetleni>
         )}
 
-        {/* 2. Moje nejbližší směny */}
+        {/* 2. Hrubá mzda za tenhle měsíc */}
+        {vydelek ? <DlazdiceVydelku v={vydelek} mesic={mesic} /> : null}
+
+        {/* 3. Moje nejbližší směny */}
         <h2 style={nadpisSekce}>Moje nejbližší směny</h2>
 
         {smeny.length === 0 ? (
@@ -513,6 +553,79 @@ function HlavickaDochazky() {
     >
       Docházka
     </Nadpis>
+  );
+}
+
+/**
+ * Hrubá mzda za měsíc.
+ *
+ * Oddíl 6 zadání a každé slovo v něm má důvod:
+ *   * VŽDYCKY „hrubá“ a „orientačně“ — odvody, zálohy ani srážky v tom
+ *     nejsou a lidé si to číslo přečtou jako slib
+ *   * pod částkou, z čeho vyšla, ať se to dá zkontrolovat
+ *   * chybějící docházka jako štítek se slovem, ne jiný odstín
+ *   * chybějící sazba NIKDY jako nula — nula vypadá jako výsledek
+ */
+function DlazdiceVydelku({ v, mesic }: { v: Vydelek; mesic: string }) {
+  return (
+    <section
+      style={{
+        marginTop: "16px",
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        borderRadius: "16px",
+        boxShadow: "var(--shadow)",
+        padding: "20px",
+      }}
+    >
+      <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
+        Hrubá mzda za {nazevMesice(mesic)} — orientačně
+      </p>
+
+      {v.sazba_chybi || v.hodinova_haleru === null ? (
+        <p style={{ margin: "6px 0 0", fontSize: "18px", color: "var(--ink)" }}>
+          Sazba není zadaná
+        </p>
+      ) : (
+        <p
+          style={{
+            margin: "6px 0 0",
+            fontSize: "28px",
+            color: "var(--ink)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {koruny(v.vydelano_haleru)}
+        </p>
+      )}
+
+      <p style={{ margin: "6px 0 0", fontSize: "13px", color: "var(--muted)" }}>
+        {hodinyAMinuty(v.odpracovano_minut)}
+        {v.hodinova_haleru !== null
+          ? ` · ${sazbaZaHodinu(v.hodinova_haleru)}`
+          : ""}
+      </p>
+
+      {/*
+        Štítek, ne odstín: barva sama nic neřekne tomu, kdo ji nerozezná,
+        a tohle je údaj o penězích.
+      */}
+      {v.dnu_bez_dochazky > 0 ? (
+        <p
+          style={{
+            display: "inline-block",
+            margin: "12px 0 0",
+            padding: "4px 10px",
+            borderRadius: "999px",
+            background: "var(--pozor-bg)",
+            color: "var(--pozor)",
+            fontSize: "13px",
+          }}
+        >
+          {dnu(v.dnu_bez_dochazky)} bez docházky
+        </p>
+      ) : null}
+    </section>
   );
 }
 
