@@ -203,6 +203,13 @@ export default async function Dochazka({
           {posledni ? ` · od ${hodina(posledni.occurred_at)}` : ""}
         </p>
 
+        {/*
+          Odchod je mosazný, ne v barvě --pozor. Píchnout odchod je ten
+          nejběžnější úkon dne, ne varování — červená by z konce směny
+          dělala poplach a otupila by barvu, kterou má obrazovka
+          vyhrazenou na skutečné problémy. Barva se přesto mezi stavy
+          mění, takže je na první pohled poznat, který úkon je na řadě.
+        */}
         <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
           <input type="hidden" name="rozsah" value={rozsah} />
           <input type="hidden" name="druh" value={dalsiDruh} />
@@ -214,7 +221,7 @@ export default async function Dochazka({
               fontSize: "18px",
               borderRadius: "12px",
               border: "none",
-              background: jsemVPraci ? "var(--warn)" : "var(--branch)",
+              background: jsemVPraci ? "var(--mosaz)" : "var(--branch)",
               color: "var(--card)",
               cursor: "pointer",
             }}
