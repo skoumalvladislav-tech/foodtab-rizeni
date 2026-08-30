@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
+import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
@@ -79,6 +80,47 @@ export default async function NastaveniLide({
     upravujeId && zamestnanci
       ? (zamestnanci.find((z) => z.id === upravujeId) as Zamestnanec)
       : null;
+
+  /*
+    Sazby. Zadání §4 na to upozorňuje zvlášť: people.manage NESTAČÍ.
+    Kdo spravuje lidi, nemusí vidět na mzdy — v malém provozu to bývá
+    dokonce jeden člověk a jeho účetní. Sloupec se proto neváže na
+    právo, kterým se sem člověk dostal.
+
+    Chyba se nevyhazuje ze stejného důvodu jako u dlaždice na Docházce:
+    dokud není nasazená migrace se sazbami, sloupec se prostě nekreslí
+    a správa lidí funguje dál.
+  */
+  const { data: vydelky, error: sazbyChyba } = await supabase.rpc(
+    "employee_earnings",
+    {
+      p_tenant: tenantId,
+      p_mesic: prvniDenMesice(new Date()),
+      p_branch: null,
+    },
+  );
+
+  const sazby = new Map<string, number | null>();
+  for (const v of (vydelky ?? []) as {
+    employee_id: string;
+    hodinova_haleru: number | null;
+  }[]) {
+    sazby.set(v.employee_id, v.hodinova_haleru);
+  }
+
+  /*
+    O přístupu rozhoduje databáze, ne tenhle řádek: employee_earnings bez
+    payroll.read nevrátí ani řádek, takže se sloupec nemá čím naplnit
+    a nekreslí se.
+
+    Správně by tu měla být i kontrola v aplikaci (pravidlo 3, dvě obranné
+    linie) — hasAccess(tenantId, 'payroll.read', …). Nejde to: seznam
+    PERMISSIONS v lib/authz.ts payroll.read zatím nezná a na ten soubor
+    jsem dnes v noci nesměl sáhnout. Až se do něj klíč doplní, patří sem
+    ta kontrola taky. Bezpečnost tím netrpí, obrazovka nemá jak ukázat
+    to, co jí databáze nedala — ale je to jedna linie, ne dvě.
+  */
+  const smiVidetSazby = !sazbyChyba && sazby.size > 0;
 
   return (
     <>
@@ -170,6 +212,7 @@ export default async function NastaveniLide({
               <th style={th}>Pobočka</th>
               <th style={th}>Typ</th>
               <th style={th}>Účet</th>
+              {smiVidetSazby ? <th style={th}>Sazba</th> : null}
               <th style={th}>Akce</th>
             </tr>
           </thead>
@@ -197,6 +240,25 @@ export default async function NastaveniLide({
                   } as Record<string, string>)[z.employment_type] || z.employment_type}
                 </td>
                 <td style={td}>{z.user_id ? "Ano" : "Ne"}</td>
+
+                {/*
+                  Chybějící sazba se píše slovem, ne jako 0 Kč. Nula
+                  vypadá jako výsledek, ne jako údaj, který nikdo nezadal
+                  — a u brigádníka, kterého ještě nikdo nenacenil, je to
+                  normální stav, ne chyba.
+                */}
+                {smiVidetSazby ? (
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
+                    {sazby.get(z.id) != null ? (
+                      <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {sazbaZaHodinu(sazby.get(z.id) as number)}
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}>nezadaná</span>
+                    )}
+                  </td>
+                ) : null}
+
                 <td style={td}>
                   <Link
                     href={`/${rozsah}/nastaveni/lide?upravuji=${z.id}`}
