@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../../nadpis";
 import { uzavritChecklist, zapsatPolozku } from "../akce";
 
 export const dynamic = "force-dynamic";
@@ -136,19 +137,12 @@ export default async function VyplnitChecklist({
         ← Zpět na úkoly
       </Link>
 
-      <h2
-        style={{
-          margin: "12px 0 4px",
-          fontSize: "18px",
-          color: "var(--branch)",
-        }}
+      <Nadpis
+        oci="Checklist"
+        popis={`${hotovo} z ${polozky.length} hotovo${uzavreno ? " · uzavřeno" : ""}`}
       >
         {nazev}
-      </h2>
-      <p style={{ margin: "0 0 16px", fontSize: "13px", color: "var(--muted)" }}>
-        {hotovo} z {polozky.length} hotovo
-        {uzavreno ? " · uzavřeno" : ""}
-      </p>
+      </Nadpis>
 
       {polozky.length === 0 ? (
         <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>

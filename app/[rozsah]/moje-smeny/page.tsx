@@ -4,6 +4,7 @@ import { getUser } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../nadpis";
 
 export const dynamic = "force-dynamic";
 
@@ -159,16 +160,9 @@ export default async function MojeSmeny({
 
   return (
     <main style={{ padding: "16px", paddingBottom: "32px" }}>
-      <h2
-        style={{
-          margin: "0 0 16px",
-          fontSize: "16px",
-          color: "var(--muted)",
-          fontWeight: 500,
-        }}
-      >
+      <Nadpis oci="Provoz" popis="Co vás čeká. Cizí směny jsou v rozpisu.">
         Moje směny
-      </h2>
+      </Nadpis>
 
       <ol
         style={{

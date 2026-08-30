@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../../nadpis";
 import { upravitZamestnance, smazatZamestnance } from "./akce";
 import VystavitPozvankuFormular from "./vystaveni";
 
@@ -79,11 +80,12 @@ export default async function NastaveniLide({
 
   return (
     <>
-      <h1 style={nadpis}>Lidé</h1>
-      <p style={popis}>
-        Přidávejte zaměstnance, brigádníky a hosty. Bez účtu se tu objeví,
-        až si někdo vystaví pozvánku.
-      </p>
+      <Nadpis
+        oci="Nastavení"
+        popis="Přidávejte zaměstnance, brigádníky a hosty. Bez účtu se tu objeví, až si někdo vystaví pozvánku."
+      >
+        Lidé
+      </Nadpis>
 
       {/* Formulář */}
       <form action={upravitZamestnance} style={{ ...formular, marginBottom: "24px" }}>
@@ -238,18 +240,6 @@ export default async function NastaveniLide({
 }
 
 /* --- Styly --- */
-
-const nadpis = {
-  margin: "0 0 3px",
-  fontSize: "20px",
-  letterSpacing: "-.02em",
-} as const;
-
-const popis = {
-  margin: "0 0 20px",
-  color: "var(--muted)",
-  fontSize: "13px",
-} as const;
 
 const formular = {
   background: "var(--card)",

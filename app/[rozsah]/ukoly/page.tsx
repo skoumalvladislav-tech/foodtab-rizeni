@@ -5,6 +5,7 @@ import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { provozniDen } from "@/lib/provozni-den";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../nadpis";
 import { dokoncitUkol, spustitChecklist } from "./akce";
 
 export const dynamic = "force-dynamic";
@@ -168,6 +169,10 @@ export default async function Ukoly({
 
   return (
     <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <Nadpis oci="Provoz" popis="Jednorázové úkoly a checklisty, které se opakují každou směnu.">
+        Úkoly a checklisty
+      </Nadpis>
+
       <h2 style={nadpisSekce}>Otevřené úkoly</h2>
 
       {ukoly.length === 0 ? (

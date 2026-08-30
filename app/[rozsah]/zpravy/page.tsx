@@ -4,6 +4,7 @@ import { getUser, hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../nadpis";
 import { napsatZpravu, oznacitPrectene } from "./akce";
 
 export const dynamic = "force-dynamic";
@@ -129,6 +130,10 @@ export default async function Zpravy({
 
   return (
     <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <Nadpis oci="Provoz" popis="Co se má vědět. Nejnovější nahoře.">
+        Nástěnka
+      </Nadpis>
+
       {muzePsat ? (
         <form
           action={napsatZpravu}

@@ -5,6 +5,7 @@ import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { provozniDen } from "@/lib/provozni-den";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../nadpis";
 import { zapsatDochazku } from "./akce";
 
 export const dynamic = "force-dynamic";
@@ -174,6 +175,10 @@ export default async function Dochazka({
 
   return (
     <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <Nadpis oci="Provoz" popis="Příchod a odchod za sebe. Kdo píchá za ostatní, potřebuje právo na docházku týmu.">
+        Docházka
+      </Nadpis>
+
       {/* Vlastní píchačka */}
       <section
         style={{

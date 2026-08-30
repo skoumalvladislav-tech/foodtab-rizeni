@@ -4,6 +4,7 @@ import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../nadpis";
 import RozpisView from "./rozpis";
 
 export const dynamic = "force-dynamic";
@@ -170,16 +171,9 @@ export default async function Rozpis({
 
   return (
     <>
-      <h2
-        style={{
-          margin: "0 0 16px",
-          fontSize: "16px",
-          color: "var(--muted)",
-          fontWeight: 500,
-        }}
-      >
+      <Nadpis oci="Provoz" popis="Kdo kdy stojí. Týden dopředu.">
         Rozpis směn
-      </h2>
+      </Nadpis>
       <RozpisView
         smeny={smeny}
         dnesni={odKdy}

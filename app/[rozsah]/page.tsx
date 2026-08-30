@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getContext } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "./nadpis";
 import { viditelnaNabidka } from "./nabidka";
 
 /**
@@ -44,6 +45,10 @@ export default async function RozsahRozcestnik({
 
   return (
     <main style={{ padding: "16px", paddingBottom: "32px" }}>
+      <Nadpis oci="Foodtab" popis="Kam dál. Vidíte jen to, na co máte právo.">
+        Rozcestník
+      </Nadpis>
+
       <div
         style={{
           display: "grid",

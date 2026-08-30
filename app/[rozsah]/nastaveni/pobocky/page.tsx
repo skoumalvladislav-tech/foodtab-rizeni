@@ -4,6 +4,7 @@ import { BRANCH_COLORS } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Nadpis from "../../nadpis";
 import { upravitPobocku } from "./akce";
 
 export const dynamic = "force-dynamic";
@@ -93,13 +94,12 @@ export default async function NastaveniPobocek({
 
   return (
     <>
-      <h1 style={{ margin: "0 0 3px", fontSize: "20px", letterSpacing: "-.02em" }}>
+      <Nadpis
+        oci="Nastavení"
+        popis="Barva odlišuje pobočku v celém rozhraní. Provozní den určuje, do které uzávěrky spadne účet vystavený po půlnoci."
+      >
         Pobočky
-      </h1>
-      <p style={{ margin: "0 0 20px", color: "var(--muted)", fontSize: "13px" }}>
-        Barva odlišuje pobočku v celém rozhraní. Provozní den určuje, do
-        které uzávěrky spadne účet vystavený po půlnoci.
-      </p>
+      </Nadpis>
 
       <div style={{ display: "grid", gap: "16px", maxWidth: "620px" }}>
         {pobocky.map((p) => {

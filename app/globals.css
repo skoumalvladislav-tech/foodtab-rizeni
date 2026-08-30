@@ -281,6 +281,26 @@ body {
     sans-serif;
 }
 
+/* ---- Hlavička obrazovky ---------------------------------------- */
+/* Mosazný nadpisek verzálkami, pod ním název obrazovky patkovým písmem.
+   Viz app/[rozsah]/nadpis.tsx — proč to není dvakrát nadpis. */
+.ft-hlava {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin: 0 0 20px;
+}
+.ft-oci {
+  margin: 0 0 5px; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .14em; color: var(--mosaz);
+}
+.ft-hlava h1 { margin: 0; font-size: 27px; line-height: 1.14; }
+.ft-popis { margin: 6px 0 0; font-size: 13px; color: var(--muted); max-width: 62ch; }
+.ft-hlava-vpravo { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 640px) {
+  .ft-hlava { margin-bottom: 16px; }
+  .ft-hlava h1 { font-size: 22px; }
+}
+
 /* Patkové písmo na nadpisy. Na odstavce ani tlačítka ne — Archivo je
    v malém stupni čitelnější a Newsreader by tam změkl.
 
