@@ -329,9 +329,12 @@ set role authenticated;
 select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
 select public.set_rate(:'tenant', :'marek', 30000, date '2026-09-15', 'přidáno') as r3 \gset
 
-select pg_temp.check('zvýšení sazby nepřepsalo dny před valid_from',
+-- 2. 9. je před platností, tak zůstává na staré sazbě; 30. 9. je po ní,
+-- tak dostane novou. Kdyby vyšly obě dny stejně, znamenalo by to, že se
+-- zvýšení buď nepropsalo vůbec, nebo přepsalo i minulost — obojí špatně.
+select pg_temp.check('zvýšení sazby platí od valid_from dál, dřívější dny nechává být',
   (select vydelano_haleru from app.earnings(:'marek', date '2026-09-01'))
-    = round((480 * 22000 + 495 * 22000)::numeric / 60));
+    = round((480 * 22000 + 495 * 30000)::numeric / 60));
 
 -- Zadání §4: na vlastní mzdu není potřeba právo.
 select set_config('test.user_id', '55555555-5555-5555-5555-555555555555', false);
