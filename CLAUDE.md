@@ -95,6 +95,14 @@ Migrace se nasazují **přes Supabase CLI** (`supabase db push`), nikdy ručním
 vkládáním do SQL editoru — jinak se nezapíše historie migrací a příště by
 se zkusilo pustit všechno znovu.
 
+### Zaseknutý stylopis v Turbopacku
+
+Když se změna v CSS neprojeví, ale na disku je správně, drží Turbopack starý
+přeložený stylopis. Pozná se to tak, že se obsah souboru liší od toho, co
+posílá server. Spraví to dotčení `globals.css` nebo smazání `.next/dev`.
+Stalo se to už dvakrát, pokaždé to stálo desítky minut hledání neexistující
+chyby.
+
 ## Rozšíření Postgresu — nepoužívej je
 
 Supabase dává rozšíření do schématu `extensions`, lokální PostgreSQL do
