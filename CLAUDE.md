@@ -177,13 +177,17 @@ Když přidáváš tabulku nebo oprávnění, přidej k tomu kontrolu do
 node --experimental-strip-types scripts/tabulka.test.mjs
 node --experimental-strip-types scripts/xlsx.test.mjs
 node --experimental-strip-types scripts/nahrani-lidi.test.mjs
+node --experimental-strip-types scripts/prideleni.test.mjs
 ```
 
-Tři věci, které se nedají ověřit v databázi, protože se dějí dřív: čtení
+Čtyři věci, které se nedají ověřit v databázi, protože se dějí dřív: čtení
 CSV, čtení sešitu .xlsx a plán nahrávání (co se založí, co aktualizuje,
-co přeskočí a proč). Běží přímo Nodem bez sestavení — proto mají soubory
-v `lib/` mezi sebou importy **s příponou `.ts`** a `tsconfig.json` má
-`allowImportingTsExtensions`. Bez přípony Node modul nenajde.
+co přeskočí a proč) — a k tomu strop na obrazovce, tedy kterou sadu
+oprávnění smím vůbec někomu přidělit.
+
+Běží přímo Nodem bez sestavení. Proto mají soubory v `lib/` mezi sebou
+importy **s příponou `.ts`** a `tsconfig.json` má
+`allowImportingTsExtensions`; bez přípony Node modul nenajde.
 
 Sešit se v testu doopravdy poskládá — ZIP i XML — a pak přečte. Kontroly
 míří na to, co u cizích souborů selhává: středník místo čárky, BOM,

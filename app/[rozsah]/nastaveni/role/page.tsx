@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { NAZVY_MODULU } from "../../nabidka";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
+import { smimPridelit } from "@/lib/prideleni";
 import { seznam } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
@@ -110,6 +111,7 @@ export default async function NastaveniOpravneni({
     ctx.modules.filter((m) => m.active).map((m) => String(m.key)),
   );
   const prava = vsechnaPrava.filter((p) => zapnute.has(p.module_key));
+  const vKatalogu = new Set(prava.map((p) => p.key));
 
   const vazby = await seznam<{ role_id: string; permission_key: string }>(
     "obsah sad oprávnění",
@@ -154,6 +156,23 @@ export default async function NastaveniOpravneni({
           {role.map((r) => {
             const moje = maPravo.get(r.id) ?? new Set<string>();
 
+            /*
+              Třetí obranná linie z docs/pravidlo-neprideluj-vic.md, ta
+              nejslabší: obrazovka má říct, co přidělit nemůžu, ještě
+              než to zkusím. Rozhodnutí padá v databázi — tady jde jen
+              o to, aby se člověk nedozvěděl „nemáte právo“ až po
+              odeslání formuláře, který se mu nabídl.
+
+              Počítá se jen z práv živých modulů. Šablona Účetní nosí
+              i finance.read; bez modulu Finance to nikomu nic
+              neotevírá, a kdyby se to počítalo, hlásila by obrazovka
+              „nemůžete přidělit“ i vlastníkovi firmy.
+            */
+            const smim = smimPridelit(ctx, {
+              isOwner: r.is_owner,
+              prava: [...moje].filter((k) => vKatalogu.has(k)),
+            });
+
             return (
               <li
                 key={r.id}
@@ -168,6 +187,17 @@ export default async function NastaveniOpravneni({
                 <h2 style={{ margin: 0, fontSize: "18px", color: "var(--ink)" }}>
                   {r.label}
                 </h2>
+
+                {smim ? null : (
+                  <p style={{ ...popisRole, marginBottom: "4px" }}>
+                    <strong style={{ color: "var(--pozor)" }}>
+                      Tuhle sadu nemůžete nikomu přidělit.
+                    </strong>{" "}
+                    {r.is_owner
+                      ? "Majitele přidělí jenom majitel."
+                      : "Obsahuje práva, která sami nemáte — a nikdo nepřiděluje víc, než má sám."}
+                  </p>
+                )}
 
                 {r.is_owner ? (
                   <>
