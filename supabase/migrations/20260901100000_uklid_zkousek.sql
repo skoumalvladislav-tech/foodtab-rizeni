@@ -49,8 +49,11 @@ begin
     v_lidi := v_lidi + 1;
   end loop;
 
+  -- btrim, protože zpráva se psala do textového pole a mezera na
+  -- konci by shodu rozbila. Počet smazaných se vypisuje níž, takže
+  -- když se netrefí, je to vidět.
   delete from public.announcements
-  where body = 'Zkouška seznamu — smažte';
+  where btrim(body) = 'Zkouška seznamu — smažte';
   get diagnostics v_zpravy = row_count;
 
   raise notice 'Úklid zkoušek: smazáno % zaměstnanců, % zpráv.', v_lidi, v_zpravy;
