@@ -53,12 +53,22 @@ comment on table public.employee_rates is
 create index if not exists employee_rates_ke_dni
   on public.employee_rates (employee_id, valid_from desc, created_at desc);
 
--- Historie se nepřepisuje ani neztrácí. Stejné opatření jako u auditu:
--- pravidlo je silnější než politika, protože platí i na majitele.
+-- Historie se nepřepisuje. Pravidlo je silnější než politika, protože
+-- platí i na majitele: změna sazby má být nový řádek, ne přepsaný starý.
 create rule employee_rates_no_update as
   on update to public.employee_rates do instead nothing;
-create rule employee_rates_no_delete as
-  on delete to public.employee_rates do instead nothing;
+
+-- Na mazání tu ŽÁDNÉ pravidlo není, a je to schválně.
+--
+-- „do instead nothing“ na delete rozbíjí kaskádu cizího klíče: když se
+-- maže zaměstnanec, Postgres chce smazat i jeho sazby, pravidlo to
+-- zruší a celé mazání spadne na „referential integrity query gave
+-- unexpected result“. Prvně napsané to tak bylo a nešlo pak smazat
+-- zaměstnance vůbec.
+--
+-- Že se sazby nemažou, drží dvě věci níž: `authenticated` na tabulce
+-- nemá žádná práva a RLS nemá politiku pro delete. Kdo sazbu smazat
+-- nemá, ji nesmaže. Zmizí jen s tím, komu patřila.
 
 
 -- ---------------------------------------------------------------------

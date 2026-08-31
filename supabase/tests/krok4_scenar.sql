@@ -251,13 +251,12 @@ declare v_pred integer; v_po integer;
 begin
   select count(*)::integer into v_pred from public.employee_rates;
   update public.employee_rates set hourly_haleru = 1;
-  delete from public.employee_rates;
   select count(*)::integer into v_po from public.employee_rates;
-  if v_pred <> v_po then raise exception 'SELHALO: sazby šly smazat'; end if;
+  if v_pred <> v_po then raise exception 'SELHALO: úpravou zmizel řádek'; end if;
   if exists (select 1 from public.employee_rates where hourly_haleru = 1) then
     raise exception 'SELHALO: sazba šla přepsat';
   end if;
-  raise notice '  OK    sazby: řádek nejde přepsat ani smazat';
+  raise notice '  OK    sazby: řádek nejde přepsat, změna je nový řádek';
 end $$;
 
 -- Odpracovaná doba a přelom provozního dne. Příchod v 18:00 a odchod
@@ -332,6 +331,92 @@ end $$;
 select pg_temp.check('mzdová oprávnění jsou citlivá (nejdou pozvat přes SMS)',
   (select bool_and(sensitive) from public.permissions
    where key in ('payroll.read', 'payroll.manage')));
+
+\echo ''
+\echo '== Audit změn u lidí, rolí a oprávnění ===================='
+-- Úprava zaměstnance a přidělení role se dělají obyčejným update přímo
+-- z aplikace, takže po nich dřív nezůstávala žádná stopa. Hlídá to
+-- spoušť, ne volání z akce — platí tak i na import a ruční SQL.
+
+reset role;
+
+do $$
+declare
+  v_tenant uuid; v_perla uuid; v_id uuid; v_pred bigint; v_zaznam record;
+begin
+  select id into v_tenant from public.tenants limit 1;
+  select id into v_perla from public.branches
+    where tenant_id = v_tenant order by created_at limit 1;
+
+  insert into public.employees (tenant_id, branch_id, full_name, employment_type)
+    values (v_tenant, v_perla, 'Auditovaná Osoba', 'hpp') returning id into v_id;
+
+  update public.employees set employment_type = 'jine' where id = v_id;
+
+  select action, before, after into v_zaznam
+  from public.audit_log
+  where entity_type = 'employee' and entity_id = v_id::text and action = 'employee.update'
+  order by occurred_at desc limit 1;
+
+  if v_zaznam is null then
+    raise exception 'SELHALO: úprava zaměstnance se nezapsala do auditu';
+  end if;
+  if v_zaznam.before <> jsonb_build_object('employment_type', 'hpp')
+     or v_zaznam.after <> jsonb_build_object('employment_type', 'jine') then
+    raise exception 'SELHALO: audit nezapsal, co se změnilo z čeho na co (% → %)',
+      v_zaznam.before, v_zaznam.after;
+  end if;
+  raise notice '  OK    úprava zaměstnance je v auditu i s hodnotou před a po';
+
+  -- Uložení formuláře beze změny nemá audit zaplevelit.
+  select count(*) into v_pred from public.audit_log where entity_id = v_id::text;
+  update public.employees set employment_type = 'jine' where id = v_id;
+  if (select count(*) from public.audit_log where entity_id = v_id::text) <> v_pred then
+    raise exception 'SELHALO: uložení beze změny zapsalo audit';
+  end if;
+  raise notice '  OK    uložení beze změny do auditu nejde';
+
+  -- Pravidlo 9: mazání je označení, tedy update. Musí být vidět taky.
+  update public.employees set deleted_at = now() where id = v_id;
+  if not exists (
+    select 1 from public.audit_log
+    where entity_id = v_id::text and after ? 'deleted_at'
+  ) then
+    raise exception 'SELHALO: označení za smazané není v auditu';
+  end if;
+  raise notice '  OK    označení zaměstnance za smazaného je v auditu';
+
+  delete from public.employees where id = v_id;
+end $$;
+
+-- Oprávnění: role_permissions nemá tenant_id, firma se dohledává přes
+-- roli. Kdyby to přestalo fungovat, audit by u oprávnění mlčel.
+do $$
+declare v_role uuid;
+begin
+  select id into v_role from public.roles where key = 'servis' limit 1;
+  insert into public.role_permissions (role_id, permission_key)
+    values (v_role, 'payroll.read') on conflict do nothing;
+
+  if not exists (
+    select 1 from public.audit_log
+    where entity_type = 'permission'
+      and entity_id = v_role::text || ':payroll.read'
+  ) then
+    raise exception 'SELHALO: přidání oprávnění není v auditu';
+  end if;
+  raise notice '  OK    přidání oprávnění roli je v auditu';
+
+  delete from public.role_permissions
+  where role_id = v_role and permission_key = 'payroll.read';
+  if not exists (
+    select 1 from public.audit_log
+    where entity_type = 'permission' and action = 'permission.delete'
+  ) then
+    raise exception 'SELHALO: odebrání oprávnění není v auditu';
+  end if;
+  raise notice '  OK    odebrání oprávnění roli je v auditu';
+end $$;
 
 reset role;
 select set_config('test.user_id', '', false);
