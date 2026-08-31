@@ -527,7 +527,7 @@ select pg_temp.check('provozní zakládá lidi',
 select pg_temp.check('a nastavení firmy nemá',
   not app.has_access(:'tenant', 'settings.manage', null));
 
-do $
+do $$
 declare v_role uuid; v_ok boolean := false; v_pred int; v_po int;
 begin
   select id into v_role from public.roles where key = 'servis' limit 1;
@@ -554,7 +554,7 @@ begin
     raise exception 'SELHALO: provozní smazal % oprávnění', v_pred - v_po;
   end if;
   raise notice '  OK    provozní oprávnění ani nemaže';
-end $;
+end $$;
 
 -- Majitel se needituje: jeho sada se nebere z role_permissions, ale
 -- z aktivních modulů. Obrazovka ho proto kreslí jen ke čtení.
@@ -769,39 +769,101 @@ select set_config('test.user_id', '77777777-7777-7777-7777-777777777777', false)
 -- Šablona Účetní nosí finance.read; bez modulu Finance to nikomu nic
 -- neotevírá a strop se z něj počítat nesmí, jinak by roli nepřidělil
 -- ani vlastník firmy.
+--
+-- Testovací firma modul Finance ZAPNUTÝ MÁ, takže se pro tuhle jednu
+-- kontrolu pozastaví a hned zase vrátí. Původní stav se schová do
+-- proměnné — kdyby se natvrdo vrátilo 'active', přepsalo by to zkušební
+-- období. Povolené hodnoty jsou active, trial a suspended.
+reset role;
+select coalesce((select status from public.tenant_modules
+                 where tenant_id = :'tenant' and module_key = 'finance'),
+                'chybi') as fin_stav \gset
+
+update public.tenant_modules set status = 'suspended'
+ where tenant_id = :'tenant' and module_key = 'finance';
+
+set role authenticated;
 select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
-select pg_temp.check('finance.read nedává ve firmě bez modulu nic ani vlastníkovi',
+select pg_temp.check('finance.read nedává ve vypnutém modulu nic ani vlastníkovi',
   not app.has_access(:'tenant', 'finance.read', null));
 select pg_temp.check('a přesto vlastník roli Účetní přidělí',
   app.smi_pridelit(:'tenant', :'r_ucetni', 'tenant'));
 
+reset role;
+update public.tenant_modules set status = :'fin_stav'
+ where tenant_id = :'tenant' and module_key = 'finance'
+   and :'fin_stav' <> 'chybi';
+
+set role authenticated;
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+select pg_temp.check('modul Finance je zase v původním stavu',
+  coalesce((select status from public.tenant_modules
+            where tenant_id = :'tenant' and module_key = 'finance'), 'chybi')
+  = :'fin_stav');
+
 select set_config('test.user_id', '77777777-7777-7777-7777-777777777777', false);
 
 -- 4. Totéž přes pozvánku. Bez toho by se tabulka obešla.
+--
+-- Volá se ZÁMĚRNĚ nadvakrát: jednou se čtyřmi parametry (tak, jak
+-- pozvánku volá aplikace — rozsah zůstane na výchozím 'branch'
+-- a pobočky na '{}') a jednou s vyjmenovanou pobočkou.
+--
+-- Nejde o úplnost. Tudy strop protekl: prázdný seznam poboček se dřív
+-- nekontroloval vůbec, takže pozvánkou šlo přidělit roli, kterou přes
+-- memberships přidělit nešlo. Test, který si rozsah vždycky dosadí sám,
+-- to nemá jak najít.
 do $$
-declare v_ok boolean; v_role uuid;
+declare v_ok boolean; v_role uuid; v_tenant uuid; v_perla uuid;
 begin
+  select id into v_tenant from public.tenants limit 1;
+  select id into v_perla from public.branches where slug = 'cerna-perla';
+
   for v_role in
     select id from public.roles where is_owner
     union all
     select id from public.roles where key = 'ucetni'
   loop
+    -- bez rozsahu
     v_ok := false;
     begin
-      perform app.create_invitation(
-        (select id from public.tenants limit 1), v_role, 'email', 'cil@foodtab.cz');
+      perform app.create_invitation(v_tenant, v_role, 'email', 'cil@foodtab.cz');
     exception when insufficient_privilege then v_ok := true;
     end;
     if not v_ok then
-      raise exception 'SELHALO: pozvánka obešla strop u role %', v_role;
+      raise exception 'SELHALO: pozvánka bez rozsahu obešla strop u role %', v_role;
+    end if;
+
+    -- s vyjmenovanou pobočkou
+    v_ok := false;
+    begin
+      perform app.create_invitation(
+        v_tenant, v_role, 'email', 'cil@foodtab.cz', 'branch', array[v_perla]);
+    exception when insufficient_privilege then v_ok := true;
+    end;
+    if not v_ok then
+      raise exception 'SELHALO: pozvánka na pobočku obešla strop u role %', v_role;
     end if;
   end loop;
-  raise notice '  OK    pozvánka s cizí rolí neprojde';
+  raise notice '  OK    pozvánka s cizí rolí neprojde ani bez rozsahu, ani na pobočku';
 
   select id into v_role from public.roles where key = 'servis' limit 1;
+  perform app.create_invitation(v_tenant, v_role, 'email', 'cil@foodtab.cz');
   perform app.create_invitation(
-    (select id from public.tenants limit 1), v_role, 'email', 'cil@foodtab.cz');
+    v_tenant, v_role, 'email', 'cil@foodtab.cz', 'branch', array[v_perla]);
   raise notice '  OK    pozvánka se Servisem projde';
+end $$;
+
+-- A žádná z odmítnutých pozvánek se nesmí vystavit. Kdyby se zapsala
+-- a jen se vrátila chyba, čekal by v databázi platný token.
+do $$
+declare v_pocet int;
+begin
+  select count(*) into v_pocet from public.invitations where email = 'cil@foodtab.cz';
+  if v_pocet <> 2 then
+    raise exception 'SELHALO: pozvánek je %, mají být dvě', v_pocet;
+  end if;
+  raise notice '  OK    odmítnutá pozvánka se nevystaví';
 end $$;
 
 -- 5. Rozsah. Klára je vedoucí směny na Perle — people.manage nemá vůbec,

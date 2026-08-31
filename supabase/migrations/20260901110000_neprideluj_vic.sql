@@ -102,7 +102,16 @@ as $$
         and m.status = 'active'
         and r.is_owner
     )
-    when p_scope = 'tenant'
+    -- Firemní rozsah — a taky rozsah bez vyjmenovaných poboček. Kdo
+    -- neřekne kam, žádá o všude: ptáme se proto na firemní úroveň.
+    --
+    -- Prázdný seznam tu dřív procházel bez jediné otázky. Vypadalo to
+    -- neškodně, protože členství bez poboček nikomu nic neotevře — jenže
+    -- app.create_invitation posílá 'branch' a '{}' jako VÝCHOZÍ hodnoty,
+    -- takže pozvánkou šla přidělit role, kterou přes memberships
+    -- přidělit nešlo. Přesně ten obchvat, kvůli kterému je kontrola
+    -- v pozvánce.
+    when p_scope = 'tenant' or coalesce(array_length(p_branches, 1), 0) = 0
     then not exists (
       select 1 from app.ziva_prava_role(p_tenant, p_role) k
       where not app.has_access(p_tenant, k, null)
@@ -110,7 +119,7 @@ as $$
     else not exists (
       select 1
       from app.ziva_prava_role(p_tenant, p_role) k
-      cross join unnest(coalesce(p_branches, '{}'::uuid[])) as b(id)
+      cross join unnest(p_branches) as b(id)
       where not app.has_access(p_tenant, k, b.id)
     )
   end;
@@ -163,10 +172,13 @@ create policy memberships_delete on public.memberships for delete to authenticat
 -- ---------------------------------------------------------------------
 -- ROZSAH ČLENSTVÍ
 --
--- Tohle je ta zadní vrátka, kterou by se strop dal obejít: založit
--- členství s rolí na nulu poboček (nic se tím nedává, projde) a pobočku
--- doplnit až potom. Ptáme se proto znovu, tentokrát na tu konkrétní
--- pobočku.
+-- Rozšíření rozsahu už existujícího členství. Ptáme se znovu, tentokrát
+-- na tu konkrétní pobočku: kdo roli přidělil se ctí na firemní úrovni,
+-- nemusí ji mít i na pobočce, která se doplňuje až teď.
+--
+-- Dřív tu stálo, že se sem chodí obejít prázdný seznam poboček. Ten
+-- obchvat je teď zavřený už v app.smi_pridelit — kdo neřekne kam, žádá
+-- o všude. Kontrola tady zůstává jako druhá závora, ne jako jediná.
 -- ---------------------------------------------------------------------
 
 drop policy if exists membership_branches_write on public.membership_branches;

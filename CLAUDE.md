@@ -167,6 +167,24 @@ supabase/tests/run.sh
 ```
 
 Postaví čistou databázi, pustí všechny migrace a projde bezpečnostní scénář.
+
+Než to pustíš, vyplatí se ověřit, že jsou scénáře vůbec čitelné:
+
+```bash
+node scripts/scenare.test.mjs
+```
+
+Dvakrát po sobě odešel scénář, ve kterém se cestou ztratil jeden znak —
+z `do $$` bylo `do $`, z `\echo` bylo `echo`. psql v takovém souboru
+spadne někde uprostřed, zbytek kontrol neproběhne a vypadá to, že
+prošly. Napodruhé to navíc zamaskovalo skutečnou díru o dvě stě řádků
+níž. Kontrola neřekne, jestli scénář platí — jen že se dá přečíst.
+
+Příčina byla pokaždé v pomocném skriptu, kterým se soubor upravoval:
+v náhradním řetězci u `String.replace` má dolar zvláštní význam — `$$`
+je escape pro jeden dolar a `` $` `` vloží text před shodou. Když
+upravuješ soubor skriptem, používej `split().join()`.
+
 Když přidáváš tabulku nebo oprávnění, přidej k tomu kontrolu do
 `supabase/tests/etapa0_scenar.sql`. Kontrola má ověřovat, že se někdo
 **nedostane** tam, kam nemá — ne jen že šťastná cesta funguje.
