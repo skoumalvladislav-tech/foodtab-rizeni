@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -59,10 +60,13 @@ export async function najdiNeboZaloz(
   const supabase = await getServerSupabase()
 
   const najdi = async (): Promise<{ id: string; label: string } | null> => {
-    const { data } = await supabase
+    const { data, error: chyba } = await supabase
       .from('positions')
       .select('id, label')
       .eq('tenant_id', tenantId)
+    // Tiché prázdno by tady znamenalo, že se pozice nenajde a založí
+    // se podruhé — přesně to, čemu má rozpoznávací klíč zabránit.
+    if (chyba) throw new DotazSelhal('pozice firmy', chyba)
     const hledane = cisty.toLocaleLowerCase('cs')
     return (
       (data ?? []).find(
@@ -77,10 +81,11 @@ export async function najdiNeboZaloz(
   // Klíč musí být jedinečný v rámci firmy. Dva různé názvy můžou dát
   // týž klíč („Číšník“ a „cisnik“), tak se přečísluje.
   const zaklad = klicZNazvu(cisty)
-  const { data: klice } = await supabase
+  const { data: klice, error: chybaKlice } = await supabase
     .from('positions')
     .select('key')
     .eq('tenant_id', tenantId)
+  if (chybaKlice) throw new DotazSelhal('klíče pozic', chybaKlice)
   const obsazene = new Set((klice ?? []).map((k) => String(k.key)))
   let klic = zaklad
   for (let i = 2; obsazene.has(klic); i++) klic = `${zaklad}_${i}`
@@ -145,10 +150,11 @@ export async function prejmenovatPozici(formData: FormData): Promise<void> {
 
   // Přejmenovat na název, který už jiná pozice má, nejde — spadlo by to
   // na klíči. Radši to řekneme než ať to spadne.
-  const { data: vsechny } = await supabase
+  const { data: vsechny, error: chybaVsechny } = await supabase
     .from('positions')
     .select('id, label')
     .eq('tenant_id', tenantId)
+  if (chybaVsechny) throw new DotazSelhal('pozice firmy', chybaVsechny)
   const hledane = nazev.toLocaleLowerCase('cs')
   const koliduje = (vsechny ?? []).find(
     (p) =>

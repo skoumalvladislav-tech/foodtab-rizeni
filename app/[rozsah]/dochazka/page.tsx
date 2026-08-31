@@ -12,6 +12,7 @@ import {
   sazbaZaHodinu,
 } from "@/lib/mzdy";
 import { provozniDen } from "@/lib/provozni-den";
+import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
@@ -123,13 +124,14 @@ export default async function Dochazka({
 
   const supabase = await getServerSupabase();
 
-  const { data: zaznamy } = await supabase
+  const { data: zaznamy, error: chybaZaznamy } = await supabase
     .from("employees")
     .select("id, branch_id, full_name")
     .eq("tenant_id", tenantId)
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .limit(1);
+  if (chybaZaznamy) throw new DotazSelhal("zaměstnanci", chybaZaznamy);
 
   const ja = zaznamy?.[0] as
     | { id: string; branch_id: string | null; full_name: string }
@@ -178,7 +180,8 @@ export default async function Dochazka({
     dotazSmeny = dotazSmeny.eq("branch_id", scope.branchId);
   }
 
-  const { data: nactene } = await dotazSmeny;
+  const { data: nactene, error: chybaNactene } = await dotazSmeny;
+  if (chybaNactene) throw new DotazSelhal("směny", chybaNactene);
   const smeny = (nactene ?? []) as Smena[];
 
   /*
@@ -190,12 +193,13 @@ export default async function Dochazka({
   const dochazkaSmen = new Map<string, StavDochazky>();
 
   if (odpracovane.length > 0) {
-    const { data: udalosti } = await supabase
+    const { data: udalosti, error: chybaUdalosti } = await supabase
       .from("attendance_events")
       .select("kind, occurred_at, branch_id, business_date")
       .eq("employee_id", ja.id)
       .in("business_date", [...new Set(odpracovane.map((s) => s.shift_date))])
       .order("occurred_at", { ascending: true });
+    if (chybaUdalosti) throw new DotazSelhal("záznamy docházky", chybaUdalosti);
 
     // Poslední událost dne rozhoduje: 'out' znamená uzavřeno, cokoli
     // jiného, že se člověk zapomněl odepsat.
@@ -222,12 +226,13 @@ export default async function Dochazka({
   const jmenaKolegu = new Map<string, string>();
 
   if (smeny.length > 0) {
-    const { data: spolu } = await supabase
+    const { data: spolu, error: chybaSpolu } = await supabase
       .from("shifts")
       .select("branch_id, shift_date, employee_id")
       .in("branch_id", [...new Set(smeny.map((s) => s.branch_id))])
       .in("shift_date", [...new Set(smeny.map((s) => s.shift_date))])
       .neq("status", "cancelled");
+    if (chybaSpolu) throw new DotazSelhal("směny", chybaSpolu);
 
     kolegove = ((spolu ?? []) as Kolega[]).filter(
       (k) => k.employee_id !== null && k.employee_id !== ja.id,
@@ -235,10 +240,11 @@ export default async function Dochazka({
 
     const idLidi = [...new Set(kolegove.map((k) => k.employee_id as string))];
     if (idLidi.length > 0) {
-      const { data: lide } = await supabase
+      const { data: lide, error: chybaLide } = await supabase
         .from("employees")
         .select("id, full_name")
         .in("id", idLidi);
+      if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
       for (const clovek of lide ?? []) {
         jmenaKolegu.set(clovek.id as string, clovek.full_name as string);
       }
@@ -251,16 +257,22 @@ export default async function Dochazka({
     Počítá databáze, sem chodí hotové číslo — nikdy cizí sazba a nikdy
     podklady k dopočítání. Na vlastní mzdu není potřeba oprávnění.
 
-    Chyba se schválně nevyhazuje. Migrace se sazbami se nasazuje zvlášť
-    a než projde, funkce v databázi není; dlaždice se do té doby prostě
-    nekreslí a zbytek docházky funguje dál. Rozbít píchačku kvůli
-    nedeplojnuté funkci by byla horší varianta než chybějící dlaždice.
+    Nenasazená migrace se schválně promíjí: než projde, funkce
+    v databázi není a dlaždice se prostě nekreslí. Rozbít píchačku kvůli
+    nedeplojnuté funkci by bylo horší než chybějící dlaždice.
+
+    Prominutí ale platí JEN na tenhle jeden důvod. Kdyby se zahodila
+    každá chyba, vypadala by rozbitá funkce úplně stejně jako
+    nenasazená — a nikdo by se to nedozvěděl.
   */
   const mesic = prvniDenMesice(new Date());
   const { data: vydelekData, error: vydelekChyba } = await supabase.rpc(
     "my_earnings",
     { p_tenant: tenantId, p_mesic: mesic },
   );
+  if (vydelekChyba && !funkceNeexistuje(vydelekChyba)) {
+    throw new DotazSelhal("můj výdělek", vydelekChyba);
+  }
   const vydelek = vydelekChyba
     ? null
     : ((vydelekData?.[0] ?? null) as Vydelek | null);
@@ -268,12 +280,13 @@ export default async function Dochazka({
   /* --- 2b. PÍCHAČKA A DNEŠNÍ STAV -------------------------------- */
 
   // Moje poslední událost — podle ní se rozhoduje, co nabídnout.
-  const { data: posledniData } = await supabase
+  const { data: posledniData, error: chybaPosledniData } = await supabase
     .from("attendance_events")
     .select("id, employee_id, kind, occurred_at, branch_id")
     .eq("employee_id", ja.id)
     .order("occurred_at", { ascending: false })
     .limit(1);
+  if (chybaPosledniData) throw new DotazSelhal("záznamy docházky", chybaPosledniData);
 
   const posledni = (posledniData?.[0] ?? null) as Udalost | null;
   const jsemVPraci =
@@ -299,7 +312,8 @@ export default async function Dochazka({
       dotaz = dotaz.eq("employee_id", ja.id);
     }
 
-    const { data } = await dotaz;
+    const { data, error: chybaData } = await dotaz;
+    if (chybaData) throw new DotazSelhal("zaměstnanci", chybaData);
     dnesni = (data ?? []) as Udalost[];
   }
 
@@ -310,10 +324,11 @@ export default async function Dochazka({
   const jmena = new Map<string, string>([[ja.id, ja.full_name]]);
   const cizi = [...stavy.keys()].filter((i) => i !== ja.id);
   if (cizi.length > 0) {
-    const { data: lide } = await supabase
+    const { data: lide, error: chybaLide } = await supabase
       .from("employees")
       .select("id, full_name")
       .in("id", cizi);
+    if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
     for (const c of lide ?? []) jmena.set(c.id as string, c.full_name as string);
   }
 

@@ -49,8 +49,13 @@ Nekopírujte ten vzor jinam.
 2. **Nahraju soubor.**
 3. **Přiřadím sloupce.** Aplikace nabídne, co si myslí, člověk to opraví.
    Nepředpokládat pevné pořadí sloupců — každá restaurace má tabulku jinak.
-4. **Náhled.** Vypíše se: *založí se 14, aktualizuje 6, přeskočí 2 (proč)*.
-   A ukázka prvních řádků tak, jak dopadnou.
+4. **Náhled.** Vypíše se: *založí se 14, aktualizuje 6, přeskočí 2 (proč)
+   a 3 zůstanou beze změny*. A ukázka prvních řádků tak, jak dopadnou.
+
+   Ta čtvrtá kategorie tam patří. Nahrávání se pouští dvakrát —
+   podruhé je většina řádků beze změny a bez vlastní kolonky by se
+   počítaly jako „aktualizuje 20“, po kterém se nic nezměnilo. To je
+   hlášení, kterému člověk přestane věřit.
 5. **Teprve pak potvrzení.**
 
 Krok 4 se nevynechává ani „když je to jasné". Nahrání bez náhledu je

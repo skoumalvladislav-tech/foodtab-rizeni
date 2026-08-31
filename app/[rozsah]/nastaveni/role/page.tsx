@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { NAZVY_MODULU } from "../../nabidka";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
+import { seznam } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
@@ -82,19 +83,23 @@ export default async function NastaveniOpravneni({
   const { ctx } = pristup;
   const supabase = await getServerSupabase();
 
-  const { data: roleData } = await supabase
-    .from("roles")
-    .select("id, key, label, is_owner")
-    .eq("tenant_id", tenantId)
-    .order("is_owner", { ascending: false })
-    .order("label");
+  const role = await seznam<Role>(
+    "sady oprávnění firmy",
+    supabase
+      .from("roles")
+      .select("id, key, label, is_owner")
+      .eq("tenant_id", tenantId)
+      .order("is_owner", { ascending: false })
+      .order("label"),
+  );
 
-  const role = (roleData ?? []) as Role[];
-
-  const { data: pravaData } = await supabase
-    .from("permissions")
-    .select("key, module_key, label, sensitive, sort_order")
-    .order("sort_order");
+  const vsechnaPrava = await seznam<Pravo>(
+    "katalog práv",
+    supabase
+      .from("permissions")
+      .select("key, module_key, label, sensitive, sort_order")
+      .order("sort_order"),
+  );
 
   /*
     Nabízejí se jen práva ze zapnutých modulů. Právo z modulu, který
@@ -104,17 +109,18 @@ export default async function NastaveniOpravneni({
   const zapnute = new Set<string>(
     ctx.modules.filter((m) => m.active).map((m) => String(m.key)),
   );
-  const prava = ((pravaData ?? []) as Pravo[]).filter((p) =>
-    zapnute.has(p.module_key),
+  const prava = vsechnaPrava.filter((p) => zapnute.has(p.module_key));
+
+  const vazby = await seznam<{ role_id: string; permission_key: string }>(
+    "obsah sad oprávnění",
+    supabase
+      .from("role_permissions")
+      .select("role_id, permission_key")
+      .in("role_id", role.map((r) => r.id)),
   );
 
-  const { data: vazby } = await supabase
-    .from("role_permissions")
-    .select("role_id, permission_key")
-    .in("role_id", role.map((r) => r.id));
-
   const maPravo = new Map<string, Set<string>>();
-  for (const v of vazby ?? []) {
+  for (const v of vazby) {
     const id = v.role_id as string;
     if (!maPravo.has(id)) maPravo.set(id, new Set());
     maPravo.get(id)!.add(v.permission_key as string);

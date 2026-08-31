@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { najdiNeboZaloz } from '../pozice/akce'
 import { NOVA_POZICE } from './pozice-volba'
@@ -25,6 +26,9 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
   const pozice = formData.get('pozice') ? String(formData.get('pozice')) : null
   const pobocka = formData.get('pobocka') ? String(formData.get('pobocka')) : null
   const typ = String(formData.get('typ') ?? 'hpp')
+  // Prázdné pole s datem posílá prázdný řetězec. Do sloupce typu date
+  // patří null, ne '' — na tom by zápis spadl.
+  const nastup = String(formData.get('nastup') ?? '').trim() || null
 
   if (!jmeno) {
     redirect(`/${rozsah}/nastaveni/lide?chyba=jmeno`)
@@ -70,6 +74,7 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
         position_id: poziceId,
         branch_id: pobocka,
         employment_type: typ,
+        started_on: nastup,
       })
       .eq('id', id)
       .eq('tenant_id', tenantId)
@@ -87,6 +92,7 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
         position_id: poziceId,
         branch_id: pobocka,
         employment_type: typ,
+        started_on: nastup,
       })
 
     if (error) {
@@ -216,12 +222,15 @@ export async function vystavitPozvankuAction(formData: FormData): Promise<{
 
   // Zjistit ID role — nyní se bere default role zaměstnance
   // Později se bude vybírat v UI. Prozatím řekneme "zaměstnanec"
-  const { data: zaměstnanec } = await supabase
+  const { data: zaměstnanec, error: chybaZamestnanec } = await supabase
     .from('employees')
     .select('id')
     .eq('id', zamestnanecId)
     .eq('tenant_id', tenantId)
-    .single()
+    .maybeSingle()
+  if (chybaZamestnanec) {
+    throw new DotazSelhal('zaměstnanec k pozvánce', chybaZamestnanec)
+  }
 
   if (!zaměstnanec) {
     return { chyba: 'Zaměstnanec nenalezen' }

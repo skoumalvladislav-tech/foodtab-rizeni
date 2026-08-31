@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { provozniDen } from '@/lib/provozni-den'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -38,13 +39,14 @@ async function zaklad(rozsah: string): Promise<Zaklad | null> {
   if (!scope) return null
 
   const supabase = await getServerSupabase()
-  const { data } = await supabase
+  const { data, error: chybaJa } = await supabase
     .from('employees')
     .select('id, branch_id')
     .eq('tenant_id', tenantId)
     .eq('user_id', user.id)
     .is('deleted_at', null)
     .limit(1)
+  if (chybaJa) throw new DotazSelhal('můj zaměstnanecký záznam', chybaJa)
 
   const ja = data?.[0] as { id: string; branch_id: string | null } | undefined
 
@@ -142,11 +144,12 @@ export async function zapsatPolozku(formData: FormData): Promise<void> {
 
   const supabase = await getServerSupabase()
 
-  const { data: polozky } = await supabase
+  const { data: polozky, error: chybaPolozky } = await supabase
     .from('checklist_items')
     .select('id, requires_value, value_type, min_value, max_value')
     .eq('id', itemId)
     .limit(1)
+  if (chybaPolozky) throw new DotazSelhal('položka checklistu', chybaPolozky)
 
   const polozka = polozky?.[0] as
     | {

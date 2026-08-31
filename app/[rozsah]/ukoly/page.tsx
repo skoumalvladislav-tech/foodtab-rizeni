@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { provozniDen } from "@/lib/provozni-den";
+import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
@@ -92,7 +93,8 @@ export default async function Ukoly({
     );
   }
 
-  const { data: ukolyData } = await dotazUkoly;
+  const { data: ukolyData, error: chybaUkolyData } = await dotazUkoly;
+  if (chybaUkolyData) throw new DotazSelhal("úkoly", chybaUkolyData);
   const ukoly = (ukolyData ?? []) as Ukol[];
 
   // Checklisty se vedou na pobočku — checklist_runs.branch_id je NOT NULL.
@@ -105,23 +107,25 @@ export default async function Ukoly({
   if (branchId) {
     den = await provozniDen(branchId);
 
-    const { data: sablonyData } = await supabase
+    const { data: sablonyData, error: chybaSablonyData } = await supabase
       .from("checklist_templates")
       .select("id, branch_id, name, department, schedule")
       .eq("tenant_id", tenantId)
       .eq("active", true)
       .or(`branch_id.eq.${branchId},branch_id.is.null`)
       .order("name", { ascending: true });
+    if (chybaSablonyData) throw new DotazSelhal("šablony checklistů", chybaSablonyData);
 
     sablony = (sablonyData ?? []) as Sablona[];
 
     if (sablony.length > 0) {
       const idSablon = sablony.map((s) => s.id);
 
-      const { data: polozky } = await supabase
+      const { data: polozky, error: chybaPolozky } = await supabase
         .from("checklist_items")
         .select("id, template_id")
         .in("template_id", idSablon);
+      if (chybaPolozky) throw new DotazSelhal("položky checklistu", chybaPolozky);
 
       for (const p of polozky ?? []) {
         const t = p.template_id as string;
@@ -129,21 +133,23 @@ export default async function Ukoly({
       }
 
       if (den) {
-        const { data: behyData } = await supabase
+        const { data: behyData, error: chybaBehyData } = await supabase
           .from("checklist_runs")
           .select("id, template_id, status")
           .eq("branch_id", branchId)
           .eq("business_date", den)
           .in("template_id", idSablon);
+        if (chybaBehyData) throw new DotazSelhal("běhy checklistů", chybaBehyData);
 
         const idBehu = (behyData ?? []).map((b) => b.id as string);
         const hotoveVBehu = new Map<string, number>();
 
         if (idBehu.length > 0) {
-          const { data: zaznamy } = await supabase
+          const { data: zaznamy, error: chybaZaznamy } = await supabase
             .from("checklist_entries")
             .select("run_id, checked")
             .in("run_id", idBehu);
+          if (chybaZaznamy) throw new DotazSelhal("odškrtnuté položky", chybaZaznamy);
 
           for (const z of zaznamy ?? []) {
             if (z.checked !== true) continue;

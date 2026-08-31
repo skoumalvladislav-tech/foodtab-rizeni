@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
+import { DotazSelhal, funkceNeexistuje, seznam } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import { kratkyUvazek, UVAZKY } from "@/lib/uvazky";
 import Sdeleni from "@/app/sdeleni";
@@ -22,6 +23,7 @@ type Zamestnanec = {
   branch_id: string | null;
   user_id: string | null;
   employment_type: string;
+  started_on: string | null;
   active: boolean;
   deleted_at: string | null;
 };
@@ -77,11 +79,16 @@ export default async function NastaveniLide({
   const supabase = await getServerSupabase();
 
   // Zaměstnanci
-  const { data: zamestnanci } = await supabase
-    .from("employees")
-    .select("id, full_name, position_id, branch_id, user_id, employment_type, active, deleted_at")
-    .eq("tenant_id", tenantId)
-    .order("full_name");
+  const zamestnanci = await seznam<Zamestnanec>(
+    "zaměstnanci firmy",
+    supabase
+      .from("employees")
+      .select(
+        "id, full_name, position_id, branch_id, user_id, employment_type, started_on, active, deleted_at",
+      )
+      .eq("tenant_id", tenantId)
+      .order("full_name"),
+  );
 
   /*
     Pozice. Sloupec se jmenuje `label`, ne `name` — dotaz se tu dřív ptal
@@ -91,17 +98,18 @@ export default async function NastaveniLide({
     Do nabídky jdou jen aktivní; vyřazená se přestane nabízet u nových,
     ale u lidí, kteří ji mají, zůstane vidět (proto se níž hledá ve všech).
   */
-  const { data: pozice } = await supabase
-    .from("positions")
-    .select("id, label, active")
-    .eq("tenant_id", tenantId)
-    .order("label");
-
-  const vsechnyPozice = (pozice ?? []) as {
+  const vsechnyPozice = await seznam<{
     id: string;
     label: string;
     active: boolean;
-  }[];
+  }>(
+    "pozice firmy",
+    supabase
+      .from("positions")
+      .select("id, label, active")
+      .eq("tenant_id", tenantId)
+      .order("label"),
+  );
   const nabizenePozice = vsechnyPozice
     .filter((p) => p.active)
     .map((p) => ({ id: p.id, label: p.label }));
@@ -147,9 +155,12 @@ export default async function NastaveniLide({
       },
     );
 
-    // Chyba se nevyhazuje: dokud není nasazená migrace se sazbami,
-    // funkce v databázi není a sloupec se prostě nekreslí. Správa lidí
-    // kvůli tomu spadnout nemá.
+    // Nenasazená migrace sloupec jen schová. Cokoli jiného je porucha
+    // a musí být slyšet — tiše skrytá sazba vypadá stejně jako sazba,
+    // kterou nikdo nezadal.
+    if (sazbyChyba && !funkceNeexistuje(sazbyChyba)) {
+      throw new DotazSelhal("výdělky zaměstnanců", sazbyChyba);
+    }
     sazbyDostupne = !sazbyChyba;
 
     for (const v of (vydelky ?? []) as {
@@ -242,6 +253,21 @@ export default async function NastaveniLide({
                 </option>
               ))}
             </select>
+          </label>
+
+          {/*
+            Nástup je nepovinný. U brigádníka, kterého někdo zapsal
+            zpětně, se datum často neví — prázdné pole je poctivější
+            než dnešek dosazený za něj.
+          */}
+          <label style={formularLabel}>
+            <span>Nástup</span>
+            <input
+              name="nastup"
+              type="date"
+              defaultValue={upravuje?.started_on ?? ""}
+              style={inputPole}
+            />
           </label>
 
           {chyba && <p className="hlaska-chyba">{popisChyby(chyba)}</p>}

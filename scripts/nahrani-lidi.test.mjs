@@ -16,7 +16,7 @@
  * protože náhled musí sedět na to, co se pak opravdu zapíše.
  */
 
-import { odhadnoutMapovani, sestavPlan, POLE } from '../lib/nahrani-lidi.ts'
+import { datumZTextu, odhadnoutMapovani, sestavPlan, POLE } from '../lib/nahrani-lidi.ts'
 
 let chyb = 0
 const ma = (popis, sk, ce) => {
@@ -33,6 +33,7 @@ const ZDROJE = {
       branch_id: 'b1',
       position_id: 'p1',
       employment_type: 'hpp',
+      started_on: '2026-01-15',
     },
     {
       id: 'z2',
@@ -40,6 +41,7 @@ const ZDROJE = {
       branch_id: null,
       position_id: null,
       employment_type: 'dpp',
+      started_on: null,
     },
   ],
   pobocky: [
@@ -53,11 +55,16 @@ const ZDROJE = {
 }
 
 console.log('== Odhad sloupců ==')
-ma('běžné záhlaví', odhadnoutMapovani(['Jméno', 'Pobočka', 'Pozice', 'Úvazek']), {
+ma('běžné záhlaví', odhadnoutMapovani(['Jméno', 'Pobočka', 'Pozice', 'Úvazek', 'Nástup']), {
   jmeno: 0,
   pobocka: 1,
   pozice: 2,
   typ: 3,
+  nastup: 4,
+})
+ma('datum nástupu i jinými slovy', odhadnoutMapovani(['Jméno', 'Datum nástupu']), {
+  jmeno: 0,
+  nastup: 1,
 })
 ma('jiné pořadí a jiná slova', odhadnoutMapovani(['Provozovna', 'Funkce', 'Zaměstnanec']), {
   jmeno: 2,
@@ -181,6 +188,37 @@ console.log('\n== Pozice ==')
     'pozice Kuchař je vyřazená z nabídky, přiřadí se i tak')
   ma('malá písmena se u pozice srovnají jako v databázi', p.zaznamy[3].zapis.position_id, 'p1')
   ma('„barman“ a „Barman“ je jedna nová pozice', p.zaznamy[1].zapis.novaPozice, 'barman')
+}
+
+console.log('\n== Nástup ==')
+ma('české datum', datumZTextu('1.9.2026'), '2026-09-01')
+ma('české datum s mezerami', datumZTextu('1. 9. 2026'), '2026-09-01')
+ma('datum ze sešitu už přišlo jako RRRR-MM-DD', datumZTextu('2026-09-01'), '2026-09-01')
+// 3/4/2026 je v české tabulce 3. dubna a v anglické 4. března. Uhodnout
+// se to nedá a špatný nástup posune odpracované měsíce.
+ma('lomítka se nehádají', datumZTextu('3/4/2026'), null)
+ma('dvouciferný rok se nedohaduje', datumZTextu('1.9.26'), null)
+ma('neexistující den neprojde', datumZTextu('31.2.2026'), null)
+ma('text neprojde', datumZTextu('nástup na jaře'), null)
+{
+  const MN = { jmeno: 0, nastup: 1 }
+  const p = sestavPlan(
+    [
+      ['Petr Nový', '1. 9. 2026'],
+      ['Marek Číšník', '2026-03-01'],
+      ['Andrea Nováková', 'někdy na jaře'],
+      ['Eva Nová', ''],
+    ],
+    MN,
+    ZDROJE,
+  )
+  ma('u nového se datum zapíše', p.zaznamy[0].zapis.started_on, '2026-09-01')
+  ma('u známého je vidět změna', p.zaznamy[1].zmeny, [
+    { pole: 'Nástup', z: '2026-01-15', na: '2026-03-01' },
+  ])
+  ma('nesrozumitelné datum člověka neztratí', p.zaznamy[2].co, 'beze_zmeny')
+  ma('a je vypsané', p.zaznamy[2].poznamky[0], 'datum „někdy na jaře“ neznám, nástup nechám prázdný')
+  ma('prázdná buňka datum nemaže', p.zaznamy[3].zapis.started_on, undefined)
 }
 
 console.log('\n== Klíč sedí na databázi ==')

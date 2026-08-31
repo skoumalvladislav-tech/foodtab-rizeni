@@ -10,10 +10,10 @@
  * Čte se jen to, co je k importu potřeba: první list a v něm text
  * buněk. Styly, vzorce a formáty se ignorují.
  *
- * POZOR: čísla se čtou tak, jak jsou uložená. Datum je v Excelu číslo
- * a bez čtení stylů se od běžného čísla nepozná — proto se odsud datumy
- * zatím netahají a import lidí je nepotřebuje. Až budou potřeba, patří
- * sem čtení `styles.xml`, ne hádání podle velikosti čísla.
+ * Datum je v Excelu ČÍSLO. Od běžného čísla se pozná jedině podle
+ * formátu buňky, a ten je až ve `styles.xml` — proto se čte i ten.
+ * Hádat podle velikosti čísla nejde: 45 000 je platné datum i platná
+ * částka.
  */
 
 /** Jeden soubor uvnitř ZIP archivu, ještě zabalený. */
@@ -195,12 +195,24 @@ export function sloupecZAdresy(adresa: string): number {
   return n - 1
 }
 
-/** Buňky prvního listu do mřížky. Chybějící buňky zůstanou prázdné. */
-export function ctiList(xml: string, sdilene: string[]): string[][] {
+/**
+ * Buňky prvního listu do mřížky. Chybějící buňky zůstanou prázdné.
+ *
+ * `styly` říká, které formáty jsou datum; bez nich se čísla nechávají
+ * tak, jak jsou. Datum se převádí na RRRR-MM-DD, ať se dál čte stejně
+ * jako z CSV a nemusí se hádat, co je den a co měsíc.
+ */
+export function ctiList(
+  xml: string,
+  sdilene: string[],
+  styly: boolean[] = [],
+  od1904 = false,
+): string[][] {
   const mrizka: string[][] = []
   let radek: string[] = []
   let sloupec = -1
   let typ = ''
+  let styl = -1
   let vHodnote = false
   let hodnota = ''
 
@@ -210,10 +222,13 @@ export function ctiList(xml: string, sdilene: string[]): string[][] {
     if (typ === 's') {
       const i = Number(hodnota)
       text = Number.isInteger(i) && sdilene[i] !== undefined ? sdilene[i] : ''
+    } else if ((typ === '' || typ === 'n') && hodnota !== '' && styly[styl]) {
+      text = datumZCisla(Number(hodnota), od1904) ?? hodnota
     }
     while (radek.length < sloupec) radek.push('')
     radek[sloupec] = text
     sloupec = -1
+    styl = -1
     hodnota = ''
   }
 
@@ -235,6 +250,7 @@ export function ctiList(xml: string, sdilene: string[]): string[][] {
       const r = atribut(z, 'r')
       sloupec = r ? sloupecZAdresy(r) : radek.length
       typ = atribut(z, 't') ?? ''
+      styl = Number(atribut(z, 's') ?? '-1')
       hodnota = ''
       if (z.endsWith('/>')) uloz()
     } else if (/^<\/c>/.test(z)) {
@@ -249,6 +265,90 @@ export function ctiList(xml: string, sdilene: string[]): string[][] {
     }
   }
   return mrizka
+}
+
+/* --- datumy ---------------------------------------------------------
+   Excel drží datum jako pořadové číslo dne a formát ukládá zvlášť.
+   Bez stylů by z „nástup 1. 9. 2026“ vyšlo „46266“. */
+
+/** Vestavěné formáty, které jsou datum nebo čas. Viz ECMA-376, §18.8.30. */
+const VESTAVENE_DATUMY = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47])
+
+/**
+ * Je tenhle zápis formátu datum?
+ *
+ * Hledají se značky dne, měsíce, roku a času mimo uvozovky a mimo
+ * hranaté závorky. Text v uvozovkách je popisek („d. m.“ v „0 \"dní\"“
+ * není datum) a v závorkách bývá barva nebo místní nastavení.
+ */
+export function formatJeDatum(zapis: string): boolean {
+  let vUvozovkach = false
+  let vZavorce = false
+  for (let i = 0; i < zapis.length; i++) {
+    const z = zapis[i]
+    if (vUvozovkach) {
+      if (z === '"') vUvozovkach = false
+      continue
+    }
+    if (vZavorce) {
+      if (z === ']') vZavorce = false
+      continue
+    }
+    if (z === '"') vUvozovkach = true
+    else if (z === '[') vZavorce = true
+    else if (z === '\\') i++
+    else if ('ymdhs'.includes(z.toLowerCase())) return true
+  }
+  return false
+}
+
+/** Které styly (cellXfs) znamenají datum. Index je hodnota atributu s. */
+export function ctiStyly(xml: string): boolean[] {
+  const vlastni = new Map<number, string>()
+  for (const k of kousky(xml)) {
+    if (!k.znacka || !/^<numFmt[\s/>]/.test(k.text)) continue
+    const id = Number(atribut(k.text, 'numFmtId'))
+    const zapis = atribut(k.text, 'formatCode')
+    if (Number.isInteger(id) && zapis !== null) vlastni.set(id, zapis)
+  }
+
+  // Zajímá nás jen blok cellXfs; cellStyleXfs má tytéž značky a jiný
+  // význam, a kdyby se braly obě, ukazovaly by indexy jinam.
+  const styly: boolean[] = []
+  let vCellXfs = false
+  for (const k of kousky(xml)) {
+    if (!k.znacka) continue
+    const z = k.text
+    if (/^<cellXfs[\s/>]/.test(z)) vCellXfs = true
+    else if (/^<\/cellXfs>/.test(z)) vCellXfs = false
+    else if (vCellXfs && /^<xf[\s/>]/.test(z)) {
+      const id = Number(atribut(z, 'numFmtId') ?? '0')
+      styly.push(
+        VESTAVENE_DATUMY.has(id) ||
+          (vlastni.has(id) && formatJeDatum(vlastni.get(id) as string)),
+      )
+    }
+  }
+  return styly
+}
+
+/**
+ * Pořadové číslo dne → datum ve tvaru RRRR-MM-DD.
+ *
+ * Nula je 30. 12. 1899, ne 31. 12. — Excel si myslí, že rok 1900 byl
+ * přestupný, a ten neexistující 29. únor v číslování zabírá místo.
+ * Pod hranicí 60 se proto počítá o den jinak. Sešity z Maců mají jiný
+ * počátek (1904) a poznají se v workbook.xml.
+ */
+export function datumZCisla(cislo: number, od1904 = false): string | null {
+  if (!Number.isFinite(cislo) || cislo < 0) return null
+  const dnu = Math.floor(cislo) + (od1904 ? 1462 : 0)
+  const posun = !od1904 && dnu < 60 ? 1 : 0
+  const ms = Date.UTC(1899, 11, 30) + (dnu + posun) * 86400000
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return null
+  const dvojmisti = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${dvojmisti(d.getUTCMonth() + 1)}-${dvojmisti(d.getUTCDate())}`
 }
 
 /**
@@ -299,5 +399,9 @@ export async function precistXlsx(bajty: Uint8Array): Promise<string[][]> {
   if (!listXml) throw new SouborNecitelny('V sešitu není žádný list.')
 
   const sdilene = ctiSdileneTexty(await vezmi('xl/sharedStrings.xml'))
-  return ctiList(listXml, sdilene)
+  const styly = ctiStyly(await vezmi('xl/styles.xml'))
+  // Sešity z Maců počítají dny od roku 1904. Jinak by všechna data
+  // seděla o čtyři roky a den vedle.
+  const od1904 = /date1904\s*=\s*["'](1|true)["']/.test(workbook)
+  return ctiList(listXml, sdilene, styly, od1904)
 }

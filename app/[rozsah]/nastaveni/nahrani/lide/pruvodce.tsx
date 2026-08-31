@@ -224,10 +224,29 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
               ) : null}
               .
             </p>
+            {/*
+              Nová pozice nesmí vzniknout potichu. Je to jediná věc,
+              kterou import zakládá mimo lidi, a v tlumeném odstavci by
+              se dala přehlédnout — tady stojí v rámečku a jmenovitě.
+            */}
             {plan.novePozice.length > 0 ? (
-              <p style={popis}>
-                Založí se {plan.novePozice.length === 1 ? 'nová pozice' : 'nové pozice'}:{' '}
-                {plan.novePozice.join(', ')}.
+              <p
+                style={{
+                  margin: '12px 0',
+                  padding: '10px 12px',
+                  border: '1px solid var(--pozor)',
+                  borderRadius: '10px',
+                  background: 'var(--pozor-bg)',
+                  color: 'var(--pozor)',
+                  fontSize: '14px',
+                  maxWidth: '68ch',
+                }}
+              >
+                Kromě lidí se založí{' '}
+                {plan.novePozice.length === 1 ? 'nová pozice' : 'nové pozice'}:{' '}
+                <strong>{plan.novePozice.join(', ')}</strong>. Pokud jde
+                o překlep, opravte ho v tabulce — pozice se pak už nemažou,
+                jen vyřazují z nabídky.
               </p>
             ) : null}
             <p style={{ ...popis, marginBottom: 0 }}>

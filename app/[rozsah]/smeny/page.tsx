@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
+import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
@@ -86,11 +87,12 @@ export default async function Rozpis({
 
   // Načíst day_starts_at z databáze
   const supabase = await getServerSupabase();
-  const { data: branchData } = await supabase
+  const { data: branchData, error: chybaBranchData } = await supabase
     .from("branches")
     .select("day_starts_at")
     .eq("id", kotva)
     .single();
+  if (chybaBranchData) throw new DotazSelhal("pobočky", chybaBranchData);
   const dayStartsAt = (branchData?.day_starts_at as string | undefined) ?? "05:00";
 
   let odKdy = await provozniDen(kotva);
@@ -125,7 +127,8 @@ export default async function Rozpis({
     dotaz = dotaz.eq("branch_id", scope.branchId);
   }
 
-  const { data: nactene } = await dotaz;
+  const { data: nactene, error: chybaNactene } = await dotaz;
+  if (chybaNactene) throw new DotazSelhal("směny", chybaNactene);
   const smeny = (nactene ?? []) as Smena[];
 
   // Jména lidí a názvy pozic. Neobsazená směna nemá employee_id — ta se
@@ -137,10 +140,11 @@ export default async function Rozpis({
     ...new Set(smeny.map((s) => s.employee_id).filter((i): i is string => !!i)),
   ];
   if (idLidi.length > 0) {
-    const { data: lide } = await supabase
+    const { data: lide, error: chybaLide } = await supabase
       .from("employees")
       .select("id, full_name")
       .in("id", idLidi);
+    if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
     for (const c of lide ?? []) jmena.set(c.id as string, c.full_name as string);
   }
 
@@ -148,10 +152,11 @@ export default async function Rozpis({
     ...new Set(smeny.map((s) => s.position_id).filter((i): i is string => !!i)),
   ];
   if (idPozic.length > 0) {
-    const { data: p } = await supabase
+    const { data: p, error: chybaP } = await supabase
       .from("positions")
       .select("id, label")
       .in("id", idPozic);
+    if (chybaP) throw new DotazSelhal("pozice", chybaP);
     for (const c of p ?? []) pozice.set(c.id as string, c.label as string);
   }
 

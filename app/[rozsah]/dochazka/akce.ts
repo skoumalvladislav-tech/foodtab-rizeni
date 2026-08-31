@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -38,13 +39,14 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
 
   const supabase = await getServerSupabase()
 
-  const { data: zaznamy } = await supabase
+  const { data: zaznamy, error: chybaZaznamy } = await supabase
     .from('employees')
     .select('id, branch_id')
     .eq('tenant_id', tenantId)
     .eq('user_id', user.id)
     .is('deleted_at', null)
     .limit(1)
+  if (chybaZaznamy) throw new DotazSelhal('můj zaměstnanecký záznam', chybaZaznamy)
 
   const ja = zaznamy?.[0]
   if (!ja) return

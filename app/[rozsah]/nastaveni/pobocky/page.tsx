@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { BRANCH_COLORS } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
+import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
@@ -73,12 +74,13 @@ export default async function NastaveniPobocek({
   /* --- 2. NAČTENÍ DAT ------------------------------------------- */
 
   const supabase = await getServerSupabase();
-  const { data } = await supabase
+  const { data, error: chybaData } = await supabase
     .from("branches")
     .select("id, name, slug, color, day_starts_at")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .order("created_at", { ascending: true });
+  if (chybaData) throw new DotazSelhal("pobočky", chybaData);
 
   const pobocky = (data ?? []) as Pobocka[];
 

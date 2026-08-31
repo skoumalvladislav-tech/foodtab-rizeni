@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -9,9 +10,15 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * nový den, i její časové pásmo patří pobočce — v kódu se to nedopočítává,
  * jinak by pravidlo žilo na dvou místech a časem se rozešlo.
  *
- * Vrací null, když pobočka není dostupná (cizí firma, chybějící funkce).
+ * Vrací null, když pobočka není dostupná (cizí firma, RLS ji nepustí).
  * Volající to musí ošetřit — tichý návrat dnešního data v zóně serveru by
  * byl přesně ta chyba, které se vyhýbáme.
+ *
+ * Chyba dotazu se ale od „není dostupná“ ODDĚLUJE a vyhazuje se. Dokud
+ * se zahazovala, znamenal překlep v názvu funkce nebo výpadek databáze
+ * to samé jako cizí pobočka: na Docházce prostě zmizela píchačka a
+ * nikde nestálo proč. Zaměstnanec by si nezapsal příchod a dozvěděl by
+ * se to až u výplaty.
  */
 export async function provozniDen(
   branchId: string,
@@ -22,7 +29,8 @@ export async function provozniDen(
     p_branch: branchId,
     ...(kdy ? { p_at: kdy.toISOString() } : {}),
   })
-  if (error || !data) return null
+  if (error) throw new DotazSelhal('provozní den pobočky', error)
+  if (!data) return null
   return String(data)
 }
 

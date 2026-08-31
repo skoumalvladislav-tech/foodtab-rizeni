@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
+import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
@@ -58,21 +59,23 @@ export default async function NastaveniPozice({
 
   const supabase = await getServerSupabase();
 
-  const { data } = await supabase
+  const { data, error: chybaData } = await supabase
     .from("positions")
     .select("id, label, active")
     .eq("tenant_id", tenantId)
     .order("label");
+  if (chybaData) throw new DotazSelhal("pozice", chybaData);
 
   const pozice = (data ?? []) as Pozice[];
 
   // Kolik lidí kterou pozici má. Podle toho se píše, co se vyřazením
   // stane — „u třech lidí zůstane“ je konkrétnější než obecná věta.
-  const { data: lide } = await supabase
+  const { data: lide, error: chybaLide } = await supabase
     .from("employees")
     .select("position_id")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null);
+  if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
 
   const pocty = new Map<string, number>();
   for (const z of lide ?? []) {

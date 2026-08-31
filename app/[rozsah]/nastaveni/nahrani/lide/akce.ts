@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import {
   NEJVIC_RADKU,
@@ -87,21 +88,32 @@ async function pripravit(vstup: Vstup): Promise<Priprava> {
 
   const supabase = await getServerSupabase()
 
+  /*
+    Prázdný obraz dat by tady byl nejdražší tichá chyba v aplikaci:
+    kdyby dotaz na lidi selhal a vrátil prázdno, nepoznal by se ani
+    jeden stávající člověk a náhled by nabídl založit celou firmu
+    znovu. Proto se přes seznam(), který při chybě vyhodí.
+  */
   const [lide, pobocky, pozice] = await Promise.all([
-    supabase
-      .from('employees')
-      .select('id, full_name, branch_id, position_id, employment_type')
-      .eq('tenant_id', tenantId)
-      .is('deleted_at', null),
-    supabase.from('branches').select('id, name, slug').eq('tenant_id', tenantId),
-    supabase.from('positions').select('id, label, active').eq('tenant_id', tenantId),
+    seznam<Zdroje['lide'][number]>(
+      'zaměstnanci firmy',
+      supabase
+        .from('employees')
+        .select('id, full_name, branch_id, position_id, employment_type, started_on')
+        .eq('tenant_id', tenantId)
+        .is('deleted_at', null),
+    ),
+    seznam<Zdroje['pobocky'][number]>(
+      'pobočky firmy',
+      supabase.from('branches').select('id, name, slug').eq('tenant_id', tenantId),
+    ),
+    seznam<Zdroje['pozice'][number]>(
+      'pozice firmy',
+      supabase.from('positions').select('id, label, active').eq('tenant_id', tenantId),
+    ),
   ])
 
-  const zdroje: Zdroje = {
-    lide: (lide.data ?? []) as Zdroje['lide'],
-    pobocky: (pobocky.data ?? []) as Zdroje['pobocky'],
-    pozice: (pozice.data ?? []) as Zdroje['pozice'],
-  }
+  const zdroje: Zdroje = { lide, pobocky, pozice }
 
   return { tenantId, supabase, plan: sestavPlan(vstup.radky, vstup.mapovani, zdroje) }
 }

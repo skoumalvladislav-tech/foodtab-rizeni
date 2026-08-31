@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -36,21 +37,27 @@ export async function ulozitOpravneni(formData: FormData): Promise<void> {
 
   const supabase = await getServerSupabase()
 
-  const { data: role } = await supabase
+  const { data: role, error: chybaRole } = await supabase
     .from('roles')
     .select('id, is_owner, label')
     .eq('id', roleId)
     .eq('tenant_id', tenantId)
     .limit(1)
+  if (chybaRole) throw new DotazSelhal('sada oprávnění', chybaRole)
 
   const tato = role?.[0] as { id: string; is_owner: boolean; label: string } | undefined
   if (!tato) redirect(`/${rozsah}/nastaveni/role?chyba=neznama`)
   if (tato.is_owner) redirect(`/${rozsah}/nastaveni/role?chyba=majitel`)
 
-  const { data: soucasna } = await supabase
+  const { data: soucasna, error: chybaSoucasna } = await supabase
     .from('role_permissions')
     .select('permission_key')
     .eq('role_id', roleId)
+  // Prázdný seznam znamená sadu bez práv. Kdyby se sem propadla chyba
+  // dotazu, spočítal by se rozdíl proti prázdnu a uložení by roli
+  // přidalo všechno zaškrtnuté jako nové — a nic by na tom nevypadalo
+  // divně.
+  if (chybaSoucasna) throw new DotazSelhal('obsah sady oprávnění', chybaSoucasna)
 
   const ma = new Set((soucasna ?? []).map((r) => String(r.permission_key)))
 

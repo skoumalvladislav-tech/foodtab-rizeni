@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
+import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
@@ -71,11 +72,12 @@ export default async function VyplnitChecklist({
 
   const supabase = await getServerSupabase();
 
-  const { data: behy } = await supabase
+  const { data: behy, error: chybaBehy } = await supabase
     .from("checklist_runs")
     .select("id, template_id, branch_id, business_date, status")
     .eq("id", beh)
     .limit(1);
+  if (chybaBehy) throw new DotazSelhal("běhy checklistů", chybaBehy);
 
   const run = behy?.[0] as
     | {
@@ -97,27 +99,30 @@ export default async function VyplnitChecklist({
     );
   }
 
-  const { data: sablony } = await supabase
+  const { data: sablony, error: chybaSablony } = await supabase
     .from("checklist_templates")
     .select("id, name")
     .eq("id", run.template_id)
     .limit(1);
+  if (chybaSablony) throw new DotazSelhal("šablony checklistů", chybaSablony);
   const nazev = (sablony?.[0]?.name as string | undefined) ?? "Checklist";
 
-  const { data: polozkyData } = await supabase
+  const { data: polozkyData, error: chybaPolozkyData } = await supabase
     .from("checklist_items")
     .select(
       "id, position, label, requires_value, value_type, value_unit, min_value, max_value",
     )
     .eq("template_id", run.template_id)
     .order("position", { ascending: true });
+  if (chybaPolozkyData) throw new DotazSelhal("položky checklistu", chybaPolozkyData);
 
   const polozky = (polozkyData ?? []) as Polozka[];
 
-  const { data: zaznamyData } = await supabase
+  const { data: zaznamyData, error: chybaZaznamyData } = await supabase
     .from("checklist_entries")
     .select("item_id, checked, value_number, value_text")
     .eq("run_id", run.id);
+  if (chybaZaznamyData) throw new DotazSelhal("odškrtnuté položky", chybaZaznamyData);
 
   const zaznamy = new Map<string, Zaznam>();
   for (const z of (zaznamyData ?? []) as Zaznam[]) zaznamy.set(z.item_id, z);

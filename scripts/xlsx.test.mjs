@@ -15,7 +15,14 @@
  */
 
 import { deflateRawSync, crc32 } from 'node:zlib'
-import { precistXlsx, ctiSdileneTexty, sloupecZAdresy } from '../lib/xlsx.ts'
+import {
+  precistXlsx,
+  ctiSdileneTexty,
+  ctiStyly,
+  datumZCisla,
+  formatJeDatum,
+  sloupecZAdresy,
+} from '../lib/xlsx.ts'
 import { zTabulky } from '../lib/tabulka.ts'
 
 /* --- malý zapisovač ZIPu, jen pro tenhle test ---------------------- */
@@ -86,10 +93,10 @@ const SDILENE = `<?xml version="1.0"?>
 const LIST = `<?xml version="1.0"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
-    <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>
+    <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="inlineStr"><is><t>Nástup</t></is></c><c r="E1" t="inlineStr"><is><t>Odměna</t></is></c></row>
     <row r="2"><c r="A2" t="s"><v>3</v></c><c r="B2" t="s"><v>4</v></c><c r="C2" t="s"><v>5</v></c></row>
     <row r="3"><c r="A3" t="inlineStr"><is><t>Eva Dvořáková</t></is></c><c r="C3" t="s"><v>6</v></c></row>
-    <row r="4"><c r="A4" t="str"><f>CONCATENATE("Jan"," Rychlý")</f><v>Jan Rychlý</v></c><c r="B4" t="s"><v>4</v></c><c r="C4"><v>42</v></c></row>
+    <row r="4"><c r="A4" t="str"><f>CONCATENATE("Jan"," Rychlý")</f><v>Jan Rychlý</v></c><c r="B4" t="s"><v>4</v></c><c r="C4"><v>42</v></c><c r="D4" s="1"><v>46266</v></c><c r="E4" s="2"><v>46266</v></c></row>
   </sheetData>
 </worksheet>`
 
@@ -113,11 +120,23 @@ const RELS = `<?xml version="1.0"?>
   <Relationship Id="rId7" Type="http://x/worksheet" Target="worksheets/sheet2.xml"/>
 </Relationships>`
 
+const STYLY = `<?xml version="1.0"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1"><numFmt numFmtId="166" formatCode="d/m/yyyy;@"/></numFmts>
+  <cellStyleXfs count="1"><xf numFmtId="0"/></cellStyleXfs>
+  <cellXfs count="3">
+    <xf numFmtId="0" xfId="0"/>
+    <xf numFmtId="166" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="4" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+</styleSheet>`
+
 const sesit = (deflate) =>
   zip([
     { nazev: 'xl/workbook.xml', obsah: WORKBOOK, deflate },
     { nazev: 'xl/_rels/workbook.xml.rels', obsah: RELS, deflate },
     { nazev: 'xl/sharedStrings.xml', obsah: SDILENE, deflate },
+    { nazev: 'xl/styles.xml', obsah: STYLY, deflate },
     { nazev: 'xl/worksheets/sheet1.xml', obsah: NAVNADA, deflate },
     { nazev: 'xl/worksheets/sheet2.xml', obsah: LIST, deflate },
   ])
@@ -147,12 +166,31 @@ ma('entity', sd[6], 'Kuchař <vedoucí>')
 for (const deflate of [false, true]) {
   console.log(`\n== Sešit (${deflate ? 'deflate' : 'bez komprese'}) ==`)
   const t = zTabulky(await precistXlsx(sesit(deflate)))
-  ma('hlavička', t.hlavicka, ['Jméno', 'Pobočka', 'Pozice'])
-  ma('čte se první záložka, ne sheet1.xml', t.radky[0], ['Novák & syn', 'Černá Perla', 'Číšník'])
-  ma('vynechaná buňka zůstane prázdná', t.radky[1], ['Eva Dvořáková', '', 'Kuchař <vedoucí>'])
-  ma('vzorec: bere se spočítaná hodnota', t.radky[2], ['Jan Rychlý', 'Černá Perla', '42'])
+  ma('hlavička', t.hlavicka, ['Jméno', 'Pobočka', 'Pozice', 'Nástup', 'Odměna'])
+  ma('čte se první záložka, ne sheet1.xml', t.radky[0].slice(0, 3), ['Novák & syn', 'Černá Perla', 'Číšník'])
+  ma('vynechaná buňka zůstane prázdná', t.radky[1].slice(0, 3), ['Eva Dvořáková', '', 'Kuchař <vedoucí>'])
+  ma('vzorec: bere se spočítaná hodnota', t.radky[2].slice(0, 3), ['Jan Rychlý', 'Černá Perla', '42'])
+  ma('datum se převede podle formátu buňky', t.radky[2][3], '2026-09-01')
+  ma('stejné číslo bez datového formátu zůstane číslem', t.radky[2][4], '46266')
   ma('řádků je tolik, kolik jich v listu je', t.radky.length, 3)
 }
+
+console.log('\n== Formáty a pořadová čísla ==')
+// Datum je v Excelu číslo. Od částky se pozná jedině podle formátu —
+// 46266 je platné datum i platná odměna.
+ma('vlastní formát d/m/yyyy je datum', ctiStyly(STYLY)[1], true)
+ma('formát 4 (číslo se setinami) datum není', ctiStyly(STYLY)[2], false)
+ma('obyčejná buňka datum není', ctiStyly(STYLY)[0], false)
+ma('d/m/yyyy', formatJeDatum('d/m/yyyy;@'), true)
+ma('0.00 "Kč" datum není', formatJeDatum('0.00 "Kč"'), false)
+ma('„dnů“ v uvozovkách datum nedělá', formatJeDatum('0 "dnů"'), false)
+ma('místní nastavení v závorce nevadí', formatJeDatum('[$-405]d\\.m\\.yyyy'), true)
+ma('1 = 1. 1. 1900', datumZCisla(1), '1900-01-01')
+ma('59 = 28. 2. 1900 (před neexistujícím 29. únorem)', datumZCisla(59), '1900-02-28')
+ma('61 = 1. 3. 1900', datumZCisla(61), '1900-03-01')
+ma('46266 = 1. 9. 2026', datumZCisla(46266), '2026-09-01')
+ma('sešit z Macu počítá od roku 1904', datumZCisla(44804, true), '2026-09-01')
+ma('nesmysl není datum', datumZCisla(Number('x')), null)
 
 console.log('\n== Co není sešit ==')
 try {

@@ -18,7 +18,7 @@ import { nazevUvazku, uvazekZTextu, type Uvazek } from './uvazky.ts'
  */
 
 /** Sloupec, který import umí použít. */
-export type Klic = 'jmeno' | 'pobocka' | 'pozice' | 'typ'
+export type Klic = 'jmeno' | 'pobocka' | 'pozice' | 'typ' | 'nastup'
 
 export const POLE: {
   klic: Klic
@@ -75,7 +75,54 @@ export const POLE: {
       'typ',
     ],
   },
+  {
+    klic: 'nastup',
+    nazev: 'Nástup',
+    napoveda: 'Datum nástupu: 1.9.2026 nebo 2026-09-01. Ze sešitu se vezme, jak je.',
+    povinne: false,
+    synonyma: [
+      'nastup',
+      'datum nastupu',
+      'den nastupu',
+      'nastoupil',
+      'od',
+      'zacatek',
+      'pracuje od',
+    ],
+  },
 ]
+
+/**
+ * Datum z buňky.
+ *
+ * Bere se jen to, co je jednoznačné: RRRR-MM-DD (tak chodí datum ze
+ * sešitu, kde ho podle formátu buňky přeložila čtečka) a české
+ * D. M. RRRR. Tvar 3/4/2026 se schválně NEPŘIJÍMÁ — v české tabulce to
+ * bývá 3. dubna, v anglické 4. března, a špatně uhodnutý nástup posune
+ * člověku odpracované měsíce.
+ *
+ * Dvouciferný rok se taky nedohaduje. „26“ může být 1926 i 2026.
+ */
+export function datumZTextu(text: string): string | null {
+  const t = text.trim()
+  if (!t) return null
+
+  let r: number, m: number, d: number
+  const iso = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  const cesky = t.match(/^(\d{1,2})\s*\.\s*(\d{1,2})\s*\.\s*(\d{4})$/)
+
+  if (iso) [, r, m, d] = iso.map(Number) as [number, number, number, number]
+  else if (cesky) [, d, m, r] = cesky.map(Number) as [number, number, number, number]
+  else return null
+
+  // Kontrola, že datum existuje: 31. 2. projde přes regulární výraz,
+  // ale Date z něj udělá 3. března. Porovnáním se to chytí.
+  const dt = new Date(Date.UTC(r, m - 1, d))
+  if (dt.getUTCFullYear() !== r || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    return null
+  }
+  return `${r}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
 
 /** Které pole je ve kterém sloupci. Nepřiřazené pole tu není. */
 export type Mapovani = Partial<Record<Klic, number>>
@@ -87,6 +134,7 @@ export type Zdroje = {
     branch_id: string | null
     position_id: string | null
     employment_type: string
+    started_on: string | null
   }[]
   pobocky: { id: string; name: string; slug: string }[]
   pozice: { id: string; label: string; active: boolean }[]
@@ -111,6 +159,7 @@ export type Zaznam = {
     branch_id?: string | null
     position_id?: string | null
     employment_type?: string
+    started_on?: string
     /** Název pozice, která ve firmě ještě není a musí se založit. */
     novaPozice?: string
   }
@@ -322,6 +371,27 @@ export function sestavPlan(
       }
     }
 
+    /* --- nástup --- */
+    let nastup: string | undefined
+    const nastupText = bunka('nastup')
+    if (nastupText) {
+      const datum = datumZTextu(nastupText)
+      if (datum) {
+        nastup = datum
+        if (stavajici && (stavajici.started_on ?? null) !== datum) {
+          zaznam.zmeny.push({
+            pole: 'Nástup',
+            z: stavajici.started_on ?? 'nevyplněno',
+            na: datum,
+          })
+        }
+      } else {
+        // Neznámý tvar data se nedomýšlí a řádek kvůli němu nepadá:
+        // člověk se nahraje, datum zůstane prázdné a je to vidět.
+        zaznam.poznamky.push(`datum „${nastupText}“ neznám, nástup nechám prázdný`)
+      }
+    }
+
     if (stavajici) {
       zaznam.id = stavajici.id
       zaznam.co = zaznam.zmeny.length > 0 ? 'aktualizovat' : 'beze_zmeny'
@@ -331,6 +401,7 @@ export function sestavPlan(
       if (poziceId !== undefined) zaznam.zapis.position_id = poziceId
       if (novaPozice !== undefined) zaznam.zapis.novaPozice = novaPozice
       if (typ !== undefined) zaznam.zapis.employment_type = typ
+      if (nastup !== undefined) zaznam.zapis.started_on = nastup
     } else {
       zaznam.co = 'zalozit'
       zaznam.zapis.full_name = jmeno
@@ -343,6 +414,7 @@ export function sestavPlan(
       if (typ === undefined) {
         zaznam.poznamky.push('typ poměru v tabulce není, uloží se jako Jiné')
       }
+      if (nastup !== undefined) zaznam.zapis.started_on = nastup
     }
 
     zaznamy.push(zaznam)

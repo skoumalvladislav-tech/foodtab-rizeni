@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { getUser, hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
+import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
@@ -87,14 +88,15 @@ export default async function Zpravy({
     dotaz = dotaz.or(`branch_id.eq.${scope.branchId},branch_id.is.null`);
   }
 
-  const { data: zpravyData } = await dotaz;
+  const { data: zpravyData, error: chybaZpravyData } = await dotaz;
+  if (chybaZpravyData) throw new DotazSelhal("zprávy na nástěnce", chybaZpravyData);
   const zpravy = (zpravyData ?? []) as Zprava[];
 
   // Co už mám přečtené. Politika pustí jen vlastní řádky, takže se
   // nemusí filtrovat podle user_id znovu — ale je to levné a čitelné.
   const prectene = new Set<string>();
   if (zpravy.length > 0 && user) {
-    const { data: cteni } = await supabase
+    const { data: cteni, error: chybaCteni } = await supabase
       .from("announcement_reads")
       .select("announcement_id")
       .eq("user_id", user.id)
@@ -102,6 +104,7 @@ export default async function Zpravy({
         "announcement_id",
         zpravy.map((z) => z.id),
       );
+    if (chybaCteni) throw new DotazSelhal("přečtené zprávy", chybaCteni);
     for (const c of cteni ?? []) prectene.add(c.announcement_id as string);
   }
 
@@ -114,10 +117,11 @@ export default async function Zpravy({
     ),
   ];
   if (idAutoru.length > 0) {
-    const { data: profily } = await supabase
+    const { data: profily, error: chybaProfily } = await supabase
       .from("profiles")
       .select("user_id, full_name")
       .in("user_id", idAutoru);
+    if (chybaProfily) throw new DotazSelhal("profily lidí", chybaProfily);
     for (const p of profily ?? []) {
       const jmeno = String(p.full_name ?? "").trim();
       if (jmeno !== "") autori.set(p.user_id as string, jmeno);
