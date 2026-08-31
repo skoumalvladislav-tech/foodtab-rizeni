@@ -100,8 +100,23 @@ se zkusilo pustit všechno znovu.
 Když se změna v CSS neprojeví, ale na disku je správně, drží Turbopack starý
 přeložený stylopis. Pozná se to tak, že se obsah souboru liší od toho, co
 posílá server. Spraví to dotčení `globals.css` nebo smazání `.next/dev`.
-Stalo se to už dvakrát, pokaždé to stálo desítky minut hledání neexistující
-chyby.
+Stalo se to už třikrát, pokaždé to stálo desítky minut hledání neexistující
+chyby:
+
+- **tři vzhledy tlačítek** — v souboru `border-color: var(--mosaz)`, ze
+  serveru chodilo `border-color: #0000`, takže hlavní tlačítko nemělo obrys
+  a vypadalo to jako chyba ve specificitě
+- **zlom 1360 px** — moduly se nesklápěly do vlastního pruhu, protože
+  v odeslaném CSS ten `@media` blok vůbec nebyl
+- **zlom 960 px** — totéž u přepínače poboček
+
+Ověřit se to dá takhle: v konzoli prohlížeče se stáhne odeslaný stylopis
+a hledá se v něm pravidlo, které má být v souboru.
+
+```js
+for (const l of document.querySelectorAll('link[rel=stylesheet]'))
+  console.log(l.href, (await fetch(l.href).then(r => r.text())).includes('max-width: 960px'))
+```
 
 ## Rozšíření Postgresu — nepoužívej je
 
