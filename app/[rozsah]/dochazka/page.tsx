@@ -17,6 +17,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
 import { zapsatDochazku } from "./akce";
+import PanelRucni from "./panel-rucni";
 
 export const dynamic = "force-dynamic";
 
@@ -74,10 +75,13 @@ type Vydelek = {
 
 export default async function Dochazka({
   params,
+  searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
+  searchParams: Promise<{ chyba?: string; zapsano?: string }>;
 }) {
   const { rozsah } = await params;
+  const { chyba: chybaRucne, zapsano } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -117,6 +121,15 @@ export default async function Dochazka({
   const vidiOstatni = await hasAccess(
     tenantId,
     "attendance.read",
+    scope.branchId,
+  );
+
+  // Ruční zápis je jiné právo než čtení: kdo docházku vidí, ještě ji
+  // nesmí vyrábět. Formulář se podle toho kreslí, ale zámek je
+  // v politice attendance_insert.
+  const smiZapsatRucne = await hasAccess(
+    tenantId,
+    "attendance.manage",
     scope.branchId,
   );
 
@@ -332,6 +345,27 @@ export default async function Dochazka({
     for (const c of lide ?? []) jmena.set(c.id as string, c.full_name as string);
   }
 
+  /*
+    Lidé do ručního zápisu. Schválně se NEBEROU z dnešních událostí:
+    ručně se zapisuje právě tomu, kdo dnes nepíchl, takže mezi dnešními
+    událostmi nefiguruje. Formulář by nabízel všechny kromě toho, koho
+    je potřeba.
+  */
+  const doVyberu: { id: string; jmeno: string }[] = [];
+  if (smiZapsatRucne && scope.branchId) {
+    const { data: lideNaPobocce, error: chybaVyberu } = await supabase
+      .from("employees")
+      .select("id, full_name")
+      .eq("tenant_id", tenantId)
+      .eq("branch_id", scope.branchId)
+      .is("deleted_at", null)
+      .order("full_name");
+    if (chybaVyberu) throw new DotazSelhal("zaměstnanci pobočky", chybaVyberu);
+    for (const c of lideNaPobocce ?? []) {
+      doVyberu.push({ id: c.id as string, jmeno: c.full_name as string });
+    }
+  }
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const ostatni = [...stavy.entries()].filter(([id]) => id !== ja.id);
@@ -342,6 +376,23 @@ export default async function Dochazka({
       <HlavickaDochazky />
 
       <div style={obal}>
+        {/*
+          Ruční zápis. Je nad píchačkou schválně: kdo sem chodí zapisovat
+          za druhé, hledá tohle, a kdo si píchá sám, ten formulář vůbec
+          nevidí. Váže se na pobočku — na firemní úrovni se nekreslí,
+          protože docházka patří k místu.
+        */}
+        {smiZapsatRucne && scope.branchId ? (
+          <PanelRucni
+            rozsah={rozsah}
+            pobockaId={scope.branchId}
+            pobockaNazev={scope.branchName ?? ctx.tenant.name}
+            lide={doVyberu}
+            chyba={chybaRucne}
+            zapsano={zapsano === "1"}
+          />
+        ) : null}
+
         {/* 1. Karta stavu s píchačkou */}
         {muzePichat ? (
           <section
