@@ -469,6 +469,60 @@ begin
   raise notice '  OK    odebrání oprávnění roli je v auditu';
 end $$;
 
+\echo ''
+\echo '== Obrazovka Oprávnění ===================================='
+-- Obrazovka je zavřená na settings.manage. Schovaná položka v nabídce
+-- není zámek — zámek je kontrola na stránce a politiky pod ní. Kdo si
+-- adresu napíše ručně, nesmí se dostat dál.
+
+set role authenticated;
+
+-- Číšník Marek (role servis) settings.manage nemá.
+select set_config('test.user_id', '55555555-5555-5555-5555-555555555555', false);
+select pg_temp.check('číšník nemá settings.manage, obrazovka Oprávnění ho odmítne',
+  not app.has_access(:'tenant', 'settings.manage', null));
+
+-- A nesmí ani zapisovat. Politika role_permissions_write ho zastaví
+-- i tehdy, když by kontrolu na stránce nějak obešel.
+do $$
+declare v_role uuid; v_ok boolean := false;
+begin
+  select id into v_role from public.roles where key = 'servis' limit 1;
+  begin
+    insert into public.role_permissions (role_id, permission_key)
+      values (v_role, 'settings.manage');
+  -- Chytá se jenom 42501. Kdyby se chytalo „others“, prošel by test
+  -- i po překlepu v názvu sloupce — a tvářil by se jako důkaz.
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok and exists (
+    select 1 from public.role_permissions
+    where role_id = v_role and permission_key = 'settings.manage'
+  ) then
+    raise exception 'SELHALO: číšník si přidal settings.manage';
+  end if;
+  raise notice '  OK    číšník si oprávnění nepřidá ani přímým zápisem';
+end $$;
+
+-- Majitel se needituje: jeho sada se nebere z role_permissions, ale
+-- z aktivních modulů. Obrazovka ho proto kreslí jen ke čtení.
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+select pg_temp.check('majitel má settings.manage a na obrazovku se dostane',
+  app.has_access(:'tenant', 'settings.manage', null));
+select pg_temp.check('majitel má právo, které nemá v role_permissions',
+  app.has_access(:'tenant', 'payroll.read', null)
+  and not exists (
+    select 1 from public.role_permissions rp
+    join public.roles r on r.id = rp.role_id
+    where r.tenant_id = :'tenant' and r.is_owner and rp.permission_key = 'payroll.read'));
+
+-- Mzdy a docházka musí být označené jako citlivé — obrazovka je podle
+-- toho odlišuje a app.create_invitation podle toho zakazuje SMS.
+select pg_temp.check('mzdová a docházková práva jsou citlivá',
+  (select bool_and(sensitive) from public.permissions
+   where key in ('payroll.read', 'payroll.manage', 'payroll.export',
+                 'attendance.read', 'attendance.manage')));
+
 reset role;
 select set_config('test.user_id', '', false);
 
