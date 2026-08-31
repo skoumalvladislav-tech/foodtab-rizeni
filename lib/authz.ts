@@ -63,6 +63,7 @@ export const PERMISSIONS = [
   'motivation.manage',
   'people.manage',
   'payroll.manage',
+  'payroll.read',
   'payroll.export',
   'approvals.decide',
   'agents.manage',

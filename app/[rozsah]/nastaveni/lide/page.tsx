@@ -92,36 +92,45 @@ export default async function NastaveniLide({
     dokud není nasazená migrace se sazbami, sloupec se prostě nekreslí
     a správa lidí funguje dál.
   */
-  const { data: vydelky, error: sazbyChyba } = await supabase.rpc(
-    "employee_earnings",
-    {
-      p_tenant: tenantId,
-      p_mesic: prvniDenMesice(new Date()),
-      p_branch: null,
-    },
-  );
+  /*
+    Dvě obranné linie (pravidlo 3). Tahle je ta v aplikaci: bez
+    payroll.read se na sazby ani neptáme. Druhá je v databázi —
+    employee_earnings bez toho práva nevrátí ani řádek, takže i kdyby se
+    tenhle řádek jednou pokazil, ven se nic nedostane.
+
+    Ptáme se bez pobočky: rozsah dořeší can_read_scoped uvnitř funkce
+    u každého člověka zvlášť (pravidlo 4). Kdo má právo jen na jednu
+    pobočku, dostane jen její lidi.
+  */
+  const smiCistSazby = await hasAccess(tenantId, "payroll.read", null);
 
   const sazby = new Map<string, number | null>();
-  for (const v of (vydelky ?? []) as {
-    employee_id: string;
-    hodinova_haleru: number | null;
-  }[]) {
-    sazby.set(v.employee_id, v.hodinova_haleru);
+  let sazbyDostupne = false;
+
+  if (smiCistSazby) {
+    const { data: vydelky, error: sazbyChyba } = await supabase.rpc(
+      "employee_earnings",
+      {
+        p_tenant: tenantId,
+        p_mesic: prvniDenMesice(new Date()),
+        p_branch: null,
+      },
+    );
+
+    // Chyba se nevyhazuje: dokud není nasazená migrace se sazbami,
+    // funkce v databázi není a sloupec se prostě nekreslí. Správa lidí
+    // kvůli tomu spadnout nemá.
+    sazbyDostupne = !sazbyChyba;
+
+    for (const v of (vydelky ?? []) as {
+      employee_id: string;
+      hodinova_haleru: number | null;
+    }[]) {
+      sazby.set(v.employee_id, v.hodinova_haleru);
+    }
   }
 
-  /*
-    O přístupu rozhoduje databáze, ne tenhle řádek: employee_earnings bez
-    payroll.read nevrátí ani řádek, takže se sloupec nemá čím naplnit
-    a nekreslí se.
-
-    Správně by tu měla být i kontrola v aplikaci (pravidlo 3, dvě obranné
-    linie) — hasAccess(tenantId, 'payroll.read', …). Nejde to: seznam
-    PERMISSIONS v lib/authz.ts payroll.read zatím nezná a na ten soubor
-    jsem dnes v noci nesměl sáhnout. Až se do něj klíč doplní, patří sem
-    ta kontrola taky. Bezpečnost tím netrpí, obrazovka nemá jak ukázat
-    to, co jí databáze nedala — ale je to jedna linie, ne dvě.
-  */
-  const smiVidetSazby = !sazbyChyba && sazby.size > 0;
+  const smiVidetSazby = smiCistSazby && sazbyDostupne;
 
   // Zadávat sazby je jiné právo než je vidět. payroll.manage v katalogu
   // i v PERMISSIONS je, takže kontrola v aplikaci tady být může —
