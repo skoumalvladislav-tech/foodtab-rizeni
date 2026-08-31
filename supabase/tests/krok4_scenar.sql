@@ -504,6 +504,58 @@ begin
   raise notice '  OK    číšník si oprávnění nepřidá ani přímým zápisem';
 end $$;
 
+-- Provozní má people.manage a NEMÁ settings.manage. Přesně o něm to je:
+-- kdo zakládá lidi, nesmí rozhodovat, kdo uvidí mzdy. Dokud politika
+-- role_permissions_write stála na people.manage, přidal si payroll.read
+-- k vlastní roli přímým dotazem — obrazovka ho nepustila, databáze ano.
+
+reset role;
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('77777777-7777-7777-7777-777777777777', 'provozni@foodtab.cz',
+   '{"full_name":"Provozní Zkouška"}')
+on conflict (id) do nothing;
+
+insert into public.memberships (tenant_id, user_id, role_id, status, scope)
+select :'tenant', '77777777-7777-7777-7777-777777777777', r.id, 'active', 'tenant'
+from public.roles r where r.tenant_id = :'tenant' and r.key = 'provozni'
+on conflict do nothing;
+
+set role authenticated;
+select set_config('test.user_id', '77777777-7777-7777-7777-777777777777', false);
+select pg_temp.check('provozní zakládá lidi',
+  app.has_access(:'tenant', 'people.manage', null));
+select pg_temp.check('a nastavení firmy nemá',
+  not app.has_access(:'tenant', 'settings.manage', null));
+
+do $
+declare v_role uuid; v_ok boolean := false; v_pred int; v_po int;
+begin
+  select id into v_role from public.roles where key = 'servis' limit 1;
+
+  begin
+    insert into public.role_permissions (role_id, permission_key)
+      values (v_role, 'payroll.read');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok and exists (
+    select 1 from public.role_permissions
+    where role_id = v_role and permission_key = 'payroll.read'
+  ) then
+    raise exception 'SELHALO: provozní si přidal payroll.read přímým dotazem';
+  end if;
+  raise notice '  OK    provozní oprávnění nepřidá ani přímým dotazem';
+
+  -- Mazání RLS nezakřičí, jen nic nesmaže. Kontroluje se proto počet
+  -- před a po — tichý průchod by jinak vypadal jako úspěch.
+  select count(*) into v_pred from public.role_permissions where role_id = v_role;
+  delete from public.role_permissions where role_id = v_role;
+  select count(*) into v_po from public.role_permissions where role_id = v_role;
+  if v_po <> v_pred then
+    raise exception 'SELHALO: provozní smazal % oprávnění', v_pred - v_po;
+  end if;
+  raise notice '  OK    provozní oprávnění ani nemaže';
+end $;
+
 -- Majitel se needituje: jeho sada se nebere z role_permissions, ale
 -- z aktivních modulů. Obrazovka ho proto kreslí jen ke čtení.
 select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
