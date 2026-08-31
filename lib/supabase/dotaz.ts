@@ -113,3 +113,17 @@ export async function pruzor<T>(
 export function funkceNeexistuje(chyba: ChybaDotazu | null): boolean {
   return chyba?.code === 'PGRST202' || chyba?.code === '42883'
 }
+
+/**
+ * Chybí ta tabulka, nebo se pokazil dotaz?
+ *
+ * Totéž pro tabulky. Obrazovka postavená na migraci, která ještě
+ * neproběhla, má říct „čeká na nasazení“ — ne spadnout na chybu, ze
+ * které to nikdo nepozná.
+ *
+ * PGRST205 = PostgREST tu tabulku nezná (není v mezipaměti schématu).
+ * 42P01 = Postgres ji nezná.
+ */
+export function tabulkaNeexistuje(chyba: ChybaDotazu | null): boolean {
+  return chyba?.code === 'PGRST205' || chyba?.code === '42P01'
+}

@@ -11,6 +11,7 @@ import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import Ram, { type ModulProp, type PolozkaProp } from "./ram";
+import PruhInformace from "./pruh-informace";
 import type { RozsahProp } from "./prepinac-rozsahu";
 
 /**
@@ -147,6 +148,12 @@ export default async function RozsahLayout({
       nastaveni={nastaveni}
       cilNastaveni={cilNastaveni}
     >
+      {/*
+        Informace o zpracování osobních údajů. Je nad obsahem, ne přes
+        něj: zadání říká, že se má zobrazit, ne že má zablokovat
+        přihlášení. Kdo neklikne, uvidí ji zase příště.
+      */}
+      <PruhInformace rozsah={rozsah} tenantId={tenantId} />
       {children}
     </Ram>
   );

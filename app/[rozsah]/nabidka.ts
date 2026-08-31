@@ -103,6 +103,10 @@ export const NASTAVENI: Polozka[] = [
   // people.manage — až přibude rozpis nebo receptury, bude se právo řídit
   // vybranou položkou na rozcestníku, ne touhle řádkou.
   { segment: 'nastaveni/nahrani', nazev: 'Nahrání dat', kratky: 'Nahrání', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'kniha' },
+  // Moje údaje nejsou správa firmy, ale osobní obrazovka: co o mně
+  // aplikace vede, oprava kontaktu, souhlasy a výpis. Proto pravo: null
+  // — patřit do firmy stačí.
+  { segment: 'moje-udaje', nazev: 'Moje údaje', kratky: 'Moje údaje', modul: 'provoz', pravo: null, hotovo: true, ikona: 'clovek' },
   { segment: 'nastaveni/moduly', nazev: 'Moduly', kratky: 'Moduly', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
 ]
 
