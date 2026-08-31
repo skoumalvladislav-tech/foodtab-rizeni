@@ -200,9 +200,21 @@
 .ft-rozsah-panel a.on { background: var(--branch-fill); color: var(--branch-ink); font-weight: 600; }
 .ft-rozsah-panel a.on .ft-swatch { background: var(--card); }
 
-@media (max-width: 640px) {
+/* Přepínač se sbalí do rozbalovátka dřív, než dojde místo.
+   Sbalený má ~184 px, rozložený s třemi pobočkami 436 px a se čtyřmi
+   kolem 580 — víc jich vedle sebe nikdy nebude, od páté ho sbaluje
+   samo prepinac-rozsahu.tsx (VEDLE_SEBE = 4).
+
+   Se čtyřmi pobočkami potřebuje lišta s rozloženým přepínačem asi
+   900 px, proto se sbaluje na 960. Dřív se sbaloval až na 640 a mezi
+   641 a 775 px se nevešel — to bylo to vodorovné posouvání na malém
+   tabletu. */
+@media (max-width: 960px) {
   .ft-seg { display: none; }
   .ft-rozsah { display: block; }
+}
+
+@media (max-width: 640px) {
   .ft-rozsah > summary { min-height: 44px; }
   .ft-rozsah > summary > span:nth-child(2) { max-width: 120px; }
 }
@@ -316,6 +328,19 @@
   }
   .ft-mob-mods::-webkit-scrollbar { display: none; }
   .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; flex: none; }
+
+  /* Moduly jsou pryč z lišty, takže tady už nástroje nemají komu
+     ustupovat — a naopak samy ustoupit MUSÍ, jinak vytlačí stránku do
+     šířky. Zúží se název pobočky (má tři tečky), ne stránka.
+     Nad tímhle zlomem zůstává flex: none, ať moduly neukrajují
+     z přepínače. */
+  .ft-tools { flex: 0 1 auto; min-width: 0; }
+  .ft-seg, .ft-rozsah { min-width: 0; }
+  /* max-width: 100% je tu podstatné: summary je inline-flex, takže se
+     samo šířkou rodiče neomezí. Bez toho si na úzkém telefonu drží
+     184 px, vyleze z nástrojů a vyhledávací pole se nakreslí přes něj. */
+  .ft-rozsah > summary { min-width: 0; max-width: 100%; }
+  .ft-rozsah > summary > span:nth-child(2) { flex: 0 1 auto; min-width: 0; }
 }
 
 /* ---- Mobil: sloupec dolů jako pevná lišta ----------------------- */
@@ -323,6 +348,12 @@
 @media (max-width: 640px) {
   .ft-topbar { height: 52px; padding: 0 14px; gap: 10px; }
   .ft-side { display: none; }
+
+  /* Na telefonu ustupuje ozdoba, ne obsah. Iniciály firmy jsou
+     aria-hidden a jejich název je vidět v levém sloupci; oddělovač je
+     jen čárka. Dohromady je to 39 px, o které se název pobočky nemusí
+     zkrátit na nečitelnou zkratku. */
+  .ft-avatar, .ft-divider { display: none; }
   .ft-main { padding: 16px 14px calc(62px + env(safe-area-inset-bottom) + 16px); }
 
   /* Lišta je tu nižší, pruh modulů se musí posunout s ní. */
