@@ -8,6 +8,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
+import PolePozice from "./pole-pozice";
 import SmazatZamestnance from "./smazani";
 import VystavitPozvankuFormular from "./vystaveni";
 
@@ -35,10 +36,22 @@ export default async function NastaveniLide({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
-  searchParams: Promise<{ chyba?: string; ulozeno?: string; upravuji?: string }>;
+  searchParams: Promise<{
+    chyba?: string;
+    ulozeno?: string;
+    upravuji?: string;
+    pozice?: string;
+    nazev?: string;
+  }>;
 }) {
   const { rozsah } = await params;
-  const { chyba, ulozeno, upravuji } = await searchParams;
+  const {
+    chyba,
+    ulozeno,
+    upravuji,
+    pozice: poziceStav,
+    nazev: nazevPozice,
+  } = await searchParams;
 
   const tenantId = await getCurrentTenantId();
   if (!tenantId) {
@@ -69,12 +82,28 @@ export default async function NastaveniLide({
     .eq("tenant_id", tenantId)
     .order("full_name");
 
-  // Pozice
+  /*
+    Pozice. Sloupec se jmenuje `label`, ne `name` — dotaz se tu dřív ptal
+    na `name`, tiše selhal a rozbalovátko proto nabízelo jen „Neurčeno“,
+    i kdyby v tabulce nějaká pozice byla.
+
+    Do nabídky jdou jen aktivní; vyřazená se přestane nabízet u nových,
+    ale u lidí, kteří ji mají, zůstane vidět (proto se níž hledá ve všech).
+  */
   const { data: pozice } = await supabase
     .from("positions")
-    .select("id, name")
+    .select("id, label, active")
     .eq("tenant_id", tenantId)
-    .order("name");
+    .order("label");
+
+  const vsechnyPozice = (pozice ?? []) as {
+    id: string;
+    label: string;
+    active: boolean;
+  }[];
+  const nabizenePozice = vsechnyPozice
+    .filter((p) => p.active)
+    .map((p) => ({ id: p.id, label: p.label }));
 
   const upravujeId = upravuji ? String(upravuji) : null;
   const upravuje =
@@ -183,17 +212,13 @@ export default async function NastaveniLide({
             />
           </label>
 
-          <label style={formularLabel}>
-            <span>Pozice</span>
-            <select name="pozice" defaultValue={upravuje?.position_id ?? ""} style={selectPole}>
-              <option value="">— Neurčeno —</option>
-              {(pozice ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <PolePozice
+            pozice={nabizenePozice}
+            vybrana={upravuje?.position_id ?? ""}
+            stylLabel={formularLabel}
+            stylSelect={selectPole}
+            stylInput={inputPole}
+          />
 
           <label style={formularLabel}>
             <span>Pobočka</span>
@@ -218,8 +243,19 @@ export default async function NastaveniLide({
             </select>
           </label>
 
-          {chyba && <p className="hlaska-chyba">{chyba}</p>}
+          {chyba && <p className="hlaska-chyba">{popisChyby(chyba)}</p>}
           {ulozeno && <p style={{ ...chybaHlaska, color: "var(--good)" }}>Uloženo.</p>}
+
+          {/*
+            Když někdo napíše „číšník“ a v databázi je „Číšník“, druhá
+            pozice nevznikne. Mlčet by bylo horší než to říct: člověk by
+            čekal svůj zápis a našel cizí velké písmeno.
+          */}
+          {poziceStav === "existujici" && nazevPozice ? (
+            <p style={{ ...chybaHlaska, color: "var(--muted)" }}>
+              Pozice {nazevPozice} už existuje, použil jsem ji.
+            </p>
+          ) : null}
 
           <div style={{ display: "flex", gap: "12px" }}>
             <button type="submit" className="ft-tl ft-tl-hlavni">
@@ -332,7 +368,7 @@ export default async function NastaveniLide({
                 <td style={td}>{z.full_name}</td>
                 <td style={td}>
                   {z.position_id
-                    ? (pozice ?? []).find((p) => p.id === z.position_id)?.name || "—"
+                    ? vsechnyPozice.find((p) => p.id === z.position_id)?.label || "—"
                     : "—"}
                 </td>
                 <td style={td}>
@@ -472,3 +508,25 @@ const tr = {
 const td = {
   padding: "12px",
 } as const;
+
+/** Hlášky z ?chyba=. Uživatel nemá číst strojové kódy. */
+function popisChyby(kod: string): string {
+  switch (kod) {
+    case "jmeno":
+      return "Jméno nesmí zůstat prázdné.";
+    case "pozice-prazdny":
+      return "Název nové pozice nesmí zůstat prázdný.";
+    case "pozice-dlouhy":
+      return "Název pozice je moc dlouhý, zkraťte ho.";
+    case "pozice-pravo":
+      return "Na zakládání pozic nemáte právo.";
+    case "sazba-neuplna":
+      return "Sazba i den, od kterého platí, musí být vyplněné.";
+    case "sazba-cislo":
+      return "Sazba musí být číslo a nesmí být záporná.";
+    case "sazba-pravo":
+      return "Na zadávání sazeb nemáte právo.";
+    default:
+      return "Uložení se nepovedlo. Zkuste to prosím znovu.";
+  }
+}

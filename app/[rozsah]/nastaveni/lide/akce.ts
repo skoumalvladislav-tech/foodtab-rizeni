@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { najdiNeboZaloz } from '../pozice/akce'
+import { NOVA_POZICE } from './pozice-volba'
 
 /**
  * Přidání nebo úprava zaměstnance.
@@ -34,6 +36,29 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
   const pristup = await zkusPristup(tenantId, 'people.manage', rozsah)
   if (pristup.stav !== 'ok') redirect('/')
 
+  /*
+    „+ Nová pozice…“ z rozbalovátka. Zakládá se tady, spolu s uložením
+    zaměstnance — bez odchodu z formuláře a bez druhého kliknutí.
+
+    najdiNeboZaloz respektuje rozpoznávací klíč: kdo napíše „číšník“
+    a v databázi je „Číšník“, dostane tu stávající a dozví se to. Druhá
+    pozice se nezaloží a nic nespadne na porušení jedinečnosti.
+  */
+  let poziceId = pozice
+  let vzkaz = ''
+
+  if (pozice === NOVA_POZICE) {
+    const nova = String(formData.get('novaPozice') ?? '')
+    const v = await najdiNeboZaloz(tenantId, nova)
+    if (v.stav === 'chyba') {
+      redirect(`/${rozsah}/nastaveni/lide?chyba=pozice-${v.duvod}`)
+    }
+    poziceId = v.id
+    if (v.stav === 'uz_existuje') {
+      vzkaz = `&pozice=existujici&nazev=${encodeURIComponent(v.nazev)}`
+    }
+  }
+
   const supabase = await getServerSupabase()
 
   if (id) {
@@ -42,7 +67,7 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
       .from('employees')
       .update({
         full_name: jmeno,
-        position_id: pozice,
+        position_id: poziceId,
         branch_id: pobocka,
         employment_type: typ,
       })
@@ -59,7 +84,7 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
       .insert({
         tenant_id: tenantId,
         full_name: jmeno,
-        position_id: pozice,
+        position_id: poziceId,
         branch_id: pobocka,
         employment_type: typ,
       })
@@ -70,7 +95,7 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
   }
 
   revalidatePath(`/${rozsah}/nastaveni/lide`)
-  redirect(`/${rozsah}/nastaveni/lide?ulozeno=1`)
+  redirect(`/${rozsah}/nastaveni/lide?ulozeno=1${vzkaz}`)
 }
 
 /**

@@ -92,6 +92,9 @@ export const NASTAVENI: Polozka[] = [
   { segment: 'nastaveni/firma', nazev: 'Firma', kratky: 'Firma', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
   { segment: 'nastaveni/pobocky', nazev: 'Pobočky', kratky: 'Pobočky', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
+  // Pozice patří ke správě lidí, ne k nastavení firmy — proto
+  // people.manage, ne settings.manage.
+  { segment: 'nastaveni/pozice', nazev: 'Pozice', kratky: 'Pozice', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
   // Segment zůstává `role` podle tabulky v databázi; mění se jen to, co
   // je vidět. Zkrácený název je taky „Oprávnění“ — „Práva“ by znamenala
   // jednotlivá zaškrtávátka, ne pojmenovanou sadu.
