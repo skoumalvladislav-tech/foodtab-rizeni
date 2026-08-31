@@ -54,7 +54,7 @@ export default async function NastaveniLide({
   if (pristup.stav === "odepren") {
     return (
       <Sdeleni nadpis="Sem nemáte přístup">
-        Správa lidí je otevřená jen rolím s právem <code>people.manage</code>.
+        Správa lidí je otevřená jen oprávněním s právem <code>people.manage</code>.
       </Sdeleni>
     );
   }

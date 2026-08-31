@@ -62,7 +62,7 @@ export default async function VyplnitChecklist({
   if (pristup.stav === "odepren") {
     return (
       <Sdeleni nadpis="Sem nemáte přístup">
-        Na checklisty vaše role nedosáhne.
+        Na checklisty vaše oprávnění nedosáhne.
       </Sdeleni>
     );
   }

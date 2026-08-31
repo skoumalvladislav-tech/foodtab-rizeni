@@ -63,7 +63,7 @@ export default async function RozsahLayout({
     return (
       <Sdeleni samostatne nadpis="Sem nemáte přístup">
         Tahle část Foodtabu vám není otevřená. Pokud si myslíte, že by
-        měla být, řekněte si správci firmy o úpravu role.
+        měla být, řekněte si správci firmy o úpravu oprávnění.
       </Sdeleni>
     );
   }

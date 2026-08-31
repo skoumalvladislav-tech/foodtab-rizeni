@@ -222,7 +222,7 @@ export async function vystavitPozvankuAction(formData: FormData): Promise<{
       return { chyba: 'Oprávnění zamítnuté (42501)' }
     }
     if (error.code === '23503') {
-      return { chyba: 'Zaměstnanec nebo role neexistuje (23503)' }
+      return { chyba: 'Zaměstnanec nebo oprávnění neexistuje (23503)' }
     }
     if (error.code === '23514') {
       return { chyba: 'Omezení porušeno (23514)' }

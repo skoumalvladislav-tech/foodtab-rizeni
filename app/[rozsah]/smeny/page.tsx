@@ -61,7 +61,7 @@ export default async function Rozpis({
   if (pristup.stav === "odepren") {
     return (
       <Sdeleni nadpis="Sem nemáte přístup">
-        Na rozpis směn vaše role nedosáhne. Pokud si myslíte, že by měla,
+        Na rozpis směn vaše oprávnění nedosáhne. Pokud si myslíte, že by měla,
         řekněte si správci firmy o úpravu oprávnění.
       </Sdeleni>
     );

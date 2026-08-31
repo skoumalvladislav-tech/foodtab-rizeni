@@ -56,7 +56,7 @@ export default async function Zpravy({
   if (pristup.stav === "odepren") {
     return (
       <Sdeleni nadpis="Sem nemáte přístup">
-        Na nástěnku vaše role nedosáhne. Pokud si myslíte, že by měla,
+        Na nástěnku vaše oprávnění nedosáhne. Pokud si myslíte, že by měla,
         řekněte si správci firmy o úpravu oprávnění.
       </Sdeleni>
     );

@@ -65,7 +65,7 @@ export default async function Ukoly({
   if (pristup.stav === "odepren") {
     return (
       <Sdeleni nadpis="Sem nemáte přístup">
-        Na úkoly vaše role nedosáhne. Pokud si myslíte, že by měla,
+        Na úkoly vaše oprávnění nedosáhne. Pokud si myslíte, že by měla,
         řekněte si správci firmy o úpravu oprávnění.
       </Sdeleni>
     );

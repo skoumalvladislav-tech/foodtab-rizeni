@@ -37,7 +37,7 @@ export default async function RozsahRozcestnik({
   if (polozky.length === 0) {
     return (
       <Sdeleni nadpis="Zatím tu pro vás nic není">
-        Vaše role nemá otevřenou žádnou obrazovku. Řekněte si správci
+        Vaše oprávnění nemá otevřenou žádnou obrazovku. Řekněte si správci
         firmy o úpravu oprávnění.
       </Sdeleni>
     );

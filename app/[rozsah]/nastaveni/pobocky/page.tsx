@@ -65,7 +65,7 @@ export default async function NastaveniPobocek({
   if (pristup.stav === "odepren") {
     return (
       <Sdeleni nadpis="Sem nemáte přístup">
-        Nastavení firmy je otevřené jen rolím se správou nastavení.
+        Nastavení firmy je otevřené jen oprávněním se správou nastavení.
       </Sdeleni>
     );
   }
