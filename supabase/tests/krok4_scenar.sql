@@ -523,6 +523,98 @@ select pg_temp.check('mzdová a docházková práva jsou citlivá',
    where key in ('payroll.read', 'payroll.manage', 'payroll.export',
                  'attendance.read', 'attendance.manage')));
 
+\echo ''
+\echo '== Nahrání lidí z tabulky (oddíl B) ======================='
+-- Import nesmí být obchvat oprávnění ani hranice firmy. Obojí drží
+-- databáze, ne aplikace: import běží pod přihlášeným člověkem, obyčejným
+-- klientem a se zapnutou RLS — žádné security definer, žádný servisní
+-- klíč. Kontroly jsou proto psané tak, aby ověřovaly, že to NEJDE.
+--
+-- Že se druhé spuštění nezdvojí, se ověřuje výš u rozpoznávacích klíčů.
+-- Co aplikace nepozná (neznámá pobočka, neznámý typ poměru), řeší náhled
+-- ještě před zápisem — na to je scripts/nahrani-lidi.test.mjs.
+
+set role authenticated;
+
+-- Číšník Marek people.manage nemá.
+select set_config('test.user_id', '55555555-5555-5555-5555-555555555555', false);
+select pg_temp.check('číšník nesmí zakládat lidi ani souborem',
+  not app.has_access(:'tenant', 'people.manage', null));
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    insert into public.employees (tenant_id, full_name)
+      values ((select id from public.tenants limit 1), 'Importem Podstrčený');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then
+    raise exception 'SELHALO: bez people.manage šel zaměstnanec založit';
+  end if;
+  raise notice '  OK    bez people.manage se zaměstnanec nezaloží';
+end $$;
+
+-- Zápis do auditu o nahrání je zavřený na totéž právo. Kdo nesmí
+-- nahrávat, nesmí ani zapsat, že nahrál.
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.audit_import(
+      (select id from public.tenants limit 1), 'lide', 'podvrh.csv', 99, 0, 0);
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: cizí člověk zapsal nahrání do auditu'; end if;
+  raise notice '  OK    bez práva se do auditu nahrání nezapíše';
+end $$;
+
+-- Hranice firmy. Řádek s cizím tenant_id neprojde ani majiteli téhle.
+select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+do $$
+declare v_cizi uuid := gen_random_uuid(); v_ok boolean := false;
+begin
+  begin
+    insert into public.employees (tenant_id, full_name)
+      values (v_cizi, 'Cizí Firma Zkouška');
+  exception when insufficient_privilege or foreign_key_violation then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: řádek s cizím tenant_id prošel'; end if;
+  raise notice '  OK    řádek s cizí firmou se nenahraje';
+end $$;
+
+-- A nahrání jako celek je v auditu: kdo, co, kdy a kolik řádků.
+do $$
+declare v_tenant uuid;
+begin
+  select id into v_tenant from public.tenants limit 1;
+  perform public.audit_import(v_tenant, 'lide', 'lidi.xlsx', 14, 6, 2);
+  if not exists (
+    select 1 from public.audit_log
+    where action = 'import.lide'
+      and after ->> 'soubor' = 'lidi.xlsx'
+      and (after ->> 'zalozeno')::int = 14
+      and (after ->> 'aktualizovano')::int = 6
+      and (after ->> 'preskoceno')::int = 2
+  ) then
+    raise exception 'SELHALO: nahrání není v auditu i s počty';
+  end if;
+  raise notice '  OK    nahrání je v auditu i s počty řádků';
+end $$;
+
+-- Co aplikace neumí nahrávat, se do auditu nedostane pod cizí hlavičkou.
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.audit_import(
+      (select id from public.tenants limit 1), 'mzdy', 'x.csv', 1, 0, 0);
+  exception when check_violation then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: neznámý druh nahrávání prošel'; end if;
+  raise notice '  OK    neznámý druh nahrávání se odmítne';
+end $$;
+
 reset role;
 select set_config('test.user_id', '', false);
 

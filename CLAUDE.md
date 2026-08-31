@@ -171,6 +171,25 @@ Když přidáváš tabulku nebo oprávnění, přidej k tomu kontrolu do
 `supabase/tests/etapa0_scenar.sql`. Kontrola má ověřovat, že se někdo
 **nedostane** tam, kam nemá — ne jen že šťastná cesta funguje.
 
+### Čtení tabulek a plán importu
+
+```bash
+node --experimental-strip-types scripts/tabulka.test.mjs
+node --experimental-strip-types scripts/xlsx.test.mjs
+node --experimental-strip-types scripts/nahrani-lidi.test.mjs
+```
+
+Tři věci, které se nedají ověřit v databázi, protože se dějí dřív: čtení
+CSV, čtení sešitu .xlsx a plán nahrávání (co se založí, co aktualizuje,
+co přeskočí a proč). Běží přímo Nodem bez sestavení — proto mají soubory
+v `lib/` mezi sebou importy **s příponou `.ts`** a `tsconfig.json` má
+`allowImportingTsExtensions`. Bez přípony Node modul nenajde.
+
+Sešit se v testu doopravdy poskládá — ZIP i XML — a pak přečte. Kontroly
+míří na to, co u cizích souborů selhává: středník místo čárky, BOM,
+windows-1250, první záložka jinde než v `sheet1.xml`, vynechané buňky
+uprostřed řádku, buňka se vzorcem.
+
 ### Paleta
 
 ```bash

@@ -99,6 +99,10 @@ export const NASTAVENI: Polozka[] = [
   // je vidět. Zkrácený název je taky „Oprávnění“ — „Práva“ by znamenala
   // jednotlivá zaškrtávátka, ne pojmenovanou sadu.
   { segment: 'nastaveni/role', nazev: 'Oprávnění', kratky: 'Oprávnění', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'clovek' },
+  // Nahrávání dat patří k tomu, co se nahrává. Dnes umí jen lidi, a proto
+  // people.manage — až přibude rozpis nebo receptury, bude se právo řídit
+  // vybranou položkou na rozcestníku, ne touhle řádkou.
+  { segment: 'nastaveni/nahrani', nazev: 'Nahrání dat', kratky: 'Nahrání', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'kniha' },
   { segment: 'nastaveni/moduly', nazev: 'Moduly', kratky: 'Moduly', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
 ]
 

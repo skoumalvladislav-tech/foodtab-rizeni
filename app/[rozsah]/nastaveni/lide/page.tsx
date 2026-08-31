@@ -5,6 +5,7 @@ import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
 import { getServerSupabase } from "@/lib/supabase/server";
+import { kratkyUvazek, UVAZKY } from "@/lib/uvazky";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
@@ -235,11 +236,11 @@ export default async function NastaveniLide({
           <label style={formularLabel}>
             <span>Typ pracovního poměru</span>
             <select name="typ" defaultValue={upravuje?.employment_type ?? "hpp"} style={selectPole}>
-              <option value="hpp">Hlavní pracovní poměr</option>
-              <option value="dpp">Dohoda o provedení práce</option>
-              <option value="dpc">Dohoda o činnosti</option>
-              <option value="ico">Samostatně činná osoba</option>
-              <option value="jine">Jiné</option>
+              {UVAZKY.map((u) => (
+                <option key={u.kod} value={u.kod}>
+                  {u.nazev}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -377,13 +378,7 @@ export default async function NastaveniLide({
                     : "Firemní"}
                 </td>
                 <td style={td}>
-                  {({
-                    hpp: "HPP",
-                    dpp: "DPP",
-                    dpc: "DPČ",
-                    ico: "OSVČ",
-                    jine: "Jiné",
-                  } as Record<string, string>)[z.employment_type] || z.employment_type}
+                  {kratkyUvazek(z.employment_type)}
                 </td>
                 <td style={td}>{z.user_id ? "Ano" : "Ne"}</td>
 

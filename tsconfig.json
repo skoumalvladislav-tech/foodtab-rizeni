@@ -9,6 +9,10 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // Kvůli souborům v lib/, které se testují přímo Nodem
+    // (node --experimental-strip-types scripts/*.test.mjs). Node umí
+    // ESM jen s příponou v importu; tohle ji dovoluje i TypeScriptu.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
