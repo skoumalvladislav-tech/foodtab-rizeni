@@ -146,8 +146,28 @@ export default async function NastaveniLide({
         Lidé
       </Nadpis>
 
-      {/* Formulář */}
-      <form action={upravitZamestnance} style={{ ...formular, marginBottom: "24px" }}>
+      {/*
+        key je tu podstatné, ne kosmetika.
+
+        Políčka jsou neřízená (defaultValue), a ta se v Reactu uplatní
+        JEN při připojení prvku. Když se z jednoho zaměstnance přejde na
+        druhého, je to pořád tentýž <form> na tomtéž místě stromu —
+        React DOM ponechá a novou výchozí hodnotu zahodí. Formulář pak
+        ukazuje údaje předchozího člověka, zatímco tabulka vedle je
+        správně, protože ta je jen text.
+
+        Nebezpečné to je proto, že se ta cizí hodnota uloží: kdo otevře
+        Upravit a dá Uložit, zapíše tomu člověku typ poměru někoho
+        jiného. Přesně tak se u jedné zaměstnankyně přepsalo HPP na Jiné.
+
+        Změna key přinutí React formulář zahodit a postavit znovu, takže
+        se výchozí hodnoty vezmou z nového záznamu.
+      */}
+      <form
+        key={upravuje?.id ?? "novy"}
+        action={upravitZamestnance}
+        style={{ ...formular, marginBottom: "24px" }}
+      >
         <input type="hidden" name="rozsah" value={rozsah} />
         {upravuje && <input type="hidden" name="id" value={upravuje.id} />}
 
@@ -224,6 +244,7 @@ export default async function NastaveniLide({
       */}
       {upravuje && smiZadavatSazby ? (
         <form
+          key={`sazba-${upravuje.id}`}
           action={nastavitSazbu}
           style={{ ...formular, marginBottom: "24px" }}
         >
