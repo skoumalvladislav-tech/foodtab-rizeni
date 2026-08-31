@@ -149,6 +149,11 @@ Když opravdu nejde jinak, zeptej se — nepřidávej `create extension` sám.
 
 - Názvy tabulek, sloupců a funkcí anglicky, `snake_case`.
 - Komentáře v kódu, chybové hlášky a texty rozhraní **česky**.
+- V rozhraní se `roles` jmenují **„Oprávnění"** a `positions` **„Pozice"**;
+  v databázi zůstávají anglické názvy. Slovo „oprávnění" na obrazovce
+  znamená vždycky tu pojmenovanou sadu (Majitel, Provozní, Servis) —
+  jednotlivá práva uvnitř se tak nepojmenovávají, jsou to zaškrtávátka
+  s větou („Vidět rozpis směn").
 - Migrace: `supabase/migrations/RRRRMMDDHHMMSS_nazev.sql`, nikdy neupravovat
   už nasazenou migraci — vždy přidat novou.
 - Každá migrace musí projít `supabase/tests/run.sh` proti čisté databázi.
