@@ -5,8 +5,9 @@
 -- úzké průzory v `public`. Počítá databáze, ne prohlížeč — do prohlížeče
 -- jde hotové číslo.
 --
--- Tři pravidla, na kterých se to láme:
+-- Čtyři pravidla, na kterých se to láme:
 --   * hodiny jen z UZAVŘENÉ docházky (příchod i odchod)
+--   * zapsaná přestávka se ODEČÍTÁ, nezapsaná se neodhaduje
 --   * den se zařazuje podle PROVOZNÍHO dne, ne kalendářního
 --   * sazba se bere KE DNI směny, ne k dnešku
 -- =====================================================================
@@ -51,9 +52,16 @@ $$;
 -- dni. Příchod bez odchodu se nezapočítá — dokud se docházka neuzavře,
 -- není co počítat.
 --
--- Pauzy se NEODEČÍTAJÍ. Zadání mluví o dvojicích příchod–odchod a nic
--- o placených či neplacených pauzách neříká; domýšlet si to u mezd
--- nebudeme. Až se rozhodne, přibude to sem.
+-- PŘESTÁVKY SE ODEČÍTAJÍ (rozhodl Šéfík). Odečte se jen zapsaná dvojice
+-- break_start–break_end uvnitř otevřené směny. Nezapsaná přestávka se
+-- neodhaduje ani nedopočítává: kdo si ji nepíchl, má ji ve mzdě.
+--
+-- Nedokončená přestávka (začátek bez konce) neodečte nic. Odečíst ji
+-- „do odchodu“ by byl odhad, a odhadovat se u mezd nemá — člověk, který
+-- se zapomněl vrátit z pauzy, by tak přišel o hodiny, které odpracoval.
+--
+-- Odečítá se v sekundách a na minuty se zaokrouhluje až nakonec, aby
+-- se osmihodinová směna s půlhodinovou pauzou netrefila o minutu vedle.
 --
 -- Seskupuje se podle business_date, který dopočítal trigger z otevírací
 -- doby pobočky. Odchod ve 2:15 tak sedí ve včerejšku sám od sebe.
@@ -68,10 +76,12 @@ returns table (den date, minut integer)
 language plpgsql stable security definer set search_path = ''
 as $$
 declare
-  v_udalost   record;
-  v_den       date := null;
-  v_otevreno  timestamptz := null;
-  v_minut     integer := 0;
+  v_udalost  record;
+  v_den      date := null;
+  v_otevreno timestamptz := null;   -- začátek otevřené směny
+  v_pauza    timestamptz := null;   -- začátek rozdělané přestávky
+  v_pauzy    numeric := 0;          -- sekundy přestávek v téhle směně
+  v_sekund   numeric := 0;          -- odpracované sekundy za den
 begin
   for v_udalost in
     select a.business_date, a.kind, a.occurred_at
@@ -82,25 +92,46 @@ begin
   loop
     -- Nový provozní den: co zbylo otevřené, propadá (chybí odchod).
     if v_den is distinct from v_udalost.business_date then
-      if v_den is not null and v_minut > 0 then
-        den := v_den; minut := v_minut; return next;
+      if v_den is not null and v_sekund > 0 then
+        den := v_den; minut := floor(v_sekund / 60)::integer; return next;
       end if;
-      v_den := v_udalost.business_date;
-      v_minut := 0;
+      v_den      := v_udalost.business_date;
+      v_sekund   := 0;
       v_otevreno := null;
+      v_pauza    := null;
+      v_pauzy    := 0;
     end if;
 
     if v_udalost.kind = 'in' and v_otevreno is null then
       v_otevreno := v_udalost.occurred_at;
+      v_pauza    := null;
+      v_pauzy    := 0;
+
+    -- Přestávka se počítá jen uvnitř otevřené směny. Druhý break_start
+    -- bez konce ten první nepřepisuje.
+    elsif v_udalost.kind = 'break_start'
+          and v_otevreno is not null and v_pauza is null then
+      v_pauza := v_udalost.occurred_at;
+
+    elsif v_udalost.kind = 'break_end' and v_pauza is not null then
+      v_pauzy := v_pauzy + extract(epoch from (v_udalost.occurred_at - v_pauza));
+      v_pauza := null;
+
     elsif v_udalost.kind = 'out' and v_otevreno is not null then
-      v_minut := v_minut
-        + floor(extract(epoch from (v_udalost.occurred_at - v_otevreno)) / 60)::integer;
+      -- greatest(0, …): kdyby zapsané přestávky přesáhly celou směnu,
+      -- je to nesmysl v datech, ne záporně odpracovaný čas.
+      v_sekund := v_sekund + greatest(
+        0,
+        extract(epoch from (v_udalost.occurred_at - v_otevreno)) - v_pauzy
+      );
       v_otevreno := null;
+      v_pauza    := null;
+      v_pauzy    := 0;
     end if;
   end loop;
 
-  if v_den is not null and v_minut > 0 then
-    den := v_den; minut := v_minut; return next;
+  if v_den is not null and v_sekund > 0 then
+    den := v_den; minut := floor(v_sekund / 60)::integer; return next;
   end if;
 end;
 $$;

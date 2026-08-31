@@ -273,6 +273,54 @@ values
 
 select pg_temp.check('výdělek jen z uzavřené docházky (rozpracovaný den nezvýší částku)',
   (select odpracovano_minut from app.earnings(:'marek', date '2026-09-01')) = 480 + 495);
+
+-- Přestávky. Zapsaná dvojice se odečítá, nezapsaná se neodhaduje.
+-- Vlastní zaměstnanec, ať se to nemíchá s Markovými dny výš.
+do $$
+declare
+  v_tenant uuid; v_perla uuid; v_zam uuid; v_minut integer;
+begin
+  select id into v_tenant from public.tenants limit 1;
+  select id into v_perla from public.branches
+    where tenant_id = v_tenant order by created_at limit 1;
+  insert into public.employees (tenant_id, branch_id, full_name)
+    values (v_tenant, v_perla, 'Pauzová Zkouška') returning id into v_zam;
+
+  -- Osmihodinová směna s půlhodinovou přestávkou = 7,5 hodiny.
+  insert into public.attendance_events
+    (tenant_id, branch_id, employee_id, kind, occurred_at, business_date)
+  values
+    (v_tenant, v_perla, v_zam, 'in',          '2026-09-05 07:00+02', '2026-09-05'),
+    (v_tenant, v_perla, v_zam, 'break_start', '2026-09-05 11:00+02', '2026-09-05'),
+    (v_tenant, v_perla, v_zam, 'break_end',   '2026-09-05 11:30+02', '2026-09-05'),
+    (v_tenant, v_perla, v_zam, 'out',         '2026-09-05 15:00+02', '2026-09-05');
+
+  select minut into v_minut
+  from app.worked_minutes(v_zam, date '2026-09-05', date '2026-09-05');
+  if v_minut is distinct from 450 then
+    raise exception 'SELHALO: 8 h s půlhodinovou přestávkou dalo % min místo 450', v_minut;
+  end if;
+  raise notice '  OK    přestávka se odečítá: 8 h s půlhodinovou pauzou je 7,5 h';
+
+  -- Nedokončená přestávka nesmí výpočet shodit ani odečíst odhadem.
+  -- Kdo se z pauzy nevrátil píchnutím, má ji ve mzdě.
+  insert into public.attendance_events
+    (tenant_id, branch_id, employee_id, kind, occurred_at, business_date)
+  values
+    (v_tenant, v_perla, v_zam, 'in',          '2026-09-06 07:00+02', '2026-09-06'),
+    (v_tenant, v_perla, v_zam, 'break_start', '2026-09-06 11:00+02', '2026-09-06'),
+    (v_tenant, v_perla, v_zam, 'out',         '2026-09-06 15:00+02', '2026-09-06');
+
+  select minut into v_minut
+  from app.worked_minutes(v_zam, date '2026-09-06', date '2026-09-06');
+  if v_minut is distinct from 480 then
+    raise exception 'SELHALO: nedokončená přestávka odečetla % min, měla nic', 480 - v_minut;
+  end if;
+  raise notice '  OK    nedokončená přestávka neodečte nic a nic neshodí';
+
+  delete from public.attendance_events where employee_id = v_zam;
+  delete from public.employees where id = v_zam;
+end $$;
 select pg_temp.check('odchod ve 2:15 se počítá do včerejška, ne do dalšího měsíce',
   (select odpracovano_minut from app.earnings(:'marek', date '2026-10-01')) = 0);
 

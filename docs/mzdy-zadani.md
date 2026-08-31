@@ -132,6 +132,14 @@ a odchod, kde je obojí zapsané.
 
 - Rozpracovaná docházka (příchod bez odchodu) se nepočítá, dokud se
   neuzavře.
+- **Přestávky se odečítají.** Zapsaná dvojice `break_start`/`break_end`
+  uvnitř směny se odejme z rozsahu příchod→odchod. Osmihodinová směna
+  s půlhodinovou přestávkou je 7,5 hodiny.
+- **Nezapsaná přestávka se neodhaduje ani nedopočítává.** Kdo si ji
+  nepíchl, má ji ve mzdě — dopočítávat ji paušálem by znamenalo brát
+  lidem hodiny podle domněnky. Nedokončená přestávka (začátek bez konce)
+  proto neodečte nic; odečíst ji „do odchodu" by byl odhad a člověk,
+  který se zapomněl vrátit z pauzy, by přišel o odpracovaný čas.
 - Den se zařazuje podle **provozního dne** (`app.business_date`), ne podle
   kalendáře. Odchod ve 2:15 patří do včerejška.
 - „Tenhle měsíc" znamená provozní dny od prvního do posledního dne měsíce.
