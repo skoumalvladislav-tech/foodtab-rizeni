@@ -7,6 +7,7 @@ import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
+import PanelVydani from "./panel-vydani";
 import RozpisView from "./rozpis";
 
 export const dynamic = "force-dynamic";
@@ -179,6 +180,25 @@ export default async function Rozpis({
       <Nadpis oci="Provoz" popis="Kdo kdy stojí. Týden dopředu.">
         Rozpis směn
       </Nadpis>
+
+      {/*
+        Vydání rozpisu. Jen na pobočce a jen tomu, kdo smí plánovat:
+        upozornění se vážou na pobočku a „vydat za celou firmu“ by
+        znamenalo rozeslat lidem i to, co se jich netýká.
+
+        Panel si sám ověří právo přes průzor v databázi — tady se jen
+        rozhoduje o kreslení, což zámek není.
+      */}
+      {scope.level === "branch" && scope.branchId ? (
+        <PanelVydani
+          rozsah={rozsah}
+          tenantId={tenantId}
+          branchId={scope.branchId}
+          od={odKdy}
+          doKdy={doKdy}
+        />
+      ) : null}
+
       <RozpisView
         smeny={smeny}
         dnesni={odKdy}

@@ -53,6 +53,8 @@ export type RamProps = {
   segmentFirmy: string;
   nazevFirmy: string;
   iniciraly: string;
+  /** Počet nepřečtených upozornění do zvonečku. */
+  neprectenych: number;
   moduly: ModulProp[];
   polozky: PolozkaProp[];
   nastaveni: PolozkaProp[];
@@ -73,6 +75,7 @@ export default function Ram({
   segmentFirmy,
   nazevFirmy,
   iniciraly,
+  neprectenych,
   moduly,
   polozky,
   nastaveni,
@@ -164,6 +167,51 @@ export default function Ram({
           </div>
 
           <PrepinacRezimu />
+
+          {/*
+            Zvoneček. Číslo je počet nepřečtených — bez něj by se muselo
+            klikat naslepo. Kreslí se vždycky, i s nulou: kdyby mizel,
+            nešlo by se k přečteným upozorněním vrátit.
+          */}
+          <Link
+            href={`/${rozsah}/upozorneni`}
+            className="ft-ikona ram"
+            title={
+              neprectenych > 0
+                ? `Upozornění (${neprectenych} nepřečtených)`
+                : "Upozornění"
+            }
+            aria-label={
+              neprectenych > 0
+                ? `Upozornění, ${neprectenych} nepřečtených`
+                : "Upozornění"
+            }
+            style={{ position: "relative" }}
+          >
+            <Ikona klic="zprava" />
+            {neprectenych > 0 ? (
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  top: "-2px",
+                  insetInlineEnd: "-2px",
+                  minWidth: "17px",
+                  height: "17px",
+                  padding: "0 4px",
+                  borderRadius: "999px",
+                  background: "var(--bad)",
+                  color: "#fff",
+                  fontSize: "11px",
+                  lineHeight: "17px",
+                  textAlign: "center",
+                  fontWeight: 700,
+                }}
+              >
+                {neprectenych > 9 ? "9+" : neprectenych}
+              </span>
+            ) : null}
+          </Link>
 
           {cilNastaveni ? (
             <>

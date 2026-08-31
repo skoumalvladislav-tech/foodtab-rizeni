@@ -8,6 +8,7 @@ import {
   type Context,
 } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
+import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import Ram, { type ModulProp, type PolozkaProp } from "./ram";
@@ -124,6 +125,20 @@ export default async function RozsahLayout({
     })),
   ];
 
+  /*
+    Nepřečtená upozornění do zvonečku. Politika na notifications pustí
+    jen vlastní řádky, takže se tu nefiltruje podle uživatele znovu.
+
+    Chyba se schválně nevyhazuje: dokud neproběhne migrace
+    20260901130000, tabulka neexistuje a zvoneček prostě ukazuje nulu.
+    Kvůli počítadlu nemá padat celý rám aplikace.
+  */
+  const { count: neprectenych } = await (await getServerSupabase())
+    .from("notifications")
+    .select("id", { count: "exact", head: true })
+    .eq("tenant_id", tenantId)
+    .is("read_at", null);
+
   // Ozubené kolo nevisí na settings.manage. Kdo má právo aspoň na jednu
   // obrazovku nastavení — třeba jen na Lidi přes people.manage — se tam
   // musí dostat, a to na tu obrazovku, kterou opravdu smí vidět.
@@ -143,6 +158,7 @@ export default async function RozsahLayout({
       segmentFirmy={TENANT_SCOPE_SEGMENT}
       nazevFirmy={ctx.tenant.name}
       iniciraly={iniciraly(user.email)}
+      neprectenych={neprectenych ?? 0}
       moduly={moduly}
       polozky={polozky}
       nastaveni={nastaveni}
