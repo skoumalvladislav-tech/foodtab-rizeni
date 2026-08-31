@@ -27,7 +27,12 @@
             color: var(--rail-ink); text-decoration: none; white-space: nowrap; }
 .ft-brand em { font-style: normal; color: var(--mosaz-sv); }
 
-.ft-mods { display: flex; gap: 2px; align-items: center; min-width: 0; }
+/* min-width: 0 dovolí pruhu se zmenšit, overflow: hidden se postará
+   o to, aby se zmenšil OPRAVDU. Bez něj se pruh sice zúžil, ale názvy
+   mají nowrap, takže obsah z něj vytekl a kreslil se přes přepínač
+   poboček. Ořez je pojistka, ne řešení — o to, aby se ořezávat nemuselo,
+   se stará zlom níž. */
+.ft-mods { display: flex; gap: 2px; align-items: center; min-width: 0; overflow: hidden; }
 .ft-mod {
   padding: 7px 14px; border-radius: 8px; font-size: 13.5px; font-weight: 500;
   color: var(--rail-tlum); white-space: nowrap; text-decoration: none;
@@ -44,7 +49,11 @@
 }
 
 .ft-spacer { margin-left: auto; }
-.ft-tools { display: flex; align-items: center; gap: 10px; }
+
+/* flex: none — nástroje se nezmenšují vůbec. Přepnout pobočku a dostat
+   se do nastavení je důležitější než šířka modulů; když je těsno, ustoupí
+   moduly, ne tohle. */
+.ft-tools { display: flex; align-items: center; gap: 10px; flex: none; }
 
 .ft-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none;
              background: var(--branch); }
@@ -118,17 +127,25 @@
 .ft-hledani input:focus { outline: none; }
 .ft-hledani:focus-within { outline: 2px solid var(--mosaz-sv); outline-offset: 1px; }
 
-@media (max-width: 1023px) {
-  .ft-hledani input { width: 168px; }
+/* ---- Co ustupuje první ------------------------------------------
+   Když se lišta nevejde, sbalí se JAKO PRVNÍ vyhledávání — je z ní
+   nejširší (252 px) a nejmíň naléhavé. Teprve potom se sahá na moduly
+   (zlom u .ft-mob-mods níž). Ikona zůstává na místě, mění se jen šířka;
+   kdyby se posouvala, poskočila by celá lišta.
+
+   Po kliknutí se pole zase rozbalí přes sousedy, takže se hledat dá
+   i na úzké liště. */
+@media (max-width: 1540px) {
+  .ft-hledani input { width: 42px; padding: 0 0 0 31px; }
+  .ft-hledani:focus-within input { width: min(40vw, 250px); padding-right: 11px; }
 }
 
-/* Na mobilu se pole sbalí pod lupu. Ikona zůstává na místě, mění se jen
-   šířka — kdyby se posouvala, poskočila by celá lišta. */
+/* Na mobilu je pilulka vyšší kvůli prstu. */
 @media (max-width: 640px) {
   .ft-hledani { height: 44px; border-radius: 999px; }
   .ft-hledani .ft-i { left: 14px; }
-  .ft-hledani input { width: 42px; padding: 0 0 0 36px; }
-  .ft-hledani:focus-within input { width: min(56vw, 240px); padding-right: 11px; }
+  .ft-hledani input { padding: 0 0 0 36px; }
+  .ft-hledani:focus-within input { width: min(56vw, 240px); }
 }
 
 /* ---- Přepínač rozsahu ------------------------------------------ */
@@ -260,25 +277,56 @@
   .ft-main { padding: 20px 22px; }
 }
 
-/* ---- Mobil: sloupec dolů jako pevná lišta ----------------------- */
 .ft-mob-mods { display: none; }
 .ft-mob-bottom { display: none; }
 
-@media (max-width: 640px) {
-  .ft-topbar { height: 52px; padding: 0 14px; gap: 10px; }
-  .ft-topbar .ft-mods { display: none; }
-  .ft-side { display: none; }
-  .ft-main { padding: 16px 14px calc(62px + env(safe-area-inset-bottom) + 16px); }
+/* ---- Kdy moduly slezou z lišty do vlastního pruhu ----------------
+   Zlom NENÍ odhad, je spočítaný z naměřených šířek (Chrome, 5 modulů,
+   3 pobočky):
 
-  /* Moduly jako vodorovně rolovatelná řádka pod lištou. */
+     odsazení lišty      36      (2 × 18)
+     mezery mezi prvky   54      (3 × 18)
+     značka Foodtab      65
+     moduly              526     ≈ 105 px na modul
+     nástroje            830     (přepínač 436, hledání 252, ikony)
+     ────────────────────────
+     celá lišta         1511
+     se sbaleným hledáním 1301   (hledání spadne na 42 px)
+     bez modulů           757
+
+   Pod 1301 px se to i se sbaleným hledáním nevejde. Zlom je proto
+   1360 px — s rezervou na svislý posuvník a na to, že názvy modulů
+   nejsou u každé firmy stejně dlouhé.
+
+   AŽ PŘIBUDE ŠESTÝ MODUL: připočti k 1301 dalších ~105 px a zlom zvedni
+   na ~1470. Kdyby se na to zapomnělo, nic se nepřekryje — .ft-mods má
+   overflow: hidden, takže se poslední modul ořízne. Je to vidět a dá se
+   to spravit; překrytí přes přepínač poboček vidět nebylo. */
+@media (max-width: 1360px) {
+  .ft-topbar .ft-mods { display: none; }
+
+  /* Moduly jako vodorovně rolovatelná řádka pod lištou. Rolování je tu
+     schválně: při šesti modulech na úzkém tabletu se řádka nevejde ani
+     tady a musí jít dojet prstem. */
   .ft-mob-mods {
     display: flex; gap: 6px; padding: 8px 14px;
     background: var(--rail-2); border-bottom: 1px solid var(--rail);
     overflow-x: auto; -webkit-overflow-scrolling: touch;
-    position: sticky; top: 52px; z-index: 19;
+    position: sticky; top: 56px; z-index: 19;
   }
   .ft-mob-mods::-webkit-scrollbar { display: none; }
   .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; flex: none; }
+}
+
+/* ---- Mobil: sloupec dolů jako pevná lišta ----------------------- */
+
+@media (max-width: 640px) {
+  .ft-topbar { height: 52px; padding: 0 14px; gap: 10px; }
+  .ft-side { display: none; }
+  .ft-main { padding: 16px 14px calc(62px + env(safe-area-inset-bottom) + 16px); }
+
+  /* Lišta je tu nižší, pruh modulů se musí posunout s ní. */
+  .ft-mob-mods { top: 52px; }
 
   .ft-mob-bottom {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
