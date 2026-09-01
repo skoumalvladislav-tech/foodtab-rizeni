@@ -195,3 +195,32 @@ přepsat, protože kdo zve, ví to nejlíp.
 Neruší se, jen přestává být tou obvyklou cestou.
 
 Obojí podléhá stropu: nabídnout jde jen to, co má sám ten, kdo zve.
+
+---
+
+## 8. Panel radí formulář, který na té obrazovce není
+
+Šéfík se pokoušel dopsat srpnové odchody a nešlo to — byl na **firemní
+úrovni** (`/firma/dochazka`). Tam panel nedokončených záznamů píše:
+
+> Doplňte odchod ručním zápisem **výš**…
+
+…jenže formulář ručního zápisu se vykresluje **jen na pobočce**. Na
+firemní úrovni tedy odkazuje na něco, co na obrazovce není. Člověk
+scrolluje nahoru a hledá formulář, který tam nikdy nebyl.
+
+Souvisí to s bodem 4: dohromady to znamená, že se nedokončený záznam
+nedá dokončit ani na jedné obrazovce bez toho, aby člověk věděl, co má
+udělat jinde.
+
+**Spolu s bodem 4 to vyřeš jednou věcí:** tlačítko **„Doplnit odchod"**
+u každého řádku. Na pobočce předvyplní formulář. Na firemní úrovni
+**přepne na pobočku toho záznamu** a předvyplní ho tam — pobočku ten
+záznam zná.
+
+Dokud to není, ať aspoň na firemní úrovni nestojí „výš", ale kde to
+opravdu je:
+
+> Doplňte odchod ručním zápisem **na pobočce Restaurace Černá Perla**.
+
+Obecně: **v textu neodkazuj na to, co na téhle obrazovce není.**
