@@ -104,7 +104,7 @@ export const NABIDKA: Polozka[] = [
  * by vypadalo jako něco k doplacení.
  */
 export const NASTAVENI: Polozka[] = [
-  { segment: 'nastaveni/firma', nazev: 'Firma', kratky: 'Firma', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
+  { segment: 'nastaveni/firma', nazev: 'Firma', kratky: 'Firma', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/pobocky', nazev: 'Pobočky', kratky: 'Pobočky', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
   // Pozice patří ke správě lidí, ne k nastavení firmy — proto

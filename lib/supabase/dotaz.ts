@@ -127,3 +127,17 @@ export function funkceNeexistuje(chyba: ChybaDotazu | null): boolean {
 export function tabulkaNeexistuje(chyba: ChybaDotazu | null): boolean {
   return chyba?.code === 'PGRST205' || chyba?.code === '42P01'
 }
+
+/**
+ * Chybí ten sloupec, nebo se pokazil dotaz?
+ *
+ * Potřetí totéž, tentokrát pro sloupce. Migrace často jen přidává
+ * sloupec do tabulky, která už dávno je — `tabulkaNeexistuje` v takovém
+ * případě neřekne nic a obrazovka spadne na hlášce, ze které nikdo
+ * nepozná, že se jen čeká na nasazení.
+ *
+ * PGRST204 = PostgREST ten sloupec nezná. 42703 = Postgres ho nezná.
+ */
+export function sloupecNeexistuje(chyba: ChybaDotazu | null): boolean {
+  return chyba?.code === 'PGRST204' || chyba?.code === '42703'
+}
