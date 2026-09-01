@@ -309,9 +309,47 @@ export default async function Dochazka({
   if (vydelekChyba && !funkceNeexistuje(vydelekChyba)) {
     throw new DotazSelhal("můj výdělek", vydelekChyba);
   }
-  const vydelek = vydelekChyba
+
+  let vydelek = vydelekChyba
     ? null
     : ((vydelekData?.[0] ?? null) as Vydelek | null);
+
+  /*
+    Dokud není nasazená migrace se zálohami, `muj_vyplatni_prehled`
+    v databázi není — a bez tohohle by dlaždice s výdělkem zmizela
+    úplně. Ne že by neukázala zálohy: zmizela by CELÁ, i s hodinami
+    a hrubou mzdou, které fungovaly rok.
+
+    Našlo se to kliknutím, ne úvahou: obrazovka se prostě vykreslila
+    bez ní a nic nikde nekřičelo. Proto se sáhne po starší funkci, která
+    umí totéž bez záloh. Až migrace projde, použije se ta novější a tahle
+    větev se přestane volat sama od sebe.
+  */
+  if (vydelekChyba) {
+    const { data: stara, error: staraChyba } = await supabase.rpc("my_earnings", {
+      p_tenant: tenantId,
+      p_mesic: mesic,
+    });
+    if (staraChyba && !funkceNeexistuje(staraChyba)) {
+      throw new DotazSelhal("můj výdělek (starší podoba)", staraChyba);
+    }
+    const r = stara?.[0] as Omit<
+      Vydelek,
+      "zalohy_haleru" | "zbyva_haleru" | "zaloh_nepotvrzenych" | "zobrazeni"
+    > | undefined;
+    vydelek = r
+      ? {
+          ...r,
+          zalohy_haleru: 0,
+          zbyva_haleru: r.vydelano_haleru,
+          zaloh_nepotvrzenych: 0,
+          // Bez záloh není co odečítat, takže se řádky se zálohami
+          // nekreslí — ne proto, že si to firma přeje, ale proto, že
+          // žádné nejsou.
+          zobrazeni: "neukazovat",
+        }
+      : null;
+  }
 
   /*
     Má pobočka vůbec nějaký tablet?
