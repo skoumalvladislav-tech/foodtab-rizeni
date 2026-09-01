@@ -29,7 +29,9 @@ export type ModulProp = {
 };
 
 export type PolozkaProp = {
-  segment: string;
+  segment: string
+  /** Absolutní adresa mimo rozsah; má přednost před segmentem. */
+  adresa?: string;
   nazev: string;
   kratky: string;
   ikona: IkonaKlic;
@@ -258,7 +260,7 @@ export default function Ram({
             {hotove.map((p) => (
               <Link
                 key={p.segment}
-                href={`/${rozsah}/${p.segment}`}
+                href={p.adresa ?? `/${rozsah}/${p.segment}`}
                 className={p.segment === zde?.segment ? "on" : undefined}
                 aria-current={p.segment === zde?.segment ? "page" : undefined}
                 title={p.nazev}
@@ -297,7 +299,7 @@ export default function Ram({
           p.hotovo ? (
             <Link
               key={p.segment}
-              href={`/${rozsah}/${p.segment}`}
+              href={p.adresa ?? `/${rozsah}/${p.segment}`}
               className={p.segment === zde?.segment ? "on" : undefined}
               aria-current={p.segment === zde?.segment ? "page" : undefined}
             >

@@ -243,7 +243,7 @@ export async function vystavitPozvankuAction(
 
   const { data: zaměstnanec, error: chybaZamestnanec } = await supabase
     .from('employees')
-    .select('id')
+    .select('id, branch_id')
     .eq('id', zamestnanecId)
     .eq('tenant_id', tenantId)
     .maybeSingle()
@@ -255,14 +255,31 @@ export async function vystavitPozvankuAction(
     return { chyba: 'Zaměstnanec nenalezen' }
   }
 
+  /*
+    Rozsah se NEBERE z formuláře, ale z toho, co je u zaměstnance
+    v Lidech (docs/odpovedi-pozvanky-2026-09-01.md, oddíl 1):
+
+      pobočka  → scope 'branch' a ta jedna pobočka
+      Firemní  → scope 'tenant'
+
+    Pobočka u zaměstnance je jednou zadaná. Ptát se na ni podruhé
+    v pozvánce znamená rozhodovat dvakrát o téže věci a druhé rozhodnutí
+    se dřív nebo později rozejde s prvním.
+
+    Samotný rozsah nic neotevírá — bez role nemá člověk jediné právo,
+    ať je rozsah jakýkoli (ověřeno v krok7_scenar.sql). Proto je
+    bezpečné nastavit ho dopředu.
+  */
+  const naPobocku = zaměstnanec.branch_id != null
+
   // Procházíme přes RPC — public.create_invitation
   const { data, error } = await supabase.rpc('create_invitation', {
     p_tenant: tenantId,
     p_role: opravneni,
     p_channel: kanal,
     p_contact: email,
-    p_scope: 'branch',
-    p_branches: [],
+    p_scope: naPobocku ? 'branch' : 'tenant',
+    p_branches: naPobocku ? [zaměstnanec.branch_id] : [],
     p_employee: zamestnanecId,
     p_valid_days: 7,
   })
@@ -376,4 +393,140 @@ na rozpisy směn, docházku a úkoly.</p>
 Pokud po přihlášení zatím nic neuvidíte, čeká se na to, až vám vedoucí přidělí
 oprávnění. Jestli o pozvánku nestojíte, nemusíte dělat nic — sama vyprší.</p>
 </body></html>`
+}
+
+/**
+ * Přidělení oprávnění a rozsahu.
+ *
+ * Obojí najednou, ne zvlášť: role sama neotevře nic, dokud k ní není
+ * rozsah, a rozsah sám neotevře nic bez role. Kdyby se nastavovaly
+ * odděleně, končilo by to půlkou lidí, kteří „oprávnění mají“ a přesto
+ * nic nevidí — přesně to, na co jsme narazili u pozvánek.
+ * Viz docs/odpovedi-pozvanky-2026-09-01.md, oddíl 1.
+ *
+ * ROZHODNUTÍ PADÁ V DATABÁZI. Politiky `memberships_update`
+ * a `membership_branches_write` se ptají `app.smi_pridelit`, takže
+ * nikdo nepřidělí víc, než má sám, ani obejitím téhle akce. Kontroly
+ * tady jsou proto, aby se člověk dozvěděl důvod dřív než chybu.
+ */
+export async function prideleniOpravneni(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zamestnanec = String(formData.get('zamestnanec') ?? '')
+  const role = String(formData.get('opravneni') ?? '').trim() || null
+  const uroven = String(formData.get('uroven') ?? 'branch') === 'tenant' ? 'tenant' : 'branch'
+  const pobocky = formData.getAll('pobocka').map(String).filter(Boolean)
+
+  const zpet = `/${rozsah}/nastaveni/lide`
+  if (!zamestnanec) redirect(zpet)
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const pristup = await zkusPristup(tenantId, 'people.manage', rozsah)
+  if (pristup.stav !== 'ok') redirect('/')
+
+  const supabase = await getServerSupabase()
+
+  const { data: clovek, error: chybaClovek } = await supabase
+    .from('employees')
+    .select('id, user_id, full_name')
+    .eq('id', zamestnanec)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (chybaClovek) throw new DotazSelhal('zaměstnanec k přidělení oprávnění', chybaClovek)
+
+  if (!clovek?.user_id) {
+    redirect(`${zpet}?chyba=opravneni-bez-uctu`)
+  }
+
+  const { data: clenstvi, error: chybaClenstvi } = await supabase
+    .from('memberships')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .eq('user_id', clovek.user_id)
+    .maybeSingle()
+  if (chybaClenstvi) throw new DotazSelhal('členství k přidělení oprávnění', chybaClenstvi)
+
+  if (!clenstvi) {
+    redirect(`${zpet}?chyba=opravneni-bez-clenstvi`)
+  }
+
+  /*
+    Zápis rozsahu. Pořadí je schválně tohle: napřed členství, pak
+    pobočky. Politika na `membership_branches` se totiž ptá na roli
+    ULOŽENOU v členství — kdyby se pobočky psaly první, ptala by se
+    ještě na tu starou.
+  */
+  const { error: chybaUpdate } = await supabase
+    .from('memberships')
+    .update({ role_id: role, scope: uroven })
+    .eq('id', clenstvi.id)
+
+  if (chybaUpdate) {
+    redirect(`${zpet}?chyba=opravneni&text=${encodeURIComponent(chybaUpdate.message)}`)
+  }
+
+  /*
+    Update, který politika nepustí, NENÍ chyba — je to nula změněných
+    řádků a Supabase o něm mlčí. Ověřuje se proto čtením: co je
+    v databázi po zápisu, ne co jsme poslali.
+
+    Tichého neprovedení se u RLS bát MUSÍME (docs/pravidlo-neprideluj-vic.md).
+    Tady navíc politika zakazuje měnit vlastní členství, takže to není
+    teorie: kdo si to zkusí na sobě, projde bez chyby a nic se nestane.
+  */
+  const { data: po } = await supabase
+    .from('memberships')
+    .select('role_id, scope')
+    .eq('id', clenstvi.id)
+    .maybeSingle()
+
+  if (po?.role_id !== role || po?.scope !== uroven) {
+    redirect(`${zpet}?chyba=opravneni-neprovedeno`)
+  }
+
+  // Pobočky se přepisují na to, co přišlo. Mazání i vkládání se počítá,
+  // ať se pozná, když politika některý řádek nepustí.
+  const { data: predtim } = await supabase
+    .from('membership_branches')
+    .select('branch_id')
+    .eq('membership_id', clenstvi.id)
+
+  const stare = new Set((predtim ?? []).map((r) => String(r.branch_id)))
+  const nove = new Set(uroven === 'tenant' ? [] : pobocky)
+
+  const kSmazani = [...stare].filter((b) => !nove.has(b))
+  const kPridani = [...nove].filter((b) => !stare.has(b))
+
+  if (kSmazani.length > 0) {
+    await supabase
+      .from('membership_branches')
+      .delete()
+      .eq('membership_id', clenstvi.id)
+      .in('branch_id', kSmazani)
+  }
+
+  if (kPridani.length > 0) {
+    await supabase.from('membership_branches').insert(
+      kPridani.map((b) => ({ membership_id: clenstvi.id, branch_id: b })),
+    )
+  }
+
+  const { data: potom } = await supabase
+    .from('membership_branches')
+    .select('branch_id')
+    .eq('membership_id', clenstvi.id)
+
+  const vysledek = new Set((potom ?? []).map((r) => String(r.branch_id)))
+  const sedi =
+    vysledek.size === nove.size && [...nove].every((b) => vysledek.has(b))
+
+  revalidatePath(zpet)
+  revalidatePath('/', 'layout')
+
+  if (!sedi) {
+    redirect(`${zpet}?chyba=opravneni-pobocky`)
+  }
+
+  redirect(`${zpet}?ulozeno=opravneni&kdo=${encodeURIComponent(clovek.full_name)}`)
 }

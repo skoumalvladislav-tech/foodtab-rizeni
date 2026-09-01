@@ -63,14 +63,7 @@ export default async function RozsahLayout({
     nikdo nic nedal. Hláška „Sem nemáte přístup“ by ho poslala shánět
     úpravu oprávnění, které ještě žádné nemá. Viz docs/pozvanky-zadani.md.
   */
-  if (!ctx.role) {
-    return (
-      <Sdeleni samostatne nadpis="Účet je hotový">
-        Zatím vám ale nikdo nepřidělil oprávnění, takže tu není co
-        otevřít — ozvěte se vedoucímu.
-      </Sdeleni>
-    );
-  }
+  if (!ctx.role) redirect("/zatim-bez-opravneni");
 
   // Až za tímhle voláním smí přijít redirect(). Uvnitř odchytávání by se
   // ztratil — redirect() funguje tak, že vyhodí výjimku.
@@ -110,6 +103,7 @@ export default async function RozsahLayout({
 
   const nastaveni: PolozkaProp[] = polozkyNastaveni(ctx).map((p) => ({
     segment: p.segment,
+    adresa: p.adresa,
     nazev: p.nazev,
     kratky: p.kratky,
     ikona: p.ikona,
@@ -158,7 +152,7 @@ export default async function RozsahLayout({
   // musí dostat, a to na tu obrazovku, kterou opravdu smí vidět.
   const prvniNastaveni = nastaveni.find((p) => p.hotovo);
   const cilNastaveni = prvniNastaveni
-    ? `/${rozsah}/${prvniNastaveni.segment}`
+    ? (prvniNastaveni.adresa ?? `/${rozsah}/${prvniNastaveni.segment}`)
     : null;
 
   return (

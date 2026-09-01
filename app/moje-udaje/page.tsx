@@ -5,7 +5,7 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { tabulkaNeexistuje, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
-import Nadpis from '../nadpis'
+import Nadpis from '@/app/[rozsah]/nadpis'
 import { nastavitPin, prepnoutSouhlas, ulozitKontakt, vzitNaVedomi } from './akce'
 
 export const dynamic = 'force-dynamic'
@@ -48,13 +48,10 @@ type Druh = {
 }
 
 export default async function MojeUdaje({
-  params,
   searchParams,
 }: {
-  params: Promise<{ rozsah: string }>
   searchParams: Promise<{ chyba?: string; text?: string; ulozeno?: string }>
 }) {
-  const { rozsah } = await params
   const { chyba, text, ulozeno } = await searchParams
 
   const tenantId = await getCurrentTenantId()
@@ -195,7 +192,6 @@ export default async function MojeUdaje({
           <h2 style={nadpisKarty}>Kontakt</h2>
           {muj ? (
             <form action={ulozitKontakt} style={{ display: 'grid', gap: '12px' }}>
-              <input type="hidden" name="rozsah" value={rozsah} />
               <label style={poleLabel}>
                 <span>Telefon</span>
                 <input
@@ -255,7 +251,6 @@ export default async function MojeUdaje({
                     </span>
                   </div>
                   <form action={prepnoutSouhlas}>
-                    <input type="hidden" name="rozsah" value={rozsah} />
                     <input type="hidden" name="druh" value={d.key} />
                     <input type="hidden" name="udelit" value={udeleno ? 'ne' : 'ano'} />
                     <button
@@ -301,7 +296,6 @@ export default async function MojeUdaje({
             a zadat znovu.
           </p>
           <form action={nastavitPin} style={{ display: 'grid', gap: '12px' }}>
-            <input type="hidden" name="rozsah" value={rozsah} />
             <label style={poleLabel}>
               <span>{maPin ? 'Nový PIN' : 'PIN'}</span>
               <input
@@ -342,7 +336,6 @@ export default async function MojeUdaje({
               ) : null}
               <pre style={textInformace}>{info.text_info}</pre>
               <form action={vzitNaVedomi}>
-                <input type="hidden" name="rozsah" value={rozsah} />
                 <input type="hidden" name="notice" value={info.id} />
                 <p style={popis}>
                   Není to souhlas a nic se jím nepodepisuje — jen se
@@ -368,7 +361,7 @@ export default async function MojeUdaje({
             textový soubor (JSON) — dá se otevřít v poznámkovém bloku
             i poslat dál.
           </p>
-          <a href={`/${rozsah}/moje-udaje/export`} className="ft-tl ft-tl-vedlejsi" download>
+          <a href="/moje-udaje/export" className="ft-tl ft-tl-vedlejsi" download>
             Stáhnout soubor
           </a>
         </section>

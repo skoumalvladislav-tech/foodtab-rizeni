@@ -39,7 +39,6 @@ async function kdo(): Promise<Kdo | null> {
 
 /** Kontakt. Prázdné pole znamená vymazat. */
 export async function ulozitKontakt(formData: FormData): Promise<void> {
-  const rozsah = String(formData.get('rozsah') ?? '')
   const telefon = String(formData.get('telefon') ?? '')
   const email = String(formData.get('email') ?? '')
 
@@ -57,12 +56,12 @@ export async function ulozitKontakt(formData: FormData): Promise<void> {
     // Hlášku o tvaru telefonu nebo adresy napsala databáze a je pro
     // člověka — projde se dál, ať se nevymýšlí druhá.
     redirect(
-      `/${rozsah}/moje-udaje?chyba=kontakt&text=${encodeURIComponent(error.message)}`,
+      `/moje-udaje?chyba=kontakt&text=${encodeURIComponent(error.message)}`,
     )
   }
 
-  revalidatePath(`/${rozsah}/moje-udaje`)
-  redirect(`/${rozsah}/moje-udaje?ulozeno=kontakt`)
+  revalidatePath(`/moje-udaje`)
+  redirect(`/moje-udaje?ulozeno=kontakt`)
 }
 
 /**
@@ -73,7 +72,6 @@ export async function ulozitKontakt(formData: FormData): Promise<void> {
  * ho nikdy neudělil — a v auditu by po odvolání nezůstalo nic.
  */
 export async function prepnoutSouhlas(formData: FormData): Promise<void> {
-  const rozsah = String(formData.get('rozsah') ?? '')
   const druh = String(formData.get('druh') ?? '')
   const udelit = String(formData.get('udelit') ?? '') === 'ano'
 
@@ -96,12 +94,12 @@ export async function prepnoutSouhlas(formData: FormData): Promise<void> {
 
   if (error) {
     redirect(
-      `/${rozsah}/moje-udaje?chyba=souhlas&text=${encodeURIComponent(error.message)}`,
+      `/moje-udaje?chyba=souhlas&text=${encodeURIComponent(error.message)}`,
     )
   }
 
-  revalidatePath(`/${rozsah}/moje-udaje`)
-  redirect(`/${rozsah}/moje-udaje?ulozeno=${udelit ? 'souhlas' : 'odvolani'}`)
+  revalidatePath(`/moje-udaje`)
+  redirect(`/moje-udaje?ulozeno=${udelit ? 'souhlas' : 'odvolani'}`)
 }
 
 /**
@@ -112,7 +110,6 @@ export async function prepnoutSouhlas(formData: FormData): Promise<void> {
  * musí se ukázat znovu.
  */
 export async function vzitNaVedomi(formData: FormData): Promise<void> {
-  const rozsah = String(formData.get('rozsah') ?? '')
   const notice = String(formData.get('notice') ?? '')
 
   if (!notice) return
@@ -128,13 +125,15 @@ export async function vzitNaVedomi(formData: FormData): Promise<void> {
   // Druhé kliknutí na totéž je v pořádku, ne chyba (23505 = už tam je).
   if (error && error.code !== '23505') {
     redirect(
-      `/${rozsah}/moje-udaje?chyba=vedomi&text=${encodeURIComponent(error.message)}`,
+      `/moje-udaje?chyba=vedomi&text=${encodeURIComponent(error.message)}`,
     )
   }
 
   // Přepočítat i rám: podle záznamu se kreslí pruh s informací.
-  revalidatePath(`/${rozsah}`, 'layout')
-  redirect(`/${rozsah}/moje-udaje?ulozeno=vedomi`)
+  // Pruh s informací kreslí layout uvnitř rozsahu — ten je jinde než
+  // tahle obrazovka, tak se přepočítá celá aplikace, ne jedna adresa.
+  revalidatePath('/', 'layout')
+  redirect(`/moje-udaje?ulozeno=vedomi`)
 }
 
 /**
@@ -148,7 +147,6 @@ export async function vzitNaVedomi(formData: FormData): Promise<void> {
  * stačit k ničemu.
  */
 export async function nastavitPin(formData: FormData): Promise<void> {
-  const rozsah = String(formData.get('rozsah') ?? '')
   const pin = String(formData.get('pin') ?? '')
 
   const ja = await kdo()
@@ -161,9 +159,9 @@ export async function nastavitPin(formData: FormData): Promise<void> {
   })
 
   if (error) {
-    redirect(`/${rozsah}/moje-udaje?chyba=pin&text=${encodeURIComponent(error.message)}`)
+    redirect(`/moje-udaje?chyba=pin&text=${encodeURIComponent(error.message)}`)
   }
 
-  revalidatePath(`/${rozsah}/moje-udaje`)
-  redirect(`/${rozsah}/moje-udaje?ulozeno=pin`)
+  revalidatePath(`/moje-udaje`)
+  redirect(`/moje-udaje?ulozeno=pin`)
 }

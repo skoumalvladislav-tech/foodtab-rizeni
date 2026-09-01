@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { hasAccess } from "@/lib/authz";
+import { getUser, hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
 import { smimPridelit } from "@/lib/prideleni";
@@ -12,6 +12,7 @@ import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
 import PolePozice from "./pole-pozice";
+import PanelOpravneni from "./panel-opravneni";
 import SmazatZamestnance from "./smazani";
 import VystavitPozvankuFormular from "./vystaveni";
 
@@ -42,8 +43,11 @@ export default async function NastaveniLide({
   params: Promise<{ rozsah: string }>;
   searchParams: Promise<{
     chyba?: string;
+    text?: string;
     ulozeno?: string;
     upravuji?: string;
+    opravneni?: string;
+    kdo?: string;
     pozice?: string;
     nazev?: string;
   }>;
@@ -51,8 +55,11 @@ export default async function NastaveniLide({
   const { rozsah } = await params;
   const {
     chyba,
+    text: textChyby,
     ulozeno,
     upravuji,
+    opravneni: opravneniProId,
+    kdo: kdoUlozen,
     pozice: poziceStav,
     nazev: nazevPozice,
   } = await searchParams;
@@ -78,6 +85,10 @@ export default async function NastaveniLide({
 
   const { ctx } = pristup;
   const supabase = await getServerSupabase();
+
+  // Kdo je přihlášený. Vlastní členství měnit nejde ani vlastníkem —
+  // panel to má říct dřív, než na to člověk klikne.
+  const uzivatel = await getUser();
 
   // Zaměstnanci
   const zamestnanci = await seznam<Zamestnanec>(
@@ -184,16 +195,44 @@ export default async function NastaveniLide({
     musí stát „čeká na přidělení“, ne prázdno. Prázdné políčko vypadá
     jako chyba a nikdo podle něj nepozná, že se na něj ještě čeká.
   */
-  const clenstvi = await seznam<{ user_id: string; role_id: string | null }>(
+  const clenstvi = await seznam<{
+    id: string;
+    user_id: string;
+    role_id: string | null;
+    scope: string;
+  }>(
     "členství ve firmě",
     supabase
       .from("memberships")
-      .select("user_id, role_id")
+      .select("id, user_id, role_id, scope")
       .eq("tenant_id", tenantId)
       .eq("status", "active"),
   );
   const roleUctu = new Map(clenstvi.map((m) => [m.user_id, m.role_id]));
   const nazevRole = new Map(roleFirmy.map((r) => [r.id, r.label]));
+
+  /*
+    Podklad pro panel přidělení. Načítá se jen pro toho jednoho člověka,
+    kterého má vedoucí zrovna otevřeného — rozsahy všech by byl dotaz
+    navíc kvůli sloupci, který v tabulce stejně není.
+  */
+  const prideluje = opravneniProId
+    ? (zamestnanci ?? []).find((z) => z.id === opravneniProId) ?? null
+    : null;
+
+  const clenstviProPanel = prideluje?.user_id
+    ? clenstvi.find((m) => m.user_id === prideluje.user_id) ?? null
+    : null;
+
+  const pobockyClena = clenstviProPanel
+    ? await seznam<{ branch_id: string }>(
+        "pobočky členství",
+        supabase
+          .from("membership_branches")
+          .select("branch_id")
+          .eq("membership_id", clenstviProPanel.id),
+      )
+    : [];
 
   const upravujeId = upravuji ? String(upravuji) : null;
   const upravuje =
@@ -351,7 +390,18 @@ export default async function NastaveniLide({
             />
           </label>
 
-          {chyba && <p className="hlaska-chyba">{popisChyby(chyba)}</p>}
+          {chyba && (
+            <p className="hlaska-chyba">
+              {popisChyby(chyba)}
+              {textChyby ? ` (${textChyby})` : ""}
+            </p>
+          )}
+          {ulozeno === "opravneni" ? (
+            <p style={{ margin: "0 0 16px", fontSize: "14px", color: "var(--dobre)" }}>
+              Oprávnění uloženo{kdoUlozen ? ` — ${kdoUlozen}` : ""}. Napoprvé
+              se projeví, až se člověk příště načte stránka.
+            </p>
+          ) : null}
           {ulozeno && <p style={{ ...chybaHlaska, color: "var(--good)" }}>Uloženo.</p>}
 
           {/*
@@ -456,6 +506,35 @@ export default async function NastaveniLide({
         </form>
       ) : null}
 
+      {prideluje ? (
+        <div style={{ padding: "0 16px" }}>
+          {!prideluje.user_id ? (
+            <p className="hlaska-chyba">
+              {prideluje.full_name} nemá účet. Oprávnění se přiděluje
+              přihlášenému člověku — nejdřív mu pošlete pozvánku.
+            </p>
+          ) : !clenstviProPanel ? (
+            <p className="hlaska-chyba">
+              {prideluje.full_name} má účet, ale ve firmě zatím žádné
+              členství. Pozvánku nejspíš ještě nepřijal.
+            </p>
+          ) : (
+            <PanelOpravneni
+              rozsah={rozsah}
+              jmeno={prideluje.full_name}
+              zamestnanec={prideluje.id}
+              opravneni={nabizenaOpravneni}
+              pobocky={ctx.branches.map((b) => ({ id: b.id, nazev: b.name }))}
+              smiFiremni={ctx.membership.scope === "tenant"}
+              nynejsiRole={clenstviProPanel.role_id}
+              nynejsiUroven={clenstviProPanel.scope === "tenant" ? "tenant" : "branch"}
+              nynejsiPobocky={pobockyClena.map((r) => String(r.branch_id))}
+              jaSam={clenstviProPanel.user_id === uzivatel?.id}
+            />
+          )}
+        </div>
+      ) : null}
+
       {/* Seznam */}
       <div style={{ overflowX: "auto", marginTop: "32px" }}>
         <table style={tabulka}>
@@ -498,10 +577,16 @@ export default async function NastaveniLide({
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   {!z.user_id ? (
                     <span style={{ color: "var(--muted)" }}>—</span>
-                  ) : roleUctu.get(z.user_id) ? (
-                    nazevRole.get(roleUctu.get(z.user_id) as string) ?? "—"
                   ) : (
-                    <span style={cekaNaPrideleni}>čeká na přidělení</span>
+                    <Link
+                      href={`/${rozsah}/nastaveni/lide?opravneni=${z.id}`}
+                      style={roleUctu.get(z.user_id) ? undefined : cekaNaPrideleni}
+                      title="Přidělit oprávnění a rozsah"
+                    >
+                      {roleUctu.get(z.user_id)
+                        ? nazevRole.get(roleUctu.get(z.user_id) as string) ?? "—"
+                        : "čeká na přidělení"}
+                    </Link>
                   )}
                 </td>
 
@@ -655,6 +740,16 @@ function popisChyby(kod: string): string {
       return "Sazba musí být číslo a nesmí být záporná.";
     case "sazba-pravo":
       return "Na zadávání sazeb nemáte právo.";
+    case "opravneni-bez-uctu":
+      return "Oprávnění se přiděluje přihlášenému člověku. Tenhle účet nemá — pošlete mu nejdřív pozvánku.";
+    case "opravneni-bez-clenstvi":
+      return "Ten člověk zatím pozvánku nepřijal, takže ve firmě nemá členství, kterému by šlo oprávnění přidělit.";
+    case "opravneni-neprovedeno":
+      return "Oprávnění se neuložilo. Buď je to vaše vlastní členství (to měnit nejde), nebo přidělujete víc, než máte sami.";
+    case "opravneni-pobocky":
+      return "Oprávnění se uložilo, ale pobočky ne — nejspíš mezi nimi je taková, na kterou sami nemáte právo.";
+    case "opravneni":
+      return "Oprávnění se nepodařilo uložit.";
     default:
       return "Uložení se nepovedlo. Zkuste to prosím znovu.";
   }

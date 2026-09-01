@@ -36,6 +36,15 @@ export type IkonaKlic =
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */
   segment: string
+  /**
+   * Absolutní adresa mimo rozsah.
+   *
+   * Osobní obrazovky patří člověku, ne provozovně — a člověk, kterému
+   * ještě nikdo nepřidělil oprávnění, žádný platný rozsah nemá, takže
+   * by se na adresu s rozsahem ani nedostal.
+   * Viz docs/odpovedi-pozvanky-2026-09-01.md, oddíl 2.
+   */
+  adresa?: string
   nazev: string
   /** Zkrácený název do spodní lišty na mobilu, kde je málo místa. */
   kratky: string
@@ -106,7 +115,7 @@ export const NASTAVENI: Polozka[] = [
   // Moje údaje nejsou správa firmy, ale osobní obrazovka: co o mně
   // aplikace vede, oprava kontaktu, souhlasy a výpis. Proto pravo: null
   // — patřit do firmy stačí.
-  { segment: 'moje-udaje', nazev: 'Moje údaje', kratky: 'Moje údaje', modul: 'provoz', pravo: null, hotovo: true, ikona: 'clovek' },
+  { segment: 'moje-udaje', adresa: '/moje-udaje', nazev: 'Moje údaje', kratky: 'Moje údaje', modul: 'provoz', pravo: null, hotovo: true, ikona: 'clovek' },
   // Zařízení pobočky — tablety, na kterých běží kiosek. Patří
   // k nastavení pobočky, proto settings.manage.
   { segment: 'nastaveni/zarizeni', nazev: 'Zařízení', kratky: 'Zařízení', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },

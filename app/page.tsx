@@ -44,20 +44,11 @@ export default async function Home() {
     bod 2). Pozvánka smí přijít bez role — teprve vedoucí pak rozhodne,
     co člověk uvidí.
 
-    Musí to být VĚTA, ne prázdný rozcestník. Bez tohohle by se takový
-    člověk podle rozsahu členství díval buď na rám s prázdnou nabídkou,
-    nebo na „Sem nemáte přístup“ — obojí vypadá jako porucha a je to
-    první, co z Foodtabu uvidí.
+    Má to vlastní adresu, ne jen jinou větev téhle stránky: obrazovka
+    se ze své podstaty ukazuje člověku bez rozsahu a musí jít poslat
+    odkazem („mrkni sem, ozvi se mi“).
   */
-  if (!ctx.role) {
-    return (
-      <Sdeleni samostatne nadpis="Účet je hotový">
-        Přihlášení proběhlo v pořádku. Zatím vám ale nikdo nepřidělil
-        oprávnění, takže tu není co otevřít — ozvěte se vedoucímu.
-        Jakmile vám oprávnění přidělí, uvidíte tady rovnou svůj rozpis.
-      </Sdeleni>
-    );
-  }
+  if (!ctx.role) redirect("/zatim-bez-opravneni");
 
   // Bez určení rozsahu: resolveScope() vybere firemní úroveň tomu, kdo na
   // ni má, ostatním jejich první pobočku.

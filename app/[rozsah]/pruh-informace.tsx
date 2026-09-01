@@ -68,7 +68,7 @@ export default async function PruhInformace({
             : 'Přečtěte si, co o vás firma vede a proč. Nic se tím nepodepisuje.'}
         </span>
       </span>
-      <Link href={`/${rozsah}/moje-udaje#informace`} className="ft-tl ft-tl-hlavni ft-tl-male">
+      <Link href="/moje-udaje#informace" className="ft-tl ft-tl-hlavni ft-tl-male">
         Zobrazit
       </Link>
     </div>

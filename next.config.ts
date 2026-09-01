@@ -17,6 +17,26 @@ const nextConfig: NextConfig = {
         destination: "/:rozsah/dochazka",
         permanent: true,
       },
+      /*
+        Moje údaje se odstěhovaly zpod rozsahu ven: osobní údaje patří
+        člověku, ne provozovně, a kdo čeká na přidělení oprávnění, žádný
+        platný rozsah nemá — na `/cerna-perla/moje-udaje` by se tedy
+        nedostal. Viz docs/odpovedi-pozvanky-2026-09-01.md, oddíl 2.
+
+        Vyjmenované cesty jsou dvě, ne jedna se zástupným znakem:
+        `/:rozsah/moje-udaje/:cesta*` by chytalo i adresy, které nikdy
+        neexistovaly, a tvářilo se, že vedou někam.
+      */
+      {
+        source: "/:rozsah/moje-udaje",
+        destination: "/moje-udaje",
+        permanent: true,
+      },
+      {
+        source: "/:rozsah/moje-udaje/export",
+        destination: "/moje-udaje/export",
+        permanent: true,
+      },
     ];
   },
 };
