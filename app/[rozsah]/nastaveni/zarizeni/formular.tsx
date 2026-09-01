@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react'
 
+import { qrSvg } from '@/lib/qr'
 import { vystavitKod, type StavKodu } from './akce'
 
 /**
@@ -69,13 +70,47 @@ export default function FormularKodu({
 
       {stav.stav === 'kod' ? (
         <div style={ramecek}>
-          <p style={{ margin: '0 0 4px', fontSize: '13px' }}>
-            Kód pro <strong>{stav.nazev}</strong> — opište ho na tabletu:
+          <p style={{ margin: '0 0 12px', fontSize: '13px' }}>
+            Kód pro <strong>{stav.nazev}</strong>. Na tabletu načtěte QR
+            a kód <strong>opište</strong>:
           </p>
-          <p style={kodStyl}>{stav.kod}</p>
-          <p style={{ margin: '8px 0 0', fontSize: '12.5px' }}>
-            Ukáže se jenom teď. Když ho ztratíte, vystavte nový — přečíst
-            se nedá ani z databáze.
+
+          <div style={dvojice}>
+            {/*
+              QR nese JEN ADRESU, ne kód.
+
+              Registrační kód je jednorázový klíč k tomu, aby se ze
+              zařízení stal důvěryhodný tablet pobočky. QR se dá vyfotit
+              přes rameno a přečíst i z dálky; opsat osm znaků jednou za
+              život tabletu není práce, kvůli které by to stálo za
+              riziko. Viz docs/ukoly-codea-drobnosti-2026-09-01.md, bod 3.
+            */}
+            <div
+              style={{ lineHeight: 0 }}
+              dangerouslySetInnerHTML={{
+                __html: qrSvg(adresaKiosku(), {
+                  velikost: 200,
+                  popis: 'QR kód s adresou kiosku',
+                }),
+              }}
+            />
+
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: '0 0 4px', fontSize: '12px', color: 'var(--muted)' }}>
+                Adresa (pro toho, kdo QR načíst nemá čím)
+              </p>
+              <p style={adresaStyl}>{adresaKiosku()}</p>
+
+              <p style={{ margin: '12px 0 4px', fontSize: '12px', color: 'var(--muted)' }}>
+                Kód k opsání
+              </p>
+              <p style={kodStyl}>{stav.kod}</p>
+            </div>
+          </div>
+
+          <p style={{ margin: '12px 0 0', fontSize: '12.5px' }}>
+            Kód se ukáže jenom teď. Když ho ztratíte, vystavte nový —
+            přečíst se nedá ani z databáze.
           </p>
         </div>
       ) : null}
@@ -135,6 +170,26 @@ const ramecek = {
   border: '1px solid var(--mosaz)',
   borderRadius: '12px',
   background: 'var(--paper)',
+  color: 'var(--ink)',
+} as const
+
+/** Adresa kiosku. Bere se z prohlížeče — tablet je na téže síti. */
+function adresaKiosku(): string {
+  const puvod = typeof window === 'undefined' ? '' : window.location.origin
+  return `${puvod}/kiosek`
+}
+
+const dvojice = {
+  display: 'flex',
+  gap: '18px',
+  alignItems: 'flex-start',
+  flexWrap: 'wrap' as const,
+} as const
+
+const adresaStyl = {
+  margin: 0,
+  fontSize: '14px',
+  wordBreak: 'break-all' as const,
   color: 'var(--ink)',
 } as const
 

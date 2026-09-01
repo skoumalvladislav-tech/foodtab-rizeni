@@ -11,6 +11,7 @@ import {
   prvniDenMesice,
   sazbaZaHodinu,
 } from "@/lib/mzdy";
+import { lideProPobocku } from "@/lib/lide-pobocky";
 import { pocet, prisudek } from "@/lib/sklonovani";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
@@ -90,10 +91,22 @@ export default async function Dochazka({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
-  searchParams: Promise<{ chyba?: string; zapsano?: string; mesic?: string }>;
+  searchParams: Promise<{
+    chyba?: string;
+    zapsano?: string;
+    mesic?: string;
+    doplnit?: string;
+    den?: string;
+  }>;
 }) {
   const { rozsah } = await params;
-  const { chyba: chybaRucne, zapsano, mesic: mesicParam } = await searchParams;
+  const {
+    chyba: chybaRucne,
+    zapsano,
+    mesic: mesicParam,
+    doplnit,
+    den: denDoplneni,
+  } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -446,30 +459,10 @@ export default async function Dochazka({
     směnu týden zpátky a týden dopředu. Je v databázi schválně, aby to
     šlo zkontrolovat scénářem a nevznikalo to počtvrté znovu.
   */
-  const doVyberu: { id: string; jmeno: string; domovska: boolean }[] = [];
-  if (smiZapsatRucne && scope.branchId && den) {
-    const { data: lideProPobocku, error: chybaVyberu } = await supabase.rpc(
-      "lide_pro_pobocku",
-      {
-        p_tenant: tenantId,
-        p_branch: scope.branchId,
-        p_od: posunDatum(den, -7),
-        p_do: posunDatum(den, 7),
-      },
-    );
-    // Dokud neproběhne migrace 20260901150000, průzor neexistuje —
-    // formulář se pak nekreslí místo toho, aby obrazovka spadla.
-    if (chybaVyberu && !funkceNeexistuje(chybaVyberu)) {
-      throw new DotazSelhal("lidé pro ruční zápis", chybaVyberu);
-    }
-    for (const c of (lideProPobocku ?? []) as {
-      employee_id: string;
-      jmeno: string;
-      domovska: boolean;
-    }[]) {
-      doVyberu.push({ id: c.employee_id, jmeno: c.jmeno, domovska: c.domovska });
-    }
-  }
+  const doVyberu =
+    smiZapsatRucne && scope.branchId && den
+      ? await lideProPobocku(tenantId, scope.branchId, den)
+      : [];
 
   /*
     Nedokončená docházka. Nález z kontroly: obrazovka tvrdila „Jste
@@ -481,6 +474,8 @@ export default async function Dochazka({
   type Nedokoncena = {
     employee_id: string;
     jmeno: string;
+    /** Pobočka záznamu — formulář ručního zápisu je jen na ní. */
+    branch_id: string;
     business_date: string;
     zacatek: string;
     moje: boolean;
@@ -506,6 +501,24 @@ export default async function Dochazka({
     nedokoncene = (otevrene ?? []) as Nedokoncena[];
   }
 
+  /*
+    „Doplnit odchod“ z panelu nedokončených (zadání, body 4 a 8).
+
+    Adrese se nevěří: člověk se bere z nedokončených záznamů, které
+    databáze vrátila TOMUHLE uživateli, ne podle toho, co přišlo
+    v parametru. Kdo si adresu upraví na cizí id, nedostane nic —
+    a zápis by mu stejně neprošel politikou.
+  */
+  const predvyplnit = (() => {
+    if (!doplnit || !denDoplneni) return null;
+    const z = nedokoncene.find(
+      (r) => r.employee_id === doplnit && r.business_date === denDoplneni,
+    );
+    if (!z) return null;
+    return { zamestnanec: z.employee_id, den: z.business_date, jmeno: z.jmeno };
+  })();
+
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const ostatni = [...stavy.entries()].filter(([id]) => id !== ja.id);
@@ -522,7 +535,15 @@ export default async function Dochazka({
           nevidí. Váže se na pobočku — na firemní úrovni se nekreslí,
           protože docházka patří k místu.
         */}
-        <PanelNedokoncene zaznamy={nedokoncene} smiOpravit={smiZapsatRucne} />
+        <PanelNedokoncene
+          zaznamy={nedokoncene.map((z) => ({
+            ...z,
+            pobockaSlug: ctx.branches.find((b) => b.id === z.branch_id)?.slug ?? null,
+            pobockaNazev: ctx.branches.find((b) => b.id === z.branch_id)?.name ?? null,
+          }))}
+          smiOpravit={smiZapsatRucne}
+          naPobocce={scope.level === "branch"}
+        />
 
         {/*
           Prázdná nabídka = formulář, do kterého nejde nic vybrat.
@@ -538,6 +559,7 @@ export default async function Dochazka({
             lide={doVyberu}
             chyba={chybaRucne}
             zapsano={zapsano === "1"}
+            predvyplnit={predvyplnit}
           />
         ) : null}
 
@@ -1029,7 +1051,8 @@ function DlazdiceVydelku({
           }}
         >
           {pocet(v.zaloh_nepotvrzenych, "záloha", "zálohy", "záloh")}{" "}
-          {prisudek(v.zaloh_nepotvrzenych, "čeká", "čeká")} na potvrzení PINem
+          {prisudek(v.zaloh_nepotvrzenych, "čeká", "čekají", "čeká")} na
+          potvrzení PINem
         </p>
       ) : null}
 
@@ -1092,7 +1115,13 @@ function DlazdiceVydelku({
           }}
         >
           {pocet(nedokoncenych, "příchod", "příchody", "příchodů")} bez
-          odchodu {prisudek(nedokoncenych, "se nezapočítal", "se nezapočítaly")}
+          odchodu{" "}
+          {prisudek(
+            nedokoncenych,
+            "se nezapočítal",
+            "se nezapočítaly",
+            "se nezapočítalo",
+          )}
         </p>
       ) : null}
     </section>

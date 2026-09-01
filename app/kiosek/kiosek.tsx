@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
+import { qrSvg } from '@/lib/qr'
 import { getBrowserSupabase } from '@/lib/supabase/client'
 
 /**
@@ -270,12 +271,37 @@ export default function Kiosek() {
         <h1 style={{ ...nadpis, marginTop: '4px' }}>Docházka</h1>
 
         <div style={mrizka}>
+          {/*
+            QR, ne osmiznakový kód k opsání.
+
+            Zadání (docs/kiosek-pin-zalohy-zadani.md, uspořádání A) chce
+            QR měnící se každých 30–60 vteřin, který zaměstnanec načte
+            telefonem. Kód se tu do QR jen zabalí do adresy — tajemství
+            pobočky do prohlížeče nejde, to zůstává na serveru.
+
+            Osmiznakový kód zůstává POD QR jako záložní cesta: kdo nemá
+            čím načíst, opíše ho.
+          */}
           <section>
-            <p style={popisek}>Kód k píchnutí telefonem</p>
+            <p style={popisek}>Načtěte telefonem</p>
+
+            <div
+              style={{ lineHeight: 0 }}
+              dangerouslySetInnerHTML={{
+                __html: qrSvg(adresaPichnuti(stav.kod), {
+                  velikost: 220,
+                  popis: 'QR kód k píchnutí',
+                }),
+              }}
+            />
+
+            <p style={{ ...popis, margin: '10px 0 0' }}>
+              Nemáte čím načíst? Opište kód:
+            </p>
             <p style={kodStyl}>{stav.kod}</p>
             <p style={{ ...popis, marginBottom: 0 }}>
-              Načtěte ho v aplikaci na Docházce. Mění se každých{' '}
-              {stav.platnost} vteřin — vyfocený je za chvíli k ničemu.
+              Mění se každých {stav.platnost} vteřin — vyfocený je za
+              chvíli k ničemu, a to je celý jeho smysl.
             </p>
           </section>
 
@@ -394,6 +420,18 @@ export default function Kiosek() {
 function koruny(halere: number): string {
   const kc = Math.round(halere / 100)
   return `${kc.toString().replace(/\B(?=(\d{3})+$)/g, '\u00a0')} Kč`
+}
+
+/**
+ * Adresa, kterou nese QR. Kód je v ní — telefon ji otevře a člověk už
+ * jen ťukne na příchod nebo odchod.
+ *
+ * Původ se bere z prohlížeče: tablet i telefon jsou na téže síti
+ * a stejné adrese, takže tenhle údaj nikde jinde držet nemusíme.
+ */
+function adresaPichnuti(kod: string): string {
+  const puvod = typeof window === 'undefined' ? '' : window.location.origin
+  return `${puvod}/pichnout?kod=${encodeURIComponent(kod)}`
 }
 
 /** Z „07:30:00“ udělá „7:30“. */

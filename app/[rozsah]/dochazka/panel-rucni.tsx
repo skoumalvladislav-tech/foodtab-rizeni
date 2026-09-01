@@ -23,6 +23,7 @@ export default function PanelRucni({
   lide,
   chyba,
   zapsano,
+  predvyplnit,
 }: {
   rozsah: string
   pobockaId: string
@@ -30,9 +31,17 @@ export default function PanelRucni({
   lide: { id: string; jmeno: string; domovska: boolean }[]
   chyba?: string
   zapsano?: boolean
+  /**
+   * Předvyplnění z tlačítka „Doplnit odchod“ u nedokončeného záznamu.
+   *
+   * Čas se schválně NEPŘEDVYPLŇUJE. Aplikace ho vědět nemůže a
+   * nejbližší po ruce je „teď“ — přesně tak si Šéfík omylem uzavřel
+   * dnešek místo 31. srpna.
+   */
+  predvyplnit?: { zamestnanec: string; den: string; jmeno: string } | null
 }) {
   return (
-    <section style={panel}>
+    <section style={panel} id="rucni">
       <h2 style={nadpis}>Zapsat docházku ručně</h2>
       <p style={popis}>
         Pro toho, kdo zapomněl telefon. Záznam se uloží označený jako
@@ -41,6 +50,15 @@ export default function PanelRucni({
         V nabídce jsou i lidé, kteří sem jen zaskakují — mají tu směnu,
         i když patří jinam.
       </p>
+
+      {predvyplnit ? (
+        <p style={ramecekPredvyplneno}>
+          Doplňujete <strong>odchod</strong> pro{' '}
+          <strong>{predvyplnit.jmeno}</strong> k{' '}
+          <strong>{denCesky(predvyplnit.den)}</strong> Zbývá čas — ten
+          aplikace vědět nemůže.
+        </p>
+      ) : null}
 
       {chyba ? <p className="hlaska-chyba">{popisChyby(chyba)}</p> : null}
       {zapsano ? (
@@ -55,7 +73,12 @@ export default function PanelRucni({
 
         <label style={poleLabel}>
           <span>Kdo</span>
-          <select name="zamestnanec" required style={pole}>
+          <select
+            name="zamestnanec"
+            required
+            defaultValue={predvyplnit?.zamestnanec ?? ''}
+            style={pole}
+          >
             <option value="">— vyberte —</option>
             {lide.map((c) => (
               <option key={c.id} value={c.id}>
@@ -68,7 +91,12 @@ export default function PanelRucni({
 
         <label style={poleLabel}>
           <span>Co</span>
-          <select name="druh" required defaultValue="in" style={pole}>
+          <select
+            name="druh"
+            required
+            defaultValue={predvyplnit ? 'out' : 'in'}
+            style={pole}
+          >
             <option value="in">Příchod</option>
             <option value="out">Odchod</option>
             <option value="break_start">Začátek přestávky</option>
@@ -78,7 +106,19 @@ export default function PanelRucni({
 
         <label style={poleLabel}>
           <span>Kdy</span>
-          <input name="kdy" type="datetime-local" required style={pole} />
+          {/*
+            Datum předvyplněné, čas prázdný. Pole datetime-local bez času
+            neprojde povinným polem, takže se dosadí konec provozního
+            dne jako výchozí bod — člověk ho přepíše, ale nezačíná
+            u dneška.
+          */}
+          <input
+            name="kdy"
+            type="datetime-local"
+            required
+            defaultValue={predvyplnit ? `${predvyplnit.den}T18:00` : undefined}
+            style={pole}
+          />
         </label>
 
         <label style={{ ...poleLabel, gridColumn: '1 / -1' }}>
@@ -103,6 +143,14 @@ export default function PanelRucni({
   )
 }
 
+/** „pondělí 31. 8.“ */
+function denCesky(iso: string): string {
+  const d = new Date(`${iso}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  const dny = ['neděle', 'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota']
+  return `${dny[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`
+}
+
 function popisChyby(kod: string): string {
   switch (kod) {
     case 'duvod':
@@ -123,6 +171,17 @@ const panel = {
 } as const
 
 const nadpis = { margin: '0 0 8px', fontSize: '17px', color: 'var(--ink)' } as const
+
+const ramecekPredvyplneno = {
+  margin: '0 0 12px',
+  padding: '10px 12px',
+  border: '1px solid var(--mosaz)',
+  borderRadius: '10px',
+  background: 'var(--paper)',
+  color: 'var(--ink)',
+  fontSize: '13.5px',
+  lineHeight: 1.5,
+} as const
 
 const popis = {
   margin: '0 0 14px',

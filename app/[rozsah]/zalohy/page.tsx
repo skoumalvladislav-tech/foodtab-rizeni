@@ -2,7 +2,9 @@ import { redirect } from 'next/navigation'
 
 import { hasAccess } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { jmenoDoNabidky, lideProPobocku } from '@/lib/lide-pobocky'
 import { koruny, prvniDenMesice } from '@/lib/mzdy'
+import { provozniDen } from '@/lib/provozni-den'
 import { pocet } from '@/lib/sklonovani'
 import { funkceNeexistuje, seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -113,26 +115,29 @@ export default async function Zalohy({
 
   const zalohy = (zalohyData ?? []) as Zaloha[]
 
-  // Lidé, kterým jde vyplácet. Na pobočkové adrese jen ta pobočka.
-  const lide = smiVyplacet
-    ? await seznam<{ id: string; full_name: string; branch_id: string | null }>(
-        'zaměstnanci k záloze',
-        (pristup.stav === 'ok' && pristup.scope.branchId
-          ? supabase
-              .from('employees')
-              .select('id, full_name, branch_id')
-              .eq('tenant_id', tenantId)
-              .eq('branch_id', pristup.scope.branchId)
-          : supabase
-              .from('employees')
-              .select('id, full_name, branch_id')
-              .eq('tenant_id', tenantId)
-        )
-          .is('deleted_at', null)
-          .not('branch_id', 'is', null)
-          .order('full_name'),
-      )
-    : []
+  /*
+    Lidé, kterým jde vyplácet.
+
+    Stejný zdroj jako ruční zápis docházky (lib/lide-pobocky.ts): lidé
+    pobočky PLUS každý, kdo tu má směnu v okně, se stejným označením
+    „zaskakuje“. Je to tentýž případ a tentýž důvod — kdo tu dnes stojí
+    směnu, tomu může být potřeba vyplatit zálohu.
+
+    Dřív to bylo napsané dvakrát a rozešlo se to: docházka zaskakující
+    nabízela, zálohy je nenabízely vůbec
+    (docs/ukoly-codea-drobnosti-2026-09-01.md, bod 2).
+
+    Na firemní úrovni se nevyplácí: záloha se vydává na pobočce, protože
+    ji tam někdo fyzicky podá z ruky do ruky.
+  */
+  const pobockaVydeje =
+    pristup.stav === 'ok' ? pristup.scope.branchId : null
+  const denVydeje = pobockaVydeje ? await provozniDen(pobockaVydeje) : null
+
+  const lide =
+    smiVyplacet && pobockaVydeje && denVydeje
+      ? await lideProPobocku(tenantId, pobockaVydeje, denVydeje)
+      : []
 
   const { data: nastaveniData, error: chybaNastaveni } = await supabase
     .from('tenant_settings')
@@ -172,17 +177,28 @@ export default async function Zalohy({
           </p>
         ) : null}
 
-        {smiVyplacet ? (
+        {smiVyplacet && !pobockaVydeje ? (
+          <p style={ramecek}>
+            <strong>Zálohu vyplatíte na pobočce.</strong> Hotovost někdo
+            podá z ruky do ruky, takže se záloha váže na místo —
+            přepněte se na pobočku a formulář se objeví. Seznam níž
+            ukazuje zálohy všech poboček, na které vidíte.
+          </p>
+        ) : null}
+
+        {smiVyplacet && pobockaVydeje ? (
           <FormularZalohy
             rozsah={rozsah}
-            lide={lide.map((l) => ({ id: l.id, jmeno: l.full_name }))}
+            lide={lide.map((l) => ({ id: l.id, jmeno: jmenoDoNabidky(l) }))}
           />
-        ) : (
+        ) : null}
+
+        {!smiVyplacet ? (
           <p style={{ ...popisSekce, marginBottom: '16px' }}>
             Zálohy vidíte, protože děláte mzdy. Vyplácet je smí ten, kdo
             má právo <code>advances.manage</code>.
           </p>
-        )}
+        ) : null}
 
         <h2 style={nadpisSekce}>Tenhle měsíc</h2>
         <p style={popisSekce}>

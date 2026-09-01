@@ -35,13 +35,38 @@ export function pocet(n: number, jedna: string, dve: string, pet: string): strin
 }
 
 /**
- * Sloveso nebo přídavné jméno v přísudku, které se řídí počtem:
- * „1 záznam NENÍ dokončený“ × „2 záznamy NEJSOU dokončené“.
+ * Sloveso nebo přídavné jméno v přísudku, které se řídí počtem.
  *
- * Tvary pro 2–4 a pro 5+ jsou v češtině tytéž („nejsou dokončené“),
- * na rozdíl od podstatného jména. Proto dva parametry, ne tři —
- * třetí by svádělo vymýšlet rozdíl, který v jazyce není.
+ * POZOR, TOHLE JSOU TŘI TVARY, NE DVA. Nejdřív tu byly dva a bylo to
+ * špatně — čeština u čísla 5 a víc přechází do jednotného čísla:
+ *
+ *   1 záznam   NENÍ dokončený
+ *   2 záznamy  NEJSOU dokončené
+ *   5 záznamů  NENÍ dokončených
+ *
+ * „5 záznamů nejsou dokončené“ zní jako strojový překlad úplně stejně
+ * jako „2 záznamů“. Skloňování v češtině není jen koncovka počítaného
+ * slova — mění se i sloveso a přídavné jméno.
  */
-export function prisudek(n: number, jedno: string, vice: string): string {
-  return Math.abs(n) === 1 ? jedno : vice
+export function prisudek(
+  n: number,
+  jedno: string,
+  dve: string,
+  pet: string = jedno,
+): string {
+  const k = Math.abs(n)
+  if (k === 1) return jedno
+  if (k >= 2 && k <= 4) return dve
+  return pet
+}
+
+/**
+ * Celá věta o počtu: „2 záznamy nejsou dokončené“.
+ *
+ * Bere tři hotové věty, ne kousky. Skládat je z podstatného jména
+ * a přísudku zvlášť svádí k tomu, že se jeden z nich zapomene ohnout —
+ * přesně tak vzniklo „2 záznamy docházky NENÍ dokončených“.
+ */
+export function veta(n: number, jedna: string, dve: string, pet: string): string {
+  return `${n} ${sklonovat(n, jedna, dve, pet)}`
 }

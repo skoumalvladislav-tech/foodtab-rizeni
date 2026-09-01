@@ -18,17 +18,24 @@ import { pocet, prisudek } from '@/lib/sklonovani'
 export type NedokoncenaProp = {
   employee_id: string
   jmeno: string
+  branch_id: string
   business_date: string
   zacatek: string
   moje: boolean
+  /** Slug a název pobočky toho záznamu — kvůli odkazu na formulář. */
+  pobockaSlug: string | null
+  pobockaNazev: string | null
 }
 
 export default function PanelNedokoncene({
   zaznamy,
   smiOpravit,
+  naPobocce,
 }: {
   zaznamy: NedokoncenaProp[]
   smiOpravit: boolean
+  /** Jsme na pobočce — formulář ručního zápisu je na téhle obrazovce. */
+  naPobocce: boolean
 }) {
   if (zaznamy.length === 0) return null
 
@@ -38,8 +45,18 @@ export default function PanelNedokoncene({
   return (
     <section style={panel}>
       <h2 style={nadpis}>
+        {/*
+          Celá věta ve třech tvarech, ne jen podstatné jméno. Stálo tu
+          „2 záznamy docházky NENÍ dokončených“ — jméno se srovnalo,
+          zbytek věty ne.
+        */}
         {pocet(zaznamy.length, 'záznam', 'záznamy', 'záznamů')} docházky{' '}
-        {prisudek(zaznamy.length, 'není dokončený', 'není dokončených')}
+        {prisudek(
+          zaznamy.length,
+          'není dokončený',
+          'nejsou dokončené',
+          'není dokončených',
+        )}
       </h2>
 
       <p style={popis}>
@@ -55,15 +72,39 @@ export default function PanelNedokoncene({
               <strong>{z.moje ? 'Vy' : z.jmeno}</strong>{' '}
               <span style={{ color: 'var(--muted)' }}>
                 — příchod {den(z.business_date)} v {cas(z.zacatek)}, odchod chybí
+                {!naPobocce && z.pobockaNazev ? ` · ${z.pobockaNazev}` : ''}
               </span>
             </span>
+
+            {/*
+              Tlačítko u KAŽDÉHO řádku (zadání, body 4 a 8).
+
+              Bez něj stálo v panelu jen „doplňte ručním zápisem výš“ —
+              a ten formulář je prázdný. Kdo ho vyplňuje, si musel sám
+              zapamatovat člověka i datum a opsat je o kus výš. Nejbližší
+              po ruce je „teď“, takže se Šéfík trefil do dneška
+              a 31. srpna zůstalo otevřené.
+
+              Na firemní úrovni vede odkaz na POBOČKU toho záznamu —
+              formulář se kreslí jen tam a pobočku ten záznam zná.
+            */}
+            {smiOpravit && z.pobockaSlug ? (
+              <a
+                href={`/${z.pobockaSlug}/dochazka?doplnit=${z.employee_id}&den=${z.business_date}#rucni`}
+                className="ft-tl ft-tl-vedlejsi ft-tl-male"
+              >
+                {naPobocce
+                  ? 'Doplnit odchod'
+                  : `Doplnit na ${z.pobockaNazev ?? 'pobočce'}`}
+              </a>
+            ) : null}
           </li>
         ))}
       </ul>
 
       <p style={{ ...popis, marginBottom: 0 }}>
         {smiOpravit
-          ? 'Doplňte odchod ručním zápisem výš — s důvodem, ať je v evidenci poznat, že nevznikl píchnutím.'
+          ? 'Doplněný odchod se uloží jako ruční záznam — s důvodem, ať je v evidenci poznat, že nevznikl píchnutím.'
           : 'Opravit to může jen ten, kdo spravuje docházku. Řekněte si o to vedoucímu — sami si záznam dopsat nemůžete, jinak by ruční zápis obcházel celý smysl píchání.'}
       </p>
     </section>
@@ -109,4 +150,11 @@ const seznam = {
   gap: '6px',
 } as const
 
-const radek = { fontSize: '14px' } as const
+const radek = {
+  fontSize: '14px',
+  display: 'flex',
+  flexWrap: 'wrap' as const,
+  gap: '10px',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+} as const
