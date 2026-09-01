@@ -74,6 +74,12 @@ export const NABIDKA: Polozka[] = [
   // /moje-smeny drží přesměrování v next.config.ts, ne položka tady.
   { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
   { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny', jenPobocka: true },
+  // Zálohy jsou peníze, ne nastavení — proto v hlavní nabídce hned za
+  // Docházkou, ze které se počítají. Obrazovku otevírá i payroll.read,
+  // ale položka visí na advances.manage: kdo dělá mzdy, přijde si pro
+  // ni z Docházky, a nabídka má ukazovat to, co člověk dělá, ne všechno,
+  // kam se dostane.
+  { segment: 'zalohy', nazev: 'Zálohy', kratky: 'Zálohy', modul: 'provoz', pravo: 'advances.manage', hotovo: true, ikona: 'kniha' },
   { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'zpravy', nazev: 'Nástěnka', kratky: 'Zprávy', modul: 'provoz', pravo: 'communication.read', hotovo: true, ikona: 'zprava' },
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },

@@ -65,6 +65,9 @@ export const PERMISSIONS = [
   'payroll.manage',
   'payroll.read',
   'payroll.export',
+  // Vydávat peníze a vidět mzdy jsou dvě různé věci: vedoucí směny
+  // u okénka potřebuje vydat dva tisíce, ne vidět, kolik kdo bere.
+  'advances.manage',
   'approvals.decide',
   'agents.manage',
   'settings.manage',

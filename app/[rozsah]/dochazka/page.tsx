@@ -66,10 +66,20 @@ type Kolega = {
 /** Jak dopadla docházka u odpracované směny. */
 type StavDochazky = "uzavrena" | "neuzavrena" | "bez_zaznamu";
 
-/** Výsledek public.my_earnings — hotová čísla z databáze. */
+/** Výsledek public.muj_vyplatni_prehled — hotová čísla z databáze. */
 type Vydelek = {
   odpracovano_minut: number;
   vydelano_haleru: number;
+  zalohy_haleru: number;
+  zbyva_haleru: number;
+  zaloh_nepotvrzenych: number;
+  /**
+   * Volba firmy, jak se mají zálohy ukázat. Chodí spolu s čísly
+   * schválně: kdyby si obrazovka skládala součty z dvou dotazů, dřív
+   * nebo později by ukázala „zbývá k výplatě“ tam, kde si to firma
+   * nepřeje. Viz docs/kiosek-pin-zalohy-zadani.md, oddíl 7.
+   */
+  zobrazeni: "odecitat" | "jen_ukazat" | "neukazovat";
   dnu_bez_dochazky: number;
   sazba_chybi: boolean;
   hodinova_haleru: number | null;
@@ -293,7 +303,7 @@ export default async function Dochazka({
   const predchozi = posunMesic(mesic, -1);
   const nasledujici = mesic < tenhleMesic ? posunMesic(mesic, 1) : null;
   const { data: vydelekData, error: vydelekChyba } = await supabase.rpc(
-    "my_earnings",
+    "muj_vyplatni_prehled",
     { p_tenant: tenantId, p_mesic: mesic },
   );
   if (vydelekChyba && !funkceNeexistuje(vydelekChyba)) {
@@ -902,6 +912,11 @@ function DlazdiceVydelku({
         ) : null}
       </div>
 
+      {/*
+        Čtyři řádky ze zadání, oddíl 7 — kolik z nich se ukáže, říká
+        volba firmy. Hrubá mzda je pořád ta velká: je to hlavní číslo,
+        kvůli kterému sem člověk chodí.
+      */}
       {v.sazba_chybi || v.hodinova_haleru === null ? (
         <p style={{ margin: "6px 0 0", fontSize: "18px", color: "var(--ink)" }}>
           Sazba není zadaná
@@ -925,6 +940,60 @@ function DlazdiceVydelku({
           ? ` · ${sazbaZaHodinu(v.hodinova_haleru)}`
           : ""}
       </p>
+
+      {v.zobrazeni !== "neukazovat" && v.zalohy_haleru > 0 ? (
+        <dl style={radky}>
+          <dt style={radekPopis}>Vyplacené zálohy</dt>
+          <dd style={radekCastka}>{koruny(v.zalohy_haleru)}</dd>
+
+          {v.zobrazeni === "odecitat" ? (
+            <>
+              <dt style={{ ...radekPopis, color: "var(--ink)" }}>Zbývá k výplatě</dt>
+              <dd style={{ ...radekCastka, color: "var(--ink)", fontWeight: 600 }}>
+                {koruny(v.zbyva_haleru)}
+              </dd>
+            </>
+          ) : null}
+        </dl>
+      ) : null}
+
+      {/*
+        Bez téhle věty skončí první výplata po zavedení záloh hádkou
+        u baru — a bude oprávněná. Zálohy se vyplácejí z ČISTÉ mzdy,
+        takže na výplatní pásce bude číslo nižší než tady.
+      */}
+      {v.zobrazeni === "odecitat" && v.zalohy_haleru > 0 ? (
+        <p
+          style={{
+            margin: "8px 0 0",
+            fontSize: "12.5px",
+            color: "var(--muted)",
+            maxWidth: "56ch",
+            lineHeight: 1.5,
+          }}
+        >
+          „Zbývá k výplatě“ je hrubá mzda po odečtení záloh —{" "}
+          <strong>před daněmi a odvody</strong>. Na výplatní pásce bude
+          číslo nižší: zálohy se vyplácejí z čisté mzdy.
+        </p>
+      ) : null}
+
+      {v.zobrazeni !== "neukazovat" && v.zaloh_nepotvrzenych > 0 ? (
+        <p
+          style={{
+            display: "inline-block",
+            margin: "12px 0 0",
+            padding: "4px 10px",
+            borderRadius: "999px",
+            background: "var(--pozor-bg)",
+            color: "var(--pozor)",
+            fontSize: "13px",
+          }}
+        >
+          {pocet(v.zaloh_nepotvrzenych, "záloha", "zálohy", "záloh")}{" "}
+          {prisudek(v.zaloh_nepotvrzenych, "čeká", "čeká")} na potvrzení PINem
+        </p>
+      ) : null}
 
       {/*
         Nula si říká o vysvětlení. Aplikace ví, PROČ je nula — jestli
@@ -1191,3 +1260,28 @@ function duvodNuly(v: Vydelek, nedokoncenych: number): string {
 
   return "Za tenhle měsíc nemáte zapsanou žádnou docházku. Sazbu zadanou máte, takže jakmile se něco píchne, číslo se tu objeví.";
 }
+
+/* --- styly řádků výplatního přehledu -------------------------------- */
+
+const radky = {
+  display: "grid",
+  gridTemplateColumns: "1fr auto",
+  gap: "2px 16px",
+  margin: "12px 0 0",
+  paddingTop: "10px",
+  borderTop: "1px solid var(--line)",
+} as const;
+
+const radekPopis = {
+  margin: 0,
+  fontSize: "13.5px",
+  color: "var(--muted)",
+} as const;
+
+const radekCastka = {
+  margin: 0,
+  fontSize: "13.5px",
+  color: "var(--muted)",
+  textAlign: "right" as const,
+  fontVariantNumeric: "tabular-nums" as const,
+} as const;

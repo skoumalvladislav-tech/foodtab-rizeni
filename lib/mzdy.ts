@@ -17,6 +17,25 @@ export function koruny(haleru: number): string {
     .replace(/\s/g, " ")} Kč`;
 }
 
+/**
+ * Kč z formuláře na haléře.
+ *
+ * Přijímá „2000“, „2 000“, „2000,50“ i „2000.50“ — lidé píšou obojí
+ * a odmítnout čárku znamená odmítnout půlku Česka. Pevná mezera
+ * z `koruny()` se počítá taky, ať jde předvyplněnou hodnotu odeslat
+ * zpátky beze změny.
+ *
+ * Vrací null, když to není číslo. NEZAOKROUHLUJE potichu: víc než dvě
+ * desetinná místa je překlep, ne haléře, a spolknout ho by znamenalo
+ * vyplatit jinou částku, než kdo napsal.
+ */
+export function naHalere(vstup: string): number | null {
+  const t = vstup.replace(/[\s ]/g, "").replace(",", ".");
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
+  const [cela, des = ""] = t.split(".");
+  return Number(cela) * 100 + Number(des.padEnd(2, "0"));
+}
+
 /** „84 h 30 min“. Hodiny bez minut se píšou taky s minutami, ať sloupec sedí. */
 export function hodinyAMinuty(minut: number): string {
   const h = Math.floor(minut / 60);

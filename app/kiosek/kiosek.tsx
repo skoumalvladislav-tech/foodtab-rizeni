@@ -7,9 +7,9 @@ import { getBrowserSupabase } from '@/lib/supabase/client'
 /**
  * Obrazovka kiosku.
  *
- * Umí přesně čtyři věci ze zadání (oddíl 2) a nic dalšího:
- * ukázat měnící se kód, přijmout PIN a podle něj píchnout, ukázat, kdo
- * má dnes na téhle pobočce směnu. Potvrzení zálohy přijde s bodem 5.
+ * Umí přesně to ze zadání a nic dalšího: ukázat měnící se kód,
+ * přijmout PIN a podle něj píchnout, ukázat, kdo má dnes na téhle
+ * pobočce směnu, a nechat zaměstnance potvrdit zálohu PINem.
  *
  * Klíč zařízení leží v prohlížeči tabletu (localStorage). Do databáze
  * se posílá jen on — nikdy se nikam neukládá, kdo je přihlášený, protože
@@ -19,6 +19,7 @@ import { getBrowserSupabase } from '@/lib/supabase/client'
 const ULOZISTE = 'foodtab-kiosek-klic'
 
 type Smena = { jmeno: string; od: string; do: string }
+type Zaloha = { id: string; jmeno: string; castka_haleru: number }
 type Stav = {
   pobocka: string
   zarizeni: string
@@ -68,6 +69,7 @@ function klicServer(): string | null {
 export default function Kiosek() {
   const klic = useSyncExternalStore(odebirat, klicKlient, klicServer)
   const [stav, setStav] = useState<Stav | null>(null)
+  const [zalohy, setZalohy] = useState<Zaloha[]>([])
   const [chyba, setChyba] = useState('')
   const [hlaska, setHlaska] = useState('')
   const [pin, setPin] = useState('')
@@ -80,6 +82,15 @@ export default function Kiosek() {
       if (error) throw new Error(error.message)
       setStav(data as Stav)
       setChyba('')
+
+      /*
+        Nepotvrzené zálohy. Chodí zvlášť od stavu, protože se mění jindy:
+        kód se obnovuje po vteřinách, záloha přibude, když ji někdo
+        vyplatí. Chyba tady obrazovku neshodí — dokud není nasazená
+        migrace se zálohami, funkce prostě není a kiosek má píchat dál.
+      */
+      const { data: z } = await supabase.rpc('kiosk_zalohy', { p_klic: k })
+      setZalohy(Array.isArray(z) ? (z as Zaloha[]) : [])
     } catch (duvod) {
       setStav(null)
       setChyba(duvod instanceof Error ? duvod.message : 'Nepodařilo se spojit se serverem.')
@@ -122,6 +133,42 @@ export default function Kiosek() {
       ohlasit()
     } catch (duvod) {
       setChyba(duvod instanceof Error ? duvod.message : 'Registrace se nepovedla.')
+    }
+  }
+
+  /*
+    Potvrzení zálohy TÝMŽ PINem, jakým se píchá. Je to schválně stejné
+    gesto: člověk se u tabletu prokazuje jednou věcí, ne dvěma.
+
+    Potvrdit smí jen ten, komu záloha patří — a když PIN sedne někomu
+    jinému, dozví se jen „nesedí“. Kdo hádá, se nesmí z odpovědi
+    dozvědět, jestli se trefil.
+  */
+  async function potvrditZalohu(z: Zaloha) {
+    if (!klic || pin.length < 4) return
+    setCeka(true)
+    setHlaska('')
+    setChyba('')
+    try {
+      const supabase = getBrowserSupabase()
+      const { data, error } = await supabase.rpc('potvrdit_zalohu_pinem', {
+        p_klic: klic,
+        p_pin: pin,
+        p_zaloha: z.id,
+      })
+      if (error) throw new Error(error.message)
+      const r = (data as { ok: boolean; jmeno: string | null }[])[0]
+      if (!r?.ok) {
+        setChyba('PIN nesedí. Potvrdit zálohu může jen ten, komu patří.')
+      } else {
+        setHlaska(`${r.jmeno} — záloha ${koruny(z.castka_haleru)} potvrzena.`)
+        setZalohy((d) => d.filter((x) => x.id !== z.id))
+      }
+      setPin('')
+    } catch (duvod) {
+      setChyba(duvod instanceof Error ? duvod.message : 'Nepodařilo se potvrdit.')
+    } finally {
+      setCeka(false)
     }
   }
 
@@ -272,6 +319,52 @@ export default function Kiosek() {
           </section>
         </div>
 
+        {/*
+          Zálohy k potvrzení. Jsou nad seznamem směn schválně: je to
+          jediná věc na téhle obrazovce, na kterou se čeká — nepotvrzená
+          záloha je otevřený doklad.
+        */}
+        {zalohy.length > 0 ? (
+          <section style={{ marginTop: '20px' }}>
+            <p style={popisek}>Zálohy k potvrzení</p>
+            <p style={{ ...popis, margin: '0 0 10px' }}>
+              Zadejte svůj PIN nahoře a potvrďte svůj řádek. Potvrzením
+              stvrzujete, že jste hotovost dostali.
+            </p>
+            <ul style={seznam}>
+              {zalohy.map((z) => (
+                <li
+                  key={z.id}
+                  style={{
+                    display: 'flex',
+                    gap: '12px',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    padding: '10px 12px',
+                    border: '1px solid var(--line-2)',
+                    borderRadius: '12px',
+                  }}
+                >
+                  <span style={{ flex: '1 1 160px', fontSize: '15px' }}>
+                    <strong>{z.jmeno}</strong>{' '}
+                    <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {koruny(z.castka_haleru)}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="ft-tl ft-tl-vedlejsi"
+                    disabled={ceka || pin.length < 4}
+                    onClick={() => potvrditZalohu(z)}
+                  >
+                    Potvrdit PINem
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         <section style={{ marginTop: '20px' }}>
           <p style={popisek}>Dnes na směně</p>
           {stav.smeny.length === 0 ? (
@@ -295,6 +388,12 @@ export default function Kiosek() {
       </div>
     </main>
   )
+}
+
+/** Haléře na „2 000 Kč“. Mezera je oddělovač tisíců, ne čárka. */
+function koruny(halere: number): string {
+  const kc = Math.round(halere / 100)
+  return `${kc.toString().replace(/\B(?=(\d{3})+$)/g, '\u00a0')} Kč`
 }
 
 /** Z „07:30:00“ udělá „7:30“. */
