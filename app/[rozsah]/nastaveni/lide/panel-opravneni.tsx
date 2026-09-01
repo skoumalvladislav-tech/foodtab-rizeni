@@ -25,6 +25,7 @@ export default function PanelOpravneni({
   nynejsiUroven,
   nynejsiPobocky,
   jaSam,
+  posledniMajitel,
 }: {
   rozsah: string
   jmeno: string
@@ -40,10 +41,15 @@ export default function PanelOpravneni({
   nynejsiPobocky: string[]
   /** Vlastní členství nejde měnit — ani vlastníkem. */
   jaSam: boolean
+  /** Jediný majitel firmy. Přeřadit ho nejde, jinak firma zůstane bez majitele. */
+  posledniMajitel: boolean
 }) {
   const [uroven, setUroven] = useState<'tenant' | 'branch'>(
     smiFiremni ? nynejsiUroven : 'branch',
   )
+
+  // Obojí zavírá formulář ze stejného důvodu: změna by neprošla.
+  const zamceno = jaSam || posledniMajitel
 
   // Role, kterou má člověk dnes, ale přihlášený ji přidělit nesmí. Do
   // nabídky patří, jinak by ji odeslání formuláře tiše sebralo.
@@ -64,6 +70,19 @@ export default function PanelOpravneni({
         </p>
       ) : null}
 
+      {/*
+        Druhá obranná linie (docs/vlastniku-muze-byt-vic.md). Rozhodnutí
+        padá ve spoušti v databázi — tohle jen říká proč dřív, než na to
+        někdo klikne.
+      */}
+      {posledniMajitel ? (
+        <p style={ramecek}>
+          <strong>Tohle je jediný majitel firmy.</strong> Ve firmě musí
+          zůstat aspoň jeden — nejdřív jmenujte dalšího, teprve pak jde
+          tenhle přeřadit.
+        </p>
+      ) : null}
+
       <p style={popis}>
         Oprávnění říká <em>co</em> smí, rozsah <em>kde</em>. Jedno bez
         druhého neotevře nic — člověk s rolí a bez pobočky se přihlásí
@@ -79,7 +98,7 @@ export default function PanelOpravneni({
           <select
             name="opravneni"
             defaultValue={nynejsiRole ?? ''}
-            disabled={jaSam}
+            disabled={zamceno}
             style={pole}
           >
             <option value="">Žádné — čeká na přidělení</option>
@@ -91,7 +110,7 @@ export default function PanelOpravneni({
           </select>
         </label>
 
-        <fieldset style={skupina} disabled={jaSam}>
+        <fieldset style={skupina} disabled={zamceno}>
           <legend style={legenda}>Rozsah</legend>
 
           {smiFiremni ? (
@@ -152,7 +171,7 @@ export default function PanelOpravneni({
         </fieldset>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button type="submit" className="ft-tl ft-tl-hlavni" disabled={jaSam}>
+          <button type="submit" className="ft-tl ft-tl-hlavni" disabled={zamceno}>
             Uložit oprávnění
           </button>
           <a

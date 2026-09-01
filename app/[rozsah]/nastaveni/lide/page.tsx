@@ -212,6 +212,27 @@ export default async function NastaveniLide({
   const nazevRole = new Map(roleFirmy.map((r) => [r.id, r.label]));
 
   /*
+    Poslední majitel se nesmí dát odebrat (docs/vlastniku-muze-byt-vic.md).
+
+    Rozhodnutí padá ve spoušti v databázi; tohle je jen druhá obranná
+    linie — tlačítko se nenabídne a je u toho vysvětlení. Bez ní by
+    člověk klikl a dostal chybu, kterou nečekal.
+
+    Nenasazená migrace se promíjí: než projde, funkce v databázi není
+    a chová se to jako dosud. Zamknout Smazat u všech kvůli nedeplojnuté
+    funkci by bylo horší.
+  */
+  const rolMajitele = roleFirmy.find((r) => r.is_owner)?.id ?? null;
+  const jeMajitel = (userId: string | null) =>
+    userId != null && rolMajitele != null && roleUctu.get(userId) === rolMajitele;
+
+  const { data: pocetMajitelu } = await supabase.rpc("pocet_majitelu", {
+    p_tenant: tenantId,
+  });
+  const posledniMajitel = (userId: string | null) =>
+    typeof pocetMajitelu === "number" && pocetMajitelu === 1 && jeMajitel(userId);
+
+  /*
     Podklad pro panel přidělení. Načítá se jen pro toho jednoho člověka,
     kterého má vedoucí zrovna otevřeného — rozsahy všech by byl dotaz
     navíc kvůli sloupci, který v tabulce stejně není.
@@ -530,6 +551,7 @@ export default async function NastaveniLide({
               nynejsiUroven={clenstviProPanel.scope === "tenant" ? "tenant" : "branch"}
               nynejsiPobocky={pobockyClena.map((r) => String(r.branch_id))}
               jaSam={clenstviProPanel.user_id === uzivatel?.id}
+              posledniMajitel={posledniMajitel(clenstviProPanel.user_id)}
             />
           )}
         </div>
@@ -577,6 +599,13 @@ export default async function NastaveniLide({
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   {!z.user_id ? (
                     <span style={{ color: "var(--muted)" }}>—</span>
+                  ) : posledniMajitel(z.user_id) ? (
+                    <span title="Ve firmě musí zůstat aspoň jeden majitel.">
+                      {nazevRole.get(roleUctu.get(z.user_id) as string) ?? "—"}{" "}
+                      <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                        (jediný)
+                      </span>
+                    </span>
                   ) : (
                     <Link
                       href={`/${rozsah}/nastaveni/lide?opravneni=${z.id}`}
@@ -616,7 +645,21 @@ export default async function NastaveniLide({
                   >
                     Upravit
                   </Link>
-                  {!z.deleted_at && (
+                  {/*
+                    Poslední majitel se smazat nedá — spoušť v databázi
+                    to odmítne. Tlačítko se proto nenabízí a je u toho
+                    vysvětlení; klikat na něco, co skončí chybou, nemá
+                    smysl nabízet.
+                  */}
+                  {!z.deleted_at && posledniMajitel(z.user_id) ? (
+                    <span
+                      style={{ fontSize: "12.5px", color: "var(--muted)" }}
+                      title="Ve firmě musí zůstat aspoň jeden majitel. Nejdřív jmenujte dalšího."
+                    >
+                      jediný majitel
+                    </span>
+                  ) : null}
+                  {!z.deleted_at && !posledniMajitel(z.user_id) && (
                     <SmazatZamestnance
                       akce={smazatZamestnance}
                       id={z.id}
@@ -740,6 +783,9 @@ function popisChyby(kod: string): string {
       return "Sazba musí být číslo a nesmí být záporná.";
     case "sazba-pravo":
       return "Na zadávání sazeb nemáte právo.";
+    // Text píše databáze a chodí v adrese; tenhle je jen návěští.
+    case "smazani":
+      return "Smazat se to nepovedlo.";
     case "opravneni-bez-uctu":
       return "Oprávnění se přiděluje přihlášenému člověku. Tenhle účet nemá — pošlete mu nejdřív pozvánku.";
     case "opravneni-bez-clenstvi":

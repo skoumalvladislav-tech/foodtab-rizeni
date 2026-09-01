@@ -125,11 +125,26 @@ export async function smazatZamestnance(formData: FormData): Promise<void> {
   if (pristup.stav !== 'ok') return
 
   const supabase = await getServerSupabase()
-  await supabase
+  const { error } = await supabase
     .from('employees')
     .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)
     .eq('tenant_id', tenantId)
+
+  /*
+    Chyba se propouští, ne polyká. Dřív se tu výsledek zahazoval úplně,
+    takže odmítnuté smazání vypadalo přesně jako povedené.
+
+    Od migrace 20260902010000 tudy chodí i „Ve firmě musí zůstat aspoň
+    jeden majitel“ — spoušť, ne politika, protože přes politiku se maže
+    tiše. Bez tohohle by ta věta nikam nedošla a člověk by koukal na
+    zaměstnance, který se nesmazal, a nevěděl proč.
+  */
+  if (error) {
+    redirect(
+      `/${rozsah}/nastaveni/lide?chyba=smazani&text=${encodeURIComponent(error.message)}`,
+    )
+  }
 
   revalidatePath(`/${rozsah}/nastaveni/lide`)
 }
