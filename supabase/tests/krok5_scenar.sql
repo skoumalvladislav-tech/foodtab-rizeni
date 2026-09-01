@@ -405,6 +405,167 @@ begin
   perform pg_temp.check('píchnutí se neaudituje (jinak by audit zaplavily)', v_pocet = 0);
 end $$;
 
+
+\echo ''
+\echo '== Opravy po kontrole 1. 9. ==============================='
+-- docs/opravy-po-kontrole-2026-09-01.md
+--
+-- Bod 1: nabídka ručního zápisu vznikla dvakrát ze špatného zdroje —
+-- poprvé z dnešních událostí, podruhé z domovské pobočky. Kdo na
+-- pobočce jen zaskakuje a zapomene telefon, je nejpravděpodobnější
+-- případ ze všech, a v nabídce nebyl.
+--
+-- Bod 2: příchod bez odchodu se do mzdy nezapočítá (to je správně,
+-- z vymyšleného času odchodu by se počítala mzda), ale nebylo to nikde
+-- vidět. Tichá nula je horší než chyba.
+
+do $$
+declare
+  v_tenant   uuid;
+  v_domovska uuid;
+  v_cizi     uuid;
+  v_zaskok   uuid;
+  v_majitel  uuid := pg_temp.uid('majitel@foodtab.cz');
+  v_marek    uuid := pg_temp.uid('cisnik@foodtab.cz');
+  v_marek_e  uuid;
+  v_pocet    integer;
+  v_jmena    text;
+begin
+  select id into v_tenant from public.tenants limit 1;
+  select id into v_domovska from public.branches where slug = 'cerna-perla';
+  select id into v_cizi     from public.branches where slug = 'bernard-bar';
+  select id into v_marek_e  from public.employees where user_id = v_marek;
+
+  -- Člověk s domovskou pobočkou Perla, který má směnu na Bernardu.
+  insert into public.employees (tenant_id, branch_id, full_name)
+  values (v_tenant, v_domovska, 'Zaskakující Zkouška')
+  returning id into v_zaskok;
+
+  insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
+  values (v_tenant, v_cizi, v_zaskok, current_date, '14:00', '22:00');
+
+  perform set_config('test.user_id', v_majitel::text, false);
+  set local role authenticated;
+
+  -- 1. Kdo má na pobočce směnu, je v nabídce ručního zápisu, i když tam
+  -- nemá domovskou pobočku.
+  select string_agg(l.jmeno, ', ' order by l.jmeno) into v_jmena
+  from public.lide_pro_pobocku(
+    v_tenant, v_cizi, current_date - 7, current_date + 7) l;
+
+  if v_jmena is null or position('Zaskakující Zkouška' in v_jmena) = 0 then
+    raise exception
+      'SELHALO: kdo má na pobočce směnu, není v nabídce ručního zápisu (%)', v_jmena;
+  end if;
+  raise notice '  OK    kdo má na pobočce směnu, je v nabídce ručního zápisu';
+
+  -- A je poznat, že tam jen zaskakuje.
+  select count(*) into v_pocet
+  from public.lide_pro_pobocku(v_tenant, v_cizi, current_date - 7, current_date + 7) l
+  where l.jmeno = 'Zaskakující Zkouška' and not l.domovska;
+  if v_pocet <> 1 then
+    raise exception 'SELHALO: zaskakující se tváří jako domovský';
+  end if;
+  raise notice '  OK    a je poznat, že tam jen zaskakuje';
+
+  -- Mimo okno se směna nepočítá — nabídka není seznam všech lidí firmy.
+  select count(*) into v_pocet
+  from public.lide_pro_pobocku(v_tenant, v_cizi, current_date + 60, current_date + 67) l
+  where l.jmeno = 'Zaskakující Zkouška';
+  if v_pocet <> 0 then
+    raise exception 'SELHALO: směna mimo okno se do nabídky počítá';
+  end if;
+  raise notice '  OK    směna mimo okno se do nabídky nepočítá';
+
+  reset role;
+  delete from public.shifts where employee_id = v_zaskok;
+  delete from public.employees where id = v_zaskok;
+end $$;
+
+-- 2. Otevřený příchod je vidět.
+do $$
+declare
+  v_tenant  uuid;
+  v_branch  uuid;
+  v_marek   uuid := pg_temp.uid('cisnik@foodtab.cz');
+  v_majitel uuid := pg_temp.uid('majitel@foodtab.cz');
+  v_marek_e uuid;
+  v_pocet   integer;
+begin
+  select id into v_tenant from public.tenants limit 1;
+  select id, branch_id into v_marek_e, v_branch
+  from public.employees where user_id = v_marek;
+
+  -- Příchod bez odchodu, přesně jako nález z kontroly.
+  insert into public.attendance_events
+    (tenant_id, branch_id, employee_id, kind, occurred_at, business_date)
+  values (v_tenant, v_branch, v_marek_e, 'in',
+          now() - interval '10 hours', current_date - 1);
+
+  perform set_config('test.user_id', v_majitel::text, false);
+  set local role authenticated;
+  select count(*) into v_pocet
+  from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, v_branch) n
+  where n.employee_id = v_marek_e;
+  if v_pocet <> 1 then
+    raise exception 'SELHALO: otevřený příchod se nehlásí (%)', v_pocet;
+  end if;
+  raise notice '  OK    otevřený příchod je vidět vedoucímu';
+
+  -- Vlastní ho člověk vidí i bez attendance.read.
+  perform set_config('test.user_id', v_marek::text, false);
+  select count(*) into v_pocet
+  from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, null) n
+  where n.employee_id = v_marek_e and n.moje;
+  if v_pocet <> 1 then
+    raise exception 'SELHALO: člověk nevidí vlastní nedokončenou docházku';
+  end if;
+  raise notice '  OK    a člověk vidí i tu svoji';
+
+  -- Dopsaný odchod ho přestane hlásit. Aplikace ho sama nedopisuje —
+  -- z vymyšleného času odchodu by se počítala mzda.
+  reset role;
+  insert into public.attendance_events
+    (tenant_id, branch_id, employee_id, kind, occurred_at, business_date, source, note)
+  values (v_tenant, v_branch, v_marek_e, 'out',
+          now() - interval '2 hours', current_date - 1, 'manual', 'dopsáno vedoucím');
+
+  perform set_config('test.user_id', v_majitel::text, false);
+  set local role authenticated;
+  select count(*) into v_pocet
+  from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, v_branch) n
+  where n.employee_id = v_marek_e;
+  if v_pocet <> 0 then
+    raise exception 'SELHALO: po dopsání odchodu se hlásí dál';
+  end if;
+  raise notice '  OK    po dopsání odchodu se přestane hlásit';
+
+  reset role;
+  delete from public.attendance_events
+  where employee_id = v_marek_e and business_date = current_date - 1;
+end $$;
+
+-- 3. Jméno se nebere z e-mailu.
+do $$
+declare v_pocet integer;
+begin
+  select count(*) into v_pocet from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'app' and p.proname = 'create_tenant' and p.pronargs = 5;
+  if v_pocet <> 0 then
+    raise exception 'SELHALO: stará podoba create_tenant bez jména pořád existuje';
+  end if;
+  raise notice '  OK    create_tenant bez jména už neexistuje';
+
+  if pg_get_functiondef(
+       (select oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'app' and p.proname = 'handle_new_user')
+     ) like '%split_part%' then
+    raise exception 'SELHALO: profil se pořád pojmenovává z e-mailu';
+  end if;
+  raise notice '  OK    profil se z e-mailu nepojmenovává';
+end $$;
+
 reset role;
 
 \echo ''

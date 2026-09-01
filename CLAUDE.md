@@ -118,6 +118,36 @@ for (const l of document.querySelectorAll('link[rel=stylesheet]'))
   console.log(l.href, (await fetch(l.href).then(r => r.text())).includes('max-width: 960px'))
 ```
 
+### Zaseknutý Turbopack umí i 404
+
+Počtvrté, a jinak než předtím: neumí jen držet starý stylopis, **umí
+přestat obsluhovat celou větev adres**.
+
+Příznak z 1. 9. 2026 — `/[rozsah]/nastaveni/lide`, `/pobocky`, `/pozice`
+i `/role` vracely **404**, zatímco `/dochazka`, `/smeny`, `/upozorneni`
+a `/moje-udaje` na téže úrovni odpovídaly 200. Soubory na disku byly
+v pořádku, importy taky, nikde v kódu není jediné `notFound()`.
+**Smazání `.next` nepomohlo.** Stálo to hodinu.
+
+Rozhodlo tohle:
+
+```bash
+npm.cmd run build
+```
+
+Build vypsal seznam adres a všechny čtyři v něm byly — takže chyba
+nebyla v kódu. A protože build přepsal celý obsah `.next`, po dalším
+`npm.cmd run dev` už obrazovky chodily.
+
+**Pravidlo: když stránka vrací 404 a soubor přitom existuje, nehledej
+chybu v kódu.** Nejdřív `npm.cmd run build` — vypíše seznam adres a tím
+oddělí chybu v kódu od zaseknutého vývojového serveru.
+
+### PowerShell na Windows
+
+V PowerShellu se musí psát `npm.cmd` a `npx.cmd`. Verze `.ps1`
+neprojdou přes zákaz spouštění skriptů.
+
 ## Rozšíření Postgresu — nepoužívej je
 
 Supabase dává rozšíření do schématu `extensions`, lokální PostgreSQL do

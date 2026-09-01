@@ -11,13 +11,14 @@ import {
   prvniDenMesice,
   sazbaZaHodinu,
 } from "@/lib/mzdy";
-import { provozniDen } from "@/lib/provozni-den";
+import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
 import { zapsatDochazku } from "./akce";
 import PanelRucni from "./panel-rucni";
+import PanelNedokoncene from "./panel-nedokoncene";
 
 export const dynamic = "force-dynamic";
 
@@ -346,24 +347,77 @@ export default async function Dochazka({
   }
 
   /*
-    Lidé do ručního zápisu. Schválně se NEBEROU z dnešních událostí:
-    ručně se zapisuje právě tomu, kdo dnes nepíchl, takže mezi dnešními
-    událostmi nefiguruje. Formulář by nabízel všechny kromě toho, koho
-    je potřeba.
+    Lidé do ručního zápisu.
+
+    Je to potřetí, co se tahle nabídka staví — a dvakrát ze špatného
+    zdroje. Nejdřív z dnešních událostí (chyběl každý, kdo dnes nepíchl,
+    tedy přesně ten, komu se zapisuje ručně). Pak podle domovské
+    pobočky (chyběl každý, kdo na pobočce jen zaskakuje — a člověk na
+    cizí pobočce, který zapomene telefon, je nejpravděpodobnější případ
+    ze všech).
+
+    Teď je to dotaz v databázi: kdo na pobočku patří PLUS kdo tam má
+    směnu týden zpátky a týden dopředu. Je v databázi schválně, aby to
+    šlo zkontrolovat scénářem a nevznikalo to počtvrté znovu.
   */
-  const doVyberu: { id: string; jmeno: string }[] = [];
-  if (smiZapsatRucne && scope.branchId) {
-    const { data: lideNaPobocce, error: chybaVyberu } = await supabase
-      .from("employees")
-      .select("id, full_name")
-      .eq("tenant_id", tenantId)
-      .eq("branch_id", scope.branchId)
-      .is("deleted_at", null)
-      .order("full_name");
-    if (chybaVyberu) throw new DotazSelhal("zaměstnanci pobočky", chybaVyberu);
-    for (const c of lideNaPobocce ?? []) {
-      doVyberu.push({ id: c.id as string, jmeno: c.full_name as string });
+  const doVyberu: { id: string; jmeno: string; domovska: boolean }[] = [];
+  if (smiZapsatRucne && scope.branchId && den) {
+    const { data: lideProPobocku, error: chybaVyberu } = await supabase.rpc(
+      "lide_pro_pobocku",
+      {
+        p_tenant: tenantId,
+        p_branch: scope.branchId,
+        p_od: posunDatum(den, -7),
+        p_do: posunDatum(den, 7),
+      },
+    );
+    // Dokud neproběhne migrace 20260901150000, průzor neexistuje —
+    // formulář se pak nekreslí místo toho, aby obrazovka spadla.
+    if (chybaVyberu && !funkceNeexistuje(chybaVyberu)) {
+      throw new DotazSelhal("lidé pro ruční zápis", chybaVyberu);
     }
+    for (const c of (lideProPobocku ?? []) as {
+      employee_id: string;
+      jmeno: string;
+      domovska: boolean;
+    }[]) {
+      doVyberu.push({ id: c.employee_id, jmeno: c.jmeno, domovska: c.domovska });
+    }
+  }
+
+  /*
+    Nedokončená docházka. Nález z kontroly: obrazovka tvrdila „Jste
+    v práci · od 21:42“ a hned pod tím 0 h 0 min, 0 Kč. Otevřený příchod
+    se do mzdy nepočítá — a to je správně, z vymyšleného času odchodu by
+    se počítala mzda — ale musí být poznat, že se něco nezapočítalo.
+    Tichá nula je horší než chyba.
+  */
+  type Nedokoncena = {
+    employee_id: string;
+    jmeno: string;
+    business_date: string;
+    zacatek: string;
+    moje: boolean;
+  };
+  let nedokoncene: Nedokoncena[] = [];
+  if (den) {
+    const { data: otevrene, error: chybaOtevrene } = await supabase.rpc(
+      "nedokoncena_dochazka",
+      {
+        p_tenant: tenantId,
+        p_od: posunDatum(den, -30),
+        // Do VČEREJŠKA. Otevřený příchod v dnešním provozním dni není
+        // nedokončený záznam, ale člověk, který je právě v práci —
+        // hlásit mu to by znamenalo křičet na každého, kdo si píchl
+        // příchod a ještě neodešel.
+        p_do: posunDatum(den, -1),
+        p_branch: scope.branchId ?? null,
+      },
+    );
+    if (chybaOtevrene && !funkceNeexistuje(chybaOtevrene)) {
+      throw new DotazSelhal("nedokončená docházka", chybaOtevrene);
+    }
+    nedokoncene = (otevrene ?? []) as Nedokoncena[];
   }
 
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
@@ -382,7 +436,15 @@ export default async function Dochazka({
           nevidí. Váže se na pobočku — na firemní úrovni se nekreslí,
           protože docházka patří k místu.
         */}
-        {smiZapsatRucne && scope.branchId ? (
+        <PanelNedokoncene zaznamy={nedokoncene} smiOpravit={smiZapsatRucne} />
+
+        {/*
+          Prázdná nabídka = formulář, do kterého nejde nic vybrat.
+          Stane se to, dokud není nasazená migrace 20260901150000
+          s průzorem lide_pro_pobocku. Radši se nekreslí nic než
+          formulář, který nejde odeslat.
+        */}
+        {smiZapsatRucne && scope.branchId && doVyberu.length > 0 ? (
           <PanelRucni
             rozsah={rozsah}
             pobockaId={scope.branchId}
@@ -445,7 +507,13 @@ export default async function Dochazka({
         )}
 
         {/* 2. Hrubá mzda za tenhle měsíc */}
-        {vydelek ? <DlazdiceVydelku v={vydelek} mesic={mesic} /> : null}
+        {vydelek ? (
+          <DlazdiceVydelku
+            v={vydelek}
+            mesic={mesic}
+            nedokoncenych={nedokoncene.filter((z) => z.moje).length}
+          />
+        ) : null}
 
         {/* 3. Moje nejbližší směny */}
         <h2 style={nadpisSekce}>Moje nejbližší směny</h2>
@@ -632,7 +700,16 @@ function HlavickaDochazky() {
  *   * chybějící docházka jako štítek se slovem, ne jiný odstín
  *   * chybějící sazba NIKDY jako nula — nula vypadá jako výsledek
  */
-function DlazdiceVydelku({ v, mesic }: { v: Vydelek; mesic: string }) {
+function DlazdiceVydelku({
+  v,
+  mesic,
+  nedokoncenych,
+}: {
+  v: Vydelek;
+  mesic: string;
+  /** Kolik MÝCH příchodů nemá odchod. Do součtu se nezapočítaly. */
+  nedokoncenych: number;
+}) {
   return (
     <section
       style={{
@@ -689,6 +766,30 @@ function DlazdiceVydelku({ v, mesic }: { v: Vydelek; mesic: string }) {
           }}
         >
           {dnu(v.dnu_bez_dochazky)} bez docházky
+        </p>
+      ) : null}
+
+      {/*
+        Nedokončený příchod se do součtu nezapočítal. Bez téhle věty je
+        pod „Jste v práci“ nula, která vypadá jako výsledek — přesně to
+        našla kontrola 1. 9. Podrobnosti jsou v panelu výš, tady stačí,
+        že to číslo není celé.
+      */}
+      {nedokoncenych > 0 ? (
+        <p
+          style={{
+            display: "inline-block",
+            margin: "12px 0 0 8px",
+            padding: "4px 10px",
+            borderRadius: "999px",
+            background: "var(--pozor-bg)",
+            color: "var(--pozor)",
+            fontSize: "13px",
+          }}
+        >
+          {nedokoncenych === 1
+            ? "1 příchod bez odchodu se nezapočítal"
+            : `${nedokoncenych} příchodů bez odchodu se nezapočítalo`}
         </p>
       ) : null}
     </section>

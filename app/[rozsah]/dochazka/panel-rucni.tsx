@@ -27,7 +27,7 @@ export default function PanelRucni({
   rozsah: string
   pobockaId: string
   pobockaNazev: string
-  lide: { id: string; jmeno: string }[]
+  lide: { id: string; jmeno: string; domovska: boolean }[]
   chyba?: string
   zapsano?: boolean
 }) {
@@ -38,6 +38,8 @@ export default function PanelRucni({
         Pro toho, kdo zapomněl telefon. Záznam se uloží označený jako
         ruční, s vaším jménem a s důvodem — v přehledu i v auditu bude
         poznat, že nevznikl píchnutím. Pobočka: <strong>{pobockaNazev}</strong>.
+        V nabídce jsou i lidé, kteří sem jen zaskakují — mají tu směnu,
+        i když patří jinam.
       </p>
 
       {chyba ? <p className="hlaska-chyba">{popisChyby(chyba)}</p> : null}
@@ -58,6 +60,7 @@ export default function PanelRucni({
             {lide.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.jmeno}
+                {c.domovska ? '' : ' — zaskakuje'}
               </option>
             ))}
           </select>
