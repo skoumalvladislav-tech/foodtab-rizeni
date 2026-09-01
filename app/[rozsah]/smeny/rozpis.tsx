@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { pocet } from "@/lib/sklonovani";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
 
 // Posun data (z lib/provozni-den.ts, duplikovaný pro klient)
@@ -738,7 +739,7 @@ function MesicView({
                     <strong>{denNum}</strong>
                     {pocetSmeny > 0 && (
                       <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-                        {pocetSmeny} směn{pocetSmeny === 1 ? "a" : ""}
+                        {pocet(pocetSmeny, "směna", "směny", "směn")}
                       </span>
                     )}
                     {pocetChybejicich > 0 && (

@@ -12,6 +12,8 @@
  * si to člověk může spravit sám. Nemůže: opravit docházku smí jen
  * attendance.manage, takže zaměstnanec dostane pokyn říct si o to.
  */
+import { pocet, prisudek } from '@/lib/sklonovani'
+
 
 export type NedokoncenaProp = {
   employee_id: string
@@ -36,9 +38,8 @@ export default function PanelNedokoncene({
   return (
     <section style={panel}>
       <h2 style={nadpis}>
-        {zaznamy.length === 1
-          ? 'Jeden záznam docházky není dokončený'
-          : `${zaznamy.length} záznamů docházky není dokončených`}
+        {pocet(zaznamy.length, 'záznam', 'záznamy', 'záznamů')} docházky{' '}
+        {prisudek(zaznamy.length, 'není dokončený', 'není dokončených')}
       </h2>
 
       <p style={popis}>

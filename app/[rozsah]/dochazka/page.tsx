@@ -11,6 +11,7 @@ import {
   prvniDenMesice,
   sazbaZaHodinu,
 } from "@/lib/mzdy";
+import { pocet, prisudek } from "@/lib/sklonovani";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
@@ -79,10 +80,10 @@ export default async function Dochazka({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
-  searchParams: Promise<{ chyba?: string; zapsano?: string }>;
+  searchParams: Promise<{ chyba?: string; zapsano?: string; mesic?: string }>;
 }) {
   const { rozsah } = await params;
-  const { chyba: chybaRucne, zapsano } = await searchParams;
+  const { chyba: chybaRucne, zapsano, mesic: mesicParam } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -279,7 +280,18 @@ export default async function Dochazka({
     každá chyba, vypadala by rozbitá funkce úplně stejně jako
     nenasazená — a nikdo by se to nedozvěděl.
   */
-  const mesic = prvniDenMesice(new Date());
+  /*
+    Měsíc se dá přepnout. Panel uměl jen ten aktuální, takže kdo si
+    dopsal příchod z konce minulého měsíce, ty hodiny nikde neviděl —
+    a u výplaty se hádá právě o minulý měsíc.
+
+    Adrese se nevěří: co nesedí na tvar, se tiše nahradí aktuálním
+    měsícem. Do budoucnosti se nechodí, tam z principu není co ukázat.
+  */
+  const tenhleMesic = prvniDenMesice(new Date());
+  const mesic = platnyMesic(mesicParam) ?? tenhleMesic;
+  const predchozi = posunMesic(mesic, -1);
+  const nasledujici = mesic < tenhleMesic ? posunMesic(mesic, 1) : null;
   const { data: vydelekData, error: vydelekChyba } = await supabase.rpc(
     "my_earnings",
     { p_tenant: tenantId, p_mesic: mesic },
@@ -290,6 +302,32 @@ export default async function Dochazka({
   const vydelek = vydelekChyba
     ? null
     : ((vydelekData?.[0] ?? null) as Vydelek | null);
+
+  /*
+    Má pobočka vůbec nějaký tablet?
+
+    Bez něj se nedá píchnout ani kódem, ani PINem — a obrazovka o tom
+    mlčela. Člověk viděl políčko na kód, který nemá kde vzít.
+
+    Ven z databáze jde jenom ano/ne: soupis zařízení zůstává zavřený na
+    settings.manage a číšníkovi do něj nic není.
+
+    Nenasazená migrace se promíjí stejně jako u výdělku — dokud funkce
+    není, tvrdí se, že tablet JE, a obrazovka vypadá přesně jako dosud.
+    Vyhlásit „tablet chybí“ tam, kde se to jen nedá zjistit, by bylo
+    horší než mlčet: lidi by chodili za vedoucím zbytečně.
+  */
+  let maKiosek = true;
+  if (branchId) {
+    const { data: kioskData, error: kioskChyba } = await supabase.rpc(
+      "pobocka_ma_kiosek",
+      { p_tenant: tenantId, p_branch: branchId },
+    );
+    if (kioskChyba && !funkceNeexistuje(kioskChyba)) {
+      throw new DotazSelhal("zařízení pobočky", kioskChyba);
+    }
+    if (!kioskChyba) maKiosek = kioskData === true;
+  }
 
   /* --- 2b. PÍCHAČKA A DNEŠNÍ STAV -------------------------------- */
 
@@ -498,6 +536,32 @@ export default async function Dochazka({
               Kód se mění každou minutu, takže vyfocený nebo opsaný je
               za chvíli k ničemu. To je celý jeho smysl.
             */}
+            {/*
+              Kudy ven, když na pobočce žádný tablet není. Formulář
+              zůstává: kdyby se tablet zaregistroval o minutu později,
+              nemá smysl nutit člověka obnovovat stránku. Ale nesmí to
+              být jediné, co uvidí.
+            */}
+            {!maKiosek ? (
+              <p
+                style={{
+                  margin: "16px 0 0",
+                  padding: "10px 12px",
+                  border: "1px solid var(--pozor)",
+                  borderRadius: "10px",
+                  background: "var(--pozor-bg)",
+                  color: "var(--pozor)",
+                  fontSize: "13.5px",
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong>Na téhle pobočce zatím není zaregistrovaný žádný tablet</strong>,
+                takže není odkud kód opsat a píchnout se nedá. Požádejte
+                vedoucího, ať vám {jsemVPraci ? "odchod" : "příchod"} zapíše
+                ručně — a ať tablet zaregistruje v Nastavení → Zařízení.
+              </p>
+            ) : null}
+
             <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
               <input type="hidden" name="rozsah" value={rozsah} />
               <input type="hidden" name="druh" value={dalsiDruh} />
@@ -571,7 +635,21 @@ export default async function Dochazka({
           <DlazdiceVydelku
             v={vydelek}
             mesic={mesic}
-            nedokoncenych={nedokoncene.filter((z) => z.moje).length}
+            rozsah={rozsah}
+            predchozi={predchozi}
+            nasledujici={nasledujici}
+            /*
+              Jen ty z UKAZOVANÉHO měsíce. Seznam nedokončených chodí za
+              posledních třicet dní, což je pro panel výš správně — ale
+              tady by ta věta stála pod součtem za jiný měsíc a tvrdila
+              o něm něco, co o něm neplatí. Po přidání přepínače měsíce
+              to přestalo být totéž číslo.
+            */
+            nedokoncenych={
+              nedokoncene.filter(
+                (z) => z.moje && z.business_date.slice(0, 7) === mesic.slice(0, 7),
+              ).length
+            }
           />
         ) : null}
 
@@ -763,10 +841,17 @@ function HlavickaDochazky() {
 function DlazdiceVydelku({
   v,
   mesic,
+  rozsah,
+  predchozi,
+  nasledujici,
   nedokoncenych,
 }: {
   v: Vydelek;
   mesic: string;
+  rozsah: string;
+  predchozi: string;
+  /** Prázdné = jsme v aktuálním měsíci, dál dopředu není co ukázat. */
+  nasledujici: string | null;
   /** Kolik MÝCH příchodů nemá odchod. Do součtu se nezapočítaly. */
   nedokoncenych: number;
 }) {
@@ -781,9 +866,41 @@ function DlazdiceVydelku({
         padding: "20px",
       }}
     >
-      <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
-        Hrubá mzda za {nazevMesice(mesic)} — orientačně
-      </p>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          flexWrap: "wrap",
+        }}
+      >
+        <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)", flex: 1 }}>
+          Hrubá mzda za {nazevMesice(mesic)} {rokMesice(mesic)} — orientačně
+        </p>
+
+        {/*
+          Šipky jsou odkazy, ne tlačítka: měsíc patří do adresy, ať se
+          dá poslat i vrátit tlačítkem zpět. Popisek je slovem, ne jen
+          znakem — samotná šipka odečítači nic neřekne.
+        */}
+        <a
+          href={`/${rozsah}/dochazka?mesic=${predchozi.slice(0, 7)}`}
+          className="ft-tl ft-tl-vedlejsi ft-tl-male"
+          aria-label={`Předchozí měsíc: ${nazevMesice(predchozi)} ${rokMesice(predchozi)}`}
+        >
+          ← {nazevMesice(predchozi)}
+        </a>
+
+        {nasledujici ? (
+          <a
+            href={`/${rozsah}/dochazka?mesic=${nasledujici.slice(0, 7)}`}
+            className="ft-tl ft-tl-vedlejsi ft-tl-male"
+            aria-label={`Následující měsíc: ${nazevMesice(nasledujici)} ${rokMesice(nasledujici)}`}
+          >
+            {nazevMesice(nasledujici)} →
+          </a>
+        ) : null}
+      </div>
 
       {v.sazba_chybi || v.hodinova_haleru === null ? (
         <p style={{ margin: "6px 0 0", fontSize: "18px", color: "var(--ink)" }}>
@@ -808,6 +925,26 @@ function DlazdiceVydelku({
           ? ` · ${sazbaZaHodinu(v.hodinova_haleru)}`
           : ""}
       </p>
+
+      {/*
+        Nula si říká o vysvětlení. Aplikace ví, PROČ je nula — jestli
+        chybí sazba, nebo docházka — a člověk to z prázdného čísla
+        nepozná. Mlčící nula vypadá jako porucha aplikace, i když je to
+        správný výsledek.
+      */}
+      {duvodNuly(v, nedokoncenych) ? (
+        <p
+          style={{
+            margin: "10px 0 0",
+            fontSize: "13px",
+            color: "var(--muted)",
+            maxWidth: "56ch",
+            lineHeight: 1.5,
+          }}
+        >
+          {duvodNuly(v, nedokoncenych)}
+        </p>
+      ) : null}
 
       {/*
         Štítek, ne odstín: barva sama nic neřekne tomu, kdo ji nerozezná,
@@ -847,9 +984,8 @@ function DlazdiceVydelku({
             fontSize: "13px",
           }}
         >
-          {nedokoncenych === 1
-            ? "1 příchod bez odchodu se nezapočítal"
-            : `${nedokoncenych} příchodů bez odchodu se nezapočítalo`}
+          {pocet(nedokoncenych, "příchod", "příchody", "příchodů")} bez
+          odchodu {prisudek(nedokoncenych, "se nezapočítal", "se nezapočítaly")}
         </p>
       ) : null}
     </section>
@@ -1002,4 +1138,56 @@ function popisDne(datum: string): string {
 
   const den = DNY[d.getDay()];
   return `${den.charAt(0).toUpperCase()}${den.slice(1)} · ${cislo}`;
+}
+
+/**
+ * Měsíc z adresy ve tvaru YYYY-MM. Vrací první den měsíce, nebo null.
+ *
+ * Adrese se nevěří. Nesmysl se nehlásí jako chyba — člověk si adresu
+ * upravil nebo mu ji zkomolil poštovní program a smysluplná odpověď je
+ * ukázat aktuální měsíc, ne chybovou stránku.
+ */
+function platnyMesic(hodnota: string | undefined): string | null {
+  if (!hodnota || !/^\d{4}-\d{2}$/.test(hodnota)) return null;
+  const m = Number(hodnota.slice(5, 7));
+  if (m < 1 || m > 12) return null;
+  return `${hodnota}-01`;
+}
+
+/** O kolik měsíců vedle. Přetečení roku řeší Date sám. */
+function posunMesic(prvniDen: string, o: number): string {
+  const d = new Date(`${prvniDen}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + o);
+  return prvniDenMesice(
+    new Date(d.getUTCFullYear(), d.getUTCMonth(), 1),
+  );
+}
+
+/** Rok se píše jen tehdy, když není letošní — jinak jen překáží. */
+function rokMesice(prvniDen: string): string {
+  const rok = prvniDen.slice(0, 4);
+  return rok === String(new Date().getFullYear()) ? "" : rok;
+}
+
+/**
+ * Proč je nula nula.
+ *
+ * Vrací větu, nebo prázdno, když se nic vysvětlovat nemusí. Rozlišuje
+ * tři různé nuly, protože každá se řeší jinak: sazbu doplní vedoucí,
+ * docházku si člověk zapíše sám, nedokončený příchod musí někdo uzavřít.
+ */
+function duvodNuly(v: Vydelek, nedokoncenych: number): string {
+  if (v.sazba_chybi || v.hodinova_haleru === null) {
+    return v.odpracovano_minut > 0
+      ? "Hodiny máte zapsané, chybí jen sazba — tu vám doplní vedoucí. Do té doby se z nich mzda spočítat nedá."
+      : "Sazbu vám zatím nikdo nezadal a za tenhle měsíc nemáte ani žádnou zapsanou docházku.";
+  }
+
+  if (v.odpracovano_minut > 0) return "";
+
+  if (nedokoncenych > 0) {
+    return "Za tenhle měsíc nemáte hotový ani jeden záznam docházky — jen příchod bez odchodu, a ten se do hodin nepočítá. Doplnit ho může vedoucí.";
+  }
+
+  return "Za tenhle měsíc nemáte zapsanou žádnou docházku. Sazbu zadanou máte, takže jakmile se něco píchne, číslo se tu objeví.";
 }

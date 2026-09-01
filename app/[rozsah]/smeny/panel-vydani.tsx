@@ -1,5 +1,6 @@
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { sklonovat } from '@/lib/sklonovani'
 import { vydatRozpis } from './vydani'
 
 /**
@@ -119,13 +120,6 @@ export default async function PanelVydani({
       </form>
     </section>
   )
-}
-
-/** 1 zpráva, 2–4 zprávy, 5 a víc zpráv. */
-function sklonovat(n: number, jedna: string, dve: string, pet: string): string {
-  if (n === 1) return jedna
-  if (n >= 2 && n <= 4) return dve
-  return pet
 }
 
 const panel = {
