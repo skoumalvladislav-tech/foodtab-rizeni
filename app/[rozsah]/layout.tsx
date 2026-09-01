@@ -10,6 +10,7 @@ import {
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import Ram, { type ModulProp, type PolozkaProp } from "./ram";
 import PruhInformace from "./pruh-informace";
@@ -41,9 +42,15 @@ export default async function RozsahLayout({
 
   const tenantId = await getCurrentTenantId();
   if (!tenantId) {
+    const cekajici = await nactiCekajici();
+    if (cekajici.length > 0) {
+      return <CekajiciPozvanka pozvanky={cekajici} />;
+    }
+
     return (
       <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě">
-        Požádejte o pozvánku někoho, kdo firmu ve Foodtabu spravuje.
+        Až vás někdo do firmy pozve, přijde vám e-mail s odkazem — stačí
+        počkat, nebo se ozvat tomu, kdo firmu spravuje.
       </Sdeleni>
     );
   }

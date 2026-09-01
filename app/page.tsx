@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getContext, getUser } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
+import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +21,22 @@ export default async function Home() {
 
   const tenantId = await getCurrentTenantId();
   if (!tenantId) {
+    /*
+      Nejdřív se podíváme, jestli na tuhle adresu nečeká pozvánka
+      (docs/ukoly-codea-drobnosti-2026-09-01.md, bod 7a). Radit člověku,
+      ať si zařídí něco, co už má, je to nejhorší, co může aplikace
+      udělat hned po přihlášení — a přesně to dělala.
+    */
+    const cekajici = await nactiCekajici();
+    if (cekajici.length > 0) {
+      return <CekajiciPozvanka pozvanky={cekajici} />;
+    }
+
     return (
       <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě">
         Přihlášení proběhlo v pořádku, ale k žádné firmě zatím nemáte
-        členství. Požádejte o pozvánku někoho, kdo firmu ve Foodtabu už
-        spravuje.
+        členství. Až vás někdo do firmy pozve, přijde vám e-mail
+        s odkazem — stačí počkat, nebo se ozvat tomu, kdo firmu spravuje.
       </Sdeleni>
     );
   }

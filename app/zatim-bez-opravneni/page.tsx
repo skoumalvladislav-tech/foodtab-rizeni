@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getContext, getUser } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import Sdeleni from '@/app/sdeleni'
+import CekajiciPozvanka, { nactiCekajici } from '@/app/cekajici-pozvanka'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,11 +28,14 @@ export default async function ZatimBezOpravneni() {
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
+    const cekajici = await nactiCekajici()
+    if (cekajici.length > 0) return <CekajiciPozvanka pozvanky={cekajici} />
+
     return (
       <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě">
         Přihlášení proběhlo v pořádku, ale k žádné firmě zatím nemáte
-        členství. Požádejte o pozvánku někoho, kdo firmu ve Foodtabu už
-        spravuje.
+        členství. Až vás někdo do firmy pozve, přijde vám e-mail
+        s odkazem — stačí počkat, nebo se ozvat tomu, kdo firmu spravuje.
       </Sdeleni>
     )
   }
