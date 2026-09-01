@@ -111,12 +111,13 @@ deset tisíc a kolega vidí přes rameno, co ťukáte.
 6. **Triviální PINy se odmítnou** — 1234, 0000, šest stejných číslic.
    Délka 4 až 6 číslic.
 
-### Otevřená otázka
+### Seznam jmen na kiosku — rozhodnuto
 
-**Má kiosek ukazovat seznam jmen?** Je to pohodlné (ťuknu na sebe
-a zadám PIN), ale tablet často stojí tak, že na něj vidí i host.
-Doporučuji ukazovat **jen lidi, kteří dnes mají na téhle pobočce
-směnu** — a když někdo zaskakuje, zadá PIN bez jména.
+**Kiosek ukazuje jen lidi, kteří dnes mají na téhle pobočce směnu.**
+Kdo zaskakuje, zadá PIN bez jména a projde stejně.
+
+Tablet často stojí tak, že na něj vidí i host — a seznam všech
+zaměstnanců pobočky na pult nepatří.
 
 ---
 
@@ -144,8 +145,9 @@ Dál platí ze staršího zadání: provozní den (pravidlo 10), dvojí načten�
 nezaloží dva příchody, kód jedné pobočky nepíchne na druhé, bez sítě
 se nepíchne.
 
-**Pořád nerozhodnuto:** má píchnout i ten, kdo dnes v rozpisu není?
-V gastru se to stává. Doporučuji povolit a **označit**.
+**Rozhodnuto:** píchnout smí i ten, kdo dnes v rozpisu není — záskok se
+stává běžně a odmítnuté píchnutí by znamenalo neplacenou práci. Záznam
+se ale **označí jako mimo rozpis**, aby to vedoucí v přehledu viděl.
 
 ---
 
@@ -342,13 +344,23 @@ Teprve pak má smysl na ní stavět peníze.
 
 ---
 
-## 11. Otevřené otázky
+## 11. Rozhodnuto 1. 9. 2026
 
-1. **Seznam jmen na kiosku** — všichni, jen dnešní směna, nebo bez
-   jmen? (Doporučuji dnešní směnu.)
-2. **Píchnutí bez směny** — povolit a označit, nebo odmítnout?
-   (Doporučuji povolit a označit.) Visí to už od minulého zadání.
-3. **Horní mez zálohy** — má aplikace odmítnout zálohu vyšší, než kolik
-   má člověk zatím odpracováno, nebo jen varovat? (Doporučuji varovat;
-   odmítnout by znamenalo, že aplikace rozhoduje o penězích za majitele.)
-4. **Kdy přesně ráno** e-mail chodí a komu na každé pobočce.
+Šéfík rozhodl tohle. Neotevírej to znovu.
+
+1. **Seznam jmen na kiosku** — jen lidé, kteří tam dnes mají směnu.
+   Kdo zaskakuje, zadá PIN bez jména.
+2. **Píchnutí bez směny** — povolit a označit jako mimo rozpis.
+3. **Horní mez zálohy** — **jen varovat**, nikdy neodmítnout. Obsluha
+   uvidí „odpracováno zatím 8 400 Kč, vyplácíte 10 000 Kč" a může přesto
+   vyplatit. Aplikace nerozhoduje o penězích za majitele.
+4. **Nedokončený příchod** (z `docs/opravy-po-kontrole-2026-09-01.md`) —
+   aplikace ho **nikdy nezavírá sama**. Zůstane otevřený a hlásí se,
+   dokud ho někdo s právem na docházku neopraví. Vymyšlený čas odchodu
+   se do mzdy dostat nesmí.
+
+### Co zbývá
+
+**Kdy přesně ráno e-mail chodí a komu na které pobočce.** Postav to jako
+nastavení firmy s prázdnou výchozí hodnotou; adresáty a čas doplní Šéfík
+v aplikaci. Žádnou adresu ani hodinu si nevymýšlej.

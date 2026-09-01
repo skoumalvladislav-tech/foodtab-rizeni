@@ -59,8 +59,10 @@ protože obrazovka mlčí a součet vypadá věrohodně.
 - Do součtu se nezapočítává, ale **musí být poznat, že se něco
   nezapočítalo**. Tichá nula je horší než chyba.
 
-Kdy se má nedokončený příchod uzavřít sám (konec provozního dne?
-po dvanácti hodinách?) **nerozhoduj** — to je otázka na Šéfíka.
+**Rozhodnuto (Šéfík, 1. 9.): aplikace ho nikdy nezavírá sama.** Zůstane
+otevřený a hlásí se, dokud ho někdo s právem na docházku neopraví.
+Žádné dopočítání do konce provozního dne ani po dvanácti hodinách —
+z vymyšleného času odchodu by se počítala mzda.
 
 ---
 
