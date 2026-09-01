@@ -123,9 +123,24 @@ create or replace function app.nastaveni(p_tenant uuid)
 returns public.tenant_settings
 language sql stable security definer set search_path = ''
 as $$
+  /*
+    Náhradní řádek se skládá PODLE JMEN sloupců, ne podle pořadí.
+    Zápis `(p_tenant, 'odecitat', null, now(), null)::tenant_settings`
+    se rozbil ve chvíli, kdy další migrace přidala `ranni_email_kdy`:
+    hodnot bylo pět, sloupců šest, a `vyplatit_zalohu` spadla u každé
+    firmy, která si nastavení ještě neuložila. Tenhle tvar přežije
+    i další sloupec.
+  */
   select coalesce(
     (select s from public.tenant_settings s where s.tenant_id = p_tenant),
-    (p_tenant, 'odecitat', null, now(), null)::public.tenant_settings
+    jsonb_populate_record(
+      null::public.tenant_settings,
+      jsonb_build_object(
+        'tenant_id',        p_tenant,
+        'zalohy_zobrazeni', 'odecitat',
+        'updated_at',       now()
+      )
+    )
   );
 $$;
 

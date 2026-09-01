@@ -29,6 +29,7 @@ select set_config('test.perla',  :'perla',  false);
 -- Neznámý klíč by pak jen tiše odmítal přístup a hledalo by se to dlouho.
 select pg_temp.check('seznam oprávnění odpovídá lib/authz.ts',
   (select array_agg(key order by key) from public.permissions) = array[
+    'advances.manage',
     'agents.manage','ai.use','approvals.decide','attendance.manage',
     'attendance.read','banking.read','communication.manage',
     'communication.read','finance.manage','finance.read',

@@ -48,8 +48,15 @@ select set_config('test.barman_e', :'barman_e', false);
 
 -- Klíč zařízení, které si krok 6 zaregistroval, tenhle scénář nezná:
 -- běží v jiném sezení a klíč se nikam neukládá. Registruje se proto
--- vlastní tablet — a protože se to dělá pod superuživatelem, obchází
--- se tím i to, kdo smí kód vystavit; na to je kontrola v kroku 6.
+-- vlastní tablet.
+--
+-- Superuživatel tu kontrolu NEOBCHÁZÍ: `vytvorit_registracni_kod` se
+-- ptá `app.has_access`, a ta čte přihlášeného člověka z `test.user_id`,
+-- ne z databázové role. Zbyl by tu ten, koho nastavil předchozí scénář,
+-- a funkce by skončila hláškou „Registrovat zařízení smí jen správce
+-- nastavení pobočky." Kdo smí kód vystavit se ověřuje v kroku 6.
+select set_config('test.user_id', :'majitel', false);
+
 select kod as kod8 from public.vytvorit_registracni_kod(
   :'tenant', :'perla', 'tablet ke zkoušce záloh') \gset
 
@@ -162,8 +169,14 @@ select pg_temp.check('nepřiměřeně vysoká záloha PROJDE',
 
 select pg_temp.check('ale ohlásí se', :'var2' like 'Odpracováno zatím%');
 
-select pg_temp.check('a oddělovač tisíců není čárka',
-  :'var2' not like '%,%');
+/*
+  Původně tu stálo `not like '%,%'`, jenže ta věta má čárku i jako
+  interpunkci („Odpracováno zatím 0 Kč, po téhle záloze…"), takže
+  kontrola padala na správně poskládaném textu. Ptáme se proto na to,
+  oč jde: že je částka rozdělená mezerou, ne čárkou.
+*/
+select pg_temp.check('tisíce se dělí mezerou, ne čárkou',
+  :'var2' ~ '\d \d{3}' and :'var2' !~ '\d,\d');
 
 
 \echo ''
