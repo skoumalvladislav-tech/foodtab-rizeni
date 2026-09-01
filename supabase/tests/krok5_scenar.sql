@@ -391,12 +391,38 @@ begin
    where a.action = 'attendance.manual' and a.entity_id = v_id::text;
   perform pg_temp.check('ruční záznam je v auditu', v_pocet = 1);
 
-  -- Píchnutí zadavatele nemá a neaudituje se
+  /*
+    Přímý zápis píchnutí za sebe sama.
+
+    Do 1. 9. tudy vedla díra: zaměstnanec si přímým voláním rozhraní
+    založil příchod s libovolným časem, neoznačený, a šel rovnou do
+    výpočtu mzdy. Migrace 20260901190000 to zavřela — píchnutí smí
+    vzniknout jen platným kódem kiosku nebo PINem na registrovaném
+    zařízení.
+
+    Kontrola proto od té chvíle ověřuje opak než dřív: že to NEJDE.
+  */
   perform set_config('test.user_id', v_marek::text, false);
   set local role authenticated;
+  begin
+    insert into public.attendance_events
+      (tenant_id, branch_id, employee_id, kind, business_date, source)
+    values (v_tenant, v_branch, v_marek_e, 'out', current_date, 'app');
+    v_ok := false;
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  perform pg_temp.check('zaměstnanec si píchnutí přímým zápisem nezaloží', v_ok);
+
+  -- Že u píchnutí zůstane zadavatel prázdný, se ověří na záznamu
+  -- založeném zpod superuživatele — jako by přišel z kiosku.
+  reset role;
+  -- Čas se zadává výslovně. Všechno v jedné transakci má stejné now(),
+  -- takže by příchod a odchod měly totožný okamžik a nešly by spárovat —
+  -- kontrola nedokončené docházky níž by pak našla o jeden záznam víc.
   insert into public.attendance_events
-    (tenant_id, branch_id, employee_id, kind, business_date, source)
-  values (v_tenant, v_branch, v_marek_e, 'out', current_date, 'app')
+    (tenant_id, branch_id, employee_id, kind, occurred_at, business_date, source)
+  values (v_tenant, v_branch, v_marek_e, 'out',
+          now() + interval '1 minute', current_date, 'app')
   returning id, entered_by into v_id, v_kdo;
   perform pg_temp.check('u píchnutí zůstane zadavatel prázdný', v_kdo is null);
 
@@ -557,9 +583,17 @@ begin
   end if;
   raise notice '  OK    create_tenant bez jména už neexistuje';
 
-  if pg_get_functiondef(
-       (select oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = 'app' and p.proname = 'handle_new_user')
+  /*
+    Poznámky se musí odstranit, jinak kontrola spadne sama na sobě:
+    v těle funkce stojí komentář „Žádný split_part(email, '@', 1)"
+    a pg_get_functiondef vrací tělo i s komentáři. Hledá se volání,
+    ne zmínka.
+  */
+  if regexp_replace(
+       pg_get_functiondef(
+         (select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'app' and p.proname = 'handle_new_user')
+       ), '--[^\n]*', '', 'g'
      ) like '%split_part%' then
     raise exception 'SELHALO: profil se pořád pojmenovává z e-mailu';
   end if;
