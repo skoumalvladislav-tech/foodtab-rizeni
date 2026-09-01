@@ -137,49 +137,61 @@ někdo potřebuje — dnes to řeší tohle tlačítko.
 
 ---
 
-## 7. „Účet zatím nepatří k žádné firmě" — říct, co bude dál
 
-Šéfík se přihlásil druhým účtem a přistál na téhle obrazovce:
+## 7. Kdo už pozvánku má, ať ji vidí — a ať po přijetí aplikace funguje
+
+Šéfík se přihlásil druhým účtem, na který mu **hodinu předtím přišla
+pozvánka**, a dostal tohle:
 
 > **Účet zatím nepatří k žádné firmě**
-> Přihlášení proběhlo v pořádku, ale k žádné firmě zatím nemáte
-> členství. Požádejte o pozvánku někoho, kdo firmu ve Foodtabu
-> už spravuje.
+> …Požádejte o pozvánku někoho, kdo firmu ve Foodtabu už spravuje.
 
-Text je pravdivý, ale končí ve slepé uličce: člověk neví, jestli má
-čekat, nebo něco udělat, a jestli se vůbec někdy něco stane.
+Aplikace mu radí, ať si zařídí něco, co už má. Jsou to tři chyby v jedné
+obrazovce a každá se opravuje jinde.
 
-**Pozor, tohle jsou dva různé stavy** a nepleť si je:
+### 7a. Čekající pozvánku nabídni, nezamlčuj ji
 
-| stav | co o něm platí |
-|---|---|
-| **Účet bez členství** | Do žádné firmy nepatří. Aplikace mu nemá co ukázat — firmu nezná, pobočky nezná, jméno firmy taky ne. |
-| **Člen bez oprávnění** | Do firmy patří. Rám aplikace s názvem firmy dává smysl, položky jsou nedostupné a je u nich vysvětlení. |
+Když se přihlásí účet **bez členství**, podívej se, jestli na jeho
+adresu nečeká **platná nepřijatá pozvánka**. Když ano, tohle je celá
+obrazovka:
 
-Šéfíkův nápad „pustit ho rovnou do aplikace, ale ať na nic neklikne"
-patří **jen k druhému stavu** — u prvního není co vykreslit a prázdný
-rám by vypadal jako rozbitá aplikace.
+> **Máte čekající pozvánku do firmy Foodtab s.r.o.**
+> [ Přijmout pozvánku ]
 
-### Co s prvním stavem
+Žádné „požádejte někoho". Člověk se přihlásil tou správnou adresou —
+což je přesně to, co pozvánka ověřuje — takže **další token už
+nepotřebuje**. Přijetí se udělá zevnitř aplikace.
 
-Přepsat text tak, aby řekl, **co se stane**:
+Hledej podle adresy přihlášeného účtu, ne podle tokenu z odkazu.
+A **jen nepřijaté, nezrušené a neprošlé** pozvánky.
+
+### 7b. Teprve když žádná pozvánka nečeká
+
+Text ať řekne, co se stane:
 
 > Až vás někdo do firmy pozve, **přijde vám e-mail s odkazem**.
 > Stačí počkat — nebo se ozvat tomu, kdo firmu spravuje.
 
-### A tenhle slib musí být pravdivý
+**Ten slib ale dneska nikdo neplní.** Přidělení členství ani oprávnění
+neodešle nic. Než tu větu napíšeš, musí platit: **vznik členství**
+i **přidělení oprávnění** pošlou upozornění v aplikaci a e-mail.
+Resend je od dneška ověřený, takže je na čem stavět. Když se e-mail
+nestihne, uprav text — ne opačně.
 
-**Dnes se ten e-mail neposílá.** Přidělení členství ani oprávnění
-neodešle nic. Než tu větu napíšeš, musí ji mít co splnit:
+### 7c. Pobočku a oprávnění zadat rovnou v pozvánce
 
-- **přijetí do firmy** (vznik členství) → upozornění v aplikaci **a**
-  e-mail s odkazem
-- **přidělení oprávnění** člověku, který ho neměl → totéž
+Šéfík: *„před odesláním pozvánky bych zadal na jakou pobočku a s jakými
+oprávněními."*
 
-Resend je od dneška nastavený a ověřený — pozvánka doopravdy dorazila,
-takže je na čem stavět.
+Tím se to hlavní vyřeší samo: kdo pozvánku přijme, **rovnou vidí
+funkční aplikaci**, ne prázdný rám s vysvětlením.
 
-**Nepiš do rozhraní slib, který kód nesplní.** Radši nechat „ozvěte se
-vedoucímu" než napsat „přijde vám e-mail" a nechat člověka čekat na
-zprávu, která nikdy nepřijde. Když se ten e-mail nestihne, uprav text,
-ne opačně.
+Do formuláře pozvánky proto patří i **pobočka**. Předvyplní se ta,
+kterou má člověk v Lidech (rozhodnuto v
+`docs/odpovedi-pozvanky-2026-09-01.md`) — ale ať je vidět a jde
+přepsat, protože kdo zve, ví to nejlíp.
+
+**„Přidělím později" zůstává** jako možnost pro toho, kdo to ještě neví.
+Neruší se, jen přestává být tou obvyklou cestou.
+
+Obojí podléhá stropu: nabídnout jde jen to, co má sám ten, kdo zve.
