@@ -136,3 +136,34 @@ export async function vzitNaVedomi(formData: FormData): Promise<void> {
   revalidatePath(`/${rozsah}`, 'layout')
   redirect(`/${rozsah}/moje-udaje?ulozeno=vedomi`)
 }
+
+/**
+ * Vlastní PIN ke kiosku.
+ *
+ * Volí si ho zaměstnanec SÁM a nikdo mu ho nesděluje — proto se odsud
+ * neposílá, komu patří. Vždycky přihlášenému.
+ *
+ * PIN není přihlášení do aplikace. Platí jen na registrovaném tabletu
+ * pobočky: čtyři číslice vidí kolega přes rameno, takže samotné nesmí
+ * stačit k ničemu.
+ */
+export async function nastavitPin(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const pin = String(formData.get('pin') ?? '')
+
+  const ja = await kdo()
+  if (!ja) redirect('/')
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('nastavit_pin', {
+    p_tenant: ja.tenantId,
+    p_pin: pin,
+  })
+
+  if (error) {
+    redirect(`/${rozsah}/moje-udaje?chyba=pin&text=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/moje-udaje`)
+  redirect(`/${rozsah}/moje-udaje?ulozeno=pin`)
+}

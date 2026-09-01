@@ -6,7 +6,7 @@ import { tabulkaNeexistuje, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
-import { prepnoutSouhlas, ulozitKontakt, vzitNaVedomi } from './akce'
+import { nastavitPin, prepnoutSouhlas, ulozitKontakt, vzitNaVedomi } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -86,7 +86,7 @@ export default async function MojeUdaje({
     a netváří se, že člověk žádné údaje nemá. Prázdná obrazovka
     „co o vás máme“ je nejhorší možná odpověď.
   */
-  const [kontakty, informace, druhy, souhlasy] = await Promise.all([
+  const [kontakty, informace, druhy, souhlasy, pin] = await Promise.all([
     supabase.rpc('employee_contacts', { p_tenant: tenantId }),
     supabase
       .from('privacy_notices')
@@ -103,6 +103,12 @@ export default async function MojeUdaje({
       .select('kind, granted')
       .eq('tenant_id', tenantId)
       .eq('user_id', user.id),
+    // Jestli PIN vůbec je. Otisk ani sůl se nevracejí — na to aplikace
+    // právo nemá a mít nemá.
+    supabase
+      .from('employee_pins')
+      .select('employee_id, nastaven_kdy')
+      .eq('tenant_id', tenantId),
   ])
 
   const chybiMigrace =
@@ -133,6 +139,9 @@ export default async function MojeUdaje({
   const muj = ((kontakty.data ?? []) as Kontakt[]).find((k) => k.duvod === 'moje') ?? null
   const info = ((informace.data ?? []) as Informace[])[0] ?? null
   const katalog = (druhy.data ?? []) as Druh[]
+  const maPin = ((pin.data ?? []) as { employee_id: string }[]).some(
+    (r) => r.employee_id === muj?.employee_id,
+  )
   const stav = new Map(
     ((souhlasy.data ?? []) as { kind: string; granted: boolean }[]).map((s) => [
       s.kind,
@@ -273,6 +282,50 @@ export default async function MojeUdaje({
           ) : null}
         </section>
 
+        {/* --- PIN ke kiosku -------------------------------------- */}
+        <section style={karta}>
+          <h2 style={nadpisKarty}>PIN ke kiosku</h2>
+          <p style={popis}>
+            Pro chvíli, kdy nemáte telefon u sebe. Na tabletu na
+            provozovně jím píchnete příchod a odchod — <strong>nic
+            jiného</strong>. Do aplikace, k rozpisu ani ke mzdám se jím
+            nikdo nedostane, a platí jen na tabletu vaší firmy.
+          </p>
+          <p style={popis}>
+            {maPin
+              ? 'PIN máte nastavený. Zadáním nového ten starý přepíšete.'
+              : 'PIN zatím nastavený nemáte.'}{' '}
+            Přečíst ho nedokáže nikdo, ani majitel — dá se jen zrušit
+            a zadat znovu.
+          </p>
+          <form action={nastavitPin} style={{ display: 'grid', gap: '12px' }}>
+            <input type="hidden" name="rozsah" value={rozsah} />
+            <label style={poleLabel}>
+              <span>{maPin ? 'Nový PIN' : 'PIN'}</span>
+              <input
+                name="pin"
+                inputMode="numeric"
+                pattern="[0-9]{4,6}"
+                minLength={4}
+                maxLength={6}
+                required
+                autoComplete="off"
+                placeholder="4 až 6 číslic"
+                style={{ ...pole, letterSpacing: '.3em' }}
+              />
+            </label>
+            <p style={{ ...popis, margin: 0 }}>
+              Ne samé stejné číslice a ne řada (1234, 4321) — to se
+              uhodne dřív, než dojde káva.
+            </p>
+            <div>
+              <button type="submit" className="ft-tl ft-tl-hlavni">
+                {maPin ? 'Změnit PIN' : 'Nastavit PIN'}
+              </button>
+            </div>
+          </form>
+        </section>
+
         {/* --- informace o zpracování ----------------------------- */}
         <section style={karta} id="informace">
           <h2 style={nadpisKarty}>Informace o zpracování osobních údajů</h2>
@@ -332,6 +385,8 @@ function popisChyby(kod: string): string {
       return 'Souhlas se nepodařilo změnit.'
     case 'vedomi':
       return 'Nepodařilo se zaznamenat, že jste informaci vzali na vědomí.'
+    case 'pin':
+      return 'PIN se nepodařilo nastavit.'
     default:
       return 'Něco se nepovedlo. Zkuste to prosím znovu.'
   }
@@ -347,6 +402,8 @@ function popisUlozeni(kod: string): string {
       return 'Souhlas odvolán. Platí to hned.'
     case 'vedomi':
       return 'Zaznamenáno, že jste informaci vzali na vědomí.'
+    case 'pin':
+      return 'PIN nastaven. Platí jen na tabletu na provozovně.'
     default:
       return 'Uloženo.'
   }

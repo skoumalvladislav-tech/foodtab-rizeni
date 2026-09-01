@@ -146,7 +146,15 @@ for (const soubor of soubory) {
     const t = r.trim()
     // Useknuté zpětné lomítko: `echo ''` na začátku řádku je vždycky
     // rozbitý `\echo`, žádný SQL příkaz tak nezačíná.
-    if (/^(echo|gset|set)\s/.test(t) && !/^set\s+(role|search_path|local|session)/i.test(t)) {
+    //
+    // U `set` to tak snadné není: `update ... \n set sloupec = 'x'` je
+    // poctivé SQL a začíná stejně. Rozliší je rovnítko — `\set jméno
+    // hodnota` ho nikdy nemá, přiřazení ve `update` vždycky.
+    const psqlSet =
+      /^set\s/i.test(t) &&
+      !/^set\s+(role|search_path|local|session)/i.test(t) &&
+      !t.includes('=')
+    if (/^(echo|gset)\s/.test(t) || psqlSet) {
       chyba(soubor, i + 1, `chybí zpětné lomítko: ${JSON.stringify(t.slice(0, 40))}`)
     }
     const m = t.match(/^\\([a-z]+)/)

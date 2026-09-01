@@ -1,68 +1,61 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 
-import { getContext, getUser } from '@/lib/authz'
-import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
-import { DotazSelhal } from '@/lib/supabase/dotaz'
+import { getCurrentTenantId } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
- * Zápis příchodu nebo odchodu.
+ * Zápis příchodu nebo odchodu KÓDEM Z KIOSKU.
  *
- * Z formuláře se bere jen rozsah a druh události. Firma, pobočka
- * i zaměstnanec se dohledávají znovu na serveru — kdyby přišly
- * z prohlížeče, dal by se podvrhnout cizí zaměstnanec nebo pobočka,
- * na které člověk nepracuje. Politika attendance_insert hlídá
- * zaměstnance, pobočku už ne.
+ * Do 1. 9. 2026 tahle akce zapisovala do docházky přímo. Znamenalo to,
+ * že si zaměstnanec mohl přímým voláním rozhraní založit příchod
+ * k 1. červenci ve 3:00 — a nebyl nijak označený, protože formálně šlo
+ * o řádné píchnutí. Dokud byla docházka evidence, byla to drobnost;
+ * teď se z ní počítá mzda a zálohy.
  *
- * `business_date` se nedoplňuje: má ho na starost trigger
- * trg_attendance_business_date podle otevírací doby pobočky.
+ * Od téhle chvíle smí píchnutí vzniknout jen třemi cestami (zadání
+ * docs/kiosek-pin-zalohy-zadani.md, oddíl 5):
+ *
+ *   měnící se kód  — tahle akce
+ *   PIN na kiosku  — public.pichnout_pinem
+ *   ruční zadání   — attendance.manage, s důvodem a auditem
+ *
+ * Čas si tedy nikdo nevybírá: zapisuje se „teď“ a rozhoduje o tom
+ * databáze, ne prohlížeč.
  */
 export async function zapsatDochazku(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const druh = String(formData.get('druh') ?? '')
+  const kod = String(formData.get('kod') ?? '').trim()
 
   if (druh !== 'in' && druh !== 'out') return
 
-  const user = await getUser()
-  if (!user) return
-
   const tenantId = await getCurrentTenantId()
-  if (!tenantId) return
+  if (!tenantId) redirect('/')
 
-  const ctx = await getContext(tenantId)
-  if (!ctx) return
-
-  const scope = bezpecnyRozsah(ctx, rozsah)
-  if (!scope) return
+  if (!kod) {
+    redirect(`/${rozsah}/dochazka?chyba=kod`)
+  }
 
   const supabase = await getServerSupabase()
 
-  const { data: zaznamy, error: chybaZaznamy } = await supabase
-    .from('employees')
-    .select('id, branch_id')
-    .eq('tenant_id', tenantId)
-    .eq('user_id', user.id)
-    .is('deleted_at', null)
-    .limit(1)
-  if (chybaZaznamy) throw new DotazSelhal('můj zaměstnanecký záznam', chybaZaznamy)
-
-  const ja = zaznamy?.[0]
-  if (!ja) return
-
-  // Pobočka: na pobočkové adrese ta z adresy, jinak domovská pobočka
-  // zaměstnance. Sloupec je NOT NULL, takže bez ní zápis nedává smysl.
-  const branchId = (scope.branchId ?? ja.branch_id) as string | null
-  if (!branchId) return
-
-  await supabase.from('attendance_events').insert({
-    tenant_id: tenantId,
-    branch_id: branchId,
-    employee_id: ja.id,
-    kind: druh,
-    source: 'app',
+  // Pobočka se NEPOSÍLÁ. Vyplyne z kódu — ten patří jedné konkrétní
+  // pobočce a jinde neplatí. Kdyby šla poslat z prohlížeče, dal by se
+  // kód z jedné provozovny použít na druhé.
+  const { error } = await supabase.rpc('pichnout_kodem', {
+    p_tenant: tenantId,
+    p_kod: kod,
+    p_druh: druh,
   })
 
+  if (error) {
+    redirect(
+      `/${rozsah}/dochazka?chyba=pichnuti&text=${encodeURIComponent(error.message)}`,
+    )
+  }
+
   revalidatePath(`/${rozsah}/dochazka`)
+  redirect(`/${rozsah}/dochazka?pichnuto=${druh}`)
 }

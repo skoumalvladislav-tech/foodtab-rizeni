@@ -486,16 +486,76 @@ export default async function Dochazka({
               problémům. Obě strany proto vypadají stejně — co je zrovna
               na řadě, říká text tlačítka a stav nad ním.
             */}
+            {/*
+              Píchá se KÓDEM Z TABLETU, ne samotným tlačítkem.
+
+              Do 1. 9. tady stačilo zmáčknout Příchod a zapsal se
+              libovolný čas — přímým voláním rozhraní šlo založit
+              příchod měsíc zpátky a nebyl nijak označený. Dokud byla
+              docházka evidence, byla to drobnost; teď se z ní počítá
+              mzda a zálohy.
+
+              Kód se mění každou minutu, takže vyfocený nebo opsaný je
+              za chvíli k ničemu. To je celý jeho smysl.
+            */}
             <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
               <input type="hidden" name="rozsah" value={rozsah} />
               <input type="hidden" name="druh" value={dalsiDruh} />
+              <label
+                style={{
+                  display: "grid",
+                  gap: "6px",
+                  fontSize: "13px",
+                  color: "var(--muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
+                }}
+              >
+                <span>Kód z tabletu</span>
+                <input
+                  name="kod"
+                  required
+                  maxLength={8}
+                  autoComplete="off"
+                  inputMode="text"
+                  placeholder="A1B2C3D4"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    fontSize: "22px",
+                    letterSpacing: ".18em",
+                    textAlign: "center",
+                    textTransform: "uppercase",
+                    borderRadius: "10px",
+                    border: "1px solid var(--line-2)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    minHeight: "52px",
+                  }}
+                />
+              </label>
               <button
                 type="submit"
                 className="ft-tl ft-tl-hlavni"
-                style={{ width: "100%", minHeight: "56px", fontSize: "18px" }}
+                style={{
+                  width: "100%",
+                  minHeight: "56px",
+                  fontSize: "18px",
+                  marginTop: "12px",
+                }}
               >
                 {jsemVPraci ? "Odchod" : "Příchod"}
               </button>
+              <p
+                style={{
+                  margin: "10px 0 0",
+                  fontSize: "12.5px",
+                  color: "var(--muted)",
+                }}
+              >
+                Kód je na tabletu na provozovně a mění se každou minutu.
+                Kdo tablet po ruce nemá, píchne na něm PINem.
+              </p>
             </form>
           </section>
         ) : (

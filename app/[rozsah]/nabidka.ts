@@ -107,6 +107,9 @@ export const NASTAVENI: Polozka[] = [
   // aplikace vede, oprava kontaktu, souhlasy a výpis. Proto pravo: null
   // — patřit do firmy stačí.
   { segment: 'moje-udaje', nazev: 'Moje údaje', kratky: 'Moje údaje', modul: 'provoz', pravo: null, hotovo: true, ikona: 'clovek' },
+  // Zařízení pobočky — tablety, na kterých běží kiosek. Patří
+  // k nastavení pobočky, proto settings.manage.
+  { segment: 'nastaveni/zarizeni', nazev: 'Zařízení', kratky: 'Zařízení', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/moduly', nazev: 'Moduly', kratky: 'Moduly', modul: 'provoz', pravo: 'settings.manage', hotovo: false, ikona: 'kolo' },
 ]
 
