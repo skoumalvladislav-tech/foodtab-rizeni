@@ -55,3 +55,23 @@ rameno a v obrázku se dá přečíst i z dálky; opsat osm znaků jednou za
 
 QR ať je **dost velký, aby ho tablet přečetl z metru** (aspoň 200 px),
 a ať je u něj napsaná i adresa textem — pro toho, kdo QR načíst nemá čím.
+
+---
+
+## 4. „Doplnit odchod" musí předvyplnit formulář
+
+Šéfík se dnes pokusil dopsat odchod ke srpnovým příchodům a **zapsal ho
+na dnešek**. Uzavřel si tím dnešní směnu (5 h, 1 500 Kč — počítá to
+správně), ale 27. a 31. srpna zůstaly nedokončené dál.
+
+Není to jeho chyba. Panel nedokončených záznamů říká „Doplňte odchod
+ručním zápisem výš" — a ten formulář je **prázdný**. Kdo ho vyplňuje,
+musí si sám zapamatovat člověka i datum a ručně je opsat o kus výš.
+Nejbližší po ruce je „teď", takže se trefí do dneška.
+
+**U každého nedokončeného záznamu ať je tlačítko „Doplnit odchod",
+které formulář předvyplní:** toho člověka, druh „Odchod" a **datum toho
+příchodu** (čas ať doplní člověk, ten aplikace vědět nemůže).
+
+Ověřeno, že samotný zápis do minulosti funguje: ruční odchod k 31. 8.
+v 19:00 nedokončený záznam uzavře. Chybí jen ta cesta na obrazovce.
