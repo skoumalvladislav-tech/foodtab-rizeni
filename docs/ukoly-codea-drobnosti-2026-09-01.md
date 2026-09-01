@@ -75,3 +75,36 @@ příchodu** (čas ať doplní člověk, ten aplikace vědět nemůže).
 
 Ověřeno, že samotný zápis do minulosti funguje: ruční odchod k 31. 8.
 v 19:00 nedokončený záznam uzavře. Chybí jen ta cesta na obrazovce.
+
+---
+
+## 5. Chybová hláška u pozvánky lže
+
+Přijetí pozvánky skončilo na obrazovce takhle:
+
+> **CHYBA: Token není platný (42501)**
+
+Token přitom platný byl. `app.accept_invitation` vrací kód `42501` ve
+**třech různých případech** a ke každému vlastní srozumitelnou větu:
+
+- „Nejdřív se přihlaste."
+- „Účet nemá profil."
+- **„Pozvánka byla vystavena na jinou e-mailovou adresu."**
+
+`app/pozvanka/[token]/akce.ts` je všechny přepíše na „Token není
+platný". Šéfík byl přihlášený pod svým gmailem a pozvánka šla na
+seznam — kontrola udělala přesně to, co má, a **obrazovka za ni
+zalhala**. Hledal by chybu v tokenu, který je v pořádku.
+
+**Pravidlo:** hlášku z databáze **propouštěj**, nepřepisuj ji.
+Chybové kódy jsou na větvení, ne na text — text už je napsaný, česky,
+na jednom místě a blíž příčině.
+
+U téhle konkrétní věty ať je navíc vidět, co s tím:
+
+> Tahle pozvánka byla vystavena na jinou adresu, než pod kterou jste
+> přihlášený. Odhlaste se a přihlaste se adresou, na kterou pozvánka
+> přišla.
+
+Projdi i ostatní `if (error.code === …)` ve `vystaveni.tsx`, `rucni.ts`
+a `akce.ts` u docházky — jsou psané stejným způsobem a dělají totéž.
