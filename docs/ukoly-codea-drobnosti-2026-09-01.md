@@ -108,3 +108,78 @@ U téhle konkrétní věty ať je navíc vidět, co s tím:
 
 Projdi i ostatní `if (error.code === …)` ve `vystaveni.tsx`, `rucni.ts`
 a `akce.ts` u docházky — jsou psané stejným způsobem a dělají totéž.
+
+---
+
+## 6. Přepnutí účtu na jedno kliknutí
+
+Navazuje na bod 5. Šéfík má dva účty (gmail a seznam) a nechce kvůli
+každé pozvánce ručně odhlašovat a přihlašovat.
+
+**Vazbu pozvánky na adresu nerozvolňuj.** Je to jediné, čím se ověří,
+že odkaz použil ten, komu byl poslaný — přeposlaný e-mail by jinak
+pustil do firmy kohokoli. Řeší se cesta, ne pravidlo.
+
+Když se přihlášená adresa neshoduje s adresou pozvánky, ať je na
+obrazovce vedle vysvětlení **tlačítko**:
+
+> **Přihlásit se jako lada@…**
+
+Klik odhlásí a rovnou pošle přihlašovací odkaz na **adresu z pozvánky**
+— člověk nic neopisuje a nevybírá. Po přihlášení se vrátí na tutéž
+pozvánku a dokončí ji.
+
+Adresu v tlačítku **zkrať** (`l…a@seznam.cz`), ať se z cizí obrazovky
+nedá přečíst celá. Kdo pozvánku otevřel, ji stejně zná z e-mailu.
+
+Do budoucna (ne teď): víc adres u jednoho účtu. Až se ukáže, že to
+někdo potřebuje — dnes to řeší tohle tlačítko.
+
+---
+
+## 7. „Účet zatím nepatří k žádné firmě" — říct, co bude dál
+
+Šéfík se přihlásil druhým účtem a přistál na téhle obrazovce:
+
+> **Účet zatím nepatří k žádné firmě**
+> Přihlášení proběhlo v pořádku, ale k žádné firmě zatím nemáte
+> členství. Požádejte o pozvánku někoho, kdo firmu ve Foodtabu
+> už spravuje.
+
+Text je pravdivý, ale končí ve slepé uličce: člověk neví, jestli má
+čekat, nebo něco udělat, a jestli se vůbec někdy něco stane.
+
+**Pozor, tohle jsou dva různé stavy** a nepleť si je:
+
+| stav | co o něm platí |
+|---|---|
+| **Účet bez členství** | Do žádné firmy nepatří. Aplikace mu nemá co ukázat — firmu nezná, pobočky nezná, jméno firmy taky ne. |
+| **Člen bez oprávnění** | Do firmy patří. Rám aplikace s názvem firmy dává smysl, položky jsou nedostupné a je u nich vysvětlení. |
+
+Šéfíkův nápad „pustit ho rovnou do aplikace, ale ať na nic neklikne"
+patří **jen k druhému stavu** — u prvního není co vykreslit a prázdný
+rám by vypadal jako rozbitá aplikace.
+
+### Co s prvním stavem
+
+Přepsat text tak, aby řekl, **co se stane**:
+
+> Až vás někdo do firmy pozve, **přijde vám e-mail s odkazem**.
+> Stačí počkat — nebo se ozvat tomu, kdo firmu spravuje.
+
+### A tenhle slib musí být pravdivý
+
+**Dnes se ten e-mail neposílá.** Přidělení členství ani oprávnění
+neodešle nic. Než tu větu napíšeš, musí ji mít co splnit:
+
+- **přijetí do firmy** (vznik členství) → upozornění v aplikaci **a**
+  e-mail s odkazem
+- **přidělení oprávnění** člověku, který ho neměl → totéž
+
+Resend je od dneška nastavený a ověřený — pozvánka doopravdy dorazila,
+takže je na čem stavět.
+
+**Nepiš do rozhraní slib, který kód nesplní.** Radši nechat „ozvěte se
+vedoucímu" než napsat „přijde vám e-mail" a nechat člověka čekat na
+zprávu, která nikdy nepřijde. Když se ten e-mail nestihne, uprav text,
+ne opačně.
