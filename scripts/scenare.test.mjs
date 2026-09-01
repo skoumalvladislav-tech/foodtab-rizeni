@@ -228,6 +228,31 @@ for (const soubor of soubory) {
   })
   zpracuj()
 
+  /*
+    Nastavení sezení. Do `do $$` bloku se proměnná psql nedostane, takže
+    se hodnoty předávají přes `set_config('test.neco', …)` a čtou přes
+    `current_setting('test.neco')`.
+
+    Pořadí se snadno přehodí — `set_config` skončí až za blokem, který
+    hodnotu čte. Chyba se pak ukáže až za běhu, hláškou o neexistujícím
+    parametru, a to ještě jen když se ten blok vůbec dostane ke slovu.
+
+    Sezení je pro každý soubor nové (run.sh volá psql zvlášť), takže
+    pořadí uvnitř souboru je celá pravda. Dvouargumentové
+    `current_setting(…, true)` se nehlásí: to je schválně „přečti, když
+    je nastaveno“.
+  */
+  const nastavene = new Set()
+  radky.forEach((r, i) => {
+    for (const m of r.matchAll(/set_config\(\s*'([^']+)'/g)) nastavene.add(m[1])
+    for (const m of r.matchAll(/current_setting\(\s*'([^']+)'\s*\)/g)) {
+      if (!nastavene.has(m[1])) {
+        chyba(soubor, i + 1, `current_setting('${m[1]}') se čte dřív, než ho set_config nastaví`)
+        nastavene.add(m[1])
+      }
+    }
+  })
+
   console.log(
     `  ${soubor}: ${kusy.length} příkazů, ${doBloku}× do $$, ${endBloku}× end $$;`,
   )

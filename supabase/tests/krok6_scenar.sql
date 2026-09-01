@@ -63,6 +63,10 @@ insert into public.employees (tenant_id, branch_id, user_id, full_name)
 values (:'tenant', :'perla', '88888888-8888-8888-8888-888888888888', 'Záskok Kioskový')
 returning id as zaskok_e \gset
 
+-- Do bloků `do $$` se proměnná psql nedostane, musí přes set_config.
+-- Nastavuje se hned tady, ne až za blokem, který ji čte.
+select set_config('test.zaskok_e', :'zaskok_e', false);
+
 -- Barman patří na druhou pobočku. Jeho PIN nesmí projít na Perle.
 insert into auth.users (id, email, raw_user_meta_data) values
   ('99999999-9999-9999-9999-999999999999', 'barman@foodtab.cz',
@@ -116,6 +120,8 @@ select set_config('test.user_id', :'majitel', false);
 
 select kod as kod1 from public.vytvorit_registracni_kod(:'tenant', :'perla', 'tablet u baru') \gset
 select kod as kod2 from public.vytvorit_registracni_kod(:'tenant', :'perla', 'tablet ztracený') \gset
+
+select set_config('test.kod1', :'kod1', false);
 
 select pg_temp.check('kód je osm znaků k opsání', length(:'kod1') = 8);
 
@@ -176,6 +182,9 @@ from public.registrovat_zarizeni(:'kod1') \gset
 select device_id as zar2, klic as klic2
 from public.registrovat_zarizeni(:'kod2') \gset
 
+select set_config('test.klic1', :'klic1', false);
+select set_config('test.klic2', :'klic2', false);
+
 select pg_temp.check('klíč zařízení je dost dlouhý na to, aby se nedal hádat',
   length(:'klic1') = 64);
 
@@ -199,8 +208,6 @@ begin
 end $$;
 
 reset role;
-
-select set_config('test.kod1', :'kod1', false);
 
 -- Vypršelý kód. Posouvá se čas platnosti, ne hodiny.
 insert into public.device_registrations
@@ -474,9 +481,6 @@ end $$;
 
 reset role;
 
-select set_config('test.zaskok_e', :'zaskok_e', false);
-select set_config('test.klic1', :'klic1', false);
-select set_config('test.klic2', :'klic2', false);
 
 
 \echo ''
@@ -487,6 +491,10 @@ select set_config('test.klic2', :'klic2', false);
 select app.kiosk_kod(:'perla', app.kiosk_okno(:'perla')) as kod_perla \gset
 select app.kiosk_kod(:'perla', app.kiosk_okno(:'perla') - 20) as kod_stary \gset
 select app.kiosk_kod(:'bar', app.kiosk_okno(:'bar')) as kod_bar \gset
+
+select set_config('test.kod_stary', :'kod_stary', false);
+select set_config('test.kod_perla', :'kod_perla', false);
+select set_config('test.kod_bar', :'kod_bar', false);
 
 set role authenticated;
 select set_config('test.user_id', :'marek', false);
@@ -514,10 +522,6 @@ begin
 end $$;
 
 reset role;
-
-select set_config('test.kod_stary', :'kod_stary', false);
-select set_config('test.kod_perla', :'kod_perla', false);
-select set_config('test.kod_bar', :'kod_bar', false);
 
 set role authenticated;
 select set_config('test.user_id', :'marek', false);
