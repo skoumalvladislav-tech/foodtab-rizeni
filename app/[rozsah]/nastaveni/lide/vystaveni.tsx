@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { vystavitPozvankuAction } from './akce'
+import { vystavitPozvankuAction, type VysledekPozvanky } from './akce'
 
 interface Zamestnanec {
   id: string
@@ -28,7 +28,7 @@ export default function VystavitPozvankuFormular({
   opravneni: Opravneni[]
 }) {
   const [expanded, setExpanded] = useState(false)
-  const [token, setToken] = useState<string | null>(null)
+  const [hotovo, setHotovo] = useState<VysledekPozvanky | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -37,7 +37,7 @@ export default function VystavitPozvankuFormular({
     e.preventDefault()
     setLoading(true)
     setError(null)
-    setToken(null)
+    setHotovo(null)
 
     const formData = new FormData(e.currentTarget)
     formData.append('rozsah', rozsah)
@@ -50,8 +50,8 @@ export default function VystavitPozvankuFormular({
       return
     }
 
-    if (result.token) {
-      setToken(result.token)
+    if (result.odkaz) {
+      setHotovo(result)
       ;(e.target as HTMLFormElement).reset()
     }
 
@@ -59,8 +59,8 @@ export default function VystavitPozvankuFormular({
   }
 
   function copyToken() {
-    if (token) {
-      navigator.clipboard.writeText(token).then(() => {
+    if (hotovo?.odkaz) {
+      navigator.clipboard.writeText(hotovo.odkaz).then(() => {
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
       })
@@ -79,7 +79,7 @@ export default function VystavitPozvankuFormular({
 
       {expanded && (
         <div style={obsah}>
-          {!token ? (
+          {!hotovo ? (
             <form onSubmit={handleSubmit} style={formular}>
               <label style={formularLabel}>
                 <span>Zaměstnanec *</span>
@@ -149,18 +149,43 @@ export default function VystavitPozvankuFormular({
             </form>
           ) : (
             <div style={vysledek}>
-              <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--muted)' }}>
-                Pozvánka byla vystavena. Zkopírujte token a pošlete jej pozvanému člověku.
+              {/*
+                Nejdřív se řekne, jestli e-mail odešel. Pozvánka, o které
+                si vedoucí myslí, že je doručená, je horší než chyba —
+                proto se neúspěch píše nahoře a barevně, ne jako poznámka
+                pod odkazem.
+              */}
+              {hotovo.poslanoNa ? (
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--dobre)' }}>
+                  Pozvánka odešla na <strong>{hotovo.poslanoNa}</strong>. Odkaz
+                  platí sedm dní a jde použít jednou.
+                </p>
+              ) : (
+                <p style={neposlano}>
+                  <strong>Pozvánka je vystavená, ale e-mail neodešel.</strong>{' '}
+                  {hotovo.chybaMailu} Odkaz níž funguje — pošlete ho zatím
+                  sami, jak vám to vyhovuje.
+                </p>
+              )}
+
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                {hotovo.poslanoNa
+                  ? 'Kdyby e-mail nedošel, tady je tentýž odkaz ke zkopírování:'
+                  : 'Odkaz k odeslání:'}
               </p>
               <div style={tokenBox}>
-                <code style={tokenText}>{token}</code>
+                <code style={tokenText}>{hotovo.odkaz}</code>
                 <button onClick={copyToken} className="ft-tl ft-tl-vedlejsi ft-tl-male">
                   {copied ? '✓ Zkopírováno' : 'Kopírovat'}
                 </button>
               </div>
+              <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
+                Ukáže se jenom teď — v databázi po něm zůstane jen otisk.
+                Když ho ztratíte, vystavte novou pozvánku.
+              </p>
               <button
                 onClick={() => {
-                  setToken(null)
+                  setHotovo(null)
                 }}
                 className="ft-tl ft-tl-vedlejsi"
               >
@@ -232,6 +257,17 @@ const inputPole = {
 const selectPole = {
   ...inputPole,
   cursor: 'pointer',
+} as const
+
+const neposlano = {
+  margin: 0,
+  padding: '10px 12px',
+  border: '1px solid var(--pozor)',
+  borderRadius: '10px',
+  background: 'var(--pozor-bg)',
+  color: 'var(--pozor)',
+  fontSize: '13.5px',
+  lineHeight: 1.5,
 } as const
 
 const vysvetlivka = {

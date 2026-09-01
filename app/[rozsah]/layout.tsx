@@ -58,6 +58,20 @@ export default async function RozsahLayout({
     );
   }
 
+  /*
+    Kdo čeká na přidělení oprávnění, není odmítnutý — jen mu zatím
+    nikdo nic nedal. Hláška „Sem nemáte přístup“ by ho poslala shánět
+    úpravu oprávnění, které ještě žádné nemá. Viz docs/pozvanky-zadani.md.
+  */
+  if (!ctx.role) {
+    return (
+      <Sdeleni samostatne nadpis="Účet je hotový">
+        Zatím vám ale nikdo nepřidělil oprávnění, takže tu není co
+        otevřít — ozvěte se vedoucímu.
+      </Sdeleni>
+    );
+  }
+
   // Až za tímhle voláním smí přijít redirect(). Uvnitř odchytávání by se
   // ztratil — redirect() funguje tak, že vyhodí výjimku.
   const scope = bezpecnyRozsah(ctx, rozsah);

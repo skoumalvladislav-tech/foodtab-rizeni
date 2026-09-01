@@ -39,6 +39,26 @@ export default async function Home() {
     );
   }
 
+  /*
+    Člen bez přiděleného oprávnění (docs/pozvanky-zadani.md, oddíl 2
+    bod 2). Pozvánka smí přijít bez role — teprve vedoucí pak rozhodne,
+    co člověk uvidí.
+
+    Musí to být VĚTA, ne prázdný rozcestník. Bez tohohle by se takový
+    člověk podle rozsahu členství díval buď na rám s prázdnou nabídkou,
+    nebo na „Sem nemáte přístup“ — obojí vypadá jako porucha a je to
+    první, co z Foodtabu uvidí.
+  */
+  if (!ctx.role) {
+    return (
+      <Sdeleni samostatne nadpis="Účet je hotový">
+        Přihlášení proběhlo v pořádku. Zatím vám ale nikdo nepřidělil
+        oprávnění, takže tu není co otevřít — ozvěte se vedoucímu.
+        Jakmile vám oprávnění přidělí, uvidíte tady rovnou svůj rozpis.
+      </Sdeleni>
+    );
+  }
+
   // Bez určení rozsahu: resolveScope() vybere firemní úroveň tomu, kdo na
   // ni má, ostatním jejich první pobočku.
   const scope = bezpecnyRozsah(ctx);

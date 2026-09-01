@@ -178,6 +178,23 @@ export default async function NastaveniLide({
     )
     .map((r) => ({ id: r.id, label: r.label }));
 
+  /*
+    Kdo má jaké oprávnění. Sloupec v seznamu je kvůli tomu, že pozvánka
+    smí přijít bez role (docs/pozvanky-zadani.md): u takového člověka
+    musí stát „čeká na přidělení“, ne prázdno. Prázdné políčko vypadá
+    jako chyba a nikdo podle něj nepozná, že se na něj ještě čeká.
+  */
+  const clenstvi = await seznam<{ user_id: string; role_id: string | null }>(
+    "členství ve firmě",
+    supabase
+      .from("memberships")
+      .select("user_id, role_id")
+      .eq("tenant_id", tenantId)
+      .eq("status", "active"),
+  );
+  const roleUctu = new Map(clenstvi.map((m) => [m.user_id, m.role_id]));
+  const nazevRole = new Map(roleFirmy.map((r) => [r.id, r.label]));
+
   const upravujeId = upravuji ? String(upravuji) : null;
   const upravuje =
     upravujeId && zamestnanci
@@ -449,6 +466,7 @@ export default async function NastaveniLide({
               <th style={th}>Pobočka</th>
               <th style={th}>Typ</th>
               <th style={th}>Účet</th>
+              <th style={th}>Oprávnění</th>
               {smiVidetSazby ? <th style={th}>Sazba</th> : null}
               <th style={th}>Akce</th>
             </tr>
@@ -471,6 +489,21 @@ export default async function NastaveniLide({
                   {kratkyUvazek(z.employment_type)}
                 </td>
                 <td style={td}>{z.user_id ? "Ano" : "Ne"}</td>
+
+                {/*
+                  Tři různé stavy, ne dva. Bez účtu se na oprávnění
+                  nečeká — brigádník bez přihlášení je běžný a v pořádku.
+                  Čeká se u toho, kdo účet MÁ a roli ne.
+                */}
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  {!z.user_id ? (
+                    <span style={{ color: "var(--muted)" }}>—</span>
+                  ) : roleUctu.get(z.user_id) ? (
+                    nazevRole.get(roleUctu.get(z.user_id) as string) ?? "—"
+                  ) : (
+                    <span style={cekaNaPrideleni}>čeká na přidělení</span>
+                  )}
+                </td>
 
                 {/*
                   Chybějící sazba se píše slovem, ne jako 0 Kč. Nula
@@ -593,6 +626,16 @@ const tr = {
 
 const td = {
   padding: "12px",
+} as const;
+
+/*
+  Čeká na přidělení není chyba, ale ani běžný stav — je to nedodělek,
+  na který se má vedoucí podívat. Proto stejné žluté jako jinde
+  v aplikaci, ne červená.
+*/
+const cekaNaPrideleni = {
+  color: "var(--pozor)",
+  fontSize: "13px",
 } as const;
 
 /** Hlášky z ?chyba=. Uživatel nemá číst strojové kódy. */
