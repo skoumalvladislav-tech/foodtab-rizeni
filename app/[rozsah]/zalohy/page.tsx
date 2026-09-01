@@ -6,12 +6,17 @@ import { jmenoDoNabidky, lideProPobocku } from '@/lib/lide-pobocky'
 import { koruny, prvniDenMesice } from '@/lib/mzdy'
 import { provozniDen } from '@/lib/provozni-den'
 import { pocet } from '@/lib/sklonovani'
-import { funkceNeexistuje, seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
+import {
+  funkceNeexistuje,
+  sloupecNeexistuje,
+  tabulkaNeexistuje,
+} from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
 import { stornovatZalohu, ulozitNastaveniZaloh } from './akce'
 import FormularZalohy from './formular'
+import Pozastaveni from './pozastaveni'
 import Storno from './storno'
 
 export const dynamic = 'force-dynamic'
@@ -141,13 +146,43 @@ export default async function Zalohy({
 
   const { data: nastaveniData, error: chybaNastaveni } = await supabase
     .from('tenant_settings')
-    .select('zalohy_zobrazeni, zaloha_max_haleru')
+    .select('zalohy_zobrazeni, zaloha_max_haleru, zalohy_pozastaveny')
     .eq('tenant_id', tenantId)
     .maybeSingle()
-  if (chybaNastaveni && !tabulkaNeexistuje(chybaNastaveni)) throw chybaNastaveni
+  /*
+    Nenasazená migrace neshodí obrazovku — a to platí i pro SLOUPEC,
+    ne jen pro tabulku. Pozastavení přidává `zalohy_pozastaveny` migrací
+    20260902040000; než projde, tabulka existuje a sloupec ne, takže
+    `tabulkaNeexistuje` na to nic neřekne a stránka spadla na 500.
+    Našlo se to kliknutím, ne úvahou.
+  */
+  if (
+    chybaNastaveni &&
+    !tabulkaNeexistuje(chybaNastaveni) &&
+    !sloupecNeexistuje(chybaNastaveni)
+  ) {
+    throw chybaNastaveni
+  }
 
   const zobrazeni = nastaveniData?.zalohy_zobrazeni ?? 'odecitat'
   const mez = nastaveniData?.zaloha_max_haleru ?? null
+  const firmaPozastavena = nastaveniData?.zalohy_pozastaveny === true
+
+  /*
+    Pozastavení přepíná JEN payroll.manage — ne ten, kdo zálohy
+    u okénka vyplácí (docs/pozastaveni-zaloh-zadani.md, oddíl 3).
+    Kdo vykonává, nerozhoduje.
+  */
+  const smiPozastavovat = await hasAccess(tenantId, 'payroll.manage', null)
+
+  const { data: stavyData } = smiPozastavovat
+    ? await supabase.rpc('stav_pozastaveni', { p_tenant: tenantId })
+    : { data: [] }
+  const stavy = (stavyData ?? []) as {
+    employee_id: string
+    jmeno: string
+    pozastaveno: boolean
+  }[]
 
   const platne = zalohy.filter((z) => z.stav !== 'stornovana')
   const soucet = platne.reduce((s, z) => s + z.castka_haleru, 0)
@@ -169,6 +204,15 @@ export default async function Zalohy({
             Záloha stornovaná. Zůstává v seznamu i s důvodem — smazaný
             pohyb peněz je díra v evidenci.
           </p>
+        ) : null}
+        {ulozeno === 'pozastaveno' ? (
+          <p style={hlaskaDobre}>
+            Zálohy pozastavené. Nové výplaty neprojdou; dřív vyplacené
+            zůstávají beze změny a storno jde dál.
+          </p>
+        ) : null}
+        {ulozeno === 'povoleno' ? (
+          <p style={hlaskaDobre}>Zálohy zase povolené.</p>
         ) : null}
         {ulozeno === 'nastaveni' ? (
           <p style={hlaskaDobre}>
@@ -262,6 +306,14 @@ export default async function Zalohy({
               </tbody>
             </table>
           </div>
+        ) : null}
+
+        {smiPozastavovat ? (
+          <Pozastaveni
+            rozsah={rozsah}
+            firmaPozastavena={firmaPozastavena}
+            lide={stavy}
+          />
         ) : null}
 
         {smiNastavovat ? (

@@ -111,6 +111,42 @@ export async function stornovatZalohu(formData: FormData): Promise<void> {
 }
 
 /**
+ * Pozastavení výplaty záloh — u člověka, nebo za celou firmu.
+ *
+ * Prázdný zaměstnanec znamená celou firmu. O právu rozhoduje
+ * `public.pozastavit_zalohy`: smí jen payroll.manage, schválně ne ten,
+ * kdo zálohy vyplácí. Kontrola tady je první linie, ne jediná.
+ */
+export async function prepnoutPozastaveni(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zamestnanec = String(formData.get('zamestnanec') ?? '').trim() || null
+  const pozastavit = String(formData.get('pozastavit') ?? '') === '1'
+
+  const zpet = `/${rozsah}/zalohy`
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('pozastavit_zalohy', {
+    p_tenant: tenantId,
+    p_employee: zamestnanec,
+    p_pozastavit: pozastavit,
+  })
+
+  // Hlášku píše databáze a je pro člověka: „Pozastavit zálohy smí jen
+  // ten, kdo spravuje mzdy.“ Projde se dál.
+  if (error) {
+    redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(zpet)
+  // I obrazovka výdělku — zaměstnanec svůj stav vidí u sebe.
+  revalidatePath('/', 'layout')
+  redirect(`${zpet}?ulozeno=${pozastavit ? 'pozastaveno' : 'povoleno'}`)
+}
+
+/**
  * Volba, jak se zálohy ukazují zaměstnancům.
  *
  * Mění JEN zobrazení, nikdy uložené záznamy — přepnutí tedy nic

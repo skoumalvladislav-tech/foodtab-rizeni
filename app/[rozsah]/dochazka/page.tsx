@@ -75,6 +75,12 @@ type Vydelek = {
   zbyva_haleru: number;
   zaloh_nepotvrzenych: number;
   /**
+   * Pozastavené zálohy. Ukazuje se schválně: kdo to neví, přijde
+   * si k okénku a odmítnutí zjistí před kolegy.
+   * Viz docs/pozastaveni-zaloh-zadani.md, oddíl 4.
+   */
+  zalohy_pozastavene: boolean;
+  /**
    * Volba firmy, jak se mají zálohy ukázat. Chodí spolu s čísly
    * schválně: kdyby si obrazovka skládala součty z dvou dotazů, dřív
    * nebo později by ukázala „zbývá k výplatě“ tam, kde si to firma
@@ -356,6 +362,7 @@ export default async function Dochazka({
           zalohy_haleru: 0,
           zbyva_haleru: r.vydelano_haleru,
           zaloh_nepotvrzenych: 0,
+          zalohy_pozastavene: false,
           // Bez záloh není co odečítat, takže se řádky se zálohami
           // nekreslí — ne proto, že si to firma přeje, ale proto, že
           // žádné nejsou.
@@ -1035,6 +1042,27 @@ function DlazdiceVydelku({
           „Zbývá k výplatě“ je hrubá mzda po odečtení záloh —{" "}
           <strong>před daněmi a odvody</strong>. Na výplatní pásce bude
           číslo nižší: zálohy se vyplácejí z čisté mzdy.
+        </p>
+      ) : null}
+
+      {/*
+        Důvod se neuvádí — ten patří do rozhovoru, ne na obrazovku.
+        Jde o to, aby se to člověk dozvěděl sám a ne až u okénka.
+      */}
+      {v.zalohy_pozastavene ? (
+        <p
+          style={{
+            margin: "12px 0 0",
+            padding: "10px 12px",
+            border: "1px solid var(--pozor)",
+            borderRadius: "10px",
+            background: "var(--pozor-bg)",
+            color: "var(--pozor)",
+            fontSize: "13.5px",
+            lineHeight: 1.5,
+          }}
+        >
+          <strong>Zálohy máte pozastavené.</strong> Domluvte se s vedením.
         </p>
       ) : null}
 
