@@ -431,6 +431,113 @@ reset role;
 
 
 \echo ''
+\echo '== Ranní přehled ========================================='
+
+/*
+  Souhrn za provozní den. Kontroluje se hlavně to, CO V NĚM NENÍ:
+  funkce vrací samá čísla a adresáty, žádná jména zaměstnanců. E-mail
+  leží v cizí schránce a osobní údaj, který se do něj dostane,
+  z aplikace odejde nadobro.
+
+  Že text e-mailu sahá jen na dohodnutá pole, hlídá
+  scripts/ranni-prehled.test.mjs. Tady jde o podklad a o to, kdo ho
+  vůbec dostane.
+*/
+
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+
+select pg_temp.check('přehled vrací řádek na pobočku',
+  (select count(*) from public.ranni_prehled(:'tenant', current_date)) >= 1);
+
+select pg_temp.check('a vrací JEN čísla a adresáty — žádné jméno',
+  (select array_agg(a.attname::text order by a.attname)
+   from pg_proc p
+   join pg_namespace n on n.oid = p.pronamespace
+   cross join lateral unnest(p.proargnames) with ordinality as a(attname, poradi)
+   where n.nspname = 'public' and p.proname = 'ranni_prehled'
+     and a.poradi > p.pronargs)
+  = array['branch_id', 'komu', 'lidi', 'nedokoncenych', 'odpracovano_minut',
+          'pobocka', 'rucnich_zapisu', 'zaloh', 'zaloh_haleru',
+          'zaloh_nepotvrzenych']);
+
+select pg_temp.check('adresáti jsou zatím prázdní — nic se nevymýšlí',
+  (select komu from public.ranni_prehled(:'tenant', current_date)
+   where branch_id = :'perla') = '{}');
+
+reset role;
+
+set role authenticated;
+select set_config('test.user_id', :'marek', false);
+
+do $$
+declare v_ok boolean;
+begin
+  begin
+    perform public.ranni_prehled(current_setting('test.tenant')::uuid, current_date);
+    -- Funkce nespadne, jen nevrátí nic: podmínka je uvnitř dotazu.
+    v_ok := not exists (
+      select 1 from public.ranni_prehled(
+        current_setting('test.tenant')::uuid, current_date));
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  perform pg_temp.check('číšník ranní přehled nedostane', v_ok);
+end $$;
+
+reset role;
+
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+
+select public.nastavit_ranni_email(:'tenant', '06:30'::time, :'perla',
+                                   array['sefik@foodtab.cz']);
+
+do $$
+declare v_ok boolean;
+begin
+  begin
+    perform public.nastavit_ranni_email(
+      current_setting('test.tenant')::uuid, '06:30'::time,
+      current_setting('test.perla')::uuid, array['tohle není adresa']);
+    v_ok := false;
+  exception when check_violation then v_ok := true;
+  end;
+  perform pg_temp.check('nesmyslná adresa neprojde', v_ok);
+end $$;
+
+reset role;
+
+select pg_temp.check('adresát se uložil',
+  (select ranni_email_komu from public.branches where id = :'perla')
+  = array['sefik@foodtab.cz']);
+
+select pg_temp.check('a překlep ho nepřepsal',
+  (select ranni_email_komu from public.branches where id = :'perla')
+  = array['sefik@foodtab.cz']);
+
+select pg_temp.check('změna nastavení je v auditu',
+  exists (select 1 from public.audit_log where action = 'settings.ranni_email'));
+
+set role authenticated;
+select set_config('test.user_id', :'provozni', false);
+
+do $$
+declare v_ok boolean;
+begin
+  begin
+    perform public.nastavit_ranni_email(
+      current_setting('test.tenant')::uuid, '07:00'::time,
+      current_setting('test.perla')::uuid, array['jinam@foodtab.cz']);
+    v_ok := false;
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  perform pg_temp.check('bez settings.manage adresáta nikdo nezmění', v_ok);
+end $$;
+
+reset role;
+
+
+\echo ''
 \echo '=========================================================='
 \echo ' KROK 8 — VŠECHNY KONTROLY PROŠLY'
 \echo '=========================================================='
