@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
+import { smimPridelit } from "@/lib/prideleni";
 import { DotazSelhal, funkceNeexistuje, seznam } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import { kratkyUvazek, UVAZKY } from "@/lib/uvazky";
@@ -113,6 +114,69 @@ export default async function NastaveniLide({
   const nabizenePozice = vsechnyPozice
     .filter((p) => p.active)
     .map((p) => ({ id: p.id, label: p.label }));
+
+  /*
+    Oprávnění do nabídky pozvánky.
+
+    Nabídne se jen to, co ten, kdo zve, sám smí přidělit
+    (docs/pravidlo-neprideluj-vic.md). Je to POHODLÍ, ne ochrana —
+    rozhodnutí padá uvnitř app.create_invitation, takže i kdyby se sem
+    role propašovala, databáze ji odmítne.
+
+    Počítá se jen z práv ŽIVÝCH modulů — stejně jako na obrazovce
+    Oprávnění a stejně jako `app.ziva_prava_role` v databázi. Šablona
+    Účetní nosí i finance.read; bez modulu Finance to nikomu nic
+    neotevírá, a kdyby se to počítalo, nešla by ta role nabídnout ani
+    vlastníkovi firmy.
+  */
+  const roleFirmy = await seznam<{
+    id: string;
+    label: string;
+    is_owner: boolean;
+  }>(
+    "role firmy",
+    supabase
+      .from("roles")
+      .select("id, label, is_owner")
+      .eq("tenant_id", tenantId)
+      .order("label"),
+  );
+
+  const katalogPrav = await seznam<{ key: string; module_key: string }>(
+    "katalog práv",
+    supabase.from("permissions").select("key, module_key"),
+  );
+
+  const zapnuteModuly = new Set<string>(
+    ctx.modules.filter((m) => m.active).map((m) => String(m.key)),
+  );
+  const ziva = new Set(
+    katalogPrav.filter((p) => zapnuteModuly.has(p.module_key)).map((p) => p.key),
+  );
+
+  const vazby = await seznam<{ role_id: string; permission_key: string }>(
+    "obsah sad oprávnění",
+    supabase
+      .from("role_permissions")
+      .select("role_id, permission_key")
+      .in("role_id", roleFirmy.map((r) => r.id)),
+  );
+
+  const pravaRole = new Map<string, string[]>();
+  for (const v of vazby) {
+    if (!ziva.has(v.permission_key)) continue;
+    if (!pravaRole.has(v.role_id)) pravaRole.set(v.role_id, []);
+    pravaRole.get(v.role_id)!.push(v.permission_key);
+  }
+
+  const nabizenaOpravneni = roleFirmy
+    .filter((r) =>
+      smimPridelit(ctx, {
+        isOwner: r.is_owner,
+        prava: pravaRole.get(r.id) ?? [],
+      }),
+    )
+    .map((r) => ({ id: r.id, label: r.label }));
 
   const upravujeId = upravuji ? String(upravuji) : null;
   const upravuje =
@@ -456,6 +520,7 @@ export default async function NastaveniLide({
           id: z.id,
           full_name: z.full_name,
         }))}
+        opravneni={nabizenaOpravneni}
       />
     </>
   );

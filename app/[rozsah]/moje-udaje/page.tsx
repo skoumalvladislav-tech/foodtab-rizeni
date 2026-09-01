@@ -179,7 +179,9 @@ export default async function MojeUdaje({
             <dt style={popisek}>Firma</dt>
             <dd style={hodnota}>{ctx.tenant.name}</dd>
             <dt style={popisek}>Oprávnění</dt>
-            <dd style={hodnota}>{ctx.role.label}</dd>
+            <dd style={hodnota}>
+              {ctx.role?.label ?? 'Zatím vám nikdo nepřidělil oprávnění'}
+            </dd>
           </dl>
           <p style={{ ...popis, marginBottom: 0 }}>
             Docházka, odpracované hodiny a mzdová sazba se vedou taky — na

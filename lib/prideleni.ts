@@ -23,7 +23,10 @@ export function smimPridelit(
   // Majitel obchází katalog oprávnění (dostává všechno z aktivních
   // modulů), takže se nedá porovnávat po položkách. Přidělí ho jen
   // vlastník.
-  if (sada.isOwner) return ctx.role.isOwner
+  //
+  // Kdo sám roli nemá (čeká na přidělení), nepřidělí nikomu nic —
+  // `ctx.permissions` je u něj stejně prázdné.
+  if (sada.isOwner) return ctx.role?.isOwner === true
 
   const moje = new Set<string>(ctx.permissions)
   return sada.prava.every((p) => moje.has(p))

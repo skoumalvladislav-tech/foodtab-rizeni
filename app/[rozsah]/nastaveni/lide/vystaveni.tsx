@@ -8,12 +8,24 @@ interface Zamestnanec {
   full_name: string
 }
 
+/**
+ * Role do nabídky. Chodí sem už PROSEJTÉ stropem — nabídne se jen to,
+ * co ten, kdo zve, smí přidělit (docs/pravidlo-neprideluj-vic.md).
+ * Rozhodnutí ale padá v databázi, ne tady; tohle je pohodlí, ne ochrana.
+ */
+interface Opravneni {
+  id: string
+  label: string
+}
+
 export default function VystavitPozvankuFormular({
   rozsah,
   zamestnanci,
+  opravneni,
 }: {
   rozsah: string
   zamestnanci: Zamestnanec[]
+  opravneni: Opravneni[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const [token, setToken] = useState<string | null>(null)
@@ -98,6 +110,29 @@ export default function VystavitPozvankuFormular({
                   style={inputPole}
                   placeholder="pozvany@example.com"
                 />
+              </label>
+
+              {/*
+                Oprávnění je NEPOVINNÉ a výchozí je „přidělím později“.
+                Kdo ví dopředu, koho zve a na co, vybere ho rovnou;
+                ostatní pozvou nejdřív a rozhodnou, až člověk pozvánku
+                opravdu přijme. Viz docs/pozvanky-zadani.md, oddíl 2.
+              */}
+              <label style={formularLabel}>
+                <span>Oprávnění</span>
+                <select name="opravneni" defaultValue="" style={selectPole}>
+                  <option value="">Přidělím později</option>
+                  {opravneni.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <span style={vysvetlivka}>
+                  Bez oprávnění se člověk přihlásí, ale v aplikaci
+                  neuvidí nic než svoje údaje. V Lidech u něj bude stát
+                  „čeká na přidělení“.
+                </span>
               </label>
 
               {error && (
@@ -199,9 +234,13 @@ const selectPole = {
   cursor: 'pointer',
 } as const
 
-const chybaHlaska = {
-  margin: '8px 0 0',
-  fontSize: '13px',
+const vysvetlivka = {
+  fontSize: '12.5px',
+  color: 'var(--muted)',
+  textTransform: 'none' as const,
+  letterSpacing: 'normal',
+  lineHeight: 1.45,
+  maxWidth: '52ch',
 } as const
 
 const vysledek = {

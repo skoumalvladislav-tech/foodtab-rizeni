@@ -140,7 +140,14 @@ export type Module = {
 export type Context = {
   tenant: { id: string; name: string; currency: string; timezone: string }
   membership: { scope: ScopeLevel; status: 'active' | 'suspended' }
-  role: { id: string; key: string; label: string; isOwner: boolean }
+  /**
+   * `null` = člen čeká na přidělení oprávnění (docs/pozvanky-zadani.md).
+   * Pozvánka smí přijít bez role; do aplikace ho to nepustí nikam —
+   * `permissions` je prázdné a `app.has_access` vrací nepravdu pro
+   * každé právo. Vykreslení musí ten rozdíl poznat, aby místo prázdného
+   * rozcestníku ukázalo vysvětlení.
+   */
+  role: { id: string; key: string; label: string; isOwner: boolean } | null
   /** Všechny moduly Foodtabu, včetně těch, které firma nemá. */
   modules: Module[]
   /** Jen pobočky, na které uživatel doopravdy vidí. */
@@ -257,7 +264,7 @@ export const getContext = cache(async (tenantId: string): Promise<Context | null
       scope: raw.membership.scope === 'tenant' ? 'tenant' : 'branch',
       status: 'active',
     },
-    role: raw.role,
+    role: raw.role ?? null,
     modules: (raw.modules ?? []).filter((m): m is Module =>
       (MODULES as readonly string[]).includes(m.key),
     ),

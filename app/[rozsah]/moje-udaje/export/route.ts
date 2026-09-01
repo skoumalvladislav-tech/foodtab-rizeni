@@ -55,7 +55,7 @@ export async function GET() {
     zamestnanec: muj
       ? { jmeno: muj.full_name, telefon: muj.phone, email: muj.email }
       : null,
-    opravneni: ctx.role.label,
+    opravneni: ctx.role?.label ?? null,
     souhlasy: souhlasy.data ?? [],
     vzato_na_vedomi: vedomi.data ?? [],
     neuplne: [

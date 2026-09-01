@@ -204,6 +204,13 @@ export async function vystavitPozvankuAction(formData: FormData): Promise<{
   const email = String(formData.get('email') ?? '').trim()
   const kanal = String(formData.get('kanal') ?? 'email')
 
+  /*
+    Prázdné = „přidělím později“, ne chyba. Do databáze musí jít null,
+    ne prázdný řetězec — ten by se pokusil přetypovat na uuid a spadl
+    by na 22P02 s hláškou, ze které nikdo nic nepozná.
+  */
+  const opravneni = String(formData.get('opravneni') ?? '').trim() || null
+
   if (!zamestnanecId) {
     return { chyba: 'Vyberte zaměstnance' }
   }
@@ -220,8 +227,6 @@ export async function vystavitPozvankuAction(formData: FormData): Promise<{
 
   const supabase = await getServerSupabase()
 
-  // Zjistit ID role — nyní se bere default role zaměstnance
-  // Později se bude vybírat v UI. Prozatím řekneme "zaměstnanec"
   const { data: zaměstnanec, error: chybaZamestnanec } = await supabase
     .from('employees')
     .select('id')
@@ -239,7 +244,7 @@ export async function vystavitPozvankuAction(formData: FormData): Promise<{
   // Procházíme přes RPC — public.create_invitation
   const { data, error } = await supabase.rpc('create_invitation', {
     p_tenant: tenantId,
-    p_role: null, // Později nastavit na vybranou roli
+    p_role: opravneni,
     p_channel: kanal,
     p_contact: email,
     p_scope: 'branch',
@@ -251,18 +256,16 @@ export async function vystavitPozvankuAction(formData: FormData): Promise<{
   if (error) {
     console.error('create_invitation error:', error)
 
-    // Chyby z SQL
-    if (error.code === '42501') {
-      return { chyba: 'Oprávnění zamítnuté (42501)' }
-    }
-    if (error.code === '23503') {
-      return { chyba: 'Zaměstnanec nebo oprávnění neexistuje (23503)' }
-    }
-    if (error.code === '23514') {
-      return { chyba: 'Omezení porušeno (23514)' }
-    }
+    /*
+      Hlášky psala databáze a jsou pro člověka („Tuhle roli nemůžete
+      přidělit — obsahuje oprávnění, která sami nemáte.“). Projdou se
+      proto dál, ať se nevymýšlí druhá sada.
 
-    return { chyba: error.message || 'Chyba při vystavení pozvánky' }
+      Dřív tu stálo „Oprávnění zamítnuté (42501)“ a podobně. Vedoucí se
+      z toho nedozvěděl nic — a právě takhle vypadala chyba, kvůli které
+      se zjistilo až po týdnu, že nejde pozvat vůbec nikdo.
+    */
+    return { chyba: error.message || 'Pozvánku se nepodařilo vystavit.' }
   }
 
   if (!data || data.length === 0) {
