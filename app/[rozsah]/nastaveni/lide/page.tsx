@@ -48,6 +48,7 @@ export default async function NastaveniLide({
     upravuji?: string;
     opravneni?: string;
     kdo?: string;
+    mail?: string;
     pozice?: string;
     nazev?: string;
   }>;
@@ -60,6 +61,7 @@ export default async function NastaveniLide({
     upravuji,
     opravneni: opravneniProId,
     kdo: kdoUlozen,
+    mail: chybaMailu,
     pozice: poziceStav,
     nazev: nazevPozice,
   } = await searchParams;
@@ -419,8 +421,10 @@ export default async function NastaveniLide({
           )}
           {ulozeno === "opravneni" ? (
             <p style={{ margin: "0 0 16px", fontSize: "14px", color: "var(--dobre)" }}>
-              Oprávnění uloženo{kdoUlozen ? ` — ${kdoUlozen}` : ""}. Napoprvé
-              se projeví, až se člověk příště načte stránka.
+              Oprávnění uloženo{kdoUlozen ? ` — ${kdoUlozen}` : ""}.{" "}
+              {chybaMailu
+                ? `Upozornění v aplikaci má, ale e-mail neodešel: ${chybaMailu}.`
+                : "Dostal upozornění v aplikaci i e-mailem."}
             </p>
           ) : null}
           {ulozeno && <p style={{ ...chybaHlaska, color: "var(--good)" }}>Uloženo.</p>}
@@ -680,8 +684,11 @@ export default async function NastaveniLide({
         zamestnanci={(zamestnanci ?? []).filter((z) => !z.deleted_at).map((z) => ({
           id: z.id,
           full_name: z.full_name,
+          branch_id: z.branch_id,
         }))}
         opravneni={nabizenaOpravneni}
+        pobocky={ctx.branches.map((b) => ({ id: b.id, nazev: b.name }))}
+        smiFiremni={ctx.membership.scope === "tenant"}
       />
     </>
   );

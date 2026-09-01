@@ -240,6 +240,9 @@ export async function vystavitPozvankuAction(
   */
   const opravneni = String(formData.get('opravneni') ?? '').trim() || null
 
+  // Prázdné = „podle Lidí“, 'firma' = firemní rozsah, jinak id pobočky.
+  const pobockaZFormulare = String(formData.get('pobocka') ?? '').trim()
+
   if (!zamestnanecId) {
     return { chyba: 'Vyberte zaměstnance' }
   }
@@ -285,16 +288,27 @@ export async function vystavitPozvankuAction(
     ať je rozsah jakýkoli (ověřeno v krok7_scenar.sql). Proto je
     bezpečné nastavit ho dopředu.
   */
-  const naPobocku = zaměstnanec.branch_id != null
+  /*
+    Pobočka z formuláře má přednost před tou z Lidí (bod 7c). Prázdné
+    pole znamená „podle Lidí“ — to je výchozí stav a předvyplňuje se
+    v prohlížeči, takže sem obvykle přijde rovnou id.
 
-  // Procházíme přes RPC — public.create_invitation
+    Strop se tu neřeší: nabídka v prohlížeči je jen pohodlí a
+    app.create_invitation ověří, že pobočka patří téhle firmě, i to,
+    že přidělovaná role nesahá výš než ten, kdo zve.
+  */
+  const pobockaProPozvanku =
+    pobockaZFormulare === 'firma'
+      ? null
+      : pobockaZFormulare || zaměstnanec.branch_id
+
   const { data, error } = await supabase.rpc('create_invitation', {
     p_tenant: tenantId,
     p_role: opravneni,
     p_channel: kanal,
     p_contact: email,
-    p_scope: naPobocku ? 'branch' : 'tenant',
-    p_branches: naPobocku ? [zaměstnanec.branch_id] : [],
+    p_scope: pobockaProPozvanku ? 'branch' : 'tenant',
+    p_branches: pobockaProPozvanku ? [pobockaProPozvanku] : [],
     p_employee: zamestnanecId,
     p_valid_days: 7,
   })
@@ -536,6 +550,56 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
   const sedi =
     vysledek.size === nove.size && [...nove].every((b) => vysledek.has(b))
 
+  /*
+    Ať se to člověk dozví (zadání bod 7b).
+
+    Upozornění v aplikaci píše spoušť v databázi — členství vzniká
+    i uvnitř přijetí pozvánky, kam aplikace nevidí. E-mail posílá
+    server odsud, protože databáze ho poslat neumí.
+
+    Neúspěch e-mailu přidělení NERUŠÍ: oprávnění je přidělené a to je
+    to podstatné. Ale musí být vidět — obrazovka, která mlčí, tvrdí, že
+    zpráva odešla.
+  */
+  let mail: string | null = null
+  const { data: kam } = await supabase.rpc('adresa_pro_upozorneni', {
+    p_tenant: tenantId,
+    p_user: clovek.user_id,
+  })
+  const prijemce = (kam as { adresa: string; jmeno: string; firma: string }[])?.[0]
+
+  if (prijemce?.adresa) {
+    const odkaz = await zakladniAdresa()
+    const poslano = await odeslatEmail({
+      komu: prijemce.adresa,
+      predmet: `Foodtab — máte přístup do firmy ${prijemce.firma}`,
+      text: [
+        `Dobrý den,`,
+        '',
+        `ve firmě ${prijemce.firma} vám někdo přidělil oprávnění, takže`,
+        'se vám aplikace otevřela. Přihlaste se a uvidíte svůj rozpis',
+        'směn i docházku:',
+        odkaz,
+        '',
+        'Kdyby něco nesedělo, ozvěte se tomu, kdo vám oprávnění přidělil.',
+      ].join('\n'),
+      html: `<!doctype html>
+<html lang="cs"><body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:15px;line-height:1.55;color:#1c1917">
+<p>Dobrý den,</p>
+<p>ve firmě <strong>${prijemce.firma}</strong> vám někdo přidělil oprávnění,
+takže se vám aplikace otevřela.</p>
+<p><a href="${odkaz}" style="display:inline-block;padding:12px 20px;background:#8a6a3b;color:#fff;border-radius:10px;text-decoration:none">Otevřít Foodtab</a></p>
+<p style="font-size:13px;color:#57534e">Kdyby něco nesedělo, ozvěte se tomu,
+kdo vám oprávnění přidělil.</p>
+</body></html>`,
+    })
+    if (poslano.stav !== 'odeslano') {
+      mail = poslano.stav === 'nenastaveno'
+        ? 'na serveru chybí klíč k Resendu'
+        : poslano.text
+    }
+  }
+
   revalidatePath(zpet)
   revalidatePath('/', 'layout')
 
@@ -543,5 +607,8 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
     redirect(`${zpet}?chyba=opravneni-pobocky`)
   }
 
-  redirect(`${zpet}?ulozeno=opravneni&kdo=${encodeURIComponent(clovek.full_name)}`)
+  redirect(
+    `${zpet}?ulozeno=opravneni&kdo=${encodeURIComponent(clovek.full_name)}` +
+      (mail ? `&mail=${encodeURIComponent(mail)}` : ''),
+  )
 }

@@ -6,6 +6,8 @@ import { vystavitPozvankuAction, type VysledekPozvanky } from './akce'
 interface Zamestnanec {
   id: string
   full_name: string
+  /** Pobočka z Lidí. Předvyplní se, ale jde přepsat. */
+  branch_id: string | null
 }
 
 /**
@@ -22,16 +24,30 @@ export default function VystavitPozvankuFormular({
   rozsah,
   zamestnanci,
   opravneni,
+  pobocky,
+  smiFiremni,
 }: {
   rozsah: string
   zamestnanci: Zamestnanec[]
   opravneni: Opravneni[]
+  /** Pobočky, na které přihlášený sám vidí — nabídnout jde jen to, co má. */
+  pobocky: { id: string; nazev: string }[]
+  /** Firemní rozsah nabízí jen ten, kdo ho má sám. */
+  smiFiremni: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [hotovo, setHotovo] = useState<VysledekPozvanky | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  /*
+    Pobočka se předvyplní podle Lidí, ale je VIDĚT a jde přepsat —
+    kdo zve, ví to nejlíp (docs/ukoly-codea-drobnosti, bod 7c).
+    Bez toho by se rozhodovalo poslepu a člověk by po přijetí pozvánky
+    koukal na prázdný rám.
+  */
+  const [pobocka, setPobocka] = useState('')
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -83,7 +99,15 @@ export default function VystavitPozvankuFormular({
             <form onSubmit={handleSubmit} style={formular}>
               <label style={formularLabel}>
                 <span>Zaměstnanec *</span>
-                <select name="zamestnanec" required style={selectPole}>
+                <select
+                  name="zamestnanec"
+                  required
+                  style={selectPole}
+                  onChange={(e) => {
+                    const z = zamestnanci.find((x) => x.id === e.target.value)
+                    setPobocka(z?.branch_id ?? (smiFiremni ? 'firma' : ''))
+                  }}
+                >
                   <option value="">— Vyberte —</option>
                   {zamestnanci.map((z) => (
                     <option key={z.id} value={z.id}>
@@ -113,10 +137,37 @@ export default function VystavitPozvankuFormular({
               </label>
 
               {/*
-                Oprávnění je NEPOVINNÉ a výchozí je „přidělím později“.
-                Kdo ví dopředu, koho zve a na co, vybere ho rovnou;
-                ostatní pozvou nejdřív a rozhodnou, až člověk pozvánku
-                opravdu přijme. Viz docs/pozvanky-zadani.md, oddíl 2.
+                Pobočka i oprávnění rovnou v pozvánce (bod 7c). Tím se
+                to hlavní vyřeší samo: kdo pozvánku přijme, rovnou vidí
+                funkční aplikaci, ne prázdný rám s vysvětlením.
+              */}
+              <label style={formularLabel}>
+                <span>Pobočka</span>
+                <select
+                  name="pobocka"
+                  value={pobocka}
+                  onChange={(e) => setPobocka(e.target.value)}
+                  style={selectPole}
+                >
+                  <option value="">Podle Lidí</option>
+                  {smiFiremni ? <option value="firma">Celá firma</option> : null}
+                  {pobocky.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nazev}
+                    </option>
+                  ))}
+                </select>
+                <span style={vysvetlivka}>
+                  Kam člověk uvidí. Předvyplní se podle Lidí; přepsat to
+                  jde, protože kdo zve, ví to nejlíp.
+                </span>
+              </label>
+
+              {/*
+                Oprávnění zůstává NEPOVINNÉ a výchozí je „přidělím
+                později“ — pro toho, kdo to ještě neví. Neruší se, jen
+                přestává být tou obvyklou cestou.
+                Viz docs/pozvanky-zadani.md, oddíl 2.
               */}
               <label style={formularLabel}>
                 <span>Oprávnění</span>
