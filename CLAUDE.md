@@ -70,8 +70,8 @@ elegantnější řešení.
 7. **Tokeny se ukládají jako otisk**, nikdy v čitelné podobě — pozvánky
    i servisní klíče agentů.
 
-8. **Mzdy a docházka se nikdy neposílají do jazykového modelu.** Agent
-   pracuje s podílem nákladů, ne se jmény a částkami.
+8. **Mzdy, docházka, kontakty a zálohy se nikdy neposílají do jazykového
+   modelu.** Agent pracuje s podílem nákladů, ne se jmény a částkami.
 
 9. **Mazání lidí je označení, ne výmaz** (`deleted_at`) — kvůli návaznosti
    docházky.
