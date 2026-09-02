@@ -79,6 +79,40 @@ elegantnější řešení.
 10. **Provozní den ≠ kalendářní den.** Účet vystavený ve 2:15 patří do
     včerejší uzávěrky. Odvozuje se z `branches.day_starts_at`.
 
+11. **Hodina na zdi není okamžik.** Co člověk napíše do políčka
+    (`2026-08-31T22:00`), nemá časové pásmo. Pásmo k tomu dodá POBOČKA
+    (`branches.timezone`, jinak `tenants.timezone`, jinak
+    `Europe/Prague`) a převod dělá databáze přes `at time zone` — ta
+    zná pravidla letního času pro to konkrétní datum. Nikdy
+    `new Date('…T22:00')`: ten řetězec se přečte v pásmu serveru,
+    a ten je na Vercelu v UTC.
+
+    Totéž obráceně při zobrazení: `getHours()` ani
+    `toLocaleTimeString()` bez `timeZone` se nepoužívají. Formátuje
+    se přes `lib/cas.ts`, kde je pásmo povinný údaj.
+
+    **Ty dvě chyby se na obrazovce vyruší** — co se zadá jako 22:00, se
+    jako 22:00 i ukáže — a přitom směna vyjde o dvě hodiny delší. Proto
+    se ukládání a zobrazení ověřují ZVLÁŠŤ, ne jedním průchodem
+    (`supabase/tests/krok14_scenar.sql` a `scripts/cas.test.mjs`).
+
+12. **Oprava časového pásma není „jen posun času“.** Když se posune
+    ruční záznam, může se v pořadí událostí dostat před jiný a spárovat
+    se s něčím jiným než dřív. Délka směny se tím změní, i když se oba
+    konce posunuly stejně.
+
+    Stalo se to 2. 9. 2026: posunutý ruční příchod se dostal před
+    píchnutý odchod, otevřenou směnu zavřel jiný odchod a z pěti hodin
+    byla hodina a čtvrt. Nebyla to chyba té opravy, byl to její
+    důsledek.
+
+    Nikdy tedy `update … occurred_at = occurred_at + interval '2 hours'`
+    s tím, že „to jen posune čas“ — a ani s poctivým převodem podle
+    pásma to není bezpečné. Dopad se před zásahem spočítá **skutečnou**
+    `app.worked_minutes` nad kopií dat a nejdřív se ověří, že model dá
+    stejná čísla jako ostrá databáze. Viz
+    `docs/rozhodnuti-stara-data-pasmo.md`.
+
 ## Prostředí — nehádej, zeptej se dokumentu
 
 | Co | Hodnota |

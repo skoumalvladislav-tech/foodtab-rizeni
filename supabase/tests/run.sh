@@ -60,7 +60,7 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
 done
 
 echo
-for t in etapa0_scenar krok2_scenar krok3_scenar krok4_scenar krok5_scenar krok6_scenar krok7_scenar krok8_scenar krok9_scenar krok10_scenar krok11_scenar krok12_scenar krok13_scenar krok14_scenar; do
+for t in etapa0_scenar krok2_scenar krok3_scenar krok4_scenar krok5_scenar krok6_scenar krok7_scenar krok8_scenar krok9_scenar krok10_scenar krok11_scenar krok12_scenar krok13_scenar krok14_scenar krok15_scenar; do
   spustit "$ROOT/supabase/tests/$t.sql"
   grep -E '^(==|psql.*(OK |SELHALO))| VŠECHNY| KROK' "$VYSTUP" \
     | sed 's/^psql[^ ]* NOTICE: //' || true
