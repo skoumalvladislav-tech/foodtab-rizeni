@@ -22,6 +22,7 @@ export default function PanelRucni({
   pobockaId,
   pobockaNazev,
   lide,
+  pobocky,
   chyba,
   zapsano,
   predvyplnit,
@@ -30,6 +31,8 @@ export default function PanelRucni({
   pobockaId: string
   pobockaNazev: string
   lide: { id: string; jmeno: string; domovska: boolean }[]
+  /** Pobočky, na kterých smí zapisovat. Viz komentář u pole „Kde“. */
+  pobocky: { id: string; nazev: string }[]
   chyba?: string
   zapsano?: boolean
   /**
@@ -39,7 +42,13 @@ export default function PanelRucni({
    * nejbližší po ruce je „teď“ — přesně tak si Šéfík omylem uzavřel
    * dnešek místo 31. srpna.
    */
-  predvyplnit?: { zamestnanec: string; den: string; jmeno: string } | null
+  predvyplnit?: {
+    zamestnanec: string
+    den: string
+    jmeno: string
+    /** Pobočka nedokončeného záznamu — odchod se doplňuje tam. */
+    pobocka: string
+  } | null
 }) {
   return (
     <section style={panel} id="rucni">
@@ -47,7 +56,14 @@ export default function PanelRucni({
       <p style={popis}>
         Pro toho, kdo zapomněl telefon. Záznam se uloží označený jako
         ruční, s vaším jménem a s důvodem — v přehledu i v auditu bude
-        poznat, že nevznikl píchnutím. Pobočka: <strong>{pobockaNazev}</strong>.
+        poznat, že nevznikl píchnutím.{' '}
+        {pobocky.length > 1 ? (
+          <>Pobočku vyberte — odejít se dá i jinde, než se přišlo.</>
+        ) : (
+          <>
+            Pobočka: <strong>{pobockaNazev}</strong>.
+          </>
+        )}{' '}
         V nabídce jsou i lidé, kteří sem jen zaskakují — mají tu směnu,
         i když patří jinam.
       </p>
@@ -88,12 +104,15 @@ export default function PanelRucni({
         načtením stránky se to projevit nemohlo.
       */}
       <form
-        key={predvyplnit ? `${predvyplnit.zamestnanec}-${predvyplnit.den}` : 'prazdny'}
+        key={
+          predvyplnit
+            ? `${predvyplnit.zamestnanec}-${predvyplnit.den}-${predvyplnit.pobocka}`
+            : 'prazdny'
+        }
         action={zapsatRucne}
         style={mrizka}
       >
         <input type="hidden" name="rozsah" value={rozsah} />
-        <input type="hidden" name="pobocka" value={pobockaId} />
 
         <label style={poleLabel}>
           <span>Kdo</span>
@@ -127,6 +146,37 @@ export default function PanelRucni({
             <option value="break_end">Konec přestávky</option>
           </select>
         </label>
+
+        {/*
+          Pobočka se VYBÍRÁ.
+
+          Dřív byla natvrdo ta, na kterou se vedoucí zrovna díval.
+          Jenže odchod se dá zapomenout i jinde, než se přišlo
+          (docs/prechod-mezi-pobockami-zadani.md, oddíl 3) — a takový
+          záznam se pak nedal zadat vůbec.
+
+          Když je jen jedna, ukáže se jako text: rozbalovátko o jedné
+          položce je jen práce navíc.
+        */}
+        {pobocky.length > 1 ? (
+          <label style={poleLabel}>
+            <span>Kde</span>
+            <select
+              name="pobocka"
+              required
+              defaultValue={predvyplnit?.pobocka ?? pobockaId}
+              style={pole}
+            >
+              {pobocky.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.nazev}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <input type="hidden" name="pobocka" value={pobockaId} />
+        )}
 
         <label style={poleLabel}>
           <span>Kdy</span>

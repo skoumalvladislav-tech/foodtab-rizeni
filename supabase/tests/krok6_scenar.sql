@@ -285,7 +285,9 @@ set role anon;
 select pg_temp.check('kiosek vrací jen dohodnuté údaje',
   (select array_agg(k order by k)
      from jsonb_object_keys(public.kiosk_stav(:'klic1')) k)
-  = array['den', 'kod', 'platnost', 'pobocka', 'smeny', 'zarizeni']);
+  -- 'slug' přibyl migrací 20260902050000: QR na kiosku nese adresu,
+  -- a do adresy patří slug pobočky, ne její název.
+  = array['den', 'kod', 'platnost', 'pobocka', 'slug', 'smeny', 'zarizeni']);
 
 select pg_temp.check('u směny na kiosku není nic než jméno a čas',
   (select array_agg(distinct k order by k)

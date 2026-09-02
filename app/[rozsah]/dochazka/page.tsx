@@ -422,6 +422,30 @@ export default async function Dochazka({
   // ale filtrujeme i tady, ať se zbytečně netahá, co se stejně nesmí.
   let dnesni: Udalost[] = [];
   if (den) {
+    /*
+      Filtr na pobočku se dělá přes LIDI, ne přes události.
+
+      Dřív se filtrovalo `branch_id = scope.branchId`, takže komu se
+      odchod zapsal na druhé pobočce, tomu poslední událost vypadla —
+      a obrazovka o něm tvrdila, že je pořád v práci. Přesně to je
+      chyba z docs/prechod-mezi-pobockami-zadani.md, oddílu 2.3.
+
+      Teď se nejdřív zjistí, kdo tu dnes vůbec byl, a pak se pro ty
+      lidi vezme celý jejich den. Víc než protějšek dvojice politika
+      stejně nepustí — a je na to kontrola v krok11_scenar.sql.
+    */
+    let idNaPobocce: string[] | null = null;
+    if (scope.level === "branch" && scope.branchId) {
+      const { data: tady, error: chybaTady } = await supabase
+        .from("attendance_events")
+        .select("employee_id")
+        .eq("tenant_id", tenantId)
+        .eq("business_date", den)
+        .eq("branch_id", scope.branchId);
+      if (chybaTady) throw new DotazSelhal("záznamy docházky", chybaTady);
+      idNaPobocce = [...new Set((tady ?? []).map((r) => r.employee_id as string))];
+    }
+
     let dotaz = supabase
       .from("attendance_events")
       .select("id, employee_id, kind, occurred_at, branch_id")
@@ -429,8 +453,8 @@ export default async function Dochazka({
       .eq("business_date", den)
       .order("occurred_at", { ascending: true });
 
-    if (scope.level === "branch" && scope.branchId) {
-      dotaz = dotaz.eq("branch_id", scope.branchId);
+    if (idNaPobocce !== null) {
+      dotaz = dotaz.in("employee_id", idNaPobocce.length > 0 ? idNaPobocce : [ja.id]);
     }
     if (!vidiOstatni) {
       dotaz = dotaz.eq("employee_id", ja.id);
@@ -439,6 +463,27 @@ export default async function Dochazka({
     const { data, error: chybaData } = await dotaz;
     if (chybaData) throw new DotazSelhal("zaměstnanci", chybaData);
     dnesni = (data ?? []) as Udalost[];
+  }
+
+  /*
+    Kdo dnes přišel jinde, než odešel.
+
+    Párování počítá databáze (`prechody_mezi_pobockami`), ne prohlížeč:
+    dvě kopie téhož pravidla se vždycky rozejdou.
+  */
+  type Prechod = {
+    employee_id: string;
+    prichod_nazev: string;
+    odchod_nazev: string;
+    uzavreno: boolean;
+  };
+  const prechody = new Map<string, Prechod>();
+  if (den) {
+    const { data: pr } = await supabase.rpc("prechody_mezi_pobockami", {
+      p_tenant: tenantId,
+      p_den: den,
+    });
+    for (const x of (pr ?? []) as Prechod[]) prechody.set(x.employee_id, x);
   }
 
   // Poslední událost každého člověka = jeho aktuální stav.
@@ -526,8 +571,39 @@ export default async function Dochazka({
       (r) => r.employee_id === doplnit && r.business_date === denDoplneni,
     );
     if (!z) return null;
-    return { zamestnanec: z.employee_id, den: z.business_date, jmeno: z.jmeno };
+    return {
+      zamestnanec: z.employee_id,
+      den: z.business_date,
+      jmeno: z.jmeno,
+      // Pobočka, kde ten člověk naposled byl. Odchod se doplňuje tam,
+      // ne tam, kde se zrovna dívá vedoucí.
+      pobocka: z.branch_id,
+    };
   })();
+
+  /*
+    Pobočky do ručního zápisu.
+
+    Zadání docs/prechod-mezi-pobockami-zadani.md, oddíl 3: kdo doplňuje
+    zapomenutý odchod, MUSÍ MOCT VYBRAT POBOČKU — jinak se nedá zadat,
+    že člověk odešel jinde, než přišel, a ta informace se ztratí.
+
+    Nabízejí se jen pobočky, na kterých ten člověk docházku spravovat
+    smí. Politika `attendance_insert` by ostatní stejně odmítla, ale
+    nabídnout je a nechat to spadnout až na zápisu je horší než je
+    nenabízet.
+  */
+  const pobockyProRucni = smiZapsatRucne
+    ? (
+        await Promise.all(
+          ctx.branches.map(async (b) =>
+            (await hasAccess(tenantId, "attendance.manage", b.id))
+              ? { id: b.id, nazev: b.name }
+              : null,
+          ),
+        )
+      ).filter((b): b is { id: string; nazev: string } => b !== null)
+    : [];
 
 
   /*
@@ -579,6 +655,7 @@ export default async function Dochazka({
             pobockaId={scope.branchId}
             pobockaNazev={scope.branchName ?? ctx.tenant.name}
             lide={doVyberu}
+            pobocky={pobockyProRucni}
             chyba={chybaRucne}
             zapsano={zapsano === "1"}
             predvyplnit={predvyplnit}
@@ -861,6 +938,12 @@ export default async function Dochazka({
             {stavy.has(ja.id)
               ? `Poslední záznam: ${popisDruhu(stavy.get(ja.id)!.kind)} v ${hodina(stavy.get(ja.id)!.occurred_at)}.`
               : "Dnes zatím nemáte žádný záznam."}
+            {prechody.has(ja.id) ? (
+              <span style={vetaPrechodu}>
+                Příchod {prechody.get(ja.id)!.prichod_nazev} · odchod{" "}
+                {prechody.get(ja.id)!.odchod_nazev}
+              </span>
+            ) : null}
           </p>
         ) : ostatni.length === 0 ? (
           <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
@@ -890,11 +973,24 @@ export default async function Dochazka({
                   <span
                     style={{
                       fontSize: "13px",
-                      whiteSpace: "nowrap",
+                      textAlign: "right",
                       color: vPraci ? "var(--good)" : "var(--muted)",
                     }}
                   >
-                    {popisDruhu(u.kind)} · {hodina(u.occurred_at)}
+                    <span style={{ whiteSpace: "nowrap" }}>
+                      {popisDruhu(u.kind)} · {hodina(u.occurred_at)}
+                    </span>
+                    {prechody.has(id) ? (
+                      /*
+                        Bez téhle věty vypadá odchod na druhé pobočce
+                        jako chyba v zápisu. Takhle je vidět, co se
+                        stalo — a že „mimo rozpis“ u toho schválně není.
+                      */
+                      <span style={vetaPrechodu}>
+                        Příchod {prechody.get(id)!.prichod_nazev} · odchod{" "}
+                        {prechody.get(id)!.odchod_nazev}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               );
@@ -905,6 +1001,14 @@ export default async function Dochazka({
     </>
   );
 }
+
+const vetaPrechodu = {
+  display: "block",
+  marginTop: "2px",
+  fontSize: "12.5px",
+  color: "var(--muted)",
+  fontWeight: 400,
+} as const;
 
 /* --- kousky rozhraní --------------------------------------------- */
 
