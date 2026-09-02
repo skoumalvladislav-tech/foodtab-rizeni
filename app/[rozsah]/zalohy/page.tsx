@@ -5,7 +5,8 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { jmenoDoNabidky, lideProPobocku } from '@/lib/lide-pobocky'
 import { koruny, prvniDenMesice } from '@/lib/mzdy'
 import { provozniDen } from '@/lib/provozni-den'
-import { pocet } from '@/lib/sklonovani'
+import { pocet, veta } from '@/lib/sklonovani'
+import { nabidkaKVyplaceni } from '@/lib/zalohy-nabidka'
 import {
   funkceNeexistuje,
   sloupecNeexistuje,
@@ -175,14 +176,40 @@ export default async function Zalohy({
   */
   const smiPozastavovat = await hasAccess(tenantId, 'payroll.manage', null)
 
-  const { data: stavyData } = smiPozastavovat
-    ? await supabase.rpc('stav_pozastaveni', { p_tenant: tenantId })
-    : { data: [] }
+  /*
+    Stav pozastavení potřebuje i ten, kdo jen VYPLÁCÍ — pozastavený
+    člověk nesmí zůstat v nabídce „Komu“. Přepnout ho nesmí, ale
+    vidět ho musí, jinak by ho nabídl a odmítnutí by se dozvěděl až
+    od databáze, před tím člověkem u okénka.
+
+    Průzor stav_pozastaveni proto pouští dovnitř advances.manage
+    i payroll.read, ne jen payroll.manage.
+  */
+  const { data: stavyData } =
+    smiPozastavovat || smiVyplacet
+      ? await supabase.rpc('stav_pozastaveni', { p_tenant: tenantId })
+      : { data: [] }
   const stavy = (stavyData ?? []) as {
     employee_id: string
     jmeno: string
     pozastaveno: boolean
   }[]
+
+  /*
+    Nabídka „Komu“ bez pozastavených.
+
+    Platí přísnější ze dvou úrovní (docs/pozastaveni-zaloh-zadani.md,
+    oddíl 2): při vypnutí za firmu nezbude nikdo.
+
+    Tenhle filtr je POHODLÍ, ne obrana. Odmítnutí padá v databázi
+    a padne i tomu, kdo si volání poskládá sám — obrazovka jen
+    nenabízí něco, co stejně neprojde.
+  */
+  const { nabidka: lideKVyplaceni, skrytych } = nabidkaKVyplaceni({
+    lide,
+    pozastaveni: stavy,
+    firmaPozastavena,
+  })
 
   const platne = zalohy.filter((z) => z.stav !== 'stornovana')
   const soucet = platne.reduce((s, z) => s + z.castka_haleru, 0)
@@ -230,11 +257,37 @@ export default async function Zalohy({
           </p>
         ) : null}
 
-        {smiVyplacet && pobockaVydeje ? (
-          <FormularZalohy
-            rozsah={rozsah}
-            lide={lide.map((l) => ({ id: l.id, jmeno: jmenoDoNabidky(l) }))}
-          />
+        {smiVyplacet && pobockaVydeje && firmaPozastavena ? (
+          <p style={ramecek}>
+            <strong>Zálohy jsou pozastavené za celou firmu.</strong> Nová
+            výplata neprojde nikomu, ani tomu, kdo pozastavené sám nemá.
+            Povolit je zpátky může jen ten, kdo spravuje mzdy. Dřív
+            vyplacené zálohy zůstávají beze změny a storno jde dál.
+          </p>
+        ) : null}
+
+        {smiVyplacet && pobockaVydeje && !firmaPozastavena ? (
+          <>
+            <FormularZalohy
+              rozsah={rozsah}
+              lide={lideKVyplaceni.map((l) => ({ id: l.id, jmeno: jmenoDoNabidky(l) }))}
+            />
+            {/*
+              Bez téhle věty by člověk u okénka hledal někoho, kdo
+              z nabídky beze slova zmizel, a myslel by si, že je
+              rozbitá aplikace.
+            */}
+            {skrytych > 0 ? (
+              <p style={{ ...popisSekce, margin: '-8px 0 16px' }}>
+                {veta(
+                  skrytych,
+                  'zaměstnanec není v nabídce, protože má pozastavené zálohy.',
+                  'zaměstnanci nejsou v nabídce, protože mají pozastavené zálohy.',
+                  'zaměstnanců není v nabídce, protože mají pozastavené zálohy.',
+                )}
+              </p>
+            ) : null}
+          </>
         ) : null}
 
         {!smiVyplacet ? (

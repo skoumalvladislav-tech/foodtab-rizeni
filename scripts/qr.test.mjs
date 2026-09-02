@@ -34,12 +34,12 @@
 import fs from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import ts from 'typescript'
 
 import jsQR from 'jsqr'
 
 import { qrSvg } from '../lib/qr.ts'
 import { odkazPichnuti } from '../lib/qr-kiosek.ts'
+import { nactiKomponentu } from './vykreslit.mjs'
 
 let chyb = 0
 const ma = (popis, sk, ce) => {
@@ -75,57 +75,12 @@ function maZnakPoZnaku(popis, sk, ce) {
 /* =====================================================================
    Vykreslení skutečné komponenty kiosku
 
-   `qr-kod.tsx` je TypeScript s JSX; Node ani jedno sám nepřečte.
-   Přeloží se tedy tímtéž překladačem, kterým se překládá aplikace,
-   a načte se z paměti. Bare importy (`react/jsx-runtime`, `@/lib/…`)
-   se přepíší na úplné cesty, protože z datové adresy se rozhodovat
-   nedají.
+   Zavaděč je ve scripts/vykreslit.mjs — používá ho i kontrola záloh.
+   Kdyby si ho každá kontrola psala po svém, jedna z nich by dřív nebo
+   později načítala něco jiného, než co běží.
    ================================================================== */
 
 const KOREN = new URL('..', import.meta.url)
-
-function cesta(kam) {
-  return new URL(kam, KOREN).href
-}
-
-async function nactiKomponentu(soubor) {
-  const zdroj = fs.readFileSync(new URL(soubor, KOREN), 'utf8')
-
-  const prelozeno = ts.transpileModule(zdroj, {
-    compilerOptions: {
-      jsx: ts.JsxEmit.ReactJSX,
-      module: ts.ModuleKind.ESNext,
-      target: ts.ScriptTarget.ES2022,
-    },
-  }).outputText
-
-  /*
-    Překladač zachovává uvozovky ze zdroje, takže se přepisují obě
-    podoby. Kdyby se přepsala jen jedna, načetlo by se něco jiného —
-    nebo nic.
-  */
-  const nahrady = [
-    ['react/jsx-runtime', import.meta.resolve('react/jsx-runtime')],
-    ['@/lib/qr', cesta('lib/qr.ts')],
-    ['@/lib/qr-kiosek', cesta('lib/qr-kiosek.ts')],
-  ]
-
-  let sPlnymiCestami = prelozeno
-  for (const [co, cim] of nahrady) {
-    for (const u of ['"', "'"]) {
-      sPlnymiCestami = sPlnymiCestami.split(u + co + u).join(u + cim + u)
-    }
-  }
-
-  if (sPlnymiCestami.includes('@/')) {
-    throw new Error('Zůstal nepřepsaný import @/… — kontrola by načetla něco jiného.')
-  }
-
-  const adresa =
-    'data:text/javascript;base64,' + Buffer.from(sPlnymiCestami, 'utf8').toString('base64')
-
-  return (await import(adresa)).default
-}
 
 const QrKod = await nactiKomponentu('app/kiosek/qr-kod.tsx')
 
