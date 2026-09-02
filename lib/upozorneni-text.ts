@@ -36,6 +36,13 @@ export type TeloUpozorneni = {
   kdo?: string
   ceka?: boolean
   pobocky?: string[]
+  // dochazka.zapomenuty_odchod
+  moje?: boolean
+  zamestnanec?: string
+  den?: string
+  prichod?: string
+  pobocka?: string
+  pobocka_slug?: string
 }
 
 /** Nadpis podle druhu. Neznámý druh se nezamlčí — ať je vidět, že přišel. */
@@ -53,9 +60,44 @@ export function nadpisUpozorneni(
       return telo.ceka
         ? `${telo.jmeno ?? 'Někdo'} přijal pozvánku a čeká na oprávnění`
         : `${telo.jmeno ?? 'Někdo'} přijal pozvánku`
+    /*
+      Zapomenutý odchod. Svému a cizímu se říká jinak: „chybí VÁM“ je
+      výzva, „Láďa NEMÁ“ je hlášení. Kdyby se to řeklo stejně, vedoucí
+      by hledal svůj chybějící odchod.
+    */
+    case 'dochazka.zapomenuty_odchod':
+      return telo.moje
+        ? `Chybí vám odchod z ${denCesky(telo.den)}`
+        : `${telo.jmeno ?? 'Někdo'} nemá odchod z ${denCesky(telo.den)}`
     default:
       return 'Upozornění'
   }
+}
+
+/**
+ * Věta pod nadpisem u zapomenutého odchodu.
+ *
+ * ŽÁDNÁ MZDA, SAZBA ANI ČÁSTKA. Chybějící odchod je provozní věc, ne
+ * mzdová — a ta věta o nezapočítaných hodinách mluví o hodinách,
+ * ne o penězích.
+ */
+export function popisZapomenuteho(telo: TeloUpozorneni): string {
+  const prichod = telo.prichod ? `Příchod v ${telo.prichod}.` : ''
+  const pobocka = telo.pobocka ? ` ${telo.pobocka}.` : ''
+
+  if (telo.moje) {
+    return `${prichod}${pobocka} Dokud odchod nedoplníte, směna se nezapočítá do odpracovaných hodin.`.trim()
+  }
+  return `${prichod}${pobocka}`.trim()
+}
+
+/** „pondělí 31. 8.“ — den v týdnu pomáhá víc než samotné datum. */
+export function denCesky(iso?: string): string {
+  if (!iso) return 'neznámého dne'
+  const d = new Date(`${iso}T12:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  const dny = ['neděle', 'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota']
+  return `${dny[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`
 }
 
 /** „Má oprávnění Servis, Restaurace Černá Perla.“ */

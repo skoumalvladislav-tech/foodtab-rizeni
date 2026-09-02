@@ -12,7 +12,7 @@ import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from '@/lib/supabase
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { ulozitRanniEmail } from './akce'
+import { ulozitRanniEmail, ulozitZapomenutyOdchod } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,7 +85,7 @@ export default async function NastaveniFirma({
 
   const { data: nastaveni } = await supabase
     .from('tenant_settings')
-    .select('ranni_email_kdy')
+    .select('ranni_email_kdy, zapomenuty_odchod_hodin, zapomenuty_odchod_kdy')
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
@@ -107,6 +107,16 @@ export default async function NastaveniFirma({
   }
 
   const cas = (nastaveni?.ranni_email_kdy as string | null) ?? ''
+
+  /*
+    Hranice a hodina pro zapomenutý odchod. Sloupce přibývají migrací
+    20260902080000; než projde, dotaz je nevrátí a berou se výchozí
+    hodnoty ze zadání.
+  */
+  const zapomenutyHodin =
+    (nastaveni as { zapomenuty_odchod_hodin?: number } | null)?.zapomenuty_odchod_hodin ?? 20
+  const zapomenutyKdy =
+    (nastaveni as { zapomenuty_odchod_kdy?: string } | null)?.zapomenuty_odchod_kdy ?? '09:00'
 
   /* --- náhled -------------------------------------------------------
      Ukazuje, co by ráno odešlo za VČEREJŠÍ provozní den. Neposílá nic.
@@ -144,7 +154,7 @@ export default async function NastaveniFirma({
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '720px' }}>
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
-        {ulozeno === 'email' ? (
+        {ulozeno === 'email' || ulozeno === 'zapomenuty' ? (
           <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--dobre)' }}>
             Uloženo.
           </p>
@@ -209,6 +219,66 @@ export default async function NastaveniFirma({
             </button>
           </form>
         ))}
+
+        <h2 style={{ ...nadpis, marginTop: '28px' }}>Zapomenutý odchod</h2>
+        <p style={popis}>
+          Kdo si zapomene odpíchnout odchod, se to dozví — a s ním i ten,
+          kdo na pobočce spravuje docházku. <strong>Jednou za záznam</strong>,
+          ne každé ráno; dál stačí seznam nedokončených na Docházce.
+        </p>
+        <p style={popis}>
+          {/*
+            Ať je to řečené nahlas, ne objevené za měsíc. U noční směny
+            se zapomenutý odchod chytí až druhé ráno — a mění se kvůli
+            tomu číslo tady, ne kód (zadání, oddíl 1).
+          */}
+          Při dvaceti hodinách sedí denní směny přesně: příchod v 11:27,
+          hranice padne v 7:27 druhý den, ozve se v 9:00 téhož rána.
+          U noční směny od 22:00 padne hranice až v 18:00 druhý den, takže
+          se ozve až ráno potom. Když je to moc, zkraťte hranici.
+        </p>
+
+        <form action={ulozitZapomenutyOdchod} style={karta}>
+          <input type="hidden" name="rozsah" value={rozsah} />
+          <div style={mrizka}>
+            <label style={poleLabel}>
+              <span>Po kolika hodinách</span>
+              <input
+                name="hodin"
+                type="number"
+                min={1}
+                max={168}
+                defaultValue={zapomenutyHodin}
+                style={pole}
+              />
+              <span style={vysvetlivka}>
+                Od příchodu, ke kterému nepřišel odchod. Výchozí 20.
+              </span>
+            </label>
+
+            <label style={poleLabel}>
+              <span>V kolik se ozve</span>
+              <input
+                name="kdy"
+                type="time"
+                defaultValue={String(zapomenutyKdy).slice(0, 5)}
+                style={pole}
+              />
+              <span style={vysvetlivka}>
+                Místního času. Ne ve chvíli, kdy hranice padne — to by
+                zvonilo uprostřed noci.
+              </span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            className="ft-tl ft-tl-hlavni ft-tl-male"
+            style={{ marginTop: '12px' }}
+          >
+            Uložit
+          </button>
+        </form>
 
         <h2 style={{ ...nadpis, marginTop: '28px' }}>Jak to bude vypadat</h2>
         <p style={popis}>

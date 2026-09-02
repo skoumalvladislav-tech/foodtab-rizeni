@@ -28,7 +28,10 @@ reset role;
 -- ve firmě je, ale lidi nespravuje.
 -- =====================================================================
 
-select id as tenant from public.tenants limit 1 \gset
+-- Podle jména, ne `limit 1`. Od krok11 jsou v databázi dvě firmy
+-- a bez řazení si Postgres vybere, kterou chce — scénář pak padal
+-- na tom, že „majitel nespravuje lidi“ v cizí firmě.
+select id as tenant from public.tenants where name = 'Foodtab s.r.o.' \gset
 select id as perla  from public.branches where slug = 'cerna-perla' \gset
 
 select user_id as majitel from public.profiles where email = 'majitel@foodtab.cz' \gset

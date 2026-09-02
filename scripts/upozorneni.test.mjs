@@ -23,7 +23,12 @@
 
 import fs from 'node:fs'
 
-import { nadpisUpozorneni, popisOpravneni } from '../lib/upozorneni-text.ts'
+import {
+  denCesky,
+  nadpisUpozorneni,
+  popisOpravneni,
+  popisZapomenuteho,
+} from '../lib/upozorneni-text.ts'
 
 let chyb = 0
 const ma = (popis, sk, ce) => {
@@ -87,6 +92,58 @@ ma(
   'Někdo přijal pozvánku a čeká na oprávnění',
 )
 
+console.log('\n== Zapomenutý odchod: svému a cizímu se říká jinak ==')
+
+const mujOdchod = {
+  moje: true,
+  jmeno: 'Láďa',
+  den: '2026-08-31',
+  prichod: '11:27',
+  pobocka: 'Restaurace Černá Perla',
+}
+const cizi = { ...mujOdchod, moje: false }
+
+ma(
+  'sobě „chybí vám“',
+  nadpisUpozorneni('dochazka.zapomenuty_odchod', mujOdchod, obdobi),
+  'Chybí vám odchod z pondělí 31. 8.',
+)
+ma(
+  'cizímu „Láďa nemá“',
+  nadpisUpozorneni('dochazka.zapomenuty_odchod', cizi, obdobi),
+  'Láďa nemá odchod z pondělí 31. 8.',
+)
+
+/*
+  Vedoucí by jinak hledal svůj chybějící odchod. Rozdíl musí být
+  v NADPISU, ne až v odstavci pod ním.
+*/
+ma(
+  'a nejsou to tytéž nadpisy',
+  nadpisUpozorneni('dochazka.zapomenuty_odchod', mujOdchod, obdobi) ===
+    nadpisUpozorneni('dochazka.zapomenuty_odchod', cizi, obdobi),
+  false,
+)
+
+ma(
+  'sobě se řekne, co se stane, když se nic neudělá',
+  popisZapomenuteho(mujOdchod),
+  'Příchod v 11:27. Restaurace Černá Perla. Dokud odchod nedoplníte, směna se nezapočítá do odpracovaných hodin.',
+)
+ma('cizímu stačí holý údaj', popisZapomenuteho(cizi), 'Příchod v 11:27. Restaurace Černá Perla.')
+
+/*
+  Chybějící odchod je PROVOZNÍ věc, ne mzdová. Kdyby se do textu dostala
+  sazba nebo částka, platila by na upozornění jiná pravidla — a hlavně
+  by se mzdový údaj dostal tam, kam nepatří.
+*/
+for (const t of [popisZapomenuteho(mujOdchod), popisZapomenuteho(cizi)]) {
+  ma('v textu není částka', /Kč|halé|sazb|mzd/i.test(t), false)
+}
+
+ma('bez dne se nevymýšlí datum', denCesky(undefined), 'neznámého dne')
+ma('nesmyslné datum se nepřebarví na dnešek', denCesky('nesmysl'), 'nesmysl')
+
 console.log('\n== Obrazovka ty funkce opravdu volá ==')
 
 const stranka = fs.readFileSync(
@@ -96,6 +153,8 @@ const stranka = fs.readFileSync(
 ma('nadpis se bere z lib/upozorneni-text',
   stranka.includes('nadpisUpozorneni(z.druh, z.telo, obdobi)'), true)
 ma('a popis oprávnění taky', stranka.includes('popisOpravneni(z.telo)'), true)
+ma('i popis zapomenutého odchodu',
+  stranka.includes('popisZapomenuteho(z.telo)'), true)
 ma('vlastní kopie na obrazovce nezůstala',
   stranka.includes('function nadpisZpravy'), false)
 

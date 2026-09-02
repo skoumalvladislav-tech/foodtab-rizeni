@@ -7,6 +7,7 @@ import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
   nadpisUpozorneni,
   popisOpravneni,
+  popisZapomenuteho,
   type TeloUpozorneni,
 } from '@/lib/upozorneni-text'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -165,6 +166,30 @@ export default async function Upozorneni({
                       {popisOpravneni(z.telo)}
                     </p>
                   )
+                ) : null}
+
+                {/*
+                  Zapomenutý odchod. Tlačítko vede rovnou na
+                  PŘEDVYPLNĚNÝ FORMULÁŘ té směny, ne na Docházku obecně
+                  — cesta ke splnění úkolu má být jedno kliknutí
+                  (zadání, oddíl 2).
+                */}
+                {z.druh === 'dochazka.zapomenuty_odchod' ? (
+                  <>
+                    <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
+                      {popisZapomenuteho(z.telo)}
+                    </p>
+                    {z.telo.pobocka_slug && z.telo.zamestnanec && z.telo.den ? (
+                      <p style={{ margin: '10px 0 0' }}>
+                        <Link
+                          href={`/${z.telo.pobocka_slug}/dochazka?doplnit=${z.telo.zamestnanec}&den=${z.telo.den}`}
+                          className="ft-tl ft-tl-hlavni ft-tl-male"
+                        >
+                          Doplnit odchod
+                        </Link>
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
 
                 {z.druh === 'opravneni.prideleno' ? (
