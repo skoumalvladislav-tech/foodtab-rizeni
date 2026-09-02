@@ -130,7 +130,20 @@ export type Scope = {
   branchSlug: string | null
 }
 
-export type Branch = { id: string; name: string; slug: string; color: BranchColor }
+export type Branch = {
+  id: string
+  name: string
+  slug: string
+  color: BranchColor
+  /**
+   * Pásmo, ve kterém se u téhle pobočky ukazují časy.
+   *
+   * Chodí z `my_context` (migrace 20260902090000). Dokud není nasazená,
+   * je `undefined` a obrazovky sáhnou po `ZONA_VYCHOZI` — nikdy po
+   * pásmu serveru, to je právě ta chyba, kvůli které to vzniklo.
+   */
+  timezone?: string
+}
 
 /** Modul firmy. `active: false` = firma ho nemá — v rozcestníku zašedlý. */
 export type Module = {

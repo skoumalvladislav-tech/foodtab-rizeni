@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { getContext, getUser, hasAccess } from "@/lib/authz";
+import { hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import {
   dnu,
@@ -622,6 +623,17 @@ export default async function Dochazka({
   const ostatni = [...stavy.entries()].filter(([id]) => id !== ja.id);
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
+  /*
+    Pásmo se bere u POBOČKY, ne u firmy: čas se ukazuje vedle jména
+    provozovny a ta může stát v jiné zemi. Když ho neznáme (nenasazená
+    migrace 20260902090000), platí výchozí — nikdy pásmo serveru.
+  */
+  const zonyPobocek = new Map(
+    ctx.branches.map((b) => [b.id, b.timezone ?? ZONA_VYCHOZI]),
+  );
+  const zonaUdalosti = (branchId: string | null | undefined) =>
+    (branchId ? zonyPobocek.get(branchId) : undefined) ?? ZONA_VYCHOZI;
+
   return (
     <>
       <HlavickaDochazky />
@@ -638,6 +650,8 @@ export default async function Dochazka({
             ...z,
             pobockaSlug: ctx.branches.find((b) => b.id === z.branch_id)?.slug ?? null,
             pobockaNazev: ctx.branches.find((b) => b.id === z.branch_id)?.name ?? null,
+            zona:
+              ctx.branches.find((b) => b.id === z.branch_id)?.timezone ?? null,
           }))}
           smiOpravit={smiZapsatRucne}
           naPobocce={scope.level === "branch"}
@@ -684,7 +698,9 @@ export default async function Dochazka({
               }}
             >
               {jsemVPraci ? "Jste v práci" : "Nejste v práci"}
-              {posledni ? ` · od ${hodina(posledni.occurred_at)}` : ""}
+              {posledni
+                ? ` · od ${hodina(posledni.occurred_at, zonaUdalosti(posledni.branch_id))}`
+                : ""}
             </p>
 
             {/*
@@ -936,7 +952,7 @@ export default async function Dochazka({
         ) : !vidiOstatni ? (
           <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
             {stavy.has(ja.id)
-              ? `Poslední záznam: ${popisDruhu(stavy.get(ja.id)!.kind)} v ${hodina(stavy.get(ja.id)!.occurred_at)}.`
+              ? `Poslední záznam: ${popisDruhu(stavy.get(ja.id)!.kind)} v ${hodina(stavy.get(ja.id)!.occurred_at, zonaUdalosti(stavy.get(ja.id)!.branch_id))}.`
               : "Dnes zatím nemáte žádný záznam."}
             {prechody.has(ja.id) ? (
               <span style={vetaPrechodu}>
@@ -978,7 +994,8 @@ export default async function Dochazka({
                     }}
                   >
                     <span style={{ whiteSpace: "nowrap" }}>
-                      {popisDruhu(u.kind)} · {hodina(u.occurred_at)}
+                      {popisDruhu(u.kind)} ·{" "}
+                      {hodina(u.occurred_at, zonaUdalosti(u.branch_id))}
                     </span>
                     {prechody.has(id) ? (
                       /*
@@ -1332,11 +1349,14 @@ const seznam = {
 /* --- pomocné funkce ---------------------------------------------- */
 
 /** Čas z timestamptz, tedy z okamžiku. */
-function hodina(casISO: string): string {
-  const d = new Date(casISO);
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  return `${h}:${m}`;
+/*
+  Formátování je v lib/cas.ts a VŽDYCKY chce pásmo. Dřív tu stálo
+  `new Date(iso).getHours()`, což je hodina v pásmu serveru — na
+  Vercelu v UTC. Událost z 13:27 pražského času se ukazovala jako
+  11:27.
+*/
+function hodina(casISO: string, zona?: string): string {
+  return hodinaVPasmu(casISO, zona ?? ZONA_VYCHOZI);
 }
 
 /** Čas ze sloupce `time`, tedy „07:30:00“. */

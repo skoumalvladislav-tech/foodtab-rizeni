@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
@@ -183,16 +184,13 @@ export default async function NastaveniZarizeni({
   )
 }
 
-function kdy(iso: string | null): string {
+/*
+  Pásmo se dodává vždycky. Bez něj bere JavaScript pásmo serveru — na
+  Vercelu UTC — a čas je v létě o dvě hodiny vedle. Viz lib/cas.ts.
+*/
+function kdy(iso: string | null, zona?: string): string {
   if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString('cs-CZ', {
-    day: 'numeric',
-    month: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  return datumACasVPasmu(iso, zona ?? ZONA_VYCHOZI)
 }
 
 const ramecek = {

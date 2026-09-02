@@ -43,15 +43,25 @@ export async function zapsatRucne(formData: FormData): Promise<void> {
   const pristup = await zkusPristup(tenantId, 'attendance.manage', rozsah)
   if (pristup.stav !== 'ok') redirect('/')
 
+  /*
+    Čas jde do databáze TAK, JAK HO ČLOVĚK NAPSAL — jako hodina na zdi,
+    bez pásma. Pásmo k ní dodá pobočka uvnitř `zapsat_rucni_dochazku`.
+
+    Dřív tu bylo `new Date(kdy).toISOString()`. Ten řetězec pásmo nemá,
+    takže ho JavaScript přečetl v pásmu SERVERU — a ten je na Vercelu
+    v UTC. Z „22:00 pražského času“ se uložila půlnoc pražského času
+    a směna vyšla o dvě hodiny delší. Viz
+    docs/odpoved-na-nalez-casu-2026-09-02.md.
+  */
   const supabase = await getServerSupabase()
-  const { error } = await supabase.from('attendance_events').insert({
-    tenant_id: tenantId,
-    branch_id: pobocka,
-    employee_id: zamestnanec,
-    kind: druh,
-    occurred_at: new Date(kdy).toISOString(),
-    source: 'manual',
-    note: duvod,
+  const { error } = await supabase.rpc('zapsat_rucni_dochazku', {
+    p_tenant: tenantId,
+    p_branch: pobocka,
+    p_employee: zamestnanec,
+    p_druh: druh,
+    // Například „2026-08-31T22:00“. Žádný převod tady, viz výš.
+    p_kdy: kdy,
+    p_duvod: duvod,
   })
 
   if (error) {

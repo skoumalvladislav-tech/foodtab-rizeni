@@ -14,6 +14,7 @@
  */
 import Link from 'next/link'
 
+import { hodinaVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { pocet, prisudek } from '@/lib/sklonovani'
 
 
@@ -27,6 +28,8 @@ export type NedokoncenaProp = {
   /** Slug a název pobočky toho záznamu — kvůli odkazu na formulář. */
   pobockaSlug: string | null
   pobockaNazev: string | null
+  /** Pásmo té pobočky. Čas začátku se ukazuje v něm, ne v pásmu serveru. */
+  zona: string | null
 }
 
 export default function PanelNedokoncene({
@@ -73,7 +76,8 @@ export default function PanelNedokoncene({
             <span>
               <strong>{z.moje ? 'Vy' : z.jmeno}</strong>{' '}
               <span style={{ color: 'var(--muted)' }}>
-                — příchod {den(z.business_date)} v {cas(z.zacatek)}, odchod chybí
+                — příchod {den(z.business_date)} v{' '}
+                {cas(z.zacatek, z.zona)}, odchod chybí
                 {!naPobocce && z.pobockaNazev ? ` · ${z.pobockaNazev}` : ''}
               </span>
             </span>
@@ -134,10 +138,13 @@ function den(iso: string): string {
   return `${dny[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`
 }
 
-function cas(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString('cs-CZ', { hour: 'numeric', minute: '2-digit' })
+/*
+  Bez pásma bral `toLocaleTimeString` pásmo serveru — na Vercelu UTC —
+  a příchod z 13:27 pražského času se ukazoval jako 11:27. Právě podle
+  tohohle údaje se rozhoduje, jaký odchod se dopíše.
+*/
+function cas(iso: string, zona: string | null): string {
+  return hodinaVPasmu(iso, zona ?? ZONA_VYCHOZI)
 }
 
 const panel = {

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { redirect } from "next/navigation";
 
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
@@ -377,10 +378,10 @@ function popisChyby(kod: string): string {
   }
 }
 
-function denAcas(iso: string): string {
-  const d = new Date(iso);
-  const den = `${d.getDate()}. ${d.getMonth() + 1}.`;
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  return `${den} ${h}:${m}`;
+/*
+  Pásmo se dodává vždycky. Bez něj bere JavaScript pásmo serveru — na
+  Vercelu UTC — a čas je v létě o dvě hodiny vedle. Viz lib/cas.ts.
+*/
+function denAcas(iso: string, zona?: string): string {
+  return datumACasVPasmu(iso, zona ?? ZONA_VYCHOZI);
 }
