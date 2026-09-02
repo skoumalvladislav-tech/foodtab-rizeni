@@ -123,6 +123,20 @@ begin
   perform pg_temp.check('a hláška říká proč',
     v_text = 'Ve firmě musí zůstat aspoň jeden majitel. Nejdřív jmenujte dalšího.');
 
+  /*
+    Od téhle chvíle se zkouší ZPOD SUPERUŽIVATELE.
+
+    Politika `memberships_write` nepustí nikoho na jeho VLASTNÍ členství
+    (kontrola je v krok4). Pod rolí `authenticated` tedy update neprojde
+    a neudělá nic — tiše, bez chyby — takže by se ke spoušti vůbec
+    nedostal a kontrola by padala na tom, že ji nikdo nezavolal.
+
+    V PGlite to nevyšlo najevo, protože tam se běží jako superuživatel
+    a RLS se neuplatní. Tady je potřeba to oddělit: politika je první
+    linie a hlídá se jinde, tohle je zkouška DRUHÉ linie — spouště.
+  */
+  reset role;
+
   -- 3. Přeřazení na jinou roli.
   begin
     update public.memberships

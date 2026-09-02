@@ -293,12 +293,19 @@ begin
     into v_zprav;
   perform pg_temp.check('zrušení se podruhé nehlásí', v_zprav = 0);
 
-  -- Tomu, kdo vydává, nechodí nic
+  /*
+    Tomu, kdo vydává, nechodí nic — ale ptáme se JEN na upozornění
+    o rozpisu. Od migrace 20260902030000 chodí upozornění i o přidělení
+    členství a oprávnění, takže majitel jich pár má z dřívějších kroků
+    a kontrola „nemá žádné" by od té chvíle padala na nesouvisející
+    zprávě.
+  */
   reset role;
   select count(*) into v_pocet
   from public.notifications n
-  where n.user_id = pg_temp.uid('majitel@foodtab.cz');
-  perform pg_temp.check('kdo vydává, upozornění nedostane', v_pocet = 0);
+  where n.user_id = pg_temp.uid('majitel@foodtab.cz')
+    and n.druh = 'rozpis.vydan';
+  perform pg_temp.check('kdo vydává, upozornění o rozpisu nedostane', v_pocet = 0);
 end $$;
 
 reset role;
@@ -315,7 +322,14 @@ begin
   perform set_config('test.user_id', pg_temp.uid('provozni@foodtab.cz')::text, false);
   set local role authenticated;
 
-  select count(*) into v_pocet from public.notifications;
+  /*
+    Ptáme se na CIZÍ upozornění, ne na všechna. Od migrace
+    20260902030000 má i provozní vlastní zprávy (o přidělení oprávnění),
+    takže „nevidí žádné" by padalo na tom, že vidí správně ta svoje.
+    Vlastnost, o kterou jde, je: nevidí ani jedno cizí.
+  */
+  select count(*) into v_pocet from public.notifications n
+   where n.user_id <> pg_temp.uid('provozni@foodtab.cz');
   perform pg_temp.check('cizí upozornění nepřečte ani provozní', v_pocet = 0);
 
   begin
