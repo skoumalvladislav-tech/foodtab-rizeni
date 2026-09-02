@@ -105,6 +105,16 @@ select pg_temp.check('NENÍ uloženo jako 22:00 UTC',
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
+/*
+  Nejdřív příchod. Od migrace 20260903020000 se odchod, ke kterému
+  není co zavřít, odmítá — a je to tak správně; tenhle scénář si ho
+  dřív zapisoval do prázdna, což je přesně to, co Šéfík dělal pětkrát
+  za sebou. Na ověření pásma to nic nemění.
+*/
+select public.zapsat_rucni_dochazku(
+  :'tenant', :'perla', :'e_pasmo', 'in',
+  timestamp '2026-01-15 14:00', 'zkouška pásma — zimní příchod') as ud_zima_in \gset
+
 select public.zapsat_rucni_dochazku(
   :'tenant', :'perla', :'e_pasmo', 'out',
   timestamp '2026-01-15 22:00', 'zkouška pásma — zima') as ud_zima \gset

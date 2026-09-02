@@ -101,6 +101,14 @@ export default async function Dochazka({
   params: Promise<{ rozsah: string }>;
   searchParams: Promise<{
     chyba?: string;
+    /**
+     * Hláška z databáze u ručního zápisu.
+     *
+     * Propouští se beze změny. Je česká, napsaná pro člověka a ví, co
+     * se stalo — „Záznam se nepodařilo uložit“ místo ní je přesně to
+     * „nepovedlo se“, které nikomu nepomůže.
+     */
+    text?: string;
     zapsano?: string;
     mesic?: string;
     doplnit?: string;
@@ -112,6 +120,7 @@ export default async function Dochazka({
   const { rozsah } = await params;
   const {
     chyba: chybaRucne,
+    text: chybaText,
     zapsano,
     mesic: mesicParam,
     doplnit,
@@ -671,6 +680,7 @@ export default async function Dochazka({
             lide={doVyberu}
             pobocky={pobockyProRucni}
             chyba={chybaRucne}
+            chybaText={chybaText}
             zapsano={zapsano === "1"}
             predvyplnit={predvyplnit}
           />

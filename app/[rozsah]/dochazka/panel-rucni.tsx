@@ -24,6 +24,7 @@ export default function PanelRucni({
   lide,
   pobocky,
   chyba,
+  chybaText,
   zapsano,
   predvyplnit,
 }: {
@@ -34,6 +35,8 @@ export default function PanelRucni({
   /** Pobočky, na kterých smí zapisovat. Viz komentář u pole „Kde“. */
   pobocky: { id: string; nazev: string }[]
   chyba?: string
+  /** Hláška z databáze. Má přednost před obecným popisem. */
+  chybaText?: string
   zapsano?: boolean
   /**
    * Předvyplnění z tlačítka „Doplnit odchod“ u nedokončeného záznamu.
@@ -84,7 +87,14 @@ export default function PanelRucni({
         </p>
       ) : null}
 
-      {chyba ? <p className="hlaska-chyba">{popisChyby(chyba)}</p> : null}
+      {/*
+        Když databáze poslala vlastní větu, ukáže se ONA. Odmítnutý
+        odchod bez otevřené směny řekne, co se stalo a co s tím —
+        obecné „nepodařilo se uložit“ by tu informaci zahodilo.
+      */}
+      {chyba ? (
+        <p className="hlaska-chyba">{chybaText?.trim() || popisChyby(chyba)}</p>
+      ) : null}
       {zapsano ? (
         <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
           Zapsáno jako ruční záznam.
