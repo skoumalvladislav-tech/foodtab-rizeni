@@ -12,6 +12,7 @@ import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
+import CekaNaOpravneni from "./ceka-na-opravneni";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import Ram, { type ModulProp, type PolozkaProp } from "./ram";
 import PruhInformace from "./pruh-informace";
@@ -166,6 +167,21 @@ export default async function RozsahLayout({
     .eq("tenant_id", tenantId)
     .is("read_at", null);
 
+  /*
+    Kdo čeká na přidělení oprávnění.
+
+    Průzor pustí dovnitř jen toho, kdo ve firmě spravuje lidi, takže se
+    tu právo neověřuje podruhé — ostatním se vrátí prázdno.
+
+    Chyba se schválně nevyhazuje: dokud neproběhne migrace
+    20260902070000, funkce neexistuje a okno se prostě neukáže. Kvůli
+    upozornění nemá padat celý rám aplikace.
+  */
+  const { data: cekajiciNaOpravneni } = await (await getServerSupabase()).rpc(
+    "cekaji_na_opravneni",
+    { p_tenant: tenantId },
+  );
+
   // Ozubené kolo nevisí na settings.manage. Kdo má právo aspoň na jednu
   // obrazovku nastavení — třeba jen na Lidi přes people.manage — se tam
   // musí dostat, a to na tu obrazovku, kterou opravdu smí vidět.
@@ -197,6 +213,14 @@ export default async function RozsahLayout({
         přihlášení. Kdo neklikne, uvidí ji zase příště.
       */}
       <PruhInformace rozsah={rozsah} tenantId={tenantId} />
+      {/*
+        Okno jen tehdy, když někdo čeká. Když pozvánka oprávnění nesla,
+        stačí zvoneček — viz komentář v ceka-na-opravneni.tsx.
+      */}
+      <CekaNaOpravneni
+        rozsah={rozsah}
+        lide={(cekajiciNaOpravneni ?? []) as { user_id: string; jmeno: string }[]}
+      />
       {children}
     </Ram>
   );

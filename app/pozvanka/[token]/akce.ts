@@ -3,6 +3,7 @@
 import { headers } from 'next/headers'
 
 import { getUser } from '@/lib/authz'
+import { ohlasPrijetiPozvanky } from '@/lib/ohlas-prijeti'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -55,6 +56,16 @@ export async function prijmoutPozvankuAction(
   }
 
   if (!data) return { chyba: 'Pozvánka nebyla přijata.' }
+
+  /*
+    E-mail tomu, kdo ve firmě spravuje lidi. Zvoneček píše spoušť
+    v databázi a na tomhle nezávisí — kdyby se pošta rozbila,
+    upozornění v aplikaci zůstane a přijetí platí dál.
+
+    Proto se výsledek NEKONTROLUJE a nic se z něj nevrací: pozvánka je
+    přijatá a to je to jediné, co má tenhle krok ovlivnit.
+  */
+  await ohlasPrijetiPozvanky(String(data))
 
   return { ok: true }
 }

@@ -1,8 +1,14 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getUser } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
+import {
+  nadpisUpozorneni,
+  popisOpravneni,
+  type TeloUpozorneni,
+} from '@/lib/upozorneni-text'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
@@ -21,14 +27,20 @@ export const dynamic = 'force-dynamic'
  * se z nich, kdo kdy dělá.
  */
 
+/**
+ * Tělo upozornění. Holé údaje — věty se skládají v lib/upozorneni-text.
+ *
+ * Ty věty tu stály taky, jenže obrazovku nejde vykreslit mimo aplikaci
+ * a nešly ověřit. Teď na ně sahá scripts/upozorneni.test.mjs.
+ */
+type Telo = TeloUpozorneni & {
+  zmeny?: { den: string; zmena: string; od: string; do: string; drive_od: string | null; drive_do: string | null }[]
+}
+
 type Zprava = {
   id: string
   druh: string
-  telo: {
-    od?: string
-    do?: string
-    zmeny?: { den: string; zmena: string; od: string; do: string; drive_od: string | null; drive_do: string | null }[]
-  }
+  telo: Telo
   created_at: string
   read_at: string | null
 }
@@ -105,8 +117,8 @@ export default async function Upozorneni({
 
         {zpravy.length === 0 ? (
           <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
-            Zatím tu nic není. Až vedoucí vydá rozpis, ve kterém se něco
-            změní na vašich směnách, objeví se to tady.
+            Zatím tu nic není. Objeví se tu změna na vašich směnách,
+            přidělené oprávnění nebo to, že někdo přijal pozvánku.
           </p>
         ) : (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '12px' }}>
@@ -120,12 +132,46 @@ export default async function Upozorneni({
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
                   <strong style={{ fontSize: '15px' }}>
-                    Rozpis {obdobi(z.telo.od, z.telo.do)}
+                    {nadpisUpozorneni(z.druh, z.telo, obdobi)}
                   </strong>
                   <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
                     {z.read_at ? 'přečteno' : 'nové'}
                   </span>
                 </div>
+
+                {/*
+                  Přijatá pozvánka: dvě různé situace, dva různé texty.
+                  Kdo čeká na oprávnění, je ÚKOL a má u sebe cestu ke
+                  splnění; kdo je má, je informace. Nesmí vypadat stejně.
+                */}
+                {z.druh === 'pozvanka.prijata' ? (
+                  z.telo.ceka ? (
+                    <>
+                      <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
+                        Dokud mu oprávnění nepřidělíte, v aplikaci neuvidí
+                        nic než své údaje.
+                      </p>
+                      <p style={{ margin: '10px 0 0' }}>
+                        <Link
+                          href={`/${rozsah}/nastaveni/lide?clovek=${z.telo.kdo ?? ''}`}
+                          className="ft-tl ft-tl-hlavni ft-tl-male"
+                        >
+                          Přidělit oprávnění
+                        </Link>
+                      </p>
+                    </>
+                  ) : (
+                    <p style={{ margin: '8px 0 0', fontSize: '14px', color: 'var(--muted)' }}>
+                      {popisOpravneni(z.telo)}
+                    </p>
+                  )
+                ) : null}
+
+                {z.druh === 'opravneni.prideleno' ? (
+                  <p style={{ margin: '8px 0 0', fontSize: '14px', color: 'var(--muted)' }}>
+                    {[z.telo.role, z.telo.firma].filter(Boolean).join(' · ')}
+                  </p>
+                ) : null}
 
                 <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: '4px' }}>
                   {(z.telo.zmeny ?? []).map((zm, i) => (

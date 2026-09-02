@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { ohlasPrijetiPozvanky } from '@/lib/ohlas-prijeti'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -24,7 +25,7 @@ export async function prijmoutMojiPozvanku(
   if (!pozvanka) return { stav: 'chyba', text: 'Chybí, kterou pozvánku přijmout.' }
 
   const supabase = await getServerSupabase()
-  const { error } = await supabase.rpc('prijmout_moji_pozvanku', {
+  const { data, error } = await supabase.rpc('prijmout_moji_pozvanku', {
     p_pozvanka: pozvanka,
   })
 
@@ -34,6 +35,9 @@ export async function prijmoutMojiPozvanku(
     tady. Chybové kódy jsou na větvení, ne na text.
   */
   if (error) return { stav: 'chyba', text: error.message }
+
+  // Táž zpráva jako u přijetí odkazem. Viz lib/ohlas-prijeti.ts.
+  if (data) await ohlasPrijetiPozvanky(String(data))
 
   revalidatePath('/', 'layout')
   redirect('/')

@@ -6,7 +6,13 @@ import { tabulkaNeexistuje, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '@/app/[rozsah]/nadpis'
-import { nastavitPin, prepnoutSouhlas, ulozitKontakt, vzitNaVedomi } from './akce'
+import {
+  nastavitPin,
+  prepnoutEmailyUpozorneni,
+  prepnoutSouhlas,
+  ulozitKontakt,
+  vzitNaVedomi,
+} from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -136,6 +142,18 @@ export default async function MojeUdaje({
   const muj = ((kontakty.data ?? []) as Kontakt[]).find((k) => k.duvod === 'moje') ?? null
   const info = ((informace.data ?? []) as Informace[])[0] ?? null
   const katalog = (druhy.data ?? []) as Druh[]
+  /*
+    Chci upozornění i e-mailem? Sloupec přibývá migrací 20260902070000;
+    dokud neproběhne, dotaz selže a bere se výchozí ano — obrazovka
+    kvůli tomu padat nemá.
+  */
+  const { data: profil } = await supabase
+    .from('profiles')
+    .select('upozorneni_emailem')
+    .eq('user_id', user.id)
+    .maybeSingle()
+  const chceEmaily = (profil as { upozorneni_emailem?: boolean } | null)?.upozorneni_emailem !== false
+
   const maPin = ((pin.data ?? []) as { employee_id: string }[]).some(
     (r) => r.employee_id === muj?.employee_id,
   )
@@ -277,6 +295,40 @@ export default async function MojeUdaje({
               souhlas je horší než žádný.
             </p>
           ) : null}
+        </section>
+
+        {/* --- Upozornění ----------------------------------------- */}
+        <section style={karta}>
+          <h2 style={nadpisKarty}>Upozornění</h2>
+          <p style={popis}>
+            {/*
+              O pushi do mobilu tu není ani slovo. Nechodí — a dokud
+              nechodí, nemá o něm být ani vypnutý přepínač: slíbil by
+              víc než celá věta (zadání, oddíl 4).
+            */}
+            <strong>Zvoneček v aplikaci</strong> chodí vždycky a vypnout
+            se nedá. Je to záznam o tom, co se ve firmě stalo, ne
+            oznámení — kdyby šel vypnout, ta stopa by zmizela.
+          </p>
+          <div style={radekSouhlasu}>
+            <div style={{ minWidth: 0 }}>
+              <strong style={{ fontSize: '15px' }}>Ještě i e-mailem</strong>
+              <span style={{ display: 'block', fontSize: '13px', color: 'var(--muted)', marginTop: '2px' }}>
+                {chceEmaily
+                  ? 'Upozornění vám chodí i na e-mail.'
+                  : 'E-maily vám nechodí. Ve zvonečku je najdete pořád.'}
+              </span>
+            </div>
+            <form action={prepnoutEmailyUpozorneni}>
+              <input type="hidden" name="chci" value={chceEmaily ? 'ne' : 'ano'} />
+              <button
+                type="submit"
+                className={chceEmaily ? 'ft-tl ft-tl-vedlejsi' : 'ft-tl ft-tl-hlavni'}
+              >
+                {chceEmaily ? 'Vypnout e-maily' : 'Zapnout e-maily'}
+              </button>
+            </form>
+          </div>
         </section>
 
         {/* --- PIN ke kiosku -------------------------------------- */}

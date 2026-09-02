@@ -165,3 +165,34 @@ export async function nastavitPin(formData: FormData): Promise<void> {
   revalidatePath(`/moje-udaje`)
   redirect(`/moje-udaje?ulozeno=pin`)
 }
+
+/**
+ * Chci upozornění i e-mailem?
+ *
+ * Zadání docs/upozorneni-na-prijeti-zadani.md, oddíl 4: kdo chce
+ * dostávat co, ať je nastavení u člověka, ne konstanta.
+ *
+ * ZVONEČEK SE NEVYPÍNÁ a přepínač na něj tady schválně není — je to
+ * záznam, ne oznámení. O pushi do mobilu se nepíše, protože nechodí.
+ */
+export async function prepnoutEmailyUpozorneni(formData: FormData): Promise<void> {
+  const chci = String(formData.get('chci') ?? '') === 'ano'
+
+  const ja = await kdo()
+  if (!ja) redirect('/')
+
+  const supabase = await getServerSupabase()
+  // Politika profiles_update_self pustí jen vlastní řádek; sloupcový
+  // grant je jen na tenhle jediný sloupec.
+  const { error } = await supabase
+    .from('profiles')
+    .update({ upozorneni_emailem: chci })
+    .eq('user_id', ja.userId)
+
+  if (error) {
+    redirect(`/moje-udaje?chyba=emaily&text=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath('/moje-udaje')
+  redirect('/moje-udaje?ulozeno=emaily')
+}
