@@ -59,6 +59,30 @@ jiného.
 
 ---
 
+## Rozsah přiděluje jen správce lidí za celou firmu
+
+Rozhodl Šéfík 1. 9. 2026, zapsáno 2. 9.
+
+Kdo má `people.manage` jen na pobočku, **nepřidělí rozsah nikomu — ani
+na tu svou.** Politika na `membership_branches` se ptá
+`app.has_access(tenant, 'people.manage')` bez pobočky, a to vyžaduje
+členství s rozsahem `tenant`.
+
+**Je to vědomé rozhodnutí, ne díra.** Je přísnější, než pravidlo 4
+žádá, a u dvou provozoven to nikomu nevadí. Kdo rozšiřuje, kam někdo
+vidí, rozhoduje o celé firmě — i když zrovna přidává jednu pobočku.
+
+Plyne z toho jedna věc, která svádí k „opravě": strop na pobočku
+uvnitř `app.smi_pridelit` (kontrola, že přidělující má právo i na tu
+konkrétní pobočku) **se nikdy neuplatní**, protože ten, na koho míří,
+se k tabulce nedostane už o krok dřív. Zůstává tam schválně — jako
+druhá závora pro případ, že by se první uvolnila.
+
+**Neopravujte to na `has_access(tenant, 'people.manage', branch_id)`.**
+Vypadalo by to logičtěji a bylo by to volnější, než jsme chtěli.
+
+---
+
 ## Dvě obranné linie
 
 Jako všude jinde (pravidlo 3):

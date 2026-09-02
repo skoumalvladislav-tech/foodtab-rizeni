@@ -195,6 +195,23 @@ o sobě.
 - `tenant_id`, RLS a politika. Každý vidí své zálohy; kdo má
   `advances.manage` nebo `payroll.read`, vidí zálohy své pobočky.
 
+### Vyplácí se jen na pobočce
+
+Potvrzeno Šéfíkem 2. 9. 2026.
+
+Formulář na výplatu se kreslí **jen na pobočkové adrese**, ne na
+firemní úrovni. Hotovost přechází z ruky do ruky na konkrétním místě
+a záznam pobočku stejně nese — vyplácení „za firmu" by znamenalo, že
+se pobočka někde dopočítá, a to je přesně ten druh domýšlení, kterému
+se u peněz vyhýbáme.
+
+Na firemní úrovni tedy zůstává jen **seznam** záloh všech poboček, na
+které volající vidí, a věta, ať se přepne na pobočku.
+
+**Neopravujte to zpátky** na „vyplatit odkudkoli a pobočku vzít
+z člověka". Kdo dnes stojí směnu jinde, než kam patří, by dostal
+zálohu připsanou na špatné místo.
+
 ---
 
 ## 7. Kolik si vydělám
