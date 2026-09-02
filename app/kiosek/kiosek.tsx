@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
-import { qrSvg } from '@/lib/qr'
 import { getBrowserSupabase } from '@/lib/supabase/client'
+
+import QrKod from './qr-kod'
 
 /**
  * Obrazovka kiosku.
@@ -291,31 +292,16 @@ export default function Kiosek() {
             Textový kód zůstává POD QR, menším písmem: kdo nemá čím
             načíst, opíše ho jako dosud.
           */}
-          <section>
-            <p style={popisek}>Namiřte fotoaparát</p>
-
-            <div
-              style={{ lineHeight: 0, maxWidth: '100%' }}
-              dangerouslySetInnerHTML={{
-                __html: qrSvg(adresaPichnuti(stav.slug, stav.kod), {
-                  // Tablet stojí na baru a člověk se k němu nebude
-                  // sklánět — QR musí zabrat podstatnou část obrazovky.
-                  velikost: 320,
-                  oprava: 'M',
-                  popis: 'QR kód s odkazem na docházku',
-                }),
-              }}
-            />
-
-            <p style={{ ...popis, margin: '10px 0 0' }}>
-              Nemáte čím načíst? Opište kód na Docházce v aplikaci:
-            </p>
-            <p style={kodMalyStyl}>{stav.kod}</p>
-            <p style={{ ...popis, marginBottom: 0 }}>
-              Mění se každých {stav.platnost} vteřin — vyfocený je za
-              chvíli k ničemu, a to je celý jeho smysl.
-            </p>
-          </section>
+          {/*
+            Obsah QR i texty kolem něj žijí v QrKod. Nekreslí se tu,
+            aby na hotové SVG mohla sáhnout kontrola — viz qr-kod.tsx.
+          */}
+          <QrKod
+            puvod={typeof window === 'undefined' ? '' : window.location.origin}
+            slug={stav.slug}
+            kod={stav.kod}
+            platnost={stav.platnost}
+          />
 
           <section>
             <p style={popisek}>Nebo zadejte svůj PIN</p>
@@ -434,31 +420,6 @@ function koruny(halere: number): string {
   return `${kc.toString().replace(/\B(?=(\d{3})+$)/g, '\u00a0')} Kč`
 }
 
-/**
- * Adresa, kterou nese QR.
- *
- *     https://<adresa>/<pobocka>/dochazka?kod=CE8CA63E
- *
- * NIC DALŠÍHO V NÍ BÝT NESMÍ (zadání, oddíl 2). Žádné jméno, žádný
- * druh píchnutí — o tom, jestli je to příchod nebo odchod, rozhoduje
- * stav člověka, ne adresa. Kdyby o tom rozhodovala adresa, stačilo by
- * podstrčit odkaz a píchnout někomu opačný směr.
- *
- * Kód v adrese je v pořádku: žije 45 vteřin a stejně svítí na obrazovce
- * za barem, kde ho vidí každý host. Není to tajemství, je to důkaz
- * přítomnosti. Jméno ani částka by tam nepatřily.
- *
- * Původ se bere z prohlížeče — tablet i telefon jsou na téže adrese.
- */
-function adresaPichnuti(slug: string | null, kod: string): string {
-  const puvod = typeof window === 'undefined' ? '' : window.location.origin
-  // Bez slugu by odkaz vedl nikam. Stane se to jen do nasazení migrace
-  // 20260902050000; do té doby ať QR aspoň nese samotný kód, který jde
-  // opsat, místo rozbité adresy.
-  if (!slug) return kod
-  return `${puvod}/${encodeURIComponent(slug)}/dochazka?kod=${encodeURIComponent(kod)}`
-}
-
 /** Z „07:30:00“ udělá „7:30“. */
 function cas(t: string): string {
   const [h, m] = (t ?? '').split(':')
@@ -500,22 +461,6 @@ const popisek = {
   color: 'var(--muted)',
   textTransform: 'uppercase' as const,
   letterSpacing: '.08em',
-} as const
-
-const kodMalyStyl = {
-  margin: '4px 0 8px',
-  fontSize: '26px',
-  letterSpacing: '.14em',
-  color: 'var(--ink)',
-  fontVariantNumeric: 'tabular-nums' as const,
-} as const
-
-const kodStyl = {
-  margin: 0,
-  fontSize: '46px',
-  letterSpacing: '.14em',
-  color: 'var(--ink)',
-  fontVariantNumeric: 'tabular-nums' as const,
 } as const
 
 const pole = {

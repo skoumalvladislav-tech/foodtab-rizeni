@@ -1,15 +1,27 @@
 #!/usr/bin/env node
 /**
- * QR kód — lib/qr.ts.
+ * QR kód — lib/qr.ts a obrazovka kiosku.
  *
  * Pusť `node --experimental-strip-types scripts/qr.test.mjs`.
  *
  * ---------------------------------------------------------------------
- * PROČ SE TO DEKÓDUJE, A NE JEN POROVNÁVÁ
+ * PROČ SE VYKRESLUJE KOMPONENTA, A NE JEN VOLÁ FUNKCE
  *
- * QR kód nemá smysl kontrolovat tím, že „nějaké SVG vzniklo“. Jediné,
- * na čem záleží, je jestli ho čtečka přečte a jestli v něm je to, co
- * tam být má — a to se ověří jedině přečtením.
+ * Předchozí podoba téhle kontroly si očekávanou adresu POSKLÁDALA
+ * SAMA a pak ověřila, že se z QR přečte zpátky. To vždycky vyjde —
+ * ověřuje se tím jen to, že kodér umí, co má. O tom, co je na tabletu,
+ * to neříká nic.
+ *
+ * A na tabletu bylo něco jiného: `adresaPichnuti` měla větev
+ * `if (!slug) return kod`, pobočka se z databáze ještě nevracela,
+ * a QR tak osm dní nesl osmiznakový kód místo šedesátiznakové adresy.
+ * Kontrola na tu větev nesáhla, protože tu funkci vůbec nevolala.
+ * Hlásilo se „29 kontrol prošlo“ nad kódem, který nefungoval.
+ *
+ * Proto se tady VYKRESLÍ SKUTEČNÁ KOMPONENTA `app/kiosek/qr-kod.tsx`
+ * — táž, kterou kreslí kiosek —, z jejího výstupu se vytáhne hotové
+ * SVG a to se dekóduje. Kontrola tedy sahá na obrázek, který uvidí
+ * člověk u baru.
  *
  * Čte se NEZÁVISLOU knihovnou (jsqr), ne tou, která kód vyrobila.
  * Kdyby se použila táž, ověřilo by se jen to, že si sama rozumí.
@@ -19,9 +31,15 @@
  * jako samostatný čtverec, ne jako slepená cesta.
  */
 
+import fs from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import ts from 'typescript'
+
 import jsQR from 'jsqr'
 
 import { qrSvg } from '../lib/qr.ts'
+import { odkazPichnuti } from '../lib/qr-kiosek.ts'
 
 let chyb = 0
 const ma = (popis, sk, ce) => {
@@ -30,7 +48,99 @@ const ma = (popis, sk, ce) => {
   console.log(`  ${ok ? 'OK   ' : 'CHYBA'} ${popis}${ok ? '' : ` → ${JSON.stringify(sk)} ≠ ${JSON.stringify(ce)}`}`)
 }
 
-/** Z našeho SVG udělá obrazové body, které umí přečíst jsqr. */
+/**
+ * Porovnání znak po znaku.
+ *
+ * `ma` by řeklo jen „nerovná se“. U šedesátiznakové adresy je rozdíl
+ * mezi „chybí pomlčka“ a „je tam osm znaků místo adresy“ podstatný,
+ * takže se ukáže, na kterém znaku se to rozešlo.
+ */
+function maZnakPoZnaku(popis, sk, ce) {
+  if (sk === ce) {
+    console.log(`  OK    ${popis} (${ce.length} znaků)`)
+    return
+  }
+  chyb++
+  if (sk === null || sk === undefined) {
+    console.log(`  CHYBA ${popis} → nepřečteno (čekalo se ${JSON.stringify(ce)})`)
+    return
+  }
+  let i = 0
+  while (i < sk.length && i < ce.length && sk[i] === ce[i]) i++
+  console.log(`  CHYBA ${popis} → rozchází se na znaku ${i}`)
+  console.log(`        na obrazovce: ${JSON.stringify(sk)} (${sk.length} znaků)`)
+  console.log(`        mělo být:     ${JSON.stringify(ce)} (${ce.length} znaků)`)
+}
+
+/* =====================================================================
+   Vykreslení skutečné komponenty kiosku
+
+   `qr-kod.tsx` je TypeScript s JSX; Node ani jedno sám nepřečte.
+   Přeloží se tedy tímtéž překladačem, kterým se překládá aplikace,
+   a načte se z paměti. Bare importy (`react/jsx-runtime`, `@/lib/…`)
+   se přepíší na úplné cesty, protože z datové adresy se rozhodovat
+   nedají.
+   ================================================================== */
+
+const KOREN = new URL('..', import.meta.url)
+
+function cesta(kam) {
+  return new URL(kam, KOREN).href
+}
+
+async function nactiKomponentu(soubor) {
+  const zdroj = fs.readFileSync(new URL(soubor, KOREN), 'utf8')
+
+  const prelozeno = ts.transpileModule(zdroj, {
+    compilerOptions: {
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+
+  /*
+    Překladač zachovává uvozovky ze zdroje, takže se přepisují obě
+    podoby. Kdyby se přepsala jen jedna, načetlo by se něco jiného —
+    nebo nic.
+  */
+  const nahrady = [
+    ['react/jsx-runtime', import.meta.resolve('react/jsx-runtime')],
+    ['@/lib/qr', cesta('lib/qr.ts')],
+    ['@/lib/qr-kiosek', cesta('lib/qr-kiosek.ts')],
+  ]
+
+  let sPlnymiCestami = prelozeno
+  for (const [co, cim] of nahrady) {
+    for (const u of ['"', "'"]) {
+      sPlnymiCestami = sPlnymiCestami.split(u + co + u).join(u + cim + u)
+    }
+  }
+
+  if (sPlnymiCestami.includes('@/')) {
+    throw new Error('Zůstal nepřepsaný import @/… — kontrola by načetla něco jiného.')
+  }
+
+  const adresa =
+    'data:text/javascript;base64,' + Buffer.from(sPlnymiCestami, 'utf8').toString('base64')
+
+  return (await import(adresa)).default
+}
+
+const QrKod = await nactiKomponentu('app/kiosek/qr-kod.tsx')
+
+/** Vykreslí kiosek přesně tak, jak ho vykreslí prohlížeč. */
+function obrazovka(vlastnosti) {
+  return renderToStaticMarkup(createElement(QrKod, vlastnosti))
+}
+
+/** Vytáhne z hotové obrazovky SVG. `null`, když tam žádné není. */
+function svgZObrazovky(html) {
+  const m = html.match(/<svg\b[\s\S]*?<\/svg>/)
+  return m ? m[0] : null
+}
+
+/** Z SVG udělá obrazové body, které umí přečíst jsqr. */
 function naBody(svg, zvetseni = 4) {
   const viewBox = svg.match(/viewBox="0 0 (\d+) (\d+)"/)
   if (!viewBox) throw new Error('SVG nemá viewBox')
@@ -61,12 +171,19 @@ function naBody(svg, zvetseni = 4) {
   return { data, sirka }
 }
 
-function precti(text, volby) {
-  const svg = qrSvg(text, volby)
+/** Dekóduje hotové SVG cizí knihovnou. */
+function dekoduj(svg) {
   const { data, sirka } = naBody(svg)
-  const v = jsQR(data, sirka, sirka)
-  return v?.data ?? null
+  return jsQR(data, sirka, sirka)?.data ?? null
 }
+
+function precti(text, volby) {
+  return dekoduj(qrSvg(text, volby))
+}
+
+/* =====================================================================
+   1. Kodér sám
+   ================================================================== */
 
 console.log('\n== Co se do QR dá, to se z něj přečte ==')
 
@@ -106,10 +223,8 @@ const souradnice = [...svg.matchAll(/M(\d+) (\d+)h1v1h-1z/g)].map((m) => [
   Number(m[1]),
   Number(m[2]),
 ])
-const nejmensi = Math.min(...souradnice.flat())
-const nejvetsi = Math.max(...souradnice.flat())
-ma('tichá zóna nahoře a vlevo', nejmensi >= 4, true)
-ma('tichá zóna dole a vpravo', nejvetsi <= celkem - 5, true)
+ma('tichá zóna nahoře a vlevo', Math.min(...souradnice.flat()) >= 4, true)
+ma('tichá zóna dole a vpravo', Math.max(...souradnice.flat()) <= celkem - 5, true)
 
 console.log('\n== A že to umí spadnout ==')
 // Kdyby se do QR dostalo něco jiného, než co jsme tam dali, tenhle
@@ -117,52 +232,138 @@ console.log('\n== A že to umí spadnout ==')
 ma('přečtený text se porovnává, ne jen že něco vzniklo',
   precti('https://foodtab.cz/kiosek') === 'https://foodtab.cz/jine', false)
 
-console.log('\n== Odkaz z kiosku: pobočka a nic navíc ==')
+/* =====================================================================
+   2. Obrazovka kiosku — dekóduje se to, co se vykreslí
+
+   Tohle je jádro. Všechno výš mluví o kodéru; tady se mluví o tabletu.
+   ================================================================== */
+
+console.log('\n== QR z obrazovky kiosku ==')
+
+const PUVOD = 'https://rizeni.foodtab.cz'
+
+// Přesně to, co vrací `kiosk_stav` (migrace 20260902050000).
+const stav = {
+  puvod: PUVOD,
+  slug: 'cerna-perla',
+  kod: 'CE8CA63E',
+  platnost: 45,
+}
+
+const html = obrazovka(stav)
+const svgKiosku = svgZObrazovky(html)
+
+ma('na obrazovce je QR', svgKiosku !== null, true)
+
+const zObrazovky = svgKiosku ? dekoduj(svgKiosku) : null
+const ocekavany = `${PUVOD}/cerna-perla/dochazka?kod=CE8CA63E`
+
+maZnakPoZnaku('přečtené z vykresleného QR sedí znak po znaku', zObrazovky, ocekavany)
 
 /*
-  Zadání docs/qr-na-kiosku-zadani.md, oddíl 5: kromě dekódování ověřit
-  i to, že se v adrese objevila SPRÁVNÁ POBOČKA a ŽÁDNÝ DALŠÍ PARAMETR.
+  Právě tenhle řádek by chytil chybu, kterou Šéfík našel na tabletu:
+  v QR byl `DAAA25EA`, tedy osm znaků a žádná adresa.
+*/
+ma('v QR není samotný kód', zObrazovky === 'CE8CA63E', false)
+ma('QR nese celou adresu, ne jen kus', (zObrazovky ?? '').startsWith('https://'), true)
 
-  Ten druhý požadavek není formalita. Kdyby se do adresy dostal druh
+const u = new URL(zObrazovky ?? 'https://x.invalid')
+ma('cesta nese pobočku ze zařízení', u.pathname, '/cerna-perla/dochazka')
+ma('a míří na Docházku', u.pathname.endsWith('/dochazka'), true)
+/*
+  Jediný parametr. Není to formalita: kdyby se do adresy dostal druh
   píchnutí, stačilo by podstrčit odkaz a píchnout někomu opačný směr —
   o tom rozhoduje stav člověka, ne adresa.
 */
-function odkazKiosku(slug, kod) {
-  return `https://rizeni.foodtab.cz/${encodeURIComponent(slug)}/dochazka?kod=${encodeURIComponent(kod)}`
-}
-
-const ocekavany = odkazKiosku('cerna-perla', 'CE8CA63E')
-const prectene = precti(ocekavany)
-
-ma('přečtený odkaz sedí znak po znaku', prectene, ocekavany)
-
-const u = new URL(prectene)
-ma('cesta nese pobočku ze zařízení', u.pathname, '/cerna-perla/dochazka')
-ma('a míří na Docházku', u.pathname.endsWith('/dochazka'), true)
-// `ma` porovnává ===, takže se pole srovná jako text.
 ma('v adrese je jediný parametr', [...u.searchParams.keys()].join(','), 'kod')
 ma('a je to ten kód, co svítí', u.searchParams.get('kod'), 'CE8CA63E')
 
-// Druhá pobočka: ať je vidět, že se pobočka opravdu bere z parametru
-// a není nikde zadrátovaná.
-const bernard = odkazKiosku('bernard-bar', 'DEADBEEF')
-ma('jiná pobočka dá jinou adresu', precti(bernard), bernard)
-ma('a v ní je ta druhá pobočka',
-  new URL(precti(bernard)).pathname, '/bernard-bar/dochazka')
+// Verze QR se pozná z počtu modulů: 21 = verze 1, 25 = 2, 29 = 3, 33 = 4.
+// Do verze 1 se šedesátiznaková adresa vejít nemůže, takže tenhle řádek
+// sám o sobě odhalí návrat k holému kódu.
+const moduluKiosku = Number(svgKiosku.match(/viewBox="0 0 (\d+)/)[1]) - 8
+const verze = (moduluKiosku - 17) / 4
+console.log(`  info  QR má ${moduluKiosku} modulů (verze ${verze}), při 320 px vychází modul na ${(320 / (moduluKiosku + 8)).toFixed(1)} px`)
+ma('QR je větší než verze 1 — do té by se adresa nevešla', moduluKiosku > 21, true)
+
+console.log('\n== Druhá pobočka a diakritika ==')
+
+const bernard = obrazovka({ ...stav, slug: 'bernard-bar', kod: 'DEADBEEF' })
+maZnakPoZnaku(
+  'jiná pobočka dá jinou adresu',
+  dekoduj(svgZObrazovky(bernard)),
+  `${PUVOD}/bernard-bar/dochazka?kod=DEADBEEF`,
+)
+
+const sHackem = obrazovka({ ...stav, slug: 'černá-perla' })
+maZnakPoZnaku(
+  'pobočka s háčkem projde jako v adrese',
+  dekoduj(svgZObrazovky(sHackem)),
+  `${PUVOD}/${encodeURIComponent('černá-perla')}/dochazka?kod=CE8CA63E`,
+)
+
+console.log('\n== Když pobočku neznáme, QR se nekreslí vůbec ==')
+
+/*
+  Tohle je ta zabezpečená mez. Dřív se místo adresy do QR dal samotný
+  kód — fotoaparát ho přečetl, ukázal osm znaků a člověk je stejně
+  přepsal. Vypadalo to, že to funguje, a to je nejhorší možný stav.
+*/
+const bezPobocky = obrazovka({ ...stav, slug: null })
+ma('žádné QR', svgZObrazovky(bezPobocky), null)
+ma('nadpis neslibuje fotoaparát', bezPobocky.includes('Namiřte fotoaparát'), false)
+ma('místo toho říká, co se dá udělat', bezPobocky.includes('Opište kód'), true)
+ma('a kód je pořád vidět', bezPobocky.includes('CE8CA63E'), true)
+
+ma('s pobočkou nadpis fotoaparát slibuje', html.includes('Namiřte fotoaparát'), true)
+ma(
+  'a popisek pro odečítač říká, co se stane',
+  html.includes('aria-label="QR kód: otevře Docházku s předvyplněným kódem"'),
+  true,
+)
+
+console.log('\n== Adresa vzniká na jednom místě ==')
+
+/*
+  Kontrola sahá na `qr-kod.tsx`. Kdyby si kiosek adresu skládal jinudy,
+  ověřovalo by se zas něco jiného, než co běží — proto se hlídá, že
+  v kiosku žádný druhý zdroj QR není.
+*/
+const zdrojKiosku = fs.readFileSync(new URL('app/kiosek/kiosek.tsx', KOREN), 'utf8')
+ma('kiosek kreslí QR jen přes QrKod', zdrojKiosku.includes('qrSvg('), false)
+ma('a nemá vlastní skládání adresy', zdrojKiosku.includes('/dochazka?kod='), false)
+ma('QrKod bere adresu z lib/qr-kiosek',
+  fs.readFileSync(new URL('app/kiosek/qr-kod.tsx', KOREN), 'utf8').includes("from '@/lib/qr-kiosek'"),
+  true)
+
+// Bez pobočky žádná adresa — ať se ta větev nedá obejít ani přímo.
+ma('bez pobočky se adresa nesestaví', odkazPichnuti(PUVOD, null, 'CE8CA63E'), null)
+ma('bez původu taky ne', odkazPichnuti('', 'cerna-perla', 'CE8CA63E'), null)
+ma('bez kódu taky ne', odkazPichnuti(PUVOD, 'cerna-perla', ''), null)
+
+console.log('\n== A databáze tu pobočku opravdu posílá ==')
+
+/*
+  Poslední díl řetězu. Komponenta dostane slug z `kiosk_stav`; kdyby ho
+  ta funkce přestala vracet, obrazovka spadne do podoby bez QR a nikdo
+  by se to nedozvěděl dřív než z tabletu. Tady se to pozná hned.
+*/
+const migrace = fs.readFileSync(
+  new URL('supabase/migrations/20260902050000_kiosek_slug.sql', KOREN),
+  'utf8',
+)
+ma("kiosk_stav vrací 'slug'", /'slug',\s+\(select b\.slug/.test(migrace), true)
 
 console.log('\n== Klidová zóna a korekce podle zadání ==')
-// Úroveň M a klidová zóna 4 moduly — bez ní se QR nechytne, i když
-// vypadá dobře.
-const kiosk = qrSvg(ocekavany, { velikost: 320, oprava: 'M' })
-const celkemK = Number(kiosk.match(/viewBox="0 0 (\d+)/)[1])
-const bodyK = [...kiosk.matchAll(/M(\d+) (\d+)h1v1h-1z/g)].map((m) => [
+const bodyK = [...svgKiosku.matchAll(/M(\d+) (\d+)h1v1h-1z/g)].map((m) => [
   Number(m[1]),
   Number(m[2]),
 ])
+const celkemK = Number(svgKiosku.match(/viewBox="0 0 (\d+)/)[1])
 ma('klidová zóna má čtyři moduly', Math.min(...bodyK.flat()) >= 4, true)
 ma('i na druhé straně', Math.max(...bodyK.flat()) <= celkemK - 5, true)
 ma('a QR je velký, ať se čte z půl metru',
-  /width="320" height="320"/.test(kiosk), true)
+  /width="320" height="320"/.test(svgKiosku), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)
