@@ -23,6 +23,8 @@ type Smena = { jmeno: string; od: string; do: string }
 type Zaloha = { id: string; jmeno: string; castka_haleru: number }
 type Stav = {
   pobocka: string
+  /** Adresní podoba pobočky. Do odkazu v QR patří slug, ne název. */
+  slug: string | null
   zarizeni: string
   kod: string
   platnost: number
@@ -275,30 +277,40 @@ export default function Kiosek() {
             QR, ne osmiznakový kód k opsání.
 
             Zadání (docs/kiosek-pin-zalohy-zadani.md, uspořádání A) chce
-            QR měnící se každých 30–60 vteřin, který zaměstnanec načte
-            telefonem. Kód se tu do QR jen zabalí do adresy — tajemství
-            pobočky do prohlížeče nejde, to zůstává na serveru.
+            QR měnící se s kódem, který se čte BĚŽNÝM FOTOAPARÁTEM
+            telefonu — čtečka uvnitř aplikace není a nebude
+            (docs/qr-na-kiosku-zadani.md).
 
-            Osmiznakový kód zůstává POD QR jako záložní cesta: kdo nemá
-            čím načíst, opíše ho.
+            V odkazu je jen pobočka a kód, nic jiného. Pobočku bere
+            kiosek ze svého zařízení, ne z ničeho, co přijde
+            z prohlížeče; tajemství pobočky do prohlížeče nejde vůbec.
+
+            Otevření odkazu NIC NEZAPÍŠE. Jen předvyplní kód na
+            Docházce — teprve ťuknutí tam vyrobí píchnutí.
+
+            Textový kód zůstává POD QR, menším písmem: kdo nemá čím
+            načíst, opíše ho jako dosud.
           */}
           <section>
-            <p style={popisek}>Načtěte telefonem</p>
+            <p style={popisek}>Namiřte fotoaparát</p>
 
             <div
-              style={{ lineHeight: 0 }}
+              style={{ lineHeight: 0, maxWidth: '100%' }}
               dangerouslySetInnerHTML={{
-                __html: qrSvg(adresaPichnuti(stav.kod), {
-                  velikost: 220,
-                  popis: 'QR kód k píchnutí',
+                __html: qrSvg(adresaPichnuti(stav.slug, stav.kod), {
+                  // Tablet stojí na baru a člověk se k němu nebude
+                  // sklánět — QR musí zabrat podstatnou část obrazovky.
+                  velikost: 320,
+                  oprava: 'M',
+                  popis: 'QR kód s odkazem na docházku',
                 }),
               }}
             />
 
             <p style={{ ...popis, margin: '10px 0 0' }}>
-              Nemáte čím načíst? Opište kód:
+              Nemáte čím načíst? Opište kód na Docházce v aplikaci:
             </p>
-            <p style={kodStyl}>{stav.kod}</p>
+            <p style={kodMalyStyl}>{stav.kod}</p>
             <p style={{ ...popis, marginBottom: 0 }}>
               Mění se každých {stav.platnost} vteřin — vyfocený je za
               chvíli k ničemu, a to je celý jeho smysl.
@@ -423,15 +435,28 @@ function koruny(halere: number): string {
 }
 
 /**
- * Adresa, kterou nese QR. Kód je v ní — telefon ji otevře a člověk už
- * jen ťukne na příchod nebo odchod.
+ * Adresa, kterou nese QR.
  *
- * Původ se bere z prohlížeče: tablet i telefon jsou na téže síti
- * a stejné adrese, takže tenhle údaj nikde jinde držet nemusíme.
+ *     https://<adresa>/<pobocka>/dochazka?kod=CE8CA63E
+ *
+ * NIC DALŠÍHO V NÍ BÝT NESMÍ (zadání, oddíl 2). Žádné jméno, žádný
+ * druh píchnutí — o tom, jestli je to příchod nebo odchod, rozhoduje
+ * stav člověka, ne adresa. Kdyby o tom rozhodovala adresa, stačilo by
+ * podstrčit odkaz a píchnout někomu opačný směr.
+ *
+ * Kód v adrese je v pořádku: žije 45 vteřin a stejně svítí na obrazovce
+ * za barem, kde ho vidí každý host. Není to tajemství, je to důkaz
+ * přítomnosti. Jméno ani částka by tam nepatřily.
+ *
+ * Původ se bere z prohlížeče — tablet i telefon jsou na téže adrese.
  */
-function adresaPichnuti(kod: string): string {
+function adresaPichnuti(slug: string | null, kod: string): string {
   const puvod = typeof window === 'undefined' ? '' : window.location.origin
-  return `${puvod}/pichnout?kod=${encodeURIComponent(kod)}`
+  // Bez slugu by odkaz vedl nikam. Stane se to jen do nasazení migrace
+  // 20260902050000; do té doby ať QR aspoň nese samotný kód, který jde
+  // opsat, místo rozbité adresy.
+  if (!slug) return kod
+  return `${puvod}/${encodeURIComponent(slug)}/dochazka?kod=${encodeURIComponent(kod)}`
 }
 
 /** Z „07:30:00“ udělá „7:30“. */
@@ -475,6 +500,14 @@ const popisek = {
   color: 'var(--muted)',
   textTransform: 'uppercase' as const,
   letterSpacing: '.08em',
+} as const
+
+const kodMalyStyl = {
+  margin: '4px 0 8px',
+  fontSize: '26px',
+  letterSpacing: '.14em',
+  color: 'var(--ink)',
+  fontVariantNumeric: 'tabular-nums' as const,
 } as const
 
 const kodStyl = {

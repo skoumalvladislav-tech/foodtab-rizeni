@@ -12,8 +12,16 @@ export const metadata: Metadata = {
 export default async function Prihlaseni({
   searchParams,
 }: {
-  searchParams: Promise<{ chyba?: string }>;
+  searchParams: Promise<{ chyba?: string; qr?: string }>;
 }) {
-  const { chyba } = await searchParams;
-  return <PrihlasovaciFormular chybaZOdkazu={chyba === "odkaz"} />;
+  const { chyba, qr } = await searchParams;
+  /*
+    Kdo naskenoval kód z tabletu a nebyl přihlášený, přistane tady.
+    Než dokliká přihlášení, kód je dávno mrtvý — a to mu má aplikace
+    říct rovnou, ne až u druhého neúspěšného ťuknutí.
+    Viz docs/qr-na-kiosku-zadani.md, oddíl 4.
+  */
+  return (
+    <PrihlasovaciFormular chybaZOdkazu={chyba === "odkaz"} zQr={qr === "1"} />
+  );
 }

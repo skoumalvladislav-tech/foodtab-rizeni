@@ -117,5 +117,52 @@ console.log('\n== A že to umí spadnout ==')
 ma('přečtený text se porovnává, ne jen že něco vzniklo',
   precti('https://foodtab.cz/kiosek') === 'https://foodtab.cz/jine', false)
 
+console.log('\n== Odkaz z kiosku: pobočka a nic navíc ==')
+
+/*
+  Zadání docs/qr-na-kiosku-zadani.md, oddíl 5: kromě dekódování ověřit
+  i to, že se v adrese objevila SPRÁVNÁ POBOČKA a ŽÁDNÝ DALŠÍ PARAMETR.
+
+  Ten druhý požadavek není formalita. Kdyby se do adresy dostal druh
+  píchnutí, stačilo by podstrčit odkaz a píchnout někomu opačný směr —
+  o tom rozhoduje stav člověka, ne adresa.
+*/
+function odkazKiosku(slug, kod) {
+  return `https://rizeni.foodtab.cz/${encodeURIComponent(slug)}/dochazka?kod=${encodeURIComponent(kod)}`
+}
+
+const ocekavany = odkazKiosku('cerna-perla', 'CE8CA63E')
+const prectene = precti(ocekavany)
+
+ma('přečtený odkaz sedí znak po znaku', prectene, ocekavany)
+
+const u = new URL(prectene)
+ma('cesta nese pobočku ze zařízení', u.pathname, '/cerna-perla/dochazka')
+ma('a míří na Docházku', u.pathname.endsWith('/dochazka'), true)
+// `ma` porovnává ===, takže se pole srovná jako text.
+ma('v adrese je jediný parametr', [...u.searchParams.keys()].join(','), 'kod')
+ma('a je to ten kód, co svítí', u.searchParams.get('kod'), 'CE8CA63E')
+
+// Druhá pobočka: ať je vidět, že se pobočka opravdu bere z parametru
+// a není nikde zadrátovaná.
+const bernard = odkazKiosku('bernard-bar', 'DEADBEEF')
+ma('jiná pobočka dá jinou adresu', precti(bernard), bernard)
+ma('a v ní je ta druhá pobočka',
+  new URL(precti(bernard)).pathname, '/bernard-bar/dochazka')
+
+console.log('\n== Klidová zóna a korekce podle zadání ==')
+// Úroveň M a klidová zóna 4 moduly — bez ní se QR nechytne, i když
+// vypadá dobře.
+const kiosk = qrSvg(ocekavany, { velikost: 320, oprava: 'M' })
+const celkemK = Number(kiosk.match(/viewBox="0 0 (\d+)/)[1])
+const bodyK = [...kiosk.matchAll(/M(\d+) (\d+)h1v1h-1z/g)].map((m) => [
+  Number(m[1]),
+  Number(m[2]),
+])
+ma('klidová zóna má čtyři moduly', Math.min(...bodyK.flat()) >= 4, true)
+ma('i na druhé straně', Math.max(...bodyK.flat()) <= celkemK - 5, true)
+ma('a QR je velký, ať se čte z půl metru',
+  /width="320" height="320"/.test(kiosk), true)
+
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

@@ -13,6 +13,16 @@ a chybí jim jen rozhraní, pak teprve nová funkce.
 
 ---
 
+## 0. Rozbitý odkaz „Doplnit odchod" — HNED
+
+U nedokončeného záznamu na Docházce **odkaz nefunguje**. Klik nic
+neudělá. Když se ta samá adresa otevře přímo, formulář se předvyplní
+správně — chyba je v klikání, ne v obrazovce za ním.
+
+Šéfík kvůli tomu nemůže dopsat dva srpnové odchody. Je to pár řádků,
+udělej to dřív než všechno ostatní. Podrobnosti v oddílu 0
+`docs/zapomenuty-odchod-zadani.md`.
+
 ## 1. QR na kiosku
 
 Na `/kiosek` se rotující kód pořád ukazuje jako **osm písmen**.
@@ -63,7 +73,15 @@ nejčastěji chybuje:
 - Okno se ukazuje **jen když někdo čeká na oprávnění**.
 - **Do rozhraní nepiš, že chodí push do mobilu**, dokud nechodí.
 
-## 5. Dopsat, ať se to neptá počtvrté
+## 5. Upozornění na zapomenutý odchod
+
+`docs/zapomenuty-odchod-zadani.md`. Naplánovaná úloha v 9:00, hranice
+20 hodin — obojí **do nastavení firmy, ne do kódu** (pravidlo 1).
+
+Jednou za záznam, ne každé ráno. Jedinečný index, ať dvojí spuštění
+nevyrobí druhé upozornění.
+
+## 6. Dopsat, ať se to neptá počtvrté
 
 - Strop na pobočku → `docs/pravidlo-neprideluj-vic.md`
   („rozsah smí přidělit jen správce lidí za celou firmu", vědomé

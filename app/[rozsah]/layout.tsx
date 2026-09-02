@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import {
@@ -38,7 +39,18 @@ export default async function RozsahLayout({
   const { rozsah } = await params;
 
   const user = await getUser();
-  if (!user) redirect("/prihlaseni");
+  if (!user) {
+    /*
+      Kdo naskenoval QR z tabletu a není přihlášený, má po přihlášení
+      dostat jinou větu než ostatní: ten kód už mezitím vypršel a musí
+      k tabletu znovu. Příznak se veze přes přihlášení až do callbacku.
+
+      Adresu podává proxy hlavičkou — layout `searchParams` nedostává.
+    */
+    const adresa = (await headers()).get("x-foodtab-adresa") ?? "";
+    const zQr = adresa.includes("kod=");
+    redirect(zQr ? "/prihlaseni?qr=1" : "/prihlaseni");
+  }
 
   const tenantId = await getCurrentTenantId();
   if (!tenantId) {

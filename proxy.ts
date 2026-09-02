@@ -17,6 +17,19 @@ import { NextResponse, type NextRequest } from 'next/server'
  * lib/authz.ts proti databázi a Row Level Security nad ní.
  */
 export async function proxy(request: NextRequest) {
+  /*
+    Adresa požadavku jako hlavička.
+
+    Layout v Next nedostává `searchParams` — dostává je až stránka.
+    Jenže o přesměrování nepřihlášeného rozhoduje layout, a ten
+    potřebuje vědět, jestli člověk přišel z naskenovaného QR
+    (docs/qr-na-kiosku-zadani.md, oddíl 4).
+
+    Proxy tím NEROZHODUJE O PŘÍSTUPU — jen podává dál to, co stejně
+    přišlo v požadavku. Kdo kam smí, řeší dál lib/authz.ts a RLS.
+  */
+  request.headers.set('x-foodtab-adresa', request.nextUrl.pathname + request.nextUrl.search)
+
   let response = NextResponse.next({ request })
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL

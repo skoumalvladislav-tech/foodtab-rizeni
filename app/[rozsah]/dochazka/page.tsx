@@ -21,6 +21,7 @@ import Nadpis from "../nadpis";
 import { zapsatDochazku } from "./akce";
 import PanelRucni from "./panel-rucni";
 import PanelNedokoncene from "./panel-nedokoncene";
+import PoleKodu from "./pole-kodu";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,8 @@ export default async function Dochazka({
     mesic?: string;
     doplnit?: string;
     den?: string;
+    /** Kód z QR na tabletu. Předvyplní políčko, nic nezapisuje. */
+    kod?: string;
   }>;
 }) {
   const { rozsah } = await params;
@@ -112,6 +115,7 @@ export default async function Dochazka({
     mesic: mesicParam,
     doplnit,
     den: denDoplneni,
+    kod: kodZQr,
   } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
@@ -526,6 +530,17 @@ export default async function Dochazka({
   })();
 
 
+  /*
+    Kód z QR. Adrese se nevěří ani tady: bere se z ní jen tvar, který
+    kód mít může, a ověřuje ho až databáze v `pichnout_kodem` proti
+    pobočce zařízení. To, že přišel z adresy, na tom nemění nic —
+    je to obdoba pravidla 4.
+  */
+  const platnyKod =
+    typeof kodZQr === "string" && /^[A-Za-z0-9]{8}$/.test(kodZQr)
+      ? kodZQr.toUpperCase()
+      : null;
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const ostatni = [...stavy.entries()].filter(([id]) => id !== ja.id);
@@ -613,6 +628,20 @@ export default async function Dochazka({
               Kód se mění každou minutu, takže vyfocený nebo opsaný je
               za chvíli k ničemu. To je celý jeho smysl.
             */}
+            {chybaRucne === "kod-vyprsel" ? (
+              <p style={ramecekKodu}>
+                <strong>Kód mezitím vypršel.</strong> Na tabletu už svítí
+                jiný — naskenujte ho znovu.
+              </p>
+            ) : null}
+
+            {platnyKod ? (
+              <p style={{ margin: "12px 0 0", fontSize: "13px", color: "var(--dobre)" }}>
+                Kód z tabletu je načtený. Ťukněte na to, co zrovna děláte
+                — teprve tím se píchnutí zapíše.
+              </p>
+            ) : null}
+
             {/*
               Kudy ven, když na pobočce žádný tablet není. Formulář
               zůstává: kdyby se tablet zaregistroval o minutu později,
@@ -653,27 +682,13 @@ export default async function Dochazka({
                 }}
               >
                 <span>Kód z tabletu</span>
-                <input
-                  name="kod"
-                  required
-                  maxLength={8}
-                  autoComplete="off"
-                  inputMode="text"
-                  placeholder="A1B2C3D4"
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    fontSize: "22px",
-                    letterSpacing: ".18em",
-                    textAlign: "center",
-                    textTransform: "uppercase",
-                    borderRadius: "10px",
-                    border: "1px solid var(--line-2)",
-                    background: "var(--paper)",
-                    color: "var(--ink)",
-                    minHeight: "52px",
-                  }}
-                />
+                {/*
+                  Kód z QR se sem předvyplní a z adresy se hned zahodí
+                  (docs/qr-na-kiosku-zadani.md, oddíl 3). Zapisovat při
+                  otevření odkazu nesmí nic — prohlížeč si adresy načítá
+                  dopředu a člověk se vrací tlačítkem zpět.
+                */}
+                <PoleKodu zQr={platnyKod} />
               </label>
               <button
                 type="submit"
@@ -1379,4 +1394,15 @@ const radekCastka = {
   color: "var(--muted)",
   textAlign: "right" as const,
   fontVariantNumeric: "tabular-nums" as const,
+} as const;
+
+const ramecekKodu = {
+  margin: "12px 0 0",
+  padding: "10px 12px",
+  border: "1px solid var(--pozor)",
+  borderRadius: "10px",
+  background: "var(--pozor-bg)",
+  color: "var(--pozor)",
+  fontSize: "13.5px",
+  lineHeight: 1.5,
 } as const;

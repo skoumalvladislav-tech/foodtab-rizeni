@@ -30,6 +30,20 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
   const druh = String(formData.get('druh') ?? '')
   const kod = String(formData.get('kod') ?? '').trim()
 
+  /*
+    Přišel kód z QR, nebo ho někdo opsal?
+
+    Rozlišuje to JEN HLÁŠKU, nic jiného. Kód se ověřuje stejně
+    v obou případech — že přišel z adresy, na tom nemění nic
+    (docs/qr-na-kiosku-zadani.md: „kód z adresy je návrh, ne
+    oprávnění“).
+
+    Kdo naskenoval a nestihl ťuknout, má jít k tabletu pro nový kód.
+    Kdo se překlepl při opisování, má zkusit znovu. Jedna věta by
+    polovinu lidí posílala špatným směrem.
+  */
+  const zQr = String(formData.get('zqr') ?? '') === '1'
+
   if (druh !== 'in' && druh !== 'out') return
 
   const tenantId = await getCurrentTenantId()
@@ -51,8 +65,19 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
   })
 
   if (error) {
+    /*
+      Neplatný kód po naskenování skoro vždycky znamená, že mezi
+      naskenováním a ťuknutím uplynulo víc než 45 vteřin — u někoho,
+      kdo si musí odemknout telefon, docela snadno.
+
+      Obrazovka pak nesmí říct „nepovedlo se“. Člověk musí vědět, že má
+      jít k tabletu, ne že je rozbitá aplikace.
+    */
+    const vyprselo = zQr && error.code === '22023'
     redirect(
-      `/${rozsah}/dochazka?chyba=pichnuti&text=${encodeURIComponent(error.message)}`,
+      vyprselo
+        ? `/${rozsah}/dochazka?chyba=kod-vyprsel`
+        : `/${rozsah}/dochazka?chyba=pichnuti&text=${encodeURIComponent(error.message)}`,
     )
   }
 

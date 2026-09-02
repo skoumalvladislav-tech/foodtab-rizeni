@@ -7,8 +7,11 @@ type Stav = "formular" | "odesilam" | "odeslano";
 
 export default function PrihlasovaciFormular({
   chybaZOdkazu,
+  zQr = false,
 }: {
   chybaZOdkazu: boolean;
+  /** Člověk sem přišel z naskenovaného QR na tabletu. */
+  zQr?: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [stav, setStav] = useState<Stav>("formular");
@@ -33,7 +36,11 @@ export default function PrihlasovaciFormular({
       const { error } = await supabase.auth.signInWithOtp({
         email: adresa,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          // Příznak se veze až za přihlášení: teprve tam má smysl říct
+          // „naskenujte znovu“, protože do té doby kód stejně vyprší.
+          emailRedirectTo: `${window.location.origin}/auth/callback${
+            zQr ? "?qr=1" : ""
+          }`,
         },
       });
       if (error) throw error;
