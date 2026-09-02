@@ -12,6 +12,8 @@
  * si to člověk může spravit sám. Nemůže: opravit docházku smí jen
  * attendance.manage, takže zaměstnanec dostane pokyn říct si o to.
  */
+import Link from 'next/link'
+
 import { pocet, prisudek } from '@/lib/sklonovani'
 
 
@@ -88,15 +90,28 @@ export default function PanelNedokoncene({
               Na firemní úrovni vede odkaz na POBOČKU toho záznamu —
               formulář se kreslí jen tam a pobočku ten záznam zná.
             */}
+            {/*
+              next/link, ne holé <a>.
+
+              Šéfík hlásí, že v ostré aplikaci klik nedělal nic — adresa
+              se nezměnila. V dev prostředí se to reprodukovat
+              nepodařilo, ale holý odkaz, který se od současné adresy
+              liší jen dotazem a kotvou, je přesně ten případ, kdy se
+              prohlížeč může rozhodnout, že „nikam se nejde".
+
+              next/link o navigaci rozhoduje sám a překreslí obrazovku
+              i tehdy, když se cesta nemění. Doskrolování navíc nespoléhá
+              na kotvu — dělá si ho formulář sám (viz skok.tsx).
+            */}
             {smiOpravit && z.pobockaSlug ? (
-              <a
-                href={`/${z.pobockaSlug}/dochazka?doplnit=${z.employee_id}&den=${z.business_date}#rucni`}
+              <Link
+                href={`/${z.pobockaSlug}/dochazka?doplnit=${z.employee_id}&den=${z.business_date}`}
                 className="ft-tl ft-tl-vedlejsi ft-tl-male"
               >
                 {naPobocce
                   ? 'Doplnit odchod'
                   : `Doplnit na ${z.pobockaNazev ?? 'pobočce'}`}
-              </a>
+              </Link>
             ) : null}
           </li>
         ))}

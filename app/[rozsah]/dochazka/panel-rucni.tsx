@@ -1,3 +1,4 @@
+import SkokNaFormular from './skok'
 import { zapsatRucne } from './rucni'
 
 /**
@@ -51,11 +52,18 @@ export default function PanelRucni({
         i když patří jinam.
       </p>
 
+      {predvyplnit ? <SkokNaFormular /> : null}
+
       {predvyplnit ? (
         <p style={ramecekPredvyplneno}>
+          {/*
+            Bez předložky, která by chtěla skloňovat den. „k čtvrtek“
+            bylo špatně a „ke čtvrtku“ by znamenalo tabulku tvarů pro
+            sedm dní — pomlčka řekne totéž a nejde ohnout špatně.
+          */}
           Doplňujete <strong>odchod</strong> pro{' '}
-          <strong>{predvyplnit.jmeno}</strong> k{' '}
-          <strong>{denCesky(predvyplnit.den)}</strong> Zbývá čas — ten
+          <strong>{predvyplnit.jmeno}</strong> —{' '}
+          <strong>{denCesky(predvyplnit.den)}</strong> Zbývá čas, ten
           aplikace vědět nemůže.
         </p>
       ) : null}
@@ -67,7 +75,23 @@ export default function PanelRucni({
         </p>
       ) : null}
 
-      <form action={zapsatRucne} style={mrizka}>
+      {/*
+        `key` podle předvyplnění, ne kvůli seznamu.
+
+        Po přechodu přes next/link React formulář NEPŘEKRESLÍ od nuly —
+        znovu použije stejné prvky. `defaultValue` se ale uplatní jen
+        při prvním připojení, takže rozbalovátko zůstalo na „Příchod“,
+        i když se pod ním předvyplnil odchod. Vypadalo to jako
+        předvyplněný formulář a bylo to špatné.
+
+        Našlo se to kliknutím hned po záměně <a> za next/link — s plným
+        načtením stránky se to projevit nemohlo.
+      */}
+      <form
+        key={predvyplnit ? `${predvyplnit.zamestnanec}-${predvyplnit.den}` : 'prazdny'}
+        action={zapsatRucne}
+        style={mrizka}
+      >
         <input type="hidden" name="rozsah" value={rozsah} />
         <input type="hidden" name="pobocka" value={pobockaId} />
 
