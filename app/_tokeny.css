@@ -42,6 +42,31 @@
 
   --shadow: 0 1px 2px rgba(22,33,28,.07), 0 8px 24px -12px rgba(22,33,28,.20);
 
+  /* --------------------------------------------------------------------
+     BEZPEČNÉ VLOŽKY
+
+     app/layout.tsx má `viewportFit: "cover"`, takže se kreslí až do
+     krajů obrazovky. Odsadit si to pak musí rozhraní samo — a dokud to
+     dělalo jen zdola, lezl na iPhonu nápis „Foodtab“ pod hodiny a řádka
+     modulů pod Dynamic Island, kde na ni nešlo kliknout.
+
+     `env()` má druhý parametr jako záložní hodnotu. Není to zbytečné:
+     kde `env()` neexistuje vůbec, je celý `calc()` neplatný a pravidlo
+     propadne — tedy i to odsazení, které tam být má.
+
+     `max(…, 8px)` u horní vložky je schválně. Tam, kde je vložka nulová
+     (Android, počítač), by lišta jinak seděla nalepená na kraj. Osm
+     bodů je vidět jako dech, ne jako mezera.
+
+     Boční vložky minimum nemají — na počítači jsou nulové a lišta má
+     kraj mít rovný. Sečítají se až tam, kde se odsazuje obsah, přes
+     `max(vlastní odsazení, vložka)`.
+     ------------------------------------------------------------------ */
+  --vlozka-nahore: max(env(safe-area-inset-top, 0px), 8px);
+  --vlozka-vpravo: env(safe-area-inset-right, 0px);
+  --vlozka-dole:   env(safe-area-inset-bottom, 0px);
+  --vlozka-vlevo:  env(safe-area-inset-left, 0px);
+
   /* Barva rozsahu — tmavá plocha horní lišty a bočního sloupce.
      Výchozí je firemní odstín; klíč pobočky ho přepíše níž. */
   --rail:      #15241e;

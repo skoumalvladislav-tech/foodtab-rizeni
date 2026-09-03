@@ -10,16 +10,36 @@
    spodní lišta 62, dotykový cíl nejméně 44.
    ===================================================================== */
 
-.ft-shell { min-height: 100dvh; display: flex; flex-direction: column; }
+/* --vysoka-lista je výška horní lišty VČETNĚ bezpečné vložky.
+
+   Je to proměnná, a ne číslo na čtyřech místech, protože se o ni opírá
+   i sticky řádka modulů (`top`) a levý sloupec (`top` a `height`).
+   Když se lišta o vložku zvětší a ty se nezvětší s ní, schová se řádka
+   modulů právě pod Dynamic Island — a tam se na ni nedá kliknout.
+   Přesně tohle se 3. 9. stalo. */
+.ft-shell {
+  --vysoka-lista: calc(56px + var(--vlozka-nahore));
+  min-height: 100dvh; display: flex; flex-direction: column;
+}
 
 .ft-i { width: 17px; height: 17px; stroke: currentColor; fill: none;
         stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
 /* ---- Horní lišta ---------------------------------------------- */
+/* Vložka se přičte k VÝŠCE a zároveň se dá jako horní odsazení.
+
+   Obojí je potřeba: `box-sizing: border-box` znamená, že samotné
+   odsazení by obsah jen stlačilo dovnitř týchž 56 px a nápis by
+   pod hodinami zůstal. Vnitřní plocha tak zůstává 56 px vysoká
+   a nad ní je pruh v barvě lišty, který sahá pod stavový řádek.
+
+   Po stranách `max(18px, vložka)`, ne součet — na iPhonu na šířku má
+   vložka kolem 44 px a lišta by měla o 62 px odsazený obsah. */
 .ft-topbar {
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 18px;
-  height: 56px; padding: 0 18px;
+  height: var(--vysoka-lista);
+  padding: var(--vlozka-nahore) max(18px, var(--vlozka-vpravo)) 0 max(18px, var(--vlozka-vlevo));
   background: var(--rail); color: var(--rail-ink);
   box-shadow: var(--shadow);
 }
@@ -242,10 +262,16 @@
 /* ---- Tělo a levý sloupec --------------------------------------- */
 .ft-body { display: flex; flex: 1; min-height: 0; }
 
+/* `top` i `height` se odvozují od lišty i s vložkou. Kdyby zůstalo
+   pevných 56 px, sloupec by se o vložku posunul dolů a vylezl pod
+   spodní hranu. */
 .ft-side {
   width: 240px; flex: none; background: var(--rail-2); color: var(--rail-ink);
   display: flex; flex-direction: column;
-  position: sticky; top: 56px; height: calc(100dvh - 56px); overflow-y: auto;
+  position: sticky; top: var(--vysoka-lista);
+  height: calc(100dvh - var(--vysoka-lista)); overflow-y: auto;
+  /* Na šířku sahá levý kraj pod zaoblený roh. */
+  padding-left: var(--vlozka-vlevo);
 }
 .ft-side-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--rail); }
 .ft-strip { height: 3px; border-radius: 2px; background: var(--mosaz-sv); margin-bottom: 10px; }
@@ -272,7 +298,10 @@
 .ft-nav hr { border: 0; border-top: 1px solid var(--rail); margin: 8px 2px; width: 100%; }
 
 .ft-main {
-  flex: 1; min-width: 0; padding: 24px 28px;
+  flex: 1; min-width: 0;
+  /* Vpravo `max`, protože obsah sahá až ke kraji okna; vlevo taky —
+     na firemní úrovni se levý sloupec skrývá a obsah je u kraje sám. */
+  padding: 24px max(28px, var(--vlozka-vpravo)) 24px max(28px, var(--vlozka-vlevo));
   background: linear-gradient(to bottom,
     color-mix(in srgb, var(--paper), var(--branch) 3%) 0%,
     var(--paper) 8%
@@ -306,7 +335,9 @@
   }
   .ft-nav .stitek, .ft-nav .soon small { display: none; }
   .ft-nav hr { width: 40px; }
-  .ft-main { padding: 20px 22px; }
+  .ft-main {
+    padding: 20px max(22px, var(--vlozka-vpravo)) 20px max(22px, var(--vlozka-vlevo));
+  }
 }
 
 .ft-mob-mods { display: none; }
@@ -341,10 +372,13 @@
      schválně: při šesti modulech na úzkém tabletu se řádka nevejde ani
      tady a musí jít dojet prstem. */
   .ft-mob-mods {
-    display: flex; gap: 6px; padding: 8px 14px;
+    display: flex; gap: 6px;
+    padding: 8px max(14px, var(--vlozka-vpravo)) 8px max(14px, var(--vlozka-vlevo));
     background: var(--rail-2); border-bottom: 1px solid var(--rail);
     overflow-x: auto; -webkit-overflow-scrolling: touch;
-    position: sticky; top: 56px; z-index: 19;
+    /* Lepí se POD lištu i s vložkou. S pevnými 56 px zaleze pod
+       Dynamic Island a nedá se na ni kliknout. */
+    position: sticky; top: var(--vysoka-lista); z-index: 19;
   }
   .ft-mob-mods::-webkit-scrollbar { display: none; }
   .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; flex: none; }
@@ -366,7 +400,14 @@
 /* ---- Mobil: sloupec dolů jako pevná lišta ----------------------- */
 
 @media (max-width: 640px) {
-  .ft-topbar { height: 52px; padding: 0 14px; gap: 10px; }
+  /* Nižší lišta na telefonu. Proměnná se přepočítá s ní, takže se
+     řádka modulů posune sama — dřív se to muselo psát dvakrát. */
+  .ft-shell { --vysoka-lista: calc(52px + var(--vlozka-nahore)); }
+  .ft-topbar {
+    height: var(--vysoka-lista);
+    padding: var(--vlozka-nahore) max(14px, var(--vlozka-vpravo)) 0 max(14px, var(--vlozka-vlevo));
+    gap: 10px;
+  }
   .ft-side { display: none; }
 
   /* Na telefonu ustupuje ozdoba, ne obsah. Iniciály firmy jsou
@@ -374,15 +415,21 @@
      jen čárka. Dohromady je to 39 px, o které se název pobočky nemusí
      zkrátit na nečitelnou zkratku. */
   .ft-avatar, .ft-divider { display: none; }
-  .ft-main { padding: 16px 14px calc(62px + env(safe-area-inset-bottom) + 16px); }
+  .ft-main {
+    padding: 16px max(14px, var(--vlozka-vpravo))
+             calc(62px + var(--vlozka-dole) + 16px)
+             max(14px, var(--vlozka-vlevo));
+  }
 
-  /* Lišta je tu nižší, pruh modulů se musí posunout s ní. */
-  .ft-mob-mods { top: 52px; }
+  /* `.ft-mob-mods { top }` se tu už nepřepisuje — jede podle
+     --vysoka-lista, kterou tenhle zlom snížil výš. */
 
   .ft-mob-bottom {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-    height: calc(62px + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom);
+    height: calc(62px + var(--vlozka-dole));
+    /* Zdola vložka byla; po stranách chyběla a na šířku se krajní
+       ikony schovaly pod zaoblený roh. */
+    padding: 0 var(--vlozka-vpravo) var(--vlozka-dole) var(--vlozka-vlevo);
     border-top: 1px solid var(--line); background: var(--card);
   }
   .ft-mob-bottom a {
@@ -4544,7 +4591,10 @@ select:focus-visible {
 
 @media (max-width: 760px) {
   .auth-screen {
-    padding: 25px 14px calc(25px + env(safe-area-inset-bottom));
+    /* Přihlašovací plocha kryje celou obrazovku, takže si vložky musí
+       hlídat sama — shora i po stranách, ne jen zdola. */
+    padding: max(25px, var(--vlozka-nahore)) max(14px, var(--vlozka-vpravo))
+             calc(25px + var(--vlozka-dole)) max(14px, var(--vlozka-vlevo));
     align-content: center;
   }
   .auth-card {
@@ -4831,7 +4881,7 @@ select:focus-visible {
   }
   .install-help > section {
     grid-template-columns: 1fr;
-    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    padding-bottom: calc(24px + var(--vlozka-dole));
   }
   .data-table > header,
   .data-table > div {
@@ -4851,7 +4901,8 @@ select:focus-visible {
     z-index: 35;
     inset: auto 0 0;
     min-height: 68px;
-    padding: 6px 5px calc(7px + env(safe-area-inset-bottom));
+    padding: 6px max(5px, var(--vlozka-vpravo))
+             calc(7px + var(--vlozka-dole)) max(5px, var(--vlozka-vlevo));
     border-top: 1px solid var(--line);
     background: rgba(255, 253, 250, 0.97);
     display: grid;

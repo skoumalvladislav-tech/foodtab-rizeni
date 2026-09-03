@@ -428,11 +428,23 @@ function cas(t: string): string {
 
 /* --- styly ---------------------------------------------------------- */
 
+/*
+  Kiosek běží na tabletu NA ŠÍŘKU a v režimu `fullscreen`, takže sahá
+  úplně do krajů — pod zaoblené rohy i pod ostrůvek. Na šířku jsou
+  nenulové hlavně boční vložky; svislé bývají malé, ale započítat se
+  musí taky, protože tablet leží jednou na jednu a jednou na druhou
+  stranu a `env()` se s ním otočí.
+
+  `max(24px, …)` po každé straně zvlášť: součet by na iPhonu na šířku
+  udělal skoro sedmdesátibodový okraj a karta by se scvrkla.
+*/
 const obal = {
   minHeight: '100dvh',
   display: 'grid',
   placeItems: 'center',
-  padding: '24px',
+  padding:
+    'max(24px, var(--vlozka-nahore)) max(24px, var(--vlozka-vpravo))' +
+    ' max(24px, var(--vlozka-dole)) max(24px, var(--vlozka-vlevo))',
   background: 'var(--paper)',
 } as const
 
