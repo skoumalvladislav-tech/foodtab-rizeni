@@ -8,8 +8,27 @@ import { odeslatEmail } from '@/lib/email'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { barvaNeboNic } from '@/lib/barvy-lidi'
 import { najdiNeboZaloz } from '../pozice/akce'
 import { NOVA_POZICE } from './pozice-volba'
+
+/**
+ * Který kód chyby poslat do adresy.
+ *
+ * Srážka barev má vlastní hlášku. Obecné „nepovedlo se“ by u ní bylo
+ * k ničemu — člověk by nevěděl, že stačí vybrat jinou barvu, a zkoušel
+ * by uložit znovu totéž.
+ *
+ * Rozhoduje NÁZEV INDEXU, ne kód 23505: `employees` má i jedinečnost
+ * na (tenant_id, user_id) a ta znamená něco úplně jiného.
+ */
+function kodChyby(error: { code?: string; message?: string; details?: string }): string {
+  const text = `${error.message ?? ''} ${error.details ?? ''}`
+  if (error.code === '23505' && text.includes('employees_barva_pobocka')) {
+    return 'barva-obsazena'
+  }
+  return 'nepovedlo'
+}
 
 /**
  * Přidání nebo úprava zaměstnance.
@@ -31,6 +50,16 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
   // Prázdné pole s datem posílá prázdný řetězec. Do sloupce typu date
   // patří null, ne '' — na tom by zápis spadl.
   const nastup = String(formData.get('nastup') ?? '').trim() || null
+  /*
+    Barva v rozpisu. Prázdno je platná volba, ne chybějící údaj:
+    „bez barvy“ si jde vybrat schválně.
+
+    Při ZALOŽENÍ prázdno znamená „přiděl volnou“ — to udělá spouštěč
+    v databázi, protože zaměstnanci vznikají i mimo tuhle obrazovku
+    (hromadné nahrání, přijatá pozvánka). Při ÚPRAVĚ prázdno znamená
+    „žádnou“ a spouštěč se do toho neplete: je jen na insert.
+  */
+  const barva = barvaNeboNic(formData.get('barva'))
 
   if (!jmeno) {
     redirect(`/${rozsah}/nastaveni/lide?chyba=jmeno`)
@@ -77,12 +106,13 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
         branch_id: pobocka,
         employment_type: typ,
         started_on: nastup,
+        color: barva,
       })
       .eq('id', id)
       .eq('tenant_id', tenantId)
 
     if (error) {
-      redirect(`/${rozsah}/nastaveni/lide?chyba=nepovedlo`)
+      redirect(`/${rozsah}/nastaveni/lide?chyba=${kodChyby(error)}`)
     }
   } else {
     // Přidání
@@ -95,10 +125,12 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
         branch_id: pobocka,
         employment_type: typ,
         started_on: nastup,
+        // Prázdno tu nechává práci spouštěči — ten vybere volnou.
+        color: barva,
       })
 
     if (error) {
-      redirect(`/${rozsah}/nastaveni/lide?chyba=nepovedlo`)
+      redirect(`/${rozsah}/nastaveni/lide?chyba=${kodChyby(error)}`)
     }
   }
 

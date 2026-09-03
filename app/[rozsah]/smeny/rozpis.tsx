@@ -19,6 +19,7 @@ function posunMesic(datum: string, mesicu: number): string {
   return posunuty.toISOString().slice(0, 10);
 }
 
+import ZnackaOsoby from "@/app/znacka-osoby";
 import FormularSmeny, { type SmenaKUprave } from "./formular-smeny";
 // `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
 // nespouští a serverová akce by se sem tahat neměla vůbec.
@@ -80,6 +81,13 @@ type Props = {
   dnesni: string;
   dayStartsAt: string;
   jmena: Map<string, string>;
+  /*
+    Barva člověka — klíč z palety, nebo null.
+
+    Chybějící záznam a null znamenají totéž: bez barvy. Vykreslí se
+    prázdný čtvereček s obrysem, ne mezera; viz app/znacka-osoby.
+  */
+  barvy: Map<string, string | null>;
   pozice: Map<string, string>;
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
@@ -90,6 +98,7 @@ export default function RozpisView({
   dnesni,
   dayStartsAt,
   jmena,
+  barvy,
   pozice,
   nazvyPobocek,
   rozsah,
@@ -197,6 +206,7 @@ export default function RozpisView({
           dny={dny}
           dnesni={dnesni}
           jmena={jmena}
+          barvy={barvy}
           pozice={pozice}
           nazvyPobocek={nazvyPobocek}
           rozsah={rozsah}
@@ -220,6 +230,7 @@ export default function RozpisView({
           dnesni={dnesni}
           dayStartsAt={dayStartsAt}
           jmena={jmena}
+          barvy={barvy}
           pozice={pozice}
           nazvyPobocek={nazvyPobocek}
           rozsah={rozsah}
@@ -261,6 +272,7 @@ function TydenView({
   dny,
   dnesni,
   jmena,
+  barvy,
   pozice,
   nazvyPobocek,
   rozsah,
@@ -270,6 +282,7 @@ function TydenView({
   dny: Map<string, Smena[]>;
   dnesni: string;
   jmena: Map<string, string>;
+  barvy: Map<string, string | null>;
   pozice: Map<string, string>;
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
@@ -357,7 +370,24 @@ function TydenView({
                     color: osoba ? "var(--ink)" : "var(--warn)",
                   }}
                 >
-                  {jmeno}
+                  {/*
+                    Čtvereček u jména, ne obarvené jméno. Obarvené jméno
+                    by některé odstíny udělalo hůř čitelnými a barva by
+                    přebila to, co je na řádku podstatné.
+
+                    Neobsazená směna značku nemá — není čí. Je to jediné
+                    místo, kde značka chybí docela.
+                  */}
+                  {osoba ? (
+                    <span
+                      style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
+                    >
+                      <ZnackaOsoby barva={barvy.get(osoba) ?? null} />
+                      {jmeno}
+                    </span>
+                  ) : (
+                    jmeno
+                  )}
                 </td>
                 {dnySerad.map((datum) => {
                   const smenyDne = smenyOsoby.get(datum) ?? [];
@@ -494,6 +524,7 @@ function DenView({
   dnesni,
   dayStartsAt,
   jmena,
+  barvy,
   pozice,
   nazvyPobocek,
   rozsah,
@@ -505,6 +536,7 @@ function DenView({
   dnesni: string;
   dayStartsAt: string;
   jmena: Map<string, string>;
+  barvy: Map<string, string | null>;
   pozice: Map<string, string>;
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
@@ -631,8 +663,9 @@ function DenView({
 
           return (
             <div key={s.id} style={{ display: "flex", height: `${rowHeight}px`, borderBottom: "1px solid var(--line)", position: "relative" }}>
-              <div style={{ width: "80px", flexShrink: 0, padding: "8px", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center" }}>
-                {jmeno}
+              <div style={{ width: "80px", flexShrink: 0, padding: "8px", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: "6px" }}>
+                {obsazena ? <ZnackaOsoby barva={barvy.get(s.employee_id as string) ?? null} velikost={8} /> : null}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{jmeno}</span>
               </div>
               <div style={{ flex: 1, position: "relative", minWidth: "1200px" }}>
                 {/* Pruh směny. Kdo smí plánovat, může na něj kliknout. */}
@@ -648,13 +681,46 @@ function DenView({
                     borderRadius: "4px",
                     display: "flex",
                     alignItems: "center",
-                    padding: "0 4px",
+                    // Vlevo místo na proužek s barvou člověka.
+                    padding: "0 4px 0 8px",
                     fontSize: "11px",
                     color: obsazena ? "var(--branch)" : "var(--pozor)",
                     whiteSpace: "nowrap" as const,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                   };
+
+                  /*
+                    PLOCHA JE POBOČKA, PROUŽEK JE ČLOVĚK.
+
+                    Výplň a rámeček pruhu drží barvu pobočky
+                    (`--branch-soft` / `--branch`). Barva člověka se do
+                    nich plést nesmí — dnes mají obě pobočky Růžovou,
+                    takže rozdíl odstínu by nikoho nezachránil. Proto
+                    úzký proužek na náběžné hraně a vlastní proměnná
+                    `--osoba`.
+
+                    U neobsazené směny žádný není: není čí.
+                  */
+                  const barvaOsoby = obsazena
+                    ? barvy.get(s.employee_id as string) ?? null
+                    : null;
+                  const prouzek = barvaOsoby ? (
+                    <span
+                      aria-hidden="true"
+                      data-osoba={barvaOsoby}
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: "4px",
+                        borderRadius: "4px 0 0 4px",
+                        background: "var(--osoba)",
+                      }}
+                    />
+                  ) : null;
+
                   const obsah = `${hodina(s.starts_at)}–${hodina(s.ends_at)}`;
                   return planovani ? (
                     <button
@@ -663,10 +729,14 @@ function DenView({
                       style={{ ...styl, cursor: "pointer", font: "inherit", fontSize: "11px" }}
                       title="Upravit směnu"
                     >
+                      {prouzek}
                       {obsah}
                     </button>
                   ) : (
-                    <div style={styl}>{obsah}</div>
+                    <div style={styl}>
+                      {prouzek}
+                      {obsah}
+                    </div>
                   );
                 })()}
               </div>

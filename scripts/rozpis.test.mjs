@@ -115,13 +115,14 @@ const PLANOVANI = {
   sablony: [],
 }
 
-function rozpis(planovani) {
+function rozpis(planovani, barvy = new Map()) {
   return renderToStaticMarkup(
     createElement(RozpisView, {
       smeny: SMENY,
       dnesni: '2026-10-05',
       dayStartsAt: '05:00',
       jmena: new Map([['e1', 'Láďa']]),
+      barvy,
       pozice: new Map(),
       nazvyPobocek: new Map([['b1', 'Restaurace Černá Perla']]),
       rozsah: { level: 'branch', branchId: 'b1', branchName: 'Restaurace Černá Perla' },

@@ -199,6 +199,33 @@
   --branch: var(--b-rose); --branch-fill: var(--b-rose-fill); --branch-soft: var(--b-rose-soft);
 }
 
+/* --------------------------------------------------------------------
+   BARVA ČLOVĚKA — vlastní proměnná, ne --branch
+
+   Táž paleta, ale JINÁ proměnná a jiný atribut. Kdyby se barva člověka
+   nastavovala přes data-branch, přepsala by uvnitř té značky --branch
+   a všechno, co ho v okolí používá (rám směny, nadpis sloupce), by se
+   přebarvilo na člověka. V rozpisu je pruh směny plocha v barvě
+   POBOČKY — a barva člověka do ní nemá co mluvit.
+
+   Odstíny se neduplikují, jen se ukazuje na tytéž --b-*, takže tmavý
+   režim i kontroly v scripts/barvy.js platí beze změny. Nové odstíny
+   nepřibyly ani jeden.
+
+   Tvarem se to liší taky, ne jen proměnnou: pobočka je PLOCHA (výplň
+   pruhu, lišta), člověk je PROUŽEK a čtvereček. Dnes mají obě pobočky
+   Růžovou, takže na pouhý odstín se spolehnout nedá.
+   ------------------------------------------------------------------ */
+[data-osoba="firma"]   { --osoba: var(--b-firma); }
+[data-osoba="slate"]   { --osoba: var(--b-slate); }
+[data-osoba="indigo"]  { --osoba: var(--b-indigo); }
+[data-osoba="violet"]  { --osoba: var(--b-violet); }
+[data-osoba="sky"]     { --osoba: var(--b-sky); }
+[data-osoba="teal"]    { --osoba: var(--b-teal); }
+[data-osoba="emerald"] { --osoba: var(--b-emerald); }
+[data-osoba="amber"]   { --osoba: var(--b-amber); }
+[data-osoba="rose"]    { --osoba: var(--b-rose); }
+
 /* Tmavý režim mění jen plochu lišty a sloupce. --branch-* se tu
    nepřepisují: hodnoty --b-* se vyměnily už v základu výš. */
 @media (prefers-color-scheme: dark) {

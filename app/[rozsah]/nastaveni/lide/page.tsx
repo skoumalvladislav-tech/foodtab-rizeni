@@ -8,6 +8,8 @@ import { smimPridelit } from "@/lib/prideleni";
 import { DotazSelhal, funkceNeexistuje, seznam } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import { kratkyUvazek, UVAZKY } from "@/lib/uvazky";
+import { BARVY_LIDI, NAZVY_BAREV_LIDI } from "@/lib/barvy-lidi";
+import ZnackaOsoby from "@/app/znacka-osoby";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
@@ -27,6 +29,8 @@ type Zamestnanec = {
   user_id: string | null;
   employment_type: string;
   started_on: string | null;
+  /** Klic z palety, nebo null. Prazdno je platny stav: bez barvy. */
+  color: string | null;
   active: boolean;
   deleted_at: string | null;
 };
@@ -102,7 +106,7 @@ export default async function NastaveniLide({
     supabase
       .from("employees")
       .select(
-        "id, full_name, position_id, branch_id, user_id, employment_type, started_on, active, deleted_at",
+        "id, full_name, position_id, branch_id, user_id, employment_type, started_on, active, deleted_at, color",
       )
       .eq("tenant_id", tenantId)
       .order("full_name"),
@@ -443,6 +447,81 @@ export default async function NastaveniLide({
           </label>
 
           {/*
+            Barva v rozpisu.
+
+            Nepovinná pomůcka: v kalendáři je u jména čtvereček, ať se
+            týden dá přejet očima. Jméno je tam napsané tak jako tak,
+            takže barva nic nenese sama.
+
+            Volba „bez barvy“ je první a je to platný stav, ne prázdné
+            pole. U NOVÉHO člověka znamená „přiděl volnou“ — to udělá
+            databáze; u stávajícího „žádnou“.
+
+            Rádia, ne rozbalovátko: devět odstínů má být vidět naráz
+            i s názvem. Stejně to má výběr barvy pobočky.
+          */}
+          <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
+            <legend style={{ ...formularLabel, padding: 0 }}>Barva v rozpisu</legend>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "8px",
+                marginTop: "8px",
+              }}
+            >
+              <label style={volbaBarvy}>
+                <input
+                  type="radio"
+                  name="barva"
+                  value=""
+                  defaultChecked={!upravuje?.color}
+                  style={{ accentColor: "var(--ink)" }}
+                />
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: "10px",
+                    height: "10px",
+                    borderRadius: "3px",
+                    border: "1px solid var(--line-2)",
+                    flex: "none",
+                  }}
+                />
+                <span>{upravuje ? "Bez barvy" : "Přidělit volnou"}</span>
+              </label>
+
+              {BARVY_LIDI.map((klic) => (
+                <label key={klic} data-osoba={klic} style={volbaBarvy}>
+                  <input
+                    type="radio"
+                    name="barva"
+                    value={klic}
+                    defaultChecked={klic === upravuje?.color}
+                    style={{ accentColor: "var(--osoba)" }}
+                  />
+                  {/*
+                    Čtvereček, ne kolečko — kolečko má výběr barvy
+                    pobočky a ty dvě věci se nesmějí plést.
+                  */}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "3px",
+                      background: "var(--osoba)",
+                      flex: "none",
+                    }}
+                  />
+                  {/* Barva nikdy nestojí sama — vedle čtverečku je název. */}
+                  <span>{NAZVY_BAREV_LIDI[klic]}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          {/*
             Nástup je nepovinný. U brigádníka, kterého někdo zapsal
             zpětně, se datum často neví — prázdné pole je poctivější
             než dnešek dosazený za něj.
@@ -626,7 +705,19 @@ export default async function NastaveniLide({
           <tbody>
             {(zamestnanci ?? []).map((z) => (
               <tr key={z.id} style={{ ...tr, opacity: z.deleted_at ? 0.5 : 1 }}>
-                <td style={td}>{z.full_name}</td>
+                {/*
+                  Čtvereček u jména je táž značka jako v rozpisu — kdo
+                  barvu zrovna nastavil, musí ji poznat i tady, ne až
+                  o dvě obrazovky dál.
+                */}
+                <td style={td}>
+                  <span
+                    style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
+                  >
+                    <ZnackaOsoby barva={z.color} />
+                    {z.full_name}
+                  </span>
+                </td>
                 <td style={td}>
                   {z.position_id
                     ? vsechnyPozice.find((p) => p.id === z.position_id)?.label || "—"
@@ -801,6 +892,20 @@ const tabulka = {
   fontSize: "14px",
 } as const;
 
+/* Jedna volba v paletě. `minHeight: 44` je kvůli prstu na telefonu —
+   stejně jako u výběru barvy pobočky. */
+const volbaBarvy = {
+  display: "inline-flex" as const,
+  alignItems: "center" as const,
+  gap: "7px",
+  padding: "7px 11px",
+  borderRadius: "999px",
+  border: "1px solid var(--line-2)",
+  fontSize: "12.5px",
+  cursor: "pointer",
+  minHeight: "44px",
+} as const;
+
 const headRow = {
   background: "var(--sunken)",
   borderBottom: "1px solid var(--line)",
@@ -862,6 +967,8 @@ function popisChyby(kod: string): string {
       return "Oprávnění se neuložilo. Buď je to vaše vlastní členství (to měnit nejde), nebo přidělujete víc, než máte sami.";
     case "opravneni-pobocky":
       return "Oprávnění se uložilo, ale pobočky ne — nejspíš mezi nimi je taková, na kterou sami nemáte právo.";
+    case "barva-obsazena":
+      return "Tuhle barvu už na téhle pobočce někdo má. Vyberte jinou, nebo nechte bez barvy — jedinečnost se hlídá v rámci pobočky, aby se v jednom rozpisu nesešli dva lidé stejné barvy.";
     case "opravneni":
       return "Oprávnění se nepodařilo uložit.";
     default:

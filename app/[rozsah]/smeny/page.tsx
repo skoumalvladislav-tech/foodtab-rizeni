@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { hasAccess } from "@/lib/authz";
+import { barvaNeboNic } from "@/lib/barvy-lidi";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
@@ -138,6 +139,11 @@ export default async function Rozpis({
   // do dotazu nedostane a v rozpisu se ukáže jako neobsazená.
   const jmena = new Map<string, string>();
   const pozice = new Map<string, string>();
+  /*
+    Barvy lidí do rozpisu. Klíč z palety, nebo null u toho, kdo barvu
+    nemá — a to je platný stav, ne chybějící údaj. Viz lib/barvy-lidi.
+  */
+  const barvy = new Map<string, string | null>();
 
   const idLidi = [
     ...new Set(smeny.map((s) => s.employee_id).filter((i): i is string => !!i)),
@@ -145,10 +151,13 @@ export default async function Rozpis({
   if (idLidi.length > 0) {
     const { data: lide, error: chybaLide } = await supabase
       .from("employees")
-      .select("id, full_name")
+      .select("id, full_name, color")
       .in("id", idLidi);
     if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
-    for (const c of lide ?? []) jmena.set(c.id as string, c.full_name as string);
+    for (const c of lide ?? []) {
+      jmena.set(c.id as string, c.full_name as string);
+      barvy.set(c.id as string, barvaNeboNic(c.color));
+    }
   }
 
   const idPozic = [
@@ -281,6 +290,7 @@ export default async function Rozpis({
         dnesni={odKdy}
         dayStartsAt={dayStartsAt}
         jmena={jmena}
+        barvy={barvy}
         pozice={pozice}
         nazvyPobocek={nazvyPobocek}
         rozsah={{
