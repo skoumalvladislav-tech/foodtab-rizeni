@@ -22,10 +22,20 @@ import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
  *    tenhle soubor běží jen na serveru a klíč `service_role` je
  *    v modulu s `server-only`.
  *
- * 2. ZIMNÍ A LETNÍ ČAS. Vercel umí plánovat jen v UTC, takže by se
- *    v zimě ozvalo v 10:00 a v létě v 9:00. Řeší se to tím, že
- *    PLÁNOVAČ BĚŽÍ KAŽDOU HODINU a o hodině rozhoduje databáze podle
- *    místního času a nastavení firmy. Tady se žádný čas neřeší.
+ * 2. ZIMNÍ A LETNÍ ČAS. Vercel umí plánovat jen v UTC, takže napevno
+ *    nastavená devátá by v zimě zvonila v deset. O hodině proto
+ *    rozhoduje DATABÁZE podle místního času a nastavení firmy —
+ *    tady se žádný čas neřeší.
+ *
+ *    Plánovač běží DENNĚ v 08:00 UTC, ne každou hodinu: hodinový cron
+ *    Vercel na tomhle tarifu odmítá a blokoval nasazení (commit
+ *    45c3a7f). 08:00 UTC je v zimě 09:00 a v létě 10:00 pražského
+ *    času, tedy vždycky už po výchozí devátě.
+ *
+ *    Co z toho plyne a je potřeba vědět: firma, která si nastaví
+ *    hodinu POZDĚJŠÍ než 10:00, se dozví až druhý den. Kdyby to
+ *    někomu vadilo, chce to hodinový cron — tedy jiný tarif, ne jiný
+ *    kód.
  *
  * 3. ZMEŠKANÉ SPUŠTĚNÍ. Když v 9:00 nic neběželo, běh v 11:00 doběhne
  *    normálně: hledá se podle stáří příchodu, ne podle hodiny.
