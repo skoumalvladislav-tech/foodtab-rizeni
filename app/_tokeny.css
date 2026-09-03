@@ -54,15 +54,17 @@
      kde `env()` neexistuje vůbec, je celý `calc()` neplatný a pravidlo
      propadne — tedy i to odsazení, které tam být má.
 
-     `max(…, 8px)` u horní vložky je schválně. Tam, kde je vložka nulová
-     (Android, počítač), by lišta jinak seděla nalepená na kraj. Osm
-     bodů je vidět jako dech, ne jako mezera.
+     ŽÁDNÁ Z NICH NEMÁ MINIMUM. Napoprvé ho horní měla — `max(env(…),
+     8px)` — a tím se lišta zvětšila i na počítači a na Androidu, kde
+     vložka vyjde nula. To nebyl záměr: minimum má odtlačit lištu tam,
+     kde ji nemá co odtlačit, ne ji všude natáhnout.
 
-     Boční vložky minimum nemají — na počítači jsou nulové a lišta má
-     kraj mít rovný. Sečítají se až tam, kde se odsazuje obsah, přes
-     `max(vlastní odsazení, vložka)`.
+     Minimum proto sedí až u toho, kdo odsazuje, a soupeří s vložkou
+     uvnitř téhož `max()` — viz `--lista-shora` v globals.css a
+     `max(18px, …)` po stranách. Kde je vložka nulová, vyjde původní
+     hodnota a nezmění se nic.
      ------------------------------------------------------------------ */
-  --vlozka-nahore: max(env(safe-area-inset-top, 0px), 8px);
+  --vlozka-nahore: env(safe-area-inset-top, 0px);
   --vlozka-vpravo: env(safe-area-inset-right, 0px);
   --vlozka-dole:   env(safe-area-inset-bottom, 0px);
   --vlozka-vlevo:  env(safe-area-inset-left, 0px);

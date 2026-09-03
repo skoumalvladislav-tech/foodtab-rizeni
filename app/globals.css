@@ -16,9 +16,24 @@
    i sticky řádka modulů (`top`) a levý sloupec (`top` a `height`).
    Když se lišta o vložku zvětší a ty se nezvětší s ní, schová se řádka
    modulů právě pod Dynamic Island — a tam se na ni nedá kliknout.
-   Přesně tohle se 3. 9. stalo. */
+   Přesně tohle se 3. 9. stalo.
+
+   VLOŽKA SE NEPŘIČÍTÁ K HOTOVÉ VÝŠCE, SOUPEŘÍ S VLASTNÍM ODSAZENÍM.
+
+   Lištiných 56 px se rozpadá na 8 + 40 + 8. Nahoře se pak bere ta
+   větší z dvojice `vlastní odsazení` a `vložka` — proto `--lista-shora`.
+   Při nulové vložce vyhraje osmička, součet je zase 56 a nezmění se
+   nic. Napoprvé to bylo `56px + max(env(…), 8px)`, což lištu na
+   počítači natáhlo na 64 a na telefonu na 60; to nikdo nechtěl.
+
+   Rozdělení je symetrické (8 nahoře, 8 dole), aby obsah zůstal
+   uprostřed tam, kde byl. Nesymetrické by ho posunulo o čtyři body
+   dolů, i když by výška seděla. */
 .ft-shell {
-  --vysoka-lista: calc(56px + var(--vlozka-nahore));
+  --lista-okraj: 8px;
+  --lista-vnitrek: 40px;   /* 56 − 2 × 8 */
+  --lista-shora: max(var(--lista-okraj), var(--vlozka-nahore));
+  --vysoka-lista: calc(var(--lista-vnitrek) + var(--lista-okraj) + var(--lista-shora));
   min-height: 100dvh; display: flex; flex-direction: column;
 }
 
@@ -39,7 +54,8 @@
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 18px;
   height: var(--vysoka-lista);
-  padding: var(--vlozka-nahore) max(18px, var(--vlozka-vpravo)) 0 max(18px, var(--vlozka-vlevo));
+  padding: var(--lista-shora) max(18px, var(--vlozka-vpravo))
+           var(--lista-okraj) max(18px, var(--vlozka-vlevo));
   background: var(--rail); color: var(--rail-ink);
   box-shadow: var(--shadow);
 }
@@ -402,10 +418,13 @@
 @media (max-width: 640px) {
   /* Nižší lišta na telefonu. Proměnná se přepočítá s ní, takže se
      řádka modulů posune sama — dřív se to muselo psát dvakrát. */
-  .ft-shell { --vysoka-lista: calc(52px + var(--vlozka-nahore)); }
+  /* 52 = 8 + 36 + 8. Mění se jen vnitřek, okraj i soupeření s vložkou
+     zůstávají — a při nulové vložce vyjde zase přesných 52 px. */
+  .ft-shell { --lista-vnitrek: 36px; }
   .ft-topbar {
     height: var(--vysoka-lista);
-    padding: var(--vlozka-nahore) max(14px, var(--vlozka-vpravo)) 0 max(14px, var(--vlozka-vlevo));
+    padding: var(--lista-shora) max(14px, var(--vlozka-vpravo))
+             var(--lista-okraj) max(14px, var(--vlozka-vlevo));
     gap: 10px;
   }
   .ft-side { display: none; }
