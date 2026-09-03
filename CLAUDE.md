@@ -225,9 +225,15 @@ už se to 3. 9. 2026 stalo:
 
 Proto čtyři pravidla:
 
-1. **Každá relace na vlastní větvi.** Provoz na `main`, marketing na
-   `marketing`. Ve společné složce si dvě relace přepisují rozdělanou
-   práci; slévá se až hotové.
+1. **Každá relace na vlastní větvi — ale databáze je jen jedna.**
+   Provoz na `main`, marketing na `marketing`; ve společné složce si
+   dvě relace přepisují rozdělanou práci.
+
+   **Nasazuje se výhradně z `main`.** Migrace z větve se do databáze
+   nepouštějí. Důvod: `supabase/tests/run.sh` staví čistou databázi ze
+   všech migrací, které v té větvi leží — a na větvi je jich jen půlka.
+   Testy by pak ověřovaly něco jiného, než co běží v provozu. Slej do
+   `main`, tam prožeň testy, teprve pak `supabase db push`.
 
 2. **V nových migracích `create table` bez `if not exists`.** Srážka
    jmen má spadnout nahlas a hned. `if not exists` je od toho, aby se
