@@ -348,4 +348,81 @@ select pg_temp.check('zkušební lidé jsou pryč',
 
 
 \echo ''
+\echo '== 10. Obrazovky si barvu opravdu přečtou ================'
+
+/*
+  TOHLE JE TA KONTROLA, KTERÁ CHYBĚLA — a stálo to pád půlky aplikace
+  v ostrém provozu.
+
+  `employees` NEMÁ právo na čtení celé tabulky. Migrace
+  20260901120000_osobni_udaje.sql ho sebrala a vrátila PO SLOUPCÍCH,
+  aby se telefon a e-mail četly jen průzorem. Je to výčet — a
+  `alter table … add column color` do něj nový sloupec nepřidá.
+
+  Dopad není „barva se neukáže“. Dotaz, který si o `color` řekne,
+  dostane rovnou
+
+    permission denied for table employees   (SQLSTATE 42501)
+
+  a spadne celý. Proto padly Lidé i Rozpis a Docházka, která barvu
+  nevybírá, jela dál.
+
+  Kontroly to nechytily, protože `color` četly jako SUPERUŽIVATEL,
+  kterému granty nic neříkají. Kontrola tedy neprošla tou cestou,
+  kterou jde aplikace — a nad rozbitou aplikací hlásila zeleno.
+
+  Proto se tu pouští doslova ty dotazy, které posílají obrazovky,
+  a pod rolí `authenticated`.
+*/
+
+select user_id as sef from public.profiles where email = 'majitel@foodtab.cz' \gset
+
+set role authenticated;
+select set_config('test.user_id', :'sef', false);
+
+do $$
+begin
+  begin
+    perform id, full_name, position_id, branch_id, user_id, employment_type,
+            started_on, active, deleted_at, color
+    from public.employees limit 1;
+  exception when insufficient_privilege then
+    raise exception 'SELHALO: obrazovka Lidé si barvu nepřečte — %', sqlerrm;
+  end;
+  raise notice '  OK    dotaz obrazovky Lidé projde i s barvou';
+end $$;
+
+do $$
+begin
+  begin
+    perform id, full_name, color from public.employees limit 1;
+  exception when insufficient_privilege then
+    raise exception 'SELHALO: obrazovka Rozpis si barvu nepřečte — %', sqlerrm;
+  end;
+  raise notice '  OK    dotaz obrazovky Rozpis projde i s barvou';
+end $$;
+
+reset role;
+
+-- A totéž ještě jednou z druhé strany: co je vlastně udělené.
+select pg_temp.check('barva je mezi čitelnými sloupci',
+  exists (
+    select 1 from information_schema.column_privileges
+    where table_name = 'employees' and column_name = 'color'
+      and grantee = 'authenticated' and privilege_type = 'SELECT'
+  ));
+
+/*
+  A co udělené BÝT NEMÁ, ať zůstane neudělené. Telefon a e-mail se
+  čtou průzorem se souhlasem, ne z tabulky — kdyby je někdo příště
+  „doplnil k barvě“, byla by z opravy díra.
+*/
+select pg_temp.check('telefon ani e-mail mezi nimi nejsou',
+  not exists (
+    select 1 from information_schema.column_privileges
+    where table_name = 'employees' and column_name in ('phone', 'email')
+      and grantee = 'authenticated' and privilege_type = 'SELECT'
+  ));
+
+\echo ''
 \echo '== KROK 21 HOTOV ========================================='
