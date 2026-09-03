@@ -209,6 +209,42 @@ Když opravdu nejde jinak, zeptej se — nepřidávej `create extension` sám.
 - **Commituj průběžně**, ať jde každý krok vrátit.
 - Majitel projektu není vývojář. Odpovídej česky a bez žargonu.
 
+## Dvě relace v jednom repozitáři
+
+Na projektu pracuje víc relací najednou — **provoz** (směny, docházka,
+lidé, zálohy) a **marketing** jako samostatný modul vedle. Píšou do
+téhož repozitáře a do téže databáze, takže se můžou potkat. Dvakrát
+už se to 3. 9. 2026 stalo:
+
+- `shift_templates` byla zabraná tabulkou z jiné práce.
+  `create table if not exists` **tiše neudělal nic** a přišlo se na to
+  až o krok dál, když index hlásil neexistující sloupec.
+- `krok18_scenar.sql` z marketingu spadl a `run.sh` s ním skončil.
+  Tím se nedalo poznat, jestli kontroly, které proběhly, jsou celý
+  obrázek, nebo jen to, co stihlo běžet před pádem.
+
+Proto čtyři pravidla:
+
+1. **Každá relace na vlastní větvi.** Provoz na `main`, marketing na
+   `marketing`. Ve společné složce si dvě relace přepisují rozdělanou
+   práci; slévá se až hotové.
+
+2. **V nových migracích `create table` bez `if not exists`.** Srážka
+   jmen má spadnout nahlas a hned. `if not exists` je od toho, aby se
+   migrace dala pustit dvakrát — jenže tady se druhý běh nedělá, na to
+   je historie migrací.
+
+3. **Scénáře se nečíslují společnou řadou.** Provoz `krokN_scenar.sql`,
+   marketing `marketingN_scenar.sql`. Jedna číselná řada pro dvě
+   relace je srážka, která se stane určitě.
+
+4. **`run.sh` musí doběhnout vždycky.** Pustí všechny scénáře, na
+   konci vypíše, které spadly, a teprve pak skončí nenulově. Jeden
+   rozbitý scénář nesmí schovat zbytek.
+
+**Do cizího modulu nesahej.** Když najdeš chybu v tom druhém, ohlas ji
+a nech ji tomu, kdo ho píše.
+
 ## Konvence
 
 - Názvy tabulek, sloupců a funkcí anglicky, `snake_case`.
