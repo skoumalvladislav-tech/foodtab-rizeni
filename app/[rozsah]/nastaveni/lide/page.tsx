@@ -13,6 +13,7 @@ import Nadpis from "../../nadpis";
 import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
 import PolePozice from "./pole-pozice";
 import PanelOpravneni from "./panel-opravneni";
+import PanelPinu from "./pin";
 import SmazatZamestnance from "./smazani";
 import VystavitPozvankuFormular from "./vystaveni";
 
@@ -51,6 +52,8 @@ export default async function NastaveniLide({
     mail?: string;
     pozice?: string;
     nazev?: string;
+    /** Komu se přiděluje PIN. Samotný PIN adresou NIKDY nechodí. */
+    pin?: string;
   }>;
 }) {
   const { rozsah } = await params;
@@ -64,6 +67,7 @@ export default async function NastaveniLide({
     mail: chybaMailu,
     pozice: poziceStav,
     nazev: nazevPozice,
+    pin: pinProId,
   } = await searchParams;
 
   const tenantId = await getCurrentTenantId();
@@ -321,6 +325,46 @@ export default async function NastaveniLide({
   // rozhodnutí ale stejně padá v public.set_rate.
   const smiZadavatSazby = await hasAccess(tenantId, "payroll.manage", null);
 
+  /*
+    PIN přiděluje ten, kdo spravuje docházku (pravidlo 2 — podle
+    práva, ne podle názvu role). Průzor si to ověří znovu na
+    pobočce toho člověka; tady se jen rozhoduje o kreslení.
+  */
+  const smiPin = await hasAccess(tenantId, "attendance.manage", null);
+
+  /*
+    Stav PINu a návrh nového. Návrh chodí z databáze, protože jen ona
+    ví, který je na té pobočce volný — vygenerovat ho v prohlížeči by
+    znamenalo hádat a nechat se odmítnout až při uložení.
+  */
+  async function panelPinu(id: string) {
+    const clovek = (zamestnanci ?? []).find((z) => z.id === id);
+    if (!clovek) return null;
+
+    const { data: pinRadek } = await supabase
+      .from("employee_pins")
+      .select("employee_id, nastaven_kdy")
+      .eq("employee_id", id)
+      .maybeSingle();
+
+    const { data: navrh } = await supabase.rpc("navrh_pinu", {
+      p_tenant: tenantId,
+      p_employee: id,
+    });
+
+    return (
+      <PanelPinu
+        rozsah={rozsah}
+        zamestnanec={clovek.id}
+        jmeno={clovek.full_name}
+        maUcet={Boolean(clovek.user_id)}
+        maPin={Boolean(pinRadek)}
+        nastavenKdy={(pinRadek?.nastaven_kdy as string | null) ?? null}
+        navrh={(navrh as string | null) ?? null}
+      />
+    );
+  }
+
   return (
     <>
       <Nadpis
@@ -531,6 +575,9 @@ export default async function NastaveniLide({
         </form>
       ) : null}
 
+      {/* PIN u konkrétního člověka */}
+      {pinProId && smiPin ? await panelPinu(pinProId) : null}
+
       {prideluje ? (
         <div style={{ padding: "0 16px" }}>
           {!prideluje.user_id ? (
@@ -649,6 +696,20 @@ export default async function NastaveniLide({
                   >
                     Upravit
                   </Link>
+                  {/*
+                    PIN. Kreslí se jen tomu, kdo spravuje docházku —
+                    a jen u nesmazaného člověka. U brigádníka bez účtu
+                    je to jediná cesta, jak mu píchání zpřístupnit.
+                  */}
+                  {smiPin && !z.deleted_at ? (
+                    <Link
+                      href={`/${rozsah}/nastaveni/lide?pin=${z.id}`}
+                      className="ft-tl ft-tl-vedlejsi ft-tl-male"
+                      style={{ marginRight: "8px" }}
+                    >
+                      PIN
+                    </Link>
+                  ) : null}
                   {/*
                     Poslední majitel se smazat nedá — spoušť v databázi
                     to odmítne. Tlačítko se proto nenabízí a je u toho

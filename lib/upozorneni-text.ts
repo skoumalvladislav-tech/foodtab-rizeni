@@ -36,6 +36,8 @@ export type TeloUpozorneni = {
   kdo?: string
   ceka?: boolean
   pobocky?: string[]
+  // pin.prenastaven
+  mel_drive?: boolean
   // dochazka.zapomenuty_odchod
   moje?: boolean
   zamestnanec?: string
@@ -69,6 +71,16 @@ export function nadpisUpozorneni(
       return telo.moje
         ? `Chybí vám odchod z ${denCesky(telo.den)}`
         : `${telo.jmeno ?? 'Někdo'} nemá odchod z ${denCesky(telo.den)}`
+    /*
+      PIN. Zpráva je krátká schválně a PIN v ní NENÍ — v databázi je
+      jen otisk a upozornění by z něj udělalo čitelné uložení.
+
+      Chodí jen tehdy, když PIN přenastavil někdo jiný. Bez téhle
+      zprávy by šlo cizí PIN přenastavit a tiše používat, a přesně
+      tomu se celé řešení vyhýbá.
+    */
+    case 'pin.prenastaven':
+      return telo.mel_drive ? 'Váš PIN byl přenastaven' : 'Máte nový PIN ke kiosku'
     default:
       return 'Upozornění'
   }
@@ -89,6 +101,13 @@ export function popisZapomenuteho(telo: TeloUpozorneni): string {
     return `${prichod}${pobocka} Dokud odchod nedoplníte, směna se nezapočítá do odpracovaných hodin.`.trim()
   }
   return `${prichod}${pobocka}`.trim()
+}
+
+/** Věta pod nadpisem u přenastaveného PINu. */
+export function popisPinu(telo: TeloUpozorneni): string {
+  return telo.mel_drive
+    ? 'Starý přestal platit. Nový vám předá vedoucí — do zprávy se nepíše.'
+    : 'Nový PIN vám předá vedoucí. Do zprávy se nepíše, přečíst se nedá ani z databáze.'
 }
 
 /** „pondělí 31. 8.“ — den v týdnu pomáhá víc než samotné datum. */

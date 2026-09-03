@@ -407,3 +407,46 @@ comment on function public.navrh_pinu(uuid, uuid) is
 
 revoke all on function public.navrh_pinu(uuid, uuid) from public, anon;
 grant execute on function public.navrh_pinu(uuid, uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- ZRUŠENÍ — nově i vlastního
+--
+-- Dosud směl PIN zrušit jen správce docházky. Jenže obrazovka Mých
+-- údajů nabízí „PIN máte nastavený · Změnit · Zrušit“ (zadání, oddíl 2)
+-- a zaměstnanec bez attendance.manage by na to tlačítko klikal marně.
+--
+-- Zrušit vlastní PIN je neškodné: je to jeho vlastní klíč a stejně si
+-- ho může kdykoli přenastavit. Cizí zůstává na attendance.manage.
+-- ---------------------------------------------------------------------
+
+create or replace function public.zrusit_pin(p_tenant uuid, p_employee uuid)
+returns void
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare
+  v_branch uuid;
+  v_ucet   uuid;
+begin
+  select e.branch_id, e.user_id into v_branch, v_ucet
+  from public.employees e
+  where e.id = p_employee and e.tenant_id = p_tenant;
+
+  if not found then
+    raise exception 'Zaměstnanec nepatří téhle firmě.' using errcode = 'no_data_found';
+  end if;
+
+  if v_ucet is distinct from (select auth.uid())
+     and not app.has_access(p_tenant, 'attendance.manage', v_branch) then
+    raise exception 'Zrušit cizí PIN smí jen správce docházky.'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  delete from public.employee_pins where employee_id = p_employee;
+
+  perform app.audit(p_tenant, 'pin.zruseno', 'employee', p_employee::text, v_branch, null, null);
+end;
+$$;
+
+revoke all on function public.zrusit_pin(uuid, uuid) from public, anon;
+grant execute on function public.zrusit_pin(uuid, uuid) to authenticated;

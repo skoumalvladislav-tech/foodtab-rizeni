@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { getContext, getUser } from '@/lib/authz'
+import { ZONA_VYCHOZI } from '@/lib/cas'
 import { getCurrentTenantId } from '@/lib/firma'
 import { tabulkaNeexistuje, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -8,6 +9,7 @@ import Sdeleni from '@/app/sdeleni'
 import Nadpis from '@/app/[rozsah]/nadpis'
 import {
   nastavitPin,
+  zrusitMujPin,
   prepnoutEmailyUpozorneni,
   prepnoutSouhlas,
   ulozitKontakt,
@@ -153,6 +155,18 @@ export default async function MojeUdaje({
     .eq('user_id', user.id)
     .maybeSingle()
   const chceEmaily = (profil as { upozorneni_emailem?: boolean } | null)?.upozorneni_emailem !== false
+
+  const mujPin = ((pin.data ?? []) as { employee_id: string; nastaven_kdy: string }[]).find(
+    (r) => r.employee_id === muj?.employee_id,
+  )
+  const datumPinu = mujPin?.nastaven_kdy
+    ? new Date(mujPin.nastaven_kdy).toLocaleDateString('cs-CZ', {
+        timeZone: ZONA_VYCHOZI,
+        day: 'numeric',
+        month: 'numeric',
+        year: 'numeric',
+      })
+    : null
 
   const maPin = ((pin.data ?? []) as { employee_id: string }[]).some(
     (r) => r.employee_id === muj?.employee_id,
@@ -341,12 +355,30 @@ export default async function MojeUdaje({
             nikdo nedostane, a platí jen na tabletu vaší firmy.
           </p>
           <p style={popis}>
-            {maPin
-              ? 'PIN máte nastavený. Zadáním nového ten starý přepíšete.'
-              : 'PIN zatím nastavený nemáte.'}{' '}
+            {maPin ? (
+              <>
+                <strong>PIN máte nastavený</strong>
+                {datumPinu ? ` (nastaven ${datumPinu})` : ''}. Zadáním
+                nového ten starý přepíšete.
+              </>
+            ) : (
+              'PIN zatím nastavený nemáte.'
+            )}{' '}
             Přečíst ho nedokáže nikdo, ani majitel — dá se jen zrušit
             a zadat znovu.
           </p>
+
+          {/*
+            Kdyby PIN přenastavil vedoucí, přijde o tom zvoneček. Bez
+            toho by šlo cizí PIN přenastavit a tiše používat — a tomu se
+            celé tohle řešení vyhýbá (zadání, oddíl 2).
+          */}
+          {maPin ? (
+            <p style={{ ...popis, marginBottom: '16px' }}>
+              Když vám ho přenastaví vedoucí, dozvíte se to zvonečkem.
+              Samotný PIN v tom upozornění není — předá vám ho osobně.
+            </p>
+          ) : null}
           <form action={nastavitPin} style={{ display: 'grid', gap: '12px' }}>
             <label style={poleLabel}>
               <span>{maPin ? 'Nový PIN' : 'PIN'}</span>
@@ -364,7 +396,9 @@ export default async function MojeUdaje({
             </label>
             <p style={{ ...popis, margin: 0 }}>
               Ne samé stejné číslice a ne řada (1234, 4321) — to se
-              uhodne dřív, než dojde káva.
+              uhodne dřív, než dojde káva. A ne takový, jaký už na vaší
+              pobočce někdo má: na tabletu se zadává jen PIN, žádné
+              jméno, takže dva stejné by se pletly.
             </p>
             <div>
               <button type="submit" className="ft-tl ft-tl-hlavni">
@@ -372,6 +406,13 @@ export default async function MojeUdaje({
               </button>
             </div>
           </form>
+          {maPin ? (
+            <form action={zrusitMujPin} style={{ marginTop: '12px' }}>
+              <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                Zrušit PIN
+              </button>
+            </form>
+          ) : null}
         </section>
 
         {/* --- informace o zpracování ----------------------------- */}

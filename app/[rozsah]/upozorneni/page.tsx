@@ -7,6 +7,7 @@ import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
   nadpisUpozorneni,
   popisOpravneni,
+  popisPinu,
   popisZapomenuteho,
   type TeloUpozorneni,
 } from '@/lib/upozorneni-text'
@@ -190,6 +191,12 @@ export default async function Upozorneni({
                       </p>
                     ) : null}
                   </>
+                ) : null}
+
+                {z.druh === 'pin.prenastaven' ? (
+                  <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
+                    {popisPinu(z.telo)}
+                  </p>
                 ) : null}
 
                 {z.druh === 'opravneni.prideleno' ? (

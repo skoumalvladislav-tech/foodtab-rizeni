@@ -612,3 +612,82 @@ kdo vám oprávnění přidělil.</p>
       (mail ? `&mail=${encodeURIComponent(mail)}` : ''),
   )
 }
+
+/* =====================================================================
+   PIN
+
+   Zadání docs/pin-prideleni-zadani.md.
+
+   PIN se vrací volajícímu, aby se ukázal JEDNOU. Proto tyhle dvě akce
+   NEPŘESMĚROVÁVAJÍ s parametrem v adrese jako zbytek téhle obrazovky:
+   PIN v adrese by zůstal v historii prohlížeče, v odkazovači a
+   v protokolech serveru. Jde zpátky jako návratová hodnota a obrazovka
+   ho ukáže a zapomene.
+   ================================================================== */
+
+export type StavPinu =
+  | { stav: 'nic' }
+  | { stav: 'chyba'; text: string }
+  | { stav: 'hotovo'; pin: string; jmeno: string }
+  | { stav: 'zruseno' }
+
+export async function pridelitPin(
+  _predchozi: StavPinu,
+  formData: FormData,
+): Promise<StavPinu> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zamestnanec = String(formData.get('zamestnanec') ?? '')
+  const jmeno = String(formData.get('jmeno') ?? '')
+  // Prázdné pole znamená VYGENEROVAT. Bez toho by měla půlka lidí 1234.
+  const pin = String(formData.get('pin') ?? '').trim()
+
+  if (!zamestnanec) return { stav: 'chyba', text: 'Chybí, komu se PIN přiděluje.' }
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
+
+  // První obranná linie. Druhá je uvnitř průzoru, který si
+  // attendance.manage ověří na pobočce toho člověka.
+  const pristup = await zkusPristup(tenantId, 'attendance.manage', rozsah)
+  if (pristup.stav !== 'ok') {
+    return { stav: 'chyba', text: 'Přidělovat PIN nemáte oprávnění.' }
+  }
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('pridelit_pin', {
+    p_tenant: tenantId,
+    p_employee: zamestnanec,
+    p_pin: pin === '' ? null : pin,
+  })
+
+  if (error) return { stav: 'chyba', text: error.message }
+  if (!data) return { stav: 'chyba', text: 'PIN se nepodařilo nastavit.' }
+
+  revalidatePath(`/${rozsah}/nastaveni/lide`)
+  return { stav: 'hotovo', pin: String(data), jmeno }
+}
+
+export async function zrusitPin(
+  _predchozi: StavPinu,
+  formData: FormData,
+): Promise<StavPinu> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zamestnanec = String(formData.get('zamestnanec') ?? '')
+
+  if (!zamestnanec) return { stav: 'chyba', text: 'Chybí, komu se PIN ruší.' }
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('zrusit_pin', {
+    p_tenant: tenantId,
+    p_employee: zamestnanec,
+  })
+
+  if (error) return { stav: 'chyba', text: error.message }
+
+  revalidatePath(`/${rozsah}/nastaveni/lide`)
+  revalidatePath('/moje-udaje')
+  return { stav: 'zruseno' }
+}

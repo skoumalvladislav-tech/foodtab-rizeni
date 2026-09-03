@@ -196,3 +196,41 @@ export async function prepnoutEmailyUpozorneni(formData: FormData): Promise<void
   revalidatePath('/moje-udaje')
   redirect('/moje-udaje?ulozeno=emaily')
 }
+
+/**
+ * Zrušení vlastního PINu.
+ *
+ * Zadání docs/pin-prideleni-zadani.md, oddíl 2: „PIN máte nastavený ·
+ * Změnit · Zrušit“. Vlastní klíč si člověk zrušit smí — stejně si ho
+ * může kdykoli přenastavit. Cizí zůstává na attendance.manage a hlídá
+ * to `zrusit_pin`, ne tahle akce.
+ */
+export async function zrusitMujPin(): Promise<void> {
+  const ja = await kdo()
+  if (!ja) redirect('/')
+
+  const supabase = await getServerSupabase()
+
+  // Vlastní zaměstnanecký záznam. Cizí id se sem nedostane ani omylem:
+  // nebere se z formuláře, hledá se podle přihlášeného účtu.
+  const { data: muj } = await supabase
+    .from('employees')
+    .select('id')
+    .eq('tenant_id', ja.tenantId)
+    .eq('user_id', ja.userId)
+    .maybeSingle()
+
+  if (!muj) redirect('/moje-udaje')
+
+  const { error } = await supabase.rpc('zrusit_pin', {
+    p_tenant: ja.tenantId,
+    p_employee: (muj as { id: string }).id,
+  })
+
+  if (error) {
+    redirect(`/moje-udaje?chyba=pin&text=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath('/moje-udaje')
+  redirect('/moje-udaje?ulozeno=pin-zrusen')
+}
