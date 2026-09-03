@@ -54,6 +54,9 @@ export const PERMISSIONS = [
   'tasks.manage',
   'communication.read',
   'communication.manage',
+  // Samostatné, ne součást `manage`: spravovat nástěnku a rozsvítit ve
+  // dvě ráno telefon dvanácti lidem jsou dvě různé pravomoci.
+  'communication.urgent',
   'recipes.read',
   'recipes.manage',
   'menus.read',
