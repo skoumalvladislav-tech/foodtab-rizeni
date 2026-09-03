@@ -309,4 +309,59 @@ reset role;
 
 
 \echo ''
+\echo '== 11. Svůj PIN si člověk zruší sám ======================'
+
+-- Moje údaje nabízejí „Zrušit“. Kdyby `zrusit_pin` chtěla
+-- `attendance.manage`, tlačítko by tam bylo a nefungovalo — číšník
+-- svůj vlastní PIN spravovat smí, cizí ne.
+
+set role authenticated;
+select set_config('test.user_id', :'marek', false);
+
+select pg_temp.check('než se zruší, PIN Marek má',
+  (select count(*) from public.employee_pins where employee_id = :'e_marek') = 1);
+
+select public.zrusit_pin(:'tenant', :'e_marek');
+
+select pg_temp.check('po zrušení už žádný nemá',
+  (select count(*) from public.employee_pins where employee_id = :'e_marek') = 0);
+
+-- Cizí PIN si ale nezruší.
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.zrusit_pin(
+      current_setting('test.tenant')::uuid,
+      current_setting('test.e_briga')::uuid);
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: číšník zrušil cizí PIN'; end if;
+  raise notice '  OK    cizí PIN nezruší';
+end $$;
+
+reset role;
+
+-- Správa docházky cizí PIN zrušit smí — bez toho by se odcházejícímu
+-- brigádníkovi nedal odebrat přístup ke kiosku.
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+
+select public.zrusit_pin(:'tenant', :'e_briga');
+
+select pg_temp.check('kdo spravuje docházku, cizí PIN zruší',
+  (select count(*) from public.employee_pins where employee_id = :'e_briga') = 0);
+
+reset role;
+
+-- `app.pin_overit` je vnitřní a `authenticated` na ni grant nemá —
+-- kiosek chodí přes `pichnout_pinem`. Proto se ptáme až tady, mimo
+-- roli; ověřuje se stav dat, ne kdo se smí ptát.
+select pg_temp.check('zrušeným PINem se pak nikdo neidentifikuje',
+  app.pin_overit(:'tenant', :'perla', '5296') is null);
+
+select pg_temp.check('a tím ani tím druhým',
+  app.pin_overit(:'tenant', :'perla', '4713') is null);
+
+\echo ''
 \echo '== KROK 19 HOTOV ========================================='
