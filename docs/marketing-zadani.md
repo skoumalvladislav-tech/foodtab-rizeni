@@ -11,7 +11,32 @@ Modul `marketing` a jeho tři oprávnění (`marketing.read`, `marketing.manage`
 — založené hned na začátku (etapa 0), ale zatím nezastavěné žádnou obrazovkou
 ani tabulkou. Tenhle dokument navrhuje, co do nich patří.
 
+> **Šéfík tenhle návrh 3. 9. 2026 schválil ("ok to sedí, tak se do toho
+> pusť").** První krok z oddílu 7 je hotový v kódu:
+>
+> - `supabase/migrations/20260903040000_marketing_tabulky.sql` — pět tabulek
+>   (`marketing_settings`, `marketing_integrations`, `marketing_photos`,
+>   `marketing_templates`, `marketing_posts`), každá s `tenant_id` a RLS.
+>   Oddíl 4 navrhoval `marketing_photo_sources` jako samostatnou tabulku
+>   vedle `marketing_integrations` z oddílu 8.3 — migrace je nezakládá obě,
+>   protože by řešily totéž; `marketing_integrations` dělá práci obecněji
+>   (viz komentář v hlavičce migrace).
+> - `app/[rozsah]/marketing/page.tsx` — prázdná obrazovka podle vzoru
+>   `menu/page.tsx`, kontroluje `marketing.read`. Položka v `nabidka.ts`
+>   přepnutá na `hotovo: true`.
+> - `supabase/tests/krok18_scenar.sql` — scénář: pravidlo 5 (vypnutý modul
+>   odmítne i přímé volání), a hlavně že **`marketing.publish` je jediné
+>   oprávnění, které smí posunout příspěvek do `publikovano`** — ověřeno
+>   vlastní rolí jen s `marketing.manage`, které to spoušť databáze odmítne.
+>
+> **Migrace ještě NENÍ nasazená** — Claude nemá na tomhle počítači k
+> dispozici shell, takže `supabase db push` a `supabase/tests/run.sh` musí
+> spustit Šéfík (nebo Code) ručně. Skutečné navrhování a publikování
+> příspěvků (bod 7, krok 4 — REST API pro n8n) zůstává samostatný,
+> pozdější krok.
+
 ---
+
 
 ## 1. Co ten modul je a co není
 
@@ -227,3 +252,105 @@ místo, na které se dá stavět dál, ne rovnou celá funkce:
 
 Nic z bodu 7 jsem ještě nenapsal do kódu ani do migrace — čekám na to,
 až tenhle návrh (hlavně body 4–6) projdeš a řekneš, co sedí a co ne.
+
+---
+
+## 8. Obecný přístup: zaměnitelné integrace, ne natvrdo zadrátované nástroje
+
+Doplněno 3. 9. 2026 na Šéfíkovu žádost — prošel jsem web (podobné produkty,
+API pro sociální sítě, API pro grafiku) a promyslel, jak modul postavit
+tak, aby fungoval pro každého zákazníka od nuly, bez ohledu na to, jaké
+nástroje už má (Canva/nic, OneDrive/Google Drive/nic).
+
+### 8.1 Co jsem zjistil na trhu
+
+Podobné produkty existují a potvrzují směr, který už tenhle návrh má:
+
+- **[PostMyPlatter](https://postmyplatter.com/)** — nejbližší přímé srovnání.
+  Restaurace nahraje fotku jídla, vybere šablonu a barevnou paletu, doplní
+  název/cenu, AI dopíše popisek. Přesně princip „brand-agnostic šablona +
+  data zákazníka" z bodu 3 tohoto návrhu. Placené ($10–15/měsíc), branding
+  (logo, název, adresa, telefon) je předvyplněný z účtu — tj. jsou to data
+  firmy, ne konstanty, stejně jako navrhuju v bodě 3.
+- **[Malou](https://www.malou.io/)** — širší francouzská platforma pro
+  marketing/reputaci restaurací, řeší i automatizaci příspěvků. Zajímavá
+  jako inspirace pro rozsah (víc než jen denní příspěvek), ne jako přímý
+  vzor pro tuhle první verzi.
+- **Popmenu, Apaya a podobné** — širší „udělej to za mě" platformy, často
+  za cenu ztráty kontroly nad vzhledem/tónem (viz zjištění z dřívějšího
+  výzkumu v projektu — prodejně uzavřené, netransparentní ceny). Přesně
+  proti tomu, co Šéfík chce („chci mít vliv na vzhled a výstupy").
+
+Žádný z nich neřeší vícenájemnost (jeden dodavatel, mnoho různě vybavených
+zákazníků) — jsou to buď nástroje pro JEDNU restauraci, nebo agenturní
+nástroje s ručním nastavením pro každého klienta zvlášť. To je přesně
+mezera, do které Foodtab modul Marketing míří.
+
+### 8.2 Princip: kategorie integrace, ne konkrétní nástroj
+
+Aby platilo „data jdou od nuly, každý zákazník má jiné vstupy", nesmí se
+nikam v kódu ani v datovém modelu objevit natvrdo „OneDrive" nebo „Canva".
+Místo toho každá potřeba modulu je **kategorie**, pro kterou existuje jeden
+vestavěný Foodtab výchozí způsob (funguje pro každého, nulové nastavení) a
+volitelně jeden nebo víc **konektorů** — pro zákazníky, kteří chtějí použít
+to, co už mají.
+
+| Kategorie | Vestavěný výchozí způsob (funguje vždy) | Volitelný konektor (zapíná si zákazník sám) |
+|---|---|---|
+| **Zdroj menu** | Ruční/AI-asistovaný vstup v appce, nebo přímo `Jídelní lístky` (bod 1) | Scraping konkrétního webu — jen jako přechodné řešení |
+| **Fotky** | Nahrání přímo v appce (mobil, fotoaparát/galerie) — stejně jako to dělá PostMyPlatter | OneDrive, Google Drive, Dropbox, WhatsApp — automatický import do stejného trvalého úložiště |
+| **Vzhled/branding** | Barvy, font, logo zadané v appce (color picker, upload) | Canva jako READ-ONLY vizuální reference pro člověka, který šablony navrhuje — nikdy runtime závislost (potvrzeno: Canva API neumí automatický render, viz bod 0 z 3. 9.) |
+| **Vykreslení grafiky** | Interní volba Foodtabu (dnes Bannerbear) — zákazník o tom vůbec neví | — (tohle NENÍ zákaznický konektor, je to Foodtabova infrastruktura, viz 8.3) |
+| **Publikování na sítě** | Sjednocené API (viz 8.4) — funguje pro každého bez čekání na schválení od Meta | Přímé napojení vlastním Meta/TikTok/Google účtem vývojáře — later, až bude objem |
+| **Text/AI obsah** | Interní volba Foodtabu (dnes OpenAI) — zákazník o tom neví | — (totéž jako vykreslení, Foodtabova infrastruktura) |
+
+Poslední dva řádky jsou důležité rozlišení: **ne všechno je zákaznický
+konektor.** Vykreslení grafiky a AI generování textu jsou věci, které
+zákazník nevidí a nevybírá — Foodtab je může kdykoliv v budoucnu vyměnit
+(dnešní Bannerbear za HTML/CSS renderer, dnešní OpenAI za jiný model),
+aniž by se cokoliv u zákazníka změnilo. Naopak fotky, branding a sociální
+účty jsou VŽDY zákazníkova data/identita — tam nejde vybrat za něj.
+
+### 8.3 Praktický dopad na datový model (rozšíření bodu 4)
+
+Jedna nová tabulka navíc k bodu 4: `marketing_integrations` (nebo obecněji
+`tenant_integrations`, pokud by se to mělo hodit i jiným modulům) — řádek
+na firmu + kategorii (`fotky`, `zdroj_menu`, `socialni_site`), typ
+zvoleného konektoru (`nativni`, `onedrive`, `google_drive`, ...) a
+přístupové údaje jako otisk (pravidlo 7). Kód se na konkrétní konektor ptá
+přes jedno rozhraní („dej mi novou fotku ze zdroje firmy X") — přidání
+podpory pro Dropbox pak znamená napsat jeden nový adaptér podle existujícího
+tvaru, ne přepisovat zbytek modulu. Přesně stejný princip, jaký `CLAUDE.md`
+už vyžaduje pro přístupová práva („o přístupu rozhoduje jediné místo") —
+tady jde o zdroj dat, princip je stejný.
+
+### 8.4 Publikování na sítě — proč nejít hned napřímo na Meta
+
+Zjištění, které mění doporučení oproti mému prvnímu návrhu (bod 5): přímé
+napojení na Instagram/Facebook Graph API (jak to dnes dělá Černá Perla)
+funguje pro JEDNOHO zákazníka snadno, ale pro víc different-firem najednou
+vyžaduje, aby Foodtab prošel Metovým **App Review na „Advanced Access"**
+— ověření firmy, zveřejněné zásady ochrany údajů, adresu pro smazání dat,
+zdůvodnění každého oprávnění a ukázkové video pro každé z nich. Není to
+nepřekonatelné, ale je to jednorázová administrativní zátěž navíc k vývoji.
+
+**Doporučení pro první verzi: použít sjednocené API pro publikování
+(např. [Ayrshare](https://www.ayrshare.com/) — cílené přímo na „multi-tenant
+products", řeší OAuth, obnovu tokenů i oddělení nájemců za vás, pokrývá
+Instagram, Facebook, TikTok, Google Business Profile a další jedním
+rozhraním).** Je to placená služba (řádově desítky dolarů/měsíc + podle
+objemu), ale ušetří přesně tu administrativní zátěž a zrychlí start na
+druhém a třetím zákazníkovi. Vlastní přímé napojení (a tedy i vlastní
+Metovo schválení) dává smysl až ve chvíli, kdy poplatky za zprostředkování
+překročí náklad na to schválení si udělat sám — to je otázka objemu
+zákazníků, ne architektury, a dá se to vyměnit později za stejným principem
+jako u fotek/renderu (kategorie s vyměnitelným poskytovatelem).
+
+### 8.5 Co to znamená pro bod 7 (první krok)
+
+Bod 7.4 („první REST API endpoint pro n8n") bych doplnil o krok 7.5:
+**vyzkoušet Ayrshare (nebo ekvivalent) na testovacím Instagram účtu ještě
+předtím, než se cokoliv staví v appce** — je to nejrizikovější neznámá
+(cena, podporované funkce, spolehlivost) a je levné si to ověřit dřív, než
+na tom závisí datový model `marketing_integrations`.
+

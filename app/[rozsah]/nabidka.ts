@@ -92,7 +92,10 @@ export const NABIDKA: Polozka[] = [
   // modulem, jak žádá pravidlo 5.
   { segment: 'menu', nazev: 'Tvorba menu', kratky: 'Menu', modul: 'menu', pravo: 'menu_ai.use', hotovo: true, ikona: 'kniha' },
   { segment: 'finance', nazev: 'Přehled financí', kratky: 'Finance', modul: 'finance', pravo: 'finance.read', hotovo: false, ikona: 'kniha' },
-  { segment: 'marketing', nazev: 'Marketing', kratky: 'Marketing', modul: 'marketing', pravo: 'marketing.read', hotovo: false, ikona: 'kniha' },
+  // Obrazovka zatím jen říká, že se modul připravuje (stejný důvod jako
+  // u Tvorby menu výše) — proto hotovo: true, i když navrhování a
+  // publikování příspěvků ještě neumí nic.
+  { segment: 'marketing', nazev: 'Marketing', kratky: 'Marketing', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
 ]
 

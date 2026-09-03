@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
@@ -161,9 +162,69 @@ export default async function Rozpis({
     for (const c of p ?? []) pozice.set(c.id as string, c.label as string);
   }
 
-  /* --- 3. VYKRESLENÍ -------------------------------------------- */
+  /* --- 3. ZADÁVÁNÍ ---------------------------------------------- */
 
-  if (smeny.length === 0) {
+  /*
+    Pobočky, na kterých ten člověk smí plánovat. Rozhoduje se podle
+    práva, ne podle rozsahu z adresy — pobočka z prohlížeče je návrh
+    (pravidlo 4) a databáze si to stejně ověří znovu.
+  */
+  const pobockyProPlanovani = (
+    await Promise.all(
+      ctx.branches.map(async (b) =>
+        (await hasAccess(tenantId, "shifts.manage", b.id))
+          ? { id: b.id, nazev: b.name }
+          : null,
+      ),
+    )
+  ).filter((b): b is { id: string; nazev: string } => b !== null);
+
+  let planovani = null;
+  if (pobockyProPlanovani.length > 0) {
+    /*
+      Lidé do nabídky „Kdo“: všichni zaměstnanci firmy, ne jen ti
+      z jedné pobočky. Kdo vypomáhá jinde, se do rozpisu dostat musí —
+      a že člověk patří do téhle firmy, si ověří sama funkce v databázi.
+    */
+    const { data: lideData, error: chybaLide2 } = await supabase
+      .from("employees")
+      .select("id, full_name")
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null)
+      .order("full_name");
+    if (chybaLide2) throw new DotazSelhal("zaměstnanci", chybaLide2);
+
+    const { data: poziceData } = await supabase
+      .from("positions")
+      .select("id, label")
+      .eq("tenant_id", tenantId)
+      .eq("active", true)
+      .order("label");
+
+    planovani = {
+      rozsah,
+      pobocky: pobockyProPlanovani,
+      vychoziPobocka:
+        scope.branchId ?? (pobockyProPlanovani[0]?.id ?? null),
+      lide: (lideData ?? []).map((c) => ({
+        id: c.id as string,
+        jmeno: c.full_name as string,
+      })),
+      pozice: (poziceData ?? []).map((p) => ({
+        id: p.id as string,
+        label: p.label as string,
+      })),
+    };
+  }
+
+  /* --- 4. VYKRESLENÍ -------------------------------------------- */
+
+  /*
+    Prázdný rozpis se hlásí jen tomu, kdo s tím stejně nic neudělá.
+    Kdo plánovat smí, potřebuje kalendář — právě do prázdného týdne
+    se směny zadávají a hláška místo něj by ho o to připravila.
+  */
+  if (smeny.length === 0 && !planovani) {
     return (
       <Sdeleni nadpis="Na příští týden není nic naplánováno">
         {scope.level === "branch"
@@ -211,6 +272,7 @@ export default async function Rozpis({
           branchId: scope.branchId ?? null,
           branchName: scope.branchName ?? null,
         }}
+        planovani={planovani}
       />
     </>
   );

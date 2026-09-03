@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { pocet } from "@/lib/sklonovani";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
@@ -19,7 +19,27 @@ function posunMesic(datum: string, mesicu: number): string {
   return posunuty.toISOString().slice(0, 10);
 }
 
+import FormularSmeny, { type SmenaKUprave } from "./formular-smeny";
+
 type Pohled = "mesic" | "tyden" | "den";
+
+/**
+ * Co obrazovka potřebuje, aby šlo směnu založit.
+ *
+ * `null` znamená „tenhle člověk plánovat nesmí“ — pak se tlačítka
+ * nekreslí. Zámek to není: rozhoduje `shifts.manage` v databázi,
+ * tady jde jen o to, aby se nenabízelo, co stejně neprojde.
+ */
+export type Planovani = {
+  rozsah: string;
+  pobocky: { id: string; nazev: string }[];
+  vychoziPobocka: string | null;
+  lide: { id: string; jmeno: string }[];
+  pozice: { id: string; label: string }[];
+};
+
+/** Které okno je otevřené. `smena` prázdná = nová. */
+type Otevrene = { den: string; smena: SmenaKUprave | null };
 
 /** Volby přepínače nahoře. Pořadí od nejširšího po nejužší. */
 const POHLEDY: [Pohled, string][] = [
@@ -64,8 +84,10 @@ export default function RozpisView({
   pozice,
   nazvyPobocek,
   rozsah,
-}: Props) {
+  planovani,
+}: Props & { planovani: Planovani | null }) {
   const router = useRouter();
+  const [otevrene, setOtevrene] = useState<Otevrene | null>(null);
   const searchParams = useSearchParams();
 
   // Přečíst z URL nebo použít výchozí
@@ -169,6 +191,8 @@ export default function RozpisView({
           pozice={pozice}
           nazvyPobocek={nazvyPobocek}
           rozsah={rozsah}
+          planovani={planovani}
+          onOtevrit={setOtevrene}
         />
       )}
 
@@ -190,8 +214,35 @@ export default function RozpisView({
           pozice={pozice}
           nazvyPobocek={nazvyPobocek}
           rozsah={rozsah}
+          planovani={planovani}
+          onOtevrit={setOtevrene}
         />
       )}
+
+      {/*
+        V měsíčním pohledu se nezakládá schválně (zadání, bod 2): do dne
+        se tam neklikne přesně a člověk by směnu zapsal o den vedle.
+      */}
+
+      {planovani && otevrene ? (
+        <FormularSmeny
+          /*
+            key podle toho, co se otevřelo. defaultValue se uplatní jen
+            při prvním připojení — kdyby se okno znovupoužilo pro jinou
+            směnu, zůstaly by v něm časy té předchozí. Přesně tak se
+            2. 9. předvyplňoval odchod jako příchod.
+          */
+          key={otevrene.smena?.id || `nova-${otevrene.den}`}
+          rozsah={planovani.rozsah}
+          den={otevrene.den}
+          smena={otevrene.smena}
+          pobocky={planovani.pobocky}
+          vychoziPobocka={planovani.vychoziPobocka}
+          lide={planovani.lide}
+          pozice={planovani.pozice}
+          onZavrit={() => setOtevrene(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -203,6 +254,8 @@ function TydenView({
   pozice,
   nazvyPobocek,
   rozsah,
+  planovani,
+  onOtevrit,
 }: {
   dny: Map<string, Smena[]>;
   dnesni: string;
@@ -210,6 +263,8 @@ function TydenView({
   pozice: Map<string, string>;
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
+  planovani: Planovani | null;
+  onOtevrit: (co: Otevrene) => void;
 }) {
   // Seřadit dny
   const dnySerad = [...dny.keys()].sort();
@@ -311,31 +366,58 @@ function TydenView({
                               : "transparent",
                       }}
                     >
-                      {smenyDne.length > 0 && (
-                        <div
-                          style={{
-                            display: "grid",
-                            gap: "4px",
-                          }}
-                        >
-                          {smenyDne.map((s) => (
-                            <div
+                      <div style={{ display: "grid", gap: "4px" }}>
+                        {smenyDne.map((s) =>
+                          planovani ? (
+                            <button
                               key={s.id}
-                              style={{
-                                fontSize: "11px",
-                                padding: "4px 6px",
-                                background: "var(--sunken)",
-                                border: "1px solid var(--line-2)",
-                                borderRadius: "4px",
-                                color: "var(--ink)",
-                                fontVariantNumeric: "tabular-nums",
-                              }}
+                              type="button"
+                              onClick={() => onOtevrit({ den: datum, smena: s })}
+                              style={chipTlacitko}
+                              title="Upravit směnu"
                             >
                               {hodina(s.starts_at)}–{hodina(s.ends_at)}
+                            </button>
+                          ) : (
+                            <div key={s.id} style={chip}>
+                              {hodina(s.starts_at)}–{hodina(s.ends_at)}
                             </div>
-                          ))}
-                        </div>
-                      )}
+                          ),
+                        )}
+
+                        {/*
+                          Prázdné políčko je taky místo, kam se dá
+                          kliknout — člověk i den už jsou dané, takže
+                          formulář se otevře skoro vyplněný. Křížek je
+                          bledý schválně: nemá přebít rozpis samotný.
+                        */}
+                        {planovani ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOtevrit({
+                                den: datum,
+                                smena: osoba
+                                  ? ({
+                                      id: "",
+                                      branch_id: planovani.vychoziPobocka ?? "",
+                                      employee_id: osoba,
+                                      position_id: null,
+                                      shift_date: datum,
+                                      starts_at: "08:00",
+                                      ends_at: "16:00",
+                                      note: "",
+                                    } as SmenaKUprave)
+                                  : null,
+                              })
+                            }
+                            style={pridatTlacitko}
+                            aria-label={`Přidat směnu ${datum}`}
+                          >
+                            +
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   );
                 })}
@@ -405,6 +487,8 @@ function DenView({
   pozice,
   nazvyPobocek,
   rozsah,
+  planovani,
+  onOtevrit,
 }: {
   smeny: Smena[];
   den: string;
@@ -414,6 +498,8 @@ function DenView({
   pozice: Map<string, string>;
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
+  planovani: Planovani | null;
+  onOtevrit: (co: Otevrene) => void;
 }) {
   // Smeny na daný den
   const smenySeDnem = smeny.filter((s) => s.shift_date === den);
@@ -480,6 +566,18 @@ function DenView({
 
   return (
     <div style={{ display: "grid", gap: "0px" }}>
+      {planovani ? (
+        <div style={{ marginBottom: "12px" }}>
+          <button
+            type="button"
+            onClick={() => onOtevrit({ den, smena: null })}
+            className="ft-tl ft-tl-hlavni ft-tl-male"
+          >
+            + Přidat směnu
+          </button>
+        </div>
+      ) : null}
+
       {/* Záhlaví — časová osa */}
       <div style={{ display: "flex", height: "32px", borderBottom: "1px solid var(--line)", position: "sticky", top: 0, background: "var(--card)", zIndex: 5 }}>
         <div style={{ width: "80px", flexShrink: 0, padding: "4px", fontSize: "11px", fontWeight: 600 }}>Čas</div>
@@ -527,10 +625,10 @@ function DenView({
                 {jmeno}
               </div>
               <div style={{ flex: 1, position: "relative", minWidth: "1200px" }}>
-                {/* Pruh směny */}
-                <div
-                  style={{
-                    position: "absolute",
+                {/* Pruh směny. Kdo smí plánovat, může na něj kliknout. */}
+                {(() => {
+                  const styl = {
+                    position: "absolute" as const,
                     left: `${left}px`,
                     top: "8px",
                     width: `${width}px`,
@@ -543,13 +641,24 @@ function DenView({
                     padding: "0 4px",
                     fontSize: "11px",
                     color: obsazena ? "var(--branch)" : "var(--pozor)",
-                    whiteSpace: "nowrap",
+                    whiteSpace: "nowrap" as const,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
-                  }}
-                >
-                  {hodina(s.starts_at)}–{hodina(s.ends_at)}
-                </div>
+                  };
+                  const obsah = `${hodina(s.starts_at)}–${hodina(s.ends_at)}`;
+                  return planovani ? (
+                    <button
+                      type="button"
+                      onClick={() => onOtevrit({ den, smena: s })}
+                      style={{ ...styl, cursor: "pointer", font: "inherit", fontSize: "11px" }}
+                      title="Upravit směnu"
+                    >
+                      {obsah}
+                    </button>
+                  ) : (
+                    <div style={styl}>{obsah}</div>
+                  );
+                })()}
               </div>
             </div>
           );
@@ -788,3 +897,39 @@ function popisDne(datum: string, dnesni: string): string {
   const den = DNY[d.getUTCDay()];
   return `${den.charAt(0).toUpperCase()}${den.slice(1)} · ${cislo}`;
 }
+
+/* --- styly zadávání ------------------------------------------------ */
+
+const chip = {
+  fontSize: "11px",
+  padding: "4px 6px",
+  background: "var(--sunken)",
+  border: "1px solid var(--line-2)",
+  borderRadius: "4px",
+  color: "var(--ink)",
+  fontVariantNumeric: "tabular-nums" as const,
+} as const;
+
+const chipTlacitko = {
+  ...chip,
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: "11px",
+  width: "100%",
+} as const;
+
+/*
+  Bledý křížek. Je v každém prázdném políčku, takže nesmí přebít
+  samotný rozpis — teprve po najetí ztmavne.
+*/
+const pridatTlacitko = {
+  fontSize: "13px",
+  lineHeight: 1,
+  padding: "3px 6px",
+  background: "transparent",
+  border: "1px dashed var(--line-2)",
+  borderRadius: "4px",
+  color: "var(--muted)",
+  cursor: "pointer",
+  opacity: 0.55,
+} as const;
