@@ -10,6 +10,7 @@ import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
 import PanelVydani from "./panel-vydani";
 import RozpisView from "./rozpis";
+import { nabidnoutSablony } from "./sablony";
 
 export const dynamic = "force-dynamic";
 
@@ -201,11 +202,26 @@ export default async function Rozpis({
       .eq("active", true)
       .order("label");
 
+    const vychoziPobocka =
+      scope.branchId ?? (pobockyProPlanovani[0]?.id ?? null);
+
+    /*
+      Šablony pro tu pobočku, se kterou se okno otevře. Formulář si je
+      po přepnutí pobočky nebo pozice dotáhne znovu; tohle je jen proto,
+      aby nabídka stála hned a neproblikla prázdná.
+
+      Bez `await` na výsledku by se nedalo poznat, jestli je prázdná
+      proto, že firma šablony nemá, nebo proto, že se dotaz nestihl.
+    */
+    const sablony = vychoziPobocka
+      ? await nabidnoutSablony(rozsah, vychoziPobocka, null)
+      : [];
+
     planovani = {
       rozsah,
       pobocky: pobockyProPlanovani,
-      vychoziPobocka:
-        scope.branchId ?? (pobockyProPlanovani[0]?.id ?? null),
+      vychoziPobocka,
+      sablony,
       lide: (lideData ?? []).map((c) => ({
         id: c.id as string,
         jmeno: c.full_name as string,

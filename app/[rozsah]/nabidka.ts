@@ -113,6 +113,11 @@ export const NASTAVENI: Polozka[] = [
   // Pozice patří ke správě lidí, ne k nastavení firmy — proto
   // people.manage, ne settings.manage.
   { segment: 'nastaveni/pozice', nazev: 'Pozice', kratky: 'Pozice', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
+  // Šablony směn — pojmenované směny s časy (D, N, R). Je to nastavení
+  // provozu, ne správa lidí, proto settings.manage. Vidět je má i ten,
+  // kdo plánuje směny, ale měnit je smí správa nastavení; kdo jen
+  // plánuje, dostane šablony rovnou v nabídce ve formuláři směny.
+  { segment: 'nastaveni/sablony', nazev: 'Šablony směn', kratky: 'Šablony', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kalendar' },
   // Segment zůstává `role` podle tabulky v databázi; mění se jen to, co
   // je vidět. Zkrácený název je taky „Oprávnění“ — „Práva“ by znamenala
   // jednotlivá zaškrtávátka, ne pojmenovanou sadu.

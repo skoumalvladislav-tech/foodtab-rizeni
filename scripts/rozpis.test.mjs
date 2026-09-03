@@ -53,15 +53,30 @@ const ODKAZ =
       '}\n',
   )
 
+/*
+  Nabídka šablon se sem podstrkuje prázdná. Tenhle soubor je o rozpisu
+  a o formuláři směny; co která šablona nabídne, ověřuje sablony.test.mjs.
+
+  Musí to stát u OBOU načtení, i u rozpisu. Rozpis si formulář natáhne
+  rekurzivně a náhrady se předávají dál — kdyby je tady rozpis neměl,
+  natáhl by se přes formulář skutečný modul se serverovou akcí a s ním
+  půl aplikace.
+*/
+const SABLONY_AKCE =
+  'data:text/javascript,' +
+  encodeURIComponent('export async function nabidnoutSablony() { return [] }')
+
 const RozpisView = await nactiKomponentu('app/[rozsah]/smeny/rozpis.tsx', [
   ['next/navigation', NAVIGACE],
   ['next/link', ODKAZ],
   ['./smena', AKCE],
+  ['./sablony', SABLONY_AKCE],
 ])
 
 const FormularSmeny = await nactiKomponentu('app/[rozsah]/smeny/formular-smeny.tsx', [
   ['next/navigation', NAVIGACE],
   ['./smena', AKCE],
+  ['./sablony', SABLONY_AKCE],
 ])
 
 /* --- data ------------------------------------------------------------ */
@@ -97,6 +112,7 @@ const PLANOVANI = {
   vychoziPobocka: 'b1',
   lide: [{ id: 'e1', jmeno: 'Láďa' }],
   pozice: [{ id: 'p1', label: 'Kuchař' }],
+  sablony: [],
 }
 
 function rozpis(planovani) {
@@ -157,6 +173,7 @@ function formular(smena) {
       vychoziPobocka: 'b1',
       lide: PLANOVANI.lide,
       pozice: PLANOVANI.pozice,
+      sablony: PLANOVANI.sablony,
       onZavrit: () => {},
     }),
   )

@@ -102,14 +102,43 @@ create index if not exists sablony_smen_firma
 
 alter table public.sablony_smen enable row level security;
 
+/*
+  Čte, kdo plánuje směny — a taky kdo spravuje nastavení.
+
+  Ta druhá půlka není navíc: obrazovku Nastavení → Šablony otevírá
+  `settings.manage`, a kdyby řádky pouštělo jen `shifts.read`, viděl by
+  účetní se správou nastavení a bez rozpisu prázdný seznam. Prázdný
+  seznam vypadá jako „firma nemá šablony“, ne jako „na tyhle nevidíš“ —
+  a takovou chybu nikdo nenahlásí, jen podle ní jedná.
+*/
 drop policy if exists sablony_smen_read on public.sablony_smen;
 create policy sablony_smen_read on public.sablony_smen for select to authenticated
-  using (app.can_read_scoped(tenant_id, 'shifts.read', branch_id));
+  using (
+    app.can_read_scoped(tenant_id, 'shifts.read', branch_id)
+    or app.has_access(tenant_id, 'settings.manage', branch_id)
+  );
 
 drop policy if exists sablony_smen_write on public.sablony_smen;
 create policy sablony_smen_write on public.sablony_smen for all to authenticated
   using (app.has_access(tenant_id, 'settings.manage', branch_id))
   with check (app.has_access(tenant_id, 'settings.manage', branch_id));
+
+/*
+  RLS SAMA O SOBĚ NESTAČÍ.
+
+  Politika říká, KTERÉ řádky člověk uvidí. Jestli se na tabulku vůbec
+  smí podívat, říká grant — a bez něj dostane „permission denied for
+  table“ dřív, než se politika stihne zeptat. Zjistilo se to tím, že
+  scénář sáhl na tabulku pod rolí `authenticated` a spadl; obrazovka
+  Nastavení → Šablony na ni sahá přesně tak.
+
+  Čte se přímo (správa potřebuje i vyřazené šablony, které nabídková
+  funkce nevrací), ale PÍŠE se jen přes `ulozit_sablonu`
+  a `prepnout_sablonu`. Ty jsou `security definer` a grant na zápis
+  nepotřebují — proto ho tabulka nedostane. Zápisová politika výš
+  zůstává jako druhá pojistka pro případ, že by grant někdy přibyl.
+*/
+grant select on public.sablony_smen to authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -196,22 +225,38 @@ returns table (
 )
 language sql stable security definer set search_path = ''
 as $$
-  select distinct on (lower(btrim(t.key)))
-    t.id,
-    btrim(t.key),
-    t.label,
-    t.starts_at,
-    t.ends_at,
-    app.delka_smeny_minut(t.starts_at, t.ends_at),
-    t.poradi
-  from public.sablony_smen t
-  where t.tenant_id = p_tenant
-    and t.active
-    and app.sablona_poradi(p_branch, p_position, t.branch_id, t.position_id) is not null
-    and app.can_read_scoped(p_tenant, 'shifts.read', t.branch_id)
-  order by
-    lower(btrim(t.key)),
-    app.sablona_poradi(p_branch, p_position, t.branch_id, t.position_id);
+  /*
+    Dvě seřazení, každé o něčem jiném.
+
+    To vnitřní vybírá: `distinct on` bere z každého klíče první řádek,
+    a aby to bral podle nejužšího pravidla, musí ORDER BY začínat tímtéž
+    klíčem. Jinak to Postgres nevezme.
+
+    To vnější řadí obrazovku. Nabídka má stát v pořadí, které si firma
+    nastavila — D, N, R —, ne podle abecedy: kdyby se nabízelo D, N, R
+    jako "D, N, R" jen náhodou, stačilo by přejmenovat na "V" a ranní
+    směna by skočila na konec.
+  */
+  select s.id, s.klic, s.label, s.starts_at, s.ends_at, s.minut, s.poradi
+  from (
+    select distinct on (lower(btrim(t.key)))
+      t.id,
+      btrim(t.key)                                   as klic,
+      t.label,
+      t.starts_at,
+      t.ends_at,
+      app.delka_smeny_minut(t.starts_at, t.ends_at)  as minut,
+      t.poradi
+    from public.sablony_smen t
+    where t.tenant_id = p_tenant
+      and t.active
+      and app.sablona_poradi(p_branch, p_position, t.branch_id, t.position_id) is not null
+      and app.can_read_scoped(p_tenant, 'shifts.read', t.branch_id)
+    order by
+      lower(btrim(t.key)),
+      app.sablona_poradi(p_branch, p_position, t.branch_id, t.position_id)
+  ) s
+  order by s.poradi, lower(s.klic);
 $$;
 
 comment on function public.sablony_pro_smenu(uuid, uuid, uuid) is
@@ -320,8 +365,19 @@ grant execute on function public.ulozit_sablonu(uuid, uuid, uuid, uuid, text, te
   to authenticated;
 
 
--- Zneplatnit, ne mazat: visí na tom historie a lidé tu zkratku znají.
-create or replace function public.zneplatnit_sablonu(p_tenant uuid, p_sablona uuid)
+/*
+  Vyřadit z nabídky, ne smazat: visí na tom historie a lidé tu zkratku
+  znají. Smazaná šablona by navíc uvolnila zkratku a někdo by pod
+  stejným "D" založil jiné časy.
+
+  Přepínač, ne jednosměrka. Vyřazení je běžný překlep — obrazovka
+  Pozice to má taky obousměrné a chovat se to má stejně.
+*/
+create or replace function public.prepnout_sablonu(
+  p_tenant  uuid,
+  p_sablona uuid,
+  p_active  boolean
+)
 returns void
 language plpgsql volatile security definer set search_path = ''
 as $$
@@ -340,12 +396,13 @@ begin
   end if;
 
   update public.sablony_smen
-     set active = false, updated_at = now()
+     set active = coalesce(p_active, false), updated_at = now()
    where id = p_sablona;
 
   perform app.audit(
     p_tenant      => p_tenant,
-    p_action      => 'sablona.zneplatnena',
+    p_action      => case when coalesce(p_active, false)
+                       then 'sablona.vracena' else 'sablona.vyrazena' end,
     p_entity_type => 'sablona_smeny',
     p_entity_id   => p_sablona::text,
     p_branch      => v_branch
@@ -353,8 +410,12 @@ begin
 end;
 $$;
 
-revoke all on function public.zneplatnit_sablonu(uuid, uuid) from public, anon;
-grant execute on function public.zneplatnit_sablonu(uuid, uuid) to authenticated;
+comment on function public.prepnout_sablonu(uuid, uuid, boolean) is
+  'Vyřadí šablonu z nabídky nebo ji vrátí. Na už zadané směny to '
+  'nemá vliv — ty si své časy drží.';
+
+revoke all on function public.prepnout_sablonu(uuid, uuid, boolean) from public, anon;
+grant execute on function public.prepnout_sablonu(uuid, uuid, boolean) to authenticated;
 
 
 -- ---------------------------------------------------------------------

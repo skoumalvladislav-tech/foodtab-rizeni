@@ -20,6 +20,9 @@ function posunMesic(datum: string, mesicu: number): string {
 }
 
 import FormularSmeny, { type SmenaKUprave } from "./formular-smeny";
+// `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
+// nespouští a serverová akce by se sem tahat neměla vůbec.
+import type { NabidnutaSablona } from "./sablony";
 
 type Pohled = "mesic" | "tyden" | "den";
 
@@ -36,6 +39,12 @@ export type Planovani = {
   vychoziPobocka: string | null;
   lide: { id: string; jmeno: string }[];
   pozice: { id: string; label: string }[];
+  /*
+    Šablony pro VÝCHOZÍ pobočku. Formulář si je po otevření dotáhne
+    znovu podle toho, co je zrovna vybrané — tohle je jen proto, aby
+    nabídka stála hned při prvním vykreslení a neprobliklo prázdno.
+  */
+  sablony: NabidnutaSablona[];
 };
 
 /** Které okno je otevřené. `smena` prázdná = nová. */
@@ -240,6 +249,7 @@ export default function RozpisView({
           vychoziPobocka={planovani.vychoziPobocka}
           lide={planovani.lide}
           pozice={planovani.pozice}
+          sablony={planovani.sablony}
           onZavrit={() => setOtevrene(null)}
         />
       ) : null}

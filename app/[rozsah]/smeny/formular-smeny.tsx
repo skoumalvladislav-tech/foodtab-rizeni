@@ -3,6 +3,9 @@
 import { useActionState, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { VETA_JEN_NOVE } from '@/lib/sablony-text'
+import { zkratkaDoSmeny } from '@/lib/sablony'
+import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
 import { ulozitSmenu, type StavSmeny } from './smena'
 
 export type SmenaKUprave = {
@@ -34,6 +37,17 @@ export type SmenaKUprave = {
  * Překryv a začátek před provozním dnem směnu nezakazují. Okno proto
  * po uložení nezmizí hned — nejdřív řekne, co se stalo, a zavře se až
  * kliknutím. Kdyby zmizelo, varování by nikdo nepřečetl.
+ *
+ * ---------------------------------------------------------------------
+ * ŠABLONA JEN PŘEDVYPLNÍ
+ *
+ * Výběr šablony nastaví časy a tím jeho práce končí. Pole zůstávají
+ * obyčejná — přepsat je jde hned, bez odklikávání a bez odemykání.
+ *
+ * Zkratka se do směny opíše jen tehdy, když časy pořád odpovídají té
+ * šabloně. Kdo je přepsal, uloží směnu bez zkratky: „D“ u směny od
+ * devíti do pěti by v rozpisu lhalo. Je to na obrazovce vidět, ne jen
+ * tady v komentáři.
  */
 export default function FormularSmeny({
   rozsah,
@@ -43,6 +57,7 @@ export default function FormularSmeny({
   vychoziPobocka,
   lide,
   pozice,
+  sablony: sablonyVychozi,
   onZavrit,
 }: {
   rozsah: string
@@ -54,6 +69,8 @@ export default function FormularSmeny({
   vychoziPobocka: string | null
   lide: { id: string; jmeno: string }[]
   pozice: { id: string; label: string }[]
+  /** Šablony pro výchozí pobočku, aby nabídka stála hned. */
+  sablony: NabidnutaSablona[]
   onZavrit: () => void
 }) {
   const router = useRouter()
@@ -62,6 +79,65 @@ export default function FormularSmeny({
   })
   const [zavreno, setZavreno] = useState(false)
   const prvni = useRef<HTMLSelectElement>(null)
+
+  /*
+    Pobočka a pozice řídí, které šablony platí, a časy se ze šablony
+    přepisují — proto jsou tahle čtyři pole řízená. Zbytek formuláře
+    zůstal neřízený; řídit se má jen to, co se má měnit samo.
+  */
+  const [pobocka, setPobocka] = useState(smena?.branch_id ?? vychoziPobocka ?? '')
+  const [vybranaPozice, setVybranaPozice] = useState(smena?.position_id ?? '')
+  const [od, setOd] = useState((smena?.starts_at ?? '08:00').slice(0, 5))
+  const [doKdy, setDoKdy] = useState((smena?.ends_at ?? '16:00').slice(0, 5))
+  const [sablony, setSablony] = useState<NabidnutaSablona[]>(sablonyVychozi)
+  const [klic, setKlic] = useState('')
+
+  /*
+    Nabídku dodává databáze, ne prohlížeč — které pravidlo vyhraje, ví
+    `app.sablona_poradi` a druhá kopie té úvahy v JavaScriptu by se
+    rozešla. Viz hlavičku ./sablony.
+
+    `zruseno` je proti přehození pořadí odpovědí: kdo přepne pobočku
+    dvakrát rychle po sobě, nesmí dostat nabídku k té první.
+  */
+  useEffect(() => {
+    let zruseno = false
+    /*
+      I „bez pobočky" jde přes Promise, ne přes rovnou `setSablony([])`.
+      Nastavit stav uprostřed efektu spustí další vykreslení hned —
+      a firma bez pobočky je stejně případ, který se sem nedostane
+      (rozpis ji dřív odmítne).
+    */
+    const nacti = pobocka
+      ? nabidnoutSablony(rozsah, pobocka, vybranaPozice || null)
+      : Promise.resolve([])
+
+    nacti
+      .then((s) => {
+        if (!zruseno) setSablony(s)
+      })
+      .catch(() => {
+        // Šablona je pohodlí, ne podmínka. Když se nabídka nenačte,
+        // časy se napíšou ručně a formulář funguje dál.
+        if (!zruseno) setSablony([])
+      })
+    return () => {
+      zruseno = true
+    }
+  }, [rozsah, pobocka, vybranaPozice])
+
+  // Odvozené, ne uložené — proč, viz hlavičku lib/sablony.
+  const klicDoSmeny = zkratkaDoSmeny(sablony, klic, od, doKdy)
+  const casySedi = klicDoSmeny !== ''
+
+  function vybratSablonu(k: string) {
+    setKlic(k)
+    const s = sablony.find((x) => x.klic === k)
+    if (s) {
+      setOd(s.od)
+      setDoKdy(s.do)
+    }
+  }
 
   // Po uložení se rozpis překreslí hned; okno zůstane kvůli varováním.
   useEffect(() => {
@@ -142,7 +218,12 @@ export default function FormularSmeny({
 
             <label style={poleLabel}>
               <span>Pozice</span>
-              <select name="pozice" defaultValue={smena?.position_id ?? ''} style={pole}>
+              <select
+                name="pozice"
+                value={vybranaPozice}
+                onChange={(e) => setVybranaPozice(e.target.value)}
+                style={pole}
+              >
                 <option value="">— bez pozice —</option>
                 {pozice.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -163,7 +244,8 @@ export default function FormularSmeny({
               <select
                 name="pobocka"
                 required
-                defaultValue={smena?.branch_id ?? vychoziPobocka ?? ''}
+                value={pobocka}
+                onChange={(e) => setPobocka(e.target.value)}
                 style={pole}
               >
                 {pobocky.map((b) => (
@@ -185,6 +267,38 @@ export default function FormularSmeny({
               />
             </label>
 
+            {/*
+              Šablona stojí těsně nad časy, které vyplňuje. Kdyby byla
+              nahoře u jména, nebylo by vidět, co vlastně udělala.
+            */}
+            {sablony.length > 0 ? (
+              <label style={poleLabel}>
+                <span>Šablona</span>
+                <select
+                  value={klic}
+                  onChange={(e) => vybratSablonu(e.target.value)}
+                  style={pole}
+                >
+                  <option value="">— vlastní časy —</option>
+                  {sablony.map((s) => (
+                    <option key={s.klic} value={s.klic}>
+                      {s.klic} · {s.label} · {s.od}–{s.do}
+                    </option>
+                  ))}
+                </select>
+                <span style={vysvetlivka}>
+                  Šablona jen vyplní časy. Přepsat je jde hned pod tím
+                  a směna si je pak drží vlastní — {VETA_JEN_NOVE}
+                </span>
+              </label>
+            ) : null}
+
+            {/*
+              Zkratka jde do směny jen tehdy, když časy pořád sedí.
+              Odvozené z časů, ne z toho, na co se klikalo.
+            */}
+            <input type="hidden" name="sablona" value={klicDoSmeny} />
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <label style={poleLabel}>
                 <span>Od</span>
@@ -192,7 +306,8 @@ export default function FormularSmeny({
                   name="od"
                   type="time"
                   required
-                  defaultValue={(smena?.starts_at ?? '08:00').slice(0, 5)}
+                  value={od}
+                  onChange={(e) => setOd(e.target.value)}
                   style={pole}
                 />
               </label>
@@ -202,11 +317,19 @@ export default function FormularSmeny({
                   name="do"
                   type="time"
                   required
-                  defaultValue={(smena?.ends_at ?? '16:00').slice(0, 5)}
+                  value={doKdy}
+                  onChange={(e) => setDoKdy(e.target.value)}
                   style={pole}
                 />
               </label>
             </div>
+
+            {klic !== '' && !casySedi ? (
+              <p style={vysvetlivka}>
+                Časy jste přepsali, takže se směna uloží bez zkratky{' '}
+                {klic}. Zkratka u směny s jinými časy by v rozpisu lhala.
+              </p>
+            ) : null}
 
             <p style={vysvetlivka}>
               Konec dřív než začátek znamená, že směna končí druhý den —

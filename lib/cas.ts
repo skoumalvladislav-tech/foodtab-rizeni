@@ -82,3 +82,27 @@ function format(cas: string | Date, zona: string, volby: Intl.DateTimeFormatOpti
     }).format(d)
   }
 }
+
+/**
+ * Délka směny v minutách z časů na zdi.
+ *
+ * Protějšek `app.delka_smeny_minut` z migrace 20260903030000. Ta je
+ * pravda pro data, tahle je pro obrazovku — a musí říkat totéž. Když
+ * se změní jedna, musí se druhá taky; kontroly obou používají stejné
+ * případy (22:00–06:00 = 480 minut).
+ *
+ * Konec dřív než začátek znamená DRUHÝ DEN. Odečtením by 22:00–06:00
+ * vyšlo jako mínus šestnáct hodin.
+ *
+ * Bez `new Date()`: jsou to hodiny na zdi, ne okamžik. Převod v pásmu
+ * serveru je přesně ta chyba, kvůli které vznikl tenhle modul.
+ */
+export function delkaSmenyMinut(od: string, doKdy: string): number {
+  const naMinuty = (t: string): number => {
+    const [h, m] = t.split(':')
+    return Number(h) * 60 + Number(m ?? 0)
+  }
+  const a = naMinuty(od)
+  const b = naMinuty(doKdy)
+  return b > a ? b - a : 24 * 60 - a + b
+}

@@ -290,4 +290,166 @@ reset role;
 
 
 \echo ''
+\echo '== 9. Vyřazení z nabídky je přepínač, ne jednosměrka ====='
+
+-- Vyřadit šablonu je běžný překlep. Obrazovka Pozice to má obousměrné
+-- a šablony se mají chovat stejně; kdyby to šlo jen jedním směrem,
+-- musela by se zakládat nová zkratka a stará by překážela v nabídce.
+
+select user_id as marek from public.profiles where email = 'cisnik@foodtab.cz' \gset
+
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+
+select id as sab_perla from public.sablony_smen
+  where tenant_id = :'tenant' and branch_id = :'perla'
+  order by created_at limit 1 \gset
+select set_config('test.sablona', :'sab_perla', false);
+
+select pg_temp.check('než se vyřadí, v nabídce je',
+  (select count(*) from public.sablony_smen
+    where id = :'sab_perla' and active) = 1);
+
+select public.prepnout_sablonu(:'tenant', :'sab_perla', false);
+
+select pg_temp.check('vyřazená se přestane nabízet',
+  (select count(*) from public.sablony_pro_smenu(:'tenant', :'perla', :'poz_kuchar') t
+    where t.id = :'sab_perla') = 0);
+
+select pg_temp.check('ale z tabulky nezmizela',
+  (select count(*) from public.sablony_smen where id = :'sab_perla') = 1);
+
+select public.prepnout_sablonu(:'tenant', :'sab_perla', true);
+
+select pg_temp.check('a vrátit do nabídky jde zase',
+  (select count(*) from public.sablony_pro_smenu(:'tenant', :'perla', :'poz_kuchar') t
+    where t.id = :'sab_perla') = 1);
+
+reset role;
+
+-- Kdo nespravuje nastavení, nepřepne ani jedním směrem.
+set role authenticated;
+select set_config('test.user_id', :'marek', false);
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.prepnout_sablonu(
+      current_setting('test.tenant')::uuid,
+      current_setting('test.sablona')::uuid,
+      false);
+  exception
+    when insufficient_privilege then v_ok := true;
+    -- Když na ten řádek nedohlédne ani přes RLS, je to taky správně.
+    when no_data_found then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: číšník vyřadil šablonu z nabídky'; end if;
+  raise notice '  OK    kdo nespravuje nastavení, šablonu nevyřadí';
+end $$;
+
+reset role;
+
+-- A po tom všem musí zůstat zapnutá — kdyby ji číšník přece jen
+-- přepnul, další kontroly by běžely nad jinými daty, než si myslí.
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('a po pokusu je pořád v nabídce',
+  (select active from public.sablony_smen where id = :'sab_perla'));
+reset role;
+
+
+\echo ''
+\echo '== 10. Nabídka stojí v nastaveném pořadí ================='
+
+-- Pořadí v nabídce řídí sloupec `poradi`, ne abeceda. Kdyby se řadilo
+-- podle zkratky, přejmenování by přeházelo nabídku, na kterou jsou lidé
+-- zvyklí — a v seznamu, kde se kliká rychle, se to pozná pozdě.
+--
+-- `with ordinality` je tu podstatné: bere pořadí, ve kterém řádky
+-- doopravdy přišly. Kdyby se v `string_agg` seřadilo znovu podle
+-- `poradi`, vyšla by kontrola vždycky — ověřila by vlastní ORDER BY,
+-- ne to, co funkce vrátila.
+
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+
+select public.ulozit_sablonu(
+  :'tenant', null, null, null, 'A', 'Až úplně dole',
+  time '10:00', time '18:00', 900);
+
+select string_agg(t.klic, ',' order by t.n) as poradi_nabidky
+from public.sablony_pro_smenu(:'tenant', :'perla', null)
+  with ordinality as t(id, klic, label, starts_at, ends_at, minut, poradi, n) \gset
+
+select pg_temp.check(
+  'šablona s vysokým pořadím stojí až za ostatními (' || :'poradi_nabidky' || ')',
+  :'poradi_nabidky' like '%A');
+
+select pg_temp.check(
+  'a není první, i když je v abecedě nejdřív',
+  :'poradi_nabidky' not like 'A%');
+
+reset role;
+
+\echo ''
+\echo '== 11. Do tabulky se píše jen přes funkce ================'
+
+-- Tabulka má grant na ČTENÍ, ne na zápis. Správa potřebuje vidět
+-- i vyřazené šablony, které nabídková funkce nevrací, ale zapisovat
+-- se má výhradně přes `ulozit_sablonu` a `prepnout_sablonu` — tam
+-- sedí kontroly práva, prázdných údajů, cizí pobočky i audit.
+--
+-- Kdyby se zápis dal obejít, dal by se obejít i audit: nikdo by
+-- nepoznal, kdo přepsal D z 8–16 na 9–17.
+
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    insert into public.sablony_smen (tenant_id, key, label, starts_at, ends_at)
+    values (current_setting('test.tenant')::uuid, 'Z', 'Zadem',
+            time '01:00', time '02:00');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: šablona se založila zadem, mimo ulozit_sablonu'; end if;
+  raise notice '  OK    ani majitel nezaloží šablonu přímo do tabulky';
+end $$;
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    update public.sablony_smen set starts_at = time '03:00'
+     where tenant_id = current_setting('test.tenant')::uuid;
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: časy šablony se přepsaly zadem'; end if;
+  raise notice '  OK    ani časy se přímo přepsat nedají';
+end $$;
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    delete from public.sablony_smen
+     where tenant_id = current_setting('test.tenant')::uuid;
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: šablony se daly smazat'; end if;
+  raise notice '  OK    a smazat se nedají vůbec';
+end $$;
+
+-- Čtení naopak fungovat MUSÍ — obrazovka Nastavení → Šablony sahá na
+-- tabulku přímo, protože potřebuje i ty vyřazené.
+select pg_temp.check('ale číst je správa smí',
+  (select count(*) from public.sablony_smen
+    where tenant_id = :'tenant') > 0);
+
+reset role;
+
+\echo ''
 \echo '== KROK 20 HOTOV ========================================='

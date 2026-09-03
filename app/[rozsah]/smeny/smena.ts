@@ -48,6 +48,13 @@ export async function ulozitSmenu(
   const od = String(formData.get('od') ?? '')
   const doKdy = String(formData.get('do') ?? '')
   const poznamka = String(formData.get('poznamka') ?? '')
+  /*
+    Zkratka šablony se jen OPÍŠE — je to popiska, ne odkaz. Formulář ji
+    posílá jen tehdy, když časy pořád odpovídají té šabloně; kdo je
+    přepsal, poslal prázdno a v řádku pak žádná zkratka nestojí. „D“
+    u směny od devíti do pěti by lhalo.
+  */
+  const sablona = String(formData.get('sablona') ?? '').trim() || null
 
   if (!pobocka) return { stav: 'chyba', text: 'Vyberte pobočku.' }
   if (!den || !od || !doKdy) return { stav: 'chyba', text: 'Vyplňte datum a čas od–do.' }
@@ -77,6 +84,7 @@ export async function ulozitSmenu(
     p_od: od,
     p_do: doKdy,
     p_poznamka: poznamka,
+    p_sablona_key: sablona,
   })
 
   // Hlášku píše databáze a je pro člověka — projde se dál, ať se
