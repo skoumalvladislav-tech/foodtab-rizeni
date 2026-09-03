@@ -1,0 +1,100 @@
+name: Zapomenutý odchod
+
+# Naplánovaná úloha: upozornění na příchod bez odchodu.
+#
+# ---------------------------------------------------------------------
+# PROČ GITHUB ACTIONS, A NE VERCEL CRON
+#
+# Vercel na tarifu Hobby hodinový cron odmítá — blokoval nasazení
+# (commit 45c3a7f). Zbyl denní běh v 08:00 UTC, a ten má díru: firma,
+# která si nastaví hodinu pozdější než 10:00 pražského času, se
+# o zapomenutém odchodu dozví až druhý den. Actions plánuje hodinově
+# a nic to nestojí.
+#
+# Denní cron ve `vercel.json` se tímhle ruší. Dva plánovače nad jednou
+# úlohou nejsou pojistka, ale místo, kde se za rok nikdo nevyzná —
+# a jeden z nich by tiše padal, aniž by to bylo vidět.
+#
+# ---------------------------------------------------------------------
+# O HODINĚ ROZHODUJE DATABÁZE
+#
+# Tenhle soubor žádný čas neřeší. Běží každou hodinu a `public.
+# ohlasit_zapomenute_odchody` si sama vybere, pro koho už je čas —
+# podle pásma POBOČKY a nastavení firmy. Napevno nastavená devátá by
+# v zimě zvonila v deset.
+#
+# ---------------------------------------------------------------------
+# TICHÉ SELHÁNÍ JE HORŠÍ NEŽ HLASITÉ
+#
+# Krok skončí nenulově při čemkoli jiném než HTTP 200. Přesně tohle
+# tady dnes chybělo: adresa žila, odpovídala 401 na chybějící tajemství
+# a nikdo se to nedozvěděl, protože se nikdo nedíval. Červený křížek
+# u běhu pošle e-mail sám.
+
+on:
+  schedule:
+    # Pátá minuta každé hodiny. Ne nula: v celou je fronta plánovačů
+    # GitHubu nejdelší a běh se odsouvá o desítky minut.
+    - cron: '5 * * * *'
+  # Ať jde spustit ručně, když se něco ladí nebo doháněj zmeškaný běh.
+  workflow_dispatch:
+
+# Dva běhy naráz nad jednou databází nemají co dělat. Úloha je sice
+# idempotentní (primární klíč v `zapomenute_odchody`), ale čekat se
+# nemá na co — když ještě běží ten předchozí, tenhle se zahodí.
+concurrency:
+  group: zapomenuty-odchod
+  cancel-in-progress: false
+
+jobs:
+  ohlasit:
+    name: Ohlásit zapomenuté odchody
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          # Chybějící tajemství je chyba nastavení, ne přechodný výpadek.
+          # Ať je to vidět hned a s návodem, ne jako 401 od aplikace.
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci, např. https://foodtab.vercel.app"
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu"
+            exit 1
+          fi
+
+          # -sS: bez ukazatele průběhu, ale chyby ano.
+          # Tělo a kód se čtou zvlášť; tajemství se nikam nevypisuje.
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 60 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/zapomenuty-odchod")
+
+          echo "HTTP ${KOD}"
+          cat telo.json || true
+          echo
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            503)
+              echo "::error::503 — na Vercelu chybí SUPABASE_SERVICE_ROLE_KEY."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          # Kolik jich bylo, ať je to vidět v přehledu běhů bez rozklikávání.
+          POCET=$(sed -n 's/.*"ohlaseno":[[:space:]]*\([0-9]*\).*/\1/p' telo.json)
+          echo "Ohlášeno zapomenutých odchodů: ${POCET:-?}" >> "$GITHUB_STEP_SUMMARY"
