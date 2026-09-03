@@ -144,6 +144,11 @@ insert into public.role_permissions (role_id, permission_key) values
   (:'r_editor', 'marketing.read'),
   (:'r_editor', 'marketing.manage');
 
+-- Uživatele zakládá superuživatel: do auth.users má role authenticated
+-- podle harnessu jen select, ne insert. Bez přepnutí tu scénář spadl
+-- na "permission denied for table users".
+reset role;
+
 insert into auth.users (id, email, raw_user_meta_data) values
   ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'marketing-editor@foodtab.cz', '{"full_name":"Editor Marketingu"}')
 on conflict (id) do nothing;
@@ -156,6 +161,8 @@ insert into public.memberships (tenant_id, user_id, role_id, status, scope)
 values (:'tenant', :'editor', :'r_editor', 'active', 'tenant')
 on conflict (tenant_id, user_id) do update
   set role_id = excluded.role_id, status = 'active', scope = excluded.scope;
+
+set role authenticated;
 
 select set_config('test.user_id', :'editor', false);
 select pg_temp.check('editor má marketing.manage, ale NE marketing.publish',
@@ -219,7 +226,7 @@ select pg_temp.check('se skutečnou připomínkou zamítnutí projde',
 \echo ''
 \echo '== Kdo do modulu nevidí vůbec ================================'
 
-select id as marek_uid from public.profiles where email = 'cisnik@foodtab.cz' \gset
+select user_id as marek_uid from public.profiles where email = 'cisnik@foodtab.cz' \gset
 select set_config('test.user_id', :'marek_uid', false);
 select pg_temp.check('číšník (role servis, bez marketing.*) nevidí marketingové příspěvky',
   (select count(*) from public.marketing_posts) = 0);

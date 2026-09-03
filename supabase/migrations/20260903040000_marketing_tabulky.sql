@@ -61,7 +61,7 @@
 -- branding nedomýšlí, viz zadání bod 3, poslední odstavec).
 -- ---------------------------------------------------------------------
 
-create table if not exists public.marketing_settings (
+create table public.marketing_settings (
   tenant_id            uuid primary key references public.tenants(id) on delete cascade,
 
   ton_hlasu            text not null default 'neformalni'
@@ -140,7 +140,7 @@ create trigger trg_audit_marketing_settings
 -- ověření, že se nic nezaměnilo.
 -- ---------------------------------------------------------------------
 
-create table if not exists public.marketing_integrations (
+create table public.marketing_integrations (
   id                uuid primary key default gen_random_uuid(),
   tenant_id         uuid not null references public.tenants(id) on delete cascade,
   -- NULL = platí pro celou firmu. Vyplněné = jen tahle pobočka
@@ -225,7 +225,7 @@ create trigger trg_audit_marketing_integrations
 -- v okamžiku, kdy se přijme ze zdroje — ne s odkazem na cizí úložiště.
 -- ---------------------------------------------------------------------
 
-create table if not exists public.marketing_photos (
+create table public.marketing_photos (
   id             uuid primary key default gen_random_uuid(),
   tenant_id      uuid not null references public.tenants(id) on delete cascade,
   branch_id      uuid not null references public.branches(id) on delete cascade,
@@ -294,7 +294,7 @@ create trigger trg_audit_marketing_photos
 -- to, KTERÁ šablona existuje a jak se jmenuje, ne jak vypadá uvnitř.
 -- ---------------------------------------------------------------------
 
-create table if not exists public.marketing_templates (
+create table public.marketing_templates (
   id                uuid primary key default gen_random_uuid(),
   tenant_id         uuid not null references public.tenants(id) on delete cascade,
 
@@ -355,7 +355,7 @@ create trigger trg_audit_marketing_templates
 -- u návrhů Tvorby menu.
 -- ---------------------------------------------------------------------
 
-create table if not exists public.marketing_posts (
+create table public.marketing_posts (
   id              uuid primary key default gen_random_uuid(),
   tenant_id       uuid not null references public.tenants(id) on delete cascade,
   branch_id       uuid not null references public.branches(id) on delete cascade,
