@@ -1,6 +1,23 @@
+import type { Metadata } from 'next'
+
 import Kiosek from './kiosek'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Odkaz na KIOSKOVÝ manifest, ne na společný.
+ *
+ * Tohle je celá oprava toho, že ikona z plochy otevírala přihlášení:
+ * Android bere start_url z manifestu, který stránka odkazuje, ne
+ * z adresy, na které člověk stojí. Metadata z bližšího segmentu
+ * přebijí ta z rozvržení, takže na /kiosek platí tenhle.
+ *
+ * Viz docs/kiosek-vlastni-manifest.md a app/kiosek.webmanifest/route.ts.
+ */
+export const metadata: Metadata = {
+  title: 'Foodtab kiosek',
+  manifest: '/kiosek.webmanifest',
+}
 
 /**
  * Kiosek na provozovně.

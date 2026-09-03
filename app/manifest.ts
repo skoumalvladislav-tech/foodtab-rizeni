@@ -33,10 +33,24 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "maskable",
       },
     ],
-    shortcuts: [
-      { name: "Moje směna", short_name: "Směna", url: "/?modul=attendance" },
-      { name: "Úkoly", short_name: "Úkoly", url: "/?modul=tasks" },
-      { name: "Komunikace", short_name: "Zprávy", url: "/?modul=communication" },
-    ],
+    /*
+      Zkratky jsou ZRUŠENÉ, ne opravené.
+
+      Mířily na /?modul=attendance, /?modul=tasks
+      a /?modul=communication — adresování ze starého prototypu.
+      Parametr modul dnes nikdo nečte: ověřeno naostro, všechny tři
+      adresy skončí na témže místě jako samotné /. Zkratka, která
+      vede tam, kam už vede ikona, je horší než žádná.
+
+      Opravit se nedají: dnešní obrazovky jsou /[rozsah]/dochazka
+      a spol., takže adresa potřebuje rozsah — a ten závisí na tom,
+      kdo je přihlášený. Manifest to vědět nemůže a statická zkratka
+      na /cerna-perla/dochazka by byla pobočka napevno v kódu
+      (pravidlo 1).
+
+      Až bude existovat adresa, která přihlášeného pošle na jeho
+      docházku bez uvedení rozsahu, zkratky se sem vrátí. Do té doby
+      tu nejsou schválně.
+    */
   };
 }
