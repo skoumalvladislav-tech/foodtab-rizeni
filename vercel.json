@@ -1,8 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/uloha/zapomenuty-odchod",
-      "schedule": "0 * * * *"
-    }
-  ]
-}
+{}
