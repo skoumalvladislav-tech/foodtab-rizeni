@@ -263,6 +263,16 @@ a nech ji tomu, kdo ho píše.
 - Migrace: `supabase/migrations/RRRRMMDDHHMMSS_nazev.sql`, nikdy neupravovat
   už nasazenou migraci — vždy přidat novou.
 - Každá migrace musí projít `supabase/tests/run.sh` proti čisté databázi.
+- **Nový sloupec na tabulce se sloupcovými granty se musí udělit
+  zvlášť.** `alter table … add column` ho do výčtu nepřidá a dotaz,
+  který si o něj řekne, dostane `42501 permission denied` **dřív, než
+  se dostane na řádky** — takže nespadne jen ten sloupec, ale celá
+  obrazovka. Stalo se to 3. 9. 2026 večer: `employees.color` (granty
+  jsou po sloupcích od `20260901120000_osobni_udaje.sql`, aby se
+  telefon a e-mail četly jen průzorem) položil Lidi i Rozpis směn
+  uprostřed ostrého testu. Kontrola to nechytila, protože na ten
+  sloupec sahala jako superuživatel, kterému granty nic neříkají.
+  **Nový sloupec vždycky zkus přečíst pod rolí `authenticated`.**
 - Peníze v celých haléřích jako `integer`, ne `float`.
 - Časy `timestamptz`, provozní datum jako `date`.
 
