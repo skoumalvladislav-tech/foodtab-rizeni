@@ -295,6 +295,33 @@ Když přidáváš tabulku nebo oprávnění, přidej k tomu kontrolu do
 `supabase/tests/etapa0_scenar.sql`. Kontrola má ověřovat, že se někdo
 **nedostane** tam, kam nemá — ne jen že šťastná cesta funguje.
 
+### Každá nová kontrola musí umět spadnout — a musíš to vidět
+
+Napsat kontrolu a nechat ji projít neznamená nic. **Rozbij schválně to,
+co má hlídat, a přesvědč se, že spadne.** Teprve pak víš, že tam něco
+hlídá.
+
+Za dva dny se to vymstilo třikrát a pokaždé jinak:
+
+- **`krok9` procházel, protože se testovaná cesta nikdy nespustila.**
+  Politika pod rolí `authenticated` update tiše zahodila, takže se ke
+  spoušti nedošlo. V PGlite to nevyšlo najevo, protože tam se běží jako
+  superuživatel.
+- **Kontroly QR ověřovaly řetězec vedle, ne ten QR, který se vykreslí.**
+  Hlásily „správná pobočka, jediný parametr `kod`", zatímco v nasazené
+  aplikaci nebyla v QR adresa vůbec.
+- **`/name="od"[^>]*readonly/` se nemohlo trefit nikdy**, protože React
+  řadí atributy jinak. Poznalo se to až tím, že se `readOnly` schválně
+  doplnilo a nic to neohlásilo.
+
+Kontrola, která nemůže spadnout, je horší než žádná: žádná je vidět,
+tahle se tváří jako důkaz.
+
+**A totéž platí pro čísla.** Když hlásíš „X kontrol prošlo", řekni
+**z čeho** to číslo je. 3. 9. se dva dny hlásilo 543 kontrol z běhu,
+který jeden scénář vynechával — znělo to jako „všechno", a bylo to
+„všechno kromě".
+
 ### Čtení tabulek a plán importu
 
 ```bash

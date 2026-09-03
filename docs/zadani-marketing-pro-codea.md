@@ -3,6 +3,13 @@
 Plné zadání je v `docs/marketing-zadani.md` (schválil Šéfík 3. 9. 2026).
 Tenhle soubor říká, co už je napsané, co s tím udělat a kde se zastavit.
 
+**Nejdřív si přečti v `CLAUDE.md` oddíl „Dvě relace v jednom repozitáři".**
+Na projektu teď souběžně pracuje i relace provoz a dvakrát se to 3. 9. 2026
+už srazilo. Platí z toho pro tebe hlavně: pracuješ na větvi `marketing`
+(ne `main`), scénáře se jmenují `marketingN_scenar.sql` (vlastní číselná
+řada, ne `krokN`), `create table` je bez `if not exists`, a **do cizího
+modulu (provoz) nesahej** — najdeš-li tam chybu, jen ji ohlas.
+
 Modul `marketing` a jeho tři oprávnění (`marketing.read`, `marketing.manage`,
 `marketing.publish`) existují od úplného začátku
 (`supabase/migrations/20260823120100_catalog.sql`). Chyběly k nim tabulky
@@ -31,12 +38,16 @@ Tři nové soubory a dvě drobné úpravy, všechno už na disku (ne v gitu):
 - `app/[rozsah]/marketing/page.tsx` — prázdná obrazovka podle vzoru
   `app/[rozsah]/menu/page.tsx`, kontroluje `marketing.read`.
 - `app/[rozsah]/nabidka.ts` — položka Marketing přepnutá na `hotovo: true`.
-- `supabase/tests/krok18_scenar.sql` — scénář, přidaný i do seznamu
-  v `supabase/tests/run.sh`.
+- `supabase/tests/marketing1_scenar.sql` — scénář, ve vlastní smyčce
+  v `supabase/tests/run.sh` (ne ve sdílené řadě `krokN`). Starý
+  `krok18_scenar.sql` je jen přesměrování na tenhle soubor — smaž ho,
+  až budeš u souborů v `supabase/tests/`.
 
 Migrace se drží stejného rozhodnutí, na jakém stojí `modul_menu`: žádná
 nová oprávnění se nezakládají (ta tři už jsou), u stávajících firem
-zůstává modul vypnutý, nikomu se nic nebere.
+zůstává modul vypnutý, nikomu se nic nebere. **Až budeš někdy přidávat
+další oprávnění modulu Marketing, dej mu klíč začínající `marketing.`**
+— ať se jmenný prostor nesrazí s provozními právy.
 
 ---
 
@@ -44,11 +55,20 @@ zůstává modul vypnutý, nikomu se nic nebere.
 
 Tohle udělám já (Šéfík), ne ty — PowerShell si dělám sám:
 
-1. `git add supabase/migrations/20260903040000_marketing_tabulky.sql app/[rozsah]/marketing app/[rozsah]/nabidka.ts supabase/tests/krok18_scenar.sql supabase/tests/run.sh docs/marketing-zadani.md docs/ukoly-codea-2026-09-03-marketing.md` a commit.
-2. `supabase/tests/run.sh` — lokální běh proti PGlite/PostgreSQL, ať se
-   ukáže, jestli scénář `krok18_scenar` vůbec projde.
-3. `supabase db push` — teprve když run.sh projde.
-4. `supabase migration list` — ověřit, že `20260903040000` je na obou
+1. Založit/přepnout na větev `marketing` (podle „Dvě relace" v
+   `CLAUDE.md` — provoz je na `main`, marketing na vlastní větvi).
+2. `git add` na nové a upravené soubory (migrace, `app/[rozsah]/marketing`,
+   `app/[rozsah]/nabidka.ts`, `supabase/tests/marketing1_scenar.sql`,
+   `supabase/tests/run.sh`, `docs/marketing-zadani.md`,
+   `docs/zadani-marketing-pro-codea.md`) a commit na větvi `marketing`.
+3. `supabase/tests/run.sh` — lokální běh proti PostgreSQL, ať se ukáže,
+   jestli scénář `marketing1_scenar` vůbec projde.
+4. `supabase db push` **jen z `main`** — teprve až se větev `marketing`
+   slije do `main` a testy tam projdou znovu. Migrace z rozdělané větve
+   se nenasazují (`run.sh` staví databázi jen z migrací, které v té
+   větvi leží — na větvi jich je jen půlka, testy by ověřovaly něco
+   jiného, než co poběží v provozu).
+5. `supabase migration list` — ověřit, že `20260903040000` je na obou
    stranách.
 
 **Než ti napíšu, že tohle proběhlo, na kódu marketingu nezačínej** —
@@ -59,12 +79,21 @@ jsem sám neměl jak spustit.
 
 ## Tvrdá omezení
 
-- **`supabase db push` NE.** To dělám já.
-- **Ostrá data neměň.**
+- **`supabase db push` NE.** To dělám já, a jen z `main`.
+- **Ostrá data neměň — a to platí i pro zapnutí modulu.** Řádek do
+  `tenant_modules` v ostré databázi je zásah do ostrých dat stejně jako
+  cokoli jiného. Modul `marketing` NEZAPÍNEJ, ani migrací, ani přímým
+  zápisem, ani při „ověření naostro". Zapne si ho Šéfík sám, až bude
+  marketing chtít vidět — je to jeho rozhodnutí a jedno kliknutí, ne
+  krok týhle etapy.
+- **Do cizího modulu (provoz) nesahej.** Sdílené soubory (`run.sh`,
+  `CLAUDE.md`) uprav jen v částech, které patří marketingu — moji úpravu
+  `run.sh` (vlastní smyčka pro `marketingN_scenar`) nech, jak je, o
+  zbytek (`krokN` smyčka, robustnost běhu) se stará provoz.
 - Nový scénář jsem psal bez možnosti si ho ověřit — **počítej s tím, že
   v něm bude drobná chyba** (špatný název sloupce, jiná signatura funkce
   apod.). Najdi ji přes chybovou hlášku z `run.sh`, oprav přímo v
-  `krok18_scenar.sql`, nepřepisuj kvůli tomu tabulky v migraci, pokud
+  `marketing1_scenar.sql`, nepřepisuj kvůli tomu tabulky v migraci, pokud
   tabulky samotné nejsou špatně.
 - **Každá případná další tabulka:** `tenant_id`, zapnuté RLS, politika,
   granty vyjmenované po sloupcích — stejně jako u těch pěti hotových.
@@ -80,10 +109,10 @@ jsem sám neměl jak spustit.
 
 ### 1. Oprav, co spadne v `run.sh`
 
-Spustím ho já a pošlu ti výstup. Pokud selže `krok18_scenar`, over nejdřív,
-jestli je chyba ve scénáři (název sloupce/funkce), nebo ve skutečné
-chybě v migraci (chybějící politika, špatná podmínka ve spoušti). Oprav
-a napiš mi, co bylo špatně, ať to doplním do zadání.
+Spustím ho já a pošlu ti výstup. Pokud selže `marketing1_scenar`, over
+nejdřív, jestli je chyba ve scénáři (název sloupce/funkce), nebo ve
+skutečné chybě v migraci (chybějící politika, špatná podmínka ve
+spoušti). Oprav a napiš mi, co bylo špatně, ať to doplním do zadání.
 
 ### 2. Projdi migraci proti CLAUDE.md
 
@@ -102,17 +131,24 @@ Zvlášť se podívej na:
   `new.branch_id`. Ověř, že `errcode = 'insufficient_privilege'` je
   totéž, na co se v testu odchytává `exception when insufficient_privilege`.
 
-### 3. Naostro na Černé Perle
-
-Až migrace projde a testy jsou zelené:
-
-- Zapnout modul `marketing` pro tenanta Černé Perly (řádek do
-  `tenant_modules`, stejně jako se to dělalo u `menu`).
-- Ověřit v prohlížeči: záložka Marketing se objeví, vede na hlášku
-  „Připravujeme". Bez zapnutého modulu / bez `marketing.read` appka
-  místo toho ukáže „Marketing není zapnutý".
-
 **Zastav se tady a napiš zprávu.**
+
+### Poznámka: ověření naostro NENÍ tvůj krok
+
+V dřívější verzi tohohle zadání stálo „zapnout modul na Černé Perle" —
+to je ve sporu s pravidlem výš („ostrá data neměň") a navíc to bylo
+formulované nepřesně (moduly se zapínají za celou firmu, ne za pobočku
+— `tenant_modules` má klíč `(tenant_id, module_key)`, sloupec pro
+pobočku neexistuje, a je to závazné rozhodnutí v `CLAUDE.md`; kdyby
+Šéfík chtěl zapínání po pobočkách, je to změna základu, ne detail
+zadání, a musí se probrat zvlášť).
+
+**Platí ostrá data neměň — modul nezapínej.** Ověření, že záložka
+Marketing vede na hlášku „Připravujeme" a že vypnutý modul odmítne
+i přímé volání adresy `/[rozsah]/marketing` (pravidlo 5), uděláš proti
+lokální databázi, kterou staví `supabase/tests/run.sh` — ne v ostré.
+Šéfík si modul v ostré databázi zapne sám, až bude chtít marketing
+v appce vidět.
 
 ---
 
@@ -128,11 +164,20 @@ Až migrace projde a testy jsou zelené:
 Tohle všechno čeká na samostatné zadání, až bude tenhle základ nasazený
 a odzkoušený.
 
+**Dopředu k n8n a skutečnému navrhování** (až přijde na řadu): pravidlo 8
+zakazuje posílat do jazykového modelu mzdy, docházku, kontakty a zálohy.
+U marketingu bude podstatné hlavně slovo **kontakty** — jakmile se bude
+pracovat s hosty/zákazníky (ne jen s jídelníčkem a fotkami interiéru),
+je to jednak tohle pravidlo, jednak souhlasy podle GDPR. Nenavrhuj tu
+část tak, aby se to muselo později pracně rozplétat — žádná osobní data
+hostů se nemají dostat k modelu bez explicitního souhlasu a bez zvlášť
+rozmyšleného, zdokumentovaného postupu.
+
 ---
 
 ## Ranní zpráva
 
 - co je hotové a commitnuté
 - co jsi opravil ve scénáři (pokud něco) a proč
-- výsledek kontroly naostro na Černé Perle
+- co jsi našel při kontrole migrace proti `CLAUDE.md` (bod 2)
 - na čem ses zastavil

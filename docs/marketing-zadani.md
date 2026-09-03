@@ -24,10 +24,28 @@ ani tabulkou. Tenhle dokument navrhuje, co do nich patří.
 > - `app/[rozsah]/marketing/page.tsx` — prázdná obrazovka podle vzoru
 >   `menu/page.tsx`, kontroluje `marketing.read`. Položka v `nabidka.ts`
 >   přepnutá na `hotovo: true`.
-> - `supabase/tests/krok18_scenar.sql` — scénář: pravidlo 5 (vypnutý modul
->   odmítne i přímé volání), a hlavně že **`marketing.publish` je jediné
->   oprávnění, které smí posunout příspěvek do `publikovano`** — ověřeno
->   vlastní rolí jen s `marketing.manage`, které to spoušť databáze odmítne.
+> - `supabase/tests/marketing1_scenar.sql` — scénář: pravidlo 5 (vypnutý
+>   modul odmítne i přímé volání), a hlavně že **`marketing.publish` je
+>   jediné oprávnění, které smí posunout příspěvek do `publikovano`** —
+>   ověřeno vlastní rolí jen s `marketing.manage`, které to spoušť
+>   databáze odmítne.
+>
+> **3. 9. 2026 večer:** v `CLAUDE.md` přibyl oddíl „Dvě relace v jednom
+> repozitáři" — provoz a marketing píšou do téhož repozitáře souběžně.
+> Podle něj se scénář přejmenoval z `krok18_scenar.sql` na
+> `marketing1_scenar.sql` (vlastní číselná řada) a marketing od teď patří
+> na větev `marketing`, ne na `main` — nasazuje se výhradně z `main`.
+>
+> Zadání pro Codea navíc obsahovalo spor: „ostrá data neměň" proti
+> „zapnout modul naostro na Černé Perle" — zapnutí modulu v ostré
+> databázi JE zásah do ostrých dat. Opraveno: modul `marketing` v ostré
+> databázi nezapíná Code, zapíná si ho výhradně Šéfík sám, až bude
+> marketing chtít vidět. Zároveň bylo to původní znění nepřesné i
+> věcně — moduly se zapínají za celou firmu, ne za pobočku
+> (`tenant_modules` klíč `(tenant_id, module_key)`, žádný sloupec pro
+> pobočku; zapínání po pobočkách by byla změna základu, ne detail).
+> Podrobnosti a co z toho plyne pro implementaci jsou v
+> `docs/zadani-marketing-pro-codea.md`.
 >
 > **Migrace ještě NENÍ nasazená** — Claude nemá na tomhle počítači k
 > dispozici shell, takže `supabase db push` a `supabase/tests/run.sh` musí
@@ -229,6 +247,21 @@ Přesně v duchu oddílu 7 zadání Tvorby menu — tohle se nedomýšlí:
   ruční Bulk Create v UI), takže Canva může být nanejvýš návrhový nástroj
   pro to, jak šablony vypadají v Bannerbear, ne živá součást appky. Souhlasí
   Šéfík s touhle rolí, nebo si představoval něco jiného?
+- **Zapínají se moduly i po pobočkách, nebo jen za celou firmu?** (Dotaz
+  vzešel 3. 9. 2026 z kontroly implementace.) Dnes `tenant_modules` má
+  klíč `(tenant_id, module_key)` — modul jde zapnout jen za celou firmu,
+  ne pro jednu pobočku zvlášť. Pro Marketing by to mohlo vadit u firmy
+  s víc pobočkami, která chce sítě řešit jen na jedné z nich — ale
+  rozšíření na pobočkovou úroveň je změna základu (`tenant_modules`),
+  ne detail modulu Marketing. Nedomýšlí se, dokud to Šéfík nepotvrdí.
+- **Kontakty hostů a pravidlo 8.** Až přijde skutečné navrhování s
+  informacemi o hostech/zákaznících (ne jen jídelníček a fotky
+  interiéru), platí totéž, co pravidlo 8 už zakazuje u mezd a docházky
+  — kontakty do jazykového modelu nejdou. U hostů navíc přibývá GDPR
+  souhlas. Návrh datového modelu (oddíl 4) s tím zatím nepočítá vůbec
+  (žádná tabulka s kontaktem hosta) a než taková tabulka/funkce vznikne,
+  potřebuje vlastní zadání — postup souhlasu, co smí a nesmí k modelu,
+  jak dlouho se co uchovává.
 
 ---
 
