@@ -51,7 +51,13 @@
 -- nevratné a nepatří to do migrace, která má jinou práci. Ohlášeno.
 -- ---------------------------------------------------------------------
 
-create table if not exists public.sablony_smen (
+/*
+  Bez `if not exists` — pravidlo z CLAUDE.md, oddílu „Dvě relace
+  v jednom repozitáři“. Srážka jmen má spadnout nahlas a hned;
+  přesně tohle mě dnes stálo půl hodiny, protože `if not exists`
+  tiše neudělal nic a chyba vylezla až o krok dál.
+*/
+create table public.sablony_smen (
   id          uuid primary key default gen_random_uuid(),
   tenant_id   uuid not null references public.tenants(id) on delete cascade,
   -- Prázdné = platí pro celou firmu, resp. pro všechny pozice.
