@@ -335,14 +335,18 @@ select zmen as zmen_pred from public.rozpis_stav(
 select pg_temp.check('před vydáním jsou všechny směny „změna“',
   :'zmen_pred'::integer > 0);
 
-select vydano_kdy as vyd_pred from public.rozpis_stav(
+-- `\gset` nad sloupcem, který je NULL, proměnnou VŮBEC NEZALOŽÍ —
+-- nenastaví ji na prázdno, nechá ji nedefinovanou. Další řádek pak
+-- spadne na `syntax error at or near ":"`. Před vydáním je
+-- `vydano_kdy` prázdné, takže se to musí protáhnout přes coalesce.
+select coalesce(vydano_kdy::text, '') as vyd_pred from public.rozpis_stav(
   :'tenant', :'perla', date '2026-10-05', date '2026-10-12') \gset
 
 select pg_temp.check('a rozpis ještě nebyl vydaný', :'vyd_pred' = '');
 
 select public.vydat_rozpis(:'tenant', :'perla', date '2026-10-05', date '2026-10-12');
 
-select vydano_kdy as vyd_po, zmen as zmen_po from public.rozpis_stav(
+select coalesce(vydano_kdy::text, '') as vyd_po, zmen as zmen_po from public.rozpis_stav(
   :'tenant', :'perla', date '2026-10-05', date '2026-10-12') \gset
 
 select pg_temp.check('po vydání je vidět, kdy se vydalo', :'vyd_po' <> '');
@@ -356,7 +360,7 @@ select public.ulozit_smenu(
   :'tenant', null, :'perla', :'e_rozpis', null,
   date '2026-10-09', time '12:00', time '18:00', 'dodatečná');
 
-select vydano_kdy as vyd_pote, zmen as zmen_pote from public.rozpis_stav(
+select coalesce(vydano_kdy::text, '') as vyd_pote, zmen as zmen_pote from public.rozpis_stav(
   :'tenant', :'perla', date '2026-10-05', date '2026-10-12') \gset
 
 select pg_temp.check('rozpis je pořád vydaný', :'vyd_pote' <> '');
