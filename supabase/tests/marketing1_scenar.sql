@@ -1,8 +1,10 @@
--- Scénář pro krok 18 — modul Marketing, první krok.
+-- Scénář marketing 1 — modul Marketing, první krok.
 --
 -- Pokrývá migraci 20260903040000_marketing_tabulky a docs/marketing-
--- zadani.md, oddíly 4, 7 a 8. Navazuje na etapa0_scenar.sql až
--- krok17_scenar.sql (stejná firma, stejná Černá Perla, stejní lidé).
+-- zadani.md, oddíly 4, 7 a 8. Vlastní číselná řada (marketingN_scenar.sql),
+-- oddělená od provozní krokN_scenar.sql (CLAUDE.md, „Dvě relace v jednom
+-- repozitáři"). Navazuje na etapa0_scenar.sql a na všechny krokN_scenar.sql
+-- — stejná firma, stejná Černá Perla, stejní lidé.
 --
 -- Kontroluje totéž, co u Tvorby menu (pravidlo 5): vypnutý modul
 -- odmítne i přímé volání, ne jen schová položku v nabídce. Navíc
@@ -236,5 +238,5 @@ select pg_temp.check('a ani je nezaloží',
 
 \echo ''
 \echo '=========================================================='
-\echo ' KROK 18 — VŠECHNY KONTROLY PROŠLY'
+\echo ' MARKETING 1 — VŠECHNY KONTROLY PROŠLY'
 \echo '=========================================================='

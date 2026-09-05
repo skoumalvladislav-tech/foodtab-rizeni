@@ -39,9 +39,8 @@ Tři nové soubory a dvě drobné úpravy, všechno už na disku (ne v gitu):
   `app/[rozsah]/menu/page.tsx`, kontroluje `marketing.read`.
 - `app/[rozsah]/nabidka.ts` — položka Marketing přepnutá na `hotovo: true`.
 - `supabase/tests/marketing1_scenar.sql` — scénář, ve vlastní smyčce
-  v `supabase/tests/run.sh` (ne ve sdílené řadě `krokN`). Starý
-  `krok18_scenar.sql` je jen přesměrování na tenhle soubor — smaž ho,
-  až budeš u souborů v `supabase/tests/`.
+  v `supabase/tests/run.sh` (ne ve sdílené řadě `krokN`). Přejmenovaný
+  z `krok18_scenar.sql`; ten už v repozitáři není.
 
 Migrace se drží stejného rozhodnutí, na jakém stojí `modul_menu`: žádná
 nová oprávnění se nezakládají (ta tři už jsou), u stávajících firem
