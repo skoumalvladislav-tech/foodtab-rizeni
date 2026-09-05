@@ -240,11 +240,13 @@ select set_config('test.rozpis', :'rozpis', false);
 insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
 values (:'tenant', :'perla', :'rozpis', app.business_date(:'perla', now()), '08:00', '16:00');
 
-select app.pichnout(:'tenant', :'perla', :'rozpis', 'in') as ud_in \gset
+-- `app.pichnout` vrací od 5. 9. řádek (událost + jestli se uzavřel
+-- starý příchod), ne holé uuid. Bere se z něj sloupec, ne celá n-tice.
+select udalost as ud_in from app.pichnout(:'tenant', :'perla', :'rozpis', 'in') \gset
 select pg_temp.check('příchod podle rozpisu není mimo rozpis',
   not (select mimo_rozpis from public.attendance_events where id = :'ud_in'));
 
-select app.pichnout(:'tenant', :'bar', :'rozpis', 'out') as ud_out \gset
+select udalost as ud_out from app.pichnout(:'tenant', :'bar', :'rozpis', 'out') \gset
 select pg_temp.check('odchod jinde NENÍ mimo rozpis, když příchod v rozpisu byl',
   not (select mimo_rozpis from public.attendance_events where id = :'ud_out'));
 
@@ -253,11 +255,11 @@ insert into public.employees (tenant_id, branch_id, full_name, employment_type)
 values (:'tenant', :'perla', 'Bez Rozpisu Zkouška', 'hpp')
 returning id as bezrozpisu \gset
 
-select app.pichnout(:'tenant', :'perla', :'bezrozpisu', 'in') as ud_bez \gset
+select udalost as ud_bez from app.pichnout(:'tenant', :'perla', :'bezrozpisu', 'in') \gset
 select pg_temp.check('příchod bez směny mimo rozpis je',
   (select mimo_rozpis from public.attendance_events where id = :'ud_bez'));
 
-select app.pichnout(:'tenant', :'bar', :'bezrozpisu', 'out') as ud_bez_out \gset
+select udalost as ud_bez_out from app.pichnout(:'tenant', :'bar', :'bezrozpisu', 'out') \gset
 select pg_temp.check('a odchod po něm taky',
   (select mimo_rozpis from public.attendance_events where id = :'ud_bez_out'));
 

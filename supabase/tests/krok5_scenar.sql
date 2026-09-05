@@ -546,7 +546,12 @@ begin
   set local role authenticated;
   select count(*) into v_pocet
   from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, v_branch) n
-  where n.employee_id = v_marek_e;
+  where n.employee_id = v_marek_e
+    -- Jen ten, který tenhle test právě založil. Krok 4 nechává schválně
+    -- otevřený příchod na 2026-09-02/03 kvůli výdělku a ten se sem
+    -- plete: dokud se datum shodovalo s current_date - 1, splynuly do
+    -- jednoho řádku a kontrola vycházela náhodou. 5. 9. se rozešly.
+    and n.business_date = current_date - 1;
   if v_pocet <> 1 then
     raise exception 'SELHALO: otevřený příchod se nehlásí (%)', v_pocet;
   end if;
@@ -556,7 +561,9 @@ begin
   perform set_config('test.user_id', v_marek::text, false);
   select count(*) into v_pocet
   from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, null) n
-  where n.employee_id = v_marek_e and n.moje;
+  where n.employee_id = v_marek_e and n.moje
+    -- Zase jen ten dnešní; viz poznámku výš.
+    and n.business_date = current_date - 1;
   if v_pocet <> 1 then
     raise exception 'SELHALO: člověk nevidí vlastní nedokončenou docházku';
   end if;
@@ -574,7 +581,9 @@ begin
   set local role authenticated;
   select count(*) into v_pocet
   from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, v_branch) n
-  where n.employee_id = v_marek_e;
+  where n.employee_id = v_marek_e
+    -- Zase jen ten dnešní; viz poznámku výš.
+    and n.business_date = current_date - 1;
   if v_pocet <> 0 then
     raise exception 'SELHALO: po dopsání odchodu se hlásí dál';
   end if;
