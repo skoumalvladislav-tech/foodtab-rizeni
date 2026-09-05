@@ -193,9 +193,8 @@ select pg_temp.check('do odpracovaných minut se nezapočítal',
   (select odpracovano_minut from app.earnings(:'e', :'dnes'::date - 3)) = 0);
 
 -- A pořád je v seznamu nedokončených — vedoucí ho má co doplnit.
+select set_config('test.user_id', :'sef', false);
 set role authenticated;
-select set_config('test.user_id',
-  :'sef', false);
 select pg_temp.check('zůstává v seznamu nedokončených',
   (select count(*) from public.nedokoncena_dochazka(
       :'tenant', :'dnes'::date - 4, :'dnes'::date, :'perla') n
@@ -307,9 +306,8 @@ values (:'tenant', :'perla', :'e', 'out',
 select pg_temp.check('po doplnění se hodiny dopočítaly na minutu',
   (select odpracovano_minut from app.earnings(:'e', :'dnes'::date - 3)) = 450);
 
+select set_config('test.user_id', :'sef', false);
 set role authenticated;
-select set_config('test.user_id',
-  :'sef', false);
 select pg_temp.check('a ze seznamu nedokončených zmizel',
   (select count(*) from public.nedokoncena_dochazka(
       :'tenant', :'dnes'::date - 4, :'dnes'::date, :'perla') n
@@ -320,9 +318,8 @@ reset role;
 \echo ''
 \echo '== 8. Cizí firma ========================================'
 
+select set_config('test.user_id', :'cizi', false);
 set role authenticated;
-select set_config('test.user_id',
-  :'cizi', false);
 
 select pg_temp.check('cizí firma ty záznamy nevidí',
   (select count(*) from public.attendance_events where employee_id = :'e') = 0);
@@ -367,9 +364,8 @@ values
   (:'tenant', :'perla', :'e2', 'in',  now() - interval '3 days', :'dnes'::date - 3),
   (:'tenant', :'perla', :'e2', 'out', now() - interval '1 day',  :'dnes'::date - 1);
 
+select set_config('test.user_id', :'sef', false);
 set role authenticated;
-select set_config('test.user_id',
-  :'sef', false);
 select pg_temp.check('obrazovka ho hlásí jako otevřený',
   (select count(*) from public.nedokoncena_dochazka(
       :'tenant', :'dnes'::date - 4, :'dnes'::date, :'perla') n
@@ -399,9 +395,8 @@ values
   (:'tenant', :'perla', :'e3', 'out', now() - interval '2 days',
    :'dnes'::date - 2);
 
+select set_config('test.user_id', :'sef', false);
 set role authenticated;
-select set_config('test.user_id',
-  :'sef', false);
 select pg_temp.check('noční směna přes půlnoc je pro obrazovku uzavřená',
   (select count(*) from public.nedokoncena_dochazka(
       :'tenant', :'dnes'::date - 3, :'dnes'::date, :'perla') n
