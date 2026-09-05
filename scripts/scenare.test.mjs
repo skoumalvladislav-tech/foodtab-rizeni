@@ -215,6 +215,38 @@ for (const soubor of soubory) {
       // `select x as jmeno, y as druhe ... \gset` vyrábí proměnné podle
       // pojmenovaných sloupců.
       for (const m of cely.matchAll(/\bas\s+([a-z_][a-z0-9_]*)/gi)) zname.add(m[1])
+
+      /*
+        A taky podle sloupců BEZ `as`.
+
+        `select udalost, uzavren_stary from f() \gset` vyrobí proměnné
+        `udalost` i `uzavren_stary` — psql je pojmenuje podle výstupních
+        sloupců, alias k tomu nepotřebuje. Kontrola to dřív neuměla
+        a hlásila platný scénář jako chybu (krok23, 5. 9.).
+
+        Bere se jen holý název ve výběru; výrazy, hvězdička a všechno
+        s tečkou nebo závorkou se přeskakují — u těch psql jméno
+        odvozuje jinak a hádat ho by znamenalo vyrábět plané poplachy
+        z druhé strany.
+      */
+      /*
+        `from` se hledá regulárním výrazem, ne `indexOf(' from ')`:
+        příkaz bývá přes dva řádky a slepený je tam `\n`, ne mezera.
+        Napoprvé to na tom spadlo — poslední sloupec před zalomením
+        se nenašel.
+      */
+      const zacatek = cely.search(/\bselect\s/i)
+      const konec = cely.search(/\sfrom\s/i)
+      const vyber =
+        zacatek >= 0 && konec > zacatek
+          ? cely.slice(cely.indexOf(' ', zacatek) + 1, konec)
+          : ''
+      if (vyber && vyber.length < 300) {
+        for (const kus of vyber.split(',')) {
+          const jmeno = kus.trim()
+          if (/^[a-z_][a-z0-9_]*$/i.test(jmeno)) zname.add(jmeno)
+        }
+      }
     }
     for (const m of cely.matchAll(/\\set\s+([a-z_][a-z0-9_]*)/gi)) zname.add(m[1])
     buf = []

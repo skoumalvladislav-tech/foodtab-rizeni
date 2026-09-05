@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { getContext, getUser, hasAccess } from "@/lib/authz";
+import { denCesky } from "@/lib/upozorneni-text";
 import { hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import {
@@ -115,6 +116,13 @@ export default async function Dochazka({
     den?: string;
     /** Kód z QR na tabletu. Předvyplní políčko, nic nezapisuje. */
     kod?: string;
+    /** Co se právě píchlo — 'in' nebo 'out'. */
+    pichnuto?: string;
+    /**
+     * Provozní den příchodu, který systém uzavřel, aby nebránil
+     * dnešnímu (20260905010000). Datum, ne hotová věta.
+     */
+    uzavreno?: string;
   }>;
 }) {
   const { rozsah } = await params;
@@ -126,6 +134,8 @@ export default async function Dochazka({
     doplnit,
     den: denDoplneni,
     kod: kodZQr,
+    pichnuto,
+    uzavreno,
   } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
@@ -735,6 +745,46 @@ export default async function Dochazka({
               <p style={ramecekKodu}>
                 <strong>Kód mezitím vypršel.</strong> Na tabletu už svítí
                 jiný — naskenujte ho znovu.
+              </p>
+            ) : null}
+
+            {/*
+              VÝSLEDEK PÍCHNUTÍ PATŘÍ SEM, K PÍCHAČCE.
+
+              Dosud se `chyba=pichnuti` vykreslovala jen uvnitř panelu
+              ručního zápisu — a ten vidí jen ten, kdo smí zapisovat za
+              druhé. Řadovému člověku tedy hláška z databáze propadla
+              a on viděl jen obnovenou stránku. Přesně to nastane
+              u dvojitého příchodu: „Už máte píchnutý příchod od 13:14.“
+
+              Text píše databáze a jde sem beze změny. Je česky
+              a napsaný pro člověka; druhá sada hlášek by se s ní
+              rozešla.
+            */}
+            {chybaRucne === "pichnuti" && chybaText?.trim() ? (
+              <p className="hlaska-chyba" style={{ marginTop: "12px" }}>
+                {chybaText}
+              </p>
+            ) : null}
+
+            {pichnuto ? (
+              <p style={{ margin: "12px 0 0", fontSize: "13px", color: "var(--dobre)" }}>
+                {pichnuto === "in" ? "Příchod zapsán." : "Odchod zapsán."}
+              </p>
+            ) : null}
+
+            {/*
+              A když se přitom uzavřel starý příchod, ať to není
+              potichu. Vedoucí o tom ví z upozornění; člověk se to
+              dozví tady — a hned s tím, že ho to dnes nezdrží.
+            */}
+            {uzavreno ? (
+              <p style={ramecekKodu}>
+                <strong>
+                  Váš příchod z {denCesky(uzavreno)} zůstal bez odchodu.
+                </strong>{" "}
+                Dali jsme o něm vědět vedoucímu — dnešní směnu vám to
+                nezdrží.
               </p>
             ) : null}
 

@@ -58,7 +58,7 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
   // Pobočka se NEPOSÍLÁ. Vyplyne z kódu — ten patří jedné konkrétní
   // pobočce a jinde neplatí. Kdyby šla poslat z prohlížeče, dal by se
   // kód z jedné provozovny použít na druhé.
-  const { error } = await supabase.rpc('pichnout_kodem', {
+  const { data, error } = await supabase.rpc('pichnout_kodem', {
     p_tenant: tenantId,
     p_kod: kod,
     p_druh: druh,
@@ -81,6 +81,23 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
     )
   }
 
+  /*
+    UZAVŘENÝ STARÝ PŘÍCHOD SE NESMÍ ZAMLČET.
+
+    Když měl člověk otevřený příchod ze staršího provozního dne,
+    `pichnout_kodem` ho uzavřela a dala o tom vědět vedoucímu
+    (20260905010000). Člověk to má vědět taky — jinak mu aplikace za
+    zády uklidila jeho vlastní záznam a on se to nedozví.
+
+    `stary_den` jde do adresy jako datum, ne jako hotová věta: text
+    patří na obrazovku, ne do serverové akce.
+  */
+  const r = (data as { uzavren_stary: boolean; stary_den: string | null }[] | null)?.[0]
+
   revalidatePath(`/${rozsah}/dochazka`)
-  redirect(`/${rozsah}/dochazka?pichnuto=${druh}`)
+  redirect(
+    r?.uzavren_stary && r.stary_den
+      ? `/${rozsah}/dochazka?pichnuto=${druh}&uzavreno=${r.stary_den}`
+      : `/${rozsah}/dochazka?pichnuto=${druh}`,
+  )
 }

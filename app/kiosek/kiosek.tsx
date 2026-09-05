@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
 import { getBrowserSupabase } from '@/lib/supabase/client'
+import { denCesky } from '@/lib/upozorneni-text'
 
 import QrKod from './qr-kod'
 
@@ -189,13 +190,31 @@ export default function Kiosek() {
         p_druh: druh,
       })
       if (error) throw new Error(error.message)
-      const r = (data as { ok: boolean; jmeno: string | null; mimo_rozpis: boolean }[])[0]
+      const r = (
+        data as {
+          ok: boolean
+          jmeno: string | null
+          mimo_rozpis: boolean
+          uzavren_stary: boolean | null
+          stary_den: string | null
+        }[]
+      )[0]
       if (!r?.ok) {
         setChyba('PIN nesedí. Po pěti pokusech se na chvíli zamkne.')
       } else {
         setHlaska(
           `${r.jmeno} — ${druh === 'in' ? 'příchod' : 'odchod'} zapsán.` +
-            (r.mimo_rozpis ? ' (mimo rozpis)' : ''),
+            (r.mimo_rozpis ? ' (mimo rozpis)' : '') +
+            /*
+              Uzavřený starý příchod se nesmí zamlčet. Vedoucí o tom ví
+              z upozornění; člověk stojí u tabletu a dozví se to tady —
+              a hned s tím, že ho to dnes nezdrží, ať neodchází s pocitem,
+              že něco provedl.
+            */
+            (r.uzavren_stary && r.stary_den
+              ? ` Váš příchod z ${denCesky(r.stary_den)} zůstal bez odchodu` +
+                ' — dali jsme o něm vědět vedoucímu, dnešní směnu vám to nezdrží.'
+              : ''),
         )
       }
       setPin('')
