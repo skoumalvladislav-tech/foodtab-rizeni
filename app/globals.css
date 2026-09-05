@@ -434,6 +434,46 @@
      jen čárka. Dohromady je to 39 px, o které se název pobočky nemusí
      zkrátit na nečitelnou zkratku. */
   .ft-avatar, .ft-divider { display: none; }
+
+  /* --------------------------------------------------------------------
+     PĚT PRVKŮ SE NA TELEFON NEVEJDE
+
+     4. 9. bylo na iPhonu 14 Plus (430 px) ozubené kolo useknuté pravým
+     okrajem a z „Bernard Bar“ zbylo jediné písmeno `l`. Zúžit název
+     pobočky nestačilo a stačit nemohlo: v liště byl přepínač pobočky,
+     hledání, přepínač režimu, zvoneček a nastavení.
+
+     Neladí se to o pixely — UBÍRÁ SE PRVEK. Na telefonu zůstává
+     přepínač pobočky a zvoneček; nic víc.
+
+     Hledání mizí úplně: je to dnes `disabled` pole, které nic nedělá
+     a zabírá 44 px na nejdražším místě aplikace. Až hledat půjde,
+     dostane vlastní obrazovku, ne tenhle proužek.
+
+     Režim a nastavení se stěhují na rozcestník („Více“ ve spodní
+     liště) — tam už na ně je místo a člověk je tam hledá.
+     ------------------------------------------------------------------ */
+  .ft-hledani, .ft-rezim, .ft-nastaveni { display: none; }
+
+  /* „Co o vás aplikace vede“: na telefonu popisek NAD hodnotu, ne vedle.
+     E-mail se vedle popisku na 430 px nevejde a dvousloupcová mřížka
+     ho pak tlačí přes okraj. */
+  .ft-udaje {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0;
+  }
+  .ft-udaje dd { margin-bottom: 12px; }
+
+  /* Název pobočky se nesmí zkrátit na jedno písmeno. `l` je nejhorší ze
+     všech možností: vypadá to jako chyba a neříká to nic. Buď se vejde
+     čitelný, nebo se ukáže jen barevná tečka a název je v přepínači po
+     rozkliknutí — o tom rozhoduje řádek níž. */
+  .ft-rozsah > summary > span:nth-child(2) {
+    min-width: 10ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .ft-main {
     padding: 16px max(14px, var(--vlozka-vpravo))
              calc(62px + var(--vlozka-dole) + 16px)

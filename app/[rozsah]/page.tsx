@@ -3,6 +3,7 @@ import Link from "next/link";
 import { getContext } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
+import PrepinacRezimu from "@/app/prepinac-rezimu";
 import Nadpis from "./nadpis";
 import { viditelnaNabidka } from "./nabidka";
 
@@ -95,6 +96,30 @@ export default async function RozsahRozcestnik({
               </div>
             ),
           )}
+        </div>
+
+        {/*
+          Přepínač vzhledu. Na telefonu z horní lišty zmizel — pět prvků
+          se tam nevešlo a ozubené kolo přetékalo z obrazovky. Ubrat ho
+          bez náhrady by ale znamenalo funkci zrušit, ne přestěhovat,
+          takže je tady, kam se z telefonu chodí přes „Více“.
+
+          Na počítači je pořád i v liště; tady navíc nepřekáží.
+        */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+            marginTop: "24px",
+            paddingTop: "16px",
+            borderTop: "1px solid var(--line)",
+            fontSize: "14px",
+            color: "var(--muted)",
+          }}
+        >
+          <span>Vzhled</span>
+          <PrepinacRezimu />
         </div>
       </div>
     </>

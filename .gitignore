@@ -52,3 +52,5 @@ deploy.env
 
 # mezivýsledek inkrementální typové kontroly (tsc --noEmit)
 *.tsbuildinfo
+scripts/mobil/sestavene.css
+scripts/mobil/hlavicka.html

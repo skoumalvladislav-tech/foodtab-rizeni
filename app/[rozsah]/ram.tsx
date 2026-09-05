@@ -168,7 +168,14 @@ export default function Ram({
             />
           </div>
 
-          <PrepinacRezimu />
+          {/*
+            Na telefonu se přepínač režimu z lišty stěhuje na rozcestník
+            („Více“). Nemizí — jen nesedí na nejdražším místě aplikace.
+            Viz .ft-rezim v globals.css.
+          */}
+          <span className="ft-rezim">
+            <PrepinacRezimu />
+          </span>
 
           {/*
             Zvoneček. Číslo je počet nepřečtených — bez něj by se muselo
@@ -218,9 +225,10 @@ export default function Ram({
           {cilNastaveni ? (
             <>
               <span className="ft-divider" />
+              {/* Na telefonu taky pryč — Nastavení je pod „Více“. */}
               <Link
                 href={cilNastaveni}
-                className="ft-ikona ram"
+                className="ft-ikona ram ft-nastaveni"
                 title="Nastavení"
                 aria-label="Nastavení"
               >

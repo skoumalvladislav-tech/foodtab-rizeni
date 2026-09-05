@@ -200,7 +200,7 @@ export default async function MojeUdaje({
         {/* --- co o mně aplikace ví ------------------------------- */}
         <section style={karta}>
           <h2 style={nadpisKarty}>Co o vás aplikace vede</h2>
-          <dl style={seznamUdaju}>
+          <dl className="ft-udaje" style={seznamUdaju}>
             <dt style={popisek}>Jméno</dt>
             <dd style={hodnota}>{muj?.full_name ?? '—'}</dd>
             <dt style={popisek}>Přihlašovací e-mail</dt>
@@ -535,7 +535,17 @@ const seznamUdaju = {
 } as const
 
 const popisek = { color: 'var(--muted)', margin: 0 } as const
-const hodnota = { color: 'var(--ink)', margin: 0 } as const
+/*
+  Dlouhý e-mail bez povoleného zalomení roztáhl řádek, řádek roztáhl
+  stránku a s ní i hlavičku — 4. 9. se „Moje údaje" otevřely už
+  odrolované doprava. Hodnota „anywhere" láme i uprostřed slova; u
+  adresy je to správně, protože zalomit se nemá kde jinde.
+*/
+const hodnota = {
+  color: 'var(--ink)',
+  margin: 0,
+  overflowWrap: 'anywhere' as const,
+} as const
 
 const poleLabel = {
   display: 'grid',
