@@ -227,6 +227,7 @@ begin
   select id, branch_id into v_marek_e, v_branch
   from public.employees where user_id = v_marek;
 
+
   -- Čistý stav: tenhle scénář si směnu i upozornění zakládá sám.
   delete from public.notifications where user_id = v_marek;
   insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
@@ -531,27 +532,54 @@ declare
   v_majitel uuid := pg_temp.uid('majitel@foodtab.cz');
   v_marek_e uuid;
   v_pocet   integer;
+  v_den     date;
 begin
   select id into v_tenant from public.tenants limit 1;
   select id, branch_id into v_marek_e, v_branch
   from public.employees where user_id = v_marek;
 
+  /*
+    DEN, KTERÝ SI TENHLE TEST SÁM VYBERE.
+
+    Krok 4 nechává Markovi schválně otevřený příchod na pevném datu
+    (2026-09-03) kvůli výdělku. Dokud se to datum shodovalo
+    s current_date - 1, splynulo to v jeden den a kontrola vycházela
+    náhodou; 5. 9. se rozešly a šest dní by test byl červený, než by
+    se sám vyléčil. To je horší než rovnou rozbitý test.
+
+    Pevné datum uvnitř posuvného okna je časovaná nálož. Bere se proto
+    nejnovější den v okně, na kterém Marek ŽÁDNÝ otevřený příchod
+    nemá — ať do toho krok 4 postaví cokoli.
+  */
+  select g::date into v_den
+  from generate_series(current_date - 6, current_date - 1, interval '1 day') g
+  where not exists (
+    select 1 from public.attendance_events a
+    where a.employee_id = v_marek_e
+      and a.business_date = g::date
+      and a.kind = 'in'
+      and a.stornovano_kdy is null
+  )
+  order by g desc limit 1;
+
+  if v_den is null then
+    raise exception 'SELHALO: v okně není volný den, na kterém by šlo měřit';
+  end if;
+
   -- Příchod bez odchodu, přesně jako nález z kontroly.
   insert into public.attendance_events
     (tenant_id, branch_id, employee_id, kind, occurred_at, business_date)
   values (v_tenant, v_branch, v_marek_e, 'in',
-          now() - interval '10 hours', current_date - 1);
+          now() - interval '10 hours', v_den);
 
   perform set_config('test.user_id', v_majitel::text, false);
   set local role authenticated;
   select count(*) into v_pocet
   from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, v_branch) n
   where n.employee_id = v_marek_e
-    -- Jen ten, který tenhle test právě založil. Krok 4 nechává schválně
-    -- otevřený příchod na 2026-09-02/03 kvůli výdělku a ten se sem
-    -- plete: dokud se datum shodovalo s current_date - 1, splynuly do
-    -- jednoho řádku a kontrola vycházela náhodou. 5. 9. se rozešly.
-    and n.business_date = current_date - 1;
+    -- Jen den, který si tenhle test sám vybral a sám naplnil. Viz
+    -- poznámku u `v_den` výš.
+    and n.business_date = v_den;
   if v_pocet <> 1 then
     raise exception 'SELHALO: otevřený příchod se nehlásí (%)', v_pocet;
   end if;
@@ -563,7 +591,7 @@ begin
   from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, null) n
   where n.employee_id = v_marek_e and n.moje
     -- Zase jen ten dnešní; viz poznámku výš.
-    and n.business_date = current_date - 1;
+    and n.business_date = v_den;
   if v_pocet <> 1 then
     raise exception 'SELHALO: člověk nevidí vlastní nedokončenou docházku';
   end if;
@@ -575,7 +603,7 @@ begin
   insert into public.attendance_events
     (tenant_id, branch_id, employee_id, kind, occurred_at, business_date, source, note)
   values (v_tenant, v_branch, v_marek_e, 'out',
-          now() - interval '2 hours', current_date - 1, 'manual', 'dopsáno vedoucím');
+          now() - interval '2 hours', v_den, 'manual', 'dopsáno vedoucím');
 
   perform set_config('test.user_id', v_majitel::text, false);
   set local role authenticated;
@@ -583,7 +611,7 @@ begin
   from public.nedokoncena_dochazka(v_tenant, current_date - 7, current_date, v_branch) n
   where n.employee_id = v_marek_e
     -- Zase jen ten dnešní; viz poznámku výš.
-    and n.business_date = current_date - 1;
+    and n.business_date = v_den;
   if v_pocet <> 0 then
     raise exception 'SELHALO: po dopsání odchodu se hlásí dál';
   end if;
@@ -591,7 +619,7 @@ begin
 
   reset role;
   delete from public.attendance_events
-  where employee_id = v_marek_e and business_date = current_date - 1;
+  where employee_id = v_marek_e and business_date = v_den;
 end $$;
 
 -- 3. Jméno se nebere z e-mailu.
