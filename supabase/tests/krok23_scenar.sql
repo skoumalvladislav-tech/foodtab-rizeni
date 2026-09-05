@@ -43,6 +43,18 @@ insert into public.employees (tenant_id, branch_id, full_name, employment_type)
 values (:'tenant', :'perla', 'Dvojitý Příchod', 'hpp')
 returning id as e \gset
 
+/*
+  Účty se načítají TEĎ, pod superuživatelem.
+
+  Číst je až pod rolí „authenticated" nejde: politika na „profiles"
+  vrátí cizí řádek prázdný, do „test.user_id" se uloží NULL a scénář
+  pak tiše zkouší nepřihlášeného člověka — „nedokoncena_dochazka" mu
+  nevrátí nic a kontrola spadne na něčem úplně jiném, než co měří.
+  Přesně tak jsem to tady napoprvé napsal a hledal to půl hodiny.
+*/
+select user_id as sef  from public.profiles where email = 'majitel@foodtab.cz' \gset
+select user_id as cizi from public.profiles where email = 'cizi@jinafirma.cz' \gset
+
 select set_config('test.tenant', :'tenant', false);
 select set_config('test.e', :'e', false);
 
@@ -183,7 +195,7 @@ select pg_temp.check('do odpracovaných minut se nezapočítal',
 -- A pořád je v seznamu nedokončených — vedoucí ho má co doplnit.
 set role authenticated;
 select set_config('test.user_id',
-  (select user_id::text from public.profiles where email = 'majitel@foodtab.cz'), false);
+  :'sef', false);
 select pg_temp.check('zůstává v seznamu nedokončených',
   (select count(*) from public.nedokoncena_dochazka(
       :'tenant', :'dnes'::date - 4, :'dnes'::date, :'perla') n
@@ -297,7 +309,7 @@ select pg_temp.check('po doplnění se hodiny dopočítaly na minutu',
 
 set role authenticated;
 select set_config('test.user_id',
-  (select user_id::text from public.profiles where email = 'majitel@foodtab.cz'), false);
+  :'sef', false);
 select pg_temp.check('a ze seznamu nedokončených zmizel',
   (select count(*) from public.nedokoncena_dochazka(
       :'tenant', :'dnes'::date - 4, :'dnes'::date, :'perla') n
@@ -310,12 +322,117 @@ reset role;
 
 set role authenticated;
 select set_config('test.user_id',
-  (select user_id::text from public.profiles where email = 'cizi@jinafirma.cz'), false);
+  :'cizi', false);
 
 select pg_temp.check('cizí firma ty záznamy nevidí',
   (select count(*) from public.attendance_events where employee_id = :'e') = 0);
 
 reset role;
+
+
+\echo ''
+\echo '== 9. Obrazovka a hlídač páruje stejně =================='
+
+/*
+  Nález docs/nalezy-vecer-2026-09-05.md, bod 2. Hlídač pároval odchod
+  k příchodu NAPŘÍČ dny, obrazovka jen v provozním dni — takže
+  aplikace na obrazovce vytýkala nedokončený příchod, který hlídač
+  nikdy neohlásil. Šéfík rozhodl: platí PROVOZNÍ DEN.
+
+  Hlídač má v podmínce denní dobu a stáří příchodu. Aby kontrola
+  nezávisela na tom, kolik je hodin — ta past dnes stála krok5 celý
+  den — nastaví se firmě obojí na hodnoty, které platí vždycky, a na
+  konci se vrátí zpátky.
+*/
+
+select zapomenuty_odchod_hodin as puv_hodin, zapomenuty_odchod_kdy as puv_kdy
+from public.tenant_settings where tenant_id = :'tenant' \gset
+
+update public.tenant_settings
+   set zapomenuty_odchod_hodin = 1, zapomenuty_odchod_kdy = time '00:00'
+ where tenant_id = :'tenant';
+
+-- Člověk jen pro tenhle oddíl: ostatní scénáře s ním nepočítají.
+insert into public.employees (tenant_id, branch_id, full_name, employment_type)
+values (:'tenant', :'perla', 'Párovací Zkouška', 'hpp')
+returning id as e2 \gset
+
+/*
+  1) Příchod ze staršího dne, odchod z JINÉHO pozdějšího dne.
+     Není to odchod z té směny — obojí ho má vidět jako otevřený.
+*/
+insert into public.attendance_events
+  (tenant_id, branch_id, employee_id, kind, occurred_at, business_date)
+values
+  (:'tenant', :'perla', :'e2', 'in',  now() - interval '3 days', :'dnes'::date - 3),
+  (:'tenant', :'perla', :'e2', 'out', now() - interval '1 day',  :'dnes'::date - 1);
+
+set role authenticated;
+select set_config('test.user_id',
+  :'sef', false);
+select pg_temp.check('obrazovka ho hlásí jako otevřený',
+  (select count(*) from public.nedokoncena_dochazka(
+      :'tenant', :'dnes'::date - 4, :'dnes'::date, :'perla') n
+    where n.employee_id = :'e2' and n.business_date = :'dnes'::date - 3) = 1);
+reset role;
+
+select public.ohlasit_zapomenute_odchody() as ohlaseno1 \gset
+
+select pg_temp.check('a hlídač ho ohlásí taky — dřív ho tiše přeskakoval',
+  (select count(*) from public.zapomenute_odchody z
+   join public.attendance_events a on a.id = z.attendance_id
+   where a.employee_id = :'e2' and a.business_date = :'dnes'::date - 3) = 1);
+
+/*
+  2) Noční směna: příchod ve 22:00, odchod ve 2:15 TÉŽE noci. Týž
+     provozní den, takže uzavřená — pro obojí.
+*/
+insert into public.employees (tenant_id, branch_id, full_name, employment_type)
+values (:'tenant', :'perla', 'Noční Zkouška', 'hpp')
+returning id as e3 \gset
+
+insert into public.attendance_events
+  (tenant_id, branch_id, employee_id, kind, occurred_at, business_date)
+values
+  (:'tenant', :'perla', :'e3', 'in',  now() - interval '2 days' - interval '4 hours',
+   :'dnes'::date - 2),
+  (:'tenant', :'perla', :'e3', 'out', now() - interval '2 days',
+   :'dnes'::date - 2);
+
+set role authenticated;
+select set_config('test.user_id',
+  :'sef', false);
+select pg_temp.check('noční směna přes půlnoc je pro obrazovku uzavřená',
+  (select count(*) from public.nedokoncena_dochazka(
+      :'tenant', :'dnes'::date - 3, :'dnes'::date, :'perla') n
+    where n.employee_id = :'e3') = 0);
+reset role;
+
+select public.ohlasit_zapomenute_odchody() as ohlaseno2 \gset
+
+select pg_temp.check('a hlídač ji taky neohlásí',
+  (select count(*) from public.zapomenute_odchody z
+   join public.attendance_events a on a.id = z.attendance_id
+   where a.employee_id = :'e3') = 0);
+
+/*
+  3) Opakovaný běh nic nezdvojí. Drží to primární klíč
+     v `zapomenute_odchody`, ne příznak, na který se dá zapomenout.
+*/
+select public.ohlasit_zapomenute_odchody() as ohlaseno3 \gset
+
+select pg_temp.check('opakovaný běh už nic nehlásí (' || :'ohlaseno3' || ')',
+  :'ohlaseno3'::int = 0);
+
+select pg_temp.check('a záznam je v hlášení právě jednou',
+  (select count(*) from public.zapomenute_odchody z
+   join public.attendance_events a on a.id = z.attendance_id
+   where a.employee_id = :'e2') = 1);
+
+update public.tenant_settings
+   set zapomenuty_odchod_hodin = :'puv_hodin'::int,
+       zapomenuty_odchod_kdy = :'puv_kdy'::time
+ where tenant_id = :'tenant';
 
 
 \echo ''
