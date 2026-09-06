@@ -427,6 +427,23 @@ ma('odhlášení je na Moje údaje', zdrojMojeUdaje.includes('Odhlásit se'), tr
 ma('a volá serverovou akci', zdrojMojeUdaje.includes('odhlasit'), true)
 
 /*
+  A JE I NA ROZCESTNÍKU.
+
+  Na Mých údajích bylo od 6. 9. a bylo udělané dobře — jen ho tam nikdo
+  nenašel. Cesta k němu vede přes Více → Moje údaje → sjet úplně dolů,
+  pod souhlasy a stahování dat; Šéfík ho nenašel, ačkoli věděl, že tam
+  je. Rozcestník je to místo pod „Více", kam člověk jde, když hledá
+  „něco ostatního".
+
+  Na Mých údajích zůstává taky — tam patří k výdeji dat a k souhlasům.
+  Obě místa se hlídají zvlášť, aby se jedno nedalo omylem zrušit
+  s tím, že „je to přece i vedle".
+*/
+const zdrojRozcestnik = nacti('app/[rozsah]/page.tsx')
+ma('odhlášení je i na rozcestníku', zdrojRozcestnik.includes('Odhlásit se'), true)
+ma('a taky přes serverovou akci', zdrojRozcestnik.includes('odhlasit'), true)
+
+/*
   V HORNÍ LIŠTĚ NE. Omylem ťuknutý odhlas uprostřed směny je horší než
   o jedno ťuknutí delší cesta — číšník by se pak přihlašoval kódem
   z e-mailu s rukama plnýma talířů.

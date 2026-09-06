@@ -4,6 +4,7 @@ import { getContext } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
 import PrepinacRezimu from "@/app/prepinac-rezimu";
+import { odhlasit } from "@/app/prihlaseni/akce";
 import Nadpis from "./nadpis";
 import { viditelnaNabidka } from "./nabidka";
 
@@ -120,6 +121,45 @@ export default async function RozsahRozcestnik({
         >
           <span>Vzhled</span>
           <PrepinacRezimu />
+        </div>
+
+        {/*
+          ODHLÁŠENÍ I TADY.
+
+          Na Mých údajích zůstává — tam patří k výdeji dat a k souhlasům.
+          Jenže cesta k němu vede přes Více → Moje údaje → sjet úplně
+          dolů, pod souhlasy a stahování. Šéfík ho 6. 9. nenašel, a to
+          věděl, že tam je.
+
+          Rozcestník je pod „Více" a je to místo, kam člověk jde, když
+          hledá „něco ostatního". Proto sem, dolů a oddělené čarou.
+
+          Do horní lišty ne: omylem ťuknuté odhlášení uprostřed směny je
+          horší než o jedno ťuknutí delší cesta.
+        */}
+        <div
+          style={{
+            marginTop: "16px",
+            paddingTop: "16px",
+            borderTop: "1px solid var(--line)",
+          }}
+        >
+          <form action={odhlasit}>
+            <button type="submit" className="ft-tl ft-tl-vedlejsi">
+              Odhlásit se
+            </button>
+          </form>
+          <p
+            style={{
+              margin: "8px 0 0",
+              fontSize: "12px",
+              color: "var(--muted)",
+              lineHeight: 1.5,
+            }}
+          >
+            Odhlásí vás z tohohle zařízení. Příště se přihlásíte kódem
+            z e-mailu.
+          </p>
         </div>
       </div>
     </>
