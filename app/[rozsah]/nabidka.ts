@@ -82,6 +82,16 @@ export const NABIDKA: Polozka[] = [
   { segment: 'zalohy', nazev: 'Zálohy', kratky: 'Zálohy', modul: 'provoz', pravo: 'advances.manage', hotovo: true, ikona: 'kniha' },
   { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'zpravy', nazev: 'Nástěnka', kratky: 'Zprávy', modul: 'provoz', pravo: 'communication.read', hotovo: true, ikona: 'zprava' },
+  // Rozhovory stojí VEDLE Nástěnky, ne místo ní. Nástěnka je „tohle
+  // vědí všichni“, rozhovor je „bavíme se o tom“ — dvě různé věci, dva
+  // různé tvary. Tak to má i 7shifts (oznámení vs. chat) a Slack.
+  //
+  // `pravo: null` je schválně: konverzaci neautorizuje oprávnění, ale
+  // ÚČASTNICTVÍ. `communication.read` je právo na Nástěnku a číšník ho
+  // v roli nemá — kdyby na něm visely i rozhovory, nepřečetl by si
+  // vlastní vlákno. Kdo do které konverzace smí, rozhoduje
+  // `app.je_ucastnik` v databázi.
+  { segment: 'rozhovory', nazev: 'Rozhovory', kratky: 'Rozhovory', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zprava' },
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },
