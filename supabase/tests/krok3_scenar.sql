@@ -313,16 +313,31 @@ select public.complete_task(:'ukol_nicii');
 select pg_temp.check('nezadaný úkol na jeho pobočce zavřít smí',
   (select status from public.tasks where id = :'ukol_nicii') = 'done');
 
-do $$
-declare v_ok boolean := false;
-begin
-  begin
-    perform public.complete_task(current_setting('test.ukol_cizi')::uuid);
-  exception when insufficient_privilege then v_ok := true;
-  end;
-  if not v_ok then raise exception 'SELHALO: číšník zavřel cizí úkol'; end if;
-  raise notice '  OK    cizí úkol číšník nezavře';
-end $$;
+/*
+  ZMĚNA PRAVIDLA 6. 9. 2026 — dřív tady stálo, že číšník cizí úkol
+  NEZAVŘE.
+
+  Do 6. 9. byl štítek zámek: úkol adresovaný Janě směla zavřít jen ona
+  nebo správce úkolů. Šéfík to obrátil
+  (docs/odpovedi-na-nocni-praci-2026-09-06.md, „Štítek, ne zámek"),
+  protože v provozu zaskakuje kdekdo a úkol, který smí splnit jediný
+  člověk, zůstane nesplněný přesně ve chvíli, kdy ten člověk marodí.
+  7shifts to má stejně.
+
+  Kontrola se proto OBRACÍ, ne maže. Marek na Janin úkol vidí, tedy ho
+  smí zavřít — a `done_by` musí sedět na MARKOVI, ne na Janě. Ta druhá
+  půlka je důležitější než ta první: odpovědnost drží od dneška už jen
+  ten zápis.
+
+  Změněno v témže commitu jako `20260906060000_stitek_ne_zamek.sql`.
+*/
+select public.complete_task(:'ukol_cizi');
+
+select pg_temp.check('cizí jmenovitý úkol číšník zavřít SMÍ (štítek, ne zámek)',
+  (select status from public.tasks where id = :'ukol_cizi') = 'done');
+select pg_temp.check('a done_by sedí na tom, kdo ho zavřel, ne na adresátovi',
+  (select done_by from public.tasks where id = :'ukol_cizi') = :'marek'
+  and (select employee_id from public.tasks where id = :'ukol_cizi') = :'jana');
 
 select set_config('test.user_id', '33333333-3333-3333-3333-333333333333', false);
 do $$

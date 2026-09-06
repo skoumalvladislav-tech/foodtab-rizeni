@@ -241,15 +241,21 @@ select pg_temp.check('audit ví, kdo splnil, i na koho zněl štítek',
 
 
 \echo ''
-\echo '== 5. Zámek na jmenovitém úkolu ZATÍM platí ============'
+\echo '== 5. Jmenovité přiřazení je štítek, ne zámek =========='
 
 /*
-  Zadání chce štítek, ne zámek. Neudělalo se — uvolnění shodí kontrolu
-  „číšník zavřel cizí úkol" v krok3_scenar, a to je cizí soubor.
+  6. 9. 2026 se pravidlo OBRÁTILO a tenhle oddíl s ním.
 
-  Tahle kontrola popisuje SKUTEČNÝ stav, ne kýžený. Až se zámek uvolní,
-  spadne — a to je správně: donutí to přepsat obojí najednou, ne nechat
-  hlášení tvrdit něco jiného než kód.
+  Do té doby tu stálo, že cizí jmenovitý úkol kolega nezavře, a byla
+  u toho poznámka, že se to nezměnilo jen proto, že by to shodilo
+  kontrolu v cizím scénáři. Šéfík obojí odblokoval
+  (docs/odpovedi-na-nocni-praci-2026-09-06.md) a `krok3_scenar` je
+  přepsaný v témže commitu jako `20260906060000_stitek_ne_zamek.sql`.
+
+  Měří se teď to, na čem po uvolnění zámku všechno stojí: kolega úkol
+  zavřít SMÍ, ale `done_by` musí sedět na NĚM, ne na tom, komu úkol
+  zněl. Kdyby se `done_by` bralo z adresáta, vypadalo by v datech, že
+  úkol splnil někdo, kdo u toho nebyl — a to je horší než zámek.
 */
 
 reset role;
@@ -261,15 +267,15 @@ select set_config('test.t_gita', :'t_gita', false);
 /*
   KOLEGA MUSÍ BÝT BEZ `tasks.manage`, jinak kontrola neměří nic.
 
-  Napoprvé tu byla Danuše z krok25 — jenže ta má roli `kuchyne`, a ta
-  má v šabloně `tasks.manage`. Úkol jí prošel první větví podmínky
-  (správce úkolů smí zavřít cokoli) a blok spadl s hláškou „zámek už
-  neplatí", i když zámek platil. Kontrola měřila oprávnění správce,
-  ne zámek.
+  Platilo to za starého pravidla a platí to i za nového, jen obráceně:
+  se `tasks.manage` by úkol zavřel odjakživa jako správce a o štítku by
+  to neřeklo nic. Napoprvé tu byla Danuše z krok25 — jenže ta má roli
+  `kuchyne`, která `tasks.manage` v šabloně má, a kontrola tak měřila
+  oprávnění správce, ne pravidlo.
 
   Proto `servis`: má `tasks.read`, takže úkol VIDÍ, a nemá
-  `tasks.manage`. Přesně ten člověk, o kterém zadání mluví — kolega,
-  co zaskakuje.
+  `tasks.manage`. Přesně ten člověk, o kterém rozhodnutí mluví —
+  kolega, co zaskakuje.
 */
 select id as role_servis from public.roles
  where tenant_id = :'tenant' and key = 'servis' \gset
@@ -285,6 +291,9 @@ select id as clen_honza from public.memberships
 insert into public.membership_branches (membership_id, branch_id)
 values (:'clen_honza', :'perla');
 
+select id as honza from public.employees
+ where user_id = '9999bbbb-0000-0000-0000-00000000000b' \gset
+
 select set_config('test.user_id', '9999bbbb-0000-0000-0000-00000000000b', false);
 set role authenticated;
 
@@ -293,19 +302,37 @@ select pg_temp.check('číšník tasks.manage nemá',
 select pg_temp.check('ale na ten úkol vidí',
   exists (select 1 from public.tasks where id = :'t_gita'));
 
-do $$
-declare v_ok boolean := false;
-begin
-  begin
-    perform public.complete_task(current_setting('test.t_gita')::uuid);
-  exception when insufficient_privilege then v_ok := true;
-  end;
-  if not v_ok then
-    raise exception 'SELHALO: zámek už neplatí — přepiš krok3_scenar i tenhle oddíl';
-  end if;
-  raise notice '  OK    ZATÍM platí zámek: cizí jmenovitý úkol nesplní (nález do hlášení)';
-end $$;
+select public.complete_task(:'t_gita');
 
+select pg_temp.check('kolega cizí jmenovitý úkol zavřít SMÍ',
+  (select status from public.tasks where id = :'t_gita') = 'done');
+select pg_temp.check('a done_by sedí na něm, ne na tom, komu úkol zněl',
+  (select done_by from public.tasks where id = :'t_gita') = :'honza'
+  and (select employee_id from public.tasks where id = :'t_gita') = :'gita');
+
+reset role;
+
+-- A v auditu je vidět obojí: kdo zavřel a na koho zněl štítek. Od
+-- uvolnění zámku se ty dva údaje běžně LIŠÍ, takže teprve tady se
+-- pozná, jestli se zapisují oba.
+select pg_temp.check('audit rozlišuje, kdo splnil a na koho zněl štítek',
+  exists (select 1 from public.audit_log
+          where entity_id = :'t_gita'
+            and after ->> 'splnil' = :'honza'
+            and after ->> 'stitek_na' = :'gita'));
+
+-- Úkol na ÚSEK smí zavřít taky každý, kdo ho vidí (odpověď 3): úkol na
+-- úsek, který smí zavřít jen někdo, zůstane v pátek večer nesplněný.
+reset role;
+insert into public.tasks (tenant_id, branch_id, title, usek_id, due_at)
+values (:'tenant', :'perla', 'Zamést zahrádku', :'zahradka', now() + interval '1 day')
+returning id as t_usek2 \gset
+
+select set_config('test.user_id', '9999bbbb-0000-0000-0000-00000000000b', false);
+set role authenticated;
+select public.complete_task(:'t_usek2');
+select pg_temp.check('úkol na úsek zavře kdokoli, kdo na něj vidí',
+  (select status from public.tasks where id = :'t_usek2') = 'done');
 reset role;
 
 
