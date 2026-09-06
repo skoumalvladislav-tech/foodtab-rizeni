@@ -72,6 +72,11 @@ export const NABIDKA: Polozka[] = [
   // Moje směny se sloučily do Docházky — byly to dvě obrazovky o téže
   // věci. Rozpis směn zůstává: to je rozpis všech, ne můj. Adresu
   // /moje-smeny drží přesměrování v next.config.ts, ne položka tady.
+  // Dnes je domovská obrazovka zaměstnance a je první schválně:
+  // spodní lišta bere položky odshora, takže to, co je tu první, má
+  // člověk na telefonu po ruce. Pravo null — obrazovku má každý sám
+  // za sebe, stejně jako Docházku.
+  { segment: 'dnes', nazev: 'Dnes', kratky: 'Dnes', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny' },
   { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
   { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny', jenPobocka: true },
   // Zálohy jsou peníze, ne nastavení — proto v hlavní nabídce hned za

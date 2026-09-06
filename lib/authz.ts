@@ -455,3 +455,35 @@ export function canSee(ctx: Context, permission: Permission): boolean {
 export function canSeeAny(ctx: Context, permissions: Permission[]): boolean {
   return permissions.some((p) => canSee(ctx, p))
 }
+
+/**
+ * Je tenhle člověk VEDENÍ?
+ *
+ * Rozhoduje se podle PRÁV, ne podle názvu role (pravidlo 2). Používá se
+ * jen na to, CO SE KRESLÍ — kam kdo přistane po přihlášení a jestli
+ * uvidí řadu modulů. Není to zámek: o přístupu rozhoduje dál
+ * `app.has_access` a RLS.
+ *
+ * ---------------------------------------------------------------------
+ * ROZHODNOUT: kam patří vedoucí směny?
+ *
+ * `people.manage` má v šablonách majitel a Provozní. `vedouci_smeny`
+ * má `shifts.manage`, ale ne `people.manage` — takže podle tohohle
+ * výčtu je zaměstnanec a přistane na Dnes.
+ *
+ * Vybral jsem tu opatrnější stranu: kdo plánuje směny, pořád taky
+ * chodí na směny, a Dnes mu odpovídá na tutéž otázku jako číšníkovi.
+ * Kdyby to Šéfíkovi nesedělo, přidá se sem `shifts.manage` a je to
+ * jedno slovo. Otázka je v `docs/hlaseni/otazky.md`.
+ *
+ * `isOwner` je tu zvlášť, protože majitel v databázi katalog práv
+ * obchází (`app.has_access` ho pustí na všechno z aktivních modulů) —
+ * ale `my_context` mu práva vypisuje podle modulů, takže na vypnutém
+ * modulu by mu `canSee` řeklo ne. Na „kdo je vedení" to vliv mít nemá.
+ */
+export function jeVedeni(ctx: Context): boolean {
+  return (
+    ctx.role?.isOwner === true ||
+    canSeeAny(ctx, ['settings.manage', 'people.manage'])
+  )
+}

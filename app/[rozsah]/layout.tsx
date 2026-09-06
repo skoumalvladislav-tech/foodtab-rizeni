@@ -6,6 +6,7 @@ import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 import {
   getContext,
   getUser,
+  jeVedeni,
   TENANT_SCOPE_SEGMENT,
   type Context,
 } from "@/lib/authz";
@@ -115,17 +116,30 @@ export default async function RozsahLayout({
     })),
   );
 
-  // Vypnutý modul se v liště kreslí taky — zákazník má vidět, co si může
-  // přikoupit. Cíl dostane jen ten, kde je aspoň jedna hotová obrazovka.
-  const moduly: ModulProp[] = ctx.modules.map((m) => {
-    const prvni = polozky.find((p) => p.modul === m.key && p.hotovo);
-    return {
-      klic: m.key,
-      nazev: m.label || NAZVY_MODULU[m.key],
-      aktivni: m.active,
-      cil: m.active && prvni ? `/${rozsah}/${prvni.segment}` : null,
-    };
-  });
+  /*
+    ŘADA MODULŮ JEN VEDENÍ.
+
+    Vypnutý modul se v liště kreslí schválně — zákazník má vidět, co si
+    může přikoupit. Jenže zaměstnanci ne: číšníkovi nabídka Tvorby menu,
+    Financí a Marketingu nepatří. Do těch modulů se stejně nedostane,
+    zabírá to nejcennější místo na obrazovce a na iPhonu to lezlo pod
+    ostrůvek (docs/dnes-obrazovka-zadani.md, oddíl 5).
+
+    Rozhoduje PRÁVO, ne název role (pravidlo 2). Není to zámek —
+    o přístupu rozhoduje dál `app.has_access` a RLS; tohle je jen
+    o tom, co se kreslí.
+  */
+  const moduly: ModulProp[] = jeVedeni(ctx)
+    ? ctx.modules.map((m) => {
+        const prvni = polozky.find((p) => p.modul === m.key && p.hotovo);
+        return {
+          klic: m.key,
+          nazev: m.label || NAZVY_MODULU[m.key],
+          aktivni: m.active,
+          cil: m.active && prvni ? `/${rozsah}/${prvni.segment}` : null,
+        };
+      })
+    : [];
 
   const nastaveni: PolozkaProp[] = polozkyNastaveni(ctx).map((p) => ({
     segment: p.segment,

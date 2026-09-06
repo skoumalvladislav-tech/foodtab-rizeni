@@ -140,11 +140,15 @@ export default function Ram({
           Food<em>tab</em>
         </Link>
 
-        <nav className="ft-mods" aria-label="Moduly">
-          {moduly.map((m) => (
-            <Modul key={m.klic} modul={m} vybrany={m.klic === vybranyModul} />
-          ))}
-        </nav>
+        {/* Prazdna rada se nekresli vubec — jinak by po sobe nechala
+            mezeru a na telefonu je kazdy pixel videt. */}
+        {moduly.length > 0 ? (
+          <nav className="ft-mods" aria-label="Moduly">
+            {moduly.map((m) => (
+              <Modul key={m.klic} modul={m} vybrany={m.klic === vybranyModul} />
+            ))}
+          </nav>
+        ) : null}
 
         <div className="ft-spacer" />
 
@@ -244,11 +248,13 @@ export default function Ram({
       </header>
 
       {/* Na mobilu se moduly stěhují pod lištu jako rolovatelná řádka. */}
-      <nav className="ft-mob-mods" aria-label="Moduly">
-        {moduly.map((m) => (
-          <Modul key={m.klic} modul={m} vybrany={m.klic === vybranyModul} />
-        ))}
-      </nav>
+      {moduly.length > 0 ? (
+        <nav className="ft-mob-mods" aria-label="Moduly">
+          {moduly.map((m) => (
+            <Modul key={m.klic} modul={m} vybrany={m.klic === vybranyModul} />
+          ))}
+        </nav>
+      ) : null}
 
       <div className="ft-body">
         {/*

@@ -44,13 +44,26 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
   */
   const zQr = String(formData.get('zqr') ?? '') === '1'
 
+  /*
+    KAM SE PO PÍCHNUTÍ VRÁTIT.
+
+    Píchá se ze dvou obrazovek — z Docházky a z Dnes — ale CESTA DO
+    DATABÁZE JE JEDNA. Druhá cesta by znamenala druhé místo, kde se
+    dá zapomenout na kód nebo na hlášku o uzavřeném příchodu.
+
+    Hodnota se nebere z formuláře volně: je to výčet, ne cesta. Kdyby
+    se posílala celá adresa, dal by se člověk po píchnutí poslat kamkoli.
+  */
+  const zpet =
+    String(formData.get('zpet') ?? '') === 'dnes' ? 'dnes' : 'dochazka'
+
   if (druh !== 'in' && druh !== 'out') return
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
   if (!kod) {
-    redirect(`/${rozsah}/dochazka?chyba=kod`)
+    redirect(`/${rozsah}/${zpet}?chyba=kod`)
   }
 
   const supabase = await getServerSupabase()
@@ -76,8 +89,8 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
     const vyprselo = zQr && error.code === '22023'
     redirect(
       vyprselo
-        ? `/${rozsah}/dochazka?chyba=kod-vyprsel`
-        : `/${rozsah}/dochazka?chyba=pichnuti&text=${encodeURIComponent(error.message)}`,
+        ? `/${rozsah}/${zpet}?chyba=kod-vyprsel`
+        : `/${rozsah}/${zpet}?chyba=pichnuti&text=${encodeURIComponent(error.message)}`,
     )
   }
 
@@ -94,10 +107,10 @@ export async function zapsatDochazku(formData: FormData): Promise<void> {
   */
   const r = (data as { uzavren_stary: boolean; stary_den: string | null }[] | null)?.[0]
 
-  revalidatePath(`/${rozsah}/dochazka`)
+  revalidatePath(`/${rozsah}/${zpet}`)
   redirect(
     r?.uzavren_stary && r.stary_den
-      ? `/${rozsah}/dochazka?pichnuto=${druh}&uzavreno=${r.stary_den}`
-      : `/${rozsah}/dochazka?pichnuto=${druh}`,
+      ? `/${rozsah}/${zpet}?pichnuto=${druh}&uzavreno=${r.stary_den}`
+      : `/${rozsah}/${zpet}?pichnuto=${druh}`,
   )
 }
