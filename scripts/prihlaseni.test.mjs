@@ -43,6 +43,7 @@ import {
   HLASKA_STROP,
   jeStrop,
   maUkazatNaPlochu,
+  normalizujKod,
   zbyvaDoZnovu,
 } from '../lib/prihlaseni.ts'
 import { nactiKomponentu } from './vykreslit.mjs'
@@ -57,6 +58,52 @@ const ma = (popis, sk, ce) => {
     `  ${ok ? 'OK   ' : 'CHYBA'} ${popis}${ok ? '' : ` → ${JSON.stringify(sk)} ≠ ${JSON.stringify(ce)}`}`,
   )
 }
+
+/**
+ * Zdroják bez komentářů — hlídá se KÓD, ne to, co se o něm píše.
+ *
+ * Napoprvé tady komentáře nebyly odstraněné a dvě kontroly spadly na
+ * vlastní dokumentaci: v hlavičce obou souborů je vysvětlené, PROČ se
+ * `getBrowserSupabase` nepoužívá, a hledaný výraz se trefil do té věty.
+ * Kontrola by tak zakazovala i psát o tom, čemu brání — a kdo by ten
+ * odstavec smazal, „opravil" by ji.
+ *
+ * Řetězce se přeskakují, aby `'https://…'` nevypadalo jako začátek
+ * komentáře.
+ */
+function bezKomentaru(zdroj) {
+  let out = ''
+  let i = 0
+  while (i < zdroj.length) {
+    const c = zdroj[i]
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1
+      while (j < zdroj.length && zdroj[j] !== c) {
+        if (zdroj[j] === '\\') j++
+        j++
+      }
+      out += zdroj.slice(i, j + 1)
+      i = j + 1
+      continue
+    }
+    if (c === '/' && zdroj[i + 1] === '/') {
+      const k = zdroj.indexOf('\n', i)
+      i = k === -1 ? zdroj.length : k
+      continue
+    }
+    if (c === '/' && zdroj[i + 1] === '*') {
+      const k = zdroj.indexOf('*/', i + 2)
+      i = k === -1 ? zdroj.length : k + 2
+      continue
+    }
+    out += c
+    i++
+  }
+  return out
+}
+
+const nacti = (cesta) =>
+  bezKomentaru(fs.readFileSync(new URL(cesta, KOREN), 'utf8'))
 
 /* --- 1. „moc pokusů" se nesmí splést se „špatný kód" ------------------ */
 
@@ -287,6 +334,148 @@ ma('a nespletl by si jinou hodnotu',
 ma('a značku bez toho id nenajde vůbec',
   vstup('<input id="email" autocomplete="one-time-code">', 'kod'), null)
 
+/* --- vložení celého kódu naráz -------------------------------------- */
+
+/*
+  TOHLE JE ZKOUŠKA NA TO, CO SE 6. 9. ROZBILO.
+
+  Šéfík nemohl na iPhonu vložit zkopírovaný kód: bublina „Vložit"
+  problikla a zmizela. Příčina nebyla ve vkládání, ale v překreslování —
+  odpočet „Poslat znovu" tikal po vteřinách uvnitř téže komponenty jako
+  políčko, takže se pole každou vteřinou překreslilo a bublina se
+  zavřela.
+
+  Měří se tedy obojí: že kód vložený NARÁZ projde celý, a že tikání
+  není ve stromu s polem.
+*/
+
+ma('šest číslic vložených naráz projde celých',
+  normalizujKod('123456'), '123456')
+ma('a projde i s mezerou, jak se kód sází v e-mailu',
+  normalizujKod('123 456'), '123456')
+ma('i s nezlomitelnou mezerou, kterou trim() neodstraní',
+  normalizujKod('123 456'), '123456')
+ma('i s úzkou nezlomitelnou mezerou',
+  normalizujKod('123 456'), '123456')
+ma('i se znakem nulové šířky, který člověk nevidí',
+  normalizujKod('1​23456'), '123456')
+ma('i se značkou pořadí bajtů na začátku',
+  normalizujKod('﻿123456'), '123456')
+ma('i se zalomením řádku z kopírování',
+  normalizujKod('123\n456'), '123456')
+ma('prázdno zůstane prázdné', normalizujKod('   '), '')
+ma('nic zůstane prázdné', normalizujKod(null), '')
+
+/*
+  Písmena se NEODSTRAŇUJÍ. Kdyby Supabase někdy vydával kód s písmeny,
+  odstraňování nečíslic by ho tiše rozbilo — a hledalo by se to
+  v ověřování, ne tady.
+*/
+ma('písmena se nezahazují', normalizujKod('a1b2c3'), 'a1b2c3')
+
+/*
+  A že pole a odpočet nejsou v jednom stromu. Tohle je ta vlastní
+  příčina, ne příznak.
+*/
+const zdrojFormularSurovy = fs.readFileSync(
+  new URL('app/prihlaseni/prihlaseni-kodem.tsx', KOREN),
+  'utf8',
+)
+const zdrojOdpoctu = nacti('app/prihlaseni/poslat-znovu.tsx')
+
+ma('odpočet má vlastní komponentu',
+  zdrojFormularSurovy.includes('poslat-znovu'), true)
+ma('a tik je v ní, ne u pole',
+  zdrojOdpoctu.includes('setInterval'), true)
+ma('komponenta s polem už netiká',
+  nacti('app/prihlaseni/prihlaseni-kodem.tsx').includes('setInterval'), false)
+/*
+  V komponentě s tikem nesmí být žádné pole, DO KTERÉHO SE PÍŠE.
+
+  Skryté `<input type="hidden">` vadit nemůže — nese jen hodnotu do
+  formuláře, nedá se do něj ťuknout a bublinu „Vložit" nad ním nikdo
+  neotevře. Napoprvé tahle kontrola hledala prostě `<input` a spadla
+  právě na nich; měřila by tedy něco jiného, než na co míří.
+*/
+const poleVOdpoctu = (zdrojOdpoctu.match(/<input\b[^>]*>/g) ?? [])
+  .filter((z) => !z.includes('type="hidden"'))
+
+ma('komponenta s tikem nemá pole, do kterého se píše',
+  poleVOdpoctu.length, 0)
+ma('a ten filtr by pole poznal',
+  ['<input type="hidden" name="a" />', '<input id="kod" />']
+    .filter((z) => !z.includes('type="hidden"')).length,
+  1)
+
+/*
+  Pole nesmí mít měnící se `key` — to by ho při každém překreslení
+  odpojilo a připojilo znovu, a bublina „Vložit" by mizela dál, i když
+  tikání zmizelo.
+*/
+/**
+ * Vyřízne ze ZDROJÁKU celou značku `<input …/>`, která má dané id.
+ *
+ * Nedá se to udělat regulárním výrazem s délkovým stropem: mezi
+ * `<input` a `/>` je u pole na kód přes tisíc znaků komentářů. Přesně
+ * na tom tahle kontrola napoprvé selhala — vzorec `[\s\S]{0,900}?` se
+ * netrefil, vrátil prázdno, a všechny tři kontroly pod ním prošly nad
+ * čímkoli. Kontrola, která nic nenajde a tváří se jako důkaz, je horší
+ * než žádná.
+ *
+ * Scanuje se proto poctivě: od `<input` dopředu, se sledováním
+ * složených závorek, dokud nepřijde `/>` na nulté úrovni.
+ */
+function znackaVeZdrojaku(zdroj, id) {
+  const kde = zdroj.indexOf(`id="${id}"`)
+  if (kde < 0) return ''
+  const zac = zdroj.lastIndexOf('<input', kde)
+  if (zac < 0) return ''
+  let hloubka = 0
+  for (let i = zac; i < zdroj.length; i++) {
+    const c = zdroj[i]
+    if (c === '{') hloubka++
+    else if (c === '}') hloubka--
+    else if (c === '/' && zdroj[i + 1] === '>' && hloubka === 0) {
+      return zdroj.slice(zac, i + 2)
+    }
+  }
+  return ''
+}
+
+/*
+  KOMENTÁŘE SE MUSÍ ODSTRANIT I TADY.
+
+  Uvnitř té značky jsou vysvětlivky, které samy zmiňují `onChange`
+  i `type="number"` — je v nich napsané, PROČ tam nejsou. Bez
+  odstranění se kontroly trefily přesně do nich a hlásily chybu nad
+  správným kódem. Je to potřetí, co mě na tomhle projektu chytila
+  vlastní próza; proto se `bezKomentaru` používá všude, kde se sahá
+  na zdroják.
+*/
+const poleSurove = bezKomentaru(znackaVeZdrojaku(zdrojFormularSurovy, 'kod'))
+
+// Nejdřív že se vůbec něco našlo — jinak jsou kontroly pod tím slepé.
+ma('značka pole na kód se ve zdrojáku našla', poleSurove.length > 0, true)
+ma('a je to opravdu to pole', poleSurove.includes('name="kod"'), true)
+ma('a komentáře z ní odešly',
+  poleSurove.includes('one-time-code` NECH TADY'), false)
+
+ma('pole na kód nemá key', /\bkey=/.test(poleSurove), false)
+ma('a je neřízené — žádný onChange, který by zahazoval znaky',
+  /onChange/.test(poleSurove), false)
+ma('a není type="number"', /type="number"/.test(poleSurove), false)
+ma('ale autoComplete one-time-code v něm zůstal',
+  /autoComplete="one-time-code"/.test(poleSurove), true)
+
+// A že ten vyřezávač pozná i to, co hledáme.
+ma('vyřezávač by našel key, kdyby tam bylo',
+  /\bkey=/.test(znackaVeZdrojaku('<input key={x} id="kod" name="kod" />', 'kod')),
+  true)
+ma('a type="number", kdyby tam bylo',
+  /type="number"/.test(
+    znackaVeZdrojaku('<input type="number" id="kod" name="kod" />', 'kod')),
+  true)
+
 ma('QR poznámka se ukáže jen po načtení kódu',
   obrazovka({ zQr: true }).includes('QR kódu na tabletu'), true)
 ma('a jinak ne', uvod.includes('QR kódu na tabletu'), false)
@@ -313,51 +502,6 @@ console.log('\n== 6. Cookie zakládá server, ne javascript ===============')
   na Supabase přímo z přihlašovací obrazovky, spadne to tady, a ne až
   za týden na Šéfíkově telefonu.
 */
-/**
- * Zdroják bez komentářů — hlídá se KÓD, ne to, co se o něm píše.
- *
- * Napoprvé tady komentáře nebyly odstraněné a dvě kontroly spadly na
- * vlastní dokumentaci: v hlavičce obou souborů je vysvětlené, PROČ se
- * `getBrowserSupabase` nepoužívá, a hledaný výraz se trefil do té věty.
- * Kontrola by tak zakazovala i psát o tom, čemu brání — a kdo by ten
- * odstavec smazal, „opravil" by ji.
- *
- * Řetězce se přeskakují, aby `'https://…'` nevypadalo jako začátek
- * komentáře.
- */
-function bezKomentaru(zdroj) {
-  let out = ''
-  let i = 0
-  while (i < zdroj.length) {
-    const c = zdroj[i]
-    if (c === '"' || c === "'" || c === '`') {
-      let j = i + 1
-      while (j < zdroj.length && zdroj[j] !== c) {
-        if (zdroj[j] === '\\') j++
-        j++
-      }
-      out += zdroj.slice(i, j + 1)
-      i = j + 1
-      continue
-    }
-    if (c === '/' && zdroj[i + 1] === '/') {
-      const k = zdroj.indexOf('\n', i)
-      i = k === -1 ? zdroj.length : k
-      continue
-    }
-    if (c === '/' && zdroj[i + 1] === '*') {
-      const k = zdroj.indexOf('*/', i + 2)
-      i = k === -1 ? zdroj.length : k + 2
-      continue
-    }
-    out += c
-    i++
-  }
-  return out
-}
-
-const nacti = (cesta) =>
-  bezKomentaru(fs.readFileSync(new URL(cesta, KOREN), 'utf8'))
 
 const zdrojFormular = nacti('app/prihlaseni/prihlaseni-kodem.tsx')
 const zdrojAkce = nacti('app/prihlaseni/akce.ts')

@@ -94,6 +94,35 @@ export function zbyvaDoZnovu(
 }
 
 /**
+ * Kód opsaný nebo vložený člověkem → kód, který přijme Supabase.
+ *
+ * ---------------------------------------------------------------------
+ * PROČ TO NENÍ JEN `trim()`
+ *
+ * Lidé kód **kopírují z e-mailu i s tím, co je kolem**. Z Gmailu se
+ * vedle číslic veze:
+ *
+ *   * obyčejná mezera (kód bývá vysázený `123 456`),
+ *   * NEZLOMITELNÁ mezera U+00A0 — tu `trim()` neodstraní a `\s`
+ *     v JavaScriptu ano, ale spolehnout se na to naslepo je zbytečné
+ *     riziko,
+ *   * úzká nezlomitelná mezera U+202F a znak nulové šířky U+200B,
+ *     které do HTML propašuje sazba e-mailu a člověk je NEVIDÍ.
+ *
+ * Zůstane tedy jen to, co je opravdu kód. Nečíslice se schválně
+ * NEODSTRAŇUJÍ všechny — kdyby Supabase někdy vydával kód s písmeny,
+ * tohle by ho tiše rozbilo. Odstraňují se jen mezery a neviditelné
+ * znaky, tedy to, co do kódu nepatří v žádné jeho podobě.
+ */
+export function normalizujKod(vstup: string | null | undefined): string {
+  return String(vstup ?? '')
+    // Všechny druhy mezer a zalomení, včetně NBSP a úzké NBSP.
+    .replace(/[\s  ]+/g, '')
+    // Znaky nulové šířky — v e-mailu je nikdo neuvidí, Supabase ano.
+    .replace(/[​‌‍﻿]/g, '')
+}
+
+/**
  * Má se ukázat věta „nejdřív na plochu, pak se přihlas"?
  *
  * Na iPhonu má aplikace přidaná na plochu VLASTNÍ ÚLOŽIŠTĚ, oddělené

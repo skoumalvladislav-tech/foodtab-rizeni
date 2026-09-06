@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useSyncExternalStore } from "react";
+import { useActionState, useRef, useSyncExternalStore } from "react";
 
 import { prihlasit } from "./akce";
-import { maUkazatNaPlochu, zbyvaDoZnovu } from "@/lib/prihlaseni";
+import { maUkazatNaPlochu, normalizujKod } from "@/lib/prihlaseni";
+import PoslatZnovu from "./poslat-znovu";
 import { PRAZDNY_STAV, type StavPrihlaseni } from "./stav";
 
 /**
@@ -85,19 +86,63 @@ export default function PrihlaseniKodem({
   );
 
   /*
-    Odpočet u „Poslat znovu".
+    ODPOČET TU SCHVÁLNĚ NENÍ — je v `poslat-znovu.tsx`.
 
-    Šéfík si vyžádal tři kódy během tří minut a platil jen ten poslední;
-    z obrazovky to poznat nešlo, takže zkoušel ten první. Zašedlé
-    tlačítko s číslem je to jediné, co tomu brání.
+    Dokud tikal tady, překresloval každou vteřinou celou obrazovku
+    včetně políčka na kód. Na iOS se tím zavírala bublina „Vložit"
+    dřív, než na ni člověk stihl ťuknout: Šéfík ji 6. 9. viděl bliknout
+    na pár milisekund a vložit kód nešlo vůbec.
 
-    Počítá se z času, který přišel ze SERVERU — kdyby si ho měřil
-    prohlížeč, obejde se to přetočením hodin. `ted` tiká po vteřinách
-    a `zbyva` je z něj jen spočítané; není to samostatný stav, takže
-    se ty dva nemají jak rozejít.
+    Tahle komponenta se teď překreslí jen tehdy, když se doopravdy něco
+    stane. Kdyby se sem tik vrátil, vrátí se s ním i ta chyba.
   */
-  const ted = useSyncExternalStore(odebiratTik, celeVteriny, nulaNaServeru);
-  const zbyva = zbyvaDoZnovu(stav.odeslanoKdy, ted);
+
+  /*
+    Odkaz na políčko s kódem — kvůli tlačítku „Vložit kód".
+
+    Pole zůstává NEŘÍZENÉ (bez `value` a `onChange`). Řízené pole by
+    každý stisk klávesy protáhlo Reactem, a to je zrovna ta cesta, na
+    které se vkládání celého kódu naráz nejčastěji láme.
+  */
+  const poleKodu = useRef<HTMLInputElement>(null);
+
+  /*
+    Umí tenhle prohlížeč přečíst schránku?
+
+    Firefox `readText()` nemá vůbec, Safari ho pouští jen z gesta
+    uživatele a jen na zabezpečeném spojení. Kde to nejde, tlačítko se
+    nekreslí — mrtvé tlačítko, které po ťuknutí nic neudělá, je horší
+    než žádné.
+  */
+  const umiSchranku = useSyncExternalStore(
+    nicNeodebira,
+    maCteniSchranky,
+    naServeru,
+  );
+
+  /*
+    Vložení ze schránky.
+
+    Kód se prožene `normalizujKod`, protože z e-mailu se veze i to, co
+    kolem něj je — mezery, nezlomitelné mezery, znaky nulové šířky.
+    Píše se přímo do neřízeného pole; React o tom vědět nemusí,
+    formulář si hodnotu vezme z DOM při odeslání.
+
+    Chyba se polyká schválně: schránka může být prázdná nebo ji
+    prohlížeč odmítne vydat, a ani jedno není porucha aplikace. Člověk
+    má pořád možnost kód opsat.
+  */
+  async function vlozitZeSchranky() {
+    try {
+      const text = await navigator.clipboard.readText();
+      const pole = poleKodu.current;
+      if (!pole) return;
+      pole.value = normalizujKod(text);
+      pole.focus();
+    } catch {
+      // Nedá se nic dělat, pole zůstane, jak bylo.
+    }
+  }
 
   const uvodniChyba = chybaZOdkazu
     ? "Odkaz už neplatí. Nechte si prosím poslat nový kód."
@@ -194,28 +239,69 @@ export default function PrihlaseniKodem({
               </p>
 
               <label htmlFor="kod" style={popisekPole}>
-                Kód z e-mailu
+                Opište kód z e-mailu
               </label>
               <input
+                ref={poleKodu}
                 id="kod"
                 name="kod"
                 type="text"
                 required
                 autoFocus
                 /*
-                  `one-time-code` je to podstatné: bez něj iPhone kód
-                  z oznámení nenabídne a člověk ho musí přepisovat ručně
-                  mezi dvěma aplikacemi. To je přesně ta chvíle, kdy to
-                  lidi vzdají.
+                  `one-time-code` NECH TADY, ale nic kolem něj neslibuj.
+
+                  iPhone kód sám nabídne jen ze Zpráv (SMS) a z Apple
+                  Mailu — kdo čte poštu v Gmailu, nedostane nic. Věta
+                  „kód se vyplní sám" by tedy byla nepravda u většiny
+                  lidí. Až přibude přihlášení přes SMS, začne to
+                  fungovat samo a nebude se muset měnit nic.
                 */
                 autoComplete="one-time-code"
+                /*
+                  `type="text"` s `inputMode="numeric"`, NE `type="number"`.
+                  Číselné pole na mobilech kroutí vkládání, přidává
+                  šipky a u kódu s vedoucí nulou umí ukousnout znak.
+                */
                 inputMode="numeric"
-                /* Číslice a mezery; kód se jinam než sem neopisuje. */
-                pattern="[0-9 ]*"
-                maxLength={10}
+                /*
+                  Pole je NEŘÍZENÉ a nemá žádný `onChange`, který by
+                  cestou zahazoval znaky. Vložení šesti číslic naráz
+                  tudy projde celé; uklidí se až na serveru přes
+                  `normalizujKod`. Filtr při psaní je nejčastější důvod,
+                  proč vkládání kódu nefunguje.
+
+                  `pattern` je jen nápověda prohlížeči, ne filtr —
+                  proto v něm mezery jsou.
+                */
+                pattern="[0-9  ]*"
+                maxLength={16}
                 placeholder="123456"
                 style={{ ...pole, letterSpacing: "0.25em", fontSize: "20px" }}
               />
+
+              {/*
+                Tlačítko „Vložit kód".
+
+                Jedno ťuknutí místo podržení prstu a trefování se do
+                bubliny, která na iOS mizí. V provozu, kde má člověk
+                mokré ruce a spěchá, je to rozdíl mezi „jde to"
+                a „nejde to".
+
+                Když prohlížeč čtení schránky neumí nebo ho zakáže,
+                tlačítko se NEUKÁŽE VŮBEC — mrtvé tlačítko je horší než
+                žádné.
+              */}
+              {umiSchranku ? (
+                <button
+                  type="button"
+                  onClick={vlozitZeSchranky}
+                  className="ft-tl ft-tl-vedlejsi ft-tl-male"
+                  style={{ marginTop: "8px" }}
+                >
+                  Vložit kód
+                </button>
+              ) : null}
 
               {chyba ? (
                 <p className="hlaska-chyba" role="alert">
@@ -242,18 +328,20 @@ export default function PrihlaseniKodem({
                 marginTop: "16px",
               }}
             >
-              <form action={odeslat}>
-                <input type="hidden" name="akce" value="poslat" />
-                <input type="hidden" name="email" value={stav.email} />
-                <input type="hidden" name="kam" value={kam} />
-                <button
-                  type="submit"
-                  disabled={ceka || zbyva > 0}
-                  className="ft-tl ft-tl-vedlejsi ft-tl-male"
-                >
-                  {zbyva > 0 ? `Poslat znovu (${zbyva} s)` : "Poslat znovu"}
-                </button>
-              </form>
+              {/*
+                Odpočet žije VE VLASTNÍ KOMPONENTĚ, protože tiká —
+                a tikání uvnitř téhle by každou vteřinou překreslilo
+                i políčko na kód nad ním. Viz `poslat-znovu.tsx`.
+              */}
+              <div>
+                <PoslatZnovu
+                  odeslanoKdy={stav.odeslanoKdy}
+                  email={stav.email}
+                  kam={kam}
+                  odeslat={odeslat}
+                  ceka={ceka}
+                />
+              </div>
 
               {/*
                 Změna adresy je taky odeslání formuláře, ne odkaz —
@@ -270,13 +358,6 @@ export default function PrihlaseniKodem({
                 </button>
               </form>
             </div>
-
-            {zbyva > 0 ? (
-              <p style={{ ...popis, margin: "10px 0 0", fontSize: "12px" }}>
-                Nový kód zneplatní ten předchozí. Platí vždycky jen ten
-                poslední.
-              </p>
-            ) : null}
           </>
         )}
 
@@ -309,17 +390,6 @@ export default function PrihlaseniKodem({
   je pokaždé jiné, React by to bral jako změnu úložiště a překresloval
   by donekonečna.
 */
-function odebiratTik(zmena: () => void): () => void {
-  const t = setInterval(zmena, 1000);
-  return () => clearInterval(t);
-}
-function celeVteriny(): number {
-  return Math.floor(Date.now() / 1000) * 1000;
-}
-function nulaNaServeru(): number {
-  return 0;
-}
-
 /* Běží aplikace v prohlížeči na telefonu, a ne přidaná na ploše? */
 function nicNeodebira(): () => void {
   return () => {};
@@ -335,6 +405,12 @@ function vProhlizeciNaTelefonu(): boolean {
 }
 function naServeru(): boolean {
   return false;
+}
+
+/* Umí prohlížeč přečíst schránku? Firefox ne, Safari jen z gesta. */
+function maCteniSchranky(): boolean {
+  return typeof navigator !== "undefined"
+    && typeof navigator.clipboard?.readText === "function";
 }
 
 const popis = {

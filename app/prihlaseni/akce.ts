@@ -7,6 +7,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import {
   bezpecnyCil,
   hlaskaProChybu,
+  normalizujKod,
   HLASKA_STROP,
   jeStrop,
 } from '@/lib/prihlaseni'
@@ -116,7 +117,14 @@ export async function prihlasit(
   }
 
   if (akce === 'overit') {
-    const kod = String(formData.get('kod') ?? '').replace(/\s/g, '')
+    /*
+      Z e-mailu se veze i to, co je kolem kódu — mezery, nezlomitelné
+      mezery, znaky nulové šířky ze sazby. Uklízí se to AŽ TADY.
+
+      V prohlížeči se nefiltruje schválně: filtr při psaní je
+      nejčastější důvod, proč se vložení celého kódu naráz rozbije.
+    */
+    const kod = normalizujKod(String(formData.get('kod') ?? ''))
 
     if (kod === '') {
       return {
