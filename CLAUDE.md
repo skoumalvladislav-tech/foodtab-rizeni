@@ -253,7 +253,22 @@ a nech ji tomu, kdo ho píše.
 
 ## Konvence
 
-- Názvy tabulek, sloupců a funkcí anglicky, `snake_case`.
+- Názvy tabulek, sloupců a funkcí `snake_case`. Jazyk podle vrstvy —
+  pravidlo opravené 6. 9. 2026, protože to původní („všechno anglicky")
+  už dávno neplatilo a nikdo se podle něj neřídil:
+  - **Základní schéma** (`tenants`, `branches`, `employees`, `roles`,
+    `permissions`, `memberships`, `audit_log`) je **anglicky** — je
+    společné pro všechny moduly a nemění se.
+  - **Provozní moduly** (docházka, zálohy, komunikace, úseky) jsou
+    **česky**: `konverzace`, `konverzace_zpravy`, `zalohy`,
+    `zapomenute_odchody`, `useky`. Vzniklo to tak a přejmenovávat
+    půlku schématu kvůli názvu je riziko bez užitku.
+  - **Uvnitř jednoho modulu se jazyky nemíchají.**
+
+  Vývojář, který to po nás přebere, potřebuje popis **pravdivý**, ne
+  hezký. Pravidlo, které se nedodržuje, je horší než pravidlo, které
+  připouští výjimku — protože podle prvního se nedá poznat, co je
+  chyba a co záměr.
 - Komentáře v kódu, chybové hlášky a texty rozhraní **česky**.
 - V rozhraní se `roles` jmenují **„Oprávnění"** a `positions` **„Pozice"**;
   v databázi zůstávají anglické názvy. Slovo „oprávnění" na obrazovce
