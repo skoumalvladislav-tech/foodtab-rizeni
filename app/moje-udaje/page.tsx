@@ -15,6 +15,9 @@ import {
   ulozitKontakt,
   vzitNaVedomi,
 } from './akce'
+// Odhlášení bydlí u přihlášení, ne tady: je to tatáž věc z druhé strany
+// a obojí musí sáhnout na cookie stejným způsobem (serverem).
+import { odhlasit } from '@/app/prihlaseni/akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -457,6 +460,31 @@ export default async function MojeUdaje({
           <a href="/moje-udaje/export" className="ft-tl ft-tl-vedlejsi" download>
             Stáhnout soubor
           </a>
+        </section>
+
+        {/* --- odhlášení ------------------------------------------- */}
+        {/*
+          DOLE A ODDĚLENÉ, NE V HORNÍ LIŠTĚ.
+
+          V liště už není místo a hlavně: omylem ťuknutý odhlas uprostřed
+          směny je horší než o jedno ťuknutí delší cesta. Číšník, který
+          se odhlásí při vydávání, se pak přihlašuje kódem z e-mailu
+          s rukama plnýma talířů.
+
+          Na kiosku odhlášení NENÍ — tam se odhlašuje samo po nečinnosti
+          (krok E). Sdílený tablet a osobní telefon jsou dvě různé věci.
+        */}
+        <section style={{ ...karta, marginTop: '32px', borderColor: 'var(--line-2)' }}>
+          <h2 style={nadpisKarty}>Odhlásit se</h2>
+          <p style={popis}>
+            Odhlásí vás z tohohle zařízení. Příště se přihlásíte kódem,
+            který vám pošleme e-mailem — heslo nepotřebujete.
+          </p>
+          <form action={odhlasit}>
+            <button type="submit" className="ft-tl ft-tl-vedlejsi">
+              Odhlásit se
+            </button>
+          </form>
         </section>
       </div>
     </>

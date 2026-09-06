@@ -108,6 +108,17 @@ select public.zalozit_rozhovor(:'tenant', 'osobni', null, 'Ivan a Jarmila', null
 select public.poslat_zpravu(:'rozhovor', 'Přines zítra ten nůž, co jsi slíbila.') as zprava \gset
 reset role;
 
+/*
+  Do-bloky psql proměnné nevidí a berou hodnoty přes `current_setting`.
+
+  `test.tenant` a `test.perla` se tu musí nastavit ZNOVU, i když je
+  nastavily scénáře přede mnou: psql pouští každý soubor ve VLASTNÍM
+  sezení, takže se sem nic nepřenese. Chytil to
+  `scripts/scenare.test.mjs` — místní běh nad PGlite ne, protože tam
+  jede všechno v jednom sezení a hodnota tam ještě ležela.
+*/
+select set_config('test.tenant', :'tenant', false);
+select set_config('test.perla', :'perla', false);
 select set_config('test.tablet', :'tablet', false);
 select set_config('test.pin_jarmila', :'pin_jarmila', false);
 
