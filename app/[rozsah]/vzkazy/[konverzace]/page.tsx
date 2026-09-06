@@ -182,7 +182,7 @@ export default async function Rozhovor({
             : 'Nejstarší nahoře.'
         }
         vpravo={
-          <Link href={`/${rozsah}/rozhovory`} className="ft-tl">
+          <Link href={`/${rozsah}/vzkazy`} className="ft-tl">
             Zpět na rozhovory
           </Link>
         }

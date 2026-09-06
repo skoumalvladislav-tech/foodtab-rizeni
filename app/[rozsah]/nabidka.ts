@@ -86,17 +86,19 @@ export const NABIDKA: Polozka[] = [
   // kam se dostane.
   { segment: 'zalohy', nazev: 'Zálohy', kratky: 'Zálohy', modul: 'provoz', pravo: 'advances.manage', hotovo: true, ikona: 'kniha' },
   { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
-  { segment: 'zpravy', nazev: 'Nástěnka', kratky: 'Zprávy', modul: 'provoz', pravo: 'communication.read', hotovo: true, ikona: 'zprava' },
-  // Rozhovory stojí VEDLE Nástěnky, ne místo ní. Nástěnka je „tohle
-  // vědí všichni“, rozhovor je „bavíme se o tom“ — dvě různé věci, dva
-  // různé tvary. Tak to má i 7shifts (oznámení vs. chat) a Slack.
+  // VZKAZY: jedna polozka, uvnitr dve zalozky.
   //
-  // `pravo: null` je schválně: konverzaci neautorizuje oprávnění, ale
-  // ÚČASTNICTVÍ. `communication.read` je právo na Nástěnku a číšník ho
-  // v roli nemá — kdyby na něm visely i rozhovory, nepřečetl by si
-  // vlastní vlákno. Kdo do které konverzace smí, rozhoduje
-  // `app.je_ucastnik` v databázi.
-  { segment: 'rozhovory', nazev: 'Rozhovory', kratky: 'Rozhovory', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zprava' },
+  // Do 7. 9. 2026 tu stala Nastenka a Rozhovory zvlast. Byly to dve
+  // ruzne veci — a porad jsou —, ale dve polozky v nabidce znamenaly
+  // dve mista, kam se chodit divat, jestli neco nepdrislo. Slucuje se
+  // VCHOD, ne obsah (rozhodnuti Sefika 6. 9.).
+  //
+  // pravo: null schvalne — konverzaci autorizuje UCASTNICTVI, ne
+  // opravneni. communication.read je pravo na Nastenku a cisnik ho
+  // v roli nema; kdyby na nem visela cela polozka, neprecetl by si
+  // vlastni vlakno. Na samotnou zalozku Nastenka se to pravo ptá
+  // uvnitr (vzkazy/nastenka.tsx).
+  { segment: 'vzkazy', nazev: 'Vzkazy', kratky: 'Vzkazy', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zprava' },
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },

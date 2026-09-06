@@ -67,12 +67,12 @@ export async function otevritKanalPobocky(formData: FormData): Promise<void> {
   // Hlášku psala databáze a je pro člověka — nepřepisuje se.
   if (error) {
     redirect(
-      `/${z.rozsah}/rozhovory?chyba=${encodeURIComponent(error.message)}`,
+      `/${z.rozsah}/vzkazy?chyba=${encodeURIComponent(error.message)}`,
     )
   }
 
-  revalidatePath(`/${z.rozsah}/rozhovory`)
-  redirect(`/${z.rozsah}/rozhovory/${String(data)}`)
+  revalidatePath(`/${z.rozsah}/vzkazy`)
+  redirect(`/${z.rozsah}/vzkazy/${String(data)}`)
 }
 
 /**
@@ -93,7 +93,7 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
   const nalehava = String(formData.get('nalehava') ?? '') === 'ano'
   if (konverzace === '' || text === '') return
 
-  const zpet = `/${z.rozsah}/rozhovory/${konverzace}`
+  const zpet = `/${z.rozsah}/vzkazy/${konverzace}`
 
   const supabase = await getServerSupabase()
   const { error } = await supabase.rpc('poslat_zpravu', {
@@ -131,13 +131,13 @@ export async function oznacitPrecteno(formData: FormData): Promise<void> {
   })
   if (error) {
     redirect(
-      `/${z.rozsah}/rozhovory/${konverzace}?chyba=${encodeURIComponent(error.message)}`,
+      `/${z.rozsah}/vzkazy/${konverzace}?chyba=${encodeURIComponent(error.message)}`,
     )
   }
 
   // Odznak s nepřečtenými je v rámu, takže se překresluje i layout.
   revalidatePath(`/${z.rozsah}`, 'layout')
-  redirect(`/${z.rozsah}/rozhovory/${konverzace}`)
+  redirect(`/${z.rozsah}/vzkazy/${konverzace}`)
 }
 
 /**
@@ -158,7 +158,7 @@ export async function stornovatZpravu(formData: FormData): Promise<void> {
   const supabase = await getServerSupabase()
   const { error } = await supabase.rpc('stornovat_zpravu', { p_zprava: zprava })
 
-  const zpet = `/${z.rozsah}/rozhovory/${konverzace}`
+  const zpet = `/${z.rozsah}/vzkazy/${konverzace}`
   if (error) {
     redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
   }
@@ -217,10 +217,10 @@ export async function zalozitVzkazVedeni(formData: FormData): Promise<void> {
   // i „Vyberte pobočku, ke které vzkaz patří.“
   if (error) {
     redirect(
-      `/${z.rozsah}/rozhovory?chyba=${encodeURIComponent(error.message)}`,
+      `/${z.rozsah}/vzkazy?chyba=${encodeURIComponent(error.message)}`,
     )
   }
 
-  revalidatePath(`/${z.rozsah}/rozhovory`)
-  redirect(`/${z.rozsah}/rozhovory/${String(data)}`)
+  revalidatePath(`/${z.rozsah}/vzkazy`)
+  redirect(`/${z.rozsah}/vzkazy/${String(data)}`)
 }
