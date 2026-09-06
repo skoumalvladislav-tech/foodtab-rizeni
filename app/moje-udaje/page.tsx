@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation'
 
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
+
 import { getContext, getUser } from '@/lib/authz'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { getCurrentTenantId } from '@/lib/firma'
@@ -75,7 +77,7 @@ export default async function MojeUdaje({
   }
 
   const user = await getUser()
-  if (!user) redirect('/prihlaseni')
+  if (!user) redirect(await odkazNaPrihlaseni())
 
   const ctx = await getContext(tenantId)
   if (!ctx) {

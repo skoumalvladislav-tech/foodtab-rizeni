@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 
 import {
   getContext,
@@ -50,7 +51,12 @@ export default async function RozsahLayout({
     */
     const adresa = (await headers()).get("x-foodtab-adresa") ?? "";
     const zQr = adresa.includes("kod=");
-    redirect(zQr ? "/prihlaseni?qr=1" : "/prihlaseni");
+    /*
+      Adresa se veze DÁL, aby se člověk po přihlášení vrátil tam, kam
+      šel. Sama `/prihlaseni` už tu hlavičku má nastavenou na sebe —
+      přesměrování je nový požadavek —, takže se to musí zabalit teď.
+    */
+    redirect(await odkazNaPrihlaseni(zQr ? { qr: "1" } : {}));
   }
 
   const tenantId = await getCurrentTenantId();

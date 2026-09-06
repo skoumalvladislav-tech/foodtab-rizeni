@@ -441,5 +441,76 @@ const zdrojKiosek = nacti('app/kiosek/kiosek.tsx')
 ma('na kiosku odhlášení NENÍ', /Odhlásit se/.test(zdrojKiosek), false)
 
 
+/* --- 8. Odmítnutí si pamatuje, kam člověk šel ------------------------ */
+
+console.log('\n== 8. Návrat na místo, odkud člověk šel ==================')
+
+/*
+  Prosté přesměrování na přihlášení původní adresu ZAHODÍ. Kdo si
+  otevřel odkaz na konkrétní rozhovor a nebyl přihlášený, skončil po
+  přihlášení na rozcestníku a musel ho hledat znovu — u člověka,
+  kterému někdo poslal odkaz na vzkaz vedení, je to rozdíl mezi
+  „přečetl si to" a „vzdal to".
+
+  Cesta se proto zabaluje do adresy UŽ VE CHVÍLI ODMÍTNUTÍ: na
+  přihlašovací obrazovce je hlavička `x-foodtab-adresa` rovna
+  `/prihlaseni`, protože přesměrování je nový požadavek.
+*/
+const zdrojLayout = nacti('app/[rozsah]/layout.tsx')
+const zdrojAdresa = nacti('lib/prihlaseni-adresa.ts')
+const zdrojStranka = nacti('app/prihlaseni/page.tsx')
+
+/*
+  HLEDÁ SE ADRESA, NE TVAR VOLÁNÍ.
+
+  Napoprvé tu byl vzorec `/redirect\(\s*["']\/prihlaseni/` a schválné
+  rozbití ho NESHODILO: původní podoba v rámu byla
+  `redirect(zQr ? "/prihlaseni?qr=1" : "/prihlaseni")`, tedy s ternárním
+  operátorem hned za závorkou. Vzorec počítal jen s adresou nalepenou
+  na `redirect(` a tuhle — jedinou, která tam doopravdy byla — minul.
+
+  Proto se teď hledá prostě to, že se v souboru vyskytne napsaná adresa
+  přihlášení. Cesta tam patřit nemá vůbec; od skládání je helper.
+*/
+const napsanaAdresa = /["']\/prihlaseni/
+
+ma('rám nemá napsanou adresu přihlášení',
+  napsanaAdresa.test(zdrojLayout), false)
+ma('a skládá ji helperem', zdrojLayout.includes('odkazNaPrihlaseni'), true)
+ma('Moje údaje ji taky nemají napsanou',
+  napsanaAdresa.test(nacti('app/moje-udaje/page.tsx')), false)
+ma('adresa se skládá přes bezpecnyCil, ne syrová',
+  zdrojAdresa.includes('bezpecnyCil'), true)
+
+/*
+  A u přihlašovací obrazovky se hledá POUŽITÍ, ne existence proměnné.
+
+  I tohle napoprvé nespadlo: kontrola se ptala, jestli se v souboru
+  vyskytuje `kamZAdresy` — a to platilo dál, protože zůstala řádka,
+  kde se rozbaluje ze `searchParams`. Měřila deklaraci, ne to, že se
+  hodnota opravdu použije.
+*/
+const radekKam = zdrojStranka
+  .split('\n')
+  .find((r) => r.includes('const kam =' ) || r.includes('const kam ='))
+const vypocetKam = zdrojStranka.slice(
+  zdrojStranka.indexOf('const kam ='),
+  zdrojStranka.indexOf('const kam =') + 200,
+)
+
+ma('řádka, která počítá kam, existuje', radekKam !== undefined, true)
+ma('a bere hodnotu z adresy', vypocetKam.includes('kamZAdresy'), true)
+ma('a prožene ji bezpecnyCil', vypocetKam.includes('bezpecnyCil'), true)
+
+// Že ty vzorce vůbec něco poznají — jinak by kontroly výš prošly nad
+// čímkoli.
+ma('vzorec napsané adresy se trefí i v ternárním operátoru',
+  napsanaAdresa.test('redirect(zQr ? "/prihlaseni?qr=1" : "/prihlaseni")'), true)
+ma('a trefí se i v jednoduchých uvozovkách',
+  napsanaAdresa.test("redirect('/prihlaseni')"), true)
+ma('a nechytá se na to správné',
+  napsanaAdresa.test('redirect(await odkazNaPrihlaseni())'), false)
+
+
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

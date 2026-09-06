@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { getUser } from "@/lib/authz";
+import { bezpecnyCil } from "@/lib/prihlaseni";
 import PrihlaseniKodem from "./prihlaseni-kodem";
 
 export const metadata: Metadata = {
@@ -17,9 +18,14 @@ export const dynamic = "force-dynamic";
 export default async function Prihlaseni({
   searchParams,
 }: {
-  searchParams: Promise<{ chyba?: string; qr?: string; odhlaseno?: string }>;
+  searchParams: Promise<{
+    chyba?: string;
+    qr?: string;
+    odhlaseno?: string;
+    kam?: string;
+  }>;
 }) {
-  const { chyba, qr, odhlaseno } = await searchParams;
+  const { chyba, qr, odhlaseno, kam: kamZAdresy } = await searchParams;
 
   /*
     PŘIHLÁŠENÝ ČLOVĚK SEM NEPATŘÍ.
@@ -41,12 +47,19 @@ export default async function Prihlaseni({
   }
 
   /*
-    Kam se po přihlášení vrátit. Adresu podává `proxy.ts` hlavičkou —
-    layout ani stránka `searchParams` z původního požadavku nedostanou.
-    Ověřuje se až na serveru v akci, tady je to jen návrh.
+    KAM SE PO PŘIHLÁŠENÍ VRÁTIT.
+
+    Přednost má `?kam=` z adresy: tu tam zabalil ten, kdo člověka
+    odmítl (`lib/prihlaseni-adresa.ts`), a je to jediné místo, kde se
+    původní cesta ještě ví. Hlavička `x-foodtab-adresa` je tady totiž
+    už `/prihlaseni` — přesměrování je nový požadavek.
+
+    Hlavička zůstává jako záloha pro případ, že by se sem někdo dostal
+    přímo. Obojí je jen NÁVRH; ověřuje se to až v akci přes
+    `bezpecnyCil`, aby se odsud nedalo poslat člověka na cizí doménu.
   */
   const hlavicky = await headers();
-  const kam = hlavicky.get("x-foodtab-adresa") ?? "/";
+  const kam = bezpecnyCil(kamZAdresy ?? hlavicky.get("x-foodtab-adresa"));
 
   /*
     Kdo naskenoval kód z tabletu a nebyl přihlášený, přistane tady.
