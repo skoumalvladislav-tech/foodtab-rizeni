@@ -90,14 +90,40 @@ select pg_temp.check('a otisk sedí na solený PIN',
   `pichnout_pinem` a `potvrdit_zalohu_pinem` PIN BEROU, nevracejí —
   proto smí existovat. `pridelit_pin` ho vrací, ale jen v okamžiku,
   kdy ho sama nastavuje; přečíst existující PIN neumí nikdo.
+
+  ---------------------------------------------------------------------
+  PŘÍRŮSTEK 6. 9. 2026: `kiosk_zpravy_pinem`
+
+  Tahle kontrola 6. 9. 2026 v noci SPADLA, a to je celý důvod, proč tu
+  je. Krok E (`20260906050000_kiosek_zpravy.sql`) přidal veřejnou
+  funkci `public.kiosk_zpravy_pinem(p_klic text, p_pin text)` a Code se
+  na ní zastavil místo toho, aby ji dopsal do výčtu — správně, protože
+  ten výčet nemá měnit ten, kdo funkci napsal.
+
+  Funkci prošel Šéfík 6. 9. 2026. Zjištění:
+    * vrací `ok`, `jmeno`, `do_kdy`, `zpravy` — PIN ani jeho otisk
+      nevrací nikde,
+    * ověřuje ho přes `app.pin_overit`, stejně jako `pichnout_pinem`
+      a `potvrdit_zalohu_pinem`, které ve výčtu jsou,
+    * špatný PIN vrací řádkem `ok = false`, ne výjimkou, aby se
+      s rollbackem nesmazalo počítadlo nezdarů.
+
+  Do výčtu tedy patří. Dopsání NENÍ obcházení téhle kontroly — je to
+  její splnění: má vynutit, aby se na novou funkci někdo podíval, ne
+  zakázat nové funkce.
+
+  Code funkci odmítl přejmenovat tak, aby na vzor `%pin%` nesedla.
+  To bylo správné: funkce by PIN brala dál a příště by se na ni už
+  nikdo nepodíval.
 */
 select pg_temp.check('žádný nový průzor kolem PINů nepřibyl',
   (select array_agg(p.proname::text order by p.proname)
    from pg_proc p
    join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'public' and p.proname like '%pin%')
-  = array['nastavit_pin', 'navrh_pinu', 'pichnout_pinem',
-          'potvrdit_zalohu_pinem', 'pridelit_pin', 'zrusit_pin']);
+  = array['kiosk_zpravy_pinem', 'nastavit_pin', 'navrh_pinu',
+          'pichnout_pinem', 'potvrdit_zalohu_pinem', 'pridelit_pin',
+          'zrusit_pin']);
 
 
 \echo ''
