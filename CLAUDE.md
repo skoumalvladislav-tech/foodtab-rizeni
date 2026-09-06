@@ -347,6 +347,44 @@ tahle se tváří jako důkaz.
 který jeden scénář vynechával — znělo to jako „všechno", a bylo to
 „všechno kromě".
 
+### Testy, které závisí na hodině
+
+**Kontrola nesmí platit jen část dne.** Test, který přes den projde
+a večer spadne, je horší než rozbitý test: rozbitý se opraví, tenhle
+se „opraví sám" do rána a příště se na červenou nikdo nepodívá.
+
+Chytlo nás to potřetí, naposledy 6. 9. 2026 v `krok23_scenar`:
+
+```sql
+update public.attendance_events
+   set occurred_at = now() - interval '20 hours',   -- ← past
+       business_date = :'dnes'
+ where id = :'prvni';
+
+select pg_temp.check('okamžik je z jiného kalendářního dne', …);
+```
+
+Dvacet hodin zpátky je jiný kalendářní den **jen do 20:00**. Ve 20:23
+vyšlo `occurred_at::date` i `dnes` na totéž datum a kontrola spadla —
+na kódu, na kterém nic nebylo. Opraveno na **26 hodin**.
+
+Pravidla, která z toho plynou:
+
+1. **Posun přes půlnoc dělej o víc než 24 hodin.** Ne 20, ne 22 — ty
+   fungují jen dopoledne. `26 hours` je jiný kalendářní den vždycky.
+   `krok13_scenar` to má správně (26 a 30 hodin).
+2. **Datum si nepočítej sám, ptej se `app.business_date`.** Provozní
+   den začíná v 05:00, ne o půlnoci — `current_date` a provozní den
+   se každý den pět hodin rozcházejí. `krok6_scenar` to má napsané
+   u zakládání směny.
+3. **Než napíšeš posun v hodinách, zeptej se: platí to i ve 23:50?**
+   A pokud test závisí na tom, kolik je hodin, řekni to v komentáři
+   nahlas — ať to příště nikdo nehledá znovu.
+
+Pozná se to i bez čekání do večera: pusť zkoušku s posunutými hodinami,
+nebo si tu podmínku spočítej pro 23:59 na papíře. Zelená v poledne nic
+neříká o půlnoci.
+
 ### Čtení tabulek a plán importu
 
 ```bash

@@ -125,13 +125,30 @@ update public.attendance_events set occurred_at = now() - interval '3 hours'
   liší, PROVOZNÍ ne — a rozhodovat má ten provozní. Druhé píchnutí je
   omyl, ne nový nástup.
 
-  Zkouší se to tak, že otevřený příchod má okamžik o dvacet hodin
+  Zkouší se to tak, že otevřený příchod má okamžik o dvacet šest hodin
   zpátky (tedy jiný kalendářní den), ale provozní den dnešní. Kdyby
   kód porovnával `occurred_at::date` místo `business_date`, pustil by
   ho dál — a z jedné noční směny by se staly dvě.
+
+  ---------------------------------------------------------------------
+  PROČ 26 A NE 20
+
+  Do 6. 9. 2026 tu stálo dvacet hodin a scénář padal na každém běhu
+  po dvacáté hodině večer. Dvacet hodin zpátky je „jiný kalendářní
+  den" jen do 20:00; ve 20:23 vyšlo `occurred_at::date` i `dnes` na
+  totéž datum a kontrola o pár řádků níž spadla — na kódu, na kterém
+  nic nebylo.
+
+  DVACET ŠEST HODIN je jiný kalendářní den VŽDYCKY, ať se scénář pustí
+  kdykoli. Smysl kontroly se tím nemění: pořád jde o to, že se okamžik
+  a provozní den rozcházejí.
+
+  Obecně: v testu nesmí být posun, který je menší než 24 hodin
+  a přitom se tváří, že překročí půlnoc. Viz CLAUDE.md, „Testy, které
+  závisí na hodině".
 */
 update public.attendance_events
-   set occurred_at = now() - interval '20 hours',
+   set occurred_at = now() - interval '26 hours',
        business_date = :'dnes'
  where id = :'prvni';
 
