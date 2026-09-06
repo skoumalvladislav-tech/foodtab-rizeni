@@ -400,6 +400,161 @@ reset role;
 
 
 \echo ''
+\echo '== 6b. Vzkaz vedení: pobočku vybírá odesílatel =========='
+
+/*
+  Rozhodnutí Šéfíka 6. 9. (odpověď 2). Do té doby se „vedoucí pobočky"
+  odvozoval z DOMOVSKÉ pobočky odesílatele — a člověk, který dělá na
+  dvou pobočkách, si stěžuje na to, co zažil TAM, KDE ZROVNA BYL.
+  Vzkaz by přistál u vedoucího té druhé provozovny a odesílatel by se
+  to nedozvěděl. To je horší než žádná cesta.
+
+  Anna dosáhne na Perlu i na Bernard (oddíl PŘÍPRAVA), takže se jí
+  aplikace musí zeptat.
+*/
+
+select set_config('test.user_id', 'aaaa0000-0000-0000-0000-00000000000a', false);
+set role authenticated;
+
+select pg_temp.check('Anna dosáhne na dvě pobočky',
+  (select count(*) from app.visible_branch_ids(:'tenant')) = 2);
+
+do $$
+declare v_ok boolean := false; v_text text;
+begin
+  begin
+    perform public.zalozit_rozhovor(
+      current_setting('test.tenant')::uuid, 'vedeni', null, 'Bez pobočky', 'vedouci');
+  exception when check_violation then
+    v_ok := true; get stacked diagnostics v_text = message_text;
+  end;
+  if not v_ok then
+    raise exception 'SELHALO: vzkaz vedoucímu prošel bez výběru pobočky';
+  end if;
+  if v_text not like '%Vyberte pobočku%' then
+    raise exception 'SELHALO: hláška neříká, co má člověk udělat: %', v_text;
+  end if;
+  raise notice '  OK    bez výběru pobočky to aplikace odmítne větou (%)', v_text;
+end $$;
+
+-- S vybranou pobočkou to projde a adresáti sedí na TU pobočku.
+select public.zalozit_rozhovor(:'tenant', 'vedeni', :'bar', 'Na Bernardu', 'vedouci')
+  as vzkaz_bar \gset
+
+select pg_temp.check('s vybranou pobočkou vzkaz vznikne', :'vzkaz_bar' is not null);
+
+/*
+  A OBRAZOVKA SE PTÁ TÉŽE FUNKCE, jakou se vybírají účastníci. Kdyby
+  měla vlastní dotaz, slíbila by jeden okruh a konverzace by vznikla
+  s jiným — a u vzkazu vedení je to ten nejcitlivější rozdíl, jaký
+  může nastat.
+*/
+select pg_temp.check('kdo_uvidi_vzkaz vrací totéž, co je v účastnících',
+  (select array_agg(employee_id order by employee_id)
+   from public.kdo_uvidi_vzkaz(:'tenant', 'vedouci', :'bar'))
+  = (select array_agg(employee_id order by employee_id)
+     from public.konverzace_ucastnici
+     where konverzace_id = :'vzkaz_bar' and employee_id <> :'anna'));
+
+select pg_temp.check('a vrací JMÉNA, ne jen id',
+  (select count(*) from public.kdo_uvidi_vzkaz(:'tenant', 'vedouci', :'bar')
+   where btrim(coalesce(jmeno, '')) <> '') > 0);
+
+/*
+  MAJITEL SE MEZI „VEDOUCÍ POBOČKY" NEPLETE. Kdo si vybral vedoucího,
+  vybral si vedoucího — kdyby to zároveň četl majitel, je volba
+  adresáta k ničemu a stížnost na vedoucího nemá kam jít.
+
+  POZOR, JAK SE TAHLE KONTROLA MĚŘÍ. Napoprvé tu stálo jen to spodní
+  `not exists` a schválné rozbití (vyndání `and not r.is_owner`
+  z `app.adresati_vzkazu`) ji NESHODILO. Prošla totiž z jiného důvodu,
+  než na který mířila: majitelská role nemá `people.manage` jako řádek
+  v `role_permissions` — majitel dostává práva zkratkou `r.is_owner`
+  v `app.has_access`. Podmínka, kterou jsem chtěl ověřit, se tedy nikdy
+  nedostala ke slovu.
+
+  Role jsou ale DATA firmy a jdou upravovat. Až někdo majitelské roli
+  to právo připíše, začne na tom záležet. Proto se tady to právo
+  schválně připíše, změří se s ním a zase se odebere.
+*/
+select pg_temp.check('u volby „vedoucí" mezi adresáty majitel není',
+  not exists (
+    select 1 from public.kdo_uvidi_vzkaz(:'tenant', 'vedouci', :'bar') k
+    join public.employees e on e.id = k.employee_id
+    where e.user_id = :'sef'));
+
+reset role;
+select id as role_majitel from public.roles
+ where tenant_id = :'tenant' and is_owner limit 1 \gset
+insert into public.role_permissions (role_id, permission_key)
+values (:'role_majitel', 'people.manage')
+on conflict do nothing;
+
+select set_config('test.user_id', 'aaaa0000-0000-0000-0000-00000000000a', false);
+set role authenticated;
+select pg_temp.check('ani když majitelská role to právo dostane výslovně',
+  not exists (
+    select 1 from public.kdo_uvidi_vzkaz(:'tenant', 'vedouci', :'bar') k
+    join public.employees e on e.id = k.employee_id
+    where e.user_id = :'sef'));
+reset role;
+
+delete from public.role_permissions
+ where role_id = :'role_majitel' and permission_key = 'people.manage';
+
+select set_config('test.user_id', 'aaaa0000-0000-0000-0000-00000000000a', false);
+set role authenticated;
+
+/*
+  Pobočka, na kterou člověk nedosáhne, neprojde ani tady (pravidlo 4).
+
+  Ta zkušební pobočka se na konci zase MAŽE. Napoprvé jsem ji tu nechal
+  a spadl na tom krok25, který počítá, na kolik poboček majitel dosáhne
+  — z dvou byly tři. Data, která scénář založí a neuklidí, nejsou jeho
+  vlastní věc: běží nad touž databází jako všechno za ním.
+*/
+reset role;
+insert into public.branches (tenant_id, name, slug)
+values (:'tenant', 'Cizí provozovna', 'cizi-provozovna')
+returning id as cizi_pob \gset
+select set_config('test.cizi_pob', :'cizi_pob', false);
+
+select set_config('test.user_id', 'aaaa0000-0000-0000-0000-00000000000a', false);
+set role authenticated;
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.zalozit_rozhovor(
+      current_setting('test.tenant')::uuid, 'vedeni',
+      current_setting('test.cizi_pob')::uuid, 'Podvrh', 'vedouci');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: prošla pobočka, na kterou nedosáhne'; end if;
+  raise notice '  OK    pobočka, na kterou nedosáhne, neprojde';
+end $$;
+
+/*
+  Uklízí se OZNAČENÍM, ne výmazem.
+
+  `delete from public.branches` tady spadlo na cizím klíči z
+  `audit_log.branch_id` — a je to tak správně: audit se mazat nemá.
+  `deleted_at` je navíc to, co s pobočkou dělá i aplikace, takže se
+  scénář chová jako provoz. `app.visible_branch_ids` smazané pobočky
+  nevrací, takže krok25 zase napočítá dvě.
+*/
+reset role;
+update public.branches set deleted_at = now(), active = false
+ where id = :'cizi_pob';
+
+select set_config('test.user_id', :'sef', false);
+set role authenticated;
+select pg_temp.check('zkušební pobočka po sobě uklidila',
+  (select count(*) from app.visible_branch_ids(:'tenant')) = 2);
+reset role;
+
+
+\echo ''
 \echo '== 7. Mezi pobočkami: účastník čte, kdo v ní není, ne ===='
 
 /*

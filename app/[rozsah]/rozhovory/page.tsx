@@ -8,7 +8,7 @@ import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
-import { otevritKanalPobocky } from './akce'
+import { otevritKanalPobocky, zalozitVzkazVedeni } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,10 +56,16 @@ const NAZVY_DRUHU: Record<Rozhovor['druh'], string> = {
 
 export default async function Rozhovory({
   params,
+  searchParams,
 }: {
   params: Promise<{ rozsah: string }>
+  searchParams: Promise<{ chyba?: string }>
 }) {
   const { rozsah } = await params
+  // Sem chodí hlášky z akcí — mimo jiné „Vyberte pobočku, ke které
+  // vzkaz patří.“ Bez tohohle by se odpověď databáze ztratila
+  // v adrese a formulář by jen mlčky nic neudělal.
+  const { chyba } = await searchParams
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -141,6 +147,45 @@ export default async function Rozhovory({
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
 
+  /*
+    KDO UVIDÍ VZKAZ VEDENÍ — jmenovitě, a ze stejné funkce, jakou se
+    pak vybírají účastníci.
+
+    Kdyby si to obrazovka počítala po svém, mohla by slíbit jeden okruh
+    a konverzace by vznikla s jiným. U vzkazu vedení je to ten
+    nejcitlivější rozdíl, jaký může nastat: člověk se rozhoduje podle
+    toho, co si přečte tady.
+
+    Pro „vedoucí pobočky" se ptáme na pobočku z rozsahu; kdo je na
+    firemní úrovni, uvidí okruh té první ze svého seznamu a při odeslání
+    si pobočku vybere.
+  */
+  const pobockaProVzkaz = scope.branchId ?? ctx.branches[0]?.id ?? null
+
+  const { data: vedouciData, error: chybaVedouci } = await supabase.rpc(
+    'kdo_uvidi_vzkaz',
+    { p_tenant: tenantId, p_adresat: 'vedouci', p_branch: pobockaProVzkaz },
+  )
+  if (chybaVedouci && !funkceNeexistuje(chybaVedouci)) {
+    throw new DotazSelhal('kdo uvidí vzkaz vedoucímu', chybaVedouci)
+  }
+
+  const { data: majitelData, error: chybaMajitel } = await supabase.rpc(
+    'kdo_uvidi_vzkaz',
+    { p_tenant: tenantId, p_adresat: 'majitel', p_branch: null },
+  )
+  if (chybaMajitel && !funkceNeexistuje(chybaMajitel)) {
+    throw new DotazSelhal('kdo uvidí vzkaz majiteli', chybaMajitel)
+  }
+
+  const jmena = (d: unknown): string[] =>
+    ((d ?? []) as { jmeno: string | null }[])
+      .map((r) => String(r.jmeno ?? '').trim())
+      .filter((j) => j !== '')
+
+  const vedouciJmena = jmena(vedouciData)
+  const majitelJmena = jmena(majitelData)
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const cekaCelkem = rozhovory.reduce((s, r) => s + r.ceka, 0)
@@ -156,6 +201,8 @@ export default async function Rozhovory({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '760px' }}>
+        {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
+
         {/*
           ZADRŽENÉ ZPRÁVY SE PŘIZNÁVAJÍ, NESCHOVÁVAJÍ.
 
@@ -190,6 +237,99 @@ export default async function Rozhovory({
             </button>
           </form>
         ) : null}
+
+        {/*
+          VZKAZ VEDENÍ.
+
+          Odesílatel vybírá adresáta a — když dosáhne na víc poboček —
+          i pobočku. Odvozovat ji z domovského záznamu nestačí: člověk,
+          co dělá na dvou provozovnách, si stěžuje na to, co zažil tam,
+          kde zrovna byl, a vzkaz by přistál u vedoucího té druhé.
+          Rozhodnutí Šéfíka 6. 9. 2026.
+
+          Kdo to uvidí, se na obrazovce vypisuje JMENOVITĚ a jména si
+          bere z `kdo_uvidi_vzkaz` — tedy z téže funkce, kterou se pak
+          vybírají účastníci. Kdyby si to obrazovka počítala po svém,
+          slíbila by jeden okruh a konverzace by vznikla s jiným.
+        */}
+        <details style={ramecekFormulare}>
+          <summary style={{ cursor: 'pointer', fontSize: '15px' }}>
+            Napsat vedení
+          </summary>
+
+          <p style={{ margin: '10px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
+            Anonymní to není. Ve dvanáctičlenném provozu je anonymita
+            stejně průhledná a zve to k útokům, na které se nedá
+            odpovědět. Místo toho platí úzký okruh adresátů — a je
+            vypsaný níž, ať víte, komu píšete, dřív než začnete.
+          </p>
+
+          <form action={zalozitVzkazVedeni} style={{ marginTop: '12px' }}>
+            <input type="hidden" name="rozsah" value={rozsah} />
+
+            <fieldset style={poleSkupina}>
+              <legend style={popisek}>Komu</legend>
+
+              <label style={volba}>
+                <input type="radio" name="adresat" value="vedouci" defaultChecked />
+                vedoucí pobočky
+              </label>
+              {vedouciJmena.length > 0 ? (
+                <p style={kdoUvidi}>Uvidí: {vedouciJmena.join(', ')}</p>
+              ) : (
+                <p style={kdoUvidi}>
+                  Na vybrané pobočce zatím nikdo s právem spravovat lidi není.
+                </p>
+              )}
+
+              <label style={{ ...volba, marginTop: '10px' }}>
+                <input type="radio" name="adresat" value="majitel" />
+                majitel firmy
+              </label>
+              <p style={kdoUvidi}>
+                Uvidí: {majitelJmena.length > 0 ? majitelJmena.join(', ') : '—'}.
+                Vedoucí pobočky se k tomu nedostane, ani nikdo se správou
+                lidí.
+              </p>
+            </fieldset>
+
+            {/*
+              Pobočku vybírá jen ten, kdo dosáhne na víc než jednu.
+              Ostatním se otázka neklade — odvodí se.
+            */}
+            {ctx.branches.length > 1 ? (
+              <fieldset style={poleSkupina}>
+                <legend style={popisek}>Které pobočky se to týká</legend>
+                <select name="pobocka" style={vyber} defaultValue={scope.branchId ?? ''}>
+                  <option value="">— vyberte —</option>
+                  {ctx.branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <p style={kdoUvidi}>
+                  Platí pro volbu „vedoucí pobočky“. U majitele na
+                  pobočce nezáleží.
+                </p>
+              </fieldset>
+            ) : null}
+
+            <fieldset style={poleSkupina}>
+              <legend style={popisek}>Čeho se to týká</legend>
+              <input
+                type="text"
+                name="nazev"
+                required
+                maxLength={120}
+                placeholder="Krátce, o co jde"
+                style={pole}
+              />
+            </fieldset>
+
+            <button type="submit" className="ft-tl">
+              Založit vzkaz
+            </button>
+          </form>
+        </details>
 
         {rozhovory.length === 0 ? (
           <Sdeleni nadpis="Zatím žádné rozhovory">
@@ -302,3 +442,58 @@ const ramecek: React.CSSProperties = {
   fontSize: '14px',
   lineHeight: 1.5,
 }
+
+/* --- Vzhled formuláře vzkazu vedení ----------------------------- */
+
+const ramecekFormulare: React.CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--line)',
+  borderRadius: '14px',
+  padding: '14px',
+  marginBottom: '20px',
+}
+
+const poleSkupina: React.CSSProperties = {
+  border: 'none',
+  padding: 0,
+  margin: '14px 0 0',
+}
+
+const popisek: React.CSSProperties = {
+  fontSize: '13px',
+  color: 'var(--muted)',
+  padding: 0,
+  marginBottom: '6px',
+}
+
+const volba: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  fontSize: '14px',
+  color: 'var(--ink)',
+}
+
+/*
+  Věta „kdo to uvidí“. Schválně blízko u té volby, ke které patří —
+  odsazená, aby bylo vidět, že mluví o ní, a ne o té pod ní.
+*/
+const kdoUvidi: React.CSSProperties = {
+  margin: '4px 0 0 26px',
+  fontSize: '12px',
+  color: 'var(--muted)',
+  lineHeight: 1.45,
+}
+
+const pole: React.CSSProperties = {
+  width: '100%',
+  padding: '10px 12px',
+  // 16 px schválně: iOS jinak při zaostření pole zoomuje celou stránku.
+  fontSize: '16px',
+  borderRadius: '10px',
+  border: '1px solid var(--line)',
+  background: 'var(--paper)',
+  color: 'var(--ink)',
+}
+
+const vyber: React.CSSProperties = { ...pole, minHeight: '44px' }

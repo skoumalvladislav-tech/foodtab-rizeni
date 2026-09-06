@@ -166,3 +166,61 @@ export async function stornovatZpravu(formData: FormData): Promise<void> {
   revalidatePath(zpet)
   redirect(zpet)
 }
+
+/**
+ * Založit vzkaz vedení.
+ *
+ * POBOČKU VYBÍRÁ ODESÍLATEL, ne jeho domovský záznam. Člověk, který
+ * dělá na dvou provozovnách, si stěžuje na to, co zažil TAM, KDE
+ * ZROVNA BYL — a odvozená domovská pobočka by vzkaz poslala vedoucímu
+ * té druhé. Rozhodnutí Šéfíka 6. 9. 2026.
+ *
+ * Adresáty formulář NEPOSÍLÁ. Odvodí si je databáze z volby
+ * `adresat` a z pobočky — jinak by šlo odesláním upraveného formuláře
+ * adresovat stížnost na vedoucího právě tomu vedoucímu, a to je horší
+ * než žádná cesta: člověk si myslí, že si postěžoval, a jediné, čeho
+ * dosáhl, je že si na sebe řekl.
+ */
+export async function zalozitVzkazVedeni(formData: FormData): Promise<void> {
+  const z = await zaklad(formData)
+  if (!z) return
+
+  const nazev = String(formData.get('nazev') ?? '').trim()
+  if (nazev === '') return
+
+  // Cokoli jiného než tyhle dvě volby je pokus o podvržení. Databáze
+  // by to odmítla taky (omezení na sloupci), ale posílat nesmysl dál
+  // nemá důvod.
+  const adresatVstup = String(formData.get('adresat') ?? '')
+  if (adresatVstup !== 'vedouci' && adresatVstup !== 'majitel') return
+
+  /*
+    U majitele na pobočce nezáleží a posílá se NULL. Kdyby se posílala,
+    vypadalo by z dat, že vzkaz patří pobočce — a on patří firmě.
+  */
+  const pobocka =
+    adresatVstup === 'vedouci'
+      ? (String(formData.get('pobocka') ?? '').trim() || z.branchId)
+      : null
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('zalozit_rozhovor', {
+    p_tenant: z.tenantId,
+    p_druh: 'vedeni',
+    p_branch: pobocka,
+    p_nazev: nazev,
+    p_adresat: adresatVstup,
+    p_ucastnici: [],
+  })
+
+  // Hlášku psala databáze a je pro člověka — nepřepisuje se. Patří sem
+  // i „Vyberte pobočku, ke které vzkaz patří.“
+  if (error) {
+    redirect(
+      `/${z.rozsah}/rozhovory?chyba=${encodeURIComponent(error.message)}`,
+    )
+  }
+
+  revalidatePath(`/${z.rozsah}/rozhovory`)
+  redirect(`/${z.rozsah}/rozhovory/${String(data)}`)
+}
