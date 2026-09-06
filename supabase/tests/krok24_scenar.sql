@@ -512,6 +512,66 @@ reset role;
 
 
 \echo ''
+\echo '== 8b. Zapomenutý odchod směnu neprodlouží =============='
+
+/*
+  Rozhodnutí Šéfíka 6. 9. (odpověď 1). Zprávy chodí jen dokud trvá
+  provozní den, ve kterém se píchl příchod.
+
+  Bez toho by zapomenutý odchod obcházel celé pravidlo: kdo v úterý
+  zapomněl odejít, měl by otevřený příchod dál a aplikace by mu zvonila
+  ve středu ve tři ráno — zrovna tomu člověku, který si toho nevšiml,
+  takže by o tom ani nevěděl.
+
+  Anniny záznamy se posunou o dva provozní dny zpátky. Příchod tím
+  ZŮSTÁVÁ OTEVŘENÝ (`uzavreno_systemem` se nesahá), jen už není
+  z dnešního dne — což je přesně stav „zapomněl jsem odejít".
+*/
+
+reset role;
+
+update public.attendance_events
+   set occurred_at   = occurred_at - interval '2 days',
+       business_date = business_date - 2
+ where employee_id = :'anna' and kind = 'in' and stornovano_kdy is null;
+
+select pg_temp.check('příchod zůstal otevřený, jen je ze staršího dne',
+  (select business_date from app.otevreny_prichod(:'tenant', :'anna'))
+    < app.business_date(:'perla', now()));
+
+select pg_temp.check('a přesto už se nebere jako směna',
+  app.smena_ted(:'tenant', :'anna') is null);
+
+select set_config('test.user_id', 'aaaa0000-0000-0000-0000-00000000000a', false);
+set role authenticated;
+
+select pg_temp.check('zpráva z Perly proto zase ČEKÁ',
+  (select ceka from public.moje_rozhovory(:'tenant')
+   where konverzace_id = :'kanal_perla') > 0);
+
+reset role;
+
+/*
+  A DRUHÁ POLOVINA, na kterou se dá snadno zapomenout: nedokončený
+  záznam se tím NEUKLIDIL. Kdyby ho aplikace odklidila, vedoucí by se
+  nedozvěděl, že tam byl — a to je nejtišší možná chyba.
+*/
+select pg_temp.check('nedokončený záznam zůstává v panelu nedokončených',
+  exists (select 1 from public.nedokoncena_dochazka(
+            :'tenant', current_date - 5, current_date, null)
+          where employee_id = :'anna'));
+
+-- Vrátit zpátky, ať oddíly níž počítají s tím, s čím počítaly.
+update public.attendance_events
+   set occurred_at   = occurred_at + interval '2 days',
+       business_date = business_date + 2
+ where employee_id = :'anna' and kind = 'in' and stornovano_kdy is null;
+
+select pg_temp.check('po vrácení do dnešního dne je zase na směně',
+  app.smena_ted(:'tenant', :'anna') = :'perla');
+
+
+\echo ''
 \echo '== 9. Vypnutý modul odmítne i přímé volání ==============='
 
 /*
