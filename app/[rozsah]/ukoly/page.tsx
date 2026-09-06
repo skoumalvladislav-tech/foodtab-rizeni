@@ -37,9 +37,34 @@ type Sablona = {
   id: string;
   branch_id: string | null;
   name: string;
-  department: string;
+  /*
+    Úsek místo napevno psaného `department`.
+
+    Dřív se tu vypisovala strojová hodnota z pětice zadrátované v kódu
+    (`kuchyne`, `bar`, …) — takže bistro s jedním pultem mělo v tabulce
+    „servis“, protože nic bližšího na výběr nebylo. Teď je to název,
+    který si firma zadala sama (20260906030000_useky).
+
+    Může být prázdný: šablona bez úseku je platná a znamená „nikam
+    zvlášť“.
+  */
+  /*
+    Tvar je schválně „objekt NEBO pole“. PostgREST vrací u vazby na
+    jeden řádek objekt, ale typ odvozený z klienta ji hlásí jako pole —
+    a `as Sablona[]` na to spadne při překladu typů. Přetypovat to přes
+    `unknown` by chybu jen umlčelo; tohle ji řeší tak, že projde obojí.
+  */
+  useky: { nazev: string } | { nazev: string }[] | null;
   schedule: string;
 };
+
+/** Název úseku ze vztahu, ať přijde jako objekt nebo jako pole. */
+function nazevUseku(u: Sablona["useky"]): string | null {
+  if (!u) return null;
+  const r = Array.isArray(u) ? u[0] : u;
+  const nazev = String(r?.nazev ?? "").trim();
+  return nazev === "" ? null : nazev;
+}
 
 export default async function Ukoly({
   params,
@@ -110,7 +135,7 @@ export default async function Ukoly({
 
     const { data: sablonyData, error: chybaSablonyData } = await supabase
       .from("checklist_templates")
-      .select("id, branch_id, name, department, schedule")
+      .select("id, branch_id, name, schedule, useky(nazev)")
       .eq("tenant_id", tenantId)
       .eq("active", true)
       .or(`branch_id.eq.${branchId},branch_id.is.null`)
@@ -312,7 +337,7 @@ export default async function Ukoly({
                     }}
                   >
                     {[
-                      s.department,
+                      nazevUseku(s.useky),
                       beh
                         ? `${beh.hotovo} z ${celkem} hotovo`
                         : `${celkem} položek`,

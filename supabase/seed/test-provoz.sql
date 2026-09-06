@@ -58,6 +58,29 @@ begin
   limit 1;
 
   ------------------------------------------------------------------
+  -- Úseky (pracoviště)
+  --
+  -- Tady je ta pětice, která do 6. 9. 2026 bydlela v CHECK omezení
+  -- v kódu (`department in ('kuchyne','bar',…)`). Patří sem, ne tam:
+  -- pracoviště jsou věc zákazníka (pravidlo 1). Bistro s jedním pultem
+  -- si nechá jen „Provoz“, hotelová restaurace si přidá tři bary.
+  --
+  -- Pořadí není abecední schválně — kuchyně je v provozu důležitější
+  -- než sklad, i když je v abecedě později.
+  ------------------------------------------------------------------
+  insert into public.useky (tenant_id, branch_id, nazev, poradi)
+  select v_tenant, null, u.nazev, u.poradi
+  from (values
+    ('Kuchyně', 10), ('Bar', 20), ('Servis', 30),
+    ('Provoz', 40), ('Vedení', 50)
+  ) as u(nazev, poradi)
+  where not exists (
+    select 1 from public.useky x
+    where x.tenant_id = v_tenant and x.branch_id is null
+      and lower(btrim(x.nazev)) = lower(btrim(u.nazev))
+  );
+
+  ------------------------------------------------------------------
   -- Pozice
   ------------------------------------------------------------------
   insert into public.positions (tenant_id, key, label, department) values
