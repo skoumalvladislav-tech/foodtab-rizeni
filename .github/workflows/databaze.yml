@@ -78,6 +78,16 @@ jobs:
           grep -q 'KROK 3' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 3"; chybi=1; }
 
+          # Kotveno na celý řádek schválně, na rozdíl od dvou kontrol nad
+          # tímhle. Prosté `grep -q 'KROK 2'` je totiž PODŘETĚZCOVÁ shoda
+          # a chytí se i na „== KROK 23 HOTOV ==" — takže kontrola pro
+          # krok 2 projde, i kdyby krok 2 spadl a doběhl jen krok 23.
+          # Je to kontrola, která nemůže spadnout. Nález je v hlášení
+          # docs/hlaseni/stav-2026-09-06.md; neopravuju to tady, aby se
+          # tahle změna dala přečíst jako jedna věc.
+          grep -qE '^[[:space:]]*== KROK 24 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 24"; chybi=1; }
+
           if [ "$chybi" -ne 0 ]; then
             echo "Scénáře neprošly celé."
             exit 1
