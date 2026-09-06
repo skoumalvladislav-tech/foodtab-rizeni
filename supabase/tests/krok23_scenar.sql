@@ -145,7 +145,8 @@ update public.attendance_events set occurred_at = now() - interval '3 hours'
 
   Obecně: v testu nesmí být posun, který je menší než 24 hodin
   a přitom se tváří, že překročí půlnoc. Viz CLAUDE.md, „Testy, které
-  závisí na hodině".
+  závisí na kalendáři" — je tam i druhý případ z 5. 9. (`krok5`, pevné
+  datum v posuvném okně, opraveno v `bbd5c9f`).
 */
 update public.attendance_events
    set occurred_at = now() - interval '26 hours',

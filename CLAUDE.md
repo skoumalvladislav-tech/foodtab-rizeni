@@ -347,13 +347,26 @@ tahle se tváří jako důkaz.
 který jeden scénář vynechával — znělo to jako „všechno", a bylo to
 „všechno kromě".
 
-### Testy, které závisí na hodině
+### Testy, které závisí na kalendáři
 
-**Kontrola nesmí platit jen část dne.** Test, který přes den projde
-a večer spadne, je horší než rozbitý test: rozbitý se opraví, tenhle
-se „opraví sám" do rána a příště se na červenou nikdo nepodívá.
+**Kontrola nesmí platit jen část dne nebo jen některé dny.** Test,
+který dneska projde a zítra spadne, je horší než rovnou rozbitý:
+rozbitý se opraví, tenhle se „opraví sám" a příště se na tu červenou
+nikdo nepodívá.
 
-Chytlo nás to potřetí, naposledy 6. 9. 2026 v `krok23_scenar`:
+Chytlo nás to **dvakrát** a pokaždé jinak:
+
+**1. Pevné datum v posuvném okně** — `krok5_scenar`, 5. 9. 2026,
+opraveno v `bbd5c9f`. `krok4` zakládal otevřený příchod na PEVNÉM datu
+(`2026-09-03`), `krok5` k tomu měřil přes POSUVNÉ okno
+`current_date - 7 … current_date`. Vycházelo to jen 4. 9., kdy oba dny
+splynuly; od 5. 9. padalo a od 11. 9. by se to samo „vyléčilo".
+Opravou nebyly hodiny, ale to, že si `krok5` sám vybere den, na kterém
+měří — proto se ten commit hledá jinak, než by člověk čekal.
+
+**2. Posun kratší než den** — `krok23_scenar`, 6. 9. 2026. Otevřený
+příchod se posouval o dvacet hodin zpátky a kontrola tvrdila, že je to
+jiný kalendářní den:
 
 ```sql
 update public.attendance_events
@@ -372,18 +385,51 @@ Pravidla, která z toho plynou:
 
 1. **Posun přes půlnoc dělej o víc než 24 hodin.** Ne 20, ne 22 — ty
    fungují jen dopoledne. `26 hours` je jiný kalendářní den vždycky.
-   `krok13_scenar` to má správně (26 a 30 hodin).
-2. **Datum si nepočítej sám, ptej se `app.business_date`.** Provozní
-   den začíná v 05:00, ne o půlnoci — `current_date` a provozní den
-   se každý den pět hodin rozcházejí. `krok6_scenar` to má napsané
-   u zakládání směny.
-3. **Než napíšeš posun v hodinách, zeptej se: platí to i ve 23:50?**
-   A pokud test závisí na tom, kolik je hodin, řekni to v komentáři
-   nahlas — ať to příště nikdo nehledá znovu.
+2. **Nemíchej pevné datum s posuvným oknem.** Když jeden scénář
+   zakládá data na napevno psaný den a druhý nad nimi měří přes
+   `current_date - N`, funguje to přesně jeden den v roce.
+3. **Datum si nepočítej sám, ptej se `app.business_date`.** Provozní
+   den začíná v 05:00, takže se s `current_date` každý den pět hodin
+   rozchází.
+4. **Než napíšeš posun v hodinách nebo dnech, zeptej se: platí to
+   i ve 23:50? A za týden?** Pokud test na kalendáři závisí, napiš to
+   v komentáři nahlas.
 
-Pozná se to i bez čekání do večera: pusť zkoušku s posunutými hodinami,
-nebo si tu podmínku spočítej pro 23:59 na papíře. Zelená v poledne nic
-neříká o půlnoci.
+Pozná se to bez čekání: projdi tu podmínku pro všech 24 hodin (nebo
+pro celé okno dní) a spočítej, v kolika z nich platí. Jeden zelený běh
+v poledne neříká o půlnoci nic — u `krok23` vyšlo, že původní podoba
+platila jen ve 20 hodinách z 24.
+
+### `\gset` nad prázdnou hodnotou proměnnou nezaloží
+
+Jiná třída chyby než ta výš — nezávisí na hodině, ale na tom, že je
+hodnota NULL. Chytlo nás to taky dvakrát: `krok17_scenar` 4. 9. 2026
+(`08acdcc`) a `krok28_scenar` 6. 9. 2026.
+
+`\gset` nad sloupcem, který vyjde NULL, proměnnou **nenastaví na
+prázdno — nechá ji nedefinovanou.** Další řádek, který ji použije,
+pak spadne na `syntax error at or near ":"`, tedy na něčem, co se
+vůbec netváří jako chyba v datech.
+
+Protahuje se to přes `coalesce`:
+
+```sql
+-- ŠPATNĚ: vydano_kdy je před vydáním NULL
+select vydano_kdy as vyd_pred from public.rozpis_stav(…) \gset
+
+-- SPRÁVNĚ
+select coalesce(vydano_kdy::text, '') as vyd_pred from public.rozpis_stav(…) \gset
+```
+
+**Kdykoli dáváš do `\gset` sloupec, který může být prázdný, obal ho.**
+Typicky je to všechno, co znamená „ještě se nestalo": `vydano_kdy`,
+`stornovano_kdy`, `done_at`, nebo návratová hodnota funkce, která
+u neúspěchu vrací NULL.
+
+A pozor: **místní běh nad PGlite tohle schová.** Pomocná vrstva, přes
+kterou se scénáře pouštějí lokálně, si NULL převádí na prázdný řetězec
+sama, takže scénář projde — a spadne až proti opravdovému PostgreSQL.
+Je to jeden z důvodů, proč rozhoduje workflow Databáze.
 
 ### Čtení tabulek a plán importu
 
