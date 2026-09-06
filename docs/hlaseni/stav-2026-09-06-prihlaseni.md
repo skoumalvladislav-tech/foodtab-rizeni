@@ -281,7 +281,34 @@ je potřeba dávat pozor.
    na `.`, takže výsledný vzorec má „libovolný znak" místo tečky.
    Prakticky to nic neshodí, ale je to jiné, než jak to vypadá.
    Patří tam `\\.`.
-5. **`npm run lint` je pořád červený** — 10 chyb a 23 varování
+5. **`krok23_scenar` spadne po osmé večer. Není to nová chyba, ale
+   uvidíš ji na každém nočním běhu CI.**
+
+   Oddíl 2 posune otevřený příchod o dvacet hodin zpátky a pak tvrdí,
+   že „okamžik je z jiného kalendářního dne":
+
+   ```sql
+   update public.attendance_events
+      set occurred_at = now() - interval '20 hours', business_date = :'dnes'
+    where id = :'prvni';
+
+   select pg_temp.check('okamžik je z jiného kalendářního dne',
+     (select occurred_at::date <> :'dnes'::date …));
+   ```
+
+   To platí, jen dokud je míň než 20:00. Po osmé večer je `now()` mínus
+   dvacet hodin **týž kalendářní den** a kontrola spadne — na kódu, na
+   kterém nic není. Změřeno ve 20:23: `okamzik_datum` i `dnesni_datum`
+   vyšly `2026-09-06`.
+
+   Nesahal jsem na to (cizí scénář, poslední změna na těch řádcích je
+   `6cc89d5` z 5. 9., tedy před mou prací). Oprava je posunout o **26**
+   hodin místo dvaceti — pak je to jiný kalendářní den vždycky, a smysl
+   kontroly se nemění.
+
+   Tvých 912 kontrol prošlo, protože jsi to pouštěl přes den.
+
+6. **`npm run lint` je pořád červený** — 10 chyb a 23 varování
    v souborech, kterých jsem se nedotkl (`app/dashboard.tsx`,
    `rozpis.tsx`). Moje nové soubory jsou čisté, ověřeno spuštěním jen
    nad nimi. Zmiňuju to znovu, protože červený lint, na který se nikdo

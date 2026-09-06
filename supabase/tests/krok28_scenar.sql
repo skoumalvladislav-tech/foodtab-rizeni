@@ -168,7 +168,23 @@ reset role;
 
 set role anon;
 
-select ok as ok_spatny, zpravy as zpravy_spatny
+/*
+  `coalesce(zpravy::text, '')` je tu nutnost, ne úhlednost.
+
+  U špatného PINu vrací funkce sloupec `zpravy` jako NULL — a `\gset`
+  proměnnou z NULL sloupce NENASTAVÍ. Kontrola o dva řádky níž pak
+  nemá co dosadit a scénář spadne dřív, než se k ní vůbec dostane.
+
+  Můj místní běh nad PGlite to nechytil: tam si NULL převádí na prázdný
+  řetězec pomocná vrstva, kterou jsem si k němu psal. Je to přesně ten
+  druh rozdílu, kvůli kterému rozhoduje běh proti opravdovému
+  PostgreSQL — nahlásil ho Šéfík 6. 9. 2026.
+
+  (A jméno té proměnné se tu schválně nepíše v zápisu s dvojtečkou:
+  `scripts/scenare.test.mjs` hlídá pořadí a v komentáři výš by ho
+  považoval za použití dřív, než vznikne. Napoprvé jsem na tom spadl.)
+*/
+select ok as ok_spatny, coalesce(zpravy::text, '') as zpravy_spatny
 from public.kiosk_zpravy_pinem(:'tablet', '000000') \gset
 
 select pg_temp.check('špatný PIN vrátí řádek s ok = false',
