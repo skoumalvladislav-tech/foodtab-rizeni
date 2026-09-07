@@ -261,10 +261,11 @@ select set_config('test.user_id', '', false);
 -- NEJDŘÍV NAD OPRAVDOVÝMI DATY, TEPRVE POTOM NAD SIMULACÍ
 --
 -- Tahle první kontrola je ta, která hlídá ROZSAH rozhodnutí. Firma
--- Foodtab vznikla v `etapa0_scenar` PO migracích, takže má všech pět
--- rolí a jejich práva jsou kopie šablon po migraci. Kdyby se mazání
--- zúžilo zpátky na tři role ze zadání, zůstalo by `ai.use`
--- u `vedouci_smeny` a `provozni` — v šabloně i tady — a spadne to.
+-- Foodtab vznikla v `etapa0_scenar` PO migracích, takže má všech sedm
+-- rolí z katalogu — včetně těch pěti, kterým `ai.use` patřilo — a jejich
+-- práva jsou kopie šablon po migraci. Kdyby se mazání zúžilo zpátky na
+-- tři role ze zadání, zůstalo by `ai.use` u `vedouci_smeny`
+-- a `provozni` — v šabloně i tady — a spadne to.
 -- ---------------------------------------------------------------------
 select pg_temp.check('po migracích nemá Gastro AI ŽÁDNÁ z rolí firmy',
   not exists (select 1
