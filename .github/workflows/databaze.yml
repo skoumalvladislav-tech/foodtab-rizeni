@@ -137,7 +137,8 @@ jobs:
 #     supabase db push
 #
 # VRÁTIT SE TO SMÍ, AŽ bude ostrý provoz ve vlastním projektu
-# (`foodtab-prod`) a `foodtab-test` bude opravdu jen test. Je to
-# na seznamu „Před ostrým provozem" v CLAUDE.md. Do té doby ne —
-# i kdyby to vypadalo jako opomenutí. Není.
+# (`foodtab-prod`) a `foodtab-test` bude opravdu jen test. Podmínka je
+# věcná, ne kalendářní: rozhoduje, kde leží ostrá data. Rozepsaná je
+# v CLAUDE.md, „Stav prací" — odstavec „Klíče pro nasazování z GitHubu".
+# Do té doby ne, i kdyby to vypadalo jako opomenutí. Není.
 # =====================================================================

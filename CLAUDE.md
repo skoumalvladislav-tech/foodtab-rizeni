@@ -494,7 +494,30 @@ zbylých obrazovek proti předloze, nahrávání rozpisu z Excelu a docházka
 proti plánu.
 
 **Před ostrým provozem:** omezit `app.create_tenant`, noční záloha
-databáze mimo Supabase, klíče pro nasazování z GitHubu.
+databáze mimo Supabase.
+
+**Klíče pro nasazování z GitHubu — PODMÍNĚNĚ, ne „ještě nehotové".**
+Smí se zavést teprve poté, co vznikne `foodtab-prod` a ostrá data
+přestanou být v projektu `foodtab-test`. Do té doby ne, a není to
+opomenutí: 7. 9. 2026 se automatické nasazení z workflow **záměrně
+odstranilo** (úlohy `tajemstvi` a `nasazeni` v
+`.github/workflows/databaze.yml`, commit `2166930`).
+
+Důvod není, že by nefungovalo. Důvod je, že **ostrá data dnes leží
+v tom projektu, na který by to nasazovalo.** Dokud to platí, stačí, aby
+někdo jednou přidal `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`
+a `SUPABASE_PROJECT_REF` do nastavení repozitáře — pár kliknutí, nikomu
+to nepřijde nebezpečné — a od té chvíle každý push do `main` mění ostrý
+provoz, aniž to kdokoli odklikne. Nasazuje Šéfík, ne push.
+
+A nespoléhej na to, že tajemství nastavená nejsou. **„Je to bezpečné,
+protože někdo něco nenastavil" není pojistka, to je shoda okolností** —
+pojistka je to, že na ně ten soubor vůbec nesahá.
+
+Až `foodtab-prod` vznikne, přestane tenhle důvod platit a klíče se
+zavést smí — proti prod projektu a s tím, že testovací nasazení míří
+na test. Podmínka je věcná, ne kalendářní: rozhoduje, kde leží ostrá
+data, ne kolik měsíců uplynulo.
 
 ## Co se ruší ze starého kódu
 
