@@ -1,6 +1,7 @@
 name: Databáze
 
-# Testy hlídají každou změnu ve schématu, nasazení jede jen z main.
+# Testy hlídají každou změnu ve schématu. Nasazovat do databáze tohle
+# workflow NEUMÍ a schválně — proč, je vysvětlené na konci souboru.
 # Mezi cestami je i tenhle soubor, jinak by se úprava workflow sama
 # neověřila a chyba v něm by se ukázala až u příští změny schématu.
 on:
@@ -14,7 +15,9 @@ on:
       - 'supabase/**'
       - '.github/workflows/databaze.yml'
 
-# Dvě nasazení naráz by si šla po krku nad jednou databází.
+# Původně to bylo proto, že dvě nasazení naráz by si šla po krku nad
+# jednou databází. Nasazení tu už není, ale skupina zůstává: dva běhy
+# nad toutéž větví nic navíc neřeknou a jen zabírají běžce.
 concurrency:
   group: databaze-${{ github.ref }}
   cancel-in-progress: false
@@ -109,53 +112,32 @@ jobs:
           fi
           echo "Všechny scénáře doběhly."
 
-  # Tajemství se nedají číst v podmínce úlohy — kontext `secrets` tam
-  # GitHub nenabízí. Přečte je proto tahle úloha jako proměnné prostředí
-  # a výsledek předá dál jako výstup, na který se v podmínce ptát smí.
-  # Bez toho by push do main bez nastavených tajemství skončil červeně.
-  tajemstvi:
-    name: Jsou nastavená tajemství?
-    needs: testy
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    outputs:
-      pripraveno: ${{ steps.kontrola.outputs.pripraveno }}
-
-    steps:
-      - name: Ověřit tajemství
-        id: kontrola
-        env:
-          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          HESLO: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PROJEKT: ${{ secrets.SUPABASE_PROJECT_REF }}
-        run: |
-          if [ -n "$TOKEN" ] && [ -n "$HESLO" ] && [ -n "$PROJEKT" ]; then
-            echo "pripraveno=true" >> "$GITHUB_OUTPUT"
-            echo "Tajemství jsou nastavená, nasazení proběhne."
-          else
-            echo "pripraveno=false" >> "$GITHUB_OUTPUT"
-            echo "Tajemství nejsou nastavená — nasazení se přeskočí."
-            echo "Migrace se zatím pouštějí ručně: supabase db push"
-          fi
-
-  nasazeni:
-    name: Nasazení na Supabase
-    needs: [testy, tajemstvi]
-    # Když tajemství chybí, úloha se přeskočí (šedě), ne spadne.
-    if: needs.tajemstvi.outputs.pripraveno == 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Propojit projekt a nasadit migrace
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: |
-          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
-          supabase db push --yes
+# =====================================================================
+# NASAZENÍ TU SCHVÁLNĚ NENÍ. NEPŘIDÁVEJ HO ZPÁTKY.
+#
+# Do 7. 9. 2026 tu byly ještě dvě úlohy: `tajemstvi` (přečetla
+# SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD a SUPABASE_PROJECT_REF
+# a řekla, jestli jsou nastavená) a `nasazeni` (`supabase link`
+# a `supabase db push --yes` po každém pushi do `main`). Odstraněné
+# rozhodnutím Šéfíka.
+#
+# NENÍ TO PROTO, ŽE BY NEFUNGOVALY. Je to proto, že OSTRÁ DATA LEŽÍ
+# V PROJEKTU `foodtab-test` (CLAUDE.md, oddíl „Prostředí"): ostrý
+# projekt zatím neexistuje. Dokud to platí, znamená automatické
+# nasazení tohle — stačí, aby někdo jednou přidal ta tři tajemství do
+# nastavení repozitáře, což je pár kliknutí a nikomu to nepřijde
+# nebezpečné, a od té chvíle každý push do `main` mění ostrý provoz.
+# Bez toho, aby to kdokoli odklikl.
+#
+# Nebezpečná není ta úloha, nebezpečné je, že se ta pojistka dá
+# odjistit omylem. Nasazuje Šéfík, ne push.
+#
+# Migrace se proto pouštějí ručně, z `main` a až po zelených testech:
+#
+#     supabase db push
+#
+# VRÁTIT SE TO SMÍ, AŽ bude ostrý provoz ve vlastním projektu
+# (`foodtab-prod`) a `foodtab-test` bude opravdu jen test. Je to
+# na seznamu „Před ostrým provozem" v CLAUDE.md. Do té doby ne —
+# i kdyby to vypadalo jako opomenutí. Není.
+# =====================================================================
