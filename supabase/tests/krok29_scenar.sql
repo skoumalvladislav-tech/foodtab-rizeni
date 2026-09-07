@@ -219,4 +219,68 @@ select pg_temp.check('a „v práci" staví na app.otevreny_prichod',
 
 
 \echo ''
+\echo ''
+\echo '== 7. Gastro AI nemá nikdo ============================='
+
+/*
+  Modul Gastro AI neexistuje, takže právo `ai.use` nemá mít nikdo
+  (rozhodnutí Šéfíka 7. 9., migrace 20260907020000).
+
+  MIGRACE MAŽE NA DVOU MÍSTECH A TO DRUHÉ JE TO PODSTATNÉ. Šablona
+  řídí jen nově zakládané firmy; `app.create_tenant` z ní při založení
+  udělá KOPII do `public.role_permissions` a od té chvíle je firma na
+  šabloně nezávislá. Kdyby se smazala jen šablona, na Šéfíkově
+  aplikaci by se nezměnilo vůbec nic.
+
+  PROČ SE TU MIGRACE POUŠTÍ ZNOVU. Scénáře běží nad prázdnou databází:
+  migrace projdou dřív, než vůbec nějaká firma vznikne, takže druhé
+  `delete` v nich nemá co mazat. Kontrola „nikdo to nemá" by tedy
+  prošla i nad migrací, ve které to druhé mazání chybí — a to je přesně
+  ta kontrola, co projde nad rozbitým kódem.
+
+  Simuluje se proto firma, která vznikla DŘÍV: řádek se do
+  `role_permissions` vrátí ručně a migrace se pustí ještě jednou
+  (`\ir`). Obě mazání jsou idempotentní, takže se to smí.
+*/
+
+reset role;
+
+select id as role_bar from public.roles
+ where tenant_id = :'tenant' and key = 'bar' \gset
+
+-- Firma založená před migrací: právo má v role_permissions, ne jen
+-- v šabloně.
+insert into public.role_permissions (role_id, permission_key)
+values (:'role_bar', 'ai.use') on conflict do nothing;
+
+-- A někdo mezitím vrátil i šablonu.
+insert into app.role_template_permissions (template_key, permission_key)
+values ('bar', 'ai.use') on conflict do nothing;
+
+select pg_temp.check('příprava: právo se opravdu podařilo vrátit',
+  exists (select 1 from public.role_permissions
+          where role_id = :'role_bar' and permission_key = 'ai.use')
+  and exists (select 1 from app.role_template_permissions
+              where template_key = 'bar' and permission_key = 'ai.use'));
+
+\ir ../migrations/20260907020000_ai_use_pryc.sql
+
+select pg_temp.check('žádná šablona role už Gastro AI nerozdává',
+  not exists (select 1 from app.role_template_permissions
+              where permission_key = 'ai.use'));
+
+select pg_temp.check('a nemá ho ani žádná role UŽ ZALOŽENÉ firmy',
+  not exists (select 1 from public.role_permissions
+              where permission_key = 'ai.use'));
+
+/*
+  Právo ale z KATALOGU nemizí — až modul vznikne, přidá se zpátky.
+  Drží to i `krok3_scenar`, který porovnává celý katalog se seznamem
+  v lib/authz.ts; kdyby klíč zmizel odsud, musel by zmizet i tam.
+*/
+select pg_temp.check('v katalogu oprávnění ale zůstává',
+  exists (select 1 from public.permissions where key = 'ai.use'));
+
+
+\echo ''
 \echo '== KROK 29 HOTOV ========================================'

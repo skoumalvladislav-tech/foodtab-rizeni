@@ -1,0 +1,86 @@
+-- =====================================================================
+-- Foodtab — právo „Používat Gastro AI" se nikomu nepřiděluje
+--
+-- Zadání docs/nocni-prace-2026-09-07.md, krok 2 bod 3, upřesněné
+-- Šéfíkem 7. 9. 2026. Jde nasadit samo.
+--
+-- ---------------------------------------------------------------------
+-- PROČ
+--
+-- Modul Gastro AI NEEXISTUJE. Právo `ai.use` je v katalogu od 23. 8.
+-- a od té chvíle ho šablony rozdávají — jenže není kam s ním jít.
+-- Číšník má v Oprávněních zaškrtnuté něco, co nikde nefunguje.
+--
+-- Zadání jmenovalo tři role (Servis, Bar, Kuchyně). Šéfík to 7. 9.
+-- rozšířil: **modul neexistuje pro nikoho, takže ho nemá mít nikdo.**
+-- Odebírá se tedy i `vedouci_smeny` a `provozni`.
+--
+-- `provozni` ho má, i když v katalogu není vyjmenovaný: jeho šablona
+-- vzniká hromadně jako „všechno kromě `agents.manage` a
+-- `settings.manage`" (20260823120100_catalog.sql, ř. 118–121), takže
+-- `ai.use` se do ní dostalo samo.
+--
+-- Majitel se neřeší — ten práva z katalogu obchází přes `r.is_owner`
+-- v `app.has_access` a žádný řádek v `role_permissions` nemá.
+--
+-- ---------------------------------------------------------------------
+-- DVĚ MAZÁNÍ, A TO DRUHÉ JE TO PODSTATNÉ
+--
+-- **Kdyby se smazala jen šablona, na Šéfíkově aplikaci se nezmění
+-- vůbec nic.**
+--
+-- `app.create_tenant` kopíruje šablony do `public.role_permissions`
+-- ve chvíli, kdy firma vzniká (20260823120300_tenant_setup.sql,
+-- ř. 121). Firmy, které už existují, tedy mají VLASTNÍ kopie těch
+-- řádků a se šablonou je nic nespojuje — změna šablony se u nich
+-- neprojeví, jen u nově založených.
+--
+-- Proto se maže na obou místech:
+--
+--   1. `app.role_template_permissions` — aby to nedostaly nové firmy,
+--   2. `public.role_permissions`      — aby to ztratily ty stávající.
+--
+-- Je to zásah do dat existující firmy, ne jen do katalogu. Jde do
+-- auditu sám: na `role_permissions` visí spoušť `trg_audit_role_permissions`
+-- (20260831020000), takže je u každého odebraného řádku vidět, kdy
+-- a čím zmizel.
+--
+-- ---------------------------------------------------------------------
+-- PRÁVO Z KATALOGU NEMIZÍ
+--
+-- `public.permissions` si řádek `ai.use` nechává. Dva důvody:
+--
+--   * až Gastro AI vznikne, přidá se zpátky — a to je pak jeden
+--     `insert`, ne obnovování smazaného klíče, na kterém visí cizí
+--     klíče z `role_permissions`,
+--   * `krok3_scenar` porovnává celý katalog se seznamem `PERMISSIONS`
+--     v `lib/authz.ts`. Kdyby klíč zmizel odsud, musel by zmizet i tam
+--     — a to je změna aplikace kvůli tomu, že se dnes nic nepřiděluje.
+--
+-- DŮSLEDEK, KTERÝ JE POTŘEBA ZNÁT: zaškrtávátko „Používat Gastro AI"
+-- zůstává na obrazovce Oprávnění vidět a dá se znovu zaškrtnout.
+-- Nic tím nerozbije — jen si někdo přidělí právo, za kterým nic není.
+-- Schovat ho by znamenalo rozhodnout, jak se v katalogu označuje
+-- „ještě nehotové", a to je samostatná úvaha.
+--
+-- ---------------------------------------------------------------------
+-- POZOR NA `menu_ai.use` — TO JE NĚCO JINÉHO
+--
+-- Vedle `ai.use` existuje `menu_ai.use` („Nechat navrhnout menu",
+-- modul `menu`, 20260830220000_modul_menu.sql). Ten modul JE hotový
+-- a obrazovka Tvorba menu se na to právo ptá
+-- (`app/[rozsah]/menu/page.tsx`). Nesmí se odebrat.
+--
+-- Obě mazání níž proto porovnávají klíč na rovnost, ne přes `like`.
+-- Kdo by to tu někdy přepsal na `like '%ai.use'` nebo `like '%ai%'`,
+-- zavře Tvorbu menu celé firmě.
+-- =====================================================================
+
+-- 1. Nové firmy už ho nedostanou.
+delete from app.role_template_permissions
+ where permission_key = 'ai.use';
+
+-- 2. A ty, které už vznikly, o něj přijdou. BEZ TOHOHLE se na nasazené
+--    aplikaci nezmění nic — viz hlavičku.
+delete from public.role_permissions
+ where permission_key = 'ai.use';
