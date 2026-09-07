@@ -245,6 +245,34 @@ select pg_temp.check('a „v práci" staví na app.otevreny_prichod',
 
 reset role;
 
+/*
+  Do oddílu se vchází s uživatelem nastaveným v oddílu 6 na CIZINCE
+  (ř. 201) — `reset role` mění databázovou roli, ne tuhle proměnnou.
+  Auditní řádky, které mazání vyrobí přes `trg_audit_role_permissions`,
+  by se pak pod firmou Foodtab připsaly někomu z jiné firmy. Nuluje se
+  proto: `auth.uid()` v harness čte `test.user_id` a nad prázdnou
+  hodnotou vrátí NULL, takže se zapíše `actor_type = 'system'` — což je
+  i to, co se stane při opravdovém `supabase db push`.
+*/
+select set_config('test.user_id', '', false);
+
+
+-- ---------------------------------------------------------------------
+-- NEJDŘÍV NAD OPRAVDOVÝMI DATY, TEPRVE POTOM NAD SIMULACÍ
+--
+-- Tahle první kontrola je ta, která hlídá ROZSAH rozhodnutí. Firma
+-- Foodtab vznikla v `etapa0_scenar` PO migracích, takže má všech pět
+-- rolí a jejich práva jsou kopie šablon po migraci. Kdyby se mazání
+-- zúžilo zpátky na tři role ze zadání, zůstalo by `ai.use`
+-- u `vedouci_smeny` a `provozni` — v šabloně i tady — a spadne to.
+-- ---------------------------------------------------------------------
+select pg_temp.check('po migracích nemá Gastro AI ŽÁDNÁ z rolí firmy',
+  not exists (select 1
+              from public.role_permissions rp
+              join public.roles r on r.id = rp.role_id
+              where r.tenant_id = :'tenant'
+                and rp.permission_key = 'ai.use'));
+
 select id as role_bar from public.roles
  where tenant_id = :'tenant' and key = 'bar' \gset
 
@@ -257,11 +285,28 @@ values (:'role_bar', 'ai.use') on conflict do nothing;
 insert into app.role_template_permissions (template_key, permission_key)
 values ('bar', 'ai.use') on conflict do nothing;
 
-select pg_temp.check('příprava: právo se opravdu podařilo vrátit',
-  exists (select 1 from public.role_permissions
-          where role_id = :'role_bar' and permission_key = 'ai.use')
-  and exists (select 1 from app.role_template_permissions
-              where template_key = 'bar' and permission_key = 'ai.use'));
+/*
+  KANÁREK: `menu_ai.use` je JINÉ právo — patří modulu `menu` a ptá se
+  na něj obrazovka Tvorba menu. Hlavička migrace před tím varuje, ale
+  varování v komentáři není kontrola: v testovací databázi nemá
+  `menu_ai.*` nikdo (žádná šablona ho nerozdává), takže by přepis obou
+  mazání na `like '%ai.use'` neměl co smazat navíc a celá sada by
+  zůstala zelená. Vkládá se proto schválně a níž se ověřuje, že přežil.
+*/
+insert into public.role_permissions (role_id, permission_key)
+values (:'role_bar', 'menu_ai.use') on conflict do nothing;
+
+insert into app.role_template_permissions (template_key, permission_key)
+values ('bar', 'menu_ai.use') on conflict do nothing;
+
+/*
+  Kontrola „příprava se povedla" tu SCHVÁLNĚ NENÍ. Po
+  `insert … on conflict do nothing` řádek existuje v obou případech —
+  buď se vložil, nebo tam už byl —, takže průchod, ve kterém by byla
+  nepravdivá, neexistuje. Cokoli jiného je chyba a při `ON_ERROR_STOP`
+  se soubor utne dřív, než se k ní dojde. Byla by to kontrola, která
+  nemůže spadnout, a jen by nafoukla počet „X kontrol prošlo".
+*/
 
 \ir ../migrations/20260907020000_ai_use_pryc.sql
 
@@ -273,10 +318,34 @@ select pg_temp.check('a nemá ho ani žádná role UŽ ZALOŽENÉ firmy',
   not exists (select 1 from public.role_permissions
               where permission_key = 'ai.use'));
 
+-- Kanárek žije: mazání se trefilo do klíče na rovnost, ne přes `like`.
+select pg_temp.check('Tvorbu menu to nezavřelo — menu_ai.use zůstal',
+  exists (select 1 from public.role_permissions
+          where role_id = :'role_bar' and permission_key = 'menu_ai.use')
+  and exists (select 1 from app.role_template_permissions
+              where template_key = 'bar' and permission_key = 'menu_ai.use'));
+
+/*
+  A kanárek se zase uklidí. Není to kosmetika: `menu_ai.use` je živé
+  právo modulu `menu`, takže by se počítalo do stropu „nikdo nepřidělí
+  víc, než má sám" (`app.smi_pridelit`) a role Bar by ho po zbytek běhu
+  nesla navíc oproti tomu, co dělá `app.create_tenant`. Scénář po sobě
+  nechává stav, jaký zastal — `ai.use` uklidila migrace sama.
+*/
+delete from public.role_permissions
+ where role_id = :'role_bar' and permission_key = 'menu_ai.use';
+
+delete from app.role_template_permissions
+ where template_key = 'bar' and permission_key = 'menu_ai.use';
+
 /*
   Právo ale z KATALOGU nemizí — až modul vznikne, přidá se zpátky.
-  Drží to i `krok3_scenar`, který porovnává celý katalog se seznamem
-  v lib/authz.ts; kdyby klíč zmizel odsud, musel by zmizet i tam.
+
+  Drží to i `krok3_scenar`: ten porovnává `public.permissions` s ručně
+  psaným seznamem 34 klíčů uvnitř svého SQL (ř. 30–43). Pozor na to,
+  co to opravdu znamená — `lib/authz.ts` se při běhu NEČTE. Kdyby klíč
+  zmizel odsud, `krok3` spadne a někdo se na to musí podívat; že se
+  srovná i seznam v aplikaci, hlídá ten člověk, ne databáze.
 */
 select pg_temp.check('v katalogu oprávnění ale zůstává',
   exists (select 1 from public.permissions where key = 'ai.use'));

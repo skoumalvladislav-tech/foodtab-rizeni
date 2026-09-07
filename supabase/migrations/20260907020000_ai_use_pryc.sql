@@ -15,10 +15,15 @@
 -- rozšířil: **modul neexistuje pro nikoho, takže ho nemá mít nikdo.**
 -- Odebírá se tedy i `vedouci_smeny` a `provozni`.
 --
+-- Přesněji: Šéfík rozhodl o `vedouci_smeny` a o tom PRAVIDLE. Že z něj
+-- vypadne i `provozni`, se dohledalo tady — nejmenoval ho.
+--
 -- `provozni` ho má, i když v katalogu není vyjmenovaný: jeho šablona
--- vzniká hromadně jako „všechno kromě `agents.manage` a
--- `settings.manage`" (20260823120100_catalog.sql, ř. 118–121), takže
--- `ai.use` se do ní dostalo samo.
+-- vzniká hromadně (20260823120100_catalog.sql, ř. 118–121) jako
+-- „všechno kromě `agents.manage` a `settings.manage`", takže `ai.use`
+-- se do ní dostalo samo. Pozor, ten popis platí pro okamžik vzniku:
+-- 20260831010000_mzdy_sazby.sql, ř. 128–130 z té šablony později
+-- vyndal ještě `payroll.read` a `payroll.manage`.
 --
 -- Majitel se neřeší — ten práva z katalogu obchází přes `r.is_owner`
 -- v `app.has_access` a žádný řádek v `role_permissions` nemá.
@@ -30,10 +35,15 @@
 -- vůbec nic.**
 --
 -- `app.create_tenant` kopíruje šablony do `public.role_permissions`
--- ve chvíli, kdy firma vzniká (20260823120300_tenant_setup.sql,
--- ř. 121). Firmy, které už existují, tedy mají VLASTNÍ kopie těch
--- řádků a se šablonou je nic nespojuje — změna šablony se u nich
--- neprojeví, jen u nově založených.
+-- ve chvíli, kdy firma vzniká. ŽIVÁ VERZE té funkce je
+-- 20260901160000_jmeno_ne_z_emailu.sql, ř. 140–144 — původní
+-- 20260823120300_tenant_setup.sql, ř. 121 je od té doby zahozená
+-- (`drop function` tamtéž na ř. 81) a odkazovat na ni vede k mrtvému
+-- kódu; chová se stejně, ale hledá se pak marně.
+--
+-- Firmy, které už existují, tedy mají VLASTNÍ kopie těch řádků a se
+-- šablonou je nic nespojuje — změna šablony se u nich neprojeví, jen
+-- u nově založených.
 --
 -- Proto se maže na obou místech:
 --
@@ -42,8 +52,28 @@
 --
 -- Je to zásah do dat existující firmy, ne jen do katalogu. Jde do
 -- auditu sám: na `role_permissions` visí spoušť `trg_audit_role_permissions`
--- (20260831020000), takže je u každého odebraného řádku vidět, kdy
--- a čím zmizel.
+-- (20260831020000), takže je u každého odebraného řádku vidět, KDY
+-- zmizel. Ne čím: migrace běží bez přihlášeného uživatele, takže
+-- `app.audit` zapíše `actor_type = 'system'` bez jména a bez odkazu na
+-- tenhle soubor. Kdo bude ten záznam za půl roku číst, pozná čas
+-- a klíč, ne původ.
+--
+-- ---------------------------------------------------------------------
+-- DO ZÁKAZNICKÝCH ROLÍ SE JINAK NESAHÁ — TOHLE JE VÝJIMKA
+--
+-- 20260831010000_mzdy_sazby.sql, ř. 122–125 říká natvrdo: „Šablony
+-- platí pro NOVĚ zakládané firmy. Do rolí, které u zákazníků existují,
+-- se nesahá … migrace, která někomu mlčky rozšíří nebo ubere
+-- oprávnění, je přesně to, co se u mezd stát nesmí."
+--
+-- Tahle migrace do zákaznických rolí sahá. Vědomě, a proto to stojí
+-- tady: pravidlo zakazuje změnu MLČKY a mluví o mzdách, tedy o právu,
+-- za kterým jsou peníze a jména. `ai.use` neotvírá nic — modul
+-- neexistuje. Nechat ho tam by nebylo opatrné, jen tiché.
+--
+-- Kdo bude příště řešit totéž, ať ví, že stejnou výjimku si už bez
+-- odkazu vzaly 20260901220000_zalohy.sql (ř. 65–69)
+-- a 20260903100000_komunikace_zaklad.sql (ř. 64–68).
 --
 -- ---------------------------------------------------------------------
 -- PRÁVO Z KATALOGU NEMIZÍ
@@ -53,27 +83,56 @@
 --   * až Gastro AI vznikne, přidá se zpátky — a to je pak jeden
 --     `insert`, ne obnovování smazaného klíče, na kterém visí cizí
 --     klíče z `role_permissions`,
---   * `krok3_scenar` porovnává celý katalog se seznamem `PERMISSIONS`
---     v `lib/authz.ts`. Kdyby klíč zmizel odsud, musel by zmizet i tam
---     — a to je změna aplikace kvůli tomu, že se dnes nic nepřiděluje.
+--   * `krok3_scenar` (ř. 30–43) porovnává katalog s ručně psaným
+--     seznamem klíčů. Kdyby klíč zmizel odsud, ta kontrola spadne
+--     a někdo se na to musí podívat — a to je zbytečný rozruch kvůli
+--     tomu, že se dnes nic nepřiděluje.
+--
+--     (Ten seznam je v SQL, ne v `lib/authz.ts`. Komentář nad ním sice
+--     mluví o `PERMISSIONS` v aplikaci, ale soubor se za běhu NEČTE:
+--     je to ruční opis a shodu drží člověk, ne databáze.)
 --
 -- DŮSLEDEK, KTERÝ JE POTŘEBA ZNÁT: zaškrtávátko „Používat Gastro AI"
 -- zůstává na obrazovce Oprávnění vidět a dá se znovu zaškrtnout.
--- Nic tím nerozbije — jen si někdo přidělí právo, za kterým nic není.
--- Schovat ho by znamenalo rozhodnout, jak se v katalogu označuje
+--
+-- A NENÍ TO NEŠKODNÉ, i když to tak vypadá. `ai.use` patří do modulu
+-- `provoz`, který je základní a vždy zapnutý, takže se počítá mezi
+-- „živá práva role" (`app.ziva_prava_role`,
+-- 20260901110000_neprideluj_vic.sql, ř. 63–75). A strop „nikdo
+-- nepřidělí víc, než má sám" (`app.smi_pridelit`, tamtéž ř. 114–124)
+-- chce po tom, kdo roli přiděluje, VŠECHNA živá práva té role.
+--
+-- Po téhle migraci nemá `ai.use` nikdo kromě majitele. Kdyby ho tedy
+-- někdo zaškrtl zpátky třeba u role Servis, provozní s právem na
+-- personál už na Servis nikoho nepřijme ani nepozve: role mu z nabídky
+-- zmizí a u Oprávnění se objeví „Tuhle sadu nemůžete nikomu přidělit".
+-- Zaškrtnout to smí jen držitel `settings.manage`, tedy podle šablon
+-- majitel — past tedy sklapne po jeho zásahu a odnese ji personalista.
+--
+-- Dokud modul nevznikne, nemá se to zaškrtávat vůbec. Schovat to
+-- zaškrtávátko by znamenalo rozhodnout, jak se v katalogu označuje
 -- „ještě nehotové", a to je samostatná úvaha.
 --
 -- ---------------------------------------------------------------------
 -- POZOR NA `menu_ai.use` — TO JE NĚCO JINÉHO
 --
 -- Vedle `ai.use` existuje `menu_ai.use` („Nechat navrhnout menu",
--- modul `menu`, 20260830220000_modul_menu.sql). Ten modul JE hotový
+-- modul `menu`, 20260830220000_modul_menu.sql). Ten modul EXISTUJE
 -- a obrazovka Tvorba menu se na to právo ptá
--- (`app/[rozsah]/menu/page.tsx`). Nesmí se odebrat.
+-- (`app/[rozsah]/menu/page.tsx`, ř. 41) — i když zatím vykresluje jen
+-- ohlášení „Připravujeme", ta kontrola přístupu prázdná není. Nesmí
+-- se odebrat. (Rozdíl proti `ai.use` je právě tenhle: `menu_ai.use`
+-- něco otevírá, `ai.use` neotevírá nic.)
 --
 -- Obě mazání níž proto porovnávají klíč na rovnost, ne přes `like`.
 -- Kdo by to tu někdy přepsal na `like '%ai.use'` nebo `like '%ai%'`,
--- zavře Tvorbu menu celé firmě.
+-- zavřel by Tvorbu menu všem kromě majitele — ten se na ni dostane
+-- přes `r.is_owner` — a jen u firem se zapnutým modulem `menu`.
+--
+-- Tohle varování NENÍ jen komentář: `krok29_scenar`, oddíl 7, vloží
+-- `menu_ai.use` do role a do šablony schválně a po migraci ověří, že
+-- přežil. Bez toho by takový přepis prošel zeleně, protože v testovací
+-- databázi `menu_ai.*` jinak nikdo nemá.
 -- =====================================================================
 
 -- 1. Nové firmy už ho nedostanou.
