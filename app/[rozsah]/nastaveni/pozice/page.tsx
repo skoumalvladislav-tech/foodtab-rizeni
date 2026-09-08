@@ -10,15 +10,21 @@ import { prejmenovatPozici, prepnoutPozici, zalozitPozici } from "./akce";
 export const dynamic = "force-dynamic";
 
 /**
- * Nastavení → Pozice
+ * Nastavení → Zařazení (seznam)
  *
- * Pozice říká, čím ten člověk je: číšník, kuchař, barman. NENÍ to
- * oprávnění — to říká, co smí v aplikaci, a bydlí na vlastní obrazovce.
- * Brigádník má pozici a žádné oprávnění; proto se to nespojuje.
+ * Zařazení říká, čím ten člověk je: číšník, kuchař, barman — a od
+ * 9. 9. 2026 NESE I OPRÁVNĚNÍ. Do té doby to byly dvě oddělené věci
+ * („pozice" a „role") a Šéfík je právem vnímal jako jednu; zadání
+ * docs/zarazeni-misto-roli.md, oddíl 2.
  *
- * Pozice se nemažou. U lidí, kteří ji mají, by zmizelo, čím byli, a
- * v rozpisu směn je pozice u každé směny. Vyřazená se jen přestane
- * nabízet u nových.
+ * Tahle obrazovka zakládá a vyřazuje zařazení. CO KTERÉ SMÍ se
+ * zaškrtává v Nastavení → Oprávnění. Zadání 6.1 chce ty dvě obrazovky
+ * nakonec sloučit do jedné — je to ergonomie, ne správnost, a zůstává
+ * to na potom (docs/hlaseni/stav-2026-09-09-prepnuti.md).
+ *
+ * Zařazení se nemažou. U lidí, kteří ho mají, by zmizelo, čím byli,
+ * a v rozpisu směn je u každé směny. Vyřazené se jen přestane nabízet
+ * u nových — ale u těch, kdo ho mají, PLATÍ DÁL, včetně oprávnění.
  */
 
 type Pozice = {
@@ -87,16 +93,16 @@ export default async function NastaveniPozice({
     <>
       <Nadpis
         oci="Nastavení"
-        popis="Čím lidé v provozu jsou. S tím, co smějí v aplikaci, to nesouvisí — to jsou Oprávnění."
+        popis="Čím lidé v provozu jsou. Co které zařazení smí, se zaškrtává v Oprávněních."
       >
-        Pozice
+        Zařazení
       </Nadpis>
 
       <div style={{ padding: "16px", paddingBottom: "32px" }}>
         <form action={zalozitPozici} style={formular}>
           <input type="hidden" name="rozsah" value={rozsah} />
           <label style={formularLabel}>
-            <span>Nová pozice</span>
+            <span>Nové zařazení</span>
             <input
               name="nazev"
               required
@@ -123,7 +129,7 @@ export default async function NastaveniPozice({
         </form>
 
         <h2 style={nadpisSekce}>
-          {pozice.length === 0 ? "Zatím žádné pozice" : "Pozice ve firmě"}
+          {pozice.length === 0 ? "Zatím žádné zařazení" : "Zařazení ve firmě"}
         </h2>
 
         {pozice.length === 0 ? (
@@ -209,9 +215,10 @@ export default async function NastaveniPozice({
             maxWidth: "62ch",
           }}
         >
-          Pozice se nemažou. Vyřazená se přestane nabízet u nových lidí, ale
-          u těch, kdo ji mají, zůstane — jinak by z jejich záznamu i ze
-          starých směn zmizelo, čím byli.
+          Zařazení se nemažou. Vyřazené se přestane nabízet u nových lidí,
+          ale u těch, kdo ho mají, zůstane — jinak by z jejich záznamu
+          i ze starých směn zmizelo, čím byli. Oprávnění, která nese,
+          jim taky platí dál.
         </p>
       </div>
     </>

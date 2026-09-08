@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { getContext, getUser, jeVedeni } from "@/lib/authz";
+import { getContext, getUser, jeVedeni, maOpravneni } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
@@ -60,7 +60,7 @@ export default async function Home() {
     se ze své podstaty ukazuje člověku bez rozsahu a musí jít poslat
     odkazem („mrkni sem, ozvi se mi“).
   */
-  if (!ctx.role) redirect("/zatim-bez-opravneni");
+  if (!maOpravneni(ctx)) redirect("/zatim-bez-opravneni");
 
   // Bez určení rozsahu: resolveScope() vybere firemní úroveň tomu, kdo na
   // ni má, ostatním jejich první pobočku.

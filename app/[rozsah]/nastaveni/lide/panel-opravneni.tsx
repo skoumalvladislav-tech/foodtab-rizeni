@@ -7,9 +7,16 @@ import { prideleniOpravneni } from './akce'
 /**
  * Přidělení oprávnění a rozsahu jednomu člověku.
  *
- * Obojí na jedné obrazovce, protože ani jedno samo nic neotevře:
- * role bez rozsahu nedá právo nikde, rozsah bez role nedá právo žádné.
+ * Oprávnění nese od 9. 9. 2026 ZAŘAZENÍ u zaměstnance, rozsah zůstal
+ * na členství. Obojí je pořád na jedné obrazovce, protože ani jedno
+ * samo nic neotevře: zařazení bez rozsahu nedá právo nikde, rozsah
+ * bez zařazení nedá právo žádné.
  * Viz docs/odpovedi-pozvanky-2026-09-01.md, oddíl 1.
+ *
+ * Rozdíl oproti starému stavu: zařazení jde nastavit i člověku BEZ
+ * účtu. Uloží se a začne platit, jakmile se přihlásí — zadání
+ * docs/zarazeni-misto-roli.md, oddíl 3. Za členstvím zůstává jen
+ * rozsah.
  *
  * Klientské je to jen kvůli tomu, aby seznam poboček zmizel, když se
  * vybere celá firma. Zápis dělá serverová akce a rozhoduje databáze.
@@ -18,27 +25,33 @@ export default function PanelOpravneni({
   rozsah,
   jmeno,
   zamestnanec,
-  opravneni,
+  zarazeni,
   pobocky,
   smiFiremni,
-  nynejsiRole,
+  nynejsiZarazeni,
   nynejsiUroven,
   nynejsiPobocky,
+  maUcet,
+  maClenstvi,
   jaSam,
   posledniMajitel,
 }: {
   rozsah: string
   jmeno: string
   zamestnanec: string
-  /** Role, které smí přihlášený přidělit — už prosejté stropem. */
-  opravneni: { id: string; label: string }[]
+  /** Zařazení, která smí přihlášený přidělit — už prosejtá stropem. */
+  zarazeni: { id: string; label: string }[]
   /** Pobočky, na které přihlášený sám vidí. */
   pobocky: { id: string; nazev: string }[]
   /** Firemní rozsah nabízí jen ten, kdo ho má sám. */
   smiFiremni: boolean
-  nynejsiRole: string | null
+  nynejsiZarazeni: string | null
   nynejsiUroven: 'tenant' | 'branch'
   nynejsiPobocky: string[]
+  /** Bez účtu se oprávnění uloží, ale zatím nic neotevře. */
+  maUcet: boolean
+  /** Bez členství nejde nastavit rozsah — není u koho ho vést. */
+  maClenstvi: boolean
   /** Vlastní členství nejde měnit — ani vlastníkem. */
   jaSam: boolean
   /** Jediný majitel firmy. Přeřadit ho nejde, jinak firma zůstane bez majitele. */
@@ -51,11 +64,11 @@ export default function PanelOpravneni({
   // Obojí zavírá formulář ze stejného důvodu: změna by neprošla.
   const zamceno = jaSam || posledniMajitel
 
-  // Role, kterou má člověk dnes, ale přihlášený ji přidělit nesmí. Do
-  // nabídky patří, jinak by ji odeslání formuláře tiše sebralo.
+  // Zařazení, které má člověk dnes, ale přihlášený ho přidělit nesmí.
+  // Do nabídky patří, jinak by ho odeslání formuláře tiše sebralo.
   const chybejici =
-    nynejsiRole && !opravneni.some((o) => o.id === nynejsiRole)
-      ? [{ id: nynejsiRole, label: 'Nynější oprávnění (přidělit ho neumíte)' }]
+    nynejsiZarazeni && !zarazeni.some((o) => o.id === nynejsiZarazeni)
+      ? [{ id: nynejsiZarazeni, label: 'Nynější zařazení (přidělit ho neumíte)' }]
       : []
 
   return (
@@ -83,10 +96,26 @@ export default function PanelOpravneni({
         </p>
       ) : null}
 
+      {maUcet ? null : (
+        <p style={ramecek}>
+          <strong>{jmeno} zatím nemá účet.</strong> Zařazení se uloží
+          a začne platit, jakmile se přihlásí. Rozsah se nastavuje až
+          s členstvím — bez přihlášení není u koho ho vést.
+        </p>
+      )}
+
+      {maUcet && !maClenstvi ? (
+        <p style={ramecek}>
+          <strong>{jmeno} má účet, ale ve firmě zatím žádné členství.</strong>{' '}
+          Pozvánku nejspíš ještě nepřijal. Zařazení uložit jde, rozsah
+          se doplní po přijetí.
+        </p>
+      ) : null}
+
       <p style={popis}>
-        Oprávnění říká <em>co</em> smí, rozsah <em>kde</em>. Jedno bez
-        druhého neotevře nic — člověk s rolí a bez pobočky se přihlásí
-        a nic neuvidí.
+        Zařazení říká <em>co</em> smí, rozsah <em>kde</em>. Jedno bez
+        druhého neotevře nic — člověk se zařazením a bez pobočky se
+        přihlásí a nic neuvidí.
       </p>
 
       <form action={prideleniOpravneni} style={{ display: 'grid', gap: '16px' }}>
@@ -94,15 +123,15 @@ export default function PanelOpravneni({
         <input type="hidden" name="zamestnanec" value={zamestnanec} />
 
         <label style={poleLabel}>
-          <span>Oprávnění</span>
+          <span>Zařazení</span>
           <select
-            name="opravneni"
-            defaultValue={nynejsiRole ?? ''}
+            name="zarazeni"
+            defaultValue={nynejsiZarazeni ?? ''}
             disabled={zamceno}
             style={pole}
           >
             <option value="">Žádné — čeká na přidělení</option>
-            {[...chybejici, ...opravneni].map((o) => (
+            {[...chybejici, ...zarazeni].map((o) => (
               <option key={o.id} value={o.id}>
                 {o.label}
               </option>
@@ -110,7 +139,13 @@ export default function PanelOpravneni({
           </select>
         </label>
 
-        <fieldset style={skupina} disabled={zamceno}>
+        {/*
+          Rozsah se schovává, dokud člověk nemá členství. Není to
+          zákaz „pro jistotu“: bez členství není řádek, do kterého by
+          se rozsah zapsal, takže by tlačítko slíbilo něco, co se
+          nestane.
+        */}
+        <fieldset style={skupina} disabled={zamceno || !maClenstvi} hidden={!maClenstvi}>
           <legend style={legenda}>Rozsah</legend>
 
           {smiFiremni ? (
