@@ -160,13 +160,21 @@ export type Context = {
   tenant: { id: string; name: string; currency: string; timezone: string }
   membership: { scope: ScopeLevel; status: 'active' | 'suspended' }
   /**
-   * `null` = člen čeká na přidělení oprávnění (docs/pozvanky-zadani.md).
-   * Pozvánka smí přijít bez role; do aplikace ho to nepustí nikam —
-   * `permissions` je prázdné a `app.has_access` vrací nepravdu pro
-   * každé právo. Vykreslení musí ten rozdíl poznat, aby místo prázdného
-   * rozcestníku ukázalo vysvětlení.
+   * Zařazení člověka — Číšník, Kuchař, Provozní. Od 9. 9. 2026 na něm
+   * visí oprávnění (`position_permissions`), takže to není jen popiska.
+   *
+   * `null` znamená „žádné zařazení nemá", a to je něco JINÉHO než
+   * „nemá oprávnění": majitel bez zařazení má práva na všechno
+   * a člověk se zařazením bez práv nemá nic. Kdo se ptá, jestli ho
+   * pustit dovnitř, se ptá `maOpravneni()`, ne tohohle klíče.
    */
-  role: { id: string; key: string; label: string; isOwner: boolean } | null
+  zarazeni: { id: string; key: string; label: string } | null
+  /**
+   * Majitel firmy (`employees.je_majitel`). Obchází katalog práv —
+   * dostává vše z aktivních modulů —, takže se nedá poznat z
+   * `permissions`, a proto stojí zvlášť.
+   */
+  jeMajitel: boolean
   /** Všechny moduly Foodtabu, včetně těch, které firma nemá. */
   modules: Module[]
   /** Jen pobočky, na které uživatel doopravdy vidí. */
@@ -269,7 +277,8 @@ export const getContext = cache(async (tenantId: string): Promise<Context | null
   const raw = data as {
     tenant: Context['tenant']
     membership: { scope: string; status: string }
-    role: Context['role']
+    zarazeni: Context['zarazeni']
+    jeMajitel: boolean
     modules: { key: string; label: string; isBase: boolean; active: boolean }[]
     branches: { id: string; name: string; slug: string; color: string }[]
     permissions: string[]
@@ -283,7 +292,8 @@ export const getContext = cache(async (tenantId: string): Promise<Context | null
       scope: raw.membership.scope === 'tenant' ? 'tenant' : 'branch',
       status: 'active',
     },
-    role: raw.role ?? null,
+    zarazeni: raw.zarazeni ?? null,
+    jeMajitel: raw.jeMajitel === true,
     modules: (raw.modules ?? []).filter((m): m is Module =>
       (MODULES as readonly string[]).includes(m.key),
     ),
@@ -476,14 +486,33 @@ export function canSeeAny(ctx: Context, permissions: Permission[]): boolean {
  * Kdyby to Šéfíkovi nesedělo, přidá se sem `shifts.manage` a je to
  * jedno slovo. Otázka je v `docs/hlaseni/otazky.md`.
  *
- * `isOwner` je tu zvlášť, protože majitel v databázi katalog práv
+ * `jeMajitel` je tu zvlášť, protože majitel v databázi katalog práv
  * obchází (`app.has_access` ho pustí na všechno z aktivních modulů) —
  * ale `my_context` mu práva vypisuje podle modulů, takže na vypnutém
  * modulu by mu `canSee` řeklo ne. Na „kdo je vedení" to vliv mít nemá.
  */
 export function jeVedeni(ctx: Context): boolean {
   return (
-    ctx.role?.isOwner === true ||
+    ctx.jeMajitel ||
     canSeeAny(ctx, ['settings.manage', 'people.manage'])
   )
+}
+
+/**
+ * Má ten člověk ve firmě vůbec co dělat?
+ *
+ * Do 9. 9. 2026 se tahle otázka ptala `ctx.role` — „přidělil mu někdo
+ * roli?". Po přepnutí na zařazení by to byla špatná otázka hned
+ * dvakrát: majitel žádné zařazení mít nemusí (a má přitom všechno)
+ * a člověk se zařazením bez práv ho má (a nemá nic).
+ *
+ * Ptá se proto na to, oč tu jde: má aspoň jedno právo? Majitel se
+ * kontroluje zvlášť, protože katalog obchází.
+ *
+ * JE TO JEN PRO VYKRESLENÍ. O přístupu rozhoduje `app.has_access`
+ * v databázi; tohle jen rozhoduje, jestli člověku ukázat aplikaci,
+ * nebo vysvětlení, že mu zatím nikdo nic nepřidělil.
+ */
+export function maOpravneni(ctx: Context): boolean {
+  return ctx.jeMajitel || ctx.permissions.length > 0
 }

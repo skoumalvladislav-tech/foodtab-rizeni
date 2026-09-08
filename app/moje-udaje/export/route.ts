@@ -55,7 +55,10 @@ export async function GET() {
     zamestnanec: muj
       ? { jmeno: muj.full_name, telefon: muj.phone, email: muj.email }
       : null,
-    opravneni: ctx.role?.label ?? null,
+    // Od 9. 9. 2026 nese oprávnění zařazení, ne role. Majitelství je
+    // vlastnost člověka, ne zařazení, takže se vypisuje zvlášť.
+    zarazeni: ctx.zarazeni?.label ?? null,
+    jeMajitel: ctx.jeMajitel,
     souhlasy: souhlasy.data ?? [],
     vzato_na_vedomi: vedomi.data ?? [],
     neuplne: [

@@ -214,7 +214,9 @@ export default async function MojeUdaje({
             <dd style={hodnota}>{ctx.tenant.name}</dd>
             <dt style={popisek}>Oprávnění</dt>
             <dd style={hodnota}>
-              {ctx.role?.label ?? 'Zatím vám nikdo nepřidělil oprávnění'}
+              {ctx.jeMajitel
+                ? 'Majitel'
+                : ctx.zarazeni?.label ?? 'Zatím vám nikdo nepřidělil oprávnění'}
             </dd>
           </dl>
           <p style={{ ...popis, marginBottom: 0 }}>

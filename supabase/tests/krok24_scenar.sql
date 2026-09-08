@@ -66,25 +66,29 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('bbbb0000-0000-0000-0000-00000000000b', 'borek@foodtab.cz',   '{"full_name":"Bořek Dvořák"}'),
   ('cccc0000-0000-0000-0000-00000000000c', 'cecilie@foodtab.cz', '{"full_name":"Cecílie Provozní"}');
 
-select id as role_kuchyne  from public.roles where tenant_id = :'tenant' and key = 'kuchyne' \gset
-select id as role_provozni from public.roles where tenant_id = :'tenant' and key = 'provozni' \gset
+select id as z_kuchyne  from public.positions where tenant_id = :'tenant' and key = 'kuchyne' \gset
+select id as z_provozni from public.positions where tenant_id = :'tenant' and key = 'provozni' \gset
+
+-- Práva visí od přepnutí na zaměstnanci, ne na roli u členství.
+-- Příprava scény proto běží bez přihlášeného, jako migrace.
+select set_config('test.user_id', '', false);
 
 -- Anna vaří na Perle. Bořek je za barem v Bernardu. Cecílie je provozní
 -- přes celou firmu — má people.manage, a právě proto na ní stojí
 -- kontrola v oddíle 6.
-insert into public.employees (tenant_id, branch_id, user_id, full_name, employment_type) values
-  (:'tenant', :'perla', 'aaaa0000-0000-0000-0000-00000000000a', 'Anna Nováková', 'hpp'),
-  (:'tenant', :'bar',   'bbbb0000-0000-0000-0000-00000000000b', 'Bořek Dvořák', 'hpp'),
-  (:'tenant', :'perla', 'cccc0000-0000-0000-0000-00000000000c', 'Cecílie Provozní', 'hpp');
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name, employment_type) values
+  (:'tenant', :'perla', 'aaaa0000-0000-0000-0000-00000000000a', :'z_kuchyne',  'Anna Nováková', 'hpp'),
+  (:'tenant', :'bar',   'bbbb0000-0000-0000-0000-00000000000b', :'z_kuchyne',  'Bořek Dvořák', 'hpp'),
+  (:'tenant', :'perla', 'cccc0000-0000-0000-0000-00000000000c', :'z_provozni', 'Cecílie Provozní', 'hpp');
 
 select id as anna    from public.employees where user_id = 'aaaa0000-0000-0000-0000-00000000000a' \gset
 select id as borek   from public.employees where user_id = 'bbbb0000-0000-0000-0000-00000000000b' \gset
 select id as cecilie from public.employees where user_id = 'cccc0000-0000-0000-0000-00000000000c' \gset
 
 insert into public.memberships (tenant_id, user_id, role_id, scope, status) values
-  (:'tenant', 'aaaa0000-0000-0000-0000-00000000000a', :'role_kuchyne',  'branch', 'active'),
-  (:'tenant', 'bbbb0000-0000-0000-0000-00000000000b', :'role_kuchyne',  'branch', 'active'),
-  (:'tenant', 'cccc0000-0000-0000-0000-00000000000c', :'role_provozni', 'tenant', 'active');
+  (:'tenant', 'aaaa0000-0000-0000-0000-00000000000a', null, 'branch', 'active'),
+  (:'tenant', 'bbbb0000-0000-0000-0000-00000000000b', null, 'branch', 'active'),
+  (:'tenant', 'cccc0000-0000-0000-0000-00000000000c', null, 'tenant', 'active');
 
 select id as clen_anna  from public.memberships where user_id = 'aaaa0000-0000-0000-0000-00000000000a' \gset
 select id as clen_borek from public.memberships where user_id = 'bbbb0000-0000-0000-0000-00000000000b' \gset
@@ -484,23 +488,22 @@ select pg_temp.check('u volby „vedoucí" mezi adresáty majitel není',
     where e.user_id = :'sef'));
 
 reset role;
-select id as role_majitel from public.roles
- where tenant_id = :'tenant' and is_owner limit 1 \gset
-insert into public.role_permissions (role_id, permission_key)
-values (:'role_majitel', 'people.manage')
-on conflict do nothing;
+select set_config('test.user_id', '', false);
+update public.employees set position_id = :'z_provozni'
+ where tenant_id = :'tenant' and user_id = :'sef';
 
 select set_config('test.user_id', 'aaaa0000-0000-0000-0000-00000000000a', false);
 set role authenticated;
-select pg_temp.check('ani když majitelská role to právo dostane výslovně',
+select pg_temp.check('ani když majitel to právo dostane ze zařazení',
   not exists (
     select 1 from public.kdo_uvidi_vzkaz(:'tenant', 'vedouci', :'bar') k
     join public.employees e on e.id = k.employee_id
     where e.user_id = :'sef'));
 reset role;
 
-delete from public.role_permissions
- where role_id = :'role_majitel' and permission_key = 'people.manage';
+select set_config('test.user_id', '', false);
+update public.employees set position_id = null
+ where tenant_id = :'tenant' and user_id = :'sef';
 
 select set_config('test.user_id', 'aaaa0000-0000-0000-0000-00000000000a', false);
 set role authenticated;

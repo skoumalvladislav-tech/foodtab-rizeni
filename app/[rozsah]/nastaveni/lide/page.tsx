@@ -33,6 +33,12 @@ type Zamestnanec = {
   color: string | null;
   active: boolean;
   deleted_at: string | null;
+  /**
+   * Majitel firmy. Od 9. 9. 2026 je majitelství vlastnost ČLOVĚKA,
+   * ne role u členství: Šéfík může být v rozpisu vedený jako
+   * provozní a majitelem být pořád.
+   */
+  je_majitel: boolean;
 };
 
 /**
@@ -106,7 +112,7 @@ export default async function NastaveniLide({
     supabase
       .from("employees")
       .select(
-        "id, full_name, position_id, branch_id, user_id, employment_type, started_on, active, deleted_at, color",
+        "id, full_name, position_id, branch_id, user_id, employment_type, started_on, active, deleted_at, color, je_majitel",
       )
       .eq("tenant_id", tenantId)
       .order("full_name"),
@@ -137,31 +143,20 @@ export default async function NastaveniLide({
     .map((p) => ({ id: p.id, label: p.label }));
 
   /*
-    Oprávnění do nabídky pozvánky.
+    Která zařazení smí ten, kdo je otevřel, vůbec přidělit.
 
-    Nabídne se jen to, co ten, kdo zve, sám smí přidělit
-    (docs/pravidlo-neprideluj-vic.md). Je to POHODLÍ, ne ochrana —
-    rozhodnutí padá uvnitř app.create_invitation, takže i kdyby se sem
-    role propašovala, databáze ji odmítne.
+    Nabídne se jen to, co má sám (docs/pravidlo-neprideluj-vic.md).
+    Je to POHODLÍ, ne ochrana — rozhodnutí padá ve spoušti
+    `trg_strop_zarazeni` a v politikách, takže i kdyby se sem zařazení
+    propašovalo, databáze ho odmítne.
 
     Počítá se jen z práv ŽIVÝCH modulů — stejně jako na obrazovce
-    Oprávnění a stejně jako `app.ziva_prava_role` v databázi. Šablona
-    Účetní nosí i finance.read; bez modulu Finance to nikomu nic
-    neotevírá, a kdyby se to počítalo, nešla by ta role nabídnout ani
-    vlastníkovi firmy.
+    Oprávnění a stejně jako `app.ziva_prava_zarazeni` v databázi.
+    Šablona Účetní nosí i finance.read; bez modulu Finance to nikomu
+    nic neotevírá, a kdyby se to počítalo, nešlo by to zařazení
+    nabídnout ani majiteli.
   */
-  const roleFirmy = await seznam<{
-    id: string;
-    label: string;
-    is_owner: boolean;
-  }>(
-    "role firmy",
-    supabase
-      .from("roles")
-      .select("id, label, is_owner")
-      .eq("tenant_id", tenantId)
-      .order("label"),
-  );
+  const zarazeniFirmy = vsechnyPozice;
 
   const katalogPrav = await seznam<{ key: string; module_key: string }>(
     "katalog práv",
@@ -175,51 +170,54 @@ export default async function NastaveniLide({
     katalogPrav.filter((p) => zapnuteModuly.has(p.module_key)).map((p) => p.key),
   );
 
-  const vazby = await seznam<{ role_id: string; permission_key: string }>(
-    "obsah sad oprávnění",
+  const vazby = await seznam<{ position_id: string; permission_key: string }>(
+    "oprávnění zařazení",
     supabase
-      .from("role_permissions")
-      .select("role_id, permission_key")
-      .in("role_id", roleFirmy.map((r) => r.id)),
+      .from("position_permissions")
+      .select("position_id, permission_key")
+      .eq("tenant_id", tenantId),
   );
 
-  const pravaRole = new Map<string, string[]>();
+  const pravaZarazeni = new Map<string, string[]>();
   for (const v of vazby) {
     if (!ziva.has(v.permission_key)) continue;
-    if (!pravaRole.has(v.role_id)) pravaRole.set(v.role_id, []);
-    pravaRole.get(v.role_id)!.push(v.permission_key);
+    if (!pravaZarazeni.has(v.position_id)) pravaZarazeni.set(v.position_id, []);
+    pravaZarazeni.get(v.position_id)!.push(v.permission_key);
   }
 
-  const nabizenaOpravneni = roleFirmy
-    .filter((r) =>
+  const nabizenaZarazeni = zarazeniFirmy
+    .filter((z) =>
       smimPridelit(ctx, {
-        isOwner: r.is_owner,
-        prava: pravaRole.get(r.id) ?? [],
+        // Majitel není zařazení — tudy nikdy neprochází.
+        isOwner: false,
+        prava: pravaZarazeni.get(z.id) ?? [],
       }),
     )
-    .map((r) => ({ id: r.id, label: r.label }));
+    .map((z) => ({ id: z.id, label: z.label }));
 
   /*
-    Kdo má jaké oprávnění. Sloupec v seznamu je kvůli tomu, že pozvánka
-    smí přijít bez role (docs/pozvanky-zadani.md): u takového člověka
-    musí stát „čeká na přidělení“, ne prázdno. Prázdné políčko vypadá
-    jako chyba a nikdo podle něj nepozná, že se na něj ještě čeká.
+    Členství drží už jen ROZSAH a to, že člověk do firmy patří.
+    Oprávnění nese zařazení u zaměstnance — proto se `role_id` nečte:
+    zůstalo v tabulce, ale o ničem nerozhoduje.
+
+    Sloupec v seznamu je kvůli tomu, že pozvánka smí přijít bez
+    oprávnění (docs/pozvanky-zadani.md): u takového člověka musí stát
+    „čeká na přidělení“, ne prázdno. Prázdné políčko vypadá jako chyba
+    a nikdo podle něj nepozná, že se na něj ještě čeká.
   */
   const clenstvi = await seznam<{
     id: string;
     user_id: string;
-    role_id: string | null;
     scope: string;
   }>(
     "členství ve firmě",
     supabase
       .from("memberships")
-      .select("id, user_id, role_id, scope")
+      .select("id, user_id, scope")
       .eq("tenant_id", tenantId)
       .eq("status", "active"),
   );
-  const roleUctu = new Map(clenstvi.map((m) => [m.user_id, m.role_id]));
-  const nazevRole = new Map(roleFirmy.map((r) => [r.id, r.label]));
+  const nazevZarazeni = new Map(vsechnyPozice.map((p) => [p.id, p.label]));
 
   /*
     Poslední majitel se nesmí dát odebrat (docs/vlastniku-muze-byt-vic.md).
@@ -232,15 +230,27 @@ export default async function NastaveniLide({
     a chová se to jako dosud. Zamknout Smazat u všech kvůli nedeplojnuté
     funkci by bylo horší.
   */
-  const rolMajitele = roleFirmy.find((r) => r.is_owner)?.id ?? null;
-  const jeMajitel = (userId: string | null) =>
-    userId != null && rolMajitele != null && roleUctu.get(userId) === rolMajitele;
+  /*
+    Majitelství se od 9. 9. 2026 čte ze `employees.je_majitel`, ne
+    z `roles.is_owner` u členství. Kdyby se to nechalo, jak bylo,
+    vrátilo by to `false` pro KAŽDÉHO: zmizelo by „(jediný)“
+    a odemklo by se Smazat u posledního majitele.
+  */
+  const majitele = new Set(
+    (zamestnanci ?? [])
+      .filter((z) => z.je_majitel && !z.deleted_at)
+      .map((z) => z.id),
+  );
+  const jeMajitel = (zamestnanecId: string | null) =>
+    zamestnanecId != null && majitele.has(zamestnanecId);
 
   const { data: pocetMajitelu } = await supabase.rpc("pocet_majitelu", {
     p_tenant: tenantId,
   });
-  const posledniMajitel = (userId: string | null) =>
-    typeof pocetMajitelu === "number" && pocetMajitelu === 1 && jeMajitel(userId);
+  const posledniMajitel = (zamestnanecId: string | null) =>
+    typeof pocetMajitelu === "number" &&
+    pocetMajitelu === 1 &&
+    jeMajitel(zamestnanecId);
 
   /*
     Podklad pro panel přidělení. Načítá se jen pro toho jednoho člověka,
@@ -657,33 +667,37 @@ export default async function NastaveniLide({
       {/* PIN u konkrétního člověka */}
       {pinProId && smiPin ? await panelPinu(pinProId) : null}
 
+      {/*
+        Panel se už NESCHOVÁVÁ ZA ČLENSTVÍ.
+
+        Do 9. 9. 2026 tu u člověka bez účtu stálo „Oprávnění se
+        přiděluje přihlášenému člověku — nejdřív mu pošlete pozvánku“.
+        Byla to pravda o starém modelu a Šéfíkova výtka mířila přesně
+        na ni: zakládá člověka, chce mu rovnou nastavit, co smí,
+        a musí to odložit.
+
+        Od přepnutí nese oprávnění ZAŘAZENÍ u zaměstnance, takže se dá
+        nastavit hned. Za členstvím zůstává už jen ROZSAH — ten bez
+        účtu opravdu nedává smysl (nemá kdo se přihlásit), a je to
+        u něj napsané.
+      */}
       {prideluje ? (
         <div style={{ padding: "0 16px" }}>
-          {!prideluje.user_id ? (
-            <p className="hlaska-chyba">
-              {prideluje.full_name} nemá účet. Oprávnění se přiděluje
-              přihlášenému člověku — nejdřív mu pošlete pozvánku.
-            </p>
-          ) : !clenstviProPanel ? (
-            <p className="hlaska-chyba">
-              {prideluje.full_name} má účet, ale ve firmě zatím žádné
-              členství. Pozvánku nejspíš ještě nepřijal.
-            </p>
-          ) : (
-            <PanelOpravneni
-              rozsah={rozsah}
-              jmeno={prideluje.full_name}
-              zamestnanec={prideluje.id}
-              opravneni={nabizenaOpravneni}
-              pobocky={ctx.branches.map((b) => ({ id: b.id, nazev: b.name }))}
-              smiFiremni={ctx.membership.scope === "tenant"}
-              nynejsiRole={clenstviProPanel.role_id}
-              nynejsiUroven={clenstviProPanel.scope === "tenant" ? "tenant" : "branch"}
-              nynejsiPobocky={pobockyClena.map((r) => String(r.branch_id))}
-              jaSam={clenstviProPanel.user_id === uzivatel?.id}
-              posledniMajitel={posledniMajitel(clenstviProPanel.user_id)}
-            />
-          )}
+          <PanelOpravneni
+            rozsah={rozsah}
+            jmeno={prideluje.full_name}
+            zamestnanec={prideluje.id}
+            zarazeni={nabizenaZarazeni}
+            pobocky={ctx.branches.map((b) => ({ id: b.id, nazev: b.name }))}
+            smiFiremni={ctx.membership.scope === "tenant"}
+            nynejsiZarazeni={prideluje.position_id}
+            nynejsiUroven={clenstviProPanel?.scope === "tenant" ? "tenant" : "branch"}
+            nynejsiPobocky={pobockyClena.map((r) => String(r.branch_id))}
+            maUcet={Boolean(prideluje.user_id)}
+            maClenstvi={Boolean(clenstviProPanel)}
+            jaSam={clenstviProPanel?.user_id === uzivatel?.id}
+            posledniMajitel={posledniMajitel(prideluje.id)}
+          />
         </div>
       ) : null}
 
@@ -693,7 +707,7 @@ export default async function NastaveniLide({
           <thead>
             <tr style={headRow}>
               <th style={th}>Jméno</th>
-              <th style={th}>Pozice</th>
+              <th style={th}>Zařazení</th>
               <th style={th}>Pobočka</th>
               <th style={th}>Typ</th>
               <th style={th}>Účet</th>
@@ -734,16 +748,17 @@ export default async function NastaveniLide({
                 <td style={td}>{z.user_id ? "Ano" : "Ne"}</td>
 
                 {/*
-                  Tři různé stavy, ne dva. Bez účtu se na oprávnění
-                  nečeká — brigádník bez přihlášení je běžný a v pořádku.
-                  Čeká se u toho, kdo účet MÁ a roli ne.
+                  Oprávnění nese ZAŘAZENÍ, takže se ukazuje i u člověka
+                  bez účtu: uloží se a začne platit, jakmile se přihlásí
+                  (zadání docs/zarazeni-misto-roli.md, oddíl 3).
+
+                  Majitel stojí zvlášť — nemá ho od zařazení a odebrat
+                  se poslednímu nedá.
                 */}
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
-                  {!z.user_id ? (
-                    <span style={{ color: "var(--muted)" }}>—</span>
-                  ) : posledniMajitel(z.user_id) ? (
+                  {posledniMajitel(z.id) ? (
                     <span title="Ve firmě musí zůstat aspoň jeden majitel.">
-                      {nazevRole.get(roleUctu.get(z.user_id) as string) ?? "—"}{" "}
+                      Majitel{" "}
                       <span style={{ fontSize: "12px", color: "var(--muted)" }}>
                         (jediný)
                       </span>
@@ -751,12 +766,14 @@ export default async function NastaveniLide({
                   ) : (
                     <Link
                       href={`/${rozsah}/nastaveni/lide?opravneni=${z.id}`}
-                      style={roleUctu.get(z.user_id) ? undefined : cekaNaPrideleni}
+                      style={z.position_id || z.je_majitel ? undefined : cekaNaPrideleni}
                       title="Přidělit oprávnění a rozsah"
                     >
-                      {roleUctu.get(z.user_id)
-                        ? nazevRole.get(roleUctu.get(z.user_id) as string) ?? "—"
-                        : "čeká na přidělení"}
+                      {z.je_majitel
+                        ? "Majitel"
+                        : z.position_id
+                          ? nazevZarazeni.get(z.position_id) ?? "—"
+                          : "čeká na přidělení"}
                     </Link>
                   )}
                 </td>
@@ -838,7 +855,6 @@ export default async function NastaveniLide({
           full_name: z.full_name,
           branch_id: z.branch_id,
         }))}
-        opravneni={nabizenaOpravneni}
         pobocky={ctx.branches.map((b) => ({ id: b.id, nazev: b.name }))}
         smiFiremni={ctx.membership.scope === "tenant"}
       />
@@ -959,10 +975,11 @@ function popisChyby(kod: string): string {
     // Text píše databáze a chodí v adrese; tenhle je jen návěští.
     case "smazani":
       return "Smazat se to nepovedlo.";
-    case "opravneni-bez-uctu":
-      return "Oprávnění se přiděluje přihlášenému člověku. Tenhle účet nemá — pošlete mu nejdřív pozvánku.";
+    // Zařazení jde nastavit i člověku bez účtu — uloží se a začne
+    // platit, jakmile se přihlásí. Bez členství nejde jen ROZSAH:
+    // ten říká, kde ta práva platí, a bez přihlášení není u koho.
     case "opravneni-bez-clenstvi":
-      return "Ten člověk zatím pozvánku nepřijal, takže ve firmě nemá členství, kterému by šlo oprávnění přidělit.";
+      return "Zařazení se uložilo. Rozsah (firma/pobočka) se doplní, až člověk přijme pozvánku — do té chvíle není u koho ho vést.";
     case "opravneni-neprovedeno":
       return "Oprávnění se neuložilo. Buď je to vaše vlastní členství (to měnit nejde), nebo přidělujete víc, než máte sami.";
     case "opravneni-pobocky":

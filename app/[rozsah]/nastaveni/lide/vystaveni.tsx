@@ -10,26 +10,15 @@ interface Zamestnanec {
   branch_id: string | null
 }
 
-/**
- * Role do nabídky. Chodí sem už PROSEJTÉ stropem — nabídne se jen to,
- * co ten, kdo zve, smí přidělit (docs/pravidlo-neprideluj-vic.md).
- * Rozhodnutí ale padá v databázi, ne tady; tohle je pohodlí, ne ochrana.
- */
-interface Opravneni {
-  id: string
-  label: string
-}
 
 export default function VystavitPozvankuFormular({
   rozsah,
   zamestnanci,
-  opravneni,
   pobocky,
   smiFiremni,
 }: {
   rozsah: string
   zamestnanci: Zamestnanec[]
-  opravneni: Opravneni[]
   /** Pobočky, na které přihlášený sám vidí — nabídnout jde jen to, co má. */
   pobocky: { id: string; nazev: string }[]
   /** Firemní rozsah nabízí jen ten, kdo ho má sám. */
@@ -164,27 +153,19 @@ export default function VystavitPozvankuFormular({
               </label>
 
               {/*
-                Oprávnění zůstává NEPOVINNÉ a výchozí je „přidělím
-                později“ — pro toho, kdo to ještě neví. Neruší se, jen
-                přestává být tou obvyklou cestou.
-                Viz docs/pozvanky-zadani.md, oddíl 2.
+                VÝBĚR OPRÁVNĚNÍ TU UŽ NENÍ, a je to schválně.
+
+                Od 9. 9. 2026 nese oprávnění zařazení u zaměstnance
+                a pozvánka je bere z něj (zadání
+                docs/zarazeni-misto-roli.md, oddíl 6.5). Rozbalovátko
+                tady by nabízelo druhé místo, kde se rozhoduje o téže
+                věci — a dvě místa se dřív nebo později rozejdou.
               */}
-              <label style={formularLabel}>
-                <span>Oprávnění</span>
-                <select name="opravneni" defaultValue="" style={selectPole}>
-                  <option value="">Přidělím později</option>
-                  {opravneni.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <span style={vysvetlivka}>
-                  Bez oprávnění se člověk přihlásí, ale v aplikaci
-                  neuvidí nic než svoje údaje. V Lidech u něj bude stát
-                  „čeká na přidělení“.
-                </span>
-              </label>
+              <p style={vysvetlivka}>
+                Oprávnění se bere ze zařazení toho člověka v Lidech.
+                Kdo zatím žádné nemá, se přihlásí a uvidí jen svoje
+                údaje — v Lidech u něj bude stát „čeká na přidělení“.
+              </p>
 
               {error && (
                 <p className="hlaska-chyba">{error}</p>

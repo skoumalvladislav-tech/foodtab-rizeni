@@ -20,16 +20,25 @@ const ma = (popis, sk, ce) => {
   console.log(`  ${ok ? 'OK   ' : 'CHYBA'} ${popis}${ok ? '' : ` → ${JSON.stringify(sk)} ≠ ${JSON.stringify(ce)}`}`)
 }
 
-const ctx = (isOwner, prava) => ({
-  role: { id: 'r', key: 'k', label: 'L', isOwner },
+/*
+  Od 9. 9. 2026 je majitelství vlastnost ČLOVĚKA (`ctx.jeMajitel`), ne
+  příznak u role. Zařazení zůstává, ale majitele z nikoho nedělá.
+
+  Kdyby tenhle podklad zůstal, jak byl, `ctx.role` by v něm bylo
+  a `smimPridelit` by četlo `ctx.jeMajitel` jako `undefined` — test by
+  spadl na tom, že měří něco jiného, než co aplikace posílá.
+*/
+const ctx = (jeMajitel, prava) => ({
+  zarazeni: { id: 'z', key: 'k', label: 'L' },
+  jeMajitel,
   permissions: prava,
 })
 
 const MAJITEL = ctx(true, ['shifts.read', 'people.manage', 'payroll.read'])
 const PROVOZNI = ctx(false, ['shifts.read', 'people.manage'])
 
-console.log('== Majitelská role ==')
-ma('vlastník ji přidělí', smimPridelit(MAJITEL, { isOwner: true, prava: [] }), true)
+console.log('== Majitelství ==')
+ma('majitel ho přidělí', smimPridelit(MAJITEL, { isOwner: true, prava: [] }), true)
 ma('nikdo jiný ne', smimPridelit(PROVOZNI, { isOwner: true, prava: [] }), false)
 // Majitel obchází katalog, takže prázdný seznam práv neznamená „nic“.
 ma('a nepomůže ani to, že je seznam práv prázdný',

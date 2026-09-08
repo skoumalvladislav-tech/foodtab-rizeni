@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getContext, getUser } from '@/lib/authz'
+import { getContext, getUser, maOpravneni } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import Sdeleni from '@/app/sdeleni'
 import CekajiciPozvanka, { nactiCekajici } from '@/app/cekajici-pozvanka'
@@ -41,7 +41,7 @@ export default async function ZatimBezOpravneni() {
   }
 
   const ctx = await getContext(tenantId)
-  if (ctx?.role) redirect('/')
+  if (ctx && maOpravneni(ctx)) redirect('/')
 
   return (
     <main style={obal}>

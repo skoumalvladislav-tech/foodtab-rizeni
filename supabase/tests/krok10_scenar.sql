@@ -41,13 +41,18 @@ select user_id as marek    from public.profiles where email = 'cisnik@foodtab.cz
 select id as marek_e from public.employees where user_id = :'marek' \gset
 
 -- Účetní: payroll.manage a payroll.read, ale ŽÁDNÉ advances.manage.
-insert into public.roles (tenant_id, key, label, is_owner)
-values (:'tenant', 'zkouska_ucetni', 'Zkouška — účetní', false)
-on conflict (tenant_id, key) do update set label = excluded.label
-returning id as r_ucetni \gset
+-- Od přepnutí je nositelem práv ZAŘAZENÍ, ne role — role by tu sadu
+-- nesla nadarmo a scénář by zkoušel člověka bez jediného práva.
+select set_config('test.user_id', '', false);
 
-insert into public.role_permissions (role_id, permission_key)
-values (:'r_ucetni', 'payroll.manage'), (:'r_ucetni', 'payroll.read')
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'tenant', 'zkouska_ucetni', 'Zkouška — účetní', 'vedeni', true)
+on conflict (tenant_id, key) do update set label = excluded.label
+returning id as z_ucetni \gset
+
+insert into public.position_permissions (tenant_id, position_id, permission_key)
+values (:'tenant', :'z_ucetni', 'payroll.manage'),
+       (:'tenant', :'z_ucetni', 'payroll.read')
 on conflict do nothing;
 
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -56,9 +61,14 @@ insert into auth.users (id, email, raw_user_meta_data) values
 on conflict (id) do nothing;
 
 insert into public.memberships (tenant_id, user_id, role_id, status, scope)
-values (:'tenant', 'dddddddd-dddd-dddd-dddd-dddddddddddd', :'r_ucetni', 'active', 'tenant')
+values (:'tenant', 'dddddddd-dddd-dddd-dddd-dddddddddddd', null, 'active', 'tenant')
 on conflict (tenant_id, user_id) do update
   set role_id = excluded.role_id, scope = excluded.scope;
+
+insert into public.employees (tenant_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', 'dddddddd-dddd-dddd-dddd-dddddddddddd', :'z_ucetni',
+        'Účetní Zkouška', 'ico')
+on conflict (tenant_id, user_id) do update set position_id = excluded.position_id;
 
 select set_config('test.tenant',  :'tenant',  false);
 select set_config('test.marek_e', :'marek_e', false);
