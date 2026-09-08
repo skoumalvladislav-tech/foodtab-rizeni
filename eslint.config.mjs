@@ -20,6 +20,9 @@ const eslintConfig = defineConfig([
     // drží se schválně tak, jak vznikla na main, aby se z ní dal opisovat
     // vzhled. Opravovat v ní pravidla lintu by znamenalo měnit vzor.
     "app/dashboard.tsx",
+    // Samostatný projekt FoodTab Marketing AI — má vlastní package.json,
+    // tsconfig i eslint. Mateřský lint ani typecheck do něj nesahají.
+    "marketing-ai/**",
   ]),
 ]);
 

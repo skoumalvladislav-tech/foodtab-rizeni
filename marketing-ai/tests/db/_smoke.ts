@@ -1,0 +1,11 @@
+import { applyMigrations } from "../../lib/db/driver.ts";
+import { createPgliteDriver } from "../../lib/db/pglite.ts";
+import { seedDemo } from "../../lib/seed/demo.ts";
+process.env.STORAGE_DIR = ".data/storage-smoke";
+const d = await createPgliteDriver(":memory:");
+const applied = await applyMigrations(d, { withShim: true });
+console.log("migrace:", applied);
+await seedDemo(d);
+console.log(await d.q("select count(*)::int as n from marketing.templates"));
+console.log(await d.q("select count(*)::int as n from marketing.media_assets"));
+await d.close();
