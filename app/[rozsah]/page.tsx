@@ -20,10 +20,16 @@ import { viditelnaNabidka } from "./nabidka";
  */
 export default async function RozsahRozcestnik({
   params,
+  searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
+  searchParams: Promise<{ [k: string]: string | string[] | undefined }>;
 }) {
   const { rozsah } = await params;
+  // Dotaz na odhlášení se přepíná ADRESOU, ne javascriptem — stejně
+  // jako záložky ve Vzkazech. Funguje to i bez skriptu a na sdíleném
+  // telefonu za barem je to ta podstatná vlastnost.
+  const ptaSeNaOdhlaseni = (await searchParams).odhlasit === "1";
 
   const tenantId = await getCurrentTenantId();
   if (!tenantId) return null;
@@ -144,11 +150,69 @@ export default async function RozsahRozcestnik({
             borderTop: "1px solid var(--line)",
           }}
         >
-          <form action={odhlasit}>
-            <button type="submit" className="ft-tl ft-tl-vedlejsi">
+          {/*
+            AŤ SE TO ZEPTÁ (podmínka Šéfíka, 8. 9.).
+
+            Přesně tenhle důvod mě vedl k tomu odhlášení dřív schovávat:
+            na sdíleném telefonu za barem, s mokrýma rukama, je omylem
+            ťuknuté odhlášení uprostřed směny horší než ťuknutí navíc.
+            Krátký dotaz ten důvod odstraní a Šéfíkovi zůstane, co chce
+            — odhlášení na dosah, ne schované pod Mými údaji.
+
+            Bez javascriptu: přepíná se adresou (`?odhlasit=1`), takže
+            „Zpět" je obyčejný odkaz a odhlášení pořád obyčejný formulář.
+          */}
+          {ptaSeNaOdhlaseni ? (
+            <>
+              <p
+                style={{
+                  margin: "0 0 12px",
+                  fontSize: "16px",
+                  fontWeight: 600,
+                  color: "var(--ink)",
+                }}
+              >
+                Odhlásit se?
+              </p>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <form action={odhlasit}>
+                  <button type="submit" className="ft-tl">
+                    Odhlásit
+                  </button>
+                </form>
+                <Link href={`/${rozsah}`} className="ft-tl ft-tl-vedlejsi">
+                  Zpět
+                </Link>
+              </div>
+            </>
+          ) : (
+            <Link
+              href={`/${rozsah}?odhlasit=1`}
+              className="ft-tl ft-tl-vedlejsi"
+              style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
+            >
+              {/*
+                Ikona A slovo. Samotná ikona se dá splést s čímkoli —
+                zvlášť u něčeho, co se nesmí ťuknout omylem.
+              */}
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M6 14H3.5A1.5 1.5 0 0 1 2 12.5v-9A1.5 1.5 0 0 1 3.5 2H6" />
+                <path d="M10.5 11 14 8l-3.5-3" />
+                <path d="M14 8H6" />
+              </svg>
               Odhlásit se
-            </button>
-          </form>
+            </Link>
+          )}
           <p
             style={{
               margin: "8px 0 0",

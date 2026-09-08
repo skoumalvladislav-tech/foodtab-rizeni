@@ -17,7 +17,6 @@ import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import CekaNaOpravneni from "./ceka-na-opravneni";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import Ram, { type ModulProp, type PolozkaProp } from "./ram";
-import PruhInformace from "./pruh-informace";
 import type { RozsahProp } from "./prepinac-rozsahu";
 
 /**
@@ -228,11 +227,21 @@ export default async function RozsahLayout({
       cilNastaveni={cilNastaveni}
     >
       {/*
-        Informace o zpracování osobních údajů. Je nad obsahem, ne přes
-        něj: zadání říká, že se má zobrazit, ne že má zablokovat
-        přihlášení. Kdo neklikne, uvidí ji zase příště.
+        PRUH O OSOBNÍCH ÚDAJÍCH TU SCHVÁLNĚ NENÍ.
+
+        Kreslil se nad obsahem na KAŽDÉ obrazovce, dokud ho člověk
+        neodklikl — a stálo u něj, že text čeká na právníka. Číšník ho
+        viděl po každém přihlášení nad docházkou. Odebral Šéfík 8. 9.
+        (docs/zarazeni-misto-roli.md, 6.4).
+
+        MIZÍ UPOMÍNKA, NE INFORMACE. Povinnost informovat zaměstnance,
+        co o nich firma vede, platí dál a celý text zůstává na Moje
+        údaje pod kotvou `#informace`, aby fungovaly staré odkazy.
+
+        Komponenta `pruh-informace.tsx` ani tabulky `privacy_notices`
+        a `privacy_acknowledgements` se NEMAŽOU — až bude text od
+        právníka, bude se to hodit. Vrátit se to sem dá jedním řádkem.
       */}
-      <PruhInformace rozsah={rozsah} tenantId={tenantId} />
       {/*
         Okno jen tehdy, když někdo čeká. Když pozvánka oprávnění nesla,
         stačí zvoneček — viz komentář v ceka-na-opravneni.tsx.
