@@ -39,6 +39,26 @@ select pg_temp.check('volitelné moduly zapnuté nejsou',
   (select count(*) from public.tenant_modules) = 1);
 select pg_temp.check('role vznikly ze šablon (7)',
   (select count(*) from public.roles where tenant_id = :'tenant') = 7);
+/*
+  Zařazení vzniknou taky — a je jich o jedno míň. Majitel není pracovní
+  zařazení, je to vlastnost člověka (`employees.je_majitel`), takže se
+  z majitelské šablony zařazení nedělá.
+
+  Kdyby tahle kontrola chyběla, mohla by nová firma vzniknout se sedmi
+  rolemi, které nic nedělají, a nulou zařazení, která něco dělají —
+  a poznalo by se to až tím, že majitel nemá koho zvát a jak.
+*/
+select pg_temp.check('zařazení vznikla ze šablon (6, bez majitele)',
+  (select count(*) from public.positions where tenant_id = :'tenant') = 6);
+select pg_temp.check('zařazení nesou práva ze šablon',
+  (select count(*) from public.position_permissions where tenant_id = :'tenant')
+  = (select count(*) from app.role_template_permissions rtp
+     join app.role_templates rt on rt.key = rtp.template_key
+     where not rt.is_owner));
+select pg_temp.check('zakladatel je majitel na sobě, ne na roli',
+  exists (select 1 from public.employees
+          where user_id = '11111111-1111-1111-1111-111111111111'
+            and je_majitel));
 select pg_temp.check('majitel má členství s rozsahem celé firmy',
   exists (select 1 from public.memberships m join public.roles r on r.id = m.role_id
           where m.user_id = '11111111-1111-1111-1111-111111111111'
@@ -79,30 +99,51 @@ select pg_temp.check('po zapnutí modulu má majitel finance',
 
 \echo ''
 \echo '== Pozvánky =============================================='
-select id as role_vedouci from public.roles where tenant_id = :'tenant' and key = 'vedouci_smeny' \gset
-select id as role_majitel from public.roles where tenant_id = :'tenant' and key = 'majitel' \gset
-select id as role_kuchyne from public.roles where tenant_id = :'tenant' and key = 'kuchyne' \gset
-select set_config('test.role_majitel', :'role_majitel', false);
+/*
+  POZVÁNKA BERE PRÁVA ZE ZAMĚSTNANCE, ne z role (zadání 6.5). Herci
+  proto napřed dostanou zaměstnanecký záznam se zařazením — bez něj
+  by pozvánka neotevřela nic a všechny kontroly rozsahu níž by měřily
+  prázdno.
+*/
+select id as z_vedouci from public.positions where tenant_id = :'tenant' and key = 'vedouci_smeny' \gset
+select id as z_kuchyne from public.positions where tenant_id = :'tenant' and key = 'kuchyne' \gset
 
+insert into public.employees (tenant_id, branch_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', :'z_vedouci', 'Klára Veselá', 'hpp'),
+       (:'tenant', :'perla', :'z_kuchyne', 'Tomáš Brigádník', 'dpp');
+select id as e_vedouci from public.employees where tenant_id = :'tenant' and full_name = 'Klára Veselá' \gset
+select id as e_kuchar  from public.employees where tenant_id = :'tenant' and full_name = 'Tomáš Brigádník' \gset
+select set_config('test.e_vedouci', :'e_vedouci', false);
+
+/*
+  Citlivé právo přes SMS neprojde. Zařazení Vedoucí směny nese
+  `attendance.read`, a to je citlivé — přenesení čísla na cizí SIM je
+  reálný útok a telefon koluje po provozovně (§7.1 specifikace).
+
+  Ptá se to ZAMĚSTNANCE, ne role: po přepnutí role žádné právo nenese,
+  takže kontrola nad rolí by mlčky pouštěla všechno.
+*/
 do $$
 declare v_ok boolean := false;
 begin
   begin
     perform app.create_invitation(current_setting('test.tenant')::uuid,
-      current_setting('test.role_majitel')::uuid, 'sms', '+420601234567');
+      null, 'sms', '+420601234567',
+      p_employee => current_setting('test.e_vedouci')::uuid);
   exception when insufficient_privilege then v_ok := true;
   end;
-  if not v_ok then raise exception 'SELHALO: citlivá role šla pozvat přes SMS'; end if;
-  raise notice '  OK    citlivá role přes SMS je odmítnutá';
+  if not v_ok then raise exception 'SELHALO: citlivé zařazení šlo pozvat přes SMS'; end if;
+  raise notice '  OK    citlivé zařazení přes SMS je odmítnuté';
 end $$;
 
 select token as sms_token from app.create_invitation(
-  :'tenant', :'role_kuchyne', 'sms', '+420601234567') \gset
-select pg_temp.check('nekritická role přes SMS projde', length(:'sms_token') = 64);
+  :'tenant', null, 'sms', '+420601234567',
+  p_employee => :'e_kuchar') \gset
+select pg_temp.check('nekritické zařazení přes SMS projde', length(:'sms_token') = 64);
 
 select token as inv_token from app.create_invitation(
-  :'tenant', :'role_vedouci', 'email', 'vedouci@foodtab.cz',
-  'branch', array[:'perla']::uuid[]) \gset
+  :'tenant', null, 'email', 'vedouci@foodtab.cz',
+  'branch', array[:'perla']::uuid[], :'e_vedouci') \gset
 select set_config('test.inv_token', :'inv_token', false);
 
 reset role;
