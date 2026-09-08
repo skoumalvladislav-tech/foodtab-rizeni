@@ -567,7 +567,59 @@ select pg_temp.check('a přesto se přes něj nikdo nikam nedostane',
 
 
 \echo ''
-\echo '== 14. Úklid ============================================'
+\echo '== 14. Podle rolí už nerozhoduje nic ====================='
+
+reset role;
+
+/*
+  KONTROLA PROTI NÁVRATU, ne proti dnešnímu stavu.
+
+  `krok30` hlídá jádro jmenovitě. Tahle se ptá CELÉHO schématu `app`,
+  protože přesně tam byla ta past: nálezy vyjmenovaly devět opsaných
+  kopií, při práci se našly ještě dvě a ani jedna z nich by nespadla —
+  běžely by dál nad tabulkou, která už nikoho neřídí, a build by
+  zůstal zelený.
+
+  Výjimka je `app.prevod_zarazeni`: ta z rolí čte SCHVÁLNĚ, je to
+  převod dat. Je vyjmenovaná, aby se nedalo přidat dvanácté místo
+  a schovat ho za „to je jako ten převod".
+*/
+select pg_temp.check('žádná funkce v app už práva z rolí nečte',
+  not exists (
+    select 1 from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app'
+      -- Jen obyčejné funkce: 'pg_get_functiondef' nad agregátem spadne.
+      and p.prokind = 'f'
+      and p.proname <> 'prevod_zarazeni'
+      and pg_get_functiondef(p.oid) like '%from public.role_permissions%'));
+
+select pg_temp.check('a ani se neptá, kdo je majitel, podle roles.is_owner',
+  not exists (
+    select 1 from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app'
+      -- Jen obyčejné funkce: 'pg_get_functiondef' nad agregátem spadne.
+      and p.prokind = 'f'
+      and p.proname <> 'prevod_zarazeni'
+      and pg_get_functiondef(p.oid) like '%r.is_owner%'));
+
+/*
+  A mrtvá funkce se nenechává stát. `app.ziva_prava_role` se tvářila
+  jako autorita nad oprávněními, měla grant pro `authenticated`
+  a počítala z tabulky, kterou už nikdo neudržuje. Kdo ji za rok
+  najde, nemá jak poznat, že neplatí: vrátí vždycky nějakou odpověď
+  a ta bude vypadat správně.
+*/
+select pg_temp.check('a mrtvá app.ziva_prava_role je pryč',
+  not exists (
+    select 1 from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'ziva_prava_role'));
+
+
+\echo ''
+\echo '== 15. Úklid ============================================'
 
 reset role;
 select set_config('test.user_id', '', false);

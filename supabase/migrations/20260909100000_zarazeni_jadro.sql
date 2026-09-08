@@ -1722,3 +1722,23 @@ comment on function app.upozorni_na_prijeti(uuid, uuid) is
   'odkud vzít žádné právo, je úkol; kdo je má, je informace.';
 
 revoke all on function app.upozorni_na_prijeti(uuid, uuid) from public, anon, authenticated;
+
+
+-- =====================================================================
+-- 12. ÚKLID: MRTVÁ FUNKCE SE NENECHÁVÁ STÁT
+--
+-- `app.ziva_prava_role` počítala „práva role, která ve firmě opravdu
+-- něco otevírají". Ptala se jí jedině `app.smi_pridelit` — a ta se od
+-- téhle migrace ptá zařazení, ne role.
+--
+-- Zůstat by mohla. Nezůstává, a to je rozhodnutí, ne úklid pro pořádek:
+-- je to funkce, která se TVÁŘÍ jako autorita nad oprávněními, má grant
+-- pro `authenticated`, a přitom počítá z tabulky, kterou už nikdo
+-- neudržuje. Kdo ji za rok najde, nemá jak poznat, že neplatí — vrátí
+-- vždycky nějakou odpověď a ta odpověď bude vypadat správně.
+--
+-- Tabulky `roles` a `role_permissions` zůstávají (pravidlo o nasazených
+-- migracích a `tasks.role_id`). Mizí jen ta funkce.
+-- =====================================================================
+
+drop function if exists app.ziva_prava_role(uuid, uuid);
