@@ -321,6 +321,25 @@ export default async function Rozhovor({
                 resize: 'vertical',
               }}
             />
+            {/*
+              Diktování je dnes jediná hlasová cesta, která funguje
+              i na iPhonu — `SpeechRecognition` v prohlížeči tam ne,
+              takže tlačítko s mikrofonem by půlce lidí nefungovalo
+              a vypadalo by to jako rozbitá aplikace.
+
+              Pole diktování unese: `textarea`, neřízené, bez měnícího
+              se `key`, nic v okolí netiká po vteřinách. Přesně na tomhle
+              se lámalo vkládání přihlašovacího kódu.
+            */}
+            <p
+              style={{
+                margin: '6px 0 0',
+                fontSize: '12px',
+                color: 'var(--muted)',
+              }}
+            >
+              Můžete i diktovat — mikrofon na klávesnici telefonu.
+            </p>
             <div
               style={{
                 display: 'flex',

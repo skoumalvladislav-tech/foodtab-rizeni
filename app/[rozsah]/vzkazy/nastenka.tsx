@@ -192,6 +192,63 @@ export default async function Nastenka({
                 resize: "vertical",
               }}
             />
+            {/*
+              Diktování. Většina lidí neví, že to jde — a je to dnes
+              jediná hlasová cesta, která funguje i na iPhonu
+              (`SpeechRecognition` v prohlížeči tam ne).
+
+              Pole to unese: je to `textarea`, neřízená, bez měnícího se
+              `key` a nic v okolí netiká po vteřinách. Kdyby se
+              překreslovalo, diktování se uprostřed věty utne — je to
+              tatáž chyba jako u vkládání přihlašovacího kódu.
+            */}
+            <p
+              style={{
+                margin: "6px 0 0",
+                fontSize: "12px",
+                color: "var(--muted)",
+              }}
+            >
+              Můžete i diktovat — mikrofon na klávesnici telefonu.
+            </p>
+
+            {/*
+              PŘED ODESLÁNÍM AŤ JE VIDĚT, KDO TO UVIDÍ.
+
+              Adresát se bere z rozsahu v adrese, ne z formuláře, takže
+              se dá přehlédnout: člověk přepne nahoře na „Celou firmu",
+              odroluje k psaní a už si toho není vědom. Zpráva mířená
+              jednomu baru pak přistane všem.
+
+              Není to dialog, jen věta nad tlačítkem — a u celé firmy
+              zvýrazněná, protože to je ta drahá záměna.
+            */}
+            <p
+              style={{
+                margin: "10px 0 0",
+                padding: "8px 10px",
+                borderRadius: "8px",
+                fontSize: "13px",
+                lineHeight: 1.5,
+                background:
+                  scope.level === "tenant" ? "var(--pozor-bg)" : "var(--paper)",
+                border: "1px solid var(--line)",
+                color: "var(--ink)",
+              }}
+            >
+              Uvidí:{" "}
+              <strong
+                style={
+                  scope.level === "tenant" ? { color: "var(--pozor)" } : undefined
+                }
+              >
+                {scope.level === "tenant" ? "celá firma" : scope.branchName}
+              </strong>{" "}
+              <span style={{ color: "var(--muted)" }}>
+                — každý, kdo tu má právo číst nástěnku.
+              </span>
+            </p>
+
             <div
               style={{
                 display: "flex",
