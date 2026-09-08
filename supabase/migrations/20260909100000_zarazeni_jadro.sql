@@ -60,10 +60,19 @@
 --   e.deleted_at is null       jinak práva označeného smazaného
 --   m.status = 'active'        jinak práva zrušeného členství
 --
--- `e.tenant_id = p_tenant` je formálně nadbytečné (plyne z
--- `e.tenant_id = m.tenant_id` a `m.tenant_id = p_tenant`). Je tam
--- schválně: kdo ten join jednou upraví, zruší ho tím tiše — a uvnitř
--- definer funkce to nechytí nic. Nadbytečnost je tu levnější než mlčení.
+-- `e.tenant_id = p_tenant` NENÍ nadbytečné, a je to schválně.
+--
+-- Návrh z měření vázal zaměstnance na firmu dvakrát: joinem
+-- `e.tenant_id = m.tenant_id` A rovnou podmínkou na `p_tenant`.
+-- Znělo to opatrněji, jenže z toho filtru se tím stala podmínka,
+-- KTERÁ NEJDE ROZBÍT: vyndá se a nic se nezmění, protože ho drží
+-- ta druhá. Kontrola s cizí firmou by pak zůstala zelená, ať je
+-- v těle napsané cokoli — a to je horší než žádná kontrola.
+--
+-- Zaměstnanec se proto na firmu váže jednou, přímo přes `p_tenant`.
+-- Členství se váže taky jednou, přes `m.tenant_id = p_tenant`.
+-- Obě podmínky teď něco drží a obě jdou shodit zvlášť —
+-- `krok33_scenar` na ně míří kontrolou 7b/1.
 --
 -- Na každý z těch tří filtrů míří vlastní kontrola s cizí firmou
 -- v `krok33_scenar` a každá se dá shodit vyndáním právě toho jednoho.
@@ -149,8 +158,7 @@ as $$
       Členství drží ROZSAH a to, že člověk do firmy patří. Práva už
       nerozdává — proto tu není `roles` ani `role_permissions`.
     */
-    join public.employees e        on e.tenant_id = m.tenant_id
-                                  and e.user_id   = m.user_id
+    join public.employees e        on e.user_id   = m.user_id
                                   and e.tenant_id = p_tenant
                                   and e.deleted_at is null
     join public.permissions p      on p.key = p_permission
@@ -207,8 +215,7 @@ as $$
   select exists (
     select 1
     from public.memberships m
-    join public.employees e        on e.tenant_id = m.tenant_id
-                                  and e.user_id   = m.user_id
+    join public.employees e        on e.user_id   = m.user_id
                                   and e.tenant_id = p_tenant
                                   and e.deleted_at is null
     join public.permissions p      on p.key = p_permission
@@ -311,8 +318,7 @@ as $$
   select exists (
     select 1
     from public.memberships m
-    join public.employees e on e.tenant_id = m.tenant_id
-                           and e.user_id   = m.user_id
+    join public.employees e on e.user_id   = m.user_id
                            and e.tenant_id = p_tenant
                            and e.deleted_at is null
     where m.user_id = (select auth.uid())
@@ -337,8 +343,7 @@ language sql stable security definer set search_path = ''
 as $$
   select distinct m.user_id
   from public.memberships m
-  join public.employees e        on e.tenant_id = m.tenant_id
-                                and e.user_id   = m.user_id
+  join public.employees e        on e.user_id   = m.user_id
                                 and e.tenant_id = p_tenant
                                 and e.deleted_at is null
   join public.permissions p      on p.key = p_permission
@@ -373,8 +378,7 @@ language sql stable security definer set search_path = ''
 as $$
   select distinct m.user_id
   from public.memberships m
-  join public.employees e        on e.tenant_id = m.tenant_id
-                                and e.user_id   = m.user_id
+  join public.employees e        on e.user_id   = m.user_id
                                 and e.tenant_id = p_tenant
                                 and e.deleted_at is null
   join public.permissions p      on p.key = p_permission
