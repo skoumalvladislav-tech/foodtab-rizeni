@@ -868,6 +868,16 @@ begin
   end if;
 
   if tg_op = 'INSERT' or new.position_id is distinct from old.position_id then
+    /*
+      ROZHODNOUT: ptá se to na FIREMNÍ úroveň, takže vedoucí pobočky
+      se `people.manage` jen na své pobočce nepřeřadí nikoho — ani tam.
+
+      Je to opatrnější strana, ne díra: zařazení nemá pobočku a rozsah
+      se dá později rozšířit, takže by se ta práva jednou mohla
+      rozprostřít po celé firmě, aniž by o tom kdokoli s firemním
+      rozsahem rozhodl. Dnes to nikoho neblokuje — správu lidí po
+      pobočkách firma nikomu nedala. Otázka 10 v docs/hlaseni/otazky.md.
+    */
     if new.position_id is not null
        and not app.smi_pridelit(new.tenant_id, new.position_id, 'tenant') then
       raise exception
@@ -1393,7 +1403,7 @@ grant execute on function public.cekaji_na_opravneni(uuid) to authenticated;
 -- ROZHODNOUT: zpráva pořád visí na členství, ne na zařazení. Kdo dostane
 -- zařazení až týden po přijetí pozvánky, se to tímhle kanálem nedozví.
 -- Spoušť na `employees` by to spravila, ale je to nové chování, ne
--- přepnutí — otázka 8 v docs/hlaseni/otazky.md.
+-- přepnutí — otázka 9 v docs/hlaseni/otazky.md.
 --
 -- Klíč `role` v těle zprávy ZŮSTÁVÁ, i když se do něj plní zařazení:
 -- čte ho `lib/upozorneni-text.ts:124` a hlavně už jsou s ním v databázi
@@ -1484,6 +1494,12 @@ $$;
 --
 -- Role se pořád zakládají. Nemažou se (pravidlo o nasazených
 -- migracích) a `tasks.role_id` se jich pořád drží.
+--
+-- ROZHODNOUT: úkol zadaný ROLI (`tasks.role_id`) se doručuje podle
+-- `memberships.role_id`, a to se novým lidem přestalo vyplňovat.
+-- Dnes to nikoho netrápí — takový úkol neumí zadat žádná obrazovka —,
+-- ale kdyby ho někdo zadal ručně, došel by jen lidem z doby před
+-- přepnutím. Otázka 8 v docs/hlaseni/otazky.md.
 -- =====================================================================
 
 create or replace function app.create_tenant(

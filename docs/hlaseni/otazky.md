@@ -188,3 +188,95 @@ existuje řešit.
 **Když to má být jinak** — třeba že u nevydané směny stačí smazat
 natvrdo a jen u vydané se to označuje — řekni, je to jedna podmínka
 navíc.
+
+---
+
+## 8. Úkoly zadané „roli" po přepnutí na zařazení nikam nedojdou
+
+**Vzniklo:** 9. 9. 2026 při přepnutí oprávnění z rolí na zařazení.
+
+`public.tasks` má vedle `employee_id`, `position_id` a `usek_id` ještě
+`role_id` — adresáta „všem, kdo mají tuhle roli". Doručení se počítá
+v `public.dokoncit_ukol` porovnáním s `memberships.role_id`.
+
+**Dnes se to nikde neprojeví**, a to ze dvou důvodů: úkol s rolí
+neumí zadat žádná obrazovka (v aplikaci není jediné místo, které by
+`tasks.role_id` vyplňovalo) a lidem, kteří ve firmě už jsou, role
+u členství zůstala.
+
+**Ale novým lidem ji aplikace přestala vyplňovat.** Kdyby někdo takový
+úkol zadal ručně v databázi, komu dojde, by záviselo na tom, kdy ten
+člověk do firmy přišel. To je horší než kdyby nedošel nikomu.
+
+**Co jsem vybral:** nesahat na to. `tasks.role_id` a
+`task_templates.role_id` zůstávají, `dokoncit_ukol` se nemění.
+Přidat vedle nich `position_id` je nová funkce, ne přepnutí — a udělat
+ji potichu při zásahu do jádra oprávnění je přesně ten druh práce,
+u které se pak nedá poznat, co byl záměr.
+
+**Rozhodni, co s tím:**
+
+**a) Zahodit.** „Úkol pro roli" nikdy nikdo nezadal, obrazovka na to
+není. `tasks.role_id` se přestane používat (nemazat — pravidlo
+o nasazených migracích) a v `dokoncit_ukol` ta větev zmizí.
+
+**b) Převést na zařazení.** `tasks.position_id` už existuje a používá
+se; stačilo by, aby `dokoncit_ukol` počítal doručení i podle něj.
+Je to pár řádků a „úkol pro všechny číšníky" dává v provozu smysl.
+
+**Co bych vybral:** **b)**, ale až samostatně — je to funkce navíc, ne
+oprava.
+
+---
+
+## 9. „Bylo vám přiděleno oprávnění" se pořád posílá při vzniku členství
+
+**Vzniklo:** 9. 9. 2026, tamtéž.
+
+Spoušť `app.upozorni_na_clenstvi` visí na tabulce `memberships`. Dokud
+oprávnění nesla role u členství, byl to ten správný okamžik: zpráva
+odešla přesně tehdy, když člověk oprávnění dostal.
+
+Po přepnutí nese oprávnění **zařazení u zaměstnance**. Přidělení tedy
+může nastat jindy než vznik členství — typicky později, když Šéfík
+člověku zařazení doplní.
+
+**Co jsem vybral (nejopatrnější):** spoušť zůstává na členství a nově
+se ptá, jestli ten člověk vůbec nějaké právo má; když nemá, zprávu
+neposílá. Kdo dostane zařazení až po přijetí pozvánky, se to tímhle
+kanálem nedozví — **ale okno „čeká na oprávnění" u vedoucího funguje
+dál** a nikomu se nic neposílá zbytečně.
+
+**Alternativa:** spoušť i na `employees` (změna `position_id`
+nebo `je_majitel`) a na `employee_permissions`. Je to nové chování,
+ne přepnutí, a hlavně by to znamenalo posílat zprávu i při opravě
+překlepu v zařazení.
+
+V kódu je to označené `-- ROZHODNOUT:` v
+`supabase/migrations/20260909100000_zarazeni_jadro.sql`.
+
+---
+
+## 10. Strop u zařazení se ptá na firemní úroveň — i vedoucího pobočky
+
+**Vzniklo:** 9. 9. 2026, tamtéž.
+
+Zařazení platí za celou firmu (`positions` nemá `branch_id`), takže
+spoušť `trg_strop_zarazeni` se ptá `app.smi_pridelit(..., 'tenant')`:
+kdo přiděluje zařazení, musí mít všechna jeho práva **na firemní
+úrovni**.
+
+**Důsledek:** vedoucí pobočky se `people.manage` jen na své pobočce
+nepřeřadí pod zařazení nikoho, ani na vlastní pobočce.
+
+**Je to opatrnější strana, ne díra.** Člověk se zařazením a rozsahem
+jedné pobočky má práva jen tam, takže by teoreticky stačilo ptát se na
+tu pobočku. Jenže rozsah se dá později rozšířit — a v tu chvíli by ta
+práva platila všude, aniž by o tom kdokoli s firemním rozsahem
+rozhodl.
+
+**Dnes to nikoho neblokuje:** správu lidí po pobočkách firma zatím
+nikomu nedala (`krok7_scenar` na to má vlastní kontrolu a je u ní
+napsané, že je to zavřenější, než pravidlo žádá).
+
+**Až se to stane**, řekni — je to jeden parametr.
