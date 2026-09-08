@@ -38,37 +38,60 @@ select user_id as majitel  from public.profiles where email = 'majitel@foodtab.c
 select user_id as provozni from public.profiles where email = 'provozni@foodtab.cz' \gset
 select user_id as marek    from public.profiles where email = 'cisnik@foodtab.cz' \gset
 
-select id as r_servis from public.roles
+select id as z_servis from public.positions
   where tenant_id = :'tenant' and key = 'servis' \gset
-select id as r_majitel from public.roles
-  where tenant_id = :'tenant' and is_owner \gset
+
+-- Příprava scény, ne krok uživatele: bez přihlášeného, jako migrace.
+-- Jinak by spoušť trg_strop_zarazeni odmítla přidělit zařazení
+-- se `settings.manage` (a měla by pravdu).
+select set_config('test.user_id', '', false);
 
 /*
-  Dvě role se zakládají tady, ne hledají mezi šablonami.
+  Dvě zkušební ZAŘAZENÍ se zakládají tady, ne hledají mezi šablonami.
 
-  Zkoušelo se to napřed hledáním („najdi roli, kterou provozní nesmí
+  Zkoušelo se to napřed hledáním („najdi sadu, kterou provozní nesmí
   přidělit“) a bylo to křehké hned dvakrát. Provozní má podle šablony
-  všechno kromě agents.manage a settings.manage, takže takovou roli
+  všechno kromě agents.manage a settings.manage, takže taková sada
   mezi šablonami vůbec nemusí být — a `\gset` nad prázdným výsledkem
   celý scénář utne. Druhá past: až někdo šablonu upraví, přestal by
   scénář zkoušet to, co má, a nikdo by si toho nevšiml. Test, který
   tiše zkouší něco jiného, je horší než žádný.
+
+  Po přepnutí to musí být zařazení, ne role: role žádné právo nenese,
+  takže strop nad rolí by pouštěl všechno a kontrola by byla zelená
+  nad dírou.
 */
-insert into public.roles (tenant_id, key, label, is_owner)
-values (:'tenant', 'zkouska_strop', 'Zkouška — strop', false)
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'tenant', 'zkouska_strop', 'Zkouška — strop', 'provoz', true)
 on conflict (tenant_id, key) do update set label = excluded.label
-returning id as r_nesmi \gset
+returning id as z_nesmi \gset
 
-insert into public.role_permissions (role_id, permission_key)
-values (:'r_nesmi', 'settings.manage') on conflict do nothing;
+insert into public.position_permissions (tenant_id, position_id, permission_key)
+values (:'tenant', :'z_nesmi', 'settings.manage') on conflict do nothing;
 
-insert into public.roles (tenant_id, key, label, is_owner)
-values (:'tenant', 'zkouska_citliva', 'Zkouška — citlivé', false)
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'tenant', 'zkouska_citliva', 'Zkouška — citlivé', 'provoz', true)
 on conflict (tenant_id, key) do update set label = excluded.label
-returning id as r_citliva \gset
+returning id as z_citliva \gset
 
-insert into public.role_permissions (role_id, permission_key)
-values (:'r_citliva', 'payroll.read') on conflict do nothing;
+insert into public.position_permissions (tenant_id, position_id, permission_key)
+values (:'tenant', :'z_citliva', 'payroll.read') on conflict do nothing;
+
+/*
+  A lidé, kteří ta zařazení nesou. Strop se od přepnutí neptá sady,
+  ptá se ČLOVĚKA — pozvánka bere práva ze zaměstnance (zadání 6.5).
+*/
+insert into public.employees (tenant_id, position_id, full_name, employment_type)
+values (:'tenant', :'z_nesmi',   'Zkouška Strop',    'hpp'),
+       (:'tenant', :'z_citliva', 'Zkouška Citlivá',  'hpp')
+on conflict do nothing;
+select id as e_nesmi from public.employees
+  where tenant_id = :'tenant' and full_name = 'Zkouška Strop' \gset
+select id as e_citliva from public.employees
+  where tenant_id = :'tenant' and full_name = 'Zkouška Citlivá' \gset
+select id as e_majitel from public.employees
+  where tenant_id = :'tenant'
+    and user_id = '11111111-1111-1111-1111-111111111111' \gset
 
 select pg_temp.check('payroll.read je opravdu vedené jako citlivé',
   (select sensitive from public.permissions where key = 'payroll.read'));
@@ -80,10 +103,10 @@ on conflict (id) do nothing;
 
 -- Do `do $$` bloků se proměnné psql nedostanou, musí přes set_config.
 -- VŠECHNY se nastavují tady, dřív než je někdo čte.
-select set_config('test.r_nesmi',   :'r_nesmi',   false);
-select set_config('test.r_majitel', :'r_majitel', false);
-select set_config('test.r_citliva', :'r_citliva', false);
-select set_config('test.r_servis',  :'r_servis',  false);
+select set_config('test.e_nesmi',   :'e_nesmi',   false);
+select set_config('test.e_majitel', :'e_majitel', false);
+select set_config('test.e_citliva', :'e_citliva', false);
+select set_config('test.z_servis',  :'z_servis',  false);
 
 
 \echo ''
@@ -99,15 +122,15 @@ select pg_temp.check('pozvánka bez oprávnění projde', length(:'tok1') = 64);
 
 reset role;
 
-select pg_temp.check('a role v ní opravdu prázdná je',
-  (select role_id from public.invitations where email = 'cekajici@foodtab.cz') is null);
+select pg_temp.check('a zaměstnanec v ní opravdu prázdný je',
+  (select employee_id from public.invitations where email = 'cekajici@foodtab.cz') is null);
 
 select pg_temp.check('token v databázi čitelný není',
   not exists (select 1 from public.invitations where token_hash = :'tok1'));
 
 
 \echo ''
-\echo '== Strop platí dál, když role zadaná je =================='
+\echo '== Strop platí dál, když zařazení zadané je =============='
 
 set role authenticated;
 select set_config('test.user_id', :'provozni', false);
@@ -123,20 +146,20 @@ begin
   select id into v_tenant from public.tenants limit 1;
 
   begin
-    perform app.create_invitation(v_tenant, current_setting('test.r_nesmi')::uuid,
-                                  'email', 'nekdo@foodtab.cz');
+    perform app.create_invitation(v_tenant, null, 'email', 'nekdo@foodtab.cz',
+                                  p_employee => current_setting('test.e_nesmi')::uuid);
     v_ok := false;
   exception when insufficient_privilege then v_ok := true;
   end;
-  perform pg_temp.check('provozní nepozve na roli, kterou sám nemá', v_ok);
+  perform pg_temp.check('provozní nepozve člověka se zařazením, které sám nemá', v_ok);
 
   begin
-    perform app.create_invitation(v_tenant, current_setting('test.r_majitel')::uuid,
-                                  'email', 'sef@foodtab.cz');
+    perform app.create_invitation(v_tenant, null, 'email', 'sef@foodtab.cz',
+                                  p_employee => current_setting('test.e_majitel')::uuid);
     v_ok := false;
   exception when insufficient_privilege then v_ok := true;
   end;
-  perform pg_temp.check('a už vůbec ne na majitele', v_ok);
+  perform pg_temp.check('a už vůbec ne majitele', v_ok);
 end $$;
 
 reset role;
@@ -152,18 +175,18 @@ begin
   select id into v_tenant from public.tenants limit 1;
 
   begin
-    perform app.create_invitation(v_tenant, current_setting('test.r_citliva')::uuid,
-                                  'sms', '+420601234567');
+    perform app.create_invitation(v_tenant, null, 'sms', '+420601234567',
+                                  p_employee => current_setting('test.e_citliva')::uuid);
     v_ok := false;
   exception when insufficient_privilege then v_ok := true;
   end;
-  perform pg_temp.check('role s citlivým právem nejde poslat přes SMS', v_ok);
+  perform pg_temp.check('zařazení s citlivým právem nejde poslat přes SMS', v_ok);
 
-  -- Pozvánka bez role přes SMS naopak projít MUSÍ: neveze žádné
-  -- oprávnění, takže SMS nedoručí nic citlivého. Citlivé právo se
-  -- přidělí až potom, a to už přes memberships, kde platí strop.
+  -- Pozvánka bez zaměstnance přes SMS naopak projít MUSÍ: neveze
+  -- žádné oprávnění, takže SMS nedoručí nic citlivého. Práva se
+  -- přidělí až potom, a to už u zaměstnance, kde platí strop.
   perform app.create_invitation(v_tenant, null, 'sms', '+420601999888');
-  perform pg_temp.check('pozvánka bez role přes SMS projde', true);
+  perform pg_temp.check('pozvánka bez zaměstnance přes SMS projde', true);
 end $$;
 
 reset role;
@@ -177,13 +200,13 @@ select set_config('test.user_id', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', false)
 select app.accept_invitation(:'tok1');
 reset role;
 
-select pg_temp.check('členství vzniklo i bez role',
+select pg_temp.check('členství vzniklo i bez oprávnění',
   (select status from public.memberships
    where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') = 'active');
 
-select pg_temp.check('a role je prázdná',
-  (select role_id from public.memberships
-   where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') is null);
+select pg_temp.check('a zaměstnanecký záznam nemá žádný',
+  not exists (select 1 from public.employees
+              where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'));
 
 
 \echo ''
@@ -235,8 +258,11 @@ select pg_temp.check('jméno firmy zná',
 select pg_temp.check('kontext se vrátí, ne prázdno',
   public.my_context(:'tenant') is not null);
 
-select pg_temp.check('role v kontextu je prázdná',
-  public.my_context(:'tenant') -> 'role' = 'null'::jsonb);
+select pg_temp.check('zařazení v kontextu je prázdné',
+  public.my_context(:'tenant') -> 'zarazeni' = 'null'::jsonb);
+
+select pg_temp.check('a majitel to není',
+  (public.my_context(:'tenant') ->> 'jeMajitel')::boolean = false);
 
 select pg_temp.check('a oprávnění taky',
   public.my_context(:'tenant') -> 'permissions' = '[]'::jsonb);
@@ -253,15 +279,17 @@ reset role;
 \echo ''
 \echo '== Po přidělení oprávnění ================================'
 
--- Pozor na pořadí: pozvánka bez role jde s výchozím rozsahem 'branch'
--- a prázdným seznamem poboček. Samotná role tedy nic neotevře, dokud
--- se nedoplní rozsah. Není to chyba, ale obrazovka na to nesmí
--- zapomenout — „přidělit oprávnění“ znamená roli I rozsah.
+-- Pozor na pořadí: pozvánka bez zařazení jde s výchozím rozsahem
+-- 'branch' a prázdným seznamem poboček. Samotné zařazení tedy nic
+-- neotevře, dokud se nedoplní rozsah. Není to chyba, ale obrazovka
+-- na to nesmí zapomenout — „přidělit oprávnění“ znamená zařazení
+-- I rozsah.
 
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
-update public.memberships set role_id = :'r_servis'
- where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+insert into public.employees (tenant_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', :'z_servis',
+        'Čekající Zkouška', 'hpp');
 reset role;
 
 set role authenticated;
@@ -287,8 +315,8 @@ select pg_temp.check('a víc pořád ne',
 select pg_temp.check('vidí právě tu jednu pobočku',
   (select count(*) from app.visible_branch_ids(:'tenant')) = 1);
 
-select pg_temp.check('role je v kontextu vidět',
-  public.my_context(:'tenant') -> 'role' ->> 'key' = 'servis');
+select pg_temp.check('zařazení je v kontextu vidět',
+  public.my_context(:'tenant') -> 'zarazeni' ->> 'key' = 'servis');
 
 reset role;
 
@@ -296,10 +324,12 @@ reset role;
 \echo ''
 \echo '== Druhá pozvánka nesmí sebrat, co člověk má ============='
 
--- `on conflict do update set role_id = excluded.role_id` by prázdnou
--- rolí SMAZALO tu, kterou člověk už má. Vedoucí, který omylem pošle
--- druhou pozvánku kolegovi, který už uvnitř je, by ho tím vyřadil
--- z aplikace — a nikde by nestálo proč.
+-- Dřív to hrozilo u `memberships.role_id`: prázdná role z druhé
+-- pozvánky by přepsala tu, kterou člověk měl. Po přepnutí nese práva
+-- ZAŘAZENÍ u zaměstnance a `app.accept_invitation` na ně nesahá —
+-- ale právě proto se to musí ověřit, ne předpokládat. Vedoucí, který
+-- omylem pošle druhou pozvánku kolegovi, který už uvnitř je, ho
+-- nesmí vyřadit z aplikace.
 
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
@@ -312,25 +342,14 @@ select set_config('test.user_id', :'marek', false);
 select app.accept_invitation(:'tok2');
 reset role;
 
-select pg_temp.check('číšníkovi jeho role zůstala',
-  (select role_id from public.memberships where user_id = :'marek') = :'r_servis');
+select pg_temp.check('číšníkovi jeho zařazení zůstalo',
+  (select position_id from public.employees
+   where user_id = :'marek' and deleted_at is null) = :'z_servis');
 
-set role authenticated;
-select set_config('test.user_id', :'majitel', false);
-select token as tok3 from app.create_invitation(
-  :'tenant', :'r_citliva', 'email', 'cisnik@foodtab.cz') \gset
-reset role;
-
-set role authenticated;
-select set_config('test.user_id', :'marek', false);
-select app.accept_invitation(:'tok3');
-reset role;
-
-select pg_temp.check('pozvánka S rolí ji pořád přepíše',
-  (select role_id from public.memberships where user_id = :'marek') = :'r_citliva');
-
--- Vrátit číšníka tam, kde ho další scénáře čekají.
-update public.memberships set role_id = :'r_servis' where user_id = :'marek';
+select pg_temp.check('a jeho práva taky',
+  (select count(*) from public.permissions p
+   where app.ma_pravo_clovek(:'tenant',
+           (select id from public.employees where user_id = :'marek'), p.key)) > 0);
 
 
 \echo ''
@@ -357,13 +376,16 @@ reset role;
 
 select id as bar from public.branches where slug = 'bernard-bar' \gset
 
-insert into public.roles (tenant_id, key, label, is_owner)
-values (:'tenant', 'zkouska_vedouci_lidi', 'Zkouška — vedoucí lidí', false)
-on conflict (tenant_id, key) do update set label = excluded.label
-returning id as r_vedouci \gset
+select set_config('test.user_id', '', false);
 
-insert into public.role_permissions (role_id, permission_key)
-values (:'r_vedouci', 'people.manage'), (:'r_vedouci', 'shifts.read')
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'tenant', 'zkouska_vedouci_lidi', 'Zkouška — vedoucí lidí', 'provoz', true)
+on conflict (tenant_id, key) do update set label = excluded.label
+returning id as z_vedouci \gset
+
+insert into public.position_permissions (tenant_id, position_id, permission_key)
+values (:'tenant', :'z_vedouci', 'people.manage'),
+       (:'tenant', :'z_vedouci', 'shifts.read')
 on conflict do nothing;
 
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -372,10 +394,17 @@ insert into auth.users (id, email, raw_user_meta_data) values
 on conflict (id) do nothing;
 
 insert into public.memberships (tenant_id, user_id, role_id, status, scope)
-values (:'tenant', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', :'r_vedouci', 'active', 'branch')
+values (:'tenant', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', null, 'active', 'branch')
 on conflict (tenant_id, user_id) do update
   set role_id = excluded.role_id, scope = excluded.scope
 returning id as clen_vedouci \gset
+
+-- A zaměstnanecký záznam se zařazením: práva po přepnutí visí na něm,
+-- členství drží už jen rozsah.
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', :'z_vedouci',
+        'Vedoucí Perly', 'hpp')
+on conflict (tenant_id, user_id) do update set position_id = excluded.position_id;
 
 insert into public.membership_branches (membership_id, branch_id)
 values (:'clen_vedouci', :'perla') on conflict do nothing;
@@ -439,7 +468,9 @@ select pg_temp.check('provozní s firemním rozsahem pobočku přidělí',
   exists (select 1 from public.membership_branches
           where membership_id = :'clen_cekajici' and branch_id = :'bar'));
 
--- Strop na roli platí i tady, ne jen u pozvánky.
+-- Strop platí i tady, ne jen u pozvánky. Majitelství je od přepnutí
+-- sloupec na zaměstnanci, takže tudy vede jediná cesta, jak ho někomu
+-- dát — a musí být zavřená pro každého, kdo majitel není.
 set role authenticated;
 select set_config('test.user_id', :'provozni', false);
 
@@ -447,13 +478,12 @@ do $$
 declare v_ok boolean;
 begin
   begin
-    update public.memberships
-       set role_id = current_setting('test.r_majitel')::uuid
-     where id = current_setting('test.clen_cekajici')::uuid;
+    update public.employees set je_majitel = true
+     where user_id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     v_ok := false;
   exception when insufficient_privilege then v_ok := true;
   end;
-  perform pg_temp.check('provozní nepřidělí roli majitele ani přes členství', v_ok);
+  perform pg_temp.check('provozní nejmenuje majitele ani oklikou', v_ok);
 end $$;
 
 reset role;

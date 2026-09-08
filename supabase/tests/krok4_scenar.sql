@@ -719,8 +719,11 @@ select id as z_ucetni from public.positions
   udělala migrace: je to příprava scény, ne krok uživatele.
 */
 select set_config('test.user_id', '', false);
-insert into public.employees (tenant_id, user_id, full_name, employment_type)
-values (:'tenant', '88888888-8888-8888-8888-888888888888', 'Cíl Přidělení', 'hpp')
+-- Bez `user_id`: uživatele 8888 si krok6 zakládá znovu pod jiným
+-- jménem a na `employees (tenant_id, user_id)` je unikát. Ke stropu
+-- na zařazení účet stejně potřeba není.
+insert into public.employees (tenant_id, full_name, employment_type)
+values (:'tenant', 'Cíl Přidělení', 'hpp')
 on conflict do nothing;
 select id as e_cil from public.employees
   where tenant_id = :'tenant' and full_name = 'Cíl Přidělení' \gset
