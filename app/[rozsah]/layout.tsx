@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 
 import {
+  canSee,
   getContext,
   getUser,
   jeVedeni,
@@ -128,8 +129,21 @@ export default async function RozsahLayout({
     o přístupu rozhoduje dál `app.has_access` a RLS; tohle je jen
     o tom, co se kreslí.
   */
+  /*
+    A VYPNUTÉ MODULY JEN TOMU, KDO JE MŮŽE ZAPNOUT.
+
+    `jeVedeni` je vedení obecně — vedoucí směny s `people.manage` sem
+    spadá taky. Jenže nabídka toho, co si firma může PŘIKOUPIT, patří
+    tomu, kdo o tom rozhoduje, a to je `settings.manage`. Vedoucímu
+    směny se tedy kreslí jen moduly, které firma opravdu má.
+
+    Zadání docs/rychlost-a-pohled-zamestnance.md, část 2, bod 1.
+  */
+  const smiVidetVypnute = canSee(ctx, "settings.manage");
   const moduly: ModulProp[] = jeVedeni(ctx)
-    ? ctx.modules.map((m) => {
+    ? ctx.modules
+        .filter((m) => m.active || smiVidetVypnute)
+        .map((m) => {
         const prvni = polozky.find((p) => p.modul === m.key && p.hotovo);
         return {
           klic: m.key,

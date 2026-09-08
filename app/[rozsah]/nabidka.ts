@@ -1,6 +1,7 @@
 import {
   canSee,
   isModuleActive,
+  jeVedeni,
   type Context,
   type ModuleKey,
   type Permission,
@@ -79,13 +80,6 @@ export const NABIDKA: Polozka[] = [
   { segment: 'dnes', nazev: 'Dnes', kratky: 'Dnes', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny' },
   { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
   { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny', jenPobocka: true },
-  // Zálohy jsou peníze, ne nastavení — proto v hlavní nabídce hned za
-  // Docházkou, ze které se počítají. Obrazovku otevírá i payroll.read,
-  // ale položka visí na advances.manage: kdo dělá mzdy, přijde si pro
-  // ni z Docházky, a nabídka má ukazovat to, co člověk dělá, ne všechno,
-  // kam se dostane.
-  { segment: 'zalohy', nazev: 'Zálohy', kratky: 'Zálohy', modul: 'provoz', pravo: 'advances.manage', hotovo: true, ikona: 'kniha' },
-  { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
   // VZKAZY: jedna polozka, uvnitr dve zalozky.
   //
   // Do 7. 9. 2026 tu stala Nastenka a Rozhovory zvlast. Byly to dve
@@ -98,7 +92,23 @@ export const NABIDKA: Polozka[] = [
   // v roli nema; kdyby na nem visela cela polozka, neprecetl by si
   // vlastni vlakno. Na samotnou zalozku Nastenka se to pravo ptá
   // uvnitr (vzkazy/nastenka.tsx).
+  //
+  // JE TU PŘED ZÁLOHAMI SCHVÁLNĚ. Spodní lišta bere první čtyři
+  // položky viditelné nabídky odshora, takže na pořadí tady záleží
+  // víc než na čemkoli jiném v tomhle souboru. Číšníkovi vycházely
+  // Dnes / Směny / Docházka / Úkoly a Vzkazy padaly pod „Více" —
+  // jenže zprávy potřebuje každý den, kdežto zálohy jednou za měsíc
+  // (a ty stejně vidí jen advances.manage). Zadání
+  // docs/velka-prace-2026-09-08.md, A4 bod 3: Vzkazy do lišty místo
+  // Záloh.
   { segment: 'vzkazy', nazev: 'Vzkazy', kratky: 'Vzkazy', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zprava' },
+  // Zálohy jsou peníze, ne nastavení — proto v hlavní nabídce hned za
+  // Docházkou, ze které se počítají. Obrazovku otevírá i payroll.read,
+  // ale položka visí na advances.manage: kdo dělá mzdy, přijde si pro
+  // ni z Docházky, a nabídka má ukazovat to, co člověk dělá, ne všechno,
+  // kam se dostane.
+  { segment: 'zalohy', nazev: 'Zálohy', kratky: 'Zálohy', modul: 'provoz', pravo: 'advances.manage', hotovo: true, ikona: 'kniha' },
+  { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },
@@ -162,7 +172,21 @@ export const NAZVY_MODULU: Record<ModuleKey, string> = {
   objednavky: 'Objednávky',
 }
 
+/**
+ * „PŘIPRAVUJEME" ZAMĚSTNANCI NE.
+ *
+ * Položky s `hotovo: false` vedou na obrazovku, která říká, že se to
+ * teprve chystá. Vedení to vidět má — je to slib, co firma dostane.
+ * Číšníkovi na denním nástroji slib nepatří: hledá, kde si píchne
+ * příchod, a mezi tím mu stojí tři položky, které nic nedělají.
+ *
+ * Zadání docs/rychlost-a-pohled-zamestnance.md, část 2, bod 2.
+ *
+ * Není to zámek, jen kreslení — obrazovky samy pouštějí dovnitř dál
+ * podle `app.has_access`.
+ */
 function smiVidet(ctx: Context, p: Polozka): boolean {
+  if (!p.hotovo && !jeVedeni(ctx)) return false
   return p.pravo === null || canSee(ctx, p.pravo)
 }
 
