@@ -123,7 +123,7 @@ begin
 end $$;
 
 select pg_temp.check('majitel je v kontextu označený jako vlastník',
-  (public.my_context(:'tenant') -> 'role' ->> 'isOwner')::boolean);
+  (public.my_context(:'tenant') ->> 'jeMajitel')::boolean);
 
 select pg_temp.check('majitel má v seznamu tenantů právě tuhle firmu',
   (select count(*) from public.my_tenants()) = 1
@@ -252,6 +252,14 @@ select pg_temp.check('cizí nemá žádnou firmu',
 -- Kuchař ani číšník nemají tasks.manage. Přesto si musí odškrtnout úkol,
 -- který je zadaný jim — jinak by u nich musel stát vedoucí a klikat za ně.
 reset role;
+/*
+  Příprava scény, ne krok uživatele. test.user_id tu po předchozím
+  oddílu drží CIZÍHO člověka, a od přepnutí je employees.position_id
+  nositel oprávnění — spoušť trg_strop_zarazeni by proto založení
+  číšníka odmítla se slovy, že cizí člověk zařazení přidělit nesmí.
+  Má pravdu. Přípravu proto děláme bez přihlášeného, jako migrace.
+*/
+select set_config('test.user_id', '', false);
 
 select id as jana from public.employees where full_name = 'Jana Kuchařka' \gset
 
@@ -267,8 +275,17 @@ returning id as clenstvi \gset
 insert into public.membership_branches (membership_id, branch_id)
 values (:'clenstvi', :'perla');
 
-insert into public.employees (tenant_id, branch_id, user_id, full_name)
-values (:'tenant', :'perla', '55555555-5555-5555-5555-555555555555', 'Marek Číšník')
+/*
+  Zařazení, ne jen členství. Práva visí od přepnutí na zaměstnanci,
+  takže číšník bez zařazení by neměl ANI JEDNO právo — a všechny
+  kontroly níž by zůstaly zelené, protože většina z nich tvrdí
+  "nemá právo". Měřily by prázdno.
+*/
+select id as z_servis from public.positions
+ where tenant_id = :'tenant' and key = 'servis' \gset
+
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name)
+values (:'tenant', :'perla', '55555555-5555-5555-5555-555555555555', :'z_servis', 'Marek Číšník')
 returning id as marek \gset
 
 insert into public.tasks (tenant_id, branch_id, employee_id, title)
@@ -356,9 +373,9 @@ end $$;
 -- Zvát lidi umí jen správce lidí. Číšník s rolí Servis ho nemá.
 set role authenticated;
 select set_config('test.user_id', '55555555-5555-5555-5555-555555555555', false);
-select id as role_kuchyne from public.roles
+select id as z_kuchyne_3 from public.positions
  where tenant_id = :'tenant' and key = 'kuchyne' \gset
-select set_config('test.role_kuchyne', :'role_kuchyne', false);
+select set_config('test.z_kuchyne', :'z_kuchyne_3', false);
 
 do $$
 declare v_ok boolean := false;
@@ -366,8 +383,7 @@ begin
   begin
     perform public.create_invitation(
       current_setting('test.tenant')::uuid,
-      current_setting('test.role_kuchyne')::uuid,
-      'email', 'kuchar@foodtab.cz');
+      null, 'email', 'kuchar@foodtab.cz');
   exception when insufficient_privilege then v_ok := true;
   end;
   if not v_ok then raise exception 'SELHALO: číšník vystavil pozvánku'; end if;
@@ -376,8 +392,20 @@ end $$;
 
 -- Majitel ano. Token dostane právě jednou.
 select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
+
+/*
+  Zaměstnanecký záznam vzniká PŘED pozvánkou, ne po ní. Pozvánka totiž
+  od přepnutí bere práva z něj; kdyby se posílala "do prázdna", přijal
+  by ji člověk, který se přihlásí a nic neuvidí — a nikdo by nevěděl
+  proč. Zadání 6.5 to říká stejně.
+*/
+insert into public.employees (tenant_id, branch_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', :'z_kuchyne_3', 'Nový Kuchař', 'hpp')
+returning id as e_kuchar_3 \gset
+
 select token as pozvanka from public.create_invitation(
-  :'tenant', :'role_kuchyne', 'email', 'kuchar@foodtab.cz') \gset
+  :'tenant', null, 'email', 'kuchar@foodtab.cz',
+  p_employee => :'e_kuchar_3') \gset
 
 select pg_temp.check('token má rozumnou délku',
   length(:'pozvanka') = 64);
@@ -404,10 +432,15 @@ begin
   raise notice '  OK    otisk tokenu se přes API nečte';
 end $$;
 
--- Role s citlivým oprávněním nejde pozvat přes SMS.
-select id as role_provozni from public.roles
+-- Citlivé oprávnění nejde pozvat přes SMS. Ptá se to ZAŘAZENÍ toho
+-- člověka, ne role — role po přepnutí žádné právo nenese, takže by
+-- kontrola nad ní tiše pouštěla všechno.
+select id as z_provozni from public.positions
  where tenant_id = :'tenant' and key = 'provozni' \gset
-select set_config('test.role_provozni', :'role_provozni', false);
+insert into public.employees (tenant_id, branch_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', :'z_provozni', 'Petra Provozní', 'hpp')
+returning id as e_provozni \gset
+select set_config('test.e_provozni', :'e_provozni', false);
 
 do $$
 declare v_ok boolean := false;
@@ -415,12 +448,12 @@ begin
   begin
     perform public.create_invitation(
       current_setting('test.tenant')::uuid,
-      current_setting('test.role_provozni')::uuid,
-      'sms', '+420601234567');
+      null, 'sms', '+420601234567',
+      p_employee => current_setting('test.e_provozni')::uuid);
   exception when insufficient_privilege then v_ok := true;
   end;
-  if not v_ok then raise exception 'SELHALO: citlivá role prošla přes SMS'; end if;
-  raise notice '  OK    citlivou roli nejde pozvat přes SMS';
+  if not v_ok then raise exception 'SELHALO: citlivé zařazení prošlo přes SMS'; end if;
+  raise notice '  OK    citlivé zařazení nejde pozvat přes SMS';
 end $$;
 
 -- Přijetí pozvánky cizím uživatelem: vznikne členství.
@@ -435,7 +468,7 @@ select public.accept_invitation(:'pozvanka');
 
 select pg_temp.check('pozvaný se stal členem firmy',
   public.my_context(:'tenant') is not null
-  and public.my_context(:'tenant') -> 'role' ->> 'key' = 'kuchyne');
+  and public.my_context(:'tenant') -> 'zarazeni' ->> 'key' = 'kuchyne');
 
 -- Spotřebovaná pozvánka je spotřebovaná. Kdyby token šel použít
 -- podruhé, stačilo by ho jednou zahlédnout přes rameno.

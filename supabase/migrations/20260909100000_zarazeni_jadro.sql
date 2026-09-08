@@ -970,6 +970,20 @@ as $$
 declare
   v_zamestnanec uuid;
 begin
+  /*
+    KDYŽ MIZÍ CELÁ FIRMA, nemá smysl hlídat, že v ní zůstal majitel.
+    `delete from tenants` sem přiteče kaskádou a hlídač by ji odmítl —
+    firma by nešla smazat vůbec.
+
+    Dosud to procházelo NÁHODOU: stará podoba hledala `roles.is_owner`
+    a při kaskádě už role smazané byly, takže vyšla NULL a hlídač se
+    vrátil dřív. Nová podoba se ptá zaměstnance, a ten při mazání firmy
+    ještě existovat může. Proto je ta podmínka napsaná nahlas.
+  */
+  if not exists (select 1 from public.tenants where id = old.tenant_id) then
+    return coalesce(new, old);
+  end if;
+
   -- Neaktivní členství majitelem nedrželo; jeho zánik firmu o majitele
   -- nepřipraví.
   if old.status <> 'active' then

@@ -520,6 +520,26 @@ select :'tenant', '77777777-7777-7777-7777-777777777777', r.id, 'active', 'tenan
 from public.roles r where r.tenant_id = :'tenant' and r.key = 'provozni'
 on conflict do nothing;
 
+/*
+  ZAMĚSTNANECKÝ ZÁZNAM, ne jen členství.
+
+  Tenhle herec vzniká tady a půjčují si ho krok5, 7, 8, 9, 10
+  i marketing1. Do přepnutí mu stačilo členství s rolí Provozní;
+  od přepnutí visí práva na zaměstnanci, takže by bez tohohle řádku
+  přišel o všechno — a jeho tvrzení by spadla ne proto, že je něco
+  rozbité, ale proto, že herec zmizel.
+
+  Zařazení Provozní má tatáž práva jako role Provozní: obojí vzniká
+  ze stejné šablony (app.role_template_permissions).
+*/
+select id as z_provozni from public.positions
+  where tenant_id = :'tenant' and key = 'provozni' \gset
+select set_config('test.user_id', '', false);
+insert into public.employees (tenant_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', '77777777-7777-7777-7777-777777777777', :'z_provozni',
+        'Provozní Zkouška', 'hpp')
+on conflict do nothing;
+
 set role authenticated;
 select set_config('test.user_id', '77777777-7777-7777-7777-777777777777', false);
 select pg_temp.check('provozní zakládá lidi',
@@ -685,48 +705,75 @@ insert into auth.users (id, email, raw_user_meta_data) values
    '{"full_name":"Cíl Přidělení"}')
 on conflict (id) do nothing;
 
-select id as r_majitel from public.roles
-  where tenant_id = :'tenant' and is_owner \gset
-select id as r_servis from public.roles
+select id as z_servis from public.positions
   where tenant_id = :'tenant' and key = 'servis' \gset
-select id as r_ucetni from public.roles
+select id as z_ucetni from public.positions
   where tenant_id = :'tenant' and key = 'ucetni' \gset
+
+/*
+  Strop se od přepnutí neptá role, ptá se ZAŘAZENÍ a ČLOVĚKA.
+  Cíl přidělení proto potřebuje zaměstnanecký záznam — bez něj
+  by nebylo co přidělovat a strop by prošel vždycky.
+
+  Zakládá se bez přihlášeného (test.user_id prázdné), jako by to
+  udělala migrace: je to příprava scény, ne krok uživatele.
+*/
+select set_config('test.user_id', '', false);
+insert into public.employees (tenant_id, user_id, full_name, employment_type)
+values (:'tenant', '88888888-8888-8888-8888-888888888888', 'Cíl Přidělení', 'hpp')
+on conflict do nothing;
+select id as e_cil from public.employees
+  where tenant_id = :'tenant' and full_name = 'Cíl Přidělení' \gset
+
+insert into public.employees (tenant_id, position_id, full_name, employment_type)
+values (:'tenant', :'z_ucetni', 'Cíl Účetní', 'hpp')
+on conflict do nothing;
+select id as e_ucetni from public.employees
+  where tenant_id = :'tenant' and full_name = 'Cíl Účetní' \gset
+
+-- Majitel firmy sám sobě: na něm se zkouší, že majitelství
+-- nepřidělí nikdo než majitel.
+select id as e_majitel from public.employees
+  where tenant_id = :'tenant'
+    and user_id = '11111111-1111-1111-1111-111111111111' \gset
 
 -- Provozní: people.manage má, settings.manage ani payroll.read ne.
 set role authenticated;
 select set_config('test.user_id', '77777777-7777-7777-7777-777777777777', false);
 
--- 1. Majitelskou roli jen vlastník.
+-- 1. Majitele jmenuje jen majitel. Není to role, je to sloupec
+-- `employees.je_majitel` — a hlídá ho spoušť trg_strop_zarazeni,
+-- protože politika by u UPDATE neviděla starou hodnotu.
 do $$
 declare v_ok boolean := false;
 begin
   begin
-    insert into public.memberships (tenant_id, user_id, role_id, scope)
-    select t.id, '88888888-8888-8888-8888-888888888888',
-           (select id from public.roles where tenant_id = t.id and is_owner), 'tenant'
-    from public.tenants t limit 1;
+    update public.employees set je_majitel = true
+     where full_name = 'Cíl Přidělení';
   exception when insufficient_privilege then v_ok := true;
   end;
-  if not v_ok then raise exception 'SELHALO: provozní přidělil roli Majitel'; end if;
-  raise notice '  OK    provozní roli Majitel nepřidělí';
+  if not v_ok then raise exception 'SELHALO: provozní jmenoval majitele'; end if;
+  raise notice '  OK    provozní majitele nejmenuje';
 end $$;
 
--- A ani sám sobě. Úprava přes RLS nekřičí, jen nic neudělá — porovnává
--- se proto stav před a po, ne návratový kód.
+-- A ani sám sobě. Spoušť tady křičí, na rozdíl od politiky —
+-- pro jistotu se stejně porovnává stav před a po.
 do $$
-declare v_pred uuid; v_po uuid; v_majitel uuid;
+declare v_ok boolean := false; v_po boolean;
 begin
-  select role_id into v_pred from public.memberships
-   where user_id = '77777777-7777-7777-7777-777777777777';
-  select id into v_majitel from public.roles where is_owner limit 1;
+  begin
+    update public.employees set je_majitel = true
+     where user_id = '77777777-7777-7777-7777-777777777777';
+  exception when insufficient_privilege then v_ok := true;
+  end;
 
-  update public.memberships set role_id = v_majitel
+  select je_majitel into v_po from public.employees
    where user_id = '77777777-7777-7777-7777-777777777777';
-
-  select role_id into v_po from public.memberships
-   where user_id = '77777777-7777-7777-7777-777777777777';
-  if v_po is distinct from v_pred then
-    raise exception 'SELHALO: provozní se povýšil na Majitele';
+  if coalesce(v_po, false) then
+    raise exception 'SELHALO: provozní se povýšil na majitele';
+  end if;
+  if not v_ok then
+    raise exception 'SELHALO: povýšení na majitele neskončilo chybou';
   end if;
   raise notice '  OK    provozní se nepovýší ani sám sobě';
 end $$;
@@ -738,26 +785,27 @@ select pg_temp.check('provozní payroll.read opravdu nemá',
 do $$
 declare v_ok boolean := false; v_ucetni uuid;
 begin
-  select id into v_ucetni from public.roles where key = 'ucetni' limit 1;
+  select id into v_ucetni from public.positions where key = 'ucetni' limit 1;
   begin
-    insert into public.memberships (tenant_id, user_id, role_id, scope)
-    select t.id, '88888888-8888-8888-8888-888888888888', v_ucetni, 'tenant'
-    from public.tenants t limit 1;
+    update public.employees set position_id = v_ucetni
+     where full_name = 'Cíl Přidělení';
   exception when insufficient_privilege then v_ok := true;
   end;
-  if not v_ok then raise exception 'SELHALO: provozní přidělil Účetní i bez payroll.read'; end if;
-  raise notice '  OK    provozní nepřidělí roli s právem, které nemá';
+  if not v_ok then raise exception 'SELHALO: provozní přeřadil pod Účetní i bez payroll.read'; end if;
+  raise notice '  OK    provozní nepřidělí zařazení s právem, které nemá';
 end $$;
 
--- 3. Roli, kterou má celou, přidělit smí.
+-- 3. Zařazení, které má celé, přidělit smí — i s členstvím k němu.
 do $$
 declare v_servis uuid;
 begin
-  select id into v_servis from public.roles where key = 'servis' limit 1;
+  select id into v_servis from public.positions where key = 'servis' limit 1;
+  update public.employees set position_id = v_servis
+   where full_name = 'Cíl Přidělení';
   insert into public.memberships (tenant_id, user_id, role_id, scope)
-  select t.id, '88888888-8888-8888-8888-888888888888', v_servis, 'branch'
+  select t.id, '88888888-8888-8888-8888-888888888888', null, 'branch'
   from public.tenants t limit 1;
-  raise notice '  OK    provozní roli Servis přidělí';
+  raise notice '  OK    provozní zařazení Servis přidělí';
 end $$;
 
 reset role;
@@ -787,7 +835,7 @@ select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false)
 select pg_temp.check('finance.read nedává ve vypnutém modulu nic ani vlastníkovi',
   not app.has_access(:'tenant', 'finance.read', null));
 select pg_temp.check('a přesto vlastník roli Účetní přidělí',
-  app.smi_pridelit(:'tenant', :'r_ucetni', 'tenant'));
+  app.smi_pridelit(:'tenant', :'z_ucetni', 'tenant'));
 
 reset role;
 update public.tenant_modules set status = :'fin_stav'
@@ -814,43 +862,46 @@ select set_config('test.user_id', '77777777-7777-7777-7777-777777777777', false)
 -- memberships přidělit nešlo. Test, který si rozsah vždycky dosadí sám,
 -- to nemá jak najít.
 do $$
-declare v_ok boolean; v_role uuid; v_tenant uuid; v_perla uuid;
+declare v_ok boolean; v_kdo uuid; v_tenant uuid; v_perla uuid; v_servis uuid;
 begin
   select id into v_tenant from public.tenants limit 1;
   select id into v_perla from public.branches where slug = 'cerna-perla';
 
-  for v_role in
-    select id from public.roles where is_owner
+  for v_kdo in
+    -- majitel firmy (je_majitel) a člověk se zařazením Účetní
+    select id from public.employees where je_majitel and deleted_at is null
     union all
-    select id from public.roles where key = 'ucetni'
+    select id from public.employees where full_name = 'Cíl Účetní'
   loop
     -- bez rozsahu
     v_ok := false;
     begin
-      perform app.create_invitation(v_tenant, v_role, 'email', 'cil@foodtab.cz');
+      perform app.create_invitation(v_tenant, null, 'email', 'cil@foodtab.cz',
+                                   p_employee => v_kdo);
     exception when insufficient_privilege then v_ok := true;
     end;
     if not v_ok then
-      raise exception 'SELHALO: pozvánka bez rozsahu obešla strop u role %', v_role;
+      raise exception 'SELHALO: pozvánka bez rozsahu obešla strop u člověka %', v_kdo;
     end if;
 
     -- s vyjmenovanou pobočkou
     v_ok := false;
     begin
       perform app.create_invitation(
-        v_tenant, v_role, 'email', 'cil@foodtab.cz', 'branch', array[v_perla]);
+        v_tenant, null, 'email', 'cil@foodtab.cz', 'branch', array[v_perla], v_kdo);
     exception when insufficient_privilege then v_ok := true;
     end;
     if not v_ok then
-      raise exception 'SELHALO: pozvánka na pobočku obešla strop u role %', v_role;
+      raise exception 'SELHALO: pozvánka na pobočku obešla strop u člověka %', v_kdo;
     end if;
   end loop;
-  raise notice '  OK    pozvánka s cizí rolí neprojde ani bez rozsahu, ani na pobočku';
+  raise notice '  OK    pozvánka s cizím zařazením neprojde ani bez rozsahu, ani na pobočku';
 
-  select id into v_role from public.roles where key = 'servis' limit 1;
-  perform app.create_invitation(v_tenant, v_role, 'email', 'cil@foodtab.cz');
+  select id into v_kdo from public.employees where full_name = 'Cíl Přidělení';
+  perform app.create_invitation(v_tenant, null, 'email', 'cil@foodtab.cz',
+                               p_employee => v_kdo);
   perform app.create_invitation(
-    v_tenant, v_role, 'email', 'cil@foodtab.cz', 'branch', array[v_perla]);
+    v_tenant, null, 'email', 'cil@foodtab.cz', 'branch', array[v_perla], v_kdo);
   raise notice '  OK    pozvánka se Servisem projde';
 end $$;
 
@@ -873,13 +924,15 @@ select set_config('test.user_id', '22222222-2222-2222-2222-222222222222', false)
 select pg_temp.check('vedoucí směny lidi nespravuje',
   not app.has_access(:'tenant', 'people.manage', null));
 select pg_temp.check('na své pobočce by Servis přidělila',
-  app.smi_pridelit(:'tenant', :'r_servis', 'branch', array[:'perla']::uuid[]));
+  app.smi_pridelit(:'tenant', :'z_servis', 'branch', array[:'perla']::uuid[]));
 select pg_temp.check('na cizí pobočce ne',
-  not app.smi_pridelit(:'tenant', :'r_servis', 'branch', array[:'bar']::uuid[]));
+  not app.smi_pridelit(:'tenant', :'z_servis', 'branch', array[:'bar']::uuid[]));
 select pg_temp.check('a Účetní nikde',
-  not app.smi_pridelit(:'tenant', :'r_ucetni', 'branch', array[:'perla']::uuid[]));
-select pg_temp.check('majitelskou roli nepřidělí ani na vlastní pobočce',
-  not app.smi_pridelit(:'tenant', :'r_majitel', 'branch', array[:'perla']::uuid[]));
+  not app.smi_pridelit(:'tenant', :'z_ucetni', 'branch', array[:'perla']::uuid[]));
+-- Majitelství není zařazení, takže se strop ptá ČLOVĚKA: kdo není
+-- majitel, nepřidá majitele ani na vlastní pobočce.
+select pg_temp.check('majitele nepřidělí ani na vlastní pobočce',
+  not app.smi_pridelit_zamestnance(:'tenant', :'e_majitel', 'branch', array[:'perla']::uuid[]));
 
 -- 6. Vlastní členství neupraví nikdo, ani vlastník.
 select set_config('test.user_id', '11111111-1111-1111-1111-111111111111', false);
