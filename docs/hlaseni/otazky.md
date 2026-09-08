@@ -112,3 +112,40 @@ takže se to číšníka na telefonu netýká.
 Příchod, Odchod, nebo nic — pak k tomu přibude vlastní tlačítko
 „Konec přestávky". V kódu je to označené `// ROZHODNOUT:`
 v `app/[rozsah]/dochazka/page.tsx`.
+
+---
+
+## 6. Kolik má mít firma majitelů? (BLOKUJE krok E)
+
+**Vzniklo:** 8. 9. 2026 při průzkumu před přechodem na zařazení.
+Není to otázka na kód — **je to rozpor uvnitř zadání a repozitáře.**
+
+`docs/zarazeni-misto-roli.md`, oddíl 5.2 chce unikátní index, který
+dovolí **jednoho** majitele na firmu:
+
+```sql
+create unique index employees_jediny_majitel
+  on public.employees (tenant_id) where je_majitel and deleted_at is null;
+```
+
+Proti tomu stojí tři věci:
+
+- `docs/vlastniku-muze-byt-vic.md`, ř. 7–11 říká, že jich může být víc,
+- `20260902010000_posledni_majitel.sql`, ř. 6–7 na tom staví: „Majitelů
+  může být víc: firma má jednu roli Majitel, ale členství k ní může mít
+  libovolně mnoho lidí,"
+- **a tvoje firma má dva** (`docs/co-jeste-chybi-2026-09-05.md`,
+  ř. 12–18).
+
+Ten index by tedy na ostrých datech **spadl uprostřed migrace** a firma
+by zůstala s novými funkcemi a starými daty.
+
+**Co jsem vybral:** index vynechat a nechat víc majitelů. Odebrat
+majitelství se dá kdykoli; migrace, která spadne v půlce přepínání
+oprávnění, se opravuje o řád hůř.
+
+**Když to má být jinak** — tedy jeden majitel na firmu —, musí se
+nejdřív rozhodnout, **který ze dvou dnešních majitelů jím zůstane**,
+a teprve pak se index smí přidat. To je rozhodnutí o firmě, ne o kódu.
+
+Podrobně v `docs/zarazeni-misto-roli-nalezy.md`, oddíl 1.
