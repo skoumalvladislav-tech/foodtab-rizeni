@@ -254,7 +254,7 @@ comment on function app.has_access(uuid, text, uuid) is
 
 
 -- =====================================================================
--- DESET OPSANÝCH KOPIÍ MIMO `has_access`
+-- JEDENÁCT OPSANÝCH KOPIÍ MIMO `has_access`
 --
 -- Nálezy (oddíl 3) jich vyjmenovaly devět. Desátá se našla až při psaní:
 -- `app.is_owner` v `20260823120200_authz.sql:33`. Neptá se jí žádná
@@ -1605,3 +1605,100 @@ end;
 $$;
 
 grant execute on function app.create_tenant(text, text, text, text, char, text) to authenticated;
+
+
+-- =====================================================================
+-- 11. JEDENÁCTÁ KOPIE — „přijal pozvánku a čeká na oprávnění"
+--
+-- `app.upozorni_na_prijeti` (20260902070000:135) rozhoduje podle
+-- `v_member.role_id is null`, jestli je nový člověk ÚKOL, nebo jen
+-- INFORMACE. Po přepnutí by `role_id` bylo prázdné vždycky, takže by
+-- se každý nový člověk hlásil jako čekající — i ten, komu zařazení
+-- dává všechno.
+--
+-- Nálezy ani měření tuhle funkci nevyjmenovaly. Našla se až tím, že
+-- na ni míří `krok12_scenar` — a to je přesně ten důvod, proč se
+-- scénáře pouští, místo aby se výčet odškrtal.
+-- =====================================================================
+
+create or replace function app.upozorni_na_prijeti(p_tenant uuid, p_kdo uuid)
+returns void
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare
+  v_jmeno    text;
+  v_zarazeni text;
+  v_scope    text;
+  v_pobocky  text[];
+  v_ceka     boolean;
+  v_member   public.memberships%rowtype;
+begin
+  select coalesce(nullif(btrim(p.full_name), ''), p.email, 'Nový člověk')
+    into v_jmeno
+  from public.profiles p where p.user_id = p_kdo;
+
+  select * into v_member
+  from public.memberships m
+  where m.tenant_id = p_tenant and m.user_id = p_kdo;
+
+  /*
+    Čeká ten, kdo nemá odkud vzít ani jedno právo. Je to tatáž otázka,
+    na kterou odpovídá `public.cekaji_na_opravneni` — a je to schválně
+    napsané stejně, protože okno při přihlášení a tenhle zvoneček musí
+    říkat totéž. Kdyby se rozešly, jeden by hlásil úkol a druhý ho
+    v seznamu neměl.
+  */
+  select po.label,
+         not (
+           e.je_majitel
+           or exists (select 1 from public.position_permissions pp
+                       where pp.position_id = e.position_id)
+           or exists (select 1 from public.employee_permissions ep
+                       where ep.employee_id = e.id and ep.granted)
+         )
+    into v_zarazeni, v_ceka
+  from public.employees e
+  left join public.positions po on po.id = e.position_id
+  where e.tenant_id = p_tenant
+    and e.user_id = p_kdo
+    and e.deleted_at is null
+  limit 1;
+
+  -- Bez zaměstnaneckého záznamu nemá práva odkud vzít vůbec.
+  v_ceka := coalesce(v_ceka, true);
+
+  v_scope := v_member.scope;
+
+  select array_agg(b.name order by b.name) into v_pobocky
+  from public.membership_branches mb
+  join public.branches b on b.id = mb.branch_id
+  where mb.membership_id = v_member.id;
+
+  insert into public.notifications (tenant_id, user_id, branch_id, druh, telo)
+  select
+    p_tenant,
+    k.user_id,
+    null,
+    'pozvanka.prijata',
+    jsonb_build_object(
+      'jmeno',   v_jmeno,
+      -- Kdo přijal. Tlačítko v okně z toho udělá odkaz rovnou na
+      -- přidělení oprávnění, ne na seznam lidí.
+      'kdo',     p_kdo,
+      'ceka',    v_ceka,
+      -- Klíč `role` zůstává, i když se do něj plní zařazení: čte ho
+      -- `lib/upozorneni-text.ts` a v databázi už s ním leží staré
+      -- zprávy. Přejmenovat ho znamená nechat je bez textu.
+      'role',    v_zarazeni,
+      'rozsah',  v_scope,
+      'pobocky', coalesce(v_pobocky, '{}'::text[])
+    )
+  from app.kdo_ma_pravo(p_tenant, 'people.manage') k;
+end;
+$$;
+
+comment on function app.upozorni_na_prijeti(uuid, uuid) is
+  'Zvoneček všem, kdo ve firmě spravují lidi. Dva různé texty: kdo nemá '
+  'odkud vzít žádné právo, je úkol; kdo je má, je informace.';
+
+revoke all on function app.upozorni_na_prijeti(uuid, uuid) from public, anon, authenticated;
