@@ -98,3 +98,55 @@ export async function ulozitSmenu(
 
   return { stav: 'hotovo', varovani: r.varovani ?? [] }
 }
+
+/**
+ * Smazání směny z kalendáře.
+ *
+ * Hlásil Šéfík z provozu 9. 9. 2026: mazat směny nešlo, jen přidávat.
+ * Nebylo to rozbité — nikdy to nevzniklo.
+ *
+ * ---------------------------------------------------------------------
+ * VYDANOU SMĚNU TO NESMAŽE, A JE TO ZÁMĚR
+ *
+ * Rozhoduje o tom databáze (`public.smazat_smenu`), ne tenhle soubor:
+ * lidem se ukazuje VYDANÁ podoba rozpisu, takže smazání vydané směny
+ * by ji z jejich rozpisu odstranilo okamžitě — bez vydání a bez
+ * upozornění. Zrušení vydané směny je vlastní věc a udělá se zvlášť
+ * (otázka 7 v docs/hlaseni/otazky.md).
+ *
+ * Hlášku o tom píše databáze a propouští se beze změny, ať se
+ * nevymýšlí druhá.
+ */
+export async function smazatSmenu(
+  _predchozi: StavSmeny,
+  formData: FormData,
+): Promise<StavSmeny> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const smena = String(formData.get('smena') ?? '').trim()
+  if (!smena) return { stav: 'chyba', text: 'Nevím, kterou směnu mám smazat.' }
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
+
+  /*
+    První obranná linie. Druhá je uvnitř `smazat_smenu`, která si
+    `shifts.manage` ověří na pobočce TÉ SMĚNY — ne na té z adresy.
+    Pobočka z prohlížeče je návrh (pravidlo 4).
+  */
+  const pristup = await zkusPristup(tenantId, 'shifts.manage', rozsah)
+  if (pristup.stav !== 'ok') {
+    return { stav: 'chyba', text: 'Mazat směny nemáte oprávnění.' }
+  }
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('smazat_smenu', {
+    p_tenant: tenantId,
+    p_smena: smena,
+  })
+
+  if (error) return { stav: 'chyba', text: error.message }
+
+  revalidatePath(`/${rozsah}/smeny`)
+
+  return { stav: 'hotovo', varovani: [] }
+}

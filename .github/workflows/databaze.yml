@@ -112,6 +112,9 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 31 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 31"; chybi=1; }
 
+          grep -qE '^[[:space:]]*== KROK 32 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 32"; chybi=1; }
+
           if [ "$chybi" -ne 0 ]; then
             echo "Scénáře neprošly celé."
             exit 1

@@ -68,6 +68,8 @@ type Smena = {
   ends_at: string;
   status: string;
   note: string;
+  // Vydaná směna se nedá smazat — lidem už je v rozpisu vidět.
+  published_at: string | null;
 };
 
 type RozsahContext = {
