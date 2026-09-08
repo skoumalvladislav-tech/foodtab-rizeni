@@ -149,3 +149,42 @@ nejdřív rozhodnout, **který ze dvou dnešních majitelů jím zůstane**,
 a teprve pak se index smí přidat. To je rozhodnutí o firmě, ne o kódu.
 
 Podrobně v `docs/zarazeni-misto-roli-nalezy.md`, oddíl 1.
+
+---
+
+## 7. Když se směna smaže, má zmizet hned, nebo až po vydání rozpisu?
+
+**Vzniklo:** 9. 9. 2026, Šéfík hlásí z provozu: *„v kalendáři směn
+nejdou mazat směny, jenom přidávat."*
+
+**Není to rozbité — nikdy to nevzniklo.** Ověřeno: v
+`app/[rozsah]/smeny/smena.ts` je jediná akce `ulozitSmenu`, formulář
+(`formular-smeny.tsx`) má jen tlačítka Zrušit a Uložit, a tabulka
+`public.shifts` nemá sloupec `deleted_at`. Přidávat a upravovat jde,
+mazat ne.
+
+Uvnitř té opravy je ale rozhodnutí o provozu:
+
+**a) Smazat natvrdo.** Řádek zmizí. Je to na pár řádků kódu a nic
+jiného se měnit nemusí.
+**Ale:** směna, kterou už lidi vidí ve vydaném rozpisu, jim zmizí
+**okamžitě**, ještě než rozpis znovu vydáš. Tím se obchází celý smysl
+vydávání — dnes platí, že rozdělané změny lidi nevidí, dokud je
+nevydáš.
+
+**b) Označit jako zrušenou** (`deleted_at`, jako u lidí — pravidlo 9
+z `CLAUDE.md`). Vydaná podoba zůstane, dokud rozpis nevydáš znovu,
+a při vydání se ta směna ukáže jako **zrušená**, ne že prostě není.
+Historie se neztratí.
+**Ale:** je to větší práce — `shifts` se čte na 4 místech v aplikaci
+a ve ~14 migracích, a **každé z nich musí zrušené směny odfiltrovat.**
+Zapomenutá cesta znamená, že se smazaná směna někde objeví zpátky.
+
+**Co bych vybral:** **b)**. Za a) mluví jen rychlost, a cena je, že
+lidem zmizí z rozpisu směna, kterou mají naplánovanou — bez toho, aby
+to kdokoli vydal. To je přesně ta třída chyby, kterou vydávání rozpisu
+existuje řešit.
+
+**Když to má být jinak** — třeba že u nevydané směny stačí smazat
+natvrdo a jen u vydané se to označuje — řekni, je to jedna podmínka
+navíc.
