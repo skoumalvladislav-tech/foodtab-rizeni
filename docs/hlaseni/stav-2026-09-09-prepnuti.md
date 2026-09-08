@@ -112,7 +112,7 @@ i člověku bez účtu: uloží se a začne platit, jakmile se přihlásí
 
 ## 2. Kolik kontrol prošlo A Z ČEHO
 
-**1002 kontrol** z `node scripts/scenare-pglite.mjs` — všech 33
+**1005 kontrol** z `node scripts/scenare-pglite.mjs` — všech 33
 scénářů, žádný nespadl. Před tímhle úkolem jich bylo **959** z 32
 scénářů.
 
@@ -122,7 +122,7 @@ krok7 44 · krok8 54 · krok9 22 · krok10 21 · krok11 32 · krok12 25
 krok13 26 · krok14 15 · krok15 17 · krok16 11 · krok17 29 · krok19 32
 krok20 35 · krok21 26 · krok22 39 · krok23 25 · krok24 63 · krok25 26
 krok26 19 · krok27 27 · krok28 19 · krok29 19 · krok30 16 · krok31 8
-krok32 7 · krok33 38 · marketing1 20
+krok32 7 · krok33 41 · marketing1 20
 ```
 
 Dál prošlo: `node scripts/scenare.test.mjs` (všechno jde přečíst),
@@ -171,6 +171,24 @@ schválně rozbil zvlášť — vyndal jeden filtr, pustil celou sadu, vrátil:
 
 Pokaždé spadla **právě ta jedna**, která na ten filtr míří, a žádná
 jiná.
+
+### A jedna kontrola navíc — proti návratu
+
+`krok33` se ptá CELÉHO schématu `app`, jestli z něj ještě někdo čte
+práva z rolí nebo se ptá `roles.is_owner`. Přesně tam byla ta past:
+nálezy vyjmenovaly devět opsaných kopií, při práci se našly ještě dvě
+a ani jedna z nich by sama nespadla.
+
+Rozbil jsem ji taky, a dvěma způsoby — vrácením mrtvé
+`app.ziva_prava_role` a přepsáním `app.is_owner` zpátky na role.
+Spadla pokaždé, a pokaždé ta správná polovina.
+
+`app.ziva_prava_role` totiž **mizí**. Nikdo ji už nevolal — jediným
+volajícím byla `app.smi_pridelit`. Zůstat mohla; nezůstává, protože
+se tvářila jako autorita nad oprávněními, měla grant pro
+`authenticated` a počítala z tabulky, kterou už nikdo neudržuje. Kdo
+ji za rok najde, nemá jak poznat, že neplatí: vrátí vždycky nějakou
+odpověď a ta bude vypadat správně.
 
 ### A při tom se ukázalo tohle
 
