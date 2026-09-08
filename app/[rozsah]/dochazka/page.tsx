@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { getContext, getUser, hasAccess } from "@/lib/authz";
 import { denCesky } from "@/lib/upozorneni-text";
+import { jeVPraci } from "@/lib/dochazka-stav";
 import { hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import {
@@ -423,7 +424,8 @@ export default async function Dochazka({
 
   /* --- 2b. PÍCHAČKA A DNEŠNÍ STAV -------------------------------- */
 
-  // Moje poslední událost — podle ní se rozhoduje, co nabídnout.
+  // Moje poslední událost — pořád se hodí pro výpis, ale ROZHODOVAT
+  // podle ní, co nabídnout, byla chyba. Viz níž.
   const { data: posledniData, error: chybaPosledniData } = await supabase
     .from("attendance_events")
     .select("id, employee_id, kind, occurred_at, branch_id")
@@ -433,9 +435,77 @@ export default async function Dochazka({
   if (chybaPosledniData) throw new DotazSelhal("záznamy docházky", chybaPosledniData);
 
   const posledni = (posledniData?.[0] ?? null) as Udalost | null;
-  const jsemVPraci =
+
+  /*
+    JSEM V PRÁCI? JEDNA ODPOVĚĎ, NE TŘI.
+
+    Tahle obrazovka se dřív ptala na POSLEDNÍ UDÁLOST a nefiltrovala
+    ani storno, ani příchod uzavřený systémem. Po stornu příchodu tedy
+    pořád nabízela „Odchod“ a člověk si píchl odchod ke směně, která
+    neexistuje. Byla to jediná skutečná chyba v ostrém provozu.
+
+    Zdroj pravdy je `app.otevreny_prichod` (20260905010000): poslední
+    příchod bez odchodu, se `stornovano_kdy is null` a bez systémem
+    uzavřených. Ta funkce ale schválně nemá grant pro `authenticated`,
+    takže se na ni chodí průzorem `public.muj_den` (20260907010000) —
+    tentýž, na kterém stojí obrazovka Dnes. Dvě obrazovky, jedna
+    definice.
+
+    DOKUD PRŮZOR V DATABÁZI NENÍ, běží se po staru — ale s doplněnými
+    filtry, ať se to chová správně už teď. Pravidlo z nočního zadání:
+    obrazovka musí fungovat i tehdy, když její migrace ještě nedoběhla.
+
+    // ROZHODNOUT: přestávka. Po staru byl člověk mezi `break_start`
+    // a `break_end` veden jako NEPŘÍTOMNÝ, takže se mu nabízel Příchod
+    // — jenže ten by `app.pichnout` stejně odmítl, otevřený příchod má
+    // pořád. Nově je na přestávce veden jako přítomný a nabízí se mu
+    // Odchod. Je to podle mě správně, ale je to změna chování; otázka
+    // je v docs/hlaseni/otazky.md.
+  */
+  let jsemVPraci =
     posledni !== null &&
     (posledni.kind === "in" || posledni.kind === "break_end");
+
+  const { data: mujDen, error: chybaMujDen } = await supabase.rpc("muj_den", {
+    p_tenant: tenantId,
+  });
+  if (chybaMujDen && !funkceNeexistuje(chybaMujDen)) {
+    throw new DotazSelhal("můj den", chybaMujDen);
+  }
+  if (!chybaMujDen) {
+    jsemVPraci = mujDen?.[0]?.v_praci === true;
+  } else {
+    // Průzor ještě není nasazený. Aspoň dofiltrovat to, co chybělo —
+    // stornovaný ani systémem uzavřený příchod nesmí tvrdit „v práci“.
+    const { data: otevreny, error: chybaOtevreny } = await supabase
+      .from("attendance_events")
+      .select("id, occurred_at, business_date")
+      .eq("employee_id", ja.id)
+      .eq("kind", "in")
+      .is("stornovano_kdy", null)
+      .is("uzavreno_systemem", null)
+      .order("occurred_at", { ascending: false })
+      .limit(1);
+    if (chybaOtevreny) throw new DotazSelhal("záznamy docházky", chybaOtevreny);
+
+    const prichod = otevreny?.[0] ?? null;
+    let odchody: { business_date: string; occurred_at: string }[] = [];
+    if (prichod) {
+      const { data: odchodData, error: chybaOdchod } = await supabase
+        .from("attendance_events")
+        .select("business_date, occurred_at, stornovano_kdy")
+        .eq("employee_id", ja.id)
+        .eq("kind", "out")
+        .eq("business_date", prichod.business_date);
+      if (chybaOdchod) throw new DotazSelhal("záznamy docházky", chybaOdchod);
+      odchody = odchodData ?? [];
+    }
+    // Rozhodnutí samo je v lib/dochazka-stav.ts, aby se dalo zkoušet —
+    // scripts/dochazka-stav.test.mjs. Úvaha zavřená uvnitř serverové
+    // komponenty se nedá spustit, a přesně tak tahle chyba vydržela.
+    jsemVPraci = jeVPraci(prichod, odchody);
+  }
+
   const dalsiDruh = jsemVPraci ? "out" : "in";
 
   // Dnešní stav. Bez attendance.read vrátí politika jen vlastní řádky,

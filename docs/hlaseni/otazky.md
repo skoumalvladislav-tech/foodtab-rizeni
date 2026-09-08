@@ -86,3 +86,29 @@ nevadí — případně se vrchní položka přejmenuje na „Zprávy". Je to je
 slovo, kód se kvůli tomu měnit nemusí.
 
 **Stav:** sloučení zatím není hotové (viz hlášení k 7. 9.).
+
+---
+
+## 5. Je člověk na přestávce „v práci"?
+
+**Vzniklo:** 8. 9. 2026, při opravě docházky (`docs/velka-prace-2026-09-08.md`,
+A1). Otázku položil Code sám a **jde o provoz, ne o kód.**
+
+Obrazovka Docházka se dřív ptala na poslední událost, takže mezi
+`break_start` a `break_end` tvrdila, že v práci **nejsi** — a nabízela
+Příchod. Nově se ptá přes `app.otevreny_prichod` (jediný zdroj pravdy),
+který přestávky vůbec neřeší: dokud k příchodu nepřišel odchod, jsi
+v práci. Na přestávce se tedy nově nabízí **Odchod**.
+
+**Co jsem vybral:** to nové chování. Starý stav nabízel tlačítko, které
+by `app.pichnout` stejně odmítl — otevřený příchod pořád existuje
+a druhý příchod se nepustí. Nabízet lidem tlačítko, po kterém přijde
+chybová hláška, je horší.
+
+Přestávky se dnes navíc dají zadat **jen ručním panelem** vedoucího,
+takže se to číšníka na telefonu netýká.
+
+**Když to má být jinak:** řekni, jestli má člověk na přestávce vidět
+Příchod, Odchod, nebo nic — pak k tomu přibude vlastní tlačítko
+„Konec přestávky". V kódu je to označené `// ROZHODNOUT:`
+v `app/[rozsah]/dochazka/page.tsx`.
