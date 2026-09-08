@@ -226,6 +226,54 @@ rozbitým pravidlem.**
 
 ---
 
+## 7b. UVNITŘ AUTORIZAČNÍCH FUNKCÍ ŽÁDNÉ RLS NENÍ
+
+Ověřeno Šéfíkem 8. 9. 2026 na produkci i pokusem: nové tělo
+`has_permission`, které čte `employees` i `position_permissions`,
+proběhlo pod skutečným přihlášeným člověkem a vrátilo 56 řádků —
+**a prošlo i se zapnutým `force row level security`.**
+
+**Nestojí to na tom příznaku.** Autorizační funkce jsou
+`security definer` a vlastní je role `postgres`, která má v Supabase
+`rolbypassrls = true`. Uvnitř nich se RLS neuplatní **vůbec**, bez
+ohledu na to, jestli je FORCE zapnuté.
+
+Dobrá zpráva: **zacyklení přes politiku `employees_select` nehrozí**,
+i když ta politika volá `has_permission` a nové tělo bude číst
+`employees`. Politika se dovnitř funkce nedostane.
+
+**A teď to podstatné, protože je to horší než ta dobrá zpráva.**
+
+Pravidlo 3 z `CLAUDE.md` mluví o dvou obranných liniích — kontrola
+v aplikaci **a** RLS v databázi. **Uvnitř definer funkce ta druhá linie
+neexistuje.** Není zeslabená, není opatrnější: není tam.
+
+Z toho plyne jediné, ale platí bez výjimky:
+
+> **Nové tělo si musí VŠECHNO odfiltrovat samo.**
+
+Chybějící `and e.tenant_id = p_tenant` znamená, že se právo najde
+u člověka z **cizí firmy** — a nic to nechytí. Žádná politika, žádný
+grant. Ta chyba se neprojeví chybovou hláškou, projeví se tím, že
+někdo vidí cizí data.
+
+**Povinně tedy v novém těle `has_permission` i `has_access`:**
+
+| filtr | proč |
+|---|---|
+| `e.tenant_id = p_tenant` | jinak právo z cizí firmy |
+| `e.deleted_at is null` | jinak práva označeného smazaného |
+| `m.status = 'active'` u členství | jinak práva zrušeného členství |
+
+**A na každý z těch tří filtrů vlastní kontrola s cizí firmou, kterou
+je potřeba schválně rozbít** — postupně vyndat jeden filtr po druhém
+a přesvědčit se, že spadne právě ta kontrola, která na něj míří. Jedno
+společné „cizí firma nevidí nic" nestačí: shodí ho první chybějící
+filtr a o zbylých dvou neřekne nic. Je to tentýž případ jako u převodu,
+kde jedno rozbití neřeklo nic o souhrnné kontrole.
+
+---
+
 ## 8. Doporučené pořadí pro příště
 
 1. **Změřit ostrá data** třemi dotazy, dřív než se napíše řádek
@@ -238,6 +286,11 @@ rozbitým pravidlem.**
    dá věřit.
 4. Teprve pak migrace: tabulky a granty → audit → převod → jádro →
    devět opsaných kopií → aplikace.
+
+**Body 1–3 jsou hotové a bod 4 je hotový až po převod včetně**
+(migrace `20260908090000_zarazeni_prava`, nasazená 8. 9.). Zbývá
+**jádro → devět opsaných kopií → aplikace** — a u jádra platí
+oddíl 7b, který není doporučení.
 
 Je to jeden soustředěný den, ne odpoledne mezi ostatním. A jde to
 udělat naráz právě proto, že se od začátku drželo pravidlo 2
