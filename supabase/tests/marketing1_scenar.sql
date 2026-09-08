@@ -136,15 +136,28 @@ select pg_temp.check('marketing.manage smí schválit',
   (select stav from public.marketing_posts where id = :'post1') = 'schvaleno');
 
 \echo ''
-\echo '-- Vlastní role jen s marketing.manage, BEZ marketing.publish --'
+\echo '-- Vlastní zařazení jen s marketing.manage, BEZ marketing.publish --'
 
-insert into public.roles (tenant_id, key, label, is_owner)
-values (:'tenant', 'marketing_editor', 'Marketingový editor', false)
-returning id as r_editor \gset
+/*
+  Od přepnutí oprávnění na zařazení (20260909100000) nese sadu práv
+  ZAŘAZENÍ, ne role. Role by tu sadu nesla nadarmo a scénář by
+  zkoušel člověka bez jediného práva — a většina jeho tvrzení zní
+  "tohle nesmí", takže by zůstala zelená a přestala měřit.
+*/
+-- Zakládá superuživatel, stejně jako uživatele o kus níž: politika
+-- na `positions` chce settings.manage a tady se běží bez přihlášeného.
+reset role;
+select set_config('test.user_id', '', false);
 
-insert into public.role_permissions (role_id, permission_key) values
-  (:'r_editor', 'marketing.read'),
-  (:'r_editor', 'marketing.manage');
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'tenant', 'marketing_editor', 'Marketingový editor', 'vedeni', true)
+on conflict (tenant_id, key) do update set label = excluded.label
+returning id as z_editor \gset
+
+insert into public.position_permissions (tenant_id, position_id, permission_key) values
+  (:'tenant', :'z_editor', 'marketing.read'),
+  (:'tenant', :'z_editor', 'marketing.manage')
+on conflict do nothing;
 
 -- Uživatele zakládá superuživatel: do auth.users má role authenticated
 -- podle harnessu jen select, ne insert. Bez přepnutí tu scénář spadl
@@ -160,9 +173,14 @@ select user_id as editor from public.profiles where email = 'marketing-editor@fo
 -- (tady se neověřuje rozsah pobočky, ten už ověřil krok9/krok10 —
 -- tady jde jen o to, co smí a nesmí marketing.manage bez marketing.publish).
 insert into public.memberships (tenant_id, user_id, role_id, status, scope)
-values (:'tenant', :'editor', :'r_editor', 'active', 'tenant')
+values (:'tenant', :'editor', null, 'active', 'tenant')
 on conflict (tenant_id, user_id) do update
   set role_id = excluded.role_id, status = 'active', scope = excluded.scope;
+
+-- Zaměstnanecký záznam: práva po přepnutí visí na něm.
+insert into public.employees (tenant_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', :'editor', :'z_editor', 'Editor Marketingu', 'ico')
+on conflict (tenant_id, user_id) do update set position_id = excluded.position_id;
 
 set role authenticated;
 
