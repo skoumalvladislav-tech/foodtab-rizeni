@@ -1,0 +1,321 @@
+{
+  "name": "FoodTab Marketing — hlídač renderů",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Hlídač renderů\n\nUdálost `render.submitted` znamená „render odešel k poskytovateli“.\nWorkflow pak každých 30 s šťouchne do fronty aplikace, dokud render\nnedoběhne — nejvýš **20×** (tedy zhruba 10 minut).\n\nProč šťouchat frontu a ne poskytovatele: stav renderu si vede aplikace\n(`render_jobs`), poskytovatel ho hlásí vlastním webhookem na\n`/api/v1/webhooky/shotstack`. Fronta jen dořeší, co z toho plyne.\n\n**Odpověď odchází hned** za webhookem — execution nesmí držet HTTP\nspojení aplikace deset minut.\n\nPočítadlo je uzel Set nad `$runIndex`, který se v cyklu zvyšuje.\n\nProměnné: `FOODTAB_MARKETING_URL`, `FOODTAB_WEBHOOK_SECRET`,\n`FOODTAB_CRON_SECRET`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "80ab382d-5ffa-4a5c-9730-bcd87b3974ff",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "foodtab-marketing/render.submitted",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "05c8e448-d529-40d2-a4ee-a0ce79e8b9e9",
+      "name": "Událost render.submitted",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        0
+      ],
+      "webhookId": "1c1053e7-3320-4ded-851c-39177c57afa8"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Ověří podpis příchozího webhooku z aplikace.\n// Podpis: hex(HMAC-SHA256(FOODTAB_WEBHOOK_SECRET, timestamp + \".\" + telo)),\n// okno 5 minut proti přehrání — stejně jako overitPodpisWebhooku v aplikaci.\n//\n// POZOR: uzel Webhook tělo rozparsuje a my ho tady serializujeme znovu.\n// Funguje to, protože aplikace posílá JSON.stringify bez mezer a Node\n// zachová pořadí klíčů. Kdyby aplikace tělo někdy formátovala jinak,\n// zapněte v uzlu Webhook volbu Raw Body a počítejte HMAC nad ním.\nconst crypto = require('crypto');\nconst vstup = $input.first().json;\nconst hlavicky = vstup.headers || {};\nconst secret = $env.FOODTAB_WEBHOOK_SECRET;\nif (!secret) throw new Error('Chybí proměnná prostředí FOODTAB_WEBHOOK_SECRET — bez ní nejde podpis ověřit.');\nconst ts = String(hlavicky['x-foodtab-timestamp'] || '');\nconst podpis = String(hlavicky['x-foodtab-signature'] || '');\nif (!ts || !podpis) throw new Error('Chybí hlavička X-FoodTab-Timestamp nebo X-FoodTab-Signature.');\nif (!Number.isFinite(Number(ts)) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) {\n  throw new Error('Časová značka je mimo okno 5 minut (nesynchronizované hodiny nebo přehraný požadavek).');\n}\nconst telo = JSON.stringify(vstup.body || {});\nconst ocekavany = crypto.createHmac('sha256', secret).update(ts + '.' + telo).digest('hex');\nconst a = Buffer.from(ocekavany, 'utf8');\nconst b = Buffer.from(podpis, 'utf8');\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error('Neplatný podpis webhooku.');\nconst zprava = vstup.body || {};\nreturn [{ json: { typ: zprava.type || '', klicUdalosti: String(hlavicky['x-foodtab-idempotency-key'] || zprava.idempotencyKey || ''), organizationId: zprava.organizationId || null, payload: zprava.payload || {} } }];"
+      },
+      "id": "71326a52-44c2-4dca-8b60-9431eb141194",
+      "name": "Ověřit podpis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ executionId: $execution.id, ok: true }) }}",
+        "options": {}
+      },
+      "id": "241cec02-6447-4ba5-a219-2db79aa0d7cf",
+      "name": "Přijato",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "93c3900c-610c-4152-aff3-0b26620e55e6",
+      "name": "Čekat 30 s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        520,
+        0
+      ],
+      "webhookId": "f5f09b7c-f245-4acd-b134-0a01b58cce7f"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/ulohy/zpracovat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Cron-Secret",
+              "value": "={{ $env.FOODTAB_CRON_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ duvod: \"render-monitor\" }) }}"
+      },
+      "id": "fbd3206a-9911-4f80-82cc-447b1e3c39da",
+      "name": "Zpracovat frontu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6235f6d7-90bb-43c2-bf40-28fd2aac3dfa",
+              "name": "pokus",
+              "value": "={{ $runIndex + 1 }}",
+              "type": "number"
+            },
+            {
+              "id": "e1034e8d-168d-4c5a-80f4-e12b9f04b2ab",
+              "name": "cekaRenderu",
+              "value": "={{ $json.body && $json.body.rendery ? $json.body.rendery.pending : 0 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "33d4d740-03e0-4e00-aada-02dddb7afd47",
+      "name": "Počítadlo",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "86dcc3bd-fb80-45fa-85eb-6336b4ea1362",
+              "leftValue": "={{ $json.cekaRenderu }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            },
+            {
+              "id": "0773448e-d1bc-4e9f-bae6-7e11790a52d4",
+              "leftValue": "={{ $json.pokus }}",
+              "rightValue": 20,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "41371f80-27e3-4bb4-8e41-cf3238d1bf88",
+      "name": "Renderuje se ještě?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d9b0a9bc-70ea-4186-a6ee-81d5c0ba7930",
+              "name": "hotovo",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f73629a4-5bee-4bd6-9444-3dbf7b4c16c4",
+              "name": "duvod",
+              "value": "={{ $json.cekaRenderu > 0 ? 'vyčerpáno 20 pokusů, render pořád běží' : 'render doběhl' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e7cfdcc5-b395-486f-b9b5-dacd8011197e",
+      "name": "Konec sledování",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1400,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Událost render.submitted": {
+      "main": [
+        [
+          {
+            "node": "Ověřit podpis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ověřit podpis": {
+      "main": [
+        [
+          {
+            "node": "Přijato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Přijato": {
+      "main": [
+        [
+          {
+            "node": "Čekat 30 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Čekat 30 s": {
+      "main": [
+        [
+          {
+            "node": "Zpracovat frontu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zpracovat frontu": {
+      "main": [
+        [
+          {
+            "node": "Počítadlo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Počítadlo": {
+      "main": [
+        [
+          {
+            "node": "Renderuje se ještě?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Renderuje se ještě?": {
+      "main": [
+        [
+          {
+            "node": "Čekat 30 s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Konec sledování",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

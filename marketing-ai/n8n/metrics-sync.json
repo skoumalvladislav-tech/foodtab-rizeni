@@ -1,0 +1,316 @@
+{
+  "name": "FoodTab Marketing — denní metriky",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Denní stažení metrik\n\nKaždý den v **06:00** (pásmo z nastavení n8n — `Europe/Prague`)\nzavolá podepsaně `POST {URL}/api/v1/analytika/synchronizovat`.\n\nAplikace si sama projde publikace, u kterých má smysl ptát se\nposkytovatele na dosah a reakce, a uloží `metric_snapshots`.\nn8n nezná ani jedno číslo — jen řekne „je čas“.\n\nRáno, ne v noci: metriky za včerejšek jsou u Meta k dispozici\ns odstupem a v šest už jsou.\n\nKdyž volání selže, jde upozornění na `NOTIFY_WEBHOOK_URL`.\n\nProměnné: `FOODTAB_MARKETING_URL`, `FOODTAB_WEBHOOK_SECRET`,\n`NOTIFY_WEBHOOK_URL`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "1e04c533-fa73-45a7-8818-05303db8276c",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 6,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "e6937c61-c04b-4b27-bc8b-7646781e2467",
+      "name": "Denně 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Sestaví podepsaný požadavek na /api/v1/analytika/synchronizovat.\nconst crypto = require('crypto');\nconst vstup = $input.first().json;\nconst secret = $env.FOODTAB_WEBHOOK_SECRET;\nif (!secret) throw new Error('Chybí proměnná prostředí FOODTAB_WEBHOOK_SECRET.');\nconst telo = JSON.stringify({ duvod: 'n8n metrics-sync', den: new Date().toISOString().slice(0, 10) });\nconst klic = 'metrics-sync-' + new Date().toISOString().slice(0, 10);\nconst doplnky = {};\nconst ts = String(Math.floor(Date.now() / 1000));\nconst podpis = crypto.createHmac('sha256', secret).update(ts + '.' + telo).digest('hex');\nreturn [{ json: { ...doplnky, telo, ts, podpis, klic } }];"
+      },
+      "id": "83b74556-5705-4b80-b45a-5bb6042a8ee5",
+      "name": "Podepsat požadavek",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/analytika/synchronizovat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-FoodTab-Signature",
+              "value": "={{ $json.podpis }}"
+            },
+            {
+              "name": "X-FoodTab-Timestamp",
+              "value": "={{ $json.ts }}"
+            },
+            {
+              "name": "X-FoodTab-Idempotency-Key",
+              "value": "={{ $json.klic }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.telo }}"
+      },
+      "id": "7c36af7e-bf97-4e74-a738-fcc2e8c9b05b",
+      "name": "Synchronizovat metriky",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "43766f06-15e5-40fb-bbfe-3f3affb012ce",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "365f9236-7cd6-4b4f-b4d9-b8863438a333",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "258006e9-9c25-4d1e-aa53-f612e671665c",
+      "name": "Prošlo to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "28cd99b4-23b0-400c-8196-addc7295db8d",
+              "name": "aktualizovano",
+              "value": "={{ $json.body && $json.body.aktualizovano != null ? $json.body.aktualizovano : 0 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7d928764-ceae-4428-aba0-282065e31589",
+      "name": "Shrnutí",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        740,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "73fafbbb-f768-4bc6-858f-3f16e1c4f158",
+              "leftValue": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "ab823c55-4087-4ef2-83b3-b51c7dda6b90",
+      "name": "Je kam poslat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        740,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ text: \"FoodTab Marketing — denní stažení metrik selhalo (HTTP \" + $json.statusCode + \").\", statusCode: $json.statusCode }) }}"
+      },
+      "id": "6818ed53-6eed-42ae-9b39-a29bd38b4b17",
+      "name": "Upozornit na chybu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Denně 06:00": {
+      "main": [
+        [
+          {
+            "node": "Podepsat požadavek",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Podepsat požadavek": {
+      "main": [
+        [
+          {
+            "node": "Synchronizovat metriky",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Synchronizovat metriky": {
+      "main": [
+        [
+          {
+            "node": "Prošlo to?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prošlo to?": {
+      "main": [
+        [
+          {
+            "node": "Shrnutí",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Je kam poslat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Je kam poslat?": {
+      "main": [
+        [
+          {
+            "node": "Upozornit na chybu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

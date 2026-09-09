@@ -1,0 +1,2272 @@
+openapi: 3.1.0
+info:
+  title: FoodTab Marketing AI — API v1
+  version: "1.0.0"
+  summary: Rozhraní pro n8n, FoodTab Řízení, cron a příchozí webhooky.
+  description: >
+    Smlouva rozhraní v1. Vlastní obrazovky aplikace tohle API nepoužívají —
+    čtou data v server komponentách a zapisují server actions. API v1 je tu
+    pro cizí systémy a pro automatizaci. Část cest je zatím jen smlouva a
+    v aplikaci je obslouží obrazovka; u každé takové je to napsané
+    v popisu. Chyby vracejí objekt Chyba s českou hláškou a nikdy
+    neobsahují tajemství. Peníze jsou celé haléře jako integer, časy jsou
+    v ISO 8601 s pásmem, provozní data jako date.
+  contact:
+    name: FoodTab
+    url: https://foodtab.cz
+servers:
+  - url: https://marketing.foodtab.cz
+    description: Ostrý provoz
+  - url: http://localhost:3000
+    description: Vývoj
+tags:
+  - name: Provoz
+    description: Zdraví aplikace a fronta úloh.
+  - name: Média
+    description: Nahrávání a podávání souborů.
+  - name: Menu
+    description: Jídelní lístky, import a potvrzení.
+  - name: Obsah
+    description: Návrhy, verze, schvalování, render a plánování.
+  - name: Publikace
+    description: Zveřejněné příspěvky a opakování selhaných úloh.
+  - name: Integrace
+    description: Katalog poskytovatelů, volba a připojené účty.
+  - name: Webhooky
+    description: Příchozí podepsané události.
+  - name: Analytika
+    description: Metriky publikací.
+paths:
+  /api/v1/health:
+    get:
+      tags:
+        - Provoz
+      operationId: zdravi
+      summary: Stav aplikace a databáze
+      description: Bez přihlášení a bez tajemství. Vrací režim, druh databáze a počet položek katalogu. Slouží hlídači v n8n a monitoringu.
+      security: []
+      responses:
+        "200":
+          description: Aplikace i databáze odpovídají.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Zdravi"
+        "503":
+          description: Databáze neodpovídá.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+  /api/v1/ulohy/zpracovat:
+    post:
+      tags:
+        - Provoz
+      operationId: zpracovatUlohy
+      summary: Zpracovat frontu (rendery, splatné publikace, opakování)
+      description: Volá cron, n8n nebo přihlášený uživatel s právem content.publish. Fronta si sama ověří, že schválení pořád platí (otisk verze), a teprve pak zavolá publisher. Volání je bezpečné opakovat — úlohy mají idempotentní klíč.
+      security:
+        - cronSecret: []
+        - cookieSession: []
+      parameters:
+        - name: automatizace
+          in: query
+          required: false
+          description: Hodnota 1 navíc spustí zapnuté automatizace. Aplikace to přijme jen od cronu, ne od přihlášeného uživatele.
+          schema:
+            type: string
+            enum:
+              - "1"
+      responses:
+        "200":
+          description: Fronta proběhla.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VysledekFronty"
+        "401":
+          $ref: "#/components/responses/Nepovoleno"
+  /api/v1/media:
+    post:
+      tags:
+        - Média
+      operationId: nahratMedium
+      summary: Nahrát soubor do knihovny médií
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Shodné soubory ve stejném rozsahu se rozpoznají podle otisku sha256 a vrátí se odkaz na původní médium místo druhé kopie.
+      security:
+        - cookieSession: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - soubor
+                - organizationId
+              properties:
+                soubor:
+                  type: string
+                  format: binary
+                  description: Obrázek, video nebo dokument. Strop velikosti a povolené typy hlídá aplikace.
+                organizationId:
+                  type: string
+                  format: uuid
+                venueId:
+                  type: string
+                  format: uuid
+                  description: Prázdné znamená médium celé organizace.
+                title:
+                  type: string
+                description:
+                  type: string
+                collectionKey:
+                  type: string
+                  description: Klíč sbírky, do které soubor patří.
+      responses:
+        "200":
+          description: Soubor uložen.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  duplicate:
+                    type: string
+                    format: uuid
+                    description: Vyplněné, když šlo o shodný soubor a vrací se původní médium.
+        "400":
+          $ref: "#/components/responses/SpatnyPozadavek"
+        "401":
+          $ref: "#/components/responses/Nepovoleno"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/media/{id}/soubor:
+    get:
+      tags:
+        - Média
+      operationId: podatSoubor
+      summary: Podat soubor média podle podepsaného odkazu
+      description: Cesta na disku se nikdy nebere z adresy, bere se z databáze podle ID. Odkaz platí do času exp a musí mít platný podpis sig. Bez nich se soubor nepodá ani přihlášenému uživateli.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: exp
+          in: query
+          required: true
+          description: Unixový čas v sekundách, do kdy odkaz platí.
+          schema:
+            type: string
+        - name: sig
+          in: query
+          required: true
+          description: Podpis odkazu.
+          schema:
+            type: string
+        - name: stahnout
+          in: query
+          required: false
+          description: Hodnota 1 pošle soubor jako přílohu ke stažení.
+          schema:
+            type: string
+            enum:
+              - "1"
+      responses:
+        "200":
+          description: Obsah souboru.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "403":
+          description: Neplatný nebo prošlý odkaz.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/menu:
+    post:
+      tags:
+        - Menu
+      operationId: ulozitMenu
+      summary: Založit nebo přepsat jídelní lístek
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Menu vzniká vždy jako koncept. Potvrzuje ho člověk zvlášť.
+      security:
+        - cookieSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MenuVstup"
+      responses:
+        "200":
+          description: Menu uloženo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/SpatnyPozadavek"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/menu/import:
+    post:
+      tags:
+        - Menu
+      operationId: importovatMenu
+      summary: Rozpoznat menu z textu nebo ze souboru
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Text se rozpozná deterministicky bez modelu. Fotografie a PDF potřebují připojený AI nástroj se schopností menu.ocr — jinak se vrátí srozumitelné varování, nikdy vymyšlená data. Rozpoznané položky, u kterých si aplikace není jistá, mají needs_review a blokují potvrzení.
+      security:
+        - cookieSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - organizationId
+                - venueId
+                - text
+              properties:
+                organizationId:
+                  type: string
+                  format: uuid
+                venueId:
+                  type: string
+                  format: uuid
+                text:
+                  type: string
+                  description: Menu vložené jako text.
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - organizationId
+                - venueId
+                - soubor
+              properties:
+                organizationId:
+                  type: string
+                  format: uuid
+                venueId:
+                  type: string
+                  format: uuid
+                soubor:
+                  type: string
+                  format: binary
+                  description: Fotografie menu nebo PDF.
+      responses:
+        "200":
+          description: Rozpoznaný návrh menu, zatím neuložený.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MenuRozpoznani"
+        "400":
+          $ref: "#/components/responses/SpatnyPozadavek"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/menu/{id}/potvrdit:
+    post:
+      tags:
+        - Menu
+      operationId: potvrditMenu
+      summary: Potvrdit jídelní lístek
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Potvrzení projde jen tehdy, když má menu aspoň jednu položku, každá položka má cenu, žádná nečeká na kontrolu a menu má datum platnosti. Jinak se vrátí seznam problémů a stav se nemění. Fakta pro AI se berou jen z potvrzeného menu.
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      responses:
+        "200":
+          description: Výsledek potvrzení.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  problemy:
+                    type: array
+                    items:
+                      type: string
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/obsah:
+    post:
+      tags:
+        - Obsah
+      operationId: vytvoritObsah
+      summary: Založit obsah
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Vznikne položka ve stavu draft a k ní první verze. Brief je data, ne instrukce pro model.
+      security:
+        - cookieSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NovyObsah"
+      responses:
+        "200":
+          description: Obsah založen.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  itemId:
+                    type: string
+                    format: uuid
+                  versionId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/SpatnyPozadavek"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/obsah/{id}:
+    get:
+      tags:
+        - Obsah
+      operationId: nacistObsah
+      summary: Přečíst obsah včetně aktuální verze
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action).
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      responses:
+        "200":
+          description: Obsah a jeho aktuální verze.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item:
+                    $ref: "#/components/schemas/ContentItem"
+                  version:
+                    $ref: "#/components/schemas/ContentVersion"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/obsah/{id}/navrh:
+    post:
+      tags:
+        - Obsah
+      operationId: navrhnoutObsah
+      summary: Nechat AI navrhnout varianty textu a storyboard
+      description: Implementováno v aplikaci (přihlášení, X-Cron-Secret nebo podpis HMAC z n8n). Volá ji workflow content-generation.json v n8n, proto přijímá i podpis HMAC. Model dostane jen brief, brand kit a potvrzené menu — nikdy mzdy, docházku, kontakty ani zálohy. Návrh se uloží jako nová verze, publikovat se nedá bez schválení člověkem. Když je připojený jen demo návrhář, je výsledek viditelně označený jako mock.
+      security:
+        - cookieSession: []
+        - webhookHmac: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contentItemId:
+                  type: string
+                  format: uuid
+                  description: Nepovinné, musí souhlasit s ID v cestě.
+                duvod:
+                  type: string
+      responses:
+        "200":
+          description: Návrh vytvořen.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versionId:
+                    type: string
+                    format: uuid
+                  isMock:
+                    type: boolean
+                  navrh:
+                    $ref: "#/components/schemas/AiNavrh"
+        "401":
+          $ref: "#/components/responses/Nepovoleno"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/obsah/{id}/prepracovat:
+    post:
+      tags:
+        - Obsah
+      operationId: prepracovatObsah
+      summary: Přepracovat jen dotčenou část podle zpětné vazby
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Nepřepisuje celý návrh, mění jen to, na co zpětná vazba míří. Vzniká nová verze, takže dřívější schválení zaniká.
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - zpetnaVazba
+              properties:
+                zpetnaVazba:
+                  type: object
+                  description: Co změnit a proč. Validuje se schématem AiZpetnaVazba.
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Přepracováno.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versionId:
+                    type: string
+                    format: uuid
+                  navrh:
+                    $ref: "#/components/schemas/AiNavrh"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/obsah/{id}/verze:
+    post:
+      tags:
+        - Obsah
+      operationId: novaVerze
+      summary: Uložit ruční úpravu jako novou verzi
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Verze se nikdy nepřepisuje. Nová verze má nový otisk, a tím zaniká schválení navázané na ten starý — hlídá to spoušť v databázi, ne jen aplikace.
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - changes
+                - note
+              properties:
+                changes:
+                  type: object
+                  description: Změněné části verze (brief, texts, media_asset_ids, cover_asset_id, storyboard, inputs).
+                  additionalProperties: true
+                note:
+                  type: string
+                  description: Poznámka ke změně. Ukáže se v historii verzí.
+      responses:
+        "200":
+          description: Verze uložena.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versionId:
+                    type: string
+                    format: uuid
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/obsah/{id}/schvaleni:
+    post:
+      tags:
+        - Obsah
+      operationId: pozadatOSchvaleni
+      summary: Poslat obsah ke schválení
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Žádost si zapamatuje otisk verze. Když se obsah pak změní, žádost se označí jako superseded a schválení už neplatí. Aplikace zároveň upozorní ty, kdo mají právo schvalovat.
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                summary:
+                  type: string
+                  description: Shrnutí pro schvalovatele.
+      responses:
+        "200":
+          description: Žádost založena.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestId:
+                    type: string
+                    format: uuid
+        "400":
+          description: Obsah není připraven ke schválení (chybí text, médium nebo cena).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/schvaleni/{id}/rozhodnout:
+    post:
+      tags:
+        - Obsah
+      operationId: rozhodnoutOSchvaleni
+      summary: Schválit, vrátit k úpravě nebo zamítnout
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Rozhodnutí se ukládá i s otiskem verze, na kterou míří. Schválit jde jen verzi, kterou schvalovatel opravdu viděl — když se mezitím změnila, rozhodnutí neprojde.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID žádosti o schválení.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - decision
+              properties:
+                decision:
+                  type: string
+                  enum:
+                    - approved
+                    - rejected
+                    - changes_requested
+                comment:
+                  type: string
+      responses:
+        "200":
+          description: Rozhodnuto.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          description: Verze se mezitím změnila, rozhodnutí neplatí.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/obsah/{id}/render:
+    post:
+      tags:
+        - Obsah
+      operationId: spustitRender
+      summary: Vyrobit obrázek nebo video pro jednu variantu
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Zakládá úlohu ve frontě s idempotentním klíčem, takže druhé volání nevyrobí druhý soubor. Hotový výsledek se uloží jako médium a připojí k variantě.
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - variantId
+              properties:
+                variantId:
+                  type: string
+                  format: uuid
+                force:
+                  type: boolean
+                  description: Vyrobit znovu, i když už výsledek existuje.
+      responses:
+        "200":
+          description: Úloha renderu založena nebo nalezena.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenderJob"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/obsah/{id}/naplanovat:
+    post:
+      tags:
+        - Obsah
+      operationId: naplanovatObsah
+      summary: Naplánovat zveřejnění
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Datum a čas jsou hodina na zdi provozovny bez pásma — pásmo dodá provozovna, jinak organizace, jinak Europe/Prague, a převod dělá databáze. Nikdy se neposílá okamžik spočítaný v prohlížeči. Naplánovat jde jen schválenou verzi.
+      security:
+        - cookieSession: []
+      parameters:
+        - $ref: "#/components/parameters/IdVCeste"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - datum
+                - cas
+              properties:
+                datum:
+                  type: string
+                  format: date
+                  examples:
+                    - 2026-09-12
+                cas:
+                  type: string
+                  description: Hodina na zdi provozovny ve tvaru HH:MM.
+                  examples:
+                    - "18:30"
+                channels:
+                  type: array
+                  items:
+                    type: string
+                    enum:
+                      - instagram
+                      - facebook
+      responses:
+        "200":
+          description: Naplánováno.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobIds:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+                  scheduledAt:
+                    type: string
+                    format: date-time
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Verze není schválená, nebo chybí připojený účet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/publikace:
+    get:
+      tags:
+        - Publikace
+      operationId: seznamPublikaci
+      summary: Seznam zveřejněných příspěvků a jejich úloh
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Demo publikace jsou vždy viditelně odlišené příznakem is_mock a stavem published_mock.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: venueId
+          in: query
+          required: false
+          description: Rozsah z prohlížeče je návrh, ne oprávnění — aplikace ho vždy ověří proti členství přihlášeného uživatele.
+          schema:
+            type: string
+            format: uuid
+        - name: stav
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - scheduled
+              - queued
+              - publishing
+              - published
+              - published_mock
+              - manual_export
+              - failed
+              - dead_letter
+              - cancelled
+        - name: od
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: do
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Seznam úloh publikace.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PublishJob"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/publikace/{id}/zopakovat:
+    post:
+      tags:
+        - Publikace
+      operationId: zopakovatPublikaci
+      summary: Zkusit selhanou publikaci znovu
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Jen nastaví úlohu zpátky do fronty; samotné zveřejnění dělá fronta, a ta si znovu ověří, že otisk schválené verze pořád sedí. Opakovat jde jen úlohu ve stavu failed, dead_letter nebo manual_export.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID úlohy publikace.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Úloha vrácena do fronty.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "400":
+          description: Úloha není ve stavu, který jde opakovat.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/providery/katalog:
+    get:
+      tags:
+        - Integrace
+      operationId: katalogProvideru
+      summary: Katalog nástrojů, které FoodTab umí nabídnout
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Řádek v katalogu sám o sobě nic nepřipojuje. Pole implementation_status říká pravdu o tom, jestli adaptér v kódu opravdu existuje — planned znamená, že zatím ne.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: kategorie
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - ai_generation
+              - image_rendering
+              - video_rendering
+              - voiceover
+              - workflow_automation
+              - social_publishing
+              - analytics
+              - notifications
+              - external_storage
+              - menu_source
+      responses:
+        "200":
+          description: Položky katalogu.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderCatalogEntry"
+        "401":
+          $ref: "#/components/responses/Nepovoleno"
+  /api/v1/providery/volba:
+    post:
+      tags:
+        - Integrace
+      operationId: vybratProvidera
+      summary: Vybrat nástroj pro danou kategorii
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Volba není připojení — vrací se v needs, co ještě chybí, aby nástroj šel použít. Volba provozovny přebíjí volbu organizace.
+      security:
+        - cookieSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - organizationId
+                - providerKey
+              properties:
+                organizationId:
+                  type: string
+                  format: uuid
+                venueId:
+                  type: string
+                  format: uuid
+                  description: Prázdné znamená volbu za celou organizaci.
+                providerKey:
+                  type: string
+      responses:
+        "200":
+          description: Volba uložena.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connectionId:
+                    type: string
+                    format: uuid
+                  needs:
+                    type: string
+                    enum:
+                      - none
+                      - api_key
+                      - oauth
+                      - webhook_secret
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/integrace:
+    get:
+      tags:
+        - Integrace
+      operationId: seznamIntegraci
+      summary: Připojené účty organizace
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Nikdy nevrací tokeny ani klíče — jen bezpečná metadata o účtu, stav a čas posledního testu. Tajemství leží šifrovaná v oddělené tabulce, kam role authenticated nevidí vůbec.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: organizationId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Seznam připojení.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IntegrationConnection"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/integrace/{id}/test:
+    post:
+      tags:
+        - Integrace
+      operationId: otestovatIntegraci
+      summary: Otestovat jedno připojení
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Zavolá testConnection adaptéru a uloží výsledek do last_test_at a last_test_ok. Chybová hláška se ukáže tak, jak přišla od služby, ale nikdy neobsahuje token.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID připojení.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Výsledek testu.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/integrace/{id}:
+    delete:
+      tags:
+        - Integrace
+      operationId: odpojitIntegraci
+      summary: Odpojit účet
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Připojení se označí jako revoked a tajemství se smaže. Historie publikací zůstává — mazání připojení není mazání toho, co se přes něj zveřejnilo.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID připojení.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Odpojeno.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "403":
+          $ref: "#/components/responses/Zakazano"
+        "404":
+          $ref: "#/components/responses/Nenalezeno"
+  /api/v1/integrace/test-vse:
+    post:
+      tags:
+        - Integrace
+      operationId: otestovatVsechnaPripojeni
+      summary: Otestovat všechna připojení organizace
+      description: Implementováno v aplikaci (přihlášení, X-Cron-Secret nebo podpis HMAC z n8n). Volá ji hodinový hlídač connection-health.json v n8n, proto přijímá i podpis HMAC. Smyslem je zachytit vypršelý token dřív, než se o něj opře publikace.
+      security:
+        - cookieSession: []
+        - webhookHmac: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organizationId:
+                  type: string
+                  format: uuid
+                  description: Prázdné u podepsaného volání znamená všechny organizace.
+                duvod:
+                  type: string
+      responses:
+        "200":
+          description: Výsledky testů.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  otestovano:
+                    type: integer
+                  problemy:
+                    type: array
+                    description: Klíče připojení, která hlásí potíž.
+                    items:
+                      type: string
+                  vysledky:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        connectionId:
+                          type: string
+                          format: uuid
+                        providerKey:
+                          type: string
+                        ok:
+                          type: boolean
+                        message:
+                          type: string
+        "401":
+          $ref: "#/components/responses/Nepovoleno"
+  /api/v1/meta/oauth/start:
+    get:
+      tags:
+        - Integrace
+      operationId: metaOauthStart
+      summary: Zahájit připojení účtu Meta
+      description: Přesměruje na přihlášení u Meta. Náhodný state se podepisuje a drží v httpOnly cookie — chrání proti CSRF a proti záměně účtu. Bez META_APP_ID se uživatel vrátí s vysvětlením, co chybí, a zůstává ruční publikace.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: connection
+          in: query
+          required: true
+          description: ID připojení, ke kterému se účet váže.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "302":
+          description: Přesměrování na Meta, nebo zpět do Integrací s vysvětlením.
+  /api/v1/meta/oauth/callback:
+    get:
+      tags:
+        - Integrace
+      operationId: metaOauthCallback
+      summary: Návrat z přihlášení u Meta
+      description: Ověří state, vymění kód za dlouhodobý token, uloží ho šifrovaně a načte dostupné stránky a účty Instagramu. Token nikdy neopustí server.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Přesměrování zpět do Integrací s výsledkem.
+  /api/v1/webhooky/{zdroj}:
+    post:
+      tags:
+        - Webhooky
+      operationId: prijmoutWebhook
+      summary: Přijmout podepsanou událost zvenčí
+      description: Podpis se ověřuje před zpracováním. Každá událost se uloží idempotentně podle dvojice zdroj a externí ID, takže druhé doručení téže události se přijme a nezpracuje podruhé. Neplatný podpis vrátí 401 a přesto se zapíše, aby byl pokus vidět.
+      security:
+        - webhookHmac: []
+      parameters:
+        - name: zdroj
+          in: path
+          required: true
+          description: Odkud událost přišla.
+          schema:
+            type: string
+            enum:
+              - shotstack
+              - n8n
+              - meta
+              - foodtab
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/WebhookN8n"
+                - $ref: "#/components/schemas/FoodtabMenuEvent"
+                - type: object
+                  description: Tělo od Shotstack nebo od Meta v jejich vlastním tvaru.
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Přijato a zpracováno, nebo rozpoznáno jako duplicita.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  duplicate:
+                    type: boolean
+                  result:
+                    type: string
+        "400":
+          description: Tělo není JSON, nebo chybí identifikátor události.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+        "401":
+          description: Neplatný podpis nebo časová značka mimo okno 5 minut.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+        "404":
+          description: Neznámý zdroj.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+    get:
+      tags:
+        - Webhooky
+      operationId: overitWebhook
+      summary: Ověření webhooku (Meta)
+      description: Meta si adresu ověřuje dotazem s hub.challenge. Ostatní zdroje odpovědí jen připomenou, že události chodí metodou POST.
+      security: []
+      parameters:
+        - name: zdroj
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - shotstack
+              - n8n
+              - meta
+              - foodtab
+        - name: hub.mode
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: hub.verify_token
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: hub.challenge
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Vrácená výzva, nebo poznámka.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "403":
+          description: Ověření selhalo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chyba"
+  /api/v1/analytika:
+    get:
+      tags:
+        - Analytika
+      operationId: nacistAnalytiku
+      summary: Metriky publikací
+      description: Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action). Vrací poslední známý snímek metrik. Odhad je vždy označený příznakem is_estimate a nikdy se nemíchá s číslem od poskytovatele.
+      security:
+        - cookieSession: []
+      parameters:
+        - name: venueId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: od
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: do
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Metriky.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MetricSnapshot"
+        "403":
+          $ref: "#/components/responses/Zakazano"
+  /api/v1/analytika/synchronizovat:
+    post:
+      tags:
+        - Analytika
+      operationId: synchronizovatMetriky
+      summary: Stáhnout metriky od poskytovatele
+      description: Implementováno v aplikaci (přihlášení, X-Cron-Secret nebo podpis HMAC z n8n). Volá ji denní workflow metrics-sync.json v n8n, proto přijímá i podpis HMAC. Projde publikace, u kterých má smysl se ptát, a uloží nový snímek metrik.
+      security:
+        - cookieSession: []
+        - webhookHmac: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organizationId:
+                  type: string
+                  format: uuid
+                venueId:
+                  type: string
+                  format: uuid
+                den:
+                  type: string
+                  format: date
+                duvod:
+                  type: string
+      responses:
+        "200":
+          description: Hotovo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aktualizovano:
+                    type: integer
+                    description: Počet publikací, u kterých přibyl nový snímek.
+        "401":
+          $ref: "#/components/responses/Nepovoleno"
+components:
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: ftm_demo
+      description: Přihlášený uživatel. V demo režimu podepsaná cookie ftm_demo, v ostrém provozu cookie Supabase Auth sb-<projekt>-auth-token. Na přístup se vždycky ptá jedno místo, funkce marketing.has_access, a druhou obrannou linií je Row Level Security v databázi.
+    cronSecret:
+      type: apiKey
+      in: header
+      name: X-Cron-Secret
+      description: Servisní volání z cronu nebo z n8n. Hodnota je CRON_SECRET aplikace, a když není nastavený, APP_SECRET. Porovnává se v konstantním čase.
+    webhookHmac:
+      type: apiKey
+      in: header
+      name: X-FoodTab-Signature
+      description: Podpis hex(HMAC-SHA256(secret, timestamp + "." + telo)) doplněný hlavičkami X-FoodTab-Timestamp a X-FoodTab-Idempotency-Key. Značka starší nebo novější než 5 minut se odmítne. Klíč se nikdy neukládá v čitelné podobě.
+  parameters:
+    IdVCeste:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Nepovoleno:
+      description: Chybí přihlášení nebo servisní tajemství.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Chyba"
+    Zakazano:
+      description: Na tuhle akci nemáte oprávnění.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Chyba"
+    Nenalezeno:
+      description: Záznam neexistuje, nebo do něj nevidíte.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Chyba"
+    SpatnyPozadavek:
+      description: Chybný nebo neúplný požadavek.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Chyba"
+  schemas:
+    Chyba:
+      type: object
+      description: Jediný tvar chyby v celém API. Hláška je česká a nikdy neobsahuje tajemství ani vnitřní cesty.
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          examples:
+            - Na tuhle akci nemáte oprávnění.
+    Zdravi:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        mode:
+          type: string
+          enum:
+            - demo
+            - production
+        database:
+          type: string
+          description: Druh připojené databáze.
+        providers_in_catalog:
+          type: integer
+        storage:
+          type: string
+          enum:
+            - supabase
+            - local
+        ms:
+          type: integer
+        version:
+          type: string
+    VysledekFronty:
+      type: object
+      description: Souhrn jednoho běhu fronty.
+      properties:
+        ok:
+          type: boolean
+        rendery:
+          type: object
+          properties:
+            done:
+              type: integer
+            failed:
+              type: integer
+            pending:
+              type: integer
+        publikace:
+          type: object
+          properties:
+            published:
+              type: integer
+            failed:
+              type: integer
+            dead_letter:
+              type: integer
+        automatizace:
+          type: array
+          description: Co udělaly automatizace. Neprázdné jen při volání s automatizace=1.
+          items:
+            type: string
+    ContentItem:
+      type: object
+      description: Jedna položka obsahu. Stavy jsou tytéž jako v lib/domena/stavy.ts a v podmínce sloupce status.
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        venue_id:
+          type: string
+          format: uuid
+        campaign_id:
+          type: [string, "null"]
+          format: uuid
+        template_id:
+          type: [string, "null"]
+          format: uuid
+        menu_id:
+          type: [string, "null"]
+          format: uuid
+        title:
+          type: string
+        purpose:
+          type: string
+          description: K čemu obsah je (denni_menu, tydenni_menu, akce, volne).
+        pillar:
+          type: string
+        status:
+          type: string
+          enum:
+            - idea
+            - draft
+            - generating
+            - preview_ready
+            - changes_requested
+            - awaiting_approval
+            - approved
+            - scheduled
+            - publishing
+            - published
+            - generation_failed
+            - render_failed
+            - publish_failed
+            - connection_required
+            - cancelled
+            - archived
+        current_version_id:
+          type: [string, "null"]
+          format: uuid
+        approved_version_id:
+          type: [string, "null"]
+          format: uuid
+          description: Schválená verze. Publikovat jde jen tuhle, a jen dokud sedí její otisk.
+        scheduled_at:
+          type: [string, "null"]
+          format: date-time
+        channels:
+          type: array
+          items:
+            type: string
+            enum:
+              - instagram
+              - facebook
+        is_evergreen:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        archived_at:
+          type: [string, "null"]
+          format: date-time
+    ContentVersion:
+      type: object
+      description: Verze obsahu. Nikdy se nepřepisuje, každá úprava zakládá novou.
+      properties:
+        id:
+          type: string
+          format: uuid
+        content_item_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        brief:
+          type: string
+          description: Zadání od člověka. Pro model je to data, ne instrukce.
+        inputs:
+          type: object
+          additionalProperties: true
+        ai_proposal:
+          type: [object, "null"]
+          additionalProperties: true
+        selected_variant_key:
+          type: [string, "null"]
+        texts:
+          type: object
+          description: Texty po kanálech, tedy caption, hashtags, cta a hook.
+          additionalProperties: true
+        storyboard:
+          type: [object, "null"]
+          additionalProperties: true
+        media_asset_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        cover_asset_id:
+          type: [string, "null"]
+          format: uuid
+        checksum:
+          type: string
+          description: Otisk obsahu verze. Počítá se z obsahu, ne z ID — stejný obsah dá stejný otisk. Na něj se váže schválení.
+        change_note:
+          type: string
+        ai_model:
+          type: [string, "null"]
+        ai_cost_estimate_cents:
+          type: [integer, "null"]
+          description: Odhad nákladu v celých haléřích.
+        created_at:
+          type: string
+          format: date-time
+    AiNavrh:
+      type: object
+      description: Ověřený návrh od modelu. Tvar hlídá schéma v lib/providers/ai/schema.ts, nevalidní odpověď se zahodí.
+      properties:
+        varianty:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        vysvetleni:
+          type: string
+      additionalProperties: true
+    ApprovalRequest:
+      type: object
+      description: Žádost o schválení. Drží otisk verze, na kterou míří.
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        venue_id:
+          type: string
+          format: uuid
+        content_item_id:
+          type: string
+          format: uuid
+        content_version_id:
+          type: string
+          format: uuid
+        version_checksum:
+          type: string
+        summary:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - approved
+            - rejected
+            - changes_requested
+            - superseded
+        requested_by:
+          type: [string, "null"]
+          format: uuid
+        requested_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: [string, "null"]
+          format: date-time
+    ApprovalDecision:
+      type: object
+      description: Rozhodnutí schvalovatele. Ukládá se i s otiskem, aby bylo zpětně vidět, co přesně schválil.
+      properties:
+        id:
+          type: string
+          format: uuid
+        approval_request_id:
+          type: string
+          format: uuid
+        decided_by:
+          type: [string, "null"]
+          format: uuid
+        decision:
+          type: string
+          enum:
+            - approved
+            - rejected
+            - changes_requested
+        comment:
+          type: string
+        version_checksum:
+          type: string
+        decided_at:
+          type: string
+          format: date-time
+    PublishJob:
+      type: object
+      description: Úloha zveřejnění. Idempotentní klíč a jediná živá úloha na verzi, kanál, formát a účet — opakování nikdy nevytvoří druhý příspěvek.
+      properties:
+        id:
+          type: string
+          format: uuid
+        content_item_id:
+          type: string
+          format: uuid
+        content_version_id:
+          type: string
+          format: uuid
+        version_checksum:
+          type: string
+        approval_request_id:
+          type: string
+          format: uuid
+          description: Bez žádosti o schválení úloha nevznikne ani přímým zápisem do databáze.
+        channel:
+          type: string
+          enum:
+            - instagram
+            - facebook
+        format:
+          type: string
+        provider_key:
+          type: string
+        mode:
+          $ref: "#/components/schemas/RezimPripojeni"
+        status:
+          type: string
+          enum:
+            - scheduled
+            - queued
+            - publishing
+            - published
+            - published_mock
+            - manual_export
+            - failed
+            - dead_letter
+            - cancelled
+        scheduled_for:
+          type: string
+          format: date-time
+        idempotency_key:
+          type: string
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        next_attempt_at:
+          type: [string, "null"]
+          format: date-time
+        last_error:
+          type: [string, "null"]
+        external_post_id:
+          type: [string, "null"]
+        published_at:
+          type: [string, "null"]
+          format: date-time
+    RenderJob:
+      type: object
+      description: Úloha výroby obrázku nebo videa.
+      properties:
+        id:
+          type: string
+          format: uuid
+        content_version_id:
+          type: string
+          format: uuid
+        variant_id:
+          type: [string, "null"]
+          format: uuid
+        provider_key:
+          type: string
+        mode:
+          $ref: "#/components/schemas/RezimPripojeni"
+        status:
+          type: string
+          enum:
+            - queued
+            - submitted
+            - rendering
+            - done
+            - failed
+            - cancelled
+        external_id:
+          type: [string, "null"]
+        idempotency_key:
+          type: string
+        output_asset_id:
+          type: [string, "null"]
+          format: uuid
+        error:
+          type: [string, "null"]
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        cost_estimate_cents:
+          type: [integer, "null"]
+          description: Odhad nákladu v celých haléřích.
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+    MediaAsset:
+      type: object
+      description: Soubor v knihovně médií. Podává se jen podepsaným odkazem s omezenou platností.
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        venue_id:
+          type: [string, "null"]
+          format: uuid
+        kind:
+          type: string
+          enum:
+            - image
+            - video
+            - audio
+            - document
+            - render
+        original_filename:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+        width:
+          type: [integer, "null"]
+        height:
+          type: [integer, "null"]
+        duration_seconds:
+          type: [number, "null"]
+        orientation:
+          type: [string, "null"]
+          enum:
+            - landscape
+            - portrait
+            - square
+            - null
+        title:
+          type: string
+        description:
+          type: string
+        is_hero:
+          type: boolean
+        author:
+          type: [string, "null"]
+        license:
+          type: [string, "null"]
+        consent_note:
+          type: [string, "null"]
+          description: Poznámka o souhlasu vyfotografovaných lidí.
+        usable_until:
+          type: [string, "null"]
+          format: date
+        ai_generated:
+          type: boolean
+        ai_edited:
+          type: boolean
+        archived_at:
+          type: [string, "null"]
+          format: date-time
+        odkaz:
+          type: string
+          description: Podepsaná adresa souboru s omezenou platností. Do databáze se neukládá, dopočítává se při čtení.
+    Menu:
+      type: object
+      description: Jídelní lístek. Fakta pro AI se berou jen z potvrzeného menu.
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        venue_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          description: Druh lístku, například daily, weekly nebo special.
+        title:
+          type: string
+        valid_from:
+          type: [string, "null"]
+          format: date
+        valid_to:
+          type: [string, "null"]
+          format: date
+        source:
+          type: string
+          enum:
+            - manual
+            - text
+            - image
+            - pdf
+            - foodtab
+        status:
+          type: string
+          enum:
+            - draft
+            - confirmed
+            - archived
+        currency:
+          type: string
+          examples:
+            - CZK
+        foodtab_event_id:
+          type: [string, "null"]
+          description: ID události z FoodTab Řízení, ze které lístek vznikl.
+        confirmed_at:
+          type: [string, "null"]
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuItem"
+    MenuItem:
+      type: object
+      description: Položka lístku. Cena je v celých haléřích jako integer a chybějící cena je null — nikdy se nedomýšlí.
+      properties:
+        id:
+          type: string
+          format: uuid
+        menu_id:
+          type: string
+          format: uuid
+        menu_day_id:
+          type: [string, "null"]
+          format: uuid
+        category:
+          type: string
+          examples:
+            - polevka
+        name:
+          type: string
+        description:
+          type: string
+        price_cents:
+          type: [integer, "null"]
+          description: Cena v celých haléřích. Null znamená, že cena není známá.
+          examples:
+            - 4500
+        allergens:
+          type: array
+          items:
+            type: string
+        note:
+          type: string
+        availability:
+          type: string
+          enum:
+            - available
+            - limited
+            - sold_out
+        needs_review:
+          type: boolean
+          description: Položka, u které si aplikace není jistá. Blokuje potvrzení lístku.
+        review_reason:
+          type: [string, "null"]
+        sort_order:
+          type: integer
+    MenuVstup:
+      type: object
+      description: Tělo pro založení nebo přepsání lístku.
+      required:
+        - organizationId
+        - venueId
+        - kind
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        venueId:
+          type: string
+          format: uuid
+        menuId:
+          type: string
+          format: uuid
+          description: Vyplněné znamená přepsání existujícího konceptu.
+        kind:
+          type: string
+        title:
+          type: string
+        validFrom:
+          type: [string, "null"]
+          format: date
+        validTo:
+          type: [string, "null"]
+          format: date
+        source:
+          type: string
+          enum:
+            - manual
+            - text
+            - image
+            - pdf
+            - foodtab
+        days:
+          type: array
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              day_date:
+                type: [string, "null"]
+                format: date
+              items:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MenuItem"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuItem"
+    MenuRozpoznani:
+      type: object
+      description: Výsledek rozpoznání, zatím neuložený. Varování se ukazují člověku, ne modelu.
+      properties:
+        kind:
+          type: string
+        title:
+          type: string
+        valid_from:
+          type: [string, "null"]
+          format: date
+        valid_to:
+          type: [string, "null"]
+          format: date
+        days:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MenuItem"
+        warnings:
+          type: array
+          items:
+            type: string
+    NovyObsah:
+      type: object
+      description: Tělo pro založení obsahu.
+      required:
+        - organizationId
+        - venueId
+        - title
+        - purpose
+        - brief
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        venueId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        purpose:
+          type: string
+        pillar:
+          type: string
+        templateId:
+          type: [string, "null"]
+          format: uuid
+        menuId:
+          type: [string, "null"]
+          format: uuid
+        campaignId:
+          type: [string, "null"]
+          format: uuid
+        brief:
+          type: string
+        channels:
+          type: array
+          items:
+            type: string
+            enum:
+              - instagram
+              - facebook
+        formats:
+          type: array
+          items:
+            type: string
+          description: Klíče výstupních formátů, například instagram_feed nebo instagram_story.
+        mediaAssetIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        inputs:
+          type: object
+          additionalProperties: true
+        isEvergreen:
+          type: boolean
+    ProviderCatalogEntry:
+      type: object
+      description: Položka katalogu nástrojů. Řádek nic nepřipojuje a nesmí předstírat funkční integraci.
+      properties:
+        key:
+          type: string
+        category:
+          type: string
+          enum:
+            - ai_generation
+            - image_rendering
+            - video_rendering
+            - voiceover
+            - workflow_automation
+            - social_publishing
+            - analytics
+            - notifications
+            - external_storage
+            - menu_source
+        name:
+          type: string
+        vendor:
+          type: string
+        description:
+          type: string
+        recommendation:
+          type: string
+          enum:
+            - foodtab_recommended
+            - supported
+            - planned
+        implementation_status:
+          type: string
+          description: Pravdivý stav adaptéru v kódu. Planned znamená, že adaptér zatím neexistuje.
+          enum:
+            - implemented
+            - planned
+        connection_modes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RezimPripojeni"
+        auth_type:
+          type: string
+          enum:
+            - api_key
+            - oauth
+            - webhook_secret
+            - none
+        billing:
+          type: string
+          enum:
+            - customer_pays_provider
+            - included
+            - free
+        capabilities:
+          type: array
+          items:
+            type: object
+            properties:
+              capability:
+                type: string
+              status:
+                type: string
+                enum:
+                  - available
+                  - partial
+                  - planned
+              note:
+                type: [string, "null"]
+        docs_url:
+          type: [string, "null"]
+        pricing_note:
+          type: [string, "null"]
+          description: Orientační cena. Není to obchodní pravda v kódu, jen údaj s datem poslední kontroly.
+        pricing_checked_at:
+          type: [string, "null"]
+          format: date
+        sort_order:
+          type: integer
+    IntegrationConnection:
+      type: object
+      description: Připojený účet. Nikdy neobsahuje token ani klíč — tajemství leží šifrovaná v oddělené tabulce, kam role authenticated nevidí.
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        venue_id:
+          type: [string, "null"]
+          format: uuid
+        provider_key:
+          type: string
+        mode:
+          $ref: "#/components/schemas/RezimPripojeni"
+        status:
+          type: string
+          enum:
+            - not_connected
+            - connecting
+            - connected
+            - needs_attention
+            - error
+            - revoked
+        display_name:
+          type: string
+        external_account:
+          type: object
+          description: Bezpečná metadata o účtu, tedy jméno stránky nebo uživatelské jméno. Nikdy token.
+          additionalProperties: true
+        granted_scopes:
+          type: array
+          items:
+            type: string
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+        last_test_at:
+          type: [string, "null"]
+          format: date-time
+        last_test_ok:
+          type: [boolean, "null"]
+        last_error:
+          type: [string, "null"]
+        revoked_at:
+          type: [string, "null"]
+          format: date-time
+    RezimPripojeni:
+      type: string
+      description: Kdo nástroj platí a jak se k němu přistupuje. Mock je vždy vidět, nikdy tichý.
+      enum:
+        - customer_managed
+        - foodtab_managed
+        - manual_export
+        - mock
+    MetricSnapshot:
+      type: object
+      description: Snímek metrik jedné publikace. Odhad se nikdy nemíchá s číslem od poskytovatele.
+      properties:
+        id:
+          type: string
+          format: uuid
+        publication_id:
+          type: string
+          format: uuid
+        captured_at:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum:
+            - provider
+            - mock
+            - estimate
+        is_estimate:
+          type: boolean
+        metrics:
+          type: object
+          description: Dosah, reakce, komentáře, uložení, u videa přehrání a doba sledování.
+          additionalProperties: true
+    WebhookEvent:
+      type: object
+      description: Evidence příchozích událostí. Dvojice zdroj a externí ID je jedinečná, takže druhé doručení téže události se nezpracuje podruhé.
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider_key:
+          type: string
+          enum:
+            - shotstack
+            - n8n
+            - meta
+            - foodtab
+        external_event_id:
+          type: string
+        signature_ok:
+          type: boolean
+          description: Zapisuje se i u odmítnutých událostí, aby byl pokus vidět.
+        payload:
+          type: object
+          additionalProperties: true
+        received_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: [string, "null"]
+          format: date-time
+        result:
+          type: [string, "null"]
+          description: Co se s událostí stalo, například created, updated, confirmed, unmapped nebo ignored.
+    WebhookN8n:
+      type: object
+      description: Událost z n8n. Typ queue.process spustí frontu.
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          examples:
+            - queue.process
+        idempotencyKey:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+    FoodtabMenuEvent:
+      type: object
+      description: Událost o jídelním lístku z FoodTab Řízení, verze 1. Zdroj pravdy o tom, co se vaří, je FoodTab; Marketing z něj jen čte výsledek. Neznámá dvojice firma a pobočka se přijme, zapíše s výsledkem unmapped a nic se nezaloží.
+      required:
+        - version
+        - type
+        - event_id
+        - organization
+        - venue
+        - menu
+      properties:
+        version:
+          type: integer
+          const: 1
+        type:
+          type: string
+          enum:
+            - menu.created
+            - menu.updated
+            - menu.approved
+        event_id:
+          type: string
+          format: uuid
+          description: Zároveň klíč idempotence. Druhé doručení téže události nic nezaloží.
+        occurred_at:
+          type: string
+          format: date-time
+        organization:
+          type: object
+          required:
+            - foodtab_tenant_id
+          properties:
+            foodtab_tenant_id:
+              type: string
+              format: uuid
+              description: ID firmy ve FoodTabu. Mapuje se na organizations.foodtab_tenant_id.
+        venue:
+          type: object
+          required:
+            - foodtab_branch_id
+          properties:
+            foodtab_branch_id:
+              type: string
+              format: uuid
+              description: ID pobočky ve FoodTabu. Mapuje se na venues.foodtab_branch_id.
+        menu:
+          type: object
+          required:
+            - kind
+            - items
+          properties:
+            kind:
+              type: string
+              examples:
+                - daily
+            title:
+              type: string
+            valid_from:
+              type: [string, "null"]
+              format: date
+            valid_to:
+              type: [string, "null"]
+              format: date
+            currency:
+              type: string
+            days:
+              type: array
+              items:
+                type: object
+                properties:
+                  label:
+                    type: string
+                  day_date:
+                    type: [string, "null"]
+                    format: date
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/MenuItem"
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/MenuItem"

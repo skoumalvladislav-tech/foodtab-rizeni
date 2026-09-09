@@ -47,7 +47,7 @@ export default async function Media({ params, searchParams }: { params: Promise<
       {muze(k, "media.manage") && (
         <section className="karta">
           <h3>Nahrát soubory</h3>
-          <form action={a.nahratAkce} encType="multipart/form-data">
+          <form action={a.nahratAkce}>
             <input type="hidden" name="slug" value={v.slug} />
             <div className="radek radek-3">
               <div className="pole"><label htmlFor="soubory">Soubory (více najednou; z mobilu i fotoaparátu)</label><input id="soubory" name="soubory" type="file" multiple accept="image/*,video/*,audio/*,application/pdf" capture={undefined} required /></div>

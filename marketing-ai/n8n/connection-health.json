@@ -1,0 +1,423 @@
+{
+  "name": "FoodTab Marketing — zdraví připojení",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Hlídač zdraví aplikace a připojení\n\nKaždou hodinu:\n\n1. `GET {URL}/api/v1/health` — žije aplikace a databáze? Bez tajemství.\n2. `POST {URL}/api/v1/integrace/test-vse` (podepsaně) — projde všechna\n   připojení organizace `testConnection()` a vrátí, kolik jich hlásí\n   potíž (vypršelý token Meta, odvolané oprávnění, nedostupný render).\n\nKdyž je něco špatně, jde jedno upozornění na `NOTIFY_WEBHOOK_URL`.\n\nCílem je zachytit vypršený token **dřív, než se o něj opře publikace**.\nMeta token platí 60 dní a vyprší tiše.\n\nProměnné: `FOODTAB_MARKETING_URL`, `FOODTAB_WEBHOOK_SECRET`,\n`NOTIFY_WEBHOOK_URL`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "b97f5d24-6cd8-433b-9481-0f8653640719",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "d18ec6dd-ea45-4f46-b4de-26e33e079600",
+      "name": "Každou hodinu",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/health",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "60876d6f-9413-4997-9b76-703924f69706",
+      "name": "Zdraví aplikace",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Zapamatuje si výsledek /health a podepíše požadavek na test všech připojení.\nconst crypto = require('crypto');\nconst vstup = $input.first().json;\nconst secret = $env.FOODTAB_WEBHOOK_SECRET;\nif (!secret) throw new Error('Chybí proměnná prostředí FOODTAB_WEBHOOK_SECRET.');\nconst zdraviOk = vstup.statusCode >= 200 && vstup.statusCode < 300 && !!(vstup.body && vstup.body.ok);\nconst telo = JSON.stringify({ duvod: 'n8n connection-health' });\nconst klic = 'connection-health-' + Math.floor(Date.now() / 3600000);\nconst doplnky = { zdraviOk, zdraviStatus: vstup.statusCode };\nconst ts = String(Math.floor(Date.now() / 1000));\nconst podpis = crypto.createHmac('sha256', secret).update(ts + '.' + telo).digest('hex');\nreturn [{ json: { ...doplnky, telo, ts, podpis, klic } }];"
+      },
+      "id": "2fb631e0-d64f-49b0-9425-ea891584bf80",
+      "name": "Podepsat test připojení",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/integrace/test-vse",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-FoodTab-Signature",
+              "value": "={{ $json.podpis }}"
+            },
+            {
+              "name": "X-FoodTab-Timestamp",
+              "value": "={{ $json.ts }}"
+            },
+            {
+              "name": "X-FoodTab-Idempotency-Key",
+              "value": "={{ $json.klic }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.telo }}"
+      },
+      "id": "742f16df-9fb4-4b14-9e79-203be59665d2",
+      "name": "Otestovat všechna připojení",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "636dc9f9-b991-441d-a96a-d2044ec75bc9",
+              "name": "zdraviOk",
+              "value": "={{ $('Podepsat test připojení').first().json.zdraviOk }}",
+              "type": "boolean"
+            },
+            {
+              "id": "b3177307-2028-47f4-848d-65ceb22f6d33",
+              "name": "testOk",
+              "value": "={{ $json.statusCode >= 200 && $json.statusCode < 300 }}",
+              "type": "boolean"
+            },
+            {
+              "id": "a629a0e5-7a51-45d5-a432-ee64e88b0520",
+              "name": "problemy",
+              "value": "={{ $json.body && $json.body.problemy ? $json.body.problemy : [] }}",
+              "type": "array"
+            },
+            {
+              "id": "ff6792e3-f22c-43bd-a131-077316ba8719",
+              "name": "shrnuti",
+              "value": "={{ ($('Podepsat test připojení').first().json.zdraviOk ? '' : 'aplikace neodpovídá (HTTP ' + $('Podepsat test připojení').first().json.zdraviStatus + '); ') + (($json.body && $json.body.problemy ? $json.body.problemy : []).length ? 'připojení s potíží: ' + ($json.body.problemy || []).join(', ') : '') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "82af4a25-bde5-421f-a193-dd5558cbfbe0",
+      "name": "Vyhodnotit",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ffdbd4ca-7c97-455f-ae1d-cb63cb5ea596",
+              "leftValue": "={{ $json.zdraviOk }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "615afe29-9d36-439a-96ad-c1bc315f84f7",
+              "leftValue": "={{ $json.testOk }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "e03fb68d-16d1-4809-b358-8951ec0e14a0",
+              "leftValue": "={{ $json.problemy.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "38cae058-7918-449c-b241-4818bc4a697b",
+      "name": "Je všechno v pořádku?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        960,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "78e276ca-0dd2-45b3-8e1d-8392dd285c4a",
+              "name": "stav",
+              "value": "v pořádku",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e39ef8ba-60a3-488f-b4d1-231290397792",
+      "name": "Vše běží",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1180,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5524673b-653c-417c-aab6-3755a944e5df",
+              "leftValue": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "726a1f92-2f1e-466d-ac08-15a0e0ba1379",
+      "name": "Je kam poslat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ text: \"FoodTab Marketing — kontrola připojení hlásí potíž: \" + $json.shrnuti, problemy: $json.problemy }) }}"
+      },
+      "id": "1abd025a-0b5f-4c7e-8d99-38c7004c3cd5",
+      "name": "Upozornit na potíž",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1400,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Každou hodinu": {
+      "main": [
+        [
+          {
+            "node": "Zdraví aplikace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zdraví aplikace": {
+      "main": [
+        [
+          {
+            "node": "Podepsat test připojení",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Podepsat test připojení": {
+      "main": [
+        [
+          {
+            "node": "Otestovat všechna připojení",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Otestovat všechna připojení": {
+      "main": [
+        [
+          {
+            "node": "Vyhodnotit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vyhodnotit": {
+      "main": [
+        [
+          {
+            "node": "Je všechno v pořádku?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Je všechno v pořádku?": {
+      "main": [
+        [
+          {
+            "node": "Vše běží",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Je kam poslat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Je kam poslat?": {
+      "main": [
+        [
+          {
+            "node": "Upozornit na potíž",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

@@ -1,0 +1,288 @@
+{
+  "name": "FoodTab Marketing — opakované kampaně",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Opakované kampaně (automatizace)\n\nKaždý den v **07:00** zavolá\n`POST {URL}/api/v1/ulohy/zpracovat?automatizace=1` s hlavičkou\n`X-Cron-Secret`. Aplikace projde zapnuté automatizace\n(`marketing.automations`) a co je na řadě, založí jako **koncept\na žádost o schválení**.\n\n**Nikdy se nic nezveřejní bez člověka.** Automatizace vyrábí návrhy,\npublikuje až fronta — a ta chce platné schválení vázané na otisk verze.\n\nParametr `automatizace=1` bere aplikace jen od cronu, ne od\npřihlášeného uživatele.\n\nČasové pásmo bere Schedule Trigger z nastavení n8n — nastavte\n`Europe/Prague`, jinak „07:00“ padne jinam.\n\nProměnné: `FOODTAB_MARKETING_URL`, `FOODTAB_CRON_SECRET`,\n`NOTIFY_WEBHOOK_URL`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "c6dda4e3-467a-4eac-a3f5-b21e4f9ea2f2",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "bb66e088-4aa9-4214-90f1-a9d9da4836aa",
+      "name": "Denně 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/ulohy/zpracovat?automatizace=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Cron-Secret",
+              "value": "={{ $env.FOODTAB_CRON_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ duvod: \"recurring-campaigns\" }) }}"
+      },
+      "id": "707ec2b8-9e30-4c4c-acf7-0e357734d9e9",
+      "name": "Spustit automatizace",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "659ff49e-c5e0-4888-a2bb-371ae65a4ffb",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "41192dc5-3233-47b9-b9fd-d6856f017330",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e8c3f2c4-ab18-484b-97a3-8e26d8005204",
+      "name": "Prošlo to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "db860f84-7a7d-4dbd-a7e1-fd66308767b3",
+              "name": "automatizace",
+              "value": "={{ $json.body && $json.body.automatizace ? $json.body.automatizace : [] }}",
+              "type": "array"
+            },
+            {
+              "id": "eebf4822-6706-43ed-ac25-b4214d06695c",
+              "name": "pocet",
+              "value": "={{ $json.body && $json.body.automatizace ? $json.body.automatizace.length : 0 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ad94a0eb-eca2-4efc-b1fe-e845b42d9bc0",
+      "name": "Shrnutí automatizací",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        520,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "260d6ba3-63c4-41a3-a7c8-d40245df3fe6",
+              "leftValue": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "085408da-f637-413f-8030-b58c1a6cc4ca",
+      "name": "Je kam poslat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ text: \"FoodTab Marketing — ranní běh automatizací selhal (HTTP \" + $json.statusCode + \"). Dnešní návrhy nevznikly.\", statusCode: $json.statusCode }) }}"
+      },
+      "id": "7e55cd45-23de-4fcd-9521-de9c08002516",
+      "name": "Upozornit na chybu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Denně 07:00": {
+      "main": [
+        [
+          {
+            "node": "Spustit automatizace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spustit automatizace": {
+      "main": [
+        [
+          {
+            "node": "Prošlo to?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prošlo to?": {
+      "main": [
+        [
+          {
+            "node": "Shrnutí automatizací",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Je kam poslat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Je kam poslat?": {
+      "main": [
+        [
+          {
+            "node": "Upozornit na chybu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

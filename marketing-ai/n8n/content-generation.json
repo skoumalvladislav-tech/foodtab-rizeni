@@ -1,0 +1,184 @@
+{
+  "name": "FoodTab Marketing — generování obsahu",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Generování návrhu obsahu\n\nAplikace pošle podepsanou událost `content.generate` na\n`{n8n}/webhook/foodtab-marketing/content.generate`.\n\nPrůběh:\n1. **Ověřit podpis** — HMAC-SHA256 nad `timestamp.telo`, okno 5 minut.\n2. **Podepsat požadavek** — sestaví tělo pro aplikaci a podepíše ho\n   stejným tajemstvím.\n3. **Vyžádat návrh** — `POST {URL}/api/v1/obsah/{id}/navrh`.\n4. **Odpovědět** — vrátí `executionId`, aby si ho aplikace uložila\n   jako `externalRunId`.\n\nExecution nikdy nečeká na člověka. Schválení se řeší v aplikaci.\n\nProměnné: `FOODTAB_MARKETING_URL`, `FOODTAB_WEBHOOK_SECRET`.\nCode uzel potřebuje `NODE_FUNCTION_ALLOW_BUILTIN=crypto`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "b23ce89c-8c0c-48f1-a328-15338fe128ae",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "foodtab-marketing/content.generate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "76b6b979-57c4-42f4-b019-044b99235b9d",
+      "name": "Událost content.generate",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        0
+      ],
+      "webhookId": "b0571707-5a38-46bd-92d1-71405a6c732f"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Ověří podpis příchozího webhooku z aplikace.\n// Podpis: hex(HMAC-SHA256(FOODTAB_WEBHOOK_SECRET, timestamp + \".\" + telo)),\n// okno 5 minut proti přehrání — stejně jako overitPodpisWebhooku v aplikaci.\n//\n// POZOR: uzel Webhook tělo rozparsuje a my ho tady serializujeme znovu.\n// Funguje to, protože aplikace posílá JSON.stringify bez mezer a Node\n// zachová pořadí klíčů. Kdyby aplikace tělo někdy formátovala jinak,\n// zapněte v uzlu Webhook volbu Raw Body a počítejte HMAC nad ním.\nconst crypto = require('crypto');\nconst vstup = $input.first().json;\nconst hlavicky = vstup.headers || {};\nconst secret = $env.FOODTAB_WEBHOOK_SECRET;\nif (!secret) throw new Error('Chybí proměnná prostředí FOODTAB_WEBHOOK_SECRET — bez ní nejde podpis ověřit.');\nconst ts = String(hlavicky['x-foodtab-timestamp'] || '');\nconst podpis = String(hlavicky['x-foodtab-signature'] || '');\nif (!ts || !podpis) throw new Error('Chybí hlavička X-FoodTab-Timestamp nebo X-FoodTab-Signature.');\nif (!Number.isFinite(Number(ts)) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) {\n  throw new Error('Časová značka je mimo okno 5 minut (nesynchronizované hodiny nebo přehraný požadavek).');\n}\nconst telo = JSON.stringify(vstup.body || {});\nconst ocekavany = crypto.createHmac('sha256', secret).update(ts + '.' + telo).digest('hex');\nconst a = Buffer.from(ocekavany, 'utf8');\nconst b = Buffer.from(podpis, 'utf8');\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error('Neplatný podpis webhooku.');\nconst zprava = vstup.body || {};\nreturn [{ json: { typ: zprava.type || '', klicUdalosti: String(hlavicky['x-foodtab-idempotency-key'] || zprava.idempotencyKey || ''), organizationId: zprava.organizationId || null, payload: zprava.payload || {} } }];"
+      },
+      "id": "f7b1ac90-d382-4d4e-8c33-33f872471c8c",
+      "name": "Ověřit podpis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Sestaví podepsaný požadavek na /api/v1/obsah/{id}/navrh.\nconst crypto = require('crypto');\nconst vstup = $input.first().json;\nconst secret = $env.FOODTAB_WEBHOOK_SECRET;\nif (!secret) throw new Error('Chybí proměnná prostředí FOODTAB_WEBHOOK_SECRET.');\nconst p = vstup.payload || {};\nconst contentId = p.contentItemId || p.content_item_id || p.id || '';\nif (!contentId) throw new Error('V události chybí contentItemId (payload.contentItemId).');\nconst telo = JSON.stringify({ contentItemId: contentId, duvod: p.duvod || 'n8n content.generate' });\nconst klic = vstup.klicUdalosti || contentId;\nconst doplnky = { contentId };\nconst ts = String(Math.floor(Date.now() / 1000));\nconst podpis = crypto.createHmac('sha256', secret).update(ts + '.' + telo).digest('hex');\nreturn [{ json: { ...doplnky, telo, ts, podpis, klic } }];"
+      },
+      "id": "f9d3f2d4-d533-40c8-8299-0e21ef5b068b",
+      "name": "Podepsat požadavek",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/obsah/{{ $json.contentId }}/navrh",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-FoodTab-Signature",
+              "value": "={{ $json.podpis }}"
+            },
+            {
+              "name": "X-FoodTab-Timestamp",
+              "value": "={{ $json.ts }}"
+            },
+            {
+              "name": "X-FoodTab-Idempotency-Key",
+              "value": "={{ $json.klic }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.telo }}"
+      },
+      "id": "868d7ffa-2dbc-4c82-955f-c85ce52f6b7b",
+      "name": "Vyžádat návrh",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ executionId: $execution.id, statusCode: $json.statusCode, ok: $json.statusCode >= 200 && $json.statusCode < 300 }) }}",
+        "options": {}
+      },
+      "id": "79128364-4d78-44cb-91ad-e37bec070d28",
+      "name": "Odpovědět aplikaci",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        740,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Událost content.generate": {
+      "main": [
+        [
+          {
+            "node": "Ověřit podpis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ověřit podpis": {
+      "main": [
+        [
+          {
+            "node": "Podepsat požadavek",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Podepsat požadavek": {
+      "main": [
+        [
+          {
+            "node": "Vyžádat návrh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vyžádat návrh": {
+      "main": [
+        [
+          {
+            "node": "Odpovědět aplikaci",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

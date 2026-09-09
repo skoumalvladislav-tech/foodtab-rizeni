@@ -58,7 +58,7 @@ export default async function NoveMenu({ params, searchParams }: { params: Promi
       )}
 
       {(zp === "foto" || zp === "pdf") && (
-        <form action={importAkce} className="karta" encType="multipart/form-data">
+        <form action={importAkce} className="karta">
           <input type="hidden" name="slug" value={v.slug} /><input type="hidden" name="zpusob" value={zp} />
           <div className="pole"><label htmlFor="soubor">{zp === "foto" ? "Fotografie nebo screenshot menu" : "PDF s menu"}</label>
             <input id="soubor" name="soubor" type="file" accept={zp === "foto" ? "image/*" : "application/pdf"} required />

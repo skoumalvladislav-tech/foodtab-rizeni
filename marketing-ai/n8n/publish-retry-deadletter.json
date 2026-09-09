@@ -1,0 +1,337 @@
+{
+  "name": "FoodTab Marketing — opakování publikace",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Opakování publikace a mrtvá schránka\n\nUdálost `publish.failed` nese `attempts` a `maxAttempts` úlohy.\n\n* **Zbývá pokus** → počká exponenciálně (1, 2, 4, 8, 16, strop 30 minut\n  — stejný odstup jako `odstupPokusu` v `lib/domena/fronta.ts`)\n  a šťouchne do fronty. Opakování dělá fronta, ne n8n: má idempotentní\n  klíč, takže druhý příspěvek nevznikne.\n* **Pokusy vyčerpány** → úloha je v `dead_letter` a jde upozornění\n  člověku. Nikdy se nezkouší donekonečna.\n\n**Odpověď odchází hned**, ještě před čekáním.\n\nProměnné: `FOODTAB_MARKETING_URL`, `FOODTAB_WEBHOOK_SECRET`,\n`FOODTAB_CRON_SECRET`, `NOTIFY_WEBHOOK_URL`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "71e4a731-dbcf-4f65-a1ea-b141aacb3b1e",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "foodtab-marketing/publish.failed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "15fe2a1b-4083-44ca-854f-053353410a39",
+      "name": "Událost publish.failed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        0
+      ],
+      "webhookId": "02ff4eca-4833-4427-8ef0-a8cd66773d98"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Ověří podpis příchozího webhooku z aplikace.\n// Podpis: hex(HMAC-SHA256(FOODTAB_WEBHOOK_SECRET, timestamp + \".\" + telo)),\n// okno 5 minut proti přehrání — stejně jako overitPodpisWebhooku v aplikaci.\n//\n// POZOR: uzel Webhook tělo rozparsuje a my ho tady serializujeme znovu.\n// Funguje to, protože aplikace posílá JSON.stringify bez mezer a Node\n// zachová pořadí klíčů. Kdyby aplikace tělo někdy formátovala jinak,\n// zapněte v uzlu Webhook volbu Raw Body a počítejte HMAC nad ním.\nconst crypto = require('crypto');\nconst vstup = $input.first().json;\nconst hlavicky = vstup.headers || {};\nconst secret = $env.FOODTAB_WEBHOOK_SECRET;\nif (!secret) throw new Error('Chybí proměnná prostředí FOODTAB_WEBHOOK_SECRET — bez ní nejde podpis ověřit.');\nconst ts = String(hlavicky['x-foodtab-timestamp'] || '');\nconst podpis = String(hlavicky['x-foodtab-signature'] || '');\nif (!ts || !podpis) throw new Error('Chybí hlavička X-FoodTab-Timestamp nebo X-FoodTab-Signature.');\nif (!Number.isFinite(Number(ts)) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) {\n  throw new Error('Časová značka je mimo okno 5 minut (nesynchronizované hodiny nebo přehraný požadavek).');\n}\nconst telo = JSON.stringify(vstup.body || {});\nconst ocekavany = crypto.createHmac('sha256', secret).update(ts + '.' + telo).digest('hex');\nconst a = Buffer.from(ocekavany, 'utf8');\nconst b = Buffer.from(podpis, 'utf8');\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error('Neplatný podpis webhooku.');\nconst zprava = vstup.body || {};\nreturn [{ json: { typ: zprava.type || '', klicUdalosti: String(hlavicky['x-foodtab-idempotency-key'] || zprava.idempotencyKey || ''), organizationId: zprava.organizationId || null, payload: zprava.payload || {} } }];"
+      },
+      "id": "00091288-b2ad-4bca-9fca-ed16ea176cd5",
+      "name": "Ověřit podpis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Vytáhne z události počet pokusů a strop. Když chybí, bere se 1 a 5\n// (stejné výchozí hodnoty jako publish_jobs.max_attempts).\nconst vstup = $input.first().json;\nconst p = vstup.payload || {};\nconst attempts = Number(p.attempts != null ? p.attempts : 1);\nconst maxAttempts = Number(p.maxAttempts != null ? p.maxAttempts : (p.max_attempts != null ? p.max_attempts : 5));\nreturn [{ json: {\n  jobId: p.publishJobId || p.jobId || p.id || '',\n  contentItemId: p.contentItemId || '',\n  chyba: p.error || p.lastError || '',\n  attempts: Number.isFinite(attempts) ? attempts : 1,\n  maxAttempts: Number.isFinite(maxAttempts) ? maxAttempts : 5,\n  klicUdalosti: vstup.klicUdalosti || '',\n} }];"
+      },
+      "id": "ccb576ea-d4d7-4fd8-8c92-486671124b87",
+      "name": "Načíst pokus",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ executionId: $execution.id, ok: true }) }}",
+        "options": {}
+      },
+      "id": "377198e6-bb1d-4857-be5d-39bf18616902",
+      "name": "Přijato",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "83635856-9dec-41ce-ac76-19442b402b77",
+              "leftValue": "={{ $json.attempts }}",
+              "rightValue": "={{ $json.maxAttempts }}",
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "7bcd2849-84a9-4b97-85ee-93ec3d3ab2e6",
+      "name": "Zbývá pokus?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        740,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.min(30, 2 ** ($json.attempts - 1)) }}",
+        "unit": "minutes"
+      },
+      "id": "b0a2a8d2-d8a6-4936-93e2-d47dccd81444",
+      "name": "Počkat exponenciálně",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        -120
+      ],
+      "webhookId": "4e63f0e7-8dab-48f0-aed6-7e0c0a7be3d1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/ulohy/zpracovat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Cron-Secret",
+              "value": "={{ $env.FOODTAB_CRON_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ duvod: \"publish-retry\" }) }}"
+      },
+      "id": "788a4ead-aad8-4923-9ed9-06ed76648356",
+      "name": "Zpracovat frontu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "258fa1b9-c4e1-4a57-af60-5b1046fc9e17",
+              "leftValue": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "aad7ba51-b960-496c-9689-6efbd22e7313",
+      "name": "Je kam poslat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        960,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ text: \"FoodTab Marketing — publikace vyčerpala pokusy (\" + $json.attempts + \"/\" + $json.maxAttempts + \"). Úloha \" + $json.jobId + \" je v mrtvé schránce a čeká na člověka. Chyba: \" + $json.chyba, jobId: $json.jobId, contentItemId: $json.contentItemId }) }}"
+      },
+      "id": "0e6f6fcd-1b10-4b59-b5db-b6ebeb18274c",
+      "name": "Eskalovat člověku",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "Událost publish.failed": {
+      "main": [
+        [
+          {
+            "node": "Ověřit podpis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ověřit podpis": {
+      "main": [
+        [
+          {
+            "node": "Načíst pokus",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Načíst pokus": {
+      "main": [
+        [
+          {
+            "node": "Přijato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Přijato": {
+      "main": [
+        [
+          {
+            "node": "Zbývá pokus?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zbývá pokus?": {
+      "main": [
+        [
+          {
+            "node": "Počkat exponenciálně",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Je kam poslat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Počkat exponenciálně": {
+      "main": [
+        [
+          {
+            "node": "Zpracovat frontu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Je kam poslat?": {
+      "main": [
+        [
+          {
+            "node": "Eskalovat člověku",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

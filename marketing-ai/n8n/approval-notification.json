@@ -1,0 +1,275 @@
+{
+  "name": "FoodTab Marketing — upozornění na schvalování",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Upozornění na schvalování\n\nDva vstupy — obojí jen **oznámí** a skončí:\n\n* `approval.requested` — někdo poslal obsah ke schválení,\n* `approval.decided` — schvalovatel rozhodl.\n\n**Execution nikdy nečeká na kliknutí člověka.** Schválení žije\nv aplikaci (`approval_requests`, `approval_decisions`, vázané na\notisk verze). Rozhodnutí vyvolá novou podepsanou událost — to je ten\ndruhý webhook.\n\nKdyž `NOTIFY_WEBHOOK_URL` není nastavená, uzel upozornění se\npřeskočí a workflow jen odpoví. Adresa je Slack incoming webhook,\nTeams, nebo e-mailová brána — cokoli, co přijme JSON POST.\n\nProměnné: `FOODTAB_WEBHOOK_SECRET`, `NOTIFY_WEBHOOK_URL`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "0eb90f6b-24bb-4e0d-98bb-45ed369917ec",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "foodtab-marketing/approval.requested",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "bdf30b3a-36db-45ff-be92-a69078b57b97",
+      "name": "Událost approval.requested",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        -100
+      ],
+      "webhookId": "87f31625-150a-4970-bb5f-3fbef0c8f53d"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "foodtab-marketing/approval.decided",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e8db9d2a-d8a1-4e17-8b89-446e12d75761",
+      "name": "Událost approval.decided",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -140,
+        120
+      ],
+      "webhookId": "42294804-4150-4f03-85d2-0bf716f7986e"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Ověří podpis příchozího webhooku z aplikace.\n// Podpis: hex(HMAC-SHA256(FOODTAB_WEBHOOK_SECRET, timestamp + \".\" + telo)),\n// okno 5 minut proti přehrání — stejně jako overitPodpisWebhooku v aplikaci.\n//\n// POZOR: uzel Webhook tělo rozparsuje a my ho tady serializujeme znovu.\n// Funguje to, protože aplikace posílá JSON.stringify bez mezer a Node\n// zachová pořadí klíčů. Kdyby aplikace tělo někdy formátovala jinak,\n// zapněte v uzlu Webhook volbu Raw Body a počítejte HMAC nad ním.\nconst crypto = require('crypto');\nconst vstup = $input.first().json;\nconst hlavicky = vstup.headers || {};\nconst secret = $env.FOODTAB_WEBHOOK_SECRET;\nif (!secret) throw new Error('Chybí proměnná prostředí FOODTAB_WEBHOOK_SECRET — bez ní nejde podpis ověřit.');\nconst ts = String(hlavicky['x-foodtab-timestamp'] || '');\nconst podpis = String(hlavicky['x-foodtab-signature'] || '');\nif (!ts || !podpis) throw new Error('Chybí hlavička X-FoodTab-Timestamp nebo X-FoodTab-Signature.');\nif (!Number.isFinite(Number(ts)) || Math.abs(Date.now() / 1000 - Number(ts)) > 300) {\n  throw new Error('Časová značka je mimo okno 5 minut (nesynchronizované hodiny nebo přehraný požadavek).');\n}\nconst telo = JSON.stringify(vstup.body || {});\nconst ocekavany = crypto.createHmac('sha256', secret).update(ts + '.' + telo).digest('hex');\nconst a = Buffer.from(ocekavany, 'utf8');\nconst b = Buffer.from(podpis, 'utf8');\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new Error('Neplatný podpis webhooku.');\nconst zprava = vstup.body || {};\nreturn [{ json: { typ: zprava.type || '', klicUdalosti: String(hlavicky['x-foodtab-idempotency-key'] || zprava.idempotencyKey || ''), organizationId: zprava.organizationId || null, payload: zprava.payload || {} } }];"
+      },
+      "id": "bbf324c9-a7db-42b9-87cd-b033558bcc64",
+      "name": "Ověřit podpis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "02060bc7-aca7-41b5-b53a-1a0b9a0f0063",
+              "name": "text",
+              "value": "={{ $json.typ === 'approval.decided' ? 'FoodTab Marketing — rozhodnuto: ' + ($json.payload.decision || 'neznámé') + ' — „' + ($json.payload.title || 'obsah') + '“' : 'FoodTab Marketing — čeká na schválení: „' + ($json.payload.title || 'obsah') + '“' }}",
+              "type": "string"
+            },
+            {
+              "id": "8324be5c-881e-46bf-bf6a-18cbf61f5a49",
+              "name": "odkaz",
+              "value": "={{ $env.FOODTAB_MARKETING_URL }}/obsah/{{ $json.payload.contentItemId || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "bfa68cf1-3f29-4c94-9745-c6b6dcfdc2de",
+              "name": "udalost",
+              "value": "={{ $json.typ }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2ebad8f3-b407-4e3a-9474-0f258da56afd",
+      "name": "Sestavit zprávu",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0a61d58b-7730-45e1-8091-cc995b9861f5",
+              "leftValue": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "0befd4f7-f433-4a62-b4ed-825a208ce6c4",
+      "name": "Je kam poslat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ text: $json.text + \" — \" + $json.odkaz, udalost: $json.udalost, odkaz: $json.odkaz }) }}"
+      },
+      "id": "04e3c495-dd2c-4b75-a157-d68db93c87bf",
+      "name": "Poslat upozornění",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ executionId: $execution.id, ok: true, upozorneno: $env.NOTIFY_WEBHOOK_URL ? true : false }) }}",
+        "options": {}
+      },
+      "id": "bdf21b59-0d43-4357-ba4b-f1a5ac890bb8",
+      "name": "Odpovědět aplikaci",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Událost approval.requested": {
+      "main": [
+        [
+          {
+            "node": "Ověřit podpis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Událost approval.decided": {
+      "main": [
+        [
+          {
+            "node": "Ověřit podpis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ověřit podpis": {
+      "main": [
+        [
+          {
+            "node": "Sestavit zprávu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sestavit zprávu": {
+      "main": [
+        [
+          {
+            "node": "Je kam poslat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Je kam poslat?": {
+      "main": [
+        [
+          {
+            "node": "Poslat upozornění",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Odpovědět aplikaci",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poslat upozornění": {
+      "main": [
+        [
+          {
+            "node": "Odpovědět aplikaci",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

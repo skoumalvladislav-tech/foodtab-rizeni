@@ -47,3 +47,11 @@ Patří výhradně na server a do prohlížeče se nesmí dostat nikdy.
 O tom, kdo co uvidí, rozhoduje databáze — funkce `app.has_access()`
 a politiky nad ní. Aplikace si pravidla nedopočítává sama, jinak by
 se obě strany časem rozešly.
+
+## FoodTab Marketing AI
+
+Ve složce `marketing-ai/` je samostatná aplikace pro tvorbu, schvalování
+a publikování gastro obsahu (Instagram, Facebook). Má vlastní `package.json`,
+migrace, testy a dokumentaci — viz `marketing-ai/README.md`. Staví se tak,
+aby šla později vložit do FoodTab Řízení (`marketing-ai/docs/FOODTAB_INTEGRATION.md`).
+Mateřský lint a typecheck do ní nesahají.

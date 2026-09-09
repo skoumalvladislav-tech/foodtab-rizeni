@@ -14,7 +14,7 @@
  *  8. Bernard Bar: víkendové menu → carousel/feed.
  */
 import { dnes, nejblizsiSobota, posunDne } from "../../lib/cas.ts";
-import { DEMO_ORG, DEMO_ORG_2, DEMO_USERS, DEMO_VENUES } from "../../lib/demo-ucty.ts";
+import { DEMO_ORG, DEMO_USERS, DEMO_VENUES } from "../../lib/demo-ucty.ts";
 import { zpracovatFrontu } from "../../lib/domena/fronta.ts";
 import { nahratMedium } from "../../lib/domena/media.ts";
 import { rozpoznatMenuZTextu } from "../../lib/domena/menu-text.ts";

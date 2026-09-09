@@ -69,7 +69,7 @@ function scenyZ(z: AiZadani, delka: number): AiVarianta["storyboard"] {
   ];
   let i = 2;
   for (const it of items) {
-    sceny.push({ poradi: i++, druh: "item", sekundy: Math.max(2, Math.min(4, (delka - 5) / Math.max(1, items.length))), mediaAssetId: mediaIds[(i - 2) % Math.max(1, mediaIds.length)] ?? null, textVObraze: it.nazev, titulek: it.cenaKc !== null ? kc(it.cenaKc) : "", poznamka: "" });
+    sceny.push({ poradi: i++, druh: "item", sekundy: Math.round(Math.max(2, Math.min(4, (delka - 5) / Math.max(1, items.length))) * 2) / 2, mediaAssetId: mediaIds[(i - 2) % Math.max(1, mediaIds.length)] ?? null, textVObraze: it.nazev, titulek: it.cenaKc !== null ? kc(it.cenaKc) : "", poznamka: "" });
   }
   if (items.length === 0) {
     sceny.push({ poradi: i++, druh: "photo", sekundy: 4, mediaAssetId: mediaIds[0] ?? null, textVObraze: (z.fakta.vstupy.title as string) ?? "", titulek: "", poznamka: "" });

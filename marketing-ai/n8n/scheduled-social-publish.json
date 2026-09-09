@@ -1,0 +1,287 @@
+{
+  "name": "FoodTab Marketing — publikace podle plánu",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Publikace naplánovaných příspěvků\n\nKaždých **5 minut** šťouchne do fronty aplikace\n(`POST /api/v1/ulohy/zpracovat` s hlavičkou `X-Cron-Secret`).\n\n**Publikace se neděje v n8n.** Fronta v aplikaci si sama ověří, že\nschválení pořád platí (otisk verze), a teprve pak zavolá publisher.\nn8n je jen budík — když vypadne, nic se neztratí, jen se to zveřejní\npři dalším běhu.\n\nKdyž volání selže (nebo vrátí jiný stav než 2xx), pošle se upozornění\nna `NOTIFY_WEBHOOK_URL`, pokud je nastavená.\n\nČasové pásmo bere Schedule Trigger z nastavení n8n — nastavte\n`Europe/Prague`.\n\nProměnné: `FOODTAB_MARKETING_URL`, `FOODTAB_CRON_SECRET`,\n`NOTIFY_WEBHOOK_URL`.",
+        "width": 460,
+        "height": 460,
+        "color": 7
+      },
+      "id": "0ceff0f1-0fff-45f5-973a-45d0eb679189",
+      "name": "Popis",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -460,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "5252925b-bd02-4b3c-97df-a8d780f1720a",
+      "name": "Každých 5 minut",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -140,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.FOODTAB_MARKETING_URL }}/api/v1/ulohy/zpracovat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Cron-Secret",
+              "value": "={{ $env.FOODTAB_CRON_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ duvod: \"scheduled-social-publish\" }) }}"
+      },
+      "id": "f47da23c-9df6-4d20-b23e-d3be533a7a6f",
+      "name": "Zpracovat frontu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e6b60d02-bd50-4a05-9b7a-fe928a9210ff",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            },
+            {
+              "id": "d78ba9ad-e3b3-4590-9ed0-9146552bf0de",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 300,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "bcc1ced7-7d98-4daa-aa3d-ea65443e9898",
+      "name": "Prošlo to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "256bc93f-582f-42fa-933b-3dcc23d67315",
+              "name": "publikovano",
+              "value": "={{ $json.body && $json.body.publikace ? $json.body.publikace.published : 0 }}",
+              "type": "number"
+            },
+            {
+              "id": "a0462533-756d-4ad3-a2f4-dc3f9fbeda33",
+              "name": "selhalo",
+              "value": "={{ $json.body && $json.body.publikace ? $json.body.publikace.failed : 0 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c2390154-3588-4585-8dfb-c1e88b50348c",
+      "name": "Shrnutí běhu",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        520,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "279913da-0a9a-42fc-b07f-fd857f609688",
+              "leftValue": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b50a9827-b084-4d60-b44d-8a430b136e68",
+      "name": "Je kam poslat?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        520,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.NOTIFY_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ text: \"FoodTab Marketing — fronta neodpověděla (HTTP \" + $json.statusCode + \"). Naplánované příspěvky se nezveřejnily.\", statusCode: $json.statusCode }) }}"
+      },
+      "id": "16de6a0b-2073-431c-8cce-9b220ca7e0aa",
+      "name": "Upozornit na výpadek fronty",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        740,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Každých 5 minut": {
+      "main": [
+        [
+          {
+            "node": "Zpracovat frontu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zpracovat frontu": {
+      "main": [
+        [
+          {
+            "node": "Prošlo to?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prošlo to?": {
+      "main": [
+        [
+          {
+            "node": "Shrnutí běhu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Je kam poslat?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Je kam poslat?": {
+      "main": [
+        [
+          {
+            "node": "Upozornit na výpadek fronty",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {},
+  "tags": []
+}

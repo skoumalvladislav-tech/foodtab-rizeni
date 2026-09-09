@@ -59,7 +59,6 @@ export default async function ObsahDetail({ params, searchParams }: { params: Pr
   const { item, verze, varianty, komentare, zadosti, joby, media, ucty } = data;
   const cur = verze.find((x) => x.id === item.current_version_id) ?? verze[0];
   const navrh = cur?.ai_proposal ?? null;
-  const varianta = navrh?.varianty.find((x) => x.klic === cur?.selected_variant_key) ?? navrh?.varianty[0] ?? null;
   const chybi = cur ? kontrolaPredSchvalenim(cur) : [];
   const mediaMap = new Map(media.map((m) => [m.id, m]));
   const cover = cur?.cover_asset_id ?? cur?.media_asset_ids[0] ?? null;
@@ -218,7 +217,7 @@ export default async function ObsahDetail({ params, searchParams }: { params: Pr
                   <summary>Storyboard videa ({cur.storyboard.reduce((s, x) => s + x.sekundy, 0)} s)</summary>
                   <div className="tabulka-obal"><table className="tabulka"><thead><tr><th>#</th><th>Scéna</th><th>Sekundy</th><th>Text v obraze</th><th>Titulek</th></tr></thead>
                     <tbody>{cur.storyboard.map((s) => (
-                      <tr key={s.poradi}><td>{s.poradi}</td><td>{s.druh}</td><td><input name={`sc_${s.poradi}_sekundy`} type="number" step="0.5" min="0.5" max="30" defaultValue={s.sekundy} style={{ width: 80 }} /></td>
+                      <tr key={s.poradi}><td>{s.poradi}</td><td>{s.druh}</td><td><input name={`sc_${s.poradi}_sekundy`} type="number" step="any" min="0.5" max="30" defaultValue={s.sekundy} style={{ width: 80 }} /></td>
                         <td><input name={`sc_${s.poradi}_text`} defaultValue={s.textVObraze} /></td><td><input name={`sc_${s.poradi}_titulek`} defaultValue={s.titulek} /></td></tr>
                     ))}</tbody></table></div>
                   <label className="chip" style={{ marginTop: 8 }}><input type="checkbox" name="titulky" defaultChecked={cur.inputs.titulky !== false} /> titulky</label>{" "}

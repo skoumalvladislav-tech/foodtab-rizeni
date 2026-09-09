@@ -18,13 +18,13 @@ systémy (Slack, e-mail, tabulky) a přehled běhů.
 | Soubor | Spouští | Co dělá |
 |---|---|---|
 | `content-generation.json` | webhook `content.generate` z aplikace | zavolá `/api/v1/obsah/{id}/navrh` a vrátí `executionId` |
-| `render-monitor.json` | webhook `render.submitted` | každých 30 s se ptá `/api/v1/render/{jobId}`, po dokončení pošle `render.finished` do `/api/v1/webhooky/n8n` |
-| `approval-notification.json` | webhook `approval.requested` | pošle upozornění do externího kanálu (Slack/e-mail přes `FOODTAB_NOTIFY_WEBHOOK_URL`) a **hned skončí** |
+| `render-monitor.json` | webhook `render.submitted` | odpoví hned, pak každých 30 s zavolá frontu `/api/v1/ulohy/zpracovat` (ta dotáhne asynchronní render), nejvýš 20×  |
+| `approval-notification.json` | webhooky `approval.requested` a `approval.decided` | pošle upozornění do externího kanálu (Slack/e-mail přes `NOTIFY_WEBHOOK_URL`) a **hned skončí** |
 | `scheduled-social-publish.json` | každých 5 minut | zavolá frontu `/api/v1/ulohy/zpracovat` s `X-Cron-Secret` |
-| `publish-retry-deadletter.json` | webhook `publish.failed` | při vyčerpaných pokusech upozorní; jinak počká a zavolá `/api/v1/publikace/{jobId}/opakovat` |
+| `publish-retry-deadletter.json` | webhook `publish.failed` | při vyčerpaných pokusech upozorní (eskalace); jinak počká exponenciálně (1, 2, 4… minut, strop 30) a zavolá frontu `/api/v1/ulohy/zpracovat` |
 | `metrics-sync.json` | denně 06:00 | zavolá `/api/v1/analytika/synchronizovat` |
-| `connection-health.json` | denně 07:00 | přečte `/api/v1/pripojeni`, upozorní na chyby a tokeny vypršející do 7 dní |
-| `recurring-campaigns.json` | čtvrtek 10:00 | zavolá `/api/v1/kampane/spustit` — založí koncept a **žádost o schválení**, nikdy nepublikuje |
+| `connection-health.json` | každou hodinu | `GET /api/v1/health` a `POST /api/v1/integrace/test-vse` (otestuje zákaznická připojení, označí tokeny vypršející do 7 dní, upozorní správce) |
+| `recurring-campaigns.json` | denně 07:00 | zavolá `/api/v1/ulohy/zpracovat?automatizace=1` — spustí zapnuté automatizace, které založí **koncepty ke schválení**, nikdy nepublikují |
 
 Podrobný postup importu a tabulka proměnných je v `n8n/README.md`.
 
@@ -48,8 +48,8 @@ s `$vars`, pak je nutné výrazy přepsat).
 | Proměnná | Význam |
 |---|---|
 | `FOODTAB_MARKETING_URL` | adresa aplikace bez lomítka, např. `https://marketing.foodtab.cz` (= `APP_URL` aplikace) |
-| `FOODTAB_MARKETING_WEBHOOK_SECRET` | společné tajemství podpisu; **musí být stejné jako `N8N_WEBHOOK_SECRET`** v aplikaci (nebo `webhook_secret` v připojení n8n uloženém v Integracích) |
-| `FOODTAB_NOTIFY_WEBHOOK_URL` | (volitelné) adresa, kam posílat upozornění — Slack incoming webhook, Teams, e-mailová brána. Když chybí, uzel upozornění se přeskočí. |
+| `FOODTAB_WEBHOOK_SECRET` | společné tajemství podpisu; **musí být stejné jako `N8N_WEBHOOK_SECRET`** v aplikaci (nebo `webhook_secret` v připojení n8n uloženém v Integracích) |
+| `NOTIFY_WEBHOOK_URL` | (volitelné) adresa, kam posílat upozornění — Slack incoming webhook, Teams, e-mailová brána. Když chybí, uzel upozornění se přeskočí. |
 | `NODE_FUNCTION_ALLOW_BUILTIN=crypto` | Code uzly volají `require('crypto')` pro HMAC. Bez této proměnné n8n `require` v Code uzlu zakáže. |
 
 ## 4. Credentials — „FoodTab Marketing webhook secret“
@@ -96,7 +96,7 @@ V Code uzlech workflow je totéž:
 
 ```js
 const crypto = require('crypto');
-const secret = $env.FOODTAB_MARKETING_WEBHOOK_SECRET;
+const secret = $env.FOODTAB_WEBHOOK_SECRET;
 const ts = String(Math.floor(Date.now() / 1000));
 const body = JSON.stringify(payload);
 const sig = crypto.createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex');
@@ -114,7 +114,7 @@ workflow.
 
 n8n umí u každého workflow nastavit *Settings → Error Workflow*.
 Doporučení: vytvořit jeden workflow „FoodTab Marketing — chyby“ s uzlem
-*Error Trigger* → HTTP POST na `FOODTAB_NOTIFY_WEBHOOK_URL` (a případně
+*Error Trigger* → HTTP POST na `NOTIFY_WEBHOOK_URL` (a případně
 podepsaný POST `workflow.failed` do `/api/v1/webhooky/n8n`, aby se
 selhání ukázalo v aplikaci). Pak ho nastavit jako Error Workflow u všech
 osmi. Není součástí importu, protože obsahuje adresu vašeho kanálu.

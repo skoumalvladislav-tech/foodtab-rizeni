@@ -18,7 +18,7 @@ export default async function MenuDetail({ params, searchParams }: { params: Pro
   const v = k.venue!;
   const data = await withUser(k.session.userId, async (tx) => {
     const m = await tx.one<{ id: string; kind: string; title: string; valid_from: string | null; valid_to: string | null; status: string; source: string; raw_import: unknown; source_asset_id: string | null; confirmed_at: string | null; confirmer: string | null }>(
-      "select m.*, p.display_name as confirmer from marketing.menus m left join marketing.profiles p on p.user_id = m.confirmed_by where m.id = $1 and m.venue_id = $2", [id, v.id]);
+      "select m.id, m.kind, m.title, m.valid_from::text, m.valid_to::text, m.status, m.source, m.raw_import, m.source_asset_id, m.confirmed_at, p.display_name as confirmer from marketing.menus m left join marketing.profiles p on p.user_id = m.confirmed_by where m.id = $1 and m.venue_id = $2", [id, v.id]);
     if (!m) return null;
     const days = await tx.q<{ id: string; label: string; day_date: string | null }>("select id, label, day_date::text from marketing.menu_days where menu_id = $1 order by sort_order", [id]);
     const items = await tx.q<{ id: string; menu_day_id: string | null; category: string; name: string; description: string; price_cents: number | null; allergens: string[]; note: string; availability: string; needs_review: boolean; review_reason: string | null }>(
@@ -33,8 +33,7 @@ export default async function MenuDetail({ params, searchParams }: { params: Pro
 
   const radek = (it: (typeof items)[number], i: number) => (
     <tr key={it.id} style={it.needs_review || it.price_cents === null ? { background: "var(--pozor-bg)" } : undefined}>
-      <input type="hidden" name={`id_${i}`} value={it.id} /><input type="hidden" name={`day_${i}`} value={it.menu_day_id ?? ""} />
-      <td>{edit ? <select name={`cat_${i}`} defaultValue={it.category}><option value="polevka">Polévka</option><option value="predkrm">Předkrm</option><option value="hlavni">Hlavní</option><option value="dezert">Dezert</option><option value="napoj">Nápoj</option><option value="ostatni">Ostatní</option></select> : it.category}</td>
+      <td><input type="hidden" name={`id_${i}`} value={it.id} /><input type="hidden" name={`day_${i}`} value={it.menu_day_id ?? ""} />{edit ? <select name={`cat_${i}`} defaultValue={it.category}><option value="polevka">Polévka</option><option value="predkrm">Předkrm</option><option value="hlavni">Hlavní</option><option value="dezert">Dezert</option><option value="napoj">Nápoj</option><option value="ostatni">Ostatní</option></select> : it.category}</td>
       <td>{edit ? <input name={`name_${i}`} defaultValue={it.name} /> : it.name}{it.needs_review && <div className="stitek stitek-pozor">vyžaduje kontrolu{it.review_reason ? `: ${it.review_reason}` : ""}</div>}</td>
       <td>{edit ? <input name={`desc_${i}`} defaultValue={it.description} /> : it.description}</td>
       <td>{edit ? <input name={`price_${i}`} type="number" min={0} inputMode="numeric" defaultValue={it.price_cents === null ? "" : it.price_cents / 100} style={{ width: 90 }} /> : kc(it.price_cents)}{it.price_cents === null && <div className="faint">chybí cena</div>}</td>

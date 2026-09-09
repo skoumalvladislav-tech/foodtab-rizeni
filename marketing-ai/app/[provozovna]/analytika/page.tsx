@@ -26,11 +26,13 @@ export default async function Analytika({ params, searchParams }: { params: Prom
     const utm = await tx.q<{ id: string; target_url: string; short_code: string; clicks: number; utm: Record<string, string>; created_at: string }>("select * from marketing.utm_links where venue_id = $1 order by created_at desc limit 20", [v.id]);
     const brand = await tx.one<{ reservation_url: string; ordering_url: string; website_url: string }>("select reservation_url, ordering_url, website_url from marketing.brand_kits where venue_id = $1", [v.id]);
     const usage = await tx.q<{ provider_key: string; n: number; cost: number | null }>("select provider_key, count(*)::int as n, sum(estimated_cost_cents)::int as cost from marketing.provider_usage_records where venue_id = $1 and occurred_at > now() - interval '30 days' group by provider_key order by n desc", [v.id]);
-    return { pubs, utm, brand, usage };
+    // „Teď“ říká databáze, ne vykreslování (React Compiler hlídá čistotu renderu).
+    const ted = await tx.one<{ ms: string }>("select (extract(epoch from now()) * 1000)::bigint::text as ms");
+    return { pubs, utm, brand, usage, nowMs: Number(ted?.ms ?? 0) };
   });
   const sMetric = data.pubs.filter((p) => p.metrics);
   const sum = (key: string) => sMetric.reduce((s, p) => s + (p.metrics?.[key] ?? 0), 0);
-  const tyden = data.pubs.filter((p) => Date.now() - new Date(p.published_at).getTime() < 7 * 86400000);
+  const tyden = data.pubs.filter((p) => data.nowMs - new Date(p.published_at).getTime() < 7 * 86400000);
   const byTemplate = new Map<string, { n: number; reach: number }>();
   for (const p of sMetric) { const t = p.template ?? "bez šablony"; const cur = byTemplate.get(t) ?? { n: 0, reach: 0 }; cur.n++; cur.reach += p.metrics?.reach ?? 0; byTemplate.set(t, cur); }
   const best = [...byTemplate.entries()].map(([t, x]) => ({ t, avg: x.reach / x.n, n: x.n })).sort((a, b) => b.avg - a.avg);

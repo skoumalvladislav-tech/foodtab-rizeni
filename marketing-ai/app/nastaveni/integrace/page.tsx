@@ -28,16 +28,15 @@ export default async function Integrace({ searchParams }: { searchParams: Promis
   const k = await nacistKontext(sp.provozovna ?? null);
   const venueId = k.venue?.id ?? null;
   const data = await withUser(k.session.userId, async (tx) => {
-    const [katalog, schopnosti, pref, spojeni, ucty, klice] = await Promise.all([
+    const [katalog, schopnosti, pref, spojeni, ucty] = await Promise.all([
       tx.q<{ key: string; category: string; name: string; vendor: string; description: string; recommendation: string; implementation_status: string; connection_modes: string[]; auth_type: string; billing: string; docs_url: string | null; pricing_url: string | null; pricing_note: string | null; pricing_checked_at: string | null; score_cost: number; score_simplicity: number; score_quality: number; score_speed: number; score_automation: number; setup_complexity: number; benefits: string[]; limitations: string[] }>("select * from marketing.provider_catalog order by category, sort_order"),
       tx.q<{ provider_key: string; capability: string; status: string; note: string | null; description: string }>("select pc.*, c.description from marketing.provider_capabilities pc join marketing.capabilities c on c.key = pc.capability order by pc.capability"),
       tx.q<{ category: string; provider_key: string; connection_id: string | null; venue_id: string | null }>("select category, provider_key, connection_id, venue_id from marketing.organization_provider_preferences where organization_id = $1 and is_active and (venue_id is null or venue_id = $2)", [k.organization.id, venueId]),
       tx.q<{ id: string; provider_key: string; venue_id: string | null; mode: string; status: string; display_name: string; external_account: Record<string, unknown>; granted_scopes: string[]; expires_at: string | null; last_test_at: string | null; last_test_ok: boolean | null; last_error: string | null; venue_name: string | null }>(
         "select c.*, v.name as venue_name from marketing.integration_connections c left join marketing.venues v on v.id = c.venue_id where c.organization_id = $1 and c.revoked_at is null order by c.created_at", [k.organization.id]),
       tx.q<{ connection_id: string; platform: string; name: string; username: string | null; venue_name: string | null; is_active: boolean }>("select sa.connection_id, sa.platform, sa.name, sa.username, v.name as venue_name, sa.is_active from marketing.social_accounts sa left join marketing.venues v on v.id = sa.venue_id where sa.organization_id = $1", [k.organization.id]),
-      tx.q<{ connection_id: string; fingerprint: string; rotated_at: string | null; created_at: string }>("select connection_id, 'uloženo' as fingerprint, null::timestamptz as rotated_at, now() as created_at from marketing.integration_connections where organization_id = $1 and secret_ref is not null", [k.organization.id]),
     ]);
-    return { katalog, schopnosti, pref, spojeni, ucty, klice };
+    return { katalog, schopnosti, pref, spojeni, ucty };
   });
   const smi = muze(k, "integrations.manage");
   const aktivni = (cat: string) => data.pref.find((p) => p.category === cat && p.venue_id === venueId) ?? data.pref.find((p) => p.category === cat && p.venue_id === null);
