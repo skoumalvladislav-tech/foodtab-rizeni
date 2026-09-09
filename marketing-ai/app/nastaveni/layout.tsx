@@ -6,10 +6,9 @@ import { Shell } from "../shell";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProvozovnaLayout({ children, params }: { children: React.ReactNode; params: Promise<{ provozovna: string }> }) {
-  const { provozovna } = await params;
-  const k = await nacistKontext(provozovna);
-  if (!k.venue) redirect("/");
+/** Nastavení organizace — rám s první viditelnou provozovnou. */
+export default async function NastaveniLayout({ children }: { children: React.ReactNode }) {
+  const k = await nacistKontext(null);
   if (!k.organization.onboarding_done_at) redirect("/pruvodce");
   return <Shell k={k}>{children}</Shell>;
 }

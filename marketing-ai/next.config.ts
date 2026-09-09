@@ -9,6 +9,12 @@ const nextConfig: NextConfig = {
   // PGlite je WebAssembly a musí zůstat mimo bundler — v demo režimu
   // běží databáze přímo v procesu serveru (viz lib/db/README v docs/SETUP.md).
   serverExternalPackages: ["@electric-sql/pglite", "postgres"],
+  experimental: {
+    // Nahrávání médií jde přes server action; výchozí limit 1 MB by
+    // nepustil ani jednu fotografii. Větší videa patří přes API
+    // /api/v1/media (viz docs/SETUP.md).
+    serverActions: { bodySizeLimit: "60mb" },
+  },
   async redirects() {
     return [
       // Kořen vede na rozcestník, který vybere provozovnu podle přihlášení.

@@ -1,8 +1,8 @@
 import { formatDatumCas, relativne } from "@/lib/cas";
 import { nacistKontext, muze } from "@/lib/authz";
 import { withUser } from "@/lib/db";
-import { STAVY_OBSAHU } from "@/lib/domena/stavy";
 
+import { Stav } from "../../ui";
 import { Kontext } from "../kontext";
 
 export default async function Prehled({ params }: { params: Promise<{ provozovna: string }> }) {
@@ -11,7 +11,7 @@ export default async function Prehled({ params }: { params: Promise<{ provozovna
   const v = k.venue!;
 
   const data = await withUser(k.session.userId, async (tx) => {
-    const [cekajici, dnes, nadchazejici, chyby, posledni, spojeni] = await Promise.all([
+    const [cekajici, dnes, nadchazejici, chyby, posledni, spojeni, napady] = await Promise.all([
       tx.q<{ id: string; title: string; requested_at: string; content_item_id: string }>(
         `select r.id, i.title, r.requested_at, r.content_item_id from marketing.approval_requests r
            join marketing.content_items i on i.id = r.content_item_id
@@ -39,8 +39,9 @@ export default async function Prehled({ params }: { params: Promise<{ provozovna
            from marketing.integration_connections c join marketing.provider_catalog pc on pc.key = c.provider_key
           where c.organization_id = $1 and (c.venue_id is null or c.venue_id = $2) and c.revoked_at is null
           order by pc.category`, [k.organization.id, v.id]),
+      tx.q<{ id: string; text: string }>("select id, text from marketing.ideas where venue_id = $1 and status = 'new' order by created_at desc limit 3", [v.id]),
     ]);
-    return { cekajici, dnes, nadchazejici, chyby, posledni, spojeni };
+    return { cekajici, dnes, nadchazejici, chyby, posledni, spojeni, napady };
   });
 
   const problemy = data.spojeni.filter((s) => s.status === "error" || s.status === "needs_attention");
@@ -57,15 +58,16 @@ export default async function Prehled({ params }: { params: Promise<{ provozovna
       </div>
 
       {muze(k, "content.create") && (
-        <div className="velke-tlacitko-obal">
+        <div className="velke-tlacitko-obal btn-radek">
           <a className="btn btn-primary btn-velke" href={`/${v.slug}/tvorba`}>＋ Vytvořit nový příspěvek nebo Reel</a>
-          <a className="btn btn-tiche" href={`/${v.slug}/tvorba?rezim=rychly`} style={{ marginLeft: 8 }}>Rychlý režim: fotka + věta</a>
+          <a className="btn btn-tiche" href={`/${v.slug}/tvorba?rezim=rychly`}>Rychlý režim: fotka + jedna věta</a>
+          <a className="btn btn-tiche" href={`/${v.slug}/tvorba?rezim=kampan`}>Kampaňový režim: série obsahu</a>
         </div>
       )}
 
       {mock.length > 0 && (
         <div className="hlaska hlaska-pozor">
-          <b>Demo režim.</b> {mock.length} nástrojů běží jako mock — nic se nikam nezveřejní. Skutečné nástroje připojíte v{" "}
+          <b>Demo režim.</b> {mock.length} nástrojů běží jako mock — nic se nikam nezveřejní, výsledek bude označený <code>published_mock</code>. Skutečné nástroje připojíte v{" "}
           <a href="/nastaveni/integrace">Integracích</a>.
         </div>
       )}
@@ -119,12 +121,16 @@ export default async function Prehled({ params }: { params: Promise<{ provozovna
             ))}</ul>
           </section>
         )}
+        {data.napady.length > 0 && (
+          <section className="karta">
+            <h3>Schránka nápadů</h3>
+            <ul className="seznam">{data.napady.map((n) => (
+              <li key={n.id}><div className="roste">{n.text}</div><a className="btn btn-male" href={`/${v.slug}/tvorba?napad=${n.id}`}>Vytvořit</a></li>
+            ))}</ul>
+            <a className="faint" href={`/${v.slug}/kampane#napady`}>Všechny nápady</a>
+          </section>
+        )}
       </div>
     </>
   );
-}
-
-export function Stav({ s }: { s: string }) {
-  const d = STAVY_OBSAHU[s] ?? { label: s, tone: "" };
-  return <span className={`stitek ${d.tone ? "stitek-" + d.tone : ""}`}>{d.label}</span>;
 }
