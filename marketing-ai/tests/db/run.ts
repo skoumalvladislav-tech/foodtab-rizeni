@@ -3,23 +3,28 @@
  *
  *   npm run test:db
  *
- * Scénáře:
+ * Scénáře (číslování odpovídá výpisu při běhu):
  *  1. izolace organizací a provozoven (RLS),
- *  2. celá cesta Černá Perla: obsah → návrh → úprava → schválení → plán → published_mock,
+ *  2. celá cesta Černá Perla: obsah → návrh → úprava → schválení → plán →
+ *     published_mock, včetně toho, že druhý běh fronty nic nezdvojí,
  *  3. změna po schválení ruší schválení; bez schválení nejde publikovat,
- *  4. opakování fronty nevytvoří duplicitní publikaci,
- *  5. přepnutí poskytovatele bez ztráty obsahu; cizí credentials nejdou číst,
- *  6. katalog nepředstírá adaptér, který v kódu není,
- *  7. render: dlouhé názvy s diakritikou, přetečení na víc slidů,
- *  8. Bernard Bar: víkendové menu → carousel/feed.
+ *  4. přepnutí poskytovatele bez ztráty obsahu; cizí credentials nejdou číst,
+ *  5. katalog nepředstírá adaptér, který v kódu není,
+ *  6. render: dlouhé názvy s diakritikou, přetečení na víc slidů,
+ *  7. Bernard Bar: víkendové menu → carousel/feed,
+ *  8. poruchy: neplatný klíč, výměna a odpojení připojení, selhání AI
+ *     i renderu, vypršelý token Meta s opakováním až do dead_letter,
+ *     překročený limit Meta a duplicitní webhook.
  */
 import { dnes, nejblizsiSobota, posunDne } from "../../lib/cas.ts";
 import { DEMO_ORG, DEMO_USERS, DEMO_VENUES } from "../../lib/demo-ucty.ts";
-import { zpracovatFrontu } from "../../lib/domena/fronta.ts";
+import { zopakovatPublikaci, zpracovatFrontu } from "../../lib/domena/fronta.ts";
+import { aktivovat, odpojit, ulozitKlic, vybratPoskytovatele } from "../../lib/domena/integrace.ts";
 import { nahratMedium } from "../../lib/domena/media.ts";
 import { rozpoznatMenuZTextu } from "../../lib/domena/menu-text.ts";
 import { potvrditMenu, rozpoznaniNaVstup, ulozitMenu } from "../../lib/domena/menu.ts";
-import { naplanovat, navrhnout, novaVerze, pozadatOSchvaleni, rozhodnout, spustitRender, vytvoritObsah, nacistAktualniVerzi } from "../../lib/domena/obsah.ts";
+import { naplanovat, navrhnout, novaVerze, oznacitSelhaniNavrhu, pozadatOSchvaleni, rozhodnout, spustitRender, vytvoritObsah, nacistAktualniVerzi } from "../../lib/domena/obsah.ts";
+import { encryptCredentials } from "../../lib/providers/credentials.ts";
 import { FACTORIES } from "../../lib/providers/registry.ts";
 import { vykreslit } from "../../lib/render/svg-sablony.ts";
 import { ukazkovyObrazekSvg } from "../../lib/seed/ukazkove-obrazky.ts";
@@ -280,6 +285,141 @@ console.log("\n7. Bernard Bar Tábor: víkendové menu");
   check("Bernard: tisková A4 vykreslena", rend.status === "done", rend.error);
   await ocekavatChybu("editor Bernard Baru nerozhoduje o schválení", () =>
     jako(d, editorBernard.id, (tx) => pozadatOSchvaleni(tx, { itemId: r.itemId, userId: editorBernard.id }).then((id) => rozhodnout(tx, { requestId: id, userId: editorBernard.id, decision: "approved", comment: "" }))), /oprávnění/);
+}
+
+console.log("\n8. Poruchy: neplatný klíč, selhání AI a renderu, opakování publikace, duplicitní webhook");
+{
+  // --- (a) neplatný zákaznický klíč se NIKDY sám neaktivuje -----------
+  // 127.0.0.1:9 je „discard“ port — spojení se odmítne hned, bez sítě
+  // a bez čekání, takže kontrola nezávisí na tom, kde běží.
+  const vyber = await jako(d, vlastnik.id, (tx) => vybratPoskytovatele(tx, { organizationId: DEMO_ORG.id, venueId: null, providerKey: "n8n", userId: vlastnik.id }));
+  check("n8n si před připojením řekne o tajemství webhooku", vyber.needs === "webhook_secret");
+  const spatny = await jako(d, vlastnik.id, (tx) => ulozitKlic(tx, { connectionId: vyber.connectionId, credentials: { base_url: "http://127.0.0.1:9", webhook_secret: "spatne-tajemstvi" }, userId: vlastnik.id }));
+  check("nefunkční připojení se neoznačí za funkční", !spatny.ok, spatny.message);
+  const stavN8n = await d.one<{ status: string; last_test_ok: boolean | null; last_error: string | null }>("select status, last_test_ok, last_error from marketing.integration_connections where id = $1", [vyber.connectionId]);
+  check("připojení zůstalo ve stavu error i s důvodem", stavN8n?.status === "error" && stavN8n.last_test_ok === false && Boolean(stavN8n.last_error));
+  const poNeuspechu = await d.one<{ provider_key: string }>("select provider_key from marketing.organization_provider_preferences where organization_id = $1 and category = 'workflow_automation' and venue_id is null and is_active", [DEMO_ORG.id]);
+  check("po neúspěšném testu zůstává vybraná interní fronta", poNeuspechu?.provider_key === "internal_queue");
+
+  // --- (b) výměna klíče: jiný otisk, starý ciphertext je pryč ---------
+  const tajemstvi1 = await d.one<{ fingerprint: string; ciphertext: string; key_version: number }>("select fingerprint, ciphertext, key_version from marketing.integration_secrets where connection_id = $1", [vyber.connectionId]);
+  await jako(d, vlastnik.id, (tx) => ulozitKlic(tx, { connectionId: vyber.connectionId, credentials: { base_url: "http://127.0.0.1:9", webhook_secret: "jine-tajemstvi" }, userId: vlastnik.id }));
+  const tajemstvi2 = await d.one<{ fingerprint: string; ciphertext: string; key_version: number }>("select fingerprint, ciphertext, key_version from marketing.integration_secrets where connection_id = $1", [vyber.connectionId]);
+  check("výměna klíče přepsala tajemství (jiný otisk i ciphertext)", Boolean(tajemstvi1) && tajemstvi2!.fingerprint !== tajemstvi1!.fingerprint && tajemstvi2!.ciphertext !== tajemstvi1!.ciphertext);
+  check("výměna zvýšila verzi klíče, nezaložila druhý řádek", tajemstvi2!.key_version === tajemstvi1!.key_version + 1);
+  const kolikTajemstvi = await d.one<{ n: number }>("select count(*)::int as n from marketing.integration_secrets where connection_id = $1", [vyber.connectionId]);
+  check("po výměně zůstává jediné tajemství", kolikTajemstvi?.n === 1);
+
+  // --- (c) odpojení smaže tajemství a vrátí záložní nástroj ----------
+  await jako(d, vlastnik.id, (tx) => aktivovat(tx, DEMO_ORG.id, null, "workflow_automation", "n8n", vyber.connectionId, vlastnik.id));
+  const predOdpojenim = await d.one<{ provider_key: string }>("select provider_key from marketing.organization_provider_preferences where organization_id = $1 and category = 'workflow_automation' and venue_id is null and is_active", [DEMO_ORG.id]);
+  check("n8n je teď opravdu aktivní (jinak by další kontrola neplatila)", predOdpojenim?.provider_key === "n8n");
+  await jako(d, vlastnik.id, (tx) => odpojit(tx, vyber.connectionId, vlastnik.id));
+  const poOdpojeni = await d.one<{ n: number }>("select count(*)::int as n from marketing.integration_secrets where connection_id = $1", [vyber.connectionId]);
+  check("odpojení tajemství opravdu smazalo", poOdpojeni?.n === 0);
+  const zaloha = await d.one<{ provider_key: string }>("select provider_key from marketing.organization_provider_preferences where organization_id = $1 and category = 'workflow_automation' and venue_id is null and is_active", [DEMO_ORG.id]);
+  check("po odpojení se aplikace vrátila k interní frontě", zaloha?.provider_key === "internal_queue");
+
+  // --- (d) selhání AI: vybraný Claude bez klíče ----------------------
+  const claude = await jako(d, vlastnik.id, (tx) => tx.one<{ id: string }>(
+    "insert into marketing.integration_connections (organization_id, provider_key, mode, status, display_name) values ($1, 'anthropic_claude', 'customer_managed', 'connected', 'Claude bez klíče') returning id", [DEMO_ORG.id]));
+  await jako(d, vlastnik.id, (tx) => aktivovat(tx, DEMO_ORG.id, null, "ai_generation", "anthropic_claude", claude!.id, vlastnik.id));
+  const tplAtmo = await d.one<{ id: string }>("select id from marketing.templates where key = 'atmosfera'");
+  const fotoPerla = await d.one<{ id: string }>("select id from marketing.media_assets where venue_id = $1 limit 1", [PERLA]);
+  const bezKlice = await jako(d, manazer.id, (tx) => vytvoritObsah(tx, { organizationId: DEMO_ORG.id, venueId: PERLA, userId: manazer.id, title: "Návrh bez klíče", purpose: "atmosfera", templateId: tplAtmo!.id, brief: "Zkouška selhání", channels: ["instagram"], formats: ["instagram_feed"], mediaAssetIds: [fotoPerla!.id], inputs: { title: "Zkouška" } }));
+  await ocekavatChybu("bez klíče AI návrh selže a řekne proč", () =>
+    jako(d, manazer.id, (tx) => navrhnout(tx, { itemId: bezKlice.itemId, userId: manazer.id })), /chybí API klíč/i);
+  const verzePoAi = await d.one<{ n: number }>("select count(*)::int as n from marketing.content_versions where content_item_id = $1", [bezKlice.itemId]);
+  check("selhaný návrh nezaložil verzi s vymyšleným textem", verzePoAi?.n === 1);
+  const konceptZil = await d.one<{ brief: string }>("select v.brief from marketing.content_items i join marketing.content_versions v on v.id = i.current_version_id where i.id = $1", [bezKlice.itemId]);
+  check("koncept i se zadáním přežil selhání AI (nemusí se psát znovu)", konceptZil?.brief === "Zkouška selhání");
+  // Aplikace zapisuje selhání až po vrácení transakce zpátky — uvnitř ní
+  // by se zápis ztratil s ní. Tady se dělá totéž co v obrazovce a v API.
+  await oznacitSelhaniNavrhu(manazer.id, bezKlice.itemId);
+  const stavPoAi = await d.one<{ status: string }>("select status from marketing.content_items where id = $1", [bezKlice.itemId]);
+  check("selhání je vidět v Přehledu jako generation_failed", stavPoAi?.status === "generation_failed");
+  const mockAi = await d.one<{ id: string }>("select id from marketing.integration_connections where organization_id = $1 and provider_key = 'internal_mock_ai' and revoked_at is null", [DEMO_ORG.id]);
+  await jako(d, vlastnik.id, (tx) => aktivovat(tx, DEMO_ORG.id, null, "ai_generation", "internal_mock_ai", mockAi!.id, vlastnik.id));
+
+  // --- (e) selhání renderu: vybraný Shotstack bez klíče --------------
+  const shotstack = await jako(d, vlastnik.id, (tx) => tx.one<{ id: string }>(
+    "insert into marketing.integration_connections (organization_id, provider_key, mode, status, display_name) values ($1, 'shotstack', 'customer_managed', 'connected', 'Shotstack bez klíče') returning id", [DEMO_ORG.id]));
+  await jako(d, vlastnik.id, (tx) => aktivovat(tx, DEMO_ORG.id, null, "video_rendering", "shotstack", shotstack!.id, vlastnik.id));
+  const reelItem = await jako(d, manazer.id, (tx) => vytvoritObsah(tx, { organizationId: DEMO_ORG.id, venueId: PERLA, userId: manazer.id, title: "Reel bez renderu", purpose: "atmosfera", templateId: tplAtmo!.id, brief: "Krátké video z fotek", channels: ["instagram"], formats: ["instagram_reel"], mediaAssetIds: [fotoPerla!.id], inputs: { title: "Večer u nás" } }));
+  const reelNav = await jako(d, manazer.id, (tx) => navrhnout(tx, { itemId: reelItem.itemId, userId: manazer.id }));
+  const reelVar = await d.one<{ id: string }>("select id from marketing.content_variants where content_version_id = $1 and format = 'reel'", [reelNav.versionId]);
+  const reelRend = await jako(d, manazer.id, (tx) => spustitRender(tx, { versionId: reelNav.versionId, variantId: reelVar!.id, userId: manazer.id }));
+  check("render bez klíče skončí jako failed, ne jako hotový", reelRend.status === "failed");
+  const reelJob = await d.one<{ status: string; error: string | null; output_asset_id: string | null }>("select status, error, output_asset_id from marketing.render_jobs where variant_id = $1", [reelVar!.id]);
+  check("úloha renderu nese srozumitelný důvod", reelJob?.status === "failed" && /Shotstack/.test(reelJob.error ?? ""), reelJob?.error ?? "");
+  check("selhaný render nevytvořil žádný výstupní soubor", reelJob?.output_asset_id === null);
+  const reelStav = await d.one<{ status: string }>("select status from marketing.content_items where id = $1", [reelItem.itemId]);
+  check("obsah je označený render_failed", reelStav?.status === "render_failed");
+  const mockVideo = await d.one<{ id: string }>("select id from marketing.integration_connections where organization_id = $1 and provider_key = 'internal_mock_video' and revoked_at is null", [DEMO_ORG.id]);
+  await jako(d, vlastnik.id, (tx) => aktivovat(tx, DEMO_ORG.id, null, "video_rendering", "internal_mock_video", mockVideo!.id, vlastnik.id));
+
+  // --- (f) publikace: vypršelý token, opakování, dead-letter ---------
+  // Meta se tu neptáme sítě: fetch je nahrazený a vrací přesně to, co
+  // vrací Graph API (OAuthException 190 = token, 4 = překročený limit).
+  const metaConn = await jako(d, vlastnik.id, (tx) => tx.one<{ id: string }>(
+    "insert into marketing.integration_connections (organization_id, venue_id, provider_key, mode, status, display_name) values ($1, $2, 'meta_graph', 'customer_managed', 'connected', 'Meta (zkouška)') returning id", [DEMO_ORG.id, PERLA]));
+  const sifra = encryptCredentials({ access_token: "TESTOVACI-TOKEN-NIKAM-NEJDE" });
+  await jako(d, vlastnik.id, (tx) => tx.q("select marketing.store_secret($1, $2, $3)", [metaConn!.id, sifra.ciphertext, sifra.fingerprint]));
+  await jako(d, vlastnik.id, (tx) => tx.q(
+    "insert into marketing.social_accounts (organization_id, venue_id, connection_id, platform, kind, external_id, name, capabilities) values ($1, $2, $3, 'instagram', 'ig_business', '17841400000000000', 'Černá Perla', $4)",
+    [DEMO_ORG.id, PERLA, metaConn!.id, ["publish.instagram.feed"]]));
+  await jako(d, vlastnik.id, (tx) => aktivovat(tx, DEMO_ORG.id, PERLA, "social_publishing", "meta_graph", metaConn!.id, vlastnik.id));
+
+  const puvodniFetch = globalThis.fetch;
+  const metaOdpovi = (code: number, message: string, status = 400) => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message, code, type: "OAuthException" } }), { status, headers: { "content-type": "application/json" } })) as typeof fetch;
+  };
+
+  const pubItem = await jako(d, manazer.id, (tx) => vytvoritObsah(tx, { organizationId: DEMO_ORG.id, venueId: PERLA, userId: manazer.id, title: "Publikace s vypršelým tokenem", purpose: "atmosfera", templateId: tplAtmo!.id, brief: "Zkouška selhání publikace", channels: ["instagram"], formats: ["instagram_feed"], mediaAssetIds: [fotoPerla!.id], inputs: { title: "Zkouška" } }));
+  const pubNav = await jako(d, manazer.id, (tx) => navrhnout(tx, { itemId: pubItem.itemId, userId: manazer.id }));
+  const pubVar = await d.one<{ id: string }>("select id from marketing.content_variants where content_version_id = $1 and format = 'feed'", [pubNav.versionId]);
+  await jako(d, manazer.id, (tx) => spustitRender(tx, { versionId: pubNav.versionId, variantId: pubVar!.id, userId: manazer.id }));
+  const pubReq = await jako(d, manazer.id, (tx) => pozadatOSchvaleni(tx, { itemId: pubItem.itemId, userId: manazer.id }));
+  await jako(d, schvalovatel.id, (tx) => rozhodnout(tx, { requestId: pubReq, userId: schvalovatel.id, decision: "approved", comment: "" }));
+  const pubPlan = await jako(d, manazer.id, (tx) => naplanovat(tx, { itemId: pubItem.itemId, userId: manazer.id, datum: null, cas: null, tz: "Europe/Prague" }));
+  const jobId = pubPlan.jobIds[0];
+  const pubJobStav = await d.one<{ provider_key: string; social_account_id: string | null }>("select provider_key, social_account_id from marketing.publish_jobs where id = $1", [jobId]);
+  check("publikace míří na Meta a na připojený účet", pubJobStav?.provider_key === "meta_graph" && Boolean(pubJobStav.social_account_id));
+
+  metaOdpovi(190, "Error validating access token: Session has expired.");
+  const zaklad = Date.now();
+  let posledni: { status: string; attempts: number; last_error: string | null; next_attempt_at: string | null } | null = null;
+  for (let i = 1; i <= 5; i++) {
+    await zpracovatFrontu({ now: new Date(zaklad + i * 3600_000) });
+    posledni = await d.one("select status, attempts, last_error, next_attempt_at from marketing.publish_jobs where id = $1", [jobId]);
+    if (i === 1) check("první selhání se opakuje, nekončí (odstup je naplánovaný)", posledni?.status === "failed" && posledni.attempts === 1 && Boolean(posledni.next_attempt_at), JSON.stringify(posledni));
+  }
+  check("po vyčerpání pokusů úloha končí v dead_letter", posledni?.status === "dead_letter" && posledni.attempts === 5, JSON.stringify(posledni));
+  check("důvod selhání je vidět a mluví o tokenu", /190|[Tt]oken/.test(posledni?.last_error ?? ""), posledni?.last_error ?? "");
+  const zadnaPublikace = await d.one<{ n: number }>("select count(*)::int as n from marketing.publications where content_item_id = $1", [pubItem.itemId]);
+  check("selhaná publikace nikdy nezaloží záznam o zveřejnění", zadnaPublikace?.n === 0);
+  const stavPoPadu = await d.one<{ status: string }>("select status from marketing.content_items where id = $1", [pubItem.itemId]);
+  check("obsah čeká na obnovení připojení, netváří se jako zveřejněný", stavPoPadu?.status === "connection_required");
+  const upoz = await d.q<{ user_id: string }>("select user_id from marketing.notifications where kind = 'publish_failed'");
+  check("o selhání se dozví lidé s právem publikovat", upoz.length > 0);
+
+  // Překročený limit Meta (kód 4) se má opakovat později, ne selhat natrvalo.
+  metaOdpovi(4, "Application request limit reached", 429);
+  await jako(d, manazer.id, (tx) => zopakovatPublikaci(tx, jobId));
+  const t0 = zaklad + 10 * 3600_000;
+  await zpracovatFrontu({ now: new Date(t0) });
+  const poLimitu = await d.one<{ status: string; next_attempt_at: string | null; last_error: string | null }>("select status, next_attempt_at, last_error from marketing.publish_jobs where id = $1", [jobId]);
+  const odstupMin = poLimitu?.next_attempt_at ? Math.round((new Date(poLimitu.next_attempt_at).getTime() - t0) / 60000) : -1;
+  check("překročený limit Meta se odloží o 15 minut, ne zahodí", poLimitu?.status === "failed" && odstupMin === 15, `${poLimitu?.status}, ${odstupMin} min`);
+
+  globalThis.fetch = puvodniFetch;
+
+  // --- (g) duplicitní webhook se přijme, ale nezpracuje podruhé ------
+  const w1 = await d.one<{ id: string }>("insert into marketing.webhook_events (provider_key, external_event_id, signature_ok, payload) values ('n8n', 'ev-duplicita', true, '{}'::jsonb) on conflict (provider_key, external_event_id) do nothing returning id");
+  const w2 = await d.one<{ id: string }>("insert into marketing.webhook_events (provider_key, external_event_id, signature_ok, payload) values ('n8n', 'ev-duplicita', true, '{}'::jsonb) on conflict (provider_key, external_event_id) do nothing returning id");
+  check("stejná událost podruhé už nic nespustí", Boolean(w1?.id) && !w2);
+  const kolikUdalosti = await d.one<{ n: number }>("select count(*)::int as n from marketing.webhook_events where provider_key = 'n8n' and external_event_id = 'ev-duplicita'");
+  check("v evidenci webhooků je událost jen jednou", kolikUdalosti?.n === 1);
 }
 
 await d.close();

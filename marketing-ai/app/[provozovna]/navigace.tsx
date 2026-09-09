@@ -44,7 +44,16 @@ export function Navigace({ slug, cekajici, opravneni, isOwner }: Props) {
     { href: `/nastaveni/tym`, label: "Tým, role a audit", ico: I.tym },
   ].filter((x) => x.show !== false);
 
-  const spodni = [hlavni[0], hlavni.find((x) => x.label === "Vytvořit obsah") ?? hlavni[1], hlavni.find((x) => x.label === "Kalendář")!, hlavni.find((x) => x.label === "Ke schválení")!, hlavni.find((x) => x.label === "Mediální knihovna") ?? hlavni[2]].filter(Boolean);
+  // Spodní lišta na mobilu: pět zkratek v tomhle pořadí. Na co uživatel
+  // nemá právo, v `hlavni` není — takové místo se doplní další položkou
+  // v pořadí, ale nikdy tou, která už v liště je. Dřív se tu při chybějícím
+  // právu „Vytvořit obsah“ objevila Mediální knihovna dvakrát a React
+  // hlásil dva stejné klíče.
+  const zkratky = ["Přehled", "Vytvořit obsah", "Kalendář", "Ke schválení", "Mediální knihovna"];
+  const spodni = [...zkratky.map((l) => hlavni.find((x) => x.label === l)), ...hlavni]
+    .filter((x) => x !== undefined)
+    .filter((x, i, a) => a.findIndex((y) => y.href === x.href) === i)
+    .slice(0, 5);
 
   return (
     <>

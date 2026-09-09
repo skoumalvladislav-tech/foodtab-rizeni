@@ -7,7 +7,7 @@ import { nacistKontext } from "@/lib/authz";
 import { withUser } from "@/lib/db";
 import { nahratMedium } from "@/lib/domena/media";
 import { ODVOZENE_Z_MENU, potvrditMenu, rozpoznaniNaVstup, rozpoznatMenu, ulozitMenu, type PolozkaVstup } from "@/lib/domena/menu";
-import { navrhnout, vytvoritObsah } from "@/lib/domena/obsah";
+import { navrhnout, oznacitSelhaniNavrhu, vytvoritObsah } from "@/lib/domena/obsah";
 
 import { chybaDoAdresy } from "../../ui";
 
@@ -131,9 +131,9 @@ export async function odvoditAkce(form: FormData) {
   const v = k.venue!;
   const druh = ODVOZENE_Z_MENU.find((o) => o.key === String(form.get("druh")));
   if (!druh) redirect(`/${slug}/menu/${menuId}?chyba=Nezn%C3%A1m%C3%BD%20typ`);
-  let itemId = "";
+  let itemIds: string[] = [];
   try {
-    itemId = await withUser(k.session.userId, async (tx) => {
+    itemIds = await withUser(k.session.userId, async (tx) => {
       const m = await tx.one<{ title: string; kind: string; valid_from: string | null; valid_to: string | null; status: string }>("select title, kind, valid_from::text, valid_to::text, status from marketing.menus where id = $1 and venue_id = $2", [menuId, v.id]);
       if (!m || m.status !== "confirmed") throw new Error("Menu musí být potvrzené.");
       const days = await tx.q<{ id: string; label: string; day_date: string | null }>("select id, label, day_date::text from marketing.menu_days where menu_id = $1 order by sort_order", [menuId]);
@@ -143,23 +143,34 @@ export async function odvoditAkce(form: FormData) {
       const inputs = { date: m.valid_from, range: { from: m.valid_from, to: m.valid_to ?? m.valid_from } };
       const zaklad = { organizationId: k.organization.id, venueId: v.id, userId: k.session.userId, purpose, pillar: "menu", templateId: tpl?.id ?? null, menuId, channels: ["instagram", "facebook"] as ("instagram" | "facebook")[], formats: druh.formats, mediaAssetIds: media.map((x) => x.id) };
       if (druh.perDay && days.length > 1) {
-        let first = "";
+        const ids: string[] = [];
         for (const d of days) {
           const r = await vytvoritObsah(tx, { ...zaklad, title: `Story ${d.label}: ${m.title}`, brief: `Story pro ${d.label}.`, inputs: { ...inputs, date: d.day_date ?? m.valid_from } });
           if (d.day_date) await tx.q("update marketing.content_items set scheduled_at = ($2::date + time '09:30') at time zone $3 where id = $1", [r.itemId, d.day_date, k.tz]);
-          await navrhnout(tx, { itemId: r.itemId, userId: k.session.userId });
-          first = first || r.itemId;
+          ids.push(r.itemId);
         }
-        return first;
+        return ids;
       }
       const r = await vytvoritObsah(tx, { ...zaklad, title: `${druh.label}: ${m.title}`, brief: druh.key === "pripominka" ? "Ranní připomínka dnešní nabídky." : druh.key === "vikend" ? "Pozvánka na víkend." : "", inputs });
       if (druh.key === "pripominka" && m.valid_from) await tx.q("update marketing.content_items set scheduled_at = ($2::date + time '09:30') at time zone $3 where id = $1", [r.itemId, m.valid_from, k.tz]);
       if (druh.key === "vikend" && m.valid_from) await tx.q("update marketing.content_items set scheduled_at = ($2::date + time '10:00') at time zone $3 where id = $1", [r.itemId, posunDne(m.valid_from, -2), k.tz]);
-      await navrhnout(tx, { itemId: r.itemId, userId: k.session.userId });
-      return r.itemId;
+      return [r.itemId];
     });
   } catch (e) {
     redirect(`/${slug}/menu/${menuId}?chyba=${chybaDoAdresy(e)}`);
   }
-  redirect(`/${slug}/obsah/${itemId}?ok=${encodeURIComponent("Návrh z menu je hotový.")}`);
+  // Návrhy běží až po založení konceptů, každý ve vlastní transakci —
+  // aby selhání AI u třetího dne nesmazalo první dva. Co selže, zůstane
+  // konceptem ve stavu „Generování selhalo“ a jde spustit znovu.
+  let chyba = "";
+  for (const id of itemIds) {
+    try {
+      await withUser(k.session.userId, (tx) => navrhnout(tx, { itemId: id, userId: k.session.userId }));
+    } catch (e) {
+      await oznacitSelhaniNavrhu(k.session.userId, id);
+      chyba = chyba || chybaDoAdresy(e);
+    }
+  }
+  if (chyba) redirect(`/${slug}/obsah/${itemIds[0]}?chyba=${chyba}`);
+  redirect(`/${slug}/obsah/${itemIds[0]}?ok=${encodeURIComponent("Návrh z menu je hotový.")}`);
 }

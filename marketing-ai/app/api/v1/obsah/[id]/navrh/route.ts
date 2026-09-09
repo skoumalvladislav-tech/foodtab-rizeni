@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { chyba, jeCron } from "@/lib/api";
 import { getSession } from "@/lib/auth/session";
 import { withService, withUser } from "@/lib/db";
-import { navrhnout } from "@/lib/domena/obsah";
+import { navrhnout, oznacitSelhaniNavrhu } from "@/lib/domena/obsah";
 import { overitPodpisWebhooku } from "@/lib/providers/workflow";
 
 /**
@@ -27,6 +27,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const r = await withUser(userId, (tx) => navrhnout(tx, { itemId: id, userId: userId! }));
     return NextResponse.json({ ok: true, versionId: r.versionId, isMock: r.isMock, variants: r.navrh.varianty.map((v) => v.klic) });
   } catch (e) {
+    // Stav se zapisuje až tady: transakce s návrhem se kvůli chybě
+    // vrátila zpátky, takže by se v ní zápis neudržel.
+    await oznacitSelhaniNavrhu(userId, id).catch(() => {});
     return chyba(e);
   }
 }

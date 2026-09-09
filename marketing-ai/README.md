@@ -17,9 +17,9 @@ schválí a teprve pak se něco zveřejní. Nikdy automaticky bez schválení.
 | Databázové schéma `marketing` (organizace, provozovny, role, média, menu, obsah, schvalování, render, publikace, katalog poskytovatelů) — 4 migrace | hotové, s RLS na každé tabulce |
 | Doménová logika: verze obsahu, schválení vázané na otisk, plánování, fronta publikací s opakováním, mediální knihovna, menu (ruční, text, fotografie/PDF přes AI) | hotové, ověřené testem `npm run test:db` proti PGlite |
 | Adaptéry poskytovatelů (Claude, Shotstack, Meta Graph, n8n, interní SVG render, mock/manual varianty) | **implementované, ale Claude, Shotstack, Meta a n8n nebyly spuštěny proti skutečné službě** — chybí klíče. Otestované jsou jen mock a vestavěné cesty. |
-| Obrazovky | přihlášení, rozcestník, přehled provozovny, zástupný průvodce. Ostatní obrazovky z navigace (tvorba, média, menu, kalendář, schvalování…) **zatím nejsou** |
-| REST API `/api/v1/…` | **píše se souběžně**, v této složce zatím žádná route není. Smlouva je v `openapi/openapi.yaml` |
-| Testy jednotkové (`npm test`) a e2e (`npm run test:e2e`) | skripty existují v `package.json`, ale složky `tests/unit` a `tests/e2e` **zatím nejsou** — příkazy tedy dnes skončí chybou |
+| Obrazovky (23) | přihlášení, rozcestník, průvodce, přehled, tvorba, média, menu, šablony, kalendář, kampaně, schvalování, detail obsahu, publikace, analytika, brand kit, upozornění, integrace, tým |
+| REST API `/api/v1/…` | hotové: health, úlohy, obsah/návrh, analytika, integrace, média, Meta OAuth, webhooky. Smlouva je v `openapi/openapi.yaml` a `tests/unit/openapi.test.ts` hlídá, že sedí s kódem |
+| Testy | `npm test` 41 jednotkových, `npm run test:db` 95 kontrol v osmi scénářích proti PGlite s RLS, `npm run test:e2e` 4 průchody Playwrightem. Osmý databázový scénář jsou schválně vyvolané poruchy (neplatný klíč, selhání AI a renderu, vypršelý token Meta, duplicitní webhook) |
 
 ## Rychlé spuštění (demo režim, bez jakéhokoli nastavení)
 
@@ -69,9 +69,9 @@ kromě posledního, který je vlastníkem druhé organizace (test oddělení dat
 | `npm run build` / `npm start` | produkční sestavení a spuštění |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | jednotkové testy (`tests/unit/*.test.ts` — složka zatím neexistuje) |
+| `npm test` | jednotkové testy (`tests/unit/*.test.ts`) — čas a pásma, bezpečnost, menu a návrh, poruchy adaptérů, soulad s OpenAPI |
 | `npm run test:db` | databázové a doménové scénáře proti čisté PGlite s RLS — **hlavní test projektu** |
-| `npm run test:e2e` | Playwright (`tests/e2e` zatím neexistuje; konfigurace spouští aplikaci na portu 3100 v demo režimu) |
+| `npm run test:e2e` | Playwright (`tests/e2e`) — celá cesta v prohlížeči na mobilním rozměru; spouští aplikaci na portu 3100 v demo režimu |
 | `npm run db:reset` | smaže `.data/pglite` a postaví ji znovu z migrací a seedu; odmítne běžet, když je nastavená `DATABASE_URL` |
 | `npm run check` | lint + typecheck + test + test:db |
 
@@ -84,7 +84,9 @@ proto mají soubory v `lib/` importy **s příponou `.ts`**.
 marketing-ai/
 ├── app/                    Next.js 16 (App Router)
 │   ├── prihlaseni/         přihlášení: demo účet / e-mail + kód (Supabase OTP)
-│   ├── [provozovna]/       obrazovky provozovny (zatím jen prehled/)
+│   ├── [provozovna]/       obrazovky provozovny (přehled, tvorba, média, menu,
+│   │                       šablony, kalendář, kampaně, schvalování, obsah,
+│   │                       publikace, analytika, brand)
 │   ├── pruvodce/           průvodce prvním nastavením (zástupný)
 │   └── bez-organizace/     stránka pro uživatele bez členství
 ├── lib/
@@ -108,7 +110,10 @@ marketing-ai/
 ├── supabase/
 │   ├── migrations/         4 migrace schématu marketing (nasazují se supabase db push)
 │   └── local/00_shim.sql   náhrada auth.uid() a rolí pro PGlite
-├── tests/db/               scénáře proti PGlite (run.ts, harness.ts)
+├── tests/
+│   ├── db/                 scénáře proti PGlite s RLS (run.ts, harness.ts)
+│   ├── unit/               jednotkové testy bez databáze i sítě
+│   └── e2e/                Playwright, mobilní rozměr 390×844
 ├── scripts/db-reset.ts
 ├── n8n/                    importovatelná workflow (volitelné)
 ├── openapi/openapi.yaml    smlouva REST API v1

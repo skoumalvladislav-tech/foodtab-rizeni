@@ -6,7 +6,7 @@ import { posunDne } from "@/lib/cas";
 import { nacistKontext } from "@/lib/authz";
 import { withUser } from "@/lib/db";
 import { rozpoznatPolozku } from "@/lib/domena/menu-text";
-import { navrhnout, vytvoritObsah } from "@/lib/domena/obsah";
+import { navrhnout, oznacitSelhaniNavrhu, vytvoritObsah } from "@/lib/domena/obsah";
 import { sablona as sablonaDef } from "@/lib/sablony/katalog";
 
 import { chybaDoAdresy } from "../../ui";
@@ -93,11 +93,20 @@ export async function vytvoritANavrhnout(form: FormData) {
           await tx.q("update marketing.content_items set scheduled_at = ($2::date + time '10:00') at time zone $3 where id = $1", [sub.itemId, posunDne(termin, offset), k.tz]);
         }
       }
-      await navrhnout(tx, { itemId: r.itemId, userId: k.session.userId });
       return r.itemId;
     });
   } catch (e) {
     redirect(`/${v.slug}/tvorba?rezim=${rezim}&chyba=${chybaDoAdresy(e)}`);
+  }
+  // Návrh AI běží ve VLASTNÍ transakci. Kdyby byl ve stejné jako založení
+  // konceptu, vzala by chyba AI s sebou i zadání, vybrané fotky a formáty
+  // — uživatel by musel psát všechno znovu. Takhle koncept zůstane
+  // uložený, označí se „Generování selhalo“ a jde zkusit znovu.
+  try {
+    await withUser(k.session.userId, (tx) => navrhnout(tx, { itemId, userId: k.session.userId }));
+  } catch (e) {
+    await oznacitSelhaniNavrhu(k.session.userId, itemId);
+    redirect(`/${v.slug}/obsah/${itemId}?chyba=${chybaDoAdresy(e)}`);
   }
   redirect(`/${v.slug}/obsah/${itemId}?ok=${encodeURIComponent("Návrh je hotový. Vyberte variantu, upravte a pošlete ke schválení.")}`);
 }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { okamzik } from "../cas.ts";
 import type { Tx } from "../db/driver.ts";
+import { withUser } from "../db/session.ts";
 import { FORMATY, formatSpec } from "../formaty.ts";
 import { AiZadaniSchema, AiZpetnaVazbaSchema, type AiNavrh, type AiZadani, type AiZpetnaVazba } from "../providers/ai/schema.ts";
 import { resolveAi, resolveImageRenderer, resolvePublisher, resolveVideoRenderer } from "../providers/registry.ts";
@@ -241,11 +242,29 @@ export async function navrhnout(tx: Tx, p: { itemId: string; userId: string }): 
   try {
     out = await ai.provider.navrhnout(zadani);
   } catch (e) {
+    // Pozor: tenhle zápis platí jen tam, kde volající chybu ZACHYTÍ a
+    // transakci přesto potvrdí (automatizace). Když chybu pustí dál,
+    // transakce se vrátí zpátky i s tímhle řádkem — proto obrazovky
+    // a API volají po zachycení ještě `oznacitSelhaniNavrhu`.
     await tx.q("update marketing.content_items set status = 'generation_failed' where id = $1", [p.itemId]);
     throw new Error(`Návrh se nepodařilo vytvořit: ${e instanceof Error ? e.message : "chyba"}`);
   }
   const versionId = await ulozitNavrh(tx, p.itemId, p.userId, out.navrh, { model: out.model, promptVersion: out.promptVersion, cost: out.costEstimateCents }, ai.providerKey, ai.connectionId, item);
   return { versionId, navrh: out.navrh, isMock: ai.provider.isMock };
+}
+
+/**
+ * Zapíše „návrh selhal“ VLASTNÍ transakcí — až potom, co se ta původní
+ * kvůli chybě vrátila zpátky. Bez toho by se stav ztratil spolu s ní
+ * a Přehled by o selhání nikdy nevěděl.
+ *
+ * Koncept se nemaže: uživateli zůstane zadání, vybrané fotky i formáty
+ * a může návrh spustit znovu.
+ */
+export async function oznacitSelhaniNavrhu(userId: string, itemId: string): Promise<void> {
+  await withUser(userId, (tx) => tx.q(
+    "update marketing.content_items set status = 'generation_failed' where id = $1 and status in ('draft', 'generating', 'preview_ready')",
+    [itemId]));
 }
 
 export async function prepracovat(tx: Tx, p: { itemId: string; userId: string; zpetnaVazba: AiZpetnaVazba }): Promise<{ versionId: string; navrh: AiNavrh }> {

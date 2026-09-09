@@ -61,25 +61,30 @@ menu na slidy (test scénář 6).
 a přepínačem provozoven, přehled provozovny, zástupný průvodce,
 stránka „bez organizace“. Autorizační vrstva, session, bezpečný návrat.
 
-**Testy** — `test:db`: 7 scénářů proti čisté PGlite s RLS.
+**Obrazovky** — 23 stránek: přihlášení, rozcestník, průvodce prvním
+nastavením, přehled, tvorba (rychlý režim, průvodce, kampaňový režim),
+detail obsahu s náhledem a verzemi, mediální knihovna, menu a import,
+šablony, kalendář, schvalování, kampaně a automatizace, publikované,
+analytika, brand kit, upozornění, integrace, tým/role/audit.
+
+**API v1** — health, úlohy, návrh obsahu, analytika, test integrací,
+soubory, Meta OAuth, webhooky; smlouva v `openapi/openapi.yaml`
+a `tests/unit/openapi.test.ts` hlídá, že sedí s kódem.
+
+**Testy** — `test:db`: 95 kontrol v osmi scénářích proti čisté PGlite
+s RLS (osmý jsou schválně vyvolané poruchy), `npm test`: 41
+jednotkových, `test:e2e`: 4 průchody Playwrightem na rozměru 390×844.
 
 ### Zbývá v etapě 1
 
-- **Obrazovky**: tvorba (rychlý režim, průvodce, kampaňový režim),
-  detail obsahu s náhledem a verzemi, mediální knihovna, menu a import,
-  šablony, kalendář (drag-and-drop přes `presunoutTermin`), schvalování,
-  kampaně a automatizace, publikované, analytika, brand kit, integrace,
-  tým/role/audit, průvodce prvním nastavením, zvonek notifikací
-- **API v1** (`openapi/openapi.yaml`) — píše se souběžně
-- **Testy**: `tests/unit` (cas, formaty, menu-text, podpisy),
-  `tests/e2e` (Playwright, mobilní viewport 390×844 je už v konfiguraci)
-- **Převod SVG → PNG/JPEG** pro publikaci obrázků (Meta SVG nepřijme)
-- **Automatizace**: tabulka `automations` existuje, ale nic ji nevykonává
-  (ranní Story z menu, čtvrteční víkendová pozvánka)
-- **Kampaňový režim**: rozpad akce na pozvánku → připomínku → poslední
-  výzvu → poděkování (šablony to popisují, kód nezakládá sérii)
-- pozvánky do týmu, správa rolí a členů v rozhraní
-- omezení `create_organization`, samostatný `CRON_SECRET`
+- **Převod SVG → PNG/JPEG** pro publikaci obrázků. Meta SVG nepřijme,
+  takže dokud tohle není, jde skutečná publikace obrázku jen přes
+  Shotstack nebo ruční export. V demo režimu to nevadí, na ostrém
+  účtu je to podmínka.
+- **Omezení `marketing.create_organization`** — dnes ji smí zavolat
+  každý přihlášený. Před ostrým provozem jen na pozvání.
+- **Samostatný `CRON_SECRET`** — dnes se spadne na `APP_SECRET`,
+  což znamená jedno tajemství na dvě různé věci.
 
 ## Etapa 2 — ostré služby a první zákazníci
 

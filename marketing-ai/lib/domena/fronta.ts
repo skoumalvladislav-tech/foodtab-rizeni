@@ -173,9 +173,12 @@ async function zverejnitSplatne(tx: Tx, now: Date, limit: number, out: VysledekB
     }
 
     // Selhání → retry s odstupem, nebo dead-letter.
+    //
+    // O opakování rozhoduje POUZE počet pokusů. Stav "retry" (typicky
+    // překročený limit u Meta) mění jen DÉLKU odstupu, ne to, jestli se
+    // ještě pokusíme — jinak by úloha při trvalém limitu běhala donekonečna.
     const attempts = j.attempts + 1;
-    const retry = result.status === "retry" || attempts < j.max_attempts;
-    if (retry && attempts < j.max_attempts) {
+    if (attempts < j.max_attempts) {
       const sec = result.status === "retry" && result.retryAfterSeconds ? result.retryAfterSeconds : odstupPokusu(attempts);
       await tx.q("update marketing.publish_jobs set status = 'failed', last_error = $2, next_attempt_at = $3, response = $4 where id = $1",
         [j.id, result.error ?? "Publikace selhala", new Date(now.getTime() + sec * 1000).toISOString(), JSON.stringify(result.response ?? {})]);

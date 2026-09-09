@@ -142,18 +142,20 @@ z adresy (`/[provozovna]/…`) je návrh — `nacistKontext` ji ověří proti
 ## 7. Ověření, že vše funguje
 
 ```bash
-npm run typecheck
-npm run lint
-npm run test:db
+npm run check     # lint + typecheck + npm test + test:db
+npm run test:e2e  # Playwright, potřebuje volný port 3100
 ```
 
-`test:db` vypíše sedm scénářů a na konci `N kontrol, 0 selhalo`. Číslo
-kontrol je z jednoho běhu `tests/db/run.ts` — když jeden scénář spadne
-uprostřed, zbytek neproběhne, proto se dívejte na to, zda skript došel
-až ke shrnutí.
+`test:db` vypíše **osm scénářů** a na konci `N kontrol, 0 selhalo`.
+Číslo kontrol je z jednoho běhu `tests/db/run.ts` — když jeden scénář
+spadne uprostřed, zbytek neproběhne, proto se dívejte na to, zda skript
+došel až ke shrnutí. Osmý scénář jsou schválně vyvolané poruchy:
+neplatný klíč, výměna a odpojení připojení, selhání AI i renderu,
+vypršelý token Meta až do `dead_letter` a duplicitní webhook.
 
-`npm test` a `npm run test:e2e` dnes skončí chybou, protože složky
-`tests/unit` a `tests/e2e` v repozitáři zatím nejsou (viz README).
+Kontrola, která nemůže spadnout, je horší než žádná. Když přidáváte
+novou, **rozbijte schválně to, co má hlídat, a přesvědčte se, že
+zčervená** — teprve pak víte, že tam něco hlídá.
 
 ## 8. Časté potíže
 
