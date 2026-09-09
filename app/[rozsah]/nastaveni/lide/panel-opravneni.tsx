@@ -26,6 +26,10 @@ export default function PanelOpravneni({
   jmeno,
   zamestnanec,
   zarazeni,
+  katalog,
+  pravaZarazeni,
+  vyjimky,
+  smiMenitPrava,
   pobocky,
   smiFiremni,
   nynejsiZarazeni,
@@ -48,6 +52,14 @@ export default function PanelOpravneni({
   nynejsiZarazeni: string | null
   nynejsiUroven: 'tenant' | 'branch'
   nynejsiPobocky: string[]
+  /** Práva, která smí přihlášený vůbec nabídnout — už prosetá stropem. */
+  katalog: { key: string; label: string }[]
+  /** Co dává které zařazení. Podle toho se zaškrtávátka předvyplní. */
+  pravaZarazeni: Record<string, string[]>
+  /** Výjimky toho člověka. `false` je platná hodnota — právo odebrané. */
+  vyjimky: Record<string, boolean>
+  /** Měnit práva smí settings.manage; people.manage je jen vidí. */
+  smiMenitPrava: boolean
   /** Bez účtu se oprávnění uloží, ale zatím nic neotevře. */
   maUcet: boolean
   /** Bez členství nejde nastavit rozsah — není u koho ho vést. */
@@ -60,6 +72,27 @@ export default function PanelOpravneni({
   const [uroven, setUroven] = useState<'tenant' | 'branch'>(
     smiFiremni ? nynejsiUroven : 'branch',
   )
+
+  /*
+    ZAŠKRTÁVÁTKA SE PŘEDVYPLNÍ ZE ZAŘAZENÍ a co se od něj liší, je
+    VÝJIMKA (zadání 6.2).
+
+    Zařazení je proto řízené — po jeho přepnutí se předvyplnění
+    přepočítá. Ručně přenastavená políčka se přitom NEZAHAZUJÍ: co
+    člověk zaškrtl, zůstane zaškrtnuté, jen se u toho může změnit,
+    jestli je to výjimka. Tiché smazání výjimky je horší než ta, která
+    po přepnutí zbyde navíc — a je vidět.
+  */
+  const [vybraneZarazeni, setVybraneZarazeni] = useState(nynejsiZarazeni ?? '')
+  const [prepsano, setPrepsano] = useState<Record<string, boolean>>({})
+
+  const zeZarazeni = (klic: string) =>
+    (pravaZarazeni[vybraneZarazeni] ?? []).includes(klic)
+
+  // Výjimka u člověka rozhoduje, jinak zařazení — stejné pravidlo jako
+  // v databázi (`app.ma_pravo_clovek`). Dvě různá by se rozešla.
+  const zaskrtnuto = (klic: string) =>
+    prepsano[klic] ?? vyjimky[klic] ?? zeZarazeni(klic)
 
   // Obojí zavírá formulář ze stejného důvodu: změna by neprošla.
   const zamceno = jaSam || posledniMajitel
@@ -126,7 +159,8 @@ export default function PanelOpravneni({
           <span>Zařazení</span>
           <select
             name="zarazeni"
-            defaultValue={nynejsiZarazeni ?? ''}
+            value={vybraneZarazeni}
+            onChange={(e) => setVybraneZarazeni(e.target.value)}
             disabled={zamceno}
             style={pole}
           >
@@ -138,6 +172,93 @@ export default function PanelOpravneni({
             ))}
           </select>
         </label>
+
+        {/*
+          OPRÁVNĚNÍ. Předvyplněná ze zařazení; co se od něj liší, je
+          označené jako výjimka a jde vrátit zpátky.
+
+          Měnit je smí jen `settings.manage` — zpřísnění z migrace
+          20260901090000 („kdo zakládá lidi, nesmí rozhodovat, kdo vidí
+          mzdy"). Vedoucí s `people.manage` je vidí, ale neuloží; kdyby
+          se to tu povolilo, obešla by se ta díra jinými dveřmi.
+        */}
+        <fieldset style={skupina} disabled={zamceno || !smiMenitPrava}>
+          <legend style={legenda}>Oprávnění</legend>
+
+          {!smiMenitPrava ? (
+            <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--muted)' }}>
+              Měnit oprávnění může jen ten, kdo spravuje nastavení firmy.
+              Tady je vidíte, jak jsou.
+            </p>
+          ) : null}
+
+          {katalog.map((p) => {
+            const ze = zeZarazeni(p.key)
+            const je = zaskrtnuto(p.key)
+            const jeVyjimka = je !== ze
+            return (
+              <div key={p.key} style={{ marginBottom: '6px' }}>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '14px',
+                  }}
+                >
+                  {/*
+                    `nabizeno` veze, co obrazovka VŮBEC nabízela. Bez
+                    toho by uložení sebralo práva, která se nekreslila
+                    (mrtvý modul, nebo je nemá ani ten, kdo přiděluje)
+                    — a nikdo by je neodškrtl.
+                  */}
+                  <input type="hidden" name="nabizeno" value={p.key} />
+                  <input
+                    type="checkbox"
+                    name="pravo"
+                    value={p.key}
+                    checked={je}
+                    onChange={(e) =>
+                      setPrepsano((s) => ({ ...s, [p.key]: e.target.checked }))
+                    }
+                  />
+                  <span>{p.label}</span>
+                </label>
+                {jeVyjimka ? (
+                  <p
+                    style={{
+                      margin: '2px 0 0 26px',
+                      fontSize: '12px',
+                      color: 'var(--pozor)',
+                    }}
+                  >
+                    {je ? 'výjimka — navíc oproti zařazení' : 'výjimka — odebráno'}
+                    {smiMenitPrava ? (
+                      <>
+                        {' · '}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPrepsano((s) => ({ ...s, [p.key]: ze }))
+                          }
+                          style={odkazovaButton}
+                        >
+                          vrátit na zařazení
+                        </button>
+                      </>
+                    ) : null}
+                  </p>
+                ) : null}
+              </div>
+            )
+          })}
+
+          {katalog.length === 0 ? (
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+              Nemáte žádné právo, které byste mohli přidělit dál.
+            </p>
+          ) : null}
+        </fieldset>
 
         {/*
           Rozsah se schovává, dokud člověk nemá členství. Není to
@@ -318,3 +439,18 @@ const ramecek = {
   fontSize: '13.5px',
   lineHeight: 1.5,
 } as const
+
+/*
+  „vrátit na zařazení" je akce, ne odkaz jinam — proto `button`
+  ostylovaný jako odkaz. `<a>` bez cíle by sliboval navigaci
+  a klávesnice by se k němu chovala jinak.
+*/
+const odkazovaButton = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  font: 'inherit',
+  color: 'var(--pozor)',
+  textDecoration: 'underline',
+  cursor: 'pointer',
+}

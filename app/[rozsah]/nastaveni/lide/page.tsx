@@ -158,9 +158,22 @@ export default async function NastaveniLide({
   */
   const zarazeniFirmy = vsechnyPozice;
 
-  const katalogPrav = await seznam<{ key: string; module_key: string }>(
+  /*
+    Popisek a pořadí přibyly kvůli zaškrtávátkům u člověka (zadání 6.2).
+    „Vidět rozpis směn" je věta pro člověka, `shifts.read` je klíč pro
+    databázi — na obrazovce nesmí stát klíč.
+  */
+  const katalogPrav = await seznam<{
+    key: string;
+    module_key: string;
+    label: string;
+    sort_order: number;
+  }>(
     "katalog práv",
-    supabase.from("permissions").select("key, module_key"),
+    supabase
+      .from("permissions")
+      .select("key, module_key, label, sort_order")
+      .order("sort_order"),
   );
 
   const zapnuteModuly = new Set<string>(
@@ -194,6 +207,51 @@ export default async function NastaveniLide({
       }),
     )
     .map((z) => ({ id: z.id, label: z.label }));
+
+  /*
+    ZAŠKRTÁVÁTKA OPRÁVNĚNÍ U ČLOVĚKA (zadání 6.2).
+
+    Nabízí se jen práva ŽIVÝCH modulů — stejně jako na obrazovce
+    Oprávnění. Kdyby se nabízela i mrtvá, dala by se zaškrtnout a nic
+    by neotevřela.
+
+    A nabízí se jen to, co má přihlášený sám: strop „nikdo nepřidělí
+    víc, než má sám" platí i na výjimky (zadání 5.5), jinak by se jím
+    dal obejít výběr zařazení.
+  */
+  const nabizenaPrava = katalogPrav
+    .filter((p) => ziva.has(p.key))
+    .filter((p) => smimPridelit(ctx, { isOwner: false, prava: [p.key] }))
+    .map((p) => ({ key: p.key, label: p.label }));
+
+  /*
+    Výjimky toho člověka, kterému se zrovna přiděluje. `granted = false`
+    je platná hodnota, ne chybějící údaj — proto mapa na boolean, ne
+    seznam klíčů.
+  */
+  const vyjimkyCloveka: Record<string, boolean> = {};
+  if (opravneniProId) {
+    const radky = await seznam<{ permission_key: string; granted: boolean }>(
+      "výjimky člověka",
+      supabase
+        .from("employee_permissions")
+        .select("permission_key, granted")
+        .eq("tenant_id", tenantId)
+        .eq("employee_id", opravneniProId),
+    );
+    for (const r of radky) vyjimkyCloveka[r.permission_key] = r.granted;
+  }
+
+  /*
+    Měnit oprávnění smí `settings.manage`, ne `people.manage`.
+
+    Je to schválně a je to zpřísnění, které zavedla migrace
+    20260901090000 s odůvodněním „kdo zakládá lidi, nesmí rozhodovat,
+    kdo vidí mzdy". Formulář zaměstnance běží pod `people.manage` —
+    kdyby se tu zaškrtávátka daly ukládat, otevřela by se ta díra
+    jinými dveřmi. Vedoucí je proto vidí, ale neuloží.
+  */
+  const smiMenitPrava = await hasAccess(tenantId, "settings.manage", rozsah);
 
   /*
     Členství drží už jen ROZSAH a to, že člověk do firmy patří.
@@ -693,6 +751,10 @@ export default async function NastaveniLide({
             nynejsiZarazeni={prideluje.position_id}
             nynejsiUroven={clenstviProPanel?.scope === "tenant" ? "tenant" : "branch"}
             nynejsiPobocky={pobockyClena.map((r) => String(r.branch_id))}
+            katalog={nabizenaPrava}
+            pravaZarazeni={Object.fromEntries(pravaZarazeni)}
+            vyjimky={vyjimkyCloveka}
+            smiMenitPrava={smiMenitPrava}
             maUcet={Boolean(prideluje.user_id)}
             maClenstvi={Boolean(clenstviProPanel)}
             jaSam={clenstviProPanel?.user_id === uzivatel?.id}
