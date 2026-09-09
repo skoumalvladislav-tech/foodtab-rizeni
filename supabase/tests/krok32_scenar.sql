@@ -39,8 +39,24 @@ select id as perla  from public.branches where slug = 'cerna-perla' \gset
 select user_id as majitel from public.profiles
  where email = 'majitel@foodtab.cz' \gset
 
-insert into public.employees (tenant_id, branch_id, full_name, employment_type)
-values (:'tenant', :'perla', 'Krok32 Smenar', 'hpp')
+/*
+  Zaměstnanec s ÚČTEM. Rozdíl rozpisu hlásí jen lidem, kteří se můžou
+  přihlásit (`e.user_id is not null`, 20260901130000 ř. 153) — komu
+  jinému by se zrušení oznamovalo. Bez účtu by se směna do rozdílu
+  nedostala a kontrola níž by spadla nad správným kódem.
+*/
+insert into auth.users (id, email)
+values ('32320000-0000-0000-0000-000000000032', 'smenar.k32@foodtab.cz')
+on conflict (id) do nothing;
+
+insert into public.profiles (user_id, email, full_name)
+values ('32320000-0000-0000-0000-000000000032', 'smenar.k32@foodtab.cz', 'Krok32 Smenar')
+on conflict (user_id) do nothing;
+
+insert into public.employees
+  (tenant_id, branch_id, user_id, full_name, employment_type)
+values (:'tenant', :'perla', '32320000-0000-0000-0000-000000000032',
+        'Krok32 Smenar', 'hpp')
 returning id as e_smenar \gset
 
 -- Nevydaná směna.
@@ -48,10 +64,18 @@ insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts
 values (:'tenant', :'perla', :'e_smenar', date '2026-10-20', '08:00', '16:00')
 returning id as s_nevydana \gset
 
--- Vydaná směna: `published_at` znamená „tohle lidi vidí".
+/*
+  Vydaná směna. Nese i to, CO bylo vydané — a je to podstatné:
+  `app.rozdil_rozpisu` porovnává `published_status` (20260901130000,
+  ř. 160), takže směna jen s `published_at` se z rozdílu vyfiltruje
+  a kontrola níž by spadla nad SPRÁVNÝM kódem.
+*/
 insert into public.shifts
-  (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at, published_at)
-values (:'tenant', :'perla', :'e_smenar', date '2026-10-21', '08:00', '16:00', now())
+  (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at,
+   published_at, published_status, published_employee_id,
+   published_starts_at, published_ends_at)
+values (:'tenant', :'perla', :'e_smenar', date '2026-10-21', '08:00', '16:00',
+        now(), 'planned', :'e_smenar', '08:00', '16:00')
 returning id as s_vydana \gset
 
 select id as cizi_tenant from public.tenants
@@ -81,31 +105,40 @@ select pg_temp.check('nevydaná směna je pryč',
 
 
 \echo ''
-\echo '== 2. Vydanou to odmítne a nechá stát ==================='
+\echo '== 2. Vydaná se ZRUŠÍ, ale nezmizí ======================'
 
 /*
-  Tohle je ta kontrola, kvůli které tu scénář je. Kdyby smazání vydané
-  směny prošlo, zmizela by lidem z rozpisu dřív, než kdokoli vydá
-  změnu — a nikdo by se to nedozvěděl.
-*/
-do $$
-declare v_spadlo boolean := false;
-begin
-  begin
-    perform public.smazat_smenu(
-      current_setting('test.tenant')::uuid,
-      current_setting('test.vydana')::uuid);
-  exception when check_violation then
-    v_spadlo := true;
-  end;
-  if not v_spadlo then
-    raise exception 'SELHALO: vydanou směnu to smazat nechalo';
-  end if;
-  raise notice '  OK    vydanou směnu smazat nenechá';
-end $$;
+  Tohle je ta kontrola, kvůli které tu scénář je — a do 9. 9. mířila
+  obráceně. Tvrdila, že vydanou směnu smazat nejde, což byla pravda
+  o tehdejší funkci, ale nepoužitelná v provozu: rozpis se VYDÁ
+  a teprve pak se v něm škrtá.
 
-select pg_temp.check('a ta směna pořád stojí',
-  exists (select 1 from public.shifts where id = :'s_vydana'));
+  Správně se vydaná směna ZRUŠÍ. Řádek zůstane stát, protože lidem se
+  ukazuje vydaná podoba — zmizí jim až vydáním rozpisu, kde jim to
+  `app.rozdil_rozpisu` ohlásí jako „zrusena". Kdyby se řádek smazal,
+  neměl by co ohlašovat a směna by jim zmizela potichu.
+*/
+select pg_temp.check('vydanou směnu funkce označí jako zrušenou',
+  public.smazat_smenu(:'tenant', :'s_vydana') = 'zrusena');
+
+select pg_temp.check('a ta směna pořád STOJÍ, jen je zrušená',
+  exists (select 1 from public.shifts
+           where id = :'s_vydana' and status = 'cancelled'));
+
+-- Druhé zrušení nic nerozbije a pozná se.
+select pg_temp.check('druhé zrušení už jen řekne, že je zrušená',
+  public.smazat_smenu(:'tenant', :'s_vydana') = 'uz_zrusena');
+
+/*
+  A to podstatné: zrušení se dostane do rozdílu k vydání. Bez toho by
+  se lidi o zrušené směně nedozvěděli nikdy — řádek by stál, ale nic
+  by ho neohlásilo.
+*/
+select pg_temp.check('zrušení čeká na vydání rozpisu',
+  exists (
+    select 1 from app.rozdil_rozpisu(:'tenant', :'perla',
+                                     date '2026-10-21', date '2026-10-21') r
+    where r.zmena = 'zrusena'));
 
 
 \echo ''

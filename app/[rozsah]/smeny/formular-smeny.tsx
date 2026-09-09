@@ -18,9 +18,9 @@ export type SmenaKUprave = {
   ends_at: string
   note: string
   /*
-    Vydanou směnu smazat nejde — lidem už je v rozpisu vidět a zmizela
-    by jim dřív, než se změna vydá. Rozhoduje o tom databáze; tohle je
-    tu proto, aby se tlačítko vůbec nenabízelo.
+    Vydaná směna se neMAŽE, ale RUŠÍ: řádek zůstane stát jako zrušený
+    a lidem zmizí až vydáním rozpisu, kde se jim to ohlásí. Rozhoduje
+    o tom databáze; tady se podle toho jen vybírá slovo na tlačítku.
   */
   published_at?: string | null
 }
@@ -192,6 +192,14 @@ export default function FormularSmeny({
 
   const hotovo = stav.stav === 'hotovo'
 
+  /*
+    Vydaná směna se neMAŽE, ale RUŠÍ — řádek zůstane stát jako zrušený
+    a lidem zmizí až vydáním rozpisu. Rozhoduje o tom databáze
+    (`public.smazat_smenu`); tohle je jen o tom, jaké slovo se ukáže,
+    ať člověk ví, co se stane.
+  */
+  const jeVydana = Boolean(smena?.published_at)
+
   return (
     <div style={zaclona} role="dialog" aria-modal="true" aria-labelledby="smena-nadpis">
       <div style={okno}>
@@ -252,14 +260,14 @@ export default function FormularSmeny({
             </label>
 
             <label style={poleLabel}>
-              <span>Pozice</span>
+              <span>Zařazení</span>
               <select
                 name="pozice"
                 value={vybranaPozice}
                 onChange={(e) => setVybranaPozice(e.target.value)}
                 style={pole}
               >
-                <option value="">— bez pozice —</option>
+                <option value="">— bez zařazení —</option>
                 {pozice.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
@@ -398,34 +406,53 @@ export default function FormularSmeny({
         )}
 
         {/*
-          SMAZAT SMĚNU.
+          SMAZAT / ZRUŠIT SMĚNU.
 
           Vlastní formulář za tím hlavním — vnořovat se nesmějí.
-          Nabízí se jen u SKUTEČNĚ ULOŽENÉ směny (`smena.id` není
-          prázdné; u nové se předává prázdný řetězec) a jen dokud
-          nebyla vydaná.
+          Nabízí se u SKUTEČNĚ ULOŽENÉ směny (`smena.id` není prázdné;
+          u nové se předává prázdný řetězec).
 
-          U vydané se místo tlačítka řekne proč. Rozhoduje o tom stejně
-          databáze, ale nabízet tlačítko, které vždycky spadne, je horší
-          než ho nenabízet.
+          NEVYDANÁ se smaže: nikdo ji neviděl, není co ohlašovat.
+          VYDANÁ se označí jako zrušená a zůstane stát — lidem se pořád
+          ukazuje vydaná podoba, takže jim zmizí až vydáním rozpisu,
+          kde se to ohlásí.
+
+          Do 9. 9. tu u vydané směny stálo, že smazat nejde. Byla to
+          správná úvaha se špatným závěrem: rozpis se VYDÁ a teprve pak
+          se v něm škrtá, takže odmítnutí u vydané znamenalo, že nešlo
+          smazat prakticky nic.
         */}
         {!hotovo && smena?.id ? (
           <div style={mazaniPruh}>
-            {smena.published_at ? (
-              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-                Tuhle směnu už lidi vidí ve vydaném rozpisu, takže ji nejde
-                smazat — zmizela by jim dřív, než změnu vydáte.
-              </p>
-            ) : ptaSeNaSmazani ? (
+            {ptaSeNaSmazani ? (
               <form action={akceSmazat} style={{ display: 'grid', gap: '8px' }}>
                 <input type="hidden" name="rozsah" value={rozsah} />
                 <input type="hidden" name="smena" value={smena.id} />
                 <p style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
-                  <strong>Smazat tuhle směnu?</strong>
+                  <strong>
+                    {jeVydana ? 'Zrušit tuhle směnu?' : 'Smazat tuhle směnu?'}
+                  </strong>
                 </p>
+                {/*
+                  U vydané se říká, KDY to lidi uvidí. Bez toho by to
+                  vypadalo, že se nic nestalo — v jejich rozpisu směna
+                  do vydání zůstane.
+                */}
+                {jeVydana ? (
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                    Zůstane vidět jako zrušená a lidem zmizí, až rozpis
+                    vydáte.
+                  </p>
+                ) : null}
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button type="submit" className="ft-tl" disabled={cekaSmazani}>
-                    {cekaSmazani ? 'Mažu…' : 'Smazat'}
+                    {cekaSmazani
+                      ? jeVydana
+                        ? 'Ruším…'
+                        : 'Mažu…'
+                      : jeVydana
+                        ? 'Zrušit'
+                        : 'Smazat'}
                   </button>
                   <button
                     type="button"
@@ -442,7 +469,7 @@ export default function FormularSmeny({
                 onClick={() => setPtaSeNaSmazani(true)}
                 className="ft-tl ft-tl-vedlejsi"
               >
-                Smazat směnu
+                {jeVydana ? 'Zrušit směnu' : 'Smazat směnu'}
               </button>
             )}
 
