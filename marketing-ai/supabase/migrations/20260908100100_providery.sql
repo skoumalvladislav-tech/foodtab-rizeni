@@ -367,10 +367,13 @@ create policy provider_prefs_update on marketing.organization_provider_preferenc
 
 -- Připojení vidí, kdo je smí používat nebo spravovat. Cizí organizace
 -- nevidí nic — ani že připojení existuje.
+-- Připojení na úrovni organizace (venue_id NULL) vidí každý, kdo smí
+-- nástroje používat — i člen s rozsahem jen na provozovny. Pobočkové
+-- připojení jen ten, kdo na pobočku vidí. Spravovat smí jen
+-- integrations.manage s rozsahem organizace.
 create policy connections_select on marketing.integration_connections for select to authenticated
-  using (marketing.has_access(organization_id, 'integrations.use', null)
-      or marketing.has_access(organization_id, 'integrations.manage', null)
-      or (venue_id is not null and marketing.can_read(organization_id, 'integrations.use', venue_id)));
+  using (marketing.can_read(organization_id, 'integrations.use', venue_id)
+      or marketing.has_access(organization_id, 'integrations.manage', null));
 create policy connections_insert on marketing.integration_connections for insert to authenticated
   with check (marketing.has_access(organization_id, 'integrations.manage', null));
 create policy connections_update on marketing.integration_connections for update to authenticated

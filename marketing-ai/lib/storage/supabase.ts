@@ -17,7 +17,7 @@ export function createSupabaseStorage(): StorageProvider {
       const res = await fetch(`${base}/storage/v1/object/${bucket}/${storagePath}`, {
         method: "POST",
         headers: { ...headers, "Content-Type": mime, "x-upsert": "true" },
-        body: data,
+        body: new Blob([data as BlobPart]),
       });
       if (!res.ok) throw new Error(`Supabase Storage: nahrání selhalo (${res.status})`);
     },
