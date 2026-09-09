@@ -98,7 +98,7 @@ done
 # repozitáři", pravidlo 3. Vlastní smyčka, ať přidání dalšího scénáře
 # v jednom modulu nikdy nevyžaduje úpravu řádku patřícího tomu druhému.
 echo
-for t in marketing1_scenar; do
+for t in marketing1_scenar marketing2_scenar; do
   spustit_scenar "$ROOT/supabase/tests/$t.sql"
   grep -E '^(==|psql.*(OK |SELHALO))| VŠECHNY| MARKETING' "$VYSTUP" \
     | sed 's/^psql[^ ]* NOTICE: //' || true
