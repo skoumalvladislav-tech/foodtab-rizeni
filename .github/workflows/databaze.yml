@@ -115,6 +115,12 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 32 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 32"; chybi=1; }
 
+          # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
+          # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —
+          # run.sh ho pouští až za provozními scénáři.
+          grep -qE '^[[:space:]]*MARKETING 1 — VŠECHNY KONTROLY PROŠLY[[:space:]]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: MARKETING 1"; chybi=1; }
+
           if [ "$chybi" -ne 0 ]; then
             echo "Scénáře neprošly celé."
             exit 1
