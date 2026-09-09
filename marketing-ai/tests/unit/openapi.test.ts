@@ -164,16 +164,19 @@ test("stav obsahu ve smlouvě se shoduje s lib/domena/stavy.ts", () => {
   assert.deepEqual(zStavu.sort(), Object.keys(STAVY_OBSAHU).sort(), "výčet stavů obsahu se rozešel se stavovým modelem");
 });
 
-test("u cest, které v aplikaci zatím nejsou, je to v popisu napsané", () => {
-  // Tyhle tři volají workflow v n8n. Když se doplní do aplikace, poznámka
-  // se z popisu smaže a tenhle test to připomene.
-  const jenSmlouva = ["/api/v1/obsah/{id}/navrh", "/api/v1/analytika/synchronizovat", "/api/v1/integrace/test-vse"];
+test("cesty volané z n8n jsou implementované a popis to říká; jen-smlouva cesty to říkají také", () => {
+  // Tyhle tři volají workflow v n8n a v aplikaci existují (app/api/v1/…).
+  const implementovane = ["/api/v1/obsah/{id}/navrh", "/api/v1/analytika/synchronizovat", "/api/v1/integrace/test-vse"];
+  for (const c of implementovane) {
+    const telo = usek(`${c}:`, 2).join("\n");
+    assert.ok(telo.includes("Implementováno v aplikaci"), `${c} má být označená jako implementovaná`);
+    assert.ok(!telo.includes("Smlouva; v aplikaci zatím"), `${c} už není jen smlouva`);
+  }
+  // Cesty, které obsluhuje jen obrazovka (server action), to musí přiznat.
+  const jenSmlouva = ["/api/v1/menu/import", "/api/v1/obsah/{id}/verze", "/api/v1/obsah/{id}/schvaleni"];
   for (const c of jenSmlouva) {
     const telo = usek(`${c}:`, 2).join("\n");
-    assert.ok(
-      telo.includes("Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action)"),
-      `${c} nemá v popisu poznámku, že jde zatím jen o smlouvu`,
-    );
+    assert.ok(telo.includes("Smlouva; v aplikaci zatím dostupné jen přes obrazovku (server action)"), `${c} nemá poznámku, že jde zatím jen o smlouvu`);
   }
 });
 
