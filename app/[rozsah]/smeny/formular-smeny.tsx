@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
 import { zkratkaDoSmeny } from '@/lib/sablony'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
-import { ulozitSmenu, type StavSmeny } from './smena'
+import { smazatSmenu, ulozitSmenu, type StavSmeny } from './smena'
 
 export type SmenaKUprave = {
   id: string
@@ -17,6 +17,12 @@ export type SmenaKUprave = {
   starts_at: string
   ends_at: string
   note: string
+  /*
+    Vydaná směna se neMAŽE, ale RUŠÍ: řádek zůstane stát jako zrušený
+    a lidem zmizí až vydáním rozpisu, kde se jim to ohlásí. Rozhoduje
+    o tom databáze; tady se podle toho jen vybírá slovo na tlačítku.
+  */
+  published_at?: string | null
 }
 
 /**
@@ -77,6 +83,20 @@ export default function FormularSmeny({
   const [stav, akce, ceka] = useActionState<StavSmeny, FormData>(ulozitSmenu, {
     stav: 'nic',
   })
+  /*
+    MAZÁNÍ MÁ VLASTNÍ FORMULÁŘ, ne jen druhé tlačítko v tom prvním.
+
+    Formuláře se nesmějí vnořovat, takže stojí až za tím hlavním —
+    a je to i správně věcně: uložení a smazání jsou dvě různé věci
+    a nemají sdílet stav ani hlášku.
+  */
+  const [stavSmazani, akceSmazat, cekaSmazani] = useActionState<
+    StavSmeny,
+    FormData
+  >(smazatSmenu, { stav: 'nic' })
+  // Ptá se to, než smaže. Rozpis se staví večer a jedno ťuknutí vedle
+  // by sebralo směnu, kterou už někdo naplánoval.
+  const [ptaSeNaSmazani, setPtaSeNaSmazani] = useState(false)
   const [zavreno, setZavreno] = useState(false)
   const prvni = useRef<HTMLSelectElement>(null)
 
@@ -144,6 +164,18 @@ export default function FormularSmeny({
     if (stav.stav === 'hotovo') router.refresh()
   }, [stav, router])
 
+  /*
+    Po smazání se okno ZAVŘE, na rozdíl od uložení. U uložení zůstává
+    kvůli varováním — u smazání žádná nejsou a nechat otevřený formulář
+    směny, která už neexistuje, by mátlo.
+  */
+  useEffect(() => {
+    if (stavSmazani.stav === 'hotovo') {
+      router.refresh()
+      onZavrit()
+    }
+  }, [stavSmazani, router, onZavrit])
+
   useEffect(() => {
     prvni.current?.focus()
   }, [])
@@ -153,9 +185,20 @@ export default function FormularSmeny({
     onZavrit()
   }
 
-  if (zavreno) return null
+  // Po smazání se okno zavře odvozeně, ne nastavením stavu v efektu —
+  // setState uvnitř efektu spouští kaskádu překreslení (eslint na to má
+  // pravidlo) a je to i zbytečné: výsledek akce tu informaci nese sám.
+  if (zavreno || stavSmazani.stav === 'hotovo') return null
 
   const hotovo = stav.stav === 'hotovo'
+
+  /*
+    Vydaná směna se neMAŽE, ale RUŠÍ — řádek zůstane stát jako zrušený
+    a lidem zmizí až vydáním rozpisu. Rozhoduje o tom databáze
+    (`public.smazat_smenu`); tohle je jen o tom, jaké slovo se ukáže,
+    ať člověk ví, co se stane.
+  */
+  const jeVydana = Boolean(smena?.published_at)
 
   return (
     <div style={zaclona} role="dialog" aria-modal="true" aria-labelledby="smena-nadpis">
@@ -217,14 +260,14 @@ export default function FormularSmeny({
             </label>
 
             <label style={poleLabel}>
-              <span>Pozice</span>
+              <span>Zařazení</span>
               <select
                 name="pozice"
                 value={vybranaPozice}
                 onChange={(e) => setVybranaPozice(e.target.value)}
                 style={pole}
               >
-                <option value="">— bez pozice —</option>
+                <option value="">— bez zařazení —</option>
                 {pozice.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
@@ -361,6 +404,82 @@ export default function FormularSmeny({
             </div>
           </form>
         )}
+
+        {/*
+          SMAZAT / ZRUŠIT SMĚNU.
+
+          Vlastní formulář za tím hlavním — vnořovat se nesmějí.
+          Nabízí se u SKUTEČNĚ ULOŽENÉ směny (`smena.id` není prázdné;
+          u nové se předává prázdný řetězec).
+
+          NEVYDANÁ se smaže: nikdo ji neviděl, není co ohlašovat.
+          VYDANÁ se označí jako zrušená a zůstane stát — lidem se pořád
+          ukazuje vydaná podoba, takže jim zmizí až vydáním rozpisu,
+          kde se to ohlásí.
+
+          Do 9. 9. tu u vydané směny stálo, že smazat nejde. Byla to
+          správná úvaha se špatným závěrem: rozpis se VYDÁ a teprve pak
+          se v něm škrtá, takže odmítnutí u vydané znamenalo, že nešlo
+          smazat prakticky nic.
+        */}
+        {!hotovo && smena?.id ? (
+          <div style={mazaniPruh}>
+            {ptaSeNaSmazani ? (
+              <form action={akceSmazat} style={{ display: 'grid', gap: '8px' }}>
+                <input type="hidden" name="rozsah" value={rozsah} />
+                <input type="hidden" name="smena" value={smena.id} />
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
+                  <strong>
+                    {jeVydana ? 'Zrušit tuhle směnu?' : 'Smazat tuhle směnu?'}
+                  </strong>
+                </p>
+                {/*
+                  U vydané se říká, KDY to lidi uvidí. Bez toho by to
+                  vypadalo, že se nic nestalo — v jejich rozpisu směna
+                  do vydání zůstane.
+                */}
+                {jeVydana ? (
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                    Zůstane vidět jako zrušená a lidem zmizí, až rozpis
+                    vydáte.
+                  </p>
+                ) : null}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button type="submit" className="ft-tl" disabled={cekaSmazani}>
+                    {cekaSmazani
+                      ? jeVydana
+                        ? 'Ruším…'
+                        : 'Mažu…'
+                      : jeVydana
+                        ? 'Zrušit'
+                        : 'Smazat'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPtaSeNaSmazani(false)}
+                    className="ft-tl ft-tl-vedlejsi"
+                  >
+                    Zpět
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPtaSeNaSmazani(true)}
+                className="ft-tl ft-tl-vedlejsi"
+              >
+                {jeVydana ? 'Zrušit směnu' : 'Smazat směnu'}
+              </button>
+            )}
+
+            {stavSmazani.stav === 'chyba' ? (
+              <p className="hlaska-chyba" style={{ marginTop: '8px' }}>
+                {stavSmazani.text}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -442,3 +561,13 @@ const varovaniRadek = {
   fontSize: '13.5px',
   lineHeight: 1.5,
 } as const
+
+/*
+  Mazání je oddělené čarou a stojí až pod hlavními tlačítky — je to
+  jiná třída akce než Uložit a nemá s nimi soutěžit o pozornost.
+*/
+const mazaniPruh = {
+  marginTop: '16px',
+  paddingTop: '12px',
+  borderTop: '1px solid var(--line)',
+}

@@ -26,7 +26,7 @@ export function smimPridelit(
   //
   // Kdo sám roli nemá (čeká na přidělení), nepřidělí nikomu nic —
   // `ctx.permissions` je u něj stejně prázdné.
-  if (sada.isOwner) return ctx.role?.isOwner === true
+  if (sada.isOwner) return ctx.jeMajitel
 
   const moje = new Set<string>(ctx.permissions)
   return sada.prava.every((p) => moje.has(p))

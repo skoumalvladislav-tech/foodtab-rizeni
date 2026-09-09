@@ -8,26 +8,34 @@ import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
- * Uložení jedné sady oprávnění.
+ * Uložení oprávnění jednoho ZAŘAZENÍ.
+ *
+ * Od 9. 9. 2026 (migrace 20260909100000) nesou oprávnění zařazení, ne
+ * role. Zapisuje se proto do `position_permissions` — role v databázi
+ * zůstávají, ale o přístupu už nerozhodují.
  *
  * Zapisuje se ROZDÍL, ne „smaž všechno a vlož znovu“. Dva důvody:
  * audit by jinak u každého uložení hlásil odebrání a přidání všech práv
  * a v zápisu by se ztratilo, co se doopravdy změnilo; a nikdo by na
  * chvíli neměl žádné právo, i kdyby se nakonec nic nezměnilo.
  *
- * Majitel se sem nedostane: jeho sada se needituje, dostává všechno
- * z aktivních modulů přes app.has_access. Kdyby se sem přece jen
- * dostal požadavek na majitelskou roli, odmítne se.
+ * ŽIVÉ PRAVIDLO: co se tu uloží, platí okamžitě všem, kdo to zařazení
+ * mají. Nic se nikam nekopíruje — proto je na obrazovce vidět, kolika
+ * lidí se změna týká.
+ *
+ * Majitel se sem nedostane: majitelství je vlastnost ČLOVĚKA
+ * (`employees.je_majitel`), ne zařazení. Dostává všechno z aktivních
+ * modulů přes `app.has_access` a odebrat se mu to tudy nedá.
  */
 export async function ulozitOpravneni(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
-  const roleId = String(formData.get('role') ?? '')
+  const zarazeniId = String(formData.get('zarazeni') ?? '')
   const zvolena = new Set(formData.getAll('pravo').map(String))
   // Co obrazovka vůbec nabízela. Bez toho by se odebrala i práva
   // z vypnutých modulů, která se nekreslila a nikdo je neodškrtl.
   const nabizena = new Set(formData.getAll('nabizeno').map(String))
 
-  if (!roleId) return
+  if (!zarazeniId) return
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
@@ -37,27 +45,26 @@ export async function ulozitOpravneni(formData: FormData): Promise<void> {
 
   const supabase = await getServerSupabase()
 
-  const { data: role, error: chybaRole } = await supabase
-    .from('roles')
-    .select('id, is_owner, label')
-    .eq('id', roleId)
+  const { data: zarazeni, error: chybaZarazeni } = await supabase
+    .from('positions')
+    .select('id, label')
+    .eq('id', zarazeniId)
     .eq('tenant_id', tenantId)
     .limit(1)
-  if (chybaRole) throw new DotazSelhal('sada oprávnění', chybaRole)
+  if (chybaZarazeni) throw new DotazSelhal('zařazení', chybaZarazeni)
 
-  const tato = role?.[0] as { id: string; is_owner: boolean; label: string } | undefined
-  if (!tato) redirect(`/${rozsah}/nastaveni/role?chyba=neznama`)
-  if (tato.is_owner) redirect(`/${rozsah}/nastaveni/role?chyba=majitel`)
+  const toto = zarazeni?.[0] as { id: string; label: string } | undefined
+  if (!toto) redirect(`/${rozsah}/nastaveni/role?chyba=neznama`)
 
   const { data: soucasna, error: chybaSoucasna } = await supabase
-    .from('role_permissions')
+    .from('position_permissions')
     .select('permission_key')
-    .eq('role_id', roleId)
-  // Prázdný seznam znamená sadu bez práv. Kdyby se sem propadla chyba
-  // dotazu, spočítal by se rozdíl proti prázdnu a uložení by roli
-  // přidalo všechno zaškrtnuté jako nové — a nic by na tom nevypadalo
-  // divně.
-  if (chybaSoucasna) throw new DotazSelhal('obsah sady oprávnění', chybaSoucasna)
+    .eq('position_id', zarazeniId)
+  // Prázdný seznam znamená zařazení bez práv. Kdyby se sem propadla
+  // chyba dotazu, spočítal by se rozdíl proti prázdnu a uložení by
+  // zařazení přidalo všechno zaškrtnuté jako nové — a nic by na tom
+  // nevypadalo divně.
+  if (chybaSoucasna) throw new DotazSelhal('oprávnění zařazení', chybaSoucasna)
 
   const ma = new Set((soucasna ?? []).map((r) => String(r.permission_key)))
 
@@ -66,23 +73,34 @@ export async function ulozitOpravneni(formData: FormData): Promise<void> {
 
   if (odebrat.length > 0) {
     const { error } = await supabase
-      .from('role_permissions')
+      .from('position_permissions')
       .delete()
-      .eq('role_id', roleId)
+      .eq('position_id', zarazeniId)
       .in('permission_key', odebrat)
     if (error) redirect(`/${rozsah}/nastaveni/role?chyba=${kod(error.code)}`)
   }
 
   if (pridat.length > 0) {
+    /*
+      `tenant_id` se posílá výslovně. Tabulka ho má kvůli AUDITU —
+      bez něj vyjde v `app.audit_zmenu` firma NULL a funkce se vrátí
+      bez zápisu, TIŠE. Zásah do oprávnění by se neuložil nikam.
+    */
     const { error } = await supabase
-      .from('role_permissions')
-      .insert(pridat.map((k) => ({ role_id: roleId, permission_key: k })))
+      .from('position_permissions')
+      .insert(
+        pridat.map((k) => ({
+          tenant_id: tenantId,
+          position_id: zarazeniId,
+          permission_key: k,
+        })),
+      )
     if (error) redirect(`/${rozsah}/nastaveni/role?chyba=${kod(error.code)}`)
   }
 
   revalidatePath(`/${rozsah}/nastaveni/role`)
   redirect(
-    `/${rozsah}/nastaveni/role?ulozeno=${encodeURIComponent(tato.label)}` +
+    `/${rozsah}/nastaveni/role?ulozeno=${encodeURIComponent(toto.label)}` +
       `&pridano=${pridat.length}&odebrano=${odebrat.length}`,
   )
 }

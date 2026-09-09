@@ -45,10 +45,13 @@ next-env.d.ts
 # cloudflare deploy config (resource ids, machine-specific)
 deploy.env
 
-# Konfigurace Claude Code. Sdílí se jen seznam povolení, aby ho měl celý
-# tým stejný; launch.json a místní nastavení zůstávají u každého svoje.
+# Konfigurace Claude Code. Sdílí se seznam povolení a postupy (skills),
+# aby je měl celý tým stejné; launch.json a místní nastavení zůstávají
+# u každého svoje.
 .claude/*
 !.claude/settings.json
+!.claude/skills/
+!.claude/skills/**
 
 # mezivýsledek inkrementální typové kontroly (tsc --noEmit)
 *.tsbuildinfo

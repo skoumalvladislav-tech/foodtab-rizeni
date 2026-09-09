@@ -47,6 +47,18 @@ select user_id as cizi    from public.profiles where email = 'cizi@jinafirma.cz'
 
 select id as marek_e from public.employees where user_id = :'marek' \gset
 
+/*
+  Zařazení pro oba herce níž. Členství s rolí Servis jim po přepnutí
+  nedá nic — práva visí na zaměstnanci. Bez tohohle by je krok12
+  našel mezi "čeká na oprávnění", a měl by pravdu.
+
+  Zakládá se bez přihlášeného, jako migrace: je to příprava scény,
+  ne krok uživatele.
+*/
+select id as z_servis from public.positions
+  where tenant_id = :'tenant' and key = 'servis' \gset
+select set_config('test.user_id', '', false);
+
 -- Záskok: patří na Perlu, ale dnes tam směnu NEMÁ. Na něm se ověří,
 -- že píchnout smí i ten, kdo v rozpisu není, a že se to označí.
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -59,8 +71,9 @@ select :'tenant', '88888888-8888-8888-8888-888888888888', r.id, 'active', 'tenan
 from public.roles r where r.tenant_id = :'tenant' and r.key = 'servis'
 on conflict do nothing;
 
-insert into public.employees (tenant_id, branch_id, user_id, full_name)
-values (:'tenant', :'perla', '88888888-8888-8888-8888-888888888888', 'Záskok Kioskový')
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name)
+values (:'tenant', :'perla', '88888888-8888-8888-8888-888888888888', :'z_servis',
+        'Záskok Kioskový')
 returning id as zaskok_e \gset
 
 -- Do bloků `do $$` se proměnná psql nedostane, musí přes set_config.
@@ -78,8 +91,9 @@ select :'tenant', '99999999-9999-9999-9999-999999999999', r.id, 'active', 'tenan
 from public.roles r where r.tenant_id = :'tenant' and r.key = 'servis'
 on conflict do nothing;
 
-insert into public.employees (tenant_id, branch_id, user_id, full_name)
-values (:'tenant', :'bar', '99999999-9999-9999-9999-999999999999', 'Barman Zkouška')
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name)
+values (:'tenant', :'bar', '99999999-9999-9999-9999-999999999999', :'z_servis',
+        'Barman Zkouška')
 returning id as barman_e \gset
 
 -- Marek dnes na Perle směnu má. Provozní den, ne kalendářní: kdyby se

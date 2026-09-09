@@ -38,6 +38,8 @@ type Smena = {
   ends_at: string;
   status: string;
   note: string;
+  // Vydaná směna se nedá smazat — lidem už je v rozpisu vidět.
+  published_at: string | null;
 };
 
 export default async function Rozpis({
@@ -118,7 +120,7 @@ export default async function Rozpis({
   let dotaz = supabase
     .from("shifts")
     .select(
-      "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note",
+      "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at",
     )
     .eq("tenant_id", tenantId)
     .gte("shift_date", odKdy)

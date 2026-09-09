@@ -37,7 +37,7 @@ select id as perla  from public.branches where slug = 'cerna-perla' \gset
 select user_id as majitel from public.profiles where email = 'majitel@foodtab.cz' \gset
 select user_id as vedouci from public.profiles where email = 'vedouci@foodtab.cz' \gset
 
-select id as role_kuchyne from public.roles
+select id as z_kuchyne from public.positions
   where tenant_id = :'tenant' and key = 'kuchyne' \gset
 
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -50,6 +50,18 @@ insert into auth.users (id, email, raw_user_meta_data) values
 on conflict (id) do nothing;
 
 select set_config('test.tenant', :'tenant', false);
+
+/*
+  Kdo má dostat oprávnění, musí mít zaměstnanecký záznam se
+  zařazením — pozvánka po přepnutí bere práva z něj (zadání 6.5).
+  Zakládá se bez přihlášeného, jako migrace: je to příprava scény.
+*/
+select set_config('test.user_id', '', false);
+insert into public.employees (tenant_id, branch_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', :'z_kuchyne', 'S Rolí Zkouška', 'hpp')
+on conflict do nothing;
+select id as e_s_roli from public.employees
+  where tenant_id = :'tenant' and full_name = 'S Rolí Zkouška' \gset
 
 
 \echo ''
@@ -110,8 +122,8 @@ set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
 select token as tok_s from app.create_invitation(
-  :'tenant', :'role_kuchyne', 'email', 'srolí@foodtab.cz',
-  'branch', array[:'perla']::uuid[]) \gset
+  :'tenant', null, 'email', 'srolí@foodtab.cz',
+  'branch', array[:'perla']::uuid[], :'e_s_roli') \gset
 
 select set_config('test.user_id', 'a2a2a2a2-a2a2-4a2a-a2a2-a2a2a2a2a2a2', false);
 select app.accept_invitation(:'tok_s') as prijal_s \gset
@@ -154,14 +166,14 @@ select pg_temp.check('a naše upozornění patří jen naší firmě',
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
-select pg_temp.check('bez role čeká přesně jeden člověk',
+select pg_temp.check('bez zařazení čeká přesně jeden člověk',
   (select count(*) from public.cekaji_na_opravneni(:'tenant')) = 1);
 
-select pg_temp.check('a je to ten, kdo roli nedostal',
+select pg_temp.check('a je to ten, kdo oprávnění nedostal',
   (select user_id from public.cekaji_na_opravneni(:'tenant'))
   = 'a1a1a1a1-a1a1-4a1a-a1a1-a1a1a1a1a1a1');
 
-select pg_temp.check('kdo roli dostal, mezi čekajícími není',
+select pg_temp.check('kdo zařazení dostal, mezi čekajícími není',
   not exists (select 1 from public.cekaji_na_opravneni(:'tenant')
               where user_id = 'a2a2a2a2-a2a2-4a2a-a2a2-a2a2a2a2a2a2'));
 
@@ -170,11 +182,14 @@ select set_config('test.user_id', :'vedouci', false);
 select pg_temp.check('vedoucí směny seznam čekajících nedostane',
   (select count(*) from public.cekaji_na_opravneni(:'tenant')) = 0);
 
--- Přidělení role: okno se přestane ukazovat samo, nic se neodškrtává.
+-- Přidělení zařazení: okno se přestane ukazovat samo, nic se
+-- neodškrtává. Stav je v DATECH, ne v tom, jestli si to někdo přečetl.
 reset role;
-update public.memberships set role_id = :'role_kuchyne'
-  where tenant_id = :'tenant'
-    and user_id = 'a1a1a1a1-a1a1-4a1a-a1a1-a1a1a1a1a1a1';
+select set_config('test.user_id', '', false);
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', 'a1a1a1a1-a1a1-4a1a-a1a1-a1a1a1a1a1a1', :'z_kuchyne',
+        'Bez Role Zkouška', 'hpp')
+on conflict (tenant_id, user_id) do update set position_id = excluded.position_id;
 
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
@@ -249,7 +264,7 @@ set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
 select token as tok_pad from app.create_invitation(
-  :'tenant', :'role_kuchyne', 'email', 'padavka@foodtab.cz',
+  :'tenant', null, 'email', 'padavka@foodtab.cz',
   'branch', array[:'perla']::uuid[]) \gset
 
 select set_config('test.user_id', 'a3a3a3a3-a3a3-4a3a-a3a3-a3a3a3a3a3a3', false);

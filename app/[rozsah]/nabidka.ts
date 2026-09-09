@@ -139,7 +139,7 @@ export const NASTAVENI: Polozka[] = [
   { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
   // Pozice patří ke správě lidí, ne k nastavení firmy — proto
   // people.manage, ne settings.manage.
-  { segment: 'nastaveni/pozice', nazev: 'Pozice', kratky: 'Pozice', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
+  { segment: 'nastaveni/pozice', nazev: 'Zařazení', kratky: 'Zařazení', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
   // Šablony směn — pojmenované směny s časy (D, N, R). Je to nastavení
   // provozu, ne správa lidí, proto settings.manage. Vidět je má i ten,
   // kdo plánuje směny, ale měnit je smí správa nastavení; kdo jen

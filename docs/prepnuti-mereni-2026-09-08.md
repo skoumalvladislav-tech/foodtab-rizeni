@@ -275,3 +275,36 @@ Tohle chybí a **bez toho se přepnutí psát nemá:**
 3. **Protidůkazy.** Nic z tohohle souboru neprošlo skeptickou
    kontrolou. U tvrzení označených „projde tiše" je to ta část, na
    které nejvíc záleží.
+
+---
+
+## 5. Rozhodnutí 8. 9. večer: bod 1 se dnes nezačíná
+
+Doměřeno přímo, ne odhadem:
+
+- scénáře mají **849 kontrol** (`pg_temp.check`),
+- herce přes členství **bez záznamu v `employees`** zakládají čtyři
+  soubory — krok7 (44 kontrol), krok9 (23), krok10 (22), marketing1
+  (18),
+- a hlavně: **sdílený provozní `7777…`** vzniká v `krok4_scenar.sql`
+  na ř. 514–519 jako `auth.users` + `memberships`, **bez zaměstnaneckého
+  záznamu**. Používají ho krok5, 7, 8, 9, 10 i marketing1.
+
+**Dobrá zpráva:** není to 200 přepsaných tvrzení. Ta tvrzení („X smí,
+Y nesmí") po přepnutí platí dál — jen jejich herci musí dostat
+`employees` řádek a `position_permissions` odpovídající dnešní roli.
+Je to oprava **přípravy** v ~7 hercích, ne přepis kontrol.
+
+**Špatná zpráva:** i tak je bod 1 součet sedmnácti funkcí, aplikační
+vrstvy, sedmi herců a tří kontrol s cizí firmou, z nichž každá se musí
+rozbít zvlášť (oddíl 7b) — **a nesmí se commitnout nedodělaný.** Když
+se to nestihne celé, nezůstane po tom nic.
+
+K tomu měření pro bod 1 **není hotové**: chybí linie scénářů, pořadí
+nasazení, návrat zpět a všechny protidůkazy (oddíl 4 tohohle souboru).
+
+**Proto se bod 1 dnes nezačíná a jde se na body, které se dají
+odevzdat samostatně.** Bod 2 (obrazovky zařazení) na bodu 1 závisí:
+kdyby obrazovka Oprávnění začala číst `position_permissions`, zatímco
+o přístupu pořád rozhodují role, **ukazovala by práva, která nic
+nedělají** — tedy by lhala. Proto se odkládá s ním.

@@ -42,10 +42,13 @@ select user_id as majitel  from public.profiles where email = 'majitel@foodtab.c
 select user_id as provozni from public.profiles where email = 'provozni@foodtab.cz' \gset
 select user_id as marek    from public.profiles where email = 'cisnik@foodtab.cz' \gset
 
-select id as r_majitel from public.roles
-  where tenant_id = :'tenant' and is_owner \gset
-select id as r_servis from public.roles
+select id as z_servis from public.positions
   where tenant_id = :'tenant' and key = 'servis' \gset
+
+-- Příprava scény bez přihlášeného, jako migrace: kdo smí majitele
+-- jmenovat, ověřuje krok4 i krok7. Tady jde o to, co se stane,
+-- když už dva jsou.
+select set_config('test.user_id', '', false);
 
 select id as m_majitel from public.memberships
   where tenant_id = :'tenant' and user_id = :'majitel' \gset
@@ -59,16 +62,28 @@ insert into auth.users (id, email, raw_user_meta_data) values
 on conflict (id) do nothing;
 
 insert into public.memberships (tenant_id, user_id, role_id, status, scope)
-values (:'tenant', 'cccccccc-cccc-cccc-cccc-cccccccccccc', :'r_majitel', 'active', 'tenant')
+values (:'tenant', 'cccccccc-cccc-cccc-cccc-cccccccccccc', null, 'active', 'tenant')
 on conflict (tenant_id, user_id) do update
   set role_id = excluded.role_id, status = 'active'
 returning id as m_druhy \gset
+
+/*
+  Majitelství je od přepnutí sloupec na ZAMĚSTNANCI, ne role
+  u členství. Druhá majitelka proto potřebuje zaměstnanecký záznam —
+  bez něj by majitelkou nebyla a celý scénář by měřil firmu s jedním
+  majitelem, zatímco by tvrdil, že jich má dva.
+*/
+insert into public.employees (tenant_id, user_id, full_name, employment_type, je_majitel)
+values (:'tenant', 'cccccccc-cccc-cccc-cccc-cccccccccccc', 'Druhá Majitelka', 'ico', true)
+on conflict (tenant_id, user_id) do update set je_majitel = true, deleted_at = null
+returning id as e_druhy \gset
 
 select set_config('test.tenant',    :'tenant',    false);
 select set_config('test.m_majitel', :'m_majitel', false);
 select set_config('test.m_druhy',   :'m_druhy',   false);
 select set_config('test.e_majitel', :'e_majitel', false);
-select set_config('test.r_servis',  :'r_servis',  false);
+select set_config('test.e_druhy',   :'e_druhy',   false);
+select set_config('test.z_servis',  :'z_servis',  false);
 
 
 \echo ''
@@ -91,6 +106,12 @@ reset role;
 
 select pg_temp.check('ze dvou majitelů jde jeden odebrat',
   not exists (select 1 from public.memberships where id = :'m_druhy'));
+
+-- Majitelství jí na papíře zůstalo, ale bez aktivního členství se
+-- do firmy nedostane — a `app.pocet_majitelu` proto počítá jen ty,
+-- kdo se opravdu přihlásí.
+select pg_temp.check('a bez členství se nepočítá, i když příznak má',
+  (select je_majitel from public.employees where id = :'e_druhy'));
 
 select pg_temp.check('a zůstal jeden', app.pocet_majitelu(:'tenant', null) = 1);
 
@@ -137,24 +158,19 @@ begin
   */
   reset role;
 
-  -- 3. Přeřazení na jinou roli.
+  /*
+    3. Odebrání majitelství. Tahle cesta ven je NOVÁ: dokud majitel
+    visel na roli, nebylo co odebírat jinak než přeřazením. Teď je to
+    sloupec `employees.je_majitel` a bez hlídače by stačil jeden
+    update, aby firma zůstala bez majitele.
+  */
   begin
-    update public.memberships
-       set role_id = current_setting('test.r_servis')::uuid
-     where id = current_setting('test.m_majitel')::uuid;
+    update public.employees set je_majitel = false
+     where id = current_setting('test.e_majitel')::uuid;
     v_ok := false;
   exception when restrict_violation then v_ok := true;
   end;
-  perform pg_temp.check('ani přeřadit na jinou roli', v_ok);
-
-  -- Ani „žádná role“, což je od pozvánek bez oprávnění platný stav.
-  begin
-    update public.memberships set role_id = null
-     where id = current_setting('test.m_majitel')::uuid;
-    v_ok := false;
-  exception when restrict_violation then v_ok := true;
-  end;
-  perform pg_temp.check('ani na žádnou roli', v_ok);
+  perform pg_temp.check('ani odebrat majitelství', v_ok);
 
   -- Pozastavení není v zadání vyjmenované, ale je to tatáž díra:
   -- pozastavený majitel není aktivní majitel.
@@ -169,8 +185,8 @@ end $$;
 
 reset role;
 
-select pg_temp.check('členství je pořád na svém místě',
-  (select role_id from public.memberships where id = :'m_majitel') = :'r_majitel');
+select pg_temp.check('majitelství je pořád na svém místě',
+  (select je_majitel from public.employees where id = :'e_majitel'));
 
 select pg_temp.check('a je aktivní',
   (select status from public.memberships where id = :'m_majitel') = 'active');
@@ -214,11 +230,12 @@ select pg_temp.check('jiná změna u posledního majitele projde',
   (select scope from public.memberships where id = :'m_majitel') = 'tenant');
 
 -- 4. Zbylý majitel pořád může přidělovat.
-select pg_temp.check('zbylý majitel smí přidělit roli Majitel',
-  app.smi_pridelit(:'tenant', :'r_majitel', 'tenant'));
+-- Majitelství není zařazení, takže se strop ptá člověka.
+select pg_temp.check('zbylý majitel smí přidělit majitelství',
+  app.smi_pridelit_zamestnance(:'tenant', :'e_majitel', 'tenant'));
 
-select pg_temp.check('i jinou roli',
-  app.smi_pridelit(:'tenant', :'r_servis', 'tenant'));
+select pg_temp.check('i obyčejné zařazení',
+  app.smi_pridelit(:'tenant', :'z_servis', 'tenant'));
 
 reset role;
 

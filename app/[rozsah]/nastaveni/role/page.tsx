@@ -14,23 +14,31 @@ export const dynamic = "force-dynamic";
 /**
  * Nastavení → Oprávnění
  *
- * Oprávnění je POJMENOVANÁ SADA práv: Majitel, Provozní, Servis. To, co
- * je uvnitř, jsou zaškrtávátka s větou („Vidět rozpis směn“) — ta se
- * oprávněním nikde neříká, jinak by to slovo znamenalo dvě věci naráz.
+ * Oprávnění nese ZAŘAZENÍ — Číšník, Kuchař, Provozní. Je to jedna věc,
+ * ne dvě: do 9. 9. 2026 tu byly zvlášť „pozice" (čím ten člověk je)
+ * a „role" (co smí), a Šéfík to právem vnímal jako dvojí zadávání
+ * téhož. Zadání: docs/zarazeni-misto-roli.md, oddíl 6.1.
  *
- * S pozicí to nesouvisí. Pozice říká, čím ten člověk je; tohle říká,
- * co smí v aplikaci. Brigádník má pozici a žádné oprávnění.
+ * To, co je uvnitř, jsou zaškrtávátka s větou („Vidět rozpis směn“) —
+ * ta se oprávněním nikde neříká, jinak by to slovo znamenalo dvě věci
+ * naráz.
  *
- * Majitel se needituje. Dostává všechno, co spadá do zapnutých modulů,
- * přes app.has_access — kdyby se mu práva odebírala tady, dal by se
- * zamknout ven z vlastní firmy.
+ * ŽIVÉ PRAVIDLO: co se tu zaškrtne, platí okamžitě všem, kdo to
+ * zařazení mají. Nic se nikomu nekopíruje — proto je u každého
+ * zařazení napsané, kolika lidí se změna týká.
+ *
+ * MAJITEL TU NENÍ, a je to schválně. Majitelství je vlastnost ČLOVĚKA
+ * (`employees.je_majitel`), ne pracovní zařazení: Šéfík může být
+ * v rozpisu vedený jako provozní a majitelem být pořád. Dostává
+ * všechno ze zapnutých modulů přes `app.has_access` — kdyby se mu
+ * práva odebírala tady, dal by se zamknout ven z vlastní firmy.
  */
 
-type Role = {
+type Zarazeni = {
   id: string;
   key: string;
   label: string;
-  is_owner: boolean;
+  active: boolean;
 };
 
 type Pravo = {
@@ -84,13 +92,13 @@ export default async function NastaveniOpravneni({
   const { ctx } = pristup;
   const supabase = await getServerSupabase();
 
-  const role = await seznam<Role>(
-    "sady oprávnění firmy",
+  const zarazeni = await seznam<Zarazeni>(
+    "zařazení firmy",
     supabase
-      .from("roles")
-      .select("id, key, label, is_owner")
+      .from("positions")
+      .select("id, key, label, active")
       .eq("tenant_id", tenantId)
-      .order("is_owner", { ascending: false })
+      .order("active", { ascending: false })
       .order("label"),
   );
 
@@ -113,19 +121,42 @@ export default async function NastaveniOpravneni({
   const prava = vsechnaPrava.filter((p) => zapnute.has(p.module_key));
   const vKatalogu = new Set(prava.map((p) => p.key));
 
-  const vazby = await seznam<{ role_id: string; permission_key: string }>(
-    "obsah sad oprávnění",
+  const vazby = await seznam<{ position_id: string; permission_key: string }>(
+    "oprávnění zařazení",
     supabase
-      .from("role_permissions")
-      .select("role_id, permission_key")
-      .in("role_id", role.map((r) => r.id)),
+      .from("position_permissions")
+      .select("position_id, permission_key")
+      .eq("tenant_id", tenantId),
   );
 
   const maPravo = new Map<string, Set<string>>();
   for (const v of vazby) {
-    const id = v.role_id as string;
+    const id = v.position_id as string;
     if (!maPravo.has(id)) maPravo.set(id, new Set());
     maPravo.get(id)!.add(v.permission_key as string);
+  }
+
+  /*
+    Kolik lidí to zařazení má. Zadání 6.1 to chce vidět na obrazovce:
+    když se mění práva zařazení, má být poznat, KOLIKA LIDÍ se to týká —
+    změna platí hned všem a nikde se nic nepotvrzuje.
+
+    Počítá se ze živých zaměstnanců, i těch bez účtu: brigádníkovi se
+    oprávnění uloží a začne platit, jakmile se přihlásí (zadání, oddíl 3).
+  */
+  const lideNaZarazeni = await seznam<{ position_id: string | null }>(
+    "lidé podle zařazení",
+    supabase
+      .from("employees")
+      .select("position_id")
+      .eq("tenant_id", tenantId)
+      .is("deleted_at", null),
+  );
+
+  const pocetLidi = new Map<string, number>();
+  for (const z of lideNaZarazeni) {
+    if (!z.position_id) continue;
+    pocetLidi.set(z.position_id, (pocetLidi.get(z.position_id) ?? 0) + 1);
   }
 
   // Práva po modulech, ať se dlouhý seznam dá číst.
@@ -139,7 +170,7 @@ export default async function NastaveniOpravneni({
     <>
       <Nadpis
         oci="Nastavení"
-        popis="Pojmenované sady práv. Čím kdo je (číšník, kuchař) se nastavuje v Pozicích — to je něco jiného."
+        popis="Co smí Číšník, Kuchař nebo Provozní. Změna platí hned všem, kdo to zařazení mají."
       >
         Oprávnění
       </Nadpis>
@@ -152,9 +183,17 @@ export default async function NastaveniOpravneni({
           </p>
         ) : null}
 
+        <p style={{ ...popisRole, maxWidth: "68ch" }}>
+          Majitel firmy tu není. Majitelství je vlastnost člověka, ne
+          zařazení — nastavuje se u něj v Lidech a dává mu všechno ze
+          zapnutých modulů. Kdyby se mu práva odebírala tady, šel by
+          zamknout ven z vlastní firmy.
+        </p>
+
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "16px" }}>
-          {role.map((r) => {
+          {zarazeni.map((r) => {
             const moje = maPravo.get(r.id) ?? new Set<string>();
+            const lidi = pocetLidi.get(r.id) ?? 0;
 
             /*
               Třetí obranná linie z docs/pravidlo-neprideluj-vic.md, ta
@@ -169,7 +208,8 @@ export default async function NastaveniOpravneni({
               „nemůžete přidělit“ i vlastníkovi firmy.
             */
             const smim = smimPridelit(ctx, {
-              isOwner: r.is_owner,
+              // Majitel není zařazení, takže tudy nikdy neprochází.
+              isOwner: false,
               prava: [...moje].filter((k) => vKatalogu.has(k)),
             });
 
@@ -186,43 +226,32 @@ export default async function NastaveniOpravneni({
               >
                 <h2 style={{ margin: 0, fontSize: "18px", color: "var(--ink)" }}>
                   {r.label}
+                  {r.active ? null : (
+                    <span style={stitek}>vyřazené</span>
+                  )}
                 </h2>
+                <p style={{ ...popisRole, margin: "4px 0 10px" }}>
+                  {lidi === 0
+                    ? "Zatím ho nemá nikdo — změna se teď nedotkne nikoho."
+                    : lidi === 1
+                      ? "Má ho jeden člověk. Změna u něj platí hned."
+                      : `Má ho ${lidi} lidí. Změna u nich platí hned.`}
+                </p>
 
                 {smim ? null : (
                   <p style={{ ...popisRole, marginBottom: "4px" }}>
                     <strong style={{ color: "var(--pozor)" }}>
-                      Tuhle sadu nemůžete nikomu přidělit.
+                      Tohle zařazení nemůžete nikomu přidělit.
                     </strong>{" "}
-                    {r.is_owner
-                      ? "Majitele přidělí jenom majitel."
-                      : "Obsahuje práva, která sami nemáte — a nikdo nepřiděluje víc, než má sám."}
+                    Obsahuje práva, která sami nemáte — a nikdo
+                    nepřiděluje víc, než má sám.
                   </p>
                 )}
 
-                {r.is_owner ? (
-                  <>
-                    <p style={popisRole}>
-                      Majitel má všechno ze zapnutých modulů a nedá se to
-                      měnit. Kdyby se mu práva odebírala, mohl by se
-                      zamknout ven z vlastní firmy — proto o tom rozhoduje
-                      databáze, ne tahle obrazovka.
-                    </p>
-                    <div style={mrizka}>
-                      {prava.map((p) => (
-                        <span key={p.key} style={{ ...radekPrava, opacity: 0.75 }}>
-                          <span aria-hidden="true">✓</span>
-                          <span>
-                            {p.label}
-                            {p.sensitive ? <Citlive /> : null}
-                          </span>
-                        </span>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <form key={`role-${r.id}`} action={ulozitOpravneni}>
+                {(
+                  <form key={`zarazeni-${r.id}`} action={ulozitOpravneni}>
                     <input type="hidden" name="rozsah" value={rozsah} />
-                    <input type="hidden" name="role" value={r.id} />
+                    <input type="hidden" name="zarazeni" value={r.id} />
 
                     {[...podleModulu.entries()].map(([modul, seznam]) => (
                       <div key={modul} style={{ marginTop: "14px" }}>
@@ -346,6 +375,24 @@ const mrizka = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
   gap: "8px 18px",
+} as const;
+
+/**
+ * Vyřazené zařazení (`positions.active = false`).
+ *
+ * Nenabízí se u nových lidí, ale u těch, kdo ho mají, PLATÍ DÁL —
+ * v ostrých datech je takový Barman a visí na něm člověk s právy.
+ * Proto se tu ukazuje i s možností úpravy, jen označené.
+ */
+const stitek = {
+  marginLeft: "8px",
+  padding: "1px 7px",
+  borderRadius: "999px",
+  background: "var(--pozor-bg)",
+  color: "var(--pozor)",
+  fontSize: "11.5px",
+  whiteSpace: "nowrap" as const,
+  verticalAlign: "middle" as const,
 } as const;
 
 const radekPrava = {

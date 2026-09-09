@@ -59,8 +59,19 @@ on conflict (tenant_id, key) do nothing;
 select id as pozice from public.positions
  where tenant_id = :'tenant' and key = 'zahradnik' \gset
 
-select id as role_kuchyne from public.roles
- where tenant_id = :'tenant' and key = 'kuchyne' \gset
+/*
+  Zařazení Zahradník nese od přepnutí i OPRÁVNĚNÍ, ne jen jméno.
+  Gita měla práva z role Kuchyně; ta po přepnutí nedává nic, takže
+  se táž sada připisuje jejímu zařazení. Bez toho by neviděla ani
+  vlastní úkol a kontroly níž by měřily prázdno.
+*/
+select set_config('test.user_id', '', false);
+insert into public.position_permissions (tenant_id, position_id, permission_key)
+select :'tenant', :'pozice', pp.permission_key
+from public.position_permissions pp
+join public.positions po on po.id = pp.position_id and po.key = 'kuchyne'
+where pp.tenant_id = :'tenant'
+on conflict do nothing;
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('9999aaaa-0000-0000-0000-000000000009', 'gita@foodtab.cz', '{"full_name":"Gita Zahradní"}');
@@ -71,7 +82,7 @@ select id as gita from public.employees
  where user_id = '9999aaaa-0000-0000-0000-000000000009' \gset
 
 insert into public.memberships (tenant_id, user_id, role_id, scope, status)
-values (:'tenant', '9999aaaa-0000-0000-0000-000000000009', :'role_kuchyne', 'branch', 'active');
+values (:'tenant', '9999aaaa-0000-0000-0000-000000000009', null, 'branch', 'active');
 select id as clen_gita from public.memberships
  where user_id = '9999aaaa-0000-0000-0000-000000000009' \gset
 insert into public.membership_branches (membership_id, branch_id)
@@ -277,15 +288,17 @@ select set_config('test.t_gita', :'t_gita', false);
   `tasks.manage`. Přesně ten člověk, o kterém rozhodnutí mluví —
   kolega, co zaskakuje.
 */
-select id as role_servis from public.roles
+select id as z_servis from public.positions
  where tenant_id = :'tenant' and key = 'servis' \gset
+select set_config('test.user_id', '', false);
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('9999bbbb-0000-0000-0000-00000000000b', 'honza@foodtab.cz', '{"full_name":"Honza Číšník"}');
-insert into public.employees (tenant_id, branch_id, user_id, full_name, employment_type)
-values (:'tenant', :'perla', '9999bbbb-0000-0000-0000-00000000000b', 'Honza Číšník', 'hpp');
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', '9999bbbb-0000-0000-0000-00000000000b', :'z_servis',
+        'Honza Číšník', 'hpp');
 insert into public.memberships (tenant_id, user_id, role_id, scope, status)
-values (:'tenant', '9999bbbb-0000-0000-0000-00000000000b', :'role_servis', 'branch', 'active');
+values (:'tenant', '9999bbbb-0000-0000-0000-00000000000b', null, 'branch', 'active');
 select id as clen_honza from public.memberships
  where user_id = '9999bbbb-0000-0000-0000-00000000000b' \gset
 insert into public.membership_branches (membership_id, branch_id)

@@ -266,11 +266,11 @@ export async function vystavitPozvankuAction(
   const kanal = String(formData.get('kanal') ?? 'email')
 
   /*
-    Prázdné = „přidělím později“, ne chyba. Do databáze musí jít null,
-    ne prázdný řetězec — ten by se pokusil přetypovat na uuid a spadl
-    by na 22P02 s hláškou, ze které nikdo nic nepozná.
+    Pozvánka od 9. 9. 2026 NENESE OPRÁVNĚNÍ — bere je ze zaměstnance,
+    kterému se posílá (zadání docs/zarazeni-misto-roli.md, oddíl 6.5).
+    Formulář se proto na oprávnění neptá; nastavuje se u člověka
+    v Lidech, a to i dřív, než účet má.
   */
-  const opravneni = String(formData.get('opravneni') ?? '').trim() || null
 
   // Prázdné = „podle Lidí“, 'firma' = firemní rozsah, jinak id pobočky.
   const pobockaZFormulare = String(formData.get('pobocka') ?? '').trim()
@@ -316,9 +316,9 @@ export async function vystavitPozvankuAction(
     v pozvánce znamená rozhodovat dvakrát o téže věci a druhé rozhodnutí
     se dřív nebo později rozejde s prvním.
 
-    Samotný rozsah nic neotevírá — bez role nemá člověk jediné právo,
-    ať je rozsah jakýkoli (ověřeno v krok7_scenar.sql). Proto je
-    bezpečné nastavit ho dopředu.
+    Samotný rozsah nic neotevírá — bez zařazení nemá člověk jediné
+    právo, ať je rozsah jakýkoli (ověřeno v krok7_scenar.sql). Proto
+    je bezpečné nastavit ho dopředu.
   */
   /*
     Pobočka z formuláře má přednost před tou z Lidí (bod 7c). Prázdné
@@ -327,7 +327,7 @@ export async function vystavitPozvankuAction(
 
     Strop se tu neřeší: nabídka v prohlížeči je jen pohodlí a
     app.create_invitation ověří, že pobočka patří téhle firmě, i to,
-    že přidělovaná role nesahá výš než ten, kdo zve.
+    že zařazení zvaného člověka nesahá výš než ten, kdo zve.
   */
   const pobockaProPozvanku =
     pobockaZFormulare === 'firma'
@@ -336,7 +336,9 @@ export async function vystavitPozvankuAction(
 
   const { data, error } = await supabase.rpc('create_invitation', {
     p_tenant: tenantId,
-    p_role: opravneni,
+    // Role už o ničem nerozhoduje. Posílá se prázdná, aby v tabulce
+    // nezůstávala hodnota, podle které se nikdo neřídí.
+    p_role: null,
     p_channel: kanal,
     p_contact: email,
     p_scope: pobockaProPozvanku ? 'branch' : 'tenant',
@@ -459,21 +461,27 @@ oprávnění. Jestli o pozvánku nestojíte, nemusíte dělat nic — sama vypr�
 /**
  * Přidělení oprávnění a rozsahu.
  *
- * Obojí najednou, ne zvlášť: role sama neotevře nic, dokud k ní není
- * rozsah, a rozsah sám neotevře nic bez role. Kdyby se nastavovaly
- * odděleně, končilo by to půlkou lidí, kteří „oprávnění mají“ a přesto
- * nic nevidí — přesně to, na co jsme narazili u pozvánek.
- * Viz docs/odpovedi-pozvanky-2026-09-01.md, oddíl 1.
+ * Od 9. 9. 2026 se oprávnění zapisuje jako ZAŘAZENÍ u zaměstnance
+ * (`employees.position_id`), ne jako role u členství. Rozsah zůstal
+ * na členství — je to „kde“, a to bez přihlášení nedává smysl.
  *
- * ROZHODNUTÍ PADÁ V DATABÁZI. Politiky `memberships_update`
- * a `membership_branches_write` se ptají `app.smi_pridelit`, takže
- * nikdo nepřidělí víc, než má sám, ani obejitím téhle akce. Kontroly
- * tady jsou proto, aby se člověk dozvěděl důvod dřív než chybu.
+ * Proto se to taky rozpadlo na dva kroky, které můžou dopadnout
+ * různě: zařazení se uloží i člověku bez účtu (zadání, oddíl 3 —
+ * „zadané dřív, účinné později“), rozsah jen tomu, kdo už členství
+ * má. Obrazovka to říká předem, tady se to jen nepřepisuje na
+ * chybu.
+ *
+ * ROZHODNUTÍ PADÁ V DATABÁZI. Zařazení hlídá spoušť
+ * `trg_strop_zarazeni`, rozsah politiky `memberships_update`
+ * a `membership_branches_write` přes `app.smi_pridelit_cloveku` —
+ * takže nikdo nepřidělí víc, než má sám, ani obejitím téhle akce.
+ * Kontroly tady jsou proto, aby se člověk dozvěděl důvod dřív než
+ * chybu.
  */
 export async function prideleniOpravneni(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const zamestnanec = String(formData.get('zamestnanec') ?? '')
-  const role = String(formData.get('opravneni') ?? '').trim() || null
+  const zarazeni = String(formData.get('zarazeni') ?? '').trim() || null
   const uroven = String(formData.get('uroven') ?? 'branch') === 'tenant' ? 'tenant' : 'branch'
   const pobocky = formData.getAll('pobocka').map(String).filter(Boolean)
 
@@ -490,14 +498,53 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
 
   const { data: clovek, error: chybaClovek } = await supabase
     .from('employees')
-    .select('id, user_id, full_name')
+    .select('id, user_id, full_name, position_id')
     .eq('id', zamestnanec)
     .eq('tenant_id', tenantId)
     .maybeSingle()
   if (chybaClovek) throw new DotazSelhal('zaměstnanec k přidělení oprávnění', chybaClovek)
 
-  if (!clovek?.user_id) {
-    redirect(`${zpet}?chyba=opravneni-bez-uctu`)
+  if (!clovek) redirect(zpet)
+
+  /*
+    1. ZAŘAZENÍ. Jde uložit i člověku bez účtu — začne platit,
+    jakmile se přihlásí.
+
+    Ověřuje se ČTENÍM, ne návratovým kódem: spoušť sice u stropu
+    křičí, ale politika `employees_write` update tiše zahodí, když na
+    něj přihlášený nemá. Nula změněných řádků není chyba a Supabase
+    o ní mlčí (docs/pravidlo-neprideluj-vic.md).
+  */
+  if (clovek.position_id !== zarazeni) {
+    const { error: chybaZarazeni } = await supabase
+      .from('employees')
+      .update({ position_id: zarazeni })
+      .eq('id', clovek.id)
+
+    if (chybaZarazeni) {
+      redirect(
+        `${zpet}?chyba=opravneni&text=${encodeURIComponent(chybaZarazeni.message)}`,
+      )
+    }
+
+    const { data: poZarazeni } = await supabase
+      .from('employees')
+      .select('position_id')
+      .eq('id', clovek.id)
+      .maybeSingle()
+
+    if ((poZarazeni?.position_id ?? null) !== zarazeni) {
+      redirect(`${zpet}?chyba=opravneni-neprovedeno`)
+    }
+  }
+
+  /*
+    2. ROZSAH. Bez účtu a bez členství není u koho ho vést — zařazení
+    už uložené je, takže se to nehlásí jako chyba, ale jako to, co se
+    stalo.
+  */
+  if (!clovek.user_id) {
+    redirect(`${zpet}?chyba=opravneni-bez-clenstvi`)
   }
 
   const { data: clenstvi, error: chybaClenstvi } = await supabase
@@ -514,13 +561,17 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
 
   /*
     Zápis rozsahu. Pořadí je schválně tohle: napřed členství, pak
-    pobočky. Politika na `membership_branches` se totiž ptá na roli
-    ULOŽENOU v členství — kdyby se pobočky psaly první, ptala by se
-    ještě na tu starou.
+    pobočky. Politika na `membership_branches` se totiž ptá na to, co
+    je ULOŽENÉ — kdyby se pobočky psaly první, ptala by se ještě na
+    starý stav.
+
+    `role_id` se nepřepisuje. Zůstalo v tabulce, ale o ničem
+    nerozhoduje — a přepsat ho na prázdno by u lidí z doby před
+    přepnutím smazalo údaj, který se ještě může hodit při dohledávání.
   */
   const { error: chybaUpdate } = await supabase
     .from('memberships')
-    .update({ role_id: role, scope: uroven })
+    .update({ scope: uroven })
     .eq('id', clenstvi.id)
 
   if (chybaUpdate) {
@@ -538,11 +589,11 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
   */
   const { data: po } = await supabase
     .from('memberships')
-    .select('role_id, scope')
+    .select('scope')
     .eq('id', clenstvi.id)
     .maybeSingle()
 
-  if (po?.role_id !== role || po?.scope !== uroven) {
+  if (po?.scope !== uroven) {
     redirect(`${zpet}?chyba=opravneni-neprovedeno`)
   }
 

@@ -107,6 +107,20 @@ select pg_temp.check('příprava: zařazení má dva lidi, jeden bez účtu',
 select count(*) as prav_bar from public.role_permissions
  where role_id = :'role_bar' \gset
 
+/*
+  Kolik lidí sedí na zařazení Účetní PŘED převodem.
+
+  Dřív tu stálo „a nikdo na ně přiřazený není" a platilo to, protože
+  na to zařazení nikdo nesahal. Od přepnutí ho krok4 používá jako
+  cíl stropu, takže tam jeden člověk je. Ověřuje se ale pořád totéž:
+  PŘEVOD NIKOMU NEMĚNÍ ZAŘAZENÍ (zadání 5.4, bod 5) — na plánování
+  směn se nesahá. Číslo se proto změří, ne předpokládá.
+*/
+select count(*) as ucetnich_pred from public.employees e
+ join public.positions p on p.id = e.position_id
+ where p.tenant_id = :'tenant' and p.key = 'ucetni'
+   and e.deleted_at is null \gset
+
 select pg_temp.check('příprava: role Bar nějaká práva má',
   :'prav_bar'::int > 0);
 
@@ -180,12 +194,11 @@ select pg_temp.check('z role bez členů vzniklo zařazení i s právy',
     join public.position_permissions pp on pp.position_id = p.id
     where r.tenant_id = :'tenant' and r.key = 'ucetni'));
 
-select pg_temp.check('a nikdo na ně přiřazený není',
-  not exists (
-    select 1 from public.employees e
+select pg_temp.check('a převod na ně nikoho nepřiřadil',
+  (select count(*) from public.employees e
     join public.positions p on p.id = e.position_id
     where p.tenant_id = :'tenant' and p.key = 'ucetni'
-      and e.deleted_at is null));
+      and e.deleted_at is null) = :'ucetnich_pred'::int);
 
 
 -- =====================================================================
@@ -229,8 +242,22 @@ where e.tenant_id = :'tenant'
   and e.deleted_at is null
   and not e.je_majitel
   and e.user_id is not null
+  /*
+    A JEN NAD LIDMI, O KTERÝCH STARÝ MODEL VŮBEC NĚCO ŘÍKÁ.
+
+    Od přepnutí (20260909100000) berou lidé práva ze zařazení
+    a role u členství se přestala vyplňovat — u většiny je prázdná.
+    Starý model o nich tedy netvrdí nic, `t_pred` je pro ně prázdné
+    a porovnání by hlásilo „získal práva navíc" nad SPRÁVNÝM
+    chováním.
+
+    Porovnání proto pokrývá přesně ty, kde je co porovnávat: kdo má
+    u členství roli. Je to totéž zúžení, jaké má `t_pred` v joinu —
+    a je vypsané tady, aby se ty dvě strany nerozešly.
+  */
   and exists (
     select 1 from public.memberships m
+    join public.roles r on r.id = m.role_id and not r.is_owner
     where m.tenant_id = e.tenant_id and m.user_id = e.user_id
       and m.status = 'active'
   );
@@ -253,17 +280,32 @@ select pg_temp.check('a nikdo žádné nezískal navíc',
 -- =====================================================================
 
 /*
-  Migrace nesahá na `app.has_permission` ani `app.has_access`, takže
-  o přístupu pořád rozhodují role. Kdyby to někdo příště přepnul a
-  zapomněl na zbytek, tahle kontrola spadne a přinutí ho podívat se do
-  docs/zarazeni-misto-roli-nalezy.md — je tam devět dalších míst mimo
-  has_access, která se musí přepsat naráz.
+  TAHLE KONTROLA SE 9. 9. OBRÁTILA.
+
+  Do 9. 9. tvrdila, že `app.has_permission` pořád čte
+  `role_permissions` — měla přinutit toho, kdo přepne jádro, aby se
+  podíval do nálezů a přepsal i zbylých jedenáct míst mimo
+  `has_access`. Splnila to: 20260909100000_zarazeni_jadro je přepsalo
+  všechna.
+
+  Od téhle chvíle hlídá opačný směr — že se to nevrátí. Kdyby někdo
+  `has_permission` přepsal zpátky na role, přístup by se řídil
+  tabulkou, kterou už nikdo neudržuje, a NIC BY NESPADLO: role tam
+  pořád jsou i s právy, jen se přestaly měnit.
 */
-select pg_temp.check('o přístupu zatím pořád rozhodují role',
+select pg_temp.check('o přístupu rozhoduje zařazení, ne role',
   (select pg_get_functiondef(p.oid) from pg_proc p
    join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'app' and p.proname = 'has_permission')
-  like '%role_permissions%');
+  like '%position_permissions%');
+
+-- Hledá se ČTENÍ té tabulky, ne její jméno: v těle je komentář,
+-- který vysvětluje, proč tam role nejsou, a ten zmizet nemá.
+select pg_temp.check('a z rolí jádro nečte',
+  (select pg_get_functiondef(p.oid) from pg_proc p
+   join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'app' and p.proname = 'has_permission')
+  not like '%from public.role_permissions%');
 
 /*
   RLS a granty. Pod superuživatelem se neprojeví ani jedno, takže se to
