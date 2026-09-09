@@ -40,6 +40,30 @@ přesměruje na `/` (pro uživatele je to totéž jako neexistující).
 `branch_id`/`venue_id` z formulářů jde vždy do `has_access` s tou
 provozovnou; RLS to hlídá podruhé.
 
+## 2b. Vstup jen na pozvánku
+
+Do aplikace se nedá „zaregistrovat“. Členem organizace se člověk stane
+jen tím, že ho někdo pozve (`nastaveni/tym`).
+
+Zbývala jedna cesta okolo: `marketing.create_organization`. V rozhraní
+na ni tlačítko není, ale u Supabase jde funkce zavolat i **přímo přes
+PostgREST** s tokenem kteréhokoli přihlášeného účtu — a volající se
+v nové organizaci stane vlastníkem. Proto:
+
+* **první** organizaci na prázdné databázi lze založit bez pozvánky
+  (jinak by systém nešlo rozjet),
+* **každou další** jen s platnou, nepoužitou a nepropadlou pozvánkou,
+  která zní na e-mail volajícího,
+* pozvánka se ukládá jako **otisk** (`sha256`); čitelný token existuje
+  jen v okamžiku vystavení a už nikdy,
+* vystavit ji smí **jen servisní role**
+  (`marketing.create_founder_invitation`); tabulka
+  `marketing.founder_invitations` nemá pro `authenticated` žádné
+  oprávnění — nepřečte ji ani vlastník existující firmy.
+
+Stará dvouparametrová podoba funkce je zrušená, aby po ní nezůstala
+otevřená cesta. Ověřuje to scénář 10 v `test:db`.
+
 ## 3. Tajemství poskytovatelů
 
 Tabulka `marketing.integration_secrets`:
@@ -83,9 +107,15 @@ V demo režimu se klíč odvodí z `APP_SECRET`; v produkci
 - **OAuth Meta**: `state` musí být náhodný a ověřený v callbacku (API
   v1); tokeny jdou rovnou do `store_secret`, nikdy do
   `external_account`, logu ani odpovědi.
-- `X-Cron-Secret` pro `/api/v1/ulohy/zpracovat` je `APP_SECRET`.
-  **K řešení:** je to master tajemství aplikace, cron/n8n by měly
-  dostat samostatný `CRON_SECRET`.
+- **Cron** má vlastní `CRON_SECRET` (hlavička `X-Cron-Secret` nebo
+  `Authorization: Bearer`). Není to `APP_SECRET`: to podepisuje cookie
+  a adresy médií a v demo režimu je to pevný řetězec z kódu. Když
+  `CRON_SECRET` chybí nebo je kratší než 16 znaků, cron cesta se
+  nezapne (`lib/cron.ts`).
+- **Frontu z rozhraní** spustí jen uživatel, který má někde právo
+  `content.publish`, a zpracují se jen úlohy JEHO organizací. Fronta
+  totiž běží pod servisní rolí, takže sama na oprávnění nenarazí —
+  musí se zeptat volající cesta (`app/api/v1/ulohy/zpracovat`).
 
 ## 5. Schvalování, které nejde obejít
 
@@ -211,14 +241,12 @@ klíče. `MetaError` a `popisChyby` (Claude) vrací jen typ chyby.
 
 ## 12. Známé mezery (k řešení před ostrým provozem)
 
-1. `marketing.create_organization` může volat každý přihlášený.
-2. `X-Cron-Secret = APP_SECRET` — zavést samostatný `CRON_SECRET`.
-3. Callback Shotstacku se neověřuje podpisem — endpoint musí výsledek
+1. Callback Shotstacku se neověřuje podpisem — endpoint musí výsledek
    potvrdit vlastním dotazem, ne věřit tělu.
-4. Webhook Meta (`/api/v1/webhooky/meta`) — ověřit `X-Hub-Signature-256`.
-5. GDPR export/mazání — jen plán.
-6. Kontrola `usable_until` / `consent_note` při publikaci — jen plán.
-7. Rate limit na přihlášení a na `/api/v1/…` — aplikace nemá vlastní;
+2. Webhook Meta (`/api/v1/webhooky/meta`) — ověřit `X-Hub-Signature-256`.
+3. GDPR export/mazání — jen plán.
+4. Kontrola `usable_until` / `consent_note` při publikaci — jen plán.
+5. Rate limit na přihlášení a na `/api/v1/…` — aplikace nemá vlastní;
    Supabase Auth má limit na OTP, zbytek musí hlídat Vercel/WAF.
-8. `response` u publikací ukládá `raw_response` do `publications` —
+6. `response` u publikací ukládá `raw_response` do `publications` —
    ověřit, že adaptér Meta nevrací nic citlivého (dnes vrací jen ID).

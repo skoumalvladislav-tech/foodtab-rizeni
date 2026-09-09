@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { bezpecnyCil, jePovolenyNavrat, odkazDoFoodtabu } from "../../lib/auth/kam.ts";
+import { cronTajemstviSedi } from "../../lib/cron.ts";
 import { decryptCredentials, encryptCredentials, maskovat } from "../../lib/providers/credentials.ts";
 import { overitPodpisWebhooku } from "../../lib/providers/workflow.ts";
 import { overitPodpis, podepsatSoubor } from "../../lib/storage/podpis.ts";
@@ -70,4 +71,32 @@ test("cesty v úložišti: bez ../ a jen bezpečné znaky", () => {
 test("kanonický JSON: pořadí klíčů nemění otisk", () => {
   assert.equal(canonicalJson({ b: 1, a: { d: 2, c: [3, { z: 1, y: 2 }] } }), canonicalJson({ a: { c: [3, { y: 2, z: 1 }], d: 2 }, b: 1 }));
   assert.notEqual(canonicalJson({ a: 1 }), canonicalJson({ a: 2 }));
+});
+
+test("cron: bez CRON_SECRET se cesta nezapne vůbec", () => {
+  const puvodni = process.env.CRON_SECRET;
+  try {
+    delete process.env.CRON_SECRET;
+    assert.equal(cronTajemstviSedi("cokoliv"), false);
+    assert.equal(cronTajemstviSedi("demo-secret-not-for-production"), false, "APP_SECRET z demo režimu nesmí stačit");
+    // Krátké tajemství se taky nepočítá — jinak by stačilo nastavit "1".
+    process.env.CRON_SECRET = "kratke";
+    assert.equal(cronTajemstviSedi("kratke"), false);
+  } finally {
+    if (puvodni === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = puvodni;
+  }
+});
+
+test("cron: se správným tajemstvím projde X-Cron-Secret i Bearer", () => {
+  const puvodni = process.env.CRON_SECRET;
+  try {
+    process.env.CRON_SECRET = "dost-dlouhe-tajemstvi-pro-cron";
+    assert.equal(cronTajemstviSedi("dost-dlouhe-tajemstvi-pro-cron"), true);
+    assert.equal(cronTajemstviSedi("Bearer dost-dlouhe-tajemstvi-pro-cron"), true);
+    assert.equal(cronTajemstviSedi("jine-dost-dlouhe-tajemstvi-xy"), false);
+    assert.equal(cronTajemstviSedi(""), false);
+    assert.equal(cronTajemstviSedi(null), false);
+  } finally {
+    if (puvodni === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = puvodni;
+  }
 });

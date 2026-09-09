@@ -12,12 +12,26 @@ import { withUser } from "@/lib/db";
  * Volá cron (X-Cron-Secret), n8n (scheduled-social-publish.json) nebo
  * přihlášený uživatel s content.publish (tlačítko v aplikaci).
  * ?automatizace=1 navíc spustí zapnuté automatizace (jen cron).
+ *
+ * Fronta běží pod servisní rolí, takže sama o oprávnění nezakopne —
+ * musí se zeptat tady. Přihlášený uživatel proto (a) musí mít někde
+ * právo publikovat a (b) spustí jen úlohy SVÝCH organizací. Bez toho
+ * by pozorovatel jedním voláním rozeslal splatné příspěvky celé
+ * databáze, cizí firmy včetně.
  */
 export async function POST(req: NextRequest) {
   const cron = jeCron(req);
   const s = cron ? null : await getSession();
   if (!cron && !s) return NextResponse.json({ error: "Nepřihlášen." }, { status: 401 });
-  const vysledek = await zpracovatFrontu({ limit: 50 });
+  let orgs: string[] | undefined;
+  if (!cron) {
+    orgs = (await withUser(s!.userId, (tx) => tx.q<{ organization_id: string }>(
+      `select m.organization_id from marketing.memberships m
+        where m.user_id = (select auth.uid()) and m.status = 'active' and m.deleted_at is null
+          and marketing.has_access(m.organization_id, 'content.publish', null)`))).map((o) => o.organization_id);
+    if (orgs.length === 0) return NextResponse.json({ error: "Na spuštění fronty nemáte oprávnění." }, { status: 403 });
+  }
+  const vysledek = await zpracovatFrontu({ limit: 50, organizationIds: orgs });
   const automatizace: string[] = [];
   if (cron && req.nextUrl.searchParams.get("automatizace") === "1") {
     const rows = await withService((tx) => tx.q<{ id: string; owner_id: string | null; timezone: string | null }>(

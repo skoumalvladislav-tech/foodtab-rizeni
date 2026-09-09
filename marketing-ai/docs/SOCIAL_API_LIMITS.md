@@ -71,11 +71,12 @@ varování (`naplanovat`).
 
 ## Známé nesoulady, na které se přijde až u skutečné publikace
 
-1. **SVG.** Interní renderer vrací `image/svg+xml`. Meta jako `image_url`
-   přijímá JPEG (u některých cest i PNG), **ne SVG**. Před ostrým
-   publikováním obrázků je potřeba převod SVG → PNG/JPEG (na serveru,
-   např. přes Shotstack `png` výstup nebo rasterizační knihovnu). Dnes
-   by publikace obrázku z interního rendereru na Meta selhala.
+1. **SVG — vyřešeno.** Vestavěné vykreslení převádí SVG na **PNG**
+   (`lib/render/rastr.ts`, přes `sharp`); obrázky nad 2 MB uloží jako
+   JPEG. Meta tedy dostane formát, který přijímá. Pozor na dvě věci:
+   písma se berou z `assets/fonty` a musí se dostat do nasazeného
+   balíčku (jinak render skončí chybou — schválně, viz `DEPLOYMENT.md`),
+   a tiskové formáty A4/A5 zůstávají SVG, protože se nepublikují.
 2. **Rozlišení a poměr.** Instagram má pro feed povolený rozsah poměrů
    (zhruba 4:5 až 1.91:1) a minimální šířku; 1080×1350 je uvnitř, ale
    zdrojové médium bez renderu (viz výše) uvnitř být nemusí.

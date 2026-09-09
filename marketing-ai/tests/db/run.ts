@@ -14,10 +14,12 @@
  *  7. Bernard Bar: víkendové menu → carousel/feed,
  *  8. poruchy: neplatný klíč, výměna a odpojení připojení, selhání AI
  *     i renderu, vypršelý token Meta s opakováním až do dead_letter,
- *     překročený limit Meta a duplicitní webhook.
+ *     překročený limit Meta a duplicitní webhook,
+ *  9. spouštění fronty: kdo ji smí spustit a čí úlohy tím spustí,
+ * 10. zakládání organizací jen na pozvánku.
  */
 import { dnes, nejblizsiSobota, posunDne } from "../../lib/cas.ts";
-import { DEMO_ORG, DEMO_USERS, DEMO_VENUES } from "../../lib/demo-ucty.ts";
+import { DEMO_ORG, DEMO_ORG_2, DEMO_USERS, DEMO_VENUES } from "../../lib/demo-ucty.ts";
 import { zopakovatPublikaci, zpracovatFrontu } from "../../lib/domena/fronta.ts";
 import { aktivovat, odpojit, ulozitKlic, vybratPoskytovatele } from "../../lib/domena/integrace.ts";
 import { nahratMedium } from "../../lib/domena/media.ts";
@@ -124,9 +126,13 @@ Palačinka s tvarohem 79 Kč`;
   // Render feed varianty
   const feed = await d.one<{ id: string }>("select id from marketing.content_variants where content_version_id = $1 and format = 'feed'", [versionId]);
   const rend = await jako(d, manazer.id, (tx) => spustitRender(tx, { versionId, variantId: feed!.id, userId: manazer.id }));
-  check("interní render feedu proběhl (SVG)", rend.status === "done", rend.error);
+  check("interní render feedu proběhl", rend.status === "done", rend.error);
   const out = await d.one<{ output_asset_id: string | null }>("select output_asset_id from marketing.content_variants where id = $1", [feed!.id]);
   check("varianta má výstupní médium odvozené od originálu", Boolean(out?.output_asset_id));
+  // Instagram ani Facebook SVG nepřijmou — výstup musí být rastr.
+  const vystup = await d.one<{ mime_type: string; width: number | null; height: number | null }>("select mime_type, width, height from marketing.media_assets where id = $1", [out!.output_asset_id]);
+  check("výstup pro sítě je PNG nebo JPEG, ne SVG", vystup?.mime_type === "image/png" || vystup?.mime_type === "image/jpeg", vystup?.mime_type);
+  check("výstup má rozměry formátu 1080×1350", vystup?.width === 1080 && vystup.height === 1350, `${vystup?.width}×${vystup?.height}`);
 
   // Žádost o schválení a schválení jinou osobou
   await ocekavatChybu("schvalovatel nemůže žádat o schválení (nemá content.create)", () =>
@@ -283,6 +289,8 @@ console.log("\n7. Bernard Bar Tábor: víkendové menu");
   const pdf = await d.one<{ id: string }>("select id from marketing.content_variants where content_version_id = $1 and format = 'pdf_a4'", [nav.versionId]);
   const rend = await jako(d, editorBernard.id, (tx) => spustitRender(tx, { versionId: nav.versionId, variantId: pdf!.id, userId: editorBernard.id }));
   check("Bernard: tisková A4 vykreslena", rend.status === "done", rend.error);
+  const tisk = await d.one<{ mime_type: string }>("select m.mime_type from marketing.content_variants v join marketing.media_assets m on m.id = v.output_asset_id where v.id = $1", [pdf!.id]);
+  check("tisk zůstává SVG (ostrý v jakékoli velikosti), nerastruje se", tisk?.mime_type === "image/svg+xml", tisk?.mime_type);
   await ocekavatChybu("editor Bernard Baru nerozhoduje o schválení", () =>
     jako(d, editorBernard.id, (tx) => pozadatOSchvaleni(tx, { itemId: r.itemId, userId: editorBernard.id }).then((id) => rozhodnout(tx, { requestId: id, userId: editorBernard.id, decision: "approved", comment: "" }))), /oprávnění/);
 }
@@ -420,6 +428,88 @@ console.log("\n8. Poruchy: neplatný klíč, selhání AI a renderu, opakování
   check("stejná událost podruhé už nic nespustí", Boolean(w1?.id) && !w2);
   const kolikUdalosti = await d.one<{ n: number }>("select count(*)::int as n from marketing.webhook_events where provider_key = 'n8n' and external_event_id = 'ev-duplicita'");
   check("v evidenci webhooků je událost jen jednou", kolikUdalosti?.n === 1);
+}
+
+console.log("\n9. Spouštění fronty: kdo smí a co tím spustí");
+{
+  // Rozhraní pouští frontu pod servisní rolí, takže RLS tam neplatí.
+  // Kdo smí, se proto musí zjistit předem — přesně tímhle dotazem
+  // (app/api/v1/ulohy/zpracovat/route.ts).
+  const smi = (uid: string) => jako(d, uid, (tx) => tx.q<{ organization_id: string }>(
+    `select m.organization_id from marketing.memberships m
+      where m.user_id = (select auth.uid()) and m.status = 'active' and m.deleted_at is null
+        and marketing.has_access(m.organization_id, 'content.publish', null)`));
+  check("manažer smí frontu spustit", (await smi(manazer.id)).length === 1);
+  check("pozorovatel frontu spustit nesmí", (await smi(pozorovatel.id)).length === 0);
+  check("schvalovatel bez práva publikovat frontu nespustí", (await smi(schvalovatel.id)).length === 0);
+  const bistroOrgs = await smi(bistro.id);
+  check("vlastník druhé firmy dostane jen svou organizaci", bistroOrgs.length === 1 && bistroOrgs[0].organization_id === DEMO_ORG_2.id);
+
+  // A co spustí: úloha první firmy nesmí odejít, když frontu pouští druhá.
+  const tpl = await d.one<{ id: string }>("select id from marketing.templates where key = 'atmosfera'");
+  const foto = await d.one<{ id: string }>("select id from marketing.media_assets where venue_id = $1 limit 1", [PERLA]);
+  const mock = await d.one<{ id: string }>("select id from marketing.integration_connections where organization_id = $1 and provider_key = 'mock_publisher' and revoked_at is null", [DEMO_ORG.id]);
+  if (mock) await jako(d, vlastnik.id, (tx) => aktivovat(tx, DEMO_ORG.id, PERLA, "social_publishing", "mock_publisher", mock.id, vlastnik.id));
+  const r = await jako(d, manazer.id, (tx) => vytvoritObsah(tx, { organizationId: DEMO_ORG.id, venueId: PERLA, userId: manazer.id, title: "Cizí frontu nespouštěj", purpose: "atmosfera", templateId: tpl!.id, brief: "Zkouška rozsahu fronty", channels: ["instagram"], formats: ["instagram_feed"], mediaAssetIds: [foto!.id], inputs: { title: "Zkouška" } }));
+  await jako(d, manazer.id, (tx) => navrhnout(tx, { itemId: r.itemId, userId: manazer.id }));
+  const zadost = await jako(d, manazer.id, (tx) => pozadatOSchvaleni(tx, { itemId: r.itemId, userId: manazer.id }));
+  await jako(d, schvalovatel.id, (tx) => rozhodnout(tx, { requestId: zadost, userId: schvalovatel.id, decision: "approved", comment: "" }));
+  const plan = await jako(d, manazer.id, (tx) => naplanovat(tx, { itemId: r.itemId, userId: manazer.id, datum: null, cas: null, tz: "Europe/Prague" }));
+
+  await zpracovatFrontu({ organizationIds: [DEMO_ORG_2.id] });
+  const poCizi = await d.one<{ status: string }>("select status from marketing.publish_jobs where id = $1", [plan.jobIds[0]]);
+  check("fronta puštěná druhou firmou se úlohy první ani nedotkne", poCizi?.status === "scheduled", poCizi?.status);
+
+  await zpracovatFrontu({ organizationIds: [DEMO_ORG.id] });
+  const poSve = await d.one<{ status: string }>("select status from marketing.publish_jobs where id = $1", [plan.jobIds[0]]);
+  check("vlastní firma svou úlohu zpracuje", poSve?.status === "published_mock", poSve?.status);
+}
+
+console.log("\n10. Zakládání organizací jen na pozvánku");
+{
+  // V rozhraní na tohle tlačítko není, ale u Supabase jde funkci zavolat
+  // přímo přes PostgREST s tokenem kteréhokoli účtu. Proto se to musí
+  // ubránit v databázi, ne v obrazovce.
+  await ocekavatChybu("bez pozvánky si organizaci nezaloží ani vlastník jiné firmy", () =>
+    jako(d, vlastnik.id, (tx) => tx.q("select marketing.create_organization('Podvržená firma', 'podvrzena')")), /pozvánk/i);
+  await ocekavatChybu("vymyšlený token neprojde", () =>
+    jako(d, pozorovatel.id, (tx) => tx.q("select marketing.create_organization('Podvržená firma', 'podvrzena', $1)", ["nejaky-vymysleny-token"])), /pozvánk/i);
+  // Volání se dvěma parametry samo o sobě nic nedokazuje — nová funkce
+  // má třetí parametr s výchozí hodnotou, takže se do ní trefí taky.
+  // Ptáme se proto katalogu, jestli stará podoba opravdu zmizela.
+  const podoby = await d.q<{ args: string }>(
+    "select pg_get_function_identity_arguments(p.oid) as args from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'marketing' and p.proname = 'create_organization'");
+  check("existuje jediná podoba create_organization, a to se třetím parametrem na pozvánku",
+    podoby.length === 1 && (podoby[0].args.match(/text/g) ?? []).length === 3, podoby.map((x) => x.args).join(" | "));
+  await ocekavatChybu("pozvánku si přihlášený uživatel sám nevystaví", () =>
+    jako(d, vlastnik.id, (tx) => tx.q("select marketing.create_founder_invitation('kdokoli@example.com')")), /permission denied|oprávnění/i);
+  await ocekavatChybu("do tabulky pozvánek se přihlášený nepodívá", () =>
+    jako(d, vlastnik.id, (tx) => tx.q("select * from marketing.founder_invitations")), /permission denied/i);
+
+  // Správce (servisní role) pozvánku vystaví — token dostane jednou.
+  const token = (await d.one<{ t: string }>("select marketing.create_founder_invitation($1, 'Nová restaurace', 14) as t", ["novy@example.com"]))!.t;
+  check("token pozvánky je dost dlouhý a v databázi leží jen otisk", token.length === 64
+    && (await d.one<{ n: number }>("select count(*)::int as n from marketing.founder_invitations where token_hash = $1", [token]))!.n === 0);
+
+  // Účet, na který pozvánka nezní, ji nepoužije.
+  await ocekavatChybu("cizí účet pozvánku nevyužije, i když zná token", () =>
+    jako(d, vlastnik.id, (tx) => tx.q("select marketing.create_organization('Cizí pokus', 'cizi-pokus', $1)", [token])), /pozvánk/i);
+
+  // Nový uživatel s tím e-mailem organizaci založí.
+  const novy = await d.one<{ id: string }>("insert into auth.users (email) values ($1) returning id", ["novy@example.com"]);
+  const orgId = (await jako(d, novy!.id, (tx) => tx.one<{ id: string }>("select marketing.create_organization('Nová restaurace', 'nova-restaurace', $1) as id", [token])))!.id;
+  check("pozvaný uživatel organizaci založí a je v ní vlastníkem", Boolean(orgId)
+    && (await d.one<{ n: number }>("select count(*)::int as n from marketing.memberships m join marketing.roles r on r.id = m.role_id where m.organization_id = $1 and m.user_id = $2 and r.is_owner", [orgId, novy!.id]))!.n === 1);
+
+  await ocekavatChybu("stejná pozvánka podruhé neprojde", () =>
+    jako(d, novy!.id, (tx) => tx.q("select marketing.create_organization('Druhá firma', 'druha-firma', $1)", [token])), /pozvánk/i);
+
+  // Propadlá pozvánka je stejně neplatná jako použitá.
+  const propadly = (await d.one<{ t: string }>("select marketing.create_founder_invitation($1, '', 1) as t", ["pozdni@example.com"]))!.t;
+  await d.q("update marketing.founder_invitations set expires_at = now() - interval '26 hours' where token_hash = encode(sha256(convert_to($1, 'UTF8')), 'hex')", [propadly]);
+  const pozdni = await d.one<{ id: string }>("insert into auth.users (email) values ($1) returning id", ["pozdni@example.com"]);
+  await ocekavatChybu("propadlá pozvánka neprojde", () =>
+    jako(d, pozdni!.id, (tx) => tx.q("select marketing.create_organization('Pozdě', 'pozde', $1)", [propadly])), /pozvánk/i);
 }
 
 await d.close();

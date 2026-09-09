@@ -30,6 +30,7 @@ v `SETUP.md`; produkční minimum:
 | `APP_MODE` | `production` |
 | `APP_URL` | `https://marketing.foodtab.cz` (veřejná adresa) |
 | `APP_SECRET` | náhodných 32+ znaků |
+| `CRON_SECRET` | náhodných 32+ znaků, **jiných než `APP_SECRET`** |
 | `CREDENTIALS_ENCRYPTION_KEY` | 64 hex znaků |
 | `DATABASE_URL` | transaction pooler ostrého projektu |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ostrý projekt |
@@ -58,29 +59,37 @@ pro automatické nasazení až po oddělení ostrých dat od testu).
 ## 4. Fronta — cron pro `/api/v1/ulohy/zpracovat`
 
 Fronta (`lib/domena/fronta.ts`) neběží sama. Něco ji musí pravidelně
-zavolat: `POST {APP_URL}/api/v1/ulohy/zpracovat` s hlavičkou
-`X-Cron-Secret: <APP_SECRET>` (nebo přihlášený uživatel — tlačítko
-v rozhraní). Každý běh dokončí čekající rendery, zveřejní splatné
-publikace a zopakuje selhané (nejvýš 20 úloh na běh).
+zavolat: `/api/v1/ulohy/zpracovat` s hlavičkou `X-Cron-Secret:
+<CRON_SECRET>` nebo `Authorization: Bearer <CRON_SECRET>`. Každý běh
+dokončí čekající rendery, zveřejní splatné publikace a zopakuje
+selhané (nejvýš 50 úloh na běh).
 
-**Vercel Cron** — soubor `marketing-ai/vercel.json` (zatím není
-v repozitáři, doplní se s API v1):
+**`CRON_SECRET` je vlastní tajemství, ne `APP_SECRET`.** Jedno tajemství
+nemá sloužit dvěma věcem — `APP_SECRET` podepisuje cookie a adresy
+médií. Když `CRON_SECRET` chybí nebo je kratší než 16 znaků, cron cesta
+se **nezapne**: volání bez přihlášení dostane 401. Není to výpadek, je
+to schválně.
+
+**Vercel Cron** — v repozitáři je `marketing-ai/vercel.json`:
 
 ```json
 {
   "crons": [
-    { "path": "/api/v1/ulohy/zpracovat", "schedule": "*/5 * * * *" }
+    { "path": "/api/v1/ulohy/zpracovat?automatizace=1", "schedule": "*/5 * * * *" },
+    { "path": "/api/v1/analytika/synchronizovat", "schedule": "0 4 * * *" },
+    { "path": "/api/v1/integrace/test-vse", "schedule": "0 5 * * *" }
   ]
 }
 ```
 
-Vercel cron posílá **GET** bez vlastních hlaviček; endpoint proto musí
-přijmout i GET s hlavičkou `Authorization: Bearer <CRON_SECRET>`,
-kterou Vercel přidává, když je nastavená proměnná `CRON_SECRET`.
-Do implementace API v1 tedy patří: přijmout `X-Cron-Secret = APP_SECRET`
-**nebo** `Authorization: Bearer CRON_SECRET` (a `SECURITY.md` doporučuje
-samostatný `CRON_SECRET` i pro n8n). Interval 5 minut; na tarifu Hobby
-Vercel dovoluje jen denní cron — pak je nutný n8n nebo tarif Pro.
+Vercel posílá **GET** a hlavičku `Authorization: Bearer <CRON_SECRET>`
+přidá sám, jakmile je proměnná nastavená — nic dalšího se nenastavuje.
+Interval 5 minut; na tarifu Hobby dovoluje Vercel jen denní cron, pak
+je nutný n8n nebo tarif Pro.
+
+**Tlačítko v aplikaci** spustí frontu taky, ale jen pro organizace
+přihlášeného uživatele a jen když má právo publikovat. Pozorovatel
+frontu nespustí a cizí firmě do ní nesáhne.
 
 **n8n** — `n8n/scheduled-social-publish.json` volá totéž každých
 5 minut (`N8N_SETUP.md`).
@@ -133,19 +142,55 @@ bude potřeba doopravdy.
 Ostrá data a testovací data nikdy v jednom projektu. Nasazuje se
 z `main`; větve druhé relace (`marketing`) se nejdřív slijí.
 
+## 7b. První organizace a pozvánky pro další
+
+`marketing.create_organization` smí zavolat každý přihlášený účet — u
+Supabase i přímo přes PostgREST, mimo aplikaci. Aby si v ostré databázi
+nemohl kdokoli založit vlastní firmu, platí:
+
+* **První** organizaci na prázdné databázi lze založit bez pozvánky.
+  Přihlaste se svým účtem a zavolejte funkci se dvěma parametry —
+  třetí (token) nechte prázdný.
+* **Každou další** jen na pozvánku vystavenou na e-mail zakladatele.
+  Pozvánku vystaví servisní role (SQL editor Supabase):
+
+  ```sql
+  select marketing.create_founder_invitation('sef@nova-restaurace.cz', 'Nová restaurace', 14);
+  ```
+
+  Vrácený token si opište — v databázi leží **jen jeho otisk** a už se
+  nikdy nezobrazí. Platnost 14 dní, jedno použití.
+
+Tabulka `marketing.founder_invitations` nemá pro roli `authenticated`
+žádné oprávnění: přihlášený uživatel do ní nevidí ani pozvánku
+nevystaví.
+
+## 7c. Písma pro převod obrázků
+
+Vykreslené SVG se před publikací převádí na PNG (Instagram ani Facebook
+SVG nepřijmou). Sazbu dělá fontconfig zabalený uvnitř `sharp` a písma
+jsou v repozitáři: `marketing-ai/assets/fonty` (Archivo a Newsreader,
+licence OFL, licenční texty tamtéž).
+
+Do nasazeného balíčku se dostanou přes `outputFileTracingIncludes`
+v `next.config.ts`. Kdyby tam chyběla, render **skončí chybou**
+a napíše proč — místo aby rozeslal příspěvky vysázené cizím písmem.
+Vlastní nastavení písem jde vnutit proměnnou `FONTCONFIG_PATH`
+(složka se souborem `fonts.conf`).
+
 ## 8. Kontrolní seznam před ostrým provozem
 
 Databáze a přístup
 
 - [ ] `supabase db push` proběhlo, historie migrací sedí se složkou
 - [ ] Advisors: žádná tabulka `marketing.*` bez RLS
-- [ ] `create_organization` omezená (dnes ji volá kdokoli přihlášený)
+- [ ] první organizace založená (na prázdné databázi to jde bez pozvánky), každá další jen přes `marketing.create_founder_invitation` — viz níž
 - [ ] první organizace a provozovny založené, vlastník se přihlásí OTP
 - [ ] demo seed **není** v databázi (`select count(*) from marketing.organizations where is_demo`)
 
 Tajemství
 
-- [ ] `APP_MODE=production`, `APP_SECRET`, `CREDENTIALS_ENCRYPTION_KEY` nastavené, jiné než v testu
+- [ ] `APP_MODE=production`, `APP_SECRET`, `CRON_SECRET`, `CREDENTIALS_ENCRYPTION_KEY` nastavené, každé jiné a jiné než v testu
 - [ ] `SUPABASE_SERVICE_ROLE_KEY` jen jako Sensitive, ne v `NEXT_PUBLIC_*`
 - [ ] klíče zálohované ve správci hesel
 
@@ -155,11 +200,11 @@ Poskytovatelé
 - [ ] Shotstack: `v1` klíč, callback dosažitelný, testovací render proběhl
 - [ ] Claude: test připojení proběhl, `ANTHROPIC_MODEL` platný
 - [ ] n8n (pokud je): `/healthz` dostupné, tajemství shodné, Error Workflow nastavený
-- [ ] převod SVG → PNG/JPEG pro publikaci obrázků na Meta vyřešen (`SOCIAL_API_LIMITS.md`)
+- [ ] po prvním renderu zkontrolovat, že výstupní médium je `image/png` (ne `image/svg+xml`) — kdyby se do balíčku nedostala složka `assets/fonty`, render skončí chybou a řekne to
 
 Provoz
 
-- [ ] cron na `/api/v1/ulohy/zpracovat` běží (Vercel nebo n8n), v logu je vidět každých 5 minut
+- [ ] `CRON_SECRET` nastavené a cron na `/api/v1/ulohy/zpracovat` běží (Vercel nebo n8n), v logu je vidět každých 5 minut
 - [ ] `GET /api/v1/health` vrací 200
 - [ ] `APP_URL` veřejně dosažitelná, podepsaná adresa média jde otevřít zvenčí a po vypršení vrací 403
 - [ ] Cloudflare nepřekáží callbackům

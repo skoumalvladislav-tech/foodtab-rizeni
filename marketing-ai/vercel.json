@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    { "path": "/api/v1/ulohy/zpracovat?automatizace=1", "schedule": "*/5 * * * *" },
+    { "path": "/api/v1/analytika/synchronizovat", "schedule": "0 4 * * *" },
+    { "path": "/api/v1/integrace/test-vse", "schedule": "0 5 * * *" }
+  ]
+}

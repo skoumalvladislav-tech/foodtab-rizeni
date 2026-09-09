@@ -26,13 +26,19 @@ export interface VysledekBehu {
   publikace: { published: number; mock: number; manual: number; retried: number; dead: number };
 }
 
-export async function zpracovatFrontu(opts: { now?: Date; limit?: number } = {}): Promise<VysledekBehu> {
+/**
+ * @param organizationIds Když je zadané, zpracují se jen úlohy těchto
+ *   organizací. Používá to tlačítko v aplikaci: uživatel má spouštět
+ *   svoje úlohy, ne úlohy cizí firmy. Cron pouští všechno.
+ */
+export async function zpracovatFrontu(opts: { now?: Date; limit?: number; organizationIds?: string[] } = {}): Promise<VysledekBehu> {
   const now = opts.now ?? new Date();
   const limit = opts.limit ?? 20;
+  const orgs = opts.organizationIds ?? null;
   return withService(async (tx) => {
     const out: VysledekBehu = { rendery: { done: 0, failed: 0, pending: 0 }, publikace: { published: 0, mock: 0, manual: 0, retried: 0, dead: 0 } };
-    await dokoncitRendery(tx, now, limit, out);
-    await zverejnitSplatne(tx, now, limit, out);
+    await dokoncitRendery(tx, now, limit, orgs, out);
+    await zverejnitSplatne(tx, now, limit, orgs, out);
     return out;
   });
 }
@@ -53,10 +59,11 @@ async function providerZPripojeni<T>(tx: Tx, providerKey: string, connectionId: 
   return factory({ organizationId, venueId, connectionId, mode, credentials, externalAccount }, tx) as T;
 }
 
-async function dokoncitRendery(tx: Tx, now: Date, limit: number, out: VysledekBehu) {
+async function dokoncitRendery(tx: Tx, now: Date, limit: number, orgs: string[] | null, out: VysledekBehu) {
   const jobs = await tx.q<{ id: string; organization_id: string; venue_id: string; provider_key: string; connection_id: string | null; mode: ConnectionMode; external_id: string | null; variant_id: string | null; content_version_id: string; attempts: number; max_attempts: number; request: { formatKey: string } }>(
     `select id, organization_id, venue_id, provider_key, connection_id, mode, external_id, variant_id, content_version_id, attempts, max_attempts, request
-       from marketing.render_jobs where status in ('submitted','rendering') and (next_attempt_at is null or next_attempt_at <= $1) order by created_at limit $2`, [now.toISOString(), limit]);
+       from marketing.render_jobs where status in ('submitted','rendering') and (next_attempt_at is null or next_attempt_at <= $1)
+          and ($3::uuid[] is null or organization_id = any($3::uuid[])) order by created_at limit $2`, [now.toISOString(), limit, orgs]);
   for (const j of jobs) {
     const p = await providerZPripojeni<RenderProvider>(tx, j.provider_key, j.connection_id, j.organization_id, j.venue_id, j.mode);
     if (!p?.status || !j.external_id) {
@@ -94,7 +101,7 @@ export function odstupPokusu(attempt: number): number {
   return Math.min(30, 2 ** Math.max(0, attempt - 1)) * 60;
 }
 
-async function zverejnitSplatne(tx: Tx, now: Date, limit: number, out: VysledekBehu) {
+async function zverejnitSplatne(tx: Tx, now: Date, limit: number, orgs: string[] | null, out: VysledekBehu) {
   const jobs = await tx.q<{
     id: string; organization_id: string; venue_id: string; content_item_id: string; content_version_id: string; version_checksum: string; variant_id: string | null;
     social_account_id: string | null; channel: "instagram" | "facebook"; format: string; provider_key: string; connection_id: string | null; mode: ConnectionMode;
@@ -103,7 +110,8 @@ async function zverejnitSplatne(tx: Tx, now: Date, limit: number, out: VysledekB
     `select id, organization_id, venue_id, content_item_id, content_version_id, version_checksum, variant_id, social_account_id, channel, format, provider_key, connection_id, mode, idempotency_key, attempts, max_attempts, scheduled_for
        from marketing.publish_jobs
       where scheduled_for <= $1 and (status in ('scheduled','queued') or (status = 'failed' and next_attempt_at <= $1))
-      order by scheduled_for limit $2`, [now.toISOString(), limit]);
+        and ($3::uuid[] is null or organization_id = any($3::uuid[]))
+      order by scheduled_for limit $2`, [now.toISOString(), limit, orgs]);
 
   for (const j of jobs) {
     // Ochrana proti publikaci změněné verze: otisk musí sedět i teď.

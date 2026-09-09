@@ -62,7 +62,9 @@ které kód **skutečně čte** (`process.env.*`), s tím, kde se používají.
 |---|---|---|
 | `APP_MODE` | `demo` nebo `production`. V produkci vypne demo přihlášení a vyžaduje tajemství. | demo, pokud chybí Supabase URL |
 | `APP_URL` | Veřejná adresa aplikace bez lomítka na konci. Skládají se z ní podepsané adresy médií pro externí služby a callback pro Shotstack (`lib/domena/obsah.ts`, `lib/domena/fronta.ts`). **V produkci musí být veřejně dosažitelná** — Shotstack i Meta si z ní stahují soubory. | `http://localhost:3000` |
-| `APP_SECRET` | Aspoň 16 znaků. Podepisuje demo cookie, podepsané adresy souborů a slouží jako `X-Cron-Secret` pro `/api/v1/ulohy/zpracovat`. | pevná demo hodnota; v produkci povinné |
+| `APP_SECRET` | Aspoň 16 znaků. Podepisuje demo cookie a podepsané adresy souborů. **Ne** cron — ten má vlastní tajemství. | pevná demo hodnota; v produkci povinné |
+| `CRON_SECRET` | Aspoň 16 znaků. Hlavička `X-Cron-Secret` nebo `Authorization: Bearer` pro `/api/v1/ulohy/zpracovat`, `/api/v1/analytika/synchronizovat` a `/api/v1/integrace/test-vse`. Když chybí, **cron cesta se nezapne** a volání bez přihlášení dostane 401 (`lib/cron.ts`). | prázdné — cron vypnutý |
+| `FONTCONFIG_PATH` | Složka se souborem `fonts.conf` pro převod SVG na PNG. Prázdné = aplikace si ji vyrobí sama a ukáže na `assets/fonty`. | vlastní dočasná složka |
 | `CREDENTIALS_ENCRYPTION_KEY` | 64 hex znaků (32 bajtů). Klíč AES-256-GCM pro přístupové údaje poskytovatelů v `marketing.integration_secrets`. Vygenerujte: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. | odvozený z `APP_SECRET`; v produkci povinné |
 | `PORT` | Port vývojového serveru (používá ho `playwright.config.ts`). | 3000 |
 
@@ -101,13 +103,32 @@ drží FoodTab, a pro OAuth aplikaci Meta.
 |---|---|
 | `FOODTAB_APP_URL` | Základ adresy FoodTab Řízení; jediný povolený cíl odkazů „zpět do FoodTabu“ (`lib/auth/kam.ts`). |
 | `FOODTAB_ALLOWED_RETURN_ORIGINS` | Další povolené originy oddělené čárkou (např. testovací doména). |
-| `FOODTAB_WEBHOOK_SECRET` | Tajemství pro podpis událostí `menu.*` z FoodTabu. **Kód ho zatím nečte** — počítá s ním API v1 (`/api/v1/webhooky/foodtab`), které se píše souběžně. |
+| `FOODTAB_WEBHOOK_SECRET` | Tajemství pro podpis událostí `menu.*` z FoodTabu (`/api/v1/webhooky/foodtab`). |
 
 ### Testy
 
 | Proměnná | Význam |
 |---|---|
 | `E2E_BASE_URL` | Základ pro Playwright (výchozí `http://localhost:3100`). |
+
+### Písma pro převod obrázků
+
+Vykreslené SVG se před publikací převádí na PNG — Instagram ani
+Facebook SVG nepřijmou. Dělá to `lib/render/rastr.ts` přes `sharp`
+a sazbu má na starosti fontconfig **zabalený uvnitř sharpu**, ne ten
+systémový. Řídí se proměnnou `FONTCONFIG_PATH`, která ukazuje na
+SLOŽKU se souborem `fonts.conf` (`FONTCONFIG_FILE` si sharp nevšímá —
+stálo to hodinu hledání).
+
+Písma jsou v repozitáři: `assets/fonty` (Archivo a Newsreader, licence
+OFL, licenční texty tamtéž). Při prvním převodu se ověří, že se
+opravdu použila: stejný text se vysází v Newsreaderu a v neexistujícím
+písmu, a když vyjde stejně, převod skončí chybou. Bez toho by se
+příspěvky rozeslaly vysázené náhradním písmem a nikdo by si toho
+nevšiml — text nezmizí, pango si vždycky něco najde.
+
+**Do `.env.example` si doplňte `CRON_SECRET=` a `FONTCONFIG_PATH=`** —
+tenhle soubor je v gitu jako vzor a nové proměnné do něj patří.
 
 ## 5. Přihlášení ve vývoji
 

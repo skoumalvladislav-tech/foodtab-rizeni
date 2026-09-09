@@ -14,12 +14,13 @@ schválí a teprve pak se něco zveřejní. Nikdy automaticky bez schválení.
 
 | Hotové v kódu | Stav |
 |---|---|
-| Databázové schéma `marketing` (organizace, provozovny, role, média, menu, obsah, schvalování, render, publikace, katalog poskytovatelů) — 4 migrace | hotové, s RLS na každé tabulce |
+| Databázové schéma `marketing` (organizace, provozovny, role, média, menu, obsah, schvalování, render, publikace, katalog poskytovatelů) — 5 migrací | hotové, s RLS na každé tabulce |
 | Doménová logika: verze obsahu, schválení vázané na otisk, plánování, fronta publikací s opakováním, mediální knihovna, menu (ruční, text, fotografie/PDF přes AI) | hotové, ověřené testem `npm run test:db` proti PGlite |
 | Adaptéry poskytovatelů (Claude, Shotstack, Meta Graph, n8n, interní SVG render, mock/manual varianty) | **implementované, ale Claude, Shotstack, Meta a n8n nebyly spuštěny proti skutečné službě** — chybí klíče. Otestované jsou jen mock a vestavěné cesty. |
 | Obrazovky (23) | přihlášení, rozcestník, průvodce, přehled, tvorba, média, menu, šablony, kalendář, kampaně, schvalování, detail obsahu, publikace, analytika, brand kit, upozornění, integrace, tým |
 | REST API `/api/v1/…` | hotové: health, úlohy, obsah/návrh, analytika, integrace, média, Meta OAuth, webhooky. Smlouva je v `openapi/openapi.yaml` a `tests/unit/openapi.test.ts` hlídá, že sedí s kódem |
-| Testy | `npm test` 41 jednotkových, `npm run test:db` 95 kontrol v osmi scénářích proti PGlite s RLS, `npm run test:e2e` 4 průchody Playwrightem. Osmý databázový scénář jsou schválně vyvolané poruchy (neplatný klíč, selhání AI a renderu, vypršelý token Meta, duplicitní webhook) |
+| Vykreslení obrázků | SVG z datové šablony → **PNG** (velké jako JPEG), aby šlo zveřejnit na Instagramu a Facebooku. Písma v `assets/fonty` (OFL); tiskové A4/A5 zůstávají SVG |
+| Testy | `npm test` 48 jednotkových, `npm run test:db` 114 kontrol v deseti scénářích proti PGlite s RLS, `npm run test:e2e` 4 průchody Playwrightem. Poslední tři databázové scénáře jsou schválně vyvolané poruchy, oprávnění ke spuštění fronty a zakládání organizací na pozvánku |
 
 ## Rychlé spuštění (demo režim, bez jakéhokoli nastavení)
 
@@ -107,8 +108,9 @@ marketing-ai/
 │   ├── storage/            lokální disk / Supabase Storage, podepsané adresy
 │   ├── formaty.ts          rozměry, limity a bezpečné zóny formátů
 │   └── cas.ts              čas s povinným pásmem
+├── assets/fonty/           Archivo a Newsreader (OFL) pro převod SVG na PNG
 ├── supabase/
-│   ├── migrations/         4 migrace schématu marketing (nasazují se supabase db push)
+│   ├── migrations/         5 migrací schématu marketing (nasazují se supabase db push)
 │   └── local/00_shim.sql   náhrada auth.uid() a rolí pro PGlite
 ├── tests/
 │   ├── db/                 scénáře proti PGlite s RLS (run.ts, harness.ts)

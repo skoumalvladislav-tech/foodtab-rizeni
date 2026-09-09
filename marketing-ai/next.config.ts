@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   // mateřskou složku a hledal Tailwind, který tady není.
   turbopack: { root: import.meta.dirname },
   outputFileTracingRoot: import.meta.dirname,
+  // Písma pro převod SVG na PNG se čtou z disku za běhu, takže je Next
+  // sám nevidí a do nasazeného balíčku by je nepřibalil. Bez nich se
+  // v Lambdě vykreslí obrázek bez jediného písmene.
+  outputFileTracingIncludes: { "/**": ["./assets/fonty/**"] },
   // PGlite je WebAssembly a musí zůstat mimo bundler — v demo režimu
   // běží databáze přímo v procesu serveru (viz lib/db/README v docs/SETUP.md).
   serverExternalPackages: ["@electric-sql/pglite", "postgres"],

@@ -5,7 +5,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSession } from "./auth/session.ts";
 import { withUser } from "./db/index.ts";
 import type { Tx } from "./db/driver.ts";
-import { appSecret, safeEqual } from "./utils/hash.ts";
+import { cronTajemstviSedi } from "./cron.ts";
 
 /**
  * Pomocníci pro API v1: přihlášení (cookie session) nebo servisní
@@ -37,11 +37,9 @@ export function chyba(e: unknown): NextResponse {
   return NextResponse.json({ error: msg }, { status });
 }
 
-/** Cron / interní volání: hlavička X-Cron-Secret = APP_SECRET (nebo CRON_SECRET). */
+/** Cron / interní volání: hlavička X-Cron-Secret nebo Authorization: Bearer. */
 export function jeCron(req: NextRequest): boolean {
-  const h = req.headers.get("x-cron-secret") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-  const expected = process.env.CRON_SECRET ?? appSecret();
-  return Boolean(h) && safeEqual(h, expected);
+  return cronTajemstviSedi(req.headers.get("x-cron-secret") ?? req.headers.get("authorization"));
 }
 
 export async function jsonBody<T = Record<string, unknown>>(req: NextRequest): Promise<T> {

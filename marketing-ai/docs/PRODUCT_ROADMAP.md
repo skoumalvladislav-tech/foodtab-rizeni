@@ -75,16 +75,27 @@ a `tests/unit/openapi.test.ts` hlídá, že sedí s kódem.
 s RLS (osmý jsou schválně vyvolané poruchy), `npm test`: 41
 jednotkových, `test:e2e`: 4 průchody Playwrightem na rozměru 390×844.
 
+**Připraveno na ostrý provoz** — tři věci, které do etapy 1 patřily
+a jsou hotové:
+
+- **Převod SVG → PNG** (`lib/render/rastr.ts`, přes `sharp`). Meta SVG
+  nepřijme; obrázky nad 2 MB se uloží jako JPEG. Písma jsou
+  v repozitáři (`assets/fonty`, OFL) a při prvním převodu se ověří, že
+  se opravdu použila — jinak render skončí chybou místo příspěvků
+  v cizím písmu.
+- **Zakládání organizací jen na pozvánku.** První organizace na
+  prázdné databázi bez pozvánky, každá další s jednorázovou pozvánkou
+  na e-mail zakladatele; ukládá se jen otisk. Vystavuje servisní role.
+- **Samostatný `CRON_SECRET`.** Cron už nespoléhá na `APP_SECRET`
+  a bez nastaveného tajemství se nezapne. Frontu z rozhraní navíc
+  spustí jen ten, kdo smí publikovat, a jen pro své organizace.
+
 ### Zbývá v etapě 1
 
-- **Převod SVG → PNG/JPEG** pro publikaci obrázků. Meta SVG nepřijme,
-  takže dokud tohle není, jde skutečná publikace obrázku jen přes
-  Shotstack nebo ruční export. V demo režimu to nevadí, na ostrém
-  účtu je to podmínka.
-- **Omezení `marketing.create_organization`** — dnes ji smí zavolat
-  každý přihlášený. Před ostrým provozem jen na pozvání.
-- **Samostatný `CRON_SECRET`** — dnes se spadne na `APP_SECRET`,
-  což znamená jedno tajemství na dvě různé věci.
+- **Skutečný PDF** pro tiskové formáty — dnes se A4/A5 vydává jako SVG,
+  které se otevře v prohlížeči a vytiskne, ale není to soubor `.pdf`.
+- Ověření Meta endpointů proti živé dokumentaci (`META_SETUP.md`,
+  „Co ověřit ručně“) — z vývojového prostředí na ni není přístup.
 
 ## Etapa 2 — ostré služby a první zákazníci
 

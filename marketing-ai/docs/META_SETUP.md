@@ -141,8 +141,9 @@ Média se Meta předávají **odkazem** (`image_url`, `video_url`,
 `file_url`) na podepsanou adresu aplikace
 `{APP_URL}/api/v1/media/{id}/soubor?exp&sig` s platností 24 h. Proto
 musí být `APP_URL` veřejně dosažitelná a soubor musí být v podporovaném
-formátu (JPEG pro IG obrázky; SVG z interního rendereru Meta
-**nepřijme** — viz `SOCIAL_API_LIMITS.md`).
+formátu. Vestavěné vykreslení proto vrací **PNG** (u objemných
+obrázků JPEG) — SVG by Meta nepřijala. SVG zůstává jen u tiskových
+formátů A4/A5, které se nikam nepublikují.
 
 Rate limit: chybové kódy 4, 17, 32, 613 nebo HTTP 429 → `retry` za
 15 minut; fronta má vlastní exponenciální odstup a strop `max_attempts`

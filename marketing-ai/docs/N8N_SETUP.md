@@ -60,14 +60,13 @@ fronty v `scheduled-social-publish.json`:
 
 1. *Credentials → New → Header Auth*.
 2. Název: **FoodTab Marketing webhook secret**.
-3. Name: `X-Cron-Secret`, Value: hodnota `APP_SECRET` aplikace
-   (endpoint `/api/v1/ulohy/zpracovat` přijímá `X-Cron-Secret = APP_SECRET`
-   nebo přihlášeného uživatele).
+3. Name: `X-Cron-Secret`, Value: hodnota `CRON_SECRET` aplikace.
 4. V uzlu „Zpracovat frontu“ vybrat tuhle credential.
 
-Poznámka k bezpečnosti: `APP_SECRET` podepisuje i cookie a adresy
-souborů. Dávat ho do n8n je širší přístup, než fronta potřebuje —
-v `SECURITY.md` je to vedené jako věc k řešení (samostatný `CRON_SECRET`).
+`CRON_SECRET` je vlastní tajemství právě proto, aby se do n8n nemuselo
+dávat `APP_SECRET`, kterým se podepisují cookie a adresy souborů. Když
+`CRON_SECRET` nastavené není, endpoint volání odmítne — n8n pak dostane
+401 a je hned vidět, co chybí.
 
 ## 5. Podpis webhooků (oběma směry)
 
