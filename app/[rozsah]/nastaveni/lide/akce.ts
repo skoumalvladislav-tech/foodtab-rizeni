@@ -5,6 +5,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { odeslatEmail } from '@/lib/email'
+import { hasAccess } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -535,6 +536,78 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
 
     if ((poZarazeni?.position_id ?? null) !== zarazeni) {
       redirect(`${zpet}?chyba=opravneni-neprovedeno`)
+    }
+  }
+
+  /*
+    1b. VÝJIMKY. Co se liší od zařazení, se uloží k člověku.
+
+    OBRAZOVKA NENÍ ZÁMEK, takže se právo ověřuje TADY ZNOVU. Panel
+    zaškrtávátka jen schová; kdo pošle formulář ručně, projde okolo
+    něj. Rozhodující je stejně politika `employee_permissions_write`,
+    která chce `settings.manage` — tohle je první linie, aby se chyba
+    projevila hláškou, a ne tichou nulou změněných řádků.
+
+    Proč `settings.manage` a ne `people.manage`: zpřísnila to migrace
+    20260901090000 s odůvodněním „kdo zakládá lidi, nesmí rozhodovat,
+    kdo vidí mzdy". Formulář zaměstnance běží pod `people.manage`,
+    takže bez téhle kontroly by se ta díra obešla jinými dveřmi.
+  */
+  const smiMenitPrava = await hasAccess(tenantId, 'settings.manage', rozsah)
+  const nabizena = new Set(formData.getAll('nabizeno').map(String))
+
+  if (smiMenitPrava && nabizena.size > 0) {
+    const zvolena = new Set(formData.getAll('pravo').map(String))
+
+    /*
+      Práva NOVÉHO zařazení, ne toho původního — výjimka je rozdíl
+      proti tomu, co člověk BUDE mít. Kdyby se počítala proti starému,
+      po přeřazení by vznikly výjimky, které nikdo nezadal.
+    */
+    const { data: zeZarazeniData, error: chybaZeZarazeni } = zarazeni
+      ? await supabase
+          .from('position_permissions')
+          .select('permission_key')
+          .eq('tenant_id', tenantId)
+          .eq('position_id', zarazeni)
+      : { data: [] as { permission_key: string }[], error: null }
+    if (chybaZeZarazeni) throw new DotazSelhal('oprávnění zařazení', chybaZeZarazeni)
+
+    const daZarazeni = new Set(
+      (zeZarazeniData ?? []).map((r) => String(r.permission_key)),
+    )
+
+    // Co se rovná zařazení, výjimku nepotřebuje — a stará se maže.
+    const bezVyjimky = [...nabizena].filter(
+      (k) => zvolena.has(k) === daZarazeni.has(k),
+    )
+    const sVyjimkou = [...nabizena]
+      .filter((k) => zvolena.has(k) !== daZarazeni.has(k))
+      .map((k) => ({
+        tenant_id: tenantId,
+        employee_id: clovek.id,
+        permission_key: k,
+        granted: zvolena.has(k),
+      }))
+
+    if (bezVyjimky.length > 0) {
+      const { error } = await supabase
+        .from('employee_permissions')
+        .delete()
+        .eq('employee_id', clovek.id)
+        .in('permission_key', bezVyjimky)
+      if (error) {
+        redirect(`${zpet}?chyba=opravneni&text=${encodeURIComponent(error.message)}`)
+      }
+    }
+
+    if (sVyjimkou.length > 0) {
+      const { error } = await supabase
+        .from('employee_permissions')
+        .upsert(sVyjimkou, { onConflict: 'employee_id,permission_key' })
+      if (error) {
+        redirect(`${zpet}?chyba=opravneni&text=${encodeURIComponent(error.message)}`)
+      }
     }
   }
 

@@ -81,6 +81,18 @@ export function nadpisUpozorneni(
     */
     case 'pin.prenastaven':
       return telo.mel_drive ? 'Váš PIN byl přenastaven' : 'Máte nový PIN ke kiosku'
+    case 'smena.nova':
+      return `Máte novou směnu ${denCesky(telo.den)}`
+    case 'smena.zmenena':
+      return `Změnila se vám směna ${denCesky(telo.den)}`
+    case 'smena.odebrana':
+      return `Odebrali vám směnu ${denCesky(telo.den)}`
+    case 'smena.zrusena':
+      return `Zrušili vám směnu ${denCesky(telo.den)}`
+    case 'oznameni.nova':
+      return 'Nové oznámení na nástěnce'
+    case 'vzkaz.novy':
+      return 'Nová zpráva v rozhovoru'
     default:
       return 'Upozornění'
   }

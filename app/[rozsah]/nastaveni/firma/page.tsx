@@ -12,7 +12,7 @@ import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from '@/lib/supabase
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { ulozitRanniEmail, ulozitZapomenutyOdchod } from './akce'
+import { ulozitPrestavku, ulozitRanniEmail, ulozitZapomenutyOdchod } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,7 +85,7 @@ export default async function NastaveniFirma({
 
   const { data: nastaveni } = await supabase
     .from('tenant_settings')
-    .select('ranni_email_kdy, zapomenuty_odchod_hodin, zapomenuty_odchod_kdy')
+    .select('ranni_email_kdy, zapomenuty_odchod_hodin, zapomenuty_odchod_kdy, prestavka_minut, prestavka_od_minut, prestavka_platna_od')
     .eq('tenant_id', tenantId)
     .maybeSingle()
 
@@ -117,6 +117,18 @@ export default async function NastaveniFirma({
     (nastaveni as { zapomenuty_odchod_hodin?: number } | null)?.zapomenuty_odchod_hodin ?? 20
   const zapomenutyKdy =
     (nastaveni as { zapomenuty_odchod_kdy?: string } | null)?.zapomenuty_odchod_kdy ?? '09:00'
+
+  // Přestávky — výchozí hodnoty viz prestavky-pausalem.md, oddíl 1.
+  const nastaveniTyped = nastaveni as {
+    prestavka_minut?: number
+    prestavka_od_minut?: number
+    prestavka_platna_od?: string | null
+  } | null
+  const prestavkaMinut = nastaveniTyped?.prestavka_minut ?? 30
+  const prestavkaOdHodin = ((nastaveniTyped?.prestavka_od_minut ?? 360) / 60).toString()
+  // Předvyplnit dneškem, jak nařizuje zadání.
+  const dnesIso = new Date().toISOString().slice(0, 10)
+  const prestavkaPlatnaOd = nastaveniTyped?.prestavka_platna_od ?? dnesIso
 
   /* --- náhled -------------------------------------------------------
      Ukazuje, co by ráno odešlo za VČEREJŠÍ provozní den. Neposílá nic.
@@ -154,7 +166,7 @@ export default async function NastaveniFirma({
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '720px' }}>
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
-        {ulozeno === 'email' || ulozeno === 'zapomenuty' ? (
+        {ulozeno === 'email' || ulozeno === 'zapomenuty' || ulozeno === 'prestavka' ? (
           <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--dobre)' }}>
             Uloženo.
           </p>
@@ -267,6 +279,75 @@ export default async function NastaveniFirma({
               <span style={vysvetlivka}>
                 Místního času. Ne ve chvíli, kdy hranice padne — to by
                 zvonilo uprostřed noci.
+              </span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            className="ft-tl ft-tl-hlavni ft-tl-male"
+            style={{ marginTop: '12px' }}
+          >
+            Uložit
+          </button>
+        </form>
+
+        <h2 style={{ ...nadpis, marginTop: '28px' }}>Přestávky</h2>
+        <p style={popis}>
+          Přestávky se nepíchají — odečítají se paušálem. Zapsaná přestávka
+          (vedoucí ji může doplnit ručně) má vždy přednost a paušál se
+          nepoužije, i kdyby byl delší. Starší směny se mění jen od data
+          &bdquo;Platí od&ldquo;.
+        </p>
+        <p style={popis}>
+          <em>
+            Příklad: Směna 8:00–16:00 se spočítá jako 7 hodin 30 minut.
+            Směna 8:00–12:00 se nezkracuje.
+          </em>
+        </p>
+
+        <form action={ulozitPrestavku} style={karta}>
+          <input type="hidden" name="rozsah" value={rozsah} />
+          <div style={mrizka}>
+            <label style={poleLabel}>
+              <span>Odečíst (minut)</span>
+              <input
+                name="prestavka_minut"
+                type="number"
+                min={0}
+                max={240}
+                defaultValue={prestavkaMinut}
+                style={pole}
+              />
+              <span style={vysvetlivka}>0 = paušál vypnutý.</span>
+            </label>
+
+            <label style={poleLabel}>
+              <span>Ze směny delší než (hodiny)</span>
+              <input
+                name="prestavka_od_hodin"
+                type="number"
+                min={0}
+                max={24}
+                step={0.5}
+                defaultValue={prestavkaOdHodin}
+                style={pole}
+              />
+              <span style={vysvetlivka}>
+                Srovnává se s hrubou délkou před odečtením.
+              </span>
+            </label>
+
+            <label style={poleLabel}>
+              <span>Platí od</span>
+              <input
+                name="prestavka_platna_od"
+                type="date"
+                defaultValue={String(prestavkaPlatnaOd)}
+                style={pole}
+              />
+              <span style={vysvetlivka}>
+                Starší směny se nemění. Předvyplněno dneškem.
               </span>
             </label>
           </div>

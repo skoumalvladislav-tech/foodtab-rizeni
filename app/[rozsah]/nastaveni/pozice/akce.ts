@@ -121,13 +121,13 @@ export async function zalozitPozici(formData: FormData): Promise<void> {
   if (pristup.stav !== 'ok') redirect('/')
 
   const v = await najdiNeboZaloz(tenantId, nazev)
-  revalidatePath(`/${rozsah}/nastaveni/pozice`)
+  revalidatePath(`/${rozsah}/nastaveni/role`)
 
   if (v.stav === 'chyba') {
-    redirect(`/${rozsah}/nastaveni/pozice?chyba=${v.duvod}`)
+    redirect(`/${rozsah}/nastaveni/role?chyba=${v.duvod}`)
   }
   redirect(
-    `/${rozsah}/nastaveni/pozice?stav=${v.stav}&nazev=${encodeURIComponent(v.nazev)}`,
+    `/${rozsah}/nastaveni/role?stav=${v.stav}&nazev=${encodeURIComponent(v.nazev)}`,
   )
 }
 
@@ -137,7 +137,7 @@ export async function prejmenovatPozici(formData: FormData): Promise<void> {
   const id = String(formData.get('pozice') ?? '')
   const nazev = String(formData.get('nazev') ?? '').trim()
   if (!id || nazev === '') {
-    redirect(`/${rozsah}/nastaveni/pozice?chyba=prazdny`)
+    redirect(`/${rozsah}/nastaveni/role?chyba=prazdny`)
   }
 
   const tenantId = await getCurrentTenantId()
@@ -162,7 +162,7 @@ export async function prejmenovatPozici(formData: FormData): Promise<void> {
   )
   if (koliduje) {
     redirect(
-      `/${rozsah}/nastaveni/pozice?chyba=kolize&nazev=${encodeURIComponent(nazev)}`,
+      `/${rozsah}/nastaveni/role?chyba=kolize&nazev=${encodeURIComponent(nazev)}`,
     )
   }
 
@@ -174,12 +174,12 @@ export async function prejmenovatPozici(formData: FormData): Promise<void> {
 
   if (error) {
     redirect(
-      `/${rozsah}/nastaveni/pozice?chyba=${error.code === '42501' ? 'pravo' : 'nepovedlo'}`,
+      `/${rozsah}/nastaveni/role?chyba=${error.code === '42501' ? 'pravo' : 'nepovedlo'}`,
     )
   }
 
-  revalidatePath(`/${rozsah}/nastaveni/pozice`)
-  redirect(`/${rozsah}/nastaveni/pozice?stav=prejmenovana`)
+  revalidatePath(`/${rozsah}/nastaveni/role`)
+  redirect(`/${rozsah}/nastaveni/role?stav=prejmenovana`)
 }
 
 /**
@@ -210,10 +210,10 @@ export async function prepnoutPozici(formData: FormData): Promise<void> {
 
   if (error) {
     redirect(
-      `/${rozsah}/nastaveni/pozice?chyba=${error.code === '42501' ? 'pravo' : 'nepovedlo'}`,
+      `/${rozsah}/nastaveni/role?chyba=${error.code === '42501' ? 'pravo' : 'nepovedlo'}`,
     )
   }
 
-  revalidatePath(`/${rozsah}/nastaveni/pozice`)
-  redirect(`/${rozsah}/nastaveni/pozice?stav=${zapnout ? 'vracena' : 'vyrazena'}`)
+  revalidatePath(`/${rozsah}/nastaveni/role`)
+  redirect(`/${rozsah}/nastaveni/role?stav=${zapnout ? 'vracena' : 'vyrazena'}`)
 }

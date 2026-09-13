@@ -125,8 +125,28 @@ export default function RozpisView({
     router.push(`?${params.toString()}`);
   };
 
-  // Seskupení po dnech
+  /*
+    Seskupení po dnech — ale NEJDŘÍV VŠECHNY DNY OBDOBÍ, teprve pak do
+    nich směny.
+
+    Mapa se stavěla jen ze směn, takže den, ve kterém ještě nic nebylo,
+    nedostal sloupec — a bez sloupce nebylo kam kliknout na „+". V týdnu,
+    kde se teprve začíná plánovat, tedy nešlo přidat vůbec nic: prázdný
+    den se nekreslil právě proto, že byl prázdný.
+
+    Hlásil to Šéfík 9. 9. 2026: „v kalendáři chybí v dalším týdnu plusy
+    na přidání směn."
+
+    Seje se přesně těch `DNU_V_ROZPISU` dnů, které načetla `page.tsx`
+    (`odKdy` … `odKdy + DNU_V_ROZPISU - 1`). Obojí čte tutéž konstantu,
+    takže se sloupce nemůžou rozejít s daty — a kdyby přesto přišla
+    směna mimo to okno, dostane svůj sloupec taky (větev `else` níž).
+
+    Týká se to jen týdenního pohledu; měsíc a den dostávají `smeny`
+    a mřížku si staví samy.
+  */
   const dny = new Map<string, Smena[]>();
+  for (let i = 0; i < DNU_V_ROZPISU; i++) dny.set(posunDatum(den, i), []);
   for (const s of smeny) {
     const seznam = dny.get(s.shift_date);
     if (seznam) seznam.push(s);
@@ -294,8 +314,32 @@ function TydenView({
   // Seřadit dny
   const dnySerad = [...dny.keys()].sort();
 
-  // Sbírat všechny unikátní zaměstnance a jejich směny
+  /*
+    Sbírat všechny unikátní zaměstnance a jejich směny.
+
+    ŘÁDKY SE ZAKLÁDAJÍ I PRO LIDI BEZ SMĚNY — jinak by v prázdném týdnu
+    nebyl ani jeden. Sloupce dnů už se sejí výš, ale bez řádku není
+    buňka, a bez buňky není „+": mřížka by byla prázdná a nešlo by do ní
+    nic přidat. Druhá půlka téhož nálezu z 9. 9.
+
+    Sejí se jen tehdy, když se vůbec smí plánovat — komu se rozpis jen
+    ukazuje, tomu je seznam lidí bez směn k ničemu a jen by mu roztáhl
+    mřížku.
+  */
   const smenyPeOsobe = new Map<string | null, Map<string, Smena[]>>();
+  if (planovani) {
+    for (const c of planovani.lide) smenyPeOsobe.set(c.id, new Map());
+  }
+
+  /*
+    Jméno do řádku. `jmena` plní `page.tsx` jen z lidí, KTEŘÍ MAJÍ
+    SMĚNU — nově zasetý řádek by se tedy jmenoval „Neznámý". Druhým
+    zdrojem je nabídka „Kdo" z plánování, kde jsou všichni.
+  */
+  const jmenoOsoby = (id: string): string =>
+    jmena.get(id) ??
+    planovani?.lide.find((c) => c.id === id)?.jmeno ??
+    "Neznámý";
   for (const [datum, smeny] of dny.entries()) {
     for (const s of smeny) {
       const osoba = s.employee_id;
@@ -311,8 +355,8 @@ function TydenView({
 
   // Seřadit osoby
   const osoby = [...smenyPeOsobe.keys()].sort((a, b) => {
-    const jmenoA = a ? jmena.get(a) ?? "Neznámý" : "Neobsazeno";
-    const jmenoB = b ? jmena.get(b) ?? "Neznámý" : "Neobsazeno";
+    const jmenoA = a ? jmenoOsoby(a) : "Neobsazeno";
+    const jmenoB = b ? jmenoOsoby(b) : "Neobsazeno";
     return jmenoA.localeCompare(jmenoB);
   });
 
@@ -360,7 +404,7 @@ function TydenView({
         </thead>
         <tbody>
           {osoby.map((osoba) => {
-            const jmeno = osoba ? jmena.get(osoba) ?? "Neznámý" : "Neobsazeno";
+            const jmeno = osoba ? jmenoOsoby(osoba) : "Neobsazeno";
             const smenyOsoby = smenyPeOsobe.get(osoba)!;
 
             return (

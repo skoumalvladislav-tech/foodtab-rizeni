@@ -137,18 +137,22 @@ export const NASTAVENI: Polozka[] = [
   { segment: 'nastaveni/firma', nazev: 'Firma', kratky: 'Firma', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/pobocky', nazev: 'Pobočky', kratky: 'Pobočky', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
-  // Pozice patří ke správě lidí, ne k nastavení firmy — proto
-  // people.manage, ne settings.manage.
-  { segment: 'nastaveni/pozice', nazev: 'Zařazení', kratky: 'Zařazení', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
   // Šablony směn — pojmenované směny s časy (D, N, R). Je to nastavení
   // provozu, ne správa lidí, proto settings.manage. Vidět je má i ten,
   // kdo plánuje směny, ale měnit je smí správa nastavení; kdo jen
   // plánuje, dostane šablony rovnou v nabídce ve formuláři směny.
   { segment: 'nastaveni/sablony', nazev: 'Šablony směn', kratky: 'Šablony', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kalendar' },
-  // Segment zůstává `role` podle tabulky v databázi; mění se jen to, co
-  // je vidět. Zkrácený název je taky „Oprávnění“ — „Práva“ by znamenala
-  // jednotlivá zaškrtávátka, ne pojmenovanou sadu.
-  { segment: 'nastaveni/role', nazev: 'Oprávnění', kratky: 'Oprávnění', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'clovek' },
+  // JEDNA POLOŽKA, ne dvě. Do 9. 9. 2026 tu stálo zvlášť „Zařazení“
+  // (seznam) a „Oprávnění“ (co smí) — dva seznamy pro jednu věc,
+  // a přesně to Šéfík vytýkal. Slilo se to do jedné obrazovky
+  // (docs/zarazeni-misto-roli.md, oddíl 6.1); segment zůstává `role`
+  // podle tabulky v databázi.
+  //
+  // Právo je to VOLNĚJŠÍ z těch dvou: dovnitř patří i vedoucí, který
+  // spravuje seznam zařazení. Zaškrtávátka práv si obrazovka zamyká
+  // sama na settings.manage — kdyby tu stálo to přísnější, vedoucí by
+  // o správu seznamu tiše přišel.
+  { segment: 'nastaveni/role', nazev: 'Zařazení', kratky: 'Zařazení', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
   // Nahrávání dat patří k tomu, co se nahrává. Dnes umí jen lidi, a proto
   // people.manage — až přibude rozpis nebo receptury, bude se právo řídit
   // vybranou položkou na rozcestníku, ne touhle řádkou.

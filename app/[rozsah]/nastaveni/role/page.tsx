@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { NAZVY_MODULU } from "../../nabidka";
+import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { smimPridelit } from "@/lib/prideleni";
 import { seznam } from "@/lib/supabase/dotaz";
@@ -8,6 +9,11 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import { ulozitOpravneni } from "./akce";
+import {
+  prejmenovatPozici,
+  prepnoutPozici,
+  zalozitPozici,
+} from "../pozice/akce";
 
 export const dynamic = "force-dynamic";
 
@@ -74,22 +80,40 @@ export default async function NastaveniOpravneni({
   }
 
   /*
-    Obrazovka je zavřená na settings.manage. Kdo si adresu napíše ručně
-    a právo nemá, dostane vysvětlení — ne obsah. Schovaná položka
-    v nabídce není zámek, zámek je tenhle řádek a politiky v databázi.
+    DVĚ PRÁVA NA JEDNÉ OBRAZOVCE, a je to schválně.
+
+    Od 9. 9. je tohle jediná obrazovka zařazení — Nastavení → Pozice
+    zaniklo a slilo se sem (zadání 6.1). Dva seznamy pro jednu věc byly
+    přesně to, na co si Šéfík stěžoval.
+
+    Jenže ty dvě obrazovky měly různá práva a slepit je na to přísnější
+    by vedoucímu tiše sebralo správu seznamu, kterou dneska má:
+
+      SEZNAM zařazení (založit, přejmenovat, vyřadit)  → people.manage
+      PRÁVA zařazení (zaškrtávátka)                    → settings.manage
+
+    To druhé je zpřísnění z migrace 20260901090000 („kdo zakládá lidi,
+    nesmí rozhodovat, kdo vidí mzdy") a nesmí se rozvolnit tím, že se
+    obrazovky spojily. Dovnitř se proto pouští `people.manage`
+    a zaškrtávátka se zamykají zvlášť.
+
+    Schovaná položka v nabídce není zámek — zámek je tenhle řádek
+    a politiky v databázi.
   */
-  const pristup = await zkusPristup(tenantId, "settings.manage", rozsah);
+  const pristup = await zkusPristup(tenantId, "people.manage", rozsah);
   if (pristup.stav === "neprihlasen") redirect("/prihlaseni");
   if (pristup.stav === "odepren") {
     return (
       <Sdeleni nadpis="Sem nemáte přístup">
-        Oprávnění nastavuje jen ten, kdo má právo{" "}
-        <code>settings.manage</code>. Řekněte si o ně správci firmy.
+        Zařazení spravuje jen ten, kdo má právo <code>people.manage</code>.
+        Řekněte si o ně správci firmy.
       </Sdeleni>
     );
   }
 
   const { ctx } = pristup;
+  // Práva zařazení mění jen settings.manage. Seznam smí i people.manage.
+  const smiMenitPrava = await hasAccess(tenantId, "settings.manage", rozsah);
   const supabase = await getServerSupabase();
 
   const zarazeni = await seznam<Zarazeni>(
@@ -170,9 +194,9 @@ export default async function NastaveniOpravneni({
     <>
       <Nadpis
         oci="Nastavení"
-        popis="Co smí Číšník, Kuchař nebo Provozní. Změna platí hned všem, kdo to zařazení mají."
+        popis="Kdo je čím a co smí. Změna práv platí hned všem, kdo to zařazení mají."
       >
-        Oprávnění
+        Zařazení
       </Nadpis>
 
       <div style={{ padding: "16px", paddingBottom: "32px" }}>
@@ -189,6 +213,30 @@ export default async function NastaveniOpravneni({
           zapnutých modulů. Kdyby se mu práva odebírala tady, šel by
           zamknout ven z vlastní firmy.
         </p>
+
+        {/*
+          ZALOŽIT ZAŘAZENÍ. Přišlo sem z Nastavení → Pozice, které
+          zaniklo (zadání 6.1). Akce zůstala tam, kde byla — kopírovat
+          ji sem by znamenalo dvě místa, kde se zakládá zařazení, a to
+          je přesně ta chyba, kvůli které se obrazovky slévají.
+        */}
+        <form action={zalozitPozici} style={zalozeni}>
+          <input type="hidden" name="rozsah" value={rozsah} />
+          <label style={{ display: "grid", gap: "4px", flex: "1 1 220px" }}>
+            <span style={popisRole}>Nové zařazení</span>
+            <input
+              type="text"
+              name="nazev"
+              required
+              maxLength={60}
+              placeholder="např. Barman"
+              style={poleText}
+            />
+          </label>
+          <button type="submit" className="ft-tl ft-tl-vedlejsi">
+            Založit
+          </button>
+        </form>
 
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "16px" }}>
           {zarazeni.map((r) => {
@@ -238,6 +286,40 @@ export default async function NastaveniOpravneni({
                       : `Má ho ${lidi} lidí. Změna u nich platí hned.`}
                 </p>
 
+                {/*
+                  Přejmenovat a vyřadit — taky ze zaniklého Nastavení →
+                  Pozice. Vyřazené zařazení se přestane nabízet u nových
+                  lidí, ale těm, kdo ho mají, zůstane: kdyby zmizelo,
+                  přišli by o práva a nikdo by nevěděl proč.
+                */}
+                <div style={spravaRadku}>
+                  <form action={prejmenovatPozici} style={spravaFormular}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="pozice" value={r.id} />
+                    <input
+                      type="text"
+                      name="nazev"
+                      defaultValue={r.label}
+                      required
+                      maxLength={60}
+                      aria-label={`Název zařazení ${r.label}`}
+                      style={{ ...poleText, maxWidth: "220px" }}
+                    />
+                    <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                      Přejmenovat
+                    </button>
+                  </form>
+
+                  <form action={prepnoutPozici} style={{ marginLeft: "auto" }}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="pozice" value={r.id} />
+                    <input type="hidden" name="zapnout" value={r.active ? "ne" : "ano"} />
+                    <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                      {r.active ? "Vyřadit" : "Vrátit"}
+                    </button>
+                  </form>
+                </div>
+
                 {smim ? null : (
                   <p style={{ ...popisRole, marginBottom: "4px" }}>
                     <strong style={{ color: "var(--pozor)" }}>
@@ -248,8 +330,27 @@ export default async function NastaveniOpravneni({
                   </p>
                 )}
 
+                {!smiMenitPrava ? (
+                  <p style={{ ...popisRole, marginBottom: "8px" }}>
+                    Práva zařazení mění jen ten, kdo spravuje nastavení
+                    firmy. Tady je vidíte, jak jsou.
+                  </p>
+                ) : null}
+
                 {(
+                  /*
+                    Práva mění jen `settings.manage`. Vedoucí
+                    s `people.manage` se sem dostane kvůli správě
+                    seznamu, ale zaškrtávátka má zamčená — zpřísnění
+                    z migrace 20260901090000 se sloučením obrazovek
+                    nesmí rozvolnit. Rozhoduje stejně politika
+                    v databázi; `fieldset` je jen první linie.
+                  */
                   <form key={`zarazeni-${r.id}`} action={ulozitOpravneni}>
+                    <fieldset
+                      disabled={!smiMenitPrava}
+                      style={{ border: "none", margin: 0, padding: 0 }}
+                    >
                     <input type="hidden" name="rozsah" value={rozsah} />
                     <input type="hidden" name="zarazeni" value={r.id} />
 
@@ -291,6 +392,7 @@ export default async function NastaveniOpravneni({
                     >
                       Uložit {r.label}
                     </button>
+                    </fieldset>
                   </form>
                 )}
               </li>
@@ -403,3 +505,43 @@ const radekPrava = {
   color: "var(--ink)",
   minHeight: "32px",
 } as const;
+
+/* --- styly převzaté ze zaniklého Nastavení → Pozice ------------------ */
+
+const zalozeni = {
+  display: "flex",
+  flexWrap: "wrap" as const,
+  alignItems: "flex-end",
+  gap: "8px",
+  margin: "0 0 20px",
+  padding: "14px",
+  background: "var(--card)",
+  border: "1px solid var(--line)",
+  borderRadius: "14px",
+};
+
+const poleText = {
+  width: "100%",
+  padding: "8px 10px",
+  fontSize: "16px",
+  borderRadius: "10px",
+  border: "1px solid var(--line)",
+  background: "var(--paper)",
+  color: "var(--ink)",
+};
+
+const spravaRadku = {
+  display: "flex",
+  flexWrap: "wrap" as const,
+  alignItems: "center",
+  gap: "8px",
+  margin: "0 0 12px",
+  paddingBottom: "12px",
+  borderBottom: "1px solid var(--line)",
+};
+
+const spravaFormular = {
+  display: "flex",
+  alignItems: "center",
+  gap: "6px",
+};
