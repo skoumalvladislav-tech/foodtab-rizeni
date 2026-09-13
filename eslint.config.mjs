@@ -9,6 +9,11 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // A build kdekoli hloub, ne jen v kořeni. Po smazané složce
+    // `marketing-ai/` zůstal na disku její `.next/` — git ho nesleduje,
+    // takže ho `git rm` neuklidil, a eslint se do něj zakousl na
+    // dva tisíce chyb v cizím strojově vyrobeném kódu.
+    "**/.next/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
@@ -20,9 +25,6 @@ const eslintConfig = defineConfig([
     // drží se schválně tak, jak vznikla na main, aby se z ní dal opisovat
     // vzhled. Opravovat v ní pravidla lintu by znamenalo měnit vzor.
     "app/dashboard.tsx",
-    // Samostatný projekt FoodTab Marketing AI — má vlastní package.json,
-    // tsconfig i eslint. Mateřský lint ani typecheck do něj nesahají.
-    "marketing-ai/**",
   ]),
 ]);
 

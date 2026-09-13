@@ -90,6 +90,17 @@ Převod je velký a dělá se po částech, aby šla každá vrátit:
    (`tsconfig.json`, `eslint.config.mjs`, odstavec v README). Dřív ne —
    je to předloha, ze které se převádí.
 
+**Hotovo 13. 9. 2026.** Složka je smazaná. Kdyby se z ní přece jen
+něco hodilo — hlavně `docs/PRODUCT_ROADMAP.md`,
+`docs/product-inspiration.md`, `docs/SOCIAL_API_LIMITS.md`,
+`docs/PROVIDER_CATALOG.md` a osm hotových n8n workflow v `n8n/` —
+leží to pořád v historii, v commitu `6cb7d72` a starších:
+
+```bash
+git show 6cb7d72:marketing-ai/docs/PRODUCT_ROADMAP.md
+git checkout 6cb7d72 -- marketing-ai/n8n   # kdyby se měly vrátit
+```
+
 ## 5. Co se tím mění proti samostatné aplikaci
 
 Věci, které se převodem nedají zachovat jedna k jedné. Ať to za rok

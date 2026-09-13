@@ -48,10 +48,10 @@ O tom, kdo co uvidí, rozhoduje databáze — funkce `app.has_access()`
 a politiky nad ní. Aplikace si pravidla nedopočítává sama, jinak by
 se obě strany časem rozešly.
 
-## FoodTab Marketing AI
+## Marketing
 
-Ve složce `marketing-ai/` je samostatná aplikace pro tvorbu, schvalování
-a publikování gastro obsahu (Instagram, Facebook). Má vlastní `package.json`,
-migrace, testy a dokumentaci — viz `marketing-ai/README.md`. Staví se tak,
-aby šla později vložit do FoodTab Řízení (`marketing-ai/docs/FOODTAB_INTEGRATION.md`).
-Mateřský lint a typecheck do ní nesahají.
+Marketing je modul Foodtabu, ne samostatná aplikace — obrazovky jsou
+v `app/[rozsah]/marketing`, práva `marketing.read`, `marketing.manage`
+a `marketing.publish`. Proč se od samostatné aplikace ustoupilo, je
+v `docs/marketing-je-modul.md`; jak se modul spouští, v
+`docs/marketing-spusteni.md`.
