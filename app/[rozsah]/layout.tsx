@@ -188,18 +188,53 @@ export default async function RozsahLayout({
   ];
 
   /*
-    Nepřečtená upozornění do zvonečku. Politika na notifications pustí
-    jen vlastní řádky, takže se tu nefiltruje podle uživatele znovu.
+    Nepřečtená upozornění, vzkazy a nástěnka do zvonečku.
+    Člověku je jedno, jestli mu leží upozornění nebo vzkaz — chce vědět,
+    že NĚCO leží (B4, docs/velka-prace-2026-09-08.md).
 
-    Chyba se schválně nevyhazuje: dokud neproběhne migrace
-    20260901130000, tabulka neexistuje a zvoneček prostě ukazuje nulu.
+    Chyby se schválně nevyhazují: dokud neproběhnou příslušné migrace,
+    tabulky/funkce neexistují a zvoneček prostě ukazuje nulu.
     Kvůli počítadlu nemá padat celý rám aplikace.
+
+    Tři dotazy se spouštějí paralelně, aby nelezly za sebou.
   */
-  const { count: neprectenych } = await (await getServerSupabase())
-    .from("notifications")
-    .select("id", { count: "exact", head: true })
-    .eq("tenant_id", tenantId)
-    .is("read_at", null);
+  const supabaseForCount = await getServerSupabase()
+  const [
+    { count: neprectenychUpozorneni },
+    { data: rozhovoryData },
+    { data: nastenkaData },
+    { data: nastenkaPrectena },
+  ] = await Promise.all([
+    supabaseForCount
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("tenant_id", tenantId)
+      .is("read_at", null),
+    supabaseForCount
+      .rpc("moje_rozhovory", { p_tenant: tenantId })
+      .then((r) => ({ data: r.error ? null : r.data })),
+    supabaseForCount
+      .from("announcements")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .limit(200)
+      .then((r) => ({ data: r.error ? null : r.data })),
+    supabaseForCount
+      .from("announcement_reads")
+      .select("announcement_id")
+      .eq("user_id", user.id)
+      .limit(200)
+      .then((r) => ({ data: r.error ? null : r.data })),
+  ])
+
+  const neprecteneVzkazy = rozhovoryData
+    ? (rozhovoryData as { neprectenych: number }[]).reduce((s, r) => s + r.neprectenych, 0)
+    : 0
+  const prectenaIds = new Set((nastenkaPrectena ?? []).map((c) => (c as { announcement_id: string }).announcement_id))
+  const neprecteneNastenka = nastenkaData
+    ? nastenkaData.filter((z) => !prectenaIds.has((z as { id: string }).id)).length
+    : 0
+  const neprectenych = (neprectenychUpozorneni ?? 0) + neprecteneVzkazy + neprecteneNastenka
 
   /*
     Kdo čeká na přidělení oprávnění.

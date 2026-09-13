@@ -199,6 +199,24 @@ export default async function Upozorneni({
                   </p>
                 ) : null}
 
+                {(z.druh === 'smena.nova' || z.druh === 'smena.zmenena' ||
+                  z.druh === 'smena.odebrana' || z.druh === 'smena.zrusena') &&
+                  z.telo.od && z.telo.do ? (
+                  <p
+                    style={{
+                      margin: '8px 0 0',
+                      fontSize: '14px',
+                      color: 'var(--muted)',
+                      textDecoration:
+                        z.druh === 'smena.odebrana' || z.druh === 'smena.zrusena'
+                          ? 'line-through'
+                          : undefined,
+                    }}
+                  >
+                    {cas(z.telo.od)}–{cas(z.telo.do)}
+                  </p>
+                ) : null}
+
                 {z.druh === 'opravneni.prideleno' ? (
                   <p style={{ margin: '8px 0 0', fontSize: '14px', color: 'var(--muted)' }}>
                     {[z.telo.role, z.telo.firma].filter(Boolean).join(' · ')}
