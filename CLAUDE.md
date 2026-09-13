@@ -288,6 +288,28 @@ a nech ji tomu, kdo ho píše.
   uprostřed ostrého testu. Kontrola to nechytila, protože na ten
   sloupec sahala jako superuživatel, kterému granty nic neříkají.
   **Nový sloupec vždycky zkus přečíst pod rolí `authenticated`.**
+- **Nová tabulka dostane granty pro `anon` a `authenticated`, i když
+  jí je nikdo nedá.** Supabase má v projektu výchozí práva
+  (`alter default privileges in schema public grant all on tables
+  to anon, authenticated, service_role`), takže `create table` je
+  udělí samo. Migrace, která grant schválně vynechá, tím ničeho
+  nedosáhne — brání pak jen RLS, a to je jedna linie místo dvou
+  (pravidlo 3).
+
+  **Tabulka, ke které se přihlášený nemá dostat vůbec, potřebuje
+  výslovné `revoke all … from anon, authenticated`.** Ne jen
+  „nedáme grant".
+
+  Přišlo se na to 13. 9. 2026 při nasazení marketingu:
+  `marketing_tajemstvi` se zašifrovanými klíči k Instagramu měla
+  granty pro obě role, ačkoli je migrace nedala. Data neunikla —
+  RLS bez politiky nepustí ani řádek, ověřeno měřením — ale první
+  linie chyběla. Opravuje `20260913180000_marketing_granty_uklid.sql`.
+
+  **A pozor, místní testy tohle nechytí.** Čistá databáze z `run.sh`
+  výchozí práva Supabase nemá, takže kontrola „na tu tabulku není
+  grant" projde lokálně a v ostré databázi by spadla. Je to tatáž
+  třída rozdílu jako `\gset` nad NULL v PGlite.
 - Peníze v celých haléřích jako `integer`, ne `float`.
 - Časy `timestamptz`, provozní datum jako `date`.
 

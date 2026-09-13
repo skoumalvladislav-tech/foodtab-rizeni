@@ -230,6 +230,52 @@ select pg_temp.check('a v auditu zůstalo, že tam byl',
 
 
 \echo ''
+\echo '== Granty, ne jen politiky =================================='
+
+/*
+  PROČ SE PTÁME NA GRANTY, KDYŽ UŽ JSME ČETLI POD ROLÍ
+
+  Protože čtení výš dokazuje jen to, že se ten dotaz NEPOVEDL — a to
+  by vyšlo stejně, kdyby grant byl a jen RLS nepustila řádky. Rozdíl
+  je vidět až tady.
+
+  A není to teoretické. 13. 9. 2026 při nasazení do `foodtab-test`
+  se ukázalo, že tam grant JE: Supabase má v projektu výchozí práva
+  (`alter default privileges … grant all on tables to anon,
+  authenticated`), která každou novou tabulku v `public` zpřístupní
+  bez ohledu na to, co si migrace přeje. Data neunikla, protože RLS
+  bez politiky nepustí ani řádek — ale z dvou obranných linií držela
+  jedna. Odebírá to 20260913180000_marketing_granty_uklid.sql.
+
+  MÍSTNÍ BĚH TENHLE ROZDÍL NEUKÁŽE. Čistá databáze z `run.sh` výchozí
+  práva Supabase nemá, takže tahle kontrola projde i bez té migrace.
+  Ptá se proto na to, co migrace zaručuje sama — kdyby někdo grant
+  přidal, spadne to tady i tam.
+*/
+
+reset role;
+
+select pg_temp.check('na tabulku s klíči nemá anon ani authenticated žádný grant',
+  (select count(*) from information_schema.role_table_grants
+    where table_schema = 'public' and table_name = 'marketing_tajemstvi'
+      and grantee in ('anon', 'authenticated')) = 0);
+
+select pg_temp.check('a service_role na ni grant má — jinak by fronta nefungovala',
+  (select count(*) from information_schema.role_table_grants
+    where table_schema = 'public' and table_name = 'marketing_tajemstvi'
+      and grantee = 'service_role' and privilege_type = 'SELECT') = 1);
+
+-- Nepřihlášený nemá co pohledávat v žádné tabulce modulu. Politiky
+-- jsou psané `to authenticated`, takže by neviděl nic — ale grant bez
+-- politiky je zbytečné riziko na den, kdy někdo přidá politiku bez
+-- omezení role.
+select pg_temp.check('a v celém modulu nemá anon grant na nic',
+  (select count(*) from information_schema.role_table_grants
+    where table_schema = 'public' and table_name like 'marketing\_%'
+      and grantee = 'anon') = 0);
+
+
+\echo ''
 \echo '== Úklid po sobě ============================================'
 
 reset role;
