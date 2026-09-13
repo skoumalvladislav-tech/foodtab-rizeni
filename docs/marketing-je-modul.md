@@ -116,3 +116,79 @@ nikdo nebere jako nedodělek:
 
 **Nenasazuje se odsud.** `supabase db push` pouští Šéfík z `main`
 (skill `nasazeni`, CLAUDE.md — „Nasazuje Šéfík, ne push“).
+
+---
+
+## 7. Zveřejňuje n8n, ne Foodtab
+
+13. 9. 2026, po prověření. Doplněk k oddílu 2 — upřesňuje, co znamená
+„API jen tam, kde opravdu vede ven".
+
+### Co se zjistilo
+
+Instagram Černé Perly **už je připojený a už se na něj publikuje** —
+ne z Foodtabu, ale z n8n. Workflow „Černá Perla — denní obsah na sítě"
+(`Z6wKMzqXAPUhuM19`) je aktivní a běží každý všední den v 8:00: vytáhne
+denní menu, nechá OpenAI napsat text, vyrobí grafiku v Bannerbearu,
+pošle e-mailem ke schválení a po schválení zveřejní přes
+`graph.instagram.com` na účet `27920687187583900`. Staré příspěvky
+z profilu maže.
+
+Je to cesta „Instagram Login", ne přes facebookovou stránku. **Žádné
+schvalování aplikace u Mety se tedy čekat nemusí** — dřívější odhad, že
+to zdrží týdny, pro tenhle způsob neplatil.
+
+Facebook: v n8n jsou tři přihlašovací údaje „Facebook Graph account",
+ale tohle workflow ani jeden nepoužívá a na Facebook neposílá nic.
+
+Ve Foodtabu nebylo nic: ani v repozitáři, ani v databázi.
+
+### Rozhodnutí
+
+**Foodtab s Instagramem nemluví.** Fronta zavolá webhook v n8n a n8n
+zveřejní přístupem, který už drží.
+
+| Kdo | Co dělá |
+|---|---|
+| Foodtab | rozhoduje CO a KDY — verze, schválení, fotky, plán, fronta |
+| n8n | POŠLE to ven přístupem, který má |
+
+Důvod není pohodlí. Kdyby si Foodtab zavedl vlastní přístup, byl by
+týž token na dvou místech, obnovoval by se dvakrát a při odvolání by
+se na jedno z nich zapomnělo.
+
+Stávající workflow se proto osekává na „zveřejni, co přijde". Text,
+schvalování a plán přebírá Foodtab.
+
+### Čím to stojí a padá
+
+1. **Idempotenční klíč.** Foodtab posílá `idempotencni_klic` a n8n si
+   podle něj MUSÍ pamatovat, co už poslalo. Bez toho stačí, aby se
+   odpověď ztratila cestou zpátky: Foodtab to vezme jako neúspěch, za
+   pět minut zkusí znovu — a na Instagramu jsou dva stejné příspěvky.
+   Zpátky se to vzít nedá. Zámek ve frontě tuhle díru nezavře; ten
+   hlídá dva běhy Foodtabu, ne ztracenou odpověď.
+
+2. **Firma a pobočka v každém požadavku.** Jeden webhook pro všechny
+   firmy znamená, že příspěvek druhé restaurace odejde na Instagram té
+   první. n8n podle nich vybírá účet a neznámou firmu odmítá.
+
+3. **Dokud oboje běží, hrozí dva příspěvky denně.** Staré workflow
+   a fronta Foodtabu o sobě nevědí. Zapínat se to smí až poté, co se
+   staré workflow osekalo.
+
+### Co je potřeba nastavit
+
+| Proměnná | K čemu |
+|---|---|
+| `N8N_MARKETING_URL` | adresa webhooku v n8n |
+| `N8N_MARKETING_TAJEMSTVI` | sdílené tajemství, chodí v hlavičce `x-foodtab-tajemstvi` |
+| `MARKETING_KLIC_SIFRY` | 64 znaků hexadecimálně; šifrování zákaznických klíčů |
+
+### Drobnost, která není drobnost
+
+Přihlašovací údaj s instagramovým tokenem se v n8n jmenuje jen
+„Authorization" a je typu hlavička HTTP. Takový údaj pošle hlavičku na
+**jakoukoli** adresu, na kterou ho někdo připne. Kdyby ho příště někdo
+omylem použil u uzlu mířícího jinam, odejde tam token k účtu. Chce to
+přejmenovat na „Instagram — Černá Perla".

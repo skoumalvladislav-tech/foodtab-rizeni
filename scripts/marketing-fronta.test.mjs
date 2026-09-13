@@ -75,39 +75,34 @@ const rucni = await odeslat(uloha({ rezim: 'rucni' }))
 ok('ruční režim není chyba', rucni.stav === 'rucne')
 ok('a řekne proč', rucni.stav === 'rucne' && rucni.duvod.length > 0)
 
-console.log('\n== Bez připojeného účtu se to přizná ==')
+console.log('\n== Bez nastaveného n8n se to přizná ==')
 
 /*
+  Zveřejňuje n8n, ne Foodtab — proč, je v lib/marketing-n8n.ts.
+  Dokud není nastavená adresa webhooku a tajemství, nesmí se úloha
+  tvářit jako odeslaná.
+
   Nejhorší možná odpověď je „hotovo" u něčeho, co nikam neodešlo.
   Druhá nejhorší je hláška, ze které se nepozná, co má člověk udělat.
+
+  Podrobnosti předání (co se posílá, čemu se nesmí věřit v odpovědi)
+  jsou ve scripts/marketing-n8n.test.mjs. Tady jde jen o to, že se
+  nenastavený stav pozná.
 */
-const bezUctu = await odeslat(uloha({ rezim: 'zakaznicky', pripojeni_id: null, ucet_id: null }))
+const bezN8n = await odeslat(uloha({ rezim: 'zakaznicky' }), [{ url: 'https://x.test/1.jpg', alt: '' }])
 
-ok('bez připojení to selže', bezUctu.stav === 'chyba')
-ok('hláška jmenuje kanál', bezUctu.stav === 'chyba' && bezUctu.duvod.includes('Instagram'))
-ok('a řekne, kam se má člověk podívat',
-  bezUctu.stav === 'chyba' && /nastaven/i.test(bezUctu.duvod))
-
-const facebook = await odeslat(uloha({ rezim: 'zakaznicky', kanal: 'facebook' }))
-ok('u Facebooku jmenuje Facebook',
-  facebook.stav === 'chyba' && facebook.duvod.includes('Facebook'))
-
-console.log('\n== Nehotové zveřejňování se netváří jako hotové ==')
+ok('bez nastaveného n8n to selže', bezN8n.stav === 'chyba')
+ok('a hláška navrhne, co dělat mezitím',
+  bezN8n.stav === 'chyba' && /ruční režim/i.test(bezN8n.duvod))
 
 /*
-  Zveřejňování k Metě čeká na nahrávání fotek. Dokud to neexistuje,
-  musí úloha SELHAT se srozumitelnou hláškou — nesmí se zapsat jako
-  zveřejněná a nesmí se tvářit jako demo.
+  Na řádek v marketing_pripojeni se schválně NEČEKÁ: účet je připojený
+  v n8n, ne u nás. Kdyby se vyžadoval i u nás, byl by to druhý seznam
+  téhož a chyběl by pokaždé, když se něco připojí jen v n8n.
 */
-const meta = await odeslat(uloha({
-  rezim: 'zakaznicky',
-  pripojeni_id: 'c1',
-  ucet_id: 'u1',
-}))
-
-ok('s připojením, ale bez hotového odesílání, to selže', meta.stav === 'chyba')
-ok('a hláška navrhne, co dělat mezitím',
-  meta.stav === 'chyba' && /ruční režim/i.test(meta.duvod))
+ok('chybějící připojení u nás není důvod k jiné chybě',
+  (await odeslat(uloha({ rezim: 'zakaznicky', pripojeni_id: 'c1', ucet_id: 'u1' }),
+    [{ url: 'https://x.test/1.jpg', alt: '' }])).duvod === bezN8n.duvod)
 
 console.log('\n== Jména funkcí sedí s migrací ==')
 

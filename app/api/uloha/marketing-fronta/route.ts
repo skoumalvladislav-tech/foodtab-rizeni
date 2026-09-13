@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
 
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+import { KBELIK } from '@/lib/marketing-media'
+import type { Obrazek } from '@/lib/marketing-n8n'
 import { odeslat, type Uloha } from '@/lib/marketing-odeslani'
 import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
 
@@ -57,11 +61,17 @@ export const dynamic = 'force-dynamic'
 /**
  * Kolik úloh na jeden běh.
  *
- * Vercel dává funkci omezený čas a jedno odeslání k Metě trvá
- * i vteřiny. Dvacet je odhad se zásobou; zbytek počká na další běh,
- * což je lepší než dávka useknutá uprostřed.
+ * Osm, a je to spočítané, ne odhadnuté: jedno předání do n8n čeká na
+ * odpověď nejvýš půl minuty, takže nejhorší možný běh trvá čtyři
+ * minuty. Plánovač dává na volání pět minut (`--max-time 300`
+ * v `.github/workflows/marketing-fronta.yml`), takže se dávka vejde
+ * i celá zaseknutá.
+ *
+ * Dvacet by se nevešlo: deset minut proti pěti. Useknuté volání by
+ * nechalo část úloh ve stavu `odesila_se` — zabrané, neodeslané a bez
+ * zápisu proč. Zbytek dávky radši počká na další běh za čtvrt hodiny.
  */
-const DAVKA = 20
+const DAVKA = 8
 
 export async function GET(request: Request): Promise<NextResponse> {
   const hlavicka = request.headers.get('authorization')
@@ -98,7 +108,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       zabraný, ale neodeslaný a bez zápisu proč.
     */
     try {
-      const vysledek = await odeslat(uloha)
+      const vysledek = await odeslat(uloha, await odkazyNaFotky(supabase, uloha))
 
       if (vysledek.stav === 'hotovo') {
         await supabase.rpc('marketing_publikace_hotova', {
@@ -137,4 +147,74 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   return NextResponse.json({ vyzvednuto: ulohy.length, ...pocty })
+}
+
+/**
+ * Podepsané odkazy na fotky příspěvku.
+ *
+ * ---------------------------------------------------------------------
+ * PROČ ODKAZY A NE SOUBORY
+ *
+ * Instagram si obrázek stahuje sám podle adresy, kterou dostane.
+ * Kbelík je ale soukromý, takže se pro každou fotku vydá podepsaný
+ * odkaz s omezenou platností — je to jediný způsob, jak dát cizí
+ * službě přístup k jedné fotce, aniž by se otevřel celý kbelík.
+ *
+ * ---------------------------------------------------------------------
+ * PLATNOST MUSÍ PŘEČKAT CELÉ ZVEŘEJNĚNÍ, NE JEN VOLÁNÍ
+ *
+ * Meta si obrázek nestáhne hned, když jí pošlete adresu — udělá to
+ * někdy během zpracování kontejneru. Kdyby odkaz platil pár minut,
+ * skončilo by to chybou od Mety, ze které se příčina nepozná.
+ * Dvě hodiny jsou se zásobou i na opakování.
+ *
+ * ---------------------------------------------------------------------
+ * POŘADÍ JE POŘADÍ Z VERZE
+ *
+ * `media_ids` drží pořadí, ve kterém člověk fotky vybral, a první je
+ * titulní. Databáze vrací řádky, jak se jí zlíbí, takže se to musí
+ * seřadit zpátky — jinak by koláž vyšla jinak, než jak ji schvalovatel
+ * viděl.
+ */
+const PLATNOST_PRO_METU_S = 7200
+
+async function odkazyNaFotky(supabase: SupabaseClient, uloha: Uloha): Promise<Obrazek[]> {
+  const ids = uloha.media_ids ?? []
+  if (ids.length === 0) return []
+
+  const { data, error } = await supabase
+    .from('marketing_media')
+    .select('id, cesta, alt_text')
+    .eq('tenant_id', uloha.tenant_id)
+    .in('id', ids)
+
+  if (error || !data || data.length === 0) return []
+
+  const podleId = new Map(data.map((m) => [m.id as string, m]))
+  const vPoradi = ids.map((id) => podleId.get(id)).filter((m) => m !== undefined)
+  if (vPoradi.length === 0) return []
+
+  const podepsane = await supabase.storage
+    .from(KBELIK)
+    .createSignedUrls(vPoradi.map((m) => m.cesta as string), PLATNOST_PRO_METU_S)
+
+  const podleCesty = new Map(
+    (podepsane.data ?? [])
+      .filter((s) => s.signedUrl && s.path)
+      .map((s) => [s.path as string, s.signedUrl as string]),
+  )
+
+  /*
+    Fotka bez odkazu se VYNECHÁ, ne nahradí prázdnou adresou. Prázdná
+    adresa by u Mety skončila chybou o neplatném obrázku a hledalo by
+    se to u ní; vynechaná fotka znamená, že příspěvek buď odejde
+    s ostatními, nebo — když nezbyde žádná — selže na srozumitelné
+    hlášce „bez fotky to nepřijme".
+  */
+  return vPoradi
+    .map((m) => ({
+      url: podleCesty.get(m.cesta as string) ?? '',
+      alt: String(m.alt_text ?? ''),
+    }))
+    .filter((o) => o.url !== '')
 }

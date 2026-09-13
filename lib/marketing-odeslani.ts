@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { textProKanal } from './marketing.ts'
+import { n8nJeNastaveny, predatN8n, type Obrazek } from './marketing-n8n.ts'
 
 /**
  * Odeslání jedné publikační úlohy ven.
@@ -27,8 +28,11 @@ import { textProKanal } from './marketing.ts'
  *   zakaznicky  — účet zákazníka u poskytovatele.
  *   foodtab     — účet Foodtabu.
  *
- * Poslední dva se liší jen tím, ČÍ klíč se použije — odesílá se
- * stejně.
+ * Poslední dva se liší jen tím, ČÍ účet se použije. Odesílá se
+ * stejně, a to PŘES n8n — Foodtab s Instagramem nemluví sám.
+ * Proč, je v `lib/marketing-n8n.ts`: přístup k účtu tam už leží
+ * a mít týž token na dvou místech znamená, že se při odvolání na
+ * jedno z nich zapomene.
  */
 
 /** Co si fronta vyzvedla. Odpovídá návratu `marketing_vyzvednout_publikace`. */
@@ -64,7 +68,7 @@ export type Vysledek =
   | { stav: 'rucne'; duvod: string }
   | { stav: 'chyba'; duvod: string }
 
-export async function odeslat(uloha: Uloha): Promise<Vysledek> {
+export async function odeslat(uloha: Uloha, obrazky: Obrazek[] = []): Promise<Vysledek> {
   const popisek = textProKanal(uloha.texty, uloha.kanal)
 
   if (uloha.rezim === 'demo') {
@@ -86,28 +90,58 @@ export async function odeslat(uloha: Uloha): Promise<Vysledek> {
     }
   }
 
-  if (!uloha.pripojeni_id || !uloha.ucet_id) {
+  /*
+    Na připojení v tabulce `marketing_pripojeni` se tu schválně
+    NEČEKÁ. Účet je připojený v n8n, ne ve Foodtabu — kdybychom
+    vyžadovali i řádek u nás, byl by to druhý seznam téhož, který se
+    dřív nebo později rozejde s tím prvním.
+  */
+
+  if (!n8nJeNastaveny()) {
     return {
       stav: 'chyba',
-      duvod: `${nazevKanalu(uloha.kanal)} není připojený. Připojte účet v nastavení marketingu.`,
+      duvod:
+        'Zveřejňování přes n8n není nastavené (chybí adresa nebo tajemství). ' +
+        'Do té doby použijte ruční režim.',
     }
   }
 
   /*
-    Skutečné odeslání k Metě sem přijde, až bude čím posílat fotky.
-    `marketing_media.cesta` ukazuje do Supabase Storage a nahrávání
-    fotek zatím není hotové — Instagram bez obrázku nic nepřijme
-    a Facebook by dostal holý text.
+    BEZ OBRÁZKU TO NEPOSÍLÁME ANI NEZKOUŠÍME.
 
-    Napsat to teď „naslepo" by znamenalo kód, který nikdo nespustil
-    a který se tváří, že publikování funguje. Radši ať to řekne
-    nahlas: úloha selže se srozumitelnou hláškou a zůstane ve frontě.
+    Instagram příspěvek bez obrázku odmítne. Kdybychom to poslali,
+    vypálí se pokus, počká se pět minut, znovu — a po pěti kolech se
+    to vzdá s hláškou od Mety, ze které nikdo nepozná, že prostě
+    chybí fotka.
   */
+  if (obrazky.length === 0) {
+    return {
+      stav: 'chyba',
+      duvod: `${nazevKanalu(uloha.kanal)} příspěvek bez fotky nepřijme. Vyberte fotku a naplánujte znovu.`,
+    }
+  }
+
+  const odpoved = await predatN8n({
+    tenantId: uloha.tenant_id,
+    branchId: uloha.branch_id,
+    ulohaId: uloha.id,
+    idempotencniKlic: uloha.idempotencni_klic,
+    kanal: uloha.kanal,
+    format: uloha.format,
+    popisek,
+    obrazky,
+  })
+
+  if (odpoved.stav === 'chyba') {
+    return { stav: 'chyba', duvod: odpoved.duvod }
+  }
+
   return {
-    stav: 'chyba',
-    duvod:
-      `Zveřejňování na ${nazevKanalu(uloha.kanal)} zatím není hotové — ` +
-      'chybí nahrávání fotek. Do té doby použijte ruční režim.',
+    stav: 'hotovo',
+    externiId: odpoved.externiId,
+    odkaz: odpoved.odkaz,
+    nanecisto: false,
+    odpoved: odpoved.odpoved,
   }
 }
 
