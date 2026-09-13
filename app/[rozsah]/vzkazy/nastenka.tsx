@@ -32,6 +32,8 @@ type Zprava = {
   id: string;
   branch_id: string | null;
   employee_id: string | null;
+  usek_id: string | null;
+  position_id: string | null;
   body: string;
   pinned: boolean;
   author_id: string | null;
@@ -87,7 +89,7 @@ export default async function Nastenka({
 
   let dotaz = supabase
     .from("announcements")
-    .select("id, branch_id, employee_id, body, pinned, author_id, created_at, requires_acknowledgment")
+    .select("id, branch_id, employee_id, usek_id, position_id, body, pinned, author_id, created_at, requires_acknowledgment")
     .eq("tenant_id", tenantId)
     .order("pinned", { ascending: false })
     .order("created_at", { ascending: false })
@@ -163,9 +165,50 @@ export default async function Nastenka({
     }
   }
 
+  // Úseky a pozice — potřebujeme pro popisky v seznamu i pro selector.
+  // Zaměstnanci jen pro vedoucí (selector může být velký seznam).
+  type UsekRow     = { id: string; nazev: string; branch_id: string | null }
+  type PoziceRow   = { id: string; label: string }
+  type ZamRow      = { id: string; full_name: string | null }
+
+  const usekyList: UsekRow[]   = []
+  const poziceList: PoziceRow[] = []
+  const zamestnanciList: ZamRow[] = []
+
+  {
+    const [usekyRes, poziceRes] = await Promise.all([
+      supabase
+        .from('useky')
+        .select('id, nazev, branch_id')
+        .eq('tenant_id', tenantId)
+        .eq('active', true)
+        .order('poradi'),
+      supabase
+        .from('positions')
+        .select('id, label')
+        .eq('tenant_id', tenantId)
+        .eq('active', true)
+        .order('label'),
+    ])
+    usekyList.push(...((usekyRes.data ?? []) as UsekRow[]))
+    poziceList.push(...((poziceRes.data ?? []) as PoziceRow[]))
+
+    if (muzePsat) {
+      const zamRes = await supabase
+        .from('employees')
+        .select('id, full_name')
+        .eq('tenant_id', tenantId)
+        .is('deleted_at', null)
+        .order('full_name')
+      zamestnanciList.push(...((zamRes.data ?? []) as ZamRow[]))
+    }
+  }
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
+  const usekyNazvy   = new Map(usekyList.map((u) => [u.id, u.nazev]));
+  const poziceLabels = new Map(poziceList.map((p) => [p.id, p.label]));
 
   /*
     Vlastní `<Nadpis>` tu SCHVÁLNĚ NENÍ — kreslí ho shell nad záložkami.
@@ -190,7 +233,7 @@ export default async function Nastenka({
           >
             <input type="hidden" name="rozsah" value={rozsah} />
             <label
-              htmlFor="text"
+              htmlFor="ft-nastenka-text"
               style={{
                 display: "block",
                 fontSize: "13px",
@@ -198,11 +241,10 @@ export default async function Nastenka({
                 marginBottom: "6px",
               }}
             >
-              Nová zpráva pro{" "}
-              {scope.level === "tenant" ? "celou firmu" : scope.branchName}
+              Nová zpráva
             </label>
             <textarea
-              id="text"
+              id="ft-nastenka-text"
               name="text"
               required
               rows={3}
@@ -238,42 +280,166 @@ export default async function Nastenka({
               Můžete i diktovat — mikrofon na klávesnici telefonu.
             </p>
 
-            {/*
-              PŘED ODESLÁNÍM AŤ JE VIDĚT, KDO TO UVIDÍ.
-
-              Adresát se bere z rozsahu v adrese, ne z formuláře, takže
-              se dá přehlédnout: člověk přepne nahoře na „Celou firmu",
-              odroluje k psaní a už si toho není vědom. Zpráva mířená
-              jednomu baru pak přistane všem.
-
-              Není to dialog, jen věta nad tlačítkem — a u celé firmy
-              zvýrazněná, protože to je ta drahá záměna.
-            */}
-            <p
-              style={{
-                margin: "10px 0 0",
-                padding: "8px 10px",
-                borderRadius: "8px",
-                fontSize: "13px",
-                lineHeight: 1.5,
-                background:
-                  scope.level === "tenant" ? "var(--pozor-bg)" : "var(--paper)",
-                border: "1px solid var(--line)",
-                color: "var(--ink)",
-              }}
-            >
-              Uvidí:{" "}
-              <strong
-                style={
-                  scope.level === "tenant" ? { color: "var(--pozor)" } : undefined
-                }
+            {/* KOMU — sjednocený adresát (B1) */}
+            <div style={{ marginTop: "10px" }}>
+              <label
+                htmlFor="ft-nastenka-komu-typ"
+                style={{
+                  display: "block",
+                  fontSize: "13px",
+                  color: "var(--muted)",
+                  marginBottom: "4px",
+                }}
               >
-                {scope.level === "tenant" ? "celá firma" : scope.branchName}
-              </strong>{" "}
-              <span style={{ color: "var(--muted)" }}>
-                — každý, kdo tu má právo číst nástěnku.
-              </span>
-            </p>
+                Komu
+              </label>
+              <select
+                name="komu_typ"
+                id="ft-nastenka-komu-typ"
+                style={{
+                  padding: "8px 10px",
+                  fontSize: "15px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                  color: "var(--ink)",
+                  width: "100%",
+                }}
+              >
+                <option value="firma">Celá firma</option>
+                {ctx.branches.length > 1 && (
+                  <option value="pobocka">Pobočka…</option>
+                )}
+                {usekyList.length > 0 && (
+                  <option value="usek">Úsek…</option>
+                )}
+                {poziceList.length > 0 && (
+                  <option value="pozice">Pozice…</option>
+                )}
+                <option value="clovek">Konkrétní člověk…</option>
+              </select>
+
+              {/* Sekundární selektory — server přečte jen ten, co odpovídá komu_typ.
+                  Bez JS jsou všechny viditelné; script je schová a odkrývá je
+                  dynamicky. */}
+              {ctx.branches.length > 1 && (
+                <select
+                  name="komu_id_pobocka"
+                  id="ft-nastenka-sel-pobocka"
+                  aria-label="Vyberte pobočku"
+                  style={{
+                    marginTop: "6px",
+                    padding: "8px 10px",
+                    fontSize: "15px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    width: "100%",
+                  }}
+                >
+                  {ctx.branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {usekyList.length > 0 && (
+                <select
+                  name="komu_id_usek"
+                  id="ft-nastenka-sel-usek"
+                  aria-label="Vyberte úsek"
+                  style={{
+                    marginTop: "6px",
+                    padding: "8px 10px",
+                    fontSize: "15px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    width: "100%",
+                  }}
+                >
+                  {usekyList.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nazev}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {poziceList.length > 0 && (
+                <select
+                  name="komu_id_pozice"
+                  id="ft-nastenka-sel-pozice"
+                  aria-label="Vyberte pozici"
+                  style={{
+                    marginTop: "6px",
+                    padding: "8px 10px",
+                    fontSize: "15px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    width: "100%",
+                  }}
+                >
+                  {poziceList.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {zamestnanciList.length > 0 && (
+                <select
+                  name="komu_id_clovek"
+                  id="ft-nastenka-sel-clovek"
+                  aria-label="Vyberte zaměstnance"
+                  style={{
+                    marginTop: "6px",
+                    padding: "8px 10px",
+                    fontSize: "15px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--line)",
+                    background: "var(--paper)",
+                    color: "var(--ink)",
+                    width: "100%",
+                  }}
+                >
+                  <option value="">Vyberte…</option>
+                  {zamestnanciList.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {String(e.full_name ?? '').trim() || '(bez jména)'}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Skrytí/odkrytí sekundárních selectorů podle komu_typ. */}
+            <script dangerouslySetInnerHTML={{ __html: `
+(function(){
+  var typ = document.getElementById('ft-nastenka-komu-typ');
+  if (!typ) return;
+  var sels = {
+    pobocka: document.getElementById('ft-nastenka-sel-pobocka'),
+    usek:    document.getElementById('ft-nastenka-sel-usek'),
+    pozice:  document.getElementById('ft-nastenka-sel-pozice'),
+    clovek:  document.getElementById('ft-nastenka-sel-clovek'),
+  };
+  function upd() {
+    var v = typ.value;
+    for (var k in sels) { if (sels[k]) sels[k].hidden = (k !== v); }
+  }
+  for (var k in sels) { if (sels[k]) sels[k].hidden = true; }
+  typ.addEventListener('change', upd);
+  upd();
+})();
+            ` }} />
 
             <div
               style={{
@@ -362,13 +528,18 @@ export default async function Nastenka({
                     {[
                       z.pinned ? "Připnuto" : null,
                       z.author_id ? autori.get(z.author_id) : null,
-                      firemni
-                        ? "celá firma"
-                        : scope.level === "tenant"
-                          ? (nazvyPobocek.get(z.branch_id as string) ??
-                            "jiná pobočka")
-                          : null,
-                      z.employee_id ? "osobní" : null,
+                      // Adresát: úsek/pozice mají přednost před pobočkou.
+                      z.usek_id
+                        ? (usekyNazvy.get(z.usek_id) ?? "úsek")
+                        : z.position_id
+                          ? (poziceLabels.get(z.position_id) ?? "pozice")
+                          : z.employee_id
+                            ? "osobní"
+                            : firemni
+                              ? "celá firma"
+                              : scope.level === "tenant"
+                                ? (nazvyPobocek.get(z.branch_id as string) ?? "jiná pobočka")
+                                : null,
                       datumACas(z.created_at),
                     ]
                       .filter(Boolean)
