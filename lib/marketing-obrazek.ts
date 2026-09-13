@@ -36,7 +36,7 @@ export type TypObrazku = (typeof POVOLENE_TYPY)[number]
 
 /**
  * Strop na velikost. Táž hodnota je v migraci u kbelíku
- * (20260913120000_marketing_ulozne.sql) — Storage ji vynutí i tehdy,
+ * (20260913170000_marketing_ulozne.sql) — Storage ji vynutí i tehdy,
  * když se soubor pošle mimo naši obrazovku.
  */
 export const STROP_BAJTU = 26214400

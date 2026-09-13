@@ -115,7 +115,7 @@ Přibývají tři migrace:
 
 - `20260910020000_marketing_okamzik` — převod hodiny na okamžik
 - `20260910040000_marketing_fronta` — fronta publikací
-- `20260913120000_marketing_ulozne` — úložiště fotek a pravidla k němu
+- `20260913170000_marketing_ulozne` — úložiště fotek a pravidla k němu
 
 **U třetí pozor.** `storage.objects` vlastní role
 `supabase_storage_admin`, ne `postgres`. Když push skončí na

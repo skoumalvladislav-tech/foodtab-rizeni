@@ -21,7 +21,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
  *
  * `getServerSupabase` jede na veřejný klíč a sezení uživatele, takže
  * na úložiště dosáhnou pravidla z
- * `20260913120000_marketing_ulozne.sql`. Servisní klíč by je obešel
+ * `20260913170000_marketing_ulozne.sql`. Servisní klíč by je obešel
  * (pravidlo 6) a zůstala by jen kontrola tady — tedy jedna linie
  * místo dvou.
  *

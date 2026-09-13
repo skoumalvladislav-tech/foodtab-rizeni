@@ -26,7 +26,7 @@ const ok = (popis, podminka) => {
   console.log(`  ${podminka ? 'OK   ' : 'CHYBA'} ${popis}`)
 }
 
-const migraceUlozne = readFileSync('supabase/migrations/20260913120000_marketing_ulozne.sql', 'utf8')
+const migraceUlozne = readFileSync('supabase/migrations/20260913170000_marketing_ulozne.sql', 'utf8')
 const migracePodklady = readFileSync('supabase/migrations/20260909180000_marketing_podklady.sql', 'utf8')
 const migraceFronta = readFileSync('supabase/migrations/20260910040000_marketing_fronta.sql', 'utf8')
 const akce = readFileSync('app/[rozsah]/marketing/media/akce.ts', 'utf8')

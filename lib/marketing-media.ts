@@ -7,7 +7,7 @@
  * na příčinu.
  */
 
-/** Jméno kbelíku. Musí sedět s 20260913120000_marketing_ulozne.sql. */
+/** Jméno kbelíku. Musí sedět s 20260913170000_marketing_ulozne.sql. */
 export const KBELIK = 'marketing'
 
 /**

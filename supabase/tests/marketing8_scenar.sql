@@ -1,6 +1,6 @@
 -- Scénář marketing 8 — úložiště fotek.
 --
--- Pokrývá 20260913120000_marketing_ulozne.sql.
+-- Pokrývá 20260913170000_marketing_ulozne.sql.
 -- Zadání: docs/marketing-je-modul.md, oddíl 4, krok 4.
 --
 -- ---------------------------------------------------------------------
