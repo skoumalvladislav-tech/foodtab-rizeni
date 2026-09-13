@@ -36,6 +36,7 @@ type Zprava = {
   pinned: boolean;
   author_id: string | null;
   created_at: string;
+  requires_acknowledgment: boolean;
 };
 
 
@@ -86,7 +87,7 @@ export default async function Nastenka({
 
   let dotaz = supabase
     .from("announcements")
-    .select("id, branch_id, employee_id, body, pinned, author_id, created_at")
+    .select("id, branch_id, employee_id, body, pinned, author_id, created_at, requires_acknowledgment")
     .eq("tenant_id", tenantId)
     .order("pinned", { ascending: false })
     .order("created_at", { ascending: false })
@@ -252,24 +253,39 @@ export default async function Nastenka({
             <div
               style={{
                 display: "flex",
+                flexWrap: "wrap",
                 justifyContent: "space-between",
                 alignItems: "center",
                 marginTop: "10px",
-                gap: "12px",
+                gap: "8px",
               }}
             >
-              <label
-                style={{
-                  fontSize: "14px",
-                  color: "var(--muted)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <input type="checkbox" name="pripnout" value="ano" />
-                Připnout nahoru
-              </label>
+              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                <label
+                  style={{
+                    fontSize: "14px",
+                    color: "var(--muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <input type="checkbox" name="pripnout" value="ano" />
+                  Připnout nahoru
+                </label>
+                <label
+                  style={{
+                    fontSize: "14px",
+                    color: "var(--muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <input type="checkbox" name="vyzadat_potvrzeni" value="ano" />
+                  Vyžadovat potvrzení
+                </label>
+              </div>
               <button type="submit" className="ft-tl ft-tl-hlavni">
                 Odeslat
               </button>
@@ -353,14 +369,21 @@ export default async function Nastenka({
                         color: "var(--good)",
                       }}
                     >
-                      ✓ Přečteno
+                      {z.requires_acknowledgment ? '✓ Potvrzeno' : '✓ Přečteno'}
                     </p>
                   ) : (
                     <form action={oznacitPrectene} style={{ marginTop: "10px" }}>
                       <input type="hidden" name="rozsah" value={rozsah} />
                       <input type="hidden" name="zprava" value={z.id} />
-                      <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
-                        Označit jako přečtené
+                      <button
+                        type="submit"
+                        className={
+                          z.requires_acknowledgment
+                            ? 'ft-tl ft-tl-hlavni ft-tl-male'
+                            : 'ft-tl ft-tl-vedlejsi ft-tl-male'
+                        }
+                      >
+                        {z.requires_acknowledgment ? 'Beru na vědomí' : 'Označit jako přečtené'}
                       </button>
                     </form>
                   )}

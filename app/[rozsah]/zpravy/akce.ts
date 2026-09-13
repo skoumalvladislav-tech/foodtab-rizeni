@@ -44,6 +44,7 @@ export async function napsatZpravu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const text = String(formData.get('text') ?? '').trim()
   const pripnout = String(formData.get('pripnout') ?? '') === 'ano'
+  const vyzadatPotvrzeni = String(formData.get('vyzadat_potvrzeni') ?? '') === 'ano'
   if (text === '') return
 
   const user = await getUser()
@@ -65,6 +66,7 @@ export async function napsatZpravu(formData: FormData): Promise<void> {
     body: text,
     pinned: pripnout,
     author_id: user.id,
+    requires_acknowledgment: vyzadatPotvrzeni,
   })
 
   revalidatePath(`/${rozsah}/zpravy`)
