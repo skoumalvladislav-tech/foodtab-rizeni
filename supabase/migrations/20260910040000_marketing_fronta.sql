@@ -17,6 +17,18 @@
 -- ROZHODOVÁNÍ, co se smí poslat, zůstává tady.
 --
 -- ---------------------------------------------------------------------
+-- PROČ JSOU TY FUNKCE V `public`, KDYŽ JSOU VNITŘNÍ
+--
+-- Protože je volá aplikace přes PostgREST, a ten vidí jen `public`
+-- (a `graphql_public`). Funkce ve schématu `app` by se z Node zavolat
+-- nedaly — dostaly by 404 na neexistující cestu, ne chybu o právech,
+-- takže by to vypadalo na překlep v názvu.
+--
+-- Že jsou v `public`, neznamená, že jsou veřejné: `revoke all … from
+-- public, anon, authenticated` plus `grant … to service_role`. Je to
+-- stejné jako u `public.ohlasit_zapomenute_odchody`.
+--
+-- ---------------------------------------------------------------------
 -- PROČ SE PLATNOST SCHVÁLENÍ OVĚŘUJE ZNOVU AŽ TADY
 --
 -- Spoušť `trg_marketing_strez_publikaci` hlídá VZNIK úlohy. Mezi
@@ -59,7 +71,7 @@
 -- `odesila_se` a nikdo jiný je nedostane.
 -- ---------------------------------------------------------------------
 
-create or replace function app.marketing_vyzvednout_publikace(p_kolik integer default 20)
+create or replace function public.marketing_vyzvednout_publikace(p_kolik integer default 20)
 returns table (
   id                uuid,
   tenant_id         uuid,
@@ -198,14 +210,14 @@ begin
      order by u.planovano_na;
 end $$;
 
-comment on function app.marketing_vyzvednout_publikace(integer) is
+comment on function public.marketing_vyzvednout_publikace(integer) is
   'Vyzvedne a zabere publikační úlohy, na které je čas. Znovu ověří '
   'platnost schválení — mezi naplánováním a odesláním uplyne i týden. '
   'Volá jen naplánovaná úloha pod service_role.';
 
-revoke all on function app.marketing_vyzvednout_publikace(integer)
+revoke all on function public.marketing_vyzvednout_publikace(integer)
   from public, anon, authenticated;
-grant execute on function app.marketing_vyzvednout_publikace(integer) to service_role;
+grant execute on function public.marketing_vyzvednout_publikace(integer) to service_role;
 
 
 -- ---------------------------------------------------------------------
@@ -215,7 +227,7 @@ grant execute on function app.marketing_vyzvednout_publikace(integer) to service
 -- Fronta se opakuje, ale příspěvek na Instagramu je jen jeden.
 -- ---------------------------------------------------------------------
 
-create or replace function app.marketing_publikace_hotova(
+create or replace function public.marketing_publikace_hotova(
   p_uloha      uuid,
   p_externi_id text,
   p_odkaz      text,
@@ -283,14 +295,56 @@ begin
   return v_id;
 end $$;
 
-comment on function app.marketing_publikace_hotova(uuid, text, text, jsonb, boolean) is
+comment on function public.marketing_publikace_hotova(uuid, text, text, jsonb, boolean) is
   'Zapíše, že úloha odešla. Idempotentní přes unikátní uloha_id — '
   'opakovaný běh fronty nesmí založit druhý příspěvek.';
 
-revoke all on function app.marketing_publikace_hotova(uuid, text, text, jsonb, boolean)
+revoke all on function public.marketing_publikace_hotova(uuid, text, text, jsonb, boolean)
   from public, anon, authenticated;
-grant execute on function app.marketing_publikace_hotova(uuid, text, text, jsonb, boolean)
+grant execute on function public.marketing_publikace_hotova(uuid, text, text, jsonb, boolean)
   to service_role;
+
+
+-- ---------------------------------------------------------------------
+-- K RUKÁM ČLOVĚKA
+--
+-- Ruční režim znamená, že se nikam nic neposílá — příspěvek je hotový
+-- a zveřejní ho někdo sám. Není to úspěch (nic neodešlo) ani neúspěch
+-- (nic se nepokazilo), a proto to má vlastní stav.
+--
+-- Kdyby to spadlo pod „selhalo", tlouklo by se to do fronty pořád
+-- dokola a v přehledu by to vypadalo jako porucha, kterou někdo půjde
+-- opravovat.
+-- ---------------------------------------------------------------------
+
+create or replace function public.marketing_publikace_k_rukam(
+  p_uloha uuid,
+  p_duvod text
+)
+returns void
+language plpgsql volatile security definer set search_path = ''
+as $$
+begin
+  update public.marketing_publikace_ulohy
+     set stav = 'k_rucnimu_zverejneni',
+         posledni_chyba = p_duvod,
+         -- Odklad se maže: fronta se k téhle úloze už nemá vracet.
+         dalsi_pokus_kdy = null,
+         zmeneno_kdy = now()
+   where id = p_uloha;
+
+  if not found then
+    raise exception 'Publikační úloha neexistuje.' using errcode = 'no_data_found';
+  end if;
+end $$;
+
+comment on function public.marketing_publikace_k_rukam(uuid, text) is
+  'Odloží úlohu k ručnímu zveřejnění. Není to úspěch ani neúspěch — '
+  'proto vlastní stav a zrušený odklad, ať se fronta nevrací.';
+
+revoke all on function public.marketing_publikace_k_rukam(uuid, text)
+  from public, anon, authenticated;
+grant execute on function public.marketing_publikace_k_rukam(uuid, text) to service_role;
 
 
 -- ---------------------------------------------------------------------
@@ -302,7 +356,7 @@ grant execute on function app.marketing_publikace_hotova(uuid, text, text, jsonb
 -- publikace, která se nikdy nestane.
 -- ---------------------------------------------------------------------
 
-create or replace function app.marketing_publikace_selhala(
+create or replace function public.marketing_publikace_selhala(
   p_uloha uuid,
   p_chyba text
 )
@@ -345,10 +399,10 @@ begin
   return v_stav;
 end $$;
 
-comment on function app.marketing_publikace_selhala(uuid, text) is
+comment on function public.marketing_publikace_selhala(uuid, text) is
   'Zapíše neúspěch a odloží další pokus (5, 15, 45, 135 minut). Po '
   'vyčerpání pokusů vrací "vzdano" a příspěvek to řekne nahlas.';
 
-revoke all on function app.marketing_publikace_selhala(uuid, text)
+revoke all on function public.marketing_publikace_selhala(uuid, text)
   from public, anon, authenticated;
-grant execute on function app.marketing_publikace_selhala(uuid, text) to service_role;
+grant execute on function public.marketing_publikace_selhala(uuid, text) to service_role;

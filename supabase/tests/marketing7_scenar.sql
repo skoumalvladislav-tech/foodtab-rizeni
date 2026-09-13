@@ -137,7 +137,7 @@ do $$
 declare v_ok boolean := false;
 begin
   begin
-    perform app.marketing_vyzvednout_publikace(10);
+    perform public.marketing_vyzvednout_publikace(10);
   exception when insufficient_privilege then v_ok := true;
   end;
   if not v_ok then raise exception 'SELHALO: přihlášený uživatel si vyzvedl úlohy fronty'; end if;
@@ -148,7 +148,7 @@ do $$
 declare v_ok boolean := false;
 begin
   begin
-    perform app.marketing_publikace_hotova(
+    perform public.marketing_publikace_hotova(
       '00000000-0000-0000-0000-000000000000'::uuid, 'x', 'y');
   exception when insufficient_privilege then v_ok := true;
   end;
@@ -160,12 +160,24 @@ do $$
 declare v_ok boolean := false;
 begin
   begin
-    perform app.marketing_publikace_selhala(
+    perform public.marketing_publikace_selhala(
       '00000000-0000-0000-0000-000000000000'::uuid, 'x');
   exception when insufficient_privilege then v_ok := true;
   end;
   if not v_ok then raise exception 'SELHALO: přihlášený uživatel zapsal neúspěch'; end if;
   raise notice '  OK    zápis neúspěchu nesmí volat ani majitel';
+end $$;
+
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    perform public.marketing_publikace_k_rukam(
+      '00000000-0000-0000-0000-000000000000'::uuid, 'x');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: přihlášený uživatel odložil úlohu k ruce'; end if;
+  raise notice '  OK    odložení k ruce nesmí volat ani majitel';
 end $$;
 
 reset role;
@@ -186,7 +198,7 @@ select set_config('test.p_ted', :'p_ted', false);
 select set_config('test.v_ted', :'v_ted', false);
 
 create temporary table vyzvednuto as
-  select * from app.marketing_vyzvednout_publikace(10);
+  select * from public.marketing_vyzvednout_publikace(10);
 
 select pg_temp.check('vyzvedla se úloha, které nastal čas',
   exists (select 1 from vyzvednuto where id = :'u_ted'));
@@ -229,13 +241,13 @@ select pg_temp.check('a pobočka příspěvku',
 */
 
 select pg_temp.check('druhé vyzvednutí tutéž úlohu nevrátí',
-  not exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_ted'));
+  not exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_ted'));
 
 
 \echo ''
 \echo '== Zveřejnění se zapíše, a jen jednou ======================='
 
-select app.marketing_publikace_hotova(:'u_ted', 'ig-999', 'https://instagram.com/p/999',
+select public.marketing_publikace_hotova(:'u_ted', 'ig-999', 'https://instagram.com/p/999',
                                       '{"ok":true}'::jsonb, false) as pub1 \gset
 
 select pg_temp.check('vznikl záznam o zveřejnění',
@@ -249,7 +261,7 @@ select pg_temp.check('a příspěvek taky',
 
 -- Opakovaný běh fronty. Bez `on conflict` by tady vznikl druhý řádek
 -- a v číslech by to vypadalo na dva zveřejněné příspěvky.
-select app.marketing_publikace_hotova(:'u_ted', 'ig-999', 'https://instagram.com/p/999',
+select public.marketing_publikace_hotova(:'u_ted', 'ig-999', 'https://instagram.com/p/999',
                                       '{"ok":true}'::jsonb, false) as pub2 \gset
 
 select pg_temp.check('druhé volání nezaložilo druhý záznam',
@@ -264,8 +276,8 @@ select pg_temp.check('a vrátilo tentýž záznam, ne nový', :'pub1' = :'pub2')
 select uloha as u_demo, prispevek as p_demo
   from pg_temp.pripravit('Zkouška nanečisto', 'facebook', 'demo1', now() - interval '1 hour') \gset
 
-do $$ begin perform app.marketing_vyzvednout_publikace(10); end $$;
-select app.marketing_publikace_hotova(:'u_demo', 'demo-1', null, null, true);
+do $$ begin perform public.marketing_vyzvednout_publikace(10); end $$;
+select public.marketing_publikace_hotova(:'u_demo', 'demo-1', null, null, true);
 
 select pg_temp.check('demo publikace je označená jako nanečisto',
   (select je_nanecisto from public.marketing_publikace where uloha_id = :'u_demo'));
@@ -314,7 +326,7 @@ update public.marketing_prispevky
    set schvalena_verze_id = :'v_zrus' where id = :'p_zrus';
 
 select pg_temp.check('úloha se zamítnutým schválením se nevyzvedne',
-  not exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_zrus'));
+  not exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_zrus'));
 
 select pg_temp.check('a rovnou se zrušila',
   (select stav from public.marketing_publikace_ulohy where id = :'u_zrus') = 'zruseno');
@@ -337,10 +349,40 @@ select uloha as u_ukaz, prispevek as p_ukaz
 update public.marketing_prispevky set schvalena_verze_id = null where id = :'p_ukaz';
 
 select pg_temp.check('úloha bez ukazatele na schválenou verzi se nevyzvedne',
-  not exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_ukaz'));
+  not exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_ukaz'));
 
 select pg_temp.check('a je zrušená',
   (select stav from public.marketing_publikace_ulohy where id = :'u_ukaz') = 'zruseno');
+
+
+\echo ''
+\echo '== Ruční režim: fronta se k tomu nevrací ===================='
+
+/*
+  Ruční režim není úspěch (nic neodešlo) ani neúspěch (nic se
+  nepokazilo). Kdyby spadl pod „selhalo", tloukla by se ta úloha do
+  fronty pořád dokola a v přehledu by vypadala jako porucha, kterou
+  někdo půjde opravovat.
+*/
+
+select uloha as u_rucne
+  from pg_temp.pripravit('K ruce', 'facebook', 'rucne', now() - interval '1 hour') \gset
+
+do $$ begin perform public.marketing_vyzvednout_publikace(10); end $$;
+select public.marketing_publikace_k_rukam(:'u_rucne', 'Ruční režim: zveřejní člověk.');
+
+select pg_temp.check('úloha čeká na člověka, ne na frontu',
+  (select stav from public.marketing_publikace_ulohy where id = :'u_rucne')
+    = 'k_rucnimu_zverejneni');
+
+select pg_temp.check('a nemá naplánovaný další pokus',
+  (select dalsi_pokus_kdy is null from public.marketing_publikace_ulohy where id = :'u_rucne'));
+
+select pg_temp.check('fronta se k ní nevrací',
+  not exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_rucne'));
+
+select pg_temp.check('a nezaložilo se zveřejnění, protože nic neodešlo',
+  not exists (select 1 from public.marketing_publikace where uloha_id = :'u_rucne'));
 
 
 \echo ''
@@ -392,7 +434,7 @@ select uloha as u_foto_ok
                          now() - interval '1 hour', array[:'m_bez_omezeni'::uuid]) \gset
 
 select pg_temp.check('fotka bez omezení odeslání nebrání',
-  exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_foto_ok'));
+  exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_foto_ok'));
 
 -- Poslední den platnosti JEŠTĚ platí. Tady se pozná chyba o jedničku,
 -- kvůli které by se den předem přestalo publikovat.
@@ -401,14 +443,14 @@ select uloha as u_foto_dnes
                          now() - interval '1 hour', array[:'m_dnes'::uuid]) \gset
 
 select pg_temp.check('fotka platná do dneška ještě projde',
-  exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_foto_dnes'));
+  exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_foto_dnes'));
 
 select uloha as u_foto_stara
   from pg_temp.pripravit('S prošlou fotkou', 'instagram', 'foto-stara',
                          now() - interval '1 hour', array[:'m_stara'::uuid]) \gset
 
 select pg_temp.check('úloha s prošlou fotkou se nevyzvedne',
-  not exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_foto_stara'));
+  not exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_foto_stara'));
 
 select pg_temp.check('a je zrušená s důvodem o právech',
   (select posledni_chyba from public.marketing_publikace_ulohy where id = :'u_foto_stara')
@@ -423,8 +465,8 @@ select uloha as u_chyba, prispevek as p_chyba
 
 update public.marketing_publikace_ulohy set max_pokusu = 2 where id = :'u_chyba';
 
-do $$ begin perform app.marketing_vyzvednout_publikace(10); end $$;
-select app.marketing_publikace_selhala(:'u_chyba', 'Meta vrátila 500.') as stav1 \gset
+do $$ begin perform public.marketing_vyzvednout_publikace(10); end $$;
+select public.marketing_publikace_selhala(:'u_chyba', 'Meta vrátila 500.') as stav1 \gset
 
 select pg_temp.check('po prvním neúspěchu je stav selhalo', :'stav1' = 'selhalo');
 
@@ -441,15 +483,15 @@ select pg_temp.check('a příspěvek se ještě NEvzdal',
 -- Odklad posuneme do minulosti, jinak by se úloha nevyzvedla — a to je
 -- právě to, co má odklad dělat.
 select pg_temp.check('během odkladu se úloha nevyzvedne',
-  not exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_chyba'));
+  not exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_chyba'));
 
 update public.marketing_publikace_ulohy
    set dalsi_pokus_kdy = now() - interval '1 hour' where id = :'u_chyba';
 
 select pg_temp.check('po uplynutí odkladu se vyzvedne',
-  exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_chyba'));
+  exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_chyba'));
 
-select app.marketing_publikace_selhala(:'u_chyba', 'Meta vrátila 500 podruhé.') as stav2 \gset
+select public.marketing_publikace_selhala(:'u_chyba', 'Meta vrátila 500 podruhé.') as stav2 \gset
 
 select pg_temp.check('po vyčerpání pokusů se to vzdá', :'stav2' = 'vzdano');
 
@@ -460,7 +502,7 @@ select pg_temp.check('a příspěvek to řekne nahlas',
   (select stav from public.marketing_prispevky where id = :'p_chyba') = 'publikace_selhala');
 
 select pg_temp.check('vzdaná úloha se už nevyzvedává',
-  not exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_chyba'));
+  not exists (select 1 from public.marketing_vyzvednout_publikace(10) where id = :'u_chyba'));
 
 
 \echo ''
@@ -484,17 +526,17 @@ values (:'tenant', :'p_dva', :'v_dva', 'otisk-dva-ig', :'s_dva',
 returning id as u_fb \gset
 
 select count(*) as vyzvednuto_dva
-  from app.marketing_vyzvednout_publikace(10)
+  from public.marketing_vyzvednout_publikace(10)
  where prispevek_id = :'p_dva' \gset
 
 select pg_temp.check('vyzvedly se obě úlohy jednoho příspěvku', :vyzvednuto_dva = 2);
 
-select app.marketing_publikace_hotova(:'u_ig', 'ig-1', null, null, false);
+select public.marketing_publikace_hotova(:'u_ig', 'ig-1', null, null, false);
 
 select pg_temp.check('po prvním kanálu příspěvek JEŠTĚ NENÍ zveřejněný',
   (select stav from public.marketing_prispevky where id = :'p_dva') <> 'zverejneno');
 
-select app.marketing_publikace_hotova(:'u_fb', 'fb-1', null, null, false);
+select public.marketing_publikace_hotova(:'u_fb', 'fb-1', null, null, false);
 
 select pg_temp.check('po druhém kanálu už zveřejněný je',
   (select stav from public.marketing_prispevky where id = :'p_dva') = 'zverejneno');
@@ -514,10 +556,10 @@ begin
   perform pg_temp.pripravit('Dávka 3', 'instagram', 'davka3', now() - interval '1 hour');
 end $$;
 
-select count(*) as davka from app.marketing_vyzvednout_publikace(2) \gset
+select count(*) as davka from public.marketing_vyzvednout_publikace(2) \gset
 select pg_temp.check('strop se dodržuje', :davka = 2);
 
-select count(*) as zbytek from app.marketing_vyzvednout_publikace(10) \gset
+select count(*) as zbytek from public.marketing_vyzvednout_publikace(10) \gset
 select pg_temp.check('zbytek přijde na řadu příště', :zbytek = 1);
 
 
