@@ -77,7 +77,7 @@ svádí; pod jménem „Instagram — Černá Perla" si toho člověk všimne.
 ## Krok 4 — Foodtab: tři proměnné prostředí
 
 Vercel → projekt Foodtab → **Settings** → **Environment Variables**.
-Přidat pro **Production** i **Preview**:
+Přidat **jen pro Production**:
 
 | Název | Hodnota |
 |---|---|
@@ -85,8 +85,25 @@ Přidat pro **Production** i **Preview**:
 | `N8N_MARKETING_TAJEMSTVI` | tajemství z kroku 1 — **musí sedět přesně** |
 | `MARKETING_KLIC_SIFRY` | klíč z chatu, 64 znaků |
 
-Pak **Redeploy**. Bez nového nasazení se proměnné nenačtou a vypadá to,
-že nastavení nefunguje.
+### Proč jen Production a ne Preview
+
+Protože náhled se nasazuje z každé větve. Kdyby tam ty tři proměnné
+byly, mohlo by rozdělané nasazení poslat příspěvek na **skutečný**
+Instagram Černé Perly — a to není chyba, kterou jde vzít zpátky.
+
+Bez nich se v náhledu ani nenabídne „Zveřejnit": obrazovka se ptá,
+jestli je n8n nastavené, a nabídne jen nanečisto a ruční cestu. Přesně
+tak to v náhledu má být.
+
+Je to i shodné s tím, co v projektu už platí: `CRON_SECRET`,
+`SUPABASE_SERVICE_ROLE_KEY` i `RESEND_API_KEY` jsou nastavené jen pro
+Production. V Preview jsou jen veřejná adresa Supabase a veřejný klíč.
+
+### Redeploy
+
+Když se hned potom slévá do `main`, **přenasazovat ručně netřeba** —
+nasazení z merge si proměnné vezme samo. Ručně jen tehdy, když se mezi
+uložením proměnných a dalším nasazením nic dít nebude.
 
 ## Krok 5 — databáze (dělá Šéfík z `main`)
 
