@@ -89,6 +89,10 @@ export function nadpisUpozorneni(
       return `Odebrali vám směnu ${denCesky(telo.den)}`
     case 'smena.zrusena':
       return `Zrušili vám směnu ${denCesky(telo.den)}`
+    case 'oznameni.nova':
+      return 'Nové oznámení na nástěnce'
+    case 'vzkaz.novy':
+      return 'Nová zpráva v rozhovoru'
     default:
       return 'Upozornění'
   }

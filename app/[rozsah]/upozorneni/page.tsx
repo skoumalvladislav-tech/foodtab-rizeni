@@ -199,6 +199,17 @@ export default async function Upozorneni({
                   </p>
                 ) : null}
 
+                {(z.druh === 'oznameni.nova' || z.druh === 'vzkaz.novy') ? (
+                  <p style={{ margin: '10px 0 0' }}>
+                    <Link
+                      href={`/${rozsah}/vzkazy${z.druh === 'oznameni.nova' ? '?zalozka=nastenka' : ''}`}
+                      className="ft-tl ft-tl-hlavni ft-tl-male"
+                    >
+                      {z.druh === 'oznameni.nova' ? 'Otevřít nástěnku' : 'Otevřít vzkazy'}
+                    </Link>
+                  </p>
+                ) : null}
+
                 {(z.druh === 'smena.nova' || z.druh === 'smena.zmenena' ||
                   z.druh === 'smena.odebrana' || z.druh === 'smena.zrusena') &&
                   z.telo.od && z.telo.do ? (
