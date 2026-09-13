@@ -86,18 +86,16 @@ Přibývají tři migrace:
 role, kterou push používá. Ten jeden příkaz se pak pustí pod rolí
 storage admina; politika se kvůli tomu nezjednodušuje.
 
-## Krok 6 — plánovač na GitHubu
+## Krok 6 — plánovač na GitHubu — HOTOVO, nic nedělat
 
-Repozitář → **Settings** → **Secrets and variables** → **Actions**.
-Musí tam být:
+Ověřeno 13. 9. 2026: úloha „Zapomenutý odchod" má za sebou 230 běhů
+a poslední desítky po sobě jsou zelené. Běží každou hodinu a používá
+tatáž tajemství, takže je jisté, že `APP_URL` i `CRON_SECRET` jsou
+nastavené a sedí s Vercelem.
 
-| Secret | Co to je |
-|---|---|
-| `APP_URL` | adresa nasazené aplikace, bez lomítka na konci |
-| `CRON_SECRET` | **táž** hodnota jako proměnná `CRON_SECRET` na Vercelu |
-
-Workflow „Marketing — fronta publikací" pak běží každou čtvrthodinu.
-Spustit jde i ručně: Actions → to workflow → **Run workflow**.
+Workflow „Marketing — fronta publikací" si je vezme taky — přibude
+samo, až se větev slije do `main`. Běží každou čtvrthodinu; spustit
+jde i ručně: Actions → to workflow → **Run workflow**.
 
 ---
 
