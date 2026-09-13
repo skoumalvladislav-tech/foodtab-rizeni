@@ -255,5 +255,34 @@ console.log('\n== Klíč se do n8n dostane z úlohy, ne odjinud ==')
   ok('a text kanálu příspěvku', telo.popisek === 'Dnes vaříme.')
 }
 
+console.log('\n== Způsob odeslání se volí, nedomýšlí ==')
+
+/*
+  Byla tu natvrdo ruční cesta: ať se nastavilo cokoli, každý
+  naplánovaný příspěvek skončil „k ručnímu zveřejnění" a k n8n se
+  nikdy nic nedostalo. Celý řetěz byl nedosažitelný a přitom vypadal
+  hotově — proto tyhle kontroly.
+*/
+const { readFileSync } = await import('node:fs')
+const akceText = readFileSync('app/[rozsah]/marketing/akce.ts', 'utf8')
+const detailText = readFileSync('app/[rozsah]/marketing/[prispevek]/page.tsx', 'utf8')
+
+ok('režim se nebere natvrdo', !/rezim: 'rucni',\n\s*planovano_na/.test(akceText))
+ok('způsob se čte z formuláře', akceText.includes("formData.get('zpusob')"))
+ok('„zveřejnit" vede na n8n', /zvoleno === 'zverejnit'[\s\S]{0,80}poskytovatel: 'n8n'/.test(akceText))
+ok('„nanečisto" je demo', /zvoleno === 'nanecisto'[\s\S]{0,60}rezim: 'demo'/.test(akceText))
+
+/*
+  Neznámá hodnota z formuláře nesmí skončit zveřejněním. Kdyby se
+  rozhodovalo obráceně (`zvoleno === 'rucne' ? rucni : zverejnit`),
+  odeslal by příspěvek i prázdný nebo podvržený formulář.
+*/
+ok('cokoli neznámého padá do ruční cesty',
+  /: \{ rezim: 'rucni', poskytovatel: 'rucni_export' \}/.test(akceText))
+
+ok('obrazovka tu volbu nabízí', detailText.includes('name="zpusob"'))
+ok('a „Zveřejnit" nenabízí, když to nejde',
+  detailText.includes('disabled={!n8nHotovo}'))
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

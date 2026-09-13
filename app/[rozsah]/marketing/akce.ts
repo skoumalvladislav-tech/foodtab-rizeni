@@ -356,6 +356,29 @@ export async function naplanovat(formData: FormData): Promise<void> {
 
   if (!okamzik) redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Čas se nepodařilo převést do pásma pobočky.')}`)
 
+  /*
+    JAK SE TO MÁ POSLAT.
+
+    Byla tu natvrdo ruční cesta a bylo to špatně: ať se nastavilo
+    cokoli, každý naplánovaný příspěvek skončil „k ručnímu
+    zveřejnění" a k n8n se nikdy nic nedostalo. Kód, který nikdo
+    nespustí, je horší než chybějící — vypadá hotově.
+
+    Způsob je teď volba na obrazovce, ne domněnka:
+
+      zverejnit  — pošle to ven přes n8n,
+      nanecisto  — projde celá cesta a nikam se nic neodešle,
+      rucne      — zveřejní to člověk sám.
+
+    Cokoli mimo tenhle výčet je ruční cesta. Neznámá hodnota
+    z formuláře nesmí skončit zveřejněním.
+  */
+  const zvoleno = String(formData.get('zpusob') ?? '')
+  const zpusob =
+    zvoleno === 'zverejnit' ? { rezim: 'zakaznicky', poskytovatel: 'n8n' }
+    : zvoleno === 'nanecisto' ? { rezim: 'demo', poskytovatel: 'n8n' }
+    : { rezim: 'rucni', poskytovatel: 'rucni_export' }
+
   const ja = await mujZamestnanec(tenantId)
   let zalozeno = 0
 
@@ -368,10 +391,8 @@ export async function naplanovat(formData: FormData): Promise<void> {
       schvaleni_id: zadost.id,
       kanal,
       format: 'prispevek',
-      // Dokud není připojený skutečný účet, jde to ručním exportem —
-      // nic se nikam nepošle a obrazovka to tak i pojmenuje.
-      poskytovatel: 'rucni_export',
-      rezim: 'rucni',
+      poskytovatel: zpusob.poskytovatel,
+      rezim: zpusob.rezim,
       planovano_na: okamzik,
       idempotencni_klic: `publikace:${prispevek.schvalena_verze_id}:${kanal}:prispevek`,
       vytvoril: ja,

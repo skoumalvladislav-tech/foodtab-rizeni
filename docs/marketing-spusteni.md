@@ -1,0 +1,156 @@
+# Marketing — jak ho spustit
+
+Kontrolní seznam k modulu Marketing. Rozhodnutí, proč to je takhle
+postavené, je v `docs/marketing-je-modul.md`; tenhle soubor je jen
+postup, který se odklikává.
+
+**Tajemství tu nejsou a nebudou.** Repozitář si je pamatuje navždycky
+i po smazání. Jsou v chatu, kde vznikla.
+
+---
+
+## Co už je hotové — nedělat znovu
+
+| Hotovo | Kde |
+|---|---|
+| Workflow v n8n | „Foodtab — zveřejnit příspěvek", `l9o955GDQVDBf8gc`, **neaktivní** |
+| Instagramový přístup na třech uzlech IG | připojeno |
+| Tabulka `foodtab_ucty` | vyplněná: Černá Perla → účet `27920687187583900` |
+| Tabulka `foodtab_zverejneno` | prázdná, plní se sama |
+| Vyzkoušené cesty | požadavek bez fotky a požadavek cizí firmy — obě odmítnuty, k Instagramu se nedostaly |
+
+Staré workflow „Černá Perla — denní obsah na sítě" je **nedotčené
+a běží dál**.
+
+---
+
+## Krok 1 — n8n: přihlašovací údaj pro Foodtab
+
+Tohle přes rozhraní udělat nejde, protože se zadává tajemství.
+
+1. n8n → **Credentials** → **Create credential** → typ **Header Auth**.
+2. Vyplnit:
+   - **Name** (název hlavičky, ne jméno údaje): `x-foodtab-tajemstvi`
+   - **Value**: tajemství z chatu
+3. Údaj pojmenovat `Foodtab do n8n` a uložit.
+
+## Krok 2 — n8n: přepnout ho na webhooku
+
+1. Otevřít workflow **Foodtab — zveřejnit příspěvek**.
+2. Kliknout na první uzel **Foodtab volá**.
+3. V **Credential for Header Auth** je teď omylem **Authorization** —
+   to je ten instagramový. Přepnout na **Foodtab do n8n**. Uložit.
+
+> Přiřadil se tam sám při zakládání. Není to nebezpečné, jen rozbité:
+> workflow by čekalo jinou hlavičku, než Foodtab posílá, a požadavek
+> by odmítlo.
+
+## Krok 3 — n8n: přejmenovat instagramový údaj
+
+Credentials → **Authorization** → přejmenovat na
+`Instagram — Černá Perla`.
+
+Není to kosmetika. Údaj typu hlavička HTTP se pošle na **jakoukoli**
+adresu, na kterou ho někdo připne. Pod jménem „Authorization" k tomu
+svádí; pod jménem „Instagram — Černá Perla" si toho člověk všimne.
+
+## Krok 4 — Foodtab: tři proměnné prostředí
+
+Vercel → projekt Foodtab → **Settings** → **Environment Variables**.
+Přidat pro **Production** i **Preview**:
+
+| Název | Hodnota |
+|---|---|
+| `N8N_MARKETING_URL` | `https://foodtab.app.n8n.cloud/webhook/foodtab-zverejnit` |
+| `N8N_MARKETING_TAJEMSTVI` | tajemství z kroku 1 — **musí sedět přesně** |
+| `MARKETING_KLIC_SIFRY` | klíč z chatu, 64 znaků |
+
+Pak **Redeploy**. Bez nového nasazení se proměnné nenačtou a vypadá to,
+že nastavení nefunguje.
+
+## Krok 5 — databáze (dělá Šéfík z `main`)
+
+1. Slít větev `claude/prompt-review-jtkh74` do `main`.
+2. `supabase/tests/run.sh` proti PostgreSQL — musí být zelené.
+3. `supabase db push`.
+
+Přibývají tři migrace:
+
+- `20260910020000_marketing_okamzik` — převod hodiny na okamžik
+- `20260910040000_marketing_fronta` — fronta publikací
+- `20260913120000_marketing_ulozne` — úložiště fotek a pravidla k němu
+
+**U třetí pozor.** `storage.objects` vlastní role
+`supabase_storage_admin`, ne `postgres`. Když push skončí na
+„must be owner of table objects", není to chyba migrace — je to práva
+role, kterou push používá. Ten jeden příkaz se pak pustí pod rolí
+storage admina; politika se kvůli tomu nezjednodušuje.
+
+## Krok 6 — plánovač na GitHubu
+
+Repozitář → **Settings** → **Secrets and variables** → **Actions**.
+Musí tam být:
+
+| Secret | Co to je |
+|---|---|
+| `APP_URL` | adresa nasazené aplikace, bez lomítka na konci |
+| `CRON_SECRET` | **táž** hodnota jako proměnná `CRON_SECRET` na Vercelu |
+
+Workflow „Marketing — fronta publikací" pak běží každou čtvrthodinu.
+Spustit jde i ručně: Actions → to workflow → **Run workflow**.
+
+---
+
+## Krok 7 — zkouška nanečisto
+
+Nic nejde ven. Tohle projít **dřív**, než se cokoli zapne.
+
+1. Foodtab → **Marketing** → **Fotky** → nahrát fotku.
+2. **Nový příspěvek** → název, účel, kanál Instagram.
+3. Napsat text, **zaškrtnout fotku**, uložit jako novou verzi.
+4. **Požádat o schválení**.
+5. Schválit — **musí to udělat někdo jiný** než ten, kdo žádal. Čtyři
+   oči hlídá databáze, ne obrazovka.
+6. **Naplánovat**, u „Jak to má odejít" vybrat **Jen nanečisto**, čas
+   dát pár minut do minulosti.
+7. Actions → „Marketing — fronta publikací" → **Run workflow**.
+8. V příspěvku má být **zveřejněno nanečisto**.
+
+Když to nevyjde, kouká se sem:
+
+| Co vidím | Kde hledat |
+|---|---|
+| „Zveřejňování přes n8n není nastavené" | krok 4, chybí proměnná nebo se nepřenasadilo |
+| „bez fotky to nepřijme" | v kroku 3 se nezaškrtla fotka |
+| úloha zůstala „naplánováno" | plánovač neběžel — krok 6 |
+| 401 v Actions | `CRON_SECRET` na Vercelu a na GitHubu se liší |
+
+---
+
+## Krok 8 — teprve teď ostrý provoz
+
+**Nejdřív staré workflow.** „Černá Perla — denní obsah na sítě" pořád
+publikuje každý všední den v 8:00. Dokud běží obojí, vyjdou dva
+příspěvky denně a jeden o druhém neví. Buď se osekne na „zveřejni, co
+přijde", nebo se vypne.
+
+Pak:
+
+1. n8n → workflow **Foodtab — zveřejnit příspěvek** → přepnout na
+   **Active**.
+2. Ve Foodtabu naplánovat příspěvek se způsobem **Zveřejnit**.
+3. **U prvního zůstat u toho** a podívat se na profil.
+
+---
+
+## Co se ještě neumí
+
+Ať to není překvapení:
+
+- **Facebook.** Workflow posílá jen na Instagram. V n8n jsou tři
+  facebookové údaje, ale nic je nepoužívá.
+- **Víc fotek v jednom příspěvku.** Vybrat jde víc, odejde první.
+  Koláž ani video zatím ne.
+- **Návrh textu od modelu.** Text se píše ručně. Kostra kolem něj
+  (verze, schválení, plán) musela stát dřív, jinak by první návrh
+  neměl kam přistát.

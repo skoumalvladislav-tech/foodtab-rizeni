@@ -9,6 +9,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/marketing-media'
+import { n8nJeNastaveny } from '@/lib/marketing-n8n'
 import { naplanovat, pozadatOSchvaleni, rozhodnoutOSchvaleni, ulozitVerzi } from '../akce'
 
 export const dynamic = 'force-dynamic'
@@ -201,6 +202,13 @@ export default async function DetailPrispevku({
 
   const smiPsat = (await zkusPristup(tenantId, 'marketing.manage', rozsah)).stav === 'ok'
   const smiPublikovat = (await zkusPristup(tenantId, 'marketing.publish', rozsah)).stav === 'ok'
+
+  /*
+    Nabízet „Zveřejnit" tam, kde zveřejnit nejde, znamená slíbit něco,
+    co skončí pěti marnými pokusy a chybou. Obrazovka se proto zeptá
+    dřív, než to nabídne.
+  */
+  const n8nHotovo = n8nJeNastaveny()
   const jeSchvalena = p.schvalena_verze_id !== null && p.schvalena_verze_id === p.aktualni_verze_id
 
   return (
@@ -377,13 +385,45 @@ export default async function DetailPrispevku({
                 <input name="cas" type="time" required style={pole} />
               </label>
             </div>
+            <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'grid', gap: '6px' }}>
+              <legend style={popisek}>Jak to má odejít</legend>
+
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '14px' }}>
+                <input type="radio" name="zpusob" value="zverejnit" defaultChecked={n8nHotovo} disabled={!n8nHotovo} />
+                <span>
+                  Zveřejnit
+                  <span style={{ display: 'block', fontSize: '12.5px', color: 'var(--muted)' }}>
+                    {n8nHotovo
+                      ? 'Odejde v naplánovaný čas na síť.'
+                      : 'Zatím nejde — zveřejňování přes n8n není nastavené.'}
+                  </span>
+                </span>
+              </label>
+
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '14px' }}>
+                <input type="radio" name="zpusob" value="nanecisto" />
+                <span>
+                  Jen nanečisto
+                  <span style={{ display: 'block', fontSize: '12.5px', color: 'var(--muted)' }}>
+                    Projde celá cesta a nikam se nic neodešle. Na vyzkoušení.
+                  </span>
+                </span>
+              </label>
+
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '14px' }}>
+                <input type="radio" name="zpusob" value="rucne" defaultChecked={!n8nHotovo} />
+                <span>
+                  Zveřejním ručně
+                  <span style={{ display: 'block', fontSize: '12.5px', color: 'var(--muted)' }}>
+                    Příspěvek se připraví a počká na člověka.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+
             <div>
               <button type="submit" className="ft-tl ft-tl-hlavni">Naplánovat</button>
             </div>
-            <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
-              Dokud není připojený účet sítě, skončí to jako „k ručnímu
-              zveřejnění“ — nic se nikam neodešle.
-            </p>
           </form>
         ) : null}
 
