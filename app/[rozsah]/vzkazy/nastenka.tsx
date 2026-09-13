@@ -138,6 +138,31 @@ export default async function Nastenka({
     }
   }
 
+  // Kdo nepotvrdil — vidí jen vedoucí u oznámení s povinným potvrzením.
+  // announcement_reads má RLS jen na vlastní řádky; RPC kdo_nepotvrdil
+  // je SECURITY DEFINER a RLS obejde (pravidlo 7b).
+  const nepotvrdiliMap = new Map<string, string[]>()
+  if (muzePsat) {
+    const vyzadujiciIds = zpravy
+      .filter((z) => z.requires_acknowledgment)
+      .map((z) => z.id)
+    if (vyzadujiciIds.length > 0) {
+      const vysledky = await Promise.all(
+        vyzadujiciIds.map((id) =>
+          supabase
+            .rpc('kdo_nepotvrdil', { p_tenant: tenantId, p_announcement: id })
+            .then((r) => ({
+              id,
+              data: (r.data ?? []) as { jmeno: string }[],
+            })),
+        ),
+      )
+      for (const { id, data } of vysledky) {
+        if (data.length > 0) nepotvrdiliMap.set(id, data.map((d) => d.jmeno))
+      }
+    }
+  }
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
@@ -387,6 +412,20 @@ export default async function Nastenka({
                       </button>
                     </form>
                   )}
+
+                  {muzePsat && z.requires_acknowledgment && nepotvrdiliMap.has(z.id) ? (
+                    <p
+                      style={{
+                        margin: "10px 0 0",
+                        fontSize: "12px",
+                        color: "var(--muted)",
+                        borderTop: "1px solid var(--line)",
+                        paddingTop: "8px",
+                      }}
+                    >
+                      Nepotvrdili: {nepotvrdiliMap.get(z.id)!.join(', ')}
+                    </p>
+                  ) : null}
                 </li>
               );
             })}
