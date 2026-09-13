@@ -4,10 +4,11 @@ import { notFound, redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { textProKanal } from '@/lib/marketing'
 import { popisStavu } from '@/lib/marketing-text'
-import { jeden, seznam } from '@/lib/supabase/dotaz'
+import { jeden, seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
+import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/marketing-media'
 import { naplanovat, pozadatOSchvaleni, rozhodnoutOSchvaleni, ulozitVerzi } from '../akce'
 
 export const dynamic = 'force-dynamic'
@@ -60,6 +61,15 @@ type Verze = {
   otisk: string
   poznamka: string
   vytvoreno_kdy: string
+  media_ids: string[]
+}
+
+type Fotka = {
+  id: string
+  nazev_souboru: string
+  cesta: string
+  alt_text: string
+  pouzitelne_do: string | null
 }
 
 type Zadost = {
@@ -137,7 +147,7 @@ export default async function DetailPrispevku({
   const verze = await seznam<Verze>(
     'verze příspěvku',
     supabase.from('marketing_verze')
-      .select('id, cislo, zadani, texty, otisk, poznamka, vytvoreno_kdy')
+      .select('id, cislo, zadani, texty, otisk, poznamka, vytvoreno_kdy, media_ids')
       .eq('prispevek_id', prispevekId).order('cislo', { ascending: false }),
   )
   const aktualni = verze[0] ?? null
@@ -156,6 +166,38 @@ export default async function DetailPrispevku({
       .select('id, kanal, stav, planovano_na, rezim')
       .eq('prispevek_id', prispevekId).order('planovano_na', { ascending: false }),
   )
+
+  /*
+    Knihovna fotek pobočky. Bez obrázku Instagram příspěvek nepřijme,
+    takže výběr patří sem, ne na zvláštní obrazovku — kdo píše text,
+    ten vybírá i fotku.
+
+    Prošlé fotky se nabízejí taky, jen jsou označené. Kdyby zmizely,
+    člověk by nevěděl, že fotka existuje a proč ji nemůže použít.
+  */
+  const knihovnaDotaz = await supabase
+    .from('marketing_media')
+    .select('id, nazev_souboru, cesta, alt_text, pouzitelne_do')
+    .eq('tenant_id', tenantId)
+    .is('archivovano_kdy', null)
+    .order('vytvoreno_kdy', { ascending: false })
+    .limit(60)
+
+  const knihovna: Fotka[] = tabulkaNeexistuje(knihovnaDotaz.error)
+    ? []
+    : await seznam<Fotka>('knihovna fotek', Promise.resolve(knihovnaDotaz))
+
+  const nahledy = new Map<string, string>()
+  if (knihovna.length > 0) {
+    const podepsane = await supabase.storage
+      .from(KBELIK)
+      .createSignedUrls(knihovna.map((f) => f.cesta), PLATNOST_ODKAZU_S)
+    for (const s of podepsane.data ?? []) {
+      if (s.signedUrl && s.path) nahledy.set(s.path, s.signedUrl)
+    }
+  }
+
+  const vybrane = new Set(aktualni?.media_ids ?? [])
 
   const smiPsat = (await zkusPristup(tenantId, 'marketing.manage', rozsah)).stav === 'ok'
   const smiPublikovat = (await zkusPristup(tenantId, 'marketing.publish', rozsah)).stav === 'ok'
@@ -195,6 +237,51 @@ export default async function DetailPrispevku({
               />
             </label>
           ))}
+
+          <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
+            <legend style={popisek}>
+              Fotky — bez obrázku Instagram příspěvek nepřijme. První vybraná je titulní.
+            </legend>
+
+            {knihovna.length === 0 ? (
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
+                V knihovně zatím nic není.{' '}
+                <Link href={`/${rozsah}/marketing/media`}>Nahrát fotku</Link>
+              </p>
+            ) : (
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '4px' }}>
+                {knihovna.map((f) => (
+                  <label
+                    key={f.id}
+                    style={{ display: 'grid', gap: '4px', width: '104px', fontSize: '12px', cursor: 'pointer' }}
+                  >
+                    {nahledy.get(f.cesta) ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={nahledy.get(f.cesta)}
+                        alt={f.alt_text || f.nazev_souboru}
+                        width={104}
+                        height={104}
+                        style={{ objectFit: 'cover', borderRadius: '8px', background: 'var(--bg)' }}
+                      />
+                    ) : (
+                      <div style={{ width: '104px', height: '104px', borderRadius: '8px', background: 'var(--bg)' }} />
+                    )}
+                    <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <input
+                        type="checkbox"
+                        name="media"
+                        value={f.id}
+                        defaultChecked={vybrane.has(f.id)}
+                        disabled={!smiPsat}
+                      />
+                      {jeProsla(f.pouzitelne_do) ? 'práva vypršela' : f.nazev_souboru.slice(0, 14)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </fieldset>
 
           <label>
             <span style={popisek}>Poznámka k této verzi (uvidí ji schvalovatel)</span>
@@ -343,4 +430,16 @@ export default async function DetailPrispevku({
       </div>
     </>
   )
+}
+
+/**
+ * Prošlá práva k fotce.
+ *
+ * Jen popisek u zaškrtávátka. O tom, jestli fotka smí ven, rozhoduje
+ * fronta v databázi podle provozního dne pobočky — počítat to na dvou
+ * místech znamená, že se to jednou rozejde.
+ */
+function jeProsla(pouzitelneDo: string | null): boolean {
+  if (!pouzitelneDo) return false
+  return pouzitelneDo < new Date().toISOString().slice(0, 10)
 }

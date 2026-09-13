@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import type { Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
-import { jeden, pruzor } from '@/lib/supabase/dotaz'
+import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -154,14 +154,52 @@ export async function ulozitVerzi(formData: FormData): Promise<void> {
     if (popisek) texty[kanal] = { popisek }
   }
 
+  /*
+    FOTKY SE OVĚŘUJÍ PROTI KNIHOVNĚ, NE JEN PŘEVEZMOU Z FORMULÁŘE.
+
+    Zaškrtávátka jsou údaj z prohlížeče, tedy návrh (pravidlo 4). Bez
+    tohohle dotazu by stačilo přepsat jedno id a do verze by se uložila
+    fotka cizí firmy — RLS by ji sice nikdy neukázala, ale otisk verze
+    by ji zahrnul a fronta by se ji pokusila poslat ven.
+
+    Dotaz jede pod přihlášeným člověkem, takže cizí id prostě nenajde
+    a tiše vypadne. Nehlásí se to jako chyba: kdo poslal cizí id, ten
+    to udělal schválně.
+  */
+  const vybrane = formData.getAll('media').map(String).filter(Boolean)
+  let mediaIds: string[] = []
+
+  if (vybrane.length > 0) {
+    const nalezene = await seznam<{ id: string }>(
+      'vybrané fotky',
+      supabase
+        .from('marketing_media')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', vybrane)
+        .is('archivovano_kdy', null),
+    )
+    const platne = new Set(nalezene.map((m) => m.id))
+    // Pořadí se drží podle formuláře, ne podle databáze — je to pořadí,
+    // ve kterém fotky půjdou do koláže.
+    mediaIds = vybrane.filter((id) => platne.has(id))
+  }
+
+  /*
+    Titulní fotka je ta první vybraná. Zvláštní přepínač na ni zatím
+    není: dokud se dá pořadí měnit jen zaškrtáváním, byl by to druhý
+    ovladač na tutéž věc.
+  */
+  const titulni = mediaIds[0] ?? null
+
   const obsah: ObsahVerze = {
     zadani: String(formData.get('zadani') ?? '').trim(),
     vstupy: soucasna.vstupy ?? {},
     vybrana_varianta: null,
     texty,
     storyboard: null,
-    media_ids: soucasna.media_ids ?? [],
-    titulni_media_id: soucasna.titulni_media_id,
+    media_ids: mediaIds,
+    titulni_media_id: titulni,
   }
 
   const ja = await mujZamestnanec(tenantId)

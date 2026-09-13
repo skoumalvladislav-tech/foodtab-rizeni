@@ -151,5 +151,37 @@ ok('obrazovka prošlé fotky neodfiltrovává',
 ok('ale řekne u nich, že se příspěvek nezveřejní',
   obrazovka.includes('Práva vypršela') && obrazovka.includes('nezveřejní'))
 
+console.log('\n== Připojení fotky k příspěvku ==')
+
+const akceVerze = readFileSync('app/[rozsah]/marketing/akce.ts', 'utf8')
+const detail = readFileSync('app/[rozsah]/marketing/[prispevek]/page.tsx', 'utf8')
+
+ok('obrazovka příspěvku nabízí fotky ke zaškrtnutí', detail.includes('name="media"'))
+ok('a předvybere ty z aktuální verze', detail.includes('defaultChecked={vybrane.has(f.id)}'))
+
+/*
+  Zaškrtávátka jsou údaj z prohlížeče, tedy návrh (pravidlo 4).
+  Bez ověření proti knihovně by stačilo přepsat jedno id a do verze by
+  se uložila fotka cizí firmy — RLS by ji nikdy neukázala, ale otisk
+  verze by ji zahrnul a fronta by se ji pokusila poslat ven.
+*/
+ok('uložení verze čte vybrané fotky z formuláře',
+  akceVerze.includes("formData.getAll('media')"))
+ok('a ověřuje je proti knihovně téže firmy',
+  /from\('marketing_media'\)[\s\S]{0,200}\.eq\('tenant_id', tenantId\)[\s\S]{0,120}\.in\('id', vybrane\)/.test(akceVerze))
+ok('do verze jdou jen ty nalezené',
+  akceVerze.includes('vybrane.filter((id) => platne.has(id))'))
+ok('titulní je první vybraná', akceVerze.includes('const titulni = mediaIds[0] ?? null'))
+ok('a nekopírují se už jen fotky z předchozí verze',
+  !akceVerze.includes('media_ids: soucasna.media_ids'))
+
+/*
+  Otisk verze počítá i s fotkami. Kdyby ne, dala by se u schválené
+  verze vyměnit fotka beze změny otisku — a schválení by pořád sedělo
+  na obsah, který nikdo neviděl.
+*/
+const lib = readFileSync('lib/marketing.ts', 'utf8')
+ok('otisk verze počítá i s fotkami', lib.includes('media_ids: [...v.media_ids].sort()'))
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)
