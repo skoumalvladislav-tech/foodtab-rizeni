@@ -192,3 +192,45 @@ Přihlašovací údaj s instagramovým tokenem se v n8n jmenuje jen
 **jakoukoli** adresu, na kterou ho někdo připne. Kdyby ho příště někdo
 omylem použil u uzlu mířícího jinam, odejde tam token k účtu. Chce to
 přejmenovat na „Instagram — Černá Perla".
+
+### Co v n8n vzniklo
+
+Postaveno 13. 9. 2026, **neaktivní**. Stávající workflow „Černá Perla —
+denní obsah na sítě" zůstalo nedotčené a běží dál.
+
+| Co | Kde |
+|---|---|
+| Workflow | „Foodtab — zveřejnit příspěvek", `l9o955GDQVDBf8gc` |
+| Adresa webhooku | `https://foodtab.app.n8n.cloud/webhook/foodtab-zverejnit` |
+| Tabulka účtů | `foodtab_ucty`, `77Ob60K3II5QSZOa` |
+| Tabulka odeslaných | `foodtab_zverejneno`, `PvDkrRLvFf8PLlwI` |
+
+Cesta workflow: přečti požadavek → je celý? → **už jsme to poslali?**
+→ najdi účet podle firmy a pobočky → vytvoř kontejner → počkej →
+dozrál? → zveřejni → zapiš → potvrď. Každá slepá ulička odpovídá
+srozumitelnou chybou, takže Foodtab nikdy nečeká naprázdno a fronta se
+o úloze dozví, proč neodešla.
+
+### Než se to zapne — pět kroků
+
+1. **Vytvořit přihlašovací údaj `Foodtab do n8n`** (typ Header Auth):
+   název hlavičky `x-foodtab-tajemstvi`, hodnota náhodné tajemství.
+   Zakládání údaje s tajemstvím přes rozhraní nejde, musí se ručně.
+2. **Přepnout ho na uzlu „Foodtab volá".** Při zakládání se tam sám
+   přiřadil údaj „Authorization", což je ten instagramový — je to
+   špatně, ale bezpečně: workflow by čekalo jinou hlavičku, než
+   Foodtab posílá, a požadavek by odmítlo.
+3. **Na třech uzlech IG vybrat údaj „Authorization"** (kontejner, stav,
+   publikovat). Při zakládání se nepřipojily.
+4. **Vyplnit `foodtab_ucty`** — jeden řádek: `tenant_id` a `branch_id`
+   z Foodtabu, `sit` = `instagram`, `ucet_id` = `27920687187583900`.
+   Bez řádku workflow odmítne a nic neodešle.
+5. **Do prostředí Foodtabu** doplnit `N8N_MARKETING_URL` (adresa výš)
+   a `N8N_MARKETING_TAJEMSTVI` (tajemství z kroku 1).
+
+### A teprve pak
+
+Zapnout se to smí až poté, co se staré workflow osekalo na „zveřejni,
+co přijde" — jinak vyjdou dva příspěvky denně. Vyzkoušet se to dá
+předtím nanečisto: příspěvek v režimu `demo` projde celou cestou
+a nikam se neodešle.
