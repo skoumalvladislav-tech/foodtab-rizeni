@@ -120,13 +120,20 @@ export default async function Marketing({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '860px', display: 'grid', gap: '16px' }}>
-        {smiPsat ? (
-          <div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {smiPsat ? (
             <Link href={`/${rozsah}/marketing/novy`} className="ft-tl ft-tl-hlavni">
               Nový příspěvek
             </Link>
-          </div>
-        ) : null}
+          ) : null}
+          {/*
+            Fotky vidí i ten, kdo nesmí psát — knihovna je podklad,
+            ne rozdělaná práce.
+          */}
+          <Link href={`/${rozsah}/marketing/media`} className="ft-tl">
+            Fotky
+          </Link>
+        </div>
 
         {!maZnacku ? (
           <div style={{ ...karta, borderColor: 'var(--mosaz)' }}>
