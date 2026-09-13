@@ -147,6 +147,34 @@ begin
           and u.otisk_verze = v.otisk
           and p.schvalena_verze_id = u.verze_id);
 
+  /*
+    Krok 2b: zrušit i to, čemu mezitím vypršela práva k fotce.
+
+    `marketing_media.pouzitelne_do` je datum, do kdy se smí fotka
+    použít — typicky svolení hosta nebo licence od fotografa. Příspěvek
+    se schvaluje týden dopředu, takže tohle je přesně případ, kdy
+    kontrola při schvalování nestačí. Zveřejnit tvář hosta den po
+    vypršení souhlasu je právní problém, ne kosmetická chyba.
+
+    Provozní datum, ne `current_date`: den se láme podle pobočky
+    (CLAUDE.md, pravidlo 10). Fotka použitelná „do 10. 9." patří ještě
+    do provozního dne 10. 9., i když je na hodinách 1:30 jedenáctého.
+  */
+  update public.marketing_publikace_ulohy u
+     set stav = 'zruseno',
+         posledni_chyba = 'Zrušeno před odesláním: fotce vypršela práva k použití.',
+         zmeneno_kdy = now()
+   where u.id = any(v_zabrane)
+     and u.stav = 'odesila_se'
+     and exists (
+       select 1
+         from public.marketing_verze v
+         join public.marketing_prispevky p on p.id = u.prispevek_id
+         join public.marketing_media m on m.id = any(v.media_ids)
+        where v.id = u.verze_id
+          and m.pouzitelne_do is not null
+          and m.pouzitelne_do < app.business_date(p.branch_id, now()));
+
   -- Krok 3: co zbylo, jde ven. Text a fotky se berou z verze, ne
   -- z příspěvku — příspěvek ukazuje na aktuální verzi, a ta už může
   -- být jiná než ta schválená.

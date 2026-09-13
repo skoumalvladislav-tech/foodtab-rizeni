@@ -79,7 +79,10 @@ create or replace function pg_temp.pripravit(
   p_nazev text,
   p_kanal text,
   p_klic  text,
-  p_kdy   timestamptz
+  p_kdy   timestamptz,
+  -- Fotky se dávají rovnou při zakládání verze. Doplnit je později
+  -- nejde: verze je neměnná (spoušť 1 z marketing 3).
+  p_media uuid[] default array[]::uuid[]
 ) returns table (prispevek uuid, verze uuid, schvaleni uuid, uloha uuid)
 language plpgsql as $$
 declare
@@ -90,9 +93,10 @@ begin
   insert into public.marketing_prispevky (tenant_id, branch_id, nazev)
   values (v_tenant, v_perla, p_nazev) returning id into prispevek;
 
-  insert into public.marketing_verze (tenant_id, prispevek_id, cislo, otisk, texty)
+  insert into public.marketing_verze (tenant_id, prispevek_id, cislo, otisk, texty, media_ids)
   values (v_tenant, prispevek, 1, v_otisk,
-          jsonb_build_object(p_kanal, jsonb_build_object('popisek', 'Dnes vaříme.')))
+          jsonb_build_object(p_kanal, jsonb_build_object('popisek', 'Dnes vaříme.')),
+          coalesce(p_media, array[]::uuid[]))
   returning id into verze;
 
   insert into public.marketing_schvaleni (tenant_id, prispevek_id, verze_id, otisk_verze)
@@ -340,6 +344,78 @@ select pg_temp.check('a je zrušená',
 
 
 \echo ''
+\echo '== Fotce vypršela práva — ven to nejde ======================'
+
+/*
+  `marketing_media.pouzitelne_do` je datum, do kdy se smí fotka použít:
+  svolení hosta, licence od fotografa. Příspěvek se schvaluje týden
+  dopředu, takže kontrola při schvalování o vypršení neví nic.
+
+  Zveřejnit tvář hosta den po vypršení souhlasu je právní problém, ne
+  kosmetická chyba — proto se to hlídá až tady, těsně před odesláním.
+*/
+
+/*
+  DATA SE POČÍTAJÍ Z PROVOZNÍHO DNE, NE Z `current_date`.
+
+  Provozní den začíná v 05:00, takže se s kalendářním každý den pět
+  hodin rozchází (CLAUDE.md, oddíl Testy). „Včera" psané jako
+  `current_date - 1` by mezi půlnocí a pátou vyšlo na TÝŽ provozní den
+  a kontrola by od 00:00 do 05:00 padala na kódu, na kterém nic není.
+*/
+select app.business_date(:'perla', now()) as dnes \gset
+
+insert into public.marketing_media
+  (tenant_id, branch_id, druh, nazev_souboru, cesta, mime, velikost_bajtu,
+   otisk, pouzitelne_do)
+values (:'tenant', :'perla', 'foto', 'host.jpg', 'marketing/host.jpg',
+        'image/jpeg', 120000, 'otisk-host', :'dnes'::date - 1)
+returning id as m_stara \gset
+
+insert into public.marketing_media
+  (tenant_id, branch_id, druh, nazev_souboru, cesta, mime, velikost_bajtu,
+   otisk, pouzitelne_do)
+values (:'tenant', :'perla', 'foto', 'dnes.jpg', 'marketing/dnes.jpg',
+        'image/jpeg', 120000, 'otisk-dnes', :'dnes'::date)
+returning id as m_dnes \gset
+
+insert into public.marketing_media
+  (tenant_id, branch_id, druh, nazev_souboru, cesta, mime, velikost_bajtu, otisk)
+values (:'tenant', :'perla', 'foto', 'talir.jpg', 'marketing/talir.jpg',
+        'image/jpeg', 120000, 'otisk-talir')
+returning id as m_bez_omezeni \gset
+
+-- Příspěvek s fotkou BEZ omezení projde. Kdyby se kontrola napsala
+-- obráceně (zruš, když má fotku), spadne tahle.
+select uloha as u_foto_ok
+  from pg_temp.pripravit('S fotkou', 'instagram', 'foto-ok',
+                         now() - interval '1 hour', array[:'m_bez_omezeni'::uuid]) \gset
+
+select pg_temp.check('fotka bez omezení odeslání nebrání',
+  exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_foto_ok'));
+
+-- Poslední den platnosti JEŠTĚ platí. Tady se pozná chyba o jedničku,
+-- kvůli které by se den předem přestalo publikovat.
+select uloha as u_foto_dnes
+  from pg_temp.pripravit('Poslední den', 'instagram', 'foto-dnes',
+                         now() - interval '1 hour', array[:'m_dnes'::uuid]) \gset
+
+select pg_temp.check('fotka platná do dneška ještě projde',
+  exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_foto_dnes'));
+
+select uloha as u_foto_stara
+  from pg_temp.pripravit('S prošlou fotkou', 'instagram', 'foto-stara',
+                         now() - interval '1 hour', array[:'m_stara'::uuid]) \gset
+
+select pg_temp.check('úloha s prošlou fotkou se nevyzvedne',
+  not exists (select 1 from app.marketing_vyzvednout_publikace(10) where id = :'u_foto_stara'));
+
+select pg_temp.check('a je zrušená s důvodem o právech',
+  (select posledni_chyba from public.marketing_publikace_ulohy where id = :'u_foto_stara')
+    like '%práva k použití%');
+
+
+\echo ''
 \echo '== Neúspěch: odklad roste, pak se to vzdá ==================='
 
 select uloha as u_chyba, prispevek as p_chyba
@@ -465,6 +541,7 @@ update public.marketing_prispevky set aktualni_verze_id = null, schvalena_verze_
  where tenant_id = :'tenant';
 delete from public.marketing_verze where tenant_id = :'tenant';
 delete from public.marketing_prispevky where tenant_id = :'tenant';
+delete from public.marketing_media where tenant_id = :'tenant';
 delete from public.tenant_modules where tenant_id = :'tenant' and module_key = 'marketing';
 
 select pg_temp.check('scénář po sobě uklidil',
