@@ -1,0 +1,353 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+
+import type { Permission } from '@/lib/authz'
+import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
+import { jeden, pruzor } from '@/lib/supabase/dotaz'
+import { getServerSupabase } from '@/lib/supabase/server'
+
+/**
+ * Marketing — akce nad příspěvkem.
+ *
+ * Zadání: docs/marketing-je-modul.md.
+ *
+ * ---------------------------------------------------------------------
+ * CO TENHLE SOUBOR NEHLÍDÁ, PROTOŽE TO HLÍDÁ DATABÁZE
+ *
+ * Že se bez schválení nic nezveřejní. Kdyby to bylo tady, dalo by se to
+ * obejít jedním voláním mimo obrazovku — u Supabase se do tabulek dá
+ * psát i přímo přes PostgREST. Drží to čtyři spouště
+ * (20260909200000_marketing_obsah.sql, 20260910000000_marketing_vystup.sql)
+ * a scénáře marketing3 a marketing5.
+ *
+ * Tady je druhá obranná linie: rozsah z adresy ověřený proti členství
+ * (pravidlo 4) a `zkusPristup` před každým zápisem (pravidlo 3). Ani
+ * jedna se nevynechává s tím, že to hlídá ta druhá.
+ */
+
+/** Kdo jsem v téhle firmě. Zápisy se podepisují zaměstnancem, ne účtem. */
+async function mujZamestnanec(tenantId: string): Promise<string | null> {
+  const supabase = await getServerSupabase()
+  const r = await jeden<{ id: string }>(
+    'můj záznam zaměstnance',
+    supabase.from('employees').select('id').eq('tenant_id', tenantId).is('deleted_at', null).maybeSingle(),
+  )
+  return r?.id ?? null
+}
+
+/** Společný začátek každé akce: firma, právo, rozsah. */
+async function pripravit(rozsah: string, pravo: Permission) {
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const pristup = await zkusPristup(tenantId, pravo, rozsah)
+  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing`)
+
+  return {
+    tenantId,
+    branchId: pristup.scope.branchId,
+    supabase: await getServerSupabase(),
+  }
+}
+
+/**
+ * Nový příspěvek.
+ *
+ * Příspěvek vždycky patří pobočce — firemní příspěvek neexistuje,
+ * vždycky někdo zve k sobě. Na firemní úrovni se proto zakládat nedá
+ * a obrazovka to říká dřív, než se člověk pustí do psaní.
+ */
+export async function zalozitPrispevek(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const { tenantId, branchId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  if (!branchId) {
+    redirect(`/${rozsah}/marketing/novy?chyba=${encodeURIComponent(
+      'Příspěvek patří pobočce. Přepněte se na provozovnu, pro kterou ho připravujete.')}`)
+  }
+
+  const nazev = String(formData.get('nazev') ?? '').trim()
+  if (!nazev) {
+    redirect(`/${rozsah}/marketing/novy?chyba=${encodeURIComponent('Příspěvek potřebuje název.')}`)
+  }
+
+  const kanaly = formData.getAll('kanaly').map(String).filter((k) => k === 'instagram' || k === 'facebook')
+  if (kanaly.length === 0) {
+    redirect(`/${rozsah}/marketing/novy?chyba=${encodeURIComponent('Vyberte aspoň jeden kanál.')}`)
+  }
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const prispevek = await jeden<{ id: string }>(
+    'založení příspěvku',
+    supabase.from('marketing_prispevky').insert({
+      tenant_id: tenantId,
+      branch_id: branchId,
+      nazev,
+      ucel: String(formData.get('ucel') ?? 'atmosfera'),
+      kanaly,
+      vytvoril: ja,
+    }).select('id').single(),
+  )
+
+  if (!prispevek) {
+    redirect(`/${rozsah}/marketing/novy?chyba=${encodeURIComponent('Příspěvek se nepodařilo založit.')}`)
+  }
+
+  // První verze je prázdná. Není to zbytečnost: příspěvek bez verze by
+  // neměl na co vázat schválení a stav by se neměl kde vzít.
+  const obsah = prazdnyObsah()
+  const { error } = await supabase.from('marketing_verze').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevek.id,
+    cislo: 1,
+    zadani: obsah.zadani,
+    vstupy: obsah.vstupy,
+    texty: obsah.texty,
+    media_ids: obsah.media_ids,
+    otisk: otiskVerze(obsah),
+    poznamka: 'Založení',
+    vytvoril: ja,
+  })
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/novy?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`/${rozsah}/marketing/${prispevek.id}`)
+}
+
+/**
+ * Úprava textu → NOVÁ VERZE, nikdy přepis.
+ *
+ * Spoušť v databázi tím zruší schválení a zneplatní čekající žádost.
+ * Je to záměr, ne vedlejší účinek: kdo text změní, posílá ho ke
+ * schválení znovu.
+ */
+export async function ulozitVerzi(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const prispevekId = String(formData.get('prispevek') ?? '')
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const soucasna = await jeden<{ id: string; cislo: number; zadani: string; vstupy: Record<string, unknown>; media_ids: string[]; titulni_media_id: string | null }>(
+    'aktuální verze',
+    supabase.from('marketing_verze')
+      .select('id, cislo, zadani, vstupy, media_ids, titulni_media_id')
+      .eq('prispevek_id', prispevekId)
+      .order('cislo', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  )
+
+  if (!soucasna) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Příspěvek nemá žádnou verzi.')}`)
+  }
+
+  const texty: Record<string, { popisek: string }> = {}
+  for (const kanal of ['instagram', 'facebook']) {
+    const popisek = String(formData.get(`text_${kanal}`) ?? '').trim()
+    if (popisek) texty[kanal] = { popisek }
+  }
+
+  const obsah: ObsahVerze = {
+    zadani: String(formData.get('zadani') ?? '').trim(),
+    vstupy: soucasna.vstupy ?? {},
+    vybrana_varianta: null,
+    texty,
+    storyboard: null,
+    media_ids: soucasna.media_ids ?? [],
+    titulni_media_id: soucasna.titulni_media_id,
+  }
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const { error } = await supabase.from('marketing_verze').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevekId,
+    cislo: soucasna.cislo + 1,
+    zadani: obsah.zadani,
+    vstupy: obsah.vstupy,
+    texty: obsah.texty,
+    media_ids: obsah.media_ids,
+    titulni_media_id: obsah.titulni_media_id,
+    otisk: otiskVerze(obsah),
+    poznamka: String(formData.get('poznamka') ?? 'Úprava textu').trim() || 'Úprava textu',
+    vytvoril: ja,
+  })
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`/${rozsah}/marketing/${prispevekId}?ulozeno=1`)
+}
+
+/** Žádost o schválení aktuální verze. Otisk se kopíruje — schvaluje se přesně tenhle obsah. */
+export async function pozadatOSchvaleni(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const prispevekId = String(formData.get('prispevek') ?? '')
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const verze = await jeden<{ id: string; otisk: string; texty: Record<string, unknown> }>(
+    'aktuální verze k schválení',
+    supabase.from('marketing_verze').select('id, otisk, texty')
+      .eq('prispevek_id', prispevekId).order('cislo', { ascending: false }).limit(1).maybeSingle(),
+  )
+
+  if (!verze) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Příspěvek nemá žádnou verzi.')}`)
+  }
+  if (Object.keys(verze.texty ?? {}).length === 0) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(
+      'Nejdřív napište text. Prázdný příspěvek nemá co schvalovat.')}`)
+  }
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const { error } = await supabase.from('marketing_schvaleni').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevekId,
+    verze_id: verze.id,
+    otisk_verze: verze.otisk,
+    zadal: ja,
+    shrnuti: String(formData.get('shrnuti') ?? '').trim(),
+  })
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  await supabase.from('marketing_prispevky')
+    .update({ stav: 'ceka_na_schvaleni', zmeneno_kdy: new Date().toISOString() })
+    .eq('id', prispevekId)
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`/${rozsah}/marketing/${prispevekId}?ulozeno=1`)
+}
+
+/**
+ * Rozhodnutí o schválení.
+ *
+ * Právo `marketing.publish` se tu ověřuje, ale rozhoduje o něm spoušť
+ * `app.marketing_strez_rozhodnuti` — ta hlídá i čtyři oči, což aplikace
+ * spolehlivě neumí (nevidí, kdo všechno ve firmě smí schvalovat, aniž
+ * by si autorizaci napsala podruhé).
+ */
+export async function rozhodnoutOSchvaleni(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const prispevekId = String(formData.get('prispevek') ?? '')
+  const zadostId = String(formData.get('zadost') ?? '')
+  const schvalit = String(formData.get('rozhodnuti') ?? '') === 'schvalit'
+  const pripominka = String(formData.get('pripominka') ?? '').trim()
+
+  const { supabase } = await pripravit(rozsah, 'marketing.publish')
+
+  if (!schvalit && !pripominka) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(
+      'K zamítnutí napište důvod — bez něj neví ten, kdo to psal, co má změnit.')}`)
+  }
+
+  const { error } = await supabase.from('marketing_schvaleni')
+    .update({ stav: schvalit ? 'schvaleno' : 'zamitnuto', pripominka })
+    .eq('id', zadostId)
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`/${rozsah}/marketing/${prispevekId}?ulozeno=1`)
+}
+
+/**
+ * Naplánování publikace.
+ *
+ * Hodina na zdi se převádí přes pásmo POBOČKY, ne serveru
+ * (CLAUDE.md, pravidlo 11) — dělá to databáze funkcí `at time zone`,
+ * protože jen ona zná pravidla letního času pro to konkrétní datum.
+ * Proto se sem posílá datum a čas zvlášť, ne hotový okamžik.
+ */
+export async function naplanovat(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const prispevekId = String(formData.get('prispevek') ?? '')
+  const datum = String(formData.get('datum') ?? '')
+  const cas = String(formData.get('cas') ?? '')
+
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.publish')
+
+  if (!datum || !cas) redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Vyplňte datum i čas.')}`)
+
+  const prispevek = await jeden<{ branch_id: string; schvalena_verze_id: string | null; kanaly: string[] }>(
+    'příspěvek k naplánování',
+    supabase.from('marketing_prispevky').select('branch_id, schvalena_verze_id, kanaly')
+      .eq('id', prispevekId).maybeSingle(),
+  )
+
+  if (!prispevek?.schvalena_verze_id) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Naplánovat jde jen schválená verze. Pošlete příspěvek ke schválení.')}`)
+  }
+
+  const zadost = await jeden<{ id: string; otisk_verze: string }>(
+    'platné schválení',
+    supabase.from('marketing_schvaleni').select('id, otisk_verze')
+      .eq('prispevek_id', prispevekId)
+      .eq('verze_id', prispevek.schvalena_verze_id)
+      .eq('stav', 'schvaleno')
+      .order('rozhodnuto_kdy', { ascending: false })
+      .limit(1).maybeSingle(),
+  )
+
+  if (!zadost) redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('K té verzi se nenašlo platné schválení.')}`)
+
+  /*
+    Hodina na zdi se na okamžik převádí V DATABÁZI, ne tady — pásmo
+    dodá pobočka a jen Postgres zná pravidla letního času pro to
+    konkrétní datum (pravidlo 11). `new Date('…T18:00')` by se přečetlo
+    v pásmu serveru, a ten je na Vercelu v UTC.
+  */
+  const okamzik = await pruzor<string>(
+    'převod času na okamžik',
+    supabase.rpc('marketing_okamzik', { p_branch: prispevek.branch_id, p_kdy: `${datum}T${cas}:00` }),
+  )
+
+  if (!okamzik) redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Čas se nepodařilo převést do pásma pobočky.')}`)
+
+  const ja = await mujZamestnanec(tenantId)
+  let zalozeno = 0
+
+  for (const kanal of prispevek.kanaly) {
+    const { error } = await supabase.from('marketing_publikace_ulohy').insert({
+      tenant_id: tenantId,
+      prispevek_id: prispevekId,
+      verze_id: prispevek.schvalena_verze_id,
+      otisk_verze: zadost.otisk_verze,
+      schvaleni_id: zadost.id,
+      kanal,
+      format: 'prispevek',
+      // Dokud není připojený skutečný účet, jde to ručním exportem —
+      // nic se nikam nepošle a obrazovka to tak i pojmenuje.
+      poskytovatel: 'rucni_export',
+      rezim: 'rucni',
+      planovano_na: okamzik,
+      idempotencni_klic: `publikace:${prispevek.schvalena_verze_id}:${kanal}:prispevek`,
+      vytvoril: ja,
+    })
+    if (error && !error.message.includes('duplicate key')) redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(error.message)}`)
+    if (!error) zalozeno++
+  }
+
+  await supabase.from('marketing_prispevky')
+    .update({ stav: 'naplanovano', planovano_na: okamzik, zmeneno_kdy: new Date().toISOString() })
+    .eq('id', prispevekId)
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(zalozeno > 0
+    ? `/${rozsah}/marketing/${prispevekId}?ulozeno=1`
+    : `/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Na tuhle verzi už je publikace naplánovaná.')}`)
+}

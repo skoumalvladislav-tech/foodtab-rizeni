@@ -19,13 +19,9 @@ export const dynamic = 'force-dynamic'
  * a co selhalo. Nic se odsud nezveřejňuje — publikuje se až ze
  * schválení, a to je jiná obrazovka.
  *
- * ---------------------------------------------------------------------
- * PROČ TU ZATÍM NENÍ TLAČÍTKO „VYTVOŘIT PŘÍSPĚVEK"
- *
- * Protože navrhování ještě není hotové. Kdyby tu tlačítko bylo a vedlo
- * na prázdno, vypadalo by to jako porucha. Až bude, přibude sem —
- * a do té doby to obrazovka říká nahlas, místo aby to schovala za
- * prázdný seznam.
+ * Text příspěvku se zatím píše ručně. Návrh od jazykového modelu je
+ * další krok — kostra kolem něj (verze, schválení, plán) ale musí stát
+ * dřív, jinak by první návrh neměl kam přistát.
  */
 
 const karta = {
@@ -108,6 +104,8 @@ export default async function Marketing({
     .limit(1)
   const maZnacku = !znacka.error && (znacka.data?.length ?? 0) > 0
 
+  const smiPsat = (await zkusPristup(tenantId, 'marketing.manage', rozsah)).stav === 'ok'
+
   const keSchvaleni = prispevky.filter((p) => p.stav === 'ceka_na_schvaleni')
   const naplanovane = prispevky.filter((p) => p.stav === 'naplanovano')
   const chybove = prispevky.filter((p) => STAVY_CHYBOVE.includes(p.stav))
@@ -122,6 +120,14 @@ export default async function Marketing({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '860px', display: 'grid', gap: '16px' }}>
+        {smiPsat ? (
+          <div>
+            <Link href={`/${rozsah}/marketing/novy`} className="ft-tl ft-tl-hlavni">
+              Nový příspěvek
+            </Link>
+          </div>
+        ) : null}
+
         {!maZnacku ? (
           <div style={{ ...karta, borderColor: 'var(--mosaz)' }}>
             <strong style={{ fontSize: '15px' }}>Nejdřív značka</strong>
@@ -155,10 +161,8 @@ export default async function Marketing({
 
           {prispevky.length === 0 ? (
             <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
-              Zatím žádný. Navrhování příspěvků se dodělává — až bude
-              hotové, přibude sem tlačítko, kterým se z potvrzeného
-              jídelníčku udělá návrh. Do té doby jde nastavit značku,
-              aby na to bylo připraveno.
+              Zatím žádný. Začněte tlačítkem „Nový příspěvek“ — text se
+              zatím píše ručně, návrh od modelu přibude později.
             </p>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '10px' }}>
@@ -174,7 +178,9 @@ export default async function Marketing({
                     borderBottom: '1px solid var(--line)',
                   }}
                 >
-                  <span style={{ fontSize: '14.5px' }}>{p.nazev}</span>
+                  <Link href={`/${rozsah}/marketing/${p.id}`} style={{ fontSize: '14.5px' }}>
+                    {p.nazev}
+                  </Link>
                   <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
                     {popisStavu(p.stav)}
                   </span>
