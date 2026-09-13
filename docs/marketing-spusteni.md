@@ -24,6 +24,24 @@ a běží dál**.
 
 ---
 
+## Kroky 1 a 2 — n8n — HOTOVO 13. 9. 2026
+
+Přihlašovací údaj `Foodtab do n8n` je založený a přepnutý na uzlu
+„Foodtab volá". Webhook teď žádá hlavičku `x-foodtab-tajemstvi`, tedy
+přesně tu, kterou Foodtab posílá.
+
+Ověřeno na celém grafu: tři instagramové uzly mají svůj přístup a
+**všech osm možných konců končí odpovědí** — neúplný požadavek,
+opakování, neznámý účet, nevzniklý kontejner, nedozrálý kontejner,
+neúspěšné zveřejnění i úspěch. Fronta tedy nikdy nezůstane viset a vždy
+se dozví proč.
+
+Zbývá jen kosmetika z kroku 3 níž (přejmenování údaje). Původní znění
+kroků 1 a 2 je pod čarou, kdyby se to někdy dělalo znovu.
+
+<details>
+<summary>Původní krok 1 — už není potřeba</summary>
+
 ## Krok 1 — n8n: přihlašovací údaj pro Foodtab
 
 Tohle přes rozhraní udělat nejde, protože se zadává tajemství.
@@ -45,7 +63,9 @@ Tohle přes rozhraní udělat nejde, protože se zadává tajemství.
 > workflow by čekalo jinou hlavičku, než Foodtab posílá, a požadavek
 > by odmítlo.
 
-## Krok 3 — n8n: přejmenovat instagramový údaj
+</details>
+
+## Krok 3 — n8n: přejmenovat instagramový údaj — ZBÝVÁ
 
 Credentials → **Authorization** → přejmenovat na
 `Instagram — Černá Perla`.
