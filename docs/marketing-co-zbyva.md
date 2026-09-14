@@ -51,7 +51,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 19 | Databázový model | **hotovo** | 19 tabulek, RLS všude, granty prověřené |
 | 20 | API a integrace do Foodtabu | **hotovo** | Modul JE uvnitř Foodtabu, takže odpadlo. Ven vedou `api/uloha/marketing-fronta` a `api/uloha/marketing-automatizace` |
 | 21 | n8n jako volitelný poskytovatel | **hotovo** | Ale **vypnuté** — viz oddíl 5 níž |
-| 22 | Obrazovky MVP | **13 ze 16** | Rozepsané v oddílu 3 |
+| 22 | Obrazovky MVP | **14 ze 16** | Rozepsané v oddílu 3 |
 | 23 | Bezpečnost a provoz | **hotovo** | Klíče šifrované, `service_role` na serveru, dvě obranné linie, audit |
 | 24 | Seed data | **chybí** | Ukázková cesta pro nového zákazníka není |
 | 25 | Testy a akceptace | **hotovo** | 13 scénářů v databázi (1259 kontrol proti PostgreSQL 16), 18 kontrol v Node. Každá nová kontrola prošla sabotáží |
@@ -66,7 +66,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 |---|---|---|---|
 | 1 | Přihlášení | **hotovo** | Foodtab, `/prihlaseni` |
 | 2 | Průvodce prvním nastavením | **chybí** | — |
-| 3 | Dashboard s přepínačem provozovny | **rozestavěné** | `marketing` — je to seznam příspěvků, ne rozcestník. **Velké tlačítko „Vytvořit", blížící se akce, dnešní obsah a chyby připojení chybí** |
+| 3 | Dashboard s přepínačem provozovny | **hotovo** (14. 9.) | `marketing` — velké tlačítko, čekající schválení, dnešní i další plán, blížící se akce, chyby připojení, naposledy odeslané. **Výkon posledních příspěvků se neukazuje a je to napsané** — analytika není |
 | 4 | Rychlé vytvoření obsahu | **hotovo** | `marketing/novy` |
 | 5 | Průvodce vytvořením (podklady → šablona → návrhy → editor → schválení → termín) | **rozestavěné** | Všechny kroky existují, ale **každý jinde**. Průvodce, který vede za ruku, není |
 | 6 | Mediální knihovna | **hotovo** | `marketing/media` — Fotky |
@@ -142,7 +142,7 @@ jsou v tabulkách výš.
 
 | Co | Chybí konkrétně |
 |---|---|
-| **Rozcestník marketingu** (obrazovka 3) | Je to seznam příspěvků, ne rozcestník. Velké tlačítko „Vytvořit", blížící se akce, dnešní obsah a chyby připojení |
+| **Rozcestník marketingu** (obrazovka 3) | Hotový od 14. 9. Zbývá jediné: **stručný výkon posledních příspěvků** — bez analytiky se nedá vzít odkud |
 | **Editor** (oddíl 13) | Náhled Instagramu a Facebooku vedle sebe, bezpečné zóny, obnovení starší verze, duplikace návrhu, nová AI varianta jen pro vybranou část |
 | **Průvodce vytvořením** (obrazovka 5) | Všechny kroky existují, ale každý jinde. Průvodce, který vede za ruku, není |
 | **Auditní přehled marketingu** (obrazovka 16) | Data v `audit_log` jsou, obrazovka „kdo co schválil a zveřejnil" ne |
