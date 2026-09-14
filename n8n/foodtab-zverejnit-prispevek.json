@@ -1,0 +1,816 @@
+{
+  "name": "Foodtab — zveřejnit příspěvek",
+  "description": "Přijme příspěvek z fronty Foodtabu a zveřejní ho na Instagram. Foodtab rozhoduje co a kdy, n8n to pošle přístupem, který drží. Idempotenční klíč brání dvojímu zveřejnění, účet se hledá podle firmy a pobočky v tabulce foodtab_ucty.",
+  "nodes": [
+    {
+      "id": "cacdcff1-6761-4992-9fbe-79b44413928a",
+      "name": "Foodtab volá",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        384
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "foodtab-zverejnit",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {}
+      },
+      "webhookId": "a0642e18-96fa-458d-b1da-a83966b2be47",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IAY8JSmybOxxTVkp",
+          "name": "Foodtab do n8n"
+        }
+      }
+    },
+    {
+      "id": "f63b1c66-d0c7-4abb-b335-1c0920502d4e",
+      "name": "Přečíst požadavek",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        384
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Co prijde z Foodtabu. Nic se nedomysli: co chybi, je chyba.\nconst t = $input.first().json.body || {};\nconst chybi = [];\nfor (const p of ['tenant_id','branch_id','kanal','idempotencni_klic','popisek']) {\n  if (!t[p]) chybi.push(p);\n}\nconst obrazky = Array.isArray(t.obrazky) ? t.obrazky.filter((o) => o && o.url) : [];\nif (obrazky.length === 0) chybi.push('obrazky');\n\nreturn [{ json: {\n  ok: chybi.length === 0,\n  duvod: chybi.length ? ('Chybi povinne udaje: ' + chybi.join(', ')) : '',\n  tenant_id: t.tenant_id || '',\n  branch_id: t.branch_id || '',\n  kanal: t.kanal || '',\n  klic: t.idempotencni_klic || '',\n  popisek: String(t.popisek || ''),\n  obrazek: obrazky.length ? obrazky[0].url : '',\n} }];"
+      }
+    },
+    {
+      "id": "f4e3ef7b-0397-4946-b1ee-c0d890b7e1e0",
+      "name": "Požadavek je celý?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        384
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cely",
+              "leftValue": "={{ $json.ok }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "rightValue": true
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "639fd2ec-3152-42ec-8ffb-17ad9fdf8779",
+      "name": "Už jsme to poslali?",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        288
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PvDkrRLvFf8PLlwI"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "idempotencni_klic",
+              "keyValue": "={{ $('Přečíst požadavek').first().json.klic }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f2723ec2-6bd5-4fd0-a406-a2ce852ccec2",
+      "name": "Už to viselo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        288
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "viselo",
+              "leftValue": "={{ $json.media_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "6e50d3a6-9cea-46ea-b084-4ae25bd3b801",
+      "name": "Vrátit, co už viselo",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ stav: 'zverejneno', externi_id: $json.media_id, odkaz: $json.odkaz, opakovani: true }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "5ec6445f-62c6-444b-9993-1e2bc24e9f87",
+      "name": "Najít účet",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        384
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "77Ob60K3II5QSZOa"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "condition": "eq",
+              "keyName": "tenant_id",
+              "keyValue": "={{ $('Přečíst požadavek').first().json.tenant_id }}"
+            },
+            {
+              "condition": "eq",
+              "keyName": "branch_id",
+              "keyValue": "={{ $('Přečíst požadavek').first().json.branch_id }}"
+            },
+            {
+              "condition": "eq",
+              "keyName": "sit",
+              "keyValue": "={{ $('Přečíst požadavek').first().json.kanal }}"
+            }
+          ]
+        },
+        "matchType": "allConditions",
+        "returnAll": false,
+        "limit": 1
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "bea8f864-d3f9-4f75-9cb8-5d53a146bcb1",
+      "name": "Účet známe?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        384
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ucet",
+              "leftValue": "={{ $json.ucet_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "4e1dbf74-0e94-4ab3-b383-b17fcc3bf118",
+      "name": "IG vytvořit kontejner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1568,
+        288
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.instagram.com/v26.0/' + $json.ucet_id + '/media' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "image_url",
+              "value": "={{ $('Přečíst požadavek').first().json.obrazek }}"
+            },
+            {
+              "name": "caption",
+              "value": "={{ $('Přečíst požadavek').first().json.popisek }}"
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "0W5DxKGKJjzIoyDu",
+          "name": "Authorization"
+        }
+      }
+    },
+    {
+      "id": "ffb85b71-e8f7-4bac-9a20-d5befaa8e07b",
+      "name": "Kontejner vznikl?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1792,
+        288
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "vznikl",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "d631c386-bfb0-4cf8-adfe-89ba1f17d8bf",
+      "name": "Počkat na zpracování",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2016,
+        192
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 8,
+        "unit": "seconds"
+      },
+      "webhookId": "d034994f-f1a3-42c2-a61c-6612658813e5"
+    },
+    {
+      "id": "ea3b195c-3bcd-4ff9-890b-4ca2641d76e2",
+      "name": "Stav kontejneru",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        192
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.instagram.com/v26.0/' + $('IG vytvořit kontejner').first().json.id + '?fields=status_code' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "0W5DxKGKJjzIoyDu",
+          "name": "Authorization"
+        }
+      }
+    },
+    {
+      "id": "1abb1ef8-a6de-4195-bd88-080509174318",
+      "name": "Kontejner dozrál?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2464,
+        192
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "zral",
+              "leftValue": "={{ $json.status_code }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "FINISHED"
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "ee94429c-9bde-440c-8701-ef0c2cac2c47",
+      "name": "IG publikovat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2688,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://graph.instagram.com/v26.0/' + $('Najít účet').first().json.ucet_id + '/media_publish' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "creation_id",
+              "value": "={{ $('IG vytvořit kontejner').first().json.id }}"
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "0W5DxKGKJjzIoyDu",
+          "name": "Authorization"
+        }
+      }
+    },
+    {
+      "id": "b027055a-27cd-4851-8697-8ede7bd82429",
+      "name": "Vyšlo to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2912,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "vyslo",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "bdd273ef-9407-4f28-abd9-cf8d915d68c7",
+      "name": "Zapsat, že to viselo",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3136,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "PvDkrRLvFf8PLlwI"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "schema": [
+            {
+              "id": "idempotencni_klic",
+              "displayName": "idempotencni_klic",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "canBeUsedToMatch": true,
+              "defaultMatch": false
+            },
+            {
+              "id": "media_id",
+              "displayName": "media_id",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "canBeUsedToMatch": true,
+              "defaultMatch": false
+            },
+            {
+              "id": "odkaz",
+              "displayName": "odkaz",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "canBeUsedToMatch": true,
+              "defaultMatch": false
+            },
+            {
+              "id": "tenant_id",
+              "displayName": "tenant_id",
+              "type": "string",
+              "display": true,
+              "required": false,
+              "canBeUsedToMatch": true,
+              "defaultMatch": false
+            },
+            {
+              "id": "kdy",
+              "displayName": "kdy",
+              "type": "dateTime",
+              "display": true,
+              "required": false,
+              "canBeUsedToMatch": true,
+              "defaultMatch": false
+            }
+          ],
+          "value": {
+            "idempotencni_klic": "={{ $('Přečíst požadavek').first().json.klic }}",
+            "media_id": "={{ $json.id }}",
+            "odkaz": "",
+            "tenant_id": "={{ $('Přečíst požadavek').first().json.tenant_id }}",
+            "kdy": "={{ $now.toISO() }}"
+          }
+        }
+      }
+    },
+    {
+      "id": "d97fe662-3cb7-4c98-9913-84dcffad5b47",
+      "name": "Potvrdit zveřejnění",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ stav: 'zverejneno', externi_id: $('IG publikovat').first().json.id, odkaz: null }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "0f571bb3-30e5-4a27-a8da-7ec623738732",
+      "name": "Zveřejnění selhalo",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3136,
+        192
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ stav: 'chyba', duvod: 'Instagram prispevek nezverejnil: ' + JSON.stringify($json).slice(0, 200) }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "36fd359a-e901-4674-8f4c-0df479f71815",
+      "name": "Nedozrál",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2688,
+        288
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ stav: 'chyba', duvod: 'Instagram obrazek nestihl zpracovat (stav ' + $json.status_code + '). Zkusi se to znovu.' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "97e6ce0c-5fb2-488a-9642-c53228384709",
+      "name": "Kontejner nevznikl",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2016,
+        384
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ stav: 'chyba', duvod: 'Instagram neprijal obrazek: ' + JSON.stringify($json).slice(0, 200) }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "beaf3023-3657-4151-b8fd-4c19de431cab",
+      "name": "Neznámý účet",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        480
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ stav: 'chyba', duvod: 'Pro tuhle firmu a pobocku neni v tabulce foodtab_ucty zadny ucet. Nic se neodeslalo.' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "14657e33-d67d-4e04-a74e-a5e0428eae6e",
+      "name": "Odmítnout neúplný požadavek",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        480
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ stav: 'chyba', duvod: $json.duvod }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Foodtab volá": {
+      "main": [
+        [
+          {
+            "node": "Přečíst požadavek",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Přečíst požadavek": {
+      "main": [
+        [
+          {
+            "node": "Požadavek je celý?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Požadavek je celý?": {
+      "main": [
+        [
+          {
+            "node": "Už jsme to poslali?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Odmítnout neúplný požadavek",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Už jsme to poslali?": {
+      "main": [
+        [
+          {
+            "node": "Už to viselo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Už to viselo?": {
+      "main": [
+        [
+          {
+            "node": "Vrátit, co už viselo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Najít účet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Najít účet": {
+      "main": [
+        [
+          {
+            "node": "Účet známe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Účet známe?": {
+      "main": [
+        [
+          {
+            "node": "IG vytvořit kontejner",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Neznámý účet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IG vytvořit kontejner": {
+      "main": [
+        [
+          {
+            "node": "Kontejner vznikl?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kontejner vznikl?": {
+      "main": [
+        [
+          {
+            "node": "Počkat na zpracování",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Kontejner nevznikl",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Počkat na zpracování": {
+      "main": [
+        [
+          {
+            "node": "Stav kontejneru",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stav kontejneru": {
+      "main": [
+        [
+          {
+            "node": "Kontejner dozrál?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kontejner dozrál?": {
+      "main": [
+        [
+          {
+            "node": "IG publikovat",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nedozrál",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IG publikovat": {
+      "main": [
+        [
+          {
+            "node": "Vyšlo to?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vyšlo to?": {
+      "main": [
+        [
+          {
+            "node": "Zapsat, že to viselo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zveřejnění selhalo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zapsat, že to viselo": {
+      "main": [
+        [
+          {
+            "node": "Potvrdit zveřejnění",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

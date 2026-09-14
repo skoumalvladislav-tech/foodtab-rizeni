@@ -10,6 +10,12 @@ a poslat jako prompt).
 
 ---
 
+> **14. 9. odpoledne:** tenhle soupis porovnává se zadáním. Šéfík
+> rozhodl, že se vrací všechny funkce a ovládací menu **původní
+> samostatné aplikace** — a ta měla víc, než zadání jmenuje. Závazné
+> je `docs/marketing-predani.md`; tenhle soubor zůstává jako soupis
+> proti promptu.
+
 ## 1. Jak číst „hotovo"
 
 Rozlišují se tři stavy a ten rozdíl je podstatný:

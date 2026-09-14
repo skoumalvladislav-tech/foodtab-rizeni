@@ -23,7 +23,7 @@ dva ne.
 | Deep link přežije přihlášení | §25 | **opraveno 14. 9.** |
 | Překlad auditu na obrazovku | §22, obrazovka 16 | **hotovo 14. 9.** |
 | Nahrání **videa** | §25 | **nejde vůbec** |
-| Čtrnáct dokumentů a osm n8n workflow | §26, §21 | **nejsou v repozitáři** |
+| Čtrnáct dokumentů a osm n8n workflow | §26, §21 | **nejsou v repozitáři**; n8n vyřešeno jinak 14. 9. odpoledne — viz oddíl 3 |
 
 ---
 
@@ -130,9 +130,15 @@ A většina těch osmi workflow je pro rozhraní, které modul nemá:
 | `connection-health` | zčásti |
 | `content-generation` | zčásti |
 
-Doporučení: **vrátit dvě, které platí, s opravenými adresami**, a k nim
-jeden pravdivý dokument o tom, co n8n v dnešním modulu dělá. Ne osm
-kusů, které popisují aplikaci, jež už neexistuje.
+**Uděláno 14. 9. odpoledne, ale jinak, než jsem tu ráno navrhoval.**
+Nevrátila se ani ta dvě: jsou to budíky, a budík už existuje —
+GitHub Actions tiká `marketing-fronta` každých 15 minut
+a `marketing-automatizace` každou hodinu. Druhý budík vedle prvního by
+tikal dvakrát. Místo toho je v repozitáři **export skutečného workflow,
+které Foodtab volá** (`n8n/foodtab-zverejnit-prispevek.json`,
+22 uzlů), kontrola, že sedí s `lib/marketing-n8n.ts`
+(`scripts/marketing-n8n-workflow.test.mjs`, rozbita osmi způsoby),
+a návod na import v `docs/marketing-n8n.md`.
 
 ---
 
@@ -192,11 +198,27 @@ Beze změny proti 14. 9. ráno:
 
 ---
 
+## 6b. To hlavní, co tahle kontrola minula — a Šéfík ne
+
+Porovnával jsem se **zadáním**. Šéfík porovnával s tím, **co už jednou
+stálo** na `localhost:3000` — a měl pravdu, že to je jiná otázka
+s jiným výsledkem. Původní samostatná aplikace (`6cb7d72`,
+`marketing-ai/`) měla renderer grafiky (SVG → PNG s písmy), průvodce
+vytvořením ve třech režimech, E2E cestu v Playwrightu, OpenAPI,
+ověřování podpisů webhooků, detail fotky s podepsanými adresami
+a vlastní ovládací menu s rozdělením oken. Nic z toho v modulu není.
+
+Rozhodnutí Šéfíka ze 14. 9. odpoledne: **všechny ty funkce i ovládací
+menu se vrací.** Podrobně, včetně přesného výčtu položek menu a pořadí
+práce, v `docs/marketing-predani.md`. Tenhle dokument tím není
+zneplatněný — říká, co proti zadání chybí; předání říká, co chybí proti
+původní aplikaci, a to je nadmnožina.
+
 ## 7. Co navrhuju dál, v tomhle pořadí
 
 1. ~~Dokončit obrazovku 16~~ — hotovo 14. 9. odpoledne.
 2. ~~Výkon posledních příspěvků na dashboard~~ — hotovo tamtéž.
-3. **n8n: dvě workflow s opravenými adresami + pravdivý dokument.**
+3. ~~n8n~~ — hotovo 14. 9. odpoledne, jinak (oddíl 3).
 4. **Video do mediální knihovny.**
 5. Obrazovka 5 (průvodce vytvořením) — je to spíš přeuspořádání
    hotových kroků než nová stavba.
