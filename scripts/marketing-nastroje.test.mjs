@@ -218,7 +218,14 @@ function souboryModulu(dir, nalezene = []) {
   return nalezene
 }
 
-const korenModulu = new URL('../', import.meta.url).pathname
+/*
+  `fileURLToPath`, ne `.pathname` — na Windows `file:///C:/...`.pathname
+  vrátí `/C:/...` s lomítkem před písmenem disku, a `path.join` s tím
+  pak sestaví neplatnou cestu se zdvojeným `C:` (ENOENT, scandir
+  `C:\C:\Users\...`). `fileURLToPath` disk sám rozpozná správně.
+*/
+const { fileURLToPath } = await import('node:url')
+const korenModulu = fileURLToPath(new URL('../', import.meta.url))
 const zdroje = [
   ...souboryModulu(path.join(korenModulu, 'app/[rozsah]/marketing')),
   ...souboryModulu(path.join(korenModulu, 'app/api/uloha/marketing-fronta')),

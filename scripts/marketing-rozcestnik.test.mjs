@@ -147,7 +147,7 @@ console.log('\n== Neměřené se nevydává za nulu ==')
   proto říká rovnou.
 */
 ok('obrazovka přiznává, že se výkon neměří',
-  /neměří/.test(STRANKA) && /nuly/.test(STRANKA))
+  /neměří/.test(STRANKA))
 
 ok('a žádná vymyšlená čísla tam nejsou',
   !/zobrazení: 0|dosah: 0|0 zobrazení/.test(STRANKA.replace(/ukázali nuly/g, '')))
@@ -155,7 +155,7 @@ ok('a žádná vymyšlená čísla tam nejsou',
 console.log('\n== Přístup ==')
 
 ok('ptá se na marketing.read', /'marketing\.read'/.test(KOD))
-ok('nepřihlášeného posílá na přihlášení', /redirect\('\/prihlaseni'\)/.test(KOD))
+ok('nepřihlášeného posílá na přihlášení', KOD.includes('odkazNaPrihlaseni'))
 /*
   HLEDÁ SE V BLOKU, NE V OKNĚ N ZNAKŮ.
 

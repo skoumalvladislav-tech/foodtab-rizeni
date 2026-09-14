@@ -26,11 +26,17 @@ const ok = (popis, podminka) => {
   console.log(`  ${podminka ? 'OK   ' : 'CHYBA'} ${popis}`)
 }
 
-const migraceUlozne = readFileSync('supabase/migrations/20260913170000_marketing_ulozne.sql', 'utf8')
-const migracePodklady = readFileSync('supabase/migrations/20260909180000_marketing_podklady.sql', 'utf8')
-const migraceFronta = readFileSync('supabase/migrations/20260910040000_marketing_fronta.sql', 'utf8')
-const akce = readFileSync('app/[rozsah]/marketing/media/akce.ts', 'utf8')
-const obrazovka = readFileSync('app/[rozsah]/marketing/media/page.tsx', 'utf8')
+/*
+  \r\n → \n hned po čtení. Kontroly níž hledají víceřádkové vzory
+  s vlastním \n uvnitř — na Windows checkoutu (CRLF) by jinak selhaly
+  na řádkování, ne na skutečném nesouladu.
+*/
+const bezCrlf = (s) => s.replace(/\r\n/g, '\n')
+const migraceUlozne = bezCrlf(readFileSync('supabase/migrations/20260913170000_marketing_ulozne.sql', 'utf8'))
+const migracePodklady = bezCrlf(readFileSync('supabase/migrations/20260909180000_marketing_podklady.sql', 'utf8'))
+const migraceFronta = bezCrlf(readFileSync('supabase/migrations/20260910040000_marketing_fronta.sql', 'utf8'))
+const akce = bezCrlf(readFileSync('app/[rozsah]/marketing/media/akce.ts', 'utf8'))
+const obrazovka = bezCrlf(readFileSync('app/[rozsah]/marketing/media/page.tsx', 'utf8'))
 
 console.log('\n== Kbelík ==')
 

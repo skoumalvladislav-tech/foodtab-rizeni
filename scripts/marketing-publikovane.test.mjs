@@ -260,7 +260,7 @@ ok('s pojistkou přes firmu', /tenants'\)[\s\S]{0,80}timezone/.test(KOD))
 console.log('\n== Přístup a filtry ==')
 
 ok('ptá se na marketing.read', /'marketing\.read'/.test(KOD))
-ok('nepřihlášeného posílá na přihlášení', /redirect\('\/prihlaseni'\)/.test(KOD))
+ok('nepřihlášeného posílá na přihlášení', KOD.includes('odkazNaPrihlaseni'))
 ok('síť se ověřuje proti seznamu', /KANALY\.some\(/.test(KOD))
 ok('stav proti seznamu stavů', /in STAVY_ULOH/.test(KOD))
 

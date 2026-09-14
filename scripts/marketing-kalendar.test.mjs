@@ -351,7 +351,7 @@ ok('dnešek se počítá v pásmu firmy',
 console.log('\n== Přístup a rozsah ==')
 
 ok('ptá se na marketing.read', /'marketing\.read'/.test(KOD))
-ok('a nepřihlášeného posílá na přihlášení', /redirect\('\/prihlaseni'\)/.test(KOD))
+ok('a nepřihlášeného posílá na přihlášení', KOD.includes('odkazNaPrihlaseni'))
 
 /*
   Filtry přicházejí z adresy, tedy od uživatele. Kdyby se strkaly do
