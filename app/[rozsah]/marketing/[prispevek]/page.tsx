@@ -10,7 +10,8 @@ import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/marketing-media'
 import { n8nJeNastaveny } from '@/lib/marketing-n8n'
-import { naplanovat, pozadatOSchvaleni, rozhodnoutOSchvaleni, ulozitVerzi } from '../akce'
+import { aiJeNastavena } from '@/lib/marketing-ai'
+import { naplanovat, navrhnoutText, pozadatOSchvaleni, rozhodnoutOSchvaleni, ulozitVerzi } from '../akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -108,10 +109,10 @@ export default async function DetailPrispevku({
   searchParams,
 }: {
   params: Promise<{ rozsah: string; prispevek: string }>
-  searchParams: Promise<{ ulozeno?: string; chyba?: string }>
+  searchParams: Promise<{ ulozeno?: string; chyba?: string; navrh?: string }>
 }) {
   const { rozsah, prispevek: prispevekId } = await params
-  const { ulozeno, chyba } = await searchParams
+  const { ulozeno, chyba, navrh } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
@@ -209,6 +210,7 @@ export default async function DetailPrispevku({
     dřív, než to nabídne.
   */
   const n8nHotovo = n8nJeNastaveny()
+  const aiHotova = aiJeNastavena()
   const jeSchvalena = p.schvalena_verze_id !== null && p.schvalena_verze_id === p.aktualni_verze_id
 
   return (
@@ -218,6 +220,45 @@ export default async function DetailPrispevku({
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '820px', display: 'grid', gap: '16px' }}>
         {ulozeno ? <p style={{ margin: 0, fontSize: '14px', color: 'var(--mosaz)' }}>Uloženo.</p> : null}
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
+        {navrh ? (
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--mosaz)' }}>
+            Návrh je hotový — je níž jako nová verze. Přečtěte si ho a upravte, co nesedí.
+          </p>
+        ) : null}
+
+        {/* --- AI NÁVRH --------------------------------------------- */}
+        {/*
+          Napsat zadání běžnou češtinou a nechat model připravit varianty.
+          Zadání, oddíl 11.
+
+          Bez připojené AI to nezmizí a nezešedne — vrátí se UKÁZKA
+          viditelně označená jako ukázka. Skryté tlačítko by znamenalo,
+          že se člověk nedozví, že ta možnost existuje.
+        */}
+        <form action={navrhnoutText} style={{ ...karta, display: 'grid', gap: '10px' }}>
+          <input type="hidden" name="rozsah" value={rozsah} />
+          <input type="hidden" name="prispevek" value={p.id} />
+          <div>
+            <h2 style={{ margin: '0 0 4px', fontSize: '16px' }}>Nechat navrhnout</h2>
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+              {aiHotova
+                ? 'Napište běžnou češtinou, co má příspěvek říct. Vrátí se dvě až tři varianty jako nová verze.'
+                : 'AI zatím není připojená — vrátí se ukázka označená jako ukázka, ne návrh od modelu.'}
+            </p>
+          </div>
+          <label>
+            <span style={popisek}>Co má příspěvek říct</span>
+            <textarea
+              name="pokyn"
+              rows={3}
+              style={{ ...pole, resize: 'vertical' }}
+              placeholder="Například: pozvánka na svíčkovou v pátek, vaříme ji podle babiččiny receptury"
+            />
+          </label>
+          <div>
+            <button type="submit" className="tlacitko">Navrhnout</button>
+          </div>
+        </form>
 
         {/* --- TEXT ------------------------------------------------ */}
         <form action={ulozitVerzi} style={{ ...karta, display: 'grid', gap: '14px' }}>

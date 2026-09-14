@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation'
 
 import type { Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { navrhnout } from '@/lib/marketing-ai'
+import { rozsifrovat } from '@/lib/marketing-klice'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -409,4 +411,188 @@ export async function naplanovat(formData: FormData): Promise<void> {
   redirect(zalozeno > 0
     ? `/${rozsah}/marketing/${prispevekId}?ulozeno=1`
     : `/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent('Na tuhle verzi už je publikace naplánovaná.')}`)
+}
+
+/**
+ * AI NÁVRH
+ *
+ * Zadání: master prompt, oddíl 11.
+ *
+ * ---------------------------------------------------------------------
+ * NÁVRH JE VERZE, NE POLÍČKO
+ *
+ * Návrh se ukládá jako nová verze — se vším, co k tomu patří: zruší
+ * schválení, dostane vlastní otisk a je vidět v historii. Kdyby se
+ * zapsal do stávající verze, přepsal by text, který už někdo schválil,
+ * a schválení by přestalo znamenat cokoli.
+ *
+ * ---------------------------------------------------------------------
+ * VARIANTY SE UKLÁDAJÍ VŠECHNY
+ *
+ * Model vrací dvě až tři. Do `texty` jde první, ale celý návrh zůstává
+ * v `navrh_ai`, takže se dá přepnout na jinou, aniž se volá znovu.
+ * Přepnutí je zase nová verze — viz výš.
+ */
+export async function navrhnoutText(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const prispevekId = String(formData.get('prispevek') ?? '')
+  const pokyn = String(formData.get('pokyn') ?? '').trim()
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(co)}`)
+
+  if (pokyn.length < 5) {
+    zpet('Napište aspoň větu o tom, co má příspěvek říct.')
+  }
+
+  const prispevek = await jeden<{ branch_id: string; kanaly: string[] }>(
+    'příspěvek',
+    supabase.from('marketing_prispevky')
+      .select('branch_id, kanaly')
+      .eq('id', prispevekId)
+      .maybeSingle(),
+  )
+  if (!prispevek) zpet('Příspěvek neexistuje.')
+
+  const soucasna = await jeden<{ cislo: number; vstupy: Record<string, unknown>; media_ids: string[]; titulni_media_id: string | null }>(
+    'aktuální verze',
+    supabase.from('marketing_verze')
+      .select('cislo, vstupy, media_ids, titulni_media_id')
+      .eq('prispevek_id', prispevekId)
+      .order('cislo', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  )
+  if (!soucasna) zpet('Příspěvek nemá žádnou verzi.')
+
+  // Značka: pobočkový řádek přebíjí firemní, rozhoduje o tom databáze.
+  const znacka = await jeden<{
+    ton_hlasu: string; pouzivat_emoji: boolean; podpis: string; kontakt: string
+    vyrazy_ano: string[]; vyrazy_ne: string[]
+  }>(
+    'značka',
+    supabase.rpc('marketing_znacka', { p_tenant: tenantId, p_branch: prispevek!.branch_id })
+      .maybeSingle(),
+  )
+
+  /*
+    Popisky fotek, ne fotky samotné. Model dostane text „talíř svíčkové
+    shora", ne obrázek — obrázky by stály násobek a k napsání popisku
+    nepřidají tolik.
+  */
+  let fotky: string[] = []
+  if ((soucasna!.media_ids ?? []).length > 0) {
+    const media = await seznam<{ alt_text: string; popis: string }>(
+      'popisky fotek',
+      supabase.from('marketing_media')
+        .select('alt_text, popis')
+        .eq('tenant_id', tenantId)
+        .in('id', soucasna!.media_ids),
+    )
+    fotky = media.map((m) => (m.alt_text || m.popis).trim()).filter(Boolean)
+  }
+
+  const vysledek = await navrhnout(
+    {
+      pokyn,
+      kanal: prispevek!.kanaly?.[0] ?? 'instagram',
+      format: 'prispevek',
+      znacka: {
+        tonHlasu: znacka?.ton_hlasu ?? 'neformalni',
+        pouzivatEmoji: znacka?.pouzivat_emoji ?? true,
+        podpis: znacka?.podpis ?? '',
+        kontakt: znacka?.kontakt ?? '',
+        vyrazyAno: znacka?.vyrazy_ano ?? [],
+        vyrazyNe: znacka?.vyrazy_ne ?? [],
+      },
+      fotky,
+    },
+    await klicZakaznika(supabase, tenantId, prispevek!.branch_id),
+  )
+
+  if (vysledek.stav === 'chyba') zpet(vysledek.duvod)
+  if (vysledek.stav !== 'hotovo') return
+
+  const prvni = vysledek.navrh.varianty[0]
+  const kanal = prispevek!.kanaly?.[0] ?? 'instagram'
+
+  const obsah: ObsahVerze = {
+    zadani: pokyn,
+    vstupy: soucasna!.vstupy ?? {},
+    vybrana_varianta: prvni.nazev,
+    texty: { [kanal]: { popisek: `${prvni.hook}\n\n${prvni.popisek}\n\n${prvni.cta}`.trim() } },
+    storyboard: vysledek.navrh.storyboard.length > 0 ? vysledek.navrh.storyboard : null,
+    media_ids: soucasna!.media_ids ?? [],
+    titulni_media_id: soucasna!.titulni_media_id ?? null,
+  }
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const { error } = await supabase.from('marketing_verze').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevekId,
+    cislo: soucasna!.cislo + 1,
+    zadani: obsah.zadani,
+    vstupy: obsah.vstupy,
+    navrh_ai: vysledek.navrh,
+    vybrana_varianta: obsah.vybrana_varianta,
+    texty: obsah.texty,
+    storyboard: obsah.storyboard,
+    media_ids: obsah.media_ids,
+    titulni_media_id: obsah.titulni_media_id,
+    otisk: otiskVerze(obsah),
+    poznamka: vysledek.jeUkazka ? 'Ukázka bez připojené AI' : 'Návrh od AI',
+    ai_model: vysledek.model,
+    ai_verze_zadani: vysledek.verzeZadani,
+    vytvoril: ja,
+  })
+
+  if (error) zpet(error.message)
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`/${rozsah}/marketing/${prispevekId}?navrh=1`)
+}
+
+/**
+ * Klíč zákazníka k AI, pokud si ho připojil.
+ *
+ * Čte se přes `app.marketing_precti_tajemstvi`, která se sama ptá na
+ * `marketing.publish` — přímo do tabulky s klíči se nesahá, ta pro
+ * přihlášeného nemá žádný grant.
+ *
+ * Když připojení není, vrátí se null a rozhodne `lib/marketing-ai`:
+ * klíč Foodtabu, nebo ukázka. Chybějící připojení NENÍ chyba.
+ */
+async function klicZakaznika(
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+  tenantId: string,
+  branchId: string,
+): Promise<string | null> {
+  const pripojeni = await jeden<{ id: string }>(
+    'připojení k AI',
+    supabase.from('marketing_pripojeni')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('kategorie', 'ai_text')
+      .is('odpojeno_kdy', null)
+      .or(`branch_id.eq.${branchId},branch_id.is.null`)
+      .order('branch_id', { nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+  ).catch(() => null)
+
+  if (!pripojeni) return null
+
+  const { data, error } = await supabase.rpc('marketing_precti_tajemstvi', {
+    p_pripojeni: pripojeni.id,
+  })
+  if (error || typeof data !== 'string' || !data) return null
+
+  try {
+    return rozsifrovat(data).klic ?? null
+  } catch {
+    // Rozbitá šifra není důvod obrazovku položit — spadne se na ukázku.
+    return null
+  }
 }
