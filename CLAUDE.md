@@ -326,8 +326,9 @@ a nech ji tomu, kdo ho píše.
   Zjistilo se to 14. 9. 2026 při nasazení kampaní a měření. Modul
   marketing je uklizený (`20260914190000_marketing_granty_uklid2.sql`),
   **provozní tabulky ne — `truncate` tam `authenticated` pořád má, na
-  všech 52.** Je to nahlášené v `docs/hlaseni/stav-2026-09-14.md`
-  a čeká to na relaci provoz.
+  všech 51, a granty pro `anon` taky.** Zadání pro relaci provoz je
+  v `docs/granty-provoz-zadani.md`, nález v
+  `docs/hlaseni/stav-2026-09-14.md`.
 
 - Peníze v celých haléřích jako `integer`, ne `float`.
 - Časy `timestamptz`, provozní datum jako `date`.
