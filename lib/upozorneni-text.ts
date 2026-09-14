@@ -45,6 +45,14 @@ export type TeloUpozorneni = {
   prichod?: string
   pobocka?: string
   pobocka_slug?: string
+  // marketing.*
+  prispevek?: string
+  nazev?: string
+  schvaleno?: boolean
+  pripominka?: string
+  kanal?: string
+  pokusy?: number
+  duvod?: string
 }
 
 /** Nadpis podle druhu. Neznámý druh se nezamlčí — ať je vidět, že přišel. */
@@ -93,6 +101,27 @@ export function nadpisUpozorneni(
       return 'Nové oznámení na nástěnce'
     case 'vzkaz.novy':
       return 'Nová zpráva v rozhovoru'
+    /*
+      MARKETING. Zadání, oddíl 14: notifikace při žádosti o schválení,
+      vrácení, schválení a selhání publikace.
+
+      Nadpis říká, CO SE STALO, ne co je to za druh zprávy. „Čeká na
+      vaše odklepnutí" je výzva; „Marketing — žádost" by byl štítek,
+      ze kterého člověk nepozná, jestli má něco udělat.
+    */
+    case 'marketing.zadost':
+      return `${telo.nazev || 'Příspěvek'} čeká na vaše odklepnutí`
+    case 'marketing.rozhodnuto':
+      return telo.schvaleno
+        ? `${telo.nazev || 'Příspěvek'} je schválený`
+        : `${telo.nazev || 'Příspěvek'} vám vrátili`
+    /*
+      Selhání se říká nahlas a bez obalu. „Nevyšlo" by znělo jako
+      drobnost — přitom to znamená, že příspěvek na síti NENÍ a bez
+      člověka tam nebude.
+    */
+    case 'marketing.publikace_selhala':
+      return `${telo.nazev || 'Příspěvek'} se nepodařilo zveřejnit`
     default:
       return 'Upozornění'
   }
@@ -136,4 +165,53 @@ export function popisOpravneni(telo: TeloUpozorneni): string {
   const kusy = [telo.role, ...(telo.pobocky ?? [])].filter(Boolean)
   if (kusy.length === 0) return 'Oprávnění už má.'
   return `Má oprávnění ${kusy.join(', ')}.`
+}
+
+
+/**
+ * Věta pod nadpisem u marketingových upozornění.
+ *
+ * ---------------------------------------------------------------------
+ * CO SE V NÍ ŘÍKÁ A CO NE
+ *
+ * U žádosti KDO o ni požádal a na které provozovně — podle toho se
+ * pozná, jestli to je na mně. U vrácení PŘIPOMÍNKA, protože bez ní je
+ * zpráva k ničemu: člověk ví, že to neprošlo, a netuší proč.
+ *
+ * U selhání PŮVODNÍ HLÁŠKA od poskytovatele, i když je anglicky.
+ * Radu česky má obrazovka Publikované; tady jde o to, aby šlo
+ * dohledat, co se doopravdy stalo.
+ */
+export function popisMarketingu(druh: string, telo: TeloUpozorneni): string {
+  if (druh === 'marketing.zadost') {
+    const kdo = telo.kdo ? `${telo.kdo} žádá o schválení.` : 'Někdo žádá o schválení.'
+    return telo.pobocka ? `${kdo} ${telo.pobocka}.` : kdo
+  }
+
+  if (druh === 'marketing.rozhodnuto') {
+    const kdo = telo.kdo ?? 'Někdo'
+    if (telo.schvaleno) {
+      return `${kdo} ho schválil. Teď se dá naplánovat ke zveřejnění.`
+    }
+    /*
+      PŘIPOMÍNKA JE TU POVINNÁ ČÁST VĚTY, ne doplněk. Zamítnutí bez
+      důvodu databáze ani nedovolí (`marketing_schvaleni_zamitnuti_ma_duvod`),
+      takže prázdná být nemá — a když přece je, řekne se to nahlas
+      místo mlčení.
+    */
+    return telo.pripominka
+      ? `${kdo} ho vrátil: ${telo.pripominka}`
+      : `${kdo} ho vrátil, ale nenapsal proč.`
+  }
+
+  if (druh === 'marketing.publikace_selhala') {
+    const kam = telo.kanal === 'instagram' ? 'Instagram'
+      : telo.kanal === 'facebook' ? 'Facebook'
+        : telo.kanal ?? 'sítě'
+    const pokusy = telo.pokusy && telo.pokusy > 1 ? ` po ${telo.pokusy} pokusech` : ''
+    const duvod = telo.duvod ? ` Hlášení: ${telo.duvod}` : ''
+    return `Na ${kam} to neodešlo${pokusy}. Na síti to není a samo se to už nezkusí.${duvod}`
+  }
+
+  return ''
 }

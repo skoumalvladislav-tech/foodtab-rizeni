@@ -26,6 +26,7 @@ import fs from 'node:fs'
 import {
   denCesky,
   nadpisUpozorneni,
+  popisMarketingu,
   popisOpravneni,
   popisZapomenuteho,
 } from '../lib/upozorneni-text.ts'
@@ -187,6 +188,157 @@ for (const f of soubory) {
     .join('.pridat(')
   ma(`${f} neslibuje push`, /\bpush\b/i.test(vykreslene), false)
 }
+
+console.log('\n== Marketing: žádost, rozhodnutí, selhání ==')
+
+/*
+  Zadání, oddíl 14: „pošli notifikaci při žádosti o schválení, vrácení,
+  schválení a selhání publikace".
+
+  NADPIS ŘÍKÁ, CO SE STALO, NE CO JE TO ZA DRUH ZPRÁVY. „Čeká na vaše
+  odklepnutí" je výzva; „Marketing — žádost" by byl štítek, ze kterého
+  člověk nepozná, jestli má něco udělat.
+*/
+const zadost = { prispevek: 'p1', nazev: 'Zabijačka', pobocka: 'Černá Perla', kdo: 'Danuše' }
+
+ma('žádost vyzývá k odklepnutí',
+  nadpisUpozorneni('marketing.zadost', zadost, obdobi),
+  'Zabijačka čeká na vaše odklepnutí')
+
+ma('a v textu je vidět kdo a kde',
+  popisMarketingu('marketing.zadost', zadost),
+  'Danuše žádá o schválení. Černá Perla.')
+
+/*
+  Bezejmenný příspěvek se nesmí přeložit na prázdno — nadpis „ čeká na
+  vaše odklepnutí" vypadá jako chyba vykreslování.
+*/
+ma('bez názvu se řekne aspoň „Příspěvek"',
+  nadpisUpozorneni('marketing.zadost', {}, obdobi),
+  'Příspěvek čeká na vaše odklepnutí')
+
+ma('a bez jména žadatele se to nezamlčí',
+  popisMarketingu('marketing.zadost', { nazev: 'X' }),
+  'Někdo žádá o schválení.')
+
+console.log('')
+
+const schvaleno = { prispevek: 'p1', nazev: 'Zabijačka', schvaleno: true, kdo: 'Provozní' }
+const vraceno = { prispevek: 'p1', nazev: 'Zabijačka', schvaleno: false, kdo: 'Provozní', pripominka: 'Chybí cena.' }
+
+ma('schválení a vrácení mají JINÝ nadpis',
+  [nadpisUpozorneni('marketing.rozhodnuto', schvaleno, obdobi),
+   nadpisUpozorneni('marketing.rozhodnuto', vraceno, obdobi)].join(' | '),
+  'Zabijačka je schválený | Zabijačka vám vrátili')
+
+/*
+  U VRÁCENÍ JE PŘIPOMÍNKA POVINNÁ ČÁST VĚTY, ne doplněk. Bez ní je
+  zpráva k ničemu: člověk ví, že to neprošlo, a netuší proč.
+*/
+ma('u vrácení je vidět připomínka',
+  popisMarketingu('marketing.rozhodnuto', vraceno),
+  'Provozní ho vrátil: Chybí cena.')
+
+ma('a chybějící připomínka se řekne nahlas, ne zamlčí',
+  popisMarketingu('marketing.rozhodnuto', { schvaleno: false, kdo: 'Provozní' }),
+  'Provozní ho vrátil, ale nenapsal proč.')
+
+ma('u schválení se řekne, co dál',
+  popisMarketingu('marketing.rozhodnuto', schvaleno),
+  'Provozní ho schválil. Teď se dá naplánovat ke zveřejnění.')
+
+console.log('')
+
+const selhani = {
+  prispevek: 'p1', nazev: 'Zabijačka', kanal: 'instagram',
+  pokusy: 5, duvod: 'The access token has expired.',
+}
+
+/*
+  SELHÁNÍ SE ŘÍKÁ NAHLAS. „Nevyšlo" by znělo jako drobnost — přitom
+  to znamená, že příspěvek na síti NENÍ a bez člověka tam nebude.
+*/
+ma('selhání nezlehčuje',
+  nadpisUpozorneni('marketing.publikace_selhala', selhani, obdobi),
+  'Zabijačka se nepodařilo zveřejnit')
+
+const textSelhani = popisMarketingu('marketing.publikace_selhala', selhani)
+ma('v textu je síť', /Instagram/.test(textSelhani), true)
+ma('a počet pokusů', /5 pokusech/.test(textSelhani), true)
+ma('a že se to samo už nezkusí', /nezkusí/.test(textSelhani), true)
+
+/*
+  PŮVODNÍ HLÁŠKA OD POSKYTOVATELE ZŮSTÁVÁ, i když je anglicky a mluví
+  o tokenech. Radu česky má obrazovka Publikované; tady jde o to, aby
+  šlo dohledat, co se doopravdy stalo.
+*/
+ma('a původní hláška od poskytovatele', /access token has expired/.test(textSelhani), true)
+
+ma('jeden pokus se nepočítá do věty',
+  /pokusech/.test(popisMarketingu('marketing.publikace_selhala', { kanal: 'facebook', pokusy: 1 })),
+  false)
+
+ma('neznámý druh nevrací větu', popisMarketingu('neco.jineho', {}), '')
+
+console.log('\n== Obrazovka to opravdu volá ==')
+
+/*
+  Texty můžou být sebelíp napsané — když je obrazovka nevolá, neověřuje
+  se nic. Komentáře se vyškrtávají, jinak by se kontrola trefila do
+  vlastního vysvětlení.
+*/
+const OBRAZOVKA = fs.readFileSync('app/[rozsah]/upozorneni/page.tsx', 'utf8')
+const OBRAZOVKA_KOD = OBRAZOVKA
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/^\s*\/\/.*$/gm, ' ')
+
+ma('obrazovka volá popisMarketingu', /popisMarketingu\(/.test(OBRAZOVKA_KOD), true)
+ma('a kreslí všechny marketingové druhy', /marketing\./.test(OBRAZOVKA_KOD), true)
+
+/*
+  ŽÁDOST VEDE DO FRONTY, OSTATNÍ DO PŘÍSPĚVKU. Cesta ke splnění úkolu
+  má být jedno kliknutí, stejně jako u zapomenutého odchodu.
+*/
+ma('žádost vede do fronty ke schválení',
+  /marketing\/schvalovani/.test(OBRAZOVKA_KOD), true)
+ma('ostatní do příspěvku',
+  /marketing\/\$\{z\.telo\.prispevek/.test(OBRAZOVKA_KOD), true)
+
+console.log('\n== Upozornění píše databáze, ne aplikace ==')
+
+/*
+  `notifications` nemá pro `authenticated` grant na `insert`. Kdyby
+  marketingová upozornění posílala serverová akce, nepřišla by
+  u ničeho, co jde mimo obrazovku — třeba u úlohy, která zruší
+  publikaci kvůli nové verzi.
+*/
+const MIGRACE_UP = fs.readFileSync('supabase/migrations/20260914160000_marketing_upozorneni.sql', 'utf8')
+
+for (const t of ['marketing_upozorni_na_zadost', 'marketing_upozorni_na_rozhodnuti', 'marketing_upozorni_na_selhani']) {
+  ma(`spoušť ${t} existuje`, new RegExp(`create trigger trg_${t}`).test(MIGRACE_UP), true)
+}
+
+ma('žádné upozornění se neposílá z akcí marketingu',
+  /from\('notifications'\)/.test(fs.readFileSync('app/[rozsah]/marketing/akce.ts', 'utf8')),
+  false)
+
+/*
+  SÁM SOBĚ SE NEPÍŠE. Kdo o schválení požádal, nedostane zprávu, že
+  o něj někdo požádal. Zní to samozřejmě, ale je to nejčastější chyba
+  v upozorněních vůbec — a lidé si pak odvyknou je číst.
+*/
+ma('žadatel nedostane zprávu o vlastní žádosti',
+  /k\.user_id is distinct from v_zadal/.test(MIGRACE_UP), true)
+ma('a kdo rozhodl o své vlastní, taky ne',
+  /new\.rozhodl = new\.zadal/.test(MIGRACE_UP), true)
+
+/*
+  JEN `vzdano`, NE KAŽDÉ `selhalo`. Fronta má pět pokusů; zpráva
+  u každého by znamenala pět zpráv o jednom příspěvku, který nakonec
+  vyjde.
+*/
+ma('u publikace se hlásí až vzdání, ne každý pokus',
+  /new\.stav <> 'vzdano' or old\.stav = 'vzdano'/.test(MIGRACE_UP), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

@@ -43,7 +43,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 11 | AI marketingový agent | **hotovo** | Návrh textu a storyboardu. Mzdy, docházka ani kontakty do modelu nejdou |
 | 12 | Automatická grafika a video | **chybí** | Tabulka `marketing_render_ulohy` stojí, **žádný renderer není napojený**. Shotstack je zmíněný v komentářích, adaptér ne |
 | 13 | Editor a náhled | **rozestavěné** | Text, cena, termín a fotky se měnit dají. **Náhled IG a FB vedle sebe, bezpečné zóny, obnovení starší verze a duplikace návrhu chybí** |
-| 14 | Schvalování a verzování | **hotovo** | Čtyři oči, otisk verze, nová verze ruší schválení, hromadné schválení, auditní stopa. **Chybí jediné: upozornění** (žádost, vrácení, schválení, selhání) |
+| 14 | Schvalování a verzování | **hotovo** | Čtyři oči, otisk verze, nová verze ruší schválení, hromadné schválení, auditní stopa. **Upozornění hotová (14. 9.)** — na žádost, schválení, vrácení i vzdanou publikaci, v aplikaci. E-mail a push zatím ne |
 | 15 | Kalendář, kampaně, automatizace | **hotovo** (14. 9.) | Kalendář (měsíc, týden, filtry, pilíře barvou, varování, přesun termínu) a kampaně se sérií pozvánka → připomínka → poslední výzva → poděkování. Automatizace s vypínačem, vlastníkem, příštím během a historií. Úloha `api/uloha/marketing-automatizace` je pouští po hodinách. **Zbývá evergreen (zásoba na prázdné dny) — dnes se přeskakuje** |
 | 16 | Publikování na IG a FB | **rozestavěné** | Fronta úloh, opakování, dead-letter, idempotence, „nikdy falešné zveřejněno" — hotové. **Facebook rovnocenně s Instagramem (14. 9.)**: pravidla sítí jako data (`lib/marketing-kanaly.ts`), FB projde i samotným textem, oddělený text a strop znaků pro každou síť, účet pobočky se vyplňuje. **Zbývá n8n workflow pro FB a načítání účtů z Mety** |
 | 17 | Inspirace z jiných nástrojů | **rozestavěné** | **Obsahové pilíře** (14. 9., šest, barvou v kalendáři) a **mini-kampaň z akce** (série ke kampani) hotové. Chybí schránka nápadů, checklist podkladů, QR a UTM, týdenní report, chytré znovupoužití staršího obsahu |
@@ -54,7 +54,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 22 | Obrazovky MVP | **13 ze 16** | Rozepsané v oddílu 3 |
 | 23 | Bezpečnost a provoz | **hotovo** | Klíče šifrované, `service_role` na serveru, dvě obranné linie, audit |
 | 24 | Seed data | **chybí** | Ukázková cesta pro nového zákazníka není |
-| 25 | Testy a akceptace | **hotovo** | 12 scénářů v databázi (1236 kontrol proti PostgreSQL 16), 18 kontrol v Node. Každá nová kontrola prošla sabotáží |
+| 25 | Testy a akceptace | **hotovo** | 13 scénářů v databázi (1259 kontrol proti PostgreSQL 16), 18 kontrol v Node. Každá nová kontrola prošla sabotáží |
 | 26 | Dokumentace | **rozestavěné** | `marketing-je-modul.md`, `marketing-spusteni.md`, `marketing-nastroje.md`. **Manuál pro obsluhu chybí** |
 | 27 | Rozdělení realizace | — | Etapa 1 z velké části hotová, etapa 2 sotva začatá |
 
@@ -146,7 +146,7 @@ jsou v tabulkách výš.
 | **Editor** (oddíl 13) | Náhled Instagramu a Facebooku vedle sebe, bezpečné zóny, obnovení starší verze, duplikace návrhu, nová AI varianta jen pro vybranou část |
 | **Průvodce vytvořením** (obrazovka 5) | Všechny kroky existují, ale každý jinde. Průvodce, který vede za ruku, není |
 | **Auditní přehled marketingu** (obrazovka 16) | Data v `audit_log` jsou, obrazovka „kdo co schválil a zveřejnil" ne |
-| **Upozornění** (oddíl 14) | Na žádost o schválení, vrácení, schválení a selhání publikace. Dnes se to člověk dozví, jen když se sám podívá |
+| **Upozornění mimo aplikaci** (oddíl 14) | V aplikaci chodí od 14. 9. E-mail a push ne — přijdou nad toutéž tabulkou, ne vedle ní |
 | **Nástroje** (oddíl 3.1) | OAuth (dnes jen vlastní klíč) a sledování spotřeby |
 | **Evergreen** (oddíl 15) | Druh automatizace „zásoba na prázdné dny" se dnes jen přeskočí |
 
