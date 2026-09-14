@@ -72,6 +72,27 @@ na řádek. Je to chybějící první obranná linie, ne díra —
 
 ---
 
+## Nejdřív `audit_log` — a proč je jiná než ostatních 50
+
+Je mezi těmi 51 tabulkami, ale nepatří do řady. Neměnnost auditu
+hlídají pravidla `audit_log_no_update` a `audit_log_no_delete` — jenže
+**pravidla `truncate` nezachytí, RLS taky ne**, a grant `TRUNCATE`
+na ní `authenticated` i `anon` mají (ověřeno 14. 9. odpoledne). Jedním
+příkazem zmizí auditní stopa všech firem, včetně záznamu o tom, že
+zmizela.
+
+Takže:
+
+- **`audit_log` dej do migrace jako první řádek** a v hlavičce ji
+  jmenuj zvlášť.
+- Odeber jí i `insert` a `update` pro obě role — do auditu píše jen
+  `app.audit()` jako `security definer`, nikdo jiný. `delete` odeber
+  taky; kaskáda při zániku firmy jde jinou cestou a grant na ni
+  nepotřebuje. **Ověř to ale scénářem, který firmu opravdu založí
+  a smaže** (`krok21` to umí), ne úvahou.
+- `select` nech — obrazovka Nastavení audit čte a politika
+  `audit_select` ho hlídá.
+
 ## Co udělat
 
 ### Krok 1 — ověř, že veřejné obrazovky na tabulky přímo nesahají

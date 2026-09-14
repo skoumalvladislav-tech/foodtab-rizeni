@@ -326,7 +326,8 @@ a nech ji tomu, kdo ho píše.
   Zjistilo se to 14. 9. 2026 při nasazení kampaní a měření. Modul
   marketing je uklizený (`20260914190000_marketing_granty_uklid2.sql`),
   **provozní tabulky ne — `truncate` tam `authenticated` pořád má, na
-  všech 51, a granty pro `anon` taky.** Zadání pro relaci provoz je
+  všech 51, a granty pro `anon` taky. Mezi nimi i `audit_log`, kde
+  pravidla proti `update`/`delete` `truncate` nezastaví.** Zadání pro relaci provoz je
   v `docs/granty-provoz-zadani.md`, nález v
   `docs/hlaseni/stav-2026-09-14.md`.
 
