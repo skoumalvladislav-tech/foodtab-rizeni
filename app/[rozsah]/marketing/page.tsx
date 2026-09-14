@@ -133,6 +133,12 @@ export default async function Marketing({
           <Link href={`/${rozsah}/marketing/media`} className="ft-tl">
             Fotky
           </Link>
+
+          {/* Šablony vidí taky každý, kdo vidí marketing — je to nabídka,
+              ze které se při tvorbě vybírá, ne rozdělaná práce. */}
+          <Link href={`/${rozsah}/marketing/sablony`} className="ft-tl">
+            Šablony
+          </Link>
         </div>
 
         {!maZnacku ? (

@@ -7,6 +7,7 @@ import type { Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { navrhnout } from '@/lib/marketing-ai'
 import { rozsifrovat } from '@/lib/marketing-klice'
+import { doporuceneRadky } from '@/lib/marketing-sablony'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -595,4 +596,70 @@ async function klicZakaznika(
     // Rozbitá šifra není důvod obrazovku položit — spadne se na ukázku.
     return null
   }
+}
+
+/**
+ * NAČTENÍ DOPORUČENÝCH ŠABLON
+ *
+ * Zadání: master prompt, oddíl 9 („Knihovna gastro šablon").
+ *
+ * ---------------------------------------------------------------------
+ * KATALOG JE NABÍDKA, ŠABLONA FIRMY JE ŘÁDEK
+ *
+ * Doporučené šablony jsou v `lib/marketing-sablony.ts` jako produktová
+ * data. Tahle akce z nich udělá řádky té firmy — a od té chvíle si je
+ * firma upravuje, vypíná a maže sama (CLAUDE.md, pravidlo 1).
+ *
+ * ---------------------------------------------------------------------
+ * OPAKOVANÉ NAČTENÍ NESMÍ PŘEPSAT ÚPRAVY
+ *
+ * Kdo si šablonu přejmenoval nebo vypnul, o to nesmí přijít tím, že
+ * někdo znovu klikne na „Načíst doporučené". Vkládá se proto jen to,
+ * co ve firmě ještě není — podle `klic`, na kterém je jedinečnost
+ * (`marketing_sablony_klic`).
+ */
+export async function nacistDoporuceneSablony(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/sablony?chyba=${encodeURIComponent(co)}`)
+
+  const stavajici = await seznam<{ klic: string }>(
+    'stávající šablony',
+    supabase.from('marketing_sablony').select('klic').eq('tenant_id', tenantId),
+  )
+  const uz = new Set(stavajici.map((s) => s.klic))
+
+  const chybejici = doporuceneRadky(tenantId).filter((r) => !uz.has(String(r.klic)))
+
+  if (chybejici.length === 0) {
+    redirect(`/${rozsah}/marketing/sablony?nic=1`)
+  }
+
+  const { error } = await supabase.from('marketing_sablony').insert(chybejici)
+  if (error) zpet(error.message)
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`/${rozsah}/marketing/sablony?nacteno=${chybejici.length}`)
+}
+
+/** Zapnout nebo vypnout šablonu. Vypnutá se nenabízí při tvorbě. */
+export async function prepnoutSablonu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('sablona') ?? '')
+  const zapnout = String(formData.get('zapnout') ?? '') === '1'
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const { error } = await supabase.from('marketing_sablony')
+    .update({ aktivni: zapnout, zmeneno_kdy: new Date().toISOString() })
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/sablony?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/marketing/sablony`)
+  redirect(`/${rozsah}/marketing/sablony?ulozeno=1`)
 }
