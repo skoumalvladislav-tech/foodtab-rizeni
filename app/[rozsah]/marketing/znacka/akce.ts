@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { delkaVidea, neboNull, seznamVyrazu } from '@/lib/marketing-text'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -28,7 +29,7 @@ export async function ulozitZnacku(formData: FormData): Promise<void> {
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, 'marketing.manage', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing`)
 
   const branchId = pristup.scope.branchId

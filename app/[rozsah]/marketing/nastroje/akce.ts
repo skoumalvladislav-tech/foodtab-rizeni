@@ -13,6 +13,7 @@ import {
 } from '@/lib/marketing-katalog'
 import { rozsifrovat, zasifrovat, sifrovaniJeNastavene } from '@/lib/marketing-klice'
 import { otestovatSpojeni } from '@/lib/marketing-spojeni'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -54,7 +55,7 @@ async function pripravit(rozsah: string) {
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, 'marketing.publish', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing/nastroje`)
 
   return {

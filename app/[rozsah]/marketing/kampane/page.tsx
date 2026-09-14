@@ -6,6 +6,7 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { KANALY } from '@/lib/marketing'
 import { PILIRE, popisPilire } from '@/lib/marketing-kalendar'
 import { DNY_ZKRATKY_ISO, DRUHY_AUTOMATIZACE, popisDnu } from '@/lib/marketing-kampane'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
@@ -110,7 +111,7 @@ export default async function Kampane({
   }
 
   const pristup = await zkusPristup(tenantId, 'marketing.read', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return (
       <Sdeleni nadpis="Na tohle nemáte oprávnění">

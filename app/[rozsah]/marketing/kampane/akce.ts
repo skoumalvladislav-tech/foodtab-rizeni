@@ -7,6 +7,7 @@ import { getUser, type Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { navrhnoutSerii, pristiBeh } from '@/lib/marketing-kampane'
 import { otiskVerze, prazdnyObsah } from '@/lib/marketing'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -50,7 +51,7 @@ async function pripravit(rozsah: string, pravo: Permission) {
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, pravo, rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing/kampane`)
 
   return {

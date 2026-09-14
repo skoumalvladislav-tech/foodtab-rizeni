@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { getUser } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { doporuceneUtm, novyKlic, zkontrolovatCil } from '@/lib/marketing-odkazy'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -29,7 +30,7 @@ export async function zalozitOdkaz(formData: FormData): Promise<void> {
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, 'marketing.manage', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing/analytika`)
 
   const branchId = pristup.scope.branchId
@@ -109,7 +110,7 @@ export async function vypnoutOdkaz(formData: FormData): Promise<void> {
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, 'marketing.manage', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing/analytika`)
 
   const supabase = await getServerSupabase()

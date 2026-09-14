@@ -8,6 +8,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { KBELIK, cestaVUlozisti } from '@/lib/marketing-media'
 import { precistObrazek } from '@/lib/marketing-obrazek'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -38,7 +39,7 @@ async function pripravit(rozsah: string, pravo: 'marketing.read' | 'marketing.ma
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, pravo, rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing`)
 
   return {

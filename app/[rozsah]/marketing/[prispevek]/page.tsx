@@ -5,6 +5,7 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { KANALY, textProKanal } from '@/lib/marketing'
 import { pravidlaKanalu, zkontrolovat } from '@/lib/marketing-kanaly'
 import { popisStavu, popisStavuUlohy } from '@/lib/marketing-text'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
@@ -115,7 +116,7 @@ export default async function DetailPrispevku({
   }
 
   const pristup = await zkusPristup(tenantId, 'marketing.read', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return (
       <Sdeleni nadpis="Marketing není zapnutý">

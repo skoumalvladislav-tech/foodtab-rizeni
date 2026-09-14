@@ -12,6 +12,7 @@ import { rozpoznatMenuZTextu, type MenuRozpoznanaPolozka } from '@/lib/marketing
 import { precistObrazek } from '@/lib/marketing-obrazek'
 import { doporuceneRadky } from '@/lib/marketing-sablony'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -66,7 +67,7 @@ async function pripravit(rozsah: string, pravo: Permission) {
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, pravo, rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing`)
 
   return {

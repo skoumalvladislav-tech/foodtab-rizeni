@@ -11,6 +11,7 @@ import {
   popisUkazatele,
   popisZdroje,
 } from '@/lib/marketing-odkazy'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { qrSvg } from '@/lib/qr'
 import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -102,7 +103,7 @@ export default async function Analytika({
   }
 
   const pristup = await zkusPristup(tenantId, 'marketing.read', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return (
       <Sdeleni nadpis="Na tohle nemáte oprávnění">

@@ -13,6 +13,7 @@ import {
   radaKeStavu,
   spocitatUlohy,
 } from '@/lib/marketing-text'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
@@ -131,7 +132,7 @@ export default async function Publikovane({
   }
 
   const pristup = await zkusPristup(tenantId, 'marketing.read', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return (
       <Sdeleni nadpis="Na tohle nemáte oprávnění">
