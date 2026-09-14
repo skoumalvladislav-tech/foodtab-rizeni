@@ -35,7 +35,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 3.1 | **Zákazník si volí nástroje** | **hotovo** (14. 9.) | Obrazovka `marketing/nastroje`, katalog v `lib/marketing-katalog.ts`, zkouška spojení, čtyři režimy. Chybí OAuth a sledování spotřeby — `docs/marketing-nastroje.md`, oddíl 7 |
 | 4 | Jazyk, vzhled, ovládání | **hotovo** | Česky, podle `docs/vzhled-predloha.html` |
 | 5 | Organizace, provozovny, role | **hotovo** | Přebírá se z Foodtabu — `app.has_access`, žádná druhá kopie |
-| 6 | První spuštění a připojení nástrojů | **rozestavěné** | Stránka Integrace a nástroje je (14. 9.). **Průvodce prvním spuštěním** — otázky na priority a z nich doporučená sestava — není |
+| 6 | První spuštění a připojení nástrojů | **hotovo** (14. 9.) | Stránka Nástroje i **průvodce prvním spuštěním** (`marketing/zacatek`) — čtyři otázky a z nich doporučená sestava s důvodem u každé položky |
 | 7 | Brand kit provozovny | **hotovo** | Obrazovka **Značka** |
 | 8 | Mediální knihovna | **hotovo** | Obrazovka **Fotky**, kbelík s pravidly přístupu, oddělení podle poboček |
 | 9 | Knihovna gastro šablon | **hotovo** | 40 šablon, 10 výstupních formátů, doporučování podle podkladů |
@@ -51,7 +51,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 19 | Databázový model | **hotovo** | 19 tabulek, RLS všude, granty prověřené |
 | 20 | API a integrace do Foodtabu | **hotovo** | Modul JE uvnitř Foodtabu, takže odpadlo. Ven vedou `api/uloha/marketing-fronta` a `api/uloha/marketing-automatizace` |
 | 21 | n8n jako volitelný poskytovatel | **hotovo** | Ale **vypnuté** — viz oddíl 5 níž |
-| 22 | Obrazovky MVP | **15 ze 16** | Rozepsané v oddílu 3 |
+| 22 | Obrazovky MVP | **16 ze 16** | Rozepsané v oddílu 3 |
 | 23 | Bezpečnost a provoz | **hotovo** | Klíče šifrované, `service_role` na serveru, dvě obranné linie, audit |
 | 24 | Seed data | **chybí** | Ukázková cesta pro nového zákazníka není |
 | 25 | Testy a akceptace | **hotovo** | 14 scénářů v databázi (1281 kontrol proti PostgreSQL 16), 20 kontrol v Node. Každá nová kontrola prošla sabotáží |
@@ -65,7 +65,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | # | Obrazovka | Stav | Kde je |
 |---|---|---|---|
 | 1 | Přihlášení | **hotovo** | Foodtab, `/prihlaseni` |
-| 2 | Průvodce prvním nastavením | **chybí** | — |
+| 2 | Průvodce prvním nastavením | **hotovo** (14. 9.) | `marketing/zacatek` — čtyři otázky, doporučená sestava, u každé položky napsané proč. Nic nepřipojuje |
 | 3 | Dashboard s přepínačem provozovny | **hotovo** (14. 9.) | `marketing` — velké tlačítko, čekající schválení, dnešní i další plán, blížící se akce, chyby připojení, naposledy odeslané. **Výkon posledních příspěvků se neukazuje a je to napsané** — analytika není |
 | 4 | Rychlé vytvoření obsahu | **hotovo** | `marketing/novy` |
 | 5 | Průvodce vytvořením (podklady → šablona → návrhy → editor → schválení → termín) | **rozestavěné** | Všechny kroky existují, ale **každý jinde**. Průvodce, který vede za ruku, není |
@@ -133,7 +133,7 @@ jsou v tabulkách výš.
 |---|---|---|
 | **Stahování čísel ze sítí** | 18 | Tabulka i obrazovka stojí, ale zobrazení a dosah nikdo nestahuje — chybí připojený účet s oprávněním číst statistiky |
 | **Automatická grafika a video** | 12 | Tabulka `marketing_render_ulohy` stojí, **žádný renderer není napojený**. Publikuje se fotka z knihovny, nic se nerenderuje |
-| **Průvodce prvním nastavením** | 6, obrazovka 2 | Nový zákazník dostane prázdný modul a musí si sám najít, kde se co nastavuje |
+| ~~Průvodce prvním nastavením~~ | 6, obrazovka 2 | **Hotovo 14. 9.** — `marketing/zacatek` |
 | **Seed data a ukázková cesta** | 24 | Není z čeho předvést modul někomu, kdo ho vidí poprvé |
 | ~~UTM odkazy a QR~~ | 17, 18 | **Hotovo 14. 9.** — `marketing/analytika`, veřejná adresa `/k/<klíč>` |
 | **Manuál pro obsluhu** | 26 | Dokumentace je pro vývojáře, ne pro člověka, který to bude používat |

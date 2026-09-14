@@ -129,6 +129,7 @@ export const NABIDKA: Polozka[] = [
   // Pořadí je podle toho, jak se to dělá: nejdřív podklady (fotky,
   // šablony, menu), pak se z nich skládá příspěvek na přehledu.
   //
+  { segment: 'marketing/zacatek', nazev: 'Začínáme', kratky: 'Začátek', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'marketing/media', nazev: 'Fotky', kratky: 'Fotky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/sablony', nazev: 'Šablony', kratky: 'Šablony', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/menu', nazev: 'Menu', kratky: 'Menu', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
