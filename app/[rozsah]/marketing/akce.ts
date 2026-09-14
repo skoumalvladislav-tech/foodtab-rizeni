@@ -396,10 +396,50 @@ export async function naplanovat(formData: FormData): Promise<void> {
     z formuláře nesmí skončit zveřejněním.
   */
   const zvoleno = String(formData.get('zpusob') ?? '')
+
+  /*
+    ČÍM SE TO POŠLE, ŘÍKÁ PŘIPOJENÍ — NE TENHLE SOUBOR.
+
+    Do 14. 9. 2026 tu stálo natvrdo `{ rezim: 'zakaznicky', poskytovatel:
+    'n8n' }`. Bylo to špatně dvakrát: `zakaznicky` znamená účet
+    zákazníka, jenže n8n se volá podle adresy z prostředí serveru, tedy
+    účtem Foodtabu — a hlavně se tím zveřejňovalo i tehdy, když si firma
+    žádný nástroj nevybrala. Obrazovka Nástroje (oddíl 3.1 zadání) je
+    od toho, aby si volbu udělal zákazník; kdyby ji tenhle řádek obešel,
+    byla by k ničemu.
+  */
+  const pripojeni = await jeden<{ id: string; poskytovatel: string; rezim: string }>(
+    'připojený nástroj na zveřejňování',
+    supabase.from('marketing_pripojeni')
+      .select('id, poskytovatel, rezim')
+      .eq('tenant_id', tenantId)
+      .eq('kategorie', 'publikovani')
+      .is('odpojeno_kdy', null)
+      .or(`branch_id.eq.${prispevek.branch_id},branch_id.is.null`)
+      .order('branch_id', { nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+  ).catch(() => null)
+
   const zpusob =
-    zvoleno === 'zverejnit' ? { rezim: 'zakaznicky', poskytovatel: 'n8n' }
-    : zvoleno === 'nanecisto' ? { rezim: 'demo', poskytovatel: 'n8n' }
-    : { rezim: 'rucni', poskytovatel: 'rucni_export' }
+    zvoleno === 'zverejnit'
+      ? (pripojeni && pripojeni.rezim !== 'rucni'
+          ? { rezim: pripojeni.rezim, poskytovatel: pripojeni.poskytovatel, pripojeniId: pripojeni.id }
+          : null)
+      : zvoleno === 'nanecisto'
+        ? { rezim: 'demo', poskytovatel: pripojeni?.poskytovatel ?? 'n8n', pripojeniId: pripojeni?.id ?? null }
+        : { rezim: 'rucni', poskytovatel: 'rucni_export', pripojeniId: null }
+
+  /*
+    Nepřipojené zveřejňování NENÍ chyba modulu. Příspěvek je hotový,
+    schválený a naplánovaný — jen ho musí někdo poslat ven sám. Proto
+    se to říká větou, která vede na Nástroje, ne hláškou o chybě.
+  */
+  if (!zpusob) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(
+      'Zveřejňování zatím není připojené. Vyberte nástroj v Marketing → Nástroje, ' +
+      'nebo zvolte ruční zveřejnění — příspěvek zůstane naplánovaný a pustíte ho ven sami.')}`)
+  }
 
   const ja = await mujZamestnanec(tenantId)
   let zalozeno = 0
@@ -414,6 +454,7 @@ export async function naplanovat(formData: FormData): Promise<void> {
       kanal,
       format: 'prispevek',
       poskytovatel: zpusob.poskytovatel,
+      pripojeni_id: zpusob.pripojeniId,
       rezim: zpusob.rezim,
       planovano_na: okamzik,
       idempotencni_klic: `publikace:${prispevek.schvalena_verze_id}:${kanal}:prispevek`,

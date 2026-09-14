@@ -137,6 +137,11 @@ export const NABIDKA: Polozka[] = [
   { segment: 'marketing/menu', nazev: 'Menu', kratky: 'Menu', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/schvalovani', nazev: 'Ke schválení', kratky: 'Schválení', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'marketing/znacka', nazev: 'Značka', kratky: 'Značka', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
+  // Integrace a nástroje. Vidět je má každý, kdo do marketingu dosáhne —
+  // i ten, kdo nic nepřipojuje: je z nich poznat, proč se něco dělá
+  // ručně. Připojovat smí jen marketing.publish a ptá se na to obrazovka
+  // i serverová akce, ne tahle řádka.
+  { segment: 'marketing/nastroje', nazev: 'Nástroje', kratky: 'Nástroje', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
   { segment: 'marketing', nazev: 'Příspěvky', kratky: 'Příspěvky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'zprava' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
 ]

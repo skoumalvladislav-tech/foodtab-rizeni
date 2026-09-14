@@ -32,10 +32,10 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 1 | Kontext a cíl | **hotovo** | Změnilo se jedno: není to samostatná aplikace, je to **modul Foodtabu**. Rozhodnutí je v `docs/marketing-je-modul.md` |
 | 2 | Pracovní postup | **hotovo** | Migrace, scénáře, kontroly se sabotáží |
 | 3 | Technologický základ | **hotovo** | Next.js + Supabase, ne vlastní stack |
-| 3.1 | **Zákazník si volí nástroje** | **rozestavěné** | Tabulky `marketing_pripojeni` a `marketing_tajemstvi` stojí a fungují. **Obrazovka, na které si to zákazník vybere, neexistuje** — dnes se připojení zakládá jen v databázi |
+| 3.1 | **Zákazník si volí nástroje** | **hotovo** (14. 9.) | Obrazovka `marketing/nastroje`, katalog v `lib/marketing-katalog.ts`, zkouška spojení, čtyři režimy. Chybí OAuth a sledování spotřeby — `docs/marketing-nastroje.md`, oddíl 7 |
 | 4 | Jazyk, vzhled, ovládání | **hotovo** | Česky, podle `docs/vzhled-predloha.html` |
 | 5 | Organizace, provozovny, role | **hotovo** | Přebírá se z Foodtabu — `app.has_access`, žádná druhá kopie |
-| 6 | První spuštění a připojení nástrojů | **chybí** | Průvodce není. Souvisí s 3.1 |
+| 6 | První spuštění a připojení nástrojů | **rozestavěné** | Stránka Integrace a nástroje je (14. 9.). **Průvodce prvním spuštěním** — otázky na priority a z nich doporučená sestava — není |
 | 7 | Brand kit provozovny | **hotovo** | Obrazovka **Značka** |
 | 8 | Mediální knihovna | **hotovo** | Obrazovka **Fotky**, kbelík s pravidly přístupu, oddělení podle poboček |
 | 9 | Knihovna gastro šablon | **hotovo** | 40 šablon, 10 výstupních formátů, doporučování podle podkladů |
@@ -51,11 +51,11 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 19 | Databázový model | **hotovo** | 16 tabulek, RLS všude, granty prověřené |
 | 20 | API a integrace do Foodtabu | **hotovo** | Modul JE uvnitř Foodtabu, takže odpadlo. Ven vede `api/uloha/marketing-fronta` |
 | 21 | n8n jako volitelný poskytovatel | **hotovo** | Ale **vypnuté** — viz oddíl 5 níž |
-| 22 | Obrazovky MVP | **10 ze 16** | Rozepsané v oddílu 3 |
+| 22 | Obrazovky MVP | **11 ze 16** | Rozepsané v oddílu 3 |
 | 23 | Bezpečnost a provoz | **hotovo** | Klíče šifrované, `service_role` na serveru, dvě obranné linie, audit |
 | 24 | Seed data | **chybí** | Ukázková cesta pro nového zákazníka není |
-| 25 | Testy a akceptace | **hotovo** | 9 scénářů v databázi, 11 kontrol v Node. Každá nová kontrola prošla sabotáží |
-| 26 | Dokumentace | **rozestavěné** | `marketing-je-modul.md`, `marketing-spusteni.md`. **Manuál pro obsluhu chybí** |
+| 25 | Testy a akceptace | **hotovo** | 10 scénářů v databázi, 12 kontrol v Node. Každá nová kontrola prošla sabotáží |
+| 26 | Dokumentace | **rozestavěné** | `marketing-je-modul.md`, `marketing-spusteni.md`, `marketing-nastroje.md`. **Manuál pro obsluhu chybí** |
 | 27 | Rozdělení realizace | — | Etapa 1 z velké části hotová, etapa 2 sotva začatá |
 
 ---
@@ -77,7 +77,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 11 | **Kampaně a automatizace** | **chybí** | — |
 | 12 | **Publikované příspěvky a stavy** | **chybí** | Stavy jsou vidět v seznamu, samostatná obrazovka ne |
 | 13 | **Základní analytika** | **chybí** | — |
-| 14 | **Integrace a nástroje** | **chybí** | Nejdůležitější chybějící — zadání to označuje za *zásadní obchodní požadavek* |
+| 14 | Integrace a nástroje | **hotovo** (14. 9.) | `marketing/nastroje` — karty po kategoriích, připojení vlastním klíčem, zkouška před aktivací |
 | 15 | Brand kit provozovny | **hotovo** | `marketing/znacka` — Značka |
 | 16 | Tým, role a auditní přehled | **rozestavěné** | Lidé a Zařazení jsou ve Foodtabu. **Auditní přehled marketingu** (kdo co schválil a zveřejnil) jako obrazovka chybí, i když data v `audit_log` jsou |
 
@@ -127,12 +127,16 @@ v `docs/marketing-je-modul.md`, oddíl 6.
 Pořadí není podle toho, co je snadné, ale podle toho, **co bez čeho
 nedává smysl**.
 
-**1. Integrace a nástroje (oddíl 3.1 a 6, obrazovka 14).**
-Zadání to samo označuje za *zásadní obchodní požadavek*. Dnes si
-zákazník nemůže vybrat nic — připojení se zakládá v databázi ručně.
-Dokud to nebude, je každý další kus modulu závislý na tom, že za
-zákazníka někdo naklikal připojení v Supabase. Databáze na to je
-hotová, chybí obrazovka a katalog.
+**1. Integrace a nástroje (oddíl 3.1 a 6, obrazovka 14).** — **HOTOVO
+14. 9. 2026.** Obrazovka `marketing/nastroje`, katalog nástrojů, zkouška
+spojení před aktivací, čtyři režimy. Podrobnosti a co z toho ještě
+chybí (průvodce prvním spuštěním, OAuth, sledování spotřeby) jsou
+v `docs/marketing-nastroje.md`.
+
+Při té práci se našlo a opravilo, že **vlastní klíč zákazníka tiše
+nefungoval**: funkce na klíče ležely ve schématu `app`, které PostgREST
+nevystavuje, takže volání z aplikace neprošlo nikdy a vypadalo to jako
+„zákazník nemá nic připojeného".
 
 **2. Kalendář obsahu (oddíl 15, obrazovka 9).**
 Druhá nejviditelnější věc. Dnes se termín nastaví u jednoho příspěvku
@@ -169,66 +173,48 @@ chybí.
 ## 7. Zadání pro další relaci
 
 > Následující text je psaný tak, aby se dal poslat jako prompt.
+> Předchozí úkol (Integrace a nástroje) je od 14. 9. hotový.
 
 ---
 
 Pokračuj na modulu **Marketing** v repozitáři `foodtab-rizeni`.
 
-Přečti si nejdřív `CLAUDE.md`, `docs/marketing-je-modul.md` a tenhle
-soubor (`docs/marketing-co-zbyva.md`). Původní zadání je
-`FoodTab Marketing AI — Claude Code prompt v2.1`; tenhle soubor říká,
+Přečti si nejdřív `CLAUDE.md`, `docs/marketing-je-modul.md`,
+`docs/marketing-nastroje.md` a tenhle soubor. Původní zadání je
+`FoodTab Marketing AI — Claude Code prompt v2.2`; tenhle soubor říká,
 co z něj je hotové.
 
-**Úkol: obrazovka Integrace a nástroje** (zadání, oddíl 3.1 a 6,
-obrazovka 14 z oddílu 22). Je to označené jako zásadní obchodní
-požadavek a je to jediná chybějící věc, na které stojí zbytek.
+**Úkol: kalendář obsahu** (zadání, oddíl 15, obrazovka 9 z oddílu 22).
+Je to druhá nejviditelnější chybějící věc: dnes se termín nastaví
+u jednoho příspěvku a nikde není vidět, co kdy půjde ven. Restaurace
+plánuje po týdnech, ne po příspěvcích.
 
 Co má vzniknout:
 
-1. **Katalog poskytovatelů** jako data, ne jako `if` v kódu. U každého:
-   kategorie, k čemu je, hlavní přínos, omezení, složitost nastavení,
-   způsob účtování a jestli je **doporučený Foodtabem**. Kategorie už
-   jsou v databázi: `ai_text`, `render_obrazek`, `render_video`,
-   `publikovani`, `automatizace`, `metriky`.
-
-2. **Obrazovka `marketing/nastroje`**, kde je vidět, co je připojené,
-   co ne, a co se doporučuje. Pro každou kategorii jeden aktivní
-   poskytovatel.
-
-3. **Připojení účtu vlastním klíčem.** Tabulky `marketing_pripojeni`
-   a `marketing_tajemstvi` už stojí a klíče se šifrují — použij je,
-   nezakládej nové. Klíč se **nikdy nevrací zpátky na obrazovku**,
-   ani zakrytý.
-
-4. **Zkouška spojení před aktivací** a zápis výsledku do
-   `posledni_test_kdy`, `posledni_test_ok`, `posledni_chyba`.
-
-5. **Čtyři režimy** z databáze: `zakaznicky`, `foodtab`, `rucni`
-   (člověk to zveřejní sám), `demo`. Demo musí být **na obrazovce
-   vidět**, nesmí se splést se skutečností.
-
-6. **Rozsah připojení**: celá firma, nebo konkrétní pobočka. Sloupec
-   `branch_id` na to je (`null` = celá firma).
+1. **Měsíční a týdenní pohled** s filtrem podle pobočky, kanálu a stavu.
+2. **Přesunutí termínu** s kontrolou oprávnění a auditním záznamem.
+   Přesun schválené verze nesmí obejít to, co hlídají spouště.
+3. **Varování před dlouhou mezerou** a před příliš častým publikováním.
+4. **Koncept bez data** — ne všechno má termín.
+5. Doporučený čas publikace **až tehdy, až budou vlastní data.** Do té
+   doby průhledné výchozí pravidlo, ne vymyšlené číslo.
 
 Pravidla, která tady platí zvlášť ostře:
 
-- **Položka v katalogu nesmí předstírat funkční integraci.** Zadání to
-  říká doslova. Co nemá odzkoušený adaptér, se označí jako
-  nepodporované — ne jako „připravujeme", na které jde kliknout.
-- **Bez připojení musí modul dál fungovat** v režimu ručního exportu.
-  Žádné „bez n8n to nejde".
-- Klíč `service_role` nesmí opustit server (CLAUDE.md, pravidlo 6).
-- Tokeny se ukládají jako otisk nebo zašifrované, nikdy čitelně
-  (pravidlo 7).
-- Nová obrazovka patří do `app/[rozsah]/nabidka.ts` — **před** obecnou
-  položku `marketing`, jinak se v levém sloupci zvýrazní špatná věc.
+- **Hodina na zdi není okamžik** (CLAUDE.md, pravidlo 11). Termín se
+  převádí v databázi přes `marketing_okamzik`, nikdy
+  `new Date('…T18:00')`. Ukládání a zobrazení se ověřují ZVLÁŠŤ.
+- Kontrola, která závisí na kalendáři, musí platit i ve 23:50 a za
+  týden (CLAUDE.md, „Testy, které závisí na kalendáři").
 - Ke každé nové kontrole **rozbij schválně to, co hlídá, a přesvědč se,
   že spadne.** Napiš, co jsi rozbil a co spadlo.
+- Nová obrazovka patří do `app/[rozsah]/nabidka.ts` — **před** obecnou
+  položku `marketing`.
 
 Nenasazuj. Nasazuje Šéfík z `main`. n8n nech vypnuté.
 
-Až to bude, pokračuj podle pořadí v oddílu 6 tohoto souboru
-(kalendář, publikované příspěvky, Facebook, kampaně, analytika).
+Až to bude, pokračuj podle pořadí v oddílu 6 (publikované příspěvky,
+Facebook, kampaně, analytika).
 
 ---
 
@@ -244,6 +230,7 @@ zásahu do marketingu.
 | `scripts/sablony.test.mjs` | totéž |
 | `scripts/cas.test.mjs` | špatně složená cesta k dočasnému souboru |
 | `scripts/scenare-poradi.test.mjs` | dva nálezy v `krok33_scenar.sql` |
+| `supabase/tests/krok31_scenar.sql` | komentář u `zapomenute_odchody` přepsala migrace `20260913140000_drobnosti.sql` a vypadla z něj věta „SCHVÁLNĚ ŽÁDNÁ NENÍ“, na kterou se kontrola ptá doslova (nalezeno 14. 9. proti PostgreSQL 16) |
 
 Do cizího modulu se nesahá (`CLAUDE.md`). Hlásí se to a opraví to ten,
 kdo ho píše.

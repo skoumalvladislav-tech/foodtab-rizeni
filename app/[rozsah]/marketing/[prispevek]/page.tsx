@@ -47,6 +47,7 @@ const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', mar
 
 type Prispevek = {
   id: string
+  branch_id: string
   nazev: string
   stav: string
   kanaly: string[]
@@ -139,7 +140,7 @@ export default async function DetailPrispevku({
   const p = await jeden<Prispevek>(
     'příspěvek',
     supabase.from('marketing_prispevky')
-      .select('id, nazev, stav, kanaly, planovano_na, schvalena_verze_id, aktualni_verze_id')
+      .select('id, branch_id, nazev, stav, kanaly, planovano_na, schvalena_verze_id, aktualni_verze_id')
       .eq('id', prispevekId).maybeSingle(),
   )
   // Cizí příspěvek schová RLS a vyjde prázdno — pro uživatele je to
@@ -208,8 +209,29 @@ export default async function DetailPrispevku({
     Nabízet „Zveřejnit" tam, kde zveřejnit nejde, znamená slíbit něco,
     co skončí pěti marnými pokusy a chybou. Obrazovka se proto zeptá
     dřív, než to nabídne.
+
+    Ptá se na DVĚ věci a obě musí platit: že si firma nějaký nástroj
+    na zveřejňování vybrala (obrazovka Nástroje, oddíl 3.1 zadání)
+    a že je ten nástroj na serveru dotažený. Samotné nastavení n8n
+    v prostředí nestačí — volba je zákazníkova, ne naše.
   */
-  const n8nHotovo = n8nJeNastaveny()
+  const pripojeniVen = await jeden<{ poskytovatel: string; rezim: string }>(
+    'připojený nástroj na zveřejňování',
+    supabase.from('marketing_pripojeni')
+      .select('poskytovatel, rezim')
+      .eq('tenant_id', tenantId)
+      .eq('kategorie', 'publikovani')
+      .is('odpojeno_kdy', null)
+      .or(`branch_id.eq.${p.branch_id},branch_id.is.null`)
+      .order('branch_id', { nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+  ).catch(() => null)
+
+  const n8nHotovo =
+    pripojeniVen !== null &&
+    pripojeniVen.rezim !== 'rucni' &&
+    (pripojeniVen.poskytovatel !== 'n8n' || n8nJeNastaveny())
   const aiHotova = aiJeNastavena()
   const jeSchvalena = p.schvalena_verze_id !== null && p.schvalena_verze_id === p.aktualni_verze_id
 
@@ -436,7 +458,9 @@ export default async function DetailPrispevku({
                   <span style={{ display: 'block', fontSize: '12.5px', color: 'var(--muted)' }}>
                     {n8nHotovo
                       ? 'Odejde v naplánovaný čas na síť.'
-                      : 'Zatím nejde — zveřejňování přes n8n není nastavené.'}
+                      : pripojeniVen === null
+                        ? 'Zatím nejde — v Marketing → Nástroje není vybraný nástroj na zveřejňování.'
+                        : 'Zatím nejde — vybraný nástroj není na serveru dotažený. Podrobnosti jsou v Nástrojích.'}
                   </span>
                 </span>
               </label>
