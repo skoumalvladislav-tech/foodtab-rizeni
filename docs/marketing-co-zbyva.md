@@ -44,7 +44,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 12 | Automatická grafika a video | **chybí** | Tabulka `marketing_render_ulohy` stojí, **žádný renderer není napojený**. Shotstack je zmíněný v komentářích, adaptér ne |
 | 13 | Editor a náhled | **rozestavěné** | Text, cena, termín a fotky se měnit dají. **Náhled IG a FB vedle sebe, bezpečné zóny, obnovení starší verze a duplikace návrhu chybí** |
 | 14 | Schvalování a verzování | **hotovo** | Čtyři oči, otisk verze, nová verze ruší schválení, hromadné schválení, auditní stopa. **Chybí jediné: upozornění** (žádost, vrácení, schválení, selhání) |
-| 15 | Kalendář, kampaně, automatizace | **rozestavěné** | **Kalendář hotový (14. 9.)** — měsíc, týden, filtry, pilíře barvou, koncepty bez data, varování, přesun termínu. **Kampaně, série, opakování a evergreen fronta chybí** |
+| 15 | Kalendář, kampaně, automatizace | **hotovo** (14. 9.) | Kalendář (měsíc, týden, filtry, pilíře barvou, varování, přesun termínu) a kampaně se sérií pozvánka → připomínka → poslední výzva → poděkování. Automatizace s vypínačem, vlastníkem, příštím během a historií. **Zbývá úloha, která je pustí** — tabulky a obrazovka stojí, běhy zatím nikdo nespouští |
 | 16 | Publikování na IG a FB | **rozestavěné** | Fronta úloh, opakování, dead-letter, idempotence, „nikdy falešné zveřejněno" — hotové. **Facebook rovnocenně s Instagramem (14. 9.)**: pravidla sítí jako data (`lib/marketing-kanaly.ts`), FB projde i samotným textem, oddělený text a strop znaků pro každou síť, účet pobočky se vyplňuje. **Zbývá n8n workflow pro FB a načítání účtů z Mety** |
 | 17 | Inspirace z jiných nástrojů | **chybí** | Schránka nápadů, obsahové pilíře, mini-kampaň z akce, checklist podkladů, QR a UTM, týdenní report — nic z toho |
 | 18 | Analytika a měření | **chybí** | Žádná tabulka, žádná obrazovka |
@@ -74,7 +74,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 8 | Knihovna šablon | **hotovo** | `marketing/sablony` |
 | 9 | Kalendář obsahu | **hotovo** (14. 9.) | `marketing/kalendar` — měsíc a týden, filtr podle kanálu, pilíře a stavu, varování na mezeru a nahuštění |
 | 10 | Fronta ke schválení | **hotovo** | `marketing/schvalovani` — dnes dodělané |
-| 11 | **Kampaně a automatizace** | **chybí** | — |
+| 11 | Kampaně a automatizace | **hotovo** (14. 9.) | `marketing/kampane` — série z jedné akce, automatizace s vypínačem a historií. Nic nezveřejňují, vyrábějí koncepty |
 | 12 | Publikované příspěvky a stavy | **hotovo** (14. 9.) | `marketing/publikovane` — fronta i historie po úlohách, chyby s radou česky, nanečisto zvlášť, odkaz na síť a číslo u poskytovatele |
 | 13 | **Základní analytika** | **chybí** | — |
 | 14 | Integrace a nástroje | **hotovo** (14. 9.) | `marketing/nastroje` — karty po kategoriích, připojení vlastním klíčem, zkouška před aktivací |
@@ -169,9 +169,19 @@ ačkoli to síť umí.
 (dnes obsluhuje jen Instagram) a účty se pořád nenačítají z Mety, takže
 `marketing_ucty` je prázdná a `schopnosti` se nekontrolují proti ničemu.
 
-**5. Kampaně a automatizace (oddíl 15, obrazovka 11).**
-Série příspěvků (pozvánka → připomínka → poslední výzva → report).
-Až po kalendáři — bez něj není kam je nakreslit.
+**5. Kampaně a automatizace (oddíl 15, obrazovka 11).** — **HOTOVO
+14. 9.**
+`marketing/kampane`: kampaň jako záznam, série čtyř konceptů z jedné
+akce, automatizace s vypínačem, vlastníkem, příštím během a historií
+výsledků.
+
+**Automatizace nic nezveřejní** a je to zapsané i v datech — tabulka
+nemá sloupec, kterým by to šlo zapnout. Vyrobí koncepty a ty projdou
+schválením jako všechno ostatní.
+
+**Co zbývá:** úloha, která automatizace doopravdy pustí (jako
+`api/uloha/marketing-fronta`). Tabulky, obrazovka i výpočet příštího
+běhu stojí; běhy zatím nikdo nespouští.
 
 **6. Analytika, UTM a QR (oddíl 18).**
 Má smysl teprve tehdy, až něco doopravdy odchází ven. Měřit prázdno
@@ -192,7 +202,8 @@ chybí.
 
 > Následující text je psaný tak, aby se dal poslat jako prompt.
 > Předchozí úkoly (Integrace a nástroje, Kalendář obsahu, Publikované
-> příspěvky, Facebook vedle Instagramu) jsou od 14. 9. hotové.
+> příspěvky, Facebook vedle Instagramu, Kampaně a automatizace) jsou
+> od 14. 9. hotové.
 
 ---
 
@@ -203,51 +214,42 @@ Přečti si nejdřív `CLAUDE.md`, `docs/marketing-je-modul.md`,
 `FoodTab Marketing AI — Claude Code prompt v2.2`; tenhle soubor říká,
 co z něj je hotové.
 
-**Úkol: kampaně a automatizace** (zadání, oddíl 15, obrazovka 11
-z oddílu 22).
+**Úkol: úloha, která automatizace doopravdy pustí.**
 
-Kalendář od 14. 9. ukazuje, co kdy půjde ven. Chybí druhá polovina:
-obsah se pořád zakládá po jednom příspěvku. Restaurace přitom
-nedělá jeden příspěvek — dělá akci a k ní patří série: pozvánka
-týden předem, připomínka den předem, poslední výzva ráno, po akci
-poděkování s fotkami.
+Kampaně a automatizace jsou od 14. 9. hotové — tabulky, obrazovka,
+vypínač, historie i výpočet příštího běhu. **Chybí to, co je spustí.**
+Zapnutá automatizace dnes ukazuje „příště v pondělí v 8:00" a v pondělí
+se nestane nic.
+
+Vzor je `app/api/uloha/marketing-fronta/route.ts`: běží pod servisním
+klíčem, jede po dávkách, každou položku zvlášť v `try`, a na konci
+vrátí počty.
 
 Co má vzniknout:
 
-1. **Kampaň** jako záznam: název, cíl, termín akce, pobočka, pilíř.
-   Příspěvky se k ní vážou, takže je v kalendáři vidět pohromadě
-   a dají se filtrovat.
-2. **Série z jedné akce.** Zadáte zabijačku na sobotu a vznikne
-   pozvánka → připomínka → poslední výzva → report po akci, jako
-   koncepty s návrhem termínu. **Nic se nezveřejní samo** — každý
-   kus projde schválením jako dnes.
-3. **Opakovaná kampaň** (denní menu, páteční propagace víkendu).
-   Každá automatizace má podle zadání mít **vypínač, vlastníka,
-   provozovnu, poslední a příští spuštění, historii výsledků
-   a možnost bezpečně ji pozastavit.**
-4. **Fronta evergreen obsahu** — příspěvky bez data, které se dají
-   pustit, když je v kalendáři díra. Varování na dlouhé ticho už
-   kalendář umí; tohle je odpověď na ně.
-5. **Ochrana před duplicitní publikací** — když se série a opakovaná
-   kampaň potkají na tomtéž dni, nesmí odejít dvakrát.
+1. **`app/api/uloha/marketing-automatizace/route.ts`** — vybere zapnuté
+   automatizace, kterým nastal čas (`pristi_beh_kdy <= now()`).
+2. **Podle druhu vyrobí koncepty.** `denni_menu` z potvrzeného menu na
+   ten den (`marketing_menu`, stav `potvrzeno`); když menu není,
+   zapíše běh jako **přeskočený**, ne jako chybu — není to porucha.
+3. **Zapíše běh** do `marketing_automatizace_behy` a posune
+   `posledni_beh_kdy` i `pristi_beh_kdy`. Příští běh se počítá funkcí
+   `pristiBeh` z `lib/marketing-kampane.ts`, která už kontroly má.
+4. **Dvakrát za den ne.** Jedinečný index to sice odmítne, ale úloha
+   se na to nesmí spoléhat jako na řízení toku — má to poznat dřív
+   a zapsat přeskočení, ne spadnout na porušení jedinečnosti.
 
 Pravidla, která tady platí zvlášť ostře:
 
-- **Automatizace nesmí obejít schválení.** Vygenerovat koncepty ano;
-  naplánovat je ke zveřejnění bez odklepnutí ne. Hlídá to databáze
-  (`app.marketing_strez_publikaci`) a nová cesta to nesmí obcházet.
-- **Vypínač musí opravdu vypínat** a musí být poznat, kdy naposledy
-  běžela a jak dopadla. Automatizace, u které se nedá zjistit, co
-  udělala, je horší než ruční práce.
-- **Termíny jsou hodiny na zdi**, převádí je databáze přes
-  `marketing_okamzik` (CLAUDE.md, pravidlo 11). Série „den předem
-  v 17:00" se nesmí počítat v UTC.
-- Posun v testech přes půlnoc dělej o **víc než 24 hodin** — CLAUDE.md,
-  „Testy, které závisí na kalendáři".
+- **Nic se nezveřejní.** Úloha zakládá koncepty a verze, nikdy
+  publikační úlohy ani schválení. Hlídá to
+  `scripts/marketing-kampane.test.mjs` u série; pro tuhle úlohu
+  přibude totéž.
+- **Provozní den, ne kalendářní** (CLAUDE.md, pravidlo 10). Menu na
+  „dnešek" se hledá podle `app.business_date` pobočky.
+- **Servisní klíč neopustí server** (pravidlo 6).
 - Ke každé nové kontrole **rozbij schválně to, co hlídá, a přesvědč
   se, že spadne.** Napiš, co jsi rozbil a co spadlo.
-- Nová obrazovka patří do `app/[rozsah]/nabidka.ts` — **před** obecnou
-  položku `marketing`.
 
 Nenasazuj. Nasazuje Šéfík z `main`. n8n nech vypnuté.
 
