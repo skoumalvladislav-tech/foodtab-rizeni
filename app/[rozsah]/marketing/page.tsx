@@ -301,7 +301,7 @@ export default async function Marketing({
         {smiPsat ? (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             <Link
-              href={`/${rozsah}/marketing/novy`}
+              href={`/${rozsah}/marketing/tvorba`}
               className="ft-tl ft-tl-hlavni"
               style={{ fontSize: '16px', padding: '12px 20px' }}
             >

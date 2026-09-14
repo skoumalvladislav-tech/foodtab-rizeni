@@ -48,7 +48,7 @@ export type PolozkaNavigace = {
 
 const HLAVNI: readonly Definice[] = [
   { klic: 'prehled', segment: '', nazev: 'Přehled', kratky: 'Přehled', ikona: 'prehled', pravo: null },
-  { klic: 'novy', segment: 'novy', nazev: 'Vytvořit obsah', kratky: 'Vytvořit', ikona: 'tvorba', pravo: 'marketing.manage' },
+  { klic: 'novy', segment: 'tvorba', nazev: 'Vytvořit obsah', kratky: 'Vytvořit', ikona: 'tvorba', pravo: 'marketing.manage' },
   { klic: 'media', segment: 'media', nazev: 'Mediální knihovna', kratky: 'Média', ikona: 'media', pravo: 'marketing.read' },
   { klic: 'menu', segment: 'menu', nazev: 'Menu', kratky: 'Menu', ikona: 'menu', pravo: 'marketing.read' },
   { klic: 'sablony', segment: 'sablony', nazev: 'Šablony', kratky: 'Šablony', ikona: 'sablony', pravo: null },

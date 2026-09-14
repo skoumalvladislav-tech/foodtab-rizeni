@@ -10,7 +10,8 @@ import { rozsifrovat } from '@/lib/marketing-klice'
 import { precistMenu } from '@/lib/marketing-menu-ai'
 import { rozpoznatMenuZTextu, type MenuRozpoznanaPolozka } from '@/lib/marketing-menu-text'
 import { precistObrazek } from '@/lib/marketing-obrazek'
-import { doporuceneRadky } from '@/lib/marketing-sablony'
+import { doporuceneRadky, sablona } from '@/lib/marketing-sablony'
+import { popisPolozekMenu, sestavPokyn, sestavVstupy, vyzadujeMenu } from '@/lib/marketing-tvorba'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
@@ -693,6 +694,234 @@ async function klicZakaznika(
     // Rozbitá šifra není důvod obrazovku položit — spadne se na ukázku.
     return null
   }
+}
+
+/**
+ * TVORBA — rychlý i průvodce jedním formulářem.
+ *
+ * Zadání krok 3 (`docs/hlaseni/zadani-pro-ai-marketing-faktury.md`):
+ * „fotka + věta" (rychlý) a „podklady → šablona → návrh" (průvodce)
+ * jsou dva pohledy na TÝŽ postup — založit příspěvek, dát mu podklady
+ * a nechat AI napsat první návrh. Proto jedna akce, ne dvě: liší se jen
+ * tím, co vyplní formulář (u průvodce navíc šablona a její pole), ne
+ * tím, co se s tím dělá.
+ *
+ * Kroky 3–6 (další návrh, editor, schválení, termín) zůstávají na
+ * `[prispevek]` — ta obrazovka je má hotové (`navrhnoutText`,
+ * `ulozitVerzi`, `pozadatOSchvaleni`, `naplanovat`). Tady se jen založí
+ * první dvě verze stejným způsobem, jakým by vznikly ručně přes
+ * `zalozitPrispevek` + „Navrhnout" na detailu, a přesměruje se tam.
+ *
+ * ---------------------------------------------------------------------
+ * AI SE VOLÁ MIMO ZÁPIS ZÁKLADU SCHVÁLNĚ
+ *
+ * Příspěvek s vybranými podklady existuje, i kdyby se návrh nepovedl —
+ * stejně jako u samostatného tlačítka „Navrhnout" na `[prispevek]`.
+ * Nejde o transakci, kterou by chyba modelu měla smazat celou: podklady
+ * vybíral člověk a ty se neztrácí kvůli tomu, že model neodpověděl.
+ *
+ * ---------------------------------------------------------------------
+ * MENU-ŠABLONY BEROU POLOŽKY Z POTVRZENÉHO MENU, NE Z FORMULÁŘE
+ *
+ * `SablonaDef.inputs` má u menu šablon vstup typu `items` — ten se tu
+ * schválně nevykresluje jako pole k vyplnění (`vyber-sablony.tsx`).
+ * Fakta (názvy, ceny) smí přijít jen odsud, nikdy se nevymýšlí
+ * (pravidlo z Kroku 2 platí i tady).
+ */
+export async function vytvoritZTvorby(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const rezim = String(formData.get('rezim') ?? 'rychly')
+  const { tenantId, branchId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/tvorba?rezim=${rezim}&chyba=${encodeURIComponent(co)}`)
+
+  if (!branchId) {
+    zpet('Příspěvek patří pobočce. Přepněte se na provozovnu, pro kterou ho připravujete.')
+  }
+
+  const kanaly = formData.getAll('kanaly').map(String).filter((k) => k === 'instagram' || k === 'facebook')
+  if (kanaly.length === 0) zpet('Vyberte aspoň jeden kanál.')
+
+  // Fotky se ověřují proti knihovně, ne jen převezmou z formuláře — stejný důvod jako v `ulozitVerzi`.
+  const vybraneMedia = formData.getAll('media').map(String).filter(Boolean)
+  let mediaIds: string[] = []
+  if (vybraneMedia.length > 0) {
+    const nalezene = await seznam<{ id: string }>(
+      'vybrané fotky',
+      supabase.from('marketing_media').select('id')
+        .eq('tenant_id', tenantId).in('id', vybraneMedia).is('archivovano_kdy', null),
+    )
+    const platne = new Set(nalezene.map((m) => m.id))
+    mediaIds = vybraneMedia.filter((id) => platne.has(id))
+  }
+
+  let pokyn = String(formData.get('pokyn') ?? '').trim()
+  let nazev = String(formData.get('nazev') ?? '').trim()
+  let ucel = 'atmosfera'
+  const vstupy: Record<string, unknown> = {}
+
+  if (rezim === 'rychly') {
+    if (mediaIds.length === 0) zpet('Rychlý příspěvek potřebuje aspoň jednu fotku.')
+    if (pokyn.length < 5) zpet('Napište aspoň větu o tom, co má příspěvek říct.')
+  } else if (rezim === 'pruvodce') {
+    const klic = String(formData.get('sablona') ?? '')
+    const def = sablona(klic)
+    if (!def) zpet('Vyberte šablonu.')
+    ucel = def!.purpose
+
+    const { vstupy: vstupyZeSablony, popisPole, chybiPovinne } = sestavVstupy(def!, {
+      hodnota: (k) => String(formData.get(`in_${k}`) ?? '').trim(),
+      zaskrtnuto: (k) => formData.get(`in_${k}`) === 'on',
+      hodnotaOd: (k) => String(formData.get(`in_${k}_od`) ?? '').trim(),
+      hodnotaDo: (k) => String(formData.get(`in_${k}_do`) ?? '').trim(),
+    })
+    if (chybiPovinne) zpet(`Vyplňte „${chybiPovinne}“.`)
+    Object.assign(vstupy, vstupyZeSablony)
+
+    let popisPolozek = ''
+    if (vyzadujeMenu(def!)) {
+      const menuId = String(formData.get('menuId') ?? '')
+      const menu = await jeden<{ id: string; stav: string }>(
+        'menu',
+        supabase.from('marketing_menu').select('id, stav').eq('id', menuId).eq('tenant_id', tenantId).maybeSingle(),
+      )
+      if (!menu) zpet('Vyberte menu.')
+      if (menu!.stav !== 'potvrzeno') zpet('Menu musí být nejdřív potvrzené — projděte položky na stránce Menu.')
+      vstupy.menuId = menu!.id
+
+      const polozky = await seznam<{ nazev: string; cena_haleru: number | null }>(
+        'položky menu',
+        supabase.from('marketing_menu_polozky').select('nazev, cena_haleru').eq('menu_id', menuId).order('poradi'),
+      )
+      popisPolozek = popisPolozekMenu(polozky)
+    }
+
+    if (!pokyn) pokyn = sestavPokyn(def!, popisPole, popisPolozek)
+    if (!nazev) nazev = def!.name
+  } else {
+    zpet('Neznámý režim tvorby.')
+  }
+
+  if (!nazev) nazev = pokyn.slice(0, 60) || 'Nový příspěvek'
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const prispevek = await jeden<{ id: string }>(
+    'založení příspěvku',
+    supabase.from('marketing_prispevky').insert({
+      tenant_id: tenantId,
+      branch_id: branchId,
+      nazev,
+      ucel,
+      kanaly,
+      vytvoril: ja,
+    }).select('id').single(),
+  )
+  if (!prispevek) zpet('Příspěvek se nepodařilo založit.')
+
+  const zakladObsah: ObsahVerze = {
+    ...prazdnyObsah(),
+    zadani: pokyn,
+    vstupy,
+    media_ids: mediaIds,
+    titulni_media_id: mediaIds[0] ?? null,
+  }
+
+  const { error: chybaZakladu } = await supabase.from('marketing_verze').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevek!.id,
+    cislo: 1,
+    zadani: zakladObsah.zadani,
+    vstupy: zakladObsah.vstupy,
+    media_ids: zakladObsah.media_ids,
+    titulni_media_id: zakladObsah.titulni_media_id,
+    otisk: otiskVerze(zakladObsah),
+    poznamka: 'Založení z tvorby',
+    vytvoril: ja,
+  })
+  if (chybaZakladu) {
+    redirect(`/${rozsah}/marketing/${prispevek!.id}?chyba=${encodeURIComponent(chybaZakladu.message)}`)
+  }
+
+  const znacka = await jeden<{
+    ton_hlasu: string; pouzivat_emoji: boolean; podpis: string; kontakt: string
+    vyrazy_ano: string[]; vyrazy_ne: string[]
+  }>(
+    'značka',
+    supabase.rpc('marketing_znacka', { p_tenant: tenantId, p_branch: branchId }).maybeSingle(),
+  )
+
+  let fotky: string[] = []
+  if (mediaIds.length > 0) {
+    const media = await seznam<{ alt_text: string; popis: string }>(
+      'popisky fotek',
+      supabase.from('marketing_media').select('alt_text, popis').eq('tenant_id', tenantId).in('id', mediaIds),
+    )
+    fotky = media.map((m) => (m.alt_text || m.popis).trim()).filter(Boolean)
+  }
+
+  const vysledek = await navrhnout(
+    {
+      pokyn,
+      kanal: kanaly[0],
+      format: 'prispevek',
+      znacka: {
+        tonHlasu: znacka?.ton_hlasu ?? 'neformalni',
+        pouzivatEmoji: znacka?.pouzivat_emoji ?? true,
+        podpis: znacka?.podpis ?? '',
+        kontakt: znacka?.kontakt ?? '',
+        vyrazyAno: znacka?.vyrazy_ano ?? [],
+        vyrazyNe: znacka?.vyrazy_ne ?? [],
+      },
+      fotky,
+    },
+    await klicZakaznika(supabase, tenantId, branchId!),
+  )
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+
+  if (vysledek.stav !== 'hotovo') {
+    redirect(`/${rozsah}/marketing/${prispevek!.id}?chyba=${encodeURIComponent(
+      vysledek.stav === 'chyba' ? vysledek.duvod : 'Návrh se nepodařilo vytvořit.',
+    )}`)
+  }
+
+  const prvni = vysledek.navrh.varianty[0]
+  const druhaVerze: ObsahVerze = {
+    zadani: pokyn,
+    vstupy,
+    vybrana_varianta: prvni.nazev,
+    texty: { [kanaly[0]]: { popisek: `${prvni.hook}\n\n${prvni.popisek}\n\n${prvni.cta}`.trim() } },
+    storyboard: vysledek.navrh.storyboard.length > 0 ? vysledek.navrh.storyboard : null,
+    media_ids: mediaIds,
+    titulni_media_id: mediaIds[0] ?? null,
+  }
+
+  const { error } = await supabase.from('marketing_verze').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevek!.id,
+    cislo: 2,
+    zadani: druhaVerze.zadani,
+    vstupy: druhaVerze.vstupy,
+    navrh_ai: vysledek.navrh,
+    vybrana_varianta: druhaVerze.vybrana_varianta,
+    texty: druhaVerze.texty,
+    storyboard: druhaVerze.storyboard,
+    media_ids: druhaVerze.media_ids,
+    titulni_media_id: druhaVerze.titulni_media_id,
+    otisk: otiskVerze(druhaVerze),
+    poznamka: vysledek.jeUkazka ? 'Ukázka bez připojené AI' : 'Návrh od AI',
+    ai_model: vysledek.model,
+    ai_verze_zadani: vysledek.verzeZadani,
+    vytvoril: ja,
+  })
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/${prispevek!.id}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  redirect(`/${rozsah}/marketing/${prispevek!.id}?navrh=1`)
 }
 
 /**
