@@ -44,7 +44,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 12 | Automatická grafika a video | **chybí** | Tabulka `marketing_render_ulohy` stojí, **žádný renderer není napojený**. Shotstack je zmíněný v komentářích, adaptér ne |
 | 13 | Editor a náhled | **rozestavěné** | Text, cena, termín a fotky se měnit dají. **Náhled IG a FB vedle sebe, bezpečné zóny, obnovení starší verze a duplikace návrhu chybí** |
 | 14 | Schvalování a verzování | **hotovo** | Čtyři oči, otisk verze, nová verze ruší schválení, hromadné schválení, auditní stopa. **Chybí jediné: upozornění** (žádost, vrácení, schválení, selhání) |
-| 15 | Kalendář, kampaně, automatizace | **chybí** | Termín se dá nastavit u jednoho příspěvku. Kalendář, série, opakování, evergreen fronta — nic |
+| 15 | Kalendář, kampaně, automatizace | **rozestavěné** | **Kalendář hotový (14. 9.)** — měsíc, týden, filtry, pilíře barvou, koncepty bez data, varování, přesun termínu. **Kampaně, série, opakování a evergreen fronta chybí** |
 | 16 | Publikování na IG a FB | **rozestavěné** | Fronta úloh, opakování, dead-letter, idempotence, „nikdy falešné zveřejněno" — **to všechno hotové**. Odesílá se přes n8n. **Facebook je v číselníku, ale skutečná cesta ven je zatím jen Instagram** |
 | 17 | Inspirace z jiných nástrojů | **chybí** | Schránka nápadů, obsahové pilíře, mini-kampaň z akce, checklist podkladů, QR a UTM, týdenní report — nic z toho |
 | 18 | Analytika a měření | **chybí** | Žádná tabulka, žádná obrazovka |
@@ -72,7 +72,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 6 | Mediální knihovna | **hotovo** | `marketing/media` — Fotky |
 | 7 | Menu a import | **hotovo** | `marketing/menu` |
 | 8 | Knihovna šablon | **hotovo** | `marketing/sablony` |
-| 9 | **Kalendář obsahu** | **chybí** | — |
+| 9 | Kalendář obsahu | **hotovo** (14. 9.) | `marketing/kalendar` — měsíc a týden, filtr podle kanálu, pilíře a stavu, varování na mezeru a nahuštění |
 | 10 | Fronta ke schválení | **hotovo** | `marketing/schvalovani` — dnes dodělané |
 | 11 | **Kampaně a automatizace** | **chybí** | — |
 | 12 | **Publikované příspěvky a stavy** | **chybí** | Stavy jsou vidět v seznamu, samostatná obrazovka ne |
@@ -138,10 +138,16 @@ nefungoval**: funkce na klíče ležely ve schématu `app`, které PostgREST
 nevystavuje, takže volání z aplikace neprošlo nikdy a vypadalo to jako
 „zákazník nemá nic připojeného".
 
-**2. Kalendář obsahu (oddíl 15, obrazovka 9).**
-Druhá nejviditelnější věc. Dnes se termín nastaví u jednoho příspěvku
-a nikde není vidět, co kdy půjde ven. Restaurace plánuje po týdnech,
-ne po příspěvcích.
+**2. Kalendář obsahu (oddíl 15, obrazovka 9).** — **HOTOVO 14. 9.**
+`marketing/kalendar`: měsíc a týden, filtr podle kanálu, pilíře
+a stavu, pilíře barvou z měřené palety, koncepty bez termínu zvlášť,
+varování na dlouhé ticho a na nahuštěný den, přesun termínu.
+
+**Přetahování myší tam není** a je to vědomé. Přesun se dělá
+formulářem v týdenním pohledu a volá tutéž akci, která posune
+i čekající publikaci — jinak by v kalendáři seděl nový den a ven by
+to odešlo v ten starý. Až přetahování bude, musí volat tutéž akci,
+ne psát do tabulky samo.
 
 **3. Publikované příspěvky a stavy (obrazovka 12).**
 Malá práce s velkým užitkem: po zapnutí n8n bude potřeba vidět, co
@@ -173,7 +179,8 @@ chybí.
 ## 7. Zadání pro další relaci
 
 > Následující text je psaný tak, aby se dal poslat jako prompt.
-> Předchozí úkol (Integrace a nástroje) je od 14. 9. hotový.
+> Předchozí úkoly (Integrace a nástroje, Kalendář obsahu) jsou od
+> 14. 9. hotové.
 
 ---
 
@@ -184,30 +191,38 @@ Přečti si nejdřív `CLAUDE.md`, `docs/marketing-je-modul.md`,
 `FoodTab Marketing AI — Claude Code prompt v2.2`; tenhle soubor říká,
 co z něj je hotové.
 
-**Úkol: kalendář obsahu** (zadání, oddíl 15, obrazovka 9 z oddílu 22).
-Je to druhá nejviditelnější chybějící věc: dnes se termín nastaví
-u jednoho příspěvku a nikde není vidět, co kdy půjde ven. Restaurace
-plánuje po týdnech, ne po příspěvcích.
+**Úkol: publikované příspěvky a jejich stavy** (zadání, obrazovka 12
+z oddílu 22). Malá práce s velkým užitkem: po zapnutí n8n bude potřeba
+vidět na jednom místě, co odešlo, co čeká ve frontě, co se odesílá,
+co spadlo a co čeká na ruční zveřejnění. Dnes se to musí proklikat
+po jednotlivých příspěvcích.
 
 Co má vzniknout:
 
-1. **Měsíční a týdenní pohled** s filtrem podle pobočky, kanálu a stavu.
-2. **Přesunutí termínu** s kontrolou oprávnění a auditním záznamem.
-   Přesun schválené verze nesmí obejít to, co hlídají spouště.
-3. **Varování před dlouhou mezerou** a před příliš častým publikováním.
-4. **Koncept bez data** — ne všechno má termín.
-5. Doporučený čas publikace **až tehdy, až budou vlastní data.** Do té
-   doby průhledné výchozí pravidlo, ne vymyšlené číslo.
+1. **Seznam publikačních úloh** (`marketing_publikace_ulohy`) se stavem,
+   kanálem, časem a pobočkou. Fronta i historie, ne jen to, co čeká.
+2. **Chybové stavy nahlas**: `selhalo`, `vzdano` a poslední chyba česky,
+   s tím, co se dá udělat. U `vzdano` i to, kolikrát se to zkusilo.
+3. **Ruční zveřejnění** (`k_rucnimu_zverejneni`) je normální stav, ne
+   porucha — nesmí vypadat jako chyba a musí být poznat, co s tím.
+4. **Nanečisto se nepočítá do skutečnosti.** `zverejneno_nanecisto`
+   a `rezim = 'demo'` musí být na obrazovce vidět zvlášť; smíchat to
+   se skutečným zveřejněním by bylo horší než to neukazovat.
+5. **Externí id a odpověď poskytovatele** u toho, co odešlo — podle
+   toho se dohledává, co se doopravdy stalo.
 
 Pravidla, která tady platí zvlášť ostře:
 
-- **Hodina na zdi není okamžik** (CLAUDE.md, pravidlo 11). Termín se
-  převádí v databázi přes `marketing_okamzik`, nikdy
-  `new Date('…T18:00')`. Ukládání a zobrazení se ověřují ZVLÁŠŤ.
-- Kontrola, která závisí na kalendáři, musí platit i ve 23:50 a za
-  týden (CLAUDE.md, „Testy, které závisí na kalendáři").
-- Ke každé nové kontrole **rozbij schválně to, co hlídá, a přesvědč se,
-  že spadne.** Napiš, co jsi rozbil a co spadlo.
+- **Nikdy falešné „zveřejněno".** Stav se bere z úlohy, ne z příspěvku,
+  a mění ho fronta, ne obrazovka.
+- Čas úlohy je okamžik. Zobrazuje se přes `lib/cas.ts` s pásmem
+  pobočky (CLAUDE.md, pravidlo 11), nikdy přes `getHours()`.
+- Obrazovka **nesmí psát do `marketing_publikace_ulohy`** jinak než
+  přes serverovou akci, která ověří `marketing.publish`. Politika
+  `marketing_publikace_ulohy_write` je druhá linie a od 14. 9. ji
+  ověřuje `supabase/tests/marketing11_scenar.sql`.
+- Ke každé nové kontrole **rozbij schválně to, co hlídá, a přesvědč
+  se, že spadne.** Napiš, co jsi rozbil a co spadlo.
 - Nová obrazovka patří do `app/[rozsah]/nabidka.ts` — **před** obecnou
   položku `marketing`.
 
@@ -220,7 +235,7 @@ Facebook, kampaně, analytika).
 
 ## 8. Co padá a není to marketingem
 
-Aby se to nehledalo znovu: pět kontrol relace **provoz** padá i bez
+Aby se to nehledalo znovu: šest kontrol relace **provoz** padá i bez
 zásahu do marketingu.
 
 | Kontrola | Na čem |

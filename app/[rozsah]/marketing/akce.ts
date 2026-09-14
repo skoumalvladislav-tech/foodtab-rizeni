@@ -1077,3 +1077,127 @@ export async function schvalitVice(formData: FormData): Promise<void> {
     + `&duvod=${encodeURIComponent(neproslo[0])}`,
   )
 }
+
+/**
+ * PŘESUN TERMÍNU Z KALENDÁŘE
+ *
+ * Zadání: master prompt, oddíl 15 — „přesunutí termínu s kontrolou
+ * oprávnění a auditním záznamem".
+ *
+ * ---------------------------------------------------------------------
+ * NENÍ TO `naplanovat` ZNOVU, A NESMÍ TO JÍ BÝT
+ *
+ * `naplanovat` teprve ZAKLÁDÁ publikační úlohy: ověří schválenou verzi,
+ * platné schválení, vybere nástroj a založí úlohu na každý kanál.
+ * Tady se nic nezakládá — příspěvek je naplánovaný, mění se jen KDY.
+ *
+ * Kdyby se sem zavolalo `naplanovat`, narazilo by to na idempotenční
+ * klíč (`publikace:verze:kanal:format`), skončilo hláškou „na tuhle
+ * verzi už je publikace naplánovaná" a čas by se neposunul. Nebo, což
+ * je horší, kdyby ten klíč někdo uvolnil, vznikly by dvě úlohy a
+ * příspěvek by šel ven dvakrát.
+ *
+ * ---------------------------------------------------------------------
+ * POSOUVÁ SE I ÚLOHA, NE JEN PŘÍSPĚVEK
+ *
+ * TOHLE JE NA CELÉM PŘESUNU TO JEDINÉ, CO SE DÁ POKAZIT TIŠE.
+ *
+ * `planovano_na` je na dvou místech: na příspěvku (co se ukazuje
+ * v kalendáři) a na publikační úloze (podle čeho si ji fronta
+ * vyzvedne — `public.marketing_vyzvednout_publikace` čte úlohu, ne
+ * příspěvek). Kdyby se posunul jen příspěvek, v kalendáři by seděl
+ * nový termín a ven by to odešlo v ten starý. Nic by nespadlo a přišlo
+ * by se na to až z Instagramu.
+ *
+ * ---------------------------------------------------------------------
+ * CO UŽ ODEŠLO, SE NEPŘESOUVÁ
+ *
+ * Posouvají se jen úlohy ve stavu `naplanovano` nebo `selhalo`. Úlohu,
+ * která je `ve_fronte`, `odesila_se` nebo `zverejneno`, nemá smysl
+ * přesouvat — odeslané se neodešle zpátky a rozdělaná by se posunula
+ * uprostřed práce. Když se nepřesune nic, řekne se to a termín
+ * příspěvku se nemění: kalendář, který ukazuje jiný den než fronta,
+ * je horší než přesun, který se nepovedl.
+ */
+export async function presunoutTermin(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const prispevekId = String(formData.get('prispevek') ?? '')
+  const datum = String(formData.get('datum') ?? '')
+  const cas = String(formData.get('cas') ?? '')
+  const zpet = String(formData.get('zpet') ?? `/${rozsah}/marketing/kalendar`)
+
+  const { supabase } = await pripravit(rozsah, 'marketing.publish')
+
+  /*
+    ANOTACE JE NA PROMĚNNÉ, NE NA FUNKCI, A NENÍ TO JEDNO.
+
+    `redirect` vyhazuje výjimku, takže se za `chyba(…)` nepokračuje.
+    Překladač to ale vezme v potaz jen tehdy, když má typ napsaný
+    u PROMĚNNÉ (`const chyba: (t: string) => never`); s anotací
+    u šipky (`(text: string): never =>`) to nestačí a za
+    `chyba('nenašel se')` dál hlídá, že příspěvek může být prázdný.
+    Psalo by se pak `prispevek!` — a vykřičník umlčí i to, co umlčet
+    nemá.
+  */
+  const chyba: (text: string) => never = (text) =>
+    redirect(`${zpet}${zpet.includes('?') ? '&' : '?'}chyba=${encodeURIComponent(text)}`)
+
+  if (!datum || !cas) chyba('Vyplňte datum i čas.')
+
+  const prispevek = await jeden<{ branch_id: string; planovano_na: string | null; stav: string }>(
+    'příspěvek k přesunutí',
+    supabase.from('marketing_prispevky').select('branch_id, planovano_na, stav')
+      .eq('id', prispevekId).maybeSingle(),
+  )
+
+  if (!prispevek) chyba('Ten příspěvek se nenašel.')
+  if (!prispevek.planovano_na) {
+    chyba('Ten příspěvek zatím termín nemá. Naplánujte ho v detailu — tam se vybírá i způsob odeslání.')
+  }
+  if (prispevek.stav === 'zverejneno' || prispevek.stav === 'zverejnuje_se') {
+    chyba('Zveřejněný příspěvek se přesunout nedá.')
+  }
+
+  /*
+    Hodina na zdi se na okamžik převádí V DATABÁZI (pravidlo 11).
+    Stejná cesta jako v `naplanovat` — `new Date('…T18:00')` by se
+    přečetlo v pásmu serveru a ten je na Vercelu v UTC.
+  */
+  const okamzik = await pruzor<string>(
+    'převod času na okamžik',
+    supabase.rpc('marketing_okamzik', { p_branch: prispevek.branch_id, p_kdy: `${datum}T${cas}:00` }),
+  )
+
+  if (!okamzik) chyba('Čas se nepodařilo převést do pásma pobočky.')
+
+  /*
+    NEJDŘÍV ÚLOHY, POTOM PŘÍSPĚVEK.
+
+    Kdyby se posunul nejdřív příspěvek a posun úloh pak selhal (třeba
+    na oprávnění), zůstal by kalendář s novým termínem a fronta se
+    starým. V tomhle pořadí je horší případ ten, že se posunou úlohy
+    a příspěvek ne — a to je vidět hned, protože kalendář ukazuje
+    starý den.
+  */
+  const { data: posunute, error: chybaUloh } = await supabase
+    .from('marketing_publikace_ulohy')
+    .update({ planovano_na: okamzik, zmeneno_kdy: new Date().toISOString() })
+    .eq('prispevek_id', prispevekId)
+    .in('stav', ['naplanovano', 'selhalo'])
+    .select('id')
+
+  if (chybaUloh) chyba(chybaUloh.message)
+
+  if ((posunute?.length ?? 0) === 0) {
+    chyba('Žádná čekající publikace k přesunutí — nejspíš už je odeslaná nebo se odesílá.')
+  }
+
+  const { error: chybaPrispevku } = await supabase.from('marketing_prispevky')
+    .update({ planovano_na: okamzik, zmeneno_kdy: new Date().toISOString() })
+    .eq('id', prispevekId)
+
+  if (chybaPrispevku) chyba(chybaPrispevku.message)
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`${zpet}${zpet.includes('?') ? '&' : '?'}presunuto=1`)
+}
