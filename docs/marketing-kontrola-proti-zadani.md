@@ -21,7 +21,7 @@ dva ne.
 | Co | Kde to zadání žádá | Stav |
 |---|---|---|
 | Deep link přežije přihlášení | §25 | **opraveno 14. 9.** |
-| Překlad auditu na obrazovku | §22, obrazovka 16 | **rozpracováno 14. 9.** |
+| Překlad auditu na obrazovku | §22, obrazovka 16 | **hotovo 14. 9.** |
 | Nahrání **videa** | §25 | **nejde vůbec** |
 | Čtrnáct dokumentů a osm n8n workflow | §26, §21 | **nejsou v repozitáři** |
 
@@ -143,12 +143,14 @@ V hlášení ze 14. 9. jsem napsal „šestnáct obrazovek ze šestnácti".
 
 - **obrazovka 5** (Průvodce vytvořením) — všechny kroky existují, ale
   každý jinde; průvodce, který vede za ruku, není,
-- **obrazovka 16** (Tým, role a auditní přehled) — rozpracovaná
-  14. 9. odpoledne, databázová část hotová.
+- **obrazovka 16** (Tým, role a auditní přehled) — **dokončená 14. 9.
+  odpoledne** (`marketing/audit`, scénář `marketing15`, čtyři sabotáže
+  chycené). Tým a role zůstávají ve Foodtabu schválně.
 
 K tomu **obrazovka 3** (Dashboard) postrádá jednu z šesti věcí, které
 §22 jmenuje: „stručný výkon posledních příspěvků". Do 14. 9. to nešlo,
-protože analytika neexistovala. Teď existuje, takže to udělat jde.
+protože analytika neexistovala. **Doplněno 14. 9. odpoledne** — ukazují se
+prokliky přes měřitelné odkazy; zobrazení a dosah dál ne, ty dává síť.
 
 ---
 
@@ -192,12 +194,12 @@ Beze změny proti 14. 9. ráno:
 
 ## 7. Co navrhuju dál, v tomhle pořadí
 
-1. **Dokončit obrazovku 16** (auditní přehled) — databázová část hotová.
-2. **Výkon posledních příspěvků na dashboard** — analytika už je.
+1. ~~Dokončit obrazovku 16~~ — hotovo 14. 9. odpoledne.
+2. ~~Výkon posledních příspěvků na dashboard~~ — hotovo tamtéž.
 3. **n8n: dvě workflow s opravenými adresami + pravdivý dokument.**
 4. **Video do mediální knihovny.**
 5. Obrazovka 5 (průvodce vytvořením) — je to spíš přeuspořádání
    hotových kroků než nová stavba.
 
-Body 1 a 2 jsou malé. Bod 3 je ten, který nejvíc pomůže, až budete
+Body 1 a 2 jsou hotové. Bod 3 je ten, který nejvíc pomůže, až budete
 zapínat cestu ven. Bod 4 je největší.

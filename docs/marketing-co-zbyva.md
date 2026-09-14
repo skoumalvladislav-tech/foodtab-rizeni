@@ -66,7 +66,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 |---|---|---|---|
 | 1 | Přihlášení | **hotovo** | Foodtab, `/prihlaseni` |
 | 2 | Průvodce prvním nastavením | **hotovo** (14. 9.) | `marketing/zacatek` — čtyři otázky, doporučená sestava, u každé položky napsané proč. Nic nepřipojuje |
-| 3 | Dashboard s přepínačem provozovny | **hotovo** (14. 9.) | `marketing` — velké tlačítko, čekající schválení, dnešní i další plán, blížící se akce, chyby připojení, naposledy odeslané. **Výkon posledních příspěvků se neukazuje a je to napsané** — analytika není |
+| 3 | Dashboard s přepínačem provozovny | **hotovo** (14. 9.) | `marketing` — velké tlačítko, čekající schválení, dnešní i další plán, blížící se akce, chyby připojení, naposledy odeslané. **Výkon posledních příspěvků** od 14. 9. odpoledne: prokliky přes měřitelné odkazy. Zobrazení a dosah dál ne — dává je síť a ta připojená není |
 | 4 | Rychlé vytvoření obsahu | **hotovo** | `marketing/novy` |
 | 5 | Průvodce vytvořením (podklady → šablona → návrhy → editor → schválení → termín) | **rozestavěné** | Všechny kroky existují, ale **každý jinde**. Průvodce, který vede za ruku, není |
 | 6 | Mediální knihovna | **hotovo** | `marketing/media` — Fotky |
@@ -79,7 +79,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 13 | Základní analytika | **hotovo** (14. 9.) | `marketing/analytika` — měřitelné odkazy, QR na plakát, prokliky. Čísla ze sítí zůstanou prázdná, dokud nebude připojený účet |
 | 14 | Integrace a nástroje | **hotovo** (14. 9.) | `marketing/nastroje` — karty po kategoriích, připojení vlastním klíčem, zkouška před aktivací |
 | 15 | Brand kit provozovny | **hotovo** | `marketing/znacka` — Značka |
-| 16 | Tým, role a auditní přehled | **rozestavěné** | Lidé a Zařazení jsou ve Foodtabu. **Auditní přehled marketingu** (kdo co schválil a zveřejnil) jako obrazovka chybí, i když data v `audit_log` jsou |
+| 16 | Tým, role a auditní přehled | **hotovo** (14. 9. odpoledne) | Lidé a Zařazení jsou ve Foodtabu (schválně, druhé místo pro práva by se rozešlo s prvním). **Auditní přehled** je `marketing/audit` — kdo, co a kdy, přes úzké okno `public.marketing_audit`, ne rozšířením práv k celému auditu |
 
 ---
 
@@ -142,10 +142,8 @@ jsou v tabulkách výš.
 
 | Co | Chybí konkrétně |
 |---|---|
-| **Rozcestník marketingu** (obrazovka 3) | Hotový od 14. 9. Zbývá jediné: **stručný výkon posledních příspěvků** — bez analytiky se nedá vzít odkud |
 | **Editor** (oddíl 13) | Náhled Instagramu a Facebooku vedle sebe, bezpečné zóny, obnovení starší verze, duplikace návrhu, nová AI varianta jen pro vybranou část |
 | **Průvodce vytvořením** (obrazovka 5) | Všechny kroky existují, ale každý jinde. Průvodce, který vede za ruku, není |
-| **Auditní přehled marketingu** (obrazovka 16) | Data v `audit_log` jsou, obrazovka „kdo co schválil a zveřejnil" ne |
 | **Upozornění mimo aplikaci** (oddíl 14) | V aplikaci chodí od 14. 9. E-mail a push ne — přijdou nad toutéž tabulkou, ne vedle ní |
 | **Nástroje** (oddíl 3.1) | OAuth (dnes jen vlastní klíč) a sledování spotřeby |
 | **Evergreen** (oddíl 15) | Druh automatizace „zásoba na prázdné dny" se dnes jen přeskočí |
@@ -161,7 +159,7 @@ na sítě je pořád jen jedna a je vypnutá.**
 | **n8n je vypnuté** | Ve vašem n8n běží starý workflow „Černá Perla — denní obsah na sítě". Kdyby se zapnul i nový, chodily by z Foodtabu **dva příspěvky denně**. Zapnout se smí, až se starý zúží |
 | **Facebook na straně n8n** | Foodtab ho od 14. 9. umí celý, ale n8n workflow obsluhuje jen Instagram |
 | **Účty se nenačítají z Mety** | `marketing_ucty` je prázdná, takže se oprávnění účtu nekontrolují proti ničemu |
-| **Migrace čekají na nasazení** | `20260914140000_marketing_kampane.sql` leží v repozitáři. Nasazuje Šéfík z `main` |
+| ~~Migrace čekají na nasazení~~ | **Nasazeno 14. 9.** na pokyn Šéfíka, včetně úklidu grantů, který si vyžádalo ověření — `docs/hlaseni/stav-2026-09-14.md`, oddíl „Nasazení" |
 | **`CRON_SECRET` a `APP_URL`** | Bez nich se automatizace ani fronta nespustí — plánovač dostane 401 |
 
 ---

@@ -258,6 +258,22 @@ export default async function Marketing({
       .limit(5),
   ).catch(() => [])
 
+  /* --- VÝKON, KTERÝ UMÍME ZMĚŘIT SAMI -------------------------------- */
+
+  /*
+    Jen prokliky přes náš krátký odkaz. Zobrazení a dosah dává síť
+    a ta připojená není — a neměřené číslo se neukazuje jako nula.
+
+    `.catch` schválně: když migrace s odkazy ještě neproběhla, nemá
+    kvůli tomu spadnout celý rozcestník. Rozcestník je to první, co
+    člověk po ránu otevře.
+  */
+  const odkazy = await seznam<{ prokliku: number }>(
+    'prokliky',
+    supabase.from('marketing_odkazy').select('prokliku').eq('tenant_id', tenantId),
+  ).catch(() => [])
+  const prokliky = odkazy.reduce((s, o) => s + (o.prokliku ?? 0), 0)
+
   /* --- ZNAČKA ------------------------------------------------------- */
 
   const znacka = await supabase
@@ -456,18 +472,33 @@ export default async function Marketing({
           )}
 
           {/*
-            ZADÁNÍ TU CHCE „STRUČNÝ VÝKON POSLEDNÍCH PŘÍSPĚVKŮ".
-            Zobrazení a dosah nikde nejsou, protože se odnikud netahají
-            — analytika (oddíl 18) zatím není.
+            ZADÁNÍ TU CHCE „STRUČNÝ VÝKON POSLEDNÍCH PŘÍSPĚVKŮ" (oddíl 22).
 
-            Ukázat místo nich nuly by bylo horší než neukázat nic: nula
-            zobrazení vypadá jako propadák, ne jako „neměřeno". Říká se
-            to proto rovnou a nahlas.
+            Ukazuje se JEN TO, CO UMÍME ZMĚŘIT SAMI — prokliky přes náš
+            krátký odkaz. Zobrazení a dosah dává síť a ta dnes připojená
+            není, takže se o nich mlčí.
+
+            Nuly by tu byly horší než mezera: nula zobrazení vypadá jako
+            propadák, ne jako „neměřeno" (zadání, oddíl 18: co se nedá
+            prokázat, se nemá tvářit jako přesné číslo).
           */}
-          <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
-            Kolik to mělo zobrazení, se zatím neměří — připojení na čísla ze sítí
-            teprve přijde. Radši to nepíšeme, než abychom ukázali nuly.
-          </p>
+          {prokliky > 0 ? (
+            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+              Měřitelné odkazy zatím dostaly <strong>{prokliky}</strong>{' '}
+              {prokliky === 1 ? 'proklik' : prokliky < 5 ? 'prokliky' : 'prokliků'}.{' '}
+              <Link href={`/${rozsah}/marketing/analytika`}>Analytika</Link>
+              {' · '}
+              <Link href={`/${rozsah}/marketing/audit`}>Kdo co změnil</Link>
+            </p>
+          ) : (
+            <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--muted)' }}>
+              Kolik to mělo zobrazení, se zatím neměří — čísla dává síť a ta
+              připojená není. Co změřit jde, jsou prokliky přes{' '}
+              <Link href={`/${rozsah}/marketing/analytika`}>měřitelný odkaz</Link>.
+              {' · '}
+              <Link href={`/${rozsah}/marketing/audit`}>Kdo co změnil</Link>
+            </p>
+          )}
         </section>
       </div>
     </>
