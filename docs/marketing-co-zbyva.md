@@ -75,7 +75,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 9 | Kalendář obsahu | **hotovo** (14. 9.) | `marketing/kalendar` — měsíc a týden, filtr podle kanálu, pilíře a stavu, varování na mezeru a nahuštění |
 | 10 | Fronta ke schválení | **hotovo** | `marketing/schvalovani` — dnes dodělané |
 | 11 | **Kampaně a automatizace** | **chybí** | — |
-| 12 | **Publikované příspěvky a stavy** | **chybí** | Stavy jsou vidět v seznamu, samostatná obrazovka ne |
+| 12 | Publikované příspěvky a stavy | **hotovo** (14. 9.) | `marketing/publikovane` — fronta i historie po úlohách, chyby s radou česky, nanečisto zvlášť, odkaz na síť a číslo u poskytovatele |
 | 13 | **Základní analytika** | **chybí** | — |
 | 14 | Integrace a nástroje | **hotovo** (14. 9.) | `marketing/nastroje` — karty po kategoriích, připojení vlastním klíčem, zkouška před aktivací |
 | 15 | Brand kit provozovny | **hotovo** | `marketing/znacka` — Značka |
@@ -149,9 +149,14 @@ i čekající publikaci — jinak by v kalendáři seděl nový den a ven by
 to odešlo v ten starý. Až přetahování bude, musí volat tutéž akci,
 ne psát do tabulky samo.
 
-**3. Publikované příspěvky a stavy (obrazovka 12).**
-Malá práce s velkým užitkem: po zapnutí n8n bude potřeba vidět, co
-odešlo, co čeká a co spadlo — dnes se to musí proklikat.
+**3. Publikované příspěvky a stavy (obrazovka 12).** — **HOTOVO 14. 9.**
+`marketing/publikovane`: fronta i historie po jednotlivých
+publikačních úlohách, ne po příspěvcích — příspěvek jde na dvě sítě
+a každá může dopadnout jinak. Chybové stavy s radou česky, ruční
+zveřejnění jako normální stav (ne porucha), nanečisto s vlastním
+štítkem a bez odkazu na síť, původní hlášení od poskytovatele vedle
+rady. Seznam stavů se přestěhoval z detailu příspěvku do
+`lib/marketing-text.ts` — dvě kopie téhož seznamu by se rozešly.
 
 **4. Facebook vedle Instagramu (oddíl 16).**
 Číselník ho zná, cesta ven zatím ne. Pro gastro provoz je FB pořád
@@ -179,8 +184,8 @@ chybí.
 ## 7. Zadání pro další relaci
 
 > Následující text je psaný tak, aby se dal poslat jako prompt.
-> Předchozí úkoly (Integrace a nástroje, Kalendář obsahu) jsou od
-> 14. 9. hotové.
+> Předchozí úkoly (Integrace a nástroje, Kalendář obsahu, Publikované
+> příspěvky) jsou od 14. 9. hotové.
 
 ---
 
@@ -191,45 +196,51 @@ Přečti si nejdřív `CLAUDE.md`, `docs/marketing-je-modul.md`,
 `FoodTab Marketing AI — Claude Code prompt v2.2`; tenhle soubor říká,
 co z něj je hotové.
 
-**Úkol: publikované příspěvky a jejich stavy** (zadání, obrazovka 12
-z oddílu 22). Malá práce s velkým užitkem: po zapnutí n8n bude potřeba
-vidět na jednom místě, co odešlo, co čeká ve frontě, co se odesílá,
-co spadlo a co čeká na ruční zveřejnění. Dnes se to musí proklikat
-po jednotlivých příspěvcích.
+**Úkol: Facebook vedle Instagramu** (zadání, oddíl 16).
+
+Facebook je dnes v číselníku kanálů, v omezení sloupce `kanal`
+i v překladech — ale **skutečná cesta ven vede jen na Instagram**.
+Číselník, který slibuje síť, kam se nedá poslat, je horší než síť,
+která tam není: uživatel příspěvek připraví, naplánuje a teprve pak
+zjistí, že nic neodešlo.
+
+Pro gastro provoz je Facebook pořád důležitý — má jiné publikum než
+Instagram a na akce (zabijačka, sledování zápasu, pozvánka na
+degustaci) se hodí líp.
 
 Co má vzniknout:
 
-1. **Seznam publikačních úloh** (`marketing_publikace_ulohy`) se stavem,
-   kanálem, časem a pobočkou. Fronta i historie, ne jen to, co čeká.
-2. **Chybové stavy nahlas**: `selhalo`, `vzdano` a poslední chyba česky,
-   s tím, co se dá udělat. U `vzdano` i to, kolikrát se to zkusilo.
-3. **Ruční zveřejnění** (`k_rucnimu_zverejneni`) je normální stav, ne
-   porucha — nesmí vypadat jako chyba a musí být poznat, co s tím.
-4. **Nanečisto se nepočítá do skutečnosti.** `zverejneno_nanecisto`
-   a `rezim = 'demo'` musí být na obrazovce vidět zvlášť; smíchat to
-   se skutečným zveřejněním by bylo horší než to neukazovat.
-5. **Externí id a odpověď poskytovatele** u toho, co odešlo — podle
-   toho se dohledává, co se doopravdy stalo.
+1. **Odeslání na Facebook Page** v `lib/marketing-odeslani.ts`
+   a v n8n workflow, stejnou cestou jako Instagram — přes připojení
+   z `marketing_pripojeni`, ne natvrdo.
+2. **Oddělený text a nastavení pro IG a FB.** Datově to jde už dnes
+   (`marketing_verze.texty` je mapa podle kanálu), ale obrazovka to
+   musí umět vyplnit zvlášť; dnes se píše jeden text pro obojí.
+3. **Výběr konkrétní připojené stránky podle provozovny** —
+   `marketing_ucty` na to je.
+4. **Co API nepodporuje, se nepředstírá.** Když se daný typ obsahu
+   na Facebook poslat nedá, nabídne se stažení hotového souboru
+   a jasně označený ruční postup — ne falešná automatizace (zadání,
+   oddíl 16, poslední odstavec).
 
 Pravidla, která tady platí zvlášť ostře:
 
-- **Nikdy falešné „zveřejněno".** Stav se bere z úlohy, ne z příspěvku,
-  a mění ho fronta, ne obrazovka.
-- Čas úlohy je okamžik. Zobrazuje se přes `lib/cas.ts` s pásmem
-  pobočky (CLAUDE.md, pravidlo 11), nikdy přes `getHours()`.
-- Obrazovka **nesmí psát do `marketing_publikace_ulohy`** jinak než
-  přes serverovou akci, která ověří `marketing.publish`. Politika
-  `marketing_publikace_ulohy_write` je druhá linie a od 14. 9. ji
-  ověřuje `supabase/tests/marketing11_scenar.sql`.
+- **Nikdy falešné „zveřejněno".** Stav se mění až podle odpovědi
+  poskytovatele. Obrazovka Publikované to ukazuje a
+  `scripts/marketing-publikovane.test.mjs` hlídá, že se nanečisto
+  nepočítá mezi skutečné.
+- **Idempotenční klíč** už tvar `publikace:verze:kanal:format` má —
+  Facebook do něj patří jako `kanal`, ne jako nový tvar klíče. Jinak
+  by se dalo poslat dvakrát.
+- **n8n zůstává vypnuté** až do doby, kdy se starý workflow „Černá
+  Perla — denní obsah na sítě" zúží. Zkoušet se dá nanečisto.
 - Ke každé nové kontrole **rozbij schválně to, co hlídá, a přesvědč
   se, že spadne.** Napiš, co jsi rozbil a co spadlo.
-- Nová obrazovka patří do `app/[rozsah]/nabidka.ts` — **před** obecnou
-  položku `marketing`.
 
 Nenasazuj. Nasazuje Šéfík z `main`. n8n nech vypnuté.
 
-Až to bude, pokračuj podle pořadí v oddílu 6 (publikované příspěvky,
-Facebook, kampaně, analytika).
+Až to bude, pokračuj podle pořadí v oddílu 6 (kampaně a automatizace,
+pak analytika s UTM a QR).
 
 ---
 

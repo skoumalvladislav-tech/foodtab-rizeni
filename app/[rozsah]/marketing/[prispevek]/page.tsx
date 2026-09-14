@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { textProKanal } from '@/lib/marketing'
-import { popisStavu } from '@/lib/marketing-text'
+import { popisStavu, popisStavuUlohy } from '@/lib/marketing-text'
 import { jeden, seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
@@ -93,17 +93,6 @@ type Uloha = {
   rezim: string
 }
 
-const STAVY_ULOH: Record<string, string> = {
-  naplanovano: 'naplánováno',
-  ve_fronte: 've frontě',
-  odesila_se: 'odesílá se',
-  zverejneno: 'zveřejněno',
-  zverejneno_nanecisto: 'zveřejněno nanečisto (demo)',
-  k_rucnimu_zverejneni: 'k ručnímu zveřejnění',
-  selhalo: 'selhalo',
-  vzdano: 'vzdáno po opakování',
-  zruseno: 'zrušeno',
-}
 
 export default async function DetailPrispevku({
   params,
@@ -499,7 +488,7 @@ export default async function DetailPrispevku({
               {ulohy.map((u) => (
                 <li key={u.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', fontSize: '14px' }}>
                   <span>{u.kanal === 'instagram' ? 'Instagram' : 'Facebook'}</span>
-                  <span style={{ color: 'var(--muted)' }}>{STAVY_ULOH[u.stav] ?? u.stav}</span>
+                  <span style={{ color: 'var(--muted)' }}>{popisStavuUlohy(u.stav)}</span>
                 </li>
               ))}
             </ul>
