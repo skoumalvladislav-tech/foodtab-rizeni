@@ -7,6 +7,7 @@ import type { Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { navrhnout } from '@/lib/marketing-ai'
 import { rozsifrovat } from '@/lib/marketing-klice'
+import { rozpoznatMenuZTextu, type MenuRozpoznanaPolozka } from '@/lib/marketing-menu-text'
 import { doporuceneRadky } from '@/lib/marketing-sablony'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
@@ -662,4 +663,175 @@ export async function prepnoutSablonu(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/marketing/sablony`)
   redirect(`/${rozsah}/marketing/sablony?ulozeno=1`)
+}
+
+/**
+ * MENU — ZALOŽENÍ Z VLOŽENÉHO TEXTU
+ *
+ * Zadání: master prompt, oddíl 10.
+ *
+ * ---------------------------------------------------------------------
+ * ČTE SE DETERMINISTICKY, NE MODELEM
+ *
+ * Vložený text je strukturovaný a model by u něj hádal — a zadání
+ * hádání zakazuje: „AI nesmí domýšlet cenu, datum, alergen ani
+ * složení." `lib/marketing-menu-text.ts` buď cenu najde, nebo ji nechá
+ * prázdnou a označí položku ke kontrole.
+ *
+ * ---------------------------------------------------------------------
+ * PŮVODNÍ TEXT SE ZACHOVÁ
+ *
+ * Do `puvodni_import` jde to, co člověk vložil. Když se za měsíc
+ * ukáže, že cena sedí špatně, musí jít poznat, jestli ji přečetl
+ * špatně import, nebo ji přepsal člověk.
+ */
+export async function zalozitMenuZTextu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const branchId = String(formData.get('pobocka') ?? '')
+  const text = String(formData.get('text') ?? '')
+  const druh = String(formData.get('druh') ?? 'denni')
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/menu?chyba=${encodeURIComponent(co)}`)
+
+  if (text.trim().length < 10) {
+    zpet('Vložte text menu — aspoň pár řádků.')
+  }
+
+  /*
+    Pobočka z formuláře je NÁVRH, ne oprávnění (pravidlo 4). Ověřuje se
+    dotazem pod přihlášeným člověkem: cizí id prostě nenajde.
+  */
+  const pobocka = await jeden<{ id: string }>(
+    'pobočka',
+    supabase.from('branches').select('id').eq('id', branchId).eq('tenant_id', tenantId).maybeSingle(),
+  )
+  if (!pobocka) zpet('Vyberte provozovnu.')
+
+  const rozpoznane = rozpoznatMenuZTextu(text)
+  const ja = await mujZamestnanec(tenantId)
+
+  const { data: menu, error: chybaMenu } = await supabase.from('marketing_menu').insert({
+    tenant_id: tenantId,
+    branch_id: branchId,
+    druh,
+    nazev: rozpoznane.title || 'Menu bez názvu',
+    plati_od: rozpoznane.valid_from,
+    plati_do: rozpoznane.valid_to,
+    zdroj: 'text',
+    puvodni_import: { text, rozpoznane },
+    vytvoril: ja,
+  }).select('id').single()
+
+  if (chybaMenu || !menu) zpet(chybaMenu?.message ?? 'Menu se nepodařilo založit.')
+
+  /*
+    Dny se zakládají jen u týdenního menu — u denního visí položky
+    přímo na menu. Prázdná tabulka dnů není nedodělek.
+  */
+  const polozky: Record<string, unknown>[] = []
+  let poradi = 0
+
+  for (const p of rozpoznane.items) {
+    polozky.push(polozkaDoRadku(p, tenantId, menu!.id, null, poradi++))
+  }
+
+  for (const [i, den] of rozpoznane.days.entries()) {
+    const { data: radekDne } = await supabase.from('marketing_menu_dny').insert({
+      tenant_id: tenantId,
+      menu_id: menu!.id,
+      den: den.day_date,
+      nazev: den.label,
+      poradi: i,
+    }).select('id').single()
+
+    for (const p of den.items) {
+      polozky.push(polozkaDoRadku(p, tenantId, menu!.id, radekDne?.id ?? null, poradi++))
+    }
+  }
+
+  if (polozky.length > 0) {
+    const { error } = await supabase.from('marketing_menu_polozky').insert(polozky)
+    if (error) zpet(error.message)
+  }
+
+  revalidatePath(`/${rozsah}/marketing/menu`)
+  redirect(`/${rozsah}/marketing/menu/${menu!.id}?nacteno=${polozky.length}`)
+}
+
+/** Rozpoznaná položka jako řádek. Prázdná cena se NEPŘEVÁDÍ na nulu. */
+function polozkaDoRadku(
+  p: MenuRozpoznanaPolozka,
+  tenantId: string,
+  menuId: string,
+  denId: string | null,
+  poradi: number,
+): Record<string, unknown> {
+  return {
+    tenant_id: tenantId,
+    menu_id: menuId,
+    den_id: denId,
+    kategorie: p.category,
+    nazev: p.name,
+    popis: p.description,
+    cena_haleru: p.price_cents,
+    alergeny: p.allergens,
+    poznamka: p.note,
+    vyzaduje_kontrolu: p.needs_review,
+    duvod_kontroly: p.review_reason,
+    poradi,
+  }
+}
+
+/** Oprava jedné položky člověkem. Tím z ní zmizí i příznak kontroly. */
+export async function opravitPolozkuMenu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const menuId = String(formData.get('menu') ?? '')
+  const id = String(formData.get('polozka') ?? '')
+  const cena = String(formData.get('cena') ?? '').trim()
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  /*
+    Prázdné políčko znamená „pořád nevíme", ne nula. Proto null, a
+    příznak kontroly se v tom případě NESUNDÁVÁ.
+  */
+  const haleru = cena === '' ? null : Math.round(Number(cena.replace(',', '.')) * 100)
+
+  if (haleru !== null && (!Number.isFinite(haleru) || haleru < 0)) {
+    redirect(`/${rozsah}/marketing/menu/${menuId}?chyba=${encodeURIComponent('Cena musí být číslo v korunách.')}`)
+  }
+
+  const { error } = await supabase.from('marketing_menu_polozky')
+    .update({
+      nazev: String(formData.get('nazev') ?? '').trim() || 'Bez názvu',
+      cena_haleru: haleru,
+      vyzaduje_kontrolu: haleru === null,
+      duvod_kontroly: haleru === null ? 'Cena zatím není známá' : null,
+    })
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/menu/${menuId}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/marketing/menu/${menuId}`)
+  redirect(`/${rozsah}/marketing/menu/${menuId}?ulozeno=1`)
+}
+
+/** Potvrzení menu. Rozhoduje databáze — viz migrace 20260914060000. */
+export async function potvrditMenu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const menuId = String(formData.get('menu') ?? '')
+  const { supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const { error } = await supabase.rpc('marketing_menu_potvrdit', { p_menu: menuId })
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/menu/${menuId}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/marketing/menu/${menuId}`)
+  redirect(`/${rozsah}/marketing/menu/${menuId}?potvrzeno=1`)
 }

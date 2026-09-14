@@ -141,6 +141,8 @@ jobs:
 
           grep -qE '^[[:space:]]*MARKETING 8 — VŠECHNY KONTROLY PROŠLY[[:space:]]*$' vystup.txt \
             || { echo "CHYBÍ hláška: MARKETING 8"; chybi=1; }
+          grep -qE '^[[:space:]]*MARKETING 9 — VŠECHNY KONTROLY PROŠLY[[:space:]]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: MARKETING 9"; chybi=1; }
 
           if [ "$chybi" -ne 0 ]; then
             echo "Scénáře neprošly celé."

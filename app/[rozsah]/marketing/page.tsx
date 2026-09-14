@@ -139,6 +139,10 @@ export default async function Marketing({
           <Link href={`/${rozsah}/marketing/sablony`} className="ft-tl">
             Šablony
           </Link>
+
+          <Link href={`/${rozsah}/marketing/menu`} className="ft-tl">
+            Menu
+          </Link>
         </div>
 
         {!maZnacku ? (
