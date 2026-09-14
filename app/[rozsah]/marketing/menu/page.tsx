@@ -2,32 +2,27 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { sestavRadky, type MenuRadek, type PolozkaPocet } from '@/lib/marketing-menu-tabulka'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { seznam } from '@/lib/supabase/dotaz'
+import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { cteniZObrazkuJeNastavene } from '@/lib/marketing-menu-ai'
-import { zalozitMenuZeSouboru, zalozitMenuZTextu } from '../akce'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Menu a jeho import.
+ * Menu — přehled v tabulce.
  *
- * Zadání: master prompt, oddíl 10 — čtyři způsoby, jak menu založit.
+ * Zadání krok 2 (`docs/hlaseni/zadani-pro-ai-marketing-faktury.md`):
+ * seznam v tabulce (druh, název, platnost, položek + „ke kontrole",
+ * stav, zdroj) a samotné zakládání se stěhuje na `/menu/nove`.
+ * Vzor: `marketing-ai/app/[provozovna]/menu/page.tsx` (git show 6cb7d72).
  *
- * ---------------------------------------------------------------------
- * DVĚ CESTY, A KAŽDÁ UMÍ NĚCO JINÉHO
- *
- * TEXT se čte pravidly, bez modelu. Funguje vždycky, nic nestojí a nic
- * nehádá — když cenu nenajde, nechá ji prázdnou.
- *
- * FOTKA A PDF potřebují AI, protože tam žádná struktura není. Bez
- * připojené AI se proto nabídka nahrání ani neukáže: tlačítko, které
- * skončí hláškou „není nastaveno", je horší než tlačítko, které tam
- * není. Místo něj stojí věta, co s tím.
+ * Čtyři cesty založení (ruční, text, fotka, PDF) žijí na jedné
+ * obrazovce dál — jen ne tady. Počty položek se počítají v
+ * `lib/marketing-menu-tabulka.ts`, čistou funkcí, kterou testuje
+ * `scripts/marketing-menu-tabulka.test.mjs` beze seed dat v databázi.
  */
 
 const karta = {
@@ -36,31 +31,6 @@ const karta = {
   borderRadius: '14px',
   padding: '16px',
 } as const
-
-const pole = {
-  display: 'block',
-  width: '100%',
-  padding: '8px 10px',
-  border: '1px solid var(--line)',
-  borderRadius: '8px',
-  background: 'var(--bg)',
-  color: 'inherit',
-  fontSize: '14px',
-} as const
-
-const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const
-
-const DRUHY = [
-  { klic: 'denni', nazev: 'Denní' },
-  { klic: 'tydenni', nazev: 'Týdenní' },
-  { klic: 'vikendove', nazev: 'Víkendové' },
-  { klic: 'poledni', nazev: 'Polední' },
-  { klic: 'sezonni', nazev: 'Sezonní' },
-]
-
-function popisStavu(stav: string): string {
-  return stav === 'potvrzeno' ? 'Potvrzeno' : stav === 'archivovano' ? 'Archiv' : 'Koncept'
-}
 
 export default async function MenuPrehled({
   params,
@@ -88,15 +58,16 @@ export default async function MenuPrehled({
   }
 
   const smiMenit = (await zkusPristup(tenantId, 'marketing.manage', rozsah)).stav === 'ok'
-  const cteniZObrazku = cteniZObrazkuJeNastavene()
   const supabase = await getServerSupabase()
 
   const dotaz = await supabase
     .from('marketing_menu')
-    .select('id, druh, nazev, plati_od, stav, zdroj, vytvoreno_kdy')
+    .select('id, druh, nazev, plati_od, plati_do, stav, zdroj, vytvoreno_kdy')
     .eq('tenant_id', tenantId)
+    .neq('stav', 'archivovano')
+    .order('plati_od', { ascending: false, nullsFirst: false })
     .order('vytvoreno_kdy', { ascending: false })
-    .limit(50)
+    .limit(100)
 
   if (tabulkaNeexistuje(dotaz.error)) {
     return (
@@ -112,150 +83,121 @@ export default async function MenuPrehled({
     )
   }
 
-  const menu = await seznam<{
-    id: string; druh: string; nazev: string; plati_od: string | null
+  const radkyDb = await seznam<{
+    id: string; druh: string; nazev: string; plati_od: string | null; plati_do: string | null
     stav: string; zdroj: string; vytvoreno_kdy: string
   }>('menu', Promise.resolve(dotaz))
 
-  const pobocky = await seznam<{ id: string; name: string }>(
-    'pobočky',
-    supabase.from('branches').select('id, name').eq('tenant_id', tenantId).order('name'),
+  const menu: MenuRadek[] = radkyDb.map((m) => ({
+    id: m.id,
+    druh: m.druh,
+    nazev: m.nazev,
+    platiOd: m.plati_od,
+    platiDo: m.plati_do,
+    stav: m.stav,
+    zdroj: m.zdroj,
+    vytvorenoKdy: m.vytvoreno_kdy,
+  }))
+
+  const menuIds = menu.map((m) => m.id)
+  const polozky = menuIds.length === 0
+    ? []
+    : await seznam<{ menu_id: string; vyzaduje_kontrolu: boolean }>(
+        'položky menu',
+        supabase.from('marketing_menu_polozky')
+          .select('menu_id, vyzaduje_kontrolu')
+          .eq('tenant_id', tenantId)
+          .in('menu_id', menuIds),
+      )
+
+  const radky = sestavRadky(
+    menu,
+    polozky.map((p): PolozkaPocet => ({ menuId: p.menu_id, vyzadujeKontrolu: p.vyzaduje_kontrolu })),
   )
 
   return (
     <>
-      <Nadpis oci="Marketing" popis={`${menu.length} menu`}>Menu</Nadpis>
+      <Nadpis
+        oci="Marketing"
+        popis={`${radky.length} menu`}
+        vpravo={smiMenit ? (
+          <Link href={`/${rozsah}/marketing/menu/nove`} className="ft-tl ft-tl-hlavni">
+            + Nové menu
+          </Link>
+        ) : undefined}
+      >
+        Menu
+      </Nadpis>
 
-      <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '900px', display: 'grid', gap: '16px' }}>
+      <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px' }}>
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
 
-        {smiMenit ? (
-          <form action={zalozitMenuZTextu} style={{ ...karta, display: 'grid', gap: '12px' }}>
-            <input type="hidden" name="rozsah" value={rozsah} />
-            <div>
-              <h2 style={{ margin: '0 0 4px', fontSize: '16px' }}>Vložit menu textem</h2>
-              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-                Zkopírujte menu, jak ho máte — z e-mailu, z Wordu, z tabule.
-                Přečte se z toho, co jde: název, cena, alergeny a dny.
-                {' '}<strong>Co se nepřečte, zůstane prázdné a označí se ke kontrole</strong> —
-                cena se nikdy nedomýšlí.
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <label style={{ flex: '1 1 200px' }}>
-                <span style={popisek}>Provozovna</span>
-                <select name="pobocka" style={pole} defaultValue={pobocky[0]?.id ?? ''}>
-                  {pobocky.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ flex: '1 1 160px' }}>
-                <span style={popisek}>Druh</span>
-                <select name="druh" style={pole} defaultValue="denni">
-                  {DRUHY.map((d) => (
-                    <option key={d.klic} value={d.klic}>{d.nazev}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <label>
-              <span style={popisek}>Text menu</span>
-              <textarea
-                name="text"
-                rows={8}
-                style={{ ...pole, resize: 'vertical', fontFamily: 'ui-monospace, monospace' }}
-                placeholder={'Denní menu 12. 9. 2026\nPolévka\nHovězí vývar 45 Kč\nHlavní jídla\nSvíčková na smetaně 189 Kč'}
-              />
-            </label>
-
-            <div>
-              <button type="submit" className="ft-tl ft-tl-hlavni">Načíst menu</button>
-            </div>
-          </form>
-        ) : null}
-
-        {smiMenit ? (
-          cteniZObrazku ? (
-            <form action={zalozitMenuZeSouboru} style={{ ...karta, display: 'grid', gap: '12px' }}>
-              <input type="hidden" name="rozsah" value={rozsah} />
-              <div>
-                <h2 style={{ margin: '0 0 4px', fontSize: '16px' }}>Nebo vyfoťte tabuli</h2>
-                <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-                  Fotka jídelního lístku nebo PDF, do 8 MB. Přečte se z toho, co je
-                  čitelné — <strong>rozmazaná cena zůstane prázdná</strong>, nikdy se
-                  nedoplní odhadem.
-                </p>
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <label style={{ flex: '1 1 200px' }}>
-                  <span style={popisek}>Provozovna</span>
-                  <select name="pobocka" style={pole} defaultValue={pobocky[0]?.id ?? ''}>
-                    {pobocky.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label style={{ flex: '1 1 160px' }}>
-                  <span style={popisek}>Druh</span>
-                  <select name="druh" style={pole} defaultValue="denni">
-                    {DRUHY.map((d) => (
-                      <option key={d.klic} value={d.klic}>{d.nazev}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <label>
-                <span style={popisek}>Soubor</span>
-                <input
-                  type="file"
-                  name="soubor"
-                  accept="image/jpeg,image/png,image/webp,application/pdf"
-                  style={pole}
-                />
-              </label>
-
-              <div>
-                <button type="submit" className="ft-tl">Přečíst z fotky</button>
-              </div>
-            </form>
-          ) : (
-            <div style={karta}>
-              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-                Čtení z fotky a PDF potřebuje připojenou AI. Než ji připojíte,
-                vkládejte menu textem — funguje to bez ní a nic to nehádá.
-              </p>
-            </div>
-          )
-        ) : null}
-
-        {menu.length === 0 ? (
+        {radky.length === 0 ? (
           <div style={karta}>
             <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
-              Zatím žádné menu. {smiMenit ? 'Vložte ho výš textem.' : null}
+              Zatím žádné menu.{' '}
+              {smiMenit ? (
+                <Link href={`/${rozsah}/marketing/menu/nove`}>Založte ho ručně, textem, fotkou nebo PDF.</Link>
+              ) : null}
             </p>
           </div>
         ) : (
-          <section style={{ ...karta, display: 'grid', gap: '8px' }}>
-            <h2 style={{ margin: 0, fontSize: '16px' }}>Uložená menu</h2>
-            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: '8px' }}>
-              {menu.map((m) => (
-                <li key={m.id} style={{ borderTop: '1px solid var(--line)', paddingTop: '8px' }}>
-                  <Link href={`/${rozsah}/marketing/menu/${m.id}`} style={{ fontSize: '14.5px' }}>
-                    {m.nazev}
-                  </Link>
-                  <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                    {popisStavu(m.stav)} · {DRUHY.find((d) => d.klic === m.druh)?.nazev ?? m.druh}
-                    {m.plati_od ? ` · od ${m.plati_od}` : ''}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <div style={{ ...karta, padding: 0, overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '14px' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
+                  <th style={{ padding: '10px 12px', fontWeight: 500 }}>Druh</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 500 }}>Název</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 500 }}>Platnost</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 500 }}>Položek</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 500 }}>Stav</th>
+                  <th style={{ padding: '10px 12px', fontWeight: 500 }}>Zdroj</th>
+                </tr>
+              </thead>
+              <tbody>
+                {radky.map((r) => (
+                  <tr key={r.id} style={{ borderTop: '1px solid var(--line)' }}>
+                    <td style={{ padding: '10px 12px' }}>{r.druh}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <Link href={`/${rozsah}/marketing/menu/${r.id}`}>{r.nazev}</Link>
+                    </td>
+                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{r.platnost}</td>
+                    <td style={{ padding: '10px 12px' }}>
+                      {r.pocetPolozek}
+                      {r.keKontrole > 0 ? (
+                        <span
+                          style={{
+                            marginLeft: '6px',
+                            fontSize: '11px',
+                            padding: '1px 6px',
+                            borderRadius: '999px',
+                            border: '1px solid var(--mosaz)',
+                            color: 'var(--mosaz)',
+                          }}
+                        >
+                          {r.keKontrole} ke kontrole
+                        </span>
+                      ) : null}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span
+                        style={{
+                          fontSize: '12px',
+                          padding: '1px 8px',
+                          borderRadius: '999px',
+                          background: r.stav === 'Potvrzeno' ? 'var(--dobre-bg)' : 'var(--sunken)',
+                          color: r.stav === 'Potvrzeno' ? 'var(--dobre)' : 'var(--muted)',
+                        }}
+                      >
+                        {r.stav}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 12px', color: 'var(--muted)' }}>{r.zdroj}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>

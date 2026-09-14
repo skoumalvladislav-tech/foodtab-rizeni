@@ -880,6 +880,102 @@ function polozkaDoRadku(
   }
 }
 
+/**
+ * Nové menu ručním formulářem.
+ *
+ * Zadání krok 2 (`docs/hlaseni/zadani-pro-ai-marketing-faktury.md`):
+ * čtvrtá cesta vedle textu, fotky a PDF — mřížka řádků, žádný model,
+ * žádné rozpoznávání. Co člověk napíše, to se uloží.
+ *
+ * ---------------------------------------------------------------------
+ * PRÁZDNÁ CENA SE KE KONTROLE OZNAČÍ STEJNĚ JAKO U IMPORTU
+ *
+ * Pravidlo „cena se nikdy nedomýšlí" neplatí jen pro AI. Kdo řádek
+ * vyplní bez ceny, ať už zapomněl nebo ji ještě nezná, má tu položku
+ * vidět stejně zvýrazněnou jako tu, kterou nedokázala přečíst fotka —
+ * `marketing_menu_potvrdit` mezi nimi taky nerozlišuje (`opravitPolozkuMenu`
+ * výš dělá totéž).
+ */
+const RADKU_RUCNE = 8
+
+export async function zalozitMenuRucne(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const branchId = String(formData.get('pobocka') ?? '')
+  const druh = String(formData.get('druh') ?? 'denni')
+  const nazev = String(formData.get('nazev') ?? '').trim()
+  const platiOd = String(formData.get('plati_od') ?? '').trim()
+  const platiDo = String(formData.get('plati_do') ?? '').trim()
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/menu/nove?zpusob=rucne&chyba=${encodeURIComponent(co)}`)
+
+  const pobocka = await jeden<{ id: string }>(
+    'pobočka',
+    supabase.from('branches').select('id').eq('id', branchId).eq('tenant_id', tenantId).maybeSingle(),
+  )
+  if (!pobocka) zpet('Vyberte provozovnu.')
+
+  if (!platiOd) zpet('Vyplňte, od kdy menu platí.')
+
+  const polozky: Record<string, unknown>[] = []
+  let poradi = 0
+
+  for (let i = 0; i < RADKU_RUCNE; i++) {
+    const nazevPolozky = String(formData.get(`nazev_${i}`) ?? '').trim()
+    // Prázdný řádek se přeskočí — mřížka má vždycky pár řádků navíc.
+    if (!nazevPolozky) continue
+
+    const cena = String(formData.get(`cena_${i}`) ?? '').trim()
+    const haleru = cena === '' ? null : Math.round(Number(cena.replace(',', '.')) * 100)
+    if (haleru !== null && (!Number.isFinite(haleru) || haleru < 0)) {
+      zpet(`Řádek ${i + 1}: cena musí být číslo v korunách.`)
+    }
+
+    const alergeny = String(formData.get(`alergeny_${i}`) ?? '')
+      .split(/[,;]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    polozky.push({
+      tenant_id: tenantId,
+      kategorie: String(formData.get(`kategorie_${i}`) ?? 'hlavni'),
+      nazev: nazevPolozky,
+      popis: String(formData.get(`popis_${i}`) ?? '').trim(),
+      cena_haleru: haleru,
+      alergeny,
+      dostupnost: String(formData.get(`dostupnost_${i}`) ?? 'k_dispozici'),
+      vyzaduje_kontrolu: haleru === null,
+      duvod_kontroly: haleru === null ? 'Cena zatím není známá' : null,
+      poradi: poradi++,
+    })
+  }
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const { data: menu, error: chybaMenu } = await supabase.from('marketing_menu').insert({
+    tenant_id: tenantId,
+    branch_id: branchId,
+    druh,
+    nazev: nazev || 'Menu bez názvu',
+    plati_od: platiOd,
+    plati_do: platiDo || null,
+    zdroj: 'rucne',
+    vytvoril: ja,
+  }).select('id').single()
+
+  if (chybaMenu || !menu) zpet(chybaMenu?.message ?? 'Menu se nepodařilo založit.')
+
+  if (polozky.length > 0) {
+    const { error } = await supabase.from('marketing_menu_polozky')
+      .insert(polozky.map((p) => ({ ...p, menu_id: menu!.id })))
+    if (error) zpet(error.message)
+  }
+
+  revalidatePath(`/${rozsah}/marketing/menu`)
+  redirect(`/${rozsah}/marketing/menu/${menu!.id}?ulozeno=1`)
+}
+
 /** Oprava jedné položky člověkem. Tím z ní zmizí i příznak kontroly. */
 export async function opravitPolozkuMenu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
