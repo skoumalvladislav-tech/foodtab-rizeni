@@ -119,10 +119,24 @@ export const NABIDKA: Polozka[] = [
   // modulem, jak žádá pravidlo 5.
   { segment: 'menu', nazev: 'Tvorba menu', kratky: 'Menu', modul: 'menu', pravo: 'menu_ai.use', hotovo: true, ikona: 'kniha' },
   { segment: 'finance', nazev: 'Přehled financí', kratky: 'Finance', modul: 'finance', pravo: 'finance.read', hotovo: false, ikona: 'kniha' },
-  // Obrazovka zatím jen říká, že se modul připravuje (stejný důvod jako
-  // u Tvorby menu výše) — proto hotovo: true, i když navrhování a
-  // publikování příspěvků ještě neumí nic.
-  { segment: 'marketing', nazev: 'Marketing', kratky: 'Marketing', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
+  // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.
+  //
+  // Do 14. 9. 2026 tu stála jediná položka a v levém sloupci proto nebylo
+  // vidět nic než „Marketing" — fotky, šablony i menu existovaly a nedalo
+  // se na ně dostat jinak než odkazem z přehledu. Původní samostatná
+  // aplikace měla vlevo deset položek; tohle je jejich převod.
+  //
+  // Pořadí je podle toho, jak se to dělá: nejdřív podklady (fotky,
+  // šablony, menu), pak se z nich skládá příspěvek na přehledu.
+  //
+  // Zdánlivě chybí „Ke schválení", „Kalendář", „Kampaně", „Publikované"
+  // a „Analytika". Nechybí — ty obrazovky zatím nejsou, a položka, která
+  // vede na 404, je horší než položka, která tam není.
+  { segment: 'marketing/media', nazev: 'Fotky', kratky: 'Fotky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
+  { segment: 'marketing/sablony', nazev: 'Šablony', kratky: 'Šablony', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
+  { segment: 'marketing/menu', nazev: 'Menu', kratky: 'Menu', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
+  { segment: 'marketing/znacka', nazev: 'Značka', kratky: 'Značka', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
+  { segment: 'marketing', nazev: 'Příspěvky', kratky: 'Příspěvky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'zprava' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
 ]
 
