@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { coNejde, zkontrolovat } from './marketing-kanaly.ts'
 import { textProKanal } from './marketing.ts'
 import { n8nJeNastaveny, predatN8n, type Obrazek } from './marketing-n8n.ts'
 
@@ -49,6 +50,14 @@ export type Uloha = {
   pripojeni_id: string | null
   ucet_id: string | null
   idempotencni_klic: string
+  /*
+    CO POSKYTOVATEL POVOLIL PRO TENHLE ÚČET.
+
+    Nepovinné: dokud se účty nenačítají, je to prázdné a pravidla
+    kanálu podle toho NEODMÍTAJÍ. Tvrdit „váš účet to neumí" proto,
+    že jsme se nezeptali, je horší než to zkusit.
+  */
+  schopnosti_uctu?: string[]
   pokusy: number
   max_pokusu: number
   texty: Record<string, unknown>
@@ -107,18 +116,31 @@ export async function odeslat(uloha: Uloha, obrazky: Obrazek[] = []): Promise<Vy
   }
 
   /*
-    BEZ OBRÁZKU TO NEPOSÍLÁME ANI NEZKOUŠÍME.
+    CO SÍŤ ODMÍTNE, SE NEPOSÍLÁ ANI NEZKOUŠÍ.
 
-    Instagram příspěvek bez obrázku odmítne. Kdybychom to poslali,
-    vypálí se pokus, počká se pět minut, znovu — a po pěti kolech se
-    to vzdá s hláškou od Mety, ze které nikdo nepozná, že prostě
-    chybí fotka.
+    Kdybychom to poslali, vypálí se pokus, počká se pět minut, znovu —
+    a po pěti kolech se to vzdá s hláškou od Mety, ze které nikdo
+    nepozná, že prostě chybí fotka.
+
+    PRAVIDLA JSOU V `lib/marketing-kanaly.ts`, NE TADY. Do 14. 9. 2026
+    stálo na tomhle místě „bez obrázku neposíláme" pro VŠECHNY sítě
+    a hláška mluvila o Instagramu. U Instagramu to platí, u Facebooku
+    ne — stránka text bez obrázku přijme. Facebook tím nešel zveřejnit
+    textem, ačkoli to síť umí.
   */
-  if (obrazky.length === 0) {
-    return {
-      stav: 'chyba',
-      duvod: `${nazevKanalu(uloha.kanal)} příspěvek bez fotky nepřijme. Vyberte fotku a naplánujte znovu.`,
-    }
+  const nalezy = zkontrolovat({
+    kanal: uloha.kanal,
+    format: uloha.format,
+    text: popisek,
+    pocetFotek: obrazky.length,
+    schopnostiUctu: uloha.schopnosti_uctu ?? [],
+  })
+
+  const prekazky = coNejde(nalezy)
+  if (prekazky.length > 0) {
+    // Do hlášky jdou všechny překážky, ne jen první. Opravit jednu
+    // a hned narazit na druhou je zbytečné kolo.
+    return { stav: 'chyba', duvod: prekazky.map((n) => n.text).join(' ') }
   }
 
   const odpoved = await predatN8n({
@@ -143,8 +165,4 @@ export async function odeslat(uloha: Uloha, obrazky: Obrazek[] = []): Promise<Vy
     nanecisto: false,
     odpoved: odpoved.odpoved,
   }
-}
-
-function nazevKanalu(kanal: string): string {
-  return kanal === 'instagram' ? 'Instagram' : kanal === 'facebook' ? 'Facebook' : kanal
 }

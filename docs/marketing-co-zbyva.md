@@ -45,7 +45,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 13 | Editor a náhled | **rozestavěné** | Text, cena, termín a fotky se měnit dají. **Náhled IG a FB vedle sebe, bezpečné zóny, obnovení starší verze a duplikace návrhu chybí** |
 | 14 | Schvalování a verzování | **hotovo** | Čtyři oči, otisk verze, nová verze ruší schválení, hromadné schválení, auditní stopa. **Chybí jediné: upozornění** (žádost, vrácení, schválení, selhání) |
 | 15 | Kalendář, kampaně, automatizace | **rozestavěné** | **Kalendář hotový (14. 9.)** — měsíc, týden, filtry, pilíře barvou, koncepty bez data, varování, přesun termínu. **Kampaně, série, opakování a evergreen fronta chybí** |
-| 16 | Publikování na IG a FB | **rozestavěné** | Fronta úloh, opakování, dead-letter, idempotence, „nikdy falešné zveřejněno" — **to všechno hotové**. Odesílá se přes n8n. **Facebook je v číselníku, ale skutečná cesta ven je zatím jen Instagram** |
+| 16 | Publikování na IG a FB | **rozestavěné** | Fronta úloh, opakování, dead-letter, idempotence, „nikdy falešné zveřejněno" — hotové. **Facebook rovnocenně s Instagramem (14. 9.)**: pravidla sítí jako data (`lib/marketing-kanaly.ts`), FB projde i samotným textem, oddělený text a strop znaků pro každou síť, účet pobočky se vyplňuje. **Zbývá n8n workflow pro FB a načítání účtů z Mety** |
 | 17 | Inspirace z jiných nástrojů | **chybí** | Schránka nápadů, obsahové pilíře, mini-kampaň z akce, checklist podkladů, QR a UTM, týdenní report — nic z toho |
 | 18 | Analytika a měření | **chybí** | Žádná tabulka, žádná obrazovka |
 | 19 | Databázový model | **hotovo** | 16 tabulek, RLS všude, granty prověřené |
@@ -158,9 +158,16 @@ zveřejnění jako normální stav (ne porucha), nanečisto s vlastním
 rady. Seznam stavů se přestěhoval z detailu příspěvku do
 `lib/marketing-text.ts` — dvě kopie téhož seznamu by se rozešly.
 
-**4. Facebook vedle Instagramu (oddíl 16).**
-Číselník ho zná, cesta ven zatím ne. Pro gastro provoz je FB pořád
-důležitý — jiné publikum než IG.
+**4. Facebook vedle Instagramu (oddíl 16).** — **HOTOVO 14. 9. na
+straně Foodtabu.**
+Rozdíly mezi sítěmi jsou data v `lib/marketing-kanaly.ts`. Našla se
+přitom skutečná závada: odesílání odmítalo KAŽDÝ příspěvek bez fotky
+větou o Instagramu, takže Facebook nešel zveřejnit samotným textem,
+ačkoli to síť umí.
+
+**Co zbývá a není to Foodtab:** n8n musí umět větev na Facebook Page
+(dnes obsluhuje jen Instagram) a účty se pořád nenačítají z Mety, takže
+`marketing_ucty` je prázdná a `schopnosti` se nekontrolují proti ničemu.
 
 **5. Kampaně a automatizace (oddíl 15, obrazovka 11).**
 Série příspěvků (pozvánka → připomínka → poslední výzva → report).
@@ -185,7 +192,7 @@ chybí.
 
 > Následující text je psaný tak, aby se dal poslat jako prompt.
 > Předchozí úkoly (Integrace a nástroje, Kalendář obsahu, Publikované
-> příspěvky) jsou od 14. 9. hotové.
+> příspěvky, Facebook vedle Instagramu) jsou od 14. 9. hotové.
 
 ---
 
@@ -196,51 +203,56 @@ Přečti si nejdřív `CLAUDE.md`, `docs/marketing-je-modul.md`,
 `FoodTab Marketing AI — Claude Code prompt v2.2`; tenhle soubor říká,
 co z něj je hotové.
 
-**Úkol: Facebook vedle Instagramu** (zadání, oddíl 16).
+**Úkol: kampaně a automatizace** (zadání, oddíl 15, obrazovka 11
+z oddílu 22).
 
-Facebook je dnes v číselníku kanálů, v omezení sloupce `kanal`
-i v překladech — ale **skutečná cesta ven vede jen na Instagram**.
-Číselník, který slibuje síť, kam se nedá poslat, je horší než síť,
-která tam není: uživatel příspěvek připraví, naplánuje a teprve pak
-zjistí, že nic neodešlo.
-
-Pro gastro provoz je Facebook pořád důležitý — má jiné publikum než
-Instagram a na akce (zabijačka, sledování zápasu, pozvánka na
-degustaci) se hodí líp.
+Kalendář od 14. 9. ukazuje, co kdy půjde ven. Chybí druhá polovina:
+obsah se pořád zakládá po jednom příspěvku. Restaurace přitom
+nedělá jeden příspěvek — dělá akci a k ní patří série: pozvánka
+týden předem, připomínka den předem, poslední výzva ráno, po akci
+poděkování s fotkami.
 
 Co má vzniknout:
 
-1. **Odeslání na Facebook Page** v `lib/marketing-odeslani.ts`
-   a v n8n workflow, stejnou cestou jako Instagram — přes připojení
-   z `marketing_pripojeni`, ne natvrdo.
-2. **Oddělený text a nastavení pro IG a FB.** Datově to jde už dnes
-   (`marketing_verze.texty` je mapa podle kanálu), ale obrazovka to
-   musí umět vyplnit zvlášť; dnes se píše jeden text pro obojí.
-3. **Výběr konkrétní připojené stránky podle provozovny** —
-   `marketing_ucty` na to je.
-4. **Co API nepodporuje, se nepředstírá.** Když se daný typ obsahu
-   na Facebook poslat nedá, nabídne se stažení hotového souboru
-   a jasně označený ruční postup — ne falešná automatizace (zadání,
-   oddíl 16, poslední odstavec).
+1. **Kampaň** jako záznam: název, cíl, termín akce, pobočka, pilíř.
+   Příspěvky se k ní vážou, takže je v kalendáři vidět pohromadě
+   a dají se filtrovat.
+2. **Série z jedné akce.** Zadáte zabijačku na sobotu a vznikne
+   pozvánka → připomínka → poslední výzva → report po akci, jako
+   koncepty s návrhem termínu. **Nic se nezveřejní samo** — každý
+   kus projde schválením jako dnes.
+3. **Opakovaná kampaň** (denní menu, páteční propagace víkendu).
+   Každá automatizace má podle zadání mít **vypínač, vlastníka,
+   provozovnu, poslední a příští spuštění, historii výsledků
+   a možnost bezpečně ji pozastavit.**
+4. **Fronta evergreen obsahu** — příspěvky bez data, které se dají
+   pustit, když je v kalendáři díra. Varování na dlouhé ticho už
+   kalendář umí; tohle je odpověď na ně.
+5. **Ochrana před duplicitní publikací** — když se série a opakovaná
+   kampaň potkají na tomtéž dni, nesmí odejít dvakrát.
 
 Pravidla, která tady platí zvlášť ostře:
 
-- **Nikdy falešné „zveřejněno".** Stav se mění až podle odpovědi
-  poskytovatele. Obrazovka Publikované to ukazuje a
-  `scripts/marketing-publikovane.test.mjs` hlídá, že se nanečisto
-  nepočítá mezi skutečné.
-- **Idempotenční klíč** už tvar `publikace:verze:kanal:format` má —
-  Facebook do něj patří jako `kanal`, ne jako nový tvar klíče. Jinak
-  by se dalo poslat dvakrát.
-- **n8n zůstává vypnuté** až do doby, kdy se starý workflow „Černá
-  Perla — denní obsah na sítě" zúží. Zkoušet se dá nanečisto.
+- **Automatizace nesmí obejít schválení.** Vygenerovat koncepty ano;
+  naplánovat je ke zveřejnění bez odklepnutí ne. Hlídá to databáze
+  (`app.marketing_strez_publikaci`) a nová cesta to nesmí obcházet.
+- **Vypínač musí opravdu vypínat** a musí být poznat, kdy naposledy
+  běžela a jak dopadla. Automatizace, u které se nedá zjistit, co
+  udělala, je horší než ruční práce.
+- **Termíny jsou hodiny na zdi**, převádí je databáze přes
+  `marketing_okamzik` (CLAUDE.md, pravidlo 11). Série „den předem
+  v 17:00" se nesmí počítat v UTC.
+- Posun v testech přes půlnoc dělej o **víc než 24 hodin** — CLAUDE.md,
+  „Testy, které závisí na kalendáři".
 - Ke každé nové kontrole **rozbij schválně to, co hlídá, a přesvědč
   se, že spadne.** Napiš, co jsi rozbil a co spadlo.
+- Nová obrazovka patří do `app/[rozsah]/nabidka.ts` — **před** obecnou
+  položku `marketing`.
 
 Nenasazuj. Nasazuje Šéfík z `main`. n8n nech vypnuté.
 
-Až to bude, pokračuj podle pořadí v oddílu 6 (kampaně a automatizace,
-pak analytika s UTM a QR).
+Až to bude, zbývá z oddílu 6 už jen analytika s UTM a QR — a ta má
+smysl teprve tehdy, až něco doopravdy odchází ven.
 
 ---
 

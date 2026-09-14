@@ -442,21 +442,57 @@ export async function naplanovat(formData: FormData): Promise<void> {
   }
 
   const ja = await mujZamestnanec(tenantId)
+
+  /*
+    ÚČET POBOČKY, NE ÚČET FIRMY.
+
+    Černá Perla a Bernard Bar mají každý svůj profil. Do 14. 9. 2026 se
+    `ucet_id` nevyplňovalo vůbec — tabulka `marketing_ucty` existovala
+    a nikdo ji nečetl. Fungovalo to jen proto, že n8n má dnes napevno
+    jeden účet; jakmile bude druhá pobočka, odešel by její příspěvek
+    na cizí profil. To není chyba, které by si někdo všiml v logu:
+    všimne si jí host, kterému se v profilu objeví cizí menu.
+
+    Když účet není zavedený, `ucet_id` zůstane prázdné a posílá se dál
+    jako dosud. Zastavit kvůli tomu zveřejňování by bylo přísnější než
+    dnešní stav a nic by to nespravilo.
+  */
+  const ucty = await seznam<{ id: string; sit: string; schopnosti: string[] }>(
+    'účty pobočky',
+    supabase.from('marketing_ucty')
+      .select('id, sit, schopnosti')
+      .eq('tenant_id', tenantId)
+      .eq('branch_id', prispevek.branch_id)
+      .eq('aktivni', true),
+  ).catch(() => [])
+
+  const ucetProSit = new Map(ucty.map((u) => [u.sit, u]))
+
   let zalozeno = 0
 
   for (const kanal of prispevek.kanaly) {
+    const ucet = ucetProSit.get(kanal)
+
     const { error } = await supabase.from('marketing_publikace_ulohy').insert({
       tenant_id: tenantId,
       prispevek_id: prispevekId,
       verze_id: prispevek.schvalena_verze_id,
       otisk_verze: zadost.otisk_verze,
       schvaleni_id: zadost.id,
+      ucet_id: ucet?.id ?? null,
       kanal,
       format: 'prispevek',
       poskytovatel: zpusob.poskytovatel,
       pripojeni_id: zpusob.pripojeniId,
       rezim: zpusob.rezim,
       planovano_na: okamzik,
+      /*
+        Formát v klíči zůstává `prispevek`, i když se jinde rozlišují
+        podrobnější (`feed`, `page_post`). Klíč drží jedinečnost —
+        změnit ho znamená, že už odeslaná úloha se přestane poznávat
+        a při opakování by odešla podruhé. Most mezi tvary je
+        v `lib/marketing-kanaly.ts`.
+      */
       idempotencni_klic: `publikace:${prispevek.schvalena_verze_id}:${kanal}:prispevek`,
       vytvoril: ja,
     })

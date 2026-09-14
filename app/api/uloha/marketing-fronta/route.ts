@@ -99,6 +99,38 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   const ulohy = (data ?? []) as Uloha[]
+
+  /*
+    CO POSKYTOVATEL POVOLIL PRO TY ÚČTY.
+
+    `marketing_vyzvednout_publikace` vrací `ucet_id`, ne schopnosti.
+    Dotáhnou se jedním dotazem za celou dávku, ne po jedné úloze —
+    v dávce bývá několik úloh na týž účet.
+
+    ROZŠIŘOVAT KVŮLI TOMU TU FUNKCI BY BYLO DRAŽŠÍ. Je
+    `security definer` a mění se migrací, která čeká na nasazení;
+    tenhle dotaz běží pod servisním klíčem na serveru a nic nemění.
+    Až bude důvod funkci měnit z jiných příčin, může se to sloučit.
+
+    Když se dotaz nepovede, jede se dál s prázdnými schopnostmi —
+    pravidla kanálu podle nich pak NEODMÍTAJÍ. Zastavit zveřejňování
+    kvůli tomu, že jsme se nedozvěděli, co účet umí, by bylo horší
+    než to zkusit.
+  */
+  const idUctu = [...new Set(ulohy.map((u) => u.ucet_id).filter(Boolean))] as string[]
+  const schopnostiUctu = new Map<string, string[]>()
+
+  if (idUctu.length > 0) {
+    const { data: ucty } = await supabase
+      .from('marketing_ucty')
+      .select('id, schopnosti')
+      .in('id', idUctu)
+
+    for (const u of (ucty ?? []) as { id: string; schopnosti: string[] | null }[]) {
+      schopnostiUctu.set(u.id, u.schopnosti ?? [])
+    }
+  }
+
   const pocty = { zverejneno: 0, nanecisto: 0, rucne: 0, selhalo: 0 }
 
   for (const uloha of ulohy) {
@@ -108,7 +140,13 @@ export async function GET(request: Request): Promise<NextResponse> {
       zabraný, ale neodeslaný a bez zápisu proč.
     */
     try {
-      const vysledek = await odeslat(uloha, await odkazyNaFotky(supabase, uloha))
+      const vysledek = await odeslat(
+        {
+          ...uloha,
+          schopnosti_uctu: uloha.ucet_id ? schopnostiUctu.get(uloha.ucet_id) ?? [] : [],
+        },
+        await odkazyNaFotky(supabase, uloha),
+      )
 
       if (vysledek.stav === 'hotovo') {
         await supabase.rpc('marketing_publikace_hotova', {
