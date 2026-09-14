@@ -7,7 +7,9 @@ import type { Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { navrhnout } from '@/lib/marketing-ai'
 import { rozsifrovat } from '@/lib/marketing-klice'
+import { precistMenu } from '@/lib/marketing-menu-ai'
 import { rozpoznatMenuZTextu, type MenuRozpoznanaPolozka } from '@/lib/marketing-menu-text'
+import { precistObrazek } from '@/lib/marketing-obrazek'
 import { doporuceneRadky } from '@/lib/marketing-sablony'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
@@ -834,4 +836,122 @@ export async function potvrditMenu(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/marketing/menu/${menuId}`)
   redirect(`/${rozsah}/marketing/menu/${menuId}?potvrzeno=1`)
+}
+
+/**
+ * MENU Z FOTKY NEBO PDF
+ *
+ * Zadání: master prompt, oddíl 10 — třetí a čtvrtý způsob.
+ *
+ * ---------------------------------------------------------------------
+ * SOUBOR SE NEUKLÁDÁ DO ÚLOŽIŠTĚ
+ *
+ * Přečte se a zahodí. Do `puvodni_import` jde výsledek čtení, ne
+ * obrázek. Je to schválně: fotka tabule s dnešním menu nemá cenu
+ * uchovávat, a kdyby se ukládala, přibyla by knihovna, kterou nikdo
+ * neprochází a nikdo neuklízí.
+ *
+ * Kdyby se ukázalo, že je podklad potřeba dohledat, uloží se přes
+ * `marketing_media` a zapíše do `zdroj_media_id` — sloupec na to
+ * v tabulce je.
+ */
+export async function zalozitMenuZeSouboru(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const branchId = String(formData.get('pobocka') ?? '')
+  const druh = String(formData.get('druh') ?? 'denni')
+  const soubor = formData.get('soubor')
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/menu?chyba=${encodeURIComponent(co)}`)
+
+  if (!(soubor instanceof File) || soubor.size === 0) {
+    zpet('Vyberte fotku nebo PDF.')
+  }
+
+  const pobocka = await jeden<{ id: string }>(
+    'pobočka',
+    supabase.from('branches').select('id').eq('id', branchId).eq('tenant_id', tenantId).maybeSingle(),
+  )
+  if (!pobocka) zpet('Vyberte provozovnu.')
+
+  const bajty = new Uint8Array(await (soubor as File).arrayBuffer())
+
+  /*
+    Typ se bere ze SOUBORU, ne z toho, co napsal prohlížeč. `File.type`
+    je údaj z klienta — a údaj z klienta je návrh (pravidlo 4).
+    `precistObrazek` typ pozná z prvních bajtů; u PDF stačí jeho
+    značka na začátku.
+  */
+  const jePdf = bajty.length > 4
+    && bajty[0] === 0x25 && bajty[1] === 0x50 && bajty[2] === 0x44 && bajty[3] === 0x46
+  // Čte se JEDNOU. Dvojí volání by otisk počítalo dvakrát zbytečně.
+  const jakoObrazek = jePdf ? null : precistObrazek(bajty)
+  const mime = jePdf
+    ? 'application/pdf'
+    : jakoObrazek?.stav === 'ok' ? jakoObrazek.obrazek.typ : ''
+
+  if (!mime) {
+    zpet('Tenhle soubor neumíme přečíst. Pošlete fotku (JPEG, PNG, WebP) nebo PDF.')
+  }
+
+  const vysledek = await precistMenu(
+    bajty,
+    mime,
+    await klicZakaznika(supabase, tenantId, branchId),
+  )
+
+  if (vysledek.stav === 'chyba') zpet(vysledek.duvod)
+  if (vysledek.stav !== 'hotovo') return
+
+  const rozpoznane = vysledek.menu
+  const ja = await mujZamestnanec(tenantId)
+
+  const { data: menu, error: chybaMenu } = await supabase.from('marketing_menu').insert({
+    tenant_id: tenantId,
+    branch_id: branchId,
+    druh,
+    nazev: rozpoznane.title || 'Menu bez názvu',
+    plati_od: rozpoznane.valid_from,
+    plati_do: rozpoznane.valid_to,
+    zdroj: jePdf ? 'pdf' : 'fotka',
+    puvodni_import: {
+      rozpoznane,
+      model: vysledek.model,
+      verze_zadani: vysledek.verzeZadani,
+      nazev_souboru: (soubor as File).name,
+    },
+    vytvoril: ja,
+  }).select('id').single()
+
+  if (chybaMenu || !menu) zpet(chybaMenu?.message ?? 'Menu se nepodařilo založit.')
+
+  const polozky: Record<string, unknown>[] = []
+  let poradi = 0
+
+  for (const p of rozpoznane.items) {
+    polozky.push(polozkaDoRadku(p, tenantId, menu!.id, null, poradi++))
+  }
+
+  for (const [i, den] of rozpoznane.days.entries()) {
+    const { data: radekDne } = await supabase.from('marketing_menu_dny').insert({
+      tenant_id: tenantId,
+      menu_id: menu!.id,
+      den: den.day_date,
+      nazev: den.label,
+      poradi: i,
+    }).select('id').single()
+
+    for (const p of den.items) {
+      polozky.push(polozkaDoRadku(p, tenantId, menu!.id, radekDne?.id ?? null, poradi++))
+    }
+  }
+
+  if (polozky.length > 0) {
+    const { error } = await supabase.from('marketing_menu_polozky').insert(polozky)
+    if (error) zpet(error.message)
+  }
+
+  revalidatePath(`/${rozsah}/marketing/menu`)
+  redirect(`/${rozsah}/marketing/menu/${menu!.id}?nacteno=${polozky.length}`)
 }

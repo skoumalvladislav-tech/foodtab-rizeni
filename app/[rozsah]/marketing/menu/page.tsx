@@ -7,7 +7,8 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { zalozitMenuZTextu } from '../akce'
+import { cteniZObrazkuJeNastavene } from '@/lib/marketing-menu-ai'
+import { zalozitMenuZeSouboru, zalozitMenuZTextu } from '../akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,9 +16,17 @@ export const dynamic = 'force-dynamic'
  * Menu a jeho import.
  *
  * Zadání: master prompt, oddíl 10 — čtyři způsoby, jak menu založit.
- * Hotové jsou dva: ruční formulář a vložený text. Fotka a PDF přijdou
- * potom; dokud nejsou, radši tu nejsou ani tlačítka, která by nic
- * neudělala.
+ *
+ * ---------------------------------------------------------------------
+ * DVĚ CESTY, A KAŽDÁ UMÍ NĚCO JINÉHO
+ *
+ * TEXT se čte pravidly, bez modelu. Funguje vždycky, nic nestojí a nic
+ * nehádá — když cenu nenajde, nechá ji prázdnou.
+ *
+ * FOTKA A PDF potřebují AI, protože tam žádná struktura není. Bez
+ * připojené AI se proto nabídka nahrání ani neukáže: tlačítko, které
+ * skončí hláškou „není nastaveno", je horší než tlačítko, které tam
+ * není. Místo něj stojí věta, co s tím.
  */
 
 const karta = {
@@ -78,6 +87,7 @@ export default async function MenuPrehled({
   }
 
   const smiMenit = (await zkusPristup(tenantId, 'marketing.manage', rozsah)).stav === 'ok'
+  const cteniZObrazku = cteniZObrazkuJeNastavene()
   const supabase = await getServerSupabase()
 
   const dotaz = await supabase
@@ -164,6 +174,62 @@ export default async function MenuPrehled({
               <button type="submit" className="ft-tl ft-tl-hlavni">Načíst menu</button>
             </div>
           </form>
+        ) : null}
+
+        {smiMenit ? (
+          cteniZObrazku ? (
+            <form action={zalozitMenuZeSouboru} style={{ ...karta, display: 'grid', gap: '12px' }}>
+              <input type="hidden" name="rozsah" value={rozsah} />
+              <div>
+                <h2 style={{ margin: '0 0 4px', fontSize: '16px' }}>Nebo vyfoťte tabuli</h2>
+                <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                  Fotka jídelního lístku nebo PDF, do 8 MB. Přečte se z toho, co je
+                  čitelné — <strong>rozmazaná cena zůstane prázdná</strong>, nikdy se
+                  nedoplní odhadem.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                <label style={{ flex: '1 1 200px' }}>
+                  <span style={popisek}>Provozovna</span>
+                  <select name="pobocka" style={pole} defaultValue={pobocky[0]?.id ?? ''}>
+                    {pobocky.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ flex: '1 1 160px' }}>
+                  <span style={popisek}>Druh</span>
+                  <select name="druh" style={pole} defaultValue="denni">
+                    {DRUHY.map((d) => (
+                      <option key={d.klic} value={d.klic}>{d.nazev}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label>
+                <span style={popisek}>Soubor</span>
+                <input
+                  type="file"
+                  name="soubor"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  style={pole}
+                />
+              </label>
+
+              <div>
+                <button type="submit" className="ft-tl">Přečíst z fotky</button>
+              </div>
+            </form>
+          ) : (
+            <div style={karta}>
+              <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                Čtení z fotky a PDF potřebuje připojenou AI. Než ji připojíte,
+                vkládejte menu textem — funguje to bez ní a nic to nehádá.
+              </p>
+            </div>
+          )
         ) : null}
 
         {menu.length === 0 ? (

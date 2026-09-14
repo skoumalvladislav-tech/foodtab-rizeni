@@ -108,6 +108,20 @@ export const PODKLADY_MENU = [
   'application/pdf',
 ] as const
 
+/**
+ * Strop na velikost podkladu.
+ *
+ * Osm megabajtů, ne pětadvacet jako u fotek do příspěvku. Důvod je
+ * v tom, jak se soubor posílá: base64 ho nafoukne o třetinu, a celý
+ * požadavek na model se musí vejít do dvaatřiceti megabajtů. Pětadvacet
+ * megabajtů by po převodu mělo přes třiatřicet a odešlo by to jen
+ * proto, aby to spadlo na druhé straně.
+ *
+ * Fotka menu z telefonu má jednotky megabajtů, sken PDF taky. Osm je
+ * strop proti omylu, ne proti běžnému použití.
+ */
+export const STROP_PODKLADU = 8 * 1024 * 1024
+
 export async function precistMenu(
   bajty: Uint8Array,
   mime: string,
@@ -118,6 +132,17 @@ export async function precistMenu(
       stav: 'chyba',
       duvod: 'Umíme přečíst jen fotku (JPEG, PNG, WebP) nebo PDF.',
     }
+  }
+
+  if (bajty.length > STROP_PODKLADU) {
+    return {
+      stav: 'chyba',
+      duvod: `Soubor je moc velký (${Math.round(bajty.length / 1024 / 1024)} MB). Vejít se musí do 8 MB.`,
+    }
+  }
+
+  if (bajty.length === 0) {
+    return { stav: 'chyba', duvod: 'Soubor je prázdný.' }
   }
 
   const klic = klicZakaznika?.trim() || process.env[PROMENNA_KLIC]
