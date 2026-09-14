@@ -44,7 +44,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 12 | Automatická grafika a video | **chybí** | Tabulka `marketing_render_ulohy` stojí, **žádný renderer není napojený**. Shotstack je zmíněný v komentářích, adaptér ne |
 | 13 | Editor a náhled | **rozestavěné** | Text, cena, termín a fotky se měnit dají. **Náhled IG a FB vedle sebe, bezpečné zóny, obnovení starší verze a duplikace návrhu chybí** |
 | 14 | Schvalování a verzování | **hotovo** | Čtyři oči, otisk verze, nová verze ruší schválení, hromadné schválení, auditní stopa. **Chybí jediné: upozornění** (žádost, vrácení, schválení, selhání) |
-| 15 | Kalendář, kampaně, automatizace | **hotovo** (14. 9.) | Kalendář (měsíc, týden, filtry, pilíře barvou, varování, přesun termínu) a kampaně se sérií pozvánka → připomínka → poslední výzva → poděkování. Automatizace s vypínačem, vlastníkem, příštím během a historií. **Zbývá úloha, která je pustí** — tabulky a obrazovka stojí, běhy zatím nikdo nespouští |
+| 15 | Kalendář, kampaně, automatizace | **hotovo** (14. 9.) | Kalendář (měsíc, týden, filtry, pilíře barvou, varování, přesun termínu) a kampaně se sérií pozvánka → připomínka → poslední výzva → poděkování. Automatizace s vypínačem, vlastníkem, příštím během a historií. Úloha `api/uloha/marketing-automatizace` je pouští po hodinách. **Zbývá evergreen (zásoba na prázdné dny) — dnes se přeskakuje** |
 | 16 | Publikování na IG a FB | **rozestavěné** | Fronta úloh, opakování, dead-letter, idempotence, „nikdy falešné zveřejněno" — hotové. **Facebook rovnocenně s Instagramem (14. 9.)**: pravidla sítí jako data (`lib/marketing-kanaly.ts`), FB projde i samotným textem, oddělený text a strop znaků pro každou síť, účet pobočky se vyplňuje. **Zbývá n8n workflow pro FB a načítání účtů z Mety** |
 | 17 | Inspirace z jiných nástrojů | **chybí** | Schránka nápadů, obsahové pilíře, mini-kampaň z akce, checklist podkladů, QR a UTM, týdenní report — nic z toho |
 | 18 | Analytika a měření | **chybí** | Žádná tabulka, žádná obrazovka |
@@ -179,9 +179,14 @@ výsledků.
 nemá sloupec, kterým by to šlo zapnout. Vyrobí koncepty a ty projdou
 schválením jako všechno ostatní.
 
-**Co zbývá:** úloha, která automatizace doopravdy pustí (jako
-`api/uloha/marketing-fronta`). Tabulky, obrazovka i výpočet příštího
-běhu stojí; běhy zatím nikdo nespouští.
+**Úloha, která je pustí, je taky hotová** (`api/uloha/marketing-automatizace`,
+plánovač `.github/workflows/marketing-automatizace.yml`, jednou za
+hodinu). Denní a víkendové menu vyrábí koncepty z potvrzeného menu;
+když menu není, zapíše se **přeskočeno**, ne chyba.
+
+**Zbývá:** druh `evergreen` (zásoba na prázdné dny) se dnes jen
+přeskakuje — vrátí „zatím se nevyrábí". A automatizace potřebuje
+`CRON_SECRET` a `APP_URL` v nastavení repozitáře, stejně jako fronta.
 
 **6. Analytika, UTM a QR (oddíl 18).**
 Má smysl teprve tehdy, až něco doopravdy odchází ven. Měřit prázdno

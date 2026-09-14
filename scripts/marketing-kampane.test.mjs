@@ -508,5 +508,146 @@ ok('a historii výsledků', /marketing_automatizace_behy/.test(STRANKA_KOD))
 */
 ok('příští běh se počítá při zapnutí', /pristi_beh_kdy: zapnout \? pristi : null/.test(PREPNOUT))
 
+console.log('\n== Úloha, která automatizace pustí ==')
+
+const ULOHA = readFileSync('app/api/uloha/marketing-automatizace/route.ts', 'utf8')
+const ULOHA_KOD = ULOHA.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^\s*\/\/.*$/gm, ' ')
+
+ok('úloha existuje a má tělo', ULOHA.length > 3000)
+
+/*
+  NEJDŮLEŽITĚJŠÍ KONTROLA U TÉHLE ÚLOHY.
+
+  Zakládá koncepty a verze. NIKDY publikační úlohy ani schválení —
+  to by byla druhá cesta ven, která obejde čtyři spouště, na kterých
+  stojí celé schvalování.
+*/
+ok('úloha nezakládá publikační úlohy', !/marketing_publikace_ulohy/.test(ULOHA_KOD))
+ok('ani schválení', !/marketing_schvaleni/.test(ULOHA_KOD))
+ok('ani nenastavuje stav „naplánováno"', !/stav: 'naplanovano'/.test(ULOHA_KOD))
+ok('zakládá příspěvky a verze',
+  /from\('marketing_prispevky'\)/.test(ULOHA_KOD) && /from\('marketing_verze'\)/.test(ULOHA_KOD))
+
+console.log('\n== Chráněná adresa ==')
+
+/*
+  Nechráněná adresa je první věc, která se u naplánovaných úloh pokazí.
+  Tajemství se porovnává v konstantním čase (`tajemstviSedi`), stejně
+  jako u fronty publikací.
+*/
+ok('adresa se chrání tajemstvím', /tajemstviSedi\(/.test(ULOHA_KOD))
+ok('bez něj vrací 401', /status: 401/.test(ULOHA_KOD))
+
+/*
+  A 503 („chybí servisní klíč") AŽ ZA OVĚŘENÍM. Kdo netrefí tajemství,
+  se z odpovědi nesmí dozvědět ani to, jestli tahle adresa něco dělá.
+*/
+ok('503 je až za ověřením tajemství',
+  ULOHA_KOD.indexOf('status: 401') < ULOHA_KOD.indexOf('status: 503'))
+
+console.log('\n== Nic z toho nepadá na jedné automatizaci ==')
+
+ok('každá automatizace má vlastní try', /for \(const a of automatizace\)[\s\S]{0,200}try \{/.test(ULOHA_KOD))
+ok('a chyba se zapíše k ní, ne k běhu',
+  /catch \(e\)[\s\S]{0,300}zapsatBeh/.test(ULOHA_KOD))
+ok('bere se po dávkách', /limit\(DAVKA\)/.test(ULOHA_KOD))
+
+console.log('\n== „Není z čeho" není chyba ==')
+
+/*
+  Když na ten den není potvrzené menu, je to normální stav — kuchař ho
+  ještě nepotvrdil. Kdyby to spadlo pod chybu, svítilo by to červeně
+  a někdo by šel opravovat něco, co není rozbité.
+*/
+/*
+  VĚTEV MUSÍ VRACET „PŘESKOČENO", NE JEN OBSAHOVAT TO SLOVO.
+
+  Napsal jsem to nejdřív jako „někde v souboru je `preskoceno` a někde
+  je věta o menu". Prošlo to i po tom, co jsem tu větev přepsal na
+  `chyba` — protože `preskoceno` se v souboru vyskytuje i jinde
+  (evergreen, „dneska už to běželo"). Hledá se proto výsledek a důvod
+  POHROMADĚ, v jednom objektu.
+*/
+ok('chybějící menu se zapíše jako přeskočené',
+  /vysledek: 'preskoceno',\s*\n\s*duvod: `Na \$\{cilovyDen\} není potvrzené menu\.`/.test(ULOHA))
+
+ok('a bere se jen POTVRZENÉ menu', /\.eq\('stav', 'potvrzeno'\)/.test(ULOHA_KOD))
+
+console.log('\n== Dvakrát za den ne ==')
+
+/*
+  Jedinečný index to odmítne, ale to je POJISTKA, ne řízení toku.
+  Kdyby se úloha spoléhala na výjimku, spadla by uprostřed a stav by
+  zůstal rozpůlený: koncepty založené, běh nezapsaný.
+*/
+ok('úloha se ptá předem, jestli dneska už neběžela',
+  /from\('marketing_automatizace_behy'\)[\s\S]{0,300}\.eq\('provozni_den', dnes\)/.test(ULOHA_KOD))
+
+ok('a ptá se jen na úspěšné běhy',
+  /\.eq\('provozni_den', dnes\)[\s\S]{0,120}\.eq\('vysledek', 'hotovo'\)/.test(ULOHA_KOD))
+
+/*
+  Druhá ochrana, jiná než ta první: na totéž menu nesmí vzniknout dva
+  příspěvky, i kdyby si jeden udělal člověk ručně.
+*/
+ok('a na totéž menu se koncept nevyrobí dvakrát',
+  /vstupy->>menu_id/.test(ULOHA_KOD))
+
+/*
+  A že se chyba toho hledání NESPOLKNE. První verze měla
+  `.then(r => r, () => ({ data: null }))` nad dotazem na sloupec,
+  který neexistuje — kontrola by se tvářila, že proběhla, a nehlídala
+  by nic.
+*/
+ok('a chyba toho hledání se nespolkne',
+  /if \(chybaHledani\)/.test(ULOHA_KOD) && !/\.then\(\(r\) => r, \(\) =>/.test(ULOHA_KOD))
+
+console.log('\n== Provozní den a pásmo (pravidla 10 a 11) ==')
+
+ok('den se ptá databáze', /rpc\('business_date'/.test(ULOHA_KOD))
+ok('hodina taky', /marketing_ted_v_pasmu/.test(ULOHA_KOD))
+ok('termín se převádí přes marketing_okamzik', /rpc\('marketing_okamzik'/.test(ULOHA_KOD))
+ok('den se nepočítá ze serveru', !/toISOString\(\)\.slice/.test(ULOHA_KOD))
+ok('a posun dnů jde přes Date.UTC', /Date\.UTC\(/.test(ULOHA_KOD))
+
+console.log('\n== Příští běh se posune i po chybě ==')
+
+/*
+  Kdyby se posouval jen po úspěchu, zůstala by automatizace s prošlým
+  termínem navždy „na řadě": každý běh úlohy by ji zkusil znovu,
+  pokaždé by spadla a historie by se zaplnila stejnou chybou stokrát
+  za den.
+*/
+const ZAPIS = ULOHA_KOD.slice(ULOHA_KOD.indexOf('async function zapsatBeh'))
+ok('běh se zapisuje vždycky', /from\('marketing_automatizace_behy'\)[\s\S]{0,200}\.insert\(/.test(ZAPIS))
+ok('a příští běh se posouvá ve stejné funkci', /pristi_beh_kdy: pristi/.test(ZAPIS))
+/*
+  A ŽE SE ZE `zapsatBeh` NEVYSKOČÍ DŘÍV.
+
+  Původně jsem hlídal jen podobu `if (v.vysledek === 'hotovo')`.
+  Sabotáž použila opačnou (`if (v.vysledek !== 'hotovo') return`)
+  a kontrola zůstala zelená. Hledá se proto JAKÝKOLI předčasný návrat
+  podmíněný výsledkem — ať je napsaný jakkoli.
+*/
+ok('takže i po chybě — nikde se dřív nevyskočí',
+  !/if \([^)]*v\.vysledek[^)]*\)\s*return/.test(ZAPIS)
+  && !/if \([^)]*v\.vysledek[^)]*\)\s*\{[\s\S]{0,80}return/.test(ZAPIS))
+
+console.log('\n== Plánovač ==')
+
+const PLAN = readFileSync('.github/workflows/marketing-automatizace.yml', 'utf8')
+ok('workflow existuje', PLAN.length > 500)
+ok('volá tu správnou adresu', /api\/uloha\/marketing-automatizace/.test(PLAN))
+ok('posílá tajemství v hlavičce, ne v adrese',
+  /Authorization: Bearer/.test(PLAN) && !/\?.*TAJEMSTVI/.test(PLAN))
+ok('a nenulově končí na čemkoli jiném než 200', /exit 1/.test(PLAN) && /200\) ;;/.test(PLAN))
+
+/*
+  Hodina stačí — nic se neposílá ven. Kdyby tu byl čtvrthodinový
+  interval jako u fronty, běželo by to zbytečně čtyřikrát tolik.
+*/
+ok('jede jednou za hodinu, ne po čtvrthodinách',
+  /cron: '\d+ \* \* \* \*'/.test(PLAN))
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

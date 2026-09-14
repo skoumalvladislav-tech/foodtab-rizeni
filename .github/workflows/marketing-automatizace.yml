@@ -1,0 +1,98 @@
+name: Marketing — automatizace
+
+# Naplánovaná úloha: pustit automatizace, kterým nastal čas.
+#
+# ---------------------------------------------------------------------
+# JEDNOU ZA HODINU, NE KAŽDOU ČTVRTHODINU
+#
+# Fronta publikací jede po čtvrthodinách, protože zmeškaný příspěvek
+# odejde pozdě. Tady se NIC NEPOSÍLÁ VEN — vyrábějí se koncepty, které
+# stejně čekají na schválení. Hodina je dost.
+#
+# Zmeškaný běh nic neztratí: vybírá se podle `pristi_beh_kdy <= now()`,
+# takže se pozdější běh o prošlé automatizace postará sám.
+#
+# ---------------------------------------------------------------------
+# PŘESNOST JE ORIENTAČNÍ
+#
+# Plánovač GitHubu není budík — ve špičce se běh odsouvá i o desítky
+# minut a jednotlivá spuštění se vynechávají. Automatizace nastavená
+# na 8:00 tedy vyrobí koncept „někdy dopoledne", ne v osm nula nula.
+#
+# Pro denní menu to stačí: koncept čeká na člověka. Kdo bude potřebovat
+# přesnost na minutu, potřebuje JINÝ PLÁNOVAČ, ne jiný kód.
+#
+# ---------------------------------------------------------------------
+# TICHÉ SELHÁNÍ JE HORŠÍ NEŽ HLASITÉ
+#
+# Krok skončí nenulově při čemkoli jiném než HTTP 200. Automatizace,
+# která mlčky nic nedělá, vypadá úplně stejně jako automatizace, pro
+# kterou není co dělat.
+
+on:
+  schedule:
+    # Devatenáctá minuta: ne v celou, tam je fronta plánovačů nejdelší.
+    - cron: '19 * * * *'
+  workflow_dispatch:
+
+# Dva běhy naráz by se mohly potkat na téže automatizaci. Odmítne to
+# sice jedinečný index na provozní den, ale čekat se nemá na co.
+concurrency:
+  group: marketing-automatizace
+  cancel-in-progress: false
+
+jobs:
+  pustit:
+    name: Pustit automatizace, kterým nastal čas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          # Chybějící tajemství je chyba nastavení, ne přechodný výpadek.
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci."
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu"
+            exit 1
+          fi
+
+          # Kratší limit než u fronty: tahle úloha nevolá ven, jen
+          # pracuje s databází.
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 120 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/marketing-automatizace")
+
+          echo "HTTP ${KOD}"
+          cat telo.json || true
+          echo
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            503)
+              echo "::error::503 — na Vercelu chybí SUPABASE_SERVICE_ROLE_KEY."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          # `chyba` je to zajímavé číslo. `preskoceno` je normální stav:
+          # na ten den nebylo potvrzené menu, nebo už to dneska běželo.
+          shrnuti() { sed -n "s/.*\"$1\":[[:space:]]*\([0-9]*\).*/\1/p" telo.json; }
+          {
+            echo "Zpracováno automatizací: $(shrnuti zpracovano)"
+            echo "Vyrobeno: $(shrnuti hotovo)  přeskočeno: $(shrnuti preskoceno)  chyba: $(shrnuti chyba)"
+          } >> "$GITHUB_STEP_SUMMARY"
