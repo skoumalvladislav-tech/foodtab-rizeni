@@ -129,12 +129,13 @@ export const NABIDKA: Polozka[] = [
   // Pořadí je podle toho, jak se to dělá: nejdřív podklady (fotky,
   // šablony, menu), pak se z nich skládá příspěvek na přehledu.
   //
-  // Zdánlivě chybí „Ke schválení", „Kalendář", „Kampaně", „Publikované"
-  // a „Analytika". Nechybí — ty obrazovky zatím nejsou, a položka, která
-  // vede na 404, je horší než položka, která tam není.
+  // Zdánlivě chybí „Kalendář", „Kampaně", „Publikované" a „Analytika".
+  // Nechybí — ty obrazovky zatím nejsou, a položka, která vede na 404,
+  // je horší než položka, která tam není.
   { segment: 'marketing/media', nazev: 'Fotky', kratky: 'Fotky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/sablony', nazev: 'Šablony', kratky: 'Šablony', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/menu', nazev: 'Menu', kratky: 'Menu', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
+  { segment: 'marketing/schvalovani', nazev: 'Ke schválení', kratky: 'Schválení', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'marketing/znacka', nazev: 'Značka', kratky: 'Značka', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
   { segment: 'marketing', nazev: 'Příspěvky', kratky: 'Příspěvky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'zprava' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },

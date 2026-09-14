@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
-import type { Permission } from '@/lib/authz'
+import { getUser, type Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { navrhnout } from '@/lib/marketing-ai'
 import { rozsifrovat } from '@/lib/marketing-klice'
@@ -34,12 +34,28 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * jedna se nevynechává s tím, že to hlídá ta druhá.
  */
 
-/** Kdo jsem v téhle firmě. Zápisy se podepisují zaměstnancem, ne účtem. */
+/**
+ * Kdo jsem v téhle firmě. Zápisy se podepisují zaměstnancem, ne účtem.
+ *
+ * PTÁ SE NA `user_id`, A TO NENÍ OZDOBA. Politika `employees_select`
+ * pouští ke všem zaměstnancům každého, kdo má `shifts.read` nebo
+ * `people.manage` — tedy skoro každého vedoucího. Dotaz bez `user_id`
+ * proto nevrací mě, ale prvního zaměstnance, kterého jsem směl vidět.
+ * Žádost o schválení by se pak podepsala cizím jménem a pravidlo čtyř
+ * očí by hlídalo někoho jiného, než kdo ji poslal.
+ */
 async function mujZamestnanec(tenantId: string): Promise<string | null> {
+  const user = await getUser()
+  if (!user) return null
+
   const supabase = await getServerSupabase()
   const r = await jeden<{ id: string }>(
     'můj záznam zaměstnance',
-    supabase.from('employees').select('id').eq('tenant_id', tenantId).is('deleted_at', null).maybeSingle(),
+    supabase.from('employees').select('id')
+      .eq('tenant_id', tenantId)
+      .eq('user_id', user.id)
+      .is('deleted_at', null)
+      .maybeSingle(),
   )
   return r?.id ?? null
 }
@@ -954,4 +970,69 @@ export async function zalozitMenuZeSouboru(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/marketing/menu`)
   redirect(`/${rozsah}/marketing/menu/${menu!.id}?nacteno=${polozky.length}`)
+}
+
+/**
+ * HROMADNÉ SCHVÁLENÍ
+ *
+ * Zadání: master prompt, oddíl 14 — „umožni hromadné schválení více
+ * příspěvků s jasným souhrnem".
+ *
+ * ---------------------------------------------------------------------
+ * KAŽDÁ ŽÁDOST ZVLÁŠŤ, I KDYŽ SE ODKLEPNOU NAJEDNOU
+ *
+ * Jeden `update … in (…)` by byl rychlejší, ale spoušť
+ * `app.marketing_strez_rozhodnuti` hlídá u KAŽDÉ žádosti zvlášť, kdo
+ * o ní rozhoduje a jestli to není jeho vlastní. Hromadný zápis by na
+ * první odmítnuté žádosti spadl celý a člověk by nevěděl, co se
+ * schválilo a co ne.
+ *
+ * Takhle projde, co projít může, a na konci se řekne, kolik jich bylo
+ * a proč zbytek ne. Zadání chce „jasný souhrn", ne tichý úspěch.
+ *
+ * ---------------------------------------------------------------------
+ * PRAVIDLO ČTYŘ OČÍ SE TÍM NEOBCHÁZÍ
+ *
+ * Rozhoduje pořád spoušť v databázi. Kdo si zaškrtne vlastní žádost,
+ * dostane ji zpátky mezi neschválené — obrazovka mu ji ani nenabídne,
+ * ale spoléhat se na to nesmí.
+ */
+export async function schvalitVice(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zadosti = formData.getAll('zadost').map(String).filter(Boolean)
+  const { supabase } = await pripravit(rozsah, 'marketing.publish')
+
+  const zpet = (dotaz: string) => redirect(`/${rozsah}/marketing/schvalovani?${dotaz}`)
+
+  if (zadosti.length === 0) {
+    zpet(`chyba=${encodeURIComponent('Nevybrali jste žádný příspěvek.')}`)
+  }
+
+  let hotovo = 0
+  const neproslo: string[] = []
+
+  for (const id of zadosti) {
+    const { error } = await supabase.from('marketing_schvaleni')
+      .update({ stav: 'schvaleno' })
+      .eq('id', id)
+
+    if (error) neproslo.push(error.message)
+    else hotovo++
+  }
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+
+  if (neproslo.length === 0) {
+    zpet(`schvaleno=${hotovo}`)
+  }
+
+  /*
+    Do hlášky jde PRVNÍ důvod, ne všechny. Pět stejných vět pod sebou
+    nikomu nepomůže a ta první bývá tatáž jako zbytek — typicky „o svou
+    vlastní žádost nerozhodujte".
+  */
+  zpet(
+    `schvaleno=${hotovo}&neproslo=${neproslo.length}`
+    + `&duvod=${encodeURIComponent(neproslo[0])}`,
+  )
 }
