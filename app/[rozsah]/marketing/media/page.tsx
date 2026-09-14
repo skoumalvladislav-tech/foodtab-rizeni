@@ -8,6 +8,8 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import { KBELIK, PLATNOST_ODKAZU_S, SBIRKY } from '@/lib/marketing-media'
+import { sestavPouziti, type PouzitiFotky } from '@/lib/marketing-media-pouziti'
+import { popisStavu } from '@/lib/marketing-text'
 import { nahratFotku, smazatFotku, ulozitPrava } from './akce'
 
 export const dynamic = 'force-dynamic'
@@ -144,6 +146,35 @@ export default async function Media({
     }
   }
 
+  /*
+    KDE SE FOTKA POUŽÍVÁ.
+    `smazatFotku` maže doopravdy a nic nekontroluje (viz komentář tam) —
+    tahle viditelnost je jediné, co varuje dřív, než rozpracovaný
+    koncept zůstane s nefunkčním odkazem na fotku.
+  */
+  const pouziti = await seznam<{
+    id: string; nazev: string; stav: string; aktualni_verze_id: string | null
+  }>(
+    'příspěvky',
+    supabase.from('marketing_prispevky')
+      .select('id, nazev, stav, aktualni_verze_id')
+      .eq('tenant_id', tenantId)
+      .not('aktualni_verze_id', 'is', null),
+  ).catch(() => [])
+
+  const verzeIds = pouziti.map((p) => p.aktualni_verze_id).filter((id): id is string => id !== null)
+  const verze = verzeIds.length === 0
+    ? []
+    : await seznam<{ id: string; media_ids: string[] }>(
+        'aktuální verze',
+        supabase.from('marketing_verze').select('id, media_ids').in('id', verzeIds),
+      ).catch(() => [])
+
+  const pouzitiPodleFotky = sestavPouziti(
+    pouziti.map((p) => ({ id: p.id, nazev: p.nazev, stav: p.stav, aktualniVerzeId: p.aktualni_verze_id })),
+    verze.map((v) => ({ id: v.id, mediaIds: v.media_ids ?? [] })),
+  )
+
   const kdePracuji = pristup.scope.branchId
     ? `Fotky se ukládají k provozovně ${pristup.scope.branchName ?? ''}.`
     : 'Fotky se ukládají celé firmě — hodí se na logo a ikony.'
@@ -224,6 +255,7 @@ export default async function Media({
                   rozsah={rozsah}
                   smiUpravovat={smiUpravovat}
                   otevreno={upravit === f.id}
+                  pouzitoV={pouzitiPodleFotky.get(f.id) ?? []}
                 />
               ))}
             </div>
@@ -244,12 +276,14 @@ function Radek({
   rozsah,
   smiUpravovat,
   otevreno,
+  pouzitoV,
 }: {
   fotka: Fotka
   odkaz: string | undefined
   rozsah: string
   smiUpravovat: boolean
   otevreno: boolean
+  pouzitoV: PouzitiFotky[]
 }) {
   const proslo = jeProsla(fotka.pouzitelne_do)
 
@@ -305,6 +339,24 @@ function Radek({
                 : `Použitelné do ${fotka.pouzitelne_do}.`}
             </span>
           ) : null}
+
+          {/*
+            Smazání je NEVRATNÉ a nic ho nehlídá (viz smazatFotku) — kdo
+            se chystá smazat fotku, kterou drží rozpracovaný koncept,
+            to má vidět TADY, ne až se příspěvek zlomí.
+          */}
+          {pouzitoV.length > 0 ? (
+            <span style={{ fontSize: '13px', color: 'var(--mosaz)' }}>
+              Použito v {pouzitoV.length === 1 ? '1 příspěvku' : `${pouzitoV.length} příspěvcích`}:{' '}
+              {pouzitoV.map((p, i) => (
+                <span key={p.prispevekId}>
+                  {i > 0 ? ', ' : ''}
+                  <Link href={`/${rozsah}/marketing/${p.prispevekId}`}>{p.nazev || 'bez názvu'}</Link>
+                  {' '}({popisStavu(p.stav)})
+                </span>
+              ))}
+            </span>
+          ) : null}
         </div>
 
         {smiUpravovat ? (
@@ -320,7 +372,13 @@ function Radek({
             <form action={smazatFotku}>
               <input type="hidden" name="rozsah" value={rozsah} />
               <input type="hidden" name="id" value={fotka.id} />
-              <button type="submit" className="ft-tl ft-tl-male">Smazat</button>
+              <button
+                type="submit"
+                className="ft-tl ft-tl-male"
+                title={pouzitoV.length > 0 ? 'Fotku drží rozpracovaný příspěvek — smazání ho nechá bez ní.' : undefined}
+              >
+                Smazat
+              </button>
             </form>
           </div>
         ) : null}
