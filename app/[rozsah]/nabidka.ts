@@ -129,15 +129,13 @@ export const NABIDKA: Polozka[] = [
   // Pořadí je podle toho, jak se to dělá: nejdřív podklady (fotky,
   // šablony, menu), pak se z nich skládá příspěvek na přehledu.
   //
-  // Zdánlivě chybí „Analytika". Nechybí — ta obrazovka zatím není,
-  // a položka, která vede na 404, je horší než položka, která tam
-  // není.
   { segment: 'marketing/media', nazev: 'Fotky', kratky: 'Fotky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/sablony', nazev: 'Šablony', kratky: 'Šablony', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/menu', nazev: 'Menu', kratky: 'Menu', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/schvalovani', nazev: 'Ke schválení', kratky: 'Schválení', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'marketing/kalendar', nazev: 'Kalendář', kratky: 'Kalendář', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kalendar' },
   { segment: 'marketing/kampane', nazev: 'Kampaně', kratky: 'Kampaně', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kalendar' },
+  { segment: 'marketing/analytika', nazev: 'Analytika', kratky: 'Čísla', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'lupa' },
   { segment: 'marketing/publikovane', nazev: 'Publikované', kratky: 'Odesláno', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'lupa' },
   { segment: 'marketing/znacka', nazev: 'Značka', kratky: 'Značka', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
   // Integrace a nástroje. Vidět je má každý, kdo do marketingu dosáhne —

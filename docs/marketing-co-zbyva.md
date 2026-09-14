@@ -47,14 +47,14 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 15 | Kalendář, kampaně, automatizace | **hotovo** (14. 9.) | Kalendář (měsíc, týden, filtry, pilíře barvou, varování, přesun termínu) a kampaně se sérií pozvánka → připomínka → poslední výzva → poděkování. Automatizace s vypínačem, vlastníkem, příštím během a historií. Úloha `api/uloha/marketing-automatizace` je pouští po hodinách. **Zbývá evergreen (zásoba na prázdné dny) — dnes se přeskakuje** |
 | 16 | Publikování na IG a FB | **rozestavěné** | Fronta úloh, opakování, dead-letter, idempotence, „nikdy falešné zveřejněno" — hotové. **Facebook rovnocenně s Instagramem (14. 9.)**: pravidla sítí jako data (`lib/marketing-kanaly.ts`), FB projde i samotným textem, oddělený text a strop znaků pro každou síť, účet pobočky se vyplňuje. **Zbývá n8n workflow pro FB a načítání účtů z Mety** |
 | 17 | Inspirace z jiných nástrojů | **rozestavěné** | **Obsahové pilíře** (14. 9., šest, barvou v kalendáři) a **mini-kampaň z akce** (série ke kampani) hotové. Chybí schránka nápadů, checklist podkladů, QR a UTM, týdenní report, chytré znovupoužití staršího obsahu |
-| 18 | Analytika a měření | **chybí** | Žádná tabulka, žádná obrazovka |
+| 18 | Analytika a měření | **rozestavěné** (14. 9.) | Měřitelné odkazy s UTM a QR, prokliky se počítají, tabulka metrik s rozlišením „ze sítě / vlastní / odhad“. **Neměřené se nikdy nekreslí jako nula.** Chybí stahování čísel ze sítí — k tomu je potřeba účet s oprávněním číst statistiky |
 | 19 | Databázový model | **hotovo** | 19 tabulek, RLS všude, granty prověřené |
 | 20 | API a integrace do Foodtabu | **hotovo** | Modul JE uvnitř Foodtabu, takže odpadlo. Ven vedou `api/uloha/marketing-fronta` a `api/uloha/marketing-automatizace` |
 | 21 | n8n jako volitelný poskytovatel | **hotovo** | Ale **vypnuté** — viz oddíl 5 níž |
-| 22 | Obrazovky MVP | **14 ze 16** | Rozepsané v oddílu 3 |
+| 22 | Obrazovky MVP | **15 ze 16** | Rozepsané v oddílu 3 |
 | 23 | Bezpečnost a provoz | **hotovo** | Klíče šifrované, `service_role` na serveru, dvě obranné linie, audit |
 | 24 | Seed data | **chybí** | Ukázková cesta pro nového zákazníka není |
-| 25 | Testy a akceptace | **hotovo** | 13 scénářů v databázi (1259 kontrol proti PostgreSQL 16), 18 kontrol v Node. Každá nová kontrola prošla sabotáží |
+| 25 | Testy a akceptace | **hotovo** | 14 scénářů v databázi (1281 kontrol proti PostgreSQL 16), 20 kontrol v Node. Každá nová kontrola prošla sabotáží |
 | 26 | Dokumentace | **rozestavěné** | `marketing-je-modul.md`, `marketing-spusteni.md`, `marketing-nastroje.md`. **Manuál pro obsluhu chybí** |
 | 27 | Rozdělení realizace | — | Etapa 1 z velké části hotová, etapa 2 sotva začatá |
 
@@ -76,7 +76,7 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 10 | Fronta ke schválení | **hotovo** | `marketing/schvalovani` — dnes dodělané |
 | 11 | Kampaně a automatizace | **hotovo** (14. 9.) | `marketing/kampane` — série z jedné akce, automatizace s vypínačem a historií. Nic nezveřejňují, vyrábějí koncepty |
 | 12 | Publikované příspěvky a stavy | **hotovo** (14. 9.) | `marketing/publikovane` — fronta i historie po úlohách, chyby s radou česky, nanečisto zvlášť, odkaz na síť a číslo u poskytovatele |
-| 13 | **Základní analytika** | **chybí** | — |
+| 13 | Základní analytika | **hotovo** (14. 9.) | `marketing/analytika` — měřitelné odkazy, QR na plakát, prokliky. Čísla ze sítí zůstanou prázdná, dokud nebude připojený účet |
 | 14 | Integrace a nástroje | **hotovo** (14. 9.) | `marketing/nastroje` — karty po kategoriích, připojení vlastním klíčem, zkouška před aktivací |
 | 15 | Brand kit provozovny | **hotovo** | `marketing/znacka` — Značka |
 | 16 | Tým, role a auditní přehled | **rozestavěné** | Lidé a Zařazení jsou ve Foodtabu. **Auditní přehled marketingu** (kdo co schválil a zveřejnil) jako obrazovka chybí, i když data v `audit_log` jsou |
@@ -131,11 +131,11 @@ jsou v tabulkách výš.
 
 | Co | Oddíl zadání | Co to znamená v praxi |
 |---|---|---|
-| **Analytika a měření** | 18, obrazovka 13 | Nevíte, co zabralo. Žádná tabulka, žádná obrazovka. Má smysl teprve tehdy, až něco doopravdy odchází ven |
+| **Stahování čísel ze sítí** | 18 | Tabulka i obrazovka stojí, ale zobrazení a dosah nikdo nestahuje — chybí připojený účet s oprávněním číst statistiky |
 | **Automatická grafika a video** | 12 | Tabulka `marketing_render_ulohy` stojí, **žádný renderer není napojený**. Publikuje se fotka z knihovny, nic se nerenderuje |
 | **Průvodce prvním nastavením** | 6, obrazovka 2 | Nový zákazník dostane prázdný modul a musí si sám najít, kde se co nastavuje |
 | **Seed data a ukázková cesta** | 24 | Není z čeho předvést modul někomu, kdo ho vidí poprvé |
-| **UTM odkazy a QR** | 17, 18 | Nedá se změřit, jestli z příspěvku někdo přišel |
+| ~~UTM odkazy a QR~~ | 17, 18 | **Hotovo 14. 9.** — `marketing/analytika`, veřejná adresa `/k/<klíč>` |
 | **Manuál pro obsluhu** | 26 | Dokumentace je pro vývojáře, ne pro člověka, který to bude používat |
 
 ### Věci, které jsou rozestavěné
