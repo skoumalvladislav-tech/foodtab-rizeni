@@ -121,20 +121,55 @@ pocty() {
       || '/' || (select count(*) from public.announcements)"
 }
 
-spustit_nebo_konec "$ROOT/supabase/seed/test-provoz.sql"
-sed -n 's/^psql[^ ]* NOTICE:  /  /p' "$VYSTUP" || true
-PRVNI="$(pocty)"
-echo "  OK    seed proběhl proti čisté databázi ($PRVNI)"
-POCET=$(( POCET + 1 ))
+pocty_marketing() {
+  psql -h "$HOST" -p "$PORT" -U "$USER" -d "$DB" -tAc "select
+    (select count(*) from public.marketing_nastaveni)
+      || '/' || (select count(*) from public.marketing_menu)
+      || '/' || (select count(*) from public.marketing_menu_polozky)
+      || '/' || (select count(*) from public.marketing_kampane)
+      || '/' || (select count(*) from public.marketing_prispevky)
+      || '/' || (select count(*) from public.marketing_verze)
+      || '/' || (select count(*) from public.marketing_schvaleni)
+      || '/' || (select count(*) from public.marketing_odkazy)"
+}
 
 spustit_nebo_konec "$ROOT/supabase/seed/test-provoz.sql"
+sed -n 's/^psql[^ ]* NOTICE:  /  /p' "$VYSTUP" || true
+
+# Seed marketingu je zvlášť od provozního: jsou to dva moduly a jeden
+# běží i tam, kde ten druhý nemá co zakládat.
+spustit_nebo_konec "$ROOT/supabase/seed/test-marketing.sql"
+sed -n 's/^psql[^ ]* NOTICE:  /  /p' "$VYSTUP" || true
+
+PRVNI="$(pocty)"
+PRVNI_M="$(pocty_marketing)"
+echo "  OK    seed proběhl proti čisté databázi ($PRVNI, marketing $PRVNI_M)"
+POCET=$(( POCET + 1 ))
+
+# Podruhé. Seed se pouští opakovaně po každém přestavění databáze
+# a nesmí data zdvojovat.
+spustit_nebo_konec "$ROOT/supabase/seed/test-provoz.sql"
+spustit_nebo_konec "$ROOT/supabase/seed/test-marketing.sql"
 DRUHY="$(pocty)"
+DRUHY_M="$(pocty_marketing)"
 
 if [ "$PRVNI" = "$DRUHY" ]; then
   echo "  OK    opakovaný běh nic nezaložil podruhé"
   POCET=$(( POCET + 1 ))
 else
   echo "SELHALO: opakovaný seed změnil data ($PRVNI → $DRUHY)"
+  echo "Do pádu prošlo kontrol: $POCET"
+  exit 1
+fi
+
+# Marketing se měří zvlášť. Kdyby se přičetl k číslům výš, poznalo by
+# se sice, že se něco zdvojilo, ale ne CO — a hledalo by se to v seedu
+# provozu, kde to není.
+if [ "$PRVNI_M" = "$DRUHY_M" ]; then
+  echo "  OK    a marketing taky ne"
+  POCET=$(( POCET + 1 ))
+else
+  echo "SELHALO: opakovaný seed marketingu změnil data ($PRVNI_M → $DRUHY_M)"
   echo "Do pádu prošlo kontrol: $POCET"
   exit 1
 fi

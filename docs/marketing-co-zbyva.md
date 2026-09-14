@@ -53,9 +53,9 @@ na skutečnou kampaň. To se pozná až u první ostré Černé Perly.
 | 21 | n8n jako volitelný poskytovatel | **hotovo** | Ale **vypnuté** — viz oddíl 5 níž |
 | 22 | Obrazovky MVP | **16 ze 16** | Rozepsané v oddílu 3 |
 | 23 | Bezpečnost a provoz | **hotovo** | Klíče šifrované, `service_role` na serveru, dvě obranné linie, audit |
-| 24 | Seed data | **chybí** | Ukázková cesta pro nového zákazníka není |
-| 25 | Testy a akceptace | **hotovo** | 14 scénářů v databázi (1281 kontrol proti PostgreSQL 16), 20 kontrol v Node. Každá nová kontrola prošla sabotáží |
-| 26 | Dokumentace | **rozestavěné** | `marketing-je-modul.md`, `marketing-spusteni.md`, `marketing-nastroje.md`. **Manuál pro obsluhu chybí** |
+| 24 | Seed data | **hotovo** (14. 9.) | `supabase/seed/test-marketing.sql` — značka, potvrzené menu, kampaň, příspěvek čekající ve frontě a měřitelný odkaz. Opakovaný běh nic nezdvojí |
+| 25 | Testy a akceptace | **hotovo** | 14 scénářů v databázi (1284 kontrol proti PostgreSQL 16), 21 kontrol v Node. Každá nová kontrola prošla sabotáží |
+| 26 | Dokumentace | **hotovo** (14. 9.) | `marketing-je-modul.md`, `marketing-spusteni.md`, `marketing-nastroje.md`, tenhle soubor a **`marketing-manual.md`** — návod pro obsluhu, ne pro vývojáře |
 | 27 | Rozdělení realizace | — | Etapa 1 z velké části hotová, etapa 2 sotva začatá |
 
 ---
@@ -134,9 +134,9 @@ jsou v tabulkách výš.
 | **Stahování čísel ze sítí** | 18 | Tabulka i obrazovka stojí, ale zobrazení a dosah nikdo nestahuje — chybí připojený účet s oprávněním číst statistiky |
 | **Automatická grafika a video** | 12 | Tabulka `marketing_render_ulohy` stojí, **žádný renderer není napojený**. Publikuje se fotka z knihovny, nic se nerenderuje |
 | ~~Průvodce prvním nastavením~~ | 6, obrazovka 2 | **Hotovo 14. 9.** — `marketing/zacatek` |
-| **Seed data a ukázková cesta** | 24 | Není z čeho předvést modul někomu, kdo ho vidí poprvé |
+| ~~Seed data a ukázková cesta~~ | 24 | **Hotovo 14. 9.** — `supabase/seed/test-marketing.sql` |
 | ~~UTM odkazy a QR~~ | 17, 18 | **Hotovo 14. 9.** — `marketing/analytika`, veřejná adresa `/k/<klíč>` |
-| **Manuál pro obsluhu** | 26 | Dokumentace je pro vývojáře, ne pro člověka, který to bude používat |
+| ~~Manuál pro obsluhu~~ | 26 | **Hotovo 14. 9.** — `docs/marketing-manual.md` |
 
 ### Věci, které jsou rozestavěné
 
