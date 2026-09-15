@@ -545,7 +545,7 @@
 }
 .modul-sloupec a, .modul-sloupec span.polozka {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border-radius: 8px; font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
+  border-radius: var(--radius-sm); font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
 }
 .modul-sloupec a:hover { color: var(--rail-ink); background: var(--rail); }
 .modul-sloupec a.on, .modul-sloupec a.on:hover {
@@ -558,7 +558,7 @@
 
 .modul-cislo {
   margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px;
-  border-radius: 999px; background: var(--bad); color: #fff;
+  border-radius: var(--radius-full); background: var(--bad); color: #fff;
   font-size: 11px; font-weight: 700; line-height: 20px; text-align: center;
 }
 
