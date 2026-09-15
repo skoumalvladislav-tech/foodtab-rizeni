@@ -146,6 +146,11 @@ export const NABIDKA: Polozka[] = [
   { segment: 'marketing/nastroje', nazev: 'Nástroje', kratky: 'Nástroje', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
   { segment: 'marketing', nazev: 'Příspěvky', kratky: 'Příspěvky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'zprava' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
+  // FAKTURY MÁ VÍC OBRAZOVEK NEŽ JEDNU — stejný důvod jako u marketingu
+  // výš: jedna položka tady, detailní navigace (8 obrazovek) žije uvnitř
+  // app/[rozsah]/faktury/ jako vlastní vnořený layout (lib/faktury-navigace.ts),
+  // ne rozepsaná do tohohle sloupce.
+  { segment: 'faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'faktury', pravo: 'faktury.read', hotovo: true, ikona: 'kniha' },
 ]
 
 /**
@@ -196,6 +201,7 @@ export const NAZVY_MODULU: Record<ModuleKey, string> = {
   finance: 'Finance',
   marketing: 'Marketing',
   objednavky: 'Objednávky',
+  faktury: 'Faktury',
 }
 
 /**

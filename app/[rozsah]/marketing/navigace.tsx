@@ -101,7 +101,7 @@ export default function Navigace({
         <Ikona klic={p.ikona} />
         <span className="stitek">{kratce ? p.kratky : p.nazev}</span>
         {p.cislo > 0 ? (
-          <span className="mkt-cislo" aria-hidden="true">
+          <span className="modul-cislo" aria-hidden="true">
             {p.cislo > 99 ? '99+' : p.cislo}
           </span>
         ) : null}
@@ -110,19 +110,19 @@ export default function Navigace({
   }
 
   return (
-    <div className="mkt-ram">
-      <nav className="mkt-sloupec" aria-label="Marketing">
-        <div className="mkt-skupina">Provozovna</div>
+    <div className="modul-ram">
+      <nav className="modul-sloupec" aria-label="Marketing">
+        <div className="modul-skupina">Provozovna</div>
         {hlavni.map((p) => odkaz(p, false))}
-        {nastaveni.length > 0 ? <div className="mkt-skupina">Nastavení</div> : null}
+        {nastaveni.length > 0 ? <div className="modul-skupina">Nastavení</div> : null}
         {nastaveni.map((p) => odkaz(p, false))}
       </nav>
 
-      <div className="mkt-obsah">
-        <div className="mkt-obsah-vnitrek">{children}</div>
+      <div className="modul-obsah">
+        <div className="modul-obsah-vnitrek">{children}</div>
       </div>
 
-      <nav className="mkt-spodni" aria-label="Marketing">
+      <nav className="modul-spodni" aria-label="Marketing">
         {spodni.map((p) => odkaz(p, true))}
       </nav>
     </div>

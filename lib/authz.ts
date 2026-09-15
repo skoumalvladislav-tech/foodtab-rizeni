@@ -88,6 +88,9 @@ export const PERMISSIONS = [
   // Tvorba menu
   'menu_ai.use',
   'menu_ai.manage',
+  // Faktury
+  'faktury.read',
+  'faktury.manage',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]
@@ -97,7 +100,7 @@ export type Permission = (typeof PERMISSIONS)[number]
  * provozem — je to dílna na návrhy menu, ne místo, kde lístky bydlí.
  * Receptury a jídelní lístky zůstávají v provozu.
  */
-export const MODULES = ['provoz', 'menu', 'finance', 'marketing', 'objednavky'] as const
+export const MODULES = ['provoz', 'menu', 'finance', 'marketing', 'objednavky', 'faktury'] as const
 export type ModuleKey = (typeof MODULES)[number]
 
 /**
