@@ -14,6 +14,7 @@ import {
 } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
+import Card from '@/components/ui/Card'
 import Nadpis from '../nadpis'
 import { stornovatZalohu, ulozitNastaveniZaloh } from './akce'
 import FormularZalohy from './formular'
@@ -370,7 +371,7 @@ export default async function Zalohy({
         ) : null}
 
         {smiNastavovat ? (
-          <section style={{ ...karta, marginTop: '28px', maxWidth: '640px' }}>
+          <Card as="section" padding="18px" style={{ boxShadow: 'var(--shadow)', marginTop: '28px', maxWidth: '640px' }}>
             <h2 style={nadpis}>Co uvidí zaměstnanci</h2>
             <p style={popisSekce}>
               Volba mění <strong>jen zobrazení</strong>, nikdy uložené
@@ -423,7 +424,7 @@ export default async function Zalohy({
                 </button>
               </div>
             </form>
-          </section>
+          </Card>
         ) : null}
       </div>
     </>
@@ -447,14 +448,6 @@ function den(datum: string): string {
   const [, m, d] = datum.split('-')
   return `${Number(d)}. ${Number(m)}.`
 }
-
-const karta = {
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: '14px',
-  boxShadow: 'var(--shadow)',
-  padding: '18px',
-} as const
 
 const nadpis = { margin: '0 0 8px', fontSize: '17px', color: 'var(--ink)' } as const
 

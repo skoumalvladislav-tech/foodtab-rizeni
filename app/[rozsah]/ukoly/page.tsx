@@ -415,11 +415,12 @@ export default async function Ukoly({
                 style={{
                   background: "var(--card)",
                   border: "1px solid var(--line)",
-                  borderLeft: `4px solid ${
+                  borderLeft: `3px solid ${
                     u.priority === "high" ? "var(--warn)" : "var(--line)"
                   }`,
-                  borderRadius: "12px",
+                  borderRadius: "var(--radius-md)",
                   padding: "14px",
+                  boxShadow: u.priority === "high" ? "var(--shadow-sm)" : "none",
                 }}
               >
                 <p style={{ margin: 0, fontSize: "15px", color: "var(--ink)" }}>
@@ -529,7 +530,7 @@ export default async function Ukoly({
                   style={{
                     background: "var(--card)",
                     border: "1px solid var(--line)",
-                    borderRadius: "12px",
+                    borderRadius: "var(--radius-md)",
                     padding: "14px",
                   }}
                 >
@@ -623,9 +624,10 @@ function denAcas(iso: string, zona?: string): string {
 const ramecekFormulare = {
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: "14px",
+  borderRadius: "var(--radius-lg)",
   padding: "14px",
   marginBottom: "20px",
+  boxShadow: "var(--shadow-sm)",
 } as const;
 
 const poleSkupina = {
