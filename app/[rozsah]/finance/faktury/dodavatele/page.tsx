@@ -8,7 +8,7 @@ import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { dniPoSplatnosti, jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
-import Nadpis from '../../nadpis'
+import Nadpis from '../../../nadpis'
 
 export const dynamic = 'force-dynamic'
 
@@ -111,7 +111,7 @@ export default async function FakturyDodavatele({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px' }}>
-        <form action={`/${rozsah}/faktury/dodavatele`} method="get" style={{ maxWidth: '320px' }}>
+        <form action={`/${rozsah}/finance/faktury/dodavatele`} method="get" style={{ maxWidth: '320px' }}>
           <input type="text" name="hledat" placeholder="Hledat dodavatele…" defaultValue={dotaz} style={{ ...pole, width: '100%' }} />
         </form>
 
@@ -131,7 +131,7 @@ export default async function FakturyDodavatele({
               return (
                 <Link
                   key={d.jmeno}
-                  href={`/${rozsah}/faktury/seznam?dodavatel=${encodeURIComponent(d.jmeno)}`}
+                  href={`/${rozsah}/finance/faktury/seznam?dodavatel=${encodeURIComponent(d.jmeno)}`}
                   style={{
                     display: 'block', textDecoration: 'none', color: 'inherit',
                     background: 'var(--card)', border: '1px solid var(--line)', borderRadius: '14px', overflow: 'hidden',

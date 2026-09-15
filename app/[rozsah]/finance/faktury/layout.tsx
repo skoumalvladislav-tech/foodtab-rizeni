@@ -37,7 +37,7 @@ export default async function FakturyLayout({
   if (!tenantId) return <>{children}</>
 
   const ctx = await getContext(tenantId)
-  if (!ctx || !isModuleActive(ctx, 'faktury') || !canSee(ctx, 'faktury.read')) {
+  if (!ctx || !isModuleActive(ctx, 'finance') || !canSee(ctx, 'faktury.read')) {
     return <>{children}</>
   }
 

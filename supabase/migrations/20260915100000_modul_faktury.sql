@@ -1,14 +1,20 @@
 -- =====================================================================
--- Foodtab — modul Faktury: katalog modulu a oprávnění
+-- Foodtab — Faktury: oprávnění uvnitř modulu Finance
 --
 -- Zadání: docs/hlaseni/zadani-pro-ai-marketing-faktury.md, „PROJEKT 2:
 -- Faktury — sloučení s Foodtabem". Sloučení = přinést faktury jako
--- nový modul do foodtab-rizeni, ne novou samostatnou appku.
+-- novou sekci do foodtab-rizeni, ne novou samostatnou appku.
+--
+-- Šéfík 15.9.2026: Faktury nejsou vlastní modul, ale sekce uvnitř
+-- Finance (adresa /finance/faktury). Modul `finance` už v katalogu
+-- existuje (20260823120100_catalog.sql) — tahle migrace jen přidává
+-- jemnější oprávnění faktury.read/faktury.manage pod něj, stejně jako
+-- je uvnitř provozu vlastní právo advances.manage.
 --
 -- ---------------------------------------------------------------------
 -- DATA FAKTUR ZŮSTÁVAJÍ V ODDĚLENÉ DATABÁZI (možnost A ze zadání)
 --
--- Tahle migrace se týká jen KATALOGU modulů/oprávnění ve foodtab DB
+-- Tahle migrace se týká jen KATALOGU oprávnění ve foodtab DB
 -- (spekntcsuroqhehmjssv) — o tom, kdo smí fakturu vidět/spravovat
 -- ve foodtabovém rámu. Samotné faktury (tabulka invoices,
 -- rejection_examples) zůstávají v odděleném projektu ctqtwahlzhyjerqulqyn,
@@ -17,21 +23,11 @@
 -- NENAHRAZUJE RLS na faktura-DB — to zůstává otevřený bod č. 3
 -- ze zadání (bezpečnost/auth), řeší se samostatně a jen se souhlasem
 -- Šéfíka.
---
--- Modul není `is_base` — zapíná se per tenant stejně jako marketing
--- a objednávky, ne automaticky.
 -- =====================================================================
 
-insert into public.modules (key, label, is_base, sort_order) values
-  ('faktury', 'Faktury', false, 50)
-on conflict (key) do update
-  set label = excluded.label,
-      is_base = excluded.is_base,
-      sort_order = excluded.sort_order;
-
 insert into public.permissions (key, module_key, label, sensitive, sort_order) values
-  ('faktury.read',   'faktury', 'Vidět přijaté faktury',                 false, 500),
-  ('faktury.manage', 'faktury', 'Zadávat, schvalovat a mazat faktury',   true,  501)
+  ('faktury.read',   'finance', 'Vidět přijaté faktury',                 false, 500),
+  ('faktury.manage', 'finance', 'Zadávat, schvalovat a mazat faktury',   true,  501)
 on conflict (key) do update
   set module_key = excluded.module_key,
       label = excluded.label,

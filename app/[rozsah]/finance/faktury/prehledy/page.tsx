@@ -8,7 +8,7 @@ import { barvaDodavatele } from '@/lib/faktury-color'
 import { formatCastku } from '@/lib/faktury-format'
 import { STAV_KE_SCHVALENI, STAV_ODMITNUTO, type Faktura } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
-import Nadpis from '../../nadpis'
+import Nadpis from '../../../nadpis'
 import PoslatUcetnimu from '../poslat-ucetnimu'
 
 export const dynamic = 'force-dynamic'
@@ -145,14 +145,14 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>Možné duplicity</span>
             <div style={{ fontSize: '20px', marginTop: '4px', color: duplicity.length > 0 ? 'var(--mosaz)' : undefined }}>{duplicity.length}</div>
             <span style={{ fontSize: '12px' }}>
-              {duplicity.length > 0 ? <Link href={`/${rozsah}/faktury/seznam?duplicity=1`}>Zkontrolovat →</Link> : <span style={{ color: 'var(--muted)' }}>nic k řešení</span>}
+              {duplicity.length > 0 ? <Link href={`/${rozsah}/finance/faktury/seznam?duplicity=1`}>Zkontrolovat →</Link> : <span style={{ color: 'var(--muted)' }}>nic k řešení</span>}
             </span>
           </div>
           <div style={{ ...karta, borderColor: cekaNaSchvaleni.length > 0 ? 'var(--mosaz)' : undefined }}>
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>Čeká na schválení</span>
             <div style={{ fontSize: '20px', marginTop: '4px', color: cekaNaSchvaleni.length > 0 ? 'var(--mosaz)' : undefined }}>{cekaNaSchvaleni.length}</div>
             <span style={{ fontSize: '12px' }}>
-              {cekaNaSchvaleni.length > 0 ? <Link href={`/${rozsah}/faktury/schvaleni`}>Zkontrolovat →</Link> : <span style={{ color: 'var(--muted)' }}>nic k řešení</span>}
+              {cekaNaSchvaleni.length > 0 ? <Link href={`/${rozsah}/finance/faktury/schvaleni`}>Zkontrolovat →</Link> : <span style={{ color: 'var(--muted)' }}>nic k řešení</span>}
             </span>
           </div>
         </div>
@@ -167,7 +167,7 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
                 {mesice.map(([mesic, stat]) => (
                   <li key={mesic}>
                     <Link
-                      href={`/${rozsah}/faktury/seznam?mesic=${mesic}`}
+                      href={`/${rozsah}/finance/faktury/seznam?mesic=${mesic}`}
                       style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: 'inherit' }}
                     >
                       <span style={{ width: '110px', flex: 'none', fontSize: '13px' }}>{nazevMesice(mesic)}</span>
@@ -191,7 +191,7 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
                 {nejvyssiOdber.map(([dodavatel, stat]) => (
                   <li key={dodavatel}>
                     <Link
-                      href={`/${rozsah}/faktury/seznam?dodavatel=${encodeURIComponent(dodavatel)}`}
+                      href={`/${rozsah}/finance/faktury/seznam?dodavatel=${encodeURIComponent(dodavatel)}`}
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit' }}
                     >
                       <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: barvaDodavatele(dodavatel), flex: 'none' }} />

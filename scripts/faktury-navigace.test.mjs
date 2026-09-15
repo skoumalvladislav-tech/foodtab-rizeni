@@ -28,8 +28,8 @@ console.log('\nsestavNavigaci — hlavní sloupec')
 ma('sedm položek v pořadí', hlavni.map((p) => p.nazev), [
   'Přehled', 'Faktury', 'Dodavatelé', 'Ke schválení', 'Přehledy', 'Kalendář splatností', 'Upomínky',
 ])
-ma('přehled vede na kořen modulu', hlavni[0].href, '/firma/faktury')
-ma('seznam vede pod faktury/seznam', hlavni.find((p) => p.klic === 'seznam').href, '/firma/faktury/seznam')
+ma('přehled vede na kořen sekce uvnitř Finance', hlavni[0].href, '/firma/finance/faktury')
+ma('seznam vede pod finance/faktury/seznam', hlavni.find((p) => p.klic === 'seznam').href, '/firma/finance/faktury/seznam')
 
 console.log('\nOdznaky sedí na správné položce, jinde jsou nula')
 ma('Faktury nese needsReview', hlavni.find((p) => p.klic === 'seznam').cislo, 3)
@@ -63,18 +63,18 @@ ok('žádná nehotová položka neproklouzne na mobil', !mobil.some((p) => !p.ho
 
 console.log('\nKaždá HOTOVÁ položka vede na existující obrazovku')
 for (const p of hlavni.filter((p) => p.hotovo)) {
-  const segment = p.href.slice('/firma/faktury'.length).replace(/^\//, '')
-  const soubor = join(koren, 'app', '[rozsah]', 'faktury', segment, 'page.tsx')
+  const segment = p.href.slice('/firma/finance/faktury'.length).replace(/^\//, '')
+  const soubor = join(koren, 'app', '[rozsah]', 'finance', 'faktury', segment, 'page.tsx')
   ok(`${p.nazev} → ${segment || '(kořen)'}`, existsSync(soubor), soubor)
 }
 
 console.log('\naktivniKlic')
-ma('kořen modulu', aktivniKlic('/firma/faktury', hlavni), 'prehled')
-ma('seznam', aktivniKlic('/firma/faktury/seznam', hlavni), 'seznam')
-ma('hlubší adresa pod seznamem patří seznamu', aktivniKlic('/firma/faktury/seznam/xyz', hlavni), 'seznam')
-ma('neznámý segment mimo žádnou položku patří kořeni (prehled = celý modul)', aktivniKlic('/firma/faktury/detail/abc', hlavni), 'prehled')
-ma('jiný rozsah nesedí', aktivniKlic('/pobocka/faktury/seznam', hlavni), null)
-ma('podobná předpona nesedí', aktivniKlic('/firma/fakturyxxx', hlavni), null)
+ma('kořen sekce', aktivniKlic('/firma/finance/faktury', hlavni), 'prehled')
+ma('seznam', aktivniKlic('/firma/finance/faktury/seznam', hlavni), 'seznam')
+ma('hlubší adresa pod seznamem patří seznamu', aktivniKlic('/firma/finance/faktury/seznam/xyz', hlavni), 'seznam')
+ma('neznámý segment mimo žádnou položku patří kořeni (prehled = celá sekce)', aktivniKlic('/firma/finance/faktury/detail/abc', hlavni), 'prehled')
+ma('jiný rozsah nesedí', aktivniKlic('/pobocka/finance/faktury/seznam', hlavni), null)
+ma('podobná předpona nesedí', aktivniKlic('/firma/finance/fakturyxxx', hlavni), null)
 
 console.log(chyb ? `\n${chyb} chyb` : '\nVšechno sedí')
 process.exit(chyb ? 1 : 0)

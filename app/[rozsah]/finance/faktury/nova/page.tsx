@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import Sdeleni from '@/app/sdeleni'
-import Nadpis from '../../nadpis'
+import Nadpis from '../../../nadpis'
 import { zalozitFakturu } from '../akce'
 
 export const dynamic = 'force-dynamic'
@@ -63,7 +63,7 @@ export default async function FakturyNova({
       <Nadpis
         oci="Faktury"
         popis="Pro doklady mimo e-mailový příjem — papírový doklad nebo platba na místě. Položky s * jsou povinné."
-        vpravo={<Link href={`/${rozsah}/faktury`} className="ft-tl">← Zpět na faktury</Link>}
+        vpravo={<Link href={`/${rozsah}/finance/faktury`} className="ft-tl">← Zpět na faktury</Link>}
       >
         Zadat fakturu ručně
       </Nadpis>
@@ -147,7 +147,7 @@ export default async function FakturyNova({
 
           <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid var(--line)', paddingTop: '14px' }}>
             <button type="submit" className="ft-tl ft-tl-hlavni">Uložit fakturu</button>
-            <Link href={`/${rozsah}/faktury`} className="ft-tl">Zrušit</Link>
+            <Link href={`/${rozsah}/finance/faktury`} className="ft-tl">Zrušit</Link>
           </div>
         </form>
       </div>

@@ -1,5 +1,5 @@
 /**
- * Levý sloupec a spodní lišta modulu Faktury.
+ * Levý sloupec a spodní lišta sekce Faktury uvnitř modulu Finance.
  *
  * Stejný vzor jako `lib/marketing-navigace.ts` (Marketing krok 1,
  * 14.9.2026) — jedna položka v `app/[rozsah]/nabidka.ts`, detailní
@@ -7,6 +7,12 @@
  * mobilu přebírá `Shell.tsx` z původní samostatné appky
  * (skoumalvladislav-tech/faktury-app) — jen „Zadat fakturu ručně" tam
  * bylo tlačítko na Přehledu, ne položka menu, a tak zůstává i tady.
+ *
+ * Faktury bydlí pod /finance/faktury (Šéfík 15.9.2026: Faktury jako
+ * sekce uvnitř Finance, ne vlastní modul) — samotné obrazovky i
+ * oprávnění (faktury.read/faktury.manage) zůstávají beze změny, mění
+ * se jen to, pod jakým modulem (`finance` místo `faktury`) se
+ * aktivují a kam v adrese patří.
  */
 
 export type FakturyIkona =
@@ -65,7 +71,7 @@ export function sestavNavigaci(
   rozsah: string,
   pocty: PocetOdznaku,
 ): { hlavni: PolozkaNavigace[]; mobil: PolozkaNavigace[] } {
-  const zaklad = `/${rozsah}/faktury`
+  const zaklad = `/${rozsah}/finance/faktury`
   const prevod = (d: Definice): PolozkaNavigace => ({
     klic: d.klic,
     href: d.segment ? `${zaklad}/${d.segment}` : zaklad,

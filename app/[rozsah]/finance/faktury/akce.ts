@@ -31,7 +31,7 @@ async function pripravit(rozsah: string, pravo: 'faktury.read' | 'faktury.manage
 
   const pristup = await zkusPristup(tenantId, pravo, rozsah)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
-  if (pristup.stav === 'odepren') redirect(`/${rozsah}/faktury`)
+  if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/faktury`)
 
   return { supabase: getFakturySupabase() }
 }
@@ -51,7 +51,7 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
   const castka = parseFloat(castkaRaw)
 
   if (!dodavatel || Number.isNaN(castka)) {
-    redirect(`/${rozsah}/faktury/nova?chyba=${encodeURIComponent('Vyplňte dodavatele a částku.')}`)
+    redirect(`/${rozsah}/finance/faktury/nova?chyba=${encodeURIComponent('Vyplňte dodavatele a částku.')}`)
   }
 
   const foto = formData.get('fotografie')
@@ -89,11 +89,11 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
   })
 
   if (error) {
-    redirect(`/${rozsah}/faktury/nova?chyba=${encodeURIComponent(error.message)}`)
+    redirect(`/${rozsah}/finance/faktury/nova?chyba=${encodeURIComponent(error.message)}`)
   }
 
-  revalidatePath(`/${rozsah}/faktury`)
-  redirect(`/${rozsah}/faktury/seznam`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 
 /** Upomínky — poznamená, že se dodavateli ozvalo (telefonem/mailem mimo appku).
@@ -105,8 +105,8 @@ export async function oznacitUpominkuVyresenou(formData: FormData): Promise<void
   const { supabase } = await pripravit(rozsah, 'faktury.manage')
 
   await supabase.from('invoices').update({ reminder_sent_at: new Date().toISOString() }).eq('id', id)
-  revalidatePath(`/${rozsah}/faktury/upominky`)
-  redirect(`/${rozsah}/faktury/upominky`)
+  revalidatePath(`/${rozsah}/finance/faktury/upominky`)
+  redirect(`/${rozsah}/finance/faktury/upominky`)
 }
 
 export async function archivovatFakturu(formData: FormData): Promise<void> {
@@ -115,8 +115,8 @@ export async function archivovatFakturu(formData: FormData): Promise<void> {
   const { supabase } = await pripravit(rozsah, 'faktury.manage')
 
   await supabase.from('invoices').update({ is_archived: true }).eq('id', id)
-  revalidatePath(`/${rozsah}/faktury/seznam`)
-  redirect(`/${rozsah}/faktury/seznam`)
+  revalidatePath(`/${rozsah}/finance/faktury/seznam`)
+  redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 
 export async function obnovitFakturu(formData: FormData): Promise<void> {
@@ -125,8 +125,8 @@ export async function obnovitFakturu(formData: FormData): Promise<void> {
   const { supabase } = await pripravit(rozsah, 'faktury.manage')
 
   await supabase.from('invoices').update({ is_archived: false }).eq('id', id)
-  revalidatePath(`/${rozsah}/faktury/seznam`)
-  redirect(`/${rozsah}/faktury/seznam`)
+  revalidatePath(`/${rozsah}/finance/faktury/seznam`)
+  redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 
 /** Natvrdo smazat. Žádná druhá cesta zpět — appka to neschovává za potvrzovací dialog
@@ -137,8 +137,8 @@ export async function smazatFakturu(formData: FormData): Promise<void> {
   const { supabase } = await pripravit(rozsah, 'faktury.manage')
 
   await supabase.from('invoices').delete().eq('id', id)
-  revalidatePath(`/${rozsah}/faktury/seznam`)
-  redirect(`/${rozsah}/faktury/seznam`)
+  revalidatePath(`/${rozsah}/finance/faktury/seznam`)
+  redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 
 /** Potvrzení dokumentu čekajícího na schválení (AI klasifikace si nebyla jistá, člověk
@@ -149,8 +149,8 @@ export async function potvrditFakturu(formData: FormData): Promise<void> {
   const { supabase } = await pripravit(rozsah, 'faktury.manage')
 
   await supabase.from('invoices').update({ status: 'Ke kontrole úhrady', review_note: null }).eq('id', id)
-  revalidatePath(`/${rozsah}/faktury`)
-  redirect(`/${rozsah}/faktury/schvaleni`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  redirect(`/${rozsah}/finance/faktury/schvaleni`)
 }
 
 /** Odmítnutí dokumentu ve frontě ke schválení BEZ zapamatování (jen smazání) —
@@ -161,8 +161,8 @@ export async function odmitnoutFakturu(formData: FormData): Promise<void> {
   const { supabase } = await pripravit(rozsah, 'faktury.manage')
 
   await supabase.from('invoices').delete().eq('id', id)
-  revalidatePath(`/${rozsah}/faktury`)
-  redirect(`/${rozsah}/faktury/schvaleni`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  redirect(`/${rozsah}/finance/faktury/schvaleni`)
 }
 
 /**
@@ -193,8 +193,8 @@ export async function oznacitJakoUpominku(formData: FormData): Promise<void> {
       .in('id', Array.from(vyrazeno))
   }
 
-  revalidatePath(`/${rozsah}/faktury`)
-  redirect(`/${rozsah}/faktury/schvaleni${vyrazeno.size > 0 ? `?prerazeno=${vyrazeno.size}` : ''}`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  redirect(`/${rozsah}/finance/faktury/schvaleni${vyrazeno.size > 0 ? `?prerazeno=${vyrazeno.size}` : ''}`)
 }
 
 type DruhOdmitnuti = 'not_invoice' | 'not_supplier'
@@ -333,6 +333,6 @@ export async function odmitnoutAZapamatovat(formData: FormData): Promise<void> {
     })
   }
 
-  revalidatePath(`/${rozsah}/faktury`)
-  redirect(`/${rozsah}/faktury/seznam${vyrazeno > 0 ? `?vyrazeno=${vyrazeno}` : ''}`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  redirect(`/${rozsah}/finance/faktury/seznam${vyrazeno > 0 ? `?vyrazeno=${vyrazeno}` : ''}`)
 }

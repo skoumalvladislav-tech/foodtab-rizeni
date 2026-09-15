@@ -7,7 +7,7 @@ import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { STAV_KE_SCHVALENI, type Faktura } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
-import Nadpis from '../../nadpis'
+import Nadpis from '../../../nadpis'
 import { odmitnoutAZapamatovat, odmitnoutFakturu, oznacitJakoUpominku, potvrditFakturu } from '../akce'
 
 export const dynamic = 'force-dynamic'

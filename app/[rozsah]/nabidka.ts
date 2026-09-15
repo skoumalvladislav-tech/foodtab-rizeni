@@ -118,7 +118,17 @@ export const NABIDKA: Polozka[] = [
   // záložka modulu by nikam nevedla a nebylo by co odmítnout vypnutým
   // modulem, jak žádá pravidlo 5.
   { segment: 'menu', nazev: 'Tvorba menu', kratky: 'Menu', modul: 'menu', pravo: 'menu_ai.use', hotovo: true, ikona: 'kniha' },
-  { segment: 'finance', nazev: 'Přehled financí', kratky: 'Finance', modul: 'finance', pravo: 'finance.read', hotovo: false, ikona: 'kniha' },
+  // FINANCE ZATÍM = FAKTURY.
+  //
+  // Faktury byly do 15. 9. 2026 vlastní modul (`/faktury`), Šéfík
+  // rozhodl přesunout je jako sekci dovnitř Finance (`/finance/faktury`)
+  // — stejný nested-nav vzor jako marketing výš, detailní navigace
+  // (8 obrazovek) žije v app/[rozsah]/finance/faktury/ jako vlastní
+  // vnořený layout (lib/faktury-navigace.ts). Kořen modulu vede rovnou
+  // na Přehled faktur, protože Finance dnes nic jiného nenabízí — až
+  // přibude další část (např. banking.read je připravené právo),
+  // dostane vlastní položku tady a samostatnou kořenovou obrazovku.
+  { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha' },
   // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.
   //
   // Do 14. 9. 2026 tu stála jediná položka a v levém sloupci proto nebylo
@@ -146,11 +156,6 @@ export const NABIDKA: Polozka[] = [
   { segment: 'marketing/nastroje', nazev: 'Nástroje', kratky: 'Nástroje', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
   { segment: 'marketing', nazev: 'Příspěvky', kratky: 'Příspěvky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'zprava' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
-  // FAKTURY MÁ VÍC OBRAZOVEK NEŽ JEDNU — stejný důvod jako u marketingu
-  // výš: jedna položka tady, detailní navigace (8 obrazovek) žije uvnitř
-  // app/[rozsah]/faktury/ jako vlastní vnořený layout (lib/faktury-navigace.ts),
-  // ne rozepsaná do tohohle sloupce.
-  { segment: 'faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'faktury', pravo: 'faktury.read', hotovo: true, ikona: 'kniha' },
 ]
 
 /**
@@ -201,7 +206,6 @@ export const NAZVY_MODULU: Record<ModuleKey, string> = {
   finance: 'Finance',
   marketing: 'Marketing',
   objednavky: 'Objednávky',
-  faktury: 'Faktury',
 }
 
 /**

@@ -9,7 +9,7 @@ import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { STAV_ODMITNUTO, type Faktura } from '@/lib/faktury-types'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
 import Sdeleni from '@/app/sdeleni'
-import Nadpis from '../../nadpis'
+import Nadpis from '../../../nadpis'
 import { archivovatFakturu, obnovitFakturu, odmitnoutAZapamatovat, smazatFakturu } from '../akce'
 import StavZnacka from '../stav-znacka'
 
@@ -116,7 +116,7 @@ export default async function FakturySeznam({
     ((mesicniData ?? []) as { duzp: string | null }[]).map((r) => r.duzp?.slice(0, 7)).filter((x): x is string => Boolean(x)),
   )).sort((a, b) => b.localeCompare(a))
 
-  const zaklad = `/${rozsah}/faktury/seznam`
+  const zaklad = `/${rozsah}/finance/faktury/seznam`
   function stavPole(prepis: Partial<Record<'stav' | 'mesic' | 'kontrola' | 'archiv' | 'dodavatel' | 'hledat' | 'duplicity', string | undefined>>) {
     const p = new URLSearchParams()
     const hodnoty = {

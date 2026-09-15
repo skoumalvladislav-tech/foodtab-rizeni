@@ -13,7 +13,7 @@ import {
   type Faktura,
 } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
-import Nadpis from '../nadpis'
+import Nadpis from '../../nadpis'
 import StavZnacka from './stav-znacka'
 
 export const dynamic = 'force-dynamic'
@@ -135,7 +135,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
         oci="Faktury"
         popis="Stav faktur ve všech schránkách."
         vpravo={
-          <Link href={`/${rozsah}/faktury/nova`} className="ft-tl ft-tl-hlavni">
+          <Link href={`/${rozsah}/finance/faktury/nova`} className="ft-tl ft-tl-hlavni">
             + Zadat fakturu ručně
           </Link>
         }
@@ -153,7 +153,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
               AI si není jistá, že jde o fakturu (může jít třeba o výplatní pásku). Nepočítají se
               do žádných přehledů, dokud je nepotvrdíte.{' '}
-              <Link href={`/${rozsah}/faktury/schvaleni`}>Zobrazit →</Link>
+              <Link href={`/${rozsah}/finance/faktury/schvaleni`}>Zobrazit →</Link>
             </p>
           </div>
         ) : null}
@@ -166,7 +166,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
             </strong>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
               AI se u nich nepodařilo bezpečně vytáhnout údaje nebo šlo o obrázek místo PDF.{' '}
-              <Link href={`/${rozsah}/faktury/seznam?kontrola=1`}>Zobrazit →</Link>
+              <Link href={`/${rozsah}/finance/faktury/seznam?kontrola=1`}>Zobrazit →</Link>
             </p>
           </div>
         ) : null}
@@ -208,7 +208,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
                 {posledni.map((f) => (
                   <li key={f.id}>
                     <Link
-                      href={`/${rozsah}/faktury/seznam`}
+                      href={`/${rozsah}/finance/faktury/seznam`}
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit' }}
                     >
                       <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: barvaDodavatele(f.supplier), flex: 'none' }} />
@@ -243,7 +243,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
                 {nejvyssiOdber.map(([dodavatel, stat]) => (
                   <li key={dodavatel}>
                     <Link
-                      href={`/${rozsah}/faktury/seznam?dodavatel=${encodeURIComponent(dodavatel)}`}
+                      href={`/${rozsah}/finance/faktury/seznam?dodavatel=${encodeURIComponent(dodavatel)}`}
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit' }}
                     >
                       <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: barvaDodavatele(dodavatel), flex: 'none' }} />
