@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getFakturySupabase } from '@/lib/supabase/faktury'
+import { STAV_KE_SCHVALENI } from '@/lib/faktury-types'
 
 /**
  * Server akce modulu Faktury.
@@ -125,6 +126,62 @@ export async function smazatFakturu(formData: FormData): Promise<void> {
   await supabase.from('invoices').delete().eq('id', id)
   revalidatePath(`/${rozsah}/faktury/seznam`)
   redirect(`/${rozsah}/faktury/seznam`)
+}
+
+/** Potvrzení dokumentu čekajícího na schválení (AI klasifikace si nebyla jistá, člověk
+ * potvrdil, že jde o fakturu) — přeřadí do běžného stavu „Ke kontrole úhrady". */
+export async function potvrditFakturu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+
+  await supabase.from('invoices').update({ status: 'Ke kontrole úhrady', review_note: null }).eq('id', id)
+  revalidatePath(`/${rozsah}/faktury`)
+  redirect(`/${rozsah}/faktury/schvaleni`)
+}
+
+/** Odmítnutí dokumentu ve frontě ke schválení BEZ zapamatování (jen smazání) —
+ * zjednodušené tlačítko „Není to faktura" vedle podrobnějšího `odmitnoutAZapamatovat`. */
+export async function odmitnoutFakturu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+
+  await supabase.from('invoices').delete().eq('id', id)
+  revalidatePath(`/${rozsah}/faktury`)
+  redirect(`/${rozsah}/faktury/schvaleni`)
+}
+
+/**
+ * Označení dokumentu ve frontě ke schválení jako upomínky (výzvy k úhradě) se
+ * zapamatováním pro ostatní čekající dokumenty od stejného dodavatele/odesílatele.
+ * Na rozdíl od odmítnutí se dokument NEMAŽE ani nearchivuje — upomínka je platný,
+ * užitečný dokument (viz `faktury/upominky`), jen jiného typu než faktura.
+ */
+export async function oznacitJakoUpominku(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+
+  const { data: faktura } = await supabase.from('invoices')
+    .select('supplier, email_sender').eq('id', id).maybeSingle()
+
+  await supabase.from('invoices')
+    .update({ status: 'Upomínka - zkontrolovat', review_note: null, is_archived: false })
+    .eq('id', id)
+
+  const vyrazeno = await najitSouvisejiciFaktury(supabase, id, faktura?.supplier, faktura?.email_sender, STAV_KE_SCHVALENI)
+  if (vyrazeno.size > 0) {
+    const poznamka = faktura?.supplier
+      ? `Automaticky přeřazeno na upomínku – jiný dokument od dodavatele „${faktura.supplier}“ byl právě označen jako upomínka.`
+      : `Automaticky přeřazeno na upomínku – jiný dokument od stejného odesílatele byl právě označen jako upomínka.`
+    await supabase.from('invoices')
+      .update({ status: 'Upomínka - zkontrolovat', review_note: poznamka, is_archived: false })
+      .in('id', Array.from(vyrazeno))
+  }
+
+  revalidatePath(`/${rozsah}/faktury`)
+  redirect(`/${rozsah}/faktury/schvaleni${vyrazeno.size > 0 ? `?prerazeno=${vyrazeno.size}` : ''}`)
 }
 
 type DruhOdmitnuti = 'not_invoice' | 'not_supplier'

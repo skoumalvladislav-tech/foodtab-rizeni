@@ -40,9 +40,9 @@ ma('Dodavatelé bez odznaku', hlavni.find((p) => p.klic === 'dodavatele').cislo,
 
 console.log('\nMobilní lišta — MOB_NAV omezená na hotové obrazovky')
 // Původní appka měla na mobilu čtveřici Přehled/Faktury/Dodavatelé/Upomínky.
-// Dodavatelé a Upomínky zatím nejsou hotové (viz níž), takže se na mobilu
-// dnes ukážou jen ty dvě, co existují — až přibudou, vrátí se k čtveřici samy.
-ma('mobil má jen hotové položky z MOB_NAV', mobil.map((p) => p.klic), ['prehled', 'seznam'])
+// Upomínky zatím nejsou hotové (viz níž), takže na mobilu dnes chybí jen ta
+// jedna — až přibude, vrátí se k čtveřici sama.
+ma('mobil má jen hotové položky z MOB_NAV', mobil.map((p) => p.klic), ['prehled', 'seznam', 'dodavatele'])
 ok('schvaleni na mobilu není', !mobil.some((p) => p.klic === 'schvaleni'))
 ok('prehledy na mobilu není', !mobil.some((p) => p.klic === 'prehledy'))
 ok('kalendar na mobilu není', !mobil.some((p) => p.klic === 'kalendar'))
@@ -54,8 +54,8 @@ console.log('\nNula ve všech počítadlech')
 }
 
 console.log('\nHotovo/brzy')
-ma('hotové položky: přehled a seznam', hlavni.filter((p) => p.hotovo).map((p) => p.klic), ['prehled', 'seznam'])
-ok('nehotová položka nese hotovo: false', hlavni.find((p) => p.klic === 'dodavatele').hotovo === false)
+ma('hotové položky: přehled, seznam, dodavatelé, ke schválení', hlavni.filter((p) => p.hotovo).map((p) => p.klic), ['prehled', 'seznam', 'dodavatele', 'schvaleni'])
+ok('nehotová položka nese hotovo: false', hlavni.find((p) => p.klic === 'prehledy').hotovo === false)
 ok('nehotová položka na mobilu vůbec není', !mobil.some((p) => !p.hotovo))
 
 console.log('\nKaždá HOTOVÁ položka vede na existující obrazovku')
