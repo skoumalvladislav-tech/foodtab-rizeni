@@ -1,14 +1,19 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { getContext, getUser } from "@/lib/authz";
+import { canSee, getContext, getUser, jeVedeni } from "@/lib/authz";
 import { hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
+import { pocet } from "@/lib/sklonovani";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
+import { posunDatum } from "@/lib/provozni-den";
 import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
+import { fakturyJsouNastavene, getFakturySupabase } from "@/lib/supabase/faktury";
+import { STAV_KE_SCHVALENI, STAV_UHRAZENO } from "@/lib/faktury-types";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Card from "@/components/ui/Card";
+import Badge from "@/components/ui/Badge";
 import Nadpis from "../nadpis";
 import { zapsatDochazku } from "../dochazka/akce";
 import PoleKodu from "../dochazka/pole-kodu";
@@ -223,6 +228,83 @@ export default async function Dnes({
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
+  /* --- 2b. OWNER ATTENTION CENTER ---------------------------------
+     Jen pro vedení (jeVedeni) — zaměstnanec vidí Dnes beze změny,
+     vedoucí/majitel NAVÍC uvidí, co potřebuje pozornost teď (master
+     prompt, sekce 16-17). Jen REÁLNÁ data — appka nemá zdroj pro
+     tržby/počasí/hodnocení, takže ty se sem nedávají. Zdroje níž jsou
+     stejné dotazy/RPC jako na Docházce a ve Financích/Fakturách, jen
+     souhrnně na jednom místě. Chyba v kterémkoli zdroji položku jen
+     vynechá — nemá kvůli chybějící faktuře spadnout celá obrazovka. */
+
+  type UrovenPozornosti = "critical" | "warning" | "info";
+  type Pozornost = { uroven: UrovenPozornosti; text: string; akce: { popisek: string; href: string } };
+  const pozornost: Pozornost[] = [];
+
+  if (jeVedeni(ctx)) {
+    const pobockaProDochazku = scope.level === "branch" ? scope.branchId : null;
+
+    const [nedokoncenaRes, fakturyRes] = await Promise.allSettled([
+      supabase.rpc("nedokoncena_dochazka", {
+        p_tenant: tenantId,
+        p_od: posunDatum(den.provozni_den, -30),
+        p_do: posunDatum(den.provozni_den, -1),
+        p_branch: pobockaProDochazku,
+      }),
+      canSee(ctx, "faktury.read") && fakturyJsouNastavene()
+        ? (async () => {
+            const fakturySupabase = getFakturySupabase();
+            const dnesniDatum = den.provozni_den;
+            const [keKontrole, poSplatnosti] = await Promise.all([
+              fakturySupabase
+                .from("invoices")
+                .select("*", { count: "exact", head: true })
+                .eq("is_archived", false)
+                .eq("needs_review", true),
+              fakturySupabase
+                .from("invoices")
+                .select("*", { count: "exact", head: true })
+                .eq("is_archived", false)
+                .neq("status", STAV_UHRAZENO)
+                .neq("status", STAV_KE_SCHVALENI)
+                .not("due_date", "is", null)
+                .lt("due_date", dnesniDatum),
+            ]);
+            return { keKontrole: keKontrole.count ?? 0, poSplatnosti: poSplatnosti.count ?? 0 };
+          })()
+        : Promise.resolve(null),
+    ]);
+
+    if (nedokoncenaRes.status === "fulfilled" && !nedokoncenaRes.value.error) {
+      const pocetNedokoncenych = (nedokoncenaRes.value.data ?? []).length;
+      if (pocetNedokoncenych > 0) {
+        pozornost.push({
+          uroven: "warning",
+          text: `${pocet(pocetNedokoncenych, "nedokončený příchod", "nedokončené příchody", "nedokončených příchodů")} za posledních 30 dní — chybí odchod.`,
+          akce: { popisek: "Zkontrolovat docházku", href: `/${rozsah}/dochazka` },
+        });
+      }
+    }
+
+    if (fakturyRes.status === "fulfilled" && fakturyRes.value) {
+      const { keKontrole, poSplatnosti } = fakturyRes.value;
+      if (poSplatnosti > 0) {
+        pozornost.push({
+          uroven: "critical",
+          text: `${pocet(poSplatnosti, "faktura je po splatnosti", "faktury jsou po splatnosti", "faktur je po splatnosti")}.`,
+          akce: { popisek: "Zobrazit faktury", href: `/${rozsah}/finance/faktury/seznam` },
+        });
+      }
+      if (keKontrole > 0) {
+        pozornost.push({
+          uroven: "info",
+          text: `${pocet(keKontrole, "faktura čeká", "faktury čekají", "faktur čeká")} na kontrolu.`,
+          akce: { popisek: "Zkontrolovat faktury", href: `/${rozsah}/finance/faktury/seznam?kontrola=1` },
+        });
+      }
+    }
+  }
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const zona = ZONA_VYCHOZI;
@@ -253,6 +335,38 @@ export default async function Dnes({
       </Nadpis>
 
       <div style={{ padding: "16px", paddingBottom: "32px", maxWidth: "760px" }}>
+        {/* ---------- CO POTŘEBUJE VAŠI POZORNOST (jen vedení) ---- */}
+        {pozornost.length > 0 ? (
+          <section style={{ marginBottom: "24px" }}>
+            <h2 style={nadpisSekce}>Co potřebuje vaši pozornost</h2>
+            <ul style={{ ...seznam, marginBottom: 0 }}>
+              {pozornost.map((p, i) => (
+                <Card
+                  key={i}
+                  as="li"
+                  padding="14px 16px"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                    borderLeft: `3px solid ${barvaPozornosti(p.uroven)}`,
+                  }}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "14px", color: "var(--ink)" }}>
+                    <Badge tone={tonPozornosti(p.uroven)}>{popisekUrovne(p.uroven)}</Badge>
+                    {p.text}
+                  </span>
+                  <Link href={p.akce.href} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                    {p.akce.popisek} →
+                  </Link>
+                </Card>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         {/* ---------- KARTA, KTERÁ ODPOVÍDÁ ---------------------- */}
         <Card as="section" padding="18px" style={{ marginBottom: "24px" }}>
           {chyba === "kod" ? (
@@ -425,6 +539,26 @@ export default async function Dnes({
       </div>
     </>
   );
+}
+
+/** Barva pruhu na kartě „Co potřebuje pozornost" podle závažnosti. */
+function barvaPozornosti(uroven: "critical" | "warning" | "info"): string {
+  if (uroven === "critical") return "var(--bad)";
+  if (uroven === "warning") return "var(--pozor)";
+  return "var(--mosaz)";
+}
+
+/** Odstín štítku (Badge) podle závažnosti — viz components/ui/Badge.tsx. */
+function tonPozornosti(uroven: "critical" | "warning" | "info"): "danger" | "warning" | "accent" {
+  if (uroven === "critical") return "danger";
+  if (uroven === "warning") return "warning";
+  return "accent";
+}
+
+function popisekUrovne(uroven: "critical" | "warning" | "info"): string {
+  if (uroven === "critical") return "Kritické";
+  if (uroven === "warning") return "Pozor";
+  return "Info";
 }
 
 /** „4 h 12 min", ne „252". */
