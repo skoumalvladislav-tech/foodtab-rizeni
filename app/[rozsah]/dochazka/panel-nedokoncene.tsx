@@ -150,7 +150,7 @@ function cas(iso: string, zona: string | null): string {
 const panel = {
   background: 'var(--card)',
   border: '1px solid var(--pozor)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   boxShadow: 'var(--shadow)',
   padding: '18px',
 } as const

@@ -176,7 +176,7 @@ const panel = {
   padding: '16px 18px',
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   boxShadow: 'var(--shadow)',
 } as const
 

@@ -93,7 +93,7 @@ export default async function NahraniRozcestnik({
                     <span
                       style={{
                         padding: '1px 8px',
-                        borderRadius: '999px',
+                        borderRadius: 'var(--radius-full)',
                         border: '1px solid var(--line)',
                         fontSize: '11.5px',
                         color: 'var(--muted)',
@@ -136,7 +136,7 @@ export default async function NahraniRozcestnik({
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   boxShadow: 'var(--shadow)',
   padding: '16px 18px',
   color: 'var(--ink)',

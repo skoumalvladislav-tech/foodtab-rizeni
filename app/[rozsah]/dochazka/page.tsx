@@ -992,7 +992,7 @@ export default async function Dochazka({
                     borderLeft: `4px solid ${
                       s.status === "confirmed" ? "var(--good)" : "var(--line-2)"
                     }`,
-                    borderRadius: "14px",
+                    borderRadius: "var(--radius-lg)",
                     boxShadow: "var(--shadow)",
                     padding: "16px",
                   }}
@@ -1322,7 +1322,7 @@ function DlazdiceVydelku({
             display: "inline-block",
             margin: "12px 0 0",
             padding: "4px 10px",
-            borderRadius: "999px",
+            borderRadius: "var(--radius-full)",
             background: "var(--pozor-bg)",
             color: "var(--pozor)",
             fontSize: "13px",
@@ -1364,7 +1364,7 @@ function DlazdiceVydelku({
             display: "inline-block",
             margin: "12px 0 0",
             padding: "4px 10px",
-            borderRadius: "999px",
+            borderRadius: "var(--radius-full)",
             background: "var(--pozor-bg)",
             color: "var(--pozor)",
             fontSize: "13px",
@@ -1386,7 +1386,7 @@ function DlazdiceVydelku({
             display: "inline-block",
             margin: "12px 0 0 8px",
             padding: "4px 10px",
-            borderRadius: "999px",
+            borderRadius: "var(--radius-full)",
             background: "var(--pozor-bg)",
             color: "var(--pozor)",
             fontSize: "13px",

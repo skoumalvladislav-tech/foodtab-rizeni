@@ -165,7 +165,7 @@ export default async function NastaveniPobocek({
                         alignItems: "center",
                         gap: "7px",
                         padding: "7px 11px",
-                        borderRadius: "999px",
+                        borderRadius: "var(--radius-full)",
                         border: "1px solid var(--line-2)",
                         fontSize: "12.5px",
                         cursor: "pointer",
