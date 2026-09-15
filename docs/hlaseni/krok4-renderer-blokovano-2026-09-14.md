@@ -77,11 +77,24 @@ nasazení bez svolení, a to se nedělá autonomně. Zůstala by tak jen
 možnost odevzdat kód, který na jednom prostředí prokazatelně
 neprojde vlastní kontrolou písem — přesně to, co zadání zakazuje.
 
+## Dodatek 15. 9. — WSL vyzkoušen a zase odinstalován
+
+Na Šéfíkovo přání jsem 15. 9. zkusil `wsl --install`, abych mohl ověřit
+chování na skutečném Linuxu bez nutnosti produkčního nasazení.
+Instalace WSL2 ale opakovaně shazovala Wi-Fi na tomhle stroji (kolize
+Hyper-V virtuálního switche se síťovou kartou) — i po nastavení
+`networkingMode=mirrored` v `.wslconfig` se to vrátilo a Šéfík musel
+počítač restartovat. **WSL je vypnutý (`wsl --shutdown`) a dál se
+nepoužívá** — na tomhle stroji není bezpečná cesta, jak Krok 4 ověřit.
+`.wslconfig` s mirrored režimem zůstal na disku pro případ, že bude
+chtít WSL použít k něčemu jinému později; instalaci samotnou jsem
+neodstraňoval, jen jsem ji přestal používat.
+
 ## Jak na to navázat
 
 1. Ověřit `FONTCONFIG_PATH` postup (originál, beze změny) v prostředí
    blízkém Vercelu — Linux kontejner nebo přímo zkušební nasazení,
-   které Šéfík schválí.
+   které Šéfík schválí. **Ne WSL na tomhle stroji** — viz dodatek výš.
 2. Pokud tam kontrola projde: přenést `svg-sablony.ts` a `rastr.ts`
    1:1 (jsou hotové, jen se dřív mazaly z `marketing-ai/`), obnovit
    písma podle příkazu výš, přidat `sharp` do `package.json` napřímo,
