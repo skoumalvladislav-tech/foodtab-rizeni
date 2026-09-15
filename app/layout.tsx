@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, Archivo, Newsreader } from "next/font/google";
 
 import "./globals.css";
 import PwaRegistration from "./pwa-registration";
+import { ToastProvider } from "@/components/ui/Toast";
 
 const archivo = Archivo({
   subsets: ["latin", "latin-ext"],
@@ -88,8 +89,10 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: REZIM_SKRIPT }} />
       </head>
       <body className="antialiased">
-        {children}
-        <PwaRegistration />
+        <ToastProvider>
+          {children}
+          <PwaRegistration />
+        </ToastProvider>
       </body>
     </html>
   );

@@ -32,6 +32,18 @@
   --mosaz-sv:  #d8ab4e;
   --mosaz-ink: #17251e;
 
+  /* Vínová — druhotný přízvuk (design systém, 15.9.2026). Mosaz zůstává
+     jediná barva odkazů/zaměření (viz komentář u --accent níž); vínová
+     je pro věci, které mají vystoupit, ale nejsou akce ani stav — např.
+     zvýraznění v nadpisu, sekundární štítek. Hodnoty prošly stejnou
+     dvojí kontrolou jako zbytek palety (scripts/barvy.js metodou):
+     kontrast >= 4,5:1 na --paper i --card v obou režimech, ΔE2000 od
+     --bad/--pozor/--mosaz vysoko nad prahem 15/14 (nezaměnitelná). */
+  --vino:      #83263c;
+  --vino-sv:   #b8536c;
+  --vino-ink:  #fffdf7;
+  --vino-soft: #f8e9ec;
+
   --dobre: #2c7657;  --dobre-bg: #dbeee4;
   --pozor: #b04519;  --pozor-bg: #fbe4d8;
   --bad:   #a3241d;  --bad-bg:   #fbe0dd;
@@ -40,7 +52,19 @@
   --accent-soft: #f0e4cd;
   --accent-ink:  #fffdf7;
 
-  --shadow: 0 1px 2px rgba(22,33,28,.07), 0 8px 24px -12px rgba(22,33,28,.20);
+  /* Škála zaoblení — design systém, 15.9.2026. sm pro drobnosti
+     (vstupy, štítky), md pro karty a tlačítka, lg pro panely/dialogy,
+     full pro pilulky/avatary. Existující --ft-tl a spol. si drží svoje
+     natvrdo zapsané hodnoty (viz vzhled-zadani.md: .ft-* se přebarvují,
+     nepřejmenovávají) — tyhle tokeny jsou pro NOVÉ sdílené komponenty. */
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   14px;
+  --radius-full: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(22,33,28,.06);
+  --shadow:    0 1px 2px rgba(22,33,28,.07), 0 8px 24px -12px rgba(22,33,28,.20);
+  --shadow-lg: 0 2px 4px rgba(22,33,28,.08), 0 16px 40px -12px rgba(22,33,28,.28);
 
   /* --------------------------------------------------------------------
      BEZPEČNÉ VLOŽKY
@@ -120,6 +144,11 @@
     --mosaz-sv:  #eac878;
     --mosaz-ink: #17251e;
 
+    --vino:      #e18aa0;
+    --vino-sv:   #eba7b8;
+    --vino-ink:  #17251e;
+    --vino-soft: #2b151a;
+
     --dobre: #5fc79c;  --dobre-bg: #0f2b22;
     --pozor: #f0855a;  --pozor-bg: #33170c;
     --bad:   #f4837c;  --bad-bg:   #331313;
@@ -128,7 +157,9 @@
     --accent-soft: #2b2313;
     --accent-ink:  #17251e;
 
-    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+    --shadow:    0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+    --shadow-lg: 0 4px 8px rgba(0,0,0,.6), 0 20px 48px -14px rgba(0,0,0,.9);
 
     --b-firma:    #48927b;  --b-firma-fill:    #3c9a7e;  --b-firma-soft:    #121e1a;
     --b-slate:    #778794;  --b-slate-fill:    #798d9e;  --b-slate-soft:    #151d24;
@@ -156,6 +187,11 @@
   --mosaz-sv:  #eac878;
   --mosaz-ink: #17251e;
 
+  --vino:      #e18aa0;
+  --vino-sv:   #eba7b8;
+  --vino-ink:  #17251e;
+  --vino-soft: #2b151a;
+
   --dobre: #5fc79c;  --dobre-bg: #0f2b22;
   --pozor: #f0855a;  --pozor-bg: #33170c;
   --bad:   #f4837c;  --bad-bg:   #331313;
@@ -164,7 +200,9 @@
   --accent-soft: #2b2313;
   --accent-ink:  #17251e;
 
-  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow:    0 1px 2px rgba(0,0,0,.5), 0 10px 30px -14px rgba(0,0,0,.8);
+  --shadow-lg: 0 4px 8px rgba(0,0,0,.6), 0 20px 48px -14px rgba(0,0,0,.9);
 
   --b-firma:    #48927b;  --b-firma-fill:    #3c9a7e;  --b-firma-soft:    #121e1a;
   --b-slate:    #778794;  --b-slate-fill:    #798d9e;  --b-slate-soft:    #151d24;
