@@ -61,7 +61,7 @@ Podrobný stav: `docs/hlaseni/design-system-stav-2026-09-15.md` (bod 8a níž).
   - **PR #4 (design systém) smergován do `main`**, 15.9.2026 19:25 —
     https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/4.
     Design systém (tokeny, `components/`, AppShell, Dnes) je v produkci.
-  - **PR #5 (Rozpis směn, priorita 3) OTEVŘENÝ, čeká na review/merge** —
+  - **PR #5 (Rozpis směn, priorita 3) smergován do `main`**, 15.9.2026 20:09 —
     https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/5.
   - **Dev server na tomhle stroji byl v této relaci mimořádně nestabilní**
     (opakovaná poškozená Turbopack cache, výjimečně dlouhé kompilace
