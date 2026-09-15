@@ -73,6 +73,11 @@ promptu). Podrobný stav dnešní noci:
     Design systém (tokeny, `components/`, AppShell, Dnes) je v produkci.
   - **PR #5 (Rozpis směn, priorita 3) smergován do `main`**, 15.9.2026 20:09 —
     https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/5.
+  - **PR #6 (Etapy 0/2/3 — noční autonomní práce) OTEVŘENÝ, čeká na review/merge** —
+    https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/6.
+    Obsahuje master audit refresh, seskupený boční panel, Owner Attention
+    Center, Vzkazy dotažení. **Doporučeno vizuálně zkontrolovat před
+    mergem** (viz poznámka o Browser pane nástroji v bodě 11).
   - **Dev server na tomhle stroji byl v této relaci mimořádně nestabilní**
     (opakovaná poškozená Turbopack cache, výjimečně dlouhé kompilace
     v řádu minut, neobjasněné ukončení procesu s exit 127) — řešeno
