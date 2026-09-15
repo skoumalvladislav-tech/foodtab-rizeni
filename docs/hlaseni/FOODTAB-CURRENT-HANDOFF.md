@@ -61,6 +61,14 @@ Podrobný stav: `docs/hlaseni/design-system-stav-2026-09-15.md` (bod 8a níž).
   - **PR #4 (design systém) smergován do `main`**, 15.9.2026 19:25 —
     https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/4.
     Design systém (tokeny, `components/`, AppShell, Dnes) je v produkci.
+  - **PR #5 (Rozpis směn, priorita 3) OTEVŘENÝ, čeká na review/merge** —
+    https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/5.
+  - **Dev server na tomhle stroji byl v této relaci mimořádně nestabilní**
+    (opakovaná poškozená Turbopack cache, výjimečně dlouhé kompilace
+    v řádu minut, neobjasněné ukončení procesu s exit 127) — řešeno
+    smazáním `.next` a restartem, nakonec fungovalo. Netýká se kódu
+    (tsc/eslint/testy čisté po celou dobu) — čistě lokální/Windows
+    prostředí. Pokud se to v nové relaci opakuje: `rm -rf .next && npm run dev`.
   - **Známý, PŘEDEXISTUJÍCÍ nález:** GitHub Actions check „Migrace a scénáře"
     (workflow Databáze) padá i na `main` už minimálně od 13.9.2026 (přes 29
     scénářů `krok3`–`krok33` a `marketing8`–`marketing15`, `no rows returned
