@@ -47,11 +47,11 @@ do FoodTabu jako moduly, podle `docs/hlaseni/zadani-pro-ai-marketing-faktury.md`
   už prošel bez zásahu — chová se to jako dočasné/nedeterministické omezení
   session, ne jako trvalý zákaz. Pokud push v nové relaci selže, zkusit znovu;
   pokud trvá, spustí ho Šéfík sám: `git push origin claude/prompt-review-jtkh74`.
-  - `gh` CLI nainstalováno (`winget install GitHub.cli`), ale **není přihlášené**
-    — `gh auth login` je interaktivní OAuth, musí dokončit Šéfík. Bez toho nejde
-    založit PR z týhle session přes `gh pr create`.
+  - `gh` CLI nainstalováno a **přihlášené** (Šéfík dokončil `gh auth login`,
+    účet `skoumalvladislav-tech`).
+  - **PR otevřený: https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3**
+    (`claude/prompt-review-jtkh74` → `main`). Čeká na review/merge Šéfíkem.
   - Odkaz na branch: `https://github.com/skoumalvladislav-tech/foodtab-rizeni/tree/claude/prompt-review-jtkh74`
-  - Odkaz na založení PR: `https://github.com/skoumalvladislav-tech/foodtab-rizeni/compare/main...claude/prompt-review-jtkh74?expand=1`
 - Druhý samostatný repozitář použitý jen jako referenční zdroj (needitovat, jen
   číst): `C:\Users\vladi\faktury-app` (privátní GitHub repo
   `skoumalvladislav-tech/faktury-app`, branch `main`) — původní samostatná appka
@@ -283,8 +283,8 @@ není rozpracované. Větev je pushnutá. Otevřené zbývá jen mimo kód:
 
 ## 15. Operace čekající na schválení Šéfíka
 
-1. **Dokončit `gh auth login`** (interaktivní OAuth) NEBO založit PR ručně přes
-   web — odkaz na compare v bodě 2. Bez přihlášení nejde založit PR z týhle session.
+1. **Review a merge PR #3** (https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3)
+   do `main`.
 2. **Nasadit `supabase/migrations/20260915100000_modul_faktury.sql`** (FoodTab DB)
    — bez toho je hotová sekce Faktury v UI neviditelná. Nejdřív musí větev
    doputovat na `main` (CLAUDE.md: nasazuje se jen z `main`).
@@ -298,18 +298,15 @@ není rozpracované. Větev je pushnutá. Otevřené zbývá jen mimo kód:
 
 ## 16. Doporučený další krok (přesně)
 
-1. Šéfík dokončí `gh auth login` (jednou, uloží se) — pak umí nová relace
-   založit PR sama přes `gh pr create`. Do té doby PR založí Šéfík ručně přes
-   compare odkaz v bodě 2.
-2. Sloučit/otevřít PR do `main` a projít review (branch je pushnutá, viz bod 2/5).
-3. Po sloučení do `main`: nasadit `20260915100000_modul_faktury.sql` —
+1. Review a merge **PR #3** do `main` (branch pushnutá, `gh` přihlášené — viz bod 2).
+2. Po sloučení do `main`: nasadit `20260915100000_modul_faktury.sql` —
    od tohoto okamžiku je sekce Faktury živá a viditelná pro uživatele s právem
    na adrese `/finance/faktury`.
-4. Spustit RLS opravu `rejection_examples` (bod 15.3) — nezávislé na kroku 3,
+3. Spustit RLS opravu `rejection_examples` (bod 15.3) — nezávislé na kroku 2,
    jde spustit kdykoli.
-5. Živě ověřit sekci Faktury se **skutečnými daty** (3022 řádků v `invoices`
+4. Živě ověřit sekci Faktury se **skutečnými daty** (3022 řádků v `invoices`
    podle posledního čtení) — dosavadní ověření bylo jen „appka korektně
    odmítá bez oprávnění", ne plný uživatelský tok s daty.
-6. Teprve pak pokračovat na Marketing Krok 4 (potřebuje jiné prostředí než
+5. Teprve pak pokračovat na Marketing Krok 4 (potřebuje jiné prostředí než
    tenhle Windows stroj) nebo Krok 5 E2E (potřebuje Šéfíkovo rozhodnutí) —
    obojí nezávislé na Fakturách, žádné z nich nemá blokovat to ostatní.
