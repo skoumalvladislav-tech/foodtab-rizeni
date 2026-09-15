@@ -20,6 +20,8 @@ function posunMesic(datum: string, mesicu: number): string {
 }
 
 import ZnackaOsoby from "@/app/znacka-osoby";
+import Card from "@/components/ui/Card";
+import Button from "@/components/ui/Button";
 import FormularSmeny, { type SmenaKUprave } from "./formular-smeny";
 // `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
 // nespouští a serverová akce by se sem tahat neměla vůbec.
@@ -156,69 +158,59 @@ export default function RozpisView({
   return (
     <div style={{ padding: "16px", paddingBottom: "32px" }}>
       {/* Navigace — posun období */}
-      <div
+      <Card
+        padding="10px 12px"
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: "24px",
-          padding: "12px",
-          background: "var(--card)",
-          borderRadius: "8px",
-          border: "1px solid var(--line)",
+          marginBottom: "20px",
+          boxShadow: "var(--shadow-sm)",
         }}
       >
-        <button
+        <Button
+          velikost="male"
           onClick={() =>
             updateUrl(
               pohled,
               pohled === "mesic" ? posunMesic(den, -1) : posunDatum(den, pohled === "tyden" ? -7 : -1)
             )
           }
-          className="ft-tl ft-tl-vedlejsi ft-tl-male"
           aria-label="Předchozí období"
         >
           ‹
-        </button>
+        </Button>
 
         <div style={{ flex: 1, textAlign: "center" }}>
-          <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--branch)" }}>
+          <div style={{ fontSize: "14.5px", fontWeight: 600, color: "var(--branch)", fontFamily: "var(--font-newsreader)" }}>
             {popisObdobi(den, pohled)}
           </div>
         </div>
 
-        <button
-          onClick={() => updateUrl(pohled, dnesni)}
-          className="ft-tl ft-tl-vedlejsi ft-tl-male"
-        >
+        <Button velikost="male" onClick={() => updateUrl(pohled, dnesni)}>
           Dnes
-        </button>
+        </Button>
 
-        <button
+        <Button
+          velikost="male"
           onClick={() =>
             updateUrl(
               pohled,
               pohled === "mesic" ? posunMesic(den, 1) : posunDatum(den, pohled === "tyden" ? 7 : 1)
             )
           }
-          className="ft-tl ft-tl-vedlejsi ft-tl-male"
           aria-label="Následující období"
         >
           ›
-        </button>
-      </div>
+        </Button>
+      </Card>
 
       {/* Přepínač pohledů */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
+      <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
         {POHLEDY.map(([klic, nazev]) => (
-          <button
-            key={klic}
-            onClick={() => updateUrl(klic, den)}
-            className="ft-tl ft-tl-vedlejsi"
-            aria-pressed={pohled === klic}
-          >
+          <Button key={klic} onClick={() => updateUrl(klic, den)} aria-pressed={pohled === klic}>
             {nazev}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -724,7 +716,7 @@ function DenView({
                     height: `${rowHeight - 16}px`,
                     background: obsazena ? "var(--branch-soft)" : "var(--pozor-bg)",
                     border: `1px solid ${obsazena ? "var(--branch)" : "var(--pozor)"}`,
-                    borderRadius: "4px",
+                    borderRadius: "var(--radius-sm)",
                     display: "flex",
                     alignItems: "center",
                     // Vlevo místo na proužek s barvou člověka.
@@ -947,8 +939,9 @@ function MesicView({
                 onClick={() => denNum && onSelectDay(datumStr)}
                 style={{
                   padding: "12px 8px",
-                  borderRadius: "8px",
+                  borderRadius: "var(--radius-md)",
                   border: denNum ? "1px solid var(--line)" : "none",
+                  boxShadow: denNum && datumStr === den ? "var(--shadow-sm)" : "none",
                   background:
                     denNum && datumStr === den
                       ? "var(--branch-soft)"
@@ -1028,10 +1021,10 @@ function popisDne(datum: string, dnesni: string): string {
 
 const chip = {
   fontSize: "11px",
-  padding: "4px 6px",
+  padding: "4px 7px",
   background: "var(--sunken)",
   border: "1px solid var(--line-2)",
-  borderRadius: "4px",
+  borderRadius: "var(--radius-sm)",
   color: "var(--ink)",
   fontVariantNumeric: "tabular-nums" as const,
 } as const;
@@ -1054,7 +1047,7 @@ const pridatTlacitko = {
   padding: "3px 6px",
   background: "transparent",
   border: "1px dashed var(--line-2)",
-  borderRadius: "4px",
+  borderRadius: "var(--radius-sm)",
   color: "var(--muted)",
   cursor: "pointer",
   opacity: 0.55,

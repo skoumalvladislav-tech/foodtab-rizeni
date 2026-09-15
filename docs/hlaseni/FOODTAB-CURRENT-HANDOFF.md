@@ -58,11 +58,17 @@ Podrobný stav: `docs/hlaseni/design-system-stav-2026-09-15.md` (bod 8a níž).
   - **PR #3 (Faktury) smergován do `main`**, 15.9.2026 16:20 —
     https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3.
     Migrace nasazená, sekce Faktury živá v produkci (viz bod 6).
-  - **PR #4 (design systém) OTEVŘENÝ, čeká na review/merge** —
+  - **PR #4 (design systém) smergován do `main`**, 15.9.2026 19:25 —
     https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/4.
-    Obsahuje 4 commity nad `main` (tokeny, `components/`, AppShell, Dnes,
-    handoff dokumentace). Nemergovat bez svolení Šéfíka — na rozdíl od
-    PR #3 tenhle merge nikdo výslovně nežádal.
+    Design systém (tokeny, `components/`, AppShell, Dnes) je v produkci.
+  - **PR #5 (Rozpis směn, priorita 3) OTEVŘENÝ, čeká na review/merge** —
+    https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/5.
+  - **Dev server na tomhle stroji byl v této relaci mimořádně nestabilní**
+    (opakovaná poškozená Turbopack cache, výjimečně dlouhé kompilace
+    v řádu minut, neobjasněné ukončení procesu s exit 127) — řešeno
+    smazáním `.next` a restartem, nakonec fungovalo. Netýká se kódu
+    (tsc/eslint/testy čisté po celou dobu) — čistě lokální/Windows
+    prostředí. Pokud se to v nové relaci opakuje: `rm -rf .next && npm run dev`.
   - **Známý, PŘEDEXISTUJÍCÍ nález:** GitHub Actions check „Migrace a scénáře"
     (workflow Databáze) padá i na `main` už minimálně od 13.9.2026 (přes 29
     scénářů `krok3`–`krok33` a `marketing8`–`marketing15`, `no rows returned
@@ -358,16 +364,15 @@ knihovnu. Marketing Krok 4 (renderer) a Krok 5 E2E zůstávají blokované
 
 ## 15. Operace čekající na schválení Šéfíka
 
-**Faktury (nasazení + RLS oprava) KOMPLETNĚ HOTOVO.** Aktuálně čeká:
+**Faktury (nasazení + RLS oprava) i design systém (PR #4) KOMPLETNĚ HOTOVO
+a v `main`.** Aktuálně čeká:
 
-1. **Review a merge PR #4** (design systém) —
-   https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/4.
-2. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
-3. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
+1. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
+2. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
    (`docs/granty-provoz-zadani.md`) — mimo gesci téhle relace, ale čeká na rozhodnutí.
-4. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
-5. n8n: zúžit/vypnout starý workflow Černá Perla.
-6. Prošetřit selhávající GitHub Actions check „Migrace a scénáře" —
+3. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
+4. n8n: zúžit/vypnout starý workflow Černá Perla.
+5. Prošetřit selhávající GitHub Actions check „Migrace a scénáře" —
    padá na `main` už dny, nesouvisí s Fakturami/Financemi ani design systémem.
 
 ## 16. Doporučený další krok (přesně)
@@ -375,13 +380,16 @@ knihovnu. Marketing Krok 4 (renderer) a Krok 5 E2E zůstávají blokované
 **Faktury jsou kompletně hotové, nasazené, RLS opravená a živě ověřené**
 (15.9.2026 večer) — na tomhle projektu není žádný další nutný krok.
 
-**Design systém (aktivní etapa):**
-1. Review a merge PR #4 do `main` (bod 15.1) — až Šéfík schválí.
-2. Pokračovat v pořadí ze `docs/hlaseni/design-system-stav-2026-09-15.md`:
+**Design systém (aktivní etapa, PR #4 už v `main`):**
+1. Pokračovat v pořadí ze `docs/hlaseni/design-system-stav-2026-09-15.md`:
    Rozpis směn → Docházka → Vzkazy → Úkoly → Lidé → Finance (shell) →
    Marketing (shell) → ostatní moduly. Používat `components/ui/*` a
    `components/shell/*`, ne vymýšlet nové vzory — kde komponenta chybí,
    doplnit ji do `components/ui/`, ne psát inline duplicitně.
+2. **Souběžně běží samostatná relace** na sjednocení 3 ručních modálních
+   oken (`smeny/formular-smeny.tsx`, `ceka-na-opravneni.tsx`,
+   `pwa-registration.tsx`) na sdílený `Dialog`/`Drawer` — nesahat na tyhle
+   tři soubory z jiné relace souběžně, ať nevzniknou konflikty.
 3. Po každé obrazovce ověřit desktop+mobil stejně jako u AppShellu/Dnes
    (tsc, eslint, node testy, živě v prohlížeči).
 4. Po dokončení celé priority: aktualizovat
