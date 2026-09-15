@@ -54,8 +54,8 @@ console.log('\nNula ve všech počítadlech')
 }
 
 console.log('\nHotovo/brzy')
-ma('hotové položky: přehled, seznam, dodavatelé, ke schválení', hlavni.filter((p) => p.hotovo).map((p) => p.klic), ['prehled', 'seznam', 'dodavatele', 'schvaleni'])
-ok('nehotová položka nese hotovo: false', hlavni.find((p) => p.klic === 'prehledy').hotovo === false)
+ma('hotové položky: přehled, seznam, dodavatelé, ke schválení, přehledy', hlavni.filter((p) => p.hotovo).map((p) => p.klic), ['prehled', 'seznam', 'dodavatele', 'schvaleni', 'prehledy'])
+ok('nehotová položka nese hotovo: false', hlavni.find((p) => p.klic === 'kalendar').hotovo === false)
 ok('nehotová položka na mobilu vůbec není', !mobil.some((p) => !p.hotovo))
 
 console.log('\nKaždá HOTOVÁ položka vede na existující obrazovku')

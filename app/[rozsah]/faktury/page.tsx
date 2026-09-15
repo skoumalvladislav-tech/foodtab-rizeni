@@ -166,7 +166,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
             </strong>
             <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
               AI se u nich nepodařilo bezpečně vytáhnout údaje nebo šlo o obrázek místo PDF.{' '}
-              <Link href={`/${rozsah}/faktury/seznam?review=1`}>Zobrazit →</Link>
+              <Link href={`/${rozsah}/faktury/seznam?kontrola=1`}>Zobrazit →</Link>
             </p>
           </div>
         ) : null}

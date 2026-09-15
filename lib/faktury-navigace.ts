@@ -41,7 +41,7 @@ const POLOZKY: readonly Definice[] = [
   { klic: 'seznam', segment: 'seznam', nazev: 'Faktury', kratky: 'Faktury', ikona: 'seznam', pocitadlo: 'needsReview', hotovo: true },
   { klic: 'dodavatele', segment: 'dodavatele', nazev: 'Dodavatelé', kratky: 'Dodavatelé', ikona: 'dodavatele', hotovo: true },
   { klic: 'schvaleni', segment: 'schvaleni', nazev: 'Ke schválení', kratky: 'Schválení', ikona: 'schvaleni', pocitadlo: 'pendingApproval', hotovo: true },
-  { klic: 'prehledy', segment: 'prehledy', nazev: 'Přehledy', kratky: 'Přehledy', ikona: 'prehledy', hotovo: false },
+  { klic: 'prehledy', segment: 'prehledy', nazev: 'Přehledy', kratky: 'Přehledy', ikona: 'prehledy', hotovo: true },
   { klic: 'kalendar', segment: 'kalendar', nazev: 'Kalendář splatností', kratky: 'Kalendář', ikona: 'kalendar', hotovo: false },
   { klic: 'upominky', segment: 'upominky', nazev: 'Upomínky', kratky: 'Upomínky', ikona: 'upominky', pocitadlo: 'overdue', hotovo: false },
 ]

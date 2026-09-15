@@ -7,6 +7,7 @@ import { getFakturySupabase } from '@/lib/supabase/faktury'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { STAV_ODMITNUTO, type Faktura } from '@/lib/faktury-types'
+import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import { archivovatFakturu, obnovitFakturu, odmitnoutAZapamatovat, smazatFakturu } from '../akce'
@@ -42,50 +43,6 @@ const pole = {
   fontSize: '13.5px',
 } as const
 
-type Filtry = {
-  archiv: boolean
-  stav?: string
-  kontrola: boolean
-  mesic?: string
-  dodavatel?: string
-  hledat: string
-  duplicity: boolean
-}
-
-/** Escapuje % a _ (speciální znaky v Postgres ILIKE) i uvozovky, ať jde uživatelský
- * dotaz bezpečně použít jako vzor uvnitř PostgREST `.or()` filtru. */
-function escapovatHledani(hodnota: string): string {
-  return hodnota.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_').replace(/"/g, '\\"')
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function pouzitFiltry(dotaz: any, f: Filtry): any {
-  dotaz = dotaz.eq('is_archived', f.archiv)
-
-  if (!f.archiv && f.stav !== STAV_ODMITNUTO) {
-    dotaz = dotaz.neq('status', STAV_ODMITNUTO)
-  }
-  if (f.kontrola) {
-    dotaz = dotaz.eq('needs_review', true)
-  } else if (f.stav) {
-    dotaz = dotaz.eq('status', f.stav)
-  }
-  if (f.mesic) {
-    const [r, m] = f.mesic.split('-').map(Number)
-    const od = `${f.mesic}-01`
-    const do_ = m === 12 ? `${r + 1}-01-01` : `${r}-${String(m + 1).padStart(2, '0')}-01`
-    dotaz = dotaz.gte('duzp', od).lt('duzp', do_)
-  }
-  if (f.dodavatel) dotaz = dotaz.eq('supplier', f.dodavatel)
-  if (f.hledat) {
-    const vzor = `%${escapovatHledani(f.hledat)}%`
-    dotaz = dotaz.or(`supplier.ilike."${vzor}",invoice_number.ilike."${vzor}",variable_symbol.ilike."${vzor}",email_subject.ilike."${vzor}"`)
-  }
-  if (f.duplicity) dotaz = dotaz.eq('is_duplicate', true)
-
-  return dotaz
-}
-
 function pluralFaktur(n: number): string {
   if (n === 1) return 'faktura'
   if (n >= 2 && n <= 4) return 'faktury'
@@ -117,7 +74,7 @@ export default async function FakturySeznam({
   }
   const smiSpravovat = (await zkusPristup(tenantId, 'faktury.manage', rozsah)).stav === 'ok'
 
-  const filtry: Filtry = {
+  const filtry: FakturyFiltry = {
     archiv: sp.archiv === '1',
     stav: sp.stav,
     kontrola: sp.kontrola === '1',
