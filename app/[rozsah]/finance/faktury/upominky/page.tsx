@@ -26,7 +26,7 @@ const MIN_DNI_PO_SPLATNOSTI = 7
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -96,7 +96,7 @@ export default async function FakturyUpominky({ params }: { params: Promise<{ ro
                   <tr key={f.id} style={{ borderTop: '1px solid var(--line)' }}>
                     <td style={{ padding: '10px 12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ width: '22px', height: '22px', borderRadius: '999px', background: barvaDodavatele(f.supplier), color: '#fff', fontSize: '10px', display: 'grid', placeItems: 'center', flex: 'none' }}>
+                        <span style={{ width: '22px', height: '22px', borderRadius: 'var(--radius-full)', background: barvaDodavatele(f.supplier), color: '#fff', fontSize: '10px', display: 'grid', placeItems: 'center', flex: 'none' }}>
                           {inicialyDodavatele(f.supplier)}
                         </span>
                         {f.supplier || '–'}

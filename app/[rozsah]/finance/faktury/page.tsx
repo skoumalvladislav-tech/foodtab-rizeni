@@ -30,7 +30,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -211,7 +211,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
                       href={`/${rozsah}/finance/faktury/seznam`}
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit' }}
                     >
-                      <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: barvaDodavatele(f.supplier), flex: 'none' }} />
+                      <span style={{ width: '8px', height: '8px', borderRadius: 'var(--radius-full)', background: barvaDodavatele(f.supplier), flex: 'none' }} />
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <strong style={{ fontSize: '14px' }}>{f.supplier || '–'}</strong>
                         <br />
@@ -246,7 +246,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
                       href={`/${rozsah}/finance/faktury/seznam?dodavatel=${encodeURIComponent(dodavatel)}`}
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit' }}
                     >
-                      <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: barvaDodavatele(dodavatel), flex: 'none' }} />
+                      <span style={{ width: '8px', height: '8px', borderRadius: 'var(--radius-full)', background: barvaDodavatele(dodavatel), flex: 'none' }} />
                       <strong style={{ flex: 1, fontSize: '14px' }}>{dodavatel}</strong>
                       <span style={{ textAlign: 'right' }}>
                         <span style={{ display: 'block', fontFamily: 'ui-monospace, monospace' }}>
