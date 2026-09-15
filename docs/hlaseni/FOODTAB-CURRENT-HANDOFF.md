@@ -162,6 +162,11 @@ Dokončeno sloučení Faktury (Marketing byl hotový už dřív):
 ## 5. Důležité commity (na `claude/prompt-review-jtkh74`, PUSHNUTÉ na `origin`)
 
 ```
+76eba8f design: radius tokeny napříč zbylými obrazovkami (priorita 10 - ostatní)
+38d5e85 design: Marketing shell - radius tokeny místo pevných hodnot
+3bf4fe5 design: Finance/Faktury - radius tokeny místo pevných hodnot
+c5c0976 design: Lidé - radius tokeny místo pevných hodnot
+2557e78 Design systém: Ukoly a Zalohy (priorita 6, 4)
 27892da Design systém: Vzkazy - lehky dotazeny (radius tokeny, jemny stin)
 0a1b38b Etapa 3: Owner Attention Center na obrazovce Dnes
 1bcf93b Etapa 2: bocni panel seskupeny podle vsech modulu najednou
@@ -336,9 +341,28 @@ další významné změně místo zakládání dalšího souboru.
 - Vzkazy — lehké dotažení (radius/stín), NE plná ConversationList/
   ChatView přestavba (master prompt sekce 21) — to je větší,
   samostatná práce, zůstává v ZBÝVÁ.
-- **Zbývá:** Úkoly, Lidé, Zálohy, Finance shell, Marketing shell,
-  ostatní moduly — v tomhle pořadí. Ikony v horních modulových
-  záložkách (mockup je má). Etapy 4(zbytek)-14 z master promptu
+- **Úkoly, Zálohy** — lehké dotažení (radius tokeny), stejný vzor.
+- **Lidé** (`nastaveni/lide/page.tsx`) — lehké dotažení (`formular`
+  12px→`--radius-lg`, `inputPole` 10px→`--radius-sm`). Tabulka a
+  akční odkazy (Upravit/PIN/Smazat) záměrně nepřestavěny na
+  DataTable+kebab-menu (master prompt sekce 23) — citlivá oblast
+  (lidé/PIN/oprávnění), zůstává jako samostatný TODO.
+- **Finance shell** — všech 9 obrazovek Faktur (jediná sekce modulu
+  Finance) přes mechanickou náhradu 14px→`--radius-lg`, 8px→
+  `--radius-sm`, 999px→`--radius-full`.
+- **Marketing shell** — přehledová karta + sdílený `.modul-*` rám
+  (`navigace.tsx`/`globals.css`) na tokeny.
+- **Priorita 10 (ostatní)** — stejná mechanická náhrada (jen
+  jednoznačné shody 14px→lg a 999px→full, ne 8/10/12px, které chtějí
+  vizuální rozhodnutí sm/md) napříč zbytkem Marketingu (16 obrazovek),
+  Docházkou (2 panely), Nastavením (Firma/Pobočky/Zařazení/Zařízení/
+  Nahrání), rozcestníkem `[rozsah]/page.tsx`, Směnami (panel výdání),
+  Vzkazy (konverzace/nástěnka), Zálohami (formulář/pozastavení).
+- **Zbývá:** hodnoty 8/10/12px napříč zbylými soubory (vynechány
+  záměrně, chtějí ruční kontrolu vizuální role sm/md, ne plošný sed).
+  Ikony v horních modulových záložkách (mockup je má, appka zatím ne).
+  Vzkazy plná ConversationList/ChatView přestavba. Lidé plná
+  DataTable+kebab-menu přestavba. Etapy 4(zbytek)-14 z master promptu
   (Finance rozšíření, Marketing dokončení, AI gateway, Gastro AI,
   Receptury/Menu, Objednávky, cross-module intelligence, plná
   responzivita, bezpečnostní regrese, release) — nezapočaty, velké
@@ -358,12 +382,15 @@ další významné změně místo zakládání dalšího souboru.
 
 **Faktury sloučení je hotové** (kód, migrace, RLS, živě ověřeno), žádný
 otevřený bod. **Aktivní je design systém** (bod 11, zadáno 15.9.2026
-večer) — nadace (tokeny + `components/ui/` + `components/shell/`) hotová,
-AppShell a Dnes hotové, **zbývá 8 obrazovek z priority**: Rozpis směn,
-Docházka, Vzkazy, Úkoly, Lidé, Finance (shell), Marketing (shell),
-ostatní moduly. Žádná z nich je rozbitá — jen zatím nevyužívá novou
-knihovnu. Marketing Krok 4 (renderer) a Krok 5 E2E zůstávají blokované
-(bod 13), nesouvisí s design systémem, nikdo na nich aktivně nepracuje.
+večer) — nadace hotová, **celá explicitní priorita 1–10 z master
+promptu je teď hotová** (AppShell, Dnes, Rozpis směn, Docházka, Vzkazy,
+Úkoly, Lidé, Finance shell, Marketing shell, ostatní obrazovky).
+Zbývá: hodnoty 8/10/12px (chtějí ruční rozhodnutí sm/md, ne sed),
+ikony v horních záložkách, plné přestavby Vzkazy/Lidé (viz bod 11),
+a **vizuální ověření živě** — dnešní/noční práce se nedala odzkoušet
+kvůli nástroji (bod 11), zůstává jako první krok příští relace. Marketing
+Krok 4 (renderer) a Krok 5 E2E zůstávají blokované (bod 13), nesouvisí
+s design systémem, nikdo na nich aktivně nepracuje.
 
 ## 13. Nevyřešené problémy
 
@@ -433,7 +460,21 @@ a v `main`.** Aktuálně čeká:
 ## 16. Doporučený další krok (přesně)
 
 **Faktury jsou kompletně hotové, nasazené, RLS opravená a živě ověřené**
-(15.9.2026 večer) — na tomhle projektu není žádný další nutný krok.
+(15.9.2026 večer) — na Fakturách samotných není žádný další nutný krok.
+
+**Design systém** (bod 11/12): priorita 1–10 z master promptu hotová
+(commity až po `76eba8f`, pushnuté na `origin`). Doporučený postup pro
+další relaci:
+1. **Vizuálně zkontrolovat živě** — první věc, dnešní/noční práci se
+   nepodařilo odzkoušet v Browser pane (bod 11).
+2. Ruční dotažení 8/10/12px hodnot tam, kde je sed vynechal záměrně
+   (chtějí rozhodnutí sm vs. md podle vizuální role, ne plošnou náhradu).
+3. Ikony v horních modulových záložkách (mockup je má).
+4. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
+   ConversationList/ChatView, Lidé DataTable+kebab-menu.
+5. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
+   nezačínat bez zvláštního zadání/kontextu, který v tomhle handoffu
+   možná chybí (master prompt sám existuje jen v chatu, viz bod 1).
 
 **Design systém (aktivní etapa, PR #4 už v `main`):**
 1. Pokračovat v pořadí ze `docs/hlaseni/design-system-stav-2026-09-15.md`:
