@@ -297,7 +297,7 @@ export default async function Rozhovor({
             style={{
               background: 'var(--card)',
               border: '1px solid var(--line)',
-              borderRadius: '14px',
+              borderRadius: 'var(--radius-lg)',
               padding: '14px',
             }}
           >

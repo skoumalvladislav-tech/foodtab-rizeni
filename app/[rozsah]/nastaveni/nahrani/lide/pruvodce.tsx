@@ -358,7 +358,7 @@ function Kroky({ krok }: { krok: Krok }) {
           aria-current={i === kde ? 'step' : undefined}
           style={{
             padding: '4px 10px',
-            borderRadius: '999px',
+            borderRadius: 'var(--radius-full)',
             border: '1px solid var(--line)',
             background: i === kde ? 'var(--mosaz-sv)' : 'transparent',
             color: i === kde ? '#17251e' : i < kde ? 'var(--ink)' : 'var(--muted)',
@@ -428,7 +428,7 @@ function Vypis({ plan }: { plan: Plan }) {
             <span
               style={{
                 padding: '1px 8px',
-                borderRadius: '999px',
+                borderRadius: 'var(--radius-full)',
                 background: s.pozadi,
                 color: s.barva,
                 fontSize: '11.5px',
@@ -489,7 +489,7 @@ async function precistSoubor(soubor: File): Promise<Tabulka> {
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   boxShadow: 'var(--shadow)',
   padding: '18px',
   marginBottom: '16px',

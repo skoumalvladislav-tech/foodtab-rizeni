@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -171,8 +171,8 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
                       style={{ display: 'flex', alignItems: 'center', gap: '10px', textDecoration: 'none', color: 'inherit' }}
                     >
                       <span style={{ width: '110px', flex: 'none', fontSize: '13px' }}>{nazevMesice(mesic)}</span>
-                      <span style={{ flex: 1, height: '8px', borderRadius: '999px', background: 'var(--bg)', overflow: 'hidden' }}>
-                        <span style={{ display: 'block', height: '100%', borderRadius: '999px', background: 'var(--mosaz)', width: `${Math.max(3, (stat.celkem / maxMesicniCelkem) * 100)}%` }} />
+                      <span style={{ flex: 1, height: '8px', borderRadius: 'var(--radius-full)', background: 'var(--bg)', overflow: 'hidden' }}>
+                        <span style={{ display: 'block', height: '100%', borderRadius: 'var(--radius-full)', background: 'var(--mosaz)', width: `${Math.max(3, (stat.celkem / maxMesicniCelkem) * 100)}%` }} />
                       </span>
                       <span style={{ width: '110px', flex: 'none', textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: '13px' }}>{formatCastku(stat.celkem, mena)}</span>
                     </Link>
@@ -194,7 +194,7 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
                       href={`/${rozsah}/finance/faktury/seznam?dodavatel=${encodeURIComponent(dodavatel)}`}
                       style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit' }}
                     >
-                      <span style={{ width: '8px', height: '8px', borderRadius: '999px', background: barvaDodavatele(dodavatel), flex: 'none' }} />
+                      <span style={{ width: '8px', height: '8px', borderRadius: 'var(--radius-full)', background: barvaDodavatele(dodavatel), flex: 'none' }} />
                       <strong style={{ flex: 1, fontSize: '14px' }}>{dodavatel}</strong>
                       <span style={{ textAlign: 'right' }}>
                         <span style={{ display: 'block', fontFamily: 'ui-monospace, monospace' }}>{formatCastku(stat.celkem, mena)}</span>

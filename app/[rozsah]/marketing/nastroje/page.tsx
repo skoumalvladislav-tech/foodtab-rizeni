@@ -65,7 +65,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -86,7 +86,7 @@ const drobne = { margin: 0, fontSize: '13px', color: 'var(--muted)' } as const
 const stitek = {
   display: 'inline-block',
   padding: '2px 8px',
-  borderRadius: '999px',
+  borderRadius: 'var(--radius-full)',
   fontSize: '12px',
   border: '1px solid var(--line)',
 } as const

@@ -391,7 +391,7 @@ export default async function NastaveniFirma({
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px 18px',
 } as const
 

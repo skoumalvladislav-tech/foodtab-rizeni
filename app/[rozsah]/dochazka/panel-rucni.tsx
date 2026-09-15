@@ -249,7 +249,7 @@ function popisChyby(kod: string): string {
 const panel = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   boxShadow: 'var(--shadow)',
   padding: '18px',
 } as const

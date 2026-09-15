@@ -33,7 +33,7 @@ export default function StavZnacka({ stav }: { stav: string }) {
         display: 'inline-block',
         fontSize: '11px',
         padding: '2px 8px',
-        borderRadius: '999px',
+        borderRadius: 'var(--radius-full)',
         background: bg,
         color: barva,
         whiteSpace: 'nowrap',

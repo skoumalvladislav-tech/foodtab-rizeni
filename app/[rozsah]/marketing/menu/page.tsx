@@ -28,7 +28,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -170,7 +170,7 @@ export default async function MenuPrehled({
                             marginLeft: '6px',
                             fontSize: '11px',
                             padding: '1px 6px',
-                            borderRadius: '999px',
+                            borderRadius: 'var(--radius-full)',
                             border: '1px solid var(--mosaz)',
                             color: 'var(--mosaz)',
                           }}
@@ -184,7 +184,7 @@ export default async function MenuPrehled({
                         style={{
                           fontSize: '12px',
                           padding: '1px 8px',
-                          borderRadius: '999px',
+                          borderRadius: 'var(--radius-full)',
                           background: r.stav === 'Potvrzeno' ? 'var(--dobre-bg)' : 'var(--sunken)',
                           color: r.stav === 'Potvrzeno' ? 'var(--dobre)' : 'var(--muted)',
                         }}

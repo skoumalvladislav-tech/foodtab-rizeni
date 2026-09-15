@@ -1,64 +1,77 @@
 import Link from "next/link";
 
 import Ikona from "@/app/[rozsah]/ikona";
-import type { PolozkaProp } from "./AppShell";
+import type { PolozkaProp, SkupinaNavigace } from "./AppShell";
 
 /**
- * Levý sloupec — hlavičce rozsahu a seznam obrazovek vybraného modulu
- * (hotové jako odkazy, nehotové zašedle se štítkem „brzy"). Vytažen
- * z ram.tsx (design systém, 15.9.2026), chování beze změny.
+ * Levý sloupec — hlavička rozsahu a VŠECHNY moduly najednou jako
+ * seskupené sekce s nadpisem (design systém, 15.9.2026 večer,
+ * Šéfíkovo rozhodnutí podle master promptu a schváleného mockupu:
+ * sloupec se nepřepíná podle vybraného modulu, ukazuje celou appku
+ * — horní lišta zůstává jako rychlý odkaz/zvýraznění aktuální sekce).
  */
 export default function ModuleSidebar({
   rozsah,
-  vNastaveni,
   druh,
   nazevRozsahu,
   nazevFirmy,
-  hotove,
-  chystane,
+  skupiny,
   aktivniSegment,
 }: {
   rozsah: string;
-  vNastaveni: boolean;
   druh: string;
   nazevRozsahu: string;
   nazevFirmy: string;
-  hotove: PolozkaProp[];
-  chystane: PolozkaProp[];
+  skupiny: SkupinaNavigace[];
   aktivniSegment: string | undefined;
 }) {
   return (
     <div className="ft-side">
       <div className="ft-side-head">
         <div className="ft-strip" />
-        <span>{vNastaveni ? "Nastavení" : druh}</span>
-        <b>{vNastaveni ? nazevFirmy : nazevRozsahu}</b>
+        <span>{druh}</span>
+        <b>{nazevRozsahu || nazevFirmy}</b>
       </div>
 
       <nav className="ft-nav" aria-label="Obrazovky">
-        {hotove.map((p) => (
-          <Link
-            key={p.segment}
-            href={p.adresa ?? `/${rozsah}/${p.segment}`}
-            className={p.segment === aktivniSegment ? "on" : undefined}
-            aria-current={p.segment === aktivniSegment ? "page" : undefined}
-            title={p.nazev}
-          >
-            <Ikona klic={p.ikona} />
-            <span className="stitek">{p.nazev}</span>
-          </Link>
-        ))}
+        {skupiny.map((s, i) => (
+          <div key={s.klic} className="ft-nav-skupina">
+            {/* První nadpis hned pod hlavičkou rozsahu nepotřebuje
+                extra odstup nahoře — další sekce ano, ať se dají
+                rozeznat. */}
+            <div className="ft-nav-nadpis" style={i === 0 ? { marginTop: 0 } : undefined}>
+              {s.nazev}
+            </div>
 
-        {chystane.length > 0 ? <hr /> : null}
+            {s.hotove.map((p) => (
+              <Link
+                key={p.segment}
+                href={p.adresa ?? `/${rozsah}/${p.segment}`}
+                className={p.segment === aktivniSegment ? "on" : undefined}
+                aria-current={p.segment === aktivniSegment ? "page" : undefined}
+                title={p.nazev}
+              >
+                <Ikona klic={p.ikona} />
+                <span className="stitek">{p.nazev}</span>
+              </Link>
+            ))}
 
-        {chystane.map((p) => (
-          <span key={p.segment} className="polozka soon" title={`${p.nazev} — připravujeme`}>
-            <Ikona klic={p.ikona} />
-            <span className="stitek">{p.nazev}</span>
-            <small>brzy</small>
-          </span>
+            {s.chystane.map((p) => (
+              <ChystanaPolozka key={p.segment} p={p} />
+            ))}
+          </div>
         ))}
       </nav>
     </div>
+  );
+}
+
+function ChystanaPolozka({ p }: { p: PolozkaProp }) {
+  return (
+    <span className="polozka soon" title={`${p.nazev} — připravujeme`}>
+      <Ikona klic={p.ikona} />
+      <span className="stitek">{p.nazev}</span>
+      <small>brzy</small>
+    </span>
   );
 }

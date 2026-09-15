@@ -73,7 +73,7 @@ export default async function RozsahRozcestnik({
                 style={{
                   display: "block",
                   padding: "20px 16px",
-                  borderRadius: "14px",
+                  borderRadius: "var(--radius-lg)",
                   background: "var(--card)",
                   border: "1px solid var(--line)",
                   boxShadow: "var(--shadow)",
@@ -89,7 +89,7 @@ export default async function RozsahRozcestnik({
                 key={p.segment}
                 style={{
                   padding: "20px 16px",
-                  borderRadius: "14px",
+                  borderRadius: "var(--radius-lg)",
                   background: "transparent",
                   border: "1px dashed var(--line)",
                   color: "var(--muted)",

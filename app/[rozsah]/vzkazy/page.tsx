@@ -462,11 +462,12 @@ export default async function Rozhovory({
                       border: '1px solid var(--line)',
                       borderLeft:
                         r.neprectenych > 0
-                          ? '4px solid var(--mosaz)'
+                          ? '3px solid var(--mosaz)'
                           : '1px solid var(--line)',
-                      borderRadius: '12px',
+                      borderRadius: 'var(--radius-md)',
                       padding: '14px',
                       opacity: r.neprectenych > 0 ? 1 : 0.78,
+                      boxShadow: r.neprectenych > 0 ? 'var(--shadow-sm)' : 'none',
                     }}
                   >
                     <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
@@ -535,7 +536,7 @@ export default async function Rozhovory({
 const ramecek: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   padding: '14px',
   margin: '0 0 16px',
   fontSize: '14px',
@@ -547,9 +548,10 @@ const ramecek: React.CSSProperties = {
 const ramecekFormulare: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '14px',
   marginBottom: '20px',
+  boxShadow: 'var(--shadow-sm)',
 }
 
 const poleSkupina: React.CSSProperties = {

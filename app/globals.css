@@ -297,7 +297,18 @@
 .ft-side-head span { font-size: 11.5px; color: var(--rail-tlum); text-transform: uppercase;
                      letter-spacing: .15em; }
 
-.ft-nav { padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.ft-nav { padding: 10px; display: flex; flex-direction: column; gap: 14px; }
+/* Design systém, 15.9.2026 — sloupec teď ukazuje všechny moduly
+   najednou (mockup Šéfíka), sdružené do .ft-nav-skupina bloků.
+   Mezera mezi bloky (gap na .ft-nav) je větší než uvnitř bloku
+   (gap na .ft-nav-skupina), ať jsou sekce vizuálně oddělené bez
+   nutnosti čáry mezi každou. */
+.ft-nav-skupina { display: flex; flex-direction: column; gap: 2px; }
+.ft-nav-nadpis {
+  padding: 4px 10px; margin-top: 4px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--rail-tlum);
+}
 .ft-nav a, .ft-nav span.polozka {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
   border-radius: 8px; font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
@@ -346,7 +357,9 @@
   .ft-side { width: 72px; align-items: center; padding-top: 12px; }
   .ft-side-head { padding: 0 0 8px; border-bottom: 0; width: 40px; }
   .ft-side-head b, .ft-side-head span { display: none; }
-  .ft-nav { padding: 0; gap: 4px; align-items: center; width: 100%; }
+  .ft-nav { padding: 0; gap: 10px; align-items: center; width: 100%; }
+  .ft-nav-skupina { align-items: center; width: 100%; gap: 4px; }
+  .ft-nav-nadpis { display: none; }
   .ft-nav a, .ft-nav span.polozka {
     width: 46px; height: 42px; padding: 0; justify-content: center; gap: 0;
   }
@@ -532,7 +545,7 @@
 }
 .modul-sloupec a, .modul-sloupec span.polozka {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border-radius: 8px; font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
+  border-radius: var(--radius-sm); font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
 }
 .modul-sloupec a:hover { color: var(--rail-ink); background: var(--rail); }
 .modul-sloupec a.on, .modul-sloupec a.on:hover {
@@ -545,7 +558,7 @@
 
 .modul-cislo {
   margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px;
-  border-radius: 999px; background: var(--bad); color: #fff;
+  border-radius: var(--radius-full); background: var(--bad); color: #fff;
   font-size: 11px; font-weight: 700; line-height: 20px; text-align: center;
 }
 
