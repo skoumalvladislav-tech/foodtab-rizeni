@@ -47,6 +47,13 @@ export type PolozkaProp = {
   jenPobocka?: boolean;
 };
 
+export type SkupinaNavigace = {
+  klic: string;
+  nazev: string;
+  hotove: PolozkaProp[];
+  chystane: PolozkaProp[];
+};
+
 export type AppShellProps = {
   rozsah: string;
   /** Klíč barvy pobočky z branches.color. Firemní úroveň má slate. */
@@ -67,6 +74,13 @@ export type AppShellProps = {
   polozky: PolozkaProp[];
   nastaveni: PolozkaProp[];
   cilNastaveni: string | null;
+  /**
+   * Názvy modulů, když je databáze nedodá (`NAZVY_MODULU` z nabidka.ts).
+   * Musí přijít jako obyčejná data z serveru, ne importem — nabidka.ts
+   * importuje lib/authz.ts, které používá next/headers, a hodnotový
+   * import odsud by tenhle klientský soubor stáhl do prohlížeče.
+   */
+  nazvyModulu: Record<string, string>;
   children: ReactNode;
 };
 
@@ -88,6 +102,7 @@ export default function AppShell({
   polozky,
   nastaveni,
   cilNastaveni,
+  nazvyModulu,
   children,
 }: AppShellProps) {
   const cesta = usePathname() ?? "";
@@ -97,19 +112,51 @@ export default function AppShell({
   const vsechny = [...polozky, ...nastaveni];
   const zde = vsechny.find((p) => p.segment === segment || (segment?.startsWith(p.segment + "/") ?? false));
 
-  // Jsme v nastavení? Pak levý sloupec ukazuje jeho obrazovky, ne modul.
+  // Jen pro spodní mobilní lištu a přepnutí rozsahu — ta zůstává
+  // kontextová na aktuálním modulu, dlouhý sdružený seznam by se na
+  // telefon nevešel. Boční sloupec na desktopu (níž) ukazuje všechno.
   const vNastaveni = segment?.startsWith("nastaveni") ?? false;
   const vybranyModul = vNastaveni ? null : (zde?.modul ?? "provoz");
-
-  const sloupec = vNastaveni ? nastaveni : polozky.filter((p) => p.modul === vybranyModul);
-
-  const hotove = sloupec.filter((p) => p.hotovo);
-  const chystane = sloupec.filter((p) => !p.hotovo);
+  const sloupecMobil = vNastaveni ? nastaveni : polozky.filter((p) => p.modul === vybranyModul);
 
   // Spodní lišta: nejčastější obrazovky, zbytek pod Více. Pátý slot je
   // Více, jen když se do čtyř všechno nevejde.
-  const doListy = sloupec.length <= 5 ? sloupec.slice(0, 5) : sloupec.slice(0, DO_LISTY);
-  const jeVice = sloupec.length > 5;
+  const doListy = sloupecMobil.length <= 5 ? sloupecMobil.slice(0, 5) : sloupecMobil.slice(0, DO_LISTY);
+  const jeVice = sloupecMobil.length > 5;
+
+  /*
+    Boční sloupec na desktopu — design systém 15.9.2026, Šéfíkovo
+    rozhodnutí podle master promptu (sekce 12, mockup): NEPŘEPÍNÁ se
+    podle vybraného modulu, ukazuje VŠECHNY moduly najednou jako
+    seskupené sekce s nadpisem. `polozky` už obsahuje jen to, na co
+    tenant/uživatel dosáhne (spočítal to server), tady se to jen
+    seskupí podle pořadí, ve kterém moduly přišly v `moduly` (nebo
+    v pořadí prvního výskytu v `polozky`, když `moduly` je prázdné —
+    to je běžný zaměstnanec bez vedení, viz app/[rozsah]/layout.tsx).
+  */
+  const poradiModulu =
+    moduly.length > 0 ? moduly.map((m) => m.klic) : [...new Set(polozky.map((p) => p.modul))];
+
+  const skupiny: SkupinaNavigace[] = poradiModulu
+    .map((modul) => {
+      const polozkyModulu = polozky.filter((p) => p.modul === modul);
+      return {
+        klic: modul,
+        nazev: moduly.find((m) => m.klic === modul)?.nazev ?? nazvyModulu[modul] ?? modul,
+        hotove: polozkyModulu.filter((p) => p.hotovo),
+        chystane: polozkyModulu.filter((p) => !p.hotovo),
+      };
+    })
+    .filter((s) => s.hotove.length > 0 || s.chystane.length > 0);
+
+  if (nastaveni.length > 0) {
+    skupiny.push({
+      klic: "nastaveni",
+      nazev: "Nastavení",
+      hotove: nastaveni.filter((p) => p.hotovo),
+      chystane: nastaveni.filter((p) => !p.hotovo),
+    });
+  }
 
   /**
    * Kam vede přepnutí rozsahu.
@@ -149,12 +196,10 @@ export default function AppShell({
       <div className="ft-body">
         <ModuleSidebar
           rozsah={rozsah}
-          vNastaveni={vNastaveni}
           druh={druh}
           nazevRozsahu={nazevRozsahu}
           nazevFirmy={nazevFirmy}
-          hotove={hotove}
-          chystane={chystane}
+          skupiny={skupiny}
           aktivniSegment={zde?.segment}
         />
 

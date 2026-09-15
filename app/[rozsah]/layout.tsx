@@ -275,6 +275,7 @@ export default async function RozsahLayout({
       polozky={polozky}
       nastaveni={nastaveni}
       cilNastaveni={cilNastaveni}
+      nazvyModulu={NAZVY_MODULU}
     >
       {/*
         PRUH O OSOBNÍCH ÚDAJÍCH TU SCHVÁLNĚ NENÍ.

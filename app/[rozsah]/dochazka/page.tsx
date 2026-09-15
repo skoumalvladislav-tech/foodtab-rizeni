@@ -20,6 +20,7 @@ import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Card from "@/components/ui/Card";
 import Nadpis from "../nadpis";
 import { zapsatDochazku } from "./akce";
 import PanelRucni from "./panel-rucni";
@@ -768,15 +769,7 @@ export default async function Dochazka({
 
         {/* 1. Karta stavu s píchačkou */}
         {muzePichat ? (
-          <section
-            style={{
-              background: "var(--card)",
-              border: "1px solid var(--line)",
-              borderRadius: "16px",
-              boxShadow: "var(--shadow)",
-              padding: "20px",
-            }}
-          >
+          <Card as="section" padding="20px" style={{ boxShadow: "var(--shadow)" }}>
             <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
               {scope.branchName ?? nazvyPobocek.get(branchId as string)}
             </p>
@@ -936,7 +929,7 @@ export default async function Dochazka({
                 Kdo tablet po ruce nemá, píchne na něm PINem.
               </p>
             </form>
-          </section>
+          </Card>
         ) : (
           <Vysvetleni nadpis="Píchat zatím nejde">
             {branchId
@@ -1199,16 +1192,7 @@ function DlazdiceVydelku({
   nedokoncenych: number;
 }) {
   return (
-    <section
-      style={{
-        marginTop: "16px",
-        background: "var(--card)",
-        border: "1px solid var(--line)",
-        borderRadius: "16px",
-        boxShadow: "var(--shadow)",
-        padding: "20px",
-      }}
-    >
+    <Card as="section" padding="20px" style={{ marginTop: "16px", boxShadow: "var(--shadow)" }}>
       <div
         style={{
           display: "flex",
@@ -1418,7 +1402,7 @@ function DlazdiceVydelku({
           )}
         </p>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
@@ -1431,15 +1415,7 @@ function Vysvetleni({
   children: ReactNode;
 }) {
   return (
-    <section
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--line)",
-        borderRadius: "16px",
-        boxShadow: "var(--shadow)",
-        padding: "20px",
-      }}
-    >
+    <Card as="section" padding="20px" style={{ boxShadow: "var(--shadow)" }}>
       <p style={{ margin: 0, fontSize: "16px", color: "var(--ink)" }}>
         {nadpis}
       </p>
@@ -1453,7 +1429,7 @@ function Vysvetleni({
       >
         {children}
       </p>
-    </section>
+    </Card>
   );
 }
 
