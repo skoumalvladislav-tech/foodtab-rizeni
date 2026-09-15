@@ -49,8 +49,17 @@ do FoodTabu jako moduly, podle `docs/hlaseni/zadani-pro-ai-marketing-faktury.md`
   pokud trvá, spustí ho Šéfík sám: `git push origin claude/prompt-review-jtkh74`.
   - `gh` CLI nainstalováno a **přihlášené** (Šéfík dokončil `gh auth login`,
     účet `skoumalvladislav-tech`).
-  - **PR otevřený: https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3**
-    (`claude/prompt-review-jtkh74` → `main`). Čeká na review/merge Šéfíkem.
+  - **PR smergován do `main`: https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3**
+    (15.9.2026, 16:20). `main` teď obsahuje kompletní sekci Faktury uvnitř Finance —
+    **ale bez nasazené migrace `20260915100000_modul_faktury.sql` je v UI dál
+    neviditelná** (viz bod 15).
+  - **Známý, PŘEDEXISTUJÍCÍ nález:** GitHub Actions check „Migrace a scénáře"
+    (workflow Databáze) padá i na `main` už minimálně od 13.9.2026 (ověřeno —
+    posledních 5 běhů na `main` samé `failure`, přes 29 scénářů `krok3`–`krok33`
+    a `marketing8`–`marketing15` s chybou `no rows returned for \gset`). Není to
+    regrese z týhle relace ani z modulu Faktury/Finance — mergováno záměrně i
+    s tímhle červeným checkem, protože blokuje i `main`. Nikdo v týhle relaci
+    nezjišťoval kořenovou příčinu — cizí/širší rozsah, jen nahlásit Šéfíkovi.
   - Odkaz na branch: `https://github.com/skoumalvladislav-tech/foodtab-rizeni/tree/claude/prompt-review-jtkh74`
 - Druhý samostatný repozitář použitý jen jako referenční zdroj (needitovat, jen
   číst): `C:\Users\vladi\faktury-app` (privátní GitHub repo
@@ -283,23 +292,24 @@ není rozpracované. Větev je pushnutá. Otevřené zbývá jen mimo kód:
 
 ## 15. Operace čekající na schválení Šéfíka
 
-1. **Review a merge PR #3** (https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3)
-   do `main`.
-2. **Nasadit `supabase/migrations/20260915100000_modul_faktury.sql`** (FoodTab DB)
-   — bez toho je hotová sekce Faktury v UI neviditelná. Nejdřív musí větev
-   doputovat na `main` (CLAUDE.md: nasazuje se jen z `main`).
-3. **Spustit SQL z `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`**
+1. **Nasadit `supabase/migrations/20260915100000_modul_faktury.sql`** (FoodTab DB)
+   — PR #3 je už smergovaný do `main` (viz bod 2), takže tohle je jediné, co
+   chybí, aby byla sekce Faktury v UI viditelná.
+2. **Spustit SQL z `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`**
    v SQL editoru projektu **Faktury** (`ctqtwahlzhyjerqulqyn`, NE FoodTab DB).
-4. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
-5. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
+3. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
+4. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
    (`docs/granty-provoz-zadani.md`) — mimo gesci téhle relace, ale čeká na rozhodnutí.
-6. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
-7. n8n: zúžit/vypnout starý workflow Černá Perla.
+5. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
+6. n8n: zúžit/vypnout starý workflow Černá Perla.
+7. **Prošetřit selhávající GitHub Actions check „Migrace a scénáře"** (bod 2) —
+   padá na `main` už dny, nesouvisí s Fakturami/Financemi, jen zjištěno a
+   nahlášeno teď.
 
 ## 16. Doporučený další krok (přesně)
 
-1. Review a merge **PR #3** do `main` (branch pushnutá, `gh` přihlášené — viz bod 2).
-2. Po sloučení do `main`: nasadit `20260915100000_modul_faktury.sql` —
+1. **PR #3 je smergovaný do `main`** (hotovo, viz bod 2) — dál nasadit
+   `20260915100000_modul_faktury.sql` —
    od tohoto okamžiku je sekce Faktury živá a viditelná pro uživatele s právem
    na adrese `/finance/faktury`.
 3. Spustit RLS opravu `rejection_examples` (bod 15.3) — nezávislé na kroku 2,
