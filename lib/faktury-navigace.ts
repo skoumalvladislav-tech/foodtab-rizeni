@@ -42,8 +42,8 @@ const POLOZKY: readonly Definice[] = [
   { klic: 'dodavatele', segment: 'dodavatele', nazev: 'Dodavatelé', kratky: 'Dodavatelé', ikona: 'dodavatele', hotovo: true },
   { klic: 'schvaleni', segment: 'schvaleni', nazev: 'Ke schválení', kratky: 'Schválení', ikona: 'schvaleni', pocitadlo: 'pendingApproval', hotovo: true },
   { klic: 'prehledy', segment: 'prehledy', nazev: 'Přehledy', kratky: 'Přehledy', ikona: 'prehledy', hotovo: true },
-  { klic: 'kalendar', segment: 'kalendar', nazev: 'Kalendář splatností', kratky: 'Kalendář', ikona: 'kalendar', hotovo: false },
-  { klic: 'upominky', segment: 'upominky', nazev: 'Upomínky', kratky: 'Upomínky', ikona: 'upominky', pocitadlo: 'overdue', hotovo: false },
+  { klic: 'kalendar', segment: 'kalendar', nazev: 'Kalendář splatností', kratky: 'Kalendář', ikona: 'kalendar', hotovo: true },
+  { klic: 'upominky', segment: 'upominky', nazev: 'Upomínky', kratky: 'Upomínky', ikona: 'upominky', pocitadlo: 'overdue', hotovo: true },
 ]
 
 /** Nezobrazují se na mobilu — přesně čtveřice z původního MOB_NAV. */

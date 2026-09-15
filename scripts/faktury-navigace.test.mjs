@@ -39,10 +39,10 @@ ma('Přehled bez odznaku', hlavni[0].cislo, 0)
 ma('Dodavatelé bez odznaku', hlavni.find((p) => p.klic === 'dodavatele').cislo, 0)
 
 console.log('\nMobilní lišta — MOB_NAV omezená na hotové obrazovky')
-// Původní appka měla na mobilu čtveřici Přehled/Faktury/Dodavatelé/Upomínky.
-// Upomínky zatím nejsou hotové (viz níž), takže na mobilu dnes chybí jen ta
-// jedna — až přibude, vrátí se k čtveřici sama.
-ma('mobil má jen hotové položky z MOB_NAV', mobil.map((p) => p.klic), ['prehled', 'seznam', 'dodavatele'])
+// Původní appka měla na mobilu přesně čtveřici Přehled/Faktury/Dodavatelé/
+// Upomínky (MOB_NAV v Shell.tsx) — teď, co jsou všechny obrazovky hotové,
+// sedí to přesně na original.
+ma('mobil = přesně čtveřice z MOB_NAV', mobil.map((p) => p.klic), ['prehled', 'seznam', 'dodavatele', 'upominky'])
 ok('schvaleni na mobilu není', !mobil.some((p) => p.klic === 'schvaleni'))
 ok('prehledy na mobilu není', !mobil.some((p) => p.klic === 'prehledy'))
 ok('kalendar na mobilu není', !mobil.some((p) => p.klic === 'kalendar'))
@@ -54,9 +54,12 @@ console.log('\nNula ve všech počítadlech')
 }
 
 console.log('\nHotovo/brzy')
-ma('hotové položky: přehled, seznam, dodavatelé, ke schválení, přehledy', hlavni.filter((p) => p.hotovo).map((p) => p.klic), ['prehled', 'seznam', 'dodavatele', 'schvaleni', 'prehledy'])
-ok('nehotová položka nese hotovo: false', hlavni.find((p) => p.klic === 'kalendar').hotovo === false)
-ok('nehotová položka na mobilu vůbec není', !mobil.some((p) => !p.hotovo))
+// Sloučení dokončeno — všech sedm obrazovek z původní appky je hotovo,
+// štítek „brzy" se dnes nikde neukáže. Test zůstává (ne jen jako
+// historie) — hlídá, že příští nová položka v POLOZKY dostane
+// hotovo: false, dokud pro ni nebude existovat obrazovka.
+ma('všechny položky hotové', hlavni.filter((p) => p.hotovo).map((p) => p.klic), hlavni.map((p) => p.klic))
+ok('žádná nehotová položka neproklouzne na mobil', !mobil.some((p) => !p.hotovo))
 
 console.log('\nKaždá HOTOVÁ položka vede na existující obrazovku')
 for (const p of hlavni.filter((p) => p.hotovo)) {

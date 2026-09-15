@@ -96,6 +96,19 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
   redirect(`/${rozsah}/faktury/seznam`)
 }
 
+/** Upomínky — poznamená, že se dodavateli ozvalo (telefonem/mailem mimo appku).
+ * Nemění stav faktury ani ji nevyřazuje ze seznamu po splatnosti — jen datum
+ * se objeví ve sloupci „Upomínka odeslána". */
+export async function oznacitUpominkuVyresenou(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+
+  await supabase.from('invoices').update({ reminder_sent_at: new Date().toISOString() }).eq('id', id)
+  revalidatePath(`/${rozsah}/faktury/upominky`)
+  redirect(`/${rozsah}/faktury/upominky`)
+}
+
 export async function archivovatFakturu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
