@@ -41,13 +41,25 @@ varianty (Newsreader i neexistující písmo) vyjdou jako identických
 naše písmo, a selhaly stejně:
 
 1. **`FONTCONFIG_PATH`** — přesně postup z originálu (dočasná složka
-   s `fonts.conf`, ukazatel na `assets/fonty`). Fontconfig je ale
-   linuxová/glibc konvence; tenhle Windows build `sharp`/`libvips`
-   ji zjevně nečte.
+   s `fonts.conf`, ukazatel na `assets/fonty`). Vyzkoušeno dvakrát —
+   nastavené z Node.js před prvním použitím `sharp` i nastavené na
+   úrovni shellu ještě před startem Node procesu (aby nešlo o pořadí
+   inicializace nativního modulu). Stejný výsledek obakrát.
 2. **Font vložený přímo do SVG** (`@font-face` s `data:font/ttf;base64,…`
    uvnitř `<style>`) — na papíře přenositelnější, protože nezávisí na
    systémovém fontconfigu vůbec. Výsledek stejný: identické bajty jako
    s neexistujícím písmem.
+3. **Nativní `sharp({ text: { fontfile: … } })`** (create image z textu,
+   ne SVG) — `sharp.versions` u týhle instalace hlásí `fontconfig` i
+   `pango` jako zabalené (`2.17.1` / `1.57.0`), takže šlo o rozumný
+   předpoklad, že cesta k souboru předaná přímo mine fontconfig úplně.
+   Výsledek stejný jako u prvních dvou — identické bajty jako
+   s neexistujícím písmem, i s reálně existujícím souborem na disku
+   (ověřeno `git hash-object` znovu po prvním úklidu).
+
+Čtyři různé přístupy, stejný výsledek, ověřeno dvakrát nezávisle na
+sobě (jednou 14. 9. večer, jednou 15. 9. po smazání a čerstvém obnovení
+písem) — tohle už není otázka konfigurace, kterou by šlo odsud doladit.
 
 Text se vykresluje — není prázdný, není chyba za běhu — ale vždycky
 nějakým náhradním písmem, bez ohledu na to, co SVG žádá. To ukazuje na
