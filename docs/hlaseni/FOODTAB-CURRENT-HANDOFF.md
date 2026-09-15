@@ -81,10 +81,12 @@ do FoodTabu jako moduly, podle `docs/hlaseni/zadani-pro-ai-marketing-faktury.md`
 - Krok 6 (OpenAPI pro `/api/uloha/*` a `/k/[klic]`) — hotovo
 - **Krok 4 (renderer grafiky, `sharp`+písma) — BLOKOVÁNO**, viz bod 13
 
-**Faktury** — **kód hotový, čeká jen na nasazení migrace** (bod 15). **Od
-15.9.2026 večer NENÍ vlastní modul** — je to sekce uvnitř modulu **Finance
-a účetnictví** (Šéfíkovo rozhodnutí), adresa `/finance/faktury` (dřív
-`/faktury`). Navigace pořád `lib/faktury-navigace.ts`, jen se změnila
+**Faktury** — **HOTOVO A ŽIVĚ OVĚŘENO (15.9.2026 večer)**, celý řetězec
+funguje: kód → migrace nasazená → modul `finance` aktivní pro tenanta →
+env proměnné opravené → appka ukazuje 1741+1138 skutečných faktur v
+produkci. **Od 15.9.2026 večer NENÍ vlastní modul** — je to sekce uvnitř
+modulu **Finance a účetnictví** (Šéfíkovo rozhodnutí), adresa `/finance/faktury`
+(dřív `/faktury`). Navigace pořád `lib/faktury-navigace.ts`, jen se změnila
 základní adresa a modul, pod kterým se aktivuje (`finance` místo `faktury`).
 - Všech 8 obrazovek z originálu přeneseno a ověřeno (tsc + eslint čisté, živě
   v prohlížeči): Přehled, Seznam, Dodavatelé, Ke schválení, Ruční zadání
@@ -147,12 +149,24 @@ Starší, už dřív na `origin` (marketing, dokumentace, audit) — viz `git lo
 - **Dvě oddělené Supabase DB:** FoodTab (`spekntcsuroqhehmjssv`, Frankfurt) a
   Faktury (`ctqtwahlzhyjerqulqyn`, eu-north-1/Stockholm) — **Možnost A**
   (rozhodnuto, viz bod 14): faktury zůstávají ve vlastní DB, nepřesouvat.
-- **Migrace `supabase/migrations/20260915100000_modul_faktury.sql` NENASAZENA.**
-  Po přesunu (bod 4) už nevkládá vlastní modul — modul `finance` v katalogu
-  existuje odjakživa (`20260823120100_catalog.sql`), migrace jen přidává práva
-  `faktury.read`/`faktury.manage` pod `module_key='finance'`. Bez nasazení je
-  celá sekce Faktury v UI neviditelná (ověřeno živě — appka korektně hlásí
-  „nemáte oprávnění", žádná chyba, ale i tak nefunkční pro uživatele).
+- **Migrace `supabase/migrations/20260915100000_modul_faktury.sql` NASAZENA**
+  (Šéfík, 15.9.2026 večer, přes SQL editor) — práva `faktury.read`/`faktury.manage`
+  jsou v katalogu pod `module_key='finance'`, zapsáno i do `schema_migrations`.
+- **Modul `finance` bylo navíc potřeba aktivovat per tenant** (`tenant_modules`) —
+  na rozdíl od `marketing`, který aktivní byl, `finance` neměl žádný řádek
+  (`is_base=false`, nikdy netogglovaný, protože předtím neměl žádný reálný
+  obsah). Nastavení→Moduly v UI zatím neexistuje (`hotovo:false`), takže se
+  zapnulo přímo SQL insertem do `tenant_modules` (Šéfík).
+- **Živě ověřeno se skutečnými daty (15.9.2026, přes claude-in-chrome):**
+  `/finance/faktury/seznam` ukazuje 1741 aktivních + 1138 archivovaných
+  faktur z produkční DB. Cestou se objevil a vyřešil samostatný problém:
+  produkční Vercel proměnné `FAKTURY_SUPABASE_URL`/`FAKTURY_SUPABASE_ANON_KEY`
+  byly nejdřív uložené jako typ **Secret** (nejde zpětně ověřit hodnotu) a i
+  po nastavení appka pořád vracela 0 faktur — anon klíč sám o sobě fungoval
+  (ověřeno přímým REST dotazem), problém byl v tom, jak se proměnná dostala
+  do Vercelu. Opraveno smazáním a založením znovu jako typ **Config** +
+  redeploy s vypnutým „Use existing Build Cache". Přesná příčina (poškozená
+  hodnota vs. stará build cache) nebyla dál zjišťována, oprava zabrala.
 - **`rejection_examples`** (Faktury DB) — RLS zapnuté, **0 politik, 0 řádků**.
   Appka i dřívější n8n do ní tiše nezapíšou nic. SQL oprava hotová v
   `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`, **nespuštěno**.
@@ -292,31 +306,27 @@ není rozpracované. Větev je pushnutá. Otevřené zbývá jen mimo kód:
 
 ## 15. Operace čekající na schválení Šéfíka
 
-1. **Nasadit `supabase/migrations/20260915100000_modul_faktury.sql`** (FoodTab DB)
-   — PR #3 je už smergovaný do `main` (viz bod 2), takže tohle je jediné, co
-   chybí, aby byla sekce Faktury v UI viditelná.
-2. **Spustit SQL z `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`**
+**Faktury nasazení HOTOVO (viz bod 3/6) — zbývá jen:**
+
+1. **Spustit SQL z `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`**
    v SQL editoru projektu **Faktury** (`ctqtwahlzhyjerqulqyn`, NE FoodTab DB).
-3. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
-4. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
+2. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
+3. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
    (`docs/granty-provoz-zadani.md`) — mimo gesci téhle relace, ale čeká na rozhodnutí.
-5. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
-6. n8n: zúžit/vypnout starý workflow Černá Perla.
-7. **Prošetřit selhávající GitHub Actions check „Migrace a scénáře"** (bod 2) —
+4. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
+5. n8n: zúžit/vypnout starý workflow Černá Perla.
+6. **Prošetřit selhávající GitHub Actions check „Migrace a scénáře"** —
    padá na `main` už dny, nesouvisí s Fakturami/Financemi, jen zjištěno a
    nahlášeno teď.
 
 ## 16. Doporučený další krok (přesně)
 
-1. **PR #3 je smergovaný do `main`** (hotovo, viz bod 2) — dál nasadit
-   `20260915100000_modul_faktury.sql` —
-   od tohoto okamžiku je sekce Faktury živá a viditelná pro uživatele s právem
-   na adrese `/finance/faktury`.
-3. Spustit RLS opravu `rejection_examples` (bod 15.3) — nezávislé na kroku 2,
-   jde spustit kdykoli.
-4. Živě ověřit sekci Faktury se **skutečnými daty** (3022 řádků v `invoices`
-   podle posledního čtení) — dosavadní ověření bylo jen „appka korektně
-   odmítá bez oprávnění", ne plný uživatelský tok s daty.
-5. Teprve pak pokračovat na Marketing Krok 4 (potřebuje jiné prostředí než
-   tenhle Windows stroj) nebo Krok 5 E2E (potřebuje Šéfíkovo rozhodnutí) —
-   obojí nezávislé na Fakturách, žádné z nich nemá blokovat to ostatní.
+**Faktury jsou kompletně hotové, nasazené a živě ověřené se skutečnými daty
+(15.9.2026 večer) — na tomhle projektu není žádný další nutný krok.** Zbývá
+jen nezávislé:
+
+1. Spustit RLS opravu `rejection_examples` (bod 15.1) — nezávislé, jde
+   spustit kdykoli.
+2. Pokračovat na Marketing Krok 4 (potřebuje jiné prostředí než tenhle
+   Windows stroj) nebo Krok 5 E2E (potřebuje Šéfíkovo rozhodnutí) — obojí
+   nezávislé na Fakturách, žádné z nich nemá blokovat to ostatní.
