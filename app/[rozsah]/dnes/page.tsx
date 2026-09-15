@@ -8,6 +8,7 @@ import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Card from "@/components/ui/Card";
 import Nadpis from "../nadpis";
 import { zapsatDochazku } from "../dochazka/akce";
 import PoleKodu from "../dochazka/pole-kodu";
@@ -253,7 +254,7 @@ export default async function Dnes({
 
       <div style={{ padding: "16px", paddingBottom: "32px", maxWidth: "760px" }}>
         {/* ---------- KARTA, KTERÁ ODPOVÍDÁ ---------------------- */}
-        <section style={karta}>
+        <Card as="section" padding="18px" style={{ marginBottom: "24px" }}>
           {chyba === "kod" ? (
             <p className="hlaska-chyba">Opište prosím kód z tabletu.</p>
           ) : null}
@@ -370,7 +371,7 @@ export default async function Dnes({
           <p style={{ ...podnadpis, fontSize: "12px", marginTop: "10px" }}>
             Kód je na tabletu na provozovně a mění se každou minutu.
           </p>
-        </section>
+        </Card>
 
         {/* ---------- PŘÍŠTÍ SMĚNY ------------------------------- */}
         <h2 style={nadpisSekce}>Příští směny</h2>
@@ -379,11 +380,11 @@ export default async function Dnes({
         ) : (
           <ul style={seznam}>
             {pristi.map((s) => (
-              <li key={s.id} style={radek}>
+              <Card key={s.id} as="li" padding="12px 14px" style={{ fontSize: "14px", color: "var(--ink)" }}>
                 <strong>{denCesky(s.shift_date)}</strong>{" "}
                 {s.starts_at.slice(0, 5)}–{s.ends_at.slice(0, 5)} ·{" "}
                 {nazvyPobocek.get(s.branch_id) ?? "jiná pobočka"}
-              </li>
+              </Card>
             ))}
           </ul>
         )}
@@ -396,21 +397,21 @@ export default async function Dnes({
         */}
         <h2 style={nadpisSekce}>Kam dál</h2>
         <ul style={seznam}>
-          <li style={radek}>
+          <Card as="li" padding="12px 14px" style={{ fontSize: "14px", color: "var(--ink)" }}>
             <Link href={`/${rozsah}/dochazka`} style={odkaz}>
               Tenhle měsíc — odpracováno, hrubá mzda, zálohy
             </Link>
-          </li>
-          <li style={radek}>
+          </Card>
+          <Card as="li" padding="12px 14px" style={{ fontSize: "14px", color: "var(--ink)" }}>
             <Link href={`/${rozsah}/rozhovory`} style={odkaz}>
               Zprávy a rozhovory
             </Link>
-          </li>
-          <li style={radek}>
+          </Card>
+          <Card as="li" padding="12px 14px" style={{ fontSize: "14px", color: "var(--ink)" }}>
             <Link href={`/${rozsah}/ukoly`} style={odkaz}>
               Úkoly a checklisty
             </Link>
-          </li>
+          </Card>
         </ul>
 
         {/*
@@ -446,14 +447,6 @@ function denCesky(datum: string): string {
   return `${Number(d)}. ${Number(m)}.`;
 }
 
-const karta = {
-  background: "var(--card)",
-  border: "1px solid var(--line)",
-  borderRadius: "16px",
-  padding: "18px",
-  marginBottom: "24px",
-} as const;
-
 const nadpisKarty = {
   margin: "4px 0 0",
   fontSize: "22px",
@@ -481,15 +474,6 @@ const seznam = {
   gap: "8px",
 } as const;
 
-const radek = {
-  background: "var(--card)",
-  border: "1px solid var(--line)",
-  borderRadius: "12px",
-  padding: "12px 14px",
-  fontSize: "14px",
-  color: "var(--ink)",
-} as const;
-
 const odkaz = {
   color: "var(--branch)",
   textDecoration: "none",
@@ -505,10 +489,11 @@ const hlaskaDobre = {
   margin: "0 0 12px",
   padding: "10px 12px",
   borderRadius: "10px",
-  background: "var(--paper)",
-  border: "1px solid var(--line)",
+  background: "var(--dobre-bg)",
+  border: "1px solid var(--dobre-bg)",
   fontSize: "14px",
-  color: "var(--ink)",
+  color: "var(--dobre)",
+  fontWeight: 600,
 } as const;
 
 const ramecek = {

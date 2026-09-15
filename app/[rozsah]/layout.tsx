@@ -18,7 +18,7 @@ import Sdeleni from "@/app/sdeleni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import CekaNaOpravneni from "./ceka-na-opravneni";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
-import Ram, { type ModulProp, type PolozkaProp } from "./ram";
+import AppShell, { type ModulProp, type PolozkaProp } from "@/components/shell/AppShell";
 import type { RozsahProp } from "./prepinac-rozsahu";
 
 /**
@@ -260,7 +260,7 @@ export default async function RozsahLayout({
     : null;
 
   return (
-    <Ram
+    <AppShell
       rozsah={rozsah}
       barva={barvaRozsahu(ctx, scope.branchId)}
       druh={scope.level === "tenant" ? "Rozsah" : "Pobočka"}
@@ -301,7 +301,7 @@ export default async function RozsahLayout({
         lide={(cekajiciNaOpravneni ?? []) as { user_id: string; jmeno: string }[]}
       />
       {children}
-    </Ram>
+    </AppShell>
   );
 }
 

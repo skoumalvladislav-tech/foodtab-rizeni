@@ -7,8 +7,16 @@ dalšího** (`docs/pracovni-rezim-codea.md`, oddíl 1 — dva seznamy pravdy zna
 
 ## 1. Hlavní cíl a závazná pravidla
 
-**Cíl týdne:** sloučit/implementovat samostatné appky **Faktury** a **Marketing**
-do FoodTabu jako moduly, podle `docs/hlaseni/zadani-pro-ai-marketing-faktury.md`.
+**Cíl týdne (původní):** sloučit/implementovat samostatné appky **Faktury** a
+**Marketing** do FoodTabu jako moduly, podle
+`docs/hlaseni/zadani-pro-ai-marketing-faktury.md`. **HOTOVO** (Faktury i
+Marketing nasazené, viz body 3, 6).
+
+**Aktuální etapa (od 15.9.2026 večer, nová priorita Šéfíka):** sjednotit
+FoodTab do moderního hospitality SaaS vzhledu — design systém (tokeny +
+sdílená knihovna komponent), pak postupně převádět obrazovky podle
+priority. Business logika/RLS/permissions/workflow se NEMĚNÍ, jen vzhled.
+Podrobný stav: `docs/hlaseni/design-system-stav-2026-09-15.md` (bod 8a níž).
 
 **Kde je závazné zadání (čti při nejasnosti, nedomýšlej):**
 - `CLAUDE.md` — 12 pravidel, která se neporušují (multitenance, autorizace přes
@@ -42,15 +50,24 @@ do FoodTabu jako moduly, podle `docs/hlaseni/zadani-pro-ai-marketing-faktury.md`
   Než se z toho něco nasadí, musí to na `main` doputovat (sloučení/PR).
 - Remote: `https://github.com/skoumalvladislav-tech/foodtab-rizeni.git`
 - **Stav k 15. 9. 2026 večer: větev je pushnutá, `origin` je aktuální** (commit
-  `1029997`). První pokus o `git push` byl dvakrát zamítnutý auto-mode
-  klasifikátorem („Out-of-Place Publication"), další pokus ve stejné relaci
-  už prošel bez zásahu — chová se to jako dočasné/nedeterministické omezení
-  session, ne jako trvalý zákaz. Pokud push v nové relaci selže, zkusit znovu;
-  pokud trvá, spustí ho Šéfík sám: `git push origin claude/prompt-review-jtkh74`.
-  - `gh` CLI nainstalováno a **přihlášené** (Šéfík dokončil `gh auth login`,
-    účet `skoumalvladislav-tech`).
-  - **PR otevřený: https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3**
-    (`claude/prompt-review-jtkh74` → `main`). Čeká na review/merge Šéfíkem.
+  `4225d89`). `git push` je teď spolehlivý (dřív dvakrát zamítnutý auto-mode
+  klasifikátorem, od té doby prochází normálně) — pokud by v nové relaci
+  selhal, zkusit znovu; pokud trvá, spustí ho Šéfík sám:
+  `git push origin claude/prompt-review-jtkh74`.
+  - `gh` CLI nainstalováno a **přihlášené** (účet `skoumalvladislav-tech`).
+  - **PR #3 (Faktury) smergován do `main`**, 15.9.2026 16:20 —
+    https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3.
+    Migrace nasazená, sekce Faktury živá v produkci (viz bod 6).
+  - **PR #4 (design systém) OTEVŘENÝ, čeká na review/merge** —
+    https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/4.
+    Obsahuje 4 commity nad `main` (tokeny, `components/`, AppShell, Dnes,
+    handoff dokumentace). Nemergovat bez svolení Šéfíka — na rozdíl od
+    PR #3 tenhle merge nikdo výslovně nežádal.
+  - **Známý, PŘEDEXISTUJÍCÍ nález:** GitHub Actions check „Migrace a scénáře"
+    (workflow Databáze) padá i na `main` už minimálně od 13.9.2026 (přes 29
+    scénářů `krok3`–`krok33` a `marketing8`–`marketing15`, `no rows returned
+    for \gset`). Nesouvisí s Fakturami/Financemi ani s design systémem —
+    jen nahlášeno, neopraveno, čeká na Šéfíka.
   - Odkaz na branch: `https://github.com/skoumalvladislav-tech/foodtab-rizeni/tree/claude/prompt-review-jtkh74`
 - Druhý samostatný repozitář použitý jen jako referenční zdroj (needitovat, jen
   číst): `C:\Users\vladi\faktury-app` (privátní GitHub repo
@@ -72,10 +89,12 @@ do FoodTabu jako moduly, podle `docs/hlaseni/zadani-pro-ai-marketing-faktury.md`
 - Krok 6 (OpenAPI pro `/api/uloha/*` a `/k/[klic]`) — hotovo
 - **Krok 4 (renderer grafiky, `sharp`+písma) — BLOKOVÁNO**, viz bod 13
 
-**Faktury** — **kód hotový, čeká jen na nasazení migrace** (bod 15). **Od
-15.9.2026 večer NENÍ vlastní modul** — je to sekce uvnitř modulu **Finance
-a účetnictví** (Šéfíkovo rozhodnutí), adresa `/finance/faktury` (dřív
-`/faktury`). Navigace pořád `lib/faktury-navigace.ts`, jen se změnila
+**Faktury** — **HOTOVO A ŽIVĚ OVĚŘENO (15.9.2026 večer)**, celý řetězec
+funguje: kód → migrace nasazená → modul `finance` aktivní pro tenanta →
+env proměnné opravené → appka ukazuje 1741+1138 skutečných faktur v
+produkci. **Od 15.9.2026 večer NENÍ vlastní modul** — je to sekce uvnitř
+modulu **Finance a účetnictví** (Šéfíkovo rozhodnutí), adresa `/finance/faktury`
+(dřív `/faktury`). Navigace pořád `lib/faktury-navigace.ts`, jen se změnila
 základní adresa a modul, pod kterým se aktivuje (`finance` místo `faktury`).
 - Všech 8 obrazovek z originálu přeneseno a ověřeno (tsc + eslint čisté, živě
   v prohlížeči): Přehled, Seznam, Dodavatelé, Ke schválení, Ruční zadání
@@ -122,6 +141,10 @@ Dokončeno sloučení Faktury (Marketing byl hotový už dřív):
 ## 5. Důležité commity (na `claude/prompt-review-jtkh74`, PUSHNUTÉ na `origin`)
 
 ```
+4225d89 Design systém: tokeny, sdilena knihovna komponent, AppShell, Dnes
+a8315b2 Doc: handoff - RLS oprava rejection_examples hotova a overena
+235103c Doc: handoff - Faktury nasazeny, aktivovany a zive overeny s daty
+262269d Doc: handoff - PR #3 otevreny, gh prihlaseno
 1029997 Faktury: presun ze samostatneho modulu do sekce uvnitr Finance
 998f0fc Doc: SQL pro RLS opravu rejection_examples (ceka na Sefika)
 85b0777 Faktury: Kalendar splatnosti a Upominky (cast 4) - modul kompletni
@@ -138,15 +161,28 @@ Starší, už dřív na `origin` (marketing, dokumentace, audit) — viz `git lo
 - **Dvě oddělené Supabase DB:** FoodTab (`spekntcsuroqhehmjssv`, Frankfurt) a
   Faktury (`ctqtwahlzhyjerqulqyn`, eu-north-1/Stockholm) — **Možnost A**
   (rozhodnuto, viz bod 14): faktury zůstávají ve vlastní DB, nepřesouvat.
-- **Migrace `supabase/migrations/20260915100000_modul_faktury.sql` NENASAZENA.**
-  Po přesunu (bod 4) už nevkládá vlastní modul — modul `finance` v katalogu
-  existuje odjakživa (`20260823120100_catalog.sql`), migrace jen přidává práva
-  `faktury.read`/`faktury.manage` pod `module_key='finance'`. Bez nasazení je
-  celá sekce Faktury v UI neviditelná (ověřeno živě — appka korektně hlásí
-  „nemáte oprávnění", žádná chyba, ale i tak nefunkční pro uživatele).
-- **`rejection_examples`** (Faktury DB) — RLS zapnuté, **0 politik, 0 řádků**.
-  Appka i dřívější n8n do ní tiše nezapíšou nic. SQL oprava hotová v
-  `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`, **nespuštěno**.
+- **Migrace `supabase/migrations/20260915100000_modul_faktury.sql` NASAZENA**
+  (Šéfík, 15.9.2026 večer, přes SQL editor) — práva `faktury.read`/`faktury.manage`
+  jsou v katalogu pod `module_key='finance'`, zapsáno i do `schema_migrations`.
+- **Modul `finance` bylo navíc potřeba aktivovat per tenant** (`tenant_modules`) —
+  na rozdíl od `marketing`, který aktivní byl, `finance` neměl žádný řádek
+  (`is_base=false`, nikdy netogglovaný, protože předtím neměl žádný reálný
+  obsah). Nastavení→Moduly v UI zatím neexistuje (`hotovo:false`), takže se
+  zapnulo přímo SQL insertem do `tenant_modules` (Šéfík).
+- **Živě ověřeno se skutečnými daty (15.9.2026, přes claude-in-chrome):**
+  `/finance/faktury/seznam` ukazuje 1741 aktivních + 1138 archivovaných
+  faktur z produkční DB. Cestou se objevil a vyřešil samostatný problém:
+  produkční Vercel proměnné `FAKTURY_SUPABASE_URL`/`FAKTURY_SUPABASE_ANON_KEY`
+  byly nejdřív uložené jako typ **Secret** (nejde zpětně ověřit hodnotu) a i
+  po nastavení appka pořád vracela 0 faktur — anon klíč sám o sobě fungoval
+  (ověřeno přímým REST dotazem), problém byl v tom, jak se proměnná dostala
+  do Vercelu. Opraveno smazáním a založením znovu jako typ **Config** +
+  redeploy s vypnutým „Use existing Build Cache". Přesná příčina (poškozená
+  hodnota vs. stará build cache) nebyla dál zjišťována, oprava zabrala.
+- **`rejection_examples`** (Faktury DB) — **OPRAVENO 15.9.2026 večer.** Politika
+  `allow all with anon key` spuštěna Šéfíkem (`docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`),
+  živě ověřen zápis (odmítnutí faktury tlačítkem „odmítnout a zapamatovat" →
+  ověřen nový řádek v tabulce, `created_at` 15.9.2026 18:25).
 - **`supabase/migrations/20260907010000_muj_den.sql` NENASAZENA** (FoodTab DB) —
   stránka „Dnes" kvůli tomu nefunguje. Starší nález, netýká se této relace přímo,
   ale zůstává na seznamu čekajícím na Šéfíka.
@@ -206,33 +242,67 @@ zatím neurčen. Žádná logika, žádný backend.
 
 ## 11. Design systém
 
-- `app/_tokeny.css` — sdílené CSS proměnné (`var(--card)`, `var(--muted)`,
+**AKTIVNÍ ETAPA od 15.9.2026 večer — nová priorita Šéfíka.** Podrobný
+stav, co je hotové a co zbývá: `docs/hlaseni/design-system-stav-2026-09-15.md`.
+Nečti tenhle bod jako historii — je to živý stav, aktualizuj ho při
+další významné změně místo zakládání dalšího souboru.
+
+**Co bylo hotové už předtím a nemění se:**
+- `app/_tokeny.css` — barevné tokeny (`var(--card)`, `var(--muted)`,
   `var(--line)`, `var(--mosaz)`, `var(--bad)`/`var(--bad-bg)`,
   `var(--dobre)`/`var(--dobre-bg)`, `var(--pozor)`/`var(--pozor-bg)`,
   `var(--sunken)` atd.) — zadání v `docs/vzhled-zadani.md` +
-  `docs/vzhled-oprava-1.md` (oprava nahrazuje tabulky odstínů).
+  `docs/vzhled-oprava-1.md`. Mosaz jako hlavní akcent a `--dobre`
+  (zelená) jen pro success **už seděly přesně podle nové priority**.
 - Vzor vnořené navigace modulu (Marketing i Faktury sdílí): jedna položka
-  v `app/[rozsah]/nabidka.ts`, vlastní `layout.tsx` + `navigace.tsx` (levý
-  sloupec ≥1024px + mobilní spodní lišta), vnější `Ram` schová svůj vlastní
-  postranní panel přes CSS `:has()`. CSS třídy `.modul-*` (dřív `.mkt-*`,
-  přejmenováno, aby to sdílely oba moduly).
+  v `app/[rozsah]/nabidka.ts`, vlastní `layout.tsx` + `navigace.tsx`, CSS
+  třídy `.modul-*`. **`.ft-*` a `.modul-*` se NEPŘEJMENOVÁVAJÍ** — jen
+  přebarvují/ladí vlastnosti (`docs/vzhled-zadani.md`).
 - Konvence `hotovo: boolean` u položek navigace — nehotová obrazovka se kreslí
-  jako nekliknutelný `<span class="polozka soon">` se štítkem „brzy", nikdy
-  jako odkaz na neexistující stránku (žádné 404 v navigaci).
-- Server Actions (`'use server'`) s `FormData` a skrytými poli `rozsah`/`id`,
-  **žádný `confirm()` v prohlížeči, žádný toast** — čisté odeslání formuláře.
-  Foodtab tenhle vzor nikde jinde nemá, nezavádět ho nově.
-- Komponenty `Nadpis` (`oči`/`h1`/`popis`/`vpravo`) a `Sdeleni` (chybové/prázdné
-  stavy) — používat všude, nevymýšlet vlastní hlavičky.
+  jako nekliknutelný `<span class="polozka soon">` se štítkem „brzy".
+- Server Actions s `FormData` a skrytými poli `rozsah`/`id`, žádný `confirm()`
+  v prohlížeči — pro potvrzovací dialogy teď existuje sdílený `Dialog`
+  (viz níž), ale server-action odeslání formuláře zůstává stejné.
+- `Nadpis` (`oči`/`h1`/`popis`/`vpravo`) a `Sdeleni` (celostránkové
+  chybové/prázdné/no-access stavy) — pořád platí, používat dál.
+
+**Nově v téhle etapě (design systém, 15.9.2026 večer):**
+- **`Ram` (`app/[rozsah]/ram.tsx`) NEEXISTUJE, smazán.** Nahrazen
+  `components/shell/AppShell.tsx` (+ `GlobalTopbar`/`ModuleSidebar`/
+  `MobileBottomNav`) — stejné chování, jen rozdělené na pojmenované
+  soubory. `app/[rozsah]/layout.tsx` teď importuje `AppShell` odtud.
+- Nová škála tokenů: `--radius-sm/md/lg/full`, `--shadow-sm/-lg`
+  (`--shadow` zůstává), vínový akcent `--vino`/`-sv`/`-ink`/`-soft`
+  (druhotný, ověřeno kontrastem i ΔE2000).
+- Nová sdílená knihovna `components/ui/` (17 komponent — Badge, Button,
+  Card, Avatar, Input, Tabs, EmptyState/ErrorState, Skeleton,
+  StatusIndicator, MetricCard, ActionCard, DropdownMenu, Dialog, Drawer,
+  Toast+ToastProvider, DataTable). Žádný nový balíček. `EmptyState`/
+  `ErrorState` doplňují `Sdeleni`, nenahrazují ho — `Sdeleni` je pro
+  celostránkové/blokující stavy, ty nové pro místo uvnitř obsahu s akcí.
+- **`ToastProvider` zapojen v `app/layout.tsx`** — appka teď MÁ sdílený
+  toast systém (`useToast()` z `components/ui/Toast.tsx`), na rozdíl od
+  dřívějšího stavu. Nepoužívat ho ale místo existujícího vzoru
+  server-action + `revalidatePath`/`redirect`, kde už funguje.
+- Nová CSS jen tam, kde inline styl nestačí: `app/_komponenty.css`,
+  třídy `.ds-*` (odlišené od `.ft-*`/`.modul-*`).
+- Dokončeno: AppShell (priorita 1) živě ověřený, Dnes (priorita 2)
+  lehce doladěn. **Zbývá:** Rozpis směn, Docházka, Vzkazy, Úkoly, Lidé,
+  Finance (shell), Marketing (shell), ostatní moduly — v tomhle pořadí.
+- Navazující úloha (založena, ne součást téhle etapy): sjednotit 3
+  ruční implementace modálního okna (`smeny/formular-smeny.tsx`,
+  `ceka-na-opravneni.tsx`, `pwa-registration.tsx`) na nový `Dialog`/`Drawer`.
 
 ## 12. Rozpracovaná etapa
 
-**Faktury sloučení je hotové** (kód, teď jako sekce uvnitř Finance), nic v něm
-není rozpracované. Větev je pushnutá. Otevřené zbývá jen mimo kód:
-- založit PR do `main` (`gh auth login` nebo ručně přes web, bod 15)
-- nasazení migrace + RLS oprava (bod 15)
-- Marketing Krok 4 (renderer) a Krok 5 E2E zůstávají blokované (bod 13),
-  nebyly součástí téhle relace a nikdo na nich aktivně nepracuje
+**Faktury sloučení je hotové** (kód, migrace, RLS, živě ověřeno), žádný
+otevřený bod. **Aktivní je design systém** (bod 11, zadáno 15.9.2026
+večer) — nadace (tokeny + `components/ui/` + `components/shell/`) hotová,
+AppShell a Dnes hotové, **zbývá 8 obrazovek z priority**: Rozpis směn,
+Docházka, Vzkazy, Úkoly, Lidé, Finance (shell), Marketing (shell),
+ostatní moduly. Žádná z nich je rozbitá — jen zatím nevyužívá novou
+knihovnu. Marketing Krok 4 (renderer) a Krok 5 E2E zůstávají blokované
+(bod 13), nesouvisí s design systémem, nikdo na nich aktivně nepracuje.
 
 ## 13. Nevyřešené problémy
 
@@ -280,33 +350,43 @@ není rozpracované. Větev je pushnutá. Otevřené zbývá jen mimo kód:
   jemnější práva pod `finance` (stejný vzor jako `advances.manage` pod `provoz`).
   Tohle je novější rozhodnutí, které **přebíjí** dřívější strukturu (vlastní
   modul `faktury`) zmiňovanou v commitech 28060e6–998f0fc — nevracet se k ní.
+- **Design systém: doplňovat, ne přepisovat** (Šéfík 15.9.2026 večer). Mosaz
+  jako hlavní akcent a zelená jen pro success už seděly — nepřebarvovat je
+  znovu. `.ft-*`/`.modul-*` třídy se nepřejmenovávají. Nové sdílené
+  komponenty žijí v `components/ui/` a `components/shell/` (nová složka,
+  appka dřív žádnou neměla) — `Nadpis`/`Sdeleni` zůstávají, nenahrazují se.
 
 ## 15. Operace čekající na schválení Šéfíka
 
-1. **Review a merge PR #3** (https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/3)
-   do `main`.
-2. **Nasadit `supabase/migrations/20260915100000_modul_faktury.sql`** (FoodTab DB)
-   — bez toho je hotová sekce Faktury v UI neviditelná. Nejdřív musí větev
-   doputovat na `main` (CLAUDE.md: nasazuje se jen z `main`).
-3. **Spustit SQL z `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`**
-   v SQL editoru projektu **Faktury** (`ctqtwahlzhyjerqulqyn`, NE FoodTab DB).
-4. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
-5. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
+**Faktury (nasazení + RLS oprava) KOMPLETNĚ HOTOVO.** Aktuálně čeká:
+
+1. **Review a merge PR #4** (design systém) —
+   https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/4.
+2. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
+3. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
    (`docs/granty-provoz-zadani.md`) — mimo gesci téhle relace, ale čeká na rozhodnutí.
-6. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
-7. n8n: zúžit/vypnout starý workflow Černá Perla.
+4. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
+5. n8n: zúžit/vypnout starý workflow Černá Perla.
+6. Prošetřit selhávající GitHub Actions check „Migrace a scénáře" —
+   padá na `main` už dny, nesouvisí s Fakturami/Financemi ani design systémem.
 
 ## 16. Doporučený další krok (přesně)
 
-1. Review a merge **PR #3** do `main` (branch pushnutá, `gh` přihlášené — viz bod 2).
-2. Po sloučení do `main`: nasadit `20260915100000_modul_faktury.sql` —
-   od tohoto okamžiku je sekce Faktury živá a viditelná pro uživatele s právem
-   na adrese `/finance/faktury`.
-3. Spustit RLS opravu `rejection_examples` (bod 15.3) — nezávislé na kroku 2,
-   jde spustit kdykoli.
-4. Živě ověřit sekci Faktury se **skutečnými daty** (3022 řádků v `invoices`
-   podle posledního čtení) — dosavadní ověření bylo jen „appka korektně
-   odmítá bez oprávnění", ne plný uživatelský tok s daty.
-5. Teprve pak pokračovat na Marketing Krok 4 (potřebuje jiné prostředí než
-   tenhle Windows stroj) nebo Krok 5 E2E (potřebuje Šéfíkovo rozhodnutí) —
-   obojí nezávislé na Fakturách, žádné z nich nemá blokovat to ostatní.
+**Faktury jsou kompletně hotové, nasazené, RLS opravená a živě ověřené**
+(15.9.2026 večer) — na tomhle projektu není žádný další nutný krok.
+
+**Design systém (aktivní etapa):**
+1. Review a merge PR #4 do `main` (bod 15.1) — až Šéfík schválí.
+2. Pokračovat v pořadí ze `docs/hlaseni/design-system-stav-2026-09-15.md`:
+   Rozpis směn → Docházka → Vzkazy → Úkoly → Lidé → Finance (shell) →
+   Marketing (shell) → ostatní moduly. Používat `components/ui/*` a
+   `components/shell/*`, ne vymýšlet nové vzory — kde komponenta chybí,
+   doplnit ji do `components/ui/`, ne psát inline duplicitně.
+3. Po každé obrazovce ověřit desktop+mobil stejně jako u AppShellu/Dnes
+   (tsc, eslint, node testy, živě v prohlížeči).
+4. Po dokončení celé priority: aktualizovat
+   `docs/hlaseni/design-system-stav-2026-09-15.md` a tenhle handoff.
+
+**Nezávisle, kdykoli:** Marketing Krok 4 (potřebuje jiné prostředí než
+tenhle Windows stroj) nebo Krok 5 E2E (potřebuje Šéfíkovo rozhodnutí) —
+obojí nezávislé na design systému i na sobě navzájem.

@@ -1,0 +1,230 @@
+/* =====================================================================
+   Sdílené komponenty design systému — components/ui, components/shell
+   =====================================================================
+   Zadání Šéfíka 15.9.2026: sjednotit vzhled na jantár/mosaz jako hlavní
+   akcent, vínovou jako druhotný, zelenou jen na success, méně borderů,
+   víc prostoru, jemné stíny, radius ~10–14 px.
+
+   Třídy tady mají předponu `ds-` (design systém), ať se nepletou s
+   `.ft-*` (rám appky, docs/vzhled-zadani.md — ty se PŘEBARVUJÍ, ne
+   přejmenovávají) ani s `.modul-*` (vnořená navigace modulů). Layout
+   uvnitř komponent zůstává inline `style={{ var(--token) }}` podle
+   zavedené konvence appky — sem patří jen to, co inline nejde: :hover,
+   :focus-visible, animace, portálové vrstvy.
+   ===================================================================== */
+
+/* --- Badge ------------------------------------------------------------ */
+
+.ds-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: var(--radius-full);
+  font-size: 12px; font-weight: 600; line-height: 1.4;
+  white-space: nowrap;
+}
+.ds-badge-dot {
+  width: 6px; height: 6px; border-radius: 999px; flex: none; background: currentColor;
+}
+
+/* --- Button (obal nad .ft-tl, jen odsazení navíc pro ikonu) ----------- */
+
+.ds-button-ikona { display: inline-flex; }
+
+/* --- Input -------------------------------------------------------------- */
+
+.ds-field { display: flex; flex-direction: column; gap: 6px; }
+.ds-field-label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.ds-field-hint { font-size: 12px; color: var(--muted); }
+.ds-field-error { font-size: 12px; color: var(--bad); }
+
+.ds-input {
+  width: 100%; min-height: 42px; padding: 0 12px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-md);
+  background: var(--card); color: var(--ink); font-size: 14px;
+  font-family: inherit; transition: border-color .12s ease, box-shadow .12s ease;
+}
+.ds-input::placeholder { color: var(--faint); }
+.ds-input:hover { border-color: var(--muted); }
+.ds-input:focus-visible {
+  outline: none; border-color: var(--mosaz); box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ds-input[aria-invalid="true"] { border-color: var(--bad); }
+.ds-input[aria-invalid="true"]:focus-visible { box-shadow: 0 0 0 3px var(--bad-bg); }
+.ds-input:disabled { opacity: .6; cursor: not-allowed; background: var(--sunken); }
+
+/* --- Tabs -------------------------------------------------------------- */
+
+.ds-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.ds-tab {
+  appearance: none; background: transparent; border: 0; cursor: pointer;
+  padding: 10px 14px; font: inherit; font-size: 13.5px; font-weight: 600;
+  color: var(--muted); border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  white-space: nowrap; position: relative; top: 1px;
+}
+.ds-tab:hover { color: var(--ink); background: var(--sunken); }
+.ds-tab[aria-selected="true"] {
+  color: var(--mosaz); border-bottom: 2px solid var(--mosaz);
+}
+.ds-tab:focus-visible { outline: 2px solid var(--mosaz); outline-offset: -2px; }
+
+/* --- Card / ActionCard -------------------------------------------------- */
+
+.ds-action-card {
+  display: block; text-decoration: none; color: inherit;
+  transition: box-shadow .15s ease, border-color .15s ease, transform .1s ease;
+}
+.ds-action-card:hover { box-shadow: var(--shadow); border-color: var(--line-2); }
+.ds-action-card:active { transform: scale(.997); }
+.ds-action-card:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 2px; }
+
+/* --- Skeleton ------------------------------------------------------------ */
+
+.ds-skeleton {
+  position: relative; overflow: hidden; background: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.ds-skeleton::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--line) 55%, transparent);
+  animation: ds-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes ds-shimmer { 100% { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ds-skeleton::after { animation: none; display: none; }
+}
+
+/* --- Dropdown menu ------------------------------------------------------ */
+/* Stejný vzor jako prepinac-rozsahu.tsx: <details>/<summary>, žádný JS
+   navíc, zavírá se kliknutím mimo (::backdrop by šlo jen pro <dialog>). */
+
+.ds-dropdown { position: relative; }
+.ds-dropdown > summary {
+  list-style: none; cursor: pointer;
+}
+.ds-dropdown > summary::-webkit-details-marker { display: none; }
+.ds-dropdown-panel {
+  position: absolute; z-index: 40; margin-top: 6px; min-width: 200px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg); padding: 6px; display: flex; flex-direction: column; gap: 2px;
+}
+.ds-dropdown-panel[data-align="end"] { right: 0; }
+.ds-dropdown-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 9px 10px; border-radius: var(--radius-sm); border: 0; background: transparent;
+  color: var(--ink); font: inherit; font-size: 13.5px; cursor: pointer; text-decoration: none;
+}
+.ds-dropdown-item:hover { background: var(--sunken); }
+.ds-dropdown-item:focus-visible { outline: 2px solid var(--mosaz); outline-offset: -2px; }
+.ds-dropdown-item[data-tone="danger"] { color: var(--bad); }
+
+/* --- Dialog / Drawer ----------------------------------------------------- */
+
+.ds-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(15, 20, 17, .48);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: ds-fade-in .15s ease;
+}
+:root[data-theme="dark"] .ds-overlay { background: rgba(0, 0, 0, .6); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ds-overlay { background: rgba(0, 0, 0, .6); }
+}
+.ds-overlay[data-placement="drawer-end"] {
+  justify-content: flex-end; padding: 0;
+}
+.ds-overlay[data-placement="drawer-bottom"] {
+  align-items: flex-end; padding: 0;
+}
+
+.ds-dialog {
+  background: var(--card); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  max-width: 480px; width: 100%; max-height: min(88vh, 720px); overflow: auto;
+  animation: ds-pop-in .16s ease;
+}
+.ds-drawer {
+  background: var(--card); box-shadow: var(--shadow-lg);
+  height: 100%; width: min(420px, 100vw); overflow: auto;
+  animation: ds-slide-in-end .18s ease;
+}
+.ds-overlay[data-placement="drawer-bottom"] .ds-drawer {
+  height: auto; max-height: 88vh; width: 100%;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  animation: ds-slide-in-bottom .18s ease;
+}
+
+@keyframes ds-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ds-pop-in { from { opacity: 0; transform: scale(.97) translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes ds-slide-in-end { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes ds-slide-in-bottom { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .ds-overlay, .ds-dialog, .ds-drawer { animation: none; }
+}
+
+.ds-dialog-head, .ds-drawer-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 18px 20px 0;
+}
+.ds-dialog-title, .ds-drawer-title { margin: 0; font-size: 19px; font-weight: 600; }
+.ds-dialog-body, .ds-drawer-body { padding: 14px 20px 20px; }
+.ds-dialog-close {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  width: 32px; height: 32px; border-radius: var(--radius-sm); flex: none;
+  display: flex; align-items: center; justify-content: center; color: var(--muted);
+}
+.ds-dialog-close:hover { background: var(--sunken); color: var(--ink); }
+.ds-dialog-close:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
+
+/* --- Toast ---------------------------------------------------------------- */
+
+.ds-toast-region {
+  position: fixed; z-index: 200; bottom: max(16px, var(--vlozka-dole));
+  right: max(16px, var(--vlozka-vpravo)); left: 16px;
+  display: flex; flex-direction: column-reverse; gap: 8px; align-items: flex-end;
+  pointer-events: none;
+}
+@media (max-width: 640px) { .ds-toast-region { left: 16px; right: 16px; align-items: stretch; } }
+
+.ds-toast {
+  pointer-events: auto; display: flex; align-items: flex-start; gap: 10px;
+  max-width: 360px; width: 100%; padding: 13px 14px;
+  background: var(--ink); color: var(--card); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg); font-size: 13.5px; line-height: 1.45;
+  animation: ds-toast-in .18s ease;
+}
+:root[data-theme="dark"] .ds-toast { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ds-toast { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+}
+.ds-toast[data-tone="success"] { box-shadow: var(--shadow-lg), inset 3px 0 0 var(--dobre); }
+.ds-toast[data-tone="error"] { box-shadow: var(--shadow-lg), inset 3px 0 0 var(--bad); }
+.ds-toast-close {
+  appearance: none; border: 0; background: transparent; color: inherit; opacity: .7;
+  cursor: pointer; padding: 2px; margin-left: auto; flex: none; border-radius: 6px;
+}
+.ds-toast-close:hover { opacity: 1; }
+@keyframes ds-toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ds-toast { animation: none; } }
+
+/* --- DataTable -------------------------------------------------------- */
+
+.ds-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--line); }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.ds-table th {
+  text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .02em;
+  text-transform: uppercase; color: var(--muted); padding: 11px 14px;
+  background: var(--sunken); white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.ds-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.ds-table tbody tr:last-child td { border-bottom: 0; }
+.ds-table tbody tr:hover td { background: var(--sunken); }
+.ds-table[data-zebra="true"] tbody tr:nth-child(even) td { background: var(--paper); }
+.ds-table[data-zebra="true"] tbody tr:hover td { background: var(--sunken); }
+.ds-table td[data-align="right"], .ds-table th[data-align="right"] { text-align: right; }
+.ds-table-empty { padding: 40px 20px; text-align: center; color: var(--muted); }
+
+/* --- MetricCard / StatusIndicator ------------------------------------- */
+
+.ds-status-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+.ds-status-dot[data-pulse="true"] { animation: ds-pulse 1.8s ease-in-out infinite; }
+@keyframes ds-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .ds-status-dot { animation: none; } }
