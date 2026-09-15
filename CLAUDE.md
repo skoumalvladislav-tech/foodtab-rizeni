@@ -310,6 +310,27 @@ a nech ji tomu, kdo ho píše.
   výchozí práva Supabase nemá, takže kontrola „na tu tabulku není
   grant" projde lokálně a v ostré databázi by spadla. Je to tatáž
   třída rozdílu jako `\gset` nad NULL v PGlite.
+
+  **Hlídá se to proto nad TEXTEM migrací, ne nad databází:**
+  `scripts/marketing-granty.test.mjs` projde všechny tabulky
+  `marketing_*` v `supabase/migrations` a ptá se, jestli k nim někde
+  je `revoke`. Tohle spadnout umí a spadne hned, ne až po nasazení.
+  Pro provozní tabulky taková kontrola zatím není.
+
+- **`truncate` obchází RLS — a výchozí práva ho udělují taky.**
+  `delete` musí projít přes politiku, `truncate` ne: přihlášený s tím
+  grantem vysype celou tabulku napříč všemi firmami a nic ho
+  nezastaví. Ke každému `revoke … from anon` proto patří i
+  `revoke truncate, references, trigger … from authenticated`.
+
+  Zjistilo se to 14. 9. 2026 při nasazení kampaní a měření. Modul
+  marketing je uklizený (`20260914190000_marketing_granty_uklid2.sql`),
+  **provozní tabulky ne — `truncate` tam `authenticated` pořád má, na
+  všech 51, a granty pro `anon` taky. Mezi nimi i `audit_log`, kde
+  pravidla proti `update`/`delete` `truncate` nezastaví.** Zadání pro relaci provoz je
+  v `docs/granty-provoz-zadani.md`, nález v
+  `docs/hlaseni/stav-2026-09-14.md`.
+
 - Peníze v celých haléřích jako `integer`, ne `float`.
 - Časy `timestamptz`, provozní datum jako `date`.
 

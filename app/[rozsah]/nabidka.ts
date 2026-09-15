@@ -118,7 +118,17 @@ export const NABIDKA: Polozka[] = [
   // záložka modulu by nikam nevedla a nebylo by co odmítnout vypnutým
   // modulem, jak žádá pravidlo 5.
   { segment: 'menu', nazev: 'Tvorba menu', kratky: 'Menu', modul: 'menu', pravo: 'menu_ai.use', hotovo: true, ikona: 'kniha' },
-  { segment: 'finance', nazev: 'Přehled financí', kratky: 'Finance', modul: 'finance', pravo: 'finance.read', hotovo: false, ikona: 'kniha' },
+  // FINANCE ZATÍM = FAKTURY.
+  //
+  // Faktury byly do 15. 9. 2026 vlastní modul (`/faktury`), Šéfík
+  // rozhodl přesunout je jako sekci dovnitř Finance (`/finance/faktury`)
+  // — stejný nested-nav vzor jako marketing výš, detailní navigace
+  // (8 obrazovek) žije v app/[rozsah]/finance/faktury/ jako vlastní
+  // vnořený layout (lib/faktury-navigace.ts). Kořen modulu vede rovnou
+  // na Přehled faktur, protože Finance dnes nic jiného nenabízí — až
+  // přibude další část (např. banking.read je připravené právo),
+  // dostane vlastní položku tady a samostatnou kořenovou obrazovku.
+  { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha' },
   // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.
   //
   // Do 14. 9. 2026 tu stála jediná položka a v levém sloupci proto nebylo
@@ -129,14 +139,21 @@ export const NABIDKA: Polozka[] = [
   // Pořadí je podle toho, jak se to dělá: nejdřív podklady (fotky,
   // šablony, menu), pak se z nich skládá příspěvek na přehledu.
   //
-  // Zdánlivě chybí „Kalendář", „Kampaně", „Publikované" a „Analytika".
-  // Nechybí — ty obrazovky zatím nejsou, a položka, která vede na 404,
-  // je horší než položka, která tam není.
+  { segment: 'marketing/zacatek', nazev: 'Začínáme', kratky: 'Začátek', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'marketing/media', nazev: 'Fotky', kratky: 'Fotky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/sablony', nazev: 'Šablony', kratky: 'Šablony', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/menu', nazev: 'Menu', kratky: 'Menu', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kniha' },
   { segment: 'marketing/schvalovani', nazev: 'Ke schválení', kratky: 'Schválení', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'fajfka' },
+  { segment: 'marketing/kalendar', nazev: 'Kalendář', kratky: 'Kalendář', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kalendar' },
+  { segment: 'marketing/kampane', nazev: 'Kampaně', kratky: 'Kampaně', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kalendar' },
+  { segment: 'marketing/analytika', nazev: 'Analytika', kratky: 'Čísla', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'lupa' },
+  { segment: 'marketing/publikovane', nazev: 'Publikované', kratky: 'Odesláno', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'lupa' },
   { segment: 'marketing/znacka', nazev: 'Značka', kratky: 'Značka', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
+  // Integrace a nástroje. Vidět je má každý, kdo do marketingu dosáhne —
+  // i ten, kdo nic nepřipojuje: je z nich poznat, proč se něco dělá
+  // ručně. Připojovat smí jen marketing.publish a ptá se na to obrazovka
+  // i serverová akce, ne tahle řádka.
+  { segment: 'marketing/nastroje', nazev: 'Nástroje', kratky: 'Nástroje', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
   { segment: 'marketing', nazev: 'Příspěvky', kratky: 'Příspěvky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'zprava' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
 ]

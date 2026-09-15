@@ -79,9 +79,19 @@ console.log('\n== Marketing má v sloupci víc než jednu položku ==')
   Tahle kontrola hlídá, aby se to nevrátilo.
 */
 const marketingove = polozky.filter((p) => p.segment.startsWith('marketing'))
-ok('marketing má aspoň šest obrazovek', marketingove.length >= 6)
+ok('marketing má aspoň jedenáct obrazovek', marketingove.length >= 11)
 ok('a je mezi nimi fronta ke schválení',
   polozky.some((p) => p.segment === 'marketing/schvalovani'))
+ok('a kalendář obsahu',
+  polozky.some((p) => p.segment === 'marketing/kalendar'))
+ok('a publikované příspěvky',
+  polozky.some((p) => p.segment === 'marketing/publikovane'))
+ok('a kampaně',
+  polozky.some((p) => p.segment === 'marketing/kampane'))
+ok('a analytika',
+  polozky.some((p) => p.segment === 'marketing/analytika'))
+ok('a průvodce prvním spuštěním',
+  polozky.some((p) => p.segment === 'marketing/zacatek'))
 ok('a všechny jsou hotové', marketingove.every((p) => p.hotovo))
 
 console.log('\n== Pořadí: nejdřív podrobnější segment ==')

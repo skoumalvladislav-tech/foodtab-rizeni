@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
@@ -72,7 +73,7 @@ export default async function DetailMenu({
   }
 
   const pristup = await zkusPristup(tenantId, 'marketing.read', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Menu vidí ten, kdo má právo „Vidět marketing“.</Sdeleni>
   }

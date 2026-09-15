@@ -118,7 +118,24 @@ const STRANKA = cti('app/[rozsah]/marketing/page.tsx')
 const AKCE = cti('app/[rozsah]/marketing/znacka/akce.ts')
 
 ok('rozcestí modulu volá popisStavu', STRANKA.includes('popisStavu('))
-ok('a bere chybové stavy ze sdíleného seznamu', STRANKA.includes('STAVY_CHYBOVE'))
+/*
+  ROZCESTNÍK POČÍTÁ NEÚSPĚCHY Z PUBLIKAČNÍCH ÚLOH, NE ZE STAVU
+  PŘÍSPĚVKU — a tahle kontrola se kvůli tomu 14. 9. přepisovala.
+
+  Dřív tu stálo „bere chybové stavy ze sdíleného seznamu", tedy
+  `STAVY_CHYBOVE`. Když se rozcestník přepsal podle zadání, přestalo to
+  platit: úloha ve stavu `selhalo` se ještě zkouší znovu a na příspěvku
+  se to NEPROJEVÍ vůbec. Počítat podle příspěvku by tedy tvrdilo
+  „nepovedlo se: 0" ve chvíli, kdy se čtyři publikace marně opakují.
+
+  `STAVY_CHYBOVE` zůstává v `lib/marketing-text.ts` a hlídá se výš, že
+  se kryje s databází. Dva ze tří stavů (`navrh_selhal`,
+  `render_selhal`) dnes nikdo nenastavuje — je to připravené, ne
+  používané, a je lepší to říct než předstírat opak.
+*/
+ok('rozcestník počítá neúspěchy z publikačních úloh',
+  /marketing_publikace_ulohy[\s\S]{0,200}'selhalo', 'vzdano'/.test(STRANKA))
+ok('a ne ze stavu příspěvku', !STRANKA.includes('STAVY_CHYBOVE'))
 ok('uložení značky volá seznamVyrazu', AKCE.includes('seznamVyrazu('))
 ok('uložení značky volá delkaVidea', AKCE.includes('delkaVidea('))
 ok('uložení značky volá neboNull', AKCE.includes('neboNull('))

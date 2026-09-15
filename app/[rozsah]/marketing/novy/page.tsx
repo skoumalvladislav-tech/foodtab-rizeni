@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { KANALY } from '@/lib/marketing'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import { zalozitPrispevek } from '../akce'
@@ -67,7 +68,7 @@ export default async function NovyPrispevek({
   }
 
   const pristup = await zkusPristup(tenantId, 'marketing.manage', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return (
       <Sdeleni nadpis="Na tohle nemáte oprávnění">

@@ -1,0 +1,172 @@
+openapi: 3.0.3
+info:
+  title: Foodtab — cesty vedoucí ven
+  version: "1.0.0"
+  description: >
+    Krok 6 zadání (`docs/hlaseni/zadani-pro-ai-marketing-faktury.md`):
+    dokumentace jen pro adresy, které SKUTEČNĚ vedou ven —
+    `/api/uloha/*` (plánovač) a `/k/[klic]` (veřejný měřitelný odkaz).
+
+    Zbytek Foodtabu jsou stránky (App Router) a Server Actions volané
+    přímo z formulářů, ne veřejné API — ty se sem záměrně nedávají.
+
+    Kontrola, že se tenhle soubor neodchýlí od skutečných cest a metod,
+    je ve `scripts/openapi-cesty.test.mjs`.
+servers:
+  - url: https://foodtab-rizeni.vercel.app
+    description: Produkce
+
+security: []
+
+paths:
+  /api/uloha/marketing-fronta:
+    get:
+      operationId: marketingFronta
+      summary: Fronta publikací na Instagram a Facebook
+      description: >
+        Vyzvedne dávku úloh z `public.marketing_vyzvednout_publikace`
+        (nejvýš 8) a pošle je ven. O tom, co se smí poslat, rozhoduje
+        databáze — tahle adresa jen obsluhuje odchozí volání, která
+        databáze sama udělat neumí. Volá ji `.github/workflows/marketing-fronta.yml`.
+      tags: [Plánované úlohy]
+      security: [{ cronSecret: [] }]
+      responses:
+        "200":
+          description: Dávka zpracována (i s nulou úloh).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vyzvednuto, zverejneno, nanecisto, rucne, selhalo]
+                properties:
+                  vyzvednuto: { type: integer, minimum: 0, description: Kolik úloh dávka vzala. }
+                  zverejneno: { type: integer, minimum: 0 }
+                  nanecisto: { type: integer, minimum: 0, description: Zkouška nanečisto, nepočítá se do zveřejněných. }
+                  rucne: { type: integer, minimum: 0, description: Vrácené k ručnímu zveřejnění. }
+                  selhalo: { type: integer, minimum: 0 }
+              example: { vyzvednuto: 3, zverejneno: 2, nanecisto: 0, rucne: 0, selhalo: 1 }
+        "401": { $ref: "#/components/responses/Nepovoleno" }
+        "500": { $ref: "#/components/responses/ChybaDatabaze" }
+        "503": { $ref: "#/components/responses/UlohaNenastavena" }
+
+  /api/uloha/marketing-automatizace:
+    get:
+      operationId: marketingAutomatizace
+      summary: Spuštění zapnutých automatizací, kterým nastal čas
+      description: >
+        Vybere nejvýš 12 automatizací s `zapnuta = true` a
+        `pristi_beh_kdy <= now()`, a podle druhu vyrobí KONCEPTY
+        (nikdy nezveřejní, nikdy nepošle ke schválení). Chybějící
+        potvrzené menu se zapíše jako přeskočeno, ne jako chyba. Volá ji
+        `.github/workflows/marketing-automatizace.yml`.
+      tags: [Plánované úlohy]
+      security: [{ cronSecret: [] }]
+      responses:
+        "200":
+          description: Dávka zpracována (i s nulou automatizací).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [zpracovano, hotovo, preskoceno, chyba]
+                properties:
+                  zpracovano: { type: integer, minimum: 0 }
+                  hotovo: { type: integer, minimum: 0 }
+                  preskoceno: { type: integer, minimum: 0 }
+                  chyba: { type: integer, minimum: 0 }
+              example: { zpracovano: 4, hotovo: 1, preskoceno: 3, chyba: 0 }
+        "401": { $ref: "#/components/responses/Nepovoleno" }
+        "500": { $ref: "#/components/responses/ChybaDatabaze" }
+        "503": { $ref: "#/components/responses/UlohaNenastavena" }
+
+  /api/uloha/zapomenuty-odchod:
+    get:
+      operationId: zapomenutyOdchod
+      summary: Upozornění na zapomenutý odchod (modul Provoz, ne marketing)
+      description: >
+        Zavolá `public.ohlasit_zapomenute_odchody` — veškerou práci
+        dělá databáze, adresa jen ověří volajícího. Denně v 08:00 UTC
+        (`.github/workflows/zapomenuty-odchod.yml`), ne hodinově —
+        Vercel na tomhle tarifu hodinový cron odmítá.
+      tags: [Plánované úlohy]
+      security: [{ cronSecret: [] }]
+      responses:
+        "200":
+          description: Hotovo (i s nulou ohlášení).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ohlaseno]
+                properties:
+                  ohlaseno: { type: integer, minimum: 0 }
+              example: { ohlaseno: 0 }
+        "401": { $ref: "#/components/responses/Nepovoleno" }
+        "500": { $ref: "#/components/responses/ChybaDatabaze" }
+        "503": { $ref: "#/components/responses/UlohaNenastavena" }
+
+  /k/{klic}:
+    get:
+      operationId: mereitelnyOdkaz
+      summary: Měřitelný odkaz — přesměrování na cíl a počítadlo prokliku
+      description: >
+        Veřejná adresa bez přihlášení — otevírá ji host z Instagramu
+        nebo z plakátu. Neplatný tvar klíče, neexistující i VYPNUTÝ
+        klíč vrací schválně STEJNOU odpověď (404, prázdné tělo), aby
+        zkoušením klíčů nešlo zjistit, co restaurace chystala nebo
+        zrušila. Proklik počítá `public.marketing_prejit` v téže
+        transakci, ne tahle adresa zvlášť.
+      tags: [Veřejné]
+      security: []
+      parameters:
+        - name: klic
+          in: path
+          required: true
+          description: 6–16 znaků, jen `a-z0-9`.
+          schema: { type: string, pattern: "^[a-z0-9]{6,16}$" }
+          example: mn7k2p
+      responses:
+        "302":
+          description: Přesměrování na uložený cíl. Bez cache (`Cache-Control: no-store, max-age=0`), aby se prokliky počítaly i příště.
+          headers:
+            Location: { schema: { type: string, format: uri } }
+            Cache-Control: { schema: { type: string, example: "no-store, max-age=0" } }
+        "404":
+          description: Neplatný tvar, neexistující nebo vypnutý klíč — nerozlišeno schválně.
+
+components:
+  securitySchemes:
+    cronSecret:
+      type: http
+      scheme: bearer
+      description: >
+        `Authorization: Bearer <CRON_SECRET>`, porovnáno v konstantním
+        čase (`lib/supabase/uloha.ts`, `tajemstviSedi`). Volá GitHub
+        Actions plánovač, ne Vercel Cron.
+  responses:
+    Nepovoleno:
+      description: Chybějící nebo špatné `CRON_SECRET`.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [chyba]
+            properties: { chyba: { type: string } }
+          example: { chyba: "Nepovoleno." }
+    ChybaDatabaze:
+      description: Dotaz do databáze selhal.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [chyba]
+            properties: { chyba: { type: string } }
+    UlohaNenastavena:
+      description: Chybí `SUPABASE_SERVICE_ROLE_KEY` v prostředí serveru.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [chyba]
+            properties: { chyba: { type: string } }
+          example: { chyba: "Úloha není nastavená — chybí SUPABASE_SERVICE_ROLE_KEY." }

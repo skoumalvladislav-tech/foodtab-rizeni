@@ -2,8 +2,10 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { textProKanal } from '@/lib/marketing'
-import { popisStavu } from '@/lib/marketing-text'
+import { KANALY, textProKanal } from '@/lib/marketing'
+import { pravidlaKanalu, zkontrolovat } from '@/lib/marketing-kanaly'
+import { popisStavu, popisStavuUlohy } from '@/lib/marketing-text'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
@@ -47,6 +49,7 @@ const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', mar
 
 type Prispevek = {
   id: string
+  branch_id: string
   nazev: string
   stav: string
   kanaly: string[]
@@ -92,17 +95,6 @@ type Uloha = {
   rezim: string
 }
 
-const STAVY_ULOH: Record<string, string> = {
-  naplanovano: 'naplánováno',
-  ve_fronte: 've frontě',
-  odesila_se: 'odesílá se',
-  zverejneno: 'zveřejněno',
-  zverejneno_nanecisto: 'zveřejněno nanečisto (demo)',
-  k_rucnimu_zverejneni: 'k ručnímu zveřejnění',
-  selhalo: 'selhalo',
-  vzdano: 'vzdáno po opakování',
-  zruseno: 'zrušeno',
-}
 
 export default async function DetailPrispevku({
   params,
@@ -124,7 +116,7 @@ export default async function DetailPrispevku({
   }
 
   const pristup = await zkusPristup(tenantId, 'marketing.read', rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return (
       <Sdeleni nadpis="Marketing není zapnutý">
@@ -139,7 +131,7 @@ export default async function DetailPrispevku({
   const p = await jeden<Prispevek>(
     'příspěvek',
     supabase.from('marketing_prispevky')
-      .select('id, nazev, stav, kanaly, planovano_na, schvalena_verze_id, aktualni_verze_id')
+      .select('id, branch_id, nazev, stav, kanaly, planovano_na, schvalena_verze_id, aktualni_verze_id')
       .eq('id', prispevekId).maybeSingle(),
   )
   // Cizí příspěvek schová RLS a vyjde prázdno — pro uživatele je to
@@ -208,8 +200,29 @@ export default async function DetailPrispevku({
     Nabízet „Zveřejnit" tam, kde zveřejnit nejde, znamená slíbit něco,
     co skončí pěti marnými pokusy a chybou. Obrazovka se proto zeptá
     dřív, než to nabídne.
+
+    Ptá se na DVĚ věci a obě musí platit: že si firma nějaký nástroj
+    na zveřejňování vybrala (obrazovka Nástroje, oddíl 3.1 zadání)
+    a že je ten nástroj na serveru dotažený. Samotné nastavení n8n
+    v prostředí nestačí — volba je zákazníkova, ne naše.
   */
-  const n8nHotovo = n8nJeNastaveny()
+  const pripojeniVen = await jeden<{ poskytovatel: string; rezim: string }>(
+    'připojený nástroj na zveřejňování',
+    supabase.from('marketing_pripojeni')
+      .select('poskytovatel, rezim')
+      .eq('tenant_id', tenantId)
+      .eq('kategorie', 'publikovani')
+      .is('odpojeno_kdy', null)
+      .or(`branch_id.eq.${p.branch_id},branch_id.is.null`)
+      .order('branch_id', { nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+  ).catch(() => null)
+
+  const n8nHotovo =
+    pripojeniVen !== null &&
+    pripojeniVen.rezim !== 'rucni' &&
+    (pripojeniVen.poskytovatel !== 'n8n' || n8nJeNastaveny())
   const aiHotova = aiJeNastavena()
   const jeSchvalena = p.schvalena_verze_id !== null && p.schvalena_verze_id === p.aktualni_verze_id
 
@@ -273,19 +286,75 @@ export default async function DetailPrispevku({
             </p>
           </div>
 
-          {p.kanaly.map((kanal) => (
-            <label key={kanal}>
-              <span style={popisek}>{kanal === 'instagram' ? 'Instagram' : 'Facebook'}</span>
-              <textarea
-                name={`text_${kanal}`}
-                rows={5}
-                defaultValue={textProKanal(aktualni?.texty ?? {}, kanal)}
-                style={pole}
-                disabled={!smiPsat}
-                placeholder="Co dnes vaříme a proč se na to těšíme…"
-              />
-            </label>
-          ))}
+          {/*
+            KAŽDÁ SÍŤ MÁ SVŮJ TEXT A SVÁ PRAVIDLA.
+
+            Do 14. 9. 2026 tu stálo `kanal === 'instagram' ? 'Instagram'
+            : 'Facebook'` — cokoli jiného než Instagram se popsalo jako
+            Facebook. A hlavně: u obou políček stálo totéž, ačkoli
+            Instagram bez fotky příspěvek nepřijme a Facebook ano
+            a strop popisku mají jiný (2 200 proti 5 000).
+
+            Pravidla jsou v `lib/marketing-kanaly.ts` a nálezy se
+            ukazujou TADY, ne až když se to nepovede odeslat. Dozvědět
+            se o překročeném stropu z fronty po pěti neúspěšných
+            pokusech je pozdě.
+          */}
+          {p.kanaly.map((kanal) => {
+            const text = textProKanal(aktualni?.texty ?? {}, kanal)
+            const pravidla = pravidlaKanalu(kanal)
+            const nalezy = zkontrolovat({
+              kanal,
+              format: 'prispevek',
+              text,
+              // Fotky jsou na verzi, ne na kanálu — pro obě sítě tytéž.
+              pocetFotek: aktualni?.media_ids?.length ?? 0,
+            })
+
+            return (
+              <label key={kanal}>
+                <span style={popisek}>
+                  {pravidla?.nazev ?? kanal}
+                  {pravidla ? (
+                    <span style={{ color: 'var(--muted)' }}>
+                      {' — '}{text.trim().length} z {pravidla.stropZnaku} znaků
+                    </span>
+                  ) : null}
+                </span>
+                <textarea
+                  name={`text_${kanal}`}
+                  rows={5}
+                  defaultValue={text}
+                  style={pole}
+                  disabled={!smiPsat}
+                  placeholder="Co dnes vaříme a proč se na to těšíme…"
+                />
+                {pravidla ? (
+                  <span style={{ display: 'block', fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
+                    {pravidla.poznamka}
+                  </span>
+                ) : null}
+                {/*
+                  Prázdný text se tu ZÁMĚRNĚ nehlásí jako překážka —
+                  u rozepsaného příspěvku je prázdno normální stav
+                  a červená hláška u každého nového příspěvku by
+                  zevšedněla. Odeslat se to bez textu stejně nedá,
+                  hlídá to `lib/marketing-odeslani.ts`.
+                */}
+                {nalezy.filter((n) => text.trim() !== '' || !/chybí text/i.test(n.text)).map((n, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      display: 'block', fontSize: '12px', marginTop: '3px',
+                      color: n.druh === 'nelze' ? 'var(--mosaz)' : 'var(--muted)',
+                    }}
+                  >
+                    {n.druh === 'nelze' ? '⚠ ' : ''}{n.text}
+                  </span>
+                ))}
+              </label>
+            )
+          })}
 
           <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
             <legend style={popisek}>
@@ -436,7 +505,9 @@ export default async function DetailPrispevku({
                   <span style={{ display: 'block', fontSize: '12.5px', color: 'var(--muted)' }}>
                     {n8nHotovo
                       ? 'Odejde v naplánovaný čas na síť.'
-                      : 'Zatím nejde — zveřejňování přes n8n není nastavené.'}
+                      : pripojeniVen === null
+                        ? 'Zatím nejde — v Marketing → Nástroje není vybraný nástroj na zveřejňování.'
+                        : 'Zatím nejde — vybraný nástroj není na serveru dotažený. Podrobnosti jsou v Nástrojích.'}
                   </span>
                 </span>
               </label>
@@ -474,8 +545,8 @@ export default async function DetailPrispevku({
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
               {ulohy.map((u) => (
                 <li key={u.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', fontSize: '14px' }}>
-                  <span>{u.kanal === 'instagram' ? 'Instagram' : 'Facebook'}</span>
-                  <span style={{ color: 'var(--muted)' }}>{STAVY_ULOH[u.stav] ?? u.stav}</span>
+                  <span>{KANALY.find((k) => k.klic === u.kanal)?.nazev ?? u.kanal}</span>
+                  <span style={{ color: 'var(--muted)' }}>{popisStavuUlohy(u.stav)}</span>
                 </li>
               ))}
             </ul>

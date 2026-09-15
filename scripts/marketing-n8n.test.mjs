@@ -269,7 +269,24 @@ const detailText = readFileSync('app/[rozsah]/marketing/[prispevek]/page.tsx', '
 
 ok('režim se nebere natvrdo', !/rezim: 'rucni',\n\s*planovano_na/.test(akceText))
 ok('způsob se čte z formuláře', akceText.includes("formData.get('zpusob')"))
-ok('„zveřejnit" vede na n8n', /zvoleno === 'zverejnit'[\s\S]{0,80}poskytovatel: 'n8n'/.test(akceText))
+/*
+  ZMĚNA 14. 9. 2026: nástroj se už nebere natvrdo.
+
+  Stálo tu `{ rezim: 'zakaznicky', poskytovatel: 'n8n' }`. Bylo to
+  špatně dvakrát: `zakaznicky` znamená účet zákazníka, jenže n8n se
+  volá účtem Foodtabu podle adresy z prostředí — a hlavně se tím
+  zveřejňovalo i tehdy, když si firma na obrazovce Nástroje žádný
+  nástroj nevybrala (zadání, oddíl 3.1: volba je zákazníkova).
+
+  Kontrola proto míří na to, že se čte PŘIPOJENÍ, ne na jméno
+  nástroje.
+*/
+ok('„zveřejnit" bere nástroj z připojení',
+  /zvoleno === 'zverejnit'[\s\S]{0,200}poskytovatel: pripojeni\.poskytovatel/.test(akceText))
+ok('a bez připojení se ven neposílá',
+  /zvoleno === 'zverejnit'[\s\S]{0,120}pripojeni && pripojeni\.rezim !== 'rucni'/.test(akceText)
+  && /if \(!zpusob\)/.test(akceText))
+ok('úloha si pamatuje, kterým připojením šla ven', akceText.includes('pripojeni_id: zpusob.pripojeniId'))
 ok('„nanečisto" je demo', /zvoleno === 'nanecisto'[\s\S]{0,60}rezim: 'demo'/.test(akceText))
 
 /*
@@ -278,11 +295,21 @@ ok('„nanečisto" je demo', /zvoleno === 'nanecisto'[\s\S]{0,60}rezim: 'demo'/.
   odeslal by příspěvek i prázdný nebo podvržený formulář.
 */
 ok('cokoli neznámého padá do ruční cesty',
-  /: \{ rezim: 'rucni', poskytovatel: 'rucni_export' \}/.test(akceText))
+  /: \{ rezim: 'rucni', poskytovatel: 'rucni_export', pripojeniId: null \}/.test(akceText))
 
 ok('obrazovka tu volbu nabízí', detailText.includes('name="zpusob"'))
 ok('a „Zveřejnit" nenabízí, když to nejde',
   detailText.includes('disabled={!n8nHotovo}'))
+
+/*
+  A ta podmínka se ptá na VYBRANÝ nástroj, ne jen na proměnnou
+  v prostředí. Nastavené n8n na serveru neznamená, že si ho firma
+  vybrala — a nabídnout „Zveřejnit" tam, kde nikdo nic nevybral, je
+  slib, který skončí pěti marnými pokusy.
+*/
+ok('a ptá se na vybraný nástroj, ne jen na prostředí',
+  detailText.includes("kategorie', 'publikovani'")
+  && /pripojeniVen !== null[\s\S]{0,200}n8nJeNastaveny\(\)/.test(detailText))
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

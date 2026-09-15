@@ -10,8 +10,10 @@ import { rozsifrovat } from '@/lib/marketing-klice'
 import { precistMenu } from '@/lib/marketing-menu-ai'
 import { rozpoznatMenuZTextu, type MenuRozpoznanaPolozka } from '@/lib/marketing-menu-text'
 import { precistObrazek } from '@/lib/marketing-obrazek'
-import { doporuceneRadky } from '@/lib/marketing-sablony'
+import { doporuceneRadky, sablona } from '@/lib/marketing-sablony'
+import { popisPolozekMenu, sestavPokyn, sestavVstupy, vyzadujeMenu } from '@/lib/marketing-tvorba'
 import { otiskVerze, prazdnyObsah, type ObsahVerze } from '@/lib/marketing'
+import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, pruzor, seznam } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -66,7 +68,7 @@ async function pripravit(rozsah: string, pravo: Permission) {
   if (!tenantId) redirect('/')
 
   const pristup = await zkusPristup(tenantId, pravo, rozsah)
-  if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
+  if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/marketing`)
 
   return {
@@ -396,26 +398,103 @@ export async function naplanovat(formData: FormData): Promise<void> {
     z formuláře nesmí skončit zveřejněním.
   */
   const zvoleno = String(formData.get('zpusob') ?? '')
+
+  /*
+    ČÍM SE TO POŠLE, ŘÍKÁ PŘIPOJENÍ — NE TENHLE SOUBOR.
+
+    Do 14. 9. 2026 tu stálo natvrdo `{ rezim: 'zakaznicky', poskytovatel:
+    'n8n' }`. Bylo to špatně dvakrát: `zakaznicky` znamená účet
+    zákazníka, jenže n8n se volá podle adresy z prostředí serveru, tedy
+    účtem Foodtabu — a hlavně se tím zveřejňovalo i tehdy, když si firma
+    žádný nástroj nevybrala. Obrazovka Nástroje (oddíl 3.1 zadání) je
+    od toho, aby si volbu udělal zákazník; kdyby ji tenhle řádek obešel,
+    byla by k ničemu.
+  */
+  const pripojeni = await jeden<{ id: string; poskytovatel: string; rezim: string }>(
+    'připojený nástroj na zveřejňování',
+    supabase.from('marketing_pripojeni')
+      .select('id, poskytovatel, rezim')
+      .eq('tenant_id', tenantId)
+      .eq('kategorie', 'publikovani')
+      .is('odpojeno_kdy', null)
+      .or(`branch_id.eq.${prispevek.branch_id},branch_id.is.null`)
+      .order('branch_id', { nullsFirst: false })
+      .limit(1)
+      .maybeSingle(),
+  ).catch(() => null)
+
   const zpusob =
-    zvoleno === 'zverejnit' ? { rezim: 'zakaznicky', poskytovatel: 'n8n' }
-    : zvoleno === 'nanecisto' ? { rezim: 'demo', poskytovatel: 'n8n' }
-    : { rezim: 'rucni', poskytovatel: 'rucni_export' }
+    zvoleno === 'zverejnit'
+      ? (pripojeni && pripojeni.rezim !== 'rucni'
+          ? { rezim: pripojeni.rezim, poskytovatel: pripojeni.poskytovatel, pripojeniId: pripojeni.id }
+          : null)
+      : zvoleno === 'nanecisto'
+        ? { rezim: 'demo', poskytovatel: pripojeni?.poskytovatel ?? 'n8n', pripojeniId: pripojeni?.id ?? null }
+        : { rezim: 'rucni', poskytovatel: 'rucni_export', pripojeniId: null }
+
+  /*
+    Nepřipojené zveřejňování NENÍ chyba modulu. Příspěvek je hotový,
+    schválený a naplánovaný — jen ho musí někdo poslat ven sám. Proto
+    se to říká větou, která vede na Nástroje, ne hláškou o chybě.
+  */
+  if (!zpusob) {
+    redirect(`/${rozsah}/marketing/${prispevekId}?chyba=${encodeURIComponent(
+      'Zveřejňování zatím není připojené. Vyberte nástroj v Marketing → Nástroje, ' +
+      'nebo zvolte ruční zveřejnění — příspěvek zůstane naplánovaný a pustíte ho ven sami.')}`)
+  }
 
   const ja = await mujZamestnanec(tenantId)
+
+  /*
+    ÚČET POBOČKY, NE ÚČET FIRMY.
+
+    Černá Perla a Bernard Bar mají každý svůj profil. Do 14. 9. 2026 se
+    `ucet_id` nevyplňovalo vůbec — tabulka `marketing_ucty` existovala
+    a nikdo ji nečetl. Fungovalo to jen proto, že n8n má dnes napevno
+    jeden účet; jakmile bude druhá pobočka, odešel by její příspěvek
+    na cizí profil. To není chyba, které by si někdo všiml v logu:
+    všimne si jí host, kterému se v profilu objeví cizí menu.
+
+    Když účet není zavedený, `ucet_id` zůstane prázdné a posílá se dál
+    jako dosud. Zastavit kvůli tomu zveřejňování by bylo přísnější než
+    dnešní stav a nic by to nespravilo.
+  */
+  const ucty = await seznam<{ id: string; sit: string; schopnosti: string[] }>(
+    'účty pobočky',
+    supabase.from('marketing_ucty')
+      .select('id, sit, schopnosti')
+      .eq('tenant_id', tenantId)
+      .eq('branch_id', prispevek.branch_id)
+      .eq('aktivni', true),
+  ).catch(() => [])
+
+  const ucetProSit = new Map(ucty.map((u) => [u.sit, u]))
+
   let zalozeno = 0
 
   for (const kanal of prispevek.kanaly) {
+    const ucet = ucetProSit.get(kanal)
+
     const { error } = await supabase.from('marketing_publikace_ulohy').insert({
       tenant_id: tenantId,
       prispevek_id: prispevekId,
       verze_id: prispevek.schvalena_verze_id,
       otisk_verze: zadost.otisk_verze,
       schvaleni_id: zadost.id,
+      ucet_id: ucet?.id ?? null,
       kanal,
       format: 'prispevek',
       poskytovatel: zpusob.poskytovatel,
+      pripojeni_id: zpusob.pripojeniId,
       rezim: zpusob.rezim,
       planovano_na: okamzik,
+      /*
+        Formát v klíči zůstává `prispevek`, i když se jinde rozlišují
+        podrobnější (`feed`, `page_post`). Klíč drží jedinečnost —
+        změnit ho znamená, že už odeslaná úloha se přestane poznávat
+        a při opakování by odešla podruhé. Most mezi tvary je
+        v `lib/marketing-kanaly.ts`.
+      */
       idempotencni_klic: `publikace:${prispevek.schvalena_verze_id}:${kanal}:prispevek`,
       vytvoril: ja,
     })
@@ -618,6 +697,234 @@ async function klicZakaznika(
 }
 
 /**
+ * TVORBA — rychlý i průvodce jedním formulářem.
+ *
+ * Zadání krok 3 (`docs/hlaseni/zadani-pro-ai-marketing-faktury.md`):
+ * „fotka + věta" (rychlý) a „podklady → šablona → návrh" (průvodce)
+ * jsou dva pohledy na TÝŽ postup — založit příspěvek, dát mu podklady
+ * a nechat AI napsat první návrh. Proto jedna akce, ne dvě: liší se jen
+ * tím, co vyplní formulář (u průvodce navíc šablona a její pole), ne
+ * tím, co se s tím dělá.
+ *
+ * Kroky 3–6 (další návrh, editor, schválení, termín) zůstávají na
+ * `[prispevek]` — ta obrazovka je má hotové (`navrhnoutText`,
+ * `ulozitVerzi`, `pozadatOSchvaleni`, `naplanovat`). Tady se jen založí
+ * první dvě verze stejným způsobem, jakým by vznikly ručně přes
+ * `zalozitPrispevek` + „Navrhnout" na detailu, a přesměruje se tam.
+ *
+ * ---------------------------------------------------------------------
+ * AI SE VOLÁ MIMO ZÁPIS ZÁKLADU SCHVÁLNĚ
+ *
+ * Příspěvek s vybranými podklady existuje, i kdyby se návrh nepovedl —
+ * stejně jako u samostatného tlačítka „Navrhnout" na `[prispevek]`.
+ * Nejde o transakci, kterou by chyba modelu měla smazat celou: podklady
+ * vybíral člověk a ty se neztrácí kvůli tomu, že model neodpověděl.
+ *
+ * ---------------------------------------------------------------------
+ * MENU-ŠABLONY BEROU POLOŽKY Z POTVRZENÉHO MENU, NE Z FORMULÁŘE
+ *
+ * `SablonaDef.inputs` má u menu šablon vstup typu `items` — ten se tu
+ * schválně nevykresluje jako pole k vyplnění (`vyber-sablony.tsx`).
+ * Fakta (názvy, ceny) smí přijít jen odsud, nikdy se nevymýšlí
+ * (pravidlo z Kroku 2 platí i tady).
+ */
+export async function vytvoritZTvorby(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const rezim = String(formData.get('rezim') ?? 'rychly')
+  const { tenantId, branchId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/tvorba?rezim=${rezim}&chyba=${encodeURIComponent(co)}`)
+
+  if (!branchId) {
+    zpet('Příspěvek patří pobočce. Přepněte se na provozovnu, pro kterou ho připravujete.')
+  }
+
+  const kanaly = formData.getAll('kanaly').map(String).filter((k) => k === 'instagram' || k === 'facebook')
+  if (kanaly.length === 0) zpet('Vyberte aspoň jeden kanál.')
+
+  // Fotky se ověřují proti knihovně, ne jen převezmou z formuláře — stejný důvod jako v `ulozitVerzi`.
+  const vybraneMedia = formData.getAll('media').map(String).filter(Boolean)
+  let mediaIds: string[] = []
+  if (vybraneMedia.length > 0) {
+    const nalezene = await seznam<{ id: string }>(
+      'vybrané fotky',
+      supabase.from('marketing_media').select('id')
+        .eq('tenant_id', tenantId).in('id', vybraneMedia).is('archivovano_kdy', null),
+    )
+    const platne = new Set(nalezene.map((m) => m.id))
+    mediaIds = vybraneMedia.filter((id) => platne.has(id))
+  }
+
+  let pokyn = String(formData.get('pokyn') ?? '').trim()
+  let nazev = String(formData.get('nazev') ?? '').trim()
+  let ucel = 'atmosfera'
+  const vstupy: Record<string, unknown> = {}
+
+  if (rezim === 'rychly') {
+    if (mediaIds.length === 0) zpet('Rychlý příspěvek potřebuje aspoň jednu fotku.')
+    if (pokyn.length < 5) zpet('Napište aspoň větu o tom, co má příspěvek říct.')
+  } else if (rezim === 'pruvodce') {
+    const klic = String(formData.get('sablona') ?? '')
+    const def = sablona(klic)
+    if (!def) zpet('Vyberte šablonu.')
+    ucel = def!.purpose
+
+    const { vstupy: vstupyZeSablony, popisPole, chybiPovinne } = sestavVstupy(def!, {
+      hodnota: (k) => String(formData.get(`in_${k}`) ?? '').trim(),
+      zaskrtnuto: (k) => formData.get(`in_${k}`) === 'on',
+      hodnotaOd: (k) => String(formData.get(`in_${k}_od`) ?? '').trim(),
+      hodnotaDo: (k) => String(formData.get(`in_${k}_do`) ?? '').trim(),
+    })
+    if (chybiPovinne) zpet(`Vyplňte „${chybiPovinne}“.`)
+    Object.assign(vstupy, vstupyZeSablony)
+
+    let popisPolozek = ''
+    if (vyzadujeMenu(def!)) {
+      const menuId = String(formData.get('menuId') ?? '')
+      const menu = await jeden<{ id: string; stav: string }>(
+        'menu',
+        supabase.from('marketing_menu').select('id, stav').eq('id', menuId).eq('tenant_id', tenantId).maybeSingle(),
+      )
+      if (!menu) zpet('Vyberte menu.')
+      if (menu!.stav !== 'potvrzeno') zpet('Menu musí být nejdřív potvrzené — projděte položky na stránce Menu.')
+      vstupy.menuId = menu!.id
+
+      const polozky = await seznam<{ nazev: string; cena_haleru: number | null }>(
+        'položky menu',
+        supabase.from('marketing_menu_polozky').select('nazev, cena_haleru').eq('menu_id', menuId).order('poradi'),
+      )
+      popisPolozek = popisPolozekMenu(polozky)
+    }
+
+    if (!pokyn) pokyn = sestavPokyn(def!, popisPole, popisPolozek)
+    if (!nazev) nazev = def!.name
+  } else {
+    zpet('Neznámý režim tvorby.')
+  }
+
+  if (!nazev) nazev = pokyn.slice(0, 60) || 'Nový příspěvek'
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const prispevek = await jeden<{ id: string }>(
+    'založení příspěvku',
+    supabase.from('marketing_prispevky').insert({
+      tenant_id: tenantId,
+      branch_id: branchId,
+      nazev,
+      ucel,
+      kanaly,
+      vytvoril: ja,
+    }).select('id').single(),
+  )
+  if (!prispevek) zpet('Příspěvek se nepodařilo založit.')
+
+  const zakladObsah: ObsahVerze = {
+    ...prazdnyObsah(),
+    zadani: pokyn,
+    vstupy,
+    media_ids: mediaIds,
+    titulni_media_id: mediaIds[0] ?? null,
+  }
+
+  const { error: chybaZakladu } = await supabase.from('marketing_verze').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevek!.id,
+    cislo: 1,
+    zadani: zakladObsah.zadani,
+    vstupy: zakladObsah.vstupy,
+    media_ids: zakladObsah.media_ids,
+    titulni_media_id: zakladObsah.titulni_media_id,
+    otisk: otiskVerze(zakladObsah),
+    poznamka: 'Založení z tvorby',
+    vytvoril: ja,
+  })
+  if (chybaZakladu) {
+    redirect(`/${rozsah}/marketing/${prispevek!.id}?chyba=${encodeURIComponent(chybaZakladu.message)}`)
+  }
+
+  const znacka = await jeden<{
+    ton_hlasu: string; pouzivat_emoji: boolean; podpis: string; kontakt: string
+    vyrazy_ano: string[]; vyrazy_ne: string[]
+  }>(
+    'značka',
+    supabase.rpc('marketing_znacka', { p_tenant: tenantId, p_branch: branchId }).maybeSingle(),
+  )
+
+  let fotky: string[] = []
+  if (mediaIds.length > 0) {
+    const media = await seznam<{ alt_text: string; popis: string }>(
+      'popisky fotek',
+      supabase.from('marketing_media').select('alt_text, popis').eq('tenant_id', tenantId).in('id', mediaIds),
+    )
+    fotky = media.map((m) => (m.alt_text || m.popis).trim()).filter(Boolean)
+  }
+
+  const vysledek = await navrhnout(
+    {
+      pokyn,
+      kanal: kanaly[0],
+      format: 'prispevek',
+      znacka: {
+        tonHlasu: znacka?.ton_hlasu ?? 'neformalni',
+        pouzivatEmoji: znacka?.pouzivat_emoji ?? true,
+        podpis: znacka?.podpis ?? '',
+        kontakt: znacka?.kontakt ?? '',
+        vyrazyAno: znacka?.vyrazy_ano ?? [],
+        vyrazyNe: znacka?.vyrazy_ne ?? [],
+      },
+      fotky,
+    },
+    await klicZakaznika(supabase, tenantId, branchId!),
+  )
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+
+  if (vysledek.stav !== 'hotovo') {
+    redirect(`/${rozsah}/marketing/${prispevek!.id}?chyba=${encodeURIComponent(
+      vysledek.stav === 'chyba' ? vysledek.duvod : 'Návrh se nepodařilo vytvořit.',
+    )}`)
+  }
+
+  const prvni = vysledek.navrh.varianty[0]
+  const druhaVerze: ObsahVerze = {
+    zadani: pokyn,
+    vstupy,
+    vybrana_varianta: prvni.nazev,
+    texty: { [kanaly[0]]: { popisek: `${prvni.hook}\n\n${prvni.popisek}\n\n${prvni.cta}`.trim() } },
+    storyboard: vysledek.navrh.storyboard.length > 0 ? vysledek.navrh.storyboard : null,
+    media_ids: mediaIds,
+    titulni_media_id: mediaIds[0] ?? null,
+  }
+
+  const { error } = await supabase.from('marketing_verze').insert({
+    tenant_id: tenantId,
+    prispevek_id: prispevek!.id,
+    cislo: 2,
+    zadani: druhaVerze.zadani,
+    vstupy: druhaVerze.vstupy,
+    navrh_ai: vysledek.navrh,
+    vybrana_varianta: druhaVerze.vybrana_varianta,
+    texty: druhaVerze.texty,
+    storyboard: druhaVerze.storyboard,
+    media_ids: druhaVerze.media_ids,
+    titulni_media_id: druhaVerze.titulni_media_id,
+    otisk: otiskVerze(druhaVerze),
+    poznamka: vysledek.jeUkazka ? 'Ukázka bez připojené AI' : 'Návrh od AI',
+    ai_model: vysledek.model,
+    ai_verze_zadani: vysledek.verzeZadani,
+    vytvoril: ja,
+  })
+
+  if (error) {
+    redirect(`/${rozsah}/marketing/${prispevek!.id}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  redirect(`/${rozsah}/marketing/${prispevek!.id}?navrh=1`)
+}
+
+/**
  * NAČTENÍ DOPORUČENÝCH ŠABLON
  *
  * Zadání: master prompt, oddíl 9 („Knihovna gastro šablon").
@@ -800,6 +1107,102 @@ function polozkaDoRadku(
     duvod_kontroly: p.review_reason,
     poradi,
   }
+}
+
+/**
+ * Nové menu ručním formulářem.
+ *
+ * Zadání krok 2 (`docs/hlaseni/zadani-pro-ai-marketing-faktury.md`):
+ * čtvrtá cesta vedle textu, fotky a PDF — mřížka řádků, žádný model,
+ * žádné rozpoznávání. Co člověk napíše, to se uloží.
+ *
+ * ---------------------------------------------------------------------
+ * PRÁZDNÁ CENA SE KE KONTROLE OZNAČÍ STEJNĚ JAKO U IMPORTU
+ *
+ * Pravidlo „cena se nikdy nedomýšlí" neplatí jen pro AI. Kdo řádek
+ * vyplní bez ceny, ať už zapomněl nebo ji ještě nezná, má tu položku
+ * vidět stejně zvýrazněnou jako tu, kterou nedokázala přečíst fotka —
+ * `marketing_menu_potvrdit` mezi nimi taky nerozlišuje (`opravitPolozkuMenu`
+ * výš dělá totéž).
+ */
+const RADKU_RUCNE = 8
+
+export async function zalozitMenuRucne(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const branchId = String(formData.get('pobocka') ?? '')
+  const druh = String(formData.get('druh') ?? 'denni')
+  const nazev = String(formData.get('nazev') ?? '').trim()
+  const platiOd = String(formData.get('plati_od') ?? '').trim()
+  const platiDo = String(formData.get('plati_do') ?? '').trim()
+  const { tenantId, supabase } = await pripravit(rozsah, 'marketing.manage')
+
+  const zpet = (co: string) =>
+    redirect(`/${rozsah}/marketing/menu/nove?zpusob=rucne&chyba=${encodeURIComponent(co)}`)
+
+  const pobocka = await jeden<{ id: string }>(
+    'pobočka',
+    supabase.from('branches').select('id').eq('id', branchId).eq('tenant_id', tenantId).maybeSingle(),
+  )
+  if (!pobocka) zpet('Vyberte provozovnu.')
+
+  if (!platiOd) zpet('Vyplňte, od kdy menu platí.')
+
+  const polozky: Record<string, unknown>[] = []
+  let poradi = 0
+
+  for (let i = 0; i < RADKU_RUCNE; i++) {
+    const nazevPolozky = String(formData.get(`nazev_${i}`) ?? '').trim()
+    // Prázdný řádek se přeskočí — mřížka má vždycky pár řádků navíc.
+    if (!nazevPolozky) continue
+
+    const cena = String(formData.get(`cena_${i}`) ?? '').trim()
+    const haleru = cena === '' ? null : Math.round(Number(cena.replace(',', '.')) * 100)
+    if (haleru !== null && (!Number.isFinite(haleru) || haleru < 0)) {
+      zpet(`Řádek ${i + 1}: cena musí být číslo v korunách.`)
+    }
+
+    const alergeny = String(formData.get(`alergeny_${i}`) ?? '')
+      .split(/[,;]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    polozky.push({
+      tenant_id: tenantId,
+      kategorie: String(formData.get(`kategorie_${i}`) ?? 'hlavni'),
+      nazev: nazevPolozky,
+      popis: String(formData.get(`popis_${i}`) ?? '').trim(),
+      cena_haleru: haleru,
+      alergeny,
+      dostupnost: String(formData.get(`dostupnost_${i}`) ?? 'k_dispozici'),
+      vyzaduje_kontrolu: haleru === null,
+      duvod_kontroly: haleru === null ? 'Cena zatím není známá' : null,
+      poradi: poradi++,
+    })
+  }
+
+  const ja = await mujZamestnanec(tenantId)
+
+  const { data: menu, error: chybaMenu } = await supabase.from('marketing_menu').insert({
+    tenant_id: tenantId,
+    branch_id: branchId,
+    druh,
+    nazev: nazev || 'Menu bez názvu',
+    plati_od: platiOd,
+    plati_do: platiDo || null,
+    zdroj: 'rucne',
+    vytvoril: ja,
+  }).select('id').single()
+
+  if (chybaMenu || !menu) zpet(chybaMenu?.message ?? 'Menu se nepodařilo založit.')
+
+  if (polozky.length > 0) {
+    const { error } = await supabase.from('marketing_menu_polozky')
+      .insert(polozky.map((p) => ({ ...p, menu_id: menu!.id })))
+    if (error) zpet(error.message)
+  }
+
+  revalidatePath(`/${rozsah}/marketing/menu`)
+  redirect(`/${rozsah}/marketing/menu/${menu!.id}?ulozeno=1`)
 }
 
 /** Oprava jedné položky člověkem. Tím z ní zmizí i příznak kontroly. */
@@ -1035,4 +1438,128 @@ export async function schvalitVice(formData: FormData): Promise<void> {
     `schvaleno=${hotovo}&neproslo=${neproslo.length}`
     + `&duvod=${encodeURIComponent(neproslo[0])}`,
   )
+}
+
+/**
+ * PŘESUN TERMÍNU Z KALENDÁŘE
+ *
+ * Zadání: master prompt, oddíl 15 — „přesunutí termínu s kontrolou
+ * oprávnění a auditním záznamem".
+ *
+ * ---------------------------------------------------------------------
+ * NENÍ TO `naplanovat` ZNOVU, A NESMÍ TO JÍ BÝT
+ *
+ * `naplanovat` teprve ZAKLÁDÁ publikační úlohy: ověří schválenou verzi,
+ * platné schválení, vybere nástroj a založí úlohu na každý kanál.
+ * Tady se nic nezakládá — příspěvek je naplánovaný, mění se jen KDY.
+ *
+ * Kdyby se sem zavolalo `naplanovat`, narazilo by to na idempotenční
+ * klíč (`publikace:verze:kanal:format`), skončilo hláškou „na tuhle
+ * verzi už je publikace naplánovaná" a čas by se neposunul. Nebo, což
+ * je horší, kdyby ten klíč někdo uvolnil, vznikly by dvě úlohy a
+ * příspěvek by šel ven dvakrát.
+ *
+ * ---------------------------------------------------------------------
+ * POSOUVÁ SE I ÚLOHA, NE JEN PŘÍSPĚVEK
+ *
+ * TOHLE JE NA CELÉM PŘESUNU TO JEDINÉ, CO SE DÁ POKAZIT TIŠE.
+ *
+ * `planovano_na` je na dvou místech: na příspěvku (co se ukazuje
+ * v kalendáři) a na publikační úloze (podle čeho si ji fronta
+ * vyzvedne — `public.marketing_vyzvednout_publikace` čte úlohu, ne
+ * příspěvek). Kdyby se posunul jen příspěvek, v kalendáři by seděl
+ * nový termín a ven by to odešlo v ten starý. Nic by nespadlo a přišlo
+ * by se na to až z Instagramu.
+ *
+ * ---------------------------------------------------------------------
+ * CO UŽ ODEŠLO, SE NEPŘESOUVÁ
+ *
+ * Posouvají se jen úlohy ve stavu `naplanovano` nebo `selhalo`. Úlohu,
+ * která je `ve_fronte`, `odesila_se` nebo `zverejneno`, nemá smysl
+ * přesouvat — odeslané se neodešle zpátky a rozdělaná by se posunula
+ * uprostřed práce. Když se nepřesune nic, řekne se to a termín
+ * příspěvku se nemění: kalendář, který ukazuje jiný den než fronta,
+ * je horší než přesun, který se nepovedl.
+ */
+export async function presunoutTermin(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const prispevekId = String(formData.get('prispevek') ?? '')
+  const datum = String(formData.get('datum') ?? '')
+  const cas = String(formData.get('cas') ?? '')
+  const zpet = String(formData.get('zpet') ?? `/${rozsah}/marketing/kalendar`)
+
+  const { supabase } = await pripravit(rozsah, 'marketing.publish')
+
+  /*
+    ANOTACE JE NA PROMĚNNÉ, NE NA FUNKCI, A NENÍ TO JEDNO.
+
+    `redirect` vyhazuje výjimku, takže se za `chyba(…)` nepokračuje.
+    Překladač to ale vezme v potaz jen tehdy, když má typ napsaný
+    u PROMĚNNÉ (`const chyba: (t: string) => never`); s anotací
+    u šipky (`(text: string): never =>`) to nestačí a za
+    `chyba('nenašel se')` dál hlídá, že příspěvek může být prázdný.
+    Psalo by se pak `prispevek!` — a vykřičník umlčí i to, co umlčet
+    nemá.
+  */
+  const chyba: (text: string) => never = (text) =>
+    redirect(`${zpet}${zpet.includes('?') ? '&' : '?'}chyba=${encodeURIComponent(text)}`)
+
+  if (!datum || !cas) chyba('Vyplňte datum i čas.')
+
+  const prispevek = await jeden<{ branch_id: string; planovano_na: string | null; stav: string }>(
+    'příspěvek k přesunutí',
+    supabase.from('marketing_prispevky').select('branch_id, planovano_na, stav')
+      .eq('id', prispevekId).maybeSingle(),
+  )
+
+  if (!prispevek) chyba('Ten příspěvek se nenašel.')
+  if (!prispevek.planovano_na) {
+    chyba('Ten příspěvek zatím termín nemá. Naplánujte ho v detailu — tam se vybírá i způsob odeslání.')
+  }
+  if (prispevek.stav === 'zverejneno' || prispevek.stav === 'zverejnuje_se') {
+    chyba('Zveřejněný příspěvek se přesunout nedá.')
+  }
+
+  /*
+    Hodina na zdi se na okamžik převádí V DATABÁZI (pravidlo 11).
+    Stejná cesta jako v `naplanovat` — `new Date('…T18:00')` by se
+    přečetlo v pásmu serveru a ten je na Vercelu v UTC.
+  */
+  const okamzik = await pruzor<string>(
+    'převod času na okamžik',
+    supabase.rpc('marketing_okamzik', { p_branch: prispevek.branch_id, p_kdy: `${datum}T${cas}:00` }),
+  )
+
+  if (!okamzik) chyba('Čas se nepodařilo převést do pásma pobočky.')
+
+  /*
+    NEJDŘÍV ÚLOHY, POTOM PŘÍSPĚVEK.
+
+    Kdyby se posunul nejdřív příspěvek a posun úloh pak selhal (třeba
+    na oprávnění), zůstal by kalendář s novým termínem a fronta se
+    starým. V tomhle pořadí je horší případ ten, že se posunou úlohy
+    a příspěvek ne — a to je vidět hned, protože kalendář ukazuje
+    starý den.
+  */
+  const { data: posunute, error: chybaUloh } = await supabase
+    .from('marketing_publikace_ulohy')
+    .update({ planovano_na: okamzik, zmeneno_kdy: new Date().toISOString() })
+    .eq('prispevek_id', prispevekId)
+    .in('stav', ['naplanovano', 'selhalo'])
+    .select('id')
+
+  if (chybaUloh) chyba(chybaUloh.message)
+
+  if ((posunute?.length ?? 0) === 0) {
+    chyba('Žádná čekající publikace k přesunutí — nejspíš už je odeslaná nebo se odesílá.')
+  }
+
+  const { error: chybaPrispevku } = await supabase.from('marketing_prispevky')
+    .update({ planovano_na: okamzik, zmeneno_kdy: new Date().toISOString() })
+    .eq('id', prispevekId)
+
+  if (chybaPrispevku) chyba(chybaPrispevku.message)
+
+  revalidatePath(`/${rozsah}/marketing`, 'layout')
+  redirect(`${zpet}${zpet.includes('?') ? '&' : '?'}presunuto=1`)
 }

@@ -507,6 +507,90 @@
   .ft-ikona { width: 44px; height: 44px; }
 }
 
+/* ---- Marketing: vlastní sloupec a spodní lišta ------------------
+   Rám by jinak kreslil vlastní sloupec i lištu vedle marketingových
+   a navigace by byla dvakrát. Klientská komponenta se renderuje už na
+   serveru, takže :has() platí od prvního vykreslení, bez probliknutí. */
+.ft-shell:has(.modul-ram) .ft-body > .ft-side,
+.ft-shell:has(.modul-ram) > .ft-mob-bottom { display: none; }
+.ft-shell:has(.modul-ram) .ft-main { padding: 0; }
+
+.modul-ram { display: flex; min-height: 100%; }
+
+.modul-sloupec {
+  width: 240px; flex: none; align-self: flex-start;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--rail-2); color: var(--rail-ink);
+  position: sticky; top: var(--vysoka-lista);
+  height: calc(100dvh - var(--vysoka-lista)); overflow-y: auto;
+  padding: 4px 10px 16px calc(10px + var(--vlozka-vlevo));
+}
+.modul-skupina {
+  padding: 14px 10px 6px; font-size: 11.5px; color: var(--rail-tlum);
+  text-transform: uppercase; letter-spacing: .15em;
+}
+.modul-sloupec a, .modul-sloupec span.polozka {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 8px; font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
+}
+.modul-sloupec a:hover { color: var(--rail-ink); background: var(--rail); }
+.modul-sloupec a.on, .modul-sloupec a.on:hover {
+  background: var(--mosaz-sv); color: var(--mosaz-ink); font-weight: 600;
+}
+.modul-sloupec .soon small {
+  margin-left: auto; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  background: var(--rail); padding: 2px 6px; border-radius: 999px;
+}
+
+.modul-cislo {
+  margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: 999px; background: var(--bad); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 20px; text-align: center;
+}
+
+.modul-obsah {
+  flex: 1; min-width: 0;
+  padding: 24px max(28px, var(--vlozka-vpravo)) 24px 28px;
+}
+.modul-obsah-vnitrek { max-width: 1180px; }
+
+.modul-spodni { display: none; }
+
+@media (max-width: 1023px) {
+  .modul-sloupec { display: none; }
+  .modul-obsah {
+    padding: 20px max(22px, var(--vlozka-vpravo))
+             calc(62px + var(--vlozka-dole) + 16px)
+             max(22px, var(--vlozka-vlevo));
+  }
+  .modul-spodni {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    height: calc(62px + var(--vlozka-dole));
+    padding: 0 var(--vlozka-vpravo) var(--vlozka-dole) var(--vlozka-vlevo);
+    border-top: 1px solid var(--line); background: var(--card);
+  }
+  .modul-spodni a {
+    flex: 1; min-width: 0; min-height: 44px; padding: 0 2px; position: relative;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-size: 10px; color: var(--faint); text-decoration: none;
+  }
+  .modul-spodni a.on { color: var(--mosaz); }
+  .modul-spodni .stitek { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .modul-spodni .ft-i { width: 20px; height: 20px; }
+  .modul-spodni .modul-cislo {
+    position: absolute; top: 5px; left: calc(50% + 5px); margin: 0;
+    min-width: 17px; height: 17px; padding: 0 4px; font-size: 10px; line-height: 17px;
+  }
+}
+
+@media (max-width: 640px) {
+  .modul-obsah {
+    padding: 16px max(14px, var(--vlozka-vpravo))
+             calc(62px + var(--vlozka-dole) + 16px)
+             max(14px, var(--vlozka-vlevo));
+  }
+}
+
 * {
   box-sizing: border-box;
 }

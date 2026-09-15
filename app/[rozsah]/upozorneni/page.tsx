@@ -6,6 +6,7 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
   nadpisUpozorneni,
+  popisMarketingu,
   popisOpravneni,
   popisPinu,
   popisZapomenuteho,
@@ -197,6 +198,35 @@ export default async function Upozorneni({
                   <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
                     {popisPinu(z.telo)}
                   </p>
+                ) : null}
+
+                {/*
+                  MARKETING. Tlačítko vede rovnou na to místo, kde se
+                  s tím dá něco udělat — u žádosti do fronty ke
+                  schválení, u vrácení a selhání do příspěvku. Cesta ke
+                  splnění úkolu má být jedno kliknutí, stejně jako
+                  u zapomenutého odchodu.
+                */}
+                {z.druh.startsWith('marketing.') ? (
+                  <>
+                    <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
+                      {popisMarketingu(z.druh, z.telo)}
+                    </p>
+                    <p style={{ margin: '10px 0 0' }}>
+                      <Link
+                        href={
+                          z.druh === 'marketing.zadost'
+                            ? `/${rozsah}/marketing/schvalovani`
+                            : `/${rozsah}/marketing/${z.telo.prispevek ?? ''}`
+                        }
+                        className="ft-tl ft-tl-hlavni ft-tl-male"
+                      >
+                        {z.druh === 'marketing.zadost' ? 'Otevřít frontu ke schválení'
+                          : z.druh === 'marketing.publikace_selhala' ? 'Otevřít příspěvek'
+                            : 'Otevřít příspěvek'}
+                      </Link>
+                    </p>
+                  </>
                 ) : null}
 
                 {(z.druh === 'oznameni.nova' || z.druh === 'vzkaz.novy') ? (
