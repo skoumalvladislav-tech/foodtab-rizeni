@@ -167,9 +167,10 @@ Starší, už dřív na `origin` (marketing, dokumentace, audit) — viz `git lo
   do Vercelu. Opraveno smazáním a založením znovu jako typ **Config** +
   redeploy s vypnutým „Use existing Build Cache". Přesná příčina (poškozená
   hodnota vs. stará build cache) nebyla dál zjišťována, oprava zabrala.
-- **`rejection_examples`** (Faktury DB) — RLS zapnuté, **0 politik, 0 řádků**.
-  Appka i dřívější n8n do ní tiše nezapíšou nic. SQL oprava hotová v
-  `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`, **nespuštěno**.
+- **`rejection_examples`** (Faktury DB) — **OPRAVENO 15.9.2026 večer.** Politika
+  `allow all with anon key` spuštěna Šéfíkem (`docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`),
+  živě ověřen zápis (odmítnutí faktury tlačítkem „odmítnout a zapamatovat" →
+  ověřen nový řádek v tabulce, `created_at` 15.9.2026 18:25).
 - **`supabase/migrations/20260907010000_muj_den.sql` NENASAZENA** (FoodTab DB) —
   stránka „Dnes" kvůli tomu nefunguje. Starší nález, netýká se této relace přímo,
   ale zůstává na seznamu čekajícím na Šéfíka.
@@ -306,27 +307,23 @@ není rozpracované. Větev je pushnutá. Otevřené zbývá jen mimo kód:
 
 ## 15. Operace čekající na schválení Šéfíka
 
-**Faktury nasazení HOTOVO (viz bod 3/6) — zbývá jen:**
+**Faktury (nasazení + RLS oprava) KOMPLETNĚ HOTOVO — zbývá jen mimo Faktury:**
 
-1. **Spustit SQL z `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`**
-   v SQL editoru projektu **Faktury** (`ctqtwahlzhyjerqulqyn`, NE FoodTab DB).
-2. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
-3. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
+1. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
+2. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
    (`docs/granty-provoz-zadani.md`) — mimo gesci téhle relace, ale čeká na rozhodnutí.
-4. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
-5. n8n: zúžit/vypnout starý workflow Černá Perla.
-6. **Prošetřit selhávající GitHub Actions check „Migrace a scénáře"** —
+3. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
+4. n8n: zúžit/vypnout starý workflow Černá Perla.
+5. **Prošetřit selhávající GitHub Actions check „Migrace a scénáře"** —
    padá na `main` už dny, nesouvisí s Fakturami/Financemi, jen zjištěno a
    nahlášeno teď.
 
 ## 16. Doporučený další krok (přesně)
 
-**Faktury jsou kompletně hotové, nasazené a živě ověřené se skutečnými daty
-(15.9.2026 večer) — na tomhle projektu není žádný další nutný krok.** Zbývá
-jen nezávislé:
+**Faktury jsou kompletně hotové, nasazené, RLS opravená a živě ověřené se
+skutečnými daty i zápisem (15.9.2026 večer) — na tomhle projektu není žádný
+další nutný krok.** Zbývá jen nezávislé, mimo Faktury:
 
-1. Spustit RLS opravu `rejection_examples` (bod 15.1) — nezávislé, jde
-   spustit kdykoli.
-2. Pokračovat na Marketing Krok 4 (potřebuje jiné prostředí než tenhle
+1. Pokračovat na Marketing Krok 4 (potřebuje jiné prostředí než tenhle
    Windows stroj) nebo Krok 5 E2E (potřebuje Šéfíkovo rozhodnutí) — obojí
    nezávislé na Fakturách, žádné z nich nemá blokovat to ostatní.
