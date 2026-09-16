@@ -10,6 +10,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import { kratkyUvazek, UVAZKY } from "@/lib/uvazky";
 import { BARVY_LIDI, NAZVY_BAREV_LIDI } from "@/lib/barvy-lidi";
 import ZnackaOsoby from "@/app/znacka-osoby";
+import Ikona from "../../ikona";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
@@ -858,50 +859,65 @@ export default async function NastaveniLide({
                   </td>
                 ) : null}
 
-                <td style={td}>
-                  <Link
-                    href={`/${rozsah}/nastaveni/lide?upravuji=${z.id}`}
-                    className="ft-tl ft-tl-vedlejsi ft-tl-male"
-                    style={{ marginRight: "8px" }}
-                  >
-                    Upravit
-                  </Link>
+                <td style={{ ...td, textAlign: "right" }}>
                   {/*
-                    PIN. Kreslí se jen tomu, kdo spravuje docházku —
-                    a jen u nesmazaného člověka. U brigádníka bez účtu
-                    je to jediná cesta, jak mu píchání zpřístupnit.
+                    Kebab menu — UX redesign, oddíl 41: víc tlačítek
+                    natěsno v jedné buňce se sbalí do "•••". <details>,
+                    žádný JS navíc (stejný vzor jako přepínač rozsahu
+                    v globals.css, .ft-rozsah).
                   */}
-                  {smiPin && !z.deleted_at ? (
-                    <Link
-                      href={`/${rozsah}/nastaveni/lide?pin=${z.id}`}
-                      className="ft-tl ft-tl-vedlejsi ft-tl-male"
-                      style={{ marginRight: "8px" }}
-                    >
-                      PIN
-                    </Link>
-                  ) : null}
-                  {/*
-                    Poslední majitel se smazat nedá — spoušť v databázi
-                    to odmítne. Tlačítko se proto nenabízí a je u toho
-                    vysvětlení; klikat na něco, co skončí chybou, nemá
-                    smysl nabízet.
-                  */}
-                  {!z.deleted_at && posledniMajitel(z.user_id) ? (
-                    <span
-                      style={{ fontSize: "12.5px", color: "var(--muted)" }}
-                      title="Ve firmě musí zůstat aspoň jeden majitel. Nejdřív jmenujte dalšího."
-                    >
-                      jediný majitel
-                    </span>
-                  ) : null}
-                  {!z.deleted_at && !posledniMajitel(z.user_id) && (
-                    <SmazatZamestnance
-                      akce={smazatZamestnance}
-                      id={z.id}
-                      rozsah={rozsah}
-                      jmeno={z.full_name}
-                    />
-                  )}
+                  <details className="ft-kebab">
+                    <summary aria-label={`Akce pro ${z.full_name}`}>
+                      <Ikona klic="tecky" />
+                    </summary>
+                    <div className="ft-kebab-panel">
+                      <Link
+                        href={`/${rozsah}/nastaveni/lide?upravuji=${z.id}`}
+                        className="ft-kebab-polozka"
+                      >
+                        Upravit
+                      </Link>
+                      {/*
+                        PIN. Kreslí se jen tomu, kdo spravuje docházku —
+                        a jen u nesmazaného člověka. U brigádníka bez
+                        účtu je to jediná cesta, jak mu píchání
+                        zpřístupnit.
+                      */}
+                      {smiPin && !z.deleted_at ? (
+                        <Link
+                          href={`/${rozsah}/nastaveni/lide?pin=${z.id}`}
+                          className="ft-kebab-polozka"
+                        >
+                          PIN
+                        </Link>
+                      ) : null}
+                      {/*
+                        Poslední majitel se smazat nedá — spoušť
+                        v databázi to odmítne. Tlačítko se proto
+                        nenabízí a je u toho vysvětlení; klikat na
+                        něco, co skončí chybou, nemá smysl nabízet.
+                      */}
+                      {!z.deleted_at && posledniMajitel(z.user_id) ? (
+                        <span
+                          className="ft-kebab-polozka"
+                          style={{ color: "var(--muted)", fontSize: "12.5px" }}
+                          title="Ve firmě musí zůstat aspoň jeden majitel. Nejdřív jmenujte dalšího."
+                        >
+                          Jediný majitel
+                        </span>
+                      ) : null}
+                      {!z.deleted_at && !posledniMajitel(z.user_id) && (
+                        <div className="ft-kebab-polozka" style={{ padding: "4px 6px" }}>
+                          <SmazatZamestnance
+                            akce={smazatZamestnance}
+                            id={z.id}
+                            rozsah={rozsah}
+                            jmeno={z.full_name}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 </td>
               </tr>
             ))}
@@ -1004,7 +1020,9 @@ const tr = {
 } as const;
 
 const td = {
-  padding: "12px",
+  // 14px svisle místo 12px — UX redesign, oddíl 41: řádek tabulky
+  // blíž ke spodní hranici 48px ze zadání (dřív ~41px).
+  padding: "14px 12px",
 } as const;
 
 /*

@@ -9,6 +9,7 @@ import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { STAV_ODMITNUTO, type Faktura } from '@/lib/faktury-types'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
 import Sdeleni from '@/app/sdeleni'
+import Ikona from '../../../ikona'
 import Nadpis from '../../../nadpis'
 import { archivovatFakturu, obnovitFakturu, odmitnoutAZapamatovat, smazatFakturu } from '../akce'
 import StavZnacka from '../stav-znacka'
@@ -249,29 +250,48 @@ export default async function FakturySeznam({
                       {!f.pdf_url && !f.onedrive_url ? '–' : null}
                     </td>
                     {smiSpravovat ? (
-                      <td style={{ padding: '10px 12px' }}>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                          <form action={f.is_archived ? obnovitFakturu : archivovatFakturu}>
-                            <input type="hidden" name="rozsah" value={rozsah} />
-                            <input type="hidden" name="id" value={f.id} />
-                            <button type="submit" className="ft-tl ft-tl-male">{f.is_archived ? 'Obnovit' : 'Archivovat'}</button>
-                          </form>
-                          <form action={smazatFakturu}>
-                            <input type="hidden" name="rozsah" value={rozsah} />
-                            <input type="hidden" name="id" value={f.id} />
-                            <button type="submit" className="ft-tl ft-tl-male">Smazat</button>
-                          </form>
-                          {!f.is_archived && f.status !== STAV_ODMITNUTO ? (
-                            <form action={odmitnoutAZapamatovat}>
+                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                        {/*
+                          Kebab menu — UX redesign, oddíl 41: víc
+                          tlačítek natěsno v jedné buňce se sbalí do
+                          "•••" (stejný vzor jako Nastavení → Lidé).
+                        */}
+                        <details className="ft-kebab">
+                          <summary aria-label={`Akce pro fakturu ${f.invoice_number || f.id}`}>
+                            <Ikona klic="tecky" />
+                          </summary>
+                          <div className="ft-kebab-panel">
+                            <form action={f.is_archived ? obnovitFakturu : archivovatFakturu}>
                               <input type="hidden" name="rozsah" value={rozsah} />
                               <input type="hidden" name="id" value={f.id} />
-                              <input type="hidden" name="druh" value="not_invoice" />
-                              <button type="submit" className="ft-tl ft-tl-male" title="Odmítnout jako „není faktura“, zapamatovat pro AI a vyřadit i ostatní od stejného dodavatele">
-                                Není faktura
+                              <button type="submit" className="ft-kebab-polozka" style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+                                {f.is_archived ? 'Obnovit' : 'Archivovat'}
                               </button>
                             </form>
-                          ) : null}
-                        </div>
+                            <form action={smazatFakturu}>
+                              <input type="hidden" name="rozsah" value={rozsah} />
+                              <input type="hidden" name="id" value={f.id} />
+                              <button type="submit" className="ft-kebab-polozka" style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+                                Smazat
+                              </button>
+                            </form>
+                            {!f.is_archived && f.status !== STAV_ODMITNUTO ? (
+                              <form action={odmitnoutAZapamatovat}>
+                                <input type="hidden" name="rozsah" value={rozsah} />
+                                <input type="hidden" name="id" value={f.id} />
+                                <input type="hidden" name="druh" value="not_invoice" />
+                                <button
+                                  type="submit"
+                                  className="ft-kebab-polozka"
+                                  style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
+                                  title="Odmítnout jako „není faktura“, zapamatovat pro AI a vyřadit i ostatní od stejného dodavatele"
+                                >
+                                  Není faktura
+                                </button>
+                              </form>
+                            ) : null}
+                          </div>
+                        </details>
                       </td>
                     ) : null}
                   </tr>

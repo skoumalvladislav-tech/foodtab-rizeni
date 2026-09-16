@@ -271,6 +271,39 @@
 .ft-rozsah-panel a.on { background: var(--branch-fill); color: var(--branch-ink); font-weight: 600; }
 .ft-rozsah-panel a.on .ft-swatch { background: var(--card); }
 
+/* ---- Řádkové menu akcí ("•••") -----------------------------------
+   Design systém, 16.9.2026, oddíl 41 zadání: kebab menu místo víc
+   tlačítek natěsno v jedné buňce tabulky. <details>/<summary>, žádný
+   JS navíc — stejný vzor jako .ft-rozsah výš. Panel se otevírá doleva
+   (right:0), ať nevyjíždí mimo tabulku, když sloupec Akce sedí
+   u pravého kraje. */
+.ft-kebab { position: relative; display: inline-block; }
+.ft-kebab > summary {
+  list-style: none; cursor: pointer;
+  width: 32px; height: 32px; border-radius: 8px;
+  display: grid; place-items: center;
+  color: var(--muted); border: 1px solid var(--line-2); background: var(--card);
+}
+.ft-kebab > summary::-webkit-details-marker { display: none; }
+.ft-kebab > summary:hover { color: var(--ink); }
+.ft-kebab-panel {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 25;
+  min-width: 190px;
+  background: var(--card); border: 1px solid var(--line-2);
+  border-radius: 10px; box-shadow: var(--shadow); padding: 6px;
+  display: grid; gap: 2px;
+}
+/* Jedna položka menu — Link, form nebo obyčejný text (vysvětlení,
+   proč akce chybí). Stejná buňka pro všechny tři, ať se nemusí
+   stylovat zvlášť podle toho, čím zrovna je. */
+.ft-kebab-polozka {
+  display: flex; align-items: center; width: 100%;
+  padding: 9px 10px; border-radius: 8px; font-size: 13.5px;
+  color: var(--ink); text-decoration: none; min-height: 40px;
+  box-sizing: border-box;
+}
+a.ft-kebab-polozka:hover { background: var(--sunken); }
+
 /* Přepínač se sbalí do rozbalovátka dřív, než dojde místo.
    Sbalený má ~184 px, rozložený s třemi pobočkami 436 px a se čtyřmi
    kolem 580 — víc jich vedle sebe nikdy nebude, od páté ho sbaluje
