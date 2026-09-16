@@ -38,14 +38,18 @@ const pole = {
   display: 'block',
   width: '100%',
   padding: '8px 10px',
-  border: '1px solid var(--line)',
+  border: '1px solid var(--line-2)',
   borderRadius: 'var(--radius-sm)',
-  background: 'var(--bg)',
+  background: 'var(--paper)',
   color: 'inherit',
   fontSize: '14px',
+  minHeight: '44px',
 } as const
 
-const poleMale = { ...pole, padding: '5px 6px', fontSize: '13px' } as const
+// minHeight se z pole schválně vrací zpátky na auto — poleMale je pro
+// hustou vstupní tabulku o osmi řádcích (RADKU_RUCNE níž), kde by 44px
+// na řádek zbytečně natáhlo celou tabulku.
+const poleMale = { ...pole, padding: '5px 6px', fontSize: '13px', minHeight: 'auto' } as const
 const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const
 
 const KATEGORIE = [

@@ -517,9 +517,10 @@ const pole: React.CSSProperties = {
   // 16 px schválně: iOS jinak při zaostření pole zoomuje celou stránku.
   fontSize: '16px',
   borderRadius: 'var(--radius-sm)',
-  border: '1px solid var(--line)',
+  border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',
+  minHeight: '44px',
 }
 
 const vyber: React.CSSProperties = { ...pole, minHeight: '44px' }
