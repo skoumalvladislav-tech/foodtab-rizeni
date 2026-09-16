@@ -57,12 +57,13 @@
   height: var(--vysoka-lista);
   padding: var(--lista-shora) max(18px, var(--vlozka-vpravo))
            var(--lista-okraj) max(18px, var(--vlozka-vlevo));
-  background: var(--rail); color: var(--rail-ink);
-  box-shadow: var(--shadow);
+  background: var(--card); color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
 }
 .ft-brand { font-weight: 700; letter-spacing: -.02em; font-size: 17px;
-            color: var(--rail-ink); text-decoration: none; white-space: nowrap; }
-.ft-brand em { font-style: normal; color: var(--mosaz-sv); }
+            color: var(--ink); text-decoration: none; white-space: nowrap; }
+.ft-brand em { font-style: normal; color: var(--mosaz); }
 
 /* min-width: 0 dovolí pruhu se zmenšit, overflow: hidden se postará
    o to, aby se zmenšil OPRAVDU. Bez něj se pruh sice zúžil, ale názvy
@@ -71,15 +72,17 @@
    se stará zlom níž. */
 .ft-mods { display: flex; gap: 2px; align-items: center; min-width: 0; overflow: hidden; }
 .ft-mod {
-  padding: 7px 14px; border-radius: 8px; font-size: 13.5px; font-weight: 500;
-  color: var(--rail-tlum); white-space: nowrap; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500;
+  color: var(--muted); white-space: nowrap; text-decoration: none;
   background: none; border: 0; font-family: inherit; cursor: pointer;
 }
-.ft-mod:hover { color: var(--rail-ink); }
-.ft-mod.on { background: var(--rail-2); color: var(--rail-ink); font-weight: 600; }
+.ft-mod .ft-i { width: 15px; height: 15px; }
+.ft-mod:hover { color: var(--ink); }
+.ft-mod.on { background: var(--mosaz-sv); color: var(--mosaz-ink); font-weight: 600; }
 /* Vypnutý modul zůstává vidět — zákazník má vědět, co si může přikoupit.
    Pozná se přeškrtnutím, ne jen bledším odstínem. */
-.ft-mod.off { color: var(--rail-tlum); position: relative; cursor: not-allowed; }
+.ft-mod.off { color: var(--muted); position: relative; cursor: not-allowed; }
 .ft-mod.off::after {
   content: ""; position: absolute; inset: 6px 10px auto; height: 1px;
   background: currentColor; opacity: .28; top: 50%;
@@ -98,11 +101,11 @@
 .ft-ikona {
   width: 32px; height: 32px; border-radius: 8px;
   display: grid; place-items: center;
-  color: var(--rail-tlum); border: 1px solid transparent;
+  color: var(--muted); border: 1px solid transparent;
   background: none; cursor: pointer; padding: 0;
 }
-.ft-ikona:hover { color: var(--rail-ink); }
-.ft-ikona.ram { border-color: var(--rail-2); }
+.ft-ikona:hover { color: var(--ink); }
+.ft-ikona.ram { border-color: var(--line-2); }
 .ft-ikona:focus-visible {
   outline: 2px solid var(--mosaz-sv);
   outline-offset: 1px;
@@ -119,7 +122,7 @@
   box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.3);
 }
 
-.ft-divider { width: 1px; height: 24px; background: var(--rail-2); flex: none; }
+.ft-divider { width: 1px; height: 24px; background: var(--line-2); flex: none; }
 
 /* Text jen pro odečítač obrazovky.
 
@@ -161,24 +164,22 @@
 .ft-hledani {
   position: relative; display: flex; align-items: center; flex: none;
   height: 32px; border-radius: 9px;
-  background: var(--rail-2);
+  background: var(--sunken);
   /* Obrys musí být vidět proti liště i proti vlastní výplni — WCAG
-     1.4.11 chce 3,0 pro hranici ovládacího prvku. Dřív tu byl --rail-2,
-     tedy táž barva jako výplň: proti liště 1,31, a neohraničoval nic.
-     --rail-tlum drží nejhůř 4,81 u všech devíti klíčů v obou režimech.
-     Hlídá to scripts/barvy.js. */
-  border: 1px solid var(--rail-tlum);
+     1.4.11 chce 3,0 pro hranici ovládacího prvku. --line-2 drží tenhle
+     poměr na papírové ploše stejně jako u ostatních vstupů appky. */
+  border: 1px solid var(--line-2);
 }
 .ft-hledani .ft-i {
   position: absolute; left: 10px; width: 15px; height: 15px;
-  color: var(--rail-tlum); pointer-events: none;
+  color: var(--muted); pointer-events: none;
 }
 .ft-hledani input {
   width: 250px; height: 100%; padding: 0 11px 0 31px;
-  border: 0; background: transparent; color: var(--rail-ink);
+  border: 0; background: transparent; color: var(--ink);
   font: inherit; font-size: 12.5px; border-radius: inherit;
 }
-.ft-hledani input::placeholder { color: var(--rail-tlum); opacity: 1; }
+.ft-hledani input::placeholder { color: var(--muted); opacity: 1; }
 .ft-hledani input:disabled { cursor: not-allowed; }
 /* Zaměření se kreslí kolem celé pilulky, ne kolem průhledného vnitřku. */
 .ft-hledani input:focus { outline: none; }
@@ -209,14 +210,14 @@
 /* Vybraná volba je vyplněná svou barvou, ostatní mají jen obrys.
    data-branch sedí na každé volbě zvlášť, takže var(--branch) uvnitř
    sáhne po odstínu té které pobočky. Vedle tečky je vždycky název. */
-.ft-seg { display: flex; gap: 2px; background: var(--rail-2);
-          border: 1px solid var(--rail-2); border-radius: 10px; padding: 3px; }
+.ft-seg { display: flex; gap: 2px; background: var(--sunken);
+          border: 1px solid var(--line-2); border-radius: 10px; padding: 3px; }
 .ft-seg a {
   display: inline-flex; align-items: center; gap: 7px;
-  font-size: 13px; font-weight: 500; color: var(--rail-tlum);
+  font-size: 13px; font-weight: 500; color: var(--muted);
   padding: 6px 11px; border-radius: 7px; text-decoration: none; white-space: nowrap;
 }
-.ft-seg a:hover { color: var(--rail-ink); }
+.ft-seg a:hover { color: var(--ink); }
 .ft-seg a.on { background: var(--mosaz-sv); color: var(--mosaz-ink); font-weight: 600; }
 .ft-seg a.on:hover { background: var(--mosaz-sv); color: var(--mosaz-ink); }
 .ft-seg a.on .ft-swatch { background: var(--mosaz-ink); }
@@ -227,12 +228,12 @@
 .ft-rozsah > summary {
   display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
   list-style: none; font-size: 13px; font-weight: 500;
-  padding: 6px 11px; border: 1px solid var(--rail-2); border-radius: 999px;
-  background: var(--rail-2); color: var(--rail-ink); white-space: nowrap;
+  padding: 6px 11px; border: 1px solid var(--line-2); border-radius: 999px;
+  background: var(--sunken); color: var(--ink); white-space: nowrap;
   min-height: 32px;
 }
 .ft-rozsah > summary::-webkit-details-marker { display: none; }
-.ft-rozsah > summary .sipka { width: 14px; height: 14px; color: var(--rail-tlum); }
+.ft-rozsah > summary .sipka { width: 14px; height: 14px; color: var(--muted); }
 .ft-rozsah[open] > summary .sipka { transform: rotate(180deg); }
 .ft-rozsah > summary > span:nth-child(2) {
   overflow: hidden; text-overflow: ellipsis; max-width: 160px;
@@ -297,7 +298,18 @@
 .ft-side-head span { font-size: 11.5px; color: var(--rail-tlum); text-transform: uppercase;
                      letter-spacing: .15em; }
 
-.ft-nav { padding: 10px; display: flex; flex-direction: column; gap: 2px; }
+.ft-nav { padding: 10px; display: flex; flex-direction: column; gap: 14px; }
+/* Design systém, 15.9.2026 — sloupec teď ukazuje všechny moduly
+   najednou (mockup Šéfíka), sdružené do .ft-nav-skupina bloků.
+   Mezera mezi bloky (gap na .ft-nav) je větší než uvnitř bloku
+   (gap na .ft-nav-skupina), ať jsou sekce vizuálně oddělené bez
+   nutnosti čáry mezi každou. */
+.ft-nav-skupina { display: flex; flex-direction: column; gap: 2px; }
+.ft-nav-nadpis {
+  padding: 4px 10px; margin-top: 4px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--rail-tlum);
+}
 .ft-nav a, .ft-nav span.polozka {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
   border-radius: 8px; font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
@@ -346,7 +358,9 @@
   .ft-side { width: 72px; align-items: center; padding-top: 12px; }
   .ft-side-head { padding: 0 0 8px; border-bottom: 0; width: 40px; }
   .ft-side-head b, .ft-side-head span { display: none; }
-  .ft-nav { padding: 0; gap: 4px; align-items: center; width: 100%; }
+  .ft-nav { padding: 0; gap: 10px; align-items: center; width: 100%; }
+  .ft-nav-skupina { align-items: center; width: 100%; gap: 4px; }
+  .ft-nav-nadpis { display: none; }
   .ft-nav a, .ft-nav span.polozka {
     width: 46px; height: 42px; padding: 0; justify-content: center; gap: 0;
   }
@@ -391,14 +405,15 @@
   .ft-mob-mods {
     display: flex; gap: 6px;
     padding: 8px max(14px, var(--vlozka-vpravo)) 8px max(14px, var(--vlozka-vlevo));
-    background: var(--rail-2); border-bottom: 1px solid var(--rail);
+    background: var(--sunken); border-bottom: 1px solid var(--line);
     overflow-x: auto; -webkit-overflow-scrolling: touch;
     /* Lepí se POD lištu i s vložkou. S pevnými 56 px zaleze pod
        Dynamic Island a nedá se na ni kliknout. */
     position: sticky; top: var(--vysoka-lista); z-index: 19;
   }
   .ft-mob-mods::-webkit-scrollbar { display: none; }
-  .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; flex: none; }
+  .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; gap: 6px; flex: none; }
+  .ft-mob-mods .ft-mod .ft-i { width: 13px; height: 13px; }
 
   /* Moduly jsou pryč z lišty, takže tady už nástroje nemají komu
      ustupovat — a naopak samy ustoupit MUSÍ, jinak vytlačí stránku do
@@ -532,7 +547,7 @@
 }
 .modul-sloupec a, .modul-sloupec span.polozka {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border-radius: 8px; font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
+  border-radius: var(--radius-sm); font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
 }
 .modul-sloupec a:hover { color: var(--rail-ink); background: var(--rail); }
 .modul-sloupec a.on, .modul-sloupec a.on:hover {
@@ -545,7 +560,7 @@
 
 .modul-cislo {
   margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px;
-  border-radius: 999px; background: var(--bad); color: #fff;
+  border-radius: var(--radius-full); background: var(--bad); color: #fff;
   font-size: 11px; font-weight: 700; line-height: 20px; text-align: center;
 }
 

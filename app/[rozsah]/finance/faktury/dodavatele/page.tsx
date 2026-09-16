@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
 const pole = {
   padding: '6px 10px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '13.5px',
@@ -134,13 +134,13 @@ export default async function FakturyDodavatele({
                   href={`/${rozsah}/finance/faktury/seznam?dodavatel=${encodeURIComponent(d.jmeno)}`}
                   style={{
                     display: 'block', textDecoration: 'none', color: 'inherit',
-                    background: 'var(--card)', border: '1px solid var(--line)', borderRadius: '14px', overflow: 'hidden',
+                    background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 'var(--radius-lg)', overflow: 'hidden',
                   }}
                 >
                   <div style={{ height: '4px', background: barva }} />
                   <div style={{ padding: '14px', display: 'grid', gap: '10px' }}>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                      <span style={{ width: '32px', height: '32px', borderRadius: '999px', background: barva, color: '#fff', fontSize: '12px', display: 'grid', placeItems: 'center', flex: 'none' }}>
+                      <span style={{ width: '32px', height: '32px', borderRadius: 'var(--radius-full)', background: barva, color: '#fff', fontSize: '12px', display: 'grid', placeItems: 'center', flex: 'none' }}>
                         {inicialyDodavatele(d.jmeno)}
                       </span>
                       <div style={{ minWidth: 0 }}>
@@ -159,7 +159,7 @@ export default async function FakturyDodavatele({
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: stitek.bg, color: stitek.barva }}>{stitek.text}</span>
+                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: 'var(--radius-full)', background: stitek.bg, color: stitek.barva }}>{stitek.text}</span>
                       <span style={{ fontSize: '11.5px', color: 'var(--muted)' }}>poslední {formatDatum(d.posledniPrijata)}</span>
                     </div>
                   </div>

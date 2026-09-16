@@ -351,7 +351,7 @@ export default function PanelOpravneni({
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   padding: '16px 18px',
   marginTop: '16px',
   maxWidth: '640px',
@@ -380,7 +380,7 @@ const pole = {
   width: '100%',
   padding: '10px 12px',
   fontSize: '16px',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',
@@ -389,7 +389,7 @@ const pole = {
 
 const skupina = {
   border: '1px solid var(--line)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   padding: '12px 14px',
   display: 'grid',
   gap: '10px',
@@ -433,7 +433,7 @@ const ramecek = {
   margin: '0 0 14px',
   padding: '10px 12px',
   border: '1px solid var(--pozor)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--pozor-bg)',
   color: 'var(--pozor)',
   fontSize: '13.5px',

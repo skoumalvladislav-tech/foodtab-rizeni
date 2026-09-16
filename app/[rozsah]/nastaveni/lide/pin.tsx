@@ -175,7 +175,7 @@ function denCesky(iso: string): string {
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   boxShadow: 'var(--shadow)',
   padding: '18px',
   margin: '0 16px 24px',
@@ -204,7 +204,7 @@ const ramecek = {
   margin: 0,
   padding: '10px 12px',
   border: '1px solid var(--pozor)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--pozor-bg)',
   color: 'var(--pozor)',
   fontSize: '13.5px',
@@ -224,7 +224,7 @@ const poleLabel = {
 const pole = {
   width: '100%',
   padding: '10px 12px',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',

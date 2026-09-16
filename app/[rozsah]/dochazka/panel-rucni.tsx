@@ -249,7 +249,7 @@ function popisChyby(kod: string): string {
 const panel = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   boxShadow: 'var(--shadow)',
   padding: '18px',
 } as const
@@ -260,7 +260,7 @@ const ramecekPredvyplneno = {
   margin: '0 0 12px',
   padding: '10px 12px',
   border: '1px solid var(--mosaz)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--paper)',
   color: 'var(--ink)',
   fontSize: '13.5px',
@@ -294,7 +294,7 @@ const pole = {
   width: '100%',
   padding: '10px 12px',
   fontSize: '16px',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',

@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -93,7 +93,7 @@ export default async function FakturySchvaleni({
           cekajici.map((f) => (
             <div key={f.id} style={{ ...karta, display: 'grid', gap: '10px' }}>
               <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                <span style={{ width: '32px', height: '32px', borderRadius: '999px', background: barvaDodavatele(f.supplier), color: '#fff', fontSize: '12px', display: 'grid', placeItems: 'center', flex: 'none' }}>
+                <span style={{ width: '32px', height: '32px', borderRadius: 'var(--radius-full)', background: barvaDodavatele(f.supplier), color: '#fff', fontSize: '12px', display: 'grid', placeItems: 'center', flex: 'none' }}>
                   {inicialyDodavatele(f.supplier)}
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>

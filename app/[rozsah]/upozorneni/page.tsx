@@ -324,7 +324,7 @@ function cas(t: string | null): string {
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   padding: '14px 16px',
   boxShadow: 'var(--shadow)',
 } as const
@@ -333,7 +333,7 @@ const ramecek = {
   margin: 0,
   padding: '10px 12px',
   border: '1px solid var(--pozor)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--pozor-bg)',
   color: 'var(--pozor)',
   fontSize: '14px',

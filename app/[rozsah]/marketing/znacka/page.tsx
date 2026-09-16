@@ -27,7 +27,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -36,7 +36,7 @@ const pole = {
   width: '100%',
   padding: '8px 10px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '14px',

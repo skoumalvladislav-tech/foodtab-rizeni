@@ -348,7 +348,7 @@ const vetaNahore = {
   margin: '0 0 16px',
   padding: '12px 14px',
   border: '1px solid var(--line-2)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--paper)',
   color: 'var(--ink)',
   fontSize: '14px',
@@ -359,7 +359,7 @@ const vetaNahore = {
 const formular = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   padding: '16px 18px',
   boxShadow: 'var(--shadow)',
   maxWidth: '620px',
@@ -385,7 +385,7 @@ const pole = {
   width: '100%',
   padding: '10px 12px',
   fontSize: '16px',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',
@@ -418,7 +418,7 @@ const seznam = {
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   padding: '14px',
 } as const
 

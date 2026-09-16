@@ -267,7 +267,7 @@ export default async function NastaveniOpravneni({
                 style={{
                   background: "var(--card)",
                   border: "1px solid var(--line)",
-                  borderRadius: "14px",
+                  borderRadius: "var(--radius-lg)",
                   boxShadow: "var(--shadow)",
                   padding: "18px",
                 }}
@@ -420,7 +420,7 @@ function Citlive() {
       style={{
         marginLeft: "8px",
         padding: "1px 7px",
-        borderRadius: "999px",
+        borderRadius: "var(--radius-full)",
         background: "var(--pozor-bg)",
         color: "var(--pozor)",
         fontSize: "11.5px",
@@ -489,7 +489,7 @@ const mrizka = {
 const stitek = {
   marginLeft: "8px",
   padding: "1px 7px",
-  borderRadius: "999px",
+  borderRadius: "var(--radius-full)",
   background: "var(--pozor-bg)",
   color: "var(--pozor)",
   fontSize: "11.5px",
@@ -517,14 +517,14 @@ const zalozeni = {
   padding: "14px",
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: "14px",
+  borderRadius: "var(--radius-lg)",
 };
 
 const poleText = {
   width: "100%",
   padding: "8px 10px",
   fontSize: "16px",
-  borderRadius: "10px",
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line)",
   background: "var(--paper)",
   color: "var(--ink)",

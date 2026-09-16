@@ -43,7 +43,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -52,7 +52,7 @@ const pole = {
   width: '100%',
   padding: '8px 10px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '14px',
@@ -177,10 +177,10 @@ export default async function Tvorba({
                   alt={f.alt_text || f.nazev_souboru}
                   width={96}
                   height={96}
-                  style={{ objectFit: 'cover', borderRadius: '8px', background: 'var(--bg)' }}
+                  style={{ objectFit: 'cover', borderRadius: 'var(--radius-sm)', background: 'var(--bg)' }}
                 />
               ) : (
-                <div style={{ width: '96px', height: '96px', borderRadius: '8px', background: 'var(--bg)' }} />
+                <div style={{ width: '96px', height: '96px', borderRadius: 'var(--radius-sm)', background: 'var(--bg)' }} />
               )}
               <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <input type="checkbox" name="media" value={f.id} />

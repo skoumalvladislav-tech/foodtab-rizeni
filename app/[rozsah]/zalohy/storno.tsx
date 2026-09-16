@@ -49,7 +49,7 @@ export default function Storno({
         style={{
           padding: '6px 8px',
           fontSize: '13px',
-          borderRadius: '8px',
+          borderRadius: 'var(--radius-sm)',
           border: '1px solid var(--line-2)',
           background: 'var(--paper)',
           color: 'var(--ink)',

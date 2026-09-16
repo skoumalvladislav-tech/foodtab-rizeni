@@ -49,6 +49,25 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <circle cx="15" cy="10" r="1.3" />
     </>
   ),
+  mince: (
+    <>
+      <circle cx="7" cy="12.5" r="4.3" />
+      <circle cx="13" cy="7.5" r="4.3" />
+    </>
+  ),
+  praporek: (
+    <>
+      <path d="M4 12.5v-4l11-4.5v13L4 12.5z" />
+      <path d="M7.5 12.5v4.5" />
+    </>
+  ),
+  vozik: (
+    <>
+      <path d="M3 4h2l1.7 9.6a1.6 1.6 0 001.6 1.3h6.2a1.6 1.6 0 001.6-1.3L17.3 7H6.2" />
+      <circle cx="8.3" cy="16.8" r="1.2" />
+      <circle cx="14.3" cy="16.8" r="1.2" />
+    </>
+  ),
 };
 
 export default function Ikona({ klic }: { klic: IkonaKlic }) {

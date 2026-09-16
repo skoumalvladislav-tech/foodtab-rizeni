@@ -30,14 +30,14 @@ const NA_STRANU = 100
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
 const pole = {
   padding: '6px 10px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '13.5px',
@@ -223,7 +223,7 @@ export default async function FakturySeznam({
                   <tr key={f.id} style={{ borderTop: '1px solid var(--line)' }}>
                     <td style={{ padding: '10px 12px' }}>
                       <Link href={stavPole({ dodavatel: f.supplier || undefined })} style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', color: 'inherit' }}>
-                        <span style={{ width: '22px', height: '22px', borderRadius: '999px', background: barvaDodavatele(f.supplier), color: '#fff', fontSize: '10px', display: 'grid', placeItems: 'center', flex: 'none' }}>
+                        <span style={{ width: '22px', height: '22px', borderRadius: 'var(--radius-full)', background: barvaDodavatele(f.supplier), color: '#fff', fontSize: '10px', display: 'grid', placeItems: 'center', flex: 'none' }}>
                           {inicialyDodavatele(f.supplier)}
                         </span>
                         {f.supplier || '–'}
@@ -236,7 +236,7 @@ export default async function FakturySeznam({
                     <td style={{ padding: '10px 12px' }}>
                       <StavZnacka stav={f.status} />
                       {f.is_duplicate ? (
-                        <span title="Možná duplicita (stejný dodavatel a číslo faktury)" style={{ marginLeft: '4px', fontSize: '11px', padding: '2px 6px', borderRadius: '999px', background: 'var(--bad-bg)', color: 'var(--bad)' }}>
+                        <span title="Možná duplicita (stejný dodavatel a číslo faktury)" style={{ marginLeft: '4px', fontSize: '11px', padding: '2px 6px', borderRadius: 'var(--radius-full)', background: 'var(--bad-bg)', color: 'var(--bad)' }}>
                           Duplicitní
                         </span>
                       ) : null}

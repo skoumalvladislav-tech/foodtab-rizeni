@@ -38,7 +38,7 @@ export const dynamic = 'force-dynamic'
 const karta = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '14px',
+  borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
 
@@ -47,7 +47,7 @@ const pole = {
   width: '100%',
   padding: '8px 10px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '14px',
@@ -291,7 +291,7 @@ function Radek({
     <div
       style={{
         border: '1px solid var(--line)',
-        borderRadius: '10px',
+        borderRadius: 'var(--radius-sm)',
         padding: '12px',
         display: 'grid',
         gap: '10px',
@@ -305,12 +305,12 @@ function Radek({
             alt={fotka.alt_text || fotka.nazev_souboru}
             width={96}
             height={96}
-            style={{ objectFit: 'cover', borderRadius: '8px', background: 'var(--bg)' }}
+            style={{ objectFit: 'cover', borderRadius: 'var(--radius-sm)', background: 'var(--bg)' }}
           />
         ) : (
           <div
             style={{
-              width: '96px', height: '96px', borderRadius: '8px', background: 'var(--bg)',
+              width: '96px', height: '96px', borderRadius: 'var(--radius-sm)', background: 'var(--bg)',
               display: 'grid', placeItems: 'center', fontSize: '12px', color: 'var(--muted)',
             }}
           >

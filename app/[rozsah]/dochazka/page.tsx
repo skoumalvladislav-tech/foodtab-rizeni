@@ -20,6 +20,7 @@ import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import Card from "@/components/ui/Card";
 import Nadpis from "../nadpis";
 import { zapsatDochazku } from "./akce";
 import PanelRucni from "./panel-rucni";
@@ -768,15 +769,7 @@ export default async function Dochazka({
 
         {/* 1. Karta stavu s píchačkou */}
         {muzePichat ? (
-          <section
-            style={{
-              background: "var(--card)",
-              border: "1px solid var(--line)",
-              borderRadius: "16px",
-              boxShadow: "var(--shadow)",
-              padding: "20px",
-            }}
-          >
+          <Card as="section" padding="20px" style={{ boxShadow: "var(--shadow)" }}>
             <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
               {scope.branchName ?? nazvyPobocek.get(branchId as string)}
             </p>
@@ -877,7 +870,7 @@ export default async function Dochazka({
                   margin: "16px 0 0",
                   padding: "10px 12px",
                   border: "1px solid var(--pozor)",
-                  borderRadius: "10px",
+                  borderRadius: "var(--radius-sm)",
                   background: "var(--pozor-bg)",
                   color: "var(--pozor)",
                   fontSize: "13.5px",
@@ -936,7 +929,7 @@ export default async function Dochazka({
                 Kdo tablet po ruce nemá, píchne na něm PINem.
               </p>
             </form>
-          </section>
+          </Card>
         ) : (
           <Vysvetleni nadpis="Píchat zatím nejde">
             {branchId
@@ -968,6 +961,16 @@ export default async function Dochazka({
           />
         ) : null}
 
+        {/*
+          Dvě samostatné sekce (moje směny / dnešní stav pobočky) vedle
+          sebe od 900px — stejný princip jako Dnes (design systém,
+          16.9.2026), tady ale symetricky: obě mají srovnatelnou váhu,
+          žádná není "hlavní sloupec". `auto-fit` grid se obejde bez
+          media dotazu, samo se to podsune pod sebe, když se dvě 320px
+          položky vedle sebe nevejdou.
+        */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px", alignItems: "start" }}>
+        <div>
         {/* 3. Moje nejbližší směny */}
         <h2 style={nadpisSekce}>Moje nejbližší směny</h2>
 
@@ -999,7 +1002,7 @@ export default async function Dochazka({
                     borderLeft: `4px solid ${
                       s.status === "confirmed" ? "var(--good)" : "var(--line-2)"
                     }`,
-                    borderRadius: "14px",
+                    borderRadius: "var(--radius-lg)",
                     boxShadow: "var(--shadow)",
                     padding: "16px",
                   }}
@@ -1069,7 +1072,9 @@ export default async function Dochazka({
             })}
           </ol>
         )}
+        </div>
 
+        <div>
         {/* 3. Dnešní stav ostatních */}
         <h2 style={nadpisSekce}>
           {vidiOstatni ? "Dnes na pobočce" : "Moje dnešní docházka"}
@@ -1105,7 +1110,7 @@ export default async function Dochazka({
                   style={{
                     background: "var(--card)",
                     border: "1px solid var(--line)",
-                    borderRadius: "12px",
+                    borderRadius: "var(--radius-md)",
                     padding: "12px 14px",
                     display: "flex",
                     justifyContent: "space-between",
@@ -1144,6 +1149,8 @@ export default async function Dochazka({
             })}
           </ul>
         )}
+        </div>
+        </div>
       </div>
     </>
   );
@@ -1199,16 +1206,7 @@ function DlazdiceVydelku({
   nedokoncenych: number;
 }) {
   return (
-    <section
-      style={{
-        marginTop: "16px",
-        background: "var(--card)",
-        border: "1px solid var(--line)",
-        borderRadius: "16px",
-        boxShadow: "var(--shadow)",
-        padding: "20px",
-      }}
-    >
+    <Card as="section" padding="20px" style={{ marginTop: "16px", boxShadow: "var(--shadow)" }}>
       <div
         style={{
           display: "flex",
@@ -1321,7 +1319,7 @@ function DlazdiceVydelku({
             margin: "12px 0 0",
             padding: "10px 12px",
             border: "1px solid var(--pozor)",
-            borderRadius: "10px",
+            borderRadius: "var(--radius-sm)",
             background: "var(--pozor-bg)",
             color: "var(--pozor)",
             fontSize: "13.5px",
@@ -1338,7 +1336,7 @@ function DlazdiceVydelku({
             display: "inline-block",
             margin: "12px 0 0",
             padding: "4px 10px",
-            borderRadius: "999px",
+            borderRadius: "var(--radius-full)",
             background: "var(--pozor-bg)",
             color: "var(--pozor)",
             fontSize: "13px",
@@ -1380,7 +1378,7 @@ function DlazdiceVydelku({
             display: "inline-block",
             margin: "12px 0 0",
             padding: "4px 10px",
-            borderRadius: "999px",
+            borderRadius: "var(--radius-full)",
             background: "var(--pozor-bg)",
             color: "var(--pozor)",
             fontSize: "13px",
@@ -1402,7 +1400,7 @@ function DlazdiceVydelku({
             display: "inline-block",
             margin: "12px 0 0 8px",
             padding: "4px 10px",
-            borderRadius: "999px",
+            borderRadius: "var(--radius-full)",
             background: "var(--pozor-bg)",
             color: "var(--pozor)",
             fontSize: "13px",
@@ -1418,7 +1416,7 @@ function DlazdiceVydelku({
           )}
         </p>
       ) : null}
-    </section>
+    </Card>
   );
 }
 
@@ -1431,15 +1429,7 @@ function Vysvetleni({
   children: ReactNode;
 }) {
   return (
-    <section
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--line)",
-        borderRadius: "16px",
-        boxShadow: "var(--shadow)",
-        padding: "20px",
-      }}
-    >
+    <Card as="section" padding="20px" style={{ boxShadow: "var(--shadow)" }}>
       <p style={{ margin: 0, fontSize: "16px", color: "var(--ink)" }}>
         {nadpis}
       </p>
@@ -1453,7 +1443,7 @@ function Vysvetleni({
       >
         {children}
       </p>
-    </section>
+    </Card>
   );
 }
 
@@ -1654,7 +1644,7 @@ const ramecekKodu = {
   margin: "12px 0 0",
   padding: "10px 12px",
   border: "1px solid var(--pozor)",
-  borderRadius: "10px",
+  borderRadius: "var(--radius-sm)",
   background: "var(--pozor-bg)",
   color: "var(--pozor)",
   fontSize: "13.5px",

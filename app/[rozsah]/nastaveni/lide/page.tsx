@@ -929,7 +929,7 @@ export default async function NastaveniLide({
 const formular = {
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: "12px",
+  borderRadius: "var(--radius-lg)",
   padding: "16px 18px",
   boxShadow: "var(--shadow)",
 } as const;
@@ -947,7 +947,7 @@ const inputPole = {
   width: "100%",
   padding: "10px 12px",
   fontSize: "16px",
-  borderRadius: "10px",
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--paper)",
   color: "var(--ink)",
@@ -977,7 +977,7 @@ const volbaBarvy = {
   alignItems: "center" as const,
   gap: "7px",
   padding: "7px 11px",
-  borderRadius: "999px",
+  borderRadius: "var(--radius-full)",
   border: "1px solid var(--line-2)",
   fontSize: "12.5px",
   cursor: "pointer",
