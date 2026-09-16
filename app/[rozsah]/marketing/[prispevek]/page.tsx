@@ -37,12 +37,13 @@ const pole = {
   display: 'block',
   width: '100%',
   padding: '8px 10px',
-  border: '1px solid var(--line)',
+  border: '1px solid var(--line-2)',
   borderRadius: 'var(--radius-sm)',
-  background: 'var(--bg)',
+  background: 'var(--paper)',
   color: 'inherit',
   fontSize: '14px',
   fontFamily: 'inherit',
+  minHeight: '44px',
 } as const
 
 const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const

@@ -16,11 +16,12 @@ export const dynamic = 'force-dynamic'
 
 const pole = {
   padding: '6px 10px',
-  border: '1px solid var(--line)',
+  border: '1px solid var(--line-2)',
   borderRadius: 'var(--radius-sm)',
-  background: 'var(--bg)',
+  background: 'var(--paper)',
   color: 'inherit',
   fontSize: '13.5px',
+  minHeight: '44px',
 } as const
 
 type StatDodavatele = {
