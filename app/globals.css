@@ -315,11 +315,21 @@
   border-radius: 8px; font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
 }
 .ft-nav a:hover { color: var(--rail-ink); background: var(--rail); }
-/* Aktivní položka: světlá mosaz s tmavým textem, 7,5:1. Tmavá mosaz
-   s bílým textem dávala 3,88:1 a plocha se od sloupce skoro nelišila.
-   Neotáčet zpátky. */
-.ft-nav a.on { background: var(--mosaz-sv); color: var(--mosaz-ink); font-weight: 600; }
-.ft-nav a.on:hover { background: var(--mosaz-sv); color: var(--mosaz-ink); }
+/* Aktivní položka — UX redesign 16.9.2026 (oddíl 4/5: sloupec nemá
+   nést „velkou barevnou plochu" za aktivní řádek). Dřív plný mosazný
+   pás; teď jemný odstín lišty + tenký mosazný pruh vlevo, text zůstává
+   --rail-ink (stejný poměr jako hover, 7,5:1 proti --rail-2 — jistě
+   nad 4,5). Pruh je jen dekorace, proto smí nést barvu bez vlastní
+   kontrolované kontrastní hodnoty. */
+.ft-nav a.on {
+  background: color-mix(in srgb, var(--rail-ink) 12%, transparent);
+  color: var(--rail-ink); font-weight: 600; position: relative;
+}
+.ft-nav a.on::before {
+  content: ""; position: absolute; left: -6px; top: 7px; bottom: 7px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--mosaz-sv);
+}
+.ft-nav a.on:hover { background: color-mix(in srgb, var(--rail-ink) 12%, transparent); color: var(--rail-ink); }
 .ft-nav .soon { color: var(--rail-tlum); }
 .ft-nav .soon small { margin-left: auto; font-size: 10.5px; text-transform: uppercase;
                       letter-spacing: .06em; background: var(--rail);
@@ -550,8 +560,15 @@
   border-radius: var(--radius-sm); font-size: 13.5px; color: var(--rail-tlum); text-decoration: none;
 }
 .modul-sloupec a:hover { color: var(--rail-ink); background: var(--rail); }
+/* Stejný jemný ukazatel jako .ft-nav a.on výš — týž sloupcový vzor,
+   týž požadavek na útlum. */
 .modul-sloupec a.on, .modul-sloupec a.on:hover {
-  background: var(--mosaz-sv); color: var(--mosaz-ink); font-weight: 600;
+  background: color-mix(in srgb, var(--rail-ink) 12%, transparent);
+  color: var(--rail-ink); font-weight: 600; position: relative;
+}
+.modul-sloupec a.on::before {
+  content: ""; position: absolute; left: -6px; top: 7px; bottom: 7px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--mosaz-sv);
 }
 .modul-sloupec .soon small {
   margin-left: auto; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
