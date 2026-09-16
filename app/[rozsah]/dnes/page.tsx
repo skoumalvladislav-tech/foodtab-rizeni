@@ -251,7 +251,7 @@ export default async function Dnes({
     `barvaNeboNic` normalizace jako v app/[rozsah]/smeny/page.tsx, ať
     barva člověka na Dnes a v Rozpisu vždycky sedí na totéž.
   */
-  const dnesniRozpis: { id: string; jmeno: string; barva: string | null; od: string; do: string }[] = [];
+  const dnesniRozpis: { id: string; employeeId: string; jmeno: string; barva: string | null; od: string; do: string }[] = [];
   if (canSee(ctx, "shifts.read")) {
     const smenyDnes = smeny.filter((s) => s.shift_date === den.provozni_den && s.employee_id !== null);
     const idDnes = [...new Set(smenyDnes.map((s) => s.employee_id as string))];
@@ -266,6 +266,7 @@ export default async function Dnes({
       for (const s of smenyDnes) {
         dnesniRozpis.push({
           id: s.id,
+          employeeId: s.employee_id as string,
           jmeno: jmenaDnes.get(s.employee_id as string) ?? "?",
           barva: barvyDnes.get(s.employee_id as string) ?? null,
           od: s.starts_at.slice(0, 5),
@@ -338,10 +339,20 @@ export default async function Dnes({
   type Pozornost = { uroven: UrovenPozornosti; text: string; akce: { popisek: string; href: string } };
   const pozornost: Pozornost[] = [];
 
+  /*
+    Tým dnes — kolik z naplánovaných je zrovna přítomno. Přítomnost je
+    „otevřený příchod ke dnešnímu provoznímu dni" — TÁŽ RPC jako
+    o pár řádků níž pro nedokončené záznamy, jen s rozsahem den–den
+    místo 30denního okna. Je to schválně stejný zdroj: appka nemá mít
+    čtvrtou definici „kdo je v práci" vedle muj_den/panelu/32denního
+    hlášení (viz komentář u migrace 20260907010000_muj_den.sql).
+  */
+  let tymPritomno: string[] = [];
+
   if (jeVedeni(ctx)) {
     const pobockaProDochazku = scope.level === "branch" ? scope.branchId : null;
 
-    const [nedokoncenaRes, fakturyRes] = await Promise.allSettled([
+    const [nedokoncenaRes, fakturyRes, dnesRes] = await Promise.allSettled([
       supabase.rpc("nedokoncena_dochazka", {
         p_tenant: tenantId,
         p_od: posunDatum(den.provozni_den, -30),
@@ -362,7 +373,17 @@ export default async function Dnes({
             return { keKontrole: keKontrole.count ?? 0, poSplatnosti: poSplatnosti.count ?? 0 };
           })()
         : Promise.resolve(null),
+      supabase.rpc("nedokoncena_dochazka", {
+        p_tenant: tenantId,
+        p_od: den.provozni_den,
+        p_do: den.provozni_den,
+        p_branch: pobockaProDochazku,
+      }),
     ]);
+
+    if (dnesRes.status === "fulfilled" && !dnesRes.value.error) {
+      tymPritomno = ((dnesRes.value.data ?? []) as { jmeno: string }[]).map((r) => r.jmeno);
+    }
 
     if (nedokoncenaRes.status === "fulfilled" && !nedokoncenaRes.value.error) {
       const pocetNedokoncenych = (nedokoncenaRes.value.data ?? []).length;
@@ -702,6 +723,28 @@ export default async function Dnes({
 
           {/* ---------- POSTRANNÍ PANEL ----------------------------- */}
           <div>
+            {jeVedeni(ctx) && dnesniRozpis.length > 0 ? (
+              <>
+                <h2 style={nadpisSekce}>Tým dnes</h2>
+                <Card padding="16px" style={{ marginBottom: "24px" }}>
+                  <div style={{ fontSize: "22px", fontWeight: 600, color: "var(--ink)" }}>
+                    {tymPritomno.length} / {new Set(dnesniRozpis.map((s) => s.employeeId)).size}
+                  </div>
+                  <div style={{ fontSize: "12.5px", color: "var(--muted)", marginTop: "2px" }}>
+                    zaměstnanců přítomno
+                  </div>
+                  {tymPritomno.length > 0 ? (
+                    <div style={{ fontSize: "13px", color: "var(--muted)", marginTop: "10px", lineHeight: 1.6 }}>
+                      {tymPritomno.join(", ")}
+                    </div>
+                  ) : null}
+                  <Link href={`/${rozsah}/dochazka`} className="ft-tl ft-tl-vedlejsi ft-tl-male" style={{ marginTop: "10px", display: "inline-block" }}>
+                    Zobrazit docházku →
+                  </Link>
+                </Card>
+              </>
+            ) : null}
+
             {rychleAkce.length > 0 ? (
               <>
                 <h2 style={nadpisSekce}>Rychlé akce</h2>
