@@ -185,6 +185,17 @@
 .ft-hledani input:focus { outline: none; }
 .ft-hledani:focus-within { outline: 2px solid var(--mosaz-sv); outline-offset: 1px; }
 
+/* Klávesová zkratka jako vlastní flex položka za polem, ne přes něj —
+   pilulka se o zkratku prostě rozšíří, nic se nepřekrývá s dlouhým
+   placeholderem. Mizí, jakmile se pole samo zúží na ikonu (níž). */
+.ft-hledani-zkratka {
+  flex: none; margin-right: 8px;
+  font-family: inherit; font-size: 10.5px; font-weight: 600; line-height: 1;
+  color: var(--muted); background: var(--card);
+  border: 1px solid var(--line-2); border-radius: 5px;
+  padding: 3px 5px;
+}
+
 /* ---- Co ustupuje první ------------------------------------------
    Když se lišta nevejde, sbalí se JAKO PRVNÍ vyhledávání — je z ní
    nejširší (252 px) a nejmíň naléhavé. Teprve potom se sahá na moduly
@@ -196,6 +207,8 @@
 @media (max-width: 1540px) {
   .ft-hledani input { width: 42px; padding: 0 0 0 31px; }
   .ft-hledani:focus-within input { width: min(40vw, 250px); padding-right: 11px; }
+  .ft-hledani-zkratka { display: none; }
+  .ft-hledani:focus-within .ft-hledani-zkratka { display: block; }
 }
 
 /* Na mobilu je pilulka vyšší kvůli prstu. */
