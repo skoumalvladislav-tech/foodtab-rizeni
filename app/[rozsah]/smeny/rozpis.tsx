@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { Fragment, useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { pocet } from "@/lib/sklonovani";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
@@ -305,6 +305,9 @@ export default function RozpisView({
   );
 }
 
+/** Jeden člověk (nebo "Neobsazeno") a jeho směny v týdnu — po dnech. */
+type RadekOsoby = { osoba: string | null; jmeno: string; smenyPodleDne: Map<string, Smena[]> };
+
 function TydenView({
   dny,
   dnesni,
@@ -330,23 +333,6 @@ function TydenView({
   const dnySerad = [...dny.keys()].sort();
 
   /*
-    Sbírat všechny unikátní zaměstnance a jejich směny.
-
-    ŘÁDKY SE ZAKLÁDAJÍ I PRO LIDI BEZ SMĚNY — jinak by v prázdném týdnu
-    nebyl ani jeden. Sloupce dnů už se sejí výš, ale bez řádku není
-    buňka, a bez buňky není „+": mřížka by byla prázdná a nešlo by do ní
-    nic přidat. Druhá půlka téhož nálezu z 9. 9.
-
-    Sejí se jen tehdy, když se vůbec smí plánovat — komu se rozpis jen
-    ukazuje, tomu je seznam lidí bez směn k ničemu a jen by mu roztáhl
-    mřížku.
-  */
-  const smenyPeOsobe = new Map<string | null, Map<string, Smena[]>>();
-  if (planovani) {
-    for (const c of planovani.lide) smenyPeOsobe.set(c.id, new Map());
-  }
-
-  /*
     Jméno do řádku. `jmena` plní `page.tsx` jen z lidí, KTEŘÍ MAJÍ
     SMĚNU — nově zasetý řádek by se tedy jmenoval „Neznámý". Druhým
     zdrojem je nabídka „Kdo" z plánování, kde jsou všichni.
@@ -355,25 +341,98 @@ function TydenView({
     jmena.get(id) ??
     planovani?.lide.find((c) => c.id === id)?.jmeno ??
     "Neznámý";
-  for (const [datum, smeny] of dny.entries()) {
+
+  /*
+    UX redesign, druhé kolo (Šéfíkovo zadání 16.9.2026): rozpis má
+    ukazovat pobočky a úsek pod sebou, ne všechny lidi v jednom
+    seznamu — na "Celá firma" se dřív míchali lidé z obou poboček
+    dohromady.
+
+    Seskupuje se podle SMĚNY (`shift.branch_id`/`position_id`), ne
+    podle člověka — člověk sám žádnou pevnou pobočku ani úsek nemá,
+    může mít ten týden směny na obou. Řádek člověka se v tabulce proto
+    může objevit ve víc skupinách zvlášť (jednou za každou pobočku,
+    na které má ten týden aspoň jednu směnu) — což je správně: ukazuje
+    to přesně to, co dělá, ne fikci "jedné pobočky".
+
+    Úsek řádku je pozice jeho NEJDŘÍV začínající směny na téhle
+    pobočce ten týden — směna beze směny nemá co seskupovat a člověk
+    s jedinou pozicí (drtivá většina) vyjde vždycky správně. Kdo
+    pozici nemá vůbec, padne do "Bez úseku".
+  */
+  const smenyPodlePobocce = new Map<string, Smena[]>();
+  for (const smeny of dny.values()) {
     for (const s of smeny) {
-      const osoba = s.employee_id;
-      if (!smenyPeOsobe.has(osoba)) {
-        smenyPeOsobe.set(osoba, new Map());
-      }
-      const denMap = smenyPeOsobe.get(osoba)!;
-      const seznam = denMap.get(datum) ?? [];
+      const seznam = smenyPodlePobocce.get(s.branch_id) ?? [];
       seznam.push(s);
-      denMap.set(datum, seznam);
+      smenyPodlePobocce.set(s.branch_id, seznam);
     }
   }
 
-  // Seřadit osoby
-  const osoby = [...smenyPeOsobe.keys()].sort((a, b) => {
-    const jmenoA = a ? jmenoOsoby(a) : "Neobsazeno";
-    const jmenoB = b ? jmenoOsoby(b) : "Neobsazeno";
-    return jmenoA.localeCompare(jmenoB);
-  });
+  function sestavRadky(smenySeznam: Smena[]): RadekOsoby[] {
+    const podleOsoby = new Map<string | null, Map<string, Smena[]>>();
+    for (const s of smenySeznam) {
+      const osoba = s.employee_id;
+      if (!podleOsoby.has(osoba)) podleOsoby.set(osoba, new Map());
+      const denMap = podleOsoby.get(osoba)!;
+      const seznam = denMap.get(s.shift_date) ?? [];
+      seznam.push(s);
+      denMap.set(s.shift_date, seznam);
+    }
+    return [...podleOsoby.entries()]
+      .map(([osoba, smenyPodleDne]) => ({
+        osoba,
+        jmeno: osoba ? jmenoOsoby(osoba) : "Neobsazeno",
+        smenyPodleDne,
+      }))
+      .sort((a, b) => a.jmeno.localeCompare(b.jmeno, "cs"));
+  }
+
+  function usekRadku(radek: RadekOsoby): string {
+    const vsechny = [...radek.smenyPodleDne.values()]
+      .flat()
+      .sort((a, b) =>
+        a.shift_date === b.shift_date ? a.starts_at.localeCompare(b.starts_at) : a.shift_date.localeCompare(b.shift_date),
+      );
+    const prvniSPozici = vsechny.find((s) => s.position_id);
+    return prvniSPozici?.position_id ? (pozice.get(prvniSPozici.position_id) ?? "Bez úseku") : "Bez úseku";
+  }
+
+  function seskupPodleUseku(radky: RadekOsoby[]): { usek: string; radky: RadekOsoby[] }[] {
+    const mapa = new Map<string, RadekOsoby[]>();
+    for (const r of radky) {
+      const usek = usekRadku(r);
+      const seznam = mapa.get(usek) ?? [];
+      seznam.push(r);
+      mapa.set(usek, seznam);
+    }
+    return [...mapa.entries()]
+      .map(([usek, radky]) => ({ usek, radky }))
+      .sort((a, b) => {
+        if (a.usek === "Bez úseku") return 1;
+        if (b.usek === "Bez úseku") return -1;
+        return a.usek.localeCompare(b.usek, "cs");
+      });
+  }
+
+  const branchIds = [...smenyPodlePobocce.keys()].sort((a, b) =>
+    (nazvyPobocek.get(a) ?? "").localeCompare(nazvyPobocek.get(b) ?? "", "cs"),
+  );
+
+  // Lidé, co plánovat smí, ale ten týden na žádné pobočce nemají ani
+  // jednu směnu — bez skupiny (nevíme, kam by patřili), na konci.
+  const lideSeSmenou = new Set<string>();
+  for (const smeny of smenyPodlePobocce.values()) {
+    for (const s of smeny) if (s.employee_id) lideSeSmenou.add(s.employee_id);
+  }
+  const radkyBezSmeny: RadekOsoby[] = planovani
+    ? planovani.lide
+        .filter((c) => !lideSeSmenou.has(c.id))
+        .map((c) => ({ osoba: c.id, jmeno: c.jmeno, smenyPodleDne: new Map<string, Smena[]>() }))
+        .sort((a, b) => a.jmeno.localeCompare(b.jmeno, "cs"))
+    : [];
+
+  const zobrazitHlavickuPobocky = branchIds.length > 1;
 
   return (
     <div style={{ overflowX: "auto" }}>
@@ -431,139 +490,231 @@ function TydenView({
           </tr>
         </thead>
         <tbody>
-          {osoby.map((osoba) => {
-            const jmeno = osoba ? jmenoOsoby(osoba) : "Neobsazeno";
-            const smenyOsoby = smenyPeOsobe.get(osoba)!;
+          {branchIds.map((branchId) => {
+            const nazevPobocky = nazvyPobocek.get(branchId) ?? "Jiná pobočka";
+            const skupinyUseku = seskupPodleUseku(sestavRadky(smenyPodlePobocce.get(branchId) ?? []));
+            const zobrazitHlavickuUseku = skupinyUseku.length > 1;
 
             return (
-              <tr key={osoba ?? "null"} style={{ borderBottom: "1px solid var(--line)" }}>
-                <td
-                  style={{
-                    padding: "9px 12px",
-                    fontWeight: osoba ? 500 : 400,
-                    color: osoba ? "var(--ink)" : "var(--warn)",
-                    background: "var(--card)",
-                    position: "sticky",
-                    left: 0,
-                    zIndex: 2,
-                  }}
-                >
-                  {/*
-                    Iniciálové kolečko + čtvereček s barvou, ne obarvené
-                    jméno. Obarvené jméno by některé odstíny udělalo hůř
-                    čitelnými a barva by přebila to, co je na řádku
-                    podstatné.
-
-                    Neobsazená směna značku nemá — není čí. Je to jediné
-                    místo, kde značka chybí docela.
-                  */}
-                  {osoba ? (
-                    <span
-                      style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
-                    >
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          flex: "none", width: "26px", height: "26px", borderRadius: "50%",
-                          background: "var(--sunken)", color: "var(--muted)",
-                          display: "grid", placeItems: "center", fontSize: "10.5px", fontWeight: 700,
-                        }}
-                      >
-                        {inicialy(jmeno)}
-                      </span>
-                      <ZnackaOsoby barva={barvy.get(osoba) ?? null} />
-                      {jmeno}
-                    </span>
-                  ) : (
-                    jmeno
-                  )}
-                </td>
-                {dnySerad.map((datum) => {
-                  const smenyDne = smenyOsoby.get(datum) ?? [];
-                  const dnesJe = datum === dnesni;
-                  const vikend = jeVikend(datum);
-                  return (
-                    <td
-                      key={`${osoba}-${datum}`}
-                      className="ft-rozpis-bunka"
-                      style={{
-                        padding: "9px 12px",
-                        textAlign: "center",
-                        borderLeft: "1px solid var(--line)",
-                        background:
-                          smenyDne.length > 0
-                            ? "var(--card)"
-                            : dnesJe
-                              ? "color-mix(in srgb, var(--mosaz-sv) 8%, var(--paper))"
-                              : vikend
-                                ? "var(--sunken)"
-                                : "transparent",
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: "4px" }}>
-                        {smenyDne.map((s) =>
-                          planovani ? (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => onOtevrit({ den: datum, smena: s })}
-                              style={chipTlacitko}
-                              title="Upravit směnu"
-                            >
-                              {hodina(s.starts_at)}–{hodina(s.ends_at)}
-                            </button>
-                          ) : (
-                            <div key={s.id} style={chip}>
-                              {hodina(s.starts_at)}–{hodina(s.ends_at)}
-                            </div>
-                          ),
-                        )}
-
-                        {/*
-                          Prázdné políčko je taky místo, kam se dá
-                          kliknout — člověk i den už jsou dané, takže
-                          formulář se otevře skoro vyplněný. Trvale
-                          vidět nemá být (oddíl 6: "prázdná buňka má
-                          být čistá") — zobrazí se až na najetí nebo
-                          zaměření, viz .ft-rozpis-plus v globals.css.
-                        */}
-                        {planovani ? (
-                          <button
-                            type="button"
-                            className="ft-rozpis-plus"
-                            onClick={() =>
-                              onOtevrit({
-                                den: datum,
-                                smena: osoba
-                                  ? ({
-                                      id: "",
-                                      branch_id: planovani.vychoziPobocka ?? "",
-                                      employee_id: osoba,
-                                      position_id: null,
-                                      shift_date: datum,
-                                      starts_at: "08:00",
-                                      ends_at: "16:00",
-                                      note: "",
-                                    } as SmenaKUprave)
-                                  : null,
-                              })
-                            }
-                            style={pridatTlacitko}
-                            aria-label={`Přidat směnu ${datum}`}
-                          >
-                            +
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr>
+              <Fragment key={branchId}>
+                {zobrazitHlavickuPobocky ? (
+                  <HlavickaSkupiny text={nazevPobocky} sloupcu={dnySerad.length + 1} uroven="pobocka" />
+                ) : null}
+                {skupinyUseku.map(({ usek, radky }) => (
+                  <Fragment key={usek}>
+                    {zobrazitHlavickuUseku ? (
+                      <HlavickaSkupiny text={usek} sloupcu={dnySerad.length + 1} uroven="usek" />
+                    ) : null}
+                    {radky.map((radek) => (
+                      <RadekTydne
+                        key={`${branchId}-${radek.osoba ?? "null"}`}
+                        radek={radek}
+                        dnySerad={dnySerad}
+                        dnesni={dnesni}
+                        barvy={barvy}
+                        planovani={planovani}
+                        vychoziPobocka={branchId}
+                        onOtevrit={onOtevrit}
+                      />
+                    ))}
+                  </Fragment>
+                ))}
+              </Fragment>
             );
           })}
+
+          {radkyBezSmeny.length > 0 ? (
+            <>
+              {zobrazitHlavickuPobocky ? (
+                <HlavickaSkupiny text="Bez směny tento týden" sloupcu={dnySerad.length + 1} uroven="pobocka" />
+              ) : null}
+              {radkyBezSmeny.map((radek) => (
+                <RadekTydne
+                  key={`bez-smeny-${radek.osoba}`}
+                  radek={radek}
+                  dnySerad={dnySerad}
+                  dnesni={dnesni}
+                  barvy={barvy}
+                  planovani={planovani}
+                  vychoziPobocka={planovani?.vychoziPobocka ?? null}
+                  onOtevrit={onOtevrit}
+                />
+              ))}
+            </>
+          ) : null}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Subtilní řádek s názvem skupiny (pobočka/úsek), přes celou šířku mřížky. */
+function HlavickaSkupiny({ text, sloupcu, uroven }: { text: string; sloupcu: number; uroven: "pobocka" | "usek" }) {
+  return (
+    <tr>
+      <td
+        colSpan={sloupcu}
+        style={{
+          position: "sticky",
+          left: 0,
+          padding: uroven === "pobocka" ? "10px 12px 6px" : "6px 12px 4px",
+          paddingLeft: uroven === "usek" ? "24px" : "12px",
+          fontSize: uroven === "pobocka" ? "12.5px" : "11px",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: ".06em",
+          color: uroven === "pobocka" ? "var(--ink)" : "var(--muted)",
+          background: "var(--paper)",
+          borderBottom: uroven === "pobocka" ? "1px solid var(--line)" : "none",
+        }}
+      >
+        {text}
+      </td>
+    </tr>
+  );
+}
+
+/** Jeden řádek člověka v týdenním rozpisu — beze změny chování, jen vytažené z TydenView, ať se dá použít pro víc skupin. */
+function RadekTydne({
+  radek,
+  dnySerad,
+  dnesni,
+  barvy,
+  planovani,
+  vychoziPobocka,
+  onOtevrit,
+}: {
+  radek: RadekOsoby;
+  dnySerad: string[];
+  dnesni: string;
+  barvy: Map<string, string | null>;
+  planovani: Planovani | null;
+  /** Pobočka skupiny, do které řádek patří — nová směna z "+" se založí na ní, ne na obecné výchozí pobočce. */
+  vychoziPobocka: string | null;
+  onOtevrit: (co: Otevrene) => void;
+}) {
+  const { osoba, jmeno, smenyPodleDne } = radek;
+
+  return (
+    <tr style={{ borderBottom: "1px solid var(--line)" }}>
+      <td
+        style={{
+          padding: "9px 12px",
+          fontWeight: osoba ? 500 : 400,
+          color: osoba ? "var(--ink)" : "var(--warn)",
+          background: "var(--card)",
+          position: "sticky",
+          left: 0,
+          zIndex: 2,
+        }}
+      >
+        {/*
+          Iniciálové kolečko + čtvereček s barvou, ne obarvené jméno.
+          Obarvené jméno by některé odstíny udělalo hůř čitelnými a
+          barva by přebila to, co je na řádku podstatné.
+
+          Neobsazená směna značku nemá — není čí. Je to jediné místo,
+          kde značka chybí docela.
+        */}
+        {osoba ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+            <span
+              aria-hidden="true"
+              style={{
+                flex: "none", width: "26px", height: "26px", borderRadius: "50%",
+                background: "var(--sunken)", color: "var(--muted)",
+                display: "grid", placeItems: "center", fontSize: "10.5px", fontWeight: 700,
+              }}
+            >
+              {inicialy(jmeno)}
+            </span>
+            <ZnackaOsoby barva={barvy.get(osoba) ?? null} />
+            {jmeno}
+          </span>
+        ) : (
+          jmeno
+        )}
+      </td>
+      {dnySerad.map((datum) => {
+        const smenyDne = smenyPodleDne.get(datum) ?? [];
+        const dnesJe = datum === dnesni;
+        const vikend = jeVikend(datum);
+        return (
+          <td
+            key={`${osoba}-${datum}`}
+            className="ft-rozpis-bunka"
+            style={{
+              padding: "9px 12px",
+              textAlign: "center",
+              borderLeft: "1px solid var(--line)",
+              background:
+                smenyDne.length > 0
+                  ? "var(--card)"
+                  : dnesJe
+                    ? "color-mix(in srgb, var(--mosaz-sv) 8%, var(--paper))"
+                    : vikend
+                      ? "var(--sunken)"
+                      : "transparent",
+            }}
+          >
+            <div style={{ display: "grid", gap: "4px" }}>
+              {smenyDne.map((s) =>
+                planovani ? (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => onOtevrit({ den: datum, smena: s })}
+                    style={chipTlacitko}
+                    title="Upravit směnu"
+                  >
+                    {hodina(s.starts_at)}–{hodina(s.ends_at)}
+                  </button>
+                ) : (
+                  <div key={s.id} style={chip}>
+                    {hodina(s.starts_at)}–{hodina(s.ends_at)}
+                  </div>
+                ),
+              )}
+
+              {/*
+                Prázdné políčko je taky místo, kam se dá kliknout —
+                člověk i den už jsou dané, takže formulář se otevře
+                skoro vyplněný. Trvale vidět nemá být (oddíl 6:
+                "prázdná buňka má být čistá") — zobrazí se až na
+                najetí nebo zaměření, viz .ft-rozpis-plus v globals.css.
+              */}
+              {planovani ? (
+                <button
+                  type="button"
+                  className="ft-rozpis-plus"
+                  onClick={() =>
+                    onOtevrit({
+                      den: datum,
+                      smena: osoba
+                        ? ({
+                            id: "",
+                            branch_id: vychoziPobocka ?? planovani.vychoziPobocka ?? "",
+                            employee_id: osoba,
+                            position_id: null,
+                            shift_date: datum,
+                            starts_at: "08:00",
+                            ends_at: "16:00",
+                            note: "",
+                          } as SmenaKUprave)
+                        : null,
+                    })
+                  }
+                  style={pridatTlacitko}
+                  aria-label={`Přidat směnu ${datum}`}
+                >
+                  +
+                </button>
+              ) : null}
+            </div>
+          </td>
+        );
+      })}
+    </tr>
   );
 }
 
