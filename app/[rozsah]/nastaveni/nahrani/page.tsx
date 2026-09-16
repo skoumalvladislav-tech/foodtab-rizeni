@@ -35,8 +35,8 @@ const CO_JDE: {
     segment: 'rozpis',
     nazev: 'Rozpis směn',
     popis:
-      'Značky jako R, O, X si firma nastaví sama — slovník je tabulka, ne pravidlo v aplikaci.',
-    hotovo: false,
+      'Jméno, datum, začátek a konec směny. Značky jako R, O, X (slovník v datech, ne v kódu) čekají na další krok.',
+    hotovo: true,
   },
   {
     segment: 'receptury',
