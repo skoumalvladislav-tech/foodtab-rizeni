@@ -65,8 +65,8 @@ const manifest: MetadataRoute.Manifest = {
     Podklad úvodní obrazovky je `--paper`, tedy totéž, co má kiosek.
     Jinak mezi splashem a obrazovkou blikne jiná barva.
   */
-  background_color: '#f6f2e9',
-  theme_color: '#16211c',
+  background_color: '#f6f5f2',
+  theme_color: '#17191c',
   lang: 'cs',
   categories: ['business', 'productivity'],
   icons: [

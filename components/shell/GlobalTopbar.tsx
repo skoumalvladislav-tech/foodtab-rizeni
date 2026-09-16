@@ -86,6 +86,10 @@ export default function GlobalTopbar({
               aria-label="Hledat nebo se zeptat Gastro AI"
               disabled
             />
+            {/* Jen vzhledová zkratka — pole je pořád disabled, viz komentář
+                výš. Schovává se, když se pole samo zúží na ikonu (níž),
+                ať nebojuje o místo s ničím. */}
+            <kbd className="ft-hledani-zkratka" aria-hidden="true">⌘K</kbd>
           </div>
 
           {/*
