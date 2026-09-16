@@ -29,6 +29,8 @@ type Pobocka = {
   color: string | null;
   day_starts_at: string | null;
   hero_photo_path: string | null;
+  lat: number | null;
+  lon: number | null;
 };
 
 const NAZVY_BAREV: Record<string, string> = {
@@ -78,23 +80,24 @@ export default async function NastaveniPobocek({
   const supabase = await getServerSupabase();
 
   /*
-    Fotka pozadí čeká na migraci 20260916160000_pobocka_pozadi — dokud
-    neproběhne, sloupec `hero_photo_path` v databázi není. Dotaz se
-    proto zkusí s ním, a při „sloupec neznámý“ zopakuje beze; jinak by
-    celá obrazovka spadla kvůli jedné nehotové věci, o kterou tu jinak
-    vůbec nejde (barva a začátek dne fungují nezávisle na tomhle).
+    Fotka pozadí a souřadnice pro počasí čekají na dvě migrace
+    (20260916160000_pobocka_pozadi, 20260916170000_pobocka_pocasi) —
+    dokud neproběhnou, sloupce v databázi nejsou. Dotaz se proto
+    zkusí se všemi, a při „sloupec neznámý“ zopakuje beze; jinak by
+    celá obrazovka spadla kvůli věcem, o které tu jinak vůbec nejde
+    (barva a začátek dne fungují nezávisle na obou).
   */
-  let fotoPozadiHotovo = true;
+  let novaPoleHotova = true;
   const zaklad = supabase
     .from("branches")
-    .select("id, name, slug, color, day_starts_at, hero_photo_path")
+    .select("id, name, slug, color, day_starts_at, hero_photo_path, lat, lon")
     .eq("tenant_id", tenantId)
     .is("deleted_at", null)
     .order("created_at", { ascending: true });
 
   let dotaz = await zaklad;
   if (dotaz.error && sloupecNeexistuje(dotaz.error)) {
-    fotoPozadiHotovo = false;
+    novaPoleHotova = false;
     dotaz = (await supabase
       .from("branches")
       .select("id, name, slug, color, day_starts_at")
@@ -111,7 +114,7 @@ export default async function NastaveniPobocek({
   // v marketingové knihovně fotek.
   const cesty = pobocky.map((p) => p.hero_photo_path).filter((c): c is string => Boolean(c));
   const nahledy = new Map<string, string>();
-  if (fotoPozadiHotovo && cesty.length > 0) {
+  if (novaPoleHotova && cesty.length > 0) {
     const { data: podepsane } = await supabase.storage.from(KBELIK).createSignedUrls(cesty, PLATNOST_ODKAZU_S);
     for (const p of podepsane ?? []) {
       if (p.path && p.signedUrl) nahledy.set(p.path, p.signedUrl);
@@ -248,6 +251,45 @@ export default async function NastaveniPobocek({
                 style={{ ...pole, maxWidth: "140px" }}
               />
 
+              {novaPoleHotova ? (
+                <fieldset style={{ border: 0, padding: 0, margin: "16px 0 0" }}>
+                  <legend style={{ ...stitek, padding: 0 }}>
+                    Souřadnice pro počasí na Dnes (nepovinné)
+                  </legend>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <input
+                      aria-label="Zeměpisná šířka"
+                      name="lat"
+                      type="number"
+                      inputMode="decimal"
+                      step="0.00001"
+                      min={-90}
+                      max={90}
+                      placeholder="Šířka, např. 49.41"
+                      defaultValue={p.lat ?? ""}
+                      className="mono"
+                      style={{ ...pole, maxWidth: "160px" }}
+                    />
+                    <input
+                      aria-label="Zeměpisná délka"
+                      name="lon"
+                      type="number"
+                      inputMode="decimal"
+                      step="0.00001"
+                      min={-180}
+                      max={180}
+                      placeholder="Délka, např. 14.66"
+                      defaultValue={p.lon ?? ""}
+                      className="mono"
+                      style={{ ...pole, maxWidth: "160px" }}
+                    />
+                  </div>
+                  <p style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+                    Beze souřadnic se widget počasí na Dnes nekreslí vůbec.
+                  </p>
+                </fieldset>
+              ) : null}
+
               {jeDotcena && chyba ? (
                 <p role="alert" className="hlaska-chyba">
                   {popisChyby(chyba)}
@@ -281,7 +323,7 @@ export default async function NastaveniPobocek({
                 </p>
               </div>
 
-              {!fotoPozadiHotovo ? (
+              {!novaPoleHotova ? (
                 <p style={{ margin: 0, fontSize: "12.5px", color: "var(--muted)" }}>
                   Tahle část čeká na nasazení databáze (migrace{" "}
                   <code>20260916160000_pobocka_pozadi</code>).
@@ -374,6 +416,8 @@ function popisChyby(kod: string): string {
       return "Fotka musí být JPG, PNG nebo WebP.";
     case "nahrani":
       return "Fotku se nepodařilo nahrát. Zkuste to prosím znovu.";
+    case "souradnice":
+      return "Zadejte obě souřadnice (šířku i délku), nebo žádnou.";
     default:
       return "Pobočku se nepodařilo uložit. Zkuste to prosím znovu.";
   }
