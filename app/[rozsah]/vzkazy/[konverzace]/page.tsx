@@ -95,6 +95,24 @@ export default async function Rozhovor({
   const rozhovory = (seznamData ?? []) as Rozhovor[]
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
 
+  // Náhled poslední zprávy do seznamu vlevo — stejný postup jako na /vzkazy.
+  const posledniText = new Map<string, string>()
+  if (rozhovory.length > 0) {
+    const { data: zpravyPreview } = await supabase
+      .from('konverzace_zpravy')
+      .select('konverzace_id, text, vytvoreno_kdy')
+      .in('konverzace_id', rozhovory.map((r) => r.konverzace_id))
+      .is('stornovano_kdy', null)
+      .order('vytvoreno_kdy', { ascending: false })
+      .limit(300)
+    for (const z of zpravyPreview ?? []) {
+      const kid = z.konverzace_id as string
+      if (posledniText.has(kid)) continue
+      const t = String(z.text ?? '').trim()
+      posledniText.set(kid, t.length > 72 ? `${t.slice(0, 72)}…` : t)
+    }
+  }
+
   const { data: hlavicka, error: chybaHlavicka } = await supabase
     .from('konverzace')
     .select('id, druh, branch_id, nazev, adresat, uzavreno_kdy')
@@ -214,6 +232,7 @@ export default async function Rozhovor({
               rozhovory={rozhovory}
               nazvyPobocek={nazvyPobocek}
               aktivniId={konverzace}
+              posledniText={posledniText}
             />
           </div>
           <div className="ds-vzkazy-detail">
@@ -241,7 +260,7 @@ export default async function Rozhovor({
                 <li
                   key={z.id}
                   style={{
-                    background: 'var(--card)',
+                    background: moje ? 'color-mix(in srgb, var(--mosaz-sv) 10%, var(--card))' : 'var(--card)',
                     border: '1px solid var(--line)',
                     // Naléhavá je vidět na první pohled. Je to jediná
                     // věc, která brání tomu, aby se naléhavé stalo

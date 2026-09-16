@@ -509,6 +509,15 @@ export default async function Dochazka({
 
   const dalsiDruh = jsemVPraci ? "out" : "in";
 
+  /*
+    Odpracováno dnes — UX redesign, druhé kolo (oddíl 7): hlavní
+    informace na týhle obrazovce je docházkový status, a "jste v práci"
+    bez toho, jak dlouho, je půlka odpovědi. Jen z `muj_den` (dostupné
+    až s migrací 20260907010000) — bez ní se řádek prostě nekreslí,
+    stejný vzor prominutí jako u výdělku a kiosku výš.
+  */
+  const odpracovanoMinDnes = !chybaMujDen ? (mujDen?.[0]?.minut_v_praci ?? null) : null;
+
   // Dnešní stav. Bez attendance.read vrátí politika jen vlastní řádky,
   // ale filtrujeme i tady, ať se zbytečně netahá, co se stejně nesmí.
   let dnesni: Udalost[] = [];
@@ -773,18 +782,41 @@ export default async function Dochazka({
             <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
               {scope.branchName ?? nazvyPobocek.get(branchId as string)}
             </p>
+            {/*
+              Docházkový status je hlavní informace téhle obrazovky
+              (UX redesign, druhé kolo, oddíl 7) — tečka + stav + od
+              kdy, a když je člověk v práci, hned pod tím kolik už má
+              odpracováno. Kód z tabletu je až níž, jako součást
+              procesu příchodu, ne jako KPI.
+            */}
             <p
               style={{
-                margin: "4px 0 0",
-                fontSize: "18px",
-                color: jsemVPraci ? "var(--good)" : "var(--muted)",
+                margin: "6px 0 0",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "19px",
+                fontWeight: 600,
+                color: jsemVPraci ? "var(--good)" : "var(--ink)",
               }}
             >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: "9px", height: "9px", borderRadius: "50%", flex: "none",
+                  background: jsemVPraci ? "var(--dobre)" : "var(--faint)",
+                }}
+              />
               {jsemVPraci ? "Jste v práci" : "Nejste v práci"}
               {posledni
                 ? ` · od ${hodina(posledni.occurred_at, zonaUdalosti(posledni.branch_id))}`
                 : ""}
             </p>
+            {jsemVPraci && odpracovanoMinDnes !== null ? (
+              <p style={{ margin: "4px 0 0 17px", fontSize: "13.5px", color: "var(--muted)" }}>
+                Odpracováno {hodinyAMinuty(odpracovanoMinDnes)}
+              </p>
+            ) : null}
 
             {/*
               Příchod i odchod jsou hlavní akce, ne varování. Píchnout
@@ -906,14 +938,22 @@ export default async function Dochazka({
                 */}
                 <PoleKodu zQr={platnyKod} />
               </label>
+              {/*
+                UX redesign, druhé kolo (oddíl 7): amber zůstává, ale
+                tlačítko nemusí být přes celou (na téhle stránce dost
+                širokou) desktopovou kartu — `maxWidth` ho drží
+                v rozumné šířce, `width:100%` pod ní pořád dá plný dosah
+                na telefonu.
+              */}
               <button
                 type="submit"
                 className="ft-tl ft-tl-hlavni"
                 style={{
                   width: "100%",
-                  minHeight: "56px",
-                  fontSize: "18px",
-                  marginTop: "12px",
+                  maxWidth: "320px",
+                  minHeight: "50px",
+                  fontSize: "16px",
+                  marginTop: "14px",
                 }}
               >
                 {jsemVPraci ? "Odchod" : "Příchod"}
@@ -1449,7 +1489,7 @@ function Vysvetleni({
 
 /* --- styly ------------------------------------------------------- */
 
-const obal = { padding: "16px", paddingBottom: "32px" } as const;
+const obal = { padding: "16px", paddingBottom: "32px", maxWidth: "1080px" } as const;
 
 const nadpisSekce = {
   margin: "24px 0 12px",
