@@ -301,9 +301,21 @@ Od té doby proběhlo v Provozu hodně práce, mimo jiné:
   fallbacku (na rozdíl od zavedeného vzoru jinde). Opraveno, aby stránka
   fungovala bez ohledu na pořadí nasazení migrace vs. kódu.
 - **GitHub Actions „Migrace a scénáře" opraveno** — viz bod 2 a 13.
-- Bezpečnostní nález TRUNCATE grantů (bod 6, 51 provozních tabulek)
-  zůstává **neopravený**, čeká na rozhodnutí Šéfíka
-  (`docs/granty-provoz-zadani.md`).
+- **Bezpečnostní nález TRUNCATE grantů — HOTOVO, NENASAZENO 17.9.2026 v noci.**
+  Nová migrace `20260917000000_granty_provoz_uklid.sql` odebírá `anon`
+  a `TRUNCATE`/`REFERENCES`/`TRIGGER` (`authenticated`) na 52 provozních
+  tabulkách/pohledech (`audit_log` zvlášť, i INSERT/UPDATE/DELETE pryč
+  pro obě role). Nová kontrola `scripts/provoz-granty.test.mjs` (116
+  kontrol, prochází text migrací — ne databázi, ze stejného důvodu jako
+  `marketing-granty.test.mjs`). Ověřeno přes CI „Databáze" proti čisté
+  databázi ([PR #22](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/22),
+  smergováno, `VŠECHNY KONTROLY PROŠLY`, 1302 kontrol). Podrobné hlášení
+  a 6 sabotážních testů: `docs/hlaseni/granty-provoz-oprava-2026-09-17.md`
+  — cestou nalezena a opravená skutečná chyba ve vlastním regexu
+  kontroly (mohl přeskočit hranici SQL příkazu); `marketing-granty.test.mjs`
+  má nejspíš tutéž chybu, nahlášeno jako samostatný úkol, needitováno
+  (cizí soubor). **Čeká na Šéfíka: `supabase db push`** (jen tahle jedna
+  migrace, zbytek `foodtab-test` je aktuální).
 - **Nedotčeno kvůli paralelní relaci:** `smeny/formular-smeny.tsx` (mimo
   jednu schválenou výjimku výš), `ceka-na-opravneni.tsx`,
   `pwa-registration.tsx`, `.install-help`/`.pwa-ios-help` v `globals.css`
@@ -585,8 +597,10 @@ s design systémem, nikdo na nich aktivně nepracuje.
 a v `main`.** Aktuálně čeká:
 
 1. Nasadit `supabase/migrations/20260907010000_muj_den.sql` (FoodTab DB, stránka Dnes).
-2. Rozhodnout o TRUNCATE grantech na `audit_log` + 51 provozních tabulkách
-   (`docs/granty-provoz-zadani.md`) — mimo gesci téhle relace, ale čeká na rozhodnutí.
+2. ~~Rozhodnout o TRUNCATE grantech~~ — **HOTOVO, migrace napsaná a ověřená
+   CI** (17.9.2026 v noci, PR #22, viz bod 7 a
+   `docs/hlaseni/granty-provoz-oprava-2026-09-17.md`). Zbývá jen
+   `supabase db push` migrace `20260917000000_granty_provoz_uklid.sql`.
 3. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
 4. n8n: zúžit/vypnout starý workflow Černá Perla.
 5. ~~Prošetřit selhávající GitHub Actions check „Migrace a scénáře"~~ —
