@@ -5,7 +5,7 @@ import { barvaNeboNic } from "@/lib/barvy-lidi";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
-import { DotazSelhal } from "@/lib/supabase/dotaz";
+import { DotazSelhal, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../nadpis";
@@ -120,25 +120,44 @@ export default async function Rozpis({
 
   const doKdy = posunDatum(odKdy, DNU_V_ROZPISU - 1);
 
-  let dotaz = supabase
-    .from("shifts")
-    .select(
-      "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at, pauza_od, pauza_do",
-    )
-    .eq("tenant_id", tenantId)
-    .gte("shift_date", odKdy)
-    .lte("shift_date", doKdy)
-    .neq("status", "cancelled")
-    .order("shift_date", { ascending: true })
-    .order("starts_at", { ascending: true });
+  // Sloupce pauza_od/pauza_do přidává migrace 20260916200000 (trhaná
+  // směna) — dokud neproběhne, dotaz na ně spadne s PGRST204/42703.
+  // Stránka to nesmí strhnout s sebou, proto se v tom případě zopakuje
+  // bez nich (viz lib/supabase/dotaz.ts, sloupecNeexistuje).
+  const zakladniSloupce =
+    "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at";
 
-  if (scope.level === "branch" && scope.branchId) {
-    dotaz = dotaz.eq("branch_id", scope.branchId);
+  function dotazNaSmeny(sloupce: string) {
+    let d = supabase
+      .from("shifts")
+      .select(sloupce)
+      .eq("tenant_id", tenantId)
+      .gte("shift_date", odKdy)
+      .lte("shift_date", doKdy)
+      .neq("status", "cancelled")
+      .order("shift_date", { ascending: true })
+      .order("starts_at", { ascending: true });
+
+    if (scope.level === "branch" && scope.branchId) {
+      d = d.eq("branch_id", scope.branchId);
+    }
+    return d;
   }
 
-  const { data: nactene, error: chybaNactene } = await dotaz;
+  let { data: nactene, error: chybaNactene } = await dotazNaSmeny(
+    `${zakladniSloupce}, pauza_od, pauza_do`,
+  );
+  let maPauzy = true;
+  if (chybaNactene && sloupecNeexistuje(chybaNactene)) {
+    maPauzy = false;
+    ({ data: nactene, error: chybaNactene } = await dotazNaSmeny(zakladniSloupce));
+  }
   if (chybaNactene) throw new DotazSelhal("směny", chybaNactene);
-  const smeny = (nactene ?? []) as Smena[];
+  const smeny = ((nactene ?? []) as unknown as Record<string, unknown>[]).map((s) => ({
+    ...s,
+    pauza_od: maPauzy ? ((s.pauza_od as string | null) ?? null) : null,
+    pauza_do: maPauzy ? ((s.pauza_do as string | null) ?? null) : null,
+  })) as unknown as Smena[];
 
   // Jména lidí a názvy pozic. Neobsazená směna nemá employee_id — ta se
   // do dotazu nedostane a v rozpisu se ukáže jako neobsazená.
