@@ -29,6 +29,7 @@ import {
   popisMarketingu,
   popisOpravneni,
   popisZapomenuteho,
+  vyzadujePotvrzeni,
 } from '../lib/upozorneni-text.ts'
 
 let chyb = 0
@@ -339,6 +340,40 @@ ma('a kdo rozhodl o své vlastní, taky ne',
 */
 ma('u publikace se hlásí až vzdání, ne každý pokus',
   /new\.stav <> 'vzdano' or old\.stav = 'vzdano'/.test(MIGRACE_UP), true)
+
+console.log('\n== Potvrzení změny směny (acknowledgement) ==')
+
+/*
+  Zadání (noční prompt Komunikace, oddíl 10 a 12): "změnili vám
+  směnu" a "zrušili vám směnu" jsou věci, které si člověk už naplánoval
+  a teď mu je někdo sebral/posunul — proto vyžadují výslovné potvrzení.
+  Nová/odebraná směna ne (odebraná znamená, že na ni už nemá počítat —
+  potvrzovat něco, co se ho víc netýká, nemá smysl).
+*/
+ma('změna směny vyžaduje potvrzení', vyzadujePotvrzeni('smena.zmenena'), true)
+ma('zrušení směny vyžaduje potvrzení', vyzadujePotvrzeni('smena.zrusena'), true)
+ma('nová směna potvrzení nevyžaduje', vyzadujePotvrzeni('smena.nova'), false)
+ma('odebraná směna potvrzení nevyžaduje', vyzadujePotvrzeni('smena.odebrana'), false)
+ma('ostatní druhy potvrzení nevyžadují', vyzadujePotvrzeni('vzkaz.novy'), false)
+ma('ani neznámý druh', vyzadujePotvrzeni('neco.noveho'), false)
+
+ma('obrazovka volá vyzadujePotvrzeni',
+  /vyzadujePotvrzeni\(z\.druh\)/.test(OBRAZOVKA_KOD), true)
+ma('obrazovka umí zavolat potvrditZmenu',
+  /potvrditZmenu/.test(OBRAZOVKA_KOD), true)
+ma('tlačítko potvrzení posílá id té konkrétní zprávy',
+  /name="id" value=\{z\.id\}/.test(OBRAZOVKA_KOD), true)
+
+/*
+  Akce musí filtrovat na stejné dva druhy jako vyzadujePotvrzeni —
+  jinak by šlo potvrdit i to, co se potvrzovat nemá, přímým odesláním
+  formuláře mimo obrazovku (id v skrytém poli, druh se tam nekontroluje).
+*/
+const AKCE = fs.readFileSync('app/[rozsah]/upozorneni/akce.ts', 'utf8')
+ma('akce filtruje na druhy z vyzadujePotvrzeni, ne na vlastní kopii',
+  /DRUHY_S_POTVRZENIM = \[.*\]\.filter\(vyzadujePotvrzeni\)/.test(AKCE), true)
+ma('potvrzení nastaví i read_at',
+  /acknowledged_at.*read_at|read_at.*acknowledged_at/s.test(AKCE), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

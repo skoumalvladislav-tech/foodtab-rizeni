@@ -3,19 +3,20 @@ import { redirect } from 'next/navigation'
 
 import { getUser } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
-import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
+import { sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
   nadpisUpozorneni,
   popisMarketingu,
   popisOpravneni,
   popisPinu,
   popisZapomenuteho,
+  vyzadujePotvrzeni,
   type TeloUpozorneni,
 } from '@/lib/upozorneni-text'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
-import { oznacitPrectene } from './akce'
+import { oznacitPrectene, potvrditZmenu } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +47,8 @@ type Zprava = {
   telo: Telo
   created_at: string
   read_at: string | null
+  // Migrace 20260917010000 — chybí, dokud neproběhne (viz níž).
+  acknowledged_at: string | null
 }
 
 const NAZVY: Record<string, string> = {
@@ -76,12 +79,25 @@ export default async function Upozorneni({
   if (!user) redirect('/prihlaseni')
 
   const supabase = await getServerSupabase()
-  const { data, error } = await supabase
-    .from('notifications')
-    .select('id, druh, telo, created_at, read_at')
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false })
-    .limit(50)
+  const dotazNaUpozorneni = (sloupce: string) =>
+    supabase
+      .from('notifications')
+      .select(sloupce)
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+  let { data, error } = await dotazNaUpozorneni(
+    'id, druh, telo, created_at, read_at, acknowledged_at',
+  )
+
+  // Sloupec z migrace 20260917010000 — dokud neproběhne, dotaz se
+  // zopakuje bez něj. Stejný vzor jako jinde v appce (viz smeny/page.tsx).
+  let maPotvrzeni = true
+  if (error && sloupecNeexistuje(error)) {
+    maPotvrzeni = false
+    ;({ data, error } = await dotazNaUpozorneni('id, druh, telo, created_at, read_at'))
+  }
 
   if (tabulkaNeexistuje(error)) {
     return (
@@ -99,7 +115,10 @@ export default async function Upozorneni({
     )
   }
 
-  const zpravy = (data ?? []) as Zprava[]
+  const zpravy = ((data ?? []) as unknown as Record<string, unknown>[]).map((z) => ({
+    ...z,
+    acknowledged_at: maPotvrzeni ? ((z.acknowledged_at as string | null) ?? null) : null,
+  })) as unknown as Zprava[]
   const neprectene = zpravy.filter((z) => !z.read_at).length
 
   return (
@@ -256,6 +275,30 @@ export default async function Upozorneni({
                   >
                     {cas(z.telo.od)}–{cas(z.telo.do)}
                   </p>
+                ) : null}
+
+                {/*
+                  Potvrzení — jen zmenena/zrusena (vyzadujePotvrzeni,
+                  jediné místo s tímhle pravidlem). Nenasazená migrace
+                  se promíjí stejně jako jinde: dokud sloupec není,
+                  acknowledged_at je vždycky null a tlačítko prostě
+                  zůstane nabídnuté — nezpůsobí to chybu, jen se
+                  potvrzení neuloží, dokud Šéfík nenasadí.
+                */}
+                {vyzadujePotvrzeni(z.druh) ? (
+                  z.acknowledged_at ? (
+                    <p style={{ margin: '8px 0 0', fontSize: '13px', color: 'var(--dobre)' }}>
+                      ✓ potvrzeno
+                    </p>
+                  ) : (
+                    <form action={potvrditZmenu} style={{ margin: '10px 0 0' }}>
+                      <input type="hidden" name="rozsah" value={rozsah} />
+                      <input type="hidden" name="id" value={z.id} />
+                      <button type="submit" className="ft-tl ft-tl-hlavni ft-tl-male">
+                        Potvrdit
+                      </button>
+                    </form>
+                  )
                 ) : null}
 
                 {z.druh === 'opravneni.prideleno' ? (
