@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { getContext, getUser, jeVedeni, maOpravneni } from "@/lib/authz";
+import { getContext, getUser, maOpravneni } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
@@ -77,18 +77,13 @@ export default async function Home() {
   /*
     KAM KDO PŘISTANE.
 
-    Zaměstnanec na „Dnes", vedení na rozcestník, jak to bylo.
-
-    Číšník, který si aplikaci otevře, má v hlavě jednu otázku: kdy mám
-    příště jít a jsem teď zapíchnutý? Rozcestník mu na ni neodpoví —
-    dá mu šest dlaždic a ať si hledá. Pro majitele je rozcestník
-    naopak dobrý a nemění se mu nic.
-
-    Rozhoduje PRÁVO, ne název role (pravidlo 2) — viz `jeVedeni`.
-    Rozcestník se neruší, jen přestává být domovský: je pořád na
-    `/<rozsah>` a vede na něj „Více" ve spodní liště.
+    Šéfíkovo rozhodnutí 16.9.2026: napevno „Dnes" pro každého, i pro
+    vedení — dřív sem vedení chodilo na rozcestník ("jak to bylo"),
+    teď je to stejné pro všechny. Rozcestník se neruší, jen přestává
+    být domovský i pro vedení: je pořád na `/<rozsah>` a vede na něj
+    „Více" ve spodní liště.
   */
   // Až za vyhodnocením rozsahu: redirect() funguje tak, že vyhodí
   // výjimku, a uvnitř odchytávání by se ztratila.
-  redirect(jeVedeni(ctx) ? `/${scope.branchSlug}` : `/${scope.branchSlug}/dnes`);
+  redirect(`/${scope.branchSlug}/dnes`);
 }

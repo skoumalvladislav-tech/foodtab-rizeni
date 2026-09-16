@@ -26,6 +26,10 @@ import FormularSmeny, { type SmenaKUprave } from "./formular-smeny";
 // `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
 // nespouští a serverová akce by se sem tahat neměla vůbec.
 import type { NabidnutaSablona } from "./sablony";
+// Stejný průvodce jako Nastavení → Nahrání dat → Rozpis směn — žádná
+// druhá kopie logiky, jen druhé místo, odkud se dá spustit (Šéfíkovo
+// zadání 16.9.2026: nahrání rozpisu patří přímo do Rozpisu směn).
+import PruvodceNahranim from "../nastaveni/nahrani/rozpis/pruvodce";
 
 type Pohled = "mesic" | "tyden" | "den";
 
@@ -213,6 +217,25 @@ export default function RozpisView({
           ))}
         </div>
       </Card>
+
+      {/*
+        Nahrání rozpisu z tabulky — přímo tady, ne jen v Nastavení
+        (Šéfíkovo zadání 16.9.2026). Stejné právo jako ruční zakládání
+        směny (`planovani` je `null`, když ho člověk nemá), stejný
+        průvodce jako Nastavení → Nahrání dat → Rozpis směn — jedna
+        logika, dvě místa, odkud se dá spustit. Sbalené ať nezabírá
+        místo, dokud ho někdo nepotřebuje.
+      */}
+      {planovani ? (
+        <details style={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)", padding: "10px 12px", marginBottom: "16px" }}>
+          <summary style={{ cursor: "pointer", fontSize: "14px", fontWeight: 600, color: "var(--ink)" }}>
+            + Nahrát rozpis z tabulky
+          </summary>
+          <div style={{ marginTop: "4px" }}>
+            <PruvodceNahranim rozsah={planovani.rozsah} />
+          </div>
+        </details>
+      ) : null}
 
       {/* Obsah podle pohledu */}
       {pohled === "tyden" && (
