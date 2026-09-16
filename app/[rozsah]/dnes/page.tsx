@@ -7,8 +7,9 @@ import { hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { pocet } from "@/lib/sklonovani";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { posunDatum } from "@/lib/provozni-den";
+import { KBELIK as KBELIK_POZADI, PLATNOST_ODKAZU_S as PLATNOST_ODKAZU_POZADI_S } from "@/lib/pobocky-pozadi";
 import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
-import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
+import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { fakturyJsouNastavene, getFakturySupabase } from "@/lib/supabase/faktury";
 import { STAV_KE_SCHVALENI, STAV_UHRAZENO } from "@/lib/faktury-types";
 import { getServerSupabase } from "@/lib/supabase/server";
@@ -54,10 +55,13 @@ export const dynamic = "force-dynamic";
  * existujícími daty — žádný nový zdroj pravdy, žádné vymyšlené číslo.
  * Co appka nemá odkud vzít (tržby, online objednávky, hodnocení
  * Google, počasí), se nekreslí vůbec — čeká na Šéfíkovo napojení
- * zdroje dat, ne na vymyšlená čísla. Hero fotka provozovny stejně tak:
- * appka nemá odkud vzít SKUTEČNOU fotku té které restaurace, takže
- * banner nese jen barvu pobočky, ne cizí/stock snímek, který by
- * předstíral, že je to ona.
+ * zdroje dat, ne na vymyšlená čísla.
+ *
+ * Hero fotka provozovny — od 16.9.2026 večer už appka odkud vzít
+ * SKUTEČNOU fotku MÁ: Nastavení → Pobočky umí nahrát vlastní snímek
+ * (branches.hero_photo_path, app/[rozsah]/nastaveni/pobocky/akce.ts).
+ * Dokud ji nikdo nenahraje, banner nese jen barvu pobočky — pořád ne
+ * cizí/stock snímek, který by předstíral, že je to ona.
  */
 
 const PRISTICH_SMEN = 3;
@@ -180,6 +184,32 @@ export default async function Dnes({
         </div>
       </>
     );
+  }
+
+  /*
+    Hero fotka pobočky — jen na konkrétní pobočce, ne na „Celá firma".
+    Na firemní úrovni nemá smysl ukazovat fotku jedné konkrétní
+    pobočky; tam banner zůstává na barvě, stejně jako beze fotky vůbec.
+  */
+  let heroFotoUrl: string | null = null;
+  if (scope.level === "branch" && scope.branchId) {
+    // Sloupec hero_photo_path čeká na migraci 20260916160000 — dokud
+    // neproběhne, dotaz na něj selže a Dnes má prostě pokračovat beze
+    // fotky (stejně jako dřív), ne spadnout na chybějícím sloupci.
+    const { data: pobockaData, error: chybaFoto } = await supabase
+      .from("branches")
+      .select("hero_photo_path")
+      .eq("id", scope.branchId)
+      .maybeSingle();
+    const cesta = sloupecNeexistuje(chybaFoto)
+      ? null
+      : (pobockaData as { hero_photo_path: string | null } | null)?.hero_photo_path;
+    if (cesta) {
+      const { data: podepsany } = await supabase.storage
+        .from(KBELIK_POZADI)
+        .createSignedUrl(cesta, PLATNOST_ODKAZU_POZADI_S);
+      heroFotoUrl = podepsany?.signedUrl ?? null;
+    }
   }
 
   /*
@@ -451,9 +481,23 @@ export default async function Dnes({
   const zVcerejska =
     vPraci && den.den_prichodu !== null && den.den_prichodu < den.provozni_den;
 
+  const heroStyl = heroFotoUrl
+    ? {
+        margin: hero.margin,
+        padding: hero.padding,
+        // Fotka jako plocha, tmavší --branch přechod navrch kvůli
+        // čitelnosti bílého textu — nahrazuje `background` shorthand
+        // z `hero`, ne doplňuje ho vedle sebe (aby si `background-image`
+        // s `background` v jednom stylu nekonkurovaly).
+        backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--branch-fill) 82%, transparent), color-mix(in srgb, var(--branch) 55%, transparent)), url("${heroFotoUrl}")`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : hero;
+
   return (
     <div style={{ padding: "16px", paddingBottom: "32px", maxWidth: "1080px" }}>
-      <div style={hero}>
+      <div style={heroStyl}>
         <p style={{ margin: "0 0 6px", fontSize: "13px", fontWeight: 600, color: "var(--branch-ink)", opacity: 0.85, textTransform: "uppercase", letterSpacing: ".06em" }}>
           {denDlouze(den.provozni_den)}
         </p>
