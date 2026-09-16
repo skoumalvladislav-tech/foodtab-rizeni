@@ -401,6 +401,14 @@ export default async function Ukoly({
           </details>
         ) : null}
 
+        {/*
+          Úkoly a checklisty vedle sebe od ~900px — stejný princip jako
+          Docházka (design systém, 16.9.2026): dvě rovnocenné sekce,
+          auto-fit grid se sám podsune pod sebe, když se dvě 320px
+          položky vedle sebe nevejdou, žádný media dotaz netřeba.
+        */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px", alignItems: "start" }}>
+        <div>
         <h2 style={nadpisSekce}>Otevřené úkoly</h2>
 
         {ukoly.length === 0 ? (
@@ -501,8 +509,10 @@ export default async function Ukoly({
             ))}
           </ul>
         )}
+        </div>
 
-        <h2 style={{ ...nadpisSekce, marginTop: "28px" }}>Checklisty</h2>
+        <div>
+        <h2 style={{ ...nadpisSekce, marginTop: 0 }}>Checklisty</h2>
 
         {!branchId ? (
           <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
@@ -577,6 +587,8 @@ export default async function Ukoly({
             })}
           </ul>
         )}
+        </div>
+        </div>
       </div>
     </>
   );
