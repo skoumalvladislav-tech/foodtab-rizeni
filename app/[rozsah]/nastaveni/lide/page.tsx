@@ -27,6 +27,9 @@ type Zamestnanec = {
   full_name: string;
   position_id: string | null;
   branch_id: string | null;
+  // Úsek — do jakého týmu člověk patří (Kuchyně, Bar, Vedení), jiná
+  // osa než position_id. Viz nastaveni/useky/.
+  usek_id: string | null;
   user_id: string | null;
   employment_type: string;
   started_on: string | null;
@@ -113,7 +116,7 @@ export default async function NastaveniLide({
     supabase
       .from("employees")
       .select(
-        "id, full_name, position_id, branch_id, user_id, employment_type, started_on, active, deleted_at, color, je_majitel",
+        "id, full_name, position_id, branch_id, usek_id, user_id, employment_type, started_on, active, deleted_at, color, je_majitel",
       )
       .eq("tenant_id", tenantId)
       .order("full_name"),
@@ -142,6 +145,18 @@ export default async function NastaveniLide({
   const nabizenePozice = vsechnyPozice
     .filter((p) => p.active)
     .map((p) => ({ id: p.id, label: p.label }));
+
+  // Úseky pro výběr u zaměstnance — jiná osa než Zařazení, viz nastaveni/useky/.
+  const vsechnyUseky = await seznam<{ id: string; nazev: string; active: boolean }>(
+    "úseky firmy",
+    supabase
+      .from("useky")
+      .select("id, nazev, active")
+      .eq("tenant_id", tenantId)
+      .order("nazev"),
+  );
+  const nabizeneUseky = vsechnyUseky.filter((u) => u.active);
+  const nazvyUseku = new Map(vsechnyUseky.map((u) => [u.id, u.nazev]));
 
   /*
     Která zařazení smí ten, kdo je otevřel, vůbec přidělit.
@@ -504,6 +519,30 @@ export default async function NastaveniLide({
             </select>
           </label>
 
+          {/*
+            Úsek — do jakého týmu člověk patří (Kuchyně, Bar, Vedení).
+            Nepovinné a JINÁ VĚC než Zařazení výš: zařazení je čím
+            člověk je a co smí, úsek je kam patří organizačně a podle
+            čeho se rozpis směn seskupuje. Seznam se spravuje
+            v Nastavení → Úseky.
+          */}
+          <label style={formularLabel}>
+            <span>Úsek</span>
+            <select name="usek" defaultValue={upravuje?.usek_id ?? ""} style={selectPole}>
+              <option value="">— Neurčeno —</option>
+              {nabizeneUseky.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.nazev}
+                </option>
+              ))}
+            </select>
+            {nabizeneUseky.length === 0 ? (
+              <span style={{ fontSize: "12px", textTransform: "none", letterSpacing: 0 }}>
+                Firma zatím žádný úsek nemá. Založí se v Nastavení → Úseky.
+              </span>
+            ) : null}
+          </label>
+
           <label style={formularLabel}>
             <span>Typ pracovního poměru</span>
             <select name="typ" defaultValue={upravuje?.employment_type ?? "hpp"} style={selectPole}>
@@ -772,6 +811,7 @@ export default async function NastaveniLide({
               <th style={th}>Jméno</th>
               <th style={th}>Zařazení</th>
               <th style={th}>Pobočka</th>
+              <th style={th}>Úsek</th>
               <th style={th}>Typ</th>
               <th style={th}>Účet</th>
               <th style={th}>Oprávnění</th>
@@ -805,6 +845,7 @@ export default async function NastaveniLide({
                     ? ctx.branches.find((b) => b.id === z.branch_id)?.name || "—"
                     : "Firemní"}
                 </td>
+                <td style={td}>{z.usek_id ? nazvyUseku.get(z.usek_id) ?? "—" : "—"}</td>
                 <td style={td}>
                   {kratkyUvazek(z.employment_type)}
                 </td>

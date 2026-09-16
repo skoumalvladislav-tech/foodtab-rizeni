@@ -55,6 +55,13 @@ export async function ulozitSmenu(
     u směny od devíti do pěti by lhalo.
   */
   const sablona = String(formData.get('sablona') ?? '').trim() || null
+  /*
+    Trhaná směna — pauza uvnitř. Nezaškrtnuté zaškrtávátko pole vůbec
+    nevykreslí (viz formular-smeny.tsx), takže tu chybí docela; prázdný
+    řetězec se posílá dál jako "bez pauzy" stejně jako chybějící pole.
+  */
+  const pauzaOd = String(formData.get('pauza_od') ?? '').trim() || null
+  const pauzaDo = String(formData.get('pauza_do') ?? '').trim() || null
 
   if (!pobocka) return { stav: 'chyba', text: 'Vyberte pobočku.' }
   if (!den || !od || !doKdy) return { stav: 'chyba', text: 'Vyplňte datum a čas od–do.' }
@@ -85,6 +92,8 @@ export async function ulozitSmenu(
     p_do: doKdy,
     p_poznamka: poznamka,
     p_sablona_key: sablona,
+    p_pauza_od: pauzaOd,
+    p_pauza_do: pauzaDo,
   })
 
   // Hlášku píše databáze a je pro člověka — projde se dál, ať se

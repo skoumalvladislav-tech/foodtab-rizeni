@@ -40,6 +40,9 @@ type Smena = {
   note: string;
   // Vydaná směna se nedá smazat — lidem už je v rozpisu vidět.
   published_at: string | null;
+  // Trhaná směna — pauza uvnitř (migrace 20260916200000). Obě, nebo žádná.
+  pauza_od: string | null;
+  pauza_do: string | null;
 };
 
 export default async function Rozpis({
@@ -120,7 +123,7 @@ export default async function Rozpis({
   let dotaz = supabase
     .from("shifts")
     .select(
-      "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at",
+      "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at, pauza_od, pauza_do",
     )
     .eq("tenant_id", tenantId)
     .gte("shift_date", odKdy)
@@ -147,18 +150,28 @@ export default async function Rozpis({
   */
   const barvy = new Map<string, string | null>();
 
+  /*
+    Domovský úsek každého člověka (do jakého týmu patří — Kuchyně,
+    Bar, Vedení), pro seskupení týdenní mřížky. Jiná osa než pozice
+    níž: úsek se váže na ČLOVĚKA (employees.usek_id), ne na směnu —
+    stejná úvaha jako u domovské pobočky v maticovém dovozu rozpisu
+    (lib/nahrani-rozpisu-matice.ts).
+  */
+  const domovskeUseky = new Map<string, string | null>();
+
   const idLidi = [
     ...new Set(smeny.map((s) => s.employee_id).filter((i): i is string => !!i)),
   ];
   if (idLidi.length > 0) {
     const { data: lide, error: chybaLide } = await supabase
       .from("employees")
-      .select("id, full_name, color")
+      .select("id, full_name, color, usek_id")
       .in("id", idLidi);
     if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
     for (const c of lide ?? []) {
       jmena.set(c.id as string, c.full_name as string);
       barvy.set(c.id as string, barvaNeboNic(c.color));
+      domovskeUseky.set(c.id as string, (c.usek_id as string | null) ?? null);
     }
   }
 
@@ -172,6 +185,17 @@ export default async function Rozpis({
       .in("id", idPozic);
     if (chybaP) throw new DotazSelhal("pozice", chybaP);
     for (const c of p ?? []) pozice.set(c.id as string, c.label as string);
+  }
+
+  const nazvyUseku = new Map<string, string>();
+  const idUseku = [...new Set([...domovskeUseky.values()].filter((i): i is string => !!i))];
+  if (idUseku.length > 0) {
+    const { data: u, error: chybaU } = await supabase
+      .from("useky")
+      .select("id, nazev")
+      .in("id", idUseku);
+    if (chybaU) throw new DotazSelhal("úseky", chybaU);
+    for (const c of u ?? []) nazvyUseku.set(c.id as string, c.nazev as string);
   }
 
   /* --- 3. ZADÁVÁNÍ ---------------------------------------------- */
@@ -294,6 +318,8 @@ export default async function Rozpis({
         jmena={jmena}
         barvy={barvy}
         pozice={pozice}
+        domovskeUseky={domovskeUseky}
+        nazvyUseku={nazvyUseku}
         nazvyPobocek={nazvyPobocek}
         rozsah={{
           level: scope.level,

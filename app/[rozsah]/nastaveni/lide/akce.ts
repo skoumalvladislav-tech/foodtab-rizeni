@@ -47,6 +47,9 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
   const jmeno = String(formData.get('jmeno') ?? '').trim()
   const pozice = formData.get('pozice') ? String(formData.get('pozice')) : null
   const pobocka = formData.get('pobocka') ? String(formData.get('pobocka')) : null
+  // Úsek — do jakého týmu člověk patří (Kuchyně, Bar, Vedení). Jiná
+  // osa než Zařazení, viz nastaveni/useky/akce.ts.
+  const usek = formData.get('usek') ? String(formData.get('usek')) : null
   const typ = String(formData.get('typ') ?? 'hpp')
   // Prázdné pole s datem posílá prázdný řetězec. Do sloupce typu date
   // patří null, ne '' — na tom by zápis spadl.
@@ -105,6 +108,7 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
         full_name: jmeno,
         position_id: poziceId,
         branch_id: pobocka,
+        usek_id: usek,
         employment_type: typ,
         started_on: nastup,
         color: barva,
@@ -124,6 +128,7 @@ export async function upravitZamestnance(formData: FormData): Promise<void> {
         full_name: jmeno,
         position_id: poziceId,
         branch_id: pobocka,
+        usek_id: usek,
         employment_type: typ,
         started_on: nastup,
         // Prázdno tu nechává práci spouštěči — ten vybere volnou.

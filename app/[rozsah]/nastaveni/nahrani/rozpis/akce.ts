@@ -94,7 +94,7 @@ async function pripravit(vstup: Vstup): Promise<Priprava> {
     nabídl založit celý rozpis znovu — duplicitně. Proto přes seznam(),
     který při chybě vyhodí.
   */
-  const [lide, pobocky, smeny] = await Promise.all([
+  const [lide, pobocky, pozice, smeny] = await Promise.all([
     seznam<Zdroje['lide'][number]>(
       'zaměstnanci firmy',
       supabase
@@ -107,23 +107,67 @@ async function pripravit(vstup: Vstup): Promise<Priprava> {
       'pobočky firmy',
       supabase.from('branches').select('id, name, slug').eq('tenant_id', tenantId),
     ),
+    seznam<Zdroje['pozice'][number]>(
+      'pozice firmy',
+      supabase.from('positions').select('id, label').eq('tenant_id', tenantId),
+    ),
     seznam<Zdroje['smeny'][number]>(
       'existující směny',
       supabase
         .from('shifts')
-        .select('id, employee_id, branch_id, shift_date, starts_at, ends_at')
+        .select('id, employee_id, branch_id, shift_date, starts_at, ends_at, position_id')
         .eq('tenant_id', tenantId)
         .neq('status', 'cancelled'),
     ),
   ])
 
-  const zdroje: Zdroje = { lide, pobocky, smeny }
+  const zdroje: Zdroje = { lide, pobocky, pozice, smeny }
 
   return {
     tenantId,
     supabase,
     plan: sestavPlan(vstup.radky, vstup.mapovani, zdroje, vychoziPobocka),
   }
+}
+
+export type ZamestnanecSDomovem = {
+  id: string
+  jmeno: string
+  branchId: string | null
+  positionId: string | null
+}
+
+/**
+ * Domovská pobočka a pozice každého zaměstnance — pro krok "značky"
+ * maticového dovozu (../../../smeny/rozpis.tsx přes pruvodce.tsx).
+ *
+ * ZAMĚSTNANEC UŽ DOMOVSKOU POBOČKU A POZICI MÁ (branch_id, position_id
+ * na employees) — Šéfík 16.9.2026: "mělo by se to automaticky rozlišit
+ * dle jména". Buňka bez přípony ("X" bez "-B"/"-P") proto NENÍ nejednoznačná
+ * — patří tomu, kdo tu směnu má, na JEHO pobočce a pozici. Přípona je
+ * jen výjimka (výpomoc na druhé pobočce), ne pravidlo pro každého.
+ */
+export async function nactiZamestnance(rozsah: string): Promise<ZamestnanecSDomovem[]> {
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return []
+
+  const pristup = await zkusPristup(tenantId, PRAVO, rozsah)
+  if (pristup.stav !== 'ok') return []
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase
+    .from('employees')
+    .select('id, full_name, branch_id, position_id')
+    .eq('tenant_id', tenantId)
+    .is('deleted_at', null)
+  if (error) return []
+
+  return (data ?? []).map((e) => ({
+    id: e.id as string,
+    jmeno: String(e.full_name ?? ''),
+    branchId: (e.branch_id as string | null) ?? null,
+    positionId: (e.position_id as string | null) ?? null,
+  }))
 }
 
 /** Krok 4 zadání: co se stane, ještě než se cokoli stane. */
