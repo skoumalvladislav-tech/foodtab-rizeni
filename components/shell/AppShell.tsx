@@ -125,29 +125,28 @@ export default function AppShell({
   const jeVice = sloupecMobil.length > 5;
 
   /*
-    Boční sloupec na desktopu — design systém 15.9.2026, Šéfíkovo
-    rozhodnutí podle master promptu (sekce 12, mockup): NEPŘEPÍNÁ se
-    podle vybraného modulu, ukazuje VŠECHNY moduly najednou jako
-    seskupené sekce s nadpisem. `polozky` už obsahuje jen to, na co
-    tenant/uživatel dosáhne (spočítal to server), tady se to jen
-    seskupí podle pořadí, ve kterém moduly přišly v `moduly` (nebo
-    v pořadí prvního výskytu v `polozky`, když `moduly` je prázdné —
-    to je běžný zaměstnanec bez vedení, viz app/[rozsah]/layout.tsx).
+    Boční sloupec na desktopu — UX redesign, druhé kolo (16.9.2026,
+    oddíl 4): sloupec je navigace UVNITŘ aktivního modulu, ne trvalý
+    seznam celé appky. Dřív (15.9.2026) ukazoval všechny moduly
+    najednou seskupené pod sebou — to teď soutěžilo s horní lištou,
+    kde modul volí uživatel. Sloupec proto ukazuje jen položky
+    vybraného modulu (`vybranyModul`, spočítané výš ze stejné logiky
+    jako mobilní spodní lišta) a k tomu vždycky Nastavení, ať se tam
+    dá skočit bez ohledu na to, který modul je zrovna aktivní.
   */
-  const poradiModulu =
-    moduly.length > 0 ? moduly.map((m) => m.klic) : [...new Set(polozky.map((p) => p.modul))];
+  const skupiny: SkupinaNavigace[] = [];
 
-  const skupiny: SkupinaNavigace[] = poradiModulu
-    .map((modul) => {
-      const polozkyModulu = polozky.filter((p) => p.modul === modul);
-      return {
-        klic: modul,
-        nazev: moduly.find((m) => m.klic === modul)?.nazev ?? nazvyModulu[modul] ?? modul,
+  if (vybranyModul) {
+    const polozkyModulu = polozky.filter((p) => p.modul === vybranyModul);
+    if (polozkyModulu.length > 0) {
+      skupiny.push({
+        klic: vybranyModul,
+        nazev: moduly.find((m) => m.klic === vybranyModul)?.nazev ?? nazvyModulu[vybranyModul] ?? vybranyModul,
         hotove: polozkyModulu.filter((p) => p.hotovo),
         chystane: polozkyModulu.filter((p) => !p.hotovo),
-      };
-    })
-    .filter((s) => s.hotove.length > 0 || s.chystane.length > 0);
+      });
+    }
+  }
 
   if (nastaveni.length > 0) {
     skupiny.push({

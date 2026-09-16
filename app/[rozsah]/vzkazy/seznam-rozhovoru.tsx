@@ -1,8 +1,18 @@
 import Link from 'next/link'
 
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
+import Ikona from '../ikona'
+import type { IkonaKlic } from '../nabidka'
 
 const ZONA = ZONA_VYCHOZI
+
+/** Ikona avataru podle druhu rozhovoru — jen vzhledová zkratka, žádné právo se z ní neodvozuje. */
+const IKONA_DRUHU: Record<Rozhovor['druh'], IkonaKlic> = {
+  osobni: 'clovek',
+  pobocka: 'zprava',
+  mezi_pobockami: 'zprava',
+  vedeni: 'praporek',
+}
 
 export type Rozhovor = {
   konverzace_id: string
@@ -40,11 +50,14 @@ export default function SeznamRozhovoru({
   rozhovory,
   nazvyPobocek,
   aktivniId,
+  posledniText,
 }: {
   rozsah: string
   rozhovory: Rozhovor[]
   nazvyPobocek: Map<string, string>
   aktivniId?: string
+  /** Poslední zpráva rozhovoru, zkrácená — pro náhled v seznamu (oddíl 8). */
+  posledniText?: Map<string, string>
 }) {
   if (rozhovory.length === 0) {
     return (
@@ -56,7 +69,7 @@ export default function SeznamRozhovoru({
   }
 
   return (
-    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
+    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '6px' }}>
       {rozhovory.map((r) => {
         const nazev =
           r.nazev ??
@@ -64,6 +77,8 @@ export default function SeznamRozhovoru({
             ? (nazvyPobocek.get(r.branch_id) ?? 'jiná pobočka')
             : NAZVY_DRUHU[r.druh])
         const aktivni = r.konverzace_id === aktivniId
+        const nalehave = r.druh === 'vedeni'
+        const nahled = posledniText?.get(r.konverzace_id)
 
         return (
           <li key={r.konverzace_id}>
@@ -71,7 +86,9 @@ export default function SeznamRozhovoru({
               href={`/${rozsah}/vzkazy/${r.konverzace_id}`}
               aria-current={aktivni ? 'page' : undefined}
               style={{
-                display: 'block',
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'flex-start',
                 textDecoration: 'none',
                 color: 'inherit',
                 background: aktivni ? 'var(--sunken)' : 'var(--card)',
@@ -83,47 +100,80 @@ export default function SeznamRozhovoru({
                       ? '3px solid var(--line-2)'
                       : '1px solid var(--line)',
                 borderRadius: 'var(--radius-md)',
-                padding: '12px 14px',
+                padding: '10px 12px',
                 opacity: r.neprectenych > 0 || aktivni ? 1 : 0.78,
                 boxShadow: r.neprectenych > 0 ? 'var(--shadow-sm)' : 'none',
               }}
             >
-              <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--muted)' }}>
-                {[
-                  NAZVY_DRUHU[r.druh],
-                  r.branch_id ? (nazvyPobocek.get(r.branch_id) ?? 'jiná pobočka') : null,
-                  r.adresat === 'majitel' ? 'jen majitelům' : null,
-                  r.uzavreno_kdy ? 'uzavřeno' : null,
-                  r.posledni_kdy ? datumACasVPasmu(r.posledni_kdy, ZONA) : null,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
-
-              <p
+              <span
+                aria-hidden="true"
                 style={{
-                  margin: '4px 0 0',
-                  fontSize: '15px',
-                  fontWeight: r.neprectenych > 0 || aktivni ? 600 : 400,
-                  color: 'var(--ink)',
+                  flex: 'none', width: '30px', height: '30px', borderRadius: '50%',
+                  background: nalehave ? 'var(--pozor-bg)' : 'var(--sunken)',
+                  color: nalehave ? 'var(--pozor)' : 'var(--muted)',
+                  display: 'grid', placeItems: 'center',
                 }}
               >
-                {nazev}
-              </p>
+                <Ikona klic={IKONA_DRUHU[r.druh]} />
+              </span>
 
-              {r.neprectenych > 0 ? (
-                <p
-                  style={{
-                    margin: '6px 0 0',
-                    fontSize: '12.5px',
-                    color: r.ceka > 0 ? 'var(--muted)' : 'var(--mosaz)',
-                  }}
-                >
-                  {r.ceka > 0
-                    ? `${r.ceka} z ${r.neprectenych} čeká na píchnutí`
-                    : `${r.neprectenych} nepřečtené`}
-                </p>
-              ) : null}
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <span style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                  <span
+                    style={{
+                      fontSize: '14.5px',
+                      fontWeight: r.neprectenych > 0 || aktivni ? 600 : 400,
+                      color: 'var(--ink)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {nazev}
+                  </span>
+                  {r.posledni_kdy ? (
+                    <span style={{ flex: 'none', fontSize: '11px', color: 'var(--muted)' }}>
+                      {datumACasVPasmu(r.posledni_kdy, ZONA)}
+                    </span>
+                  ) : null}
+                </span>
+
+                <span style={{ display: 'block', margin: '2px 0 0', fontSize: '11.5px', color: 'var(--muted)' }}>
+                  {[
+                    NAZVY_DRUHU[r.druh],
+                    r.branch_id ? (nazvyPobocek.get(r.branch_id) ?? 'jiná pobočka') : null,
+                    r.adresat === 'majitel' ? 'jen majitelům' : null,
+                    r.uzavreno_kdy ? 'uzavřeno' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+
+                {nahled ? (
+                  <span
+                    style={{
+                      display: 'block', margin: '4px 0 0', fontSize: '12.5px', color: 'var(--muted)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {nahled}
+                  </span>
+                ) : null}
+
+                {r.neprectenych > 0 ? (
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      marginTop: '5px',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      color: r.ceka > 0 ? 'var(--pozor)' : 'var(--mosaz)',
+                    }}
+                  >
+                    {r.ceka > 0
+                      ? `${r.ceka} z ${r.neprectenych} čeká na píchnutí`
+                      : `${r.neprectenych} nepřečtené`}
+                  </span>
+                ) : null}
+              </span>
             </Link>
           </li>
         )

@@ -530,34 +530,73 @@ export default async function Dnes({
   const zVcerejska =
     vPraci && den.den_prichodu !== null && den.den_prichodu < den.provozni_den;
 
-  const heroStyl = heroFotoUrl
-    ? {
-        margin: hero.margin,
-        padding: hero.padding,
-        // Fotka jako plocha, tmavší --branch přechod navrch kvůli
-        // čitelnosti bílého textu — nahrazuje `background` shorthand
-        // z `hero`, ne doplňuje ho vedle sebe (aby si `background-image`
-        // s `background` v jednom stylu nekonkurovaly).
-        backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--branch-fill) 82%, transparent), color-mix(in srgb, var(--branch) 55%, transparent)), url("${heroFotoUrl}")`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      }
-    : hero;
-
   return (
     <div style={{ padding: "16px", paddingBottom: "32px", maxWidth: "1080px" }}>
-      <div style={heroStyl}>
-        <p style={{ margin: "0 0 6px", fontSize: "13px", fontWeight: 600, color: "var(--branch-ink)", opacity: 0.85, textTransform: "uppercase", letterSpacing: ".06em" }}>
-          {denDlouze(den.provozni_den)}
-        </p>
-        <h1 style={{ margin: 0, fontSize: "clamp(26px, 4vw, 34px)", color: "var(--branch-ink)", fontWeight: 600 }}>
-          {pozdrav(zona)}
-          {krestni ? <>, {krestni}</> : null}
-        </h1>
-        <p style={{ margin: "6px 0 0", fontSize: "14.5px", color: "var(--branch-ink)", opacity: 0.85 }}>
-          {den.pobocka_nazev ? `Tady je přehled dnešního dne v ${den.pobocka_nazev}.` : "Tady je přehled dnešního dne."}
-        </p>
+      {/* ---------- KOMPAKTNÍ HLAVIČKA --------------------------
+         UX redesign, druhé kolo (oddíl 5): dřív tu stál vysoký hero
+         banner přes celou šířku — zabíral nejcennější plochu obrazovky
+         na pozdrav, který se dá říct jedním řádkem. Fotka pobočky
+         (kdo ji nahrál v Nastavení → Pobočky) teď žije jako malá
+         značka vedle textu, ne jako celoplošné pozadí. */}
+      <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: pozornost.length > 0 ? "16px" : "22px" }}>
+        {heroFotoUrl ? (
+          <img
+            src={heroFotoUrl}
+            alt=""
+            aria-hidden="true"
+            style={{ width: "44px", height: "44px", borderRadius: "var(--radius-md)", objectFit: "cover", flex: "none" }}
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            style={{ width: "44px", height: "44px", borderRadius: "var(--radius-md)", flex: "none", background: "linear-gradient(135deg, var(--branch-fill), var(--branch))" }}
+          />
+        )}
+        <div>
+          <h1 style={{ margin: 0, fontSize: "25px", color: "var(--ink)" }}>
+            {pozdrav(zona)}
+            {krestni ? <>, {krestni}</> : null}
+          </h1>
+          <p style={{ margin: "3px 0 0", fontSize: "13.5px", color: "var(--muted)" }}>
+            {denDlouze(den.provozni_den)}
+            {den.pobocka_nazev ? ` · ${den.pobocka_nazev}` : ""}
+          </p>
+        </div>
       </div>
+
+      {/* ---------- CO POTŘEBUJE VAŠI POZORNOST (jen vedení) ----
+         Oddíl 5: první skutečně důležitý blok, ne schovaný pod
+         čtyřmi kartami — proto stojí hned pod hlavičkou. */}
+      {pozornost.length > 0 ? (
+        <section style={{ marginBottom: "20px" }}>
+          <p style={nadpisPozornosti}>Potřebuje vaši pozornost</p>
+          <ul style={{ ...seznam, marginBottom: 0 }}>
+            {pozornost.map((p, i) => (
+              <Card
+                key={i}
+                as="li"
+                padding="12px 14px"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                  borderLeft: `3px solid ${barvaPozornosti(p.uroven)}`,
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "14px", color: "var(--ink)" }}>
+                  <Badge tone={tonPozornosti(p.uroven)}>{popisekUrovne(p.uroven)}</Badge>
+                  {p.text}
+                </span>
+                <Link href={p.akce.href} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                  {p.akce.popisek} →
+                </Link>
+              </Card>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {/* ---------- 4 PŘEHLEDOVÉ KARTY -------------------------- */}
         <div style={mrizkaKaret}>
@@ -608,38 +647,6 @@ export default async function Dnes({
             />
           ) : null}
         </div>
-
-        {/* ---------- CO POTŘEBUJE VAŠI POZORNOST (jen vedení) ---- */}
-        {pozornost.length > 0 ? (
-          <section style={{ marginBottom: "24px" }}>
-            <h2 style={nadpisSekce}>Co potřebuje vaši pozornost</h2>
-            <ul style={{ ...seznam, marginBottom: 0 }}>
-              {pozornost.map((p, i) => (
-                <Card
-                  key={i}
-                  as="li"
-                  padding="14px 16px"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "12px",
-                    flexWrap: "wrap",
-                    borderLeft: `3px solid ${barvaPozornosti(p.uroven)}`,
-                  }}
-                >
-                  <span style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "14px", color: "var(--ink)" }}>
-                    <Badge tone={tonPozornosti(p.uroven)}>{popisekUrovne(p.uroven)}</Badge>
-                    {p.text}
-                  </span>
-                  <Link href={p.akce.href} className="ft-tl ft-tl-vedlejsi ft-tl-male">
-                    {p.akce.popisek} →
-                  </Link>
-                </Card>
-              ))}
-            </ul>
-          </section>
-        ) : null}
 
         <div className="ds-dvasloupec">
           <div>
@@ -1012,7 +1019,14 @@ const MESICE = [
   "července", "srpna", "září", "října", "listopadu", "prosince",
 ];
 
-/** Jedna ze 4 přehledových karet nahoře. */
+/**
+ * Jedna ze 4 přehledových karet nahoře.
+ *
+ * UX redesign, druhé kolo (oddíl 5): dřív každá nesla vlastní velké
+ * vedlejší tlačítko dole — čtyři tlačítka vedle sebe na obrazovce,
+ * která má být souhrn, ne rozcestník. Celá karta je teď odkaz, malá
+ * šipka v rohu jen naznačuje, že se dá otevřít.
+ */
 function StavovaKarta({
   ikona,
   tone,
@@ -1034,28 +1048,31 @@ function StavovaKarta({
     tone === "success" ? "var(--dobre-bg)" : tone === "warning" ? "var(--pozor-bg)" : tone === "danger" ? "var(--bad-bg)" : "var(--sunken)";
 
   return (
-    <Card padding="16px" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+    <Link
+      href={odkaz.href}
+      style={{
+        background: "var(--card)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)",
+        padding: "12px 14px", display: "flex", flexDirection: "column", gap: "6px",
+        textDecoration: "none", color: "inherit",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
         <span
           aria-hidden="true"
           style={{
-            width: "32px", height: "32px", borderRadius: "var(--radius-sm)",
+            width: "26px", height: "26px", borderRadius: "var(--radius-sm)",
             background: pozadi, color: barva,
             display: "grid", placeItems: "center", flex: "none",
           }}
         >
           {ikona}
         </span>
-        <span style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--muted)" }}>{titulek}</span>
+        <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--muted)" }}>{titulek}</span>
+        <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--faint)", fontSize: "13px" }}>→</span>
       </div>
-      <div>
-        <div style={{ fontSize: "16.5px", fontWeight: 600, color: "var(--ink)" }}>{hodnota}</div>
-        {popis ? <div style={{ fontSize: "12.5px", color: tone === "danger" ? "var(--bad)" : "var(--muted)", marginTop: "2px" }}>{popis}</div> : null}
-      </div>
-      <Link href={odkaz.href} className="ft-tl ft-tl-vedlejsi ft-tl-male" style={{ marginTop: "auto" }}>
-        {odkaz.popisek} →
-      </Link>
-    </Card>
+      <div style={{ fontSize: "15px", fontWeight: 600, color: "var(--ink)" }}>{hodnota}</div>
+      {popis ? <div style={{ fontSize: "12px", color: tone === "danger" ? "var(--bad)" : "var(--muted)" }}>{popis}</div> : null}
+    </Link>
   );
 }
 
@@ -1108,17 +1125,20 @@ function denCesky(datum: string): string {
   return `${Number(d)}. ${Number(m)}.`;
 }
 
-const hero = {
-  margin: "-16px -16px 0",
-  padding: "28px 28px 32px",
-  background: "linear-gradient(135deg, var(--branch-fill), var(--branch))",
+const nadpisPozornosti = {
+  margin: "0 0 8px",
+  fontSize: "11px",
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: ".08em",
+  color: "var(--muted)",
 } as const;
 
 const mrizkaKaret = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-  gap: "12px",
-  margin: "20px 0 24px",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gap: "10px",
+  margin: "0 0 22px",
 } as const;
 
 const nadpisKarty = {

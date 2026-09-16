@@ -8,8 +8,17 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
 import Nastenka from './nastenka'
-import SeznamRozhovoru, { type Rozhovor } from './seznam-rozhovoru'
+import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from './seznam-rozhovoru'
 import { otevritKanalPobocky, zalozitVzkazVedeni } from './akce'
+
+type FiltrKlic = 'vse' | 'neprectene' | 'pobocka' | 'prime'
+
+const FILTRY: { klic: FiltrKlic; nazev: string }[] = [
+  { klic: 'vse', nazev: 'Vše' },
+  { klic: 'neprectene', nazev: 'Nepřečtené' },
+  { klic: 'pobocka', nazev: 'Pobočka' },
+  { klic: 'prime', nazev: 'Přímé' },
+]
 
 export const dynamic = 'force-dynamic'
 
@@ -50,13 +59,17 @@ export default async function Rozhovory({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; zalozka?: string }>
+  searchParams: Promise<{ chyba?: string; zalozka?: string; filtr?: string; hledat?: string }>
 }) {
   const { rozsah } = await params
   // Sem chodí hlášky z akcí — mimo jiné „Vyberte pobočku, ke které
   // vzkaz patří.“ Bez tohohle by se odpověď databáze ztratila
   // v adrese a formulář by jen mlčky nic neudělal.
-  const { chyba, zalozka: zalozkaZAdresy } = await searchParams
+  const { chyba, zalozka: zalozkaZAdresy, filtr: filtrZAdresy, hledat } = await searchParams
+
+  const filtrAktivni: FiltrKlic = FILTRY.some((f) => f.klic === filtrZAdresy)
+    ? (filtrZAdresy as FiltrKlic)
+    : 'vse'
 
   /*
     Která záložka. Neznámá hodnota spadne na Vzkazy — z adresy je to
@@ -143,6 +156,50 @@ export default async function Rozhovory({
   const rozhovory = (seznamData ?? []) as Rozhovor[]
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
+
+  /*
+    Náhled poslední zprávy do seznamu vlevo — UX redesign, druhé kolo
+    (oddíl 8: "last message preview"). `moje_rozhovory` dává jen počty,
+    ne text, takže se sáhne na `konverzace_zpravy` zvlášť — RLS
+    (`je_ucastnik`) beztak omezí na to, co appka už jednou pustila přes
+    `moje_rozhovory`. Nejnovější zprávy napříč rozhovory se seřadí
+    a v JS se z nich vezme první výskyt na konverzaci — bez zvláštního
+    pohledu "poslední zpráva na konverzaci" v databázi.
+  */
+  const posledniText = new Map<string, string>()
+  if (rozhovory.length > 0) {
+    const { data: zpravyPreview } = await supabase
+      .from('konverzace_zpravy')
+      .select('konverzace_id, text, vytvoreno_kdy')
+      .in('konverzace_id', rozhovory.map((r) => r.konverzace_id))
+      .is('stornovano_kdy', null)
+      .order('vytvoreno_kdy', { ascending: false })
+      .limit(300)
+    for (const z of zpravyPreview ?? []) {
+      const kid = z.konverzace_id as string
+      if (posledniText.has(kid)) continue
+      const t = String(z.text ?? '').trim()
+      posledniText.set(kid, t.length > 72 ? `${t.slice(0, 72)}…` : t)
+    }
+  }
+
+  function projdeFiltrem(r: Rozhovor): boolean {
+    if (filtrAktivni === 'neprectene') return r.neprectenych > 0
+    if (filtrAktivni === 'pobocka') return r.druh === 'pobocka' || r.druh === 'mezi_pobockami'
+    if (filtrAktivni === 'prime') return r.druh === 'osobni' || r.druh === 'vedeni'
+    return true
+  }
+
+  const hledatOriznute = (hledat ?? '').trim().toLowerCase()
+  function projdeHledanim(r: Rozhovor): boolean {
+    if (!hledatOriznute) return true
+    const nazev = (
+      r.nazev ?? (r.branch_id ? nazvyPobocek.get(r.branch_id) : NAZVY_DRUHU[r.druh]) ?? ''
+    ).toLowerCase()
+    return nazev.includes(hledatOriznute)
+  }
+
+  const rozhovoryZobrazene = rozhovory.filter((r) => projdeFiltrem(r) && projdeHledanim(r))
 
   /*
     KDO UVIDÍ VZKAZ VEDENÍ — jmenovitě, a ze stejné funkce, jakou se
@@ -314,15 +371,44 @@ export default async function Rozhovory({
         <div className="ds-vzkazy-split" data-zobrazit="seznam">
           <div className="ds-vzkazy-seznam">
             {/*
+              Hledání + filtry — UX redesign, druhé kolo (oddíl 8: LEFT
+              panel = Search, filtry, [+ Nový vzkaz], seznam). Hledání
+              je normální GET formulář (funguje i bez JS, stejný vzor
+              jako Finance → Faktury), filtry jsou odkazy s `?filtr=`.
+            */}
+            <form method="get" action={`/${rozsah}/vzkazy`} style={{ marginBottom: '10px' }}>
+              <input type="hidden" name="filtr" value={filtrAktivni} />
+              <input
+                type="search"
+                name="hledat"
+                defaultValue={hledat ?? ''}
+                placeholder="Hledat rozhovor…"
+                style={poleHledani}
+              />
+            </form>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+              {FILTRY.map((f) => (
+                <Link
+                  key={f.klic}
+                  href={f.klic === 'vse' ? `/${rozsah}/vzkazy` : `/${rozsah}/vzkazy?filtr=${f.klic}`}
+                  className="ft-tl ft-tl-vedlejsi ft-tl-male"
+                  aria-pressed={filtrAktivni === f.klic}
+                >
+                  {f.nazev}
+                </Link>
+              ))}
+            </div>
+
+            {/*
               Kanál pobočky se neZAKLÁDÁ. Tohle tlačítko ho jen otevře;
               když ještě neexistuje, vyrobí ho databáze. Seznam členů se
               nikde nezadává — plyne z dosahu na pobočku.
             */}
             {scope.level === 'branch' && scope.branchId ? (
-              <form action={otevritKanalPobocky} style={{ marginBottom: '16px' }}>
+              <form action={otevritKanalPobocky} style={{ marginBottom: '10px' }}>
                 <input type="hidden" name="rozsah" value={rozsah} />
-                <button type="submit" className="ft-tl">
-                  Otevřít kanál pobočky {scope.branchName}
+                <button type="submit" className="ft-tl ft-tl-male">
+                  + Otevřít kanál pobočky {scope.branchName}
                 </button>
               </form>
             ) : null}
@@ -420,7 +506,18 @@ export default async function Rozhovory({
           </form>
         </details>
 
-            <SeznamRozhovoru rozsah={rozsah} rozhovory={rozhovory} nazvyPobocek={nazvyPobocek} />
+            {rozhovoryZobrazene.length === 0 && rozhovory.length > 0 ? (
+              <p style={{ fontSize: '13.5px', color: 'var(--muted)', padding: '4px 2px' }}>
+                Žádný rozhovor neodpovídá filtru nebo hledání.
+              </p>
+            ) : (
+              <SeznamRozhovoru
+                rozsah={rozsah}
+                rozhovory={rozhovoryZobrazene}
+                nazvyPobocek={nazvyPobocek}
+                posledniText={posledniText}
+              />
+            )}
 
             {doruceno > 0 || cekaCelkem > 0 ? null : (
               <p style={{ marginTop: '16px', fontSize: '13px', color: 'var(--muted)' }}>
@@ -473,10 +570,20 @@ const ramecek: React.CSSProperties = {
 const ramecekFormulare: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: 'var(--radius-lg)',
-  padding: '14px',
-  marginBottom: '20px',
-  boxShadow: 'var(--shadow-sm)',
+  borderRadius: 'var(--radius-md)',
+  padding: '10px 12px',
+  marginBottom: '14px',
+}
+
+const poleHledani: React.CSSProperties = {
+  width: '100%',
+  height: '38px',
+  padding: '0 12px',
+  fontSize: '13.5px',
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--line-2)',
+  background: 'var(--sunken)',
+  color: 'var(--ink)',
 }
 
 const poleSkupina: React.CSSProperties = {

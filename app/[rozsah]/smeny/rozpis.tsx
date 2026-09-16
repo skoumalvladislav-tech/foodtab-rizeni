@@ -157,62 +157,62 @@ export default function RozpisView({
 
   return (
     <div style={{ padding: "16px", paddingBottom: "32px" }}>
-      {/* Navigace — posun období */}
+      {/* Navigace — posun období + přepínač pohledů, jeden kompaktní
+         řádek (UX redesign, druhé kolo, oddíl 6: "zkompaktni", "zmenši
+         prázdný prostor nad gridem" — dřív dva bloky pod sebou). */}
       <Card
-        padding="10px 12px"
+        padding="8px 10px"
         style={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: "20px",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginBottom: "16px",
           boxShadow: "var(--shadow-sm)",
         }}
       >
-        <Button
-          velikost="male"
-          onClick={() =>
-            updateUrl(
-              pohled,
-              pohled === "mesic" ? posunMesic(den, -1) : posunDatum(den, pohled === "tyden" ? -7 : -1)
-            )
-          }
-          aria-label="Předchozí období"
-        >
-          ‹
-        </Button>
-
-        <div style={{ flex: 1, textAlign: "center" }}>
-          <div style={{ fontSize: "14.5px", fontWeight: 600, color: "var(--branch)", fontFamily: "var(--font-newsreader)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <Button
+            velikost="male"
+            onClick={() =>
+              updateUrl(
+                pohled,
+                pohled === "mesic" ? posunMesic(den, -1) : posunDatum(den, pohled === "tyden" ? -7 : -1)
+              )
+            }
+            aria-label="Předchozí období"
+          >
+            ‹
+          </Button>
+          <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--ink)", minWidth: "150px", textAlign: "center" }}>
             {popisObdobi(den, pohled)}
           </div>
+          <Button
+            velikost="male"
+            onClick={() =>
+              updateUrl(
+                pohled,
+                pohled === "mesic" ? posunMesic(den, 1) : posunDatum(den, pohled === "tyden" ? 7 : 1)
+              )
+            }
+            aria-label="Následující období"
+          >
+            ›
+          </Button>
+          <Button velikost="male" onClick={() => updateUrl(pohled, dnesni)}>
+            Dnes
+          </Button>
         </div>
 
-        <Button velikost="male" onClick={() => updateUrl(pohled, dnesni)}>
-          Dnes
-        </Button>
-
-        <Button
-          velikost="male"
-          onClick={() =>
-            updateUrl(
-              pohled,
-              pohled === "mesic" ? posunMesic(den, 1) : posunDatum(den, pohled === "tyden" ? 7 : 1)
-            )
-          }
-          aria-label="Následující období"
-        >
-          ›
-        </Button>
+        <div className="ft-seg">
+          {POHLEDY.map(([klic, nazev]) => (
+            <button key={klic} type="button" onClick={() => updateUrl(klic, den)} aria-pressed={pohled === klic}>
+              {nazev}
+            </button>
+          ))}
+        </div>
       </Card>
-
-      {/* Přepínač pohledů */}
-      <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
-        {POHLEDY.map(([klic, nazev]) => (
-          <Button key={klic} onClick={() => updateUrl(klic, den)} aria-pressed={pohled === klic}>
-            {nazev}
-          </Button>
-        ))}
-      </div>
 
       {/* Obsah podle pohledu */}
       {pohled === "tyden" && (
@@ -363,7 +363,7 @@ function TydenView({
         }}
       >
         <thead>
-          <tr style={{ background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
+          <tr style={{ background: "var(--card)", borderBottom: "1px solid var(--line)", position: "sticky", top: "var(--vysoka-lista)", zIndex: 5 }}>
             <th
               style={{
                 padding: "8px 12px",
@@ -371,27 +371,40 @@ function TydenView({
                 fontWeight: 600,
                 color: "var(--branch)",
                 width: "120px",
+                background: "var(--card)",
+                position: "sticky",
+                left: 0,
+                zIndex: 7,
               }}
             >
               Osoba
             </th>
-            {dnySerad.map((datum) => (
-              <th
-                key={datum}
-                style={{
-                  padding: "8px 12px",
-                  textAlign: "center",
-                  fontWeight: 500,
-                  color: "var(--ink)",
-                  borderLeft: "1px solid var(--line)",
-                  minWidth: "100px",
-                }}
-              >
-                <div style={{ fontSize: "12px", color: "var(--muted)" }}>
-                  {popisDneZkracene(datum, dnesni)}
-                </div>
-              </th>
-            ))}
+            {dnySerad.map((datum) => {
+              const dnesJe = datum === dnesni;
+              const vikend = jeVikend(datum);
+              return (
+                <th
+                  key={datum}
+                  style={{
+                    padding: "8px 12px",
+                    textAlign: "center",
+                    fontWeight: dnesJe ? 700 : 500,
+                    color: "var(--ink)",
+                    borderLeft: "1px solid var(--line)",
+                    minWidth: "100px",
+                    background: dnesJe
+                      ? "color-mix(in srgb, var(--mosaz-sv) 16%, var(--card))"
+                      : vikend
+                        ? "var(--sunken)"
+                        : "var(--card)",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", color: "var(--muted)", whiteSpace: "pre-line" }}>
+                    {popisDneZkracene(datum, dnesni)}
+                  </div>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -403,15 +416,20 @@ function TydenView({
               <tr key={osoba ?? "null"} style={{ borderBottom: "1px solid var(--line)" }}>
                 <td
                   style={{
-                    padding: "8px 12px",
+                    padding: "9px 12px",
                     fontWeight: osoba ? 500 : 400,
                     color: osoba ? "var(--ink)" : "var(--warn)",
+                    background: "var(--card)",
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 2,
                   }}
                 >
                   {/*
-                    Čtvereček u jména, ne obarvené jméno. Obarvené jméno
-                    by některé odstíny udělalo hůř čitelnými a barva by
-                    přebila to, co je na řádku podstatné.
+                    Iniciálové kolečko + čtvereček s barvou, ne obarvené
+                    jméno. Obarvené jméno by některé odstíny udělalo hůř
+                    čitelnými a barva by přebila to, co je na řádku
+                    podstatné.
 
                     Neobsazená směna značku nemá — není čí. Je to jediné
                     místo, kde značka chybí docela.
@@ -420,6 +438,16 @@ function TydenView({
                     <span
                       style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
                     >
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          flex: "none", width: "26px", height: "26px", borderRadius: "50%",
+                          background: "var(--sunken)", color: "var(--muted)",
+                          display: "grid", placeItems: "center", fontSize: "10.5px", fontWeight: 700,
+                        }}
+                      >
+                        {inicialy(jmeno)}
+                      </span>
                       <ZnackaOsoby barva={barvy.get(osoba) ?? null} />
                       {jmeno}
                     </span>
@@ -429,19 +457,24 @@ function TydenView({
                 </td>
                 {dnySerad.map((datum) => {
                   const smenyDne = smenyOsoby.get(datum) ?? [];
+                  const dnesJe = datum === dnesni;
+                  const vikend = jeVikend(datum);
                   return (
                     <td
                       key={`${osoba}-${datum}`}
+                      className="ft-rozpis-bunka"
                       style={{
-                        padding: "8px 12px",
+                        padding: "9px 12px",
                         textAlign: "center",
                         borderLeft: "1px solid var(--line)",
                         background:
                           smenyDne.length > 0
                             ? "var(--card)"
-                            : datum === dnesni
-                              ? "var(--sunken)"
-                              : "transparent",
+                            : dnesJe
+                              ? "color-mix(in srgb, var(--mosaz-sv) 8%, var(--paper))"
+                              : vikend
+                                ? "var(--sunken)"
+                                : "transparent",
                       }}
                     >
                       <div style={{ display: "grid", gap: "4px" }}>
@@ -466,12 +499,15 @@ function TydenView({
                         {/*
                           Prázdné políčko je taky místo, kam se dá
                           kliknout — člověk i den už jsou dané, takže
-                          formulář se otevře skoro vyplněný. Křížek je
-                          bledý schválně: nemá přebít rozpis samotný.
+                          formulář se otevře skoro vyplněný. Trvale
+                          vidět nemá být (oddíl 6: "prázdná buňka má
+                          být čistá") — zobrazí se až na najetí nebo
+                          zaměření, viz .ft-rozpis-plus v globals.css.
                         */}
                         {planovani ? (
                           <button
                             type="button"
+                            className="ft-rozpis-plus"
                             onClick={() =>
                               onOtevrit({
                                 den: datum,
@@ -506,6 +542,19 @@ function TydenView({
       </table>
     </div>
   );
+}
+
+/** Neděle/sobota z data ve tvaru RRRR-MM-DD. */
+function jeVikend(datum: string): boolean {
+  const den = new Date(`${datum}T00:00:00Z`).getUTCDay();
+  return den === 0 || den === 6;
+}
+
+/** Iniciály ze jména — první písmeno prvních dvou slov, jinak první dvě písmena. */
+function inicialy(jmeno: string): string {
+  const slova = jmeno.split(/\s+/).filter(Boolean);
+  if (slova.length >= 2) return (slova[0][0] + slova[1][0]).toUpperCase();
+  return (jmeno.slice(0, 2) || "?").toUpperCase();
 }
 
 function popisObdobi(den: string, pohled: Pohled): string {
@@ -1021,11 +1070,12 @@ function popisDne(datum: string, dnesni: string): string {
 
 const chip = {
   fontSize: "11px",
-  padding: "4px 7px",
-  background: "var(--sunken)",
-  border: "1px solid var(--line-2)",
+  padding: "5px 7px",
+  background: "var(--card)",
+  border: "1px solid var(--branch)",
   borderRadius: "var(--radius-sm)",
-  color: "var(--ink)",
+  color: "var(--branch)",
+  fontWeight: 600 as const,
   fontVariantNumeric: "tabular-nums" as const,
 } as const;
 
@@ -1038,8 +1088,9 @@ const chipTlacitko = {
 } as const;
 
 /*
-  Bledý křížek. Je v každém prázdném políčku, takže nesmí přebít
-  samotný rozpis — teprve po najetí ztmavne.
+  Viditelnost řídí .ft-rozpis-plus v globals.css (najetí/zaměření,
+  UX redesign druhé kolo oddíl 6: "prázdná buňka má být čistá") — tady
+  zůstává jen vzhled samotného tlačítka.
 */
 const pridatTlacitko = {
   fontSize: "13px",
@@ -1050,5 +1101,4 @@ const pridatTlacitko = {
   borderRadius: "var(--radius-sm)",
   color: "var(--muted)",
   cursor: "pointer",
-  opacity: 0.55,
 } as const;

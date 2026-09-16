@@ -8,7 +8,9 @@ import { provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
+import EmptyState from "@/components/ui/EmptyState";
 import Nadpis from "../nadpis";
+import Ikona from "../ikona";
 import { dokoncitUkol, spustitChecklist, zadatUkol } from "./akce";
 
 export const dynamic = "force-dynamic";
@@ -283,6 +285,25 @@ export default async function Ukoly({
 
       <div style={{ padding: "16px", paddingBottom: "32px" }}>
         {/*
+          Kompaktní souhrn — UX redesign, druhé kolo (oddíl 9). Jen
+          čísla, která appka umí spočítat bez odhadu: otevřené úkoly už
+          má načtené, po termínu je stejné porovnání jako u štítku
+          u každého úkolu níž. "Dnes"/"Hotovo" by potřebovaly datum
+          podle pásma pobočky a na firemní úrovni ho nemá o co opřít —
+          radši žádné číslo než tiše špatné.
+        */}
+        {ukoly.length > 0 ? (
+          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "18px", fontSize: "13px", color: "var(--muted)" }}>
+            <span><strong style={{ color: "var(--ink)" }}>{ukoly.length}</strong> otevřených</span>
+            {ukoly.some((u) => poTerminu(u.due_at)) ? (
+              <span style={{ color: "var(--bad)" }}>
+                <strong>{ukoly.filter((u) => poTerminu(u.due_at)).length}</strong> po termínu
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/*
           JEDEN FORMULÁŘ, JEDEN ADRESÁT.
 
           7shifts to má stejně: *„a specific Location, Department, Role,
@@ -294,9 +315,9 @@ export default async function Ukoly({
           odpoví větou místo hláškou o porušení `check`.
         */}
         {smiZadat ? (
-          <details style={ramecekFormulare}>
-            <summary style={{ cursor: "pointer", fontSize: "15px" }}>
-              Zadat úkol
+          <details id="zadat-ukol" style={ramecekFormulare}>
+            <summary style={{ cursor: "pointer", fontSize: "14px", fontWeight: 600 }}>
+              + Zadat úkol
             </summary>
 
             <form action={zadatUkol} style={{ marginTop: "12px" }}>
@@ -412,9 +433,13 @@ export default async function Ukoly({
         <h2 style={nadpisSekce}>Otevřené úkoly</h2>
 
         {ukoly.length === 0 ? (
-          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-            Žádný otevřený úkol. Hotovo.
-          </p>
+          <EmptyState
+            ikona={<Ikona klic="fajfka" />}
+            nadpis="Všechno je hotové"
+            akce={smiZadat ? <a href="#zadat-ukol" className="ft-tl ft-tl-hlavni ft-tl-male">+ Zadat úkol</a> : undefined}
+          >
+            Nemáte žádné otevřené úkoly.
+          </EmptyState>
         ) : (
           <ul style={seznam}>
             {ukoly.map((u) => (
@@ -515,10 +540,34 @@ export default async function Ukoly({
         <h2 style={{ ...nadpisSekce, marginTop: 0 }}>Checklisty</h2>
 
         {!branchId ? (
-          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-            Checklisty se vedou po pobočkách. Přepněte se na konkrétní
-            pobočku.
-          </p>
+          /*
+            UX redesign, druhé kolo (oddíl 9): jedna věta "přepněte se"
+            nedává, kam kliknout. Checklisty se vedou po pobočkách
+            (`checklist_runs.branch_id` je NOT NULL) — to se nemění,
+            ale na firemní úrovni appka aspoň rovnou nabídne odkazy na
+            pobočky, kam přepnout, místo aby to nechala na uživateli.
+          */
+          <div>
+            <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+              Checklisty se vedou po pobočkách. Vyberte, na kterou se
+              podívat:
+            </p>
+            {ctx.branches.length > 0 ? (
+              <ul style={{ ...seznam, marginTop: "10px" }}>
+                {ctx.branches.map((b) => (
+                  <li key={b.id}>
+                    <Link
+                      href={`/${b.slug}/ukoly`}
+                      className="ft-tl ft-tl-vedlejsi"
+                      style={{ width: "100%" }}
+                    >
+                      {b.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         ) : !den ? (
           <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
             Nepodařilo se zjistit provozní den, takže checklisty nelze
@@ -636,10 +685,9 @@ function denAcas(iso: string, zona?: string): string {
 const ramecekFormulare = {
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: "var(--radius-lg)",
-  padding: "14px",
-  marginBottom: "20px",
-  boxShadow: "var(--shadow-sm)",
+  borderRadius: "var(--radius-md)",
+  padding: "10px 12px",
+  marginBottom: "16px",
 } as const;
 
 const poleSkupina = {
