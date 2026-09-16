@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { canSee, getContext, getUser, jeVedeni } from "@/lib/authz";
+import { barvaNeboNic } from "@/lib/barvy-lidi";
 import { hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { pocet } from "@/lib/sklonovani";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
@@ -242,6 +243,38 @@ export default async function Dnes({
   }
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
+
+  /*
+    Dnešní rozpis, barevně — jen s `shifts.read` (stejné právo, jaké
+    hlídá Rozpis směn). `smeny` už appka má načtené (viz výš), tady se
+    jen filtruje na dnešek a dotáhnou se jména/barvy — TÝŽ dotaz a TÁŽ
+    `barvaNeboNic` normalizace jako v app/[rozsah]/smeny/page.tsx, ať
+    barva člověka na Dnes a v Rozpisu vždycky sedí na totéž.
+  */
+  const dnesniRozpis: { id: string; jmeno: string; barva: string | null; od: string; do: string }[] = [];
+  if (canSee(ctx, "shifts.read")) {
+    const smenyDnes = smeny.filter((s) => s.shift_date === den.provozni_den && s.employee_id !== null);
+    const idDnes = [...new Set(smenyDnes.map((s) => s.employee_id as string))];
+    if (idDnes.length > 0) {
+      const { data: lideDnes, error: chybaLideDnes } = await supabase
+        .from("employees")
+        .select("id, full_name, color")
+        .in("id", idDnes);
+      if (chybaLideDnes) throw new DotazSelhal("lidé v dnešním rozpisu", chybaLideDnes);
+      const jmenaDnes = new Map((lideDnes ?? []).map((c) => [c.id as string, c.full_name as string]));
+      const barvyDnes = new Map((lideDnes ?? []).map((c) => [c.id as string, barvaNeboNic(c.color)]));
+      for (const s of smenyDnes) {
+        dnesniRozpis.push({
+          id: s.id,
+          jmeno: jmenaDnes.get(s.employee_id as string) ?? "?",
+          barva: barvyDnes.get(s.employee_id as string) ?? null,
+          od: s.starts_at.slice(0, 5),
+          do: s.ends_at.slice(0, 5),
+        });
+      }
+      dnesniRozpis.sort((a, b) => a.od.localeCompare(b.od));
+    }
+  }
 
   /*
     Vlastní jméno pro pozdrav — jen křestní, ne celé úřední jméno.
@@ -615,6 +648,40 @@ export default async function Dnes({
                 Kód je na tabletu na provozovně a mění se každou minutu.
               </p>
             </Card>
+
+            {/* ---------- DNEŠNÍ ROZPIS, BAREVNĚ ---------------------- */}
+            {dnesniRozpis.length > 0 ? (
+              <>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "10px" }}>
+                  <h2 style={{ ...nadpisSekce, margin: 0 }}>Dnes v rozpisu</h2>
+                  <Link href={`/${rozsah}/smeny`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                    Zobrazit celý rozpis →
+                  </Link>
+                </div>
+                <ul style={seznam}>
+                  {dnesniRozpis.map((s) => (
+                    <Card
+                      key={s.id}
+                      as="li"
+                      padding="10px 14px"
+                      style={{ position: "relative", paddingLeft: "18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", fontSize: "14px", color: "var(--ink)" }}
+                    >
+                      {s.barva ? (
+                        <span
+                          aria-hidden="true"
+                          data-osoba={s.barva}
+                          style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", borderRadius: "var(--radius-sm) 0 0 var(--radius-sm)", background: "var(--osoba)" }}
+                        />
+                      ) : null}
+                      <span>{s.jmeno}</span>
+                      <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                        {s.od}–{s.do}
+                      </span>
+                    </Card>
+                  ))}
+                </ul>
+              </>
+            ) : null}
 
             {/* ---------- PŘÍŠTÍ SMĚNY ------------------------------- */}
             <h2 style={nadpisSekce}>Příští směny</h2>
