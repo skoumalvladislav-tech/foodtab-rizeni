@@ -7,6 +7,7 @@ import { BRANCH_COLORS, getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { precistObrazek } from '@/lib/marketing-obrazek'
 import { KBELIK, cestaVUlozisti } from '@/lib/pobocky-pozadi'
+import { sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -25,6 +26,10 @@ export async function upravitPobocku(formData: FormData): Promise<void> {
   const nazev = String(formData.get('nazev') ?? '').trim()
   const barva = String(formData.get('barva') ?? '')
   const zacatek = String(formData.get('zacatek') ?? '').trim()
+  // Nepovinné — prázdné pole má zůstat NULL (žádný widget počasí),
+  // ne se rozbít na NaN. Viz popisChyby('souradnice') v page.tsx.
+  const latText = String(formData.get('lat') ?? '').trim()
+  const lonText = String(formData.get('lon') ?? '').trim()
 
   if (!pobocka) return
 
@@ -43,26 +48,51 @@ export async function upravitPobocku(formData: FormData): Promise<void> {
   const zpet = (duvod: string) =>
     `/${rozsah}/nastaveni/pobocky?pobocka=${pobocka}&chyba=${duvod}`
 
+  const lat = latText === '' ? null : Number(latText)
+  const lon = lonText === '' ? null : Number(lonText)
+
   let chyba: string | null = null
 
   if (nazev === '') chyba = 'nazev'
   else if (!(BRANCH_COLORS as readonly string[]).includes(barva)) chyba = 'barva'
   else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(zacatek)) chyba = 'hodina'
+  // Obě souřadnice, nebo žádná — jen jedna by widgetu počasí nebyla
+  // k ničemu a tiše by se nekreslil, což vypadá jako druhá zapomenutá.
+  else if ((lat === null) !== (lon === null)) chyba = 'souradnice'
+  else if (lat !== null && (Number.isNaN(lat) || lat < -90 || lat > 90)) chyba = 'souradnice'
+  else if (lon !== null && (Number.isNaN(lon) || lon < -180 || lon > 180)) chyba = 'souradnice'
 
   // Až za kontrolami: redirect() vyhazuje výjimku.
   if (chyba) redirect(zpet(chyba))
 
   const supabase = await getServerSupabase()
-  const { error } = await supabase
+  let { error } = await supabase
     .from('branches')
     .update({
       name: nazev,
       color: barva,
       // Sloupec je typu time, takže stačí HH:MM.
       day_starts_at: zacatek,
+      lat,
+      lon,
     })
     .eq('id', pobocka)
     .eq('tenant_id', tenantId)
+
+  /*
+    Sloupce lat/lon čekají na migraci 20260916170000_pobocka_pocasi —
+    dokud neproběhne, zápis s nimi selže. Beze souřadnic (ty appka
+    beztak zatím nekreslí, viz lib/pocasi.ts) se zbytek — jméno, barva,
+    začátek dne — má uložit stejně jako dřív, ne spadnout kvůli
+    nehotové věci, o kterou tady vůbec nejde.
+  */
+  if (error && sloupecNeexistuje(error)) {
+    ;({ error } = await supabase
+      .from('branches')
+      .update({ name: nazev, color: barva, day_starts_at: zacatek })
+      .eq('id', pobocka)
+      .eq('tenant_id', tenantId))
+  }
 
   if (error) {
     // 42501 = insufficient_privilege. Politika branches_update žádá

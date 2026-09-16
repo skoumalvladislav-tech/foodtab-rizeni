@@ -8,6 +8,7 @@ import { pocet } from "@/lib/sklonovani";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { posunDatum } from "@/lib/provozni-den";
 import { KBELIK as KBELIK_POZADI, PLATNOST_ODKAZU_S as PLATNOST_ODKAZU_POZADI_S } from "@/lib/pobocky-pozadi";
+import { nactiPocasi, type Pocasi } from "@/lib/pocasi";
 import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { fakturyJsouNastavene, getFakturySupabase } from "@/lib/supabase/faktury";
@@ -187,28 +188,39 @@ export default async function Dnes({
   }
 
   /*
-    Hero fotka pobočky — jen na konkrétní pobočce, ne na „Celá firma".
-    Na firemní úrovni nemá smysl ukazovat fotku jedné konkrétní
-    pobočky; tam banner zůstává na barvě, stejně jako beze fotky vůbec.
+    Hero fotka a souřadnice pro počasí — jen na konkrétní pobočce, ne
+    na „Celá firma". Na firemní úrovni nemá smysl ukazovat fotku nebo
+    počasí jedné konkrétní pobočky; tam banner zůstává na barvě
+    a widget počasí se nekreslí, stejně jako beze dat vůbec.
+    Oba sloupce čekají na migrace (20260916160000, 20260916170000) —
+    dokud neproběhnou, dotaz na ně selže a Dnes má prostě pokračovat
+    beze fotky/počasí, ne spadnout na chybějícím sloupci.
   */
   let heroFotoUrl: string | null = null;
+  let pocasi: Pocasi | null = null;
   if (scope.level === "branch" && scope.branchId) {
-    // Sloupec hero_photo_path čeká na migraci 20260916160000 — dokud
-    // neproběhne, dotaz na něj selže a Dnes má prostě pokračovat beze
-    // fotky (stejně jako dřív), ne spadnout na chybějícím sloupci.
-    const { data: pobockaData, error: chybaFoto } = await supabase
+    const { data: pobockaData, error: chybaPobocky } = await supabase
       .from("branches")
-      .select("hero_photo_path")
+      .select("hero_photo_path, lat, lon")
       .eq("id", scope.branchId)
       .maybeSingle();
-    const cesta = sloupecNeexistuje(chybaFoto)
+    const radek = sloupecNeexistuje(chybaPobocky)
       ? null
-      : (pobockaData as { hero_photo_path: string | null } | null)?.hero_photo_path;
-    if (cesta) {
+      : (pobockaData as { hero_photo_path: string | null; lat: number | null; lon: number | null } | null);
+
+    if (radek?.hero_photo_path) {
       const { data: podepsany } = await supabase.storage
         .from(KBELIK_POZADI)
-        .createSignedUrl(cesta, PLATNOST_ODKAZU_POZADI_S);
+        .createSignedUrl(radek.hero_photo_path, PLATNOST_ODKAZU_POZADI_S);
       heroFotoUrl = podepsany?.signedUrl ?? null;
+    }
+
+    if (radek?.lat !== null && radek?.lat !== undefined && radek?.lon !== null && radek?.lon !== undefined) {
+      const vysledek = await nactiPocasi(radek.lat, radek.lon);
+      if (vysledek.stav === "ok") pocasi = vysledek.pocasi;
+      // Chyba (výpadek MET Norska, zablokovaná IP…) se schválně
+      // nikam nehlásí — widget počasí se prostě nekreslí, stejné
+      // pravidlo jako u chybějících souřadnic.
     }
   }
 
@@ -787,6 +799,21 @@ export default async function Dnes({
                   </Link>
                 </Card>
               </>
+            ) : null}
+
+            {pocasi ? (
+              <Card
+                padding="12px 14px"
+                style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}
+              >
+                <span style={{ fontSize: "13.5px", color: "var(--ink)" }}>
+                  Počasí{den.pobocka_nazev ? ` – ${den.pobocka_nazev}` : ""}
+                </span>
+                <span style={{ marginLeft: "auto", fontSize: "15px", fontWeight: 600, color: "var(--ink)" }}>
+                  {pocasi.teplotaC}°C
+                </span>
+                <span style={{ fontSize: "13px", color: "var(--muted)" }}>{pocasi.stavPocasi}</span>
+              </Card>
             ) : null}
 
             {rychleAkce.length > 0 ? (
