@@ -228,3 +228,12 @@
 .ds-status-dot[data-pulse="true"] { animation: ds-pulse 1.8s ease-in-out infinite; }
 @keyframes ds-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .ds-status-dot { animation: none; } }
+
+/* --- Dvousloupcové rozvržení (Dnes) ------------------------------------
+   Hlavní sloupec + užší postranní panel. Media dotaz inline styl neumí,
+   proto jediná výjimka z „layout zůstává inline" — pod 900px se panel
+   nevejde vedle sebe s hlavním sloupcem čitelně, takže se podsune pod něj. */
+.ds-dvasloupec { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); gap: 28px; }
+@media (max-width: 900px) {
+  .ds-dvasloupec { grid-template-columns: minmax(0, 1fr); }
+}
