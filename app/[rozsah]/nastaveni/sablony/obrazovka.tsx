@@ -1,7 +1,7 @@
 import { hodinyAMinuty } from '@/lib/mzdy'
 import { delkaSmenyMinut } from '@/lib/cas'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
-import { prepnoutSablonu, ulozitSablonu } from './akce'
+import { prepnoutSablonu, prepsatCasyDoSmen, ulozitSablonu } from './akce'
 
 /**
  * Nastavení → Šablony směn, samotné vykreslení.
@@ -31,6 +31,7 @@ export default function ObrazovkaSablon({
   pozice,
   chyba,
   stav,
+  pocet,
 }: {
   rozsah: string
   sablony: SablonaRadek[]
@@ -38,6 +39,8 @@ export default function ObrazovkaSablon({
   pozice: { id: string; label: string }[]
   chyba?: string
   stav?: string
+  /** Kolik směn ovlivnilo poslední "Přepsat časy do směn" (stav=prepsano). */
+  pocet?: number
 }) {
   const nazvyPobocek = new Map(pobocky.map((b) => [b.id, b.nazev]))
   const nazvyPozic = new Map(pozice.map((p) => [p.id, p.label]))
@@ -143,8 +146,8 @@ export default function ObrazovkaSablon({
 
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
         {stav ? (
-          <p style={{ margin: '12px 0 0', fontSize: '13px', color: popisStavu(stav).barva }}>
-            {popisStavu(stav).text}
+          <p style={{ margin: '12px 0 0', fontSize: '13px', color: popisStavu(stav, pocet).barva }}>
+            {popisStavu(stav, pocet).text}
           </p>
         ) : null}
 
@@ -292,7 +295,26 @@ export default function ObrazovkaSablon({
                     {s.active ? '' : ' · vyřazená z nabídky'}
                   </span>
 
-                  <form action={prepnoutSablonu} style={{ marginLeft: 'auto' }}>
+                  {/*
+                    Vědomá výjimka z "šablona je předvyplnění, ne vazba"
+                    (migrace 20260916190000) — jen na tohle tlačítko,
+                    nikdy samo od sebe po uložení. Zasáhne jen NEVYDANÉ
+                    směny s přesně touhle zkratkou; ručně přepsané
+                    a vydané nechá, jak jsou (hlídá to databáze).
+                  */}
+                  <form
+                    action={prepsatCasyDoSmen}
+                    style={{ marginLeft: 'auto' }}
+                    title="Přepíše časy jen v nevydaných směnách, které z týhle šablony vznikly a nikdo je ručně nezměnil."
+                  >
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="sablona" value={s.id} />
+                    <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                      Přepsat časy do nevydaných směn
+                    </button>
+                  </form>
+
+                  <form action={prepnoutSablonu}>
                     <input type="hidden" name="rozsah" value={rozsah} />
                     <input type="hidden" name="sablona" value={s.id} />
                     <input type="hidden" name="zapnout" value={s.active ? 'ne' : 'ano'} />
@@ -324,7 +346,7 @@ export default function ObrazovkaSablon({
 
 /* --- hlášky ------------------------------------------------------ */
 
-function popisStavu(stav: string): { barva: string; text: string } {
+function popisStavu(stav: string, pocet?: number): { barva: string; text: string } {
   switch (stav) {
     case 'zalozena':
       return { barva: 'var(--good)', text: 'Šablona přidaná.' }
@@ -337,6 +359,16 @@ function popisStavu(stav: string): { barva: string; text: string } {
       }
     case 'vracena':
       return { barva: 'var(--good)', text: 'Vráceno do nabídky.' }
+    case 'prepsano': {
+      const n = pocet ?? 0
+      return {
+        barva: 'var(--good)',
+        text:
+          n === 0
+            ? 'Žádná nevydaná směna s touhle zkratkou se nenašla — nebylo co přepsat.'
+            : `Časy přepsané v ${n} ${n === 1 ? 'nevydané směně' : 'nevydaných směnách'}.`,
+      }
+    }
     default:
       return { barva: 'var(--muted)', text: '' }
   }

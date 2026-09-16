@@ -25,7 +25,15 @@ import { datumZTextu } from './nahrani-lidi.ts'
  * dělá `nahrani-lidi.ts`, tenhle soubor na to jen navazuje.
  */
 
-export type Klic = 'jmeno' | 'pobocka' | 'datum' | 'zacatek' | 'konec'
+/*
+  'kod' je schválně mimo POLE níž — flat wizard (přiřazení sloupců)
+  ho nenabízí, uživatel ho nemůže vybrat ručně. Plní ho jen maticový
+  dovoz (lib/nahrani-rozpisu-matice.ts), když značku v buňce rozpozná
+  proti Šablonám směn — `sestavPlan` ho pak jen opíše do `zapis.sablona_key`,
+  stejná logika jako u ručního zadání směny (app/[rozsah]/smeny/smena.ts:
+  "zkratka šablony se jen OPÍŠE — je to popiska, ne odkaz").
+*/
+export type Klic = 'jmeno' | 'pobocka' | 'datum' | 'zacatek' | 'konec' | 'kod'
 
 export const POLE: {
   klic: Klic
@@ -157,6 +165,8 @@ export type Zaznam = {
     shift_date?: string
     starts_at?: string
     ends_at?: string
+    /** Jen z maticového dovozu — viz komentář u `Klic` výš. */
+    sablona_key?: string
   }
 }
 
@@ -309,6 +319,14 @@ export function sestavPlan(
     }
     vSouboru.set(klic, cislo)
 
+    /*
+      Zkratka šablony — jen z maticového dovozu (viz komentář u `Klic`).
+      Prázdná, když mapování `kod` vůbec není, stejně jako ostatní
+      nepovinná pole.
+    */
+    const kodText = bunka('kod')
+    const sablonaKey = kodText === '' ? undefined : kodText
+
     const stavajici = smenaPodleKlice.get(klic)
 
     if (stavajici) {
@@ -322,7 +340,7 @@ export function sestavPlan(
       }
       zaznam.zmeny = zmeny
       zaznam.co = zmeny.length > 0 ? 'aktualizovat' : 'beze_zmeny'
-      zaznam.zapis = { starts_at: `${zacatek}:00`, ends_at: `${konec}:00` }
+      zaznam.zapis = { starts_at: `${zacatek}:00`, ends_at: `${konec}:00`, sablona_key: sablonaKey }
     } else {
       zaznam.co = 'zalozit'
       zaznam.zapis = {
@@ -331,6 +349,7 @@ export function sestavPlan(
         shift_date: datum,
         starts_at: `${zacatek}:00`,
         ends_at: `${konec}:00`,
+        sablona_key: sablonaKey,
       }
     }
 

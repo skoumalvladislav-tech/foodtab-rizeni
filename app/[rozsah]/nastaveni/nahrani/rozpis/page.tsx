@@ -43,6 +43,8 @@ export default async function NahraniRozpisu({
     )
   }
 
+  const { ctx } = pristup
+
   return (
     <>
       <Nadpis
@@ -51,7 +53,10 @@ export default async function NahraniRozpisu({
       >
         Rozpis směn z tabulky
       </Nadpis>
-      <Pruvodce rozsah={rozsah} />
+      <Pruvodce
+        rozsah={rozsah}
+        pobocky={ctx.branches.map((b) => ({ id: b.id, nazev: b.name }))}
+      />
     </>
   )
 }

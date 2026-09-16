@@ -28,10 +28,10 @@ export default async function NastaveniSablony({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; stav?: string }>
+  searchParams: Promise<{ chyba?: string; stav?: string; pocet?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, stav } = await searchParams
+  const { chyba, stav, pocet } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
@@ -96,6 +96,7 @@ export default async function NastaveniSablony({
         pozice={(pozice ?? []).map((p) => ({ id: p.id as string, label: p.label as string }))}
         chyba={chyba}
         stav={stav}
+        pocet={pocet ? Number(pocet) : undefined}
       />
     </>
   )
