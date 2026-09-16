@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useId, useState, useTransition } from 'react'
 import Link from 'next/link'
 
 import { precistCsv, zTabulky, type Tabulka } from '@/lib/tabulka'
@@ -29,6 +29,7 @@ import { nahratLidi, pripravitNahled, type Vysledek } from './akce'
 type Krok = 'soubor' | 'sloupce' | 'nahled' | 'hotovo'
 
 export default function Pruvodce({ rozsah }: { rozsah: string }) {
+  const idSouboru = useId()
   const [krok, setKrok] = useState<Krok>('soubor')
   const [nazevSouboru, setNazevSouboru] = useState('')
   const [tabulka, setTabulka] = useState<Tabulka | null>(null)
@@ -124,11 +125,20 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
             ani na tom, jak se jmenují — v dalším kroku je přiřadíte. Soubor
             zůstane u vás v počítači; posílají se jen přečtené buňky.
           </p>
+          {/*
+            Nabarvený label místo holého <input type=file> — stejná
+            oprava jako u ../rozpis/pruvodce.tsx (Šéfík 16.9.2026:
+            nestylované tlačítko souboru vypadalo vedle appky rozbitě).
+          */}
+          <label htmlFor={idSouboru} className="ft-tl ft-tl-vedlejsi" style={{ cursor: 'pointer' }}>
+            Vybrat soubor
+          </label>
           <input
+            id={idSouboru}
             type="file"
             accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={vybranSoubor}
-            style={{ fontSize: '15px' }}
+            className="ft-jen-pro-odecitac"
           />
           <p style={{ ...popis, marginBottom: 0 }}>
             Najednou jde nahrát nejvýš {NEJVIC_RADKU} řádků. Nahrání jde
