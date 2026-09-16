@@ -162,6 +162,13 @@ Dokončeno sloučení Faktury (Marketing byl hotový už dřív):
 ## 5. Důležité commity (na `claude/prompt-review-jtkh74`, PUSHNUTÉ na `origin`)
 
 ```
+fd3d81b design: Dnes - widget Tym dnes (kdo je pritomen)
+cb412b8 design: Dnes - barevny nahled dnesniho rozpisu
+287c842 design: Dnes - plna prestavba podle mockupu Sefika (hero, karty, 2 sloupce)
+2dcbb4c design: svetla horni lista podle mockupu Sefika
+a579468 Doc: handoff - radius tokeny 100% a ikony v zalozkach hotovo
+dcfdfa5 design: ikony v hornich modulovych zalozkach
+31d941a design: dotazeni radius tokenu 8/10/12px napric zbylymi obrazovkami
 76eba8f design: radius tokeny napříč zbylými obrazovkami (priorita 10 - ostatní)
 38d5e85 design: Marketing shell - radius tokeny místo pevných hodnot
 3bf4fe5 design: Finance/Faktury - radius tokeny místo pevných hodnot
@@ -367,12 +374,36 @@ další významné změně místo zakládání dalšího souboru.
   modulových záložkách doplněny** — 3 nové tvary (`mince`/`praporek`/
   `vozik`) ve stejném stylu jako zbytek sady, mapované podle klíče
   modulu v `GlobalTopbar.tsx`. Živě ověřeno desktop i mobil.
-- **Zbývá:** Vzkazy plná ConversationList/ChatView přestavba. Lidé
-  plná DataTable+kebab-menu přestavba. Etapy 4(zbytek)-14 z master
-  promptu (Finance rozšíření, Marketing dokončení, AI gateway, Gastro
-  AI, Receptury/Menu, Objednávky, cross-module intelligence, plná
-  responzivita, bezpečnostní regrese, release) — nezapočaty, velké
-  samostatné bloky práce, nezačínat bez zvláštního zadání.
+- **Pivot 16.9.2026 dopoledne:** Šéfík po živé kontrole řekl „apka
+  není vůbec podobná foto výše" a poslal znovu referenční mockup
+  (bohatý dashboard s hero bannerem, pozdravem, 4 kartami, 3sloupcovým
+  rozvržením). Ujasněno přes AskUserQuestion: (1) top-lišta má být
+  SVĚTLÁ podle mockupu (byla tmavá jako panel) — **hotovo**; (2) čísla
+  bez zdroje dat (tržby/objednávky/hodnocení) — Šéfík řekl „mám/seženu
+  zdroj dat", **zůstávají nepostavená, čekají na něj**; (3) Dnes —
+  „ano, plná přestavba" — **hotovo včetně obou dřív odložených kusů**.
+  Detaily viz body 4 a 5 (commity `2dcbb4c`…`fd3d81b`).
+- **Dnes je teď kompletní podle mockupu** (mimo blokované položky):
+  hero s pozdravem/datem/barvou pobočky (bez fotky — appka nemá
+  skutečný snímek té které restaurace, cizí stock by lhal), 4
+  přehledové karty (Docházka/Další směna/Vzkazy/Úkoly, reálná data),
+  Owner Attention Center, píchací formulář beze změny, barevný náhled
+  dnešního rozpisu (`--osoba`/`data-osoba`, stejný vzor jako Rozpis
+  směn), widget Tým dnes (`X/Y přítomno`, jen vedení, **bez nové
+  migrace** — znovupoužívá existující `nedokoncena_dochazka` RPC se
+  stejným dnem místo 30denního okna), Rychlé akce (permission-gated
+  odkazy). Živě ověřeno světlý/tmavý režim i mobil 375px.
+- **Stále blokováno na Šéfíkovi:** Tržby dnes / Online objednávky /
+  Hodnocení Google / počasí — čekají na zdroj dat, ne na vymyšlená
+  čísla. Hero fotka provozovny — appka nemá odkud vzít skutečný
+  snímek.
+- **Zbývá (mimo mockup Dnes):** Vzkazy plná ConversationList/ChatView
+  přestavba. Lidé plná DataTable+kebab-menu přestavba. Etapy 4(zbytek)
+  -14 z master promptu (Finance rozšíření, Marketing dokončení, AI
+  gateway, Gastro AI, Receptury/Menu, Objednávky, cross-module
+  intelligence, plná responzivita, bezpečnostní regrese, release) —
+  nezapočaty, velké samostatné bloky práce, nezačínat bez zvláštního
+  zadání.
 - **Vizuální ověření živě HOTOVO** (16.9.2026 ráno, na žádost Šéfíka
   „zkontroluj vzhled živě"). Příčina včerejšího `ERR_FAILED` nalezena:
   **zastaralý PWA service worker na `localhost:3000`** zachytával
@@ -481,31 +512,30 @@ a v `main`.** Aktuálně čeká:
 **Faktury jsou kompletně hotové, nasazené, RLS opravená a živě ověřené**
 (15.9.2026 večer) — na Fakturách samotných není žádný další nutný krok.
 
-**Design systém** (bod 11/12): priorita 1–10 z master promptu hotová
-(commity až po `dcfdfa5`, pushnuté na `origin`) **a živě vizuálně
-ověřena** (16.9.2026 ráno, bod 11 — vzhled, tmavý režim i mobil v
-pořádku). Radius tokeny mají teď 100% pokrytí a ikony v horních
-záložkách jsou doplněné. Doporučený postup pro další relaci:
-1. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
+**Design systém** (bod 11/12): priorita 1–10 z master promptu hotová,
+radius tokeny 100% pokrytí, ikony v záložkách doplněné, **a Dnes teď
+plně sedí na mockupu** (bod 11 — pivot 16.9.2026 dopoledne, commity
+`2dcbb4c`…`fd3d81b`, pushnuté na `origin`, živě ověřeno včetně tmavého
+režimu a mobilu). Doporučený postup pro další relaci:
+1. **Až Šéfík sežene zdroj dat** (POS pro tržby, Google Business API
+   pro hodnocení, weather API pro počasí) — napojit „Rychlý přehled"
+   a widget počasí na Dnes. Do té doby nevymýšlet čísla.
+2. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
    ConversationList/ChatView, Lidé DataTable+kebab-menu.
-2. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
+3. Stejný „vzhled podle mockupu" pohled na DALŠÍ obrazovky (Rozpis
+   směn, Docházka, …) — mockup, který Šéfík poslal, ukazoval jen Dnes;
+   nikdo zatím neověřil, jestli i tam mají obrazovky sedět na nějaký
+   konkrétní referenční vzhled, nebo jestli dosavadní token-only
+   dotažení stačí. Zeptat se, než se předělává něco, co už možná sedí.
+4. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
    nezačínat bez zvláštního zadání/kontextu, který v tomhle handoffu
    možná chybí (master prompt sám existuje jen v chatu, viz bod 1).
 
-**Design systém (aktivní etapa, PR #4 už v `main`):**
-1. Pokračovat v pořadí ze `docs/hlaseni/design-system-stav-2026-09-15.md`:
-   Rozpis směn → Docházka → Vzkazy → Úkoly → Lidé → Finance (shell) →
-   Marketing (shell) → ostatní moduly. Používat `components/ui/*` a
-   `components/shell/*`, ne vymýšlet nové vzory — kde komponenta chybí,
-   doplnit ji do `components/ui/`, ne psát inline duplicitně.
-2. **Souběžně běží samostatná relace** na sjednocení 3 ručních modálních
-   oken (`smeny/formular-smeny.tsx`, `ceka-na-opravneni.tsx`,
-   `pwa-registration.tsx`) na sdílený `Dialog`/`Drawer` — nesahat na tyhle
-   tři soubory z jiné relace souběžně, ať nevzniknou konflikty.
-3. Po každé obrazovce ověřit desktop+mobil stejně jako u AppShellu/Dnes
-   (tsc, eslint, node testy, živě v prohlížeči).
-4. Po dokončení celé priority: aktualizovat
-   `docs/hlaseni/design-system-stav-2026-09-15.md` a tenhle handoff.
+**Souběžně běží samostatná relace** na sjednocení 3 ručních modálních
+oken (`smeny/formular-smeny.tsx`, `ceka-na-opravneni.tsx`,
+`pwa-registration.tsx`) na sdílený `Dialog`/`Drawer` — nesahat na tyhle
+tři soubory ani na `app/globals.css` v oblasti `.install-help`/
+`.pwa-ios-help` z jiné relace souběžně, ať nevzniknou konflikty.
 
 **Nezávisle, kdykoli:** Marketing Krok 4 (potřebuje jiné prostředí než
 tenhle Windows stroj) nebo Krok 5 E2E (potřebuje Šéfíkovo rozhodnutí) —
