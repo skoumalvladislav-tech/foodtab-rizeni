@@ -358,13 +358,19 @@ další významné změně místo zakládání dalšího souboru.
   Docházkou (2 panely), Nastavením (Firma/Pobočky/Zařazení/Zařízení/
   Nahrání), rozcestníkem `[rozsah]/page.tsx`, Směnami (panel výdání),
   Vzkazy (konverzace/nástěnka), Zálohami (formulář/pozastavení).
-- **Zbývá:** hodnoty 8/10/12px napříč zbylými soubory (vynechány
-  záměrně, chtějí ruční kontrolu vizuální role sm/md, ne plošný sed).
-  Ikony v horních modulových záložkách (mockup je má, appka zatím ne).
-  Vzkazy plná ConversationList/ChatView přestavba. Lidé plná
-  DataTable+kebab-menu přestavba. Etapy 4(zbytek)-14 z master promptu
-  (Finance rozšíření, Marketing dokončení, AI gateway, Gastro AI,
-  Receptury/Menu, Objednávky, cross-module intelligence, plná
+- **Dotaženo (16.9.2026, na výslovnou žádost „podívej se i na ostatní
+  soubory"):** zbylé hodnoty 8/10/12px sjednoceny na tokeny podle
+  jasného opakovaného vzoru (vstupní pole 8/10px→`--radius-sm`,
+  vedlejší/sunken karty 12px→`--radius-md`) napříč 36 dalšími soubory
+  — teď **nulové pevné hodnoty radiusu** v celé appce mimo
+  `formular-smeny.tsx` (patří paralelní relaci). **Ikony v horních
+  modulových záložkách doplněny** — 3 nové tvary (`mince`/`praporek`/
+  `vozik`) ve stejném stylu jako zbytek sady, mapované podle klíče
+  modulu v `GlobalTopbar.tsx`. Živě ověřeno desktop i mobil.
+- **Zbývá:** Vzkazy plná ConversationList/ChatView přestavba. Lidé
+  plná DataTable+kebab-menu přestavba. Etapy 4(zbytek)-14 z master
+  promptu (Finance rozšíření, Marketing dokončení, AI gateway, Gastro
+  AI, Receptury/Menu, Objednávky, cross-module intelligence, plná
   responzivita, bezpečnostní regrese, release) — nezapočaty, velké
   samostatné bloky práce, nezačínat bez zvláštního zadání.
 - **Vizuální ověření živě HOTOVO** (16.9.2026 ráno, na žádost Šéfíka
@@ -476,15 +482,13 @@ a v `main`.** Aktuálně čeká:
 (15.9.2026 večer) — na Fakturách samotných není žádný další nutný krok.
 
 **Design systém** (bod 11/12): priorita 1–10 z master promptu hotová
-(commity až po `76eba8f`, pushnuté na `origin`) **a živě vizuálně
+(commity až po `dcfdfa5`, pushnuté na `origin`) **a živě vizuálně
 ověřena** (16.9.2026 ráno, bod 11 — vzhled, tmavý režim i mobil v
-pořádku). Doporučený postup pro další relaci:
-1. Ruční dotažení 8/10/12px hodnot tam, kde je sed vynechal záměrně
-   (chtějí rozhodnutí sm vs. md podle vizuální role, ne plošnou náhradu).
-2. Ikony v horních modulových záložkách (mockup je má).
-3. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
+pořádku). Radius tokeny mají teď 100% pokrytí a ikony v horních
+záložkách jsou doplněné. Doporučený postup pro další relaci:
+1. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
    ConversationList/ChatView, Lidé DataTable+kebab-menu.
-4. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
+2. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
    nezačínat bez zvláštního zadání/kontextu, který v tomhle handoffu
    možná chybí (master prompt sám existuje jen v chatu, viz bod 1).
 
