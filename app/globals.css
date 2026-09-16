@@ -71,10 +71,12 @@
    se stará zlom níž. */
 .ft-mods { display: flex; gap: 2px; align-items: center; min-width: 0; overflow: hidden; }
 .ft-mod {
-  padding: 7px 14px; border-radius: 8px; font-size: 13.5px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500;
   color: var(--rail-tlum); white-space: nowrap; text-decoration: none;
   background: none; border: 0; font-family: inherit; cursor: pointer;
 }
+.ft-mod .ft-i { width: 15px; height: 15px; }
 .ft-mod:hover { color: var(--rail-ink); }
 .ft-mod.on { background: var(--rail-2); color: var(--rail-ink); font-weight: 600; }
 /* Vypnutý modul zůstává vidět — zákazník má vědět, co si může přikoupit.
@@ -411,7 +413,8 @@
     position: sticky; top: var(--vysoka-lista); z-index: 19;
   }
   .ft-mob-mods::-webkit-scrollbar { display: none; }
-  .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; flex: none; }
+  .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; gap: 6px; flex: none; }
+  .ft-mob-mods .ft-mod .ft-i { width: 13px; height: 13px; }
 
   /* Moduly jsou pryč z lišty, takže tady už nástroje nemají komu
      ustupovat — a naopak samy ustoupit MUSÍ, jinak vytlačí stránku do

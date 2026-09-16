@@ -4,8 +4,24 @@ import Link from "next/link";
 
 import PrepinacRezimu from "@/app/prepinac-rezimu";
 import Ikona from "@/app/[rozsah]/ikona";
+import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import PrepinacRozsahu, { type RozsahProp } from "@/app/[rozsah]/prepinac-rozsahu";
 import type { ModulProp } from "./AppShell";
+
+/**
+ * Ikona modulu v horní liště — mockup Šéfíka ji u záložek má, appka
+ * zatím neměla. Klíč modulu je z `lib/authz.ts` (`MODULES`), stálý a
+ * malý výčet (5), proto mapa napevno tady místo dalšího proputování
+ * přes server. Neznámý/budoucí klíč dostane `tecky` jako neutrální
+ * zástupnou ikonu, ať appka nespadne, až přibude šestý modul.
+ */
+const IKONA_MODULU: Record<string, IkonaKlic> = {
+  provoz: "hodiny",
+  menu: "kniha",
+  finance: "mince",
+  marketing: "praporek",
+  objednavky: "vozik",
+};
 
 /**
  * Horní lišta — značka, moduly, hledání, přepínač rozsahu/režimu,
@@ -154,9 +170,12 @@ export default function GlobalTopbar({
  * nepustila databáze, ne jen nabídka.
  */
 function Modul({ modul, vybrany }: { modul: ModulProp; vybrany: boolean }) {
+  const ikona = IKONA_MODULU[modul.klic] ?? "tecky";
+
   if (!modul.aktivni) {
     return (
       <span className="ft-mod off" title="Není součástí vašeho tarifu" aria-disabled="true">
+        <Ikona klic={ikona} />
         {modul.nazev}
       </span>
     );
@@ -165,6 +184,7 @@ function Modul({ modul, vybrany }: { modul: ModulProp; vybrany: boolean }) {
   if (!modul.cil) {
     return (
       <span className="ft-mod" title={`${modul.nazev} — připravujeme`}>
+        <Ikona klic={ikona} />
         {modul.nazev}
       </span>
     );
@@ -172,6 +192,7 @@ function Modul({ modul, vybrany }: { modul: ModulProp; vybrany: boolean }) {
 
   return (
     <Link href={modul.cil} className={vybrany ? "ft-mod on" : "ft-mod"} aria-current={vybrany ? "page" : undefined}>
+      <Ikona klic={ikona} />
       {modul.nazev}
     </Link>
   );

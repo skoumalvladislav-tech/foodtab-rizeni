@@ -33,6 +33,9 @@ export type IkonaKlic =
   | 'kolo'
   | 'lupa'
   | 'tecky'
+  | 'mince'
+  | 'praporek'
+  | 'vozik'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */
