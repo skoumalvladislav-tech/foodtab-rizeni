@@ -345,6 +345,43 @@ export default async function Dnes({
   const maVedeniVzkaz = rozhovory.some((r) => r.druh === "vedeni" && r.neprectenych > 0);
 
   /*
+    Poslední vzkazy — náhled pro Dnes (design systém, 16.9.2026,
+    dvousloupcové rozvržení podle mockupu). `moje_rozhovory` výš dává
+    jen počty, ne náhled textu, takže se sáhne rovnou na
+    `konverzace_zpravy` — RLS (`je_ucastnik`) samo omezí na rozhovory,
+    kde je přihlášený člověk účastník, stejně jako ve vlákně samotném
+    (app/[rozsah]/vzkazy/[konverzace]/page.tsx). Stornované zprávy se
+    tu na rozdíl od vlákna nezobrazují vůbec — v náhledu není místo na
+    přeškrtnutý text s vysvětlením, jen by matlo.
+  */
+  const POSLEDNICH_VZKAZU = 4;
+  const { data: zpravyData } = await supabase
+    .from("konverzace_zpravy")
+    .select("id, autor, text, vytvoreno_kdy")
+    .is("stornovano_kdy", null)
+    .order("vytvoreno_kdy", { ascending: false })
+    .limit(POSLEDNICH_VZKAZU);
+  const posledniVzkazy: { id: string; jmeno: string; text: string; kdy: string }[] = [];
+  if (zpravyData && zpravyData.length > 0) {
+    const autoriIds = [...new Set(zpravyData.map((z) => z.autor).filter((a): a is string => a !== null))];
+    const { data: autoriData } = autoriIds.length > 0
+      ? await supabase.from("employees").select("id, full_name").in("id", autoriIds)
+      : { data: [] as { id: string; full_name: string }[] };
+    const jmenaAutoru = new Map((autoriData ?? []).map((a) => [a.id as string, String(a.full_name ?? "").trim()]));
+    for (const z of zpravyData) {
+      posledniVzkazy.push({
+        id: z.id,
+        jmeno: (z.autor ? jmenaAutoru.get(z.autor) : null) || "Někdo, kdo mezitím odešel",
+        text: z.text,
+        // ZONA_VYCHOZI přímo, ne přes `zona` — ta se přiřazuje až ve
+        // vykreslovací části níž, tady bychom na ni sáhli dřív, než
+        // vznikne.
+        kdy: hodinaVPasmu(z.vytvoreno_kdy, ZONA_VYCHOZI),
+      });
+    }
+  }
+
+  /*
     Otevřené úkoly — stejná tabulka/podmínky jako Úkoly a checklisty,
     jen bez checklistů (ty na jednu KPI kartu nesbalíš smysluplně).
     Karta se nekreslí vůbec bez `tasks.read` — ne prázdná, žádná.
@@ -726,38 +763,87 @@ export default async function Dnes({
               </p>
             </Card>
 
-            {/* ---------- DNEŠNÍ ROZPIS, BAREVNĚ ---------------------- */}
-            {dnesniRozpis.length > 0 ? (
-              <>
-                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "10px" }}>
-                  <h2 style={{ ...nadpisSekce, margin: 0 }}>Dnes v rozpisu</h2>
-                  <Link href={`/${rozsah}/smeny`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
-                    Zobrazit celý rozpis →
-                  </Link>
-                </div>
-                <ul style={seznam}>
-                  {dnesniRozpis.map((s) => (
-                    <Card
-                      key={s.id}
-                      as="li"
-                      padding="10px 14px"
-                      style={{ position: "relative", paddingLeft: "18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", fontSize: "14px", color: "var(--ink)" }}
-                    >
-                      {s.barva ? (
-                        <span
-                          aria-hidden="true"
-                          data-osoba={s.barva}
-                          style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", borderRadius: "var(--radius-sm) 0 0 var(--radius-sm)", background: "var(--osoba)" }}
-                        />
-                      ) : null}
-                      <span>{s.jmeno}</span>
-                      <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
-                        {s.od}–{s.do}
-                      </span>
-                    </Card>
-                  ))}
-                </ul>
-              </>
+            {/* ---------- DNEŠNÍ ROZPIS + POSLEDNÍ VZKAZY, VEDLE SEBE ---
+               Design systém, 16.9.2026 (dvousloupcové rozvržení podle
+               mockupu). Dvě samostatné, nezávislé sekce — sloupec se
+               na užší obrazovce zalomí sám (auto-fit), žádný nový
+               zlom navíc. Ani jedna nekreslí nic, když nemá co. */}
+            {dnesniRozpis.length > 0 || posledniVzkazy.length > 0 ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "24px", alignItems: "start" }}>
+                {dnesniRozpis.length > 0 ? (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "10px" }}>
+                      <h2 style={{ ...nadpisSekce, margin: 0 }}>Dnes v rozpisu</h2>
+                      <Link href={`/${rozsah}/smeny`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                        Zobrazit celý rozpis →
+                      </Link>
+                    </div>
+                    <ul style={seznam}>
+                      {dnesniRozpis.map((s) => (
+                        <Card
+                          key={s.id}
+                          as="li"
+                          padding="10px 14px"
+                          style={{ position: "relative", paddingLeft: "18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", fontSize: "14px", color: "var(--ink)" }}
+                        >
+                          {s.barva ? (
+                            <span
+                              aria-hidden="true"
+                              data-osoba={s.barva}
+                              style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", borderRadius: "var(--radius-sm) 0 0 var(--radius-sm)", background: "var(--osoba)" }}
+                            />
+                          ) : null}
+                          <span>{s.jmeno}</span>
+                          <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+                            {s.od}–{s.do}
+                          </span>
+                        </Card>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {posledniVzkazy.length > 0 ? (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "10px" }}>
+                      <h2 style={{ ...nadpisSekce, margin: 0 }}>Poslední vzkazy</h2>
+                      <Link href={`/${rozsah}/vzkazy`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                        Zobrazit všechny →
+                      </Link>
+                    </div>
+                    <ul style={seznam}>
+                      {posledniVzkazy.map((z) => (
+                        <Card key={z.id} as="li" padding="10px 14px" style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              flex: "none", width: "28px", height: "28px", borderRadius: "50%",
+                              background: "var(--sunken)", color: "var(--muted)",
+                              display: "grid", placeItems: "center", fontSize: "11px", fontWeight: 600,
+                            }}
+                          >
+                            {initialy(z.jmeno)}
+                          </span>
+                          <span style={{ minWidth: 0, flex: 1 }}>
+                            <span style={{ display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "13.5px", color: "var(--ink)", fontWeight: 600 }}>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{z.jmeno}</span>
+                              <span style={{ flex: "none", color: "var(--muted)", fontWeight: 400, fontVariantNumeric: "tabular-nums" }}>{z.kdy}</span>
+                            </span>
+                            <span
+                              style={{
+                                display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                                overflow: "hidden", fontSize: "13px", color: "var(--muted)", marginTop: "2px",
+                              }}
+                            >
+                              {z.text}
+                            </span>
+                          </span>
+                        </Card>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
             ) : null}
 
             {/* ---------- PŘÍŠTÍ SMĚNY ------------------------------- */}
@@ -863,6 +949,20 @@ export default async function Dnes({
             </ul>
 
             {/*
+              Citát — čistě značková ozdoba (design systém, 16.9.2026,
+              podle mockupu), ne tvrzení o datech. Proto stojí jasně
+              podepsaný "Foodtab", ne jako by šlo o vyjádření KONKRÉTNÍ
+              provozovny nebo zákazníka — to by bylo totéž předstírání,
+              kterému se vyhýbá hero fotka (viz komentář výš).
+            */}
+            <Card padding="16px 18px" style={{ marginTop: "24px" }}>
+              <p style={{ margin: 0, fontSize: "14.5px", fontStyle: "italic", color: "var(--ink)", lineHeight: 1.5 }}>
+                „Dobrá restaurace stojí na skvělém týmu.“
+              </p>
+              <p style={{ margin: "8px 0 0", fontSize: "12px", color: "var(--muted)" }}>— Foodtab</p>
+            </Card>
+
+            {/*
               Push do mobilu zatím nechodí a NEPÍŠE SE, že chodí. Věta,
               která není pravda, je horší než žádná: člověk by na ni
               spoléhal.
@@ -877,6 +977,14 @@ export default async function Dnes({
   );
 }
 
+
+/** Iniciály ze jména pro kolečko u náhledu vzkazu — první písmeno
+ * prvních dvou slov, nebo první dvě písmena jednoho slova. */
+function initialy(jmeno: string): string {
+  const slova = jmeno.split(/\s+/).filter(Boolean);
+  if (slova.length >= 2) return (slova[0][0] + slova[1][0]).toUpperCase();
+  return (jmeno.slice(0, 2) || "?").toUpperCase();
+}
 
 /** Pozdrav podle denní doby v pásmu appky — žádné vymyšlené jméno dne. */
 function pozdrav(zona: string): string {
