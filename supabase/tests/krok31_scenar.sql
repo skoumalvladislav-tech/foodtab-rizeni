@@ -90,10 +90,13 @@ select pg_temp.check('ani grant pro authenticated',
     where table_schema = 'public' and table_name = 'zapomenute_odchody'
       and grantee = 'authenticated') = 0);
 
--- A důvod je zapsaný u tabulky, ne jen v migraci.
+-- A důvod je zapsaný u tabulky, ne jen v migraci. Přesné znění komentáře
+-- přepsala 20260913140000_drobnosti.sql (už nasazená, migrace se
+-- neupravují zpětně) — kontrola se drží aktuálního textu, ne toho
+-- původního z 20260902080000.
 select pg_temp.check('důvod je v komentáři u tabulky',
   coalesce(obj_description('public.zapomenute_odchody'::regclass, 'pg_class'), '')
-    like '%SCHVÁLNĚ ŽÁDNÁ NENÍ%');
+    like '%PROČ CHYBÍ RLS POLITIKA%');
 
 
 \echo ''
