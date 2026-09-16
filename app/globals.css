@@ -4,10 +4,11 @@
 
 /* =====================================================================
    Rám rozhraní — odstupy, poloměry a velikosti podle
-   docs/rozvrzeni-nahled.html
+   docs/rozvrzeni-nahled.html, výška horní lišty podle UX redesignu
+   16.9.2026 (oddíl 9: 60–68 px).
 
    Body zlomu: do 640 mobil, 641–1023 tablet, od 1024 počítač.
-   Závazné rozměry: lišta 56, sloupec 240, ikonová lišta 72,
+   Závazné rozměry: lišta 64, sloupec 240, ikonová lišta 72,
    spodní lišta 62, dotykový cíl nejméně 44.
    ===================================================================== */
 
@@ -21,18 +22,17 @@
 
    VLOŽKA SE NEPŘIČÍTÁ K HOTOVÉ VÝŠCE, SOUPEŘÍ S VLASTNÍM ODSAZENÍM.
 
-   Lištiných 56 px se rozpadá na 8 + 40 + 8. Nahoře se pak bere ta
-   větší z dvojice `vlastní odsazení` a `vložka` — proto `--lista-shora`.
-   Při nulové vložce vyhraje osmička, součet je zase 56 a nezmění se
-   nic. Napoprvé to bylo `56px + max(env(…), 8px)`, což lištu na
-   počítači natáhlo na 64 a na telefonu na 60; to nikdo nechtěl.
+   Lištiných 64 px (UX redesign, oddíl 9: 60–68) se rozpadá na
+   8 + 48 + 8. Nahoře se pak bere ta větší z dvojice `vlastní odsazení`
+   a `vložka` — proto `--lista-shora`. Při nulové vložce vyhraje
+   osmička, součet je zase 64 a nezmění se nic.
 
    Rozdělení je symetrické (8 nahoře, 8 dole), aby obsah zůstal
    uprostřed tam, kde byl. Nesymetrické by ho posunulo o čtyři body
    dolů, i když by výška seděla. */
 .ft-shell {
   --lista-okraj: 8px;
-  --lista-vnitrek: 40px;   /* 56 − 2 × 8 */
+  --lista-vnitrek: 48px;   /* 64 − 2 × 8 */
   --lista-shora: max(var(--lista-okraj), var(--vlozka-nahore));
   --vysoka-lista: calc(var(--lista-vnitrek) + var(--lista-okraj) + var(--lista-shora));
   min-height: 100dvh; display: flex; flex-direction: column;
@@ -434,9 +434,9 @@
 @media (max-width: 640px) {
   /* Nižší lišta na telefonu. Proměnná se přepočítá s ní, takže se
      řádka modulů posune sama — dřív se to muselo psát dvakrát. */
-  /* 52 = 8 + 36 + 8. Mění se jen vnitřek, okraj i soupeření s vložkou
-     zůstávají — a při nulové vložce vyjde zase přesných 52 px. */
-  .ft-shell { --lista-vnitrek: 36px; }
+  /* 60 = 8 + 44 + 8. Mění se jen vnitřek, okraj i soupeření s vložkou
+     zůstávají — a při nulové vložce vyjde zase přesných 60 px. */
+  .ft-shell { --lista-vnitrek: 44px; }
   .ft-topbar {
     height: var(--vysoka-lista);
     padding: var(--lista-shora) max(14px, var(--vlozka-vpravo))

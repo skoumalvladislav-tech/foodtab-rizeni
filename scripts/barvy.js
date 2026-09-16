@@ -325,6 +325,7 @@ function main() {
     zkus('--dobre na --dobre-bg', t('dobre'), t('dobre-bg'), 4.5);
     zkus('--pozor na --pozor-bg', t('pozor'), t('pozor-bg'), 4.5);
     zkus('--bad na --bad-bg', t('bad'), t('bad-bg'), 4.5);
+    zkus('--info na --info-bg', t('info'), t('info-bg'), 4.5);
     zkus('--faint na --paper (jen výzdoba)', t('faint'), t('paper'), 3.0);
 
     console.log('  kontrast základu: ' + (overeno - predZakladem) + ' dvojic');
