@@ -3,7 +3,7 @@
 import { useId, useState, useTransition } from 'react'
 import Link from 'next/link'
 
-import { precistCsv, zTabulky, type Tabulka } from '@/lib/tabulka'
+import { klicDb, precistCsv, zTabulky, type Tabulka } from '@/lib/tabulka'
 import { precistXlsx, SouborNecitelny } from '@/lib/xlsx'
 import {
   NEJVIC_RADKU,
@@ -23,7 +23,7 @@ import {
 } from '@/lib/nahrani-rozpisu-matice'
 import { nabidnoutSablony, type NabidnutaSablona } from '@/app/[rozsah]/smeny/sablony'
 import { vytvoritSablonu } from '@/app/[rozsah]/nastaveni/sablony/akce'
-import { nahratRozpis, pripravitNahled, type Vysledek } from './akce'
+import { nactiZamestnance, nahratRozpis, pripravitNahled, type Vysledek, type ZamestnanecSDomovem } from './akce'
 
 /**
  * Průvodce nahráním rozpisu z tabulky.
@@ -86,6 +86,7 @@ export default function Pruvodce({
   const [casyZnacek, setCasyZnacek] = useState<Record<string, { od: string; do: string }>>({})
   const [chybejiciZnacky, setChybejiciZnacky] = useState<{ zaklad: string; branchId: string; nazevPobocky: string }[] | null>(null)
   const [chybyVytvareni, setChybyVytvareni] = useState<string[]>([])
+  const [zamestnanci, setZamestnanci] = useState<ZamestnanecSDomovem[]>([])
 
   async function vybranSoubor(e: React.ChangeEvent<HTMLInputElement>) {
     const soubor = e.target.files?.[0]
@@ -106,6 +107,8 @@ export default function Pruvodce({
       if (jeMaticovyFormat(t.hlavicka, t.radky)) {
         setJeMatice(true)
         setKrok('znacky')
+        // Domovské pobočky a pozice — viz komentář u `najdiZamestnance` níž.
+        nactiZamestnance(rozsah).then(setZamestnanci)
       } else {
         setJeMatice(false)
         setMapovani(odhadnoutMapovani(t.hlavicka))
@@ -141,30 +144,57 @@ export default function Pruvodce({
   /* --- krok "značky" (jen maticový vstup) -------------------------- */
 
   /** Které přípony (pobočky) je potřeba přiřadit — '' = buňky bez přípony. */
+  /*
+    Zaměstnanec už domovskou pobočku a pozici MÁ (employees.branch_id/
+    position_id) — Šéfík 16.9.2026: "mělo by se to automaticky rozlišit
+    dle jména". Buňka bez přípony ("X" bez "-B"/"-P") proto NENÍ
+    nejednoznačná: patří tomu, kdo tu směnu má, na JEHO pobočce
+    a pozici. Přípona je jen výjimka (výpomoc na druhé pobočce), ne
+    pravidlo pro každého — jen ONA se ptá uživatele, kterou pobočku
+    znamená.
+  */
+  function najdiZamestnance(jmeno: string): ZamestnanecSDomovem | undefined {
+    return zamestnanci.find((z) => klicDb(z.jmeno) === klicDb(jmeno))
+  }
+
+  /** Které PŘÍPONY (ne buňky bez přípony — ty řeší domovská pobočka) je potřeba přiřadit pobočce. */
   function potrebnePripony(bunky: BunkaMatice[]): string[] {
-    return [...new Set(bunky.map((b) => b.pripona ?? ''))].sort()
+    return [...new Set(bunky.map((b) => b.pripona).filter((p): p is string => p !== null))].sort()
   }
 
-  /** Dvojice (základ značky, id pobočky) pro každou buňku, podle aktuální `mapaPripon`. */
-  function dvojiceProBunky(bunky: BunkaMatice[]): { zaklad: string; branchId: string }[] {
-    return bunky.map((b) => ({ zaklad: b.zaklad, branchId: mapaPripon[b.pripona ?? ''] }))
+  type DvojiceZnacky = { zaklad: string; branchId: string | null; positionId: string | null }
+
+  /** Pobočka a pozice pro každou buňku — z přípony (výjimka) nebo z domovské pobočky/pozice zaměstnance (pravidlo). */
+  function dvojiceProBunky(bunky: BunkaMatice[]): DvojiceZnacky[] {
+    return bunky.map((b) => {
+      const z = najdiZamestnance(b.jmeno)
+      const branchId = b.pripona ? (mapaPripon[b.pripona] ?? null) : (z?.branchId ?? null)
+      return { zaklad: b.zaklad, branchId, positionId: z?.positionId ?? null }
+    })
   }
 
-  /** Zeptá se Šablon směn (`nabidnoutSablony`), co appka o dvojicích (zaklad, pobočka) ví. */
+  /**
+   * Zeptá se Šablon směn (`nabidnoutSablony`), co appka o dvojicích
+   * (zaklad, pobočka) ví. Schválně BEZ pozice — auto-vytvořené šablony
+   * jsou vždycky pobočkové, ne pozicové (viz `vytvoritZnackyAPokracovat`
+   * níž), takže hledání podle pozice by tu jen komplikovalo klíč beze
+   * zisku. Pozice se dál nese zvlášť a zapisuje se přímo na směnu.
+   */
   async function zjistiCasyZnacek(
-    dvojice: { zaklad: string; branchId: string }[],
+    dvojice: DvojiceZnacky[],
   ): Promise<{
     nalezene: Record<string, { od: string; do: string }>
     chybejici: { zaklad: string; branchId: string; nazevPobocky: string }[]
   }> {
-    const branchIds = [...new Set(dvojice.map((d) => d.branchId))]
+    const platne = dvojice.filter((d): d is DvojiceZnacky & { branchId: string } => d.branchId !== null)
+    const branchIds = [...new Set(platne.map((d) => d.branchId))]
     const nabidkaPodlePobocky = new Map<string, NabidnutaSablona[]>()
     for (const bid of branchIds) {
       nabidkaPodlePobocky.set(bid, await nabidnoutSablony(rozsah, bid, null))
     }
     const nalezene: Record<string, { od: string; do: string }> = {}
     const chybejici: { zaklad: string; branchId: string; nazevPobocky: string }[] = []
-    for (const { zaklad, branchId } of dvojice) {
+    for (const { zaklad, branchId } of platne) {
       const klicMapy = `${zaklad}|${branchId}`
       if (nalezene[klicMapy] || chybejici.some((c) => `${c.zaklad}|${c.branchId}` === klicMapy)) continue
       const nabidka = nabidkaPodlePobocky.get(branchId) ?? []
@@ -181,25 +211,33 @@ export default function Pruvodce({
   /** Poslední krok maticového vstupu: rozloží buňky do stejného tvaru, jaký čeká `sestavPlan`, a rovnou zeptá na náhled. */
   async function dokoncitMatici(
     bunky: BunkaMatice[],
-    dvojice: { zaklad: string; branchId: string }[],
+    dvojice: DvojiceZnacky[],
     casy: Record<string, { od: string; do: string }>,
   ) {
     const virtualniRadky: string[][] = []
     const nedoplnene: string[] = []
     bunky.forEach((b, i) => {
-      const branchId = dvojice[i].branchId
-      const nazevPobocky = pobocky.find((p) => p.id === branchId)?.nazev ?? ''
+      const { branchId, positionId } = dvojice[i]
       const datum = sestavDatum(rok, mesic, b.den)
-      const cas = casy[`${b.zaklad}|${branchId}`]
       if (!datum) {
         nedoplnene.push(`${b.jmeno}, den ${b.den}: v tomhle měsíci takový den není`)
         return
       }
+      if (!branchId) {
+        nedoplnene.push(
+          b.pripona
+            ? `${b.jmeno}, ${datum}: přípona „${b.pripona}“ nemá přiřazenou pobočku`
+            : `${b.jmeno}, ${datum}: nemá domovskou pobočku v Nastavení → Lidé a buňka nemá příponu — doplňte jedno z toho`,
+        )
+        return
+      }
+      const nazevPobocky = pobocky.find((p) => p.id === branchId)?.nazev ?? ''
+      const cas = casy[`${b.zaklad}|${branchId}`]
       if (!cas) {
         nedoplnene.push(`${b.jmeno}, ${datum}: zkratka „${b.kodRaw}“ se nepodařilo přiřadit`)
         return
       }
-      virtualniRadky.push([b.jmeno, nazevPobocky, datum, cas.od, cas.do, b.zaklad])
+      virtualniRadky.push([b.jmeno, nazevPobocky, datum, cas.od, cas.do, b.zaklad, positionId ?? ''])
     })
 
     if (virtualniRadky.length === 0) {
@@ -210,8 +248,8 @@ export default function Pruvodce({
       return
     }
 
-    const mapovaniMatice: Mapovani = { jmeno: 0, pobocka: 1, datum: 2, zacatek: 3, konec: 4, kod: 5 }
-    setTabulka({ hlavicka: ['Jméno', 'Pobočka', 'Datum', 'Začátek', 'Konec', 'Kód'], radky: virtualniRadky })
+    const mapovaniMatice: Mapovani = { jmeno: 0, pobocka: 1, datum: 2, zacatek: 3, konec: 4, kod: 5, pozice_id: 6 }
+    setTabulka({ hlavicka: ['Jméno', 'Pobočka', 'Datum', 'Začátek', 'Konec', 'Kód', 'Pozice'], radky: virtualniRadky })
     setMapovani(mapovaniMatice)
     setChybejiciZnacky(null)
 
@@ -240,7 +278,7 @@ export default function Pruvodce({
     }
     for (const p of potrebnePripony(bunky)) {
       if (!mapaPripon[p]) {
-        setChyba(p === '' ? 'Vyberte pobočku pro buňky bez přípony (např. „X“ bez „-B“/„-P“).' : `Vyberte pobočku pro příponu „${p}“.`)
+        setChyba(`Vyberte pobočku pro příponu „${p}“.`)
         return
       }
     }
@@ -335,6 +373,7 @@ export default function Pruvodce({
     setCasyZnacek({})
     setChybejiciZnacky(null)
     setChybyVytvareni([])
+    setZamestnanci([])
   }
 
   return (
@@ -672,8 +711,6 @@ function ZnackyKrok({
   const sloupce = sloupceJmen(tabulka.hlavicka)
   const bunky = rozeberMatici(tabulka.radky, sloupce)
   const { pripony } = distinctZnacky(bunky)
-  // '' = buňky bez přípony — potřebují "výchozí" pobočku stejně jako pojmenovaná přípona.
-  const potrebnePripony = [...new Set(bunky.map((b) => b.pripona ?? ''))].sort()
 
   return (
     <>
@@ -708,36 +745,47 @@ function ZnackyKrok({
           </label>
         </div>
 
-        {potrebnePripony.length > 0 ? (
-          <div style={{ marginTop: '4px' }}>
-            <p style={{ ...popis, margin: '0 0 8px' }}>
-              {pripony.length > 0
-                ? 'Komu patří která přípona ve značce (např. „-B" u „X-B"):'
-                : 'Buňky nemají příponu pobočky — vyberte, na kterou pobočku se mají nahrát:'}
-            </p>
-            <div style={{ display: 'grid', gap: '10px', maxWidth: '480px' }}>
-              {potrebnePripony.map((p) => (
-                <label key={p || '(bez přípony)'} style={radekPole}>
-                  <span style={{ fontWeight: 600 }}>{p ? `Přípona „${p}“` : 'Bez přípony'}</span>
-                  <select
-                    value={mapaPripon[p] ?? ''}
-                    onChange={(e) =>
-                      setMapaPripon((m) => ({ ...m, [p]: e.target.value }))
-                    }
-                    style={vyber}
-                  >
-                    <option value="">— vyberte pobočku —</option>
-                    {pobocky.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.nazev}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ))}
-            </div>
+        {/*
+          UX oprava 16.9.2026: dřív appka chtěla pobočku i pro buňky
+          BEZ přípony — jeden výběr pro všechny, takže kdo neměl
+          příponu, skončil na jedné natvrdo zvolené pobočce bez ohledu
+          na to, kde doopravdy pracuje. Teď buňka bez přípony patří na
+          DOMOVSKOU pobočku a pozici toho člověka (Nastavení → Lidé) —
+          přípona je jen výjimka (výpomoc jinde), proto se ptá appka
+          jen na ni.
+        */}
+        <p style={{ ...popis, margin: '0 0 8px' }}>
+          Buňka bez přípony (např. „X“ samotné) jde na domovskou pobočku
+          a pozici toho člověka podle Nastavení → Lidé. Přípona pobočku
+          přepíše — komu patří která, vyberte tady:
+        </p>
+        {pripony.length > 0 ? (
+          <div style={{ display: 'grid', gap: '10px', maxWidth: '480px' }}>
+            {pripony.map((p) => (
+              <label key={p} style={radekPole}>
+                <span style={{ fontWeight: 600 }}>Přípona „{p}“</span>
+                <select
+                  value={mapaPripon[p] ?? ''}
+                  onChange={(e) =>
+                    setMapaPripon((m) => ({ ...m, [p]: e.target.value }))
+                  }
+                  style={vyber}
+                >
+                  <option value="">— vyberte pobočku —</option>
+                  {pobocky.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.nazev}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
           </div>
-        ) : null}
+        ) : (
+          <p style={{ ...popis, margin: 0, fontStyle: 'italic' }}>
+            Soubor žádné přípony nepoužívá — všechno jde podle domovské pobočky.
+          </p>
+        )}
       </div>
 
       <div style={karta}>

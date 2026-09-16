@@ -26,14 +26,20 @@ import { datumZTextu } from './nahrani-lidi.ts'
  */
 
 /*
-  'kod' je schválně mimo POLE níž — flat wizard (přiřazení sloupců)
-  ho nenabízí, uživatel ho nemůže vybrat ručně. Plní ho jen maticový
-  dovoz (lib/nahrani-rozpisu-matice.ts), když značku v buňce rozpozná
-  proti Šablonám směn — `sestavPlan` ho pak jen opíše do `zapis.sablona_key`,
-  stejná logika jako u ručního zadání směny (app/[rozsah]/smeny/smena.ts:
-  "zkratka šablony se jen OPÍŠE — je to popiska, ne odkaz").
+  'kod' a 'pozice_id' jsou schválně mimo POLE níž — flat wizard
+  (přiřazení sloupců) je nenabízí, uživatel je nemůže vybrat ručně.
+  Plní je jen maticový dovoz (lib/nahrani-rozpisu-matice.ts):
+
+  - 'kod': značka v buňce, rozpoznaná proti Šablonám směn —
+    `sestavPlan` ji jen opíše do `zapis.sablona_key`, stejná logika
+    jako u ručního zadání směny (app/[rozsah]/smeny/smena.ts:
+    "zkratka šablony se jen OPÍŠE — je to popiska, ne odkaz").
+  - 'pozice_id': na rozdíl od `pobocka` (text, hledá se podle jména/
+    slugu) je tohle rovnou UUID — maticový dovoz ho dostane hotové
+    z domovské pozice zaměstnance (employees.position_id), takže se
+    tu nic nedohledává, jen opisuje do `zapis.position_id`.
 */
-export type Klic = 'jmeno' | 'pobocka' | 'datum' | 'zacatek' | 'konec' | 'kod'
+export type Klic = 'jmeno' | 'pobocka' | 'datum' | 'zacatek' | 'konec' | 'kod' | 'pozice_id'
 
 export const POLE: {
   klic: Klic
@@ -136,6 +142,8 @@ export type Mapovani = Partial<Record<Klic, number>>
 export type Zdroje = {
   lide: { id: string; full_name: string }[]
   pobocky: { id: string; name: string; slug: string }[]
+  /** Jen pro čitelný název v náhledu, když se `pozice_id` liší od stávající směny. */
+  pozice: { id: string; label: string }[]
   /** Existující směny v dosahu — jen ty, na které tabulka může narazit. */
   smeny: {
     id: string
@@ -144,6 +152,7 @@ export type Zdroje = {
     shift_date: string
     starts_at: string
     ends_at: string
+    position_id: string | null
   }[]
 }
 
@@ -167,6 +176,7 @@ export type Zaznam = {
     ends_at?: string
     /** Jen z maticového dovozu — viz komentář u `Klic` výš. */
     sablona_key?: string
+    position_id?: string
   }
 }
 
@@ -231,6 +241,9 @@ export function sestavPlan(
     pobockaPodle.set(klicDb(p.name), p)
     pobockaPodle.set(klicDb(p.slug), p)
   }
+
+  const nazevPozice = new Map<string, string>()
+  for (const p of zdroje.pozice) nazevPozice.set(p.id, p.label)
 
   // Existující směny podle klíče člověk|datum|pobočka (oddíl A).
   const smenaPodleKlice = new Map<string, Zdroje['smeny'][number]>()
@@ -326,6 +339,8 @@ export function sestavPlan(
     */
     const kodText = bunka('kod')
     const sablonaKey = kodText === '' ? undefined : kodText
+    const poziceIdText = bunka('pozice_id')
+    const poziceId = poziceIdText === '' ? undefined : poziceIdText
 
     const stavajici = smenaPodleKlice.get(klic)
 
@@ -338,9 +353,19 @@ export function sestavPlan(
       if (stavajici.ends_at.slice(0, 5) !== konec) {
         zmeny.push({ pole: 'Konec', z: stavajici.ends_at.slice(0, 5), na: konec })
       }
+      // Jen když maticový dovoz pozici vůbec poslal (`poziceId` je
+      // undefined u plochého dovozu, ten pozici neřeší vůbec) a liší
+      // se od stávající — beze změny se nekreslí jako změna.
+      if (poziceId !== undefined && (stavajici.position_id ?? '') !== poziceId) {
+        zmeny.push({
+          pole: 'Pozice',
+          z: stavajici.position_id ? (nazevPozice.get(stavajici.position_id) ?? 'neznámá') : '—',
+          na: nazevPozice.get(poziceId) ?? 'neznámá',
+        })
+      }
       zaznam.zmeny = zmeny
       zaznam.co = zmeny.length > 0 ? 'aktualizovat' : 'beze_zmeny'
-      zaznam.zapis = { starts_at: `${zacatek}:00`, ends_at: `${konec}:00`, sablona_key: sablonaKey }
+      zaznam.zapis = { starts_at: `${zacatek}:00`, ends_at: `${konec}:00`, sablona_key: sablonaKey, position_id: poziceId }
     } else {
       zaznam.co = 'zalozit'
       zaznam.zapis = {
@@ -350,6 +375,7 @@ export function sestavPlan(
         starts_at: `${zacatek}:00`,
         ends_at: `${konec}:00`,
         sablona_key: sablonaKey,
+        position_id: poziceId,
       }
     }
 

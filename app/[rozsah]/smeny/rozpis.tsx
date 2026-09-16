@@ -76,6 +76,9 @@ type Smena = {
   note: string;
   // Vydaná směna se nedá smazat — lidem už je v rozpisu vidět.
   published_at: string | null;
+  // Trhaná směna — pauza uvnitř (migrace 20260916200000). Obě, nebo žádná.
+  pauza_od: string | null;
+  pauza_do: string | null;
 };
 
 type RozsahContext = {
@@ -97,6 +100,10 @@ type Props = {
   */
   barvy: Map<string, string | null>;
   pozice: Map<string, string>;
+  /** Domovský úsek každého člověka (employees.usek_id) — pro seskupení týdenní mřížky. */
+  domovskeUseky: Map<string, string | null>;
+  /** Název úseku podle id (useky.nazev). */
+  nazvyUseku: Map<string, string>;
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
 };
@@ -108,6 +115,8 @@ export default function RozpisView({
   jmena,
   barvy,
   pozice,
+  domovskeUseky,
+  nazvyUseku,
   nazvyPobocek,
   rozsah,
   planovani,
@@ -244,7 +253,8 @@ export default function RozpisView({
           dnesni={dnesni}
           jmena={jmena}
           barvy={barvy}
-          pozice={pozice}
+          domovskeUseky={domovskeUseky}
+          nazvyUseku={nazvyUseku}
           nazvyPobocek={nazvyPobocek}
           rozsah={rozsah}
           planovani={planovani}
@@ -313,7 +323,8 @@ function TydenView({
   dnesni,
   jmena,
   barvy,
-  pozice,
+  domovskeUseky,
+  nazvyUseku,
   nazvyPobocek,
   rozsah,
   planovani,
@@ -323,7 +334,8 @@ function TydenView({
   dnesni: string;
   jmena: Map<string, string>;
   barvy: Map<string, string | null>;
-  pozice: Map<string, string>;
+  domovskeUseky: Map<string, string | null>;
+  nazvyUseku: Map<string, string>;
   nazvyPobocek: Map<string, string>;
   rozsah: RozsahContext;
   planovani: Planovani | null;
@@ -348,17 +360,16 @@ function TydenView({
     seznamu — na "Celá firma" se dřív míchali lidé z obou poboček
     dohromady.
 
-    Seskupuje se podle SMĚNY (`shift.branch_id`/`position_id`), ne
-    podle člověka — člověk sám žádnou pevnou pobočku ani úsek nemá,
-    může mít ten týden směny na obou. Řádek člověka se v tabulce proto
-    může objevit ve víc skupinách zvlášť (jednou za každou pobočku,
-    na které má ten týden aspoň jednu směnu) — což je správně: ukazuje
-    to přesně to, co dělá, ne fikci "jedné pobočky".
+    Pobočka skupiny se bere ze SMĚNY (`shift.branch_id`) — člověk sám
+    žádnou pevnou pobočku nemá, může mít ten týden směny na obou.
+    Řádek člověka se proto může objevit ve víc skupinách zvlášť.
 
-    Úsek řádku je pozice jeho NEJDŘÍV začínající směny na téhle
-    pobočce ten týden — směna beze směny nemá co seskupovat a člověk
-    s jedinou pozicí (drtivá většina) vyjde vždycky správně. Kdo
-    pozici nemá vůbec, padne do "Bez úseku".
+    ÚSEK je JINÁ VĚC než pozice a bere se z ČLOVĚKA
+    (employees.usek_id — "do jakého týmu patří", Kuchyně/Bar/Vedení),
+    ne ze směny. Šéfík 16.9.2026: "nefungují úseky u jednotlivých
+    poboček" — dřív se tu omylem používala pozice ze směny
+    (position_id), což je úplně jiná osa (čím člověk je / co smí).
+    Kdo úsek nemá přiřazený (Nastavení → Lidé), padne do "Bez úseku".
   */
   const smenyPodlePobocce = new Map<string, Smena[]>();
   for (const smeny of dny.values()) {
@@ -389,13 +400,9 @@ function TydenView({
   }
 
   function usekRadku(radek: RadekOsoby): string {
-    const vsechny = [...radek.smenyPodleDne.values()]
-      .flat()
-      .sort((a, b) =>
-        a.shift_date === b.shift_date ? a.starts_at.localeCompare(b.starts_at) : a.shift_date.localeCompare(b.shift_date),
-      );
-    const prvniSPozici = vsechny.find((s) => s.position_id);
-    return prvniSPozici?.position_id ? (pozice.get(prvniSPozici.position_id) ?? "Bez úseku") : "Bez úseku";
+    if (!radek.osoba) return "Bez úseku";
+    const usekId = domovskeUseky.get(radek.osoba);
+    return usekId ? (nazvyUseku.get(usekId) ?? "Bez úseku") : "Bez úseku";
   }
 
   function seskupPodleUseku(radky: RadekOsoby[]): { usek: string; radky: RadekOsoby[] }[] {
@@ -665,13 +672,13 @@ function RadekTydne({
                     type="button"
                     onClick={() => onOtevrit({ den: datum, smena: s })}
                     style={chipTlacitko}
-                    title="Upravit směnu"
+                    title={s.pauza_od ? "Trhaná směna — upravit" : "Upravit směnu"}
                   >
-                    {hodina(s.starts_at)}–{hodina(s.ends_at)}
+                    {popisSmeny(s)}
                   </button>
                 ) : (
                   <div key={s.id} style={chip}>
-                    {hodina(s.starts_at)}–{hodina(s.ends_at)}
+                    {popisSmeny(s)}
                   </div>
                 ),
               )}
@@ -682,8 +689,13 @@ function RadekTydne({
                 skoro vyplněný. Trvale vidět nemá být (oddíl 6:
                 "prázdná buňka má být čistá") — zobrazí se až na
                 najetí nebo zaměření, viz .ft-rozpis-plus v globals.css.
+
+                Jen na PRÁZDNÉ políčko (Šéfík 16.9.2026: "odebrat druhé
+                plus" — den, kde už směna je, ho nepotřebuje. Přidat
+                další směnu ten samý den jde teď přímo z otevřené
+                směny, viz FormularSmeny.
               */}
-              {planovani ? (
+              {planovani && smenyDne.length === 0 ? (
                 <button
                   type="button"
                   className="ft-rozpis-plus"
@@ -700,6 +712,8 @@ function RadekTydne({
                             starts_at: "08:00",
                             ends_at: "16:00",
                             note: "",
+                            pauza_od: null,
+                            pauza_do: null,
                           } as SmenaKUprave)
                         : null,
                     })
@@ -982,7 +996,7 @@ function DenView({
                     />
                   ) : null;
 
-                  const obsah = `${hodina(s.starts_at)}–${hodina(s.ends_at)}`;
+                  const obsah = popisSmeny(s);
                   return planovani ? (
                     <button
                       type="button"
@@ -1211,6 +1225,17 @@ function MesicView({
 
 function hodina(cas: string): string {
   return cas.slice(0, 5);
+}
+
+/**
+ * Popisek směny do chipu — trhaná (pauza uvnitř) se ukáže jako dva
+ * úseky, ne jedno souvislé od–do, ať je zlom vidět i v hustém rozpisu.
+ */
+function popisSmeny(s: { starts_at: string; ends_at: string; pauza_od: string | null; pauza_do: string | null }): string {
+  if (s.pauza_od && s.pauza_do) {
+    return `${hodina(s.starts_at)}–${hodina(s.pauza_od)} · ${hodina(s.pauza_do)}–${hodina(s.ends_at)}`;
+  }
+  return `${hodina(s.starts_at)}–${hodina(s.ends_at)}`;
 }
 
 const DNY = [

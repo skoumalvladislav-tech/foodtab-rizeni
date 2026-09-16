@@ -177,6 +177,11 @@ export const NASTAVENI: Polozka[] = [
   // kdo plánuje směny, ale měnit je smí správa nastavení; kdo jen
   // plánuje, dostane šablony rovnou v nabídce ve formuláři směny.
   { segment: 'nastaveni/sablony', nazev: 'Šablony směn', kratky: 'Šablony', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kalendar' },
+  // Úsek — do jakého týmu/oddělení člověk patří (Kuchyně, Bar, Vedení).
+  // NENÍ totéž co Zařazení (co smí a jakou má pracovní roli) — dvě
+  // různé osy, viz nastaveni/useky/page.tsx. Právo settings.manage
+  // sedí na tutéž politiku, jakou má tabulka useky v databázi.
+  { segment: 'nastaveni/useky', nazev: 'Úseky', kratky: 'Úseky', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   // JEDNA POLOŽKA, ne dvě. Do 9. 9. 2026 tu stálo zvlášť „Zařazení“
   // (seznam) a „Oprávnění“ (co smí) — dva seznamy pro jednu věc,
   // a přesně to Šéfík vytýkal. Slilo se to do jedné obrazovky

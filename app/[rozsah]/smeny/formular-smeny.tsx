@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import Drawer from '@/components/ui/Drawer'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
 import { zkratkaDoSmeny } from '@/lib/sablony'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
@@ -23,6 +24,13 @@ export type SmenaKUprave = {
     o tom databáze; tady se podle toho jen vybírá slovo na tlačítku.
   */
   published_at?: string | null
+  /*
+    Trhaná směna (Šéfík 16.9.2026, migrace 20260916200000) — pauza
+    uvnitř směny, ne druhá oddělená směna. NULL/NULL = směna trhaná
+    není. Jen plán, do mzdy nezasahuje (tu řeší paušální odpočet).
+  */
+  pauza_od: string | null
+  pauza_do: string | null
 }
 
 /**
@@ -34,8 +42,9 @@ export type SmenaKUprave = {
  * NA TELEFONU CELÁ OBRAZOVKA
  *
  * Kalendář je hustý a bublina, do které se nedá trefit, je horší než
- * žádná. Pod 640 px se okno roztáhne přes celou plochu; nad ní je to
- * karta uprostřed.
+ * žádná. Formulář proto jede ve sdíleném `Drawer` (components/ui/Drawer)
+ * — na telefonu se panel roztáhne přes celou šířku, na širším okně
+ * zůstává úzký boční panel.
  *
  * ---------------------------------------------------------------------
  * VAROVÁNÍ SE UKÁŽÍ PO ULOŽENÍ, NE MÍSTO NĚJ
@@ -111,6 +120,16 @@ export default function FormularSmeny({
   const [doKdy, setDoKdy] = useState((smena?.ends_at ?? '16:00').slice(0, 5))
   const [sablony, setSablony] = useState<NabidnutaSablona[]>(sablonyVychozi)
   const [klic, setKlic] = useState('')
+
+  /*
+    Trhaná směna — pauza uvnitř, ne druhá oddělená směna (Šéfík
+    16.9.2026). Zaškrtávátko řídí, jestli se pole vůbec posílají:
+    odškrtnuté pošle prázdno a `ulozitSmenu` z toho udělá NULL/NULL,
+    stejně jako u nové směny bez pauzy.
+  */
+  const [trhana, setTrhana] = useState(Boolean(smena?.pauza_od && smena?.pauza_do))
+  const [pauzaOd, setPauzaOd] = useState((smena?.pauza_od ?? '').slice(0, 5))
+  const [pauzaDo, setPauzaDo] = useState((smena?.pauza_do ?? '').slice(0, 5))
 
   /*
     Nabídku dodává databáze, ne prohlížeč — které pravidlo vyhraje, ví
@@ -201,319 +220,333 @@ export default function FormularSmeny({
   const jeVydana = Boolean(smena?.published_at)
 
   return (
-    <div style={zaclona} role="dialog" aria-modal="true" aria-labelledby="smena-nadpis">
-      <div style={okno}>
-        <h2 id="smena-nadpis" style={nadpis}>
-          {smena ? 'Upravit směnu' : 'Nová směna'}
-        </h2>
+    <Drawer otevreno onZavrit={zavrit} nadpis={smena ? 'Upravit směnu' : 'Nová směna'}>
+      {hotovo ? (
+        <>
+          <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
+            {smena ? 'Změna uložena.' : 'Směna přidána do rozpisu.'}
+          </p>
 
-        {hotovo ? (
-          <>
-            <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
-              {smena ? 'Změna uložena.' : 'Směna přidána do rozpisu.'}
-            </p>
+          {/*
+            Varování až tady, u výsledku. Kdyby se ukazovala předem,
+            člověk by je odklikl dřív, než by měl co odklikávat.
+          */}
+          {stav.varovani.length > 0 ? (
+            <ul style={varovaniSeznam}>
+              {stav.varovani.map((v, i) => (
+                <li key={i} style={varovaniRadek}>
+                  {v}
+                </li>
+              ))}
+            </ul>
+          ) : null}
 
-            {/*
-              Varování až tady, u výsledku. Kdyby se ukazovala předem,
-              člověk by je odklikl dřív, než by měl co odklikávat.
-            */}
-            {stav.varovani.length > 0 ? (
-              <ul style={varovaniSeznam}>
-                {stav.varovani.map((v, i) => (
-                  <li key={i} style={varovaniRadek}>
-                    {v}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={zavrit} className="ft-tl ft-tl-hlavni">
-                Hotovo
-              </button>
-            </div>
-          </>
-        ) : (
-          <form action={akce} style={{ display: 'grid', gap: '12px' }}>
-            <input type="hidden" name="rozsah" value={rozsah} />
-            {smena ? <input type="hidden" name="smena" value={smena.id} /> : null}
-
-            <label style={poleLabel}>
-              <span>Kdo</span>
-              <select
-                ref={prvni}
-                name="zamestnanec"
-                defaultValue={smena?.employee_id ?? ''}
-                style={pole}
-              >
-                {/*
-                  Prázdné je platná volba, ne chybějící údaj: neobsazená
-                  směna znamená „sem někoho potřebujeme“.
-                */}
-                <option value="">— zatím nikdo (volná směna) —</option>
-                {lide.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.jmeno}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={poleLabel}>
-              <span>Zařazení</span>
-              <select
-                name="pozice"
-                value={vybranaPozice}
-                onChange={(e) => setVybranaPozice(e.target.value)}
-                style={pole}
-              >
-                <option value="">— bez zařazení —</option>
-                {pozice.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-              {pozice.length === 0 ? (
-                <span style={vysvetlivka}>
-                  Firma zatím žádnou pozici nemá. Založí se v Nastavení →
-                  Pozice; směna jde uložit i bez ní.
-                </span>
-              ) : null}
-            </label>
-
-            <label style={poleLabel}>
-              <span>Kde</span>
-              <select
-                name="pobocka"
-                required
-                value={pobocka}
-                onChange={(e) => setPobocka(e.target.value)}
-                style={pole}
-              >
-                {pobocky.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.nazev}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label style={poleLabel}>
-              <span>Datum</span>
-              <input
-                name="den"
-                type="date"
-                required
-                defaultValue={smena?.shift_date ?? den}
-                style={pole}
-              />
-            </label>
-
-            {/*
-              Šablona stojí těsně nad časy, které vyplňuje. Kdyby byla
-              nahoře u jména, nebylo by vidět, co vlastně udělala.
-            */}
-            {sablony.length > 0 ? (
-              <label style={poleLabel}>
-                <span>Šablona</span>
-                <select
-                  value={klic}
-                  onChange={(e) => vybratSablonu(e.target.value)}
-                  style={pole}
-                >
-                  <option value="">— vlastní časy —</option>
-                  {sablony.map((s) => (
-                    <option key={s.klic} value={s.klic}>
-                      {s.klic} · {s.label} · {s.od}–{s.do}
-                    </option>
-                  ))}
-                </select>
-                <span style={vysvetlivka}>
-                  Šablona jen vyplní časy. Přepsat je jde hned pod tím
-                  a směna si je pak drží vlastní — {VETA_JEN_NOVE}
-                </span>
-              </label>
-            ) : null}
-
-            {/*
-              Zkratka jde do směny jen tehdy, když časy pořád sedí.
-              Odvozené z časů, ne z toho, na co se klikalo.
-            */}
-            <input type="hidden" name="sablona" value={klicDoSmeny} />
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <label style={poleLabel}>
-                <span>Od</span>
-                <input
-                  name="od"
-                  type="time"
-                  required
-                  value={od}
-                  onChange={(e) => setOd(e.target.value)}
-                  style={pole}
-                />
-              </label>
-              <label style={poleLabel}>
-                <span>Do</span>
-                <input
-                  name="do"
-                  type="time"
-                  required
-                  value={doKdy}
-                  onChange={(e) => setDoKdy(e.target.value)}
-                  style={pole}
-                />
-              </label>
-            </div>
-
-            {klic !== '' && !casySedi ? (
-              <p style={vysvetlivka}>
-                Časy jste přepsali, takže se směna uloží bez zkratky{' '}
-                {klic}. Zkratka u směny s jinými časy by v rozpisu lhala.
-              </p>
-            ) : null}
-
-            <p style={vysvetlivka}>
-              Konec dřív než začátek znamená, že směna končí druhý den —
-              22:00–06:00 je osm hodin, ne mínus šestnáct.
-            </p>
-
-            <label style={poleLabel}>
-              <span>Poznámka</span>
-              <input
-                name="poznamka"
-                maxLength={200}
-                defaultValue={smena?.note ?? ''}
-                placeholder="nepovinná"
-                style={pole}
-              />
-            </label>
-
-            {stav.stav === 'chyba' ? (
-              <p className="hlaska-chyba">{stav.text}</p>
-            ) : null}
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi">
-                Zpět
-              </button>
-              <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>
-                {ceka ? 'Ukládám…' : smena ? 'Uložit změnu' : 'Přidat směnu'}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/*
-          SMAZAT / ZRUŠIT SMĚNU.
-
-          Vlastní formulář za tím hlavním — vnořovat se nesmějí.
-          Nabízí se u SKUTEČNĚ ULOŽENÉ směny (`smena.id` není prázdné;
-          u nové se předává prázdný řetězec).
-
-          NEVYDANÁ se smaže: nikdo ji neviděl, není co ohlašovat.
-          VYDANÁ se označí jako zrušená a zůstane stát — lidem se pořád
-          ukazuje vydaná podoba, takže jim zmizí až vydáním rozpisu,
-          kde se to ohlásí.
-
-          Do 9. 9. tu u vydané směny stálo, že smazat nejde. Byla to
-          správná úvaha se špatným závěrem: rozpis se VYDÁ a teprve pak
-          se v něm škrtá, takže odmítnutí u vydané znamenalo, že nešlo
-          smazat prakticky nic.
-        */}
-        {!hotovo && smena?.id ? (
-          <div style={mazaniPruh}>
-            {ptaSeNaSmazani ? (
-              <form action={akceSmazat} style={{ display: 'grid', gap: '8px' }}>
-                <input type="hidden" name="rozsah" value={rozsah} />
-                <input type="hidden" name="smena" value={smena.id} />
-                <p style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
-                  <strong>
-                    {jeVydana ? 'Zrušit tuhle směnu?' : 'Smazat tuhle směnu?'}
-                  </strong>
-                </p>
-                {/*
-                  U vydané se říká, KDY to lidi uvidí. Bez toho by to
-                  vypadalo, že se nic nestalo — v jejich rozpisu směna
-                  do vydání zůstane.
-                */}
-                {jeVydana ? (
-                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-                    Zůstane vidět jako zrušená a lidem zmizí, až rozpis
-                    vydáte.
-                  </p>
-                ) : null}
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button type="submit" className="ft-tl" disabled={cekaSmazani}>
-                    {cekaSmazani
-                      ? jeVydana
-                        ? 'Ruším…'
-                        : 'Mažu…'
-                      : jeVydana
-                        ? 'Zrušit'
-                        : 'Smazat'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPtaSeNaSmazani(false)}
-                    className="ft-tl ft-tl-vedlejsi"
-                  >
-                    Zpět
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setPtaSeNaSmazani(true)}
-                className="ft-tl ft-tl-vedlejsi"
-              >
-                {jeVydana ? 'Zrušit směnu' : 'Smazat směnu'}
-              </button>
-            )}
-
-            {stavSmazani.stav === 'chyba' ? (
-              <p className="hlaska-chyba" style={{ marginTop: '8px' }}>
-                {stavSmazani.text}
-              </p>
-            ) : null}
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={zavrit} className="ft-tl ft-tl-hlavni">
+              Hotovo
+            </button>
           </div>
-        ) : null}
-      </div>
-    </div>
+        </>
+      ) : (
+        <form action={akce} style={{ display: 'grid', gap: '12px' }}>
+          <input type="hidden" name="rozsah" value={rozsah} />
+          {smena ? <input type="hidden" name="smena" value={smena.id} /> : null}
+
+          <label style={poleLabel}>
+            <span>Kdo</span>
+            <select
+              ref={prvni}
+              name="zamestnanec"
+              defaultValue={smena?.employee_id ?? ''}
+              style={pole}
+            >
+              {/*
+                Prázdné je platná volba, ne chybějící údaj: neobsazená
+                směna znamená „sem někoho potřebujeme“.
+              */}
+              <option value="">— zatím nikdo (volná směna) —</option>
+              {lide.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.jmeno}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={poleLabel}>
+            <span>Zařazení</span>
+            <select
+              name="pozice"
+              value={vybranaPozice}
+              onChange={(e) => setVybranaPozice(e.target.value)}
+              style={pole}
+            >
+              <option value="">— bez zařazení —</option>
+              {pozice.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            {pozice.length === 0 ? (
+              <span style={vysvetlivka}>
+                Firma zatím žádnou pozici nemá. Založí se v Nastavení →
+                Pozice; směna jde uložit i bez ní.
+              </span>
+            ) : null}
+          </label>
+
+          <label style={poleLabel}>
+            <span>Kde</span>
+            <select
+              name="pobocka"
+              required
+              value={pobocka}
+              onChange={(e) => setPobocka(e.target.value)}
+              style={pole}
+            >
+              {pobocky.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.nazev}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label style={poleLabel}>
+            <span>Datum</span>
+            <input
+              name="den"
+              type="date"
+              required
+              defaultValue={smena?.shift_date ?? den}
+              style={pole}
+            />
+          </label>
+
+          {/*
+            Šablona stojí těsně nad časy, které vyplňuje. Kdyby byla
+            nahoře u jména, nebylo by vidět, co vlastně udělala.
+          */}
+          {sablony.length > 0 ? (
+            <label style={poleLabel}>
+              <span>Šablona</span>
+              <select
+                value={klic}
+                onChange={(e) => vybratSablonu(e.target.value)}
+                style={pole}
+              >
+                <option value="">— vlastní časy —</option>
+                {sablony.map((s) => (
+                  <option key={s.klic} value={s.klic}>
+                    {s.klic} · {s.label} · {s.od}–{s.do}
+                  </option>
+                ))}
+              </select>
+              <span style={vysvetlivka}>
+                Šablona jen vyplní časy. Přepsat je jde hned pod tím
+                a směna si je pak drží vlastní — {VETA_JEN_NOVE}
+              </span>
+            </label>
+          ) : null}
+
+          {/*
+            Zkratka jde do směny jen tehdy, když časy pořád sedí.
+            Odvozené z časů, ne z toho, na co se klikalo.
+          */}
+          <input type="hidden" name="sablona" value={klicDoSmeny} />
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <label style={poleLabel}>
+              <span>Od</span>
+              <input
+                name="od"
+                type="time"
+                required
+                value={od}
+                onChange={(e) => setOd(e.target.value)}
+                style={pole}
+              />
+            </label>
+            <label style={poleLabel}>
+              <span>Do</span>
+              <input
+                name="do"
+                type="time"
+                required
+                value={doKdy}
+                onChange={(e) => setDoKdy(e.target.value)}
+                style={pole}
+              />
+            </label>
+          </div>
+
+          {klic !== '' && !casySedi ? (
+            <p style={vysvetlivka}>
+              Časy jste přepsali, takže se směna uloží bez zkratky{' '}
+              {klic}. Zkratka u směny s jinými časy by v rozpisu lhala.
+            </p>
+          ) : null}
+
+          <p style={vysvetlivka}>
+            Konec dřív než začátek znamená, že směna končí druhý den —
+            22:00–06:00 je osm hodin, ne mínus šestnáct.
+          </p>
+
+          {/*
+            Trhaná směna — pauza uvnitř, jako součást TÉTO směny, ne
+            druhá oddělená. Zaškrtnutí jen odkrývá dvě pole; kdo ho
+            odškrtne, pošle prázdno a uloží se bez pauzy, i kdyby předtím
+            nějakou měla.
+          */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: 'var(--ink)' }}>
+            <input
+              type="checkbox"
+              checked={trhana}
+              onChange={(e) => setTrhana(e.target.checked)}
+            />
+            Trhaná směna (pauza uprostřed)
+          </label>
+
+          {trhana ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <label style={poleLabel}>
+                  <span>Pauza od</span>
+                  <input
+                    name="pauza_od"
+                    type="time"
+                    required
+                    value={pauzaOd}
+                    onChange={(e) => setPauzaOd(e.target.value)}
+                    style={pole}
+                  />
+                </label>
+                <label style={poleLabel}>
+                  <span>Pauza do</span>
+                  <input
+                    name="pauza_do"
+                    type="time"
+                    required
+                    value={pauzaDo}
+                    onChange={(e) => setPauzaDo(e.target.value)}
+                    style={pole}
+                  />
+                </label>
+              </div>
+              <p style={vysvetlivka}>
+                Pauza je jen v rozpisu — do mzdy se nepočítá zvlášť, tu
+                řeší paušální odpočet v Nastavení.
+              </p>
+            </>
+          ) : null}
+
+          <label style={poleLabel}>
+            <span>Poznámka</span>
+            <input
+              name="poznamka"
+              maxLength={200}
+              defaultValue={smena?.note ?? ''}
+              placeholder="nepovinná"
+              style={pole}
+            />
+          </label>
+
+          {stav.stav === 'chyba' ? (
+            <p className="hlaska-chyba">{stav.text}</p>
+          ) : null}
+
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi">
+              Zpět
+            </button>
+            <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>
+              {ceka ? 'Ukládám…' : smena ? 'Uložit změnu' : 'Přidat směnu'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/*
+        SMAZAT / ZRUŠIT SMĚNU.
+
+        Vlastní formulář za tím hlavním — vnořovat se nesmějí.
+        Nabízí se u SKUTEČNĚ ULOŽENÉ směny (`smena.id` není prázdné;
+        u nové se předává prázdný řetězec).
+
+        NEVYDANÁ se smaže: nikdo ji neviděl, není co ohlašovat.
+        VYDANÁ se označí jako zrušená a zůstane stát — lidem se pořád
+        ukazuje vydaná podoba, takže jim zmizí až vydáním rozpisu,
+        kde se to ohlásí.
+
+        Do 9. 9. tu u vydané směny stálo, že smazat nejde. Byla to
+        správná úvaha se špatným závěrem: rozpis se VYDÁ a teprve pak
+        se v něm škrtá, takže odmítnutí u vydané znamenalo, že nešlo
+        smazat prakticky nic.
+      */}
+      {!hotovo && smena?.id ? (
+        <div style={mazaniPruh}>
+          {ptaSeNaSmazani ? (
+            <form action={akceSmazat} style={{ display: 'grid', gap: '8px' }}>
+              <input type="hidden" name="rozsah" value={rozsah} />
+              <input type="hidden" name="smena" value={smena.id} />
+              <p style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
+                <strong>
+                  {jeVydana ? 'Zrušit tuhle směnu?' : 'Smazat tuhle směnu?'}
+                </strong>
+              </p>
+              {/*
+                U vydané se říká, KDY to lidi uvidí. Bez toho by to
+                vypadalo, že se nic nestalo — v jejich rozpisu směna
+                do vydání zůstane.
+              */}
+              {jeVydana ? (
+                <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                  Zůstane vidět jako zrušená a lidem zmizí, až rozpis
+                  vydáte.
+                </p>
+              ) : null}
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button type="submit" className="ft-tl" disabled={cekaSmazani}>
+                  {cekaSmazani
+                    ? jeVydana
+                      ? 'Ruším…'
+                      : 'Mažu…'
+                    : jeVydana
+                      ? 'Zrušit'
+                      : 'Smazat'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPtaSeNaSmazani(false)}
+                  className="ft-tl ft-tl-vedlejsi"
+                >
+                  Zpět
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPtaSeNaSmazani(true)}
+              className="ft-tl ft-tl-vedlejsi"
+            >
+              {jeVydana ? 'Zrušit směnu' : 'Smazat směnu'}
+            </button>
+          )}
+
+          {stavSmazani.stav === 'chyba' ? (
+            <p className="hlaska-chyba" style={{ marginTop: '8px' }}>
+              {stavSmazani.text}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </Drawer>
   )
 }
 
 /* --- styly ---------------------------------------------------------- */
-
-const zaclona = {
-  position: 'fixed' as const,
-  inset: 0,
-  zIndex: 70,
-  background: 'rgba(0,0,0,.45)',
-  display: 'grid',
-  placeItems: 'center',
-  padding: '0',
-}
-
-/*
-  Na telefonu celá obrazovka, na širším okně karta uprostřed. Řeší se
-  to jednotkami, ne dotazem na šířku: `min(560px, 100vw)` a
-  `min(100dvh, …)` udělají totéž bez druhé sady stylů.
-*/
-const okno = {
-  width: 'min(560px, 100vw)',
-  maxHeight: '100dvh',
-  overflowY: 'auto' as const,
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 'clamp(0px, calc((100vw - 560px) * 100), 16px)',
-  boxShadow: 'var(--shadow)',
-  padding: '20px',
-}
-
-const nadpis = { margin: '0 0 14px', fontSize: '18px', color: 'var(--ink)' } as const
 
 const poleLabel = {
   display: 'grid',
