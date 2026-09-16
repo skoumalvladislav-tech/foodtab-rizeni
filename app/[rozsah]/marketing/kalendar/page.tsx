@@ -338,7 +338,7 @@ export default async function Kalendar({
                     style={{
                       minHeight: f.pohled === 'mesic' ? '92px' : '200px',
                       padding: '6px',
-                      borderRadius: '8px',
+                      borderRadius: 'var(--radius-sm)',
                       border: jeDnes ? '1px solid var(--mosaz)' : '1px solid var(--line)',
                       // Dny cizího měsíce se kreslí, ale zeslabeně —
                       // prázdná buňka vypadá jako díra a člověk neví,

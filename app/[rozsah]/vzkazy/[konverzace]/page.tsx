@@ -224,7 +224,7 @@ export default async function Rozhovor({
                     borderLeft: z.nalehava
                       ? '4px solid var(--warn)'
                       : '1px solid var(--line)',
-                    borderRadius: '12px',
+                    borderRadius: 'var(--radius-md)',
                     padding: '12px 14px',
                     marginLeft: moje ? '32px' : 0,
                     marginRight: moje ? 0 : '32px',
@@ -314,7 +314,7 @@ export default async function Rozhovor({
                 padding: '10px 12px',
                 // 16 px schválně: iOS jinak při zaostření pole zoomuje.
                 fontSize: '16px',
-                borderRadius: '10px',
+                borderRadius: 'var(--radius-sm)',
                 border: '1px solid var(--line)',
                 background: 'var(--paper)',
                 color: 'var(--ink)',
@@ -397,7 +397,7 @@ export default async function Rozhovor({
 const ramecek: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   padding: '14px',
   margin: '0 0 16px',
   fontSize: '14px',

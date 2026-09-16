@@ -74,7 +74,7 @@ const pole = {
   width: '100%',
   padding: '8px 10px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '14px',
@@ -336,7 +336,7 @@ function Pripojene({
   const ucet = typeof p.externi_ucet?.nazev === 'string' ? p.externi_ucet.nazev : null
 
   return (
-    <div style={{ display: 'grid', gap: '8px', background: 'var(--bg)', borderRadius: '10px', padding: '12px' }}>
+    <div style={{ display: 'grid', gap: '8px', background: 'var(--bg)', borderRadius: 'var(--radius-sm)', padding: '12px' }}>
       <p style={{ margin: 0, fontSize: '14px' }}>
         <strong>{p.nazev || p.poskytovatel}</strong>{' '}
         <span style={stitek}>{NAZVY_REZIMU[p.rezim as Rezim] ?? p.rezim}</span>{' '}
@@ -400,7 +400,7 @@ function Nabidnout({
   const znacka = znackaPoskytovatele(p)
 
   return (
-    <div style={{ display: 'grid', gap: '6px', border: '1px solid var(--line)', borderRadius: '10px', padding: '12px' }}>
+    <div style={{ display: 'grid', gap: '6px', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '12px' }}>
       <p style={{ margin: 0, fontSize: '14px' }}>
         <strong>{p.nazev}</strong> <span style={stitek}>{NAZVY_ZNACEK[znacka]}</span>
       </p>

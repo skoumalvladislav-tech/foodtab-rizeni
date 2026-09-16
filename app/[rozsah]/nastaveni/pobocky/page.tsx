@@ -116,7 +116,7 @@ export default async function NastaveniPobocek({
               style={{
                 background: "var(--card)",
                 border: "1px solid var(--line)",
-                borderRadius: "12px",
+                borderRadius: "var(--radius-md)",
                 padding: "16px 18px",
                 boxShadow: "var(--shadow)",
               }}
@@ -246,7 +246,7 @@ const pole = {
   width: "100%",
   padding: "10px 12px",
   fontSize: "16px",
-  borderRadius: "10px",
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line-2)",
   background: "var(--paper)",
   color: "var(--ink)",

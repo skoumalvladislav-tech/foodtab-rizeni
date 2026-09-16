@@ -59,7 +59,7 @@ const pole = {
   width: '100%',
   padding: '8px 10px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '14px',
@@ -222,7 +222,7 @@ export default async function Analytika({
             {UKAZATELE.filter((u) => u.klic !== 'kliknuti').map((u) => {
               const s = soucet(u.klic)
               return (
-                <div key={u.klic} style={{ border: '1px solid var(--line)', borderRadius: '8px', padding: '10px' }}>
+                <div key={u.klic} style={{ border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '10px' }}>
                   <span style={{ display: 'block', fontSize: '12px', color: 'var(--muted)' }}>
                     {popisUkazatele(u.klic)}
                   </span>

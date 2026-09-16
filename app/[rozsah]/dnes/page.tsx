@@ -622,7 +622,7 @@ const prazdno = {
 const hlaskaDobre = {
   margin: "0 0 12px",
   padding: "10px 12px",
-  borderRadius: "10px",
+  borderRadius: "var(--radius-sm)",
   background: "var(--dobre-bg)",
   border: "1px solid var(--dobre-bg)",
   fontSize: "14px",
@@ -633,7 +633,7 @@ const hlaskaDobre = {
 const ramecek = {
   background: "var(--card)",
   border: "1px solid var(--line)",
-  borderRadius: "12px",
+  borderRadius: "var(--radius-md)",
   padding: "14px",
   margin: 0,
   fontSize: "14px",

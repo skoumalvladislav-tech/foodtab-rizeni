@@ -236,7 +236,7 @@ export default function VystavitPozvankuFormular({
 const panel = {
   background: 'var(--card)',
   border: '1px solid var(--line)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   marginTop: '32px',
   overflow: 'hidden',
 } as const
@@ -279,7 +279,7 @@ const inputPole = {
   width: '100%',
   padding: '10px 12px',
   fontSize: '16px',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',
@@ -295,7 +295,7 @@ const neposlano = {
   margin: 0,
   padding: '10px 12px',
   border: '1px solid var(--pozor)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--pozor-bg)',
   color: 'var(--pozor)',
   fontSize: '13.5px',
@@ -321,7 +321,7 @@ const tokenBox = {
   gap: '8px',
   padding: '12px',
   background: 'var(--sunken)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   alignItems: 'center',
 } as const
 

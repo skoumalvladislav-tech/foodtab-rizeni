@@ -37,7 +37,7 @@ const karta = {
 const pole = {
   padding: '6px 8px',
   border: '1px solid var(--line)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--bg)',
   color: 'inherit',
   fontSize: '14px',

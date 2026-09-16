@@ -84,7 +84,7 @@ const pruh = {
   margin: '16px 16px 0',
   padding: '12px 14px',
   border: '1px solid var(--mosaz)',
-  borderRadius: '12px',
+  borderRadius: 'var(--radius-md)',
   background: 'var(--card)',
   color: 'var(--ink)',
   fontSize: '14px',

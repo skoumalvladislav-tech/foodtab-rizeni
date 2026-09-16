@@ -524,7 +524,7 @@ const poleText = {
   width: "100%",
   padding: "8px 10px",
   fontSize: "16px",
-  borderRadius: "10px",
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line)",
   background: "var(--paper)",
   color: "var(--ink)",

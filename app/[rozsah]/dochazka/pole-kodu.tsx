@@ -76,7 +76,7 @@ const pole = {
   letterSpacing: '.18em',
   textAlign: 'center' as const,
   textTransform: 'uppercase' as const,
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',

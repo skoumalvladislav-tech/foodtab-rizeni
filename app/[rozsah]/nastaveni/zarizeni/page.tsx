@@ -139,7 +139,7 @@ export default async function NastaveniZarizeni({
                 style={{
                   background: 'var(--card)',
                   border: '1px solid var(--line)',
-                  borderRadius: '12px',
+                  borderRadius: 'var(--radius-md)',
                   padding: '14px 16px',
                   opacity: z.stav === 'active' ? 1 : 0.6,
                   display: 'flex',
@@ -197,7 +197,7 @@ const ramecek = {
   margin: 0,
   padding: '10px 12px',
   border: '1px solid var(--pozor)',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   background: 'var(--pozor-bg)',
   color: 'var(--pozor)',
   fontSize: '14px',

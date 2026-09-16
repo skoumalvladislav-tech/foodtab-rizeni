@@ -657,7 +657,7 @@ const pole = {
   padding: "10px 12px",
   // 16 px schválně: iOS jinak při zaostření pole zoomuje celou stránku.
   fontSize: "16px",
-  borderRadius: "10px",
+  borderRadius: "var(--radius-sm)",
   border: "1px solid var(--line)",
   background: "var(--paper)",
   color: "var(--ink)",

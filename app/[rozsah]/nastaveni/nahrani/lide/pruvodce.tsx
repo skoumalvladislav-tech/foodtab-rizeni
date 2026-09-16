@@ -235,7 +235,7 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
                   margin: '12px 0',
                   padding: '10px 12px',
                   border: '1px solid var(--pozor)',
-                  borderRadius: '10px',
+                  borderRadius: 'var(--radius-sm)',
                   background: 'var(--pozor-bg)',
                   color: 'var(--pozor)',
                   fontSize: '14px',
@@ -515,7 +515,7 @@ const radekPole = {
 const vyber = {
   padding: '10px 12px',
   fontSize: '16px',
-  borderRadius: '10px',
+  borderRadius: 'var(--radius-sm)',
   border: '1px solid var(--line-2)',
   background: 'var(--paper)',
   color: 'var(--ink)',
