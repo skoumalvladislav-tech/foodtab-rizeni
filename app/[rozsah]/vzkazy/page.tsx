@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
@@ -9,6 +8,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
 import Nastenka from './nastenka'
+import SeznamRozhovoru, { type Rozhovor } from './seznam-rozhovoru'
 import { otevritKanalPobocky, zalozitVzkazVedeni } from './akce'
 
 export const dynamic = 'force-dynamic'
@@ -44,27 +44,6 @@ export const dynamic = 'force-dynamic'
  * pobočky otevře, a pokud ještě neexistuje, databáze ho vyrobí. Kdo do
  * něj patří, se nikde neuvádí: plyne to z dosahu na pobočku.
  */
-
-const ZONA = ZONA_VYCHOZI
-
-type Rozhovor = {
-  konverzace_id: string
-  druh: 'osobni' | 'pobocka' | 'mezi_pobockami' | 'vedeni'
-  branch_id: string | null
-  nazev: string | null
-  adresat: string | null
-  posledni_kdy: string | null
-  neprectenych: number
-  ceka: number
-  uzavreno_kdy: string | null
-}
-
-const NAZVY_DRUHU: Record<Rozhovor['druh'], string> = {
-  osobni: 'Osobní',
-  pobocka: 'Pobočka',
-  mezi_pobockami: 'Mezi pobočkami',
-  vedeni: 'Vedení',
-}
 
 export default async function Rozhovory({
   params,
@@ -256,7 +235,7 @@ export default async function Rozhovory({
         Vzkazy
       </Nadpis>
 
-      <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '760px' }}>
+      <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: naNastence ? '760px' : '1080px' }}>
         {/*
           ZÁLOŽKY — SLUČUJE SE VCHOD, NE OBSAH.
 
@@ -322,20 +301,33 @@ export default async function Rozhovory({
         ) : null}
 
         {/*
-          Kanál pobočky se neZAKLÁDÁ. Tohle tlačítko ho jen otevře;
-          když ještě neexistuje, vyrobí ho databáze. Seznam členů se
-          nikde nezadává — plyne z dosahu na pobočku.
-        */}
-        {scope.level === 'branch' && scope.branchId ? (
-          <form action={otevritKanalPobocky} style={{ marginBottom: '16px' }}>
-            <input type="hidden" name="rozsah" value={rozsah} />
-            <button type="submit" className="ft-tl">
-              Otevřít kanál pobočky {scope.branchName}
-            </button>
-          </form>
-        ) : null}
+          CONVERSATIONLIST/CHATVIEW (master prompt, sekce 21).
 
-        {/*
+          Seznam vlevo, vlákno vpravo od 900px — `.ds-vzkazy-split`
+          (app/_komponenty.css). Na téhle stránce (`/vzkazy`) je
+          `data-zobrazit="seznam"`: pod 900px se ukáže jen seznam,
+          detail vpravo je tu jen jako výzva „vyberte rozhovor" pro
+          širokou obrazovku. `/vzkazy/[konverzace]` má opačně
+          `data-zobrazit="detail"` a vykresluje TÝŽ seznam (sdílená
+          komponenta `SeznamRozhovoru`) se zvýrazněnou aktivní položkou.
+        */}
+        <div className="ds-vzkazy-split" data-zobrazit="seznam">
+          <div className="ds-vzkazy-seznam">
+            {/*
+              Kanál pobočky se neZAKLÁDÁ. Tohle tlačítko ho jen otevře;
+              když ještě neexistuje, vyrobí ho databáze. Seznam členů se
+              nikde nezadává — plyne z dosahu na pobočku.
+            */}
+            {scope.level === 'branch' && scope.branchId ? (
+              <form action={otevritKanalPobocky} style={{ marginBottom: '16px' }}>
+                <input type="hidden" name="rozsah" value={rozsah} />
+                <button type="submit" className="ft-tl">
+                  Otevřít kanál pobočky {scope.branchName}
+                </button>
+              </form>
+            ) : null}
+
+            {/*
           VZKAZ VEDENÍ.
 
           Odesílatel vybírá adresáta a — když dosáhne na víc poboček —
@@ -428,104 +420,37 @@ export default async function Rozhovory({
           </form>
         </details>
 
-        {rozhovory.length === 0 ? (
-          <Sdeleni nadpis="Zatím žádné rozhovory">
-            Kanál své pobočky otevřete tlačítkem nahoře. Osobní rozhovor
-            zatím zakládá vedoucí.
-          </Sdeleni>
-        ) : (
-          <ul
-            style={{
-              listStyle: 'none',
-              margin: 0,
-              padding: 0,
-              display: 'grid',
-              gap: '12px',
-            }}
-          >
-            {rozhovory.map((r) => {
-              const nazev =
-                r.nazev ??
-                (r.branch_id
-                  ? (nazvyPobocek.get(r.branch_id) ?? 'jiná pobočka')
-                  : NAZVY_DRUHU[r.druh])
+            <SeznamRozhovoru rozsah={rozsah} rozhovory={rozhovory} nazvyPobocek={nazvyPobocek} />
 
-              return (
-                <li key={r.konverzace_id}>
-                  <Link
-                    href={`/${rozsah}/vzkazy/${r.konverzace_id}`}
-                    style={{
-                      display: 'block',
-                      textDecoration: 'none',
-                      color: 'inherit',
-                      background: 'var(--card)',
-                      border: '1px solid var(--line)',
-                      borderLeft:
-                        r.neprectenych > 0
-                          ? '3px solid var(--mosaz)'
-                          : '1px solid var(--line)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: '14px',
-                      opacity: r.neprectenych > 0 ? 1 : 0.78,
-                      boxShadow: r.neprectenych > 0 ? 'var(--shadow-sm)' : 'none',
-                    }}
-                  >
-                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
-                      {[
-                        NAZVY_DRUHU[r.druh],
-                        r.branch_id
-                          ? (nazvyPobocek.get(r.branch_id) ?? 'jiná pobočka')
-                          : null,
-                        r.adresat === 'majitel' ? 'jen majitelům' : null,
-                        r.uzavreno_kdy ? 'uzavřeno' : null,
-                        /*
-                          Pásmo se dodává vždycky. Bez něj bere
-                          JavaScript pásmo serveru — na Vercelu UTC — a
-                          čas je v létě o dvě hodiny vedle. Viz lib/cas.ts.
-                        */
-                        r.posledni_kdy
-                          ? datumACasVPasmu(r.posledni_kdy, ZONA)
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </p>
+            {doruceno > 0 || cekaCelkem > 0 ? null : (
+              <p style={{ marginTop: '16px', fontSize: '13px', color: 'var(--muted)' }}>
+                Všechno přečtené.
+              </p>
+            )}
+          </div>
 
-                    <p
-                      style={{
-                        margin: '4px 0 0',
-                        fontSize: '16px',
-                        fontWeight: r.neprectenych > 0 ? 600 : 400,
-                      }}
-                    >
-                      {nazev}
-                    </p>
-
-                    {r.neprectenych > 0 ? (
-                      <p
-                        style={{
-                          margin: '6px 0 0',
-                          fontSize: '13px',
-                          color: r.ceka > 0 ? 'var(--muted)' : 'var(--mosaz)',
-                        }}
-                      >
-                        {r.ceka > 0
-                          ? `${r.ceka} z ${r.neprectenych} čeká na píchnutí`
-                          : `${r.neprectenych} nepřečtené`}
-                      </p>
-                    ) : null}
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-
-        {doruceno > 0 || cekaCelkem > 0 ? null : (
-          <p style={{ marginTop: '16px', fontSize: '13px', color: 'var(--muted)' }}>
-            Všechno přečtené.
-          </p>
-        )}
+          {/*
+            Detail vpravo — na týhle stránce žádný rozhovor vybraný
+            není, takže tu je jen výzva. Pod 900px se celý sloupec
+            schová (`data-zobrazit="seznam"` výš), takže tenhle text
+            na mobilu vůbec neexistuje v DOM ani jako blikající obsah.
+          */}
+          <div className="ds-vzkazy-detail">
+            <div
+              style={{
+                display: 'grid',
+                placeItems: 'center',
+                minHeight: '300px',
+                textAlign: 'center',
+                color: 'var(--muted)',
+                fontSize: '14px',
+                padding: '32px',
+              }}
+            >
+              <p style={{ margin: 0 }}>Vyberte rozhovor vlevo.</p>
+            </div>
+          </div>
+        </div>
           </>
         )}
       </div>

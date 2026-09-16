@@ -8,6 +8,7 @@ import { DotazSelhal, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
+import SeznamRozhovoru, { type Rozhovor } from '../seznam-rozhovoru'
 import { oznacitPrecteno, poslatZpravu, stornovatZpravu } from '../akce'
 
 export const dynamic = 'force-dynamic'
@@ -83,6 +84,16 @@ export default async function Rozhovor({
   /* --- 2. NAČTENÍ DAT ------------------------------------------- */
 
   const supabase = await getServerSupabase()
+
+  /*
+    Seznam pro levý sloupec ConversationList/ChatView (master prompt,
+    sekce 21) — TÁŽ RPC a TÝŽ typ jako na /vzkazy (`SeznamRozhovoru`),
+    jen se tu navíc zvýrazní `konverzace` jako aktivní. Chyba se
+    nevyhazuje: bez seznamu se ukáže aspoň vlákno, ne prázdná stránka.
+  */
+  const { data: seznamData } = await supabase.rpc('moje_rozhovory', { p_tenant: tenantId })
+  const rozhovory = (seznamData ?? []) as Rozhovor[]
+  const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
 
   const { data: hlavicka, error: chybaHlavicka } = await supabase
     .from('konverzace')
@@ -165,7 +176,6 @@ export default async function Rozhovor({
 
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
-  const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
   const nazev =
     hlavicka.nazev ??
     (hlavicka.branch_id
@@ -190,7 +200,23 @@ export default async function Rozhovor({
         {nazev}
       </Nadpis>
 
-      <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '760px' }}>
+      <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '1080px' }}>
+        {/*
+          CONVERSATIONLIST/CHATVIEW — stejný `.ds-vzkazy-split` jako na
+          /vzkazy, tady s `data-zobrazit="detail"`: pod 900px je vidět
+          jen vlákno (seznam si zavře „Zpět na rozhovory" výš). Nad
+          900px stojí seznam se zvýrazněnou touhle konverzací vlevo.
+        */}
+        <div className="ds-vzkazy-split" data-zobrazit="detail">
+          <div className="ds-vzkazy-seznam">
+            <SeznamRozhovoru
+              rozsah={rozsah}
+              rozhovory={rozhovory}
+              nazvyPobocek={nazvyPobocek}
+              aktivniId={konverzace}
+            />
+          </div>
+          <div className="ds-vzkazy-detail">
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
 
         {zpravy.length === 0 ? (
@@ -389,6 +415,8 @@ export default async function Rozhovor({
           Zprávy se ukazují v aplikaci. Upozornění do telefonu zatím
           nechodí.
         </p>
+          </div>
+        </div>
       </div>
     </>
   )

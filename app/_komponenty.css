@@ -237,3 +237,18 @@
 @media (max-width: 900px) {
   .ds-dvasloupec { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* --- Vzkazy: ConversationList/ChatView (master prompt, sekce 21) ------
+   Seznam vlevo + vlákno vpravo, vedle sebe od 900px. Pod tím se appka
+   přepíná adresou (žádný klientský stav) — proto dvě varianty JEDNÉ
+   třídy podle toho, na které stránce zrovna jsme (`data-zobrazit`):
+   /vzkazy má jen seznam co ukázat na mobilu, /vzkazy/[id] jen vlákno.
+   Nad 900px se `data-zobrazit` ignoruje, oba sloupce jsou vidět pořád. */
+.ds-vzkazy-split { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.ds-vzkazy-seznam { min-width: 0; }
+.ds-vzkazy-detail { min-width: 0; }
+@media (max-width: 900px) {
+  .ds-vzkazy-split { display: block; }
+  .ds-vzkazy-split[data-zobrazit="detail"] .ds-vzkazy-seznam { display: none; }
+  .ds-vzkazy-split[data-zobrazit="seznam"] .ds-vzkazy-detail { display: none; }
+}
