@@ -232,7 +232,7 @@ export default function RozpisView({
             + Nahrát rozpis z tabulky
           </summary>
           <div style={{ marginTop: "4px" }}>
-            <PruvodceNahranim rozsah={planovani.rozsah} />
+            <PruvodceNahranim rozsah={planovani.rozsah} pobocky={planovani.pobocky} />
           </div>
         </details>
       ) : null}

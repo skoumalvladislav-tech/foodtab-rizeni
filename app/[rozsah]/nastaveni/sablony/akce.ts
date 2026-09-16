@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -90,6 +91,85 @@ export async function ulozitSablonu(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/nastaveni/sablony`)
   zpet(rozsah, `?stav=${sablona ? 'upravena' : 'zalozena'}`)
+}
+
+export type VysledekVytvoreni = { stav: 'ok' } | { stav: 'chyba'; text: string }
+
+/**
+ * Založení šablony BEZ přesměrování — pro maticový dovoz rozpisu
+ * (../nahrani/rozpis/pruvodce.tsx), který ji volá uprostřed vlastního
+ * průvodce, ne z <form action>. Stejná RPC a stejné ověření práva jako
+ * `ulozitSablonu` výš, jen vrací výsledek místo `redirect()`.
+ */
+export async function vytvoritSablonu(vstup: {
+  rozsah: string
+  klic: string
+  nazev: string
+  pobocka: string | null
+  od: string
+  do: string
+}): Promise<VysledekVytvoreni> {
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return { stav: 'chyba', text: 'Účet nepatří k žádné firmě.' }
+
+  const pristup = await zkusPristup(tenantId, 'settings.manage', vstup.rozsah)
+  if (pristup.stav !== 'ok') {
+    return { stav: 'chyba', text: 'Na zakládání šablon nemáte oprávnění — požádejte správce nastavení.' }
+  }
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('ulozit_sablonu', {
+    p_tenant: tenantId,
+    p_sablona: null,
+    p_branch: vstup.pobocka,
+    p_position: null,
+    p_key: vstup.klic,
+    p_label: vstup.nazev,
+    p_od: vstup.od,
+    p_do: vstup.do,
+    p_poradi: 100,
+  })
+  if (error) return { stav: 'chyba', text: zkrat(error.message) }
+
+  revalidatePath(`/${vstup.rozsah}/nastaveni/sablony`)
+  return { stav: 'ok' }
+}
+
+/**
+ * Přepsat časy podle šablony do nevydaných směn, které z ní vznikly.
+ *
+ * VĚDOMÁ, JEDNORÁZOVÁ VÝJIMKA z "šablona je předvyplnění, ne vazba"
+ * (viz komentář v migraci 20260916190000_prepsani_sablony_do_smen.sql).
+ * Spouští se jen na výslovné tlačítko — nikdy automaticky po uložení
+ * šablony. Zasáhne jen směny s přesně touhle zkratkou, které ještě
+ * nejsou vydané; databáze (`prepsat_casy_podle_sablony`) hlídá zbytek.
+ */
+export async function prepsatCasyDoSmen(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const sablona = String(formData.get('sablona') ?? '').trim()
+  if (!sablona) return
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const pristup = await zkusPristup(tenantId, 'settings.manage', rozsah)
+  if (pristup.stav !== 'ok') redirect('/')
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('prepsat_casy_podle_sablony', {
+    p_tenant: tenantId,
+    p_sablona: sablona,
+  })
+
+  // Nenasazená migrace (20260916190000) nemá tlačítko rozbít — jasná
+  // hláška místo syrové chyby z databáze.
+  if (funkceNeexistuje(error)) {
+    zpet(rozsah, '?chyba=' + encodeURIComponent('Tohle tlačítko čeká na nasazení databáze (migrace 20260916190000).'))
+  }
+  if (error) zpet(rozsah, '?chyba=' + encodeURIComponent(zkrat(error.message)))
+
+  revalidatePath(`/${rozsah}/smeny`)
+  zpet(rozsah, `?stav=prepsano&pocet=${Number(data ?? 0)}`)
 }
 
 /**

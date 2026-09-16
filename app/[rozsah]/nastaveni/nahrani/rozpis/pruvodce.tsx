@@ -12,6 +12,17 @@ import {
   type Mapovani,
   type Plan,
 } from '@/lib/nahrani-rozpisu'
+import {
+  distinctZnacky,
+  jeMaticovyFormat,
+  NAZVY_MESICU,
+  rozeberMatici,
+  sestavDatum,
+  sloupceJmen,
+  type BunkaMatice,
+} from '@/lib/nahrani-rozpisu-matice'
+import { nabidnoutSablony, type NabidnutaSablona } from '@/app/[rozsah]/smeny/sablony'
+import { vytvoritSablonu } from '@/app/[rozsah]/nastaveni/sablony/akce'
 import { nahratRozpis, pripravitNahled, type Vysledek } from './akce'
 
 /**
@@ -24,11 +35,38 @@ import { nahratRozpis, pripravitNahled, type Vysledek } from './akce'
  *
  * Soubor se čte tady, v prohlížeči, a na server se posílají jen buňky
  * a přiřazení sloupců. Nikam se neukládá.
+ *
+ * ---------------------------------------------------------------------
+ * DRUHÝ TVAR TABULKY — MATICE (dny v řádcích, jména ve sloupcích)
+ *
+ * Šéfík 16.9.2026 (chat): reálný export rozpisu bývá matice se
+ * značkami (R/O/X, „-B“/„-P“ pro pobočku), ne řádek na směnu s časy.
+ * Krok „soubor“ pozná tvar sám (lib/nahrani-rozpisu-matice.ts) a místo
+ * kroku „sloupce“ (ten pro matici nedává smysl — nejde přiřazovat
+ * sloupce, tvar je pevný) jde do nového kroku „značky“: měsíc/rok,
+ * které pobočce patří která přípona, a časy pro značky, které appka
+ * ještě nezná (rovnou navrhne, uloží se do Šablon směn, dá se upravit
+ * později). Teprve pak se rozloží do stejného tvaru, jaký čeká
+ * `sestavPlan` — jedna diffovací logika pro oba vstupy, ne dvě.
  */
 
-type Krok = 'soubor' | 'sloupce' | 'nahled' | 'hotovo'
+type Krok = 'soubor' | 'sloupce' | 'znacky' | 'nahled' | 'hotovo'
 
-export default function Pruvodce({ rozsah }: { rozsah: string }) {
+/** Časy, které appka sama navrhne pro obecně známé značky (R/O/X) — dál se upravují v Šablonách směn. */
+const VYCHOZI_CASY: Record<string, { od: string; do: string }> = {
+  R: { od: '08:00', do: '16:00' },
+  O: { od: '14:00', do: '22:00' },
+  X: { od: '08:00', do: '22:00' },
+}
+
+export default function Pruvodce({
+  rozsah,
+  pobocky = [],
+}: {
+  rozsah: string
+  /** Pro krok "značky" — komu se má přiřadit přípona jako „-B“. Nepovinné: bez toho matice nabídne jen výchozí pobočku. */
+  pobocky?: { id: string; nazev: string }[]
+}) {
   const idSouboru = useId()
   const [krok, setKrok] = useState<Krok>('soubor')
   const [nazevSouboru, setNazevSouboru] = useState('')
@@ -38,6 +76,16 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
   const [hotovo, setHotovo] = useState<Extract<Vysledek, { stav: 'hotovo' }> | null>(null)
   const [chyba, setChyba] = useState('')
   const [ceka, spust] = useTransition()
+
+  /* --- stav kroku "značky" (jen pro maticový vstup) ---------------- */
+  const [jeMatice, setJeMatice] = useState(false)
+  const ted = new Date()
+  const [rok, setRok] = useState(ted.getFullYear())
+  const [mesic, setMesic] = useState(ted.getMonth() + 1)
+  const [mapaPripon, setMapaPripon] = useState<Record<string, string>>({})
+  const [casyZnacek, setCasyZnacek] = useState<Record<string, { od: string; do: string }>>({})
+  const [chybejiciZnacky, setChybejiciZnacky] = useState<{ zaklad: string; branchId: string; nazevPobocky: string }[] | null>(null)
+  const [chybyVytvareni, setChybyVytvareni] = useState<string[]>([])
 
   async function vybranSoubor(e: React.ChangeEvent<HTMLInputElement>) {
     const soubor = e.target.files?.[0]
@@ -55,8 +103,14 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
       }
       setNazevSouboru(soubor.name)
       setTabulka(t)
-      setMapovani(odhadnoutMapovani(t.hlavicka))
-      setKrok('sloupce')
+      if (jeMaticovyFormat(t.hlavicka, t.radky)) {
+        setJeMatice(true)
+        setKrok('znacky')
+      } else {
+        setJeMatice(false)
+        setMapovani(odhadnoutMapovani(t.hlavicka))
+        setKrok('sloupce')
+      }
     } catch (e) {
       setChyba(
         e instanceof SouborNecitelny
@@ -81,6 +135,173 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
         setPlan(v.plan)
         setKrok('nahled')
       }
+    })
+  }
+
+  /* --- krok "značky" (jen maticový vstup) -------------------------- */
+
+  /** Které přípony (pobočky) je potřeba přiřadit — '' = buňky bez přípony. */
+  function potrebnePripony(bunky: BunkaMatice[]): string[] {
+    return [...new Set(bunky.map((b) => b.pripona ?? ''))].sort()
+  }
+
+  /** Dvojice (základ značky, id pobočky) pro každou buňku, podle aktuální `mapaPripon`. */
+  function dvojiceProBunky(bunky: BunkaMatice[]): { zaklad: string; branchId: string }[] {
+    return bunky.map((b) => ({ zaklad: b.zaklad, branchId: mapaPripon[b.pripona ?? ''] }))
+  }
+
+  /** Zeptá se Šablon směn (`nabidnoutSablony`), co appka o dvojicích (zaklad, pobočka) ví. */
+  async function zjistiCasyZnacek(
+    dvojice: { zaklad: string; branchId: string }[],
+  ): Promise<{
+    nalezene: Record<string, { od: string; do: string }>
+    chybejici: { zaklad: string; branchId: string; nazevPobocky: string }[]
+  }> {
+    const branchIds = [...new Set(dvojice.map((d) => d.branchId))]
+    const nabidkaPodlePobocky = new Map<string, NabidnutaSablona[]>()
+    for (const bid of branchIds) {
+      nabidkaPodlePobocky.set(bid, await nabidnoutSablony(rozsah, bid, null))
+    }
+    const nalezene: Record<string, { od: string; do: string }> = {}
+    const chybejici: { zaklad: string; branchId: string; nazevPobocky: string }[] = []
+    for (const { zaklad, branchId } of dvojice) {
+      const klicMapy = `${zaklad}|${branchId}`
+      if (nalezene[klicMapy] || chybejici.some((c) => `${c.zaklad}|${c.branchId}` === klicMapy)) continue
+      const nabidka = nabidkaPodlePobocky.get(branchId) ?? []
+      const nalezena = nabidka.find((s) => s.klic.toLowerCase() === zaklad.toLowerCase())
+      if (nalezena) {
+        nalezene[klicMapy] = { od: nalezena.od, do: nalezena.do }
+      } else {
+        chybejici.push({ zaklad, branchId, nazevPobocky: pobocky.find((p) => p.id === branchId)?.nazev ?? 'pobočka' })
+      }
+    }
+    return { nalezene, chybejici }
+  }
+
+  /** Poslední krok maticového vstupu: rozloží buňky do stejného tvaru, jaký čeká `sestavPlan`, a rovnou zeptá na náhled. */
+  async function dokoncitMatici(
+    bunky: BunkaMatice[],
+    dvojice: { zaklad: string; branchId: string }[],
+    casy: Record<string, { od: string; do: string }>,
+  ) {
+    const virtualniRadky: string[][] = []
+    const nedoplnene: string[] = []
+    bunky.forEach((b, i) => {
+      const branchId = dvojice[i].branchId
+      const nazevPobocky = pobocky.find((p) => p.id === branchId)?.nazev ?? ''
+      const datum = sestavDatum(rok, mesic, b.den)
+      const cas = casy[`${b.zaklad}|${branchId}`]
+      if (!datum) {
+        nedoplnene.push(`${b.jmeno}, den ${b.den}: v tomhle měsíci takový den není`)
+        return
+      }
+      if (!cas) {
+        nedoplnene.push(`${b.jmeno}, ${datum}: zkratka „${b.kodRaw}“ se nepodařilo přiřadit`)
+        return
+      }
+      virtualniRadky.push([b.jmeno, nazevPobocky, datum, cas.od, cas.do, b.zaklad])
+    })
+
+    if (virtualniRadky.length === 0) {
+      setChyba(
+        'Po rozpoznání značek nezůstal žádný řádek k nahrání.' +
+          (nedoplnene.length > 0 ? ' ' + nedoplnene.slice(0, 5).join('; ') : ''),
+      )
+      return
+    }
+
+    const mapovaniMatice: Mapovani = { jmeno: 0, pobocka: 1, datum: 2, zacatek: 3, konec: 4, kod: 5 }
+    setTabulka({ hlavicka: ['Jméno', 'Pobočka', 'Datum', 'Začátek', 'Konec', 'Kód'], radky: virtualniRadky })
+    setMapovani(mapovaniMatice)
+    setChybejiciZnacky(null)
+
+    const v = await pripravitNahled({ rozsah, radky: virtualniRadky, mapovani: mapovaniMatice, soubor: nazevSouboru })
+    if (v.stav === 'chyba') {
+      setChyba(nedoplnene.length > 0 ? `${v.text} (${nedoplnene.slice(0, 5).join('; ')})` : v.text)
+    } else if (v.stav === 'plan') {
+      setPlan(v.plan)
+      setKrok('nahled')
+      if (nedoplnene.length > 0) {
+        setChyba(`${nedoplnene.length} buněk se nepodařilo rozpoznat a chybí v plánu níž: ${nedoplnene.slice(0, 5).join('; ')}`)
+      }
+    }
+  }
+
+  /** Tlačítko "Ukázat, co se stane" v kroku "značky". */
+  function pokracovatZeZnacek() {
+    if (!tabulka) return
+    setChyba('')
+    setChybyVytvareni([])
+    const sloupce = sloupceJmen(tabulka.hlavicka)
+    const bunky = rozeberMatici(tabulka.radky, sloupce)
+    if (bunky.length === 0) {
+      setChyba('V souboru se nenašla žádná rozpoznatelná buňka se směnou — zkontrolujte, že první sloupec obsahuje den v měsíci (1–31).')
+      return
+    }
+    for (const p of potrebnePripony(bunky)) {
+      if (!mapaPripon[p]) {
+        setChyba(p === '' ? 'Vyberte pobočku pro buňky bez přípony (např. „X“ bez „-B“/„-P“).' : `Vyberte pobočku pro příponu „${p}“.`)
+        return
+      }
+    }
+    const dvojice = dvojiceProBunky(bunky)
+    spust(async () => {
+      const { nalezene, chybejici } = await zjistiCasyZnacek(dvojice)
+      if (chybejici.length === 0) {
+        await dokoncitMatici(bunky, dvojice, nalezene)
+        return
+      }
+      setChybejiciZnacky(chybejici)
+      setCasyZnacek((c) => {
+        const doplnene = { ...c, ...nalezene }
+        for (const ch of chybejici) {
+          const klicMapy = `${ch.zaklad}|${ch.branchId}`
+          if (!doplnene[klicMapy]) {
+            const navrh = VYCHOZI_CASY[ch.zaklad.toUpperCase()]
+            if (navrh) doplnene[klicMapy] = navrh
+          }
+        }
+        return doplnene
+      })
+    })
+  }
+
+  /** Tlačítko "Vytvořit značky a pokračovat" — jen když `chybejiciZnacky` není prázdné. */
+  function vytvoritZnackyAPokracovat() {
+    if (!tabulka || !chybejiciZnacky) return
+    setChybyVytvareni([])
+    spust(async () => {
+      const chyby: string[] = []
+      const nove: Record<string, { od: string; do: string }> = {}
+      for (const ch of chybejiciZnacky) {
+        const klicMapy = `${ch.zaklad}|${ch.branchId}`
+        const cas = casyZnacek[klicMapy]
+        if (!cas || !cas.od || !cas.do) {
+          chyby.push(`Zkratka „${ch.zaklad}“ (${ch.nazevPobocky}): vyplňte čas od–do.`)
+          continue
+        }
+        const vysledek = await vytvoritSablonu({
+          rozsah,
+          klic: ch.zaklad,
+          nazev: `${ch.zaklad} (z dovozu rozpisu)`,
+          pobocka: ch.branchId,
+          od: cas.od,
+          do: cas.do,
+        })
+        if (vysledek.stav === 'chyba') {
+          chyby.push(`Zkratka „${ch.zaklad}“ (${ch.nazevPobocky}): ${vysledek.text}`)
+        } else {
+          nove[klicMapy] = cas
+        }
+      }
+      if (chyby.length > 0) {
+        setChybyVytvareni(chyby)
+        return
+      }
+      const sloupce = sloupceJmen(tabulka.hlavicka)
+      const bunky = rozeberMatici(tabulka.radky, sloupce)
+      const dvojice = dvojiceProBunky(bunky)
+      await dokoncitMatici(bunky, dvojice, { ...casyZnacek, ...nove })
     })
   }
 
@@ -109,11 +330,16 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
     setHotovo(null)
     setChyba('')
     setNazevSouboru('')
+    setJeMatice(false)
+    setMapaPripon({})
+    setCasyZnacek({})
+    setChybejiciZnacky(null)
+    setChybyVytvareni([])
   }
 
   return (
     <div style={{ padding: '16px', paddingBottom: '32px' }}>
-      <Kroky krok={krok} />
+      <Kroky krok={krok} maticovy={jeMatice} />
 
       {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
 
@@ -235,6 +461,28 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
         </>
       ) : null}
 
+      {krok === 'znacky' && tabulka ? (
+        <ZnackyKrok
+          tabulka={tabulka}
+          nazevSouboru={nazevSouboru}
+          pobocky={pobocky}
+          rok={rok}
+          setRok={setRok}
+          mesic={mesic}
+          setMesic={setMesic}
+          mapaPripon={mapaPripon}
+          setMapaPripon={setMapaPripon}
+          chybejiciZnacky={chybejiciZnacky}
+          casyZnacek={casyZnacek}
+          setCasyZnacek={setCasyZnacek}
+          chybyVytvareni={chybyVytvareni}
+          ceka={ceka}
+          onPokracovat={pokracovatZeZnacek}
+          onVytvoritAPokracovat={vytvoritZnackyAPokracovat}
+          onJinySoubor={znovu}
+        />
+      ) : null}
+
       {krok === 'nahled' && plan ? (
         <>
           <div style={karta}>
@@ -330,14 +578,22 @@ export default function Pruvodce({ rozsah }: { rozsah: string }) {
 
 /* --- části obrazovky ---------------------------------------------- */
 
-const NAZVY_KROKU: { klic: Krok; nazev: string }[] = [
+const NAZVY_KROKU_PLOCHY: { klic: Krok; nazev: string }[] = [
   { klic: 'soubor', nazev: 'Soubor' },
   { klic: 'sloupce', nazev: 'Sloupce' },
   { klic: 'nahled', nazev: 'Náhled' },
   { klic: 'hotovo', nazev: 'Potvrzení' },
 ]
 
-function Kroky({ krok }: { krok: Krok }) {
+const NAZVY_KROKU_MATICE: { klic: Krok; nazev: string }[] = [
+  { klic: 'soubor', nazev: 'Soubor' },
+  { klic: 'znacky', nazev: 'Značky' },
+  { klic: 'nahled', nazev: 'Náhled' },
+  { klic: 'hotovo', nazev: 'Potvrzení' },
+]
+
+function Kroky({ krok, maticovy }: { krok: Krok; maticovy: boolean }) {
+  const NAZVY_KROKU = maticovy ? NAZVY_KROKU_MATICE : NAZVY_KROKU_PLOCHY
   const kde = NAZVY_KROKU.findIndex((k) => k.klic === krok)
   return (
     <ol
@@ -368,6 +624,204 @@ function Kroky({ krok }: { krok: Krok }) {
         </li>
       ))}
     </ol>
+  )
+}
+
+/**
+ * Krok "Značky" — jen pro maticový vstup (dny v řádcích, jména ve
+ * sloupcích). Měsíc/rok, komu patří která přípona (pobočka), a pro
+ * zkratky, které appka ještě nezná, návrh času k potvrzení.
+ */
+function ZnackyKrok({
+  tabulka,
+  nazevSouboru,
+  pobocky,
+  rok,
+  setRok,
+  mesic,
+  setMesic,
+  mapaPripon,
+  setMapaPripon,
+  chybejiciZnacky,
+  casyZnacek,
+  setCasyZnacek,
+  chybyVytvareni,
+  ceka,
+  onPokracovat,
+  onVytvoritAPokracovat,
+  onJinySoubor,
+}: {
+  tabulka: Tabulka
+  nazevSouboru: string
+  pobocky: { id: string; nazev: string }[]
+  rok: number
+  setRok: (r: number) => void
+  mesic: number
+  setMesic: (m: number) => void
+  mapaPripon: Record<string, string>
+  setMapaPripon: (f: (m: Record<string, string>) => Record<string, string>) => void
+  chybejiciZnacky: { zaklad: string; branchId: string; nazevPobocky: string }[] | null
+  casyZnacek: Record<string, { od: string; do: string }>
+  setCasyZnacek: (f: (c: Record<string, { od: string; do: string }>) => Record<string, { od: string; do: string }>) => void
+  chybyVytvareni: string[]
+  ceka: boolean
+  onPokracovat: () => void
+  onVytvoritAPokracovat: () => void
+  onJinySoubor: () => void
+}) {
+  const sloupce = sloupceJmen(tabulka.hlavicka)
+  const bunky = rozeberMatici(tabulka.radky, sloupce)
+  const { pripony } = distinctZnacky(bunky)
+  // '' = buňky bez přípony — potřebují "výchozí" pobočku stejně jako pojmenovaná přípona.
+  const potrebnePripony = [...new Set(bunky.map((b) => b.pripona ?? ''))].sort()
+
+  return (
+    <>
+      <div style={karta}>
+        <h2 style={nadpisKarty}>Rozpoznána tabulka s dny v řádcích a jmény ve sloupcích</h2>
+        <p style={popis}>
+          Soubor <strong>{nazevSouboru}</strong> — {sloupce.length}{' '}
+          {sloupce.length === 1 ? 'sloupec se jménem' : 'sloupců se jmény'}, {bunky.length}{' '}
+          {bunky.length === 1 ? 'buňka se směnou' : 'buněk se směnou'}. Appka tenhle tvar pozná
+          podle prvního sloupce — den v měsíci (1–31) — a zbylých sloupců se jmény lidí.
+        </p>
+
+        <div style={dvaSloupce}>
+          <label style={poleSvisle}>
+            <span style={{ fontWeight: 600 }}>Měsíc</span>
+            <select value={mesic} onChange={(e) => setMesic(Number(e.target.value))} style={vyber}>
+              {NAZVY_MESICU.map((n, i) => (
+                <option key={i} value={i + 1}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={poleSvisle}>
+            <span style={{ fontWeight: 600 }}>Rok</span>
+            <input
+              type="number"
+              value={rok}
+              onChange={(e) => setRok(Number(e.target.value))}
+              style={vyber}
+            />
+          </label>
+        </div>
+
+        {potrebnePripony.length > 0 ? (
+          <div style={{ marginTop: '4px' }}>
+            <p style={{ ...popis, margin: '0 0 8px' }}>
+              {pripony.length > 0
+                ? 'Komu patří která přípona ve značce (např. „-B" u „X-B"):'
+                : 'Buňky nemají příponu pobočky — vyberte, na kterou pobočku se mají nahrát:'}
+            </p>
+            <div style={{ display: 'grid', gap: '10px', maxWidth: '480px' }}>
+              {potrebnePripony.map((p) => (
+                <label key={p || '(bez přípony)'} style={radekPole}>
+                  <span style={{ fontWeight: 600 }}>{p ? `Přípona „${p}“` : 'Bez přípony'}</span>
+                  <select
+                    value={mapaPripon[p] ?? ''}
+                    onChange={(e) =>
+                      setMapaPripon((m) => ({ ...m, [p]: e.target.value }))
+                    }
+                    style={vyber}
+                  >
+                    <option value="">— vyberte pobočku —</option>
+                    {pobocky.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.nazev}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div style={karta}>
+        <h2 style={nadpisKarty}>Prvních pár řádků ze souboru</h2>
+        <Nahlizecka tabulka={tabulka} />
+      </div>
+
+      {chybejiciZnacky && chybejiciZnacky.length > 0 ? (
+        <div style={karta}>
+          <h2 style={nadpisKarty}>Appka nezná tyhle zkratky</h2>
+          <p style={popis}>
+            Nejsou v Šablonách směn na dané pobočce ani pro celou firmu. Appka
+            navrhne čas u těch, co pozná (R = ranní, O = odpolední, X = celá) —
+            u ostatních vyplňte čas sami. Uloží se do Šablon směn, kde je
+            kdykoli upravíte — a tímhle dovozem založené směny se dají po
+            úpravě přepsat tlačítkem „Přepsat časy do nevydaných směn“.
+          </p>
+          <div style={{ display: 'grid', gap: '10px' }}>
+            {chybejiciZnacky.map((ch) => {
+              const klicMapy = `${ch.zaklad}|${ch.branchId}`
+              const cas = casyZnacek[klicMapy] ?? { od: '', do: '' }
+              return (
+                <div key={klicMapy} style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 600, minWidth: '160px' }}>
+                    „{ch.zaklad}“ — {ch.nazevPobocky}
+                  </span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
+                    od
+                    <input
+                      type="time"
+                      value={cas.od}
+                      onChange={(e) =>
+                        setCasyZnacek((c) => ({ ...c, [klicMapy]: { od: e.target.value, do: c[klicMapy]?.do ?? '' } }))
+                      }
+                      style={{ ...vyber, width: 'auto' }}
+                    />
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}>
+                    do
+                    <input
+                      type="time"
+                      value={cas.do}
+                      onChange={(e) =>
+                        setCasyZnacek((c) => ({ ...c, [klicMapy]: { od: c[klicMapy]?.od ?? '', do: e.target.value } }))
+                      }
+                      style={{ ...vyber, width: 'auto' }}
+                    />
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+          {chybyVytvareni.length > 0 ? (
+            <ul style={{ margin: '12px 0 0', paddingLeft: '18px', fontSize: '13px', color: 'var(--bad)' }}>
+              {chybyVytvareni.map((c, i) => (
+                <li key={i}>{c}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '14px' }}>
+            <button type="button" className="ft-tl ft-tl-hlavni" onClick={onVytvoritAPokracovat} disabled={ceka}>
+              {ceka ? 'Ukládám…' : 'Vytvořit značky a pokračovat'}
+            </button>
+            <button type="button" className="ft-tl ft-tl-vedlejsi" onClick={onJinySoubor}>
+              Jiný soubor
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="ft-tl ft-tl-hlavni"
+            onClick={onPokracovat}
+            disabled={ceka || bunky.length === 0}
+          >
+            {ceka ? 'Počítám…' : 'Ukázat, co se stane'}
+          </button>
+          <button type="button" className="ft-tl ft-tl-vedlejsi" onClick={onJinySoubor}>
+            Jiný soubor
+          </button>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -497,6 +951,20 @@ const radekPole = {
   gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 220px)',
   gap: '12px',
   alignItems: 'center',
+  fontSize: '14px',
+} as const
+
+const dvaSloupce = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: '12px',
+  maxWidth: '420px',
+  marginBottom: '4px',
+} as const
+
+const poleSvisle = {
+  display: 'grid',
+  gap: '6px',
   fontSize: '14px',
 } as const
 
