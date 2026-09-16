@@ -1,0 +1,231 @@
+# Komunikace / Notifikace — COMMUNICATION CURRENT STATE MAP
+
+17. 9. 2026, v noci. Etapa A (audit) podle nočního zadání „FOODTAB —
+KOMUNIKACE, VZKAZY A NOTIFIKAČNÍ CENTRUM". Účel: než se začne psát
+nový kód, vědět přesně, co už existuje — zadání samo to žádá jako
+první krok ("Nejdříve vytvoř krátký COMMUNICATION CURRENT STATE MAP").
+
+**Zjištění číslo jedna: tohle NENÍ zelená louka.** Modul Komunikace byl
+zadaný a z velké části postavený 3.–7. 9. 2026
+(`docs/komunikace-zadani.md`, `docs/nocni-prace-komunikace-2026-09-05.md`)
+a rozšířen o upozornění na směny 13. 9. 2026
+(`docs/velka-prace-2026-09-08.md`). Většina toho, co noční zadání
+popisuje jako cíl, už běží v produkci.
+
+---
+
+## 1. Co existuje a funguje
+
+### Konverzace (chat, ne nástěnka)
+
+`supabase/migrations/20260903100000_komunikace_zaklad.sql`,
+`20260906010000_doruceni_po_pichnuti.sql`.
+
+- **`konverzace`** (`osobni` / `pobocka` / `mezi_pobockami` / `vedeni`),
+  **`konverzace_ucastnici`** (`precteno_do` — vidí jen vlastník řádku),
+  **`konverzace_zpravy`** (`nalehava boolean`, storno místo mazání).
+- **RLS: účastnictví je autorizace**, ne oprávnění. `app.je_ucastnik()` —
+  ani majitel firmy nepřečte cizí rozhovor. Ověřeno zápornou kontrolou
+  v `supabase/tests/krok*_scenar.sql` (modul komunikace má vlastní sadu).
+- **Jediná cesta zápisu jsou průzory** (`zalozit_rozhovor`,
+  `poslat_zpravu`, `oznacit_precteno`, `stornovat_zpravu`) — přímý
+  insert na tabulky je `revoke`d.
+- **Audit BEZ obsahu zprávy** (`app.audit_zpravy()` — `to_jsonb(new) -
+  'text'`). Cestou se našla a opravila skutečná díra: obecná
+  `app.audit_zmenu` zapisovala celý řádek včetně textu a majitel
+  s `settings.manage` si tak mohl přečíst stížnost na sebe přes audit,
+  i když RLS na `konverzace` mu ji právem odmítala.
+
+### Doručení podle píchnutí (= "zadržené doručení" ze zadání)
+
+`app.doruci_se(p_na_smene, p_konv_branch, p_nalehava)` — **jediné
+místo**, kde je pravidlo "vzkazy přijdou až po píchnutí" zapsané.
+`app.smena_ted()` bere pobočku z **otevřeného příchodu**
+(`app.otevreny_prichod`), ne z "je přihlášený". Naléhavá zpráva
+(`communication.urgent`) pravidlo obchází a jde rovnou do auditu se
+jménem odesílatele — text zprávy do auditu nejde, jen počet znaků.
+
+**Právní odůvodnění je zapsané přímo v migraci** (§ 78 ZP, judikatura
+SDEU o pohotovosti vs. pracovní době) — tohle není náhodou vzniklé
+škrtnutí funkce, je to podložené rozhodnutí.
+
+`public.moje_rozhovory()` vrací pro každou konverzaci `neprectenych`
+(kolik čeká) a `ceka` (kolik z toho ještě čeká na píchnutí — rozdíl je
+to, co se smí ukázat). `public.ceka_na_me()` dává dvě souhrnná čísla
+pro odznak — bezpečné i pro sdílený tablet, protože nesou jen počty,
+ne obsah.
+
+### "Napsat vedení"
+
+`zalozit_rozhovor(p_druh := 'vedeni', p_adresat := 'vedouci' | 'majitel')`.
+**Účastníci se u tohohle druhu NEPŘEDÁVAJÍ z prohlížeče — odvozují se
+na serveru** z `role_permissions`/`is_owner`. `majitel` vidí jen
+majitelé, `vedouci` jen ten, kdo má `people.manage` na domovské
+pobočce odesílatele. Přesně to, co zadání žádá ("Zpráva nesmí být
+automaticky dostupná vedoucímu pobočky, pokud podle permission modelu
+nemá být příjemcem").
+
+Otevřená otázka zapsaná přímo v migraci (ne zapomenutá, jen
+nerozhodnutá): u člověka na dvou pobočkách se "vedoucí" bere z domovské
+pobočky, ne z té, kde zrovna je.
+
+### Priorita zpráv
+
+Dnes **binární** (`nalehava boolean`), ne třístupňová
+(NORMAL/IMPORTANT/URGENT ze zadání). `communication.urgent` je
+samostatné právo (ne `communication.manage`) — posílat nástěnku a
+budit lidi ve dvě ráno jsou dvě různé pravomoci.
+
+### Notifikační centrum (existuje, jmenuje se "Upozornění")
+
+`app/[rozsah]/upozorneni/page.tsx` + tabulka `public.notifications`
+(`20260901130000_vydani_rozpisu.sql`). RLS: každý vidí jen svoje —
+ani majitel cizí (dozvěděl by se, kdo kdy dělá).
+
+**Event-driven, ale bez formálního event-logu** — zápis do
+`notifications` běží přímo v triggerech/průzorech nad zdrojovou
+tabulkou, ne přes samostatnou frontu/outbox:
+
+| Zdroj | Kde | Druhy |
+|---|---|---|
+| Směny | `app.upozornit_smenu()`, volané z `ulozit_smenu`/`smazat_smenu` | `smena.nova`, `smena.zmenena`, `smena.odebrana`, `smena.zrusena` |
+| Nástěnka | trigger `upozornit_na_oznameni` na `announcements` | `oznameni.nova` |
+| Vzkazy | trigger `upozornit_na_vzkaz` na `konverzace_zpravy` | `vzkaz.novy` |
+| Marketing | (jinde v repu) | `marketing.zadost`, `marketing.publikace_selhala`, … |
+| Docházka | (jinde) | `dochazka.zapomenuty_odchod` |
+| Lidé/PIN/pozvánky | (jinde) | `pozvanka.prijata`, `opravneni.prideleno`, `pin.prenastaven` |
+
+Tohle **pokrývá většinu katalogu událostí ze zadání (SHIFT_CHANGED,
+SHIFT_CANCELLED, URGENT_MESSAGE per naléhavost, DIRECT_MESSAGE,
+BRANCH_ANNOUNCEMENT, MARKETING_APPROVAL_REQUIRED, PUBLISHING_FAILED)
+— jen ne jako jmenovaný `enum`, ale jako řetězec `druh`.**
+TASK_ASSIGNED/TASK_CHANGED/TASK_DUE_SOON/CHECKLIST_REQUIRED,
+APPROVAL_REQUIRED, INVOICE_REVIEW_REQUIRED, INVOICE_OVERDUE —
+**neověřeno, jestli píšou do `notifications`** (mimo rozsah dnešního
+auditu, dopsat příště).
+
+**Slučování (dedup/coalescing) už existuje** — přesně to, co zadání
+žádá v bodě 36 ("nevytvářej notification spam"): `app.upozornit_smenu`
+smaže nepřečtené téhož `(user_id, druh, den)` a nahradí novým. Osm
+změn jednoho dne → jedno upozornění.
+
+**Obrazovka `/upozorneni`** už umí: nepřečtené vs. přečtené vizuálně
+odlišené, "označit všechny za přečtené", **hluboký odkaz na konkrétní
+objekt** (přesně požadavek zadání "Notification musí linkovat přímo na
+konkrétní objekt") — tlačítka jako "Doplnit odchod", "Přidělit
+oprávnění", "Otevřít frontu ke schválení" vedou rovnou na
+předvyplněné místo, ne obecně na modul.
+
+**Zvoneček v `GlobalTopbar.tsx`** ukazuje počet nepřečtených (`9+` při
+přetečení) — ale odkazuje na celou stránku `/upozorneni`, ne na
+vysouvací panel/dropdown, jak zadání navrhuje v bodě 15.
+
+### Potvrzení důležité změny (acknowledgement)
+
+Existuje, ale **jen pro nástěnku**, ne pro upozornění obecně:
+`announcements.requires_acknowledgment` + `public.kdo_nepotvrdil()`
+(`20260913120000`, `20260913130000`). Notifikace (`public.notifications`)
+mají jen `read_at` — **žádné `acknowledged_at`**. Zadání (bod 12)
+chce SENT/DELIVERED/READ/ACKNOWLEDGED explicitně i pro **změnu
+směny** ("[Potvrdit změnu]") — tohle dnes NEEXISTUJE.
+
+### Vzkazy — UX
+
+`app/[rozsah]/vzkazy/` — `page.tsx` (seznam rozhovorů +
+`SeznamRozhovoru`), `[konverzace]/page.tsx` (vlákno), `nastenka.tsx`
+(druhá záložka), `akce.ts`. Desktop split-view (`.ds-vzkazy-split`,
+seznam vlevo ~320–360px / vlákno vpravo nad 900px, jedno z obou pod
+900px podle adresy) — **přesně odpovídá požadavku zadání bodu 16**,
+postavené v tomhle repu 16.9.2026 (redesign druhého kola). Filtry
+Vše/Nepřečtené/Přímé/Pobočky/Vedení — **odpovídá bodu 16 doslova**.
+
+---
+
+## 2. Co je opravdu jinak, než zadání navrhuje (vědomé rozhodnutí, ne díra)
+
+- **Quiet hours jsou vázané na směnu, ne na hodiny na hodinách.**
+  Zadání (bod 25) navrhuje `22:00–07:00`. Tenhle modul místo toho váže
+  doručení na **skutečnou přítomnost v práci** (`app.smena_ted`) — cílenější
+  a právně podloženější (viz výš), ale nepokrývá case "člověk má
+  směnu v 23:00" (tam by klasické quiet hours zprávu schovaly, tohle
+  ji naopak doručí, protože je na směně). **Rozhodnutí pro Šéfíka**,
+  jestli má vedle tohohle vzniknout i klasické hodinové okno, nebo
+  jestli tohle řešení stačí.
+- **Notifikační centrum je celá stránka, ne dropdown panel z
+  zvonečku.** Funkčně rovnocenné, vizuálně jiné, než ukazuje mockup
+  v zadání (bod 15).
+- **Žádný formální event-log/outbox** (zadání bod 9, 29). Zápis běží
+  v téže transakci jako zdrojová událost (`security definer` funkce/
+  trigger) — to je ve skutečnosti SILNĚJŠÍ záruka doručení než
+  outbox s async zpracováním (nemůže se "ztratit mezi update a
+  notifikací", protože je to jeden příkaz), ale není to
+  znovu-přehratelný log a nepodporuje retry/idempotency pro EXTERNÍ
+  kanály (protože žádný externí kanál zatím není, viz níž).
+
+---
+
+## 3. Co opravdu chybí
+
+1. **Třístupňová priorita (NORMAL/IMPORTANT/URGENT).** Dnes jen
+   `nalehava boolean` u zpráv a žádná priorita u `notifications`
+   vůbec. Zadání to chce jako řídicí prvek doručení, ne jen barvu.
+2. **Konfigurovatelná naléhavost změny směny podle blízkosti data**
+   (zadání bod 10: "Nevymýšlej časovou hranici naslepo... navrhni ji
+   jako konfigurovatelné business pravidlo"). Dnes všechny `smena.*`
+   notifikace mají stejnou váhu bez ohledu na to, jestli je změna za
+   hodinu nebo za tři týdny.
+3. **Acknowledgement (potvrzení) u změny směny.** Existuje jen pro
+   nástěnku. Zadání to chce explicitně i pro `smena.zmenena`/
+   `smena.zrusena` s "[Potvrdit]" tlačítkem a přehledem, kdo potvrdil.
+4. **Uživatelské nastavení upozornění** (zadání bod 24) — žádná
+   obrazovka, kde by si člověk zapnul/vypnul kategorie (Přímé zprávy,
+   Změny mých směn — to poslední navíc podle zadání NESMÍ jít vypnout).
+5. **Hlasové zprávy + AI přepis** (body 19–21) — neexistuje vůbec.
+   Composer ve vzkazech dnes umí jen text.
+6. **E-mailový kanál pro upozornění** (Resend je v projektu nastavený
+   pro jiné účely — pozvánky, kód pro přihlášení — ale žádné
+   upozornění z `notifications` dnes e-mail neposílá).
+7. **Notifikační centrum jako vysouvací panel** místo celé stránky
+   (kosmetický rozdíl proti mockupu, ne funkční mezera).
+8. **Neověřeno** (mimo rozsah tohoto auditu): jestli Úkoly/Checklisty/
+   Faktury/Schvalování zapisují do `notifications` u všech událostí,
+   které zadání jmenuje (TASK_ASSIGNED, CHECKLIST_REQUIRED,
+   APPROVAL_REQUIRED, INVOICE_REVIEW_REQUIRED, INVOICE_OVERDUE) — bod
+   pro další průchod.
+
+---
+
+## 4. Doporučené pořadí zbývající práce
+
+Zadání samo (bod 37) navrhuje Etapy A–I. Na základě týhle mapy:
+
+1. **Acknowledgement pro změnu směny** (bod 3 výš) — nejmenší, nejjasněji
+   zadaný kus, staví na existujícím vzoru (`requires_acknowledgment`/
+   `kdo_nepotvrdil`), přidává `acknowledged_at` na `notifications` a
+   tlačítko "Potvrdit" na `/upozorneni`. P0 podle zadání (bod 10).
+2. **Třístupňová priorita** — rozšířit `nalehava boolean` na `priorita
+   text check (in 'normal','important','urgent')` (migrace, ne
+   přepis) a promítnout do `app.doruci_se`. Dotýká se víc míst,
+   větší, ale pořád izolovaný kus.
+3. **Konfigurovatelná časová hranice naléhavosti u směn** — vyžaduje
+   rozhodnutí Šéfíka o výchozí hodnotě (hodiny do směny), ne jen kód.
+4. **Uživatelské nastavení upozornění** — nová obrazovka +
+   tabulka/sloupce pro preference, s tím, že "Změny mých směn" musí
+   zůstat nevypnutelné (zadání to říká výslovně).
+5. **Hlasové zprávy** — největší samostatný blok (nahrávání, storage,
+   AI přepis pipeline), vlastní etapa.
+6. **E-mailový kanál** — navazuje na 1–3, potřebuje rozhodnutí, které
+   `druh` upozornění si e-mail zaslouží.
+
+Etapy 7–8 (bod 8 výš, ověření pokrytí Úkolů/Faktur) můžou proběhnout
+kdykoli mezi ostatním jako rychlá kontrola, ne implementace.
+
+---
+
+## 5. Co se NEDĚLÁ bez dalšího zadání
+
+Podle bezpečnostní brány nočního zadání (bod 41): žádný merge do
+`main`, žádný `supabase db push`, žádné produkční tajemství/proměnné,
+žádná externí aktivace SMS/e-mailu se skutečnými uživateli — tahle
+mapa a navazující implementace zůstávají na samostatné větvi, dokud
+Šéfík výslovně nepotvrdí.
