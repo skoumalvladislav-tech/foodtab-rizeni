@@ -199,10 +199,21 @@ Vše/Nepřečtené/Přímé/Pobočky/Vedení — **odpovídá bodu 16 doslova**.
 
 Zadání samo (bod 37) navrhuje Etapy A–I. Na základě týhle mapy:
 
-1. **Acknowledgement pro změnu směny** (bod 3 výš) — nejmenší, nejjasněji
-   zadaný kus, staví na existujícím vzoru (`requires_acknowledgment`/
-   `kdo_nepotvrdil`), přidává `acknowledged_at` na `notifications` a
-   tlačítko "Potvrdit" na `/upozorneni`. P0 podle zadání (bod 10).
+1. ~~Acknowledgement pro změnu směny~~ — **HOTOVO, NENASAZENO
+   17.9.2026 v noci.** Migrace `20260917010000_potvrzeni_zmeny_smeny.sql`
+   (`notifications.acknowledged_at`), pravidlo "který druh vyžaduje
+   potvrzení" na jednom místě (`lib/upozorneni-text.ts`,
+   `vyzadujePotvrzeni` — jen `smena.zmenena`/`smena.zrusena`), tlačítko
+   "Potvrdit" na `/upozorneni`, degraduje gracefully dokud migrace
+   nedoběhne. Ověřeno CI proti čisté databázi ([draft PR #24](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/24),
+   `VŠECHNY KONTROLY PROŠLY`, 1302 kontrol) — **PR zůstává draft,
+   nemerguje se bez schválení Šéfíka** (bod 41 zadání).
+   **Vědomě nehotové:** pohled VEDOUCÍHO "kdo potvrdil" (zadání bod
+   12 — "Anna ✓ potvrzeno 18:42, Petr čeká, Karel nedoručeno").
+   `notifications` dnes nemá `shift_id`, jen `telo->>'den'` (datum),
+   takže nejde spolehlivě dohledat "kdo všechno má potvrdit TUHLE
+   konkrétní směnu" napříč lidmi — jen zaměstnanec vidí a potvrzuje
+   svoje vlastní řádky. Přidat `shift_id` je samostatný krok.
 2. **Třístupňová priorita** — rozšířit `nalehava boolean` na `priorita
    text check (in 'normal','important','urgent')` (migrace, ne
    přepis) a promítnout do `app.doruci_se`. Dotýká se víc míst,
