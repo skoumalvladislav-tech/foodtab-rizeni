@@ -744,9 +744,13 @@ select:focus-visible {
 }
 
 /* Malá varianta je rozměr, ne čtvrtý vzhled — barvy si nese dál z těch
-   tří. Používá se v seznamech, kde plné tlačítko rozhodí řádkování. */
+   tří. Používá se v seznamech, kde plné tlačítko rozhodí řádkování.
+   38 px drží spodní hranici UX redesignu (oddíl 9: 38–42) — jen tahle
+   varianta, ne .ft-tl. Základní tlačítko zůstává na 44 px schválně:
+   je to dotykový cíl na tabletu v provozu, mokrýma rukama, a to platí
+   napříč rozměry bez ohledu na obecné desktopové doporučení. */
 .ft-tl-male {
-  padding: 8px 14px; min-height: 36px; font-size: 13px; border-radius: 8px;
+  padding: 8px 14px; min-height: 38px; font-size: 13px; border-radius: 8px;
 }
 
 .ft-tl-hlavni {
