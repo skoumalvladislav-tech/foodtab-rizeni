@@ -203,18 +203,6 @@ function vyrez(css, od, doo) {
   return css.slice(a, b < 0 ? css.length : b);
 }
 
-function ctiRail(css, klic, tmavy) {
-  const cast = css.slice(css.indexOf('Klíč barvy z branches.color'));
-  const hlava = (tmavy ? ':root[data-theme="dark"] ' : '') + '[data-branch="' + klic + '"]';
-  const radky = cast.split('\n');
-  for (let i = 0; i < radky.length; i++) {
-    if (!radky[i].startsWith(hlava)) continue;
-    const kus = radky.slice(i, i + (tmavy ? 1 : 3)).join('\n');
-    return ['rail', 'rail-2', 'rail-tlum'].map((n) => ctiToken(kus, n));
-  }
-  return null;
-}
-
 /**
  * Kterým tokenem je obarvený obrys vyhledávacího pole.
  *
@@ -285,23 +273,29 @@ function main() {
   const globals = fs.readFileSync(GLOBALS, 'utf8');
   const obrysToken = ctiObrysHledani(globals);
 
-  /**
-   * Hodnota obrysu pro daný klíč. Tokeny rail, rail-2 a rail-tlum se mění
-   * po klíčích, ostatní se čtou ze základu.
-   */
-  const obrysBarva = (klic, tmavy, blok) => {
-    if (!obrysToken) return null;
-    const rail = ctiRail(css, klic, tmavy);
-    if (!rail) return null;
-    const poKlicich = { rail: rail[0], 'rail-2': rail[1], 'rail-tlum': rail[2] };
-    return poKlicich[obrysToken] ?? ctiToken(blok, obrysToken);
-  };
-
   const bloky = {
     svetlo: vyrez(css, ':root {', '@media (prefers-color-scheme: dark)'),
     tma: vyrez(css, ':root[data-theme="dark"] {', '/* ---'),
   };
+
+  /*
+   * Boční sloupec (--rail/--rail-2/--rail-ink/--rail-tlum) je od UX
+   * redesignu 16.9.2026 JEDNOTNÁ grafitová barva — nemění se ani podle
+   * pobočky, ani podle světlého/tmavého režimu appky (sloupec byl
+   * tmavý vždycky). Čte se proto jednou ze základního :root bloku, ne
+   * po klíčích a ne zvlášť pro „tma".
+   */
   const railInk = ctiToken(bloky.svetlo, 'rail-ink');
+  const rail = ctiToken(bloky.svetlo, 'rail');
+  const rail2 = ctiToken(bloky.svetlo, 'rail-2');
+  const railTlum = ctiToken(bloky.svetlo, 'rail-tlum');
+
+  /** Hodnota obrysu vyhledávacího pole — čte se ze stejného konstantního základu. */
+  const obrysBarva = () => {
+    if (!obrysToken) return null;
+    const poJmenu = { rail, 'rail-2': rail2, 'rail-tlum': railTlum };
+    return poJmenu[obrysToken] ?? ctiToken(bloky.svetlo, obrysToken);
+  };
 
   const zavady = [];
   let overeno = 0;
@@ -378,51 +372,59 @@ function main() {
 
     console.log('  tlačítka: ' + (overeno - predTlacitky) + ' dvojic ve třech vzhledech');
 
-    // devět klíčů rozsahu
-    const hlavicka = ['klíč     ', 'ink/rail', 'ink/r-2', 'tlum/r', 'tlum/r-2', 'mosaz', 'br/pap', 'ink/fill', 'fill/pap', 'br/soft', 'obrys/r', 'obrys/r2'];
+    /*
+     * Boční sloupec — jednou za appku, ne za klíč pobočky (viz komentář
+     * u rail/rail2/railTlum výš). ΔE-matice distinktnosti mezi lištami
+     * odpadla úplně: lišta je teď jedna barva pro všechny, není co
+     * rozlišovat.
+     */
+    zkus('rail-ink vs rail', railInk, rail, 4.5);
+    zkus('rail-ink vs rail-2', railInk, rail2, 4.5);
+    zkus('rail-tlum vs rail', railTlum, rail, 4.5);
+    zkus('rail-tlum vs rail-2', railTlum, rail2, 4.5);
+    zkus('mosaz-sv vs rail-2', t('mosaz-sv'), rail2, 3.0);
+    // Obrys vyhledávacího pole. Hranice ovládacího prvku podle WCAG
+    // 1.4.11 — musí být vidět proti liště za polem i proti vlastní
+    // výplni pole. Barva se bere ta, kterou obrys v globals.css
+    // opravdu má, ne napevno zvolená: právě záměna obrysu za barvu
+    // výplně byla ta chyba, kterou to má hlídat.
+    zkus('obrys hledání vs lišta', obrysBarva(), rail, 3.0);
+    zkus('obrys hledání vs výplň pole', obrysBarva(), rail2, 3.0);
+
+    // devět klíčů pobočky — jen přízvuk (--branch/-fill/-soft), sloupec už mezi ně nepatří
+    const hlavicka = ['klíč     ', 'br/pap', 'ink/fill', 'fill/pap', 'br/soft'];
     console.log('\n  ' + hlavicka.map((h, i) => (i ? h.padStart(9) : h)).join(''));
 
     for (const k of KLICE) {
-      const rail = ctiRail(css, k, rezim === 'tma');
-      if (!rail) { zavady.push('nenalezen blok ' + k); continue; }
-      const [r1, r2, tlum] = rail;
       const br = ctiToken(blok, 'b-' + k);
       const fill = ctiToken(blok, 'b-' + k + '-fill');
       const soft = ctiToken(blok, 'b-' + k + '-soft');
       const hodnoty = [
-        zkus(k + ' rail-ink/rail', railInk, r1, 4.5),
-        zkus(k + ' rail-ink/rail-2', railInk, r2, 4.5),
-        zkus(k + ' tlum/rail', tlum, r1, 4.5),
-        zkus(k + ' tlum/rail-2', tlum, r2, 4.5),
-        zkus(k + ' mosaz-sv vs rail-2', t('mosaz-sv'), r2, 3.0),
         zkus(k + ' branch/paper', br, t('paper'), 4.5),
         zkus(k + ' branch-ink/fill', t('branch-ink'), fill, 4.5),
         zkus(k + ' fill vs paper', fill, t('paper'), 3.0),
         zkus(k + ' branch/soft', br, soft, 4.5),
-        // Obrys vyhledávacího pole. Hranice ovládacího prvku podle WCAG
-        // 1.4.11 — musí být vidět proti liště za polem i proti vlastní
-        // výplni pole. Barva se bere ta, kterou obrys v globals.css
-        // opravdu má, ne napevno zvolená: právě záměna obrysu za barvu
-        // výplně byla ta chyba, kterou to má hlídat.
-        zkus(k + ' obrys hledání vs lišta', obrysBarva(k, rezim === 'tma', blok), r1, 3.0),
-        zkus(k + ' obrys hledání vs výplň pole', obrysBarva(k, rezim === 'tma', blok), r2, 3.0),
       ];
       console.log('  ' + k.padEnd(9) + hodnoty.map((v) => (v === null ? '—' : v.toFixed(2)).padStart(9)).join(''));
     }
 
-    // matice ΔE mezi lištami
+    // ΔE distinktnosti mezi barvami POBOČEK (--branch) zůstává — tahle
+    // matice dřív měřila --rail (ten teď mezi pobočkami nerozlišuje,
+    // viz komentář výš), ale smysl kontroly — pozná uživatel pobočky
+    // od sebe? — platí pro --branch stejně, protože ten se v appce dál
+    // používá na odznaky, tečky a přízvuky podle pobočky.
     const mez = MEZ_DE[rezim];
     let nej = Infinity;
     let nejDvojice = null;
-    console.log('\n  ΔE2000 mezi --rail (hranice ' + mez + '):');
+    console.log('\n  ΔE2000 mezi --branch (hranice ' + mez + '):');
     console.log('  ' + 'klíč     ' + KLICE.map((k) => k.slice(0, 4).padStart(7)).join(''));
     for (const a of KLICE) {
       const radek = KLICE.map((b) => {
         if (a === b) return '      ·';
-        const ra = ctiRail(css, a, rezim === 'tma');
-        const rb = ctiRail(css, b, rezim === 'tma');
-        if (!ra || !rb) return '      ?';
-        const d = de(ra[0], rb[0]);
+        const ba = ctiToken(blok, 'b-' + a);
+        const bb = ctiToken(blok, 'b-' + b);
+        if (!ba || !bb) return '      ?';
+        const d = de(ba, bb);
         if (d < nej) { nej = d; nejDvojice = a + '/' + b; }
         return d.toFixed(1).padStart(7);
       });

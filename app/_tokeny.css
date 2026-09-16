@@ -93,12 +93,18 @@
   --vlozka-dole:   env(safe-area-inset-bottom, 0px);
   --vlozka-vlevo:  env(safe-area-inset-left, 0px);
 
-  /* Barva rozsahu — tmavá plocha horní lišty a bočního sloupce.
-     Výchozí je firemní odstín; klíč pobočky ho přepíše níž. */
-  --rail:      #15241e;
-  --rail-2:    #233931;
-  --rail-ink:  #f1ece0;
-  --rail-tlum: #87ab9f;
+  /* Barva bočního sloupce — jednotná grafitová, NE podle pobočky.
+     UX redesign 16.9.2026 (oddíl 4 a 39: „sidebar nesmí být plný
+     barev"). Dřív se lišila podle branches.color — barva pobočky
+     zůstává jako přízvuk jinde (--branch/--branch-fill/--branch-soft,
+     beze změny), jen sloupec/lišta samy jsou teď pořád stejné, ať
+     appka vypadá jako jeden ucelený produkt bez ohledu na to, na
+     které pobočce zrovna stojíte. Nemění se podle světlého/tmavého
+     režimu — sloupec byl tmavý vždycky. */
+  --rail:      #1b1f23;
+  --rail-2:    #262b30;
+  --rail-ink:  #f1f2f3;
+  --rail-tlum: #9099a1;
 
   /* Mosaz je přízvuk celého rozhraní: odkazy, nadpisky sekcí, zaměření.
      Barva pobočky se na papírové ploše drží --branch-*, ne --accent —
@@ -228,39 +234,30 @@
    Do databáze se "firma" nikdy neukládá; slate zůstává pobočkám.
    ------------------------------------------------------------------ */
 [data-branch="firma"]    {
-  --rail: #15241e; --rail-2: #233931; --rail-tlum: #87ab9f;
   --branch: var(--b-firma); --branch-fill: var(--b-firma-fill); --branch-soft: var(--b-firma-soft);
 }
 [data-branch="slate"]    {
-  --rail: #141724; --rail-2: #22273a; --rail-tlum: #8d94b0;
   --branch: var(--b-slate); --branch-fill: var(--b-slate-fill); --branch-soft: var(--b-slate-soft);
 }
 [data-branch="indigo"]   {
-  --rail: #171763; --rail-2: #24247a; --rail-tlum: #9c9cba;
   --branch: var(--b-indigo); --branch-fill: var(--b-indigo-fill); --branch-soft: var(--b-indigo-soft);
 }
 [data-branch="violet"]   {
-  --rail: #4d2c4d; --rail-2: #613b61; --rail-tlum: #cdb7cc;
   --branch: var(--b-violet); --branch-fill: var(--b-violet-fill); --branch-soft: var(--b-violet-soft);
 }
 [data-branch="sky"]      {
-  --rail: #1d465e; --rail-2: #2a5974; --rail-tlum: #c6d1d7;
   --branch: var(--b-sky); --branch-fill: var(--b-sky-fill); --branch-soft: var(--b-sky-soft);
 }
 [data-branch="teal"]     {
-  --rail: #17524e; --rail-2: #246965; --rail-tlum: #d5e2e1;
   --branch: var(--b-teal); --branch-fill: var(--b-teal-fill); --branch-soft: var(--b-teal-soft);
 }
 [data-branch="emerald"]  {
-  --rail: #2b4e20; --rail-2: #3a642e; --rail-tlum: #cfdbcc;
   --branch: var(--b-emerald); --branch-fill: var(--b-emerald-fill); --branch-soft: var(--b-emerald-soft);
 }
 [data-branch="amber"]    {
-  --rail: #443419; --rail-2: #5a4726; --rail-tlum: #c9c0b1;
   --branch: var(--b-amber); --branch-fill: var(--b-amber-fill); --branch-soft: var(--b-amber-soft);
 }
 [data-branch="rose"]     {
-  --rail: #311212; --rail-2: #481f1f; --rail-tlum: #b29090;
   --branch: var(--b-rose); --branch-fill: var(--b-rose-fill); --branch-soft: var(--b-rose-soft);
 }
 
@@ -291,29 +288,10 @@
 [data-osoba="amber"]   { --osoba: var(--b-amber); }
 [data-osoba="rose"]    { --osoba: var(--b-rose); }
 
-/* Tmavý režim mění jen plochu lišty a sloupce. --branch-* se tu
-   nepřepisují: hodnoty --b-* se vyměnily už v základu výš. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) [data-branch="firma"]    { --rail: #091611; --rail-2: #132921; --rail-tlum: #7a9f91; }
-  :root:not([data-theme="light"]) [data-branch="slate"]    { --rail: #0a0c1d; --rail-2: #131730; --rail-tlum: #8084a3; }
-  :root:not([data-theme="light"]) [data-branch="indigo"]   { --rail: #0b0b4c; --rail-2: #131360; --rail-tlum: #8989a9; }
-  :root:not([data-theme="light"]) [data-branch="violet"]   { --rail: #381d38; --rail-2: #482948; --rail-tlum: #b69ab6; }
-  :root:not([data-theme="light"]) [data-branch="sky"]      { --rail: #103246; --rail-2: #19415a; --rail-tlum: #a0b0ba; }
-  :root:not([data-theme="light"]) [data-branch="teal"]     { --rail: #153f3c; --rail-2: #1f514d; --rail-tlum: #acc3c1; }
-  :root:not([data-theme="light"]) [data-branch="emerald"]  { --rail: #182f0d; --rail-2: #254216; --rail-tlum: #9cb092; }
-  :root:not([data-theme="light"]) [data-branch="amber"]    { --rail: #2c210d; --rail-2: #403015; --rail-tlum: #aba08c; }
-  :root:not([data-theme="light"]) [data-branch="rose"]     { --rail: #370f0f; --rail-2: #4a1717; --rail-tlum: #ab8c8c; }
-}
-
-:root[data-theme="dark"] [data-branch="firma"]    { --rail: #091611; --rail-2: #132921; --rail-tlum: #7a9f91; }
-:root[data-theme="dark"] [data-branch="slate"]    { --rail: #0a0c1d; --rail-2: #131730; --rail-tlum: #8084a3; }
-:root[data-theme="dark"] [data-branch="indigo"]   { --rail: #0b0b4c; --rail-2: #131360; --rail-tlum: #8989a9; }
-:root[data-theme="dark"] [data-branch="violet"]   { --rail: #381d38; --rail-2: #482948; --rail-tlum: #b69ab6; }
-:root[data-theme="dark"] [data-branch="sky"]      { --rail: #103246; --rail-2: #19415a; --rail-tlum: #a0b0ba; }
-:root[data-theme="dark"] [data-branch="teal"]     { --rail: #153f3c; --rail-2: #1f514d; --rail-tlum: #acc3c1; }
-:root[data-theme="dark"] [data-branch="emerald"]  { --rail: #182f0d; --rail-2: #254216; --rail-tlum: #9cb092; }
-:root[data-theme="dark"] [data-branch="amber"]    { --rail: #2c210d; --rail-2: #403015; --rail-tlum: #aba08c; }
-:root[data-theme="dark"] [data-branch="rose"]     { --rail: #370f0f; --rail-2: #4a1717; --rail-tlum: #ab8c8c; }
+/* Boční sloupec se tmavým režimem neřídí — byl tmavý vždycky
+   (--rail výš, konstantní). Zbylo tu jen pro branch-* poznamenat: ty
+   se podle tmavého režimu taky neřídí zvlášť, hodnoty --b-* se
+   vyměnily už v základu (řádek 132 a 176). */
 
 /* ---------------------------------------------------------------------
    Stará jména
