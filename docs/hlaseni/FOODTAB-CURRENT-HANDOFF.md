@@ -84,11 +84,29 @@ promptu). Podrobný stav dnešní noci:
     smazáním `.next` a restartem, nakonec fungovalo. Netýká se kódu
     (tsc/eslint/testy čisté po celou dobu) — čistě lokální/Windows
     prostředí. Pokud se to v nové relaci opakuje: `rm -rf .next && npm run dev`.
-  - **Známý, PŘEDEXISTUJÍCÍ nález:** GitHub Actions check „Migrace a scénáře"
-    (workflow Databáze) padá i na `main` už minimálně od 13.9.2026 (přes 29
-    scénářů `krok3`–`krok33` a `marketing8`–`marketing15`, `no rows returned
-    for \gset`). Nesouvisí s Fakturami/Financemi ani s design systémem —
-    jen nahlášeno, neopraveno, čeká na Šéfíka.
+  - **OPRAVENO 16.9.2026 v noci (relace Provoz):** GitHub Actions check
+    „Migrace a scénáře" (workflow Databáze), padající na `main` od
+    13.9.2026, byl diagnostikován a opraven — [PR #20](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/20),
+    smergováno. Skutečná příčina byla jiná, než "no rows returned for
+    \gset": `krok3_scenar.sql` porovnává `public.permissions` s ručně
+    psaným seznamem klíčů a ten se nedoplnil o `faktury.read`/
+    `faktury.manage` po sloučení Faktur (15.9.) — `ON_ERROR_STOP` zastavil
+    krok3 hned na první kontrole a strhl s sebou (chybějící fixture) přes
+    28 navazujících scénářů (krok4–33, marketing1–15). Druhý, nezávislý
+    nález: `krok31_scenar.sql` čekal starou frázi v komentáři tabulky
+    `zapomenute_odchody` ("SCHVÁLNĚ ŽÁDNÁ NENÍ"), kterou pozdější, už
+    nasazená migrace (`20260913140000_drobnosti.sql`) legitimně
+    přeformulovala na "PROČ CHYBÍ RLS POLITIKA" se stejným smyslem — test
+    se nedoplnil. Obě opravy jsou jen v `supabase/tests/`, žádný zásah do
+    migrací ani do živé databáze. Po opravě: 1302 kontrol, `VŠECHNY
+    KONTROLY PROŠLY`, ověřeno dvakrát (PR i po merge do `main`).
+    **Nástroj-past zjištěná cestou:** `gh run view <id> --log-failed`
+    dumpuje i GitHub Actions' předvýpis zdrojového kódu kroku (barevně
+    zvýrazněný `run:` blok) — řetězce jako `"CHYBÍ hláška: X"` se tam
+    objeví jako SOUČÁST zobrazovaného shellového zdrojáku, ne jako
+    skutečný běhový výstup. Spolehlivé je `--log` (celý log) a hledání
+    `SPADLÉ SCÉNÁŘE:`/`VŠECHNY KONTROLY PROŠLY` — to jsou řádky, které
+    tiskne až samo `run.sh` za běhu, ne text příkazu.
   - Odkaz na branch: `https://github.com/skoumalvladislav-tech/foodtab-rizeni/tree/claude/prompt-review-jtkh74`
 - Druhý samostatný repozitář použitý jen jako referenční zdroj (needitovat, jen
   číst): `C:\Users\vladi\faktury-app` (privátní GitHub repo
@@ -243,14 +261,53 @@ Starší, už dřív na `origin` (marketing, dokumentace, audit) — viz `git lo
 
 ## 7. Provoz / Směny / Docházka / Vzkazy
 
-**Tahle relace do modulu Provoz nezasahovala** — cizí modul, jen čtení/hlášení
-dle CLAUDE.md. Z dokumentace platí:
-- Známý produkční bug: **Docházka A1** — stornovaný příchod nabízí tlačítko
-  Odchod (chybné). Jen nahlášeno, neopraveno, není v gesci téhle relace.
-- Bezpečnostní nález viz bod 6 (TRUNCATE granty na 51 provozních tabulkách).
-- Podrobný aktuální stav (pokud existuje) hledej v nejnovějším
-  `docs/hlaseni/stav-*.md` z relace provoz, ne tady — tenhle handoff patří
-  relaci marketing/faktury.
+**Doplněno 16.–17.9.2026 relací Provoz — tenhle bod byl silně zastaralý**
+(psala ho relace marketing/faktury 15.9., která do Provozu nesahala).
+Od té doby proběhlo v Provozu hodně práce, mimo jiné:
+
+- **Docházka A1 opraveno** — stornovaný příchod už nenabízí Odchod
+  (`app/[rozsah]/dochazka/page.tsx`, přes `app.otevreny_prichod`/
+  `public.muj_den`, s fallbackem dokud migrace nedoběhne).
+- **UX redesign, druhé kolo** — kompozice/hierarchie/density napříč Dnes,
+  Směny, Docházka, Vzkazy, Úkoly podle podrobné Šéfíkovy kritiky (17 bodů),
+  NE jen barvy. Typografie, topbar, sidebar, kebab menu místo více
+  tlačítek v řádku (`.ft-kebab`), atd.
+- **Domovská obrazovka natrvalo na Dnes** (`app/page.tsx`), místo
+  rozcestníku.
+- **Dovoz rozpisu z Excelu přímo v Rozpisu směn** — nový maticový formát
+  (dny × jména jako sloupce/řádky), rozpoznání pobočky/pozice podle
+  přípony (b/p) i domovské pobočky zaměstnance, zpětné propsání šablony
+  do nevydaných směn (`lib/nahrani-rozpisu-matice.ts`, `nastaveni/nahrani/
+  rozpis/pruvodce.tsx`).
+- **Rozpis směn: týdenní pohled seskupený podle pobočky a úseku**
+  (`domovskeUseky`/`nazvyUseku` z `employees.usek_id`, ne z `position_id`
+  — úsek a zařazení jsou dvě různé osy, viz `nastaveni/useky/akce.ts`).
+- **Nová obrazovka Nastavení → Úseky** — CRUD, chybělo úplně (tabulka
+  `useky` měla RLS, ale žádnou správu). Úsek přidán i do formuláře
+  Nastavení → Lidé.
+- **Trhaná směna** (pauza uprostřed) — `shifts.pauza_od`/`pauza_do`,
+  checkbox ve `formular-smeny.tsx` (jednorázová výjimka z hranice mezi
+  relacemi, se svolením Šéfíka), odstraněno zbytečné druhé tlačítko „+".
+- **Migrace `20260916190000_prepsani_sablony_do_smen.sql` a
+  `20260916200000_trhana_smena.sql` — NASAZENY 16.9.2026 večer** (Šéfík).
+  Cestou se objevil a vyřešil zádrhel: `db push` nejdřív tiše neproběhl
+  (nesedělo přihlášení CLI), pak spadl na `migration history` konfliktu
+  (nezapsaná migrace `20260913190528` v remote historii bez lokálního
+  souboru) — opraveno `supabase migration repair --status reverted
+  20260913190528`, pak `db push` prošel. Ověřeno přímým dotazem do
+  databáze, ne jen hlášením Šéfíka.
+- **Produkční pád na `/[rozsah]/smeny` opraven** — dotaz bral nové
+  sloupce `pauza_od`/`pauza_do` natvrdo, bez `sloupecNeexistuje()`
+  fallbacku (na rozdíl od zavedeného vzoru jinde). Opraveno, aby stránka
+  fungovala bez ohledu na pořadí nasazení migrace vs. kódu.
+- **GitHub Actions „Migrace a scénáře" opraveno** — viz bod 2 a 13.
+- Bezpečnostní nález TRUNCATE grantů (bod 6, 51 provozních tabulek)
+  zůstává **neopravený**, čeká na rozhodnutí Šéfíka
+  (`docs/granty-provoz-zadani.md`).
+- **Nedotčeno kvůli paralelní relaci:** `smeny/formular-smeny.tsx` (mimo
+  jednu schválenou výjimku výš), `ceka-na-opravneni.tsx`,
+  `pwa-registration.tsx`, `.install-help`/`.pwa-ios-help` v `globals.css`
+  — sjednocení modálních oken na `Dialog`/`Drawer`, běží souběžně.
 
 ## 8. Finance / Faktury a jejich AI
 
@@ -491,6 +548,7 @@ s design systémem, nikdo na nich aktivně nepracuje.
 5. Docházka A1 bug (stornovaný příchod nabízí Odchod) — cizí modul, jen nahlášeno.
 6. n8n starý workflow Černá Perla — zůstává zapnutý/nezúžený, blokuje zapnutí
    nového workflow (`foodtab-zverejnit-prispevek.json`), čeká na Šéfíka.
+7. ~~GitHub Actions „Migrace a scénáře"~~ — **OPRAVENO 16.9.2026**, viz bod 2.
 
 ## 14. Rozhodnutí, která se nesmí ztratit
 
@@ -531,8 +589,8 @@ a v `main`.** Aktuálně čeká:
    (`docs/granty-provoz-zadani.md`) — mimo gesci téhle relace, ale čeká na rozhodnutí.
 3. Rozhodnutí o E2E přihlášení servisním klíčem (Marketing Krok 5).
 4. n8n: zúžit/vypnout starý workflow Černá Perla.
-5. Prošetřit selhávající GitHub Actions check „Migrace a scénáře" —
-   padá na `main` už dny, nesouvisí s Fakturami/Financemi ani design systémem.
+5. ~~Prošetřit selhávající GitHub Actions check „Migrace a scénáře"~~ —
+   **OPRAVENO 16.9.2026** (relace Provoz, PR #20), viz bod 2.
 
 ## 16. Doporučený další krok (přesně)
 
