@@ -162,6 +162,10 @@ Dokončeno sloučení Faktury (Marketing byl hotový už dřív):
 ## 5. Důležité commity (na `claude/prompt-review-jtkh74`, PUSHNUTÉ na `origin`)
 
 ```
+e34fbcd design: Ukoly a checklisty - 2 sloupce (otevrene ukoly / checklisty)
+788009b design: Zalohy - 2 sloupce (tabulka hlavni, formular na strane)
+3d94146 design: Dochazka - 2 sloupce pro Moje smeny / Dnes na pobocce
+30ac9cb design: Vzkazy - plna prestavba na ConversationList/ChatView
 fd3d81b design: Dnes - widget Tym dnes (kdo je pritomen)
 cb412b8 design: Dnes - barevny nahled dnesniho rozpisu
 287c842 design: Dnes - plna prestavba podle mockupu Sefika (hero, karty, 2 sloupce)
@@ -397,13 +401,36 @@ další významné změně místo zakládání dalšího souboru.
   Hodnocení Google / počasí — čekají na zdroj dat, ne na vymyšlená
   čísla. Hero fotka provozovny — appka nemá odkud vzít skutečný
   snímek.
-- **Zbývá (mimo mockup Dnes):** Vzkazy plná ConversationList/ChatView
-  přestavba. Lidé plná DataTable+kebab-menu přestavba. Etapy 4(zbytek)
-  -14 z master promptu (Finance rozšíření, Marketing dokončení, AI
-  gateway, Gastro AI, Receptury/Menu, Objednávky, cross-module
-  intelligence, plná responzivita, bezpečnostní regrese, release) —
-  nezapočaty, velké samostatné bloky práce, nezačínat bez zvláštního
-  zadání.
+- **Pokračování 16.9.2026 odpoledne** (Šéfík: „pokračuj intenzivně,
+  dnes potřebuji dodělat vzhled dle zadání a dále dodělat modul
+  provoz"). Ujasněno přes AskUserQuestion: Vzkazy ConversationList/
+  ChatView + další obrazovky ve stylu Dnes — **NE** stavba chybějících
+  funkcí (Receptury/Jídelní lístky/Motivace zůstávají BRZY, mimo
+  rozsah). Commity `30ac9cb`…`e34fbcd`:
+  - **Vzkazy — plná přestavba na ConversationList/ChatView** (master
+    prompt sekce 21, poslední konkrétní dluh v Provozu). Nová sdílená
+    komponenta `SeznamRozhovoru` (`app/[rozsah]/vzkazy/
+    seznam-rozhovoru.tsx`), stejná na `/vzkazy` i `/vzkazy/
+    [konverzace]`. Nad 900px stojí seznam vlevo + vlákno vpravo vedle
+    sebe (`.ds-vzkazy-split`), pod 900px jen jedno z obou podle
+    stránky (`data-zobrazit`) — žádný klientský stav, pořád se
+    přepíná adresou. Nástěnka (druhá záložka) beze změny.
+  - **Docházka, Zálohy, Úkoly — 2sloupcové rozvržení** pro dvojice
+    rovnocenných sekcí (Moje směny/Dnes na pobočce; tabulka/formulář;
+    Otevřené úkoly/Checklisty). Docházka je rozsáhlý bezpečnostně
+    citlivý soubor (mzdy) — zásah byl záměrně jen prezentační
+    (auto-fit grid), žádná byznys logika/dotaz/oprávnění se neměnily.
+  - **Rozpis směn záměrně nedotčen** — je to `"use client"` komponenta
+    sdílená s `formular-smeny.tsx`, na kterém právě pracuje paralelní
+    relace (sjednocení modálů); navíc je to široká tabulka/kalendář,
+    kde by 2sloupcové vynucení UX zhoršilo, ne zlepšilo.
+  - **Lidé plná DataTable+kebab-menu přestavba** — pořád nezapočato,
+    zůstává jako TODO (citlivá oblast PIN/oprávnění, samostatná práce).
+  - Etapy 4(zbytek)-14 z master promptu (Finance rozšíření, Marketing
+    dokončení, AI gateway, Gastro AI, Receptury/Menu, Objednávky,
+    cross-module intelligence, plná responzivita, bezpečnostní
+    regrese, release) — nezapočaty, velké samostatné bloky práce,
+    nezačínat bez zvláštního zadání.
 - **Vizuální ověření živě HOTOVO** (16.9.2026 ráno, na žádost Šéfíka
   „zkontroluj vzhled živě"). Příčina včerejšího `ERR_FAILED` nalezena:
   **zastaralý PWA service worker na `localhost:3000`** zachytával
@@ -513,20 +540,21 @@ a v `main`.** Aktuálně čeká:
 (15.9.2026 večer) — na Fakturách samotných není žádný další nutný krok.
 
 **Design systém** (bod 11/12): priorita 1–10 z master promptu hotová,
-radius tokeny 100% pokrytí, ikony v záložkách doplněné, **a Dnes teď
-plně sedí na mockupu** (bod 11 — pivot 16.9.2026 dopoledne, commity
-`2dcbb4c`…`fd3d81b`, pushnuté na `origin`, živě ověřeno včetně tmavého
+radius tokeny 100% pokrytí, ikony v záložkách doplněné, Dnes plně sedí
+na mockupu, **a modul Provoz je teď vizuálně dotažený** (commity
+`2dcbb4c`…`e34fbcd`, pushnuté na `origin`, živě ověřeno včetně tmavého
 režimu a mobilu). Doporučený postup pro další relaci:
 1. **Až Šéfík sežene zdroj dat** (POS pro tržby, Google Business API
    pro hodnocení, weather API pro počasí) — napojit „Rychlý přehled"
    a widget počasí na Dnes. Do té doby nevymýšlet čísla.
-2. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
-   ConversationList/ChatView, Lidé DataTable+kebab-menu.
-3. Stejný „vzhled podle mockupu" pohled na DALŠÍ obrazovky (Rozpis
-   směn, Docházka, …) — mockup, který Šéfík poslal, ukazoval jen Dnes;
-   nikdo zatím neověřil, jestli i tam mají obrazovky sedět na nějaký
-   konkrétní referenční vzhled, nebo jestli dosavadní token-only
-   dotažení stačí. Zeptat se, než se předělává něco, co už možná sedí.
+2. **Lidé — plná DataTable+kebab-menu přestavba** (master prompt
+   sekce 23) — jediná zbývající plná přestavba v Provozu, odloženo
+   kvůli citlivosti (PIN/oprávnění), samostatná práce.
+3. Stejný „vzhled podle mockupu" pohled na moduly MIMO Provoz
+   (Finance/Faktury, Marketing, …) — mockup, který Šéfík poslal,
+   ukazoval jen Dnes; Provoz teď dotažený je, ale nikdo neověřil, jestli
+   mají sedět na nějaký konkrétní vzhled i tyhle. Zeptat se, než se
+   předělává něco, co už možná sedí.
 4. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
    nezačínat bez zvláštního zadání/kontextu, který v tomhle handoffu
    možná chybí (master prompt sám existuje jen v chatu, viz bod 1).
