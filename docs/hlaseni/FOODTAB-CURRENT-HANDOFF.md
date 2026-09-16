@@ -367,10 +367,23 @@ další významné změně místo zakládání dalšího souboru.
   Receptury/Menu, Objednávky, cross-module intelligence, plná
   responzivita, bezpečnostní regrese, release) — nezapočaty, velké
   samostatné bloky práce, nezačínat bez zvláštního zadání.
-- **Vizuální screenshoty se dnes v noci nepodařilo pořídit** — Browser
-  pane nástroj měl opakovaně `ERR_FAILED` na CSS requestech (server
-  sám CSS servíruje správně, ověřeno přímo `curl`). Nesouvisí s kódem.
-  **Zkontrolovat vzhled živě jako první věc v nové relaci/ráno.**
+- **Vizuální ověření živě HOTOVO** (16.9.2026 ráno, na žádost Šéfíka
+  „zkontroluj vzhled živě"). Příčina včerejšího `ERR_FAILED` nalezena:
+  **zastaralý PWA service worker na `localhost:3000`** zachytával
+  requesty a shazoval CSS chunky konkrétně v sandboxu Browser pane
+  nástroje — odregistrování service workeru + smazání cache (`caches
+  .keys()`/`delete`) problém okamžitě vyřešilo. Nesouviselo s kódem,
+  potvrzeno. Živě zkontrolováno a v pořádku: Dnes (Owner Attention
+  Center — „633 faktur je po splatnosti", živá data, o jednu víc než
+  včerejších 632), Rozpis směn, Docházka, Vzkazy, Úkoly, Lidé (formulář
+  vizuálně, tabulka přes DOM), Finance/Faktury, Marketing — seskupený
+  boční panel, tmavý topbar, amber/zlatý akcent, radius/stín na
+  kartách. Navíc zkontrolován **tmavý režim** (dobrý kontrast, akcent
+  zůstává) a **mobilní šířka 375px** (sbalený topbar, rolovatelné
+  modulové záložky, spodní lišta) — obojí v pořádku. Jediný nález byl
+  falešný poplach: `scrollIntoView()` z vlastního testování zaskočil
+  obsah za dvojici sticky lišt, čerstvé načtení stránky ukázalo správné
+  vykreslení.
 - Navazující úloha (založena, ne součást téhle etapy, běží souběžně
   v jiné relaci): sjednotit 3 ruční implementace modálního okna
   (`smeny/formular-smeny.tsx`, `ceka-na-opravneni.tsx`,
@@ -463,16 +476,15 @@ a v `main`.** Aktuálně čeká:
 (15.9.2026 večer) — na Fakturách samotných není žádný další nutný krok.
 
 **Design systém** (bod 11/12): priorita 1–10 z master promptu hotová
-(commity až po `76eba8f`, pushnuté na `origin`). Doporučený postup pro
-další relaci:
-1. **Vizuálně zkontrolovat živě** — první věc, dnešní/noční práci se
-   nepodařilo odzkoušet v Browser pane (bod 11).
-2. Ruční dotažení 8/10/12px hodnot tam, kde je sed vynechal záměrně
+(commity až po `76eba8f`, pushnuté na `origin`) **a živě vizuálně
+ověřena** (16.9.2026 ráno, bod 11 — vzhled, tmavý režim i mobil v
+pořádku). Doporučený postup pro další relaci:
+1. Ruční dotažení 8/10/12px hodnot tam, kde je sed vynechal záměrně
    (chtějí rozhodnutí sm vs. md podle vizuální role, ne plošnou náhradu).
-3. Ikony v horních modulových záložkách (mockup je má).
-4. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
+2. Ikony v horních modulových záložkách (mockup je má).
+3. Plné přestavby (samostatná práce, ne lehké dotažení): Vzkazy
    ConversationList/ChatView, Lidé DataTable+kebab-menu.
-5. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
+4. Etapy 4(zbytek)-14 z master promptu — velké samostatné bloky,
    nezačínat bez zvláštního zadání/kontextu, který v tomhle handoffu
    možná chybí (master prompt sám existuje jen v chatu, viz bod 1).
 
