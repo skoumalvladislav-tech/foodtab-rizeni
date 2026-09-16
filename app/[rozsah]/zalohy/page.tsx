@@ -249,118 +249,131 @@ export default async function Zalohy({
           </p>
         ) : null}
 
-        {smiVyplacet && !pobockaVydeje ? (
-          <p style={ramecek}>
-            <strong>Zálohu vyplatíte na pobočce.</strong> Hotovost někdo
-            podá z ruky do ruky, takže se záloha váže na místo —
-            přepněte se na pobočku a formulář se objeví. Seznam níž
-            ukazuje zálohy všech poboček, na které vidíte.
-          </p>
-        ) : null}
+        {/*
+          Tabulka (hlavní, širší sloupec) + výplatní formulář nebo
+          vysvětlení, proč se vyplácet nedá (užší postranní panel) —
+          stejný `.ds-dvasloupec` jako na Dnes (design systém,
+          16.9.2026). Pod 900px se podsune pod sebe, formulář první —
+          u okénka se přišlo hlavně vyplatit, ne číst tabulku.
+        */}
+        <div className="ds-dvasloupec" style={{ marginTop: '4px' }}>
+          <div>
+            <h2 style={{ ...nadpisSekce, marginTop: 0 }}>Tenhle měsíc</h2>
+            <p style={popisSekce}>
+              {platne.length === 0
+                ? 'Zatím žádná záloha.'
+                : `${pocet(platne.length, 'záloha', 'zálohy', 'záloh')} v součtu ${koruny(soucet)}` +
+                  (nepotvrzenych > 0
+                    ? ` · ${nepotvrzenych} zatím bez potvrzení PINem`
+                    : '')}
+            </p>
 
-        {smiVyplacet && pobockaVydeje && firmaPozastavena ? (
-          <p style={ramecek}>
-            <strong>Zálohy jsou pozastavené za celou firmu.</strong> Nová
-            výplata neprojde nikomu, ani tomu, kdo pozastavené sám nemá.
-            Povolit je zpátky může jen ten, kdo spravuje mzdy. Dřív
-            vyplacené zálohy zůstávají beze změny a storno jde dál.
-          </p>
-        ) : null}
+            {zalohy.length > 0 ? (
+              <div style={{ overflowX: 'auto', marginTop: '12px' }}>
+                <table style={tabulka}>
+                  <thead>
+                    <tr style={headRow}>
+                      <th style={th}>Den</th>
+                      <th style={th}>Komu</th>
+                      <th style={th}>Částka</th>
+                      <th style={th}>Stav</th>
+                      <th style={th}>Poznámka</th>
+                      {smiVyplacet ? <th style={th}>Akce</th> : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zalohy.map((z) => (
+                      <tr
+                        key={z.id}
+                        style={{ ...tr, opacity: z.stav === 'stornovana' ? 0.55 : 1 }}
+                      >
+                        <td style={{ ...td, whiteSpace: 'nowrap' }}>{den(z.business_date)}</td>
+                        <td style={td}>{z.jmeno}</td>
+                        <td
+                          style={{
+                            ...td,
+                            whiteSpace: 'nowrap',
+                            fontVariantNumeric: 'tabular-nums',
+                            textDecoration:
+                              z.stav === 'stornovana' ? 'line-through' : undefined,
+                          }}
+                        >
+                          {koruny(z.castka_haleru)}
+                        </td>
+                        <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                          <StavStitek stav={z.stav} />
+                        </td>
+                        <td style={{ ...td, fontSize: '13px', color: 'var(--muted)' }}>
+                          {z.stav === 'stornovana'
+                            ? `Storno: ${z.storno_duvod ?? ''}`
+                            : z.poznamka}
+                        </td>
+                        {smiVyplacet ? (
+                          <td style={td}>
+                            {z.stav !== 'stornovana' ? (
+                              <Storno akce={stornovatZalohu} id={z.id} rozsah={rozsah} />
+                            ) : null}
+                          </td>
+                        ) : null}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
 
-        {smiVyplacet && pobockaVydeje && !firmaPozastavena ? (
-          <>
-            <FormularZalohy
-              rozsah={rozsah}
-              lide={lideKVyplaceni.map((l) => ({ id: l.id, jmeno: jmenoDoNabidky(l) }))}
-            />
-            {/*
-              Bez téhle věty by člověk u okénka hledal někoho, kdo
-              z nabídky beze slova zmizel, a myslel by si, že je
-              rozbitá aplikace.
-            */}
-            {skrytych > 0 ? (
-              <p style={{ ...popisSekce, margin: '-8px 0 16px' }}>
-                {veta(
-                  skrytych,
-                  'zaměstnanec není v nabídce, protože má pozastavené zálohy.',
-                  'zaměstnanci nejsou v nabídce, protože mají pozastavené zálohy.',
-                  'zaměstnanců není v nabídce, protože mají pozastavené zálohy.',
-                )}
+          <div>
+            {smiVyplacet && !pobockaVydeje ? (
+              <p style={ramecek}>
+                <strong>Zálohu vyplatíte na pobočce.</strong> Hotovost někdo
+                podá z ruky do ruky, takže se záloha váže na místo —
+                přepněte se na pobočku a formulář se objeví. Tabulka
+                vlevo ukazuje zálohy všech poboček, na které vidíte.
               </p>
             ) : null}
-          </>
-        ) : null}
 
-        {!smiVyplacet ? (
-          <p style={{ ...popisSekce, marginBottom: '16px' }}>
-            Zálohy vidíte, protože děláte mzdy. Vyplácet je smí ten, kdo
-            má právo <code>advances.manage</code>.
-          </p>
-        ) : null}
+            {smiVyplacet && pobockaVydeje && firmaPozastavena ? (
+              <p style={ramecek}>
+                <strong>Zálohy jsou pozastavené za celou firmu.</strong> Nová
+                výplata neprojde nikomu, ani tomu, kdo pozastavené sám nemá.
+                Povolit je zpátky může jen ten, kdo spravuje mzdy. Dřív
+                vyplacené zálohy zůstávají beze změny a storno jde dál.
+              </p>
+            ) : null}
 
-        <h2 style={nadpisSekce}>Tenhle měsíc</h2>
-        <p style={popisSekce}>
-          {platne.length === 0
-            ? 'Zatím žádná záloha.'
-            : `${pocet(platne.length, 'záloha', 'zálohy', 'záloh')} v součtu ${koruny(soucet)}` +
-              (nepotvrzenych > 0
-                ? ` · ${nepotvrzenych} zatím bez potvrzení PINem`
-                : '')}
-        </p>
+            {smiVyplacet && pobockaVydeje && !firmaPozastavena ? (
+              <>
+                <FormularZalohy
+                  rozsah={rozsah}
+                  lide={lideKVyplaceni.map((l) => ({ id: l.id, jmeno: jmenoDoNabidky(l) }))}
+                />
+                {/*
+                  Bez téhle věty by člověk u okénka hledal někoho, kdo
+                  z nabídky beze slova zmizel, a myslel by si, že je
+                  rozbitá aplikace.
+                */}
+                {skrytych > 0 ? (
+                  <p style={{ ...popisSekce, margin: '8px 0 0' }}>
+                    {veta(
+                      skrytych,
+                      'zaměstnanec není v nabídce, protože má pozastavené zálohy.',
+                      'zaměstnanci nejsou v nabídce, protože mají pozastavené zálohy.',
+                      'zaměstnanců není v nabídce, protože mají pozastavené zálohy.',
+                    )}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
 
-        {zalohy.length > 0 ? (
-          <div style={{ overflowX: 'auto', marginTop: '12px' }}>
-            <table style={tabulka}>
-              <thead>
-                <tr style={headRow}>
-                  <th style={th}>Den</th>
-                  <th style={th}>Komu</th>
-                  <th style={th}>Částka</th>
-                  <th style={th}>Stav</th>
-                  <th style={th}>Poznámka</th>
-                  {smiVyplacet ? <th style={th}>Akce</th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {zalohy.map((z) => (
-                  <tr
-                    key={z.id}
-                    style={{ ...tr, opacity: z.stav === 'stornovana' ? 0.55 : 1 }}
-                  >
-                    <td style={{ ...td, whiteSpace: 'nowrap' }}>{den(z.business_date)}</td>
-                    <td style={td}>{z.jmeno}</td>
-                    <td
-                      style={{
-                        ...td,
-                        whiteSpace: 'nowrap',
-                        fontVariantNumeric: 'tabular-nums',
-                        textDecoration:
-                          z.stav === 'stornovana' ? 'line-through' : undefined,
-                      }}
-                    >
-                      {koruny(z.castka_haleru)}
-                    </td>
-                    <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                      <StavStitek stav={z.stav} />
-                    </td>
-                    <td style={{ ...td, fontSize: '13px', color: 'var(--muted)' }}>
-                      {z.stav === 'stornovana'
-                        ? `Storno: ${z.storno_duvod ?? ''}`
-                        : z.poznamka}
-                    </td>
-                    {smiVyplacet ? (
-                      <td style={td}>
-                        {z.stav !== 'stornovana' ? (
-                          <Storno akce={stornovatZalohu} id={z.id} rozsah={rozsah} />
-                        ) : null}
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {!smiVyplacet ? (
+              <p style={popisSekce}>
+                Zálohy vidíte, protože děláte mzdy. Vyplácet je smí ten, kdo
+                má právo <code>advances.manage</code>.
+              </p>
+            ) : null}
           </div>
-        ) : null}
+        </div>
 
         {smiPozastavovat ? (
           <Pozastaveni
