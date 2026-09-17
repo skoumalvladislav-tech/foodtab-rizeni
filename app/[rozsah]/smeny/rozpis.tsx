@@ -441,183 +441,193 @@ function TydenView({
 
   const zobrazitHlavickuPobocky = branchIds.length > 1;
 
+  /*
+    PŘESTAVĚNO Z <table> NA CSS GRID (17.9.2026 v noci).
+
+    Tři pokusy zachránit sticky hlavičku uvnitř <table> (overflowY na
+    obalu, sticky na <th> místo <tr>, vyšší z-index) v ostrém provozu
+    neuspěly — hlavička plavala jen na začátku a přestala fungovat, jak
+    se scrollovalo hlouběji do řádků. `position: sticky` uvnitř
+    opravdové HTML tabulky je napříč prohlížeči (Chrome nevyjímaje, ve
+    velkých tabulkách) známě nespolehlivé — tabulkové rozvržení
+    komplikuje výpočet "containing blocku", na kterém sticky stojí.
+
+    Řešení: stejná mřížka, ale z <div> s CSS grid, ne z <table>.
+    Vizuálně nerozeznatelné, ale sticky na blokových prvcích funguje
+    předvídatelně. `role="table"/"row"/"columnheader"/"cell"` drží
+    stejnou strukturu pro čtečky obrazovky, jakou dřív dávala
+    sémantika <table> zadarmo.
+
+    Grid nepotřebuje řádkový obal — každá "buňka" je přímé dítě
+    jednoho grid kontejneru a rozteče se do řádků sama podle
+    gridTemplateColumns. HlavickaSkupiny apod. proto vrací fragmenty
+    plných <div>, ne <tr>.
+  */
+  const sablonaSloupcu = `minmax(120px, 140px) repeat(${dnySerad.length}, minmax(100px, 1fr))`;
+
   return (
     <div
       style={{
         border: "1px solid var(--line-2)",
         borderRadius: "var(--radius-lg)",
         boxShadow: "var(--shadow)",
-        // overflowY musí zůstat "visible" schválně — bez toho by tenhle
-        // div (samo "overflowX: auto") podle CSS specifikace dostal
-        // i overflow-y: auto, stal by se vlastním scroll kontejnerem
-        // a "position: sticky" na hlavičce dní (níž) by se přestalo
-        // vázat na scroll stránky. Přesně proto dny při scrollování
-        // dolů "neplavaly" — sticky bylo napsané správně, ale kontext,
-        // ve kterém mělo fungovat, mu to nedovolil.
         overflowX: "auto",
-        overflowY: "visible",
       }}
     >
-      <table
+      <div
+        role="table"
         style={{
-          width: "100%",
-          borderCollapse: "collapse",
+          display: "grid",
+          gridTemplateColumns: sablonaSloupcu,
           minWidth: "600px",
           fontSize: "13px",
         }}
       >
-        <thead>
-          {/*
-            Sticky je na jednotlivých <th>, ne na <tr>. Zkoušelo se to
-            napřed na <tr> (position: sticky přímo na řádku hlavičky) a
-            v ostrém provozu se to neprojevilo — <tr> je table-row a
-            sticky se na řádcích tabulky chová napříč prohlížeči
-            nespolehlivě, i když je zápis platný. Sticky na <th> je
-            zdokumentovaný, spolehlivý vzor pro plovoucí záhlaví
-            tabulky. Roh (Osoba) má sticky na OBOU osách zároveň
-            (top i left), aby zůstal na místě při scrollu oběma směry.
-          */}
-          <tr style={{ background: "var(--card)", borderBottom: "2px solid var(--line-2)" }}>
-            <th
+        {/*
+          Hlavička. Roh (Osoba) má sticky na obou osách zároveň (top
+          i left), dny jen top — přesně jako dřív, jen na <div>.
+        */}
+        <div
+          role="columnheader"
+          style={{
+            padding: "8px 12px",
+            textAlign: "left",
+            fontWeight: 600,
+            color: "var(--branch)",
+            background: "var(--card)",
+            borderBottom: "2px solid var(--line-2)",
+            position: "sticky",
+            top: "var(--vysoka-lista)",
+            left: 0,
+            zIndex: 7,
+          }}
+        >
+          Osoba
+        </div>
+        {dnySerad.map((datum) => {
+          const dnesJe = datum === dnesni;
+          const vikend = jeVikend(datum);
+          return (
+            <div
+              key={datum}
+              role="columnheader"
               style={{
                 padding: "8px 12px",
-                textAlign: "left",
-                fontWeight: 600,
-                color: "var(--branch)",
-                width: "120px",
-                background: "var(--card)",
+                textAlign: "center",
+                fontWeight: dnesJe ? 700 : 500,
+                color: "var(--ink)",
+                borderLeft: "1px solid var(--line-2)",
+                borderBottom: "2px solid var(--line-2)",
                 position: "sticky",
                 top: "var(--vysoka-lista)",
-                left: 0,
-                zIndex: 7,
+                zIndex: 5,
+                /*
+                  Dnešek i víkend jsou mosaz — jediná zlatá barva,
+                  kterou appka má (--mosaz/--mosaz-sv, viz
+                  _tokeny.css) — Šéfík 17.9.2026 chtěl výslovně "lehce
+                  zlatou, kterou už používáme". Odlišují se SÍLOU
+                  odstínu, ne barvou: dnešek 16 %, víkend jen 7 % —
+                  stejný poměr jako u vzoru "jemné zvýraznění" jinde
+                  v appce (marketing/menu, vzkazy/[konverzace]).
+                */
+                background: dnesJe
+                  ? "color-mix(in srgb, var(--mosaz-sv) 16%, var(--card))"
+                  : vikend
+                    ? "color-mix(in srgb, var(--mosaz-sv) 7%, var(--card))"
+                    : "var(--card)",
               }}
             >
-              Osoba
-            </th>
-            {dnySerad.map((datum) => {
-              const dnesJe = datum === dnesni;
-              const vikend = jeVikend(datum);
-              return (
-                <th
-                  key={datum}
-                  style={{
-                    padding: "8px 12px",
-                    textAlign: "center",
-                    fontWeight: dnesJe ? 700 : 500,
-                    color: "var(--ink)",
-                    borderLeft: "1px solid var(--line-2)",
-                    minWidth: "100px",
-                    position: "sticky",
-                    top: "var(--vysoka-lista)",
-                    zIndex: 5,
-                    /*
-                      Dnešek i víkend jsou mosaz — jediná zlatá barva,
-                      kterou appka má (--mosaz/--mosaz-sv, viz
-                      _tokeny.css) — Šéfík 17.9.2026 chtěl výslovně
-                      "lehce zlatou, kterou už používáme". Odlišují se
-                      SÍLOU odstínu, ne barvou: dnešek 16 % (stejná síla
-                      jako předtím), víkend jen 7 % — stejný poměr jako
-                      u vzoru "jemné zvýraznění" jinde v appce (srov.
-                      color-mix … mosaz 8%/10% v marketing/menu a
-                      vzkazy/[konverzace]).
-                    */
-                    background: dnesJe
-                      ? "color-mix(in srgb, var(--mosaz-sv) 16%, var(--card))"
-                      : vikend
-                        ? "color-mix(in srgb, var(--mosaz-sv) 7%, var(--card))"
-                        : "var(--card)",
-                  }}
-                >
-                  <div style={{ fontSize: "12px", color: "var(--muted)", whiteSpace: "pre-line" }}>
-                    {popisDneZkracene(datum, dnesni)}
-                  </div>
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {branchIds.map((branchId) => {
-            const nazevPobocky = nazvyPobocek.get(branchId) ?? "Jiná pobočka";
-            const skupinyUseku = seskupPodleUseku(sestavRadky(smenyPodlePobocce.get(branchId) ?? []));
-            const zobrazitHlavickuUseku = skupinyUseku.length > 1;
+              <div style={{ fontSize: "12px", color: "var(--muted)", whiteSpace: "pre-line" }}>
+                {popisDneZkracene(datum, dnesni)}
+              </div>
+            </div>
+          );
+        })}
 
-            return (
-              <Fragment key={branchId}>
-                {zobrazitHlavickuPobocky ? (
-                  <HlavickaSkupiny text={nazevPobocky} sloupcu={dnySerad.length + 1} uroven="pobocka" />
-                ) : null}
-                {skupinyUseku.map(({ usek, radky }) => (
-                  <Fragment key={usek}>
-                    {zobrazitHlavickuUseku ? (
-                      <HlavickaSkupiny text={usek} sloupcu={dnySerad.length + 1} uroven="usek" />
-                    ) : null}
-                    {radky.map((radek) => (
-                      <RadekTydne
-                        key={`${branchId}-${radek.osoba ?? "null"}`}
-                        radek={radek}
-                        dnySerad={dnySerad}
-                        dnesni={dnesni}
-                        barvy={barvy}
-                        planovani={planovani}
-                        vychoziPobocka={branchId}
-                        onOtevrit={onOtevrit}
-                      />
-                    ))}
-                  </Fragment>
-                ))}
-              </Fragment>
-            );
-          })}
+        {branchIds.map((branchId) => {
+          const nazevPobocky = nazvyPobocek.get(branchId) ?? "Jiná pobočka";
+          const skupinyUseku = seskupPodleUseku(sestavRadky(smenyPodlePobocce.get(branchId) ?? []));
+          const zobrazitHlavickuUseku = skupinyUseku.length > 1;
 
-          {radkyBezSmeny.length > 0 ? (
-            <>
+          return (
+            <Fragment key={branchId}>
               {zobrazitHlavickuPobocky ? (
-                <HlavickaSkupiny text="Bez směny tento týden" sloupcu={dnySerad.length + 1} uroven="pobocka" />
+                <HlavickaSkupiny text={nazevPobocky} uroven="pobocka" />
               ) : null}
-              {radkyBezSmeny.map((radek) => (
-                <RadekTydne
-                  key={`bez-smeny-${radek.osoba}`}
-                  radek={radek}
-                  dnySerad={dnySerad}
-                  dnesni={dnesni}
-                  barvy={barvy}
-                  planovani={planovani}
-                  vychoziPobocka={planovani?.vychoziPobocka ?? null}
-                  onOtevrit={onOtevrit}
-                />
+              {skupinyUseku.map(({ usek, radky }) => (
+                <Fragment key={usek}>
+                  {zobrazitHlavickuUseku ? (
+                    <HlavickaSkupiny text={usek} uroven="usek" />
+                  ) : null}
+                  {radky.map((radek) => (
+                    <RadekTydne
+                      key={`${branchId}-${radek.osoba ?? "null"}`}
+                      radek={radek}
+                      dnySerad={dnySerad}
+                      dnesni={dnesni}
+                      barvy={barvy}
+                      planovani={planovani}
+                      vychoziPobocka={branchId}
+                      onOtevrit={onOtevrit}
+                    />
+                  ))}
+                </Fragment>
               ))}
-            </>
-          ) : null}
-        </tbody>
-      </table>
+            </Fragment>
+          );
+        })}
+
+        {radkyBezSmeny.length > 0 ? (
+          <>
+            {zobrazitHlavickuPobocky ? (
+              <HlavickaSkupiny text="Bez směny tento týden" uroven="pobocka" />
+            ) : null}
+            {radkyBezSmeny.map((radek) => (
+              <RadekTydne
+                key={`bez-smeny-${radek.osoba}`}
+                radek={radek}
+                dnySerad={dnySerad}
+                dnesni={dnesni}
+                barvy={barvy}
+                planovani={planovani}
+                vychoziPobocka={planovani?.vychoziPobocka ?? null}
+                onOtevrit={onOtevrit}
+              />
+            ))}
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-/** Subtilní řádek s názvem skupiny (pobočka/úsek), přes celou šířku mřížky. */
-function HlavickaSkupiny({ text, sloupcu, uroven }: { text: string; sloupcu: number; uroven: "pobocka" | "usek" }) {
+/**
+ * Subtilní řádek s názvem skupiny (pobočka/úsek), přes celou šířku
+ * mřížky (gridColumn: "1 / -1" — grid ho sám zalomí na nový řádek,
+ * i bez explicitního čísla řádku, protože se nevejde vedle
+ * předchozích buněk).
+ */
+function HlavickaSkupiny({ text, uroven }: { text: string; uroven: "pobocka" | "usek" }) {
   return (
-    <tr>
-      <td
-        colSpan={sloupcu}
-        style={{
-          position: "sticky",
-          left: 0,
-          padding: uroven === "pobocka" ? "10px 12px 6px" : "6px 12px 4px",
-          paddingLeft: uroven === "usek" ? "24px" : "12px",
-          fontSize: uroven === "pobocka" ? "12.5px" : "11px",
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: ".06em",
-          color: uroven === "pobocka" ? "var(--ink)" : "var(--muted)",
-          background: "var(--paper)",
-          borderBottom: uroven === "pobocka" ? "1px solid var(--line)" : "none",
-        }}
-      >
-        {text}
-      </td>
-    </tr>
+    <div
+      role="row"
+      style={{
+        gridColumn: "1 / -1",
+        position: "sticky",
+        left: 0,
+        padding: uroven === "pobocka" ? "10px 12px 6px" : "6px 12px 4px",
+        paddingLeft: uroven === "usek" ? "24px" : "12px",
+        fontSize: uroven === "pobocka" ? "12.5px" : "11px",
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: ".06em",
+        color: uroven === "pobocka" ? "var(--ink)" : "var(--muted)",
+        background: "var(--paper)",
+        borderBottom: uroven === "pobocka" ? "1px solid var(--line)" : "none",
+      }}
+    >
+      {text}
+    </div>
   );
 }
 
@@ -641,11 +651,14 @@ function RadekTydne({
   onOtevrit: (co: Otevrene) => void;
 }) {
   const { osoba, jmeno, smenyPodleDne } = radek;
+  const radkovyOkraj = { borderBottom: "1px solid var(--line-2)" } as const;
 
   return (
-    <tr style={{ borderBottom: "1px solid var(--line-2)" }}>
-      <td
+    <Fragment>
+      <div
+        role="cell"
         style={{
+          ...radkovyOkraj,
           padding: "9px 12px",
           fontWeight: osoba ? 500 : 400,
           color: osoba ? "var(--ink)" : "var(--warn)",
@@ -681,16 +694,18 @@ function RadekTydne({
         ) : (
           jmeno
         )}
-      </td>
+      </div>
       {dnySerad.map((datum) => {
         const smenyDne = smenyPodleDne.get(datum) ?? [];
         const dnesJe = datum === dnesni;
         const vikend = jeVikend(datum);
         return (
-          <td
+          <div
             key={`${osoba}-${datum}`}
+            role="cell"
             className="ft-rozpis-bunka"
             style={{
+              ...radkovyOkraj,
               padding: "9px 12px",
               textAlign: "center",
               borderLeft: "1px solid var(--line-2)",
@@ -765,10 +780,10 @@ function RadekTydne({
                 </button>
               ) : null}
             </div>
-          </td>
+          </div>
         );
       })}
-    </tr>
+    </Fragment>
   );
 }
 
