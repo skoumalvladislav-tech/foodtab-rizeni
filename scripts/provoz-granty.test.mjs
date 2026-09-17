@@ -159,5 +159,20 @@ for (const role of ['anon', 'authenticated']) {
   }
 }
 
+/*
+  SELECT je jinak než u zbytku modulu: anon o něj přijde úplně
+  (stejně jako o všechno ostatní na 51 zbylých tabulkách — nález
+  20260917020000, na první průchod se na tuhle jednu ručně psanou
+  tabulku zapomnělo). authenticated ho MUSÍ mít dál — obrazovka
+  Nastavení → Audit ho čte, politika audit_select hlídá řádky. Obě
+  strany se hlídají zvlášť, ať kontrola pozná i to, kdyby někdo omylem
+  vzal select i authenticated a Audit tím rozbil.
+*/
+console.log('\n== audit_log — SELECT: pryč jen anon, authenticated ho potřebuje ==\n')
+
+ok('audit_log odebírá select roli anon', odebranoPravo('audit_log', 'select', 'anon'))
+ok('a authenticated si select NEODEBÍRÁ (obrazovka Audit ho čte)',
+  !odebranoPravo('audit_log', 'select', 'authenticated'))
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)
