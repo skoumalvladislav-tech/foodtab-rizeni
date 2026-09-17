@@ -287,8 +287,35 @@ zeleno napoprvé. [Draft PR #33](https://github.com/skoumalvladislav-tech/foodta
 nemergovaný.** Zbývá z doporučeného pořadí: bod 3 (konfigurovatelná
 hranice naléhavosti — vyžaduje rozhodnutí Šéfíka o výchozí hodnotě,
 nejde udělat autonomně), bod 5 (hlasové zprávy — největší samostatný
-blok, vlastní etapa), bod 6 (e-mailový kanál), body 7–8 (ověření
-pokrytí Úkolů/Faktur — rychlá kontrola, ne implementace).
+blok, vlastní etapa), bod 6 (e-mailový kanál).
+
+**Body 7–8 (ověření pokrytí Úkolů/Faktur) provedeny — jen kontrola,
+beze změny kódu:**
+
+- `grep` po `create trigger` nad `public.tasks`/`public.checklist_items`
+  nenašel NIC. Žádná spoušť, žádný zápis do `notifications` odjinud
+  (prohledáno i `app/`, `lib/` — jediné čtení/zápisy `notifications` jsou
+  na obrazovce Upozornění a v topbaru).
+- `lib/upozorneni-text.ts` (jediné místo, které `druh` formátuje na
+  větu) zná jen: `smena.*`, `oznameni.nova`, `vzkaz.novy`,
+  `marketing.*`, `dochazka.zapomenuty_odchod`, `pozvanka.prijata`,
+  `opravneni.prideleno`, `pin.prenastaven`. Žádný `ukol.*`/`task.*`,
+  `checklist.*` ani `faktura.*`/`schvaleni.*` (mimo marketing) tam
+  není.
+- Topbarový odznak (`app/[rozsah]/layout.tsx`, ř. ~209–237) sčítá
+  `notifications` + nepřečtené vzkazy + nepřečtenou nástěnku — bez
+  úkolů a faktur. **Kdo dostane přidělený úkol nebo mu čeká faktura
+  ke schválení, se o tom nedozví odjinud než otevřením té konkrétní
+  obrazovky.** Není to poloviční implementace, která by tiše
+  nefungovala — je to úplná absence, dřív jen neověřená.
+- **Záměrně NEIMPLEMENTOVÁNO dnes v noci**: přidat `task.prideleny`/
+  `faktura.ceka_na_schvaleni` apod. znamená rozhodnout O ČEM se
+  upozorňuje (každé přiřazení úkolu? jen blížící se termín? každá
+  faktura, nebo jen nad limit?) a to je produktové rozhodnutí pro
+  moduly Úkoly/Faktury, které tahle noc nezkoumala do hloubky — psát
+  to bez pochopení jejich vlastních konvencí by riskovalo notification
+  spam nebo špatně mířené upozornění. Zapsáno jako zjištění, ne
+  dopsáno narychlo.
 
 ---
 
