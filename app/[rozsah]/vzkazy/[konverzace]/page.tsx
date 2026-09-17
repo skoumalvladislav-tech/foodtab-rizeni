@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
-import { DotazSelhal, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
+import { DotazSelhal, sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
@@ -155,14 +155,45 @@ export default async function Rozhovor({
     )
   }
 
-  const { data: zpravyData, error: chybaZpravy } = await supabase
-    .from('konverzace_zpravy')
-    .select('id, autor, text, priorita, vytvoreno_kdy, stornovano_kdy')
-    .eq('konverzace_id', konverzace)
-    .order('vytvoreno_kdy', { ascending: true })
-    .limit(POCET)
+  const dotazNaZpravy = (sloupce: string) =>
+    supabase
+      .from('konverzace_zpravy')
+      .select(sloupce)
+      .eq('konverzace_id', konverzace)
+      .order('vytvoreno_kdy', { ascending: true })
+      .limit(POCET)
+
+  let { data: zpravyData, error: chybaZpravy } = await dotazNaZpravy(
+    'id, autor, text, priorita, vytvoreno_kdy, stornovano_kdy',
+  )
+
+  /*
+    Sloupec `priorita` je z migrace 20260917040000 — dokud neproběhne,
+    fyzicky tam pořád je jen starý `nalehava boolean`. Dotaz se
+    zopakuje s ním a priorita se odvodí (true → urgent, jinak normal).
+    Bez tohohle by tahle stránka spadla hned po mergi do main, protože
+    kód a databáze se nasazují nezávisle — Vercel nasadí kód okamžitě,
+    migrace čeká na ruční `db push`. Stejný vzor jako upozorneni/page.tsx.
+  */
+  let maPrioritu = true
+  if (chybaZpravy && sloupecNeexistuje(chybaZpravy)) {
+    maPrioritu = false
+    ;({ data: zpravyData, error: chybaZpravy } = await dotazNaZpravy(
+      'id, autor, text, nalehava, vytvoreno_kdy, stornovano_kdy',
+    ))
+  }
   if (chybaZpravy) throw new DotazSelhal('zprávy rozhovoru', chybaZpravy)
-  const zpravy = (zpravyData ?? []) as Zprava[]
+
+  const zpravy = ((zpravyData ?? []) as unknown as Record<string, unknown>[]).map((z) => ({
+    id: z.id as string,
+    autor: z.autor as string | null,
+    text: z.text as string,
+    priorita: maPrioritu
+      ? (z.priorita as Priorita)
+      : ((z.nalehava as boolean) ? 'urgent' : 'normal'),
+    vytvoreno_kdy: z.vytvoreno_kdy as string,
+    stornovano_kdy: z.stornovano_kdy as string | null,
+  })) satisfies Zprava[]
 
   // Jména autorů. `full_name` je ve sloupcovém grantu, telefon a e-mail
   // schválně ne — ty se čtou jen průzorem v Lidech.
