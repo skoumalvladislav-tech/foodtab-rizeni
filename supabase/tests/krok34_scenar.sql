@@ -213,7 +213,14 @@ reset role;
 \echo ''
 \echo '== 5. Záložka vzniká až čtením ============================'
 
-select set_config('test.user_id', '34340001-0000-0000-0000-000000000001', false);
+-- Testuje se Pepou, ne Hanou. `moje_rozhovory` počítá nepřečtené jen
+-- ze zpráv OD JINÝCH (`z.autor is distinct from ja`) — vlastní zprávu
+-- si autor logicky nemusí „přečíst". Hana napsala z1 sama, takže by
+-- jí v čerstvém kanálu bez jiných zpráv vyšlo nepřečtených 0 i před
+-- přečtením a kontrola by spadla, aniž by to o odvození řeklo cokoli.
+-- Pepa zprávu nenapsal, jen v úseku je — u něj je „nepřečtené > 0
+-- před, 0 po" skutečná zkouška záložky.
+select set_config('test.user_id', '34340002-0000-0000-0000-000000000002', false);
 set role authenticated;
 
 select pg_temp.check('před přečtením je nepřečtené',
