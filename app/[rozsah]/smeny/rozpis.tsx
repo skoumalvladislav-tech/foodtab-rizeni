@@ -467,7 +467,17 @@ function TydenView({
         }}
       >
         <thead>
-          <tr style={{ background: "var(--card)", borderBottom: "2px solid var(--line-2)", position: "sticky", top: "var(--vysoka-lista)", zIndex: 5 }}>
+          {/*
+            Sticky je na jednotlivých <th>, ne na <tr>. Zkoušelo se to
+            napřed na <tr> (position: sticky přímo na řádku hlavičky) a
+            v ostrém provozu se to neprojevilo — <tr> je table-row a
+            sticky se na řádcích tabulky chová napříč prohlížeči
+            nespolehlivě, i když je zápis platný. Sticky na <th> je
+            zdokumentovaný, spolehlivý vzor pro plovoucí záhlaví
+            tabulky. Roh (Osoba) má sticky na OBOU osách zároveň
+            (top i left), aby zůstal na místě při scrollu oběma směry.
+          */}
+          <tr style={{ background: "var(--card)", borderBottom: "2px solid var(--line-2)" }}>
             <th
               style={{
                 padding: "8px 12px",
@@ -477,6 +487,7 @@ function TydenView({
                 width: "120px",
                 background: "var(--card)",
                 position: "sticky",
+                top: "var(--vysoka-lista)",
                 left: 0,
                 zIndex: 7,
               }}
@@ -496,10 +507,18 @@ function TydenView({
                     color: "var(--ink)",
                     borderLeft: "1px solid var(--line-2)",
                     minWidth: "100px",
+                    position: "sticky",
+                    top: "var(--vysoka-lista)",
+                    zIndex: 5,
+                    // Dnešek mosazí, víkend vínovou — dvě jinak laděné
+                    // barvy, ne dva odstíny skoro téhož neutrálu jako
+                    // dřív (Šéfík 17.9.2026: "obě barvy jsou dost
+                    // podobné"). --vino je v appce druhotný akcent
+                    // přesně pro tohle: odlišit bez budění pozoru.
                     background: dnesJe
                       ? "color-mix(in srgb, var(--mosaz-sv) 16%, var(--card))"
                       : vikend
-                        ? "var(--sunken)"
+                        ? "var(--vino-soft)"
                         : "var(--card)",
                   }}
                 >
@@ -675,7 +694,7 @@ function RadekTydne({
                   : dnesJe
                     ? "color-mix(in srgb, var(--mosaz-sv) 8%, var(--paper))"
                     : vikend
-                      ? "var(--sunken)"
+                      ? "var(--vino-soft)"
                       : "transparent",
             }}
           >
