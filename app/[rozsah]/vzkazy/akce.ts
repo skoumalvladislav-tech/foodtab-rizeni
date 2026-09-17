@@ -1,10 +1,13 @@
 'use server'
 
+import { randomUUID } from 'node:crypto'
+
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
+import { KBELIK, MAX_DELKA_S, cestaVUlozisti, priponaZMime } from '@/lib/hlasove-zpravy'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -139,6 +142,71 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
   })
 
   if (error) {
+    redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(zpet)
+  redirect(zpet)
+}
+
+/**
+ * Odeslat hlasovku do rozhovoru.
+ *
+ * ŽÁDNÝ AI PŘEPIS (rozhodnutí Šéfíka 17.9.2026 v noci — viz hlavička
+ * 20260917060000_hlasove_zpravy.sql). Zvuk se jen nahraje a pošle.
+ *
+ * NAHRÁVÁ SE POD PŘIHLÁŠENÝM ČLOVĚKEM, NE SERVISNÍM KLÍČEM —
+ * `getServerSupabase` jede na veřejný klíč a sezení uživatele, takže
+ * na úložiště dosáhnou politiky z 20260917060000_hlasove_zpravy.sql.
+ * Stejná úvaha jako u nahrátFotku v marketingu.
+ */
+export async function odeslatHlasovku(formData: FormData): Promise<void> {
+  const z = await zaklad(formData)
+  if (!z) return
+
+  const konverzace = String(formData.get('konverzace') ?? '')
+  const zvuk = formData.get('zvuk')
+  const delkaVstup = Number(formData.get('delka_s') ?? 0)
+  if (konverzace === '') return
+
+  const zpet = `/${z.rozsah}/vzkazy/${konverzace}`
+
+  if (!(zvuk instanceof File) || zvuk.size === 0) {
+    redirect(`${zpet}?chyba=${encodeURIComponent('Nahrávka se nepovedla, zkuste to znovu.')}`)
+  }
+
+  // Délka je jen pro zobrazení (mm:ss) — nesmyslnou hodnotu z prohlížeče
+  // radši zahodit, než ji tahat dál do databáze.
+  const delkaS =
+    Number.isFinite(delkaVstup) && delkaVstup > 0 && delkaVstup <= MAX_DELKA_S
+      ? Math.round(delkaVstup)
+      : null
+
+  const supabase = await getServerSupabase()
+  const kam = cestaVUlozisti(z.tenantId, konverzace, randomUUID(), priponaZMime(zvuk.type))
+
+  const nahrano = await supabase.storage.from(KBELIK).upload(kam, new Uint8Array(await zvuk.arrayBuffer()), {
+    contentType: zvuk.type || 'audio/webm',
+    upsert: false,
+  })
+
+  if (nahrano.error) {
+    redirect(`${zpet}?chyba=${encodeURIComponent(`Hlasovku se nepodařilo uložit: ${nahrano.error.message}`)}`)
+  }
+
+  const { error } = await supabase.rpc('poslat_zpravu', {
+    p_konverzace: konverzace,
+    p_text: '',
+    p_priorita: 'normal',
+    p_zvuk_cesta: kam,
+    p_zvuk_delka_s: delkaS,
+  })
+
+  if (error) {
+    // Úklid po sobě — stejná úvaha jako u nahrátFotku v marketingu:
+    // soubor je nahraný, zpráva nevznikla, a bez úklidu by v kbelíku
+    // zůstal soubor, na který se z appky nedá dostat.
+    await supabase.storage.from(KBELIK).remove([kam])
     redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
   }
 

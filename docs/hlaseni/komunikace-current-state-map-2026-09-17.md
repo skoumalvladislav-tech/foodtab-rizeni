@@ -289,6 +289,40 @@ hranice naléhavosti — vyžaduje rozhodnutí Šéfíka o výchozí hodnotě,
 nejde udělat autonomně), bod 5 (hlasové zprávy — největší samostatný
 blok, vlastní etapa), bod 6 (e-mailový kanál).
 
+**Skutečná chyba nalezená a opravená při stavbě bodu 5, zpětně i v #32
+a #33 (ne nová práce v samostatné PR, protože šlo o opravu, ne
+funkci):** `/vzkazy/[konverzace]/page.tsx` četl sloupec `priorita`
+přímo, bez tolerance na to, že v ostré databázi ještě může být jen
+starý `nalehava boolean` — kód a databáze se nasazují NEZÁVISLE
+(Vercel nasadí kód z `main` hned po mergi, migrace čeká na ruční
+`db push`). Po mergi #32 samotné by tahle stránka spadla KAŽDÉMU, dokud
+by migrace neproběhla. Opraveno stejným vzorem jako `upozorneni/page.tsx`
+(`acknowledged_at`) — dotaz se při „sloupec neexistuje" zopakuje se
+starým sloupcem. Nalezeno při stavbě navazující práce, ne testem
+(scénáře běží proti čerstvě zmigrované databázi) — je to mezera
+v pokrytí testy, zapsáno jako zjištění pro příště.
+
+**Doplněno stejnou noc, pokračování (bod 5 — hlasové zprávy, BEZ AI
+přepisu):** **ROZHODNUTÍ ŠÉFÍKA 17.9.2026 v noci** — Claude API nemá
+vstup pro zvuk (jen text/obrázky/PDF), AI přepis by potřeboval nového
+dodavatele (Whisper API, Deepgram, Google Speech-to-Text…) s vlastním
+klíčem a náklady. Šéfík zvolil: nahrávání a přehrávání ANO, přepis NE
+(zatím). **HOTOVO, NENASAZENO.** Migrace `20260917060000_hlasove_zpravy.sql`
+— `konverzace_zpravy.zvuk_cesta`/`zvuk_delka_s`, sloupec `text`
+uvolněný na prázdný (zpráva má text NEBO zvuk, aspoň jedno). Soukromý
+kbelík `hlasovky`, mirror `20260913170000_marketing_ulozne.sql`
+(cesta `tenant/konverzace/soubor`, politika `app.je_ucastnik` — stejné
+právo jako čtení zprávy samotné, ne zvlášť vymyšlené). `poslat_zpravu`
+dostala `p_zvuk_cesta`/`p_zvuk_delka_s` — a POPRVÉ výslovně DROPuje
+starou signaturu před `CREATE OR REPLACE` (nález z #32: přidání
+parametru samotné nestačí, nechá vedle sebe dvě funkce). Navíc
+kontrola, že cesta k hlasovce sedí s konverzací, na kterou se posílá
+— storage politika sama křížové přiřazení nepokryje. UI: `HlasovkaNahravac`,
+jediný klientský ostrůvek v celém vlákně (MediaRecorder, mikrofon jde
+jen z prohlížeče), nahrává/přehrává přes podepsané odkazy. Scénář
+`krok37_scenar.sql`. Ověřeno `tsc --noEmit`, `eslint` a `next build`
+bez chyby; SQL scénář ověří CI.
+
 **Body 7–8 (ověření pokrytí Úkolů/Faktur) provedeny — jen kontrola,
 beze změny kódu:**
 
