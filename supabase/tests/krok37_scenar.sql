@@ -172,6 +172,7 @@ select set_config('test.user_id', '37370001-0000-0000-0000-000000000001', false)
 set role authenticated;
 
 select public.zalozit_rozhovor(:'tenant', 'vedeni', null, 'Dotaz', 'majitel') as jina \gset
+select set_config('test.jina', :'jina', false);
 
 do $$
 declare v_ok boolean := false;
@@ -189,7 +190,6 @@ begin
 end $$;
 
 reset role;
-select set_config('test.jina', :'jina', false);
 
 
 \echo ''
