@@ -51,9 +51,9 @@ select user_id as sef  from public.profiles where email = 'majitel@foodtab.cz' \
 select user_id as cizi from public.profiles where email = 'cizi@jinafirma.cz' \gset
 
 insert into auth.users (id, email, raw_user_meta_data) values
-  ('ffff0000-0000-0000-0000-00000000000f', 'hana34@foodtab.cz', '{"full_name":"Hana Kuchařová"}'),
-  ('11110000-0000-0000-0000-000000000011', 'pepa34@foodtab.cz', '{"full_name":"Pepa Kuchař"}'),
-  ('22220000-0000-0000-0000-000000000022', 'iva34@foodtab.cz',  '{"full_name":"Iva Barmanová"}');
+  ('34340001-0000-0000-0000-000000000001', 'hana34@foodtab.cz', '{"full_name":"Hana Kuchařová"}'),
+  ('34340002-0000-0000-0000-000000000002', 'pepa34@foodtab.cz', '{"full_name":"Pepa Kuchař"}'),
+  ('34340003-0000-0000-0000-000000000003', 'iva34@foodtab.cz',  '{"full_name":"Iva Barmanová"}');
 
 select id as role_kuchyne from public.roles where tenant_id = :'tenant' and key = 'kuchyne' \gset
 
@@ -70,25 +70,25 @@ select id as usek_bar from public.useky
  where tenant_id = :'tenant' and nazev = 'Bar — krok34' \gset
 
 insert into public.employees (tenant_id, branch_id, usek_id, user_id, full_name, employment_type) values
-  (:'tenant', :'perla', :'usek_kuchyne', 'ffff0000-0000-0000-0000-00000000000f', 'Hana Kuchařová', 'hpp'),
-  (:'tenant', :'bar_p', :'usek_kuchyne', '11110000-0000-0000-0000-000000000011', 'Pepa Kuchař',    'hpp'),
-  (:'tenant', :'perla', :'usek_bar',     '22220000-0000-0000-0000-000000000022', 'Iva Barmanová',  'hpp');
+  (:'tenant', :'perla', :'usek_kuchyne', '34340001-0000-0000-0000-000000000001', 'Hana Kuchařová', 'hpp'),
+  (:'tenant', :'bar_p', :'usek_kuchyne', '34340002-0000-0000-0000-000000000002', 'Pepa Kuchař',    'hpp'),
+  (:'tenant', :'perla', :'usek_bar',     '34340003-0000-0000-0000-000000000003', 'Iva Barmanová',  'hpp');
 
-select id as hana from public.employees where user_id = 'ffff0000-0000-0000-0000-00000000000f' \gset
-select id as pepa from public.employees where user_id = '11110000-0000-0000-0000-000000000011' \gset
-select id as iva  from public.employees where user_id = '22220000-0000-0000-0000-000000000022' \gset
+select id as hana from public.employees where user_id = '34340001-0000-0000-0000-000000000001' \gset
+select id as pepa from public.employees where user_id = '34340002-0000-0000-0000-000000000002' \gset
+select id as iva  from public.employees where user_id = '34340003-0000-0000-0000-000000000003' \gset
 
 insert into public.memberships (tenant_id, user_id, role_id, scope, status) values
-  (:'tenant', 'ffff0000-0000-0000-0000-00000000000f', :'role_kuchyne', 'branch', 'active'),
-  (:'tenant', '11110000-0000-0000-0000-000000000011', :'role_kuchyne', 'branch', 'active'),
-  (:'tenant', '22220000-0000-0000-0000-000000000022', :'role_kuchyne', 'branch', 'active');
+  (:'tenant', '34340001-0000-0000-0000-000000000001', :'role_kuchyne', 'branch', 'active'),
+  (:'tenant', '34340002-0000-0000-0000-000000000002', :'role_kuchyne', 'branch', 'active'),
+  (:'tenant', '34340003-0000-0000-0000-000000000003', :'role_kuchyne', 'branch', 'active');
 
 select id as clen_hana from public.memberships
- where user_id = 'ffff0000-0000-0000-0000-00000000000f' \gset
+ where user_id = '34340001-0000-0000-0000-000000000001' \gset
 select id as clen_pepa from public.memberships
- where user_id = '11110000-0000-0000-0000-000000000011' \gset
+ where user_id = '34340002-0000-0000-0000-000000000002' \gset
 select id as clen_iva from public.memberships
- where user_id = '22220000-0000-0000-0000-000000000022' \gset
+ where user_id = '34340003-0000-0000-0000-000000000003' \gset
 
 insert into public.membership_branches (membership_id, branch_id) values
   (:'clen_hana', :'perla'),
@@ -101,7 +101,7 @@ select set_config('test.tenant', :'tenant', false);
 \echo ''
 \echo '== 1. Kanál se založí sám a spojí lidi napříč pobočkami ==='
 
-select set_config('test.user_id', 'ffff0000-0000-0000-0000-00000000000f', false);
+select set_config('test.user_id', '34340001-0000-0000-0000-000000000001', false);
 set role authenticated;
 
 select public.kanal_useku(:'tenant', :'usek_kuchyne') as kanal \gset
@@ -128,7 +128,7 @@ select pg_temp.check('členství NENÍ zapsané, je odvozené',
 -- Baru, ne na Perle, ale je ve stejném úseku jako Hana. Kdyby se
 -- odvození omylem řídilo pobočkou místo employees.usek_id, tahle
 -- kontrola spadne.
-select set_config('test.user_id', '11110000-0000-0000-0000-000000000011', false);
+select set_config('test.user_id', '34340002-0000-0000-0000-000000000002', false);
 set role authenticated;
 
 select pg_temp.check('Pepa je na jiné pobočce než Hana',
@@ -148,7 +148,7 @@ reset role;
 
 -- Iva je na Perle (stejně jako Hana), ale v Baru (jiný úsek). Dosah
 -- na pobočku nesmí stačit.
-select set_config('test.user_id', '22220000-0000-0000-0000-000000000022', false);
+select set_config('test.user_id', '34340003-0000-0000-0000-000000000003', false);
 set role authenticated;
 
 select pg_temp.check('Iva je na stejné pobočce jako Hana',
@@ -213,7 +213,7 @@ reset role;
 \echo ''
 \echo '== 5. Záložka vzniká až čtením ============================'
 
-select set_config('test.user_id', 'ffff0000-0000-0000-0000-00000000000f', false);
+select set_config('test.user_id', '34340001-0000-0000-0000-000000000001', false);
 set role authenticated;
 
 select pg_temp.check('před přečtením je nepřečtené',
