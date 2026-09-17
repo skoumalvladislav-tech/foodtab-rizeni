@@ -30,11 +30,13 @@ export const dynamic = 'force-dynamic'
 const ZONA = ZONA_VYCHOZI
 const POCET = 200
 
+type Priorita = 'normal' | 'important' | 'urgent'
+
 type Zprava = {
   id: string
   autor: string | null
   text: string
-  nalehava: boolean
+  priorita: Priorita
   vytvoreno_kdy: string
   stornovano_kdy: string | null
 }
@@ -155,7 +157,7 @@ export default async function Rozhovor({
 
   const { data: zpravyData, error: chybaZpravy } = await supabase
     .from('konverzace_zpravy')
-    .select('id, autor, text, nalehava, vytvoreno_kdy, stornovano_kdy')
+    .select('id, autor, text, priorita, vytvoreno_kdy, stornovano_kdy')
     .eq('konverzace_id', konverzace)
     .order('vytvoreno_kdy', { ascending: true })
     .limit(POCET)
@@ -262,13 +264,19 @@ export default async function Rozhovor({
                   style={{
                     background: moje ? 'color-mix(in srgb, var(--mosaz-sv) 10%, var(--card))' : 'var(--card)',
                     border: '1px solid var(--line)',
-                    // Naléhavá je vidět na první pohled. Je to jediná
-                    // věc, která brání tomu, aby se naléhavé stalo
-                    // výchozím — když je naléhavé všechno, není
-                    // naléhavé nic.
-                    borderLeft: z.nalehava
-                      ? '4px solid var(--warn)'
-                      : '1px solid var(--line)',
+                    // Priorita je vidět na první pohled a jen na téhle
+                    // hraně — je to jediná věc, která brání tomu, aby
+                    // se naléhavé stalo výchozím: když je naléhavé
+                    // všechno, není naléhavé nic. Important dostává
+                    // jinou barvu (--info), ne jen slabší naléhavou —
+                    // dvě různé věci nemají vypadat jako dvě síly
+                    // téhož.
+                    borderLeft:
+                      z.priorita === 'urgent'
+                        ? '4px solid var(--warn)'
+                        : z.priorita === 'important'
+                          ? '4px solid var(--info)'
+                          : '1px solid var(--line)',
                     borderRadius: 'var(--radius-md)',
                     padding: '12px 14px',
                     marginLeft: moje ? '32px' : 0,
@@ -277,7 +285,8 @@ export default async function Rozhovor({
                 >
                   <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
                     {[
-                      z.nalehava ? 'NALÉHAVÉ' : null,
+                      z.priorita === 'urgent' ? 'NALÉHAVÉ' : null,
+                      z.priorita === 'important' ? 'DŮLEŽITÉ' : null,
                       z.autor ? (jmena.get(z.autor) ?? 'kdosi') : 'systém',
                       /*
                         Pásmo se dodává vždycky. Bez něj bere JavaScript
@@ -394,13 +403,15 @@ export default async function Rozhovor({
                 gap: '12px',
               }}
             >
-              {/*
-                Zaškrtávátko se ukazuje jen tomu, kdo na naléhavou má
-                právo. Není to zámek — ten je v databázi — ale nabízet
-                někomu tlačítko, které mu vždycky vrátí chybu, je jen
-                zdroj otrávení.
-              */}
-              {smiNalehavou ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {/*
+                  Volba „Naléhavé" se nabízí jen tomu, kdo na ni má
+                  právo. Není to zámek — ten je v databázi — ale
+                  nabízet někomu možnost, která mu vždycky vrátí
+                  chybu, je jen zdroj otrávení. „Důležité" právo
+                  nevyžaduje: nemění DOKDY zpráva dorazí, jen jak
+                  vypadá a kde se řadí.
+                */}
                 <label
                   style={{
                     fontSize: '14px',
@@ -410,14 +421,21 @@ export default async function Rozhovor({
                     gap: '6px',
                   }}
                 >
-                  <input type="checkbox" name="nalehava" value="ano" />
-                  Naléhavé — dorazí i mimo směnu
+                  Priorita
+                  <select name="priorita" defaultValue="normal" style={vyberPriority}>
+                    <option value="normal">Normální</option>
+                    <option value="important">Důležité</option>
+                    {smiNalehavou ? (
+                      <option value="urgent">Naléhavé — dorazí i mimo směnu</option>
+                    ) : null}
+                  </select>
                 </label>
-              ) : (
-                <span style={{ fontSize: '13px', color: 'var(--muted)' }}>
-                  Doručí se, až bude příjemce na směně.
-                </span>
-              )}
+                {!smiNalehavou ? (
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    Doručí se, až bude příjemce na směně.
+                  </span>
+                ) : null}
+              </div>
               <button type="submit" className="ft-tl ft-tl-hlavni">
                 Odeslat
               </button>
@@ -439,6 +457,15 @@ export default async function Rozhovor({
       </div>
     </>
   )
+}
+
+const vyberPriority: React.CSSProperties = {
+  fontSize: '14px',
+  padding: '4px 6px',
+  borderRadius: 'var(--radius-sm)',
+  border: '1px solid var(--line)',
+  background: 'var(--card)',
+  color: 'var(--ink)',
 }
 
 const ramecek: React.CSSProperties = {

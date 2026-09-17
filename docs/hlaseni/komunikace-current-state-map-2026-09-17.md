@@ -231,6 +231,24 @@ Zadání samo (bod 37) navrhuje Etapy A–I. Na základě týhle mapy:
 Etapy 7–8 (bod 8 výš, ověření pokrytí Úkolů/Faktur) můžou proběhnout
 kdykoli mezi ostatním jako rychlá kontrola, ne implementace.
 
+**Doplněno 17.9.2026 v noci, druhý noční běh (zadání "KOMUNIKACE /
+VZKAZY 2.0"):** kanál úseku (department channel) — dosud v
+`20260906020000_odvozene_kanaly.sql` výslovně odloženo jako
+"rozhodnutí pro Šéfíka" — je **HOTOVO, NENASAZENO**. Migrace
+`20260917030000_kanal_useku.sql`, mirror `kanal_pobocky` přesně
+(`public.kanal_useku`, `app.je_ucastnik` rozšířené o třetí odvozenou
+větev podle `employees.usek_id`, `moje_rozhovory` rozšířené o
+`muj_usek` CTE). UI: tlačítko "+ Otevřít kanál úseku" ve
+`vzkazy/page.tsx`, filtr "Úsek". Scénář `krok34_scenar.sql` ověřuje
+klíčovou věc — úsek je vlastnost ČLOVĚKA, ne pobočky (stejný úsek na
+jiné pobočce čte, jiný úsek na stejné pobočce ne). CI zeleno
+(`VŠECHNY KONTROLY PROŠLY`, 1321 kontrol) po dvou opravách přímo
+v testu (kolize UUID s krok26, chybná kontrola "nepřečtené" testovaná
+na autorovi zprávy místo na jiném čtenáři). [Draft PR #31](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/31)
+— **zůstává draft, nemerguje se bez schválení Šéfíka.**
+
+Další v pořadí (bod 2 výš): třístupňová priorita.
+
 ---
 
 ## 5. Co se NEDĚLÁ bez dalšího zadání

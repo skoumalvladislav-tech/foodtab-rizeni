@@ -786,8 +786,12 @@ select pg_temp.check('moje_rozhovory se ptá na zapnutý modul',
 select pg_temp.check('zalozit_rozhovor se ptá na zapnutý modul',
   pg_get_functiondef('public.zalozit_rozhovor(uuid,text,uuid,text,text,uuid[])'::regprocedure)
     like '%modul_zapnuty%');
+-- Signatura má od 20260917040000 čtvrtý parametr (p_priorita,
+-- default). Přidání parametru s výchozí hodnotou je stále TATÁŽ
+-- funkce (CREATE OR REPLACE), ne nová — proto se mění tenhle typový
+-- otisk, ne kontrola samotná.
 select pg_temp.check('poslat_zpravu se ptá na zapnutý modul',
-  pg_get_functiondef('public.poslat_zpravu(uuid,text,boolean)'::regprocedure)
+  pg_get_functiondef('public.poslat_zpravu(uuid,text,boolean,text)'::regprocedure)
     like '%modul_zapnuty%');
 
 

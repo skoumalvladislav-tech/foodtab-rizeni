@@ -105,14 +105,19 @@ export async function otevritKanalUseku(formData: FormData): Promise<void> {
   redirect(`/${z.rozsah}/vzkazy/${String(data)}`)
 }
 
+const PRIORITY: readonly string[] = ['normal', 'important', 'urgent']
+
 /**
  * Odeslat zprávu do rozhovoru.
  *
- * `nalehava` se posílá jako přání, ne jako fakt. Jestli ho databáze
- * splní, rozhoduje právo `communication.urgent` — a když ho člověk
- * nemá, vrátí se chyba místo tichého odeslání obyčejné zprávy.
+ * `priorita` se posílá jako přání, ne jako fakt. Jestli databáze
+ * `urgent` splní, rozhoduje právo `communication.urgent` — a když ho
+ * člověk nemá, vrátí se chyba místo tichého odeslání obyčejné zprávy.
  * Tiché „skoro splněno“ by bylo horší: odesílatel by si myslel, že
- * zpráva dorazí hned, a ona by čekala na píchnutí.
+ * zpráva dorazí hned, a ona by čekala na píchnutí. Cokoli mimo
+ * `PRIORITY` je pokus o podvržení pole z prohlížeče — spadne na
+ * stejnou skutečnou kontrolu v `poslat_zpravu`, tady se jen nemá
+ * posílat dál nesmysl.
  */
 export async function poslatZpravu(formData: FormData): Promise<void> {
   const z = await zaklad(formData)
@@ -120,7 +125,8 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
 
   const konverzace = String(formData.get('konverzace') ?? '')
   const text = String(formData.get('text') ?? '').trim()
-  const nalehava = String(formData.get('nalehava') ?? '') === 'ano'
+  const prioritaVstup = String(formData.get('priorita') ?? '')
+  const priorita = PRIORITY.includes(prioritaVstup) ? prioritaVstup : 'normal'
   if (konverzace === '' || text === '') return
 
   const zpet = `/${z.rozsah}/vzkazy/${konverzace}`
@@ -129,7 +135,7 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
   const { error } = await supabase.rpc('poslat_zpravu', {
     p_konverzace: konverzace,
     p_text: text,
-    p_nalehava: nalehava,
+    p_priorita: priorita,
   })
 
   if (error) {
