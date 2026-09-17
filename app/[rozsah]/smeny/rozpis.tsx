@@ -471,7 +471,19 @@ function TydenView({
         border: "1px solid var(--line-2)",
         borderRadius: "var(--radius-lg)",
         boxShadow: "var(--shadow)",
+        // overflowY: "visible" NENÍ kosmetika — bez něj CSS specifikace
+        // tichem přidá "overflow-y: auto" k samotnému "overflow-x:
+        // auto", tenhle div se stane vlastním scroll kontejnerem a
+        // "position: sticky" na hlavičce (níž) se přestane vázat na
+        // scroll stránky. PŘESNĚ TOHLE byla oprava z úplně prvního
+        // pokusu (PR #26) — při přestavbě z <table> na grid se sem
+        // omylem nepřenesla, takže se stejná chyba vrátila. Ověřeno
+        // 17.9.2026 živě přes DevTools (getComputedStyle): bez týhle
+        // řádky měl obal overflowY: "auto" a hlavička měla
+        // position: sticky správně spočítané, ale rectTop hluboko
+        // v záporu — sticky se fakticky neuplatňovalo.
         overflowX: "auto",
+        overflowY: "visible",
       }}
     >
       <div
