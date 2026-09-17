@@ -1,0 +1,23 @@
+-- =====================================================================
+-- Foodtab — audit_log: dorovnat anon na stejnou úroveň jako ostatních 51
+--
+-- Doplněk k 20260917000000_granty_provoz_uklid.sql. Ta migrace
+-- odebrala anon všechno (`revoke all`) na 51 provozních tabulkách, ale
+-- audit_log řešila zvlášť — jen `revoke insert, update, delete,
+-- truncate, references, trigger`, SELECT nechala oběma rolím
+-- (authenticated ho potřebuje pro obrazovku Nastavení → Audit).
+--
+-- Nález po nasazení (17. 9. 2026, ověřeno přímým dotazem do
+-- foodtab-test): `anon` měl na audit_log pořád SELECT — jediná
+-- tabulka z celého nálezu, kde `anon` neztratil úplně všechno.
+--
+-- DATA TÍM NEUNIKLA A NEUNIKALA by: politika `audit_select` cílí jen
+-- na `authenticated` se `settings.manage`/`agents.manage`, žádná
+-- politika v public necílí na `anon` (ověřeno), takže RLS by mu
+-- nepustila žádný řádek. Je to přesně ta samá chybějící PRVNÍ linie
+-- jako u ostatních 51 tabulek před minulou migrací — jen se na ni
+-- tehdy zapomnělo u téhle jedné, protože audit_log měla vlastní,
+-- ručně psaný blok místo generického `revoke all`.
+-- =====================================================================
+
+revoke select on public.audit_log from anon;
