@@ -249,6 +249,47 @@ na autorovi zprávy místo na jiném čtenáři). [Draft PR #31](https://github.
 
 Další v pořadí (bod 2 výš): třístupňová priorita.
 
+**Doplněno 17.9.2026 v noci, pokračování (bod 2 — třístupňová
+priorita):** **HOTOVO, NENASAZENO.** Migrace
+`20260917040000_priorita_zprav.sql` — `konverzace_zpravy.priorita`
+(normal/important/urgent) jako rozšíření, `nalehava` zůstává jako
+ODVOZENÝ sloupec (`generated always as priorita = 'urgent'`), takže
+se s ním nemůže rozejít a všechno staré (RLS, `moje_rozhovory`,
+`kiosek_zpravy`, `app.doruci_se`) čte beze změny dál. `app.doruci_se`
+se záměrně NEMĚNÍ — mimo směnu doručí jen `urgent`, `important` je
+jen vizuální/řadicí váha. `poslat_zpravu` dostala `p_priorita` navíc;
+CI odhalilo, že `CREATE OR REPLACE` s přidaným parametrem nestačí
+(stará i nová signatura zůstanou vedle sebe a dvouargumentové volání
+spadne na "is not unique") — opraveno výslovným `DROP FUNCTION`
+staré signatury napřed. `notifications.priorita` se u `vzkaz.novy`
+přebírá ze zprávy. UI: composer má výběr priority místo zaškrtávátka,
+vlákno rozlišuje 3 úrovně barvou okraje (`--warn` urgent, `--info`
+important). Scénář `krok35_scenar.sql`, CI zeleno po dvou opravách
+(chybějící DROP, a `zalozit_rozhovor` čeká `employees.id` ne
+`profiles.user_id`). [Draft PR #32](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/32)
+(staví na #31) — **draft, nemerguje se bez schválení.**
+
+**Doplněno stejnou noc (bod 4 — uživatelské nastavení upozornění):**
+**HOTOVO, NENASAZENO.** Migrace `20260917050000_nastaveni_upozorneni.sql`
+— tabulka `notification_preferences` (tenant_id, user_id, kategorie,
+povoleno), RLS `user_id = auth.uid()`, žádná RPC obálka. Dvě
+kategorie: `vzkazy`, `nastenka` — obě informativní. **Směny se
+NEDAJÍ vypnout strukturálně**: CHECK na sloupci `kategorie` zná jen
+tyhle dvě hodnoty, `app.upozornit_smenu()` `app.upozorneni_povoleno`
+vůbec nevolá — není to "checkbox v UI chybí", je to "taková kategorie
+neexistuje". Vypnutí zastaví jen NOVÉ upozornění, nesahá na už
+doručené nepřečtené (ověřeno scénářem — stejné `id` přežije). UI:
+`/[rozsah]/upozorneni/nastaveni`. Scénář `krok36_scenar.sql`, CI
+zeleno napoprvé. [Draft PR #33](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/33)
+(staví na #32) — **draft, nemerguje se bez schválení.**
+
+**Tři draft PR na sobě (#31 → #32 → #33), všechny CI-zelené, žádný
+nemergovaný.** Zbývá z doporučeného pořadí: bod 3 (konfigurovatelná
+hranice naléhavosti — vyžaduje rozhodnutí Šéfíka o výchozí hodnotě,
+nejde udělat autonomně), bod 5 (hlasové zprávy — největší samostatný
+blok, vlastní etapa), bod 6 (e-mailový kanál), body 7–8 (ověření
+pokrytí Úkolů/Faktur — rychlá kontrola, ne implementace).
+
 ---
 
 ## 5. Co se NEDĚLÁ bez dalšího zadání
