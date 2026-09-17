@@ -16,10 +16,10 @@
 -- změny.
 --
 -- `poslat_zpravu` dostává NOVÝ parametr `p_priorita` navíc k existujícím
--- třem — CREATE OR REPLACE smí přidat parametry s výchozí hodnotou na
--- konec, aniž by to byla jiná funkce (PostgreSQL to výslovně dovoluje).
--- Staré volání se třemi argumenty (`poslat_zpravu(id, text, true)`,
--- krok24_scenar.sql) proto dál funguje beze změny.
+-- třem — stará (uuid,text,boolean) se proto DROPne (viz níž), ať vedle
+-- ní nezůstane souběžně dvouznačná dvojice. Staré volání se třemi
+-- argumenty (`poslat_zpravu(id, text, true)`, krok24_scenar.sql)
+-- funguje dál beze změny — jen přes JEDNU, rozšířenou funkci.
 
 -- =====================================================================
 -- KONVERZACE_ZPRAVY: priorita
@@ -67,6 +67,13 @@ comment on column public.konverzace_zpravy.nalehava is
 -- =====================================================================
 -- POSLAT_ZPRAVU: nový parametr p_priorita
 -- =====================================================================
+--
+-- CREATE OR REPLACE se starým typovým otiskem (uuid,text,boolean) tu
+-- NESTAČÍ — v praxi (ověřeno CI, run 35267094122) vedle sebe nechá OBĚ
+-- funkce a dvouargumentové volání jako `poslat_zpravu(id, text)` pak
+-- spadne na "function ... is not unique", protože defaulty obou
+-- overloadů match. Stará se proto napřed výslovně DROPne.
+drop function if exists public.poslat_zpravu(uuid, text, boolean);
 
 create or replace function public.poslat_zpravu(
   p_konverzace uuid,

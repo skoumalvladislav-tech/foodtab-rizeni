@@ -14,9 +14,12 @@
 -- omylem obcházelo doručení mimo směnu stejně jako `urgent`, dostali by
 -- lidé notifikace i mimo píchnutí za zprávu, která na to nemá právo —
 -- přesně to, co `communication.urgent` hlídá. Druhá past je stará
--- signatura `poslat_zpravu(id, text, boolean)`: `CREATE OR REPLACE`
--- s přidaným parametrem musí zůstat TATÁŽ funkce, ne nová — jinak by
--- krok24_scenar.sql (starší, boolean volání) přestal fungovat.
+-- signatura `poslat_zpravu(id, text, boolean)`: nestačí ji nahradit
+-- `CREATE OR REPLACE` s přidaným parametrem — vedle sebe zůstanou OBĚ
+-- funkce a dvouargumentové volání spadne na nejednoznačnost (ověřeno
+-- v CI, run 35267094122). Migrace proto starou explicitně DROPuje,
+-- ať existuje jen JEDNA, rozšířená funkce — a krok24_scenar.sql
+-- (starší, boolean volání) dál funguje beze změny přes ni.
 
 \set ON_ERROR_STOP on
 
@@ -43,6 +46,13 @@ select id as perla  from public.branches where slug = 'cerna-perla' \gset
 
 select user_id as sef  from public.profiles where email = 'majitel@foodtab.cz' \gset
 select user_id as cizi from public.profiles where email = 'cizi@jinafirma.cz' \gset
+
+-- p_ucastnici v zalozit_rozhovor čeká employees.id, ne user_id
+-- (20260906080000_vzkaz_vedeni_pobocka.sql, ř. 234-237: "unnest(p_ucastnici)
+-- ... where e.id = x.emp") — majitel employees řádek v testovacích
+-- datech má (ověřeno krok22, ř. 60), i když bez usek_id (krok34).
+select id as sef_emp from public.employees
+ where tenant_id = :'tenant' and user_id = :'sef' \gset
 
 insert into auth.users (id, email, raw_user_meta_data) values
   ('35350001-0000-0000-0000-000000000001', 'olda35@foodtab.cz', '{"full_name":"Olda Obyčejný"}');
@@ -73,7 +83,7 @@ select set_config('test.user_id', '35350001-0000-0000-0000-000000000001', false)
 set role authenticated;
 
 select public.zalozit_rozhovor(:'tenant', 'osobni', null, 'Priorita', null,
-  array[:'sef']::uuid[]) as osobni \gset
+  array[:'sef_emp']::uuid[]) as osobni \gset
 
 select public.poslat_zpravu(:'osobni', 'Obyčejná zpráva.') as z_normal \gset
 
