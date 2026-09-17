@@ -55,6 +55,19 @@ export type TeloUpozorneni = {
   duvod?: string
 }
 
+/**
+ * Vyžaduje tenhle druh výslovné potvrzení (ne jen otevření stránky)?
+ *
+ * Jediné místo, kde je tohle rozhodnuté — stejný důvod jako
+ * u app.doruci_se v databázi: pravidlo opsané na dvou místech se
+ * jednou rozejde. Jen zmenena/zrusena, ne nova/odebrana — zadání mluví
+ * o změně toho, co si člověk už naplánoval, ne o nové/odebrané směně.
+ * Viz supabase/migrations/20260917010000_potvrzeni_zmeny_smeny.sql.
+ */
+export function vyzadujePotvrzeni(druh: string): boolean {
+  return druh === 'smena.zmenena' || druh === 'smena.zrusena'
+}
+
 /** Nadpis podle druhu. Neznámý druh se nezamlčí — ať je vidět, že přišel. */
 export function nadpisUpozorneni(
   druh: string,
