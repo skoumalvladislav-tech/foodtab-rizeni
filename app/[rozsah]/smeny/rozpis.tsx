@@ -442,7 +442,22 @@ function TydenView({
   const zobrazitHlavickuPobocky = branchIds.length > 1;
 
   return (
-    <div style={{ overflowX: "auto" }}>
+    <div
+      style={{
+        border: "1px solid var(--line-2)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow)",
+        // overflowY musí zůstat "visible" schválně — bez toho by tenhle
+        // div (samo "overflowX: auto") podle CSS specifikace dostal
+        // i overflow-y: auto, stal by se vlastním scroll kontejnerem
+        // a "position: sticky" na hlavičce dní (níž) by se přestalo
+        // vázat na scroll stránky. Přesně proto dny při scrollování
+        // dolů "neplavaly" — sticky bylo napsané správně, ale kontext,
+        // ve kterém mělo fungovat, mu to nedovolil.
+        overflowX: "auto",
+        overflowY: "visible",
+      }}
+    >
       <table
         style={{
           width: "100%",
@@ -452,7 +467,7 @@ function TydenView({
         }}
       >
         <thead>
-          <tr style={{ background: "var(--card)", borderBottom: "1px solid var(--line)", position: "sticky", top: "var(--vysoka-lista)", zIndex: 5 }}>
+          <tr style={{ background: "var(--card)", borderBottom: "2px solid var(--line-2)", position: "sticky", top: "var(--vysoka-lista)", zIndex: 5 }}>
             <th
               style={{
                 padding: "8px 12px",
@@ -479,7 +494,7 @@ function TydenView({
                     textAlign: "center",
                     fontWeight: dnesJe ? 700 : 500,
                     color: "var(--ink)",
-                    borderLeft: "1px solid var(--line)",
+                    borderLeft: "1px solid var(--line-2)",
                     minWidth: "100px",
                     background: dnesJe
                       ? "color-mix(in srgb, var(--mosaz-sv) 16%, var(--card))"
@@ -603,7 +618,7 @@ function RadekTydne({
   const { osoba, jmeno, smenyPodleDne } = radek;
 
   return (
-    <tr style={{ borderBottom: "1px solid var(--line)" }}>
+    <tr style={{ borderBottom: "1px solid var(--line-2)" }}>
       <td
         style={{
           padding: "9px 12px",
@@ -653,7 +668,7 @@ function RadekTydne({
             style={{
               padding: "9px 12px",
               textAlign: "center",
-              borderLeft: "1px solid var(--line)",
+              borderLeft: "1px solid var(--line-2)",
               background:
                 smenyDne.length > 0
                   ? "var(--card)"
@@ -1152,7 +1167,41 @@ function MesicView({
   }
 
   return (
-    <div style={{ display: "grid", gap: "16px" }}>
+    <div
+      style={{
+        display: "grid",
+        gap: "16px",
+        padding: "16px",
+        background: "var(--card)",
+        border: "1px solid var(--line-2)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow)",
+      }}
+    >
+      {/*
+        Záhlaví dní v týdnu — dřív žádné nebylo, takže se muselo
+        počítat, který sloupec je který den (Šéfík 17.9.2026: "abych
+        věděl který den to je"). Pořadí Ne–So schválně sedí s tím, jak
+        mřížku pod ním sestavuje prvniDenTydne (getUTCDay(), 0=neděle)
+        — neměnit datovou logiku kvůli tomuhle popisku.
+      */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "8px" }}>
+        {DNY_V_TYDNU_ZKRACENE.map((nazev, i) => (
+          <div
+            key={i}
+            style={{
+              textAlign: "center",
+              fontSize: "11px",
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: ".04em",
+              color: "var(--muted)",
+            }}
+          >
+            {nazev}
+          </div>
+        ))}
+      </div>
       {tydny.map((radek_items, tydenIdx) => (
         <div
           key={tydenIdx}
@@ -1177,15 +1226,21 @@ function MesicView({
                 style={{
                   padding: "12px 8px",
                   borderRadius: "var(--radius-md)",
-                  border: denNum ? "1px solid var(--line)" : "none",
+                  border: denNum ? "1px solid var(--line-2)" : "none",
                   boxShadow: denNum && datumStr === den ? "var(--shadow-sm)" : "none",
+                  /*
+                    Okolní rám je teď taky --card (bílá) — den se
+                    směnami proto potřebuje jiné pozadí než "beze
+                    změny", jinak by v bílém rámu zmizel v bílé
+                    (stejná past jako u chipů v týdenním pohledu).
+                  */
                   background:
                     denNum && datumStr === den
                       ? "var(--branch-soft)"
                       : denNum && pocetSmeny === 0
                         ? "transparent"
                         : denNum
-                          ? "var(--card)"
+                          ? "var(--sunken)"
                           : "transparent",
                   cursor: denNum ? "pointer" : "default",
                   fontSize: "13px",
@@ -1248,6 +1303,9 @@ const DNY = [
   "sobota",
 ];
 
+/** Zkrácené názvy dní, stejné pořadí jako DNY (neděle první — MesicView). */
+const DNY_V_TYDNU_ZKRACENE = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
+
 function popisDne(datum: string, dnesni: string): string {
   const d = new Date(`${datum}T00:00:00Z`);
   const cislo = `${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`;
@@ -1267,10 +1325,16 @@ function popisDne(datum: string, dnesni: string): string {
 
 /* --- styly zadávání ------------------------------------------------ */
 
+/*
+  Barevná výplň (--branch-soft), ne jen obrys na bílé — buňka dne má
+  stejné bílé pozadí jako karta kolem ní (--card), takže samotný
+  1px obrys splýval se vším ostatním a směna se od prázdného dne
+  špatně rozeznávala (Šéfík 17.9.2026: "dny a směny se slévají").
+*/
 const chip = {
   fontSize: "11px",
   padding: "5px 7px",
-  background: "var(--card)",
+  background: "var(--branch-soft)",
   border: "1px solid var(--branch)",
   borderRadius: "var(--radius-sm)",
   color: "var(--branch)",
