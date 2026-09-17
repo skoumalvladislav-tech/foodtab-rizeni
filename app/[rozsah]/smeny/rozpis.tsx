@@ -471,19 +471,32 @@ function TydenView({
         border: "1px solid var(--line-2)",
         borderRadius: "var(--radius-lg)",
         boxShadow: "var(--shadow)",
-        // overflowY: "visible" NENÍ kosmetika — bez něj CSS specifikace
-        // tichem přidá "overflow-y: auto" k samotnému "overflow-x:
-        // auto", tenhle div se stane vlastním scroll kontejnerem a
-        // "position: sticky" na hlavičce (níž) se přestane vázat na
-        // scroll stránky. PŘESNĚ TOHLE byla oprava z úplně prvního
-        // pokusu (PR #26) — při přestavbě z <table> na grid se sem
-        // omylem nepřenesla, takže se stejná chyba vrátila. Ověřeno
-        // 17.9.2026 živě přes DevTools (getComputedStyle): bez týhle
-        // řádky měl obal overflowY: "auto" a hlavička měla
-        // position: sticky správně spočítané, ale rectTop hluboko
-        // v záporu — sticky se fakticky neuplatňovalo.
+        /*
+          PĚT POKUSŮ, TADY JE DŮVOD, PROČ PŘEDCHOZÍ NEFUNGOVALY.
+
+          overflow-x: auto a overflow-y: visible NEJDE MÍT současně na
+          jednom prvku — CSS specifikace obě osy vždycky srovná na
+          "auto", ať se do overflow-y napíše cokoli (ověřeno živě
+          přes DevTools: computed overflowY byl "auto" i po výslovném
+          zápisu "visible"). Tenhle div se tedy VŽDYCKY stane scroll
+          kontejnerem pro position:sticky uvnitř — na tom nejde nic
+          změnit.
+
+          Jenže bez vlastní omezené výšky tenhle div nikdy doopravdy
+          nepřeteče (roste přesně podle obsahu, height ≈ scrollHeight)
+          — takže i když JE technicky scroll kontejner, nic se v něm
+          reálně nescrolluje a sticky nemá vůči čemu "být přilepené".
+
+          Řešení: udělat z něj SKUTEČNÝ scrollovací panel s vlastní
+          výškou — stejný vzor, jaký appka už má a funguje u levého
+          bočního sloupce (.ft-side v globals.css: position:sticky,
+          top:var(--vysoka-lista), height:calc(100dvh - ...),
+          overflow-y:auto). Kalendář teď scroluje sám v sobě, ne celá
+          stránka kolem něj.
+        */
+        maxHeight: "calc(100dvh - var(--vysoka-lista) - 32px)",
         overflowX: "auto",
-        overflowY: "visible",
+        overflowY: "auto",
       }}
     >
       <div
@@ -509,7 +522,11 @@ function TydenView({
             background: "var(--card)",
             borderBottom: "2px solid var(--line-2)",
             position: "sticky",
-            top: "var(--vysoka-lista)",
+            // top: 0, NE var(--vysoka-lista) — obalový div teď scroluje
+            // sám v sobě (viz vysvětlení u obalu výš), takže "nahoře"
+            // znamená horní hranu JEHO VLASTNÍHO scroll rámce, ne
+            // stránky pod pevnou horní lištou.
+            top: 0,
             left: 0,
             zIndex: 7,
           }}
@@ -531,7 +548,7 @@ function TydenView({
                 borderLeft: "1px solid var(--line-2)",
                 borderBottom: "2px solid var(--line-2)",
                 position: "sticky",
-                top: "var(--vysoka-lista)",
+                top: 0,
                 zIndex: 5,
                 /*
                   Dnešek i víkend jsou mosaz — jediná zlatá barva,
