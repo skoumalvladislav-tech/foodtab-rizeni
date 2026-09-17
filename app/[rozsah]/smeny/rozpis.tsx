@@ -554,15 +554,16 @@ function TydenView({
                   Dnešek i víkend jsou mosaz — jediná zlatá barva,
                   kterou appka má (--mosaz/--mosaz-sv, viz
                   _tokeny.css) — Šéfík 17.9.2026 chtěl výslovně "lehce
-                  zlatou, kterou už používáme". Odlišují se SÍLOU
-                  odstínu, ne barvou: dnešek 16 %, víkend jen 7 % —
-                  stejný poměr jako u vzoru "jemné zvýraznění" jinde
-                  v appce (marketing/menu, vzkazy/[konverzace]).
+                  zlatou, kterou už používáme", pak "ještě víc
+                  zvýraznit". Odlišují se SÍLOU odstínu, ne barvou:
+                  dnešek zůstává nejsilnější (16 %), víkend zesílen
+                  ze 7 % na 14 % — pořád zřetelně pod dneškem, ale
+                  vizuálně vydatnější, ne jen jemný nádech.
                 */
                 background: dnesJe
                   ? "color-mix(in srgb, var(--mosaz-sv) 16%, var(--card))"
                   : vikend
-                    ? "color-mix(in srgb, var(--mosaz-sv) 7%, var(--card))"
+                    ? "color-mix(in srgb, var(--mosaz-sv) 14%, var(--card))"
                     : "var(--card)",
               }}
             >
@@ -744,7 +745,7 @@ function RadekTydne({
                   : dnesJe
                     ? "color-mix(in srgb, var(--mosaz-sv) 8%, var(--paper))"
                     : vikend
-                      ? "color-mix(in srgb, var(--mosaz-sv) 4%, var(--paper))"
+                      ? "color-mix(in srgb, var(--mosaz-sv) 7%, var(--paper))"
                       : "transparent",
             }}
           >
