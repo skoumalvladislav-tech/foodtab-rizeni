@@ -12,11 +12,12 @@ const IKONA_DRUHU: Record<Rozhovor['druh'], IkonaKlic> = {
   pobocka: 'zprava',
   mezi_pobockami: 'zprava',
   vedeni: 'praporek',
+  usek: 'kolo',
 }
 
 export type Rozhovor = {
   konverzace_id: string
-  druh: 'osobni' | 'pobocka' | 'mezi_pobockami' | 'vedeni'
+  druh: 'osobni' | 'pobocka' | 'mezi_pobockami' | 'vedeni' | 'usek'
   branch_id: string | null
   nazev: string | null
   adresat: string | null
@@ -31,6 +32,7 @@ export const NAZVY_DRUHU: Record<Rozhovor['druh'], string> = {
   pobocka: 'Pobočka',
   mezi_pobockami: 'Mezi pobočkami',
   vedeni: 'Vedení',
+  usek: 'Úsek',
 }
 
 /**

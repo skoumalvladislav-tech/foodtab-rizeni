@@ -76,6 +76,36 @@ export async function otevritKanalPobocky(formData: FormData): Promise<void> {
 }
 
 /**
+ * Otevřít kanál úseku.
+ *
+ * Stejná úvaha jako u kanálu pobočky: tahle akce ho nezakládá, jen si
+ * o něj řekne. `usek` v poli je NÁVRH z prohlížeče (pravidlo 4) —
+ * obrazovka ho tam dá jen tomu, kdo v tom úseku sám je, ale skutečné
+ * ověření dělá až `kanal_useku` v databázi proti `employees.usek_id`.
+ */
+export async function otevritKanalUseku(formData: FormData): Promise<void> {
+  const z = await zaklad(formData)
+  if (!z) return
+  const usek = String(formData.get('usek') ?? '')
+  if (!usek) return
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('kanal_useku', {
+    p_tenant: z.tenantId,
+    p_usek: usek,
+  })
+
+  if (error) {
+    redirect(
+      `/${z.rozsah}/vzkazy?chyba=${encodeURIComponent(error.message)}`,
+    )
+  }
+
+  revalidatePath(`/${z.rozsah}/vzkazy`)
+  redirect(`/${z.rozsah}/vzkazy/${String(data)}`)
+}
+
+/**
  * Odeslat zprávu do rozhovoru.
  *
  * `nalehava` se posílá jako přání, ne jako fakt. Jestli ho databáze
