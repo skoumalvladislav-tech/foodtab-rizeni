@@ -320,8 +320,19 @@ kontrola, že cesta k hlasovce sedí s konverzací, na kterou se posílá
 — storage politika sama křížové přiřazení nepokryje. UI: `HlasovkaNahravac`,
 jediný klientský ostrůvek v celém vlákně (MediaRecorder, mikrofon jde
 jen z prohlížeče), nahrává/přehrává přes podepsané odkazy. Scénář
-`krok37_scenar.sql`. Ověřeno `tsc --noEmit`, `eslint` a `next build`
-bez chyby; SQL scénář ověří CI.
+`krok37_scenar.sql`, CI zeleno po dvou opravách (zastaralý regprocedure
+otisk v krok24, `set_config` volaný AŽ ZA do-blokem, který ho čte).
+[Draft PR #34](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/34)
+(staví na #33) — **draft, nemerguje se bez schválení.**
+
+**Čtyři draft PR na sobě (#31 → #32 → #33 → #34), všechny CI-zelené,
+žádný nemergovaný.** Tohle je konec toho, co jde tuhle noc udělat
+autonomně a bezpečně: zbývá bod 3 (konfigurovatelná hranice
+naléhavosti — rozhodnutí Šéfíka o výchozí hodnotě), AI přepis k bodu 5
+(rozhodnutí Šéfíka: samostatný dodavatel, až bude vybraný) a bod 6
+(e-mailový kanál — explicitně mimo autonomní rozsah, oddíl 5 níž:
+„žádná externí aktivace e-mailu se skutečnými uživateli"). Dál se
+nepokračuje vymýšlením práce, která by tyhle brány obcházela.
 
 **Body 7–8 (ověření pokrytí Úkolů/Faktur) provedeny — jen kontrola,
 beze změny kódu:**
