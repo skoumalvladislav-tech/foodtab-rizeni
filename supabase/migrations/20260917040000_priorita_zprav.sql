@@ -51,6 +51,11 @@ comment on column public.konverzace_zpravy.priorita is
 -- beze změny — mění se jen TOHLE, jak vzniká.
 alter table public.konverzace_zpravy drop column nalehava;
 
+-- POZOR PŘI NASAZENÍ: GENEROVANÝ sloupec dopočítá a zapíše hodnotu
+-- pro KAŽDÝ existující řádek pod ACCESS EXCLUSIVE zámkem — celá
+-- tabulka se na tu dobu přepíše, ne jen změní katalog jako u obyčejné
+-- ADD COLUMN. konverzace_zpravy je živá tabulka zpráv; nasadit mimo
+-- špičku, ne uprostřed provozu. Nalezeno multi-agentní revizí.
 alter table public.konverzace_zpravy
   add column nalehava boolean
   generated always as (priorita = 'urgent') stored
