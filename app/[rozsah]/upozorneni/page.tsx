@@ -128,14 +128,27 @@ export default async function Upozorneni({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '760px' }}>
-        {neprectene > 0 ? (
-          <form action={oznacitPrectene} style={{ marginBottom: '16px' }}>
-            <input type="hidden" name="rozsah" value={rozsah} />
-            <button type="submit" className="ft-tl ft-tl-vedlejsi">
-              Označit {neprectene === 1 ? 'jedno' : `všech ${neprectene}`} za přečtené
-            </button>
-          </form>
-        ) : null}
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '12px',
+            marginBottom: '16px',
+          }}
+        >
+          {neprectene > 0 ? (
+            <form action={oznacitPrectene}>
+              <input type="hidden" name="rozsah" value={rozsah} />
+              <button type="submit" className="ft-tl ft-tl-vedlejsi">
+                Označit {neprectene === 1 ? 'jedno' : `všech ${neprectene}`} za přečtené
+              </button>
+            </form>
+          ) : null}
+          <Link href={`/${rozsah}/upozorneni/nastaveni`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+            Nastavení upozornění
+          </Link>
+        </div>
 
         {zpravy.length === 0 ? (
           <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
