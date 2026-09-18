@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import type { RozsahProp } from "@/app/[rozsah]/prepinac-rozsahu";
+import type { TeloUpozorneni } from "@/lib/upozorneni-text";
 import GlobalTopbar from "./GlobalTopbar";
 import ModuleSidebar from "./ModuleSidebar";
 import MobileBottomNav from "./MobileBottomNav";
@@ -54,6 +55,15 @@ export type SkupinaNavigace = {
   chystane: PolozkaProp[];
 };
 
+/** Řádek do rozbalovacího panelu zvonečku — jen to, co panel potřebuje. */
+export type UpozorneniProp = {
+  id: string;
+  druh: string;
+  telo: TeloUpozorneni;
+  created_at: string;
+  read_at: string | null;
+};
+
 export type AppShellProps = {
   rozsah: string;
   /** Klíč barvy pobočky z branches.color. Firemní úroveň má slate. */
@@ -70,6 +80,8 @@ export type AppShellProps = {
   iniciraly: string;
   /** Počet nepřečtených upozornění do zvonečku. */
   neprectenych: number;
+  /** Posledních pár upozornění pro rozbalovací panel zvonečku. */
+  posledniUpozorneni: UpozorneniProp[];
   moduly: ModulProp[];
   polozky: PolozkaProp[];
   nastaveni: PolozkaProp[];
@@ -98,6 +110,7 @@ export default function AppShell({
   nazevFirmy,
   iniciraly,
   neprectenych,
+  posledniUpozorneni,
   moduly,
   polozky,
   nastaveni,
@@ -187,6 +200,7 @@ export default function AppShell({
         aktivniRozsah={aktivniRozsah}
         cilRozsahu={cilRozsahu}
         neprectenych={neprectenych}
+        posledniUpozorneni={posledniUpozorneni}
         cilNastaveni={cilNastaveni}
         nazevFirmy={nazevFirmy}
         iniciraly={iniciraly}

@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 
 import PrepinacRezimu from "@/app/prepinac-rezimu";
 import Ikona from "@/app/[rozsah]/ikona";
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import PrepinacRozsahu, { type RozsahProp } from "@/app/[rozsah]/prepinac-rozsahu";
-import type { ModulProp } from "./AppShell";
+import { datumACasVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
+import { nadpisUpozorneni, obdobiRozpisu } from "@/lib/upozorneni-text";
+import type { ModulProp, UpozorneniProp } from "./AppShell";
 
 /**
  * Ikona modulu v horní liště — mockup Šéfíka ji u záložek má, appka
@@ -38,6 +41,7 @@ export default function GlobalTopbar({
   aktivniRozsah,
   cilRozsahu,
   neprectenych,
+  posledniUpozorneni,
   cilNastaveni,
   nazevFirmy,
   iniciraly,
@@ -49,10 +53,41 @@ export default function GlobalTopbar({
   aktivniRozsah: string;
   cilRozsahu: (slug: string) => string;
   neprectenych: number;
+  posledniUpozorneni: UpozorneniProp[];
   cilNastaveni: string | null;
   nazevFirmy: string;
   iniciraly: string;
 }) {
+  /*
+    Vysouvací panel místo rovnou celé stránky — zadání ("KOMUNIKACE /
+    VZKAZY 2.0", bod 15) navrhuje náhled u zvonečku, ne jen odkaz.
+    Panel jen NÁHLÍŽÍ; otevírá se z něj tatáž `/upozorneni`, kde se
+    dá i cokoli udělat (potvrdit, označit přečtené) — dvojitou
+    logiku pro totéž tady nemá cenu stavět.
+  */
+  const [otevreno, setOtevreno] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!otevreno) return;
+
+    function naKlikMimo(e: MouseEvent) {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOtevreno(false);
+      }
+    }
+    function naEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") setOtevreno(false);
+    }
+
+    document.addEventListener("mousedown", naKlikMimo);
+    document.addEventListener("keydown", naEscape);
+    return () => {
+      document.removeEventListener("mousedown", naKlikMimo);
+      document.removeEventListener("keydown", naEscape);
+    };
+  }, [otevreno]);
+
   return (
     <>
       <header className="ft-topbar">
@@ -105,38 +140,57 @@ export default function GlobalTopbar({
             Zvoneček. Číslo je počet nepřečtených — bez něj by se muselo
             klikat naslepo. Kreslí se vždycky, i s nulou: kdyby mizel,
             nešlo by se k přečteným upozorněním vrátit.
+
+            Tlačítko místo odkazu — otevírá panel NA MÍSTĚ, ne celou
+            stránku. Panel jen náhlíží; klik na položku i "Zobrazit
+            všechna" stejně vedou na `/upozorneni`, kde se dá s nimi
+            i něco udělat (potvrdit, označit přečtené) — druhou logiku
+            pro totéž tady nemá cenu stavět.
           */}
-          <Link
-            href={`/${rozsah}/upozorneni`}
-            className="ft-ikona ram"
-            title={neprectenych > 0 ? `Upozornění (${neprectenych} nepřečtených)` : "Upozornění"}
-            aria-label={neprectenych > 0 ? `Upozornění, ${neprectenych} nepřečtených` : "Upozornění"}
-            style={{ position: "relative" }}
-          >
-            <Ikona klic="zprava" />
-            {neprectenych > 0 ? (
-              <span
-                aria-hidden="true"
-                style={{
-                  position: "absolute",
-                  top: "-2px",
-                  insetInlineEnd: "-2px",
-                  minWidth: "17px",
-                  height: "17px",
-                  padding: "0 4px",
-                  borderRadius: "999px",
-                  background: "var(--bad)",
-                  color: "#fff",
-                  fontSize: "11px",
-                  lineHeight: "17px",
-                  textAlign: "center",
-                  fontWeight: 700,
-                }}
-              >
-                {neprectenych > 9 ? "9+" : neprectenych}
-              </span>
+          <div ref={panelRef} style={{ position: "relative" }}>
+            <button
+              type="button"
+              onClick={() => setOtevreno((v) => !v)}
+              className="ft-ikona ram"
+              title={neprectenych > 0 ? `Upozornění (${neprectenych} nepřečtených)` : "Upozornění"}
+              aria-label={neprectenych > 0 ? `Upozornění, ${neprectenych} nepřečtených` : "Upozornění"}
+              aria-expanded={otevreno}
+              aria-haspopup="true"
+              style={{ position: "relative", border: "none", background: "none", padding: 0, font: "inherit", cursor: "pointer" }}
+            >
+              <Ikona klic="zprava" />
+              {neprectenych > 0 ? (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    top: "-2px",
+                    insetInlineEnd: "-2px",
+                    minWidth: "17px",
+                    height: "17px",
+                    padding: "0 4px",
+                    borderRadius: "999px",
+                    background: "var(--bad)",
+                    color: "#fff",
+                    fontSize: "11px",
+                    lineHeight: "17px",
+                    textAlign: "center",
+                    fontWeight: 700,
+                  }}
+                >
+                  {neprectenych > 9 ? "9+" : neprectenych}
+                </span>
+              ) : null}
+            </button>
+
+            {otevreno ? (
+              <PanelUpozorneni
+                rozsah={rozsah}
+                upozorneni={posledniUpozorneni}
+                onZavrit={() => setOtevreno(false)}
+              />
             ) : null}
-          </Link>
+          </div>
 
           {cilNastaveni ? (
             <>
@@ -199,5 +253,100 @@ function Modul({ modul, vybrany }: { modul: ModulProp; vybrany: boolean }) {
       <Ikona klic={ikona} />
       {modul.nazev}
     </Link>
+  );
+}
+
+/**
+ * Rozbalovací panel u zvonečku.
+ *
+ * Jen náhled — potvrdit, označit přečtené a odkazy na konkrétní objekt
+ * umí plná stránka `/upozorneni`, tady by to bylo zdvojení. Klik na
+ * položku i patičku vedou tam.
+ */
+function PanelUpozorneni({
+  rozsah,
+  upozorneni,
+  onZavrit,
+}: {
+  rozsah: string;
+  upozorneni: UpozorneniProp[];
+  onZavrit: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-label="Upozornění"
+      style={{
+        position: "absolute",
+        top: "calc(100% + 8px)",
+        insetInlineEnd: 0,
+        width: "min(340px, calc(100vw - 24px))",
+        maxHeight: "min(480px, calc(100vh - 80px))",
+        overflowY: "auto",
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow)",
+        zIndex: 50,
+      }}
+    >
+      <div
+        style={{
+          padding: "12px 14px",
+          borderBottom: "1px solid var(--line)",
+          fontSize: "14px",
+          fontWeight: 700,
+        }}
+      >
+        Upozornění
+      </div>
+
+      {upozorneni.length === 0 ? (
+        <p style={{ margin: 0, padding: "16px 14px", fontSize: "13px", color: "var(--muted)" }}>
+          Zatím tu nic není.
+        </p>
+      ) : (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {upozorneni.map((z) => (
+            <li key={z.id} style={{ borderBottom: "1px solid var(--line)" }}>
+              <Link
+                href={`/${rozsah}/upozorneni`}
+                onClick={onZavrit}
+                style={{
+                  display: "block",
+                  padding: "10px 14px",
+                  color: "inherit",
+                  textDecoration: "none",
+                  borderInlineStart: z.read_at ? "3px solid transparent" : "3px solid var(--mosaz)",
+                }}
+              >
+                <strong style={{ display: "block", fontSize: "13.5px" }}>
+                  {nadpisUpozorneni(z.druh, z.telo, obdobiRozpisu)}
+                </strong>
+                <span style={{ fontSize: "12px", color: "var(--muted)" }}>
+                  {datumACasVPasmu(z.created_at, ZONA_VYCHOZI)}
+                  {!z.read_at ? " · nové" : ""}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Link
+        href={`/${rozsah}/upozorneni`}
+        onClick={onZavrit}
+        style={{
+          display: "block",
+          padding: "10px 14px",
+          fontSize: "13px",
+          fontWeight: 600,
+          color: "var(--mosaz)",
+          textDecoration: "none",
+        }}
+      >
+        Zobrazit všechna upozornění →
+      </Link>
+    </div>
   );
 }

@@ -14,11 +14,12 @@ import {
 } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
+import type { TeloUpozorneni } from "@/lib/upozorneni-text";
 import Sdeleni from "@/app/sdeleni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import CekaNaOpravneni from "./ceka-na-opravneni";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
-import AppShell, { type ModulProp, type PolozkaProp } from "@/components/shell/AppShell";
+import AppShell, { type ModulProp, type PolozkaProp, type UpozorneniProp } from "@/components/shell/AppShell";
 import type { RozsahProp } from "./prepinac-rozsahu";
 
 /**
@@ -204,6 +205,7 @@ export default async function RozsahLayout({
     { data: rozhovoryData },
     { data: nastenkaData },
     { data: nastenkaPrectena },
+    { data: posledniUpozornenaData },
   ] = await Promise.all([
     supabaseForCount
       .from("notifications")
@@ -225,6 +227,20 @@ export default async function RozsahLayout({
       .eq("user_id", user.id)
       .limit(200)
       .then((r) => ({ data: r.error ? null : r.data })),
+    /*
+      Náhled do rozbalovacího panelu zvonečku — jen z `notifications`
+      (vzkazy a nástěnka mají vlastní obrazovky s vlastním seznamem,
+      sem by nesly cizí formát řádku). Posledních pár, ne jen
+      nepřečtené — kdo si zrovna všechno označil za přečtené, nemá
+      vidět prázdný panel, jako by se nic nikdy nestalo.
+    */
+    supabaseForCount
+      .from("notifications")
+      .select("id, druh, telo, created_at, read_at")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .limit(6)
+      .then((r) => ({ data: r.error ? null : r.data })),
   ])
 
   const neprecteneVzkazy = rozhovoryData
@@ -235,6 +251,14 @@ export default async function RozsahLayout({
     ? nastenkaData.filter((z) => !prectenaIds.has((z as { id: string }).id)).length
     : 0
   const neprectenych = (neprectenychUpozorneni ?? 0) + neprecteneVzkazy + neprecteneNastenka
+
+  const posledniUpozorneni: UpozorneniProp[] = (posledniUpozornenaData ?? []).map((z) => ({
+    id: String(z.id),
+    druh: String(z.druh),
+    telo: (z.telo ?? {}) as TeloUpozorneni,
+    created_at: String(z.created_at),
+    read_at: (z.read_at as string | null) ?? null,
+  }))
 
   /*
     Kdo čeká na přidělení oprávnění.
@@ -271,6 +295,7 @@ export default async function RozsahLayout({
       nazevFirmy={ctx.tenant.name}
       iniciraly={iniciraly(user.email)}
       neprectenych={neprectenych ?? 0}
+      posledniUpozorneni={posledniUpozorneni}
       moduly={moduly}
       polozky={polozky}
       nastaveni={nastaveni}

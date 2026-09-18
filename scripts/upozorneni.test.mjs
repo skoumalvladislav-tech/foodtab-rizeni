@@ -25,7 +25,9 @@ import fs from 'node:fs'
 
 import {
   denCesky,
+  denZkraceny,
   nadpisUpozorneni,
+  obdobiRozpisu,
   popisMarketingu,
   popisOpravneni,
   popisZapomenuteho,
@@ -146,6 +148,17 @@ for (const t of [popisZapomenuteho(mujOdchod), popisZapomenuteho(cizi)]) {
 ma('bez dne se nevymýšlí datum', denCesky(undefined), 'neznámého dne')
 ma('nesmyslné datum se nepřebarví na dnešek', denCesky('nesmysl'), 'nesmysl')
 
+/*
+  denZkraceny/obdobiRozpisu se 17.9.2026 v noci přesunuly z
+  app/[rozsah]/upozorneni/page.tsx do lib/upozorneni-text.ts (rozbalovací
+  panel zvonečku je taky potřebuje) — přesně proto, aby na ně šla
+  napsat kontrola, ne aby zůstaly zamčené v serverové komponentě.
+*/
+ma('denZkraceny dá den v týdnu zkráceně', denZkraceny('2026-09-10'), 'čt 10. 9.')
+ma('nesmyslné datum se nepřebarví', denZkraceny('nesmysl'), 'nesmysl')
+ma('bez obou dat je období prázdné', obdobiRozpisu(undefined, undefined), '')
+ma('období spojí dva zkrácené dny', obdobiRozpisu('2026-09-10', '2026-09-12'), 'čt 10. 9. – so 12. 9.')
+
 console.log('\n== Obrazovka ty funkce opravdu volá ==')
 
 const stranka = fs.readFileSync(
@@ -153,7 +166,7 @@ const stranka = fs.readFileSync(
   'utf8',
 )
 ma('nadpis se bere z lib/upozorneni-text',
-  stranka.includes('nadpisUpozorneni(z.druh, z.telo, obdobi)'), true)
+  stranka.includes('nadpisUpozorneni(z.druh, z.telo, obdobiRozpisu)'), true)
 ma('a popis oprávnění taky', stranka.includes('popisOpravneni(z.telo)'), true)
 ma('i popis zapomenutého odchodu',
   stranka.includes('popisZapomenuteho(z.telo)'), true)
