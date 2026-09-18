@@ -326,13 +326,38 @@ otisk v krok24, `set_config` volaný AŽ ZA do-blokem, který ho čte).
 (staví na #33) — **draft, nemerguje se bez schválení.**
 
 **Čtyři draft PR na sobě (#31 → #32 → #33 → #34), všechny CI-zelené,
-žádný nemergovaný.** Tohle je konec toho, co jde tuhle noc udělat
-autonomně a bezpečně: zbývá bod 3 (konfigurovatelná hranice
+žádný nemergovaný.** Zbývá bod 3 (konfigurovatelná hranice
 naléhavosti — rozhodnutí Šéfíka o výchozí hodnotě), AI přepis k bodu 5
 (rozhodnutí Šéfíka: samostatný dodavatel, až bude vybraný) a bod 6
 (e-mailový kanál — explicitně mimo autonomní rozsah, oddíl 5 níž:
-„žádná externí aktivace e-mailu se skutečnými uživateli"). Dál se
-nepokračuje vymýšlením práce, která by tyhle brány obcházela.
+„žádná externí aktivace e-mailu se skutečnými uživateli").
+
+**Doplněno stejnou noc (bod 7 — zvoneček jako rozbalovací panel):**
+**HOTOVO.** Jediná zbývající položka z „co opravdu chybí", která
+nezávisí na žádné migraci ani na rozhodnutí Šéfíka — proto samostatná
+větev `komunikace-panel-upozorneni` **z `main`**, ne stack na #31–34.
+`GlobalTopbar` (klientská komponenta) dostala lokální stav: klik na
+zvoneček otevře panel s posledními upozorněními místo přechodu na
+`/upozorneni`; panel jen náhlíží, potvrdit/označit/hluboké odkazy
+zůstávají na plné stránce. `app/[rozsah]/layout.tsx` dostal pátý
+paralelní dotaz (posledních 6 z `notifications`). Cestou nalezena
+a opravena reálná regrese vlastním refaktorem: `denZkraceny`/
+`obdobiRozpisu` se přesunuly z `/upozorneni/page.tsx` do
+`lib/upozorneni-text.ts` (panel je taky potřebuje) a
+`scripts/upozorneni.test.mjs` kontroloval přesný textový vzorec
+volání, který přejmenováním přestal sedět — chyceno skutečným
+spuštěním testu (`node scripts/upozorneni.test.mjs`), ne odhadem.
+Ověřeno `tsc --noEmit`, `eslint`, Node testem a `next build` bez
+chyby; appka se v prohlížeči spustí a vykreslí bez pádu, samotný
+panel se skutečnými daty nešlo ověřit vizuálně (vyžaduje přihlášení
+reálným účtem). [Draft PR #35](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/35)
+— **draft, nemerguje se bez schválení**, Vercel nasazení náhledu
+prošlo.
+
+**Tohle je konec toho, co jde tuhle noc udělat autonomně a bezpečně.**
+Vše zbývající vyžaduje buď rozhodnutí Šéfíka (bod 3, AI přepis), nebo
+je explicitně mimo bezpečnostní bránu (e-mail). Dál se nepokračuje
+vymýšlením práce, která by tyhle brány obcházela.
 
 **Body 7–8 (ověření pokrytí Úkolů/Faktur) provedeny — jen kontrola,
 beze změny kódu:**
