@@ -173,6 +173,24 @@ export function denCesky(iso?: string): string {
   return `${dny[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`
 }
 
+/**
+ * „st 10. 9.“ — zkrácený tvar pro seznamy, kde je den vedle sebe víc
+ * (rozpis, výpis upozornění). Není totéž co denCesky() — ten píše celé
+ * jméno dne do věty ("Máte novou směnu pondělí…"), tohle je pro sloupec.
+ */
+export function denZkraceny(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return iso
+  const dny = ['ne', 'po', 'út', 'st', 'čt', 'pá', 'so']
+  return `${dny[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`
+}
+
+/** „st 10. 9. – pá 12. 9.“ — rozsah vydaného rozpisu v hlavičce upozornění. */
+export function obdobiRozpisu(od?: string, doKdy?: string): string {
+  if (!od || !doKdy) return ''
+  return `${denZkraceny(od)} – ${denZkraceny(doKdy)}`
+}
+
 /** „Má oprávnění Servis, Restaurace Černá Perla.“ */
 export function popisOpravneni(telo: TeloUpozorneni): string {
   const kusy = [telo.role, ...(telo.pobocky ?? [])].filter(Boolean)

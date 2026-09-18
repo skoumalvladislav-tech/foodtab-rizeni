@@ -5,7 +5,9 @@ import { getUser } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import { sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
+  denZkraceny,
   nadpisUpozorneni,
+  obdobiRozpisu,
   popisMarketingu,
   popisOpravneni,
   popisPinu,
@@ -167,7 +169,7 @@ export default async function Upozorneni({
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
                   <strong style={{ fontSize: '15px' }}>
-                    {nadpisUpozorneni(z.druh, z.telo, obdobi)}
+                    {nadpisUpozorneni(z.druh, z.telo, obdobiRozpisu)}
                   </strong>
                   <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
                     {z.read_at ? 'přečteno' : 'nové'}
@@ -323,7 +325,7 @@ export default async function Upozorneni({
                 <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'grid', gap: '4px' }}>
                   {(z.telo.zmeny ?? []).map((zm, i) => (
                     <li key={i} style={{ fontSize: '14px' }}>
-                      <strong>{den(zm.den)}</strong>{' '}
+                      <strong>{denZkraceny(zm.den)}</strong>{' '}
                       {zm.zmena === 'cas' && zm.drive_od ? (
                         <>
                           <span style={{ textDecoration: 'line-through', color: 'var(--muted)' }}>
@@ -357,18 +359,6 @@ export default async function Upozorneni({
   )
 }
 
-function obdobi(od?: string, doKdy?: string): string {
-  if (!od || !doKdy) return ''
-  return `${den(od)} – ${den(doKdy)}`
-}
-
-/** „st 10. 9.“ — den v týdnu pomáhá víc než datum samotné. */
-function den(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`)
-  if (Number.isNaN(d.getTime())) return iso
-  const dny = ['ne', 'po', 'út', 'st', 'čt', 'pá', 'so']
-  return `${dny[d.getUTCDay()]} ${d.getUTCDate()}. ${d.getUTCMonth() + 1}.`
-}
 
 /** Z „07:30:00“ udělá „7:30“. */
 function cas(t: string | null): string {
