@@ -229,4 +229,66 @@ reset role;
 
 
 \echo ''
+\echo '== 9. DELETE jen na sirotky, odeslaná hlasovka nesmazatelná ==='
+
+/*
+  Přidáno DODATEČNĚ (multi-agentní revize): kbelík měl jen SELECT
+  a INSERT politiku. Úklid siroty v odeslatHlasovku (po neúspěšném
+  poslat_zpravu smazat právě nahraný soubor) by proto pod session
+  uživatele tiše neprošel a soubor by zůstal navždy — a bez téhle
+  kontroly by to krok37 neodhalil, protože :'osobni'/nahravka.webm
+  z oddílu 5 se testovala jen na SELECT/INSERT, nikdy na DELETE.
+*/
+
+-- Mazání pod RLS nekřičí, jen nic nesmaže (stejná úvaha jako
+-- marketing8_scenar.sql, „PŘEJMENOVÁNÍ DO CIZÍ FIRMY") — kontroluje
+-- se proto, že řádek pořád je, ne že delete spadl.
+select set_config('test.user_id', '37370001-0000-0000-0000-000000000001', false);
+set role authenticated;
+
+delete from storage.objects
+ where bucket_id = 'hlasovky'
+   and name = :'tenant' || '/' || :'osobni' || '/nahravka.webm';
+
+select pg_temp.check('odeslanou hlasovku (připojenou ke zprávě) nejde smazat',
+  exists (select 1 from storage.objects
+          where bucket_id = 'hlasovky'
+            and name = :'tenant' || '/' || :'osobni' || '/nahravka.webm'));
+
+-- Nahraje se DRUHÝ soubor, který k žádné zprávě nikdy nepřipojí —
+-- simuluje neúspěšné poslat_zpravu po úspěšném nahrání. Tenhle
+-- SMAZAT jde: je to přesně scénář úklidu siroty.
+insert into storage.objects (bucket_id, name)
+values ('hlasovky', :'tenant' || '/' || :'osobni' || '/sirotek.webm');
+
+delete from storage.objects
+ where bucket_id = 'hlasovky'
+   and name = :'tenant' || '/' || :'osobni' || '/sirotek.webm';
+
+select pg_temp.check('nepřipojenou (osiřelou) hlasovku smazat jde',
+  not exists (select 1 from storage.objects
+              where bucket_id = 'hlasovky'
+                and name = :'tenant' || '/' || :'osobni' || '/sirotek.webm'));
+
+reset role;
+
+-- Kdo není účastník, nesmaže ani sirotka.
+insert into storage.objects (bucket_id, name)
+values ('hlasovky', :'tenant' || '/' || :'osobni' || '/sirotek2.webm');
+
+select set_config('test.user_id', '37370002-0000-0000-0000-000000000002', false);
+set role authenticated;
+
+delete from storage.objects
+ where bucket_id = 'hlasovky'
+   and name = :'tenant' || '/' || :'osobni' || '/sirotek2.webm';
+
+reset role;
+select pg_temp.check('kdo není účastník, sirotka taky nesmaže',
+  exists (select 1 from storage.objects
+          where bucket_id = 'hlasovky'
+            and name = :'tenant' || '/' || :'osobni' || '/sirotek2.webm'));
+
+
+\echo ''
 \echo '== KROK 37 HOTOV ========================================'

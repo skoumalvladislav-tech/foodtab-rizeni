@@ -37,15 +37,30 @@ alter table public.notification_preferences enable row level security;
 
 -- Přímý přístup, žádná RPC obálka — vlastní přepínač nemá co skrývat
 -- ani co ověřovat navíc, na rozdíl od zápisu do konverzace_zpravy.
+--
+-- `app.is_member(tenant_id)` navíc k `user_id = auth.uid()`: bez něj
+-- by člověk se dvěma firmami mohl PostgREST voláním mimo appku (bez
+-- bezpecnyRozsah) zapsat řádek pro tenant_id, ke kterému nepatří —
+-- žádný únik dat (pořád jen jeho vlastní user_id), ale obchází to
+-- rozsahové ověření, které appka jinak vždycky dělá. Nalezeno
+-- multi-agentní revizí.
 create policy notification_preferences_vlastni
   on public.notification_preferences
   for all
   to authenticated
-  using (user_id = (select auth.uid()))
-  with check (user_id = (select auth.uid()));
+  using (user_id = (select auth.uid()) and app.is_member(tenant_id))
+  with check (user_id = (select auth.uid()) and app.is_member(tenant_id));
 
 grant select, insert, update, delete on public.notification_preferences to authenticated;
 revoke all on public.notification_preferences from anon;
+
+-- `truncate` obchází RLS a výchozí práva ho udělují taky (viz
+-- 20260917000000_granty_provoz_uklid.sql, které tohle retrofitovalo
+-- na 51 dalších tabulek tutéž noc) — nová tabulka potřebuje tenhle
+-- řádek od prvního dne, ne až v dalším úklidu. Nalezeno multi-agentní
+-- revizí; scripts/provoz-granty.test.mjs by to bylo chytlo, kdyby
+-- bylo zapojené do CI (není — jen ruční spuštění).
+revoke truncate, references, trigger on public.notification_preferences from authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -71,6 +86,17 @@ comment on function app.upozorneni_povoleno(uuid, uuid, text) is
   'Výchozí je zapnuto — chybějící řádek znamená povoleno, ne vypnuto. '
   'Volá se jen z triggerů na oznameni/vzkaz; app.upozornit_smenu() ho '
   'nevolá vůbec, takže směny obejít nejde.';
+
+-- Volá se JEN zevnitř dvou SECURITY DEFINER triggerů (vlastník má
+-- práva bez ohledu na granty) — přímé RPC volání odkudkoli jinud tu
+-- nemá co dělat. Bez tohohle revoke by (default execute na PUBLIC při
+-- CREATE FUNCTION) mohl kdokoli přihlášený zavolat
+-- upozorneni_povoleno(cizí_tenant, cizí_user, 'vzkazy') a zjistit,
+-- jestli si cizí člověk v cizí firmě vypnul upozornění — únik
+-- informace mimo RLS na notification_preferences. Nalezeno
+-- multi-agentní revizí (chybělo na rozdíl od každé sousední funkce
+-- v týhle migraci).
+revoke all on function app.upozorneni_povoleno(uuid, uuid, text) from public, anon, authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -123,6 +149,14 @@ end $$;
 -- NÁSTĚNKA: filtr podle kategorie 'nastenka'
 -- ---------------------------------------------------------------------
 
+-- Rozšíření o usek_id a position_id se ztratilo v prvním pokusu o tuhle
+-- migraci: zkopíroval jsem tělo z 20260913110000 (tři větve), ne
+-- z aktuálního 20260913160000_nastenka_adresat.sql (pět větví,
+-- employee_id > usek_id > position_id > branch_id > firma), které
+-- vzniklo o deset dní dřív. Nasazená by tahle chyba tiše rozeslala
+-- oznámení pro úsek/pozici celé pobočce nebo celé firmě. Nalezeno
+-- multi-agentní revizí, ne testem — krok36_scenar.sql testuje jen
+-- pobočku a celou firmu, ne usek_id/position_id.
 create or replace function app.upozornit_na_oznameni_trg()
 returns trigger
 language plpgsql volatile security definer set search_path = ''
@@ -137,11 +171,21 @@ begin
      where e.tenant_id  = NEW.tenant_id
        and e.user_id    is not null
        and e.deleted_at is null
+       -- Vlastní oznámení neupozorňuje (C3/2): author_id = profiles.user_id.
        and (NEW.author_id is null or e.user_id <> NEW.author_id)
+       -- Adresování: employee_id má nejvyšší prioritu, pak úsek, pozice,
+       -- pobočka; null ve všech = celá firma.
        and (
-         (NEW.employee_id is not null and e.id = NEW.employee_id)
-         or (NEW.employee_id is null and NEW.branch_id is not null and e.branch_id = NEW.branch_id)
-         or (NEW.employee_id is null and NEW.branch_id is null)
+         (NEW.employee_id  is not null and e.id          = NEW.employee_id)
+         or (NEW.usek_id   is not null and e.usek_id     = NEW.usek_id
+               and NEW.employee_id is null)
+         or (NEW.position_id is not null and e.position_id = NEW.position_id
+               and NEW.employee_id is null and NEW.usek_id is null)
+         or (NEW.branch_id is not null
+               and NEW.employee_id is null and NEW.usek_id is null and NEW.position_id is null
+               and e.branch_id = NEW.branch_id)
+         or (NEW.employee_id is null and NEW.usek_id is null
+               and NEW.position_id is null and NEW.branch_id is null)
        )
        and app.upozorneni_povoleno(NEW.tenant_id, e.user_id, 'nastenka')
   loop

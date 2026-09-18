@@ -185,8 +185,20 @@ export async function odeslatHlasovku(formData: FormData): Promise<void> {
   const supabase = await getServerSupabase()
   const kam = cestaVUlozisti(z.tenantId, konverzace, randomUUID(), priponaZMime(zvuk.type))
 
-  const nahrano = await supabase.storage.from(KBELIK).upload(kam, new Uint8Array(await zvuk.arrayBuffer()), {
-    contentType: zvuk.type || 'audio/webm',
+  /*
+    Storage porovnává Content-Type s allowed_mime_types DOSLOVA — typ
+    z MediaRecorder ale v Chrome/Firefoxu nese i kodek
+    ("audio/webm;codecs=opus"), zatímco kbelík zná jen holé typy.
+    Bez odseknutí ";codecs=..." by se nahrání odmítlo v přesně tom
+    prohlížeči, který je výchozí. Kbelík dál kontroluje kontejner
+    (webm/ogg/mp4/mpeg) — na kodeku uvnitř mu nezáleží.
+
+    `zvuk` je File (Blob) a storage-js ho umí nahrát přímo — ruční
+    arrayBuffer()/Uint8Array by celou nahrávku zbytečně natáhl celou
+    do paměti Node procesu, než by se poslala dál.
+  */
+  const nahrano = await supabase.storage.from(KBELIK).upload(kam, zvuk, {
+    contentType: (zvuk.type || 'audio/webm').split(';')[0].trim(),
     upsert: false,
   })
 

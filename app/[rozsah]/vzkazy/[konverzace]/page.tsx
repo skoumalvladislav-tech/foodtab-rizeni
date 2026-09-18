@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
-import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/hlasove-zpravy'
+import { KBELIK, PLATNOST_ODKAZU_S, mmss } from '@/lib/hlasove-zpravy'
 import { DotazSelhal, sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
@@ -389,7 +389,7 @@ export default async function Rozhovor({
                       <audio controls src={odkazyHlasovek.get(z.zvuk_cesta)} style={{ height: '32px', maxWidth: '260px' }} />
                       {z.zvuk_delka_s ? (
                         <span style={{ marginLeft: '8px', fontSize: '12px', color: 'var(--muted)' }}>
-                          {Math.floor(z.zvuk_delka_s / 60)}:{String(z.zvuk_delka_s % 60).padStart(2, '0')}
+                          {mmss(z.zvuk_delka_s)}
                         </span>
                       ) : null}
                     </div>

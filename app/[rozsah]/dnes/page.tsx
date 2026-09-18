@@ -355,24 +355,42 @@ export default async function Dnes({
     přeškrtnutý text s vysvětlením, jen by matlo.
   */
   const POSLEDNICH_VZKAZU = 4;
-  const { data: zpravyData } = await supabase
-    .from("konverzace_zpravy")
-    .select("id, autor, text, vytvoreno_kdy")
-    .is("stornovano_kdy", null)
-    .order("vytvoreno_kdy", { ascending: false })
-    .limit(POSLEDNICH_VZKAZU);
+  const dotazNaPosledniVzkazy = (sloupce: string) =>
+    supabase
+      .from("konverzace_zpravy")
+      .select(sloupce)
+      .is("stornovano_kdy", null)
+      .order("vytvoreno_kdy", { ascending: false })
+      .limit(POSLEDNICH_VZKAZU);
+
+  let { data: zpravyData, error: chybaVzkazu } = await dotazNaPosledniVzkazy(
+    "id, autor, text, zvuk_cesta, vytvoreno_kdy",
+  );
+  // Sloupec z 20260917060000_hlasove_zpravy — dokud neproběhne migrací,
+  // dotaz se zopakuje bez něj (stejný vzor jako jinde v appce).
+  if (chybaVzkazu && sloupecNeexistuje(chybaVzkazu)) {
+    ({ data: zpravyData, error: chybaVzkazu } = await dotazNaPosledniVzkazy(
+      "id, autor, text, vytvoreno_kdy",
+    ));
+  }
   const posledniVzkazy: { id: string; jmeno: string; text: string; kdy: string }[] = [];
   if (zpravyData && zpravyData.length > 0) {
-    const autoriIds = [...new Set(zpravyData.map((z) => z.autor).filter((a): a is string => a !== null))];
+    const radky = zpravyData as unknown as {
+      id: string; autor: string | null; text: string; zvuk_cesta?: string | null; vytvoreno_kdy: string;
+    }[];
+    const autoriIds = [...new Set(radky.map((z) => z.autor).filter((a): a is string => a !== null))];
     const { data: autoriData } = autoriIds.length > 0
       ? await supabase.from("employees").select("id, full_name").in("id", autoriIds)
       : { data: [] as { id: string; full_name: string }[] };
     const jmenaAutoru = new Map((autoriData ?? []).map((a) => [a.id as string, String(a.full_name ?? "").trim()]));
-    for (const z of zpravyData) {
+    for (const z of radky) {
       posledniVzkazy.push({
         id: z.id,
         jmeno: (z.autor ? jmenaAutoru.get(z.autor) : null) || "Někdo, kdo mezitím odešel",
-        text: z.text,
+        // Hlasovka nemá text (viz 20260917060000_hlasove_zpravy) —
+        // bez týhle větve by náhled zůstal prázdný, jako by zpráva
+        // nic neobsahovala.
+        text: z.text || (z.zvuk_cesta ? "🎤 Hlasovka" : ""),
         // ZONA_VYCHOZI přímo, ne přes `zona` — ta se přiřazuje až ve
         // vykreslovací části níž, tady bychom na ni sáhli dřív, než
         // vznikne.

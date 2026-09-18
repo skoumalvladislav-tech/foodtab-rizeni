@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { MAX_DELKA_S } from '@/lib/hlasove-zpravy'
+import { AUDIO_BITRATE_BPS, MAX_DELKA_S, mmss, priponaZMime } from '@/lib/hlasove-zpravy'
 import { odeslatHlasovku } from '../akce'
 
 /**
@@ -31,13 +31,6 @@ function vybratTyp(): string | undefined {
   return TYPY_PODLE_PREFERENCE.find((t) => MediaRecorder.isTypeSupported(t))
 }
 
-/** „1:07" z počtu sekund. */
-function mmss(s: number): string {
-  const m = Math.floor(s / 60)
-  const zbytek = s % 60
-  return `${m}:${String(zbytek).padStart(2, '0')}`
-}
-
 export default function HlasovkaNahravac({
   rozsah,
   konverzace,
@@ -55,6 +48,17 @@ export default function HlasovkaNahravac({
   const blobRef = useRef<Blob | null>(null)
   const odkazRef = useRef<string | null>(null)
   const casovacRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  /*
+    Nastaví se SYNCHRONNĚ na začátku zacitNahravat, ne až po
+    `setStav('nahravani')`. `stav` se mění až po `await
+    getUserMedia(...)` — rychlý dvojklik (nebo druhý klik, než se
+    stihne zobrazit svolení prohlížeče) by jinak spustil funkci
+    podruhé, než React vůbec překreslí tlačítko, a druhé volání by
+    tiše přepsalo streamRef/recorderRef/casovacRef prvního: mikrofon
+    z prvního pokusu by zůstal navždy zapnutý a jeho časovač by nikdy
+    nešel zastavit.
+  */
+  const zahajujeSeRef = useRef(false)
 
   // Úklid při odchodu ze stránky — mikrofon nesmí zůstat zapnutý
   // a odkaz na náhled by jinak nikdo neuvolnil.
@@ -67,9 +71,13 @@ export default function HlasovkaNahravac({
   }, [])
 
   async function zacitNahravat() {
+    if (zahajujeSeRef.current) return
+    zahajujeSeRef.current = true
+
     setChyba(null)
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setChyba('Tenhle prohlížeč neumí nahrávat zvuk.')
+      zahajujeSeRef.current = false
       return
     }
 
@@ -78,6 +86,7 @@ export default function HlasovkaNahravac({
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch {
       setChyba('Přístup k mikrofonu se nepovedl. Povolte ho v prohlížeči a zkuste to znovu.')
+      zahajujeSeRef.current = false
       return
     }
 
@@ -85,7 +94,14 @@ export default function HlasovkaNahravac({
     chunkyRef.current = []
 
     const typ = vybratTyp()
-    const recorder = typ ? new MediaRecorder(stream, { mimeType: typ }) : new MediaRecorder(stream)
+    const recorder = new MediaRecorder(stream, {
+      ...(typ ? { mimeType: typ } : {}),
+      // Bez tohohle dá MediaRecorder v některých prohlížečích hudební
+      // kvalitu a nahrávka blízko MAX_DELKA_S naráží na 1MB strop
+      // Server Actions v Next.js dřív, než se vůbec pošle — viz
+      // lib/hlasove-zpravy.ts.
+      audioBitsPerSecond: AUDIO_BITRATE_BPS,
+    })
     recorderRef.current = recorder
 
     recorder.ondataavailable = (e) => {
@@ -101,23 +117,39 @@ export default function HlasovkaNahravac({
     setStav('nahravani')
     setUplynulo(0)
 
+    // Updater zůstává čistý — jen počítá. Zastavení při dosažení
+    // MAX_DELKA_S řeší samostatný useEffect níž, ne vedlejší účinek
+    // uvnitř setState. React v StrictModu volá updater dvakrát;
+    // vedlejší účinek uvnitř by se tak mohl spustit dvakrát taky.
     casovacRef.current = setInterval(() => {
-      setUplynulo((s) => {
-        const dalsi = s + 1
-        // Automatické zastavení — stejný strop jako Storage
-        // (file_size_limit), jen dřív a s vysvětlením, ne chybou.
-        if (dalsi >= MAX_DELKA_S) {
-          ukoncitNahravani()
-        }
-        return dalsi
-      })
+      setUplynulo((s) => s + 1)
     }, 1000)
   }
 
+  // Automatické zastavení — stejný strop jako Storage (file_size_limit),
+  // jen dřív a s vysvětlením, ne chybou.
+  useEffect(() => {
+    if (stav === 'nahravani' && uplynulo >= MAX_DELKA_S) {
+      ukoncitNahravani()
+    }
+  }, [stav, uplynulo])
+
+  /**
+   * Musí být bezpečné zavolat víckrát za sebou beze změny stavu.
+   * Dosáhne se sem tolika cestami (tlačítko „Ukončit", dvojklik na
+   * něj, i automatický strop výš), že spoléhat na to, že se zavolá
+   * přesně jednou, by dřív nebo později spadlo na
+   * `MediaRecorder.stop()` vyhozeném `InvalidStateError` nad už
+   * zastaveným nahráváním.
+   */
   function ukoncitNahravani() {
-    if (casovacRef.current) clearInterval(casovacRef.current)
-    casovacRef.current = null
-    recorderRef.current?.stop()
+    if (casovacRef.current) {
+      clearInterval(casovacRef.current)
+      casovacRef.current = null
+    }
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      recorderRef.current.stop()
+    }
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
   }
@@ -128,6 +160,7 @@ export default function HlasovkaNahravac({
     blobRef.current = null
     chunkyRef.current = []
     setUplynulo(0)
+    zahajujeSeRef.current = false
     setStav('klid')
   }
 
@@ -136,11 +169,7 @@ export default function HlasovkaNahravac({
     setStav('odesilani')
     setChyba(null)
 
-    const pripona = blobRef.current.type.includes('mp4')
-      ? 'mp4'
-      : blobRef.current.type.includes('ogg')
-        ? 'ogg'
-        : 'webm'
+    const pripona = priponaZMime(blobRef.current.type)
 
     const formData = new FormData()
     formData.set('rozsah', rozsah)

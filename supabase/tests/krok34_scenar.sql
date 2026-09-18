@@ -96,6 +96,11 @@ insert into public.membership_branches (membership_id, branch_id) values
   (:'clen_iva',  :'perla');
 
 select set_config('test.tenant', :'tenant', false);
+-- Bez tohohle current_setting('test.usek_kuchyne', true) v oddílech
+-- 3/4 tiše vrací NULL (missing_ok) a tři kontroly tam projdou i nad
+-- rozbitým kódem, aniž by skutečné usek_kuchyne id vůbec zkusily —
+-- nalezeno multi-agentní revizí.
+select set_config('test.usek_kuchyne', :'usek_kuchyne', false);
 
 
 \echo ''

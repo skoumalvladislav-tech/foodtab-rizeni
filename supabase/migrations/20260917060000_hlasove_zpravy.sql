@@ -22,13 +22,16 @@
 -- dosah na pobočku.
 --
 -- ---------------------------------------------------------------------
--- ZPRÁVA JE STORNO, NE VÝMAZ (pravidlo 9) — PROTO ŽÁDNÁ UPDATE/DELETE
--- POLITIKA
+-- ZPRÁVA JE STORNO, NE VÝMAZ (pravidlo 9) — PROTO ŽÁDNÁ UPDATE POLITIKA
+-- A DELETE JEN NA SIROTKY
 --
 -- Text zprávy se dnes taky nedá měnit ani mazat přímo — jen stornovat
--- přes `stornovat_zpravu`. Hlasovka je stejná: jednou nahraná, zůstává.
--- Kdyby šla přepsat/smazat přímo v úložišti, dal by se název pod
--- odkazem, který si někdo uložil, změnit na jiný obsah.
+-- přes `stornovat_zpravu`. Hlasovka jednou PŘIPOJENÁ KE ZPRÁVĚ je
+-- stejná: nesmazatelná. DELETE politika níž smí smazat jen soubor,
+-- na který zatím neukazuje žádná zpráva — úklid nepovedeného nahrání,
+-- ne cesta, jak vzít zpátky odeslanou hlasovku. Kdyby šel přepsat
+-- soubor pod odkazem, který už někdo má, změnil by se mu obsah beze
+-- stopy — proto žádná UPDATE politika vůbec.
 -- =====================================================================
 
 
@@ -123,11 +126,22 @@ grant execute on function app.hlasovka_cesta_rozsah(text) to authenticated, serv
 
 
 -- ---------------------------------------------------------------------
--- POLITIKY — jen SELECT a INSERT (viz hlavička: storno, ne přepis)
+-- POLITIKY — SELECT, INSERT a DELETE OMEZENÝ NA SIROTKY
 --
--- Obě se ptají na app.je_ucastnik — stejné právo, jaké potřebuje
--- poslat_zpravu/číst konverzaci. Kdyby se lišilo, šlo by nahrát
--- hlasovku tam, kam by se nedala poslat textová zpráva, nebo naopak.
+-- Všechny tři se ptají na app.je_ucastnik — stejné právo, jaké
+-- potřebuje poslat_zpravu/číst konverzaci. Kdyby se lišilo, šlo by
+-- nahrát hlasovku tam, kam by se nedala poslat textová zpráva, nebo
+-- naopak.
+--
+-- DELETE NENÍ VÝJIMKA Z "storno, ne výmaz" (hlavička výš) — je
+-- ZÚŽENÝ, aby ji neporušil. `odeslatHlasovku` po neúspěšném
+-- poslat_zpravu smaže právě nahraný soubor (úklid siroty, stejná
+-- úvaha jako nahrátFotku v marketingu); bez téhle politiky ten úklid
+-- pod session uživatele tiše neprojde (RLS ho odmítne, výsledek se
+-- nekontroluje) a soubor zůstane navždy. Politika proto smí smazat
+-- jen cestu, na kterou zatím NEUKAZUJE žádná zpráva — jakmile
+-- poslat_zpravu hlasovku připojí ke zprávě, `not exists` selže
+-- a soubor je od té chvíle nesmazatelný, přesně jako text zprávy.
 -- ---------------------------------------------------------------------
 
 create policy hlasovky_select on storage.objects for select to authenticated
@@ -143,6 +157,16 @@ create policy hlasovky_insert on storage.objects for insert to authenticated
     and exists (
       select 1 from app.hlasovka_cesta_rozsah(storage.objects.name) r
        where app.je_ucastnik(r.konverzace_id)));
+
+create policy hlasovky_delete_sirotka on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'hlasovky'
+    and exists (
+      select 1 from app.hlasovka_cesta_rozsah(storage.objects.name) r
+       where app.je_ucastnik(r.konverzace_id))
+    and not exists (
+      select 1 from public.konverzace_zpravy z
+       where z.zvuk_cesta = storage.objects.name));
 
 
 -- =====================================================================
@@ -167,11 +191,13 @@ returns uuid
 language plpgsql volatile security definer set search_path = ''
 as $$
 declare
-  v_tenant   uuid;
-  v_ja       uuid;
-  v_id       uuid;
-  v_priorita text;
-  v_text     text := coalesce(p_text, '');
+  v_tenant           uuid;
+  v_ja               uuid;
+  v_id               uuid;
+  v_priorita         text;
+  v_text             text := coalesce(p_text, '');
+  v_cesta_tenant     uuid;
+  v_cesta_konverzace uuid;
 begin
   select k.tenant_id into v_tenant from public.konverzace k where k.id = p_konverzace;
 
@@ -203,11 +229,23 @@ begin
     poslat_zpravu k JINÉ. Storage politika sama tenhle křížový případ
     nepokryje, protože se dívá jen na cestu při nahrávání, ne na to,
     kam se cesta později přiřadí.
+
+    Rozebírá se přes app.hlasovka_cesta_rozsah — STEJNÝ parser, který
+    používají politiky úložiště výš. Ruční regex nad stejným tvarem
+    cesty by byl druhá, nezávislá definice "jak se cesta skládá" — dvě
+    místa, která se musí měnit spolu a nic to nevynucuje. Nalezeno
+    multi-agentní revizí.
   */
-  if p_zvuk_cesta is not null
-     and p_zvuk_cesta !~ ('^' || v_tenant::text || '/' || p_konverzace::text || '/') then
-    raise exception 'Cesta k hlasovce nesedí s touhle konverzací.'
-      using errcode = 'check_violation';
+  if p_zvuk_cesta is not null then
+    select r.tenant_id, r.konverzace_id
+      into v_cesta_tenant, v_cesta_konverzace
+      from app.hlasovka_cesta_rozsah(p_zvuk_cesta) r;
+
+    if v_cesta_tenant is distinct from v_tenant
+       or v_cesta_konverzace is distinct from p_konverzace then
+      raise exception 'Cesta k hlasovce nesedí s touhle konverzací.'
+        using errcode = 'check_violation';
+    end if;
   end if;
 
   v_ja := app.muj_employee(v_tenant);

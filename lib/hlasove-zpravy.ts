@@ -28,6 +28,19 @@ export const PLATNOST_ODKAZU_S = 3600
 export const MAX_DELKA_S = 180
 
 /**
+ * Datový tok nahrávky (bit/s), vynucený explicitně na MediaRecorder.
+ *
+ * Server Action v Next.js má bez zvláštního nastavení strop na tělo
+ * požadavku 1 MB — mnohem míň, než 10MB limit kbelíku. Bez vlastního
+ * `audioBitsPerSecond` dá MediaRecorder v některých prohlížečích
+ * hudební kvalitu (desítky až stovky kb/s), a nahrávka blízko
+ * MAX_DELKA_S by na tenhle strop narazila dřív, než se vůbec dostane
+ * do `odeslatHlasovku` — 24 kb/s × 180 s ≈ 540 kB, s rezervou i pod
+ * multipart režií.
+ */
+export const AUDIO_BITRATE_BPS = 24000
+
+/**
  * Cesta v úložišti: firma / konverzace / soubor.
  *
  * Stejná úvaha jako u cestaVUlozisti pro marketing, jen s konverzací
@@ -45,4 +58,11 @@ export function priponaZMime(mime: string): string {
   if (mime.includes('ogg')) return 'ogg'
   if (mime.includes('mpeg')) return 'mp3'
   return 'webm'
+}
+
+/** „1:07“ z počtu sekund — společné pro nahrávač i vlákno zpráv. */
+export function mmss(s: number): string {
+  const m = Math.floor(s / 60)
+  const zbytek = s % 60
+  return `${m}:${String(zbytek).padStart(2, '0')}`
 }
