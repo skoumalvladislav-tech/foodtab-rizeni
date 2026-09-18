@@ -289,6 +289,76 @@ hranice naléhavosti — vyžaduje rozhodnutí Šéfíka o výchozí hodnotě,
 nejde udělat autonomně), bod 5 (hlasové zprávy — největší samostatný
 blok, vlastní etapa), bod 6 (e-mailový kanál).
 
+**Skutečná chyba nalezená a opravená při stavbě bodu 5, zpětně i v #32
+a #33 (ne nová práce v samostatné PR, protože šlo o opravu, ne
+funkci):** `/vzkazy/[konverzace]/page.tsx` četl sloupec `priorita`
+přímo, bez tolerance na to, že v ostré databázi ještě může být jen
+starý `nalehava boolean` — kód a databáze se nasazují NEZÁVISLE
+(Vercel nasadí kód z `main` hned po mergi, migrace čeká na ruční
+`db push`). Po mergi #32 samotné by tahle stránka spadla KAŽDÉMU, dokud
+by migrace neproběhla. Opraveno stejným vzorem jako `upozorneni/page.tsx`
+(`acknowledged_at`) — dotaz se při „sloupec neexistuje" zopakuje se
+starým sloupcem. Nalezeno při stavbě navazující práce, ne testem
+(scénáře běží proti čerstvě zmigrované databázi) — je to mezera
+v pokrytí testy, zapsáno jako zjištění pro příště.
+
+**Doplněno stejnou noc, pokračování (bod 5 — hlasové zprávy, BEZ AI
+přepisu):** **ROZHODNUTÍ ŠÉFÍKA 17.9.2026 v noci** — Claude API nemá
+vstup pro zvuk (jen text/obrázky/PDF), AI přepis by potřeboval nového
+dodavatele (Whisper API, Deepgram, Google Speech-to-Text…) s vlastním
+klíčem a náklady. Šéfík zvolil: nahrávání a přehrávání ANO, přepis NE
+(zatím). **HOTOVO, NENASAZENO.** Migrace `20260917060000_hlasove_zpravy.sql`
+— `konverzace_zpravy.zvuk_cesta`/`zvuk_delka_s`, sloupec `text`
+uvolněný na prázdný (zpráva má text NEBO zvuk, aspoň jedno). Soukromý
+kbelík `hlasovky`, mirror `20260913170000_marketing_ulozne.sql`
+(cesta `tenant/konverzace/soubor`, politika `app.je_ucastnik` — stejné
+právo jako čtení zprávy samotné, ne zvlášť vymyšlené). `poslat_zpravu`
+dostala `p_zvuk_cesta`/`p_zvuk_delka_s` — a POPRVÉ výslovně DROPuje
+starou signaturu před `CREATE OR REPLACE` (nález z #32: přidání
+parametru samotné nestačí, nechá vedle sebe dvě funkce). Navíc
+kontrola, že cesta k hlasovce sedí s konverzací, na kterou se posílá
+— storage politika sama křížové přiřazení nepokryje. UI: `HlasovkaNahravac`,
+jediný klientský ostrůvek v celém vlákně (MediaRecorder, mikrofon jde
+jen z prohlížeče), nahrává/přehrává přes podepsané odkazy. Scénář
+`krok37_scenar.sql`, CI zeleno po dvou opravách (zastaralý regprocedure
+otisk v krok24, `set_config` volaný AŽ ZA do-blokem, který ho čte).
+[Draft PR #34](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/34)
+(staví na #33) — **draft, nemerguje se bez schválení.**
+
+**Čtyři draft PR na sobě (#31 → #32 → #33 → #34), všechny CI-zelené,
+žádný nemergovaný.** Zbývá bod 3 (konfigurovatelná hranice
+naléhavosti — rozhodnutí Šéfíka o výchozí hodnotě), AI přepis k bodu 5
+(rozhodnutí Šéfíka: samostatný dodavatel, až bude vybraný) a bod 6
+(e-mailový kanál — explicitně mimo autonomní rozsah, oddíl 5 níž:
+„žádná externí aktivace e-mailu se skutečnými uživateli").
+
+**Doplněno stejnou noc (bod 7 — zvoneček jako rozbalovací panel):**
+**HOTOVO.** Jediná zbývající položka z „co opravdu chybí", která
+nezávisí na žádné migraci ani na rozhodnutí Šéfíka — proto samostatná
+větev `komunikace-panel-upozorneni` **z `main`**, ne stack na #31–34.
+`GlobalTopbar` (klientská komponenta) dostala lokální stav: klik na
+zvoneček otevře panel s posledními upozorněními místo přechodu na
+`/upozorneni`; panel jen náhlíží, potvrdit/označit/hluboké odkazy
+zůstávají na plné stránce. `app/[rozsah]/layout.tsx` dostal pátý
+paralelní dotaz (posledních 6 z `notifications`). Cestou nalezena
+a opravena reálná regrese vlastním refaktorem: `denZkraceny`/
+`obdobiRozpisu` se přesunuly z `/upozorneni/page.tsx` do
+`lib/upozorneni-text.ts` (panel je taky potřebuje) a
+`scripts/upozorneni.test.mjs` kontroloval přesný textový vzorec
+volání, který přejmenováním přestal sedět — chyceno skutečným
+spuštěním testu (`node scripts/upozorneni.test.mjs`), ne odhadem.
+Ověřeno `tsc --noEmit`, `eslint`, Node testem a `next build` bez
+chyby; appka se v prohlížeči spustí a vykreslí bez pádu, samotný
+panel se skutečnými daty nešlo ověřit vizuálně (vyžaduje přihlášení
+reálným účtem). [Draft PR #35](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/35)
+— **draft, nemerguje se bez schválení**, Vercel nasazení náhledu
+prošlo.
+
+**Tohle je konec toho, co jde tuhle noc udělat autonomně a bezpečně.**
+Vše zbývající vyžaduje buď rozhodnutí Šéfíka (bod 3, AI přepis), nebo
+je explicitně mimo bezpečnostní bránu (e-mail). Dál se nepokračuje
+vymýšlením práce, která by tyhle brány obcházela.
+
 **Body 7–8 (ověření pokrytí Úkolů/Faktur) provedeny — jen kontrola,
 beze změny kódu:**
 

@@ -36,9 +36,13 @@ export async function ulozitNastaveni(formData: FormData): Promise<void> {
     updated_at: new Date().toISOString(),
   }))
 
-  await supabase
+  const { error } = await supabase
     .from('notification_preferences')
     .upsert(radky, { onConflict: 'tenant_id,user_id,kategorie' })
+
+  if (error) {
+    redirect(`/${rozsah}/upozorneni/nastaveni?chyba=${encodeURIComponent(error.message)}`)
+  }
 
   redirect(`/${rozsah}/upozorneni/nastaveni?ulozeno=1`)
 }

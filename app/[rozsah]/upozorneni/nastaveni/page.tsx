@@ -40,10 +40,10 @@ export default async function NastaveniUpozorneni({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ ulozeno?: string }>
+  searchParams: Promise<{ ulozeno?: string; chyba?: string }>
 }) {
   const { rozsah } = await params
-  const { ulozeno } = await searchParams
+  const { ulozeno, chyba } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
@@ -106,7 +106,21 @@ export default async function NastaveniUpozorneni({
           </Link>
         </p>
 
-        {ulozeno ? (
+        {chyba ? (
+          <p
+            style={{
+              margin: '0 0 16px',
+              padding: '10px 12px',
+              border: '1px solid var(--bad)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'var(--bad-bg)',
+              color: 'var(--bad)',
+              fontSize: '14px',
+            }}
+          >
+            {chyba}
+          </p>
+        ) : ulozeno ? (
           <p
             style={{
               margin: '0 0 16px',

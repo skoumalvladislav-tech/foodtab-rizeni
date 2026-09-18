@@ -4,12 +4,14 @@ import Link from 'next/link'
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
+import { KBELIK, PLATNOST_ODKAZU_S, mmss } from '@/lib/hlasove-zpravy'
 import { DotazSelhal, sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import SeznamRozhovoru, { type Rozhovor } from '../seznam-rozhovoru'
 import { oznacitPrecteno, poslatZpravu, stornovatZpravu } from '../akce'
+import HlasovkaNahravac from './hlasovka-nahravac'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +41,8 @@ type Zprava = {
   priorita: Priorita
   vytvoreno_kdy: string
   stornovano_kdy: string | null
+  zvuk_cesta: string | null
+  zvuk_delka_s: number | null
 }
 
 export default async function Rozhovor({
@@ -164,18 +168,26 @@ export default async function Rozhovor({
       .limit(POCET)
 
   let { data: zpravyData, error: chybaZpravy } = await dotazNaZpravy(
-    'id, autor, text, priorita, vytvoreno_kdy, stornovano_kdy',
+    'id, autor, text, priorita, vytvoreno_kdy, stornovano_kdy, zvuk_cesta, zvuk_delka_s',
   )
 
   /*
-    Sloupec `priorita` je z migrace 20260917040000 — dokud neproběhne,
-    fyzicky tam pořád je jen starý `nalehava boolean`. Dotaz se
-    zopakuje s ním a priorita se odvodí (true → urgent, jinak normal).
-    Bez tohohle by tahle stránka spadla hned po mergi do main, protože
-    kód a databáze se nasazují nezávisle — Vercel nasadí kód okamžitě,
-    migrace čeká na ruční `db push`. Stejný vzor jako upozorneni/page.tsx.
+    Sloupce zvuk_cesta/zvuk_delka_s jsou z 20260917060000, priorita
+    z 20260917040000 — dokud migrace neproběhnou, dotaz se postupně
+    zjednodušuje až na nejstarší tvar (jen `nalehava boolean`, žádný
+    zvuk). Bez tohohle by tahle stránka spadla hned po mergi do main,
+    protože kód a databáze se nasazují nezávisle — Vercel nasadí kód
+    okamžitě, migrace čeká na ruční `db push`. Stejný vzor jako
+    upozorneni/page.tsx.
   */
   let maPrioritu = true
+  let maZvuk = true
+  if (chybaZpravy && sloupecNeexistuje(chybaZpravy)) {
+    maZvuk = false
+    ;({ data: zpravyData, error: chybaZpravy } = await dotazNaZpravy(
+      'id, autor, text, priorita, vytvoreno_kdy, stornovano_kdy',
+    ))
+  }
   if (chybaZpravy && sloupecNeexistuje(chybaZpravy)) {
     maPrioritu = false
     ;({ data: zpravyData, error: chybaZpravy } = await dotazNaZpravy(
@@ -193,7 +205,25 @@ export default async function Rozhovor({
       : ((z.nalehava as boolean) ? 'urgent' : 'normal'),
     vytvoreno_kdy: z.vytvoreno_kdy as string,
     stornovano_kdy: z.stornovano_kdy as string | null,
+    zvuk_cesta: maZvuk ? (z.zvuk_cesta as string | null) : null,
+    zvuk_delka_s: maZvuk ? (z.zvuk_delka_s as number | null) : null,
   })) satisfies Zprava[]
+
+  // Podepsané odkazy na hlasovky — kbelík je soukromý, přehrává se jen
+  // přes krátkodobý odkaz vydaný až po kontrole app.je_ucastnik
+  // (politika úložiště). Jeden dávkový dotaz pro celé vlákno.
+  const cestyHlasovek = zpravy
+    .map((z) => z.zvuk_cesta)
+    .filter((c): c is string => c !== null)
+  const odkazyHlasovek = new Map<string, string>()
+  if (cestyHlasovek.length > 0) {
+    const { data: podepsane } = await supabase.storage
+      .from(KBELIK)
+      .createSignedUrls(cestyHlasovek, PLATNOST_ODKAZU_S)
+    for (const p of podepsane ?? []) {
+      if (p.signedUrl && p.path) odkazyHlasovek.set(p.path, p.signedUrl)
+    }
+  }
 
   // Jména autorů. `full_name` je ve sloupcovém grantu, telefon a e-mail
   // schválně ne — ty se čtou jen průzorem v Lidech.
@@ -331,20 +361,39 @@ export default async function Rozhovor({
                       .join(' · ')}
                   </p>
 
-                  <p
-                    style={{
-                      margin: '4px 0 0',
-                      fontSize: '15px',
-                      lineHeight: 1.5,
-                      whiteSpace: 'pre-wrap',
-                      // Stažená zpráva nemizí — jen je vidět, že ji
-                      // někdo stáhl (pravidlo 9).
-                      textDecoration: stornovana ? 'line-through' : 'none',
-                      opacity: stornovana ? 0.55 : 1,
-                    }}
-                  >
-                    {z.text}
-                  </p>
+                  {z.text ? (
+                    <p
+                      style={{
+                        margin: '4px 0 0',
+                        fontSize: '15px',
+                        lineHeight: 1.5,
+                        whiteSpace: 'pre-wrap',
+                        // Stažená zpráva nemizí — jen je vidět, že ji
+                        // někdo stáhl (pravidlo 9).
+                        textDecoration: stornovana ? 'line-through' : 'none',
+                        opacity: stornovana ? 0.55 : 1,
+                      }}
+                    >
+                      {z.text}
+                    </p>
+                  ) : null}
+
+                  {/*
+                    Hlasovka — BEZ přepisu (rozhodnutí Šéfíka, viz
+                    hlavička 20260917060000_hlasove_zpravy.sql). Odkaz
+                    je krátkodobý a podepsaný, vydaný výš dávkově pro
+                    celé vlákno — kbelík je soukromý.
+                  */}
+                  {z.zvuk_cesta && odkazyHlasovek.get(z.zvuk_cesta) ? (
+                    <div style={{ margin: '6px 0 0', opacity: stornovana ? 0.55 : 1 }}>
+                      <audio controls src={odkazyHlasovek.get(z.zvuk_cesta)} style={{ height: '32px', maxWidth: '260px' }} />
+                      {z.zvuk_delka_s ? (
+                        <span style={{ marginLeft: '8px', fontSize: '12px', color: 'var(--muted)' }}>
+                          {mmss(z.zvuk_delka_s)}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
 
                   {moje && !stornovana ? (
                     <form action={stornovatZpravu} style={{ marginTop: '8px' }}>
@@ -473,6 +522,12 @@ export default async function Rozhovor({
             </div>
           </form>
         )}
+
+        {!hlavicka.uzavreno_kdy ? (
+          <div style={{ marginTop: '10px' }}>
+            <HlasovkaNahravac rozsah={rozsah} konverzace={konverzace} />
+          </div>
+        ) : null}
 
         {/*
           Push do mobilu zatím nechodí a NEPÍŠE SE, že chodí. Věta
