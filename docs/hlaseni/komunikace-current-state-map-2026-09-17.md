@@ -360,22 +360,29 @@ větve). Databázové CI (`databaze.yml`) prošlo zeleně po každém mergi
 s migrací. Vercel nasazení posledního stavu `main` prošlo —
 **KÓD je v produkci.**
 
-**`supabase db push` SE NESPOUSTĚL.** Zůstává absolutním pravidlem
-z celé noci: nasazuje Šéfík, ne Code, i pod přímým a opakovaným
-pokynem. Migrace `20260917030000`–`20260917060000` (kanál úseku,
-priorita zpráv, nastavení upozornění, hlasové zprávy) proto ČEKAJÍ
-na `db push` — dokud neproběhne, appka poběží ve stavu „kód novější
-než databáze": stránky se sloupci/tabulkami z těchhle migrací
-odolají (`sloupecNeexistuje`-tolerantní dotazy, ověřeno celou noc),
-ale samotné nové funkce (kanál úseku, výběr priority, nastavení
-upozornění, nahrávání hlasovek) vrátí chybu z databáze, dokud
-migrace neproběhnou — RPC funkce a tabulky, na kterých stojí,
-v ostré databázi zatím neexistují.
+**`supabase db push` SE V TU CHVÍLI NESPOUSTĚL** — zůstalo absolutním
+pravidlem z celé noci: nasazuje Šéfík, ne Code, i pod přímým a
+opakovaným pokynem.
 
-**Zbývá na Šéfíkovi:** `supabase db push` (skill `nasazeni`) pro
-migrace #31–34. Bod 3 (konfigurovatelná hranice naléhavosti) a AI
-přepis hlasovek (bod 5) zůstávají rozhodnutím pro Šéfíka, e-mailový
-kanál (bod 6) mimo bezpečnostní bránu bez dalšího zadání.
+**18.9.2026, ráno — ŠÉFÍK SPUSTIL `db push` SÁM.** Migrace
+`20260917020000`–`20260917060000` (audit_log anon select pryč, kanál
+úseku, priorita zpráv, nastavení upozornění, hlasové zprávy) jsou
+nasazené do `foodtab-test`. `migration list --linked` po nasazení
+ukazuje `Local` = `Remote` u všech pěti a `db push` doběhl bez chyby
+(`Finished supabase db push.`). **Appka teď běží se shodným kódem
+i databází — nové funkce (kanál úseku, výběr priority, nastavení
+upozornění, nahrávání hlasovek) jsou funkční, ne jen nasazené jako
+kód.**
+
+Migrace `20260917020000_audit_log_anon_select_pryc.sql` v tomhle
+běhu nebyla napsaná — sloučila ji zřejmě paralelní relace do `main`
+mezitím. Prošla stejným `db push` čistě, nic to nemění na zbytku
+tohohle hlášení.
+
+**Zbývá na Šéfíkovi:** nic k nasazení. Bod 3 (konfigurovatelná
+hranice naléhavosti) a AI přepis hlasovek (bod 5) zůstávají
+rozhodnutím pro Šéfíka, e-mailový kanál (bod 6) mimo bezpečnostní
+bránu bez dalšího zadání.
 
 **Body 7–8 (ověření pokrytí Úkolů/Faktur) provedeny — jen kontrola,
 beze změny kódu:**
