@@ -315,12 +315,21 @@ export default async function Ukoly({
           odpoví větou místo hláškou o porušení `check`.
         */}
         {smiZadat ? (
-          <details id="zadat-ukol" style={ramecekFormulare}>
+          <details style={ramecekFormulare}>
             <summary style={{ cursor: "pointer", fontSize: "14px", fontWeight: 600 }}>
               + Zadat úkol
             </summary>
 
-            <form action={zadatUkol} style={{ marginTop: "12px" }}>
+            {/*
+              `id` je schválně na formuláři, ne na `details`. Odkaz
+              „+ Zadat úkol“ z prázdného stavu (níž) míří na `#zadat-ukol`
+              a spoléhá na to, že prohlížeč sám rozbalí `details`, když
+              cíl kotvy leží uvnitř skrytého obsahu — `details` samotný
+              je ale vidět pořád (jen sbalený), takže odkaz na jeho
+              vlastní `id` by ho k otevření nedonutil a tlačítko by
+              vypadalo, že nereaguje.
+            */}
+            <form id="zadat-ukol" action={zadatUkol} style={{ marginTop: "12px" }}>
               <input type="hidden" name="rozsah" value={rozsah} />
 
               <fieldset style={poleSkupina}>
