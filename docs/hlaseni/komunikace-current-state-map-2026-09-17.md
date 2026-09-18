@@ -350,14 +350,32 @@ spuštěním testu (`node scripts/upozorneni.test.mjs`), ne odhadem.
 Ověřeno `tsc --noEmit`, `eslint`, Node testem a `next build` bez
 chyby; appka se v prohlížeči spustí a vykreslí bez pádu, samotný
 panel se skutečnými daty nešlo ověřit vizuálně (vyžaduje přihlášení
-reálným účtem). [Draft PR #35](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/35)
-— **draft, nemerguje se bez schválení**, Vercel nasazení náhledu
-prošlo.
+reálným účtem). [PR #35](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/35)
 
-**Tohle je konec toho, co jde tuhle noc udělat autonomně a bezpečně.**
-Vše zbývající vyžaduje buď rozhodnutí Šéfíka (bod 3, AI přepis), nebo
-je explicitně mimo bezpečnostní bránu (e-mail). Dál se nepokračuje
-vymýšlením práce, která by tyhle brány obcházela.
+**18.9.2026 — VÝSLOVNÝ POKYN ŠÉFÍKA „vše nasaď do ostré verze":**
+všech pět PR (#31 → #32 → #33 → #34 → #35) sloučeno do `main`, ve
+správném pořadí (stack #31–34 postupně přenastaven na `main` jako
+base po mergi předchozího, aby se sloučilo tam, ne do smergnuté
+větve). Databázové CI (`databaze.yml`) prošlo zeleně po každém mergi
+s migrací. Vercel nasazení posledního stavu `main` prošlo —
+**KÓD je v produkci.**
+
+**`supabase db push` SE NESPOUSTĚL.** Zůstává absolutním pravidlem
+z celé noci: nasazuje Šéfík, ne Code, i pod přímým a opakovaným
+pokynem. Migrace `20260917030000`–`20260917060000` (kanál úseku,
+priorita zpráv, nastavení upozornění, hlasové zprávy) proto ČEKAJÍ
+na `db push` — dokud neproběhne, appka poběží ve stavu „kód novější
+než databáze": stránky se sloupci/tabulkami z těchhle migrací
+odolají (`sloupecNeexistuje`-tolerantní dotazy, ověřeno celou noc),
+ale samotné nové funkce (kanál úseku, výběr priority, nastavení
+upozornění, nahrávání hlasovek) vrátí chybu z databáze, dokud
+migrace neproběhnou — RPC funkce a tabulky, na kterých stojí,
+v ostré databázi zatím neexistují.
+
+**Zbývá na Šéfíkovi:** `supabase db push` (skill `nasazeni`) pro
+migrace #31–34. Bod 3 (konfigurovatelná hranice naléhavosti) a AI
+přepis hlasovek (bod 5) zůstávají rozhodnutím pro Šéfíka, e-mailový
+kanál (bod 6) mimo bezpečnostní bránu bez dalšího zadání.
 
 **Body 7–8 (ověření pokrytí Úkolů/Faktur) provedeny — jen kontrola,
 beze změny kódu:**
