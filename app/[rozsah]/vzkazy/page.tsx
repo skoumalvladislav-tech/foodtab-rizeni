@@ -9,14 +9,15 @@ import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
 import Nastenka from './nastenka'
 import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from './seznam-rozhovoru'
-import { otevritKanalPobocky, zalozitVzkazVedeni } from './akce'
+import { otevritKanalPobocky, otevritKanalUseku, zalozitVzkazVedeni } from './akce'
 
-type FiltrKlic = 'vse' | 'neprectene' | 'pobocka' | 'prime'
+type FiltrKlic = 'vse' | 'neprectene' | 'pobocka' | 'usek' | 'prime'
 
 const FILTRY: { klic: FiltrKlic; nazev: string }[] = [
   { klic: 'vse', nazev: 'Vše' },
   { klic: 'neprectene', nazev: 'Nepřečtené' },
   { klic: 'pobocka', nazev: 'Pobočka' },
+  { klic: 'usek', nazev: 'Úsek' },
   { klic: 'prime', nazev: 'Přímé' },
 ]
 
@@ -158,6 +159,34 @@ export default async function Rozhovory({
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
 
   /*
+    Kanál MÉHO úseku — stejná úvaha jako u kanálu pobočky výš (řádek
+    o "KANÁL POBOČKY SE NEZAKLÁDÁ"): tlačítko ho jen otevře, databáze
+    ho při prvním použití vyrobí. Úsek je vlastnost ČLOVĚKA
+    (employees.usek_id — Nastavení → Lidé), ne pobočky, takže se
+    nebere z rozsahu v adrese, ale z vlastního zaměstnaneckého
+    záznamu. Kdo úsek nemá přiřazený, tlačítko vůbec neuvidí — nemá
+    co otevřít.
+  */
+  const { data: mujZaznam } = await supabase
+    .from('employees')
+    .select('usek_id')
+    .eq('tenant_id', tenantId)
+    .eq('user_id', user.id)
+    .is('deleted_at', null)
+    .maybeSingle()
+  const mujUsekId = (mujZaznam?.usek_id as string | null) ?? null
+
+  let nazevMehoUseku: string | null = null
+  if (mujUsekId) {
+    const { data: usekData } = await supabase
+      .from('useky')
+      .select('nazev')
+      .eq('id', mujUsekId)
+      .maybeSingle()
+    nazevMehoUseku = (usekData?.nazev as string | undefined) ?? null
+  }
+
+  /*
     Náhled poslední zprávy do seznamu vlevo — UX redesign, druhé kolo
     (oddíl 8: "last message preview"). `moje_rozhovory` dává jen počty,
     ne text, takže se sáhne na `konverzace_zpravy` zvlášť — RLS
@@ -186,6 +215,7 @@ export default async function Rozhovory({
   function projdeFiltrem(r: Rozhovor): boolean {
     if (filtrAktivni === 'neprectene') return r.neprectenych > 0
     if (filtrAktivni === 'pobocka') return r.druh === 'pobocka' || r.druh === 'mezi_pobockami'
+    if (filtrAktivni === 'usek') return r.druh === 'usek'
     if (filtrAktivni === 'prime') return r.druh === 'osobni' || r.druh === 'vedeni'
     return true
   }
@@ -409,6 +439,22 @@ export default async function Rozhovory({
                 <input type="hidden" name="rozsah" value={rozsah} />
                 <button type="submit" className="ft-tl ft-tl-male">
                   + Otevřít kanál pobočky {scope.branchName}
+                </button>
+              </form>
+            ) : null}
+
+            {/*
+              Kanál úseku, stejná úvaha jako kanál pobočky výš — jen
+              dosah je "mám ten usek_id sám u sebe", ne pobočka
+              z adresy. Kdo úsek nemá přiřazený (Nastavení → Lidé),
+              tlačítko vůbec neuvidí.
+            */}
+            {mujUsekId ? (
+              <form action={otevritKanalUseku} style={{ marginBottom: '10px' }}>
+                <input type="hidden" name="rozsah" value={rozsah} />
+                <input type="hidden" name="usek" value={mujUsekId} />
+                <button type="submit" className="ft-tl ft-tl-male">
+                  + Otevřít kanál úseku {nazevMehoUseku ?? ''}
                 </button>
               </form>
             ) : null}
