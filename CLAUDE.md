@@ -20,6 +20,10 @@ aby ho někdo cizí převzal bez dohledu.
 - `docs/vzhled-zadani.md` a `docs/vzhled-oprava-1.md` — barvy, písmo a plochy;
   oprava nahrazuje tabulky odstínů v §4.3 a §4.4 zadání
 - `docs/vzhled-predloha.html` — předloha vzhledu, otevírá se dvojklikem
+- **`docs/vzhled-zadani.md`, oddíl 11 — pravidlo vzhledu od 19.9.2026** (mockup
+  Dnes, `docs/vzhled-dnes-mockup-2026-09-19.webp`): patkové nadpisy a čísla,
+  karty `.ds-plocha`, ikony jen ze sdílené sady. **Platí pro všechna okna** a
+  je nejnovější — přebíjí starší poznámky o vyřazení patkového písma.
 
 Když si nejsi jistý, jak se má něco chovat, hledej odpověď tam. Když tam
 není, zeptej se — nedomýšlej si pravidla provozu restaurace.

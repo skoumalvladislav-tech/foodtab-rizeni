@@ -36,6 +36,16 @@ export type IkonaKlic =
   | 'mince'
   | 'praporek'
   | 'vozik'
+  | 'blesk'
+  | 'slunce'
+  | 'lide'
+  | 'sipkaVpravo'
+  | 'fajfkaKruh'
+  | 'fajfkaCtverec'
+  | 'vykricnik'
+  | 'fotka'
+  | 'faktura'
+  | 'seznam'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */

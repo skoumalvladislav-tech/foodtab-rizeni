@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, Archivo, Newsreader } from "next/font/google";
+import { IBM_Plex_Mono, Archivo, Newsreader, Caveat } from "next/font/google";
 
 import "./globals.css";
 import PwaRegistration from "./pwa-registration";
@@ -19,6 +19,16 @@ const newsreader = Newsreader({
   variable: "--font-newsreader",
   display: "swap",
   fallback: ["Georgia", "serif"],
+});
+
+// Rukopis jen na podpis „Foodtab“ pod citátem a na značkové hesla —
+// nikdy na text, který se čte (mockup Dnes, 19.9.2026).
+const caveat = Caveat({
+  subsets: ["latin", "latin-ext"],
+  weight: ["500", "600"],
+  variable: "--font-rukopis",
+  display: "swap",
+  fallback: ["cursive"],
 });
 
 // Mono jen na časy, data a čísla ve sloupcích. Číslice mají stejnou
@@ -84,7 +94,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="cs" className={`${archivo.variable} ${newsreader.variable} ${plexMono.variable}`}>
+    <html lang="cs" className={`${archivo.variable} ${newsreader.variable} ${caveat.variable} ${plexMono.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: REZIM_SKRIPT }} />
       </head>

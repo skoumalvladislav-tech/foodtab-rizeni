@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 
 import { canSee, getContext, getUser, jeVedeni } from "@/lib/authz";
 import { barvaNeboNic } from "@/lib/barvy-lidi";
-import { hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
+import { denVPasmu, hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
+import { osloveni } from "@/lib/osloveni";
 import { pocet } from "@/lib/sklonovani";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { posunDatum } from "@/lib/provozni-den";
@@ -20,6 +21,23 @@ import Badge from "@/components/ui/Badge";
 import Nadpis from "../nadpis";
 import { zapsatDochazku } from "../dochazka/akce";
 import PoleKodu from "../dochazka/pole-kodu";
+import { NAZVY_DRUHU } from "../vzkazy/seznam-rozhovoru";
+import {
+  Citat,
+  Hero,
+  KpiKarta,
+  KpiOdkaz,
+  PanelHlava,
+  PanelRozpisu,
+  PanelVzkazu,
+  PocasiKarta,
+  RychleAkce,
+  TymDnes,
+  type DenRozpisu,
+  type RadekSmeny,
+  type RychlaAkceProp,
+  type VzkazNahled,
+} from "./prvky";
 
 export const dynamic = "force-dynamic";
 
@@ -63,14 +81,36 @@ export const dynamic = "force-dynamic";
  * (branches.hero_photo_path, app/[rozsah]/nastaveni/pobocky/akce.ts).
  * Dokud ji nikdo nenahraje, banner nese jen barvu pobočky — pořád ne
  * cizí/stock snímek, který by předstíral, že je to ona.
+ *
+ * ---------------------------------------------------------------------
+ * PŘESTAVBA 19.9.2026 — nový mockup Šéfíka (docs/vzhled-dnes-mockup-2026-09-19.webp)
+ *
+ * Banner přes celou šířku je zpět (16.9. ho druhé kolo zmenšilo na
+ * značku), karty mají ikonu a tlačítko dole, rozpis má proužek dnů, pod
+ * ním jména s pozicí a barevným časem, vpravo boční panel. Vzhled je
+ * v `./prvky.tsx` a `app/_komponenty.css` (třídy `ds-*`) a platí jako
+ * PRAVIDLO pro všechna okna — viz docs/vzhled-zadani.md.
+ *
+ * ČEHO SE MOCKUP DOTÝKÁ A ZDE SE NEKRESLÍ: „Rychlý přehled" dole
+ * (tržby, online objednávky, hodnocení Google). Appka na to nemá zdroj
+ * dat a čísla se nevymýšlejí — viz výše. Stejně tak chybí věta „Ideální
+ * den na zahrádku" u počasí: byla by to domněnka, ne údaj.
  */
 
 const PRISTICH_SMEN = 3;
+/** Kolik dní dopředu ukazuje proužek rozpisu (dnešek + šest dalších). */
+const DNU_V_PROUZKU = 7;
+/** Kolik řádků směn se vejde pod proužek; zbytek je odkaz na celý rozpis. */
+const RADKU_ROZPISU = 8;
+const POSLEDNICH_VZKAZU = 4;
+/** Zkratky dnů podle `getUTCDay()` (0 = neděle) — stejné pořadí jako v Rozpisu. */
+const DNY_ZKRATKY = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
 
 type Smena = {
   id: string;
   branch_id: string;
   employee_id: string | null;
+  position_id: string | null;
   shift_date: string;
   starts_at: string;
   ends_at: string;
@@ -87,7 +127,13 @@ type MujDen = {
   provozni_den: string;
 };
 
-type Rozhovor = { druh: string; neprectenych: number };
+type Rozhovor = {
+  konverzace_id: string;
+  druh: string;
+  branch_id: string | null;
+  nazev: string | null;
+  neprectenych: number;
+};
 
 export default async function Dnes({
   params,
@@ -100,10 +146,11 @@ export default async function Dnes({
     pichnuto?: string;
     uzavreno?: string;
     kod?: string;
+    den?: string;
   }>;
 }) {
   const { rozsah } = await params;
-  const { chyba, text, pichnuto, uzavreno, kod } = await searchParams;
+  const { chyba, text, pichnuto, uzavreno, kod, den: denZAdresy } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -231,7 +278,7 @@ export default async function Dnes({
   */
   const { data: smenyData, error: chybaSmeny } = await supabase
     .from("shifts")
-    .select("id, branch_id, employee_id, shift_date, starts_at, ends_at")
+    .select("id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at")
     .eq("tenant_id", tenantId)
     .gte("shift_date", den.provozni_den)
     .neq("status", "cancelled")
@@ -287,36 +334,78 @@ export default async function Dnes({
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
   /*
-    Dnešní rozpis, barevně — jen s `shifts.read` (stejné právo, jaké
-    hlídá Rozpis směn). `smeny` už appka má načtené (viz výš), tady se
-    jen filtruje na dnešek a dotáhnou se jména/barvy — TÝŽ dotaz a TÁŽ
-    `barvaNeboNic` normalizace jako v app/[rozsah]/smeny/page.tsx, ať
-    barva člověka na Dnes a v Rozpisu vždycky sedí na totéž.
+    Rozpis na týden dopředu, barevně — jen s `shifts.read` (stejné právo,
+    jaké hlídá Rozpis směn). Dřív se jen filtroval dnešek z `smeny` výš,
+    jenže ta má strop 200 řádků přes všechny dny a firmy: počty lidí na
+    pozdější dny v proužku by tiše vycházely nižší. Proto vlastní dotaz na
+    okno dnešek + 6 dní, na pobočce jen její směny.
+
+    Jména, barvy a pozice se dotahují TÝMŽ způsobem jako v
+    app/[rozsah]/smeny/page.tsx (`barvaNeboNic`, tabulka `positions`), ať
+    barva člověka a název pozice na Dnes a v Rozpisu vždycky sedí.
   */
-  const dnesniRozpis: { id: string; employeeId: string; jmeno: string; barva: string | null; od: string; do: string }[] = [];
-  if (canSee(ctx, "shifts.read")) {
-    const smenyDnes = smeny.filter((s) => s.shift_date === den.provozni_den && s.employee_id !== null);
-    const idDnes = [...new Set(smenyDnes.map((s) => s.employee_id as string))];
-    if (idDnes.length > 0) {
-      const { data: lideDnes, error: chybaLideDnes } = await supabase
-        .from("employees")
-        .select("id, full_name, color")
-        .in("id", idDnes);
-      if (chybaLideDnes) throw new DotazSelhal("lidé v dnešním rozpisu", chybaLideDnes);
-      const jmenaDnes = new Map((lideDnes ?? []).map((c) => [c.id as string, c.full_name as string]));
-      const barvyDnes = new Map((lideDnes ?? []).map((c) => [c.id as string, barvaNeboNic(c.color)]));
-      for (const s of smenyDnes) {
-        dnesniRozpis.push({
-          id: s.id,
-          employeeId: s.employee_id as string,
-          jmeno: jmenaDnes.get(s.employee_id as string) ?? "?",
-          barva: barvyDnes.get(s.employee_id as string) ?? null,
-          od: s.starts_at.slice(0, 5),
-          do: s.ends_at.slice(0, 5),
-        });
-      }
-      dnesniRozpis.sort((a, b) => a.od.localeCompare(b.od));
+  const smiCistRozpis = canSee(ctx, "shifts.read");
+  const dnyProuzku = Array.from({ length: DNU_V_PROUZKU }, (_, i) => posunDatum(den.provozni_den, i));
+  const vybranyDen =
+    typeof denZAdresy === "string" && dnyProuzku.includes(denZAdresy) ? denZAdresy : den.provozni_den;
+
+  let smenyProuzku: Smena[] = [];
+  if (smiCistRozpis) {
+    let dotazProuzek = supabase
+      .from("shifts")
+      .select("id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at")
+      .eq("tenant_id", tenantId)
+      .gte("shift_date", dnyProuzku[0])
+      .lte("shift_date", dnyProuzku[DNU_V_PROUZKU - 1])
+      .neq("status", "cancelled")
+      .order("shift_date", { ascending: true })
+      .order("starts_at", { ascending: true })
+      .limit(1000);
+    if (scope.level === "branch" && scope.branchId) {
+      dotazProuzek = dotazProuzek.eq("branch_id", scope.branchId);
     }
+    const { data: prouzekData, error: chybaProuzku } = await dotazProuzek;
+    if (chybaProuzku) throw new DotazSelhal("rozpis na týden dopředu", chybaProuzku);
+    smenyProuzku = (prouzekData ?? []) as Smena[];
+  }
+
+  const lidiPoDnech = new Map<string, Set<string>>();
+  for (const s of smenyProuzku) {
+    if (s.employee_id === null) continue;
+    const mnozina = lidiPoDnech.get(s.shift_date) ?? new Set<string>();
+    mnozina.add(s.employee_id);
+    lidiPoDnech.set(s.shift_date, mnozina);
+  }
+  const smenyVybranehoDne = smenyProuzku.filter((s) => s.shift_date === vybranyDen && s.employee_id !== null);
+  const planovanoDnes = lidiPoDnech.get(den.provozni_den)?.size ?? 0;
+
+  // Moje příští směna může mít pozici, stejně jako řádky rozpisu.
+  const dalsiSmena = dnesniSmena ?? pristi[0] ?? null;
+  const idLidiVRozpisu = [...new Set(smenyVybranehoDne.map((s) => s.employee_id as string))];
+  const idPozic = [
+    ...new Set(
+      [...smenyVybranehoDne, ...(dalsiSmena ? [dalsiSmena] : [])]
+        .map((s) => s.position_id)
+        .filter((i): i is string => !!i),
+    ),
+  ];
+
+  const lidiVRozpisu = new Map<string, { jmeno: string; barva: string | null }>();
+  if (idLidiVRozpisu.length > 0) {
+    const { data: lideDnes, error: chybaLideDnes } = await supabase
+      .from("employees")
+      .select("id, full_name, color")
+      .in("id", idLidiVRozpisu);
+    if (chybaLideDnes) throw new DotazSelhal("lidé v rozpisu", chybaLideDnes);
+    for (const c of lideDnes ?? []) {
+      lidiVRozpisu.set(c.id as string, { jmeno: String(c.full_name ?? "").trim() || "?", barva: barvaNeboNic(c.color) });
+    }
+  }
+
+  const nazvyPozic = new Map<string, string>();
+  if (idPozic.length > 0) {
+    const { data: poziceData } = await supabase.from("positions").select("id, label").in("id", idPozic);
+    for (const p of poziceData ?? []) nazvyPozic.set(p.id as string, String(p.label ?? ""));
   }
 
   /*
@@ -354,7 +443,6 @@ export default async function Dnes({
     tu na rozdíl od vlákna nezobrazují vůbec — v náhledu není místo na
     přeškrtnutý text s vysvětlením, jen by matlo.
   */
-  const POSLEDNICH_VZKAZU = 4;
   const dotazNaPosledniVzkazy = (sloupce: string) =>
     supabase
       .from("konverzace_zpravy")
@@ -363,20 +451,54 @@ export default async function Dnes({
       .order("vytvoreno_kdy", { ascending: false })
       .limit(POSLEDNICH_VZKAZU);
 
-  let { data: zpravyData, error: chybaVzkazu } = await dotazNaPosledniVzkazy(
-    "id, autor, text, zvuk_cesta, vytvoreno_kdy",
-  );
-  // Sloupec z 20260917060000_hlasove_zpravy — dokud neproběhne migrací,
-  // dotaz se zopakuje bez něj (stejný vzor jako jinde v appce).
-  if (chybaVzkazu && sloupecNeexistuje(chybaVzkazu)) {
-    ({ data: zpravyData, error: chybaVzkazu } = await dotazNaPosledniVzkazy(
-      "id, autor, text, vytvoreno_kdy",
-    ));
+  /*
+    Sloupce přibývaly migracemi: `zvuk_cesta` (20260917060000) a
+    `priorita` (20260917040000). Dokud kterákoli neproběhne, dotaz na ni
+    selže — zkouší se proto od nejúplnějšího výběru k nejskromnějšímu
+    a obrazovka pokračuje s tím, co databáze umí (stejný vzor jako jinde).
+  */
+  const VYBERY_VZKAZU = [
+    "id, konverzace_id, autor, text, zvuk_cesta, priorita, vytvoreno_kdy",
+    "id, konverzace_id, autor, text, zvuk_cesta, vytvoreno_kdy",
+    "id, konverzace_id, autor, text, vytvoreno_kdy",
+  ];
+  let zpravyData: unknown[] | null = null;
+  for (const vyber of VYBERY_VZKAZU) {
+    const { data: d, error: e } = await dotazNaPosledniVzkazy(vyber);
+    if (e && sloupecNeexistuje(e)) continue;
+    zpravyData = e ? null : (d as unknown[] | null);
+    break;
   }
-  const posledniVzkazy: { id: string; jmeno: string; text: string; kdy: string }[] = [];
+
+  const kalendarniDnes = denVPasmu(new Date(), ZONA_VYCHOZI);
+  const kdyKratce = (iso: string): string => {
+    const d = denVPasmu(iso, ZONA_VYCHOZI);
+    if (d === kalendarniDnes) return hodinaVPasmu(iso, ZONA_VYCHOZI);
+    if (d === posunDatum(kalendarniDnes, -1)) return "Včera";
+    const [, m, dd] = d.split("-");
+    return `${Number(dd)}. ${Number(m)}.`;
+  };
+  const nazevRozhovoru = (id: string): { nazev: string; druh: string } => {
+    const r = rozhovory.find((x) => x.konverzace_id === id);
+    if (!r) return { nazev: "Rozhovor", druh: "" };
+    const nazev =
+      r.nazev ??
+      (r.branch_id
+        ? (nazvyPobocek.get(r.branch_id) ?? "Jiná pobočka")
+        : ((NAZVY_DRUHU as Record<string, string>)[r.druh] ?? "Rozhovor"));
+    return { nazev, druh: r.druh };
+  };
+
+  const posledniVzkazy: VzkazNahled[] = [];
   if (zpravyData && zpravyData.length > 0) {
-    const radky = zpravyData as unknown as {
-      id: string; autor: string | null; text: string; zvuk_cesta?: string | null; vytvoreno_kdy: string;
+    const radky = zpravyData as {
+      id: string;
+      konverzace_id: string;
+      autor: string | null;
+      text: string;
+      zvuk_cesta?: string | null;
+      priorita?: string | null;
+      vytvoreno_kdy: string;
     }[];
     const autoriIds = [...new Set(radky.map((z) => z.autor).filter((a): a is string => a !== null))];
     const { data: autoriData } = autoriIds.length > 0
@@ -384,17 +506,20 @@ export default async function Dnes({
       : { data: [] as { id: string; full_name: string }[] };
     const jmenaAutoru = new Map((autoriData ?? []).map((a) => [a.id as string, String(a.full_name ?? "").trim()]));
     for (const z of radky) {
+      const { nazev, druh } = nazevRozhovoru(z.konverzace_id);
       posledniVzkazy.push({
         id: z.id,
-        jmeno: (z.autor ? jmenaAutoru.get(z.autor) : null) || "Někdo, kdo mezitím odešel",
+        konverzaceId: z.konverzace_id,
+        druh,
+        nazev,
+        inicialy: initialy(nazev),
+        autor: (z.autor ? jmenaAutoru.get(z.autor) : null) || "Někdo, kdo mezitím odešel",
         // Hlasovka nemá text (viz 20260917060000_hlasove_zpravy) —
         // bez týhle větve by náhled zůstal prázdný, jako by zpráva
         // nic neobsahovala.
-        text: z.text || (z.zvuk_cesta ? "🎤 Hlasovka" : ""),
-        // ZONA_VYCHOZI přímo, ne přes `zona` — ta se přiřazuje až ve
-        // vykreslovací části níž, tady bychom na ni sáhli dřív, než
-        // vznikne.
-        kdy: hodinaVPasmu(z.vytvoreno_kdy, ZONA_VYCHOZI),
+        text: z.text || (z.zvuk_cesta ? "Hlasová zpráva" : ""),
+        kdy: kdyKratce(z.vytvoreno_kdy),
+        naleha: z.priorita === "urgent",
       });
     }
   }
@@ -517,22 +642,23 @@ export default async function Dnes({
      schovaný za tímtéž oprávněním, jaké hlídá cílová obrazovka —
      odkaz, který vede na stránku beze smyslu, je horší než žádný. */
 
-  type RychlaAkce = { popisek: string; href: string; ikona: React.ReactNode };
-  const rychleAkce: RychlaAkce[] = [];
+  const rychleAkce: RychlaAkceProp[] = [];
   if (canSee(ctx, "menu_ai.use")) {
-    rychleAkce.push({ popisek: "Vytvořit nové menu", href: `/${rozsah}/menu`, ikona: <IkonaIkona d="M4 6h16M4 12h16M4 18h10" /> });
+    rychleAkce.push({ popisek: "Vytvořit nové menu", href: `/${rozsah}/menu`, ikona: "seznam" });
   }
   if (canSee(ctx, "marketing.read")) {
-    rychleAkce.push({ popisek: "Nahrát fotky a obsah", href: `/${rozsah}/marketing/media`, ikona: <IkonaIkona d="M4 16l4.5-5 4 4 3-3 4.5 4.5M4 6h16v12H4z" /> });
+    rychleAkce.push({ popisek: "Nahrát fotky a obsah", href: `/${rozsah}/marketing/media`, ikona: "fotka" });
   }
   if (canSee(ctx, "tasks.read")) {
-    rychleAkce.push({ popisek: "Přidat úkol", href: `/${rozsah}/ukoly`, ikona: <IkonaIkona d="M5 12.5l3.5 3.5L19 6" /> });
+    // Míří na formulář v Úkolech — kotva je na formuláři uvnitř `details`,
+    // takže ho prohlížeč sám rozbalí (viz komentář v ukoly/page.tsx).
+    rychleAkce.push({ popisek: "Přidat úkol", href: `/${rozsah}/ukoly#zadat-ukol`, ikona: "fajfkaCtverec" });
   }
   if (canSee(ctx, "shifts.manage")) {
-    rychleAkce.push({ popisek: "Zapsat směnu", href: `/${rozsah}/smeny`, ikona: <IkonaIkona d="M4 4.5h12v12H4zM7 2.5v4M13 2.5v4M4 8.5h12" /> });
+    rychleAkce.push({ popisek: "Zapsat směnu", href: `/${rozsah}/smeny`, ikona: "kalendar" });
   }
   if (canSee(ctx, "faktury.manage") && fakturyJsouNastavene()) {
-    rychleAkce.push({ popisek: "Nová faktura", href: `/${rozsah}/finance/faktury/nova`, ikona: <IkonaIkona d="M5 3h7l4 4v13H5zM12 3v4h4M8 12h6M8 15h6" /> });
+    rychleAkce.push({ popisek: "Nová faktura", href: `/${rozsah}/finance/faktury/nova`, ikona: "faktura" });
   }
 
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
@@ -548,140 +674,195 @@ export default async function Dnes({
   const zVcerejska =
     vPraci && den.den_prichodu !== null && den.den_prichodu < den.provozni_den;
 
+  const oslovene = osloveni(krestni) || null;
+
+  /*
+    Kód z tabletu zůstává POVINNÝ — píchnutí jde pořád přes `zapsatDochazku`
+    a pořád ho ověřuje databáze. Karta má jen tlačítko, po jehož rozbalení
+    se ukáže políčko. Rozbalená je rovnou, když se právě něco stalo
+    (chybný kód, hláška z akce) nebo kód přišel z naskenovaného QR — jinak
+    by člověk po chybě viděl zavřenou kartu a nevěděl proč.
+  */
+  const otevritPichnuti =
+    chyba === "kod" || chyba === "kod-vyprsel" || (chyba === "pichnuti" && !!text) || platnyKod !== null;
+
+  const popisyDochazky: (string | null)[] = vPraci
+    ? [
+        `od ${hodinaVPasmu(den.od_kdy as string, zona)} · ${trvani(minutVPraci)}`,
+        zVcerejska ? `Příchod je z ${denCesky(den.den_prichodu as string)}, ne z dneška.` : null,
+      ]
+    : dnesniSmena
+      ? [
+          `Dnes ${dnesniSmena.starts_at.slice(0, 5)}–${dnesniSmena.ends_at.slice(0, 5)}`,
+          // Jen jména, nic víc — viz docs/dnes-obrazovka-zadani.md, oddíl 6.
+          jmena.length > 0 ? `Na směně s vámi: ${jmena.join(", ")}` : null,
+        ]
+      : [
+          "Dnes nemáte směnu.",
+          pristi.length > 0
+            ? `Nejbližší ${denCesky(pristi[0].shift_date)} od ${pristi[0].starts_at.slice(0, 5)}.`
+            : "Ani v příštích dnech není žádná zadaná.",
+        ];
+
+  const casSmeny = (s: Smena) => `${s.starts_at.slice(0, 5)} – ${s.ends_at.slice(0, 5)}`;
+  const dalsiHodnota = dnesniSmena
+    ? `Dnes ${casSmeny(dnesniSmena)}`
+    : pristi[0]
+      ? `${denCesky(pristi[0].shift_date)} ${casSmeny(pristi[0])}`
+      : "Zatím žádná";
+
+  const vsechnyRadky: RadekSmeny[] = smenyVybranehoDne
+    .map((s) => {
+      const clovek = lidiVRozpisu.get(s.employee_id as string);
+      const jmeno = clovek?.jmeno ?? "?";
+      return {
+        id: s.id,
+        jmeno,
+        inicialy: initialy(jmeno),
+        barva: clovek?.barva ?? null,
+        pozice: s.position_id ? (nazvyPozic.get(s.position_id) ?? null) : null,
+        pobocka: scope.level === "tenant" ? (nazvyPobocek.get(s.branch_id) ?? null) : null,
+        od: s.starts_at.slice(0, 5),
+        do: s.ends_at.slice(0, 5),
+      };
+    })
+    .sort((a, b) => a.od.localeCompare(b.od) || a.jmeno.localeCompare(b.jmeno, "cs"));
+  const radkyRozpisu = vsechnyRadky.slice(0, RADKU_ROZPISU);
+
+  const dnyRozpisu: DenRozpisu[] = dnyProuzku.map((datum) => {
+    const dow = new Date(Date.UTC(Number(datum.slice(0, 4)), Number(datum.slice(5, 7)) - 1, Number(datum.slice(8, 10)))).getUTCDay();
+    return {
+      datum,
+      zkratka: `${DNY_ZKRATKY[dow]} ${Number(datum.slice(8, 10))}. ${Number(datum.slice(5, 7))}.`,
+      pocet: lidiPoDnech.get(datum)?.size ?? 0,
+      vikend: dow === 0 || dow === 6,
+      vybrany: datum === vybranyDen,
+      href: datum === den.provozni_den ? `/${rozsah}/dnes` : `/${rozsah}/dnes?den=${datum}`,
+    };
+  });
+
+  const nadpisRozpisu = scope.level === "branch" && scope.branchName ? `Rozpis směn – ${scope.branchName}` : "Rozpis směn";
+
+  const panelPristichSmen = (
+    <section className="ds-plocha" aria-label="Příští směny">
+      <PanelHlava ikona="kalendar" nadpis="Příští směny" />
+      {pristi.length === 0 ? (
+        <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>Zatím nemáte zadanou žádnou další směnu.</p>
+      ) : (
+        <ul style={{ ...seznam, margin: 0 }}>
+          {pristi.map((s) => (
+            <li key={s.id} style={{ fontSize: "14px", color: "var(--ink)" }}>
+              <strong>{denCesky(s.shift_date)}</strong> {casSmeny(s)} · {nazvyPobocek.get(s.branch_id) ?? "jiná pobočka"}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
   return (
-    <div style={{ padding: "16px", paddingBottom: "32px", maxWidth: "1080px" }}>
-      {/* ---------- KOMPAKTNÍ HLAVIČKA --------------------------
-         UX redesign, druhé kolo (oddíl 5): dřív tu stál vysoký hero
-         banner přes celou šířku — zabíral nejcennější plochu obrazovky
-         na pozdrav, který se dá říct jedním řádkem. Fotka pobočky
-         (kdo ji nahrál v Nastavení → Pobočky) teď žije jako malá
-         značka vedle textu, ne jako celoplošné pozadí. */}
-      <div style={{ display: "flex", alignItems: "center", gap: "14px", marginBottom: pozornost.length > 0 ? "16px" : "22px" }}>
-        {heroFotoUrl ? (
-          <img
-            src={heroFotoUrl}
-            alt=""
-            aria-hidden="true"
-            style={{ width: "44px", height: "44px", borderRadius: "var(--radius-md)", objectFit: "cover", flex: "none" }}
-          />
-        ) : (
-          <span
-            aria-hidden="true"
-            style={{ width: "44px", height: "44px", borderRadius: "var(--radius-md)", flex: "none", background: "linear-gradient(135deg, var(--branch-fill), var(--branch))" }}
-          />
-        )}
-        <div>
-          <h1 style={{ margin: 0, fontSize: "25px", color: "var(--ink)" }}>
-            {pozdrav(zona)}
-            {krestni ? <>, {krestni}</> : null}
-          </h1>
-          <p style={{ margin: "3px 0 0", fontSize: "13.5px", color: "var(--muted)" }}>
-            {denDlouze(den.provozni_den)}
-            {den.pobocka_nazev ? ` · ${den.pobocka_nazev}` : ""}
-          </p>
-        </div>
-      </div>
+    <div style={{ padding: "16px", paddingBottom: "32px", maxWidth: "1480px" }}>
+      {/* ---------- HERO ------------------------------------------
+         Mockup Šéfíka z 19.9.2026 vrátil banner přes celou šířku (druhé
+         kolo UX redesignu ho 16.9. zmenšilo na malou značku). Fotku
+         nahrává pobočka v Nastavení → Pobočky; bez ní zůstane barva. */}
+      <Hero
+        datum={denDlouze(den.provozni_den)}
+        pozdrav={pozdrav(zona)}
+        oslovene={oslovene}
+        popis="Tady je přehled dnešního dne."
+        fotoUrl={heroFotoUrl}
+      />
 
-      {/* ---------- CO POTŘEBUJE VAŠI POZORNOST (jen vedení) ----
-         Oddíl 5: první skutečně důležitý blok, ne schovaný pod
-         čtyřmi kartami — proto stojí hned pod hlavičkou. */}
-      {pozornost.length > 0 ? (
-        <section style={{ marginBottom: "20px" }}>
-          <p style={nadpisPozornosti}>Potřebuje vaši pozornost</p>
-          <ul style={{ ...seznam, marginBottom: 0 }}>
-            {pozornost.map((p, i) => (
-              <Card
-                key={i}
-                as="li"
-                padding="12px 14px"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                  flexWrap: "wrap",
-                  borderLeft: `3px solid ${barvaPozornosti(p.uroven)}`,
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "14px", color: "var(--ink)" }}>
-                  <Badge tone={tonPozornosti(p.uroven)}>{popisekUrovne(p.uroven)}</Badge>
-                  {p.text}
-                </span>
-                <Link href={p.akce.href} className="ft-tl ft-tl-vedlejsi ft-tl-male">
-                  {p.akce.popisek} →
-                </Link>
-              </Card>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {/* ---------- 4 PŘEHLEDOVÉ KARTY -------------------------- */}
-        <div style={mrizkaKaret}>
-          <StavovaKarta
-            ikona={<IkonaIkona d="M5 12.5l3.5 3.5L19 6" />}
-            tone={vPraci ? "success" : "neutral"}
-            titulek="Docházka"
-            hodnota={vPraci ? "Jste v práci" : "Nejste v práci"}
-            popis={
-              vPraci
-                ? `od ${hodinaVPasmu(den.od_kdy as string, zona)} · ${trvani(minutVPraci)}`
-                : dnesniSmena
-                  ? `Dnes ${dnesniSmena.starts_at.slice(0, 5)}–${dnesniSmena.ends_at.slice(0, 5)}`
-                  : "Dnes nemáte směnu"
-            }
-            odkaz={{ popisek: "Zobrazit docházku", href: `/${rozsah}/dochazka` }}
-          />
-          <StavovaKarta
-            ikona={<IkonaIkona d="M4 4.5h12v12H4zM7 2.5v4M13 2.5v4M4 8.5h12" />}
-            tone="neutral"
-            titulek="Další směna"
-            hodnota={
-              dnesniSmena
-                ? `Dnes ${dnesniSmena.starts_at.slice(0, 5)}–${dnesniSmena.ends_at.slice(0, 5)}`
-                : pristi.length > 0
-                  ? `${denCesky(pristi[0].shift_date)} od ${pristi[0].starts_at.slice(0, 5)}`
-                  : "Zatím žádná"
-            }
-            popis={dnesniSmena ? (nazvyPobocek.get(dnesniSmena.branch_id) ?? "") : pristi.length > 0 ? (nazvyPobocek.get(pristi[0].branch_id) ?? "") : "Ani v příštích dnech"}
-            odkaz={{ popisek: "Zobrazit rozpis", href: `/${rozsah}/smeny` }}
-          />
-          <StavovaKarta
-            ikona={<IkonaIkona d="M3.5 5.5a2 2 0 012-2h9a2 2 0 012 2v6a2 2 0 01-2 2H8l-4 3.2V5.5z" />}
-            tone={maVedeniVzkaz ? "danger" : neprecteneVzkazy > 0 ? "warning" : "neutral"}
-            titulek="Vzkazy"
-            hodnota={neprecteneVzkazy > 0 ? pocet(neprecteneVzkazy, "nová zpráva", "nové zprávy", "nových zpráv") : "Vše přečteno"}
-            popis={maVedeniVzkaz ? "Nová zpráva z vedení" : neprecteneVzkazy > 0 ? "Čeká na přečtení" : undefined}
-            odkaz={{ popisek: "Otevřít vzkazy", href: `/${rozsah}/vzkazy` }}
-          />
-          {canSee(ctx, "tasks.read") ? (
-            <StavovaKarta
-              ikona={<IkonaIkona d="M5 12.5l3.5 3.5L19 6" />}
-              tone={poTerminuUkolu > 0 ? "danger" : otevrenoUkolu > 0 ? "neutral" : "success"}
-              titulek="Úkoly"
-              hodnota={otevrenoUkolu > 0 ? pocet(otevrenoUkolu, "otevřený úkol", "otevřené úkoly", "otevřených úkolů") : "Hotovo"}
-              popis={poTerminuUkolu > 0 ? `${pocet(poTerminuUkolu, "po termínu", "po termínu", "po termínu")}` : undefined}
-              odkaz={{ popisek: "Zobrazit úkoly", href: `/${rozsah}/ukoly` }}
-            />
+      <div className="ds-dnes" style={{ marginTop: "22px" }}>
+        <div className="ds-dnes-hlavni">
+          {/* ---------- CO POTŘEBUJE VAŠI POZORNOST (jen vedení) ----
+             První skutečně důležitý blok, ne schovaný pod kartami. */}
+          {pozornost.length > 0 ? (
+            <section>
+              <p style={nadpisPozornosti}>Potřebuje vaši pozornost</p>
+              <ul style={{ ...seznam, marginBottom: 0 }}>
+                {pozornost.map((p, i) => (
+                  <Card
+                    key={i}
+                    as="li"
+                    padding="12px 14px"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      flexWrap: "wrap",
+                      borderLeft: `3px solid ${barvaPozornosti(p.uroven)}`,
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "14px", color: "var(--ink)" }}>
+                      <Badge tone={tonPozornosti(p.uroven)}>{popisekUrovne(p.uroven)}</Badge>
+                      {p.text}
+                    </span>
+                    <Link href={p.akce.href} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                      {p.akce.popisek} →
+                    </Link>
+                  </Card>
+                ))}
+              </ul>
+            </section>
           ) : null}
-        </div>
 
-        <div className="ds-dvasloupec">
-          <div>
-            {/* ---------- KARTA, KTERÁ ODPOVÍDÁ ---------------------- */}
-            <Card as="section" padding="18px" style={{ marginBottom: "24px" }}>
-              {chyba === "kod" ? (
-                <p className="hlaska-chyba">Opište prosím kód z tabletu.</p>
-              ) : null}
+          {/* ---------- ČTYŘI PŘEHLEDOVÉ KARTY ---------------------- */}
+          <div className="ds-kpi-mrizka">
+            <KpiKarta
+              ikona="fajfkaKruh"
+              ton="dobre"
+              titulek="Docházka"
+              hodnota={vPraci ? "Jste v práci" : "Nejste v práci"}
+              popisy={popisyDochazky}
+              paticka={
+                /*
+                  PÍCHNUTÍ JDE PŘES TUTÉŽ AKCI JAKO NA DOCHÁZCE.
+
+                  `zpet=dnes` říká jen to, kam se vrátit; ověřuje se to výčtem
+                  v akci, ne cestou z formuláře. Kód je pořád povinný a pořád
+                  patří jedné pobočce — pobočka se schválně neposílá. `PoleKodu`
+                  bere předvyplněný kód z QR a sám si ho z adresy uklidí.
+                */
+                <details className="ds-pichnuti" open={otevritPichnuti}>
+                  <summary className="ft-tl ft-tl-hlavni">
+                    {vPraci ? "Píchnout odchod" : "Píchnout příchod"} →
+                  </summary>
+                  <form action={zapsatDochazku}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="druh" value={dalsiDruh} />
+                    <input type="hidden" name="zpet" value="dnes" />
+                    <PoleKodu zQr={platnyKod} />
+                    <button
+                      type="submit"
+                      className="ft-tl ft-tl-hlavni"
+                      style={{
+                        width: "100%",
+                        // Nejčastější úkon v aplikaci — dvakrát denně, ve spěchu,
+                        // často jednou rukou. Musí se na něj trefit palec.
+                        minHeight: "56px",
+                        fontSize: "17px",
+                        marginTop: "10px",
+                      }}
+                    >
+                      {vPraci ? "Zapsat odchod" : "Zapsat příchod"}
+                    </button>
+                    <p style={{ margin: "8px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+                      Kód je na tabletu na provozovně a mění se každou minutu.
+                    </p>
+                  </form>
+                </details>
+              }
+            >
+              {chyba === "kod" ? <p className="hlaska-chyba">Opište prosím kód z tabletu.</p> : null}
               {chyba === "kod-vyprsel" ? (
                 <p className="hlaska-chyba">
-                  Kód už neplatí — mění se každou minutu. Načtěte prosím nový
-                  z tabletu.
+                  Kód už neplatí — mění se každou minutu. Načtěte prosím nový z tabletu.
                 </p>
               ) : null}
-              {chyba === "pichnuti" && text ? (
-                <p className="hlaska-chyba">{text}</p>
-              ) : null}
+              {chyba === "pichnuti" && text ? <p className="hlaska-chyba">{text}</p> : null}
               {pichnuto ? (
                 <p style={hlaskaDobre} role="status">
                   {pichnuto === "in" ? "Příchod zapsán." : "Odchod zapsán."}
@@ -689,316 +870,105 @@ export default async function Dnes({
               ) : null}
               {uzavreno ? (
                 <p style={hlaskaDobre}>
-                  Váš příchod z {uzavreno} zůstal bez odchodu. Vedoucí o tom ví
-                  a doplní ho.
+                  Váš příchod z {uzavreno} zůstal bez odchodu. Vedoucí o tom ví a doplní ho.
                 </p>
               ) : null}
+            </KpiKarta>
 
-              <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
-                {den.pobocka_nazev ?? "Vaše pobočka"}
-              </p>
+            <KpiKarta
+              ikona="kalendar"
+              ton="info"
+              titulek="Další směna"
+              hodnota={dalsiHodnota}
+              popisy={
+                dalsiSmena
+                  ? [
+                      dalsiSmena.position_id ? (nazvyPozic.get(dalsiSmena.position_id) ?? null) : null,
+                      nazvyPobocek.get(dalsiSmena.branch_id) ?? null,
+                    ]
+                  : ["Ani v příštích dnech"]
+              }
+              paticka={<KpiOdkaz href={`/${rozsah}/smeny`} popisek="Zobrazit rozpis" />}
+            />
 
-              {vPraci ? (
-                <>
-                  <h2 style={{ ...nadpisKarty, color: "var(--good)" }}>
-                    Jste v práci
-                  </h2>
-                  <p style={podnadpis}>
-                    od {hodinaVPasmu(den.od_kdy as string, zona)} ·{" "}
-                    <strong>{trvani(minutVPraci)}</strong>
-                  </p>
-                  {/*
-                    Otevřený příchod z dřívějška se NESCHOVÁVÁ. Je to buď
-                    noční směna, nebo zapomenutý odchod — a v obou případech
-                    to člověk potřebuje vidět právě proto, že to není dnešek.
-                  */}
-                  {zVcerejska ? (
-                    <p style={{ ...podnadpis, color: "var(--warn)" }}>
-                      Příchod je z {denCesky(den.den_prichodu as string)}, ne
-                      z dneška.
-                    </p>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <h2 style={nadpisKarty}>Nejste v práci</h2>
-                  {dnesniSmena ? (
-                    <>
-                      <p style={podnadpis}>
-                        Dnes {dnesniSmena.starts_at.slice(0, 5)}–
-                        {dnesniSmena.ends_at.slice(0, 5)} ·{" "}
-                        {nazvyPobocek.get(dnesniSmena.branch_id) ?? "jiná pobočka"}
-                      </p>
-                      {jmena.length > 0 ? (
-                        <p style={podnadpis}>Na směně s vámi: {jmena.join(", ")}</p>
-                      ) : null}
-                    </>
-                  ) : (
-                    /*
-                      Když dnes směna není, karta to řekne rovnou a hned
-                      nabídne nejbližší příští. Prázdno by člověka nechalo
-                      hledat jinde.
-                    */
-                    <p style={podnadpis}>
-                      Dnes nemáte směnu.
-                      {pristi.length > 0
-                        ? ` Nejbližší ${denCesky(pristi[0].shift_date)} od ${pristi[0].starts_at.slice(0, 5)}.`
-                        : " Ani v příštích dnech není žádná zadaná."}
-                    </p>
-                  )}
-                </>
-              )}
+            <KpiKarta
+              ikona="zprava"
+              ton={maVedeniVzkaz ? "bad" : "pozor"}
+              odznak={neprecteneVzkazy}
+              titulek="Vzkazy"
+              hodnota={neprecteneVzkazy > 0 ? pocet(neprecteneVzkazy, "nová zpráva", "nové zprávy", "nových zpráv") : "Vše přečteno"}
+              popisy={[maVedeniVzkaz ? "Nová zpráva z vedení" : neprecteneVzkazy > 0 ? "Čeká na přečtení" : null]}
+              popisTon={maVedeniVzkaz ? "bad" : undefined}
+              paticka={<KpiOdkaz href={`/${rozsah}/vzkazy`} popisek="Otevřít vzkazy" />}
+            />
 
-              {/*
-                PÍCHNUTÍ JDE PŘES TUTÉŽ AKCI JAKO NA DOCHÁZCE.
-
-                `zpet=dnes` říká jen to, kam se vrátit; ověřuje se to výčtem
-                v akci, ne cestou z formuláře. Kód je pořád povinný a pořád
-                patří jedné pobočce — pobočka se schválně neposílá.
-              */}
-              <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
-                <input type="hidden" name="rozsah" value={rozsah} />
-                <input type="hidden" name="druh" value={dalsiDruh} />
-                <input type="hidden" name="zpet" value="dnes" />
-                {/*
-                  `PoleKodu` bere předvyplněný kód, ne příznak: sám si ho
-                  po vykreslení z adresy uklidí, aby nezůstal v historii
-                  prohlížeče. Tvar se ověřuje stejně jako na Docházce —
-                  osm znaků, písmena a číslice; z adresy je to NÁVRH, ne
-                  oprávnění, a platnost stejně rozhoduje databáze.
-                */}
-                <PoleKodu zQr={platnyKod} />
-                <button
-                  type="submit"
-                  className="ft-tl ft-tl-hlavni"
-                  style={{
-                    width: "100%",
-                    // Nejčastější úkon v aplikaci — dvakrát denně, ve spěchu,
-                    // často jednou rukou. Musí se na něj trefit palec.
-                    minHeight: "56px",
-                    fontSize: "18px",
-                    marginTop: "12px",
-                  }}
-                >
-                  {vPraci ? "Píchnout odchod" : "Píchnout příchod"}
-                </button>
-              </form>
-              <p style={{ ...podnadpis, fontSize: "12px", marginTop: "10px" }}>
-                Kód je na tabletu na provozovně a mění se každou minutu.
-              </p>
-            </Card>
-
-            {/* ---------- DNEŠNÍ ROZPIS + POSLEDNÍ VZKAZY, VEDLE SEBE ---
-               Design systém, 16.9.2026 (dvousloupcové rozvržení podle
-               mockupu). Dvě samostatné, nezávislé sekce — sloupec se
-               na užší obrazovce zalomí sám (auto-fit), žádný nový
-               zlom navíc. Ani jedna nekreslí nic, když nemá co. */}
-            {dnesniRozpis.length > 0 || posledniVzkazy.length > 0 ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "24px", alignItems: "start" }}>
-                {dnesniRozpis.length > 0 ? (
-                  <div>
-                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "10px" }}>
-                      <h2 style={{ ...nadpisSekce, margin: 0 }}>Dnes v rozpisu</h2>
-                      <Link href={`/${rozsah}/smeny`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
-                        Zobrazit celý rozpis →
-                      </Link>
-                    </div>
-                    <ul style={seznam}>
-                      {dnesniRozpis.map((s) => (
-                        <Card
-                          key={s.id}
-                          as="li"
-                          padding="10px 14px"
-                          style={{ position: "relative", paddingLeft: "18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", fontSize: "14px", color: "var(--ink)" }}
-                        >
-                          {s.barva ? (
-                            <span
-                              aria-hidden="true"
-                              data-osoba={s.barva}
-                              style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "4px", borderRadius: "var(--radius-sm) 0 0 var(--radius-sm)", background: "var(--osoba)" }}
-                            />
-                          ) : null}
-                          <span>{s.jmeno}</span>
-                          <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
-                            {s.od}–{s.do}
-                          </span>
-                        </Card>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {posledniVzkazy.length > 0 ? (
-                  <div>
-                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "10px" }}>
-                      <h2 style={{ ...nadpisSekce, margin: 0 }}>Poslední vzkazy</h2>
-                      <Link href={`/${rozsah}/vzkazy`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
-                        Zobrazit všechny →
-                      </Link>
-                    </div>
-                    <ul style={seznam}>
-                      {posledniVzkazy.map((z) => (
-                        <Card key={z.id} as="li" padding="10px 14px" style={{ display: "flex", gap: "10px", alignItems: "flex-start" }}>
-                          <span
-                            aria-hidden="true"
-                            style={{
-                              flex: "none", width: "28px", height: "28px", borderRadius: "50%",
-                              background: "var(--sunken)", color: "var(--muted)",
-                              display: "grid", placeItems: "center", fontSize: "11px", fontWeight: 600,
-                            }}
-                          >
-                            {initialy(z.jmeno)}
-                          </span>
-                          <span style={{ minWidth: 0, flex: 1 }}>
-                            <span style={{ display: "flex", justifyContent: "space-between", gap: "8px", fontSize: "13.5px", color: "var(--ink)", fontWeight: 600 }}>
-                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{z.jmeno}</span>
-                              <span style={{ flex: "none", color: "var(--muted)", fontWeight: 400, fontVariantNumeric: "tabular-nums" }}>{z.kdy}</span>
-                            </span>
-                            <span
-                              style={{
-                                display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                                overflow: "hidden", fontSize: "13px", color: "var(--muted)", marginTop: "2px",
-                              }}
-                            >
-                              {z.text}
-                            </span>
-                          </span>
-                        </Card>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
+            {canSee(ctx, "tasks.read") ? (
+              <KpiKarta
+                ikona="fajfkaCtverec"
+                ton="dobre"
+                titulek="Úkoly"
+                hodnota={otevrenoUkolu > 0 ? pocet(otevrenoUkolu, "otevřený úkol", "otevřené úkoly", "otevřených úkolů") : "Hotovo"}
+                popisy={[poTerminuUkolu > 0 ? `${poTerminuUkolu} po termínu` : null]}
+                popisTon={poTerminuUkolu > 0 ? "bad" : undefined}
+                paticka={<KpiOdkaz href={`/${rozsah}/ukoly`} popisek="Zobrazit úkoly" />}
+              />
             ) : null}
-
-            {/* ---------- PŘÍŠTÍ SMĚNY ------------------------------- */}
-            <h2 style={nadpisSekce}>Příští směny</h2>
-            {pristi.length === 0 ? (
-              <p style={prazdno}>Zatím nemáte zadanou žádnou další směnu.</p>
-            ) : (
-              <ul style={seznam}>
-                {pristi.map((s) => (
-                  <Card key={s.id} as="li" padding="12px 14px" style={{ fontSize: "14px", color: "var(--ink)" }}>
-                    <strong>{denCesky(s.shift_date)}</strong>{" "}
-                    {s.starts_at.slice(0, 5)}–{s.ends_at.slice(0, 5)} ·{" "}
-                    {nazvyPobocek.get(s.branch_id) ?? "jiná pobočka"}
-                  </Card>
-                ))}
-              </ul>
-            )}
           </div>
 
-          {/* ---------- POSTRANNÍ PANEL ----------------------------- */}
-          <div>
-            {jeVedeni(ctx) && dnesniRozpis.length > 0 ? (
-              <>
-                <h2 style={nadpisSekce}>Tým dnes</h2>
-                <Card padding="16px" style={{ marginBottom: "24px" }}>
-                  <div style={{ fontSize: "22px", fontWeight: 600, color: "var(--ink)" }}>
-                    {tymPritomno.length} / {new Set(dnesniRozpis.map((s) => s.employeeId)).size}
-                  </div>
-                  <div style={{ fontSize: "12.5px", color: "var(--muted)", marginTop: "2px" }}>
-                    zaměstnanců přítomno
-                  </div>
-                  {tymPritomno.length > 0 ? (
-                    <div style={{ fontSize: "13px", color: "var(--muted)", marginTop: "10px", lineHeight: 1.6 }}>
-                      {tymPritomno.join(", ")}
-                    </div>
-                  ) : null}
-                  <Link href={`/${rozsah}/dochazka`} className="ft-tl ft-tl-vedlejsi ft-tl-male" style={{ marginTop: "10px", display: "inline-block" }}>
-                    Zobrazit docházku →
-                  </Link>
-                </Card>
-              </>
-            ) : null}
-
-            {pocasi ? (
-              <Card
-                padding="12px 14px"
-                style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "16px" }}
-              >
-                <span style={{ fontSize: "13.5px", color: "var(--ink)" }}>
-                  Počasí{den.pobocka_nazev ? ` – ${den.pobocka_nazev}` : ""}
-                </span>
-                <span style={{ marginLeft: "auto", fontSize: "15px", fontWeight: 600, color: "var(--ink)" }}>
-                  {pocasi.teplotaC}°C
-                </span>
-                <span style={{ fontSize: "13px", color: "var(--muted)" }}>{pocasi.stavPocasi}</span>
-              </Card>
-            ) : null}
-
-            {rychleAkce.length > 0 ? (
-              <>
-                <h2 style={nadpisSekce}>Rychlé akce</h2>
-                <ul style={{ ...seznam, marginBottom: "24px" }}>
-                  {rychleAkce.map((a) => (
-                    <Card key={a.href + a.popisek} as="li" padding="0">
-                      <Link
-                        href={a.href}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          padding: "12px 14px",
-                          fontSize: "14px",
-                          color: "var(--ink)",
-                          textDecoration: "none",
-                        }}
-                      >
-                        <span aria-hidden="true" style={{ color: "var(--mosaz)", display: "flex" }}>
-                          {a.ikona}
-                        </span>
-                        {a.popisek}
-                        <span style={{ marginLeft: "auto", color: "var(--muted)" }} aria-hidden="true">
-                          →
-                        </span>
-                      </Link>
-                    </Card>
-                  ))}
-                </ul>
-              </>
-            ) : null}
-
-            <h2 style={nadpisSekce}>Kam dál</h2>
-            <ul style={seznam}>
-              <Card as="li" padding="12px 14px" style={{ fontSize: "14px", color: "var(--ink)" }}>
-                <Link href={`/${rozsah}/dochazka`} style={odkaz}>
-                  Tenhle měsíc — odpracováno, hrubá mzda, zálohy
-                </Link>
-              </Card>
-              <Card as="li" padding="12px 14px" style={{ fontSize: "14px", color: "var(--ink)" }}>
-                <Link href={`/${rozsah}/ukoly`} style={odkaz}>
-                  Úkoly a checklisty
-                </Link>
-              </Card>
-            </ul>
-
-            {/*
-              Citát — čistě značková ozdoba (design systém, 16.9.2026,
-              podle mockupu), ne tvrzení o datech. Proto stojí jasně
-              podepsaný "Foodtab", ne jako by šlo o vyjádření KONKRÉTNÍ
-              provozovny nebo zákazníka — to by bylo totéž předstírání,
-              kterému se vyhýbá hero fotka (viz komentář výš).
-            */}
-            <Card padding="16px 18px" style={{ marginTop: "24px" }}>
-              <p style={{ margin: 0, fontSize: "14.5px", fontStyle: "italic", color: "var(--ink)", lineHeight: 1.5 }}>
-                „Dobrá restaurace stojí na skvělém týmu.“
-              </p>
-              <p style={{ margin: "8px 0 0", fontSize: "12px", color: "var(--muted)" }}>— Foodtab</p>
-            </Card>
-
-            {/*
-              Push do mobilu zatím nechodí a NEPÍŠE SE, že chodí. Věta,
-              která není pravda, je horší než žádná: člověk by na ni
-              spoléhal.
-            */}
-            <p style={{ ...prazdno, fontSize: "12px" }}>
-              Zprávy se ukazují v aplikaci. Upozornění do telefonu zatím
-              nechodí.
-            </p>
+          {/* ---------- ROZPIS + POSLEDNÍ VZKAZY --------------------
+             Bez `shifts.read` rozpis nikoho jiného vidět nesmí — místo
+             něj jsou tu jen moje příští směny. */}
+          <div className="ds-stred">
+            {smiCistRozpis ? (
+              <PanelRozpisu
+                nadpis={nadpisRozpisu}
+                rozsah={rozsah}
+                dny={dnyRozpisu}
+                radky={radkyRozpisu}
+                zbyva={Math.max(0, vsechnyRadky.length - RADKU_ROZPISU)}
+                prazdno={vybranyDen === den.provozni_den ? "Dnes nikdo nemá směnu." : "Na tenhle den není nikdo v rozpisu."}
+              />
+            ) : (
+              panelPristichSmen
+            )}
+            <PanelVzkazu rozsah={rozsah} vzkazy={posledniVzkazy} />
           </div>
         </div>
+
+        {/* ---------- BOČNÍ PANEL ----------------------------------- */}
+        <aside className="ds-dnes-bok" aria-label="Doplňující informace">
+          <RychleAkce akce={rychleAkce} />
+
+          {jeVedeni(ctx) && planovanoDnes > 0 ? (
+            <TymDnes
+              pritomno={tymPritomno.length}
+              planovano={planovanoDnes}
+              jmena={tymPritomno.map((j) => ({ inicialy: initialy(j), jmeno: j }))}
+              href={`/${rozsah}/dochazka`}
+            />
+          ) : null}
+
+          {pocasi ? <PocasiKarta misto={den.pobocka_nazev} teplota={pocasi.teplotaC} stav={pocasi.stavPocasi} /> : null}
+
+          <Citat />
+
+          <p style={{ margin: 0, fontSize: "13px" }}>
+            <Link href={`/${rozsah}/dochazka`} style={odkaz}>
+              Tenhle měsíc — odpracováno, hrubá mzda, zálohy
+            </Link>
+          </p>
+
+          {/*
+            Push do mobilu zatím nechodí a NEPÍŠE SE, že chodí. Věta,
+            která není pravda, je horší než žádná: člověk by na ni
+            spoléhal.
+          */}
+          <p style={{ ...prazdno, fontSize: "12px", margin: 0 }}>
+            Zprávy se ukazují v aplikaci. Upozornění do telefonu zatím nechodí.
+          </p>
+        </aside>
       </div>
+    </div>
   );
 }
 
@@ -1023,85 +993,19 @@ function pozdrav(zona: string): string {
   return "Dobrou noc";
 }
 
-/** „Neděle 14. září" — provozní datum, bez roku u letošního. */
+/** „Neděle 14. září 2026" — provozní datum, s rokem jako v mockupu. */
 function denDlouze(datum: string): string {
-  const [, m, d] = datum.split("-").map(Number);
+  const [rok, m, d] = datum.split("-").map(Number);
   const dny = ["Neděle", "Pondělí", "Úterý", "Středa", "Čtvrtek", "Pátek", "Sobota"];
   // `datum` je provozní DATUM bez pásma — nepouštět přes `new Date()` se
   // stringem, ať se den v týdnu neposune. Sestaví se z jednotlivých čísel.
-  const den = new Date(Date.UTC(Number(datum.slice(0, 4)), m - 1, d));
-  return `${dny[den.getUTCDay()]} ${d}. ${MESICE[m - 1]}`;
+  const den = new Date(Date.UTC(rok, m - 1, d));
+  return `${dny[den.getUTCDay()]} ${d}. ${MESICE[m - 1]} ${rok}`;
 }
 const MESICE = [
   "ledna", "února", "března", "dubna", "května", "června",
   "července", "srpna", "září", "října", "listopadu", "prosince",
 ];
-
-/**
- * Jedna ze 4 přehledových karet nahoře.
- *
- * UX redesign, druhé kolo (oddíl 5): dřív každá nesla vlastní velké
- * vedlejší tlačítko dole — čtyři tlačítka vedle sebe na obrazovce,
- * která má být souhrn, ne rozcestník. Celá karta je teď odkaz, malá
- * šipka v rohu jen naznačuje, že se dá otevřít.
- */
-function StavovaKarta({
-  ikona,
-  tone,
-  titulek,
-  hodnota,
-  popis,
-  odkaz,
-}: {
-  ikona: React.ReactNode;
-  tone: "success" | "warning" | "danger" | "neutral";
-  titulek: string;
-  hodnota: string;
-  popis?: string;
-  odkaz: { popisek: string; href: string };
-}) {
-  const barva =
-    tone === "success" ? "var(--dobre)" : tone === "warning" ? "var(--pozor)" : tone === "danger" ? "var(--bad)" : "var(--mosaz)";
-  const pozadi =
-    tone === "success" ? "var(--dobre-bg)" : tone === "warning" ? "var(--pozor-bg)" : tone === "danger" ? "var(--bad-bg)" : "var(--sunken)";
-
-  return (
-    <Link
-      href={odkaz.href}
-      style={{
-        background: "var(--card)", border: "1px solid var(--line)", borderRadius: "var(--radius-md)",
-        padding: "12px 14px", display: "flex", flexDirection: "column", gap: "6px",
-        textDecoration: "none", color: "inherit",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <span
-          aria-hidden="true"
-          style={{
-            width: "26px", height: "26px", borderRadius: "var(--radius-sm)",
-            background: pozadi, color: barva,
-            display: "grid", placeItems: "center", flex: "none",
-          }}
-        >
-          {ikona}
-        </span>
-        <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--muted)" }}>{titulek}</span>
-        <span aria-hidden="true" style={{ marginLeft: "auto", color: "var(--faint)", fontSize: "13px" }}>→</span>
-      </div>
-      <div style={{ fontSize: "15px", fontWeight: 600, color: "var(--ink)" }}>{hodnota}</div>
-      {popis ? <div style={{ fontSize: "12px", color: tone === "danger" ? "var(--bad)" : "var(--muted)" }}>{popis}</div> : null}
-    </Link>
-  );
-}
-
-/** Drobná ikona pro Rychlé akce a přehledové karty — obrys 20×20, stejný styl jako app/[rozsah]/ikona.tsx. */
-function IkonaIkona({ d }: { d: string }) {
-  return (
-    <svg className="ft-i" viewBox="0 0 20 20" aria-hidden="true" style={{ width: "17px", height: "17px" }}>
-      <path d={d} />
-    </svg>
-  );
-}
 
 /** Barva pruhu na kartě „Co potřebuje pozornost" podle závažnosti. */
 function barvaPozornosti(uroven: "critical" | "warning" | "info"): string {
@@ -1149,32 +1053,6 @@ const nadpisPozornosti = {
   fontWeight: 700,
   textTransform: "uppercase",
   letterSpacing: ".08em",
-  color: "var(--muted)",
-} as const;
-
-const mrizkaKaret = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-  gap: "10px",
-  margin: "0 0 22px",
-} as const;
-
-const nadpisKarty = {
-  margin: "4px 0 0",
-  fontSize: "22px",
-  color: "var(--ink)",
-} as const;
-
-const podnadpis = {
-  margin: "6px 0 0",
-  fontSize: "14px",
-  lineHeight: 1.5,
-  color: "var(--muted)",
-} as const;
-
-const nadpisSekce = {
-  margin: "0 0 10px",
-  fontSize: "15px",
   color: "var(--muted)",
 } as const;
 
