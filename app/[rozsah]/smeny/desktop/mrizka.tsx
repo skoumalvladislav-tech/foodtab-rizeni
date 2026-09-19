@@ -92,6 +92,7 @@ export default function MrizkaTydne({
   barvy,
   jmena,
   nazvyPobocek,
+  zkratkyPobocek,
   pobockaProNovou,
   vybranaId,
   sbalene,
@@ -109,8 +110,10 @@ export default function MrizkaTydne({
   poziceOsob: (osobaId: string) => string | null;
   barvy: Map<string, string | null>;
   jmena: Map<string, string>;
-  /** id pobočky → název; karta směny je píše, když je v okně víc poboček. */
+  /** id pobočky → název; do `title` karty, když je v okně víc poboček. */
   nazvyPobocek: Map<string, string>;
+  /** id pobočky → zkratka („Černá Perla“ → „ČP“); to je to, co je na kartě vidět. */
+  zkratkyPobocek: Map<string, string>;
   /** Na které pobočce zakládat novou směnu, když mřížka není dělená po pobočkách. */
   pobockaProNovou: string | null;
   /** Směna otevřená v panelu vpravo — v mřížce zvýrazněná. */
@@ -221,6 +224,7 @@ export default function MrizkaTydne({
                   /* Bez pruhu pobočky se zakládá na vybrané (Zobrazit), jinak na výchozí. */
                   pobockaId={pobocka.jePobocka ? pobocka.klic : pobockaProNovou}
                   nazvyPobocek={nazvyPobocek}
+                  zkratkyPobocek={zkratkyPobocek}
                   psatPobocku={!pobocka.jePobocka}
                   dny={dny}
                   dnesni={dnesni}
@@ -243,6 +247,7 @@ export default function MrizkaTydne({
               skupina={mrizka.bezSmeny}
               pobockaId={pobockaProNovou ?? planovani?.vychoziPobocka ?? null}
               nazvyPobocek={nazvyPobocek}
+              zkratkyPobocek={zkratkyPobocek}
               psatPobocku={false}
               dny={dny}
               dnesni={dnesni}
@@ -314,6 +319,7 @@ function SkupinaMrizkyView({
   skupina,
   pobockaId,
   nazvyPobocek,
+  zkratkyPobocek,
   psatPobocku,
   dny,
   dnesni,
@@ -329,6 +335,7 @@ function SkupinaMrizkyView({
   skupina: SkupinaMrizky;
   pobockaId: string | null;
   nazvyPobocek: Map<string, string>;
+  zkratkyPobocek: Map<string, string>;
   psatPobocku: boolean;
   dny: string[];
   dnesni: string;
@@ -392,6 +399,7 @@ function SkupinaMrizkyView({
               radek={radek}
               pobockaId={pobockaId}
               nazvyPobocek={nazvyPobocek}
+              zkratkyPobocek={zkratkyPobocek}
               psatPobocku={psatPobocku}
               dny={dny}
               dnesni={dnesni}
@@ -413,6 +421,7 @@ function RadekMrizkyView({
   radek,
   pobockaId,
   nazvyPobocek,
+  zkratkyPobocek,
   psatPobocku,
   dny,
   dnesni,
@@ -426,6 +435,8 @@ function RadekMrizkyView({
   radek: RadekMrizky;
   pobockaId: string | null;
   nazvyPobocek: Map<string, string>;
+  /** id pobočky → zkratka („Černá Perla“ → „ČP“); počítá se ze VŠECH poboček firmy, ať je stálá. */
+  zkratkyPobocek: Map<string, string>;
   /** Psát na kartu pobočku? V mřížce nedělené po pobočkách ano, jinak je jasná z pruhu. */
   psatPobocku: boolean;
   dny: string[];
@@ -507,7 +518,8 @@ function RadekMrizkyView({
                 jmena={jmena}
                 vybrana={vybranaId === s.id}
                 klikaci={planovani !== null}
-                pobocka={psatPobocku ? (nazvyPobocek.get(s.branch_id) ?? null) : null}
+                pobocka={psatPobocku ? (zkratkyPobocek.get(s.branch_id) ?? null) : null}
+                pobockaNazev={psatPobocku ? (nazvyPobocek.get(s.branch_id) ?? null) : null}
                 onOtevrit={() => onOtevrit({ den, smena: s })}
               />
             ))}
@@ -559,6 +571,7 @@ export function KartaSmeny({
   onOtevrit,
   kompaktni = false,
   pobocka = null,
+  pobockaNazev = null,
 }: {
   s: Smena;
   jmena: Map<string, string>;
@@ -567,8 +580,10 @@ export function KartaSmeny({
   onOtevrit: () => void;
   /** Úzká buňka (měsíc dvou lidí vedle sebe): „8–16“ místo „08:00–16:00“ a „pauza 15–17“. */
   kompaktni?: boolean;
-  /** Název pobočky pod časem; `null` = nepsat (pobočka je jasná odjinud). */
+  /** Zkratka pobočky na kartě; `null` = nepsat (pobočka je jasná odjinud). */
   pobocka?: string | null;
+  /** Celý název pobočky do `title` — zkratka sama by nikomu nic neřekla. */
+  pobockaNazev?: string | null;
 }) {
   const stav = stavSmeny(s as SmenaD);
   const puvodne = puvodniStav(s as SmenaD);
@@ -584,12 +599,13 @@ export function KartaSmeny({
       ? `pauza ${kratkyCas(hhmm(s.pauza_od as string))}–${kratkyCas(hhmm(s.pauza_do as string))}`
       : pauza
     : null;
-  const popisek = [stitek, pobocka, pauzaNaKarte].filter(Boolean).join(" · ");
+  const popisek = [stitek, pauzaNaKarte].filter(Boolean).join(" · ");
 
   // Celý popis do `title` a odečítače — karta sama je záměrně strohá.
   const podrobnosti = [
     cas,
     trhana ? `trhaná směna, ${pauza}` : null,
+    pobockaNazev,
     stitek,
     puvodne
       ? [
@@ -609,6 +625,11 @@ export function KartaSmeny({
   const obsah = (
     <>
       <span className="ds-smd-cas">{casNaKarte}</span>
+      {pobocka ? (
+        <span className="ds-smd-pobocka-zkr" title={pobockaNazev ?? undefined}>
+          {pobocka}
+        </span>
+      ) : null}
       {stav !== "vydana" ? <span className="ds-smd-znacka" aria-hidden="true" /> : null}
       {popisek ? <span className="ds-smd-popisek">{popisek}</span> : null}
     </>

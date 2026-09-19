@@ -38,8 +38,8 @@ import {
   sirkaSloupceXlsx,
   vetyPoznamky,
   zalomitVety,
-  zkratkyPobocek,
 } from '../lib/rozpis-export.ts'
+import { zkratkyPobocek } from '../lib/rozpis-desktop.ts'
 import { A4_SIRKA, A4_VYSKA, DOLNI_HRANICE, OKRAJ, pdfZExportu, vyberRozlozeni } from '../lib/rozpis-export-pdf.ts'
 import { sirkaTextu, sirkaZnaku, StrankaPdf, zapsatPdf, zkratitText } from '../lib/pdf-zapis.ts'
 import { crc32, sloupecNaPismeno, textTisku, zapsatXlsx } from '../lib/xlsx-zapis.ts'
@@ -150,7 +150,7 @@ je('čas do úzké buňky: celé hodiny bez :00, půlhodiny celé',
 je('směna nese pobočku, když ji zná', dilSmeny(smena('2026-09-01', 'a', '08:00', '16:00'), 'Bernard').pobocka, 'Bernard')
 
 const dvePobocky = sestavitExportMesice(vstup([...smeny, smena('2026-09-06', 'a', '08:00', '12:00', { branch_id: 'b2' })]))
-je('dvě pobočky: příznak a pobočky se zkratkami (abecedně)', [dvePobocky.vicePobocek, dvePobocky.pobocky], [true, [{ nazev: 'Bernard', zkratka: 'Ber' }, { nazev: 'Černá Perla', zkratka: 'ČP' }]])
+je('dvě pobočky: příznak a pobočky se zkratkami (abecedně)', [dvePobocky.vicePobocek, dvePobocky.pobocky], [true, [{ nazev: 'Bernard', zkratka: 'B' }, { nazev: 'Černá Perla', zkratka: 'ČP' }]])
 const andreaDve = dvePobocky.sloupce.filter((c) => c.jmeno === 'Andrea Mikulová')
 je('dvě pobočky: člověk je pořád JEDEN sloupec (pobočky se nemíchají do sloupců)', andreaDve.length, 1)
 je('… pobočka je na směně: 6. 9. Bernard, 1. 9. Černá Perla', [andreaDve[0].podleDne.get('2026-09-06')[0].pobocka, andreaDve[0].podleDne.get('2026-09-01')[0].pobocka], ['Bernard', 'Černá Perla'])
@@ -159,13 +159,29 @@ je('… souhrn: jeden řádek na člověka', dvePobocky.souhrn.filter((r) => r.j
 
 console.log('\n== Zkratky poboček ==')
 const zk = (...nazvy) => Object.fromEntries(zkratkyPobocek(nazvy))
-je('víceslovný název: iniciály', zk('Černá Perla', 'Bernard')['Černá Perla'], 'ČP')
-je('jednoslovný název: první tři písmena', zk('Černá Perla', 'Bernard')['Bernard'], 'Ber')
-je('shodné iniciály se natáhnou, dokud se nerozliší', zk('Černá Perla', 'Červená Pergola'), { 'Černá Perla': 'Čern', 'Červená Pergola': 'Červ' })
-je('zkratka není delší než název (krátký název zůstane celý)', [zk('Bar')['Bar'], zk('Ab')['Ab']], ['Bar', 'Ab'])
+// Zkratka = první písmena slov (Šéfík 20. 9. 2026).
+je('víceslovný název: písmeno z každého slova', [zk('Černá Perla', 'Bernard')['Černá Perla'], zk('Restaurace U Lva')['Restaurace U Lva']], ['ČP', 'RUL'])
+je('jednoslovný název: jedno písmeno', zk('Černá Perla', 'Bernard')['Bernard'], 'B')
+je('shodné iniciály: každému slovu se přidá písmeno, dokud se nerozliší', zk('Černá Perla', 'Červená Pergola'), { 'Černá Perla': 'ČernPerl', 'Červená Pergola': 'ČervPerg' })
+je('… prodlužují se VŠECHNA slova, ne jen první (liší se až poslední)', zk('Restaurace U Lva', 'Restaurace U Lípy'), { 'Restaurace U Lva': 'ReULv', 'Restaurace U Lípy': 'ReULí' })
+je('zkratka není delší než název (jednopísmenný název zůstane celý)', [zk('Bar')['Bar'], zk('U')['U']], ['B', 'U'])
+je('dvě jednoslovné pobočky na stejné písmeno se rozliší', zk('Bernard', 'Bistro'), { Bernard: 'Be', Bistro: 'Bi' })
 const mnoho = zkratkyPobocek(['Restaurace U Lva', 'Restaurace U Lípy', 'Rybí Ulice', 'Bar Bernard', 'Bernard', 'Bistro Baltazar'])
 je('každá zkratka je jiná i u podobných názvů', new Set(mnoho.values()).size, 6)
 je('stejný název dvakrát = jedna zkratka', zkratkyPobocek(['Bernard', 'Bernard']).size, 1)
+/*
+  Zkratka se počítá ze VŠECH poboček firmy, ne jen z těch, které mají v měsíci
+  směnu — jinak by „Černá Perla“ byla v lednu „ČP“ a v únoru (když přibude
+  „Červená Pergola“) „Čern“, a dva papíry by se nedaly srovnat. Obrazovka má
+  tentýž zdroj, takže karta směny a export říkají totéž.
+*/
+const vsechnyPobocky = new Map([['b1', 'Černá Perla'], ['b2', 'Červená Pergola']])
+const jenJedna = sestavitExportMesice(vstup([smena('2026-09-02', 'a', '08:00', '16:00'), smena('2026-09-03', 'a', '08:00', '12:00', { branch_id: 'b2' })], { pobocky: vsechnyPobocky }))
+je('obě pobočky v měsíci: zkratky se rozliší', jenJedna.pobocky.map((p) => p.zkratka), ['ČernPerl', 'ČervPerg'])
+const bezDruhe = sestavitExportMesice(vstup([smena('2026-09-02', 'a', '08:00', '16:00'), smena('2026-09-03', 'a', '08:00', '12:00', { branch_id: 'b3' })], { pobocky: new Map([...vsechnyPobocky, ['b3', 'Bernard']]) }))
+je('druhá pobočka v měsíci chybí, a „Černá Perla“ má přesto TUTÉŽ zkratku (ne „ČP“)',
+  bezDruhe.pobocky.find((p) => p.nazev === 'Černá Perla').zkratka, 'ČernPerl')
+je('… a v seznamu jsou jen pobočky, které v měsíci opravdu jsou', bezDruhe.pobocky.map((p) => p.nazev), ['Bernard', 'Černá Perla'])
 
 console.log('\n== ZIP a XML ==')
 je('CRC-32 známého vstupu', crc32(new TextEncoder().encode('123456789')), 0xcbf43926)

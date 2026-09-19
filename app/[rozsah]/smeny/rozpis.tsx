@@ -38,6 +38,7 @@ import {
   puvodniStav,
   sestavitMrizku,
   smenaVyhovuje,
+  zkratkyPobocek,
   souhrnZmen,
   stavSmeny,
   zmenyRozpisu,
@@ -327,6 +328,16 @@ export default function RozpisView({
     Na pobočkovém rozsahu (/cerna-perla/smeny) dotaz jiné pobočky nevrátí,
     takže by jejich výběr vedl jen na prázdnou mřížku s hláškou o filtrech.
   */
+  /*
+    Zkratky poboček na kartu směny („Černá Perla“ → „ČP“). Počítají se ze VŠECH
+    poboček firmy, ne jen z těch v okně — jinak by se táž pobočka zkracovala
+    různě podle toho, na který týden se vedoucí kouká. Export je má stejně.
+  */
+  const zkratkyPodleId = (() => {
+    const zk = zkratkyPobocek([...nazvyPobocek.values()]);
+    return new Map([...nazvyPobocek].map(([id, nazev]) => [id, zk.get(nazev) ?? nazev]));
+  })();
+
   const moznosti: MoznostiFiltru = {
     pobocky: [...nazvyPobocek]
       .filter(([id]) => rozsah.level !== "branch" || id === rozsah.branchId)
@@ -581,6 +592,7 @@ export default function RozpisView({
             barvy={barvy}
             jmena={jmena}
             nazvyPobocek={nazvyPobocek}
+            zkratkyPobocek={zkratkyPodleId}
             pobockaProNovou={pobockaProNovou}
             vybranaId={okno?.smena?.id || null}
             sbalene={sbalene}
@@ -612,6 +624,7 @@ export default function RozpisView({
               poziceOsob={poziceOsoby}
               barvy={barvy}
               nazvyPobocek={nazvyPobocek}
+              zkratkyPobocek={zkratkyPodleId}
               pobockaProNovou={pobockaProNovou}
               vybranaId={okno?.smena?.id || null}
               onOtevrit={setOtevrene}
