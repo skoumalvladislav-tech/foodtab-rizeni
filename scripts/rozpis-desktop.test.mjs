@@ -27,6 +27,7 @@ import {
 import {
   FILTR_DESKTOP_PRAZDNY,
   cekaNaVydani,
+  dalsiVolnyDen,
   denKratce,
   hodinyStruc,
   jeFiltrPrazdny,
@@ -347,9 +348,20 @@ je('mřížka pro obě vybrané pobočky najednou: obě se ukážou a hodiny jso
 je('… a Tomáš je v obou pobočkách jako dva řádky (směny se nemíchají)',
   jmenaVsech(zPobocek({ pobocky: ['b1', 'b2'], osoby: ['t'] })), ['Tomáš Kovář', 'Tomáš Kovář'])
 
+console.log('\n== Uložit a přidat další den ==')
+je('bez obsazených dní: hned další den', dalsiVolnyDen([], '2026-09-03'), '2026-09-04')
+je('přeskočí dny, které člověk už má (4. a 5. 9. → 6. 9.)', dalsiVolnyDen(['2026-09-04', '2026-09-05'], '2026-09-03'), '2026-09-06')
+je('obsazený je jen jiný den, ne ten hned další', dalsiVolnyDen(['2026-09-10'], '2026-09-03'), '2026-09-04')
+je('uložený den sám se nepočítá (hledá se až po něm)', dalsiVolnyDen(['2026-09-03'], '2026-09-03'), '2026-09-04')
+je('přes konec měsíce: 30. 9. + obsazený 1. 10. → 2. 10.', dalsiVolnyDen(['2026-10-01'], '2026-09-30'), '2026-10-02')
+je('přes konec roku: 31. 12. → 1. 1.', dalsiVolnyDen([], '2026-12-31'), '2027-01-01')
+je('zpětné dny nevadí (jen ty po uloženém)', dalsiVolnyDen(['2026-09-01', '2026-09-02'], '2026-09-03'), '2026-09-04')
+je('obsazeno všechno v dosahu: den hned po uložené směně', dalsiVolnyDen(['2026-09-04', '2026-09-05', '2026-09-06'], '2026-09-03', 3), '2026-09-04')
+je('funguje i nad množinou', dalsiVolnyDen(new Set(['2026-09-04']), '2026-09-03'), '2026-09-05')
+
 console.log('\n== Krátké zápisy ==')
 je('celá hodina bez :00, bez nuly navíc', [kratkyCas('08:00'), kratkyCas('22:00'), kratkyCas('00:00')], ['8', '22', '0'])
-je('půlhodina zůstane celá', [kratkyCas('15:30'), kratkyCas('08:15')], ['15:30', '08:15'])
+je('půlhodina zůstane celá, jen bez nuly navíc', [kratkyCas('15:30'), kratkyCas('08:15'), kratkyCas('00:30')], ['15:30', '8:15', '0:30'])
 je('hodiny jako české číslo', [hodinyStruc(480), hodinyStruc(1890), hodinyStruc(0), hodinyStruc(100)], ['8 h', '31,5 h', '0 h', '1,67 h'])
 
 console.log('\n== Celý měsíc jednoho člověka ==')

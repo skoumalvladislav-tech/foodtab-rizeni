@@ -40,6 +40,7 @@ import {
   denVTydnu,
   hhmm,
   minutSmeny,
+  posunDatum,
   ZKRATKY_DNU,
   type SmenaZaklad,
 } from './rozpis-mobil.ts'
@@ -381,11 +382,32 @@ export function smenaVyhovuje(
   return osobaVyhovuje(o, [s.position_id], f, useky)
 }
 
+/* --- „Uložit a přidat další den“ ------------------------------------------- */
+
+/**
+ * Den, na který se po uložené směně otevře další: nejbližší den po `datum`,
+ * který člověk nemá obsazený (`obsazene` = dny, kde už směnu má). Při
+ * zadávání měsíce tak formulář přeskočí dny, které už jsou vyplněné, a
+ * nezaloží se dvakrát totéž. Hledá se nejvýš `limit` dnů dopředu; kdo má
+ * obsazeno všechno, dostane den hned po uložené směně.
+ */
+export function dalsiVolnyDen(obsazene: Iterable<string>, datum: string, limit = 62): string {
+  const maSmenu = new Set(obsazene)
+  const hned = posunDatum(datum, 1)
+  let den = hned
+  for (let i = 0; i < limit; i++) {
+    if (!maSmenu.has(den)) return den
+    den = posunDatum(den, 1)
+  }
+  return hned
+}
+
 /* --- krátké zápisy do úzkých buněk ---------------------------------------- */
 
-/** „08:00“ → „8“, „15:30“ → „15:30“ — do úzké buňky. */
+/** „08:00“ → „8“, „08:30“ → „8:30“, „15:30“ → „15:30“ — do úzké buňky (bez nuly navíc). */
 export function kratkyCas(hm: string): string {
-  return hm.endsWith(':00') ? String(Number(hm.slice(0, 2))) : hm
+  const hodina = String(Number(hm.slice(0, 2)))
+  return hm.endsWith(':00') ? hodina : `${hodina}${hm.slice(2)}`
 }
 
 /** Hodiny jako české číslo: 1890 min → „31,5 h“, 480 → „8 h“. */
