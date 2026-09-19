@@ -22,23 +22,20 @@ export const STYL = {
   obycejny: 0,
   titul: 1,
   hlavicka: 2,
-  hlavickaVikend: 3,
-  bunka: 4,
-  bunkaVikend: 5,
-  jmeno: 6,
-  cislo: 7,
-  cisloTucne: 8,
-  poznamka: 9,
-  souctovyText: 10,
-  /** Jméno v týdenní tabulce: menší písmo, může mít druhý řádek (pozice). */
-  jmenoTydne: 11,
-  /** Pás s názvem úseku přes celou šířku tabulky. */
-  skupina: 12,
-  /** Nadpis týdne nad tabulkou. */
-  podtitul: 13,
-  /** Buňka dne mimo měsíc — šedá a prázdná. */
-  bunkaMimo: 14,
-  hlavickaMimo: 15,
+  /** Směny dne v úzké buňce (9 pt). */
+  bunka: 3,
+  bunkaVikend: 4,
+  /** Text v tabulce Souhrn. */
+  jmeno: 5,
+  cislo: 6,
+  cisloTucne: 7,
+  poznamka: 8,
+  souctovyText: 9,
+  /** Záhlaví sloupce člověka: text otočený o 90°, aby sloupec mohl být úzký. */
+  hlavickaOtocena: 10,
+  /** Den v levém sloupci („Po 1.“). */
+  denRadek: 11,
+  denRadekVikend: 12,
 } as const
 
 export type BunkaXlsx =
@@ -61,6 +58,8 @@ export type ListXlsx = {
   vyskyRadku?: Record<number, number>
   /** `false` = A4 na výšku; jinak na šířku. */
   naSirku?: boolean
+  /** Při tisku zmenšit celý list na jednu stránku (na šířku i na výšku). */
+  naJednuStranku?: boolean
   /**
    * Pevné měřítko tisku v procentech. Bez něj se list při tisku zmenší na
    * jednu stránku na šířku; s ním Excel ctí i ruční zalomení stránek
@@ -110,34 +109,30 @@ const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationship
 
 const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <numFmts count="1"><numFmt numFmtId="164" formatCode="0.0"/></numFmts>
-<fonts count="7">
+<fonts count="6">
 <font><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="15"/><name val="Calibri"/></font>
 <font><i/><sz val="10"/><color rgb="FF6C7177"/><name val="Calibri"/></font>
-<font><sz val="10"/><name val="Calibri"/></font>
-<font><b/><sz val="10"/><name val="Calibri"/></font>
-<font><b/><sz val="12"/><name val="Calibri"/></font>
+<font><sz val="9"/><name val="Calibri"/></font>
+<font><b/><sz val="9"/><name val="Calibri"/></font>
 </fonts>
-<fills count="6">
+<fills count="5">
 <fill><patternFill patternType="none"/></fill>
 <fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFEDEBE6"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFFBEFD2"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFF6F5F2"/><bgColor indexed="64"/></patternFill></fill>
-<fill><patternFill patternType="solid"><fgColor rgb="FFEFEFEF"/><bgColor indexed="64"/></patternFill></fill>
 </fills>
-<borders count="3">
+<borders count="2">
 <border><left/><right/><top/><bottom/><diagonal/></border>
 <border><left style="thin"><color rgb="FFD6D1C7"/></left><right style="thin"><color rgb="FFD6D1C7"/></right><top style="thin"><color rgb="FFD6D1C7"/></top><bottom style="thin"><color rgb="FFD6D1C7"/></bottom><diagonal/></border>
-<border><left/><right/><top style="thin"><color rgb="FFD6D1C7"/></top><bottom style="thin"><color rgb="FFD6D1C7"/></bottom><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="16">
+<cellXfs count="13">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="4" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
@@ -145,11 +140,9 @@ const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <xf numFmtId="164" fontId="1" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="5" fillId="4" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-<xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
-<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
-<xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="bottom" textRotation="90" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="5" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`
@@ -254,8 +247,8 @@ function polozkaTextu(text: string, drobne?: boolean[]): string {
   const radky = text.split('\n')
   const behy = radky.map((r, i) => {
     const pismo = drobne[i]
-      ? '<rPr><sz val="8"/><color rgb="FF6C7177"/><rFont val="Calibri"/></rPr>'
-      : '<rPr><sz val="10"/><rFont val="Calibri"/></rPr>'
+      ? '<rPr><sz val="7"/><color rgb="FF6C7177"/><rFont val="Calibri"/></rPr>'
+      : '<rPr><sz val="9"/><rFont val="Calibri"/></rPr>'
     return `<r>${pismo}<t xml:space="preserve">${xml(r)}${i < radky.length - 1 ? '\n' : ''}</t></r>`
   })
   return `<si>${behy.join('')}</si>`
@@ -311,7 +304,7 @@ export function zapsatXlsx(listy: ListXlsx[]): Uint8Array {
     // Pevné měřítko, nebo „na jednu stránku na šířku“ (výška se dopočítá).
     const tisk = list.meritko
       ? `scale="${Math.round(list.meritko)}"`
-      : 'fitToWidth="1" fitToHeight="0"'
+      : `fitToWidth="1" fitToHeight="${list.naJednuStranku ? 1 : 0}"`
     const zalomeni = (list.zalomeniPred ?? []).filter((r) => r > 1)
     const zapatiXml = list.tisk
       ? `<headerFooter>${list.tisk.zahlavi ? `<oddHeader>${xml(list.tisk.zahlavi)}</oddHeader>` : ''}${list.tisk.zapati ? `<oddFooter>${xml(list.tisk.zapati)}</oddFooter>` : ''}</headerFooter>`

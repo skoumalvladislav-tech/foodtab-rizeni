@@ -165,19 +165,33 @@ export class StrankaPdf {
   /**
    * Text s levým okrajem (nebo středem / pravým okrajem) v `x`; `y` je
    * účaří (dolní hrana písmen bez oušek).
+   *
+   * `otoceny`: text se čte zdola nahoru (o 90°). Pak je `x` účaří (svislá
+   * čára, písmena jsou nalevo od ní) a `y` je bod, od kterého text
+   * vychází: `l` = začíná v `y` a jde nahoru, `c` = má tam střed, `r` =
+   * tam končí. Do záhlaví úzkých sloupců.
    */
   text(
     text: string,
     x: number,
     y: number,
-    o: { velikost?: number; pismo?: Pismo; barva?: Barva; zarovnani?: 'l' | 'c' | 'r' } = {},
+    o: { velikost?: number; pismo?: Pismo; barva?: Barva; zarovnani?: 'l' | 'c' | 'r'; otoceny?: boolean } = {},
   ) {
     const velikost = o.velikost ?? 9
     const pismo = o.pismo ?? 'normal'
     const sirka = sirkaTextu(text, velikost, pismo)
-    const zacatek = o.zarovnani === 'c' ? x - sirka / 2 : o.zarovnani === 'r' ? x - sirka : x
+    const zacatek = o.zarovnani === 'c' ? -sirka / 2 : o.zarovnani === 'r' ? -sirka : 0
+    const barva = barvaOp(o.barva ?? [0, 0, 0], 'rg')
+    const pismoOp = `/${pismo === 'tucne' ? 'F2' : 'F1'} ${cislo(velikost)} Tf`
+    if (o.otoceny) {
+      // Matice 0 1 −1 0 x y: osa textu míří nahoru; pozice je v bodech PDF (od dola).
+      this.operace.push(
+        `BT ${barva} ${pismoOp} 0 1 -1 0 ${cislo(x)} ${cislo(this.vyska - y + zacatek)} Tm ${retezec(text)} Tj ET`,
+      )
+      return
+    }
     this.operace.push(
-      `BT ${barvaOp(o.barva ?? [0, 0, 0], 'rg')} /${pismo === 'tucne' ? 'F2' : 'F1'} ${cislo(velikost)} Tf ${cislo(zacatek)} ${cislo(this.vyska - y)} Td ${retezec(text)} Tj ET`,
+      `BT ${barva} ${pismoOp} ${cislo(x + zacatek)} ${cislo(this.vyska - y)} Td ${retezec(text)} Tj ET`,
     )
   }
 }

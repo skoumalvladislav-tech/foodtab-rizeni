@@ -399,9 +399,10 @@ export function dalsiVolnyDen(obsazene: Iterable<string>, datum: string, limit =
 
 /* --- krátké zápisy do úzkých buněk ---------------------------------------- */
 
-/** „08:00“ → „8“, „15:30“ → „15:30“ — do úzké buňky. */
+/** „08:00“ → „8“, „08:30“ → „8:30“, „15:30“ → „15:30“ — do úzké buňky (bez nuly navíc). */
 export function kratkyCas(hm: string): string {
-  return hm.endsWith(':00') ? String(Number(hm.slice(0, 2))) : hm
+  const hodina = String(Number(hm.slice(0, 2)))
+  return hm.endsWith(':00') ? hodina : `${hodina}${hm.slice(2)}`
 }
 
 /** Hodiny jako české číslo: 1890 min → „31,5 h“, 480 → „8 h“. */

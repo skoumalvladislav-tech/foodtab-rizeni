@@ -19,21 +19,26 @@
  * směna); automatická přestávka pobočky se neodečítá — je to plán,
  * ne docházka (stejně jako na obrazovce).
  *
- * Neobsazené směny mají vlastní řádek a do součtů hodin lidí se
- * nepočítají.
+ * Neobsazené směny mají vlastní sloupec „Neobsazeno“ a do součtů hodin
+ * lidí se nepočítají.
+ *
+ * ---------------------------------------------------------------------
+ * JEDNA STRÁNKA A4: DNY V ŘÁDCÍCH, LIDÉ VE SLOUPCÍCH
+ *
+ * Měsíc má 28–31 dní, ale lidí bývá řádově deset. Řádek na den a sloupec
+ * na člověka se proto na A4 na výšku vejde celý měsíc čitelně, kdežto
+ * opačně (30 sloupců dní) by písmo skončilo pod čtyřmi body. Sloupec je
+ * tak široký, jak dlouhý je čas směny („8–16“, „16–23:30“).
+ *
+ * Úseky ani pobočky tabulka nekreslí jako záhlaví či sloupce. Kdo pracuje
+ * na víc pobočkách, má pobočku pod časem směny — celým názvem, když se
+ * vejde, jinak zkratkou (vysvětlenou v poznámce pod tabulkou). Jedna
+ * pobočka se nepíše vůbec: je v nadpisu, na každé směně by jen brala místo.
+ * Úseky určují jen pořadí lidí (kuchyň pohromadě, pak plac…).
  */
 
 import { cekaNaVydani, kratkyCas, type OsobaD, type SmenaD } from './rozpis-desktop.ts'
-import {
-  denVTydnu,
-  hhmm,
-  hodinyKratce,
-  jeVikend,
-  minutSmeny,
-  pondeliTydne,
-  posunDatum,
-  ZKRATKY_DNU,
-} from './rozpis-mobil.ts'
+import { denVTydnu, hhmm, jeVikend, minutSmeny, ZKRATKY_DNU } from './rozpis-mobil.ts'
 import { STYL, textTisku, type BunkaXlsx, type ListXlsx } from './xlsx-zapis.ts'
 
 /* --- model ------------------------------------------------------------ */
@@ -42,44 +47,37 @@ import { STYL, textTisku, type BunkaXlsx, type ListXlsx } from './xlsx-zapis.ts'
 export type DilSmeny = {
   /** „08:00–16:00“ */
   cas: string
+  /** „8–16“, „16–23:30“ — do úzké buňky. */
+  kratce: string
   /** „15:00–17:00“ u trhané směny, jinak `null`. */
   pauza: string | null
+  /** Název pobočky směny; prázdný, když ho nikdo nezná. */
+  pobocka: string
   /** Ještě nebyla rozeslána lidem (značí se hvězdičkou). */
   nevydana: boolean
 }
 
-export type RadekExportu = {
-  klic: string
+/** Sloupec tabulky: člověk (nebo „Neobsazeno“) a jeho směny po dnech. */
+export type SloupecExportu = {
   /** `null` = neobsazené směny. */
   osobaId: string | null
   jmeno: string
-  usek: string
   pozice: string
-  pobocka: string
-  /** Směny po dnech; každý řádek pole je jedna směna, už jako text. */
-  podleDne: Map<string, string[]>
-  /** Totéž po částech (čas, pauza, hvězdička) — pro úzké buňky na výšku. */
-  dilyPodleDne: Map<string, DilSmeny[]>
-  /** Plánované minuty po dnech (do týdenních součtů v PDF). */
-  minutPodleDne: Map<string, number>
+  /** Směny po dnech, v pořadí od nejdřívější; přes všechny pobočky. */
+  podleDne: Map<string, DilSmeny[]>
+  /** Plánované minuty za měsíc. */
   minut: number
   smen: number
 }
+
+/** Pobočka, která se v měsíci vyskytuje, a její zkratka (jednoznačná mezi ostatními). */
+export type PobockaExportu = { nazev: string; zkratka: string }
 
 /** Souhrn hodin člověka za měsíc — přes všechny pobočky, na kterých pracoval. */
 export type SouhrnCloveka = {
   jmeno: string
-  usek: string
   pozice: string
-  /** „Černá Perla 24 h · Bernard 8 h“ — jen když se pracovalo na víc pobočkách, jinak prázdné. */
-  pobocky: string
   smen: number
-  minut: number
-}
-
-export type SkupinaExportu = {
-  nazev: string
-  radky: RadekExportu[]
   minut: number
 }
 
@@ -92,15 +90,15 @@ export type ExportMesice = {
   vytvoreno: string
   /** Všechny dny měsíce. */
   dny: string[]
-  /** Týdny od pondělí do neděle, které měsíc pokrývají (i s dny mimo měsíc). */
-  tydny: string[][]
+  /** Lidé v pořadí úseků a abecedně, na konci „Neobsazeno“ (je-li co). */
+  sloupce: SloupecExportu[]
+  /** Jsou v měsíci směny z víc poboček? Jen pak se pobočka píše pod čas. */
   vicePobocek: boolean
-  skupiny: SkupinaExportu[]
-  /** Hodiny po lidech (jeden řádek na člověka, ne na pobočku). */
+  /** Pobočky měsíce se zkratkami; prázdné, když je jedna. */
+  pobocky: PobockaExportu[]
+  /** Hodiny po lidech, v pořadí sloupců (bez „Neobsazeno“). */
   souhrn: SouhrnCloveka[]
-  neobsazene: RadekExportu | null
-  /** Minuty lidí po dnech (bez neobsazených směn). */
-  poDnech: Map<string, number>
+  /** Minuty lidí za měsíc (bez neobsazených směn). */
   celkemMinut: number
   smen: number
   nevydanych: number
@@ -129,18 +127,14 @@ export function jeMesic(s: string | null | undefined): s is string {
   return !!s && /^\d{4}-(0[1-9]|1[0-2])$/.test(s)
 }
 
-export function dilSmeny(s: SmenaD): DilSmeny {
+export function dilSmeny(s: SmenaD, pobocka = ''): DilSmeny {
   return {
     cas: `${hhmm(s.starts_at)}–${hhmm(s.ends_at)}`,
+    kratce: `${kratkyCas(hhmm(s.starts_at))}–${kratkyCas(hhmm(s.ends_at))}`,
     pauza: s.pauza_od && s.pauza_do ? `${hhmm(s.pauza_od)}–${hhmm(s.pauza_do)}` : null,
+    pobocka,
     nevydana: cekaNaVydani(s),
   }
-}
-
-/** Text jedné směny do buňky: „08:00–16:00“, trhaná „… (pauza 15:00–17:00)“, nevydaná s hvězdičkou. */
-export function textSmeny(s: SmenaD): string {
-  const d = dilSmeny(s)
-  return `${d.cas}${d.pauza ? ` (pauza ${d.pauza})` : ''}${d.nevydana ? '*' : ''}`
 }
 
 /** „15:00–17:00“ → „15–17“, „15:30–17:00“ → „15:30–17“ (do úzké buňky). */
@@ -148,20 +142,50 @@ export function pauzaKratce(pauza: string): string {
   return pauza.split('–').map(kratkyCas).join('–')
 }
 
-const MESIC_2P = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince']
-
-/** „21.–27. září“, přes hranici měsíce „31. srpna – 6. září“. `dny` je sedm po sobě jdoucích dní. */
-export function popisTydne(dny: string[]): string {
-  const [, m1, d1] = dny[0].split('-').map(Number)
-  const [, m2, d2] = dny[6].split('-').map(Number)
-  return m1 === m2 ? `${d1}.–${d2}. ${MESIC_2P[m2 - 1]}` : `${d1}. ${MESIC_2P[m1 - 1]} – ${d2}. ${MESIC_2P[m2 - 1]}`
+/**
+ * Zkratky poboček, každá jiná. Víceslovný název dá iniciály („Černá Perla“
+ * → „ČP“), jednoslovný první tři písmena („Bernard“ → „Ber“). Kdyby se dvě
+ * shodovaly, dotčeným se zkratka natáhne, dokud se nerozliší. Zkratka není
+ * nikdy delší než celý název.
+ */
+export function zkratkyPobocek(nazvy: string[]): Map<string, string> {
+  const jedinecne = [...new Set(nazvy)]
+  const kandidati = jedinecne.map((nazev) => {
+    const slova = nazev.split(/\s+/).filter(Boolean)
+    const pismena = [...slova.join('')]
+    const seznam: string[] = []
+    if (slova.length > 1) seznam.push(slova.map((w) => [...w][0].toUpperCase()).join(''))
+    for (let d = 3; d < pismena.length; d++) seznam.push(pismena.slice(0, d).join(''))
+    seznam.push(nazev)
+    return seznam
+  })
+  const uroven = jedinecne.map(() => 0)
+  for (let kolo = 0; kolo < 50; kolo++) {
+    const zkratky = kandidati.map((k, i) => k[Math.min(uroven[i], k.length - 1)])
+    const pocet = new Map<string, number>()
+    for (const z of zkratky) pocet.set(z, (pocet.get(z) ?? 0) + 1)
+    let zmena = false
+    zkratky.forEach((z, i) => {
+      if ((pocet.get(z) ?? 0) > 1 && uroven[i] < kandidati[i].length - 1) {
+        uroven[i] += 1
+        zmena = true
+      }
+    })
+    if (!zmena) break
+  }
+  return new Map(
+    jedinecne.map((nazev, i) => {
+      const z = kandidati[i][Math.min(uroven[i], kandidati[i].length - 1)]
+      return [nazev, [...z].length >= [...nazev].length ? nazev : z]
+    }),
+  )
 }
 
 export function sestavitExportMesice(v: {
   mesic: string
   smeny: SmenaD[]
   osoby: Map<string, OsobaD>
-  /** id → název, v pořadí, které si firma nastavila. */
+  /** id → název, v pořadí, které si firma nastavila (určuje jen pořadí lidí). */
   useky: Map<string, string>
   /** id pozice → název. */
   pozice: Map<string, string>
@@ -174,104 +198,59 @@ export function sestavitExportMesice(v: {
   const dnyMnozina = new Set(dny)
   const smeny = v.smeny.filter((s) => s.status !== 'cancelled' && dnyMnozina.has(s.shift_date))
 
-  const vicePobocek = new Set(smeny.map((s) => s.branch_id)).size > 1
+  const idPobocek = [...new Set(smeny.map((s) => s.branch_id))]
+  const vicePobocek = idPobocek.length > 1
+  const nazevPobocky = (id: string) => v.pobocky.get(id) ?? ''
 
-  // Řádek = člověk (a u víc poboček i pobočka, ať se nemíchají).
-  const radkyMapa = new Map<string, { osoba: OsobaD | null; branch: string; smeny: SmenaD[] }>()
+  const pobocky: PobockaExportu[] = vicePobocek
+    ? (() => {
+        const nazvy = idPobocek.map(nazevPobocky).filter(Boolean)
+        const zkratky = zkratkyPobocek(nazvy)
+        return [...new Set(nazvy)]
+          .sort((a, b) => a.localeCompare(b, 'cs'))
+          .map((nazev) => ({ nazev, zkratka: zkratky.get(nazev) ?? nazev }))
+      })()
+    : []
+
+  // Sloupec = člověk, přes všechny pobočky; pobočka je na jednotlivé směně.
+  const poLidech = new Map<string, { osoba: OsobaD; smeny: SmenaD[] }>()
+  const neobsazeneSmeny: SmenaD[] = []
   for (const s of smeny) {
-    const klic = `${s.employee_id ?? 'neobsazeno'}|${vicePobocek ? s.branch_id : ''}`
-    const r = radkyMapa.get(klic) ?? {
-      osoba: s.employee_id ? (v.osoby.get(s.employee_id) ?? { id: s.employee_id, jmeno: 'Neznámý', usekId: null, poziceId: null, barva: null }) : null,
-      branch: s.branch_id,
+    if (!s.employee_id) {
+      neobsazeneSmeny.push(s)
+      continue
+    }
+    const zaznam = poLidech.get(s.employee_id) ?? {
+      osoba: v.osoby.get(s.employee_id) ?? { id: s.employee_id, jmeno: 'Neznámý', usekId: null, poziceId: null, barva: null },
       smeny: [],
     }
-    r.smeny.push(s)
-    radkyMapa.set(klic, r)
+    zaznam.smeny.push(s)
+    poLidech.set(s.employee_id, zaznam)
   }
 
-  const naRadek = (klic: string, r: { osoba: OsobaD | null; branch: string; smeny: SmenaD[] }): RadekExportu => {
-    const podleDne = new Map<string, string[]>()
-    const dilyPodleDne = new Map<string, DilSmeny[]>()
-    const minutPodleDne = new Map<string, number>()
-    for (const s of [...r.smeny].sort(
-      (a, b) => a.shift_date.localeCompare(b.shift_date) || a.starts_at.localeCompare(b.starts_at),
-    )) {
-      const seznam = podleDne.get(s.shift_date) ?? []
-      seznam.push(textSmeny(s))
-      podleDne.set(s.shift_date, seznam)
-      dilyPodleDne.set(s.shift_date, [...(dilyPodleDne.get(s.shift_date) ?? []), dilSmeny(s)])
-      minutPodleDne.set(s.shift_date, (minutPodleDne.get(s.shift_date) ?? 0) + minutSmeny(s))
+  const naSloupec = (osobaId: string | null, jmeno: string, pozice: string, jeho: SmenaD[]): SloupecExportu => {
+    const podleDne = new Map<string, DilSmeny[]>()
+    for (const s of [...jeho].sort((a, b) => a.shift_date.localeCompare(b.shift_date) || a.starts_at.localeCompare(b.starts_at))) {
+      podleDne.set(s.shift_date, [...(podleDne.get(s.shift_date) ?? []), dilSmeny(s, nazevPobocky(s.branch_id))])
     }
-    const usekId = r.osoba?.usekId
     return {
-      klic,
-      osobaId: r.osoba?.id ?? null,
-      jmeno: r.osoba?.jmeno ?? 'Neobsazeno',
-      usek: usekId && v.useky.has(usekId) ? (v.useky.get(usekId) as string) : 'Bez úseku',
-      pozice: r.osoba?.poziceId ? (v.pozice.get(r.osoba.poziceId) ?? '') : '',
-      pobocka: v.pobocky.get(r.branch) ?? '',
+      osobaId,
+      jmeno,
+      pozice,
       podleDne,
-      dilyPodleDne,
-      minutPodleDne,
-      minut: r.smeny.reduce((n, s) => n + minutSmeny(s), 0),
-      smen: r.smeny.length,
+      minut: jeho.reduce((k, s) => k + minutSmeny(s), 0),
+      smen: jeho.length,
     }
   }
 
-  const lide: RadekExportu[] = []
-  let neobsazene: RadekExportu | null = null
-  for (const [klic, r] of radkyMapa) {
-    const radek = naRadek(klic, r)
-    if (r.osoba) lide.push(radek)
-    else neobsazene = radek
-  }
+  // Pořadí: úseky tak, jak je nastavila firma (kuchyň pohromadě, pak plac…), uvnitř abecedně.
+  const poradiUseku = new Map([...v.useky.keys()].map((id, i) => [id, i]))
+  const poradi = (o: OsobaD) => (o.usekId && poradiUseku.has(o.usekId) ? (poradiUseku.get(o.usekId) as number) : poradiUseku.size)
+  const lide = [...poLidech.values()]
+    .sort((a, b) => poradi(a.osoba) - poradi(b.osoba) || a.osoba.jmeno.localeCompare(b.osoba.jmeno, 'cs'))
+    .map((z) => naSloupec(z.osoba.id, z.osoba.jmeno, z.osoba.poziceId ? (v.pozice.get(z.osoba.poziceId) ?? '') : '', z.smeny))
 
-  const poradiUseku = [...v.useky.values(), 'Bez úseku']
-  const skupiny: SkupinaExportu[] = poradiUseku
-    .map((nazev) => {
-      const radky = lide
-        .filter((r) => r.usek === nazev)
-        .sort((a, b) => a.jmeno.localeCompare(b.jmeno, 'cs') || a.pobocka.localeCompare(b.pobocka, 'cs'))
-      return { nazev, radky, minut: radky.reduce((n, r) => n + r.minut, 0) }
-    })
-    .filter((s) => s.radky.length > 0)
-
-  /*
-    Souhrn po lidech. Člověk na dvou pobočkách má v tabulce dva řádky (ať
-    se směny nemíchají), ale hodiny za měsíc chce vedoucí vidět jako jedno
-    číslo — u mzdy i u kontroly, kolik toho člověk odpracuje.
-  */
-  const souhrn: SouhrnCloveka[] = skupiny.flatMap((g) => {
-    const poLidech = new Map<string, RadekExportu[]>()
-    for (const r of g.radky) {
-      const seznam = poLidech.get(r.osobaId ?? r.jmeno) ?? []
-      seznam.push(r)
-      poLidech.set(r.osobaId ?? r.jmeno, seznam)
-    }
-    return [...poLidech.values()].map((radky) => ({
-      jmeno: radky[0].jmeno,
-      usek: radky[0].usek,
-      pozice: radky[0].pozice,
-      pobocky:
-        radky.length > 1
-          ? radky.map((r) => `${r.pobocka} ${hodinyKratce(r.minut)}`).join(' · ')
-          : '',
-      smen: radky.reduce((k, r) => k + r.smen, 0),
-      minut: radky.reduce((k, r) => k + r.minut, 0),
-    }))
-  })
-
-  const poDnech = new Map<string, number>(dny.map((d) => [d, 0]))
-  for (const s of smeny) {
-    if (!s.employee_id) continue
-    poDnech.set(s.shift_date, (poDnech.get(s.shift_date) ?? 0) + minutSmeny(s))
-  }
-
-  // Týdny od pondělí prvního dne do neděle posledního.
-  const tydny: string[][] = []
-  for (let pondeli = pondeliTydne(dny[0]); pondeli <= dny[dny.length - 1]; pondeli = posunDatum(pondeli, 7)) {
-    tydny.push(Array.from({ length: 7 }, (_, i) => posunDatum(pondeli, i)))
-  }
+  const sloupce = neobsazeneSmeny.length > 0 ? [...lide, naSloupec(null, 'Neobsazeno', 'volné směny', neobsazeneSmeny)] : lide
 
   return {
     mesic: v.mesic,
@@ -279,13 +258,11 @@ export function sestavitExportMesice(v: {
     rozsah: v.rozsah,
     vytvoreno: v.vytvoreno,
     dny,
-    tydny,
+    sloupce,
     vicePobocek,
-    skupiny,
-    souhrn,
-    neobsazene,
-    poDnech,
-    celkemMinut: lide.reduce((n, r) => n + r.minut, 0),
+    pobocky,
+    souhrn: lide.map((c) => ({ jmeno: c.jmeno, pozice: c.pozice, smen: c.smen, minut: c.minut })),
+    celkemMinut: lide.reduce((n, c) => n + c.minut, 0),
     smen: smeny.length,
     nevydanych: smeny.filter(cekaNaVydani).length,
   }
@@ -294,211 +271,228 @@ export function sestavitExportMesice(v: {
 /** Minuty jako číslo hodin na dvě desetinná místa: 510 → 8,5. */
 export const hodinyCislem = (minut: number): number => Math.round((minut / 60) * 100) / 100
 
+/**
+ * Věty poznámky pod tabulkou spojené do řádků (věta se nikdy nerozdělí
+ * uprostřed). Společné pro Excel a PDF — délku si každý měří po svém, proto
+ * bere funkci `vejde`.
+ */
+export function zalomitVety(vety: string[], vejde: (text: string) => boolean): string[] {
+  const radky: string[] = []
+  let aktualni = ''
+  for (const veta of vety) {
+    const spojene = aktualni ? `${aktualni} · ${veta}` : veta
+    if (aktualni && !vejde(spojene)) {
+      radky.push(aktualni)
+      aktualni = veta
+    } else {
+      aktualni = spojene
+    }
+  }
+  if (aktualni) radky.push(aktualni)
+  return radky
+}
+
+/**
+ * Poznámky pod tabulkou: hvězdička, výklad hodin, zkratky poboček (jen ty,
+ * které se opravdu použily) a „Neobsazeno“.
+ */
+export function vetyPoznamky(m: ExportMesice, pouziteZkratky: PobockaExportu[], maNeobsazeno: boolean): string[] {
+  return [
+    ...(m.nevydanych > 0 ? [`* nevydaná směna — ještě nebyla rozeslána lidem (celkem ${m.nevydanych})`] : []),
+    'Hodiny = plánované délky směn bez automatické přestávky',
+    ...(pouziteZkratky.length > 0 ? [pouziteZkratky.map((p) => `${p.zkratka} = ${p.nazev}`).join(', ')] : []),
+    ...(maNeobsazeno ? ['Neobsazeno = volné směny, do součtů se nepočítají'] : []),
+    `Celkem lidé: ${String(hodinyCislem(m.celkemMinut)).replace('.', ',')} h`,
+  ]
+}
+
+/** Rozdělí lidi na co nejméně stejně velkých částí po nejvýš `nejvic`. */
+export function rozdelitLidi<T>(pole: T[], nejvic: number): T[][] {
+  if (pole.length === 0) return [[]]
+  const casti = Math.ceil(pole.length / Math.max(1, nejvic))
+  const zaklad = Math.floor(pole.length / casti)
+  const navic = pole.length % casti
+  const vysledek: T[][] = []
+  let od = 0
+  for (let i = 0; i < casti; i++) {
+    const kolik = zaklad + (i < navic ? 1 : 0)
+    vysledek.push(pole.slice(od, od + kolik))
+    od += kolik
+  }
+  return vysledek
+}
+
 /* --- Excel ----------------------------------------------------------- */
 
 const s = (v: string, styl?: number): BunkaXlsx => ({ t: 's', v, s: styl })
 const n = (v: number, styl?: number): BunkaXlsx => ({ t: 'n', v, s: styl })
 
-/** „Po 21“ — zkratka dne a číslo, do záhlaví sloupce. */
-const zahlaviDne = (den: string) => `${ZKRATKY_DNU[denVTydnu(den)][0]}${ZKRATKY_DNU[denVTydnu(den)][1].toLowerCase()} ${Number(den.slice(8, 10))}`
+/** „Po 21.“ — zkratka dne a číslo, do levého sloupce. */
+export const popisDne = (den: string) =>
+  `${ZKRATKY_DNU[denVTydnu(den)][0]}${ZKRATKY_DNU[denVTydnu(den)][1].toLowerCase()} ${Number(den.slice(8, 10))}.`
 
-/*
-  Rozměry týdenního listu pro tisk na A4 NA VÝŠKU. Šířka sloupců je ve
-  znacích Excelu (jeden znak ≈ 7 px, plus 5 px na sloupec); z ní se počítá
-  měřítko tak, aby se sedm dnů vešlo na šířku papíru bez ořezu.
-*/
-const SIRKA_JMENA = 20
-const SIRKA_DNE = 12.5 // „pauza 14:30–16:30“ drobným písmem se ještě vejde na jeden řádek
-const SIRKA_HODIN = 6.5
-const VYSKA_RADKU_XLSX = 13.5 // jeden řádek písma 10 pt
-const TISK_SIRKA_PT = (8.27 - 2 * 0.4) * 72 // A4 na výšku, okraje 0,4″
-const TISK_VYSKA_PT = (11.69 - 2 * 0.5) * 72 // okraje 0,5″ nahoře a dole
-const REZERVA_TISKU = 0.96 // tiskárny a Excel se v pár bodech liší
-
-/** Měřítko v %, při kterém se sloupce vejdou na šířku A4 na výšku. */
-export function meritkoNaSirku(sloupce: number[]): number {
-  const pt = sloupce.reduce((soucet, w) => soucet + (w * 7 + 5) * 0.75, 0)
-  return Math.max(40, Math.min(100, Math.floor((TISK_SIRKA_PT / pt) * 100 * REZERVA_TISKU)))
-}
-
-/** Jeden řádek buňky se směnami; `drobne` = vedlejší údaj (pauza) pod časem. */
+/** Jeden řádek buňky se směnami; `drobne` = vedlejší údaj (pobočka, pauza) pod časem. */
 export type RadekSmeny = { text: string; drobne: boolean }
 
-/** Směny dne na řádky buňky: „10:00–22:00*“ a případně pod ním „pauza 15–17“. */
-export function radkySmeny(dily: DilSmeny[]): RadekSmeny[] {
+/**
+ * Směny dne na řádky buňky: „10–22*“, pod ním pobočka (když je `pobockaText`
+ * zadaná a směna nějakou má) a případně „pauza 15–17“.
+ */
+export function radkySmeny(dily: DilSmeny[], pobockaText?: (pobocka: string) => string): RadekSmeny[] {
   return dily.flatMap((d) => [
-    { text: `${d.cas}${d.nevydana ? '*' : ''}`, drobne: false },
+    { text: `${d.kratce}${d.nevydana ? '*' : ''}`, drobne: false },
+    ...(pobockaText && d.pobocka ? [{ text: pobockaText(d.pobocka), drobne: true }] : []),
     ...(d.pauza ? [{ text: `pauza ${pauzaKratce(d.pauza)}`, drobne: true }] : []),
   ])
 }
 
-/** Výška řádku buňky v bodech: hlavní řádek písma 10 pt, drobný 8 pt. */
-const vyskaRadkuSmeny = (radky: RadekSmeny[]) => radky.reduce((v, r) => v + (r.drobne ? 11 : VYSKA_RADKU_XLSX), 0)
+/*
+  Rozměry listu pro tisk na jednu stránku A4 na výšku. Šířky jsou ve
+  znacích Excelu (jeden znak ≈ 7 px, plus 5 px na sloupec); z nich se
+  počítá, kolik lidí se vejde na list, aniž by tisk klesl pod čitelné
+  měřítko — víc lidí jde na další list.
+*/
+const VYSKA_RADKU_XLSX = 12 // řádek písma 9 pt
+const VYSKA_DROBNE_XLSX = 10 // řádek písma 7 pt
+const SIRKA_DNE_XLSX = 6.5
+const TISK_SIRKA_PT = (8.27 - 2 * 0.4) * 72 // A4 na výšku, okraje 0,4″
+const NEJMENSI_MERITKO = 0.62
 
-/**
- * Sešit: „Rozpis“ (po týdnech, A4 na výšku — k tisku), „Souhrn“ (hodiny po
- * lidech, A4 na výšku) a „Matice měsíce“ (jeden řádek na člověka, sloupec
- * na den — k třídění a filtrování; na papír se nehodí, 30 sloupců se na
- * výšku nevejde čitelně). Hodiny jsou čísla, dají se sčítat.
- */
-export function listyXlsx(m: ExportMesice): ListXlsx[] {
-  return [rozpisPoTydnech(m), souhrnXlsx(m), maticeMesice(m)]
+/** Šířka sloupce člověka ve znacích: podle nejdelšího času (nebo pauzy) směny. */
+export function sirkaSloupceXlsx(sloupce: SloupecExportu[]): number {
+  let cas = 0
+  let pauza = 0
+  for (const c of sloupce) {
+    for (const dily of c.podleDne.values()) {
+      for (const d of dily) {
+        cas = Math.max(cas, d.kratce.length + (d.nevydana ? 1 : 0))
+        if (d.pauza) pauza = Math.max(pauza, `pauza ${pauzaKratce(d.pauza)}`.length)
+      }
+    }
+  }
+  return Math.min(11, Math.max(6, Math.round(Math.max(cas * 0.85, pauza * 0.62) + 1.5)))
 }
 
 const zapatiTisku = (m: ExportMesice) => `&L${textTisku(`Vytvořeno ${m.vytvoreno}`)}&RStrana &P z &N`
 
-function poznamkaHodin(m: ExportMesice): string {
-  return m.nevydanych > 0
-    ? `* nevydaná směna — ještě nebyla rozeslána lidem (celkem ${m.nevydanych}). Hodiny jsou plánované délky směn bez automatické přestávky.`
-    : 'Hodiny jsou plánované délky směn bez automatické přestávky.'
+/**
+ * Sešit: „Rozpis“ (dny v řádcích, lidé ve sloupcích, jedna stránka A4 na
+ * výšku; při hodně lidech „Rozpis 1“, „Rozpis 2“…) a „Souhrn“ (hodiny po
+ * lidech). Hodiny jsou čísla, dají se sčítat.
+ */
+export function listyXlsx(m: ExportMesice): ListXlsx[] {
+  return [...rozpisXlsx(m), souhrnXlsx(m)]
 }
 
-function rozpisPoTydnech(m: ExportMesice): ListXlsx {
-  const mimoMesic = (d: string) => !d.startsWith(m.mesic)
-  const sloupce = [SIRKA_JMENA, ...Array.from({ length: 7 }, () => SIRKA_DNE), SIRKA_HODIN]
-  const meritko = meritkoNaSirku(sloupce)
-  // Kolik bodů výšky sešitu se vejde na stránku při tomhle měřítku.
-  const kapacita = ((TISK_VYSKA_PT / meritko) * 100) * REZERVA_TISKU
+function rozpisXlsx(m: ExportMesice): ListXlsx[] {
+  const sirka = sirkaSloupceXlsx(m.sloupce)
+  // Kolik lidí se vejde na šířku při nejmenším přijatelném měřítku.
+  const pxNaLidi = TISK_SIRKA_PT / NEJMENSI_MERITKO / 0.75 - (SIRKA_DNE_XLSX * 7 + 5)
+  const nejvic = Math.max(1, Math.floor(pxNaLidi / (sirka * 7 + 5)))
+  const casti = rozdelitLidi(m.sloupce, nejvic)
 
-  const radky: (BunkaXlsx | null)[][] = []
-  const vyskyRadku: Record<number, number> = {}
-  const zalomeni: number[] = []
-  let naStrane = 0
-  const pridej = (radek: (BunkaXlsx | null)[], vyska: number) => {
-    radky.push(radek)
-    vyskyRadku[radky.length] = vyska
-    naStrane += vyska
-  }
+  // Pobočka pod časem: celý název, když se vejde do sloupce (drobné písmo ≈ 0,65 znaku), jinak zkratka.
+  const zkratkaPobocky = new Map(m.pobocky.map((p) => [p.nazev, p.zkratka]))
+  const textPobocky = (nazev: string) => (nazev.length * 0.65 <= sirka - 1 ? nazev : (zkratkaPobocky.get(nazev) ?? nazev))
 
-  // Nadpis je jen na obrazovce; na papíře ho nese záhlaví (`tiskOdRadku`).
-  pridej([s(m.nadpis, STYL.titul)], 22)
-  pridej([s(`${m.rozsah} · vytvořeno ${m.vytvoreno}`, STYL.poznamka)], 15)
-  pridej([], 10)
-  const PRVNI_TYDEN_RADEK = radky.length + 1
-  naStrane = 0
+  return casti.map((cast, i) => {
+    const radky: (BunkaXlsx | null)[][] = []
+    const vyskyRadku: Record<number, number> = {}
+    const pridej = (radek: (BunkaXlsx | null)[], vyska: number) => {
+      radky.push(radek)
+      vyskyRadku[radky.length] = vyska
+    }
 
-  for (const [poradi, dny] of m.tydny.entries()) {
-    const blok: { radek: (BunkaXlsx | null)[]; vyska: number }[] = []
-    const dalsi = (radek: (BunkaXlsx | null)[], vyska: number) => blok.push({ radek, vyska })
+    pridej([s(casti.length > 1 ? `${m.nadpis} — část ${i + 1} z ${casti.length}` : m.nadpis, STYL.titul)], 22)
+    pridej([s(`${m.rozsah} · vytvořeno ${m.vytvoreno}`, STYL.poznamka)], 15)
 
-    dalsi([s(`Týden ${poradi + 1} · ${popisTydne(dny)}`, STYL.podtitul)], 20)
-    dalsi(
+    // Záhlaví: jméno (a pozice pod ním) otočené o 90°; výška podle nejdelšího textu.
+    const nejdelsi = Math.max(4, ...cast.map((c) => Math.max([...c.jmeno].length, [...c.pozice].length)))
+    pridej(
       [
-        s('Zaměstnanec', STYL.hlavicka),
-        ...dny.map((d) => s(zahlaviDne(d), mimoMesic(d) ? STYL.hlavickaMimo : jeVikend(d) ? STYL.hlavickaVikend : STYL.hlavicka)),
-        s('Hodin', STYL.hlavicka),
+        s('Den', STYL.hlavicka),
+        ...cast.map((c) => s(c.pozice ? `${c.jmeno}\n${c.pozice}` : c.jmeno, STYL.hlavickaOtocena)),
       ],
-      20,
+      Math.min(130, Math.max(50, nejdelsi * 5 + 8)),
     )
 
-    const skupinaRadek = (nazev: string) => dalsi([s(nazev, STYL.skupina), ...Array.from({ length: 8 }, () => s('', STYL.skupina))], 16)
-
-    const osobaRadek = (r: RadekExportu, neobsazeno: boolean) => {
-      const podtitul = neobsazeno ? 'volné směny' : [r.pozice, m.vicePobocek ? r.pobocka : ''].filter(Boolean).join(' · ')
-      const denniRadky = dny.map((d) => radkySmeny(r.dilyPodleDne.get(d) ?? []))
-      const bunkaDne = (radky: RadekSmeny[], styl: number): BunkaXlsx => ({
-        t: 's',
-        v: radky.map((x) => x.text).join('\n'),
-        s: styl,
-        drobne: radky.map((x) => x.drobne),
-      })
-      const minut = dny.reduce((k, d) => k + (r.minutPodleDne.get(d) ?? 0), 0)
-      // Řádků v buňce jména: jméno se může zalomit na dva řádky, pod něj pozice.
-      const radkuJmena = Math.max(1, Math.ceil(r.jmeno.length / 22)) + (podtitul ? Math.max(1, Math.ceil(podtitul.length / 26)) : 0)
-      const vyskaObsahu = Math.max(radkuJmena * VYSKA_RADKU_XLSX, ...denniRadky.map(vyskaRadkuSmeny))
-      dalsi(
+    for (const den of m.dny) {
+      const vikend = jeVikend(den)
+      const bunky = cast.map((c) => radkySmeny(c.podleDne.get(den) ?? [], m.vicePobocek ? textPobocky : undefined))
+      const vyska = Math.max(
+        VYSKA_RADKU_XLSX + 3,
+        ...bunky.map((r) => r.reduce((k, x) => k + (x.drobne ? VYSKA_DROBNE_XLSX : VYSKA_RADKU_XLSX), 3)),
+      )
+      pridej(
         [
-          s(podtitul ? `${r.jmeno}\n${podtitul}` : r.jmeno, STYL.jmenoTydne),
-          ...dny.map((d, i) =>
-            mimoMesic(d)
-              ? s('', STYL.bunkaMimo)
-              : bunkaDne(denniRadky[i], jeVikend(d) ? STYL.bunkaVikend : STYL.bunka),
+          s(popisDne(den), vikend ? STYL.denRadekVikend : STYL.denRadek),
+          ...bunky.map(
+            (r): BunkaXlsx => ({
+              t: 's',
+              v: r.map((x) => x.text).join('\n'),
+              s: vikend ? STYL.bunkaVikend : STYL.bunka,
+              drobne: r.map((x) => x.drobne),
+            }),
           ),
-          minut > 0 ? n(hodinyCislem(minut), STYL.cislo) : s('—', STYL.bunka),
         ],
-        Math.max(20, vyskaObsahu + 4),
+        vyska,
       )
     }
 
-    for (const skupina of m.skupiny) {
-      skupinaRadek(skupina.nazev)
-      for (const r of skupina.radky) osobaRadek(r, false)
-    }
-    const neobsazene = m.neobsazene
-    if (neobsazene && dny.some((d) => (neobsazene.podleDne.get(d) ?? []).length > 0)) {
-      skupinaRadek('Neobsazené směny')
-      osobaRadek(neobsazene, true)
-    }
-
-    let soucetTydne = 0
-    dalsi(
+    pridej(
       [
-        s('Celkem hodin', STYL.souctovyText),
-        ...dny.map((d) => {
-          if (mimoMesic(d)) return s('', STYL.bunkaMimo)
-          const minut = m.poDnech.get(d) ?? 0
-          soucetTydne += minut
-          return n(hodinyCislem(minut), STYL.cisloTucne)
-        }),
-        n(hodinyCislem(soucetTydne), STYL.cisloTucne),
+        s('Hodin', STYL.souctovyText),
+        ...cast.map((c) => (c.minut > 0 ? n(hodinyCislem(c.minut), STYL.cisloTucne) : s('—', STYL.cisloTucne))),
       ],
       18,
     )
 
-    // Poznámka pod posledním týdnem je jeho součástí — ať nepřeteče na stránku sama.
-    if (poradi === m.tydny.length - 1) dalsi([s(poznamkaHodin(m), STYL.poznamka)], 15)
-
-    // Týden se drží pohromadě: nevejde-li se na zbytek stránky, začne nová.
-    const vyska = blok.reduce((k, b) => k + b.vyska, 0)
-    if (naStrane > 0 && naStrane + vyska > kapacita) {
-      zalomeni.push(radky.length + 1)
-      naStrane = 0
+    // Poznámky: jen zkratky poboček, které tenhle list opravdu použil.
+    const pouziteNazvy = new Set<string>()
+    if (m.vicePobocek) {
+      for (const c of cast) for (const dily of c.podleDne.values()) for (const d of dily) if (d.pobocka) pouziteNazvy.add(d.pobocka)
     }
-    for (const b of blok) pridej(b.radek, b.vyska)
-    pridej([], 10)
-  }
+    const pouziteZkratky = m.pobocky.filter((p) => pouziteNazvy.has(p.nazev) && textPobocky(p.nazev) !== p.nazev)
+    const maxZnaku = Math.floor((SIRKA_DNE_XLSX + cast.length * sirka) / 0.85)
+    radky.push([])
+    for (const radek of zalomitVety(
+      vetyPoznamky(m, pouziteZkratky, cast.some((c) => c.osobaId === null)),
+      (t) => t.length <= maxZnaku,
+    )) {
+      pridej([s(radek, STYL.poznamka)], 13)
+    }
 
-  return {
-    nazev: 'Rozpis',
-    sloupce,
-    radky,
-    vyskyRadku,
-    naSirku: false,
-    meritko,
-    zalomeniPred: zalomeni,
-    tiskOdRadku: PRVNI_TYDEN_RADEK,
-    tisk: { zahlavi: `&L${textTisku(m.nadpis)}&R${textTisku(m.rozsah)}`, zapati: zapatiTisku(m) },
-  }
+    return {
+      nazev: casti.length > 1 ? `Rozpis ${i + 1}` : 'Rozpis',
+      sloupce: [SIRKA_DNE_XLSX, ...cast.map(() => sirka)],
+      radky,
+      vyskyRadku,
+      zmrazit: { radky: 3, sloupce: 1 },
+      naSirku: false,
+      naJednuStranku: true,
+      tisk: { zapati: zapatiTisku(m) },
+    }
+  })
 }
 
 function souhrnXlsx(m: ExportMesice): ListXlsx {
-  const predDny = m.vicePobocek ? 4 : 3 // Zaměstnanec, Úsek, Pozice, (Pobočka)
   return {
     nazev: 'Souhrn',
-    sloupce: [26, 16, 18, ...(m.vicePobocek ? [44] : []), 10, 10],
+    sloupce: [28, 22, 9, 10],
     radky: [
       [s(`Souhrn hodin — ${nazevMesice(m.mesic)}`, STYL.titul)],
       [s(`${m.rozsah} · vytvořeno ${m.vytvoreno}`, STYL.poznamka)],
       [],
-      [
-        s('Zaměstnanec', STYL.hlavicka),
-        s('Úsek', STYL.hlavicka),
-        s('Pozice', STYL.hlavicka),
-        ...(m.vicePobocek ? [s('Z toho po pobočkách', STYL.hlavicka)] : []),
-        s('Směn', STYL.hlavicka),
-        s('Hodin', STYL.hlavicka),
-      ],
+      [s('Zaměstnanec', STYL.hlavicka), s('Pozice', STYL.hlavicka), s('Směn', STYL.hlavicka), s('Hodin', STYL.hlavicka)],
       ...m.souhrn.map((r) => [
         s(r.jmeno, STYL.jmeno),
-        s(r.usek, STYL.jmeno),
         s(r.pozice, STYL.jmeno),
-        ...(m.vicePobocek ? [s(r.pobocky, STYL.jmeno)] : []),
         n(r.smen, STYL.cislo),
         n(hodinyCislem(r.minut), STYL.cislo),
       ]),
       [
         s('Celkem', STYL.souctovyText),
-        ...Array.from({ length: predDny - 1 }, () => s('', STYL.souctovyText)),
+        s('', STYL.souctovyText),
         n(m.souhrn.reduce((k, r) => k + r.smen, 0), STYL.cisloTucne),
         n(hodinyCislem(m.celkemMinut), STYL.cisloTucne),
       ],
@@ -506,74 +500,6 @@ function souhrnXlsx(m: ExportMesice): ListXlsx {
     zmrazit: { radky: 4, sloupce: 0 },
     vyskyRadku: { 1: 22 },
     naSirku: false,
-    tisk: { zapati: zapatiTisku(m) },
-  }
-}
-
-/** Jeden řádek na člověka, sloupec na den — k třídění, filtrování a dalšímu počítání. */
-function maticeMesice(m: ExportMesice): ListXlsx {
-  const predDny = m.vicePobocek ? 4 : 3 // Zaměstnanec, Úsek, Pozice, (Pobočka)
-  const hlavicka: (BunkaXlsx | null)[] = [
-    s('Zaměstnanec', STYL.hlavicka),
-    s('Úsek', STYL.hlavicka),
-    s('Pozice', STYL.hlavicka),
-    ...(m.vicePobocek ? [s('Pobočka', STYL.hlavicka)] : []),
-    ...m.dny.map((d) => s(zahlaviDne(d), jeVikend(d) ? STYL.hlavickaVikend : STYL.hlavicka)),
-    s('Hodin', STYL.hlavicka),
-  ]
-
-  const radekLidi = (r: RadekExportu): (BunkaXlsx | null)[] => [
-    s(r.jmeno, STYL.jmeno),
-    s(r.usek, STYL.jmeno),
-    s(r.pozice, STYL.jmeno),
-    ...(m.vicePobocek ? [s(r.pobocka, STYL.jmeno)] : []),
-    ...m.dny.map((d) => s((r.podleDne.get(d) ?? []).join('\n'), jeVikend(d) ? STYL.bunkaVikend : STYL.bunka)),
-    n(hodinyCislem(r.minut), STYL.cislo),
-  ]
-
-  const radky: (BunkaXlsx | null)[][] = [
-    [s(m.nadpis, STYL.titul)],
-    [s(`${m.rozsah} · vytvořeno ${m.vytvoreno}`, STYL.poznamka)],
-    [],
-    hlavicka,
-  ]
-  const vyskyRadku: Record<number, number> = { 1: 22, 4: 30 }
-
-  for (const skupina of m.skupiny) {
-    for (const r of skupina.radky) {
-      const kolik = Math.max(1, ...m.dny.map((d) => (r.podleDne.get(d) ?? []).length))
-      radky.push(radekLidi(r))
-      if (kolik > 1) vyskyRadku[radky.length] = 15 * kolik
-    }
-  }
-  if (m.neobsazene) {
-    const kolik = Math.max(1, ...m.dny.map((d) => (m.neobsazene?.podleDne.get(d) ?? []).length))
-    radky.push([
-      s('Neobsazeno', STYL.jmeno),
-      s('', STYL.jmeno),
-      s('volné směny', STYL.jmeno),
-      ...(m.vicePobocek ? [s('', STYL.jmeno)] : []),
-      ...m.dny.map((d) => s((m.neobsazene?.podleDne.get(d) ?? []).join('\n'), jeVikend(d) ? STYL.bunkaVikend : STYL.bunka)),
-      s('—', STYL.bunka),
-    ])
-    if (kolik > 1) vyskyRadku[radky.length] = 15 * kolik
-  }
-
-  radky.push([
-    s('Celkem hodin (lidé)', STYL.souctovyText),
-    ...Array.from({ length: predDny - 1 }, () => s('', STYL.souctovyText)),
-    ...m.dny.map((d) => n(hodinyCislem(m.poDnech.get(d) ?? 0), STYL.cisloTucne)),
-    n(hodinyCislem(m.celkemMinut), STYL.cisloTucne),
-  ])
-  radky.push([])
-  radky.push([s(poznamkaHodin(m), STYL.poznamka)])
-
-  return {
-    nazev: 'Matice měsíce',
-    sloupce: [24, 14, 16, ...(m.vicePobocek ? [20] : []), ...m.dny.map(() => 13), 9],
-    radky,
-    zmrazit: { radky: 4, sloupce: 1 },
-    vyskyRadku,
     tisk: { zapati: zapatiTisku(m) },
   }
 }
