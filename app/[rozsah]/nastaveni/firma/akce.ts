@@ -102,6 +102,47 @@ export async function ulozitZapomenutyOdchod(formData: FormData): Promise<void> 
 }
 
 /**
+ * Nastavení firmy — důležitá změna směny.
+ *
+ * Do kolika hodin před začátkem je změna směny „důležitá“. PRÁZDNÉ JE
+ * PLATNÁ HODNOTA (pravidlo vypnuto), ne chyba — proto se prázdné pole
+ * neodmítá, ale posílá jako `null`. Rozhoduje průzor
+ * `nastavit_dulezitou_zmenu_smeny`; kontrola tady je první linie.
+ */
+export async function ulozitDulezitouZmenu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const surove = String(formData.get('hodin') ?? '').trim()
+  const zpet = `/${rozsah}/nastaveni/firma`
+
+  let hodin: number | null = null
+  if (surove !== '') {
+    hodin = Number(surove)
+    if (!Number.isInteger(hodin) || hodin < 1 || hodin > 720) {
+      redirect(`${zpet}?chyba=${encodeURIComponent('Hranice musí být celé číslo mezi 1 a 720 hodinami, nebo prázdná.')}`)
+    }
+  }
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const pristup = await zkusPristup(tenantId, 'settings.manage', rozsah)
+  if (pristup.stav !== 'ok') redirect('/')
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('nastavit_dulezitou_zmenu_smeny', {
+    p_tenant: tenantId,
+    p_hodin: hodin,
+  })
+
+  if (error) {
+    redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(zpet)
+  redirect(`${zpet}?ulozeno=dulezita`)
+}
+
+/**
  * Nastavení firmy — paušální přestávky.
  *
  * Průzor nastavit_prestavku zapíše do tenant_settings a do auditu.

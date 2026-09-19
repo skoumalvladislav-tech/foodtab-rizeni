@@ -1,11 +1,14 @@
 'use client'
 
-import { useActionState, useEffect, useRef, useState } from 'react'
+import { useActionState, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 
+import Ikona from '@/app/[rozsah]/ikona'
+import type { IkonaKlic } from '@/app/[rozsah]/nabidka'
 import Drawer from '@/components/ui/Drawer'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
 import { zkratkaDoSmeny } from '@/lib/sablony'
+import { ListMobil } from './mobil/sheet'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
 import { smazatSmenu, ulozitSmenu, type StavSmeny } from './smena'
 
@@ -34,6 +37,22 @@ export type SmenaKUprave = {
 }
 
 /**
+ * Co se předvyplní do NOVÉ směny — při duplikaci směny nebo při zadání
+ * směny ze seznamu konkrétnímu člověku. Není to úprava: nemá `id`, takže
+ * se pořád zakládá nový řádek.
+ */
+export type PredvyplneniSmeny = {
+  employee_id?: string | null
+  position_id?: string | null
+  branch_id?: string
+  starts_at?: string
+  ends_at?: string
+  note?: string
+  pauza_od?: string | null
+  pauza_do?: string | null
+}
+
+/**
  * Formulář na směnu — zakládání i úprava.
  *
  * Zadání docs/nocni-prace-2026-09-03.md, bod 2.
@@ -42,9 +61,15 @@ export type SmenaKUprave = {
  * NA TELEFONU CELÁ OBRAZOVKA
  *
  * Kalendář je hustý a bublina, do které se nedá trefit, je horší než
- * žádná. Formulář proto jede ve sdíleném `Drawer` (components/ui/Drawer)
- * — na telefonu se panel roztáhne přes celou šířku, na širším okně
- * zůstává úzký boční panel.
+ * žádná. Na počítači proto formulář jede ve sdíleném `Drawer`
+ * (components/ui/Drawer) jako boční panel.
+ *
+ * Na telefonu (`varianta="list"`, rozhoduje rozpis podle šířky) je to
+ * celoobrazovková stránka se šipkou zpět, poli s ikonami a pevným
+ * tlačítkem „Uložit směnu“ dole — podle mockupu Směn z 19.9.2026. LOGIKA
+ * JE TATÁŽ (šablony, pauza, varování, akce `ulozitSmenu`); mění se jen
+ * obal, pořadí a vzhled polí. Nikdy se tu nemá objevit druhá kopie
+ * ukládání.
  *
  * ---------------------------------------------------------------------
  * VAROVÁNÍ SE UKÁŽÍ PO ULOŽENÍ, NE MÍSTO NĚJ
@@ -74,6 +99,9 @@ export default function FormularSmeny({
   pozice,
   sablony: sablonyVychozi,
   onZavrit,
+  varianta = 'drawer',
+  predvyplneni,
+  zamerit,
 }: {
   rozsah: string
   /** Předvyplněné datum u nové směny. */
@@ -87,6 +115,12 @@ export default function FormularSmeny({
   /** Šablony pro výchozí pobočku, aby nabídka stála hned. */
   sablony: NabidnutaSablona[]
   onZavrit: () => void
+  /** `list` = celoobrazovková stránka na telefonu, jinak boční panel. */
+  varianta?: 'drawer' | 'list'
+  /** Předvyplnění nové směny (duplikace, zadání konkrétnímu člověku). */
+  predvyplneni?: PredvyplneniSmeny | null
+  /** Kam po otevření přesunout kurzor. Na telefonu se jinak nezaměřuje nic. */
+  zamerit?: 'poznamka'
 }) {
   const router = useRouter()
   const [stav, akce, ceka] = useActionState<StavSmeny, FormData>(ulozitSmenu, {
@@ -108,16 +142,28 @@ export default function FormularSmeny({
   const [ptaSeNaSmazani, setPtaSeNaSmazani] = useState(false)
   const [zavreno, setZavreno] = useState(false)
   const prvni = useRef<HTMLSelectElement>(null)
+  const poznamkaRef = useRef<HTMLInputElement>(null)
+  const mobil = varianta === 'list'
+  const S = mobil ? STYL_MOBIL : STYL_DRAWER
+  const poradi = (n: number) => (mobil ? { order: n } : undefined)
+
+  /*
+    Zdroj výchozích hodnot: upravovaná směna, jinak předvyplnění (kopie
+    směny, zadání ze seznamu), jinak prázdno. Na `smena` (ne na zdroj) se
+    dál váže všechno, co znamená ÚPRAVU: skryté `id`, slovo na tlačítku,
+    smazání.
+  */
+  const zdroj = smena ?? predvyplneni ?? null
 
   /*
     Pobočka a pozice řídí, které šablony platí, a časy se ze šablony
     přepisují — proto jsou tahle čtyři pole řízená. Zbytek formuláře
     zůstal neřízený; řídit se má jen to, co se má měnit samo.
   */
-  const [pobocka, setPobocka] = useState(smena?.branch_id ?? vychoziPobocka ?? '')
-  const [vybranaPozice, setVybranaPozice] = useState(smena?.position_id ?? '')
-  const [od, setOd] = useState((smena?.starts_at ?? '08:00').slice(0, 5))
-  const [doKdy, setDoKdy] = useState((smena?.ends_at ?? '16:00').slice(0, 5))
+  const [pobocka, setPobocka] = useState(zdroj?.branch_id ?? vychoziPobocka ?? '')
+  const [vybranaPozice, setVybranaPozice] = useState(zdroj?.position_id ?? '')
+  const [od, setOd] = useState((zdroj?.starts_at ?? '08:00').slice(0, 5))
+  const [doKdy, setDoKdy] = useState((zdroj?.ends_at ?? '16:00').slice(0, 5))
   const [sablony, setSablony] = useState<NabidnutaSablona[]>(sablonyVychozi)
   const [klic, setKlic] = useState('')
 
@@ -127,9 +173,9 @@ export default function FormularSmeny({
     odškrtnuté pošle prázdno a `ulozitSmenu` z toho udělá NULL/NULL,
     stejně jako u nové směny bez pauzy.
   */
-  const [trhana, setTrhana] = useState(Boolean(smena?.pauza_od && smena?.pauza_do))
-  const [pauzaOd, setPauzaOd] = useState((smena?.pauza_od ?? '').slice(0, 5))
-  const [pauzaDo, setPauzaDo] = useState((smena?.pauza_do ?? '').slice(0, 5))
+  const [trhana, setTrhana] = useState(Boolean(zdroj?.pauza_od && zdroj?.pauza_do))
+  const [pauzaOd, setPauzaOd] = useState((zdroj?.pauza_od ?? '').slice(0, 5))
+  const [pauzaDo, setPauzaDo] = useState((zdroj?.pauza_do ?? '').slice(0, 5))
 
   /*
     Nabídku dodává databáze, ne prohlížeč — které pravidlo vyhraje, ví
@@ -195,9 +241,12 @@ export default function FormularSmeny({
     }
   }, [stavSmazani, router, onZavrit])
 
+  // Na telefonu se nezaměřuje nic samo — výběr by hned otevřel nabídku
+  // nebo klávesnici a zakryl polovinu formuláře.
   useEffect(() => {
-    prvni.current?.focus()
-  }, [])
+    if (zamerit === 'poznamka') poznamkaRef.current?.focus()
+    else if (!mobil) prvni.current?.focus()
+  }, [zamerit, mobil])
 
   function zavrit() {
     setZavreno(true)
@@ -219,8 +268,8 @@ export default function FormularSmeny({
   */
   const jeVydana = Boolean(smena?.published_at)
 
-  return (
-    <Drawer otevreno onZavrit={zavrit} nadpis={smena ? 'Upravit směnu' : 'Nová směna'}>
+  const telo = (
+    <>
       {hotovo ? (
         <>
           <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
@@ -248,46 +297,54 @@ export default function FormularSmeny({
           </div>
         </>
       ) : (
-        <form action={akce} style={{ display: 'grid', gap: '12px' }}>
+        <form
+          id={ID_FORMULARE}
+          action={akce}
+          style={{ display: 'grid', gap: mobil ? '16px' : '12px' }}
+        >
           <input type="hidden" name="rozsah" value={rozsah} />
           {smena ? <input type="hidden" name="smena" value={smena.id} /> : null}
 
-          <label style={poleLabel}>
-            <span>Kdo</span>
-            <select
-              ref={prvni}
-              name="zamestnanec"
-              defaultValue={smena?.employee_id ?? ''}
-              style={pole}
-            >
-              {/*
-                Prázdné je platná volba, ne chybějící údaj: neobsazená
-                směna znamená „sem někoho potřebujeme“.
-              */}
-              <option value="">— zatím nikdo (volná směna) —</option>
-              {lide.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.jmeno}
-                </option>
-              ))}
-            </select>
+          <label style={{ ...S.label, ...poradi(1) }}>
+            <span>{mobil ? 'Zaměstnanec' : 'Kdo'}</span>
+            <Pole mobil={mobil} ikona="clovek" sipka>
+              <select
+                ref={prvni}
+                name="zamestnanec"
+                defaultValue={zdroj?.employee_id ?? ''}
+                style={S.pole}
+              >
+                {/*
+                  Prázdné je platná volba, ne chybějící údaj: neobsazená
+                  směna znamená „sem někoho potřebujeme“.
+                */}
+                <option value="">— zatím nikdo (volná směna) —</option>
+                {lide.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.jmeno}
+                  </option>
+                ))}
+              </select>
+            </Pole>
           </label>
 
-          <label style={poleLabel}>
-            <span>Zařazení</span>
-            <select
-              name="pozice"
-              value={vybranaPozice}
-              onChange={(e) => setVybranaPozice(e.target.value)}
-              style={pole}
-            >
-              <option value="">— bez zařazení —</option>
-              {pozice.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+          <label style={{ ...S.label, ...poradi(8) }}>
+            <span>{mobil ? 'Úsek / pozice' : 'Zařazení'}</span>
+            <Pole mobil={mobil} ikona="vidlicka" sipka>
+              <select
+                name="pozice"
+                value={vybranaPozice}
+                onChange={(e) => setVybranaPozice(e.target.value)}
+                style={S.pole}
+              >
+                <option value="">— bez zařazení —</option>
+                {pozice.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </Pole>
             {pozice.length === 0 ? (
               <span style={vysvetlivka}>
                 Firma zatím žádnou pozici nemá. Založí se v Nastavení →
@@ -296,32 +353,36 @@ export default function FormularSmeny({
             ) : null}
           </label>
 
-          <label style={poleLabel}>
-            <span>Kde</span>
-            <select
-              name="pobocka"
-              required
-              value={pobocka}
-              onChange={(e) => setPobocka(e.target.value)}
-              style={pole}
-            >
-              {pobocky.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.nazev}
-                </option>
-              ))}
-            </select>
+          <label style={{ ...S.label, ...poradi(9) }}>
+            <span>{mobil ? 'Pobočka' : 'Kde'}</span>
+            <Pole mobil={mobil} ikona="pobocka" sipka>
+              <select
+                name="pobocka"
+                required
+                value={pobocka}
+                onChange={(e) => setPobocka(e.target.value)}
+                style={S.pole}
+              >
+                {pobocky.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.nazev}
+                  </option>
+                ))}
+              </select>
+            </Pole>
           </label>
 
-          <label style={poleLabel}>
+          <label style={{ ...S.label, ...poradi(2) }}>
             <span>Datum</span>
-            <input
-              name="den"
-              type="date"
-              required
-              defaultValue={smena?.shift_date ?? den}
-              style={pole}
-            />
+            <Pole mobil={mobil} ikona="kalendar">
+              <input
+                name="den"
+                type="date"
+                required
+                defaultValue={smena?.shift_date ?? den}
+                style={S.pole}
+              />
+            </Pole>
           </label>
 
           {/*
@@ -329,20 +390,22 @@ export default function FormularSmeny({
             nahoře u jména, nebylo by vidět, co vlastně udělala.
           */}
           {sablony.length > 0 ? (
-            <label style={poleLabel}>
+            <label style={{ ...S.label, ...poradi(3) }}>
               <span>Šablona</span>
-              <select
-                value={klic}
-                onChange={(e) => vybratSablonu(e.target.value)}
-                style={pole}
-              >
-                <option value="">— vlastní časy —</option>
-                {sablony.map((s) => (
-                  <option key={s.klic} value={s.klic}>
-                    {s.klic} · {s.label} · {s.od}–{s.do}
-                  </option>
-                ))}
-              </select>
+              <Pole mobil={mobil} ikona="seznam" sipka>
+                <select
+                  value={klic}
+                  onChange={(e) => vybratSablonu(e.target.value)}
+                  style={S.pole}
+                >
+                  <option value="">— vlastní časy —</option>
+                  {sablony.map((s) => (
+                    <option key={s.klic} value={s.klic}>
+                      {s.klic} · {s.label} · {s.od}–{s.do}
+                    </option>
+                  ))}
+                </select>
+              </Pole>
               <span style={vysvetlivka}>
                 Šablona jen vyplní časy. Přepsat je jde hned pod tím
                 a směna si je pak drží vlastní — {VETA_JEN_NOVE}
@@ -356,39 +419,71 @@ export default function FormularSmeny({
           */}
           <input type="hidden" name="sablona" value={klicDoSmeny} />
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <label style={poleLabel}>
-              <span>Od</span>
-              <input
-                name="od"
-                type="time"
-                required
-                value={od}
-                onChange={(e) => setOd(e.target.value)}
-                style={pole}
-              />
-            </label>
-            <label style={poleLabel}>
-              <span>Do</span>
-              <input
-                name="do"
-                type="time"
-                required
-                value={doKdy}
-                onChange={(e) => setDoKdy(e.target.value)}
-                style={pole}
-              />
-            </label>
-          </div>
+          {mobil ? (
+            /*
+              Na telefonu jedno pole „Čas od – do“ s hodinami vlevo, jako
+              v mockupu. Pole se jmenují stejně (`od`, `do`), takže akce
+              nic nepozná.
+            */
+            <div style={{ ...S.label, ...poradi(4) }} role="group" aria-labelledby={ID_CAS}>
+              <span id={ID_CAS}>Čas od – do</span>
+              <Pole mobil ikona="hodiny">
+                <input
+                  name="od"
+                  type="time"
+                  required
+                  aria-label="Od"
+                  value={od}
+                  onChange={(e) => setOd(e.target.value)}
+                  style={S.pole}
+                />
+                <span aria-hidden="true">–</span>
+                <input
+                  name="do"
+                  type="time"
+                  required
+                  aria-label="Do"
+                  value={doKdy}
+                  onChange={(e) => setDoKdy(e.target.value)}
+                  style={S.pole}
+                />
+              </Pole>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <label style={S.label}>
+                <span>Od</span>
+                <input
+                  name="od"
+                  type="time"
+                  required
+                  value={od}
+                  onChange={(e) => setOd(e.target.value)}
+                  style={S.pole}
+                />
+              </label>
+              <label style={S.label}>
+                <span>Do</span>
+                <input
+                  name="do"
+                  type="time"
+                  required
+                  value={doKdy}
+                  onChange={(e) => setDoKdy(e.target.value)}
+                  style={S.pole}
+                />
+              </label>
+            </div>
+          )}
 
           {klic !== '' && !casySedi ? (
-            <p style={vysvetlivka}>
+            <p style={{ ...vysvetlivka, ...poradi(5) }}>
               Časy jste přepsali, takže se směna uloží bez zkratky{' '}
               {klic}. Zkratka u směny s jinými časy by v rozpisu lhala.
             </p>
           ) : null}
 
-          <p style={vysvetlivka}>
+          <p style={{ ...vysvetlivka, ...poradi(5) }}>
             Konec dřív než začátek znamená, že směna končí druhý den —
             22:00–06:00 je osm hodin, ne mínus šestnáct.
           </p>
@@ -399,7 +494,17 @@ export default function FormularSmeny({
             odškrtne, pošle prázdno a uloží se bez pauzy, i kdyby předtím
             nějakou měla.
           */}
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: 'var(--ink)' }}>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '14px',
+              color: 'var(--ink)',
+              minHeight: mobil ? '44px' : undefined,
+              ...poradi(6),
+            }}
+          >
             <input
               type="checkbox"
               checked={trhana}
@@ -410,60 +515,72 @@ export default function FormularSmeny({
 
           {trhana ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <label style={poleLabel}>
+              <div
+                style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', ...poradi(7) }}
+              >
+                <label style={S.label}>
                   <span>Pauza od</span>
-                  <input
-                    name="pauza_od"
-                    type="time"
-                    required
-                    value={pauzaOd}
-                    onChange={(e) => setPauzaOd(e.target.value)}
-                    style={pole}
-                  />
+                  <Pole mobil={mobil} ikona="hodiny">
+                    <input
+                      name="pauza_od"
+                      type="time"
+                      required
+                      value={pauzaOd}
+                      onChange={(e) => setPauzaOd(e.target.value)}
+                      style={S.pole}
+                    />
+                  </Pole>
                 </label>
-                <label style={poleLabel}>
+                <label style={S.label}>
                   <span>Pauza do</span>
-                  <input
-                    name="pauza_do"
-                    type="time"
-                    required
-                    value={pauzaDo}
-                    onChange={(e) => setPauzaDo(e.target.value)}
-                    style={pole}
-                  />
+                  <Pole mobil={mobil} ikona="hodiny">
+                    <input
+                      name="pauza_do"
+                      type="time"
+                      required
+                      value={pauzaDo}
+                      onChange={(e) => setPauzaDo(e.target.value)}
+                      style={S.pole}
+                    />
+                  </Pole>
                 </label>
               </div>
-              <p style={vysvetlivka}>
+              <p style={{ ...vysvetlivka, ...poradi(7) }}>
                 Pauza je jen v rozpisu — do mzdy se nepočítá zvlášť, tu
                 řeší paušální odpočet v Nastavení.
               </p>
             </>
           ) : null}
 
-          <label style={poleLabel}>
-            <span>Poznámka</span>
-            <input
-              name="poznamka"
-              maxLength={200}
-              defaultValue={smena?.note ?? ''}
-              placeholder="nepovinná"
-              style={pole}
-            />
+          <label style={{ ...S.label, ...poradi(10) }}>
+            <span>{mobil ? 'Poznámka (nepovinné)' : 'Poznámka'}</span>
+            <Pole mobil={mobil} ikona="tuzka">
+              <input
+                ref={poznamkaRef}
+                name="poznamka"
+                maxLength={200}
+                defaultValue={zdroj?.note ?? ''}
+                placeholder={mobil ? 'Zadejte poznámku…' : 'nepovinná'}
+                style={S.pole}
+              />
+            </Pole>
           </label>
 
           {stav.stav === 'chyba' ? (
-            <p className="hlaska-chyba">{stav.text}</p>
+            <p className="hlaska-chyba" style={poradi(11)}>{stav.text}</p>
           ) : null}
 
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi">
-              Zpět
-            </button>
-            <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>
-              {ceka ? 'Ukládám…' : smena ? 'Uložit změnu' : 'Přidat směnu'}
-            </button>
-          </div>
+          {/* Na telefonu je tlačítko pevně dole (viz `pata` níž). */}
+          {mobil ? null : (
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi">
+                Zpět
+              </button>
+              <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>
+                {ceka ? 'Ukládám…' : smena ? 'Uložit změnu' : 'Přidat směnu'}
+              </button>
+            </div>
+          )}
         </form>
       )}
 
@@ -484,7 +601,7 @@ export default function FormularSmeny({
         se v něm škrtá, takže odmítnutí u vydané znamenalo, že nešlo
         smazat prakticky nic.
       */}
-      {!hotovo && smena?.id ? (
+      {!hotovo && smena?.id && !mobil ? (
         <div style={mazaniPruh}>
           {ptaSeNaSmazani ? (
             <form action={akceSmazat} style={{ display: 'grid', gap: '8px' }}>
@@ -542,7 +659,83 @@ export default function FormularSmeny({
           ) : null}
         </div>
       ) : null}
-    </Drawer>
+    </>
+  )
+
+  if (!mobil) {
+    return (
+      <Drawer otevreno onZavrit={zavrit} nadpis={smena ? 'Upravit směnu' : 'Nová směna'}>
+        {telo}
+      </Drawer>
+    )
+  }
+
+  /*
+    Telefon. Mazání tu záměrně není: patří do Detailu směny, odkud se
+    úprava otevírá. Hlavní tlačítko je v patičce mimo `<form>`, proto
+    atribut `form`.
+  */
+  return (
+    <ListMobil
+      nadpis={smena ? 'Upravit směnu' : 'Přidat směnu'}
+      onZavrit={zavrit}
+      pata={
+        hotovo ? (
+          <button type="button" className="ds-sm-pridat ds-sm-pridat-v-listu" onClick={zavrit}>
+            Hotovo
+          </button>
+        ) : (
+          <button
+            type="submit"
+            form={ID_FORMULARE}
+            className="ds-sm-pridat ds-sm-pridat-v-listu"
+            disabled={ceka}
+          >
+            {ceka ? 'Ukládám…' : smena ? 'Uložit změnu' : 'Uložit směnu'}
+          </button>
+        )
+      }
+    >
+      <div className="ds-sm-form">{telo}</div>
+    </ListMobil>
+  )
+}
+
+/* --- pole s ikonou na telefonu --------------------------------------- */
+
+const ID_FORMULARE = 'ds-sm-formular-smeny'
+const ID_CAS = 'ds-sm-cas-popisek'
+
+/**
+ * Obal pole v mobilní variantě: rámeček s ikonou vlevo a šipkou vpravo.
+ * V desktopové variantě nedělá nic — pole zůstává, jak bylo. Je to
+ * funkce MIMO komponentu formuláře schválně: definovaná uvnitř by se při
+ * každém vykreslení stala „novou“ komponentou a pole by ztrácela fokus.
+ */
+function Pole({
+  mobil,
+  ikona,
+  sipka = false,
+  children,
+}: {
+  mobil: boolean
+  ikona: IkonaKlic
+  sipka?: boolean
+  children: ReactNode
+}) {
+  if (!mobil) return <>{children}</>
+  return (
+    <span className="ds-sm-pole-obal">
+      <span className="ds-sm-pole-ikona" aria-hidden="true">
+        <Ikona klic={ikona} velikost={20} />
+      </span>
+      {children}
+      {sipka ? (
+        <span className="ds-sm-pole-sipka" aria-hidden="true">
+          <Ikona klic="sipkaVpravo" velikost={16} />
+        </span>
+      ) : null}
+    </span>
   )
 }
 
@@ -567,6 +760,36 @@ const pole = {
   color: 'var(--ink)',
   minHeight: '44px',
 } as const
+
+/*
+  Mobilní varianta: popisek malým písmem bez verzálek nad rámečkem,
+  samotné pole bez vlastního rámu (rám dělá `.ds-sm-pole-obal`).
+  16 px na polích je záměr — menší písmo by iOS při zaměření přiblížil.
+*/
+const labelMobil = {
+  display: 'grid',
+  gap: '6px',
+  fontSize: '13px',
+  color: 'var(--muted)',
+} as const
+
+const poleMobil = {
+  flex: 1,
+  minWidth: 0,
+  width: '100%',
+  padding: 0,
+  fontSize: '16px',
+  border: 0,
+  background: 'transparent',
+  color: 'var(--ink)',
+  minHeight: '48px',
+  appearance: 'none' as const,
+  WebkitAppearance: 'none' as const,
+  outline: 'none',
+} as const
+
+const STYL_DRAWER = { label: poleLabel, pole } as const
+const STYL_MOBIL = { label: labelMobil, pole: poleMobil } as const
 
 const vysvetlivka = {
   margin: 0,
