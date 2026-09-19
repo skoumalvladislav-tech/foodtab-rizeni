@@ -323,6 +323,9 @@ export default function RozpisView({
   };
 
   const moznosti: MoznostiFiltru = {
+    pobocky: [...nazvyPobocek]
+      .map(([id, nazev]) => ({ id, nazev }))
+      .sort((a, b) => a.nazev.localeCompare(b.nazev, "cs")),
     useky: [
       ...[...nazvyUseku].map(([klic, nazev]) => ({ klic, nazev })),
       ...([...osoby.values(), ...lideBezSmeny].some((o) => !o.usekId || !nazvyUseku.has(o.usekId))
@@ -578,7 +581,9 @@ export default function RozpisView({
               lide={filtr.osoby.map((id) => ({ id, jmeno: jmenoOsoby(id) }))}
               mesic={den.slice(0, 7)}
               tydny={mesicniMrizka(den)}
-              smeny={nactene}
+              smeny={
+                filtr.pobocky.length === 0 ? nactene : nactene.filter((s) => filtr.pobocky.includes(s.branch_id))
+              }
               dnesni={dnesni}
               planovani={planovani}
               jmena={jmena}

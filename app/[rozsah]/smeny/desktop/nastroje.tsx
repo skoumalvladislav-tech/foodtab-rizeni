@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import {
@@ -23,6 +23,11 @@ import { MAX_LIDI_V_MESICI, type PohledRozpisu } from "@/lib/rozpis-konstanty";
  * kalendářní týden od pondělí. „Celý měsíc“ se nabídne, jen když jsou
  * vyfiltrovaní jeden nebo dva lidé — je to jejich měsíc po dnech, kde jde
  * zadávat směny.
+ *
+ * „Zobrazit“ je rychlá volba, co z rozpisu ukázat: jedna pobočka a pod ní
+ * jeden úsek (Plac, Kuchyně, Vedení…). Píše do týchž filtrů jako nabídka
+ * Filtry (`pobocky` a `useky`), takže čipy i počet filtrů sedí a jde to
+ * kdykoli zrušit. Kdo chce víc úseků najednou, použije Filtry.
  *
  * Hledání filtruje viditelné řádky hned, jak se píše. Filtry jsou
  * jedna nabídka (úsek, pozice, zaměstnanec, stav směny), aktivní se
@@ -55,6 +60,8 @@ const STAVY: [StavFiltru, string, string][] = [
 ];
 
 export type MoznostiFiltru = {
+  /** Pobočky, na které člověk vidí; víc než jedna = nabídne se výběr pobočky. */
+  pobocky: { id: string; nazev: string }[];
   /** Úseky v pořadí, které si firma nastavila; `BEZ_USEKU` na konci. */
   useky: { klic: string; nazev: string }[];
   pozice: { id: string; label: string }[];
@@ -85,38 +92,37 @@ export default function Nastroje({
   mesicLidiMozny: boolean;
 }) {
   const [otevrene, setOtevrene] = useState(false);
+  const [zobrazitOtevrene, setZobrazitOtevrene] = useState(false);
   const [hledaniLidi, setHledaniLidi] = useState("");
   const tlacitko = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const zobrazitTlacitko = useRef<HTMLButtonElement>(null);
+  const zobrazitPanel = useRef<HTMLDivElement>(null);
   const panelId = useId();
+  const zobrazitId = useId();
   const pocet = pocetFiltru(filtr);
 
-  // Zavírá se klikem mimo a Escapem; fokus se vrací na tlačítko.
-  useEffect(() => {
-    if (!otevrene) return;
-    function naKlik(e: MouseEvent) {
-      const cil = e.target as Node;
-      if (panel.current?.contains(cil) || tlacitko.current?.contains(cil)) return;
-      setOtevrene(false);
-    }
-    function naKlavesu(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setOtevrene(false);
-        tlacitko.current?.focus();
-      }
-    }
-    document.addEventListener("mousedown", naKlik);
-    document.addEventListener("keydown", naKlavesu);
-    return () => {
-      document.removeEventListener("mousedown", naKlik);
-      document.removeEventListener("keydown", naKlavesu);
-    };
-  }, [otevrene]);
+  // Obě nabídky se zavírají klikem mimo a Escapem; fokus se vrací na tlačítko.
+  useZavirani(otevrene, setOtevrene, tlacitko, panel);
+  useZavirani(zobrazitOtevrene, setZobrazitOtevrene, zobrazitTlacitko, zobrazitPanel);
 
   const nazevUseku = (klic: string) =>
     klic === BEZ_USEKU ? "Bez úseku" : (moznosti.useky.find((u) => u.klic === klic)?.nazev ?? klic);
 
-  const zapnout = <K extends "useky" | "pozice" | "osoby">(pole: K, hodnota: string) =>
+  // Co je vybráno v „Zobrazit“: pobočka a úsek, které tlačítko ukáže jako popisek.
+  const popisekZobrazeni = [
+    filtr.pobocky.length === 1
+      ? (moznosti.pobocky.find((p) => p.id === filtr.pobocky[0])?.nazev ?? null)
+      : filtr.pobocky.length > 1
+        ? `${filtr.pobocky.length} pobočky`
+        : null,
+    filtr.useky.length === 1 ? nazevUseku(filtr.useky[0]) : filtr.useky.length > 1 ? `${filtr.useky.length} úseky` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const zobrazitDostupne = moznosti.pobocky.length > 1 || moznosti.useky.length > 0;
+
+  const zapnout = <K extends "useky" | "pozice" | "osoby" | "pobocky">(pole: K, hodnota: string) =>
     onFiltr({
       ...filtr,
       [pole]: filtr[pole].includes(hodnota)
@@ -125,6 +131,11 @@ export default function Nastroje({
     });
 
   const cipy: { klic: string; text: string; zrusit: () => void }[] = [
+    ...filtr.pobocky.map((p) => ({
+      klic: `pobocka-${p}`,
+      text: `Pobočka: ${moznosti.pobocky.find((x) => x.id === p)?.nazev ?? p}`,
+      zrusit: () => zapnout("pobocky", p),
+    })),
     ...filtr.useky.map((k) => ({
       klic: `usek-${k}`,
       text: `Úsek: ${nazevUseku(k)}`,
@@ -184,6 +195,91 @@ export default function Nastroje({
           ),
         )}
       </div>
+
+      {zobrazitDostupne ? (
+        <div className="ds-smd-filtry-obal">
+          <button
+            ref={zobrazitTlacitko}
+            type="button"
+            className="ds-smd-tl"
+            aria-expanded={zobrazitOtevrene}
+            aria-controls={zobrazitOtevrene ? zobrazitId : undefined}
+            onClick={() => setZobrazitOtevrene((o) => !o)}
+          >
+            <Ikona klic="pobocka" velikost={15} />
+            Zobrazit
+            {popisekZobrazeni ? <span className="ds-smd-zobrazit-hodnota">{popisekZobrazeni}</span> : null}
+          </button>
+
+          {zobrazitOtevrene ? (
+            <div
+              ref={zobrazitPanel}
+              id={zobrazitId}
+              className="ds-smd-filtry ds-smd-zobrazit"
+              role="group"
+              aria-label="Co zobrazit"
+            >
+              {moznosti.pobocky.length > 1 ? (
+                <fieldset className="ds-smd-f-sloupec">
+                  <legend>Pobočka</legend>
+                  <label className="ds-smd-volba">
+                    <input
+                      type="radio"
+                      name="zobrazit-pobocka"
+                      checked={filtr.pobocky.length === 0}
+                      onChange={() => onFiltr({ ...filtr, pobocky: [] })}
+                    />
+                    Všechny pobočky
+                  </label>
+                  {moznosti.pobocky.map((p) => (
+                    <label key={p.id} className="ds-smd-volba">
+                      <input
+                        type="radio"
+                        name="zobrazit-pobocka"
+                        checked={filtr.pobocky.length === 1 && filtr.pobocky[0] === p.id}
+                        onChange={() => onFiltr({ ...filtr, pobocky: [p.id] })}
+                      />
+                      {p.nazev}
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
+
+              {moznosti.useky.length > 0 ? (
+                <fieldset className="ds-smd-f-sloupec">
+                  <legend>Úsek</legend>
+                  <label className="ds-smd-volba">
+                    <input
+                      type="radio"
+                      name="zobrazit-usek"
+                      checked={filtr.useky.length === 0}
+                      onChange={() => onFiltr({ ...filtr, useky: [] })}
+                    />
+                    Všechny úseky
+                  </label>
+                  {moznosti.useky.map((u) => (
+                    <label key={u.klic} className="ds-smd-volba">
+                      <input
+                        type="radio"
+                        name="zobrazit-usek"
+                        checked={filtr.useky.length === 1 && filtr.useky[0] === u.klic}
+                        onChange={() => onFiltr({ ...filtr, useky: [u.klic] })}
+                      />
+                      {u.nazev}
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
+
+              {filtr.pobocky.length > 1 || filtr.useky.length > 1 ? (
+                <p className="ds-smd-f-napoveda ds-smd-zobrazit-poznamka">
+                  Máte vybráno víc najednou (nabídka Filtry). Volba tady to nahradí jednou pobočkou a jedním úsekem.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <label className="ds-smd-hledani">
         <Ikona klic="lupa" velikost={16} />
@@ -362,4 +458,36 @@ export default function Nastroje({
       ) : null}
     </div>
   );
+}
+
+/**
+ * Nabídka se zavírá klikem mimo a Escapem; po Escapu se fokus vrací na
+ * tlačítko, které ji otevřelo.
+ */
+function useZavirani(
+  otevrene: boolean,
+  nastavit: (o: boolean) => void,
+  tlacitko: RefObject<HTMLButtonElement | null>,
+  panel: RefObject<HTMLDivElement | null>,
+) {
+  useEffect(() => {
+    if (!otevrene) return;
+    function naKlik(e: MouseEvent) {
+      const cil = e.target as Node;
+      if (panel.current?.contains(cil) || tlacitko.current?.contains(cil)) return;
+      nastavit(false);
+    }
+    function naKlavesu(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        nastavit(false);
+        tlacitko.current?.focus();
+      }
+    }
+    document.addEventListener("mousedown", naKlik);
+    document.addEventListener("keydown", naKlavesu);
+    return () => {
+      document.removeEventListener("mousedown", naKlik);
+      document.removeEventListener("keydown", naKlavesu);
+    };
+  }, [otevrene, nastavit, tlacitko, panel]);
 }

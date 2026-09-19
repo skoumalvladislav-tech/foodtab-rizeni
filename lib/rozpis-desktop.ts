@@ -273,6 +273,8 @@ export type FiltrDesktop = {
   pozice: string[]
   /** id zaměstnanců; víc jich naráz = víc lidí v mřížce. Prázdné = všichni. */
   osoby: string[]
+  /** id poboček. Prázdné = všechny; jinak se ukážou jen směny těchto poboček. */
+  pobocky: string[]
   stav: StavFiltru
 }
 
@@ -281,12 +283,13 @@ export const FILTR_DESKTOP_PRAZDNY: FiltrDesktop = {
   useky: [],
   pozice: [],
   osoby: [],
+  pobocky: [],
   stav: 'vse',
 }
 
 /** Kolik filtrů je zapnutých. Hledání se nepočítá — má vlastní pole. */
 export function pocetFiltru(f: FiltrDesktop): number {
-  return f.useky.length + f.pozice.length + f.osoby.length + (f.stav !== 'vse' ? 1 : 0)
+  return f.useky.length + f.pozice.length + f.osoby.length + f.pobocky.length + (f.stav !== 'vse' ? 1 : 0)
 }
 
 export const jeFiltrPrazdny = (f: FiltrDesktop) => pocetFiltru(f) === 0 && f.hledani.trim() === ''
@@ -359,6 +362,8 @@ export function smenaVyhovuje(
   useky: Map<string, string>,
 ): boolean {
   if (!smenaVyhovujeStavu(s, f.stav)) return false
+  // Pobočka patří směně (i neobsazené), ne člověku — kdo pracuje na dvou, má v každé jen ty její.
+  if (f.pobocky.length > 0 && !f.pobocky.includes(s.branch_id)) return false
 
   if (s.employee_id === null) {
     if (f.osoby.length > 0) return false
@@ -544,7 +549,12 @@ export function sestavitMrizku(v: {
   filtr: FiltrDesktop
 }): Mrizka {
   const { dny, osoby, useky, pobocky, filtr } = v
-  const vOkne = v.smeny.filter((s) => s.status !== 'cancelled' && dny.includes(s.shift_date))
+  const vOkne = v.smeny.filter(
+    (s) =>
+      s.status !== 'cancelled' &&
+      dny.includes(s.shift_date) &&
+      (filtr.pobocky.length === 0 || filtr.pobocky.includes(s.branch_id)),
+  )
 
   const znamaOsoba = (id: string): OsobaD =>
     osoby.get(id) ?? { id, jmeno: 'Neznámý', usekId: null, poziceId: null, barva: null }
@@ -667,7 +677,8 @@ export function sestavitMrizku(v: {
     které tihle lidé nemají, takže se při nich neukazují.
   */
   const bezSmeny: SkupinaMrizky | null = (() => {
-    if (filtr.stav !== 'vse') return null
+    // Lidé bez směny nemají pobočku, na které by se dali ukázat — při výběru pobočky se neukazují.
+    if (filtr.stav !== 'vse' || filtr.pobocky.length > 0) return null
     const radky = v.lideBezSmeny
       .map((o) => sestavRadek(o, []))
       .filter((r) => radekProjde(r, []))

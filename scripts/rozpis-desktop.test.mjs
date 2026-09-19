@@ -201,9 +201,9 @@ je('velká písmena nevadí', jmenoVyhovuje('lucie skoumalová', 'LUCIE'), true)
 console.log('\n== Filtry ==')
 je('prázdný filtr je prázdný', jeFiltrPrazdny(FILTR_DESKTOP_PRAZDNY), true)
 je('hledání není filtr, ale prázdný už není', jeFiltrPrazdny({ ...FILTR_DESKTOP_PRAZDNY, hledani: 'a' }), false)
-je('počet filtrů: úsek (2) + pozice (1) + zaměstnanci (2) + stav (1)', pocetFiltru({
-  hledani: 'x', useky: ['u1', 'u2'], pozice: ['p1'], osoby: ['e1', 'e2'], stav: 'nevydane',
-}), 6)
+je('počet filtrů: úsek (2) + pozice (1) + zaměstnanci (2) + pobočka (1) + stav (1)', pocetFiltru({
+  hledani: 'x', useky: ['u1', 'u2'], pozice: ['p1'], osoby: ['e1', 'e2'], pobocky: ['b1'], stav: 'nevydane',
+}), 7)
 je('hledání se do počtu filtrů nepočítá', pocetFiltru({ ...FILTR_DESKTOP_PRAZDNY, hledani: 'x' }), 0)
 
 const osoby = new Map([
@@ -322,6 +322,31 @@ je('týden přes hranici roku: pátek 1. 1. 2027 → pondělí 28. 12. 2026', za
 je('měsíc, den, osoby a neznámý pohled běží od zvoleného dne', ['mesic', 'den', 'osoby', 'nesmysl', undefined, null].map((p) => zacatekOkna(p, '2026-09-24')), Array(6).fill('2026-09-24'))
 je('měsíční pohledy: měsíc a osoby (načítá se celý měsíc), ostatní ne', ['mesic', 'osoby', 'sedm', 'tyden', 'den', undefined].map(jeMesicniPohled), [true, true, false, false, false, false])
 je('celý měsíc jde ukázat nejvýš dvěma lidem', MAX_LIDI_V_MESICI, 2)
+
+console.log('\n== Zobrazit: pobočka a úsek ==')
+const sPob1 = smena('2026-09-22', 'a', '08:00', '16:00')
+const sPob2 = smena('2026-09-22', 'a', '08:00', '12:00', { branch_id: 'b2' })
+const volnaPob2 = koncept('2026-09-22', null, '10:00', '18:00', { branch_id: 'b2' })
+je('pobočka b2: jen směny b2, i neobsazená (pobočka patří směně, ne člověku)',
+  [sPob1, sPob2, volnaPob2].map((s) => vyhovuje(s, { pobocky: ['b2'] })), [false, true, true])
+je('pobočka b1: opak', [sPob1, sPob2, volnaPob2].map((s) => vyhovuje(s, { pobocky: ['b1'] })), [true, false, false])
+je('bez výběru pobočky vyhoví všechny', [sPob1, sPob2, volnaPob2].map((s) => vyhovuje(s, {})), [true, true, true])
+je('pobočka + úsek se sčítají (AND): b2 a Kuchyně = jen Andreina směna na b2 (neobsazená úsek nemá a filtrem úseku se neschová)',
+  [sPob1, sPob2, volnaPob2, sb].map((s) => vyhovuje(s, { pobocky: ['b2'], useky: ['u-k'] })), [false, true, true, false])
+je('víc poboček najednou (vlastní výběr)', [sPob1, sPob2].map((s) => vyhovuje(s, { pobocky: ['b1', 'b2'] })), [true, true])
+
+const zPobocek = (filtr) => M(F(filtr))
+const jmenaSkupin = (mr2) => mr2.pobocky.map((p) => [p.nazev, p.skupiny.map((sk) => sk.nazev)])
+je('mřížka jen pro Bernard: jediná pobočka, jen Tomáš (jeho b2 směna 25. 9.), bez neobsazených a bez lidí bez směny',
+  [jmenaSkupin(zPobocek({ pobocky: ['b2'] })), zPobocek({ pobocky: ['b2'] }).bezSmeny, zPobocek({ pobocky: ['b2'] }).celkemMinut], [[['Bernard', ['Plac']]], null, 6 * 60])
+je('mřížka jen pro Černou Perlu: Tomášova b2 směna se nepočítá (48 h − 6 h = 42 h)', [zPobocek({ pobocky: ['b1'] }).pobocky.map((p) => p.nazev), zPobocek({ pobocky: ['b1'] }).celkemMinut], [['Černá Perla'], 42 * 60])
+je('mřížka: pobočka + úsek Kuchyně na Bernardu = prázdná (na b2 nikdo z kuchyně není)', zPobocek({ pobocky: ['b2'], useky: ['u-k'] }).pocetRadku, 0)
+je('mřížka: pobočka + úsek Kuchyně na Černé Perle = Andrea a Irina (a neobsazená směna, která se filtrem úseku neschová)', jmenaVsech(zPobocek({ pobocky: ['b1'], useky: ['u-k'] })), ['Neobsazeno', 'Andrea Mikulová', 'Irina'])
+je('lidé bez směny se bez výběru pobočky ukazují dál (Žaneta)', jmenaVsech(M()).includes('Žaneta'), true)
+je('mřížka pro obě vybrané pobočky najednou: obě se ukážou a hodiny jsou jako bez filtru (48 h)',
+  [zPobocek({ pobocky: ['b1', 'b2'] }).pobocky.map((p) => p.nazev), zPobocek({ pobocky: ['b1', 'b2'] }).celkemMinut], [['Bernard', 'Černá Perla'], 48 * 60])
+je('… a Tomáš je v obou pobočkách jako dva řádky (směny se nemíchají)',
+  jmenaVsech(zPobocek({ pobocky: ['b1', 'b2'], osoby: ['t'] })), ['Tomáš Kovář', 'Tomáš Kovář'])
 
 console.log('\n== Uložit a přidat další den ==')
 je('bez obsazených dní: hned další den', dalsiVolnyDen([], '2026-09-03'), '2026-09-04')
