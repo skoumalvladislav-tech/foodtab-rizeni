@@ -68,11 +68,59 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <circle cx="14.3" cy="16.8" r="1.2" />
     </>
   ),
+  blesk: <path d="M11.2 2.5L4.5 11.2H9l-.7 6.3 7.2-8.7H11l.2-6.3z" />,
+  slunce: (
+    <>
+      <circle cx="10" cy="10" r="3.2" />
+      <path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" />
+    </>
+  ),
+  lide: (
+    <>
+      <circle cx="7.5" cy="7.5" r="2.6" />
+      <path d="M2.5 16.5c.6-2.8 2.5-4 5-4s4.4 1.2 5 4" />
+      <circle cx="14" cy="8" r="2.1" />
+      <path d="M13.6 12.6c2.2-.1 3.4 1 3.9 3.9" />
+    </>
+  ),
+  sipkaVpravo: <path d="M7.5 4.5L13 10l-5.5 5.5" />,
+  fajfkaKruh: (
+    <>
+      <circle cx="10" cy="10" r="7.5" />
+      <path d="M6.6 10.3l2.4 2.4 4.4-4.8" />
+    </>
+  ),
+  fajfkaCtverec: (
+    <>
+      <rect x="3.5" y="3.5" width="13" height="13" rx="2.5" />
+      <path d="M7 10.2l2.2 2.2 3.9-4.3" />
+    </>
+  ),
+  vykricnik: <path d="M10 4v7.5M10 15v.5" />,
+  fotka: (
+    <>
+      <rect x="3" y="4.5" width="14" height="11" rx="2" />
+      <circle cx="7.3" cy="8.6" r="1.2" />
+      <path d="M3 14l4.2-3.8 3.3 3 2.5-2.2 4 3.5" />
+    </>
+  ),
+  faktura: (
+    <>
+      <path d="M5.5 2.5h6l3.5 3.5v11.5h-9.5z" />
+      <path d="M11.5 2.5V6H15M8 10.5h4.5M8 13.5h4.5" />
+    </>
+  ),
+  seznam: <path d="M4 6h12M4 10h12M4 14h7" />,
 };
 
-export default function Ikona({ klic }: { klic: IkonaKlic }) {
+export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {
   return (
-    <svg className="ft-i" viewBox="0 0 20 20" aria-hidden="true">
+    <svg
+      className="ft-i"
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      style={velikost ? { width: `${velikost}px`, height: `${velikost}px` } : undefined}
+    >
       {TVARY[klic]}
     </svg>
   );

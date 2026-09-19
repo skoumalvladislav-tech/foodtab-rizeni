@@ -280,3 +280,50 @@ vrátit jen ta část.
 
 Poslední bod ber vážně. Nedodělaná obrazovka, o které vím, je lepší než
 dodělaná, o které si to jen myslím.
+
+---
+
+## 11. Pravidlo vzhledu od 19.9.2026 — mockup Dnes
+
+Předloha: `docs/vzhled-dnes-mockup-2026-09-19.webp`. Šéfík 19.9.2026: obrazovka
+Dnes má vypadat **přesně** takto — ikony, rozložení oken, banner nahoře, styl
+písma — a **totéž platí jako pravidlo pro všechna další okna**.
+
+Tohle je nejnovější a platí nad tím, co říkají starší oddíly a poznámky.
+Konkrétně **obrací** druhé kolo UX redesignu (16.9.2026), které patkové
+Newsreader vyhodilo z nadpisů: vracíme se k oddílu 5 výš.
+
+### Co platí v každém novém nebo přepracovaném okně
+
+| Oblast | Pravidlo | Kde to je |
+|---|---|---|
+| Písmo | Nadpisy `h1`–`h3` a **velká čísla** patkovým Newsreader. Text, tlačítka, štítky Archivo. Rukopis (`--font-rukopis`) jen na podpis „Foodtab“ a značková hesla, **nikdy na čtený text**. | pravidlo `h1, h2, h3` a `.ds-cislo` v `app/_komponenty.css`; font v `app/layout.tsx` |
+| Plochy | Bílá karta `.ds-plocha`: radius 16, jemný stín, linka 1 px. Hlavička panelu = obrysová ikona + `h2` + odkaz „… →“ vpravo. | `.ds-plocha*` v `_komponenty.css`, `PanelHlava` v `dnes/prvky.tsx` |
+| Ikony | **Jen** ze sdílené sady `app/[rozsah]/ikona.tsx` (`<Ikona klic="…" />`), obrys na mřížce 20×20. Chybí-li ikona, přidá se **klíč** tam a do `IkonaKlic` v `nabidka.ts` — žádné vlastní SVG na místě a **žádné emoji**. | `ikona.tsx`, `nabidka.ts` |
+| Přehledová karta | Ikona v tónované dlaždici (`dobre` / `info` / `pozor` / `bad`), titulek, hodnota patkově, popis, **jedno** tlačítko dole. Hlavní (zlaté) tlačítko jen jedno na kartu. | `KpiKarta` |
+| Přízvuk | Mosaz `--mosaz-sv` přes `color-mix` s kartou: vybraný den 26 %, dnešek 22–40 %, víkend 11–28 %. **Barva nikdy sama** — vždycky i text nebo tvar (oddíl 7). | `_komponenty.css` |
+| Banner | `Hero` na **Dnes** (domovská obrazovka). Fotku nahrává pobočka v Nastavení → Pobočky; vlevo překryv do `--paper`, aby seděl tmavý text. Bez fotky barva pobočky, **nikdy cizí snímek**. Ostatní okna mají běžný `Nadpis` (patkový `h1`); stejný banner jinde jen na výslovný pokyn. | `Hero`, `.ds-hero*` |
+| Rozvržení | Hlavní sloupec + boční panel 272 px, který začíná na úrovni karet. Uvnitř hlavního sloupce se rozhoduje podle **jeho** šířky (container query), ne podle okna. Pod 1100 px jeden sloupec. | `.ds-dnes*` |
+
+### Co se nekreslí, dokud nejsou data
+
+Mockup ukazuje **Rychlý přehled** (tržby dnes, online objednávky, hodnocení
+Google) a u počasí větu „Ideální den na zahrádku“. Appka na to nemá zdroj
+dat a **čísla ani rady se nevymýšlejí** (viz `docs/dnes-obrazovka-zadani.md`,
+oddíl 6). Sekce čeká na napojení; kdo ho bude dělat, nesmí do té doby dosadit
+ukázkové hodnoty.
+
+### Co se tímhle pravidlem NEZMĚNILO
+
+Horní lišta a boční sloupec (`components/shell`) zůstaly, jak byly. Mockup
+ukazuje jiné pořadí záložek („Dnes“ jako první) a ve sloupci všechny moduly
+najednou; druhé kolo UX redesignu (oddíl 4) rozhodlo, že sloupec ukazuje jen
+aktivní modul. To je **samostatné rozhodnutí** a čeká na Šéfíka.
+
+### Než odevzdáš okno
+
+1. Nadpisy a čísla jsou patková, text ne.
+2. Každá ikona je z `ikona.tsx`; `grep` na `<svg` a emoji v nové obrazovce nic nenajde.
+3. Karty jsou `.ds-plocha` / `KpiKarta`, ne nová `const karta = {…}`.
+4. Světlý **i tmavý** režim jsou vidět — tokeny, žádná barva napevno.
+5. Nic nepřetéká ve 375 px (mobil) ani ve 1536 px (desktop).
