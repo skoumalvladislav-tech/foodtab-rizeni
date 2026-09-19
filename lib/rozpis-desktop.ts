@@ -292,6 +292,15 @@ export function pocetFiltru(f: FiltrDesktop): number {
   return f.useky.length + f.pozice.length + f.osoby.length + f.pobocky.length + (f.stav !== 'vse' ? 1 : 0)
 }
 
+/**
+ * Kolik z nich se dá najít a odškrtnout v nabídce **Filtry**. Pobočka se
+ * vybírá v nabídce Zobrazit, takže do odznaku u Filtrů nepatří — odznak,
+ * který ukazuje na nabídku, kde se ta volba nedá zrušit, je past.
+ */
+export function pocetFiltruVPanelu(f: FiltrDesktop): number {
+  return pocetFiltru(f) - f.pobocky.length
+}
+
 export const jeFiltrPrazdny = (f: FiltrDesktop) => pocetFiltru(f) === 0 && f.hledani.trim() === ''
 
 /** Malá písmena bez diakritiky: „Kateřina“ = „katerina“. */

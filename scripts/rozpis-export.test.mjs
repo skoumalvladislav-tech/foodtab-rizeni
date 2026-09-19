@@ -295,8 +295,12 @@ const m40 = sestavitExportMesice(vstup(smeny40, { osoby: lide40 }))
 const listy40 = listyXlsx(m40)
 je('40 lidí: víc listů „Rozpis 1“, „Rozpis 2“… a Souhrn na konci', [listy40.length > 2, listy40[0].nazev, listy40[listy40.length - 1].nazev], [true, 'Rozpis 1', 'Souhrn'])
 je('… každý list má aspoň jednoho člověka a všichni lidé jsou právě na jednom', [listy40.slice(0, -1).every((l) => l.sloupce.length > 1), listy40.slice(0, -1).reduce((k, l) => k + l.sloupce.length - 1, 0)], [true, 40])
-je('… a nikdo se nedostane pod čitelné měřítko: list má nejvýš tolik lidí, kolik se vejde', listy40.slice(0, -1).every((l) => (l.sloupce.slice(1).reduce((k, w) => k + w * 7 + 5, 6.5 * 7 + 5) * 0.75) * 0.62 <= (8.27 - 0.8) * 72 * 1.001 * 1.0 || true), true)
-je('… při tom se šířka jednoho listu vejde do A4 s měřítkem aspoň 62 %', listy40.slice(0, -1).every((l) => (l.sloupce.reduce((k, w) => k + (w * 7 + 5) * 0.75, 0)) * 0.62 <= (8.27 - 0.8) * 72 + 1), true)
+/** Šířka listu v bodech: sloupec zabere `w * 7 + 5` pixelů, bod je 0,75 pixelu. */
+const sirkaListuPt = (list) => list.sloupce.reduce((k, w) => k + (w * 7 + 5) * 0.75, 0)
+const SIRKA_A4_PT = (8.27 - 0.8) * 72 // A4 na výšku s okraji 0,4″
+je('… a šířka každého listu se vejde do A4 při měřítku aspoň 62 %', listy40.slice(0, -1).every((l) => sirkaListuPt(l) * 0.62 <= SIRKA_A4_PT + 1), true)
+// A ta kontrola umí spadnout — bez tohohle by byla zelená nad čímkoli.
+je('… a chytne list, který je na A4 moc široký (60 sloupců po 11 znacích)', sirkaListuPt({ sloupce: Array.from({ length: 60 }, () => 11) }) * 0.62 <= SIRKA_A4_PT + 1, false)
 je('rozdělení lidí: 7 po 3 → 3 + 2 + 2', rozdelitLidi([1, 2, 3, 4, 5, 6, 7], 3).map((c) => c.length), [3, 2, 2])
 je('rozdělení lidí: vejdou se → jedna část', rozdelitLidi([1, 2, 3, 4, 5, 6], 6).map((c) => c.length), [6])
 je('rozdělení lidí: 10 po 4 → 4 + 3 + 3', rozdelitLidi(Array.from({ length: 10 }, (_, i) => i), 4).map((c) => c.length), [4, 3, 3])

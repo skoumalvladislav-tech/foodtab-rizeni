@@ -322,8 +322,14 @@ export default function RozpisView({
     return id ? (nazvyPozic.get(id) ?? null) : null;
   };
 
+  /*
+    Pobočky do nabídky Zobrazit: jen ty, pro které se směny opravdu načítají.
+    Na pobočkovém rozsahu (/cerna-perla/smeny) dotaz jiné pobočky nevrátí,
+    takže by jejich výběr vedl jen na prázdnou mřížku s hláškou o filtrech.
+  */
   const moznosti: MoznostiFiltru = {
     pobocky: [...nazvyPobocek]
+      .filter(([id]) => rozsah.level !== "branch" || id === rozsah.branchId)
       .map(([id, nazev]) => ({ id, nazev }))
       .sort((a, b) => a.nazev.localeCompare(b.nazev, "cs")),
     useky: [
@@ -385,12 +391,25 @@ export default function RozpisView({
 
   /* --- akce nad směnou -------------------------------------------- */
 
-  // Je vyfiltrovaný právě jeden člověk, formulář se otevře rovnou s ním.
+  /*
+    Na které pobočce se zakládá. Je-li v nabídce Zobrazit vybraná jedna,
+    zakládá se na ní — jinak by nová směna vznikla na výchozí pobočce, hned
+    ji odfiltrovala mřížka a vypadalo by to, že se uložení nepovedlo.
+  */
+  const pobockaProNovou = filtr.pobocky.length === 1 ? filtr.pobocky[0] : (planovani?.vychoziPobocka ?? null);
+
+  // Vyfiltrovaný člověk i pobočka se do nové směny předvyplní.
   const novaSmena = () =>
     setOtevrene({
       den: pohled === "den" ? den : dny.includes(dnesni) ? dnesni : den,
       smena: null,
-      predvyplneni: filtr.osoby.length === 1 ? { employee_id: filtr.osoby[0] } : null,
+      predvyplneni:
+        filtr.osoby.length === 1 || pobockaProNovou
+          ? {
+              ...(filtr.osoby.length === 1 ? { employee_id: filtr.osoby[0] } : {}),
+              ...(pobockaProNovou ? { branch_id: pobockaProNovou } : {}),
+            }
+          : null,
       nonce: Date.now(),
     });
 
@@ -507,7 +526,9 @@ export default function RozpisView({
                   polozky={(["xlsx", "pdf"] as const).map((format) => ({
                     klic: format,
                     nazev: `${format === "xlsx" ? "Excel (.xlsx)" : "PDF"} — ${nazevMesice(den.slice(0, 7))}`,
-                    href: `/api/smeny/export?rozsah=${encodeURIComponent(planovani.rozsah)}&mesic=${den.slice(0, 7)}&format=${format}`,
+                    href: `/api/smeny/export?rozsah=${encodeURIComponent(planovani.rozsah)}&mesic=${den.slice(0, 7)}&format=${format}${
+                      filtr.pobocky.length === 1 ? `&pobocka=${encodeURIComponent(filtr.pobocky[0])}` : ""
+                    }`,
                   }))}
                 />
                 <button type="button" className="ft-tl ft-tl-male ft-tl-vedlejsi" onClick={() => setImportOtevren(true)}>
@@ -581,15 +602,15 @@ export default function RozpisView({
               lide={filtr.osoby.map((id) => ({ id, jmeno: jmenoOsoby(id) }))}
               mesic={den.slice(0, 7)}
               tydny={mesicniMrizka(den)}
-              smeny={
-                filtr.pobocky.length === 0 ? nactene : nactene.filter((s) => filtr.pobocky.includes(s.branch_id))
-              }
+              /* Týž filtr jako Den a Měsíc — ne vlastní kopie, která zná jen pobočky. */
+              smeny={nactenoFiltrovane}
               dnesni={dnesni}
               planovani={planovani}
               jmena={jmena}
               poziceOsob={poziceOsoby}
               barvy={barvy}
               nazvyPobocek={nazvyPobocek}
+              pobockaProNovou={pobockaProNovou}
               vybranaId={okno?.smena?.id || null}
               onOtevrit={setOtevrene}
             />

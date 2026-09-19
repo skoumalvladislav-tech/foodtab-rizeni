@@ -42,6 +42,16 @@ export async function GET(request: Request) {
   const rozsah = searchParams.get('rozsah') ?? ''
   const mesic = searchParams.get('mesic')
   const format = searchParams.get('format')
+  /*
+    Nepovinné zúžení na jednu pobočku — obrazovka ho posílá, když je
+    v nabídce Zobrazit vybraná jedna (jinak by stažený soubor obsahoval
+    celou firmu, ačkoli na obrazovce je vidět jedna pobočka).
+
+    Adrese se nevěří: id se porovná s pobočkami, které uživateli vrátila
+    databáze, a co nesedí, se odmítne. I kdyby projelo, RLS cizí řádky
+    stejně nevydá — tohle je první linie, ne jediná.
+  */
+  const pobockaZAdresy = searchParams.get('pobocka')
 
   if (!jeMesic(mesic) || Number(mesic.slice(0, 4)) < 2020 || Number(mesic.slice(0, 4)) > 2100) {
     return new Response('Měsíc má mít tvar RRRR-MM.', { status: 400 })
@@ -57,6 +67,13 @@ export async function GET(request: Request) {
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') return new Response('Na tohle nemáte oprávnění.', { status: 403 })
   const { ctx, scope } = pristup
+
+  const jenPobocka = pobockaZAdresy ? (ctx.branches.find((b) => b.id === pobockaZAdresy) ?? null) : null
+  if (pobockaZAdresy && !jenPobocka) return new Response('Taková pobočka tu není.', { status: 400 })
+  // Na pobočkovém rozsahu rozhoduje rozsah; jiná pobočka z adresy by ho obcházela.
+  if (jenPobocka && scope.level === 'branch' && scope.branchId !== jenPobocka.id) {
+    return new Response('Tahle pobočka do zvoleného rozsahu nepatří.', { status: 400 })
+  }
 
   const supabase = await getServerSupabase()
   const dny = dnyMesice(mesic)
@@ -74,7 +91,8 @@ export async function GET(request: Request) {
       .order('shift_date', { ascending: true })
       .order('starts_at', { ascending: true })
       .order('id', { ascending: true })
-    if (scope.level === 'branch' && scope.branchId) dotaz = dotaz.eq('branch_id', scope.branchId)
+    const jedna = jenPobocka?.id ?? (scope.level === 'branch' ? scope.branchId : null)
+    if (jedna) dotaz = dotaz.eq('branch_id', jedna)
     return dotaz.range(od, od + STRANKA - 1)
   }
 
@@ -138,8 +156,11 @@ export async function GET(request: Request) {
 
   const pobocky = new Map(ctx.branches.map((b) => [b.id, b.name]))
   const zona =
+    jenPobocka?.timezone ??
     (scope.branchId ? ctx.branches.find((b) => b.id === scope.branchId)?.timezone : ctx.branches[0]?.timezone) ??
     ZONA_VYCHOZI
+  // Co je v souboru napsané jako rozsah, musí sedět s tím, co v něm opravdu je.
+  const popisRozsahu = jenPobocka?.name ?? scope.branchName ?? ctx.tenant.name
 
   const model = sestavitExportMesice({
     mesic,
@@ -148,12 +169,12 @@ export async function GET(request: Request) {
     useky: new Map((useky ?? []).map((u) => [u.id as string, u.nazev as string])),
     pozice: new Map((pozice ?? []).map((p) => [p.id as string, p.label as string])),
     pobocky,
-    rozsah: scope.branchName ?? ctx.tenant.name,
+    rozsah: popisRozsahu,
     vytvoreno: datumACasSRokemVPasmu(new Date(), zona),
   })
 
   const bajty = format === 'xlsx' ? zapsatXlsx(listyXlsx(model)) : pdfZExportu(model)
-  const soubor = nazevSouboru(scope.branchName ?? 'firma', mesic, format)
+  const soubor = nazevSouboru(jenPobocka?.name ?? scope.branchName ?? 'firma', mesic, format)
 
   return new Response(bajty as BodyInit, {
     headers: {
