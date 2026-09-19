@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 
-import { hasAccess } from "@/lib/authz";
+import { getUser, hasAccess } from "@/lib/authz";
 import { barvaNeboNic } from "@/lib/barvy-lidi";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
+import { dnyTydne, mesicniMrizka } from "@/lib/rozpis-mobil";
 import { DotazSelhal, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
@@ -43,7 +44,24 @@ type Smena = {
   // Trhaná směna — pauza uvnitř (migrace 20260916200000). Obě, nebo žádná.
   pauza_od: string | null;
   pauza_do: string | null;
+  // Kdo a kdy směnu založil — do detailu na telefonu.
+  created_by: string | null;
+  created_at: string | null;
 };
+
+/**
+ * Je to opravdové datum RRRR-MM-DD?
+ *
+ * Adresa je vstup od uživatele. Dřív se `?den=` posílalo rovnou do
+ * dotazu; teď se z něj počítá i týden, a nesmyslné datum by shodilo
+ * stránku výjimkou z `toISOString`, ne hláškou. Roundtrip chytí i
+ * „2026-02-31“, které regulární výraz pustí.
+ */
+function jeDatum(s: string | undefined): s is string {
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
 
 export default async function Rozpis({
   params,
@@ -53,7 +71,8 @@ export default async function Rozpis({
   searchParams: Promise<{ den?: string }>;
 }) {
   const { rozsah } = await params;
-  const { den: denZUrl } = await searchParams;
+  const { den: denSurovy } = await searchParams;
+  const denZUrl = jeDatum(denSurovy) ? denSurovy : undefined;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -104,8 +123,8 @@ export default async function Rozpis({
   if (chybaBranchData) throw new DotazSelhal("pobočky", chybaBranchData);
   const dayStartsAt = (branchData?.day_starts_at as string | undefined) ?? "05:00";
 
-  let odKdy = await provozniDen(kotva);
-  if (!odKdy) {
+  const dnesProvozni = await provozniDen(kotva);
+  if (!dnesProvozni) {
     return (
       <Sdeleni nadpis="Nepodařilo se zjistit provozní den">
         Bez něj nelze rozpis sestavit. Zkuste to prosím za chvíli znovu.
@@ -114,50 +133,96 @@ export default async function Rozpis({
   }
 
   // Pokud je v URL zadán konkrétní den, počítáme rozsah od něj
-  if (denZUrl) {
-    odKdy = denZUrl;
-  }
-
+  const odKdy = denZUrl ?? dnesProvozni;
   const doKdy = posunDatum(odKdy, DNU_V_ROZPISU - 1);
+
+  /*
+    CO SE NAČÍTÁ.
+
+    Počítač: `odKdy` … `doKdy` (sedm dnů od zvoleného dne). Telefon: celý
+    týden od pondělí do neděle, do kterého `odKdy` patří — denní přehled
+    i týden po lidech se kreslí po ISO týdnech. Sjednocení je nejvýš
+    třináct dní; nic víc (ani měsíc, ani lidé bez směny).
+
+    Vlastní směny přihlášeného (Moje směny, Kalendář) jdou zvlášť, přes
+    `employee_id`, bez omezení na pobočku z adresy — člověk chce vidět
+    všechny své směny, ať je má kde chce; co smí číst, hlídá RLS.
+  */
+  const tyden = dnyTydne(odKdy);
+  const nacistOd = tyden[0];
+  const nacistDo = tyden[6] > doKdy ? tyden[6] : doKdy;
+
+  const mrizka = mesicniMrizka(odKdy).flat();
+  const nadchazejiciDo = posunDatum(dnesProvozni, 13);
+  const mojeOd = dnesProvozni < mrizka[0] ? dnesProvozni : mrizka[0];
+  const mojeDo = nadchazejiciDo > mrizka[mrizka.length - 1] ? nadchazejiciDo : mrizka[mrizka.length - 1];
 
   // Sloupce pauza_od/pauza_do přidává migrace 20260916200000 (trhaná
   // směna) — dokud neproběhne, dotaz na ně spadne s PGRST204/42703.
   // Stránka to nesmí strhnout s sebou, proto se v tom případě zopakuje
   // bez nich (viz lib/supabase/dotaz.ts, sloupecNeexistuje).
   const zakladniSloupce =
-    "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at";
+    "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at, created_by, created_at";
 
-  function dotazNaSmeny(sloupce: string) {
+  function dotazNaSmeny(sloupce: string, od: string, doDne: string, zamestnanec?: string) {
     let d = supabase
       .from("shifts")
       .select(sloupce)
       .eq("tenant_id", tenantId)
-      .gte("shift_date", odKdy)
-      .lte("shift_date", doKdy)
+      .gte("shift_date", od)
+      .lte("shift_date", doDne)
       .neq("status", "cancelled")
       .order("shift_date", { ascending: true })
       .order("starts_at", { ascending: true });
 
-    if (scope.level === "branch" && scope.branchId) {
+    if (zamestnanec) {
+      d = d.eq("employee_id", zamestnanec);
+    } else if (scope.level === "branch" && scope.branchId) {
       d = d.eq("branch_id", scope.branchId);
     }
     return d;
   }
 
-  let { data: nactene, error: chybaNactene } = await dotazNaSmeny(
-    `${zakladniSloupce}, pauza_od, pauza_do`,
-  );
-  let maPauzy = true;
-  if (chybaNactene && sloupecNeexistuje(chybaNactene)) {
-    maPauzy = false;
-    ({ data: nactene, error: chybaNactene } = await dotazNaSmeny(zakladniSloupce));
+  async function nactiSmeny(od: string, doDne: string, zamestnanec?: string): Promise<Smena[]> {
+    let { data, error } = await dotazNaSmeny(
+      `${zakladniSloupce}, pauza_od, pauza_do`,
+      od,
+      doDne,
+      zamestnanec,
+    );
+    let maPauzy = true;
+    if (error && sloupecNeexistuje(error)) {
+      maPauzy = false;
+      ({ data, error } = await dotazNaSmeny(zakladniSloupce, od, doDne, zamestnanec));
+    }
+    if (error) throw new DotazSelhal("směny", error);
+    return ((data ?? []) as unknown as Record<string, unknown>[]).map((s) => ({
+      ...s,
+      pauza_od: maPauzy ? ((s.pauza_od as string | null) ?? null) : null,
+      pauza_do: maPauzy ? ((s.pauza_do as string | null) ?? null) : null,
+    })) as unknown as Smena[];
   }
-  if (chybaNactene) throw new DotazSelhal("směny", chybaNactene);
-  const smeny = ((nactene ?? []) as unknown as Record<string, unknown>[]).map((s) => ({
-    ...s,
-    pauza_od: maPauzy ? ((s.pauza_od as string | null) ?? null) : null,
-    pauza_do: maPauzy ? ((s.pauza_do as string | null) ?? null) : null,
-  })) as unknown as Smena[];
+
+  // Kdo je přihlášený jako zaměstnanec. Ne každý účet má záznam (majitel
+  // bez směn) — pak `jaId` chybí a Moje směny zůstanou prázdné.
+  const uzivatel = await getUser();
+  let jaId: string | null = null;
+  if (uzivatel) {
+    const { data: ja, error: chybaJa } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("user_id", uzivatel.id)
+      .is("deleted_at", null)
+      .limit(1);
+    if (chybaJa) throw new DotazSelhal("zaměstnanec", chybaJa);
+    jaId = (ja?.[0]?.id as string | undefined) ?? null;
+  }
+
+  const [smeny, mojeSmeny] = await Promise.all([
+    nactiSmeny(nacistOd, nacistDo),
+    jaId ? nactiSmeny(mojeOd, mojeDo, jaId) : Promise.resolve([] as Smena[]),
+  ]);
 
   // Jména lidí a názvy pozic. Neobsazená směna nemá employee_id — ta se
   // do dotazu nedostane a v rozpisu se ukáže jako neobsazená.
@@ -179,7 +244,12 @@ export default async function Rozpis({
   const domovskeUseky = new Map<string, string | null>();
 
   const idLidi = [
-    ...new Set(smeny.map((s) => s.employee_id).filter((i): i is string => !!i)),
+    ...new Set(
+      [...smeny, ...mojeSmeny]
+        .map((s) => s.employee_id)
+        .concat(jaId)
+        .filter((i): i is string => !!i),
+    ),
   ];
   if (idLidi.length > 0) {
     const { data: lide, error: chybaLide } = await supabase
@@ -195,7 +265,7 @@ export default async function Rozpis({
   }
 
   const idPozic = [
-    ...new Set(smeny.map((s) => s.position_id).filter((i): i is string => !!i)),
+    ...new Set([...smeny, ...mojeSmeny].map((s) => s.position_id).filter((i): i is string => !!i)),
   ];
   if (idPozic.length > 0) {
     const { data: p, error: chybaP } = await supabase
@@ -209,12 +279,34 @@ export default async function Rozpis({
   const nazvyUseku = new Map<string, string>();
   const idUseku = [...new Set([...domovskeUseky.values()].filter((i): i is string => !!i))];
   if (idUseku.length > 0) {
+    // Pořadí si určuje firma (`poradi`); telefon podle něj řadí skupiny.
     const { data: u, error: chybaU } = await supabase
       .from("useky")
       .select("id, nazev")
-      .in("id", idUseku);
+      .in("id", idUseku)
+      .order("poradi", { ascending: true })
+      .order("nazev", { ascending: true });
     if (chybaU) throw new DotazSelhal("úseky", chybaU);
     for (const c of u ?? []) nazvyUseku.set(c.id as string, c.nazev as string);
+  }
+
+  /*
+    Jména těch, kdo směny zakládali (řádek „Vytvořil“ v detailu).
+    Přes `employees.user_id`; komu se jméno nenajde, u směny žádný
+    „Vytvořil“ nebude — nevymýšlí se.
+  */
+  const tvurci = new Map<string, string>();
+  const idTvurcu = [
+    ...new Set([...smeny, ...mojeSmeny].map((s) => s.created_by).filter((i): i is string => !!i)),
+  ];
+  if (idTvurcu.length > 0) {
+    const { data: t, error: chybaT } = await supabase
+      .from("employees")
+      .select("user_id, full_name")
+      .eq("tenant_id", tenantId)
+      .in("user_id", idTvurcu);
+    if (chybaT) throw new DotazSelhal("zaměstnanci", chybaT);
+    for (const c of t ?? []) tvurci.set(c.user_id as string, c.full_name as string);
   }
 
   /* --- 3. ZADÁVÁNÍ ---------------------------------------------- */
@@ -294,7 +386,7 @@ export default async function Rozpis({
     Kdo plánovat smí, potřebuje kalendář — právě do prázdného týdne
     se směny zadávají a hláška místo něj by ho o to připravila.
   */
-  if (smeny.length === 0 && !planovani) {
+  if (smeny.length === 0 && mojeSmeny.length === 0 && !planovani) {
     return (
       <Sdeleni nadpis="Na příští týden není nic naplánováno">
         {scope.level === "branch"
@@ -307,10 +399,18 @@ export default async function Rozpis({
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
   return (
-    <>
-      <Nadpis oci="Provoz" popis="Kdo kdy stojí. Týden dopředu.">
-        Rozpis směn
-      </Nadpis>
+    /*
+      Sloupec, aby šlo na telefonu panel vydání přesunout pod seznam
+      (`ds-sm-vydani`, app/_komponenty.css). Na počítači je pořadí beze
+      změny: nadpis, vydání, rozpis.
+    */
+    <div className="ds-sm-stranka">
+      {/* Na telefonu má nadpis roli hlavičky obrazovky sám mobilní pohled. */}
+      <div className="ds-sm-jen-desktop">
+        <Nadpis oci="Provoz" popis="Kdo kdy stojí. Týden dopředu.">
+          Rozpis směn
+        </Nadpis>
+      </div>
 
       {/*
         Vydání rozpisu. Jen na pobočce a jen tomu, kdo smí plánovat:
@@ -321,18 +421,33 @@ export default async function Rozpis({
         rozhoduje o kreslení, což zámek není.
       */}
       {scope.level === "branch" && scope.branchId ? (
-        <PanelVydani
-          rozsah={rozsah}
-          tenantId={tenantId}
-          branchId={scope.branchId}
-          od={odKdy}
-          doKdy={doKdy}
-        />
+        <div className="ds-sm-vydani">
+          <PanelVydani
+            rozsah={rozsah}
+            tenantId={tenantId}
+            branchId={scope.branchId}
+            od={odKdy}
+            doKdy={doKdy}
+          />
+        </div>
       ) : null}
 
       <RozpisView
         smeny={smeny}
-        dnesni={odKdy}
+        /*
+          Skutečné „dnes“ (provozní den pobočky), ne den z adresy. Dřív se
+          sem posílal `odKdy`, který se po posunu o týden stal „dneškem“:
+          první sloupec se zvýraznil jako dnešní a tlačítko Dnes nevrátilo
+          nikam.
+        */
+        dnesni={dnesProvozni}
+        mobil={{
+          mojeSmeny,
+          okno: { od: nacistOd, do: nacistDo },
+          maSve: jaId !== null,
+          tvurci,
+          rozsah,
+        }}
         dayStartsAt={dayStartsAt}
         jmena={jmena}
         barvy={barvy}
@@ -347,6 +462,6 @@ export default async function Rozpis({
         }}
         planovani={planovani}
       />
-    </>
+    </div>
   );
 }

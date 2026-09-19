@@ -13,6 +13,8 @@ import {
   popisPinu,
   popisZapomenuteho,
   vyzadujePotvrzeni,
+  odkazNaSmenu,
+  zmenaSmeny,
   type TeloUpozorneni,
 } from '@/lib/upozorneni-text'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -51,6 +53,8 @@ type Zprava = {
   read_at: string | null
   // Migrace 20260917010000 — chybí, dokud neproběhne (viz níž).
   acknowledged_at: string | null
+  // Migrace 20260919120000 — odkaz na směnu; chybí do jejího nasazení.
+  shift_id: string | null
 }
 
 const NAZVY: Record<string, string> = {
@@ -89,13 +93,25 @@ export default async function Upozorneni({
       .order('created_at', { ascending: false })
       .limit(50)
 
-  let { data, error } = await dotazNaUpozorneni(
-    'id, druh, telo, created_at, read_at, acknowledged_at',
-  )
+  /*
+    Sloupce přidávají migrace, které se nasazují ručně, kód se nasazuje
+    sám: dokud migrace neproběhne, dotaz na nový sloupec spadne. Stránka
+    proto zkouší od nejnovějšího stavu k nejstaršímu a vždycky se
+    vykreslí. Stejný vzor jako jinde v appce (viz smeny/page.tsx).
 
-  // Sloupec z migrace 20260917010000 — dokud neproběhne, dotaz se
-  // zopakuje bez něj. Stejný vzor jako jinde v appce (viz smeny/page.tsx).
+      1. + shift_id            (20260919120000)
+      2. + acknowledged_at     (20260917010000)
+      3. základ
+  */
+  let { data, error } = await dotazNaUpozorneni(
+    'id, druh, telo, created_at, read_at, acknowledged_at, shift_id',
+  )
+  let maSmenu = true
   let maPotvrzeni = true
+  if (error && sloupecNeexistuje(error)) {
+    maSmenu = false
+    ;({ data, error } = await dotazNaUpozorneni('id, druh, telo, created_at, read_at, acknowledged_at'))
+  }
   if (error && sloupecNeexistuje(error)) {
     maPotvrzeni = false
     ;({ data, error } = await dotazNaUpozorneni('id, druh, telo, created_at, read_at'))
@@ -120,6 +136,7 @@ export default async function Upozorneni({
   const zpravy = ((data ?? []) as unknown as Record<string, unknown>[]).map((z) => ({
     ...z,
     acknowledged_at: maPotvrzeni ? ((z.acknowledged_at as string | null) ?? null) : null,
+    shift_id: maSmenu ? ((z.shift_id as string | null) ?? null) : null,
   })) as unknown as Zprava[]
   const neprectene = zpravy.filter((z) => !z.read_at).length
 
@@ -288,7 +305,37 @@ export default async function Upozorneni({
                           : undefined,
                     }}
                   >
-                    {cas(z.telo.od)}–{cas(z.telo.do)}
+                    {/*
+                      U změny „původně → nově“, když upozornění nese původní
+                      stav (od 19. 9.); starší ukážou jen nový čas.
+                    */}
+                    {z.druh === 'smena.zmenena' && zmenaSmeny(z.telo) ? (
+                      <>
+                        <span style={{ textDecoration: 'line-through' }}>
+                          {zmenaSmeny(z.telo)?.puvodne}
+                        </span>{' '}
+                        → <strong style={{ color: 'var(--ink)' }}>{zmenaSmeny(z.telo)?.nove}</strong>
+                      </>
+                    ) : (
+                      <>
+                        {cas(z.telo.od)}–{cas(z.telo.do)}
+                      </>
+                    )}
+                  </p>
+                ) : null}
+
+                {/*
+                  Zobrazit směnu — rovnou detail, ne jen rozpis. Odebraná a
+                  zrušená se neodkazují: směna už není jeho, není co otevřít.
+                */}
+                {(z.druh === 'smena.nova' || z.druh === 'smena.zmenena') && z.telo.den ? (
+                  <p style={{ margin: '8px 0 0' }}>
+                    <Link
+                      href={odkazNaSmenu(rozsah, z.telo, z.shift_id)}
+                      className="ft-tl ft-tl-vedlejsi ft-tl-male"
+                    >
+                      Zobrazit směnu
+                    </Link>
                   </p>
                 ) : null}
 

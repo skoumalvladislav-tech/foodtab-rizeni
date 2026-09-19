@@ -45,6 +45,12 @@ export type TeloUpozorneni = {
   prichod?: string
   pobocka?: string
   pobocka_slug?: string
+  // smena.zmenena — stav PŘED změnou (migrace 20260919120000). U starších
+  // upozornění chybí; věta se pak řekne bez „původně“.
+  puvodni_den?: string
+  puvodni_od?: string
+  puvodni_do?: string
+  puvodni_pobocka?: string
   // marketing.*
   prispevek?: string
   nazev?: string
@@ -66,6 +72,39 @@ export type TeloUpozorneni = {
  */
 export function vyzadujePotvrzeni(druh: string): boolean {
   return druh === 'smena.zmenena' || druh === 'smena.zrusena'
+}
+
+/**
+ * „Původně → nově“ u změněné směny.
+ *
+ * Vrací `null`, když upozornění nenese původní stav (starší, z doby před
+ * migrací 20260919120000) — obrazovka pak ukáže jen nový čas a nic
+ * nevymýšlí. Den se do věty píše jen tehdy, když se změnil; jinak by
+ * „út 22. 9. 08:00–16:00 → út 22. 9. 10:00–18:00“ jen zdržovalo.
+ */
+export function zmenaSmeny(telo: TeloUpozorneni): { puvodne: string; nove: string } | null {
+  if (!telo.puvodni_od || !telo.puvodni_do || !telo.od || !telo.do) return null
+  const jinyDen = Boolean(telo.puvodni_den && telo.den && telo.puvodni_den !== telo.den)
+  const predDnem = (iso?: string) => (jinyDen && iso ? `${denZkraceny(iso)} ` : '')
+  return {
+    puvodne: `${predDnem(telo.puvodni_den)}${telo.puvodni_od}–${telo.puvodni_do}`,
+    nove: `${predDnem(telo.den)}${telo.od}–${telo.do}`,
+  }
+}
+
+/**
+ * Kam vede „Zobrazit“ u upozornění na směnu: do rozpisu, rovnou na
+ * detail té směny. Bez `shift_id` (starší upozornění, odebraná směna)
+ * vede jen na správný den.
+ *
+ * `moje` je pohled zaměstnance — příjemce upozornění je vždy někdo, kdo
+ * má záznam zaměstnance, takže ho má.
+ */
+export function odkazNaSmenu(rozsah: string, telo: TeloUpozorneni, shiftId?: string | null): string {
+  const q = new URLSearchParams({ pohled: 'moje' })
+  if (telo.den) q.set('den', telo.den)
+  if (shiftId) q.set('smena', shiftId)
+  return `/${rozsah}/smeny?${q.toString()}`
 }
 
 /** Nadpis podle druhu. Neznámý druh se nezamlčí — ať je vidět, že přišel. */

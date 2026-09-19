@@ -327,3 +327,28 @@ aktivní modul. To je **samostatné rozhodnutí** a čeká na Šéfíka.
 3. Karty jsou `.ds-plocha` / `KpiKarta`, ne nová `const karta = {…}`.
 4. Světlý **i tmavý** režim jsou vidět — tokeny, žádná barva napevno.
 5. Nic nepřetéká ve 375 px (mobil) ani ve 1536 px (desktop).
+
+## 12. Směny na telefonu — mockup z 19.9.2026
+
+Předloha: `docs/vzhled-smeny-mobil-mockup-2026-09-19.webp` — osm obrazovek
+(denní přehled, moje směny, týden, detail, přidat směnu, filtry, push,
+hlasové zprávy) ze Šéfíkova zadání „Směny 2.0“.
+
+Mobilní Směny jsou jiná **prezentace** téhož rozpisu, ne druhý rozpis: data,
+oprávnění a formulář jsou společné, desktopová mřížka zůstala. Přepíná se CSS
+na 640 px (tam, kde je spodní lišta), ne JavaScriptem.
+
+| Oblast | Pravidlo | Kde to je |
+|---|---|---|
+| Kdo vidí co | Vedoucí (`shifts.manage`): Den · Týden · Moje. Ostatní: Moje směny + Tým dnes. Rozhoduje oprávnění, ne název role. | `smeny/mobil/mobilni-rozpis.tsx` |
+| Písmo | **Odchylka od oddílu 11:** nadpisy obrazovky a dne jsou tady **bezpatkové**, protože je takhle kreslí mockup. Platí jen uvnitř `.ds-sm` (třída `ds-sm-titul`); jinde se nic nemění. | `_komponenty.css`, blok „Směny na telefonu“ |
+| Jména | Nikdy lámání uprostřed slova: `overflow-wrap: normal`, nejvýš dva řádky, pak tři tečky. | `.ds-sm-jmeno` |
+| Barva | Nikdy jediný nositel významu: rozpracovaná směna je čárkovaná + text „rozpracováno“; neobsazená má „?“ a text; volno má slovo. | `PilulkaSmeny`, `AvatarM` |
+| Dotyk | Cíle ≥ ~44 px (dny v pruhu jsou ~39–44 × 56 — sedm dnů se vedle sebe jinak nevejde). | `.ds-sm-den` |
+| Hodiny | Součet plánovaných délek bez pauzy uvnitř směny (`lib/rozpis-mobil.ts`, `minutSmeny`). Neodečítá se automatická přestávka pobočky — to je pravidlo docházky. | `lib/rozpis-mobil.ts` |
+| Okna | Detail a „Přidat směnu“ jsou celoobrazovkové stránky se šipkou zpět, filtry list zdola. Formulář je **týž** `FormularSmeny` s `varianta="list"`. | `mobil/sheet.tsx`, `formular-smeny.tsx` |
+| Co se nekreslí | Menu „…“ v detailu (nebylo by co dát dovnitř), filtr podle role a zaměstnance, hlasové zprávy (jiný modul, poslední obrazovka mockupu). Smazání **vydané** směny se v mockupu jmenuje „Smazat“, v appce „Zrušit“ — tak to určuje databáze (`public.smazat_smenu`): vydaná směna zůstane stát jako zrušená a lidem zmizí až vydáním rozpisu. | — |
+| Push | Poslední obrazovka mockupu ukazuje push se „Potvrdit“ a „Zobrazit“. Obsah i potvrzení hotové jsou, **kanál se nezapíná** bez Šéfíka — v aplikaci je to `notifications` (zdroj pravdy) a tlačítko Potvrdit v detailu směny. | `smeny/potvrzeni.ts` |
+
+Před odevzdáním další mobilní obrazovky ověř stejně jako oddíl 11, navíc
+360 px (nejmenší telefon) a že `scrollWidth` okna se rovná jeho šířce.

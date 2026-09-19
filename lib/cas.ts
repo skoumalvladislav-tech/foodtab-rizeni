@@ -46,6 +46,17 @@ export function datumACasVPasmu(cas: string | Date, zona: string = ZONA_VYCHOZI)
   })
 }
 
+/** „12. 9. 2026 10:24“ — s rokem, kde se ukazuje, KDY něco vzniklo. */
+export function datumACasSRokemVPasmu(cas: string | Date, zona: string = ZONA_VYCHOZI): string {
+  return format(cas, zona, {
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 /** Datum provozního dne z okamžiku: „2026-08-31“. */
 export function denVPasmu(cas: string | Date, zona: string = ZONA_VYCHOZI): string {
   const d = new Date(cas)

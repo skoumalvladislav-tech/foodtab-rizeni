@@ -15,6 +15,7 @@ import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from "@/lib/supabase
 import { fakturyJsouNastavene, getFakturySupabase } from "@/lib/supabase/faktury";
 import { STAV_KE_SCHVALENI, STAV_UHRAZENO } from "@/lib/faktury-types";
 import { getServerSupabase } from "@/lib/supabase/server";
+import { odkazNaSmenu, type TeloUpozorneni } from "@/lib/upozorneni-text";
 import Sdeleni from "@/app/sdeleni";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
@@ -560,6 +561,42 @@ export default async function Dnes({
   type UrovenPozornosti = "critical" | "warning" | "info";
   type Pozornost = { uroven: UrovenPozornosti; text: string; akce: { popisek: string; href: string } };
   const pozornost: Pozornost[] = [];
+
+  /*
+    ZMĚNA SMĚNY ČEKÁ NA POTVRZENÍ — týká se KAŽDÉHO, ne jen vedení: kdo
+    dostal změnu své směny, ji má potvrdit (Směny 2.0, oddíl 26). Jen
+    jeho vlastní upozornění (RLS + filtr `user_id`). Chybějící sloupec
+    před nasazením migrace nebo jakákoli chyba položku jen vynechá.
+  */
+  if (user) {
+    const { data: cekajiciZmeny, error: chybaZmeny } = await supabase
+      .from("notifications")
+      .select("telo, shift_id")
+      .eq("tenant_id", tenantId)
+      .eq("user_id", user.id)
+      .eq("druh", "smena.zmenena")
+      .is("acknowledged_at", null)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (!chybaZmeny && cekajiciZmeny && cekajiciZmeny.length > 0) {
+      const prvni = cekajiciZmeny[0] as { telo: TeloUpozorneni; shift_id?: string | null };
+      pozornost.push({
+        uroven: "warning",
+        text:
+          cekajiciZmeny.length === 1
+            ? "Změnili vám směnu — čeká na vaše potvrzení."
+            : `${pocet(cekajiciZmeny.length, "změna směny čeká", "změny směn čekají", "změn směn čeká")} na vaše potvrzení.`,
+        akce: {
+          popisek: cekajiciZmeny.length === 1 ? "Zobrazit směnu" : "Zobrazit upozornění",
+          href:
+            cekajiciZmeny.length === 1
+              ? odkazNaSmenu(rozsah, prvni.telo ?? {}, prvni.shift_id ?? null)
+              : `/${rozsah}/upozorneni`,
+        },
+      });
+    }
+  }
 
   /*
     Tým dnes — kolik z naplánovaných je zrovna přítomno. Přítomnost je

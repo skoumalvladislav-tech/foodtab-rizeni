@@ -37,7 +37,7 @@ import fs from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { datumACasVPasmu, denVPasmu, hodinaVPasmu, ZONA_VYCHOZI } from '../lib/cas.ts'
+import { datumACasSRokemVPasmu, datumACasVPasmu, denVPasmu, hodinaVPasmu, ZONA_VYCHOZI } from '../lib/cas.ts'
 import { nactiKomponentu } from './vykreslit.mjs'
 
 /** Kód bez komentářů. Vysvětlení chyby není totéž co chyba. */
@@ -107,6 +107,11 @@ ma('nesmyslné pásmo obrazovku neshodí', hodinaVPasmu(LETO, 'Nesmysl/Nikde'), 
 ma('nesmyslné datum vrátí prázdno, ne „Invalid Date“', hodinaVPasmu('nesmysl'), '')
 
 ma('datum a čas dohromady', datumACasVPasmu(LETO, 'Europe/Prague'), '31. 8. 22:00')
+// Detail směny: „Vytvořil … 12. 9. 2026 10:24“. Červencový okamžik v UTC
+// je v Praze o dvě hodiny dál — a zimní o jednu.
+ma('datum a čas s rokem (letní čas)', datumACasSRokemVPasmu('2026-09-12T08:24:00Z', 'Europe/Prague'), '12. 9. 2026 10:24')
+ma('datum a čas s rokem (zimní čas)', datumACasSRokemVPasmu('2026-12-12T08:24:00Z', 'Europe/Prague'), '12. 12. 2026 09:24')
+ma('datum a čas s rokem, nesmyslný vstup vrátí prázdno', datumACasSRokemVPasmu('nesmysl'), '')
 
 /* =====================================================================
    2. Panel nedokončených — hotové HTML

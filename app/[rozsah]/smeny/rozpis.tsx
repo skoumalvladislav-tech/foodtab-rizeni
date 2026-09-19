@@ -22,7 +22,7 @@ function posunMesic(datum: string, mesicu: number): string {
 import ZnackaOsoby from "@/app/znacka-osoby";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import FormularSmeny, { type SmenaKUprave } from "./formular-smeny";
+import FormularSmeny, { type PredvyplneniSmeny, type SmenaKUprave } from "./formular-smeny";
 // `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
 // nespouští a serverová akce by se sem tahat neměla vůbec.
 import type { NabidnutaSablona } from "./sablony";
@@ -30,6 +30,8 @@ import type { NabidnutaSablona } from "./sablony";
 // druhá kopie logiky, jen druhé místo, odkud se dá spustit (Šéfíkovo
 // zadání 16.9.2026: nahrání rozpisu patří přímo do Rozpisu směn).
 import PruvodceNahranim from "../nastaveni/nahrani/rozpis/pruvodce";
+import MobilniRozpis from "./mobil/mobilni-rozpis";
+import type { KontextM, MobilVstup } from "./mobil/typy";
 
 type Pohled = "mesic" | "tyden" | "den";
 
@@ -54,8 +56,21 @@ export type Planovani = {
   sablony: NabidnutaSablona[];
 };
 
-/** Které okno je otevřené. `smena` prázdná = nová. */
-type Otevrene = { den: string; smena: SmenaKUprave | null };
+/**
+ * Které okno je otevřené. `smena` prázdná = nová.
+ *
+ * `predvyplneni` je jen pro novou směnu (kopie jiné směny, zadání
+ * konkrétnímu člověku ze seznamu); `zamerit` posune kurzor do poznámky;
+ * `nonce` odliší dvě kopie téže směny za sebou, aby se formulář znovu
+ * sestavil a nezůstaly v něm hodnoty z té první.
+ */
+type Otevrene = {
+  den: string;
+  smena: SmenaKUprave | null;
+  predvyplneni?: PredvyplneniSmeny | null;
+  zamerit?: "poznamka";
+  nonce?: number;
+};
 
 /** Volby přepínače nahoře. Pořadí od nejširšího po nejužší. */
 const POHLEDY: [Pohled, string][] = [
@@ -79,6 +94,9 @@ type Smena = {
   // Trhaná směna — pauza uvnitř (migrace 20260916200000). Obě, nebo žádná.
   pauza_od: string | null;
   pauza_do: string | null;
+  // Kdo a kdy směnu založil — do detailu na telefonu.
+  created_by: string | null;
+  created_at: string | null;
 };
 
 type RozsahContext = {
@@ -109,7 +127,7 @@ type Props = {
 };
 
 export default function RozpisView({
-  smeny,
+  smeny: nactene,
   dnesni,
   dayStartsAt,
   jmena,
@@ -120,9 +138,11 @@ export default function RozpisView({
   nazvyPobocek,
   rozsah,
   planovani,
-}: Props & { planovani: Planovani | null }) {
+  mobil,
+}: Props & { planovani: Planovani | null; mobil: MobilVstup }) {
   const router = useRouter();
   const [otevrene, setOtevrene] = useState<Otevrene | null>(null);
+  const naTelefonu = useNaTelefonu();
   const searchParams = useSearchParams();
 
   // Přečíst z URL nebo použít výchozí
@@ -132,6 +152,35 @@ export default function RozpisView({
   // Validace
   const pohled = (POHLEDY.some(([k]) => k === pohledZUrl) ? pohledZUrl : "tyden") as Pohled;
   const den = denZUrl;
+
+  /*
+    Server načítá o něco víc, než desktop potřebuje (celý ISO týden pro
+    telefon), takže mřížka si vezme jen svých `DNU_V_ROZPISU` dnů. Bez
+    toho by dny před `den` dostaly vlastní sloupec — viz větev `else`
+    v seskupení níž.
+  */
+  const konecOkna = posunDatum(den, DNU_V_ROZPISU - 1);
+  const smeny = nactene.filter((s) => s.shift_date >= den && s.shift_date <= konecOkna);
+
+  /*
+    Kontext pro mobilní pohledy. Jména a barvy má `page.tsx` jen u lidí,
+    kteří mají v okně směnu — kdo jinde není, se v mobilním přehledu
+    nekreslí (viz lib/rozpis-mobil, „Kdo je v rozpisu“).
+  */
+  const kontext: KontextM = {
+    dnesni,
+    osoby: new Map(
+      [...jmena].map(([id, jmeno]) => [
+        id,
+        { id, jmeno, usekId: domovskeUseky.get(id) ?? null, barva: barvy.get(id) ?? null },
+      ]),
+    ),
+    useky: nazvyUseku,
+    pobocky: nazvyPobocek,
+    pozice,
+    tvurci: mobil.tvurci,
+    vicePobocek: new Set(nactene.map((s) => s.branch_id)).size > 1,
+  };
 
   const updateUrl = (newPohled: Pohled, newDay: string) => {
     const params = new URLSearchParams();
@@ -169,7 +218,53 @@ export default function RozpisView({
   }
 
   return (
-    <div style={{ padding: "16px", paddingBottom: "32px" }}>
+    <>
+    {/*
+      TELEFON. Jiná prezentace téhož rozpisu, ne druhý rozpis — data,
+      oprávnění i formulář jsou společné. Které z obou stromů je vidět,
+      rozhoduje CSS (app/_komponenty.css, `ds-sm-jen-*`), ne JavaScript.
+    */}
+    <div className="ds-sm-jen-mobil">
+      <MobilniRozpis
+        smeny={nactene}
+        mojeSmeny={mobil.mojeSmeny}
+        ctx={kontext}
+        okno={mobil.okno}
+        jeVedouci={planovani !== null}
+        maSve={mobil.maSve}
+        smiVidetTym
+        rozsah={mobil.rozsah}
+        onPridat={({ osobaId, den: d }) =>
+          setOtevrene({
+            den: d,
+            smena: null,
+            predvyplneni: osobaId ? { employee_id: osobaId } : null,
+            nonce: Date.now(),
+          })
+        }
+        onUpravit={(s) => setOtevrene({ den: s.shift_date, smena: s })}
+        onPoznamka={(s) => setOtevrene({ den: s.shift_date, smena: s, zamerit: "poznamka" })}
+        onDuplikovat={(s) =>
+          setOtevrene({
+            den: s.shift_date,
+            smena: null,
+            predvyplneni: {
+              employee_id: s.employee_id,
+              position_id: s.position_id,
+              branch_id: s.branch_id,
+              starts_at: s.starts_at,
+              ends_at: s.ends_at,
+              note: s.note,
+              pauza_od: s.pauza_od,
+              pauza_do: s.pauza_do,
+            },
+            nonce: Date.now(),
+          })
+        }
+      />
+    </div>
+
+    <div className="ds-sm-jen-desktop" style={{ padding: "16px", paddingBottom: "32px" }}>
       {/* Navigace — posun období + přepínač pohledů, jeden kompaktní
          řádek (UX redesign, druhé kolo, oddíl 6: "zkompaktni", "zmenši
          prázdný prostor nad gridem" — dřív dva bloky pod sebou). */}
@@ -290,6 +385,7 @@ export default function RozpisView({
         V měsíčním pohledu se nezakládá schválně (zadání, bod 2): do dne
         se tam neklikne přesně a člověk by směnu zapsal o den vedle.
       */}
+    </div>
 
       {planovani && otevrene ? (
         <FormularSmeny
@@ -299,7 +395,10 @@ export default function RozpisView({
             směnu, zůstaly by v něm časy té předchozí. Přesně tak se
             2. 9. předvyplňoval odchod jako příchod.
           */
-          key={otevrene.smena?.id || `nova-${otevrene.den}`}
+          key={otevrene.smena?.id || `nova-${otevrene.den}-${otevrene.nonce ?? 0}`}
+          varianta={naTelefonu ? "list" : "drawer"}
+          predvyplneni={otevrene.predvyplneni}
+          zamerit={otevrene.zamerit}
           rozsah={planovani.rozsah}
           den={otevrene.den}
           smena={otevrene.smena}
@@ -311,7 +410,7 @@ export default function RozpisView({
           onZavrit={() => setOtevrene(null)}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -463,7 +562,13 @@ function TydenView({
     gridTemplateColumns. HlavickaSkupiny apod. proto vrací fragmenty
     plných <div>, ne <tr>.
   */
-  const sablonaSloupcu = `minmax(120px, 140px) repeat(${dnySerad.length}, minmax(100px, 1fr))`;
+  /*
+    První sloupec (jméno) je široký tak, aby se běžné jméno vešlo na
+    jeden řádek. Dřív 120–140 px a jména jako „Lucie Skoumalová“ se
+    lámala po znacích („Skoumalov / á“) — druhá kopie téhož nálezu, který
+    se řešil na telefonu.
+  */
+  const sablonaSloupcu = `minmax(160px, 200px) repeat(${dnySerad.length}, minmax(100px, 1fr))`;
 
   return (
     <div
@@ -1185,6 +1290,26 @@ function useVProhlizeci(): boolean {
   return useSyncExternalStore(
     NEODEBIRAT,
     () => true,
+    () => false,
+  );
+}
+
+/**
+ * Je okno tak úzké, že se kreslí telefonní varianta (do 640 px — tam,
+ * kde je i spodní lišta)? Na serveru vždy ne; kdo se ptá, se ptá až po
+ * kliknutí, takže hydratace nemá s čím se rozejít. Stejný zlom má CSS
+ * (`ds-sm-jen-mobil` v app/_komponenty.css).
+ */
+const TELEFON = "(max-width: 640px)";
+
+function useNaTelefonu(): boolean {
+  return useSyncExternalStore(
+    (zmena) => {
+      const m = window.matchMedia(TELEFON);
+      m.addEventListener("change", zmena);
+      return () => m.removeEventListener("change", zmena);
+    },
+    () => window.matchMedia(TELEFON).matches,
     () => false,
   );
 }

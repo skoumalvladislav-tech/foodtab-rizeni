@@ -12,7 +12,12 @@ import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from '@/lib/supabase
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { ulozitPrestavku, ulozitRanniEmail, ulozitZapomenutyOdchod } from './akce'
+import {
+  ulozitDulezitouZmenu,
+  ulozitPrestavku,
+  ulozitRanniEmail,
+  ulozitZapomenutyOdchod,
+} from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,6 +93,22 @@ export default async function NastaveniFirma({
     .select('ranni_email_kdy, zapomenuty_odchod_hodin, zapomenuty_odchod_kdy, prestavka_minut, prestavka_od_minut, prestavka_platna_od')
     .eq('tenant_id', tenantId)
     .maybeSingle()
+
+  /*
+    „Důležitá změna směny“ (migrace 20260919120000). ČTE SE ZVLÁŠŤ a
+    tolerantně, ne přidáním do výběru výše: kód se nasazuje sám, migrace
+    ručně, a sloupec bez nasazené migrace (nebo bez grantu) by shodil
+    celou stránku Firma na 500 — přesně to se 19. 9. stalo se sloupci
+    pobočky. Chybí-li, formulář se neukáže a stránka funguje dál.
+  */
+  const { data: dulezitaData, error: chybaDulezita } = await supabase
+    .from('tenant_settings')
+    .select('smeny_dulezita_hodin')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  const maDulezitou = !chybaDulezita
+  const dulezitaHodin =
+    (dulezitaData as { smeny_dulezita_hodin?: number | null } | null)?.smeny_dulezita_hodin ?? null
 
   if (pobocky === null) {
     return (
@@ -166,7 +187,7 @@ export default async function NastaveniFirma({
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '720px' }}>
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
-        {ulozeno === 'email' || ulozeno === 'zapomenuty' || ulozeno === 'prestavka' ? (
+        {ulozeno === 'email' || ulozeno === 'zapomenuty' || ulozeno === 'prestavka' || ulozeno === 'dulezita' ? (
           <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--dobre)' }}>
             Uloženo.
           </p>
@@ -291,6 +312,50 @@ export default async function NastaveniFirma({
             Uložit
           </button>
         </form>
+
+        {/*
+          Důležitá změna směny. Pravidlo NENÍ zapsané v kódu — firma si ho
+          zapne, jak potřebuje (Směny 2.0, oddíl 23). Prázdné = nikdy.
+        */}
+        {maDulezitou ? (
+          <>
+            <h2 style={{ ...nadpis, marginTop: '28px' }}>Důležité změny směn</h2>
+            <p style={popis}>
+              Změna směny, která začíná <strong>do několika hodin</strong>,
+              se považuje za důležitou — dostane se k člověku i mimo
+              pracovní dobu. Běžná změna počká. Necháte-li pole prázdné,
+              žádná změna se za důležitou nepovažuje.
+            </p>
+
+            <form action={ulozitDulezitouZmenu} style={karta}>
+              <input type="hidden" name="rozsah" value={rozsah} />
+              <label style={poleLabel}>
+                <span>Do kolika hodin před začátkem</span>
+                <input
+                  name="hodin"
+                  type="number"
+                  min={1}
+                  max={720}
+                  defaultValue={dulezitaHodin ?? ''}
+                  placeholder="nepovinné"
+                  style={pole}
+                />
+                <span style={vysvetlivka}>
+                  Například 24: změna směny, která začíná do 24 hodin, je
+                  důležitá. Kanál „v aplikaci“ funguje vždycky; tohle jen
+                  rozhoduje, jak naléhavě se změna ukáže.
+                </span>
+              </label>
+              <button
+                type="submit"
+                className="ft-tl ft-tl-hlavni ft-tl-male"
+                style={{ marginTop: '12px' }}
+              >
+                Uložit
+              </button>
+            </form>
+          </>
+        ) : null}
 
         <h2 style={{ ...nadpis, marginTop: '28px' }}>Přestávky</h2>
         <p style={popis}>

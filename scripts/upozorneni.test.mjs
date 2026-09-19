@@ -32,6 +32,8 @@ import {
   popisOpravneni,
   popisZapomenuteho,
   vyzadujePotvrzeni,
+  zmenaSmeny,
+  odkazNaSmenu,
 } from '../lib/upozorneni-text.ts'
 
 let chyb = 0
@@ -387,6 +389,45 @@ ma('akce filtruje na druhy z vyzadujePotvrzeni, ne na vlastní kopii',
   /DRUHY_S_POTVRZENIM = \[.*\]\.filter\(vyzadujePotvrzeni\)/.test(AKCE), true)
 ma('potvrzení nastaví i read_at',
   /acknowledged_at.*read_at|read_at.*acknowledged_at/s.test(AKCE), true)
+
+console.log('\n== Změna směny: původně → nově ==')
+
+ma('stejný den: jen časy',
+  JSON.stringify(zmenaSmeny({ den: '2026-09-22', od: '10:00', do: '18:00', puvodni_den: '2026-09-22', puvodni_od: '08:00', puvodni_do: '16:00' })),
+  JSON.stringify({ puvodne: '08:00–16:00', nove: '10:00–18:00' }))
+ma('jiný den: den se připíše k oběma stranám',
+  JSON.stringify(zmenaSmeny({ den: '2026-09-23', od: '10:00', do: '18:00', puvodni_den: '2026-09-22', puvodni_od: '08:00', puvodni_do: '16:00' })),
+  JSON.stringify({ puvodne: 'út 22. 9. 08:00–16:00', nove: 'st 23. 9. 10:00–18:00' }))
+ma('starší upozornění bez původního stavu nic nevymýšlí',
+  zmenaSmeny({ den: '2026-09-22', od: '10:00', do: '18:00' }), null)
+ma('bez nového času taky ne',
+  zmenaSmeny({ puvodni_od: '08:00', puvodni_do: '16:00' }), null)
+ma('směna přes půlnoc se zapíše, jak je (nepočítá se z ní nic)',
+  JSON.stringify(zmenaSmeny({ den: '2026-09-22', od: '18:00', do: '02:00', puvodni_den: '2026-09-22', puvodni_od: '16:00', puvodni_do: '00:00' })),
+  JSON.stringify({ puvodne: '16:00–00:00', nove: '18:00–02:00' }))
+
+console.log('\n== Zobrazit: odkaz na směnu ==')
+
+ma('odkaz vede na moje směny, den a detail',
+  odkazNaSmenu('cerna-perla', { den: '2026-09-22' }, 'abc-123'),
+  '/cerna-perla/smeny?pohled=moje&den=2026-09-22&smena=abc-123')
+ma('bez id směny vede aspoň na den',
+  odkazNaSmenu('cerna-perla', { den: '2026-09-22' }, null),
+  '/cerna-perla/smeny?pohled=moje&den=2026-09-22')
+ma('id se do adresy bezpečně zakóduje',
+  odkazNaSmenu('firma', { den: '2026-09-22' }, 'a&b=c'),
+  '/firma/smeny?pohled=moje&den=2026-09-22&smena=a%26b%3Dc')
+
+/*
+  Obrazovka musí ty funkce opravdu volat a musí si o `shift_id` říct
+  tolerantně — sloupec přidává migrace, která se nasazuje ručně, a
+  kód se nasazuje sám. Bez tolerance by upozornění po sloučení kódu
+  a před `db push` spadla na 500.
+*/
+ma('obrazovka používá zmenaSmeny z lib', /zmenaSmeny\(/.test(OBRAZOVKA_KOD), true)
+ma('obrazovka používá odkazNaSmenu z lib', /odkazNaSmenu\(/.test(OBRAZOVKA_KOD), true)
+ma('shift_id se čte tolerantně (sloupec chybí do nasazení migrace)',
+  /shift_id/.test(OBRAZOVKA_KOD) && /sloupecNeexistuje/.test(OBRAZOVKA_KOD), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

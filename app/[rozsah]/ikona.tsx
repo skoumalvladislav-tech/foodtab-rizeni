@@ -111,6 +111,53 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
     </>
   ),
   seznam: <path d="M4 6h12M4 10h12M4 14h7" />,
+  zpet: <path d="M16 10H4.5M9.5 4.5L4 10l5.5 5.5" />,
+  sipkaVlevo: <path d="M12.5 4.5L7 10l5.5 5.5" />,
+  plus: <path d="M10 4v12M4 10h12" />,
+  pobocka: (
+    <>
+      <path d="M10 17.5s5.5-4.9 5.5-9.3a5.5 5.5 0 10-11 0c0 4.4 5.5 9.3 5.5 9.3z" />
+      <circle cx="10" cy="8.2" r="2" />
+    </>
+  ),
+  vidlicka: (
+    <>
+      <path d="M5 3v4.5a2 2 0 004 0V3M7 3v14" />
+      <path d="M14.5 17V3c-2 1.1-3 3.4-3 6.3 0 1.4.9 2 3 2" />
+    </>
+  ),
+  tuzka: (
+    <>
+      <path d="M13.5 3.5l3 3L7 16l-3.8.8L4 13l9.5-9.5z" />
+      <path d="M11.5 5.5l3 3" />
+    </>
+  ),
+  kopie: (
+    <>
+      <rect x="7" y="7" width="9.5" height="9.5" rx="1.8" />
+      <path d="M13 7V5.3a1.8 1.8 0 00-1.8-1.8H5.3a1.8 1.8 0 00-1.8 1.8v5.9A1.8 1.8 0 005.3 13H7" />
+    </>
+  ),
+  kos: (
+    <>
+      <path d="M4 6h12M8 6V4h4v2M5.5 6l.7 10a1.5 1.5 0 001.5 1.4h4.6a1.5 1.5 0 001.5-1.4L14.5 6" />
+      <path d="M8.3 9.3v4.5M11.7 9.3v4.5" />
+    </>
+  ),
+  postel: (
+    <>
+      <path d="M3 16V5M3 12.5h14V16M17 12.5V10a2 2 0 00-2-2H9.5v4.5" />
+      <circle cx="6.3" cy="9.7" r="1.3" />
+    </>
+  ),
+  filtr: <path d="M3.5 5h13L11.5 11v4.5l-3 1.5V11L3.5 5z" />,
+  varovani: (
+    <>
+      <path d="M10 3.5l7.5 13h-15L10 3.5z" />
+      <path d="M10 8.5v3.5M10 14.2v.3" />
+    </>
+  ),
+  zavrit: <path d="M5 5l10 10M15 5L5 15" />,
 };
 
 export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {
