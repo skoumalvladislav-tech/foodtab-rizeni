@@ -40,6 +40,7 @@ import {
   denVTydnu,
   hhmm,
   minutSmeny,
+  posunDatum,
   ZKRATKY_DNU,
   type SmenaZaklad,
 } from './rozpis-mobil.ts'
@@ -374,6 +375,26 @@ export function smenaVyhovuje(
     barva: null,
   }
   return osobaVyhovuje(o, [s.position_id], f, useky)
+}
+
+/* --- „Uložit a přidat další den“ ------------------------------------------- */
+
+/**
+ * Den, na který se po uložené směně otevře další: nejbližší den po `datum`,
+ * který člověk nemá obsazený (`obsazene` = dny, kde už směnu má). Při
+ * zadávání měsíce tak formulář přeskočí dny, které už jsou vyplněné, a
+ * nezaloží se dvakrát totéž. Hledá se nejvýš `limit` dnů dopředu; kdo má
+ * obsazeno všechno, dostane den hned po uložené směně.
+ */
+export function dalsiVolnyDen(obsazene: Iterable<string>, datum: string, limit = 62): string {
+  const maSmenu = new Set(obsazene)
+  const hned = posunDatum(datum, 1)
+  let den = hned
+  for (let i = 0; i < limit; i++) {
+    if (!maSmenu.has(den)) return den
+    den = posunDatum(den, 1)
+  }
+  return hned
 }
 
 /* --- krátké zápisy do úzkých buněk ---------------------------------------- */

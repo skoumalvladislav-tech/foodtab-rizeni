@@ -33,6 +33,7 @@ import DropdownMenu from "@/components/ui/DropdownMenu";
 import {
   FILTR_DESKTOP_PRAZDNY,
   cekaNaVydani,
+  dalsiVolnyDen,
   jeFiltrPrazdny,
   puvodniStav,
   sestavitMrizku,
@@ -46,7 +47,7 @@ import {
 import { nazevMesice } from "@/lib/rozpis-export";
 import { BEZ_USEKU, denVTydnu, dnyTydne, mesicniMrizka, minutSmeny } from "@/lib/rozpis-mobil";
 import Nadpis from "../nadpis";
-import FormularSmeny, { type PredvyplneniSmeny, type SmenaKUprave } from "./formular-smeny";
+import FormularSmeny, { type DalsiSmena, type PredvyplneniSmeny, type SmenaKUprave } from "./formular-smeny";
 // `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
 // nespouští a serverová akce by se sem tahat neměla vůbec.
 import type { NabidnutaSablona } from "./sablony";
@@ -109,6 +110,8 @@ export type Otevrene = {
   predvyplneni?: PredvyplneniSmeny | null;
   zamerit?: "poznamka";
   nonce?: number;
+  /** Co se právě uložilo přes „Uložit a přidat další den“ — věta nad novým formulářem. */
+  potvrzeni?: string;
 };
 
 export type Smena = {
@@ -405,6 +408,24 @@ export default function RozpisView({
       nonce: Date.now(),
     });
 
+  /*
+    „Uložit a přidat další den“: nový formulář pro nejbližší den po uložené
+    směně, který ten člověk nemá obsazený (přeskočí dny, kde už směnu má, ať
+    se při zadávání měsíce nezakládá dvakrát totéž). Časy, pobočka a pozice
+    se opíšou, poznámka ne — ta bývá k jedné směně.
+  */
+  const dalsiDen = (d: DalsiSmena) => {
+    const osobaId = d.predvyplneni.employee_id ?? null;
+    const obsazene = osobaId ? nactene.filter((s) => s.employee_id === osobaId).map((s) => s.shift_date) : [];
+    setOtevrene({
+      den: dalsiVolnyDen(obsazene, d.datum),
+      smena: null,
+      predvyplneni: d.predvyplneni,
+      potvrzeni: d.ulozeno,
+      nonce: Date.now(),
+    });
+  };
+
   // Směna v panelu, ale s CELÝMI daty (stav při vydání), ne jen s tím, co formulář potřebuje.
   const upravovana = okno?.smena?.id ? (smeny.find((s) => s.id === okno.smena?.id) ?? null) : null;
   const kontextSmeny: KontextSmeny | undefined = upravovana
@@ -627,6 +648,8 @@ export default function RozpisView({
           sablony={planovani.sablony}
           kontext={kontextSmeny}
           souctyTydne={souctyTydne}
+          potvrzeni={okno.potvrzeni}
+          onDalsiDen={!okno.smena?.id && !naTelefonu ? dalsiDen : undefined}
           onDuplikovat={okno.smena?.id ? () => duplikovat(okno.smena as SmenaKUprave) : undefined}
           dole={
             upravovana ? (
