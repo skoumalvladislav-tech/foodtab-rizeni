@@ -5,6 +5,7 @@ import { Fragment } from "react";
 import Ikona from "@/app/[rozsah]/ikona";
 import ZnackaOsoby from "@/app/znacka-osoby";
 import {
+  kratkyCas,
   puvodniStav,
   stavSmeny,
   type Mrizka,
@@ -23,7 +24,28 @@ import {
 } from "@/lib/rozpis-mobil";
 import { pocet } from "@/lib/sklonovani";
 
+import type { SmenaKUprave } from "../formular-smeny";
 import type { Otevrene, Planovani, Smena } from "../rozpis";
+
+/**
+ * Prázdná směna pro formulář: člověk a den jsou dané, časy výchozí.
+ * Společné pro týdenní mřížku i měsíc jednoho člověka — obojí otevírá
+ * formulář stejně skoro vyplněný.
+ */
+export function novaSmenaProOsobu(osobaId: string, den: string, pobockaId: string): SmenaKUprave {
+  return {
+    id: "",
+    branch_id: pobockaId,
+    employee_id: osobaId,
+    position_id: null,
+    shift_date: den,
+    starts_at: "08:00",
+    ends_at: "16:00",
+    note: "",
+    pauza_od: null,
+    pauza_do: null,
+  };
+}
 
 /**
  * Týdenní mřížka — hlavní pracovní plocha manažera.
@@ -438,20 +460,7 @@ function RadekMrizkyView({
                 onClick={() =>
                   onOtevrit({
                     den,
-                    smena: osoba
-                      ? {
-                          id: "",
-                          branch_id: pobockaId ?? planovani.vychoziPobocka ?? "",
-                          employee_id: osoba.id,
-                          position_id: null,
-                          shift_date: den,
-                          starts_at: "08:00",
-                          ends_at: "16:00",
-                          note: "",
-                          pauza_od: null,
-                          pauza_do: null,
-                        }
-                      : null,
+                    smena: osoba ? novaSmenaProOsobu(osoba.id, den, pobockaId ?? planovani.vychoziPobocka ?? "") : null,
                     nonce: Date.now(),
                   })
                 }
@@ -469,18 +478,21 @@ function RadekMrizkyView({
 
 /* --- karta směny ------------------------------------------------------- */
 
-function KartaSmeny({
+export function KartaSmeny({
   s,
   jmena,
   vybrana,
   klikaci,
   onOtevrit,
+  kompaktni = false,
 }: {
   s: Smena;
   jmena: Map<string, string>;
   vybrana: boolean;
   klikaci: boolean;
   onOtevrit: () => void;
+  /** Úzká buňka (měsíc dvou lidí vedle sebe): „8–16“ místo „08:00–16:00“ a „pauza 15–17“. */
+  kompaktni?: boolean;
 }) {
   const stav = stavSmeny(s as SmenaD);
   const puvodne = puvodniStav(s as SmenaD);
@@ -489,7 +501,14 @@ function KartaSmeny({
 
   const stitek = stav === "koncept" ? "Nevydáno" : stav === "zmenena" ? "Změněno" : null;
   const pauza = trhana ? `pauza ${hhmm(s.pauza_od as string)}–${hhmm(s.pauza_do as string)}` : null;
-  const popisek = [stitek, pauza].filter(Boolean).join(" · ");
+  // Do karty se píše krátce; celý zápis zůstává v `title` a pro odečítač.
+  const casNaKarte = kompaktni ? `${kratkyCas(hhmm(s.starts_at))}–${kratkyCas(hhmm(s.ends_at))}` : cas;
+  const pauzaNaKarte = trhana
+    ? kompaktni
+      ? `pauza ${kratkyCas(hhmm(s.pauza_od as string))}–${kratkyCas(hhmm(s.pauza_do as string))}`
+      : pauza
+    : null;
+  const popisek = [stitek, pauzaNaKarte].filter(Boolean).join(" · ");
 
   // Celý popis do `title` a odečítače — karta sama je záměrně strohá.
   const podrobnosti = [
@@ -513,7 +532,7 @@ function KartaSmeny({
 
   const obsah = (
     <>
-      <span className="ds-smd-cas">{cas}</span>
+      <span className="ds-smd-cas">{casNaKarte}</span>
       {stav !== "vydana" ? <span className="ds-smd-znacka" aria-hidden="true" /> : null}
       {popisek ? <span className="ds-smd-popisek">{popisek}</span> : null}
     </>

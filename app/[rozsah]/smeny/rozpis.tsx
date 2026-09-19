@@ -3,7 +3,14 @@
 import { useState, useSyncExternalStore } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { pocet } from "@/lib/sklonovani";
-import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
+import {
+  DNU_V_ROZPISU,
+  MAX_LIDI_V_MESICI,
+  VYCHOZI_POHLED,
+  jeMesicniPohled,
+  jePohled,
+  zacatekOkna,
+} from "@/lib/rozpis-konstanty";
 
 // Posun data (z lib/provozni-den.ts, duplikovaný pro klient)
 function posunDatum(datum: string, dnu: number): string {
@@ -37,7 +44,7 @@ import {
   type OsobaD,
 } from "@/lib/rozpis-desktop";
 import { nazevMesice } from "@/lib/rozpis-export";
-import { BEZ_USEKU, denVTydnu, minutSmeny } from "@/lib/rozpis-mobil";
+import { BEZ_USEKU, denVTydnu, dnyTydne, mesicniMrizka, minutSmeny } from "@/lib/rozpis-mobil";
 import Nadpis from "../nadpis";
 import FormularSmeny, { type PredvyplneniSmeny, type SmenaKUprave } from "./formular-smeny";
 // `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
@@ -50,6 +57,7 @@ import PruvodceNahranim from "../nastaveni/nahrani/rozpis/pruvodce";
 import MobilniRozpis from "./mobil/mobilni-rozpis";
 import type { KontextM, MobilVstup } from "./mobil/typy";
 import type { KontextSmeny } from "./desktop/hlavicka-smeny";
+import MesicLidi from "./desktop/mesic-lidi";
 import MrizkaTydne from "./desktop/mrizka";
 import Nastroje, { type MoznostiFiltru, type Pohled } from "./desktop/nastroje";
 import PanelKeSmene from "./desktop/panel-ke-smene";
@@ -156,8 +164,6 @@ type Props = {
   rozsah: RozsahContext;
 };
 
-const PLATNE_POHLEDY: Pohled[] = ["den", "tyden", "mesic"];
-
 export default function RozpisView({
   smeny: nactene,
   dnesni,
@@ -196,12 +202,19 @@ export default function RozpisView({
   const naTelefonu = useNaTelefonu();
   const searchParams = useSearchParams();
 
-  // Přečíst z URL nebo použít výchozí
-  const pohledZUrl = searchParams.get("pohled") ?? "tyden";
+  // Přečíst z URL nebo použít výchozí (sedm následujících dní od dneška).
+  const pohledZUrl = searchParams.get("pohled");
   const denZUrl = searchParams.get("den") ?? dnesni;
 
-  // Validace
-  const pohled = (PLATNE_POHLEDY.includes(pohledZUrl as Pohled) ? pohledZUrl : "tyden") as Pohled;
+  /*
+    „Celý měsíc“ (`osoby`) má smysl jen pro vyfiltrované jednoho nebo dva
+    lidi. Bez nich (filtr se zrušil, nebo jich je víc) se ukáže výchozí
+    pohled, ať se člověk nedívá na prázdný kalendář. Adresa se přitom
+    nemění — vybere-li lidi znovu, celý měsíc je zpátky.
+  */
+  const mesicLidiMozny = filtr.osoby.length >= 1 && filtr.osoby.length <= MAX_LIDI_V_MESICI;
+  const pohledZAdresy: Pohled = jePohled(pohledZUrl) ? pohledZUrl : VYCHOZI_POHLED;
+  const pohled: Pohled = pohledZAdresy === "osoby" && !mesicLidiMozny ? VYCHOZI_POHLED : pohledZAdresy;
   const den = denZUrl;
 
   /*
@@ -225,9 +238,10 @@ export default function RozpisView({
     telefon), takže mřížka si vezme jen svých `DNU_V_ROZPISU` dnů. Bez
     toho by dny před `den` dostaly vlastní sloupec.
   */
-  const dny = Array.from({ length: DNU_V_ROZPISU }, (_, i) => posunDatum(den, i));
+  const zacatek = zacatekOkna(pohled, den);
+  const dny = Array.from({ length: DNU_V_ROZPISU }, (_, i) => posunDatum(zacatek, i));
   const konecOkna = dny[dny.length - 1];
-  const smeny = nactene.filter((s) => s.shift_date >= den && s.shift_date <= konecOkna);
+  const smeny = nactene.filter((s) => s.shift_date >= zacatek && s.shift_date <= konecOkna);
 
   /*
     Kontext pro mobilní pohledy. Jména a barvy má `page.tsx` jen u lidí,
@@ -256,10 +270,13 @@ export default function RozpisView({
     router.push(`?${params.toString()}`);
   };
 
+  // Měsíc se posouvá po měsících, týden i sedm dní po týdnu, den po dni.
   const posun = (smer: -1 | 1) =>
     updateUrl(
       pohled,
-      pohled === "mesic" ? posunMesic(den, smer) : posunDatum(den, (pohled === "tyden" ? 7 : 1) * smer),
+      jeMesicniPohled(pohled)
+        ? posunMesic(den, smer)
+        : posunDatum(den, (pohled === "sedm" || pohled === "tyden" ? 7 : 1) * smer),
     );
 
   /* --- lidé, pozice a nabídky filtrů --------------------------------- */
@@ -336,7 +353,7 @@ export default function RozpisView({
   /* --- vydání rozpisu ---------------------------------------------- */
 
   const zmeny = vydani ? zmenyRozpisu([...smeny, ...zrusene]) : [];
-  const obdobi = popisObdobi(den, "tyden");
+  const obdobi = popisObdobi(zacatek, "sedm");
   const cekaVydani = souhrnZmen(zmeny).smen > 0 && vydani?.pobockaId != null && vydani.mozeVydat;
 
   /*
@@ -344,19 +361,30 @@ export default function RozpisView({
     se právě upravuje). Formulář z toho ukazuje průběžný součet. Datum
     mimo načtené dny → `null`: součet by byl nepravdivý, tak se neukáže.
   */
-  const souctyTydne = (zamestnanec: string, datum: string, ignorovat: string | null): number | null =>
-    dny.includes(datum)
-      ? smeny
-          .filter((s) => s.employee_id === zamestnanec && s.id !== ignorovat)
-          .reduce((n, s) => n + minutSmeny(s), 0)
-      : null;
+  const souctyTydne = (zamestnanec: string, datum: string, ignorovat: string | null): number | null => {
+    // Týden je kalendářní (pondělí–neděle), ať se rozpis dívá na sedm dní od
+    // kteréhokoli dne. Součet je pravdivý jen s celým týdnem v načtených datech.
+    const tyden = dnyTydne(datum);
+    if (tyden[0] < mobil.okno.od || tyden[6] > mobil.okno.do) return null;
+    return nactene
+      .filter(
+        (s) =>
+          s.employee_id === zamestnanec &&
+          s.id !== ignorovat &&
+          s.shift_date >= tyden[0] &&
+          s.shift_date <= tyden[6],
+      )
+      .reduce((n, s) => n + minutSmeny(s), 0);
+  };
 
   /* --- akce nad směnou -------------------------------------------- */
 
+  // Je vyfiltrovaný právě jeden člověk, formulář se otevře rovnou s ním.
   const novaSmena = () =>
     setOtevrene({
       den: pohled === "den" ? den : dny.includes(dnesni) ? dnesni : den,
       smena: null,
+      predvyplneni: filtr.osoby.length === 1 ? { employee_id: filtr.osoby[0] } : null,
       nonce: Date.now(),
     });
 
@@ -486,6 +514,7 @@ export default function RozpisView({
           filtr={filtr}
           onFiltr={setFiltr}
           moznosti={moznosti}
+          mesicLidiMozny={mesicLidiMozny}
         />
 
         <PruhVydani
@@ -497,7 +526,7 @@ export default function RozpisView({
           onVydat={() => setKontrola(true)}
         />
 
-        {pohled === "tyden" && (
+        {(pohled === "sedm" || pohled === "tyden") && (
           <MrizkaTydne
             mrizka={mrizka}
             dny={dny}
@@ -520,6 +549,25 @@ export default function RozpisView({
             onZrusitFiltry={() => setFiltr(FILTR_DESKTOP_PRAZDNY)}
             maSmeny={smeny.length > 0}
           />
+        )}
+
+        {pohled === "osoby" && (
+          <div className="ds-smd-pohled">
+            <MesicLidi
+              lide={filtr.osoby.map((id) => ({ id, jmeno: jmenoOsoby(id) }))}
+              mesic={den.slice(0, 7)}
+              tydny={mesicniMrizka(den)}
+              smeny={nactene}
+              dnesni={dnesni}
+              planovani={planovani}
+              jmena={jmena}
+              poziceOsob={poziceOsoby}
+              barvy={barvy}
+              nazvyPobocek={nazvyPobocek}
+              vybranaId={okno?.smena?.id || null}
+              onOtevrit={setOtevrene}
+            />
+          </div>
         )}
 
         {pohled === "mesic" && (
@@ -550,8 +598,10 @@ export default function RozpisView({
           </div>
         )}
         {/*
-          V měsíčním pohledu se nezakládá schválně (zadání, bod 2): do dne
-          se tam neklikne přesně a člověk by směnu zapsal o den vedle.
+          V přehledovém měsíci (počty směn) se nezakládá schválně (zadání,
+          bod 2): do dne se tam neklikne přesně a člověk by směnu zapsal o
+          den vedle. Zakládá se v „Celém měsíci“ vybraných lidí — tam je
+          člověk dán a každý den má vlastní tlačítko.
         */}
       </div>
 
@@ -624,27 +674,28 @@ export default function RozpisView({
 function popisObdobi(den: string, pohled: Pohled): string {
   const d = new Date(`${den}T00:00:00Z`);
 
-  if (pohled === "mesic") {
+  if (pohled === "mesic" || pohled === "osoby") {
     const mesice = ["leden", "únor", "březen", "duben", "květen", "červen", "červenec", "srpen", "září", "říjen", "listopad", "prosinec"];
     return `${mesice[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
   }
 
-  if (pohled === "tyden") {
-    // Okno běží od zvoleného dne dopředu, ne od pondělí. Dotaz na směny
-    // to tak dělá taky — obojí čte DNU_V_ROZPISU, takže se to nemůže
-    // rozejít. Dřív se tady snapovalo na kalendářní týden a hlavička
-    // hlásila jiné dny, než byly ve sloupcích.
-    const konec = new Date(d);
-    konec.setUTCDate(d.getUTCDate() + DNU_V_ROZPISU - 1);
+  if (pohled === "sedm" || pohled === "tyden") {
+    // „7 dní“ běží od zvoleného dne dopředu, „Týden“ od pondělí — dotaz na
+    // směny počítá začátek okna týmž `zacatekOkna` a obojí čte
+    // DNU_V_ROZPISU, takže hlavička nemůže hlásit jiné dny, než jsou ve
+    // sloupcích (kdysi hlásila kalendářní týden nad sloupci od dneška).
+    const od = new Date(`${zacatekOkna(pohled, den)}T00:00:00Z`);
+    const konec = new Date(od);
+    konec.setUTCDate(od.getUTCDate() + DNU_V_ROZPISU - 1);
 
     const mesice = ["leden", "únor", "březen", "duben", "květen", "červen", "červenec", "srpen", "září", "říjen", "listopad", "prosinec"];
-    const m1 = mesice[d.getUTCMonth()];
+    const m1 = mesice[od.getUTCMonth()];
     const m2 = mesice[konec.getUTCMonth()];
 
-    if (d.getUTCMonth() === konec.getUTCMonth()) {
-      return `${d.getUTCDate()}.–${konec.getUTCDate()}. ${m1}`;
+    if (od.getUTCMonth() === konec.getUTCMonth()) {
+      return `${od.getUTCDate()}.–${konec.getUTCDate()}. ${m1}`;
     }
-    return `${d.getUTCDate()}. ${m1} – ${konec.getUTCDate()}. ${m2}`;
+    return `${od.getUTCDate()}. ${m1} – ${konec.getUTCDate()}. ${m2}`;
   }
 
   const dny = ["neděle", "pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota"];

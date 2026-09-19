@@ -6,16 +6,23 @@ import Ikona from "@/app/[rozsah]/ikona";
 import {
   FILTR_DESKTOP_PRAZDNY,
   jeFiltrPrazdny,
+  jmenoVyhovuje,
   pocetFiltru,
   type FiltrDesktop,
   type StavFiltru,
 } from "@/lib/rozpis-desktop";
 import { BEZ_USEKU } from "@/lib/rozpis-mobil";
+import { MAX_LIDI_V_MESICI, type PohledRozpisu } from "@/lib/rozpis-konstanty";
 
 /**
  * Jeden kompaktní panel nástrojů nad mřížkou:
  *
- *   ‹ 19.–25. září ›  [Dnes]  [Den|Týden|Měsíc]  🔍 Hledat…  [Filtry]  čipy
+ *   ‹ 19.–25. září ›  [Dnes]  [Den|7 dní|Týden|Měsíc]  🔍 Hledat…  [Filtry]  čipy
+ *
+ * „7 dní“ (výchozí) je sedm následujících dní od zvoleného dne, „Týden“
+ * kalendářní týden od pondělí. „Celý měsíc“ se nabídne, jen když jsou
+ * vyfiltrovaní jeden nebo dva lidé — je to jejich měsíc po dnech, kde jde
+ * zadávat směny.
  *
  * Hledání filtruje viditelné řádky hned, jak se píše. Filtry jsou
  * jedna nabídka (úsek, pozice, zaměstnanec, stav směny), aktivní se
@@ -25,12 +32,19 @@ import { BEZ_USEKU } from "@/lib/rozpis-mobil";
  * dolů; tahle komponenta jen kreslí a hlásí změny.
  */
 
-export type Pohled = "mesic" | "tyden" | "den";
+export type Pohled = PohledRozpisu;
 
-const POHLEDY: [Pohled, string][] = [
-  ["den", "Den"],
-  ["tyden", "Týden"],
-  ["mesic", "Měsíc"],
+const POHLEDY: [Pohled, string, string][] = [
+  ["den", "Den", "Jeden den po hodinách"],
+  ["sedm", "7 dní", "Sedm následujících dní od zvoleného dne (výchozí)"],
+  ["tyden", "Týden", "Kalendářní týden od pondělí do neděle"],
+  ["mesic", "Měsíc", "Kalendář měsíce s počty směn"],
+];
+
+const POHLED_MESIC_LIDI: [Pohled, string, string] = [
+  "osoby",
+  "Celý měsíc",
+  "Celý měsíc vybraných lidí — směny se v něm zadávají po dnech",
 ];
 
 const STAVY: [StavFiltru, string, string][] = [
@@ -56,6 +70,7 @@ export default function Nastroje({
   filtr,
   onFiltr,
   moznosti,
+  mesicLidiMozny,
 }: {
   pohled: Pohled;
   /** „19.–25. září“ — hotový popisek období. */
@@ -66,8 +81,11 @@ export default function Nastroje({
   filtr: FiltrDesktop;
   onFiltr: (f: FiltrDesktop) => void;
   moznosti: MoznostiFiltru;
+  /** Jsou vyfiltrovaní jeden nebo dva lidé, takže jde ukázat jejich celý měsíc? */
+  mesicLidiMozny: boolean;
 }) {
   const [otevrene, setOtevrene] = useState(false);
+  const [hledaniLidi, setHledaniLidi] = useState("");
   const tlacitko = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const panelId = useId();
@@ -98,7 +116,7 @@ export default function Nastroje({
   const nazevUseku = (klic: string) =>
     klic === BEZ_USEKU ? "Bez úseku" : (moznosti.useky.find((u) => u.klic === klic)?.nazev ?? klic);
 
-  const zapnout = <K extends "useky" | "pozice">(pole: K, hodnota: string) =>
+  const zapnout = <K extends "useky" | "pozice" | "osoby">(pole: K, hodnota: string) =>
     onFiltr({
       ...filtr,
       [pole]: filtr[pole].includes(hodnota)
@@ -117,15 +135,11 @@ export default function Nastroje({
       text: `Pozice: ${moznosti.pozice.find((x) => x.id === p)?.label ?? p}`,
       zrusit: () => zapnout("pozice", p),
     })),
-    ...(filtr.osoba
-      ? [
-          {
-            klic: "osoba",
-            text: `Zaměstnanec: ${moznosti.lide.find((l) => l.id === filtr.osoba)?.jmeno ?? "?"}`,
-            zrusit: () => onFiltr({ ...filtr, osoba: "" }),
-          },
-        ]
-      : []),
+    ...filtr.osoby.map((o) => ({
+      klic: `osoba-${o}`,
+      text: `Zaměstnanec: ${moznosti.lide.find((l) => l.id === o)?.jmeno ?? "?"}`,
+      zrusit: () => zapnout("osoby", o),
+    })),
     ...(filtr.stav !== "vse"
       ? [
           {
@@ -156,11 +170,19 @@ export default function Nastroje({
       </button>
 
       <div className="ds-smd-seg" role="group" aria-label="Pohled">
-        {POHLEDY.map(([klic, nazev]) => (
-          <button key={klic} type="button" aria-pressed={pohled === klic} onClick={() => onPohled(klic)}>
-            {nazev}
-          </button>
-        ))}
+        {(mesicLidiMozny || pohled === "osoby" ? [...POHLEDY, POHLED_MESIC_LIDI] : POHLEDY).map(
+          ([klic, nazev, popis]) => (
+            <button
+              key={klic}
+              type="button"
+              aria-pressed={pohled === klic}
+              title={popis}
+              onClick={() => onPohled(klic)}
+            >
+              {nazev}
+            </button>
+          ),
+        )}
       </div>
 
       <label className="ds-smd-hledani">
@@ -234,20 +256,39 @@ export default function Nastroje({
               </fieldset>
             ) : null}
 
-            <fieldset className="ds-smd-f-siroka">
-              <legend>Zaměstnanec</legend>
-              <select
-                value={filtr.osoba}
-                onChange={(e) => onFiltr({ ...filtr, osoba: e.target.value })}
-                aria-label="Zaměstnanec"
-              >
-                <option value="">Všichni</option>
-                {moznosti.lide.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.jmeno}
-                  </option>
-                ))}
-              </select>
+            <fieldset className="ds-smd-f-siroka ds-smd-f-lide">
+              <legend>Zaměstnanci</legend>
+              <input
+                type="search"
+                className="ds-smd-f-hledej"
+                value={hledaniLidi}
+                onChange={(e) => setHledaniLidi(e.target.value)}
+                placeholder="Najít zaměstnance v seznamu…"
+                aria-label="Najít zaměstnance v seznamu"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <div className="ds-smd-f-seznam">
+                {moznosti.lide
+                  .filter((l) => filtr.osoby.includes(l.id) || jmenoVyhovuje(l.jmeno, hledaniLidi))
+                  .map((l) => (
+                    <label key={l.id} className="ds-smd-volba">
+                      <input
+                        type="checkbox"
+                        checked={filtr.osoby.includes(l.id)}
+                        onChange={() => zapnout("osoby", l.id)}
+                      />
+                      <span className="ds-smd-volba-text">{l.jmeno}</span>
+                    </label>
+                  ))}
+                {moznosti.lide.every((l) => !filtr.osoby.includes(l.id) && !jmenoVyhovuje(l.jmeno, hledaniLidi)) ? (
+                  <p className="ds-smd-f-nic">Nikdo takový v seznamu není.</p>
+                ) : null}
+              </div>
+              <p className="ds-smd-f-napoveda">
+                Vyberte jednoho nebo dva lidi ({MAX_LIDI_V_MESICI} nejvýš) a nabídne se jejich celý měsíc, kde jde
+                zadat směny po dnech.
+              </p>
             </fieldset>
 
             <fieldset className="ds-smd-f-siroka ds-smd-f-stav">
@@ -299,6 +340,13 @@ export default function Nastroje({
               </button>
             </li>
           ))}
+          {mesicLidiMozny && pohled !== "osoby" ? (
+            <li>
+              <button type="button" className="ds-smd-odkaz" onClick={() => onPohled("osoby")}>
+                Ukázat celý měsíc
+              </button>
+            </li>
+          ) : null}
           {!jeFiltrPrazdny(filtr) && pocet > 1 ? (
             <li>
               <button
