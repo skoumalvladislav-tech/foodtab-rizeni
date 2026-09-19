@@ -91,6 +91,8 @@ export default function MrizkaTydne({
   poziceOsob,
   barvy,
   jmena,
+  nazvyPobocek,
+  pobockaProNovou,
   vybranaId,
   sbalene,
   onPrepnout,
@@ -107,6 +109,10 @@ export default function MrizkaTydne({
   poziceOsob: (osobaId: string) => string | null;
   barvy: Map<string, string | null>;
   jmena: Map<string, string>;
+  /** id pobočky → název; karta směny je píše, když je v okně víc poboček. */
+  nazvyPobocek: Map<string, string>;
+  /** Na které pobočce zakládat novou směnu, když mřížka není dělená po pobočkách. */
+  pobockaProNovou: string | null;
   /** Směna otevřená v panelu vpravo — v mřížce zvýrazněná. */
   vybranaId: string | null;
   sbalene: Set<string>;
@@ -171,40 +177,51 @@ export default function MrizkaTydne({
           </div>
 
           {mrizka.pobocky.map((pobocka) => {
-            const sbalenaPobocka = sbalene.has(pobocka.klic);
+            const sbalenaPobocka = pobocka.jePobocka && sbalene.has(pobocka.klic);
             return (
             <Fragment key={pobocka.klic}>
-              <div role="row" className="ds-smd-radek ds-smd-radek-siroky">
-                <div role="rowheader" className="ds-smd-pobocka-obal">
-                  <button
-                    type="button"
-                    className="ds-smd-pobocka"
-                    aria-expanded={!sbalenaPobocka}
-                    onClick={() => onPrepnout(pobocka.klic)}
-                  >
-                    <span className="ds-smd-skupina-sipka" aria-hidden="true">
-                      <Ikona klic="sipkaVpravo" velikost={14} />
-                    </span>
-                    <Ikona klic="pobocka" velikost={14} />
-                    <span className="ds-smd-pobocka-nazev">{pobocka.nazev}</span>
-                    <span className="ds-smd-skupina-pocty">
-                      {[
-                        pocet(pobocka.lidi, "člověk", "lidé", "lidí"),
-                        pobocka.minut > 0 ? hodinyKratce(pobocka.minut) : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </span>
-                  </button>
+              {/*
+                Pruh pobočky jen tehdy, když je v okně JEDNA pobočka. Při víc
+                pobočkách má každý člověk jeden řádek se všemi směnami (aby se
+                nezdvojil a jeho hodiny seděly s exportem), takže pod žádnou
+                pobočku nepatří — tu pak nese karta směny.
+              */}
+              {pobocka.jePobocka ? (
+                <div role="row" className="ds-smd-radek ds-smd-radek-siroky">
+                  <div role="rowheader" className="ds-smd-pobocka-obal">
+                    <button
+                      type="button"
+                      className="ds-smd-pobocka"
+                      aria-expanded={!sbalenaPobocka}
+                      onClick={() => onPrepnout(pobocka.klic)}
+                    >
+                      <span className="ds-smd-skupina-sipka" aria-hidden="true">
+                        <Ikona klic="sipkaVpravo" velikost={14} />
+                      </span>
+                      <Ikona klic="pobocka" velikost={14} />
+                      <span className="ds-smd-pobocka-nazev">{pobocka.nazev}</span>
+                      <span className="ds-smd-skupina-pocty">
+                        {[
+                          pocet(pobocka.lidi, "člověk", "lidé", "lidí"),
+                          pobocka.minut > 0 ? hodinyKratce(pobocka.minut) : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : null}
               {sbalenaPobocka
                 ? null
                 : pobocka.skupiny.map((skupina) => (
                 <SkupinaMrizkyView
                   key={skupina.klic}
                   skupina={skupina}
-                  pobockaId={pobocka.klic}
+                  /* Bez pruhu pobočky se zakládá na vybrané (Zobrazit), jinak na výchozí. */
+                  pobockaId={pobocka.jePobocka ? pobocka.klic : pobockaProNovou}
+                  nazvyPobocek={nazvyPobocek}
+                  psatPobocku={!pobocka.jePobocka}
                   dny={dny}
                   dnesni={dnesni}
                   planovani={planovani}
@@ -224,7 +241,9 @@ export default function MrizkaTydne({
           {mrizka.bezSmeny ? (
             <SkupinaMrizkyView
               skupina={mrizka.bezSmeny}
-              pobockaId={planovani?.vychoziPobocka ?? null}
+              pobockaId={pobockaProNovou ?? planovani?.vychoziPobocka ?? null}
+              nazvyPobocek={nazvyPobocek}
+              psatPobocku={false}
               dny={dny}
               dnesni={dnesni}
               planovani={planovani}
@@ -294,6 +313,8 @@ export default function MrizkaTydne({
 function SkupinaMrizkyView({
   skupina,
   pobockaId,
+  nazvyPobocek,
+  psatPobocku,
   dny,
   dnesni,
   planovani,
@@ -307,6 +328,8 @@ function SkupinaMrizkyView({
 }: {
   skupina: SkupinaMrizky;
   pobockaId: string | null;
+  nazvyPobocek: Map<string, string>;
+  psatPobocku: boolean;
   dny: string[];
   dnesni: string;
   planovani: Planovani | null;
@@ -368,6 +391,8 @@ function SkupinaMrizkyView({
               key={`${skupina.klic}|${radek.klic}`}
               radek={radek}
               pobockaId={pobockaId}
+              nazvyPobocek={nazvyPobocek}
+              psatPobocku={psatPobocku}
               dny={dny}
               dnesni={dnesni}
               planovani={planovani}
@@ -387,6 +412,8 @@ function SkupinaMrizkyView({
 function RadekMrizkyView({
   radek,
   pobockaId,
+  nazvyPobocek,
+  psatPobocku,
   dny,
   dnesni,
   planovani,
@@ -398,6 +425,9 @@ function RadekMrizkyView({
 }: {
   radek: RadekMrizky;
   pobockaId: string | null;
+  nazvyPobocek: Map<string, string>;
+  /** Psát na kartu pobočku? V mřížce nedělené po pobočkách ano, jinak je jasná z pruhu. */
+  psatPobocku: boolean;
   dny: string[];
   dnesni: string;
   planovani: Planovani | null;
@@ -455,6 +485,10 @@ function RadekMrizkyView({
         )}
       </div>
 
+      {/*
+        Pobočka na kartě jen tehdy, když řádek míchá víc poboček — jinak by ji
+        nesla každá směna zbytečně (pobočka je pak v pruhu nad řádky).
+      */}
       {dny.map((den) => {
         const smeny = (radek.smenyPodleDne.get(den) ?? []) as Smena[];
         const obsazeno = smeny.length > 0;
@@ -473,6 +507,7 @@ function RadekMrizkyView({
                 jmena={jmena}
                 vybrana={vybranaId === s.id}
                 klikaci={planovani !== null}
+                pobocka={psatPobocku ? (nazvyPobocek.get(s.branch_id) ?? null) : null}
                 onOtevrit={() => onOtevrit({ den, smena: s })}
               />
             ))}
@@ -523,6 +558,7 @@ export function KartaSmeny({
   klikaci,
   onOtevrit,
   kompaktni = false,
+  pobocka = null,
 }: {
   s: Smena;
   jmena: Map<string, string>;
@@ -531,6 +567,8 @@ export function KartaSmeny({
   onOtevrit: () => void;
   /** Úzká buňka (měsíc dvou lidí vedle sebe): „8–16“ místo „08:00–16:00“ a „pauza 15–17“. */
   kompaktni?: boolean;
+  /** Název pobočky pod časem; `null` = nepsat (pobočka je jasná odjinud). */
+  pobocka?: string | null;
 }) {
   const stav = stavSmeny(s as SmenaD);
   const puvodne = puvodniStav(s as SmenaD);
@@ -546,7 +584,7 @@ export function KartaSmeny({
       ? `pauza ${kratkyCas(hhmm(s.pauza_od as string))}–${kratkyCas(hhmm(s.pauza_do as string))}`
       : pauza
     : null;
-  const popisek = [stitek, pauzaNaKarte].filter(Boolean).join(" · ");
+  const popisek = [stitek, pobocka, pauzaNaKarte].filter(Boolean).join(" · ");
 
   // Celý popis do `title` a odečítače — karta sama je záměrně strohá.
   const podrobnosti = [

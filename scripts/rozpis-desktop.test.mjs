@@ -271,32 +271,44 @@ const smenyM = [
 const M = (filtr = FILTR_DESKTOP_PRAZDNY, bez = [osobyM.get('z')]) =>
   sestavitMrizku({ smeny: smenyM, dny, osoby: osobyM, useky, pobocky, lideBezSmeny: bez, filtr })
 const mr = M()
-je('pobočky abecedně', mr.pobocky.map((p) => p.nazev), ['Bernard', 'Černá Perla'])
-je('Černá Perla: neobsazené první, pak úseky podle pořadí firmy, Bez úseku poslední', mr.pobocky[1].skupiny.map((s) => s.nazev), ['Neobsazené směny', 'Kuchyně', 'Plac', 'Bez úseku'])
-// Pruh pobočky nese tytéž součty jako hlavičky úseků: lidi i hodiny BEZ neobsazených směn.
-je('Černá Perla: 4 lidé (Andrea, Irina, Tomáš, Oxy) — neobsazená směna člověka nepřidá', mr.pobocky[1].lidi, 4)
-je('Černá Perla: hodiny jen lidí (42 h), volná směna 8 h se nepřičítá', mr.pobocky[1].minut, 42 * 60)
-je('Bernard: jeden člověk, 6 h', [mr.pobocky[0].lidi, mr.pobocky[0].minut], [1, 6 * 60])
-je('a součet poboček sedí s „Celkem“ v patičce (42 + 6 = 48 h)', mr.pobocky.reduce((n, p) => n + p.minut, 0), mr.celkemMinut)
-// Kdo pracuje na dvou pobočkách, je v součtu každé z nich; celá mřížka ho počítá jednou.
-const lidiPodlePobocek = mr.pobocky.reduce((n, p) => n + p.lidi, 0)
-const ruznychVPobockach = new Set(mr.pobocky.flatMap((p) => p.skupiny.flatMap((s) => s.radky.map((r) => r.osoba?.id)).filter(Boolean))).size
-je('Tomáš je v součtu obou poboček (5 = 4 + 1), různých lidí na pobočkách je ale 4', [lidiPodlePobocek, ruznychVPobockach], [5, 4])
-je('a pocetLidi celé mřížky počítá i Žanetu bez směny, Tomáše jednou', mr.pocetLidi, 5)
-const kuchyne = mr.pobocky[1].skupiny.find((s) => s.nazev === 'Kuchyně')
+/*
+  V okně jsou dvě pobočky → mřížka se po pobočkách NEDĚLÍ: každý člověk má
+  jeden řádek se všemi svými směnami (Šéfík 20. 9. 2026), takže se nezdvojí
+  a jeho hodiny sedí s exportem. Pobočku nese karta směny.
+*/
+je('dvě pobočky v okně: jedna skupina všech lidí, bez pruhu pobočky', [mr.pobocky.length, mr.pobocky[0].jePobocka, mr.pobocky[0].nazev], [1, false, ''])
+const vse = mr.pobocky[0]
+je('úseky podle pořadí firmy, neobsazené první, Bez úseku poslední', vse.skupiny.map((s) => s.nazev), ['Neobsazené směny', 'Kuchyně', 'Plac', 'Bez úseku'])
+je('každý člověk právě jednou (Tomáš dělal na obou pobočkách)', vse.skupiny.flatMap((s) => s.radky.map((r) => r.jmeno)).filter((j) => j === 'Tomáš Kovář').length, 1)
+je('Tomášův řádek má obě směny: 23. 9. na Černé Perle i 25. 9. na Bernardu',
+  [...vse.skupiny.flatMap((s) => s.radky).find((r) => r.jmeno === 'Tomáš Kovář').smenyPodleDne.keys()].sort(), ['2026-09-23', '2026-09-25'])
+je('… a jeden součet přes obě pobočky: 8 h + 6 h = 14 h (jako v exportu)', vse.skupiny.flatMap((s) => s.radky).find((r) => r.jmeno === 'Tomáš Kovář').minut, 14 * 60)
+je('součty skupiny: lidé i hodiny bez neobsazených směn (48 h = Celkem v patičce)', [vse.lidi, vse.minut, mr.celkemMinut], [4, 48 * 60, 48 * 60])
+je('a pocetLidi počítá i Žanetu bez směny, Tomáše jednou', mr.pocetLidi, 5)
+
+// Jedna pobočka v okně → pruh pobočky a pod ním úseky (Šéfík 19. 9. 2026).
+const jednaPobocka = sestavitMrizku({
+  smeny: smenyM.filter((s) => s.branch_id === 'b1'), dny, osoby: osobyM, useky, pobocky,
+  lideBezSmeny: [osobyM.get('z')], filtr: FILTR_DESKTOP_PRAZDNY,
+})
+je('jedna pobočka: pruh pobočky s názvem', [jednaPobocka.pobocky.length, jednaPobocka.pobocky[0].jePobocka, jednaPobocka.pobocky[0].nazev], [1, true, 'Černá Perla'])
+je('… a pod ním úseky', jednaPobocka.pobocky[0].skupiny.map((s) => s.nazev), ['Neobsazené směny', 'Kuchyně', 'Plac', 'Bez úseku'])
+je('… součty pruhu: 4 lidé, 42 h (volná směna 8 h se nepřičítá)', [jednaPobocka.pobocky[0].lidi, jednaPobocka.pobocky[0].minut], [4, 42 * 60])
+je('… a sedí s „Celkem“ v patičce', jednaPobocka.pobocky[0].minut, jednaPobocka.celkemMinut)
+je('výběr jedné pobočky v Zobrazit vrátí pruh zpátky', [M(F({ pobocky: ['b1'] })).pobocky[0].jePobocka, M(F({ pobocky: ['b1'] })).pobocky[0].nazev], [true, 'Černá Perla'])
+
+const kuchyne = vse.skupiny.find((s) => s.nazev === 'Kuchyně')
 je('Kuchyně: dva lidé', kuchyne.lidi, 2)
 je('Kuchyně: Andrea 16 h + Irina 14 h = 1800 min', kuchyne.minut, 16 * 60 + 14 * 60 - 0)
 je('lidé v úseku abecedně', kuchyne.radky.map((r) => r.jmeno), ['Andrea Mikulová', 'Irina'])
 je('zrušená směna se do mřížky nedostala', kuchyne.radky[0].smenyPodleDne.get('2026-09-22').length, 1)
 je('směna mimo okno se do mřížky nedostala', kuchyne.radky[0].smenyPodleDne.has('2026-09-30'), false)
-const neobs = mr.pobocky[1].skupiny[0]
+const neobs = vse.skupiny[0]
 je('neobsazená skupina nemá lidi, jen hodiny (8 h)', [neobs.lidi, neobs.minut], [0, 480])
 je('lidé bez směny mají vlastní skupinu pod pobočkami', M().bezSmeny.radky.map((r) => r.jmeno), ['Žaneta'])
 je('bez lidí bez směny žádná skupina není', M(FILTR_DESKTOP_PRAZDNY, []).bezSmeny, null)
-const tomas = mr.pobocky[0].skupiny[0].radky[0]
-je('Tomáš na druhé pobočce: řádek se objeví i tam', tomas.jmeno, 'Tomáš Kovář')
-je('směna přes půlnoc 18–02 = 480 min, ne záporná', mr.pobocky[1].skupiny.flatMap((s) => s.radky).find((r) => r.jmeno === 'Tomáš Kovář').minut, 480)
-je('nevydaných směn v řádku Oxy', mr.pobocky[1].skupiny.flatMap((s) => s.radky).find((r) => r.jmeno === 'Oxy').nevydanych, 1)
+je('směna přes půlnoc 18–02 = 480 min, ne záporná', jednaPobocka.pobocky[0].skupiny.flatMap((s) => s.radky).find((r) => r.jmeno === 'Tomáš Kovář').minut, 480)
+je('nevydaných směn v řádku Oxy', vse.skupiny.flatMap((s) => s.radky).find((r) => r.jmeno === 'Oxy').nevydanych, 1)
 je('celkem hodin lidí (neobsazené se nepočítají): Andrea 16 + Irina 14 + Tomáš 8 + Oxy 4 + Tomáš/b2 6 = 48 h', mr.celkemMinut, 48 * 60)
 je('po dnech: úterý = Andrea + Irina, 8 + 14 = 22 h', mr.poDnech.get('2026-09-22'), { lidi: 2, minut: 22 * 60 })
 je('po dnech: čtvrtek jen neobsazená směna — nikdo, 0 h', mr.poDnech.get('2026-09-24'), { lidi: 0, minut: 0 })
@@ -307,12 +319,12 @@ const jmenaVsech = (m) => [
   ...(m.bezSmeny?.radky.map((r) => r.jmeno) ?? []),
 ]
 je('hledání „irin“', jmenaVsech(M(F({ hledani: 'irin' }))), ['Irina'])
-je('hledání bez diakritiky: „tomas“', jmenaVsech(M(F({ hledani: 'tomas' }))), ['Tomáš Kovář', 'Tomáš Kovář'])
+je('hledání bez diakritiky: „tomas“ — jeden řádek, i když dělá na dvou pobočkách', jmenaVsech(M(F({ hledani: 'tomas' }))), ['Tomáš Kovář'])
 je('hledání najde i člověka bez směny („zan“)', jmenaVsech(M(F({ hledani: 'zan' }))), ['Žaneta'])
 je('úsek Kuchyně: Andrea, Irina — a neobsazená směna, ta se filtrem úseku neschová',
   jmenaVsech(M(F({ useky: ['u-k'] }))), ['Neobsazeno', 'Andrea Mikulová', 'Irina'])
-je('úsek Kuchyně: druhá pobočka (jen Plac) zmizí celá',
-  M(F({ useky: ['u-k'] })).pobocky.map((p) => p.nazev), ['Černá Perla'])
+je('úsek Kuchyně: zůstanou jen kuchyňské skupiny (a neobsazené, ty se úsekem neschovají)',
+  M(F({ useky: ['u-k'] })).pobocky[0].skupiny.map((s) => s.nazev), ['Neobsazené směny', 'Kuchyně'])
 je('stav nevydané: Oxy a neobsazené (mají koncept)', jmenaVsech(M(F({ stav: 'nevydane' }))).sort(), ['Neobsazeno', 'Oxy'])
 je('stav nevydané neukáže lidi bez směny', M(F({ stav: 'nevydane' })).bezSmeny, null)
 je('stav neobsazené: jen neobsazená skupina', jmenaVsech(M(F({ stav: 'neobsazene' }))), ['Neobsazeno'])
@@ -321,11 +333,12 @@ je('dva zaměstnanci: Andrea a Irina', jmenaVsech(M(F({ osoby: ['a', 'i'] }))), 
 je('dva zaměstnanci: Irina a Žaneta (Žaneta nemá směnu, ale je vybraná)', jmenaVsech(M(F({ osoby: ['i', 'z'] }))), ['Irina', 'Žaneta'])
 je('dva zaměstnanci: součty jen jejich (Andrea 16 + Irina 14 = 30 h)', M(F({ osoby: ['a', 'i'] })).celkemMinut, 30 * 60)
 je('dva zaměstnanci: neobsazená skupina se schová', M(F({ osoby: ['a', 'i'] })).pobocky[0].skupiny.some((s) => s.druh === 'neobsazene'), false)
-je('Tomáš (dvě pobočky) vybraný: řádek na obou pobočkách', jmenaVsech(M(F({ osoby: ['t'] }))), ['Tomáš Kovář', 'Tomáš Kovář'])
-je('pozice Číšník: Tomáš (obě pobočky) i Žaneta bez směny', jmenaVsech(M(F({ pozice: ['p-cisnik'] }))), ['Tomáš Kovář', 'Tomáš Kovář', 'Žaneta'])
+je('Tomáš (dvě pobočky) vybraný: jeden řádek se součtem přes obě (8 + 6 = 14 h)',
+  [jmenaVsech(M(F({ osoby: ['t'] }))), M(F({ osoby: ['t'] })).celkemMinut], [['Tomáš Kovář'], 14 * 60])
+je('pozice Číšník: Tomáš (jednou, přes obě pobočky) i Žaneta bez směny', jmenaVsech(M(F({ pozice: ['p-cisnik'] }))), ['Tomáš Kovář', 'Žaneta'])
 je('nic nevyhovuje: prázdná mřížka', [M(F({ hledani: 'qqq' })).pocetRadku, M(F({ hledani: 'qqq' })).pobocky.length], [0, 0])
 je('součty se řídí filtrem: jen Irina = 14 h', M(F({ hledani: 'irin' })).celkemMinut, 14 * 60)
-je('bez filtru vidím všech osm řádků (Andrea, Irina, Tomáš×2, Oxy, Neobsazeno, Žaneta)', M().pocetRadku, 7)
+je('bez filtru vidím šest řádků (Andrea, Irina, Tomáš, Oxy, Neobsazeno, Žaneta) — Tomáš jen jednou', M().pocetRadku, 6)
 
 console.log('\n== Pohledy a začátek okna ==')
 je('výchozí pohled je „sedm“ (sedm následujících dní)', VYCHOZI_POHLED, 'sedm')
@@ -357,14 +370,15 @@ const zPobocek = (filtr) => M(F(filtr))
 const jmenaSkupin = (mr2) => mr2.pobocky.map((p) => [p.nazev, p.skupiny.map((sk) => sk.nazev)])
 je('mřížka jen pro Bernard: jediná pobočka, jen Tomáš (jeho b2 směna 25. 9.), bez neobsazených a bez lidí bez směny',
   [jmenaSkupin(zPobocek({ pobocky: ['b2'] })), zPobocek({ pobocky: ['b2'] }).bezSmeny, zPobocek({ pobocky: ['b2'] }).celkemMinut], [[['Bernard', ['Plac']]], null, 6 * 60])
+je('… a Tomášův řádek v ní má jen tu jednu směnu (6 h), ne obě', zPobocek({ pobocky: ['b2'] }).pobocky[0].skupiny[0].radky[0].minut, 6 * 60)
 je('mřížka jen pro Černou Perlu: Tomášova b2 směna se nepočítá (48 h − 6 h = 42 h)', [zPobocek({ pobocky: ['b1'] }).pobocky.map((p) => p.nazev), zPobocek({ pobocky: ['b1'] }).celkemMinut], [['Černá Perla'], 42 * 60])
 je('mřížka: pobočka + úsek Kuchyně na Bernardu = prázdná (na b2 nikdo z kuchyně není)', zPobocek({ pobocky: ['b2'], useky: ['u-k'] }).pocetRadku, 0)
 je('mřížka: pobočka + úsek Kuchyně na Černé Perle = Andrea a Irina (a neobsazená směna, která se filtrem úseku neschová)', jmenaVsech(zPobocek({ pobocky: ['b1'], useky: ['u-k'] })), ['Neobsazeno', 'Andrea Mikulová', 'Irina'])
 je('lidé bez směny se bez výběru pobočky ukazují dál (Žaneta)', jmenaVsech(M()).includes('Žaneta'), true)
-je('mřížka pro obě vybrané pobočky najednou: obě se ukážou a hodiny jsou jako bez filtru (48 h)',
-  [zPobocek({ pobocky: ['b1', 'b2'] }).pobocky.map((p) => p.nazev), zPobocek({ pobocky: ['b1', 'b2'] }).celkemMinut], [['Bernard', 'Černá Perla'], 48 * 60])
-je('… a Tomáš je v obou pobočkách jako dva řádky (směny se nemíchají)',
-  jmenaVsech(zPobocek({ pobocky: ['b1', 'b2'], osoby: ['t'] })), ['Tomáš Kovář', 'Tomáš Kovář'])
+je('mřížka pro obě vybrané pobočky najednou: bez pruhů a hodiny jako bez filtru (48 h)',
+  [zPobocek({ pobocky: ['b1', 'b2'] }).pobocky.map((p) => p.jePobocka), zPobocek({ pobocky: ['b1', 'b2'] }).celkemMinut], [[false], 48 * 60])
+je('… a Tomáš je i tam jen jednou, se součtem přes obě pobočky',
+  [jmenaVsech(zPobocek({ pobocky: ['b1', 'b2'], osoby: ['t'] })), zPobocek({ pobocky: ['b1', 'b2'], osoby: ['t'] }).celkemMinut], [['Tomáš Kovář'], 14 * 60])
 
 console.log('\n== Uložit a přidat další den ==')
 je('bez obsazených dní: hned další den', dalsiVolnyDen([], '2026-09-03'), '2026-09-04')
