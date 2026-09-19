@@ -8,7 +8,7 @@ import type { IkonaKlic } from '@/app/[rozsah]/nabidka'
 import Drawer from '@/components/ui/Drawer'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
 import { zkratkaDoSmeny } from '@/lib/sablony'
-import { hodinyKratce, minutSmeny } from '@/lib/rozpis-mobil'
+import { denVTydnu, hodinyKratce, minutSmeny, ZKRATKY_DNU } from '@/lib/rozpis-mobil'
 import HlavickaSmeny, { type KontextSmeny } from './desktop/hlavicka-smeny'
 import { ListMobil } from './mobil/sheet'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
@@ -52,6 +52,17 @@ export type PredvyplneniSmeny = {
   note?: string
   pauza_od?: string | null
   pauza_do?: string | null
+}
+
+/**
+ * Co formulář předá, když se má hned po směně zakládat další: datum právě
+ * uložené směny, předvyplnění (člověk, pobočka, časy, pauza) a věta o tom,
+ * co se uložilo — ukáže se nad novým formulářem, ať člověk ví, že to prošlo.
+ */
+export type DalsiSmena = {
+  datum: string
+  predvyplneni: PredvyplneniSmeny
+  ulozeno: string
 }
 
 /**
@@ -108,6 +119,8 @@ export default function FormularSmeny({
   onDuplikovat,
   dole,
   souctyTydne,
+  onDalsiDen,
+  potvrzeni,
 }: {
   rozsah: string
   /** Předvyplněné datum u nové směny. */
@@ -139,6 +152,14 @@ export default function FormularSmeny({
    * součet se nezná — a proto se neukazuje.
    */
   souctyTydne?: (zamestnanec: string, den: string, ignorovat: string | null) => number | null
+  /**
+   * Panel na počítači u NOVÉ směny: „Uložit a přidat další den“. Po uložení
+   * (bez varování) se místo výsledku otevře nový formulář; s varováním se
+   * výsledek ukáže a další den nabídne tlačítkem. Bez toho se nic nekreslí.
+   */
+  onDalsiDen?: (dalsi: DalsiSmena) => void
+  /** Věta nad formulářem: co se právě uložilo, když sem člověk přišel z „přidat další den“. */
+  potvrzeni?: string
 }) {
   const router = useRouter()
   const [stav, akce, ceka] = useActionState<StavSmeny, FormData>(ulozitSmenu, {
@@ -209,6 +230,28 @@ export default function FormularSmeny({
   const [pauzaDo, setPauzaDo] = useState((zdroj?.pauza_do ?? '').slice(0, 5))
 
   /*
+    „Uložit a přidat další den“. Druhé odesílací tlačítko jen poznamená, že
+    po uložení se má otevřít další směna; hlavní tlačítko to zase zruší
+    (včetně odeslání Enterem, které klikne na první odesílací tlačítko).
+    Co se uložilo, se bere z polí v okamžiku kliknutí — to je totéž, co
+    odešlo na server.
+  */
+  const dalsiRef = useRef<DalsiSmena | null>(null)
+  const dalsiPodklady = (): DalsiSmena => ({
+    datum,
+    predvyplneni: {
+      employee_id: zamestnanec || null,
+      position_id: vybranaPozice || null,
+      branch_id: pobocka || undefined,
+      starts_at: od,
+      ends_at: doKdy,
+      pauza_od: trhana && pauzaOd ? pauzaOd : null,
+      pauza_do: trhana && pauzaDo ? pauzaDo : null,
+    },
+    ulozeno: `${ZKRATKY_DNU[denVTydnu(datum)][0]}${ZKRATKY_DNU[denVTydnu(datum)][1].toLowerCase()} ${Number(datum.slice(8, 10))}. ${Number(datum.slice(5, 7))}., ${od}–${doKdy}`,
+  })
+
+  /*
     Nabídku dodává databáze, ne prohlížeč — které pravidlo vyhraje, ví
     `app.sablona_poradi` a druhá kopie té úvahy v JavaScriptu by se
     rozešla. Viz hlavičku ./sablony.
@@ -277,6 +320,16 @@ export default function FormularSmeny({
     if (stav.stav === 'hotovo') router.refresh()
   }, [stav, router])
 
+  // Uložení přes „a přidat další den“ bez varování rovnou otevře další směnu.
+  // S varováním se zůstane u výsledku — nikdo by ho nestihl přečíst.
+  useEffect(() => {
+    if (stav.stav !== 'hotovo' || stav.varovani.length > 0) return
+    const dalsi = dalsiRef.current
+    if (!dalsi || !onDalsiDen) return
+    dalsiRef.current = null
+    onDalsiDen(dalsi)
+  }, [stav, onDalsiDen])
+
   /*
     Po smazání se okno ZAVŘE, na rozdíl od uložení. U uložení zůstává
     kvůli varováním — u smazání žádná nejsou a nechat otevřený formulář
@@ -339,6 +392,11 @@ export default function FormularSmeny({
           ) : null}
 
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            {!smena?.id && onDalsiDen ? (
+              <button type="button" onClick={() => onDalsiDen(dalsiPodklady())} className="ft-tl ft-tl-vedlejsi">
+                Přidat další den
+              </button>
+            ) : null}
             <button type="button" onClick={zavrit} className="ft-tl ft-tl-hlavni">
               Hotovo
             </button>
@@ -350,6 +408,12 @@ export default function FormularSmeny({
           action={akce}
           style={{ display: 'grid', gap: '16px' }}
         >
+          {potvrzeni ? (
+            <p role="status" className="ds-smd-form-potvrzeni">
+              <Ikona klic="fajfka" velikost={14} />
+              Uloženo: {potvrzeni}
+            </p>
+          ) : null}
           <input type="hidden" name="rozsah" value={rozsah} />
           {smena ? <input type="hidden" name="smena" value={smena.id} /> : null}
 
@@ -604,10 +668,30 @@ export default function FormularSmeny({
           {/* Na telefonu je tlačítko pevně dole (viz `pata` níž). */}
           {mobil ? null : (
             <div className="ds-smd-form-pata" style={poradi(12)}>
-              <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>
+              <button
+                type="submit"
+                className="ft-tl ft-tl-hlavni"
+                disabled={ceka}
+                onClick={() => {
+                  dalsiRef.current = null
+                }}
+              >
                 {ceka ? 'Ukládám…' : smena?.id ? 'Uložit změny' : 'Přidat směnu'}
               </button>
-              <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi">
+              {!smena?.id && onDalsiDen ? (
+                <button
+                  type="submit"
+                  className="ft-tl ft-tl-vedlejsi ds-smd-form-dalsi"
+                  disabled={ceka}
+                  title="Uloží směnu a otevře novou pro další den, který člověk nemá obsazený — se stejnými časy"
+                  onClick={() => {
+                    dalsiRef.current = dalsiPodklady()
+                  }}
+                >
+                  Uložit a přidat další den
+                </button>
+              ) : null}
+              <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi ds-smd-form-zrusit">
                 Zrušit
               </button>
             </div>

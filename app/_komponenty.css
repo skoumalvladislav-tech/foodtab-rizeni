@@ -1375,8 +1375,16 @@ div.ds-smd-smena:hover { box-shadow: none; }
 .ds-smd-stav-smeny[data-stav="zmenena"] { border-color: var(--mosaz); }
 .ds-smd-stav-vysvetleni { display: block; color: var(--muted); }
 
-.ds-smd-form-pata { display: flex; gap: 8px; }
+.ds-smd-form-pata { display: flex; flex-wrap: wrap; gap: 8px; }
 .ds-smd-form-pata > :first-child { flex: 1; }
+/* Hlavní a „Zrušit“ v jednom řádku, „Uložit a přidat další den“ pod nimi přes celou šířku. */
+.ds-smd-form-zrusit { order: 2; }
+.ds-smd-form-dalsi { order: 3; flex: 1 1 100%; }
+.ds-smd-form-potvrzeni {
+  display: flex; align-items: center; gap: 6px; margin: 0; padding: 7px 10px;
+  border-radius: 8px; background: var(--dobre-bg, color-mix(in srgb, var(--dobre) 12%, var(--card)));
+  color: var(--dobre); font-size: 13px; font-weight: 500;
+}
 .ds-smd-form-druhotne { display: flex; flex-wrap: wrap; gap: 8px; }
 .ds-smd-smazat { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line-2)); }
 .ds-smd-smazat:hover { background: var(--bad-bg); }
