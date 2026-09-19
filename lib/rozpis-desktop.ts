@@ -508,6 +508,15 @@ export type PobockaMrizky = {
   klic: string
   nazev: string
   skupiny: SkupinaMrizky[]
+  /** Kolik různých lidí na té pobočce v okně pracuje (neobsazené směny se nepočítají). */
+  lidi: number
+  /**
+   * Plánované minuty LIDÍ na té pobočce — bez neobsazených směn, stejně jako
+   * hlavičky úseků a „Celkem“ v patičce. Kdyby se sem přičetly i volné směny,
+   * součet poboček by nesouhlasil s patičkou a nikdo by nevěděl, které z těch
+   * dvou čísel lže. Volné směny mají vlastní řádek nahoře („1 směna k obsazení“).
+   */
+  minut: number
 }
 
 export type Mrizka = {
@@ -668,6 +677,8 @@ export function sestavitMrizku(v: {
         klic: branchId,
         nazev: pobocky.get(branchId) ?? 'Jiná pobočka',
         skupiny,
+        lidi: skupiny.reduce((n, sk) => n + sk.lidi, 0),
+        minut: skupiny.filter((sk) => sk.druh === 'usek').reduce((n, sk) => n + sk.minut, 0),
       }
     })
     .filter((p) => p.skupiny.length > 0)

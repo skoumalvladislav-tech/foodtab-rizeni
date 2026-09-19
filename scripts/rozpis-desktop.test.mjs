@@ -265,6 +265,16 @@ const M = (filtr = FILTR_DESKTOP_PRAZDNY, bez = [osobyM.get('z')]) =>
 const mr = M()
 je('pobočky abecedně', mr.pobocky.map((p) => p.nazev), ['Bernard', 'Černá Perla'])
 je('Černá Perla: neobsazené první, pak úseky podle pořadí firmy, Bez úseku poslední', mr.pobocky[1].skupiny.map((s) => s.nazev), ['Neobsazené směny', 'Kuchyně', 'Plac', 'Bez úseku'])
+// Pruh pobočky nese tytéž součty jako hlavičky úseků: lidi i hodiny BEZ neobsazených směn.
+je('Černá Perla: 4 lidé (Andrea, Irina, Tomáš, Oxy) — neobsazená směna člověka nepřidá', mr.pobocky[1].lidi, 4)
+je('Černá Perla: hodiny jen lidí (42 h), volná směna 8 h se nepřičítá', mr.pobocky[1].minut, 42 * 60)
+je('Bernard: jeden člověk, 6 h', [mr.pobocky[0].lidi, mr.pobocky[0].minut], [1, 6 * 60])
+je('a součet poboček sedí s „Celkem“ v patičce (42 + 6 = 48 h)', mr.pobocky.reduce((n, p) => n + p.minut, 0), mr.celkemMinut)
+// Kdo pracuje na dvou pobočkách, je v součtu každé z nich; celá mřížka ho počítá jednou.
+const lidiPodlePobocek = mr.pobocky.reduce((n, p) => n + p.lidi, 0)
+const ruznychVPobockach = new Set(mr.pobocky.flatMap((p) => p.skupiny.flatMap((s) => s.radky.map((r) => r.osoba?.id)).filter(Boolean))).size
+je('Tomáš je v součtu obou poboček (5 = 4 + 1), různých lidí na pobočkách je ale 4', [lidiPodlePobocek, ruznychVPobockach], [5, 4])
+je('a pocetLidi celé mřížky počítá i Žanetu bez směny, Tomáše jednou', mr.pocetLidi, 5)
 const kuchyne = mr.pobocky[1].skupiny.find((s) => s.nazev === 'Kuchyně')
 je('Kuchyně: dva lidé', kuchyne.lidi, 2)
 je('Kuchyně: Andrea 16 h + Irina 14 h = 1800 min', kuchyne.minut, 16 * 60 + 14 * 60 - 0)

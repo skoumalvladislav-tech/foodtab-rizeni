@@ -65,6 +65,15 @@ export function novaSmenaProOsobu(osobaId: string, den: string, pobockaId: strin
  * a jedno slovo, ne barva sama — kdo odstíny nerozliší, přečte si ho.
  *
  * ---------------------------------------------------------------------
+ * POBOČKA, A POD NÍ ÚSEKY
+ *
+ * Pruh pobočky se kreslí VŽDY, i když je pobočka jediná (Šéfík 19. 9. 2026:
+ * „potřebuji zobrazit pobočku a pod ní jednotlivé úseky“). Dřív se při
+ * jedné pobočce schovával, takže po výběru pobočky v nabídce Zobrazit
+ * zmizel právě ten nadpis, podle kterého se vedoucí orientoval. Nese počet
+ * lidí a hodin jako hlavičky úseků — a dá se sbalit celý, i s úseky pod ním.
+ *
+ * ---------------------------------------------------------------------
  * JMÉNA SE NELÁMOU PO ZNACÍCH
  *
  * Lámat se smí jen mezi slovy (nejvýš dva řádky), pak se ořízne
@@ -108,7 +117,6 @@ export default function MrizkaTydne({
   /** Je v okně vůbec nějaká směna? Bez ní je prázdný stav o něčem jiném než o filtru. */
   maSmeny: boolean;
 }) {
-  const vicePobocek = mrizka.pobocky.length > 1;
   const sablona = `${ODSTUP_SLOUPCE} repeat(${dny.length}, minmax(112px, 1fr))`;
 
   return (
@@ -162,16 +170,37 @@ export default function MrizkaTydne({
             })}
           </div>
 
-          {mrizka.pobocky.map((pobocka) => (
+          {mrizka.pobocky.map((pobocka) => {
+            const sbalenaPobocka = sbalene.has(pobocka.klic);
+            return (
             <Fragment key={pobocka.klic}>
-              {vicePobocek ? (
-                <div role="row" className="ds-smd-radek ds-smd-radek-siroky">
-                  <div role="rowheader" className="ds-smd-pobocka">
-                    {pobocka.nazev}
-                  </div>
+              <div role="row" className="ds-smd-radek ds-smd-radek-siroky">
+                <div role="rowheader" className="ds-smd-pobocka-obal">
+                  <button
+                    type="button"
+                    className="ds-smd-pobocka"
+                    aria-expanded={!sbalenaPobocka}
+                    onClick={() => onPrepnout(pobocka.klic)}
+                  >
+                    <span className="ds-smd-skupina-sipka" aria-hidden="true">
+                      <Ikona klic="sipkaVpravo" velikost={14} />
+                    </span>
+                    <Ikona klic="pobocka" velikost={14} />
+                    <span className="ds-smd-pobocka-nazev">{pobocka.nazev}</span>
+                    <span className="ds-smd-skupina-pocty">
+                      {[
+                        pocet(pobocka.lidi, "člověk", "lidé", "lidí"),
+                        pobocka.minut > 0 ? hodinyKratce(pobocka.minut) : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </button>
                 </div>
-              ) : null}
-              {pobocka.skupiny.map((skupina) => (
+              </div>
+              {sbalenaPobocka
+                ? null
+                : pobocka.skupiny.map((skupina) => (
                 <SkupinaMrizkyView
                   key={skupina.klic}
                   skupina={skupina}
@@ -189,7 +218,8 @@ export default function MrizkaTydne({
                 />
               ))}
             </Fragment>
-          ))}
+            );
+          })}
 
           {mrizka.bezSmeny ? (
             <SkupinaMrizkyView
