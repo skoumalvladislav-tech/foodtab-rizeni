@@ -27,6 +27,7 @@ import {
 import {
   FILTR_DESKTOP_PRAZDNY,
   cekaNaVydani,
+  dalsiVolnyDen,
   denKratce,
   hodinyStruc,
   jeFiltrPrazdny,
@@ -321,6 +322,17 @@ je('týden přes hranici roku: pátek 1. 1. 2027 → pondělí 28. 12. 2026', za
 je('měsíc, den, osoby a neznámý pohled běží od zvoleného dne', ['mesic', 'den', 'osoby', 'nesmysl', undefined, null].map((p) => zacatekOkna(p, '2026-09-24')), Array(6).fill('2026-09-24'))
 je('měsíční pohledy: měsíc a osoby (načítá se celý měsíc), ostatní ne', ['mesic', 'osoby', 'sedm', 'tyden', 'den', undefined].map(jeMesicniPohled), [true, true, false, false, false, false])
 je('celý měsíc jde ukázat nejvýš dvěma lidem', MAX_LIDI_V_MESICI, 2)
+
+console.log('\n== Uložit a přidat další den ==')
+je('bez obsazených dní: hned další den', dalsiVolnyDen([], '2026-09-03'), '2026-09-04')
+je('přeskočí dny, které člověk už má (4. a 5. 9. → 6. 9.)', dalsiVolnyDen(['2026-09-04', '2026-09-05'], '2026-09-03'), '2026-09-06')
+je('obsazený je jen jiný den, ne ten hned další', dalsiVolnyDen(['2026-09-10'], '2026-09-03'), '2026-09-04')
+je('uložený den sám se nepočítá (hledá se až po něm)', dalsiVolnyDen(['2026-09-03'], '2026-09-03'), '2026-09-04')
+je('přes konec měsíce: 30. 9. + obsazený 1. 10. → 2. 10.', dalsiVolnyDen(['2026-10-01'], '2026-09-30'), '2026-10-02')
+je('přes konec roku: 31. 12. → 1. 1.', dalsiVolnyDen([], '2026-12-31'), '2027-01-01')
+je('zpětné dny nevadí (jen ty po uloženém)', dalsiVolnyDen(['2026-09-01', '2026-09-02'], '2026-09-03'), '2026-09-04')
+je('obsazeno všechno v dosahu: den hned po uložené směně', dalsiVolnyDen(['2026-09-04', '2026-09-05', '2026-09-06'], '2026-09-03', 3), '2026-09-04')
+je('funguje i nad množinou', dalsiVolnyDen(new Set(['2026-09-04']), '2026-09-03'), '2026-09-05')
 
 console.log('\n== Krátké zápisy ==')
 je('celá hodina bez :00, bez nuly navíc', [kratkyCas('08:00'), kratkyCas('22:00'), kratkyCas('00:00')], ['8', '22', '0'])
