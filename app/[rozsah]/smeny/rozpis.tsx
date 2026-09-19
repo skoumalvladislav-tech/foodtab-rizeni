@@ -696,6 +696,13 @@ function RadekTydne({
           position: "sticky",
           left: 0,
           zIndex: 2,
+          /*
+            Sloupec má nejvýš 140 px (sablonaSloupcu). Dlouhé jméno se
+            zalomí na druhý řádek místo přetečení do pondělního
+            políčka; `anywhere` zalomí i jednoslovné jméno bez mezer.
+          */
+          minWidth: 0,
+          overflowWrap: "anywhere",
         }}
       >
         {/*
@@ -707,7 +714,7 @@ function RadekTydne({
           kde značka chybí docela.
         */}
         {osoba ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
             <span
               aria-hidden="true"
               style={{
@@ -719,7 +726,7 @@ function RadekTydne({
               {inicialy(jmeno)}
             </span>
             <ZnackaOsoby barva={barvy.get(osoba) ?? null} />
-            {jmeno}
+            <span style={{ minWidth: 0 }} title={jmeno}>{jmeno}</span>
           </span>
         ) : (
           jmeno
