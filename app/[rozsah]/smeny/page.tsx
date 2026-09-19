@@ -4,7 +4,13 @@ import { getUser, hasAccess } from "@/lib/authz";
 import { barvaNeboNic } from "@/lib/barvy-lidi";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { posunDatum, provozniDen } from "@/lib/provozni-den";
-import { DNU_V_ROZPISU } from "@/lib/rozpis-konstanty";
+import {
+  DNU_V_ROZPISU,
+  VYCHOZI_POHLED,
+  jeMesicniPohled,
+  jePohled,
+  zacatekOkna,
+} from "@/lib/rozpis-konstanty";
 import { dnyTydne, mesicniMrizka } from "@/lib/rozpis-mobil";
 import { DotazSelhal, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
@@ -156,8 +162,10 @@ export default async function Rozpis({
     );
   }
 
-  // Pokud je v URL zadán konkrétní den, počítáme rozsah od něj
-  const odKdy = denZUrl ?? dnesProvozni;
+  // Pokud je v URL zadán konkrétní den, počítáme rozsah od něj; „Týden“ od
+  // pondělí toho týdne (stejné pravidlo má i obrazovka: `zacatekOkna`).
+  const pohled = jePohled(pohledSurovy) ? pohledSurovy : VYCHOZI_POHLED;
+  const odKdy = zacatekOkna(pohled, denZUrl ?? dnesProvozni);
   const doKdy = posunDatum(odKdy, DNU_V_ROZPISU - 1);
 
   /*
@@ -180,7 +188,7 @@ export default async function Rozpis({
     zvoleného dne a zbytek měsíce byl prázdný. Ostatní pohledy načítají,
     co dřív.
   */
-  const mesicniOkno = pohledSurovy === "mesic" ? mesicniMrizka(odKdy).flat() : [];
+  const mesicniOkno = jeMesicniPohled(pohled) ? mesicniMrizka(odKdy).flat() : [];
   const nacistOd = mesicniOkno.length && mesicniOkno[0] < tyden[0] ? mesicniOkno[0] : tyden[0];
   const konecTydne = tyden[6] > doKdy ? tyden[6] : doKdy;
   const konecMesice = mesicniOkno[mesicniOkno.length - 1];

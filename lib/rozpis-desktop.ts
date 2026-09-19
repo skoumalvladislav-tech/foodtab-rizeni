@@ -270,8 +270,8 @@ export type FiltrDesktop = {
   useky: string[]
   /** id pozice. Prázdné = všechny. */
   pozice: string[]
-  /** id zaměstnance. Prázdné = všichni. */
-  osoba: string
+  /** id zaměstnanců; víc jich naráz = víc lidí v mřížce. Prázdné = všichni. */
+  osoby: string[]
   stav: StavFiltru
 }
 
@@ -279,13 +279,13 @@ export const FILTR_DESKTOP_PRAZDNY: FiltrDesktop = {
   hledani: '',
   useky: [],
   pozice: [],
-  osoba: '',
+  osoby: [],
   stav: 'vse',
 }
 
 /** Kolik filtrů je zapnutých. Hledání se nepočítá — má vlastní pole. */
 export function pocetFiltru(f: FiltrDesktop): number {
-  return f.useky.length + f.pozice.length + (f.osoba ? 1 : 0) + (f.stav !== 'vse' ? 1 : 0)
+  return f.useky.length + f.pozice.length + f.osoby.length + (f.stav !== 'vse' ? 1 : 0)
 }
 
 export const jeFiltrPrazdny = (f: FiltrDesktop) => pocetFiltru(f) === 0 && f.hledani.trim() === ''
@@ -323,7 +323,7 @@ export function osobaVyhovuje(
   useky: Map<string, string>,
 ): boolean {
   if (!jmenoVyhovuje(o.jmeno, f.hledani)) return false
-  if (f.osoba && f.osoba !== o.id) return false
+  if (f.osoby.length > 0 && !f.osoby.includes(o.id)) return false
   if (f.useky.length > 0 && !f.useky.includes(klicUseku(o, useky))) return false
   if (f.pozice.length > 0) {
     const mam = [o.poziceId, ...poziceSmen]
@@ -360,7 +360,7 @@ export function smenaVyhovuje(
   if (!smenaVyhovujeStavu(s, f.stav)) return false
 
   if (s.employee_id === null) {
-    if (f.osoba) return false
+    if (f.osoby.length > 0) return false
     if (f.hledani.trim() !== '' && !jmenoVyhovuje('Neobsazeno', f.hledani)) return false
     if (f.pozice.length > 0 && !(s.position_id && f.pozice.includes(s.position_id))) return false
     return true
@@ -374,6 +374,84 @@ export function smenaVyhovuje(
     barva: null,
   }
   return osobaVyhovuje(o, [s.position_id], f, useky)
+}
+
+/* --- krátké zápisy do úzkých buněk ---------------------------------------- */
+
+/** „08:00“ → „8“, „15:30“ → „15:30“ — do úzké buňky. */
+export function kratkyCas(hm: string): string {
+  return hm.endsWith(':00') ? String(Number(hm.slice(0, 2))) : hm
+}
+
+/** Hodiny jako české číslo: 1890 min → „31,5 h“, 480 → „8 h“. */
+export function hodinyStruc(minut: number): string {
+  return `${String(Math.round((minut / 60) * 100) / 100).replace('.', ',')} h`
+}
+
+/* --- celý měsíc jednoho člověka -------------------------------------------- */
+
+export type DenMesiceOsoby = {
+  den: string
+  /** Patří den do zobrazeného měsíce, nebo je jen z okolního týdne? */
+  vMesici: boolean
+  smeny: SmenaD[]
+}
+
+export type TydenMesiceOsoby = {
+  dny: DenMesiceOsoby[]
+  /** Naplánované minuty celého týdne od pondělí do neděle (i dny okolního měsíce). */
+  minut: number
+}
+
+export type MesicOsoby = {
+  tydny: TydenMesiceOsoby[]
+  /** Minuty, počet směn a nevydané směny — jen dny zobrazeného měsíce. */
+  minut: number
+  smen: number
+  nevydanych: number
+}
+
+/**
+ * Kalendář měsíce jednoho člověka: týdny od pondělí (`tydny`, jak je dá
+ * `mesicniMrizka`), v nich jeho směny po dnech. Součet týdne bere celý
+ * týden, součet měsíce jen dny měsíce — týden na rozhraní dvou měsíců
+ * tak ukazuje pravdu o hodinách za týden, a přitom se měsíc nezdvojí.
+ */
+export function sestavitMesicOsoby(v: {
+  smeny: SmenaD[]
+  osobaId: string
+  tydny: string[][]
+  /** `RRRR-MM` */
+  mesic: string
+}): MesicOsoby {
+  const poDnech = new Map<string, SmenaD[]>()
+  for (const s of v.smeny) {
+    if (s.employee_id !== v.osobaId || s.status === 'cancelled') continue
+    const seznam = poDnech.get(s.shift_date) ?? []
+    seznam.push(s)
+    poDnech.set(s.shift_date, seznam)
+  }
+
+  let minut = 0
+  let smen = 0
+  let nevydanych = 0
+  const tydny = v.tydny.map((dny) => {
+    let minutTydne = 0
+    const radek = dny.map((den) => {
+      const smeny = [...(poDnech.get(den) ?? [])].sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+      const vMesici = den.startsWith(v.mesic)
+      const m = smeny.reduce((k, s) => k + minutSmeny(s), 0)
+      minutTydne += m
+      if (vMesici) {
+        minut += m
+        smen += smeny.length
+        nevydanych += smeny.filter(cekaNaVydani).length
+      }
+      return { den, vMesici, smeny }
+    })
+    return { dny: radek, minut: minutTydne }
+  })
+  return { tydny, minut, smen, nevydanych }
 }
 
 /* --- mřížka týdne ---------------------------------------------------- */
@@ -486,7 +564,7 @@ export function sestavitMrizku(v: {
     if (radek.osoba === null) {
       // Neobsazené: jméno „Neobsazeno“ se dá vyhledat; úsek ani zaměstnanec
       // je neschovají (nemají člověka), pozice ano.
-      if (filtr.osoba) return false
+      if (filtr.osoby.length > 0) return false
       if (!jmenoVyhovuje('Neobsazeno', filtr.hledani)) return false
       if (filtr.pozice.length > 0) {
         return smeny.some((s) => s.position_id && filtr.pozice.includes(s.position_id))

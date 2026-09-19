@@ -30,10 +30,23 @@ export const STYL = {
   cisloTucne: 8,
   poznamka: 9,
   souctovyText: 10,
+  /** Jméno v týdenní tabulce: menší písmo, může mít druhý řádek (pozice). */
+  jmenoTydne: 11,
+  /** Pás s názvem úseku přes celou šířku tabulky. */
+  skupina: 12,
+  /** Nadpis týdne nad tabulkou. */
+  podtitul: 13,
+  /** Buňka dne mimo měsíc — šedá a prázdná. */
+  bunkaMimo: 14,
+  hlavickaMimo: 15,
 } as const
 
 export type BunkaXlsx =
-  | { t: 's'; v: string; s?: number }
+  /**
+   * `drobne[i]` označí i-tý řádek textu (dělený `\n`) drobným šedým písmem
+   * — vedlejší údaj pod hlavním, např. „pauza 15–17“ pod časem směny.
+   */
+  | { t: 's'; v: string; s?: number; drobne?: boolean[] }
   | { t: 'n'; v: number; s?: number }
 
 export type ListXlsx = {
@@ -46,8 +59,32 @@ export type ListXlsx = {
   zmrazit?: { radky: number; sloupce: number }
   /** Výška řádku v bodech podle čísla řádku od 1. */
   vyskyRadku?: Record<number, number>
+  /** `false` = A4 na výšku; jinak na šířku. */
   naSirku?: boolean
+  /**
+   * Pevné měřítko tisku v procentech. Bez něj se list při tisku zmenší na
+   * jednu stránku na šířku; s ním Excel ctí i ruční zalomení stránek
+   * (`zalomeniPred`), které se s „přizpůsobit na šířku“ neslučuje.
+   */
+  meritko?: number
+  /** Čísla řádků (od 1), PŘED kterými začíná nová stránka. */
+  zalomeniPred?: number[]
+  /**
+   * Záhlaví a zápatí tisku v zápisu Excelu (`&L` vlevo, `&R` vpravo,
+   * `&P` číslo strany, `&N` počet stran), na každé straně. Znak `&`
+   * v textu zdvoj přes `textTisku`.
+   */
+  tisk?: { zahlavi?: string; zapati?: string }
+  /**
+   * Tiskne se jen od tohoto řádku (od 1) dolů. Nadpis listu nad ním je na
+   * obrazovce, na papíře ho nahrazuje záhlaví — nezabírá tedy místo na
+   * první straně a týdny se dělí stejně na každé.
+   */
+  tiskOdRadku?: number
 }
+
+/** Text do záhlaví/zápatí tisku: `&` je tam řídicí znak, zdvojí se. */
+export const textTisku = (t: string) => t.replace(/&/g, '&&')
 
 /* --- XML ------------------------------------------------------------- */
 
@@ -73,26 +110,30 @@ const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationship
 
 const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <numFmts count="1"><numFmt numFmtId="164" formatCode="0.0"/></numFmts>
-<fonts count="5">
+<fonts count="7">
 <font><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="15"/><name val="Calibri"/></font>
 <font><i/><sz val="10"/><color rgb="FF6C7177"/><name val="Calibri"/></font>
 <font><sz val="10"/><name val="Calibri"/></font>
+<font><b/><sz val="10"/><name val="Calibri"/></font>
+<font><b/><sz val="12"/><name val="Calibri"/></font>
 </fonts>
-<fills count="5">
+<fills count="6">
 <fill><patternFill patternType="none"/></fill>
 <fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFEDEBE6"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFFBEFD2"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFF6F5F2"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFEFEFEF"/><bgColor indexed="64"/></patternFill></fill>
 </fills>
-<borders count="2">
+<borders count="3">
 <border><left/><right/><top/><bottom/><diagonal/></border>
 <border><left style="thin"><color rgb="FFD6D1C7"/></left><right style="thin"><color rgb="FFD6D1C7"/></right><top style="thin"><color rgb="FFD6D1C7"/></top><bottom style="thin"><color rgb="FFD6D1C7"/></bottom><diagonal/></border>
+<border><left/><right/><top style="thin"><color rgb="FFD6D1C7"/></top><bottom style="thin"><color rgb="FFD6D1C7"/></bottom><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="11">
+<cellXfs count="16">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
@@ -104,6 +145,11 @@ const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <xf numFmtId="164" fontId="1" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="4" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`
@@ -198,22 +244,42 @@ export function zipBezKomprese(soubory: { nazev: string; data: string | Uint8Arr
 
 /* --- sešit ----------------------------------------------------------- */
 
+/**
+ * Jedna položka sdílených textů (`<si>`). Obyčejný text je jeden `<t>`;
+ * s drobnými řádky je to formátovaný text po řádcích — každý běh dostane
+ * písmo výslovně, ať se nezdědí jiná velikost než ta, kterou má buňka.
+ */
+function polozkaTextu(text: string, drobne?: boolean[]): string {
+  if (!drobne) return `<si><t xml:space="preserve">${xml(text)}</t></si>`
+  const radky = text.split('\n')
+  const behy = radky.map((r, i) => {
+    const pismo = drobne[i]
+      ? '<rPr><sz val="8"/><color rgb="FF6C7177"/><rFont val="Calibri"/></rPr>'
+      : '<rPr><sz val="10"/><rFont val="Calibri"/></rPr>'
+    return `<r>${pismo}<t xml:space="preserve">${xml(r)}${i < radky.length - 1 ? '\n' : ''}</t></r>`
+  })
+  return `<si>${behy.join('')}</si>`
+}
+
 export function zapsatXlsx(listy: ListXlsx[]): Uint8Array {
   const sdilene: string[] = []
   const indexTextu = new Map<string, number>()
   let pocetTextu = 0
-  const textId = (t: string): number => {
+  const textId = (b: { v: string; drobne?: boolean[] }): number => {
     pocetTextu++
-    let i = indexTextu.get(t)
+    // Stejný text s jiným rozložením drobného písma je jiná položka.
+    const drobne = b.drobne?.some(Boolean) ? b.drobne : undefined
+    const klic = drobne ? `${b.v}\u0001${drobne.map((d) => (d ? 1 : 0)).join('')}` : b.v
+    let i = indexTextu.get(klic)
     if (i === undefined) {
       i = sdilene.length
-      sdilene.push(t)
-      indexTextu.set(t, i)
+      sdilene.push(polozkaTextu(b.v, drobne))
+      indexTextu.set(klic, i)
     }
     return i
   }
 
-  const listyXml = listy.map((list) => {
+  const listyXml = listy.map((list, li) => {
     const radky = list.radky
       .map((r, ri) => {
         const bunky = r
@@ -222,7 +288,7 @@ export function zapsatXlsx(listy: ListXlsx[]): Uint8Array {
             const adresa = `${sloupecNaPismeno(ci)}${ri + 1}`
             const styl = b.s ? ` s="${b.s}"` : ''
             return b.t === 's'
-              ? `<c r="${adresa}" t="s"${styl}><v>${textId(b.v)}</v></c>`
+              ? `<c r="${adresa}" t="s"${styl}><v>${textId(b)}</v></c>`
               : `<c r="${adresa}"${styl}><v>${Number.isFinite(b.v) ? b.v : 0}</v></c>`
           })
           .join('')
@@ -242,16 +308,35 @@ export function zapsatXlsx(listy: ListXlsx[]): Uint8Array {
       ? `<pane${z.sloupce ? ` xSplit="${z.sloupce}"` : ''}${z.radky ? ` ySplit="${z.radky}"` : ''} topLeftCell="${sloupecNaPismeno(z.sloupce)}${z.radky + 1}" activePane="${z.radky && z.sloupce ? 'bottomRight' : z.radky ? 'bottomLeft' : 'topRight'}" state="frozen"/>`
       : ''
 
-    return `${HLAVICKA_XML}<worksheet xmlns="${NS}" xmlns:r="${NS_R}"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${sloupecNaPismeno(nejdelsi - 1)}${list.radky.length}"/><sheetViews><sheetView workbookViewId="0"${z ? '' : ' tabSelected="1"'}>${pane}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>${sloupce ? `<cols>${sloupce}</cols>` : ''}<sheetData>${radky}</sheetData><pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="${list.naSirku === false ? 'portrait' : 'landscape'}" fitToWidth="1" fitToHeight="0"/></worksheet>`
+    // Pevné měřítko, nebo „na jednu stránku na šířku“ (výška se dopočítá).
+    const tisk = list.meritko
+      ? `scale="${Math.round(list.meritko)}"`
+      : 'fitToWidth="1" fitToHeight="0"'
+    const zalomeni = (list.zalomeniPred ?? []).filter((r) => r > 1)
+    const zapatiXml = list.tisk
+      ? `<headerFooter>${list.tisk.zahlavi ? `<oddHeader>${xml(list.tisk.zahlavi)}</oddHeader>` : ''}${list.tisk.zapati ? `<oddFooter>${xml(list.tisk.zapati)}</oddFooter>` : ''}</headerFooter>`
+      : ''
+    const zalomeniXml = zalomeni.length
+      ? `<rowBreaks count="${zalomeni.length}" manualBreakCount="${zalomeni.length}">${zalomeni.map((r) => `<brk id="${r - 1}" max="16383" man="1"/>`).join('')}</rowBreaks>`
+      : ''
+
+    return `${HLAVICKA_XML}<worksheet xmlns="${NS}" xmlns:r="${NS_R}">${list.meritko ? '' : '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'}<dimension ref="A1:${sloupecNaPismeno(nejdelsi - 1)}${list.radky.length}"/><sheetViews><sheetView workbookViewId="0"${li === 0 ? ' tabSelected="1"' : ''}>${pane}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>${sloupce ? `<cols>${sloupce}</cols>` : ''}<sheetData>${radky}</sheetData><pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="${list.naSirku === false ? 'portrait' : 'landscape'}" ${tisk}/>${zapatiXml}${zalomeniXml}</worksheet>`
   })
 
-  const sharedXml = `${HLAVICKA_XML}<sst xmlns="${NS}" count="${pocetTextu}" uniqueCount="${sdilene.length}">${sdilene
-    .map((t) => `<si><t xml:space="preserve">${xml(t)}</t></si>`)
-    .join('')}</sst>`
+  const sharedXml = `${HLAVICKA_XML}<sst xmlns="${NS}" count="${pocetTextu}" uniqueCount="${sdilene.length}">${sdilene.join('')}</sst>`
+
+  // Oblast tisku listů, které mají `tiskOdRadku` (jméno listu v apostrofech, `'` zdvojený).
+  const oblasti = listy.flatMap((l, i) => {
+    if (!l.tiskOdRadku) return []
+    const sloupcu = Math.max(1, ...l.radky.map((r) => r.length))
+    const list = `'${l.nazev.slice(0, 31).replace(/'/g, "''")}'`
+    return [`<definedName name="_xlnm.Print_Area" localSheetId="${i}">${xml(list)}!$A$${l.tiskOdRadku}:$${sloupecNaPismeno(sloupcu - 1)}$${l.radky.length}</definedName>`]
+  })
+  const oblastiTisku = oblasti.length ? `<definedNames>${oblasti.join('')}</definedNames>` : ''
 
   const workbook = `${HLAVICKA_XML}<workbook xmlns="${NS}" xmlns:r="${NS_R}"><bookViews><workbookView activeTab="0"/></bookViews><sheets>${listy
     .map((l, i) => `<sheet name="${xml(l.nazev.slice(0, 31))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`)
-    .join('')}</sheets></workbook>`
+    .join('')}</sheets>${oblastiTisku}</workbook>`
 
   const workbookRels = `${HLAVICKA_XML}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${listy
     .map(

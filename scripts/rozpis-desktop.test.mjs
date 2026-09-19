@@ -16,16 +16,26 @@
  * Vzorová data jsou vymyšlená; nic z nich není zapsané v logice.
  */
 
-import { BEZ_USEKU } from '../lib/rozpis-mobil.ts'
+import { BEZ_USEKU, mesicniMrizka } from '../lib/rozpis-mobil.ts'
+import {
+  MAX_LIDI_V_MESICI,
+  VYCHOZI_POHLED,
+  jeMesicniPohled,
+  jePohled,
+  zacatekOkna,
+} from '../lib/rozpis-konstanty.ts'
 import {
   FILTR_DESKTOP_PRAZDNY,
   cekaNaVydani,
   denKratce,
+  hodinyStruc,
   jeFiltrPrazdny,
   jmenoVyhovuje,
+  kratkyCas,
   normalizuj,
   pocetFiltru,
   puvodniStav,
+  sestavitMesicOsoby,
   sestavitMrizku,
   smenaVyhovuje,
   souhrnZmen,
@@ -190,9 +200,9 @@ je('velká písmena nevadí', jmenoVyhovuje('lucie skoumalová', 'LUCIE'), true)
 console.log('\n== Filtry ==')
 je('prázdný filtr je prázdný', jeFiltrPrazdny(FILTR_DESKTOP_PRAZDNY), true)
 je('hledání není filtr, ale prázdný už není', jeFiltrPrazdny({ ...FILTR_DESKTOP_PRAZDNY, hledani: 'a' }), false)
-je('počet filtrů: úsek + pozice + osoba + stav', pocetFiltru({
-  hledani: 'x', useky: ['u1', 'u2'], pozice: ['p1'], osoba: 'e1', stav: 'nevydane',
-}), 5)
+je('počet filtrů: úsek (2) + pozice (1) + zaměstnanci (2) + stav (1)', pocetFiltru({
+  hledani: 'x', useky: ['u1', 'u2'], pozice: ['p1'], osoby: ['e1', 'e2'], stav: 'nevydane',
+}), 6)
 je('hledání se do počtu filtrů nepočítá', pocetFiltru({ ...FILTR_DESKTOP_PRAZDNY, hledani: 'x' }), 0)
 
 const osoby = new Map([
@@ -213,7 +223,12 @@ je('neobsazená směna se filtrem úseku neschová', vyhovuje(volna, { useky: ['
 je('pozice Číšník: Tomáš i neobsazená číšnická směna', [sa, sb, volna].map((s) => vyhovuje(s, { pozice: ['p-cisnik'] })), [false, true, true])
 je('pozice se bere i ze směny, ne jen z člověka',
   vyhovuje(smena('2026-09-22', 'c', '08:00', '16:00', { position_id: 'p-cisnik' }), { pozice: ['p-cisnik'] }), true)
-je('zaměstnanec: neobsazená směna se schová', vyhovuje(volna, { osoba: 'a' }), false)
+je('zaměstnanec: neobsazená směna se schová', vyhovuje(volna, { osoby: ['a'] }), false)
+je('dva zaměstnanci najednou: Andrea a Tomáš ano, Oxy ne', [sa, sb, sc].map((s) => vyhovuje(s, { osoby: ['a', 'b'] })), [true, true, false])
+je('dva zaměstnanci: neobsazená směna se schová i tady', vyhovuje(volna, { osoby: ['a', 'b'] }), false)
+je('dva zaměstnanci + úsek Kuchyně (AND): jen Andrea', [sa, sb, sc].map((s) => vyhovuje(s, { osoby: ['a', 'b'], useky: ['u-k'] })), [true, false, false])
+je('dva zaměstnanci + hledání „tom“ (AND): jen Tomáš', [sa, sb, sc].map((s) => vyhovuje(s, { osoby: ['a', 'b'], hledani: 'tom' })), [false, true, false])
+je('člověk s jiným id, než je v seznamu, projde jen bez filtru zaměstnanců', [vyhovuje(sc, { osoby: ['a'] }), vyhovuje(sc, {})], [false, true])
 je('hledání „oxy“', [sa, sb, sc].map((s) => vyhovuje(s, { hledani: 'oxy' })), [false, false, true])
 je('hledání „neobsazeno“ najde volnou směnu', vyhovuje(volna, { hledani: 'neobs' }), true)
 je('hledání jména schová neobsazenou směnu', vyhovuje(volna, { hledani: 'andrea' }), false)
@@ -282,11 +297,67 @@ je('úsek Kuchyně: druhá pobočka (jen Plac) zmizí celá',
 je('stav nevydané: Oxy a neobsazené (mají koncept)', jmenaVsech(M(F({ stav: 'nevydane' }))).sort(), ['Neobsazeno', 'Oxy'])
 je('stav nevydané neukáže lidi bez směny', M(F({ stav: 'nevydane' })).bezSmeny, null)
 je('stav neobsazené: jen neobsazená skupina', jmenaVsech(M(F({ stav: 'neobsazene' }))), ['Neobsazeno'])
-je('zaměstnanec Andrea: jen její řádek', jmenaVsech(M(F({ osoba: 'a' }))), ['Andrea Mikulová'])
+je('zaměstnanec Andrea: jen její řádek', jmenaVsech(M(F({ osoby: ['a'] }))), ['Andrea Mikulová'])
+je('dva zaměstnanci: Andrea a Irina', jmenaVsech(M(F({ osoby: ['a', 'i'] }))), ['Andrea Mikulová', 'Irina'])
+je('dva zaměstnanci: Irina a Žaneta (Žaneta nemá směnu, ale je vybraná)', jmenaVsech(M(F({ osoby: ['i', 'z'] }))), ['Irina', 'Žaneta'])
+je('dva zaměstnanci: součty jen jejich (Andrea 16 + Irina 14 = 30 h)', M(F({ osoby: ['a', 'i'] })).celkemMinut, 30 * 60)
+je('dva zaměstnanci: neobsazená skupina se schová', M(F({ osoby: ['a', 'i'] })).pobocky[0].skupiny.some((s) => s.druh === 'neobsazene'), false)
+je('Tomáš (dvě pobočky) vybraný: řádek na obou pobočkách', jmenaVsech(M(F({ osoby: ['t'] }))), ['Tomáš Kovář', 'Tomáš Kovář'])
 je('pozice Číšník: Tomáš (obě pobočky) i Žaneta bez směny', jmenaVsech(M(F({ pozice: ['p-cisnik'] }))), ['Tomáš Kovář', 'Tomáš Kovář', 'Žaneta'])
 je('nic nevyhovuje: prázdná mřížka', [M(F({ hledani: 'qqq' })).pocetRadku, M(F({ hledani: 'qqq' })).pobocky.length], [0, 0])
 je('součty se řídí filtrem: jen Irina = 14 h', M(F({ hledani: 'irin' })).celkemMinut, 14 * 60)
 je('bez filtru vidím všech osm řádků (Andrea, Irina, Tomáš×2, Oxy, Neobsazeno, Žaneta)', M().pocetRadku, 7)
+
+console.log('\n== Pohledy a začátek okna ==')
+je('výchozí pohled je „sedm“ (sedm následujících dní)', VYCHOZI_POHLED, 'sedm')
+je('platné pohledy', ['den', 'sedm', 'tyden', 'mesic', 'osoby'].map(jePohled), [true, true, true, true, true])
+je('neplatné pohledy (adrese se nevěří)', ['', null, undefined, 'týden', 'TYDEN', 'mesic ', '__proto__'].map(jePohled), [false, false, false, false, false, false, false])
+je('sedm dní běží od zvoleného dne (čtvrtek 24. 9.)', zacatekOkna('sedm', '2026-09-24'), '2026-09-24')
+je('týden je kalendářní: čtvrtek 24. 9. → pondělí 21. 9.', zacatekOkna('tyden', '2026-09-24'), '2026-09-21')
+je('týden: pondělí zůstane pondělím', zacatekOkna('tyden', '2026-09-21'), '2026-09-21')
+je('týden: neděle patří k týdnu, který začal o šest dní dřív', zacatekOkna('tyden', '2026-09-27'), '2026-09-21')
+je('týden přes hranici měsíce: středa 2. 9. → pondělí 31. 8.', zacatekOkna('tyden', '2026-09-02'), '2026-08-31')
+je('týden přes hranici roku: pátek 1. 1. 2027 → pondělí 28. 12. 2026', zacatekOkna('tyden', '2027-01-01'), '2026-12-28')
+je('měsíc, den, osoby a neznámý pohled běží od zvoleného dne', ['mesic', 'den', 'osoby', 'nesmysl', undefined, null].map((p) => zacatekOkna(p, '2026-09-24')), Array(6).fill('2026-09-24'))
+je('měsíční pohledy: měsíc a osoby (načítá se celý měsíc), ostatní ne', ['mesic', 'osoby', 'sedm', 'tyden', 'den', undefined].map(jeMesicniPohled), [true, true, false, false, false, false])
+je('celý měsíc jde ukázat nejvýš dvěma lidem', MAX_LIDI_V_MESICI, 2)
+
+console.log('\n== Krátké zápisy ==')
+je('celá hodina bez :00, bez nuly navíc', [kratkyCas('08:00'), kratkyCas('22:00'), kratkyCas('00:00')], ['8', '22', '0'])
+je('půlhodina zůstane celá', [kratkyCas('15:30'), kratkyCas('08:15')], ['15:30', '08:15'])
+je('hodiny jako české číslo', [hodinyStruc(480), hodinyStruc(1890), hodinyStruc(0), hodinyStruc(100)], ['8 h', '31,5 h', '0 h', '1,67 h'])
+
+console.log('\n== Celý měsíc jednoho člověka ==')
+const tydnyZari = mesicniMrizka('2026-09-15')
+je('září 2026 má pět týdnů, od pondělí 31. 8. do neděle 4. 10.', [tydnyZari.length, tydnyZari[0][0], tydnyZari[4][6]], [5, '2026-08-31', '2026-10-04'])
+n = 0
+const mesicSmeny = [
+  smena('2026-09-01', 'a', '08:00', '16:00'),
+  smena('2026-09-02', 'a', '08:00', '16:00'),
+  koncept('2026-09-02', 'a', '18:00', '20:00'), // druhá směna téhož dne, nevydaná
+  smena('2026-09-30', 'a', '10:00', '18:00'),
+  smena('2026-08-31', 'a', '08:00', '12:00'), // pondělí před měsícem — okolní týden
+  smena('2026-10-01', 'a', '08:00', '12:00'), // čtvrtek po měsíci — okolní týden
+  smena('2026-09-15', 'a', '08:00', '16:00', { status: 'cancelled' }), // zrušená se nekreslí
+  smena('2026-09-01', 'b', '08:00', '16:00'), // jiný člověk
+  koncept('2026-09-03', null, '08:00', '16:00'), // neobsazená
+]
+const mo = sestavitMesicOsoby({ smeny: mesicSmeny, osobaId: 'a', tydny: tydnyZari, mesic: '2026-09' })
+je('pět týdnů po sedmi dnech', [mo.tydny.length, mo.tydny.every((t) => t.dny.length === 7)], [5, true])
+je('den mimo měsíc je označený (31. 8. a 1. 10.)', [mo.tydny[0].dny[0].vMesici, mo.tydny[0].dny[1].vMesici, mo.tydny[4].dny[3].vMesici], [false, true, false])
+je('jen směny tohoto člověka: 1. 9. má jednu', mo.tydny[0].dny[1].smeny.map((s) => s.starts_at), ['08:00:00'])
+je('dvě směny téhož dne po začátku: 2. 9.', mo.tydny[0].dny[2].smeny.map((s) => s.starts_at), ['08:00:00', '18:00:00'])
+je('zrušená směna se nedostala do kalendáře (15. 9.)', mo.tydny[2].dny[1].smeny.length, 0)
+je('neobsazená a cizí směny se nedostaly do kalendáře (3. 9.)', mo.tydny[0].dny[3].smeny.length, 0)
+je('hodiny týdne 1 zahrnují i 31. 8.: 4 + 8 + 8 + 2 = 22 h', mo.tydny[0].minut, 22 * 60)
+je('hodiny měsíce jsou jen dny měsíce: 8 + 8 + 2 + 8 = 26 h (bez 31. 8. a 1. 10.)', mo.minut, 26 * 60)
+je('směn v měsíci: 4 (bez okolních týdnů)', mo.smen, 4)
+je('nevydané v měsíci: jen večerní z 2. 9.', mo.nevydanych, 1)
+je('týden na konci měsíce: 30. 9. + 1. 10. = 8 + 4 = 12 h', mo.tydny[4].minut, 12 * 60)
+const prazdny = sestavitMesicOsoby({ smeny: mesicSmeny, osobaId: 'neexistuje', tydny: tydnyZari, mesic: '2026-09' })
+je('člověk bez směn: samé nuly, kalendář ale existuje', [prazdny.tydny.length, prazdny.minut, prazdny.smen, prazdny.nevydanych], [5, 0, 0, 0])
+je('směna přes půlnoc se počítá kladně (22–06 = 8 h)', sestavitMesicOsoby({ smeny: [smena('2026-09-10', 'a', '22:00', '06:00')], osobaId: 'a', tydny: tydnyZari, mesic: '2026-09' }).minut, 480)
+je('trhaná směna: pauza uvnitř se odečte (10–22 s pauzou 15–17 = 10 h)', sestavitMesicOsoby({ smeny: [smena('2026-09-10', 'a', '10:00', '22:00', { pauza_od: '15:00:00', pauza_do: '17:00:00' })], osobaId: 'a', tydny: tydnyZari, mesic: '2026-09' }).minut, 600)
 
 console.log(chyb === 0 ? '\n  VŠECHNY KONTROLY PROŠLY\n' : `\n  CHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)
