@@ -1,0 +1,61 @@
+-- =====================================================================
+-- Foodtab — vrátit přihlášenému čtení tří sloupců pobočky
+--
+-- Nastavení → Firma padalo na „This page couldn't load“ (19.9.2026).
+--
+-- ---------------------------------------------------------------------
+-- CO SE STALO
+--
+-- `branches` nemá celotabulkový `select`, jen granty po sloupcích
+-- (20260901170000_zarizeni_pobocky.sql — kvůli `kiosk_secret`). Dvě
+-- migrace z 16.9.2026, 20260916160000 (fotka pozadí) a 20260916170000
+-- (počasí), obě napsaly
+--
+--     revoke select on public.branches from authenticated;
+--     grant select (pevný výčet) on public.branches to authenticated;
+--
+-- a ten výčet vycházel z 20260901170000, ne ze stavu, který v databázi
+-- tou dobou skutečně byl. Tři sloupce, které dostaly grant až po něm,
+-- tím o čtení přišly:
+--
+--   ranni_email_komu     (20260901230000) — adresáti ranního přehledu
+--   prestavka_minut      (20260913150000) — přestávka pobočky
+--   prestavka_od_minut   (20260913150000) — od kdy se přestávka strhává
+--
+-- Nastavení → Firma si o `ranni_email_komu` řekne a dostane `42501
+-- permission denied` dřív, než se dostane na řádky. Kód
+-- (`sloupecNeexistuje`) rozpoznává jen `42703`, takže to nevyhodnotí
+-- jako nenasazenou migraci a obrazovka spadne na 500.
+--
+-- Zapisuje se přes SECURITY DEFINER průzory (`ulozit_ranni_email`,
+-- `zapsat_dochazku`, …) a čte se přes `app.worked_minutes`, které
+-- sloupce čtou jako vlastník — proto nic jiného nespadlo a chyba zůstala
+-- dva dny skrytá. Padá jen to jediné místo, které čte sloupec přímo.
+--
+-- ---------------------------------------------------------------------
+-- CO SE SCHVÁLNĚ NEDĚLÁ
+--
+--   * NEPÍŠE SE další `revoke` + celý výčet. Přesně to chybu způsobilo:
+--     výčet opsaný ze starší migrace je vždycky o tu poslední migraci
+--     pozadu. Tahle migrace jen PŘIDÁVÁ, a proto ji nejde rozbít
+--     pořadím ani tím, že mezitím přibyl další sloupec.
+--   * NEDAVÁ se plošný `grant select on public.branches` — smazal by
+--     výjimku pro `kiosk_secret`, klíč, kterým se ověřuje tablet na
+--     provozovně. `kiosk_secret` čtení nedostává a nedostane.
+--   * NEMĚNÍ se `update` — ten se `revoke select` netýká a zůstal.
+--
+-- Kdo příště přidá sloupec do `branches`, přidá ho do výčtu JEN
+-- `grant select (novy_sloupec) …`, bez `revoke`. Scénář
+-- `supabase/tests/krok38_scenar.sql` zkontroluje CELOU tabulku, ne jen
+-- tyhle tři — nový sloupec bez grantu ho shodí.
+--
+-- ---------------------------------------------------------------------
+-- NASAZENÍ
+--
+-- Jde o čistě aditivní `grant`, opakované spuštění nic nezmění a na data
+-- nesahá. Kdo ho potřebuje hned, může stejný řádek pustit ručně; pozdější
+-- `db push` pak proběhne jako prázdná operace. Nasazuje Šéfík.
+-- =====================================================================
+
+grant select (ranni_email_komu, prestavka_minut, prestavka_od_minut)
+  on public.branches to authenticated;
