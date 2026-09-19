@@ -1607,3 +1607,12 @@ div.ds-smd-smena:hover { box-shadow: none; }
   display: grid; place-items: start center; padding: 8px 2px; background: var(--sunken);
   font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
+
+/* --- „Zobrazit“: pobočka a úsek ------------------------------------------- */
+
+.ds-smd-zobrazit { width: 360px; }
+.ds-smd-zobrazit-hodnota {
+  max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-left: 7px; border-left: 1px solid var(--line-2); font-weight: 600;
+}
+.ds-smd-zobrazit-poznamka { grid-column: 1 / -1; }
