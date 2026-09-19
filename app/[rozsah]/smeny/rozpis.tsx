@@ -553,17 +553,17 @@ function TydenView({
                 /*
                   Dnešek i víkend jsou mosaz — jediná zlatá barva,
                   kterou appka má (--mosaz/--mosaz-sv, viz
-                  _tokeny.css) — Šéfík 17.9.2026 chtěl výslovně "lehce
-                  zlatou, kterou už používáme", pak "ještě víc
-                  zvýraznit". Odlišují se SÍLOU odstínu, ne barvou:
-                  dnešek zůstává nejsilnější (16 %), víkend zesílen
-                  ze 7 % na 14 % — pořád zřetelně pod dneškem, ale
-                  vizuálně vydatnější, ne jen jemný nádech.
+                  _tokeny.css), tatáž jako u přepínače Týden/Měsíc
+                  a Celá firma. Šéfík 19.9.2026: víkendy "podobnou
+                  barvou jako Celá firma nebo Týden, může být
+                  světlejší" — 14 % bylo sotva znát. Odlišují se
+                  SÍLOU odstínu: dnešek nejsilnější (40 %), víkend
+                  světlejší (28 %).
                 */
                 background: dnesJe
-                  ? "color-mix(in srgb, var(--mosaz-sv) 16%, var(--card))"
+                  ? "color-mix(in srgb, var(--mosaz-sv) 40%, var(--card))"
                   : vikend
-                    ? "color-mix(in srgb, var(--mosaz-sv) 14%, var(--card))"
+                    ? "color-mix(in srgb, var(--mosaz-sv) 28%, var(--card))"
                     : "var(--card)",
               }}
             >
@@ -739,14 +739,19 @@ function RadekTydne({
               padding: "9px 12px",
               textAlign: "center",
               borderLeft: "1px solid var(--line-2)",
-              background:
-                smenyDne.length > 0
-                  ? "var(--card)"
-                  : dnesJe
-                    ? "color-mix(in srgb, var(--mosaz-sv) 8%, var(--paper))"
-                    : vikend
-                      ? "color-mix(in srgb, var(--mosaz-sv) 7%, var(--paper))"
-                      : "transparent",
+              /*
+                Odstín platí i pro obsazené dny — dřív měl den se směnou
+                vždycky bílé pozadí, takže víkend v řádku s lidmi
+                vypadal jako všední den. Chip směny má vlastní pozadí
+                i rámeček, na zlatém podkladu se neztratí.
+              */
+              background: dnesJe
+                ? "color-mix(in srgb, var(--mosaz-sv) 22%, var(--card))"
+                : vikend
+                  ? "color-mix(in srgb, var(--mosaz-sv) 14%, var(--card))"
+                  : smenyDne.length > 0
+                    ? "var(--card)"
+                    : "transparent",
             }}
           >
             <div style={{ display: "grid", gap: "4px" }}>
@@ -1265,7 +1270,7 @@ function MesicView({
               fontWeight: 700,
               textTransform: "uppercase",
               letterSpacing: ".04em",
-              color: "var(--muted)",
+              color: i === 0 || i === 6 ? "var(--mosaz)" : "var(--muted)",
             }}
           >
             {nazev}
@@ -1288,6 +1293,8 @@ function MesicView({
 
             const pocetSmeny = smenePoDnech.get(denNum)?.length ?? 0;
             const pocetChybejicich = chybejiciPoDnech.get(denNum) ?? 0;
+            // Sloupce jdou Ne–So (viz záhlaví výš): 0 = neděle, 6 = sobota.
+            const vikend = sloupecIdx === 0 || sloupecIdx === 6;
 
             return (
               <button
@@ -1307,11 +1314,13 @@ function MesicView({
                   background:
                     denNum && datumStr === den
                       ? "var(--branch-soft)"
-                      : denNum && pocetSmeny === 0
-                        ? "transparent"
-                        : denNum
-                          ? "var(--sunken)"
-                          : "transparent",
+                      : denNum && vikend
+                        ? `color-mix(in srgb, var(--mosaz-sv) ${pocetSmeny === 0 ? 14 : 24}%, ${pocetSmeny === 0 ? "var(--card)" : "var(--sunken)"})`
+                        : denNum && pocetSmeny === 0
+                          ? "transparent"
+                          : denNum
+                            ? "var(--sunken)"
+                            : "transparent",
                   cursor: denNum ? "pointer" : "default",
                   fontSize: "13px",
                   color: denNum ? "var(--ink)" : "transparent",
