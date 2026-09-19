@@ -117,3 +117,64 @@ export function delkaSmenyMinut(od: string, doKdy: string): number {
   const b = naMinuty(doKdy)
   return b > a ? b - a : 24 * 60 - a + b
 }
+
+/**
+ * Okamžik z hodin na zdi v pásmu pobočky: „2026-09-19“ + „08:00“ →
+ * milisekundy od epochy.
+ *
+ * Protějšek databázového `(den + čas) at time zone zona_pobocky`. Potřeba
+ * všude, kde se hodiny ze směny (čas bez data a pásma) porovnávají s
+ * okamžikem (příchod, „teď“): směna 08:00 začíná v Praze o dvě hodiny
+ * dřív než 08:00 UTC a server běží v UTC.
+ *
+ * Posun pásma se zjišťuje dvakrát, aby to vyšlo i těsně kolem přechodu
+ * na letní/zimní čas. Hodina, která ten den neexistuje (02:30 při
+ * přechodu na letní), vyjde jako nejbližší platný okamžik — pro otázku
+ * „už ta směna začala?“ to stačí.
+ */
+export function okamzikVPasmu(den: string, cas: string, zona: string = ZONA_VYCHOZI): number {
+  const [r, m, d] = den.split('-').map(Number)
+  const [h, min = 0, s = 0] = cas.split(':').map(Number)
+  const naZdi = Date.UTC(r, m - 1, d, h, min, s)
+
+  const posunPasma = (okamzik: number): number => {
+    let casti: Intl.DateTimeFormatPart[]
+    try {
+      casti = new Intl.DateTimeFormat('en-CA', {
+        timeZone: zona,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }).formatToParts(new Date(okamzik))
+    } catch {
+      // Neznámé pásmo: výchozí, nikdy pásmo serveru (viz hlavičku souboru).
+      casti = new Intl.DateTimeFormat('en-CA', {
+        timeZone: ZONA_VYCHOZI,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }).formatToParts(new Date(okamzik))
+    }
+    const cislo = (typ: string) => Number(casti.find((c) => c.type === typ)?.value ?? 0)
+    const vPasmu = Date.UTC(
+      cislo('year'),
+      cislo('month') - 1,
+      cislo('day'),
+      cislo('hour'),
+      cislo('minute'),
+      cislo('second'),
+    )
+    return vPasmu - Math.floor(okamzik / 1000) * 1000
+  }
+
+  const prvni = naZdi - posunPasma(naZdi)
+  return naZdi - posunPasma(prvni)
+}

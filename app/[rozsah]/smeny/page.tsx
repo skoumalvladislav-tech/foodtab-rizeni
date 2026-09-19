@@ -9,10 +9,10 @@ import { dnyTydne, mesicniMrizka } from "@/lib/rozpis-mobil";
 import { DotazSelhal, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
-import Nadpis from "../nadpis";
 import PanelVydani from "./panel-vydani";
 import RozpisView from "./rozpis";
 import { nabidnoutSablony } from "./sablony";
+import { nactiDataVydani } from "./vydani-data";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +47,12 @@ type Smena = {
   // Kdo a kdy směnu založil — do detailu na telefonu.
   created_by: string | null;
   created_at: string | null;
+  // Stav při posledním vydání (migrace 20260901130000) — desktop podle
+  // něj rozlišuje nevydané a po vydání změněné směny.
+  published_employee_id: string | null;
+  published_starts_at: string | null;
+  published_ends_at: string | null;
+  published_status: string | null;
 };
 
 /**
@@ -68,11 +74,29 @@ export default async function Rozpis({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
-  searchParams: Promise<{ den?: string }>;
+  searchParams: Promise<{
+    den?: string;
+    pohled?: string;
+    /** Po vydání rozpisu: kolik zpráv odešlo (akce `vydatRozpis`). */
+    vydano?: string;
+    /** Po neúspěšném vydání: `vydani` + text z databáze. */
+    chyba?: string;
+    text?: string;
+  }>;
 }) {
   const { rozsah } = await params;
-  const { den: denSurovy } = await searchParams;
+  const { den: denSurovy, pohled: pohledSurovy, vydano, chyba, text } = await searchParams;
   const denZUrl = jeDatum(denSurovy) ? denSurovy : undefined;
+
+  /*
+    Výsledek vydání z adresy. Adrese se nevěří: číslo se bere jen tehdy,
+    když je to číslo, a text chyby se ořízne — je to zobrazený text, ne
+    příkaz, ale nemá být ani román.
+  */
+  const vysledekVydani = {
+    vydano: vydano !== undefined && /^\d{1,5}$/.test(vydano) ? Number(vydano) : null,
+    chyba: chyba === "vydani" ? (text ?? "Databáze vydání odmítla.").slice(0, 300) : null,
+  };
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -149,8 +173,18 @@ export default async function Rozpis({
     všechny své směny, ať je má kde chce; co smí číst, hlídá RLS.
   */
   const tyden = dnyTydne(odKdy);
-  const nacistOd = tyden[0];
-  const nacistDo = tyden[6] > doKdy ? tyden[6] : doKdy;
+
+  /*
+    Měsíční pohled na počítači ukazuje celý měsíc (týdny od pondělí do
+    neděle, jako kalendář na telefonu). Dřív dostal jen sedm dní od
+    zvoleného dne a zbytek měsíce byl prázdný. Ostatní pohledy načítají,
+    co dřív.
+  */
+  const mesicniOkno = pohledSurovy === "mesic" ? mesicniMrizka(odKdy).flat() : [];
+  const nacistOd = mesicniOkno.length && mesicniOkno[0] < tyden[0] ? mesicniOkno[0] : tyden[0];
+  const konecTydne = tyden[6] > doKdy ? tyden[6] : doKdy;
+  const konecMesice = mesicniOkno[mesicniOkno.length - 1];
+  const nacistDo = konecMesice && konecMesice > konecTydne ? konecMesice : konecTydne;
 
   const mrizka = mesicniMrizka(odKdy).flat();
   const nadchazejiciDo = posunDatum(dnesProvozni, 13);
@@ -162,18 +196,36 @@ export default async function Rozpis({
   // Stránka to nesmí strhnout s sebou, proto se v tom případě zopakuje
   // bez nich (viz lib/supabase/dotaz.ts, sloupecNeexistuje).
   const zakladniSloupce =
-    "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at, created_by, created_at";
+    "id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, note, published_at, created_by, created_at, published_employee_id, published_starts_at, published_ends_at, published_status";
 
-  function dotazNaSmeny(sloupce: string, od: string, doDne: string, zamestnanec?: string) {
+  /*
+    `zrusene`: opačný výběr — jen směny, které se po vydání zrušily a
+    lidé se o tom ještě nedozvěděli. Nekreslí se, ale patří do rozdílu
+    proti vydanému rozpisu („2 směny čekají na vydání“). Zrušená směna,
+    o které už se hlásilo (`published_status = 'cancelled'`), tam není.
+  */
+  function dotazNaSmeny(
+    sloupce: string,
+    od: string,
+    doDne: string,
+    zamestnanec?: string,
+    zrusene = false,
+  ) {
     let d = supabase
       .from("shifts")
       .select(sloupce)
       .eq("tenant_id", tenantId)
       .gte("shift_date", od)
       .lte("shift_date", doDne)
-      .neq("status", "cancelled")
       .order("shift_date", { ascending: true })
       .order("starts_at", { ascending: true });
+
+    d = zrusene
+      ? d
+          .eq("status", "cancelled")
+          .not("published_at", "is", null)
+          .or("published_status.is.null,published_status.neq.cancelled")
+      : d.neq("status", "cancelled");
 
     if (zamestnanec) {
       d = d.eq("employee_id", zamestnanec);
@@ -183,17 +235,23 @@ export default async function Rozpis({
     return d;
   }
 
-  async function nactiSmeny(od: string, doDne: string, zamestnanec?: string): Promise<Smena[]> {
+  async function nactiSmeny(
+    od: string,
+    doDne: string,
+    zamestnanec?: string,
+    zrusene = false,
+  ): Promise<Smena[]> {
     let { data, error } = await dotazNaSmeny(
       `${zakladniSloupce}, pauza_od, pauza_do`,
       od,
       doDne,
       zamestnanec,
+      zrusene,
     );
     let maPauzy = true;
     if (error && sloupecNeexistuje(error)) {
       maPauzy = false;
-      ({ data, error } = await dotazNaSmeny(zakladniSloupce, od, doDne, zamestnanec));
+      ({ data, error } = await dotazNaSmeny(zakladniSloupce, od, doDne, zamestnanec, zrusene));
     }
     if (error) throw new DotazSelhal("směny", error);
     return ((data ?? []) as unknown as Record<string, unknown>[]).map((s) => ({
@@ -219,9 +277,28 @@ export default async function Rozpis({
     jaId = (ja?.[0]?.id as string | undefined) ?? null;
   }
 
-  const [smeny, mojeSmeny] = await Promise.all([
+  /*
+    Pobočky, na kterých ten člověk smí plánovat. Rozhoduje se podle
+    práva, ne podle rozsahu z adresy — pobočka z prohlížeče je návrh
+    (pravidlo 4) a databáze si to stejně ověří znovu.
+  */
+  const pobockyProPlanovani = (
+    await Promise.all(
+      ctx.branches.map(async (b) =>
+        (await hasAccess(tenantId, "shifts.manage", b.id))
+          ? { id: b.id, nazev: b.name }
+          : null,
+      ),
+    )
+  ).filter((b): b is { id: string; nazev: string } => b !== null);
+
+  const [smeny, mojeSmeny, zrusene] = await Promise.all([
     nactiSmeny(nacistOd, nacistDo),
     jaId ? nactiSmeny(mojeOd, mojeDo, jaId) : Promise.resolve([] as Smena[]),
+    // Zrušené po vydání zajímají jen toho, kdo rozpis vydává.
+    pobockyProPlanovani.length > 0
+      ? nactiSmeny(odKdy, doKdy, undefined, true)
+      : Promise.resolve([] as Smena[]),
   ]);
 
   // Jména lidí a názvy pozic. Neobsazená směna nemá employee_id — ta se
@@ -243,10 +320,23 @@ export default async function Rozpis({
   */
   const domovskeUseky = new Map<string, string | null>();
 
+  /*
+    Pozice člověka (employees.position_id) — štítek pod jménem v mřížce
+    na počítači, ne pozice ze směny — a jeho uživatelský účet, podle
+    kterého se pozná, komu při vydání rozpisu zazvoní.
+  */
+  const poziceLidi = new Map<string, string | null>();
+  const ucty = new Map<string, string | null>();
+
+  /*
+    Kdo všechno se v okně objevuje. Kromě lidí na směnách i ti, komu
+    směnu po vydání vzali (`published_employee_id`) — jejich jméno je
+    potřeba v přehledu změn, i když už na směně nestojí.
+  */
   const idLidi = [
     ...new Set(
-      [...smeny, ...mojeSmeny]
-        .map((s) => s.employee_id)
+      [...smeny, ...mojeSmeny, ...zrusene]
+        .flatMap((s) => [s.employee_id, s.published_employee_id])
         .concat(jaId)
         .filter((i): i is string => !!i),
     ),
@@ -254,18 +344,25 @@ export default async function Rozpis({
   if (idLidi.length > 0) {
     const { data: lide, error: chybaLide } = await supabase
       .from("employees")
-      .select("id, full_name, color, usek_id")
+      .select("id, full_name, color, usek_id, position_id, user_id")
       .in("id", idLidi);
     if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
     for (const c of lide ?? []) {
       jmena.set(c.id as string, c.full_name as string);
       barvy.set(c.id as string, barvaNeboNic(c.color));
       domovskeUseky.set(c.id as string, (c.usek_id as string | null) ?? null);
+      poziceLidi.set(c.id as string, (c.position_id as string | null) ?? null);
+      ucty.set(c.id as string, (c.user_id as string | null) ?? null);
     }
   }
 
   const idPozic = [
-    ...new Set([...smeny, ...mojeSmeny].map((s) => s.position_id).filter((i): i is string => !!i)),
+    ...new Set(
+      [...smeny, ...mojeSmeny]
+        .map((s) => s.position_id)
+        .concat([...poziceLidi.values()])
+        .filter((i): i is string => !!i),
+    ),
   ];
   if (idPozic.length > 0) {
     const { data: p, error: chybaP } = await supabase
@@ -279,7 +376,7 @@ export default async function Rozpis({
   const nazvyUseku = new Map<string, string>();
   const idUseku = [...new Set([...domovskeUseky.values()].filter((i): i is string => !!i))];
   if (idUseku.length > 0) {
-    // Pořadí si určuje firma (`poradi`); telefon podle něj řadí skupiny.
+    // Pořadí si určuje firma (`poradi`); telefon i mřížka podle něj řadí skupiny.
     const { data: u, error: chybaU } = await supabase
       .from("useky")
       .select("id, nazev")
@@ -311,21 +408,6 @@ export default async function Rozpis({
 
   /* --- 3. ZADÁVÁNÍ ---------------------------------------------- */
 
-  /*
-    Pobočky, na kterých ten člověk smí plánovat. Rozhoduje se podle
-    práva, ne podle rozsahu z adresy — pobočka z prohlížeče je návrh
-    (pravidlo 4) a databáze si to stejně ověří znovu.
-  */
-  const pobockyProPlanovani = (
-    await Promise.all(
-      ctx.branches.map(async (b) =>
-        (await hasAccess(tenantId, "shifts.manage", b.id))
-          ? { id: b.id, nazev: b.name }
-          : null,
-      ),
-    )
-  ).filter((b): b is { id: string; nazev: string } => b !== null);
-
   let planovani = null;
   if (pobockyProPlanovani.length > 0) {
     /*
@@ -335,11 +417,34 @@ export default async function Rozpis({
     */
     const { data: lideData, error: chybaLide2 } = await supabase
       .from("employees")
-      .select("id, full_name")
+      .select("id, full_name, usek_id, position_id, color")
       .eq("tenant_id", tenantId)
       .is("deleted_at", null)
       .order("full_name");
     if (chybaLide2) throw new DotazSelhal("zaměstnanci", chybaLide2);
+
+    /*
+      Úseky lidí, kteří v okně nemají směnu — filtr „Úsek“ a jejich řádky
+      dole v mřížce je potřebují znát. Ostatní úseky už jsou načtené výš.
+    */
+    const chybejiciUseky = [
+      ...new Set(
+        (lideData ?? [])
+          .map((c) => c.usek_id as string | null)
+          .filter((i): i is string => !!i && !nazvyUseku.has(i)),
+      ),
+    ];
+    if (chybejiciUseky.length > 0) {
+      const { data: dalsi } = await supabase
+        .from("useky")
+        .select("id, nazev")
+        .in("id", chybejiciUseky)
+        .order("poradi", { ascending: true })
+        .order("nazev", { ascending: true });
+      for (const c of dalsi ?? []) nazvyUseku.set(c.id as string, c.nazev as string);
+    }
+
+    const vidiDochazku = await hasAccess(tenantId, "attendance.read", scope.branchId);
 
     const { data: poziceData } = await supabase
       .from("positions")
@@ -371,13 +476,57 @@ export default async function Rozpis({
       lide: (lideData ?? []).map((c) => ({
         id: c.id as string,
         jmeno: c.full_name as string,
+        usekId: (c.usek_id as string | null) ?? null,
+        poziceId: (c.position_id as string | null) ?? null,
+        barva: barvaNeboNic(c.color),
       })),
+      vidiDochazku,
       pozice: (poziceData ?? []).map((p) => ({
         id: p.id as string,
         label: p.label as string,
       })),
     };
   }
+
+  /*
+    Vydání rozpisu. Jen na pobočce a jen tomu, kdo na TÉ pobočce smí
+    plánovat: upozornění se vážou na pobočku a „vydat za celou firmu“ by
+    znamenalo rozeslat lidem i to, co se jich netýká.
+
+    Dřív se panel vydání kreslil každému, kdo rozpis smí číst — člověk
+    bez práva plánovat viděl „Vydat znovu“ a tlačítko mu pak spadlo na
+    odmítnutí z databáze. Databáze ho odmítne pořád (první i druhá
+    obranná linie, pravidlo 3); tady se jen přestane nabízet, co nemůže
+    projít.
+  */
+  const smiVydavat =
+    scope.level === "branch" &&
+    scope.branchId !== null &&
+    pobockyProPlanovani.some((b) => b.id === scope.branchId);
+
+  const dataVydani = smiVydavat
+    ? await nactiDataVydani(supabase, tenantId, scope.branchId as string, odKdy, doKdy)
+    : null;
+
+  /*
+    Komu při vydání zazvoní. Říká to databáze (`rozpis_nahled`, tatáž
+    funkce jako vlastní vydání); tady se jen přeloží z uživatelských účtů
+    na zaměstnance, aby to mřížka uměla přiložit k řádku.
+  */
+  const ucetVNahledu = new Set((dataVydani?.nahled ?? []).map((r) => r.user_id));
+  const vydani = planovani
+    ? {
+        pobockaId: smiVydavat ? scope.branchId : null,
+        od: odKdy,
+        doKdy,
+        mozeVydat: dataVydani !== null,
+        vydanoKdy: dataVydani?.stav?.vydano_kdy ?? null,
+        zprav: ucetVNahledu.size,
+        upozornit: [...ucty]
+          .filter(([, ucet]) => ucet !== null && ucetVNahledu.has(ucet))
+          .map(([id]) => id),
+      }
+    : null;
 
   /* --- 4. VYKRESLENÍ -------------------------------------------- */
 
@@ -405,29 +554,20 @@ export default async function Rozpis({
       změny: nadpis, vydání, rozpis.
     */
     <div className="ds-sm-stranka">
-      {/* Na telefonu má nadpis roli hlavičky obrazovky sám mobilní pohled. */}
-      <div className="ds-sm-jen-desktop">
-        <Nadpis oci="Provoz" popis="Kdo kdy stojí. Týden dopředu.">
-          Rozpis směn
-        </Nadpis>
-      </div>
-
       {/*
-        Vydání rozpisu. Jen na pobočce a jen tomu, kdo smí plánovat:
-        upozornění se vážou na pobočku a „vydat za celou firmu“ by
-        znamenalo rozeslat lidem i to, co se jich netýká.
-
-        Panel si sám ověří právo přes průzor v databázi — tady se jen
-        rozhoduje o kreslení, což zámek není.
+        Nadpis obrazovky i vydání rozpisu na počítači kreslí sám
+        `RozpisView` (nadpis s tlačítky vpravo, pruh vydání nad
+        mřížkou). Na telefonu má roli hlavičky mobilní pohled a vydání je
+        karta pod seznamem — tu zná jen telefon, proto `ds-sm-jen-mobil`.
       */}
-      {scope.level === "branch" && scope.branchId ? (
-        <div className="ds-sm-vydani">
+      {dataVydani && scope.branchId ? (
+        <div className="ds-sm-vydani ds-sm-jen-mobil">
           <PanelVydani
             rozsah={rozsah}
-            tenantId={tenantId}
             branchId={scope.branchId}
             od={odKdy}
             doKdy={doKdy}
+            data={dataVydani}
           />
         </div>
       ) : null}
@@ -461,6 +601,10 @@ export default async function Rozpis({
           branchName: scope.branchName ?? null,
         }}
         planovani={planovani}
+        poziceLidi={poziceLidi}
+        zrusene={zrusene}
+        vydani={vydani}
+        vysledekVydani={vysledekVydani}
       />
     </div>
   );

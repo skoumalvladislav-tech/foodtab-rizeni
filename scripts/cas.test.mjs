@@ -37,7 +37,14 @@ import fs from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
-import { datumACasSRokemVPasmu, datumACasVPasmu, denVPasmu, hodinaVPasmu, ZONA_VYCHOZI } from '../lib/cas.ts'
+import {
+  datumACasSRokemVPasmu,
+  datumACasVPasmu,
+  denVPasmu,
+  hodinaVPasmu,
+  okamzikVPasmu,
+  ZONA_VYCHOZI,
+} from '../lib/cas.ts'
 import { nactiKomponentu } from './vykreslit.mjs'
 
 /** Kód bez komentářů. Vysvětlení chyby není totéž co chyba. */
@@ -112,6 +119,29 @@ ma('datum a čas dohromady', datumACasVPasmu(LETO, 'Europe/Prague'), '31. 8. 22:
 ma('datum a čas s rokem (letní čas)', datumACasSRokemVPasmu('2026-09-12T08:24:00Z', 'Europe/Prague'), '12. 9. 2026 10:24')
 ma('datum a čas s rokem (zimní čas)', datumACasSRokemVPasmu('2026-12-12T08:24:00Z', 'Europe/Prague'), '12. 12. 2026 09:24')
 ma('datum a čas s rokem, nesmyslný vstup vrátí prázdno', datumACasSRokemVPasmu('nesmysl'), '')
+
+console.log('\n== Hodiny na zdi → okamžik (směna 08:00 porovnaná s příchodem) ==')
+
+/*
+  Živý přehled docházky porovnává začátek směny (čas bez data a pásma) s
+  okamžikem příchodu. Server běží v UTC, směna v Praze: 08:00 pražského
+  času je v létě 06:00 UTC. Kdyby se čas směny bral jako UTC, „směna už
+  začala“ by se hlásila o dvě hodiny pozdě.
+*/
+const iso = (ms) => new Date(ms).toISOString()
+ma('léto: 08:00 v Praze = 06:00 UTC', iso(okamzikVPasmu('2026-07-15', '08:00', 'Europe/Prague')), '2026-07-15T06:00:00.000Z')
+ma('zima: 08:00 v Praze = 07:00 UTC', iso(okamzikVPasmu('2026-01-15', '08:00', 'Europe/Prague')), '2026-01-15T07:00:00.000Z')
+ma('čas se sekundami (08:00:00)', iso(okamzikVPasmu('2026-07-15', '08:00:00', 'Europe/Prague')), '2026-07-15T06:00:00.000Z')
+ma('v UTC je to totéž', iso(okamzikVPasmu('2026-07-15', '08:00', 'UTC')), '2026-07-15T08:00:00.000Z')
+ma('New York (letní čas UTC−4)', iso(okamzikVPasmu('2026-07-15', '08:00', 'America/New_York')), '2026-07-15T12:00:00.000Z')
+// Přechod na letní čas (29. 3. 2026 ve 2:00 → 3:00): 03:30 už je letní.
+ma('po přechodu na letní čas', iso(okamzikVPasmu('2026-03-29', '03:30', 'Europe/Prague')), '2026-03-29T01:30:00.000Z')
+// Přechod na zimní čas (25. 10. 2026): ráno 08:00 už je zimní (UTC+1).
+ma('po přechodu na zimní čas', iso(okamzikVPasmu('2026-10-25', '08:00', 'Europe/Prague')), '2026-10-25T07:00:00.000Z')
+ma('půlnoc pražského času přes hranici dne', iso(okamzikVPasmu('2026-09-21', '00:00', 'Europe/Prague')), '2026-09-20T22:00:00.000Z')
+ma('nesmyslné pásmo → výchozí Praha, ne pásmo serveru', iso(okamzikVPasmu('2026-07-15', '08:00', 'Nesmysl/Nikde')), '2026-07-15T06:00:00.000Z')
+// A hodina, kterou vrátí zpátky, musí sedět (kruh: okamžik → hodina).
+ma('kruh: okamžik → hodina v Praze', hodinaVPasmu(okamzikVPasmu('2026-09-21', '22:15', 'Europe/Prague'), 'Europe/Prague'), '22:15')
 
 /* =====================================================================
    2. Panel nedokončených — hotové HTML

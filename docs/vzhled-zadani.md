@@ -352,3 +352,43 @@ na 640 px (tam, kde je spodní lišta), ne JavaScriptem.
 
 Před odevzdáním další mobilní obrazovky ověř stejně jako oddíl 11, navíc
 360 px (nejmenší telefon) a že `scrollWidth` okna se rovná jeho šířce.
+
+## 13. Směny a Docházka na počítači — pracovní plocha manažera (19.9.2026)
+
+Zadání „Desktop Směny + Docházka UX 2.0“, předloha desktopového mockupu
+Rozpisu (týden, panel „Upravit směnu“ vpravo). Mobilní část (oddíl 12)
+se nezměnila — desktop je jiná **prezentace** týchž dat a týchž právech.
+
+**Rozpis (týdenní mřížka je hlavní plocha):**
+
+| Oblast | Pravidlo | Kde to je |
+|---|---|---|
+| Výška | Nadpis, jeden řádek nástrojů a (jen když je co vydávat) jeden úzký pruh. Mřížka zabere zbytek obrazovky a scrolluje sama v sobě; na 1536 × 864 je vidět 9–10 řádků. | `.ds-smd`, `smeny/desktop/` |
+| Nástroje | `‹ 19.–25. září ›` · Dnes · Den/Týden/Měsíc · hledání · Filtry. Hledání jde po jménu bez ohledu na diakritiku a filtruje řádky hned. | `desktop/nastroje.tsx`, `lib/rozpis-desktop.ts` |
+| Filtry | Jedna nabídka: úsek, pozice, zaměstnanec, stav směny. Aktivní jako čipy. Neobsazená směna se filtrem úseku **neschová** (je to poplach), schová ji jen výslovný stav nebo zaměstnanec. | `lib/rozpis-desktop.ts` (`smenaVyhovuje`) |
+| Prázdná buňka | Čistá. „+ Přidat“ až při najetí nebo zaměření. | `.ds-smd-pridat` |
+| Karta směny | Tři stavy, každý s tvarem a slovem, ne jen barvou: vydaná (plný modrý rámeček), **Nevydáno** (přerušovaný jantarový + značka), **Změněno** po vydání (plný jantarový + značka). Původní stav je v `title` a v panelu. | `.ds-smd-smena`, `lib/rozpis-desktop.ts` (`stavSmeny`) |
+| Jména | Nikdy lámání po znacích: mezi slovy nejvýš dva řádky, pak výpustka. Sloupec 196–216 px. | `.ds-smd-jmeno-text` |
+| Hodiny | Za pozicí u člověka („Kuchařka · 32 h“), po dnech pod datem, po úsecích v hlavičce skupiny, celkem dole. Plánované délky bez automatické přestávky, neobsazené směny se nepočítají do lidí. Při zadávání směny formulář ukazuje průběžně „tento týden 32 h → 40 h“. | `mrizka.tsx`, `formular-smeny.tsx` |
+| Úseky | Sbalitelné (`aria-expanded`), s počtem lidí a hodin. Neobsazené směny jsou jeden řádek nahoře, ne skupina. | `SkupinaMrizkyView` |
+| Panel „Upravit směnu“ | Vpravo, **nemodální** (bez ztmavení, pod horní lištou) — rozpis zůstává vidět a jde přepnout na jinou směnu. Pole nižší než na telefonu (40 px), dva časy v jednom krátkém poli. Nahoře kdo a stav vůči vydanému rozpisu; dole docházka k té směně a potvrzení upozornění. | `components/ui/Drawer.tsx` (`nemodalni`), `desktop/hlavicka-smeny.tsx`, `desktop/panel-ke-smene.tsx` |
+| Vydání | Pruh „7 změn čeká na vydání · 1 zaměstnanec bude upozorněn“ + [Zkontrolovat změny] (filtr Nevydané) + [Vydat rozpis]. Vydat otevře kontrolu: co se změnilo (`ST 08:00–16:00 → 10:00–18:00`), komu zazvoní. Číslo „komu zazvoní“ dává databáze (`rozpis_nahled`), přehled změn se skládá z týchž sloupců jako `app.rozdil_rozpisu`. Po vydání se ukáže výsledek (kolik zpráv odešlo, nebo co databáze odmítla) a vedoucí se vrátí na týž týden. | `desktop/vydani.tsx`, `zprava-vydani.tsx`, `vydani.ts` |
+| Import a export | Import z tabulky je tlačítko v záhlaví (panel s průvodcem), ne trvalá karta. Export měsíce do Excelu (.xlsx) a PDF: `/api/smeny/export`, právo `shifts.manage`. | `app/api/smeny/export/route.ts`, `lib/rozpis-export*.ts` |
+| Písmo | Nadpis obrazovky je bezpatkový tučný (jako mobilní část a mockup); panely (`Drawer`) mají patkový nadpis podle oddílu 11. | `.ds-smd .ft-hlava h1` |
+
+**Docházka (vedoucí s `attendance.read` na pobočce vidí živý přehled):**
+
+| Oblast | Pravidlo | Kde to je |
+|---|---|---|
+| Karty | V práci · Čekáme (směna ještě nezačala) · Po začátku směny (příchod chybí) · Na místě dnes. **Žádné „Zpoždění“** — firma nemá pravidlo tolerance, takže by to byl vymyšlený práh. | `lib/dochazka-dnes.ts` |
+| „Je v práci“ | Jedna definice = `app.otevreny_prichod` (nestornovaný, systémem neuzavřený příchod bez pozdějšího odchodu v témže provozním dni). Nikdy podle poslední události. | `lib/dochazka-dnes.ts` |
+| Čas na místě | Od příchodu do odchodu (u lidí v práci do teď), bez odečtu přestávek — stejné číslo, které si člověk čte o sobě. Mzdy počítá `app.worked_minutes`. | `pritomnostOsoby` |
+| Seznamy | Právě v práci · Ještě nepřišli · Odešli · Nesrovnalosti (směna skončila bez příchodu). Kdo se píchl mimo rozpis, má značku. | `dochazka/prehled/` |
+| Panel člověka | Plán dne, příchod, odchod, na místě, záznamy dne; **Tento měsíc** (hodiny, hrubá mzda) jen s `payroll.read` — bere se z `employee_earnings`, ne z vlastního počtu. | `prehled/detail.tsx`, `detail-akce.ts` |
+| Kiosk | Jen malý stav „Kiosk aktivní“ a odkaz na zařízení (s `settings.manage`). Kód z tabletu, jeho rotace ani kontrola se nezměnily. | `prehled/prehled.tsx` |
+| Obnovování | Přehled se sám obnovuje každou minutu (jen na viditelné záložce). | `prehled/auto-obnova.tsx` |
+| Vlastní píchačka | Zůstává pod přehledem („Moje docházka“). Majitel bez záznamu zaměstnance přehled vidí taky. | `dochazka/page.tsx` |
+
+Před odevzdáním další desktopové obrazovky ověř: snímky 1536 × 864 (mřížka
+zabírá většinu, viditelných 8–10 řádků), 1280, 1024 a tablet 768, tmavý
+režim, a že telefon (oddíl 12) vypadá stejně jako předtím.
