@@ -2,25 +2,37 @@
  * Měsíční rozpis jako PDF — stránky z modelu `ExportMesice`.
  *
  * ---------------------------------------------------------------------
- * A4 NA VÝŠKU, TÝDNY POD SEBOU
+ * CELÝ MĚSÍC NA JEDNÉ STRÁNCE A4 NA VÝŠKU
  *
- * Měsíc o 30 sloupcích se na A4 nevejde tak, aby byl čitelný —
- * „8–16“ by musela být písmem, které se nedá číst. Proto jedna tabulka
- * na TÝDEN (sedm dní od pondělí, jako mřížka na obrazovce). Sloupec dne
- * je asi 56 bodů, což na „10:00–22:00“ písmem 7 pt stačí; trhaná směna
- * má pod časem druhý řádek „pauza 15–17“.
+ * Dny jsou v řádcích, lidé ve sloupcích (záhlaví jmen je otočené o 90°,
+ * aby sloupec mohl být úzký). Sloupec je široký asi jako čas směny
+ * („8–16“, „16–23:30“), takže na šířku 539 bodů se vejde kolem dvaceti
+ * lidí. Písmo se volí největší, při kterém se celý měsíc (28–31 řádků)
+ * vejde na výšku i na šířku; klesne-li pod 6 bodů, lidé se rozdělí na
+ * víc stránek (každá má celý měsíc, jen část lidí) a písmo se zvětší.
  *
- * Týdny se na stránku skládají pod sebe, dokud se vejdou celé; týden se
- * nikdy netrhá, pokud se vejde na prázdnou stránku (menší podnik má tak
- * dva týdny na stránce, větší jeden). Týden vyšší než stránka pokračuje
- * na další se záhlavím tabulky znovu a úseky se drží pohromadě s aspoň
- * jedním řádkem. Dny mimo měsíc (začátek a konec týdne) jsou šedé a
- * prázdné, ať je jasné, že tam rozpis tenhle export nepokrývá. Na konci
- * je souhrn hodin za celý měsíc.
+ * Úseky ani pobočky se nekreslí jako záhlaví. Kdo pracuje na víc
+ * pobočkách, má pobočku pod časem směny — celým názvem, když se vejde,
+ * jinak zkratkou (vysvětlenou v poznámce pod tabulkou).
+ *
+ * Kdyby se ani při nejmenším písmu nevešel měsíc na výšku (hodně dvojitých
+ * směn a poboček pod časy), řádky pokračují na další stránce se záhlavím
+ * znovu — všichni lidé zůstanou pohromadě, jen měsíc se zlomí.
  */
 
-import { denVTydnu, jeVikend, ZKRATKY_DNU } from './rozpis-mobil.ts'
-import { hodinyCislem, nazevMesice, pauzaKratce, popisTydne, type DilSmeny, type ExportMesice, type RadekExportu } from './rozpis-export.ts'
+import { jeVikend } from './rozpis-mobil.ts'
+import {
+  hodinyCislem,
+  pauzaKratce,
+  popisDne,
+  rozdelitLidi,
+  vetyPoznamky,
+  zalomitVety,
+  type DilSmeny,
+  type ExportMesice,
+  type PobockaExportu,
+  type SloupecExportu,
+} from './rozpis-export.ts'
 import { sirkaTextu, StrankaPdf, zapsatPdf, zkratitText, type Barva } from './pdf-zapis.ts'
 
 /** A4 na výšku v bodech (1 bod = 1/72″). */
@@ -34,319 +46,297 @@ const LINKA: Barva = [0.82, 0.8, 0.76]
 const HLAVICKA: Barva = [0.93, 0.92, 0.9]
 const SKUPINA: Barva = [0.96, 0.95, 0.94]
 const VIKEND: Barva = [0.98, 0.94, 0.85]
-const MIMO: Barva = [0.94, 0.94, 0.94]
 
-/** Kde končí záhlaví stránky (nadpis měsíce) a kde začíná obsah. */
-const ZACATEK_OBSAHU = OKRAJ + 28
-const PATA_STRANKY = 22
-/** Nejníž, kam smí sahat tabulky; pod tím je zápatí. */
+/** Kde končí záhlaví stránky (nadpis měsíce) a kde začíná tabulka. */
+const ZACATEK_OBSAHU = OKRAJ + 24
+const PATA_STRANKY = 18
+/** Nejníž, kam smí sahat tabulka a poznámky; pod tím je zápatí. */
 export const DOLNI_HRANICE = A4_VYSKA - OKRAJ - PATA_STRANKY
 
-const VYSKA_NADPISU = 16
-const VYSKA_HLAVICKY_TABULKY = 26
-const VYSKA_RADKU = 21
-const VYSKA_SKUPINY = 13
-const VYSKA_SOUCTU = 15
-const MEZERA_BLOKU = 10
-const RADEK_SMENY = 8.5
-const RADEK_PAUZY = 7.5
-const VYSKA_RADKU_SOUHRNU = 15
-const VYSKA_HLAVICKY_SOUHRNU = 17
+const DEN_SIRKA = 34
+/** Největší a nejmenší písmo času směny. Pod 6 bodů se lidé dělí na víc stránek. */
+const F_MAX = 9
+const F_MIN = 6
+const F_JMENO = 7
+const F_POZICE = 5.5
+const F_POZNAMKY = 6.5
+const RADEK_POZNAMKY = 8.2
+const VYSKA_POZNAMEK_MAX = 34
 
 /** Minuty jako české číslo hodin: 1890 → „31,5“, 480 → „8“. */
 const hod = (minut: number) => String(hodinyCislem(minut)).replace('.', ',')
 
-/** Výška obsahu buňky dne: čas směny a případně pauza pod ním. */
-function vyskaDne(dily: DilSmeny[]): number {
-  return dily.reduce((v, d) => v + RADEK_SMENY + (d.pauza ? RADEK_PAUZY : 0), 0)
+type Velikosti = { cas: number; pobocka: number; pauza: number; den: number }
+const velikosti = (f: number): Velikosti => ({
+  cas: f,
+  pobocka: Math.max(4.5, f * 0.85),
+  pauza: Math.max(4.5, f * 0.8),
+  den: Math.min(f, 8),
+})
+const RADEK = 1.3 // mezera pod řádkem textu
+
+const vyskaSouctu = (f: number) => f + 6
+
+/** Výška záhlaví: podle nejdelšího otočeného jména (nebo pozice), ale v mezích. */
+function vyskaZahlavi(lide: SloupecExportu[]): number {
+  const nejdelsi = Math.max(0, ...lide.map((c) => Math.max(sirkaTextu(c.jmeno, F_JMENO, 'tucne'), sirkaTextu(c.pozice, F_POZICE))))
+  return Math.min(96, Math.max(44, nejdelsi + 8))
+}
+
+/** Výška buňky = řádky času, pobočky a pauzy všech směn dne. */
+function vyskaBunky(dily: DilSmeny[], v: Velikosti, sPobockou: boolean): number {
+  return dily.reduce((h, d) => h + v.cas + RADEK + (sPobockou && d.pobocka ? v.pobocka + RADEK : 0) + (d.pauza ? v.pauza + RADEK : 0), 0)
+}
+
+/** Výška dne = nejvyšší buňka toho dne (+ vzduch); nejméně jeden řádek. */
+function vyskaDne(den: string, lide: SloupecExportu[], v: Velikosti, sPobockou: boolean): number {
+  const nej = Math.max(0, ...lide.map((c) => vyskaBunky(c.podleDne.get(den) ?? [], v, sPobockou)))
+  return Math.max(v.cas + 4.5, nej + 3)
+}
+
+export type Rozlozeni = {
+  /** Lidé po stránkách; každá část má celý měsíc. */
+  casti: SloupecExportu[][]
+  /** Písmo času směny v bodech. */
+  f: number
+  sirkaSloupce: number
+}
+
+/**
+ * Vybere počet stránek a písmo. Možnosti jsou dvě a vyhrává ta, která dá
+ * míň papíru:
+ *
+ *   A) lidé se rozdělí na části a každá se svým celým měsícem vyjde na
+ *      jednu stránku (s co největším písmem); zkouší se 1, 2, 3… části,
+ *   B) lidé zůstanou pohromadě (nejméně částí, na které se při nejmenším
+ *      písmu vejde šířka) a měsíc se lámá na další stránku.
+ *
+ * Výška se měří pro každou část zvlášť — s méně lidmi bývá řádek nižší.
+ */
+export function vyberRozlozeni(m: ExportMesice): Rozlozeni {
+  const lide = m.sloupce
+  const sirkaObsahu = A4_SIRKA - 2 * OKRAJ
+  let nejsirsiCas = 0 // šířka nejdelšího času při písmu 1 bod
+  for (const c of lide) {
+    for (const dily of c.podleDne.values()) {
+      for (const d of dily) nejsirsiCas = Math.max(nejsirsiCas, sirkaTextu(`${d.kratce}${d.nevydana ? '*' : ''}`, 1))
+    }
+  }
+  const dostupna = DOLNI_HRANICE - ZACATEK_OBSAHU
+  const pocetLidi = Math.max(1, lide.length)
+  const sirkaPro = (naStranu: number) => (sirkaObsahu - DEN_SIRKA) / naStranu
+  const vyskaCasti = (cast: SloupecExportu[], f: number) => {
+    const v = velikosti(f)
+    return (
+      vyskaZahlavi(cast) +
+      m.dny.reduce((k, den) => k + vyskaDne(den, cast, v, m.vicePobocek), 0) +
+      vyskaSouctu(f) +
+      VYSKA_POZNAMEK_MAX
+    )
+  }
+  const rozdel = (pocetCasti: number) => rozdelitLidi(lide, Math.ceil(lide.length / pocetCasti))
+  const nejvicVCasti = (casti: SloupecExportu[][]) => Math.max(...casti.map((c) => c.length), 1)
+
+  // A) každá část s celým měsícem na jedné stránce.
+  let a: (Rozlozeni & { stranek: number }) | null = null
+  for (let pocetCasti = 1; pocetCasti <= pocetLidi && !a; pocetCasti++) {
+    const casti = rozdel(pocetCasti)
+    const sirkaSloupce = sirkaPro(nejvicVCasti(casti))
+    for (let f = F_MAX; f >= F_MIN - 1e-9; f -= 0.5) {
+      if (nejsirsiCas * f + 3 > sirkaSloupce) continue
+      if (casti.every((cast) => vyskaCasti(cast, f) <= dostupna)) {
+        a = { casti, f, sirkaSloupce, stranek: casti.length }
+        break
+      }
+    }
+  }
+
+  // B) lidé pohromadě, měsíc se láme na další stránku.
+  let pocetCastiB = 1
+  while (pocetCastiB < pocetLidi && nejsirsiCas * F_MIN + 3 > sirkaPro(nejvicVCasti(rozdel(pocetCastiB)))) pocetCastiB++
+  const castiB = rozdel(pocetCastiB)
+  const stranekB = castiB.reduce((k, cast) => k + Math.max(1, Math.ceil(vyskaCasti(cast, F_MIN) / dostupna)), 0)
+
+  if (a && a.stranek <= stranekB) return a
+  return { casti: castiB, f: F_MIN, sirkaSloupce: sirkaPro(nejvicVCasti(castiB)) }
 }
 
 export function pdfZExportu(m: ExportMesice): Uint8Array {
   const stranky: StrankaPdf[] = []
-  // Aktuální stránka. První hodnota je jen kvůli typu — než se cokoli
-  // kreslí, `novaStranka` ji nahradí skutečnou a zařadí do dokumentu.
-  let s = new StrankaPdf(A4_SIRKA, A4_VYSKA)
-  let y = 0
-  /** Znovu vykreslí nadpis a záhlaví tabulky, když se tabulka zalomí na novou stránku. */
-  let obnovaZahlavi: (() => void) | null = null
-
   const sirkaObsahu = A4_SIRKA - 2 * OKRAJ
-  const sloupecJmen = m.vicePobocek ? 122 : 112
-  const sloupecHodin = 34
-  const sloupecDne = (sirkaObsahu - sloupecJmen - sloupecHodin) / 7
+  const rozlozeni = vyberRozlozeni(m)
+  const { f, sirkaSloupce } = rozlozeni
+  const v = velikosti(f)
+  const zkratkaPobocky = new Map(m.pobocky.map((p) => [p.nazev, p.zkratka]))
 
-  const mimoMesic = (d: string) => !d.startsWith(m.mesic)
+  // Pobočka pod časem: celý název, když se vejde do sloupce, jinak zkratka.
+  const textPobocky = (nazev: string) =>
+    sirkaTextu(nazev, v.pobocka) <= sirkaSloupce - 3 ? nazev : (zkratkaPobocky.get(nazev) ?? nazev)
+  // Pauza: „pauza 15–17“; nevejde-li se, jen „(15–17)“; nevejde-li se ani to, zmenšené písmo (ne ořez — čas s výpustkou nic neříká).
+  const pauzaNaKarte = (pauza: string): { text: string; velikost: number } => {
+    const kratce = pauzaKratce(pauza)
+    const dovnitr = sirkaSloupce - 3
+    for (const text of [`pauza ${kratce}`, `(${kratce})`]) {
+      if (sirkaTextu(text, v.pauza) <= dovnitr) return { text, velikost: v.pauza }
+    }
+    const text = `(${kratce})`
+    return { text, velikost: Math.max(3.5, Math.min(v.pauza, dovnitr / sirkaTextu(text, 1))) }
+  }
 
-  const novaStranka = () => {
+  let s = new StrankaPdf(A4_SIRKA, A4_VYSKA)
+  const novaStranka = (cast: SloupecExportu[], pocetCasti: number) => {
     s = new StrankaPdf(A4_SIRKA, A4_VYSKA)
     stranky.push(s)
+    const vpravo =
+      pocetCasti > 1
+        ? `${m.rozsah} · zaměstnanci ${m.sloupce.indexOf(cast[0]) + 1}–${m.sloupce.indexOf(cast[cast.length - 1]) + 1} z ${m.sloupce.length}`
+        : m.rozsah
     s.text(m.nadpis, OKRAJ, OKRAJ + 11, { velikost: 13, pismo: 'tucne', barva: CERNA })
-    s.text(zkratitText(m.rozsah, sirkaObsahu / 2, 9), A4_SIRKA - OKRAJ, OKRAJ + 11, { velikost: 9, barva: SEDA, zarovnani: 'r' })
-    s.cara(OKRAJ, OKRAJ + 17, A4_SIRKA - OKRAJ, OKRAJ + 17, LINKA)
-    y = ZACATEK_OBSAHU
+    s.text(zkratitText(vpravo, sirkaObsahu * 0.6, 9), A4_SIRKA - OKRAJ, OKRAJ + 11, { velikost: 9, barva: SEDA, zarovnani: 'r' })
+    s.cara(OKRAJ, OKRAJ + 16, A4_SIRKA - OKRAJ, OKRAJ + 16, LINKA)
+    return ZACATEK_OBSAHU
   }
 
-  /** Zalomí na novou stránku a vrátí tam záhlaví právě rozdělané tabulky. */
-  const zalomit = () => {
-    novaStranka()
-    obnovaZahlavi?.()
-  }
+  /* --- záhlaví tabulky: „Den“ a otočená jména ---------------------------- */
 
-  /** Nevejde-li se `vyska` na zbytek stránky, začne nová. */
-  const misto = (vyska: number) => {
-    if (y + vyska > DOLNI_HRANICE) zalomit()
-  }
-
-  /**
-   * Začátek samostatného bloku (týden, souhrn): drží se pohromadě, pokud
-   * se vejde na prázdnou stránku; jinak začne nahoře a poteče dál.
-   */
-  const zacniBlok = (vyska: number) => {
-    obnovaZahlavi = null
-    if (stranky.length === 0) novaStranka()
-    else if (y > ZACATEK_OBSAHU && y + MEZERA_BLOKU + vyska > DOLNI_HRANICE) novaStranka()
-    else if (y > ZACATEK_OBSAHU) y += MEZERA_BLOKU
-  }
-
-  const nadpisSekce = (text: string) => {
-    s.text(text, OKRAJ, y + 11, { velikost: 9.5, pismo: 'tucne', barva: CERNA })
-    y += VYSKA_NADPISU
-  }
-
-  /* --- týdenní tabulka --------------------------------------------- */
-
-  const hlavickaTydne = (dny: string[]) => {
-    let x = OKRAJ
-    s.obdelnik(x, y, sloupecJmen, VYSKA_HLAVICKY_TABULKY, { vypln: HLAVICKA, ramecek: LINKA })
-    s.text('Zaměstnanec', x + 5, y + 16, { velikost: 8, pismo: 'tucne', barva: CERNA })
-    x += sloupecJmen
-    for (const d of dny) {
-      s.obdelnik(x, y, sloupecDne, VYSKA_HLAVICKY_TABULKY, {
-        vypln: mimoMesic(d) ? MIMO : jeVikend(d) ? VIKEND : HLAVICKA,
-        ramecek: LINKA,
-      })
-      const [, mm, dd] = d.split('-').map(Number)
-      s.text(`${ZKRATKY_DNU[denVTydnu(d)][0]}${ZKRATKY_DNU[denVTydnu(d)][1].toLowerCase()} ${dd}. ${mm}.`, x + sloupecDne / 2, y + 11, {
-        velikost: 7.5,
+  const kresliZahlavi = (cast: SloupecExportu[], y: number, vyska: number): number => {
+    s.obdelnik(OKRAJ, y, DEN_SIRKA, vyska, { vypln: HLAVICKA, ramecek: LINKA })
+    s.text('Den', OKRAJ + DEN_SIRKA / 2, y + vyska - 4, { velikost: 7, pismo: 'tucne', barva: CERNA, zarovnani: 'c' })
+    cast.forEach((c, i) => {
+      const x = OKRAJ + DEN_SIRKA + i * sirkaSloupce
+      s.obdelnik(x, y, sirkaSloupce, vyska, { vypln: HLAVICKA, ramecek: LINKA })
+      // Otočený text: účaří je svislá čára, písmena jsou nalevo od ní. Jméno a pod ním (vpravo) pozice.
+      const sirkaBloku = F_JMENO * 0.93 + (c.pozice ? F_POZICE * 0.93 + 1.7 : 0)
+      const x1 = x + (sirkaSloupce - sirkaBloku) / 2 + F_JMENO * 0.72
+      s.text(zkratitText(c.jmeno, vyska - 7, F_JMENO, 'tucne'), x1, y + vyska - 3, {
+        velikost: F_JMENO,
         pismo: 'tucne',
-        barva: mimoMesic(d) ? SEDA : CERNA,
-        zarovnani: 'c',
+        barva: CERNA,
+        otoceny: true,
       })
-      const minut = m.poDnech.get(d)
-      s.text(mimoMesic(d) ? '' : minut ? `${hod(minut)} h` : '—', x + sloupecDne / 2, y + 21, {
-        velikost: 7,
-        barva: SEDA,
-        zarovnani: 'c',
-      })
-      x += sloupecDne
-    }
-    s.obdelnik(x, y, sloupecHodin, VYSKA_HLAVICKY_TABULKY, { vypln: HLAVICKA, ramecek: LINKA })
-    s.text('Hodin', x + sloupecHodin / 2, y + 16, { velikost: 8, pismo: 'tucne', barva: CERNA, zarovnani: 'c' })
-    y += VYSKA_HLAVICKY_TABULKY
+      if (c.pozice) {
+        s.text(zkratitText(c.pozice, vyska - 7, F_POZICE), x1 + F_JMENO * 0.21 + 0.5 + F_POZICE * 0.72, y + vyska - 3, {
+          velikost: F_POZICE,
+          barva: SEDA,
+          otoceny: true,
+        })
+      }
+    })
+    return y + vyska
   }
 
-  const vyskaRadku = (r: RadekExportu, dny: string[]) =>
-    Math.max(VYSKA_RADKU, 5 + Math.max(0, ...dny.map((d) => vyskaDne(r.dilyPodleDne.get(d) ?? []))) + 2)
+  /* --- řádek dne --------------------------------------------------------- */
 
-  const kresliRadek = (r: RadekExportu, dny: string[], vyska: number) => {
-    let x = OKRAJ
-    s.obdelnik(x, y, sloupecJmen, vyska, { ramecek: LINKA })
-    s.text(zkratitText(r.jmeno, sloupecJmen - 8, 8, 'tucne'), x + 4, y + 9, { velikost: 8, pismo: 'tucne', barva: CERNA })
-    const podtitul = [r.pozice, m.vicePobocek ? r.pobocka : ''].filter(Boolean).join(' · ')
-    if (podtitul) s.text(zkratitText(podtitul, sloupecJmen - 8, 6.5, 'normal'), x + 4, y + 17, { velikost: 6.5, barva: SEDA })
-    x += sloupecJmen
-    for (const d of dny) {
-      s.obdelnik(x, y, sloupecDne, vyska, {
-        vypln: mimoMesic(d) ? MIMO : jeVikend(d) ? VIKEND : undefined,
-        ramecek: LINKA,
-      })
-      let radek = y + 9
-      for (const dil of r.dilyPodleDne.get(d) ?? []) {
-        s.text(zkratitText(`${dil.cas}${dil.nevydana ? '*' : ''}`, sloupecDne - 4, 7, 'normal'), x + sloupecDne / 2, radek, {
-          velikost: 7,
+  const kresliDen = (den: string, cast: SloupecExportu[], y: number, vyska: number) => {
+    const vikend = jeVikend(den)
+    s.obdelnik(OKRAJ, y, DEN_SIRKA, vyska, { vypln: vikend ? VIKEND : undefined, ramecek: LINKA })
+    s.text(popisDne(den), OKRAJ + DEN_SIRKA / 2, y + vyska / 2 + v.den * 0.35, {
+      velikost: v.den,
+      pismo: 'tucne',
+      barva: CERNA,
+      zarovnani: 'c',
+    })
+    cast.forEach((c, i) => {
+      const x = OKRAJ + DEN_SIRKA + i * sirkaSloupce
+      s.obdelnik(x, y, sirkaSloupce, vyska, { vypln: vikend ? VIKEND : undefined, ramecek: LINKA })
+      const dily = c.podleDne.get(den) ?? []
+      let radek = y + (vyska - vyskaBunky(dily, v, m.vicePobocek)) / 2
+      const stred = x + sirkaSloupce / 2
+      for (const d of dily) {
+        s.text(`${d.kratce}${d.nevydana ? '*' : ''}`, stred, radek + v.cas * 0.8 + 0.4, {
+          velikost: v.cas,
           barva: CERNA,
           zarovnani: 'c',
         })
-        radek += RADEK_SMENY
-        if (dil.pauza) {
-          // Pauza je vedlejší údaj: 6 pt, a když se ani tak nevejde, 5,5 pt.
-          const textPauzy = `pauza ${pauzaKratce(dil.pauza)}`
-          const velikostPauzy = sirkaTextu(textPauzy, 6) <= sloupecDne - 4 ? 6 : 5.5
-          s.text(zkratitText(textPauzy, sloupecDne - 4, velikostPauzy, 'normal'), x + sloupecDne / 2, radek - 1, {
-            velikost: velikostPauzy,
+        radek += v.cas + RADEK
+        if (m.vicePobocek && d.pobocka) {
+          s.text(zkratitText(textPobocky(d.pobocka), sirkaSloupce - 2, v.pobocka), stred, radek + v.pobocka * 0.8 + 0.4, {
+            velikost: v.pobocka,
             barva: SEDA,
             zarovnani: 'c',
           })
-          radek += RADEK_PAUZY
+          radek += v.pobocka + RADEK
+        }
+        if (d.pauza) {
+          const p = pauzaNaKarte(d.pauza)
+          s.text(p.text, stred, radek + v.pauza * 0.8 + 0.4, { velikost: p.velikost, barva: SEDA, zarovnani: 'c' })
+          radek += v.pauza + RADEK
         }
       }
-      x += sloupecDne
-    }
-    s.obdelnik(x, y, sloupecHodin, vyska, { ramecek: LINKA })
-    const minutTydne = dny.reduce((k, d) => k + (r.minutPodleDne.get(d) ?? 0), 0)
-    s.text(minutTydne > 0 ? hod(minutTydne) : '—', x + sloupecHodin / 2, y + 9, {
-      velikost: 7.5,
-      pismo: 'tucne',
-      barva: CERNA,
-      zarovnani: 'c',
     })
-    y += vyska
   }
 
-  const maNeobsazene = (dny: string[]) =>
-    !!m.neobsazene && dny.some((d) => (m.neobsazene?.podleDne.get(d) ?? []).length > 0)
+  /* --- součty a poznámky ------------------------------------------------- */
 
-  /** Výška celého týdne — podle ní se rozhoduje, jestli se vejde pod předchozí. */
-  const vyskaTydne = (dny: string[]) => {
-    let v = VYSKA_NADPISU + VYSKA_HLAVICKY_TABULKY + VYSKA_SOUCTU
-    for (const g of m.skupiny) v += VYSKA_SKUPINY + g.radky.reduce((k, r) => k + vyskaRadku(r, dny), 0)
-    if (m.neobsazene && maNeobsazene(dny)) v += VYSKA_SKUPINY + vyskaRadku(m.neobsazene, dny)
-    return v
-  }
-
-  for (const [poradi, dny] of m.tydny.entries()) {
-    const nadpis = `Týden ${poradi + 1} · ${popisTydne(dny)}`
-    zacniBlok(vyskaTydne(dny))
-    nadpisSekce(nadpis)
-    hlavickaTydne(dny)
-    obnovaZahlavi = () => {
-      nadpisSekce(`${nadpis} (pokračování)`)
-      hlavickaTydne(dny)
-    }
-
-    const kresliSkupinu = (nazev: string, prvni: RadekExportu) => {
-      misto(VYSKA_SKUPINY + vyskaRadku(prvni, dny))
-      s.obdelnik(OKRAJ, y, sirkaObsahu, VYSKA_SKUPINY, { vypln: SKUPINA, ramecek: LINKA })
-      s.text(nazev.toUpperCase(), OKRAJ + 4, y + 9.5, { velikost: 7, pismo: 'tucne', barva: SEDA })
-      y += VYSKA_SKUPINY
-    }
-
-    const kresli = (r: RadekExportu) => {
-      const vyska = vyskaRadku(r, dny)
-      misto(vyska)
-      kresliRadek(r, dny, vyska)
-    }
-
-    for (const skupina of m.skupiny) {
-      kresliSkupinu(skupina.nazev, skupina.radky[0])
-      skupina.radky.forEach(kresli)
-    }
-    if (m.neobsazene && maNeobsazene(dny)) {
-      kresliSkupinu('Neobsazené směny', m.neobsazene)
-      kresli(m.neobsazene)
-    }
-
-    // Součet týdne (jen lidé; neobsazené směny se nepočítají).
-    misto(VYSKA_SOUCTU)
-    let x = OKRAJ
-    s.obdelnik(x, y, sloupecJmen, VYSKA_SOUCTU, { vypln: SKUPINA, ramecek: LINKA })
-    s.text('Celkem hodin', x + 4, y + 10, { velikost: 7.5, pismo: 'tucne', barva: CERNA })
-    x += sloupecJmen
-    let soucetTydne = 0
-    for (const d of dny) {
-      const minut = mimoMesic(d) ? 0 : (m.poDnech.get(d) ?? 0)
-      soucetTydne += minut
-      s.obdelnik(x, y, sloupecDne, VYSKA_SOUCTU, { vypln: SKUPINA, ramecek: LINKA })
-      s.text(minut > 0 ? hod(minut) : '—', x + sloupecDne / 2, y + 10, {
-        velikost: 7.5,
+  const kresliSoucty = (cast: SloupecExportu[], y: number) => {
+    const vyska = vyskaSouctu(f)
+    s.obdelnik(OKRAJ, y, DEN_SIRKA, vyska, { vypln: SKUPINA, ramecek: LINKA })
+    s.text('Hodin', OKRAJ + DEN_SIRKA / 2, y + vyska / 2 + 2.4, { velikost: 6.5, pismo: 'tucne', barva: CERNA, zarovnani: 'c' })
+    cast.forEach((c, i) => {
+      const x = OKRAJ + DEN_SIRKA + i * sirkaSloupce
+      s.obdelnik(x, y, sirkaSloupce, vyska, { vypln: SKUPINA, ramecek: LINKA })
+      s.text(c.minut > 0 ? hod(c.minut) : '—', x + sirkaSloupce / 2, y + vyska / 2 + f * 0.35, {
+        velikost: f,
         pismo: 'tucne',
-        barva: CERNA,
+        barva: c.osobaId === null ? SEDA : CERNA,
         zarovnani: 'c',
       })
-      x += sloupecDne
-    }
-    s.obdelnik(x, y, sloupecHodin, VYSKA_SOUCTU, { vypln: SKUPINA, ramecek: LINKA })
-    s.text(soucetTydne > 0 ? hod(soucetTydne) : '—', x + sloupecHodin / 2, y + 10, {
-      velikost: 7.5,
-      pismo: 'tucne',
-      barva: CERNA,
-      zarovnani: 'c',
     })
-    y += VYSKA_SOUCTU
+    return y + vyska
   }
 
-  /* --- souhrn za měsíc ------------------------------------------------ */
-
-  // Šířky vyplní celou šířku obsahu; poslední dva sloupce jsou čísla.
-  const sloupceSouhrnu = m.vicePobocek
-    ? [
-        { nazev: 'Zaměstnanec', sirka: 120 },
-        { nazev: 'Úsek', sirka: 80 },
-        { nazev: 'Pozice', sirka: 80 },
-        { nazev: 'Z toho po pobočkách', sirka: 155 },
-        { nazev: 'Směn', sirka: 50 },
-        { nazev: 'Hodin', sirka: sirkaObsahu - 485 },
-      ]
-    : [
-        { nazev: 'Zaměstnanec', sirka: 170 },
-        { nazev: 'Úsek', sirka: 120 },
-        { nazev: 'Pozice', sirka: 120 },
-        { nazev: 'Směn', sirka: 55 },
-        { nazev: 'Hodin', sirka: sirkaObsahu - 465 },
-      ]
-  const nadpisSouhrnu = `Souhrn hodin — ${nazevMesice(m.mesic)}`
-  const hlavickaSouhrnu = () => {
-    let x = OKRAJ
-    for (const [i, c] of sloupceSouhrnu.entries()) {
-      const cislo = i >= sloupceSouhrnu.length - 2
-      s.obdelnik(x, y, c.sirka, VYSKA_HLAVICKY_SOUHRNU, { vypln: HLAVICKA, ramecek: LINKA })
-      s.text(c.nazev, cislo ? x + c.sirka - 5 : x + 5, y + 11.5, {
-        velikost: 8,
-        pismo: 'tucne',
-        barva: CERNA,
-        zarovnani: cislo ? 'r' : 'l',
-      })
-      x += c.sirka
+  const kresliPoznamky = (cast: SloupecExportu[], y: number): void => {
+    const pouzite = new Set<string>()
+    if (m.vicePobocek) {
+      for (const c of cast) for (const dily of c.podleDne.values()) for (const d of dily) if (d.pobocka) pouzite.add(d.pobocka)
     }
-    y += VYSKA_HLAVICKY_SOUHRNU
+    const zkratky: PobockaExportu[] = m.pobocky.filter((p) => pouzite.has(p.nazev) && textPobocky(p.nazev) !== p.nazev)
+    const radky = zalomitVety(
+      vetyPoznamky(m, zkratky, cast.some((c) => c.osobaId === null)),
+      (t) => sirkaTextu(t, F_POZNAMKY) <= sirkaObsahu,
+    )
+    radky.forEach((r, i) => s.text(r, OKRAJ, y + 8 + i * RADEK_POZNAMKY, { velikost: F_POZNAMKY, barva: SEDA }))
   }
-  zacniBlok(VYSKA_NADPISU + VYSKA_HLAVICKY_SOUHRNU + (m.souhrn.length + 1) * VYSKA_RADKU_SOUHRNU)
-  nadpisSekce(nadpisSouhrnu)
-  hlavickaSouhrnu()
-  obnovaZahlavi = () => {
-    nadpisSekce(`${nadpisSouhrnu} (pokračování)`)
-    hlavickaSouhrnu()
-  }
-  const radekSouhrnu = (hodnoty: string[], tucne = false, vypln?: Barva) => {
-    misto(VYSKA_RADKU_SOUHRNU)
-    let x = OKRAJ
-    sloupceSouhrnu.forEach((c, i) => {
-      s.obdelnik(x, y, c.sirka, VYSKA_RADKU_SOUHRNU, { vypln, ramecek: LINKA })
-      const cislo = i >= sloupceSouhrnu.length - 2
-      s.text(zkratitText(hodnoty[i] ?? '', c.sirka - 10, 8, tucne ? 'tucne' : 'normal'), cislo ? x + c.sirka - 5 : x + 5, y + 10.5, {
-        velikost: 8,
-        pismo: tucne ? 'tucne' : 'normal',
-        barva: CERNA,
-        zarovnani: cislo ? 'r' : 'l',
-      })
-      x += c.sirka
+
+  /* --- stránky ----------------------------------------------------------- */
+
+  if (m.sloupce.length === 0) {
+    const y = novaStranka([], 1)
+    s.text('V tomto měsíci nejsou žádné směny.', OKRAJ, y + 14, { velikost: 10, barva: SEDA })
+  } else {
+    rozlozeni.casti.forEach((cast) => {
+      let y = novaStranka(cast, rozlozeni.casti.length)
+      const zahlavi = vyskaZahlavi(cast)
+      y = kresliZahlavi(cast, y, zahlavi)
+      for (const den of m.dny) {
+        const vyska = vyskaDne(den, cast, v, m.vicePobocek)
+        // Poslední den táhne s sebou součty a poznámky — ať nezůstanou osamoceně na další stránce.
+        const potreba = vyska + (den === m.dny[m.dny.length - 1] ? vyskaSouctu(f) + VYSKA_POZNAMEK_MAX : 0)
+        if (y + potreba > DOLNI_HRANICE) {
+          // Jen když se ani při nejmenším písmu měsíc nevešel: pokračování se záhlavím znovu.
+          y = novaStranka(cast, rozlozeni.casti.length)
+          y = kresliZahlavi(cast, y, zahlavi)
+        }
+        kresliDen(den, cast, y, vyska)
+        y += vyska
+      }
+      if (y + vyskaSouctu(f) > DOLNI_HRANICE) {
+        y = novaStranka(cast, rozlozeni.casti.length)
+        y = kresliZahlavi(cast, y, zahlavi)
+      }
+      y = kresliSoucty(cast, y)
+      if (y + VYSKA_POZNAMEK_MAX > DOLNI_HRANICE + PATA_STRANKY - 6) y = novaStranka(cast, rozlozeni.casti.length)
+      kresliPoznamky(cast, y + 3)
     })
-    y += VYSKA_RADKU_SOUHRNU
   }
-  for (const r of m.souhrn) {
-    radekSouhrnu([r.jmeno, r.usek, r.pozice, ...(m.vicePobocek ? [r.pobocky] : []), String(r.smen), hod(r.minut)])
-  }
-  radekSouhrnu(
-    ['Celkem', '', '', ...(m.vicePobocek ? [''] : []), String(m.souhrn.reduce((n, r) => n + r.smen, 0)), hod(m.celkemMinut)],
-    true,
-    SKUPINA,
-  )
 
   /* --- zápatí na každé stránce ---------------------------------------- */
 
   stranky.forEach((st, i) => {
-    const caraY = A4_VYSKA - OKRAJ - PATA_STRANKY + 6
+    const caraY = A4_VYSKA - OKRAJ - PATA_STRANKY + 4
     st.cara(OKRAJ, caraY, A4_SIRKA - OKRAJ, caraY, LINKA)
-    const yPaty = A4_VYSKA - OKRAJ + 2
+    const yPaty = A4_VYSKA - OKRAJ - 1
     st.text(`Vytvořeno ${m.vytvoreno}`, OKRAJ, yPaty, { velikost: 7, barva: SEDA })
-    st.text(
-      m.nevydanych > 0
-        ? `* nevydaná směna (celkem ${m.nevydanych}) · hodiny = plánované délky směn bez automatické přestávky`
-        : 'Hodiny = plánované délky směn bez automatické přestávky',
-      A4_SIRKA / 2 + 20,
-      yPaty,
-      { velikost: 7, barva: SEDA, zarovnani: 'c' },
-    )
     st.text(`Strana ${i + 1} z ${stranky.length}`, A4_SIRKA - OKRAJ, yPaty, { velikost: 7, barva: SEDA, zarovnani: 'r' })
   })
 

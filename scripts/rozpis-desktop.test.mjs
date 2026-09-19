@@ -324,7 +324,7 @@ je('celý měsíc jde ukázat nejvýš dvěma lidem', MAX_LIDI_V_MESICI, 2)
 
 console.log('\n== Krátké zápisy ==')
 je('celá hodina bez :00, bez nuly navíc', [kratkyCas('08:00'), kratkyCas('22:00'), kratkyCas('00:00')], ['8', '22', '0'])
-je('půlhodina zůstane celá', [kratkyCas('15:30'), kratkyCas('08:15')], ['15:30', '08:15'])
+je('půlhodina zůstane celá, jen bez nuly navíc', [kratkyCas('15:30'), kratkyCas('08:15'), kratkyCas('00:30')], ['15:30', '8:15', '0:30'])
 je('hodiny jako české číslo', [hodinyStruc(480), hodinyStruc(1890), hodinyStruc(0), hodinyStruc(100)], ['8 h', '31,5 h', '0 h', '1,67 h'])
 
 console.log('\n== Celý měsíc jednoho člověka ==')
