@@ -516,6 +516,13 @@ export type SkupinaMrizky = {
 export type PobockaMrizky = {
   klic: string
   nazev: string
+  /**
+   * `false` = není to pobočka, ale VŠICHNI lidé dohromady. Nastane, když je
+   * v okně víc poboček najednou: člověk, který ten týden dělal na obou, má
+   * jeden řádek a jeden součet (jako v exportu), a pobočka se píše na kartu
+   * směny. Rozdělit ho po pobočkách a přitom ho nezdvojit nejde.
+   */
+  jePobocka: boolean
   skupiny: SkupinaMrizky[]
   /** Kolik různých lidí na té pobočce v okně pracuje (neobsazené směny se nepočítají). */
   lidi: number
@@ -546,12 +553,21 @@ const poZacatku = (a: SmenaD, b: SmenaD) =>
   a.starts_at.localeCompare(b.starts_at) || a.ends_at.localeCompare(b.ends_at)
 
 /**
- * Mřížka týdne: pobočky → úseky → lidé.
+ * Mřížka týdne: pobočka → úseky → lidé.
  *
- * Pobočka skupiny se bere ze SMĚNY, ne z člověka — člověk žádnou pevnou
- * nemá a může mít ten týden směny na obou; jeho řádek se pak objeví ve
- * víc skupinách. ÚSEK se naopak bere z ČLOVĚKA (`employees.usek_id`),
- * ne ze směny (Šéfík 16. 9. 2026).
+ * JEDEN ŘÁDEK NA ČLOVĚKA (Šéfík 20. 9. 2026). Dřív se člověk, který měl
+ * v okně směny na dvou pobočkách, objevil dvakrát — v každé pobočce s její
+ * částí hodin. Export ho přitom vedl jako jeden sloupec s celkovým součtem,
+ * takže obrazovka a stažený soubor říkaly o témž člověku jiné číslo.
+ *
+ * Teď platí: ```vidím-li jednu pobočku, je nahoře její pruh a pod ním úseky;
+ * vidím-li jich víc najednou, pruhy pobočky nejsou a každý člověk má jeden
+ * řádek se všemi svými směnami```. Pobočku pak nese karta směny. Obojí je
+ * pravdivé zároveň a nikdo se nezdvojí. Výběrem pobočky v nabídce Zobrazit
+ * se člověk vrátí k první podobě.
+ *
+ * ÚSEK se bere z ČLOVĚKA (`employees.usek_id`), ne ze směny (Šéfík
+ * 16. 9. 2026) — ten je na pobočce nezávislý, takže seskupení platí vždy.
  *
  * `lideBezSmeny` jsou ti, které vedoucí smí plánovat, ale v okně nemají
  * ani jednu směnu; kreslí se dole zvlášť, ať jim jde směna zadat.
@@ -626,71 +642,92 @@ export function sestavitMrizku(v: {
 
   const poradiUseku = [...useky.keys()]
 
-  const pobockyVysledek: PobockaMrizky[] = [...poPobockach.keys()]
-    .sort((a, b) => podleJmena(pobocky.get(a) ?? '', pobocky.get(b) ?? ''))
-    .map((branchId) => {
-      const smenyPobocky = poPobockach.get(branchId) ?? []
+  /** Úseky a lidé z daných směn; `predpona` odlišuje klíče skupin mezi pobočkami. */
+  const sestavSkupiny = (smenySkupiny: SmenaD[], predpona: string): SkupinaMrizky[] => {
+    const podleOsoby = new Map<string | null, SmenaD[]>()
+    for (const s of smenySkupiny) {
+      const seznam = podleOsoby.get(s.employee_id) ?? []
+      seznam.push(s)
+      podleOsoby.set(s.employee_id, seznam)
+    }
 
-      const podleOsoby = new Map<string | null, SmenaD[]>()
-      for (const s of smenyPobocky) {
-        const seznam = podleOsoby.get(s.employee_id) ?? []
-        seznam.push(s)
-        podleOsoby.set(s.employee_id, seznam)
+    const skupinyMapa = new Map<string, RadekMrizky[]>()
+    let neobsazene: RadekMrizky | null = null
+
+    for (const [osobaId, smenyOsoby] of podleOsoby) {
+      const radek = sestavRadek(osobaId ? znamaOsoba(osobaId) : null, smenyOsoby)
+      if (!radekProjde(radek, smenyOsoby)) continue
+      if (osobaId === null) {
+        neobsazene = radek
+        continue
       }
+      const klic = klicUseku(radek.osoba!, useky)
+      const seznam = skupinyMapa.get(klic) ?? []
+      seznam.push(radek)
+      skupinyMapa.set(klic, seznam)
+    }
 
-      const skupinyMapa = new Map<string, RadekMrizky[]>()
-      let neobsazene: RadekMrizky | null = null
+    const skupiny: SkupinaMrizky[] = []
 
-      for (const [osobaId, smenyOsoby] of podleOsoby) {
-        const radek = sestavRadek(osobaId ? znamaOsoba(osobaId) : null, smenyOsoby)
-        if (!radekProjde(radek, smenyOsoby)) continue
-        if (osobaId === null) {
-          neobsazene = radek
-          continue
-        }
-        const klic = klicUseku(radek.osoba!, useky)
-        const seznam = skupinyMapa.get(klic) ?? []
-        seznam.push(radek)
-        skupinyMapa.set(klic, seznam)
-      }
+    // Neobsazené směny jako první: „sem někoho potřebujeme“ je poplach.
+    if (neobsazene) {
+      skupiny.push({
+        klic: `${predpona}|neobsazene`,
+        nazev: 'Neobsazené směny',
+        druh: 'neobsazene',
+        radky: [neobsazene],
+        lidi: 0,
+        minut: neobsazene.minut,
+      })
+    }
 
-      const skupiny: SkupinaMrizky[] = []
+    for (const klic of [...poradiUseku, BEZ_USEKU]) {
+      const radky = skupinyMapa.get(klic)
+      if (!radky || radky.length === 0) continue
+      radky.sort((a, b) => podleJmena(a.jmeno, b.jmeno))
+      skupiny.push({
+        klic: `${predpona}|${klic}`,
+        nazev: klic === BEZ_USEKU ? 'Bez úseku' : (useky.get(klic) ?? 'Bez úseku'),
+        druh: 'usek',
+        radky,
+        lidi: radky.length,
+        minut: radky.reduce((n, r) => n + r.minut, 0),
+      })
+    }
+    return skupiny
+  }
 
-      // Neobsazené směny jako první: „sem někoho potřebujeme“ je poplach.
-      if (neobsazene) {
-        skupiny.push({
-          klic: `${branchId}|neobsazene`,
-          nazev: 'Neobsazené směny',
-          druh: 'neobsazene',
-          radky: [neobsazene],
-          lidi: 0,
-          minut: neobsazene.minut,
-        })
-      }
+  const souctySkupin = (skupiny: SkupinaMrizky[]) => ({
+    lidi: skupiny.reduce((n, sk) => n + sk.lidi, 0),
+    minut: skupiny.filter((sk) => sk.druh === 'usek').reduce((n, sk) => n + sk.minut, 0),
+  })
 
-      for (const klic of [...poradiUseku, BEZ_USEKU]) {
-        const radky = skupinyMapa.get(klic)
-        if (!radky || radky.length === 0) continue
-        radky.sort((a, b) => podleJmena(a.jmeno, b.jmeno))
-        skupiny.push({
-          klic: `${branchId}|${klic}`,
-          nazev: klic === BEZ_USEKU ? 'Bez úseku' : (useky.get(klic) ?? 'Bez úseku'),
-          druh: 'usek',
-          radky,
-          lidi: radky.length,
-          minut: radky.reduce((n, r) => n + r.minut, 0),
-        })
-      }
-
-      return {
-        klic: branchId,
-        nazev: pobocky.get(branchId) ?? 'Jiná pobočka',
-        skupiny,
-        lidi: skupiny.reduce((n, sk) => n + sk.lidi, 0),
-        minut: skupiny.filter((sk) => sk.druh === 'usek').reduce((n, sk) => n + sk.minut, 0),
-      }
-    })
-    .filter((p) => p.skupiny.length > 0)
+  /*
+    Jedna pobočka v okně → pruh pobočky a pod ním úseky. Víc poboček →
+    žádné pruhy a každý člověk jen jednou, se všemi svými směnami
+    (pobočku nese karta směny). Jinak by se člověk, co dělá na obou,
+    objevil dvakrát a jeho hodiny by se rozpadly na dvě čísla.
+  */
+  const pobockyVysledek: PobockaMrizky[] =
+    poPobockach.size > 1
+      ? (() => {
+          const skupiny = sestavSkupiny(vOkne, 'vse')
+          if (skupiny.length === 0) return []
+          return [{ klic: 'vse', nazev: '', jePobocka: false, skupiny, ...souctySkupin(skupiny) }]
+        })()
+      : [...poPobockach.keys()]
+          .sort((a, b) => podleJmena(pobocky.get(a) ?? '', pobocky.get(b) ?? ''))
+          .map((branchId) => {
+            const skupiny = sestavSkupiny(poPobockach.get(branchId) ?? [], branchId)
+            return {
+              klic: branchId,
+              nazev: pobocky.get(branchId) ?? 'Jiná pobočka',
+              jePobocka: true,
+              skupiny,
+              ...souctySkupin(skupiny),
+            }
+          })
+          .filter((p) => p.skupiny.length > 0)
 
   /*
     Lidé bez směny v okně. Stav „nevydané“ a „neobsazené“ jsou o směnách,

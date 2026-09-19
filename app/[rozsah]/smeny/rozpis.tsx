@@ -580,6 +580,8 @@ export default function RozpisView({
             poziceOsob={poziceOsoby}
             barvy={barvy}
             jmena={jmena}
+            nazvyPobocek={nazvyPobocek}
+            pobockaProNovou={pobockaProNovou}
             vybranaId={okno?.smena?.id || null}
             sbalene={sbalene}
             onPrepnout={(klic) =>
