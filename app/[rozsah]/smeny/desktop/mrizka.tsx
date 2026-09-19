@@ -1,0 +1,544 @@
+"use client";
+
+import { Fragment } from "react";
+
+import Ikona from "@/app/[rozsah]/ikona";
+import ZnackaOsoby from "@/app/znacka-osoby";
+import {
+  puvodniStav,
+  stavSmeny,
+  type Mrizka,
+  type RadekMrizky,
+  type SkupinaMrizky,
+  type SmenaD,
+} from "@/lib/rozpis-desktop";
+import {
+  denVTydnu,
+  hhmm,
+  hodinyKratce,
+  inicialy,
+  jeVikend,
+  stitekDne,
+  ZKRATKY_DNU,
+} from "@/lib/rozpis-mobil";
+import { pocet } from "@/lib/sklonovani";
+
+import type { Otevrene, Planovani, Smena } from "../rozpis";
+
+/**
+ * Týdenní mřížka — hlavní pracovní plocha manažera.
+ *
+ * Řádky = lidé, sloupce = dny. Sloupec se jmény i záhlaví dnů jsou
+ * „přilepené“ (sticky) a mřížka sama scrolluje ve vlastním rámu — přesně
+ * z důvodů popsaných v git historii (pět pokusů nechat sticky uvnitř
+ * <table> a scrollovat celou stránku selhalo): sticky na blokových
+ * prvcích uvnitř obalu s vlastní výškou funguje předvídatelně.
+ *
+ * ---------------------------------------------------------------------
+ * ČISTÁ PLOCHA
+ *
+ * Prázdná buňka nemá nic. „+ Přidat“ se ukáže až při najetí nebo
+ * zaměření (klávesnice na tlačítko dosáhne pořád). Směna je jedna
+ * kompaktní karta s časem; stav („Nevydáno“, „Změněno“) je značka
+ * a jedno slovo, ne barva sama — kdo odstíny nerozliší, přečte si ho.
+ *
+ * ---------------------------------------------------------------------
+ * JMÉNA SE NELÁMOU PO ZNACÍCH
+ *
+ * Lámat se smí jen mezi slovy (nejvýš dva řádky), pak se ořízne
+ * s výpustkou; celé jméno je vždycky v `title`. Sloupec je široký tak,
+ * aby se běžné jméno vešlo na jeden řádek.
+ */
+
+const ODSTUP_SLOUPCE = "minmax(196px, 216px)";
+
+export default function MrizkaTydne({
+  mrizka,
+  dny,
+  dnesni,
+  planovani,
+  poziceOsob,
+  barvy,
+  jmena,
+  vybranaId,
+  sbalene,
+  onPrepnout,
+  onOtevrit,
+  filtrAktivni,
+  onZrusitFiltry,
+  maSmeny,
+}: {
+  mrizka: Mrizka;
+  dny: string[];
+  dnesni: string;
+  planovani: Planovani | null;
+  /** Štítek pod jménem: název pozice člověka, nebo `null`. */
+  poziceOsob: (osobaId: string) => string | null;
+  barvy: Map<string, string | null>;
+  jmena: Map<string, string>;
+  /** Směna otevřená v panelu vpravo — v mřížce zvýrazněná. */
+  vybranaId: string | null;
+  sbalene: Set<string>;
+  onPrepnout: (klic: string) => void;
+  onOtevrit: (co: Otevrene) => void;
+  filtrAktivni: boolean;
+  onZrusitFiltry: () => void;
+  /** Je v okně vůbec nějaká směna? Bez ní je prázdný stav o něčem jiném než o filtru. */
+  maSmeny: boolean;
+}) {
+  const vicePobocek = mrizka.pobocky.length > 1;
+  const sablona = `${ODSTUP_SLOUPCE} repeat(${dny.length}, minmax(112px, 1fr))`;
+
+  return (
+    <>
+      <div className="ds-smd-mrizka">
+        <div
+          role="table"
+          aria-label="Rozpis směn na týden"
+          className="ds-smd-tabulka"
+          style={{ gridTemplateColumns: sablona }}
+        >
+          <div role="row" className="ds-smd-radek">
+            <div role="columnheader" className="ds-smd-roh">
+              Zaměstnanec
+              <span className="ds-smd-roh-pocet">
+                {pocet(mrizka.pocetLidi, "člověk", "lidé", "lidí")}
+              </span>
+            </div>
+            {dny.map((den) => {
+              const souhrn = mrizka.poDnech.get(den);
+              const stitek = stitekDne(den, dnesni);
+              const cislo = Number(den.slice(8, 10));
+              return (
+                <div
+                  key={den}
+                  role="columnheader"
+                  className="ds-smd-den"
+                  data-dnes={den === dnesni ? "" : undefined}
+                  data-vikend={jeVikend(den) ? "" : undefined}
+                  aria-label={`${ZKRATKY_DNU[denVTydnu(den)]} ${cislo}. ${Number(den.slice(5, 7))}.`}
+                >
+                  <span className="ds-smd-den-hlava">
+                    <span className="ds-smd-den-nazev">{stitek ?? ZKRATKY_DNU[denVTydnu(den)]}</span>
+                    <span className="ds-smd-den-cislo">{cislo}.</span>
+                  </span>
+                  <span
+                    className="ds-smd-den-soucet"
+                    title="Kolik lidí ten den pracuje a kolik hodin je naplánováno (bez neobsazených směn)"
+                  >
+                    {souhrn && souhrn.lidi > 0 ? (
+                      <>
+                        <Ikona klic="lide" velikost={12} />
+                        {souhrn.lidi} · {hodinyKratce(souhrn.minut)}
+                      </>
+                    ) : (
+                      <span aria-label="nikdo nepracuje">—</span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {mrizka.pobocky.map((pobocka) => (
+            <Fragment key={pobocka.klic}>
+              {vicePobocek ? (
+                <div role="row" className="ds-smd-radek ds-smd-radek-siroky">
+                  <div role="rowheader" className="ds-smd-pobocka">
+                    {pobocka.nazev}
+                  </div>
+                </div>
+              ) : null}
+              {pobocka.skupiny.map((skupina) => (
+                <SkupinaMrizkyView
+                  key={skupina.klic}
+                  skupina={skupina}
+                  pobockaId={pobocka.klic}
+                  dny={dny}
+                  dnesni={dnesni}
+                  planovani={planovani}
+                  poziceOsob={poziceOsob}
+                  barvy={barvy}
+                  jmena={jmena}
+                  vybranaId={vybranaId}
+                  sbaleno={sbalene.has(skupina.klic)}
+                  onPrepnout={onPrepnout}
+                  onOtevrit={onOtevrit}
+                />
+              ))}
+            </Fragment>
+          ))}
+
+          {mrizka.bezSmeny ? (
+            <SkupinaMrizkyView
+              skupina={mrizka.bezSmeny}
+              pobockaId={planovani?.vychoziPobocka ?? null}
+              dny={dny}
+              dnesni={dnesni}
+              planovani={planovani}
+              poziceOsob={poziceOsob}
+              barvy={barvy}
+              jmena={jmena}
+              vybranaId={vybranaId}
+              sbaleno={sbalene.has(mrizka.bezSmeny.klic)}
+              onPrepnout={onPrepnout}
+              onOtevrit={onOtevrit}
+            />
+          ) : null}
+        </div>
+
+        {mrizka.pocetRadku === 0 ? (
+          <div className="ds-smd-prazdno" role="status">
+            {filtrAktivni ? (
+              <>
+                <p>Hledání ani filtrům nevyhovuje žádný řádek.</p>
+                <button type="button" className="ft-tl ft-tl-male ft-tl-vedlejsi" onClick={onZrusitFiltry}>
+                  Zrušit filtry
+                </button>
+              </>
+            ) : (
+              <>
+                <p>{maSmeny ? "V tomto období není co ukázat." : "V tomto období zatím není žádná směna."}</p>
+                {planovani ? (
+                  <button
+                    type="button"
+                    className="ft-tl ft-tl-male ft-tl-hlavni"
+                    onClick={() => onOtevrit({ den: dny[0], smena: null, nonce: Date.now() })}
+                  >
+                    + Přidat směnu
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="ds-smd-paticka">
+        <ul className="ds-smd-legenda" aria-label="Vysvětlivky">
+          <li>
+            <span className="ds-smd-vzorek" data-stav="vydana" aria-hidden="true" />
+            Vydaná směna
+          </li>
+          <li>
+            <span className="ds-smd-vzorek" data-stav="koncept" aria-hidden="true" />
+            Nevydaná
+          </li>
+          <li>
+            <span className="ds-smd-vzorek" data-stav="zmenena" aria-hidden="true" />
+            Změněná po vydání
+          </li>
+        </ul>
+        <p className="ds-smd-celkem" title="Plánované hodiny lidí v tom, co je vidět. Neobsazené směny a automatická přestávka pobočky se nepočítají.">
+          Celkem: <strong>{hodinyKratce(mrizka.celkemMinut)}</strong>
+        </p>
+      </div>
+    </>
+  );
+}
+
+/* --- skupina (úsek) ---------------------------------------------------- */
+
+function SkupinaMrizkyView({
+  skupina,
+  pobockaId,
+  dny,
+  dnesni,
+  planovani,
+  poziceOsob,
+  barvy,
+  jmena,
+  vybranaId,
+  sbaleno,
+  onPrepnout,
+  onOtevrit,
+}: {
+  skupina: SkupinaMrizky;
+  pobockaId: string | null;
+  dny: string[];
+  dnesni: string;
+  planovani: Planovani | null;
+  poziceOsob: (osobaId: string) => string | null;
+  barvy: Map<string, string | null>;
+  jmena: Map<string, string>;
+  vybranaId: string | null;
+  sbaleno: boolean;
+  onPrepnout: (klic: string) => void;
+  onOtevrit: (co: Otevrene) => void;
+}) {
+  const nazev = skupina.nazev;
+  const neobsazenychSmen = skupina.radky.reduce(
+    (n, r) => n + [...r.smenyPodleDne.values()].reduce((m, seznam) => m + seznam.length, 0),
+    0,
+  );
+  const souhrn =
+    skupina.druh === "neobsazene"
+      ? `${pocet(neobsazenychSmen, "směna", "směny", "směn")} k obsazení · ${hodinyKratce(skupina.minut)}`
+      : [
+          pocet(skupina.lidi, "člověk", "lidé", "lidí"),
+          skupina.minut > 0 ? hodinyKratce(skupina.minut) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+  return (
+    <>
+      {/*
+        Neobsazené směny nemají vlastní hlavičku: je to jeden řádek nahoře
+        a jeho součet stojí v buňce se jménem („Neobsazeno · 2 směny · 16 h“).
+        Hlavička navíc by nad ním brala řádek místa a nedala by se k ničemu
+        sbalit — poplach, „sem někoho potřebujeme“, se schovávat nemá.
+      */}
+      {skupina.druh === "neobsazene" ? null : (
+        <div role="row" className="ds-smd-radek ds-smd-radek-siroky">
+          <div role="rowheader" className="ds-smd-skupina-obal">
+            <button
+              type="button"
+              className="ds-smd-skupina"
+              data-druh={skupina.druh}
+              aria-expanded={!sbaleno}
+              onClick={() => onPrepnout(skupina.klic)}
+            >
+              <span className="ds-smd-skupina-sipka" aria-hidden="true">
+                <Ikona klic="sipkaVpravo" velikost={14} />
+              </span>
+              <span className="ds-smd-skupina-nazev">{nazev}</span>
+              <span className="ds-smd-skupina-pocty">{souhrn}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sbaleno
+        ? null
+        : skupina.radky.map((radek) => (
+            <RadekMrizkyView
+              key={`${skupina.klic}|${radek.klic}`}
+              radek={radek}
+              pobockaId={pobockaId}
+              dny={dny}
+              dnesni={dnesni}
+              planovani={planovani}
+              role={radek.osoba ? poziceOsob(radek.osoba.id) : souhrn}
+              barva={radek.osoba ? (barvy.get(radek.osoba.id) ?? null) : null}
+              jmena={jmena}
+              vybranaId={vybranaId}
+              onOtevrit={onOtevrit}
+            />
+          ))}
+    </>
+  );
+}
+
+/* --- řádek člověka ----------------------------------------------------- */
+
+function RadekMrizkyView({
+  radek,
+  pobockaId,
+  dny,
+  dnesni,
+  planovani,
+  role,
+  barva,
+  jmena,
+  vybranaId,
+  onOtevrit,
+}: {
+  radek: RadekMrizky;
+  pobockaId: string | null;
+  dny: string[];
+  dnesni: string;
+  planovani: Planovani | null;
+  role: string | null;
+  barva: string | null;
+  jmena: Map<string, string>;
+  vybranaId: string | null;
+  onOtevrit: (co: Otevrene) => void;
+}) {
+  const { osoba, jmeno } = radek;
+
+  return (
+    <div role="row" className="ds-smd-radek ds-smd-radek-osoby">
+      <div role="rowheader" className="ds-smd-osoba" data-volna={osoba ? undefined : ""}>
+        {osoba ? (
+          <>
+            <span className="ds-smd-avatar" aria-hidden="true">
+              {inicialy(jmeno)}
+            </span>
+            <span className="ds-smd-osoba-text">
+              <span className="ds-smd-jmeno" title={jmeno}>
+                <ZnackaOsoby barva={barva} velikost={9} />
+                <span className="ds-smd-jmeno-text">{jmeno}</span>
+              </span>
+              {/*
+                Kolik hodin má člověk v tomhle týdnu naplánováno — za pozicí,
+                aby se dalo sledovat, jak přibývá s každou přidanou směnou.
+                Plánované délky bez automatické přestávky (stejně jako
+                součty v hlavičkách).
+              */}
+              <span className="ds-smd-role">
+                {role ? <>{role} · </> : null}
+                <span className="ds-smd-hodiny" title="Naplánováno v tomto týdnu">
+                  {hodinyKratce(radek.minut)}
+                </span>
+              </span>
+            </span>
+            {/* Jen plánující: „nevydané změny“ jsou věc toho, kdo rozpis vydává. */}
+            {planovani && radek.nevydanych > 0 ? (
+              <span
+                className="ds-smd-tecka"
+                title={`${pocet(radek.nevydanych, "nevydaná změna", "nevydané změny", "nevydaných změn")}`}
+              >
+                <span className="ft-jen-pro-odecitac">
+                  {pocet(radek.nevydanych, "nevydaná změna", "nevydané změny", "nevydaných změn")}
+                </span>
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <span className="ds-smd-osoba-text">
+            <span className="ds-smd-jmeno">{jmeno}</span>
+            <span className="ds-smd-role">{role ?? "volné směny"}</span>
+          </span>
+        )}
+      </div>
+
+      {dny.map((den) => {
+        const smeny = (radek.smenyPodleDne.get(den) ?? []) as Smena[];
+        const obsazeno = smeny.length > 0;
+        return (
+          <div
+            key={den}
+            role="cell"
+            className="ds-smd-bunka"
+            data-dnes={den === dnesni ? "" : undefined}
+            data-vikend={jeVikend(den) ? "" : undefined}
+          >
+            {smeny.map((s) => (
+              <KartaSmeny
+                key={s.id}
+                s={s}
+                jmena={jmena}
+                vybrana={vybranaId === s.id}
+                klikaci={planovani !== null}
+                onOtevrit={() => onOtevrit({ den, smena: s })}
+              />
+            ))}
+
+            {/*
+              Jen PRÁZDNÉ políčko: člověk i den jsou dané, formulář se
+              otevře skoro vyplněný. Kam dát další směnu téhož dne, řeší
+              otevřená směna (Šéfík 16. 9. 2026: „odebrat druhé plus“).
+            */}
+            {planovani && !obsazeno ? (
+              <button
+                type="button"
+                className="ds-smd-pridat"
+                aria-label={`Přidat směnu: ${jmeno}, ${den}`}
+                onClick={() =>
+                  onOtevrit({
+                    den,
+                    smena: osoba
+                      ? {
+                          id: "",
+                          branch_id: pobockaId ?? planovani.vychoziPobocka ?? "",
+                          employee_id: osoba.id,
+                          position_id: null,
+                          shift_date: den,
+                          starts_at: "08:00",
+                          ends_at: "16:00",
+                          note: "",
+                          pauza_od: null,
+                          pauza_do: null,
+                        }
+                      : null,
+                    nonce: Date.now(),
+                  })
+                }
+              >
+                <Ikona klic="plus" velikost={12} />
+                Přidat
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* --- karta směny ------------------------------------------------------- */
+
+function KartaSmeny({
+  s,
+  jmena,
+  vybrana,
+  klikaci,
+  onOtevrit,
+}: {
+  s: Smena;
+  jmena: Map<string, string>;
+  vybrana: boolean;
+  klikaci: boolean;
+  onOtevrit: () => void;
+}) {
+  const stav = stavSmeny(s as SmenaD);
+  const puvodne = puvodniStav(s as SmenaD);
+  const cas = `${hhmm(s.starts_at)}–${hhmm(s.ends_at)}`;
+  const trhana = Boolean(s.pauza_od && s.pauza_do);
+
+  const stitek = stav === "koncept" ? "Nevydáno" : stav === "zmenena" ? "Změněno" : null;
+  const pauza = trhana ? `pauza ${hhmm(s.pauza_od as string)}–${hhmm(s.pauza_do as string)}` : null;
+  const popisek = [stitek, pauza].filter(Boolean).join(" · ");
+
+  // Celý popis do `title` a odečítače — karta sama je záměrně strohá.
+  const podrobnosti = [
+    cas,
+    trhana ? `trhaná směna, ${pauza}` : null,
+    stitek,
+    puvodne
+      ? [
+          puvodne.casSeZmenil ? `původně ${puvodne.od}–${puvodne.do}` : null,
+          puvodne.osobaSeZmenila
+            ? `původně ${puvodne.osobaId ? (jmena.get(puvodne.osobaId) ?? "jiný člověk") : "neobsazeno"}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(", ")
+      : null,
+    s.note ? `poznámka: ${s.note}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const obsah = (
+    <>
+      <span className="ds-smd-cas">{cas}</span>
+      {stav !== "vydana" ? <span className="ds-smd-znacka" aria-hidden="true" /> : null}
+      {popisek ? <span className="ds-smd-popisek">{popisek}</span> : null}
+    </>
+  );
+
+  if (!klikaci) {
+    return (
+      <div className="ds-smd-smena" data-stav={stav} title={podrobnosti} aria-label={podrobnosti} role="group">
+        {obsah}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="ds-smd-smena"
+      data-stav={stav}
+      data-vybrana={vybrana ? "" : undefined}
+      aria-pressed={vybrana}
+      title={podrobnosti}
+      aria-label={podrobnosti}
+      onClick={onOtevrit}
+    >
+      {obsah}
+    </button>
+  );
+}

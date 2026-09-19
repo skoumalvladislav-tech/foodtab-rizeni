@@ -8,6 +8,8 @@ import type { IkonaKlic } from '@/app/[rozsah]/nabidka'
 import Drawer from '@/components/ui/Drawer'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
 import { zkratkaDoSmeny } from '@/lib/sablony'
+import { hodinyKratce, minutSmeny } from '@/lib/rozpis-mobil'
+import HlavickaSmeny, { type KontextSmeny } from './desktop/hlavicka-smeny'
 import { ListMobil } from './mobil/sheet'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
 import { smazatSmenu, ulozitSmenu, type StavSmeny } from './smena'
@@ -102,6 +104,10 @@ export default function FormularSmeny({
   varianta = 'drawer',
   predvyplneni,
   zamerit,
+  kontext,
+  onDuplikovat,
+  dole,
+  souctyTydne,
 }: {
   rozsah: string
   /** Předvyplněné datum u nové směny. */
@@ -121,6 +127,18 @@ export default function FormularSmeny({
   predvyplneni?: PredvyplneniSmeny | null
   /** Kam po otevření přesunout kurzor. Na telefonu se jinak nezaměřuje nic. */
   zamerit?: 'poznamka'
+  /** Panel na počítači: kdo a v jakém stavu (hlavička nad formulářem). */
+  kontext?: KontextSmeny
+  /** Panel na počítači: „Duplikovat směnu“. Bez něj se tlačítko nekreslí. */
+  onDuplikovat?: () => void
+  /** Panel na počítači: co se kreslí pod formulářem (docházka k téhle směně). */
+  dole?: ReactNode
+  /**
+   * Kolik minut má člověk v zobrazeném týdnu naplánováno, bez směny
+   * `ignorovat` (ta se právě upravuje). `null` = datum je mimo načtené dny,
+   * součet se nezná — a proto se neukazuje.
+   */
+  souctyTydne?: (zamestnanec: string, den: string, ignorovat: string | null) => number | null
 }) {
   const router = useRouter()
   const [stav, akce, ceka] = useActionState<StavSmeny, FormData>(ulozitSmenu, {
@@ -143,9 +161,15 @@ export default function FormularSmeny({
   const [zavreno, setZavreno] = useState(false)
   const prvni = useRef<HTMLSelectElement>(null)
   const poznamkaRef = useRef<HTMLInputElement>(null)
+  /*
+    `mobil` je jen to, co je opravdu telefon: celoobrazovkový obal,
+    pevné tlačítko dole, mazání v detailu. Pole (s ikonou), popisky a
+    pořadí jsou pro telefon i panel na počítači totéž — podle mockupu
+    Směn. Dvě podoby téhož formuláře se vždycky rozejdou.
+  */
   const mobil = varianta === 'list'
-  const S = mobil ? STYL_MOBIL : STYL_DRAWER
-  const poradi = (n: number) => (mobil ? { order: n } : undefined)
+  const S = STYL_POLE
+  const poradi = (n: number) => ({ order: n })
 
   /*
     Zdroj výchozích hodnot: upravovaná směna, jinak předvyplnění (kopie
@@ -161,6 +185,13 @@ export default function FormularSmeny({
     zůstal neřízený; řídit se má jen to, co se má měnit samo.
   */
   const [pobocka, setPobocka] = useState(zdroj?.branch_id ?? vychoziPobocka ?? '')
+  /*
+    Zaměstnanec a datum se řídí kvůli průběžnému součtu hodin pod časy —
+    vedoucí při zadávání hned vidí, kolik má člověk v týdnu naplánováno
+    a kolik bude mít s touhle směnou.
+  */
+  const [zamestnanec, setZamestnanec] = useState(zdroj?.employee_id ?? '')
+  const [datum, setDatum] = useState(smena?.shift_date ?? den)
   const [vybranaPozice, setVybranaPozice] = useState(zdroj?.position_id ?? '')
   const [od, setOd] = useState((zdroj?.starts_at ?? '08:00').slice(0, 5))
   const [doKdy, setDoKdy] = useState((zdroj?.ends_at ?? '16:00').slice(0, 5))
@@ -214,6 +245,23 @@ export default function FormularSmeny({
   // Odvozené, ne uložené — proč, viz hlavičku lib/sablony.
   const klicDoSmeny = zkratkaDoSmeny(sablony, klic, od, doKdy)
   const casySedi = klicDoSmeny !== ''
+
+  /*
+    Průběžný součet: co má člověk v týdnu bez téhle směny → s ní. Nová
+    délka se počítá týmž výpočtem jako všude jinde (`minutSmeny`: směna
+    přes půlnoc je kladná, pauza uvnitř se odečte).
+  */
+  const predSmenou =
+    souctyTydne && zamestnanec && datum ? souctyTydne(zamestnanec, datum, smena?.id || null) : null
+  const novychMinut =
+    od && doKdy
+      ? minutSmeny({
+          starts_at: od,
+          ends_at: doKdy,
+          pauza_od: trhana && pauzaOd ? pauzaOd : null,
+          pauza_do: trhana && pauzaDo ? pauzaDo : null,
+        })
+      : 0
 
   function vybratSablonu(k: string) {
     setKlic(k)
@@ -300,18 +348,19 @@ export default function FormularSmeny({
         <form
           id={ID_FORMULARE}
           action={akce}
-          style={{ display: 'grid', gap: mobil ? '16px' : '12px' }}
+          style={{ display: 'grid', gap: '16px' }}
         >
           <input type="hidden" name="rozsah" value={rozsah} />
           {smena ? <input type="hidden" name="smena" value={smena.id} /> : null}
 
           <label style={{ ...S.label, ...poradi(1) }}>
-            <span>{mobil ? 'Zaměstnanec' : 'Kdo'}</span>
-            <Pole mobil={mobil} ikona="clovek" sipka>
+            <span>Zaměstnanec</span>
+            <Pole ikona="clovek" sipka>
               <select
                 ref={prvni}
                 name="zamestnanec"
-                defaultValue={zdroj?.employee_id ?? ''}
+                value={zamestnanec}
+                onChange={(e) => setZamestnanec(e.target.value)}
                 style={S.pole}
               >
                 {/*
@@ -329,8 +378,8 @@ export default function FormularSmeny({
           </label>
 
           <label style={{ ...S.label, ...poradi(8) }}>
-            <span>{mobil ? 'Úsek / pozice' : 'Zařazení'}</span>
-            <Pole mobil={mobil} ikona="vidlicka" sipka>
+            <span>Úsek / pozice</span>
+            <Pole ikona="vidlicka" sipka>
               <select
                 name="pozice"
                 value={vybranaPozice}
@@ -354,8 +403,8 @@ export default function FormularSmeny({
           </label>
 
           <label style={{ ...S.label, ...poradi(9) }}>
-            <span>{mobil ? 'Pobočka' : 'Kde'}</span>
-            <Pole mobil={mobil} ikona="pobocka" sipka>
+            <span>Pobočka</span>
+            <Pole ikona="pobocka" sipka>
               <select
                 name="pobocka"
                 required
@@ -374,12 +423,13 @@ export default function FormularSmeny({
 
           <label style={{ ...S.label, ...poradi(2) }}>
             <span>Datum</span>
-            <Pole mobil={mobil} ikona="kalendar">
+            <Pole ikona="kalendar">
               <input
                 name="den"
                 type="date"
                 required
-                defaultValue={smena?.shift_date ?? den}
+                value={datum}
+                onChange={(e) => setDatum(e.target.value)}
                 style={S.pole}
               />
             </Pole>
@@ -392,7 +442,7 @@ export default function FormularSmeny({
           {sablony.length > 0 ? (
             <label style={{ ...S.label, ...poradi(3) }}>
               <span>Šablona</span>
-              <Pole mobil={mobil} ikona="seznam" sipka>
+              <Pole ikona="seznam" sipka>
                 <select
                   value={klic}
                   onChange={(e) => vybratSablonu(e.target.value)}
@@ -419,62 +469,43 @@ export default function FormularSmeny({
           */}
           <input type="hidden" name="sablona" value={klicDoSmeny} />
 
-          {mobil ? (
-            /*
-              Na telefonu jedno pole „Čas od – do“ s hodinami vlevo, jako
-              v mockupu. Pole se jmenují stejně (`od`, `do`), takže akce
-              nic nepozná.
-            */
-            <div style={{ ...S.label, ...poradi(4) }} role="group" aria-labelledby={ID_CAS}>
-              <span id={ID_CAS}>Čas od – do</span>
-              <Pole mobil ikona="hodiny">
-                <input
-                  name="od"
-                  type="time"
-                  required
-                  aria-label="Od"
-                  value={od}
-                  onChange={(e) => setOd(e.target.value)}
-                  style={S.pole}
-                />
-                <span aria-hidden="true">–</span>
-                <input
-                  name="do"
-                  type="time"
-                  required
-                  aria-label="Do"
-                  value={doKdy}
-                  onChange={(e) => setDoKdy(e.target.value)}
-                  style={S.pole}
-                />
-              </Pole>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <label style={S.label}>
-                <span>Od</span>
-                <input
-                  name="od"
-                  type="time"
-                  required
-                  value={od}
-                  onChange={(e) => setOd(e.target.value)}
-                  style={S.pole}
-                />
-              </label>
-              <label style={S.label}>
-                <span>Do</span>
-                <input
-                  name="do"
-                  type="time"
-                  required
-                  value={doKdy}
-                  onChange={(e) => setDoKdy(e.target.value)}
-                  style={S.pole}
-                />
-              </label>
-            </div>
-          )}
+          {/*
+            Jedno pole „Čas od – do“ s hodinami vlevo, jako v mockupu —
+            telefon i panel na počítači. Pole se jmenují stejně (`od`,
+            `do`), takže akce nic nepozná. Krátké: dva časy nepotřebují
+            šířku celého panelu.
+          */}
+          <div className="ds-sm-cas" style={{ ...S.label, ...poradi(4) }} role="group" aria-labelledby={ID_CAS}>
+            <span id={ID_CAS}>Čas od – do</span>
+            <Pole ikona="hodiny">
+              <input
+                name="od"
+                type="time"
+                required
+                aria-label="Od"
+                value={od}
+                onChange={(e) => setOd(e.target.value)}
+                style={S.pole}
+              />
+              <span aria-hidden="true">–</span>
+              <input
+                name="do"
+                type="time"
+                required
+                aria-label="Do"
+                value={doKdy}
+                onChange={(e) => setDoKdy(e.target.value)}
+                style={S.pole}
+              />
+            </Pole>
+          </div>
+
+          {predSmenou !== null && novychMinut > 0 ? (
+            <p className="ds-smd-souhrn-hodin" style={poradi(4)} aria-live="polite">
+              Tento týden má naplánováno <strong>{hodinyKratce(predSmenou)}</strong>, s touhle směnou{' '}
+              <strong>{hodinyKratce(predSmenou + novychMinut)}</strong>.
+            </p>
+          ) : null}
 
           {klic !== '' && !casySedi ? (
             <p style={{ ...vysvetlivka, ...poradi(5) }}>
@@ -501,7 +532,7 @@ export default function FormularSmeny({
               gap: '8px',
               fontSize: '14px',
               color: 'var(--ink)',
-              minHeight: mobil ? '44px' : undefined,
+              minHeight: '44px',
               ...poradi(6),
             }}
           >
@@ -520,7 +551,7 @@ export default function FormularSmeny({
               >
                 <label style={S.label}>
                   <span>Pauza od</span>
-                  <Pole mobil={mobil} ikona="hodiny">
+                  <Pole ikona="hodiny">
                     <input
                       name="pauza_od"
                       type="time"
@@ -533,7 +564,7 @@ export default function FormularSmeny({
                 </label>
                 <label style={S.label}>
                   <span>Pauza do</span>
-                  <Pole mobil={mobil} ikona="hodiny">
+                  <Pole ikona="hodiny">
                     <input
                       name="pauza_do"
                       type="time"
@@ -553,14 +584,14 @@ export default function FormularSmeny({
           ) : null}
 
           <label style={{ ...S.label, ...poradi(10) }}>
-            <span>{mobil ? 'Poznámka (nepovinné)' : 'Poznámka'}</span>
-            <Pole mobil={mobil} ikona="tuzka">
+            <span>Poznámka (nepovinné)</span>
+            <Pole ikona="tuzka">
               <input
                 ref={poznamkaRef}
                 name="poznamka"
                 maxLength={200}
                 defaultValue={zdroj?.note ?? ''}
-                placeholder={mobil ? 'Zadejte poznámku…' : 'nepovinná'}
+                placeholder="Zadejte poznámku…"
                 style={S.pole}
               />
             </Pole>
@@ -572,12 +603,12 @@ export default function FormularSmeny({
 
           {/* Na telefonu je tlačítko pevně dole (viz `pata` níž). */}
           {mobil ? null : (
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi">
-                Zpět
-              </button>
+            <div className="ds-smd-form-pata" style={poradi(12)}>
               <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>
-                {ceka ? 'Ukládám…' : smena ? 'Uložit změnu' : 'Přidat směnu'}
+                {ceka ? 'Ukládám…' : smena?.id ? 'Uložit změny' : 'Přidat směnu'}
+              </button>
+              <button type="button" onClick={zavrit} className="ft-tl ft-tl-vedlejsi">
+                Zrušit
               </button>
             </div>
           )}
@@ -643,13 +674,22 @@ export default function FormularSmeny({
               </div>
             </form>
           ) : (
-            <button
-              type="button"
-              onClick={() => setPtaSeNaSmazani(true)}
-              className="ft-tl ft-tl-vedlejsi"
-            >
-              {jeVydana ? 'Zrušit směnu' : 'Smazat směnu'}
-            </button>
+            <div className="ds-smd-form-druhotne">
+              {onDuplikovat ? (
+                <button type="button" onClick={onDuplikovat} className="ft-tl ft-tl-male ft-tl-vedlejsi">
+                  <Ikona klic="kopie" velikost={15} />
+                  Duplikovat směnu
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setPtaSeNaSmazani(true)}
+                className="ft-tl ft-tl-male ft-tl-vedlejsi ds-smd-smazat"
+              >
+                <Ikona klic="kos" velikost={15} />
+                {jeVydana ? 'Zrušit směnu' : 'Smazat směnu'}
+              </button>
+            </div>
           )}
 
           {stavSmazani.stav === 'chyba' ? (
@@ -664,8 +704,12 @@ export default function FormularSmeny({
 
   if (!mobil) {
     return (
-      <Drawer otevreno onZavrit={zavrit} nadpis={smena ? 'Upravit směnu' : 'Nová směna'}>
-        {telo}
+      <Drawer otevreno onZavrit={zavrit} nadpis={smena?.id ? 'Upravit směnu' : 'Nová směna'} nemodalni>
+        <div className="ds-sm-form ds-smd-form">
+          {kontext && smena?.id ? <HlavickaSmeny kontext={kontext} /> : null}
+          {telo}
+          {dole}
+        </div>
       </Drawer>
     )
   }
@@ -713,17 +757,14 @@ const ID_CAS = 'ds-sm-cas-popisek'
  * každém vykreslení stala „novou“ komponentou a pole by ztrácela fokus.
  */
 function Pole({
-  mobil,
   ikona,
   sipka = false,
   children,
 }: {
-  mobil: boolean
   ikona: IkonaKlic
   sipka?: boolean
   children: ReactNode
 }) {
-  if (!mobil) return <>{children}</>
   return (
     <span className="ds-sm-pole-obal">
       <span className="ds-sm-pole-ikona" aria-hidden="true">
@@ -741,28 +782,9 @@ function Pole({
 
 /* --- styly ---------------------------------------------------------- */
 
-const poleLabel = {
-  display: 'grid',
-  gap: '6px',
-  fontSize: '13px',
-  color: 'var(--muted)',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '.06em',
-} as const
-
-const pole = {
-  width: '100%',
-  padding: '10px 12px',
-  fontSize: '16px',
-  borderRadius: '10px',
-  border: '1px solid var(--line-2)',
-  background: 'var(--paper)',
-  color: 'var(--ink)',
-  minHeight: '44px',
-} as const
-
 /*
-  Mobilní varianta: popisek malým písmem bez verzálek nad rámečkem,
+  Pole formuláře (telefon i panel na počítači): popisek malým písmem bez
+  verzálek nad rámečkem,
   samotné pole bez vlastního rámu (rám dělá `.ds-sm-pole-obal`).
   16 px na polích je záměr — menší písmo by iOS při zaměření přiblížil.
 */
@@ -788,8 +810,7 @@ const poleMobil = {
   outline: 'none',
 } as const
 
-const STYL_DRAWER = { label: poleLabel, pole } as const
-const STYL_MOBIL = { label: labelMobil, pole: poleMobil } as const
+const STYL_POLE = { label: labelMobil, pole: poleMobil } as const
 
 const vysvetlivka = {
   margin: 0,

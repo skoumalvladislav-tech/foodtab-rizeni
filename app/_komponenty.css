@@ -1008,3 +1008,521 @@ span.ds-sm-dl { cursor: default; }
 @media (max-width: 640px) {
   .ft-shell .ft-mob-mods { display: none; }
 }
+
+/* =====================================================================
+   Směny na počítači — pracovní plocha manažera (`ds-smd-*`)
+   Zadání „Desktop Směny + Docházka UX 2.0“ (19. 9. 2026).
+
+   Mřížka je hlavní obsah stránky; všechno kolem ní je jeden řádek
+   nástrojů a (jen když je co vydávat) jeden úzký pruh. Sloupec se jmény
+   i záhlaví dnů jsou přilepené a mřížka scrolluje sama v sobě.
+
+   Barva nikdy nestojí sama: stav směny nese i slovo („Nevydáno“,
+   „Změněno“), tvar rámečku (přerušovaný / plný) a značka.
+   ===================================================================== */
+
+.ds-smd {
+  display: flex; flex-direction: column; min-width: 0;
+  /* Zbytek obrazovky pod horní lištou; `.ft-main` je tu odsazený 14 px nahoře i dole (níž). */
+  height: calc(100dvh - var(--vysoka-lista) - 28px);
+  min-height: 520px;
+}
+/* Pracovní plocha potřebuje výšku víc než vzdušný okraj: mřížka je hlavní
+   obsah stránky a každý řádek navíc je jeden člověk vidět bez scrollování. */
+@media (min-width: 641px) {
+  .ft-main:has(.ds-smd) { padding-top: 14px; padding-bottom: 14px; }
+}
+/* Nadpis a věta pod ním na jednom řádku — mockup Směn má bezpatkový tučný
+   nadpis (stejně jako mobilní část, viz docs/vzhled-zadani.md, oddíl 12). */
+.ds-smd .ft-hlava { margin: 0 0 10px; flex: none; align-items: center; }
+.ds-smd .ft-hlava > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
+.ds-smd .ft-hlava h1 { font-family: inherit; font-weight: 700; font-size: 24px; letter-spacing: -.015em; }
+.ds-smd .ft-popis { margin: 0; }
+
+/* --- řádek nástrojů ---------------------------------------------------- */
+
+.ds-smd-lista {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  margin-bottom: 10px; flex: none;
+}
+
+.ds-smd-tl {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 38px; padding: 0 14px; white-space: nowrap;
+  border: 1px solid var(--line-2); border-radius: 10px;
+  background: var(--card); color: var(--ink);
+  font-size: 13.5px; font-weight: 500; line-height: 1; cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.ds-smd-tl:hover { background: var(--sunken); }
+.ds-smd-tl[aria-pressed="true"] { background: var(--sunken); border-color: var(--ink); font-weight: 600; }
+.ds-smd-tl-hlavni { background: var(--mosaz-sv); color: var(--mosaz-ink); border-color: var(--mosaz); font-weight: 600; }
+.ds-smd-tl-hlavni:hover { background: var(--mosaz); color: var(--accent-ink); }
+
+.ds-smd-nav {
+  display: inline-flex; align-items: center; height: 38px; overflow: hidden;
+  border: 1px solid var(--line-2); border-radius: 10px; background: var(--card);
+}
+.ds-smd-nav button {
+  display: grid; place-items: center; width: 36px; height: 100%;
+  border: 0; background: transparent; color: var(--ink); cursor: pointer;
+}
+.ds-smd-nav button:hover { background: var(--sunken); }
+.ds-smd-obdobi {
+  min-width: 140px; padding: 0 14px; text-align: center; font-size: 14px; font-weight: 600;
+  border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+  line-height: 36px; white-space: nowrap;
+}
+
+/* Vlastní přepínač pohledů: `.ft-seg` se pod 960 px schovává (patří
+   přepínači poboček v liště), tady by tablet o Den/Týden/Měsíc přišel. */
+.ds-smd-seg {
+  display: inline-flex; gap: 2px; height: 38px; padding: 3px;
+  background: var(--sunken); border: 1px solid var(--line-2); border-radius: 10px;
+}
+.ds-smd-seg button {
+  padding: 0 12px; border: 0; border-radius: 7px; background: none;
+  font-size: 13px; font-weight: 500; color: var(--muted); cursor: pointer;
+}
+.ds-smd-seg button:hover { color: var(--ink); }
+.ds-smd-seg button[aria-pressed="true"] { background: var(--mosaz-sv); color: var(--mosaz-ink); font-weight: 600; }
+
+.ds-smd-hledani {
+  display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 8px 0 11px;
+  width: 250px; max-width: 100%;
+  background: var(--card); border: 1px solid var(--line-2); border-radius: 10px; color: var(--muted);
+}
+.ds-smd-hledani:focus-within {
+  border-color: var(--mosaz); box-shadow: 0 0 0 2px color-mix(in srgb, var(--mosaz-sv) 45%, transparent);
+}
+.ds-smd-hledani input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  font-size: 13.5px; color: var(--ink);
+}
+.ds-smd-hledani input:focus-visible { outline: 0; }
+.ds-smd-hledani input::-webkit-search-cancel-button { display: none; }
+.ds-smd-hledani-zrusit {
+  display: grid; place-items: center; width: 24px; height: 24px; flex: none;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.ds-smd-hledani-zrusit:hover { background: var(--sunken); color: var(--ink); }
+
+.ds-smd-odznak {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--mosaz-sv); color: var(--mosaz-ink);
+  font-size: 11px; font-weight: 700;
+}
+
+.ds-smd-filtry-obal { position: relative; }
+.ds-smd-filtry {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  width: 440px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 200px); overflow: auto;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px;
+  padding: 14px 16px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: var(--shadow-lg);
+}
+.ds-smd-filtry fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 2px; min-width: 0; }
+.ds-smd-filtry legend {
+  padding: 0; margin-bottom: 4px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+}
+.ds-smd-volba { display: flex; align-items: center; gap: 8px; min-height: 27px; font-size: 13.5px; cursor: pointer; }
+.ds-smd-f-sloupec { align-content: start; }
+.ds-smd-filtry .ds-smd-f-siroka, .ds-smd-filtry-pata { grid-column: 1 / -1; }
+.ds-smd-f-stav { grid-template-columns: repeat(4, auto); justify-content: start; column-gap: 16px; }
+.ds-smd-f-stav legend { grid-column: 1 / -1; }
+.ds-smd-filtry select {
+  height: 36px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px;
+  background: var(--paper); color: var(--ink); font-size: 13.5px;
+}
+.ds-smd-filtry-pata {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+.ds-smd-odkaz {
+  padding: 0; border: 0; background: none; color: var(--ink); font-size: 13px;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.ds-smd-odkaz:disabled { color: var(--faint); text-decoration: none; cursor: default; }
+
+.ds-smd-cipy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ds-smd-cipy button:not(.ds-smd-odkaz) {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 11px;
+  border: 1px solid var(--line-2); border-radius: 14px; background: var(--sunken);
+  font-size: 12.5px; color: var(--ink); cursor: pointer;
+}
+.ds-smd-cipy button:not(.ds-smd-odkaz):hover { border-color: var(--ink); }
+
+/* --- výsledek vydání --------------------------------------------------- */
+
+.ds-smd-zprava {
+  display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; padding: 10px 12px 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--dobre) 45%, var(--line)); border-radius: 12px;
+  background: var(--dobre-bg); font-size: 13.5px;
+}
+.ds-smd-zprava[data-chyba] { border-color: var(--bad); background: var(--bad-bg); }
+.ds-smd-zprava p { flex: 1; margin: 0; line-height: 1.45; }
+.ds-smd-zprava-ikona { display: grid; margin-top: 2px; color: var(--dobre); }
+.ds-smd-zprava[data-chyba] .ds-smd-zprava-ikona { color: var(--bad); }
+.ds-smd-zprava-zavrit {
+  display: grid; place-items: center; width: 26px; height: 26px; flex: none;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.ds-smd-zprava-zavrit:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+@media (max-width: 640px) { .ds-smd-zprava { margin: 8px 0; } }
+
+/* --- pruh vydání ------------------------------------------------------- */
+
+.ds-smd-pruh {
+  display: flex; align-items: center; gap: 12px; flex: none; min-height: 44px;
+  margin-bottom: 10px; padding: 5px 8px 5px 12px;
+  background: color-mix(in srgb, var(--mosaz-sv) 14%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--mosaz) 40%, var(--line)); border-radius: 12px;
+}
+.ds-smd-pruh-ikona {
+  display: grid; place-items: center; width: 26px; height: 26px; flex: none;
+  border-radius: 50%; background: var(--mosaz-sv); color: var(--mosaz-ink);
+}
+.ds-smd-pruh-text { flex: 1; min-width: 0; margin: 0; font-size: 13.5px; line-height: 1.35; }
+.ds-smd-pruh-obdobi { color: var(--muted); }
+.ds-smd-pruh-akce { display: flex; gap: 8px; flex: none; }
+.ds-smd-vydano {
+  display: flex; align-items: center; gap: 6px; flex: none; margin: 0 0 8px;
+  font-size: 12.5px; color: var(--muted);
+}
+
+/* --- mřížka týdne ------------------------------------------------------- */
+
+.ds-smd-mrizka {
+  flex: 1; min-height: 240px; overflow: auto; position: relative;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px 12px 0 0;
+  box-shadow: var(--shadow-sm);
+}
+.ds-smd-tabulka { display: grid; min-width: 900px; align-content: start; font-size: 13px; }
+.ds-smd-radek { display: contents; }
+.ds-smd-radek-siroky > * { grid-column: 1 / -1; }
+
+.ds-smd-roh {
+  position: sticky; top: 0; left: 0; z-index: 7; display: flex; align-items: baseline; gap: 8px;
+  padding: 10px 12px 6px; background: var(--card); border-bottom: 1px solid var(--line-2);
+  font-size: 13px; font-weight: 600;
+}
+.ds-smd-roh-pocet { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+
+.ds-smd-den {
+  position: sticky; top: 0; z-index: 5; display: grid; gap: 1px; align-content: center;
+  padding: 6px 8px 5px; text-align: center;
+  background: var(--card); border-bottom: 1px solid var(--line-2); border-left: 1px solid var(--line);
+}
+.ds-smd-den[data-vikend] { background: color-mix(in srgb, var(--mosaz-sv) 12%, var(--card)); }
+.ds-smd-den[data-dnes] { background: color-mix(in srgb, var(--mosaz-sv) 24%, var(--card)); }
+.ds-smd-den-hlava { display: flex; align-items: baseline; justify-content: center; gap: 6px; }
+.ds-smd-den-nazev { font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.ds-smd-den-cislo { font-size: 15px; font-weight: 600; line-height: 1.25; }
+.ds-smd-den[data-dnes] .ds-smd-den-cislo {
+  padding: 0 7px; border-radius: 10px; background: var(--mosaz-sv); color: var(--mosaz-ink);
+}
+.ds-smd-den-soucet {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+.ds-smd-radek-siroky > .ds-smd-pobocka {
+  padding: 9px 14px 6px; background: var(--branch-soft);
+  border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--branch);
+}
+
+.ds-smd-skupina-obal {
+  background: color-mix(in srgb, var(--sunken) 60%, var(--card));
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.ds-smd-skupina {
+  position: sticky; left: 0; display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 12px; border: 0; background: transparent; color: var(--ink);
+  font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; cursor: pointer;
+}
+.ds-smd-skupina[data-druh="neobsazene"] { color: var(--pozor); }
+.ds-smd-skupina-sipka { display: grid; color: var(--muted); transition: transform .12s; }
+.ds-smd-skupina[aria-expanded="true"] .ds-smd-skupina-sipka { transform: rotate(90deg); }
+.ds-smd-skupina-pocty { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
+
+.ds-smd-osoba {
+  position: sticky; left: 0; z-index: 2; display: flex; align-items: center; gap: 10px; min-width: 0;
+  min-height: 52px; padding: 5px 10px 5px 12px;
+  background: var(--card); border-bottom: 1px solid var(--line);
+}
+.ds-smd-osoba[data-volna] { background: color-mix(in srgb, var(--pozor-bg) 45%, var(--card)); }
+.ds-smd-avatar {
+  display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--sunken); color: var(--muted); font-size: 11px; font-weight: 700;
+}
+.ds-smd-avatar-velky { width: 40px; height: 40px; font-size: 13px; }
+.ds-smd-osoba-text { display: grid; flex: 1; gap: 1px; min-width: 0; }
+.ds-smd-jmeno { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+/* Lámat se smí jen mezi slovy, nejvýš na dva řádky; pak výpustka. */
+.ds-smd-jmeno-text {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  min-width: 0; overflow-wrap: normal; word-break: normal; hyphens: manual;
+}
+.ds-smd-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.ds-smd-hodiny { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ds-smd-tecka {
+  flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--mosaz-sv);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mosaz-sv) 30%, transparent);
+}
+
+.ds-smd-bunka {
+  position: relative; display: grid; gap: 4px; align-content: center; min-height: 52px; padding: 5px 6px;
+  border-bottom: 1px solid var(--line); border-left: 1px solid var(--line);
+}
+.ds-smd-bunka[data-vikend] { background: color-mix(in srgb, var(--mosaz-sv) 7%, var(--card)); }
+.ds-smd-bunka[data-dnes] { background: color-mix(in srgb, var(--mosaz-sv) 13%, var(--card)); }
+
+/* Prázdná buňka je čistá; „+ Přidat“ až při najetí nebo zaměření. */
+.ds-smd-pridat {
+  position: absolute; inset: 5px; display: flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1px dashed var(--line-2); border-radius: 8px; background: var(--card);
+  color: var(--muted); font-size: 12.5px; font-weight: 500; cursor: pointer;
+  opacity: 0; transition: opacity .12s;
+}
+.ds-smd-bunka:hover .ds-smd-pridat, .ds-smd-pridat:focus-visible { opacity: 1; }
+.ds-smd-pridat:hover {
+  color: var(--ink); border-color: var(--mosaz);
+  background: color-mix(in srgb, var(--mosaz-sv) 12%, var(--card));
+}
+
+/* --- karta směny -------------------------------------------------------- */
+
+.ds-smd-smena {
+  position: relative; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1px 6px;
+  width: 100%; min-width: 0; padding: 4px 8px; text-align: left; font: inherit;
+  border: 1px solid transparent; border-radius: 8px; cursor: pointer;
+}
+div.ds-smd-smena { cursor: default; }
+.ds-smd-smena:hover { box-shadow: 0 1px 4px rgba(22, 33, 28, .14); }
+div.ds-smd-smena:hover { box-shadow: none; }
+.ds-smd-smena[data-vybrana] { outline: 2px solid var(--mosaz); outline-offset: 1px; }
+.ds-smd-cas { font-size: 13px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ds-smd-znacka { width: 8px; height: 8px; border-radius: 50%; background: var(--mosaz); }
+.ds-smd-popisek {
+  grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; line-height: 1.15; color: var(--muted);
+}
+
+.ds-smd-smena[data-stav="vydana"] {
+  background: var(--branch-soft); color: var(--branch);
+  border-color: color-mix(in srgb, var(--branch) 32%, transparent);
+}
+.ds-smd-smena[data-stav="koncept"] {
+  background: color-mix(in srgb, var(--mosaz-sv) 20%, var(--card)); color: var(--ink);
+  border: 1px dashed var(--mosaz);
+}
+.ds-smd-smena[data-stav="zmenena"] {
+  background: color-mix(in srgb, var(--mosaz-sv) 20%, var(--card)); color: var(--ink);
+  border: 1px solid var(--mosaz);
+}
+.ds-smd-smena[data-stav="koncept"] .ds-smd-popisek,
+.ds-smd-smena[data-stav="zmenena"] .ds-smd-popisek { color: var(--mosaz); font-weight: 600; }
+
+/* --- patička mřížky ----------------------------------------------------- */
+
+.ds-smd-paticka {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none;
+  padding: 8px 14px; background: var(--card);
+  border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px;
+}
+.ds-smd-legenda { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+.ds-smd-legenda li { display: inline-flex; align-items: center; gap: 6px; }
+.ds-smd-vzorek { width: 14px; height: 14px; border-radius: 4px; border: 1px solid transparent; }
+.ds-smd-vzorek[data-stav="vydana"] { background: var(--branch-soft); border-color: color-mix(in srgb, var(--branch) 45%, transparent); }
+.ds-smd-vzorek[data-stav="koncept"] { background: color-mix(in srgb, var(--mosaz-sv) 20%, var(--card)); border: 1px dashed var(--mosaz); }
+.ds-smd-vzorek[data-stav="zmenena"] { background: color-mix(in srgb, var(--mosaz-sv) 20%, var(--card)); border: 1px solid var(--mosaz); }
+.ds-smd-celkem { margin: 0; font-size: 13px; color: var(--muted); }
+.ds-smd-celkem strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.ds-smd-prazdno { display: grid; justify-items: center; gap: 12px; padding: 48px 20px; text-align: center; color: var(--muted); }
+.ds-smd-prazdno p { margin: 0; }
+
+.ds-smd-pohled { flex: 1; min-height: 0; overflow: auto; }
+
+/* --- panel vpravo: Upravit směnu ---------------------------------------- */
+
+.ds-smd-form { align-content: start; gap: 12px; padding-bottom: 8px; }
+/* Pole v panelu jsou nižší než na telefonu (40 místo 52 px): panel je
+   pracovní nástroj vedle mřížky, ne obrazovka, na kterou se ťuká prstem.
+   `!important`: pole nese vložený styl z formulář-smeny.tsx. */
+.ds-smd-form .ds-sm-pole-obal { min-height: 40px; padding: 0 12px; border-radius: 10px; }
+.ds-smd-form .ds-sm-pole-obal > input,
+.ds-smd-form .ds-sm-pole-obal > select { min-height: 38px !important; font-size: 15px !important; }
+.ds-smd-form form { gap: 12px !important; }
+/* Dva časy nepotřebují šířku celého panelu. */
+.ds-smd-form .ds-sm-cas .ds-sm-pole-obal { width: fit-content; max-width: 100%; gap: 8px; }
+.ds-smd-form .ds-sm-pole-obal input[type="time"] { width: 4.6em !important; }
+.ds-smd-souhrn-hodin { margin: -4px 0 0; font-size: 12.5px; color: var(--muted); }
+.ds-smd-souhrn-hodin strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.ds-smd-hlavicka-smeny { display: grid; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.ds-smd-hlavicka-osoba { display: flex; align-items: center; gap: 12px; }
+.ds-smd-hlavicka-jmeno { font-size: 16px; font-weight: 600; }
+.ds-smd-stav-smeny {
+  display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--sunken); font-size: 13px; line-height: 1.4;
+}
+.ds-smd-stav-znacka { flex: none; width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: var(--dobre); }
+.ds-smd-stav-smeny[data-stav="koncept"] .ds-smd-stav-znacka,
+.ds-smd-stav-smeny[data-stav="zmenena"] .ds-smd-stav-znacka { background: var(--mosaz-sv); }
+.ds-smd-stav-smeny[data-stav="koncept"] { border-style: dashed; border-color: var(--mosaz); }
+.ds-smd-stav-smeny[data-stav="zmenena"] { border-color: var(--mosaz); }
+.ds-smd-stav-vysvetleni { display: block; color: var(--muted); }
+
+.ds-smd-form-pata { display: flex; gap: 8px; }
+.ds-smd-form-pata > :first-child { flex: 1; }
+.ds-smd-form-druhotne { display: flex; flex-wrap: wrap; gap: 8px; }
+.ds-smd-smazat { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, var(--line-2)); }
+.ds-smd-smazat:hover { background: var(--bad-bg); }
+
+.ds-smd-karta { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.ds-smd-karta h3 { margin: 0; font-size: 14px; }
+.ds-smd-karta-radek { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ds-smd-karta-jmeno { font-weight: 600; font-size: 13.5px; }
+.ds-smd-karta-mlcky { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.ds-smd-karta-odkaz { justify-self: start; }
+.ds-smd-pritomnost {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 12px;
+  background: var(--sunken); font-size: 12px; font-weight: 600; color: var(--ink);
+}
+.ds-smd-pritomnost::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.ds-smd-pritomnost[data-stav="v_praci"] { background: var(--dobre-bg); color: var(--dobre); }
+.ds-smd-pritomnost[data-stav="v_praci"]::before { background: var(--dobre); }
+.ds-smd-pritomnost[data-stav="nebyl"] { background: var(--pozor-bg); color: var(--pozor); }
+.ds-smd-pritomnost[data-stav="nebyl"]::before { background: var(--pozor); }
+.ds-smd-udaje { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.ds-smd-udaje dt { font-size: 11.5px; color: var(--muted); }
+.ds-smd-udaje dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ds-smd-udaje-svisle { grid-template-columns: 1fr; gap: 6px; }
+.ds-smd-udaje-svisle > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ds-smd-udaje-svisle dd { margin: 0; font-size: 13.5px; }
+
+/* --- panel vpravo: kontrola před vydáním -------------------------------- */
+
+.ds-smd-kontrola { display: flex; flex-direction: column; gap: 14px; min-height: calc(100dvh - 92px); }
+.ds-smd-kontrola-uvod { margin: 0; font-size: 13.5px; color: var(--muted); }
+.ds-smd-kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.ds-smd-kpi > div { padding: 10px 12px; border-radius: 10px; background: var(--sunken); }
+.ds-smd-kpi dt { font-size: 11.5px; color: var(--muted); }
+.ds-smd-kpi dd { margin: 2px 0 0; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ds-smd-kontrola-seznam { display: grid; gap: 10px; }
+.ds-smd-kontrola-osoba { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; }
+.ds-smd-kontrola-osoba header { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--sunken); }
+.ds-smd-kontrola-osoba h3 { flex: 1; margin: 0; font-size: 14px; }
+.ds-smd-kontrola-zprava {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 11px;
+  border: 1px solid var(--line-2); font-size: 11.5px; color: var(--muted);
+}
+.ds-smd-kontrola-zprava[data-ano] { border-color: transparent; background: var(--dobre-bg); color: var(--dobre); font-weight: 600; }
+.ds-smd-kontrola-osoba ul { margin: 0; padding: 0; list-style: none; }
+.ds-smd-kontrola-osoba li {
+  display: grid; grid-template-columns: 62px 112px 1fr; align-items: baseline; gap: 8px;
+  padding: 8px 12px; border-top: 1px solid var(--line); font-size: 13px;
+}
+.ds-smd-kontrola-den { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ds-smd-kontrola-druh { font-size: 12px; color: var(--muted); }
+.ds-smd-kontrola-druh[data-druh="zrusena"], .ds-smd-kontrola-druh[data-druh="odebrana"] { color: var(--bad); font-weight: 600; }
+.ds-smd-kontrola-druh[data-druh="nova"], .ds-smd-kontrola-druh[data-druh="prevzata"] { color: var(--dobre); font-weight: 600; }
+.ds-smd-kontrola-druh[data-druh="cas"] { color: var(--mosaz); font-weight: 600; }
+.ds-smd-kontrola-cas { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ds-smd-kontrola-poznamka { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+.ds-smd-kontrola-pravidlo { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.ds-smd-kontrola-pata {
+  position: sticky; bottom: -20px; display: flex; justify-content: flex-end; gap: 8px;
+  margin: auto -20px -20px; padding: 12px 20px; background: var(--card); border-top: 1px solid var(--line);
+}
+.ds-smd-kontrola-osoba h3, .ds-smd-karta h3 { font-family: inherit; }
+
+/* --- Drawer: šířky a pracovní (nemodální) panel ------------------------- */
+
+.ds-overlay[data-sirka="siroka"] .ds-drawer { width: min(520px, 100vw); }
+.ds-overlay[data-sirka="plna"] .ds-drawer { width: min(860px, 100vw); }
+/* Pracovní panel vedle obsahu: bez ztmavení, pod horní lištou; klikání
+   do rozpisu vedle nic nezavírá ani neblokuje. Panel se kreslí do <body>,
+   mimo `.ft-shell`, kde je `--vysoka-lista` definovaná — proto záložních
+   64 px (výška lišty na počítači bez vložky). */
+.ds-overlay[data-nemodalni] {
+  inset: var(--vysoka-lista, 64px) 0 0 0; background: transparent !important; pointer-events: none; animation: none;
+}
+.ds-overlay[data-nemodalni] .ds-drawer { pointer-events: auto; border-left: 1px solid var(--line); }
+
+/* =====================================================================
+   Docházka na počítači — živý přehled pro vedoucího (`ds-dh-*`)
+   Zadání „Desktop Směny + Docházka UX 2.0“ (19. 9. 2026).
+
+   Karty a seznamy jsou skutečná data dne; co se spočítat nedá (zpoždění
+   bez pravidla tolerance, mzdy bez práva), se nekreslí. Barva nikdy
+   nestojí sama — stav vždycky nese i slovo.
+   ===================================================================== */
+
+.ds-dh { display: grid; gap: 16px; min-width: 0; padding-bottom: 24px; }
+.ds-dh .ft-hlava { margin: 0; }
+.ds-dh-aktualizace { color: var(--faint); }
+.ds-dh-kiosek { display: flex; align-items: center; gap: 12px; }
+
+.ds-dh-karty { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 900px) { .ds-dh-karty { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.ds-dh-seznamy { display: grid; gap: 16px; }
+.ds-dh-sekce {
+  padding: 14px 16px 6px; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); min-width: 0; overflow-x: auto;
+}
+.ds-dh-sekce[data-varovani] { border-color: color-mix(in srgb, var(--pozor) 45%, var(--line)); }
+.ds-dh-sekce h2 {
+  display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; font-family: inherit;
+  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.ds-dh-pocet { font-size: 12.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.ds-dh-nikdo { margin: 0 0 12px; font-size: 13.5px; color: var(--muted); }
+
+.ds-dh-tabulka { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.ds-dh-tabulka th[scope="col"] {
+  padding: 4px 10px 6px; text-align: left; font-size: 11.5px; font-weight: 600; color: var(--muted);
+  border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.ds-dh-tabulka td, .ds-dh-tabulka th[scope="row"] {
+  padding: 6px 10px; vertical-align: middle; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--line);
+}
+.ds-dh-tabulka tbody tr:last-child > * { border-bottom: 0; }
+.ds-dh-tabulka th[scope="row"] { width: 26%; min-width: 210px; text-align: left; font-weight: 400; }
+.ds-dh-tabulka tbody tr:hover { background: color-mix(in srgb, var(--sunken) 45%, var(--card)); }
+.ds-dh-tabulka tr[data-vybrana] { background: color-mix(in srgb, var(--mosaz-sv) 14%, var(--card)); }
+
+.ds-dh-osoba {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 0;
+  border: 0; background: transparent; text-align: left; cursor: pointer; color: inherit;
+}
+.ds-dh-osoba-text { display: grid; min-width: 0; }
+.ds-dh-jmeno {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 13.5px;
+}
+.ds-dh-role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+
+.ds-dh-stav { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.ds-dh-stav[data-stav="v_praci"] { color: var(--dobre); font-weight: 600; }
+.ds-dh-stav[data-stav="po_zacatku"], .ds-dh-stav[data-stav="nepresel"] { color: var(--pozor); font-weight: 600; }
+.ds-dh-tecka { width: 8px; height: 8px; border-radius: 50%; background: var(--dobre); flex: none; }
+.ds-dh-znacka {
+  padding: 1px 8px; border-radius: 10px; background: var(--sunken); color: var(--muted);
+  font-size: 11.5px; font-weight: 500;
+}
+
+.ds-dh-prazdno {
+  padding: 36px 20px; text-align: center; color: var(--muted); background: var(--card);
+  border: 1px dashed var(--line-2); border-radius: var(--radius-lg);
+}
+.ds-dh-prazdno p { margin: 0; }
+
+.ds-dh-detail { display: grid; gap: 12px; align-content: start; }
+.ds-dh-plan { margin: 0; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ds-dh-osa { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.ds-dh-osa li { display: flex; gap: 12px; }
+.ds-dh-osa-cas { min-width: 44px; font-weight: 600; font-variant-numeric: tabular-nums; }

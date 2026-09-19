@@ -26,8 +26,13 @@ import { zapsatDochazku } from "./akce";
 import PanelRucni from "./panel-rucni";
 import PanelNedokoncene from "./panel-nedokoncene";
 import PoleKodu from "./pole-kodu";
+import { nactiPrehledDne, type PrehledProps } from "./prehled/nacti";
+import PrehledDochazky from "./prehled/prehled";
 
 export const dynamic = "force-dynamic";
+
+/** Okamžik „teď“. Zvlášť, aby se `Date.now()` nevolalo uvnitř těla komponenty. */
+const terazMs = () => Date.now();
 
 /**
  * Docházka — příchod, odchod a moje směny na jednom místě.
@@ -125,6 +130,8 @@ export default async function Dochazka({
      * dnešnímu (20260905010000). Datum, ne hotová věta.
      */
     uzavreno?: string;
+    /** Zaměstnanec, jehož panel se v živém přehledu otevře rovnou (odkaz z Rozpisu). */
+    osoba?: string;
   }>;
 }) {
   const { rozsah } = await params;
@@ -138,6 +145,7 @@ export default async function Dochazka({
     kod: kodZQr,
     pichnuto,
     uzavreno,
+    osoba: osobaZUrl,
   } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
@@ -194,6 +202,49 @@ export default async function Dochazka({
 
   const supabase = await getServerSupabase();
 
+  /*
+    ŽIVÝ PŘEHLED pro vedoucího — výchozí obrazovka tomu, kdo smí číst
+    docházku ostatních, na konkrétní pobočce. Načítá se PŘED zaměstnaneckým
+    záznamem záměrně: majitel bez vlastního záznamu zaměstnance (nepíchá si)
+    by jinak viděl jen větu „nemáte zaměstnanecký záznam“ a přehled ne.
+
+    Všechno jde přes RLS (`attendance.read` na téhle pobočce); kdo je v
+    práci, počítá lib/dochazka-dnes týmž pravidlem jako databáze.
+  */
+  let prehled: { den: string; data: PrehledProps; kioskAktivni: boolean; smiZarizeni: boolean } | null = null;
+  if (vidiOstatni && scope.level === "branch" && scope.branchId) {
+    const denPrehledu = await provozniDen(scope.branchId);
+    if (denPrehledu) {
+      const pobockaPrehledu = ctx.branches.find((b) => b.id === scope.branchId);
+
+      // Má pobočka tablet? Stejné promíjení nenasazené migrace jako níž.
+      let kioskAktivni = true;
+      const { data: kioskZ, error: kioskChyba } = await supabase.rpc("pobocka_ma_kiosek", {
+        p_tenant: tenantId,
+        p_branch: scope.branchId,
+      });
+      if (kioskChyba && !funkceNeexistuje(kioskChyba)) {
+        throw new DotazSelhal("zařízení pobočky", kioskChyba);
+      }
+      if (!kioskChyba) kioskAktivni = kioskZ === true;
+
+      prehled = {
+        den: denPrehledu,
+        data: await nactiPrehledDne({
+          supabase,
+          tenantId,
+          branchId: scope.branchId,
+          den: denPrehledu,
+          zona: pobockaPrehledu?.timezone,
+          pobocky: new Map(ctx.branches.map((b) => [b.id, b.name])),
+          ted: terazMs(),
+        }),
+        kioskAktivni,
+        smiZarizeni: await hasAccess(tenantId, "settings.manage", scope.branchId),
+      };
+    }
+  }
+
   const { data: zaznamy, error: chybaZaznamy } = await supabase
     .from("employees")
     .select("id, branch_id, full_name")
@@ -217,7 +268,21 @@ export default async function Dochazka({
   if (!ja) {
     return (
       <>
-        <HlavickaDochazky />
+        {prehled ? (
+          <PrehledDochazky
+            data={prehled.data}
+            denPopis={denCesky(prehled.den)}
+            den={prehled.den}
+            rozsah={rozsah}
+            kiosek={{
+              aktivni: prehled.kioskAktivni,
+              odkaz: prehled.smiZarizeni ? `/${rozsah}/nastaveni/zarizeni` : null,
+            }}
+            vybranaZUrl={osobaZUrl ?? null}
+          />
+        ) : (
+          <HlavickaDochazky />
+        )}
         <div style={obal}>
           <Vysvetleni nadpis="Zatím nemáte zaměstnanecký záznam">
             Váš účet ještě není propojený se zaměstnancem, takže k němu
@@ -735,7 +800,21 @@ export default async function Dochazka({
 
   return (
     <>
-      <HlavickaDochazky />
+      {prehled ? (
+        <PrehledDochazky
+          data={prehled.data}
+          denPopis={denCesky(prehled.den)}
+          den={prehled.den}
+          rozsah={rozsah}
+          kiosek={{
+            aktivni: prehled.kioskAktivni,
+            odkaz: prehled.smiZarizeni ? `/${rozsah}/nastaveni/zarizeni` : null,
+          }}
+          vybranaZUrl={osobaZUrl ?? null}
+        />
+      ) : (
+        <HlavickaDochazky />
+      )}
 
       <div style={obal}>
         {/*
@@ -775,6 +854,9 @@ export default async function Dochazka({
             predvyplnit={predvyplnit}
           />
         ) : null}
+
+        {/* Vedoucí má nahoře přehled všech; vlastní píchačka je pod ním. */}
+        {prehled && muzePichat ? <h2 style={nadpisSekce}>Moje docházka</h2> : null}
 
         {/* 1. Karta stavu s píchačkou */}
         {muzePichat ? (
@@ -1114,6 +1196,7 @@ export default async function Dochazka({
         )}
         </div>
 
+        {prehled ? null : (
         <div>
         {/* 3. Dnešní stav ostatních */}
         <h2 style={nadpisSekce}>
@@ -1190,6 +1273,7 @@ export default async function Dochazka({
           </ul>
         )}
         </div>
+        )}
         </div>
       </div>
     </>

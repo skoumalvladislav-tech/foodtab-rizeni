@@ -25,6 +25,13 @@ export async function vydatRozpis(formData: FormData): Promise<void> {
 
   if (!branchId || !od || !doKdy) return
 
+  /*
+    Kam se po vydání vrátit: na týž týden, který vedoucí viděl, ne na
+    dnešek. Datum jde z formuláře, takže se ověří tvar — do adresy se
+    smí dostat jen `RRRR-MM-DD`.
+  */
+  const zpet = /^\d{4}-\d{2}-\d{2}$/.test(od) ? `den=${od}&` : ''
+
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
@@ -43,10 +50,10 @@ export async function vydatRozpis(formData: FormData): Promise<void> {
 
   if (error) {
     redirect(
-      `/${rozsah}/smeny?chyba=vydani&text=${encodeURIComponent(error.message)}`,
+      `/${rozsah}/smeny?${zpet}chyba=vydani&text=${encodeURIComponent(error.message)}`,
     )
   }
 
   revalidatePath(`/${rozsah}/smeny`)
-  redirect(`/${rozsah}/smeny?vydano=${Number(data ?? 0)}`)
+  redirect(`/${rozsah}/smeny?${zpet}vydano=${Number(data ?? 0)}`)
 }

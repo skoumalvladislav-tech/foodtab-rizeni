@@ -1,10 +1,13 @@
-import { funkceNeexistuje } from '@/lib/supabase/dotaz'
-import { getServerSupabase } from '@/lib/supabase/server'
 import { sklonovat } from '@/lib/sklonovani'
 import { vydatRozpis } from './vydani'
+import type { DataVydani } from './vydani-data'
 
 /**
- * Panel „Vydat rozpis“.
+ * Panel „Vydat rozpis“ — TELEFON.
+ *
+ * Na počítači tuhle kartu nahrazuje kompaktní pruh nad mřížkou
+ * (`desktop/vydani.tsx`); obě čtou tatáž data z `vydani-data.ts`,
+ * takže se nemůžou rozejít. Karta se na počítači nekreslí (`page.tsx`).
  *
  * Zadání docs/upozorneni-smeny-zadani.md, oddíly 1 a 3. Rozpis má dva
  * stavy: rozpracovaný a vydaný. Rozpracovaný nikomu nezvoní — vedoucí
@@ -18,13 +21,6 @@ import { vydatRozpis } from './vydani'
  * a člověk může dělat na dvou.
  */
 
-type RadekNahledu = {
-  user_id: string
-  jmeno: string
-  zmena: string
-  pocet: number
-}
-
 const NAZVY: Record<string, string> = {
   nova: 'nová směna',
   cas: 'změna času',
@@ -33,33 +29,19 @@ const NAZVY: Record<string, string> = {
   zrusena: 'zrušená',
 }
 
-export default async function PanelVydani({
+export default function PanelVydani({
   rozsah,
-  tenantId,
   branchId,
   od,
   doKdy,
+  data: dataVydani,
 }: {
   rozsah: string
-  tenantId: string
   branchId: string
   od: string
   doKdy: string
+  data: DataVydani
 }) {
-  const supabase = await getServerSupabase()
-
-  const { data, error } = await supabase.rpc('rozpis_nahled', {
-    p_tenant: tenantId,
-    p_branch: branchId,
-    p_od: od,
-    p_do: doKdy,
-  })
-
-  // Migrace 20260901130000 ještě nemusí být nasazená. Panel se pak
-  // prostě nekreslí — rozpis kvůli tomu padat nebude.
-  if (funkceNeexistuje(error)) return null
-  if (error) return null
-
   /*
     Stav období. Obrazovka musí rozeznat TŘI situace, ne dvě:
 
@@ -72,20 +54,12 @@ export default async function PanelVydani({
     tenhle stav hlásil jako „Rozpis se ještě připravuje“, což je
     nepravda — vydaný byl.
   */
-  const { data: stavData } = await supabase.rpc('rozpis_stav', {
-    p_tenant: tenantId,
-    p_branch: branchId,
-    p_od: od,
-    p_do: doKdy,
-  })
-  const stav = (stavData ?? [])[0] as
-    | { vydano_kdy: string | null; smen: number; zmen: number }
-    | undefined
+  const stav = dataVydani.stav ?? undefined
 
   const bylVydan = Boolean(stav?.vydano_kdy)
   const cekaZmen = stav?.zmen ?? 0
 
-  const radky = (data ?? []) as RadekNahledu[]
+  const radky = dataVydani.nahled
   const lidi = new Set(radky.map((r) => r.user_id)).size
   const zprav = lidi // jedna zpráva na člověka, ne jedna na směnu
   const smen = radky.reduce((s, r) => s + r.pocet, 0)

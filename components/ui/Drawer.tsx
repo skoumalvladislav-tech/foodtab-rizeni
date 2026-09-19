@@ -6,6 +6,11 @@ import { createPortal } from "react-dom";
 /**
  * Vysouvací panel z boku (desktop) nebo zdola (mobil) — stejná
  * mechanika jako Dialog (fokus, Esc, portál), jiné umístění a vzhled.
+ *
+ * `nemodalni` je pracovní panel vedle obsahu: bez ztmavení, pod horní
+ * lištou, a klikání v obsahu vedle nic nezavírá ani neblokuje (rozpis
+ * díky tomu zůstane celý vidět a jde přepnout na jinou směnu). Ostatní
+ * použití zůstávají modální, jak byla.
  */
 export default function Drawer({
   otevreno,
@@ -13,6 +18,8 @@ export default function Drawer({
   nadpis,
   children,
   umisteni = "end",
+  sirka = "uzka",
+  nemodalni = false,
 }: {
   otevreno: boolean;
   onZavrit: () => void;
@@ -20,6 +27,9 @@ export default function Drawer({
   children: ReactNode;
   /** "end" = z pravé strany, "bottom" = zdola (typicky mobilní list akcí). */
   umisteni?: "end" | "bottom";
+  /** "uzka" = 420 px (formulář), "siroka" = 520 px (přehled), "plna" = 860 px (průvodce s tabulkou). */
+  sirka?: "uzka" | "siroka" | "plna";
+  nemodalni?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const nadpisId = useId();
@@ -45,11 +55,20 @@ export default function Drawer({
     <div
       className="ds-overlay"
       data-placement={umisteni === "bottom" ? "drawer-bottom" : "drawer-end"}
+      data-sirka={sirka}
+      data-nemodalni={nemodalni ? "" : undefined}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onZavrit();
+        if (!nemodalni && e.target === e.currentTarget) onZavrit();
       }}
     >
-      <div ref={panelRef} className="ds-drawer" role="dialog" aria-modal="true" aria-labelledby={nadpisId} tabIndex={-1}>
+      <div
+        ref={panelRef}
+        className="ds-drawer"
+        role="dialog"
+        aria-modal={nemodalni ? "false" : "true"}
+        aria-labelledby={nadpisId}
+        tabIndex={-1}
+      >
         <div className="ds-drawer-head">
           <h2 className="ds-drawer-title" id={nadpisId}>
             {nadpis}

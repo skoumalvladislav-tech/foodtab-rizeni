@@ -3,7 +3,8 @@ import Skeleton from "@/components/ui/Skeleton";
 /**
  * Načítání rozpisu — kostra tvaru, který se za chvíli ukáže, ne
  * celostránkový spinner. Na telefonu je to pruh dnů a pár řádků lidí,
- * na počítači blok mřížky.
+ * na počítači nadpis, řádek nástrojů a mřížka s pár řádky (stejná výška
+ * jako ta skutečná, ať stránka při načtení neskáče).
  */
 export default function NacitaniSmen() {
   return (
@@ -27,10 +28,26 @@ export default function NacitaniSmen() {
         </div>
       </div>
 
-      <div className="ds-sm-jen-desktop" style={{ padding: "16px" }}>
-        <Skeleton height="48px" radius="12px" />
-        <div style={{ height: "16px" }} />
-        <Skeleton height="420px" radius="14px" />
+      <div className="ds-sm-jen-desktop ds-smd">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+          <Skeleton width="260px" height="30px" radius="8px" />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <Skeleton width="150px" height="38px" radius="10px" />
+            <Skeleton width="150px" height="38px" radius="10px" />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
+          <Skeleton width="190px" height="38px" radius="10px" />
+          <Skeleton width="180px" height="38px" radius="10px" />
+          <Skeleton width="250px" height="38px" radius="10px" />
+        </div>
+        <Skeleton height="44px" radius="12px" style={{ marginBottom: "10px" }} />
+        <div style={{ flex: 1, display: "grid", gap: "6px", alignContent: "start" }}>
+          <Skeleton height="46px" radius="10px" />
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} height="46px" radius="8px" />
+          ))}
+        </div>
       </div>
     </div>
   );
