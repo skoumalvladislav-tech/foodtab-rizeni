@@ -8,6 +8,7 @@ import {
   jeFiltrPrazdny,
   jmenoVyhovuje,
   pocetFiltru,
+  pocetFiltruVPanelu,
   type FiltrDesktop,
   type StavFiltru,
 } from "@/lib/rozpis-desktop";
@@ -101,6 +102,8 @@ export default function Nastroje({
   const panelId = useId();
   const zobrazitId = useId();
   const pocet = pocetFiltru(filtr);
+  // Odznak u tlačítka Filtry ukazuje jen to, co je uvnitř té nabídky.
+  const pocetVPanelu = pocetFiltruVPanelu(filtr);
 
   // Obě nabídky se zavírají klikem mimo a Escapem; fokus se vrací na tlačítko.
   useZavirani(otevrene, setOtevrene, tlacitko, panel);
@@ -315,7 +318,7 @@ export default function Nastroje({
         >
           <Ikona klic="filtr" velikost={15} />
           Filtry
-          {pocet > 0 ? <span className="ds-smd-odznak">{pocet}</span> : null}
+          {pocetVPanelu > 0 ? <span className="ds-smd-odznak">{pocetVPanelu}</span> : null}
         </button>
 
         {otevrene ? (
@@ -406,8 +409,9 @@ export default function Nastroje({
               <button
                 type="button"
                 className="ds-smd-odkaz"
-                disabled={pocet === 0}
-                onClick={() => onFiltr({ ...FILTR_DESKTOP_PRAZDNY, hledani: filtr.hledani })}
+                disabled={pocetVPanelu === 0}
+                /* Ruší jen to, co je v téhle nabídce — volbu v Zobrazit nechává být. */
+                onClick={() => onFiltr({ ...FILTR_DESKTOP_PRAZDNY, hledani: filtr.hledani, pobocky: filtr.pobocky })}
               >
                 Zrušit filtry
               </button>

@@ -40,6 +40,7 @@ export default function MesicLidi({
   poziceOsob,
   barvy,
   nazvyPobocek,
+  pobockaProNovou,
   vybranaId,
   onOtevrit,
 }: {
@@ -56,6 +57,8 @@ export default function MesicLidi({
   poziceOsob: (osobaId: string) => string | null;
   barvy: Map<string, string | null>;
   nazvyPobocek: Map<string, string>;
+  /** Na které pobočce zakládat novou směnu (vybraná v Zobrazit, jinak výchozí). */
+  pobockaProNovou: string | null;
   vybranaId: string | null;
   onOtevrit: (co: Otevrene) => void;
 }) {
@@ -77,6 +80,7 @@ export default function MesicLidi({
           role={poziceOsob(o.id)}
           barva={barvy.get(o.id) ?? null}
           nazvyPobocek={vicePobocek ? nazvyPobocek : null}
+          pobockaProNovou={pobockaProNovou}
           vybranaId={vybranaId}
           onOtevrit={onOtevrit}
         />
@@ -96,6 +100,7 @@ function KartaMesice({
   role,
   barva,
   nazvyPobocek,
+  pobockaProNovou,
   vybranaId,
   onOtevrit,
 }: {
@@ -110,6 +115,7 @@ function KartaMesice({
   barva: string | null;
   /** `null` = jedna pobočka, název se nepíše. */
   nazvyPobocek: Map<string, string> | null;
+  pobockaProNovou: string | null;
   vybranaId: string | null;
   onOtevrit: (co: Otevrene) => void;
 }) {
@@ -213,7 +219,7 @@ function KartaMesice({
                       onClick={() =>
                         onOtevrit({
                           den: d.den,
-                          smena: novaSmenaProOsobu(osoba.id, d.den, planovani.vychoziPobocka ?? ""),
+                          smena: novaSmenaProOsobu(osoba.id, d.den, pobockaProNovou ?? planovani.vychoziPobocka ?? ""),
                           nonce: Date.now(),
                         })
                       }

@@ -487,13 +487,21 @@ function RadekMrizkyView({
                 type="button"
                 className="ds-smd-pridat"
                 aria-label={`Přidat směnu: ${jmeno}, ${den}`}
-                onClick={() =>
+                onClick={() => {
+                  /*
+                    Pobočka je ta, v jejímž pruhu se kliklo — i u neobsazeného
+                    řádku, který nemá člověka, a tedy ani hotovou směnu
+                    k předvyplnění. Bez toho by volná směna vznikla na výchozí
+                    pobočce a z rozpisu, kde se právě zakládala, by zmizela.
+                  */
+                  const pobocka = pobockaId ?? planovani.vychoziPobocka ?? "";
                   onOtevrit({
                     den,
-                    smena: osoba ? novaSmenaProOsobu(osoba.id, den, pobockaId ?? planovani.vychoziPobocka ?? "") : null,
+                    smena: osoba ? novaSmenaProOsobu(osoba.id, den, pobocka) : null,
+                    predvyplneni: osoba || !pobocka ? null : { branch_id: pobocka },
                     nonce: Date.now(),
-                  })
-                }
+                  });
+                }}
               >
                 <Ikona klic="plus" velikost={12} />
                 Přidat

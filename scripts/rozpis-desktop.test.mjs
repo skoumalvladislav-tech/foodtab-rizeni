@@ -35,6 +35,7 @@ import {
   kratkyCas,
   normalizuj,
   pocetFiltru,
+  pocetFiltruVPanelu,
   puvodniStav,
   sestavitMesicOsoby,
   sestavitMrizku,
@@ -205,6 +206,13 @@ je('počet filtrů: úsek (2) + pozice (1) + zaměstnanci (2) + pobočka (1) + s
   hledani: 'x', useky: ['u1', 'u2'], pozice: ['p1'], osoby: ['e1', 'e2'], pobocky: ['b1'], stav: 'nevydane',
 }), 7)
 je('hledání se do počtu filtrů nepočítá', pocetFiltru({ ...FILTR_DESKTOP_PRAZDNY, hledani: 'x' }), 0)
+// Odznak u tlačítka Filtry počítá jen to, co je uvnitř té nabídky — pobočka se vybírá v Zobrazit.
+je('odznak Filtry: pobočka se nepočítá', pocetFiltruVPanelu({
+  hledani: '', useky: ['u1'], pozice: [], osoby: ['e1'], pobocky: ['b1', 'b2'], stav: 'nevydane',
+}), 3)
+je('odznak Filtry: samotná pobočka = žádný odznak (a přitom filtr prázdný není)',
+  [pocetFiltruVPanelu({ ...FILTR_DESKTOP_PRAZDNY, pobocky: ['b1'] }), jeFiltrPrazdny({ ...FILTR_DESKTOP_PRAZDNY, pobocky: ['b1'] })], [0, false])
+je('odznak Filtry bez pobočky sedí s celkovým počtem', [pocetFiltruVPanelu({ ...FILTR_DESKTOP_PRAZDNY, useky: ['u1'], stav: 'vydane' }), pocetFiltru({ ...FILTR_DESKTOP_PRAZDNY, useky: ['u1'], stav: 'vydane' })], [2, 2])
 
 const osoby = new Map([
   ['a', { id: 'a', jmeno: 'Andrea Mikulová', usekId: 'u-k', poziceId: 'p-kuchar', barva: null }],
