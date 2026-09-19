@@ -16,8 +16,8 @@ import {
 /**
  * Stavební kameny mobilních Směn — jen kreslí, nic nenačítají.
  *
- * Předloha: mockup mobilních Směn z 19.9.2026 (příloha zadání „Směny 2.0“;
- * do repa zatím neuložený obrázek — viz docs/vzhled-zadani.md, oddíl 12).
+ * Předloha: docs/vzhled-smeny-mobil-mockup-2026-09-19.webp (pravidla k ní
+ * jsou v docs/vzhled-zadani.md, oddíl 12).
  * Styly jsou třídy `ds-sm-*` v app/_komponenty.css.
  */
 
