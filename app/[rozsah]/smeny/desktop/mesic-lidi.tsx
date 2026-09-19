@@ -40,6 +40,7 @@ export default function MesicLidi({
   poziceOsob,
   barvy,
   nazvyPobocek,
+  zkratkyPobocek,
   pobockaProNovou,
   vybranaId,
   onOtevrit,
@@ -57,6 +58,8 @@ export default function MesicLidi({
   poziceOsob: (osobaId: string) => string | null;
   barvy: Map<string, string | null>;
   nazvyPobocek: Map<string, string>;
+  /** id pobočky → zkratka („Černá Perla“ → „ČP“) — na kartu se vejde, celý název ne. */
+  zkratkyPobocek: Map<string, string>;
   /** Na které pobočce zakládat novou směnu (vybraná v Zobrazit, jinak výchozí). */
   pobockaProNovou: string | null;
   vybranaId: string | null;
@@ -80,6 +83,7 @@ export default function MesicLidi({
           role={poziceOsob(o.id)}
           barva={barvy.get(o.id) ?? null}
           nazvyPobocek={vicePobocek ? nazvyPobocek : null}
+          zkratkyPobocek={zkratkyPobocek}
           pobockaProNovou={pobockaProNovou}
           vybranaId={vybranaId}
           onOtevrit={onOtevrit}
@@ -100,6 +104,7 @@ function KartaMesice({
   role,
   barva,
   nazvyPobocek,
+  zkratkyPobocek,
   pobockaProNovou,
   vybranaId,
   onOtevrit,
@@ -115,6 +120,7 @@ function KartaMesice({
   barva: string | null;
   /** `null` = jedna pobočka, název se nepíše. */
   nazvyPobocek: Map<string, string> | null;
+  zkratkyPobocek: Map<string, string>;
   pobockaProNovou: string | null;
   vybranaId: string | null;
   onOtevrit: (co: Otevrene) => void;
@@ -199,8 +205,8 @@ function KartaMesice({
                         onOtevrit={() => onOtevrit({ den: d.den, smena: s as Smena })}
                       />
                       {nazvyPobocek ? (
-                        <span className="ds-smd-ml-pobocka" title={nazvyPobocek.get(s.branch_id) ?? undefined}>
-                          {nazvyPobocek.get(s.branch_id) ?? ""}
+                        <span className="ds-smd-pobocka-zkr" title={nazvyPobocek.get(s.branch_id) ?? undefined}>
+                          {zkratkyPobocek.get(s.branch_id) ?? ""}
                         </span>
                       ) : null}
                     </div>

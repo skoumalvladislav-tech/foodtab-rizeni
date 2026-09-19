@@ -411,6 +411,65 @@ export function dalsiVolnyDen(obsazene: Iterable<string>, datum: string, limit =
   return hned
 }
 
+/* --- pobočky ---------------------------------------------------------------- */
+
+/**
+ * Zkratky poboček: PRVNÍ PÍSMENA slov názvu (Šéfík 20. 9. 2026).
+ * „Černá Perla“ → „ČP“, „Bernard“ → „B“.
+ *
+ * Dvě pobočky nesmějí mít tutéž zkratku — na kartě směny by pak nebylo
+ * poznat, o kterou jde. Když se iniciály potkají, přidá se každému slovu
+ * další písmeno („ČP“ → „ČePe“ → „ČerPer“ → „ČernPerl“), dokud se nerozliší;
+ * poslední možnost je celý název. Prodlužují se VŠECHNA slova, ne jen první —
+ * „Restaurace U Lva“ a „Restaurace U Lípy“ se liší až v posledním.
+ * Zkratka nikdy není delší než samotný název.
+ */
+export function zkratkyPobocek(nazvy: string[]): Map<string, string> {
+  const jedinecne = [...new Set(nazvy)]
+
+  /** Žebřík od nejkratšího: k písmen z každého slova, nakonec celý název. */
+  const kandidati = jedinecne.map((nazev) => {
+    const slova = nazev.split(/\s+/).filter(Boolean).map((w) => [...w])
+    if (slova.length === 0) return [nazev]
+    const nejdelsi = Math.max(...slova.map((w) => w.length))
+    const seznam: string[] = []
+    for (let k = 1; k <= nejdelsi; k++) {
+      seznam.push(
+        slova
+          .map((w) => {
+            const kus = w.slice(0, k)
+            return [kus[0].toUpperCase(), ...kus.slice(1)].join('')
+          })
+          .join(''),
+      )
+    }
+    seznam.push(nazev)
+    return seznam
+  })
+
+  const uroven = jedinecne.map(() => 0)
+  for (let kolo = 0; kolo < 50; kolo++) {
+    const zkratky = kandidati.map((k, i) => k[Math.min(uroven[i], k.length - 1)])
+    const pocet = new Map<string, number>()
+    for (const z of zkratky) pocet.set(z, (pocet.get(z) ?? 0) + 1)
+    let zmena = false
+    zkratky.forEach((z, i) => {
+      if ((pocet.get(z) ?? 0) > 1 && uroven[i] < kandidati[i].length - 1) {
+        uroven[i] += 1
+        zmena = true
+      }
+    })
+    if (!zmena) break
+  }
+
+  return new Map(
+    jedinecne.map((nazev, i) => {
+      const z = kandidati[i][Math.min(uroven[i], kandidati[i].length - 1)]
+      return [nazev, [...z].length >= [...nazev].length ? nazev : z]
+    }),
+  )
+}
+
 /* --- krátké zápisy do úzkých buněk ---------------------------------------- */
 
 /** „08:00“ → „8“, „08:30“ → „8:30“, „15:30“ → „15:30“ — do úzké buňky (bez nuly navíc). */

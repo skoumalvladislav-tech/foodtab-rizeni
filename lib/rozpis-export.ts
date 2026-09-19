@@ -37,7 +37,7 @@
  * Úseky určují jen pořadí lidí (kuchyň pohromadě, pak plac…).
  */
 
-import { cekaNaVydani, kratkyCas, type OsobaD, type SmenaD } from './rozpis-desktop.ts'
+import { cekaNaVydani, kratkyCas, zkratkyPobocek, type OsobaD, type SmenaD } from './rozpis-desktop.ts'
 import { denVTydnu, hhmm, jeVikend, minutSmeny, ZKRATKY_DNU } from './rozpis-mobil.ts'
 import { STYL, textTisku, type BunkaXlsx, type ListXlsx } from './xlsx-zapis.ts'
 
@@ -142,45 +142,6 @@ export function pauzaKratce(pauza: string): string {
   return pauza.split('–').map(kratkyCas).join('–')
 }
 
-/**
- * Zkratky poboček, každá jiná. Víceslovný název dá iniciály („Černá Perla“
- * → „ČP“), jednoslovný první tři písmena („Bernard“ → „Ber“). Kdyby se dvě
- * shodovaly, dotčeným se zkratka natáhne, dokud se nerozliší. Zkratka není
- * nikdy delší než celý název.
- */
-export function zkratkyPobocek(nazvy: string[]): Map<string, string> {
-  const jedinecne = [...new Set(nazvy)]
-  const kandidati = jedinecne.map((nazev) => {
-    const slova = nazev.split(/\s+/).filter(Boolean)
-    const pismena = [...slova.join('')]
-    const seznam: string[] = []
-    if (slova.length > 1) seznam.push(slova.map((w) => [...w][0].toUpperCase()).join(''))
-    for (let d = 3; d < pismena.length; d++) seznam.push(pismena.slice(0, d).join(''))
-    seznam.push(nazev)
-    return seznam
-  })
-  const uroven = jedinecne.map(() => 0)
-  for (let kolo = 0; kolo < 50; kolo++) {
-    const zkratky = kandidati.map((k, i) => k[Math.min(uroven[i], k.length - 1)])
-    const pocet = new Map<string, number>()
-    for (const z of zkratky) pocet.set(z, (pocet.get(z) ?? 0) + 1)
-    let zmena = false
-    zkratky.forEach((z, i) => {
-      if ((pocet.get(z) ?? 0) > 1 && uroven[i] < kandidati[i].length - 1) {
-        uroven[i] += 1
-        zmena = true
-      }
-    })
-    if (!zmena) break
-  }
-  return new Map(
-    jedinecne.map((nazev, i) => {
-      const z = kandidati[i][Math.min(uroven[i], kandidati[i].length - 1)]
-      return [nazev, [...z].length >= [...nazev].length ? nazev : z]
-    }),
-  )
-}
-
 export function sestavitExportMesice(v: {
   mesic: string
   smeny: SmenaD[]
@@ -202,11 +163,17 @@ export function sestavitExportMesice(v: {
   const vicePobocek = idPobocek.length > 1
   const nazevPobocky = (id: string) => v.pobocky.get(id) ?? ''
 
+  /*
+    Zkratky se počítají ze VŠECH poboček firmy, ne jen z těch, které mají
+    v měsíci směnu — jinak by se „Černá Perla“ zkrátila jednou na „ČP“
+    a podruhé (když přibude „Červená Pergola“) na „Čern“, a papír z ledna
+    by se nedal srovnat s papírem z února. Ze stejného důvodu je má takhle
+    i obrazovka, takže obojí říká totéž.
+  */
   const pobocky: PobockaExportu[] = vicePobocek
     ? (() => {
-        const nazvy = idPobocek.map(nazevPobocky).filter(Boolean)
-        const zkratky = zkratkyPobocek(nazvy)
-        return [...new Set(nazvy)]
+        const zkratky = zkratkyPobocek([...v.pobocky.values()])
+        return [...new Set(idPobocek.map(nazevPobocky).filter(Boolean))]
           .sort((a, b) => a.localeCompare(b, 'cs'))
           .map((nazev) => ({ nazev, zkratka: zkratky.get(nazev) ?? nazev }))
       })()
