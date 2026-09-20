@@ -7,7 +7,7 @@ import { denVPasmu, hodinaVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { osloveni } from "@/lib/osloveni";
 import { pocet } from "@/lib/sklonovani";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
-import { posunDatum } from "@/lib/provozni-den";
+import { posunDatum, provozniDen } from "@/lib/provozni-den";
 import { KBELIK as KBELIK_POZADI, PLATNOST_ODKAZU_S as PLATNOST_ODKAZU_POZADI_S } from "@/lib/pobocky-pozadi";
 import { nactiPocasi, type Pocasi } from "@/lib/pocasi";
 import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
@@ -217,9 +217,9 @@ export default async function Dnes({
   }
   if (chybaDen) throw new DotazSelhal("můj den", chybaDen);
 
-  const den = ((denData ?? [])[0] ?? null) as MujDen | null;
+  const denZDatabaze = ((denData ?? [])[0] ?? null) as (Omit<MujDen, "provozni_den"> & { provozni_den: string | null }) | null;
 
-  if (!den) {
+  if (!denZDatabaze) {
     return (
       <>
         <Nadpis oci="Provoz" popis="Co potřebujete vědět hned teď.">
@@ -234,6 +234,39 @@ export default async function Dnes({
       </>
     );
   }
+
+  /*
+    PROVOZNÍ DEN BEZ DOMOVSKÉ POBOČKY. `muj_den` bere provozní den z pobočky,
+    kde má člověk otevřený příchod, jinak z jeho domovské. Majitel a vedoucí
+    často žádnou domovskou pobočku nemají (dva ze tří účtů v databázi) — a
+    pak přijde `null`. Ten se dřív posílal dál do dotazu na směny jako
+    `shift_date >= null` a databáze odpověděla „invalid input syntax for type
+    date“: Dnes spadlo na „server error“ na telefonu i na počítači, a to u
+    každého, kdo domovskou pobočku nemá. Rozpis směn si s tím poradí stejně
+    jako tady: kotvou je vybraná pobočka, na firemní úrovni první pobočka firmy
+    (pobočky se stejnou otevírací dobou vyjdou stejně).
+  */
+  let provozniDenDnes = denZDatabaze.provozni_den;
+  if (!provozniDenDnes) {
+    const kotva = scope.branchId ?? ctx.branches[0]?.id ?? null;
+    provozniDenDnes = kotva ? await provozniDen(kotva) : null;
+    if (!provozniDenDnes) {
+      return (
+        <>
+          <Nadpis oci="Provoz" popis="Co potřebujete vědět hned teď.">
+            Dnes
+          </Nadpis>
+          <div style={{ padding: "16px" }}>
+            <Sdeleni nadpis="Nepodařilo se zjistit provozní den">
+              Nemáte domovskou pobočku a žádná pobočka firmy se nenašla. Zkuste to
+              prosím za chvíli znovu, nebo si pobočku nastavte v Lidech.
+            </Sdeleni>
+          </div>
+        </>
+      );
+    }
+  }
+  const den: MujDen = { ...denZDatabaze, provozni_den: provozniDenDnes };
 
   /*
     Hero fotka a souřadnice pro počasí — jen na konkrétní pobočce, ne
