@@ -153,6 +153,7 @@ const DNES = '2026-09-22'
 const potvrzeniK = (s, prepis = {}) => ({
   shift_id: s.id,
   employee_id: s.employee_id,
+  branch_id: s.branch_id,
   shift_date: s.shift_date,
   starts_at: s.starts_at,
   ends_at: s.ends_at,
@@ -193,14 +194,17 @@ je('… a potvrzená směna v minulosti je zelená',
 
 // Platnost: potvrzení nese opis směny a platí, jen dokud se směna s ním shoduje.
 const zmen = (prepis) => puntikSmeny({ ...v1, ...prepis }, mAno, DNES)
-je('potvrzení přestane platit po změně času (i když ještě není znovu vydáno): začátek, konec, den, pauza, člověk',
+je('potvrzení přestane platit, když se směna od potvrzení změnila a je znovu vydaná: začátek, konec, den, pauza, člověk',
   [zmen({ starts_at: '09:00:00', published_starts_at: '09:00:00' }), zmen({ ends_at: '17:00:00', published_ends_at: '17:00:00' }),
    zmen({ shift_date: '2026-09-25' }), zmen({ pauza_od: '12:00:00', pauza_do: '13:00:00' }),
    zmen({ employee_id: 'b', published_employee_id: 'b' })],
   ['nepotvrzeno', 'nepotvrzeno', 'nepotvrzeno', 'nepotvrzeno', 'nepotvrzeno'])
 je('pauza: změna jen začátku, nebo jen konce pauzy potvrzení zneplatní (každá zvlášť)',
   [zmen({ pauza_od: '12:00:00' }), zmen({ pauza_do: '13:00:00' })], ['nepotvrzeno', 'nepotvrzeno'])
+je('… i přesun na jinou pobočku (pobočka je v opisu; do published_* se nepromítá, směna zůstává „vydaná“)', puntikSmeny({ ...v1, branch_id: 'b2' }, okno([potvrzeniK(v1)], { pobocky: ['b1', 'b2'] }), DNES), 'nepotvrzeno')
 je('… a vrátí-li se změna zpátky, potvrzení platí zas (vydaná směna, opis sedí)', zmen({}), 'potvrzeno')
+je('změněná a zatím NEvydaná směna (published_* staré) je červená, i když ji člověk dřív potvrdil',
+  puntikSmeny({ ...v1, starts_at: '09:00:00' }, mAno, DNES), 'nevydano')
 je('čas se porovnává jako čas, ne jako text: „08:00“ a „08:00:00“ je totéž',
   puntikSmeny({ ...v1, starts_at: '08:00' }, mAno, DNES), 'potvrzeno')
 je('potvrzení jiného člověka (směna se po potvrzení přeřadila) neplatí ani při shodných časech',

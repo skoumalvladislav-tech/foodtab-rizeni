@@ -30,21 +30,36 @@ end $$;
 
 /*
   Zavolá potvrdit_smenu jako daný uživatel a vrátí „ok“ nebo kód chyby
-  (`err:42501`). Chybu polyká záměrně: scénář se ptá, ZDA a JAK funkce
-  odmítla, ne aby spadl.
+  (`err:PT403`). Chybu polyká záměrně: scénář se ptá, ZDA a JAK funkce
+  odmítla, ne aby spadl. Znění směny (den, časy, pauza) bere z databáze,
+  tedy jako by si člověk právě obnovil obrazovku; `pg_temp.potvrdit_zneni`
+  posílá znění výslovně (zastaralá obrazovka).
 */
-create or replace function pg_temp.potvrdit(p_kdo uuid, p_smena uuid, p_tenant uuid default null)
+create or replace function pg_temp.potvrdit_zneni(
+  p_kdo uuid, p_smena uuid, p_den date, p_od time, p_do time,
+  p_pauza_od time default null, p_pauza_do time default null, p_tenant uuid default null)
 returns text language plpgsql as $$
 begin
   perform set_config('test.user_id', p_kdo::text, false);
   begin
-    perform public.potvrdit_smenu(coalesce(p_tenant, current_setting('test.tenant')::uuid), p_smena);
+    perform public.potvrdit_smenu(coalesce(p_tenant, current_setting('test.tenant')::uuid), p_smena,
+      p_den, p_od, p_do, p_pauza_od, p_pauza_do);
     return 'ok';
   exception when others then
     return 'err:' || sqlstate;
   end;
 end $$;
 
+create or replace function pg_temp.potvrdit(p_kdo uuid, p_smena uuid, p_tenant uuid default null)
+returns text language plpgsql as $$
+declare v public.shifts%rowtype;
+begin
+  select * into v from public.shifts where id = p_smena;
+  -- Neexistující směna: znění je jedno, funkce ji odmítne dřív, než se na něj podívá.
+  return pg_temp.potvrdit_zneni(p_kdo, p_smena,
+    coalesce(v.shift_date, date '2026-01-01'), coalesce(v.starts_at, time '00:00'), coalesce(v.ends_at, time '00:00'),
+    v.pauza_od, v.pauza_do, p_tenant);
+end $$;
 reset role;
 
 
@@ -103,6 +118,12 @@ select smena as s_bar from public.ulozit_smenu(
 select smena as s_koncept from public.ulozit_smenu(
   :'tenant', null, :'perla', :'e_ucet', null,
   date '2026-11-10', time '08:00', time '16:00', 'koncept') \gset
+select smena as s_m from public.ulozit_smenu(
+  :'tenant', null, :'perla', :'e_majitel', null,
+  date '2026-11-07', time '08:00', time '16:00', 'majitel na Perle') \gset
+select smena as s_prer from public.ulozit_smenu(
+  :'tenant', null, :'perla', :'e_ucet', null,
+  date '2026-11-08', time '08:00', time '16:00', 'přeřazení a obnovení') \gset
 select smena as s_dva from public.ulozit_smenu(
   :'tenant', null, :'perla', :'e_ucet', null,
   date '2026-11-06', time '08:00', time '16:00', 'začátek a konec zvlášť') \gset
@@ -112,8 +133,8 @@ select public.vydat_rozpis(:'tenant', :'bar',   date '2026-11-01', date '2026-11
 
 reset role;
 
-select pg_temp.check('nevydaná směna: potvrdit nejde (stav vyžadující vydání)',
-  pg_temp.potvrdit(:'vedouci', :'s_koncept') = 'err:55000');
+select pg_temp.check('nevydaná směna: potvrdit nejde (stav neodpovídá vydání)',
+  pg_temp.potvrdit(:'vedouci', :'s_koncept') = 'err:PT409');
 
 
 \echo ''
@@ -142,20 +163,43 @@ select pg_temp.check('a záznam je pořád jeden',
 \echo '== 3. Kdo smí a co smí ===================================='
 
 select pg_temp.check('cizí směnu (patří jinému zaměstnanci) potvrdit nejde',
-  pg_temp.potvrdit(:'majitel', :'s1') = 'err:42501');
+  pg_temp.potvrdit(:'majitel', :'s1') = 'err:PT403');
 select pg_temp.check('směna zaměstnance bez účtu: nikdo ji nepotvrdí za něj',
-  pg_temp.potvrdit(:'vedouci', :'s_bez') = 'err:42501');
+  pg_temp.potvrdit(:'vedouci', :'s_bez') = 'err:PT403');
 select pg_temp.check('neexistující směna dá tutéž odpověď jako cizí (nedá se zkoušet, co existuje)',
-  pg_temp.potvrdit(:'vedouci', gen_random_uuid()) = 'err:42501');
+  pg_temp.potvrdit(:'vedouci', gen_random_uuid()) = 'err:PT403');
 select pg_temp.check('cizí firma (jiné tenant_id): odmítnuto',
-  pg_temp.potvrdit(:'vedouci', :'s1', gen_random_uuid()) = 'err:42501');
+  pg_temp.potvrdit(:'vedouci', :'s1', gen_random_uuid()) = 'err:PT403');
 
 update public.shifts set status = 'cancelled' where id = :'s_zrus';
 select pg_temp.check('zrušená směna: potvrdit nejde',
-  pg_temp.potvrdit(:'vedouci', :'s_zrus') = 'err:55000');
+  pg_temp.potvrdit(:'vedouci', :'s_zrus') = 'err:PT409');
 select pg_temp.check('… a nic se nezapsalo',
   not exists (select 1 from public.smeny_potvrzeni where shift_id = :'s_zrus'));
 
+
+-- Znění, které člověk vidí, musí sedět s databází (vedoucí mohl směnu mezitím změnit a vydat).
+select pg_temp.check('zastaralá obrazovka (jiné časy, než jsou v databázi): potvrdit nejde',
+  pg_temp.potvrdit_zneni(:'vedouci', :'s_prer', date '2026-11-08', time '07:00', time '15:00') = 'err:PT409');
+select pg_temp.check('zastaralá obrazovka (jiný den): potvrdit nejde',
+  pg_temp.potvrdit_zneni(:'vedouci', :'s_prer', date '2026-11-09', time '08:00', time '16:00') = 'err:PT409');
+select pg_temp.check('zastaralá obrazovka (pauza, která v databázi není): potvrdit nejde',
+  pg_temp.potvrdit_zneni(:'vedouci', :'s_prer', date '2026-11-08', time '08:00', time '16:00', time '12:00', time '13:00') = 'err:PT409');
+select pg_temp.check('… a nic se nezapsalo', not exists (select 1 from public.smeny_potvrzeni where shift_id = :'s_prer'));
+
+-- Směna přeřazená na jiného člověka bez nového vydání: nový držitel ji potvrdit nemůže.
+update public.shifts set employee_id = :'e_majitel' where id = :'s_prer';
+select pg_temp.check('přeřazená a nevydaná směna: nový držitel nepotvrdí (vydaná byla jinému)',
+  pg_temp.potvrdit(:'majitel', :'s_prer') = 'err:PT409');
+select pg_temp.check('… a původní držitel už není držitelem, taky nepotvrdí',
+  pg_temp.potvrdit(:'vedouci', :'s_prer') = 'err:PT403');
+update public.shifts set employee_id = :'e_ucet' where id = :'s_prer';
+
+-- Zrušená a obnovená směna (published_status cancelled) se bere jako nevydaná.
+update public.shifts set published_status = 'cancelled' where id = :'s_prer';
+select pg_temp.check('zrušená a obnovená směna: potvrdit nejde', pg_temp.potvrdit(:'vedouci', :'s_prer') = 'err:PT409');
+update public.shifts set published_status = 'planned' where id = :'s_prer';
+select pg_temp.check('… a s vráceným stavem už jde', pg_temp.potvrdit(:'vedouci', :'s_prer') = 'ok');
 
 \echo ''
 \echo '== 4. Změna po potvrzení =================================='
@@ -174,7 +218,7 @@ select pg_temp.check('po změně času potvrzení zůstává, ale opis už nesed
    where p.shift_id = :'s1'));
 
 select pg_temp.check('změněnou a nevydanou směnu potvrdit nejde',
-  pg_temp.potvrdit(:'vedouci', :'s1') = 'err:55000');
+  pg_temp.potvrdit(:'vedouci', :'s1') = 'err:PT409');
 
 -- Vydá se znovu; teprve teď jde potvrdit nové znění.
 set role authenticated;
@@ -216,14 +260,14 @@ select set_config('test.user_id', :'majitel', false);
 select smena from public.ulozit_smenu(:'tenant', :'s_dva', :'perla', :'e_ucet', null,
   date '2026-11-06', time '08:00', time '17:00', 'jen konec') \gset
 reset role;
-select pg_temp.check('změněný jen konec: potvrdit nejde', pg_temp.potvrdit(:'vedouci', :'s_dva') = 'err:55000');
+select pg_temp.check('změněný jen konec: potvrdit nejde', pg_temp.potvrdit(:'vedouci', :'s_dva') = 'err:PT409');
 
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 select smena from public.ulozit_smenu(:'tenant', :'s_dva', :'perla', :'e_ucet', null,
   date '2026-11-06', time '09:00', time '16:00', 'jen začátek') \gset
 reset role;
-select pg_temp.check('změněný jen začátek: potvrdit nejde', pg_temp.potvrdit(:'vedouci', :'s_dva') = 'err:55000');
+select pg_temp.check('změněný jen začátek: potvrdit nejde', pg_temp.potvrdit(:'vedouci', :'s_dva') = 'err:PT409');
 
 -- Vrátí-li se směna do vydaného znění, potvrdit jde zas a opis sedí s původním potvrzením.
 set role authenticated;
@@ -236,6 +280,21 @@ select pg_temp.check('směna zpět v původním znění: opis potvrzení sedí, 
    join public.shifts s on s.id = p.shift_id where p.shift_id = :'s_dva')
   and pg_temp.potvrdit(:'vedouci', :'s_dva') = 'ok');
 
+
+-- Pobočka je součástí opisu: přesun potvrzené směny na jinou pobočku potvrzení zneplatní.
+select pg_temp.check('potvrzení nese pobočku, na které platilo',
+  (select branch_id = :'perla' from public.smeny_potvrzeni where shift_id = :'s_dva'));
+update public.shifts set branch_id = :'bar' where id = :'s_dva';
+select pg_temp.check('po přesunu na jinou pobočku opis nesedí (potvrzení platilo pro Perlu)',
+  (select p.branch_id <> s.branch_id from public.smeny_potvrzeni p join public.shifts s on s.id = p.shift_id where p.shift_id = :'s_dva'));
+
+-- Člověk potvrdí směnu na nové pobočce: opis (pobočka) se přepíše a čas potvrzení je nový.
+select confirmed_at::text as kdy_pred from public.smeny_potvrzeni where shift_id = :'s_dva' \gset
+select pg_temp.potvrdit(:'vedouci', :'s_dva') as r_presun \gset
+select (branch_id = :'bar' and confirmed_at::text <> :'kdy_pred')::text as presun_ok from public.smeny_potvrzeni where shift_id = :'s_dva' \gset
+select pg_temp.check('po přesunu jde potvrdit znovu: pobočka v opisu se přepíše a čas potvrzení je nový',
+  :'r_presun' = 'ok' and :'presun_ok' = 'true');
+update public.shifts set branch_id = :'perla' where id = :'s_dva';
 
 \echo ''
 \echo '== 5. Zápis jen funkcí, anon nemá nic ====================='
@@ -251,8 +310,8 @@ select pg_temp.check('přihlášený nesmí zapisovat přímo (insert, update, d
 select pg_temp.check('anon nemá k tabulce nic',
   not has_table_privilege('anon', 'public.smeny_potvrzeni', 'select'));
 select pg_temp.check('anon funkci volat nesmí, přihlášený smí (právo se ověřuje uvnitř)',
-  not has_function_privilege('anon', 'public.potvrdit_smenu(uuid, uuid)', 'execute')
-  and has_function_privilege('authenticated', 'public.potvrdit_smenu(uuid, uuid)', 'execute'));
+  not has_function_privilege('anon', 'public.potvrdit_smenu(uuid, uuid, date, time, time, time, time)', 'execute')
+  and has_function_privilege('authenticated', 'public.potvrdit_smenu(uuid, uuid, date, time, time, time, time)', 'execute'));
 select pg_temp.check('čtecí politika existuje a zápisová ne',
   (select count(*) from pg_policies where tablename = 'smeny_potvrzeni' and cmd = 'SELECT') = 1
   and (select count(*) from pg_policies where tablename = 'smeny_potvrzeni' and cmd <> 'SELECT') = 0);
@@ -264,6 +323,8 @@ select pg_temp.check('čtecí politika existuje a zápisová ne',
 -- Majitel potvrdí svou směnu na Baru; vedoucí Perly ji vidět nesmí.
 select pg_temp.potvrdit(:'majitel', :'s_bar') as r_bar \gset
 select pg_temp.check('majitel potvrdí svou vydanou směnu na Baru', :'r_bar' = 'ok');
+select pg_temp.potvrdit(:'majitel', :'s_m') as r_m \gset
+select pg_temp.check('majitel potvrdí svou vydanou směnu na Perle', :'r_m' = 'ok');
 
 set role authenticated;
 select set_config('test.user_id', :'vedouci', false);
@@ -271,6 +332,7 @@ select set_config('test.user_id', :'vedouci', false);
 select (rolsuper or rolbypassrls)::text as obchazi_rls from pg_roles where rolname = current_user \gset
 
 select count(*) filter (where shift_id = :'s1')    as v_perla,
+       count(*) filter (where shift_id = :'s_m')   as v_cizi_perla,
        count(*) filter (where shift_id = :'s_bar') as v_bar
 from public.smeny_potvrzeni \gset
 
@@ -284,6 +346,7 @@ reset role;
 select set_config('test.obchazi_rls', :'obchazi_rls', false);
 select set_config('test.v_perla', :'v_perla', false);
 select set_config('test.v_bar', :'v_bar', false);
+select set_config('test.v_cizi_perla', :'v_cizi_perla', false);
 select set_config('test.m_perla', :'m_perla', false);
 select set_config('test.m_bar', :'m_bar', false);
 
@@ -293,6 +356,7 @@ begin
     raise notice '  PŘESKOČENO  RLS (spojení je superuživatel/bypassrls — PGlite); rozhoduje běh proti PostgreSQL';
   else
     if current_setting('test.v_perla')::int <> 1 then raise exception 'SELHALO: vedoucí Perly nevidí potvrzení na své pobočce'; end if;
+    if current_setting('test.v_cizi_perla')::int <> 1 then raise exception 'SELHALO: vedoucí Perly nevidí potvrzení JINÉHO člověka na své pobočce (politika has_access)'; end if;
     if current_setting('test.v_bar')::int <> 0 then raise exception 'SELHALO: vedoucí Perly vidí potvrzení na Baru, který nespravuje'; end if;
     if current_setting('test.m_perla')::int <> 1 or current_setting('test.m_bar')::int <> 1 then
       raise exception 'SELHALO: majitel nevidí potvrzení na obou pobočkách';

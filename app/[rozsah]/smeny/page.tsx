@@ -353,7 +353,7 @@ export default async function Rozpis({
   if (idLidi.length > 0) {
     const { data: lide, error: chybaLide } = await supabase
       .from("employees")
-      .select("id, full_name, color, usek_id, position_id, user_id")
+      .select("id, full_name, color, usek_id, position_id, user_id, deleted_at")
       .in("id", idLidi);
     if (chybaLide) throw new DotazSelhal("zaměstnanci", chybaLide);
     for (const c of lide ?? []) {
@@ -361,7 +361,8 @@ export default async function Rozpis({
       barvy.set(c.id as string, barvaNeboNic(c.color));
       domovskeUseky.set(c.id as string, (c.usek_id as string | null) ?? null);
       poziceLidi.set(c.id as string, (c.position_id as string | null) ?? null);
-      ucty.set(c.id as string, (c.user_id as string | null) ?? null);
+      // Smazaný zaměstnanec potvrdit nemůže stejně jako ten bez účtu — potvrdit_smenu ho nepustí.
+      ucty.set(c.id as string, c.deleted_at ? null : ((c.user_id as string | null) ?? null));
     }
   }
 
@@ -373,6 +374,7 @@ export default async function Rozpis({
   */
   const potvrzeni = await nactiPotvrzeniOkna(
     supabase,
+    tenantId,
     pobockyProPlanovani.map((b) => b.id),
     [...ucty].filter(([, ucet]) => ucet === null).map(([id]) => id),
     nacistOd,

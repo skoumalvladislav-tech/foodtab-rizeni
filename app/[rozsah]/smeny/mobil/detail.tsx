@@ -93,7 +93,12 @@ export default function DetailSmeny({
       setUpozorneni((u) =>
         u && u.moje ? { ...u, moje: { ...u.moje, potvrzeno_at: new Date().toISOString() } } : u,
       );
-      // Potvrzení změny potvrdilo i samotnou směnu — načtou se čerstvá data.
+      // Jedno tlačítko „Potvrdit změnu“ potvrdí i samotnou směnu, je-li k potvrzení (moje, vydaná
+      // v tomhle znění). Chyba se ukáže, nepolyká se: změna je potvrzená, směna ještě ne.
+      if (upozorneni?.potvrzeniSmeny?.mozePotvrdit) {
+        const s = await potvrditSmenu(zneniSmeny, rozsah);
+        if (s.stav === "chyba") setChybaPotvrzeni(s.text);
+      }
       nactiStavSmeny(smena.id)
         .then(setUpozorneni)
         .catch(() => undefined);
@@ -113,7 +118,7 @@ export default function DetailSmeny({
   async function potvrditSvouSmenu() {
     setPotvrzujeSmenu(true);
     setChybaPotvrzeni(null);
-    const r = await potvrditSmenu(smena.id, rozsah);
+    const r = await potvrditSmenu(zneniSmeny, rozsah);
     if (r.stav === "ok") {
       nactiStavSmeny(smena.id)
         .then(setUpozorneni)
@@ -128,7 +133,15 @@ export default function DetailSmeny({
   const moje = upozorneni?.moje ?? null;
   const vedouciStav = upozorneni?.vedouci ?? null;
   const potvrzeniSmeny = upozorneni?.potvrzeniSmeny ?? null;
-  // Změna, u které je k dispozici „Potvrdit změnu“ — ta potvrdí i směnu, druhé tlačítko by mátlo.
+  // Znění, které člověk vidí — potvrzuje se právě to (změnila-li se směna mezitím, databáze potvrzení odmítne).
+  const zneniSmeny = {
+    id: smena.id,
+    shift_date: smena.shift_date,
+    starts_at: smena.starts_at,
+    ends_at: smena.ends_at,
+    pauza_od: smena.pauza_od ?? null,
+    pauza_do: smena.pauza_do ?? null,
+  };  // Změna, u které je k dispozici „Potvrdit změnu“ — ta potvrdí i směnu, druhé tlačítko by mátlo.
   const zmenaKPotvrzeni = Boolean(moje && moje.druh === "smena.zmenena" && moje.vyzaduje && !moje.potvrzeno_at);
   const osoba = smena.employee_id ? (ctx.osoby.get(smena.employee_id) ?? null) : null;
   const jmeno = osoba?.jmeno ?? (smena.employee_id ? "Neznámý" : "Neobsazená směna");

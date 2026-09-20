@@ -114,11 +114,12 @@ export const cekaNaVydani = (s: SmenaD) => stavSmeny(s) !== 'vydana'
 /**
  * Potvrzení směny zaměstnancem (`smeny_potvrzeni`): kdo, kdy a OPIS směny,
  * kterou potvrdil. Potvrzení platí, jen dokud se směna s opisem shoduje —
- * změna času, dne, pauzy nebo člověka ho tiše zneplatní (`potvrzeniPlatne`).
+ * změna času, dne, pauzy, pobočky nebo člověka ho tiše zneplatní (`potvrzeniPlatne`).
  */
 export type PotvrzeniSmeny = {
   shift_id: string
   employee_id: string
+  branch_id: string
   shift_date: string
   starts_at: string
   ends_at: string
@@ -154,12 +155,13 @@ export function potvrzeniZRadku(radky: PotvrzeniSmeny[], pobocky: string[], bezU
 
 /**
  * Platí potvrzení pro směnu, jak vypadá TEĎ? Ano, když ho dal člověk, který
- * ji teď má, a shoduje se opis: den, čas, pauza. Vrátí-li se změna zpátky,
- * potvrzení platí zas.
+ * ji teď má, a shoduje se opis: pobočka, den, čas, pauza. Vrátí-li se změna
+ * zpátky, potvrzení platí zas.
  */
 export function potvrzeniPlatne(s: SmenaD, p: PotvrzeniSmeny | null | undefined): boolean {
   if (!p || !s.employee_id || p.employee_id !== s.employee_id) return false
   return (
+    p.branch_id === s.branch_id &&
     p.shift_date === s.shift_date &&
     stejnyCas(p.starts_at, s.starts_at) &&
     stejnyCas(p.ends_at, s.ends_at) &&

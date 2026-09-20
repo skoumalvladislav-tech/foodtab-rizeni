@@ -488,9 +488,9 @@ export default function Nastroje({
           {!potvrzeniZnamo ? (
             <li
               className="ds-smd-legenda-pozn"
-              title="Stav potvrzení se teď nepodařilo načíst, proto vydané směny puntík nemají. Červený puntík u nevydaných směn platí dál."
+              title="Potvrzení směn se nenačetla — databáze je buď ještě nemá (čeká na nasazení), nebo se čtení nepovedlo. Vydané směny proto puntík nemají; červený puntík u nevydaných platí dál."
             >
-              Potvrzení se nepodařilo načíst
+              Potvrzení zatím nejsou k dispozici
             </li>
           ) : null}
         </ul>

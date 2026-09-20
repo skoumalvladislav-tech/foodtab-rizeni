@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { getUser } from '@/lib/authz'
+import { getUser, hasAccess } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import { platnePotvrzeni, stavSmeny, type PotvrzeniSmeny, type SmenaD } from '@/lib/rozpis-desktop'
 import { funkceNeexistuje, sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
@@ -149,7 +149,7 @@ export async function nactiStavSmeny(smenaId: string): Promise<StavUpozorneniSme
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
 
-const SLOUPCE_POTVRZENI = 'shift_id, employee_id, shift_date, starts_at, ends_at, pauza_od, pauza_do, confirmed_at'
+const SLOUPCE_POTVRZENI = 'shift_id, employee_id, branch_id, shift_date, starts_at, ends_at, pauza_od, pauza_do, confirmed_at'
 
 /**
  * Kde je tahle směna s potvrzením: moje a k potvrzení, potvrzená, nepotvrzená,
@@ -197,6 +197,10 @@ async function nactiPotvrzeniSmeny(
   }
 
   const jeMoje = ((ja.data ?? [])[0] as { id: string } | undefined)?.id === s.employee_id
+  // Cizí směna na pobočce, kde člověk neplánuje: RLS mu potvrzení neukáže, a prázdný výsledek
+  // by se četl jako „nepotvrzeno“. Neví se — stejné pravidlo jako v mřížce.
+  if (!jeMoje && !(await hasAccess(tenantId, 'shifts.manage', s.branch_id))) return null
+
   const bezUctu = !clovek.error && clovek.data !== null && (clovek.data as { user_id: string | null }).user_id === null
   const platne = platnePotvrzeni(s, (potvrzeni.data ?? []) as PotvrzeniSmeny[])
 
@@ -213,11 +217,21 @@ async function nactiPotvrzeniSmeny(
  * že je vydaná a od vydání beze změny. Odsud se nepředává, kdo potvrzuje —
  * bere se z přihlášení, takže cizí potvrzení poslat nejde.
  */
+/** Znění směny, které člověk vidí na obrazovce — potvrzuje se právě to, a nesedí-li s databází, potvrzení se odmítne. */
+export type ZneniSmeny = {
+  id: string
+  shift_date: string
+  starts_at: string
+  ends_at: string
+  pauza_od: string | null
+  pauza_do: string | null
+}
+
 export async function potvrditSmenu(
-  smenaId: string,
+  zneni: ZneniSmeny,
   rozsah: string,
 ): Promise<{ stav: 'ok' } | { stav: 'chyba'; text: string }> {
-  if (!smenaId) return { stav: 'chyba', text: 'Nevím, co potvrdit.' }
+  if (!zneni?.id) return { stav: 'chyba', text: 'Nevím, co potvrdit.' }
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
@@ -225,7 +239,7 @@ export async function potvrditSmenu(
   if (!user) return { stav: 'chyba', text: 'Nejste přihlášeni.' }
 
   const supabase = await getServerSupabase()
-  const r = await potvrditVDatabazi(supabase, tenantId, smenaId)
+  const r = await potvrditVDatabazi(supabase, tenantId, zneni)
   if (r.stav === 'ok') revalidatePath(`/${rozsah}`, 'layout')
   return r
 }
@@ -234,15 +248,25 @@ export async function potvrditSmenu(
 async function potvrditVDatabazi(
   supabase: Supabase,
   tenantId: string,
-  smenaId: string,
+  zneni: ZneniSmeny,
 ): Promise<{ stav: 'ok' } | { stav: 'chyba'; text: string }> {
-  const { error } = await supabase.rpc('potvrdit_smenu', { p_tenant: tenantId, p_smena: smenaId })
+  const { error } = await supabase.rpc('potvrdit_smenu', {
+    p_tenant: tenantId,
+    p_smena: zneni.id,
+    p_den: zneni.shift_date,
+    p_od: zneni.starts_at,
+    p_do: zneni.ends_at,
+    p_pauza_od: zneni.pauza_od,
+    p_pauza_do: zneni.pauza_do,
+  })
   if (!error) return { stav: 'ok' }
   if (funkceNeexistuje(error)) {
     return { stav: 'chyba', text: 'Potvrzování směn ještě není zapnuté — čeká na nasazení databáze.' }
   }
-  // Věty z funkce jsou psané pro člověka (cizí směna, nevydaná, změněná od vydání).
-  if (error.code === '42501' || error.code === '55000') return { stav: 'chyba', text: error.message }
+  // Věty z funkce jsou psané pro člověka (cizí směna, nevydaná, změněná od vydání). Poznají se
+  // podle vlastních kódů PT403 / PT409; cizí chyba databáze (třeba chybějící grant, 42501) by
+  // člověku ukázala anglickou hlášku o interních objektech, tak se tam nepředává.
+  if (error.code === 'PT403' || error.code === 'PT409') return { stav: 'chyba', text: error.message }
   return { stav: 'chyba', text: 'Potvrzení se nepodařilo uložit.' }
 }
 
@@ -277,7 +301,7 @@ export async function potvrditZmenuSmeny(
     .eq('user_id', user.id)
     .in('druh', DRUHY_S_POTVRZENIM)
     .is('acknowledged_at', null)
-    .select('id, shift_id')
+    .select('id')
 
   if (error) return { stav: 'chyba', text: 'Potvrzení se nepodařilo uložit.' }
   if (!data || data.length === 0) {
@@ -295,10 +319,6 @@ export async function potvrditZmenuSmeny(
     .eq('user_id', user.id)
     .is('read_at', null)
 
-  // Jedno tlačítko „Potvrdit změnu“ potvrdí i samotnou směnu — ne dvě tlačítka za sebou.
-  // Nejde-li to (změnila se znovu, databáze funkci nemá), upozornění zůstává potvrzené.
-  const shiftId = (data[0] as { shift_id?: string | null }).shift_id
-  if (shiftId) await potvrditVDatabazi(supabase, tenantId, shiftId)
 
   revalidatePath(`/${rozsah}`, 'layout')
   return { stav: 'ok' }

@@ -26,10 +26,11 @@ type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
 const STRANA = 1000
 const NEJVIC_STRAN = 10
 
-const SLOUPCE = 'shift_id, employee_id, shift_date, starts_at, ends_at, pauza_od, pauza_do, confirmed_at'
+const SLOUPCE = 'shift_id, employee_id, branch_id, shift_date, starts_at, ends_at, pauza_od, pauza_do, confirmed_at'
 
 export async function nactiPotvrzeniOkna(
   supabase: Supabase,
+  tenantId: string,
   pobocky: string[],
   bezUctu: string[],
   od: string,
@@ -42,7 +43,9 @@ export async function nactiPotvrzeniOkna(
     const { data, error } = await supabase
       .from('smeny_potvrzeni')
       .select(SLOUPCE)
-      .in('branch_id', pobocky)
+      // Bez filtru na pobočku: RLS čte podle SOUČASNÉ pobočky směny (uložená se po přesunu
+      // směny liší) a klient stejně bere jen `pobocky`.
+      .eq('tenant_id', tenantId)
       .gte('shift_date', od)
       .lte('shift_date', doKdy)
       .order('shift_date', { ascending: true })
