@@ -38,6 +38,8 @@ export const STYL = {
   /** Den v levém sloupci („Po 1.“). */
   denRadek: 11,
   denRadekVikend: 12,
+  /** Součet hodin pod sloupcem člověka: tučné číslo, ale 9 pt jako zbytek tabulky (ne 11 pt jako v Souhrnu). */
+  cisloTucneMale: 14,
 } as const
 
 export type BunkaXlsx =
@@ -82,6 +84,11 @@ export type ListXlsx = {
    * první straně a týdny se dělí stejně na každé.
    */
   tiskOdRadku?: number
+  /**
+   * Prvních N řádků (od 1) se při tisku opakuje nahoře na každé straně —
+   * potřeba, když se list nevejde na jednu stranu na výšku.
+   */
+  opakovatRadky?: number
 }
 
 /** Text do záhlaví/zápatí tisku: `&` je tam řídicí znak, zdvojí se. */
@@ -131,7 +138,7 @@ const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <border><left style="thin"><color rgb="FFD6D1C7"/></left><right style="thin"><color rgb="FFD6D1C7"/></right><top style="thin"><color rgb="FFD6D1C7"/></top><bottom style="thin"><color rgb="FFD6D1C7"/></bottom><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="14">
+<cellXfs count="15">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
@@ -146,6 +153,7 @@ const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <xf numFmtId="0" fontId="5" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="5" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="5" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="164" fontId="5" fillId="4" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`
@@ -328,7 +336,14 @@ export function zapsatXlsx(listy: ListXlsx[]): Uint8Array {
     const list = `'${l.nazev.slice(0, 31).replace(/'/g, "''")}'`
     return [`<definedName name="_xlnm.Print_Area" localSheetId="${i}">${xml(list)}!$A$${l.tiskOdRadku}:$${sloupecNaPismeno(sloupcu - 1)}$${l.radky.length}</definedName>`]
   })
-  const oblastiTisku = oblasti.length ? `<definedNames>${oblasti.join('')}</definedNames>` : ''
+  // Opakované řádky (`_xlnm.Print_Titles`).
+  const opakovane = listy.flatMap((l, i) => {
+    if (!l.opakovatRadky) return []
+    const list = `'${l.nazev.slice(0, 31).replace(/'/g, "''")}'`
+    return [`<definedName name="_xlnm.Print_Titles" localSheetId="${i}">${xml(list)}!$1:$${l.opakovatRadky}</definedName>`]
+  })
+  const nazvy = [...oblasti, ...opakovane]
+  const oblastiTisku = nazvy.length ? `<definedNames>${nazvy.join('')}</definedNames>` : ''
 
   const workbook = `${HLAVICKA_XML}<workbook xmlns="${NS}" xmlns:r="${NS_R}"><bookViews><workbookView activeTab="0"/></bookViews><sheets>${listy
     .map((l, i) => `<sheet name="${xml(l.nazev.slice(0, 31))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`)

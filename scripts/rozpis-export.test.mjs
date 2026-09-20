@@ -28,7 +28,6 @@ import {
   hodinyCislem,
   jeMesic,
   jmenaNalezato,
-  listyXlsx,
   nazevMesice,
   nazevSouboru,
   pauzaKratce,
@@ -37,12 +36,13 @@ import {
   radkySmeny,
   rozdelitLidi,
   sestavitExportMesice,
-  sirkaSloupceXlsx,
   vetyPoznamky,
   zalomitVety,
 } from '../lib/rozpis-export.ts'
 import { zkratkyPobocek } from '../lib/rozpis-desktop.ts'
-import { A4_SIRKA, A4_VYSKA, DOLNI_HRANICE, OKRAJ, pdfZExportu, vyberRozlozeni } from '../lib/rozpis-export-pdf.ts'
+import { listyXlsx, sirkaSloupceVBodech, sirkaSloupceXlsx } from '../lib/rozpis-export-xlsx.ts'
+import { pdfZExportu } from '../lib/rozpis-export-pdf.ts'
+import { A4_SIRKA, A4_VYSKA, DOLNI_HRANICE, OKRAJ, vyberRozlozeni } from '../lib/rozpis-rozlozeni.ts'
 import { sirkaTextu, sirkaZnaku, StrankaPdf, zapsatPdf, zkratitText } from '../lib/pdf-zapis.ts'
 import { crc32, sloupecNaPismeno, textTisku, zapsatXlsx } from '../lib/xlsx-zapis.ts'
 import { precistXlsx } from '../lib/xlsx.ts'
@@ -290,14 +290,14 @@ const sirkyCol = [...sheetRozpis.matchAll(/<col [^>]*width="([\d.]+)"/g)].map((x
 */
 je('sloupce: Den + čtyři lidé, všichni stejně širocí', [sirkyCol.length, sirkyCol[0], new Set(sirkyCol.slice(1)).size], [5, 6.5, 1])
 je('… čtyři lidé se roztáhnou na strop (16 znaků), protože na stránce je místa dost', sirkyCol[1], 16)
-je('… ale nikdy pod nutné minimum podle času a pauzy (8 znaků)', sirkyCol[1] >= sirkaSloupceXlsx(m.sloupce), true)
+je('… ale nikdy pod nutné minimum podle času, pauzy a součtu hodin (8 znaků)', sirkyCol[1] >= sirkaSloupceXlsx(m.sloupce), true)
 const bezPauz = sestavitExportMesice(vstup(smeny.filter((s2) => !s2.pauza_od)))
-je('bez pauz řídí šířku nejdelší čas „10–18*“ (6 znaků → sloupec 7)', sirkaSloupceXlsx(bezPauz.sloupce), 7)
-je('a jen z krátkých časů („8–16“) sloupec neklesne pod 6', sirkaSloupceXlsx(sestavitExportMesice(vstup([smena('2026-09-02', 'a', '08:00', '16:00')])).sloupce), 6)
+je('bez pauz řídí šířku nejdelší čas „10–18*“ — měří se v bodech, ne ve znacích (5,7 znaku)', sirkaSloupceXlsx(bezPauz.sloupce), 5.7)
+je('jen z krátkých časů („8–16“) je sloupec úzký (4,1 znaku), nikdy pod 4', sirkaSloupceXlsx(sestavitExportMesice(vstup([smena('2026-09-02', 'a', '08:00', '16:00')])).sloupce), 4.1)
 const dlouhe = sestavitExportMesice(vstup([smena('2026-09-02', 'a', '16:00', '23:30'), smena('2026-09-03', 'a', '10:30', '23:30')]))
-je('dlouhý čas „10:30–23:30“ (11 znaků) → sloupec 11 (strop)', sirkaSloupceXlsx(dlouhe.sloupce), 11)
-je('dlouhý čas „16–23:30“ (8 znaků) → 8', sirkaSloupceXlsx(sestavitExportMesice(vstup([smena('2026-09-02', 'a', '16:00', '23:30')])).sloupce), 8)
-je('minimum počítá funkce z týchž dat („pauza 15–17“ → 8 znaků)', sirkaSloupceXlsx(m.sloupce), 8)
+je('dlouhý čas „10:30–23:30“ → 9,8 znaku', sirkaSloupceXlsx(dlouhe.sloupce), 9.8)
+je('dlouhý čas „16–23:30“ → 7,4 znaku', sirkaSloupceXlsx(sestavitExportMesice(vstup([smena('2026-09-02', 'a', '16:00', '23:30')])).sloupce), 7.4)
+je('pauza „15–17“ (drobné písmo) řídí šířku: 8 znaků', sirkaSloupceXlsx(m.sloupce), 8)
 const souhrnRadky = await precistXlsx(zapsatXlsx([listy[1]]))
 je('Souhrn: jen jméno, pozice, směny, hodiny (bez úseku a poboček)', souhrnRadky[3], ['Zaměstnanec', 'Pozice', 'Směn', 'Hodin'])
 je('Souhrn: Andrea 5 směn a 42 h; řádek Celkem', [souhrnRadky[4], souhrnRadky[souhrnRadky.length - 1]], [['Andrea Mikulová', 'Kuchařka', '5', '42'], ['Celkem', '', '8', '60']])
@@ -311,16 +311,21 @@ je('pořadí sloupců: nejdřív úsek Kuchyně (Zuzana), pak Plac (Adam) — i 
   sestavitExportMesice(vstup([smena('2026-09-02', 'ad', '08:00', '16:00'), smena('2026-09-02', 'zu', '08:00', '16:00')], { osoby: poradiOsoby })).sloupce.map((c) => c.jmeno), ['Zuzana Stará', 'Adam Nový'])
 
 const dveRadky = await precistXlsx(zapsatXlsx(listyXlsx(dvePobocky)))
-// Bez pauz je sloupec úzký (6 znaků): „Černá Perla“ se nevejde → zkratka „ČP“, „Bernard“ se ještě vejde celý.
-const dveUzke = sestavitExportMesice(vstup([...smeny.filter((s2) => !s2.pauza_od), smena('2026-09-06', 'a', '08:00', '12:00', { branch_id: 'b2' })]))
+/*
+  Pobočka pod časem se píše celým názvem, když se do sloupce vejde (měří se drobným
+  písmem v bodech), jinak zkratkou. Málo lidí = široký sloupec = celé názvy.
+*/
+je('dvě pobočky, málo lidí (široký sloupec): pobočka pod časem celým názvem', [dveRadky[8][1], dveRadky[3][1]], ['8–12\nBernard', '8–16\nČerná Perla'])
+je('… a zkratka „ČP“ se v poznámce nevysvětluje, není použitá', dveRadky.some((r) => (r[0] ?? '').includes('ČP = ')), false)
+// Hodně lidí = sloupec na minimu (bez pauz 5,7 znaku ≈ 34 bodů): „Bernard“ (30 b.) se ještě vejde, „Černá Perla“ (42 b.) ne → „ČP“.
+const fillery = new Map(Array.from({ length: 24 }, (_, i) => [`f${i}`, { id: `f${i}`, jmeno: `Osoba ${i}`, usekId: 'u-p', poziceId: null, barva: null }]))
+const dveUzke = sestavitExportMesice(vstup(
+  [...smeny.filter((s2) => !s2.pauza_od), smena('2026-09-06', 'a', '08:00', '12:00', { branch_id: 'b2' }), ...[...fillery.keys()].map((id) => smena('2026-09-02', id, '10:00', '18:00'))],
+  { osoby: new Map([...osoby, ...fillery]) },
+))
 const dveUzkeRadky = await precistXlsx(zapsatXlsx(listyXlsx(dveUzke)))
-je('úzký sloupec: dlouhý název pobočky se zkrátí („ČP“), krátký „Bernard“ zůstane celý', [dveUzkeRadky[3][1], dveUzkeRadky[8][1]], ['8–16\nČP', '8–12\nBernard'])
+je('úzký sloupec (hodně lidí): dlouhý název pobočky se zkrátí („ČP“), krátký „Bernard“ zůstane celý', [dveUzkeRadky[3][1], dveUzkeRadky[8][1]], ['8–16\nČP', '8–12\nBernard'])
 je('… zkratka je vysvětlená v poznámce, „Bernard“ vysvětlení nepotřebuje', [dveUzkeRadky.some((r) => (r[0] ?? '').includes('ČP = Černá Perla')), dveUzkeRadky.some((r) => (r[0] ?? '').includes('Ber = Bernard'))], [true, false])
-const sirkaDve = sirkaSloupceXlsx(dvePobocky.sloupce)
-je('dvě pobočky: pobočka je pod časem (celý název, když se vejde do sloupce; jinak zkratka)',
-  [dveRadky[8][1], dveRadky[3][1]],
-  [`8–12\n${'Bernard'.length * 0.65 <= sirkaDve - 1 ? 'Bernard' : 'Ber'}`, `8–16\n${'Černá Perla'.length * 0.65 <= sirkaDve - 1 ? 'Černá Perla' : 'ČP'}`])
-je('dvě pobočky: použitá zkratka je vysvětlená v poznámce', dveRadky.some((r) => (r[0] ?? '').includes('ČP = Černá Perla')), 'Černá Perla'.length * 0.65 > sirkaDve - 1)
 const zaHlavou = (radky2) => radky2.slice(3, 33).flat().join(' ')
 je('dvě pobočky: v tabulce dnů není žádný úsek', zaHlavou(dveRadky).includes('Kuchyn'), false)
 
@@ -343,6 +348,24 @@ const SIRKA_A4_PT = (8.27 - 0.8) * 72 // A4 na výšku s okraji 0,4″
 je('… a šířka každého listu se vejde do A4 při měřítku aspoň 62 %', listy40.slice(0, -1).every((l) => sirkaListuPt(l) * 0.62 <= SIRKA_A4_PT + 1), true)
 // A ta kontrola umí spadnout — bez tohohle by byla zelená nad čímkoli.
 je('… a chytne list, který je na A4 moc široký (60 sloupců po 11 znacích)', sirkaListuPt({ sloupce: Array.from({ length: 60 }, () => 11) }) * 0.62 <= SIRKA_A4_PT + 1, false)
+/*
+  Minimální sloupec musí pojmout všechno, co v něm je: čas, pauzu drobným písmem
+  i součet hodin. Číslo, které se nevejde, Excel neuřízne, ale ukáže „####“.
+*/
+const vejdeSeDoSirky = (mm, znaku) => {
+  const w = sirkaSloupceVBodech(znaku)
+  return mm.sloupce.every((c) =>
+    [...c.podleDne.values()].flat().every((d) => sirkaTextu(`${d.kratce}${d.nevydana ? '*' : ''}`, 9) + 5 <= w + 1e-9 && (!d.pauza || sirkaTextu(`pauza ${pauzaKratce(d.pauza)}`, 7) + 5 <= w + 1e-9)) &&
+    (c.minut === 0 || sirkaTextu(hodinyCislem(c.minut).toFixed(1), 9, 'tucne') + 5 <= w + 1e-9))
+}
+// Poslední sada: každý den 8–16 = 240 h za měsíc; „240.0“ je širší než „8–16“, takže tu šířku určuje součet hodin.
+const kMereni = [m, bezPauz, dlouhe, m40, vzorek(12)]
+je('do minimální šířky se vejde každý čas, pauza i součet hodin (5 sad dat)', kMereni.map((mm) => vejdeSeDoSirky(mm, sirkaSloupceXlsx(mm.sloupce))), [true, true, true, true, true])
+// A ta kontrola umí spadnout: o znak užší sloupec už nestačí.
+je('… a chytne sloupec o znak užší', kMereni.map((mm) => vejdeSeDoSirky(mm, sirkaSloupceXlsx(mm.sloupce) - 1)), [false, false, false, false, false])
+je('… součet hodin je v poslední sadě širší než nejdelší čas (jinak by ta sada nic nehlídala)',
+  sirkaTextu('240.0', 9, 'tucne') > sirkaTextu('8–16', 9), true)
+je('součet hodin je v sešitu 9 pt tučně (styl 14), ne 11 pt jako v Souhrnu', [(sheetRozpis.match(/ s="14"/g) ?? []).length, sheetRozpis.includes(' s="7"')], [4, false])
 je('rozdělení lidí: 7 po 3 → 3 + 2 + 2', rozdelitLidi([1, 2, 3, 4, 5, 6, 7], 3).map((c) => c.length), [3, 2, 2])
 je('rozdělení lidí: vejdou se → jedna část', rozdelitLidi([1, 2, 3, 4, 5, 6], 6).map((c) => c.length), [6])
 je('rozdělení lidí: 10 po 4 → 4 + 3 + 3', rozdelitLidi(Array.from({ length: 10 }, (_, i) => i), 4).map((c) => c.length), [4, 3, 3])
@@ -541,6 +564,54 @@ const smTezke = []
 const mTezke = sestavitExportMesice(vstup(smTezke, { osoby: osTezke }))
 je('15 lidí, těžká buňka každý den u někoho: lidé zůstanou pohromadě a měsíc se zlomí (2 stránky), ne 4–5 stránek po pár lidech',
   [stranPdf(mTezke), vyberRozlozeni(mTezke).casti.length], [2, 1])
+
+
+console.log('\n== Excel a PDF dělí lidi stejně ==')
+/*
+  Kdo je na kterém listu (stránce), rozhoduje jediná funkce, `vyberRozlozeni`;
+  sešit ani PDF si dělení nepočítají sami. Dřív měl sešit vlastní výpočet jen
+  podle šířky a z týchž dat vycházelo jinak: 25 lidí s krátkými časy = PDF jedna
+  stránka, sešit dva listy.
+*/
+const listyRozpisu = (mm) => listyXlsx(mm).filter((l) => l.nazev.startsWith('Rozpis'))
+const lidiNaListech = (mm) => listyRozpisu(mm).map((l) => l.sloupce.length - 1)
+const lidiVRozlozeni = (mm) => vyberRozlozeni(mm).casti.map((c) => c.length)
+const kratke = (k) => vzorek(k)
+const dlouhe2 = (k) => vzorek(k, () => ({}), false, dlouheCasy)
+for (const [nazev, sestav, pocty] of [['krátké časy', kratke, [6, 15, 25, 30, 40]], ['dlouhé časy', dlouhe2, [6, 15, 18, 20, 30, 40]]]) {
+  je(`${nazev}: na listech sešitu jsou lidé přesně tak, jak je dělí PDF (${pocty.join(', ')} lidí)`,
+    pocty.map((k) => JSON.stringify(lidiNaListech(sestav(k))) === JSON.stringify(lidiVRozlozeni(sestav(k)))), pocty.map(() => true))
+}
+je('25 lidí s krátkými časy: jeden list i jedna stránka PDF (sešit dřív dělil na dva)', [lidiNaListech(kratke(25)), stranPdf(kratke(25))], [[25], 1])
+je('20 lidí s dlouhými časy: dva listy po deseti a dvě stránky PDF', [lidiNaListech(dlouhe2(20)), stranPdf(dlouhe2(20))], [[10, 10], 2])
+je('těžké buňky (15 lidí, měsíc se láme): jeden list a dvě stránky PDF', [lidiNaListech(mTezke), stranPdf(mTezke)], [[15], 2])
+je('… nadpis listu říká, kolikátý z kolika (jen když jich je víc)', [listyRozpisu(dlouhe2(20)).map((l) => l.nazev), listyRozpisu(kratke(6)).map((l) => l.nazev)], [['Rozpis 1', 'Rozpis 2'], ['Rozpis']])
+
+// Tisk: vejde-li se měsíc na stránku, sešit ho vytiskne na jednu; láme-li se v PDF, láme se i v sešitu a záhlaví tabulky se opakuje.
+const soubor = (mm) => rozbalit(zapsatXlsx(listyXlsx(mm)))
+const jedna = soubor(kratke(12))
+const lomi = soubor(mTezke)
+je('měsíc se vejde na stránku: jedna stránka (fitToHeight="1") a žádné opakované řádky', [jedna.get('xl/worksheets/sheet1.xml').text.includes('fitToHeight="1"'), jedna.get('xl/workbook.xml').text.includes('Print_Titles')], [true, false])
+je('měsíc se láme na víc stránek: výška podle obsahu (fitToHeight="0")', lomi.get('xl/worksheets/sheet1.xml').text.includes('fitToHeight="0"'), true)
+je('… a záhlaví tabulky (řádky 1–3) se opakuje na každé straně', lomi.get('xl/workbook.xml').text.includes("'Rozpis'!$1:$3"), true)
+je('… sloupce se přitom nenatahují do šířky stránky (jinak by se tisklo velkým písmem a stran by bylo víc než v PDF)',
+  new Set(listyRozpisu(mTezke)[0].sloupce.slice(1)).size === 1 && listyRozpisu(mTezke)[0].sloupce[1] === sirkaSloupceXlsx(mTezke.sloupce), true)
+// Málo lidí, ale těžké buňky: měsíc se láme i tak, a sloupce se přesto nenatahují (natažené by list vytiskl velkým písmem).
+const malo = vzorek(5, (den, i) => ({ branch_id: (Number(den.slice(8)) + i) % 2 ? 'b2' : 'b1', pauza_od: '10:00:00', pauza_do: '11:00:00' }), true)
+const listMalo = listyRozpisu(malo)[0]
+je('5 lidí, dvě směny denně na dvou pobočkách s pauzami: měsíc se láme', vyberRozlozeni(malo).lomiMesic, true)
+je('… a sloupce zůstanou na minimu, nenatáhnou se', listMalo.sloupce[1], sirkaSloupceXlsx(malo.sloupce))
+je('… kdežto 5 lidí s obyčejnými směnami se natáhne (a ta kontrola tak umí spadnout)', listyRozpisu(vzorek(5))[0].sloupce[1] > sirkaSloupceXlsx(vzorek(5).sloupce), true)
+const zkList = (prepis) => rozbalit(zapsatXlsx([{ nazev: 'X', sloupce: [10], radky: [[{ t: 's', v: 'a' }], [{ t: 's', v: 'b' }], [{ t: 's', v: 'c' }]], ...prepis }])).get('xl/workbook.xml').text
+je('opakovatRadky: 3 → Print_Titles „$1:$3“ na tom listu', zkList({ opakovatRadky: 3 }).includes(`name="_xlnm.Print_Titles" localSheetId="0">'X'!$1:$3`), true)
+je('bez opakovatRadky žádné Print_Titles', zkList({}).includes('Print_Titles'), false)
+
+// Stejné dělení nestačí, kdyby si sešit na tolika sloupcích tisknul nečitelným písmem. Písmo sešitu (9 pt × zmenšení na šířku A4)
+// se drží blízko písma PDF; dřív byly sloupce sešitu o polovinu širší a při 30 lidech vycházelo kolem 4 bodů.
+const pismoSesitu = (l) => 9 * Math.min(1, SIRKA_A4_PT / sirkaListuPt(l))
+je('písmo sešitu je nejvýš o bod menší než PDF (krátké: 25 a 30 lidí; dlouhé: 15, 18 a 30)',
+  [kratke(25), kratke(30), dlouhe2(15), dlouhe2(18), dlouhe2(30)].map((mm) => listyRozpisu(mm).every((l) => pismoSesitu(l) >= vyberRozlozeni(mm).f - 1)), [true, true, true, true, true])
+je('… a ta kontrola umí spadnout: 60 sloupců po 8 znacích se tiskne pod 5 body', pismoSesitu({ sloupce: [6.5, ...Array.from({ length: 60 }, () => 8)] }) >= 5, false)
 
 const prazdne = cti(pdfZExportu(sestavitExportMesice(vstup([]))))
 je('měsíc bez směn: jedna stránka s větou, ne pád', [(prazdne.match(/\/Type \/Page /g) ?? []).length, prazdne.includes('nejsou')], [1, true])

@@ -5,7 +5,8 @@
  * podoby ukazují totéž. Je to čistá funkce nad daty, která rozpis stejně
  * načítá (`shifts`, `employees`, `useky`, `positions`); žádný druhý zdroj
  * pravdy, žádné dopočítávání jinde. PDF si z modelu skládá stránky
- * (`lib/rozpis-export-pdf.ts`), Excel list tabulek (`listyXlsx` níž).
+ * (`lib/rozpis-export-pdf.ts`), Excel listy tabulek `lib/rozpis-export-xlsx.ts`;
+ * kdo je na kterém listu (stránce), určuje jednou `lib/rozpis-rozlozeni.ts`.
  *
  * ---------------------------------------------------------------------
  * CO EXPORT OBSAHUJE — A CO SE VYZNAČUJE
@@ -38,9 +39,7 @@
  */
 
 import { cekaNaVydani, kratkyCas, zkratkyPobocek, type OsobaD, type SmenaD } from './rozpis-desktop.ts'
-import { denVTydnu, hhmm, jeVikend, minutSmeny, ZKRATKY_DNU } from './rozpis-mobil.ts'
-import { sirkaTextu } from './pdf-zapis.ts'
-import { STYL, textTisku, type BunkaXlsx, type ListXlsx } from './xlsx-zapis.ts'
+import { denVTydnu, hhmm, minutSmeny, ZKRATKY_DNU } from './rozpis-mobil.ts'
 
 /* --- model ------------------------------------------------------------ */
 
@@ -338,10 +337,8 @@ export function rozdelitLidi<T>(pole: T[], nejvic: number): T[][] {
   return vysledek
 }
 
-/* --- Excel ----------------------------------------------------------- */
+/* --- text buňky: společný pro Excel i PDF -------------------------------- */
 
-const s = (v: string, styl?: number): BunkaXlsx => ({ t: 's', v, s: styl })
-const n = (v: number, styl?: number): BunkaXlsx => ({ t: 'n', v, s: styl })
 
 /** „Po 21.“ — zkratka dne a číslo, do levého sloupce. */
 export const popisDne = (den: string) =>
@@ -362,205 +359,6 @@ export function radkySmeny(dily: DilSmeny[], pobockaText?: (pobocka: string) => 
   ])
 }
 
-/*
-  Rozměry listu pro tisk na jednu stránku A4 na výšku. Šířky jsou ve
-  znacích Excelu (jeden znak ≈ 7 px, plus 5 px na sloupec); z nich se
-  počítá, kolik lidí se vejde na list, aniž by tisk klesl pod čitelné
-  měřítko — víc lidí jde na další list.
-*/
-const VYSKA_RADKU_XLSX = 12 // řádek písma 9 pt
-const VYSKA_DROBNE_XLSX = 10 // řádek písma 7 pt
-const SIRKA_DNE_XLSX = 6.5
-const TISK_SIRKA_PT = (8.27 - 2 * 0.4) * 72 // A4 na výšku, okraje 0,4″
-const NEJMENSI_MERITKO = 0.62
-/** Šířka tiskové plochy v pixelech Excelu (bod je 0,75 px). */
-const TISK_SIRKA_PX = TISK_SIRKA_PT / 0.75
-/** Sloupec člověka nemá smysl táhnout donekonečna — pár lidí by mělo pruhy přes půl stránky. */
-const NEJSIRSI_SLOUPEC = 16
-/** Šířka sloupce Excelu (ve znacích výchozího písma) v bodech: znak ≈ 7 px + 5 px na sloupec. */
-export const sirkaSloupceVBodech = (w: number) => (w * 7 + 5) * 0.75
-/** Písmo jména v záhlaví sešitu (bodů) — podle něj se měří, jestli se vejde naležato. */
-const PISMO_ZAHLAVI_XLSX = 9
-
-/** Šířka sloupce člověka ve znacích: podle nejdelšího času (nebo pauzy) směny. */
-export function sirkaSloupceXlsx(sloupce: SloupecExportu[]): number {
-  let cas = 0
-  let pauza = 0
-  for (const c of sloupce) {
-    for (const dily of c.podleDne.values()) {
-      for (const d of dily) {
-        cas = Math.max(cas, d.kratce.length + (d.nevydana ? 1 : 0))
-        if (d.pauza) pauza = Math.max(pauza, `pauza ${pauzaKratce(d.pauza)}`.length)
-      }
-    }
-  }
-  return Math.min(11, Math.max(6, Math.round(Math.max(cas * 0.85, pauza * 0.62) + 1.5)))
-}
-
-const zapatiTisku = (m: ExportMesice) => `&L${textTisku(`Vytvořeno ${m.vytvoreno}`)}&RStrana &P z &N`
-
-/**
- * Sešit: „Rozpis“ (dny v řádcích, lidé ve sloupcích, jedna stránka A4 na
- * výšku; při hodně lidech „Rozpis 1“, „Rozpis 2“…) a „Souhrn“ (hodiny po
- * lidech). Hodiny jsou čísla, dají se sčítat.
- */
-export function listyXlsx(m: ExportMesice): ListXlsx[] {
-  return [...rozpisXlsx(m), souhrnXlsx(m)]
-}
-
-function rozpisXlsx(m: ExportMesice): ListXlsx[] {
-  const sirka = sirkaSloupceXlsx(m.sloupce)
-  // Kolik lidí se vejde na šířku při nejmenším přijatelném měřítku.
-  const pxNaLidi = TISK_SIRKA_PT / NEJMENSI_MERITKO / 0.75 - (SIRKA_DNE_XLSX * 7 + 5)
-  const nejvic = Math.max(1, Math.floor(pxNaLidi / (sirka * 7 + 5)))
-  const casti = rozdelitLidi(m.sloupce, nejvic)
-  /*
-    Zbude-li na stránce místo, sloupce lidí se roztáhnou. Úzký proužek na
-    levé třetině A4 nikomu neposlouží a v širším sloupci se navíc vejde
-    jméno naležato, takže se nemusí otáčet.
-  */
-  const naSirku = (pocet: number) => Math.max(sirka, Math.min(NEJSIRSI_SLOUPEC, (TISK_SIRKA_PX - (SIRKA_DNE_XLSX * 7 + 5)) / Math.max(1, pocet) / 7 - 5 / 7))
-
-  // Pobočka pod časem: celý název, když se vejde do sloupce (drobné písmo ≈ 0,65 znaku), jinak zkratka.
-  const zkratkaPobocky = new Map(m.pobocky.map((p) => [p.nazev, p.zkratka]))
-  const textPobocky = (nazev: string) => (nazev.length * 0.65 <= sirka - 1 ? nazev : (zkratkaPobocky.get(nazev) ?? nazev))
-
-  return casti.map((cast, i) => {
-    const radky: (BunkaXlsx | null)[][] = []
-    const vyskyRadku: Record<number, number> = {}
-    const pridej = (radek: (BunkaXlsx | null)[], vyska: number) => {
-      radky.push(radek)
-      vyskyRadku[radky.length] = vyska
-    }
-
-    pridej([s(casti.length > 1 ? `${m.nadpis} — část ${i + 1} z ${casti.length}` : m.nadpis, STYL.titul)], 22)
-    pridej([s(`${m.rozsah} · vytvořeno ${m.vytvoreno}`, STYL.poznamka)], 15)
-
-    /*
-      Záhlaví: jméno a pod ním pozice. Vejdou-li se do sloupce naležato (po
-      slovech, nejvýš tři řádky), nic se neotáčí — vodorovné jméno se čte samo
-      a řádek je nižší (Šéfík 20. 9. 2026). Jinak se celé záhlaví otočí o 90°,
-      aby sloupec mohl zůstat úzký. Buď otočené celé, nebo nic; půlka tak
-      a půlka onak vypadá rozbitě.
-    */
-    const sirkaSloupce = naSirku(cast.length)
-    /*
-      Šířka se měří v bodech, ne ve znacích — počet znaků lže, protože „í“ je
-      užší než „M“. Týmž metrem měří i PDF; odpověď se ale lišit může, a je to
-      tak správně: sešit má sloupce pevně široké a před tiskem se celý zmenší
-      (jméno se zmenší s ním), kdežto PDF dělí šířku stránky mezi sloupce
-      a písmo drží. Každý se proto ptá na svou geometrii.
-    */
-    const dovnitr = sirkaSloupceVBodech(sirkaSloupce) - 5
-    const vejdeSe = (t: string) => sirkaTextu(t, PISMO_ZAHLAVI_XLSX, 'tucne') <= dovnitr
-    const vodorovne = jmenaNalezato(cast, vejdeSe)
-    const radkuZahlavi = vodorovne
-      ? Math.max(
-          1,
-          ...cast.map(
-            (c) =>
-              (radkyDoSirky(c.jmeno, vejdeSe)?.length ?? 1) + (c.pozice ? (radkyDoSirky(c.pozice, vejdeSe)?.length ?? 1) : 0),
-          ),
-        )
-      : 0
-    const nejdelsi = Math.max(4, ...cast.map((c) => Math.max([...c.jmeno].length, [...c.pozice].length)))
-    pridej(
-      [
-        s('Den', STYL.hlavicka),
-        ...cast.map((c) =>
-          s(c.pozice ? `${c.jmeno}\n${c.pozice}` : c.jmeno, vodorovne ? STYL.hlavickaJmeno : STYL.hlavickaOtocena),
-        ),
-      ],
-      vodorovne ? Math.max(24, radkuZahlavi * 12 + 6) : Math.min(130, Math.max(50, nejdelsi * 5 + 8)),
-    )
-
-    for (const den of m.dny) {
-      const vikend = jeVikend(den)
-      const bunky = cast.map((c) => radkySmeny(c.podleDne.get(den) ?? [], m.vicePobocek ? textPobocky : undefined))
-      const vyska = Math.max(
-        VYSKA_RADKU_XLSX + 3,
-        ...bunky.map((r) => r.reduce((k, x) => k + (x.drobne ? VYSKA_DROBNE_XLSX : VYSKA_RADKU_XLSX), 3)),
-      )
-      pridej(
-        [
-          s(popisDne(den), vikend ? STYL.denRadekVikend : STYL.denRadek),
-          ...bunky.map(
-            (r): BunkaXlsx => ({
-              t: 's',
-              v: r.map((x) => x.text).join('\n'),
-              s: vikend ? STYL.bunkaVikend : STYL.bunka,
-              drobne: r.map((x) => x.drobne),
-            }),
-          ),
-        ],
-        vyska,
-      )
-    }
-
-    pridej(
-      [
-        s('Hodin', STYL.souctovyText),
-        ...cast.map((c) => (c.minut > 0 ? n(hodinyCislem(c.minut), STYL.cisloTucne) : s('—', STYL.cisloTucne))),
-      ],
-      18,
-    )
-
-    // Poznámky: jen zkratky poboček, které tenhle list opravdu použil.
-    const pouziteNazvy = new Set<string>()
-    if (m.vicePobocek) {
-      for (const c of cast) for (const dily of c.podleDne.values()) for (const d of dily) if (d.pobocka) pouziteNazvy.add(d.pobocka)
-    }
-    const pouziteZkratky = m.pobocky.filter((p) => pouziteNazvy.has(p.nazev) && textPobocky(p.nazev) !== p.nazev)
-    const maxZnaku = Math.floor((SIRKA_DNE_XLSX + cast.length * sirkaSloupce) / 0.85)
-    radky.push([])
-    for (const radek of zalomitVety(
-      vetyPoznamky(m, pouziteZkratky, cast.some((c) => c.osobaId === null)),
-      (t) => t.length <= maxZnaku,
-    )) {
-      pridej([s(radek, STYL.poznamka)], 13)
-    }
-
-    return {
-      nazev: casti.length > 1 ? `Rozpis ${i + 1}` : 'Rozpis',
-      sloupce: [SIRKA_DNE_XLSX, ...cast.map(() => sirkaSloupce)],
-      radky,
-      vyskyRadku,
-      zmrazit: { radky: 3, sloupce: 1 },
-      naSirku: false,
-      naJednuStranku: true,
-      tisk: { zapati: zapatiTisku(m) },
-    }
-  })
-}
-
-function souhrnXlsx(m: ExportMesice): ListXlsx {
-  return {
-    nazev: 'Souhrn',
-    sloupce: [28, 22, 9, 10],
-    radky: [
-      [s(`Souhrn hodin — ${nazevMesice(m.mesic)}`, STYL.titul)],
-      [s(`${m.rozsah} · vytvořeno ${m.vytvoreno}`, STYL.poznamka)],
-      [],
-      [s('Zaměstnanec', STYL.hlavicka), s('Pozice', STYL.hlavicka), s('Směn', STYL.hlavicka), s('Hodin', STYL.hlavicka)],
-      ...m.souhrn.map((r) => [
-        s(r.jmeno, STYL.jmeno),
-        s(r.pozice, STYL.jmeno),
-        n(r.smen, STYL.cislo),
-        n(hodinyCislem(r.minut), STYL.cislo),
-      ]),
-      [
-        s('Celkem', STYL.souctovyText),
-        s('', STYL.souctovyText),
-        n(m.souhrn.reduce((k, r) => k + r.smen, 0), STYL.cisloTucne),
-        n(hodinyCislem(m.celkemMinut), STYL.cisloTucne),
-      ],
-    ],
-    zmrazit: { radky: 4, sloupce: 0 },
-    vyskyRadku: { 1: 22 },
-    naSirku: false,
-    tisk: { zapati: zapatiTisku(m) },
-  }
-}
 
 /** Bezpečný základ názvu souboru: bez diakritiky a mezer. */
 export function nazevSouboru(rozsah: string, mesic: string, pripona: string): string {
