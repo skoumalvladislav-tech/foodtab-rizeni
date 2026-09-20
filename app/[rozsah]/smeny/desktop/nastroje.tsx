@@ -437,30 +437,6 @@ export default function Nastroje({
         ) : null}
       </div>
 
-      {/*
-        Vysvětlení puntíku u času směny (Šéfík 20. 9. 2026). Sedí v liště nad
-        mřížkou, ne dole v patičce, ať je vidět dřív, než se člověk zeptá.
-        Slova jsou z `POPIS_PUNTIKU` — táž, která nese `title` karty.
-      */}
-      {legendaPuntiku ? (
-        <ul className="ds-smd-legenda ds-smd-legenda-puntiku" aria-label="Význam puntíku u času směny">
-          {(["nevydano", "nepotvrzeno", "potvrzeno"] as const).map((k) => (
-            <li key={k}>
-              <span className="ds-smd-znacka" data-puntik={k} aria-hidden="true" />
-              {POPIS_PUNTIKU[k]}
-            </li>
-          ))}
-          {!potvrzeniZnamo ? (
-            <li
-              className="ds-smd-legenda-pozn"
-              title="Databáze zatím neumí říct, kdo směnu potvrdil (chybí migrace 20260920100000). Vydané směny proto puntík nemají."
-            >
-              Potvrzení zatím nejsou k dispozici
-            </li>
-          ) : null}
-        </ul>
-      ) : null}
-
       {cipy.length > 0 ? (
         <ul className="ds-smd-cipy" aria-label="Aktivní filtry">
           {cipy.map((c) => (
@@ -487,6 +463,34 @@ export default function Nastroje({
               >
                 Zrušit vše
               </button>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+      {/*
+        Vysvětlení puntíku u času směny (Šéfík 20. 9. 2026). Sedí v liště nad
+        mřížkou, ne dole v patičce, ať je vidět dřív, než se člověk zeptá.
+        Slova jsou z `POPIS_PUNTIKU` — táž, která nese `title` karty. Je až za
+        čipy filtrů, aby je `margin-left: auto` neodstrčilo na další řádek.
+      */}
+      {legendaPuntiku ? (
+        <ul
+          className="ds-smd-legenda ds-smd-legenda-puntiku"
+          aria-label="Význam puntíku u času směny"
+          title="Potvrzeno = zaměstnanec směnu potvrdil v telefonu. Změní-li se čas, den, pauza nebo člověk, potvrzení přestane platit."
+        >
+          {(["nevydano", "nepotvrzeno", "potvrzeno"] as const).map((k) => (
+            <li key={k}>
+              <span className="ds-smd-znacka" data-puntik={k} aria-hidden="true" />
+              {POPIS_PUNTIKU[k]}
+            </li>
+          ))}
+          {!potvrzeniZnamo ? (
+            <li
+              className="ds-smd-legenda-pozn"
+              title="Stav potvrzení se teď nepodařilo načíst, proto vydané směny puntík nemají. Červený puntík u nevydaných směn platí dál."
+            >
+              Potvrzení se nepodařilo načíst
             </li>
           ) : null}
         </ul>

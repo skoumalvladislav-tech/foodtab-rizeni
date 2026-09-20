@@ -1314,7 +1314,7 @@ div.ds-smd-smena { cursor: default; }
 .ds-smd-smena:hover { box-shadow: 0 1px 4px rgba(22, 33, 28, .14); }
 div.ds-smd-smena:hover { box-shadow: none; }
 .ds-smd-smena[data-vybrana] { outline: 2px solid var(--mosaz); outline-offset: 1px; }
-.ds-smd-cas { font-size: 13px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ds-smd-cas { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /*
   Puntík u času směny (Šéfík 20. 9. 2026): červený = nevydáno, žlutý = vydáno
   a nepotvrzeno, zelený = vydáno a potvrzeno. Slovo se na kartě nepíše, takže
@@ -1322,24 +1322,31 @@ div.ds-smd-smena:hover { box-shadow: none; }
   (`.ds-smd-legenda-puntiku`) a v `title` karty.
 */
 .ds-smd-znacka {
-  position: relative; flex: none; grid-column: 2; grid-row: 1; justify-self: end;
-  width: 10px; height: 10px; border-radius: 50%; background: var(--muted);
-  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--card) 75%, transparent);
+  position: relative; flex: none; grid-column: 2; grid-row: 1; justify-self: end; box-sizing: border-box;
+  width: 11px; height: 11px; border-radius: 50%; background: var(--muted);
+  /* Obrys drží tvar i tam, kde barva sama nestačí (žlutá na světlé kartě, tmavý režim). */
+  border: 1.5px solid color-mix(in srgb, var(--ink) 70%, transparent);
 }
 .ds-smd-znacka[data-puntik="nevydano"] { background: var(--bad); }
 .ds-smd-znacka[data-puntik="nepotvrzeno"] { background: var(--mosaz-sv); }
 .ds-smd-znacka[data-puntik="potvrzeno"] { background: var(--dobre); }
+/* Fajfka je v barvě karty: bílá na světlé, tmavá na tmavé — vždy proti zelené. */
 .ds-smd-znacka[data-puntik="potvrzeno"]::after {
-  content: ""; position: absolute; left: 3.2px; top: 1.6px; width: 2px; height: 4.5px;
-  border: solid #fff; border-width: 0 1.4px 1.4px 0; transform: rotate(45deg);
+  content: ""; position: absolute; left: 2.3px; top: 0.4px; width: 2px; height: 4.5px;
+  border: solid var(--card); border-width: 0 1.4px 1.4px 0; transform: rotate(45deg);
+}
+/* Vysoký kontrast: systém přebarví pozadí a puntíky by splynuly — barvy si tu hlídáme sami. */
+@media (forced-colors: active) {
+  .ds-smd-znacka { forced-color-adjust: none; border-color: CanvasText; }
 }
 /* Zkratka pobočky — má být vidět na první pohled, ne tušit se v šedém podtitulku. */
 /*
   Zkratka pobočky je ve druhém sloupci druhého řádku — vedle času by se
   s puntíkem stavu do úzké buňky nevešla a puntík by vylezl z karty ven.
 */
+.ds-smd-smena > .ds-smd-pobocka-zkr { grid-column: 2; grid-row: 2; justify-self: end; }
 .ds-smd-pobocka-zkr {
-  grid-column: 2; grid-row: 2; justify-self: end; padding: 0 4px; border-radius: 5px; white-space: nowrap;
+  padding: 0 4px; border-radius: 5px; white-space: nowrap;
   background: color-mix(in srgb, var(--ink) 12%, var(--card));
   border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
   color: var(--ink); font-size: 10px; font-weight: 800; letter-spacing: .03em; line-height: 1.5;

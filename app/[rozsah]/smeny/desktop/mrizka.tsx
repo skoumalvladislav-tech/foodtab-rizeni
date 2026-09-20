@@ -534,7 +534,7 @@ function RadekMrizkyView({
                 jmena={jmena}
                 vybrana={vybranaId === s.id}
                 klikaci={planovani !== null}
-                puntik={puntikSmeny(s as SmenaD, potvrzeni)}
+                puntik={puntikSmeny(s as SmenaD, potvrzeni, dnesni)}
                 pobocka={psatPobocku ? (zkratkyPobocek.get(s.branch_id) ?? null) : null}
                 pobockaNazev={psatPobocku ? (nazvyPobocek.get(s.branch_id) ?? null) : null}
                 onOtevrit={() => onOtevrit({ den, smena: s })}

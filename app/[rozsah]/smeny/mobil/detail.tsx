@@ -8,7 +8,7 @@ import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import { datumACasSRokemVPasmu, datumACasVPasmu } from "@/lib/cas";
 import { vyzadujePotvrzeni as vyzadujePotvrzeniDruhu } from "@/lib/upozorneni-text";
 import { delkaPopis, minutSmeny, popisDne, rozsahCasu } from "@/lib/rozpis-mobil";
-import { nactiStavSmeny, potvrditZmenuSmeny, type StavUpozorneniSmeny } from "../potvrzeni";
+import { nactiStavSmeny, potvrditSmenu, potvrditZmenuSmeny, type StavUpozorneniSmeny } from "../potvrzeni";
 import { smazatSmenu, type StavSmeny } from "../smena";
 import { AvatarM } from "./prvky";
 import { ListMobil } from "./sheet";
@@ -69,6 +69,7 @@ export default function DetailSmeny({
   const [upozorneni, setUpozorneni] = useState<StavUpozorneniSmeny | null>(null);
   const [potvrzuje, setPotvrzuje] = useState(false);
   const [chybaPotvrzeni, setChybaPotvrzeni] = useState<string | null>(null);
+  const [potvrzujeSmenu, setPotvrzujeSmenu] = useState(false);
 
   useEffect(() => {
     let zruseno = false;
@@ -92,6 +93,10 @@ export default function DetailSmeny({
       setUpozorneni((u) =>
         u && u.moje ? { ...u, moje: { ...u.moje, potvrzeno_at: new Date().toISOString() } } : u,
       );
+      // Potvrzení změny potvrdilo i samotnou směnu — načtou se čerstvá data.
+      nactiStavSmeny(smena.id)
+        .then(setUpozorneni)
+        .catch(() => undefined);
       router.refresh();
     } else {
       setChybaPotvrzeni(r.text);
@@ -99,9 +104,32 @@ export default function DetailSmeny({
     setPotvrzuje(false);
   }
 
+  /*
+    Potvrzení SMĚNY (Šéfík 20. 9. 2026): zaměstnanec vědomě potvrdí, že svou
+    vydanou směnu zná. Vedoucí to vidí jako zelený puntík u času. Nová směna
+    žádné tlačítko dřív neměla; u změny zůstává „Potvrdit změnu“ a potvrdí
+    i směnu (jedno tlačítko, ne dvě).
+  */
+  async function potvrditSvouSmenu() {
+    setPotvrzujeSmenu(true);
+    setChybaPotvrzeni(null);
+    const r = await potvrditSmenu(smena.id, rozsah);
+    if (r.stav === "ok") {
+      nactiStavSmeny(smena.id)
+        .then(setUpozorneni)
+        .catch(() => undefined);
+      router.refresh();
+    } else {
+      setChybaPotvrzeni(r.text);
+    }
+    setPotvrzujeSmenu(false);
+  }
+
   const moje = upozorneni?.moje ?? null;
   const vedouciStav = upozorneni?.vedouci ?? null;
-
+  const potvrzeniSmeny = upozorneni?.potvrzeniSmeny ?? null;
+  // Změna, u které je k dispozici „Potvrdit změnu“ — ta potvrdí i směnu, druhé tlačítko by mátlo.
+  const zmenaKPotvrzeni = Boolean(moje && moje.druh === "smena.zmenena" && moje.vyzaduje && !moje.potvrzeno_at);
   const osoba = smena.employee_id ? (ctx.osoby.get(smena.employee_id) ?? null) : null;
   const jmeno = osoba?.jmeno ?? (smena.employee_id ? "Neznámý" : "Neobsazená směna");
   const pozice = smena.position_id ? ctx.pozice.get(smena.position_id) : undefined;
@@ -148,8 +176,30 @@ export default function DetailSmeny({
           </div>
         ) : null}
 
-        <div className="ds-sm-detail-osoba">
-          <AvatarM osoba={osoba} velikost="v" />
+        {/* Potvrzení směny: moje vydaná směna → tlačítko; potvrzená → řádek s časem. */}
+        {potvrzeniSmeny?.mozePotvrdit && !zmenaKPotvrzeni ? (
+          <div className="ds-sm-zmena" role="status">
+            <p className="ds-sm-zmena-nadpis">Potvrďte směnu</p>
+            <p className="ds-sm-zmena-casy">Dejte vedoucímu vědět, že o téhle směně víte.</p>
+            <button
+              type="button"
+              className="ds-sm-tl ds-sm-tl-hlavni"
+              disabled={potvrzujeSmenu}
+              onClick={potvrditSvouSmenu}
+            >
+              {potvrzujeSmenu ? "Potvrzuji…" : "Potvrdit směnu"}
+            </button>
+            {chybaPotvrzeni ? <p className="hlaska-chyba">{chybaPotvrzeni}</p> : null}
+          </div>
+        ) : null}
+        {potvrzeniSmeny?.jeMoje && potvrzeniSmeny.stav === "potvrzeno" && !(moje && moje.druh === "smena.zmenena") ? (
+          <p className="ds-sm-zmena-ok">
+            <Ikona klic="fajfka" velikost={16} />
+            Směna potvrzena{potvrzeniSmeny.potvrzeno_at ? ` ${datumACasVPasmu(potvrzeniSmeny.potvrzeno_at)}` : ""}
+          </p>
+        ) : null}
+
+        <div className="ds-sm-detail-osoba">          <AvatarM osoba={osoba} velikost="v" />
           <div className="ds-sm-detail-osoba-text">
             <p className="ds-sm-detail-jmeno">{jmeno}</p>
             {misto ? <p className="ds-sm-mista">{misto}</p> : null}

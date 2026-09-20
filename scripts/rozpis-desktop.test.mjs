@@ -32,8 +32,7 @@ import {
   denKratce,
   hodinyStruc,
   jeFiltrPrazdny,
-  jePotvrzena,
-  oknoPotvrzeniSeVejde,
+  potvrzeniPlatne,
   jmenoVyhovuje,
   kratkyCas,
   normalizuj,
@@ -146,65 +145,75 @@ je('čeká na vydání: vydaná ne', cekaNaVydani(smena('2026-09-22', 'a', '08:0
 console.log('\n== Puntík: červený / žlutý / zelený ==')
 /*
   Puntík u času směny (Šéfík 20. 9. 2026): červený = nevydáno, žlutý = vydáno
-  a nepotvrzeno, zelený = vydáno a potvrzeno. Potvrzení pochází z upozornění
-  (`stav_potvrzeni_smen`); když se nenačetlo, vydaná směna puntík nemá.
+  a nepotvrzeno, zelený = vydáno a potvrzeno. „Potvrzeno“ je skutečné
+  potvrzení zaměstnancem (`smeny_potvrzeni`) a platí, jen dokud se směna
+  shoduje s tím, co člověk potvrdil.
 */
-const potv = (smeny, podleSmeny, pobocky = ['b1']) => ({
-  pobocky,
-  podleSmeny: Object.fromEntries(smeny.map((s, i) => [s.id, podleSmeny[i]]).filter(([, p]) => p)),
+const DNES = '2026-09-22'
+const potvrzeniK = (s, prepis = {}) => ({
+  shift_id: s.id,
+  employee_id: s.employee_id,
+  shift_date: s.shift_date,
+  starts_at: s.starts_at,
+  ends_at: s.ends_at,
+  pauza_od: s.pauza_od,
+  pauza_do: s.pauza_do,
+  confirmed_at: '2026-09-18T08:00:00Z',
+  ...prepis,
 })
-const nova = { druh: 'smena.nova', precteno_at: null, potvrzeno_at: null }
-const vydana1 = smena('2026-09-22', 'a', '08:00', '16:00')
-const vydana2 = smena('2026-09-23', 'a', '08:00', '16:00')
-const vydana3 = smena('2026-09-24', 'a', '08:00', '16:00')
-const vydana4 = smena('2026-09-25', 'a', '08:00', '16:00')
-const vseVydane = [vydana1, vydana2, vydana3, vydana4]
-const okno = potv(vseVydane, [
-  { druh: 'smena.nova', precteno_at: '2026-09-18T08:00:00Z', potvrzeno_at: null }, // přečtená nová
-  { druh: 'smena.zmenena', precteno_at: '2026-09-18T08:00:00Z', potvrzeno_at: null }, // změna přečtená, nepotvrzená
-  { druh: 'smena.zmenena', precteno_at: '2026-09-18T08:00:00Z', potvrzeno_at: '2026-09-18T08:05:00Z' }, // změna potvrzená
-  undefined, // upozornění neexistuje
-])
+const okno = (smeny, { pobocky = ['b1'], bezUctu = [] } = {}) => potvrzeniZRadku(smeny, pobocky, bezUctu)
+
+const v1 = smena('2026-09-23', 'a', '08:00', '16:00')
+const v2 = smena('2026-09-24', 'a', '08:00', '16:00')
+const mAno = okno([potvrzeniK(v1)])
+
 je('nevydaná (koncept) směna: červený, ať je potvrzení jakékoli',
-  [puntikSmeny(koncept('2026-09-22', 'a', '08:00', '16:00'), okno), puntikSmeny(koncept('2026-09-22', 'a', '08:00', '16:00'), null)], ['nevydano', 'nevydano'])
-je('nevydaná neobsazená směna: taky červený (je to ještě koncept)', puntikSmeny(koncept('2026-09-22', null, '08:00', '16:00'), okno), 'nevydano')
+  [puntikSmeny(koncept('2026-09-23', 'a', '08:00', '16:00'), mAno, DNES), puntikSmeny(koncept('2026-09-23', 'a', '08:00', '16:00'), null, DNES)], ['nevydano', 'nevydano'])
+je('nevydaná neobsazená směna: taky červený (je to ještě koncept)', puntikSmeny(koncept('2026-09-23', null, '08:00', '16:00'), mAno, DNES), 'nevydano')
 je('vydaná a po vydání změněná: červený (lidé mají starou verzi), i když starou potvrdili',
-  puntikSmeny(smena('2026-09-22', 'a', '10:00', '18:00', { published_starts_at: '08:00:00', published_ends_at: '16:00:00' }), okno), 'nevydano')
-je('zrušená a vrácená (published_status cancelled): červený', puntikSmeny(smena('2026-09-22', 'a', '08:00', '16:00', { published_status: 'cancelled' }), okno), 'nevydano')
-je('vydaná, nová směna přečtená: zelený (žádné tlačítko k potvrzení nemá, bere se přečtení)', puntikSmeny(vydana1, okno), 'potvrzeno')
-je('vydaná, změna jen přečtená, ne potvrzená: žlutý', puntikSmeny(vydana2, okno), 'nepotvrzeno')
-je('vydaná, změna potvrzená: zelený', puntikSmeny(vydana3, okno), 'potvrzeno')
-je('vydaná, upozornění k ní není: žlutý (nikdo nepotvrdil)', puntikSmeny(vydana4, okno), 'nepotvrzeno')
-je('vydaná, nová směna, člověk ji zatím nepřečetl: žlutý', puntikSmeny(vydana1, potv([vydana1], [nova])), 'nepotvrzeno')
+  puntikSmeny(smena('2026-09-23', 'a', '10:00', '18:00', { published_starts_at: '08:00:00', published_ends_at: '16:00:00' }), okno([potvrzeniK(v1)]), DNES), 'nevydano')
+je('zrušená a vrácená (published_status cancelled): červený', puntikSmeny(smena('2026-09-23', 'a', '08:00', '16:00', { published_status: 'cancelled' }), mAno, DNES), 'nevydano')
+je('vydaná a potvrzená: zelený', puntikSmeny(v1, mAno, DNES), 'potvrzeno')
+je('vydaná, potvrzení k ní není: žlutý', puntikSmeny(v2, mAno, DNES), 'nepotvrzeno')
 je('vydaná: potvrzení se nenačetlo (null / undefined) → žádný puntík, „nepotvrzeno“ se nevymýšlí',
-  [puntikSmeny(vydana1, null), puntikSmeny(vydana1, undefined)], [null, null])
-je('vydaná směna z pobočky, za kterou se potvrzení nenačítá (vedoucí tam neplánuje) → žádný puntík',
-  puntikSmeny(vydana1, potv([vydana1], [nova], ['b2'])), null)
-je('… ale koncept z takové pobočky je pořád červený (to ví každý)', puntikSmeny(koncept('2026-09-22', 'a', '08:00', '16:00'), potv([], [], ['b2'])), 'nevydano')
-je('vydaná neobsazená směna: žádný puntík, není komu ji potvrdit', puntikSmeny(smena('2026-09-22', null, '08:00', '16:00'), potv([vydana1], [nova])), null)
-je('jePotvrzena: potvrzení má přednost i u druhu, který ho nevyžaduje', jePotvrzena({ druh: 'smena.nova', precteno_at: null, potvrzeno_at: '2026-09-18T08:00:00Z' }), true)
-je('jePotvrzena: zrušení (vyžaduje potvrzení) samo přečtením potvrzené není', jePotvrzena({ druh: 'smena.zrusena', precteno_at: '2026-09-18T08:00:00Z', potvrzeno_at: null }), false)
+  [puntikSmeny(v1, null, DNES), puntikSmeny(v1, undefined, DNES)], [null, null])
+je('žádné potvrzení (nikdo nic nepotvrdil) není totéž co „nenačteno“: vydaná je žlutá, ne bez puntíku',
+  [puntikSmeny(v1, okno([]), DNES), puntikSmeny(v1, null, DNES)], ['nepotvrzeno', null])
+je('vydaná směna z pobočky, za kterou se potvrzení nečtou (vedoucí tam neplánuje) → žádný puntík',
+  puntikSmeny(v1, okno([potvrzeniK(v1)], { pobocky: ['b2'] }), DNES), null)
+je('… ale koncept z takové pobočky je pořád červený (to ví každý)', puntikSmeny(koncept('2026-09-23', 'a', '08:00', '16:00'), okno([], { pobocky: ['b2'] }), DNES), 'nevydano')
+je('vydaná neobsazená směna: žádný puntík, není komu ji potvrdit', puntikSmeny(smena('2026-09-23', null, '08:00', '16:00'), okno([]), DNES), null)
+je('vydaná směna zaměstnance bez účtu: žádný puntík (nemá jak potvrdit), ne věčně žlutý',
+  [puntikSmeny(v2, okno([], { bezUctu: ['a'] }), DNES), puntikSmeny(v2, okno([], { bezUctu: ['jiny'] }), DNES)], [null, 'nepotvrzeno'])
+je('žlutý se u směn v minulosti nekreslí, dnešek a budoucnost ano',
+  [puntikSmeny(smena('2026-09-21', 'a', '08:00', '16:00'), okno([]), DNES), puntikSmeny(smena('2026-09-22', 'a', '08:00', '16:00'), okno([]), DNES)],
+  [null, 'nepotvrzeno'])
+je('… a potvrzená směna v minulosti je zelená',
+  (() => { const m = smena('2026-09-21', 'a', '08:00', '16:00'); return puntikSmeny(m, okno([potvrzeniK(m)]), DNES) })(), 'potvrzeno')
+
+// Platnost: potvrzení nese opis směny a platí, jen dokud se směna s ním shoduje.
+const zmen = (prepis) => puntikSmeny({ ...v1, ...prepis }, mAno, DNES)
+je('potvrzení přestane platit po změně času (i když ještě není znovu vydáno): začátek, konec, den, pauza, člověk',
+  [zmen({ starts_at: '09:00:00', published_starts_at: '09:00:00' }), zmen({ ends_at: '17:00:00', published_ends_at: '17:00:00' }),
+   zmen({ shift_date: '2026-09-25' }), zmen({ pauza_od: '12:00:00', pauza_do: '13:00:00' }),
+   zmen({ employee_id: 'b', published_employee_id: 'b' })],
+  ['nepotvrzeno', 'nepotvrzeno', 'nepotvrzeno', 'nepotvrzeno', 'nepotvrzeno'])
+je('pauza: změna jen začátku, nebo jen konce pauzy potvrzení zneplatní (každá zvlášť)',
+  [zmen({ pauza_od: '12:00:00' }), zmen({ pauza_do: '13:00:00' })], ['nepotvrzeno', 'nepotvrzeno'])
+je('… a vrátí-li se změna zpátky, potvrzení platí zas (vydaná směna, opis sedí)', zmen({}), 'potvrzeno')
+je('čas se porovnává jako čas, ne jako text: „08:00“ a „08:00:00“ je totéž',
+  puntikSmeny({ ...v1, starts_at: '08:00' }, mAno, DNES), 'potvrzeno')
+je('potvrzení jiného člověka (směna se po potvrzení přeřadila) neplatí ani při shodných časech',
+  puntikSmeny({ ...v1, employee_id: 'b', published_employee_id: 'b' }, okno([potvrzeniK(v1)]), DNES), 'nepotvrzeno')
+je('po přeřazení: platí potvrzení toho, kdo směnu má teď (řádky jsou dva, od dvou lidí)',
+  puntikSmeny({ ...v1, employee_id: 'b', published_employee_id: 'b' }, okno([potvrzeniK(v1), potvrzeniK(v1, { employee_id: 'b' })]), DNES), 'potvrzeno')
+je('potvrzeniPlatne: bez záznamu nebo bez člověka na směně neplatí', [potvrzeniPlatne(v1, null), potvrzeniPlatne(v1, undefined), potvrzeniPlatne({ ...v1, employee_id: null }, potvrzeniK(v1))], [false, false, false])
 je('slova k puntíkům (legenda, title, odečítač) mají jediné místo',
   [POPIS_PUNTIKU.nevydano, POPIS_PUNTIKU.nepotvrzeno, POPIS_PUNTIKU.potvrzeno], ['Nevydáno', 'Vydáno, nepotvrzeno', 'Vydáno a potvrzeno'])
-je('všechny tři barvy se opravdu dají dostat', [...new Set([vydana1, vydana2, koncept('2026-09-22', 'a', '08:00', '16:00')].map((s) => puntikSmeny(s, okno)))].sort(), ['nepotvrzeno', 'nevydano', 'potvrzeno'])
-
-// Načtení: řádky z databáze → potvrzení okna (čistá část; volání funkce je v page.tsx).
-const radkyDb = [
-  { smena_id: vydana1.id, druh: 'smena.nova', precteno_at: '2026-09-18T08:00:00Z', potvrzeno_at: null },
-  { smena_id: vydana2.id, druh: 'smena.zmenena', precteno_at: null, potvrzeno_at: undefined },
-]
-const zDb = potvrzeniZRadku(radkyDb, ['b1'])
-je('řádky z databáze se podle id směny přeloží na potvrzení okna (chybějící čas = null, ne undefined)',
-  [Object.keys(zDb.podleSmeny).length, zDb.pobocky, zDb.podleSmeny[vydana2.id]],
-  [2, ['b1'], { druh: 'smena.zmenena', precteno_at: null, potvrzeno_at: null }])
-je('… a z toho puntíky: přečtená nová = zelený, změna bez přečtení = žlutý, bez upozornění = žlutý',
-  [puntikSmeny(vydana1, zDb), puntikSmeny(vydana2, zDb), puntikSmeny(vydana3, zDb)], ['potvrzeno', 'nepotvrzeno', 'nepotvrzeno'])
-je('žádné řádky (nikdo nic nepotvrdil) není totéž co „nenačteno“: vydaná je žlutá, ne bez puntíku',
-  [puntikSmeny(vydana1, potvrzeniZRadku([], ['b1'])), puntikSmeny(vydana1, null)], ['nepotvrzeno', null])
-je('okno, které databáze vezme (do 93 dní): měsíc ano, přesně 93 dní ano',
-  [oknoPotvrzeniSeVejde('2026-08-31', '2026-10-11'), oknoPotvrzeniSeVejde('2026-09-01', '2026-12-02')], [true, true])
-je('… o den delší ne; obrácené okno a nesmysl ne',
-  [oknoPotvrzeniSeVejde('2026-09-01', '2026-12-03'), oknoPotvrzeniSeVejde('2026-10-01', '2026-09-01'), oknoPotvrzeniSeVejde('x', 'y')], [false, false, false])
+je('všechny tři barvy se opravdu dají dostat', [...new Set([v1, v2, koncept('2026-09-23', 'a', '08:00', '16:00')].map((s) => puntikSmeny(s, mAno, DNES)))].sort(), ['nepotvrzeno', 'nevydano', 'potvrzeno'])
+je('řádky z databáze se seskupí podle id směny, včetně pobočky a lidí bez účtu',
+  [Object.keys(okno([potvrzeniK(v1), potvrzeniK(v1, { employee_id: 'b' }), potvrzeniK(v2)]).podleSmeny).length, okno([potvrzeniK(v1), potvrzeniK(v1, { employee_id: 'b' })]).podleSmeny[v1.id].length, okno([], { bezUctu: ['x'] }).bezUctu],
+  [2, 2, ['x']])
 
 console.log('\n== Původní stav („Změněno“) ==')
 const zmenena = smena('2026-09-23', 'a', '10:00', '18:00', { published_starts_at: '08:00:00', published_ends_at: '16:00:00' })

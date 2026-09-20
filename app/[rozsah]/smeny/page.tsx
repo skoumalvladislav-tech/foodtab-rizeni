@@ -301,25 +301,13 @@ export default async function Rozpis({
     )
   ).filter((b): b is { id: string; nazev: string } => b !== null);
 
-  const [smeny, mojeSmeny, zrusene, potvrzeni] = await Promise.all([
+  const [smeny, mojeSmeny, zrusene] = await Promise.all([
     nactiSmeny(nacistOd, nacistDo),
     jaId ? nactiSmeny(mojeOd, mojeDo, jaId) : Promise.resolve([] as Smena[]),
     // Zrušené po vydání zajímají jen toho, kdo rozpis vydává.
     pobockyProPlanovani.length > 0
       ? nactiSmeny(odKdy, doKdy, undefined, true)
       : Promise.resolve([] as Smena[]),
-    /*
-      Kdo směny potvrdil (puntík u času: žlutý × zelený). Stejně jako zrušené
-      je to věc toho, kdo rozpis vydává; `null` = neplánuje, nebo databáze
-      funkci ještě nemá — vydané směny pak puntík nemají.
-    */
-    nactiPotvrzeniOkna(
-      supabase,
-      tenantId,
-      pobockyProPlanovani.map((b) => b.id),
-      nacistOd,
-      nacistDo,
-    ),
   ]);
 
   // Jména lidí a názvy pozic. Neobsazená směna nemá employee_id — ta se
@@ -376,6 +364,20 @@ export default async function Rozpis({
       ucty.set(c.id as string, (c.user_id as string | null) ?? null);
     }
   }
+
+  /*
+    Kdo směny potvrdil (puntík u času: žlutý × zelený). Stejně jako zrušené je
+    to věc toho, kdo rozpis vydává; `null` = neplánuje, nebo se čtení nepovedlo
+    (tabulka ještě není v databázi) — vydané směny pak puntík nemají. Lidé bez
+    účtu potvrdit nemůžou, těm se puntík vydaných směn nekreslí.
+  */
+  const potvrzeni = await nactiPotvrzeniOkna(
+    supabase,
+    pobockyProPlanovani.map((b) => b.id),
+    [...ucty].filter(([, ucet]) => ucet === null).map(([id]) => id),
+    nacistOd,
+    nacistDo,
+  );
 
   const idPozic = [
     ...new Set(

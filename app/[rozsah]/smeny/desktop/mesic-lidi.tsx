@@ -207,7 +207,7 @@ function KartaMesice({
                         jmena={jmena}
                         vybrana={vybranaId === s.id}
                         klikaci={planovani !== null}
-                        puntik={puntikSmeny(s, potvrzeni)}
+                        puntik={puntikSmeny(s, potvrzeni, dnesni)}
                         kompaktni
                         onOtevrit={() => onOtevrit({ den: d.den, smena: s as Smena })}
                       />
