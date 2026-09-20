@@ -194,6 +194,9 @@ export const NASTAVENI: Polozka[] = [
   { segment: 'nastaveni/firma', nazev: 'Firma', kratky: 'Firma', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/pobocky', nazev: 'Pobočky', kratky: 'Pobočky', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },
   { segment: 'nastaveni/lide', nazev: 'Lidé', kratky: 'Lidé', modul: 'provoz', pravo: 'people.manage', hotovo: true, ikona: 'clovek' },
+  // Směny — nastavení celého modulu (co se nabízí při přidání směny) a rozcestník
+  // k ostatním nastavením kolem směn. settings.manage jako u Šablon a Úseků.
+  { segment: 'nastaveni/smeny', nazev: 'Směny', kratky: 'Směny', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kalendar' },
   // Šablony směn — pojmenované směny s časy (D, N, R). Je to nastavení
   // provozu, ne správa lidí, proto settings.manage. Vidět je má i ten,
   // kdo plánuje směny, ale měnit je smí správa nastavení; kdo jen
