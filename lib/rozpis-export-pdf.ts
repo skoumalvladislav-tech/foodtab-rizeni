@@ -23,24 +23,41 @@
 import { jeVikend } from './rozpis-mobil.ts'
 import {
   hodinyCislem,
-  jmenaNalezato,
   pauzaKratce,
   popisDne,
-  radkyDoSirky,
-  rozdelitLidi,
   vetyPoznamky,
   zalomitVety,
-  type DilSmeny,
   type ExportMesice,
   type PobockaExportu,
   type SloupecExportu,
 } from './rozpis-export.ts'
+import {
+  A4_SIRKA,
+  A4_VYSKA,
+  DEN_SIRKA,
+  DOLNI_HRANICE,
+  F_JMENO,
+  F_POZICE,
+  OKRAJ,
+  PATA_STRANKY,
+  RADEK,
+  RADEK_POZICE,
+  RADEK_ZAHLAVI,
+  VYSKA_POZNAMEK_MAX,
+  ZACATEK_OBSAHU,
+  nalezato,
+  radkyZahlavi,
+  velikosti,
+  vyberRozlozeni,
+  vyskaBunky,
+  vyskaDne,
+  vyskaSouctu,
+  vyskaZahlavi,
+} from './rozpis-rozlozeni.ts'
 import { sirkaTextu, StrankaPdf, zapsatPdf, zkratitText, type Barva } from './pdf-zapis.ts'
 
-/** A4 na výšku v bodech (1 bod = 1/72″). */
-export const A4_SIRKA = 595
-export const A4_VYSKA = 842
-export const OKRAJ = 28
+// Rozměry stránky a dělení lidí jsou ve sdíleném modulu; tady zůstává jen kreslení.
+export { A4_SIRKA, A4_VYSKA, DOLNI_HRANICE, OKRAJ, vyberRozlozeni }
 
 const CERNA: Barva = [0.09, 0.1, 0.11]
 const SEDA: Barva = [0.42, 0.44, 0.47]
@@ -49,151 +66,11 @@ const HLAVICKA: Barva = [0.93, 0.92, 0.9]
 const SKUPINA: Barva = [0.96, 0.95, 0.94]
 const VIKEND: Barva = [0.98, 0.94, 0.85]
 
-/** Kde končí záhlaví stránky (nadpis měsíce) a kde začíná tabulka. */
-const ZACATEK_OBSAHU = OKRAJ + 24
-const PATA_STRANKY = 18
-/** Nejníž, kam smí sahat tabulka a poznámky; pod tím je zápatí. */
-export const DOLNI_HRANICE = A4_VYSKA - OKRAJ - PATA_STRANKY
-
-const DEN_SIRKA = 34
-/** Největší a nejmenší písmo času směny. Pod 6 bodů se lidé dělí na víc stránek. */
-const F_MAX = 9
-const F_MIN = 6
-const F_JMENO = 7
-const F_POZICE = 5.5
 const F_POZNAMKY = 6.5
 const RADEK_POZNAMKY = 8.2
-const VYSKA_POZNAMEK_MAX = 34
 
 /** Minuty jako české číslo hodin: 1890 → „31,5“, 480 → „8“. */
 const hod = (minut: number) => String(hodinyCislem(minut)).replace('.', ',')
-
-type Velikosti = { cas: number; pobocka: number; pauza: number; den: number }
-const velikosti = (f: number): Velikosti => ({
-  cas: f,
-  pobocka: Math.max(4.5, f * 0.85),
-  pauza: Math.max(4.5, f * 0.8),
-  den: Math.min(f, 8),
-})
-const RADEK = 1.3 // mezera pod řádkem textu
-
-const vyskaSouctu = (f: number) => f + 6
-
-const RADEK_ZAHLAVI = 8
-const RADEK_POZICE = 6.5
-
-/**
- * Vejdou se jména do sloupce naležato (po slovech na nejvýš tři řádky)?
- * Pak se nic neotáčí — vodorovné jméno se čte samo a záhlaví je nižší,
- * takže na stránku zbude víc místa (Šéfík 20. 9. 2026).
- */
-function nalezato(lide: SloupecExportu[], sirkaSloupce: number): boolean {
-  return jmenaNalezato(lide, (t) => sirkaTextu(t, F_JMENO, 'tucne') <= sirkaSloupce - 5)
-}
-
-/** Řádky jména (a pozice) pod sebou; prázdné, když se to má otočit. */
-function radkyZahlavi(c: SloupecExportu, sirkaSloupce: number): { jmeno: string[]; pozice: string[] } {
-  const vejde = (t: string) => sirkaTextu(t, F_JMENO, 'tucne') <= sirkaSloupce - 5
-  return {
-    jmeno: radkyDoSirky(c.jmeno, vejde) ?? [],
-    pozice: c.pozice ? (radkyDoSirky(c.pozice, (t) => sirkaTextu(t, F_POZICE) <= sirkaSloupce - 5) ?? []) : [],
-  }
-}
-
-/** Výška záhlaví: naležato podle počtu řádků, otočené podle nejdelšího jména. */
-function vyskaZahlavi(lide: SloupecExportu[], sirkaSloupce: number): number {
-  if (nalezato(lide, sirkaSloupce)) {
-    const radku = Math.max(
-      1,
-      ...lide.map((c) => {
-        const r = radkyZahlavi(c, sirkaSloupce)
-        return r.jmeno.length + r.pozice.length
-      }),
-    )
-    return Math.max(22, radku * RADEK_ZAHLAVI + 8)
-  }
-  const nejdelsi = Math.max(0, ...lide.map((c) => Math.max(sirkaTextu(c.jmeno, F_JMENO, 'tucne'), sirkaTextu(c.pozice, F_POZICE))))
-  return Math.min(96, Math.max(44, nejdelsi + 8))
-}
-
-/** Výška buňky = řádky času, pobočky a pauzy všech směn dne. */
-function vyskaBunky(dily: DilSmeny[], v: Velikosti, sPobockou: boolean): number {
-  return dily.reduce((h, d) => h + v.cas + RADEK + (sPobockou && d.pobocka ? v.pobocka + RADEK : 0) + (d.pauza ? v.pauza + RADEK : 0), 0)
-}
-
-/** Výška dne = nejvyšší buňka toho dne (+ vzduch); nejméně jeden řádek. */
-function vyskaDne(den: string, lide: SloupecExportu[], v: Velikosti, sPobockou: boolean): number {
-  const nej = Math.max(0, ...lide.map((c) => vyskaBunky(c.podleDne.get(den) ?? [], v, sPobockou)))
-  return Math.max(v.cas + 4.5, nej + 3)
-}
-
-export type Rozlozeni = {
-  /** Lidé po stránkách; každá část má celý měsíc. */
-  casti: SloupecExportu[][]
-  /** Písmo času směny v bodech. */
-  f: number
-  sirkaSloupce: number
-}
-
-/**
- * Vybere počet stránek a písmo. Možnosti jsou dvě a vyhrává ta, která dá
- * míň papíru:
- *
- *   A) lidé se rozdělí na části a každá se svým celým měsícem vyjde na
- *      jednu stránku (s co největším písmem); zkouší se 1, 2, 3… části,
- *   B) lidé zůstanou pohromadě (nejméně částí, na které se při nejmenším
- *      písmu vejde šířka) a měsíc se lámá na další stránku.
- *
- * Výška se měří pro každou část zvlášť — s méně lidmi bývá řádek nižší.
- */
-export function vyberRozlozeni(m: ExportMesice): Rozlozeni {
-  const lide = m.sloupce
-  const sirkaObsahu = A4_SIRKA - 2 * OKRAJ
-  let nejsirsiCas = 0 // šířka nejdelšího času při písmu 1 bod
-  for (const c of lide) {
-    for (const dily of c.podleDne.values()) {
-      for (const d of dily) nejsirsiCas = Math.max(nejsirsiCas, sirkaTextu(`${d.kratce}${d.nevydana ? '*' : ''}`, 1))
-    }
-  }
-  const dostupna = DOLNI_HRANICE - ZACATEK_OBSAHU
-  const pocetLidi = Math.max(1, lide.length)
-  const sirkaPro = (naStranu: number) => (sirkaObsahu - DEN_SIRKA) / naStranu
-  const vyskaCasti = (cast: SloupecExportu[], f: number, sirkaSloupce: number) => {
-    const v = velikosti(f)
-    return (
-      vyskaZahlavi(cast, sirkaSloupce) +
-      m.dny.reduce((k, den) => k + vyskaDne(den, cast, v, m.vicePobocek), 0) +
-      vyskaSouctu(f) +
-      VYSKA_POZNAMEK_MAX
-    )
-  }
-  const rozdel = (pocetCasti: number) => rozdelitLidi(lide, Math.ceil(lide.length / pocetCasti))
-  const nejvicVCasti = (casti: SloupecExportu[][]) => Math.max(...casti.map((c) => c.length), 1)
-
-  // A) každá část s celým měsícem na jedné stránce.
-  let a: (Rozlozeni & { stranek: number }) | null = null
-  for (let pocetCasti = 1; pocetCasti <= pocetLidi && !a; pocetCasti++) {
-    const casti = rozdel(pocetCasti)
-    const sirkaSloupce = sirkaPro(nejvicVCasti(casti))
-    for (let f = F_MAX; f >= F_MIN - 1e-9; f -= 0.5) {
-      if (nejsirsiCas * f + 3 > sirkaSloupce) continue
-      if (casti.every((cast) => vyskaCasti(cast, f, sirkaSloupce) <= dostupna)) {
-        a = { casti, f, sirkaSloupce, stranek: casti.length }
-        break
-      }
-    }
-  }
-
-  // B) lidé pohromadě, měsíc se láme na další stránku.
-  let pocetCastiB = 1
-  while (pocetCastiB < pocetLidi && nejsirsiCas * F_MIN + 3 > sirkaPro(nejvicVCasti(rozdel(pocetCastiB)))) pocetCastiB++
-  const castiB = rozdel(pocetCastiB)
-  const sirkaB = sirkaPro(nejvicVCasti(castiB))
-  const stranekB = castiB.reduce((k, cast) => k + Math.max(1, Math.ceil(vyskaCasti(cast, F_MIN, sirkaB) / dostupna)), 0)
-
-  if (a && a.stranek <= stranekB) return a
-  return { casti: castiB, f: F_MIN, sirkaSloupce: sirkaPro(nejvicVCasti(castiB)) }
-}
 
 export function pdfZExportu(m: ExportMesice): Uint8Array {
   const stranky: StrankaPdf[] = []
