@@ -23,8 +23,10 @@
 import { jeVikend } from './rozpis-mobil.ts'
 import {
   hodinyCislem,
+  jmenaNalezato,
   pauzaKratce,
   popisDne,
+  radkyDoSirky,
   rozdelitLidi,
   vetyPoznamky,
   zalomitVety,
@@ -77,8 +79,39 @@ const RADEK = 1.3 // mezera pod řádkem textu
 
 const vyskaSouctu = (f: number) => f + 6
 
-/** Výška záhlaví: podle nejdelšího otočeného jména (nebo pozice), ale v mezích. */
-function vyskaZahlavi(lide: SloupecExportu[]): number {
+const RADEK_ZAHLAVI = 8
+const RADEK_POZICE = 6.5
+
+/**
+ * Vejdou se jména do sloupce naležato (po slovech na nejvýš tři řádky)?
+ * Pak se nic neotáčí — vodorovné jméno se čte samo a záhlaví je nižší,
+ * takže na stránku zbude víc místa (Šéfík 20. 9. 2026).
+ */
+function nalezato(lide: SloupecExportu[], sirkaSloupce: number): boolean {
+  return jmenaNalezato(lide, (t) => sirkaTextu(t, F_JMENO, 'tucne') <= sirkaSloupce - 5)
+}
+
+/** Řádky jména (a pozice) pod sebou; prázdné, když se to má otočit. */
+function radkyZahlavi(c: SloupecExportu, sirkaSloupce: number): { jmeno: string[]; pozice: string[] } {
+  const vejde = (t: string) => sirkaTextu(t, F_JMENO, 'tucne') <= sirkaSloupce - 5
+  return {
+    jmeno: radkyDoSirky(c.jmeno, vejde) ?? [],
+    pozice: c.pozice ? (radkyDoSirky(c.pozice, (t) => sirkaTextu(t, F_POZICE) <= sirkaSloupce - 5) ?? []) : [],
+  }
+}
+
+/** Výška záhlaví: naležato podle počtu řádků, otočené podle nejdelšího jména. */
+function vyskaZahlavi(lide: SloupecExportu[], sirkaSloupce: number): number {
+  if (nalezato(lide, sirkaSloupce)) {
+    const radku = Math.max(
+      1,
+      ...lide.map((c) => {
+        const r = radkyZahlavi(c, sirkaSloupce)
+        return r.jmeno.length + r.pozice.length
+      }),
+    )
+    return Math.max(22, radku * RADEK_ZAHLAVI + 8)
+  }
   const nejdelsi = Math.max(0, ...lide.map((c) => Math.max(sirkaTextu(c.jmeno, F_JMENO, 'tucne'), sirkaTextu(c.pozice, F_POZICE))))
   return Math.min(96, Math.max(44, nejdelsi + 8))
 }
@@ -125,10 +158,10 @@ export function vyberRozlozeni(m: ExportMesice): Rozlozeni {
   const dostupna = DOLNI_HRANICE - ZACATEK_OBSAHU
   const pocetLidi = Math.max(1, lide.length)
   const sirkaPro = (naStranu: number) => (sirkaObsahu - DEN_SIRKA) / naStranu
-  const vyskaCasti = (cast: SloupecExportu[], f: number) => {
+  const vyskaCasti = (cast: SloupecExportu[], f: number, sirkaSloupce: number) => {
     const v = velikosti(f)
     return (
-      vyskaZahlavi(cast) +
+      vyskaZahlavi(cast, sirkaSloupce) +
       m.dny.reduce((k, den) => k + vyskaDne(den, cast, v, m.vicePobocek), 0) +
       vyskaSouctu(f) +
       VYSKA_POZNAMEK_MAX
@@ -144,7 +177,7 @@ export function vyberRozlozeni(m: ExportMesice): Rozlozeni {
     const sirkaSloupce = sirkaPro(nejvicVCasti(casti))
     for (let f = F_MAX; f >= F_MIN - 1e-9; f -= 0.5) {
       if (nejsirsiCas * f + 3 > sirkaSloupce) continue
-      if (casti.every((cast) => vyskaCasti(cast, f) <= dostupna)) {
+      if (casti.every((cast) => vyskaCasti(cast, f, sirkaSloupce) <= dostupna)) {
         a = { casti, f, sirkaSloupce, stranek: casti.length }
         break
       }
@@ -155,7 +188,8 @@ export function vyberRozlozeni(m: ExportMesice): Rozlozeni {
   let pocetCastiB = 1
   while (pocetCastiB < pocetLidi && nejsirsiCas * F_MIN + 3 > sirkaPro(nejvicVCasti(rozdel(pocetCastiB)))) pocetCastiB++
   const castiB = rozdel(pocetCastiB)
-  const stranekB = castiB.reduce((k, cast) => k + Math.max(1, Math.ceil(vyskaCasti(cast, F_MIN) / dostupna)), 0)
+  const sirkaB = sirkaPro(nejvicVCasti(castiB))
+  const stranekB = castiB.reduce((k, cast) => k + Math.max(1, Math.ceil(vyskaCasti(cast, F_MIN, sirkaB) / dostupna)), 0)
 
   if (a && a.stranek <= stranekB) return a
   return { casti: castiB, f: F_MIN, sirkaSloupce: sirkaPro(nejvicVCasti(castiB)) }
@@ -197,14 +231,42 @@ export function pdfZExportu(m: ExportMesice): Uint8Array {
     return ZACATEK_OBSAHU
   }
 
-  /* --- záhlaví tabulky: „Den“ a otočená jména ---------------------------- */
+  /* --- záhlaví tabulky: „Den“ a jména (naležato, nebo otočená) ----------- */
+
+  const jmenaVodorovne = nalezato(m.sloupce, sirkaSloupce)
 
   const kresliZahlavi = (cast: SloupecExportu[], y: number, vyska: number): number => {
     s.obdelnik(OKRAJ, y, DEN_SIRKA, vyska, { vypln: HLAVICKA, ramecek: LINKA })
-    s.text('Den', OKRAJ + DEN_SIRKA / 2, y + vyska - 4, { velikost: 7, pismo: 'tucne', barva: CERNA, zarovnani: 'c' })
+    s.text('Den', OKRAJ + DEN_SIRKA / 2, jmenaVodorovne ? y + vyska / 2 + 2.5 : y + vyska - 4, {
+      velikost: 7,
+      pismo: 'tucne',
+      barva: CERNA,
+      zarovnani: 'c',
+    })
     cast.forEach((c, i) => {
       const x = OKRAJ + DEN_SIRKA + i * sirkaSloupce
       s.obdelnik(x, y, sirkaSloupce, vyska, { vypln: HLAVICKA, ramecek: LINKA })
+
+      if (jmenaVodorovne) {
+        const { jmeno, pozice } = radkyZahlavi(c, sirkaSloupce)
+        const vysokyBlok = jmeno.length * RADEK_ZAHLAVI + pozice.length * RADEK_POZICE
+        let radek = y + (vyska - vysokyBlok) / 2
+        for (const r of jmeno) {
+          s.text(r, x + sirkaSloupce / 2, radek + RADEK_ZAHLAVI - 2, {
+            velikost: F_JMENO,
+            pismo: 'tucne',
+            barva: CERNA,
+            zarovnani: 'c',
+          })
+          radek += RADEK_ZAHLAVI
+        }
+        for (const r of pozice) {
+          s.text(r, x + sirkaSloupce / 2, radek + RADEK_POZICE - 1.5, { velikost: F_POZICE, barva: SEDA, zarovnani: 'c' })
+          radek += RADEK_POZICE
+        }
+        return
+      }
+
       // Otočený text: účaří je svislá čára, písmena jsou nalevo od ní. Jméno a pod ním (vpravo) pozice.
       const sirkaBloku = F_JMENO * 0.93 + (c.pozice ? F_POZICE * 0.93 + 1.7 : 0)
       const x1 = x + (sirkaSloupce - sirkaBloku) / 2 + F_JMENO * 0.72
@@ -306,7 +368,7 @@ export function pdfZExportu(m: ExportMesice): Uint8Array {
   } else {
     rozlozeni.casti.forEach((cast) => {
       let y = novaStranka(cast, rozlozeni.casti.length)
-      const zahlavi = vyskaZahlavi(cast)
+      const zahlavi = vyskaZahlavi(cast, sirkaSloupce)
       y = kresliZahlavi(cast, y, zahlavi)
       for (const den of m.dny) {
         const vyska = vyskaDne(den, cast, v, m.vicePobocek)

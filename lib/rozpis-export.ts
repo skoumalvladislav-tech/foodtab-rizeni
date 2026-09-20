@@ -39,6 +39,7 @@
 
 import { cekaNaVydani, kratkyCas, zkratkyPobocek, type OsobaD, type SmenaD } from './rozpis-desktop.ts'
 import { denVTydnu, hhmm, jeVikend, minutSmeny, ZKRATKY_DNU } from './rozpis-mobil.ts'
+import { sirkaTextu } from './pdf-zapis.ts'
 import { STYL, textTisku, type BunkaXlsx, type ListXlsx } from './xlsx-zapis.ts'
 
 /* --- model ------------------------------------------------------------ */
@@ -273,6 +274,54 @@ export function vetyPoznamky(m: ExportMesice, pouziteZkratky: PobockaExportu[], 
   ]
 }
 
+/**
+ * Text zalomený na slovech do řádků, které se vejdou do šířky. Vrátí `null`,
+ * když se nevejde ani jedno slovo samo o sobě — takový text se musí otočit
+ * nebo zkrátit, na řádky ho rozsekat nejde.
+ */
+export function radkyDoSirky(text: string, vejde: (t: string) => boolean, nejvicRadku = 3): string[] | null {
+  // Mezera i spojovník jsou místa, kde se text smí zalomit: „Jirásková-Novotná“
+  // je jedno slovo, ale do úzkého sloupce se rozdělit dá — a spojovník zůstane
+  // na konci řádku, ať je poznat, že jméno pokračuje.
+  const slova = text
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap((w) => w.split(/(?<=-)/).filter(Boolean))
+  if (slova.length === 0) return []
+  if (slova.some((w) => !vejde(w))) return null
+  const radky: string[] = []
+  let aktualni = ''
+  for (const slovo of slova) {
+    const spojene = aktualni ? `${aktualni}${aktualni.endsWith('-') ? '' : ' '}${slovo}` : slovo
+    if (aktualni && !vejde(spojene)) {
+      radky.push(aktualni)
+      aktualni = slovo
+    } else {
+      aktualni = spojene
+    }
+  }
+  if (aktualni) radky.push(aktualni)
+  return radky.length <= nejvicRadku ? radky : null
+}
+
+/**
+ * Vejdou se VŠECHNA jména (a pozice) naležato? Buď je naležato celé záhlaví,
+ * nebo žádné — tabulka, kde je půlka jmen otočená a půlka ne, vypadá rozbitě.
+ * Naležato je čitelnější a záhlaví je nižší, takže má přednost, kdykoli to jde
+ * (Šéfík 20. 9. 2026).
+ */
+export function jmenaNalezato(
+  sloupce: { jmeno: string; pozice: string }[],
+  vejde: (t: string) => boolean,
+  nejvicRadku = 3,
+): boolean {
+  return sloupce.every(
+    (c) =>
+      radkyDoSirky(c.jmeno, vejde, nejvicRadku) !== null &&
+      (!c.pozice || radkyDoSirky(c.pozice, vejde, nejvicRadku) !== null),
+  )
+}
+
 /** Rozdělí lidi na co nejméně stejně velkých částí po nejvýš `nejvic`. */
 export function rozdelitLidi<T>(pole: T[], nejvic: number): T[][] {
   if (pole.length === 0) return [[]]
@@ -324,6 +373,14 @@ const VYSKA_DROBNE_XLSX = 10 // řádek písma 7 pt
 const SIRKA_DNE_XLSX = 6.5
 const TISK_SIRKA_PT = (8.27 - 2 * 0.4) * 72 // A4 na výšku, okraje 0,4″
 const NEJMENSI_MERITKO = 0.62
+/** Šířka tiskové plochy v pixelech Excelu (bod je 0,75 px). */
+const TISK_SIRKA_PX = TISK_SIRKA_PT / 0.75
+/** Sloupec člověka nemá smysl táhnout donekonečna — pár lidí by mělo pruhy přes půl stránky. */
+const NEJSIRSI_SLOUPEC = 16
+/** Šířka sloupce Excelu (ve znacích výchozího písma) v bodech: znak ≈ 7 px + 5 px na sloupec. */
+export const sirkaSloupceVBodech = (w: number) => (w * 7 + 5) * 0.75
+/** Písmo jména v záhlaví sešitu (bodů) — podle něj se měří, jestli se vejde naležato. */
+const PISMO_ZAHLAVI_XLSX = 9
 
 /** Šířka sloupce člověka ve znacích: podle nejdelšího času (nebo pauzy) směny. */
 export function sirkaSloupceXlsx(sloupce: SloupecExportu[]): number {
@@ -357,6 +414,12 @@ function rozpisXlsx(m: ExportMesice): ListXlsx[] {
   const pxNaLidi = TISK_SIRKA_PT / NEJMENSI_MERITKO / 0.75 - (SIRKA_DNE_XLSX * 7 + 5)
   const nejvic = Math.max(1, Math.floor(pxNaLidi / (sirka * 7 + 5)))
   const casti = rozdelitLidi(m.sloupce, nejvic)
+  /*
+    Zbude-li na stránce místo, sloupce lidí se roztáhnou. Úzký proužek na
+    levé třetině A4 nikomu neposlouží a v širším sloupci se navíc vejde
+    jméno naležato, takže se nemusí otáčet.
+  */
+  const naSirku = (pocet: number) => Math.max(sirka, Math.min(NEJSIRSI_SLOUPEC, (TISK_SIRKA_PX - (SIRKA_DNE_XLSX * 7 + 5)) / Math.max(1, pocet) / 7 - 5 / 7))
 
   // Pobočka pod časem: celý název, když se vejde do sloupce (drobné písmo ≈ 0,65 znaku), jinak zkratka.
   const zkratkaPobocky = new Map(m.pobocky.map((p) => [p.nazev, p.zkratka]))
@@ -373,14 +436,42 @@ function rozpisXlsx(m: ExportMesice): ListXlsx[] {
     pridej([s(casti.length > 1 ? `${m.nadpis} — část ${i + 1} z ${casti.length}` : m.nadpis, STYL.titul)], 22)
     pridej([s(`${m.rozsah} · vytvořeno ${m.vytvoreno}`, STYL.poznamka)], 15)
 
-    // Záhlaví: jméno (a pozice pod ním) otočené o 90°; výška podle nejdelšího textu.
+    /*
+      Záhlaví: jméno a pod ním pozice. Vejdou-li se do sloupce naležato (po
+      slovech, nejvýš tři řádky), nic se neotáčí — vodorovné jméno se čte samo
+      a řádek je nižší (Šéfík 20. 9. 2026). Jinak se celé záhlaví otočí o 90°,
+      aby sloupec mohl zůstat úzký. Buď otočené celé, nebo nic; půlka tak
+      a půlka onak vypadá rozbitě.
+    */
+    const sirkaSloupce = naSirku(cast.length)
+    /*
+      Šířka se měří v bodech, ne ve znacích — počet znaků lže, protože „í“ je
+      užší než „M“. Týmž metrem měří i PDF; odpověď se ale lišit může, a je to
+      tak správně: sešit má sloupce pevně široké a před tiskem se celý zmenší
+      (jméno se zmenší s ním), kdežto PDF dělí šířku stránky mezi sloupce
+      a písmo drží. Každý se proto ptá na svou geometrii.
+    */
+    const dovnitr = sirkaSloupceVBodech(sirkaSloupce) - 5
+    const vejdeSe = (t: string) => sirkaTextu(t, PISMO_ZAHLAVI_XLSX, 'tucne') <= dovnitr
+    const vodorovne = jmenaNalezato(cast, vejdeSe)
+    const radkuZahlavi = vodorovne
+      ? Math.max(
+          1,
+          ...cast.map(
+            (c) =>
+              (radkyDoSirky(c.jmeno, vejdeSe)?.length ?? 1) + (c.pozice ? (radkyDoSirky(c.pozice, vejdeSe)?.length ?? 1) : 0),
+          ),
+        )
+      : 0
     const nejdelsi = Math.max(4, ...cast.map((c) => Math.max([...c.jmeno].length, [...c.pozice].length)))
     pridej(
       [
         s('Den', STYL.hlavicka),
-        ...cast.map((c) => s(c.pozice ? `${c.jmeno}\n${c.pozice}` : c.jmeno, STYL.hlavickaOtocena)),
+        ...cast.map((c) =>
+          s(c.pozice ? `${c.jmeno}\n${c.pozice}` : c.jmeno, vodorovne ? STYL.hlavickaJmeno : STYL.hlavickaOtocena),
+        ),
       ],
-      Math.min(130, Math.max(50, nejdelsi * 5 + 8)),
+      vodorovne ? Math.max(24, radkuZahlavi * 12 + 6) : Math.min(130, Math.max(50, nejdelsi * 5 + 8)),
     )
 
     for (const den of m.dny) {
@@ -420,7 +511,7 @@ function rozpisXlsx(m: ExportMesice): ListXlsx[] {
       for (const c of cast) for (const dily of c.podleDne.values()) for (const d of dily) if (d.pobocka) pouziteNazvy.add(d.pobocka)
     }
     const pouziteZkratky = m.pobocky.filter((p) => pouziteNazvy.has(p.nazev) && textPobocky(p.nazev) !== p.nazev)
-    const maxZnaku = Math.floor((SIRKA_DNE_XLSX + cast.length * sirka) / 0.85)
+    const maxZnaku = Math.floor((SIRKA_DNE_XLSX + cast.length * sirkaSloupce) / 0.85)
     radky.push([])
     for (const radek of zalomitVety(
       vetyPoznamky(m, pouziteZkratky, cast.some((c) => c.osobaId === null)),
@@ -431,7 +522,7 @@ function rozpisXlsx(m: ExportMesice): ListXlsx[] {
 
     return {
       nazev: casti.length > 1 ? `Rozpis ${i + 1}` : 'Rozpis',
-      sloupce: [SIRKA_DNE_XLSX, ...cast.map(() => sirka)],
+      sloupce: [SIRKA_DNE_XLSX, ...cast.map(() => sirkaSloupce)],
       radky,
       vyskyRadku,
       zmrazit: { radky: 3, sloupce: 1 },

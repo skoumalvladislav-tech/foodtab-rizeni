@@ -27,11 +27,13 @@ import {
   dnyMesice,
   hodinyCislem,
   jeMesic,
+  jmenaNalezato,
   listyXlsx,
   nazevMesice,
   nazevSouboru,
   pauzaKratce,
   popisDne,
+  radkyDoSirky,
   radkySmeny,
   rozdelitLidi,
   sestavitExportMesice,
@@ -267,17 +269,35 @@ je('bez pevného měřítka (s ním by se „na jednu stránku“ ignorovalo)', 
 je('Souhrn: A4 na výšku, na šířku jedné stránky (výška se dopočítá)', [/orientation="(\w+)"/.exec(sheetSouhrn)[1], sheetSouhrn.includes('fitToHeight="0"')], ['portrait', true])
 je('zápatí s časem a stranou (& v kódech Excelu escapované pro XML)', sheetRozpis.includes('<oddFooter>&amp;LVytvořeno 19. 9. 2026 15:30&amp;RStrana &amp;P z &amp;N</oddFooter>'), true)
 je('zmrazené záhlaví a levý sloupec (na obrazovce)', sheetRozpis.includes('xSplit="1" ySplit="3"'), true)
-je('záhlaví lidí je otočené o 90° (sloupec může být úzký)', soubory.get('xl/styles.xml').text.includes('textRotation="90"'), true)
+je('styl pro otočené záhlaví v sešitu existuje', soubory.get('xl/styles.xml').text.includes('textRotation="90"'), true)
+/*
+  Jména v záhlaví sešitu: naležato, vejdou-li se do sloupce (Šéfík 20. 9. 2026),
+  jinak otočená o 90°. Styl 13 = naležato, styl 10 = otočené.
+*/
+const stylyZahlavi = (list) => {
+  const x = rozbalit(zapsatXlsx([list])).get('xl/worksheets/sheet1.xml').text
+  const r3 = /<row r="3"[^>]*>(.*?)<\/row>/s.exec(x)
+  return [...new Set([...(r3?.[1] ?? '').matchAll(/ s="(\d+)"/g)].map((z) => z[1]))]
+}
+je('čtyři lidé v širokém sloupci: záhlaví naležato (styl 13, ne 10)', stylyZahlavi(listy[0]).includes('13'), true)
+je('… a nic se neotáčí', stylyZahlavi(listy[0]).includes('10'), false)
 je('víkend má vlastní styl levého sloupce: So 5. (řádek 8) jiný než Út 1. (řádek 4)', [/<c r="A4" t="s" s="(\d+)"/.exec(sheetRozpis)[1], /<c r="A8" t="s" s="(\d+)"/.exec(sheetRozpis)[1]], ['11', '12'])
 const sirkyCol = [...sheetRozpis.matchAll(/<col [^>]*width="([\d.]+)"/g)].map((x) => Number(x[1]))
-je('sloupce: Den + čtyři lidé; člověk je úzký — 8 znaků podle nejdelší pauzy („pauza 15–17“), ne 30', [sirkyCol.length, sirkyCol[0], sirkyCol.slice(1)], [5, 6.5, [8, 8, 8, 8]])
+/*
+  Sloupce lidí: nejmíň tak široké, aby se vešel čas a pauza (`sirkaSloupceXlsx`),
+  a pak se roztáhnou do zbytku stránky — úzký proužek na levé třetině A4
+  nikomu neposlouží a v širším sloupci se jméno vejde naležato.
+*/
+je('sloupce: Den + čtyři lidé, všichni stejně širocí', [sirkyCol.length, sirkyCol[0], new Set(sirkyCol.slice(1)).size], [5, 6.5, 1])
+je('… čtyři lidé se roztáhnou na strop (16 znaků), protože na stránce je místa dost', sirkyCol[1], 16)
+je('… ale nikdy pod nutné minimum podle času a pauzy (8 znaků)', sirkyCol[1] >= sirkaSloupceXlsx(m.sloupce), true)
 const bezPauz = sestavitExportMesice(vstup(smeny.filter((s2) => !s2.pauza_od)))
 je('bez pauz řídí šířku nejdelší čas „10–18*“ (6 znaků → sloupec 7)', sirkaSloupceXlsx(bezPauz.sloupce), 7)
 je('a jen z krátkých časů („8–16“) sloupec neklesne pod 6', sirkaSloupceXlsx(sestavitExportMesice(vstup([smena('2026-09-02', 'a', '08:00', '16:00')])).sloupce), 6)
 const dlouhe = sestavitExportMesice(vstup([smena('2026-09-02', 'a', '16:00', '23:30'), smena('2026-09-03', 'a', '10:30', '23:30')]))
 je('dlouhý čas „10:30–23:30“ (11 znaků) → sloupec 11 (strop)', sirkaSloupceXlsx(dlouhe.sloupce), 11)
 je('dlouhý čas „16–23:30“ (8 znaků) → 8', sirkaSloupceXlsx(sestavitExportMesice(vstup([smena('2026-09-02', 'a', '16:00', '23:30')])).sloupce), 8)
-je('šířka sloupce počítá funkce z týchž dat', sirkaSloupceXlsx(m.sloupce), sirkyCol[1])
+je('minimum počítá funkce z týchž dat („pauza 15–17“ → 8 znaků)', sirkaSloupceXlsx(m.sloupce), 8)
 const souhrnRadky = await precistXlsx(zapsatXlsx([listy[1]]))
 je('Souhrn: jen jméno, pozice, směny, hodiny (bez úseku a poboček)', souhrnRadky[3], ['Zaměstnanec', 'Pozice', 'Směn', 'Hodin'])
 je('Souhrn: Andrea 5 směn a 42 h; řádek Celkem', [souhrnRadky[4], souhrnRadky[souhrnRadky.length - 1]], [['Andrea Mikulová', 'Kuchařka', '5', '42'], ['Celkem', '', '8', '60']])
@@ -309,6 +329,12 @@ const lide40 = new Map(Array.from({ length: 40 }, (_, i) => [`v${i}`, { id: `v${
 const smeny40 = [...lide40.keys()].flatMap((id, i) => ['2026-09-07', '2026-09-08', '2026-09-09'].map((den) => smena(den, id, i % 2 ? '08:00' : '16:00', i % 2 ? '16:00' : '23:30')))
 const m40 = sestavitExportMesice(vstup(smeny40, { osoby: lide40 }))
 const listy40 = listyXlsx(m40)
+// Hodně lidí = na roztažení není místo, sloupec zůstane na nutném minimu.
+je('40 lidí rozdělených na listy: sloupec zůstane na minimu, neroztahuje se', listy40[0].sloupce[1], sirkaSloupceXlsx(m40.sloupce))
+const dlouzi40 = new Map(Array.from({ length: 40 }, (_, i) => [`d${i}`, { id: `d${i}`, jmeno: `Bartoloměj${i} Nepomucký`, usekId: 'u-k', poziceId: 'p-1', barva: null }]))
+const listyDlouhe = listyXlsx(sestavitExportMesice(vstup([...dlouzi40.keys()].flatMap((id) => ['2026-09-07', '2026-09-08'].map((den) => smena(den, id, '08:00', '16:00'))), { osoby: dlouzi40 })))
+je('40 lidí s dlouhými jmény v úzkém sloupci: záhlaví se otočí (styl 10)', stylyZahlavi(listyDlouhe[0]).includes('10'), true)
+je('… a nic naležato', stylyZahlavi(listyDlouhe[0]).includes('13'), false)
 je('40 lidí: víc listů „Rozpis 1“, „Rozpis 2“… a Souhrn na konci', [listy40.length > 2, listy40[0].nazev, listy40[listy40.length - 1].nazev], [true, 'Rozpis 1', 'Souhrn'])
 je('… každý list má aspoň jednoho člověka a všichni lidé jsou právě na jednom', [listy40.slice(0, -1).every((l) => l.sloupce.length > 1), listy40.slice(0, -1).reduce((k, l) => k + l.sloupce.length - 1, 0)], [true, 40])
 /** Šířka listu v bodech: sloupec zabere `w * 7 + 5` pixelů, bod je 0,75 pixelu. */
@@ -357,6 +383,19 @@ je('řádky buňky: čas s hvězdičkou, pod ním pobočka a pauza drobně',
   [{ text: '10–22*', drobne: false }, { text: 'Bernard', drobne: true }, { text: 'pauza 15–17', drobne: true }, { text: '23–23:30', drobne: false }])
 je('bez funkce na pobočku se pobočka nepíše', radkySmeny([dilTrhane]).map((r) => r.text), ['10–22', 'pauza 15–17'])
 je('věty se spojují do řádků a věta se nikdy nerozdělí', zalomitVety(['aaaa', 'bbbb', 'cccc'], (t) => t.length <= 11), ['aaaa · bbbb', 'cccc'])
+console.log('\n== Jména naležato ==')
+const doSirky = (t, n) => radkyDoSirky(t, (x) => [...x].length <= n)
+je('krátké jméno na jeden řádek', doSirky('Jan Novák', 12), ['Jan Novák'])
+je('delší jméno se zalomí mezi slovy', doSirky('Andrea Mikulová', 9), ['Andrea', 'Mikulová'])
+je('spojovník je místo, kde se smí zalomit — a zůstane na konci řádku', doSirky('Jirásková-Novotná', 10), ['Jirásková-', 'Novotná'])
+je('… bez spojovníku by se to nevešlo vůbec', doSirky('JiráskováNovotná', 10), null)
+je('jedno slovo širší než sloupec = nevejde se (otočí se)', doSirky('Nepomucký', 5), null)
+je('víc než tři řádky se nepovolí — záhlaví by přerostlo tabulku', [doSirky('a b c', 1), doSirky('a b c d', 1)], [['a', 'b', 'c'], null])
+je('prázdný text: žádné řádky, ale ne „nevejde se“', doSirky('', 5), [])
+je('naležato jen když se vejdou VŠICHNI (jeden dlouhý rozhodne za všechny)',
+  [jmenaNalezato([{ jmeno: 'Jan Novák', pozice: '' }], (t) => [...t].length <= 6),
+   jmenaNalezato([{ jmeno: 'Jan', pozice: '' }, { jmeno: 'Bartoloměj', pozice: '' }], (t) => [...t].length <= 6)], [true, false])
+je('nevejde-li se pozice, otočí se taky', jmenaNalezato([{ jmeno: 'Jan', pozice: 'Pomocná síla' }], (t) => [...t].length <= 5), false)
 je('jediná dlouhá věta zůstane celá', zalomitVety(['aaaaaaaaaaaaaaaa'], (t) => t.length <= 5), ['aaaaaaaaaaaaaaaa'])
 je('poznámky: bez nevydaných a zkratek jen hodiny a celkem', vetyPoznamky({ ...m, nevydanych: 0 }, [], false), ['Hodiny = plánované délky směn bez automatické přestávky', 'Celkem lidé: 60 h'])
 je('poznámky: zkratky poboček a Neobsazeno se přidají', vetyPoznamky(m, [{ nazev: 'Černá Perla', zkratka: 'ČP' }], true).slice(1, 3), ['Hodiny = plánované délky směn bez automatické přestávky', 'ČP = Černá Perla'])
@@ -393,7 +432,24 @@ je('encoding s doplňky pro češtinu', text.includes('/Differences [1 /ecaron 2
 je('ř se kóduje osmičkově jako \\013 („Kateřina“ v otočeném záhlaví)', text.includes('Kate\\013ina'), true)
 je('ě jako \\001 („směn“ v nadpisu)', text.includes('sm\\001n'), true)
 je('WinAnsi znaky jdou osmičkově (á = 0xE1 = \\341: „Jirásková“)', text.includes('Jir\\341skov\\341'), true)
-je('záhlaví jmen je otočené o 90° (matice 0 1 -1 0): jméno a pozice u čtyř sloupců aspoň 4×', (text.match(/ 0 1 -1 0 /g) ?? []).length >= 4, true)
+/*
+  Jména v záhlaví: naležato, kdykoli se do sloupce vejdou (Šéfík 20. 9. 2026) —
+  vodorovné jméno se čte samo a záhlaví je nižší. Otáčí se, až když se
+  nevejdou; buď otočené celé záhlaví, nebo nic.
+*/
+je('čtyři lidé v širokém sloupci: jména naležato, nic se neotáčí', (text.match(/ 0 1 -1 0 /g) ?? []).length, 0)
+const sJmeny = (jmena) => {
+  const os = new Map(jmena.map((j, i) => [`z${i}`, { id: `z${i}`, jmeno: j, usekId: 'u-k', poziceId: null, barva: null }]))
+  const sm = [...os.keys()].flatMap((id) => dnyMesice('2026-09').map((den) => smena(den, id, '08:00', '16:00')))
+  return cti(pdfZExportu(sestavitExportMesice(vstup(sm, { osoby: os }))))
+}
+// „Ota 3“ se do sloupce širokého 25 bodů vejde; „Nov19“ o zlomek bodu ne — proto krátká jména.
+const kratkaJmena = sJmeny(Array.from({ length: 20 }, (_, i) => `Ota ${i}`))
+je('20 lidí s krátkými jmény: pořád naležato (do úzkého sloupce se vejdou)', (kratkaJmena.match(/ 0 1 -1 0 /g) ?? []).length, 0)
+const dlouhaJmena = sJmeny(Array.from({ length: 20 }, (_, i) => `Bartoloměj${i} Nepomucký`))
+je('20 lidí s dlouhými jmény: záhlaví se otočí (naležato by se nevešla)', (dlouhaJmena.match(/ 0 1 -1 0 /g) ?? []).length >= 20, true)
+je('… a otočí se všechna, ne jen některá (půlka tak a půlka onak by vypadala rozbitě)',
+  (dlouhaJmena.match(/ 0 1 -1 0 /g) ?? []).length % 20, 0)
 je('trhaná směna: pauza zkráceně (en pomlčka = \\226)', text.includes('pauza 15\\22617'), true)
 je('žádný úsek v PDF (ani „Kuchyně“, ani „PLAC“)', text.includes('Kuchyn') || text.includes('Plac') || text.includes('PLAC') || text.includes('KUCHYN'), false)
 je('jedna pobočka: název pobočky není u směn (jen v nadpisu jako „Restaurace Černá Perla“ v rozsahu)', (text.match(/\\(Perla\\)/g) ?? []).length, 0)
