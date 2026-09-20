@@ -33,6 +33,8 @@ export const STYL = {
   souctovyText: 9,
   /** Záhlaví sloupce člověka: text otočený o 90°, aby sloupec mohl být úzký. */
   hlavickaOtocena: 10,
+  /** Totéž naležato — když se jméno do sloupce vejde, otáčet ho nemá smysl. */
+  hlavickaJmeno: 13,
   /** Den v levém sloupci („Po 1.“). */
   denRadek: 11,
   denRadekVikend: 12,
@@ -129,7 +131,7 @@ const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <border><left style="thin"><color rgb="FFD6D1C7"/></left><right style="thin"><color rgb="FFD6D1C7"/></right><top style="thin"><color rgb="FFD6D1C7"/></top><bottom style="thin"><color rgb="FFD6D1C7"/></bottom><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="13">
+<cellXfs count="14">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
@@ -143,6 +145,7 @@ const STYLY_XML = `${HLAVICKA_XML}<styleSheet xmlns="${NS}">
 <xf numFmtId="0" fontId="5" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="bottom" textRotation="90" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="5" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="5" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="5" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`

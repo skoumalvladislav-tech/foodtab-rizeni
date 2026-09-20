@@ -1230,15 +1230,18 @@ span.ds-sm-dl { cursor: default; }
 .ds-smd-radek-siroky > .ds-smd-pobocka-obal {
   background: var(--branch-soft); border-bottom: 1px solid var(--line);
 }
+/* Pobočka je nad úseky, tak má být i větší a těžší — jinak obě úrovně splývají. */
 .ds-smd-pobocka {
-  position: sticky; left: 0; display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 14px 7px; border: 0; background: transparent; cursor: pointer;
-  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--branch);
+  position: sticky; left: 0; display: inline-flex; align-items: center; gap: 9px;
+  padding: 10px 14px 9px; border: 0; background: transparent; cursor: pointer;
+  font-size: 14.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--branch);
 }
 .ds-smd-pobocka[aria-expanded="true"] .ds-smd-skupina-sipka { transform: rotate(90deg); }
 .ds-smd-pobocka .ds-smd-skupina-sipka { color: var(--branch); }
 .ds-smd-pobocka-nazev { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ds-smd-pobocka .ds-smd-skupina-pocty { color: color-mix(in srgb, var(--branch) 75%, var(--muted)); }
+.ds-smd-pobocka .ds-smd-skupina-pocty {
+  font-size: 12.5px; letter-spacing: .01em; color: color-mix(in srgb, var(--branch) 75%, var(--muted));
+}
 
 .ds-smd-skupina-obal {
   background: color-mix(in srgb, var(--sunken) 60%, var(--card));
@@ -1302,7 +1305,7 @@ span.ds-sm-dl { cursor: default; }
 /* --- karta směny -------------------------------------------------------- */
 
 .ds-smd-smena {
-  position: relative; display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 1px 5px;
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1px 5px;
   width: 100%; min-width: 0; padding: 4px 8px; text-align: left; font: inherit;
   border: 1px solid transparent; border-radius: 8px; cursor: pointer;
 }
@@ -1313,15 +1316,19 @@ div.ds-smd-smena:hover { box-shadow: none; }
 .ds-smd-cas { font-size: 13px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ds-smd-znacka { width: 8px; height: 8px; border-radius: 50%; background: var(--mosaz); }
 /* Zkratka pobočky — má být vidět na první pohled, ne tušit se v šedém podtitulku. */
+/*
+  Zkratka pobočky je ve druhém sloupci druhého řádku — vedle času by se
+  s puntíkem stavu do úzké buňky nevešla a puntík by vylezl z karty ven.
+*/
 .ds-smd-pobocka-zkr {
-  padding: 1px 5px; border-radius: 5px; white-space: nowrap;
+  grid-column: 2; justify-self: end; padding: 0 4px; border-radius: 5px; white-space: nowrap;
   background: color-mix(in srgb, var(--ink) 12%, var(--card));
   border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
-  color: var(--ink); font-size: 10.5px; font-weight: 800; letter-spacing: .03em;
+  color: var(--ink); font-size: 10px; font-weight: 800; letter-spacing: .03em; line-height: 1.5;
   font-variant-numeric: tabular-nums;
 }
 .ds-smd-popisek {
-  grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 10.5px; line-height: 1.15; color: var(--muted);
 }
 

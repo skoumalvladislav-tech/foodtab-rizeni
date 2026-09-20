@@ -199,9 +199,9 @@ export default function MrizkaTydne({
                       onClick={() => onPrepnout(pobocka.klic)}
                     >
                       <span className="ds-smd-skupina-sipka" aria-hidden="true">
-                        <Ikona klic="sipkaVpravo" velikost={14} />
+                        <Ikona klic="sipkaVpravo" velikost={15} />
                       </span>
-                      <Ikona klic="pobocka" velikost={14} />
+                      <Ikona klic="pobocka" velikost={17} />
                       <span className="ds-smd-pobocka-nazev">{pobocka.nazev}</span>
                       <span className="ds-smd-skupina-pocty">
                         {[
