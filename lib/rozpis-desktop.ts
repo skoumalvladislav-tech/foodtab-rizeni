@@ -44,7 +44,6 @@ import {
   ZKRATKY_DNU,
   type SmenaZaklad,
 } from './rozpis-mobil.ts'
-import { vyzadujePotvrzeni } from './upozorneni-text.ts'
 
 /* --- typy ------------------------------------------------------------ */
 
@@ -113,59 +112,75 @@ export const cekaNaVydani = (s: SmenaD) => stavSmeny(s) !== 'vydana'
 /* --- puntík: kde je směna vůči lidem ---------------------------------- */
 
 /**
- * Co databáze ví o posledním upozornění na směnu (`stav_potvrzeni_smen`):
- * jaký druh to byl a kdy ho člověk přečetl a potvrdil. Nikdy ne obsah.
+ * Potvrzení směny zaměstnancem (`smeny_potvrzeni`): kdo, kdy a OPIS směny,
+ * kterou potvrdil. Potvrzení platí, jen dokud se směna s opisem shoduje —
+ * změna času, dne, pauzy, pobočky nebo člověka ho tiše zneplatní (`potvrzeniPlatne`).
  */
 export type PotvrzeniSmeny = {
-  druh: string
-  precteno_at: string | null
-  potvrzeno_at: string | null
+  shift_id: string
+  employee_id: string
+  branch_id: string
+  shift_date: string
+  starts_at: string
+  ends_at: string
+  pauza_od: string | null
+  pauza_do: string | null
+  confirmed_at: string
 }
 
 /**
  * Potvrzení pro celé okno rozpisu. `null` na místě téhle hodnoty = nenačteno
- * (člověk neplánuje, nebo databáze funkci ještě nemá) a puntík vydané směny
- * se pak nekreslí — „nepotvrzeno“ se nevymýšlí, když se to neví.
+ * (člověk neplánuje, nebo se čtení nepovedlo) a puntík vydané směny se pak
+ * nekreslí — „nepotvrzeno“ se nevymýšlí, když se to neví.
  */
 export type PotvrzeniRozpisu = {
   /**
-   * Pobočky, za které databáze potvrzení vrací (tam člověk smí plánovat).
-   * Vedoucí Perly vidí i směny Baru, ale jejich potvrzení nedostane — a
-   * chybějící řádek by se tam četl jako „nepotvrzeno“.
+   * Pobočky, za které se potvrzení čtou (tam člověk smí plánovat). Vedoucí
+   * Perly vidí i směny Baru, ale jejich potvrzení nedostane — a chybějící
+   * záznam by se tam četl jako „nepotvrzeno“.
    */
   pobocky: string[]
-  /** Poslední upozornění podle id směny. Chybí-li, upozornění neexistuje. */
-  podleSmeny: Record<string, PotvrzeniSmeny>
+  /** Zaměstnanci bez účtu: nemají jak potvrdit, puntík jejich vydaných směn se nekreslí. */
+  bezUctu: string[]
+  /** Potvrzení podle id směny (u přeřazené směny jich může být víc — každé od jiného člověka). */
+  podleSmeny: Record<string, PotvrzeniSmeny[]>
 }
 
-/** Řádek z `stav_potvrzeni_smen` (databáze). */
-export type RadekPotvrzeni = PotvrzeniSmeny & { smena_id: string }
-
-/** Nejdelší okno, které `stav_potvrzeni_smen` vezme (93 dní včetně krajů); delší databáze odmítne. */
-export const NEJVIC_DNI_POTVRZENI = 92
-
-/** Vejde se okno `od`–`doKdy` (RRRR-MM-DD) do toho, co funkce v databázi vezme? */
-export function oknoPotvrzeniSeVejde(od: string, doKdy: string): boolean {
-  const dnu = Math.round((Date.parse(doKdy) - Date.parse(od)) / 86_400_000)
-  return Number.isFinite(dnu) && dnu >= 0 && dnu <= NEJVIC_DNI_POTVRZENI
+/** Řádky z databáze → potvrzení okna. */
+export function potvrzeniZRadku(radky: PotvrzeniSmeny[], pobocky: string[], bezUctu: string[]): PotvrzeniRozpisu {
+  const podleSmeny: Record<string, PotvrzeniSmeny[]> = {}
+  for (const r of radky) (podleSmeny[r.shift_id] ??= []).push(r)
+  return { pobocky, bezUctu, podleSmeny }
 }
 
-/** Řádky z databáze → potvrzení okna. `pobocky` = kde databáze potvrzení vrací; jinde se neví. */
-export function potvrzeniZRadku(radky: RadekPotvrzeni[], pobocky: string[]): PotvrzeniRozpisu {
-  const podleSmeny: Record<string, PotvrzeniSmeny> = {}
-  for (const r of radky) {
-    podleSmeny[r.smena_id] = { druh: r.druh, precteno_at: r.precteno_at ?? null, potvrzeno_at: r.potvrzeno_at ?? null }
-  }
-  return { pobocky, podleSmeny }
+/**
+ * Platí potvrzení pro směnu, jak vypadá TEĎ? Ano, když ho dal člověk, který
+ * ji teď má, a shoduje se opis: pobočka, den, čas, pauza. Vrátí-li se změna
+ * zpátky, potvrzení platí zas.
+ */
+export function potvrzeniPlatne(s: SmenaD, p: PotvrzeniSmeny | null | undefined): boolean {
+  if (!p || !s.employee_id || p.employee_id !== s.employee_id) return false
+  return (
+    p.branch_id === s.branch_id &&
+    p.shift_date === s.shift_date &&
+    stejnyCas(p.starts_at, s.starts_at) &&
+    stejnyCas(p.ends_at, s.ends_at) &&
+    stejnyCas(p.pauza_od, s.pauza_od) &&
+    stejnyCas(p.pauza_do, s.pauza_do)
+  )
 }
+
+/** Potvrzení platné pro směnu z výběru řádků (obvykle jeden, po přeřazení víc). */
+export const platnePotvrzeni = (s: SmenaD, radky: PotvrzeniSmeny[] | undefined): PotvrzeniSmeny | null =>
+  (radky ?? []).find((p) => potvrzeniPlatne(s, p)) ?? null
 
 /**
  * Tři barvy puntíku u času směny (Šéfík 20. 9. 2026):
  *
  *   nevydano     červený — směna ještě není v rozpisu, který lidé dostali
  *                (koncept, i vydaná a pak změněná: lidé mají starou verzi)
- *   nepotvrzeno  žlutý   — vydaná, člověk ji ještě nevzal na vědomí
- *   potvrzeno    zelený  — vydaná a člověk ji vzal na vědomí
+ *   nepotvrzeno  žlutý   — vydaná a člověk její znění zatím nepotvrdil
+ *   potvrzeno    zelený  — vydaná a člověk její znění potvrdil
  */
 export type PuntikSmeny = 'nevydano' | 'nepotvrzeno' | 'potvrzeno'
 
@@ -177,28 +192,25 @@ export const POPIS_PUNTIKU: Record<PuntikSmeny, string> = {
 }
 
 /**
- * Vzal člověk směnu na vědomí? Změnu (druh, který to vyžaduje) potvrdil
- * tlačítkem; u nové směny žádné tlačítko není, takže se bere její přečtení
- * — nic silnějšího tu k dispozici není.
- */
-export function jePotvrzena(p: PotvrzeniSmeny): boolean {
-  if (p.potvrzeno_at) return true
-  return !vyzadujePotvrzeni(p.druh) && Boolean(p.precteno_at)
-}
-
-/**
  * Puntík směny, nebo `null`, když se nekreslí.
  *
  * Nekreslí se u vydané směny, o které se neví, jak to s potvrzením je
- * (potvrzení se nenačetlo, nebo je z pobočky, kde člověk neplánuje), a u
- * vydané neobsazené směny — není komu ji potvrdit.
+ * (potvrzení se nenačetlo, nebo je z pobočky, kde člověk neplánuje), u
+ * vydané neobsazené směny a u zaměstnance bez účtu — není komu ji potvrdit.
+ * Žlutý puntík se nekreslí ani u směn v minulosti (`dnesni` = provozní den):
+ * nepotvrzená včerejší směna už nikoho nic nenaučí.
  */
-export function puntikSmeny(s: SmenaD, potvrzeni: PotvrzeniRozpisu | null | undefined): PuntikSmeny | null {
+export function puntikSmeny(
+  s: SmenaD,
+  potvrzeni: PotvrzeniRozpisu | null | undefined,
+  dnesni: string,
+): PuntikSmeny | null {
   if (stavSmeny(s) !== 'vydana') return 'nevydano'
   if (!s.employee_id) return null
   if (!potvrzeni || !potvrzeni.pobocky.includes(s.branch_id)) return null
-  const p = potvrzeni.podleSmeny[s.id]
-  return p && jePotvrzena(p) ? 'potvrzeno' : 'nepotvrzeno'
+  if (potvrzeni.bezUctu.includes(s.employee_id)) return null
+  if (platnePotvrzeni(s, potvrzeni.podleSmeny[s.id])) return 'potvrzeno'
+  return s.shift_date < dnesni ? null : 'nepotvrzeno'
 }
 
 /** Co bylo při vydání — do popisku „Změněno“. `null`, když se nic nezměnilo nebo se neví. */

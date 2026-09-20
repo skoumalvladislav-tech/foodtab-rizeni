@@ -2,8 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { getUser } from '@/lib/authz'
+import { getUser, hasAccess } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
+import { platnePotvrzeni, stavSmeny, type PotvrzeniSmeny, type SmenaD } from '@/lib/rozpis-desktop'
+import { funkceNeexistuje, sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { vyzadujePotvrzeni, zmenaSmeny, type TeloUpozorneni } from '@/lib/upozorneni-text'
 
@@ -48,12 +50,27 @@ export type UpozorneniVedouciho = {
   potvrzeno_at: string | null
 }
 
+/**
+ * Potvrzení SMĚNY zaměstnancem (`smeny_potvrzeni`), ne upozornění na ni.
+ * Platí, jen dokud se směna shoduje s tím, co člověk potvrdil.
+ */
+export type StavPotvrzeniSmeny = {
+  /** Směna, kterou má přihlášený — jen ta jde potvrdit. */
+  jeMoje: boolean
+  stav: 'nevydano' | 'nepotvrzeno' | 'potvrzeno' | 'bez-uctu'
+  potvrzeno_at: string | null
+  /** Moje, vydaná, ve vydaném znění a zatím nepotvrzená — nabídne se tlačítko. */
+  mozePotvrdit: boolean
+}
+
 export type StavUpozorneniSmeny = {
   moje: MojeUpozorneni | null
   vedouci: UpozorneniVedouciho | null
+  /** `null` = neví se (tabulka ještě není v databázi, směna nemá člověka, chyba). */
+  potvrzeniSmeny: StavPotvrzeniSmeny | null
 }
 
-const PRAZDNO: StavUpozorneniSmeny = { moje: null, vedouci: null }
+const PRAZDNO: StavUpozorneniSmeny = { moje: null, vedouci: null, potvrzeniSmeny: null }
 
 export async function nactiStavSmeny(smenaId: string): Promise<StavUpozorneniSmeny> {
   if (!smenaId) return PRAZDNO
@@ -64,7 +81,7 @@ export async function nactiStavSmeny(smenaId: string): Promise<StavUpozorneniSme
   if (!user) return PRAZDNO
 
   const supabase = await getServerSupabase()
-  const stav: StavUpozorneniSmeny = { moje: null, vedouci: null }
+  const stav: StavUpozorneniSmeny = { moje: null, vedouci: null, potvrzeniSmeny: null }
 
   /* --- moje upozornění --------------------------------------------- */
 
@@ -125,7 +142,132 @@ export async function nactiStavSmeny(smenaId: string): Promise<StavUpozorneniSme
     }
   }
 
+  stav.potvrzeniSmeny = await nactiPotvrzeniSmeny(supabase, tenantId, user.id, smenaId).catch(() => null)
+
   return stav
+}
+
+type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
+
+const SLOUPCE_POTVRZENI = 'shift_id, employee_id, branch_id, shift_date, starts_at, ends_at, pauza_od, pauza_do, confirmed_at'
+
+/**
+ * Kde je tahle směna s potvrzením: moje a k potvrzení, potvrzená, nepotvrzená,
+ * zaměstnanec bez účtu, nevydaná. Čte přímo tabulku (RLS: člověk své, vedoucí
+ * pobočky, kde plánuje) a porovnává s TÍMTO směnou — tatáž pravidla jako
+ * puntík v mřížce (`lib/rozpis-desktop.ts`).
+ */
+async function nactiPotvrzeniSmeny(
+  supabase: Supabase,
+  tenantId: string,
+  userId: string,
+  smenaId: string,
+): Promise<StavPotvrzeniSmeny | null> {
+  const zaklad =
+    'id, branch_id, employee_id, shift_date, starts_at, ends_at, status, published_at, published_employee_id, published_starts_at, published_ends_at, published_status'
+  let maPauzy = true
+  let { data: smena, error } = await supabase
+    .from('shifts')
+    .select(`${zaklad}, pauza_od, pauza_do`)
+    .eq('id', smenaId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (error && sloupecNeexistuje(error)) {
+    maPauzy = false
+    ;({ data: smena, error } = await supabase.from('shifts').select(zaklad).eq('id', smenaId).eq('tenant_id', tenantId).maybeSingle())
+  }
+  if (error || !smena) return null
+
+  const radek = smena as unknown as Record<string, unknown>
+  const s = {
+    ...radek,
+    pauza_od: maPauzy ? ((radek.pauza_od as string | null) ?? null) : null,
+    pauza_do: maPauzy ? ((radek.pauza_do as string | null) ?? null) : null,
+  } as unknown as SmenaD
+  if (!s.employee_id) return null
+
+  const [ja, clovek, potvrzeni] = await Promise.all([
+    supabase.from('employees').select('id').eq('tenant_id', tenantId).eq('user_id', userId).is('deleted_at', null).limit(1),
+    supabase.from('employees').select('user_id').eq('id', s.employee_id).maybeSingle(),
+    supabase.from('smeny_potvrzeni').select(SLOUPCE_POTVRZENI).eq('shift_id', smenaId),
+  ])
+  if (potvrzeni.error) {
+    if (!tabulkaNeexistuje(potvrzeni.error)) console.error('smeny_potvrzeni selhalo', potvrzeni.error)
+    return null
+  }
+
+  const jeMoje = ((ja.data ?? [])[0] as { id: string } | undefined)?.id === s.employee_id
+  // Cizí směna na pobočce, kde člověk neplánuje: RLS mu potvrzení neukáže, a prázdný výsledek
+  // by se četl jako „nepotvrzeno“. Neví se — stejné pravidlo jako v mřížce.
+  if (!jeMoje && !(await hasAccess(tenantId, 'shifts.manage', s.branch_id))) return null
+
+  const bezUctu = !clovek.error && clovek.data !== null && (clovek.data as { user_id: string | null }).user_id === null
+  const platne = platnePotvrzeni(s, (potvrzeni.data ?? []) as PotvrzeniSmeny[])
+
+  if (stavSmeny(s) !== 'vydana') return { jeMoje, stav: 'nevydano', potvrzeno_at: null, mozePotvrdit: false }
+  if (platne) return { jeMoje, stav: 'potvrzeno', potvrzeno_at: platne.confirmed_at, mozePotvrdit: false }
+  if (bezUctu) return { jeMoje, stav: 'bez-uctu', potvrzeno_at: null, mozePotvrdit: false }
+  return { jeMoje, stav: 'nepotvrzeno', potvrzeno_at: null, mozePotvrdit: jeMoje }
+}
+
+/**
+ * Zaměstnanec potvrdí SVOU vydanou směnu (tlačítko „Potvrdit směnu“).
+ *
+ * Všechno podstatné hlídá databáze (`potvrdit_smenu`): že je to jeho směna,
+ * že je vydaná a od vydání beze změny. Odsud se nepředává, kdo potvrzuje —
+ * bere se z přihlášení, takže cizí potvrzení poslat nejde.
+ */
+/** Znění směny, které člověk vidí na obrazovce — potvrzuje se právě to, a nesedí-li s databází, potvrzení se odmítne. */
+export type ZneniSmeny = {
+  id: string
+  shift_date: string
+  starts_at: string
+  ends_at: string
+  pauza_od: string | null
+  pauza_do: string | null
+}
+
+export async function potvrditSmenu(
+  zneni: ZneniSmeny,
+  rozsah: string,
+): Promise<{ stav: 'ok' } | { stav: 'chyba'; text: string }> {
+  if (!zneni?.id) return { stav: 'chyba', text: 'Nevím, co potvrdit.' }
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
+  const user = await getUser()
+  if (!user) return { stav: 'chyba', text: 'Nejste přihlášeni.' }
+
+  const supabase = await getServerSupabase()
+  const r = await potvrditVDatabazi(supabase, tenantId, zneni)
+  if (r.stav === 'ok') revalidatePath(`/${rozsah}`, 'layout')
+  return r
+}
+
+/** Volání funkce v databázi a překlad chyby na větu pro člověka. */
+async function potvrditVDatabazi(
+  supabase: Supabase,
+  tenantId: string,
+  zneni: ZneniSmeny,
+): Promise<{ stav: 'ok' } | { stav: 'chyba'; text: string }> {
+  const { error } = await supabase.rpc('potvrdit_smenu', {
+    p_tenant: tenantId,
+    p_smena: zneni.id,
+    p_den: zneni.shift_date,
+    p_od: zneni.starts_at,
+    p_do: zneni.ends_at,
+    p_pauza_od: zneni.pauza_od,
+    p_pauza_do: zneni.pauza_do,
+  })
+  if (!error) return { stav: 'ok' }
+  if (funkceNeexistuje(error)) {
+    return { stav: 'chyba', text: 'Potvrzování směn ještě není zapnuté — čeká na nasazení databáze.' }
+  }
+  // Věty z funkce jsou psané pro člověka (cizí směna, nevydaná, změněná od vydání). Poznají se
+  // podle vlastních kódů PT403 / PT409; cizí chyba databáze (třeba chybějící grant, 42501) by
+  // člověku ukázala anglickou hlášku o interních objektech, tak se tam nepředává.
+  if (error.code === 'PT403' || error.code === 'PT409') return { stav: 'chyba', text: error.message }
+  return { stav: 'chyba', text: 'Potvrzení se nepodařilo uložit.' }
 }
 
 /**
@@ -176,6 +318,7 @@ export async function potvrditZmenuSmeny(
     .eq('tenant_id', tenantId)
     .eq('user_id', user.id)
     .is('read_at', null)
+
 
   revalidatePath(`/${rozsah}`, 'layout')
   return { stav: 'ok' }

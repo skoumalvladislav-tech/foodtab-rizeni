@@ -8,7 +8,7 @@ import { datumACasVPasmu } from "@/lib/cas";
 import { hodinyKratce } from "@/lib/rozpis-mobil";
 
 import { nactiDochazkuKeSmene, type DochazkaKeSmene } from "../dochazka-smeny";
-import { nactiStavSmeny, type UpozorneniVedouciho } from "../potvrzeni";
+import { nactiStavSmeny, type StavPotvrzeniSmeny, type UpozorneniVedouciho } from "../potvrzeni";
 
 /**
  * Co k směně ví zbytek aplikace — pod formulářem v panelu „Upravit směnu“.
@@ -45,6 +45,8 @@ export default function PanelKeSmene({
 
   const [dochazka, setDochazka] = useState<Faze<DochazkaKeSmene | null>>({ faze: "nacita" });
   const [upozorneni, setUpozorneni] = useState<Faze<UpozorneniVedouciho | null>>({ faze: "nacita" });
+  // Potvrzení SMĚNY zaměstnancem (zelený puntík v mřížce); `null` = neví se.
+  const [potvrzeniSmeny, setPotvrzeniSmeny] = useState<StavPotvrzeniSmeny | null>(null);
 
   useEffect(() => {
     let zruseno = false;
@@ -59,7 +61,9 @@ export default function PanelKeSmene({
     }
     nactiStavSmeny(smena.id)
       .then((s) => {
-        if (!zruseno) setUpozorneni({ faze: "hotovo", data: s.vedouci });
+        if (zruseno) return;
+        setUpozorneni({ faze: "hotovo", data: s.vedouci });
+        setPotvrzeniSmeny(s.potvrzeniSmeny);
       })
       .catch(() => {
         if (!zruseno) setUpozorneni({ faze: "hotovo", data: null });
@@ -128,8 +132,25 @@ export default function PanelKeSmene({
         </section>
       ) : null}
 
-      {upozorneniData ? (
-        <section className="ds-smd-karta" aria-labelledby="ds-smd-upozorneni-nadpis">
+      {potvrzeniSmeny && potvrzeniSmeny.stav !== "nevydano" ? (
+        <section className="ds-smd-karta" aria-labelledby="ds-smd-potvrzeni-nadpis">
+          <h3 id="ds-smd-potvrzeni-nadpis">Potvrzení směny</h3>
+          <dl className="ds-smd-udaje ds-smd-udaje-svisle">
+            <div>
+              <dt>Stav</dt>
+              <dd>
+                {potvrzeniSmeny.stav === "potvrzeno"
+                  ? `Potvrzeno ${potvrzeniSmeny.potvrzeno_at ? datumACasVPasmu(potvrzeniSmeny.potvrzeno_at) : ""}`.trim()
+                  : potvrzeniSmeny.stav === "bez-uctu"
+                    ? "Zaměstnanec nemá účet, potvrdit směnu nemůže."
+                    : "Zatím nepotvrzeno."}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+
+      {upozorneniData ? (        <section className="ds-smd-karta" aria-labelledby="ds-smd-upozorneni-nadpis">
           <h3 id="ds-smd-upozorneni-nadpis">Upozornění na změnu</h3>
           <dl className="ds-smd-udaje ds-smd-udaje-svisle">
             <div>
