@@ -19,6 +19,7 @@ import PanelVydani from "./panel-vydani";
 import RozpisView from "./rozpis";
 import { nabidnoutSablony } from "./sablony";
 import { nactiDataVydani } from "./vydani-data";
+import { nactiPotvrzeniOkna } from "./potvrzeni-okna";
 
 export const dynamic = "force-dynamic";
 
@@ -300,13 +301,25 @@ export default async function Rozpis({
     )
   ).filter((b): b is { id: string; nazev: string } => b !== null);
 
-  const [smeny, mojeSmeny, zrusene] = await Promise.all([
+  const [smeny, mojeSmeny, zrusene, potvrzeni] = await Promise.all([
     nactiSmeny(nacistOd, nacistDo),
     jaId ? nactiSmeny(mojeOd, mojeDo, jaId) : Promise.resolve([] as Smena[]),
     // Zrušené po vydání zajímají jen toho, kdo rozpis vydává.
     pobockyProPlanovani.length > 0
       ? nactiSmeny(odKdy, doKdy, undefined, true)
       : Promise.resolve([] as Smena[]),
+    /*
+      Kdo směny potvrdil (puntík u času: žlutý × zelený). Stejně jako zrušené
+      je to věc toho, kdo rozpis vydává; `null` = neplánuje, nebo databáze
+      funkci ještě nemá — vydané směny pak puntík nemají.
+    */
+    nactiPotvrzeniOkna(
+      supabase,
+      tenantId,
+      pobockyProPlanovani.map((b) => b.id),
+      nacistOd,
+      nacistDo,
+    ),
   ]);
 
   // Jména lidí a názvy pozic. Neobsazená směna nemá employee_id — ta se
@@ -611,6 +624,7 @@ export default async function Rozpis({
         planovani={planovani}
         poziceLidi={poziceLidi}
         zrusene={zrusene}
+        potvrzeni={potvrzeni}
         vydani={vydani}
         vysledekVydani={vysledekVydani}
       />
