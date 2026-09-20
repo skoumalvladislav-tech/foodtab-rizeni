@@ -44,6 +44,7 @@ import {
   zmenyRozpisu,
   type FiltrDesktop,
   type OsobaD,
+  type PotvrzeniRozpisu,
 } from "@/lib/rozpis-desktop";
 import { nazevMesice } from "@/lib/rozpis-export";
 import { BEZ_USEKU, denVTydnu, dnyTydne, mesicniMrizka, minutSmeny } from "@/lib/rozpis-mobil";
@@ -183,6 +184,7 @@ export default function RozpisView({
   mobil,
   poziceLidi,
   zrusene,
+  potvrzeni,
   vydani,
   vysledekVydani,
 }: Props & {
@@ -192,6 +194,11 @@ export default function RozpisView({
   poziceLidi: Map<string, string | null>;
   /** Směny zrušené po vydání, o kterých se ještě nehlásilo — jen pro přehled změn. */
   zrusene: Smena[];
+  /**
+   * Kdo směny potvrdil (puntík u času: žlutý × zelený). `null` = člověk
+   * neplánuje, nebo to databáze ještě neumí — vydané směny pak puntík nemají.
+   */
+  potvrzeni: PotvrzeniRozpisu | null;
   /** `null` = člověk rozpis neplánuje, žádné vydání nevidí. */
   vydani: VydaniProp | null;
   vysledekVydani?: VysledekVydani;
@@ -571,6 +578,8 @@ export default function RozpisView({
           onFiltr={setFiltr}
           moznosti={moznosti}
           mesicLidiMozny={mesicLidiMozny}
+          legendaPuntiku={planovani !== null}
+          potvrzeniZnamo={potvrzeni !== null}
         />
 
         <PruhVydani
@@ -588,6 +597,7 @@ export default function RozpisView({
             dny={dny}
             dnesni={dnesni}
             planovani={planovani}
+            potvrzeni={potvrzeni}
             poziceOsob={poziceOsoby}
             barvy={barvy}
             jmena={jmena}
@@ -620,6 +630,7 @@ export default function RozpisView({
               smeny={nactenoFiltrovane}
               dnesni={dnesni}
               planovani={planovani}
+              potvrzeni={potvrzeni}
               jmena={jmena}
               poziceOsob={poziceOsoby}
               barvy={barvy}

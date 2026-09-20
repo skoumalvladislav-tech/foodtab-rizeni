@@ -2,7 +2,7 @@
 
 import Ikona from "@/app/[rozsah]/ikona";
 import ZnackaOsoby from "@/app/znacka-osoby";
-import { hodinyStruc, sestavitMesicOsoby, type SmenaD } from "@/lib/rozpis-desktop";
+import { hodinyStruc, puntikSmeny, sestavitMesicOsoby, type PotvrzeniRozpisu, type SmenaD } from "@/lib/rozpis-desktop";
 import { cisloDne, inicialy, jeVikend } from "@/lib/rozpis-mobil";
 import { pocet } from "@/lib/sklonovani";
 
@@ -36,6 +36,7 @@ export default function MesicLidi({
   smeny,
   dnesni,
   planovani,
+  potvrzeni,
   jmena,
   poziceOsob,
   barvy,
@@ -54,6 +55,8 @@ export default function MesicLidi({
   smeny: Smena[];
   dnesni: string;
   planovani: Planovani | null;
+  /** Kdo směny potvrdil (puntík u času); `null` = neví se. */
+  potvrzeni: PotvrzeniRozpisu | null;
   jmena: Map<string, string>;
   poziceOsob: (osobaId: string) => string | null;
   barvy: Map<string, string | null>;
@@ -79,6 +82,7 @@ export default function MesicLidi({
           smeny={smeny}
           dnesni={dnesni}
           planovani={planovani}
+          potvrzeni={potvrzeni}
           jmena={jmena}
           role={poziceOsob(o.id)}
           barva={barvy.get(o.id) ?? null}
@@ -100,6 +104,7 @@ function KartaMesice({
   smeny,
   dnesni,
   planovani,
+  potvrzeni,
   jmena,
   role,
   barva,
@@ -115,6 +120,7 @@ function KartaMesice({
   smeny: Smena[];
   dnesni: string;
   planovani: Planovani | null;
+  potvrzeni: PotvrzeniRozpisu | null;
   jmena: Map<string, string>;
   role: string | null;
   barva: string | null;
@@ -201,6 +207,7 @@ function KartaMesice({
                         jmena={jmena}
                         vybrana={vybranaId === s.id}
                         klikaci={planovani !== null}
+                        puntik={puntikSmeny(s, potvrzeni)}
                         kompaktni
                         onOtevrit={() => onOtevrit({ den: d.den, smena: s as Smena })}
                       />

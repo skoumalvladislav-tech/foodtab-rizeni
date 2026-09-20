@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import Ikona from "@/app/[rozsah]/ikona";
 import {
   FILTR_DESKTOP_PRAZDNY,
+  POPIS_PUNTIKU,
   jeFiltrPrazdny,
   jmenoVyhovuje,
   pocetFiltru,
@@ -79,6 +80,8 @@ export default function Nastroje({
   onFiltr,
   moznosti,
   mesicLidiMozny,
+  legendaPuntiku,
+  potvrzeniZnamo,
 }: {
   pohled: Pohled;
   /** „19.–25. září“ — hotový popisek období. */
@@ -91,6 +94,10 @@ export default function Nastroje({
   moznosti: MoznostiFiltru;
   /** Jsou vyfiltrovaní jeden nebo dva lidé, takže jde ukázat jejich celý měsíc? */
   mesicLidiMozny: boolean;
+  /** Vysvětlit barvy puntíku u času směny? Jen tomu, kdo plánuje — potvrzení je věc vedoucího. */
+  legendaPuntiku: boolean;
+  /** Načetlo se, kdo směny potvrdil? Když ne, žlutý a zelený puntík nejsou a legenda to řekne. */
+  potvrzeniZnamo: boolean;
 }) {
   const [otevrene, setOtevrene] = useState(false);
   const [zobrazitOtevrene, setZobrazitOtevrene] = useState(false);
@@ -429,6 +436,30 @@ export default function Nastroje({
           </div>
         ) : null}
       </div>
+
+      {/*
+        Vysvětlení puntíku u času směny (Šéfík 20. 9. 2026). Sedí v liště nad
+        mřížkou, ne dole v patičce, ať je vidět dřív, než se člověk zeptá.
+        Slova jsou z `POPIS_PUNTIKU` — táž, která nese `title` karty.
+      */}
+      {legendaPuntiku ? (
+        <ul className="ds-smd-legenda ds-smd-legenda-puntiku" aria-label="Význam puntíku u času směny">
+          {(["nevydano", "nepotvrzeno", "potvrzeno"] as const).map((k) => (
+            <li key={k}>
+              <span className="ds-smd-znacka" data-puntik={k} aria-hidden="true" />
+              {POPIS_PUNTIKU[k]}
+            </li>
+          ))}
+          {!potvrzeniZnamo ? (
+            <li
+              className="ds-smd-legenda-pozn"
+              title="Databáze zatím neumí říct, kdo směnu potvrdil (chybí migrace 20260920100000). Vydané směny proto puntík nemají."
+            >
+              Potvrzení zatím nejsou k dispozici
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
 
       {cipy.length > 0 ? (
         <ul className="ds-smd-cipy" aria-label="Aktivní filtry">

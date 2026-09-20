@@ -5,10 +5,14 @@ import { Fragment } from "react";
 import Ikona from "@/app/[rozsah]/ikona";
 import ZnackaOsoby from "@/app/znacka-osoby";
 import {
+  POPIS_PUNTIKU,
   kratkyCas,
+  puntikSmeny,
   puvodniStav,
   stavSmeny,
   type Mrizka,
+  type PotvrzeniRozpisu,
+  type PuntikSmeny,
   type RadekMrizky,
   type SkupinaMrizky,
   type SmenaD,
@@ -61,8 +65,10 @@ export function novaSmenaProOsobu(osobaId: string, den: string, pobockaId: strin
  *
  * Prázdná buňka nemá nic. „+ Přidat“ se ukáže až při najetí nebo
  * zaměření (klávesnice na tlačítko dosáhne pořád). Směna je jedna
- * kompaktní karta s časem; stav („Nevydáno“, „Změněno“) je značka
- * a jedno slovo, ne barva sama — kdo odstíny nerozliší, přečte si ho.
+ * kompaktní karta s časem a puntíkem. Puntík je červený (nevydáno),
+ * žlutý (vydáno a nepotvrzeno) nebo zelený s fajfkou (vydáno a potvrzeno);
+ * slovo se nepíše, je v `title` a v odečítači a barvy vysvětluje lišta
+ * nástrojů nad mřížkou. Kdo odstíny nerozliší, pozná zelený podle fajfky.
  *
  * ---------------------------------------------------------------------
  * POBOČKA, A POD NÍ ÚSEKY
@@ -88,6 +94,7 @@ export default function MrizkaTydne({
   dny,
   dnesni,
   planovani,
+  potvrzeni,
   poziceOsob,
   barvy,
   jmena,
@@ -106,6 +113,8 @@ export default function MrizkaTydne({
   dny: string[];
   dnesni: string;
   planovani: Planovani | null;
+  /** Kdo směny potvrdil (puntík u času); `null` = neví se. */
+  potvrzeni: PotvrzeniRozpisu | null;
   /** Štítek pod jménem: název pozice člověka, nebo `null`. */
   poziceOsob: (osobaId: string) => string | null;
   barvy: Map<string, string | null>;
@@ -229,6 +238,7 @@ export default function MrizkaTydne({
                   dny={dny}
                   dnesni={dnesni}
                   planovani={planovani}
+                  potvrzeni={potvrzeni}
                   poziceOsob={poziceOsob}
                   barvy={barvy}
                   jmena={jmena}
@@ -252,6 +262,7 @@ export default function MrizkaTydne({
               dny={dny}
               dnesni={dnesni}
               planovani={planovani}
+              potvrzeni={potvrzeni}
               poziceOsob={poziceOsob}
               barvy={barvy}
               jmena={jmena}
@@ -324,6 +335,7 @@ function SkupinaMrizkyView({
   dny,
   dnesni,
   planovani,
+  potvrzeni,
   poziceOsob,
   barvy,
   jmena,
@@ -340,6 +352,7 @@ function SkupinaMrizkyView({
   dny: string[];
   dnesni: string;
   planovani: Planovani | null;
+  potvrzeni: PotvrzeniRozpisu | null;
   poziceOsob: (osobaId: string) => string | null;
   barvy: Map<string, string | null>;
   jmena: Map<string, string>;
@@ -404,6 +417,7 @@ function SkupinaMrizkyView({
               dny={dny}
               dnesni={dnesni}
               planovani={planovani}
+              potvrzeni={potvrzeni}
               role={radek.osoba ? poziceOsob(radek.osoba.id) : souhrn}
               barva={radek.osoba ? (barvy.get(radek.osoba.id) ?? null) : null}
               jmena={jmena}
@@ -426,6 +440,7 @@ function RadekMrizkyView({
   dny,
   dnesni,
   planovani,
+  potvrzeni,
   role,
   barva,
   jmena,
@@ -442,6 +457,7 @@ function RadekMrizkyView({
   dny: string[];
   dnesni: string;
   planovani: Planovani | null;
+  potvrzeni: PotvrzeniRozpisu | null;
   role: string | null;
   barva: string | null;
   jmena: Map<string, string>;
@@ -518,6 +534,7 @@ function RadekMrizkyView({
                 jmena={jmena}
                 vybrana={vybranaId === s.id}
                 klikaci={planovani !== null}
+                puntik={puntikSmeny(s as SmenaD, potvrzeni)}
                 pobocka={psatPobocku ? (zkratkyPobocek.get(s.branch_id) ?? null) : null}
                 pobockaNazev={psatPobocku ? (nazvyPobocek.get(s.branch_id) ?? null) : null}
                 onOtevrit={() => onOtevrit({ den, smena: s })}
@@ -572,6 +589,7 @@ export function KartaSmeny({
   kompaktni = false,
   pobocka = null,
   pobockaNazev = null,
+  puntik = null,
 }: {
   s: Smena;
   jmena: Map<string, string>;
@@ -584,13 +602,28 @@ export function KartaSmeny({
   pobocka?: string | null;
   /** Celý název pobočky do `title` — zkratka sama by nikomu nic neřekla. */
   pobockaNazev?: string | null;
+  /** Barva puntíku u času; `null` = bez puntíku. Počítá `puntikSmeny` (lib/rozpis-desktop.ts). */
+  puntik?: PuntikSmeny | null;
 }) {
   const stav = stavSmeny(s as SmenaD);
   const puvodne = puvodniStav(s as SmenaD);
   const cas = `${hhmm(s.starts_at)}–${hhmm(s.ends_at)}`;
   const trhana = Boolean(s.pauza_od && s.pauza_do);
 
-  const stitek = stav === "koncept" ? "Nevydáno" : stav === "zmenena" ? "Změněno" : null;
+  /*
+    Stav se na kartě nepíše slovem, jen puntíkem u času (Šéfík 20. 9. 2026:
+    červený = nevydáno, žlutý = vydáno a nepotvrzeno, zelený = vydáno a
+    potvrzeno). Slovo zůstává v `title` a pro odečítač, barvy vysvětluje
+    lišta nad mřížkou. Karta je tak o řádek nižší.
+  */
+  const stitek =
+    stav === "koncept"
+      ? POPIS_PUNTIKU.nevydano
+      : stav === "zmenena"
+        ? "Změněno po vydání, nevydáno"
+        : puntik
+          ? POPIS_PUNTIKU[puntik]
+          : null;
   const pauza = trhana ? `pauza ${hhmm(s.pauza_od as string)}–${hhmm(s.pauza_do as string)}` : null;
   // Do karty se píše krátce; celý zápis zůstává v `title` a pro odečítač.
   const casNaKarte = kompaktni ? `${kratkyCas(hhmm(s.starts_at))}–${kratkyCas(hhmm(s.ends_at))}` : cas;
@@ -599,7 +632,7 @@ export function KartaSmeny({
       ? `pauza ${kratkyCas(hhmm(s.pauza_od as string))}–${kratkyCas(hhmm(s.pauza_do as string))}`
       : pauza
     : null;
-  const popisek = [stitek, pauzaNaKarte].filter(Boolean).join(" · ");
+  const popisek = pauzaNaKarte;
 
   // Celý popis do `title` a odečítače — karta sama je záměrně strohá.
   const podrobnosti = [
@@ -630,7 +663,7 @@ export function KartaSmeny({
           {pobocka}
         </span>
       ) : null}
-      {stav !== "vydana" ? <span className="ds-smd-znacka" aria-hidden="true" /> : null}
+      {puntik ? <span className="ds-smd-znacka" data-puntik={puntik} aria-hidden="true" /> : null}
       {popisek ? <span className="ds-smd-popisek">{popisek}</span> : null}
     </>
   );
