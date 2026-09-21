@@ -64,7 +64,7 @@ app.notifikovat(...)            ← JEDINÉ vstupní místo, security definer
    2. preference kategorie (vzkazy / nástěnka); urgentní se nepotlačuje
    3. priorita   low | normal | important | urgent
    4. slučování  dedupe_key (nepřečtené téže věci se nahradí, počet se sčítá,
-                 vyšší priorita se nikdy nesníží)
+                 priorita je vždy ta poslední — krok35 oddíl 5)
    5. záznam     notifications  ← vždy, i mimo směnu (je to záznam, ne rušení)
    6. kanál      app.zaradit_doruceni  → notifikace_doruceni (push …)
    │
