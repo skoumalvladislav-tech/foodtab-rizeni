@@ -30,6 +30,7 @@
 --     rozhovoru (běžný zaměstnanec nesmí číst employees, obrazovka
 --     proto ukazovala „kdosi“) a název osobního rozhovoru pro každého
 --     účastníka zvlášť.
+--  9. public.moje_rozhovory: systémová událost se nepočítá jako nepřečtená.
 --
 -- ---------------------------------------------------------------------
 -- CO SE NEMĚNÍ
@@ -771,3 +772,96 @@ grant execute on function public.jmena_osobnich_rozhovoru(uuid) to authenticated
 comment on function public.jmena_osobnich_rozhovoru(uuid) is
   'Názvy osobních rozhovorů bez názvu, jak je vidí volající: jména ostatních '
   'účastníků. Rozhovory s vlastním názvem se nevracejí.';
+
+
+-- ---------------------------------------------------------------------
+-- 9. moje_rozhovory: systémová událost není nepřečtená zpráva
+--
+-- „Vytvořen úkol“ v rozhovoru (typ = 'system') se do počtu nepřečtených
+-- nesmí započítat: účastníkům by u rozhovoru svítilo „1 nepřečtená“ a v
+-- odznaku by přibylo číslo za zprávu, kterou nikdo nenapsal. Vlákno samo
+-- událost ukazuje, dělítko „Nové zprávy“ ji nepočítá (lib/komunikace/vlakno.ts).
+--
+-- Zbytek je ŽIVÉ znění (pg_get_functiondef z 21. 9. 2026), změněné jsou jen
+-- tři podmínky `z.typ = 'zprava'`. Návratový tvar se nemění — stránky ho čtou
+-- (layout, vzkazy, dnes).
+-- ---------------------------------------------------------------------
+
+create or replace function public.moje_rozhovory(p_tenant uuid)
+returns table (
+  konverzace_id uuid, druh text, branch_id uuid, nazev text, adresat text,
+  posledni_kdy timestamptz, neprectenych integer, ceka integer, uzavreno_kdy timestamptz
+)
+language sql stable security definer set search_path = ''
+as $$
+  with ja as (
+    select app.muj_employee(p_tenant) as emp
+  ),
+  muj_usek as (
+    select e.usek_id from public.employees e
+    where e.id = (select emp from ja)
+  ),
+  smena as (
+    select app.smena_ted(p_tenant, (select emp from ja)) as pobocka
+  ),
+  moje as (
+    select k.*, u.precteno_do
+    from public.konverzace k
+    left join public.konverzace_ucastnici u
+      on u.konverzace_id = k.id
+     and u.employee_id = (select emp from ja)
+    where k.tenant_id = p_tenant
+      and (
+        (u.employee_id is not null and u.odesel_kdy is null)
+        or (
+          k.druh = 'pobocka'
+          and k.branch_id in (select app.visible_branch_ids(p_tenant))
+        )
+        or (
+          k.druh = 'usek'
+          and k.usek_id is not null
+          and k.usek_id = (select usek_id from muj_usek)
+        )
+      )
+  )
+  select
+    m.id,
+    m.druh,
+    m.branch_id,
+    m.nazev,
+    m.adresat,
+    max(z.vytvoreno_kdy) filter (where z.stornovano_kdy is null),
+    count(*) filter (
+      where z.stornovano_kdy is null
+        and z.typ = 'zprava'
+        and z.autor is distinct from (select emp from ja)
+        and (m.precteno_do is null or z.vytvoreno_kdy > m.precteno_do)
+    )::integer,
+    count(*) filter (
+      where z.stornovano_kdy is null
+        and z.typ = 'zprava'
+        and z.autor is distinct from (select emp from ja)
+        and (m.precteno_do is null or z.vytvoreno_kdy > m.precteno_do)
+        and not app.doruci_se((select pobocka from smena), m.branch_id, z.nalehava)
+    )::integer,
+    m.uzavreno_kdy
+  from moje m
+  left join public.konverzace_zpravy z on z.konverzace_id = m.id
+  where
+    app.modul_zapnuty(p_tenant, 'provoz')
+    and (select emp from ja) is not null
+  group by m.id, m.druh, m.branch_id, m.nazev, m.adresat, m.uzavreno_kdy, m.precteno_do
+  order by
+    (count(*) filter (
+      where z.stornovano_kdy is null
+        and z.typ = 'zprava'
+        and z.autor is distinct from (select emp from ja)
+        and (m.precteno_do is null or z.vytvoreno_kdy > m.precteno_do)
+    ) > 0) desc,
+    min(z.vytvoreno_kdy) filter (
+      where z.stornovano_kdy is null
+        and z.typ = 'zprava'
+        and (m.precteno_do is null or z.vytvoreno_kdy > m.precteno_do)
+    ) asc nulls last,
+    max(z.vytvoreno_kdy) desc nulls last;
+$$;

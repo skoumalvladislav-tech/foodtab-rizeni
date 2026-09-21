@@ -231,6 +231,12 @@ select pg_temp.check('systémová událost nikoho nepípá: Bořek má pořád 1
   and (select coalesce((telo->>'pocet')::integer, 1) from public.notifications
         where user_id = '43430000-0000-0000-0000-00000000000b' and druh = 'vzkaz.novy' and read_at is null) = 4);
 
+-- Systémová událost není nepřečtená zpráva: Bořek má nepřečtené jen Anniny čtyři.
+select set_config('test.user_id', '43430000-0000-0000-0000-00000000000b', false);
+select pg_temp.check('systémová událost se nepočítá do nepřečtených zpráv rozhovoru (4, ne 5)',
+  (select neprectenych from public.moje_rozhovory(:'tenant') where konverzace_id = :'konv') = 4);
+select set_config('test.user_id', :'sef', false);
+
 select pg_temp.check('přidělenému (Anna) přišlo PŘESNĚ JEDNO upozornění ukol.pridelen',
   pg_temp.pocet('43430000-0000-0000-0000-00000000000a', 'ukol.pridelen') = 1);
 select pg_temp.check('… s názvem úkolu a důležitostí (high = important)',
