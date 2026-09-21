@@ -1940,3 +1940,38 @@ a.pc-udalost:hover { color: var(--ink); }
 .pc-poznamka-navrhu a, .pc-detail p a, .pc-prazdno a {
   text-decoration: underline; text-underline-offset: 3px;
 }
+
+/* --- Přílohy ke zprávám ---------------------------------------------------- */
+
+.pc-priloha { display: grid; gap: 8px; }
+.pc-priloha-radek { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pc-priloha-radek small { font-size: 12px; color: var(--muted); }
+.pc-priloha-vyber {
+  display: grid; gap: 10px; padding: 12px 14px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.pc-priloha-vyber ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pc-priloha-vyber li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; }
+.pc-priloha-vyber li .ft-i { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.pc-priloha-nazev { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-priloha-vyber li small { font-size: 12px; color: var(--muted); flex: none; }
+.pc-priloha-popisek { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.pc-priloha-popisek input {
+  width: 100%; padding: 8px 10px; font: inherit; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+
+/* Přílohy ve vlákně: fotky jako náhledy, PDF jako řádek s názvem. */
+.pc-prilohy { display: grid; gap: 6px; margin-top: 8px; }
+.pc-prilohy-fotky { display: flex; gap: 6px; flex-wrap: wrap; }
+.pc-prilohy-fotky a { display: block; line-height: 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--line); }
+.pc-prilohy-fotky img { display: block; max-width: 220px; max-height: 180px; width: auto; height: auto; object-fit: cover; }
+.pc-priloha-soubor {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%;
+  padding: 6px 10px; border-radius: var(--radius-md); background: var(--sunken);
+  color: var(--ink); font-size: 13px; text-decoration: none;
+}
+.pc-priloha-soubor:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pc-priloha-soubor .ft-i { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.pc-priloha-soubor span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-priloha-soubor small { color: var(--muted); font-size: 12px; flex: none; }

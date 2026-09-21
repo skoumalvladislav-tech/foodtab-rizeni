@@ -10,8 +10,8 @@ import { oznacitPrecteno } from '../akce'
  *
  * Ukazuje jen to, co aplikace OPRAVDU ví:
  *   * účastníky (nebo větu, koho se týká odvozený kanál),
- *   * sdílené soubory — dnes jen hlasové zprávy; fotky a dokumenty se
- *     sdílet zatím nedají a panel to říká, nepředstírá prázdnou galerii,
+ *   * sdílené soubory — hlasové zprávy a přílohy (fotky, PDF; ty až po
+ *     nasazení migrace 20260921130000, do té doby jen hlasovky),
  *   * související úkoly (úkoly založené z zpráv téhle konverzace),
  *   * události v konverzaci (např. vytvořený úkol).
  *
@@ -23,7 +23,16 @@ import { oznacitPrecteno } from '../akce'
  */
 
 export type UcastnikUI = { id: string; jmeno: string; jeJa: boolean }
-export type SouborUI = { id: string; kdy: string; delkaS: number | null }
+export type SouborUI = {
+  /** Id zprávy — kotva ve vlákně (#z-…). */
+  id: string
+  /** Jednoznačný klíč řádku, když jedna zpráva nese víc souborů. */
+  klic?: string
+  kdy: string
+  delkaS: number | null
+  /** Název přiloženého souboru; u hlasovky null. */
+  nazev?: string | null
+}
 export type UkolUI = {
   id: string
   nazev: string
@@ -63,6 +72,7 @@ export default function PanelKonverzace({
   smiUkoly,
   zpravaProUkol,
   jeUzavrena,
+  prilohyDostupne = false,
 }: {
   rozsah: string
   konverzace: string
@@ -81,6 +91,8 @@ export default function PanelKonverzace({
   /** Poslední textová zpráva, ze které se dá udělat úkol; jinak null. */
   zpravaProUkol: string | null
   jeUzavrena: boolean
+  /** Přílohy jsou v databázi (migrace 20260921130000 nasazená). Bez nich panel řekne, že se fotky sdílet nedají. */
+  prilohyDostupne?: boolean
 }) {
   return (
     <aside className="ds-plocha pc-panel" aria-label="O konverzaci">
@@ -125,12 +137,12 @@ export default function PanelKonverzace({
         {soubory.length > 0 ? (
           <ul className="pc-seznam">
             {soubory.map((s) => (
-              <li key={s.id}>
+              <li key={s.klic ?? s.id}>
                 <span className="pc-avatar" aria-hidden="true">
-                  <Ikona klic="zprava" />
+                  <Ikona klic={s.nazev ? 'faktura' : 'zprava'} />
                 </span>
                 <a href={`#z-${s.id}`}>
-                  Hlasová zpráva{s.delkaS ? ` · ${mmss(s.delkaS)}` : ''}
+                  {s.nazev ? s.nazev : `Hlasová zpráva${s.delkaS ? ` · ${mmss(s.delkaS)}` : ''}`}
                   <small>{datumACasVPasmu(s.kdy, zona)}</small>
                 </a>
               </li>
@@ -139,9 +151,11 @@ export default function PanelKonverzace({
         ) : (
           <p className="pc-prazdno">Zatím nic nesdíleno.</p>
         )}
-        <p className="pc-prazdno" style={{ marginTop: '8px' }}>
-          Fotky a dokumenty se zatím sdílet nedají.
-        </p>
+        {prilohyDostupne ? null : (
+          <p className="pc-prazdno" style={{ marginTop: '8px' }}>
+            Fotky a dokumenty se zatím sdílet nedají.
+          </p>
+        )}
       </section>
 
       <section className="pc-sekce">

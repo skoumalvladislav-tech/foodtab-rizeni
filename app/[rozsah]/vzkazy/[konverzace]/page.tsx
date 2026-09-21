@@ -5,6 +5,7 @@ import { ZONA_VYCHOZI, denVPasmu } from '@/lib/cas'
 import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/hlasove-zpravy'
+import { KBELIK_PRILOH, PLATNOST_ODKAZU_PRILOH_S } from '@/lib/komunikace/prilohy'
 import { poskladatVlakno } from '@/lib/komunikace/vlakno'
 import { DotazSelhal, sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -16,6 +17,7 @@ import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from '../seznam-rozhovoru
 import HlasovkaNahravac from './hlasovka-nahravac'
 import PanelKonverzace, { type UcastnikUI, type UkolUI } from './panel-konverzace'
 import PosunNaKonec from './posun-na-konec'
+import PridatPrilohu from './priloha-pridat'
 import SkladaniZpravy from './skladani-zpravy'
 import VlaknoZprav, { type ZpravaUI } from './vlakno-zprav'
 
@@ -43,6 +45,8 @@ const ZONA = ZONA_VYCHOZI
 const POCET = 200
 
 type Priorita = 'normal' | 'important' | 'urgent'
+
+type PrilohaUI = ZpravaUI['prilohy'][number]
 
 type Zprava = {
   id: string
@@ -231,6 +235,49 @@ export default async function Rozhovor({
     }
   }
 
+  // Přílohy zpráv (fotky, PDF). Tabulka přibývá migrací 20260921130000; bez ní
+  // se přílohy nenačtou, tlačítko „Přidat přílohu“ se neukáže a rozhovor jede
+  // jako dřív. Kbelík je soukromý, otevírá se jen přes krátkodobý odkaz vydaný
+  // až po kontrole účastnictví (politika úložiště).
+  let prilohyDostupne = false
+  const prilohyZpravy = new Map<string, PrilohaUI[]>()
+  {
+    const { data: prilohyData, error: chybaPrilohy } = await supabase
+      .from('konverzace_prilohy')
+      .select('id, zprava_id, cesta, nazev, mime, velikost')
+      .eq('konverzace_id', konverzace)
+      .order('vytvoreno_kdy', { ascending: true })
+      .limit(500)
+
+    if (!chybaPrilohy) {
+      prilohyDostupne = true
+      const radky = (prilohyData ?? []) as Record<string, unknown>[]
+      const odkazyPriloh = new Map<string, string>()
+      if (radky.length > 0) {
+        const { data: podepsane } = await supabase.storage
+          .from(KBELIK_PRILOH)
+          .createSignedUrls(radky.map((r) => String(r.cesta)), PLATNOST_ODKAZU_PRILOH_S)
+        for (const p of podepsane ?? []) {
+          if (p.signedUrl && p.path) odkazyPriloh.set(p.path, p.signedUrl)
+        }
+      }
+      for (const r of radky) {
+        const zid = String(r.zprava_id)
+        const seznam = prilohyZpravy.get(zid) ?? []
+        seznam.push({
+          id: String(r.id),
+          nazev: String(r.nazev ?? ''),
+          mime: String(r.mime ?? ''),
+          velikost: Number(r.velikost) || 0,
+          odkaz: odkazyPriloh.get(String(r.cesta)) ?? null,
+        })
+        prilohyZpravy.set(zid, seznam)
+      }
+    } else if (!tabulkaNeexistuje(chybaPrilohy)) {
+      throw new DotazSelhal('přílohy zpráv', chybaPrilohy)
+    }
+  }
+
   // Kdo je tady „já“ — kvůli zarovnání, dělítku „Nové“ a tomu, co jde stornovat.
   const { data: ja, error: chybaJa } = await supabase
     .from('employees')
@@ -347,6 +394,7 @@ export default async function Rozhovor({
     maZvuk: z.zvuk_cesta !== null,
     objektTyp: z.objekt_typ,
     objektId: z.objekt_id,
+    prilohy: prilohyZpravy.get(z.id) ?? [],
   }))
 
   const polozky = poskladatVlakno(zpravyUI, {
@@ -453,6 +501,11 @@ export default async function Rozhovor({
                   <div style={{ padding: '0 18px 16px' }}>
                     <HlasovkaNahravac rozsah={rozsah} konverzace={konverzace} />
                   </div>
+                  {prilohyDostupne ? (
+                    <div style={{ padding: '0 18px 16px' }}>
+                      <PridatPrilohu rozsah={rozsah} konverzace={konverzace} tenantId={tenantId} />
+                    </div>
+                  ) : null}
                 </>
               )}
             </section>
@@ -476,8 +529,18 @@ export default async function Rozhovor({
               zalozeno={(hlavicka.zalozeno_kdy as string | null) ?? null}
               ucastnici={ucastniciPanel}
               soubory={zpravyUI
-                .filter((z) => z.maZvuk && !z.stornovana)
-                .map((z) => ({ id: z.id, kdy: z.vytvoreno, delkaS: z.zvukDelkaS }))}
+                .filter((z) => !z.stornovana && (z.maZvuk || z.prilohy.length > 0))
+                .flatMap((z) =>
+                  z.maZvuk
+                    ? [{ id: z.id, kdy: z.vytvoreno, delkaS: z.zvukDelkaS }]
+                    : z.prilohy.map((p) => ({
+                        id: z.id,
+                        klic: p.id,
+                        kdy: z.vytvoreno,
+                        delkaS: null,
+                        nazev: p.nazev,
+                      })),
+                )}
               ukoly={ukolyPanel}
               udalosti={zpravyUI
                 .filter((z) => z.typ === 'system')
@@ -486,6 +549,7 @@ export default async function Rozhovor({
               smiUkoly={smiUkoly}
               zpravaProUkol={zpravaProUkol}
               jeUzavrena={Boolean(hlavicka.uzavreno_kdy)}
+              prilohyDostupne={prilohyDostupne}
             />
           </div>
         </div>

@@ -4,6 +4,7 @@ import Ikona from '@/app/[rozsah]/ikona'
 import { datumACasVPasmu, hodinaVPasmu } from '@/lib/cas'
 import { mmss } from '@/lib/hlasove-zpravy'
 import { popisStavuPrepisu } from '@/lib/komunikace/prepis'
+import { jeObrazek, velikostText } from '@/lib/komunikace/prilohy'
 import type { PolozkaVlakna, ZpravaVlakna } from '@/lib/komunikace/vlakno'
 import { slovoPodleCisla } from '@/lib/upozorneni-text'
 import { stornovatZpravu } from '../akce'
@@ -23,6 +24,15 @@ import { stornovatZpravu } from '../akce'
  * „DŮLEŽITÉ“) a v panelu. Barva nikdy sama.
  */
 
+export type PrilohaZpravyUI = {
+  id: string
+  nazev: string
+  mime: string
+  velikost: number
+  /** Podepsaný odkaz (platí hodinu), nebo null, když se nepodařilo vystavit. */
+  odkaz: string | null
+}
+
 export type ZpravaUI = ZpravaVlakna & {
   text: string
   priorita: 'normal' | 'important' | 'urgent'
@@ -34,6 +44,8 @@ export type ZpravaUI = ZpravaVlakna & {
   maZvuk: boolean
   objektTyp: string | null
   objektId: string | null
+  /** Přílohy zprávy (fotky, PDF); prázdné pole, když žádné nejsou nebo migrace čeká. */
+  prilohy: PrilohaZpravyUI[]
 }
 
 const STITKY: Record<'important' | 'urgent', string> = {
@@ -140,6 +152,44 @@ export default function VlaknoZprav({
               ) : null}
               {z.text}
               {z.stornovana ? <span className="pc-zprava-meta"> · staženo</span> : null}
+
+              {z.prilohy.length > 0 ? (
+                <div className="pc-prilohy">
+                  <div className="pc-prilohy-fotky">
+                    {z.prilohy
+                      .filter((a) => jeObrazek(a.mime) && a.odkaz)
+                      .map((a) => (
+                        <a key={a.id} href={a.odkaz ?? undefined} target="_blank" rel="noopener noreferrer" title={a.nazev}>
+                          {/* eslint-disable-next-line @next/next/no-img-element -- podepsaný odkaz na soukromý kbelík, next/image by ho zbytečně proháněl přes optimalizátor */}
+                          <img src={a.odkaz ?? ''} alt={a.nazev} loading="lazy" />
+                        </a>
+                      ))}
+                  </div>
+                  {z.prilohy
+                    .filter((a) => !jeObrazek(a.mime) || !a.odkaz)
+                    .map((a) =>
+                      a.odkaz ? (
+                        <a
+                          key={a.id}
+                          className="pc-priloha-soubor"
+                          href={a.odkaz}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <Ikona klic="faktura" />
+                          <span>{a.nazev}</span>
+                          <small>{velikostText(a.velikost)}</small>
+                        </a>
+                      ) : (
+                        <span key={a.id} className="pc-priloha-soubor">
+                          <Ikona klic="faktura" />
+                          <span>{a.nazev}</span>
+                          <small>nepodařilo se načíst</small>
+                        </span>
+                      ),
+                    )}
+                </div>
+              ) : null}
 
               {z.maZvuk ? (
                 <div className="pc-hlasovka">

@@ -35,6 +35,19 @@ import {
 } from '../lib/komunikace/prepis.ts'
 import { denVPasmu } from '../lib/cas.ts'
 import { slozitPush } from '../lib/komunikace/push-zprava.ts'
+import {
+  MAX_BAJTU,
+  MAX_PRILOH,
+  TYPY_PRILOH,
+  cestaPriloh,
+  jeTypPriloh,
+  ocistitNazev,
+  textZpravyPrilohy,
+  typSouboru,
+  velikostText,
+  zkontrolujPoZmenseni,
+  zkontrolujVyber,
+} from '../lib/komunikace/prilohy.ts'
 import { popisDne, poskladatVlakno } from '../lib/komunikace/vlakno.ts'
 import {
   hledatPrijemce,
@@ -268,6 +281,72 @@ const p6 = slozitPush({ typ: 'jedna', pocet: 1, druh: null, telo: null, priorita
 je('upozornění, které mezitím zmizelo, se řekne obecně', p6.body, 'Máte nové upozornění')
 je('souhrn nikdy není naléhavý', slozitPush({ typ: 'souhrn', pocet: 2, druh: null, telo: null, priorita: 'urgent' }).urgent, false)
 je('neznámý druh nevyleze jinak než obecně', slozitPush({ typ: 'jedna', pocet: 1, druh: 'neznamy.druh', telo: {}, priorita: 'normal' }).body, 'Upozornění')
+
+console.log('\n== Přílohy ke zprávám ==')
+
+const MBP = 1024 * 1024
+je('typ z prohlížeče', typSouboru({ name: 'a.jpg', type: 'image/jpeg' }), 'image/jpeg')
+je('typ s parametrem se ořízne', typSouboru({ name: 'a.png', type: 'image/png; charset=x' }), 'image/png')
+je('image/jpg se sjednotí na jpeg', typSouboru({ name: 'a.jpg', type: 'image/jpg' }), 'image/jpeg')
+je('prázdný typ u PDF se dovodí z přípony', typSouboru({ name: 'Faktura.PDF', type: '' }), 'application/pdf')
+je('prázdný typ a neznámá přípona = nic (neuhaduje se)', typSouboru({ name: 'a.exe', type: '' }), '')
+je('povolené typy jsou čtyři', Object.keys(TYPY_PRILOH).sort(), ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+je('jeTypPriloh: pdf ano, html ne, toString ne', [jeTypPriloh('application/pdf'), jeTypPriloh('text/html'), jeTypPriloh('toString')], [true, false, false])
+je('limity sedí s migrací (5 příloh, 10 MiB)', [MAX_PRILOH, MAX_BAJTU], [5, 10485760])
+
+je('cesta v úložišti: firma/rozhovor/id.přípona',
+  cestaPriloh('t1', 'k1', 'u1', 'application/pdf'), 't1/k1/u1.pdf')
+je('velikost: bajty', velikostText(512), '512 B')
+je('velikost: kB', velikostText(120000), '117 kB')
+je('velikost: MB s čárkou', velikostText(1.5 * MBP), '1,5 MB')
+je('velikost: nesmysl = prázdné', velikostText(-1), '')
+
+je('název: složky pryč', ocistitNazev('../../etc/passwd'), 'passwd')
+je('název: zpětná lomítka pryč', ocistitNazev('C:' + String.fromCharCode(92) + 'x' + String.fromCharCode(92) + 'foto.jpg'), 'foto.jpg')
+je('název: prázdný = soubor', ocistitNazev('   '), 'soubor')
+je('název: řídicí znaky pryč', ocistitNazev('a' + String.fromCharCode(0) + 'b.jpg'), 'ab.jpg')
+je('název: strop 120 znaků', ocistitNazev('x'.repeat(300)).length, 120)
+
+const sf = (name, type, size) => ({ name, type, size })
+let vyb = zkontrolujVyber([sf('a.jpg', 'image/jpeg', MBP), sf('b.pdf', 'application/pdf', 2 * MBP)], 0)
+je('platný výběr projde celý', [vyb.platne, vyb.chyby], [[0, 1], []])
+
+vyb = zkontrolujVyber([sf('a.exe', 'application/x-msdownload', 100), sf('b.jpg', 'image/jpeg', 100)], 0)
+je('nepovolený typ se odmítne jmenovitě, zbytek projde', [vyb.platne, vyb.chyby.length, vyb.chyby[0].includes('a.exe')], [[1], 1, true])
+
+vyb = zkontrolujVyber([sf('velke.pdf', 'application/pdf', 11 * MBP)], 0)
+je('PDF přes 10 MB se odmítne', [vyb.platne, vyb.chyby.length], [[], 1])
+
+vyb = zkontrolujVyber([sf('velka.jpg', 'image/jpeg', 20 * MBP)], 0)
+je('velká fotka projde výběrem (zmenší se, pak se kontroluje znovu)', vyb.platne, [0])
+
+vyb = zkontrolujVyber([sf('nula.jpg', 'image/jpeg', 0)], 0)
+je('prázdný soubor se odmítne', [vyb.platne, vyb.chyby.length], [[], 1])
+
+vyb = zkontrolujVyber([1, 2, 3, 4].map((i) => sf(i + '.png', 'image/png', 100)), 3)
+je('přebytek nad pět se odřízne a řekne se to (3 už vybrané + 4 nové = jen 2 volná)',
+  [vyb.platne, vyb.chyby.length], [[0, 1], 2])
+
+vyb = zkontrolujVyber([sf('a.png', 'image/png', 100)], 5)
+je('při plném počtu nejde nic dalšího', [vyb.platne, vyb.chyby.length], [[], 1])
+
+vyb = zkontrolujVyber([sf('a.png', 'image/png', 100)], 9)
+je('přeplněno (uzMa > 5) nikdy nedá záporný počet', [vyb.platne, vyb.chyby.length], [[], 1])
+
+vyb = zkontrolujVyber([sf('foto.heic', 'image/heic', 3 * MBP)], 0)
+je('HEIC projde výběrem (komponenta ho zkusí převést)', vyb.platne, [0])
+
+je('po zmenšení: JPEG do limitu prošel', zkontrolujPoZmenseni('a.jpg', 'image/jpeg', MBP), null)
+je('po zmenšení: pořád přes limit', zkontrolujPoZmenseni('a.jpg', 'image/jpeg', 11 * MBP) !== null, true)
+je('po zmenšení: HEIC, který se nepodařilo převést, se odmítne', zkontrolujPoZmenseni('a.heic', 'image/heic', MBP) !== null, true)
+je('po zmenšení: nula bajtů se odmítne', zkontrolujPoZmenseni('a.jpg', 'image/jpeg', 0) !== null, true)
+
+je('text zprávy: popisek má přednost', textZpravyPrilohy('  Tady je objednávka  ', ['a.pdf']), 'Tady je objednávka')
+je('text zprávy: jedna příloha bez popisku', textZpravyPrilohy('', ['a.pdf']), 'Příloha: a.pdf')
+je('text zprávy: víc příloh bez popisku', textZpravyPrilohy('   ', ['a.pdf', 'b.jpg']), 'Přílohy (2): a.pdf, b.jpg')
+je('text zprávy: název v textu je očištěný', textZpravyPrilohy('', ['../x/a.pdf']), 'Příloha: a.pdf')
+je('text zprávy: dlouhý popisek se ořízne na 4000', textZpravyPrilohy('x'.repeat(5000), []).length, 4000)
+je('text zprávy: nikdy prázdný', textZpravyPrilohy('', []), 'Příloha')
 
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO\n' : `\nCHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)

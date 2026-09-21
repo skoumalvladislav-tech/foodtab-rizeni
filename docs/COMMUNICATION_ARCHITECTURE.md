@@ -158,6 +158,16 @@ protože Vercel nasazuje z `main` hned a migrace až potom.
 * Do publikace `supabase_realtime` se přidává jen `notifications` (tolerantně
   k prostředí bez publikace).
 
+**D. `20260921130000_prilohy.sql`** — scénář `krok44` (volitelná; nic na ní nestojí)
+* Kbelík `prilohy` (soukromý, 10 MB, jpeg/png/webp/pdf), tabulka
+  `konverzace_prilohy` (RLS: čte účastník rozhovoru; **bez zápisového grantu**).
+* Politiky úložiště: select a insert přes `app.je_ucastnik`, delete jen sirotka;
+  žádná update (soubor pod odkazem, který už někdo má, se nesmí tiše změnit).
+  Cestu `firma/rozhovor/soubor` rozebírá tentýž parser jako u hlasovek.
+* `pripojit_prilohu` — jediná cesta, kudy příloha vznikne: jen autor zprávy,
+  do 10 minut od odeslání, ne ke stornované zprávě, cesta patří tomuto
+  rozhovoru i firmě, soubor v úložišti opravdu je, nejvýš 5 na zprávu.
+
 Těla funkcí vycházejí ze **živé** databáze (`pg_get_functiondef`), ne z nejstarší
 migrace — dvakrát už novější migrace přepsala objekt podle staršího stavu.
 
@@ -216,9 +226,10 @@ Podle přiloženého vizuálu (desktop tři sloupce, mobil obrazovky 1–8).
 
 ## 7. Co je záměrně mimo tuto etapu
 
-Přílohy (fotky, dokumenty), vyhledávání ve zprávách, doba uchování zpráv,
+Vyhledávání ve zprávách, doba uchování zpráv,
 konfigurovatelné tiché hodiny, e-mailový kanál upozornění, model pro návrh
-úkolu, přepis hlasu. Každé je v `NOCNI-REPORT-KOMUNIKACE.md` zařazeno do
+úkolu, přepis hlasu. (Přílohy — fotky, PDF — původně mezi nimi byly a nyní jsou
+v migraci D.) Každé je v `NOCNI-REPORT-KOMUNIKACE.md` zařazeno do
 HOTOVO / ČÁSTEČNĚ / PŘIPRAVENO / NEHOTOVO / EXTERNÍ ZÁVISLOST podle toho, co
 v repozitáři opravdu je.
 
@@ -233,6 +244,8 @@ v repozitáři opravdu je.
 | Doménová logika | `lib/komunikace/*` (návrh úkolu, přepis, vlákno, příjemci, web push, text push), `lib/upozorneni-text.ts` |
 | Testy logiky | `scripts/komunikace.test.mjs`, `scripts/upozorneni.test.mjs`, `scripts/web-push.test.mjs` |
 | UI | `app/[rozsah]/vzkazy/**`, `app/[rozsah]/ukoly/ukol/[id]`, `app/[rozsah]/provozni-centrum/*`, `components/shell/ZivaAktualizace.tsx` |
+| Přílohy (SQL) | `20260921130000_prilohy.sql`, `krok44_scenar.sql` |
+| Přílohy (logika a UI) | `lib/komunikace/prilohy.ts`, `vzkazy/[konverzace]/{priloha-pridat.tsx,akce-prilohy.ts}`, zobrazení ve `vlakno-zprav.tsx` a v panelu |
 | Push (odesílač, plánovač, service worker, zapnutí na zařízení) | `app/api/uloha/notifikace-push`, `.github/workflows/notifikace-push.yml`, `public/sw.js`, `upozorneni/nastaveni/push-prepinac.tsx` |
 
 Podrobnosti, co je hotové a co ne, jsou v `NOCNI-REPORT-KOMUNIKACE.md`.
