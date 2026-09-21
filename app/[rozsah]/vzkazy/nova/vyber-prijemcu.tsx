@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 
 import Ikona from '@/app/[rozsah]/ikona'
+import TlacitkoOdeslat from '../tlacitko-odeslat'
 import {
   hledatPrijemce,
   seskupitPrijemce,
@@ -140,9 +141,9 @@ export default function VyberPrijemcu({
       </div>
 
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-        <button type="submit" className="ft-tl ft-tl-hlavni" disabled={vybrani.length === 0}>
+        <TlacitkoOdeslat className="ft-tl ft-tl-hlavni" disabled={vybrani.length === 0} pracuje="Zakládám…">
           {vybrani.length === 0 ? 'Založit rozhovor' : `Založit rozhovor (${vybrani.length})`}
-        </button>
+        </TlacitkoOdeslat>
       </div>
     </form>
   )

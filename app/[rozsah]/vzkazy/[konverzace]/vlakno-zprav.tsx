@@ -8,6 +8,7 @@ import { jeObrazek, velikostText } from '@/lib/komunikace/prilohy'
 import type { PolozkaVlakna, ZpravaVlakna } from '@/lib/komunikace/vlakno'
 import { slovoPodleCisla } from '@/lib/upozorneni-text'
 import { stornovatZpravu } from '../akce'
+import { PevnaHlasovka, PevnyObrazek } from './pevny-zdroj'
 
 /**
  * Vlákno rozhovoru — jen vykreslení.
@@ -160,8 +161,7 @@ export default function VlaknoZprav({
                       .filter((a) => jeObrazek(a.mime) && a.odkaz)
                       .map((a) => (
                         <a key={a.id} href={a.odkaz ?? undefined} target="_blank" rel="noopener noreferrer" title={a.nazev}>
-                          {/* eslint-disable-next-line @next/next/no-img-element -- podepsaný odkaz na soukromý kbelík, next/image by ho zbytečně proháněl přes optimalizátor */}
-                          <img src={a.odkaz ?? ''} alt={a.nazev} loading="lazy" />
+                          <PevnyObrazek src={a.odkaz ?? ''} alt={a.nazev} />
                         </a>
                       ))}
                   </div>
@@ -194,7 +194,7 @@ export default function VlaknoZprav({
               {z.maZvuk ? (
                 <div className="pc-hlasovka">
                   {z.zvukOdkaz ? (
-                    <audio controls preload="none" src={z.zvukOdkaz} />
+                    <PevnaHlasovka src={z.zvukOdkaz} />
                   ) : (
                     <small>Hlasovku se nepodařilo načíst.</small>
                   )}

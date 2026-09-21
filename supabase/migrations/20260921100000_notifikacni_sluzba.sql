@@ -548,6 +548,13 @@ begin
        and d.user_id   = v_u.user_id
        and d.stav      = 'ceka_na_smenu';
 
+    -- Mezi výběrem člověka a počítáním se čekající mohla sloučit nebo zrušit
+    -- (souběžná nová zpráva): bez čekajících se nic neuvolňuje, jinak by vznikl
+    -- souhrn „Čeká na vás 1 zpráva“ navíc ke skutečnému pípnutí.
+    if v_radku = 0 then
+      continue;
+    end if;
+
     if v_radku = 1 then
       update public.notifikace_doruceni d
          set stav = 'k_odeslani', uvolneno_kdy = now()

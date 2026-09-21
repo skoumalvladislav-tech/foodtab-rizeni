@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import type { NavrhUkolu } from '@/lib/komunikace/navrh-ukolu'
+import TlacitkoOdeslat from '../../tlacitko-odeslat'
 
 /**
  * Formulář úkolu ze zprávy — jen vykreslení.
@@ -203,9 +204,9 @@ export default function FormularUkolu({
         </fieldset>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button type="submit" className="ft-tl ft-tl-hlavni">
+          <TlacitkoOdeslat className="ft-tl ft-tl-hlavni" pracuje="Vytvářím…">
             Vytvořit úkol
-          </button>
+          </TlacitkoOdeslat>
           <Link href={zpet} className="ft-tl ft-tl-vedlejsi">
             Zrušit
           </Link>

@@ -1702,7 +1702,7 @@ div.ds-smd-smena:hover { box-shadow: none; }
 }
 .pc-zalozky .ft-i { width: 18px; height: 18px; flex: none; }
 .pc-pocet {
-  display: inline-grid; place-items: center; min-width: 20px; height: 20px;
+  position: relative; display: inline-grid; place-items: center; min-width: 20px; height: 20px;
   padding: 0 6px; border-radius: 10px; font-size: 12px; font-weight: 600;
   font-variant-numeric: tabular-nums;
   background: var(--mosaz-sv); color: var(--mosaz-ink);

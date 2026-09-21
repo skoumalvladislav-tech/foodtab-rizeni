@@ -57,7 +57,8 @@ export default function PcZalozky({
             <Ikona klic={z.ikona} />
             {z.nazev}
             {pocet > 0 ? (
-              <span className="pc-pocet" aria-label={`${pocet} nepřečtených`}>
+              <span className="pc-pocet">
+                <span className="sr-only">{pocet} nepřečtených: </span>
                 {pocet > 99 ? '99+' : pocet}
               </span>
             ) : null}

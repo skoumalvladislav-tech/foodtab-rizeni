@@ -36,8 +36,9 @@ export default function MobileBottomNav({
             <Ikona klic={p.ikona} />
             <span>{p.kratky}</span>
             {(odznaky?.[p.segment] ?? 0) > 0 ? (
-              <b className="pc-odznak-lista" aria-label={`${odznaky?.[p.segment]} nepřečtených`}>
-                {(odznaky?.[p.segment] ?? 0) > 99 ? "99+" : odznaky?.[p.segment]}
+              <b className="pc-odznak-lista">
+                <span aria-hidden="true">{(odznaky?.[p.segment] ?? 0) > 99 ? "99+" : odznaky?.[p.segment]}</span>
+                <span className="sr-only">{odznaky?.[p.segment]} nepřečtených</span>
               </b>
             ) : null}
           </Link>

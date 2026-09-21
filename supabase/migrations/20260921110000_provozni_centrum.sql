@@ -87,9 +87,13 @@ begin
     return NEW;
   end if;
 
+  -- Kontroluje se jen NOVĚ zapsaná vazba. Nezměněná, nebo jen ZRUŠENÁ (NULL) se
+  -- nekontroluje: cizí klíče `on delete set null` vazbu při smazání zprávy či
+  -- rozhovoru jen nulují — kdyby to trigger blokoval, nešlo by smazat zprávu,
+  -- rozhovor ani (kaskádou) úsek, pobočku či firmu s navázaným úkolem.
   if TG_OP = 'UPDATE'
-     and NEW.konverzace_id is not distinct from OLD.konverzace_id
-     and NEW.zprava_id     is not distinct from OLD.zprava_id then
+     and (NEW.konverzace_id is null or NEW.konverzace_id = OLD.konverzace_id)
+     and (NEW.zprava_id     is null or NEW.zprava_id     = OLD.zprava_id) then
     return NEW;
   end if;
 
@@ -424,6 +428,15 @@ begin
 
   if v_typ = 'system' then
     raise exception 'Z události v rozhovoru úkol nevznikne.'
+      using errcode = 'check_violation';
+  end if;
+
+  -- Termín potřebuje POBOČKU: okamžik z hodiny na zdi se počítá podle pásma
+  -- pobočky (pravidlo 11) a zadat_ukol pro úkol bez pobočky termín tiše zahodí
+  -- (app.zona_pobocky(NULL) nemá z čeho pásmo vzít). Radši chyba než úkol bez
+  -- termínu, o kterém si zadavatel myslí, že ho má.
+  if p_branch is null and p_termin is not null then
+    raise exception 'Úkol s termínem zadejte na konkrétní pobočce — v rozsahu „celá firma“ by se termín ztratil.'
       using errcode = 'check_violation';
   end if;
 

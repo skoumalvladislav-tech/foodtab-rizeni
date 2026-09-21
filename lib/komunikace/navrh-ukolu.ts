@@ -337,7 +337,9 @@ export function najdiTermin(textPuvodni: string, dnes: string): NalezTerminu {
   )
   if (rozdilna.size > 1) nalezy.push('Ve zprávě je víc různých dnů — ověřte, který platí.')
   if (prvni.nejiste) nalezy.push(prvni.nejiste)
-  if (!cas && !data.some((d) => d.vaha === 0) && /\bdo\s+\d{1,2}\b/.test(t)) nalezy.push('Ve zprávě je „do“ s číslem — pokud je to hodina, doplňte čas.')
+  if (!cas && !data.some((d) => d.vaha === 0) && /\b(?:do|v|ve)\s+\d{1,2}\b/.test(t)) {
+    nalezy.push('Ve zprávě je „do“ nebo „v“ s číslem — pokud je to hodina, doplňte čas.')
+  }
 
   return { termin, nalezy, kontrola }
 }

@@ -188,6 +188,13 @@ export default async function UkolZeZpravy({
       <div style={{ padding: '16px', paddingBottom: '32px' }}>
         <PcZalozky rozsah={rozsah} aktivni="komunikace" />
 
+        {scope.branchId === null ? (
+          <p className="pc-poznamka-navrhu">
+            Jste v rozsahu „Celá firma“: úkol s <strong>termínem</strong> zadejte na konkrétní pobočce
+            (přepněte pobočku nahoře) — bez pobočky by se termín ztratil a databáze úkol odmítne.
+          </p>
+        ) : null}
+
         <FormularUkolu
           akce={zalozitUkolZeZpravy}
           rozsah={rozsah}

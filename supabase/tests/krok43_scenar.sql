@@ -36,6 +36,16 @@ exception when others then
   return sqlstate = p_stav;
 end $$;
 
+-- Totéž, ale i s částí hlášky: spadnout musí TA větev, kterou zkoušíme.
+create or replace function pg_temp.spadne_hlaskou(p_sql text, p_stav text, p_hlaska text)
+returns boolean language plpgsql as $$
+begin
+  execute p_sql;
+  return false;
+exception when others then
+  return sqlstate = p_stav and sqlerrm like '%' || p_hlaska || '%';
+end $$;
+
 create or replace function pg_temp.pocet(p_user uuid, p_druh text)
 returns integer language sql as $$
   select count(*)::integer from public.notifications
@@ -348,6 +358,24 @@ returning id as legit \gset
 select pg_temp.check('účastník rozhovoru vazbu zapsat smí (trigger nepřehání)',
   exists (select 1 from public.tasks where id = :'legit' and konverzace_id = :'konv'));
 
+-- Totéž přes UPDATE: nově zapsaná vazba se kontroluje, nezměněná ani zrušená ne.
+select pg_temp.check('přepsání vazby na rozhovor JINÉ firmy (UPDATE) se odmítne',
+  pg_temp.spadne(format($q$update public.tasks set konverzace_id = %L::uuid, zprava_id = null where id = %L::uuid$q$,
+    :'cizi_konv', :'legit'), '42501'));
+select pg_temp.check('přepsání vazby na zprávu z cizího rozhovoru (UPDATE) se odmítne',
+  pg_temp.spadne(format($q$update public.tasks set zprava_id = %L::uuid where id = %L::uuid$q$,
+    :'cizi_zprava', :'legit'), '42501'));
+select pg_temp.check('nezměněná vazba při jiné úpravě úkolu (UPDATE názvu) projde',
+  not pg_temp.spadne(format($q$update public.tasks set title = 'Legitimní vazba 2' where id = %L::uuid$q$, :'legit'), '42501'));
+
+-- Zrušení vazby (cizí klíč on delete set null při smazání zprávy/rozhovoru) smí
+-- provést i ten, kdo není účastníkem — třeba správce bez přihlášení. Nic
+-- nového se nezapisuje, takže se nekontroluje.
+select set_config('test.user_id', '', false);
+select pg_temp.check('zrušení vazby na zprávu smí i ten, kdo v rozhovoru není (FK set null)',
+  not pg_temp.spadne(format($q$update public.tasks set zprava_id = null where id = %L::uuid$q$, :'legit'), '42501'));
+select set_config('test.user_id', :'sef', false);
+
 
 \echo ''
 \echo '== 5. Producent: přidělený úkol — adresáti ================'
@@ -454,6 +482,23 @@ select pg_temp.check('úkol z uzavřeného rozhovoru vznikl a nese vazbu na zpr�
   (select zprava_id = :'zprava_uz' and konverzace_id = :'konv_uz' from public.tasks where id = :'ukol_uz'));
 select pg_temp.check('… ale do uzavřeného rozhovoru se žádná událost nezapsala',
   not exists (select 1 from public.konverzace_zpravy where konverzace_id = :'konv_uz' and typ = 'system'));
+
+-- Smazání zprávy (nebo rozhovoru) s navázaným úkolem: cizí klíč vazbu jen vynuluje
+-- a trigger to nesmí blokovat. Aplikace dnes tvrdě nemaže, ale kaskáda ze smazání
+-- úseku, pobočky či firmy stejnou cestou projde.
+delete from public.konverzace_zpravy where id = :'zprava_uz';
+select pg_temp.check('smazání zprávy s navázaným úkolem projde a vazba na zprávu se vynuluje',
+  (select zprava_id is null and konverzace_id = :'konv_uz' from public.tasks where id = :'ukol_uz'));
+
+-- Termín potřebuje pobočku (bez ní by ho zadat_ukol tiše zahodil).
+select public.poslat_zpravu(:'konv', 'Krok43: zpráva pro firemní úkol.') as m_firma \gset
+select pg_temp.check('úkol s termínem bez pobočky (rozsah „celá firma“) se odmítne, ne zadá bez termínu',
+  pg_temp.spadne_hlaskou(format(
+    $q$select public.zalozit_ukol_ze_zpravy(%L::uuid, %L::uuid, null::uuid, 'Firemní úkol', '', timestamp '2026-12-01 10:00', 'normal', null, null, %L::uuid)$q$,
+    :'tenant', :'m_firma', :'anna'), '23514', 'konkrétní pobočce'));
+select public.zalozit_ukol_ze_zpravy(:'tenant', :'m_firma', null, 'Firemní úkol bez termínu', '', null, 'normal', null, null, :'anna') as ukol_firma \gset
+select pg_temp.check('… bez termínu firemní úkol vznikne',
+  exists (select 1 from public.tasks where id = :'ukol_firma' and due_at is null));
 
 
 \echo ''
