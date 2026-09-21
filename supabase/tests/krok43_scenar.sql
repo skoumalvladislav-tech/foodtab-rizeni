@@ -445,6 +445,54 @@ select pg_temp.check('běžný zaměstnanec (Petr) jména nedostane, ač zná id
   (select count(*) from public.kdo_nepotvrdil(:'tenant', :'oz')) = 0);
 
 
+\echo ''
+\echo '== 8. Jména v rozhovoru ===================================='
+
+-- Skupinový rozhovor bez názvu: Anna, Bořek a Dana (založila Anna).
+select set_config('test.user_id', '43430000-0000-0000-0000-00000000000a', false);
+select public.zalozit_rozhovor(:'tenant', 'osobni', null, null, null,
+  array[:'borek', :'dana']::uuid[]) as skupina \gset
+select public.zalozit_rozhovor(:'tenant', 'osobni', null, 'Krok43 s názvem', null,
+  array[:'borek']::uuid[]) as s_nazvem \gset
+select public.poslat_zpravu(:'skupina', 'Krok43: skupinová zpráva.') as zs \gset
+
+select pg_temp.check('účastník vidí jména všech v rozhovoru (i autory zpráv)',
+  (select count(*) from public.lide_v_rozhovoru(:'skupina')) = 3
+  and exists (select 1 from public.lide_v_rozhovoru(:'skupina') where employee_id = :'dana' and jmeno = 'Dana Čtyřicettři'));
+
+select set_config('test.user_id', '43430000-0000-0000-0000-00000000000e', false);
+select pg_temp.check('člověk, který v rozhovoru NENÍ (Petr), nedostane žádná jména',
+  (select count(*) from public.lide_v_rozhovoru(:'skupina')) = 0);
+
+select set_config('test.user_id', :'sef', false);
+select pg_temp.check('ani majitel s celofiremním rozsahem (rozhovor je osobní, není jeho)',
+  (select count(*) from public.lide_v_rozhovoru(:'skupina')) = 0);
+
+select pg_temp.check('neexistující rozhovor nevrátí nic',
+  (select count(*) from public.lide_v_rozhovoru(gen_random_uuid())) = 0);
+
+-- Názvy pro každého jiné: Anna vidí ostatní, Bořek vidí Annu a Danu.
+select set_config('test.user_id', '43430000-0000-0000-0000-00000000000a', false);
+select pg_temp.check('zakladatelka vidí název = ostatní (Bořek, Dana)',
+  (select nazev from public.jmena_osobnich_rozhovoru(:'tenant') where konverzace_id = :'skupina')
+  = 'Bořek Čtyřicettři, Dana Čtyřicettři');
+
+select set_config('test.user_id', '43430000-0000-0000-0000-00000000000b', false);
+select pg_temp.check('Bořek vidí u téhož rozhovoru JINÝ název (Anna, Dana) — ne sám sebe',
+  (select nazev from public.jmena_osobnich_rozhovoru(:'tenant') where konverzace_id = :'skupina')
+  = 'Anna Čtyřicettři, Dana Čtyřicettři');
+select pg_temp.check('rozhovor s vlastním názvem se nevrací (název už má)',
+  not exists (select 1 from public.jmena_osobnich_rozhovoru(:'tenant') where konverzace_id = :'s_nazvem'));
+
+select set_config('test.user_id', '43430000-0000-0000-0000-00000000000e', false);
+select pg_temp.check('Petr cizí rozhovory ve výpisu nemá',
+  not exists (select 1 from public.jmena_osobnich_rozhovoru(:'tenant') where konverzace_id = :'skupina'));
+
+select set_config('test.user_id', (select user_id::text from public.profiles where email = 'cizi@jinafirma.cz'), false);
+select pg_temp.check('nečlen firmy (cizi@jinafirma.cz) nemá žádný výpis názvů',
+  (select count(*) from public.jmena_osobnich_rozhovoru(:'tenant')) = 0);
+
+
 -- Úklid: cizí firma se maže (kaskádou i její rozhovor, zpráva a upozornění).
 reset role;
 delete from public.tenants where id = :'cizi_firma';

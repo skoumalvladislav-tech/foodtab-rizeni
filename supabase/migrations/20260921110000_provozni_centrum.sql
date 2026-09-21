@@ -26,6 +26,10 @@
 --     zaměstnanec nesmí číst tabulku employees, funkce vrací jen id,
 --     jméno a zařazení).
 --  7. public.kdo_nepotvrdil: kontrola oprávnění (dosud hlídalo jen UI).
+--  8. public.lide_v_rozhovoru a jmena_osobnich_rozhovoru: jména lidí v
+--     rozhovoru (běžný zaměstnanec nesmí číst employees, obrazovka
+--     proto ukazovala „kdosi“) a název osobního rozhovoru pro každého
+--     účastníka zvlášť.
 --
 -- ---------------------------------------------------------------------
 -- CO SE NEMĚNÍ
@@ -692,3 +696,78 @@ begin
        )
      order by jmeno;
 end $$;
+
+
+-- ---------------------------------------------------------------------
+-- 8. JMÉNA V ROZHOVORU
+--
+-- Účastníci rozhovoru se potřebují vidět jménem, ale běžný zaměstnanec
+-- nesmí číst tabulku employees (jen svůj řádek, nebo kolegy podle
+-- oprávnění). Obrazovka proto dosud ukazovala „kdosi“ všude, kde jméno
+-- nešlo přečíst. Tyhle dvě funkce vrací JEN jména lidí, kteří v rozhovoru
+-- už jsou — kdo v něm není, nedostane nic. Tím se nikomu nevydává víc,
+-- než co v rozhovoru stejně vidí.
+--
+-- DEFINER BEZ DRUHÉ LINIE: účastnictví si funkce hlídá sama
+-- (app.je_ucastnik), firmu bere z rozhovoru.
+-- ---------------------------------------------------------------------
+
+create or replace function public.lide_v_rozhovoru(p_konverzace uuid)
+returns table (employee_id uuid, jmeno text)
+language sql stable security definer set search_path = ''
+as $$
+  select e.id, e.full_name::text
+    from public.employees e
+    join public.konverzace k on k.tenant_id = e.tenant_id
+   where k.id = p_konverzace
+     and app.je_ucastnik(p_konverzace)
+     and (
+       e.id in (select u.employee_id from public.konverzace_ucastnici u
+                 where u.konverzace_id = p_konverzace)
+       or e.id in (select z.autor from public.konverzace_zpravy z
+                    where z.konverzace_id = p_konverzace and z.autor is not null)
+     );
+$$;
+
+revoke all on function public.lide_v_rozhovoru(uuid) from public, anon;
+grant execute on function public.lide_v_rozhovoru(uuid) to authenticated;
+
+comment on function public.lide_v_rozhovoru(uuid) is
+  'Jména účastníků a autorů zpráv v rozhovoru, jehož je volající účastníkem. '
+  'Kdo účastník není, nedostane nic.';
+
+
+-- Název osobního rozhovoru bez názvu ukazuje ostatní účastníky, ne
+-- „Osobní“. Každý vidí JINÝ název (ten druhý), proto se skládá pro
+-- přihlášeného, ne ukládá do konverzace.
+create or replace function public.jmena_osobnich_rozhovoru(p_tenant uuid)
+returns table (konverzace_id uuid, nazev text)
+language sql stable security definer set search_path = ''
+as $$
+  select k.id,
+         string_agg(e.full_name::text, ', ' order by e.full_name)
+    from public.konverzace k
+    join public.konverzace_ucastnici ja
+      on ja.konverzace_id = k.id
+     and ja.employee_id   = app.muj_employee(p_tenant)
+     and ja.odesel_kdy    is null
+    join public.konverzace_ucastnici o
+      on o.konverzace_id = k.id
+     and o.employee_id  <> ja.employee_id
+     and o.odesel_kdy    is null
+    join public.employees e
+      on e.id = o.employee_id
+     and e.tenant_id = p_tenant
+   where k.tenant_id = p_tenant
+     and k.druh      = 'osobni'
+     and k.nazev     is null
+     and app.modul_zapnuty(p_tenant, 'provoz')
+   group by k.id;
+$$;
+
+revoke all on function public.jmena_osobnich_rozhovoru(uuid) from public, anon;
+grant execute on function public.jmena_osobnich_rozhovoru(uuid) to authenticated;
+
+comment on function public.jmena_osobnich_rozhovoru(uuid) is
+  'Názvy osobních rozhovorů bez názvu, jak je vidí volající: jména ostatních '
+  'účastníků. Rozhovory s vlastním názvem se nevracejí.';
