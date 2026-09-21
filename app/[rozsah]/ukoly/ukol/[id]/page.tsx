@@ -1,16 +1,15 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-import { ZONA_VYCHOZI, datumACasVPasmu } from '@/lib/cas'
 import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { DotazSelhal, sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
-import Ikona from '../../../ikona'
 import Nadpis from '../../../nadpis'
 import PcZalozky from '../../../provozni-centrum/zalozky'
 import { dokoncitUkolZDetailu } from './akce'
+import DetailUkolu from './detail-ukolu'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,12 +33,6 @@ type Ukol = {
   konverzace_id?: string | null
 }
 
-const STAV: Record<Ukol['status'], string> = {
-  open: 'Otevřený',
-  done: 'Hotovo',
-  cancelled: 'Zrušený',
-}
-
 /**
  * Detail úkolu.
  *
@@ -53,7 +46,7 @@ const STAV: Record<Ukol['status'], string> = {
  * KÓD SE NASAZUJE DŘÍV NEŽ MIGRACE: vazba na zprávu (`zprava_id`,
  * `konverzace_id`) se čte tolerantně, bez ní se detail ukáže bez zdroje.
  */
-export default async function DetailUkolu({
+export default async function StrankaDetailuUkolu({
   params,
   searchParams,
 }: {
@@ -126,7 +119,6 @@ export default async function DetailUkolu({
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
   const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
-  const poTerminu = ukol.status === 'open' && ukol.due_at !== null && new Date(ukol.due_at).getTime() < Date.now()
 
   return (
     <>
@@ -149,82 +141,14 @@ export default async function DetailUkolu({
           skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
         />
 
-        <div className="pc-detail">
-          {chyba ? (
-            <p className="hlaska-chyba" role="alert" style={{ margin: 0 }}>
-              {chyba}
-            </p>
-          ) : null}
-
-          <section className="ds-plocha">
-            <div className="pc-detail-hlava">
-              <span className="pc-avatar" aria-hidden="true">
-                <Ikona klic={ukol.status === 'done' ? 'fajfkaKruh' : 'fajfkaCtverec'} />
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <h2>{ukol.title}</h2>
-                <p style={{ margin: '6px 0 0', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <span className="pc-chip" data-stav={ukol.status === 'done' ? 'hotovo' : poTerminu ? 'pozde' : undefined}>
-                    {poTerminu ? 'Po termínu' : STAV[ukol.status]}
-                  </span>
-                  {ukol.priority === 'high' ? (
-                    <span className="pc-chip" data-stav="high">
-                      Důležitý
-                    </span>
-                  ) : null}
-                </p>
-              </div>
-            </div>
-
-            <dl className="pc-detail-pole" style={{ marginTop: '18px' }}>
-              <dt>Termín</dt>
-              <dd>{ukol.due_at ? datumACasVPasmu(ukol.due_at, ZONA_VYCHOZI) : 'Bez termínu'}</dd>
-              <dt>Komu</dt>
-              <dd>{komu}</dd>
-              <dt>Pobočka</dt>
-              <dd>{ukol.branch_id ? (nazvyPobocek.get(ukol.branch_id) ?? 'jiná pobočka') : 'Celá firma'}</dd>
-              <dt>Založeno</dt>
-              <dd>{datumACasVPasmu(ukol.created_at, ZONA_VYCHOZI)}</dd>
-              {ukol.done_at ? (
-                <>
-                  <dt>Splněno</dt>
-                  <dd>{datumACasVPasmu(ukol.done_at, ZONA_VYCHOZI)}</dd>
-                </>
-              ) : null}
-            </dl>
-
-            {ukol.note && ukol.note.trim() !== '' ? (
-              <p style={{ margin: '16px 0 0', fontSize: '15px', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
-                {ukol.note}
-              </p>
-            ) : null}
-
-            {ukol.status === 'open' ? (
-              <form action={dokoncitUkolZDetailu} style={{ marginTop: '18px' }}>
-                <input type="hidden" name="rozsah" value={rozsah} />
-                <input type="hidden" name="ukol" value={ukol.id} />
-                <button type="submit" className="ft-tl ft-tl-hlavni">
-                  Označit jako hotové
-                </button>
-              </form>
-            ) : null}
-          </section>
-
-          {ukol.konverzace_id ? (
-            <section className="ds-plocha">
-              <h3 style={{ margin: '0 0 8px', fontSize: '15px' }}>Odkud úkol je</h3>
-              <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5 }}>
-                Vznikl ze zprávy v rozhovoru.{' '}
-                <Link
-                  href={`/${rozsah}/vzkazy/${ukol.konverzace_id}${ukol.zprava_id ? `#z-${ukol.zprava_id}` : ''}`}
-                >
-                  Otevřít zprávu
-                </Link>
-                . Diskuse k úkolu samostatně zatím není — mluví se o něm v tom rozhovoru.
-              </p>
-            </section>
-          ) : null}
-        </div>
+        <DetailUkolu
+          rozsah={rozsah}
+          ukol={ukol}
+          komu={komu}
+          pobocka={ukol.branch_id ? (nazvyPobocek.get(ukol.branch_id) ?? 'jiná pobočka') : 'Celá firma'}
+          chyba={chyba ?? null}
+          akceDokoncit={dokoncitUkolZDetailu}
+        />
       </div>
     </>
   )

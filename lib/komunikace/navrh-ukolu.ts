@@ -391,9 +391,10 @@ export const modelovyPoskytovatel: PoskytovatelNavrhuUkolu = {
   popis: 'Návrh jazykovým modelem.',
   stav: () => ({
     dostupny: false,
+    // Pravidlo 8 z CLAUDE.md, řečené lidsky — věta se ukazuje na obrazovce.
     duvod:
-      'Obsah komunikace se jazykovému modelu neposílá (CLAUDE.md, pravidlo 8). ' +
-      'Zapnout to může jen rozhodnutí vlastníka.',
+      'Obsah komunikace se jazykovému modelu neposílá. ' +
+      'Zapnout to může jen rozhodnutí vlastníka firmy.',
   }),
   navrhnout: async () => null,
 }

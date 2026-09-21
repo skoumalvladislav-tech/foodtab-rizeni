@@ -1919,3 +1919,24 @@ a.pc-udalost:hover { color: var(--ink); }
   padding: 12px 14px; border-radius: 12px; background: var(--sunken);
   border: 1px solid var(--line);
 }
+
+/* --- Doladění po prvním vykreslení -------------------------------------- */
+
+/* Položka seznamu se smí zúžit pod šířku textu — jinak jednořádkový náhled
+   („nowrap“) roztáhne kartu přes sousední sloupec. */
+.ds-vzkazy-seznam li { min-width: 0; }
+
+/* Akce u zprávy (Vytvořit úkol, Stáhnout) se na počítači ukazují při najetí
+   a při zaměření klávesnicí; na dotykovém zařízení jsou vidět pořád, protože
+   tam najetí není. */
+@media (hover: hover) {
+  .pc-akce-zpravy { opacity: 0; transition: opacity .12s; }
+  .pc-zprava:hover .pc-akce-zpravy,
+  .pc-zprava:focus-within .pc-akce-zpravy { opacity: 1; }
+}
+
+/* Tailwind (preflight) smazal odrážky a podtržení odkazů; v poznámkách a detailu se vracejí. */
+.pc-poznamka-navrhu ul { list-style: disc; }
+.pc-poznamka-navrhu a, .pc-detail p a, .pc-prazdno a {
+  text-decoration: underline; text-underline-offset: 3px;
+}

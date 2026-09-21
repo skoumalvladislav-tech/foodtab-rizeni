@@ -376,11 +376,6 @@ export default async function Rozhovor({
             ? 'Tenhle vzkaz čtou jen majitelé. Vedoucí pobočky se k němu nedostane.'
             : 'Nejstarší nahoře.'
         }
-        vpravo={
-          <Link href={`/${rozsah}/vzkazy`} className="ft-tl">
-            Zpět na rozhovory
-          </Link>
-        }
       >
         {nazev}
       </Nadpis>
