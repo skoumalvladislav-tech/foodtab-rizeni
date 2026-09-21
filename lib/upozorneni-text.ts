@@ -50,6 +50,9 @@ export type TeloUpozorneni = {
   pocet?: number
   // Kdo změnu směny provedl (jméno). Chybí u systémových změn a starších upozornění.
   zmenil?: string
+  // ukol.pridelen — id úkolu a jeho termín (YYYY-MM-DDTHH:MM v pásmu pobočky).
+  ukol?: string
+  termin?: string
   // smena.zmenena — stav PŘED změnou (migrace 20260919120000). U starších
   // upozornění chybí; věta se pak řekne bez „původně“.
   puvodni_den?: string
@@ -154,6 +157,8 @@ export function nadpisUpozorneni(
       return `Odebrali vám směnu ${denCesky(telo.den)}`
     case 'smena.zrusena':
       return `Zrušili vám směnu ${denCesky(telo.den)}`
+    case 'ukol.pridelen':
+      return telo.nazev ? `Nový úkol: ${telo.nazev}` : 'Máte nový úkol'
     case 'oznameni.nova':
       return pocetUpozorneni(telo) > 1
         ? `${pocetUpozorneni(telo)} ${slovoPodleCisla(pocetUpozorneni(telo), 'nové oznámení', 'nová oznámení', 'nových oznámení')} na nástěnce`

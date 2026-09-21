@@ -87,13 +87,3 @@ export function souhrnVyberu(vybrani: Pick<Prijemce, 'jmeno'>[]): string {
   const slovo = dalsi === 1 ? 'další' : dalsi >= 2 && dalsi <= 4 ? 'další' : 'dalších'
   return `${jmena[0]}, ${jmena[1]} a ${dalsi} ${slovo}`
 }
-
-/**
- * Název rozhovoru, když ho člověk nezadá: jeden příjemce = jeho jméno,
- * víc = jména. Osobní rozhovor bez názvu by v seznamu neměl čím být.
- */
-export function vychoziNazevRozhovoru(vybrani: Pick<Prijemce, 'jmeno'>[]): string {
-  if (vybrani.length === 0) return ''
-  if (vybrani.length === 1) return vybrani[0].jmeno
-  return souhrnVyberu(vybrani)
-}

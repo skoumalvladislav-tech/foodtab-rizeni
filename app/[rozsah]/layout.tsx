@@ -18,6 +18,7 @@ import type { TeloUpozorneni } from "@/lib/upozorneni-text";
 import Sdeleni from "@/app/sdeleni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import CekaNaOpravneni from "./ceka-na-opravneni";
+import ZivaAktualizace from "@/components/shell/ZivaAktualizace";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import AppShell, { type ModulProp, type PolozkaProp, type UpozorneniProp } from "@/components/shell/AppShell";
 import type { RozsahProp } from "./prepinac-rozsahu";
@@ -304,6 +305,7 @@ export default async function RozsahLayout({
       nazevFirmy={ctx.tenant.name}
       iniciraly={iniciraly(user.email)}
       neprectenych={neprectenych ?? 0}
+      odznaky={{ vzkazy: neprecteneVzkazy + neprecteneNastenka }}
       posledniUpozorneni={posledniUpozorneni}
       moduly={moduly}
       polozky={polozky}
@@ -331,6 +333,8 @@ export default async function RozsahLayout({
         Okno jen tehdy, když někdo čeká. Když pozvánka oprávnění nesla,
         stačí zvoneček — viz komentář v ceka-na-opravneni.tsx.
       */}
+      {/* Živá aktualizace: nová zpráva, oznámení nebo úkol osvěží obrazovku sama. */}
+      <ZivaAktualizace userId={user.id} />
       <CekaNaOpravneni
         rozsah={rozsah}
         lide={(cekajiciNaOpravneni ?? []) as { user_id: string; jmeno: string }[]}

@@ -1,15 +1,17 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-import { getContext, getUser } from '@/lib/authz'
+import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
+import PcZalozky from '../provozni-centrum/zalozky'
 import Nastenka from './nastenka'
 import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from './seznam-rozhovoru'
 import { otevritKanalPobocky, otevritKanalUseku, zalozitVzkazVedeni } from './akce'
+import { nactiNazvyOsobnich } from './nazvy'
 
 type FiltrKlic = 'vse' | 'neprectene' | 'pobocka' | 'usek' | 'prime'
 
@@ -157,6 +159,9 @@ export default async function Rozhovory({
   const rozhovory = (seznamData ?? []) as Rozhovor[]
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
+  // Osobní rozhovor bez názvu = jména ostatních účastníků (každý vidí toho druhého).
+  const nazvyOsobnich = await nactiNazvyOsobnich(supabase, tenantId)
+  const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
 
   /*
     Kanál MÉHO úseku — stejná úvaha jako u kanálu pobočky výš (řádek
@@ -225,7 +230,7 @@ export default async function Rozhovory({
       const t = String(z.text ?? '').trim()
       // Hlasovka nemá text — bez týhle větve by náhled zůstal prázdný,
       // jako by konverzace žádnou novou zprávu neměla.
-      posledniText.set(kid, t.length > 72 ? `${t.slice(0, 72)}…` : t || (z.zvuk_cesta ? '🎤 Hlasovka' : ''))
+      posledniText.set(kid, t.length > 72 ? `${t.slice(0, 72)}…` : t || (z.zvuk_cesta ? 'Hlasová zpráva' : ''))
     }
   }
 
@@ -241,7 +246,10 @@ export default async function Rozhovory({
   function projdeHledanim(r: Rozhovor): boolean {
     if (!hledatOriznute) return true
     const nazev = (
-      r.nazev ?? (r.branch_id ? nazvyPobocek.get(r.branch_id) : NAZVY_DRUHU[r.druh]) ?? ''
+      r.nazev ??
+      nazvyOsobnich.get(r.konverzace_id) ??
+      (r.branch_id ? nazvyPobocek.get(r.branch_id) : NAZVY_DRUHU[r.druh]) ??
+      ''
     ).toLowerCase()
     return nazev.includes(hledatOriznute)
   }
@@ -336,41 +344,22 @@ export default async function Rozhovory({
             : 'Nepřečtené nahoře, od nejstaršího.'
         }
       >
-        Vzkazy
+        Provozní centrum
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: naNastence ? '760px' : '1080px' }}>
         {/*
-          ZÁLOŽKY — SLUČUJE SE VCHOD, NE OBSAH.
-
-          Vzkazy jsou rozhovor: odpovídá se na ně a jde o ně mezi lidmi,
-          pobočkami a úseky. Nástěnka je sdělení: neodpovídá se na ni
-          a eviduje se, kdo ji vzal na vědomí. Jsou to dva různé tvary
-          a zůstávají oddělené — mění se jen to, že se do obou chodí
-          jedněmi dveřmi.
-
-          Přepíná se adresou, ne javascriptem: obrazovka je stejně
-          `force-dynamic`, odkaz jde poslat dál a funguje i bez skriptů.
-          Neznámá hodnota spadne na Vzkazy, ne na chybu.
+          ZÁLOŽKY PROVOZNÍHO CENTRA. Slučuje se vchod, ne obsah (rozhodnutí
+          Šéfíka 6. 9. 2026): Vzkazy jsou rozhovor, Nástěnka je sdělení, obojí
+          se dál kreslí zvlášť — mění se jen to, že se do všeho chodí jednou
+          lištou. Přepíná se adresou, ne skriptem.
         */}
-        <nav style={zalozky} aria-label="Vzkazy a nástěnka">
-          <Link
-            href={`/${rozsah}/vzkazy`}
-            style={naNastence ? zalozka : zalozkaAktivni}
-            aria-current={naNastence ? undefined : 'page'}
-          >
-            Vzkazy
-            {neprecteneVzkazy > 0 ? ` (${neprecteneVzkazy})` : ''}
-          </Link>
-          <Link
-            href={`/${rozsah}/vzkazy?zalozka=nastenka`}
-            style={naNastence ? zalozkaAktivni : zalozka}
-            aria-current={naNastence ? 'page' : undefined}
-          >
-            Nástěnka
-            {neprecteneNastenka > 0 ? ` (${neprecteneNastenka})` : ''}
-          </Link>
-        </nav>
+        <PcZalozky
+          rozsah={rozsah}
+          aktivni={naNastence ? 'nastenka' : 'komunikace'}
+          pocty={{ komunikace: neprecteneVzkazy, nastenka: neprecteneNastenka }}
+          skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
+        />
 
         {naNastence ? (
           <Nastenka
@@ -451,6 +440,12 @@ export default async function Rozhovory({
               když ještě neexistuje, vyrobí ho databáze. Seznam členů se
               nikde nezadává — plyne z dosahu na pobočku.
             */}
+            <div style={{ marginBottom: '10px' }}>
+              <Link href={`/${rozsah}/vzkazy/nova`} className="ft-tl ft-tl-hlavni ft-tl-male">
+                + Nová zpráva
+              </Link>
+            </div>
+
             {scope.level === 'branch' && scope.branchId ? (
               <form action={otevritKanalPobocky} style={{ marginBottom: '10px' }}>
                 <input type="hidden" name="rozsah" value={rozsah} />
@@ -579,6 +574,7 @@ export default async function Rozhovory({
                 rozhovory={rozhovoryZobrazene}
                 nazvyPobocek={nazvyPobocek}
                 posledniText={posledniText}
+                nazvyOsobnich={nazvyOsobnich}
               />
             )}
 
@@ -694,33 +690,3 @@ const pole: React.CSSProperties = {
 }
 
 const vyber: React.CSSProperties = { ...pole, minHeight: '44px' }
-
-/* --- Záložky ---------------------------------------------------- */
-
-const zalozky: React.CSSProperties = {
-  display: 'flex',
-  gap: '8px',
-  marginBottom: '16px',
-  borderBottom: '1px solid var(--line)',
-}
-
-const zalozka: React.CSSProperties = {
-  padding: '10px 14px',
-  // 44 px je nejmenší cíl, na který se dá na telefonu spolehlivě
-  // trefit palcem. Záložky se přepínají ve spěchu jako všechno ostatní.
-  minHeight: '44px',
-  display: 'flex',
-  alignItems: 'center',
-  fontSize: '15px',
-  color: 'var(--muted)',
-  textDecoration: 'none',
-  borderBottom: '2px solid transparent',
-  marginBottom: '-1px',
-}
-
-const zalozkaAktivni: React.CSSProperties = {
-  ...zalozka,
-  color: 'var(--ink)',
-  fontWeight: 600,
-  borderBottom: '2px solid var(--mosaz)',
-}

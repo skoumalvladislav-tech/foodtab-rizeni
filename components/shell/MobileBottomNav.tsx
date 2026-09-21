@@ -13,12 +13,15 @@ export default function MobileBottomNav({
   aktivniSegment,
   jeVice,
   segment,
+  odznaky,
 }: {
   rozsah: string;
   doListy: PolozkaProp[];
   aktivniSegment: string | undefined;
   jeVice: boolean;
   segment: string | null;
+  /** Počty nepřečtených podle segmentu položky; nula se nekreslí. */
+  odznaky?: Record<string, number>;
 }) {
   return (
     <nav className="ft-mob-bottom" aria-label="Obrazovky">
@@ -32,6 +35,11 @@ export default function MobileBottomNav({
           >
             <Ikona klic={p.ikona} />
             <span>{p.kratky}</span>
+            {(odznaky?.[p.segment] ?? 0) > 0 ? (
+              <b className="pc-odznak-lista" aria-label={`${odznaky?.[p.segment]} nepřečtených`}>
+                {(odznaky?.[p.segment] ?? 0) > 99 ? "99+" : odznaky?.[p.segment]}
+              </b>
+            ) : null}
           </Link>
         ) : (
           <span key={p.segment} style={{ flex: 1 }} />

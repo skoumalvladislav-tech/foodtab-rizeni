@@ -6,12 +6,14 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
   denZkraceny,
+  kartaZmenySmeny,
   nadpisUpozorneni,
   obdobiRozpisu,
   popisMarketingu,
   popisOpravneni,
   popisPinu,
   popisZapomenuteho,
+  prioritaUpozorneni,
   vyzadujePotvrzeni,
   odkazNaSmenu,
   zmenaSmeny,
@@ -55,6 +57,8 @@ type Zprava = {
   acknowledged_at: string | null
   // Migrace 20260919120000 — odkaz na směnu; chybí do jejího nasazení.
   shift_id: string | null
+  // Migrace 20260917040000; normal, když chybí.
+  priorita?: string | null
 }
 
 const NAZVY: Record<string, string> = {
@@ -104,7 +108,7 @@ export default async function Upozorneni({
       3. základ
   */
   let { data, error } = await dotazNaUpozorneni(
-    'id, druh, telo, created_at, read_at, acknowledged_at, shift_id',
+    'id, druh, telo, created_at, read_at, acknowledged_at, shift_id, priorita',
   )
   let maSmenu = true
   let maPotvrzeni = true
@@ -186,6 +190,11 @@ export default async function Upozorneni({
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
                   <strong style={{ fontSize: '15px' }}>
+                    {prioritaUpozorneni(z.priorita) === 'urgent' || prioritaUpozorneni(z.priorita) === 'important' ? (
+                      <span className="pc-stitek" data-druh={prioritaUpozorneni(z.priorita)}>
+                        {prioritaUpozorneni(z.priorita) === 'urgent' ? 'NALÉHAVÉ' : 'DŮLEŽITÉ'}
+                      </span>
+                    ) : null}
                     {nadpisUpozorneni(z.druh, z.telo, obdobiRozpisu)}
                   </strong>
                   <span style={{ fontSize: '12.5px', color: 'var(--muted)' }}>
@@ -245,6 +254,24 @@ export default async function Upozorneni({
                   </>
                 ) : null}
 
+                {z.druh === 'ukol.pridelen' ? (
+                  <>
+                    {z.telo.termin ? (
+                      <p style={{ margin: '8px 0 0', fontSize: '14px', color: 'var(--muted)' }}>
+                        Termín: {z.telo.termin.slice(0, 10).split('-').reverse().map(Number).join('. ')}
+                        {z.telo.termin.length >= 16 ? ` ${z.telo.termin.slice(11, 16)}` : ''}
+                      </p>
+                    ) : null}
+                    {z.telo.ukol ? (
+                      <p style={{ margin: '10px 0 0' }}>
+                        <Link href={`/${rozsah}/ukoly/ukol/${z.telo.ukol}`} className="ft-tl ft-tl-hlavni ft-tl-male">
+                          Otevřít úkol
+                        </Link>
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
+
                 {z.druh === 'pin.prenastaven' ? (
                   <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
                     {popisPinu(z.telo)}
@@ -291,7 +318,32 @@ export default async function Upozorneni({
                   </p>
                 ) : null}
 
-                {(z.druh === 'smena.nova' || z.druh === 'smena.zmenena' ||
+                {z.druh === 'smena.zmenena' && kartaZmenySmeny(z.telo) ? (
+                  <div className="pc-karta-zmeny" style={{ margin: '10px 0 0' }}>
+                    <p style={{ margin: 0, fontSize: '12px', fontWeight: 700, letterSpacing: '.08em', color: 'var(--mosaz)' }}>
+                      {kartaZmenySmeny(z.telo)?.nadpis}
+                    </p>
+                    <p className="ds-serif" style={{ margin: '4px 0 8px', fontSize: '19px', fontWeight: 600 }}>
+                      {kartaZmenySmeny(z.telo)?.den}
+                    </p>
+                    <dl className="pc-udaje">
+                      <dt>Původně</dt>
+                      <dd style={{ textDecoration: 'line-through', color: 'var(--muted)' }}>
+                        {kartaZmenySmeny(z.telo)?.puvodne}
+                      </dd>
+                      <dt>Nově</dt>
+                      <dd><strong>{kartaZmenySmeny(z.telo)?.nove}</strong></dd>
+                      {kartaZmenySmeny(z.telo)?.zmenil ? (
+                        <>
+                          <dt>Změnil</dt>
+                          <dd>{kartaZmenySmeny(z.telo)?.zmenil}</dd>
+                        </>
+                      ) : null}
+                    </dl>
+                  </div>
+                ) : null}
+
+                {(z.druh === 'smena.nova' || (z.druh === 'smena.zmenena' && !kartaZmenySmeny(z.telo)) ||
                   z.druh === 'smena.odebrana' || z.druh === 'smena.zrusena') &&
                   z.telo.od && z.telo.do ? (
                   <p
@@ -334,7 +386,7 @@ export default async function Upozorneni({
                       href={odkazNaSmenu(rozsah, z.telo, z.shift_id)}
                       className="ft-tl ft-tl-vedlejsi ft-tl-male"
                     >
-                      Zobrazit směnu
+                      Detail směny
                     </Link>
                   </p>
                 ) : null}

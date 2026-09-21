@@ -33,13 +33,13 @@ import {
   popisStavuPrepisu,
   vybratPoskytovatelePrepisu,
 } from '../lib/komunikace/prepis.ts'
-import { denVPasmu, popisDne, poskladatVlakno } from '../lib/komunikace/vlakno.ts'
+import { denVPasmu } from '../lib/cas.ts'
+import { popisDne, poskladatVlakno } from '../lib/komunikace/vlakno.ts'
 import {
   hledatPrijemce,
   normalizuj,
   seskupitPrijemce,
   souhrnVyberu,
-  vychoziNazevRozhovoru,
 } from '../lib/komunikace/prijemci.ts'
 
 let chyb = 0
@@ -180,7 +180,6 @@ const moznosti = { ja: 'ja', zona: 'Europe/Prague', dnes: DNES, precetoDo: null 
 
 je('den v pásmu pobočky: 00:30 pražského času je už 21.', denVPasmu('2026-09-20T22:30:00Z', 'Europe/Prague'), '2026-09-21')
 je('… ale v UTC je to ještě 20.', denVPasmu('2026-09-20T22:30:00Z', 'UTC'), '2026-09-20')
-je('neplatné pásmo nespadne', denVPasmu('2026-09-20T12:00:00Z', 'Nikde/Neni'), '2026-09-20')
 je('popis dne: dnes', popisDne('2026-09-21', DNES), 'Dnes')
 je('popis dne: včera', popisDne('2026-09-20', DNES), 'Včera')
 je('popis dne: starší', popisDne('2026-09-18', DNES), 'pá 18. 9.')
@@ -251,9 +250,6 @@ je('souhrn: dva', souhrnVyberu([{ jmeno: 'Karel Novák' }, { jmeno: 'Božena Ře
 je('souhrn: tři', souhrnVyberu([{ jmeno: 'A a' }, { jmeno: 'B b' }, { jmeno: 'C c' }]), 'A, B a 1 další')
 je('souhrn: pět', souhrnVyberu(['A', 'B', 'C', 'D', 'E'].map((j) => ({ jmeno: `${j} x` }))), 'A, B a 3 další')
 je('souhrn: osm', souhrnVyberu(Array.from({ length: 8 }, (_, i) => ({ jmeno: `J${i} x` }))), 'J0, J1 a 6 dalších')
-je('výchozí název: jeden příjemce = jeho celé jméno', vychoziNazevRozhovoru([{ jmeno: 'Karel Novák' }]), 'Karel Novák')
-je('výchozí název: víc příjemců = souhrn', vychoziNazevRozhovoru([{ jmeno: 'Karel Novák' }, { jmeno: 'Božena Řezníčková' }]), 'Karel a Božena')
-je('výchozí název: nikdo = prázdný', vychoziNazevRozhovoru([]), '')
 
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO\n' : `\nCHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)

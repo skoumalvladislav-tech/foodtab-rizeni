@@ -10,6 +10,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import EmptyState from "@/components/ui/EmptyState";
 import Nadpis from "../nadpis";
+import PcZalozky from "../provozni-centrum/zalozky";
 import Ikona from "../ikona";
 import { dokoncitUkol, spustitChecklist, zadatUkol } from "./akce";
 
@@ -284,6 +285,9 @@ export default async function Ukoly({
       </Nadpis>
 
       <div style={{ padding: "16px", paddingBottom: "32px" }}>
+        {/* Záložky Provozního centra — kdo tuhle obrazovku vidí, má tasks.read. */}
+        <PcZalozky rozsah={rozsah} aktivni="ukoly" pocty={{ ukoly: ukoly.length }} />
+
         {/*
           Kompaktní souhrn — UX redesign, druhé kolo (oddíl 9). Jen
           čísla, která appka umí spočítat bez odhadu: otevřené úkoly už
@@ -466,7 +470,9 @@ export default async function Ukoly({
                 }}
               >
                 <p style={{ margin: 0, fontSize: "15px", color: "var(--ink)" }}>
-                  {u.title}
+                  <Link href={`/${rozsah}/ukoly/ukol/${u.id}`} style={{ color: "inherit", textDecoration: "none" }}>
+                    {u.title}
+                  </Link>
                 </p>
 
                 {u.note ? (
@@ -546,7 +552,7 @@ export default async function Ukoly({
         </div>
 
         <div>
-        <h2 style={{ ...nadpisSekce, marginTop: 0 }}>Checklisty</h2>
+        <h2 id="checklisty" style={{ ...nadpisSekce, marginTop: 0, scrollMarginTop: "72px" }}>Checklisty</h2>
 
         {!branchId ? (
           /*

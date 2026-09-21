@@ -11,6 +11,7 @@
  * nesmí přeskočit na další den jen proto, že server běží v UTC.
  */
 
+import { denVPasmu } from '../cas.ts'
 import { denZkraceny } from '../upozorneni-text.ts'
 
 export type ZpravaVlakna = {
@@ -39,22 +40,6 @@ export type MoznostiVlakna = {
   precetoDo: string | null
   /** Zprávy téhož autora blíž než tolik minut se slučují do skupiny. */
   mezeraMin?: number
-}
-
-/** YYYY-MM-DD daného okamžiku v pásmu. Neplatné pásmo padá na UTC, ne na chybu. */
-export function denVPasmu(iso: string, zona: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  try {
-    return new Intl.DateTimeFormat('en-CA', {
-      timeZone: zona,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(d)
-  } catch {
-    return d.toISOString().slice(0, 10)
-  }
 }
 
 function posunDne(iso: string, dny: number): string {
