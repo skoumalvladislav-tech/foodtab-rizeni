@@ -11,7 +11,7 @@
  * nesmí přeskočit na další den jen proto, že server běží v UTC.
  */
 
-import { denZkraceny } from '../upozorneni-text'
+import { denZkraceny } from '../upozorneni-text.ts'
 
 export type ZpravaVlakna = {
   id: string

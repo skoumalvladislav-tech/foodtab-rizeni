@@ -75,7 +75,9 @@ select id as usek_k from public.useky where tenant_id = :'tenant' and nazev = 'K
 insert into public.employees (tenant_id, branch_id, usek_id, user_id, full_name, employment_type, deleted_at) values
   (:'tenant', :'perla', :'usek_k', '43430000-0000-0000-0000-00000000000a', 'Anna Čtyřicettři',  'hpp', null),
   (:'tenant', :'perla', :'usek_k', '43430000-0000-0000-0000-00000000000b', 'Bořek Čtyřicettři', 'hpp', null),
-  (:'tenant', :'bar',   null,      '43430000-0000-0000-0000-00000000000c', 'Cyril Čtyřicettři', 'hpp', null),
+  -- Cyril je také v Kuchyni (úsek je firemní), jen na jiné pobočce — na něm
+  -- se pozná, že úkol pro úsek na pobočce nepípá kuchařům z jiné pobočky.
+  (:'tenant', :'bar',   :'usek_k', '43430000-0000-0000-0000-00000000000c', 'Cyril Čtyřicettři', 'hpp', null),
   (:'tenant', :'perla', null,      '43430000-0000-0000-0000-00000000000d', 'Dana Čtyřicettři',  'hpp', null),
   (:'tenant', :'perla', null,      '43430000-0000-0000-0000-00000000000e', 'Petr Čtyřicettři',  'hpp', null),
   (:'tenant', :'perla', null,      '43430000-0000-0000-0000-00000000000f', 'Hugo Smazaný',      'hpp', now());
@@ -119,8 +121,12 @@ select m.id, x.b
 insert into public.tenants (name, legal_name, currency, timezone)
 values ('Krok43 Cizí s.r.o.', 'Krok43 Cizí s.r.o.', 'CZK', 'Europe/Prague')
 returning id as cizi_firma \gset
-insert into public.employees (tenant_id, full_name, employment_type)
-values (:'cizi_firma', 'Cizí Zaměstnanec Krok43', 'hpp')
+-- Cizí zaměstnanec MÁ účet (cizi@jinafirma.cz z etapa0). Bez účtu by ho
+-- z nabídky vyřadila podmínka na účet, ne filtr firmy, a schválné rozbití
+-- filtru firmy by neprošlo (nalezeno mutační zkouškou).
+insert into public.employees (tenant_id, user_id, full_name, employment_type)
+values (:'cizi_firma', (select user_id from public.profiles where email = 'cizi@jinafirma.cz'),
+        'Cizí Zaměstnanec Krok43', 'hpp')
 returning id as cizi_emp \gset
 insert into public.konverzace (tenant_id, druh, nazev)
 values (:'cizi_firma', 'osobni', 'Cizí rozhovor krok43')
