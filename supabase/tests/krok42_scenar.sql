@@ -133,6 +133,17 @@ select m.id, :'bar'::uuid
  where m.user_id in ('42420000-0000-0000-0000-00000000000a', '42420000-0000-0000-0000-00000000000b')
    and m.tenant_id = :'tenant';
 
+-- Cizí firma: člověk z etapa0 (cizi@jinafirma.cz) je v ní zaměstnanec. Bez
+-- toho by ho z naší firmy vyřadil už neexistující zaměstnanecký záznam,
+-- ne kontrola firmy, a test by prošel i nad funkcí bez filtru firmy
+-- (schválné rozbití to prozradilo).
+insert into public.tenants (name, legal_name, currency, timezone)
+values ('Krok42 Cizí s.r.o.', 'Krok42 Cizí s.r.o.', 'CZK', 'Europe/Prague')
+returning id as cizi_firma \gset
+
+insert into public.employees (tenant_id, user_id, full_name, employment_type)
+values (:'cizi_firma', :'cizi', 'Krok42 Cizí zaměstnanec', 'hpp');
+
 select set_config('test.tenant', :'tenant', false);
 
 
@@ -211,9 +222,14 @@ select app.notifikovat(:'tenant', '42420000-0000-0000-0000-00000000000a', 'test.
 select pg_temp.check('priorita low je přijatá',
   (select priorita from public.notifications where id = :'n_low') = 'low');
 
-select pg_temp.check('uživatel CIZÍ firmy upozornění nedostane (definer nemá RLS)',
+select pg_temp.check('příprava: cizi je zaměstnanec JINÉ firmy (jinak by test nic neměřil)',
+  exists (select 1 from public.employees where user_id = :'cizi' and tenant_id = :'cizi_firma')
+  and not exists (select 1 from public.employees where user_id = :'cizi' and tenant_id = :'tenant'));
+select pg_temp.check('zaměstnanec JINÉ firmy upozornění v naší firmě nedostane (definer nemá RLS)',
   app.notifikovat(:'tenant', :'cizi', 'test.cizi', '{}'::jsonb) is null
   and not exists (select 1 from public.notifications where druh = 'test.cizi'));
+select pg_temp.check('a ve své vlastní firmě upozornění dostane (filtr firmy není příliš přísný)',
+  app.notifikovat(:'cizi_firma', :'cizi', 'test.cizi.vlastni', '{}'::jsonb) is not null);
 
 select pg_temp.check('smazaný zaměstnanec upozornění nedostane',
   app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000011', 'test.smazany', '{}'::jsonb) is null
@@ -726,6 +742,9 @@ exception when sqlstate 'PT403' then
   raise notice '  OK    nepřihlášený zařízení nezapíše (PT403)';
 end $$;
 
+
+-- Úklid: cizí firma se maže (kaskádou i její zaměstnanec a upozornění).
+delete from public.tenants where id = :'cizi_firma';
 
 \echo ''
 \echo '  VŠECHNY KONTROLY KROKU 42 PROŠLY'

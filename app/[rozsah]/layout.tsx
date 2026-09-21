@@ -207,11 +207,20 @@ export default async function RozsahLayout({
     { data: nastenkaPrectena },
     { data: posledniUpozornenaData },
   ] = await Promise.all([
+    /*
+      Vzkazy a oznámení se do odznaku počítají ze SVÝCH zdrojů níž
+      (nepřečtené zprávy, nepřečtená nástěnka). Jejich upozornění
+      v `notifications` by je započítala podruhé — jedna nová zpráva
+      by ukázala „2“. Tichá upozornění (priorita low) se nepočítají
+      vůbec: jsou to záznam, ne výzva.
+    */
     supabaseForCount
       .from("notifications")
       .select("id", { count: "exact", head: true })
       .eq("tenant_id", tenantId)
-      .is("read_at", null),
+      .is("read_at", null)
+      .not("druh", "in", "(vzkaz.novy,oznameni.nova)")
+      .neq("priorita", "low"),
     supabaseForCount
       .rpc("moje_rozhovory", { p_tenant: tenantId })
       .then((r) => ({ data: r.error ? null : r.data })),

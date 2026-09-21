@@ -786,14 +786,14 @@ select pg_temp.check('moje_rozhovory se ptá na zapnutý modul',
 select pg_temp.check('zalozit_rozhovor se ptá na zapnutý modul',
   pg_get_functiondef('public.zalozit_rozhovor(uuid,text,uuid,text,text,uuid[])'::regprocedure)
     like '%modul_zapnuty%');
--- Signatura má dnes šest parametrů (20260917040000 přidala
--- p_priorita, 20260917060000 p_zvuk_cesta/p_zvuk_delka_s) — obě
--- migrace starou signaturu nejdřív výslovně DROPnou, protože
--- CREATE OR REPLACE s přidaným parametrem v praxi nechá vedle sebe
--- DVĚ funkce, ne jednu rozšířenou (ověřeno CI, run 35267094122).
--- Proto se mění tenhle typový otisk, ne kontrola samotná.
+-- Signatura má dnes sedm parametrů (20260917040000 přidala
+-- p_priorita, 20260917060000 p_zvuk_cesta/p_zvuk_delka_s, 20260921110000
+-- p_klient_id) — všechny tyto migrace starou signaturu nejdřív výslovně
+-- DROPnou, protože CREATE OR REPLACE s přidaným parametrem v praxi
+-- nechá vedle sebe DVĚ funkce, ne jednu rozšířenou (ověřeno CI, run
+-- 35267094122). Proto se mění tenhle typový otisk, ne kontrola samotná.
 select pg_temp.check('poslat_zpravu se ptá na zapnutý modul',
-  pg_get_functiondef('public.poslat_zpravu(uuid,text,boolean,text,text,integer)'::regprocedure)
+  pg_get_functiondef('public.poslat_zpravu(uuid,text,boolean,text,text,integer,uuid)'::regprocedure)
     like '%modul_zapnuty%');
 
 
