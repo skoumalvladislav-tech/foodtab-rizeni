@@ -188,10 +188,42 @@ export function vapidHlavicka(endpoint: string, klice: KliceVapid, ted: number =
    Odeslání
    --------------------------------------------------------------------- */
 
+/**
+ * Patří adresa zařízení skutečné push službě prohlížeče?
+ *
+ * Odesílač na ni posílá požadavek Z NAŠEHO SERVERU, podepsaný klíčem VAPID.
+ * Kdyby si někdo zaregistroval libovolnou adresu, posílal by server slepé
+ * POSTy kamkoli (i dovnitř sítě) nebo by ho zdržel pomalý cizí server. Proto
+ * jen https, žádný port ani uživatelské jméno a hostitel ze známých služeb
+ * (Chrome/Edge: fcm.googleapis.com, Firefox: updates.push.services.mozilla.com,
+ * Safari: *.push.apple.com, Edge/Windows: *.notify.windows.com).
+ *
+ * TOTÉŽ pravidlo drží databáze (push_odber_ulozit, migrace 20260921100000) —
+ * tohle je druhá linie pro řádky, které tam nějak přesto jsou.
+ */
+export function jeDuveryhodnyEndpoint(endpoint: string): boolean {
+  let url: URL
+  try {
+    url = new URL(endpoint)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || url.port !== '') return false
+  const host = url.hostname.toLowerCase()
+  return (
+    host === 'fcm.googleapis.com' ||
+    host === 'updates.push.services.mozilla.com' ||
+    host.endsWith('.push.apple.com') ||
+    host.endsWith('.notify.windows.com')
+  )
+}
+
 export type VysledekOdeslani =
   | { stav: 'odeslano' }
   /** 404 / 410: zařízení odběr zrušilo — řádek se vypne, nezkouší se dál. */
   | { stav: 'vyprselo' }
+  /** Adresa nepatří známé push službě — nikam se neposílá, řádek se vypne. */
+  | { stav: 'neplatny' }
   | { stav: 'selhalo'; chyba: string }
 
 export type VolbyOdeslani = {
@@ -209,6 +241,7 @@ export async function odeslatWebPush(
   volby: VolbyOdeslani = {},
 ): Promise<VysledekOdeslani> {
   const f = volby.fetchFn ?? fetch
+  if (!jeDuveryhodnyEndpoint(odber.endpoint)) return { stav: 'neplatny' }
   let telo: Buffer
   try {
     telo = zasifrovat(Buffer.from(JSON.stringify(zprava), 'utf8'), odber.p256dh, odber.auth_secret)

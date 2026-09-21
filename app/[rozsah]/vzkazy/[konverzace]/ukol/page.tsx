@@ -97,6 +97,14 @@ export default async function UkolZeZpravy({
 
   const zpet = `/${rozsah}/vzkazy/${konverzace}`
 
+  if (!UUID.test(konverzace)) {
+    return (
+      <Sdeleni nadpis="Tenhle rozhovor neexistuje">
+        Odkaz není platný. <Link href={`/${rozsah}/vzkazy`}>Zpět na rozhovory</Link>.
+      </Sdeleni>
+    )
+  }
+
   if (!(await hasAccess(tenantId, 'tasks.manage', scope.branchId))) {
     return (
       <Sdeleni nadpis="Úkol zadat nemůžete">
@@ -122,23 +130,46 @@ export default async function UkolZeZpravy({
 
   const text = String(z.text ?? '').trim()
   const jeHlasovka = Boolean(z.zvuk_cesta)
-  const dnes = denVPasmu(new Date(), ZONA_VYCHOZI)
+  const dnesSkutecne = denVPasmu(new Date(), ZONA_VYCHOZI)
+  // „Zítra“ a „v pátek“ se počítají od dne, kdy byla ZPRÁVA napsaná, ne od dneška:
+  // zpráva z pondělí „zítra přijede dodavatel“ myslí úterý, i když se úkol zakládá ve čtvrtek.
+  const denZpravy = denVPasmu(z.vytvoreno_kdy, ZONA_VYCHOZI)
 
   const poskytovatel = vybratPoskytovateleNavrhu()
-  const navrh = text !== '' ? await poskytovatel.navrhnout({ text, dnes }) : null
+  let navrh = text !== '' ? await poskytovatel.navrhnout({ text, dnes: denZpravy }) : null
+  if (navrh?.termin && navrh.termin.datum < dnesSkutecne) {
+    // Termín odvozený od staré zprávy už mohl uplynout — nevydává se za jistý.
+    navrh = {
+      ...navrh,
+      vyzadujeKontrolu: [...new Set([...navrh.vyzadujeKontrolu, 'termin' as const])],
+      nalezy: [...navrh.nalezy, 'Navržený termín už uplynul (zpráva je starší) — ověřte ho.'],
+    }
+  }
   const stavModelu = modelovyPoskytovatel.stav()
 
   // Adresáti. Úseky a pozice čte každý člen firmy; lidi dává `komu_muzu_psat`
   // (jen s účtem — úkol pro někoho bez účtu by nikoho nenotifikoval).
-  const [{ data: usekyData }, { data: poziceData }, lideOdpoved] = await Promise.all([
+  const [{ data: usekyData, error: chybaUseky }, { data: poziceData, error: chybaPozice }, lideOdpoved] = await Promise.all([
     supabase.from('useky').select('id, nazev').eq('tenant_id', tenantId).eq('active', true).order('poradi', { ascending: true }),
     supabase.from('positions').select('id, label').eq('tenant_id', tenantId).eq('active', true).order('label', { ascending: true }),
     supabase.rpc('komu_muzu_psat', { p_tenant: tenantId }),
   ])
-  const lide =
-    lideOdpoved.error && !funkceNeexistuje(lideOdpoved.error)
-      ? []
-      : ((lideOdpoved.data ?? []) as { employee_id: string; jmeno: string }[])
+  // Bez migrace (funkce není) se formulář vůbec nenabízí — o chybějící
+  // `zalozit_ukol_ze_zpravy` by se člověk dozvěděl až po odeslání. Jakákoli
+  // JINÁ chyba se vyhazuje: prázdný seznam lidí by vypadal jako správně
+  // vykreslený formulář s prázdným výběrem.
+  if (lideOdpoved.error && funkceNeexistuje(lideOdpoved.error)) {
+    return (
+      <Sdeleni nadpis="Úkol ze zprávy čeká na nasazení databáze">
+        Bude fungovat po nasazení migrace <code>20260921110000_provozni_centrum</code>.{' '}
+        <Link href={zpet}>Zpět do rozhovoru</Link>.
+      </Sdeleni>
+    )
+  }
+  if (lideOdpoved.error) throw new DotazSelhal('seznam kolegů', lideOdpoved.error)
+  if (chybaUseky) throw new DotazSelhal('úseky', chybaUseky)
+  if (chybaPozice) throw new DotazSelhal('pozice', chybaPozice)
+  const lide = (lideOdpoved.data ?? []) as { employee_id: string; jmeno: string }[]
 
   return (
     <>

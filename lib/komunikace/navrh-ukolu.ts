@@ -130,19 +130,23 @@ const DNY_TYDNE: { kmen: RegExp; den: number }[] = [
   { kmen: /nedel/, den: 0 },
 ]
 
+/**
+ * Měsíc podle názvu — jen SKUTEČNÉ tvary (leden, ledna, lednu…), ne předpony.
+ * Předpona by z „5. Prosím zavolej“ udělala prosinec a z „3. Listy jsou“ listopad.
+ */
 const MESICE: [RegExp, number][] = [
-  [/^led/, 1],
-  [/^uno/, 2],
-  [/^bre/, 3],
-  [/^dub/, 4],
-  [/^kve/, 5],
-  [/^cervn/, 6],
-  [/^cervence|^cervenc/, 7],
-  [/^srp/, 8],
-  [/^zar/, 9],
-  [/^rij/, 10],
-  [/^list/, 11],
-  [/^pros/, 12],
+  [/^(?:leden|ledna|lednu|ledne)$/, 1],
+  [/^(?:unor|unora|unoru|unore)$/, 2],
+  [/^(?:brezen|brezna|breznu|brezne)$/, 3],
+  [/^(?:duben|dubna|dubnu|dubne)$/, 4],
+  [/^(?:kveten|kvetna|kvetnu|kvetne)$/, 5],
+  [/^(?:cerven|cervna|cervnu|cervne)$/, 6],
+  [/^(?:cervenec|cervence|cervenci)$/, 7],
+  [/^(?:srpen|srpna|srpnu|srpne)$/, 8],
+  [/^zari$/, 9],
+  [/^(?:rijen|rijna|rijnu|rijne)$/, 10],
+  [/^(?:listopad|listopadu|listopadem)$/, 11],
+  [/^(?:prosinec|prosince|prosinci)$/, 12],
 ]
 
 function mesicZNazvu(slovo: string): number | null {
@@ -163,80 +167,148 @@ function hodina(h: number, min: number): string | null {
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
 }
 
-/** Čas ve zprávě: „do 15:00“, „v 15.30“, „ve 14 hodin“, „v 8h“. */
+/**
+ * Čas ve zprávě: „do 15:00“, „v 15.30“, „ve 14 hodin“, „v 8h“.
+ *
+ * Co čas NENÍ a nesmí se za něj vzít:
+ *   * „do 15.10.“ — datum (den. měsíc.), ne 15:10; s tečkou za tím a platným
+ *     dnem a měsícem je to datum (15.30 nebo 8.15 datem být nemůže);
+ *   * „na 5.50 Kč“, „do 1.20 m“ — cena a rozměr (číslo s jednotkou).
+ * A z „od 8:00 do 16:00“ je termín KONEC intervalu, ne začátek: přednost má
+ * čas s „do“.
+ */
 function najdiCas(t: string): string | null {
-  const dvojtecka = /\b(?:do|v|ve|na|kolem|od|pred)\s+(\d{1,2})[:.](\d{2})\b(?!\s*\.\s*\d)/.exec(t)
-  if (dvojtecka) return hodina(Number(dvojtecka[1]), Number(dvojtecka[2]))
-  const hodiny = /\b(?:do|v|ve|na|kolem|od|pred)\s+(\d{1,2})\s*(?:hod\w*|h)\b/.exec(t)
-  if (hodiny) return hodina(Number(hodiny[1]), 0)
-  return null
+  const kandidati: { predlozka: string; cas: string }[] = []
+
+  const dvojtecka =
+    /\b(do|v|ve|na|kolem|od|pred)\s+(\d{1,2})([:.])(\d{2})\b(?!\s*\.\s*\d)(?!\s*(?:kc|czk|eur|kg|g|l|ml|m|cm|mm|km|%))/g
+  for (const m of t.matchAll(dvojtecka)) {
+    const h = Number(m[2])
+    const min = Number(m[4])
+    const dal = t.slice((m.index ?? 0) + m[0].length)
+    if (m[3] === '.' && h >= 1 && h <= 31 && min >= 1 && min <= 12 && /^\s*\./.test(dal)) continue
+    const cas = hodina(h, min)
+    if (cas) kandidati.push({ predlozka: m[1], cas })
+  }
+
+  const hodiny = /\b(do|v|ve|na|kolem|od|pred)\s+(\d{1,2})\s*(?:hod\w*|h)\b/g
+  for (const m of t.matchAll(hodiny)) {
+    const cas = hodina(Number(m[2]), 0)
+    if (cas) kandidati.push({ predlozka: m[1], cas })
+  }
+
+  const doCasu = kandidati.find((k) => k.predlozka === 'do')
+  return (doCasu ?? kandidati[0])?.cas ?? null
+}
+
+/** Pondělí příštího týdne (YYYY-MM-DD) — pro „příští týden v pátek“. */
+function pristiPondeli(dnes: string): string {
+  const den = denVTydnu(dnes) // 0 = neděle … 6 = sobota
+  const doPondeli = ((8 - den) % 7) || 7
+  return pridejDny(dnes, doPondeli)
+}
+
+type DatumZTextu = {
+  datum: string
+  /** Jak se to ve zprávě psalo (původní text, s diakritikou). */
+  jak: string
+  /** Proč si návrh není jistý (věta pro člověka), nebo null. */
+  nejiste: string | null
+  /** Čím výš, tím méně se tomu věří: 0 = datum, 1 = den v týdnu, 2 = dnes/zítra/pozítří. */
+  vaha: number
 }
 
 export function najdiTermin(textPuvodni: string, dnes: string): NalezTerminu {
   const t = bezDiakritiky(textPuvodni)
+  // Rozdělení diakritiky nemění délku (é → e), takže se dá z původního textu
+  // ocitovat přesný kus; kdyby se délky rozešly, cituje se hledaný tvar.
+  const ocitovat = (m: RegExpMatchArray): string =>
+    t.length === textPuvodni.length && m.index !== undefined
+      ? textPuvodni.slice(m.index, m.index + m[0].length).trim()
+      : m[0].trim()
+
   const nalezy: string[] = []
-  const data: { datum: string; jak: string; nejiste: boolean }[] = []
+  const data: DatumZTextu[] = []
 
-  if (/\bpozitri\b/.test(t)) data.push({ datum: pridejDny(dnes, 2), jak: 'pozítří', nejiste: false })
-  if (/\bzitra\b|\bzejtra\b/.test(t)) data.push({ datum: pridejDny(dnes, 1), jak: 'zítra', nejiste: false })
-  if (/\bdnes\b|\bdneska\b/.test(t)) data.push({ datum: dnes, jak: 'dnes', nejiste: false })
+  if (/\bpozitri\b/.test(t)) data.push({ datum: pridejDny(dnes, 2), jak: 'pozítří', nejiste: null, vaha: 2 })
+  if (/\bzitra\b|\bzejtra\b/.test(t)) data.push({ datum: pridejDny(dnes, 1), jak: 'zítra', nejiste: null, vaha: 2 })
+  if (/\bdnes\b|\bdneska\b/.test(t)) data.push({ datum: dnes, jak: 'dnes', nejiste: null, vaha: 2 })
 
-  // Den v týdnu: „v pátek“, „do pátku“, „na sobotu“, „ve středu“.
-  const dnyRe = /\b(?:v|ve|do|na|az do|nejpozdeji v|nejpozdeji do)\s+(pondel\w*|uter\w*|stred\w*|ctvrt\w*|pat(?:ek|ku|ka)|sobot\w*|nedel\w*)\b/g
+  const pristiTyden = /\b(?:pristi|dalsi)\s+tyden\b/.test(t)
+
+  // Den v týdnu: „v pátek“, „do pátku“, „na sobotu“, „ve středu“. Jen skutečné tvary
+  // dnů — kmen s libovolným koncem by chytal „do střediska“, „na utěrky“, „ve čtvrt na osm“.
+  const dnyRe =
+    /\b(?:v|ve|do|na|az do|nejpozdeji v|nejpozdeji do)\s+(pondeli|utery|stred(?:a|u|y|e|ou)|ctvrt(?:ek|ku|ka|kem)|pat(?:ek|ku|ka|kem)|sobot(?:a|u|y|e|ou)|nedel(?:e|i|y|ou))\b/g
   for (const m of t.matchAll(dnyRe)) {
     const kmen = DNY_TYDNE.find((d) => d.kmen.test(m[1]))
     if (!kmen) continue
+
+    if (pristiTyden) {
+      // „Příští týden v pátek“: pátek PŘÍŠTÍHO týdne, ne nejbližší.
+      const datum = pridejDny(pristiPondeli(dnes), (kmen.den + 6) % 7)
+      data.push({
+        datum,
+        jak: ocitovat(m),
+        nejiste: 'Den je odvozený z „příští týden“ — ověřte.',
+        vaha: 1,
+      })
+      continue
+    }
+
     const dnesDen = denVTydnu(dnes)
     let rozdil = (kmen.den - dnesDen + 7) % 7
-    let nejiste = false
+    let nejiste: string | null = null
     if (rozdil === 0) {
       // „V pátek“ napsané v pátek: dnes, nebo za týden? Neuhodne se.
       rozdil = 7
-      nejiste = true
+      nejiste = 'Den není z textu jednoznačný (týden dopředu, nebo dnes?) — ověřte.'
     }
-    data.push({ datum: pridejDny(dnes, rozdil), jak: m[0], nejiste })
+    data.push({ datum: pridejDny(dnes, rozdil), jak: ocitovat(m), nejiste, vaha: 1 })
+  }
+
+  const rokDnes = Number(dnes.slice(0, 4))
+  const sIsoDatem = (rok: number, mes: number, den: number) =>
+    `${rok}-${String(mes).padStart(2, '0')}-${String(den).padStart(2, '0')}`
+
+  /**
+   * Zařadí datum z textu. Bez uvedeného roku a už uplynulé → příští rok, k ověření;
+   * s uvedeným rokem a uplynulé → k ověření (nemění se, co člověk napsal).
+   */
+  const pridatDatum = (m: RegExpMatchArray, mes: number, den: number, rokUvedeny: number | null) => {
+    let rok = rokUvedeny ?? rokDnes
+    if (!platneDatum(rok, mes, den)) return
+    let iso = sIsoDatem(rok, mes, den)
+    let nejiste: string | null = null
+    if (iso < dnes) {
+      if (rokUvedeny === null) {
+        rok += 1
+        if (!platneDatum(rok, mes, den)) return
+        iso = sIsoDatem(rok, mes, den)
+        nejiste = 'Datum už letos uplynulo, navrhuje se příští rok — ověřte.'
+      } else {
+        nejiste = 'Datum už uplynulo — ověřte.'
+      }
+    }
+    data.push({ datum: iso, jak: ocitovat(m), nejiste, vaha: 0 })
   }
 
   // Datum číslem: „22. 9.“, „22.9.“, „22. 9. 2026“.
   const ciselne = /\b(\d{1,2})\s*\.\s*(\d{1,2})\s*\.(?:\s*(\d{4}))?(?!\d)/g
   for (const m of t.matchAll(ciselne)) {
-    const d = Number(m[1])
-    const mes = Number(m[2])
-    const rokUvedeny = m[3] ? Number(m[3]) : null
-    const rokDnes = Number(dnes.slice(0, 4))
-    let rok = rokUvedeny ?? rokDnes
-    if (!platneDatum(rok, mes, d)) continue
-    let iso = `${rok}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    let nejiste = false
-    // Bez roku a už uplynulo: příští rok, ale ať to člověk ověří.
-    if (!rokUvedeny && iso < dnes) {
-      rok += 1
-      if (!platneDatum(rok, mes, d)) continue
-      iso = `${rok}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-      nejiste = true
-    }
-    data.push({ datum: iso, jak: m[0].trim(), nejiste })
+    pridatDatum(m, Number(m[2]), Number(m[1]), m[3] ? Number(m[3]) : null)
   }
 
-  // Datum slovem: „22. září“, „3. března“.
-  const slovem = /\b(\d{1,2})\s*\.\s*([a-z]{3,})\b/g
+  // Datum slovem: „22. září“, „3. března 2027“.
+  const slovem = /\b(\d{1,2})\s*\.\s*([a-z]{3,})\b(?:\s+(\d{4})\b)?/g
   for (const m of t.matchAll(slovem)) {
     const mes = mesicZNazvu(m[2])
     if (!mes) continue
-    const d = Number(m[1])
-    const rokDnes = Number(dnes.slice(0, 4))
-    let rok = rokDnes
-    if (!platneDatum(rok, mes, d)) continue
-    let iso = `${rok}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-    let nejiste = false
-    if (iso < dnes) {
-      rok += 1
-      if (!platneDatum(rok, mes, d)) continue
-      iso = `${rok}-${String(mes).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-      nejiste = true
-    }
-    data.push({ datum: iso, jak: m[0].trim(), nejiste })
+    pridatDatum(m, mes, Number(m[1]), m[3] ? Number(m[3]) : null)
   }
+
+  // Přednost má výslovné datum, pak den v týdnu, nakonec „dnes/zítra“ (stabilní řazení).
+  data.sort((a, b) => a.vaha - b.vaha)
 
   const cas = najdiCas(t)
 
@@ -256,15 +328,16 @@ export function najdiTermin(textPuvodni: string, dnes: string): NalezTerminu {
   // Různé dny ve zprávě: první se navrhne, ale je to k ověření.
   const rozdilna = new Set(data.map((d) => d.datum))
   const prvni = data[0]
-  const kontrola = rozdilna.size > 1 || prvni.nejiste
+  const kontrola = rozdilna.size > 1 || prvni.nejiste !== null
   const termin: Termin = { datum: prvni.datum, cas }
 
   nalezy.push(
-    `Termín: „${prvni.jak}“ → ${popisData(prvni.datum)}${cas ? ` ${cas}` : ''}.`,
+    // popisData končí tečkou („pá 25. 9.“); za čas se tečka doplní.
+    `Termín: „${prvni.jak}“ → ${popisData(prvni.datum)}${cas ? ` ${cas}.` : ''}`,
   )
   if (rozdilna.size > 1) nalezy.push('Ve zprávě je víc různých dnů — ověřte, který platí.')
-  if (prvni.nejiste) nalezy.push('Den není z textu jednoznačný (týden dopředu, nebo dnes?) — ověřte.')
-  if (!cas && /\bdo\s+\d{1,2}\b/.test(t)) nalezy.push('Ve zprávě je „do“ s číslem — pokud je to hodina, doplňte čas.')
+  if (prvni.nejiste) nalezy.push(prvni.nejiste)
+  if (!cas && !data.some((d) => d.vaha === 0) && /\bdo\s+\d{1,2}\b/.test(t)) nalezy.push('Ve zprávě je „do“ s číslem — pokud je to hodina, doplňte čas.')
 
   return { termin, nalezy, kontrola }
 }
@@ -275,6 +348,12 @@ export function najdiTermin(textPuvodni: string, dnes: string): NalezTerminu {
 
 export function jeNaleha(textPuvodni: string): boolean {
   const t = bezDiakritiky(textPuvodni)
+    // Záporný a jiný význam: „není spěch“, „bez spěchu“, „nespěchej“, „není naléhavé“,
+    // „hned vedle“ (místo, ne čas). Vyřadí se dřív, než se hledá naléhavost.
+    .replace(/\b(?:neni|nebude|nemusi|bez)\s+(?:zadny\s+|moc\s+)?spech\w*/g, ' ')
+    .replace(/\bnespech\w*/g, ' ')
+    .replace(/\b(?:neni|nebude)\s+(?:moc\s+|zas\s+)?(?:nalehav|urgentn)\w*/g, ' ')
+    .replace(/\bhned\s+(?:vedle|za|pod|nad|pred|u|naproti)\b/g, ' ')
   return /\bnalehav|\burgent|\bihned\b|\bhned\b|\bokamzit|\bco\s+nejdriv\b|\bcoby\s+nejdriv\b|\basap\b|\bspech|\bnutne\b/.test(t)
 }
 
@@ -286,11 +365,11 @@ const POVELY =
   /^(?:prosim\s+)?(?:zajisti|zajistete|objednej|objednejte|zkontroluj|zkontrolujte|dej|dejte|udelej|udelejte|priprav|pripravte|zavolej|zavolejte|napis|napiste|vycisti|vycistete|umyj|umyjte|dones|doneste|prines|prinest|dokup|dokupte|nezapomen|nezapomente|over|overte|zaridit|zarid|zaridte|vyrid|vyridte|oprav|opravte|uklid|uklidte|doplnte|dopln|vezmi|vezmete|posli|poslete|domluv|domluvte|potvrd|potvrdte|nahlas|nahlaste)\b/
 const POTREBA = /\b(?:je\s+treba|musime|musis|musite|potrebujeme|potrebuju|potrebuji|chybi|dosel[aoy]?|nezapomen|prosim)\b/
 
-/** Pozdravy a zdvořilostní úvody, které v názvu úkolu nemají co dělat. */
+/** Pozdravy a zdvořilostní úvody, které v názvu úkolu nemají co dělat. Jen CELÁ slova („Ahojky“ zůstane). */
 function oriznoutUvod(veta: string): string {
   return veta
-    .replace(/^\s*(?:ahoj|dobr[ýé]\s+(?:den|r[áa]no|ve[čc]er)|ƒ|čau|cau|nazdar|hej)[\s,!.:–-]*/iu, '')
-    .replace(/^\s*(?:pros[ií]m(?:\s+t[ěe])?|d[ěe]kuji|d[íi]ky)[\s,!.:–-]*/iu, '')
+    .replace(/^\s*(?:ahoj|dobr[ýé]\s+(?:den|r[áa]no|ve[čc]er)|čau|cau|nazdar|hej)(?![\p{L}])[\s,!.:–-]*/iu, '')
+    .replace(/^\s*(?:pros[ií]m(?:\s+t[ěe])?|d[ěe]kuji|d[íi]ky)(?![\p{L}])[\s,!.:–-]*/iu, '')
     .trim()
 }
 
@@ -298,19 +377,34 @@ function velkePismeno(s: string): string {
   return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+/** Zkrátí na `max` znaků; počítá se po znacích (code points), takže nerozseká emoji na půl. */
 function zkratit(s: string, max: number): string {
-  if (s.length <= max) return s
-  const rez = s.slice(0, max - 1)
+  const znaky = Array.from(s)
+  if (znaky.length <= max) return s
+  const rez = znaky.slice(0, max - 1).join('')
   const mezera = rez.lastIndexOf(' ')
   return `${(mezera > max * 0.5 ? rez.slice(0, mezera) : rez).replace(/[\s,;:–-]+$/u, '')}…`
 }
 
+/**
+ * Věty zprávy. Tečka za číslem („do 22. 9.“, „č. 3“) nebo zkratkou („tj.“, „cca.“)
+ * není konec věty — jinak by se název úkolu useknul uprostřed data. Nový řádek
+ * je vždy nová věta.
+ */
 function vety(text: string): string[] {
-  return text
-    .replace(/\r\n/g, '\n')
-    .split(/(?<=[.!?…])\s+|\n+/u)
-    .map((v) => v.replace(/\s+/g, ' ').trim())
-    .filter((v) => v.length > 0)
+  const vysledek: string[] = []
+  for (const radek of text.replace(/\r\n/g, '\n').split('\n')) {
+    let aktualni = ''
+    for (const kus of radek.split(/(?<=[.!?…])\s+/u)) {
+      aktualni = aktualni === '' ? kus : `${aktualni} ${kus}`
+      if (!/(?:^|\s)(?:\d+|tj|tzn|např|cca|č|čís|str|ul|hod|min|resp|atd|apod)\.$/iu.test(aktualni)) {
+        vysledek.push(aktualni)
+        aktualni = ''
+      }
+    }
+    if (aktualni !== '') vysledek.push(aktualni)
+  }
+  return vysledek.map((v) => v.replace(/\s+/g, ' ').trim()).filter((v) => v.length > 0)
 }
 
 /** Věta „Prosím zavolej dodavateli“ je povel; „Ahoj všichni“ ne. */

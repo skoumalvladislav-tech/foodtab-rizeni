@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 
 import { getUser } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
+import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /** Musí sedět s KATEGORIE ve `20260917050000_nastaveni_upozorneni.sql`. */
@@ -73,7 +74,7 @@ export async function ulozitZarizeniPush(odber: {
   })
   if (error) {
     // Kód se nasazuje dřív než migrace.
-    if (error.code === 'PGRST202' || /does not exist|schema cache/i.test(error.message)) {
+    if (funkceNeexistuje(error)) {
       return { ok: false, chyba: 'Upozornění do telefonu čekají na nasazení databáze.' }
     }
     return { ok: false, chyba: error.message }

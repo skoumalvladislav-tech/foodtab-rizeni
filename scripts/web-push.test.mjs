@@ -22,6 +22,7 @@ import { createECDH, createPublicKey, verify } from 'node:crypto'
 import {
   NEJVIC_BAJTU_ZPRAVY,
   desifrovat,
+  jeDuveryhodnyEndpoint,
   nactiKliceVapid,
   odeslatWebPush,
   vapidHlavicka,
@@ -137,15 +138,15 @@ je('podpis má 64 bajtů (r||s), ne DER', z64(podpis).length, 64)
 
 console.log('\n== Odeslání proti podvržené push službě ==')
 
-const odber = { endpoint: 'https://push.example.test/v1/abc', p256dh: b64(zar.getPublicKey()), auth_secret: auth2 }
-async function zkus(status, extra = {}) {
+const odber = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', p256dh: b64(zar.getPublicKey()), auth_secret: auth2 }
+async function zkus(status, extra = {}, adresa = odber.endpoint) {
   let volani = null
   const fetchFn = async (url, init) => {
     volani = { url, init }
     if (status === 'vyjimka') throw new Error('síť spadla')
     return { status }
   }
-  const v = await odeslatWebPush(odber, { title: 'Foodtab', body: 'Nová zpráva' }, klice, { fetchFn, ted: TED, ...extra })
+  const v = await odeslatWebPush({ ...odber, endpoint: adresa }, { title: 'Foodtab', body: 'Nová zpráva' }, klice, { fetchFn, ted: TED, ...extra })
   return { v, volani }
 }
 const ok = await zkus(201)
@@ -166,6 +167,32 @@ je('500 = selhalo (zkusí se znovu)', (await zkus(500)).v.stav, 'selhalo')
 je('429 = selhalo, nezahazuje se odběr', (await zkus(429)).v.stav, 'selhalo')
 je('výjimka sítě = selhalo, ne pád', (await zkus('vyjimka')).v, { stav: 'selhalo', chyba: 'síť spadla' })
 je('rozbitý klíč zařízení = selhalo, ne pád', (await odeslatWebPush({ ...odber, p256dh: 'x' }, {}, klice, { fetchFn: async () => ({ status: 201 }) })).stav, 'selhalo')
+
+console.log('\n== Kam se smí posílat (SSRF) ==')
+
+for (const [adresa, cekano] of [
+  ['https://fcm.googleapis.com/fcm/send/abc', true],
+  ['https://updates.push.services.mozilla.com/wpush/v2/abc', true],
+  ['https://web.push.apple.com/abc', true],
+  ['https://wns2-par02p.notify.windows.com/w/?token=x', true],
+  ['http://fcm.googleapis.com/fcm/send/abc', false],
+  ['https://interni-host.local/x', false],
+  ['https://localhost/x', false],
+  ['https://169.254.169.254/latest/meta-data', false],
+  ['https://fcm.googleapis.com@evil.example/x', false],
+  ['https://fcm.googleapis.com:8443/x', false],
+  ['https://user:pass@fcm.googleapis.com/x', false],
+  ['https://fcm.googleapis.com.evil.example/x', false],
+  ['https://evilfcm.googleapis.com.evil.example/x', false],
+  ['https://web.push.apple.com.evil.example/x', false],
+  ['https://evil-push.apple.com.example/x', false],
+  ['nesmysl', false],
+  ['', false],
+]) {
+  je('endpoint ' + (adresa || '(prázdný)') + (cekano ? ' smí' : ' nesmí'), jeDuveryhodnyEndpoint(adresa), cekano)
+}
+const cizi = await zkus(201, {}, 'https://interni-host.local/x')
+je('cizí adresa: nikam se neposílá a odběr se vypne', [cizi.v, cizi.volani], [{ stav: 'neplatny' }, null])
 
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO\n' : `\nCHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)

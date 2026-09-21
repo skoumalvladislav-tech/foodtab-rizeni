@@ -112,7 +112,8 @@ export default function DetailUkolu({
             <Link href={`/${rozsah}/vzkazy/${ukol.konverzace_id}${ukol.zprava_id ? `#z-${ukol.zprava_id}` : ''}`}>
               Otevřít zprávu
             </Link>
-            . Diskuse k úkolu samostatně zatím není — mluví se o něm v tom rozhovoru.
+            {' '}(Otevře se jen účastníkům toho rozhovoru — ostatní úkol vidí, zprávu ne.) Diskuse k úkolu
+            samostatně zatím není — mluví se o něm v tom rozhovoru.
           </p>
         </section>
       ) : null}

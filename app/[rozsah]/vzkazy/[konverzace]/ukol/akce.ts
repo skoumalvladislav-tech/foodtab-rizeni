@@ -47,10 +47,20 @@ export async function zalozitUkolZeZpravy(formData: FormData): Promise<void> {
   const nazev = String(formData.get('nazev') ?? '').trim().slice(0, 120)
   if (nazev === '') chyba('Název úkolu je povinný.')
 
-  const komu = String(formData.get('komu') ?? 'pobocka')
+  let komu = String(formData.get('komu') ?? 'pobocka')
   const vybrane = (klic: string): string | null => {
     const v = String(formData.get(klic) ?? '').trim()
     return UUID.test(v) ? v : null
+  }
+
+  // Člověk vybral adresáta v rozbalovátku a nepřepnul přepínač „Komu“ (formulář
+  // bez JavaScriptu to za něj neudělá). Jeden vybraný adresát se použije — úkol
+  // by jinak tiše skončil u celé pobočky. Víc vybraných adresátů bez přepnutí
+  // se nehádá: chyba.
+  if (komu === 'pobocka') {
+    const zvolene = (['usek', 'pozice', 'clovek'] as const).filter((k) => vybrane(k) !== null)
+    if (zvolene.length === 1) komu = zvolene[0]
+    else if (zvolene.length > 1) chyba('Vyberte jen jednoho adresáta a přepněte volbu „Komu“.')
   }
   const usek = komu === 'usek' ? vybrane('usek') : null
   const pozice = komu === 'pozice' ? vybrane('pozice') : null

@@ -38,10 +38,11 @@ export function normalizuj(s: string): string {
  * písmen nehrají roli. Prázdný dotaz vrátí všechny.
  */
 export function hledatPrijemce(lide: Prijemce[], dotaz: string): Prijemce[] {
-  const slova = normalizuj(dotaz).split(' ').filter(Boolean)
+  // Pomlčka odděluje slova jako mezera: „svob“ najde „Nováková-Svobodová“.
+  const slova = normalizuj(dotaz).split(/[\s-]+/).filter(Boolean)
   if (slova.length === 0) return lide
   return lide.filter((p) => {
-    const jmenaSlova = normalizuj(p.jmeno).split(' ')
+    const jmenaSlova = normalizuj(p.jmeno).split(/[\s-]+/)
     return slova.every((s) => jmenaSlova.some((j) => j.startsWith(s)))
   })
 }

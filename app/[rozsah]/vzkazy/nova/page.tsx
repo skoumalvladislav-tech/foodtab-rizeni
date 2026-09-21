@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-import { getContext, getUser } from '@/lib/authz'
+import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import type { Prijemce } from '@/lib/komunikace/prijemci'
 import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
@@ -59,6 +59,10 @@ export default async function NovaZprava({
     return <Sdeleni nadpis="Sem nemáte přístup">Tahle část Foodtabu vám není otevřená.</Sdeleni>
   }
 
+  // Záložky Úkoly a Checklisty jen tomu, kdo na ně má právo (jako na ostatních
+  // stránkách Provozního centra).
+  const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
+
   const supabase = await getServerSupabase()
   const { data, error } = await supabase.rpc('komu_muzu_psat', { p_tenant: tenantId })
 
@@ -93,13 +97,17 @@ export default async function NovaZprava({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '720px' }}>
-        <PcZalozky rozsah={rozsah} aktivni="komunikace" />
+        <PcZalozky
+          rozsah={rozsah}
+          aktivni="komunikace"
+          skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
+        />
 
         {ceka ? (
           <p className="pc-poznamka-navrhu">
             <strong>Výběr příjemců čeká na nasazení databáze.</strong> Přibude migrací{' '}
-            <code>20260921110000_provozni_centrum</code>. Do té doby se osobní rozhovor
-            zakládá jako dřív.
+            <code>20260921110000_provozni_centrum</code>. Do té doby jde psát jen do
+            kanálu pobočky nebo úseku a poslat vzkaz vedení (na seznamu rozhovorů).
           </p>
         ) : (
           <section className="ds-plocha">

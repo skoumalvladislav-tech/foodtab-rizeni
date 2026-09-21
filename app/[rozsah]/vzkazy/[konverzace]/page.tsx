@@ -14,6 +14,7 @@ import Nadpis from '../../nadpis'
 import PcZalozky from '../../provozni-centrum/zalozky'
 import VetaOPushi from '../../provozni-centrum/veta-o-pushi'
 import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from '../seznam-rozhovoru'
+import { nactiJmenaVRozhovoru, nactiNazvyOsobnich, nactiPosledniTexty } from '../nazvy'
 import HlasovkaNahravac from './hlasovka-nahravac'
 import PanelKonverzace, { type UcastnikUI, type UkolUI } from './panel-konverzace'
 import PosunNaKonec from './posun-na-konec'
@@ -43,6 +44,8 @@ export const dynamic = 'force-dynamic'
 
 const ZONA = ZONA_VYCHOZI
 const POCET = 200
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 type Priorita = 'normal' | 'important' | 'urgent'
 
@@ -88,6 +91,15 @@ export default async function Rozhovor({
   const user = await getUser()
   if (!user) redirect('/prihlaseni')
 
+  // Neplatné id v adrese (`/vzkazy/abc`) je hláška, ne pád stránky na chybě databáze.
+  if (!UUID.test(konverzace)) {
+    return (
+      <Sdeleni nadpis="Tenhle rozhovor neexistuje">
+        Odkaz není platný. <Link href={`/${rozsah}/vzkazy`}>Zpět na rozhovory</Link>.
+      </Sdeleni>
+    )
+  }
+
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
     return (
@@ -129,22 +141,9 @@ export default async function Rozhovor({
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
 
   // Náhled poslední zprávy do seznamu vlevo — stejný postup jako na /vzkazy.
-  const posledniText = new Map<string, string>()
-  if (rozhovory.length > 0) {
-    const { data: zpravyPreview } = await supabase
-      .from('konverzace_zpravy')
-      .select('konverzace_id, text, vytvoreno_kdy')
-      .in('konverzace_id', rozhovory.map((r) => r.konverzace_id))
-      .is('stornovano_kdy', null)
-      .order('vytvoreno_kdy', { ascending: false })
-      .limit(300)
-    for (const z of zpravyPreview ?? []) {
-      const kid = z.konverzace_id as string
-      if (posledniText.has(kid)) continue
-      const t = String(z.text ?? '').trim()
-      posledniText.set(kid, t.length > 72 ? `${t.slice(0, 72)}…` : t)
-    }
-  }
+  const posledniText = await nactiPosledniTexty(supabase, rozhovory.map((r) => r.konverzace_id))
+  // Osobní rozhovor bez názvu = jména ostatních účastníků (každý vidí toho druhého).
+  const nazvyOsobnich = await nactiNazvyOsobnich(supabase, tenantId)
 
   const { data: hlavicka, error: chybaHlavicka } = await supabase
     .from('konverzace')
@@ -194,9 +193,11 @@ export default async function Rozhovor({
       .from('konverzace_zpravy')
       .select(VARIANTY_ZPRAV[varianta].sloupce)
       .eq('konverzace_id', konverzace)
-      .order('vytvoreno_kdy', { ascending: true })
+      // NEJNOVĚJŠÍCH POCET zpráv: seřazené od nejnovější a níž se obrátí. Vzestupné
+      // řazení s limitem by od 201. zprávy nové vůbec neukázalo.
+      .order('vytvoreno_kdy', { ascending: false })
       .limit(POCET)
-    zpravyData = r.data as unknown[] | null
+    zpravyData = r.data ? [...(r.data as unknown[])].reverse() : null
     chybaZpravy = r.error
     if (!r.error || !sloupecNeexistuje(r.error)) break
   }
@@ -318,8 +319,21 @@ export default async function Rozhovor({
     }
   }
 
+  // Běžný zaměstnanec z `employees` nepřečte jména kolegů (RLS), takže by
+  // v rozhovoru viděl samé „kdosi“. Jména lidí TÉHLE konverzace dává
+  // `lide_v_rozhovoru` (jen účastníkovi). Bez funkce (migrace ještě není)
+  // zůstává staré čtení výš.
+  const jmenaZRozhovoru = await nactiJmenaVRozhovoru(supabase, konverzace)
+  if (jmenaZRozhovoru) {
+    for (const [id, jmeno] of jmenaZRozhovoru) {
+      if (jmeno !== '') jmena.set(id, jmeno)
+    }
+  }
+
   const smiNalehavou = await hasAccess(tenantId, 'communication.urgent', null)
   const smiUkoly = await hasAccess(tenantId, 'tasks.manage', scope.branchId)
+  // Záložky Úkoly a Checklisty se skrývají podle ČTENÍ (jako jinde v Provozním centru), ne podle zadávání.
+  const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
 
   // Do kdy mám přečteno — pro dělítko „Nové zprávy“. Čas přečtení vidí jen
   // vlastník (moje_precteno_do), ne ostatní účastníci. Chyba = žádné dělítko.
@@ -367,7 +381,11 @@ export default async function Rozhovor({
   const nazevPobocky = hlavicka.branch_id
     ? (nazvyPobocek.get(hlavicka.branch_id as string) ?? 'jiná pobočka')
     : null
-  const nazev = (hlavicka.nazev as string | null) ?? nazevPobocky ?? 'Rozhovor'
+  const nazev =
+    (hlavicka.nazev as string | null) ??
+    (hlavicka.druh === 'osobni' ? nazvyOsobnich.get(konverzace) : undefined) ??
+    nazevPobocky ??
+    'Rozhovor'
   const druh = hlavicka.druh as Rozhovor['druh']
 
   const kdoCte =
@@ -434,7 +452,7 @@ export default async function Rozhovor({
           rozsah={rozsah}
           aktivni="komunikace"
           pocty={{ komunikace: neprecteneCelkem }}
-          skryte={smiUkoly ? [] : ['ukoly', 'checklisty']}
+          skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
         />
 
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
@@ -457,6 +475,7 @@ export default async function Rozhovor({
               nazvyPobocek={nazvyPobocek}
               aktivniId={konverzace}
               posledniText={posledniText}
+              nazvyOsobnich={nazvyOsobnich}
             />
           </div>
 
@@ -475,6 +494,12 @@ export default async function Rozhovor({
                   </p>
                 </div>
               </div>
+
+              {zpravy.length >= POCET ? (
+                <p className="pc-poznamka-navrhu" style={{ margin: '12px 18px 0' }}>
+                  Zobrazuje se posledních {POCET} zpráv rozhovoru; starší tu nejsou.
+                </p>
+              ) : null}
 
               <VlaknoZprav
                 rozsah={rozsah}
@@ -496,6 +521,7 @@ export default async function Rozhovor({
                   <SkladaniZpravy
                     rozsah={rozsah}
                     konverzace={konverzace}
+                    uzivatel={user.id}
                     smiNalehavou={smiNalehavou}
                   />
                   <div style={{ padding: '0 18px 16px' }}>

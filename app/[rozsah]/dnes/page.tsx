@@ -23,6 +23,7 @@ import Nadpis from "../nadpis";
 import VetaOPushi from "../provozni-centrum/veta-o-pushi";
 import { zapsatDochazku } from "../dochazka/akce";
 import PoleKodu from "../dochazka/pole-kodu";
+import { nactiJmenaVRozhovoru, nactiNazvyOsobnich } from "../vzkazy/nazvy";
 import { NAZVY_DRUHU } from "../vzkazy/seznam-rozhovoru";
 import {
   Citat,
@@ -478,32 +479,45 @@ export default async function Dnes({
     tu na rozdíl od vlákna nezobrazují vůbec — v náhledu není místo na
     přeškrtnutý text s vysvětlením, jen by matlo.
   */
-  const dotazNaPosledniVzkazy = (sloupce: string) =>
-    supabase
+  const dotazNaPosledniVzkazy = (sloupce: string, bezSystemovych: boolean) => {
+    let dotaz = supabase
       .from("konverzace_zpravy")
       .select(sloupce)
-      .is("stornovano_kdy", null)
+      .is("stornovano_kdy", null);
+    // Systémové události („Vytvořen úkol: …“, sloupec `typ` z migrace
+    // 20260921110000) nejsou vzkazy a v náhledu by je nahrazovaly.
+    if (bezSystemovych) dotaz = dotaz.eq("typ", "zprava");
+    return dotaz
       .order("vytvoreno_kdy", { ascending: false })
       .limit(POSLEDNICH_VZKAZU);
+  };
 
   /*
-    Sloupce přibývaly migracemi: `zvuk_cesta` (20260917060000) a
-    `priorita` (20260917040000). Dokud kterákoli neproběhne, dotaz na ni
-    selže — zkouší se proto od nejúplnějšího výběru k nejskromnějšímu
-    a obrazovka pokračuje s tím, co databáze umí (stejný vzor jako jinde).
+    Sloupce přibývaly migracemi: `typ` (20260921110000), `zvuk_cesta`
+    (20260917060000) a `priorita` (20260917040000). Dokud kterákoli
+    neproběhne, dotaz na ni selže — zkouší se proto od nejúplnějšího výběru
+    k nejskromnějšímu a obrazovka pokračuje s tím, co databáze umí (stejný
+    vzor jako jinde).
   */
   const VYBERY_VZKAZU = [
-    "id, konverzace_id, autor, text, zvuk_cesta, priorita, vytvoreno_kdy",
-    "id, konverzace_id, autor, text, zvuk_cesta, vytvoreno_kdy",
-    "id, konverzace_id, autor, text, vytvoreno_kdy",
+    { sloupce: "id, konverzace_id, autor, text, zvuk_cesta, priorita, vytvoreno_kdy", bezSystemovych: true },
+    { sloupce: "id, konverzace_id, autor, text, zvuk_cesta, priorita, vytvoreno_kdy", bezSystemovych: false },
+    { sloupce: "id, konverzace_id, autor, text, zvuk_cesta, vytvoreno_kdy", bezSystemovych: false },
+    { sloupce: "id, konverzace_id, autor, text, vytvoreno_kdy", bezSystemovych: false },
   ];
   let zpravyData: unknown[] | null = null;
-  for (const vyber of VYBERY_VZKAZU) {
-    const { data: d, error: e } = await dotazNaPosledniVzkazy(vyber);
+  for (const v of VYBERY_VZKAZU) {
+    const { data: d, error: e } = await dotazNaPosledniVzkazy(v.sloupce, v.bezSystemovych);
     if (e && sloupecNeexistuje(e)) continue;
-    zpravyData = e ? null : (d as unknown[] | null);
+    zpravyData = e ? null : (d as unknown as unknown[] | null);
     break;
   }
+
+  // Jména osobních rozhovorů (každý vidí toho druhého). Dnes se kvůli jménům
+  // v náhledu nesmí rozbít — chyba = staré názvy.
+  const nazvyOsobnich = await nactiNazvyOsobnich(supabase, tenantId).catch(
+    () => new Map<string, string>(),
+  );
 
   const kalendarniDnes = denVPasmu(new Date(), ZONA_VYCHOZI);
   const kdyKratce = (iso: string): string => {
@@ -518,6 +532,7 @@ export default async function Dnes({
     if (!r) return { nazev: "Rozhovor", druh: "" };
     const nazev =
       r.nazev ??
+      (r.druh === "osobni" ? nazvyOsobnich.get(id) : undefined) ??
       (r.branch_id
         ? (nazvyPobocek.get(r.branch_id) ?? "Jiná pobočka")
         : ((NAZVY_DRUHU as Record<string, string>)[r.druh] ?? "Rozhovor"));
@@ -540,6 +555,16 @@ export default async function Dnes({
       ? await supabase.from("employees").select("id, full_name").in("id", autoriIds)
       : { data: [] as { id: string; full_name: string }[] };
     const jmenaAutoru = new Map((autoriData ?? []).map((a) => [a.id as string, String(a.full_name ?? "").trim()]));
+    // Běžný zaměstnanec z `employees` nepřečte jména kolegů (RLS) — autory
+    // zpráv dá `lide_v_rozhovoru`, jen z rozhovorů, kde je účastníkem.
+    const rozhovoryVKarte = [...new Set(radky.map((z) => z.konverzace_id))];
+    const jmenaZRozhovoru = await Promise.all(
+      rozhovoryVKarte.map((k) => nactiJmenaVRozhovoru(supabase, k).catch(() => null)),
+    );
+    for (const m of jmenaZRozhovoru) {
+      if (!m) continue;
+      for (const [id, jmeno] of m) if (jmeno !== "") jmenaAutoru.set(id, jmeno);
+    }
     for (const z of radky) {
       const { nazev, druh } = nazevRozhovoru(z.konverzace_id);
       posledniVzkazy.push({

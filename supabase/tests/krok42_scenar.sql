@@ -32,6 +32,17 @@ begin
   else raise exception 'SELHALO: %', p_name; end if;
 end $$;
 
+-- Zavolá SQL a vrátí, jestli spadlo s daným SQLSTATE A hláškou obsahující text:
+-- spadnout musí TA větev, kterou zkoušíme, ne jiná kontrola se stejným kódem.
+create or replace function pg_temp.spadne_hlaskou(p_sql text, p_stav text, p_hlaska text)
+returns boolean language plpgsql as $$
+begin
+  execute p_sql;
+  return false;
+exception when others then
+  return sqlstate = p_stav and sqlerrm like '%' || p_hlaska || '%';
+end $$;
+
 -- Kolik nepřečtených upozornění daného druhu člověk má.
 create or replace function pg_temp.pocet(p_user uuid, p_druh text)
 returns integer language sql as $$
@@ -144,6 +155,13 @@ returning id as cizi_firma \gset
 insert into public.employees (tenant_id, user_id, full_name, employment_type)
 values (:'cizi_firma', :'cizi', 'Krok42 Cizí zaměstnanec', 'hpp');
 
+-- ... a v cizí firmě je AKTIVNÍM členem (upozornění dostává jen aktivní člen).
+insert into public.roles (tenant_id, key, label)
+values (:'cizi_firma', 'krok42cizi', 'Krok42 cizí role')
+returning id as cizi_role \gset
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'cizi_firma', :'cizi', :'cizi_role', 'branch', 'active');
+
 select set_config('test.tenant', :'tenant', false);
 
 
@@ -230,6 +248,20 @@ select pg_temp.check('zaměstnanec JINÉ firmy upozornění v naší firmě nedo
   and not exists (select 1 from public.notifications where druh = 'test.cizi'));
 select pg_temp.check('a ve své vlastní firmě upozornění dostane (filtr firmy není příliš přísný)',
   app.notifikovat(:'cizi_firma', :'cizi', 'test.cizi.vlastni', '{}'::jsonb) is not null);
+
+-- Pozastavené členství: přístup do aplikace je zavřený (has_access, modul_zapnuty),
+-- zaměstnanecký řádek ale zůstává. Upozornění — a hlavně push na zamčenou
+-- obrazovku telefonu — mu chodit nemá.
+update public.memberships set status = 'suspended'
+ where user_id = :'cizi' and tenant_id = :'cizi_firma';
+select app.notifikovat(:'cizi_firma', :'cizi', 'test.cizi.pozastaveny', '{}'::jsonb);
+select pg_temp.check('pozastavené členství upozornění nedostane',
+  not exists (select 1 from public.notifications where druh = 'test.cizi.pozastaveny'));
+update public.memberships set status = 'active'
+ where user_id = :'cizi' and tenant_id = :'cizi_firma';
+select app.notifikovat(:'cizi_firma', :'cizi', 'test.cizi.obnoveny', '{}'::jsonb);
+select pg_temp.check('po obnovení členství upozornění zase dostane',
+  exists (select 1 from public.notifications where druh = 'test.cizi.obnoveny'));
 
 select pg_temp.check('smazaný zaměstnanec upozornění nedostane',
   app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000011', 'test.smazany', '{}'::jsonb) is null
@@ -450,6 +482,69 @@ select pg_temp.check('nahrazené upozornění nenechá viset čekající push',
                    where d.notification_id = :'g_puv' and d.stav in ('ceka_na_smenu', 'k_odeslani')));
 select pg_temp.check('nové čekající nese součet zpráv (2)',
   (select pocet from public.notifikace_doruceni where notification_id = :'g_nove') = 2);
+
+-- NALÉHAVÝ push, který ještě neodešel, nesmí zmizet kvůli další běžné zprávě
+-- téhož klíče (sloučení by ho nahradilo čekáním na příchod).
+select app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000010', 'test.uslah',
+  '{"pocet":1}'::jsonb, 'urgent', null, null, null, null, 'k:g5') as g_urg \gset
+select app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000010', 'test.uslah',
+  '{"pocet":1}'::jsonb, 'normal', null, null, null, null, 'k:g5') as g_pot \gset
+select pg_temp.check('naléhavé upozornění s neodeslaným pushem se sloučením nezrušilo',
+  exists (select 1 from public.notifications where id = :'g_urg')
+  and (select stav from public.notifikace_doruceni where notification_id = :'g_urg') = 'k_odeslani');
+select pg_temp.check('běžná zpráva čeká na příchod vedle něj a nese počet jen sama sebe',
+  (select stav from public.notifikace_doruceni where notification_id = :'g_pot') = 'ceka_na_smenu'
+  and (select pocet from public.notifikace_doruceni where notification_id = :'g_pot') = 1);
+
+-- Až naléhavý push odejde (worker), sloučení ho už smí nahradit jako každé jiné.
+update public.notifikace_doruceni set stav = 'odeslano' where notification_id = :'g_urg';
+select app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000010', 'test.uslah',
+  '{"pocet":1}'::jsonb, 'normal', null, null, null, null, 'k:g5') as g_pot2 \gset
+select pg_temp.check('odeslané naléhavé upozornění se slučuje jako každé jiné',
+  not exists (select 1 from public.notifications where id = :'g_urg')
+  and (select pocet from public.notifikace_doruceni where notification_id = :'g_pot2') = 3);
+update public.notifikace_doruceni set stav = 'zruseno'
+ where user_id = '42420000-0000-0000-0000-000000000010' and stav = 'ceka_na_smenu'
+   and notification_id in (select id from public.notifications where druh = 'test.uslah');
+
+-- Přečtené upozornění se po příchodu nepřipomíná.
+-- (Zbytek čekajících z předchozích kontrol se zruší, ať se počítá jen s těmi dvěma.)
+update public.notifikace_doruceni set stav = 'zruseno'
+ where user_id = '42420000-0000-0000-0000-000000000010' and stav = 'ceka_na_smenu';
+select app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000010', 'test.prectene',
+  '{}'::jsonb, 'normal', null, null, null, null, 'k:g6') as g_prec \gset
+select app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000010', 'test.nepr',
+  '{}'::jsonb, 'normal', null, null, null, null, 'k:g7') as g_nepr \gset
+update public.notifications set read_at = now() where id = :'g_prec';
+-- Píchnutí téhož druhu do dvou minut se bere jako totéž (app.pichnout): dřívější
+-- Gitiny příchody se posunou o hodinu zpět, ať tenhle příchod opravdu vznikne.
+update public.attendance_events
+   set occurred_at = occurred_at - interval '1 hour'
+ where employee_id = :'gita';
+select udalost from app.pichnout(:'tenant', :'perla', :'gita', 'in') \gset
+select app.uvolnit_cekajici(:'tenant') \gset
+select pg_temp.check('po příchodu se nepřipomene, co si Gita už přečetla',
+  (select stav from public.notifikace_doruceni where notification_id = :'g_prec') = 'zruseno');
+select pg_temp.check('nepřečtené čekající se po příchodu uvolní samo',
+  (select stav from public.notifikace_doruceni where notification_id = :'g_nepr') = 'k_odeslani');
+select pg_temp.check('… a nevznikl kvůli tomu žádný souhrn (přečtené se do něj nezapočítá)',
+  not exists (select 1 from public.notifikace_doruceni
+               where user_id = '42420000-0000-0000-0000-000000000010' and typ = 'souhrn'));
+
+-- Gita je teď na směně: běžná zpráva čeká na odeslání (k_odeslani) a další téhož
+-- klíče ji nahradí. Chrání se JEN naléhavé — jinak by se u každého pípnutí
+-- hromadila stará upozornění vedle nových.
+select app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000010', 'test.nasmene',
+  '{"pocet":1}'::jsonb, 'normal', null, null, null, null, 'k:g8') as g_a \gset
+select app.notifikovat(:'tenant', '42420000-0000-0000-0000-000000000010', 'test.nasmene',
+  '{"pocet":1}'::jsonb, 'normal', null, null, null, null, 'k:g8') as g_b \gset
+select pg_temp.check('na směně: nahrazená běžná zpráva se nezachovává (chrání se jen naléhavé)',
+  not exists (select 1 from public.notifications where id = :'g_a')
+  and (select stav from public.notifikace_doruceni where notification_id = :'g_b') = 'k_odeslani'
+  and (select count(*) from public.notifikace_doruceni d
+        where d.user_id = '42420000-0000-0000-0000-000000000010' and d.stav = 'k_odeslani'
+          and d.notification_id in (select id from public.notifications where druh = 'test.nasmene')) = 1);
+select udalost from app.pichnout(:'tenant', :'perla', :'gita', 'out') \gset
 
 
 \echo ''
@@ -699,52 +794,144 @@ select pg_temp.check('přeřazení: Bořek dostal dvě „nová“ (po jedné na
 
 select set_config('test.user_id', '42420000-0000-0000-0000-00000000000a', false);
 set role authenticated;
-select public.push_odber_ulozit('https://push.example/spolecny', 'p256dh-spolecny-0123456789', 'auth-spol-0123', 'Test');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/spolecny', 'p256dh-spolecny-0123456789', 'auth-spol-0123', 'Test');
 reset role;
 
 select pg_temp.check('zařízení se zapsalo pod přihlášeného',
-  (select user_id from public.push_odbery where endpoint = 'https://push.example/spolecny')
+  (select user_id from public.push_odbery where endpoint = 'https://fcm.googleapis.com/fcm/send/spolecny')
   = '42420000-0000-0000-0000-00000000000a');
 
 -- Sdílený telefon: přihlásí se Bořek, zařízení přejde na něj.
 select set_config('test.user_id', '42420000-0000-0000-0000-00000000000b', false);
 set role authenticated;
-select public.push_odber_ulozit('https://push.example/spolecny', 'p256dh-spolecny-0123456789', 'auth-spol-0123', 'Test');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/spolecny', 'p256dh-spolecny-0123456789', 'auth-spol-0123', 'Test');
 reset role;
 
 select pg_temp.check('sdílené zařízení přejde na posledního přihlášeného (jeden řádek, ne dva)',
-  (select count(*) from public.push_odbery where endpoint = 'https://push.example/spolecny') = 1
-  and (select user_id from public.push_odbery where endpoint = 'https://push.example/spolecny')
+  (select count(*) from public.push_odbery where endpoint = 'https://fcm.googleapis.com/fcm/send/spolecny') = 1
+  and (select user_id from public.push_odbery where endpoint = 'https://fcm.googleapis.com/fcm/send/spolecny')
       = '42420000-0000-0000-0000-00000000000b');
 
 -- Cizí člověk cizí zařízení nezruší.
 select set_config('test.user_id', '42420000-0000-0000-0000-00000000000a', false);
 set role authenticated;
-select public.push_odber_zrusit('https://push.example/spolecny');
+select public.push_odber_zrusit('https://fcm.googleapis.com/fcm/send/spolecny');
 reset role;
 select pg_temp.check('zrušit smí jen vlastník zařízení (Anna cizí zařízení nevypne)',
-  (select vypnuto_kdy from public.push_odbery where endpoint = 'https://push.example/spolecny') is null);
+  (select vypnuto_kdy from public.push_odbery where endpoint = 'https://fcm.googleapis.com/fcm/send/spolecny') is null);
 
 select set_config('test.user_id', '42420000-0000-0000-0000-00000000000b', false);
 set role authenticated;
-select public.push_odber_zrusit('https://push.example/spolecny');
+select public.push_odber_zrusit('https://fcm.googleapis.com/fcm/send/spolecny');
 reset role;
 select pg_temp.check('vlastník zařízení ho vypnout může',
-  (select vypnuto_kdy from public.push_odbery where endpoint = 'https://push.example/spolecny') is not null);
+  (select vypnuto_kdy from public.push_odbery where endpoint = 'https://fcm.googleapis.com/fcm/send/spolecny') is not null);
+
+-- Adresa musí patřit push službě prohlížeče: odesílač na ni z našeho serveru
+-- posílá požadavek, takže libovolná adresa by byla SSRF.
+select set_config('test.user_id', '42420000-0000-0000-0000-00000000000a', false);
+
+select pg_temp.check('http:// se nezapíše',
+  pg_temp.spadne_hlaskou($q$select public.push_odber_ulozit('http://fcm.googleapis.com/fcm/send/x', 'p256dh-xx-0123456789', 'auth-xx-0123')$q$, 'PT400', 'push službě'));
+select pg_temp.check('cizí (vnitřní) adresa se nezapíše',
+  pg_temp.spadne_hlaskou($q$select public.push_odber_ulozit('https://interni-host.local/x', 'p256dh-xx-0123456789', 'auth-xx-0123')$q$, 'PT400', 'push službě'));
+select pg_temp.check('adresa s uživatelským jménem (fcm.googleapis.com@evil) se nezapíše',
+  pg_temp.spadne_hlaskou($q$select public.push_odber_ulozit('https://fcm.googleapis.com@evil.example/x', 'p256dh-xx-0123456789', 'auth-xx-0123')$q$, 'PT400', 'push službě'));
+select pg_temp.check('adresa s portem se nezapíše',
+  pg_temp.spadne_hlaskou($q$select public.push_odber_ulozit('https://fcm.googleapis.com:8443/x', 'p256dh-xx-0123456789', 'auth-xx-0123')$q$, 'PT400', 'push službě'));
+select pg_temp.check('podřetězec hostitele (fcm.googleapis.com.evil.example) se nezapíše',
+  pg_temp.spadne_hlaskou($q$select public.push_odber_ulozit('https://fcm.googleapis.com.evil.example/x', 'p256dh-xx-0123456789', 'auth-xx-0123')$q$, 'PT400', 'push službě'));
+select pg_temp.check('cizí doména končící na push.apple.com.evil se nezapíše',
+  pg_temp.spadne_hlaskou($q$select public.push_odber_ulozit('https://web.push.apple.com.evil.example/x', 'p256dh-xx-0123456789', 'auth-xx-0123')$q$, 'PT400', 'push službě'));
+
+select public.push_odber_ulozit('https://updates.push.services.mozilla.com/wpush/v2/abc', 'p256dh-moz-0123456789', 'auth-moz-0123');
+select public.push_odber_ulozit('https://wns2-par02p.notify.windows.com/w/?token=abc', 'p256dh-win-0123456789', 'auth-win-0123');
+select pg_temp.check('skutečné adresy služeb (Firefox, Windows) projdou',
+  (select count(*) from public.push_odbery
+    where endpoint in ('https://updates.push.services.mozilla.com/wpush/v2/abc',
+                       'https://wns2-par02p.notify.windows.com/w/?token=abc')) = 2);
+
+-- Strop zařízení: nejvýš 10 zapnutých na člověka, nejstarší se vypnou.
+-- Bořek má dvě zapnutá zařízení, starší než všechna Anina: kdyby strop nefiltroval
+-- podle člověka, vypnul by je jako „nejstarší“ (bez nich by kontrola nic neměřila).
+select set_config('test.user_id', '42420000-0000-0000-0000-00000000000b', false);
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/borek1', 'p256dh-bor-0123456789', 'auth-bor-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/borek2', 'p256dh-bor-0123456789', 'auth-bor-0123');
+select set_config('test.user_id', '42420000-0000-0000-0000-00000000000a', false);
+select count(*) as b_pred from public.push_odbery
+ where user_id = '42420000-0000-0000-0000-00000000000b' and vypnuto_kdy is null \gset
+-- (dvanáct samostatných příkazů: jeden příkaz je jedna transakce s jedním now(),
+-- takže by se „nejstarší“ nedalo rozlišit)
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap01', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap02', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap03', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap04', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap05', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap06', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap07', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap08', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap09', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap10', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap11', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select public.push_odber_ulozit('https://fcm.googleapis.com/fcm/send/kap12', 'p256dh-kap-0123456789', 'auth-kap-0123');
+select pg_temp.check('po dvanácti registracích má člověk zapnutých nejvýš 10 zařízení',
+  (select count(*) from public.push_odbery
+    where user_id = '42420000-0000-0000-0000-00000000000a' and vypnuto_kdy is null) = 10);
+select pg_temp.check('nejnovější zařízení zůstalo zapnuté, nejstarší z dávky se vypnulo',
+  (select vypnuto_kdy is null from public.push_odbery where endpoint = 'https://fcm.googleapis.com/fcm/send/kap12')
+  and (select vypnuto_kdy is not null from public.push_odbery where endpoint = 'https://fcm.googleapis.com/fcm/send/kap01'));
+select pg_temp.check('zařízení jiného člověka se tím nedotklo',
+  (select count(*) from public.push_odbery
+    where user_id = '42420000-0000-0000-0000-00000000000b' and vypnuto_kdy is null) = :b_pred);
 
 -- Nepřihlášený.
 select set_config('test.user_id', '', false);
 do $$
 begin
-  perform public.push_odber_ulozit('https://push.example/nikdo', 'p256dh-nikdo-0123456789', 'auth-nikdo-0123');
+  perform public.push_odber_ulozit('https://web.push.apple.com/nikdo', 'p256dh-nikdo-0123456789', 'auth-nikdo-0123');
   raise exception 'SELHALO: nepřihlášený zapsal zařízení';
 exception when sqlstate 'PT403' then
   raise notice '  OK    nepřihlášený zařízení nezapíše (PT403)';
 end $$;
 
 
+\echo ''
+\echo '== 10. Potvrzení (acknowledged_at) nejde zpětně přepsat ======'
+
+select id as n_potv from public.notifications
+ where user_id = '42420000-0000-0000-0000-00000000000a' and druh = 'test.zaklad'
+ order by created_at limit 1 \gset
+
+select set_config('test.user_id', '42420000-0000-0000-0000-00000000000a', false);
+set role authenticated;
+update public.notifications set acknowledged_at = now() - interval '2 days' where id = :'n_potv';
+reset role;
+select pg_temp.check('první potvrzení dostane čas serveru, ne zpětně vymyšlený',
+  (select acknowledged_at > now() - interval '1 minute' from public.notifications where id = :'n_potv'));
+
+set role authenticated;
+update public.notifications set acknowledged_at = null where id = :'n_potv';
+reset role;
+select pg_temp.check('zapsané potvrzení nejde vrátit na NULL',
+  (select acknowledged_at is not null from public.notifications where id = :'n_potv'));
+
+set role authenticated;
+update public.notifications set acknowledged_at = now() - interval '5 days' where id = :'n_potv';
+reset role;
+select pg_temp.check('a nejde ani přepsat na jiný čas',
+  (select acknowledged_at > now() - interval '1 minute' from public.notifications where id = :'n_potv'));
+
+select pg_temp.check('read_at zůstává pod kontrolou člověka (přečteno/nepřečteno se dál nastavuje)',
+  has_column_privilege('authenticated', 'public.notifications', 'read_at', 'update'));
+
+-- Servisní role a definer funkce se tím neřídí (current_user není authenticated).
+update public.notifications set acknowledged_at = now() - interval '3 days' where id = :'n_potv';
+select pg_temp.check('server smí čas potvrzení opravit (guard platí jen pro role API)',
+  (select acknowledged_at < now() - interval '2 days' from public.notifications where id = :'n_potv'));
+
+
 -- Úklid: cizí firma se maže (kaskádou i její zaměstnanec a upozornění).
 delete from public.tenants where id = :'cizi_firma';
 
 \echo ''
-\echo '  VŠECHNY KONTROLY KROKU 42 PROŠLY'
+\echo '== KROK 42 HOTOV ========================================'

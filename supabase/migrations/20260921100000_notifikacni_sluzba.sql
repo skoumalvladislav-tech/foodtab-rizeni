@@ -114,6 +114,39 @@ create index notifications_dedupe
 revoke update on public.notifications from authenticated;
 grant update (read_at, acknowledged_at) on public.notifications to authenticated;
 
+-- ---------------------------------------------------------------------
+-- 1c. Potvrzení („Beru na vědomí“) nejde zpětně přepsat.
+--
+-- Sloupcový grant výš pustí klienta k acknowledged_at — přímým PATCH by si ale
+-- mohl potvrzení zpětně nadatovat (před změnu směny) nebo ho vrátit na NULL.
+-- Vedoucí podle něj vidí, kdo se se změnou seznámil, takže hodnotu, kterou
+-- klient sám nastaví, nelze brát jako doklad. Pro role API (authenticated,
+-- anon) proto platí: první potvrzení dostane ČAS SERVERU (now()), zapsané
+-- potvrzení se už nemění. Servisní role a definer funkce (current_user je
+-- jiný) se tím neřídí.
+-- ---------------------------------------------------------------------
+
+create or replace function app.hlidat_potvrzeni_upozorneni()
+returns trigger
+language plpgsql volatile set search_path = ''
+as $$
+begin
+  if current_user in ('authenticated', 'anon') then
+    if OLD.acknowledged_at is not null then
+      NEW.acknowledged_at := OLD.acknowledged_at;
+    elsif NEW.acknowledged_at is not null then
+      NEW.acknowledged_at := now();
+    end if;
+  end if;
+  return NEW;
+end $$;
+
+revoke all on function app.hlidat_potvrzeni_upozorneni() from public, anon, authenticated;
+
+create trigger notifications_potvrzeni
+  before update of acknowledged_at on public.notifications
+  for each row execute function app.hlidat_potvrzeni_upozorneni();
+
 
 -- ---------------------------------------------------------------------
 -- 2. Předplatné push a fronta doručení
@@ -229,7 +262,19 @@ begin
    where n.tenant_id  = p_tenant
      and n.user_id    = p_user
      and n.dedupe_key = p_dedupe
-     and n.read_at is null;
+     and n.read_at is null
+     -- NALÉHAVÉ UPOZORNĚNÍ, JEHOŽ PUSH JEŠTĚ NEODEŠEL, SE NESLUČUJE. Odesílač
+     -- běží po několika minutách; přijde-li do té doby běžná zpráva téhož
+     -- klíče, sloučení by naléhavý push zrušilo a nahradilo by ho čekáním na
+     -- příchod — přesně v případě, kdy má naléhavé čekání obcházet. Zůstane
+     -- vedle nového upozornění, dokud ho nikdo nepřečte (nebo neodejde).
+     and not (
+       n.priorita = 'urgent'
+       and exists (
+         select 1 from public.notifikace_doruceni d
+          where d.notification_id = n.id and d.stav = 'k_odeslani'
+       )
+     );
 
   if cardinality(v_ids) > 0 then
     update public.notifikace_doruceni d
@@ -292,13 +337,20 @@ begin
     v_priorita := 'normal';
   end if;
 
-  -- 1. PŘÍJEMCE: aktivní zaměstnanec téže firmy s účtem.
+  -- 1. PŘÍJEMCE: aktivní zaměstnanec téže firmy s účtem A S AKTIVNÍM
+  -- ČLENSTVÍM. Pozastavené členství zavírá přístup do aplikace (has_access,
+  -- modul_zapnuty); upozornění, a hlavně push na zamčenou obrazovku telefonu,
+  -- mu proto nemá chodit dál — zaměstnanecký řádek zůstává i po pozastavení.
   if not exists (
     select 1
       from public.employees e
+      join public.memberships m
+        on m.tenant_id = e.tenant_id
+       and m.user_id   = e.user_id
      where e.tenant_id  = p_tenant
        and e.user_id    = p_user
        and e.deleted_at is null
+       and m.status     = 'active'
   ) then
     return null;
   end if;
@@ -459,6 +511,18 @@ begin
      and d.created_at < now() - interval '48 hours'
      and (p_tenant is null or d.tenant_id = p_tenant);
 
+  -- Co si člověk mezitím přečetl v aplikaci (doma; obsah se mimo směnu
+  -- neschovává), se po příchodu nepřipomíná — ani jednotlivě, ani v souhrnu
+  -- „Čekají na vás N zpráv“.
+  update public.notifikace_doruceni d
+     set stav = 'zruseno'
+   where d.stav = 'ceka_na_smenu'
+     and (p_tenant is null or d.tenant_id = p_tenant)
+     and exists (
+       select 1 from public.notifications n
+        where n.id = d.notification_id and n.read_at is not null
+     );
+
   for v_u in
     select distinct d.tenant_id, d.user_id
       from public.notifikace_doruceni d
@@ -557,6 +621,35 @@ begin
   if coalesce(p_endpoint, '') = '' or coalesce(p_p256dh, '') = '' or coalesce(p_auth, '') = '' then
     raise exception 'Chybí údaje o zařízení.' using errcode = 'PT400';
   end if;
+
+  /*
+    ADRESA MUSÍ BÝT HTTPS A PATŘIT PUSH SLUŽBĚ PROHLÍŽEČE.
+
+    Odesílač na ni z NAŠEHO serveru posílá požadavek (podepsaný klíčem VAPID).
+    Bez tohohle omezení by si přihlášený člověk zaregistroval libovolnou adresu
+    — i vnitřní (SSRF: slepé POSTy z infrastruktury Foodtabu), nebo pomalý server,
+    který by v jedné dávce zdržel doručení všem. Skutečné adresy: Chrome/Edge
+    fcm.googleapis.com, Firefox updates.push.services.mozilla.com, Safari
+    *.push.apple.com, Edge/Windows *.notify.windows.com. Žádný port ani
+    uživatelské jméno: za názvem hostitele musí hned následovat lomítko.
+  */
+  if p_endpoint !~* '^https://(fcm\.googleapis\.com|updates\.push\.services\.mozilla\.com|([a-z0-9-]+\.)+push\.apple\.com|([a-z0-9-]+\.)+notify\.windows\.com)/' then
+    raise exception 'Adresa zařízení nepatří známé push službě.' using errcode = 'PT400';
+  end if;
+
+  -- Nejvýš 10 zapnutých zařízení na člověka: nejstarší se vypnou. Neomezený
+  -- počet by prodlužoval dávku odesílače (posílá se po jednom).
+  update public.push_odbery o
+     set vypnuto_kdy = now()
+   where o.id in (
+     select x.id
+       from public.push_odbery x
+      where x.user_id = v_user
+        and x.vypnuto_kdy is null
+        and x.endpoint <> p_endpoint
+      order by x.created_at desc
+     offset 9
+   );
 
   insert into public.push_odbery (user_id, endpoint, p256dh, auth_secret, user_agent)
   values (v_user, p_endpoint, p_p256dh, p_auth, left(p_user_agent, 300))

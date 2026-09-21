@@ -280,7 +280,85 @@ je('naléhavé: příznak a označení v nadpisu', [p5.urgent, p5.title], [true,
 const p6 = slozitPush({ typ: 'jedna', pocet: 1, druh: null, telo: null, priorita: null })
 je('upozornění, které mezitím zmizelo, se řekne obecně', p6.body, 'Máte nové upozornění')
 je('souhrn nikdy není naléhavý', slozitPush({ typ: 'souhrn', pocet: 2, druh: null, telo: null, priorita: 'urgent' }).urgent, false)
+const p7 = slozitPush({ typ: 'jedna', pocet: 1, druh: 'ukol.pridelen', telo: { nazev: 'Objednat petržel u Nováka' }, priorita: 'normal' })
+je('nový úkol: název (z textu zprávy) se na zamčenou obrazovku nedostane', [p7.body, JSON.stringify(p7).includes('petržel')], ['Máte nový úkol', false])
 je('neznámý druh nevyleze jinak než obecně', slozitPush({ typ: 'jedna', pocet: 1, druh: 'neznamy.druh', telo: {}, priorita: 'normal' }).body, 'Upozornění')
+
+console.log('\n== Termín a naléhavost: nálezy z revize ==')
+{
+
+// 21. 9. 2026 je pondělí (DNES).
+const c1 = najdiTermin('Objednej mrkev do 15.10.', DNES)
+je('„do 15.10.“ je DATUM (15. října), ne čas 15:10', c1.termin, { datum: '2026-10-15', cas: null })
+je('… a nepřidává se poznámka o „do“ s číslem (datum tam už je)', c1.nalezy.some((n) => n.includes('„do“ s číslem')), false)
+je('„do 15.30.“ na konci věty je čas (30 není měsíc)', najdiTermin('Zítra to bud hotové do 15.30.', DNES).termin, { datum: '2026-09-22', cas: '15:30' })
+je('„do 8.15“ je čas (15 není měsíc)', najdiTermin('Pozítří do 8.15 přijde revize.', DNES).termin, { datum: '2026-09-23', cas: '08:15' })
+je('cena není čas („na 5.50 Kč“)', najdiTermin('Zítra kup na 5.50 Kč mrkev.', DNES).termin, { datum: '2026-09-22', cas: null })
+je('rozměr není čas („do 1.20 m“)', najdiTermin('Zítra nařež do 1.20 m dřevo.', DNES).termin, { datum: '2026-09-22', cas: null })
+je('z intervalu „od 8:00 do 16:00“ je termín KONEC (16:00)', najdiTermin('Zítra od 8:00 do 16:00 bude revize.', DNES).termin, { datum: '2026-09-22', cas: '16:00' })
+
+je('„do střediska“ není den v týdnu', najdiTermin('Zavolej do střediska.', DNES).termin, null)
+je('„ve čtvrt na osm“ není čtvrtek', najdiTermin('Sejdeme se ve čtvrt na osm.', DNES).termin, null)
+je('„na utěrky“ není úterý', najdiTermin('Objednej peníze na utěrky.', DNES).termin, null)
+je('„v neděli“ pořád funguje', najdiTermin('Otevřeno v neděli.', DNES).termin, { datum: '2026-09-27', cas: null })
+
+const c2 = najdiTermin('Udělej to příští týden v pátek.', DNES)
+je('„příští týden v pátek“ je pátek PŘÍŠTÍHO týdne (2. 10.), ne nejbližší', c2.termin, { datum: '2026-10-02', cas: null })
+je('… a je to k ověření', c2.kontrola, true)
+const c3 = najdiTermin('Objednávka je na příští týden, ve středu.', '2026-09-27')
+je('z neděle: příští týden ve středu = 30. 9.', c3.termin, { datum: '2026-09-30', cas: null })
+
+const c4 = najdiTermin('Sejdeme se 5. Prosím dej vědět.', DNES)
+je('„5. Prosím“ není 5. prosince', c4.termin, null)
+je('„3. listy“ (slovo) není 3. listopadu', najdiTermin('Vezmi 3. listy salátu.', DNES).termin, null)
+je('„5. prosince“ se pozná', najdiTermin('Vánoční menu 5. prosince.', DNES).termin, { datum: '2026-12-05', cas: null })
+je('uvedený rok u data slovem se respektuje („3. března 2027“)', najdiTermin('Kontrola 3. března 2027.', DNES).termin, { datum: '2027-03-03', cas: null })
+const c5 = najdiTermin('Kontrola 3. 10. 2020.', DNES)
+je('minulé datum s rokem se navrhne, ale je k ověření', [c5.termin, c5.kontrola], [{ datum: '2020-10-03', cas: null }, true])
+const c6 = najdiTermin('Inventura 1. 9.', DNES)
+je('datum bez roku, které už letos bylo, se posune na příští rok a řekne se to', [c6.termin.datum, c6.kontrola, c6.nalezy.some((n) => n.includes('příští rok'))], ['2027-09-01', true, true])
+
+const c7 = najdiTermin('V pátek 22. 9. objednej mrkev.', DNES)
+je('při „v pátek 22. 9.“ má přednost výslovné datum a je to k ověření (22. 9. 2026 je úterý)', [c7.termin.datum, c7.kontrola], ['2026-09-22', true])
+const c8 = najdiTermin('Kontrola v pátek 25. 9.', DNES)
+je('shoduje-li se den v týdnu s datem, je to jednoznačné (bez ověřování)', [c8.termin.datum, c8.kontrola], ['2026-09-25', false])
+
+je('citace v „Co se poznalo“ nese PŮVODNÍ text s diakritikou', najdiTermin('Sejdeme se v pátek.', DNES).nalezy[0], 'Termín: „v pátek“ → pá 25. 9.')
+
+je('„Není spěch“ není naléhavost', jeNaleha('Objednej mrkev, není spěch.'), false)
+je('„Bez spěchu“ není naléhavost', jeNaleha('Udělej to bez spěchu.'), false)
+je('„Nespěchej“ není naléhavost', jeNaleha('Nespěchej s tím.'), false)
+je('„hned vedle“ (místo) není naléhavost', jeNaleha('Postav to hned vedle lednice.'), false)
+je('„není naléhavé“ není naléhavost', jeNaleha('To není naléhavé.'), false)
+je('„Hned zavolej dodavateli“ pořád je naléhavost', jeNaleha('Hned zavolej dodavateli.'), true)
+je('„Je to naléhavé“ pořád je naléhavost', jeNaleha('Je to naléhavé!'), true)
+
+const n1 = navrhniNazev('Objednej mrkev do 22. 9. prosím.')
+je('název se neusekne uprostřed data', n1.nazev, 'Objednej mrkev do 22. 9. prosím')
+const n2 = navrhniNazev('Ahojky, objednej mrkev.')
+je('„Ahojky“ se neořezává na „Ky“', n2.nazev.startsWith('Ahojky'), true)
+const n3 = navrhniNazev('Ahoj, objednej mrkev.')
+je('„Ahoj,“ se ořízne', n3.nazev, 'Objednej mrkev')
+const n4 = navrhniNazev('Prosím zavolej dodavateli.\nZítra v 8 přijede.')
+je('nový řádek je vždy nová věta', n4.poznamka, 'Zítra v 8 přijede.')
+const n5 = navrhniNazev('Kup ' + '😀'.repeat(90))
+je('zkrácení nerozseká emoji (žádný osamělý surrogát)', /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(n5.nazev), false)
+
+}
+
+console.log('\n== Přepis a příjemci: nálezy z revize ==')
+
+je('neznámé id poskytovatele přepisu = nedostupný', vybratPoskytovatelePrepisu('neexistuje').id, 'zadny')
+for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+  je('id z prototypu („' + id + '“) nespadne a vrátí nedostupný přepis', vybratPoskytovatelePrepisu(id).id, 'zadny')
+}
+je('prázdný „hotový“ přepis se neukáže jako ticho', popisStavuPrepisu({ stav: 'hotovo', text: '   ', jazyk: 'cs' }).jeVarovani, true)
+je('neprázdný přepis se ukáže', popisStavuPrepisu({ stav: 'hotovo', text: 'Objednej mrkev.', jazyk: 'cs' }).text, 'Objednej mrkev.')
+
+const dvojite = [{ employee_id: 'x1', jmeno: 'Marie Nováková-Svobodová', branch_id: null, usek_id: null, position_id: null, na_me_pobocce: false }]
+je('hledání najde druhou část jména s pomlčkou („svob“)', hledatPrijemce(dvojite, 'svob').length, 1)
+je('… i s pomlčkou v dotazu („nováková-svob“)', hledatPrijemce(dvojite, 'nováková-svob').length, 1)
+je('… a neshoduje se, co ve jménu není', hledatPrijemce(dvojite, 'kučera').length, 0)
 
 console.log('\n== Přílohy ke zprávám ==')
 

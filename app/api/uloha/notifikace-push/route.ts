@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { slozitPush, type RadekDoruceni } from '@/lib/komunikace/push-zprava'
 import { nactiKliceVapid, odeslatWebPush, type OdberPush } from '@/lib/komunikace/web-push'
+import { funkceNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
 
 /**
@@ -43,6 +44,14 @@ export const dynamic = 'force-dynamic'
 const DAVKA = 100
 const NEJVIC_POKUSU = 3
 
+/**
+ * Kolik ms smí dávka odesílat. Zařízení jednoho člověka se posílají
+ * souběžně (každé má vlastní timeout 8 s), ale pomalá push služba by dávku
+ * jinak natáhla přes limit funkce — nedokončená dávka by pak řádky neoznačila
+ * a při dalším běhu by šla znovu. Co se nestihne, zůstane `k_odeslani`.
+ */
+const ROZPOCET_MS = 45_000
+
 type Doruceni = {
   id: string
   user_id: string
@@ -66,8 +75,12 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ chyba: 'Úloha není nastavená — chybí SUPABASE_SERVICE_ROLE_KEY.' }, { status: 503 })
   }
 
-  const chybiMigrace = (e: { code?: string; message?: string } | null) =>
-    e !== null && (e.code === '42P01' || e.code === 'PGRST202' || e.code === 'PGRST205' || /does not exist|schema cache/i.test(e.message ?? ''))
+  // JEN podle kódu chyby (chybí funkce / tabulka). Volný text („does not exist“)
+  // by za čekání na migraci vydal i skutečnou chybu uvnitř funkce po nasazení:
+  // plánovač by odpověděl 200, workflow zůstal zelený a push by se tiše
+  // nikdy neodeslal.
+  const chybiMigrace = (e: Parameters<typeof funkceNeexistuje>[0]) =>
+    e !== null && (funkceNeexistuje(e) || tabulkaNeexistuje(e))
 
   // 1. Uvolnění čekajících
   const { data: uvolneno, error: chybaUvolneni } = await supabase.rpc('uvolnit_cekajici_notifikace')
@@ -90,7 +103,8 @@ export async function GET(request: Request): Promise<NextResponse> {
   const radky = (fronta ?? []) as unknown as Doruceni[]
 
   const klice = nactiKliceVapid(process.env)
-  const vysledek = { uvolneno: uvolneno ?? 0, ve_fronte: radky.length, odeslano: 0, selhalo: 0, bez_zarizeni: 0, nakonfigurovano: klice !== null, propadlo: 0 }
+  const zacatek = Date.now()
+  const vysledek = { uvolneno: uvolneno ?? 0, ve_fronte: radky.length, odeslano: 0, selhalo: 0, bez_zarizeni: 0, nakonfigurovano: klice !== null, propadlo: 0, odlozeno: 0 }
 
   if (!klice) {
     // Nic se neposílá. Zastaralé řádky se označí, ať fronta neroste donekonečna.
@@ -120,6 +134,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   for (const r of radky) {
+    if (Date.now() - zacatek > ROZPOCET_MS) {
+      vysledek.odlozeno++
+      continue
+    }
     const moje = zarizeni.get(r.user_id) ?? []
     if (moje.length === 0) {
       await supabase.from('notifikace_doruceni').update({ stav: 'zruseno', chyba: 'Člověk už nemá žádné zařízení.' }).eq('id', r.id)
@@ -137,13 +155,18 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     let odeslano = false
     let posledniChyba = ''
-    for (const z of moje) {
-      const v = await odeslatWebPush(z, zprava, klice, { urgency: zprava.urgent ? 'high' : 'normal' })
+    const odpovedi = await Promise.all(
+      moje.map(async (z) => ({
+        z,
+        v: await odeslatWebPush(z, zprava, klice, { urgency: zprava.urgent ? 'high' : 'normal' }),
+      })),
+    )
+    for (const { z, v } of odpovedi) {
       if (v.stav === 'odeslano') {
         odeslano = true
         await supabase.from('push_odbery').update({ posledni_uspech_kdy: new Date().toISOString() }).eq('id', z.id)
-      } else if (v.stav === 'vyprselo') {
-        // Zařízení odběr zrušilo: nezkouší se dál.
+      } else if (v.stav === 'vyprselo' || v.stav === 'neplatny') {
+        // Zařízení odběr zrušilo (nebo má adresu, na kterou se neposílá): nezkouší se dál.
         await supabase.from('push_odbery').update({ vypnuto_kdy: new Date().toISOString() }).eq('id', z.id)
       } else {
         posledniChyba = v.chyba

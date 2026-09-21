@@ -3,7 +3,7 @@ import Link from 'next/link'
 
 import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
-import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from '@/lib/supabase/dotaz'
+import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
@@ -11,7 +11,7 @@ import PcZalozky from '../provozni-centrum/zalozky'
 import Nastenka from './nastenka'
 import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from './seznam-rozhovoru'
 import { otevritKanalPobocky, otevritKanalUseku, zalozitVzkazVedeni } from './akce'
-import { nactiNazvyOsobnich } from './nazvy'
+import { nactiNazvyOsobnich, nactiPosledniTexty } from './nazvy'
 
 type FiltrKlic = 'vse' | 'neprectene' | 'pobocka' | 'usek' | 'prime'
 
@@ -201,38 +201,7 @@ export default async function Rozhovory({
     a v JS se z nich vezme první výskyt na konverzaci — bez zvláštního
     pohledu "poslední zpráva na konverzaci" v databázi.
   */
-  const posledniText = new Map<string, string>()
-  if (rozhovory.length > 0) {
-    const dotazNaPreview = (sloupce: string) =>
-      supabase
-        .from('konverzace_zpravy')
-        .select(sloupce)
-        .in('konverzace_id', rozhovory.map((r) => r.konverzace_id))
-        .is('stornovano_kdy', null)
-        .order('vytvoreno_kdy', { ascending: false })
-        .limit(300)
-
-    let { data: zpravyPreview, error: chybaPreview } = await dotazNaPreview(
-      'konverzace_id, text, zvuk_cesta, vytvoreno_kdy',
-    )
-    // Sloupec z 20260917060000_hlasove_zpravy — dokud neproběhne
-    // migrací, dotaz se zopakuje bez něj.
-    if (chybaPreview && sloupecNeexistuje(chybaPreview)) {
-      ;({ data: zpravyPreview, error: chybaPreview } = await dotazNaPreview(
-        'konverzace_id, text, vytvoreno_kdy',
-      ))
-    }
-    for (const z of (zpravyPreview ?? []) as unknown as {
-      konverzace_id: string; text: string; zvuk_cesta?: string | null; vytvoreno_kdy: string
-    }[]) {
-      const kid = z.konverzace_id
-      if (posledniText.has(kid)) continue
-      const t = String(z.text ?? '').trim()
-      // Hlasovka nemá text — bez týhle větve by náhled zůstal prázdný,
-      // jako by konverzace žádnou novou zprávu neměla.
-      posledniText.set(kid, t.length > 72 ? `${t.slice(0, 72)}…` : t || (z.zvuk_cesta ? 'Hlasová zpráva' : ''))
-    }
-  }
+  const posledniText = await nactiPosledniTexty(supabase, rozhovory.map((r) => r.konverzace_id))
 
   function projdeFiltrem(r: Rozhovor): boolean {
     if (filtrAktivni === 'neprectene') return r.neprectenych > 0

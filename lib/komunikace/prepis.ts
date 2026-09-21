@@ -75,7 +75,9 @@ export const POSKYTOVATELE: Record<string, PoskytovatelPrepisu> = {}
  */
 export function vybratPoskytovatelePrepisu(id?: string | null): PoskytovatelPrepisu {
   if (!id) return nedostupnyPrepis
-  const p = POSKYTOVATELE[id]
+  // Jen vlastní klíče registru: „constructor“, „toString“ nebo „__proto__“ z nastavení
+  // by jinak vrátily funkci z prototypu a `jeNakonfigurovan()` by spadlo.
+  const p = Object.prototype.hasOwnProperty.call(POSKYTOVATELE, id) ? POSKYTOVATELE[id] : undefined
   return p && p.jeNakonfigurovan() ? p : nedostupnyPrepis
 }
 
@@ -91,6 +93,10 @@ export function popisStavuPrepisu(vysledek: VysledekPrepisu | null | undefined):
   }
   if (vysledek.stav === 'chyba') {
     return { text: `Přepis se nepodařil: ${vysledek.duvod}`, jeVarovani: true }
+  }
+  // Prázdný „hotový“ přepis by vypadal jako ticho, které někdo řekl — říká se to nahlas.
+  if (vysledek.text.trim() === '') {
+    return { text: 'Přepis je prázdný — v nahrávce se nic nepoznalo.', jeVarovani: true }
   }
   return { text: vysledek.text, jeVarovani: false }
 }

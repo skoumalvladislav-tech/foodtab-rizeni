@@ -436,6 +436,27 @@ select pg_temp.check('rozhovor mezi pobočkami se nezakázal — zalozit_rozhovo
 
 
 \echo ''
+\echo '== 6b. Úkol z uzavřeného rozhovoru ============================'
+
+-- poslat_zpravu do uzavřeného rozhovoru nepíše; systémová událost o úkolu ho
+-- proto taky nemá oživit. Úkol z něj ale vzniknout smí (archivovaná zpráva
+-- může být důvod k úkolu).
+select set_config('test.user_id', :'sef', false);
+select public.zalozit_rozhovor(:'tenant', 'osobni', null, 'Krok43 k uzavření', null,
+  array[:'anna']::uuid[]) as konv_uz \gset
+select public.poslat_zpravu(:'konv_uz', 'Krok43: zpráva před uzavřením.') as zprava_uz \gset
+update public.konverzace set uzavreno_kdy = now() where id = :'konv_uz';
+
+select public.zalozit_ukol_ze_zpravy(
+  :'tenant', :'zprava_uz', :'perla', 'Úkol z uzavřeného rozhovoru', '', null, 'normal', null, null, :'anna') as ukol_uz \gset
+
+select pg_temp.check('úkol z uzavřeného rozhovoru vznikl a nese vazbu na zprávu',
+  (select zprava_id = :'zprava_uz' and konverzace_id = :'konv_uz' from public.tasks where id = :'ukol_uz'));
+select pg_temp.check('… ale do uzavřeného rozhovoru se žádná událost nezapsala',
+  not exists (select 1 from public.konverzace_zpravy where konverzace_id = :'konv_uz' and typ = 'system'));
+
+
+\echo ''
 \echo '== 7. kdo_nepotvrdil vyžaduje oprávnění ===================='
 
 insert into public.announcements (tenant_id, branch_id, body, author_id, requires_acknowledgment)
@@ -449,6 +470,43 @@ select pg_temp.check('majitel (communication.manage) vidí, kdo nepotvrdil',
 select set_config('test.user_id', '43430000-0000-0000-0000-00000000000e', false);
 select pg_temp.check('běžný zaměstnanec (Petr) jména nedostane, ač zná id oznámení',
   (select count(*) from public.kdo_nepotvrdil(:'tenant', :'oz')) = 0);
+
+-- ROZSAH: vedoucí s právem communication.manage jen na Perle nesmí vidět lidi
+-- z jiných poboček ani z celé firmy — definer nemá druhou linii RLS.
+insert into auth.users (id, email, raw_user_meta_data)
+values ('43430000-0000-0000-0000-000000000010', 'vlasta43@foodtab.cz', '{"full_name":"Vlasta Vedoucí"}');
+-- Práva dávají zařazení a výjimky u člověka (ne role): Vlasta má výjimkou
+-- communication.manage, rozsah členství je jen Perla.
+insert into public.employees (tenant_id, branch_id, user_id, full_name, employment_type)
+values (:'tenant', :'perla', '43430000-0000-0000-0000-000000000010', 'Vlasta Vedoucí', 'hpp')
+returning id as vlasta_emp \gset
+insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted)
+values (:'tenant', :'vlasta_emp', 'communication.manage', true);
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'tenant', '43430000-0000-0000-0000-000000000010', :'role_kuchyne', 'branch', 'active');
+insert into public.membership_branches (membership_id, branch_id)
+select m.id, :'perla'::uuid from public.memberships m
+ where m.tenant_id = :'tenant' and m.user_id = '43430000-0000-0000-0000-000000000010';
+
+insert into public.announcements (tenant_id, branch_id, body, author_id, requires_acknowledgment)
+values (:'tenant', :'bar', 'Krok43: potvrďte (Bar).', :'sef', true)
+returning id as oz_bar \gset
+insert into public.announcements (tenant_id, branch_id, body, author_id, requires_acknowledgment)
+values (:'tenant', null, 'Krok43: potvrďte (celá firma).', :'sef', true)
+returning id as oz_firma \gset
+
+select set_config('test.user_id', '43430000-0000-0000-0000-000000000010', false);
+select pg_temp.check('vedoucí Perly vidí, kdo nepotvrdil oznámení SVÉ pobočky',
+  (select count(*) from public.kdo_nepotvrdil(:'tenant', :'oz')) >= 1);
+select pg_temp.check('… ale ne oznámení jiné pobočky (Bar), ač zná jeho id',
+  (select count(*) from public.kdo_nepotvrdil(:'tenant', :'oz_bar')) = 0);
+select pg_temp.check('… a ne celofiremní oznámení (to je rozsah celé firmy)',
+  (select count(*) from public.kdo_nepotvrdil(:'tenant', :'oz_firma')) = 0);
+
+select set_config('test.user_id', :'sef', false);
+select pg_temp.check('majitel vidí i oznámení Baru a celofiremní (rozsah celé firmy)',
+  (select count(*) from public.kdo_nepotvrdil(:'tenant', :'oz_bar')) >= 1
+  and (select count(*) from public.kdo_nepotvrdil(:'tenant', :'oz_firma')) >= 3);
 
 
 \echo ''
@@ -467,6 +525,12 @@ select pg_temp.check('účastník vidí jména všech v rozhovoru (i autory zpr�
   and exists (select 1 from public.lide_v_rozhovoru(:'skupina') where employee_id = :'dana' and jmeno = 'Dana Čtyřicettři'));
 
 select set_config('test.user_id', '43430000-0000-0000-0000-00000000000e', false);
+-- Základní modul provoz nejde pozastavit (etapa0), takže se chování při vypnutém
+-- modulu tady vyzkoušet nedá; ověří se aspoň, že kontrola v definici je
+-- (jako u moje_rozhovory v krok24).
+select pg_temp.check('lide_v_rozhovoru se ptá na zapnutý modul Provoz (jako RLS na konverzacích)',
+  pg_get_functiondef('public.lide_v_rozhovoru(uuid)'::regprocedure) like '%app.modul_zapnuty(k.tenant_id, ''provoz'')%');
+
 select pg_temp.check('člověk, který v rozhovoru NENÍ (Petr), nedostane žádná jména',
   (select count(*) from public.lide_v_rozhovoru(:'skupina')) = 0);
 
@@ -504,4 +568,4 @@ reset role;
 delete from public.tenants where id = :'cizi_firma';
 
 \echo ''
-\echo '  VŠECHNY KONTROLY KROKU 43 PROŠLY'
+\echo '== KROK 43 HOTOV ========================================'

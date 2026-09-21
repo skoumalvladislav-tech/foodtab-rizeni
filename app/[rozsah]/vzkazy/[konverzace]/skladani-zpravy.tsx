@@ -42,11 +42,13 @@ type Neodeslana = {
   trvale: boolean
 }
 
-const KLIC = (konverzace: string) => `foodtab:fronta-zprav:${konverzace}`
+// Klíč nese i UŽIVATELE: na sdíleném telefonu by neodeslaná zpráva jednoho člověka
+// jinak čekala v prohlížeči a odešla by pod jménem toho, kdo se přihlásí po něm.
+const KLIC = (uzivatel: string, konverzace: string) => `foodtab:fronta-zprav:${uzivatel}:${konverzace}`
 
-function nactiFrontu(konverzace: string): Neodeslana[] {
+function nactiFrontu(uzivatel: string, konverzace: string): Neodeslana[] {
   try {
-    const hrube = window.localStorage.getItem(KLIC(konverzace))
+    const hrube = window.localStorage.getItem(KLIC(uzivatel, konverzace))
     if (!hrube) return []
     const pole = JSON.parse(hrube)
     return Array.isArray(pole)
@@ -61,10 +63,10 @@ function nactiFrontu(konverzace: string): Neodeslana[] {
   }
 }
 
-function ulozFrontu(konverzace: string, fronta: Neodeslana[]): void {
+function ulozFrontu(uzivatel: string, konverzace: string, fronta: Neodeslana[]): void {
   try {
-    if (fronta.length === 0) window.localStorage.removeItem(KLIC(konverzace))
-    else window.localStorage.setItem(KLIC(konverzace), JSON.stringify(fronta))
+    if (fronta.length === 0) window.localStorage.removeItem(KLIC(uzivatel, konverzace))
+    else window.localStorage.setItem(KLIC(uzivatel, konverzace), JSON.stringify(fronta))
   } catch {
     /* viz nactiFrontu */
   }
@@ -82,10 +84,13 @@ function noveId(): string {
 export default function SkladaniZpravy({
   rozsah,
   konverzace,
+  uzivatel,
   smiNalehavou,
 }: {
   rozsah: string
   konverzace: string
+  /** Přihlášený člověk — fronta neodeslaných zpráv patří jemu, ne prohlížeči. */
+  uzivatel: string
   smiNalehavou: boolean
 }) {
   const router = useRouter()
@@ -102,9 +107,9 @@ export default function SkladaniZpravy({
     (nova: Neodeslana[]) => {
       frontaRef.current = nova
       setFronta(nova)
-      ulozFrontu(konverzace, nova)
+      ulozFrontu(uzivatel, konverzace, nova)
     },
-    [konverzace],
+    [uzivatel, konverzace],
   )
 
   // Odeslání všeho, co čeká. Jedna dávka naráz — dvě souběžné by si šlapaly po frontě.
@@ -114,8 +119,14 @@ export default function SkladaniZpravy({
     setOdesila(true)
     try {
       let zmena = false
-      for (const p of [...frontaRef.current]) {
-        if (p.trvale) continue
+      // Co se v téhle dávce už zkoušelo — ať se zpráva, kterou server odmítl, netočí dokola.
+      const zkouseno = new Set<string>()
+      for (;;) {
+        // Vždy nejstarší zpráva, která ještě nebyla na řadě: přibude-li nová za
+        // běhu, odejde v téže dávce, ne až po 20 s časovači.
+        const p = frontaRef.current.find((x) => !x.trvale && !zkouseno.has(x.klientId))
+        if (!p) break
+        zkouseno.add(p.klientId)
         try {
           const v = await odeslatZpravuKlient({
             rozsah,
@@ -157,11 +168,13 @@ export default function SkladaniZpravy({
 
   // Po načtení stránky: co zbylo z minula, se zkusí odeslat.
   useEffect(() => {
-    const ulozena = nactiFrontu(konverzace)
+    const ulozena = nactiFrontu(uzivatel, konverzace)
     frontaRef.current = ulozena
+    // Fronta žije v localStorage (na serveru není) — načíst ji jde až v prohlížeči, po vykreslení.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFronta(ulozena)
     if (ulozena.length > 0) void odeslatFrontu()
-  }, [konverzace, odeslatFrontu])
+  }, [uzivatel, konverzace, odeslatFrontu])
 
   // Po obnovení spojení a po čase (spojení se občas vrátí bez události).
   useEffect(() => {

@@ -443,12 +443,19 @@ begin
 
   v_ja := app.muj_employee(p_tenant);
 
-  insert into public.konverzace_zpravy
-    (konverzace_id, tenant_id, autor, text, typ, objekt_typ, objekt_id)
-  values
-    (v_konv, p_tenant, v_ja,
-     'Vytvořen úkol: ' || left(btrim(p_nazev), 120),
-     'system', 'ukol', v_ukol);
+  -- Uzavřený rozhovor událost nedostane (poslat_zpravu do něj také nepíše):
+  -- úkol z něj vzniknout smí, ale rozhovor se tím neoživí.
+  if not exists (
+    select 1 from public.konverzace k
+     where k.id = v_konv and k.uzavreno_kdy is not null
+  ) then
+    insert into public.konverzace_zpravy
+      (konverzace_id, tenant_id, autor, text, typ, objekt_typ, objekt_id)
+    values
+      (v_konv, p_tenant, v_ja,
+       'Vytvořen úkol: ' || left(btrim(p_nazev), 120),
+       'system', 'ukol', v_ukol);
+  end if;
 
   perform app.audit(
     p_tenant      => p_tenant,
@@ -670,6 +677,13 @@ begin
 
   if not found then return; end if;
 
+  -- ROZSAH: právo na oznámení TÉTO pobočky (celofiremní oznámení = celofiremní
+  -- rozsah), stejně jako politika announcements_write. Definer nemá druhou
+  -- linii RLS; bez tohohle by vedoucí jedné pobočky viděl jména lidí z ostatních.
+  if not app.has_access(p_tenant, 'communication.manage', v_branch_id) then
+    return;
+  end if;
+
   return query
     select coalesce(nullif(trim(p.full_name::text), ''), 'Neznámý') as jmeno
       from public.employees e
@@ -721,6 +735,7 @@ as $$
     from public.employees e
     join public.konverzace k on k.tenant_id = e.tenant_id
    where k.id = p_konverzace
+     and app.modul_zapnuty(k.tenant_id, 'provoz')
      and app.je_ucastnik(p_konverzace)
      and (
        e.id in (select u.employee_id from public.konverzace_ucastnici u

@@ -37,9 +37,19 @@ export function slozitPush(r: RadekDoruceni): ZpravaPush {
     return { title: 'Foodtab', body: souhrnCekajicich(r.pocet), tag: 'souhrn', url: '/', urgent: false }
   }
 
+  // NÁZEV ÚKOLU se do push nedává: úkol ze zprávy má název předvyplněný
+  // z textu zprávy a přidělený nemusí být účastníkem rozhovoru. V aplikaci
+  // je název součástí úkolu; na zamčené obrazovce přes cizí službu ne.
+  const body =
+    r.druh === 'ukol.pridelen'
+      ? 'Máte nový úkol'
+      : r.druh
+        ? nadpisUpozorneni(r.druh, r.telo ?? {}, obdobiRozpisu)
+        : 'Máte nové upozornění'
+
   return {
     title: urgent ? 'Foodtab — naléhavé' : 'Foodtab',
-    body: r.druh ? nadpisUpozorneni(r.druh, r.telo ?? {}, obdobiRozpisu) : 'Máte nové upozornění',
+    body,
     tag: r.druh ?? 'upozorneni',
     url: '/',
     urgent,

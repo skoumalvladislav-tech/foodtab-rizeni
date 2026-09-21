@@ -109,7 +109,14 @@ export default function PushPrepinac({
       const reg = await navigator.serviceWorker.ready
       const odber = await reg.pushManager.getSubscription()
       if (odber) {
-        await zrusit(odber.endpoint)
+        // Když server zařízení nezruší (výpadek, vypršené sezení), odběr v
+        // prohlížeči se NEruší a stav zůstává „zapnuto“ — jinak by UI tvrdilo
+        // „vypnuto“, zatímco server na telefon dál posílá.
+        const v = await zrusit(odber.endpoint)
+        if (!v.ok) {
+          setChyba(v.chyba)
+          return
+        }
         await odber.unsubscribe()
       }
       setStav('vypnuto')
