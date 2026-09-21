@@ -36,8 +36,10 @@ Nalezené vady, které tahle práce opravuje nebo obchází (pořadí = závažn
    téhož dne“). Vyšetřeno: je to ROZHODNUTÍ, ne vada — scénář `krok35`, oddíl 5,
    ho vyžaduje („po sloučení nese upozornění AKTUÁLNÍ prioritu, ne starou; jinak
    by byl odznak trvale poplašný“). Zachováno. Naléhavá zpráva zůstává v rozhovoru
-   označená a její push odešel hned při vzniku. Kdo by chtěl, aby naléhavé
-   upozornění nezmizelo, změní jeden řádek v `app.notifikovat`.
+   označená. **Výjimka po revizi (21. 9.):** naléhavé upozornění, jehož push ještě
+   NEODEŠEL, se slučováním neruší (`app.zrusit_neprectene`) — jinak by ho další běžná
+   zpráva nahradila čekáním na příchod a naléhavé by čekání neobešlo přesně tam, kde
+   má. Odeslané naléhavé se slučuje jako každé jiné.
 4. **Celotabulkový `UPDATE` na `notifications`.** Přihlášený si smí přepsat
    `telo`, `druh`, `priorita` i `acknowledged_at` svých řádků; potvrzení je tedy
    nedůvěryhodné a nový sloupec by si mohl přepsat také.
