@@ -45,6 +45,11 @@ export type TeloUpozorneni = {
   prichod?: string
   pobocka?: string
   pobocka_slug?: string
+  // Kolik zpráv/oznámení za upozorněním stojí (slučování, app.notifikovat).
+  // U starších upozornění chybí — bere se jako 1.
+  pocet?: number
+  // Kdo změnu směny provedl (jméno). Chybí u systémových změn a starších upozornění.
+  zmenil?: string
   // smena.zmenena — stav PŘED změnou (migrace 20260919120000). U starších
   // upozornění chybí; věta se pak řekne bez „původně“.
   puvodni_den?: string
@@ -150,9 +155,13 @@ export function nadpisUpozorneni(
     case 'smena.zrusena':
       return `Zrušili vám směnu ${denCesky(telo.den)}`
     case 'oznameni.nova':
-      return 'Nové oznámení na nástěnce'
+      return pocetUpozorneni(telo) > 1
+        ? `${pocetUpozorneni(telo)} ${slovoPodleCisla(pocetUpozorneni(telo), 'nové oznámení', 'nová oznámení', 'nových oznámení')} na nástěnce`
+        : 'Nové oznámení na nástěnce'
     case 'vzkaz.novy':
-      return 'Nová zpráva v rozhovoru'
+      return pocetUpozorneni(telo) > 1
+        ? `${pocetUpozorneni(telo)} ${slovoPodleCisla(pocetUpozorneni(telo), 'nová zpráva', 'nové zprávy', 'nových zpráv')} v rozhovorech`
+        : 'Nová zpráva v rozhovoru'
     /*
       MARKETING. Zadání, oddíl 14: notifikace při žádosti o schválení,
       vrácení, schválení a selhání publikace.
@@ -177,6 +186,90 @@ export function nadpisUpozorneni(
     default:
       return 'Upozornění'
   }
+}
+
+/** Kolik zpráv za upozorněním stojí; bez údaje 1. */
+export function pocetUpozorneni(telo: TeloUpozorneni): number {
+  const n = Number(telo.pocet)
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 1
+}
+
+/**
+ * České skloňování podle počtu: 1 zpráva, 2–4 zprávy, 5 a víc zpráv (a 0).
+ * Jedno místo, ať se „3 zpráv“ neobjeví v jedné obrazovce a „3 zprávy“
+ * v jiné.
+ */
+export function slovoPodleCisla(n: number, jedno: string, dve: string, pet: string): string {
+  const cele = Math.abs(Math.trunc(n))
+  if (cele === 1) return jedno
+  if (cele >= 2 && cele <= 4) return dve
+  return pet
+}
+
+/**
+ * Souhrn, který se pošle místo dávky pípnutí po příchodu do práce:
+ * „Čekají na vás 3 zprávy“. Bez obsahu — text zprávy se nikdy nenosí
+ * do notifikace (ani na zamčenou obrazovku).
+ */
+export function souhrnCekajicich(pocet: number): string {
+  const n = Math.max(1, Math.floor(pocet))
+  if (n === 1) return 'Čeká na vás 1 zpráva'
+  return `Čekají na vás ${n} ${slovoPodleCisla(n, 'zpráva', 'zprávy', 'zpráv')}`
+}
+
+/**
+ * Karta změny směny (zadání Provozního centra):
+ *
+ *   ZMĚNA SMĚNY
+ *   Úterý 22. 9.
+ *   Původně  18:00–22:00
+ *   Nově     16:00–22:00
+ *   Změnil: vedoucí provozu
+ *
+ * Skládá se výhradně z holých údajů v `telo`. Notifikaci NEVYTVÁŘÍ UI Směn
+ * — ta vzniká z události v databázi (app.upozornit_smenu → app.notifikovat).
+ * Vrací `null`, když upozornění nenese původní stav (starší z doby před
+ * migrací 20260919120000): karta se pak nezobrazí a nic se nevymýšlí.
+ */
+export type KartaZmenySmeny = {
+  nadpis: 'ZMĚNA SMĚNY'
+  den: string
+  puvodne: string
+  nove: string
+  zmenil: string | null
+}
+
+export function kartaZmenySmeny(telo: TeloUpozorneni): KartaZmenySmeny | null {
+  const z = zmenaSmeny(telo)
+  if (!z || !telo.den) return null
+  const den = denCesky(telo.den)
+  return {
+    nadpis: 'ZMĚNA SMĚNY',
+    den: den.charAt(0).toUpperCase() + den.slice(1),
+    puvodne: z.puvodne,
+    nove: z.nove,
+    zmenil: telo.zmenil?.trim() ? telo.zmenil.trim() : null,
+  }
+}
+
+/** Priorita upozornění. `low` = tichý záznam bez odznaku a bez push. */
+export type PrioritaUpozorneni = 'low' | 'normal' | 'important' | 'urgent'
+
+export const POPIS_PRIORITY: Record<PrioritaUpozorneni, string> = {
+  low: 'Nízká',
+  normal: 'Běžná',
+  important: 'Důležitá',
+  urgent: 'Naléhavá',
+}
+
+/** Neznámá hodnota z databáze se bere jako běžná — upozornění nezmizí kvůli překlepu. */
+export function prioritaUpozorneni(hodnota: unknown): PrioritaUpozorneni {
+  return hodnota === 'low' || hodnota === 'important' || hodnota === 'urgent' ? hodnota : 'normal'
+}
+
+/** Počítá se upozornění do odznaku u zvonečku? Tichá (low) ne. */
+export function pocitaSeDoOdznaku(priorita: unknown): boolean {
+  return prioritaUpozorneni(priorita) !== 'low'
 }
 
 /**
