@@ -42,7 +42,7 @@ returns text language plpgsql as $$
 begin
   perform set_config('test.user_id', p_kdo::text, false);
   begin
-    perform public.potvrdit_smenu(coalesce(p_tenant, current_setting('test.tenant')::uuid), p_smena,
+    perform public.potvrdit_smenu(coalesce(p_tenant, current_setting('test.tenant', true)::uuid), p_smena,
       p_den, p_od, p_do, p_pauza_od, p_pauza_do);
     return 'ok';
   exception when others then

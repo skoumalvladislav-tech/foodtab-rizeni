@@ -96,6 +96,8 @@ export type Planovani = {
     nabídka stála hned při prvním vykreslení a neprobliklo prázdno.
   */
   sablony: NabidnutaSablona[];
+  /** Nabízet ve formuláři nové směny výběr zařazení? Nastavení → Směny; bez nasazené migrace se nabízí. */
+  zarazeniVeFormulari?: boolean;
 };
 
 /**
@@ -697,6 +699,7 @@ export default function RozpisView({
           vychoziPobocka={planovani.vychoziPobocka}
           lide={planovani.lide}
           pozice={planovani.pozice}
+          zarazeniVeFormulari={planovani.zarazeniVeFormulari ?? true}
           sablony={planovani.sablony}
           kontext={kontextSmeny}
           souctyTydne={souctyTydne}

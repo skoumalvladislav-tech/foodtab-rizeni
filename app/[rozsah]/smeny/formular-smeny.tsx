@@ -8,6 +8,7 @@ import type { IkonaKlic } from '@/app/[rozsah]/nabidka'
 import Drawer from '@/components/ui/Drawer'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
 import { zkratkaDoSmeny } from '@/lib/sablony'
+import { ukazatZarazeni, zarazeniProUlozeni } from '@/lib/smeny-formular'
 import { denVTydnu, hodinyKratce, minutSmeny, ZKRATKY_DNU } from '@/lib/rozpis-mobil'
 import HlavickaSmeny, { type KontextSmeny } from './desktop/hlavicka-smeny'
 import { ListMobil } from './mobil/sheet'
@@ -110,6 +111,7 @@ export default function FormularSmeny({
   vychoziPobocka,
   lide,
   pozice,
+  zarazeniVeFormulari = true,
   sablony: sablonyVychozi,
   onZavrit,
   varianta = 'drawer',
@@ -129,8 +131,14 @@ export default function FormularSmeny({
   smena?: SmenaKUprave | null
   pobocky: { id: string; nazev: string }[]
   vychoziPobocka: string | null
-  lide: { id: string; jmeno: string }[]
+  /** `poziceId` = zařazení člověka; bere se, když je výběr zařazení schovaný (Nastavení → Směny). */
+  lide: { id: string; jmeno: string; poziceId?: string | null }[]
   pozice: { id: string; label: string }[]
+  /**
+   * Nabízet výběr zařazení (pozice)? Nastavení firmy. Vypnuté ho schová a směna si vezme
+   * zařazení zaměstnance; u neobsazené směny se nabízí vždy (`lib/smeny-formular.ts`).
+   */
+  zarazeniVeFormulari?: boolean
   /** Šablony pro výchozí pobočku, aby nabídka stála hned. */
   sablony: NabidnutaSablona[]
   onZavrit: () => void
@@ -214,6 +222,19 @@ export default function FormularSmeny({
   const [zamestnanec, setZamestnanec] = useState(zdroj?.employee_id ?? '')
   const [datum, setDatum] = useState(smena?.shift_date ?? den)
   const [vybranaPozice, setVybranaPozice] = useState(zdroj?.position_id ?? '')
+  /*
+    Zařazení se nemusí vybírat: zaměstnanci jsou zařazeni od začátku a změna
+    se dá napsat do poznámky (Šéfík 20. 9. 2026). Kdo pole nepotřebuje, vypne ho
+    v Nastavení → Směny; `pouzitaPozice` je pak zařazení zaměstnance. Šablony
+    i uložení jedou podle ní, ne podle skrytého pole.
+  */
+  const ukazano = ukazatZarazeni(zarazeniVeFormulari, Boolean(zamestnanec))
+  const pouzitaPozice = zarazeniProUlozeni({
+    ukazano,
+    vybrana: vybranaPozice,
+    poziceZamestnance: lide.find((c) => c.id === zamestnanec)?.poziceId,
+    poziceSmeny: zdroj?.employee_id === zamestnanec ? zdroj?.position_id : '',
+  })
   const [od, setOd] = useState((zdroj?.starts_at ?? '08:00').slice(0, 5))
   const [doKdy, setDoKdy] = useState((zdroj?.ends_at ?? '16:00').slice(0, 5))
   const [sablony, setSablony] = useState<NabidnutaSablona[]>(sablonyVychozi)
@@ -241,7 +262,7 @@ export default function FormularSmeny({
     datum,
     predvyplneni: {
       employee_id: zamestnanec || null,
-      position_id: vybranaPozice || null,
+      position_id: pouzitaPozice || null,
       branch_id: pobocka || undefined,
       starts_at: od,
       ends_at: doKdy,
@@ -268,7 +289,7 @@ export default function FormularSmeny({
       (rozpis ji dřív odmítne).
     */
     const nacti = pobocka
-      ? nabidnoutSablony(rozsah, pobocka, vybranaPozice || null)
+      ? nabidnoutSablony(rozsah, pobocka, pouzitaPozice || null)
       : Promise.resolve([])
 
     nacti
@@ -283,7 +304,7 @@ export default function FormularSmeny({
     return () => {
       zruseno = true
     }
-  }, [rozsah, pobocka, vybranaPozice])
+  }, [rozsah, pobocka, pouzitaPozice])
 
   // Odvozené, ne uložené — proč, viz hlavičku lib/sablony.
   const klicDoSmeny = zkratkaDoSmeny(sablony, klic, od, doKdy)
@@ -441,6 +462,7 @@ export default function FormularSmeny({
             </Pole>
           </label>
 
+          {ukazano ? (
           <label style={{ ...S.label, ...poradi(8) }}>
             <span>Úsek / pozice</span>
             <Pole ikona="vidlicka" sipka>
@@ -465,6 +487,10 @@ export default function FormularSmeny({
               </span>
             ) : null}
           </label>
+          ) : (
+            // Schované pole: zařazení zaměstnance jde dál stejným jménem, ať ho `ulozitSmenu` čte jako dřív.
+            <input type="hidden" name="pozice" value={pouzitaPozice} />
+          )}
 
           <label style={{ ...S.label, ...poradi(9) }}>
             <span>Pobočka</span>

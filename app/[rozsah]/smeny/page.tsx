@@ -471,6 +471,20 @@ export default async function Rozpis({
 
     const vidiDochazku = await hasAccess(tenantId, "attendance.read", scope.branchId);
 
+    /*
+      Nabízet ve formuláři nové směny výběr zařazení? Nastavení → Směny (migrace
+      20260920130000). ČTE SE ZVLÁŠŤ a tolerantně: kód se nasazuje sám, migrace ručně,
+      a sloupec bez migrace by jinak shodil celou stránku. Chybí-li, nebo se čtení
+      nepovede, nabízí se jako dřív.
+    */
+    const { data: nastaveniSmen, error: chybaNastaveniSmen } = await supabase
+      .from("tenant_settings")
+      .select("smeny_zarazeni_ve_formulari")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    const zarazeniVeFormulari = chybaNastaveniSmen
+      ? true
+      : ((nastaveniSmen as { smeny_zarazeni_ve_formulari?: boolean } | null)?.smeny_zarazeni_ve_formulari ?? true);
     const { data: poziceData } = await supabase
       .from("positions")
       .select("id, label")
@@ -506,6 +520,7 @@ export default async function Rozpis({
         barva: barvaNeboNic(c.color),
       })),
       vidiDochazku,
+      zarazeniVeFormulari,
       pozice: (poziceData ?? []).map((p) => ({
         id: p.id as string,
         label: p.label as string,
