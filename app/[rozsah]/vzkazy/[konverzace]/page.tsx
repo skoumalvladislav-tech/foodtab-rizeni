@@ -11,6 +11,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import PcZalozky from '../../provozni-centrum/zalozky'
+import VetaOPushi from '../../provozni-centrum/veta-o-pushi'
 import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from '../seznam-rozhovoru'
 import HlasovkaNahravac from './hlasovka-nahravac'
 import PanelKonverzace, { type UcastnikUI, type UkolUI } from './panel-konverzace'
@@ -462,7 +463,7 @@ export default async function Rozhovor({
               na ni spoléhal a zprávu by si nepřišel přečíst.
             */}
             <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--muted)' }}>
-              Zprávy se ukazují v aplikaci. Upozornění do telefonu zatím nechodí.
+              <VetaOPushi rozsah={rozsah} />
             </p>
           </div>
 

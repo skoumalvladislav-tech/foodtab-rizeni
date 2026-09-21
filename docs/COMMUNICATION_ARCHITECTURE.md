@@ -32,14 +32,22 @@ Nalezené vady, které tahle práce opravuje nebo obchází (pořadí = závažn
    při prvním otevření, takže kdo kanál nikdy neotevřel, notifikaci nedostane.
 2. **Slučování směn maže cizí upozornění** (`app.upozornit_smenu`: klíč
    „uživatel + druh + den“, druhá směna téhož dne smaže první). Známo z handoffu.
-3. **Nový vzkaz přepíše naléhavý.** Slučování „nepřečtené téhož dne“ maže
-   i nepřečtenou *urgentní* notifikaci a nahradí ji normální.
+3. **Nový vzkaz nahradí naléhavé upozornění normálním** (slučování „nepřečtené
+   téhož dne“). Vyšetřeno: je to ROZHODNUTÍ, ne vada — scénář `krok35`, oddíl 5,
+   ho vyžaduje („po sloučení nese upozornění AKTUÁLNÍ prioritu, ne starou; jinak
+   by byl odznak trvale poplašný“). Zachováno. Naléhavá zpráva zůstává v rozhovoru
+   označená a její push odešel hned při vzniku. Kdo by chtěl, aby naléhavé
+   upozornění nezmizelo, změní jeden řádek v `app.notifikovat`.
 4. **Celotabulkový `UPDATE` na `notifications`.** Přihlášený si smí přepsat
    `telo`, `druh`, `priorita` i `acknowledged_at` svých řádků; potvrzení je tedy
    nedůvěryhodné a nový sloupec by si mohl přepsat také.
 5. **`kdo_nepotvrdil` je definer bez kontroly práva** (hlídá to jen UI).
 6. **`zalozit_rozhovor`** u osobních a mezipobočkových rozhovorů kontroluje jen
-   shodu firmy — kdokoli s modulem Provoz může přidat libovolného zaměstnance.
+   shodu firmy. Zpřísnění (jen kolegové z mých poboček) jsem zkusil a **vrátil**:
+   rozhovory mezi pobočkami jsou zamýšlené (`krok24` oddíl 7, `krok25` oddíl 3)
+   a osobní rozhovor dvou kolegů z různých poboček je běžná věc. Kdo smí komu
+   psát, zůstává rozhodnutí pro Šéfíka; výběr příjemců proto nabízí všechny kolegy
+   s účtem a řadí „moji pobočku“ nahoru (`komu_muzu_psat`).
 7. Zvoneček počítá `notifications` + nepřečtené vzkazy + nástěnku, takže
    `vzkaz.novy` a `oznameni.nova` se počítají dvakrát.
 
@@ -120,30 +128,38 @@ je rozhodnutí pro Šéfíka a zasáhlo by `moje_rozhovory`, `doruci_se` i kiose
 ## 3. Databázový plán (jen přírůstkový, nasazuje Šéfík)
 
 Migrace jdou v pořadí a **nikdy se nepouštějí autonomně** (`db push` je vždy
-ruční). Kód tolerantně čte starší schéma (vzory `sloupecNeexistuje`,
-`funkceNeexistuje`), protože Vercel nasazuje z `main` hned a migrace až potom.
+ruční). Před nimi čekají tři migrace Směn (`20260920100000`, `…120000`, `…130000`).
+Kód tolerantně čte starší schéma (vzory `sloupecNeexistuje`, `funkceNeexistuje`),
+protože Vercel nasazuje z `main` hned a migrace až potom.
 
-**A. `20260921100000_notifikacni_sluzba.sql`**
+**A. `20260921100000_notifikacni_sluzba.sql`** — scénář `krok42`
 * `notifications`: `priorita` rozšířena o `low`; nové sloupce `zdroj_typ`,
   `zdroj_id`, `dedupe_key`; **sloupcový grant** — `authenticated` smí měnit
   jen `read_at` a `acknowledged_at`.
-* `app.notifikovat` (definer, `revoke` od všech mimo definery) + `app.zaradit_doruceni`
-  + `app.uvolnit_cekajici` (jen service_role).
-* `push_odbery`, `notifikace_doruceni` (bez grantu pro anon/authenticated).
-* Producenti přepojeni **v téže migraci** (nikdy „starý insert + nová služba“):
-  `upozornit_na_vzkaz_trg` (nově i členové kanálů pobočky a úseku),
-  `upozornit_na_oznameni_trg`, `app.upozornit_smenu` (klíč = konkrétní směna).
-* Těla funkcí vycházejí ze **živé** databáze (`pg_get_functiondef`), ne
-  z nejstarší migrace — dvakrát už novější migrace přepsala objekt podle
-  staršího stavu.
+* `app.notifikovat`, `app.zrusit_neprectene`, `app.zaradit_doruceni`,
+  `app.uvolnit_cekajici` (+ `public.uvolnit_cekajici_notifikace` jen pro service_role).
+* `push_odbery`, `notifikace_doruceni` (bez grantu pro anon/authenticated),
+  `push_odber_ulozit` / `push_odber_zrusit` (jen vlastní zařízení).
+* Producenti přepojeni **v téže migraci**: `upozornit_na_vzkaz_trg` (nově i členové
+  kanálů pobočky a úseku), `upozornit_na_oznameni_trg`, `app.upozornit_smenu`
+  (klíč = konkrétní směna, „Změnil“ v `telo`).
 
-**B. `20260921110000_provozni_centrum.sql`** (viz oddíl 5)
-* `tasks`: `zprava_id`, `konverzace_id`, `zdroj`, `updated_at`, priorita `low`…`urgent`.
-* Typ zprávy (`system`) a odkaz na objekt pro události v konverzaci.
-* RPC: `zalozit_ukol_ze_zpravy`, `komu_muzu_psat`, zpřísněné `zalozit_rozhovor`,
-  oprava `kdo_nepotvrdil`.
-* Idempotence odesílání: `konverzace_zpravy.klient_id` + unikátní index,
-  parametr `poslat_zpravu(…, p_klient_id)` (starý podpis se DROPuje).
+**B. `20260921110000_provozni_centrum.sql`** — scénář `krok43`
+* `tasks`: `zprava_id`, `konverzace_id`, `zdroj`; trigger `tasks_vazba_zpravy`
+  (vazba jen na rozhovor téže firmy, jehož je člověk účastníkem); trigger
+  `upozornit_na_ukol` (druh `ukol.pridelen`).
+* `konverzace_zpravy`: `typ` (`zprava`/`system`), `objekt_typ`/`objekt_id`,
+  `klient_id` + unikátní index. `poslat_zpravu` má 7. parametr `p_klient_id`
+  (starý podpis se DROPuje).
+* `zalozit_ukol_ze_zpravy`, `komu_muzu_psat`, `lide_v_rozhovoru`,
+  `jmena_osobnich_rozhovoru`; oprava `kdo_nepotvrdil` (kontrola práva).
+
+**C. `20260921120000_realtime_upozorneni.sql`**
+* Do publikace `supabase_realtime` se přidává jen `notifications` (tolerantně
+  k prostředí bez publikace).
+
+Těla funkcí vycházejí ze **živé** databáze (`pg_get_functiondef`), ne z nejstarší
+migrace — dvakrát už novější migrace přepsala objekt podle staršího stavu.
 
 **Kompatibilita.** Tabulky `konverzace*`, `announcements`, `notifications`
 se nepřejmenovávají ani nepřepisují. Adresy `/vzkazy`, `/vzkazy/[konverzace]`,
@@ -205,3 +221,18 @@ konfigurovatelné tiché hodiny, e-mailový kanál upozornění, model pro návr
 úkolu, přepis hlasu. Každé je v `NOCNI-REPORT-KOMUNIKACE.md` zařazeno do
 HOTOVO / ČÁSTEČNĚ / PŘIPRAVENO / NEHOTOVO / EXTERNÍ ZÁVISLOST podle toho, co
 v repozitáři opravdu je.
+
+---------------------------------------------------------------------
+
+## 8. Stav implementace (kde co je)
+
+| Kus | Kde |
+|---|---|
+| Notification Service (SQL) | `20260921100000_notifikacni_sluzba.sql`, `supabase/tests/krok42_scenar.sql` |
+| Provozní centrum (SQL) | `20260921110000_provozni_centrum.sql`, `krok43_scenar.sql` |
+| Doménová logika | `lib/komunikace/*` (návrh úkolu, přepis, vlákno, příjemci, web push, text push), `lib/upozorneni-text.ts` |
+| Testy logiky | `scripts/komunikace.test.mjs`, `scripts/upozorneni.test.mjs`, `scripts/web-push.test.mjs` |
+| UI | `app/[rozsah]/vzkazy/**`, `app/[rozsah]/ukoly/ukol/[id]`, `app/[rozsah]/provozni-centrum/*`, `components/shell/ZivaAktualizace.tsx` |
+| Push (odesílač, plánovač, service worker, zapnutí na zařízení) | `app/api/uloha/notifikace-push`, `.github/workflows/notifikace-push.yml`, `public/sw.js`, `upozorneni/nastaveni/push-prepinac.tsx` |
+
+Podrobnosti, co je hotové a co ne, jsou v `NOCNI-REPORT-KOMUNIKACE.md`.

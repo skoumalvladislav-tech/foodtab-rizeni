@@ -20,6 +20,7 @@ import Sdeleni from "@/app/sdeleni";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Nadpis from "../nadpis";
+import VetaOPushi from "../provozni-centrum/veta-o-pushi";
 import { zapsatDochazku } from "../dochazka/akce";
 import PoleKodu from "../dochazka/pole-kodu";
 import { NAZVY_DRUHU } from "../vzkazy/seznam-rozhovoru";
@@ -1034,7 +1035,7 @@ export default async function Dnes({
             spoléhal.
           */}
           <p style={{ ...prazdno, fontSize: "12px", margin: 0 }}>
-            Zprávy se ukazují v aplikaci. Upozornění do telefonu zatím nechodí.
+            <VetaOPushi rozsah={rozsah} />
           </p>
         </aside>
       </div>

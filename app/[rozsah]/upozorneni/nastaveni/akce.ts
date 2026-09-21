@@ -46,3 +46,49 @@ export async function ulozitNastaveni(formData: FormData): Promise<void> {
 
   redirect(`/${rozsah}/upozorneni/nastaveni?ulozeno=1`)
 }
+
+/**
+ * Zapsat zařízení pro upozornění do telefonu (web push).
+ *
+ * Volá se z klientské komponenty po tom, co prohlížeč vydal předplatné.
+ * Zapisuje `public.push_odber_ulozit`: zařízení se váže na PŘIHLÁŠENÉHO
+ * (auth.uid), takže cizí účet tu nejde podvrhnout, a zařízení dříve zapsané
+ * pod jiným účtem (sdílený telefon) přejde na nového.
+ */
+export async function ulozitZarizeniPush(odber: {
+  endpoint: string
+  p256dh: string
+  auth: string
+  agent: string
+}): Promise<{ ok: true } | { ok: false; chyba: string }> {
+  const user = await getUser()
+  if (!user) return { ok: false, chyba: 'Nejste přihlášen(a).' }
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('push_odber_ulozit', {
+    p_endpoint: String(odber.endpoint ?? ''),
+    p_p256dh: String(odber.p256dh ?? ''),
+    p_auth: String(odber.auth ?? ''),
+    p_user_agent: String(odber.agent ?? '').slice(0, 300),
+  })
+  if (error) {
+    // Kód se nasazuje dřív než migrace.
+    if (error.code === 'PGRST202' || /does not exist|schema cache/i.test(error.message)) {
+      return { ok: false, chyba: 'Upozornění do telefonu čekají na nasazení databáze.' }
+    }
+    return { ok: false, chyba: error.message }
+  }
+  return { ok: true }
+}
+
+/** Zrušit zařízení. Zruší jen vlastní (push_odber_zrusit kontroluje vlastníka). */
+export async function zrusitZarizeniPush(
+  endpoint: string,
+): Promise<{ ok: true } | { ok: false; chyba: string }> {
+  const user = await getUser()
+  if (!user) return { ok: false, chyba: 'Nejste přihlášen(a).' }
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('push_odber_zrusit', { p_endpoint: String(endpoint ?? '') })
+  return error ? { ok: false, chyba: error.message } : { ok: true }
+}

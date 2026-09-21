@@ -34,6 +34,7 @@ import {
   vybratPoskytovatelePrepisu,
 } from '../lib/komunikace/prepis.ts'
 import { denVPasmu } from '../lib/cas.ts'
+import { slozitPush } from '../lib/komunikace/push-zprava.ts'
 import { popisDne, poskladatVlakno } from '../lib/komunikace/vlakno.ts'
 import {
   hledatPrijemce,
@@ -250,6 +251,23 @@ je('souhrn: dva', souhrnVyberu([{ jmeno: 'Karel Novák' }, { jmeno: 'Božena Ře
 je('souhrn: tři', souhrnVyberu([{ jmeno: 'A a' }, { jmeno: 'B b' }, { jmeno: 'C c' }]), 'A, B a 1 další')
 je('souhrn: pět', souhrnVyberu(['A', 'B', 'C', 'D', 'E'].map((j) => ({ jmeno: `${j} x` }))), 'A, B a 3 další')
 je('souhrn: osm', souhrnVyberu(Array.from({ length: 8 }, (_, i) => ({ jmeno: `J${i} x` }))), 'J0, J1 a 6 dalších')
+
+console.log('\n== Text push oznámení ==')
+
+const p1 = slozitPush({ typ: 'souhrn', pocet: 3, druh: null, telo: null, priorita: null })
+je('souhrn po příchodu', [p1.title, p1.body, p1.tag], ['Foodtab', 'Čekají na vás 3 zprávy', 'souhrn'])
+const p2 = slozitPush({ typ: 'jedna', pocet: 1, druh: 'vzkaz.novy', telo: { pocet: 1 }, priorita: 'normal' })
+je('nový vzkaz nenese obsah zprávy ani jméno', [p2.body, p2.urgent], ['Nová zpráva v rozhovoru', false])
+const p3 = slozitPush({ typ: 'jedna', pocet: 4, druh: 'vzkaz.novy', telo: { pocet: 4 }, priorita: 'normal' })
+je('slučovaný vzkaz řekne počet', p3.body, '4 nové zprávy v rozhovorech')
+const p4 = slozitPush({ typ: 'jedna', pocet: 1, druh: 'smena.zmenena', telo: { den: '2026-09-22', od: '16:00', do: '22:00' }, priorita: 'important' })
+je('změna směny: den, žádné jméno', p4.body, 'Změnila se vám směna úterý 22. 9.')
+const p5 = slozitPush({ typ: 'jedna', pocet: 1, druh: 'vzkaz.novy', telo: {}, priorita: 'urgent' })
+je('naléhavé: příznak a označení v nadpisu', [p5.urgent, p5.title], [true, 'Foodtab — naléhavé'])
+const p6 = slozitPush({ typ: 'jedna', pocet: 1, druh: null, telo: null, priorita: null })
+je('upozornění, které mezitím zmizelo, se řekne obecně', p6.body, 'Máte nové upozornění')
+je('souhrn nikdy není naléhavý', slozitPush({ typ: 'souhrn', pocet: 2, druh: null, telo: null, priorita: 'urgent' }).urgent, false)
+je('neznámý druh nevyleze jinak než obecně', slozitPush({ typ: 'jedna', pocet: 1, druh: 'neznamy.druh', telo: {}, priorita: 'normal' }).body, 'Upozornění')
 
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO\n' : `\nCHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)
