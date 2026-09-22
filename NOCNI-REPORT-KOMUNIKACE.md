@@ -54,6 +54,7 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
 | **Přílohy ke zprávám** (fotka, PDF; volitelná migrace D): soukromý kbelík, tabulka bez zápisového grantu, `pripojit_prilohu` jako jediná cesta (autor zprávy, do 10 min, cesta patří rozhovoru, soubor existuje, ≤ 5), nahrání z prohlížeče přímo do Storage, zmenšení fotek, náhledy ve vlákně a v panelu | `krok44` (**41 kontrol**), `komunikace.test.mjs`, snímek `desktop-prilohy.png` |
 | Bezpečnostní opravy: sloupcový grant na `notifications` (klient smí měnit jen `read_at`/`acknowledged_at`, potvrzení se nedá zpětně přepsat); `kdo_nepotvrdil` má kontrolu práva **i rozsahu pobočky** | `krok42`, `krok43` |
 | **Checklist → úkol** (volitelná migrace E): tlačítko „Nahlásit problém“ u položky i za celý běh, pobočka jde vždy z běhu (ne od volajícího), vazbu nejde podvrhnout na jinou pobočku ani firmu (přímý zápis i trigger), termín/adresát/právo `tasks.manage` ověří stejný `zadat_ukol` jako ruční úkol; smazání běhu nebo položky jen ruší vazbu, úkol zůstává | `krok45` (**25 kontrol**), mutace, snímek `desktop-checklist-problem.png` |
+| **Majiteli chodí upozornění kdykoliv** (migrace 9, `…120000_majitel_doruceni_kdykoliv.sql`): externí kanál (push) majitele neobchází jen naléhavá zpráva, ale i to, že je majitel — nečeká na směnu, kterou nemá; bez předplatného push se pořád nezaloží nic | `krok46` (**6 kontrol**), mutace; **čeká na `db push`** |
 
 ## ČÁSTEČNĚ
 
@@ -169,6 +170,35 @@ záhadná mezera:
   napoprvé), příznak je: `has_permission` vrátí `false`, i když scénář vypadá, že
   roli s právem přidělil.
 
+## Nová práce 22. 9. (2): Majiteli chodí upozornění kdykoliv
+
+Šéfík nahlásil: „když odešlu zprávu vedení, tak mi žádné upozornění nepřijde."
+Diagnóza přes produkční `foodtab-test` (jen čtení, žádný obsah zpráv): účastníci
+i trigger fungují správně — Šéfíkův test byl sám na sebe (odesílatel se nikdy
+neupozorňuje, to je záměr) a proběhl navíc PŘED odpoledním nasazením nové
+notifikační služby. Skutečný, trvalý nález byl jinde:
+
+* **`app.zaradit_doruceni` posílá NEnaléhavé upozornění hned jen tomu, kdo je
+  právě na směně** (`app.smena_ted` — otevřený příchod); jinak čeká ve frontě
+  na `app.uvolnit_cekajici`, která ji pustí AŽ PO příchodu. **Majitel typicky
+  nepíchá docházku vůbec** — takže „čeká na směnu" je pro něj čekání, které
+  nikdy neskončí, ne jen do nejbližší směny.
+* Migrace `20260922120000_majitel_doruceni_kdykoliv.sql`: majitel (`je_majitel`)
+  obchází frontu stejnou cestou, jakou už dnes obchází naléhavá zpráva — jedna
+  podmínka navíc v jednom parametru `app.doruci_se`, žádný nový stav.
+* **Rozsah byl otázka, ne samozřejmost** — zeptal jsem se Šéfíka: jen vzkazy
+  vedení, nebo všechna upozornění majiteli? Odpověď (22. 9.): **všechna** —
+  důvod (majitel nemá směnu) je obecný, užší oprava by stejnou díru jen
+  přesunula k dalšímu typu upozornění (např. nástěnka).
+* Push samotný tím nezačne fungovat — pořád chybí klíče VAPID na Vercelu
+  (viz „Externí závislost" níž) a druhý majitel (Lucie, v testovacích datech)
+  nemá na žádném zařízení push zapnutý. Tahle oprava řeší jen frontu/čekání —
+  odznak v appce funguje nezávisle na obojím.
+
+Scénář `krok46` (6 kontrol), mutační zkouška (1 schválné rozbití — smazání
+podmínky pro majitele — spadlo přesně na tu kontrolu, kterou mířilo, nic
+jiného).
+
 ## Provedené migrace, změněné RLS/granty
 
 **Provedené migrace (22. 9. odpoledne, Šéfík, `db push --yes`, bez chyby):**
@@ -177,6 +207,9 @@ záhadná mezera:
 `migration list --linked` i přímým dotazem přes Supabase MCP.
 Migrace A–C byly po revizi ještě upravovány — dělo se to, dokud nebyly nasazené; od 22. 9.
 už jen přírůstkově.
+
+**Čeká na Šéfíka (22. 9. večer):** `20260922120000_majitel_doruceni_kdykoliv.sql`
+(majiteli chodí upozornění kdykoliv) — devátá migrace, ještě nikde nenasazená.
 
 Změny oprávnění, které migrace dělají:
 
@@ -198,10 +231,10 @@ Změny oprávnění, které migrace dělají:
 
 | Co | Výsledek |
 |---|---|
-| Celá sada scénářů v PGlite | **1724 kontrol, nic nespadlo** (PGlite RLS ani granty úplně neověří) |
+| Celá sada scénářů v PGlite | **1730 kontrol, nic nespadlo** (PGlite RLS ani granty úplně neověří; +6 z `krok46`, majitel kdykoliv) |
 | Workflow „Databáze“ na PostgreSQL 16 (PR #60) | **prošlo** pro `f2f9c97` (poslední commit z 21. 9.; 22. 9. se počítá v PR) |
 | `scripts/komunikace.test.mjs` / `upozorneni` / `web-push` / `smeny-formular` | 200 / 105 / 65 / 11 kontrol, 0 chyb |
-| Mutační zkouška SQL (schválné rozbití migrace) | 34 (A/B původní) + 29 (přílohy) + 22 (opravy z revize) + 9 (checklist → úkol) rozbití; **všechna zachycena** kromě popsaných níž |
+| Mutační zkouška SQL (schválné rozbití migrace) | 34 (A/B původní) + 29 (přílohy) + 22 (opravy z revize) + 9 (checklist → úkol) + 1 (majitel kdykoliv) rozbití; **všechna zachycena** kromě popsaných níž |
 | `tsc --noEmit`, `eslint` (změněné části) | čisté (jen dřívější chyby v `lib/marketing-*ai.ts` — chybí `@anthropic-ai/sdk`, a v lokálním `app/nahled/`) |
 | Vercel build (preview) | prošel pro dřívější commity; poslední se počítá v PR |
 | Lokální `next build` | **nešel** — `node_modules` v pracovní kopii nemá `@anthropic-ai/sdk` (týká se Marketingu, ne téhle práce); rozhoduje Vercel |
