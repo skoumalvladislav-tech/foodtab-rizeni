@@ -1,6 +1,14 @@
 # Noční report — Provozní centrum / Komunikace
 
-**Větev:** `komunikace-provozni-centrum` · **Draft PR:** [#60](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/60) (nemergováno) · **Datum:** 21.–22. 9. 2026
+**Větev:** `komunikace-provozni-centrum` · **PR:** [#60](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/60) (sloučeno do `main`) · **Datum:** 21.–22. 9. 2026
+
+> **DOPLNĚNO 22. 9. odpoledne: NASAZENO.** Šéfík PR #60 sloučil do `main`
+> (Vercel, úspěšně) a pustil `db push` — všech 8 migrací níž je teď **v ostré
+> databázi `foodtab-test`**, ověřeno `migration list` i bezpečnostními poradci
+> (žádný nový nález, RLS bez politik na `notifikace_doruceni`/`push_odbery` je
+> záměr). Data beze změny (1 firma, 22 lidí, žádná ztráta). Zbytek tohohle
+> souboru popisuje stav **před** nasazením — ponecháno, ať je vidět, co se
+> ověřovalo a proč. Věty „čeká na db push“ níž už neplatí.
 
 Tohle je souhrn pro ráno. Zdroj pravdy je kód, databáze, testy a dokumenty
 v repozitáři — ne chat. Architektura: `docs/COMMUNICATION_ARCHITECTURE.md`.
@@ -8,16 +16,16 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
 
 ## Nejdůležitější věci na začátek
 
-1. **Nic z toho není nasazené do provozu.** Kód leží ve větvi + draft PR, **nic jsem
-   nemergoval** (merge = okamžité nasazení Vercelem) a **žádnou migraci jsem nepustil**
-   (`db push` je vždy ruční). Databáze `foodtab-test` je nedotčená.
-2. **Pět migrací čeká na vás**, v tomto pořadí (před nimi ještě tři migrace Směn
-   z 20. 9., které taky čekají):
+1. ~~Nic z toho není nasazené do provozu.~~ **Nasazeno 22. 9., viz poznámka
+   nahoře.** Do rána (kdy tohle vzniklo) jsem nic nemergoval ani nepustil —
+   merge a `db push` udělal Šéfík sám, ručně, po kontrole.
+2. **Pět migrací čekalo na Šéfíka**, v tomto pořadí (před nimi ještě tři migrace
+   Směn z 20. 9., které taky čekaly) — **všech 8 je teď nasazeno**:
    `20260921100000_notifikacni_sluzba` → `20260921110000_provozni_centrum` →
    `20260921120000_realtime_upozorneni` → *(volitelná)* `20260921130000_prilohy` →
    *(volitelná)* `20260922100000_checklist_ukol`.
-   Kód je psaný tak, aby bez nich nespadl (obrazovky řeknou „čeká na nasazení databáze“,
-   tlačítko Příloha i „Nahlásit problém“ se bez svých migrací neukážou).
+   Kód byl psaný tak, aby bez nich nespadl — to se osvědčilo i naostro: kód se
+   nasadil (merge) dřív, než migrace (`db push`), a appka mezitím neselhala.
 3. **Po dokončení jsem nechal větev zrevidovat** (5 nezávislých úhlů, každé zjištění
    ověřoval skeptik) — oddíl „Nezávislá revize“ níž. Našla i věc, kterou jsem předtím
    ohlásil jako hotovou a nebyla (jména v rozhovoru — pomocná funkce existovala, stránky ji
@@ -87,9 +95,7 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
    Vygenerují se jednorázově; bez nich je push vypnutý a UI to říká.
 2. **Dodavatel přepisu hlasu** (Whisper / Deepgram / Google STT) + smlouva o zpracování údajů —
    Claude API zvukový vstup nemá.
-3. **Nasazení migrací** (`db push`) — vždy ruční.
-4. Rozhodnutí o nasazení realtime publikace (migrace `…120000` je volitelná), příloh (`…130000`)
-   a checklist → úkolu (`…100000` z 22. 9.).
+3. ~~Nasazení migrací (`db push`) — vždy ruční.~~ **Hotovo 22. 9., viz poznámka nahoře.**
 
 ## Nezávislá revize (co našla, co jsem opravil, co ne)
 
@@ -165,10 +171,11 @@ záhadná mezera:
 
 ## Provedené migrace, změněné RLS/granty
 
-**Provedené migrace: žádná** (žádná se nepouštěla do databáze).
-Napsané, čekají: `20260921100000`, `…110000`, `…120000`, `…130000` (volitelná),
-`20260922100000` (volitelná).
-Migrace A–C byly po revizi ještě upravovány — nejsou nasazené, takže se to smělo; po nasazení
+**Provedené migrace (22. 9. odpoledne, Šéfík, `db push --yes`, bez chyby):**
+`20260920100000`, `…120000`, `…130000` (Směny), `20260921100000`, `…110000`, `…120000`,
+`…130000` (přílohy), `20260922100000` (checklist → úkol) — všech 8, v pořadí, ověřeno
+`migration list --linked` i přímým dotazem přes Supabase MCP.
+Migrace A–C byly po revizi ještě upravovány — dělo se to, dokud nebyly nasazené; od 22. 9.
 už jen přírůstkově.
 
 Změny oprávnění, které migrace dělají:
@@ -239,17 +246,17 @@ skutečná data ne** — to ověří až prohlídka po `db push` a přihlášen�
 5. **Důležitá změna směny mimo směnu** — má pípnout (jak slibuje Nastavení → Firma), nebo jen
    naléhavé (jak drží Notification Service a zadání „žádný agresivní push“)?
 6. **Odhlášení a push** — má odhlášení rušit push zařízení? (Zásah do přihlašování.)
-7. **Přílohy** — nasadit `…130000`? Povolené typy jsou jpeg/png/webp/pdf do 10 MB, max. 5 na zprávu.
-8. **Checklist → úkol** — nasadit `…100000` z 22. 9.? Nic nemění chování checklistu samotného,
-   jen přidává tlačítko „Nahlásit problém“ tomu, kdo už dnes smí zadávat úkoly.
+7. ~~Přílohy — nasadit `…130000`?~~ **Nasazeno 22. 9.**
+8. ~~Checklist → úkol — nasadit `…100000`?~~ **Nasazeno 22. 9.**
 
 ## Doporučený další krok
 
-1. Projít draft PR #60 a snímky. 2. Pustit migrace v pořadí (nejdřív Směny). 3. Prohlédnout si
-`/vzkazy`, nový rozhovor a checklist → úkol s přihlášeným účtem (tohle jsem nemohl — nejvíc
-riskantní je právě napojení na skutečná data, protože testy stojí na scénářích a ukázkových
-datech). 4. Vygenerovat klíče VAPID a zkusit push na jednom telefonu (iPhone: přidat na plochu).
-5. Rozhodnout body výše.
+1. ~~Projít draft PR #60 a snímky.~~ Sloučeno, viz poznámka nahoře. ~~Pustit migrace v pořadí~~
+**hotovo.** 3. Prohlédnout si `/vzkazy`, nový rozhovor a checklist → úkol s přihlášeným účtem —
+teď už jde, appka běží naostro (tohle jsem předtím nemohl; nejvíc riskantní bylo právě napojení
+na skutečná data, protože testy stojí na scénářích a ukázkových datech — první opravdová
+prohlídka pořád chybí). 4. Vygenerovat klíče VAPID a zkusit push na jednom telefonu
+(iPhone: přidat na plochu). 5. Rozhodnout zbylé body výše (1–6).
 Jako další etapu doporučuji **E2E test hlavních cest** (poslat zprávu → vidět ji → vytvořit z ní
 úkol; odškrtnout položku checklistu → nahlásit problém → vidět úkol v detailu) a **checklist →
 diskusi/problém jako součást samotného checklistu** (dnešní řešení jde jen směrem „vytvoř úkol“,
