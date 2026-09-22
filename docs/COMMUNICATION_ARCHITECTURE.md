@@ -101,6 +101,12 @@ je rozhodnutí pro Šéfíka a zasáhlo by `moje_rozhovory`, `doruci_se` i kiose
 * **Urgentní** obchází čekání. Odesílatel musí mít `communication.urgent`,
   v UI potvrdí, že upozorní i mimo směnu, a odeslání jde do `audit_log`
   (`komunikace.nalehava_zprava`, bez textu).
+* **Majitel** (`employees.je_majitel`) obchází čekání taky, u jakékoli priority
+  kromě `low` — nemá směnu, na kterou by čekal, takže by jinak čekal navěky
+  (migrace `20260922120000_majitel_doruceni_kdykoliv.sql`). Řeší se v jednom
+  místě (`app.zaradit_doruceni`, stejný parametr jako u urgentní), ne u
+  jednotlivých producentů — díra by se jinak přesunula na příští typ
+  upozornění adresovaný majiteli.
 * Notifikaci změny směny **nevytváří UI Směn**; vzniká z události ve
   `ulozit_smenu` → `app.upozornit_smenu` → `app.notifikovat`. Text „ZMĚNA SMĚNY
   … Původně … Nově … Změnil: …“ skládá jen prezentační vrstva
