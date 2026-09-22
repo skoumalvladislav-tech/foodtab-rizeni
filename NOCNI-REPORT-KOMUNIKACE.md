@@ -54,7 +54,7 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
 | **Přílohy ke zprávám** (fotka, PDF; volitelná migrace D): soukromý kbelík, tabulka bez zápisového grantu, `pripojit_prilohu` jako jediná cesta (autor zprávy, do 10 min, cesta patří rozhovoru, soubor existuje, ≤ 5), nahrání z prohlížeče přímo do Storage, zmenšení fotek, náhledy ve vlákně a v panelu | `krok44` (**41 kontrol**), `komunikace.test.mjs`, snímek `desktop-prilohy.png` |
 | Bezpečnostní opravy: sloupcový grant na `notifications` (klient smí měnit jen `read_at`/`acknowledged_at`, potvrzení se nedá zpětně přepsat); `kdo_nepotvrdil` má kontrolu práva **i rozsahu pobočky** | `krok42`, `krok43` |
 | **Checklist → úkol** (volitelná migrace E): tlačítko „Nahlásit problém“ u položky i za celý běh, pobočka jde vždy z běhu (ne od volajícího), vazbu nejde podvrhnout na jinou pobočku ani firmu (přímý zápis i trigger), termín/adresát/právo `tasks.manage` ověří stejný `zadat_ukol` jako ruční úkol; smazání běhu nebo položky jen ruší vazbu, úkol zůstává | `krok45` (**25 kontrol**), mutace, snímek `desktop-checklist-problem.png` |
-| **Majiteli chodí upozornění kdykoliv** (migrace 9, `…120000_majitel_doruceni_kdykoliv.sql`): externí kanál (push) majitele neobchází jen naléhavá zpráva, ale i to, že je majitel — nečeká na směnu, kterou nemá; bez předplatného push se pořád nezaloží nic | `krok46` (**6 kontrol**), mutace; **čeká na `db push`** |
+| **Majiteli chodí upozornění kdykoliv** (migrace 9, `…120000_majitel_doruceni_kdykoliv.sql`): externí kanál (push) majitele neobchází jen naléhavá zpráva, ale i to, že je majitel — nečeká na směnu, kterou nemá; bez předplatného push se pořád nezaloží nic | `krok46` (**6 kontrol**), mutace; **nasazeno 22. 9. večer**, ověřeno přímo v databázi |
 
 ## ČÁSTEČNĚ
 
@@ -208,8 +208,11 @@ jiného).
 Migrace A–C byly po revizi ještě upravovány — dělo se to, dokud nebyly nasazené; od 22. 9.
 už jen přírůstkově.
 
-**Čeká na Šéfíka (22. 9. večer):** `20260922120000_majitel_doruceni_kdykoliv.sql`
-(majiteli chodí upozornění kdykoliv) — devátá migrace, ještě nikde nenasazená.
+**Nasazeno 22. 9. večer:** `20260922120000_majitel_doruceni_kdykoliv.sql`
+(majiteli chodí upozornění kdykoliv) — devátá migrace, PR #62 sloučen a Šéfík
+pustil `db push`. Ověřeno přímo v databázi (ne podle hlášení): funkce
+`app.zaradit_doruceni` má opravu, migrace v ledgeru, bezpečnostní poradci
+beze změny, žádná ztráta dat.
 
 Změny oprávnění, které migrace dělají:
 
