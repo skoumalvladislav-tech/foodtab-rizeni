@@ -19,6 +19,13 @@ export type UkolDetail = {
   done_at: string | null
   konverzace_id?: string | null
   zprava_id?: string | null
+  checklist_run_id?: string | null
+}
+
+/** Šablona a den checklistu, ze kterého úkol vznikl; položka jen když se ho týká. */
+export type ChecklistZdroj = {
+  behNazev: string
+  polozkaLabel: string | null
 }
 
 const STAV: Record<UkolDetail['status'], string> = {
@@ -34,6 +41,7 @@ export default function DetailUkolu({
   pobocka,
   chyba,
   akceDokoncit,
+  checklistZdroj,
 }: {
   rozsah: string
   ukol: UkolDetail
@@ -41,6 +49,8 @@ export default function DetailUkolu({
   pobocka: string
   chyba?: string | null
   akceDokoncit: (formData: FormData) => void | Promise<void>
+  /** null = úkol nevznikl z checklistu (nebo vazba mezitím zanikla). */
+  checklistZdroj?: ChecklistZdroj | null
 }) {
   const poTerminu = ukol.status === 'open' && ukol.due_at !== null && new Date(ukol.due_at).getTime() < Date.now()
 
@@ -114,6 +124,22 @@ export default function DetailUkolu({
             </Link>
             {' '}(Otevře se jen účastníkům toho rozhovoru — ostatní úkol vidí, zprávu ne.) Diskuse k úkolu
             samostatně zatím není — mluví se o něm v tom rozhovoru.
+          </p>
+        </section>
+      ) : null}
+
+      {checklistZdroj ? (
+        <section className="ds-plocha">
+          <h3 style={{ margin: '0 0 8px', fontSize: '15px' }}>Odkud úkol je</h3>
+          <p style={{ margin: 0, fontSize: '14px', lineHeight: 1.5 }}>
+            Vznikl z checklistu {checklistZdroj.behNazev}
+            {checklistZdroj.polozkaLabel ? <>, položka „{checklistZdroj.polozkaLabel}“</> : null}.
+            {ukol.checklist_run_id ? (
+              <>
+                {' '}
+                <Link href={`/${rozsah}/ukoly/${ukol.checklist_run_id}`}>Otevřít checklist</Link>.
+              </>
+            ) : null}
           </p>
         </section>
       ) : null}

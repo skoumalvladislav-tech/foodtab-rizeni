@@ -170,6 +170,21 @@ protože Vercel nasazuje z `main` hned a migrace až potom.
   do 10 minut od odeslání, ne ke stornované zprávě, cesta patří tomuto
   rozhovoru i firmě, soubor v úložišti opravdu je, nejvýš 5 na zprávu.
 
+**E. `20260922100000_checklist_ukol.sql`** — scénář `krok45`
+* `tasks`: `checklist_run_id`, `checklist_item_id` (obojí nepovinné —
+  problém se může týkat jedné položky, nebo celého běhu). `zdroj = 'checklist'`
+  hodnotu už znala migrace B, jen se nepoužívala.
+* Trigger `tasks_vazba_checklistu` — přímý zápis vazby nesmí připnout úkol
+  k checklistu jiné pobočky nebo firmy; kontroluje se jen NOVĚ zapsaná vazba
+  (cizí klíč `on delete set null` při smazání běhu/položky vazbu jen ruší).
+* `zalozit_ukol_z_checklistu` — pobočka jde vždy z BĚHU, ne od volajícího
+  (checklist na rozdíl od rozhovoru pobočku má vždy); deleguje na `zadat_ukol`
+  (adresát, termín, právo `tasks.manage`) a zapíše vazbu.
+* UI: tlačítko „Nahlásit problém“ na obrazovce checklistu (u položky i za
+  celý běh) vede na formulář, ze kterého vznikne úkol — bez návrhu (checklist
+  nemá text zprávy, ze kterého by šlo něco poznat). Detail úkolu ukazuje
+  „Odkud úkol je“ i pro checklist, stejně jako pro zprávu.
+
 Těla funkcí vycházejí ze **živé** databáze (`pg_get_functiondef`), ne z nejstarší
 migrace — dvakrát už novější migrace přepsala objekt podle staršího stavu.
 
@@ -230,8 +245,8 @@ Podle přiloženého vizuálu (desktop tři sloupce, mobil obrazovky 1–8).
 
 Vyhledávání ve zprávách, doba uchování zpráv,
 konfigurovatelné tiché hodiny, e-mailový kanál upozornění, model pro návrh
-úkolu, přepis hlasu. (Přílohy — fotky, PDF — původně mezi nimi byly a nyní jsou
-v migraci D.) Každé je v `NOCNI-REPORT-KOMUNIKACE.md` zařazeno do
+úkolu, přepis hlasu. (Přílohy — fotky, PDF — a checklist → úkol původně mezi
+nimi byly a nyní jsou v migracích D a E.) Každé je v `NOCNI-REPORT-KOMUNIKACE.md` zařazeno do
 HOTOVO / ČÁSTEČNĚ / PŘIPRAVENO / NEHOTOVO / EXTERNÍ ZÁVISLOST podle toho, co
 v repozitáři opravdu je.
 
@@ -248,6 +263,8 @@ v repozitáři opravdu je.
 | UI | `app/[rozsah]/vzkazy/**`, `app/[rozsah]/ukoly/ukol/[id]`, `app/[rozsah]/provozni-centrum/*`, `components/shell/ZivaAktualizace.tsx` |
 | Přílohy (SQL) | `20260921130000_prilohy.sql`, `krok44_scenar.sql` |
 | Přílohy (logika a UI) | `lib/komunikace/prilohy.ts`, `vzkazy/[konverzace]/{priloha-pridat.tsx,akce-prilohy.ts}`, zobrazení ve `vlakno-zprav.tsx` a v panelu |
+| Checklist → úkol (SQL) | `20260922100000_checklist_ukol.sql`, `krok45_scenar.sql` |
+| Checklist → úkol (UI) | `ukoly/[beh]/problem/{page.tsx,formular-problem.tsx}`, akce `zalozitUkolZChecklistu` v `ukoly/akce.ts`, „Nahlásit problém“ na `ukoly/[beh]/page.tsx`, „Odkud úkol je“ v `ukoly/ukol/[id]/detail-ukolu.tsx` |
 | Push (odesílač, plánovač, service worker, zapnutí na zařízení) | `app/api/uloha/notifikace-push`, `.github/workflows/notifikace-push.yml`, `public/sw.js`, `upozorneni/nastaveni/push-prepinac.tsx` |
 
 Podrobnosti, co je hotové a co ne, jsou v `NOCNI-REPORT-KOMUNIKACE.md`.

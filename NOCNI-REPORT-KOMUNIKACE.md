@@ -1,6 +1,6 @@
 # Noční report — Provozní centrum / Komunikace
 
-**Větev:** `komunikace-provozni-centrum` · **Draft PR:** [#60](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/60) (nemergováno) · **Datum:** 21. 9. 2026
+**Větev:** `komunikace-provozni-centrum` · **Draft PR:** [#60](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/60) (nemergováno) · **Datum:** 21.–22. 9. 2026
 
 Tohle je souhrn pro ráno. Zdroj pravdy je kód, databáze, testy a dokumenty
 v repozitáři — ne chat. Architektura: `docs/COMMUNICATION_ARCHITECTURE.md`.
@@ -11,12 +11,13 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
 1. **Nic z toho není nasazené do provozu.** Kód leží ve větvi + draft PR, **nic jsem
    nemergoval** (merge = okamžité nasazení Vercelem) a **žádnou migraci jsem nepustil**
    (`db push` je vždy ruční). Databáze `foodtab-test` je nedotčená.
-2. **Čtyři migrace čekají na vás**, v tomto pořadí (před nimi ještě tři migrace Směn
+2. **Pět migrací čeká na vás**, v tomto pořadí (před nimi ještě tři migrace Směn
    z 20. 9., které taky čekají):
    `20260921100000_notifikacni_sluzba` → `20260921110000_provozni_centrum` →
-   `20260921120000_realtime_upozorneni` → *(volitelná)* `20260921130000_prilohy`.
+   `20260921120000_realtime_upozorneni` → *(volitelná)* `20260921130000_prilohy` →
+   *(volitelná)* `20260922100000_checklist_ukol`.
    Kód je psaný tak, aby bez nich nespadl (obrazovky řeknou „čeká na nasazení databáze“,
-   tlačítko Příloha se bez čtvrté neukáže).
+   tlačítko Příloha i „Nahlásit problém“ se bez svých migrací neukážou).
 3. **Po dokončení jsem nechal větev zrevidovat** (5 nezávislých úhlů, každé zjištění
    ověřoval skeptik) — oddíl „Nezávislá revize“ níž. Našla i věc, kterou jsem předtím
    ohlásil jako hotovou a nebyla (jména v rozhovoru — pomocná funkce existovala, stránky ji
@@ -44,6 +45,7 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
 | **Offline/opakování odeslání**: fronta neodeslaných zpráv v prohlížeči (po uživateli) + klientské id (bez zdvojení) | `krok43` (idempotence); chování prohlížeče **neověřeno end-to-end** |
 | **Přílohy ke zprávám** (fotka, PDF; volitelná migrace D): soukromý kbelík, tabulka bez zápisového grantu, `pripojit_prilohu` jako jediná cesta (autor zprávy, do 10 min, cesta patří rozhovoru, soubor existuje, ≤ 5), nahrání z prohlížeče přímo do Storage, zmenšení fotek, náhledy ve vlákně a v panelu | `krok44` (**41 kontrol**), `komunikace.test.mjs`, snímek `desktop-prilohy.png` |
 | Bezpečnostní opravy: sloupcový grant na `notifications` (klient smí měnit jen `read_at`/`acknowledged_at`, potvrzení se nedá zpětně přepsat); `kdo_nepotvrdil` má kontrolu práva **i rozsahu pobočky** | `krok42`, `krok43` |
+| **Checklist → úkol** (volitelná migrace E): tlačítko „Nahlásit problém“ u položky i za celý běh, pobočka jde vždy z běhu (ne od volajícího), vazbu nejde podvrhnout na jinou pobočku ani firmu (přímý zápis i trigger), termín/adresát/právo `tasks.manage` ověří stejný `zadat_ukol` jako ruční úkol; smazání běhu nebo položky jen ruší vazbu, úkol zůstává | `krok45` (**25 kontrol**), mutace, snímek `desktop-checklist-problem.png` |
 
 ## ČÁSTEČNĚ
 
@@ -68,7 +70,6 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
 
 ## NEHOTOVO
 
-* **Checklist → problém/úkol** — mezi konverzací/úkolem a checklistem žádná vazba není.
 * **Diskuse k úkolu** — samostatná neexistuje; úkol ze zprávy odkazuje zpět do rozhovoru.
 * **Vyhledávání ve zprávách**, stránkování vlákna (zobrazuje se posledních 200 zpráv a řekne
   se to), zakládání skupinových kanálů s vlastním názvem mimo osobní rozhovory.
@@ -87,7 +88,8 @@ Směny (závislost): `docs/HANDOFF-SMENY.md`.
 2. **Dodavatel přepisu hlasu** (Whisper / Deepgram / Google STT) + smlouva o zpracování údajů —
    Claude API zvukový vstup nemá.
 3. **Nasazení migrací** (`db push`) — vždy ruční.
-4. Rozhodnutí o nasazení realtime publikace (migrace `…120000` je volitelná) a příloh (`…130000`).
+4. Rozhodnutí o nasazení realtime publikace (migrace `…120000` je volitelná), příloh (`…130000`)
+   a checklist → úkolu (`…100000` z 22. 9.).
 
 ## Nezávislá revize (co našla, co jsem opravil, co ne)
 
@@ -136,10 +138,36 @@ napsal test, který nad starým kódem spadl** (22 kontrol), takže oprava zůst
   nezakládá); nepřečtená upozornění vzniklá před migrací se neslučují (chybí klíč).
 * Fronta neodeslaných zpráv se odesílá jen dokud je otevřená stránka rozhovoru.
 
+## Nová práce 22. 9.: Checklist → úkol
+
+Doporučení z konce předchozí noci („jako další etapu doporučuji checklist → úkol“).
+Migrace E (`20260922100000_checklist_ukol.sql`), scénář `krok45`, UI pod
+`ukoly/[beh]/problem`. Dvě rozhodnutí stojí za zápis, ať se příště neobjeví jako
+záhadná mezera:
+
+* **Přístupová brána je jen `tasks.manage` na pobočce běhu** (přes `zadat_ukol`),
+  ne ještě samostatná kontrola `tasks.read` navrch. Zkusil jsem to s ní — mutační
+  zkouška ukázala, že jde o podmínku, kterou nejde rozbít (`zadat_ukol` požaduje
+  totéž, jen přísněji), takže by to byla falešná jistota. Kdo checklist VIDÍ
+  (`tasks.read`), ale nezadává úkoly (`tasks.manage`), dostane přesně tu hlášku,
+  kterou by čekal od ručního „Zadat úkol“ na stejné obrazovce.
+* **Trigger na přímý zápis kontroluje jen shodu pobočky**, ne zvlášť firmy —
+  `checklist_runs.branch_id` je globálně jedinečné (`gen_random_uuid`), takže
+  shoda pobočky sama dokazuje shodu firmy. Druhá podmínka na `tenant_id` by byla
+  nadbytečná (a nešla by rozbít mutací) — mutační zkouška to potvrdila, tak zůstala
+  venku.
+* Práva dnes dává **zařazení** (`employee_permissions`/`position_permissions`,
+  migrace `20260909100000`), ne `roles`/`role_permissions` — ty zůstávají jen kvůli
+  cizímu klíči na `memberships.role_id`. Scénář `krok45` proto přiděluje práva přes
+  `employee_permissions`, ne přes roli. Kdyby se to zase spletlo (jako tuhle noc
+  napoprvé), příznak je: `has_permission` vrátí `false`, i když scénář vypadá, že
+  roli s právem přidělil.
+
 ## Provedené migrace, změněné RLS/granty
 
 **Provedené migrace: žádná** (žádná se nepouštěla do databáze).
-Napsané, čekají: `20260921100000`, `…110000`, `…120000`, `…130000` (volitelná).
+Napsané, čekají: `20260921100000`, `…110000`, `…120000`, `…130000` (volitelná),
+`20260922100000` (volitelná).
 Migrace A–C byly po revizi ještě upravovány — nejsou nasazené, takže se to smělo; po nasazení
 už jen přírůstkově.
 
@@ -154,6 +182,8 @@ Změny oprávnění, které migrace dělají:
   soukromý; politiky úložiště select/insert přes účastnictví, delete jen sirotka, žádná update.
 * `poslat_zpravu` dostává 7. parametr, starý šestiparametrový podpis se **zahazuje**.
 * Trigger `tasks_vazba_zpravy` na `tasks`: úkol nejde připnout k cizímu rozhovoru.
+* Trigger `tasks_vazba_checklistu` (E): úkol nejde připnout k checklistu jiné pobočky ani firmy;
+  `tasks.checklist_run_id`/`checklist_item_id` (obojí nepovinné, `on delete set null`).
 * `kdo_nepotvrdil`: vrací jména jen tomu, kdo má `communication.manage` **na rozsahu oznámení**.
 * `zalozit_rozhovor` se **nemění** (zpřísnění jsem zkusil a vrátil — viz architektura, oddíl 1/6).
 
@@ -161,10 +191,10 @@ Změny oprávnění, které migrace dělají:
 
 | Co | Výsledek |
 |---|---|
-| Celá sada scénářů v PGlite | **1699 kontrol, nic nespadlo** (PGlite RLS ani granty úplně neověří) |
-| Workflow „Databáze“ na PostgreSQL 16 (PR #60) | **prošlo** pro `f2f9c97` (poslední commit; 54 s) |
+| Celá sada scénářů v PGlite | **1724 kontrol, nic nespadlo** (PGlite RLS ani granty úplně neověří) |
+| Workflow „Databáze“ na PostgreSQL 16 (PR #60) | **prošlo** pro `f2f9c97` (poslední commit z 21. 9.; 22. 9. se počítá v PR) |
 | `scripts/komunikace.test.mjs` / `upozorneni` / `web-push` / `smeny-formular` | 200 / 105 / 65 / 11 kontrol, 0 chyb |
-| Mutační zkouška SQL (schválné rozbití migrace) | 34 (A/B původní) + 29 (přílohy) + 22 (opravy z revize) rozbití; **všechna zachycena** kromě popsaných níž |
+| Mutační zkouška SQL (schválné rozbití migrace) | 34 (A/B původní) + 29 (přílohy) + 22 (opravy z revize) + 9 (checklist → úkol) rozbití; **všechna zachycena** kromě popsaných níž |
 | `tsc --noEmit`, `eslint` (změněné části) | čisté (jen dřívější chyby v `lib/marketing-*ai.ts` — chybí `@anthropic-ai/sdk`, a v lokálním `app/nahled/`) |
 | Vercel build (preview) | prošel pro dřívější commity; poslední se počítá v PR |
 | Lokální `next build` | **nešel** — `node_modules` v pracovní kopii nemá `@anthropic-ai/sdk` (týká se Marketingu, ne téhle práce); rozhoduje Vercel |
@@ -180,7 +210,8 @@ scénářem se vyzkoušet nedá. Kontrola, která nejde rozbít, je popsaná, ne
 ## Snímky obrazovky
 
 `docs/nocni-report-snimky/` — desktop (1536 px) a mobil (390 px), světlý i tmavý režim:
-rozhovor, seznam, výběr příjemců, úkol ze zprávy, detail úkolu, přílohy. **Pozor:** jsou to snímky
+rozhovor, seznam, výběr příjemců, úkol ze zprávy, detail úkolu, přílohy, nahlášení problému
+z checklistu. **Pozor:** jsou to snímky
 komponent s ukázkovými daty (přihlášená aplikace se nedá bez přístupu ke vašim údajům
 vykreslit). Vzhled je ověřený (včetně měření, že mobilní stránka nepřetéká), **napojení na
 skutečná data ne** — to ověří až prohlídka po `db push` a přihlášení.
@@ -209,12 +240,17 @@ skutečná data ne** — to ověří až prohlídka po `db push` a přihlášen�
    naléhavé (jak drží Notification Service a zadání „žádný agresivní push“)?
 6. **Odhlášení a push** — má odhlášení rušit push zařízení? (Zásah do přihlašování.)
 7. **Přílohy** — nasadit `…130000`? Povolené typy jsou jpeg/png/webp/pdf do 10 MB, max. 5 na zprávu.
+8. **Checklist → úkol** — nasadit `…100000` z 22. 9.? Nic nemění chování checklistu samotného,
+   jen přidává tlačítko „Nahlásit problém“ tomu, kdo už dnes smí zadávat úkoly.
 
 ## Doporučený další krok
 
 1. Projít draft PR #60 a snímky. 2. Pustit migrace v pořadí (nejdřív Směny). 3. Prohlédnout si
-`/vzkazy` a nový rozhovor s přihlášeným účtem (tohle jsem nemohl — nejvíc riskantní je právě
-napojení na skutečná data, protože testy stojí na scénářích a ukázkových datech). 4. Vygenerovat
-klíče VAPID a zkusit push na jednom telefonu (iPhone: přidat na plochu). 5. Rozhodnout body výše.
-Jako další etapu doporučuji **checklist → úkol** a **E2E test hlavních cest** (poslat zprávu →
-vidět ji → vytvořit z ní úkol), obojí bez dalších závislostí.
+`/vzkazy`, nový rozhovor a checklist → úkol s přihlášeným účtem (tohle jsem nemohl — nejvíc
+riskantní je právě napojení na skutečná data, protože testy stojí na scénářích a ukázkových
+datech). 4. Vygenerovat klíče VAPID a zkusit push na jednom telefonu (iPhone: přidat na plochu).
+5. Rozhodnout body výše.
+Jako další etapu doporučuji **E2E test hlavních cest** (poslat zprávu → vidět ji → vytvořit z ní
+úkol; odškrtnout položku checklistu → nahlásit problém → vidět úkol v detailu) a **checklist →
+diskusi/problém jako součást samotného checklistu** (dnešní řešení jde jen směrem „vytvoř úkol“,
+ne „označ položku jako problémovou“ přímo v běhu).

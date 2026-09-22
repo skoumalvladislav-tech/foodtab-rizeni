@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { provozniDen } from '@/lib/provozni-den'
-import { DotazSelhal } from '@/lib/supabase/dotaz'
+import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -296,4 +296,99 @@ export async function zadatUkol(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/ukoly`)
   redirect(`/${rozsah}/ukoly`)
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Nahlásit problém z checklistu — úkol vzniká z položky (nebo z celého
+ * běhu, když se problém netýká jedné řádky).
+ *
+ * JEDEN CÍL NA ÚKOL, stejná úvaha jako `zadatUkol` a `zalozitUkolZeZpravy`
+ * ve vzkazech: přepínač `komu` vybírá jen JEDEN ze tří adresátů, ostatní se
+ * zahazují — nemá se tam posílat nesmysl, i když poslední slovo má databáze.
+ *
+ * TERMÍN SE NEPŘEVÁDÍ TADY (pravidlo 11) — den a čas z formuláře jsou hodina
+ * na zdi bez pásma a přesně tak se posílají dál; okamžik z nich udělá
+ * databáze podle pásma POBOČKY BĚHU (ne podle rozsahu, ve kterém se
+ * formulář zrovna otvírá).
+ *
+ * Pobočka a právo tasks.manage se neposílají — bere je databáze z běhu
+ * samotného (public.zalozit_ukol_z_checklistu), ať se nedá podvrhnout jiná
+ * pobočka, než odkud checklist je.
+ */
+export async function zalozitUkolZChecklistu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const z = await zaklad(rozsah)
+  if (!z) return
+
+  const beh = String(formData.get('beh') ?? '')
+  if (!UUID.test(beh)) return
+
+  const polozkaVstup = String(formData.get('polozka') ?? '')
+  const polozka = UUID.test(polozkaVstup) ? polozkaVstup : null
+
+  const zpetFormular = `/${rozsah}/ukoly/${beh}/problem${polozka ? `?polozka=${polozka}` : ''}`
+  const chyba = (text: string): never =>
+    redirect(`${zpetFormular}${polozka ? '&' : '?'}chyba=${encodeURIComponent(text)}`)
+
+  const nazev = String(formData.get('nazev') ?? '').trim().slice(0, 120)
+  if (nazev === '') chyba('Název úkolu je povinný.')
+
+  let komu = String(formData.get('komu') ?? 'pobocka')
+  const vybrane = (klic: string): string | null => {
+    const v = String(formData.get(klic) ?? '').trim()
+    return UUID.test(v) ? v : null
+  }
+
+  // Vybraný adresát v rozbalovátku platí i bez přepnutí přepínače „Komu“
+  // (formulář bez JavaScriptu to za člověka neudělá) — stejná oprava jako
+  // u úkolu ze zprávy.
+  if (komu === 'pobocka') {
+    const zvolene = (['usek', 'pozice', 'clovek'] as const).filter((k) => vybrane(k) !== null)
+    if (zvolene.length === 1) komu = zvolene[0]
+    else if (zvolene.length > 1) chyba('Vyberte jen jednoho adresáta a přepněte volbu „Komu“.')
+  }
+  const usek = komu === 'usek' ? vybrane('usek') : null
+  const pozice = komu === 'pozice' ? vybrane('pozice') : null
+  const clovek = komu === 'clovek' ? vybrane('clovek') : null
+
+  if (komu !== 'pobocka' && usek === null && pozice === null && clovek === null) {
+    chyba('Vyberte, komu je úkol určený.')
+  }
+
+  const den = String(formData.get('termin_datum') ?? '').trim()
+  const cas = String(formData.get('termin_cas') ?? '').trim()
+  let termin: string | null = null
+  if (den !== '') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(den)) chyba('Termín není platné datum.')
+    if (cas !== '' && !/^\d{2}:\d{2}$/.test(cas)) chyba('Čas termínu není platný.')
+    termin = `${den}T${cas === '' ? '23:59' : cas}`
+  }
+
+  const priorita = String(formData.get('priorita') ?? '') === 'high' ? 'high' : 'normal'
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('zalozit_ukol_z_checklistu', {
+    p_tenant: z.tenantId,
+    p_run: beh,
+    p_polozka: polozka,
+    p_nazev: nazev,
+    p_poznamka: String(formData.get('poznamka') ?? '').trim().slice(0, 1000),
+    p_termin: termin,
+    p_priorita: priorita,
+    p_usek: usek,
+    p_pozice: pozice,
+    p_clovek: clovek,
+  })
+
+  if (error) {
+    if (funkceNeexistuje(error)) chyba('Nahlášení problému čeká na nasazení databáze.')
+    // Hlášku psala databáze a je pro člověka — nepřepisuje se.
+    chyba(error.message)
+  }
+
+  revalidatePath(`/${rozsah}/ukoly/${beh}`)
+  revalidatePath(`/${rozsah}/ukoly`)
+  redirect(`/${rozsah}/ukoly/${beh}`)
 }

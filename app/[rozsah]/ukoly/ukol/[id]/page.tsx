@@ -31,6 +31,8 @@ type Ukol = {
   done_at: string | null
   zprava_id?: string | null
   konverzace_id?: string | null
+  checklist_run_id?: string | null
+  checklist_item_id?: string | null
 }
 
 /**
@@ -44,7 +46,8 @@ type Ukol = {
  * odkaz zpátky do rozhovoru; tam se o něm mluví.
  *
  * KÓD SE NASAZUJE DŘÍV NEŽ MIGRACE: vazba na zprávu (`zprava_id`,
- * `konverzace_id`) se čte tolerantně, bez ní se detail ukáže bez zdroje.
+ * `konverzace_id`) i na checklist (`checklist_run_id`, `checklist_item_id`)
+ * se čte tolerantně, bez nich se detail ukáže bez zdroje.
  */
 export default async function StrankaDetailuUkolu({
   params,
@@ -85,7 +88,10 @@ export default async function StrankaDetailuUkolu({
 
   let ukol: Ukol | null = null
   if (UUID.test(id)) {
-    let { data, error } = await dotaz(`${zaklad}, zprava_id, konverzace_id`)
+    let { data, error } = await dotaz(
+      `${zaklad}, zprava_id, konverzace_id, checklist_run_id, checklist_item_id`,
+    )
+    if (error && sloupecNeexistuje(error)) ({ data, error } = await dotaz(`${zaklad}, zprava_id, konverzace_id`))
     if (error && sloupecNeexistuje(error)) ({ data, error } = await dotaz(zaklad))
     if (error) throw new DotazSelhal('úkol', error)
     ukol = (data as unknown as Ukol | null) ?? null
@@ -115,6 +121,39 @@ export default async function StrankaDetailuUkolu({
     komu = 'Každý s příslušným oprávněním'
   } else if (!ukol.branch_id) {
     komu = 'Celá firma'
+  }
+
+  // Odkud úkol vzešel z checklistu — jen když vazba pořád existuje (run se
+  // dá smazat, viz FK on delete set null). Šablona i položka se dohledávají
+  // zvlášť, ať se jedna chybějící (smazaná položka) neztratí druhou.
+  let checklistZdroj: { behNazev: string; polozkaLabel: string | null } | null = null
+  if (ukol.checklist_run_id) {
+    const { data: behData } = await supabase
+      .from('checklist_runs')
+      .select('template_id, business_date')
+      .eq('id', ukol.checklist_run_id)
+      .maybeSingle()
+    if (behData) {
+      const { data: sablonaData } = await supabase
+        .from('checklist_templates')
+        .select('name')
+        .eq('id', behData.template_id as string)
+        .maybeSingle()
+      let polozkaLabel: string | null = null
+      if (ukol.checklist_item_id) {
+        const { data: polozkaData } = await supabase
+          .from('checklist_items')
+          .select('label')
+          .eq('id', ukol.checklist_item_id)
+          .maybeSingle()
+        polozkaLabel = (polozkaData?.label as string | undefined) ?? null
+      }
+      checklistZdroj = {
+        behNazev:
+          ((sablonaData?.name as string | undefined) ?? 'Checklist') + ' · ' + String(behData.business_date),
+        polozkaLabel,
+      }
+    }
   }
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
@@ -148,6 +187,7 @@ export default async function StrankaDetailuUkolu({
           pobocka={ukol.branch_id ? (nazvyPobocek.get(ukol.branch_id) ?? 'jiná pobočka') : 'Celá firma'}
           chyba={chyba ?? null}
           akceDokoncit={dokoncitUkolZDetailu}
+          checklistZdroj={checklistZdroj}
         />
       </div>
     </>
