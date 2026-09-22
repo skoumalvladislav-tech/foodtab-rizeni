@@ -11,12 +11,15 @@ import { oznacitPrecteno } from '../akce'
  * Ukazuje jen to, co aplikace OPRAVDU ví:
  *   * účastníky (nebo větu, koho se týká odvozený kanál),
  *   * sdílené soubory — hlasové zprávy a přílohy (fotky, PDF; ty až po
- *     nasazení migrace 20260921130000, do té doby jen hlasovky),
- *   * související úkoly (úkoly založené z zpráv téhle konverzace),
- *   * události v konverzaci (např. vytvořený úkol).
+ *     nasazení migrace 20260921130000, do té doby jen hlasovky).
  *
- * Checklisty tu nejsou: mezi konverzací a checklistem žádná vazba
- * neexistuje a sekce s vymyšlenými daty by lhala.
+ * Související úkoly a události mají VLASTNÍ, čtvrtý sloupec —
+ * `panel-ukoly-udalosti.tsx` — vzhled 22. 9. podle Šéfíkova obrázku.
+ * Rozdělení je čistě vizuální, žádná data se nepřidala.
+ *
+ * Checklisty tu nejsou (ani ve čtvrtém sloupci): mezi konverzací
+ * a checklistem žádná vazba neexistuje a sekce s vymyšlenými daty
+ * by lhala.
  *
  * Komponenta nesahá do databáze — data jí dodá stránka, takže se dá
  * vykreslit i v dočasném náhledu.
@@ -44,7 +47,8 @@ export type UkolUI = {
 }
 export type UdalostUI = { id: string; text: string; kdy: string; ukolId: string | null }
 
-function iniciely(jmeno: string): string {
+/** Sdílené i s panel-ukoly-udalosti.tsx a vlakno-zprav.tsx — jedna definice „jak se dělá iniciála“. */
+export function iniciely(jmeno: string): string {
   const casti = jmeno.trim().split(/\s+/).filter(Boolean)
   if (casti.length === 0) return '?'
   const a = casti[0].charAt(0)
@@ -52,7 +56,7 @@ function iniciely(jmeno: string): string {
   return `${a}${b}`.toUpperCase()
 }
 
-const STAV_UKOLU: Record<UkolUI['stav'], string> = {
+export const STAV_UKOLU: Record<UkolUI['stav'], string> = {
   open: 'Otevřený',
   done: 'Hotovo',
   cancelled: 'Zrušený',
@@ -66,8 +70,6 @@ export default function PanelKonverzace({
   zalozeno,
   ucastnici,
   soubory,
-  ukoly,
-  udalosti,
   zona,
   smiUkoly,
   zpravaProUkol,
@@ -83,9 +85,6 @@ export default function PanelKonverzace({
   /** null = seznam se nepodařilo načíst. */
   ucastnici: UcastnikUI[] | null
   soubory: SouborUI[]
-  /** null = úkoly se k rozhovorům zatím nedají svázat (migrace nenasazená). */
-  ukoly: UkolUI[] | null
-  udalosti: UdalostUI[]
   zona: string
   smiUkoly: boolean
   /** Poslední textová zpráva, ze které se dá udělat úkol; jinak null. */
@@ -177,67 +176,6 @@ export default function PanelKonverzace({
             </button>
           </form>
         </div>
-      </section>
-
-      <section className="pc-sekce">
-        <h3>Související úkoly</h3>
-        {ukoly === null ? (
-          <p className="pc-prazdno">
-            Úkoly se k rozhovorům přiřadí po nasazení databáze.
-          </p>
-        ) : ukoly.length === 0 ? (
-          <p className="pc-prazdno">Z téhle konverzace zatím žádný úkol nevznikl.</p>
-        ) : (
-          <ul className="pc-seznam">
-            {ukoly.map((u) => (
-              <li key={u.id}>
-                <span className="pc-avatar" aria-hidden="true">
-                  <Ikona klic="fajfkaCtverec" />
-                </span>
-                <Link href={`/${rozsah}/ukoly/ukol/${u.id}`}>
-                  {u.nazev}
-                  <small>
-                    <span
-                      className="pc-chip"
-                      data-stav={u.stav === 'done' ? 'hotovo' : u.poTerminu ? 'pozde' : u.priorita === 'high' ? 'high' : undefined}
-                    >
-                      {u.stav === 'open' && u.poTerminu ? 'Po termínu' : STAV_UKOLU[u.stav]}
-                    </span>
-                    {u.termin ? ` · do ${datumACasVPasmu(u.termin, zona)}` : ''}
-                  </small>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="pc-sekce">
-        <h3>Události</h3>
-        {udalosti.length === 0 ? (
-          <p className="pc-prazdno">Zatím se nic nestalo.</p>
-        ) : (
-          <ul className="pc-seznam">
-            {udalosti.map((u) => (
-              <li key={u.id}>
-                <span className="pc-avatar" aria-hidden="true">
-                  <Ikona klic="fajfkaKruh" />
-                </span>
-                {u.ukolId ? (
-                  <Link href={`/${rozsah}/ukoly/ukol/${u.ukolId}`}>
-                    {u.text}
-                    <small>{datumACasVPasmu(u.kdy, zona)}</small>
-                  </Link>
-                ) : (
-                  <span>
-                    {u.text}
-                    <small>{datumACasVPasmu(u.kdy, zona)}</small>
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
       </section>
     </aside>
   )

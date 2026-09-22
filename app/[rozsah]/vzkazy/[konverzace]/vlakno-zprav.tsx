@@ -8,6 +8,7 @@ import { jeObrazek, velikostText } from '@/lib/komunikace/prilohy'
 import type { PolozkaVlakna, ZpravaVlakna } from '@/lib/komunikace/vlakno'
 import { slovoPodleCisla } from '@/lib/upozorneni-text'
 import { stornovatZpravu } from '../akce'
+import { iniciely, type UkolUI } from './panel-konverzace'
 import { PevnaHlasovka, PevnyObrazek } from './pevny-zdroj'
 
 /**
@@ -59,6 +60,7 @@ export default function VlaknoZprav({
   konverzace,
   polozky,
   jmena,
+  ukolyPodleId = {},
   zona,
   smiUkoly,
 }: {
@@ -67,6 +69,12 @@ export default function VlaknoZprav({
   polozky: PolozkaVlakna<ZpravaUI>[]
   /** employees.id → jméno. */
   jmena: Record<string, string>
+  /**
+   * task.id → stejná data jako v panelu „Úkoly“ (title/termín/stav). Karta
+   * „Úkol vytvořen“ tím umí ukázat termín beze druhého dotazu do databáze;
+   * chybějící/starý úkol (mimo mapu) dostane jen text, žádná chyba.
+   */
+  ukolyPodleId?: Record<string, UkolUI>
   zona: string
   /** Smí přihlášený zakládat úkoly (tasks.manage)? Jen pak se nabízí „Vytvořit úkol“. */
   smiUkoly: boolean
@@ -102,6 +110,34 @@ export default function VlaknoZprav({
         if (p.druh === 'udalost') {
           const z = p.zprava
           const cas = hodinaVPasmu(z.vytvoreno, zona)
+          const ukol = z.objektTyp === 'ukol' && z.objektId ? ukolyPodleId[z.objektId] : undefined
+
+          // Vytvořený úkol dostane vlastní kartu s tlačítkem (vzhled 22. 9.,
+          // podle Šéfíkova obrázku) — jen když ho známe (mapa z panelu Úkoly).
+          // Jinak (starý úkol mimo limit 20, nebo migrace bez tasks.konverzace_id)
+          // zůstává jako dřív: šedá pilulka s textem, aby se nic nevymýšlelo.
+          if (ukol) {
+            return (
+              <div key={z.id} id={`z-${z.id}`} className="pc-udalost-karta">
+                <span className="pc-udalost-karta-ikona" aria-hidden="true">
+                  <Ikona klic="fajfkaKruh" />
+                </span>
+                <div className="pc-udalost-karta-telo">
+                  <p className="pc-udalost-karta-hlava">
+                    Úkol vytvořen <span>· {cas}</span>
+                  </p>
+                  <p className="pc-udalost-karta-nazev">{ukol.nazev}</p>
+                  {ukol.termin ? (
+                    <p className="pc-udalost-karta-termin">do {datumACasVPasmu(ukol.termin, zona)}</p>
+                  ) : null}
+                </div>
+                <Link href={`/${rozsah}/ukoly/ukol/${z.objektId}`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                  Zobrazit úkol
+                </Link>
+              </div>
+            )
+          }
+
           const obsah = (
             <>
               <Ikona klic="fajfkaKruh" />
@@ -141,6 +177,11 @@ export default function VlaknoZprav({
           >
             {p.zacatekSkupiny ? (
               <p className="pc-zprava-meta">
+                {!p.moje ? (
+                  <span className="pc-avatar pc-avatar-male" aria-hidden="true">
+                    {iniciely(autor)}
+                  </span>
+                ) : null}
                 <strong>{p.moje ? 'Vy' : autor}</strong> · {hodinaVPasmu(z.vytvoreno, zona)}
               </p>
             ) : null}
