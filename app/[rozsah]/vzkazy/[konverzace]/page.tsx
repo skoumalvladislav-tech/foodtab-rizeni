@@ -17,6 +17,7 @@ import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from '../seznam-rozhovoru
 import { nactiJmenaVRozhovoru, nactiNazvyOsobnich, nactiPosledniTexty } from '../nazvy'
 import HlasovkaNahravac from './hlasovka-nahravac'
 import PanelKonverzace, { type UcastnikUI, type UkolUI } from './panel-konverzace'
+import PanelUkolyUdalosti from './panel-ukoly-udalosti'
 import PosunNaKonec from './posun-na-konec'
 import PridatPrilohu from './priloha-pridat'
 import SkladaniZpravy from './skladani-zpravy'
@@ -25,7 +26,9 @@ import VlaknoZprav, { type ZpravaUI } from './vlakno-zprav'
 export const dynamic = 'force-dynamic'
 
 /**
- * Jeden rozhovor — tři sloupce: seznam | vlákno | O konverzaci.
+ * Jeden rozhovor — čtyři sloupce: seznam | vlákno | O konverzaci | Úkoly a události.
+ * Poslední dva jsou od 22. 9. oddělené (vzhled podle Šéfíkova obrázku) —
+ * dřív byly jeden dlouhý panel, dnes dvě karty vedle sebe.
  *
  * OBSAH SE TU NESCHOVÁVÁ, ANI MIMO SMĚNU. Pravidlo o doručení chrání
  * před vyrušením, ne před informací — kdo si sám otevře aplikaci, čte.
@@ -364,6 +367,9 @@ export default async function Rozhovor({
       throw new DotazSelhal('úkoly rozhovoru', chybaUkoly)
     }
   }
+  // Stejná data jako výš, jen podle id — ať karta „Úkol vytvořen“ ve vlákně
+  // umí ukázat termín, aniž by se sahalo do databáze podruhé.
+  const ukolyPodleId = new Map((ukolyPanel ?? []).map((u) => [u.id, u]))
 
   let nazevUseku: string | null = null
   if (hlavicka.druh === 'usek' && hlavicka.usek_id) {
@@ -436,15 +442,14 @@ export default async function Rozhovor({
 
   return (
     <>
-      <Nadpis
-        oci="Provoz"
-        popis={
-          hlavicka.adresat === 'majitel'
-            ? 'Tenhle vzkaz čtou jen majitelé. Vedoucí pobočky se k němu nedostane.'
-            : 'Nejstarší nahoře.'
-        }
-      >
-        {nazev}
+      {/*
+        Trvalá hlavička „Provozní centrum“ — 22. 9., vzhled podle Šéfíkova
+        obrázku. Dřív se tu vypisoval NÁZEV KONVERZACE a nadpis modulu
+        zmizel; ten teď zůstává v hlavičce vlákna (pc-vlakno-hlava níž),
+        kde je i tak potřeba pro „Zpět“.
+      */}
+      <Nadpis oci="Provoz" popis="Komunikace, úkoly, checklisty a oznámení na jednom místě.">
+        Provozní centrum
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '1440px' }}>
@@ -467,7 +472,7 @@ export default async function Rozhovor({
           1280 px jde panel pod vlákno, pod 900 px je vidět jen vlákno
           (seznam se otevírá tlačítkem „Zpět na rozhovory“).
         */}
-        <div className="ds-vzkazy-split" data-zobrazit="detail" data-tri="1">
+        <div className="ds-vzkazy-split" data-zobrazit="detail" data-ctyri="1">
           <div className="ds-vzkazy-seznam">
             <SeznamRozhovoru
               rozsah={rozsah}
@@ -492,6 +497,11 @@ export default async function Rozhovor({
                       .filter(Boolean)
                       .join(' · ')}
                   </p>
+                  {hlavicka.adresat === 'majitel' ? (
+                    <p className="pc-poznamka-navrhu" style={{ margin: '2px 0 0' }}>
+                      Tenhle vzkaz čtou jen majitelé. Vedoucí pobočky se k němu nedostane.
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -506,6 +516,7 @@ export default async function Rozhovor({
                 konverzace={konverzace}
                 polozky={polozky}
                 jmena={Object.fromEntries(jmena)}
+                ukolyPodleId={Object.fromEntries(ukolyPodleId)}
                 zona={ZONA}
                 smiUkoly={smiUkoly}
               />
@@ -567,15 +578,22 @@ export default async function Rozhovor({
                         nazev: p.nazev,
                       })),
                 )}
-              ukoly={ukolyPanel}
-              udalosti={zpravyUI
-                .filter((z) => z.typ === 'system')
-                .map((z) => ({ id: z.id, text: z.text, kdy: z.vytvoreno, ukolId: z.objektTyp === 'ukol' ? z.objektId : null }))}
               zona={ZONA}
               smiUkoly={smiUkoly}
               zpravaProUkol={zpravaProUkol}
               jeUzavrena={Boolean(hlavicka.uzavreno_kdy)}
               prilohyDostupne={prilohyDostupne}
+            />
+          </div>
+
+          <div className="ds-vzkazy-panel">
+            <PanelUkolyUdalosti
+              rozsah={rozsah}
+              ukoly={ukolyPanel}
+              udalosti={zpravyUI
+                .filter((z) => z.typ === 'system')
+                .map((z) => ({ id: z.id, text: z.text, kdy: z.vytvoreno, ukolId: z.objektTyp === 'ukol' ? z.objektId : null }))}
+              zona={ZONA}
             />
           </div>
         </div>

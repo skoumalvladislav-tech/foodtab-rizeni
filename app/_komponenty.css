@@ -1723,6 +1723,26 @@ div.ds-smd-smena:hover { box-shadow: none; }
   .ds-vzkazy-split[data-zobrazit="seznam"] .ds-vzkazy-panel { display: none; }
 }
 
+/*
+  Čtyři sloupce (detail konverzace, 22. 9.): seznam | vlákno | O konverzaci |
+  Úkoly a události — dva samostatné `.ds-vzkazy-panel` vedle sebe, ne jeden
+  dlouhý. Pod 1480 px se oba přesunou pod vlákno (každý na svůj řádek —
+  žádné vedlejší řazení, ať se nemusí řešit, který je širší); pod 900 px
+  stejně jako u `[data-tri]`: jen vlákno, panely sbalitelné tlačítkem.
+*/
+.ds-vzkazy-split[data-ctyri] { grid-template-columns: minmax(250px, 310px) minmax(0, 1fr) 280px 260px; }
+@media (max-width: 1479px) {
+  .ds-vzkazy-split[data-ctyri] { grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); }
+  .ds-vzkazy-split[data-ctyri] .ds-vzkazy-panel { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  .ds-vzkazy-split[data-ctyri] { display: block; }
+  .ds-vzkazy-split[data-ctyri] .ds-vzkazy-panel { margin-top: 16px; }
+  /* Skrytí panelu při zobrazeném seznamu řeší už obecné pravidlo výš
+     (`[data-zobrazit="seznam"] .ds-vzkazy-panel`) — platí bez ohledu
+     na data-tri/data-ctyri. */
+}
+
 /* --- Vlákno ------------------------------------------------------------- */
 
 .pc-vlakno-karta { padding: 0; overflow: hidden; }
@@ -1750,8 +1770,11 @@ div.ds-smd-smena:hover { box-shadow: none; }
 
 .pc-zprava { display: flex; flex-direction: column; align-items: flex-start; max-width: min(80%, 560px); }
 .pc-zprava.moje { align-self: flex-end; align-items: flex-end; }
-.pc-zprava-meta { margin: 10px 6px 3px; font-size: 12px; color: var(--muted); }
+.pc-zprava-meta { display: flex; align-items: center; gap: 6px; margin: 10px 6px 3px; font-size: 12px; color: var(--muted); }
 .pc-zprava-meta strong { color: var(--ink); font-weight: 600; }
+/* Avatar u zprávy (22. 9.) — stejná iniciálová kolečka jako u účastníků
+   v panelu „O konverzaci“, jen menší; jen u zprávy druhého (ne u „Vy“). */
+.pc-avatar-male { width: 20px; height: 20px; font-size: 10px; }
 .pc-bublina {
   position: relative; padding: 9px 13px; border-radius: 16px;
   background: var(--paper); border: 1px solid var(--line);
@@ -1788,6 +1811,35 @@ div.ds-smd-smena:hover { box-shadow: none; }
 }
 .pc-udalost .ft-i { width: 16px; height: 16px; flex: none; color: var(--dobre); }
 a.pc-udalost:hover { color: var(--ink); }
+
+/*
+  Karta „Úkol vytvořen“ (22. 9., vzhled podle Šéfíkova obrázku) — jen
+  když je úkol známý (viz vlakno-zprav.tsx); jinak zůstává obyčejná
+  pilulka `.pc-udalost` výš, aby se nic nedomýšlelo.
+*/
+.pc-udalost-karta {
+  align-self: center; display: flex; align-items: center; gap: 12px;
+  width: 100%; max-width: 440px; margin: 8px 0; padding: 10px 14px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card);
+}
+.pc-udalost-karta-ikona {
+  display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px;
+  border-radius: 50%; background: var(--dobre-bg);
+}
+.pc-udalost-karta-ikona .ft-i { width: 16px; height: 16px; color: var(--dobre); }
+.pc-udalost-karta-telo { flex: 1; min-width: 0; }
+.pc-udalost-karta-hlava {
+  margin: 0; font-size: 11.5px; font-weight: 700; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--dobre);
+}
+.pc-udalost-karta-hlava span { font-weight: 400; letter-spacing: normal; text-transform: none; color: var(--muted); }
+.pc-udalost-karta-nazev { margin: 2px 0 0; font-size: 14px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.pc-udalost-karta-termin { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.pc-udalost-karta .ft-tl { flex: none; }
+@media (max-width: 480px) {
+  .pc-udalost-karta { flex-wrap: wrap; }
+  .pc-udalost-karta .ft-tl { width: 100%; justify-content: center; }
+}
 
 /* --- Psaní zprávy -------------------------------------------------------- */
 
