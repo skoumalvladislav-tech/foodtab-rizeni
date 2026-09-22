@@ -5,10 +5,10 @@ import { randomUUID } from 'node:crypto'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
-import { getContext, getUser } from '@/lib/authz'
-import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { KBELIK, MAX_DELKA_S, cestaVUlozisti, priponaZMime } from '@/lib/hlasove-zpravy'
+import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { zakladZRozsahu, type Zaklad } from './zaklad'
 
 /**
  * Akce obrazovky Rozhovory.
@@ -27,26 +27,9 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * čísla.
  */
 
-type Zaklad = {
-  tenantId: string
-  rozsah: string
-  branchId: string | null
-}
-
 /** Společný začátek každé akce. Vrací null, když cokoli nesedí. */
 async function zaklad(formData: FormData): Promise<Zaklad | null> {
-  const rozsah = String(formData.get('rozsah') ?? '')
-
-  const user = await getUser()
-  if (!user) return null
-  const tenantId = await getCurrentTenantId()
-  if (!tenantId) return null
-  const ctx = await getContext(tenantId)
-  if (!ctx) return null
-  const scope = bezpecnyRozsah(ctx, rozsah)
-  if (!scope) return null
-
-  return { tenantId, rozsah, branchId: scope.branchId }
+  return zakladZRozsahu(String(formData.get('rozsah') ?? ''))
 }
 
 /**
@@ -110,6 +93,85 @@ export async function otevritKanalUseku(formData: FormData): Promise<void> {
 
 const PRIORITY: readonly string[] = ['normal', 'important', 'urgent']
 
+const CHYBA_POTVRZENI_NALEHAVE =
+  'Naléhavou zprávu je třeba potvrdit — upozorní příjemce i mimo směnu.'
+
+/** Nejdelší zpráva, kterou aplikace pošle. Databáze limit nemá; tohle je pojistka proti vložení celého dokumentu. */
+const MAX_DELKA_ZPRAVY = 4000
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export type VysledekOdeslani =
+  | { ok: true; id: string }
+  /** `trvale` = zopakovat nemá smysl (nemáte přístup, chybí potvrzení…); jinak se dá zkusit znovu. */
+  | { ok: false; chyba: string; trvale: boolean }
+
+/**
+ * Odeslání zprávy z klientské komponenty — s klientským id.
+ *
+ * Aplikace si při psaní zprávy vygeneruje id. Když se spojení přeruší
+ * a odeslání se zopakuje, databáze díky němu pozná, že je to tatáž zpráva,
+ * a druhou nezaloží (`poslat_zpravu`, parametr `p_klient_id`).
+ *
+ * KÓD SE NASAZUJE DŘÍV NEŽ MIGRACE. Dokud databáze sedmiparametrovou
+ * podobu nemá, volání s `p_klient_id` skončí „funkce neexistuje“ — pak se
+ * zpráva pošle po staru (bez ochrany proti zdvojení) místo aby zmizela.
+ *
+ * Nic nepřesměrovává: volající (klient) ukáže výsledek sám.
+ */
+export async function odeslatZpravuKlient(vstup: {
+  rozsah: string
+  konverzace: string
+  text: string
+  priorita: string
+  klientId: string
+  potvrzeno: boolean
+}): Promise<VysledekOdeslani> {
+  const z = await zakladZRozsahu(String(vstup.rozsah ?? ''))
+  if (!z) return { ok: false, chyba: 'Nejste přihlášen(a) nebo nemáte přístup.', trvale: true }
+
+  const konverzace = String(vstup.konverzace ?? '')
+  const text = String(vstup.text ?? '').trim()
+  const priorita = PRIORITY.includes(vstup.priorita) ? vstup.priorita : 'normal'
+
+  if (!UUID.test(konverzace)) return { ok: false, chyba: 'Neplatný rozhovor.', trvale: true }
+  if (text === '') return { ok: false, chyba: 'Zpráva je prázdná.', trvale: true }
+  if (text.length > MAX_DELKA_ZPRAVY) {
+    return { ok: false, chyba: `Zpráva je moc dlouhá (nejvíc ${MAX_DELKA_ZPRAVY} znaků).`, trvale: true }
+  }
+  if (priorita === 'urgent' && vstup.potvrzeno !== true) {
+    return { ok: false, chyba: CHYBA_POTVRZENI_NALEHAVE, trvale: true }
+  }
+
+  const klientId = UUID.test(String(vstup.klientId ?? '')) ? vstup.klientId : null
+
+  const supabase = await getServerSupabase()
+  let { data, error } = await supabase.rpc('poslat_zpravu', {
+    p_konverzace: konverzace,
+    p_text: text,
+    p_priorita: priorita,
+    ...(klientId ? { p_klient_id: klientId } : {}),
+  })
+
+  if (error && klientId && funkceNeexistuje(error)) {
+    ;({ data, error } = await supabase.rpc('poslat_zpravu', {
+      p_konverzace: konverzace,
+      p_text: text,
+      p_priorita: priorita,
+    }))
+  }
+
+  if (error) {
+    // Chyby, které vrací sama funkce (přístup, uzavřený rozhovor, priorita),
+    // mají SQLSTATE; výpadek spojení nebo pád služby ne — ten se opakuje.
+    const trvale = /^(42501|23514|P0002|PT\d{3})$/.test(error.code ?? '')
+    return { ok: false, chyba: error.message, trvale }
+  }
+
+  revalidatePath(`/${z.rozsah}/vzkazy/${konverzace}`)
+  return { ok: true, id: String(data) }
+}
+
 /**
  * Odeslat zprávu do rozhovoru.
  *
@@ -133,6 +195,13 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
   if (konverzace === '' || text === '') return
 
   const zpet = `/${z.rozsah}/vzkazy/${konverzace}`
+
+  // Naléhavá zpráva upozorní i mimo směnu, proto se odesílá jen s výslovným
+  // potvrzením — a hlídá se TADY, ne jen v prohlížeči, ať ho nejde obejít
+  // upraveným formulářem.
+  if (priorita === 'urgent' && formData.get('potvrzeno') !== 'on') {
+    redirect(`${zpet}?chyba=${encodeURIComponent(CHYBA_POTVRZENI_NALEHAVE)}`)
+  }
 
   const supabase = await getServerSupabase()
   const { error } = await supabase.rpc('poslat_zpravu', {
@@ -281,6 +350,50 @@ export async function stornovatZpravu(formData: FormData): Promise<void> {
 
   revalidatePath(zpet)
   redirect(zpet)
+}
+
+/**
+ * Založit osobní rozhovor s vybranými lidmi (výběr příjemců).
+ *
+ * Účastníky posílá formulář jako opakované pole `ucastnik`; jsou to NÁVRH z
+ * prohlížeče (pravidlo 4). Že patří do firmy, ověřuje `zalozit_rozhovor`.
+ */
+export async function zalozitOsobniRozhovor(formData: FormData): Promise<void> {
+  const z = await zaklad(formData)
+  if (!z) return
+
+  const zpet = `/${z.rozsah}/vzkazy/nova`
+  const ucastnici = [
+    ...new Set(formData.getAll('ucastnik').map((v) => String(v)).filter((v) => UUID.test(v))),
+  ].slice(0, 50)
+
+  if (ucastnici.length === 0) {
+    redirect(`${zpet}?chyba=${encodeURIComponent('Vyberte aspoň jednoho člověka.')}`)
+  }
+
+  const supabase = await getServerSupabase()
+
+  // Bez názvu se NEukládají jména příjemců: název je jeden pro všechny
+  // účastníky a každý má vidět toho druhého, ne sám sebe. Skládá se při
+  // zobrazení (`jmena_osobnich_rozhovoru`).
+  const nazev = String(formData.get('nazev') ?? '').trim().slice(0, 120)
+
+  const { data, error } = await supabase.rpc('zalozit_rozhovor', {
+    p_tenant: z.tenantId,
+    p_druh: 'osobni',
+    p_branch: null,
+    p_nazev: nazev === '' ? null : nazev,
+    p_adresat: null,
+    p_ucastnici: ucastnici,
+  })
+
+  // Hlášku psala databáze a je pro člověka — nepřepisuje se.
+  if (error) {
+    redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${z.rozsah}/vzkazy`)
+  redirect(`/${z.rozsah}/vzkazy/${String(data)}`)
 }
 
 /**

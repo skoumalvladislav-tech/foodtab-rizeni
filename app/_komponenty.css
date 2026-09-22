@@ -1672,3 +1672,306 @@ div.ds-smd-smena:hover { box-shadow: none; }
   padding-left: 7px; border-left: 1px solid var(--line-2); font-weight: 600;
 }
 .ds-smd-zobrazit-poznamka { grid-column: 1 / -1; }
+
+/* =====================================================================
+   PROVOZNÍ CENTRUM — komunikace, úkoly, nástěnka (21. 9. 2026)
+   =====================================================================
+   Tři sloupce na desktopu (seznam | vlákno | O konverzaci), jeden na
+   telefonu. Stejná pravidla jako zbytek: patkové nadpisy, karty
+   `.ds-plocha`, ikony jen ze sdílené sady, žádná barva napevno.
+   Barva nikdy sama — priorita má vždy i slovo a tvar (hrana + štítek).
+   Předpona `.pc-` je jen pro tuhle část, ať se nemíchá s ds-*.
+   ===================================================================== */
+
+/* --- Záložky: Přehled · Komunikace · Úkoly · Checklisty · Nástěnka ------ */
+
+.pc-zalozky {
+  display: flex; gap: 2px; margin: 0 0 16px; overflow-x: auto;
+  border-bottom: 1px solid var(--line); scrollbar-width: none;
+}
+.pc-zalozky::-webkit-scrollbar { display: none; }
+.pc-zalozky a {
+  display: inline-flex; align-items: center; gap: 8px; flex: none;
+  min-height: 44px; padding: 0 14px; margin-bottom: -1px;
+  font-size: 15px; color: var(--muted); text-decoration: none; white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+.pc-zalozky a:hover { color: var(--ink); }
+.pc-zalozky a[aria-current="page"] {
+  color: var(--ink); font-weight: 600; border-bottom-color: var(--mosaz);
+}
+.pc-zalozky .ft-i { width: 18px; height: 18px; flex: none; }
+.pc-pocet {
+  position: relative; display: inline-grid; place-items: center; min-width: 20px; height: 20px;
+  padding: 0 6px; border-radius: 10px; font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--mosaz-sv); color: var(--mosaz-ink);
+}
+
+/* --- Rozvržení: seznam | vlákno | panel -------------------------------- */
+
+.ds-vzkazy-split[data-tri] { grid-template-columns: minmax(250px, 310px) minmax(0, 1fr) 300px; }
+.ds-vzkazy-panel { min-width: 0; display: grid; gap: 14px; align-content: start; }
+@media (max-width: 1279px) {
+  .ds-vzkazy-split[data-tri] { grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); }
+  .ds-vzkazy-split[data-tri] .ds-vzkazy-panel { grid-column: 1 / -1; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+}
+@media (max-width: 900px) {
+  .ds-vzkazy-split[data-tri] { display: block; }
+  .ds-vzkazy-split[data-tri] .ds-vzkazy-panel { margin-top: 16px; }
+  /* Na telefonu je panel „O konverzaci“ pod vláknem, sbalitelný. */
+  .ds-vzkazy-split[data-zobrazit="seznam"] .ds-vzkazy-panel { display: none; }
+}
+
+/* --- Vlákno ------------------------------------------------------------- */
+
+.pc-vlakno-karta { padding: 0; overflow: hidden; }
+.pc-vlakno-hlava {
+  display: flex; align-items: center; gap: 12px; padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.pc-vlakno-hlava h2 { margin: 0; font-size: 19px; line-height: 1.2; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-vlakno-hlava p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+.pc-vlakno-hlava .pc-zpet { display: none; }
+@media (max-width: 900px) { .pc-vlakno-hlava .pc-zpet { display: inline-flex; } }
+
+.pc-vlakno { display: flex; flex-direction: column; gap: 3px; padding: 14px 18px 18px; }
+.pc-vlakno-prazdne { padding: 36px 18px; text-align: center; color: var(--muted); font-size: 14px; }
+
+.pc-den, .pc-nove {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  margin: 14px 0 8px; font-size: 12px; color: var(--muted);
+}
+.pc-den::before, .pc-den::after, .pc-nove::before, .pc-nove::after {
+  content: ""; flex: 1; height: 1px; background: var(--line);
+}
+.pc-nove { color: var(--mosaz); font-weight: 600; }
+.pc-nove::before, .pc-nove::after { background: color-mix(in srgb, var(--mosaz-sv) 60%, var(--line)); }
+
+.pc-zprava { display: flex; flex-direction: column; align-items: flex-start; max-width: min(80%, 560px); }
+.pc-zprava.moje { align-self: flex-end; align-items: flex-end; }
+.pc-zprava-meta { margin: 10px 6px 3px; font-size: 12px; color: var(--muted); }
+.pc-zprava-meta strong { color: var(--ink); font-weight: 600; }
+.pc-bublina {
+  position: relative; padding: 9px 13px; border-radius: 16px;
+  background: var(--paper); border: 1px solid var(--line);
+  font-size: 15px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.pc-zprava.moje .pc-bublina {
+  background: color-mix(in srgb, var(--mosaz-sv) 20%, var(--card));
+  border-color: color-mix(in srgb, var(--mosaz-sv) 45%, var(--line));
+}
+.pc-zprava[data-priorita="urgent"] .pc-bublina { border-left: 4px solid var(--pozor); }
+.pc-zprava[data-priorita="important"] .pc-bublina { border-left: 4px solid var(--info); }
+.pc-zprava[data-stornovana="1"] .pc-bublina { opacity: .55; text-decoration: line-through; }
+.pc-stitek {
+  display: inline-block; margin: 0 6px 0 0; padding: 1px 7px; border-radius: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; vertical-align: 1px;
+}
+.pc-stitek[data-druh="urgent"] { background: var(--pozor-bg); color: var(--pozor); }
+.pc-stitek[data-druh="important"] { background: var(--info-bg); color: var(--info); }
+.pc-hlasovka { display: grid; gap: 4px; min-width: 240px; }
+.pc-hlasovka audio { width: 100%; max-width: 280px; height: 34px; }
+.pc-hlasovka small { font-size: 12px; color: var(--muted); }
+.pc-akce-zpravy { display: flex; gap: 12px; flex-wrap: wrap; margin: 3px 6px 0; font-size: 12px; }
+.pc-akce-zpravy a, .pc-akce-zpravy button {
+  padding: 0; border: 0; background: none; font: inherit; color: var(--muted);
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+.pc-akce-zpravy a:hover, .pc-akce-zpravy button:hover { color: var(--ink); }
+
+.pc-udalost {
+  align-self: center; display: inline-flex; align-items: center; gap: 8px;
+  margin: 8px 0; padding: 5px 12px; border-radius: 999px;
+  background: var(--sunken); color: var(--muted); font-size: 12.5px;
+  text-decoration: none; max-width: 100%;
+}
+.pc-udalost .ft-i { width: 16px; height: 16px; flex: none; color: var(--dobre); }
+a.pc-udalost:hover { color: var(--ink); }
+
+/* --- Psaní zprávy -------------------------------------------------------- */
+
+.pc-skladani { display: grid; gap: 10px; padding: 12px 18px 16px; border-top: 1px solid var(--line); background: var(--card); }
+.pc-skladani textarea {
+  width: 100%; min-height: 48px; padding: 10px 12px; resize: vertical;
+  /* 16 px schválně: iOS jinak při zaostření pole zoomuje stránku. */
+  font-size: 16px; line-height: 1.4; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line-2); border-radius: 12px;
+}
+.pc-skladani-radek { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pc-skladani select {
+  min-height: 40px; padding: 0 8px; font-size: 14px; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line-2); border-radius: 8px;
+}
+.pc-potvrzeni-nalehave {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px;
+  border-radius: 10px; background: var(--pozor-bg); color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--pozor) 45%, var(--line));
+  font-size: 13.5px; line-height: 1.45;
+}
+.pc-potvrzeni-nalehave input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+.pc-neodeslano { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pc-neodeslano li {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px;
+  background: var(--pozor-bg); font-size: 13.5px;
+}
+.pc-neodeslano span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- Panel „O konverzaci“ ---------------------------------------------- */
+
+.pc-panel h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.pc-sekce + .pc-sekce { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.pc-udaje { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13.5px; }
+.pc-udaje dt { color: var(--muted); }
+.pc-udaje dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pc-seznam { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.pc-seznam li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pc-seznam li > span:last-child, .pc-seznam li > a { min-width: 0; overflow-wrap: anywhere; }
+.pc-seznam small { display: block; color: var(--muted); font-size: 12px; }
+.pc-prazdno { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+.pc-rychle { display: grid; gap: 8px; }
+.pc-rychle a, .pc-rychle button { justify-content: flex-start; width: 100%; }
+.pc-avatar {
+  display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px;
+  border-radius: 50%; background: var(--sunken); color: var(--ink);
+  font-size: 12px; font-weight: 600;
+}
+.pc-avatar[data-druh="skupina"] { background: color-mix(in srgb, var(--mosaz-sv) 22%, var(--card)); }
+.pc-chip {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  background: var(--sunken); color: var(--muted);
+}
+.pc-chip[data-stav="hotovo"] { background: var(--dobre-bg); color: var(--dobre); }
+.pc-chip[data-stav="pozde"] { background: var(--bad-bg); color: var(--bad); }
+.pc-chip[data-stav="high"] { background: var(--pozor-bg); color: var(--pozor); }
+
+/* --- Výběr příjemců -------------------------------------------------------- */
+
+.pc-vyber { display: grid; gap: 14px; }
+.pc-vyber-hledani {
+  width: 100%; min-height: 44px; padding: 0 14px; font-size: 16px; color: var(--ink);
+  background: var(--sunken); border: 1px solid var(--line-2); border-radius: 12px;
+}
+.pc-vyber-vybrani { display: flex; gap: 6px; flex-wrap: wrap; min-height: 32px; }
+.pc-vyber-vybrani button {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--mosaz-sv) 50%, var(--line));
+  border-radius: 999px; background: color-mix(in srgb, var(--mosaz-sv) 16%, var(--card));
+  color: var(--ink); font-size: 13.5px; cursor: pointer;
+}
+.pc-vyber-vybrani .ft-i { width: 16px; height: 16px; }
+.pc-vyber-skupina h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+.pc-vyber-radek {
+  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 10px;
+  border-radius: 12px; cursor: pointer;
+}
+.pc-vyber-radek:hover { background: var(--sunken); }
+.pc-vyber-radek input { width: 20px; height: 20px; flex: none; }
+.pc-vyber-radek[data-vybran="1"] { background: color-mix(in srgb, var(--mosaz-sv) 14%, var(--card)); }
+.pc-vyber-radek small { display: block; color: var(--muted); font-size: 12.5px; }
+
+/* --- Formulář úkolu ze zprávy ------------------------------------------------ */
+
+.pc-formular { display: grid; gap: 16px; max-width: 640px; }
+.pc-formular label, .pc-formular legend { display: block; margin: 0 0 4px; font-size: 13px; color: var(--muted); padding: 0; }
+.pc-formular fieldset { border: 0; margin: 0; padding: 0; }
+.pc-formular input[type="text"], .pc-formular input[type="date"], .pc-formular input[type="time"],
+.pc-formular textarea, .pc-formular select {
+  width: 100%; min-height: 44px; padding: 8px 12px; font-size: 16px; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line-2); border-radius: 10px;
+}
+.pc-formular textarea { min-height: 84px; resize: vertical; }
+.pc-formular [data-kontrola="1"] { border-color: var(--pozor); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pozor) 22%, transparent); }
+.pc-formular .pc-dvojice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pc-formular .pc-volba { display: flex; gap: 10px; align-items: center; min-height: 40px; font-size: 15px; color: var(--ink); margin: 0; }
+.pc-formular .pc-volba input { width: 18px; height: 18px; flex: none; }
+.pc-poznamka-navrhu {
+  padding: 12px 14px; border-radius: 12px; background: var(--info-bg); color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--info) 35%, var(--line)); font-size: 13.5px; line-height: 1.5;
+}
+.pc-poznamka-navrhu ul { margin: 6px 0 0; padding-left: 18px; }
+.pc-upozorneni-soukromi {
+  padding: 10px 14px; border-radius: 12px; background: var(--pozor-bg); font-size: 13px; line-height: 1.45;
+}
+
+/* --- Detail úkolu -------------------------------------------------------------- */
+
+.pc-detail { display: grid; gap: 14px; max-width: 760px; }
+.pc-detail-hlava { display: flex; gap: 12px; align-items: flex-start; }
+.pc-detail-hlava h2 { margin: 0; font-size: 22px; line-height: 1.25; }
+.pc-detail-pole { display: grid; grid-template-columns: 130px 1fr; gap: 8px 14px; margin: 0; font-size: 14.5px; }
+.pc-detail-pole dt { color: var(--muted); }
+.pc-detail-pole dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .pc-detail-pole { grid-template-columns: 1fr; } .pc-detail-pole dt { margin-top: 6px; } }
+
+/* --- Odznak nepřečtených ve spodní liště telefonu -------------------------------- */
+
+.ft-mob-bottom a { position: relative; }
+.pc-odznak-lista {
+  position: absolute; top: 2px; left: calc(50% + 6px); min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 9px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+  background: var(--bad); color: #fff;
+}
+
+/* Karta „ZMĚNA SMĚNY“ v upozorněních. */
+.pc-karta-zmeny {
+  padding: 12px 14px; border-radius: 12px; background: var(--sunken);
+  border: 1px solid var(--line);
+}
+
+/* --- Doladění po prvním vykreslení -------------------------------------- */
+
+/* Položka seznamu se smí zúžit pod šířku textu — jinak jednořádkový náhled
+   („nowrap“) roztáhne kartu přes sousední sloupec. */
+.ds-vzkazy-seznam li { min-width: 0; }
+
+/* Akce u zprávy (Vytvořit úkol, Stáhnout) se na počítači ukazují při najetí
+   a při zaměření klávesnicí; na dotykovém zařízení jsou vidět pořád, protože
+   tam najetí není. */
+@media (hover: hover) {
+  .pc-akce-zpravy { opacity: 0; transition: opacity .12s; }
+  .pc-zprava:hover .pc-akce-zpravy,
+  .pc-zprava:focus-within .pc-akce-zpravy { opacity: 1; }
+}
+
+/* Tailwind (preflight) smazal odrážky a podtržení odkazů; v poznámkách a detailu se vracejí. */
+.pc-poznamka-navrhu ul { list-style: disc; }
+.pc-poznamka-navrhu a, .pc-detail p a, .pc-prazdno a {
+  text-decoration: underline; text-underline-offset: 3px;
+}
+
+/* --- Přílohy ke zprávám ---------------------------------------------------- */
+
+.pc-priloha { display: grid; gap: 8px; }
+.pc-priloha-radek { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pc-priloha-radek small { font-size: 12px; color: var(--muted); }
+.pc-priloha-vyber {
+  display: grid; gap: 10px; padding: 12px 14px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.pc-priloha-vyber ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pc-priloha-vyber li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; }
+.pc-priloha-vyber li .ft-i { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.pc-priloha-nazev { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-priloha-vyber li small { font-size: 12px; color: var(--muted); flex: none; }
+.pc-priloha-popisek { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.pc-priloha-popisek input {
+  width: 100%; padding: 8px 10px; font: inherit; color: var(--ink);
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+
+/* Přílohy ve vlákně: fotky jako náhledy, PDF jako řádek s názvem. */
+.pc-prilohy { display: grid; gap: 6px; margin-top: 8px; }
+.pc-prilohy-fotky { display: flex; gap: 6px; flex-wrap: wrap; }
+.pc-prilohy-fotky a { display: block; line-height: 0; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--line); }
+.pc-prilohy-fotky img { display: block; max-width: 220px; max-height: 180px; width: auto; height: auto; object-fit: cover; }
+.pc-priloha-soubor {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%;
+  padding: 6px 10px; border-radius: var(--radius-md); background: var(--sunken);
+  color: var(--ink); font-size: 13px; text-decoration: none;
+}
+.pc-priloha-soubor:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pc-priloha-soubor .ft-i { width: 16px; height: 16px; flex: none; color: var(--muted); }
+.pc-priloha-soubor span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-priloha-soubor small { color: var(--muted); font-size: 12px; flex: none; }

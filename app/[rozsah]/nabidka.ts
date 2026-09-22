@@ -126,7 +126,7 @@ export const NABIDKA: Polozka[] = [
   // (a ty stejně vidí jen advances.manage). Zadání
   // docs/velka-prace-2026-09-08.md, A4 bod 3: Vzkazy do lišty místo
   // Záloh.
-  { segment: 'vzkazy', nazev: 'Vzkazy', kratky: 'Vzkazy', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zprava' },
+  { segment: 'vzkazy', nazev: 'Provozní centrum', kratky: 'Komunikace', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zprava' },
   // Zálohy jsou peníze, ne nastavení — proto v hlavní nabídce hned za
   // Docházkou, ze které se počítají. Obrazovku otevírá i payroll.read,
   // ale položka visí na advances.manage: kdo dělá mzdy, přijde si pro

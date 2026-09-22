@@ -18,6 +18,7 @@ import type { TeloUpozorneni } from "@/lib/upozorneni-text";
 import Sdeleni from "@/app/sdeleni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import CekaNaOpravneni from "./ceka-na-opravneni";
+import ZivaAktualizace from "@/components/shell/ZivaAktualizace";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import AppShell, { type ModulProp, type PolozkaProp, type UpozorneniProp } from "@/components/shell/AppShell";
 import type { RozsahProp } from "./prepinac-rozsahu";
@@ -207,11 +208,20 @@ export default async function RozsahLayout({
     { data: nastenkaPrectena },
     { data: posledniUpozornenaData },
   ] = await Promise.all([
+    /*
+      Vzkazy a oznámení se do odznaku počítají ze SVÝCH zdrojů níž
+      (nepřečtené zprávy, nepřečtená nástěnka). Jejich upozornění
+      v `notifications` by je započítala podruhé — jedna nová zpráva
+      by ukázala „2“. Tichá upozornění (priorita low) se nepočítají
+      vůbec: jsou to záznam, ne výzva.
+    */
     supabaseForCount
       .from("notifications")
       .select("id", { count: "exact", head: true })
       .eq("tenant_id", tenantId)
-      .is("read_at", null),
+      .is("read_at", null)
+      .not("druh", "in", "(vzkaz.novy,oznameni.nova)")
+      .neq("priorita", "low"),
     supabaseForCount
       .rpc("moje_rozhovory", { p_tenant: tenantId })
       .then((r) => ({ data: r.error ? null : r.data })),
@@ -295,6 +305,7 @@ export default async function RozsahLayout({
       nazevFirmy={ctx.tenant.name}
       iniciraly={iniciraly(user.email)}
       neprectenych={neprectenych ?? 0}
+      odznaky={{ vzkazy: neprecteneVzkazy + neprecteneNastenka }}
       posledniUpozorneni={posledniUpozorneni}
       moduly={moduly}
       polozky={polozky}
@@ -322,6 +333,8 @@ export default async function RozsahLayout({
         Okno jen tehdy, když někdo čeká. Když pozvánka oprávnění nesla,
         stačí zvoneček — viz komentář v ceka-na-opravneni.tsx.
       */}
+      {/* Živá aktualizace: nová zpráva, oznámení nebo úkol osvěží obrazovku sama. */}
+      <ZivaAktualizace userId={user.id} />
       <CekaNaOpravneni
         rozsah={rozsah}
         lide={(cekajiciNaOpravneni ?? []) as { user_id: string; jmeno: string }[]}

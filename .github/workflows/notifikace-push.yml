@@ -1,0 +1,84 @@
+name: Push oznámení
+
+# Naplánovaná úloha: uvolnění čekajících oznámení a odeslání push.
+#
+# ---------------------------------------------------------------------
+# CO TO DĚLÁ
+#
+# Volá /api/uloha/notifikace-push (app/api/uloha/notifikace-push/route.ts):
+#   1. lidem, kteří mezitím přišli do práce, uvolní čekající oznámení
+#      (jedno samo, víc jako „Čekají na vás N zpráv“),
+#   2. odešle, co je ve frontě.
+# Vše ostatní (kdo je v práci, co se sloučí) řeší DATABÁZE, tenhle soubor
+# žádnou logiku nemá.
+#
+# ---------------------------------------------------------------------
+# JAK ČASTO
+#
+# Každých ~15 minut. GitHub plánovač není přesný a při vytížení běh
+# odsune; pro pípnutí „přišel jsem do práce a čeká 3 zprávy“ to stačí.
+# Zprávy jsou v aplikaci vidět hned — tohle řídí jen upozornění do telefonu.
+#
+# ---------------------------------------------------------------------
+# BEZ KLÍČŮ VAPID
+#
+# Úloha dopadne úspěšně a řekne „nakonfigurovano: false“ — push je
+# PŘIPRAVENÝ, ne zapnutý. Klíče a zařízení vydává Šéfík.
+# Před nasazením migrace 20260921100000 odpoví „ceka_na_migraci“ (HTTP 200),
+# ať plánovač nehlásí chybu za to, že se čeká na `db push`.
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: notifikace-push
+  cancel-in-progress: false
+
+jobs:
+  odeslat:
+    name: Uvolnit a odeslat push
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci"
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu"
+            exit 1
+          fi
+
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 120 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/notifikace-push")
+
+          echo "HTTP ${KOD}"
+          cat telo.json || true
+          echo
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            503)
+              echo "::error::503 — na Vercelu chybí SUPABASE_SERVICE_ROLE_KEY."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          echo "Výsledek: $(cat telo.json)" >> "$GITHUB_STEP_SUMMARY"

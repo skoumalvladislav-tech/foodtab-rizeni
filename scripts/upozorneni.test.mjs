@@ -34,6 +34,12 @@ import {
   vyzadujePotvrzeni,
   zmenaSmeny,
   odkazNaSmenu,
+  kartaZmenySmeny,
+  pocetUpozorneni,
+  pocitaSeDoOdznaku,
+  prioritaUpozorneni,
+  slovoPodleCisla,
+  souhrnCekajicich,
 } from '../lib/upozorneni-text.ts'
 
 let chyb = 0
@@ -428,6 +434,44 @@ ma('obrazovka používá zmenaSmeny z lib', /zmenaSmeny\(/.test(OBRAZOVKA_KOD), 
 ma('obrazovka používá odkazNaSmenu z lib', /odkazNaSmenu\(/.test(OBRAZOVKA_KOD), true)
 ma('shift_id se čte tolerantně (sloupec chybí do nasazení migrace)',
   /shift_id/.test(OBRAZOVKA_KOD) && /sloupecNeexistuje/.test(OBRAZOVKA_KOD), true)
+
+console.log('\n== Skloňování a počty (Provozní centrum) ==')
+
+ma('1 zpráva', slovoPodleCisla(1, 'zpráva', 'zprávy', 'zpráv'), 'zpráva')
+ma('2–4 zprávy', [2, 3, 4].map((n) => slovoPodleCisla(n, 'zpráva', 'zprávy', 'zpráv')).join('|'), 'zprávy|zprávy|zprávy')
+ma('5 a víc, i 0, zpráv', [5, 11, 0, 100].map((n) => slovoPodleCisla(n, 'zpráva', 'zprávy', 'zpráv')).join('|'), 'zpráv|zpráv|zpráv|zpráv')
+ma('souhrn po příchodu: 3 zprávy', souhrnCekajicich(3), 'Čekají na vás 3 zprávy')
+ma('souhrn: 1 zpráva', souhrnCekajicich(1), 'Čeká na vás 1 zpráva')
+ma('souhrn: 7 zpráv', souhrnCekajicich(7), 'Čekají na vás 7 zpráv')
+ma('souhrn nikdy neřekne 0 ani zápornou hodnotu', souhrnCekajicich(0), 'Čeká na vás 1 zpráva')
+ma('počet upozornění bez údaje = 1', pocetUpozorneni({}), 1)
+ma('počet upozornění z těla', pocetUpozorneni({ pocet: 3 }), 3)
+ma('nesmyslný počet se bere jako 1', [pocetUpozorneni({ pocet: 0 }), pocetUpozorneni({ pocet: -2 }), pocetUpozorneni({ pocet: NaN })].join('|'), '1|1|1')
+ma('nadpis vzkazu s počtem 1 je jednotné číslo', nadpisUpozorneni('vzkaz.novy', {}, obdobi), 'Nová zpráva v rozhovoru')
+ma('nadpis vzkazu s počtem 3', nadpisUpozorneni('vzkaz.novy', { pocet: 3 }, obdobi), '3 nové zprávy v rozhovorech')
+ma('nadpis vzkazu s počtem 5', nadpisUpozorneni('vzkaz.novy', { pocet: 5 }, obdobi), '5 nových zpráv v rozhovorech')
+ma('nadpis oznámení s počtem 2', nadpisUpozorneni('oznameni.nova', { pocet: 2 }, obdobi), '2 nová oznámení na nástěnce')
+ma('nadpis oznámení bez počtu', nadpisUpozorneni('oznameni.nova', {}, obdobi), 'Nové oznámení na nástěnce')
+
+console.log('\n== Priorita ==')
+
+ma('low, normal, important, urgent projdou beze změny', ['low', 'normal', 'important', 'urgent'].map(prioritaUpozorneni).join('|'), 'low|normal|important|urgent')
+ma('neznámá hodnota = normal (upozornění nezmizí kvůli překlepu)', [prioritaUpozorneni('kritická'), prioritaUpozorneni(null), prioritaUpozorneni(undefined)].join('|'), 'normal|normal|normal')
+ma('low se nepočítá do odznaku', pocitaSeDoOdznaku('low'), false)
+ma('ostatní i neznámá se počítají', ['normal', 'important', 'urgent', 'nic'].every(pocitaSeDoOdznaku), true)
+
+console.log('\n== Karta „ZMĚNA SMĚNY“ ==')
+
+const karta = kartaZmenySmeny({ den: '2026-09-22', od: '16:00', do: '22:00', puvodni_den: '2026-09-22', puvodni_od: '18:00', puvodni_do: '22:00', zmenil: 'Jana Vedoucí' })
+ma('nadpis', karta?.nadpis, 'ZMĚNA SMĚNY')
+ma('den s velkým písmenem (jako ve vzoru „Úterý 22. 9.“)', karta?.den, 'Úterý 22. 9.')
+ma('původně', karta?.puvodne, '18:00–22:00')
+ma('nově', karta?.nove, '16:00–22:00')
+ma('změnil', karta?.zmenil, 'Jana Vedoucí')
+ma('bez jména změnitele je null, nevymýšlí se', kartaZmenySmeny({ den: '2026-09-22', od: '16:00', do: '22:00', puvodni_od: '18:00', puvodni_do: '22:00' })?.zmenil, null)
+ma('prázdné jméno = null', kartaZmenySmeny({ den: '2026-09-22', od: '16:00', do: '22:00', puvodni_od: '18:00', puvodni_do: '22:00', zmenil: '   ' })?.zmenil, null)
+ma('starší upozornění bez původního stavu kartu nemá', kartaZmenySmeny({ den: '2026-09-22', od: '16:00', do: '22:00' }), null)
+ma('bez dne kartu nemá', kartaZmenySmeny({ od: '16:00', do: '22:00', puvodni_od: '18:00', puvodni_do: '22:00' }), null)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

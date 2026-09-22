@@ -7,7 +7,8 @@ import { tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { ulozitNastaveni } from './akce'
+import { ulozitNastaveni, ulozitZarizeniPush, zrusitZarizeniPush } from './akce'
+import PushPrepinac from './push-prepinac'
 
 export const dynamic = 'force-dynamic'
 
@@ -201,6 +202,17 @@ export default async function NastaveniUpozorneni({
             </button>
           </div>
         </form>
+
+        {/*
+          Upozornění do telefonu. Veřejný klíč VAPID je veřejný z definice
+          (prohlížeč ho potřebuje k předplatnému); soukromý klíč zůstává na
+          serveru a sem se nedostane.
+        */}
+        <PushPrepinac
+          verejnyKlic={process.env.VAPID_PUBLIC_KEY?.trim() || null}
+          ulozit={ulozitZarizeniPush}
+          zrusit={zrusitZarizeniPush}
+        />
       </div>
     </>
   )

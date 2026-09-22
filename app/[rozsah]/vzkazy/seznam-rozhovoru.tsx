@@ -53,6 +53,7 @@ export default function SeznamRozhovoru({
   nazvyPobocek,
   aktivniId,
   posledniText,
+  nazvyOsobnich,
 }: {
   rozsah: string
   rozhovory: Rozhovor[]
@@ -60,6 +61,8 @@ export default function SeznamRozhovoru({
   aktivniId?: string
   /** Poslední zpráva rozhovoru, zkrácená — pro náhled v seznamu (oddíl 8). */
   posledniText?: Map<string, string>
+  /** Názvy osobních rozhovorů bez názvu — jména ostatních (jmena_osobnich_rozhovoru). */
+  nazvyOsobnich?: Map<string, string>
 }) {
   if (rozhovory.length === 0) {
     return (
@@ -75,6 +78,7 @@ export default function SeznamRozhovoru({
       {rozhovory.map((r) => {
         const nazev =
           r.nazev ??
+          nazvyOsobnich?.get(r.konverzace_id) ??
           (r.branch_id
             ? (nazvyPobocek.get(r.branch_id) ?? 'jiná pobočka')
             : NAZVY_DRUHU[r.druh])

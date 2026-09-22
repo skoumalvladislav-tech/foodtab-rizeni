@@ -82,6 +82,11 @@ export type AppShellProps = {
   neprectenych: number;
   /** Posledních pár upozornění pro rozbalovací panel zvonečku. */
   posledniUpozorneni: UpozorneniProp[];
+  /**
+   * Odznaky u položek spodní lišty podle segmentu (např. { vzkazy: 3 }).
+   * Nula se nekreslí. Číslo je z téhož zdroje jako zvoneček.
+   */
+  odznaky?: Record<string, number>;
   moduly: ModulProp[];
   polozky: PolozkaProp[];
   nastaveni: PolozkaProp[];
@@ -111,6 +116,7 @@ export default function AppShell({
   iniciraly,
   neprectenych,
   posledniUpozorneni,
+  odznaky,
   moduly,
   polozky,
   nastaveni,
@@ -224,7 +230,7 @@ export default function AppShell({
         <main className="ft-main">{children}</main>
       </div>
 
-      <MobileBottomNav rozsah={rozsah} doListy={doListy} aktivniSegment={zde?.segment} jeVice={jeVice} segment={segment} />
+      <MobileBottomNav rozsah={rozsah} doListy={doListy} aktivniSegment={zde?.segment} jeVice={jeVice} segment={segment} odznaky={odznaky} />
     </div>
   );
 }

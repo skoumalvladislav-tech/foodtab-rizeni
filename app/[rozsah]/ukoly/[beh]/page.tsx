@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
@@ -118,6 +119,10 @@ export default async function VyplnitChecklist({
 
   const polozky = (polozkyData ?? []) as Polozka[];
 
+  // Kdo smí zadávat úkoly na téhle pobočce, smí z checklistu nahlásit
+  // problém — stejné právo, stejná úvaha jako u „Zadat úkol“ na /ukoly.
+  const smiZadatUkol = await hasAccess(tenantId, "tasks.manage", run.branch_id);
+
   const { data: zaznamyData, error: chybaZaznamyData } = await supabase
     .from("checklist_entries")
     .select("item_id, checked, value_number, value_text")
@@ -145,6 +150,13 @@ export default async function VyplnitChecklist({
       <Nadpis
         oci="Checklist"
         popis={`${hotovo} z ${polozky.length} hotovo${uzavreno ? " · uzavřeno" : ""}`}
+        vpravo={
+          smiZadatUkol ? (
+            <Link href={`/${rozsah}/ukoly/${run.id}/problem`} className="ft-tl ft-tl-vedlejsi ft-tl-male">
+              Nahlásit problém
+            </Link>
+          ) : undefined
+        }
       >
         {nazev}
       </Nadpis>
@@ -245,6 +257,17 @@ export default async function VyplnitChecklist({
                     </button>
                   </form>
                 )}
+
+                {smiZadatUkol ? (
+                  <p style={{ margin: "8px 0 0" }}>
+                    <Link
+                      href={`/${rozsah}/ukoly/${run.id}/problem?polozka=${p.id}`}
+                      style={{ fontSize: "12.5px", color: "var(--muted)" }}
+                    >
+                      Nahlásit problém u téhle položky →
+                    </Link>
+                  </p>
+                ) : null}
 
                 {chybnaPolozka === p.id && chyba ? (
                   <p
