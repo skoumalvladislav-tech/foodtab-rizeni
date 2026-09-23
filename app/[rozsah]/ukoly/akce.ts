@@ -232,6 +232,110 @@ export async function uzavritChecklist(formData: FormData): Promise<void> {
   revalidatePath(`/${rozsah}/ukoly`)
 }
 
+/** Kolik čísel typu hodnoty databáze zná — jediné místo, které to říká. */
+const TYPY_HODNOTY = ['number', 'text', 'photo'] as const
+const ROZVRHY = ['opening', 'closing', 'haccp', 'weekly'] as const
+
+/**
+ * Vytvoření nové šablony checklistu i s položkami, jedním odesláním.
+ *
+ * O právo se nestará tahle funkce — obě tabulky (checklist_templates,
+ * checklist_items) mají politiku na `tasks.manage` na dané pobočce a bez
+ * něj insert prostě neprojde. Formulář sám navíc obrazovka `nova/page.tsx`
+ * nevykreslí tomu, kdo ho nemá — dvě linie, ne jedna.
+ *
+ * ŘÁDKY POLOŽEK JSOU STATICKY VYKRESLENÉ (`polozka-N-*`), NE PŘIDÁVANÉ
+ * SKRIPTEM. Prázdný řádek (bez názvu) se tiše přeskočí — formulář tak
+ * funguje i bez JavaScriptu a nikdo nemusí mazat nepoužité řádky.
+ *
+ * Šablona bez jediné položky je platný, už dřív ošetřený stav
+ * (`ukoly/[beh]/page.tsx`: „Checklist nemá žádné položky.“) — nezakazuje
+ * se tu, jen by asi nikdo takovou nechtěl.
+ */
+export async function vytvoritSablonuChecklistu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const z = await zaklad(rozsah)
+  if (!z || !z.branchId) return
+
+  const nazev = String(formData.get('nazev') ?? '').trim()
+  if (nazev === '') {
+    redirect(`/${rozsah}/ukoly/sablona/nova?chyba=nazev`)
+  }
+
+  const usekRaw = String(formData.get('usek') ?? '').trim()
+  const usekId = usekRaw === '' ? null : usekRaw
+
+  const rozvrhRaw = String(formData.get('rozvrh') ?? 'opening')
+  const rozvrh = (ROZVRHY as readonly string[]).includes(rozvrhRaw) ? rozvrhRaw : 'opening'
+
+  const pocetRadku = Math.max(0, Math.min(50, Number(formData.get('pocetRadku') ?? 0) || 0))
+  const polozky: {
+    position: number
+    label: string
+    requires_value: boolean
+    value_type: string | null
+    value_unit: string | null
+    min_value: number | null
+    max_value: number | null
+  }[] = []
+
+  for (let i = 0; i < pocetRadku; i++) {
+    const label = String(formData.get(`polozka-${i}-nazev`) ?? '').trim()
+    if (label === '') continue
+
+    const vyzadujeHodnotu = formData.get(`polozka-${i}-vyzaduje`) === 'on'
+    const typRaw = String(formData.get(`polozka-${i}-typ`) ?? 'number')
+    const typ = (TYPY_HODNOTY as readonly string[]).includes(typRaw) ? typRaw : 'number'
+    const jednotka = String(formData.get(`polozka-${i}-jednotka`) ?? '').trim()
+    const minRaw = String(formData.get(`polozka-${i}-min`) ?? '').trim()
+    const maxRaw = String(formData.get(`polozka-${i}-max`) ?? '').trim()
+    const jeCislo = vyzadujeHodnotu && typ === 'number'
+
+    polozky.push({
+      position: i,
+      label,
+      requires_value: vyzadujeHodnotu,
+      value_type: vyzadujeHodnotu ? typ : null,
+      value_unit: vyzadujeHodnotu && jednotka !== '' ? jednotka : null,
+      min_value: jeCislo && minRaw !== '' ? Number(minRaw.replace(',', '.')) : null,
+      max_value: jeCislo && maxRaw !== '' ? Number(maxRaw.replace(',', '.')) : null,
+    })
+  }
+
+  const supabase = await getServerSupabase()
+
+  const { data: sablona, error: chybaSablony } = await supabase
+    .from('checklist_templates')
+    .insert({
+      tenant_id: z.tenantId,
+      branch_id: z.branchId,
+      usek_id: usekId,
+      name: nazev,
+      schedule: rozvrh,
+    })
+    .select('id')
+    .limit(1)
+  if (chybaSablony || !sablona?.[0]) {
+    redirect(`/${rozsah}/ukoly/sablona/nova?chyba=nepovedlo`)
+  }
+  const sablonaId = sablona[0].id as string
+
+  if (polozky.length > 0) {
+    const { error: chybaPolozek } = await supabase
+      .from('checklist_items')
+      .insert(polozky.map((p) => ({ ...p, template_id: sablonaId })))
+    if (chybaPolozek) {
+      // Šablona už existuje, jen se jí nepodařilo dodat položky — necháme
+      // ji být (dá se doplnit později) a řekneme to rovnou, ne že se nic
+      // nestalo.
+      redirect(`/${rozsah}/ukoly?chyba=polozky#checklisty`)
+    }
+  }
+
+  revalidatePath(`/${rozsah}/ukoly`)
+  redirect(`/${rozsah}/ukoly#checklisty`)
+}
+
 /**
  * Zadání úkolu.
  *

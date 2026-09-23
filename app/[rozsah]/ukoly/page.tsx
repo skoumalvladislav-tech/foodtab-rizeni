@@ -589,10 +589,31 @@ export default async function Ukoly({
             zobrazit.
           </p>
         ) : sablony.length === 0 ? (
-          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-            Pro tuhle pobočku není nastavený žádný checklist.
-          </p>
+          <div>
+            <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
+              Pro tuhle pobočku není nastavený žádný checklist.
+            </p>
+            {smiZadat ? (
+              <Link
+                href={`/${rozsah}/ukoly/sablona/nova`}
+                className="ft-tl ft-tl-hlavni ft-tl-male"
+                style={{ marginTop: "10px" }}
+              >
+                + Vytvořit checklist
+              </Link>
+            ) : null}
+          </div>
         ) : (
+          <>
+          {smiZadat ? (
+            <Link
+              href={`/${rozsah}/ukoly/sablona/nova`}
+              className="ft-tl ft-tl-vedlejsi ft-tl-male"
+              style={{ marginBottom: "10px" }}
+            >
+              + Další checklist
+            </Link>
+          ) : null}
           <ul style={seznam}>
             {sablony.map((s) => {
               const beh = behy.get(s.id);
@@ -650,6 +671,7 @@ export default async function Ukoly({
               );
             })}
           </ul>
+          </>
         )}
         </div>
         </div>
