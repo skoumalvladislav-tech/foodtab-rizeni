@@ -70,6 +70,35 @@ export function denVPasmu(cas: string | Date, zona: string = ZONA_VYCHOZI): stri
   }).format(d)
 }
 
+/**
+ * „2026-09-19T21:42“ — pro předvyplnění `<input type="datetime-local">`
+ * existující hodnotou. Bez tohohle by úprava jednoho pole (třeba „komu“)
+ * ve stejném formuláři tiše smazala `due_at`, protože prázdné `doKdy` se
+ * v akci čte jako „zrušit termín“.
+ */
+export function datetimeLocalVPasmu(cas: string | Date, zona: string = ZONA_VYCHOZI): string {
+  const d = new Date(cas)
+  if (Number.isNaN(d.getTime())) return ''
+  const sestav = (z: string): string => {
+    const casti = new Intl.DateTimeFormat('en-CA', {
+      timeZone: z,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(d)
+    const get = (typ: string) => casti.find((c) => c.type === typ)?.value ?? '00'
+    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
+  }
+  try {
+    return sestav(zona)
+  } catch {
+    return sestav(ZONA_VYCHOZI)
+  }
+}
+
 function format(cas: string | Date, zona: string, volby: Intl.DateTimeFormatOptions): string {
   const d = new Date(cas)
   if (Number.isNaN(d.getTime())) return ''
