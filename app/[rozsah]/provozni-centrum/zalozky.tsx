@@ -4,19 +4,23 @@ import Ikona from '../ikona'
 import type { IkonaKlic } from '../nabidka'
 
 /**
- * Záložky Provozního centra: Přehled · Komunikace · Úkoly · Checklisty · Nástěnka.
+ * Záložky „Vzkazy a úkoly“ (do 22. 9. „Provozní centrum“): Komunikace ·
+ * Úkoly · Checklisty · Nástěnka.
  *
  * NIC SE NEPŘESOUVÁ. Záložky jsou jen společná navigace nad trasami, které
- * už existují (Dnes, Vzkazy, Úkoly, Nástěnka) — adresy, odkazy z upozornění
- * a přesměrování zůstávají. Jedna lišta místo čtyř různých míst, kam se
+ * už existují (Vzkazy, Úkoly, Nástěnka) — adresy, odkazy z upozornění
+ * a přesměrování zůstávají. Jedna lišta místo víc různých míst, kam se
  * chodí zjistit, jestli se něco děje.
+ *
+ * Záložka „Přehled“ (odkaz na /dnes) 22. 9. odpadla — Dnes má vlastní
+ * položku v levém sloupci, takže to byla druhá cesta ke stejné obrazovce.
  *
  * Přepíná se adresou, ne skriptem (funguje i bez JavaScriptu, odkaz jde
  * poslat dál). Čísla u záložek jsou nepřečtené věci z TÉHOŽ zdroje jako
  * odznak ve zvonečku — nepočítají se tu podruhé po svém.
  */
 
-export type KlicZalozky = 'prehled' | 'komunikace' | 'ukoly' | 'checklisty' | 'nastenka'
+export type KlicZalozky = 'komunikace' | 'ukoly' | 'checklisty' | 'nastenka'
 
 const ZALOZKY: {
   klic: KlicZalozky
@@ -24,7 +28,6 @@ const ZALOZKY: {
   ikona: IkonaKlic
   adresa: (rozsah: string) => string
 }[] = [
-  { klic: 'prehled', nazev: 'Přehled', ikona: 'hodiny', adresa: (r) => `/${r}/dnes` },
   { klic: 'komunikace', nazev: 'Komunikace', ikona: 'zprava', adresa: (r) => `/${r}/vzkazy` },
   { klic: 'ukoly', nazev: 'Úkoly', ikona: 'fajfkaCtverec', adresa: (r) => `/${r}/ukoly` },
   { klic: 'checklisty', nazev: 'Checklisty', ikona: 'seznam', adresa: (r) => `/${r}/ukoly#checklisty` },
@@ -45,7 +48,7 @@ export default function PcZalozky({
   skryte?: KlicZalozky[]
 }) {
   return (
-    <nav className="pc-zalozky" aria-label="Provozní centrum">
+    <nav className="pc-zalozky" aria-label="Vzkazy a úkoly">
       {ZALOZKY.filter((z) => !skryte.includes(z.klic)).map((z) => {
         const pocet = pocty[z.klic] ?? 0
         return (

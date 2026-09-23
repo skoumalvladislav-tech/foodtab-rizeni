@@ -46,6 +46,14 @@ export type PolozkaProp = {
   modul: string;
   /** Bez pobočky nedává smysl — při přepnutí na firmu se jde jinam. */
   jenPobocka?: boolean;
+  /**
+   * Další segmenty, na kterých se tahle položka taky zvýrazní — pro
+   * sloučenou položku, která vede na jednu adresu (`segment`), ale
+   * obsahem zůstává rozkročená přes víc starých adres (22. 9., sloučení
+   * Provozního centra a Úkolů/checklistů do „Vzkazy a úkoly“: samotné
+   * obrazovky se nikam nestěhovaly, jen navigace nad nimi).
+   */
+  dalsiSegmenty?: string[];
 };
 
 export type SkupinaNavigace = {
@@ -129,7 +137,12 @@ export default function AppShell({
   const segment = cesta.startsWith(predpona) ? cesta.slice(predpona.length) : null;
 
   const vsechny = [...polozky, ...nastaveni];
-  const zde = vsechny.find((p) => p.segment === segment || (segment?.startsWith(p.segment + "/") ?? false));
+  // Položka se pozná podle vlastního segmentu, nebo podle libovolného
+  // z `dalsiSegmenty` (sloučená položka rozkročená přes víc adres).
+  const odpovidaSegmentu = (s: string) => segment === s || (segment?.startsWith(s + "/") ?? false);
+  const zde = vsechny.find(
+    (p) => odpovidaSegmentu(p.segment) || (p.dalsiSegmenty ?? []).some(odpovidaSegmentu),
+  );
 
   // Jen pro spodní mobilní lištu a přepnutí rozsahu — ta zůstává
   // kontextová na aktuálním modulu, dlouhý sdružený seznam by se na
