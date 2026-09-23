@@ -1,0 +1,69 @@
+name: Checklisty — termíny
+
+# Naplánovaná úloha: upozornit na checklist, kterému se blíží termín
+# (do hodiny) nebo je po termínu (Checklisty 2.0, zadání body 21 a 32).
+#
+# Vzor notifikace-push.yml / zapomenuty-odchod.yml. Čtvrthodinově, aby
+# „blíží se termín" přišlo včas; každý termín se ohlásí jednou (tabulka
+# checklist_terminy_ohlaseno), takže častější běh nic nezdvojí.
+# Upozornění jdou přes app.notifikovat — pracovní doba, fronta doručení
+# i výjimka pro majitele platí samy.
+#
+# Bez nasazené migrace 20260923170000 odpoví adresa 200 s poznámkou.
+
+on:
+  schedule:
+    - cron: '3,18,33,48 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: checklisty-terminy
+  cancel-in-progress: false
+
+jobs:
+  terminy:
+    name: Ohlásit termíny checklistů
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci"
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu"
+            exit 1
+          fi
+
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 60 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/checklisty-terminy")
+
+          echo "HTTP ${KOD}"
+          cat telo.json || true
+          echo
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            503)
+              echo "::error::503 — na Vercelu chybí SUPABASE_SERVICE_ROLE_KEY."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          POCET=$(sed -n 's/.*"ohlaseno":[[:space:]]*\([0-9]*\).*/\1/p' telo.json)
+          echo "Ohlášeno termínů: ${POCET:-?}" >> "$GITHUB_STEP_SUMMARY"

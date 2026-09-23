@@ -30,7 +30,7 @@ const ZALOZKY: {
 }[] = [
   { klic: 'komunikace', nazev: 'Komunikace', ikona: 'zprava', adresa: (r) => `/${r}/vzkazy` },
   { klic: 'ukoly', nazev: 'Úkoly', ikona: 'fajfkaCtverec', adresa: (r) => `/${r}/ukoly` },
-  { klic: 'checklisty', nazev: 'Checklisty', ikona: 'seznam', adresa: (r) => `/${r}/ukoly#checklisty` },
+  { klic: 'checklisty', nazev: 'Checklisty', ikona: 'seznam', adresa: (r) => `/${r}/ukoly/checklisty` },
   { klic: 'nastenka', nazev: 'Nástěnka', ikona: 'praporek', adresa: (r) => `/${r}/vzkazy?zalozka=nastenka` },
 ]
 

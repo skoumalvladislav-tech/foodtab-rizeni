@@ -58,6 +58,7 @@ export type IkonaKlic =
   | 'filtr'
   | 'varovani'
   | 'zavrit'
+  | 'schranka'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */

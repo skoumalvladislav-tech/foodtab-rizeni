@@ -19,8 +19,12 @@ import { odkazNaSmenu, type TeloUpozorneni } from "@/lib/upozorneni-text";
 import Sdeleni from "@/app/sdeleni";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
+import Ikona from "../ikona";
 import Nadpis from "../nadpis";
 import VetaOPushi from "../provozni-centrum/veta-o-pushi";
+import { nactiMojeChecklisty, type MujChecklist } from "../ukoly/checklisty/data";
+import { Pruh, StavChip } from "../ukoly/checklisty/prvky";
+import { STAV_TON, terazMs } from "../ukoly/checklisty/spolecne";
 import { zapsatDochazku } from "../dochazka/akce";
 import PoleKodu from "../dochazka/pole-kodu";
 import { nactiJmenaVRozhovoru, nactiNazvyOsobnich } from "../vzkazy/nazvy";
@@ -608,6 +612,28 @@ export default async function Dnes({
     ).length;
   }
 
+  /*
+    MOJE CHECKLISTY (Checklisty 2.0, zadání bod 33) — otevřené běhy
+    přiřazené mně, ať člověk nemusí chodit do modulu. Chyba karty se jen
+    vynechá — Dnes kvůli ní nesmí spadnout.
+  */
+  let mojeChecklisty: MujChecklist[] = [];
+  if (canSee(ctx, "tasks.read") && user) {
+    try {
+      const { data: ja } = await supabase
+        .from("employees")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("user_id", user.id)
+        .is("deleted_at", null)
+        .limit(1);
+      const mujId = (ja?.[0]?.id as string | undefined) ?? null;
+      if (mujId) mojeChecklisty = await nactiMojeChecklisty(supabase, tenantId, mujId, terazMs());
+    } catch {
+      mojeChecklisty = [];
+    }
+  }
+
   /* --- 2b. OWNER ATTENTION CENTER ---------------------------------
      Jen pro vedení (jeVedeni) — zaměstnanec vidí Dnes beze změny,
      vedoucí/majitel NAVÍC uvidí, co potřebuje pozornost teď (master
@@ -1027,6 +1053,48 @@ export default async function Dnes({
             ) : (
               panelPristichSmen
             )}
+            {mojeChecklisty.length > 0 ? (
+              <section className="ds-plocha" aria-labelledby="dnes-checklisty">
+                <div className="ds-plocha-hlava">
+                  <Ikona klic="seznam" />
+                  <h2 id="dnes-checklisty">Moje checklisty</h2>
+                  <Link href={`/${rozsah}/ukoly/checklisty?cl=moje`} className="ds-plocha-odkaz">
+                    Všechny
+                  </Link>
+                </div>
+                <ul className="ck-karty">
+                  {mojeChecklisty.map((c) => {
+                    const slug = ctx.branches.find((b) => b.id === c.pobockaId)?.slug ?? rozsah;
+                    return (
+                      <li key={c.id}>
+                        <Link href={`/${slug}/ukoly/checklisty/${c.id}`} className="ck-karta" data-ton={STAV_TON[c.stav]}>
+                          <span className="ck-karta-ikona" aria-hidden="true">
+                            <Ikona klic="seznam" />
+                          </span>
+                          <span className="ck-karta-hlavni">
+                            <strong>{c.nazev}</strong>
+                            <small>
+                              {c.dueAt ? `do ${hodinaVPasmu(c.dueAt, zona)}` : "bez termínu"}
+                              {c.stav === "poterminu" ? " · po termínu" : ""}
+                            </small>
+                          </span>
+                          <span className="ck-karta-postup">
+                            <span>
+                              {c.hotovo} / {c.celkem}
+                            </span>
+                            <Pruh hotovo={c.hotovo} celkem={c.celkem} ton={STAV_TON[c.stav]} />
+                          </span>
+                          <StavChip stav={c.stav} />
+                          <span className="ck-karta-sipka" aria-hidden="true">
+                            <Ikona klic="sipkaVpravo" />
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ) : null}
             <PanelVzkazu rozsah={rozsah} vzkazy={posledniVzkazy} />
           </div>
         </div>

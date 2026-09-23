@@ -1,0 +1,80 @@
+name: Checklisty — naplánovat
+
+# Naplánovaná úloha: založit dnešní checklisty podle rozvrhu šablon
+# (Checklisty 2.0, zadání bod 15 — „nevytvářej ručně stejný checklist
+# každý den").
+#
+# Stejný vzor jako zapomenuty-odchod.yml, a ze stejných důvodů:
+#   * GitHub Actions, ne Vercel Cron — ten na tarifu Hobby hodinový běh
+#     odmítá;
+#   * o hodině rozhoduje DATABÁZE (provozní den a pásmo každé pobočky),
+#     tenhle soubor žádný čas neřeší;
+#   * úloha je idempotentní (on conflict do nothing) — dvojí běh nic
+#     nezdvojí;
+#   * cokoli jiného než HTTP 200 skončí červeně, ať se porucha nedá
+#     přehlédnout.
+#
+# Dokud není nasazená migrace 20260923170000, adresa odpoví 200
+# s poznámkou „čeká na nasazení databáze" — nic se nezaloží, ale
+# plánovač nehlásí poruchu, která žádnou poruchou není.
+
+on:
+  schedule:
+    # 17. minuta každé hodiny (ne celá — fronta plánovačů je v celou nejdelší).
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: checklisty-naplanovat
+  cancel-in-progress: false
+
+jobs:
+  naplanovat:
+    name: Založit dnešní checklisty
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci"
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu"
+            exit 1
+          fi
+
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 60 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/checklisty-naplanovat")
+
+          echo "HTTP ${KOD}"
+          cat telo.json || true
+          echo
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            503)
+              echo "::error::503 — na Vercelu chybí SUPABASE_SERVICE_ROLE_KEY."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          POCET=$(sed -n 's/.*"zalozeno":[[:space:]]*\([0-9]*\).*/\1/p' telo.json)
+          echo "Založeno checklistů: ${POCET:-?}" >> "$GITHUB_STEP_SUMMARY"
+          if grep -q 'čeká na nasazení' telo.json; then
+            echo "Pozor: funkce v databázi zatím není — čeká na db push migrace 20260923170000." >> "$GITHUB_STEP_SUMMARY"
+          fi

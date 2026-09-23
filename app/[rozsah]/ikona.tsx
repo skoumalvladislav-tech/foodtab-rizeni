@@ -111,6 +111,13 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
     </>
   ),
   seznam: <path d="M4 6h12M4 10h12M4 14h7" />,
+  schranka: (
+    <>
+      <path d="M7.5 4H6a1.5 1.5 0 00-1.5 1.5v11A1.5 1.5 0 006 18h8a1.5 1.5 0 001.5-1.5v-11A1.5 1.5 0 0014 4h-1.5" />
+      <rect x="7.5" y="2.5" width="5" height="3" rx="1" />
+      <path d="M7.5 10.5l1.8 1.8 3.3-3.6" />
+    </>
+  ),
   zpet: <path d="M16 10H4.5M9.5 4.5L4 10l5.5 5.5" />,
   sipkaVlevo: <path d="M12.5 4.5L7 10l5.5 5.5" />,
   plus: <path d="M10 4v12M4 10h12" />,

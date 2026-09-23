@@ -67,6 +67,24 @@ export type TeloUpozorneni = {
   kanal?: string
   pokusy?: number
   duvod?: string
+  // checklist.* (app.checklist_telo, 20260923160000) — běh, název šablony,
+  // pobočka běhu (pobocka_slug výš), termín; u problému položka.
+  beh?: string
+  stav?: string
+  polozka?: string
+  polozka_nazev?: string
+}
+
+/**
+ * Kam vede „Otevřít checklist" u checklist.* upozornění: na POBOČKU BĚHU
+ * (ne na rozsah, ve kterém člověk upozornění zrovna čte) a u problému
+ * rovnou na položku.
+ */
+export function odkazNaChecklist(rozsah: string, telo: TeloUpozorneni): string | null {
+  if (!telo.beh) return null
+  const kde = telo.pobocka_slug || rozsah
+  const polozka = telo.polozka ? `/polozka/${telo.polozka}` : ''
+  return `/${kde}/ukoly/checklisty/${telo.beh}${polozka}`
 }
 
 /**
@@ -188,6 +206,25 @@ export function nadpisUpozorneni(
     */
     case 'marketing.publikace_selhala':
       return `${telo.nazev || 'Příspěvek'} se nepodařilo zveřejnit`
+    /*
+      CHECKLISTY (23. 9.). Nadpis říká, co se stalo a co se od člověka
+      čeká; název checklistu je z šablony (psal ho vedoucí), text položek
+      a důvody v upozornění nejsou.
+    */
+    case 'checklist.prideleno':
+      return `Máte přidělený checklist: ${telo.nazev || 'checklist'}`
+    case 'checklist.blizi_se_termin':
+      return `${telo.nazev || 'Checklist'}: blíží se termín`
+    case 'checklist.po_terminu':
+      return `${telo.nazev || 'Checklist'} je po termínu`
+    case 'checklist.dokonceno':
+      return telo.stav === 'completed_with_issues'
+        ? `${telo.nazev || 'Checklist'} skončil s výhradami`
+        : `${telo.nazev || 'Checklist'} je dokončený`
+    case 'checklist.vyzaduje_kontrolu':
+      return `${telo.nazev || 'Checklist'} čeká na vaše potvrzení`
+    case 'checklist.problem':
+      return `Problém v checklistu ${telo.nazev || ''}: ${telo.polozka_nazev || 'položka'} nejde splnit`.replace('  ', ' ')
     default:
       return 'Upozornění'
   }

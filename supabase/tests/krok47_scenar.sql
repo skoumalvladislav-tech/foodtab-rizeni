@@ -200,4 +200,4 @@ select pg_temp.check('update jiného sloupce (due_at) nesáhne na kontrolu při�
 
 
 \echo ''
-\echo 'VŠECHNY KONTROLY KROKU 47 PROŠLY'
+\echo '== KROK 47 HOTOV ========================================'
