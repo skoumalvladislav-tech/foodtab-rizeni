@@ -2,9 +2,8 @@ import Link from "next/link";
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { redirect } from "next/navigation";
 
-import { hasAccess } from "@/lib/authz";
+import { getUser, hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
-import { provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
@@ -12,7 +11,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import Nadpis from "../nadpis";
 import PcZalozky from "../provozni-centrum/zalozky";
 import Ikona from "../ikona";
-import { dokoncitUkol, spustitChecklist, zadatUkol } from "./akce";
+import Checklisty, { type KlicPohledu } from "./checklisty";
+import { dokoncitUkol, zadatUkol } from "./akce";
 
 export const dynamic = "force-dynamic";
 
@@ -66,48 +66,26 @@ function adresat(
   return null;
 }
 
-type Sablona = {
-  id: string;
-  branch_id: string | null;
-  name: string;
-  /*
-    Úsek místo napevno psaného `department`.
-
-    Dřív se tu vypisovala strojová hodnota z pětice zadrátované v kódu
-    (`kuchyne`, `bar`, …) — takže bistro s jedním pultem mělo v tabulce
-    „servis“, protože nic bližšího na výběr nebylo. Teď je to název,
-    který si firma zadala sama (20260906030000_useky).
-
-    Může být prázdný: šablona bez úseku je platná a znamená „nikam
-    zvlášť“.
-  */
-  /*
-    Tvar je schválně „objekt NEBO pole“. PostgREST vrací u vazby na
-    jeden řádek objekt, ale typ odvozený z klienta ji hlásí jako pole —
-    a `as Sablona[]` na to spadne při překladu typů. Přetypovat to přes
-    `unknown` by chybu jen umlčelo; tohle ji řeší tak, že projde obojí.
-  */
-  useky: { nazev: string } | { nazev: string }[] | null;
-  schedule: string;
-};
-
-/** Název úseku ze vztahu, ať přijde jako objekt nebo jako pole. */
-function nazevUseku(u: Sablona["useky"]): string | null {
-  if (!u) return null;
-  const r = Array.isArray(u) ? u[0] : u;
-  const nazev = String(r?.nazev ?? "").trim();
-  return nazev === "" ? null : nazev;
-}
-
 export default async function Ukoly({
   params,
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>;
-  searchParams: Promise<{ ukol?: string; chyba?: string }>;
+  searchParams: Promise<{
+    ukol?: string;
+    chyba?: string;
+    /** Pohled na Checklisty: dnes/moje/sablony/historie (viz checklisty.tsx). */
+    cl?: string;
+    usek?: string;
+    stav?: string;
+    strana?: string;
+  }>;
 }) {
   const { rozsah } = await params;
-  const { ukol: chybnyUkol, chyba } = await searchParams;
+  const { ukol: chybnyUkol, chyba, cl, usek, stav, strana } = await searchParams;
+  const POHLEDY_CL: KlicPohledu[] = ["dnes", "moje", "sablony", "historie"];
+  const pohledCl: KlicPohledu = (POHLEDY_CL as string[]).includes(cl ?? "") ? (cl as KlicPohledu) : "dnes";
+  const stranaCl = Math.max(1, Number(strana) || 1);
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -157,76 +135,8 @@ export default async function Ukoly({
   const ukoly = (ukolyData ?? []) as Ukol[];
 
   // Checklisty se vedou na pobočku — checklist_runs.branch_id je NOT NULL.
+  // Vlastní data/dotazy má checklisty.tsx (Checklisty 2.0, 23. 9.).
   const branchId = scope.branchId;
-  let sablony: Sablona[] = [];
-  const behy = new Map<string, { id: string; status: string; hotovo: number }>();
-  const poctyPolozek = new Map<string, number>();
-  let den: string | null = null;
-
-  if (branchId) {
-    den = await provozniDen(branchId);
-
-    const { data: sablonyData, error: chybaSablonyData } = await supabase
-      .from("checklist_templates")
-      .select("id, branch_id, name, schedule, useky(nazev)")
-      .eq("tenant_id", tenantId)
-      .eq("active", true)
-      .or(`branch_id.eq.${branchId},branch_id.is.null`)
-      .order("name", { ascending: true });
-    if (chybaSablonyData) throw new DotazSelhal("šablony checklistů", chybaSablonyData);
-
-    sablony = (sablonyData ?? []) as Sablona[];
-
-    if (sablony.length > 0) {
-      const idSablon = sablony.map((s) => s.id);
-
-      const { data: polozky, error: chybaPolozky } = await supabase
-        .from("checklist_items")
-        .select("id, template_id")
-        .in("template_id", idSablon);
-      if (chybaPolozky) throw new DotazSelhal("položky checklistu", chybaPolozky);
-
-      for (const p of polozky ?? []) {
-        const t = p.template_id as string;
-        poctyPolozek.set(t, (poctyPolozek.get(t) ?? 0) + 1);
-      }
-
-      if (den) {
-        const { data: behyData, error: chybaBehyData } = await supabase
-          .from("checklist_runs")
-          .select("id, template_id, status")
-          .eq("branch_id", branchId)
-          .eq("business_date", den)
-          .in("template_id", idSablon);
-        if (chybaBehyData) throw new DotazSelhal("běhy checklistů", chybaBehyData);
-
-        const idBehu = (behyData ?? []).map((b) => b.id as string);
-        const hotoveVBehu = new Map<string, number>();
-
-        if (idBehu.length > 0) {
-          const { data: zaznamy, error: chybaZaznamy } = await supabase
-            .from("checklist_entries")
-            .select("run_id, checked")
-            .in("run_id", idBehu);
-          if (chybaZaznamy) throw new DotazSelhal("odškrtnuté položky", chybaZaznamy);
-
-          for (const z of zaznamy ?? []) {
-            if (z.checked !== true) continue;
-            const r = z.run_id as string;
-            hotoveVBehu.set(r, (hotoveVBehu.get(r) ?? 0) + 1);
-          }
-        }
-
-        for (const b of behyData ?? []) {
-          behy.set(b.template_id as string, {
-            id: b.id as string,
-            status: b.status as string,
-            hotovo: hotoveVBehu.get(b.id as string) ?? 0,
-          });
-        }
-      }
-    }
-  }
 
   /*
     Číselníky pro adresáta a pro formulář.
@@ -273,6 +183,22 @@ export default async function Ukoly({
   );
 
   const smiZadat = await hasAccess(tenantId, "tasks.manage", scope.branchId);
+
+  // Pro záložku "Moje" v Checklistech — čí je to zaměstnanecký záznam.
+  // null u účtu bez vlastního řádku v employees (výjimečné, ale platné).
+  const user = await getUser();
+  let mujEmployeeId: string | null = null;
+  if (user) {
+    const { data: jaData, error: chybaJa } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("tenant_id", tenantId)
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .limit(1);
+    if (chybaJa) throw new DotazSelhal("můj zaměstnanecký záznam", chybaJa);
+    mujEmployeeId = (jaData?.[0]?.id as string | undefined) ?? null;
+  }
 
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
@@ -551,128 +477,21 @@ export default async function Ukoly({
         )}
         </div>
 
-        <div>
-        <h2 id="checklisty" style={{ ...nadpisSekce, marginTop: 0, scrollMarginTop: "72px" }}>Checklisty</h2>
-
-        {!branchId ? (
-          /*
-            UX redesign, druhé kolo (oddíl 9): jedna věta "přepněte se"
-            nedává, kam kliknout. Checklisty se vedou po pobočkách
-            (`checklist_runs.branch_id` je NOT NULL) — to se nemění,
-            ale na firemní úrovni appka aspoň rovnou nabídne odkazy na
-            pobočky, kam přepnout, místo aby to nechala na uživateli.
-          */
-          <div>
-            <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-              Checklisty se vedou po pobočkách. Vyberte, na kterou se
-              podívat:
-            </p>
-            {ctx.branches.length > 0 ? (
-              <ul style={{ ...seznam, marginTop: "10px" }}>
-                {ctx.branches.map((b) => (
-                  <li key={b.id}>
-                    <Link
-                      href={`/${b.slug}/ukoly`}
-                      className="ft-tl ft-tl-vedlejsi"
-                      style={{ width: "100%" }}
-                    >
-                      {b.name}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : !den ? (
-          <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-            Nepodařilo se zjistit provozní den, takže checklisty nelze
-            zobrazit.
-          </p>
-        ) : sablony.length === 0 ? (
-          <div>
-            <p style={{ margin: 0, fontSize: "14px", color: "var(--muted)" }}>
-              Pro tuhle pobočku není nastavený žádný checklist.
-            </p>
-            {smiZadat ? (
-              <Link
-                href={`/${rozsah}/ukoly/sablona/nova`}
-                className="ft-tl ft-tl-hlavni ft-tl-male"
-                style={{ marginTop: "10px" }}
-              >
-                + Vytvořit checklist
-              </Link>
-            ) : null}
-          </div>
-        ) : (
-          <>
-          {smiZadat ? (
-            <Link
-              href={`/${rozsah}/ukoly/sablona/nova`}
-              className="ft-tl ft-tl-vedlejsi ft-tl-male"
-              style={{ marginBottom: "10px" }}
-            >
-              + Další checklist
-            </Link>
-          ) : null}
-          <ul style={seznam}>
-            {sablony.map((s) => {
-              const beh = behy.get(s.id);
-              const celkem = poctyPolozek.get(s.id) ?? 0;
-
-              return (
-                <li
-                  key={s.id}
-                  style={{
-                    background: "var(--card)",
-                    border: "1px solid var(--line)",
-                    borderRadius: "var(--radius-md)",
-                    padding: "14px",
-                  }}
-                >
-                  <p style={{ margin: 0, fontSize: "15px", color: "var(--ink)" }}>
-                    {s.name}
-                  </p>
-                  <p
-                    style={{
-                      margin: "4px 0 0",
-                      fontSize: "12px",
-                      color: "var(--muted)",
-                    }}
-                  >
-                    {[
-                      nazevUseku(s.useky),
-                      beh
-                        ? `${beh.hotovo} z ${celkem} hotovo`
-                        : `${celkem} položek`,
-                      beh?.status === "done" ? "uzavřeno" : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-
-                  {beh ? (
-                    <Link
-                      href={`/${rozsah}/ukoly/${beh.id}`}
-                      className="ft-tl ft-tl-hlavni ft-tl-male"
-                      style={{ marginTop: "10px" }}
-                    >
-                      {beh.status === "done" ? "Zobrazit" : "Pokračovat"}
-                    </Link>
-                  ) : (
-                    <form action={spustitChecklist} style={{ marginTop: "10px" }}>
-                      <input type="hidden" name="rozsah" value={rozsah} />
-                      <input type="hidden" name="sablona" value={s.id} />
-                      <button type="submit" className="ft-tl ft-tl-hlavni ft-tl-male">
-                        Spustit
-                      </button>
-                    </form>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          </>
-        )}
+        <div id="checklisty" style={{ scrollMarginTop: "72px" }}>
+          <Checklisty
+            rozsah={rozsah}
+            tenantId={tenantId}
+            branchId={branchId}
+            branches={ctx.branches}
+            mujEmployeeId={mujEmployeeId}
+            jmenaLidi={jmenaLidi}
+            smiZadat={smiZadat}
+            pohled={pohledCl}
+            usekFiltr={usek ?? null}
+            stavFiltr={stav ?? null}
+            strana={stranaCl}
+            chyba={chyba ?? null}
+          />
         </div>
         </div>
       </div>

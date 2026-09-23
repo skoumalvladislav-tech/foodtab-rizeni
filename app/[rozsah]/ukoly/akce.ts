@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { provozniDen } from '@/lib/provozni-den'
-import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
+import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -97,7 +97,10 @@ export async function dokoncitUkol(formData: FormData): Promise<void> {
  *
  * Dvojice (šablona, pobočka, provozní den) je v databázi jedinečná, takže
  * druhé kliknutí nevyrobí druhý běh — konflikt se ignoruje a pokračuje se
- * v tom existujícím.
+ * v tom existujícím (`ignoreDuplicates`). To platí i pro `komu`/`doKdy`:
+ * na existující běh se nepřepíšou — kdyby dvě kliknutí odeslala různé
+ * hodnoty, vyhrálo by to první, tiše. Změna odpovědnosti u BĚŽÍCÍHO
+ * běhu jde přes nastavitOdpovednost níž.
  */
 export async function spustitChecklist(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
@@ -110,16 +113,42 @@ export async function spustitChecklist(formData: FormData): Promise<void> {
   const den = await provozniDen(z.branchId)
   if (!den) return
 
+  const komu = String(formData.get('komu') ?? '').trim() || null
+  const doKdyRaw = String(formData.get('doKdy') ?? '').trim()
+  // `datetime-local` nese hodinu na zdi bez pásma — okamžik z ní udělá
+  // databáze podle pásma pobočky, stejně jako u termínu úkolu (zadatUkol
+  // níž). Sem se posílá jen řetězec, žádný Date() na serveru.
+  const doKdy = doKdyRaw === '' ? null : doKdyRaw
+
   const supabase = await getServerSupabase()
-  await supabase.from('checklist_runs').upsert(
+  let { error } = await supabase.from('checklist_runs').upsert(
     {
       tenant_id: z.tenantId,
       branch_id: z.branchId,
       template_id: sablonaId,
       business_date: den,
+      assigned_employee_id: komu,
+      due_at: doKdy,
     },
     { onConflict: 'template_id,branch_id,business_date', ignoreDuplicates: true },
   )
+  // KÓD SE NASAZUJE DŘÍV NEŽ MIGRACE. Dokud 20260923100000 neproběhne,
+  // sloupce assigned_employee_id/due_at v databázi ještě nejsou — bez
+  // tohohle by „Spustit" přestalo fungovat úplně (ne jen bez odpovědnosti),
+  // protože by celý insert spadl na neznámý sloupec.
+  if (error && sloupecNeexistuje(error)) {
+    ;({ error } = await supabase.from('checklist_runs').upsert(
+      { tenant_id: z.tenantId, branch_id: z.branchId, template_id: sablonaId, business_date: den },
+      { onConflict: 'template_id,branch_id,business_date', ignoreDuplicates: true },
+    ))
+  }
+  if (error) {
+    // 42501 = insufficient_privilege — komu poslaný z formuláře nepatří
+    // k firmě (trigger checklist_run_prirazeny_trg). Nesmyslné id ve
+    // formuláři je bug na klientu (select se plní ze seznamu firmy),
+    // ne uživatelská chyba, ale radši hláška než tiché nic.
+    redirect(`/${rozsah}/ukoly?chyba=odpovednost#checklisty`)
+  }
 
   revalidatePath(`/${rozsah}/ukoly`)
 }
@@ -213,7 +242,14 @@ export async function zapsatPolozku(formData: FormData): Promise<void> {
   revalidatePath(`/${rozsah}/ukoly/${runId}`)
 }
 
-/** Uzavření checklistu, když jsou všechny položky hotové. */
+/**
+ * Uzavření checklistu, když jsou všechny položky hotové.
+ *
+ * `completed_by` je z. employeeId ze serverové session (zaklad()), ne
+ * z formuláře — stejná záruka jako u employee_id v zapsatPolozku výš.
+ * Bez zaměstnaneckého záznamu (z.employeeId === null) se zapíše
+ * NULL — uzavření samo se nezakáže, jen se historii ztratí „kým“.
+ */
 export async function uzavritChecklist(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const runId = String(formData.get('beh') ?? '')
@@ -225,10 +261,43 @@ export async function uzavritChecklist(formData: FormData): Promise<void> {
   const supabase = await getServerSupabase()
   await supabase
     .from('checklist_runs')
-    .update({ status: 'done', finished_at: new Date().toISOString() })
+    .update({ status: 'done', finished_at: new Date().toISOString(), completed_by: z.employeeId })
     .eq('id', runId)
     .eq('tenant_id', z.tenantId)
 
+  revalidatePath(`/${rozsah}/ukoly`)
+}
+
+/**
+ * Změna odpovědnosti (kdo/do kdy) na už běžícím checklistu.
+ *
+ * Oddělené od spustitChecklist schválně — ten smí zapsat odpovědnost
+ * jen jednou, při vzniku běhu (ignoreDuplicates); tohle je jediná
+ * cesta, jak ji později změnit nebo smazat (prázdné pole = zrušit).
+ */
+export async function nastavitOdpovednost(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const runId = String(formData.get('beh') ?? '')
+  if (!runId) return
+
+  const z = await zaklad(rozsah)
+  if (!z) return
+
+  const komu = String(formData.get('komu') ?? '').trim() || null
+  const doKdyRaw = String(formData.get('doKdy') ?? '').trim()
+  const doKdy = doKdyRaw === '' ? null : doKdyRaw
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase
+    .from('checklist_runs')
+    .update({ assigned_employee_id: komu, due_at: doKdy })
+    .eq('id', runId)
+    .eq('tenant_id', z.tenantId)
+  if (error) {
+    redirect(`/${rozsah}/ukoly/${runId}?chyba=odpovednost`)
+  }
+
+  revalidatePath(`/${rozsah}/ukoly/${runId}`)
   revalidatePath(`/${rozsah}/ukoly`)
 }
 
