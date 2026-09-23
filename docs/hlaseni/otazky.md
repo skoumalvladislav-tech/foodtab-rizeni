@@ -280,3 +280,50 @@ nikomu nedala (`krok7_scenar` na to má vlastní kontrolu a je u ní
 napsané, že je to zavřenější, než pravidlo žádá).
 
 **Až se to stane**, řekni — je to jeden parametr.
+
+---
+
+## 11. Checklist „každou směnu" — podle čeho poznat, čí je směna?
+
+**Vzniklo:** 23. 9. 2026, Checklisty 2.0 (větev `checklisty-2-0-mockup`).
+
+Zadání chce checklist, který se založí a přidělí **na každou směnu**
+(např. „Předávka baru" při každém střídání). V editoru šablony tahle volba
+je, ale běhy se pro ni **samy nezakládají ani nepřidělují** — chová se
+jako „ručně".
+
+**Proč:** směna dnes nemá vazbu na úsek (kuchyň, bar…). Obě cesty, jak
+ji získat, mají háček:
+
+- nový sloupec `shifts.usek_id` — schéma navíc, které se musí zpětně
+  dovyplnit u všech starých směn,
+- úsek člověka (`employees.usek_id`) — zaskakující kolega nebo brigádník
+  bez úseku by dostal cizí checklist, nebo žádný, a nikdo by to nepoznal.
+
+> **ROZHODNUTÍ ŠÉFÍKA (23. 9.): „Zatím bez automatiky."** Schéma je
+> připravené, zakládání a přidělování čeká na tuhle odpověď.
+
+**Až se rozhodne**, je to jedna větev v `vytvorit_naplanovane_checklisty()`
+(dnes ji výslovně přeskakuje, `krok53_scenar` to hlídá kontrolou
+„ruční a každá směna: žádný běh").
+
+---
+
+## 12. Smí vedoucí potvrdit checklist, který sám dokončil?
+
+**Vzniklo:** 23. 9. 2026, tamtéž.
+
+U šablony s „vyžaduje potvrzení vedoucím" dnes **nejde potvrdit vlastní
+běh** — kdo checklist uzavřel, ten ho nepotvrdí, i když má `tasks.manage`.
+
+**Proč jsem vybral přísnější variantu:** zadání (bod 31) popisuje dvojí
+kontrolu jako dvě různé osoby. Kdyby šlo potvrdit sám sobě, „kontrola"
+by v malé směně byla jen druhé kliknutí téhož člověka.
+
+**Co to znamená v provozu:** když na směně není druhý člověk
+s `tasks.manage`, potvrzení počká na dalšího vedoucího. Checklist je
+uzavřený (záznam platí), jen visí jako „čeká na potvrzení".
+
+**Když to má být jinak**, je to jedna podmínka v `potvrdit_checklist`
+(`supabase/migrations/20260923160000_checklisty_rpc.sql`) a jedna kontrola
+v `krok51_scenar` („Petra svůj běh sama nepotvrdí").
