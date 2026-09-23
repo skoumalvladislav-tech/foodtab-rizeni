@@ -13,19 +13,26 @@ export type UkolDetail = {
   title: string
   note: string | null
   due_at: string | null
-  priority: 'normal' | 'high'
+  /** 'critical' jen u úkolů z checklistu (tasks_critical_jen_checklist). */
+  priority: 'normal' | 'high' | 'critical'
   status: 'open' | 'done' | 'cancelled'
   created_at: string
   done_at: string | null
   konverzace_id?: string | null
   zprava_id?: string | null
   checklist_run_id?: string | null
+  checklist_item_id?: string | null
 }
 
 /** Šablona a den checklistu, ze kterého úkol vznikl; položka jen když se ho týká. */
 export type ChecklistZdroj = {
   behNazev: string
   polozkaLabel: string | null
+}
+
+/** Okamžik „teď" mimo tělo komponenty (react-hooks/purity). */
+function terazMs(): number {
+  return Date.now()
 }
 
 const STAV: Record<UkolDetail['status'], string> = {
@@ -52,7 +59,7 @@ export default function DetailUkolu({
   /** null = úkol nevznikl z checklistu (nebo vazba mezitím zanikla). */
   checklistZdroj?: ChecklistZdroj | null
 }) {
-  const poTerminu = ukol.status === 'open' && ukol.due_at !== null && new Date(ukol.due_at).getTime() < Date.now()
+  const poTerminu = ukol.status === 'open' && ukol.due_at !== null && new Date(ukol.due_at).getTime() < terazMs()
 
   return (
     <div className="pc-detail">
@@ -73,7 +80,11 @@ export default function DetailUkolu({
               <span className="pc-chip" data-stav={ukol.status === 'done' ? 'hotovo' : poTerminu ? 'pozde' : undefined}>
                 {poTerminu ? 'Po termínu' : STAV[ukol.status]}
               </span>
-              {ukol.priority === 'high' ? (
+              {ukol.priority === 'critical' ? (
+                <span className="pc-chip" data-stav="pozde">
+                  Kritický
+                </span>
+              ) : ukol.priority === 'high' ? (
                 <span className="pc-chip" data-stav="high">
                   Důležitý
                 </span>
@@ -137,7 +148,16 @@ export default function DetailUkolu({
             {ukol.checklist_run_id ? (
               <>
                 {' '}
-                <Link href={`/${rozsah}/ukoly/${ukol.checklist_run_id}`}>Otevřít checklist</Link>.
+                <Link
+                  href={
+                    ukol.checklist_item_id
+                      ? `/${rozsah}/ukoly/checklisty/${ukol.checklist_run_id}/polozka/${ukol.checklist_item_id}`
+                      : `/${rozsah}/ukoly/checklisty/${ukol.checklist_run_id}`
+                  }
+                >
+                  {ukol.checklist_item_id ? 'Otevřít položku checklistu' : 'Otevřít checklist'}
+                </Link>
+                .
               </>
             ) : null}
           </p>

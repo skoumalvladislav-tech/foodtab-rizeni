@@ -2,22 +2,25 @@ import Link from "next/link";
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { redirect } from "next/navigation";
 
-import { getUser, hasAccess } from "@/lib/authz";
+import { hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
-import { DotazSelhal } from "@/lib/supabase/dotaz";
+import { DotazSelhal, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import EmptyState from "@/components/ui/EmptyState";
 import Nadpis from "../nadpis";
 import PcZalozky from "../provozni-centrum/zalozky";
 import Ikona from "../ikona";
-import Checklisty, { type KlicPohledu } from "./checklisty";
 import { dokoncitUkol, zadatUkol } from "./akce";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Úkoly a checklisty.
+ * Úkoly — jednorázová práce.
+ *
+ * Checklisty (opakovaný postup) mají od 23. 9. vlastní záložku
+ * /ukoly/checklisty; úkol z nahlášeného problému na checklist odkazuje,
+ * ale jsou to dvě různé věci (zadání bod 2).
  *
  * Úkol bez pobočky (`branch_id` prázdné) patří celé firmě a vidí ho každý
  * s oprávněním — proto se na pobočkové adrese ptáme na „moje pobočka nebo
@@ -39,6 +42,8 @@ type Ukol = {
   usek_id: string | null;
   position_id: string | null;
   employee_id: string | null;
+  /** Běh checklistu, ze kterého úkol vznikl (nahlášený problém). */
+  checklist_run_id?: string | null;
 };
 
 /**
@@ -74,18 +79,10 @@ export default async function Ukoly({
   searchParams: Promise<{
     ukol?: string;
     chyba?: string;
-    /** Pohled na Checklisty: dnes/moje/sablony/historie (viz checklisty.tsx). */
-    cl?: string;
-    usek?: string;
-    stav?: string;
-    strana?: string;
   }>;
 }) {
   const { rozsah } = await params;
-  const { ukol: chybnyUkol, chyba, cl, usek, stav, strana } = await searchParams;
-  const POHLEDY_CL: KlicPohledu[] = ["dnes", "moje", "sablony", "historie"];
-  const pohledCl: KlicPohledu = (POHLEDY_CL as string[]).includes(cl ?? "") ? (cl as KlicPohledu) : "dnes";
-  const stranaCl = Math.max(1, Number(strana) || 1);
+  const { ukol: chybnyUkol, chyba } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
 
@@ -115,28 +112,33 @@ export default async function Ukoly({
 
   const supabase = await getServerSupabase();
 
-  let dotazUkoly = supabase
-    .from("tasks")
-    .select("id, branch_id, title, note, due_at, priority, status, usek_id, position_id, employee_id")
-    .eq("tenant_id", tenantId)
-    .eq("status", "open")
-    .order("priority", { ascending: false })
-    .order("due_at", { ascending: true, nullsFirst: false });
-
-  if (scope.level === "branch" && scope.branchId) {
-    // Firemní úkoly (branch_id prázdné) patří i pobočce.
-    dotazUkoly = dotazUkoly.or(
-      `branch_id.eq.${scope.branchId},branch_id.is.null`,
-    );
+  // `sloupce: string` (ne literál): dva různé výběry pak mají stejný typ
+  // a tolerantní druhý pokus jde přiřadit do téže proměnné.
+  const nactiUkoly = (sloupce: string): PromiseLike<{ data: unknown; error: unknown }> => {
+    let q = supabase
+      .from("tasks")
+      .select(sloupce)
+      .eq("tenant_id", tenantId)
+      .eq("status", "open")
+      .order("due_at", { ascending: true, nullsFirst: false });
+    if (scope.level === "branch" && scope.branchId) {
+      // Firemní úkoly (branch_id prázdné) patří i pobočce.
+      q = q.or(`branch_id.eq.${scope.branchId},branch_id.is.null`);
+    }
+    return q;
+  };
+  const ZAKLAD = "id, branch_id, title, note, due_at, priority, status, usek_id, position_id, employee_id";
+  let { data: ukolyData, error: chybaUkolyData } = await nactiUkoly(`${ZAKLAD}, checklist_run_id`);
+  if (chybaUkolyData && sloupecNeexistuje(chybaUkolyData as Parameters<typeof sloupecNeexistuje>[0])) {
+    ({ data: ukolyData, error: chybaUkolyData } = await nactiUkoly(ZAKLAD));
   }
-
-  const { data: ukolyData, error: chybaUkolyData } = await dotazUkoly;
-  if (chybaUkolyData) throw new DotazSelhal("úkoly", chybaUkolyData);
-  const ukoly = (ukolyData ?? []) as Ukol[];
-
-  // Checklisty se vedou na pobočku — checklist_runs.branch_id je NOT NULL.
-  // Vlastní data/dotazy má checklisty.tsx (Checklisty 2.0, 23. 9.).
-  const branchId = scope.branchId;
+  if (chybaUkolyData) throw new DotazSelhal("úkoly", chybaUkolyData as ConstructorParameters<typeof DotazSelhal>[1]);
+  // Pořadí: kritické, přednostní, běžné — a v každé skupině podle termínu.
+  // (Řazení podle textu priority v databázi by 'critical' < 'high' dalo špatně.)
+  const VAHA: Record<string, number> = { critical: 0, high: 1, normal: 2 };
+  const ukoly = ((ukolyData ?? []) as Ukol[]).sort(
+    (a, b) => (VAHA[a.priority] ?? 2) - (VAHA[b.priority] ?? 2),
+  );
 
   /*
     Číselníky pro adresáta a pro formulář.
@@ -184,30 +186,14 @@ export default async function Ukoly({
 
   const smiZadat = await hasAccess(tenantId, "tasks.manage", scope.branchId);
 
-  // Pro záložku "Moje" v Checklistech — čí je to zaměstnanecký záznam.
-  // null u účtu bez vlastního řádku v employees (výjimečné, ale platné).
-  const user = await getUser();
-  let mujEmployeeId: string | null = null;
-  if (user) {
-    const { data: jaData, error: chybaJa } = await supabase
-      .from("employees")
-      .select("id")
-      .eq("tenant_id", tenantId)
-      .eq("user_id", user.id)
-      .is("deleted_at", null)
-      .limit(1);
-    if (chybaJa) throw new DotazSelhal("můj zaměstnanecký záznam", chybaJa);
-    mujEmployeeId = (jaData?.[0]?.id as string | undefined) ?? null;
-  }
-
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
   return (
     <>
-      <Nadpis oci="Provoz" popis="Jednorázové úkoly a checklisty, které se opakují každou směnu.">
-        Úkoly a checklisty
+      <Nadpis oci="Vzkazy a úkoly" popis="Jednorázová práce — co se má udělat, komu a do kdy.">
+        Úkoly
       </Nadpis>
 
       <div style={{ padding: "16px", paddingBottom: "32px" }}>
@@ -361,14 +347,7 @@ export default async function Ukoly({
           </details>
         ) : null}
 
-        {/*
-          Úkoly a checklisty vedle sebe od ~900px — stejný princip jako
-          Docházka (design systém, 16.9.2026): dvě rovnocenné sekce,
-          auto-fit grid se sám podsune pod sebe, když se dvě 320px
-          položky vedle sebe nevejdou, žádný media dotaz netřeba.
-        */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px", alignItems: "start" }}>
-        <div>
+        <div style={{ maxWidth: "860px" }}>
         <h2 style={nadpisSekce}>Otevřené úkoly</h2>
 
         {ukoly.length === 0 ? (
@@ -388,11 +367,11 @@ export default async function Ukoly({
                   background: "var(--card)",
                   border: "1px solid var(--line)",
                   borderLeft: `3px solid ${
-                    u.priority === "high" ? "var(--warn)" : "var(--line)"
+                    u.priority === "critical" ? "var(--bad)" : u.priority === "high" ? "var(--warn)" : "var(--line)"
                   }`,
                   borderRadius: "var(--radius-md)",
                   padding: "14px",
-                  boxShadow: u.priority === "high" ? "var(--shadow-sm)" : "none",
+                  boxShadow: u.priority !== "normal" ? "var(--shadow-sm)" : "none",
                 }}
               >
                 <p style={{ margin: 0, fontSize: "15px", color: "var(--ink)" }}>
@@ -439,11 +418,19 @@ export default async function Ukoly({
                       žádná. Zůstane vidět, jen označený.
                     */
                     poTerminu(u.due_at) ? "PO TERMÍNU" : null,
-                    u.priority === "high" ? "přednostně" : null,
+                    u.priority === "critical" ? "KRITICKÉ" : u.priority === "high" ? "přednostně" : null,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
                 </p>
+
+                {u.checklist_run_id ? (
+                  <p style={{ margin: "4px 0 0", fontSize: "12px" }}>
+                    <Link href={`/${rozsah}/ukoly/checklisty/${u.checklist_run_id}`} style={{ color: "var(--muted)" }}>
+                      Nahlášeno z checklistu →
+                    </Link>
+                  </p>
+                ) : null}
 
                 {/*
                   Tlačítko se ukáže každému, kdo úkol vidí. O tom, jestli
@@ -475,24 +462,6 @@ export default async function Ukoly({
             ))}
           </ul>
         )}
-        </div>
-
-        <div id="checklisty" style={{ scrollMarginTop: "72px" }}>
-          <Checklisty
-            rozsah={rozsah}
-            tenantId={tenantId}
-            branchId={branchId}
-            branches={ctx.branches}
-            mujEmployeeId={mujEmployeeId}
-            jmenaLidi={jmenaLidi}
-            smiZadat={smiZadat}
-            pohled={pohledCl}
-            usekFiltr={usek ?? null}
-            stavFiltr={stav ?? null}
-            strana={stranaCl}
-            chyba={chyba ?? null}
-          />
-        </div>
         </div>
       </div>
     </>

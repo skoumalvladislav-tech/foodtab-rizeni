@@ -15,6 +15,7 @@ import {
   popisZapomenuteho,
   prioritaUpozorneni,
   vyzadujePotvrzeni,
+  odkazNaChecklist,
   odkazNaSmenu,
   zmenaSmeny,
   type TeloUpozorneni,
@@ -269,6 +270,26 @@ export default async function Upozorneni({
                         </Link>
                       </p>
                     ) : null}
+                  </>
+                ) : null}
+
+                {z.druh.startsWith('checklist.') && odkazNaChecklist(rozsah, z.telo) ? (
+                  <>
+                    {z.telo.termin && (z.druh === 'checklist.prideleno' || z.druh === 'checklist.blizi_se_termin' || z.druh === 'checklist.po_terminu') ? (
+                      <p style={{ margin: '8px 0 0', fontSize: '14px', color: 'var(--muted)' }}>
+                        Termín: {z.telo.termin.slice(0, 10).split('-').reverse().map(Number).join('. ')}
+                        {z.telo.termin.length >= 16 ? ` ${z.telo.termin.slice(11, 16)}` : ''}
+                      </p>
+                    ) : null}
+                    <p style={{ margin: '10px 0 0' }}>
+                      <Link href={odkazNaChecklist(rozsah, z.telo)!} className="ft-tl ft-tl-hlavni ft-tl-male">
+                        {z.druh === 'checklist.problem'
+                          ? 'Otevřít položku'
+                          : z.druh === 'checklist.vyzaduje_kontrolu'
+                            ? 'Zkontrolovat a potvrdit'
+                            : 'Otevřít checklist'}
+                      </Link>
+                    </p>
                   </>
                 ) : null}
 
