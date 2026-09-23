@@ -443,13 +443,13 @@ export default async function Rozhovor({
   return (
     <>
       {/*
-        Trvalá hlavička „Provozní centrum“ — 22. 9., vzhled podle Šéfíkova
-        obrázku. Dřív se tu vypisoval NÁZEV KONVERZACE a nadpis modulu
-        zmizel; ten teď zůstává v hlavičce vlákna (pc-vlakno-hlava níž),
-        kde je i tak potřeba pro „Zpět“.
+        Trvalá hlavička „Vzkazy a úkoly“ (22. 9., přejmenováno z „Provozní
+        centrum“ při sloučení s Úkoly a checklisty). Dřív se tu vypisoval
+        NÁZEV KONVERZACE a nadpis modulu zmizel; ten teď zůstává v hlavičce
+        vlákna (pc-vlakno-hlava níž), kde je i tak potřeba pro „Zpět“.
       */}
       <Nadpis oci="Provoz" popis="Komunikace, úkoly, checklisty a oznámení na jednom místě.">
-        Provozní centrum
+        Vzkazy a úkoly
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '1440px' }}>

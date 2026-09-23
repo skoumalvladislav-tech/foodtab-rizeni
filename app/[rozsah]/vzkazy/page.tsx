@@ -313,7 +313,7 @@ export default async function Rozhovory({
             : 'Nepřečtené nahoře, od nejstaršího.'
         }
       >
-        Provozní centrum
+        Vzkazy a úkoly
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: naNastence ? '760px' : '1080px' }}>

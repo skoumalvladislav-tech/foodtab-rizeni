@@ -92,6 +92,13 @@ export type Polozka = {
    * téhož modulu — ne na chybovou stránku.
    */
   jenPobocka?: boolean
+  /**
+   * Další segmenty, na kterých se položka taky zvýrazní v levém sloupci
+   * i na spodní liště — pro sloučenou položku, jejíž obrazovky zůstaly
+   * na starých adresách (22. 9., sloučení Provozního centra a Úkolů do
+   * „Vzkazy a úkoly“: nic se nestěhovalo, jen navigace nad tím).
+   */
+  dalsiSegmenty?: string[]
 }
 
 export const NABIDKA: Polozka[] = [
@@ -105,18 +112,27 @@ export const NABIDKA: Polozka[] = [
   { segment: 'dnes', nazev: 'Dnes', kratky: 'Dnes', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny' },
   { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
   { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny', jenPobocka: true },
-  // VZKAZY: jedna polozka, uvnitr dve zalozky.
+  // VZKAZY A ÚKOLY: jedna polozka, uvnitr ctyri zalozky.
   //
-  // Do 7. 9. 2026 tu stala Nastenka a Rozhovory zvlast. Byly to dve
-  // ruzne veci — a porad jsou —, ale dve polozky v nabidce znamenaly
-  // dve mista, kam se chodit divat, jestli neco nepdrislo. Slucuje se
-  // VCHOD, ne obsah (rozhodnuti Sefika 6. 9.).
+  // Do 22. 9. 2026 tu stály DVĚ položky — „Provozní centrum“ (vzkazy,
+  // nástěnka) a „Úkoly a checklisty“ (ukoly) — se stejnou vadou, jakou
+  // řešilo sloučení Nástěnky a Rozhovorů 7. 9.: dvě místa, kam se chodit
+  // dívat, jestli něco nepřišlo. Slučuje se VCHOD, ne obsah (Šéfíkův
+  // pokyn 22. 9.) — obrazovky samotné zůstávají na svých adresách
+  // (/vzkazy, /ukoly), jen navigace nad nimi je teď jedna. Segment
+  // `vzkazy-a-ukoly` vede na tenký přesměrovací list
+  // (app/[rozsah]/vzkazy-a-ukoly/page.tsx) na /vzkazy; `dalsiSegmenty`
+  // níž drží zvýraznění položky i na starých adresách.
+  //
+  // Záložka „Přehled“ (bývalá 5. záložka) mizí — vedla jen na /dnes,
+  // které má vlastní položku o řádek výš, takže to byla druhá cesta
+  // ke stejné obrazovce, ne vlastní obsah.
   //
   // pravo: null schvalne — konverzaci autorizuje UCASTNICTVI, ne
-  // opravneni. communication.read je pravo na Nastenku a cisnik ho
-  // v roli nema; kdyby na nem visela cela polozka, neprecetl by si
-  // vlastni vlakno. Na samotnou zalozku Nastenka se to pravo ptá
-  // uvnitr (vzkazy/nastenka.tsx).
+  // opravneni; a tasks.read, které dřív hlídalo VIDITELNOST téhle
+  // položky, teď hlídají až záložky Úkoly/Checklisty uvnitř (`skryte`
+  // v PcZalozky) — kdo to právo nemá, položku pořád vidí (jako dřív
+  // viděl Provozní centrum), jen mu tam nesvítí ty dvě záložky.
   //
   // JE TU PŘED ZÁLOHAMI SCHVÁLNĚ. Spodní lišta bere první čtyři
   // položky viditelné nabídky odshora, takže na pořadí tady záleží
@@ -126,14 +142,22 @@ export const NABIDKA: Polozka[] = [
   // (a ty stejně vidí jen advances.manage). Zadání
   // docs/velka-prace-2026-09-08.md, A4 bod 3: Vzkazy do lišty místo
   // Záloh.
-  { segment: 'vzkazy', nazev: 'Provozní centrum', kratky: 'Komunikace', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zprava' },
+  {
+    segment: 'vzkazy-a-ukoly',
+    nazev: 'Vzkazy a úkoly',
+    kratky: 'Vzkazy',
+    modul: 'provoz',
+    pravo: null,
+    hotovo: true,
+    ikona: 'zprava',
+    dalsiSegmenty: ['vzkazy', 'ukoly'],
+  },
   // Zálohy jsou peníze, ne nastavení — proto v hlavní nabídce hned za
   // Docházkou, ze které se počítají. Obrazovku otevírá i payroll.read,
   // ale položka visí na advances.manage: kdo dělá mzdy, přijde si pro
   // ni z Docházky, a nabídka má ukazovat to, co člověk dělá, ne všechno,
   // kam se dostane.
   { segment: 'zalohy', nazev: 'Zálohy', kratky: 'Zálohy', modul: 'provoz', pravo: 'advances.manage', hotovo: true, ikona: 'kniha' },
-  { segment: 'ukoly', nazev: 'Úkoly a checklisty', kratky: 'Úkoly', modul: 'provoz', pravo: 'tasks.read', hotovo: true, ikona: 'fajfka' },
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },

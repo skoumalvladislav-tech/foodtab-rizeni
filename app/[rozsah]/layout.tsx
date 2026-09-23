@@ -116,6 +116,7 @@ export default async function RozsahLayout({
       hotovo: p.hotovo,
       modul: p.modul,
       jenPobocka: p.jenPobocka,
+      dalsiSegmenty: p.dalsiSegmenty,
     })),
   );
 
@@ -305,7 +306,7 @@ export default async function RozsahLayout({
       nazevFirmy={ctx.tenant.name}
       iniciraly={iniciraly(user.email)}
       neprectenych={neprectenych ?? 0}
-      odznaky={{ vzkazy: neprecteneVzkazy + neprecteneNastenka }}
+      odznaky={{ 'vzkazy-a-ukoly': neprecteneVzkazy + neprecteneNastenka }}
       posledniUpozorneni={posledniUpozorneni}
       moduly={moduly}
       polozky={polozky}
