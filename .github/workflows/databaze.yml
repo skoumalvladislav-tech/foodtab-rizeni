@@ -137,7 +137,7 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 44 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 44"; chybi=1; }
 
-          # Checklist → úkol (45), přílohy (46), Checklisty 2.0 (47–53).
+          # Checklist → úkol (45), přílohy (46), Checklisty 2.0 (47–54).
           # 45 a 46 v kontrole chyběly — scénář mohl přestat běžet, aniž by
           # si toho kdo všiml (doplněno 23. 9. spolu s 47–53). Krok 46 má
           # jinou závěrečnou hlášku, kontroluje se ta jeho.
@@ -147,7 +147,7 @@ jobs:
           grep -qE '^[[:space:]]*VŠECHNY KONTROLY KROKU 46 PROŠLY[[:space:]]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 46"; chybi=1; }
 
-          for n in 47 48 49 50 51 52 53; do
+          for n in 47 48 49 50 51 52 53 54; do
             grep -qE "^[[:space:]]*== KROK ${n} HOTOV[[:space:]=]*\$" vystup.txt \
               || { echo "CHYBÍ hláška: KROK ${n}"; chybi=1; }
           done
