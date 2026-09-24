@@ -356,3 +356,33 @@ Je to ale **změna nastavení ostré databáze** (zapnutí rozšíření a plán
 
 **Když se rozhodne pro pg_cron**, je to jedna migrace (`create extension
 pg_cron` + `cron.schedule` pro tři funkce) a smazání tří workflowů.
+
+---
+
+## 14. Zakládání účtů v Supabase: zapnuté, nebo jen přes pozvánku serverem?
+
+**Vzniklo:** 24. 9. 2026 ráno — Juli Yaniv se nemohla přihlásit (hlášení
+[24. 9.](stav-2026-09-24.md)).
+
+Nový člověk dostane účet ve chvíli, kdy poprvé přijímá pozvánku
+(`app/pozvanka/[token]/akce.ts`, `signInWithOtp` bez `shouldCreateUser:
+false`). To funguje jen se zapnutým **„Allow new users to sign up"**
+v Supabase. Od 5. 9. je podle logů vypnuté — nikdo nový se nedostal dovnitř.
+
+**Dvě cesty:**
+
+- **Zapnout** (rychlé, doporučeno teď): pár kliknutí, postup v hlášení
+  24. 9. Do Foodtabu se dál dostane jen ten, kdo přijme pozvánku.
+  Zbytkové riziko: technicky zdatný člověk si přes rozhraní Supabase může
+  založit **prázdný** účet bez přístupu k čemukoli (a přihlašovací služba
+  mu pošle e-mail — spotřebovává limit pošty).
+- **Nechat vypnuté a zakládat účty serverem** (úprava aplikace, zhruba
+  půl dne i s testy): při přijetí platné pozvánky založí účet server
+  (klíč `service_role`, jen pro adresu z pozvánky) a pošle přihlašovací
+  kód. Pak neexistuje žádná cesta, jak si účet založit bez pozvánky.
+
+**Co jsem vybral do té doby:** nic neměním — nastavení je na Šéfíkovi.
+Pro Juli stačí dnes zapnout (nebo náhradní cesta „Add user").
+
+**Když se rozhodne pro druhou cestu**, napiš — upravím přijetí pozvánky,
+přidám scénář a pak jde zakládání účtů zase vypnout.
