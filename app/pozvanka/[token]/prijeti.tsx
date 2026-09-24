@@ -13,8 +13,9 @@ import { prihlasitSeAdresouZPozvanky, prijmoutPozvankuAction } from './akce'
  *  * hláška z databáze se PROPOUŠTÍ (bod 5). „Pozvánka byla vystavena
  *    na jinou e-mailovou adresu“ řekne víc než „Token není platný“ —
  *    a hlavně je to pravda;
- *  * kdo je přihlášený pod jinou adresou, dostane tlačítko, které mu
- *    pošle odkaz na tu správnou (bod 6). Nic neopisuje a nevybírá.
+ *  * kdo je přihlášený pod jinou adresou, dostane tlačítko, které ho
+ *    odhlásí — stránka se pak nabídne kód na adresu z pozvánky
+ *    (`PrvniPrihlaseni`, bod 6). Nic neopisuje a nevybírá.
  */
 export default function PrijmoutPozvankuFormular({
   token,
@@ -28,7 +29,6 @@ export default function PrijmoutPozvankuFormular({
   const [ceka, setCeka] = useState(false)
   const [chyba, setChyba] = useState<string | null>(null)
   const [jinaAdresa, setJinaAdresa] = useState(false)
-  const [odkazPoslan, setOdkazPoslan] = useState(false)
 
   async function prijmout(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -51,27 +51,13 @@ export default function PrijmoutPozvankuFormular({
     setCeka(true)
     const v = await prihlasitSeAdresouZPozvanky(token)
     if (v.ok) {
-      setOdkazPoslan(true)
-      setChyba(null)
-    } else {
-      setChyba(v.chyba ?? 'Odkaz se nepodařilo poslat.')
+      // Odhlášeno — stránka se obnoví jako pro nepřihlášeného a nabídne
+      // kód na adresu z pozvánky.
+      router.refresh()
+      return
     }
+    setChyba(v.chyba ?? 'Přepnout účet se nepodařilo.')
     setCeka(false)
-  }
-
-  if (odkazPoslan) {
-    return (
-      <div style={formular}>
-        <p style={{ margin: 0, fontSize: '15px', color: 'var(--dobre)' }}>
-          Odkaz k přihlášení odešel{adresaZkracena ? ` na ${adresaZkracena}` : ''}.
-        </p>
-        <p style={text}>
-          Otevřete ho ve stejném prohlížeči. Po přihlášení uvidíte
-          čekající pozvánku rovnou na úvodní obrazovce a přijmete ji
-          jedním kliknutím.
-        </p>
-      </div>
-    )
   }
 
   return (
@@ -91,8 +77,7 @@ export default function PrijmoutPozvankuFormular({
         <div style={ramecek}>
           <p style={{ margin: '0 0 10px', fontSize: '13.5px', lineHeight: 1.5 }}>
             Tahle pozvánka byla vystavena na jinou adresu, než pod kterou
-            jste přihlášený. Můžeme vám poslat přihlašovací odkaz na tu
-            správnou.
+            jste přihlášený. Odhlásíme vás a pošleme kód na tu správnou.
           </p>
           <button
             type="button"
@@ -101,10 +86,10 @@ export default function PrijmoutPozvankuFormular({
             onClick={prepnoutUcet}
           >
             {ceka
-              ? 'Posílám…'
+              ? 'Odhlašuji…'
               : adresaZkracena
                 ? `Přihlásit se jako ${adresaZkracena}`
-                : 'Poslat odkaz na správnou adresu'}
+                : 'Přihlásit se správnou adresou'}
           </button>
         </div>
       ) : (

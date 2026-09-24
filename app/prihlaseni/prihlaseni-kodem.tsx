@@ -189,6 +189,14 @@ export default function PrihlaseniKodem({
               Zadejte pracovní e-mail. Pošleme vám kód, který sem opíšete —
               heslo nepotřebujete.
             </p>
+            {/*
+              Tahle stránka účty nezakládá (do Foodtabu jen na pozvánku) —
+              nový člověk tu kód nedostane. Proto věta, kudy jít poprvé.
+            */}
+            <p style={{ ...popis, fontSize: "13px" }}>
+              Jste tu poprvé? V e-mailu s pozvánkou ťukněte na{" "}
+              <strong>Přijmout pozvánku</strong> — poprvé se přihlásíte tam.
+            </p>
 
             <label htmlFor="email" style={popisekPole}>
               E-mail

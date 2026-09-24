@@ -37,6 +37,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
+  adresaProPrvniKod,
   bezpecnyCil,
   hlaskaProChybu,
   HLASKA_SPATNY_KOD,
@@ -44,6 +45,7 @@ import {
   jeStrop,
   maUkazatNaPlochu,
   normalizujKod,
+  ucetUzExistuje,
   zbyvaDoZnovu,
 } from '../lib/prihlaseni.ts'
 import { nactiKomponentu } from './vykreslit.mjs'
@@ -565,7 +567,9 @@ console.log('\n== 7. Odhlásit se ========================================')
   přihlásit jako číšník, aby viděl, co číšník vidí.
 */
 const zdrojMojeUdaje = nacti('app/moje-udaje/page.tsx')
-const zdrojRam = nacti('app/[rozsah]/ram.tsx')
+// Rám (`app/[rozsah]/ram.tsx`) se 15. 9. rozdělil na components/shell/ —
+// horní lišta je GlobalTopbar.
+const zdrojRam = nacti('components/shell/GlobalTopbar.tsx')
 
 ma('odhlášení je na Moje údaje', zdrojMojeUdaje.includes('Odhlásit se'), true)
 ma('a volá serverovou akci', zdrojMojeUdaje.includes('odhlasit'), true)
@@ -671,6 +675,66 @@ ma('a trefí se i v jednoduchých uvozovkách',
   napsanaAdresa.test("redirect('/prihlaseni')"), true)
 ma('a nechytá se na to správné',
   napsanaAdresa.test('redirect(await odkazNaPrihlaseni())'), false)
+
+
+console.log('\n== 9. První přihlášení z pozvánky (nový člověk) ==========')
+
+/*
+  Od 6. 9. přihlašovací stránka účty nezakládá — a stránka pozvánky
+  posílala nepřihlášené právě tam. Nově pozvaný (Juli Yaniv, 24. 9.) se
+  neměl kudy dostat dovnitř. Teď se poprvé přihlásí přímo na pozvánce
+  a účet mu založí server — JEN pro adresu z pozvánky v databázi.
+*/
+ma('platná e-mailová pozvánka → adresa (malými, bez mezer)',
+  adresaProPrvniKod({ stav: 'ok', kanal: 'email', kontakt: '  Juli@Example.CZ ' }), 'juli@example.cz')
+ma('použitá pozvánka → nic',
+  adresaProPrvniKod({ stav: 'pouzita', kanal: 'email', kontakt: 'juli@example.cz' }), null)
+ma('propadlá pozvánka → nic',
+  adresaProPrvniKod({ stav: 'propadla', kanal: 'email', kontakt: 'juli@example.cz' }), null)
+ma('pozvánka na telefon → nic (kód jde jen e-mailem)',
+  adresaProPrvniKod({ stav: 'ok', kanal: 'telefon', kontakt: '+420777111222' }), null)
+ma('nesmyslný kontakt → nic',
+  adresaProPrvniKod({ stav: 'ok', kanal: 'email', kontakt: 'bez zavináče' }), null)
+ma('žádná pozvánka → nic', adresaProPrvniKod(undefined), null)
+
+ma('účet už je: kód email_exists', ucetUzExistuje({ code: 'email_exists' }), true)
+ma('účet už je: kód user_already_exists', ucetUzExistuje({ code: 'user_already_exists' }), true)
+ma('účet už je: jen text (starší Supabase)',
+  ucetUzExistuje({ message: 'A user with this email address has already been registered' }), true)
+ma('jiná chyba NENÍ „účet už je"',
+  ucetUzExistuje({ code: 'unexpected_failure', message: 'Database error' }), false)
+ma('žádná chyba NENÍ „účet už je"', ucetUzExistuje(null), false)
+
+const STUB_POZVANKA =
+  'data:text/javascript,' +
+  encodeURIComponent(
+    'export async function poslatPrvniKod() { return { ok: true, odeslanoKdy: 1 } }\n' +
+      'export async function overitPrvniKod() { return { ok: true } }\n',
+  )
+const PrvniPrihlaseni = await nactiKomponentu(
+  'app/pozvanka/[token]/prvni-prihlaseni.tsx',
+  [['./akce', STUB_POZVANKA]],
+)
+const prvni = renderToStaticMarkup(
+  createElement(PrvniPrihlaseni, { token: 't', adresaZkracena: 'j…i@example.cz' }),
+)
+ma('první obrazovka nabízí „Poslat kód"', prvni.includes('Poslat kód'), true)
+ma('a říká, kam kód půjde (zkrácená adresa)', prvni.includes('j…i@example.cz'), true)
+ma('adresu člověk NEZADÁVÁ — žádné pole na e-mail', /<input[^>]*type="email"/.test(prvni), false)
+
+const zdrojPozvanky = nacti('app/pozvanka/[token]/page.tsx')
+const zdrojAkciPozvanky = nacti('app/pozvanka/[token]/akce.ts')
+ma('stránka pozvánky nepřihlášeného NEpřesměruje na přihlášení',
+  /redirect\(/.test(zdrojPozvanky), false)
+ma('a nabídne mu první přihlášení', zdrojPozvanky.includes('<PrvniPrihlaseni'), true)
+ma('poslatPrvniKod bere jen token — adresa z prohlížeče do něj nejde',
+  /export async function poslatPrvniKod\(token: string\)/.test(zdrojAkciPozvanky), true)
+ma('účet se zakládá pro adresu z pozvánky v databázi',
+  /adresaZPozvanky\(/.test(zdrojAkciPozvanky) && /createUser\(\{ email: adresa/.test(zdrojAkciPozvanky), true)
+ma('přihlašovací stránka dál účty NEZAKLÁDÁ',
+  nacti('app/prihlaseni/akce.ts').includes('shouldCreateUser: false'), true)
+ma('a novému člověku řekne, kudy jít poprvé',
+  uvod.includes('Jste tu poprvé'), true)
 
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
