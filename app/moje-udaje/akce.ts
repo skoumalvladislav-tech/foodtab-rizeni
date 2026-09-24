@@ -182,8 +182,10 @@ export async function prepnoutEmailyUpozorneni(formData: FormData): Promise<void
   if (!ja) redirect('/')
 
   const supabase = await getServerSupabase()
-  // Politika profiles_update_self pustí jen vlastní řádek; sloupcový
-  // grant je jen na tenhle jediný sloupec.
+  // Politika profiles_update_self pustí jen vlastní řádek. Měnit smí
+  // přihlášený v profilu jen tenhle jediný sloupec — platí to až od
+  // 20260924130000: do té doby měl UPDATE na celou tabulku a sloupcový
+  // grant nic nezužoval (šlo si přepsat e-mail a přivlastnit pozvánku).
   const { error } = await supabase
     .from('profiles')
     .update({ upozorneni_emailem: chci })

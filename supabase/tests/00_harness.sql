@@ -12,6 +12,13 @@ create table auth.users (
   phone text unique,
   raw_user_meta_data jsonb not null default '{}'::jsonb,
   raw_app_meta_data  jsonb not null default '{}'::jsonb,
+  -- Ověření adresy a čísla. V Supabase výchozí hodnotu nemají — nastaví
+  -- je až potvrzení odkazem nebo kódem. Tady je výchozí now(): scénáře
+  -- zakládají účty, které se už přihlásily, a přihlásit se u nás jde
+  -- jen odkazem nebo kódem. Neověřený účet si scénář založí výslovně
+  -- s NULL (krok56).
+  email_confirmed_at timestamptz default now(),
+  phone_confirmed_at timestamptz default now(),
   created_at timestamptz not null default now()
 );
 
