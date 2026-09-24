@@ -38,3 +38,31 @@ export function odkazPichnuti(
   if (!puvod || !slug || !kod) return null
   return `${puvod}/${encodeURIComponent(slug)}/dochazka?kod=${encodeURIComponent(kod)}`
 }
+
+/**
+ * Kód z QR, který načetla čtečka V APLIKACI (Docházka, Dnes).
+ *
+ * Opak `odkazPichnuti`. Bere se JEN to, co kiosek opravdu kreslí:
+ * adresa na TÉŽE doméně ve tvaru `/<pobocka>/dochazka?kod=XXXXXXXX`.
+ * Samotných osm znaků ne: kiosek je do QR nikdy nekreslí a „Wifi2026"
+ * z cedulky na zdi by se předvyplnilo jako kód z tabletu. Cokoli jiného
+ * — cizí doména, jiná cesta, divný kód — vrací `null` a nikam se nejde:
+ * čtečka v aplikaci nesmí být cesta, jak člověka poslat na podvržený
+ * odkaz nalepený přes tablet.
+ *
+ * Vrací jen kód (velkými), ne adresu. Pobočku stejně určuje kód sám
+ * (`pichnout_kodem`), adresa se proto nepřebírá.
+ */
+export function kodZeSkenu(text: string | null | undefined, puvod: string): string | null {
+  const t = String(text ?? '').trim()
+  let url: URL
+  try {
+    url = new URL(t)
+  } catch {
+    return null
+  }
+  if (!puvod || url.origin !== puvod) return null
+  if (!/^\/[a-z0-9-]+\/dochazka\/?$/.test(url.pathname)) return null
+  const kod = url.searchParams.get('kod') ?? ''
+  return /^[A-Za-z0-9]{8}$/.test(kod) ? kod.toUpperCase() : null
+}

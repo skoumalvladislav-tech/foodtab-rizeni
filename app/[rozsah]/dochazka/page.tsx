@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -297,7 +298,14 @@ export default async function Dochazka({
   // chybí, netrpí tím zbytek obrazovky — směny se ukážou dál.
   const branchId = scope.branchId ?? ja.branch_id;
   const den = branchId ? await provozniDen(branchId) : null;
-  const muzePichat = Boolean(branchId && den);
+  /*
+    Majitel (a kdokoli bez domovské pobočky) na firemní úrovni pobočku
+    nemá — ale píchat kódem z tabletu může: pobočku určí KÓD
+    (`pichnout_kodem`), stav „v práci" dává `muj_den` za celou firmu.
+    Do 24. 9. tu dostal „Píchat zatím nejde".
+  */
+  const pichaBezPobocky = !branchId && scope.level === "tenant";
+  const muzePichat = Boolean(branchId && den) || pichaBezPobocky;
 
   /* --- 2a. MOJE SMĚNY -------------------------------------------- */
 
@@ -782,6 +790,29 @@ export default async function Dochazka({
       ? kodZQr.toUpperCase()
       : null;
 
+  /*
+    PŘIŠEL PÍCHNOUT (24. 9. 2026).
+
+    Kdo naskenuje QR z tabletu, jde píchnout — nic jiného. Vedoucí
+    a majitel ale měli nahoře živý přehled pobočky a ruční zápis za
+    druhé a vlastní Příchod/Odchod až pod nimi, takže obrazovka po
+    naskenování vypadala jako přehled („ukáže mi úvodní stránku").
+    Totéž s výsledkem píchnutí: „Příchod zapsán" i „Kód mezitím vypršel"
+    se kreslí v kartě píchačky, a ta byla mimo obrazovku.
+
+    Když se tedy píchá (kód z QR, výsledek, chyba píchnutí), je
+    píchačka nahoře sama a přehled je o ťuknutí dál. Řadový člověk
+    přehled nemá, u něj se nemění nic.
+  */
+  const pichaSe = Boolean(
+    platnyKod ||
+      pichnuto ||
+      uzavreno ||
+      chybaRucne === "kod" ||
+      chybaRucne === "kod-vyprsel" ||
+      chybaRucne === "pichnuti",
+  );
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const ostatni = [...stavy.entries()].filter(([id]) => id !== ja.id);
@@ -800,7 +831,7 @@ export default async function Dochazka({
 
   return (
     <>
-      {prehled ? (
+      {prehled && !pichaSe ? (
         <PrehledDochazky
           data={prehled.data}
           denPopis={denCesky(prehled.den)}
@@ -823,6 +854,8 @@ export default async function Dochazka({
           nevidí. Váže se na pobočku — na firemní úrovni se nekreslí,
           protože docházka patří k místu.
         */}
+        {/* Řadový člověk (bez přehledu) svoje nedokončené vidí vždycky. */}
+        {pichaSe && prehled ? null : (
         <PanelNedokoncene
           zaznamy={nedokoncene.map((z) => ({
             ...z,
@@ -834,6 +867,7 @@ export default async function Dochazka({
           smiOpravit={smiZapsatRucne}
           naPobocce={scope.level === "branch"}
         />
+        )}
 
         {/*
           Prázdná nabídka = formulář, do kterého nejde nic vybrat.
@@ -841,7 +875,7 @@ export default async function Dochazka({
           s průzorem lide_pro_pobocku. Radši se nekreslí nic než
           formulář, který nejde odeslat.
         */}
-        {smiZapsatRucne && scope.branchId && doVyberu.length > 0 ? (
+        {!pichaSe && smiZapsatRucne && scope.branchId && doVyberu.length > 0 ? (
           <PanelRucni
             rozsah={rozsah}
             pobockaId={scope.branchId}
@@ -856,13 +890,15 @@ export default async function Dochazka({
         ) : null}
 
         {/* Vedoucí má nahoře přehled všech; vlastní píchačka je pod ním. */}
-        {prehled && muzePichat ? <h2 style={nadpisSekce}>Moje docházka</h2> : null}
+        {prehled && muzePichat && !pichaSe ? <h2 style={nadpisSekce}>Moje docházka</h2> : null}
 
         {/* 1. Karta stavu s píchačkou */}
         {muzePichat ? (
           <Card as="section" padding="20px" style={{ boxShadow: "var(--shadow)" }}>
             <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
-              {scope.branchName ?? nazvyPobocek.get(branchId as string)}
+              {pichaBezPobocky
+                ? "Pobočku určí kód z tabletu"
+                : (scope.branchName ?? nazvyPobocek.get(branchId as string))}
             </p>
             {/*
               Docházkový status je hlavní informace téhle obrazovky
@@ -938,6 +974,12 @@ export default async function Dochazka({
               a napsaný pro člověka; druhá sada hlášek by se s ní
               rozešla.
             */}
+            {chybaRucne === "kod" ? (
+              <p className="hlaska-chyba" style={{ marginTop: "12px" }}>
+                Opište prosím kód z tabletu, nebo ho naskenujte.
+              </p>
+            ) : null}
+
             {chybaRucne === "pichnuti" && chybaText?.trim() ? (
               <p className="hlaska-chyba" style={{ marginTop: "12px" }}>
                 {chybaText}
@@ -1001,17 +1043,24 @@ export default async function Dochazka({
             <form action={zapsatDochazku} style={{ marginTop: "16px" }}>
               <input type="hidden" name="rozsah" value={rozsah} />
               <input type="hidden" name="druh" value={dalsiDruh} />
-              <label
-                style={{
-                  display: "grid",
-                  gap: "6px",
-                  fontSize: "13px",
-                  color: "var(--muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: ".06em",
-                }}
-              >
-                <span>Kód z tabletu</span>
+              {/*
+                Blok, ne <label>: uvnitř je od 24. 9. i čtečka QR s tlačítky
+                a náhledem kamery, a ty do popisku nepatří (ťuknutí by
+                skákalo do políčka a velká písmena by se dědila). Políčko
+                má vlastní aria-label „Kód z tabletu".
+              */}
+              <div style={{ display: "grid", gap: "6px" }}>
+                <label
+                  htmlFor="kod-z-tabletu"
+                  style={{
+                    fontSize: "13px",
+                    color: "var(--muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: ".06em",
+                  }}
+                >
+                  Kód z tabletu
+                </label>
                 {/*
                   Kód z QR se sem předvyplní a z adresy se hned zahodí
                   (docs/qr-na-kiosku-zadani.md, oddíl 3). Zapisovat při
@@ -1019,7 +1068,7 @@ export default async function Dochazka({
                   dopředu a člověk se vrací tlačítkem zpět.
                 */}
                 <PoleKodu zQr={platnyKod} />
-              </label>
+              </div>
               {/*
                 UX redesign, druhé kolo (oddíl 7): amber zůstává, ale
                 tlačítko nemusí být přes celou (na téhle stránce dost
@@ -1056,9 +1105,16 @@ export default async function Dochazka({
           <Vysvetleni nadpis="Píchat zatím nejde">
             {branchId
               ? "Nepodařilo se zjistit provozní den pobočky. Zkuste to prosím za chvíli znovu."
-              : "Docházka se zapisuje na pobočku a vaše členství žádnou nemá. Doplní ji správce firmy, nebo se přepněte na konkrétní pobočku."}
+              : "Docházka se zapisuje na pobočku. Přepněte se nahoře na konkrétní pobočku."}
           </Vysvetleni>
         )}
+
+        {/* Po píchnutí zpátky k přehledu pobočky — bez kódu v adrese. */}
+        {prehled && pichaSe ? (
+          <p style={{ margin: "14px 0 0", fontSize: "14px" }}>
+            <Link href={`/${rozsah}/dochazka`}>Zobrazit přehled pobočky</Link>
+          </p>
+        ) : null}
 
         {/* 2. Hrubá mzda za tenhle měsíc */}
         {vydelek ? (

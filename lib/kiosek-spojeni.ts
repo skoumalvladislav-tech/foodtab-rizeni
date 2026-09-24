@@ -36,15 +36,37 @@ export function jeOdpojeneZarizeni(chyba: unknown): boolean {
 }
 
 /**
+ * Co s chybou dotazu kiosku: `odpojeno` jen na výslovné „neznám",
+ * všechno ostatní (síť, časový limit, 5xx, chybějící grant) je
+ * `vypadek` a klíč zůstává. Jediné místo, kde se to rozhoduje —
+ * obrazovka i testy se ptají sem.
+ */
+export function stavPoChybe(chyba: unknown): 'odpojeno' | 'vypadek' {
+  return jeOdpojeneZarizeni(chyba) ? 'odpojeno' : 'vypadek'
+}
+
+/** Nepřišla odpověď vůbec (síť, časový limit) — na rozdíl od chyby serveru. */
+export function jeSitovaChyba(zprava: string | null | undefined): boolean {
+  return /failed to fetch|fetch failed|networkerror|network request failed|load failed|timeout|timed out|abort/i.test(
+    zprava ?? '',
+  )
+}
+
+/**
  * Hláška pro člověka u tabletu. Výpadek sítě z prohlížeče přijde
- * anglicky („TypeError: Failed to fetch", na iPadu „Load failed") —
- * to se přeloží; hláška z databáze (česká, třeba „PIN je zamčený")
- * se propustí, jak je.
+ * anglicky („TypeError: Failed to fetch", na iPadu „Load failed",
+ * „signal timed out") — to se přeloží. Hláška z databáze (česká,
+ * třeba „PIN je zamčený") se propustí, jak je. Technický text serveru
+ * (HTML brány, „permission denied", „JWT", „API key", PGRST…) na displej
+ * u baru nepatří — místo něj výchozí věta.
  */
 export function hlaskaKiosku(zprava: string | null | undefined, vychozi: string): string {
   if (!zprava) return vychozi
-  if (/failed to fetch|fetch failed|networkerror|network request failed|load failed/i.test(zprava)) {
+  if (jeSitovaChyba(zprava)) {
     return 'Spojení se serverem vypadlo. Zkuste to prosím za chvíli znovu.'
+  }
+  if (/<html|<!doctype|permission denied|jwt|api key|pgrst|internal server error|bad gateway/i.test(zprava)) {
+    return `${vychozi} Zkuste to prosím za chvíli znovu.`
   }
   return zprava
 }

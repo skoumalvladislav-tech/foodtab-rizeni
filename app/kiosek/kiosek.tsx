@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
-import { dalsiPokusZa, hlaskaKiosku, jeOdpojeneZarizeni } from '@/lib/kiosek-spojeni'
+import { dalsiPokusZa, hlaskaKiosku, jeSitovaChyba, stavPoChybe } from '@/lib/kiosek-spojeni'
 import { getKioskSupabase } from '@/lib/supabase/kiosek'
 import { denCesky } from '@/lib/upozorneni-text'
 
@@ -20,13 +20,19 @@ import QrKod from './qr-kod'
  * na kiosku není přihlášený nikdo (a klient kiosku přihlášení ani nečte,
  * viz lib/supabase/kiosek.ts).
  *
- * VÝPADEK SPOJENÍ NENÍ ODPOJENÍ (24. 9. 2026). Po zavření nebo přepnutí
- * aplikace tablet chvíli nemá síť. Kiosek dřív při první chybě ukázal
- * „Tablet není připojený" s tlačítkem, které smazalo klíč, a tablet pak
- * chtěl nový registrační kód. Teď: klíč se maže jen na výslovné „tohle
- * zařízení neznám" z databáze (lib/kiosek-spojeni.ts); výpadek kiosek
- * přečká s posledním stavem a zkouší to znovu sám — a hned, jakmile se
- * tablet vrátí do popředí nebo naskočí síť.
+ * VÝPADEK SPOJENÍ NENÍ ODPOJENÍ (24. 9. 2026). Hlášení: po zavření nebo
+ * přepnutí aplikace chtěl tablet „znovu přihlašovací údaje". Do té doby
+ * kiosek ukazoval „Tablet není připojený" s tlačítkem, které smazalo
+ * klíč, a to při KAŽDÉM načtení, dokud nepřišla první odpověď (Android
+ * kartu v pozadí zahodí a po návratu ji načte znovu), i při každé chybě
+ * spojení. Navíc HTML ze serveru byl vždycky formulář „Zaregistrovat
+ * tablet" — server klíč nezná — a zmizel až po načtení skriptů.
+ * Je to nejpravděpodobnější vysvětlení, ne ověřené na tabletu.
+ *
+ * Teď: dokud se klíč nepřečte, je vidět „Připojuji…"; klíč se maže jen
+ * na výslovné „tohle zařízení neznám" z databáze (lib/kiosek-spojeni.ts);
+ * výpadek kiosek přečká s posledním stavem a zkouší to znovu sám —
+ * a hned, jakmile se tablet vrátí do popředí nebo naskočí síť.
  */
 
 const ULOZISTE = 'foodtab-kiosek-klic'
@@ -77,12 +83,38 @@ function klicKlient(): string | null {
   }
 }
 
-function klicServer(): string | null {
-  return null
+/*
+  Server klíč nezná — a NESMÍ tvrdit, že žádný není. `null` by znamenalo
+  „tablet není zaregistrovaný" a HTML ze serveru by byl registrační
+  formulář, který na zaregistrovaném tabletu probleskne při každém
+  spuštění. `undefined` = „ještě nevím", kreslí se neutrální obrazovka.
+*/
+function klicServer(): string | null | undefined {
+  return undefined
+}
+
+/* Běží kiosek z ikony na ploše? (Na iPadu má jiné úložiště než Safari.) */
+function nicNeodebira(): () => void {
+  return () => {}
+}
+function zPlochy(): boolean {
+  try {
+    return (
+      window.matchMedia('(display-mode: fullscreen)').matches ||
+      window.matchMedia('(display-mode: standalone)').matches ||
+      Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone)
+    )
+  } catch {
+    return true
+  }
+}
+function zPlochyServer(): boolean {
+  return true
 }
 
 export default function Kiosek() {
-  const klic = useSyncExternalStore(odebirat, klicKlient, klicServer)
+  const klic = useSyncExternalStore<string | null | undefined>(odebirat, klicKlient, klicServer)
+  const jeZPlochy = useSyncExternalStore(nicNeodebira, zPlochy, zPlochyServer)
   const [stav, setStav] = useState<Stav | null>(null)
   const [zalohy, setZalohy] = useState<Zaloha[]>([])
   const [chyba, setChyba] = useState('')
@@ -95,45 +127,77 @@ export default function Kiosek() {
    */
   const [spojeni, setSpojeni] = useState<'ok' | 'vypadek' | 'odpojeno'>('ok')
   const [pokusu, setPokusu] = useState(0)
-  // Jen jeden dotaz naráz: návrat do popředí, naskočení sítě a časovač
-  // se můžou sejít v téže vteřině.
-  const bezi = useRef(false)
+  /** Poslední chyba spojení, drobně pod textem — jediná stopa z fotky tabletu. */
+  const [posledniChyba, setPosledniChyba] = useState('')
+  /*
+    Počítadlo kol místo zámku. Návrat do popředí, naskočení sítě
+    a časovač se můžou sejít v téže vteřině; platí jen odpověď
+    POSLEDNÍHO kola a jen pro klíč, který v úložišti pořád je. Zámek
+    („jeden dotaz naráz") by na visícím dotazu uvízl a spolkl všechny
+    další pokusy.
+  */
+  const kolo = useRef(0)
+  /*
+    Kdy začalo kolo, které ještě běží (0 = žádné). Časovač ho nepřebíjí
+    — jinak by každý tik po 3 s zahodil dotaz, který teprve čeká na
+    časový limit (10 s), výpadek by se nikdy nezapočítal a opakování
+    by nezpomalilo. Návrat do popředí, síť a „Zkusit hned" přebít smí.
+  */
+  const letiOd = useRef(0)
+
+  const odpojit = useCallback(() => {
+    setStav(null)
+    setSpojeni('odpojeno')
+    setChyba('')
+    setHlaska('')
+    setPin('')
+    setZalohy([])
+  }, [])
 
   const nacti = useCallback(async (k: string) => {
-    if (bezi.current) return
-    bezi.current = true
+    const moje = ++kolo.current
+    letiOd.current = Date.now()
+    const platiPorad = () => moje === kolo.current && klicKlient() === k
+    const vypadek = (zprava: string | undefined) => {
+      if (!platiPorad()) return
+      // „Odpojeno" přepíše jen úspěch nebo nová registrace, ne výpadek.
+      setSpojeni((s) => (s === 'odpojeno' ? s : 'vypadek'))
+      setPokusu((p) => p + 1)
+      setPosledniChyba(zprava ?? '')
+    }
     try {
       const supabase = getKioskSupabase()
       const { data, error } = await supabase.rpc('kiosk_stav', { p_klic: k })
+      if (!platiPorad()) return
       if (error) {
-        if (jeOdpojeneZarizeni(error)) {
-          setStav(null)
-          setSpojeni('odpojeno')
-          setChyba('')
-          return
-        }
-        throw new Error(error.message)
+        if (stavPoChybe(error) === 'odpojeno') odpojit()
+        else vypadek(error.message)
+        return
       }
       setStav(data as Stav)
       setSpojeni('ok')
       setPokusu(0)
+      setPosledniChyba('')
+      setChyba('')
 
       /*
         Nepotvrzené zálohy. Chodí zvlášť od stavu, protože se mění jindy:
         kód se obnovuje po vteřinách, záloha přibude, když ji někdo
         vyplatí. Chyba tady obrazovku neshodí — dokud není nasazená
         migrace se zálohami, funkce prostě není a kiosek má píchat dál.
+        Při výpadku uprostřed se seznam NEmaže (nepotvrzená záloha je
+        otevřený doklad); prázdný je jen, když funkce neexistuje.
       */
-      const { data: z } = await supabase.rpc('kiosk_zalohy', { p_klic: k })
-      setZalohy(Array.isArray(z) ? (z as Zaloha[]) : [])
-    } catch {
-      // Výpadek: poslední stav zůstává na obrazovce, klíč taky.
-      setSpojeni('vypadek')
-      setPokusu((p) => p + 1)
+      const { data: z, error: chybaZaloh } = await supabase.rpc('kiosk_zalohy', { p_klic: k })
+      if (!platiPorad()) return
+      if (!chybaZaloh) setZalohy(Array.isArray(z) ? (z as Zaloha[]) : [])
+      else if (chybaZaloh.code === 'PGRST202') setZalohy([])
+    } catch (duvod) {
+      vypadek(duvod instanceof Error ? duvod.message : undefined)
     } finally {
-      bezi.current = false
+      if (moje === kolo.current) letiOd.current = 0
     }
-  }, [])
+  }, [odpojit])
 
   /*
     Kód se obnovuje sám. Perioda je o něco kratší než jeho platnost —
@@ -158,6 +222,8 @@ export default function Kiosek() {
   useEffect(() => {
     if (!klic || spojeni === 'odpojeno') return
     const t = setInterval(() => {
+      // Běžící kolo (do 12 s — limit dotazu je 10 s) tik nepřebíjí.
+      if (letiOd.current && Date.now() - letiOd.current < 12_000) return
       void nacti(klic)
     }, perioda)
     return () => clearInterval(t)
@@ -172,7 +238,14 @@ export default function Kiosek() {
   useEffect(() => {
     if (!klic) return
     const hned = () => {
-      if (document.visibilityState === 'visible') void nacti(klic)
+      if (document.visibilityState === 'visible') {
+        // Po pobytu v pozadí začíná opakování zase od 3 s, ne od 30 s.
+        setPokusu(0)
+        void nacti(klic)
+      } else {
+        // Odchod z obrazovky: rozepsaný PIN na displeji nezůstane.
+        setPin('')
+      }
     }
     document.addEventListener('visibilitychange', hned)
     window.addEventListener('pageshow', hned)
@@ -205,7 +278,8 @@ export default function Kiosek() {
     const kod = new FormData(e.currentTarget).get('kod')
     setChyba('')
     try {
-      const supabase = getKioskSupabase()
+      // Bez časového limitu: kód je jednorázový (lib/supabase/kiosek.ts).
+      const supabase = getKioskSupabase({ bezLimitu: true })
       const { data, error } = await supabase.rpc('registrovat_zarizeni', {
         p_kod: String(kod ?? ''),
       })
@@ -242,9 +316,8 @@ export default function Kiosek() {
         p_zaloha: z.id,
       })
       if (error) {
-        if (jeOdpojeneZarizeni(error)) {
-          setStav(null)
-          setSpojeni('odpojeno')
+        if (stavPoChybe(error) === 'odpojeno') {
+          odpojit()
           return
         }
         throw new Error(error.message)
@@ -256,10 +329,11 @@ export default function Kiosek() {
         setHlaska(`${r.jmeno} — záloha ${koruny(z.castka_haleru)} potvrzena.`)
         setZalohy((d) => d.filter((x) => x.id !== z.id))
       }
-      setPin('')
     } catch (duvod) {
       setChyba(hlaskaKiosku(duvod instanceof Error ? duvod.message : null, 'Nepodařilo se potvrdit.'))
     } finally {
+      // PIN po KAŽDÉM pokusu pryč — i po chybě, ať nezůstane na displeji.
+      setPin('')
       setCeka(false)
     }
   }
@@ -277,9 +351,8 @@ export default function Kiosek() {
         p_druh: druh,
       })
       if (error) {
-        if (jeOdpojeneZarizeni(error)) {
-          setStav(null)
-          setSpojeni('odpojeno')
+        if (stavPoChybe(error) === 'odpojeno') {
+          odpojit()
           return
         }
         throw new Error(error.message)
@@ -311,12 +384,26 @@ export default function Kiosek() {
               : ''),
         )
       }
-      setPin('')
     } catch (duvod) {
       setChyba(hlaskaKiosku(duvod instanceof Error ? duvod.message : null, 'Nepodařilo se zapsat.'))
     } finally {
+      // PIN po KAŽDÉM pokusu pryč — i po chybě, ať nezůstane na displeji.
+      setPin('')
       setCeka(false)
     }
+  }
+
+  /* --- ještě nevím, jestli klíč je (server, první vykreslení) ------ */
+
+  if (klic === undefined) {
+    return (
+      <main style={obal}>
+        <div style={karta}>
+          <h1 style={nadpis}>Připojuji…</h1>
+          <p style={popis}>Načítám kiosek.</p>
+        </div>
+      </main>
+    )
   }
 
   /* --- zařízení ještě není zaregistrované ------------------------- */
@@ -331,6 +418,21 @@ export default function Kiosek() {
             vystavit registrační kód a opište ho sem. Platí pár minut
             a jde použít jednou.
           </p>
+          {/*
+            Klíč se uloží v TOMHLE prohlížeči. Na iPadu má ikona na ploše
+            jiné úložiště než Safari — registrace v Safari by v aplikaci
+            z plochy nebyla. Proto nejdřív na plochu, pak kód.
+          */}
+          {!jeZPlochy ? (
+            <p role="note" style={vypadekStyl}>
+              Kiosek máte otevřený v prohlížeči. Doporučujeme ho nejdřív
+              přidat na plochu (Android, Chrome: ⋮ → <strong>Přidat na plochu</strong> /{' '}
+              <strong>Instalovat</strong>; iPad, Safari: Sdílet → <strong>Přidat na
+              plochu</strong>), otevřít ikonou <strong>Kiosek</strong> a kód zadat až
+              tam. Na iPadu je to nutné — aplikace z plochy má jiné úložiště než
+              Safari.
+            </p>
+          ) : null}
           {chyba ? <p style={chybaStyl}>{chyba}</p> : null}
           <form onSubmit={registrovat}>
             <input
@@ -374,6 +476,10 @@ export default function Kiosek() {
               window.localStorage.removeItem(ULOZISTE)
               setSpojeni('ok')
               setPokusu(0)
+              setPosledniChyba('')
+              setPin('')
+              setHlaska('')
+              setZalohy([])
               ohlasit()
               setChyba('')
             }}
@@ -397,19 +503,25 @@ export default function Kiosek() {
         <div style={karta}>
           <h1 style={nadpis}>{spojeni === 'vypadek' ? 'Čekám na spojení' : 'Připojuji…'}</h1>
           <p style={popis}>
-            {spojeni === 'vypadek'
-              ? 'Spojení se serverem zatím nejde. Tablet zůstává zaregistrovaný a zkouší to znovu sám — zkontrolujte wifi.'
-              : 'Načítám kiosek.'}
+            {spojeni !== 'vypadek'
+              ? 'Načítám kiosek.'
+              : jeSitovaChyba(posledniChyba)
+                ? 'Spojení se serverem zatím nejde. Tablet zůstává zaregistrovaný a zkouší to znovu sám — zkontrolujte wifi.'
+                : 'Server teď neodpovídá, jak má. Tablet zůstává zaregistrovaný a zkouší to znovu sám.'}
           </p>
           {spojeni === 'vypadek' ? (
-            <button
-              type="button"
-              className="ft-tl ft-tl-vedlejsi"
-              style={tlacitko}
-              onClick={() => void nacti(klic)}
-            >
-              Zkusit hned
-            </button>
+            <>
+              <button
+                type="button"
+                className="ft-tl ft-tl-vedlejsi"
+                style={tlacitko}
+                onClick={() => void nacti(klic)}
+              >
+                Zkusit hned
+              </button>
+              {/* Drobně: jediná stopa, když majitel pošle fotku tabletu. */}
+              {posledniChyba ? <p style={stopaStyl}>{posledniChyba.slice(0, 160)}</p> : null}
+            </>
           ) : null}
         </div>
       </main>
@@ -432,10 +544,15 @@ export default function Kiosek() {
           řekne, že kód nahoře může být starý. Nic se nemaže.
         */}
         {spojeni === 'vypadek' ? (
-          <p role="status" style={vypadekStyl}>
-            Spojení se serverem vypadlo — zkouším to znovu. Kód může být
-            neplatný, PIN zkuste za chvíli.
-          </p>
+          <div role="status" style={{ ...vypadekStyl, display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ flex: '1 1 240px' }}>
+              Spojení se serverem vypadlo — zkouším to znovu. Kód může být
+              neplatný, PIN zkuste za chvíli.
+            </span>
+            <button type="button" className="ft-tl ft-tl-vedlejsi ft-tl-male" onClick={() => void nacti(klic)}>
+              Zkusit hned
+            </button>
+          </div>
         ) : null}
 
         <div style={mrizka}>
@@ -444,8 +561,9 @@ export default function Kiosek() {
 
             Zadání (docs/kiosek-pin-zalohy-zadani.md, uspořádání A) chce
             QR měnící se s kódem, který se čte BĚŽNÝM FOTOAPARÁTEM
-            telefonu — čtečka uvnitř aplikace není a nebude
-            (docs/qr-na-kiosku-zadani.md).
+            telefonu. Od 24. 9. 2026 umí QR načíst i sama aplikace
+            (Docházka → „Naskenovat kód z tabletu“) — rozhodnutí Šéfíka,
+            viz docs/qr-na-kiosku-zadani.md.
 
             V odkazu je jen pobočka a kód, nic jiného. Pobočku bere
             kiosek ze svého zařízení, ne z ničeho, co přijde
@@ -477,7 +595,12 @@ export default function Kiosek() {
               autoComplete="off"
               placeholder="••••"
               aria-label="PIN"
-              style={{ ...pole, letterSpacing: '.4em', fontSize: '30px' }}
+              /*
+                PIN se na displeji u baru nečte přes rameno: tečky místo
+                číslic. `type="password"` by tablet nutil nabízet uložení
+                hesla, proto jen maskování písmem (Chrome i Safari).
+              */
+              style={{ ...pole, letterSpacing: '.4em', fontSize: '30px', WebkitTextSecurity: 'disc' } as React.CSSProperties}
             />
             <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
               <button
@@ -658,6 +781,13 @@ const chybaStyl = {
   margin: '12px 0 0',
   fontSize: '14px',
   color: 'var(--bad)',
+} as const
+
+const stopaStyl = {
+  margin: '10px 0 0',
+  fontSize: '11.5px',
+  color: 'var(--faint)',
+  wordBreak: 'break-word' as const,
 } as const
 
 const vypadekStyl = {

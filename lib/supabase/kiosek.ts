@@ -17,9 +17,18 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
  * potvrdit_zalohu_pinem, registrovat_zarizeni).
  */
 let klient: SupabaseClient | null = null
+let klientBezLimitu: SupabaseClient | null = null
 
-export function getKioskSupabase(): SupabaseClient {
-  if (klient) return klient
+/**
+ * `bezLimitu` jen pro REGISTRACI: jednorázový kód se na serveru
+ * spotřebuje, i když klient dotaz přeruší — tablet by pak klíč nedostal
+ * a kód už by nešel použít znovu. Ostatní volání kiosku jsou bezpečná
+ * zopakovat (píchnutí stejného druhu do 2 minut vrátí původní záznam,
+ * druhé potvrzení zálohy nic nemění), ta časový limit mají.
+ */
+export function getKioskSupabase(moznosti: { bezLimitu?: boolean } = {}): SupabaseClient {
+  if (moznosti.bezLimitu && klientBezLimitu) return klientBezLimitu
+  if (!moznosti.bezLimitu && klient) return klient
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -30,8 +39,23 @@ export function getKioskSupabase(): SupabaseClient {
     )
   }
 
+  if (moznosti.bezLimitu) {
+    klientBezLimitu = createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    })
+    return klientBezLimitu
+  }
+
   klient = createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    /*
+      Časový limit dotazu. Fetch v prohlížeči sám žádný nemá a rpc je
+      POST, který postgrest-js neopakuje: po probuzení tabletu může
+      dotaz viset na mrtvém spojení minuty a kiosek by celou dobu ukazoval
+      propadlý kód bez varování. Po 10 s se dotaz přeruší, vrátí se jako
+      chyba a kiosek to vezme jako výpadek (lib/kiosek-spojeni.ts).
+    */
+    db: { timeout: 10_000 },
   })
   return klient
 }

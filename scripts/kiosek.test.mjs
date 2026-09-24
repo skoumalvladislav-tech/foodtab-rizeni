@@ -23,16 +23,23 @@
  */
 
 import fs from 'node:fs'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
   dalsiPokusZa,
   hlaskaKiosku,
   HLASKA_NEZNAME_ZARIZENI,
   jeOdpojeneZarizeni,
+  jeSitovaChyba,
+  stavPoChybe,
 } from '../lib/kiosek-spojeni.ts'
+import { nactiKomponentu } from './vykreslit.mjs'
 
 const KOREN = new URL('..', import.meta.url)
-const nacti = (cesta) => fs.readFileSync(new URL(cesta, KOREN), 'utf8')
+// Konce řádků sjednotit: na Windows je pracovní kopie v CRLF a regexy
+// s `\n` by tam tiše nenašly nic (a kontrola by prošla vždycky).
+const nacti = (cesta) => fs.readFileSync(new URL(cesta, KOREN), 'utf8').replace(/\r\n/g, '\n')
 
 let chyb = 0
 const ma = (popis, sk, ce) => {
@@ -67,6 +74,17 @@ ma('pomalý server (5xx) → NE odpojeno',
   jeOdpojeneZarizeni({ code: '57014', message: 'canceling statement due to statement timeout' }), false)
 ma('žádná chyba → NE odpojeno', jeOdpojeneZarizeni(null), false)
 
+// Rozhodnutí obrazovky jde přes jednu funkci — tady se testuje výstup.
+ma('stav po chybě: neznámý klíč → odpojeno',
+  stavPoChybe({ code: '42501', message: HLASKA_NEZNAME_ZARIZENI }), 'odpojeno')
+ma('stav po chybě: síť → výpadek', stavPoChybe({ message: 'TypeError: Failed to fetch' }), 'vypadek')
+ma('stav po chybě: časový limit (AbortError) → výpadek',
+  stavPoChybe({ code: '', message: 'AbortError: signal timed out' }), 'vypadek')
+ma('stav po chybě: chybějící grant → výpadek, klíč zůstává',
+  stavPoChybe({ code: '42501', message: 'permission denied for function kiosk_stav' }), 'vypadek')
+ma('síťová chyba se pozná (i časový limit)', jeSitovaChyba('TimeoutError: signal timed out'), true)
+ma('chyba serveru NENÍ síťová (věta o wifi by lhala)', jeSitovaChyba('Internal Server Error'), false)
+
 /*
   Hláška musí sedět s tím, co databáze OPRAVDU vrací. Bere se poslední
   definice každé funkce kiosku z migrací (platí ta s nejvyšším razítkem).
@@ -87,6 +105,31 @@ for (const funkce of ['kiosk_stav', 'kiosk_zalohy', 'pichnout_pinem', 'potvrdit_
   const telo = posledniDefinice(funkce) ?? ''
   ma(`${funkce}: na neznámý klíč vrací právě tuhle hlášku s 42501`,
     telo.includes(`'${HLASKA_NEZNAME_ZARIZENI}'`) && /using errcode = 'insufficient_privilege'/.test(telo), true)
+}
+
+/*
+  Kiosek volá databázi VÝHRADNĚ jako anon (lib/supabase/kiosek.ts).
+  Kdyby budoucí úklid grantů anon právo sebral, každý tablet by trvale
+  čekal na spojení. Hlídá se poslední grant i pozdější revoke.
+*/
+for (const funkce of ['kiosk_stav', 'kiosk_zalohy', 'pichnout_pinem', 'potvrdit_zalohu_pinem', 'registrovat_zarizeni']) {
+  let posledniGrant = null
+  let revokePo = false
+  for (const f of migrace) {
+    const s = nacti(`supabase/migrations/${f}`)
+    for (const radek of s.split('\n')) {
+      if (new RegExp(`grant execute on function public\\.${funkce}\\(`).test(radek)) {
+        posledniGrant = radek
+        revokePo = false
+      }
+      if (new RegExp(`revoke .*on function public\\.${funkce}\\(.*from .*anon`).test(radek) ||
+          /revoke .*on all functions in schema public .*from .*anon/.test(radek)) {
+        revokePo = true
+      }
+    }
+  }
+  ma(`${funkce}: smí ji volat anon (a nikdo mu to potom nesebral)`,
+    Boolean(posledniGrant && /\banon\b/.test(posledniGrant)) && !revokePo, true)
 }
 
 console.log('\n== 2. Opakování a hlášky ===================================')
@@ -116,7 +159,21 @@ ma('obrazovka bez stavu (načítání/výpadek) nemaže nic',
   /if \(!stav\) \{[\s\S]*?removeItem[\s\S]*?\n  \}\n/.test(kiosek.slice(kiosek.indexOf('if (!stav) {'))), false)
 ma('kiosek nepoužívá klienta s přihlášením aplikace', /getBrowserSupabase/.test(kiosek), false)
 ma('… ale vlastního bez sezení', /getKioskSupabase\(\)/.test(kiosek), true)
-ma('odpojení se pozná přes jeOdpojeneZarizeni', /jeOdpojeneZarizeni\(error\)/.test(kiosek), true)
+ma('odpojení se pozná jen přes stavPoChybe', /stavPoChybe\(error\) === 'odpojeno'/.test(kiosek), true)
+ma("'odpojeno' se nastavuje jen v odpojit()",
+  [...kiosek.matchAll(/setSpojeni\('odpojeno'\)/g)].length === 1 &&
+    kiosek.indexOf("setSpojeni('odpojeno')") > kiosek.indexOf('const odpojit = useCallback'), true)
+ma('výpadek „odpojeno" nepřepíše', /s === 'odpojeno' \? s : 'vypadek'/.test(kiosek), true)
+ma('časovač nepřebíjí běžící kolo (jinak opakování nezpomalí)',
+  /if \(letiOd\.current && Date\.now\(\) - letiOd\.current < 12_000\) return/.test(kiosek), true)
+ma('registrace jde klientem bez časového limitu (kód je jednorázový)',
+  /getKioskSupabase\(\{ bezLimitu: true \}\)[\s\S]{0,120}registrovat_zarizeni/.test(kiosek), true)
+ma('bez zámku, který by uvízl na visícím dotazu (počítadlo kol)',
+  /bezi\.current/.test(kiosek) === false && /\+\+kolo\.current/.test(kiosek), true)
+ma('odpověď platí jen pro klíč, který v úložišti pořád je', /klicKlient\(\) === k/.test(kiosek), true)
+ma('PIN se maže po každém pokusu (finally)', [...kiosek.matchAll(/finally \{\n\s+setPin\(''\)/g)].length, 2)
+ma('PIN je na displeji maskovaný', /WebkitTextSecurity: 'disc'/.test(kiosek), true)
+ma('výpadek uprostřed nesmaže seznam záloh', /if \(!chybaZaloh\) setZalohy/.test(kiosek), true)
 ma('po návratu do popředí se ptá hned (visibilitychange)', /addEventListener\('visibilitychange'/.test(kiosek), true)
 ma('… a po naskočení sítě (online)', /addEventListener\('online'/.test(kiosek), true)
 ma('časovač po neúspěchu jen čeká — neptá se hned znovu (žádná smyčka)',
@@ -127,6 +184,40 @@ ma('o úložiště se žádá, ať ho prohlížeč nemaže', /navigator\.storage
 const klient = bezKomentaru(nacti('lib/supabase/kiosek.ts'))
 ma('klient kiosku sezení neukládá ani neobnovuje',
   /persistSession: false/.test(klient) && /autoRefreshToken: false/.test(klient), true)
+ma('… a dotaz má časový limit', /db: \{ timeout: 10_000 \}/.test(klient), true)
+
+/*
+  HTML ZE SERVERU. Server klíč nezná; do 24. 9. poslal registrační
+  formulář, který na zaregistrovaném tabletu probleskl při každém
+  spuštění — přesně „chce to znovu přihlašovací údaje". Vykresluje se
+  skutečná komponenta.
+*/
+const STUB_KLIENT = 'data:text/javascript,' + encodeURIComponent(
+  'export function getKioskSupabase() { throw new Error("na serveru se nevolá") }\n')
+const Kiosek = await nactiKomponentu('app/kiosek/kiosek.tsx', [['@/lib/supabase/kiosek', STUB_KLIENT]])
+const zeServeru = renderToStaticMarkup(createElement(Kiosek))
+ma('ze serveru přijde „Připojuji…"', zeServeru.includes('Připojuji'), true)
+ma('… a NE registrační formulář', /Zaregistrovat/.test(zeServeru), false)
+
+console.log('\n== 4. Docházka po naskenování QR ===========================')
+
+/*
+  Vedoucí a majitel měli nahoře přehled pobočky a ruční zápis, vlastní
+  Příchod/Odchod až pod nimi — obrazovka z QR vypadala jako „úvodní
+  stránka". Když se píchá, je píchačka nahoře sama.
+*/
+const dochazka = bezKomentaru(nacti('app/[rozsah]/dochazka/page.tsx'))
+ma('kód z QR / výsledek píchnutí = režim „píchá se"',
+  /const pichaSe = Boolean\(\s*platnyKod \|\|\s*pichnuto \|\|/.test(dochazka), true)
+ma('… přehled pobočky se tehdy nekreslí', /\{prehled && !pichaSe \? \(\s*<PrehledDochazky/.test(dochazka), true)
+ma('… ani ruční zápis za druhé', /\{!pichaSe && smiZapsatRucne/.test(dochazka), true)
+ma('… ani panel nedokončených — ale jen tomu, kdo má přehled (řadový ho vidí vždycky)',
+  /\{pichaSe && prehled \? null : \(\s*<PanelNedokoncene/.test(dochazka), true)
+ma('majitel bez domovské pobočky píchá i na /firma (pobočku určí kód)',
+  /const pichaBezPobocky = !branchId && scope\.level === "tenant"/.test(dochazka) &&
+    /const muzePichat = Boolean\(branchId && den\) \|\| pichaBezPobocky/.test(dochazka), true)
+ma('chybějící kód má na Docházce hlášku', /chybaRucne === "kod" \?/.test(dochazka), true)
+ma('… a k přehledu vede odkaz', /prehled && pichaSe \?[\s\S]{0,200}Zobrazit přehled pobočky/.test(dochazka), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)
