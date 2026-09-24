@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
 import { KBELIK, MAX_DELKA_S, cestaVUlozisti, priponaZMime } from '@/lib/hlasove-zpravy'
+import { naplanovatPushKeZprave } from '@/lib/komunikace/push-hned'
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { zakladZRozsahu, type Zaklad } from './zaklad'
@@ -168,8 +169,12 @@ export async function odeslatZpravuKlient(vstup: {
     return { ok: false, chyba: error.message, trvale }
   }
 
+  // Push příjemcům hned, ne až s plánovačem — po odpovědi, odesílatel nečeká.
+  const zpravaId = String(data)
+  naplanovatPushKeZprave(zpravaId, z.tenantId)
+
   revalidatePath(`/${z.rozsah}/vzkazy/${konverzace}`)
-  return { ok: true, id: String(data) }
+  return { ok: true, id: zpravaId }
 }
 
 /**
@@ -204,7 +209,7 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
   }
 
   const supabase = await getServerSupabase()
-  const { error } = await supabase.rpc('poslat_zpravu', {
+  const { data, error } = await supabase.rpc('poslat_zpravu', {
     p_konverzace: konverzace,
     p_text: text,
     p_priorita: priorita,
@@ -213,6 +218,9 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
   if (error) {
     redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
   }
+
+  const zpravaId = String(data)
+  naplanovatPushKeZprave(zpravaId, z.tenantId)
 
   revalidatePath(zpet)
   redirect(zpet)
@@ -275,7 +283,7 @@ export async function odeslatHlasovku(formData: FormData): Promise<void> {
     redirect(`${zpet}?chyba=${encodeURIComponent(`Hlasovku se nepodařilo uložit: ${nahrano.error.message}`)}`)
   }
 
-  const { error } = await supabase.rpc('poslat_zpravu', {
+  const { data, error } = await supabase.rpc('poslat_zpravu', {
     p_konverzace: konverzace,
     p_text: '',
     p_priorita: 'normal',
@@ -290,6 +298,9 @@ export async function odeslatHlasovku(formData: FormData): Promise<void> {
     await supabase.storage.from(KBELIK).remove([kam])
     redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
   }
+
+  const zpravaId = String(data)
+  naplanovatPushKeZprave(zpravaId, z.tenantId)
 
   revalidatePath(zpet)
   redirect(zpet)
