@@ -163,5 +163,36 @@ ma('a formuláři předává filtrovaný seznam',
 ma('nefiltrovaný seznam už formuláři nedává',
   stranka.includes('lide={lide.map('), false)
 
+/*
+  24. 9. 2026: „u zaměstnanců, kteří na to mají práva, mi nejdou
+  vyplácet zálohy". Nabídka se brala z průzoru pro RUČNÍ ZÁPIS DOCHÁZKY
+  (brána attendance.manage) — kdo měl jen advances.manage, viděl prázdno.
+  A výplata se účtovala na domovskou pobočku, takže člověk bez ní
+  (a zaskakující) zálohu nedostal.
+*/
+console.log('\n== Kdo má právo na zálohy, může vyplácet ==')
+ma('nabídka „Komu" je z průzoru pro zálohy, ne pro ruční docházku',
+  /await lideProZalohy\(tenantId, pobockaVydeje, denVydeje\)/.test(stranka) && !/lideProPobocku\(/.test(stranka), true)
+const lide = fs.readFileSync(new URL('lib/lide-pobocky.ts', KOREN), 'utf8')
+ma('… a ten průzor je lide_pro_zalohy', /rpc\('lide_pro_zalohy'/.test(lide), true)
+ma('… lidé bez pobočky mají v nabídce své označení', /bez pobočky/.test(lide), true)
+const akceZaloh = fs.readFileSync(new URL('app/[rozsah]/zalohy/akce.ts', KOREN), 'utf8')
+ma('výplata posílá pobočku VÝDEJE z ověřeného rozsahu (ne z formuláře)',
+  /const pobocka = pristup\.scope\.branchId/.test(akceZaloh) && /p_branch: pobocka/.test(akceZaloh) &&
+    !/formData\.get\('pobocka'\)|formData\.get\('branch/.test(akceZaloh), true)
+/*
+  Nabídka a výplata musí brát STEJNÉ okno směn — jinak nabídka ukáže
+  člověka, kterému výplata odmítne („nepracuje"), a to je přesně ten
+  rozchod, kvůli kterému hlášení vzniklo.
+*/
+const migraceZaloh = fs.readFileSync(
+  new URL('supabase/migrations/20260924120000_zalohy_vyplaceni_na_pobocce.sql', KOREN), 'utf8')
+const oknoVyplaty = migraceZaloh.match(/patri_k_zaloze\(p_tenant, v_branch, v_den - (\d+), v_den \+ (\d+)\)/)
+const oknoNabidky = lide.slice(lide.indexOf('export async function lideProZalohy')).match(/okno = (\d+)/)
+ma('okno směn: výplata (±N v migraci) = nabídka (okno v lideProZalohy)',
+  Boolean(oknoVyplaty && oknoNabidky) && oknoVyplaty[1] === oknoVyplaty[2] && oknoVyplaty[1] === oknoNabidky[1], true)
+ma('do nasazení migrace se volá postaru (bez p_branch)',
+  /funkceNeexistuje\(error\)\) \{\s*;\(\{ data, error \} = await supabase\.rpc\('vyplatit_zalohu', \{\s*p_tenant: tenantId,\s*p_employee: zamestnanec,\s*p_castka: halere,\s*p_poznamka: poznamka,\s*\}\)\)/.test(akceZaloh), true)
+
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

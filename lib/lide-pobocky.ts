@@ -59,7 +59,59 @@ export async function lideProPobocku(
   }[]).map((c) => ({ id: c.employee_id, jmeno: c.jmeno, domovska: c.domovska }))
 }
 
-/** Jméno do nabídky. Kdo tu jen zaskakuje, to má u sebe napsané. */
-export function jmenoDoNabidky(c: ClovekPobocky): string {
-  return c.domovska ? c.jmeno : `${c.jmeno} — zaskakuje`
+/** Jméno do nabídky. Kdo tu jen zaskakuje (nebo nemá pobočku), to má u sebe napsané. */
+export function jmenoDoNabidky(c: ClovekPobocky & { bezPobocky?: boolean }): string {
+  if (c.domovska) return c.jmeno
+  return c.bezPobocky ? `${c.jmeno} — bez pobočky` : `${c.jmeno} — zaskakuje`
+}
+
+/**
+ * Komu jde na pobočce VYPLATIT ZÁLOHU (24. 9. 2026).
+ *
+ * Dřív se bralo `lideProPobocku` — průzor pro RUČNÍ ZÁPIS DOCHÁZKY,
+ * který vrací lidi jen tomu, kdo má `attendance.manage`. Kdo měl jen
+ * právo vyplácet zálohy (`advances.manage`, třeba zařazení
+ * Číšník/servírka), viděl prázdnou nabídku „Komu" a nevyplatil nikomu.
+ *
+ * `lide_pro_zalohy` má vlastní bránu (`advances.manage` na téhle
+ * pobočce) a stejné pravidlo „kdo sem patří" jako `vyplatit_zalohu`:
+ * domovská pobočka, směna tady v okně, nebo bez pobočky (ne majitel).
+ * Dokud migrace 20260924120000 neproběhne, vrací se to, co dřív.
+ */
+export async function lideProZalohy(
+  tenantId: string,
+  branchId: string,
+  den: string,
+  okno = 7,
+): Promise<(ClovekPobocky & { bezPobocky: boolean })[]> {
+  const supabase = await getServerSupabase()
+
+  const { data, error } = await supabase.rpc('lide_pro_zalohy', {
+    p_tenant: tenantId,
+    p_branch: branchId,
+    p_od: posunDatum(den, -okno),
+    p_do: posunDatum(den, okno),
+  })
+
+  if (error) {
+    if (funkceNeexistuje(error)) {
+      return (await lideProPobocku(tenantId, branchId, den, okno)).map((c) => ({
+        ...c,
+        bezPobocky: false,
+      }))
+    }
+    throw new DotazSelhal('lidé pro zálohy', error)
+  }
+
+  return ((data ?? []) as {
+    employee_id: string
+    jmeno: string
+    domovska: boolean
+    bez_pobocky: boolean
+  }[]).map((c) => ({
+    id: c.employee_id,
+    jmeno: c.jmeno,
+    domovska: c.domovska,
+    bezPobocky: c.bez_pobocky,
+  }))
 }

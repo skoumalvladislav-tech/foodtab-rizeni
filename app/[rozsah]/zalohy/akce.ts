@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { naHalere } from '@/lib/mzdy'
+import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
@@ -50,13 +51,40 @@ export async function vyplatitZalohu(
     return { stav: 'chyba', text: 'Na vyplácení záloh nemáte oprávnění.' }
   }
 
+  /*
+    Záloha se vydává NA POBOČCE, kde se hotovost podává z ruky do ruky
+    (24. 9. 2026) — ne na domovské pobočce toho člověka. Jinak nešlo
+    vyplatit nikomu bez domovské pobočky a zaskakujícímu se záloha
+    zaúčtovala jinam (a vedoucí s právem jen na téhle pobočce ji
+    nevyplatil vůbec). Pobočka se bere z rozsahu ověřeného na serveru,
+    ne z formuláře; právo na ní hlídá znovu databáze.
+  */
+  const pobocka = pristup.scope.branchId
+  if (!pobocka) {
+    return {
+      stav: 'chyba',
+      text: 'Zálohu vydáváte na konkrétní pobočce — přepněte se nahoře na ni.',
+    }
+  }
+
   const supabase = await getServerSupabase()
-  const { data, error } = await supabase.rpc('vyplatit_zalohu', {
+  let { data, error } = await supabase.rpc('vyplatit_zalohu', {
     p_tenant: tenantId,
     p_employee: zamestnanec,
     p_castka: halere,
     p_poznamka: poznamka,
+    p_branch: pobocka,
   })
+  // Do nasazení migrace 20260924120000 databáze pobočku výdeje nezná —
+  // pak jako dřív (domovská pobočka).
+  if (error && funkceNeexistuje(error)) {
+    ;({ data, error } = await supabase.rpc('vyplatit_zalohu', {
+      p_tenant: tenantId,
+      p_employee: zamestnanec,
+      p_castka: halere,
+      p_poznamka: poznamka,
+    }))
+  }
 
   // Hlášku psala databáze a je pro člověka — projde se dál, ať se
   // nevymýšlí druhá.

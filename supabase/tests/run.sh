@@ -86,7 +86,7 @@ for f in "$ROOT"/supabase/migrations/*.sql; do
 done
 
 echo
-for t in etapa0_scenar krok2_scenar krok3_scenar krok4_scenar krok5_scenar krok6_scenar krok7_scenar krok8_scenar krok9_scenar krok10_scenar krok11_scenar krok12_scenar krok13_scenar krok14_scenar krok15_scenar krok16_scenar krok17_scenar krok19_scenar krok20_scenar krok21_scenar krok22_scenar krok23_scenar krok24_scenar krok25_scenar krok26_scenar krok27_scenar krok28_scenar krok29_scenar krok30_scenar krok31_scenar krok32_scenar krok33_scenar krok34_scenar krok35_scenar krok36_scenar krok37_scenar krok38_scenar krok39_scenar krok40_scenar krok41_scenar krok42_scenar krok43_scenar krok44_scenar krok45_scenar krok46_scenar krok47_scenar krok48_scenar krok49_scenar krok50_scenar krok51_scenar krok52_scenar krok53_scenar krok54_scenar; do
+for t in etapa0_scenar krok2_scenar krok3_scenar krok4_scenar krok5_scenar krok6_scenar krok7_scenar krok8_scenar krok9_scenar krok10_scenar krok11_scenar krok12_scenar krok13_scenar krok14_scenar krok15_scenar krok16_scenar krok17_scenar krok19_scenar krok20_scenar krok21_scenar krok22_scenar krok23_scenar krok24_scenar krok25_scenar krok26_scenar krok27_scenar krok28_scenar krok29_scenar krok30_scenar krok31_scenar krok32_scenar krok33_scenar krok34_scenar krok35_scenar krok36_scenar krok37_scenar krok38_scenar krok39_scenar krok40_scenar krok41_scenar krok42_scenar krok43_scenar krok44_scenar krok45_scenar krok46_scenar krok47_scenar krok48_scenar krok49_scenar krok50_scenar krok51_scenar krok52_scenar krok53_scenar krok54_scenar krok57_scenar; do
   spustit_scenar "$ROOT/supabase/tests/$t.sql"
   grep -E '^(==|psql.*(OK |SELHALO))| VŠECHNY| KROK' "$VYSTUP" \
     | sed 's/^psql[^ ]* NOTICE: //' || true

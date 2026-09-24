@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { hasAccess } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { jmenoDoNabidky, lideProPobocku } from '@/lib/lide-pobocky'
+import { jmenoDoNabidky, lideProZalohy } from '@/lib/lide-pobocky'
 import { koruny, prvniDenMesice } from '@/lib/mzdy'
 import { provozniDen } from '@/lib/provozni-den'
 import { pocet, veta } from '@/lib/sklonovani'
@@ -125,14 +125,15 @@ export default async function Zalohy({
   /*
     Lidé, kterým jde vyplácet.
 
-    Stejný zdroj jako ruční zápis docházky (lib/lide-pobocky.ts): lidé
-    pobočky PLUS každý, kdo tu má směnu v okně, se stejným označením
-    „zaskakuje“. Je to tentýž případ a tentýž důvod — kdo tu dnes stojí
-    směnu, tomu může být potřeba vyplatit zálohu.
+    Lidé pobočky PLUS každý, kdo tu má směnu v okně („zaskakuje“), PLUS
+    lidé bez domovské pobočky (ne majitel) — kdo tu dnes stojí směnu,
+    tomu může být potřeba vyplatit zálohu.
 
-    Dřív to bylo napsané dvakrát a rozešlo se to: docházka zaskakující
-    nabízela, zálohy je nenabízely vůbec
-    (docs/ukoly-codea-drobnosti-2026-09-01.md, bod 2).
+    Od 24. 9. 2026 z vlastního průzoru `lide_pro_zalohy` (lib/lide-
+    pobocky.ts): dřív se bral průzor pro ruční zápis docházky, který
+    vrací lidi jen tomu, kdo má `attendance.manage`, a kdo měl jen právo
+    vyplácet zálohy, viděl prázdnou nabídku. Pravidlo „kdo sem patří"
+    hlídá stejně i `vyplatit_zalohu`.
 
     Na firemní úrovni se nevyplácí: záloha se vydává na pobočce, protože
     ji tam někdo fyzicky podá z ruky do ruky.
@@ -143,7 +144,7 @@ export default async function Zalohy({
 
   const lide =
     smiVyplacet && pobockaVydeje && denVydeje
-      ? await lideProPobocku(tenantId, pobockaVydeje, denVydeje)
+      ? await lideProZalohy(tenantId, pobockaVydeje, denVydeje)
       : []
 
   const { data: nastaveniData, error: chybaNastaveni } = await supabase
