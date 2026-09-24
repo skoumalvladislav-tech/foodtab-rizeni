@@ -137,6 +137,13 @@ export default function Kiosek() {
     další pokusy.
   */
   const kolo = useRef(0)
+  /*
+    Kdy začalo kolo, které ještě běží (0 = žádné). Časovač ho nepřebíjí
+    — jinak by každý tik po 3 s zahodil dotaz, který teprve čeká na
+    časový limit (10 s), výpadek by se nikdy nezapočítal a opakování
+    by nezpomalilo. Návrat do popředí, síť a „Zkusit hned" přebít smí.
+  */
+  const letiOd = useRef(0)
 
   const odpojit = useCallback(() => {
     setStav(null)
@@ -149,6 +156,7 @@ export default function Kiosek() {
 
   const nacti = useCallback(async (k: string) => {
     const moje = ++kolo.current
+    letiOd.current = Date.now()
     const platiPorad = () => moje === kolo.current && klicKlient() === k
     const vypadek = (zprava: string | undefined) => {
       if (!platiPorad()) return
@@ -186,6 +194,8 @@ export default function Kiosek() {
       else if (chybaZaloh.code === 'PGRST202') setZalohy([])
     } catch (duvod) {
       vypadek(duvod instanceof Error ? duvod.message : undefined)
+    } finally {
+      if (moje === kolo.current) letiOd.current = 0
     }
   }, [odpojit])
 
@@ -212,6 +222,8 @@ export default function Kiosek() {
   useEffect(() => {
     if (!klic || spojeni === 'odpojeno') return
     const t = setInterval(() => {
+      // Běžící kolo (do 12 s — limit dotazu je 10 s) tik nepřebíjí.
+      if (letiOd.current && Date.now() - letiOd.current < 12_000) return
       void nacti(klic)
     }, perioda)
     return () => clearInterval(t)
@@ -266,7 +278,8 @@ export default function Kiosek() {
     const kod = new FormData(e.currentTarget).get('kod')
     setChyba('')
     try {
-      const supabase = getKioskSupabase()
+      // Bez časového limitu: kód je jednorázový (lib/supabase/kiosek.ts).
+      const supabase = getKioskSupabase({ bezLimitu: true })
       const { data, error } = await supabase.rpc('registrovat_zarizeni', {
         p_kod: String(kod ?? ''),
       })
@@ -412,9 +425,12 @@ export default function Kiosek() {
           */}
           {!jeZPlochy ? (
             <p role="note" style={vypadekStyl}>
-              Kiosek máte otevřený v prohlížeči. Nejdřív ho přidejte na plochu
-              (v Chromu ⋮ → <strong>Přidat na plochu</strong> / <strong>Instalovat</strong>),
-              otevřete ho ikonou <strong>Kiosek</strong> a kód zadejte až tam.
+              Kiosek máte otevřený v prohlížeči. Doporučujeme ho nejdřív
+              přidat na plochu (Android, Chrome: ⋮ → <strong>Přidat na plochu</strong> /{' '}
+              <strong>Instalovat</strong>; iPad, Safari: Sdílet → <strong>Přidat na
+              plochu</strong>), otevřít ikonou <strong>Kiosek</strong> a kód zadat až
+              tam. Na iPadu je to nutné — aplikace z plochy má jiné úložiště než
+              Safari.
             </p>
           ) : null}
           {chyba ? <p style={chybaStyl}>{chyba}</p> : null}

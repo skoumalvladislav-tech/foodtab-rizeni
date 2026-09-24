@@ -164,6 +164,10 @@ ma("'odpojeno' se nastavuje jen v odpojit()",
   [...kiosek.matchAll(/setSpojeni\('odpojeno'\)/g)].length === 1 &&
     kiosek.indexOf("setSpojeni('odpojeno')") > kiosek.indexOf('const odpojit = useCallback'), true)
 ma('výpadek „odpojeno" nepřepíše', /s === 'odpojeno' \? s : 'vypadek'/.test(kiosek), true)
+ma('časovač nepřebíjí běžící kolo (jinak opakování nezpomalí)',
+  /if \(letiOd\.current && Date\.now\(\) - letiOd\.current < 12_000\) return/.test(kiosek), true)
+ma('registrace jde klientem bez časového limitu (kód je jednorázový)',
+  /getKioskSupabase\(\{ bezLimitu: true \}\)[\s\S]{0,120}registrovat_zarizeni/.test(kiosek), true)
 ma('bez zámku, který by uvízl na visícím dotazu (počítadlo kol)',
   /bezi\.current/.test(kiosek) === false && /\+\+kolo\.current/.test(kiosek), true)
 ma('odpověď platí jen pro klíč, který v úložišti pořád je', /klicKlient\(\) === k/.test(kiosek), true)
@@ -207,7 +211,12 @@ ma('kód z QR / výsledek píchnutí = režim „píchá se"',
   /const pichaSe = Boolean\(\s*platnyKod \|\|\s*pichnuto \|\|/.test(dochazka), true)
 ma('… přehled pobočky se tehdy nekreslí', /\{prehled && !pichaSe \? \(\s*<PrehledDochazky/.test(dochazka), true)
 ma('… ani ruční zápis za druhé', /\{!pichaSe && smiZapsatRucne/.test(dochazka), true)
-ma('… ani panel nedokončených', /\{pichaSe \? null : \(\s*<PanelNedokoncene/.test(dochazka), true)
+ma('… ani panel nedokončených — ale jen tomu, kdo má přehled (řadový ho vidí vždycky)',
+  /\{pichaSe && prehled \? null : \(\s*<PanelNedokoncene/.test(dochazka), true)
+ma('majitel bez domovské pobočky píchá i na /firma (pobočku určí kód)',
+  /const pichaBezPobocky = !branchId && scope\.level === "tenant"/.test(dochazka) &&
+    /const muzePichat = Boolean\(branchId && den\) \|\| pichaBezPobocky/.test(dochazka), true)
+ma('chybějící kód má na Docházce hlášku', /chybaRucne === "kod" \?/.test(dochazka), true)
 ma('… a k přehledu vede odkaz', /prehled && pichaSe \?[\s\S]{0,200}Zobrazit přehled pobočky/.test(dochazka), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)

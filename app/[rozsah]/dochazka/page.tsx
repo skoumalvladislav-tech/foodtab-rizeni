@@ -298,7 +298,14 @@ export default async function Dochazka({
   // chybí, netrpí tím zbytek obrazovky — směny se ukážou dál.
   const branchId = scope.branchId ?? ja.branch_id;
   const den = branchId ? await provozniDen(branchId) : null;
-  const muzePichat = Boolean(branchId && den);
+  /*
+    Majitel (a kdokoli bez domovské pobočky) na firemní úrovni pobočku
+    nemá — ale píchat kódem z tabletu může: pobočku určí KÓD
+    (`pichnout_kodem`), stav „v práci" dává `muj_den` za celou firmu.
+    Do 24. 9. tu dostal „Píchat zatím nejde".
+  */
+  const pichaBezPobocky = !branchId && scope.level === "tenant";
+  const muzePichat = Boolean(branchId && den) || pichaBezPobocky;
 
   /* --- 2a. MOJE SMĚNY -------------------------------------------- */
 
@@ -847,7 +854,8 @@ export default async function Dochazka({
           nevidí. Váže se na pobočku — na firemní úrovni se nekreslí,
           protože docházka patří k místu.
         */}
-        {pichaSe ? null : (
+        {/* Řadový člověk (bez přehledu) svoje nedokončené vidí vždycky. */}
+        {pichaSe && prehled ? null : (
         <PanelNedokoncene
           zaznamy={nedokoncene.map((z) => ({
             ...z,
@@ -888,7 +896,9 @@ export default async function Dochazka({
         {muzePichat ? (
           <Card as="section" padding="20px" style={{ boxShadow: "var(--shadow)" }}>
             <p style={{ margin: 0, fontSize: "13px", color: "var(--muted)" }}>
-              {scope.branchName ?? nazvyPobocek.get(branchId as string)}
+              {pichaBezPobocky
+                ? "Pobočku určí kód z tabletu"
+                : (scope.branchName ?? nazvyPobocek.get(branchId as string))}
             </p>
             {/*
               Docházkový status je hlavní informace téhle obrazovky
@@ -964,6 +974,12 @@ export default async function Dochazka({
               a napsaný pro člověka; druhá sada hlášek by se s ní
               rozešla.
             */}
+            {chybaRucne === "kod" ? (
+              <p className="hlaska-chyba" style={{ marginTop: "12px" }}>
+                Opište prosím kód z tabletu, nebo ho naskenujte.
+              </p>
+            ) : null}
+
             {chybaRucne === "pichnuti" && chybaText?.trim() ? (
               <p className="hlaska-chyba" style={{ marginTop: "12px" }}>
                 {chybaText}
@@ -1034,7 +1050,8 @@ export default async function Dochazka({
                 má vlastní aria-label „Kód z tabletu".
               */}
               <div style={{ display: "grid", gap: "6px" }}>
-                <span
+                <label
+                  htmlFor="kod-z-tabletu"
                   style={{
                     fontSize: "13px",
                     color: "var(--muted)",
@@ -1043,7 +1060,7 @@ export default async function Dochazka({
                   }}
                 >
                   Kód z tabletu
-                </span>
+                </label>
                 {/*
                   Kód z QR se sem předvyplní a z adresy se hned zahodí
                   (docs/qr-na-kiosku-zadani.md, oddíl 3). Zapisovat při
@@ -1088,7 +1105,7 @@ export default async function Dochazka({
           <Vysvetleni nadpis="Píchat zatím nejde">
             {branchId
               ? "Nepodařilo se zjistit provozní den pobočky. Zkuste to prosím za chvíli znovu."
-              : "Docházka se zapisuje na pobočku a vaše členství žádnou nemá. Doplní ji správce firmy, nebo se přepněte na konkrétní pobočku."}
+              : "Docházka se zapisuje na pobočku. Přepněte se nahoře na konkrétní pobočku."}
           </Vysvetleni>
         )}
 

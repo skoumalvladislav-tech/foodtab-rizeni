@@ -81,29 +81,55 @@ export default function SkenerQr({ onKod }: { onKod: (kod: string) => void }) {
             detektor = null
           }
         }
-        const jsQR = detektor ? null : (await import('jsqr')).default
+        /*
+          jsqr jako záloha. BarcodeDetector na Androidu stojí na Google
+          Play services: bez nich (nebo dokud si nestáhnou modul) vrací
+          potichu prázdno, případně vyhodí výjimku. Proto: při výjimce
+          detektor zahodit, a když dvě vteřiny nic nenajde, střídat
+          snímky s jsqr — obojí je při pěti pokusech za vteřinu levné.
+        */
+        let jsQR: typeof import('jsqr').default | null = null
+        const nactiJsqr = async () => {
+          jsQR ??= (await import('jsqr')).default
+          return jsQR
+        }
+        if (!detektor) await nactiJsqr()
+        const zacatek = performance.now()
+
+        const presJsqr = (): string | null => {
+          if (!jsQR || !kontext) return null
+          // Zmenšit na nejvýš 640 px — QR z tabletu je velký a čte se i tak.
+          const meritko = Math.min(1, 640 / v.videoWidth)
+          const w = Math.round(v.videoWidth * meritko)
+          const h = Math.round(v.videoHeight * meritko)
+          // Rozměr jen při změně: každé přiřazení plátno vymaže a přealokuje.
+          if (platno.width !== w) platno.width = w
+          if (platno.height !== h) platno.height = h
+          kontext.drawImage(v, 0, 0, w, h)
+          const obraz = kontext.getImageData(0, 0, w, h)
+          return jsQR(obraz.data, obraz.width, obraz.height, { inversionAttempts: 'dontInvert' })?.data ?? null
+        }
 
         let posledni = 0
+        let licho = false
         const krok = async (cas: number) => {
           if (konec) return
           // Pět pokusů za vteřinu stačí a telefon se nezahřeje.
           if (cas - posledni >= 200 && v.readyState >= 2 && v.videoWidth > 0) {
             posledni = cas
+            licho = !licho
             let text: string | null = null
-            if (detektor) {
+            const stridat = detektor !== null && cas - zacatek > 2000
+            if (detektor && !(stridat && licho)) {
               try {
                 text = (await detektor.detect(v))[0]?.rawValue ?? null
               } catch {
-                text = null
+                detektor = null
+                await nactiJsqr()
               }
-            } else if (jsQR && kontext) {
-              // Zmenšit na nejvýš 640 px — QR z tabletu je velký a čte se i tak.
-              const meritko = Math.min(1, 640 / v.videoWidth)
-              platno.width = Math.round(v.videoWidth * meritko)
-              platno.height = Math.round(v.videoHeight * meritko)
-              kontext.drawImage(v, 0, 0, platno.width, platno.height)
-              const obraz = kontext.getImageData(0, 0, platno.width, platno.height)
-              text = jsQR(obraz.data, obraz.width, obraz.height, { inversionAttempts: 'dontInvert' })?.data ?? null
+              if (!text && stridat) await nactiJsqr()
+            } else {
+              text = presJsqr()
             }
             if (text && !konec) {
               const kod = kodZeSkenu(text, window.location.origin)
@@ -129,15 +155,39 @@ export default function SkenerQr({ onKod }: { onKod: (kod: string) => void }) {
     })()
 
     // Odchod z obrazovky kameru vypne — nesmí běžet v pozadí.
+    const zavrit = () => {
+      zastavit()
+      setOtevreno(false)
+    }
     const skryto = () => {
-      if (document.visibilityState === 'hidden') {
-        zastavit()
-        setOtevreno(false)
-      }
+      if (document.visibilityState === 'hidden') zavrit()
     }
     document.addEventListener('visibilitychange', skryto)
+
+    /*
+      Kamera nesmí běžet, když náhled není vidět: na Dnes je čtečka
+      uvnitř sbalitelné karty (<details>) a na Docházce se dá odrolovat
+      nebo přejít na přehled. Sbalení details i zmizení z obrazovky
+      kameru zavře (svítící kontrolka kamery bez náhledu nepatří nikam).
+    */
+    const ramecekEl = video.current?.parentElement ?? null
+    const details = ramecekEl?.closest('details') ?? null
+    const sbaleno = () => {
+      if (details && !details.open) zavrit()
+    }
+    details?.addEventListener('toggle', sbaleno)
+    let pozorovatel: IntersectionObserver | null = null
+    if (ramecekEl && 'IntersectionObserver' in window) {
+      pozorovatel = new IntersectionObserver((zaznamy) => {
+        if (zaznamy.some((z) => !z.isIntersecting)) zavrit()
+      })
+      pozorovatel.observe(ramecekEl)
+    }
+
     return () => {
       document.removeEventListener('visibilitychange', skryto)
+      details?.removeEventListener('toggle', sbaleno)
+      pozorovatel?.disconnect()
       zastavit()
     }
   }, [otevreno])
@@ -200,13 +250,22 @@ function hlaskaKamery(duvod: unknown): string {
 function nicNeodebira(): () => void {
   return () => {}
 }
-/* Kamera jde jen přes HTTPS a jen tam, kde ji prohlížeč vůbec nabízí. */
+/*
+  Kamera jde jen přes HTTPS a jen tam, kde ji prohlížeč vůbec nabízí.
+  A jen na dotykovém zařízení: na počítači by tlačítko otevřelo
+  webkameru (nebo skončilo „kamera se nenašla") — tam se kód opisuje.
+*/
 function maKameru(): boolean {
-  return (
-    typeof navigator !== 'undefined' &&
-    typeof navigator.mediaDevices?.getUserMedia === 'function' &&
-    window.isSecureContext
-  )
+  try {
+    return (
+      typeof navigator !== 'undefined' &&
+      typeof navigator.mediaDevices?.getUserMedia === 'function' &&
+      window.isSecureContext &&
+      window.matchMedia('(pointer: coarse)').matches
+    )
+  } catch {
+    return false
+  }
 }
 function naServeru(): boolean {
   return false

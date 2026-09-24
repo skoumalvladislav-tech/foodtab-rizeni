@@ -82,6 +82,7 @@ export default function PoleKodu({ zQr }: { zQr: string | null }) {
         autoComplete="off"
         inputMode="text"
         placeholder="A1B2C3D4"
+        id="kod-z-tabletu"
         aria-label="Kód z tabletu"
         value={kod}
         onChange={(e) => {

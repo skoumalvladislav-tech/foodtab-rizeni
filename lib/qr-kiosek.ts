@@ -43,9 +43,10 @@ export function odkazPichnuti(
  * Kód z QR, který načetla čtečka V APLIKACI (Docházka, Dnes).
  *
  * Opak `odkazPichnuti`. Bere se JEN to, co kiosek opravdu kreslí:
- * adresa na TÉŽE doméně ve tvaru `/<pobocka>/dochazka?kod=XXXXXXXX`,
- * nebo samotných osm znaků (textový kód pod QR). Cokoli jiného — cizí
- * doména, jiná cesta, divný kód — vrací `null` a nikam se nejde:
+ * adresa na TÉŽE doméně ve tvaru `/<pobocka>/dochazka?kod=XXXXXXXX`.
+ * Samotných osm znaků ne: kiosek je do QR nikdy nekreslí a „Wifi2026"
+ * z cedulky na zdi by se předvyplnilo jako kód z tabletu. Cokoli jiného
+ * — cizí doména, jiná cesta, divný kód — vrací `null` a nikam se nejde:
  * čtečka v aplikaci nesmí být cesta, jak člověka poslat na podvržený
  * odkaz nalepený přes tablet.
  *
@@ -54,7 +55,6 @@ export function odkazPichnuti(
  */
 export function kodZeSkenu(text: string | null | undefined, puvod: string): string | null {
   const t = String(text ?? '').trim()
-  if (/^[A-Za-z0-9]{8}$/.test(t)) return t.toUpperCase()
   let url: URL
   try {
     url = new URL(t)

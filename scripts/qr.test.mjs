@@ -329,7 +329,7 @@ console.log('\n== Čtečka v aplikaci (24. 9. 2026) ==')
 */
 const skenovano = dekoduj(qrSvg(odkazPichnuti(PUVOD, 'cerna-perla', 'ce8ca63e'), { velikost: 320 }))
 ma('QR z kiosku → čtečka → kód (velkými)', kodZeSkenu(skenovano, PUVOD), 'CE8CA63E')
-ma('samotných osm znaků (textový kód) projde', kodZeSkenu('ab12cd34', PUVOD), 'AB12CD34')
+ma('samotných osm znaků NE (kiosek je do QR nekreslí; cedulka Wifi2026 by prošla)', kodZeSkenu('Wifi2026', PUVOD), null)
 ma('cizí doména NE (podvržená nálepka přes tablet)',
   kodZeSkenu('https://zloduch.cz/cerna-perla/dochazka?kod=CE8CA63E', PUVOD), null)
 ma('jiná cesta téže domény NE', kodZeSkenu(`${PUVOD}/cerna-perla/nastaveni?kod=CE8CA63E`, PUVOD), null)
@@ -343,7 +343,13 @@ ma('čtečka NIC nezapisuje (žádná akce ani dotaz)',
   /zapsatDochazku|\.rpc\(|fetch\(/.test(skener), false)
 ma('čtečka bere kód jen přes kodZeSkenu', /kodZeSkenu\(text, window\.location\.origin\)/.test(skener), true)
 ma('kamera se při zavření vypne', /getTracks\(\)\.forEach\(\(t\) => t\.stop\(\)\)/.test(skener), true)
-ma('… i při odchodu z obrazovky', /visibilityState === 'hidden'[\s\S]{0,80}zastavit\(\)/.test(skener), true)
+ma('… i při odchodu z obrazovky', /visibilityState === 'hidden'\) zavrit\(\)/.test(skener), true)
+ma('… i když se sbalí karta (<details> na Dnes)', /addEventListener\('toggle', sbaleno\)/.test(skener) &&
+  /details && !details\.open\) zavrit\(\)/.test(skener), true)
+ma('… i když náhled zmizí z obrazovky', /new IntersectionObserver/.test(skener) && /!z\.isIntersecting\)\) zavrit\(\)/.test(skener), true)
+ma('zavrit() kameru opravdu vypne', /const zavrit = \(\) => \{\s*zastavit\(\)\s*setOtevreno\(false\)/.test(skener), true)
+ma('když BarcodeDetector selže, přepne se na jsqr', /catch \{\s*detektor = null\s*await nactiJsqr\(\)/.test(skener), true)
+ma('tlačítko jen na dotykovém zařízení', /\(pointer: coarse\)/.test(skener), true)
 ma('jsqr se stahuje až po otevření čtečky', /await import\('jsqr'\)/.test(skener), true)
 ma('jsqr je běžná závislost (jde do aplikace), ne jen pro testy',
   JSON.parse(nacti('package.json')).dependencies?.jsqr !== undefined, true)
