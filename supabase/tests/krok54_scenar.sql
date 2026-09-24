@@ -1,4 +1,4 @@
--- Scénář pro krok 54 — Checklisty 2.0: přímý zápis klienta.
+-- Scénář pro krok 54 — Checklisty 2.0: přímý zápis klienta a odpovědnost.
 --
 -- Pokrývá 20260923200000_checklisty_prava_zapisu.sql.
 --
@@ -9,13 +9,17 @@
 --
 -- * Záznamy položek jdou zapsat JEN přes zapsat_polozku_checklistu —
 --   přímý insert/update/delete přihlášeného spadne.
--- * Běh smí přihlášený přímo jen založit; odpovědnost (kdo / do kdy /
---   směna) změní jen vedoucí a jen u otevřeného běhu. Stav, uzavření,
---   potvrzení a verze ne — ty drží RPC.
--- * „Kdo zahájil" se bere ze session, ne z těla požadavku.
+-- * Běh smí přihlášený napřímo jen ZALOŽIT (čtyři sloupce). Nic nezmění
+--   ani nesmaže — stav, uzavření, potvrzení, verze i odpovědnost drží RPC.
+-- * „Kdo zahájil" se bere ze session, ne z těla požadavku; zápisy mimo
+--   roli authenticated (plánovač, systém) spoušť nepřepisuje.
 -- * Šablona běhu musí být z téže firmy a pobočky a aktivní.
--- * RPC s právy vlastníka tím NEJSOU omezené: zápis, uzavření
---   i potvrzení (které mění UZAVŘENÝ běh) pod rolí authenticated projdou.
+-- * Odpovědnost (nastavit_odpovednost_checklistu): jen vedoucí, jen
+--   otevřený běh, jen vlastní firma; termín je hodina na zdi a okamžik
+--   z ní dělá databáze v pásmu pobočky (léto i zima, uložení beze změny
+--   termín neposune).
+-- * RPC s právy vlastníka tím nejsou omezené: zápis, uzavření
+--   i potvrzení pod rolí authenticated projdou.
 --
 -- POZOR NA PGLITE: sloupcové granty se tam neprojeví, proto se hlídají
 -- katalogem (has_column_privilege). Tabulkové granty a spoušť se
@@ -125,8 +129,8 @@ insert into public.checklist_templates (tenant_id, branch_id, name, schedule, ac
 values (:'tenant', :'perla', 'Vyřazená — krok54', 'opening', false)
 returning id as sablona_vyrazena \gset
 
--- Otevřený běh se záznamem (založený jako vlastník — tak, jak by ho
--- založil plánovač) a uzavřený běh.
+-- Otevřený běh se záznamem a uzavřený běh — založené jako vlastník
+-- (tak, jak by je založil plánovač).
 insert into public.checklist_runs (tenant_id, branch_id, template_id, business_date)
 values (:'tenant', :'perla', :'sablona', current_date - 70) returning id as beh_otevreny \gset
 insert into public.checklist_entries (run_id, item_id, checked, employee_id, recorded_at)
@@ -146,38 +150,38 @@ select pg_temp.check('checklist_entries: přihlášený čte, ale přímo nevlo�
   and not has_any_column_privilege('authenticated', 'public.checklist_entries', 'UPDATE')
   and not has_table_privilege('authenticated', 'public.checklist_entries', 'DELETE'));
 
-select pg_temp.check('checklist_runs: mazat nesmí nikdo přihlášený',
-  not has_table_privilege('authenticated', 'public.checklist_runs', 'DELETE'));
+select pg_temp.check('checklist_runs: přihlášený čte, ale žádný sloupec nezmění a nic nesmaže',
+  has_table_privilege('authenticated', 'public.checklist_runs', 'SELECT')
+  and not has_any_column_privilege('authenticated', 'public.checklist_runs', 'UPDATE')
+  and not has_table_privilege('authenticated', 'public.checklist_runs', 'DELETE'));
 
-select pg_temp.check('checklist_runs: měnit smí jen komu, do kdy a směnu',
-  (select bool_and(has_column_privilege('authenticated', 'public.checklist_runs', c, 'UPDATE'))
-     from unnest(array['assigned_employee_id', 'due_at', 'shift_label']) c)
-  and not (select bool_or(has_column_privilege('authenticated', 'public.checklist_runs', c, 'UPDATE'))
-     from unnest(array['status', 'completed_by', 'finished_at', 'potvrdil_kym', 'potvrzeno_kdy',
-                       'sablona_verze_id', 'started_by', 'started_at', 'tenant_id', 'branch_id',
-                       'template_id', 'business_date']) c));
-
-select pg_temp.check('checklist_runs: založit smí jen s údaji pro spuštění, ne se stavem ani potvrzením',
+select pg_temp.check('checklist_runs: založit smí jen se čtyřmi údaji — bez stavu, lidí, termínu a potvrzení',
   (select bool_and(has_column_privilege('authenticated', 'public.checklist_runs', c, 'INSERT'))
-     from unnest(array['tenant_id', 'branch_id', 'template_id', 'business_date',
-                       'assigned_employee_id', 'due_at', 'shift_label', 'started_by']) c)
+     from unnest(array['tenant_id', 'branch_id', 'template_id', 'business_date']) c)
   and not (select bool_or(has_column_privilege('authenticated', 'public.checklist_runs', c, 'INSERT'))
      from unnest(array['status', 'completed_by', 'finished_at', 'potvrdil_kym', 'potvrzeno_kdy',
-                       'sablona_verze_id', 'started_at']) c));
+                       'sablona_verze_id', 'started_at', 'started_by', 'assigned_employee_id',
+                       'due_at', 'shift_label']) c));
+
+select pg_temp.check('nastavit_odpovednost_checklistu smí přihlášený, ne anon',
+  has_function_privilege('authenticated',
+    'public.nastavit_odpovednost_checklistu(uuid, uuid, uuid, timestamp, text)', 'execute')
+  and not has_function_privilege('anon',
+    'public.nastavit_odpovednost_checklistu(uuid, uuid, uuid, timestamp, text)', 'execute'));
 
 select pg_temp.check('spouště z checklistů nesmí spouštět přihlášený ani anon',
-  not has_function_privilege('authenticated', 'app.checklist_run_zapis_klienta_trg()', 'execute')
+  not has_function_privilege('authenticated', 'app.checklist_run_zalozeni_klientem_trg()', 'execute')
   and not has_function_privilege('anon', 'app.checklist_run_prirazeny_trg()', 'execute')
   and not has_function_privilege('anon', 'app.checklist_sablona_verze_je_nemenna()', 'execute'));
 
 
 \echo ''
-\echo '== 2. Záznam položky napřímo neprojde ======================'
+\echo '== 2. Záznam položky ani běh napřímo nezmění ================'
 
 set role authenticated;
-select set_config('test.user_id', '54540000-0000-0000-0000-000000000003', false);
+select set_config('test.user_id', '54540000-0000-0000-0000-000000000001', false);
 
-select pg_temp.check('přímý INSERT záznamu spadne na právech',
+select pg_temp.check('přímý INSERT záznamu spadne na právech (i vedoucímu)',
   pg_temp.spadne_pravem(format(
     $q$insert into public.checklist_entries (run_id, item_id, checked) values (%L, %L, true)$q$,
     :'beh_hotovy', :'polozka')));
@@ -191,6 +195,11 @@ select pg_temp.check('přímý DELETE záznamu spadne na právech',
   pg_temp.spadne_pravem(format(
     $q$delete from public.checklist_entries where id = %L$q$, :'zaznam')));
 
+select pg_temp.check('přímý UPDATE běhu (třeba „potvrzeno") spadne na právech',
+  pg_temp.spadne_pravem(format(
+    $q$update public.checklist_runs set potvrdil_kym = %L, potvrzeno_kdy = now() where id = %L$q$,
+    :'petra', :'beh_hotovy')));
+
 select pg_temp.check('přímý DELETE běhu spadne na právech',
   pg_temp.spadne_pravem(format(
     $q$delete from public.checklist_runs where id = %L$q$, :'beh_hotovy')));
@@ -198,27 +207,32 @@ select pg_temp.check('přímý DELETE běhu spadne na právech',
 reset role;
 select pg_temp.check('záznam i běh po pokusech zůstaly, jak byly',
   (select checked and value_number is null from public.checklist_entries where id = :'zaznam')
-  and exists (select 1 from public.checklist_runs where id = :'beh_hotovy'));
+  and (select potvrdil_kym is null from public.checklist_runs where id = :'beh_hotovy'));
 
 
 \echo ''
-\echo '== 3. Založení běhu napřímo — „kdo zahájil" je ze session ==='
+\echo '== 3. Založení běhu napřímo ================================='
+
+-- Systémový zápis (mimo roli authenticated) spoušť nepřepisuje.
+insert into public.checklist_runs (tenant_id, branch_id, template_id, business_date, started_by)
+values (:'tenant', :'perla', :'sablona', current_date - 75, :'marek')
+returning id as beh_systemovy \gset
+select pg_temp.check('systémový zápis si „kdo zahájil" nechá (spoušť hlídá jen přihlášené)',
+  (select started_by = :'marek'::uuid from public.checklist_runs where id = :'beh_systemovy'));
 
 set role authenticated;
 select set_config('test.user_id', '54540000-0000-0000-0000-000000000003', false);
 
--- Standa se pokusí zapsat, že běh zahájila Petra.
-insert into public.checklist_runs (tenant_id, branch_id, template_id, business_date, started_by, shift_label)
-values (:'tenant', :'perla', :'sablona', current_date - 72, :'petra', 'Večerní směna')
+insert into public.checklist_runs (tenant_id, branch_id, template_id, business_date)
+values (:'tenant', :'perla', :'sablona', current_date - 72)
 returning id as beh_novy \gset
 
 reset role;
-select pg_temp.check('běh se založil, ale „zahájil" je Standa ze session, ne podvržená Petra',
-  (select started_by = :'standa'::uuid and status = 'open' and shift_label = 'Večerní směna'
+select pg_temp.check('běh se založil otevřený a „zahájil" je Standa ze session',
+  (select started_by = :'standa'::uuid and status = 'open'
      from public.checklist_runs where id = :'beh_novy'));
 
 set role authenticated;
-select set_config('test.user_id', '54540000-0000-0000-0000-000000000003', false);
 
 -- Olga šablonu Baru VIDÍ (má tasks.read i na Baru), takže tady ji
 -- nezastaví RLS, ale jen pravidlo „šablona z téže pobočky".
@@ -233,7 +247,6 @@ select pg_temp.check('běh na Perle se šablonou Baru se nezaloží, i když ji 
     :'tenant', :'perla', :'sablona_bar'), '23514', 'neběží'));
 
 select set_config('test.user_id', '54540000-0000-0000-0000-000000000003', false);
-
 select pg_temp.check('běh s vyřazenou šablonou se nezaloží',
   pg_temp.spadne_hlaskou(format(
     $q$insert into public.checklist_runs (tenant_id, branch_id, template_id, business_date)
@@ -242,39 +255,98 @@ select pg_temp.check('běh s vyřazenou šablonou se nezaloží',
 
 
 \echo ''
-\echo '== 4. Odpovědnost napřímo — jen vedoucí, jen otevřený běh ==='
+\echo '== 4. Odpovědnost — jen vedoucí, jen otevřený běh ==========='
 
--- Standa (jen tasks.read) si checklist přeplánovat nesmí, i když
--- politika checklist_runs_write mu zápis pouští.
 select pg_temp.check('bez tasks.manage odpovědnost změnit nejde',
   pg_temp.spadne_hlaskou(format(
-    $q$update public.checklist_runs set assigned_employee_id = %L where id = %L$q$,
-    :'standa', :'beh_otevreny'), '42501', 'jen vedoucí'));
+    $q$select public.nastavit_odpovednost_checklistu(%L, %L, %L, null, null)$q$,
+    :'tenant', :'beh_otevreny', :'standa'), '42501', 'jen vedoucí'));
 
 select set_config('test.user_id', '54540000-0000-0000-0000-000000000001', false);
-update public.checklist_runs
-   set assigned_employee_id = :'standa', shift_label = 'Ranní směna'
- where id = :'beh_otevreny';
+select pg_temp.check('u uzavřeného běhu odpovědnost nezmění ani vedoucí (je to záznam)',
+  pg_temp.spadne_hlaskou(format(
+    $q$select public.nastavit_odpovednost_checklistu(%L, %L, %L, null, null)$q$,
+    :'tenant', :'beh_hotovy', :'petra'), '23514', 'Uzavřený'));
+
+select public.nastavit_odpovednost_checklistu(:'tenant', :'beh_otevreny', :'standa',
+  '2026-09-23 14:00'::timestamp, 'Ranní směna');
 
 reset role;
-select pg_temp.check('vedoucí u otevřeného běhu změní komu a směnu',
+select pg_temp.check('pobočka je v pásmu Europe/Prague (na tom stojí další kontroly)',
+  app.zona_pobocky(:'perla') = 'Europe/Prague');
+
+select pg_temp.check('vedoucí přidělil a přeplánoval: 14:00 v Praze v létě = 12:00 UTC',
   (select assigned_employee_id = :'standa'::uuid and shift_label = 'Ranní směna'
+          and due_at = timestamptz '2026-09-23 12:00:00+00'
      from public.checklist_runs where id = :'beh_otevreny'));
 
 set role authenticated;
 select set_config('test.user_id', '54540000-0000-0000-0000-000000000001', false);
 
-select pg_temp.check('u uzavřeného běhu odpovědnost nezmění ani vedoucí (je to záznam)',
-  pg_temp.spadne_hlaskou(format(
-    $q$update public.checklist_runs set assigned_employee_id = %L where id = %L$q$,
-    :'petra', :'beh_hotovy'), '23514', 'Uzavřený'));
+-- Formulář ukáže uložený termín jako hodinu na zdi a pošle ji beze změny
+-- zpátky — termín se nesmí posunout (dřív utíkal o 2 h při každém uložení).
+select public.nastavit_odpovednost_checklistu(:'tenant', :'beh_otevreny', :'standa',
+  (select (due_at at time zone 'Europe/Prague') from public.checklist_runs where id = :'beh_otevreny'),
+  null);
+
+reset role;
+select pg_temp.check('uložení beze změny termín neposune a směnu (NULL) nechá',
+  (select due_at = timestamptz '2026-09-23 12:00:00+00' and shift_label = 'Ranní směna'
+     from public.checklist_runs where id = :'beh_otevreny'));
+
+set role authenticated;
+select set_config('test.user_id', '54540000-0000-0000-0000-000000000001', false);
+select public.nastavit_odpovednost_checklistu(:'tenant', :'beh_otevreny', :'standa',
+  '2026-12-01 14:00'::timestamp, '');
+
+reset role;
+select pg_temp.check('v zimě: 14:00 v Praze = 13:00 UTC; prázdná směna se smaže',
+  (select due_at = timestamptz '2026-12-01 13:00:00+00' and shift_label = ''
+     from public.checklist_runs where id = :'beh_otevreny'));
 
 
 \echo ''
-\echo '== 5. RPC s právy vlastníka dál fungují ===================='
+\echo '== 5. Celofiremní vedoucí na cizí firmu nedosáhne ==========='
+
+-- app.has_access pro scope='tenant' vrací true pro JAKOUKOLI pobočku,
+-- i cizí firmy. Jediná bariéra je filtr `r.tenant_id = p_tenant`.
+insert into public.tenants (name, legal_name, currency, timezone)
+values ('Krok54 Cizí s.r.o.', 'Krok54 Cizí s.r.o.', 'CZK', 'Europe/Prague')
+returning id as cizi_firma \gset
+insert into public.branches (tenant_id, name, slug)
+values (:'cizi_firma', 'Cizí 54', 'krok54-cizi') returning id as cizi_branch \gset
+insert into public.checklist_templates (tenant_id, branch_id, name)
+values (:'cizi_firma', :'cizi_branch', 'Cizí — krok54') returning id as cizi_sablona \gset
+insert into public.checklist_runs (tenant_id, branch_id, template_id, business_date)
+values (:'cizi_firma', :'cizi_branch', :'cizi_sablona', current_date) returning id as cizi_beh \gset
+
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('54540000-0000-0000-0000-000000000009', 'majka54@foodtab.cz', '{"full_name":"Majka Padesátčtyři"}');
+insert into public.employees (tenant_id, branch_id, user_id, full_name, employment_type)
+values (:'tenant', :'perla', '54540000-0000-0000-0000-000000000009', 'Majka Padesátčtyři', 'hpp')
+returning id as majka \gset
+insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted) values
+  (:'tenant', :'majka', 'tasks.read', true), (:'tenant', :'majka', 'tasks.manage', true);
+insert into public.memberships (tenant_id, user_id, role_id, scope, status) values
+  (:'tenant', '54540000-0000-0000-0000-000000000009', :'role_any', 'tenant', 'active');
+
+set role authenticated;
+select set_config('test.user_id', '54540000-0000-0000-0000-000000000009', false);
+select pg_temp.check('celofiremní vedoucí NAŠÍ firmy cizí běh nepřeplánuje (p_tenant = naše)',
+  pg_temp.spadne_hlaskou(format(
+    $q$select public.nastavit_odpovednost_checklistu(%L, %L, null, '2026-09-23 14:00', 'Podvrh')$q$,
+    :'tenant', :'cizi_beh'), '42501', 'jen vedoucí'));
+
+reset role;
+select pg_temp.check('cizí běh zůstal nedotčený',
+  (select due_at is null and shift_label = '' from public.checklist_runs where id = :'cizi_beh'));
+
+
+\echo ''
+\echo '== 6. RPC s právy vlastníka dál fungují ===================='
 
 -- Pod rolí authenticated, jako z aplikace: zápis, uzavření, potvrzení.
--- Potvrzení mění UZAVŘENÝ běh — spoušť ho nesmí zablokovat.
+set role authenticated;
 select set_config('test.user_id', '54540000-0000-0000-0000-000000000003', false);
 select public.zapsat_polozku_checklistu(:'tenant', :'beh_novy', :'polozka', null, '', false, '', null);
 

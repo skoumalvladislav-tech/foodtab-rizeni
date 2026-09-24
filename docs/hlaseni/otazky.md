@@ -327,3 +327,32 @@ uzavřený (záznam platí), jen visí jako „čeká na potvrzení".
 **Když to má být jinak**, je to jedna podmínka v `potvrdit_checklist`
 (`supabase/migrations/20260923160000_checklisty_rpc.sql`) a jedna kontrola
 v `krok51_scenar` („Petra svůj běh sama nepotvrdí").
+
+---
+
+## 13. Plánované úlohy běží na GitHubu nespolehlivě — přesunout do databáze?
+
+**Vzniklo:** 23. 9. 2026 večer, ověření po nasazení Checklistů 2.0.
+
+GitHub Actions hodinový plán nedodržuje: `zapomenuty-odchod.yml`
+(cron každou hodinu) má od 20. 9. 16 běhů místo zhruba 72, s mezerami
+3–6 hodin. Stejně na tom budou nové úlohy `checklisty-naplanovat`
+a `checklisty-terminy`:
+
+- dnešní checklisty podle rozvrhu se můžou založit **o hodiny později**,
+- upozornění „blíží se termín" hlídá okno hodinu dopředu — při
+  několikahodinové mezeře **většinou propadne**; „po termínu" přijde
+  s víc než hodinovým zpožděním,
+- totéž už dnes platí pro „zapomenutý odchod".
+
+**Co navrhuji:** rozšíření `pg_cron` přímo v Supabase — databáze si
+funkce (`vytvorit_naplanovane_checklisty`, `ohlasit_checklisty_terminy`,
+zapomenutý odchod) spouští sama, bez GitHubu, bez HTTP a bez tajemství.
+Je to ale **změna nastavení ostré databáze** (zapnutí rozšíření a plán
+úloh), proto ji nedělám bez rozhodnutí.
+
+**Co jsem vybral do té doby:** nic neměním; úlohy běží přes GitHub jako
+`zapomenuty-odchod`. Varování je v hlavičce `checklisty-naplanovat.yml`.
+
+**Když se rozhodne pro pg_cron**, je to jedna migrace (`create extension
+pg_cron` + `cron.schedule` pro tři funkce) a smazání tří workflowů.
