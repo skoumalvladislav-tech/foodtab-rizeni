@@ -126,7 +126,15 @@ function naAdresu(soubor, nahrady, hotove) {
  * vykreslení z nich stejně nic nejde.
  */
 export async function nactiKomponentu(soubor, nahrady = []) {
+  return (await nactiModul(soubor, nahrady)).default
+}
+
+/**
+ * Totéž, ale vrátí CELÝ modul — pro serverové akce, které nemají
+ * výchozí export a které se mají spustit s podstrčenou databází.
+ */
+export async function nactiModul(soubor, nahrady = []) {
   const cil = new URL(soubor, KOREN)
   const adresa = naAdresu(cil, nahrady, new Map())
-  return (await import(adresa)).default
+  return import(adresa)
 }

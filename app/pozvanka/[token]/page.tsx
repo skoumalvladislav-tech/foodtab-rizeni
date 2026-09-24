@@ -1,11 +1,11 @@
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 
 import { getUser } from '@/lib/authz'
 import { zkratitAdresu } from '@/lib/adresa'
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import PrijmoutPozvankuFormular from './prijeti'
+import PrvniPrihlaseni from './prvni-prihlaseni'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,9 +13,11 @@ export const dynamic = 'force-dynamic'
  * Přijetí pozvánky.
  *
  * Pozvaný si vezme odkaz z e-mailu a otevře tuhle stránku. Kdo není
- * přihlášený, jde nejdřív na přihlášení; o platnosti tokenu rozhoduje
- * až `app.accept_invitation`, kde na to jsou všechny kontroly
- * pohromadě.
+ * přihlášený, přihlásí se PŘÍMO TADY kódem na adresu z pozvánky
+ * (`PrvniPrihlaseni`) — účet mu případně založí server. Dřív šel na
+ * přihlašovací stránku, a ta účty nezakládá: nově pozvaný se od 6. 9.
+ * neměl kudy dostat dovnitř. O platnosti tokenu rozhoduje až
+ * `app.accept_invitation`, kde na to jsou všechny kontroly pohromadě.
  *
  * Název firmy a zkrácená adresa se načtou dopředu, aby obrazovka věděla,
  * co člověku nabídnout, když je přihlášený pod jinou adresou (bod 6).
@@ -39,7 +41,6 @@ export default async function PrijmoutPozvankuPage({
   const { token } = await params
 
   const user = await getUser()
-  if (!user) redirect('/prihlaseni')
 
   const supabase = await getServerSupabase()
   const { data, error } = await supabase.rpc('pozvanka_info', { p_token: token })
@@ -79,7 +80,13 @@ export default async function PrijmoutPozvankuPage({
             lineHeight: 1.55,
           }}
         >
-          {popisStavu(info?.stav)}
+          {!user && info?.stav === 'ok' && info.kanal === 'email'
+            ? 'Vítejte! Přihlásíte se kódem z e-mailu a pozvánka se tím rovnou přijme.'
+            : !user && info?.stav === 'ok'
+              ? 'Pozvánku na telefon zatím nejde přijmout bez účtu. Požádejte toho, kdo firmu spravuje, o pozvánku na e-mail.'
+              : user && info?.stav === 'pouzita'
+              ? 'Tahle pozvánka je přijatá.'
+              : popisStavu(info?.stav)}
         </p>
 
         {/*
@@ -95,7 +102,19 @@ export default async function PrijmoutPozvankuPage({
           poslat novou, protože token v DB prostě není.
         */}
         {stavKonecny || stavNicNenaslo ? (
-          <CestaVen stav={info?.stav} />
+          <CestaVen stav={info?.stav} prihlaseny={!!user} />
+        ) : !user ? (
+          info?.kanal === 'email' ? (
+            <PrvniPrihlaseni token={token} adresaZkracena={zkratitAdresu(info.kontakt)} />
+          ) : (
+            // Pozvánka na telefon: SMS bránu zatím nemáme a přihlašovací
+            // stránka umí jen e-mail. Kdo účet už má (e-mailem), přihlásí
+            // se tam a pozvánku přijme; nový člověk potřebuje pozvánku na
+            // e-mail — říká to text nahoře.
+            <Link href='/prihlaseni' className='ft-tl ft-tl-vedlejsi' style={{ display: 'inline-block' }}>
+              Už mám účet — přihlásit se
+            </Link>
+          )
         ) : (
           <PrijmoutPozvankuFormular
             token={token}
@@ -110,11 +129,18 @@ export default async function PrijmoutPozvankuPage({
 }
 
 /** Cestu ven z terminálního stavu — bez formuláře. */
-function CestaVen({ stav }: { stav: string | undefined }) {
+function CestaVen({ stav, prihlaseny }: { stav: string | undefined; prihlaseny: boolean }) {
   if (stav === 'pouzita') {
+    // Přihlášený sem typicky přijde hned po přijetí z `PrvniPrihlaseni`
+    // (stránka se překreslí dřív, než prohlížeč přejde do aplikace) —
+    // „přihlaste se" by ho jen mátlo.
     return (
-      <Link href='/prihlaseni' className='ft-tl ft-tl-hlavni' style={{ display: 'inline-block' }}>
-        Přihlásit se
+      <Link
+        href={prihlaseny ? '/' : '/prihlaseni'}
+        className='ft-tl ft-tl-hlavni'
+        style={{ display: 'inline-block' }}
+      >
+        {prihlaseny ? 'Do aplikace' : 'Přihlásit se'}
       </Link>
     )
   }

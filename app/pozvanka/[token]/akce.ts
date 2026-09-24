@@ -1,10 +1,16 @@
 'use server'
 
-import { headers } from 'next/headers'
-
 import { getUser } from '@/lib/authz'
 import { ohlasPrijetiPozvanky } from '@/lib/ohlas-prijeti'
+import {
+  adresaProPrvniKod,
+  hlaskaProChybu,
+  jeStrop,
+  normalizujKod,
+  ucetUzExistuje,
+} from '@/lib/prihlaseni'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { klientUlohy } from '@/lib/supabase/uloha'
 
 /**
  * Přijetí pozvánky odkazem.
@@ -80,10 +86,8 @@ export async function prijmoutPozvankuAction(
  * Adresa se bere v databázi podle tokenu, ne z prohlížeče: do prohlížeče
  * jde jen zkrácená podoba, aby se z cizí obrazovky nedala přečíst celá.
  *
- * Kam se člověk vrátí, se nikam nepředává. Po přihlášení správnou
- * adresou ho na rozcestí čeká „Máte čekající pozvánku“ (bod 7a)
- * a dokončí ji jedním kliknutím — druhá cesta zpátky by byla druhé
- * místo, kde se rozhoduje o přesměrování.
+ * Od 24. 9.: jen odhlásí. Stránka se obnoví jako pro nepřihlášeného
+ * a nabídne kód na adresu z pozvánky (viz „První přihlášení" níž).
  */
 export async function prihlasitSeAdresouZPozvanky(
   token: string,
@@ -102,27 +106,127 @@ export async function prihlasitSeAdresouZPozvanky(
     }
   }
 
-  // Odhlásit se musí dřív, než přijde odkaz — jinak by se člověk vrátil
-  // pod původním účtem a byl by na tom stejně.
-  await supabase.auth.signOut()
-
-  const { error: chybaOdkazu } = await supabase.auth.signInWithOtp({
-    email: info.kontakt,
-    options: { emailRedirectTo: `${await zakladniAdresa()}/auth/callback` },
-  })
-
-  if (chybaOdkazu) return { chyba: chybaOdkazu.message }
+  // Jen odhlásit. Stránka pozvánky se pak obnoví jako pro nepřihlášeného
+  // a nabídne kód na adresu z pozvánky (poslatPrvniKod) — i když ta adresa
+  // ještě účet nemá. Dřív šel magický odkaz, který by nový účet nezaložil.
+  // `local`: odhlásí jen tenhle prohlížeč, ne účet na všech zařízeních.
+  await supabase.auth.signOut({ scope: 'local' })
   return { ok: true }
 }
 
-/** Adresa, na které aplikace běží. Bere se z hlaviček požadavku. */
-async function zakladniAdresa(): Promise<string> {
-  const nastavena = process.env.NEXT_PUBLIC_APP_URL?.trim()
-  if (nastavena) return nastavena.replace(/\/+$/, '')
+/* ======================================================================
+   PRVNÍ PŘIHLÁŠENÍ Z POZVÁNKY (člověk, který ještě nemá účet)
+   ======================================================================
 
-  const h = await headers()
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3000'
-  const protokol =
-    h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https')
-  return `${protokol}://${host}`
+   PROČ TO EXISTUJE. Od 6. 9. přihlašovací stránka účty NEZAKLÁDÁ
+   (`shouldCreateUser: false` — do Foodtabu se vstupuje jen na pozvánku).
+   Stránka pozvánky ale nepřihlášeného člověka posílala právě tam — takže
+   nově pozvaný se neměl kudy dostat dovnitř: e-mail zadal, kód nepřišel.
+   Od 5. 9. do 24. 9. nevznikl ani jeden nový účet (Juli Yaniv).
+
+   Teď: stránka pozvánky pošle kód sama. Účet (je-li potřeba) založí
+   SERVER, a jen pro adresu, na kterou pozvánka v databázi zní — nikdy pro
+   adresu z prohlížeče. `admin.createUser` na nastavení „Allow new users
+   to sign up" v Supabase nezávisí — a to nastavení MÁ BÝT VYPNUTÉ:
+   `shouldCreateUser: false` je jen volba naší aplikace, kdokoli s veřejným
+   klíčem může Supabase volat napřímo. „Jen na pozvánku" drží vypnutá
+   volba, ne tenhle kód.
+
+   Kdo odkaz získá (přeposlaný e-mail), nedostane nic: kód jde na adresu
+   z pozvánky a bez něj se nepřihlásí. Založený účet bez přihlášení je
+   prázdný (žádné členství).
+
+   Existující NEPOTVRZENÝ účet (např. „Add user" bez „Auto Confirm User")
+   se tu schválně nedopotvrzuje — mohl ho předem založit kdokoli i s vlastním
+   heslem. Kód pak nepřijde a chyba se zapíše do logu.
+*/
+
+export type StavPrvnihoKodu = {
+  ok?: boolean
+  chyba?: string
+  /** Čas odeslání ze SERVERU — „Poslat znovu" se odpočítává od něj. */
+  odeslanoKdy?: number
+  /** Přihlášení proběhlo, jen přijetí pozvánky ne — stránka se obnoví. */
+  prihlasen?: boolean
+  /**
+   * Kód se teď neposlal kvůli limitu, ale jeden nejspíš už leží v e-mailu
+   * (člověk se vrátil na odkaz z pozvánky). Obrazovka má přejít na opsání
+   * kódu, ne ho nechat viset na „Poslat kód".
+   */
+  zadatKod?: boolean
+}
+
+const UZ_POSLANO =
+  'Kód jsme vám poslali před chvílí — opište ho z e-mailu. Když nepřišel, zkuste za pár minut „Poslat kód znovu".'
+
+const NEPLATI = 'Tahle pozvánka už neplatí. Požádejte o novou toho, kdo firmu spravuje.'
+
+async function adresaZPozvanky(token: string): Promise<string | null> {
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('pozvanka_info', { p_token: token })
+  if (error) return null
+  return adresaProPrvniKod((data as { kanal: string; kontakt: string; stav: string }[] | null)?.[0])
+}
+
+export async function poslatPrvniKod(token: string): Promise<StavPrvnihoKodu> {
+  const adresa = await adresaZPozvanky(String(token ?? ''))
+  if (!adresa) return { chyba: NEPLATI }
+
+  // Účet pro adresu z pozvánky. Servisní klíč jen na serveru (pravidlo 6)
+  // a jen pro tuhle jednu adresu z databáze.
+  const sluzba = klientUlohy()
+  if (!sluzba) {
+    console.error('Pozvánka: chybí SUPABASE_SERVICE_ROLE_KEY — účet nejde založit.')
+    return { chyba: 'Přihlášení z pozvánky teď nejde. Dejte prosím vědět tomu, kdo firmu spravuje.' }
+  }
+  const { error: chybaUctu } = await sluzba.auth.admin.createUser({ email: adresa, email_confirm: true })
+  if (chybaUctu && !ucetUzExistuje(chybaUctu)) {
+    console.error('Pozvánka: účet se nepodařilo založit:', chybaUctu.code ?? chybaUctu.status ?? 'neznámá chyba')
+    return { chyba: 'Účet se nepodařilo připravit. Zkuste to prosím za chvíli znovu.' }
+  }
+
+  const supabase = await getServerSupabase()
+  const { error: chybaKodu } = await supabase.auth.signInWithOtp({
+    email: adresa,
+    // Účet už je (výš) — kód se jen pošle, nic dalšího se nezakládá.
+    options: { shouldCreateUser: false },
+  })
+  if (chybaKodu) {
+    // Do logu kód chyby, ne adresu. Přihlašovací stránka mlčí kvůli
+    // zjišťování adres — tady adresu nikdo nezadává, bere se z pozvánky.
+    console.error('Pozvánka: kód se nepodařilo poslat:', chybaKodu.code ?? chybaKodu.status ?? 'neznámá chyba')
+    if (jeStrop(chybaKodu)) return { zadatKod: true, chyba: UZ_POSLANO }
+    return { chyba: 'Kód se nepodařilo poslat. Zkuste to prosím znovu.' }
+  }
+  return { ok: true, odeslanoKdy: Date.now() }
+}
+
+export async function overitPrvniKod(token: string, kodVstup: string): Promise<StavPrvnihoKodu> {
+  const kod = normalizujKod(kodVstup)
+  if (kod === '') return { chyba: 'Opište prosím kód z e-mailu.' }
+
+  const tokenCisty = String(token ?? '')
+  const adresa = await adresaZPozvanky(tokenCisty)
+  if (!adresa) return { chyba: NEPLATI }
+
+  // Sezení vzniká na serveru (cookie hlavičkou), stejně jako na přihlašovací
+  // stránce — viz app/prihlaseni/akce.ts.
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.auth.verifyOtp({ email: adresa, token: kod, type: 'email' })
+  if (error) return { chyba: hlaskaProChybu(error) }
+
+  // Týmž klientem, který teď drží nové sezení, se pozvánka rovnou přijme.
+  const { data, error: chybaPrijeti } = await supabase.rpc('accept_invitation', { p_token: tokenCisty })
+  if (chybaPrijeti || !data) {
+    // Obrazovka hlášku ukáže a pod ní „Pokračovat" — po obnovení je
+    // člověk přihlášený a má tlačítko „Přijmout pozvánku".
+    return {
+      prihlasen: true,
+      chyba: chybaPrijeti?.message || 'Přihlášení proběhlo, pozvánku se ale nepodařilo přijmout. Ťukněte na Pokračovat a zkuste ji přijmout znovu.',
+    }
+  }
+
+  // Stejně jako prijmoutPozvankuAction: e-mail správci, výsledek se nehlídá.
+  await ohlasPrijetiPozvanky(String(data))
+  return { ok: true }
 }

@@ -31,7 +31,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
  *   * `app/k/[klic]` — krátký odkaz,
  *   * `lib/komunikace/push-hned.ts` — push hned po odeslání zprávy, jen
  *     k upozorněním zprávy, kterou databáze právě přijala pod účtem
- *     odesílatele (id vrací `poslat_zpravu`).
+ *     odesílatele (id vrací `poslat_zpravu`),
+ *   * `app/pozvanka/[token]/akce.ts` (`poslatPrvniKod`) — založení účtu
+ *     pro nově pozvaného, JEN pro adresu z platné pozvánky v databázi
+ *     (`pozvanka_info`), nikdy pro adresu z prohlížeče.
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ

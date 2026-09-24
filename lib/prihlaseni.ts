@@ -140,3 +140,34 @@ export function maUkazatNaPlochu(kde: {
 }): boolean {
   return kde.uzkaObrazovka && !kde.naPlose
 }
+
+/**
+ * Na jakou adresu smí pozvánka poslat první přihlašovací kód (a pro ni
+ * případně založit účet)? `null` = na žádnou.
+ *
+ * Jen platná (`ok`) e-mailová pozvánka. Adresa se bere VÝHRADNĚ z pozvánky
+ * v databázi, nikdy z prohlížeče — jinak by se odkazem z jedné pozvánky
+ * dal založit účet komukoli.
+ */
+export function adresaProPrvniKod(
+  info: { kanal?: unknown; kontakt?: unknown; stav?: unknown } | null | undefined,
+): string | null {
+  if (!info || info.stav !== 'ok' || info.kanal !== 'email') return null
+  const adresa = typeof info.kontakt === 'string' ? info.kontakt.trim().toLowerCase() : ''
+  return /^[^\s@]+@[^\s@]+$/.test(adresa) ? adresa : null
+}
+
+/**
+ * Odpověď „takový účet už je" při zakládání účtu serverem. Pak se nic
+ * nezakládá a rovnou se pošle kód — pozvaný se jen přihlašuje.
+ *
+ * Supabase podle verze vrací kód `email_exists`, `user_already_exists`,
+ * nebo jen text „already been registered". Kdyby se hlídal jen jeden,
+ * člověk s účtem by dostal „účet se nepodařilo připravit".
+ */
+export function ucetUzExistuje(chyba: unknown): boolean {
+  if (!chyba || typeof chyba !== 'object') return false
+  const e = chyba as { code?: unknown; message?: unknown }
+  if (e.code === 'email_exists' || e.code === 'user_already_exists') return true
+  return typeof e.message === 'string' && /already (been )?(registered|exists)/i.test(e.message)
+}
