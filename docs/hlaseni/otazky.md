@@ -365,8 +365,8 @@ pg_cron` + `cron.schedule` pro tři funkce) a smazání tří workflowů.
 > příčina nebyla v nastavení Supabase, ale v aplikaci (stránka pozvánky
 > posílala nového člověka na přihlašovací stránku, která účty nezakládá).
 > Oprava (PR #73) jde druhou cestou níž: účet zakládá server jen pro
-> adresu z platné pozvánky. „Allow new users to sign up" může zůstat
-> vypnuté. Text níž je ranní a jeho předpoklad („od 5. 9. je podle logů
+> adresu z platné pozvánky. „Allow new users to sign up" má zůstat
+> **vypnuté** — zámek „jen na pozvánku" drží ono, ne aplikace. Text níž je ranní a jeho předpoklad („od 5. 9. je podle logů
 > vypnuté") neplatí — viz hlášení [24. 9.](stav-2026-09-24.md#skutečná-příčina-a-oprava).
 
 **Vzniklo:** 24. 9. 2026 ráno — Juli Yaniv se nemohla přihlásit (hlášení

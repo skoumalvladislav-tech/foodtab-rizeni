@@ -736,6 +736,25 @@ ma('přihlašovací stránka dál účty NEZAKLÁDÁ',
 ma('a novému člověku řekne, kudy jít poprvé',
   uvod.includes('Jste tu poprvé'), true)
 
+/*
+  Telefon: odkaz z pozvánky se otevře v kartě uvnitř Gmailu, člověk ji
+  zavře, aby si přečetl kód, a ťukne na odkaz znovu — je zase na začátku.
+  K opsání kódu se musí dát dostat BEZ nového odeslání (nový kód by ten
+  v e-mailu zneplatnil) a limit odesílání nesmí skončit slepou uličkou.
+*/
+ma('první obrazovka nabízí i „Už mám kód z e-mailu"', prvni.includes('Už mám kód z e-mailu'), true)
+ma('limit odesílání vede na opsání kódu (server)',
+  /jeStrop\(chybaKodu\)\) return \{ zadatKod: true/.test(zdrojAkciPozvanky), true)
+const zdrojPrvni = nacti('app/pozvanka/[token]/prvni-prihlaseni.tsx')
+ma('limit odesílání vede na opsání kódu (obrazovka)',
+  /if \(v\.zadatKod\) setKrok\('kod'\)/.test(zdrojPrvni), true)
+ma('neodeslaný kód se zapíše do logu (kód chyby, ne adresa)',
+  /console\.error\('Pozvánka: kód se nepodařilo poslat:', chybaKodu\.code/.test(zdrojAkciPozvanky), true)
+ma('nepotvrzený existující účet se NEdopotvrzuje',
+  /updateUserById/.test(zdrojAkciPozvanky), false)
+ma('přihlášený na použité pozvánce dostane „Do aplikace", ne „Přihlásit se"',
+  zdrojPozvanky.includes("prihlaseny ? 'Do aplikace' : 'Přihlásit se'"), true)
+
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

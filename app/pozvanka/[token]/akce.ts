@@ -4,7 +4,6 @@ import { getUser } from '@/lib/authz'
 import { ohlasPrijetiPozvanky } from '@/lib/ohlas-prijeti'
 import {
   adresaProPrvniKod,
-  HLASKA_STROP,
   hlaskaProChybu,
   jeStrop,
   normalizujKod,
@@ -126,12 +125,19 @@ export async function prihlasitSeAdresouZPozvanky(
 
    Teď: stránka pozvánky pošle kód sama. Účet (je-li potřeba) založí
    SERVER, a jen pro adresu, na kterou pozvánka v databázi zní — nikdy pro
-   adresu z prohlížeče. Nezávisí to na nastavení „Allow new users to sign
-   up" v Supabase; přihlašovací stránka dál nikomu účet nezaloží.
+   adresu z prohlížeče. `admin.createUser` na nastavení „Allow new users
+   to sign up" v Supabase nezávisí — a to nastavení MÁ BÝT VYPNUTÉ:
+   `shouldCreateUser: false` je jen volba naší aplikace, kdokoli s veřejným
+   klíčem může Supabase volat napřímo. „Jen na pozvánku" drží vypnutá
+   volba, ne tenhle kód.
 
    Kdo odkaz získá (přeposlaný e-mail), nedostane nic: kód jde na adresu
    z pozvánky a bez něj se nepřihlásí. Založený účet bez přihlášení je
    prázdný (žádné členství).
+
+   Existující NEPOTVRZENÝ účet (např. „Add user" bez „Auto Confirm User")
+   se tu schválně nedopotvrzuje — mohl ho předem založit kdokoli i s vlastním
+   heslem. Kód pak nepřijde a chyba se zapíše do logu.
 */
 
 export type StavPrvnihoKodu = {
@@ -141,7 +147,16 @@ export type StavPrvnihoKodu = {
   odeslanoKdy?: number
   /** Přihlášení proběhlo, jen přijetí pozvánky ne — stránka se obnoví. */
   prihlasen?: boolean
+  /**
+   * Kód se teď neposlal kvůli limitu, ale jeden nejspíš už leží v e-mailu
+   * (člověk se vrátil na odkaz z pozvánky). Obrazovka má přejít na opsání
+   * kódu, ne ho nechat viset na „Poslat kód".
+   */
+  zadatKod?: boolean
 }
+
+const UZ_POSLANO =
+  'Kód jsme vám poslali před chvílí — opište ho z e-mailu. Když nepřišel, zkuste za pár minut „Poslat kód znovu".'
 
 const NEPLATI = 'Tahle pozvánka už neplatí. Požádejte o novou toho, kdo firmu spravuje.'
 
@@ -176,7 +191,11 @@ export async function poslatPrvniKod(token: string): Promise<StavPrvnihoKodu> {
     options: { shouldCreateUser: false },
   })
   if (chybaKodu) {
-    return { chyba: jeStrop(chybaKodu) ? HLASKA_STROP : 'Kód se nepodařilo poslat. Zkuste to prosím znovu.' }
+    // Do logu kód chyby, ne adresu. Přihlašovací stránka mlčí kvůli
+    // zjišťování adres — tady adresu nikdo nezadává, bere se z pozvánky.
+    console.error('Pozvánka: kód se nepodařilo poslat:', chybaKodu.code ?? chybaKodu.status ?? 'neznámá chyba')
+    if (jeStrop(chybaKodu)) return { zadatKod: true, chyba: UZ_POSLANO }
+    return { chyba: 'Kód se nepodařilo poslat. Zkuste to prosím znovu.' }
   }
   return { ok: true, odeslanoKdy: Date.now() }
 }

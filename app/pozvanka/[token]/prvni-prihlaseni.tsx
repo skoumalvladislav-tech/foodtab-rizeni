@@ -13,6 +13,13 @@ import { overitPrvniKod, poslatPrvniKod } from './akce'
  * kód. Po ověření se pozvánka rovnou přijme a jde se do aplikace.
  * Adresu člověk nezadává — bere se z pozvánky na serveru (do prohlížeče
  * jde jen zkrácená), takže se nedá splést ani podstrčit.
+ *
+ * Krok „kód" žije jen v paměti stránky. Na telefonu se ale typicky stane
+ * tohle: odkaz z pozvánky se otevře v kartě uvnitř Gmailu, člověk ji
+ * zavře, aby si přečetl kód, a znovu ťukne na odkaz — a je zase na
+ * začátku. Proto se k opsání kódu dá dostat i bez nového odeslání („Už
+ * mám kód z e-mailu"), a limit odesílání vede taky na opsání kódu, ne do
+ * slepé uličky. Nový kód by ten v e-mailu zneplatnil.
  */
 export default function PrvniPrihlaseni({
   token,
@@ -50,8 +57,14 @@ export default function PrvniPrihlaseni({
       setKrok('kod')
     } else {
       setChyba(v.chyba ?? 'Kód se nepodařilo poslat.')
+      if (v.zadatKod) setKrok('kod')
     }
     setCeka(false)
+  }
+
+  function uzMamKod() {
+    setChyba(null)
+    setKrok('kod')
   }
 
   async function overit(e: React.FormEvent<HTMLFormElement>) {
@@ -87,6 +100,9 @@ export default function PrvniPrihlaseni({
         <button type="button" className="ft-tl ft-tl-hlavni" disabled={ceka} onClick={poslat}>
           {ceka ? 'Posílám…' : 'Poslat kód'}
         </button>
+        <button type="button" className="ft-tl ft-tl-vedlejsi ft-tl-male" disabled={ceka} onClick={uzMamKod}>
+          Už mám kód z e-mailu
+        </button>
       </div>
     )
   }
@@ -94,7 +110,8 @@ export default function PrvniPrihlaseni({
   return (
     <form onSubmit={overit} style={formular}>
       <p style={text}>
-        Kód jsme poslali{adresaZkracena ? <> na <strong>{adresaZkracena}</strong></> : ''}. Platí
+        {odeslanoKdy > 0 ? 'Kód jsme poslali' : 'Opište kód z e-mailu, který přišel'}
+        {adresaZkracena ? <> na <strong>{adresaZkracena}</strong></> : ''}. Platí
         několik minut. Když nepřijde, podívejte se i do nevyžádané pošty.
       </p>
 

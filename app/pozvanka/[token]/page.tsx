@@ -82,7 +82,9 @@ export default async function PrijmoutPozvankuPage({
         >
           {!user && info?.stav === 'ok'
             ? 'Vítejte! Pro vstup do aplikace se jednou přihlásíte kódem z e-mailu — pozvánka se tím rovnou přijme.'
-            : popisStavu(info?.stav)}
+            : user && info?.stav === 'pouzita'
+              ? 'Tahle pozvánka je přijatá.'
+              : popisStavu(info?.stav)}
         </p>
 
         {/*
@@ -98,7 +100,7 @@ export default async function PrijmoutPozvankuPage({
           poslat novou, protože token v DB prostě není.
         */}
         {stavKonecny || stavNicNenaslo ? (
-          <CestaVen stav={info?.stav} />
+          <CestaVen stav={info?.stav} prihlaseny={!!user} />
         ) : !user ? (
           info?.kanal === 'email' ? (
             <PrvniPrihlaseni token={token} adresaZkracena={zkratitAdresu(info.kontakt)} />
@@ -123,11 +125,18 @@ export default async function PrijmoutPozvankuPage({
 }
 
 /** Cestu ven z terminálního stavu — bez formuláře. */
-function CestaVen({ stav }: { stav: string | undefined }) {
+function CestaVen({ stav, prihlaseny }: { stav: string | undefined; prihlaseny: boolean }) {
   if (stav === 'pouzita') {
+    // Přihlášený sem typicky přijde hned po přijetí z `PrvniPrihlaseni`
+    // (stránka se překreslí dřív, než prohlížeč přejde do aplikace) —
+    // „přihlaste se" by ho jen mátlo.
     return (
-      <Link href='/prihlaseni' className='ft-tl ft-tl-hlavni' style={{ display: 'inline-block' }}>
-        Přihlásit se
+      <Link
+        href={prihlaseny ? '/' : '/prihlaseni'}
+        className='ft-tl ft-tl-hlavni'
+        style={{ display: 'inline-block' }}
+      >
+        {prihlaseny ? 'Do aplikace' : 'Přihlásit se'}
       </Link>
     )
   }
