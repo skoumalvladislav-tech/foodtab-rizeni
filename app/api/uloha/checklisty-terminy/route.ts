@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 
-import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
 
 /**
@@ -13,7 +12,7 @@ import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
  * platí samo). Urgentní push se neposílá: „po termínu" je důležité,
  * ne naléhavé (bod 21: „Neposílej automaticky urgentní push").
  *
- * Bez nasazené migrace 20260923170000 odpoví 200 s poznámkou (viz
+ * Každá chyba databáze = 500 a červený běh workflow (viz
  * checklisty-naplanovat).
  */
 
@@ -38,9 +37,6 @@ export async function GET(request: Request): Promise<NextResponse> {
   const { data, error } = await supabase.rpc('ohlasit_checklisty_terminy')
 
   if (error) {
-    if (funkceNeexistuje(error)) {
-      return NextResponse.json({ ohlaseno: 0, poznamka: 'čeká na nasazení databáze' })
-    }
     return NextResponse.json({ chyba: error.message }, { status: 500 })
   }
 

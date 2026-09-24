@@ -16,11 +16,9 @@ import { ROZVRHY } from './spolecne'
  * databáze v RPC z 20260923160000_checklisty_rpc.sql — tady se jen
  * posílá, co člověk vyplnil, a výsledek se převede na hlášku.
  *
- * KÓD SE NASAZUJE DŘÍV NEŽ MIGRACE: dokud RPC v databázi nejsou,
- * `funkceNeexistuje` přepne na dosavadní chování (přímý zápis jako do
- * 23. 9.), ať se po sloučení do main checklisty dají vyplňovat dál.
- * Co bez migrace nejde vůbec (fotky, potvrzení, úprava šablony), řekne
- * obrazovka rovnou — tlačítko se neukáže.
+ * Přímo do tabulek se zapisuje jen založení běhu a odpovědnost — nic
+ * jiného databáze přihlášenému nedovolí (20260923200000). Záznamy
+ * položek, uzavření a potvrzení jdou výhradně přes RPC.
  */
 
 const zakladni = (rozsah: string) => `/${rozsah}/ukoly/checklisty`
@@ -39,7 +37,10 @@ function obnovit(rozsah: string, beh?: string) {
  * Spuštění checklistu na dnešní provozní den (ruční; plánované rozvrhy
  * zakládá plánovač sám). Dvojice (šablona, pobočka, den) je jedinečná —
  * druhé kliknutí nevyrobí druhý běh, jen otevře ten existující.
- * `started_by` je ze session, ne z formuláře.
+ *
+ * Posílají se jen čtyři údaje — víc databáze přihlášenému při založení
+ * nedovolí (20260923200000). „Kdo zahájil" doplní spoušť ze session,
+ * odpovědnost se nastavuje zvlášť (nastavitOdpovednost).
  */
 export async function spustitChecklist(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
@@ -52,36 +53,17 @@ export async function spustitChecklist(formData: FormData): Promise<void> {
   const den = await provozniDen(z.branchId)
   if (!den) redirect(bezpecnyNavrat(null, rozsah, zakladni(rozsah), { chyba: 'Nepodařilo se zjistit provozní den.' }))
 
-  const komu = String(formData.get('komu') ?? '').trim()
-  const doKdy = String(formData.get('doKdy') ?? '').trim()
-  const smena = String(formData.get('smena') ?? '').trim().slice(0, 120)
-
   const supabase = await getServerSupabase()
-  const zakladRadku = {
-    tenant_id: z.tenantId,
-    branch_id: z.branchId,
-    template_id: sablonaId,
-    business_date: den,
-    assigned_employee_id: UUID.test(komu) ? komu : null,
-    // `datetime-local` = hodina na zdi; okamžik z ní dělá databáze (pravidlo 11).
-    due_at: doKdy === '' ? null : doKdy,
-  }
-
-  let { error } = await supabase
+  const { error } = await supabase
     .from('checklist_runs')
     .upsert(
-      { ...zakladRadku, shift_label: smena, started_by: z.employeeId },
+      { tenant_id: z.tenantId, branch_id: z.branchId, template_id: sablonaId, business_date: den },
       { onConflict: 'template_id,branch_id,business_date', ignoreDuplicates: true },
     )
-  if (error && sloupecNeexistuje(error)) {
-    ;({ error } = await supabase
-      .from('checklist_runs')
-      .upsert(zakladRadku, { onConflict: 'template_id,branch_id,business_date', ignoreDuplicates: true }))
-  }
   if (error) {
-    // 42501 = přiřazený člověk nepatří k firmě (trg_checklist_run_prirazeny).
+    // 23514 = šablona na téhle pobočce neběží (trg_checklist_run_zalozeni_klientem).
     redirect(bezpecnyNavrat(formData.get('zpet'), rozsah, zakladni(rozsah), {
-      chyba: error.code === '42501' ? 'Vybraný člověk nepatří k vaší firmě.' : 'Checklist se nepodařilo spustit.',
+      chyba: error.code === '23514' ? error.message : 'Checklist se nepodařilo spustit.',
     }))
   }
 
@@ -100,8 +82,14 @@ export async function spustitChecklist(formData: FormData): Promise<void> {
 }
 
 /**
- * Změna odpovědnosti (kdo / do kdy / směna) na běžícím checklistu.
- * Prázdné pole = zrušit. Druhou linii (cizí člověk) drží spoušť.
+ * Změna odpovědnosti (kdo / do kdy / směna) na běžícím checklistu — jen
+ * vedoucí a jen u otevřeného běhu; hlídá to databáze
+ * (nastavit_odpovednost_checklistu). Prázdné pole = zrušit.
+ *
+ * Termín z `datetime-local` je HODINA NA ZDI a jako taková se i posílá
+ * (`timestamp` bez pásma) — okamžik z ní dělá databáze v pásmu pobočky
+ * (pravidlo 11). Dřív šla hodina rovnou do sloupce s pásmem, relace
+ * PostgRESTu ji přečetla v UTC a termín se při každém uložení posunul.
  */
 export async function nastavitOdpovednost(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
@@ -113,33 +101,29 @@ export async function nastavitOdpovednost(formData: FormData): Promise<void> {
 
   const komu = String(formData.get('komu') ?? '').trim()
   const doKdy = String(formData.get('doKdy') ?? '').trim()
-  const smena = String(formData.get('smena') ?? '').trim().slice(0, 120)
-  const zmena = {
-    assigned_employee_id: UUID.test(komu) ? komu : null,
-    due_at: doKdy === '' ? null : doKdy,
-  }
+  // Pole směny formulář bez migrace neukazuje: chybí-li, směna se nemění.
+  const smenaPole = formData.get('smena')
+  const smena = smenaPole === null ? null : String(smenaPole).trim().slice(0, 120)
 
   const supabase = await getServerSupabase()
-  let { error } = await supabase
-    .from('checklist_runs')
-    .update({ ...zmena, shift_label: smena })
-    .eq('id', beh)
-    .eq('tenant_id', z.tenantId)
-    .eq('status', 'open')
-  if (error && sloupecNeexistuje(error)) {
-    ;({ error } = await supabase
-      .from('checklist_runs')
-      .update(zmena)
-      .eq('id', beh)
-      .eq('tenant_id', z.tenantId)
-      .eq('status', 'open'))
-  }
+  const { error } = await supabase.rpc('nastavit_odpovednost_checklistu', {
+    p_tenant: z.tenantId,
+    p_run: beh,
+    p_komu: UUID.test(komu) ? komu : null,
+    p_do_kdy: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(doKdy) ? doKdy : null,
+    p_smena: smena,
+  })
 
   const zpet = formData.get('zpet')
   if (error) {
-    redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), {
-      chyba: error.code === '42501' ? 'Vybraný člověk nepatří k vaší firmě.' : 'Odpovědnost se nepodařilo uložit.',
-    }))
+    // 42501 = cizí člověk nebo chybí tasks.manage; 23514 = uzavřený běh.
+    // Hlášky z databáze jsou česky a pro člověka.
+    const hlaska = funkceNeexistuje(error)
+      ? 'Úprava odpovědnosti bude dostupná po nasazení databáze.'
+      : error.code === '42501' || error.code === '23514'
+        ? error.message
+        : 'Odpovědnost se nepodařilo uložit.'
+    redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), { chyba: hlaska }))
   }
   obnovit(rozsah, beh)
   redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), {}))
@@ -192,11 +176,6 @@ export async function ulozitPolozku(formData: FormData): Promise<void> {
     p_zrusit: rezim === 'vratit',
   })
 
-  if (error && funkceNeexistuje(error)) {
-    await ulozitPolozkuPostaru(z.tenantId, z.employeeId, rozsah, beh, polozka, rezim, hodnota, zpet)
-    return
-  }
-
   if (error) {
     const hlaska =
       error.code === '40001'
@@ -204,85 +183,6 @@ export async function ulozitPolozku(formData: FormData): Promise<void> {
         : error.message
     redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), { chyba: hlaska, polozka }))
   }
-
-  obnovit(rozsah, beh)
-  redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), {}))
-}
-
-/**
- * Dosavadní zápis (do nasazení 20260923160000): jen „splnit", meze
- * z databáze, přímý upsert. Nelze splnit / vrátit bez migrace nejde —
- * obrazovka ty volby bez ní nenabízí.
- */
-async function ulozitPolozkuPostaru(
-  tenantId: string,
-  employeeId: string | null,
-  rozsah: string,
-  beh: string,
-  polozka: string,
-  rezim: Rezim,
-  hodnota: string,
-  zpet: FormDataEntryValue | null,
-): Promise<void> {
-  const chyba = (text: string): never =>
-    redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), { chyba: text, polozka }))
-
-  if (rezim !== 'splnit') chyba('Tahle volba bude dostupná po nasazení databáze.')
-
-  const supabase = await getServerSupabase()
-  const { data: behy, error: chybaBehu } = await supabase
-    .from('checklist_runs')
-    .select('id, template_id, status')
-    .eq('id', beh)
-    .eq('tenant_id', tenantId)
-    .limit(1)
-  if (chybaBehu) throw new DotazSelhal('běh checklistu', chybaBehu)
-  const run = behy?.[0] as { template_id: string; status: string } | undefined
-  if (!run) chyba('Checklist nenalezen.')
-  if (run!.status !== 'open') chyba('Uzavřený checklist už nejde měnit.')
-
-  const { data: polozky, error: chybaPolozky } = await supabase
-    .from('checklist_items')
-    .select('id, requires_value, value_type, min_value, max_value')
-    .eq('id', polozka)
-    .eq('template_id', run!.template_id)
-    .limit(1)
-  if (chybaPolozky) throw new DotazSelhal('položka checklistu', chybaPolozky)
-  const p = polozky?.[0] as
-    | { requires_value: boolean; value_type: string | null; min_value: number | null; max_value: number | null }
-    | undefined
-  if (!p) chyba('Ta položka k tomuhle checklistu nepatří.')
-
-  let valueNumber: number | null = null
-  let valueText: string | null = null
-  if (p!.requires_value) {
-    if (p!.value_type === 'photo') chyba('Fotky budou dostupné po nasazení databáze.')
-    if (hodnota === '') chyba('Hodnota je povinná.')
-    if (p!.value_type === 'number') {
-      const n = Number(hodnota.replace(',', '.'))
-      if (!Number.isFinite(n)) chyba('Zadejte platné číslo.')
-      if ((p!.min_value !== null && n < p!.min_value) || (p!.max_value !== null && n > p!.max_value)) {
-        chyba('Hodnota je mimo povolené meze.')
-      }
-      valueNumber = n
-    } else {
-      valueText = hodnota.slice(0, 500)
-    }
-  }
-
-  const { error } = await supabase.from('checklist_entries').upsert(
-    {
-      run_id: beh,
-      item_id: polozka,
-      checked: true,
-      value_number: valueNumber,
-      value_text: valueText,
-      employee_id: employeeId,
-      recorded_at: new Date().toISOString(),
-    },
-    { onConflict: 'run_id,item_id' },
-  )
-  if (error) chyba('Položku se nepodařilo zapsat.')
 
   obnovit(rozsah, beh)
   redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), {}))
@@ -308,19 +208,7 @@ export async function uzavritChecklist(formData: FormData): Promise<void> {
   const supabase = await getServerSupabase()
   const { error } = await supabase.rpc('uzavrit_checklist', { p_tenant: z.tenantId, p_run: beh })
 
-  if (error && funkceNeexistuje(error)) {
-    // Dosavadní chování: přímý zápis (obrazovka tlačítko ukáže, až je
-    // všechno odškrtnuté — kontrolu povinných bez migrace nemá kdo držet).
-    const { error: chybaZapisu } = await supabase
-      .from('checklist_runs')
-      .update({ status: 'done', finished_at: new Date().toISOString(), completed_by: z.employeeId })
-      .eq('id', beh)
-      .eq('tenant_id', z.tenantId)
-      .eq('status', 'open')
-    if (chybaZapisu) {
-      redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), { chyba: 'Checklist se nepodařilo uzavřít.' }))
-    }
-  } else if (error) {
+  if (error) {
     redirect(bezpecnyNavrat(zpet, rozsah, naDetail(rozsah, beh), { chyba: error.message }))
   }
 

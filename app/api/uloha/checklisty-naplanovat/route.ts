@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 
-import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
 
 /**
@@ -41,9 +40,6 @@ export async function GET(request: Request): Promise<NextResponse> {
   const { data, error } = await supabase.rpc('vytvorit_naplanovane_checklisty')
 
   if (error) {
-    if (funkceNeexistuje(error)) {
-      return NextResponse.json({ zalozeno: 0, poznamka: 'čeká na nasazení databáze' })
-    }
     return NextResponse.json({ chyba: error.message }, { status: 500 })
   }
 

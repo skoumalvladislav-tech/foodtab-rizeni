@@ -12,11 +12,13 @@ name: Checklisty — naplánovat
 #   * úloha je idempotentní (on conflict do nothing) — dvojí běh nic
 #     nezdvojí;
 #   * cokoli jiného než HTTP 200 skončí červeně, ať se porucha nedá
-#     přehlédnout.
+#     přehlédnout (i chyba databáze — výjimka „čeká na nasazení" je
+#     od nasazení 23. 9. pryč).
 #
-# Dokud není nasazená migrace 20260923170000, adresa odpoví 200
-# s poznámkou „čeká na nasazení databáze" — nic se nezaloží, ale
-# plánovač nehlásí poruchu, která žádnou poruchou není.
+# POZOR: GitHub plánované běhy nedodržuje přesně — hodinový cron
+# běží ve skutečnosti zhruba jednou za 3–6 hodin (měřeno na
+# zapomenuty-odchod.yml 20.–23. 9.). Dnešní checklisty se tak můžou
+# založit se zpožděním. Viz hlášení 23. 9.
 
 on:
   schedule:
@@ -75,6 +77,3 @@ jobs:
 
           POCET=$(sed -n 's/.*"zalozeno":[[:space:]]*\([0-9]*\).*/\1/p' telo.json)
           echo "Založeno checklistů: ${POCET:-?}" >> "$GITHUB_STEP_SUMMARY"
-          if grep -q 'čeká na nasazení' telo.json; then
-            echo "Pozor: funkce v databázi zatím není — čeká na db push migrace 20260923170000." >> "$GITHUB_STEP_SUMMARY"
-          fi
