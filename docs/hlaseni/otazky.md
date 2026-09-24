@@ -394,3 +394,27 @@ Pro Juli stačí dnes zapnout (nebo náhradní cesta „Add user").
 
 **Když se rozhodne pro druhou cestu**, napiš — upravím přijetí pozvánky,
 přidám scénář a pak jde zakládání účtů zase vypnout.
+
+---
+
+## 15. Záloha člověku bez pobočky — jak ji potvrdí PINem na tabletu?
+
+**Vzniklo:** 24. 9. 2026 večer, při opravě „u zaměstnanců, kteří na to
+mají práva, mi nejdou vyplácet zálohy" (hlášení [24. 9.](stav-2026-09-24.md#zálohy--nešly-vyplácet)).
+
+Po opravě jde zálohu vyplatit i lidem **bez domovské pobočky** (Andrea
+Mikulová, Edita) a zaskakujícím — zaúčtuje se na pobočku, kde se
+hotovost předává, a kiosek té pobočky ji ukáže k potvrzení. **Potvrdit
+PINem ji ale tablet dovolí jen tomu, koho pozná**: domovským lidem
+pobočky a lidem se směnou tam včera/dnes/zítra (`app.pin_lide_pobocky`).
+Kdo nemá pobočku ani směnu v těchhle třech dnech, zálohu dostane, ale
+na tabletu ji nepotvrdí — zůstane „nepotvrzená".
+
+**Co jsem vybral do té doby:** nic neměním na kiosku. Záloha se vyplatí
+a zapíše; nepotvrzená je vidět v Zálohách.
+
+**Varianty, když to má být jinak:**
+- tablet pozná i každého, kdo má na téhle pobočce **dnes nepotvrzenou
+  zálohu** (úzké, jen pro potvrzení),
+- nebo pozná i **všechny lidi bez pobočky** (ne majitele) — pozor, mění
+  to i hlídání shody PINů na pobočce.
