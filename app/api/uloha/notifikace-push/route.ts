@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
-import { slozitPush, type RadekDoruceni } from '@/lib/komunikace/push-zprava'
-import { nactiKliceVapid, odeslatWebPush, type OdberPush } from '@/lib/komunikace/web-push'
+import { odeslatFrontu, PRAZDNY_VYSLEDEK } from '@/lib/komunikace/fronta-push'
+import { nactiKliceVapid } from '@/lib/komunikace/web-push'
 import { funkceNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
 
@@ -18,6 +18,9 @@ import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
  *    nejvýš interval plánovače. V aplikaci se čekající zprávy ukazují hned.
  * 2. Odeslání toho, co je ve frontě `k_odeslani` — MIMO transakci zdroje,
  *    aby výpadek push služby nikdy neshodil `ulozit_smenu` ani `poslat_zpravu`.
+ *    Logika je v `lib/komunikace/fronta-push.ts`, sdílená s odesláním hned
+ *    po zprávě (`lib/komunikace/push-hned.ts`). Tady je to ZÁLOHA pro to, co
+ *    hned neodešlo, a hlavní cesta pro vše ostatní (úkoly, směny, checklisty).
  *
  * ---------------------------------------------------------------------
  * BEZ KLÍČŮ VAPID SE NIC NEPŘEDSTÍRÁ
@@ -41,26 +44,7 @@ import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
 
 export const dynamic = 'force-dynamic'
 
-const DAVKA = 100
-const NEJVIC_POKUSU = 3
-
-/**
- * Kolik ms smí dávka odesílat. Zařízení jednoho člověka se posílají
- * souběžně (každé má vlastní timeout 8 s), ale pomalá push služba by dávku
- * jinak natáhla přes limit funkce — nedokončená dávka by pak řádky neoznačila
- * a při dalším běhu by šla znovu. Co se nestihne, zůstane `k_odeslani`.
- */
-const ROZPOCET_MS = 45_000
-
-type Doruceni = {
-  id: string
-  user_id: string
-  notification_id: string | null
-  typ: 'jedna' | 'souhrn'
-  pocet: number
-  pokusu: number
-  notifications: { druh: string; telo: Record<string, unknown>; priorita: string } | null
-}
+type ChybaDotazu = Parameters<typeof funkceNeexistuje>[0]
 
 export async function GET(request: Request): Promise<NextResponse> {
   const hlavicka = request.headers.get('authorization')
@@ -79,8 +63,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   // by za čekání na migraci vydal i skutečnou chybu uvnitř funkce po nasazení:
   // plánovač by odpověděl 200, workflow zůstal zelený a push by se tiše
   // nikdy neodeslal.
-  const chybiMigrace = (e: Parameters<typeof funkceNeexistuje>[0]) =>
-    e !== null && (funkceNeexistuje(e) || tabulkaNeexistuje(e))
+  const chybiMigrace = (e: ChybaDotazu) => e !== null && (funkceNeexistuje(e) || tabulkaNeexistuje(e))
 
   // 1. Uvolnění čekajících
   const { data: uvolneno, error: chybaUvolneni } = await supabase.rpc('uvolnit_cekajici_notifikace')
@@ -89,22 +72,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ chyba: chybaUvolneni.message }, { status: 500 })
   }
 
-  // 2. Co je k odeslání
-  const { data: fronta, error: chybaFronty } = await supabase
-    .from('notifikace_doruceni')
-    .select('id, user_id, notification_id, typ, pocet, pokusu, notifications(druh, telo, priorita)')
-    .eq('stav', 'k_odeslani')
-    .order('created_at', { ascending: true })
-    .limit(DAVKA)
-  if (chybaFronty) {
-    if (chybiMigrace(chybaFronty)) return NextResponse.json({ stav: 'ceka_na_migraci' })
-    return NextResponse.json({ chyba: chybaFronty.message }, { status: 500 })
-  }
-  const radky = (fronta ?? []) as unknown as Doruceni[]
-
   const klice = nactiKliceVapid(process.env)
-  const zacatek = Date.now()
-  const vysledek = { uvolneno: uvolneno ?? 0, ve_fronte: radky.length, odeslano: 0, selhalo: 0, bez_zarizeni: 0, nakonfigurovano: klice !== null, propadlo: 0, odlozeno: 0 }
 
   if (!klice) {
     // Nic se neposílá. Zastaralé řádky se označí, ať fronta neroste donekonečna.
@@ -115,83 +83,17 @@ export async function GET(request: Request): Promise<NextResponse> {
       .eq('stav', 'k_odeslani')
       .lt('created_at', hranice)
       .select('id')
-    vysledek.propadlo = propadle?.length ?? 0
-    return NextResponse.json(vysledek)
+    return NextResponse.json({ uvolneno: uvolneno ?? 0, nakonfigurovano: false, propadlo: propadle?.length ?? 0, ...PRAZDNY_VYSLEDEK })
   }
 
-  // Zařízení všech dotčených lidí jedním dotazem.
-  const lide = [...new Set(radky.map((r) => r.user_id))]
-  const zarizeni = new Map<string, (OdberPush & { id: string })[]>()
-  if (lide.length > 0) {
-    const { data: odbery } = await supabase
-      .from('push_odbery')
-      .select('id, user_id, endpoint, p256dh, auth_secret')
-      .in('user_id', lide)
-      .is('vypnuto_kdy', null)
-    for (const o of (odbery ?? []) as (OdberPush & { id: string; user_id: string })[]) {
-      zarizeni.set(o.user_id, [...(zarizeni.get(o.user_id) ?? []), o])
-    }
+  // 2. Odeslání fronty (chyba dotazu z odeslatFrontu přijde jako výjimka).
+  try {
+    const vysledek = await odeslatFrontu(supabase, klice)
+    return NextResponse.json({ uvolneno: uvolneno ?? 0, nakonfigurovano: true, propadlo: 0, ...vysledek })
+  } catch (e) {
+    const chyba = e as ChybaDotazu
+    if (chybiMigrace(chyba)) return NextResponse.json({ stav: 'ceka_na_migraci' })
+    const zprava = e instanceof Error ? e.message : ((e as { message?: string } | null)?.message ?? 'Neznámá chyba.')
+    return NextResponse.json({ chyba: zprava }, { status: 500 })
   }
-
-  for (const r of radky) {
-    if (Date.now() - zacatek > ROZPOCET_MS) {
-      vysledek.odlozeno++
-      continue
-    }
-    const moje = zarizeni.get(r.user_id) ?? []
-    if (moje.length === 0) {
-      await supabase.from('notifikace_doruceni').update({ stav: 'zruseno', chyba: 'Člověk už nemá žádné zařízení.' }).eq('id', r.id)
-      vysledek.bez_zarizeni++
-      continue
-    }
-
-    const zprava = slozitPush({
-      typ: r.typ,
-      pocet: r.pocet,
-      druh: r.notifications?.druh ?? null,
-      telo: (r.notifications?.telo as RadekDoruceni['telo']) ?? null,
-      priorita: r.notifications?.priorita ?? null,
-    })
-
-    let odeslano = false
-    let posledniChyba = ''
-    const odpovedi = await Promise.all(
-      moje.map(async (z) => ({
-        z,
-        v: await odeslatWebPush(z, zprava, klice, { urgency: zprava.urgent ? 'high' : 'normal' }),
-      })),
-    )
-    for (const { z, v } of odpovedi) {
-      if (v.stav === 'odeslano') {
-        odeslano = true
-        await supabase.from('push_odbery').update({ posledni_uspech_kdy: new Date().toISOString() }).eq('id', z.id)
-      } else if (v.stav === 'vyprselo' || v.stav === 'neplatny') {
-        // Zařízení odběr zrušilo (nebo má adresu, na kterou se neposílá): nezkouší se dál.
-        await supabase.from('push_odbery').update({ vypnuto_kdy: new Date().toISOString() }).eq('id', z.id)
-      } else {
-        posledniChyba = v.chyba
-      }
-    }
-
-    if (odeslano) {
-      await supabase
-        .from('notifikace_doruceni')
-        .update({ stav: 'odeslano', odeslano_kdy: new Date().toISOString(), pokusu: r.pokusu + 1, chyba: null })
-        .eq('id', r.id)
-      vysledek.odeslano++
-    } else {
-      const pokusu = r.pokusu + 1
-      await supabase
-        .from('notifikace_doruceni')
-        .update({
-          pokusu,
-          chyba: (posledniChyba || 'Zařízení odběr zrušila.').slice(0, 500),
-          stav: pokusu >= NEJVIC_POKUSU || posledniChyba === '' ? 'selhalo' : 'k_odeslani',
-        })
-        .eq('id', r.id)
-      vysledek.selhalo++
-    }
-  }
-
-  return NextResponse.json(vysledek)
 }

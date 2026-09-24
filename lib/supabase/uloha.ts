@@ -26,7 +26,12 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
  *     pro prohlížeč nedá ani nedopatřením.
  *
  * Klíč otevírá celou databázi. Volat se s ním smí jen to, co je
- * v `app/api/uloha/…`, a jen za tajemstvím.
+ * v `app/api/uloha/…`, a jen za tajemstvím. Výjimky (vždy jen na
+ * serveru, nikdy s daty z prohlížeče jako filtrem na cizí řádky):
+ *   * `app/k/[klic]` — krátký odkaz,
+ *   * `lib/komunikace/push-hned.ts` — push hned po odeslání zprávy, jen
+ *     k upozorněním zprávy, kterou databáze právě přijala pod účtem
+ *     odesílatele (id vrací `poslat_zpravu`).
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ

@@ -12,6 +12,7 @@ import {
   ocistitNazev,
   textZpravyPrilohy,
 } from '@/lib/komunikace/prilohy'
+import { naplanovatPushKeZprave } from '@/lib/komunikace/push-hned'
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { zakladZRozsahu } from '../zaklad'
@@ -155,6 +156,8 @@ export async function poslatSPrilohami(vstup: {
   }
 
   const zpravaId = String(data)
+  // Zpráva je uložená (i kdyby se přílohy nepřipojily) — push příjemcům hned.
+  naplanovatPushKeZprave(zpravaId, z.tenantId)
   const nepripojene: string[] = []
   let prvniChyba: string | null = null
 
