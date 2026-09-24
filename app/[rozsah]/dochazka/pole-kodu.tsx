@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 
+import SkenerQr from './skener-qr'
+
 /**
  * Políčko na kód z tabletu.
  *
@@ -18,9 +20,14 @@ import { useEffect, useState } from 'react'
  *
  * Otevření odkazu tím pádem NIC NEZAPÍŠE — jen předvyplní. Zápis
  * vzniká teprve ťuknutím na Příchod nebo Odchod.
+ *
+ * Od 24. 9. 2026 je nad políčkem i čtečka QR v aplikaci (`SkenerQr`,
+ * rozhodnutí Šéfíka). Načtený kód se sem jen předvyplní — stejně jako
+ * kód z odkazu.
  */
 export default function PoleKodu({ zQr }: { zQr: string | null }) {
   const [kod, setKod] = useState(zQr ?? '')
+  const [zeSkeneru, setZeSkeneru] = useState(false)
 
   useEffect(() => {
     if (!zQr) return
@@ -47,12 +54,26 @@ export default function PoleKodu({ zQr }: { zQr: string | null }) {
 
   return (
     <>
+      <SkenerQr
+        onKod={(k) => {
+          setKod(k)
+          setZeSkeneru(true)
+        }}
+      />
+
       {/*
         Příznak, že kód přišel z QR. Rozlišuje se podle něj JEN HLÁŠKA:
         kdo naskenoval a nestihl ťuknout, má jít k tabletu pro nový kód,
         kdežto kdo se překlepl při opisování, má zkusit znovu.
       */}
-      <input type="hidden" name="zqr" value={zQr ? '1' : ''} />
+      <input type="hidden" name="zqr" value={zQr || zeSkeneru ? '1' : ''} />
+
+      {zeSkeneru ? (
+        <p role="status" style={nacteno}>
+          Kód z tabletu je načtený. Ťukněte na to, co zrovna děláte —
+          teprve tím se píchnutí zapíše.
+        </p>
+      ) : null}
 
       <input
         name="kod"
@@ -61,13 +82,23 @@ export default function PoleKodu({ zQr }: { zQr: string | null }) {
         autoComplete="off"
         inputMode="text"
         placeholder="A1B2C3D4"
+        aria-label="Kód z tabletu"
         value={kod}
-        onChange={(e) => setKod(e.target.value.toUpperCase().slice(0, 8))}
+        onChange={(e) => {
+          setKod(e.target.value.toUpperCase().slice(0, 8))
+          setZeSkeneru(false)
+        }}
         style={pole}
       />
     </>
   )
 }
+
+const nacteno = {
+  margin: '0 0 8px',
+  fontSize: '13px',
+  color: 'var(--dobre)',
+} as const
 
 const pole = {
   width: '100%',

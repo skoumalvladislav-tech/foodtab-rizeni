@@ -2,6 +2,18 @@
 
 Rozhodl Šéfík 2. 9. 2026 po rozvaze nad NFC a čtečkou otisků.
 
+> **ROZHODNUTÍ ŠÉFÍKA (24. 9. 2026): „přidej do aplikace možnost skenovat
+> přímo z apky".** Řádek „Do aplikace se čtečka nepíše" tím přestává
+> platit. Důvod z provozu: fotoaparát telefonu otevře odkaz v Chromu, ne
+> v nainstalované aplikaci (Android to od verze 12 dělá, dokud se v
+> telefonu nepovolí „Otevírat podporované odkazy"), a na iPhonu v Safari,
+> kde člověk není přihlášený. Čtečka je teď na Docházce i na Dnes nad
+> políčkem na kód (`app/[rozsah]/dochazka/skener-qr.tsx`). Zbytek zadání
+> platí dál: QR nese odkaz, načtení NIC nezapíše (jen předvyplní kód),
+> textový kód i fotoaparát zůstávají jako záložní cesty. Čtečka bere jen
+> QR z kiosku téže domény (`kodZeSkenu` v `lib/qr-kiosek.ts`).
+> Návod pro provozovnu: `docs/kiosek-navod-provozovna.md`.
+
 | Otázka | Rozhodnuto |
 |---|---|
 | Co QR nese | **Odkaz s předvyplněným kódem**, ne jen těch osm znaků |

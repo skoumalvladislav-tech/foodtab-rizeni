@@ -38,7 +38,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import jsQR from 'jsqr'
 
 import { qrSvg } from '../lib/qr.ts'
-import { odkazPichnuti } from '../lib/qr-kiosek.ts'
+import { kodZeSkenu, odkazPichnuti } from '../lib/qr-kiosek.ts'
 import { nactiKomponentu } from './vykreslit.mjs'
 
 let chyb = 0
@@ -319,6 +319,36 @@ ma('klidová zóna má čtyři moduly', Math.min(...bodyK.flat()) >= 4, true)
 ma('i na druhé straně', Math.max(...bodyK.flat()) <= celkemK - 5, true)
 ma('a QR je velký, ať se čte z půl metru',
   /width="320" height="320"/.test(svgKiosku), true)
+
+console.log('\n== Čtečka v aplikaci (24. 9. 2026) ==')
+
+/*
+  Celá cesta tak, jak ji dělá čtečka v aplikaci na Safari: adresa
+  z kiosku → QR → přečtení knihovnou jsqr → kodZeSkenu → kód.
+  (Chrome na Androidu čte přes BarcodeDetector, dál je to totéž.)
+*/
+const skenovano = dekoduj(qrSvg(odkazPichnuti(PUVOD, 'cerna-perla', 'ce8ca63e'), { velikost: 320 }))
+ma('QR z kiosku → čtečka → kód (velkými)', kodZeSkenu(skenovano, PUVOD), 'CE8CA63E')
+ma('samotných osm znaků (textový kód) projde', kodZeSkenu('ab12cd34', PUVOD), 'AB12CD34')
+ma('cizí doména NE (podvržená nálepka přes tablet)',
+  kodZeSkenu('https://zloduch.cz/cerna-perla/dochazka?kod=CE8CA63E', PUVOD), null)
+ma('jiná cesta téže domény NE', kodZeSkenu(`${PUVOD}/cerna-perla/nastaveni?kod=CE8CA63E`, PUVOD), null)
+ma('špatný kód NE', kodZeSkenu(`${PUVOD}/cerna-perla/dochazka?kod=CE8CA`, PUVOD), null)
+ma('javascript: NE', kodZeSkenu('javascript:alert(1)', PUVOD), null)
+ma('prázdno NE', kodZeSkenu('', PUVOD), null)
+
+const nacti = (cesta) => fs.readFileSync(new URL(cesta, KOREN), 'utf8').replace(/\r\n/g, '\n')
+const skener = nacti('app/[rozsah]/dochazka/skener-qr.tsx')
+ma('čtečka NIC nezapisuje (žádná akce ani dotaz)',
+  /zapsatDochazku|\.rpc\(|fetch\(/.test(skener), false)
+ma('čtečka bere kód jen přes kodZeSkenu', /kodZeSkenu\(text, window\.location\.origin\)/.test(skener), true)
+ma('kamera se při zavření vypne', /getTracks\(\)\.forEach\(\(t\) => t\.stop\(\)\)/.test(skener), true)
+ma('… i při odchodu z obrazovky', /visibilityState === 'hidden'[\s\S]{0,80}zastavit\(\)/.test(skener), true)
+ma('jsqr se stahuje až po otevření čtečky', /await import\('jsqr'\)/.test(skener), true)
+ma('jsqr je běžná závislost (jde do aplikace), ne jen pro testy',
+  JSON.parse(nacti('package.json')).dependencies?.jsqr !== undefined, true)
+ma('čtečka je nad políčkem na kód (Docházka i Dnes)',
+  /<SkenerQr/.test(nacti('app/[rozsah]/dochazka/pole-kodu.tsx')), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

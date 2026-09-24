@@ -32,6 +32,14 @@ export function getKioskSupabase(): SupabaseClient {
 
   klient = createClient(url, anonKey, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    /*
+      Časový limit dotazu. Fetch v prohlížeči sám žádný nemá a rpc je
+      POST, který postgrest-js neopakuje: po probuzení tabletu může
+      dotaz viset na mrtvém spojení minuty a kiosek by celou dobu ukazoval
+      propadlý kód bez varování. Po 10 s se dotaz přeruší, vrátí se jako
+      chyba a kiosek to vezme jako výpadek (lib/kiosek-spojeni.ts).
+    */
+    db: { timeout: 10_000 },
   })
   return klient
 }
