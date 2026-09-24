@@ -109,7 +109,8 @@ export async function prihlasitSeAdresouZPozvanky(
   // Jen odhlásit. Stránka pozvánky se pak obnoví jako pro nepřihlášeného
   // a nabídne kód na adresu z pozvánky (poslatPrvniKod) — i když ta adresa
   // ještě účet nemá. Dřív šel magický odkaz, který by nový účet nezaložil.
-  await supabase.auth.signOut()
+  // `local`: odhlásí jen tenhle prohlížeč, ne účet na všech zařízeních.
+  await supabase.auth.signOut({ scope: 'local' })
   return { ok: true }
 }
 
@@ -204,7 +205,8 @@ export async function overitPrvniKod(token: string, kodVstup: string): Promise<S
   const kod = normalizujKod(kodVstup)
   if (kod === '') return { chyba: 'Opište prosím kód z e-mailu.' }
 
-  const adresa = await adresaZPozvanky(String(token ?? ''))
+  const tokenCisty = String(token ?? '')
+  const adresa = await adresaZPozvanky(tokenCisty)
   if (!adresa) return { chyba: NEPLATI }
 
   // Sezení vzniká na serveru (cookie hlavičkou), stejně jako na přihlašovací
@@ -214,11 +216,13 @@ export async function overitPrvniKod(token: string, kodVstup: string): Promise<S
   if (error) return { chyba: hlaskaProChybu(error) }
 
   // Týmž klientem, který teď drží nové sezení, se pozvánka rovnou přijme.
-  const { data, error: chybaPrijeti } = await supabase.rpc('accept_invitation', { p_token: token })
+  const { data, error: chybaPrijeti } = await supabase.rpc('accept_invitation', { p_token: tokenCisty })
   if (chybaPrijeti || !data) {
+    // Obrazovka hlášku ukáže a pod ní „Pokračovat" — po obnovení je
+    // člověk přihlášený a má tlačítko „Přijmout pozvánku".
     return {
       prihlasen: true,
-      chyba: chybaPrijeti?.message || 'Přihlášení proběhlo, pozvánku se ale nepodařilo přijmout. Zkuste to prosím tlačítkem níž.',
+      chyba: chybaPrijeti?.message || 'Přihlášení proběhlo, pozvánku se ale nepodařilo přijmout. Ťukněte na Pokračovat a zkuste ji přijmout znovu.',
     }
   }
 

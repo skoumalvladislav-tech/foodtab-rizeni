@@ -80,9 +80,11 @@ export default async function PrijmoutPozvankuPage({
             lineHeight: 1.55,
           }}
         >
-          {!user && info?.stav === 'ok'
-            ? 'Vítejte! Pro vstup do aplikace se jednou přihlásíte kódem z e-mailu — pozvánka se tím rovnou přijme.'
-            : user && info?.stav === 'pouzita'
+          {!user && info?.stav === 'ok' && info.kanal === 'email'
+            ? 'Vítejte! Přihlásíte se kódem z e-mailu a pozvánka se tím rovnou přijme.'
+            : !user && info?.stav === 'ok'
+              ? 'Pozvánku na telefon zatím nejde přijmout bez účtu. Požádejte toho, kdo firmu spravuje, o pozvánku na e-mail.'
+              : user && info?.stav === 'pouzita'
               ? 'Tahle pozvánka je přijatá.'
               : popisStavu(info?.stav)}
         </p>
@@ -105,10 +107,12 @@ export default async function PrijmoutPozvankuPage({
           info?.kanal === 'email' ? (
             <PrvniPrihlaseni token={token} adresaZkracena={zkratitAdresu(info.kontakt)} />
           ) : (
-            // Pozvánka na telefon: SMS bránu zatím nemáme, přihlášení
-            // telefonem jde přes přihlašovací stránku.
-            <Link href='/prihlaseni' className='ft-tl ft-tl-hlavni' style={{ display: 'inline-block' }}>
-              Přihlásit se
+            // Pozvánka na telefon: SMS bránu zatím nemáme a přihlašovací
+            // stránka umí jen e-mail. Kdo účet už má (e-mailem), přihlásí
+            // se tam a pozvánku přijme; nový člověk potřebuje pozvánku na
+            // e-mail — říká to text nahoře.
+            <Link href='/prihlaseni' className='ft-tl ft-tl-vedlejsi' style={{ display: 'inline-block' }}>
+              Už mám účet — přihlásit se
             </Link>
           )
         ) : (

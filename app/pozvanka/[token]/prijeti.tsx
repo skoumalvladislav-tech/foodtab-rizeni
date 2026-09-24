@@ -14,7 +14,7 @@ import { prihlasitSeAdresouZPozvanky, prijmoutPozvankuAction } from './akce'
  *    na jinou e-mailovou adresu“ řekne víc než „Token není platný“ —
  *    a hlavně je to pravda;
  *  * kdo je přihlášený pod jinou adresou, dostane tlačítko, které ho
- *    odhlásí — stránka se pak nabídne kód na adresu z pozvánky
+ *    odhlásí — stránka pak nabídne kód na adresu z pozvánky
  *    (`PrvniPrihlaseni`, bod 6). Nic neopisuje a nevybírá.
  */
 export default function PrijmoutPozvankuFormular({
@@ -66,7 +66,7 @@ export default function PrijmoutPozvankuFormular({
         Kliknutím na tlačítko níže potvrdíte, že chcete vstoupit do firmy.
       </p>
 
-      {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
+      {chyba ? <p className="hlaska-chyba" role="alert">{chyba}</p> : null}
 
       {/*
         Vazba pozvánky na adresu se nerozvolňuje — je to jediné, čím se
@@ -77,7 +77,8 @@ export default function PrijmoutPozvankuFormular({
         <div style={ramecek}>
           <p style={{ margin: '0 0 10px', fontSize: '13.5px', lineHeight: 1.5 }}>
             Tahle pozvánka byla vystavena na jinou adresu, než pod kterou
-            jste přihlášený. Odhlásíme vás a pošleme kód na tu správnou.
+            jste přihlášený. Odhlásíme vás a na další obrazovce si necháte
+            poslat kód na tu správnou.
           </p>
           <button
             type="button"
@@ -88,7 +89,7 @@ export default function PrijmoutPozvankuFormular({
             {ceka
               ? 'Odhlašuji…'
               : adresaZkracena
-                ? `Přihlásit se jako ${adresaZkracena}`
+                ? `Odhlásit a přihlásit se jako ${adresaZkracena}`
                 : 'Přihlásit se správnou adresou'}
           </button>
         </div>

@@ -48,7 +48,7 @@ import {
   ucetUzExistuje,
   zbyvaDoZnovu,
 } from '../lib/prihlaseni.ts'
-import { nactiKomponentu } from './vykreslit.mjs'
+import { nactiKomponentu, nactiModul } from './vykreslit.mjs'
 
 const KOREN = new URL('..', import.meta.url)
 
@@ -691,8 +691,14 @@ ma('použitá pozvánka → nic',
   adresaProPrvniKod({ stav: 'pouzita', kanal: 'email', kontakt: 'juli@example.cz' }), null)
 ma('propadlá pozvánka → nic',
   adresaProPrvniKod({ stav: 'propadla', kanal: 'email', kontakt: 'juli@example.cz' }), null)
+// Kontakt ve tvaru e-mailu — jinak by „nic" vrátil už regex na zavináč
+// a filtr kanálu by nešel rozbít. V databázi je kanál 'email' nebo 'sms'.
 ma('pozvánka na telefon → nic (kód jde jen e-mailem)',
-  adresaProPrvniKod({ stav: 'ok', kanal: 'telefon', kontakt: '+420777111222' }), null)
+  adresaProPrvniKod({ stav: 'ok', kanal: 'sms', kontakt: 'juli@example.cz' }), null)
+ma('zrušená pozvánka → nic',
+  adresaProPrvniKod({ stav: 'zrusena', kanal: 'email', kontakt: 'juli@example.cz' }), null)
+ma('pozvánka bez stavu → nic',
+  adresaProPrvniKod({ kanal: 'email', kontakt: 'juli@example.cz' }), null)
 ma('nesmyslný kontakt → nic',
   adresaProPrvniKod({ stav: 'ok', kanal: 'email', kontakt: 'bez zavináče' }), null)
 ma('žádná pozvánka → nic', adresaProPrvniKod(undefined), null)
@@ -720,7 +726,30 @@ const prvni = renderToStaticMarkup(
 )
 ma('první obrazovka nabízí „Poslat kód"', prvni.includes('Poslat kód'), true)
 ma('a říká, kam kód půjde (zkrácená adresa)', prvni.includes('j…i@example.cz'), true)
-ma('adresu člověk NEZADÁVÁ — žádné pole na e-mail', /<input[^>]*type="email"/.test(prvni), false)
+ma('adresu člověk NEZADÁVÁ — na první obrazovce žádné pole',
+  (prvni.match(/<input(?![^>]*type="hidden")/g) ?? []).length, 0)
+
+// Druhý krok (pole na kód) — stejná pravidla jako na přihlašovací
+// stránce po 6. 9. (commit 344094b).
+const druhy = renderToStaticMarkup(
+  createElement(PrvniPrihlaseni, { token: 't', adresaZkracena: 'j…i@example.cz', vychoziKrok: 'kod' }),
+)
+const vstupy = druhy.match(/<input(?![^>]*type="hidden")[^>]*>/g) ?? []
+ma('druhý krok: právě jedno pole', vstupy.length, 1)
+ma('… a je to pole na kód', /id="kod-z-pozvanky"/.test(vstupy[0] ?? ''), true)
+ma('… s one-time-code a číselnou klávesnicí',
+  /autoComplete="one-time-code"/i.test(vstupy[0] ?? '') && /inputMode="numeric"/i.test(vstupy[0] ?? ''), true)
+ma('… textové, ne type="number"', /type="text"/.test(vstupy[0] ?? ''), true)
+ma('… a popisek k němu patří', druhy.includes('for="kod-z-pozvanky"'), true)
+ma('… a jde se k němu dostat „Poslat kód znovu"', druhy.includes('Poslat kód znovu'), true)
+
+const zdrojPrvniBezKom = bezKomentaru(nacti('app/pozvanka/[token]/prvni-prihlaseni.tsx'))
+ma('komponenta s polem na kód NETIKÁ (odpočet je jinde)',
+  /setInterval|useSyncExternalStore\(odebiratTik/.test(zdrojPrvniBezKom), false)
+ma('pole na kód je NEŘÍZENÉ (bez value/onChange)',
+  /<input[\s\S]*?(onChange|value=)[\s\S]*?\/>/.test(zdrojPrvniBezKom), false)
+ma('komponenta s odpočtem nemá žádné pole',
+  /<input/.test(bezKomentaru(nacti('app/pozvanka/[token]/poslat-znovu.tsx'))), false)
 
 const zdrojPozvanky = nacti('app/pozvanka/[token]/page.tsx')
 const zdrojAkciPozvanky = nacti('app/pozvanka/[token]/akce.ts')
@@ -729,12 +758,118 @@ ma('stránka pozvánky nepřihlášeného NEpřesměruje na přihlášení',
 ma('a nabídne mu první přihlášení', zdrojPozvanky.includes('<PrvniPrihlaseni'), true)
 ma('poslatPrvniKod bere jen token — adresa z prohlížeče do něj nejde',
   /export async function poslatPrvniKod\(token: string\)/.test(zdrojAkciPozvanky), true)
-ma('účet se zakládá pro adresu z pozvánky v databázi',
-  /adresaZPozvanky\(/.test(zdrojAkciPozvanky) && /createUser\(\{ email: adresa/.test(zdrojAkciPozvanky), true)
-ma('přihlašovací stránka dál účty NEZAKLÁDÁ',
-  nacti('app/prihlaseni/akce.ts').includes('shouldCreateUser: false'), true)
 ma('a novému člověku řekne, kudy jít poprvé',
   uvod.includes('Jste tu poprvé'), true)
+
+/*
+  SERVEROVÉ AKCE NAOSTRO — s podstrčenou databází a přihlašovací
+  službou. Regex nad zdrojákem by prošel i tehdy, kdyby se createUser
+  zavolal DŘÍV než kontrola pozvánky; tohle kód opravdu spustí a zapíše,
+  co a s čím zavolal.
+*/
+const STUB_SERVER = 'data:text/javascript,' + encodeURIComponent(
+  'export async function getServerSupabase() { return globalThis.__pozvankaSupabase }\n')
+const STUB_ULOHA = 'data:text/javascript,' + encodeURIComponent(
+  'export function klientUlohy() { return globalThis.__pozvankaSluzba }\n')
+const STUB_AUTHZ = 'data:text/javascript,' + encodeURIComponent(
+  'export async function getUser() { return null }\n')
+const STUB_OHLAS = 'data:text/javascript,' + encodeURIComponent(
+  'export async function ohlasPrijetiPozvanky(id) { globalThis.__pozvankaVolani.push(["ohlas", id]) }\n')
+const akcePozvanky = await nactiModul('app/pozvanka/[token]/akce.ts', [
+  ['@/lib/supabase/server', STUB_SERVER],
+  ['@/lib/supabase/uloha', STUB_ULOHA],
+  ['@/lib/authz', STUB_AUTHZ],
+  ['@/lib/ohlas-prijeti', STUB_OHLAS],
+])
+
+/** Nastaví podstrčenou databázi a vrátí seznam volání. */
+function podstrcit({ pozvanka, chybaUctu = null, chybaKodu = null, chybaOvereni = null, chybaPrijeti = null }) {
+  const volani = []
+  globalThis.__pozvankaVolani = volani
+  globalThis.__pozvankaSupabase = {
+    rpc: async (jmeno, args) => {
+      volani.push(['rpc', jmeno, args])
+      if (jmeno === 'pozvanka_info') return { data: pozvanka ? [pozvanka] : [], error: null }
+      if (jmeno === 'accept_invitation') return chybaPrijeti ? { data: null, error: chybaPrijeti } : { data: 'firma-1', error: null }
+      return { data: null, error: { message: 'neznámá funkce' } }
+    },
+    auth: {
+      signInWithOtp: async (args) => { volani.push(['signInWithOtp', args]); return { error: chybaKodu } },
+      verifyOtp: async (args) => { volani.push(['verifyOtp', args]); return { error: chybaOvereni } },
+      signOut: async (args) => { volani.push(['signOut', args]); return { error: null } },
+    },
+  }
+  globalThis.__pozvankaSluzba = {
+    auth: { admin: { createUser: async (args) => { volani.push(['createUser', args]); return { error: chybaUctu } } } },
+  }
+  return volani
+}
+const jen = (volani, co) => volani.filter((v) => v[0] === co)
+const PLATNA = { stav: 'ok', kanal: 'email', kontakt: 'juli@example.cz', firma: 'Černá Perla' }
+
+let v = podstrcit({ pozvanka: PLATNA })
+let odpoved = await akcePozvanky.poslatPrvniKod('token-1')
+ma('akce: platná pozvánka → účet pro adresu Z DATABÁZE, potvrzený',
+  JSON.stringify(jen(v, 'createUser').map((x) => x[1])), JSON.stringify([{ email: 'juli@example.cz', email_confirm: true }]))
+ma('akce: … a kód na tutéž adresu, bez zakládání dalšího účtu',
+  JSON.stringify(jen(v, 'signInWithOtp').map((x) => [x[1].email, x[1].options?.shouldCreateUser])),
+  JSON.stringify([['juli@example.cz', false]]))
+ma('akce: … a odpoví „poslano"', odpoved.ok === true && typeof odpoved.odeslanoKdy === 'number', true)
+
+for (const [popis, pozvanka] of [
+  ['použitá', { ...PLATNA, stav: 'pouzita' }],
+  ['propadlá', { ...PLATNA, stav: 'propadla' }],
+  ['zrušená', { ...PLATNA, stav: 'zrusena' }],
+  ['na telefon', { ...PLATNA, kanal: 'sms' }],
+  ['neexistující token', null],
+]) {
+  v = podstrcit({ pozvanka })
+  odpoved = await akcePozvanky.poslatPrvniKod('token-x')
+  ma(`akce: ${popis} pozvánka → žádný účet ani kód`,
+    jen(v, 'createUser').length + jen(v, 'signInWithOtp').length, 0)
+}
+ma('akce: … a hláška, že pozvánka neplatí', /neplatí/.test(odpoved.chyba ?? ''), true)
+
+v = podstrcit({ pozvanka: PLATNA, chybaUctu: { code: 'unexpected_failure', message: 'Database error' } })
+odpoved = await akcePozvanky.poslatPrvniKod('token-1')
+ma('akce: účet nejde založit → kód se neposílá', jen(v, 'signInWithOtp').length, 0)
+
+v = podstrcit({ pozvanka: PLATNA, chybaUctu: { code: 'email_exists' } })
+odpoved = await akcePozvanky.poslatPrvniKod('token-1')
+ma('akce: účet už je → kód se pošle', jen(v, 'signInWithOtp').length === 1 && odpoved.ok === true, true)
+
+v = podstrcit({ pozvanka: PLATNA, chybaKodu: { status: 429, code: 'over_email_send_rate_limit' } })
+odpoved = await akcePozvanky.poslatPrvniKod('token-1')
+ma('akce: limit odesílání → obrazovka přejde na opsání kódu', odpoved.zadatKod === true && !odpoved.ok, true)
+
+v = podstrcit({ pozvanka: PLATNA })
+odpoved = await akcePozvanky.overitPrvniKod('token-1', ' 123 456 ')
+ma('akce: ověření kódu pro adresu Z DATABÁZE (ne z prohlížeče)',
+  JSON.stringify(jen(v, 'verifyOtp').map((x) => x[1])),
+  JSON.stringify([{ email: 'juli@example.cz', token: '123456', type: 'email' }]))
+ma('akce: … pak se přijme TATÁŽ pozvánka',
+  JSON.stringify(jen(v, 'rpc').filter((x) => x[1] === 'accept_invitation').map((x) => x[2])),
+  JSON.stringify([{ p_token: 'token-1' }]))
+ma('akce: … a odpoví ok', odpoved.ok, true)
+
+v = podstrcit({ pozvanka: { ...PLATNA, stav: 'pouzita' } })
+odpoved = await akcePozvanky.overitPrvniKod('token-1', '123456')
+ma('akce: použitá pozvánka → kód se ani neověřuje', jen(v, 'verifyOtp').length, 0)
+
+v = podstrcit({ pozvanka: PLATNA, chybaOvereni: { status: 403, code: 'otp_expired' } })
+odpoved = await akcePozvanky.overitPrvniKod('token-1', '123456')
+ma('akce: špatný kód → pozvánka se NEpřijímá',
+  jen(v, 'rpc').filter((x) => x[1] === 'accept_invitation').length, 0)
+
+v = podstrcit({ pozvanka: PLATNA, chybaPrijeti: { message: 'Pozvánka byla vystavena na jinou e-mailovou adresu.' } })
+odpoved = await akcePozvanky.overitPrvniKod('token-1', '123456')
+ma('akce: přihlášen, ale přijetí neprošlo → hláška z databáze se propustí',
+  odpoved.prihlasen === true && /jinou e-mailovou/.test(odpoved.chyba ?? ''), true)
+
+v = podstrcit({ pozvanka: PLATNA })
+await akcePozvanky.prihlasitSeAdresouZPozvanky('token-1')
+ma('akce: přepnutí účtu odhlásí jen tenhle prohlížeč',
+  JSON.stringify(jen(v, 'signOut').map((x) => x[1])), JSON.stringify([{ scope: 'local' }]))
 
 /*
   Telefon: odkaz z pozvánky se otevře v kartě uvnitř Gmailu, člověk ji

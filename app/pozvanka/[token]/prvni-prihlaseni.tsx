@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useRef, useState, useSyncExternalStore } from 'react'
 
-import { zbyvaDoZnovu } from '@/lib/prihlaseni'
+import { normalizujKod } from '@/lib/prihlaseni'
 import { overitPrvniKod, poslatPrvniKod } from './akce'
+import PoslatZnovu from './poslat-znovu'
 
 /**
  * První přihlášení z pozvánky — pro člověka, který ještě není přihlášený
@@ -20,46 +21,51 @@ import { overitPrvniKod, poslatPrvniKod } from './akce'
  * začátku. Proto se k opsání kódu dá dostat i bez nového odeslání („Už
  * mám kód z e-mailu"), a limit odesílání vede taky na opsání kódu, ne do
  * slepé uličky. Nový kód by ten v e-mailu zneplatnil.
+ *
+ * Pole na kód je stejné jako na přihlašovací stránce (commit 344094b):
+ * NEŘÍZENÉ, bez `onChange`, a odpočet tiká ve vlastní komponentě
+ * (`poslat-znovu.tsx`) — kdyby tikal tady, pole by se každou vteřinou
+ * překreslilo a na telefonu by mizela bublina „Vložit".
  */
 export default function PrvniPrihlaseni({
   token,
   adresaZkracena,
+  vychoziKrok = 'start',
 }: {
   token: string
   /** Např. „j…i@seznam.cz“. Celá adresa do prohlížeče nejde. */
   adresaZkracena: string | null
+  /** Jen pro testy a náhled — v aplikaci se začíná vždycky od „start". */
+  vychoziKrok?: 'start' | 'kod'
 }) {
-  const [krok, setKrok] = useState<'start' | 'kod'>('start')
-  const [kod, setKod] = useState('')
-  const [ceka, setCeka] = useState(false)
+  const [krok, setKrok] = useState<'start' | 'kod'>(vychoziKrok)
+  const [probiha, setProbiha] = useState<'posilam' | 'overuji' | null>(null)
   const [chyba, setChyba] = useState<string | null>(null)
   const [odeslanoKdy, setOdeslanoKdy] = useState(0)
-  const [ted, setTed] = useState(0)
-
-  // „Poslat znovu" se odpočítává od času ze serveru; hodiny tikají jen
-  // v kroku s kódem.
-  useEffect(() => {
-    if (krok !== 'kod') return
-    const id = setInterval(() => setTed(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [krok])
-
-  const zbyva = zbyvaDoZnovu(odeslanoKdy, ted)
+  // Přihlášený je, jen pozvánka se nepřijala — ukáže se hláška
+  // a „Pokračovat", žádné slepé obnovení stránky.
+  const [jenPrihlasen, setJenPrihlasen] = useState(false)
+  const poleKodu = useRef<HTMLInputElement>(null)
+  const umiSchranku = useSyncExternalStore(nicNeodebira, maCteniSchranky, naServeru)
 
   async function poslat() {
-    setCeka(true)
+    setProbiha('posilam')
     setChyba(null)
-    const v = await poslatPrvniKod(token)
-    if (v.ok) {
-      const kdy = v.odeslanoKdy ?? Date.now()
-      setOdeslanoKdy(kdy)
-      setTed(kdy)
-      setKrok('kod')
-    } else {
-      setChyba(v.chyba ?? 'Kód se nepodařilo poslat.')
-      if (v.zadatKod) setKrok('kod')
+    try {
+      const v = await poslatPrvniKod(token)
+      if (v.ok) {
+        setOdeslanoKdy(v.odeslanoKdy ?? Date.now())
+        if (poleKodu.current) poleKodu.current.value = ''
+        setKrok('kod')
+      } else {
+        setChyba(v.chyba ?? 'Kód se nepodařilo poslat.')
+        if (v.zadatKod) setKrok('kod')
+      }
+    } catch {
+      setChyba(SPOJENI)
+    } finally {
+      setProbiha(null)
     }
-    setCeka(false)
   }
 
   function uzMamKod() {
@@ -69,23 +75,46 @@ export default function PrvniPrihlaseni({
 
   async function overit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setCeka(true)
+    const kod = String(new FormData(e.currentTarget).get('kod') ?? '')
+    setProbiha('overuji')
     setChyba(null)
-    const v = await overitPrvniKod(token, kod)
-    if (v.ok) {
-      // Celé načtení: nové sezení je v cookie a rozcestí si ho má přečíst
-      // od začátku.
-      window.location.assign('/')
-      return
+    try {
+      const v = await overitPrvniKod(token, kod)
+      if (v.ok) {
+        // Celé načtení: nové sezení je v cookie a rozcestí si ho má
+        // přečíst od začátku. Tlačítka zůstanou zamčená až do odchodu.
+        window.location.assign('/')
+        return
+      }
+      if (v.prihlasen) setJenPrihlasen(true)
+      setChyba(v.chyba ?? 'Kód se nepodařilo ověřit.')
+    } catch {
+      setChyba(SPOJENI)
     }
-    if (v.prihlasen) {
-      // Přihlášený je, jen přijetí neprošlo — stránka ukáže tlačítko
-      // „Přijmout pozvánku" s hláškou z databáze.
-      window.location.reload()
-      return
+    setProbiha(null)
+  }
+
+  async function vlozitZeSchranky() {
+    try {
+      const text = await navigator.clipboard.readText()
+      const pole = poleKodu.current
+      if (!pole) return
+      pole.value = normalizujKod(text)
+      pole.focus()
+    } catch {
+      // Schránka je prázdná nebo ji prohlížeč nevydal — kód jde opsat.
     }
-    setChyba(v.chyba ?? 'Kód se nepodařilo ověřit.')
-    setCeka(false)
+  }
+
+  if (jenPrihlasen) {
+    return (
+      <div style={formular}>
+        <p className="hlaska-chyba" role="alert">{chyba}</p>
+        <button type="button" className="ft-tl ft-tl-hlavni" onClick={() => window.location.reload()}>
+          Pokračovat
+        </button>
+      </div>
+    )
   }
 
   if (krok === 'start') {
@@ -97,10 +126,10 @@ export default function PrvniPrihlaseni({
           Heslo nepotřebujete.
         </p>
         {chyba ? <p className="hlaska-chyba" role="alert">{chyba}</p> : null}
-        <button type="button" className="ft-tl ft-tl-hlavni" disabled={ceka} onClick={poslat}>
-          {ceka ? 'Posílám…' : 'Poslat kód'}
+        <button type="button" className="ft-tl ft-tl-hlavni" disabled={probiha !== null} onClick={poslat}>
+          {probiha === 'posilam' ? 'Posílám…' : 'Poslat kód'}
         </button>
-        <button type="button" className="ft-tl ft-tl-vedlejsi ft-tl-male" disabled={ceka} onClick={uzMamKod}>
+        <button type="button" className="ft-tl ft-tl-vedlejsi ft-tl-male" disabled={probiha !== null} onClick={uzMamKod}>
           Už mám kód z e-mailu
         </button>
       </div>
@@ -109,7 +138,7 @@ export default function PrvniPrihlaseni({
 
   return (
     <form onSubmit={overit} style={formular}>
-      <p style={text}>
+      <p style={text} role="status">
         {odeslanoKdy > 0 ? 'Kód jsme poslali' : 'Opište kód z e-mailu, který přišel'}
         {adresaZkracena ? <> na <strong>{adresaZkracena}</strong></> : ''}. Platí
         několik minut. Když nepřijde, podívejte se i do nevyžádané pošty.
@@ -119,35 +148,49 @@ export default function PrvniPrihlaseni({
         Kód z e-mailu
       </label>
       <input
+        ref={poleKodu}
         id="kod-z-pozvanky"
         name="kod"
-        value={kod}
-        onChange={(e) => setKod(e.target.value)}
+        type="text"
         autoComplete="one-time-code"
         inputMode="numeric"
+        pattern="[0-9  ]*"
+        maxLength={16}
         autoFocus
         required
         placeholder="123456"
         style={pole}
       />
+      {umiSchranku ? (
+        <button type="button" className="ft-tl ft-tl-vedlejsi ft-tl-male" onClick={vlozitZeSchranky}>
+          Vložit kód
+        </button>
+      ) : null}
 
       {chyba ? <p className="hlaska-chyba" role="alert">{chyba}</p> : null}
 
-      <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>
-        {ceka ? 'Ověřuji…' : 'Přihlásit a vstoupit do firmy'}
+      <button type="submit" className="ft-tl ft-tl-hlavni" disabled={probiha !== null}>
+        {probiha === 'overuji' ? 'Ověřuji…' : 'Přihlásit a vstoupit do firmy'}
       </button>
 
-      <button
-        type="button"
-        className="ft-tl ft-tl-vedlejsi ft-tl-male"
-        disabled={ceka || zbyva > 0}
-        onClick={poslat}
-      >
-        {zbyva > 0 ? `Poslat kód znovu (za ${zbyva} s)` : 'Poslat kód znovu'}
-      </button>
-      <p style={{ ...text, fontSize: '12px' }}>Nový kód zneplatní ten předchozí.</p>
+      <PoslatZnovu odeslanoKdy={odeslanoKdy} zamceno={probiha !== null} poslat={poslat} />
     </form>
   )
+}
+
+const SPOJENI = 'Spojení vypadlo. Zkuste to prosím znovu.'
+
+/* --- Zdroje pro useSyncExternalStore ----------------------------- */
+
+function nicNeodebira(): () => void {
+  return () => {}
+}
+/* Firefox `readText()` nemá, Safari jen z gesta — kde to nejde, tlačítko se nekreslí. */
+function maCteniSchranky(): boolean {
+  return typeof navigator !== 'undefined' && typeof navigator.clipboard?.readText === 'function'
+}
+function naServeru(): boolean {
+  return false
 }
 
 /* --- Styly (stejné jako u přijetí pozvánky) --- */
