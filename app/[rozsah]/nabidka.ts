@@ -112,7 +112,12 @@ export const NABIDKA: Polozka[] = [
   // za sebe, stejně jako Docházku.
   { segment: 'dnes', nazev: 'Dnes', kratky: 'Dnes', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny' },
   { segment: 'smeny', nazev: 'Rozpis směn', kratky: 'Směny', modul: 'provoz', pravo: 'shifts.read', hotovo: true, ikona: 'kalendar' },
-  { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny', jenPobocka: true },
+  // Docházka nese od 24. 9. i záložky Výdělky a Zálohy (dochazka/zalozky.tsx).
+  // `jenPobocka` schválně NEMÁ: majitel pracuje hlavně na /firma (domovskou
+  // pobočku obvykle nemá) a výdělky i zálohy tam dávají smysl jako souhrn
+  // firmy. S tím příznakem by ho přepínač rozsahu z Docházky na firmu
+  // odvedl jinam a k výdělkům by se na firemní úrovni nedostal.
+  { segment: 'dochazka', nazev: 'Docházka', kratky: 'Docházka', modul: 'provoz', pravo: null, hotovo: true, ikona: 'hodiny' },
   // VZKAZY A ÚKOLY: jedna polozka, uvnitr ctyri zalozky.
   //
   // Do 22. 9. 2026 tu stály DVĚ položky — „Provozní centrum“ (vzkazy,
@@ -135,14 +140,13 @@ export const NABIDKA: Polozka[] = [
   // v PcZalozky) — kdo to právo nemá, položku pořád vidí (jako dřív
   // viděl Provozní centrum), jen mu tam nesvítí ty dvě záložky.
   //
-  // JE TU PŘED ZÁLOHAMI SCHVÁLNĚ. Spodní lišta bere první čtyři
-  // položky viditelné nabídky odshora, takže na pořadí tady záleží
-  // víc než na čemkoli jiném v tomhle souboru. Číšníkovi vycházely
-  // Dnes / Směny / Docházka / Úkoly a Vzkazy padaly pod „Více" —
-  // jenže zprávy potřebuje každý den, kdežto zálohy jednou za měsíc
-  // (a ty stejně vidí jen advances.manage). Zadání
-  // docs/velka-prace-2026-09-08.md, A4 bod 3: Vzkazy do lišty místo
-  // Záloh.
+  // NA POŘADÍ ZÁLEŽÍ. Spodní lišta bere první čtyři položky viditelné
+  // nabídky odshora, takže na pořadí tady záleží víc než na čemkoli
+  // jiném v tomhle souboru. Číšníkovi vycházely Dnes / Směny / Docházka
+  // / Úkoly a Vzkazy padaly pod „Více" — jenže zprávy potřebuje každý
+  // den. Zadání docs/velka-prace-2026-09-08.md, A4 bod 3: Vzkazy do
+  // lišty místo Záloh. (Zálohy od 24. 9. vlastní položku nemají vůbec,
+  // jsou záložkou Docházky.)
   {
     segment: 'vzkazy-a-ukoly',
     nazev: 'Vzkazy a úkoly',
@@ -153,12 +157,11 @@ export const NABIDKA: Polozka[] = [
     ikona: 'zprava',
     dalsiSegmenty: ['vzkazy', 'ukoly'],
   },
-  // Zálohy jsou peníze, ne nastavení — proto v hlavní nabídce hned za
-  // Docházkou, ze které se počítají. Obrazovku otevírá i payroll.read,
-  // ale položka visí na advances.manage: kdo dělá mzdy, přijde si pro
-  // ni z Docházky, a nabídka má ukazovat to, co člověk dělá, ne všechno,
-  // kam se dostane.
-  { segment: 'zalohy', nazev: 'Zálohy', kratky: 'Zálohy', modul: 'provoz', pravo: 'advances.manage', hotovo: true, ikona: 'kniha' },
+  // ZÁLOHY TU NEJSOU. Do 24. 9. 2026 tu stála vlastní položka „Zálohy“
+  // (advances.manage); majitel je chtěl mít v Docházce, ze které se
+  // počítají. Obrazovka se přestěhovala na /dochazka/zalohy a je to
+  // záložka Docházky, viditelná podle práva (dochazka/zalozky-prava.ts).
+  // Starou adresu /:rozsah/zalohy drží přesměrování v next.config.ts.
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },

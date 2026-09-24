@@ -19,6 +19,14 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * obranná linie (pravidlo 3), ne jediná.
  */
 
+/**
+ * Kam se po zápisu vrací. Od 24. 9. jsou Zálohy záložkou Docházky;
+ * stará /zalohy by sice přesměrovala, ale s hláškou v adrese by to byla
+ * zbytečná zajížďka navíc — a revalidatePath na starou cestu by
+ * obnovil stránku, která už neexistuje.
+ */
+const adresaZaloh = (rozsah: string) => `/${rozsah}/dochazka/zalohy`
+
 export type StavVyplaceni =
   | { stav: 'nic' }
   | { stav: 'chyba'; text: string }
@@ -99,7 +107,7 @@ export async function vyplatitZalohu(
     .eq('id', zamestnanec)
     .maybeSingle()
 
-  revalidatePath(`/${rozsah}/zalohy`)
+  revalidatePath(adresaZaloh(rozsah))
 
   return {
     stav: 'hotovo',
@@ -114,7 +122,7 @@ export async function stornovatZalohu(formData: FormData): Promise<void> {
   const zaloha = String(formData.get('zaloha') ?? '')
   const duvod = String(formData.get('duvod') ?? '').trim()
 
-  const zpet = `/${rozsah}/zalohy`
+  const zpet = adresaZaloh(rozsah)
   if (!zaloha) redirect(zpet)
 
   const tenantId = await getCurrentTenantId()
@@ -150,7 +158,7 @@ export async function prepnoutPozastaveni(formData: FormData): Promise<void> {
   const zamestnanec = String(formData.get('zamestnanec') ?? '').trim() || null
   const pozastavit = String(formData.get('pozastavit') ?? '') === '1'
 
-  const zpet = `/${rozsah}/zalohy`
+  const zpet = adresaZaloh(rozsah)
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
@@ -185,7 +193,7 @@ export async function ulozitNastaveniZaloh(formData: FormData): Promise<void> {
   const volba = String(formData.get('zobrazeni') ?? 'odecitat')
   const mezText = String(formData.get('mez') ?? '').trim()
 
-  const zpet = `/${rozsah}/zalohy`
+  const zpet = adresaZaloh(rozsah)
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')

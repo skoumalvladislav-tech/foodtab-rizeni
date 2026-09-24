@@ -137,23 +137,24 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 44 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 44"; chybi=1; }
 
-          # Checklist → úkol (45), přílohy (46), Checklisty 2.0 (47–54).
-          # 45 a 46 v kontrole chyběly — scénář mohl přestat běžet, aniž by
-          # si toho kdo všiml (doplněno 23. 9. spolu s 47–53). Krok 46 má
-          # jinou závěrečnou hlášku, kontroluje se ta jeho.
+          # Checklist → úkol (45), přílohy (46), Checklisty 2.0 (47–54),
+          # výdělky všech lidí (55 — mimo jiné shoda paušálu v plánu a ve
+          # mzdě). 45 a 46 v kontrole chyběly — scénář mohl přestat běžet,
+          # aniž by si toho kdo všiml (doplněno 23. 9. spolu s 47–53).
+          # Krok 46 má jinou závěrečnou hlášku, kontroluje se ta jeho.
           grep -qE '^[[:space:]]*== KROK 45 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 45"; chybi=1; }
 
           grep -qE '^[[:space:]]*VŠECHNY KONTROLY KROKU 46 PROŠLY[[:space:]]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 46"; chybi=1; }
 
-          for n in 47 48 49 50 51 52 53 54; do
+          for n in 47 48 49 50 51 52 53 54 55; do
             grep -qE "^[[:space:]]*== KROK ${n} HOTOV[[:space:]=]*\$" vystup.txt \
               || { echo "CHYBÍ hláška: KROK ${n}"; chybi=1; }
           done
 
-          # Záloha na pobočce výdeje (57). Krok 55 a 56 jsou na jiných
-          # větvích — zapíšou se tam, kde vznikly.
+          # Záloha na pobočce výdeje (57). Krok 56 je na jiné větvi —
+          # zapíše se tam, kde vznikl.
           grep -qE '^[[:space:]]*== KROK 57 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 57"; chybi=1; }
 

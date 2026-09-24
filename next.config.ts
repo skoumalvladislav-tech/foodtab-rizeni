@@ -18,6 +18,20 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       /*
+        Zálohy se 24. 9. 2026 přestěhovaly do Docházky jako záložka
+        (zadání majitele: „sloučit kartu zálohy do karty docházka“).
+        Starou adresu mají lidé v záložkách prohlížeče; parametry
+        (?chyba=, ?ulozeno=) Next při přesměrování přenáší sám.
+
+        Jen tahle jedna cesta — pod /zalohy žádné podstránky nikdy
+        nebyly, zástupný znak by se tvářil, že vedou někam.
+      */
+      {
+        source: "/:rozsah/zalohy",
+        destination: "/:rozsah/dochazka/zalohy",
+        permanent: true,
+      },
+      /*
         Moje údaje se odstěhovaly zpod rozsahu ven: osobní údaje patří
         člověku, ne provozovně, a kdo čeká na přidělení oprávnění, žádný
         platný rozsah nemá — na `/cerna-perla/moje-udaje` by se tedy

@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 
-import { hasAccess } from '@/lib/authz'
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { getContext, hasAccess } from '@/lib/authz'
+import { bezpecnyRozsah, getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { jmenoDoNabidky, lideProZalohy } from '@/lib/lide-pobocky'
 import { koruny, prvniDenMesice } from '@/lib/mzdy'
 import { provozniDen } from '@/lib/provozni-den'
@@ -15,7 +15,9 @@ import {
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Card from '@/components/ui/Card'
-import Nadpis from '../nadpis'
+import Nadpis from '../../nadpis'
+import DochazkaZalozky from '../zalozky'
+import zalozkyDochazky from '../zalozky-prava'
 import { stornovatZalohu, ulozitNastaveniZaloh } from './akce'
 import FormularZalohy from './formular'
 import Pozastaveni from './pozastaveni'
@@ -32,6 +34,11 @@ export const dynamic = 'force-dynamic'
  * vydávat peníze a dělat mzdy jsou dvě různé práce a obojí sem
  * potřebuje vidět. Vyplácet ale smí jen to první — kdo sem přijde
  * s payroll.read, uvidí seznam bez formuláře.
+ *
+ * Od 24. 9. 2026 je to záložka Docházky (/dochazka/zalohy), ne vlastní
+ * položka nabídky — majitel chtěl zálohy tam, odkud se počítají.
+ * Obsah i práva se přestěhováním nezměnily; jen hlavička je teď
+ * společná „Docházka“ a pod ní lišta záložek.
  */
 
 type Zaloha = {
@@ -91,6 +98,22 @@ export default async function Zalohy({
   const smiNastavovat = await hasAccess(tenantId, 'settings.manage', null)
   const supabase = await getServerSupabase()
 
+  /*
+    Lišta záložek. Rozsah z adresy se tu musí zjistit zvlášť: kdo sem
+    přišel jen s payroll.read, tomu `zkusPristup` rozsah nevrátil
+    (odmítl advances.manage). Adresu už ověřil layout; kdyby přesto
+    nesedla, záložky se nekreslí.
+  */
+  const ctx = await getContext(tenantId)
+  const rozsahAdresy = ctx ? bezpecnyRozsah(ctx, rozsah) : null
+  const zalozky = rozsahAdresy ? (
+    <DochazkaZalozky
+      rozsah={rozsah}
+      aktivni="zalohy"
+      viditelne={await zalozkyDochazky(tenantId, rozsahAdresy.branchId)}
+    />
+  ) : null
+
   const mesic = prvniDenMesice(new Date())
   const konec = new Date()
   konec.setMonth(konec.getMonth() + 1)
@@ -106,10 +129,9 @@ export default async function Zalohy({
   if (funkceNeexistuje(chybaZaloh)) {
     return (
       <>
-        <Nadpis oci="Peníze" popis="Hotovost, která přešla z ruky do ruky.">
-          Zálohy
-        </Nadpis>
+        <HlavickaZaloh />
         <div style={{ padding: '16px' }}>
+          {zalozky}
           <p style={ramecek}>
             <strong>Tahle obrazovka čeká na nasazení databáze.</strong>{' '}
             Zálohy přibudou migrací <code>20260901220000_zalohy</code>.
@@ -219,14 +241,10 @@ export default async function Zalohy({
 
   return (
     <>
-      <Nadpis
-        oci="Peníze"
-        popis="Záznam o hotovosti, která přešla z ruky do ruky. Aplikace nikomu nic neposílá — účetní dělá mzdy dál ve svém programu."
-      >
-        Zálohy
-      </Nadpis>
+      <HlavickaZaloh />
 
       <div style={{ padding: '16px', paddingBottom: '32px' }}>
+        {zalozky}
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
         {ulozeno === 'storno' ? (
           <p style={hlaskaDobre}>
@@ -442,6 +460,21 @@ export default async function Zalohy({
         ) : null}
       </div>
     </>
+  )
+}
+
+/**
+ * Hlavička jako na Docházce: jeden h1 „Docházka“, záložky pod ním.
+ * Věta pod nadpisem patří záložce — co se tu eviduje a co ne.
+ */
+function HlavickaZaloh() {
+  return (
+    <Nadpis
+      oci="Provoz"
+      popis="Zálohy: záznam o hotovosti, která přešla z ruky do ruky. Aplikace nikomu nic neposílá — účetní dělá mzdy dál ve svém programu."
+    >
+      Docházka
+    </Nadpis>
   )
 }
 
