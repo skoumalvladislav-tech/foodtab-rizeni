@@ -17,8 +17,7 @@ name: Aplikace
 # NOVÝ TEST: každý scripts/*.test.mjs musí být v TESTY, nebo ve
 # VYNECHANE (dole v kroku Testy). Nezařazený shodí job, i když sám
 # prochází. Platí i pro testy z větví, které se sem teprve sloučí:
-# kdo slučuje, připíše je ve stejném PR (25. 9. 2026 to čeká `ucet`
-# z větve dochazka-ucet-naklady).
+# kdo slučuje, připíše je ve stejném PR (tak přibyl `ucet` s Můj účet).
 on:
   push:
     branches: [main]
@@ -101,7 +100,7 @@ jobs:
             marketing-schvalovani marketing-tvorba nabidka nahrani-lidi
             osloveni penize prava-osob prideleni prihlaseni provoz-granty
             qr ranni-prehled rozpis-desktop rozpis-export rozpis-mobil
-            scenare sklonovani smeny-formular tabulka upozorneni vydelky
+            scenare sklonovani smeny-formular tabulka ucet upozorneni vydelky
             web-push xlsx zalohy
           )
 
