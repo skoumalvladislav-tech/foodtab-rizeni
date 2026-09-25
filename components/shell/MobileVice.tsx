@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
 import Drawer from "@/components/ui/Drawer";
 import Ikona from "@/app/[rozsah]/ikona";
 import PrepinacRezimu from "@/app/prepinac-rezimu";
-import { odhlasit } from "@/app/prihlaseni/akce";
+import { jeOtevrena, poKliknuti, poZmeneAdresy, ZAVRENA, type StavNabidky } from "@/lib/stav-nabidky";
 import type { PolozkaProp } from "./AppShell";
+import Odhlaseni from "./Odhlaseni";
 
 /**
  * Skupina obrazovek v menu „Více" — jeden modul, nebo Nastavení.
@@ -41,6 +42,11 @@ export type SkupinaVice = {
  * „Více" je v liště VŽDYCKY, ne až když se obrazovky nevejdou: Vzhled,
  * Odhlásit se a Moje údaje potřebuje i číšník se třemi položkami.
  *
+ * Jen na telefonu — nad 640 px se spodní lišta schovává. Na počítači
+ * a tabletu je Odhlásit se vlevo dole na konci levého sloupce
+ * (ModuleSidebar), Moje údaje a Vzhled pod iniciálami v horní liště
+ * (MenuUctu).
+ *
  * ---------------------------------------------------------------------
  * PŘÍSTUPNOST
  *
@@ -49,7 +55,8 @@ export type SkupinaVice = {
  * zavírají, `role="dialog"` s nadpisem. Tlačítko nese `aria-expanded`.
  *
  * Menu se zavře i samo, když se změní adresa (tlačítko Zpět
- * v prohlížeči) — pamatuje si, na které adrese se otevřelo.
+ * v prohlížeči), a po návratu na tutéž adresu samo nevyskočí
+ * (lib/stav-nabidky.ts, stejné jako nabídka účtu).
  */
 export default function MobileVice({
   rozsah,
@@ -61,16 +68,15 @@ export default function MobileVice({
   aktivniSegment: string | undefined;
 }) {
   const cesta = usePathname() ?? "";
-  // Adresa, na které se menu otevřelo; `null` = zavřené. Po přechodu
-  // jinam (i tlačítkem Zpět) přestane sedět a menu je zavřené bez
-  // efektu, který by stav přepisoval zpětně.
-  const [otevrenoNa, setOtevrenoNa] = useState<string | null>(null);
-  const otevreno = otevrenoNa === cesta;
+  const [stav, setStav] = useState<StavNabidky>(ZAVRENA);
+  const platny = poZmeneAdresy(stav, cesta);
+  if (platny !== stav) setStav(platny);
+  const otevreno = jeOtevrena(platny, cesta);
 
   // Stálá funkce: Drawer má `onZavrit` v závislostech efektu, který
   // přesouvá fokus. Nová funkce při každém vykreslení by fokus
   // přehazovala sem a tam.
-  const zavrit = useCallback(() => setOtevrenoNa(null), []);
+  const zavrit = useCallback(() => setStav(ZAVRENA), []);
 
   return (
     <>
@@ -84,7 +90,7 @@ export default function MobileVice({
           // iPhonu ťuknutím tlačítko nezaměří, a fokus by se po zavření
           // vrátil na začátek stránky místo sem.
           e.currentTarget.focus();
-          setOtevrenoNa(cesta);
+          setStav((s) => poKliknuti(s, cesta));
         }}
       >
         <Ikona klic="tecky" />
@@ -103,11 +109,8 @@ export default function MobileVice({
   );
 }
 
-/**
- * Obsah menu. Samostatně, aby se dal vykreslit a zkontrolovat bez
- * portálu (scripts/nabidka.test.mjs).
- */
-export function ObsahVice({
+/** Obsah menu — to, co Drawer ukáže po ťuknutí na „Více". */
+function ObsahVice({
   rozsah,
   skupiny,
   aktivniSegment,
@@ -165,92 +168,7 @@ export function ObsahVice({
         <PrepinacRezimu />
       </div>
 
-      <Odhlaseni />
-    </div>
-  );
-}
-
-/**
- * ODHLÁŠENÍ S DOTAZEM (podmínka Šéfíka, 8. 9.).
- *
- * Na Mých údajích zůstává — tam patří k výdeji dat a k souhlasům. Tady
- * je proto, že sem člověk jde, když hledá „něco ostatního"; Šéfík ho
- * 6. 9. pod Mými údaji nenašel, a to věděl, že tam je.
- *
- * Do horní lišty ne a ne bez dotazu: na sdíleném telefonu za barem,
- * s mokrýma rukama, je omylem ťuknuté odhlášení uprostřed směny horší
- * než ťuknutí navíc.
- *
- * Fokus se při přepnutí přesouvá sám: tlačítko, na které člověk
- * ťukl, zmizí, a fokus by jinak spadl mimo otevřené menu. Na dotaz
- * přistane na „Zpět" — bezpečná volba, kdyby se Enter zmáčkl dvakrát.
- */
-export function Odhlaseni({
-  ptaSeNaZacatku = false,
-}: {
-  /**
-   * Začít rovnou dotazem. Aplikace to nepoužívá — je to pro kontrolu
-   * ve scripts/nabidka.test.mjs, která bez prohlížeče neumí ťuknout
-   * a jinak by druhý stav nikdy neviděla.
-   */
-  ptaSeNaZacatku?: boolean;
-}) {
-  const [ptaSe, setPtaSe] = useState(ptaSeNaZacatku);
-  const presunoutFokus = useRef(false);
-  const odhlasitRef = useRef<HTMLButtonElement>(null);
-  const zpetRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!presunoutFokus.current) return;
-    presunoutFokus.current = false;
-    (ptaSe ? zpetRef : odhlasitRef).current?.focus();
-  }, [ptaSe]);
-
-  function prepnout(novy: boolean) {
-    presunoutFokus.current = true;
-    setPtaSe(novy);
-  }
-
-  return (
-    <div className="ds-vice-odhlaseni">
-      {ptaSe ? (
-        <>
-          <p className="ds-vice-dotaz">Odhlásit se?</p>
-          <div className="ds-vice-akce">
-            {/* Na rozcestníku bylo holé .ft-tl — bez obrysu i výplně
-                vypadalo jako text vedle „Zpět". Po dotazu je to ta akce,
-                kvůli které člověk přišel, proto hlavní vzhled. */}
-            <form action={odhlasit}>
-              <button type="submit" className="ft-tl ft-tl-hlavni">
-                Odhlásit
-              </button>
-            </form>
-            <button
-              ref={zpetRef}
-              type="button"
-              className="ft-tl ft-tl-vedlejsi"
-              onClick={() => prepnout(false)}
-            >
-              Zpět
-            </button>
-          </div>
-        </>
-      ) : (
-        // Ikona A slovo. Samotná ikona se dá splést s čímkoli — zvlášť
-        // u něčeho, co se nesmí ťuknout omylem.
-        <button
-          ref={odhlasitRef}
-          type="button"
-          className="ft-tl ft-tl-vedlejsi ds-vice-odhlasit"
-          onClick={() => prepnout(true)}
-        >
-          <Ikona klic="odhlasit" />
-          Odhlásit se
-        </button>
-      )}
-      <p className="ds-vice-poznamka">
-        Odhlásí vás z tohohle zařízení. Příště se přihlásíte kódem z e-mailu.
-      </p>
+      <Odhlaseni varianta="menu" />
     </div>
   );
 }

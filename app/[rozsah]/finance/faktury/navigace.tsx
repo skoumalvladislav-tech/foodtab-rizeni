@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
+import Odhlaseni from '@/components/shell/Odhlaseni'
 import {
   aktivniKlic,
   type FakturyIkona,
@@ -114,10 +115,17 @@ export default function Navigace({
 
   return (
     <div className="modul-ram">
-      <nav className="modul-sloupec" aria-label="Faktury">
-        <div className="modul-skupina">Faktury</div>
-        {hlavni.map((p) => odkaz(p, false))}
-      </nav>
+      {/* Sloupec místo levého sloupce aplikace (ten tu CSS schová), proto
+          na jeho konci i odhlášení vlevo dole — viz ModuleSidebar. */}
+      <div className="modul-sloupec">
+        <nav className="modul-sloupec-nav" aria-label="Faktury">
+          <div className="modul-skupina">Faktury</div>
+          {hlavni.map((p) => odkaz(p, false))}
+        </nav>
+        <div className="ft-side-pata">
+          <Odhlaseni varianta="sloupec" />
+        </div>
+      </div>
 
       <div className="modul-obsah">
         <div className="modul-obsah-vnitrek">{children}</div>
