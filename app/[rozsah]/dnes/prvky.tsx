@@ -103,8 +103,11 @@ export function KpiKarta({
   hodnota: string;
   popisy?: (string | null | undefined)[];
   popisTon?: "bad";
-  /** Tlačítko dole. */
-  paticka: ReactNode;
+  /**
+   * Tlačítko dole. Nepovinné: karta, která jen ukazuje součet (Výdělky
+   * v Docházce), žádnou akci nemá a prázdná patička by jen ukrojila místo.
+   */
+  paticka?: ReactNode;
   /** Vlastní obsah mezi hodnotou a patičkou (hlášky z píchnutí). */
   children?: ReactNode;
 }) {
@@ -125,7 +128,7 @@ export function KpiKarta({
         </p>
       ))}
       {children}
-      <div className="ds-kpi-paticka">{paticka}</div>
+      {paticka ? <div className="ds-kpi-paticka">{paticka}</div> : null}
     </article>
   );
 }

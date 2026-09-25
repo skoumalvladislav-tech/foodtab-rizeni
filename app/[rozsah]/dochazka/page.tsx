@@ -29,6 +29,8 @@ import PanelNedokoncene from "./panel-nedokoncene";
 import PoleKodu from "./pole-kodu";
 import { nactiPrehledDne, type PrehledProps } from "./prehled/nacti";
 import PrehledDochazky from "./prehled/prehled";
+import DochazkaZalozky from "./zalozky";
+import zalozkyDochazky from "./zalozky-prava";
 
 export const dynamic = "force-dynamic";
 
@@ -199,6 +201,17 @@ export default async function Dochazka({
     scope.branchId,
   );
 
+  // Záložky Docházka · Výdělky · Zálohy (24. 9.). Co se kreslí, říká
+  // zalozky-prava.ts; číšník má jen Docházku, a pak se lišta nekreslí.
+  const zalozky = (
+    <DochazkaZalozky
+      rozsah={rozsah}
+      aktivni="dochazka"
+      viditelne={await zalozkyDochazky(tenantId, scope.branchId)}
+      mesic={platnyMesic(mesicParam) ? mesicParam : null}
+    />
+  );
+
   /* --- 2. NAČTENÍ DAT ------------------------------------------- */
 
   const supabase = await getServerSupabase();
@@ -280,11 +293,13 @@ export default async function Dochazka({
               odkaz: prehled.smiZarizeni ? `/${rozsah}/nastaveni/zarizeni` : null,
             }}
             vybranaZUrl={osobaZUrl ?? null}
+            zalozky={zalozky}
           />
         ) : (
           <HlavickaDochazky />
         )}
         <div style={obal}>
+          {prehled ? null : zalozky}
           <Vysvetleni nadpis="Zatím nemáte zaměstnanecký záznam">
             Váš účet ještě není propojený se zaměstnancem, takže k němu
             nejdou přiřadit směny ani docházka. Doplní to správce firmy.
@@ -842,12 +857,16 @@ export default async function Dochazka({
             odkaz: prehled.smiZarizeni ? `/${rozsah}/nastaveni/zarizeni` : null,
           }}
           vybranaZUrl={osobaZUrl ?? null}
+          zalozky={zalozky}
         />
       ) : (
         <HlavickaDochazky />
       )}
 
       <div style={obal}>
+        {/* Záložky patří pod hlavičku; u přehledu je kreslí přehled sám. */}
+        {prehled ? null : zalozky}
+
         {/*
           Ruční zápis. Je nad píchačkou schválně: kdo sem chodí zapisovat
           za druhé, hledá tohle, a kdo si píchá sám, ten formulář vůbec

@@ -2,7 +2,7 @@
 /**
  * Zálohy — nabídka „Komu“ při pozastavení.
  *
- * Pusť `node --experimental-strip-types scripts/zalohy.test.mjs`.
+ * Pusť `node scripts/zalohy.test.mjs` (starší Node: s `--experimental-strip-types`).
  *
  * ---------------------------------------------------------------------
  * PROČ SE VYKRESLUJE FORMULÁŘ
@@ -12,8 +12,13 @@
  * je opravdu v rozbalovátku. To první ověřuje záměr — a přesně tak se
  * u QR na kiosku stalo, že kontrola prošla nad kódem, který nefungoval.
  *
- * Proto se tady VYKRESLÍ SKUTEČNÝ FORMULÁŘ (`app/[rozsah]/zalohy/
- * formular.tsx`) a přečtou se z hotového HTML všechny `<option>`.
+ * Proto se tady VYKRESLÍ SKUTEČNÝ FORMULÁŘ (`app/[rozsah]/dochazka/
+ * zalohy/formular.tsx`) a přečtou se z hotového HTML všechny `<option>`.
+ *
+ * Od 24. 9. 2026 jsou Zálohy záložkou Docházky (/dochazka/zalohy).
+ * Cesty v tomhle souboru jsou proto ty nové — a na konci se ověří, že
+ * stará složka opravdu zmizela. Jinak by kontrola mohla tiše číst
+ * soubor, který obrazovka už nepoužívá.
  *
  * Serverová akce se při vykreslení nahrazuje prázdnou funkcí: modul
  * `./akce` má `'use server'` a tahá `@/lib/supabase/server`, což mimo
@@ -50,7 +55,7 @@ const STUB_AKCE =
   'data:text/javascript,' +
   encodeURIComponent('export async function vyplatitZaloh' + 'u() { return { stav: "nic" } }')
 
-const FormularZalohy = await nactiKomponentu('app/[rozsah]/zalohy/formular.tsx', [
+const FormularZalohy = await nactiKomponentu('app/[rozsah]/dochazka/zalohy/formular.tsx', [
   ['./akce', STUB_AKCE],
 ])
 
@@ -154,7 +159,7 @@ console.log('\n== Stránka tu funkci opravdu volá ==')
   vydalo rozbité.
 */
 const stranka = fs.readFileSync(
-  new URL('app/[rozsah]/zalohy/page.tsx', KOREN),
+  new URL('app/[rozsah]/dochazka/zalohy/page.tsx', KOREN),
   'utf8',
 )
 ma('page.tsx volá nabidkaKVyplaceni', stranka.includes('nabidkaKVyplaceni({'), true)
@@ -176,7 +181,7 @@ ma('nabídka „Komu" je z průzoru pro zálohy, ne pro ruční docházku',
 const lide = fs.readFileSync(new URL('lib/lide-pobocky.ts', KOREN), 'utf8')
 ma('… a ten průzor je lide_pro_zalohy', /rpc\('lide_pro_zalohy'/.test(lide), true)
 ma('… lidé bez pobočky mají v nabídce své označení', /bez pobočky/.test(lide), true)
-const akceZaloh = fs.readFileSync(new URL('app/[rozsah]/zalohy/akce.ts', KOREN), 'utf8')
+const akceZaloh = fs.readFileSync(new URL('app/[rozsah]/dochazka/zalohy/akce.ts', KOREN), 'utf8')
 ma('výplata posílá pobočku VÝDEJE z ověřeného rozsahu (ne z formuláře)',
   /const pobocka = pristup\.scope\.branchId/.test(akceZaloh) && /p_branch: pobocka/.test(akceZaloh) &&
     !/formData\.get\('pobocka'\)|formData\.get\('branch/.test(akceZaloh), true)
@@ -193,6 +198,20 @@ ma('okno směn: výplata (±N v migraci) = nabídka (okno v lideProZalohy)',
   Boolean(oknoVyplaty && oknoNabidky) && oknoVyplaty[1] === oknoVyplaty[2] && oknoVyplaty[1] === oknoNabidky[1], true)
 ma('do nasazení migrace se volá postaru (bez p_branch)',
   /funkceNeexistuje\(error\)\) \{\s*;\(\{ data, error \} = await supabase\.rpc\('vyplatit_zalohu', \{\s*p_tenant: tenantId,\s*p_employee: zamestnanec,\s*p_castka: halere,\s*p_poznamka: poznamka,\s*\}\)\)/.test(akceZaloh), true)
+
+console.log('\n== Kontroluje se živý soubor, ne mrtvý ==')
+
+/*
+  Obrazovka se 24. 9. přestěhovala pod Docházku. Kdyby stará složka
+  zůstala ležet, obě kontroly výš by mohly procházet nad souborem, který
+  nikdo nevykresluje — a přestěhovaná stránka by byla bez dozoru.
+*/
+ma('stará app/[rozsah]/zalohy/ už neexistuje',
+  fs.existsSync(new URL('app/[rozsah]/zalohy', KOREN)), false)
+ma('formulář je vedle přestěhované stránky',
+  fs.existsSync(new URL('app/[rozsah]/dochazka/zalohy/formular.tsx', KOREN)), true)
+ma('a stránka ho opravdu vykresluje',
+  stranka.includes("import FormularZalohy from './formular'") && stranka.includes('<FormularZalohy'), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

@@ -1684,23 +1684,27 @@ div.ds-smd-smena:hover { box-shadow: none; }
    ===================================================================== */
 
 /* --- Záložky: Přehled · Komunikace · Úkoly · Checklisty · Nástěnka ------ */
+/* Tutéž lištu má od 24. 9. i Docházka (Docházka · Výdělky · Zálohy,
+   `.ds-zalozky`). Jeden vzhled záložek v celé aplikaci, ne dva podobné. */
 
-.pc-zalozky {
+.pc-zalozky, .ds-zalozky {
   display: flex; gap: 2px; margin: 0 0 16px; overflow-x: auto;
   border-bottom: 1px solid var(--line); scrollbar-width: none;
 }
-.pc-zalozky::-webkit-scrollbar { display: none; }
-.pc-zalozky a {
+.pc-zalozky::-webkit-scrollbar, .ds-zalozky::-webkit-scrollbar { display: none; }
+.pc-zalozky a, .ds-zalozky a {
   display: inline-flex; align-items: center; gap: 8px; flex: none;
   min-height: 44px; padding: 0 14px; margin-bottom: -1px;
   font-size: 15px; color: var(--muted); text-decoration: none; white-space: nowrap;
   border-bottom: 2px solid transparent;
 }
-.pc-zalozky a:hover { color: var(--ink); }
-.pc-zalozky a[aria-current="page"] {
+.pc-zalozky a:hover, .ds-zalozky a:hover { color: var(--ink); }
+.pc-zalozky a[aria-current="page"], .ds-zalozky a[aria-current="page"] {
   color: var(--ink); font-weight: 600; border-bottom-color: var(--mosaz);
 }
-.pc-zalozky .ft-i { width: 18px; height: 18px; flex: none; }
+.pc-zalozky .ft-i, .ds-zalozky .ft-i { width: 18px; height: 18px; flex: none; }
+/* Uvnitř živého přehledu docházky mezery dělá mřížka `.ds-dh` (gap). */
+.ds-dh > .ds-zalozky { margin: 0; }
 .pc-pocet {
   position: relative; display: inline-grid; place-items: center; min-width: 20px; height: 20px;
   padding: 0 6px; border-radius: 10px; font-size: 12px; font-weight: 600;
@@ -2466,3 +2470,81 @@ span.ck-box { cursor: default; }
 .ck-dny input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .ck-dny label:has(input:checked) { border-color: var(--mosaz); background: color-mix(in srgb, var(--mosaz-sv) 40%, var(--card)); font-weight: 600; }
 .ck-dny label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* =====================================================================
+   DOCHÁZKA → VÝDĚLKY (24. 9. 2026)
+   =====================================================================
+   Záložka Výdělky v Docházce: čtyři přehledové karty (`KpiKarta` v
+   `.ds-kpi-mrizka`) a pod nimi plocha s lidmi. Pravidla oddílu 11:
+   čísla v kartách patkově (`.ds-cislo`), karty `.ds-plocha`, ikony ze
+   sdílené sady. Barva nikdy sama — „bez sazby“ a „přeplaceno“ nesou
+   vždy i slovo.
+
+   Kontejner je `.ds-vy`, ne okno: karty se skládají podle šířky obsahu
+   (levý sloupec aplikace mu ukrojí různě), stejně jako na Dnes. Podle
+   téže šířky se tabulka mění v karty lidí; @media podle okna by
+   nepoznalo, kolik z okna zbylo obsahu. Hranice 820 px je naměřená
+   (24. 9., Archivo, sedm sloupců s „přeplaceno 540 Kč“ a „3 směny ·
+   22 h 30 min“): při 784 px obsahu už se poslední sloupec nevešel, při
+   824 px ano. Delší čísla dorovná posuvný obal tabulky.
+   ===================================================================== */
+
+.ds-vy { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
+
+.ds-vy-lista { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.ds-vy-obdobi {
+  flex: 1 1 260px; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px;
+  font-size: 13px; color: var(--muted);
+}
+.ds-vy-mesic { font-size: 21px; font-weight: 600; line-height: 1.2; color: var(--ink); }
+.ds-vy-mesice { display: flex; gap: 8px; }
+
+.ds-vy-prazdno p { margin: 0; font-size: 14px; color: var(--muted); }
+
+/* position: relative — skryté popisky (.sr-only, position: absolute)
+   v buňkách se jinak vztahují k někomu nad posuvným obalem a umějí
+   rozšířit celou stránku do stran. */
+.ds-vy-tabulka-obal { position: relative; overflow-x: auto; }
+.ds-vy-tabulka { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.ds-vy-tabulka th[scope="col"] {
+  padding: 4px 10px 8px; text-align: right; font-family: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--muted); border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.ds-vy-tabulka th[scope="col"]:first-child { text-align: left; padding-left: 0; }
+.ds-vy-tabulka td, .ds-vy-tabulka th[scope="row"] {
+  padding: 9px 10px; vertical-align: top; border-bottom: 1px solid var(--line);
+}
+.ds-vy-tabulka td { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ds-vy-tabulka th[scope="row"] { min-width: 180px; padding-left: 0; text-align: left; font-family: inherit; font-weight: 400; }
+.ds-vy-tabulka tbody tr:last-child > * { border-bottom: 0; }
+.ds-vy-tabulka tbody tr:hover { background: color-mix(in srgb, var(--sunken) 45%, var(--card)); }
+
+.ds-vy-clovek { display: grid; min-width: 0; }
+.ds-vy-jmeno { font-weight: 600; overflow-wrap: normal; }
+.ds-vy-sazba { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ds-vy-bez-sazby { color: var(--pozor); font-weight: 600; }
+.ds-vy-preplaceno { color: var(--bad); font-weight: 600; }
+.ds-vy-znacka {
+  display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 10px;
+  background: var(--pozor-bg); color: var(--pozor); font-size: 11.5px; font-weight: 500; white-space: nowrap;
+}
+.ds-vy-nic { color: var(--faint); }
+
+.ds-vy-karty { display: none; margin: 0; padding: 0; list-style: none; }
+.ds-vy-karta { padding: 12px 0; border-top: 1px solid var(--line); }
+.ds-vy-karta:first-child { padding-top: 0; border-top: 0; }
+.ds-vy-karta:last-child { padding-bottom: 0; }
+.ds-vy-karta dl { display: grid; gap: 3px; margin: 8px 0 0; font-size: 13.5px; }
+.ds-vy-radek { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.ds-vy-radek dt { color: var(--muted); }
+.ds-vy-radek dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+@container (max-width: 820px) {
+  .ds-vy-tabulka-obal { display: none; }
+  .ds-vy-karty { display: block; }
+}
+
+.ds-vy-vysvetlivky {
+  display: grid; gap: 4px; max-width: 76ch; margin: 0; padding-left: 18px;
+  font-size: 12.5px; line-height: 1.5; color: var(--muted);
+}
