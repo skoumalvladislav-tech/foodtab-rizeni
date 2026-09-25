@@ -194,7 +194,7 @@ select m.id, :'perla'::uuid
                      '57570000-0000-0000-0000-000000000002');
 
 -- Cyril má účet a ČLENSTVÍ (na svém Baru). Od 25. 9. 2026 jde upozornění
--- na zálohu přes app.notifikovat (20260925100000) a ta píše jen lidem
+-- na zálohu přes app.notifikovat (20260925140000) a ta píše jen lidem
 -- s aktivním členstvím — kdo ho nemá, do aplikace firmy stejně nevidí.
 -- Bez členství by kontrola „upozornění zaskakujícímu je z Perly" níž
 -- neměla co měřit. Scénář ho dřív neměl, protože přímý insert se na

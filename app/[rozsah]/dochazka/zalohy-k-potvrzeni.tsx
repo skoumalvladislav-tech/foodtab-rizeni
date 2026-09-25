@@ -43,15 +43,7 @@ export default function ZalohyKPotvrzeni({
   if (zalohy.length === 0) return null;
 
   return (
-    <section
-      aria-label="Zálohy k potvrzení"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-        gap: "14px",
-        marginBottom: "16px",
-      }}
-    >
+    <section aria-label="Zálohy k potvrzení" className="ds-zalohy-potvrdit">
       {zalohy.map((z) => (
         <KpiKarta
           key={z.id}
@@ -63,13 +55,22 @@ export default function ZalohyKPotvrzeni({
             [z.vydal ? `Vydal(a) ${z.vydal}` : null, denCesky(z.business_date), z.pobocka]
               .filter(Boolean)
               .join(" · "),
-            "Potvrďte jen tehdy, když ji máte v ruce. Kdo ji vydal, dostane zprávu.",
+            "Potvrďte jen tehdy, když ji máte v ruce. Kdo ji vydal, uvidí potvrzení v upozorněních.",
           ]}
           paticka={
             <form action={akce}>
               <input type="hidden" name="rozsah" value={rozsah} />
               <input type="hidden" name="zaloha" value={z.id} />
-              <button type="submit" className="ft-tl ft-tl-hlavni ds-kpi-tlacitko">
+              {/*
+                Víc karet = víc stejných tlačítek. Čtečka čte jen nápis
+                tlačítka, takže nese i částku a den — jinak by dvakrát
+                přečetla totéž a nebylo by poznat, co se potvrzuje.
+              */}
+              <button
+                type="submit"
+                className="ft-tl ft-tl-hlavni ds-kpi-tlacitko"
+                aria-label={`Potvrdit převzetí zálohy ${koruny(z.castka_haleru)} (${denCesky(z.business_date)})`}
+              >
                 Potvrdit, že jsem ji dostal/a
               </button>
             </form>
@@ -78,4 +79,60 @@ export default function ZalohyKPotvrzeni({
       ))}
     </section>
   );
+}
+
+/**
+ * Kde se karta na Docházce kreslí (vytažené sem, ať to jde ověřit
+ * vykreslením, ne čtením stránky):
+ *
+ *   zadne       při píchání (kód z QR, výsledek píchnutí) — po
+ *               naskenování QR má být píchačka nahoře sama;
+ *   v-prehledu  vedoucí s živým přehledem: hned pod záložky přehledu,
+ *               NAD jeho karty a seznamy — jinak by ji našel až po
+ *               dlouhém posouvání pod celým přehledem;
+ *   nahore      ostatní: nahoře pod záložkami, nad píchačkou.
+ */
+export type MistoZaloh = "zadne" | "v-prehledu" | "nahore";
+
+export function mistoZaloh({
+  pichaSe,
+  prehled,
+}: {
+  pichaSe: boolean;
+  prehled: boolean;
+}): MistoZaloh {
+  if (pichaSe) return "zadne";
+  return prehled ? "v-prehledu" : "nahore";
+}
+
+/**
+ * Hláška po potvrzení v telefonu (`?zaloha=potvrzena` / `?zaloha=chyba`).
+ *
+ * Zprávu neslibuje natvrdo: vydávající ji nedostane, když zálohu vydal
+ * i potvrdil sám, když nemá aktivní členství nebo když už účet nemá.
+ * A na telefon mimo směnu dojde až s příchodem. „Potvrzená" se ukáže
+ * JEN u `potvrzena`, nikdy vedle chyby.
+ */
+export function HlaskaPotvrzeniZalohy({
+  vysledek,
+  duvod,
+}: {
+  vysledek?: string;
+  duvod?: string;
+}) {
+  if (vysledek === "potvrzena") {
+    return (
+      <p role="status" className="ds-zalohy-hlaska" style={{ fontSize: "14px", color: "var(--dobre)" }}>
+        Záloha je potvrzená. Kdo vám ji vydal, uvidí to v upozorněních.
+      </p>
+    );
+  }
+  if (vysledek === "chyba" && duvod?.trim()) {
+    return (
+      <p role="alert" className="hlaska-chyba ds-zalohy-hlaska">
+        {duvod}
+      </p>
+    );
+  }
+  return null;
 }

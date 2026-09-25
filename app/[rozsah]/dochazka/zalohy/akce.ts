@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getContext } from '@/lib/authz'
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { bezpecnyRozsah, getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { naplanovatPushKeZdroji } from '@/lib/komunikace/push-hned'
 import { naHalere } from '@/lib/mzdy'
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
@@ -170,16 +170,25 @@ export async function stornovatZalohu(formData: FormData): Promise<void> {
  *
  * Výsledek jde do adresy Docházky jako `zaloha=…`, ne `chyba=…`: tu už
  * Docházka používá pro ruční zápis a píchnutí.
+ *
+ * Rozsah z formuláře jde do adresy přesměrování, proto se nejdřív ověří
+ * (`bezpecnyRozsah`) a do adresy jde slug OVĚŘENÉHO rozsahu, ne text
+ * z formuláře: `rozsah="/evil.cz"` by z `/${rozsah}/dochazka` udělal
+ * `//evil.cz/dochazka`, tedy jiný web.
  */
 export async function potvrditMojiZalohu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const zaloha = String(formData.get('zaloha') ?? '')
 
-  const zpet = `/${rozsah}/dochazka`
-  if (!zaloha) redirect(zpet)
-
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
+
+  const ctx = await getContext(tenantId)
+  const scope = ctx ? bezpecnyRozsah(ctx, rozsah) : null
+  if (!scope?.branchSlug) redirect('/')
+
+  const zpet = `/${scope.branchSlug}/dochazka`
+  if (!zaloha) redirect(zpet)
 
   const supabase = await getServerSupabase()
   const { data, error } = await supabase.rpc('potvrdit_moji_zalohu', {
@@ -209,18 +218,23 @@ export async function potvrditMojiZalohu(formData: FormData): Promise<void> {
  * sám potvrzovat. První linie je `jeMajitel` z kontextu (databáze,
  * `employees.je_majitel`); o zápisu rozhoduje znovu `app.is_owner`
  * v `potvrdit_zalohu_za_zamestnance` (pravidlo 2 a 3).
+ *
+ * Rozsah do adresy přesměrování jen ověřený — viz potvrditMojiZalohu.
  */
 export async function potvrditZaZamestnance(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const zaloha = String(formData.get('zaloha') ?? '')
 
-  const zpet = adresaZaloh(rozsah)
-  if (!zaloha) redirect(zpet)
-
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
   const ctx = await getContext(tenantId)
+  const scope = ctx ? bezpecnyRozsah(ctx, rozsah) : null
+  if (!scope?.branchSlug) redirect('/')
+
+  const zpet = adresaZaloh(scope.branchSlug)
+  if (!zaloha) redirect(zpet)
+
   if (!ctx?.jeMajitel) {
     redirect(`${zpet}?chyba=${encodeURIComponent('Potvrdit zálohu za zaměstnance smí jen majitel.')}`)
   }

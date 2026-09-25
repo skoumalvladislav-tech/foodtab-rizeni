@@ -11,6 +11,11 @@
 --
 -- NASAZUJE ŠÉFÍK (db push), NIKDY relace.
 --
+-- Razítko 20260925140000, ne původní 20260925100000: v main už leží
+-- 20260925120000 (#84) a 20260925130000 (#82). Se starším razítkem by
+-- db push tuhle migraci odmítl, kdyby se main nasadil dřív. Na žádné
+-- z těch dvou nezávisí a ony nezávisí na ní (jiné funkce).
+--
 -- ---------------------------------------------------------------------
 -- CO SE MĚNÍ
 --
@@ -24,6 +29,8 @@
 --      čekajícího push k výplatě. Volají ji všechny tři cesty, aby se
 --      nemohly rozejít (stejná úvaha jako `app.patri_k_zaloze`
 --      v 20260924120000: dvě kopie téhož pravidla se vždycky rozejdou).
+--      Samotné zrušení push je ještě o patro níž, v `app.zrusit_vyzvu_
+--      k_zaloze` — volá ho i storno (bod 9).
 --
 --   3. NOVÁ `public.potvrdit_moji_zalohu` — příjemce potvrdí ve svém
 --      telefonu. Jen svou, jen nepotvrzenou a nestornovanou.
@@ -53,6 +60,14 @@
 --      replace změnu výstupních sloupců neumí). Stará aplikace sloupec
 --      navíc ignoruje.
 --
+--   9. `public.stornovat_zalohu` — tělo z 20260901220000 (jiná definice
+--      od té doby není), změněné JEN v tom, že po stornu zruší čekající
+--      push „Máte zálohu k potvrzení". Dřív tahle situace nastat
+--      nemohla: push k výplatě vůbec nebyl (bod 7). Bez toho by příjemci,
+--      který není v práci, druhý den po příchodu pípla výzva k záloze,
+--      kterou mezitím někdo stornoval — a karta v Docházce by byla
+--      prázdná, protože stornovaná se nepotvrzuje.
+--
 -- ---------------------------------------------------------------------
 -- ROZHODNUTÍ (nejopatrnější varianta; zapsané, ať je jde změnit)
 --
@@ -63,10 +78,11 @@
 --     zaměstnanec (`zaloha.potvrzena_za_vas`), pokud má účet. Potvrzení
 --     za někoho je tvrzení o jeho penězích; musí se o něm dozvědět, aby
 --     se mohl ozvat, kdyby hotovost nedostal.
---   * Po potvrzení se ZRUŠÍ čekající push k výplatě příjemci
+--   * Po potvrzení i po stornu se ZRUŠÍ čekající push k výplatě příjemci
 --     (`zaloha.vyplacena`, stav ceka_na_smenu / k_odeslani). Jinak by
 --     mu po příchodu na směnu pípla výzva k potvrzení zálohy, kterou už
---     potvrdil na tabletu. Záznam v aplikaci zůstává.
+--     potvrdil na tabletu, nebo kterou někdo stornoval. Záznam
+--     v aplikaci zůstává.
 --   * Upozornění jdou s prioritou `normal`. Mimo směnu tedy push čeká
 --     na příchod (app.doruci_se); majiteli chodí hned
 --     (20260922120000). V aplikaci je upozornění vidět hned vždycky.
@@ -93,7 +109,9 @@
 --     způsob stejně umět musí (stará data).
 --   * Potvrzení se NEDÁ vrátit. Omylem potvrzenou zálohu nejde
 --     „odpotvrdit" ani storno nemaže potvrzení — storno jde dál jako
---     dřív (stornovat_zalohu se nemění).
+--     dřív; mění se na něm jen zrušení čekající výzvy (bod 9). Zprávu
+--     „záloha byla stornovaná" příjemci storno NEPOSÍLÁ — to by byla
+--     nová věc mimo zadání.
 --   * Kiosek (anon) push hned neposílá — dojde frontou s plánovačem.
 --     Hned posílá jen aplikace: po výplatě, po potvrzení v telefonu
 --     a po potvrzení za zaměstnance (lib/komunikace/push-hned.ts).
@@ -129,11 +147,18 @@
 -- protože každá říká jinou větu; pomocná funkce ho už nekontroluje
 -- (druhá kopie téže podmínky by nešla shodit).
 --
--- Granty: pomocná funkce nikomu zvenku; nové public funkce jen
+-- Granty: pomocné funkce nikomu zvenku; nové public funkce jen
 -- `authenticated` (Supabase dává nové funkci výchozí právo i `anon`,
--- proto výslovné revoke). Nové sloupce mají sloupcový grant pro čtení
--- (advances má granty po sloupcích — bez něj by `select` na ně spadl
--- 42501 a s ním celá obrazovka).
+-- proto výslovné revoke).
+--
+-- Nové sloupce dostávají sloupcový `grant select`. Je to POJISTKA, ne
+-- podmínka: ostrá databáze (katalog čtený 25. 9. 2026) má na `advances`
+-- pro `authenticated` SELECT na CELOU tabulku z výchozích práv Supabase
+-- (vedle sloupcových grantů na každý starý sloupec), takže tam nové
+-- sloupce jde číst i bez něj. Platí v prostředí, kde celotabulkový
+-- grant není (PGlite, čistý PostgreSQL, a až se výchozí práva jednou
+-- uklidí) — tam by `select` na nové sloupce spadl 42501 a s ním celá
+-- obrazovka.
 --
 -- SOUBĚH. Příjemce na tabletu a v telefonu, nebo příjemce a majitel,
 -- můžou potvrdit tutéž zálohu ve stejnou chvíli. Každá cesta si proto
@@ -161,7 +186,49 @@ comment on column public.advances.potvrdil is
   'Účet, který potvrzení zapsal: u telefonu příjemce, u majitele majitel. '
   'U PINu prázdné — potvrdil držitel PINu na tabletu potvrzeno_zarizenim.';
 
+-- Pojistka pro prostředí bez celotabulkového SELECT — viz hlavička,
+-- „Granty".
 grant select (potvrzeno_jak, potvrdil) on public.advances to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 2a. VÝZVA K POTVRZENÍ UŽ NEPLATÍ — zrušit čekající push
+--
+-- Příjemci, který není v práci, čeká push „Máte zálohu k potvrzení"
+-- na příchod (ceka_na_smenu); kdo v práci je, tomu čeká na odesílač
+-- (k_odeslani — třeba když push hned selhal nebo chybí klíče). Po
+-- potvrzení (kteroukoli cestou) ani po stornu už výzva nemá k čemu
+-- vyzývat. Volá se z obou míst TOUHLE funkcí: seznam stavů a druh
+-- upozornění napsané dvakrát by se rozešly.
+--
+-- Záznam v aplikaci (`notifications`) zůstává — je to záznam, ne
+-- oznámení. Nic nekontroluje; volá se až z definer funkcí po jejich
+-- kontrolách.
+-- ---------------------------------------------------------------------
+
+create function app.zrusit_vyzvu_k_zaloze(p_zaloha uuid, p_proc text)
+returns void
+language plpgsql volatile security definer set search_path = ''
+as $$
+begin
+  update public.notifikace_doruceni d
+     set stav  = 'zruseno',
+         chyba = p_proc
+   where d.stav in ('ceka_na_smenu', 'k_odeslani')
+     and d.notification_id in (
+       select n.id from public.notifications n
+        where n.druh      = 'zaloha.vyplacena'
+          and n.zdroj_typ = 'zaloha'
+          and n.zdroj_id  = p_zaloha
+     );
+end $$;
+
+comment on function app.zrusit_vyzvu_k_zaloze(uuid, text) is
+  'Zruší čekající push „Máte zálohu k potvrzení" (ceka_na_smenu, k_odeslani) '
+  'po potvrzení nebo stornu zálohy. Záznam v aplikaci zůstává.';
+
+revoke all on function app.zrusit_vyzvu_k_zaloze(uuid, text)
+  from public, anon, authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -208,18 +275,8 @@ begin
                     v_zal.branch_id, null,
                     jsonb_build_object('jak', p_jak, 'castka_haleru', v_zal.castka_haleru));
 
-  -- Výzva k potvrzení už nemá co hlásit. Čekající push se ruší; záznam
-  -- v aplikaci zůstává (je to záznam, ne oznámení).
-  update public.notifikace_doruceni d
-     set stav  = 'zruseno',
-         chyba = 'Záloha je mezitím potvrzená.'
-   where d.stav in ('ceka_na_smenu', 'k_odeslani')
-     and d.notification_id in (
-       select n.id from public.notifications n
-        where n.druh      = 'zaloha.vyplacena'
-          and n.zdroj_typ = 'zaloha'
-          and n.zdroj_id  = v_zal.id
-     );
+  -- Výzva k potvrzení už nemá co hlásit (bod 2a).
+  perform app.zrusit_vyzvu_k_zaloze(v_zal.id, 'Záloha je mezitím potvrzená.');
 
   v_telo := jsonb_build_object(
     'castka_haleru', v_zal.castka_haleru,
@@ -686,3 +743,60 @@ $$;
 
 revoke all on function public.zalohy_pobocky(uuid, date, date, uuid) from public, anon;
 grant execute on function public.zalohy_pobocky(uuid, date, date, uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 9. STORNO — zruší i čekající výzvu k potvrzení
+--
+-- Tělo z 20260901220000 (jiná definice od té doby není). JEDINÁ změna
+-- je poslední `perform` — viz hlavička, bod 9. Kdo smí, důvod, hlášky,
+-- zápis i audit jsou beze změny. Granty zůstávají z 20260901220000
+-- (create or replace je nemění).
+-- ---------------------------------------------------------------------
+
+create or replace function public.stornovat_zalohu(
+  p_tenant uuid,
+  p_zaloha uuid,
+  p_duvod  text
+)
+returns void
+language plpgsql volatile security definer set search_path = ''
+as $$
+declare v_zal public.advances;
+begin
+  select * into v_zal from public.advances a
+  where a.id = p_zaloha and a.tenant_id = p_tenant;
+
+  if not found then
+    raise exception 'Taková záloha tu není.' using errcode = 'no_data_found';
+  end if;
+
+  if not app.has_access(p_tenant, 'advances.manage', v_zal.branch_id) then
+    raise exception 'Stornovat zálohu smí jen ten, kdo je vyplácí.'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  if length(btrim(coalesce(p_duvod, ''))) = 0 then
+    raise exception 'Napište důvod storna — bez něj se za měsíc nedá zjistit, co se stalo.'
+      using errcode = 'check_violation';
+  end if;
+
+  if v_zal.stav = 'stornovana' then
+    raise exception 'Tahle záloha je stornovaná už teď.' using errcode = 'check_violation';
+  end if;
+
+  update public.advances
+     set stav = 'stornovana',
+         storno_duvod = btrim(p_duvod),
+         storno_kdy = now(),
+         stornoval = (select auth.uid())
+   where id = p_zaloha;
+
+  perform app.audit(p_tenant, 'advance.storno', 'advance', p_zaloha::text,
+                    v_zal.branch_id, jsonb_build_object('castka_haleru', v_zal.castka_haleru),
+                    jsonb_build_object('duvod', btrim(p_duvod)));
+
+  -- 25. 9. 2026: stornovanou nejde potvrdit, výzva k tomu nesmí pípnout.
+  perform app.zrusit_vyzvu_k_zaloze(p_zaloha, 'Záloha je mezitím stornovaná.');
+end;
+$$;

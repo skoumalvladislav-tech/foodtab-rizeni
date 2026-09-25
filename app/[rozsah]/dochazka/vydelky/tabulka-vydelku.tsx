@@ -167,7 +167,7 @@ export default function TabulkaVydelku({
                 s.seZalohou > 0
                   ? `${pocet(s.seZalohou, "člověk", "lidé", "lidí")} · všechny pobočky`
                   : "za tenhle měsíc žádná",
-                "nestornované, i ty, které čekají na PIN",
+                "nestornované, i ty, které čekají na potvrzení",
               ]}
             />
 
@@ -275,7 +275,7 @@ export default function TabulkaVydelku({
         </li>
         <li>
           Zálohy jsou nestornované zálohy za měsíc ze všech poboček, i ty,
-          které ještě čekají na PIN. „Zbývá“ = vyděláno minus zálohy,
+          které ještě čekají na potvrzení. „Zbývá“ = vyděláno minus zálohy,
           u každého zvlášť; kdo si vybral víc, má „přeplaceno“ a výplatu
           ostatních to nesnižuje.
         </li>

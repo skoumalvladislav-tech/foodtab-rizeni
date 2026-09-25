@@ -32,7 +32,11 @@ import PrehledDochazky from "./prehled/prehled";
 import DochazkaZalozky from "./zalozky";
 import zalozkyDochazky from "./zalozky-prava";
 import { potvrditMojiZalohu } from "./zalohy/akce";
-import ZalohyKPotvrzeni, { type ZalohaKPotvrzeni } from "./zalohy-k-potvrzeni";
+import ZalohyKPotvrzeni, {
+  HlaskaPotvrzeniZalohy,
+  mistoZaloh,
+  type ZalohaKPotvrzeni,
+} from "./zalohy-k-potvrzeni";
 
 export const dynamic = "force-dynamic";
 
@@ -873,6 +877,27 @@ export default async function Dochazka({
   const zonaUdalosti = (branchId: string | null | undefined) =>
     (branchId ? zonyPobocek.get(branchId) : undefined) ?? ZONA_VYCHOZI;
 
+  /*
+    Zálohy k potvrzení — nahoře, protože se na ně čeká (kdo zálohu
+    vydal, se o potvrzení dozví až potom). U vedoucího s živým přehledem
+    hned pod záložkami přehledu, ne až pod ním. Při píchání vůbec: po
+    naskenování QR má být píchačka nahoře sama. Pravidlo je
+    v `mistoZaloh` (zalohy-k-potvrzeni.tsx), ať jde ověřit.
+  */
+  const kdeZalohy = mistoZaloh({ pichaSe, prehled: Boolean(prehled) });
+  const blokZaloh = (
+    <>
+      <HlaskaPotvrzeniZalohy vysledek={vysledekZalohy} duvod={duvodZalohy} />
+      {kdeZalohy === "zadne" ? null : (
+        <ZalohyKPotvrzeni
+          zalohy={zalohyKPotvrzeni}
+          rozsah={rozsah}
+          akce={potvrditMojiZalohu}
+        />
+      )}
+    </>
+  );
+
   return (
     <>
       {prehled && !pichaSe ? (
@@ -887,6 +912,7 @@ export default async function Dochazka({
           }}
           vybranaZUrl={osobaZUrl ?? null}
           zalozky={zalozky}
+          podZalozkami={kdeZalohy === "v-prehledu" ? blokZaloh : null}
         />
       ) : (
         <HlavickaDochazky />
@@ -896,28 +922,8 @@ export default async function Dochazka({
         {/* Záložky patří pod hlavičku; u přehledu je kreslí přehled sám. */}
         {prehled ? null : zalozky}
 
-        {/*
-          Zálohy k potvrzení — nahoře, protože se na ně čeká (kdo zálohu
-          vydal, dostane zprávu až po potvrzení). Při píchání ne: po
-          naskenování QR má být píchačka nahoře sama.
-        */}
-        {vysledekZalohy === "potvrzena" ? (
-          <p style={{ margin: "0 0 12px", fontSize: "14px", color: "var(--dobre)" }}>
-            Záloha je potvrzená. Kdo vám ji vydal, dostal zprávu.
-          </p>
-        ) : null}
-        {vysledekZalohy === "chyba" && duvodZalohy?.trim() ? (
-          <p className="hlaska-chyba" style={{ margin: "0 0 12px" }}>
-            {duvodZalohy}
-          </p>
-        ) : null}
-        {pichaSe ? null : (
-          <ZalohyKPotvrzeni
-            zalohy={zalohyKPotvrzeni}
-            rozsah={rozsah}
-            akce={potvrditMojiZalohu}
-          />
-        )}
+        {/* Zálohy k potvrzení (viz blokZaloh výš) — pokud nejsou v přehledu. */}
+        {kdeZalohy === "v-prehledu" ? null : blokZaloh}
 
         {/*
           Ruční zápis. Je nad píchačkou schválně: kdo sem chodí zapisovat

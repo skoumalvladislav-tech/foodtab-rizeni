@@ -1,12 +1,12 @@
 -- Scénář pro krok 60 — potvrzení zálohy v telefonu, za zaměstnance
 -- majitelem a zpráva tomu, kdo zálohu vydal.
 --
--- Pokrývá migraci 20260925100000_zalohy_potvrzeni.sql.
+-- Pokrývá migraci 20260925140000_zalohy_potvrzeni.sql.
 --
 -- Navazuje jen na etapa0_scenar.sql (firma Foodtab s.r.o., pobočky
 -- Černá Perla a Bernard Bar, majitel). Pouští se i samostatně:
 --   node scripts/scenare-pglite.mjs etapa0_scenar krok60_scenar
--- Kroky 58 a 59 patří jiným větvím.
+-- Kroky 58 a 59 přišly z jiných větví (#84, #82).
 --
 -- ---------------------------------------------------------------------
 -- ZADÁNÍ MAJITELE 25. 9. 2026
@@ -25,11 +25,16 @@
 --      ne smazanému, ne s pozastaveným členstvím;
 --   3. příjemce potvrdí svou v telefonu, cizí ne; zápis kdo/kdy/jak,
 --      audit, zpráva vydávajícímu, zrušený čekající push;
---   4. stornovaná ani už potvrzená nejde;
+--   4. stornovaná ani už potvrzená nejde; STORNO zruší čekající výzvu
+--      k potvrzení (jinak by příjemci po příchodu pípla výzva k záloze,
+--      která už neplatí) — jen k té jedné, výzvy k jiným čekají dál;
 --   5. majitel za kohokoli (i na jiné pobočce, i brigádníkovi bez účtu),
 --      ne-majitel s advances.manage za jiného NE; zpráva vydávajícímu
---      i tomu, za koho se potvrdilo; majitel sám sobě nepíše;
---   6. PIN na kiosku: zpráva vydávajícímu jde i odsud;
+--      i tomu, za koho se potvrdilo; majitel sám sobě nepíše — ani jako
+--      vydávající, ani „za vás", když potvrdil zálohu vyplacenou sobě;
+--   6. PIN na kiosku: zpráva vydávajícímu jde i odsud; ruší se i výzva,
+--      která čeká na odesílač (k_odeslani), ne jen na směnu; kdo si
+--      zálohu vydal sám a potvrdil ji PINem, zprávu sám od sebe nedostane;
 --   7. cizí firma (majitel i člověk ve dvou firmách);
 --   8. granty, sloupce a pojistka na hodnotu způsobu.
 --
@@ -487,8 +492,42 @@ set role authenticated;
 select set_config('test.user_id', '60600000-0000-0000-0000-000000000001', false);
 select zaloha as zal_storno from public.vyplatit_zalohu(
   :'tenant', :'radek', 5000, 'krok60 storno', :'perla') \gset
+-- Druhá Radkova, která zůstane nepotvrzená až do konce: na její výzvě se
+-- pozná, že storno i potvrzení ruší výzvu jen k SVÉ záloze.
+select zaloha as zal_ceka from public.vyplatit_zalohu(
+  :'tenant', :'radek', 3000, 'krok60 čeká dál', :'perla') \gset
+reset role;
+select set_config('test.user_id', '', false);
+
+-- Radek není v práci: výzva k potvrzení čeká ve frontě na jeho příchod.
+select pg_temp.check('příprava: výzva ke stornované čeká na Radkův příchod',
+  exists (select 1 from public.notifikace_doruceni d
+            join public.notifications n on n.id = d.notification_id
+           where n.zdroj_id = :'zal_storno' and n.druh = 'zaloha.vyplacena'
+             and d.stav = 'ceka_na_smenu'));
+
+set role authenticated;
+select set_config('test.user_id', '60600000-0000-0000-0000-000000000001', false);
 select public.stornovat_zalohu(:'tenant', :'zal_storno', 'krok60 překlep');
 reset role;
+select set_config('test.user_id', '', false);
+
+select pg_temp.check('po stornu čekající push „máte zálohu k potvrzení" zrušený',
+  exists (select 1 from public.notifikace_doruceni d
+            join public.notifications n on n.id = d.notification_id
+           where n.zdroj_id = :'zal_storno' and n.druh = 'zaloha.vyplacena'
+             and d.stav = 'zruseno')
+  and not exists (select 1 from public.notifikace_doruceni d
+                    join public.notifications n on n.id = d.notification_id
+                   where n.zdroj_id = :'zal_storno' and n.druh = 'zaloha.vyplacena'
+                     and d.stav in ('ceka_na_smenu', 'k_odeslani')));
+
+-- Ruší se výzva jen k TÉHLE záloze: druhá Radkova (zal_ceka) čeká dál.
+select pg_temp.check('výzva k JINÉ Radkově záloze čeká dál — storno ruší jen tu svou',
+  exists (select 1 from public.notifikace_doruceni d
+            join public.notifications n on n.id = d.notification_id
+           where n.zdroj_id = :'zal_ceka' and n.druh = 'zaloha.vyplacena'
+             and d.stav = 'ceka_na_smenu'));
 
 set role authenticated;
 select set_config('test.user_id', '60600000-0000-0000-0000-000000000002', false);
@@ -609,6 +648,40 @@ select pg_temp.check('„za vás" jde jen při potvrzení majitelem (u telefonu 
   not exists (select 1 from public.notifications n
                where n.druh = 'zaloha.potvrzena_za_vas' and n.zdroj_id = :'zal1'));
 
+-- Záloha vyplacená SAMOTNÉMU majiteli (vydala Petra) a majitel ji
+-- potvrdí cestou „za zaměstnance". Příjemce a ten, kdo potvrdil, je
+-- tentýž člověk — „za vás potvrdil majitel" by psal sám sobě. Zakládá
+-- se přímým zápisem: majitel bez domovské pobočky v nabídce výplaty
+-- není a výplata tu není předmětem.
+select id as majitel_e from public.employees
+ where tenant_id = :'tenant' and user_id = :'majitel' and deleted_at is null \gset
+
+insert into public.advances (tenant_id, branch_id, employee_id, castka_haleru, business_date,
+                             vyplatil, poznamka)
+values (:'tenant', :'perla', :'majitel_e', 10000, current_date,
+        '60600000-0000-0000-0000-000000000001', 'krok60 majiteli')
+returning id as zal_majitel \gset
+
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('majitel potvrdí i zálohu vyplacenou sobě',
+  pg_temp.projde(format('select public.potvrdit_zalohu_za_zamestnance(%L, %L)',
+    :'tenant', :'zal_majitel')));
+reset role;
+select set_config('test.user_id', '', false);
+
+select pg_temp.check('důkaz: Petra (vydala ji) zprávu dostala — zprávy se u ní posílaly',
+  exists (select 1 from public.notifications n
+           where n.druh = 'zaloha.potvrzena'
+             and n.user_id = '60600000-0000-0000-0000-000000000001'
+             and n.zdroj_id = :'zal_majitel'));
+
+select pg_temp.check('majitel si sám sobě „za vás potvrdil majitel" nepíše',
+  not exists (select 1 from public.notifications n
+               where n.druh = 'zaloha.potvrzena_za_vas'
+                 and n.user_id = :'majitel'::uuid
+                 and n.zdroj_id = :'zal_majitel'));
+
 
 \echo ''
 \echo '== 6. PIN na kiosku — i odsud zpráva vydávajícímu ======='
@@ -631,6 +704,22 @@ select zaloha as zal3 from public.vyplatit_zalohu(
 reset role;
 select set_config('test.user_id', '', false);
 
+-- Radek je teď v práci (nebo mu push hned selhal): výzva nečeká na
+-- směnu, ale na odesílač — stav k_odeslani. Ani ta po potvrzení nesmí
+-- odejít. Přepíná se přímo: příchod na směnu tu není předmětem
+-- a oddíl 3 už hlídá čekání na směnu.
+update public.notifikace_doruceni d
+   set stav = 'k_odeslani'
+  from public.notifications n
+ where n.id = d.notification_id
+   and n.zdroj_id = :'zal3' and n.druh = 'zaloha.vyplacena';
+
+select pg_temp.check('příprava: výzva k zal3 čeká na odesílač (k_odeslani)',
+  exists (select 1 from public.notifikace_doruceni d
+            join public.notifications n on n.id = d.notification_id
+           where n.zdroj_id = :'zal3' and n.druh = 'zaloha.vyplacena'
+             and d.stav = 'k_odeslani'));
+
 set role anon;
 select ok as pin_ok from public.potvrdit_zalohu_pinem(:'klic60', '6039', :'zal3') \gset
 reset role;
@@ -652,11 +741,15 @@ select pg_temp.check('Petra dostala zaloha.potvrzena i z kiosku (jak = pin)',
              and n.zdroj_id = :'zal3'
              and n.telo ->> 'jak' = 'pin'));
 
-select pg_temp.check('i tady se zrušil čekající push k výplatě',
+select pg_temp.check('i tady se zrušil push k výplatě — i ten, co čekal na odesílač',
   exists (select 1 from public.notifikace_doruceni d
             join public.notifications n on n.id = d.notification_id
            where n.zdroj_id = :'zal3' and n.druh = 'zaloha.vyplacena'
-             and d.stav = 'zruseno'));
+             and d.stav = 'zruseno')
+  and not exists (select 1 from public.notifikace_doruceni d
+                    join public.notifications n on n.id = d.notification_id
+                   where n.zdroj_id = :'zal3' and n.druh = 'zaloha.vyplacena'
+                     and d.stav in ('ceka_na_smenu', 'k_odeslani')));
 
 set role anon;
 select ok as pin_ok2 from public.potvrdit_zalohu_pinem(:'klic60', '6039', :'zal3') \gset
@@ -666,6 +759,40 @@ select pg_temp.check('druhé potvrzení PINem je jen „ok", nic nového',
   :'pin_ok2'::boolean
   and (select count(*) from public.notifications n
         where n.druh = 'zaloha.potvrzena' and n.zdroj_id = :'zal3') = 1);
+
+-- Petra si zálohu vydá SAMA SOBĚ a potvrdí ji svým PINem. U PINu není
+-- přihlášený účet (potvrdil = NULL); že potvrdila ona, se pozná jen
+-- podle příjemce — a sama sobě psát nemá.
+set role authenticated;
+select set_config('test.user_id', '60600000-0000-0000-0000-000000000001', false);
+select public.nastavit_pin(:'tenant', '604717');
+select zaloha as zal_petra from public.vyplatit_zalohu(
+  :'tenant', :'petra', 12000, 'krok60 sama sobě', :'perla') \gset
+reset role;
+select set_config('test.user_id', '', false);
+
+set role anon;
+select ok as pin_petra from public.potvrdit_zalohu_pinem(:'klic60', '604717', :'zal_petra') \gset
+reset role;
+
+select pg_temp.check('důkaz: Petra svou zálohu PINem potvrdila (zapsáno jako PIN)',
+  :'pin_petra'::boolean
+  and exists (select 1 from public.advances
+               where id = :'zal_petra' and stav = 'potvrzena' and potvrzeno_jak = 'pin'));
+
+select pg_temp.check('Petra (vydala i potvrdila) zprávu sama od sebe nedostala',
+  not exists (select 1 from public.notifications n
+               where n.druh like 'zaloha.potvrzena%'
+                 and n.zdroj_id = :'zal_petra'));
+
+-- Od oddílu 4 se potvrdily další Radkovy zálohy (majitel zal2, PIN zal3).
+-- Výzva k té, kterou nikdo nepotvrdil, pořád čeká.
+select pg_temp.check('ani potvrzení jiných Radkových záloh výzvu k zal_ceka nezrušilo',
+  (select stav from public.advances where id = :'zal_ceka') = 'nepotvrzena'
+  and exists (select 1 from public.notifikace_doruceni d
+                join public.notifications n on n.id = d.notification_id
+               where n.zdroj_id = :'zal_ceka' and n.druh = 'zaloha.vyplacena'
+                 and d.stav = 'ceka_na_smenu'));
 
 
 \echo ''
@@ -716,9 +843,21 @@ select pg_temp.check('pomocnou funkci nevolá zvenku nikdo',
   not has_function_privilege('authenticated', 'app.zapsat_potvrzeni_zalohy(uuid, text, uuid, uuid)', 'execute')
   and not has_function_privilege('anon', 'app.zapsat_potvrzeni_zalohy(uuid, text, uuid, uuid)', 'execute'));
 
+select pg_temp.check('ani rušení výzvy k potvrzení',
+  not has_function_privilege('authenticated', 'app.zrusit_vyzvu_k_zaloze(uuid, text)', 'execute')
+  and not has_function_privilege('anon', 'app.zrusit_vyzvu_k_zaloze(uuid, text)', 'execute'));
+
+select pg_temp.check('storno smí dál jen přihlášený (create or replace granty nezměnil)',
+  has_function_privilege('authenticated', 'public.stornovat_zalohu(uuid, uuid, text)', 'execute')
+  and not has_function_privilege('anon', 'public.stornovat_zalohu(uuid, uuid, text)', 'execute'));
+
 select pg_temp.check('kiosek (anon) potvrzuje PINem dál',
   has_function_privilege('anon', 'public.potvrdit_zalohu_pinem(text, text, uuid)', 'execute'));
 
+-- Měří KATALOG. Kde má authenticated SELECT na celou tabulku (ostrá
+-- databáze z výchozích práv Supabase — viz hlavička migrace, „Granty"),
+-- projde i bez sloupcového grantu; hlídá tedy jen prostředí bez něj
+-- (PGlite, čistý PostgreSQL).
 select pg_temp.check('nové sloupce jde číst pod authenticated (sloupcový grant)',
   has_column_privilege('authenticated', 'public.advances', 'potvrzeno_jak', 'select')
   and has_column_privilege('authenticated', 'public.advances', 'potvrdil', 'select'));
@@ -773,12 +912,14 @@ delete from public.notifications
  where user_id::text like '60600000-0000-0000-0000-00000000000%'
     or (zdroj_typ = 'zaloha' and zdroj_id in (
          select a.id from public.advances a
-          where a.employee_id in (:'petra', :'radek', :'olga', :'vera', :'dan', :'bohous', :'eva', :'vera_cizi')));
+          where a.employee_id in (:'petra', :'radek', :'olga', :'vera', :'dan', :'bohous', :'eva', :'vera_cizi')
+             or a.id = :'zal_majitel'));
 delete from public.push_odbery
  where user_id::text like '60600000-0000-0000-0000-00000000000%';
 delete from public.advances
- where employee_id in (:'petra', :'radek', :'olga', :'vera', :'dan', :'bohous', :'eva', :'vera_cizi');
-delete from public.employee_pins where employee_id = :'radek';
+ where employee_id in (:'petra', :'radek', :'olga', :'vera', :'dan', :'bohous', :'eva', :'vera_cizi')
+    or id = :'zal_majitel';
+delete from public.employee_pins where employee_id in (:'radek', :'petra');
 delete from public.employee_permissions where employee_id = :'ivo';
 delete from public.memberships
  where user_id::text like '60600000-0000-0000-0000-00000000000%'

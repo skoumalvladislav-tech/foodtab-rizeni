@@ -40,15 +40,20 @@
  * je vidět a co se volá:
  *   * karta „Máte nepotvrzenou zálohu" se VYKRESLÍ a nese formulář
  *     s id zálohy a tlačítkem; Docházka ji opravdu kreslí a data bere
- *     z `moje_nepotvrzene_zalohy`;
+ *     z `moje_nepotvrzene_zalohy`; při píchání ne, u vedoucího v živém
+ *     přehledu nad jeho kartami; hláška po potvrzení nic neslibuje
+ *     a „potvrzená" se nikdy neukáže vedle chyby;
  *   * STRÁNKA Zálohy se vykreslí s podstrčenou databází: tlačítko
  *     „Potvrdit za zaměstnance" jen majiteli, jen u nepotvrzené a jen
- *     když databáze novou funkci zná;
+ *     když databáze novou funkci zná — v seznamu NAD tabulkou (na
+ *     telefonu by ve sloupci Akce bylo za okrajem);
  *   * serverové akce volají správná RPC se správnými parametry, push
  *     hned plánují až PO úspěchu a s id z DATABÁZE; ne-majiteli akce
- *     za zaměstnance databázi vůbec nezavolá;
+ *     za zaměstnance databázi vůbec nezavolá; podvržený rozsah
+ *     nepřesměruje na cizí web;
  *   * věty upozornění: nadpis (a tedy push přes cizí službu) nenese
  *     částku ani jméno;
+ *   * nikde v aplikaci nezůstalo „čeká na PIN" / „potvrzená PINem";
  *   * jména funkcí, parametrů a sloupců sedí s migrací.
  * Že databáze cizí zálohu odmítne, hlídá scénář krok60, ne tohle.
  */
@@ -264,7 +269,7 @@ const text = (html) =>
   html.replace(/<[^>]+>/g, ' ').replace(/[\u00a0\u202f]/g, ' ').replace(/\s+/g, ' ').trim()
 
 const migrace60 = fs.readFileSync(
-  new URL('supabase/migrations/20260925100000_zalohy_potvrzeni.sql', KOREN), 'utf8')
+  new URL('supabase/migrations/20260925140000_zalohy_potvrzeni.sql', KOREN), 'utf8')
 
 console.log('\n== Karta na Docházce: „Máte nepotvrzenou zálohu" ==')
 
@@ -294,6 +299,40 @@ ma('bez jména vydávajícího se nic nevymýšlí', !/Vydal\(a\)\s*·/.test(tex
 ma('ikona ze sdílené sady, žádné vlastní SVG navíc', (karta.match(/<svg/g) ?? []).length, 2)
 ma('bez nepotvrzených se nekreslí nic',
   renderToStaticMarkup(createElement(ZalohyKPotvrzeni, { zalohy: [], rozsah: 'cerna-perla', akce: async () => {} })), '')
+/*
+  Dvě karty = dvě stejná tlačítka. Čtečka čte jen nápis tlačítka, takže
+  musí nést i částku a den — jinak nejde poznat, co se potvrzuje.
+*/
+const popiskyTlacitek = [...karta.matchAll(/<button[^>]*aria-label="([^"]*)"/g)].map((m) => m[1].replace(/[  ]/g, ' '))
+ma('tlačítko na kartě nese pro čtečku částku a den (a každé jiné)',
+  JSON.stringify(popiskyTlacitek),
+  JSON.stringify(['Potvrdit převzetí zálohy 1 500 Kč (pátek 25. 9.)', 'Potvrdit převzetí zálohy 200 Kč (čtvrtek 24. 9.)']))
+
+const kartaModul = await nactiModul('app/[rozsah]/dochazka/zalohy-k-potvrzeni.tsx', [['next/link', ODKAZ]])
+
+console.log('\n== Docházka: kde karta je a hláška po potvrzení ==')
+
+/*
+  Kde se karta kreslí, rozhoduje `mistoZaloh` — vytažené ze stránky, ať
+  to jde ověřit spuštěním. Schválné rozbití „karta i při píchání" dřív
+  prošlo, protože to nehlídalo nic.
+*/
+const { mistoZaloh, HlaskaPotvrzeniZalohy } = kartaModul
+ma('při píchání (po QR) se karta nekreslí — ani vedoucímu s přehledem',
+  [mistoZaloh({ pichaSe: true, prehled: false }), mistoZaloh({ pichaSe: true, prehled: true })].join(','), 'zadne,zadne')
+ma('vedoucí s živým přehledem ji má V PŘEHLEDU (pod záložkami, nad kartami)',
+  mistoZaloh({ pichaSe: false, prehled: true }), 'v-prehledu')
+ma('ostatní nahoře nad píchačkou', mistoZaloh({ pichaSe: false, prehled: false }), 'nahore')
+
+const hlaska = (vysledek, duvod) =>
+  text(renderToStaticMarkup(createElement(HlaskaPotvrzeniZalohy, { vysledek, duvod })))
+ma('po potvrzení: „Záloha je potvrzená."', hlaska('potvrzena').startsWith('Záloha je potvrzená.'), true)
+ma('… a neslibuje, že vydávající „dostal zprávu" (nemusí: sám sobě, bez účtu)',
+  /dostal[a-z()]* zprávu/.test(hlaska('potvrzena')), false)
+ma('chyba: jen hláška databáze, žádné „potvrzená" vedle ní',
+  hlaska('chyba', 'Takovou zálohu tu nemáte.'), 'Takovou zálohu tu nemáte.')
+ma('chyba bez důvodu ani cizí hodnota nic neukáže',
+  [hlaska('chyba', '  '), hlaska('cokoli'), hlaska(undefined)].join('|'), '||')
 
 const dochazka = fs.readFileSync(new URL('app/[rozsah]/dochazka/page.tsx', KOREN), 'utf8')
 ma('Docházka se ptá databáze na MOJE nepotvrzené',
@@ -304,6 +343,52 @@ ma('… a potvrzovací akci bere ze záloh (ne vlastní kopii)',
   dochazka.includes('import { potvrditMojiZalohu } from "./zalohy/akce";'), true)
 ma('nenasazená funkce kartu jen schová, jiná chyba stránku shodí',
   /if \(chybaZaloh && !funkceNeexistuje\(chybaZaloh\)\) \{\s*throw new DotazSelhal/.test(dochazka), true)
+/*
+  Stránka se celá vykreslit nedá (desítky dotazů). Hlídá se proto, že
+  místo bere z `mistoZaloh` se skutečným `pichaSe` a že ho OPRAVDU
+  použije: kartu schová při píchání, v přehledu ji předá přehledu a pod
+  ním ji pak nekreslí podruhé.
+*/
+ma('místo karty bere z mistoZaloh se skutečným pichaSe a přehledem',
+  /const kdeZalohy = mistoZaloh\(\{ pichaSe, prehled: Boolean\(prehled\) \}\)/.test(dochazka), true)
+ma('… při „zadne" kartu nekreslí',
+  /\{kdeZalohy === "zadne" \? null : \(\s*<ZalohyKPotvrzeni/.test(dochazka), true)
+ma('… přehledu ji předá jen při „v-prehledu"',
+  /podZalozkami=\{kdeZalohy === "v-prehledu" \? blokZaloh : null\}/.test(dochazka), true)
+ma('… a pod přehledem pak ne podruhé',
+  /\{kdeZalohy === "v-prehledu" \? null : blokZaloh\}/.test(dochazka), true)
+ma('hlášku kreslí HlaskaPotvrzeniZalohy (ne vlastní kopie ve stránce)',
+  /<HlaskaPotvrzeniZalohy vysledek=\{vysledekZalohy\} duvod=\{duvodZalohy\} \/>/.test(dochazka) &&
+    !dochazka.includes('Záloha je potvrzená'), true)
+
+/*
+  Přehled vedoucího se VYKRESLÍ a hledá se, kde v něm zálohy jsou: pod
+  záložkami, NAD kartami přehledu — ne až pod celým přehledem.
+*/
+const PrehledDochazky = await nactiKomponentu('app/[rozsah]/dochazka/prehled/prehled.tsx', [
+  ['next/link', ODKAZ],
+  ['next/navigation', js('export function useRouter() { return { refresh() {} } }\n')],
+  // Panel člověka (zásuvka se serverovými akcemi) tu není předmětem
+  // a bez vybraného člověka se stejně nekreslí.
+  ['./detail', js('export default function Detail() { return null }\n')],
+])
+const htmlPrehledu = renderToStaticMarkup(
+  createElement(PrehledDochazky, {
+    data: { radky: [], souhrn: { vPraci: 0, cekame: 0, poZacatku: 0, odesli: 0, minutNaMiste: 0 }, aktualizovano: '10:00' },
+    denPopis: 'pátek 25. 9.',
+    den: '2026-09-25',
+    rozsah: 'cerna-perla',
+    kiosek: { aktivni: true, odkaz: null },
+    vybranaZUrl: null,
+    zalozky: createElement('nav', { id: 'zalozky-test' }),
+    podZalozkami: createElement(ZalohyKPotvrzeni, { zalohy: MOJE.slice(0, 1), rozsah: 'cerna-perla', akce: async () => {} }),
+  }),
+)
+const iZalozky = htmlPrehledu.indexOf('id="zalozky-test"')
+const iZaloh = htmlPrehledu.indexOf('Máte nepotvrzenou zálohu')
+const iKaret = htmlPrehledu.indexOf('ds-dh-karty')
+ma('v přehledu: záložky → zálohy k potvrzení → karty přehledu',
+  iZalozky > 0 && iZaloh > iZalozky && iKaret > iZaloh, true)
 
 console.log('\n== Stránka Zálohy: „Potvrdit za zaměstnance" jen majiteli ==')
 
@@ -380,7 +465,7 @@ const RADKY = [
 ]
 
 async function strankaZaloh({ jeMajitel, prava, radky = RADKY, ulozeno }) {
-  globalThis.__zalohy = { ctx: { jeMajitel, branches: [] }, prava, radky }
+  globalThis.__zalohy = { ctx: { jeMajitel, branches: [{ id: 'b1', name: 'Černá Perla' }] }, prava, radky }
   const prvek = await StrankaZaloh({
     params: Promise.resolve({ rozsah: 'cerna-perla' }),
     searchParams: Promise.resolve(ulozeno ? { ulozeno } : {}),
@@ -391,8 +476,25 @@ const pocetTlacitek = (html, napis) => (text(html).match(new RegExp(napis, 'g'))
 
 const majitel = await strankaZaloh({ jeMajitel: true, prava: ['advances.manage', 'payroll.read', 'settings.manage', 'payroll.manage'] })
 ma('majitel: „Potvrdit za zaměstnance" u JEDINÉ nepotvrzené', pocetTlacitek(majitel, 'Potvrdit za zaměstnance'), 1)
-ma('… v řádku té nepotvrzené (Radek n1)',
-  /Radek n1[\s\S]*?Potvrdit za zaměstnance[\s\S]*?Radek p1/.test(text(majitel)), true)
+/*
+  Tlačítko je v seznamu NAD tabulkou, ne ve sloupci Akce: tabulka má
+  640 px a na telefonu (375 px) bylo tlačítko za pravým okrajem.
+  Vyříznutí seznamu se kontroluje zvlášť — prázdný výřez by jinak
+  prošel jako „v seznamu nic cizího není".
+*/
+const seznamMajitele = (html) => html.match(/<section[^>]*aria-label="Čekají na potvrzení"[\s\S]*?<\/section>/)?.[0] ?? ''
+const tabulkaZaloh = (html) => html.match(/<table[\s\S]*?<\/table>/)?.[0] ?? ''
+ma('seznam „Čekají na potvrzení" se vykreslil (výřez není prázdný)', seznamMajitele(majitel).length > 0, true)
+ma('… je NAD tabulkou', majitel.indexOf('aria-label="Čekají na potvrzení"') < majitel.indexOf('<table'), true)
+ma('… je v něm jen nepotvrzená (Radek n1), s částkou, dnem a pobočkou',
+  text(seznamMajitele(majitel)).includes('Radek n1 600 Kč 25. 9. · Černá Perla') &&
+    !/Radek (p1|p2|s1)/.test(text(seznamMajitele(majitel))), true)
+ma('… a tlačítko je v něm, v tabulce už ne',
+  pocetTlacitek(seznamMajitele(majitel), 'Potvrdit za zaměstnance') === 1 &&
+    pocetTlacitek(tabulkaZaloh(majitel), 'Potvrdit za zaměstnance') === 0, true)
+ma('… pro čtečku s tím, za koho a kolik',
+  /aria-label="Potvrdit za zaměstnance: Radek n1, 600 Kč"/.test(seznamMajitele(majitel).replace(/[  ]/g, ' ')), true)
+ma('… plné výšky (ne ft-tl-male, 38 px)', /ft-tl-male/.test(seznamMajitele(majitel)), false)
 ma('majitel: storno zůstává u nestornovaných (3)', pocetTlacitek(majitel, 'Stornovat'), 3)
 ma('potvrzená majitelem je tak i popsaná', /potvrzená potvrdil majitel/.test(text(majitel)), true)
 ma('potvrzená v telefonu taky', /potvrzená v telefonu/.test(text(majitel)), true)
@@ -401,6 +503,7 @@ ma('nepotvrzená „čeká na potvrzení" (ne „čeká na PIN")',
 
 const vydavajici = await strankaZaloh({ jeMajitel: false, prava: ['advances.manage'] })
 ma('vydávající s advances.manage (ne majitel): tlačítko NENÍ', pocetTlacitek(vydavajici, 'Potvrdit za zaměstnance'), 0)
+ma('… ani seznam „Čekají na potvrzení"', seznamMajitele(vydavajici), '')
 ma('… ale storno ano (důkaz, že se sloupec akcí kreslí)', pocetTlacitek(vydavajici, 'Stornovat'), 3)
 
 const mzdar = await strankaZaloh({ jeMajitel: false, prava: ['payroll.read'] })
@@ -408,9 +511,10 @@ ma('jen payroll.read: žádné tlačítko ani sloupec Akce',
   pocetTlacitek(mzdar, 'Potvrdit za zaměstnance') === 0 && !text(mzdar).includes('Akce') && text(mzdar).includes('Radek n1'), true)
 
 const majitelMzdy = await strankaZaloh({ jeMajitel: true, prava: ['payroll.read'] })
-ma('majitel i bez advances.manage v rozsahu tlačítko má (sloupec Akce se kreslí)',
-  pocetTlacitek(majitelMzdy, 'Potvrdit za zaměstnance'), 1)
-ma('… ale storno ne (to je advances.manage)', pocetTlacitek(majitelMzdy, 'Stornovat'), 0)
+ma('majitel i bez advances.manage v rozsahu tlačítko má (v seznamu nad tabulkou)',
+  pocetTlacitek(seznamMajitele(majitelMzdy), 'Potvrdit za zaměstnance'), 1)
+ma('… ale storno ne (to je advances.manage) a sloupec Akce taky ne',
+  pocetTlacitek(majitelMzdy, 'Stornovat') === 0 && !text(tabulkaZaloh(majitelMzdy)).includes('Akce'), true)
 
 const nenasazeno = await strankaZaloh({
   jeMajitel: true, prava: ['advances.manage'],
@@ -424,18 +528,49 @@ ma('nenasazená migrace (řádek bez potvrzeno_jak): tlačítko se nekreslí',
   pocetTlacitek(nenasazeno, 'Potvrdit za zaměstnance'), 0)
 ma('… a stránka se vykreslí dál', text(nenasazeno).includes('Radek n1'), true)
 
-ma('po potvrzení majitelem hláška',
-  text(await strankaZaloh({ jeMajitel: true, prava: ['advances.manage'], ulozeno: 'potvrzeno' }))
-    .includes('Záloha potvrzená za zaměstnance'), true)
+const poPotvrzeni = text(await strankaZaloh({ jeMajitel: true, prava: ['advances.manage'], ulozeno: 'potvrzeno' }))
+ma('po potvrzení majitelem hláška', poPotvrzeni.includes('Záloha je potvrzená za zaměstnance'), true)
+/*
+  Brigádník bez účtu zprávu nedostane, a kdo zálohu vydal i potvrdil
+  sám, taky ne — hláška to nesmí tvrdit natvrdo.
+*/
+ma('… a nic neslibuje („dostali zprávu")', /dostal[a-zi()]* zprávu/.test(poPotvrzeni), false)
+ma('formulář výplaty si neprotiřečí („nikomu nic neposílá" vedle upozornění)',
+  /nikomu\s+nic\s+neposílá/.test(fs.readFileSync(new URL('app/[rozsah]/dochazka/zalohy/formular.tsx', KOREN), 'utf8')) ||
+    text(majitel).includes('nikomu nic neposílá'), false)
+
+/*
+  Dvoukrokové potvrzení se vykreslí jen zavřené (bez prohlížeče se na
+  tlačítko kliknout nedá), proto zdroják: věta v 1. pádě (ne „za Radek
+  Šedesát") a fokus na varování, ne na body.
+*/
+const zaZamestnanceZdroj = fs.readFileSync(new URL('app/[rozsah]/dochazka/zalohy/potvrzeni-za-zamestnance.tsx', KOREN), 'utf8')
+ma('potvrzení za zaměstnance: věta „Potvrzujete, že <jméno> dostal(a)…"',
+  zaZamestnanceZdroj.includes('Potvrzujete, že <strong>{jmeno}</strong> dostal(a) do ruky {castka}.') &&
+    !zaZamestnanceZdroj.includes('Potvrzujete za'), true)
+ma('… po otevření jde fokus na varování (tabIndex -1), po „Zpět" zpátky na tlačítko',
+  /ref=\{varovani\}\s+tabIndex=\{-1\}/.test(zaZamestnanceZdroj) &&
+    /if \(otevreno\) varovani\.current\?\.focus\(\)\s+else if \(byloOtevreno\.current\) tlacitko\.current\?\.focus\(\)/.test(zaZamestnanceZdroj), true)
 
 console.log('\n== Serverové akce: správné RPC, push hned až po úspěchu ==')
 
 globalThis.__akce = null
 const CACHE_A = js('export function revalidatePath(c) { globalThis.__akce.cesty.push(c) }')
 const AUTHZ_A = js('export async function getContext() { return globalThis.__akce.ctx }\n')
+/*
+  `bezpecnyRozsah` jako resolveScope v lib/authz.ts: zná jen rozsahy,
+  na které člověk vidí (pobočka „cerna-perla", firma „firma"), prázdný
+  dá výchozí a cokoli jiného odmítne (null).
+*/
 const FIRMA_A = js(
   'export async function getCurrentTenantId() { return "t1" }\n' +
-    'export async function zkusPristup() { return { stav: "ok", ctx: {}, scope: { branchId: "b1" } } }\n',
+    'export async function zkusPristup() { return { stav: "ok", ctx: {}, scope: { branchId: "b1" } } }\n' +
+    'export function bezpecnyRozsah(ctx, r) {\n' +
+    '  if (!r) return { level: "branch", branchId: "b1", branchName: "Černá Perla", branchSlug: "cerna-perla" }\n' +
+    '  if (r === "cerna-perla") return { level: "branch", branchId: "b1", branchName: "Černá Perla", branchSlug: r }\n' +
+    '  if (r === "firma") return { level: "tenant", branchId: null, branchName: "Firma", branchSlug: r }\n' +
+    '  return null\n' +
+    '}\n',
 )
 const PUSH_A = js('export function naplanovatPushKeZdroji(zdroj, firma) { globalThis.__akce.push.push([zdroj, firma]) }\n')
 const DOTAZ_A = js('export function funkceNeexistuje(e) { return e?.code === "PGRST202" }\n')
@@ -459,7 +594,7 @@ const akce = await nactiModul('app/[rozsah]/dochazka/zalohy/akce.ts', [
 ])
 
 /** Spustí akci; vrátí, kam přesměrovala, co volala a co naplánovala. */
-async function spustit(fn, pole, { ctx = null, odpoved = () => ({ data: 'z-z-databaze', error: null }) } = {}) {
+async function spustit(fn, pole, { ctx = { jeMajitel: false }, odpoved = () => ({ data: 'z-z-databaze', error: null }) } = {}) {
   globalThis.__akce = { ctx, odpoved, rpc: [], push: [], cesty: [] }
   const fd = new FormData()
   for (const [k, v] of Object.entries({ rozsah: 'cerna-perla', ...pole })) fd.set(k, v)
@@ -502,6 +637,21 @@ ma('… zpět na Zálohy s hláškou', zaMajitele.adresa, '/cerna-perla/dochazka
 
 const zaMajiteleChyba = await spustit(akce.potvrditZaZamestnance, { zaloha: 'z1' }, { ctx: { jeMajitel: true }, odpoved: CHYBA_DB })
 ma('majitel, databáze odmítla: žádný push', zaMajiteleChyba.push.length, 0)
+
+/*
+  Rozsah z formuláře jde do adresy přesměrování. Podvržený „/evil.cz"
+  by z `/${rozsah}/dochazka` udělal `//evil.cz/dochazka` — jiný web.
+  Akce ho proto ověří a do adresy dá jen slug ověřeného rozsahu.
+*/
+const podvrzenyTelefon = await spustit(akce.potvrditMojiZalohu, { zaloha: 'z1', rozsah: '/evil.cz' })
+ma('telefon, podvržený rozsah „/evil.cz": zpět na úvod, ne na cizí web',
+  podvrzenyTelefon.adresa, '/')
+ma('… a databáze se vůbec nezeptá', podvrzenyTelefon.rpc.length, 0)
+const podvrzenyMajitel = await spustit(akce.potvrditZaZamestnance, { zaloha: 'z1', rozsah: '/evil.cz' }, { ctx: { jeMajitel: true } })
+ma('za zaměstnance, podvržený rozsah: taky na úvod a bez dotazu',
+  podvrzenyMajitel.adresa === '/' && podvrzenyMajitel.rpc.length === 0, true)
+const zFirmy = await spustit(akce.potvrditMojiZalohu, { zaloha: 'z1', rozsah: 'firma' })
+ma('platný rozsah firmy vede zpět na firemní Docházku', zFirmy.adresa, '/firma/dochazka?zaloha=potvrzena')
 
 async function vyplatit(odpoved) {
   globalThis.__akce = { ctx: null, odpoved, rpc: [], push: [], cesty: [] }
@@ -583,7 +733,56 @@ ma('upozornění „potvrzeno": kdo a jak, odkaz do Záloh',
 ma('upozornění „za vás": věta ano, odkaz ne',
   text(polozka('zaloha.potvrzena_za_vas')).includes('ozvěte se vedení') && !/href=/.test(polozka('zaloha.potvrzena_za_vas')), true)
 
-console.log('\n== Kontrakt s migrací 20260925100000 ==')
+console.log('\n== Texty: záloha se nepotvrzuje jen PINem ==')
+
+/*
+  Od 25. 9. 2026 se záloha potvrzuje PINem na tabletu, v telefonu, nebo
+  za zaměstnance majitelem. Věty „čeká na PIN" a „potvrzená PINem" jsou
+  od té doby nepravdivé: u zálohy, kterou potvrdil majitel, by
+  zaměstnanec četl, že ji potvrdil PINem, který nikdy nezadal.
+
+  Souběžná větev (#82, Můj účet) takové věty psala do vlastních souborů.
+  Git konflikt z toho nebude a funkce se nepřekrývají, takže by to
+  nechytilo nic jiného — proto se čte CELÉ app/[rozsah], lib
+  a components. Komentáře se nečtou (popisují i minulost); „potvrzeno
+  PINem na tabletu" u zálohy potvrzené opravdu PINem je pravda a projde.
+*/
+const ZAKAZANE = [
+  /ček[áa](?:j[íi])?\s+na\s+PIN\b/iu,
+  /(?:na|bez)\s+potvrzení\s+PINem/iu,
+  /potvrzen[áéý]\s+PINem/iu,
+]
+const vadnaVeta = (t) => ZAKAZANE.some((r) => r.test(t))
+ma('vzory chytí, co mají („čekají na PIN", „čeká na PIN", „potvrzená PINem", „čekají na potvrzení PINem", „bez potvrzení PINem")',
+  ['čekají na PIN', 'čeká na PIN', 'potvrzená PINem', 'čekají na potvrzení PINem', '3 zatím bez potvrzení PINem'].every(vadnaVeta), true)
+ma('… a nechají, co je pravda („potvrzeno PINem na tabletu", „potvrďte PINem", „čeká na potvrzení")',
+  ['potvrzeno PINem na tabletu', 'Zatím zálohu potvrďte PINem na tabletu.', 'čeká na potvrzení', 'píchne na něm PINem'].some(vadnaVeta), false)
+
+function soubory(adresar) {
+  const cesta = new URL(adresar, KOREN)
+  if (!fs.existsSync(cesta)) return []
+  return fs.readdirSync(cesta, { withFileTypes: true }).flatMap((z) =>
+    z.isDirectory()
+      ? soubory(`${adresar}${z.name}/`)
+      : /\.tsx?$/.test(z.name) ? [`${adresar}${z.name}`] : [],
+  )
+}
+/** Bez komentářů (blokových i řádkových — ne `//` v adresách), mezery sjednocené. */
+const bezKomentaru = (s) =>
+  s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:"'`])\/\/.*$/gm, '$1').replace(/\s+/g, ' ')
+const cteneSoubory = [...soubory('app/[rozsah]/'), ...soubory('lib/'), ...soubory('components/')]
+const nalezy = cteneSoubory.flatMap((f) => {
+  const t = bezKomentaru(fs.readFileSync(new URL(f, KOREN), 'utf8'))
+  return ZAKAZANE.flatMap((r) => [...t.matchAll(new RegExp(r.source, 'giu'))].map((m) => `${f}: „${m[0]}"`))
+})
+ma('čtou se opravdu soubory aplikace (výřez není prázdný)',
+  cteneSoubory.length > 100 && cteneSoubory.includes('app/[rozsah]/dochazka/vydelky/tabulka-vydelku.tsx'), true)
+ma('… a text obrazovky v nich po vyndání komentářů zůstal',
+  bezKomentaru(fs.readFileSync(new URL('app/[rozsah]/dochazka/vydelky/tabulka-vydelku.tsx', KOREN), 'utf8'))
+    .includes('i ty, které ještě čekají na potvrzení'), true)
+ma('nikde nezůstalo „čeká na PIN" ani „potvrzená PINem"', JSON.stringify(nalezy), '[]')
+
+console.log('\n== Kontrakt s migrací 20260925140000 ==')
 
 /*
   Aplikace a databáze se domlouvají jen jmény. Přejmenovaný parametr by

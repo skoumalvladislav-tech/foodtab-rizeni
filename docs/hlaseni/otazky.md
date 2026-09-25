@@ -474,16 +474,33 @@ ukazuje dnešní nepotvrzené zálohy k potvrzení PINem).
 **Vzniklo:** 25. 9. 2026, potvrzení záloh v telefonu.
 
 Upozornění na vyplacenou zálohu (příjemci) a na potvrzení (vydávajícímu)
-jde přes frontu doručení s **běžnou** prioritou. V aplikaci je vidět
-hned vždycky; **na telefon (push)** ale přijde hned jen tomu, kdo je
-právě v práci (otevřený příchod), a majiteli. Kdo si zálohu vzal ve
-volný den, dostane push až po příštím příchodu na směnu.
+jde přes frontu doručení s **běžnou** prioritou. **V aplikaci (zvoneček)
+je vidět hned vždycky.** Na telefon (push) je to složitější:
+
+- **Hned** přijde jen tomu, kdo je právě v práci (otevřený příchod),
+  a majiteli.
+- Kdo v práci není, tomu push **čeká na příští příchod na směnu**.
+  Čekání **starší než 48 hodin propadá** (stejné pravidlo jako u všech
+  upozornění): záloha vydaná v pátek po odchodu, další směna v pondělí —
+  výzva „potvrďte zálohu" na telefon **nepřijde vůbec**, zůstane jen ve
+  zvonečku. Propadne i tehdy, když si ji člověk mezitím přečte
+  v aplikaci.
+- **Potvrzení PINem na tabletu** push hned neplánuje (tablet není
+  přihlášený účet a aplikace se po něm nevolá). Vydávající dostane push
+  až s **plánovačem**, který dnes běží zhruba jednou za 3–6 hodin
+  (měřeno 23. 9.). Po potvrzení v telefonu nebo majitelem jde push hned.
 
 **Co jsem vybral do té doby:** běžná priorita. „Naléhavé" by na obrazovce
 svítilo jako NALÉHAVÉ a obcházelo by klid mimo směnu — záloha tak
-naléhavá není. Když ji člověk potvrdí jinak (PINem, majitel), čekající
-push se zruší, takže mu po příchodu nepípne výzva k něčemu hotovému.
+naléhavá není. Když ji člověk potvrdí jinak (PINem, majitel), nebo když
+ji někdo stornuje, čekající push se zruší, takže mu po příchodu nepípne
+výzva k něčemu, co už neplatí.
 
-**Když to má být jinak:** jedna změna v databázi — pro druhy
-`zaloha.*` pouštět push hned bez ohledu na směnu (stejnou cestou, jakou
-to dnes dělá majitel), bez označení NALÉHAVÉ.
+**Když to má být jinak:**
+- *zazvonit i mimo směnu:* jedna změna v databázi — pro druhy `zaloha.*`
+  pouštět push hned bez ohledu na směnu (stejnou cestou, jakou to dnes
+  dělá majitel), bez označení NALÉHAVÉ. Tím odpadne i propadání po 48 h.
+- *po PINu na tabletu hned zpráva vydávajícímu:* tablet by potvrzení
+  posílal přes serverovou akci aplikace, která po úspěchu naplánuje push
+  (jako dnes telefon a majitel). Je to změna na kiosku, proto ne bez
+  rozhodnutí — souvisí s otázkou 16.

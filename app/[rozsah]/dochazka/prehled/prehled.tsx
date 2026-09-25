@@ -47,6 +47,7 @@ export default function PrehledDochazky({
   kiosek,
   vybranaZUrl,
   zalozky,
+  podZalozkami = null,
 }: {
   data: PrehledProps;
   /** „pondělí 21. 9.“ */
@@ -62,6 +63,12 @@ export default function PrehledDochazky({
    * (práva spočítala stránka), tady se jen postaví pod nadpis.
    */
   zalozky?: ReactNode;
+  /**
+   * Co má být nad kartami přehledu — vlastní zálohy k potvrzení
+   * (25. 9. 2026). Hotové ze serveru; bez toho by je vedoucí našel až
+   * pod celým přehledem.
+   */
+  podZalozkami?: ReactNode;
 }) {
   const [vybrana, setVybrana] = useState<string | null>(vybranaZUrl);
   const { souhrn, radky } = data;
@@ -100,6 +107,8 @@ export default function PrehledDochazky({
       </Nadpis>
 
       {zalozky}
+
+      {podZalozkami}
 
       <div className="ds-dh-karty">
         <MetricCard

@@ -15,6 +15,7 @@ import {
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Card from '@/components/ui/Card'
+import { PanelHlava } from '../../dnes/prvky'
 import Nadpis from '../../nadpis'
 import DochazkaZalozky from '../zalozky'
 import zalozkyDochazky from '../zalozky-prava'
@@ -55,7 +56,7 @@ type Zaloha = {
   vyplaceno_kdy: string
   potvrzeno_kdy: string | null
   /**
-   * pin / telefon / majitel (migrace 20260925100000). Klíč v řádku CHYBÍ,
+   * pin / telefon / majitel (migrace 20260925140000). Klíč v řádku CHYBÍ,
    * dokud migrace není nasazená — podle toho se pozná, že potvrzení za
    * zaměstnance v databázi ještě není, a tlačítko se nekreslí.
    * `null` u potvrzené = PINem před 25. 9. 2026.
@@ -256,6 +257,20 @@ export default async function Zalohy({
   const soucet = platne.reduce((s, z) => s + z.castka_haleru, 0)
   const nepotvrzenych = platne.filter((z) => z.stav === 'nepotvrzena').length
 
+  /*
+    Co majitel může potvrdit ZA ZAMĚSTNANCE: nepotvrzené, a jen když
+    databáze funkci zná (řádek nese `potvrzeno_jak`, viz typ Zaloha) —
+    jinak by tlačítko vedlo na chybu.
+
+    Kreslí se NAD tabulkou jako seznam, ne ve sloupci Akce: tabulka je
+    široká 640 px a na telefonu by tlačítko zůstalo za pravým okrajem,
+    bez náznaku, že se dá posunout (kontrola 25. 9., snímek na 375 px).
+  */
+  const kPotvrzeniZaZamestnance = jeMajitel
+    ? zalohy.filter((z) => z.stav === 'nepotvrzena' && 'potvrzeno_jak' in z)
+    : []
+  const nazevPobocky = (id: string) => ctx?.branches.find((b) => b.id === id)?.name ?? null
+
   return (
     <>
       <HlavickaZaloh />
@@ -278,10 +293,15 @@ export default async function Zalohy({
         {ulozeno === 'povoleno' ? (
           <p style={hlaskaDobre}>Zálohy zase povolené.</p>
         ) : null}
+        {/*
+          Nic neslibuje natvrdo: brigádník bez účtu zprávu nedostane a kdo
+          zálohu vydal i potvrdil sám, taky ne.
+        */}
         {ulozeno === 'potvrzeno' ? (
           <p style={hlaskaDobre}>
-            Záloha potvrzená za zaměstnance. Je u ní zapsané, že ji potvrdil
-            majitel — zaměstnanec i ten, kdo ji vydal, dostali zprávu.
+            Záloha je potvrzená za zaměstnance a je u ní zapsané, že ji
+            potvrdil majitel. Zaměstnanec s účtem a ten, kdo zálohu vydal,
+            to uvidí v upozorněních.
           </p>
         ) : null}
         {ulozeno === 'nastaveni' ? (
@@ -289,6 +309,43 @@ export default async function Zalohy({
             Nastavení uloženo. Změnilo se jen to, co zaměstnanci vidí —
             uložené zálohy zůstaly, jak byly.
           </p>
+        ) : null}
+
+        {/*
+          Majitel: nepotvrzené, které může potvrdit za zaměstnance
+          („já jako majitel potřebuji umět potvrdit zálohu každému
+          zaměstnanci", 25. 9. 2026). Proč nad tabulkou, viz
+          kPotvrzeniZaZamestnance výš.
+        */}
+        {kPotvrzeniZaZamestnance.length > 0 ? (
+          <section className="ds-plocha" aria-label="Čekají na potvrzení" style={{ marginBottom: '20px' }}>
+            <PanelHlava ikona="mince" nadpis="Čekají na potvrzení" />
+            <p style={popisSekce}>
+              Zaměstnanec zálohu potvrdí ve svém telefonu nebo PINem na
+              tabletu. Když to nejde (nemá účet, nemá u sebe telefon),
+              potvrdíte ji za něj vy — jako majitel.
+            </p>
+            <ul className="ds-zal-cekaji">
+              {kPotvrzeniZaZamestnance.map((z) => (
+                <li key={z.id}>
+                  <span className="ds-zal-cekaji-kdo">
+                    <strong>{z.jmeno}</strong>
+                    <span className="ds-cislo ds-zal-cekaji-castka">{koruny(z.castka_haleru)}</span>
+                    <span className="ds-zal-cekaji-kdy">
+                      {[den(z.business_date), nazevPobocky(z.branch_id)].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <PotvrzeniZaZamestnance
+                    akce={potvrditZaZamestnance}
+                    id={z.id}
+                    rozsah={rozsah}
+                    jmeno={z.jmeno}
+                    castka={koruny(z.castka_haleru)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
         {/*
@@ -320,7 +377,7 @@ export default async function Zalohy({
                       <th style={th}>Částka</th>
                       <th style={th}>Stav</th>
                       <th style={th}>Poznámka</th>
-                      {smiVyplacet || jeMajitel ? <th style={th}>Akce</th> : null}
+                      {smiVyplacet ? <th style={th}>Akce</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -350,28 +407,11 @@ export default async function Zalohy({
                             ? `Storno: ${z.storno_duvod ?? ''}`
                             : z.poznamka}
                         </td>
-                        {smiVyplacet || jeMajitel ? (
+                        {smiVyplacet ? (
                           <td style={td}>
-                            <div style={{ display: 'grid', gap: '6px', justifyItems: 'start' }}>
-                              {/*
-                                Potvrdit za zaměstnance: jen majitel, jen
-                                nepotvrzená — a jen když databáze funkci
-                                zná (řádek nese `potvrzeno_jak`, viz typ
-                                Zaloha). Jinak by tlačítko vedlo na chybu.
-                              */}
-                              {jeMajitel && z.stav === 'nepotvrzena' && 'potvrzeno_jak' in z ? (
-                                <PotvrzeniZaZamestnance
-                                  akce={potvrditZaZamestnance}
-                                  id={z.id}
-                                  rozsah={rozsah}
-                                  jmeno={z.jmeno}
-                                  castka={koruny(z.castka_haleru)}
-                                />
-                              ) : null}
-                              {smiVyplacet && z.stav !== 'stornovana' ? (
-                                <Storno akce={stornovatZalohu} id={z.id} rozsah={rozsah} />
-                              ) : null}
-                            </div>
+                            {z.stav !== 'stornovana' ? (
+                              <Storno akce={stornovatZalohu} id={z.id} rozsah={rozsah} />
+                            ) : null}
                           </td>
                         ) : null}
                       </tr>
@@ -511,7 +551,7 @@ function HlavickaZaloh() {
   return (
     <Nadpis
       oci="Provoz"
-      popis="Zálohy: záznam o hotovosti, která přešla z ruky do ruky. Aplikace nikomu nic neposílá — účetní dělá mzdy dál ve svém programu."
+      popis="Zálohy: záznam o hotovosti, která přešla z ruky do ruky. Peníze ani podklady aplikace nikam neposílá — účetní dělá mzdy dál ve svém programu."
     >
       Docházka
     </Nadpis>

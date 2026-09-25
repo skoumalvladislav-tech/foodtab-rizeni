@@ -27,10 +27,11 @@ export default function FormularZalohy({
     <section style={karta}>
       <h2 style={nadpis}>Vyplatit zálohu</h2>
       <p style={popis}>
-        Záznam o hotovosti, která přešla z ruky do ruky. Aplikace nikomu
-        nic neposílá. Zaměstnanec zálohu potvrdí ve svém telefonu (přijde
+        Záznam o hotovosti, která přešla z ruky do ruky — peníze aplikace
+        nikam neposílá. Zaměstnanec zálohu potvrdí ve svém telefonu (přijde
         mu upozornění), nebo PINem na tabletu — tím se z ní stane doklad,
-        ne tvrzení jednoho člověka. Až ji potvrdí, dostanete zprávu.
+        ne tvrzení jednoho člověka. Až ji potvrdí, uvidíte to
+        v upozorněních.
       </p>
 
       <form action={akce} style={mrizka}>

@@ -75,7 +75,7 @@ export type TeloUpozorneni = {
   stav?: string
   polozka?: string
   polozka_nazev?: string
-  // zaloha.* (20260925100000) — částka v haléřích, id zálohy, provozní den
+  // zaloha.* (20260925140000) — částka v haléřích, id zálohy, provozní den
   // (den výš); u potvrzení jméno příjemce (jmeno výš) a způsob.
   castka_haleru?: number
   zaloha?: string
