@@ -43,7 +43,11 @@ jobs:
           --health-retries 5
 
     steps:
+      # Scénáře git nepotřebují — token z checkoutu ať neleží
+      # v .git/config po celý běh migrací z PR (stejně jako Aplikace).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Doinstalovat psql
         run: |
