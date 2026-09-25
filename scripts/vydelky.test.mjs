@@ -672,7 +672,7 @@ const radekDne = (h, d) =>
   )].map((x) => text(x[1]))
 ma('den z databáze dojde do buněk celý (lidé · hodiny · mzdy + bez sazby · zálohy + čekající)',
   JSON.stringify(radekDne(kontraktDny.html, '2026-09-07')),
-  JSON.stringify(['2 lidé', '1 h 1 min', '1 111 Kč+ 1 člověk bez sazby', '222 Kč2 čekají na PIN']))
+  JSON.stringify(['2 lidé', '1 h 1 min', '1 111 Kč+ 1 člověk bez sazby', '222 Kč2 nepotvrzené']))
 ma('… a mzdy NULL zůstanou „bez sazby“, ne „0 Kč“',
   radekDne((await stranka({
     pristup: smi,

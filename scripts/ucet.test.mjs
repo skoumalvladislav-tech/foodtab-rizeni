@@ -16,10 +16,14 @@
  *   3. Které záložky se kreslí (zalozky-prava.ts) s podstrčenou
  *      databází: Můj účet jen se zaměstnaneckým záznamem, a dotaz se
  *      ptá na SVŮJ záznam v TÉHLE firmě
- *   4. STRÁNKA Můj účet s podstrčeným serverem: bez záznamu se databáze
- *      na účet nezeptá, funkce nedostane žádný parametr zaměstnance,
- *      měsíc z provozního dne (ne z hodin serveru), do budoucna se
- *      nechodí, nenasazeno se promine, jiná chyba ne
+ *   4. STRÁNKA Můj účet s podstrčeným serverem: ptá se na SVŮJ záznam,
+ *      bez záznamu se databáze na účet nezeptá, funkce nedostane žádný
+ *      parametr zaměstnance, měsíc z provozního dne (ne z hodin
+ *      serveru), běžící × uzavřený měsíc, do budoucna se nechodí,
+ *      volba firmy u prázdného měsíce z nastavení, nenasazeno se
+ *      promine, jiná chyba ne
+ *   Ve štítcích ani vysvětlivkách není, ČÍM se záloha potvrdila (PIN,
+ *   telefon, majitel — od 20260925100000): řádek to nenese.
  *   5. Kontrakt s migrací: jména parametrů a sloupců obou funkcí se
  *      vezmou z 20260924160000 a řádek z nich projde až do buněk
  *
@@ -151,10 +155,12 @@ const TOMAS = [
     zustatek_haleru: 20000, zustatek_neuplny: true }),
 ]
 
-const ucet = (radky, obdobi = 'tento') =>
+// Volbu firmy posílá stránka; s řádky je to jejich `zobrazeni`.
+const ucet = (radky, obdobi = 'tento', zobrazeni = radky[0]?.zobrazeni ?? 'odecitat') =>
   renderToStaticMarkup(
     createElement(Ucet, {
       radky,
+      zobrazeni,
       mesic: '2026-05-01',
       obdobi,
       predchozi: { href: '/cerna-perla/dochazka/ucet?mesic=2026-04', mesic: '2026-04-01' },
@@ -167,16 +173,22 @@ const hZ = ucet(ZUZANA)
 ma('sloupce: Den · Odpracováno · Výdělek · Zálohy · Zůstatek', zahlavi(hZ).join(' · '),
   'Den · Odpracováno · Výdělek · Zálohy · Zůstatek')
 ma('4. 5.: hodiny, výdělek se sazbou, dvě zálohy (jedna čeká), zůstatek',
-  JSON.stringify(radek(hZ, '2026-05-04')), JSON.stringify(['8 h 0 min', '1 600 Kč200 Kč/h', '700 Kč1 čeká na PIN', '900 Kč']))
+  JSON.stringify(radek(hZ, '2026-05-04')), JSON.stringify(['8 h 0 min', '1 600 Kč200 Kč/h', '700 Kč1 nepotvrzená', '900 Kč']))
 ma('den jen se zálohou: hodiny a výdělek pomlčka, ne nula',
-  JSON.stringify(radek(hZ, '2026-05-10')), JSON.stringify(['—', '—', '300 Kččeká na PIN', '1 500 Kč']))
+  JSON.stringify(radek(hZ, '2026-05-10')), JSON.stringify(['—', '—', '300 Kčnepotvrzená', '1 500 Kč']))
 ma('20. 5.: nová sazba ke dni', JSON.stringify(radek(hZ, '2026-05-20')),
   JSON.stringify(['6 h 0 min', '1 560 Kč260 Kč/h', '—', '3 060 Kč']))
 ma('den je popsaný zkratkou dne v týdnu', /<th scope="row">po 4\. 5\.<\/th>/.test(hZ), true)
 ma('telefon: karta dne říká totéž co tabulka', JSON.stringify(karta(hZ, '2026-05-04')), JSON.stringify(radek(hZ, '2026-05-04')))
-ma('potvrzená záloha má slovo „potvrzená PINem“',
+ma('potvrzená záloha má slovo „potvrzená“ — ne čím (PIN, telefon, majitel)',
   radek(ucet([den({ den: '2026-05-02', zalohy_haleru: 5000, zaloh: 1, zustatek_haleru: -5000 })]), '2026-05-02')?.[2],
-  '50 Kčpotvrzená PINem')
+  '50 Kčpotvrzená')
+/*
+  Od 25. 9. 2026 se záloha potvrzuje PINem na tabletu, v telefonu, nebo
+  za zaměstnance majitelem (20260925100000). Řádek účtu způsob nenese,
+  takže účet nesmí tvrdit žádný — ani ve štítcích, ani ve vysvětlivkách.
+*/
+ma('účet o způsobu potvrzení nic netvrdí (nikde „PIN“)', /PIN/.test(text(hZ)), false)
 
 console.log('\n== Můj účet: přehledové karty ==')
 const kZ = karty(hZ)
@@ -185,14 +197,14 @@ ma('vyděláno = součet dnů', kZ['Vyděláno do dneška']?.hodnota, '4 060 Kč
 ma('… z hodin', kZ['Vyděláno do dneška']?.popisy[0]?.text, '18 h 30 min uzavřené docházky')
 ma('… hrubá mzda, orientačně', kZ['Vyděláno do dneška']?.popisy[1]?.text, 'hrubá mzda, orientačně')
 ma('zálohy = součet', kZ['Zálohy']?.hodnota, '1 000 Kč')
-ma('… a kolik čeká na PIN', kZ['Zálohy']?.popisy.map((p) => p.text).join(' / '), '3 zálohy / 2 čekají na potvrzení PINem')
+ma('… a kolik čeká na potvrzení', kZ['Zálohy']?.popisy.map((p) => p.text).join(' / '), '3 zálohy / 2 čekají na potvrzení')
 ma('zbývá = zůstatek posledního dne', kZ['Zbývá k výplatě']?.hodnota, '3 060 Kč')
 ma('minulý měsíc: „Vyděláno za měsíc“', 'Vyděláno za měsíc' in karty(ucet(ZUZANA, 'minuly')), true)
 
 console.log('\n== Bez sazby: „bez sazby“, nikdy „0 Kč“ ==')
 const hT = ucet(TOMAS)
 ma('den bez sazby: výdělek „bez sazby“',
-  JSON.stringify(radek(hT, '2026-05-04')), JSON.stringify(['4 h 0 min', 'bez sazby', '100 Kččeká na PIN', 'zálohy napřed 100 Kččást bez sazby']))
+  JSON.stringify(radek(hT, '2026-05-04')), JSON.stringify(['4 h 0 min', 'bez sazby', '100 Kčnepotvrzená', 'zálohy napřed 100 Kččást bez sazby']))
 ma('v řádku bez sazby není „0 Kč“', nulaKorun(hT.match(/<tr[^>]*data-den="2026-05-04"[\s\S]*?<\/tr>/)?.[0] ?? '0 Kč'), false)
 ma('záporný zůstatek slovy, ne „-100 Kč“', /-100|−100/.test(text(hT)), false)
 ma('další den: zůstatek se štítkem „část bez sazby“',
@@ -239,6 +251,15 @@ const prazdny = ucet([])
 ma('věta, ne tabulka', prazdny.includes('<table'), false)
 ma('žádné karty s nulou', prazdny.includes('ds-kpi'), false)
 ma('běžící měsíc: kdo je v práci, přičte se po odchodu', text(prazdny).includes('přičte se po odchodu'), true)
+ma('odecitat: „ani záloha“ a vysvětlivka o zůstatku',
+  `${text(prazdny).includes('žádná uzavřená docházka ani záloha')} / ${text(prazdny).includes('Zůstatek je výdělek')}`, 'true / true')
+// Při „neukazovat“ databáze vynechá dny jen se zálohou — prázdný měsíc
+// může mít zálohu, jen schovanou. Volba přijde od stránky, ne z řádků.
+const prazdnyNic = text(ucet([], 'tento', 'neukazovat'))
+ma('neukazovat, prázdný měsíc: o zálohách nic netvrdí („ani záloha“ ne)', prazdnyNic.includes('ani záloha'), false)
+ma('… jen věta, že je firma neukazuje', prazdnyNic.includes('Zálohy tu firma neukazuje'), true)
+ma('… a nic o zůstatku ani o tom, co zálohy jsou',
+  /Zůstatek je výdělek|nestornované zálohy/.test(prazdnyNic), false)
 
 console.log('\n== Vysvětlivky ==')
 ma('hrubá mzda', hZ.includes('<strong>hrubá mzda</strong>'), true)
@@ -267,18 +288,22 @@ const hD = poDnech(DNY)
 console.log('\n== Po dnech ==')
 ma('sloupce', zahlavi(hD).join(' · '), 'Den · Lidé · Odpracováno · Mzdy (hrubě) · Zálohy')
 ma('4. 5.: lidé, hodiny, mzdy se štítkem bez sazby, zálohy s čekajícími',
-  JSON.stringify(radek(hD, '2026-05-04')), JSON.stringify(['3 lidé', '17 h 0 min', '2 500 Kč+ 1 člověk bez sazby', '1 000 Kč3 čekají na PIN']))
+  JSON.stringify(radek(hD, '2026-05-04')), JSON.stringify(['3 lidé', '17 h 0 min', '2 500 Kč+ 1 člověk bez sazby', '1 000 Kč3 nepotvrzené']))
 ma('den jen se zálohou: pomlčky, ne nuly',
-  JSON.stringify(radek(hD, '2026-05-10')), JSON.stringify(['—', '—', '—', '300 Kč1 čeká na PIN']))
+  JSON.stringify(radek(hD, '2026-05-10')), JSON.stringify(['—', '—', '—', '300 Kč1 nepotvrzená']))
 ma('den jen s lidmi bez sazby: „bez sazby“, ne „0 Kč“',
   JSON.stringify(radek(hD, '2026-05-30')), JSON.stringify(['1 člověk', '4 h 0 min', 'bez sazby', '—']))
 ma('haléře: 167 haléřů jsou 2 Kč', radek(hD, '2026-05-12')?.[2], '2 Kč')
 ma('Celkem: lidé se nesčítají, minuty, mzdy dnů se sazbou, zálohy',
-  JSON.stringify(radek(hD, 'celkem')), JSON.stringify(['—', '21 h 1 min', '2 502 Kččást bez sazby', '1 300 Kč4 čekají na PIN']))
+  JSON.stringify(radek(hD, 'celkem')), JSON.stringify(['—', '21 h 1 min', '2 502 Kččást bez sazby', '1 300 Kč4 nepotvrzené']))
 ma('Celkem je v patičce tabulky', /<tfoot>\s*<tr data-den="celkem">/.test(hD), true)
 ma('telefon: karta dne = řádek tabulky', JSON.stringify(karta(hD, '2026-05-04')), JSON.stringify(radek(hD, '2026-05-04')))
 ma('telefon: i Celkem', JSON.stringify(karta(hD, 'celkem')), JSON.stringify(radek(hD, 'celkem')))
 ma('nikde „0 Kč“', nulaKorun(hD), false)
+ma('o způsobu potvrzení nic netvrdí (nikde „PIN“)', /PIN/.test(text(hD)), false)
+ma('pět a víc: „5 nepotvrzených“',
+  radek(poDnech([{ ...DNY[1], zalohy_haleru: 60000, zaloh: 6, zaloh_nepotvrzenych: 5 }]), '2026-05-10')?.[3],
+  '600 Kč5 nepotvrzených')
 ma('jen dny bez sazby: Celkem „bez sazby“', radek(poDnech([DNY[3]]), 'celkem')?.[2], 'bez sazby')
 ma('nenasazeno: věta, ne tabulka', text(poDnech(null)).includes('Přehled po dnech bude dostupný po nasazení databáze.'), true)
 ma('prázdný měsíc: věta', text(poDnech([])).includes('Za květen zatím žádná uzavřená docházka ani záloha.'), true)
@@ -297,6 +322,7 @@ const DOTAZ_TABULKY = js(
     '    eq: (k, v) => (zapis.push(["eq", k, v]), o),\n' +
     '    is: (k, v) => (zapis.push(["is", k, v]), o),\n' +
     '    limit: async (n) => (zapis.push(["limit", n]), globalThis.__db.tabulka(tabulka, zapis)),\n' +
+    '    maybeSingle: async () => (zapis.push(["maybeSingle"]), globalThis.__db.tabulka(tabulka, zapis)),\n' +
     '  };\n' +
     '  return o;\n' +
     '}\n',
@@ -323,17 +349,26 @@ function db(n = {}) {
     pravo: () => false,
     zaznam: [{ id: 'e1', branch_id: 'B1' }],
     chybaZaznamu: null,
+    // Řádek tenant_settings; null = firma nastavení nemá (výchozí).
+    nastaveni: null,
+    chybaNastaveni: null,
     odpoved: () => ({ data: ZUZANA, error: null }),
     dotazy: [],
     rpc: [],
     volani: [],
     ...n,
   }
+  const d = globalThis.__db
   globalThis.__db.tabulka = (t) =>
     t === 'employees'
-      ? { data: globalThis.__db.chybaZaznamu ? null : globalThis.__db.zaznam, error: globalThis.__db.chybaZaznamu }
-      : { data: null, error: { message: 'neznámá tabulka ' + t } }
+      ? { data: d.chybaZaznamu ? null : d.zaznam, error: d.chybaZaznamu }
+      : t === 'tenant_settings'
+        ? { data: d.chybaNastaveni ? null : d.nastaveni, error: d.chybaNastaveni }
+        : { data: null, error: { message: 'neznámá tabulka ' + t } }
 }
+/** Zapsané dotazy na tabulku (řetěz from/select/eq/…), jako JSON. */
+const dotazyNa = (tabulka, dotazy = globalThis.__db.dotazy) =>
+  dotazy.filter((z) => z[0]?.[1] === tabulka).map((z) => JSON.stringify(z))
 db()
 
 const pravaZalozek = await nactiModul('app/[rozsah]/dochazka/zalozky-prava.ts', [
@@ -423,7 +458,7 @@ async function stranka({ rozsah = 'cerna-perla', mesic, ...n } = {}) {
   } catch (e) {
     chyba = e
   }
-  return { html, chyba, rpc: globalThis.__db.rpc, volani: globalThis.__db.volani }
+  return { html, chyba, rpc: globalThis.__db.rpc, volani: globalThis.__db.volani, dotazy: globalThis.__db.dotazy }
 }
 
 console.log('\n== Stránka Můj účet: kdo ==')
@@ -441,9 +476,21 @@ const s = await stranka()
 ma('volá muj_pracovni_ucet', s.rpc[0]?.[0], 'muj_pracovni_ucet')
 ma('jen firma a měsíc — ŽÁDNÝ parametr zaměstnance', JSON.stringify(s.rpc[0]?.[1]), JSON.stringify({ p_tenant: 't1', p_mesic: '2026-05-01' }))
 ma('tabulka dnů je na stránce', JSON.stringify(radek(s.html, '2026-05-04')),
-  JSON.stringify(['8 h 0 min', '1 600 Kč200 Kč/h', '700 Kč1 čeká na PIN', '900 Kč']))
+  JSON.stringify(['8 h 0 min', '1 600 Kč200 Kč/h', '700 Kč1 nepotvrzená', '900 Kč']))
 ma('jeden nadpis „Docházka“', (s.html.match(/<h1>/g) ?? []).length === 1 && s.html.includes('<h1>Docházka</h1>'), true)
 ma('záložky dostaly pobočku z rozsahu', JSON.stringify(s.volani.find((v) => v[0] === 'zalozky')), '["zalozky","B1"]')
+/*
+  Stránka se na záznam ptá SAMA (záložky jsou tu podstrčené). Podstrčená
+  databáze vrací záznam bez ohledu na filtry, takže bez téhle kontroly by
+  prošla i stránka, která se ptá na kohokoli: vedoucí bez vlastního
+  záznamu by pak místo vysvětlení dostal prázdný účet a kotvu provozního
+  dne z cizí pobočky. Nejdřív se ověří, že dotaz na employees je právě
+  jeden — prázdný výběr by jinak prošel „všemi“ podmínkami.
+*/
+const zaznamStranky = dotazyNa('employees', s.dotazy)
+ma('stránka se ptá na SVŮJ záznam v TÉHLE firmě, nesmazaný (jeden dotaz)',
+  `${zaznamStranky.length} / ${['["eq","tenant_id","t1"]', '["eq","user_id","u1"]', '["is","deleted_at",null]']
+    .every((k) => zaznamStranky[0]?.includes(k))}`, '1 / true')
 
 console.log('\n== Stránka Můj účet: měsíc z provozního dne, ne z hodin serveru ==')
 // Provozní den je schválně jiný měsíc, než jaký ukazují hodiny počítače.
@@ -458,6 +505,10 @@ ma('… a účet dostane', majitel.rpc[0]?.[0], 'muj_pracovni_ucet')
 const srpen = await stranka({ mesic: '2026-04' })
 ma('?mesic=2026-04 → duben', srpen.rpc[0]?.[1]?.p_mesic, '2026-04-01')
 ma('… a šipka dopředu vede na květen', /href="\/cerna-perla\/dochazka\/ucet\?mesic=2026-05"/.test(srpen.html), true)
+ma('… uzavřený měsíc: „uzavřený měsíc“ a karta „Vyděláno za měsíc“',
+  `${text(srpen.html).includes('uzavřený měsíc')} / ${Object.keys(karty(srpen.html))[0]}`, 'true / Vyděláno za měsíc')
+ma('běžící měsíc: „běžící měsíc — do dneška“ a karta „Vyděláno do dneška“',
+  `${text(s.html).includes('běžící měsíc — do dneška')} / ${Object.keys(karty(s.html))[0]}`, 'true / Vyděláno do dneška')
 ma('v běžícím měsíci šipka dopředu není', /Následující měsíc/.test(s.html), false)
 ma('budoucí měsíc z adresy → běžící', (await stranka({ mesic: '2026-12' })).rpc[0]?.[1]?.p_mesic, '2026-05-01')
 ma('nesmysl z adresy → běžící', (await stranka({ mesic: '2026-13' })).rpc[0]?.[1]?.p_mesic, '2026-05-01')
@@ -475,6 +526,28 @@ const porucha = await stranka({ odpoved: () => ({ data: null, error: { code: '42
 ma('jiná chyba se NEZAMETE — spadne', porucha.chyba instanceof Error && !porucha.chyba.adresa, true)
 const zaznamSpadl = await stranka({ chybaZaznamu: { message: 'spojení spadlo' } })
 ma('chyba dotazu na záznam se NEZAMETE — spadne', zaznamSpadl.chyba instanceof Error, true)
+
+console.log('\n== Stránka Můj účet: volba firmy, když řádky nejsou ==')
+/*
+  Při „neukazovat“ databáze vynechá dny jen se zálohou. Kdo měl v měsíci
+  jen zálohu, dostane nula řádků — a z nich se volba firmy nepozná.
+*/
+const prazdne = () => ({ data: [], error: null })
+const bezRadkuNic = await stranka({ odpoved: prazdne, nastaveni: { zalohy_zobrazeni: 'neukazovat' } })
+const dotazNastaveni = dotazyNa('tenant_settings', bezRadkuNic.dotazy)
+ma('prázdný měsíc: volbu si stránka přečte z nastavení TÉHLE firmy (jeden dotaz)',
+  `${dotazNastaveni.length} / ${['["select","zalohy_zobrazeni"]', '["eq","tenant_id","t1"]'].every((k) => dotazNastaveni[0]?.includes(k))}`,
+  '1 / true')
+ma('… a při „neukazovat“ o zálohách nic netvrdí',
+  `${text(bezRadkuNic.html).includes('ani záloha')} / ${text(bezRadkuNic.html).includes('Zálohy tu firma neukazuje')}`,
+  'false / true')
+const bezRadkuVychozi = await stranka({ odpoved: prazdne, nastaveni: null })
+ma('firma bez řádku nastavení: výchozí „odecitat“ („ani záloha“)',
+  text(bezRadkuVychozi.html).includes('žádná uzavřená docházka ani záloha'), true)
+const nastaveniSpadlo = await stranka({ odpoved: prazdne, chybaNastaveni: { message: 'spojení spadlo' } })
+ma('chyba dotazu na nastavení se NEZAMETE — spadne', nastaveniSpadlo.chyba instanceof Error, true)
+const sRadkyNic = await stranka({ odpoved: () => ({ data: NIC, error: null }), nastaveni: { zalohy_zobrazeni: 'odecitat' } })
+ma('s řádky platí volba, kterou databáze uplatnila (z řádků)', zahlavi(sRadkyNic.html).join(' · '), 'Den · Odpracováno · Výdělek')
 
 /* ======================================================================
    5. KONTRAKT S MIGRACÍ
@@ -510,7 +583,7 @@ const zDb = Object.fromEntries(SL_U.map((x) => [x, HODNOTY_U[x]]))
 const kontrakt = await stranka({ odpoved: () => ({ data: [zDb], error: null }) })
 ma('řádek z databáze dojde do buněk celý (odpracováno · výdělek + sazba · zálohy + stav · zůstatek + štítek)',
   JSON.stringify(radek(kontrakt.html, '2026-05-07')),
-  JSON.stringify(['1 h 1 min', '125 Kč123 Kč/h', '222 Kč2 čekají na PIN', '444 Kččást bez sazby']))
+  JSON.stringify(['1 h 1 min', '125 Kč123 Kč/h', '222 Kč2 nepotvrzené', '444 Kččást bez sazby']))
 
 const hD2 = hlavicka('vydelky_po_dnech')
 const PAR_D = jmena(hD2?.[1])

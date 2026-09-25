@@ -158,6 +158,11 @@ function mzdy(r: RadekDne, jeCelkem: boolean): ReactNode {
   );
 }
 
+/**
+ * Zálohy dne a kolik z nich je nepotvrzených. Jen „nepotvrzená“, ne čím
+ * se má potvrdit: od 25. 9. 2026 jde PINem na tabletu, v telefonu i za
+ * zaměstnance majitelem.
+ */
 function zalohy(r: RadekDne): ReactNode {
   if (r.zaloh === 0) return <Nic />;
   return (
@@ -165,7 +170,7 @@ function zalohy(r: RadekDne): ReactNode {
       {koruny(r.zalohy_haleru)}
       {r.zaloh_nepotvrzenych > 0 ? (
         <span className="ds-vy-znacka ds-vy-pod">
-          {pocet(r.zaloh_nepotvrzenych, "čeká", "čekají", "čeká")} na PIN
+          {pocet(r.zaloh_nepotvrzenych, "nepotvrzená", "nepotvrzené", "nepotvrzených")}
         </span>
       ) : null}
     </>

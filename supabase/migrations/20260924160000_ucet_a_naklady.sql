@@ -50,7 +50,9 @@
 -- E. ZÁLOHY: nestornované, i nepotvrzené (jako vydelky_prehled
 --    a muj_vyplatni_prehled — jinak by se součty nesešly), podle
 --    business_date = provozní den výdeje, ze všech poboček. Nepotvrzené
---    se počítají zvlášť, ať je vidět, co ještě čeká na PIN.
+--    se počítají zvlášť, ať je vidět, co ještě čeká na potvrzení (PINem
+--    na tabletu, v telefonu, nebo za zaměstnance majitelem — jak, to
+--    tu není; sloupec potvrzeno_jak přidává až 20260925100000).
 --
 -- F. DEN BEZ SAZBY: odpracované minuty jsou vidět, peníze za ně
 --    v částce chybí (jako v earnings) a řádek to nese příznakem. Nikdy

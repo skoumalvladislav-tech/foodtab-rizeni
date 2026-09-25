@@ -16,8 +16,14 @@ import { KpiKarta, PanelHlava } from "../../dnes/prvky";
  * právo. Kdo to je, rozhodla databáze (`public.muj_pracovni_ucet` —
  * jen já, podle přihlášení); co se ze záloh smí ukázat, taky ona
  * (volba firmy `zalohy_zobrazeni` chodí v každém řádku a sloupce, které
- * se ukázat nemají, jsou NULL). Sem chodí hotová čísla, nic se tu
+ * se ukázat nemají, jsou NULL). Volbu sem posílá stránka zvlášť: při
+ * „neukazovat“ databáze vynechá dny jen se zálohou, a měsíc bez řádků
+ * by jinak o volbě nevěděl nic. Sem chodí hotová čísla, nic se tu
  * nenásobí sazbou — jen se sčítají haléře do přehledových karet.
+ *
+ * Záloha se potvrzuje PINem na tabletu, v telefonu, nebo ji za
+ * zaměstnance potvrdí majitel (od 25. 9. 2026). Proto se tu píše jen
+ * „potvrzená“ / „čeká na potvrzení“, ne čím.
  *
  * Pravidla ze zadání mezd (oddíl 6), každé s důvodem:
  *   * chybějící sazba NIKDY jako „0 Kč“ — nula vypadá jako výsledek;
@@ -56,12 +62,18 @@ export type ObdobiUctu = "tento" | "minuly";
 
 export default function UcetZamestnance({
   radky,
+  zobrazeni,
   mesic,
   obdobi,
   predchozi,
   nasledujici,
 }: {
   radky: RadekUctu[];
+  /**
+   * Volba firmy. S řádky je to jejich `zobrazeni` (tu databáze právě
+   * uplatnila), bez řádků hodnota z nastavení firmy — viz stránka.
+   */
+  zobrazeni: Zobrazeni;
   /** První den měsíce, RRRR-MM-DD. */
   mesic: string;
   obdobi: ObdobiUctu;
@@ -71,7 +83,6 @@ export default function UcetZamestnance({
 }) {
   const dny = [...radky].sort((a, b) => a.den.localeCompare(b.den));
   const s = souhrn(dny);
-  const zobrazeni = dny[0]?.zobrazeni ?? "odecitat";
   const sZalohami = zobrazeni !== "neukazovat";
   const sZustatkem = zobrazeni === "odecitat";
   const sloupce = [
@@ -155,7 +166,7 @@ export default function UcetZamestnance({
                 popisy={[
                   s.zaloh > 0 ? pocet(s.zaloh, "záloha", "zálohy", "záloh") : "za tenhle měsíc žádná",
                   s.nepotvrzenych > 0
-                    ? `${pocet(s.nepotvrzenych, "čeká", "čekají", "čeká")} na potvrzení PINem`
+                    ? `${pocet(s.nepotvrzenych, "čeká", "čekají", "čeká")} na potvrzení`
                     : null,
                 ]}
               />
@@ -239,7 +250,7 @@ export default function UcetZamestnance({
         {sZalohami ? (
           <li>
             Zálohy jsou nestornované zálohy ze všech poboček, i ty, které
-            ještě čekají na potvrzení PINem.
+            ještě čekají na potvrzení.
           </li>
         ) : (
           <li>Zálohy tu firma neukazuje — zeptejte se vedoucího.</li>
@@ -305,12 +316,15 @@ function zalohy(r: RadekUctu): ReactNode {
 
 /**
  * Stav záloh dne slovem. Nepotvrzená se nezahazuje — počítá se, jen je
- * vidět, že na PIN teprve čeká.
+ * vidět, že potvrzení teprve chybí. Čím se potvrdila (PIN, telefon,
+ * majitel), tu není: řádek účtu to nenese. Krátce („nepotvrzená“, ne
+ * „čeká na potvrzení“): štítek je pod částkou v úzkém sloupci a delší
+ * text roztáhl tabulku u 600 px do strany; celou větu má karta Zálohy.
  */
 function stavZaloh(zaloh: number, nepotvrzenych: number): string {
-  if (nepotvrzenych === 0) return zaloh === 1 ? "potvrzená PINem" : "potvrzené PINem";
-  if (zaloh === 1) return "čeká na PIN";
-  return `${pocet(nepotvrzenych, "čeká", "čekají", "čeká")} na PIN`;
+  if (nepotvrzenych === 0) return zaloh === 1 ? "potvrzená" : "potvrzené";
+  if (zaloh === 1) return "nepotvrzená";
+  return pocet(nepotvrzenych, "nepotvrzená", "nepotvrzené", "nepotvrzených");
 }
 
 /**

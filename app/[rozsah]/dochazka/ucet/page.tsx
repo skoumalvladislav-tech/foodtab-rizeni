@@ -171,6 +171,26 @@ export default async function MujUcet({
 
   const radky = ((data ?? []) as Record<string, unknown>[]).map(naRadek);
 
+  /*
+    Volba firmy u záloh. S řádky ji nese každý řádek (databáze ji právě
+    uplatnila). Bez řádků se musí přečíst zvlášť: při „neukazovat“
+    databáze vynechá dny jen se zálohou, takže měsíc, kdy člověk měl jen
+    zálohu, přijde prázdný — a výchozí „odecitat“ by pak mluvilo
+    o zálohách a zůstatku, které firma schovává. Číst ji smí každý člen
+    firmy (politika tenant_settings_select, sloupcový grant); řádek
+    nastavení chybět smí, pak platí výchozí.
+  */
+  let zobrazeni: Zobrazeni = radky[0]?.zobrazeni ?? "odecitat";
+  if (radky.length === 0) {
+    const { data: nastaveni, error: chybaNastaveni } = await supabase
+      .from("tenant_settings")
+      .select("zalohy_zobrazeni")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (chybaNastaveni) throw new DotazSelhal("nastavení záloh", chybaNastaveni);
+    zobrazeni = naZobrazeni((nastaveni as { zalohy_zobrazeni?: unknown } | null)?.zalohy_zobrazeni);
+  }
+
   const predchozi = posunMesic(mesic, -1);
   const nasledujici = posunMesic(mesic, 1);
   const odkaz = (m: string) => `/${rozsah}/dochazka/ucet?mesic=${m.slice(0, 7)}`;
@@ -182,6 +202,7 @@ export default async function MujUcet({
         {zalozky}
         <UcetZamestnance
           radky={radky}
+          zobrazeni={zobrazeni}
           mesic={mesic}
           obdobi={obdobi}
           predchozi={{ href: odkaz(predchozi), mesic: predchozi }}
@@ -210,8 +231,7 @@ function Hlavicka() {
  */
 function naRadek(r: Record<string, unknown>): RadekUctu {
   const neboNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
-  const zobrazeni: Zobrazeni =
-    r.zobrazeni === "jen_ukazat" || r.zobrazeni === "neukazovat" ? r.zobrazeni : "odecitat";
+  const zobrazeni = naZobrazeni(r.zobrazeni);
   return {
     den: String(r.den),
     odpracovano_minut: Number(r.odpracovano_minut ?? 0),
@@ -225,6 +245,11 @@ function naRadek(r: Record<string, unknown>): RadekUctu {
     zustatek_neuplny: r.zustatek_neuplny === true,
     zobrazeni,
   };
+}
+
+/** Volba firmy; neznámá hodnota nebo žádná = výchozí „odecitat“ (jako app.nastaveni). */
+function naZobrazeni(v: unknown): Zobrazeni {
+  return v === "jen_ukazat" || v === "neukazovat" ? v : "odecitat";
 }
 
 /**

@@ -2605,8 +2605,8 @@ span.ck-box { cursor: default; }
 
    Tabulky po dnech (`.ds-vy-dny` — Výdělky → Po dnech i Můj účet) mají
    pět sloupců místo sedmi, takže se v karty mění až pod 560 px obsahu,
-   ne pod 820. Štítky („čeká na PIN“, „část bez sazby“) jdou pod částku
-   (`.ds-vy-pod`), jinak by sloupce roztáhly tabulku do stran. */
+   ne pod 820. Štítky („nepotvrzená“, „část bez sazby“) jdou pod
+   částku (`.ds-vy-pod`), jinak by sloupce roztáhly tabulku do stran. */
 
 .ds-vy-tabulka th[scope="col"].ds-vy-zbyva { color: var(--ink); }
 .ds-vy-tabulka td.ds-vy-zbyva { font-weight: 600; color: var(--ink); }

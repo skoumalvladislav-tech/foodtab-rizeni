@@ -39,6 +39,10 @@
 --   neukazovat — i to, že den jen se zálohou při „neukazovat" zmizí.
 -- * Bez sazby: NULL a příznak, nikdy nula; zůstatek od toho dne
 --   „neúplný".
+-- * Nový člověk, kterému se sazba zadá až po pár směnách (Nováček,
+--   duben): chybějící haléř nedostane den bez sazby (tam by se ztratil)
+--   a „neúplný" zůstatek začíná prvním dnem bez sazby — záloha před ním
+--   ho nemá.
 --
 -- POZOR NA PGLITE: funkce jsou SECURITY DEFINER a práva si ověřují
 -- samy přes auth.uid() → test.user_id, takže kontroly práv tady měří
@@ -75,7 +79,8 @@ insert into auth.users (id, email, raw_user_meta_data) values
   ('59590000-0000-0000-0000-000000000007', 'clen59@foodtab.cz',      '{"full_name":"Člen Padesátdevět"}'),
   ('59590000-0000-0000-0000-000000000008', 'pozastaven59@foodtab.cz','{"full_name":"Pozastavený Padesátdevět"}'),
   ('59590000-0000-0000-0000-000000000009', 'cizi59@jinafirma.cz',    '{"full_name":"Cizí Padesátdevět"}'),
-  ('59590000-0000-0000-0000-000000000010', 'smazany59@foodtab.cz',   '{"full_name":"Smazaný Padesátdevět"}');
+  ('59590000-0000-0000-0000-000000000010', 'smazany59@foodtab.cz',   '{"full_name":"Smazaný Padesátdevět"}'),
+  ('59590000-0000-0000-0000-000000000011', 'novacek59@foodtab.cz',   '{"full_name":"Nováček Padesátdevět"}');
 
 set role authenticated;
 select set_config('test.user_id', '59590000-0000-0000-0000-000000000001', false);
@@ -105,6 +110,7 @@ insert into public.employees (tenant_id, branch_id, user_id, full_name) values
   (:'firma', :'pob_a', '59590000-0000-0000-0000-000000000006', 'Tomáš Padesátdevět'),
   (:'firma', :'pob_a', '59590000-0000-0000-0000-000000000008', 'Pozastavený Padesátdevět'),
   (:'firma', :'pob_a', '59590000-0000-0000-0000-000000000010', 'Smazaný Padesátdevět'),
+  (:'firma', :'pob_a', '59590000-0000-0000-0000-000000000011', 'Nováček Padesátdevět'),
   (:'firma', :'pob_b', null, 'Bedřich Padesátdevět'),
   (:'firma', :'pob_a', null, 'Haléř Padesátdevět'),
   (:'firma', :'pob_a', null, 'Třetina Padesátdevět'),
@@ -119,6 +125,7 @@ select max(id::text) filter (where full_name = 'Vedoucí Padesátdevět')     as
        max(id::text) filter (where full_name = 'Tomáš Padesátdevět')       as tomas,
        max(id::text) filter (where full_name = 'Pozastavený Padesátdevět') as pozastaveny,
        max(id::text) filter (where full_name = 'Smazaný Padesátdevět')     as smazany,
+       max(id::text) filter (where full_name = 'Nováček Padesátdevět')     as novacek,
        max(id::text) filter (where full_name = 'Bedřich Padesátdevět')     as bedrich,
        max(id::text) filter (where full_name = 'Haléř Padesátdevět')       as haler,
        max(id::text) filter (where full_name = 'Třetina Padesátdevět')     as tretina,
@@ -129,7 +136,8 @@ from public.employees where tenant_id in (:'firma', :'cizi_firma') \gset
 -- Vedoucí: payroll.read, ale členství jen na pobočku A.
 -- Provozní: docházka a zálohy na A, payroll.read NE.
 -- Účetní: payroll.read s firemním rozsahem — není majitel.
--- Zuzana, Tomáš, Pozastavený, Smazaný: žádné právo, jen členství na A.
+-- Zuzana, Tomáš, Pozastavený, Smazaný, Nováček: žádné právo, jen
+-- členství na A.
 -- Člen: členství na A, zaměstnanecký záznam jen v CIZÍ firmě.
 insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted) values
   (:'firma', :'vedouci',  'payroll.read',    true),
@@ -145,7 +153,8 @@ insert into public.memberships (tenant_id, user_id, role_id, scope, status) valu
   (:'firma', '59590000-0000-0000-0000-000000000006', :'role_f', 'branch', 'active'),
   (:'firma', '59590000-0000-0000-0000-000000000007', :'role_f', 'branch', 'active'),
   (:'firma', '59590000-0000-0000-0000-000000000008', :'role_f', 'branch', 'suspended'),
-  (:'firma', '59590000-0000-0000-0000-000000000010', :'role_f', 'branch', 'active');
+  (:'firma', '59590000-0000-0000-0000-000000000010', :'role_f', 'branch', 'active'),
+  (:'firma', '59590000-0000-0000-0000-000000000011', :'role_f', 'branch', 'active');
 
 insert into public.membership_branches (membership_id, branch_id)
 select m.id, :'pob_a'::uuid
@@ -154,14 +163,16 @@ select m.id, :'pob_a'::uuid
 
 /*
   Sazby. Tomáš nemá sazbu do 19. 5. (4. a 16. 5. bez ní, 21. 5. s ní).
-  Haléř a Třetina mají sazby, u kterých by zaokrouhlení po dnech dalo
-  jiný součet než earnings (oddíl 2).
+  Nováček je nový: sazbu 200 Kč/h dostal až od 15. 4. (6. 4. bez ní,
+  20. 4. s ní). Haléř a Třetina mají sazby, u kterých by zaokrouhlení
+  po dnech dalo jiný součet než earnings (oddíl 2).
 */
 insert into public.employee_rates (tenant_id, employee_id, hourly_haleru, valid_from) values
   (:'firma', :'majitel',     30000, '2026-01-01'),
   (:'firma', :'zuzana',      20000, '2026-01-01'),
   (:'firma', :'zuzana',      26000, '2026-05-16'),
   (:'firma', :'tomas',       15000, '2026-05-20'),
+  (:'firma', :'novacek',     20000, '2026-04-15'),
   (:'firma', :'bedrich',     18000, '2026-01-01'),
   (:'firma', :'haler',       10001, '2026-01-01'),
   (:'firma', :'tretina',        10, '2026-01-01'),
@@ -198,6 +209,12 @@ insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, o
   (:'firma', :'pob_a', :'tomas',  'out', '2026-05-16 13:00+02'),
   (:'firma', :'pob_a', :'tomas',  'in',  '2026-05-21 10:00+02'),
   (:'firma', :'pob_a', :'tomas',  'out', '2026-05-21 12:00+02'),
+  -- Nováček: 6. 4. dvě hodiny bez sazby, 20. 4. 4 h 2 min × 200 Kč/h
+  -- = 806,666… Kč (oddíl 2).
+  (:'firma', :'pob_a', :'novacek', 'in',  '2026-04-06 10:00+02'),
+  (:'firma', :'pob_a', :'novacek', 'out', '2026-04-06 12:00+02'),
+  (:'firma', :'pob_a', :'novacek', 'in',  '2026-04-20 10:00+02'),
+  (:'firma', :'pob_a', :'novacek', 'out', '2026-04-20 14:02+02'),
   (:'firma', :'pob_b', :'bedrich','in',  '2026-05-04 10:00+02'),
   (:'firma', :'pob_b', :'bedrich','out', '2026-05-04 15:00+02'),
   -- Majitel (bez pobočky) pracuje na A — den, kdy je v práci sám.
@@ -241,6 +258,7 @@ insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, o
     PODVRŽENÁ: cizí firma, cizí pobočka, NAŠE Zuzana, 12. 5., 777 Kč
     Tomáš 4. 5.: 100 Kč; Bedřich (B) 4. 5. vyplacená na A: 200 Kč
     Majitel 15. 5.: 500 Kč potvrzená; Smazaný 19. 5.: 50 Kč
+    Nováček 2. 4.: 50 Kč — dřív, než poprvé pracoval (oddíl 5)
 */
 insert into public.advances
   (tenant_id, branch_id, employee_id, castka_haleru, business_date, stav, potvrzeno_kdy, storno_duvod)
@@ -254,7 +272,8 @@ values
   (:'firma', :'pob_a', :'tomas',   10000, '2026-05-04', 'nepotvrzena', null, null),
   (:'firma', :'pob_a', :'bedrich', 20000, '2026-05-04', 'nepotvrzena', null, null),
   (:'firma', :'pob_a', :'majitel', 50000, '2026-05-15', 'potvrzena',   '2026-05-15 12:00+02', null),
-  (:'firma', :'pob_a', :'smazany',  5000, '2026-05-19', 'nepotvrzena', null, null);
+  (:'firma', :'pob_a', :'smazany',  5000, '2026-05-19', 'nepotvrzena', null, null),
+  (:'firma', :'pob_a', :'novacek',  5000, '2026-04-02', 'nepotvrzena', null, null);
 
 -- Smazaný je smazaný až teď — docházku a zálohu má z doby předtím.
 update public.employees set deleted_at = now() where id = :'smazany';
@@ -340,6 +359,26 @@ select pg_temp.check('Tomáš: dny bez sazby mají haléře NULL (ne 0), den se 
                      ' ' order by v.den)
      from app.vydelek_po_dnech(:'tomas', '2026-05-01') v)
   = '2026-05-04=NULL/NULL 2026-05-16=NULL/NULL 2026-05-21=30000/15000');
+
+/*
+  Nováček: den bez sazby (6. 4.) PŘED dnem se zbytkem (20. 4., 242 min
+  × 20 000 = 4 840 000 haléřominut, dolů 80 666, zbytek 40/60). earnings
+  zaokrouhlí na 80 667, chybí tedy jeden haléř. Řazení zbytků je `desc`
+  a NULL by v PostgreSQL stálo PRVNÍ — bez `nulls last` by haléř dostal
+  den bez sazby, NULL + 1 = NULL, a ze součtu by se ztratil. U Tomáše
+  se to projevit nemůže: 120 min × 15 000 dělí 60 beze zbytku.
+*/
+select pg_temp.check('příprava: Nováček má den bez sazby a jeden chybějící haléř (earnings 80 667, dolů 80 666)',
+  (select sazba_chybi and vydelano_haleru = 80667 from app.earnings(:'novacek', '2026-04-01'))
+  and (select count(*) filter (where app.rate_at(:'novacek', w.den) is null) = 1
+              and sum(w.minut::bigint * 20000 / 60) filter (where w.den = '2026-04-20') = 80666
+         from app.worked_minutes(:'novacek', '2026-04-01', '2026-04-30') w));
+
+select pg_temp.check('Nováček po dnech: chybějící haléř dostane 20. 4. (se sazbou), ne 6. 4. bez sazby',
+  (select string_agg(v.den || '=' || coalesce(v.haleru::text, 'NULL') || '/' || coalesce(v.sazba::text, 'NULL'),
+                     ' ' order by v.den)
+     from app.vydelek_po_dnech(:'novacek', '2026-04-01') v)
+  = '2026-04-06=NULL/NULL 2026-04-20=80667/20000');
 
 -- U každého člověka obou firem a obou měsíců: minuty, haléře i příznak
 -- sazby sečtené po dnech = app.earnings. Čísla se neskládají vedle,
@@ -613,7 +652,8 @@ begin
     select * from (values
       ('Zuzana, květen', '59590000-0000-0000-0000-000000000005', date '2026-05-01'),
       ('Zuzana, duben',  '59590000-0000-0000-0000-000000000005', date '2026-04-01'),
-      ('Tomáš, květen',  '59590000-0000-0000-0000-000000000006', date '2026-05-01')
+      ('Tomáš, květen',  '59590000-0000-0000-0000-000000000006', date '2026-05-01'),
+      ('Nováček, duben', '59590000-0000-0000-0000-000000000011', date '2026-04-01')
     ) t(popis, uzivatel, mesic)
   loop
     perform set_config('test.user_id', c.uzivatel, false);
@@ -656,6 +696,23 @@ select pg_temp.check('Tomáš: den bez sazby = NULL a příznak, ne 0 Kč; zůst
   = '2026-05-04|240|NULL|true|-10000|true'
     ' 2026-05-16|180|NULL|true|-10000|true'
     ' 2026-05-21|120|30000|false|20000|true');
+
+/*
+  Bod J: „neúplný" je PRŮBĚŽNÝ — od prvního dne bez sazby dál, ne za
+  celý měsíc. U Tomáše se to nerozliší (den bez sazby je hned první),
+  u Nováčka ano: záloha 2. 4. je před prací bez sazby 6. 4. a zůstatek
+  toho dne je úplný (−50 Kč = jen ta záloha).
+*/
+select set_config('test.user_id', '59590000-0000-0000-0000-000000000011', false);
+
+select pg_temp.check('Nováček: záloha před prvním dnem bez sazby — ten den zůstatek ještě úplný, od 6. 4. „neúplný"',
+  (select string_agg(concat_ws('|', u.den, u.odpracovano_minut, coalesce(u.vydelano_haleru::text, 'NULL'),
+                               u.sazba_chybi::text, u.zustatek_haleru, u.zustatek_neuplny::text),
+                     ' ' order by u.den)
+     from public.muj_pracovni_ucet(:'firma', '2026-04-01') u)
+  = '2026-04-02|0|NULL|false|-5000|false'
+    ' 2026-04-06|120|NULL|true|-5000|true'
+    ' 2026-04-20|242|80667|false|75667|true');
 
 select set_config('test.user_id', '59590000-0000-0000-0000-000000000005', false);
 
