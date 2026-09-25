@@ -9,9 +9,12 @@ import { odeslatWebPush, type KliceVapid, type OdberPush, type VolbyOdeslani, ty
  * Volají ji dvě místa:
  *   * plánovaná úloha /api/uloha/notifikace-push — celá fronta, záloha
  *     a uvolnění čekajících na směnu,
- *   * odeslání zprávy — jen řádky upozornění té jedné zprávy, HNED po
+ *   * „push hned" (push-hned.ts) — jen řádky upozornění JEDNOHO ZDROJE
+ *     (`notifications.zdroj_typ` + `zdroj_id`: zpráva, záloha…), HNED po
  *     odpovědi uživateli (`after`). Bez toho push čekal na plánovač, a ten
  *     na GitHubu běží zhruba jednou za 3–6 hodin (měřeno 23. 9.).
+ *     Do 25. 9. to uměla jen zpráva (`zprava`); zdroj je od té doby obecný,
+ *     aby záloha nepotřebovala kopii téhož dotazu.
  *
  * ---------------------------------------------------------------------
  * DVA ODESÍLATELÉ NARÁZ — ZABRÁNÍ ŘÁDKU
@@ -71,10 +74,17 @@ export const PRAZDNY_VYSLEDEK: VysledekFronty = {
   ve_fronte: 0, odeslano: 0, selhalo: 0, bez_zarizeni: 0, odlozeno: 0, nezabrano: 0,
 }
 
+/**
+ * Zdroj upozornění (`notifications.zdroj_typ` / `zdroj_id`) — např.
+ * `{ typ: 'zprava', id }` nebo `{ typ: 'zaloha', id }`. Typ je součást
+ * filtru: zpráva a úkol se stejným id se nepletou.
+ */
+export type ZdrojUpozorneni = { typ: string; id: string }
+
 export type VolbyFronty = {
-  /** Jen řádky upozornění k téhle zprávě (odeslání hned). Bez = celá fronta. */
-  zprava?: string
-  /** S `zprava`: jen řádky téhle firmy (obrana do hloubky, id zprávy je z RPC). */
+  /** Jen řádky upozornění z tohohle zdroje (odeslání hned). Bez = celá fronta. */
+  zdroj?: ZdrojUpozorneni
+  /** Se `zdroj`: jen řádky téhle firmy (obrana do hloubky, id zdroje je z RPC). */
   firma?: string
   rozpocetMs?: number
   /** Pro testy: náhrada skutečného odeslání. */
@@ -93,15 +103,15 @@ export async function odeslatFrontu(
   const ted = volby.ted ?? Date.now
   const rozpocet = volby.rozpocetMs ?? ROZPOCET_MS
 
-  // Upozornění zprávy se hledají PŘES FRONTU (málo řádků, částečný index
+  // Upozornění zdroje se hledají PŘES FRONTU (málo řádků, částečný index
   // na stav) a spojem na upozornění — ne průchodem celé tabulky upozornění.
-  const { data: fronta, error } = volby.zprava
+  const { data: fronta, error } = volby.zdroj
     ? await supabase
         .from('notifikace_doruceni')
         .select('id, user_id, notification_id, typ, pocet, pokusu, notifications!inner(druh, telo, priorita, zdroj_typ, zdroj_id)')
         .eq('stav', 'k_odeslani')
-        .eq('notifications.zdroj_typ', 'zprava')
-        .eq('notifications.zdroj_id', volby.zprava)
+        .eq('notifications.zdroj_typ', volby.zdroj.typ)
+        .eq('notifications.zdroj_id', volby.zdroj.id)
         .eq('tenant_id', volby.firma ?? '')
         .order('created_at', { ascending: true })
         .limit(DAVKA)

@@ -418,3 +418,89 @@ a zapíše; nepotvrzená je vidět v Zálohách.
   zálohu** (úzké, jen pro potvrzení),
 - nebo pozná i **všechny lidi bez pobočky** (ne majitele) — pozor, mění
   to i hlídání shody PINů na pobočce.
+
+> **Doplněno 25. 9. 2026:** kdo má **účet**, potvrdí takovou zálohu nově
+> **ve svém telefonu** (Docházka → karta „Máte nepotvrzenou zálohu") a za
+> kohokoli ji potvrdí **majitel** (Docházka → Zálohy). Otevřené zůstává jen
+> pro brigádníky bez účtu, kteří na tabletu nejsou poznaní — za ně dnes
+> může potvrdit majitel.
+
+---
+
+## 16. Výplata záloh přímo z kiosku (tabletu) s PINem vydávajícího?
+
+**Vzniklo:** 25. 9. 2026 ráno, zadání majitele: „a nebo na kiosku udělat
+kartu zálohy a vše řešit přes kiosek".
+
+**Co je hotové (25. 9.):** záloha se vyplácí v aplikaci (Docházka →
+Zálohy, právo „Vyplácet zálohy"); příjemci s účtem přijde upozornění
+a potvrdí ji **ve svém telefonu**, nebo dál **PINem na tabletu**; majitel
+ji umí potvrdit **za kohokoli**; kdo zálohu vydal, dostane zprávu, že je
+potvrzená — ať se potvrdilo kteroukoli cestou (i PINem na tabletu).
+
+**Co jsem NEudělal:** kartu „Vyplatit zálohu" na tabletu, kde by
+vydávající zadal svůj PIN, vybral člověka a částku.
+
+**Proč ne bez rozhodnutí — rizika:**
+- **PIN je 4–6 číslic.** Dnes PIN na tabletu dokládá jen „tohle jsem já,
+  přišel jsem / beru si svou zálohu". Kdyby otevíral i **vydávání peněz**,
+  stal by se z něj klíč k pokladně — a ten, kdo ho odkouká u baru (tablet
+  stojí na pultě, PIN se ťuká před lidmi), může vydávat zálohy komukoli.
+- **„Kdo vydal" by byl jen PIN.** V aplikaci je vydávající přihlášený účet
+  (heslo / kód z e-mailu, jeho telefon). Na tabletu by to byla jen čtyři
+  čísla — záznam „vyplatila Petra" by znamenal „někdo znal Petřin PIN".
+- **Zneužití u baru.** Vydávající i příjemce stojí u téhož tabletu; kdo
+  zná PIN kolegy s právem vydávat, vyplatí si zálohu sám sobě a sám si ji
+  svým PINem potvrdí. Dnes tomu brání, že výplata chce přihlášený účet
+  s právem a potvrzení PIN příjemce — dvě různé věci, dva různí lidé.
+- Zámek po pěti špatných PINech dnes chrání potvrzení a píchání;
+  u vydávání peněz by bylo potřeba přísnější (a hlídat i hádání PINů lidí
+  s právem vydávat).
+
+**Varianta, kdyby se to chtělo:** tablet jen **nabídne** zálohu k vydání
+(člověk, částka) a vydávající ji **odklikne ve svém telefonu** (přihlášený
+účet s právem) — tablet by byl jen „obrazovka u pultu", peníze by dál
+pouštěl účet, ne PIN. Nebo PIN vydávajícího delší (6 číslic) + strop
+částky z tabletu + zpráva majiteli o každé výplatě z tabletu.
+
+**Co platí do rozhodnutí:** výplata jen v aplikaci, potvrzení v telefonu,
+PINem na tabletu nebo majitelem. Nic na kiosku se nemění (kiosek dál
+ukazuje dnešní nepotvrzené zálohy k potvrzení PINem).
+
+---
+
+## 17. Má výzva „potvrďte zálohu" zazvonit i mimo směnu?
+
+**Vzniklo:** 25. 9. 2026, potvrzení záloh v telefonu.
+
+Upozornění na vyplacenou zálohu (příjemci) a na potvrzení (vydávajícímu)
+jde přes frontu doručení s **běžnou** prioritou. **V aplikaci (zvoneček)
+je vidět hned vždycky.** Na telefon (push) je to složitější:
+
+- **Hned** přijde jen tomu, kdo je právě v práci (otevřený příchod),
+  a majiteli.
+- Kdo v práci není, tomu push **čeká na příští příchod na směnu**.
+  Čekání **starší než 48 hodin propadá** (stejné pravidlo jako u všech
+  upozornění): záloha vydaná v pátek po odchodu, další směna v pondělí —
+  výzva „potvrďte zálohu" na telefon **nepřijde vůbec**, zůstane jen ve
+  zvonečku. Propadne i tehdy, když si ji člověk mezitím přečte
+  v aplikaci.
+- **Potvrzení PINem na tabletu** push hned neplánuje (tablet není
+  přihlášený účet a aplikace se po něm nevolá). Vydávající dostane push
+  až s **plánovačem**, který dnes běží zhruba jednou za 3–6 hodin
+  (měřeno 23. 9.). Po potvrzení v telefonu nebo majitelem jde push hned.
+
+**Co jsem vybral do té doby:** běžná priorita. „Naléhavé" by na obrazovce
+svítilo jako NALÉHAVÉ a obcházelo by klid mimo směnu — záloha tak
+naléhavá není. Když ji člověk potvrdí jinak (PINem, majitel), nebo když
+ji někdo stornuje, čekající push se zruší, takže mu po příchodu nepípne
+výzva k něčemu, co už neplatí.
+
+**Když to má být jinak:**
+- *zazvonit i mimo směnu:* jedna změna v databázi — pro druhy `zaloha.*`
+  pouštět push hned bez ohledu na směnu (stejnou cestou, jakou to dnes
+  dělá majitel), bez označení NALÉHAVÉ. Tím odpadne i propadání po 48 h.
+- *po PINu na tabletu hned zpráva vydávajícímu:* tablet by potvrzení
+  posílal přes serverovou akci aplikace, která po úspěchu naplánuje push
+  (jako dnes telefon a majitel). Je to změna na kiosku, proto ne bez
+  rozhodnutí — souvisí s otázkou 16.

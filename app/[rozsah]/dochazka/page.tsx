@@ -31,6 +31,12 @@ import { nactiPrehledDne, type PrehledProps } from "./prehled/nacti";
 import PrehledDochazky from "./prehled/prehled";
 import DochazkaZalozky from "./zalozky";
 import zalozkyDochazky from "./zalozky-prava";
+import { potvrditMojiZalohu } from "./zalohy/akce";
+import ZalohyKPotvrzeni, {
+  HlaskaPotvrzeniZalohy,
+  mistoZaloh,
+  type ZalohaKPotvrzeni,
+} from "./zalohy-k-potvrzeni";
 
 export const dynamic = "force-dynamic";
 
@@ -135,6 +141,13 @@ export default async function Dochazka({
     uzavreno?: string;
     /** Zaměstnanec, jehož panel se v živém přehledu otevře rovnou (odkaz z Rozpisu). */
     osoba?: string;
+    /**
+     * Výsledek potvrzení zálohy v telefonu: 'potvrzena' nebo 'chyba'
+     * (s hláškou z databáze v `duvod`). Vlastní klíč, ne `chyba`/`text` —
+     * ty patří ručnímu zápisu a píchnutí.
+     */
+    zaloha?: string;
+    duvod?: string;
   }>;
 }) {
   const { rozsah } = await params;
@@ -149,6 +162,8 @@ export default async function Dochazka({
     pichnuto,
     uzavreno,
     osoba: osobaZUrl,
+    zaloha: vysledekZalohy,
+    duvod: duvodZalohy,
   } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
@@ -484,6 +499,24 @@ export default async function Dochazka({
         }
       : null;
   }
+
+  /*
+    ZÁLOHY K POTVRZENÍ (25. 9. 2026). Vlastní nepotvrzené — sem vede
+    upozornění „Máte zálohu k potvrzení". Jen vlastní a jen nepotvrzené
+    hlídá databáze (moje_nepotvrzene_zalohy), ne tenhle dotaz.
+
+    Nenasazená migrace se promíjí jako u výdělku: karta se prostě
+    nekreslí. Jiná chyba obrazovku shodí — mlčky zahozená by vypadala
+    jako „žádné nepotvrzené" a člověk by se o záloze nedozvěděl.
+  */
+  const { data: zalohyData, error: chybaZaloh } = await supabase.rpc(
+    "moje_nepotvrzene_zalohy",
+    { p_tenant: tenantId },
+  );
+  if (chybaZaloh && !funkceNeexistuje(chybaZaloh)) {
+    throw new DotazSelhal("moje nepotvrzené zálohy", chybaZaloh);
+  }
+  const zalohyKPotvrzeni = (chybaZaloh ? [] : (zalohyData ?? [])) as ZalohaKPotvrzeni[];
 
   /*
     Má pobočka vůbec nějaký tablet?
@@ -844,6 +877,27 @@ export default async function Dochazka({
   const zonaUdalosti = (branchId: string | null | undefined) =>
     (branchId ? zonyPobocek.get(branchId) : undefined) ?? ZONA_VYCHOZI;
 
+  /*
+    Zálohy k potvrzení — nahoře, protože se na ně čeká (kdo zálohu
+    vydal, se o potvrzení dozví až potom). U vedoucího s živým přehledem
+    hned pod záložkami přehledu, ne až pod ním. Při píchání vůbec: po
+    naskenování QR má být píchačka nahoře sama. Pravidlo je
+    v `mistoZaloh` (zalohy-k-potvrzeni.tsx), ať jde ověřit.
+  */
+  const kdeZalohy = mistoZaloh({ pichaSe, prehled: Boolean(prehled) });
+  const blokZaloh = (
+    <>
+      <HlaskaPotvrzeniZalohy vysledek={vysledekZalohy} duvod={duvodZalohy} />
+      {kdeZalohy === "zadne" ? null : (
+        <ZalohyKPotvrzeni
+          zalohy={zalohyKPotvrzeni}
+          rozsah={rozsah}
+          akce={potvrditMojiZalohu}
+        />
+      )}
+    </>
+  );
+
   return (
     <>
       {prehled && !pichaSe ? (
@@ -858,6 +912,7 @@ export default async function Dochazka({
           }}
           vybranaZUrl={osobaZUrl ?? null}
           zalozky={zalozky}
+          podZalozkami={kdeZalohy === "v-prehledu" ? blokZaloh : null}
         />
       ) : (
         <HlavickaDochazky />
@@ -866,6 +921,9 @@ export default async function Dochazka({
       <div style={obal}>
         {/* Záložky patří pod hlavičku; u přehledu je kreslí přehled sám. */}
         {prehled ? null : zalozky}
+
+        {/* Zálohy k potvrzení (viz blokZaloh výš) — pokud nejsou v přehledu. */}
+        {kdeZalohy === "v-prehledu" ? null : blokZaloh}
 
         {/*
           Ruční zápis. Je nad píchačkou schválně: kdo sem chodí zapisovat
@@ -1543,7 +1601,7 @@ function DlazdiceVydelku({
         >
           {pocet(v.zaloh_nepotvrzenych, "záloha", "zálohy", "záloh")}{" "}
           {prisudek(v.zaloh_nepotvrzenych, "čeká", "čekají", "čeká")} na
-          potvrzení PINem
+          vaše potvrzení
         </p>
       ) : null}
 

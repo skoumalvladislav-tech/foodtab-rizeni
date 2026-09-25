@@ -121,6 +121,9 @@ function falesnaDb(data) {
 
 const KLICE = { verejny: 'x', soukromy: 'y', subjekt: 'mailto:test@foodtab.cz' }
 
+/** Zdroj „zpráva m1" — od 25. 9. se push hned filtruje obecným zdrojem, ne jen zprávou. */
+const ZPRAVA_M1 = { typ: 'zprava', id: 'm1' }
+
 function zaklad() {
   return {
     notifications: [
@@ -153,7 +156,7 @@ await test('odeslání ke zprávě pošle JEN její řádky k_odeslani a označ�
   const { db, klient } = falesnaDb(zaklad())
   const poslano = []
   const v = await odeslatFrontu(klient, KLICE, {
-    zprava: 'm1', firma: 't1',
+    zdroj: ZPRAVA_M1, firma: 't1',
     odeslat: async (z) => { poslano.push(z.id); return { stav: 'odeslano' } },
   })
   assert.equal(v.odeslano, 1)
@@ -166,11 +169,29 @@ await test('odeslání ke zprávě pošle JEN její řádky k_odeslani a označ�
   assert.ok(db.push_odbery.every((o) => o.posledni_uspech_kdy !== null))
 })
 
+/*
+  Záloha (25. 9. 2026): push hned po výplatě a po potvrzení jde stejnou
+  cestou jako u zprávy, jen s jiným zdrojem. Id schválně SHODNÉ se
+  zprávou m1 i úkolem m1 — kdyby filtr bral jen id (nebo typ napevno
+  „zprava"), pošle se cizí řádek.
+*/
+await test('odeslání k ZÁLOZE pošle jen její řádky, ne zprávu ani úkol se stejným id', async () => {
+  const data = zaklad()
+  data.notifications.push({ id: 'n7', druh: 'zaloha.potvrzena', telo: {}, priorita: 'normal', zdroj_typ: 'zaloha', zdroj_id: 'm1' })
+  data.notifikace_doruceni.push({ tenant_id: 't1', id: 'd7', user_id: 'u1', notification_id: 'n7', typ: 'jedna', pocet: 1, pokusu: 0, stav: 'k_odeslani' })
+  const { db, klient } = falesnaDb(data)
+  const v = await odeslatFrontu(klient, KLICE, { zdroj: { typ: 'zaloha', id: 'm1' }, firma: 't1', odeslat: vzdyOdeslano })
+  assert.equal(v.ve_fronte, 1)
+  assert.equal(radek(db, 'd7').stav, 'odeslano')
+  assert.equal(radek(db, 'd1').stav, 'k_odeslani', 'zpráva se stejným id nedotčená')
+  assert.equal(radek(db, 'd9').stav, 'k_odeslani', 'úkol se stejným id nedotčený')
+})
+
 await test('naléhavá zpráva jde s vysokou naléhavostí', async () => {
   const { klient } = falesnaDb(zaklad())
   const urgency = []
   await odeslatFrontu(klient, KLICE, {
-    zprava: 'm1', firma: 't1',
+    zdroj: ZPRAVA_M1, firma: 't1',
     odeslat: async (_z, _m, _k, volby) => { urgency.push(volby?.urgency); return { stav: 'odeslano' } },
   })
   assert.deepEqual([...new Set(urgency)], ['high'])
@@ -179,7 +200,7 @@ await test('naléhavá zpráva jde s vysokou naléhavostí', async () => {
 await test('zpráva bez řádků ve frontě nic nepošle a na nic nesáhne', async () => {
   const { db, klient } = falesnaDb(zaklad())
   let volano = 0
-  const v = await odeslatFrontu(klient, KLICE, { zprava: 'm-neznama', firma: 't1', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
+  const v = await odeslatFrontu(klient, KLICE, { zdroj: { typ: 'zprava', id: 'm-neznama' }, firma: 't1', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
   assert.equal(volano, 0)
   assert.equal(v.ve_fronte, 0)
   assert.ok(db.notifikace_doruceni.every((r) => r.stav !== 'odeslano'))
@@ -188,7 +209,7 @@ await test('zpráva bez řádků ve frontě nic nepošle a na nic nesáhne', asy
 await test('cizí firma: odeslání ke zprávě s jinou firmou nic nepošle', async () => {
   const { db, klient } = falesnaDb(zaklad())
   let volano = 0
-  const v = await odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't-cizi', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
+  const v = await odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't-cizi', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
   assert.equal(volano, 0)
   assert.equal(v.ve_fronte, 0)
   assert.equal(radek(db, 'd1').stav, 'k_odeslani')
@@ -200,7 +221,7 @@ await test('souběh PŘED zabráním: řádek zabraný jiným se nepošle', asyn
     Object.assign(radek(db, 'd1'), { stav: 'selhalo', pokusu: 1, chyba: NEDOKONCENO })
   }
   let volano = 0
-  const v = await odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't1', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
+  const v = await odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't1', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
   assert.equal(volano, 0, 'push se neposlal podruhé')
   assert.equal(v.nezabrano, 1)
 })
@@ -212,7 +233,7 @@ await test('souběh BĚHEM odesílání: plánovač řádek, který se právě p
   const brana = new Promise((r) => { pustit = r })
   // Odeslání hned: zabere d1 a „posílá" (čeká na bránu).
   const hned = odeslatFrontu(klient, KLICE, {
-    zprava: 'm1', firma: 't1',
+    zdroj: ZPRAVA_M1, firma: 't1',
     odeslat: async () => { odeslani++; await brana; return { stav: 'odeslano' } },
   })
   await new Promise((r) => setTimeout(r, 10))
@@ -229,7 +250,7 @@ await test('souběh BĚHEM odesílání: plánovač řádek, který se právě p
 await test('zrušení během odesílání se nepřepíše (řádek už není náš)', async () => {
   const { db, klient } = falesnaDb(zaklad())
   await odeslatFrontu(klient, KLICE, {
-    zprava: 'm1', firma: 't1',
+    zdroj: ZPRAVA_M1, firma: 't1',
     odeslat: async () => {
       // Jiná transakce řádek mezitím změní (např. ruční zásah / úklid).
       Object.assign(radek(db, 'd1'), { stav: 'zruseno', chyba: 'Zrušeno jinde.' })
@@ -243,7 +264,7 @@ await test('zrušení během odesílání se nepřepíše (řádek už není ná
 await test('chyba dotazu na zařízení: výjimka, řádek zůstane ve frontě (ne „bez zařízení")', async () => {
   const { db, klient } = falesnaDb(zaklad())
   db.chybaTabulky.push_odbery = { message: 'timeout', code: '57014' }
-  await assert.rejects(() => odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't1', odeslat: vzdyOdeslano }))
+  await assert.rejects(() => odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't1', odeslat: vzdyOdeslano }))
   assert.equal(radek(db, 'd1').stav, 'k_odeslani')
 })
 
@@ -251,7 +272,7 @@ await test('člověk bez zařízení: řádek se zruší, nic se neposílá', as
   const data = zaklad()
   data.push_odbery = []
   const { db, klient } = falesnaDb(data)
-  const v = await odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't1', odeslat: vzdyOdeslano })
+  const v = await odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't1', odeslat: vzdyOdeslano })
   assert.equal(v.bez_zarizeni, 1)
   assert.equal(radek(db, 'd1').stav, 'zruseno')
 })
@@ -260,7 +281,7 @@ await test(`dočasná chyba: zpátky do fronty, po ${NEJVIC_POKUSU}. pokusu selh
   const { db, klient } = falesnaDb(zaklad())
   const chyba = async () => ({ stav: 'selhalo', chyba: 'HTTP 503' })
   for (let i = 1; i <= NEJVIC_POKUSU; i++) {
-    await odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't1', odeslat: chyba })
+    await odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't1', odeslat: chyba })
     const r = radek(db, 'd1')
     assert.equal(r.pokusu, i, `pokus ${i} se započítal jednou`)
     assert.equal(r.stav, i < NEJVIC_POKUSU ? 'k_odeslani' : 'selhalo', `po pokusu ${i}`)
@@ -270,18 +291,18 @@ await test(`dočasná chyba: zpátky do fronty, po ${NEJVIC_POKUSU}. pokusu selh
 
 await test('zrušené zařízení (410) se vypne a řádek skončí selhalo', async () => {
   const { db, klient } = falesnaDb(zaklad())
-  await odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't1', odeslat: async () => ({ stav: 'vyprselo' }) })
+  await odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't1', odeslat: async () => ({ stav: 'vyprselo' }) })
   assert.ok(db.push_odbery.every((o) => o.vypnuto_kdy !== null))
   assert.equal(radek(db, 'd1').stav, 'selhalo')
 })
 
 await test('pád uprostřed odesílání: řádek zůstane selhalo („nedokončilo se") a znovu se nepošle', async () => {
   const { db, klient } = falesnaDb(zaklad())
-  await assert.rejects(() => odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't1', odeslat: async () => { throw new Error('funkce utnuta') } }))
+  await assert.rejects(() => odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't1', odeslat: async () => { throw new Error('funkce utnuta') } }))
   assert.equal(radek(db, 'd1').stav, 'selhalo')
   assert.equal(radek(db, 'd1').chyba, NEDOKONCENO)
   let volano = 0
-  await odeslatFrontu(klient, KLICE, { zprava: 'm1', firma: 't1', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
+  await odeslatFrontu(klient, KLICE, { zdroj: ZPRAVA_M1, firma: 't1', odeslat: async () => { volano++; return { stav: 'odeslano' } } })
   assert.equal(volano, 0)
 })
 

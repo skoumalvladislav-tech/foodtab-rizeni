@@ -737,7 +737,9 @@ const CACHE = js('export function revalidatePath(c, t) { globalThis.__akce.cesty
 const FIRMA_AKCE = js(
   'export async function getCurrentTenantId() { return "t1" }\n' +
     // Pobočka v rozsahu: výplata zálohy ji od #77 vyžaduje (pobočka výdeje).
-    'export async function zkusPristup() { return { stav: "ok", ctx: {}, scope: { branchId: "b1" } } }\n',
+    'export async function zkusPristup() { return { stav: "ok", ctx: {}, scope: { branchId: "b1" } } }\n' +
+    // Potvrzovací akce (25. 9.) rozsah ověřují; tady jen náhrada.
+    'export function bezpecnyRozsah(ctx, r) { return { level: "branch", branchId: "b1", branchName: "", branchSlug: r } }\n',
 )
 const DOTAZ_AKCE = js(
   'export function funkceNeexistuje(e) { return e?.code === "PGRST202" || e?.code === "42883" }\n',
@@ -750,10 +752,17 @@ const SERVER_AKCE = js(
     '  };\n' +
     '}\n',
 )
+// Od 25. 9. 2026 akce záloh potvrzují (majitel → getContext) a posílají
+// push hned. Tady jde jen o adresy, takže obojí je prázdná náhrada;
+// potvrzení a push ověřuje scripts/zalohy.test.mjs.
+const AUTHZ_AKCE = js('export async function getContext() { return null }\n')
+const PUSH_AKCE = js('export function naplanovatPushKeZdroji() {}\n')
 const akce = await nactiModul('app/[rozsah]/dochazka/zalohy/akce.ts', [
   ['next/cache', CACHE],
   ['next/navigation', NAVIGACE],
+  ['@/lib/authz', AUTHZ_AKCE],
   ['@/lib/firma', FIRMA_AKCE],
+  ['@/lib/komunikace/push-hned', PUSH_AKCE],
   ['@/lib/mzdy', new URL('lib/mzdy.ts', KOREN).href],
   ['@/lib/supabase/dotaz', DOTAZ_AKCE],
   ['@/lib/supabase/server', SERVER_AKCE],
