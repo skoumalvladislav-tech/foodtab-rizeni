@@ -4,11 +4,14 @@ import Ikona from "../ikona";
 import type { IkonaKlic } from "../nabidka";
 
 /**
- * Záložky Docházky: Docházka · Výdělky · Zálohy (24. 9. 2026).
+ * Záložky Docházky: Docházka · Můj účet · Výdělky · Zálohy (24. 9. 2026).
  *
  * Zadání majitele: „sloučit kartu zálohy do karty docházka“ a ukazovat
  * výdělky lidí. Zálohy měly v nabídce vlastní položku; teď bydlí pod
  * /dochazka/zalohy a starou adresu drží přesměrování v next.config.ts.
+ * Večer přibyl „Můj účet“ — vlastní výdělek a zálohy po dnech („dal
+ * bych tam přehled pracovního účtu“), pro každého se zaměstnaneckým
+ * záznamem.
  *
  * Stejný vzor jako PcZalozky (Vzkazy a úkoly): odkazy, přepíná se
  * adresou, funguje bez JavaScriptu a odkaz jde poslat dál.
@@ -19,7 +22,7 @@ import type { IkonaKlic } from "../nabidka";
  * druhá linie.
  */
 
-export type KlicZalozky = "dochazka" | "vydelky" | "zalohy";
+export type KlicZalozky = "dochazka" | "ucet" | "vydelky" | "zalohy";
 
 const ZALOZKY: {
   klic: KlicZalozky;
@@ -30,6 +33,8 @@ const ZALOZKY: {
   sMesicem: boolean;
 }[] = [
   { klic: "dochazka", nazev: "Docházka", ikona: "hodiny", adresa: (r) => `/${r}/dochazka`, sMesicem: true },
+  // Hned za Docházkou: je to záložka zaměstnance, ne vedení.
+  { klic: "ucet", nazev: "Můj účet", ikona: "clovek", adresa: (r) => `/${r}/dochazka/ucet`, sMesicem: true },
   { klic: "vydelky", nazev: "Výdělky", ikona: "mince", adresa: (r) => `/${r}/dochazka/vydelky`, sMesicem: true },
   // Zálohy ukazují vždy běžící měsíc, parametr by jen visel v adrese.
   { klic: "zalohy", nazev: "Zálohy", ikona: "kniha", adresa: (r) => `/${r}/dochazka/zalohy`, sMesicem: false },
@@ -50,8 +55,10 @@ export default function DochazkaZalozky({
 }) {
   const zalozky = ZALOZKY.filter((z) => viditelne.includes(z.klic));
 
-  // Jediná záložka není volba. Číšník, který vidí jen svou docházku,
-  // nemá dostat lištu s jedním odkazem na stránku, na které už stojí.
+  // Jediná záložka není volba. Kdo vidí jen Docházku (čerstvě pozvaný,
+  // ještě bez zaměstnaneckého záznamu), nemá dostat lištu s jedním
+  // odkazem na stránku, na které už stojí. Číšník se záznamem má dvě:
+  // Docházku a Můj účet.
   if (zalozky.length < 2) return null;
 
   return (

@@ -75,11 +75,14 @@ const text = (html) =>
  */
 const nulaKorun = (html) => /(?<![\d\s ])0[\s ]Kč/.test(html)
 
-/** Buňky řádku tabulky člověka (bez jména), jako text. */
+/**
+ * Buňky řádku tabulky člověka (bez jména), jako text. `<td` i se
+ * třídou — sloupec Zbývá ji má (zvýraznění, 24. 9. večer).
+ */
 function radekTabulky(html, id) {
   const m = html.match(new RegExp(`<tr[^>]*data-clovek="${id}"[^>]*>([\\s\\S]*?)</tr>`))
   if (!m) return null
-  return [...m[1].matchAll(/<td>([\s\S]*?)<\/td>/g)].map((x) => text(x[1]))
+  return [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((x) => text(x[1]))
 }
 
 /** Hodnoty z karty člověka na telefonu (dd), jako text. */
@@ -244,6 +247,17 @@ ma('běžný člověk: zbývá vyděláno minus zálohy', cyril?.[ZBY], '16 590 
 ma('běžný člověk: předběžně', cyril?.[PRED], '23 540 Kč')
 ma('plán: směny a hodiny', cyril?.[PLAN], '3 směny · 22 h 30 min')
 
+console.log('\n== Zbývá je zvýrazněné (zůstatek, na který se majitel ptá) ==')
+ma('parser buněk vidí i buňku se třídou: 6 buněk v řádku', radekTabulky(html, 'cyril')?.length, 6)
+const tridyZahlavi = [...html.matchAll(/<th scope="col"( class="([^"]*)")?>([\s\S]*?)<\/th>/g)]
+  .filter((m) => m[2]).map((m) => `${text(m[3])}:${m[2]}`)
+ma('v záhlaví je zvýrazněný jen sloupec Zbývá', tridyZahlavi.join(' '), 'Zbývá:ds-vy-zbyva')
+const tridyBunek = [...htmlRadku(html, 'cyril').matchAll(/<td( class="([^"]*)")?>([\s\S]*?)<\/td>/g)].map((m) => m[2] ?? '')
+ma('v řádku člověka má třídu jen buňka Zbývá (5. sloupec)', tridyBunek.join('|'), '|||ds-vy-zbyva||')
+const kartaCyril = html.match(/<li[^>]*data-clovek="cyril"[^>]*>([\s\S]*?)<\/li>/)?.[1] ?? ''
+ma('na telefonu je zvýrazněný řádek Zbývá',
+  [...kartaCyril.matchAll(/<div class="ds-vy-radek ds-vy-zbyva"><dt>([^<]*)<\/dt>/g)].map((m) => m[1]).join(','), 'Zbývá')
+
 console.log('\n== Hodiny jedním tvarem ==')
 const hodiny = [...text(html).matchAll(/\d+(?:,\d+)?\s?h\b(?:\s\d+\smin)?/g)].map((m) => m[0])
 ma('nějaké hodiny se našly', hodiny.length >= 5, true)
@@ -320,6 +334,20 @@ const prazdne = vykresli([])
 ma('prázdný měsíc: věta, ne tabulka', prazdne.includes('<table'), false)
 ma('a žádné karty s nulou', prazdne.includes('ds-kpi'), false)
 
+// Oddíl Po dnech (po-dnech.tsx) se kreslí POD lidmi a nad vysvětlivkami;
+// sám se testuje ve scripts/ucet.test.mjs.
+const sDny = renderToStaticMarkup(
+  createElement(TabulkaVydelku, {
+    radky: LIDE, mesic: '2026-09-01', obdobi: 'tento', naPobocce: true, pobocky: {},
+    predchozi: { href: '#', mesic: '2026-08-01' }, nasledujici: null,
+    poDnech: createElement('section', { id: 'po-dnech' }, 'DNY'),
+  }),
+)
+const kde = (h, co) => h.indexOf(co)
+ma('Po dnech je pod tabulkou lidí a nad vysvětlivkami',
+  kde(sDny, 'ds-vy-karty') < kde(sDny, 'id="po-dnech"') && kde(sDny, 'id="po-dnech"') < kde(sDny, 'ds-vy-vysvetlivky'), true)
+ma('vysvětlivka: součet dnů = sloupec Vyděláno', text(sDny).includes('Součet dnů je přesně součet sloupce Vyděláno'), true)
+
 /* ======================================================================
    2. LIŠTA ZÁLOŽEK
    ====================================================================== */
@@ -350,25 +378,42 @@ ma('měsíc jde do Docházky i Výdělků, ne do Záloh',
   `hasAccess` se podstrčí: odpovídá podle tabulky práv „kdo co má kde“
   a zapisuje si, na co se ho kdo ptal.
 */
-globalThis.__prava = { mam: () => false, volani: [] }
+globalThis.__prava = { mam: () => false, volani: [], zaznam: false }
 const AUTHZ = js(
   'export async function hasAccess(t, pravo, pobocka) {\n' +
     '  globalThis.__prava.volani.push([pravo, pobocka]);\n' +
     '  return globalThis.__prava.mam(pravo, pobocka);\n' +
+    '}\n' +
+    'export async function getUser() { return { id: "u1" } }\n',
+)
+/*
+  Záložka Můj účet se ptá na zaměstnanecký záznam (od 24. 9. večer).
+  Tady jen ano/ne; na co přesně se ptá, hlídá scripts/ucet.test.mjs.
+*/
+const SUPABASE_ZALOZEK = js(
+  'export async function getServerSupabase() {\n' +
+    '  const o = { select: () => o, eq: () => o, is: () => o,\n' +
+    '    limit: async () => ({ data: globalThis.__prava.zaznam ? [{ id: "e1" }] : [], error: null }) };\n' +
+    '  return { from: () => o };\n' +
     '}\n',
 )
-const zalozkyDochazky = await nactiKomponentu('app/[rozsah]/dochazka/zalozky-prava.ts', [['@/lib/authz', AUTHZ]])
+const zalozkyDochazky = await nactiKomponentu('app/[rozsah]/dochazka/zalozky-prava.ts', [
+  ['@/lib/authz', AUTHZ],
+  ['@/lib/supabase/server', SUPABASE_ZALOZEK],
+])
 
-async function zalozkyPro(prava, pobocka) {
+async function zalozkyPro(prava, pobocka, zaznam = false) {
   globalThis.__prava = {
     mam: (pravo, kde) => prava.some(([p, b]) => p === pravo && (b === '*' || b === kde)),
     volani: [],
+    zaznam,
   }
   return (await zalozkyDochazky('t1', pobocka)).join(',')
 }
 
 console.log('\n== Práva → záložky ==')
-ma('číšník: jen Docházka (lišta se pak nekreslí)', await zalozkyPro([], 'B1'), 'dochazka')
+ma('bez zaměstnaneckého záznamu: jen Docházka (lišta se pak nekreslí)', await zalozkyPro([], 'B1'), 'dochazka')
+ma('číšník se záznamem: Docházka a Můj účet, výdělky ostatních ne', await zalozkyPro([], 'B1', true), 'dochazka,ucet')
 ma('vedoucí s docházkou a zálohami, BEZ payroll.read: výdělky ne',
   await zalozkyPro([['attendance.read', 'B1'], ['advances.manage', 'B1']], 'B1'), 'dochazka,zalohy')
 ma('majitel (všechno všude)', await zalozkyPro([['payroll.read', '*'], ['advances.manage', '*']], 'B1'), 'dochazka,vydelky,zalohy')
@@ -413,7 +458,7 @@ const SERVER = js(
   'export async function getServerSupabase() {\n' +
     '  return { rpc: async (jmeno, args) => {\n' +
     '    globalThis.__stranka.volani.push(["rpc", jmeno, args]);\n' +
-    '    return globalThis.__stranka.odpoved;\n' +
+    '    return jmeno === "vydelky_po_dnech" ? globalThis.__stranka.odpovedDny : globalThis.__stranka.odpoved;\n' +
     '  } };\n' +
     '}\n',
 )
@@ -438,8 +483,15 @@ const POBOCKA = { level: 'branch', branchId: 'B1', branchName: 'Černá Perla', 
 const FIRMA_ROZSAH = { level: 'tenant', branchId: null, branchName: 'Foodtab', branchSlug: 'firma' }
 const CTX = { branches: [{ id: 'B1', name: 'Černá Perla' }, { id: 'B2', name: 'Bernard' }] }
 
-async function stranka({ pristup, rozsah = 'cerna-perla', mesic, den = '2026-09-24', odpoved = { data: LIDE, error: null } }) {
-  globalThis.__stranka = { pristup, den, odpoved, volani: [] }
+async function stranka({
+  pristup,
+  rozsah = 'cerna-perla',
+  mesic,
+  den = '2026-09-24',
+  odpoved = { data: LIDE, error: null },
+  odpovedDny = { data: [], error: null },
+}) {
+  globalThis.__stranka = { pristup, den, odpoved, odpovedDny, volani: [] }
   let vystup = ''
   let chyba = null
   try {
@@ -575,6 +627,57 @@ ma('sazba_chybi dojde až do buněk',
   JSON.stringify(radekTabulky(kontrakt.html, 'kontrakt2')),
   JSON.stringify(['0 h 30 min', '50 Kččást bez sazby', '—', 'bez sazby', '—', '50 Kččást bez sazby']))
 ma('a sazba NULL je „bez sazby“, ne „0 Kč/h“', podJmenem('kontrakt2'), 'Karel Kontraktový | bez sazby')
+
+console.log('\n== Po dnech na stránce (24. 9. večer) ==')
+const dnyVolani = sPravem.rpc.find((r) => r[1] === 'vydelky_po_dnech')
+ma('stránka volá i vydelky_po_dnech', Boolean(dnyVolani), true)
+ma('s TÝMIŽ parametry jako po lidech (firma, pobočka z rozsahu, měsíc)',
+  JSON.stringify(dnyVolani?.[2]), JSON.stringify(sPravem.rpc.find((r) => r[1] === 'vydelky_prehled')?.[2]))
+ma('na /firma taky s NULL', naFirme.rpc.find((r) => r[1] === 'vydelky_po_dnech')?.[2]?.p_branch, null)
+ma('bez payroll.read se na dny taky nezeptá', bez.rpc.length, 0)
+
+const dnyNenasazene = await stranka({
+  pristup: smi,
+  odpovedDny: { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } },
+})
+ma('po dnech nenasazeno: tabulka lidí zůstane', dnyNenasazene.html.includes('ds-vy-tabulka'), true)
+ma('… místo dnů věta', text(dnyNenasazene.html).includes('Přehled po dnech bude dostupný po nasazení databáze.'), true)
+ma('… a nic nespadlo', dnyNenasazene.chyba, null)
+const dnyPorucha = await stranka({
+  pristup: smi,
+  odpovedDny: { data: null, error: { code: '42501', message: 'permission denied' } },
+})
+ma('jiná chyba po dnech se NEZAMETE — spadne', dnyPorucha.chyba instanceof Error, true)
+
+// Kontrakt i pro dny: jména z migrace 20260924160000, řádek z nich až do buněk.
+const migraceDny = fs.readFileSync(new URL('supabase/migrations/20260924160000_ucet_a_naklady.sql', KOREN), 'utf8')
+const hlavickaDny = migraceDny.match(
+  /create or replace function public\.vydelky_po_dnech\(([^)]*)\)\s*returns table \(([^)]*)\)/,
+)
+const SLOUPCE_DNY = hlavickaDny ? jmena(hlavickaDny[2]) : []
+ma('z migrace jde přečíst 8 sloupců dnů', SLOUPCE_DNY.length, 8)
+ma('stránka posílá po dnech právě parametry funkce',
+  serazeno(Object.keys(dnyVolani?.[2] ?? {})), serazeno(hlavickaDny ? jmena(hlavickaDny[1]) : []))
+const HODNOTY_DNY = {
+  den: '2026-09-07', lidi: 2, odpracovano_minut: 61, mzdy_haleru: 111100, bez_sazby_lidi: 1,
+  zalohy_haleru: 22200, zaloh: 3, zaloh_nepotvrzenych: 2,
+}
+const kontraktDny = await stranka({
+  pristup: smi,
+  odpovedDny: { data: [Object.fromEntries(SLOUPCE_DNY.map((s) => [s, HODNOTY_DNY[s]]))], error: null },
+})
+const radekDne = (h, d) =>
+  [...((h.match(new RegExp(`<tr[^>]*data-den="${d}"[^>]*>([\\s\\S]*?)</tr>`)) ?? ['', ''])[1]).matchAll(
+    /<td[^>]*>([\s\S]*?)<\/td>/g,
+  )].map((x) => text(x[1]))
+ma('den z databáze dojde do buněk celý (lidé · hodiny · mzdy + bez sazby · zálohy + čekající)',
+  JSON.stringify(radekDne(kontraktDny.html, '2026-09-07')),
+  JSON.stringify(['2 lidé', '1 h 1 min', '1 111 Kč+ 1 člověk bez sazby', '222 Kč2 čekají na PIN']))
+ma('… a mzdy NULL zůstanou „bez sazby“, ne „0 Kč“',
+  radekDne((await stranka({
+    pristup: smi,
+    odpovedDny: { data: [{ ...HODNOTY_DNY, mzdy_haleru: null }], error: null },
+  })).html, '2026-09-07')[2], 'bez sazby')
 
 /* ======================================================================
    5. NABÍDKA

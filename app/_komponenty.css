@@ -2597,3 +2597,38 @@ span.ck-box { cursor: default; }
   display: grid; gap: 4px; max-width: 76ch; margin: 0; padding-left: 18px;
   font-size: 12.5px; line-height: 1.5; color: var(--muted);
 }
+
+/* --- Zbývá, Po dnech, Můj účet (24. 9. 2026 večer) ------------------
+   „Zbývá“ je zůstatek člověka, na který se majitel ptá — zvýrazněný
+   PÍSMEM (tučně, plná barva textu), ne odstínem: barva sama nic neřekne
+   (oddíl 7 vzhledu).
+
+   Tabulky po dnech (`.ds-vy-dny` — Výdělky → Po dnech i Můj účet) mají
+   pět sloupců místo sedmi, takže se v karty mění až pod 560 px obsahu,
+   ne pod 820. Štítky („čeká na PIN“, „část bez sazby“) jdou pod částku
+   (`.ds-vy-pod`), jinak by sloupce roztáhly tabulku do stran. */
+
+.ds-vy-tabulka th[scope="col"].ds-vy-zbyva { color: var(--ink); }
+.ds-vy-tabulka td.ds-vy-zbyva { font-weight: 600; color: var(--ink); }
+.ds-vy-radek.ds-vy-zbyva dt, .ds-vy-radek.ds-vy-zbyva dd { font-weight: 600; color: var(--ink); }
+
+.ds-vy-pod { display: block; width: fit-content; margin: 2px 0 0 auto; }
+.ds-vy-poznamka { margin: 0; font-size: 14px; color: var(--muted); }
+
+/* th[scope="row"] i v patičce: jinak ho přebije obecné pravidlo řádku
+   výš (vyšší specificita) a pod „Celkem“ zůstane čára. */
+.ds-vy-tabulka tfoot td, .ds-vy-tabulka tfoot th[scope="row"] {
+  padding: 9px 10px; vertical-align: top; border-top: 1px solid var(--line-2); border-bottom: 0; font-weight: 600;
+}
+.ds-vy-tabulka tfoot td { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ds-vy-tabulka tfoot th[scope="row"] { padding-left: 0; text-align: left; font-family: inherit; }
+.ds-vy-dny .ds-vy-tabulka th[scope="row"] { min-width: 0; white-space: nowrap; }
+
+@container (max-width: 820px) {
+  .ds-vy-dny .ds-vy-tabulka-obal { display: block; }
+  .ds-vy-dny .ds-vy-karty { display: none; }
+}
+@container (max-width: 560px) {
+  .ds-vy-dny .ds-vy-tabulka-obal { display: none; }
+  .ds-vy-dny .ds-vy-karty { display: block; }
+}

@@ -64,6 +64,7 @@ export default function TabulkaVydelku({
   pobocky,
   predchozi,
   nasledujici,
+  poDnech = null,
 }: {
   radky: RadekVydelku[];
   /** První den měsíce, RRRR-MM-DD. */
@@ -76,6 +77,8 @@ export default function TabulkaVydelku({
   /** Odkazy přepínače měsíců. `nasledujici` prázdné = dál se nejde. */
   predchozi: { href: string; mesic: string };
   nasledujici: { href: string; mesic: string } | null;
+  /** Oddíl „Po dnech“ (po-dnech.tsx) — kreslí se pod lidmi. */
+  poDnech?: ReactNode;
 }) {
   const serazene = [...radky].sort((a, b) => a.full_name.localeCompare(b.full_name, "cs"));
   const s = souhrn(serazene);
@@ -206,7 +209,7 @@ export default function TabulkaVydelku({
                 <thead>
                   <tr>
                     {SLOUPCE.map((sl) => (
-                      <th key={sl} scope="col">
+                      <th key={sl} scope="col" className={zvyraznit(sl)}>
                         {sl}
                       </th>
                     ))}
@@ -219,7 +222,9 @@ export default function TabulkaVydelku({
                         <Clovek r={r} pobocka={naPobocce ? null : jmenoPobocky(r, pobocky)} />
                       </th>
                       {bunky(r).map((b, i) => (
-                        <td key={SLOUPCE[i + 1]}>{b}</td>
+                        <td key={SLOUPCE[i + 1]} className={zvyraznit(SLOUPCE[i + 1])}>
+                          {b}
+                        </td>
                       ))}
                     </tr>
                   ))}
@@ -234,7 +239,10 @@ export default function TabulkaVydelku({
                   <Clovek r={r} pobocka={naPobocce ? null : jmenoPobocky(r, pobocky)} />
                   <dl>
                     {bunky(r).map((b, i) => (
-                      <div key={SLOUPCE[i + 1]} className="ds-vy-radek">
+                      <div
+                        key={SLOUPCE[i + 1]}
+                        className={`ds-vy-radek${zvyraznit(SLOUPCE[i + 1]) ? " ds-vy-zbyva" : ""}`}
+                      >
                         <dt>{SLOUPCE[i + 1]}</dt>
                         <dd>{b}</dd>
                       </div>
@@ -244,6 +252,8 @@ export default function TabulkaVydelku({
               ))}
             </ul>
           </section>
+
+          {poDnech}
         </>
       )}
 
@@ -273,10 +283,16 @@ export default function TabulkaVydelku({
           „Bez sazby“ znamená, že sazba chybí a z hodin se mzda spočítat
           nedá. Doplní ji ten, kdo spravuje mzdy.
         </li>
+        <li>
+          „Po dnech“ jsou tytéž mzdy rozložené na provozní dny (noc po
+          půlnoci patří ke dni, kdy směna začala) a zálohy podle dne výdeje.
+          Součet dnů je přesně součet sloupce Vyděláno — jednotlivý den se
+          může lišit o haléř, protože mzda se zaokrouhluje až za měsíc.
+        </li>
         {naPobocce ? (
           <li>
             Na pobočce jsou lidé, kteří k ní patří (domovská pobočka) —
-            s hodinami a zálohami ze všech poboček.
+            s hodinami a zálohami ze všech poboček, i po dnech.
           </li>
         ) : null}
       </ul>
@@ -287,6 +303,15 @@ export default function TabulkaVydelku({
 /* --- kousky ------------------------------------------------------------ */
 
 const SLOUPCE = ["Jméno", "Odpracováno", "Vyděláno", "Zálohy", "Zbývá", "Plán", "Předběžně"] as const;
+
+/**
+ * „Zbývá“ je zůstatek člověka — to, na co se majitel ptá („kolik kdo má
+ * zůstatek“, 24. 9. večer). Proto je sloupec zvýrazněný písmem, ne jen
+ * barvou (oddíl 7 vzhledu), v tabulce i na kartách telefonu.
+ */
+function zvyraznit(sloupec: (typeof SLOUPCE)[number]): string | undefined {
+  return sloupec === "Zbývá" ? "ds-vy-zbyva" : undefined;
+}
 
 const TITULEK_VYDELANO: Record<Obdobi, string> = {
   tento: "Vyděláno do dneška",

@@ -8,6 +8,7 @@ import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import DochazkaZalozky from "../zalozky";
 import zalozkyDochazky from "../zalozky-prava";
+import NakladyPoDnech, { type RadekDne } from "./po-dnech";
 import TabulkaVydelku, { type Obdobi, type RadekVydelku } from "./tabulka-vydelku";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,10 @@ export const dynamic = "force-dynamic";
  *
  * Počítá všechno databáze (`public.vydelky_prehled`), sem chodí hotová
  * čísla — sazby aplikace nevidí vůbec.
+ *
+ * Pod lidmi je od 24. 9. večer oddíl „Po dnech“ (`public.vydelky_po_dnech`):
+ * „denní přehled nákladů na mzdy a odečtené zálohy“. Tytéž mzdy rozložené
+ * na provozní dny, stejní lidé, stejná práva — součet sedí s Vyděláno.
  *
  * PRÁVO: payroll.read v rozsahu z adresy, ne „je majitel“ (pravidlo 2).
  * Majitel ho má přes je_majitel, účetní přes zařazení. Vedoucí, který
@@ -112,11 +117,19 @@ export default async function Vydelky({
     mesic < tenhleMesic ? "minuly" : mesic === tenhleMesic ? "tento" : "budouci";
 
   const supabase = await getServerSupabase();
-  const { data, error } = await supabase.rpc("vydelky_prehled", {
-    p_tenant: tenantId,
-    p_branch: scope.branchId,
-    p_mesic: mesic,
-  });
+  // Po lidech a po dnech: tytéž parametry, táž pravidla práv v databázi.
+  const [{ data, error }, { data: dnyData, error: dnyChyba }] = await Promise.all([
+    supabase.rpc("vydelky_prehled", {
+      p_tenant: tenantId,
+      p_branch: scope.branchId,
+      p_mesic: mesic,
+    }),
+    supabase.rpc("vydelky_po_dnech", {
+      p_tenant: tenantId,
+      p_branch: scope.branchId,
+      p_mesic: mesic,
+    }),
+  ]);
 
   /*
     Nenasazená migrace obrazovku neshodí, jen řekne, na co se čeká —
@@ -135,6 +148,16 @@ export default async function Vydelky({
     );
   }
   if (error) throw new DotazSelhal("výdělky lidí", error);
+
+  /*
+    Po dnech přibylo o migraci později (20260924160000). Když ještě není
+    nasazená, tabulka po lidech zůstane a místo dnů je věta — stejné
+    prominutí jako výš, a zase JEN pro chybějící funkci.
+  */
+  if (dnyChyba && !funkceNeexistuje(dnyChyba)) {
+    throw new DotazSelhal("náklady po dnech", dnyChyba);
+  }
+  const poDnech = dnyChyba ? null : ((dnyData ?? []) as Record<string, unknown>[]).map(naDen);
 
   const radky = ((data ?? []) as Record<string, unknown>[]).map(naRadek);
 
@@ -158,6 +181,7 @@ export default async function Vydelky({
           pobocky={Object.fromEntries(ctx.branches.map((b) => [b.id, b.name]))}
           predchozi={{ href: odkaz(predchozi), mesic: predchozi }}
           nasledujici={nasledujici <= nejdal ? { href: odkaz(nasledujici), mesic: nasledujici } : null}
+          poDnech={<NakladyPoDnech radky={poDnech} mesic={mesic} />}
         />
       </div>
     </>
@@ -169,7 +193,7 @@ function Hlavicka() {
   return (
     <Nadpis
       oci="Provoz"
-      popis="Výdělky lidí za měsíc: odpracováno, zálohy a předběžně podle rozpisu. Hrubá mzda, orientačně."
+      popis="Výdělky lidí za měsíc: odpracováno, zálohy a předběžně podle rozpisu, náklady po dnech. Hrubá mzda, orientačně."
     >
       Docházka
     </Nadpis>
@@ -200,6 +224,24 @@ function naRadek(r: Record<string, unknown>): RadekVydelku {
     plan_smen: cislo(r.plan_smen),
     zalohy_haleru: cislo(r.zalohy_haleru),
     predbezne_haleru: cislo(r.predbezne_haleru),
+  };
+}
+
+/**
+ * Den z `vydelky_po_dnech` na čísla. Mzdy NULL zůstávají NULL — den,
+ * kdy pracovali jen lidé bez sazby, není „0 Kč“.
+ */
+function naDen(r: Record<string, unknown>): RadekDne {
+  const cislo = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
+  return {
+    den: String(r.den),
+    lidi: cislo(r.lidi),
+    odpracovano_minut: cislo(r.odpracovano_minut),
+    mzdy_haleru: r.mzdy_haleru === null || r.mzdy_haleru === undefined ? null : Number(r.mzdy_haleru),
+    bez_sazby_lidi: cislo(r.bez_sazby_lidi),
+    zalohy_haleru: cislo(r.zalohy_haleru),
+    zaloh: cislo(r.zaloh),
+    zaloh_nepotvrzenych: cislo(r.zaloh_nepotvrzenych),
   };
 }
 
