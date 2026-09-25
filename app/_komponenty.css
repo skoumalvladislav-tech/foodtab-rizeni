@@ -1752,6 +1752,33 @@ div.ds-smd-smena:hover { box-shadow: none; }
   color: var(--ink); font-weight: 600; border-bottom-color: var(--mosaz);
 }
 .pc-zalozky .ft-i, .ds-zalozky .ft-i { width: 18px; height: 18px; flex: none; }
+/* Na telefonu jen slova. Se čtvrtou záložkou (Můj účet, 25. 9.) měřila
+   lišta Docházky 451 px na 343 px obsahu a „Zálohy“ ujely za okraj —
+   posuvník je schovaný, takže o nich člověk nevěděl. Bez ikon a s užším
+   okrajem se čtyři vejdou (změřeno s Archivem: 343 px na 375, 328 na
+   360); název nese záložku i tak, ikona jen zdobí. */
+@media (max-width: 540px) {
+  .pc-zalozky a, .ds-zalozky a { padding: 0 10px; }
+  .pc-zalozky .ft-i, .ds-zalozky .ft-i { display: none; }
+}
+/* Kde se lišta ani tak nevejde (pět záložek Vzkazů a úkolů, telefon
+   na 320 px), pravý okraj slábne — náznak, že je tam víc. Animace jede
+   podle posunu lišty: na konci náznak zmizí, a když lišta posouvat nejde
+   (vejde se), časová osa neběží a náznak není vůbec. Prohlížeč bez
+   `animation-timeline` lištu nechá, jak byla. */
+@keyframes ds-zalozky-dalsi {
+  from, 96% {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  }
+  to { -webkit-mask-image: none; mask-image: none; }
+}
+@supports (animation-timeline: scroll()) {
+  .pc-zalozky, .ds-zalozky {
+    animation: ds-zalozky-dalsi linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
 /* Uvnitř živého přehledu docházky mezery dělá mřížka `.ds-dh` (gap). */
 .ds-dh > .ds-zalozky { margin: 0; }
 .pc-pocet {
