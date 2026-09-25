@@ -546,8 +546,9 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
      a zabírá 44 px na nejdražším místě aplikace. Až hledat půjde,
      dostane vlastní obrazovku, ne tenhle proužek.
 
-     Režim a nastavení se stěhují na rozcestník („Více“ ve spodní
-     liště) — tam už na ně je místo a člověk je tam hledá.
+     Režim a nastavení se stěhují do menu „Více“ ve spodní liště
+     (components/shell/MobileVice.tsx; do 25. 9. 2026 to byl rozcestník)
+     — tam už na ně je místo a člověk je tam hledá.
      ------------------------------------------------------------------ */
   .ft-hledani, .ft-rezim, .ft-nastaveni { display: none; }
 
@@ -587,16 +588,25 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
     padding: 0 var(--vlozka-vpravo) var(--vlozka-dole) var(--vlozka-vlevo);
     border-top: 1px solid var(--line); background: var(--card);
   }
-  .ft-mob-bottom a {
+  /* „Více“ je tlačítko (otevírá menu na místě), ostatní odkazy — vzhled
+     mají mít stejný, jinak by pátý slot vypadal jako cizí prvek. */
+  .ft-mob-bottom a,
+  .ft-mob-bottom button {
     flex: 1; min-width: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 3px;
     font-size: 10px; color: var(--faint); text-decoration: none;
     /* Dotykový cíl nejméně 44 px — ovládá se to mokrýma rukama. */
     min-height: 44px; padding: 0 2px;
   }
-  .ft-mob-bottom a.on { color: var(--mosaz); }
-  .ft-mob-bottom a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                          max-width: 100%; }
+  .ft-mob-bottom button {
+    appearance: none; border: 0; background: none; font-family: inherit;
+    line-height: inherit; cursor: pointer;
+  }
+  .ft-mob-bottom a.on,
+  .ft-mob-bottom button.on { color: var(--mosaz); }
+  .ft-mob-bottom a span,
+  .ft-mob-bottom button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                               max-width: 100%; }
   .ft-mob-bottom .ft-i { width: 20px; height: 20px; }
 
   /* Dotykové cíle v liště nahoře taky nejméně 44 px. */

@@ -79,9 +79,12 @@ export default async function Home() {
 
     Šéfíkovo rozhodnutí 16.9.2026: napevno „Dnes" pro každého, i pro
     vedení — dřív sem vedení chodilo na rozcestník ("jak to bylo"),
-    teď je to stejné pro všechny. Rozcestník se neruší, jen přestává
-    být domovský i pro vedení: je pořád na `/<rozsah>` a vede na něj
-    „Více" ve spodní liště.
+    teď je to stejné pro všechny.
+
+    Rozcestník je od 25. 9. 2026 zrušený úplně (Šéfík 24. 9.: „je
+    zbytečný"). `/<rozsah>` přesměruje na Dnes stejně jako tahle
+    stránka (app/[rozsah]/page.tsx, lib/vychozi-obrazovka.ts) a co
+    rozcestník ukazoval, je na telefonu v menu „Více" ve spodní liště.
   */
   // Až za vyhodnocením rozsahu: redirect() funguje tak, že vyhodí
   // výjimku, a uvnitř odchytávání by se ztratila.

@@ -2,24 +2,29 @@ import Link from "next/link";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import type { PolozkaProp } from "./AppShell";
+import MobileVice, { type SkupinaVice } from "./MobileVice";
 
 /**
  * Spodní lišta na mobilu — nejčastější obrazovky, zbytek pod „Více".
  * Vytažena z ram.tsx (design systém, 15.9.2026), chování beze změny.
+ *
+ * Od 25. 9. 2026 „Více" nevede na rozcestník (zrušený), ale otevírá
+ * výsuvné menu na místě — viz MobileVice. A je tu vždycky: kdo má
+ * v modulu jen tři obrazovky, pod „Více" pořád najde ostatní moduly,
+ * Nastavení, vzhled a odhlášení.
  */
 export default function MobileBottomNav({
   rozsah,
   doListy,
   aktivniSegment,
-  jeVice,
-  segment,
+  skupinyVice,
   odznaky,
 }: {
   rozsah: string;
   doListy: PolozkaProp[];
   aktivniSegment: string | undefined;
-  jeVice: boolean;
-  segment: string | null;
+  /** Všechno, na co člověk dosáhne — obsah menu „Více". */
+  skupinyVice: SkupinaVice[];
   /** Počty nepřečtených podle segmentu položky; nula se nekreslí. */
   odznaky?: Record<string, number>;
 }) {
@@ -47,12 +52,7 @@ export default function MobileBottomNav({
         ),
       )}
 
-      {jeVice ? (
-        <Link href={`/${rozsah}`} className={segment === null ? "on" : undefined}>
-          <Ikona klic="tecky" />
-          <span>Více</span>
-        </Link>
-      ) : null}
+      <MobileVice rozsah={rozsah} skupiny={skupinyVice} aktivniSegment={aktivniSegment} />
     </nav>
   );
 }

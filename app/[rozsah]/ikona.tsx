@@ -165,6 +165,15 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
     </>
   ),
   zavrit: <path d="M5 5l10 10M15 5L5 15" />,
+  // Dveře a šipka ven. Bylo to vlastní SVG na rozcestníku; s ním se
+  // odhlášení stěhuje do „Více" a ikona do sdílené sady (vzhled-zadani.md,
+  // oddíl 11: žádné vlastní SVG na místě).
+  odhlasit: (
+    <>
+      <path d="M7.5 17H4.5A1.5 1.5 0 013 15.5v-11A1.5 1.5 0 014.5 3h3" />
+      <path d="M13 13.5L16.5 10 13 6.5M16.5 10H7.5" />
+    </>
+  ),
 };
 
 export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {

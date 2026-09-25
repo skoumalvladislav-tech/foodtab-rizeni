@@ -11,7 +11,8 @@ import {
  * Nabídka obrazovek.
  *
  * Jedno místo, ze kterého se skládá vodorovná řada modulů, levý sloupec,
- * spodní lišta na mobilu i rozcestník. Položka se nakreslí jen tehdy,
+ * spodní lišta na mobilu i menu „Více" pod ní (to po 25. 9. 2026
+ * převzalo, co ukazoval zrušený rozcestník). Položka se nakreslí jen tehdy,
  * když má firma zapnutý příslušný modul a uživatel má právo ji vidět.
  *
  * Tahle tabulka zároveň říká, který modul je vybraný: adresy zůstávají
@@ -59,6 +60,7 @@ export type IkonaKlic =
   | 'varovani'
   | 'zavrit'
   | 'schranka'
+  | 'odhlasit'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */
@@ -307,8 +309,8 @@ export function viditelnaNabidka(ctx: Context): Polozka[] {
  * Ke kterému modulu patří obrazovka v adrese.
  *
  * Adresy zůstávají ploché, takže se vybraný modul nedá přečíst z cesty —
- * odvozuje se odsud. Co nesedí na žádnou obrazovku (rozcestník, neznámý
- * segment), spadne na provoz.
+ * odvozuje se odsud. Co nesedí na žádnou obrazovku (holá adresa rozsahu,
+ * neznámý segment), spadne na provoz.
  */
 export function modulPodleSegmentu(segment: string | null): ModuleKey {
   if (!segment) return 'provoz'

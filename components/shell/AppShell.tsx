@@ -6,9 +6,11 @@ import type { ReactNode } from "react";
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import type { RozsahProp } from "@/app/[rozsah]/prepinac-rozsahu";
 import type { TeloUpozorneni } from "@/lib/upozorneni-text";
+import { vychoziObrazovka } from "@/lib/vychozi-obrazovka";
 import GlobalTopbar from "./GlobalTopbar";
 import ModuleSidebar from "./ModuleSidebar";
 import MobileBottomNav from "./MobileBottomNav";
+import type { SkupinaVice } from "./MobileVice";
 
 /* ---------------------------------------------------------------------
  * Rám rozhraní: horní lišta, levý sloupec, na mobilu spodní lišta.
@@ -109,7 +111,15 @@ export type AppShellProps = {
   children: ReactNode;
 };
 
-/** Kolik obrazovek se vejde do spodní lišty, než se zbytek schová pod Více. */
+/**
+ * Kolik obrazovek se vejde do spodní lišty. Pátý slot patří „Více".
+ *
+ * Do 25. 9. 2026 bylo „Více" jen tehdy, když se obrazovky modulu do
+ * pěti nevešly, a pětice se pak kreslila celá. Jenže „Více" je od té
+ * doby jediná cesta k ostatním modulům, Nastavení, vzhledu
+ * a odhlášení (rozcestník, kam vedlo, je zrušený) — kdo měl v modulu
+ * obrazovek pět nebo míň, by se k nim z telefonu nedostal.
+ */
 const DO_LISTY = 4;
 
 export default function AppShell({
@@ -151,10 +161,34 @@ export default function AppShell({
   const vybranyModul = vNastaveni ? null : (zde?.modul ?? "provoz");
   const sloupecMobil = vNastaveni ? nastaveni : polozky.filter((p) => p.modul === vybranyModul);
 
-  // Spodní lišta: nejčastější obrazovky, zbytek pod Více. Pátý slot je
-  // Více, jen když se do čtyř všechno nevejde.
-  const doListy = sloupecMobil.length <= 5 ? sloupecMobil.slice(0, 5) : sloupecMobil.slice(0, DO_LISTY);
-  const jeVice = sloupecMobil.length > 5;
+  // Spodní lišta: nejčastější obrazovky, všechno ostatní pod Více.
+  const doListy = sloupecMobil.slice(0, DO_LISTY);
+
+  /*
+    Obsah „Více": úplně všechno, na co člověk dosáhne, po modulech
+    a Nastavení zvlášť — to, co dřív ukazoval rozcestník, a navíc
+    Nastavení. Obrazovky ze spodní lišty se tu opakují schválně: kdo
+    otevře „Více", hledá, a seznam, ze kterého něco chybí, protože „to
+    je přece dole", se hledá hůř než o dva řádky delší.
+  */
+  const skupinyVice: SkupinaVice[] = [];
+  for (const p of polozky) {
+    const skupina = skupinyVice.find((s) => s.klic === p.modul);
+    if (skupina) skupina.polozky.push(p);
+    else
+      skupinyVice.push({
+        klic: p.modul,
+        nazev: moduly.find((m) => m.klic === p.modul)?.nazev ?? nazvyModulu[p.modul] ?? p.modul,
+        polozky: [p],
+      });
+  }
+  if (nastaveni.length > 0) {
+    skupinyVice.push({ klic: "nastaveni", nazev: "Nastavení", polozky: nastaveni });
+  }
+
+  // Kam vede logo a holá adresa rozsahu — obojí stejně (Dnes).
+  const vychozi = vychoziObrazovka(polozky, rozsah === segmentFirmy);
+  const domu = vychozi ? `/${rozsah}/${vychozi}` : `/${rozsah}`;
 
   /*
     Boční sloupec na desktopu — UX redesign, druhé kolo (16.9.2026,
@@ -196,10 +230,19 @@ export default function AppShell({
    * checklistu patří jiné pobočce a jinde by nic nenašel. A obrazovku,
    * která se váže na pobočku, nahradíme na firemní úrovni první
    * obrazovkou téhož modulu, ať se nepřistane na hlášce o přístupu.
+   *
+   * Obrazovka, která v nabídce nemá položku (upozornění, rozhovory),
+   * se přepne na výchozí obrazovku rozsahu — dřív na rozcestník, od
+   * 25. 9. 2026 na Dnes. Počítá se to tady rovnou, ne přesměrováním
+   * z holé adresy: o jeden skok míň a stejné pravidlo
+   * (lib/vychozi-obrazovka.ts).
    */
   function cilRozsahu(novy: string): string {
     const zaklad = zde?.segment;
-    if (!zaklad) return `/${novy}`;
+    if (!zaklad) {
+      const vychoziTam = vychoziObrazovka(polozky, novy === segmentFirmy);
+      return vychoziTam ? `/${novy}/${vychoziTam}` : `/${novy}`;
+    }
 
     if (novy === segmentFirmy && zde.jenPobocka) {
       const nahrada = polozky.find((p) => p.modul === zde.modul && p.hotovo && !p.jenPobocka);
@@ -213,6 +256,7 @@ export default function AppShell({
     <div className="ft-shell" data-branch={barva}>
       <GlobalTopbar
         rozsah={rozsah}
+        domu={domu}
         moduly={moduly}
         vybranyModul={vybranyModul}
         rozsahy={rozsahy}
@@ -243,7 +287,13 @@ export default function AppShell({
         <main className="ft-main">{children}</main>
       </div>
 
-      <MobileBottomNav rozsah={rozsah} doListy={doListy} aktivniSegment={zde?.segment} jeVice={jeVice} segment={segment} odznaky={odznaky} />
+      <MobileBottomNav
+        rozsah={rozsah}
+        doListy={doListy}
+        aktivniSegment={zde?.segment}
+        skupinyVice={skupinyVice}
+        odznaky={odznaky}
+      />
     </div>
   );
 }

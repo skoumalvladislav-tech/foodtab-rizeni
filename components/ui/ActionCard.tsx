@@ -2,9 +2,10 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 /**
- * Klikací dlaždice — "Kam dál" na rozcestníku, "Zkontrolovat →" na
- * přehledech. `.ds-action-card` (app/_komponenty.css) dodává hover/focus,
- * layout je inline jako zbytek appky.
+ * Klikací dlaždice — "Zkontrolovat →" na přehledech. (Vznikla i pro
+ * "Kam dál" na rozcestníku; ten je od 25. 9. 2026 zrušený.)
+ * `.ds-action-card` (app/_komponenty.css) dodává hover/focus, layout je
+ * inline jako zbytek appky.
  */
 export default function ActionCard({
   href,

@@ -134,18 +134,22 @@ export async function nactiKomponentu(soubor, nahrady = []) {
  * výchozí export a které se mají spustit s podstrčenou databází.
  */
 export async function nactiModul(soubor, nahrady = []) {
-  const cil = new URL(soubor, KOREN)
-  const adresa = naAdresu(cil, nahrady, new Map())
-  return import(adresa)
+  return import(adresaModulu(soubor, nahrady))
 }
 
 /**
- * Jen ADRESA přeloženého modulu, bez načtení.
+ * Přeložený soubor jako adresa, kterou jde předat DALŠÍMU souboru
+ * v `nahrady`.
  *
- * Pro případ, kdy se jinému modulu nemá podstrčit náhrada, ale SKUTEČNÝ
- * kód — třeba `lib/authz.ts`, jen s podstrčenou databází pod sebou.
- * Stejný vstup dá stejnou adresu, takže dva moduly, které si ji vezmou,
- * sdílejí jednu instanci.
+ * Pro `.ts` se skutečnými importy přes `@/`: sourozenecký `.ts` se
+ * jinak načítá tak, jak je, a Node `@/…` nezná. Takhle jde podstrčit
+ * SKUTEČNÝ kód — třeba `nabidka.ts`, který si sáhne na skutečný
+ * `lib/authz.ts` — a podstrčená je jen databáze pod ním, ne rozhodování
+ * nad ní. Stejný vstup dá stejnou adresu, takže dva moduly, které si ji
+ * vezmou, sdílejí jednu instanci.
+ *
+ * (24.–25. 9. ji přidaly nezávisle dvě větve — práva k osobám
+ * a odstranění Rozcestníku; tady je jednou.)
  */
 export function adresaModulu(soubor, nahrady = []) {
   return naAdresu(new URL(soubor, KOREN), nahrady, new Map())
