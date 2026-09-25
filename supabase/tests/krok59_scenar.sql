@@ -1,6 +1,6 @@
 -- Scénář pro krok 59 — pracovní účet zaměstnance a denní náklady na mzdy.
 --
--- Pokrývá 20260924160000_ucet_a_naklady.sql: app.vydelek_po_dnech,
+-- Pokrývá 20260925130000_ucet_a_naklady.sql: app.vydelek_po_dnech,
 -- public.vydelky_po_dnech (Výdělky → „Po dnech") a
 -- public.muj_pracovni_ucet (Docházka → „Můj účet"), rozhodnutí A–K
 -- z hlavičky té migrace.

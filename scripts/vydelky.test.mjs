@@ -649,8 +649,8 @@ const dnyPorucha = await stranka({
 })
 ma('jiná chyba po dnech se NEZAMETE — spadne', dnyPorucha.chyba instanceof Error, true)
 
-// Kontrakt i pro dny: jména z migrace 20260924160000, řádek z nich až do buněk.
-const migraceDny = fs.readFileSync(new URL('supabase/migrations/20260924160000_ucet_a_naklady.sql', KOREN), 'utf8')
+// Kontrakt i pro dny: jména z migrace 20260925130000, řádek z nich až do buněk.
+const migraceDny = fs.readFileSync(new URL('supabase/migrations/20260925130000_ucet_a_naklady.sql', KOREN), 'utf8')
 const hlavickaDny = migraceDny.match(
   /create or replace function public\.vydelky_po_dnech\(([^)]*)\)\s*returns table \(([^)]*)\)/,
 )

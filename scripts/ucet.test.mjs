@@ -23,9 +23,9 @@
  *      volba firmy u prázdného měsíce z nastavení, nenasazeno se
  *      promine, jiná chyba ne
  *   Ve štítcích ani vysvětlivkách není, ČÍM se záloha potvrdila (PIN,
- *   telefon, majitel — od 20260925100000): řádek to nenese.
+ *   telefon, majitel — od migrace zalohy_potvrzeni): řádek to nenese.
  *   5. Kontrakt s migrací: jména parametrů a sloupců obou funkcí se
- *      vezmou z 20260924160000 a řádek z nich projde až do buněk
+ *      vezmou z 20260925130000 a řádek z nich projde až do buněk
  *
  * ---------------------------------------------------------------------
  * ČEHO SE TÍM NEDOSÁHNE
@@ -185,7 +185,7 @@ ma('potvrzená záloha má slovo „potvrzená“ — ne čím (PIN, telefon, ma
   '50 Kčpotvrzená')
 /*
   Od 25. 9. 2026 se záloha potvrzuje PINem na tabletu, v telefonu, nebo
-  za zaměstnance majitelem (20260925100000). Řádek účtu způsob nenese,
+  za zaměstnance majitelem (migrace zalohy_potvrzeni). Řádek účtu způsob nenese,
   takže účet nesmí tvrdit žádný — ani ve štítcích, ani ve vysvětlivkách.
 */
 ma('účet o způsobu potvrzení nic netvrdí (nikde „PIN“)', /PIN/.test(text(hZ)), false)
@@ -560,7 +560,7 @@ console.log('\n== Kontrakt s migrací ==')
   tiše ukázala pomlčku. Jména se proto vezmou přímo z migrace; scénář
   krok59 hlídá tutéž hlavičku z druhé strany (pg_get_function_result).
 */
-const migrace = fs.readFileSync(new URL('supabase/migrations/20260924160000_ucet_a_naklady.sql', KOREN), 'utf8')
+const migrace = fs.readFileSync(new URL('supabase/migrations/20260925130000_ucet_a_naklady.sql', KOREN), 'utf8')
 const hlavicka = (fn) =>
   migrace.match(new RegExp(`create or replace function public\\.${fn}\\(([^)]*)\\)\\s*returns table \\(([^)]*)\\)`))
 const jmena = (seznam) => (seznam ?? '').split(',').map((x) => x.trim().split(/\s+/)[0]).filter(Boolean)

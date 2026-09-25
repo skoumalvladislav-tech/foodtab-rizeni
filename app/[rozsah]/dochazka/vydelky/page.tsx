@@ -150,7 +150,7 @@ export default async function Vydelky({
   if (error) throw new DotazSelhal("výdělky lidí", error);
 
   /*
-    Po dnech přibylo o migraci později (20260924160000). Když ještě není
+    Po dnech přibylo o migraci později (20260925130000). Když ještě není
     nasazená, tabulka po lidech zůstane a místo dnů je věta — stejné
     prominutí jako výš, a zase JEN pro chybějící funkci.
   */

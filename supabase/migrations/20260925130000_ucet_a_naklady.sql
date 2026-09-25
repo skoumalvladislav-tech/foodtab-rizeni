@@ -52,7 +52,7 @@
 --    business_date = provozní den výdeje, ze všech poboček. Nepotvrzené
 --    se počítají zvlášť, ať je vidět, co ještě čeká na potvrzení (PINem
 --    na tabletu, v telefonu, nebo za zaměstnance majitelem — jak, to
---    tu není; sloupec potvrzeno_jak přidává až 20260925100000).
+--    tu není; sloupec potvrzeno_jak přidává až migrace zalohy_potvrzeni).
 --
 -- F. DEN BEZ SAZBY: odpracované minuty jsou vidět, peníze za ně
 --    v částce chybí (jako v earnings) a řádek to nese příznakem. Nikdy
