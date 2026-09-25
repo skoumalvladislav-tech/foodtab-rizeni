@@ -774,9 +774,15 @@ kdo vám oprávnění přidělil.</p>
         : poslano.text
     }
   } else {
-    // Účet na telefon, bez e-mailu — nebo se adresu nepodařilo zjistit.
-    // Mlčet by v obou případech znamenalo „odešlo".
-    mail = chybaAdresy ? 'adresu se nepodařilo zjistit' : 'u účtu není e-mailová adresa'
+    /*
+      Mlčet by znamenalo „odešlo". Proč adresa chybí, ale NEVÍME:
+      `adresa_pro_upozorneni` vrátí prázdno i tomu, kdo nemá
+      `people.manage` za celou firmu (vedoucí pobočky), nejen u účtu
+      bez e-mailu. „U účtu není e-mailová adresa" by vedoucímu lhalo.
+      Chyba dotazu jde aspoň do logu.
+    */
+    if (chybaAdresy) console.error('adresa_pro_upozorneni selhalo:', chybaAdresy.code, chybaAdresy.message)
+    mail = 'adresu se nepodařilo zjistit'
   }
 
   revalidatePath(zpet)
