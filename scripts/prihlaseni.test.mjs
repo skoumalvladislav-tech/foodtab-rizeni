@@ -107,6 +107,75 @@ function bezKomentaru(zdroj) {
 const nacti = (cesta) =>
   bezKomentaru(fs.readFileSync(new URL(cesta, KOREN), 'utf8'))
 
+/**
+ * Kód bez obsahu řetězců — `klic="odhlasit"` je jméno ikony, ne volání.
+ *
+ * Výrazy `${…}` v šablonových řetězcích zůstávají: je to kód a volání
+ * schované do šablony by se jinak ztratilo s ní. Apostrof a uvozovka
+ * končí na konci řádku — v textu JSX („don't") by jinak spolkly kód
+ * až k další uvozovce kdesi níž.
+ */
+function bezRetezcu(kod) {
+  let out = ''
+  let i = 0
+  const hloubky = [] // otevřené `${`: kolik neuzavřených { v každém
+  while (i < kod.length) {
+    const c = kod[i]
+    if (c === '`' || (c === '}' && hloubky.length > 0 && hloubky.at(-1) === 0)) {
+      // Začátek šablony, nebo návrat do ní za koncem `${…}`.
+      if (c === '}') hloubky.pop()
+      let j = i + 1
+      while (j < kod.length && kod[j] !== '`' && !(kod[j] === '$' && kod[j + 1] === '{')) {
+        if (kod[j] === '\\') j++
+        j++
+      }
+      if (kod[j] === '$') {
+        hloubky.push(0)
+        out += '`${'
+        i = j + 2
+      } else {
+        out += '``'
+        i = j + 1
+      }
+      continue
+    }
+    if (c === '{' && hloubky.length > 0) hloubky[hloubky.length - 1]++
+    if (c === '}' && hloubky.length > 0) hloubky[hloubky.length - 1]--
+    if (c === '"' || c === "'") {
+      let j = i + 1
+      while (j < kod.length && kod[j] !== c && kod[j] !== '\n') {
+        if (kod[j] === '\\') j++
+        j++
+      }
+      if (kod[j] === c) {
+        out += c + c
+        i = j + 1
+        continue
+      }
+    }
+    out += c
+    i++
+  }
+  return out
+}
+
+/** Zdrojáky aplikace (bez dočasných náhledů v app/nahled), cesty od kořene. */
+function zdrojakyAplikace(slozky) {
+  const vysledek = []
+  const projit = (slozka) => {
+    for (const z of fs.readdirSync(new URL(slozka + '/', KOREN), { withFileTypes: true })) {
+      const cesta = `${slozka}/${z.name}`
+      if (z.isDirectory()) {
+        if (cesta !== 'app/nahled' && z.name !== 'node_modules') projit(cesta)
+      } else if (/\.(ts|tsx|js|jsx|mjs)$/.test(z.name)) {
+        vysledek.push(cesta)
+      }
+    }
+  }
+  for (const s of slozky) projit(s)
+  return vysledek
+}
+
 /* --- 1. „moc pokusů" se nesmí splést se „špatný kód" ------------------ */
 
 console.log('\n== 1. Strop na IP se odliší od špatného kódu ==============')
@@ -576,32 +645,89 @@ ma('odhlášení je na Moje údaje', zdrojMojeUdaje.includes('Odhlásit se'), tr
 ma('a volá serverovou akci', zdrojMojeUdaje.includes('odhlasit'), true)
 
 /*
-  A JE I POD „VÍCE".
+  A JE I VLEVO DOLE A POD „VÍCE".
 
   Na Mých údajích bylo od 6. 9. a bylo udělané dobře — jen ho tam nikdo
   nenašel. Cesta k němu vede přes Více → Moje údaje → sjet úplně dolů,
   pod souhlasy a stahování dat; Šéfík ho nenašel, ačkoli věděl, že tam
-  je. Pod „Více" jde člověk, když hledá „něco ostatního".
+  je. 8. 9.: „ikonu odhlásit dát na základní obrazovku třeba vlevo
+  dolů, teď je schovaná" (docs/zarazeni-misto-roli.md, 6.6).
 
   Do 25. 9. 2026 to byl rozcestník (`app/[rozsah]/page.tsx`); ten je
-  zrušený a odhlášení se přestěhovalo do výsuvného menu „Více"
-  (components/shell/MobileVice.tsx). Že se v něm opravdu vykreslí
-  a nejdřív se ptá, ověřuje scripts/nabidka.test.mjs.
+  zrušený. Teď je odhlášení:
+    - na telefonu ve výsuvném menu „Více" (components/shell/MobileVice.tsx),
+    - nad 640 px, kde spodní lišta s „Více" není, vlevo dole na konci
+      levého sloupce (components/shell/ModuleSidebar.tsx) — a na konci
+      sloupců Marketingu a Faktur, které ho na počítači nahrazují.
+  Všude TUTÁŽ komponenta s dotazem (components/shell/Odhlaseni.tsx).
+  Že se opravdu zeptá a teprve pak odhlásí, ověřuje klikáním
+  scripts/nabidka.test.mjs.
 
   Na Mých údajích zůstává taky — tam patří k výdeji dat a k souhlasům.
-  Obě místa se hlídají zvlášť, aby se jedno nedalo omylem zrušit
-  s tím, že „je to přece i vedle".
+  Místa se hlídají zvlášť, aby se jedno nedalo omylem zrušit s tím,
+  že „je to přece i vedle".
 */
+const zdrojOdhlaseni = nacti('components/shell/Odhlaseni.tsx')
 const zdrojVice = nacti('components/shell/MobileVice.tsx')
-ma('odhlášení je i pod „Více"', zdrojVice.includes('Odhlásit se'), true)
-ma('a taky přes serverovou akci', /action=\{odhlasit\}/.test(zdrojVice), true)
+const zdrojMenuUctu = nacti('components/shell/MenuUctu.tsx')
+ma('odhlášení s dotazem volá serverovou akci', /action=\{odhlasit\}/.test(zdrojOdhlaseni), true)
+ma('  a nejdřív se ptá', zdrojOdhlaseni.includes('Odhlásit se?'), true)
+ma('je pod „Více" na telefonu', /<Odhlaseni\s+varianta="menu"\s*\/>/.test(zdrojVice), true)
+for (const [popis, soubor] of [
+  ['a vlevo dole v levém sloupci', 'components/shell/ModuleSidebar.tsx'],
+  ['  i ve sloupci Marketingu', 'app/[rozsah]/marketing/navigace.tsx'],
+  ['  i ve sloupci Faktur', 'app/[rozsah]/finance/faktury/navigace.tsx'],
+]) {
+  ma(popis, /<Odhlaseni\s+varianta="sloupec"\s*\/>/.test(nacti(soubor)), true)
+}
 
 /*
   V HORNÍ LIŠTĚ NE. Omylem ťuknutý odhlas uprostřed směny je horší než
   o jedno ťuknutí delší cesta — číšník by se pak přihlašoval kódem
   z e-mailu s rukama plnýma talířů.
+
+  Platí i pro nabídku pod iniciálami, kterou horní lišta kreslí
+  (MenuUctu): 25. 9. 2026 tam odhlášení na chvíli bylo, „jen přes
+  dotaz". Šéfík ale 7. 9. napsal „Do horní lišty ne" a 8. 9., že
+  schované pod něčím je právě to, co mu vadí.
 */
 ma('v horní liště odhlášení NENÍ', /odhl[aá]s/i.test(zdrojRam), false)
+ma('ani v nabídce pod iniciálami', /odhl[aá]s/i.test(zdrojMenuUctu), false)
+
+/*
+  A NEOBEJDE SE TO JINUDY.
+
+  Hledat cestu importu (`prihlaseni/akce`) nestačí: nezávislá kontrola
+  25. 9. nechala Odhlaseni akci znovu vyvézt (`export { odhlasit }`)
+  a nabídka pod iniciálami ji pak zavolala jedním klikem — oba testy
+  zůstaly zelené. Hlídá se proto IDENTIFIKÁTOR `odhlasit`: v kódu
+  aplikace (bez komentářů a řetězců — `klic="odhlasit"` je jméno
+  ikony) smí stát jen tam, kde akce vzniká, v Odhlaseni s dotazem
+  a na Mých údajích. Jediná další povolená podoba je klíč ikony
+  v sadě ikon (`odhlasit: (`).
+*/
+{
+  const POVOLENE = new Set([
+    'app/prihlaseni/akce.ts',
+    'components/shell/Odhlaseni.tsx',
+    'app/moje-udaje/page.tsx',
+  ])
+  const nalezy = []
+  for (const soubor of zdrojakyAplikace(['app', 'components', 'lib'])) {
+    const kod = bezRetezcu(nacti(soubor))
+    for (const m of kod.matchAll(/\bodhlasit\b/g)) {
+      if (POVOLENE.has(soubor)) continue
+      const klicIkony =
+        soubor === 'app/[rozsah]/ikona.tsx' && /^odhlasit\s*:\s*\(/.test(kod.slice(m.index))
+      if (!klicIkony) nalezy.push(soubor)
+    }
+  }
+  // Že hledání vůbec něco najde: v povolených souborech akce je.
+  ma('identifikátor akce se najde, kde má být (Odhlaseni, Moje údaje)',
+    /\bodhlasit\b/.test(bezRetezcu(zdrojOdhlaseni)) && /\bodhlasit\b/.test(bezRetezcu(zdrojMojeUdaje)), true)
+  ma(`akci odhlášení jinde nikdo nevolá ani nepřeposílá${nalezy.length ? ' — ' + [...new Set(nalezy)].join(', ') : ''}`,
+    nalezy.length, 0)
+}
 
 /*
   Na kiosku taky ne: tam se odhlašuje samo po nečinnosti (krok E).

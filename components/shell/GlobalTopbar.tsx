@@ -10,6 +10,7 @@ import PrepinacRozsahu, { type RozsahProp } from "@/app/[rozsah]/prepinac-rozsah
 import { datumACasVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { nadpisUpozorneni, obdobiRozpisu } from "@/lib/upozorneni-text";
 import type { ModulProp, UpozorneniProp } from "./AppShell";
+import MenuUctu from "./MenuUctu";
 
 /**
  * Ikona modulu v horní liště — mockup Šéfíka ji u záložek má, appka
@@ -28,7 +29,8 @@ const IKONA_MODULU: Record<string, IkonaKlic> = {
 
 /**
  * Horní lišta — značka, moduly, hledání, přepínač rozsahu/režimu,
- * zvoneček, nastavení, avatar. Vytažena z app/[rozsah]/ram.tsx
+ * zvoneček, nastavení, iniciály s nabídkou účtu (MenuUctu, od 25. 9.
+ * 2026; do té doby jen ozdoba). Vytažena z app/[rozsah]/ram.tsx
  * (design systém, 15.9.2026) beze změny chování — jen jako vlastní
  * pojmenovaná komponenta, ať appka má opravdový AppShell/GlobalTopbar
  * místo jednoho velkého souboru.
@@ -207,9 +209,10 @@ export default function GlobalTopbar({
             </>
           ) : null}
 
-          <span className="ft-avatar" title={nazevFirmy} aria-hidden="true">
-            {iniciraly}
-          </span>
+          {/* Iniciály jsou tlačítko nabídky účtu: Moje údaje a Vzhled.
+              Na telefonu schované, tam je totéž ve „Více“. Cesta ven
+              z aplikace sem nepatří — je vlevo dole (ModuleSidebar). */}
+          <MenuUctu iniciraly={iniciraly} nazevFirmy={nazevFirmy} />
         </div>
       </header>
 
