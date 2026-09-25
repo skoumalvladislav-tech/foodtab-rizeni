@@ -28,8 +28,9 @@ export default function FormularZalohy({
       <h2 style={nadpis}>Vyplatit zálohu</h2>
       <p style={popis}>
         Záznam o hotovosti, která přešla z ruky do ruky. Aplikace nikomu
-        nic neposílá. Zaměstnanec zálohu potvrdí PINem na tabletu — tím
-        se z ní stane doklad, ne tvrzení jednoho člověka.
+        nic neposílá. Zaměstnanec zálohu potvrdí ve svém telefonu (přijde
+        mu upozornění), nebo PINem na tabletu — tím se z ní stane doklad,
+        ne tvrzení jednoho člověka. Až ji potvrdí, dostanete zprávu.
       </p>
 
       <form action={akce} style={mrizka}>
@@ -80,8 +81,8 @@ export default function FormularZalohy({
       {stav.stav === 'hotovo' ? (
         <div style={{ marginTop: '14px', display: 'grid', gap: '10px' }}>
           <p style={{ margin: 0, fontSize: '14px', color: 'var(--dobre)' }}>
-            Zapsáno: <strong>{stav.castka} Kč</strong> pro {stav.komu}. Čeká
-            na potvrzení PINem na tabletu.
+            Zapsáno: <strong>{stav.castka} Kč</strong> pro {stav.komu}. Čeká,
+            až ji potvrdí — v telefonu, nebo PINem na tabletu.
           </p>
 
           {/*

@@ -193,6 +193,21 @@ select m.id, :'perla'::uuid
    and m.user_id in ('57570000-0000-0000-0000-000000000001',
                      '57570000-0000-0000-0000-000000000002');
 
+-- Cyril má účet a ČLENSTVÍ (na svém Baru). Od 25. 9. 2026 jde upozornění
+-- na zálohu přes app.notifikovat (20260925100000) a ta píše jen lidem
+-- s aktivním členstvím — kdo ho nemá, do aplikace firmy stejně nevidí.
+-- Bez členství by kontrola „upozornění zaskakujícímu je z Perly" níž
+-- neměla co měřit. Scénář ho dřív neměl, protože přímý insert se na
+-- členství neptal.
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'tenant', '57570000-0000-0000-0000-000000000004', null, 'branch', 'active');
+
+insert into public.membership_branches (membership_id, branch_id)
+select m.id, :'bar'::uuid
+  from public.memberships m
+ where m.tenant_id = :'tenant'
+   and m.user_id = '57570000-0000-0000-0000-000000000004';
+
 -- Cizí firma: pobočka a člověk BEZ pobočky (ne majitel). Právě ten by
 -- bez filtru firmy prošel pravidlem „bez pobočky" do nabídky Perly.
 insert into public.tenants (name, legal_name, currency, timezone)
@@ -708,7 +723,7 @@ delete from public.shifts
 delete from public.memberships
  where tenant_id = :'tenant'
    and user_id in ('57570000-0000-0000-0000-000000000001', '57570000-0000-0000-0000-000000000002',
-                   '57570000-0000-0000-0000-000000000003');
+                   '57570000-0000-0000-0000-000000000003', '57570000-0000-0000-0000-000000000004');
 delete from public.employee_permissions where employee_id = :'ivan';
 delete from public.employees
  where id in (:'juli', :'hana', :'ivan', :'adam', :'bara', :'cyril', :'dana',

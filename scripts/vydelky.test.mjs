@@ -750,10 +750,17 @@ const SERVER_AKCE = js(
     '  };\n' +
     '}\n',
 )
+// Od 25. 9. 2026 akce záloh potvrzují (majitel → getContext) a posílají
+// push hned. Tady jde jen o adresy, takže obojí je prázdná náhrada;
+// potvrzení a push ověřuje scripts/zalohy.test.mjs.
+const AUTHZ_AKCE = js('export async function getContext() { return null }\n')
+const PUSH_AKCE = js('export function naplanovatPushKeZdroji() {}\n')
 const akce = await nactiModul('app/[rozsah]/dochazka/zalohy/akce.ts', [
   ['next/cache', CACHE],
   ['next/navigation', NAVIGACE],
+  ['@/lib/authz', AUTHZ_AKCE],
   ['@/lib/firma', FIRMA_AKCE],
+  ['@/lib/komunikace/push-hned', PUSH_AKCE],
   ['@/lib/mzdy', new URL('lib/mzdy.ts', KOREN).href],
   ['@/lib/supabase/dotaz', DOTAZ_AKCE],
   ['@/lib/supabase/server', SERVER_AKCE],

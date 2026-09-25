@@ -18,9 +18,10 @@ import Card from '@/components/ui/Card'
 import Nadpis from '../../nadpis'
 import DochazkaZalozky from '../zalozky'
 import zalozkyDochazky from '../zalozky-prava'
-import { stornovatZalohu, ulozitNastaveniZaloh } from './akce'
+import { potvrditZaZamestnance, stornovatZalohu, ulozitNastaveniZaloh } from './akce'
 import FormularZalohy from './formular'
 import Pozastaveni from './pozastaveni'
+import PotvrzeniZaZamestnance from './potvrzeni-za-zamestnance'
 import Storno from './storno'
 
 export const dynamic = 'force-dynamic'
@@ -53,6 +54,13 @@ type Zaloha = {
   storno_duvod: string | null
   vyplaceno_kdy: string
   potvrzeno_kdy: string | null
+  /**
+   * pin / telefon / majitel (migrace 20260925100000). Klíč v řádku CHYBÍ,
+   * dokud migrace není nasazená — podle toho se pozná, že potvrzení za
+   * zaměstnance v databázi ještě není, a tlačítko se nekreslí.
+   * `null` u potvrzené = PINem před 25. 9. 2026.
+   */
+  potvrzeno_jak?: string | null
 }
 
 export default async function Zalohy({
@@ -106,6 +114,15 @@ export default async function Zalohy({
   */
   const ctx = await getContext(tenantId)
   const rozsahAdresy = ctx ? bezpecnyRozsah(ctx, rozsah) : null
+
+  /*
+    Potvrdit zálohu ZA ZAMĚSTNANCE smí jen majitel (25. 9. 2026) — ne
+    advances.manage: kdo zálohy vydává, si je nesmí sám potvrzovat.
+    `jeMajitel` dává databáze (my_context); zámek je znovu v databázi
+    (`potvrdit_zalohu_za_zamestnance` → app.is_owner). Tohle rozhoduje
+    jen o tom, jestli se tlačítko kreslí.
+  */
+  const jeMajitel = ctx?.jeMajitel === true
   const zalozky = rozsahAdresy ? (
     <DochazkaZalozky
       rozsah={rozsah}
@@ -261,6 +278,12 @@ export default async function Zalohy({
         {ulozeno === 'povoleno' ? (
           <p style={hlaskaDobre}>Zálohy zase povolené.</p>
         ) : null}
+        {ulozeno === 'potvrzeno' ? (
+          <p style={hlaskaDobre}>
+            Záloha potvrzená za zaměstnance. Je u ní zapsané, že ji potvrdil
+            majitel — zaměstnanec i ten, kdo ji vydal, dostali zprávu.
+          </p>
+        ) : null}
         {ulozeno === 'nastaveni' ? (
           <p style={hlaskaDobre}>
             Nastavení uloženo. Změnilo se jen to, co zaměstnanci vidí —
@@ -283,7 +306,7 @@ export default async function Zalohy({
                 ? 'Zatím žádná záloha.'
                 : `${pocet(platne.length, 'záloha', 'zálohy', 'záloh')} v součtu ${koruny(soucet)}` +
                   (nepotvrzenych > 0
-                    ? ` · ${nepotvrzenych} zatím bez potvrzení PINem`
+                    ? ` · ${nepotvrzenych} zatím nepotvrzen${nepotvrzenych === 1 ? 'á' : nepotvrzenych < 5 ? 'é' : 'ých'}`
                     : '')}
             </p>
 
@@ -297,7 +320,7 @@ export default async function Zalohy({
                       <th style={th}>Částka</th>
                       <th style={th}>Stav</th>
                       <th style={th}>Poznámka</th>
-                      {smiVyplacet ? <th style={th}>Akce</th> : null}
+                      {smiVyplacet || jeMajitel ? <th style={th}>Akce</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -320,18 +343,35 @@ export default async function Zalohy({
                           {koruny(z.castka_haleru)}
                         </td>
                         <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                          <StavStitek stav={z.stav} />
+                          <StavStitek stav={z.stav} jak={z.potvrzeno_jak ?? null} />
                         </td>
                         <td style={{ ...td, fontSize: '13px', color: 'var(--muted)' }}>
                           {z.stav === 'stornovana'
                             ? `Storno: ${z.storno_duvod ?? ''}`
                             : z.poznamka}
                         </td>
-                        {smiVyplacet ? (
+                        {smiVyplacet || jeMajitel ? (
                           <td style={td}>
-                            {z.stav !== 'stornovana' ? (
-                              <Storno akce={stornovatZalohu} id={z.id} rozsah={rozsah} />
-                            ) : null}
+                            <div style={{ display: 'grid', gap: '6px', justifyItems: 'start' }}>
+                              {/*
+                                Potvrdit za zaměstnance: jen majitel, jen
+                                nepotvrzená — a jen když databáze funkci
+                                zná (řádek nese `potvrzeno_jak`, viz typ
+                                Zaloha). Jinak by tlačítko vedlo na chybu.
+                              */}
+                              {jeMajitel && z.stav === 'nepotvrzena' && 'potvrzeno_jak' in z ? (
+                                <PotvrzeniZaZamestnance
+                                  akce={potvrditZaZamestnance}
+                                  id={z.id}
+                                  rozsah={rozsah}
+                                  jmeno={z.jmeno}
+                                  castka={koruny(z.castka_haleru)}
+                                />
+                              ) : null}
+                              {smiVyplacet && z.stav !== 'stornovana' ? (
+                                <Storno akce={stornovatZalohu} id={z.id} rozsah={rozsah} />
+                              ) : null}
+                            </div>
                           </td>
                         ) : null}
                       </tr>
@@ -478,15 +518,36 @@ function HlavickaZaloh() {
   )
 }
 
-function StavStitek({ stav }: { stav: string }) {
+/**
+ * Jak se záloha potvrdila — pod slovem „potvrzená". Potvrzení majitelem
+ * není totéž co potvrzení zaměstnancem a musí to být poznat na první
+ * pohled. Prázdné u potvrzené = PINem před 25. 9. 2026 (jiná cesta
+ * tehdy nebyla), proto se u něj nic nepíše, ne „neznámo".
+ */
+const JAK_POTVRZENO: Record<string, string> = {
+  pin: 'PINem na tabletu',
+  telefon: 'v telefonu',
+  majitel: 'potvrdil majitel',
+}
+
+function StavStitek({ stav, jak }: { stav: string; jak: string | null }) {
   if (stav === 'potvrzena') {
-    return <span style={{ color: 'var(--dobre)', fontSize: '13px' }}>potvrzená</span>
+    return (
+      <span style={{ color: 'var(--dobre)', fontSize: '13px' }}>
+        potvrzená
+        {jak && JAK_POTVRZENO[jak] ? (
+          <span style={{ display: 'block', color: 'var(--muted)', fontSize: '12px' }}>
+            {JAK_POTVRZENO[jak]}
+          </span>
+        ) : null}
+      </span>
+    )
   }
   if (stav === 'stornovana') {
     return <span style={{ color: 'var(--muted)', fontSize: '13px' }}>stornovaná</span>
   }
   return (
-    <span style={{ color: 'var(--pozor)', fontSize: '13px' }}>čeká na PIN</span>
+    <span style={{ color: 'var(--pozor)', fontSize: '13px' }}>čeká na potvrzení</span>
   )
 }
 

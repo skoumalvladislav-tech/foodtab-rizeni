@@ -26,6 +26,8 @@
  * liší už nadpisem, ne jen odstavcem pod ním.
  */
 
+import { koruny } from './mzdy.ts'
+
 export type TeloUpozorneni = {
   od?: string
   do?: string
@@ -73,6 +75,11 @@ export type TeloUpozorneni = {
   stav?: string
   polozka?: string
   polozka_nazev?: string
+  // zaloha.* (20260925100000) — částka v haléřích, id zálohy, provozní den
+  // (den výš); u potvrzení jméno příjemce (jmeno výš) a způsob.
+  castka_haleru?: number
+  zaloha?: string
+  jak?: string
 }
 
 /**
@@ -225,6 +232,19 @@ export function nadpisUpozorneni(
       return `${telo.nazev || 'Checklist'} čeká na vaše potvrzení`
     case 'checklist.problem':
       return `Problém v checklistu ${telo.nazev || ''}: ${telo.polozka_nazev || 'položka'} nejde splnit`.replace('  ', ' ')
+    /*
+      ZÁLOHY (25. 9. 2026). Nadpis NENESE ČÁSTKU ANI JMÉNO: skládá se
+      z něj i push, který jde přes cizí službu (Google, Apple, Mozilla)
+      a ukáže se na zamčené obrazovce (lib/komunikace/push-zprava.ts).
+      Částka a jméno jsou až ve větě pod nadpisem (popisZalohy) — tu
+      vidí jen přihlášený v aplikaci.
+    */
+    case 'zaloha.vyplacena':
+      return 'Máte zálohu k potvrzení'
+    case 'zaloha.potvrzena':
+      return 'Záloha je potvrzená'
+    case 'zaloha.potvrzena_za_vas':
+      return 'Majitel za vás potvrdil převzetí zálohy'
     default:
       return 'Upozornění'
   }
@@ -329,6 +349,52 @@ export function popisZapomenuteho(telo: TeloUpozorneni): string {
     return `${prichod}${pobocka} Dokud odchod nedoplníte, směna se nezapočítá do odpracovaných hodin.`.trim()
   }
   return `${prichod}${pobocka}`.trim()
+}
+
+/** Jak se záloha potvrdila — do věty „potvrzeno …". */
+const ZPUSOB_POTVRZENI: Record<string, string> = {
+  pin: 'PINem na tabletu',
+  telefon: 'v telefonu',
+  majitel: 'majitelem',
+}
+
+/**
+ * Věta pod nadpisem u záloh. Částka a jméno jsou TADY, ne v nadpisu
+ * (nadpis jde i do push — viz nadpisUpozorneni).
+ *
+ *   vyplacena        příjemci: kolik, kdy a kde to potvrdit
+ *   potvrzena        vydávajícímu: kdo, kolik a jak
+ *   potvrzena_za_vas příjemci, za kterého potvrdil majitel: ať se ozve,
+ *                    kdyby hotovost nedostal
+ */
+export function popisZalohy(druh: string, telo: TeloUpozorneni): string {
+  const castka =
+    typeof telo.castka_haleru === 'number' ? koruny(telo.castka_haleru) : 'Záloha'
+  const kdy = telo.den ? ` (${denCesky(telo.den)})` : ''
+
+  if (druh === 'zaloha.vyplacena') {
+    return `${castka}${kdy}. Potvrďte v Docházce, že ji máte v ruce. Pokud jste ji už potvrdili PINem na tabletu, nemusíte nic dělat.`
+  }
+  if (druh === 'zaloha.potvrzena') {
+    const kdo = telo.jmeno?.trim() || 'Zaměstnanec'
+    const jak = telo.jak && ZPUSOB_POTVRZENI[telo.jak] ? `, potvrzeno ${ZPUSOB_POTVRZENI[telo.jak]}` : ''
+    return `${kdo}: ${castka}${kdy}${jak}.`
+  }
+  if (druh === 'zaloha.potvrzena_za_vas') {
+    return `${castka}${kdy}. Pokud jste ji nedostali, ozvěte se vedení.`
+  }
+  return ''
+}
+
+/**
+ * Kam vede tlačítko u zálohy. Výzva k potvrzení → Docházka (tam je
+ * karta s tlačítkem), potvrzení vydávajícímu → Zálohy. Kdo za sebe
+ * potvrzení nedělal, nemá kam jít — `null`.
+ */
+export function odkazNaZalohu(rozsah: string, druh: string): { href: string; popisek: string } | null {
+  if (druh === 'zaloha.vyplacena') return { href: `/${rozsah}/dochazka`, popisek: 'Potvrdit převzetí' }
+  if (druh === 'zaloha.potvrzena') return { href: `/${rozsah}/dochazka/zalohy`, popisek: 'Otevřít zálohy' }
+  return null
 }
 
 /** Věta pod nadpisem u přenastaveného PINu. */

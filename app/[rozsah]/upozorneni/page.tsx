@@ -12,7 +12,9 @@ import {
   popisMarketingu,
   popisOpravneni,
   popisPinu,
+  popisZalohy,
   popisZapomenuteho,
+  odkazNaZalohu,
   prioritaUpozorneni,
   vyzadujePotvrzeni,
   odkazNaChecklist,
@@ -297,6 +299,36 @@ export default async function Upozorneni({
                   <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
                     {popisPinu(z.telo)}
                   </p>
+                ) : null}
+
+                {/*
+                  ZÁLOHY (25. 9. 2026). Výzva k potvrzení vede do Docházky,
+                  kde je karta s tlačítkem — potvrzuje se tam, ne tady:
+                  jedno místo, kde se potvrzuje, a to ukazuje, co je
+                  opravdu nepotvrzené (upozornění může být starší než
+                  potvrzení PINem). Částka a jméno jsou jen ve větě, ne
+                  v nadpisu (ten se ukazuje i na zamčeném telefonu).
+                */}
+                {z.druh.startsWith('zaloha.') ? (
+                  <>
+                    <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
+                      {popisZalohy(z.druh, z.telo)}
+                    </p>
+                    {odkazNaZalohu(rozsah, z.druh) ? (
+                      <p style={{ margin: '10px 0 0' }}>
+                        <Link
+                          href={odkazNaZalohu(rozsah, z.druh)!.href}
+                          className={
+                            z.druh === 'zaloha.vyplacena'
+                              ? 'ft-tl ft-tl-hlavni ft-tl-male'
+                              : 'ft-tl ft-tl-vedlejsi ft-tl-male'
+                          }
+                        >
+                          {odkazNaZalohu(rozsah, z.druh)!.popisek}
+                        </Link>
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
 
                 {/*

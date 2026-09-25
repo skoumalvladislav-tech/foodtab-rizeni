@@ -3,7 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { getContext } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { naplanovatPushKeZdroji } from '@/lib/komunikace/push-hned'
 import { naHalere } from '@/lib/mzdy'
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -12,11 +14,19 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * Zálohy — zápisy.
  *
  * Všechno jde přes průzory v databázi (`vyplatit_zalohu`,
- * `stornovat_zalohu`). Do tabulky `advances` nemá aplikace právo
- * zapisovat přímo: kdyby měla, dal by se cizí zálohu dopsat i potvrdit.
+ * `stornovat_zalohu`, `potvrdit_moji_zalohu`,
+ * `potvrdit_zalohu_za_zamestnance`). Do tabulky `advances` nemá aplikace
+ * právo zapisovat přímo: kdyby měla, dal by se cizí zálohu dopsat
+ * i potvrdit.
  *
  * Rozhodnutí padá tam, ne tady. Kontrola přístupu na začátku je první
  * obranná linie (pravidlo 3), ne jediná.
+ *
+ * PUSH HNED (25. 9. 2026): po výplatě a po potvrzení se upozornění
+ * (příjemci, vydávajícímu) pošlou na telefon hned po odpovědi, ne až
+ * s plánovačem. Zdroj je záloha a její id se bere z odpovědi DATABÁZE,
+ * ne z formuláře. Volá se až po kontrole chyby — co se nezapsalo, nemá
+ * co posílat.
  */
 
 /**
@@ -101,6 +111,9 @@ export async function vyplatitZalohu(
   const r = (data as { zaloha: string; varovani: string | null }[])?.[0]
   if (!r?.zaloha) return { stav: 'chyba', text: 'Záloha se nezapsala.' }
 
+  // Příjemci na telefon hned — „máte zálohu k potvrzení".
+  naplanovatPushKeZdroji({ typ: 'zaloha', id: r.zaloha }, tenantId)
+
   const { data: kdo } = await supabase
     .from('employees')
     .select('full_name')
@@ -144,6 +157,89 @@ export async function stornovatZalohu(formData: FormData): Promise<void> {
 
   revalidatePath(zpet)
   redirect(`${zpet}?ulozeno=storno`)
+}
+
+/**
+ * Příjemce potvrdí ve svém telefonu, že zálohu dostal (25. 9. 2026).
+ *
+ * Volá se z karty na Docházce. ČÍ záloha to je, rozhoduje databáze
+ * (`potvrdit_moji_zalohu`: jen vlastní, nepotvrzená, nestornovaná, téhle
+ * firmy) — id z formuláře je jen návrh. Kdo si ho podvrhne, dostane
+ * od databáze „Takovou zálohu tu nemáte". Tady se hlídá jen, že je
+ * přihlášený ve firmě.
+ *
+ * Výsledek jde do adresy Docházky jako `zaloha=…`, ne `chyba=…`: tu už
+ * Docházka používá pro ruční zápis a píchnutí.
+ */
+export async function potvrditMojiZalohu(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zaloha = String(formData.get('zaloha') ?? '')
+
+  const zpet = `/${rozsah}/dochazka`
+  if (!zaloha) redirect(zpet)
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('potvrdit_moji_zalohu', {
+    p_tenant: tenantId,
+    p_zaloha: zaloha,
+  })
+
+  if (error) {
+    const duvod = funkceNeexistuje(error)
+      ? 'Potvrzení v telefonu čeká na nasazení databáze. Zatím zálohu potvrďte PINem na tabletu.'
+      : error.message
+    redirect(`${zpet}?zaloha=chyba&duvod=${encodeURIComponent(duvod)}`)
+  }
+
+  // Vydávajícímu na telefon hned — „záloha je potvrzená".
+  naplanovatPushKeZdroji({ typ: 'zaloha', id: String(data) }, tenantId)
+
+  revalidatePath(zpet)
+  redirect(`${zpet}?zaloha=potvrzena`)
+}
+
+/**
+ * Majitel potvrdí zálohu za zaměstnance (25. 9. 2026: „já jako majitel
+ * potřebuji umět potvrdit zálohu každému zaměstnanci").
+ *
+ * Jen MAJITEL — ne `advances.manage`: kdo zálohy vydává, si je nesmí
+ * sám potvrzovat. První linie je `jeMajitel` z kontextu (databáze,
+ * `employees.je_majitel`); o zápisu rozhoduje znovu `app.is_owner`
+ * v `potvrdit_zalohu_za_zamestnance` (pravidlo 2 a 3).
+ */
+export async function potvrditZaZamestnance(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const zaloha = String(formData.get('zaloha') ?? '')
+
+  const zpet = adresaZaloh(rozsah)
+  if (!zaloha) redirect(zpet)
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const ctx = await getContext(tenantId)
+  if (!ctx?.jeMajitel) {
+    redirect(`${zpet}?chyba=${encodeURIComponent('Potvrdit zálohu za zaměstnance smí jen majitel.')}`)
+  }
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('potvrdit_zalohu_za_zamestnance', {
+    p_tenant: tenantId,
+    p_zaloha: zaloha,
+  })
+
+  if (error) {
+    redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  // Vydávajícímu a zaměstnanci na telefon hned.
+  naplanovatPushKeZdroji({ typ: 'zaloha', id: String(data) }, tenantId)
+
+  revalidatePath(zpet)
+  redirect(`${zpet}?ulozeno=potvrzeno`)
 }
 
 /**
