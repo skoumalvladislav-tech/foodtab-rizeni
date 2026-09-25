@@ -5,7 +5,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { odeslatEmail } from '@/lib/email'
-import { hasAccess } from '@/lib/authz'
+import { smiSpravovatPrava } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -557,8 +557,13 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
     20260901090000 s odůvodněním „kdo zakládá lidi, nesmí rozhodovat,
     kdo vidí mzdy". Formulář zaměstnance běží pod `people.manage`,
     takže bez téhle kontroly by se ta díra obešla jinými dveřmi.
+
+    Na FIREMNÍ úrovni, ne na pobočce z adresy — stejně jako politika.
+    Do 25. 9. 2026 se tu `hasAccess` předával slug z adresy místo id
+    pobočky, databáze to odmítla jako chybu a výjimky neuložil nikdo,
+    ani majitel (hlášení 24. 9.). Viz `smiSpravovatPrava`.
   */
-  const smiMenitPrava = await hasAccess(tenantId, 'settings.manage', rozsah)
+  const smiMenitPrava = await smiSpravovatPrava(tenantId)
   const nabizena = new Set(formData.getAll('nabizeno').map(String))
 
   if (smiMenitPrava && nabizena.size > 0) {
@@ -618,11 +623,19 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
 
   /*
     2. ROZSAH. Bez účtu a bez členství není u koho ho vést — zařazení
-    už uložené je, takže se to nehlásí jako chyba, ale jako to, co se
-    stalo.
+    i výjimky už uložené jsou, takže se to nehlásí jako chyba, ale jako
+    to, co se stalo.
+
+    Jako ÚSPĚCH, ne přes `?chyba=`. Dřív to tak chodilo a hláška
+    „Zařazení se uložilo…" se kreslila červeně jako porucha — u člověka
+    bez účtu, tedy u většiny brigádníků, vypadalo každé uložení jako
+    nepovedené.
   */
+  const ulozeno = `${zpet}?ulozeno=opravneni&kdo=${encodeURIComponent(clovek.full_name)}`
+
   if (!clovek.user_id) {
-    redirect(`${zpet}?chyba=opravneni-bez-clenstvi`)
+    revalidatePath(zpet)
+    redirect(`${ulozeno}&bezuctu=1`)
   }
 
   const { data: clenstvi, error: chybaClenstvi } = await supabase
@@ -634,7 +647,8 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
   if (chybaClenstvi) throw new DotazSelhal('členství k přidělení oprávnění', chybaClenstvi)
 
   if (!clenstvi) {
-    redirect(`${zpet}?chyba=opravneni-bez-clenstvi`)
+    revalidatePath(zpet)
+    redirect(`${ulozeno}&bezclenstvi=1`)
   }
 
   /*
@@ -723,7 +737,7 @@ export async function prideleniOpravneni(formData: FormData): Promise<void> {
     zpráva odešla.
   */
   let mail: string | null = null
-  const { data: kam } = await supabase.rpc('adresa_pro_upozorneni', {
+  const { data: kam, error: chybaAdresy } = await supabase.rpc('adresa_pro_upozorneni', {
     p_tenant: tenantId,
     p_user: clovek.user_id,
   })
@@ -759,6 +773,10 @@ kdo vám oprávnění přidělil.</p>
         ? 'na serveru chybí klíč k Resendu'
         : poslano.text
     }
+  } else {
+    // Účet na telefon, bez e-mailu — nebo se adresu nepodařilo zjistit.
+    // Mlčet by v obou případech znamenalo „odešlo".
+    mail = chybaAdresy ? 'adresu se nepodařilo zjistit' : 'u účtu není e-mailová adresa'
   }
 
   revalidatePath(zpet)
@@ -768,10 +786,7 @@ kdo vám oprávnění přidělil.</p>
     redirect(`${zpet}?chyba=opravneni-pobocky`)
   }
 
-  redirect(
-    `${zpet}?ulozeno=opravneni&kdo=${encodeURIComponent(clovek.full_name)}` +
-      (mail ? `&mail=${encodeURIComponent(mail)}` : ''),
-  )
+  redirect(ulozeno + (mail ? `&mail=${encodeURIComponent(mail)}` : ''))
 }
 
 /* =====================================================================

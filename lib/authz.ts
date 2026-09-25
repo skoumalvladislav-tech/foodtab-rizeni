@@ -384,6 +384,11 @@ export function resolveScope(ctx: Context, scopeParam?: string | null): Scope {
  * odpověď pak vždycky odpovídá tomu, co povolí i RLS.
  * ------------------------------------------------------------------ */
 
+/**
+ * Třetí parametr je ID POBOČKY (uuid), nebo `null` pro firemní úroveň.
+ * Nikdy ne `rozsah` z adresy — to je slug („firma", „cerna-perla")
+ * a ten se na pobočku převádí přes `resolveScope`/`zkusPristup`.
+ */
 export async function hasAccess(
   tenantId: string,
   permission: Permission,
@@ -395,9 +400,40 @@ export async function hasAccess(
     p_permission: permission,
     p_branch: branchId,
   })
-  // Chyba spojení, neznámé oprávnění, cokoli nečekaného → ne.
-  if (error) return false
+  /*
+    Chyba spojení, neznámé oprávnění, cokoli nečekaného → ne.
+
+    Ale NE POTICHU. Tři místa se od 9. 9. 2026 ptala se slugem z adresy
+    místo id pobočky; databáze odpovídala chybou 22P02, tady z toho bylo
+    „nemá právo" a práva lidem nesměl měnit nikdo, ani majitel — bez
+    jediné stopy v logu (hlášení 24. 9. 2026). Odpověď zůstává NE, jen
+    je vidět proč. Do zápisu jde klíč práva a text chyby, nic o člověku.
+  */
+  if (error) {
+    console.error('has_access selhalo:', permission, error.code, error.message)
+    return false
+  }
   return data === true
+}
+
+/**
+ * Smí přihlášený měnit PRÁVA — co dává zařazení (`position_permissions`)
+ * a výjimky u lidí (`employee_permissions`)?
+ *
+ * `settings.manage` na FIREMNÍ úrovni, protože přesně tak se ptají
+ * politiky obou tabulek (20260909100000_zarazeni_jadro.sql,
+ * `has_access(tenant_id, 'settings.manage', null)`). Kdyby se aplikace
+ * ptala na pobočku z adresy, pustila by provozního jedné pobočky
+ * k zaškrtávátkům — a databáze by mu přidání odmítla chybou a odebrání
+ * zahodila potichu.
+ *
+ * Vlastní funkce proto, že tuhle otázku kladou čtyři místa (dvě
+ * obrazovky, dvě akce) a do 25. 9. 2026 se tři z nich ptala se slugem
+ * z adresy (viz `hasAccess` výš) a čtvrté na pobočku místo firmy.
+ * Hlídá scripts/prava-osob.test.mjs.
+ */
+export async function smiSpravovatPrava(tenantId: string): Promise<boolean> {
+  return hasAccess(tenantId, 'settings.manage', null)
 }
 
 /**

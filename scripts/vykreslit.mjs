@@ -138,3 +138,15 @@ export async function nactiModul(soubor, nahrady = []) {
   const adresa = naAdresu(cil, nahrady, new Map())
   return import(adresa)
 }
+
+/**
+ * Jen ADRESA přeloženého modulu, bez načtení.
+ *
+ * Pro případ, kdy se jinému modulu nemá podstrčit náhrada, ale SKUTEČNÝ
+ * kód — třeba `lib/authz.ts`, jen s podstrčenou databází pod sebou.
+ * Stejný vstup dá stejnou adresu, takže dva moduly, které si ji vezmou,
+ * sdílejí jednu instanci.
+ */
+export function adresaModulu(soubor, nahrady = []) {
+  return naAdresu(new URL(soubor, KOREN), nahrady, new Map())
+}

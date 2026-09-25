@@ -161,6 +161,11 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 57 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 57"; chybi=1; }
 
+          # Majitel přiděluje práva lidem a zařazením (58) — databázová
+          # půlka cesty, aplikační hlídá scripts/prava-osob.test.mjs.
+          grep -qE '^[[:space:]]*== KROK 58 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 58"; chybi=1; }
+
           # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
           # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —
           # run.sh ho pouští až za provozními scénáři.
