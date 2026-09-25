@@ -1,0 +1,147 @@
+name: Aplikace
+
+# Kontroly aplikační vrstvy (scripts/*.test.mjs). Workflow Databáze
+# pouští jen migrace a scénáře; aplikační kód do 25. 9. 2026 nehlídalo
+# v CI nic. Tak se 16 dní schovávala chyba „nefunguje přiřazování práv
+# k osobám": `scripts/prava-osob.test.mjs` by ji chytil, jenže ho nikdo
+# nespustil (nález nezávislé kontroly u PR #80).
+#
+# Mezi cestami je i tenhle soubor, stejně jako u Databáze: jinak by se
+# úprava workflow sama neověřila. `supabase/**`, `n8n/**`, `public/**`
+# a konfigurace jsou tu proto, že je testy čtou (granty nad texty
+# migrací, čitelnost scénářů, n8n workflow, manifest).
+#
+# Žádná tajemství: testy běží proti podstrčené databázi a nikam
+# nevolají. Kdyby si jednou nějaký řekl o klíč, patří jinam, ne sem.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'lib/**'
+      - 'components/**'
+      - 'scripts/**'
+      - 'supabase/**'
+      - 'n8n/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - 'proxy.ts'
+      - '.github/workflows/aplikace.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'lib/**'
+      - 'components/**'
+      - 'scripts/**'
+      - 'supabase/**'
+      - 'n8n/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'next.config.ts'
+      - 'proxy.ts'
+      - '.github/workflows/aplikace.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aplikace-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  testy:
+    name: Testy aplikace
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24: na něm se seznam níž ověřil (25. 9. 2026, v24.19.0).
+      # package.json chce ">=22.13.0". Databáze Node nepotřebuje, pouští
+      # jen psql, takže tu není s čím se srovnat.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Závislosti
+        run: npm ci
+
+      - name: Testy (každý zvlášť)
+        run: |
+          set -uo pipefail
+
+          # SEZNAM. Každý z nich na main (0a38fb6) prošel, v pásmu Praha
+          # i UTC. Nový test sem připiš, jakmile prochází.
+          TESTY=(
+            adresa cas dochazka-dnes dochazka-stav faktury-filtry
+            faktury-navigace fronta-push kiosek komunikace manifest
+            marketing marketing-audit marketing-granty marketing-kalendar
+            marketing-kampane marketing-kanaly marketing-media
+            marketing-media-pouziti marketing-menu marketing-menu-tabulka
+            marketing-n8n-workflow marketing-navigace marketing-obrazek
+            marketing-odkazy marketing-prihlaseni marketing-pruvodce
+            marketing-publikovane marketing-rozcestnik marketing-sablony
+            marketing-schvalovani marketing-tvorba nabidka nahrani-lidi
+            osloveni penize prava-osob prideleni prihlaseni provoz-granty
+            qr ranni-prehled rozpis-desktop rozpis-export rozpis-mobil
+            scenare sklonovani smeny-formular tabulka upozorneni vydelky
+            web-push xlsx zalohy
+          )
+
+          # VYNECHANÉ. Na main padají už dnes, většinou na podstrčených
+          # importech v testu (Drawer.tsx: react-dom, server-only), ne na
+          # aplikaci. Kdo některý spraví, přesune ho do seznamu výš.
+          VYNECHANE=(
+            barvy-lidi email marketing-ai marketing-fronta marketing-klice
+            marketing-menu-ai marketing-n8n marketing-nastroje
+            nahrani-rozpisu openapi-cesty rozpis sablony scenare-poradi
+            vlozky
+          )
+
+          # Test, který není ani v jednom výčtu, by tu tiše neběžel —
+          # přesně to, kvůli čemu tohle workflow vzniklo.
+          nezarazene=0
+          for f in scripts/*.test.mjs; do
+            t="$(basename "$f" .test.mjs)"
+            if [[ ! " ${TESTY[*]} ${VYNECHANE[*]} " == *" $t "* ]]; then
+              echo "::error::scripts/$t.test.mjs není v seznamu ani mezi vynechanými"
+              nezarazene=1
+            fi
+          done
+
+          spadle=()
+          for t in "${TESTY[@]}"; do
+            if [ ! -f "scripts/$t.test.mjs" ]; then
+              echo "::error::scripts/$t.test.mjs neexistuje"
+              spadle+=("$t (chybí)")
+              continue
+            fi
+            echo "::group::$t"
+            if node "scripts/$t.test.mjs"; then
+              echo "::endgroup::"
+              echo "OK      $t"
+            else
+              kod=$?
+              echo "::endgroup::"
+              echo "::error::scripts/$t.test.mjs skončil kódem $kod"
+              spadle+=("$t")
+            fi
+          done
+
+          echo
+          echo "Prošlo $(( ${#TESTY[@]} - ${#spadle[@]} )) z ${#TESTY[@]}."
+          if [ "${#spadle[@]}" -ne 0 ]; then
+            echo "Spadlo: ${spadle[*]}"
+            exit 1
+          fi
+          if [ "$nezarazene" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Všechny testy ze seznamu prošly."

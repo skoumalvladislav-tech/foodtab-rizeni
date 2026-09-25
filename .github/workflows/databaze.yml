@@ -162,7 +162,10 @@ jobs:
             || { echo "CHYBÍ hláška: KROK 57"; chybi=1; }
 
           # Majitel přiděluje práva lidem a zařazením (58) — databázová
-          # půlka cesty, aplikační hlídá scripts/prava-osob.test.mjs.
+          # půlka cesty, aplikační hlídá scripts/prava-osob.test.mjs
+          # (workflow Aplikace).
+          # Oddíly 7–8: oprávnění nejde zapsat pod cizí firmu
+          # (20260925120000_prava_firma_radku.sql).
           grep -qE '^[[:space:]]*== KROK 58 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 58"; chybi=1; }
 

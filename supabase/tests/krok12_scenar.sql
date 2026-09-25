@@ -251,7 +251,15 @@ update public.profiles set upozorneni_emailem = true where user_id = :'majitel';
   za funkci, která vždycky spadne — a členství musí vzniknout přesto.
   Bez téhle výměny by se ta ochrana neověřila vůbec: za normálního
   běhu se ta větev nikdy nespustí.
+
+  Skutečné tělo se napřed uschová a na konci oddílu vrátí. `run.sh`
+  i PGlite jedou všechny scénáře nad jednou databází, takže rozbitá
+  funkce by zůstala každému scénáři po tomhle. Přišlo se na to 25. 9.
+  2026, když se na ni začal přímo ptát krok58 (cizí firma, oddíl 8).
 */
+create temp table zaloha_upozorni_na_prijeti as
+  select pg_get_functiondef('app.upozorni_na_prijeti(uuid,uuid)'::regprocedure) as def;
+
 create or replace function app.upozorni_na_prijeti(p_tenant uuid, p_kdo uuid)
 returns void language plpgsql volatile security definer set search_path = ''
 as $$
@@ -284,6 +292,15 @@ select pg_temp.check('upozornění o něm ale nevzniklo — funkce spadla',
   not exists (select 1 from public.notifications
               where druh = 'pozvanka.prijata'
                 and telo ->> 'jmeno' = 'Padavka Zkouška'));
+
+-- Úklid: skutečná funkce zpátky, i s `security definer` a `search_path`.
+do $$ begin execute (select def from zaloha_upozorni_na_prijeti); end $$;
+
+select pg_temp.check('úklid: skutečné upozornění na přijetí je zpátky',
+  pg_get_functiondef('app.upozorni_na_prijeti(uuid,uuid)'::regprocedure)
+    = (select def from zaloha_upozorni_na_prijeti)
+  and pg_get_functiondef('app.upozorni_na_prijeti(uuid,uuid)'::regprocedure)
+    not like '%pošta je rozbitá%');
 
 
 \echo ''

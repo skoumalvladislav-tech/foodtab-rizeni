@@ -556,8 +556,17 @@ console.log('\n== 3. Člověk s účtem: výjimka, rozsah a pobočky ==')
   const prvky2 = formular(await vykreslit(StrankaLide, 'firma', { opravneni: E_PETR }), 'Uložit oprávnění') ?? []
   const kam2 = await odeslat(akceLide.prideleniOpravneni, kliknoutAOdeslat(prvky2).fd)
   ma('bez e-mailové adresy se nic neposílá', bez.maily.length, 0)
-  ma('… a hláška to řekne, netvrdí „i e-mailem"',
-    decodeURIComponent(kam2 ?? '').includes('mail=u účtu není e-mailová adresa'), true)
+  /*
+    Proč adresa chybí, akce NEVÍ: `adresa_pro_upozorneni` vrací prázdno
+    i vedoucímu pobočky bez `people.manage` za celou firmu. Hláška proto
+    nesmí tvrdit, že adresa u účtu není. Čte se z vykreslené obrazovky,
+    na kterou akce přesměruje, ne z adresy.
+  */
+  const html2 = await vykreslit(StrankaLide, 'firma',
+    Object.fromEntries(new URL(kam2 ?? '/', 'http://x').searchParams))
+  ma('… a obrazovka řekne, že e-mail neodešel, netvrdí „i e-mailem"',
+    html2.includes('e-mail neodešel: adresu se nepodařilo zjistit.'), true)
+  ma('… ani že u účtu adresa není (důvod nezná)', /není e-mailová adresa/.test(html2), false)
 
   const spadla = svet(U_MAJITEL)
   spadla.adresaSpadne = true
