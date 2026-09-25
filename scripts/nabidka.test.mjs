@@ -432,9 +432,10 @@ const OBA_ROZSAHY = [
   const r = await ram(MAJITEL, 'cerna-perla', '/cerna-perla/upozorneni', OBA_ROZSAHY)
   ok('přepnutí na firmu z upozornění vede na /firma/dnes',
     maOdkaz(r.html, '/firma/dnes') && !/href="\/firma"/.test(r.html))
-  // Docházka se váže na pobočku; na firmě ji nahradí první obrazovka Provozu.
+  // Docházka se od #78 (záložky Výdělky, Zálohy) na pobočku neváže —
+  // majitel na firmě zůstane v Docházce.
   const d = await ram(MAJITEL, 'cerna-perla', '/cerna-perla/dochazka', OBA_ROZSAHY)
-  ok('přepnutí na firmu z Docházky vede na /firma/dnes', /<a [^>]*href="\/firma\/dnes"[^>]*data-branch="firma"/.test(d.html))
+  ok('přepnutí na firmu z Docházky vede na /firma/dochazka', /<a [^>]*href="\/firma\/dochazka"[^>]*data-branch="firma"/.test(d.html))
 }
 
 {
@@ -473,16 +474,18 @@ const OBA_ROZSAHY = [
 }
 
 {
-  // Pět obrazovek: do 25. 9. se kreslily všechny a „Více" chybělo.
-  // Teď čtyři a pátá (Zálohy) v menu.
+  // Víc obrazovek, než je míst: do 25. 9. se při pěti kreslily všechny
+  // a „Více" chybělo. Teď čtyři a zbytek v menu. (Zálohy už samostatná
+  // položka nejsou — od #78 jsou záložkou Docházky —, proto Lidé.)
   const r = await ram(
-    { ...CISNIK, kontext: { ...CISNIK.kontext, permissions: ['shifts.read', 'advances.manage'] } },
+    { ...CISNIK, kontext: { ...CISNIK.kontext, permissions: ['shifts.read', 'communication.read', 'people.manage'] } },
     'cerna-perla',
     '/cerna-perla/dnes',
   )
-  ok('pět obrazovek: čtyři v liště + „Více"',
+  ok('víc obrazovek: čtyři v liště + „Více"',
     r.vyrizlo && odkazu(r.lista) === 4 && r.lista.includes('Více'))
-  ok('  a pátá je v menu', !maOdkaz(r.lista, '/cerna-perla/zalohy') && maOdkaz(r.vice, '/cerna-perla/zalohy'))
+  ok('  a ta navíc je v menu',
+    !maOdkaz(r.lista, '/cerna-perla/nastaveni/lide') && maOdkaz(r.vice, '/cerna-perla/nastaveni/lide'))
 }
 
 console.log('\n== Odhlášení v „Více" se ptá ==')

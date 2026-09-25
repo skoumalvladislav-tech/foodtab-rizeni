@@ -143,20 +143,13 @@ export async function nactiModul(soubor, nahrady = []) {
  *
  * Pro `.ts` se skutečnými importy přes `@/`: sourozenecký `.ts` se
  * jinak načítá tak, jak je, a Node `@/…` nezná. Takhle jde podstrčit
- * skutečný `nabidka.ts`, který si sáhne na skutečný `lib/authz.ts`,
- * a podstrčená je jen databáze pod ním — ne rozhodování nad ní.
- */
-export function adresaModulu(soubor, nahrady = []) {
-  return naAdresu(new URL(soubor, KOREN), nahrady, new Map())
-}
-
-/**
- * Jen ADRESA přeloženého modulu, bez načtení.
+ * SKUTEČNÝ kód — třeba `nabidka.ts`, který si sáhne na skutečný
+ * `lib/authz.ts` — a podstrčená je jen databáze pod ním, ne rozhodování
+ * nad ní. Stejný vstup dá stejnou adresu, takže dva moduly, které si ji
+ * vezmou, sdílejí jednu instanci.
  *
- * Pro případ, kdy se jinému modulu nemá podstrčit náhrada, ale SKUTEČNÝ
- * kód — třeba `lib/authz.ts`, jen s podstrčenou databází pod sebou.
- * Stejný vstup dá stejnou adresu, takže dva moduly, které si ji vezmou,
- * sdílejí jednu instanci.
+ * (24.–25. 9. ji přidaly nezávisle dvě větve — práva k osobám
+ * a odstranění Rozcestníku; tady je jednou.)
  */
 export function adresaModulu(soubor, nahrady = []) {
   return naAdresu(new URL(soubor, KOREN), nahrady, new Map())
