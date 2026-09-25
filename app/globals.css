@@ -164,6 +164,60 @@
   font-size: 12px; font-weight: 600; flex: none;
 }
 
+/* ---- Nabídka účtu pod iniciálami (components/shell/MenuUctu.tsx) ----
+   Moje údaje a Vzhled na počítači a tabletu. Na telefonu se schovává
+   (zlom 640 px níž) — tam je totéž v menu „Více“. Cesta ven z aplikace
+   tu není: je vlevo dole na konci levého sloupce (.ft-side-pata).
+   Panel vypadá jako ten u zvonečku: karta pod lištou, zarovnaná vpravo. */
+.ft-ucet { position: relative; flex: none; }
+.ft-ucet-tl {
+  appearance: none; border: 0; background: none; padding: 0; font: inherit;
+  width: 32px; height: 32px; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer;
+}
+.ft-ucet-tl:focus-visible { outline: 2px solid var(--mosaz-sv); outline-offset: 1px; }
+/* Otevřená nabídka: prstenec kolem kroužku. Tvar, ne jen barva —
+   a aria-expanded to řekne i odečítači. */
+.ft-ucet-tl[aria-expanded="true"] .ft-avatar {
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--mosaz);
+}
+.ft-ucet-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
+  width: min(300px, calc(100vw - 24px));
+  display: grid; gap: 12px; padding: 14px;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  /* Jako panel zvonečku: visí v lepivé liště, takže co by přeteklo pod
+     okno (telefon na šířku), se rolováním stránky nedorolovalo. */
+  max-height: calc(100dvh - var(--vysoka-lista) - 8px); overflow-y: auto;
+}
+/* Fokus dostane panel jen proto, aby z něj šel Tab na první volbu;
+   rámeček kolem celé karty by vypadal jako chyba. */
+.ft-ucet-panel:focus { outline: none; }
+.ft-ucet-hlava { display: grid; gap: 2px; min-width: 0; }
+.ft-ucet-hlava b { font-size: 14px; font-weight: 700; }
+.ft-ucet-hlava span {
+  font-size: 12.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Stejná dlaždice jako v menu „Více“ (.ds-vice-mrizka a). */
+.ft-ucet-odkaz {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px;
+  color: var(--ink); text-decoration: none; font-size: 14px;
+  transition: background .12s, border-color .12s;
+}
+.ft-ucet-odkaz:hover { background: var(--sunken); border-color: var(--line-2); }
+.ft-ucet-odkaz:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 2px; }
+.ft-ucet-odkaz .ft-i { flex: none; width: 18px; height: 18px; color: var(--mosaz); }
+.ft-ucet-radek {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 14px; color: var(--muted);
+}
+/* V liště má přepínač 32 px; tady je to dotykový cíl na tabletu u baru. */
+.ft-ucet-radek .ft-ikona { width: 44px; height: 44px; }
+
 
 /* ---- Vyhledávání ------------------------------------------------ */
 /* Pole je zatím jen vzhled — nic nehledá a na model se neptá.
@@ -406,6 +460,22 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
                       padding: 2px 6px; border-radius: 999px; }
 .ft-nav hr { border: 0; border-top: 1px solid var(--rail); margin: 8px 2px; width: 100%; }
 
+/* ---- Odhlásit se vlevo dole (Šéfík 8. 9.; ModuleSidebar) ----------
+   Oddělené čarou a PŘIPNUTÉ dole. `margin-top: auto` ho při krátkém
+   seznamu odsune na spodní hranu sloupce; `sticky` ho tam drží, když je
+   obrazovek tolik, že se sloupec roluje — jinak by odhlášení bylo až pod
+   posledním Nastavením, tedy zase schované. Podklad je barva sloupce,
+   ať přes něj rolující položky neprosvítají.
+
+   Týž kus stojí na konci sloupce Marketingu a Faktur (.modul-sloupec),
+   které na počítači levý sloupec aplikace nahrazují. */
+.ft-side-pata {
+  margin-top: auto; position: sticky; bottom: 0;
+  align-self: stretch;
+  padding: 10px 10px max(10px, var(--vlozka-dole));
+  background: var(--rail-2); border-top: 1px solid var(--rail);
+}
+
 .ft-main {
   flex: 1; min-width: 0;
   /* Vpravo `max`, protože obsah sahá až ke kraji okna; vlevo taky —
@@ -446,6 +516,22 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
   }
   .ft-nav .stitek, .ft-nav .soon small { display: none; }
   .ft-nav hr { width: 40px; }
+
+  /* Odhlásit se: v ikonovém sloupci jen ikona (jméno nese aria-label
+     a title, Odhlaseni.tsx), cíl 46 × 44. Dotaz se do 72 px nevejde —
+     vyskočí jako karta vedle sloupce, u jeho spodní hrany. `fixed`,
+     protože sloupec má overflow a kartu by jinak ořízl; z-index na
+     sloupci, ať ji nepřekryje obsah s vlastním z-indexem. */
+  .ft-side { z-index: 15; }
+  .ft-side-pata { display: flex; justify-content: center; padding: 8px 0 max(10px, var(--vlozka-dole)); }
+  .ft-side-pata .stitek { display: none; }
+  .ft-side-pata .ds-odhlaseni-tl { width: 46px; padding: 0; justify-content: center; gap: 0; }
+  .ft-side-pata .ds-odhlaseni-otazka {
+    position: fixed; z-index: 30;
+    left: calc(72px + 8px); bottom: calc(12px + var(--vlozka-dole));
+    width: 280px; box-shadow: var(--shadow);
+    max-height: calc(100dvh - var(--vysoka-lista) - 24px); overflow-y: auto;
+  }
   .ft-main {
     padding: 20px max(22px, var(--vlozka-vpravo)) 20px max(22px, var(--vlozka-vlevo));
   }
@@ -495,6 +581,22 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
   .ft-mob-mods .ft-mod { padding: 5px 11px; font-size: 12.5px; gap: 6px; flex: none; }
   .ft-mob-mods .ft-mod .ft-i { width: 13px; height: 13px; }
 
+  /* LEVÝ SLOUPEC SE LEPÍ POD ŘÁDKU MODULŮ, NE POD LIŠTU.
+
+     Do 25. 9. 2026 se lepil pod lištu a výšku měl „okno bez lišty“ —
+     jenže začínal až pod řádkou, takže o její výšku (47 px) přesahoval
+     spodní hranu okna. Na krátké stránce se tam nedalo dorolovat, a přesně
+     tam od 25. 9. stojí „Odhlásit se“ (.ft-side-pata): na 1280 × 800 bylo
+     vidět jen jeho horní čáru. Řádka má proto pevnou výšku a sloupec
+     s ní počítá. Kreslí se jen vedení (moduly), proto :has(). */
+  .ft-shell { --radka-modulu: 47px; }
+  .ft-mob-mods { height: var(--radka-modulu); align-items: center; }
+  .ft-shell:has(> .ft-mob-mods) .ft-side,
+  .ft-shell:has(> .ft-mob-mods) .modul-sloupec {
+    top: calc(var(--vysoka-lista) + var(--radka-modulu));
+    height: calc(100dvh - var(--vysoka-lista) - var(--radka-modulu));
+  }
+
   /* Moduly jsou pryč z lišty, takže tady už nástroje nemají komu
      ustupovat — a naopak samy ustoupit MUSÍ, jinak vytlačí stránku do
      šířky. Zúží se název pobočky (má tři tečky), ne stránka.
@@ -525,11 +627,12 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
   }
   .ft-side { display: none; }
 
-  /* Na telefonu ustupuje ozdoba, ne obsah. Iniciály firmy jsou
-     aria-hidden a jejich název je vidět v levém sloupci; oddělovač je
-     jen čárka. Dohromady je to 39 px, o které se název pobočky nemusí
-     zkrátit na nečitelnou zkratku. */
-  .ft-avatar, .ft-divider { display: none; }
+  /* Na telefonu ustupují iniciály s nabídkou účtu a oddělovač (jen
+     čárka). Nabídka se neztrácí: Moje údaje a Vzhled jsou v menu „Více“
+     ve spodní liště (MobileVice), a s nimi i odhlášení, které je nad
+     640 px vlevo dole (a sloupec se tu schovává). Dohromady je to 43 px,
+     o které se název pobočky nemusí zkrátit na nečitelnou zkratku. */
+  .ft-ucet, .ft-divider { display: none; }
 
   /* --------------------------------------------------------------------
      PĚT PRVKŮ SE NA TELEFON NEVEJDE
@@ -629,8 +732,12 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
   background: var(--rail-2); color: var(--rail-ink);
   position: sticky; top: var(--vysoka-lista);
   height: calc(100dvh - var(--vysoka-lista)); overflow-y: auto;
-  padding: 4px 10px 16px calc(10px + var(--vlozka-vlevo));
+  /* Dole bez odsazení: sloupec končí patou s odhlášením (.ft-side-pata),
+     která má odsazení vlastní a přes celou šířku čáru. */
+  padding: 4px 10px 0 calc(10px + var(--vlozka-vlevo));
 }
+.modul-sloupec-nav { display: flex; flex-direction: column; gap: 2px; }
+.modul-sloupec > .ft-side-pata { margin-inline: -10px; }
 .modul-skupina {
   padding: 14px 10px 6px; font-size: 11.5px; color: var(--rail-tlum);
   text-transform: uppercase; letter-spacing: .15em;

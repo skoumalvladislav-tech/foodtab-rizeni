@@ -172,6 +172,12 @@
 }
 .ds-dialog-close:hover { background: var(--sunken); color: var(--ink); }
 .ds-dialog-close:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
+/* Na telefonu dotykový cíl nejméně 44 px, jako ve spodní liště — křížek
+   je u menu „Více“ nejviditelnější cesta ven. Záporný okraj drží křížek
+   na stejném místě a hlavička panelu kvůli němu nepovyroste. */
+@media (max-width: 640px) {
+  .ds-dialog-close { width: 44px; height: 44px; margin: -6px -6px -6px 0; }
+}
 
 /* --- Toast ---------------------------------------------------------------- */
 
@@ -1050,13 +1056,34 @@ span.ds-sm-dl { cursor: default; }
   padding-top: 16px; border-top: 1px solid var(--line);
   font-size: 14px; color: var(--muted);
 }
-.ds-vice-odhlaseni { padding-top: 16px; border-top: 1px solid var(--line); }
-.ds-vice-odhlasit { display: inline-flex; align-items: center; gap: 8px; }
-.ds-vice-odhlasit .ft-i { width: 16px; height: 16px; }
-.ds-vice-dotaz { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--ink); }
-.ds-vice-akce { display: flex; flex-wrap: wrap; gap: 8px; }
-.ds-vice-akce form { margin: 0; }
-.ds-vice-poznamka { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+/* Odhlášení s dotazem (components/shell/Odhlaseni.tsx) — v menu „Více“
+   na telefonu i vlevo dole v levém sloupci, proto bez „vice“ v názvu. */
+.ds-odhlaseni { padding-top: 16px; border-top: 1px solid var(--line); }
+.ds-odhlaseni-tl { display: inline-flex; align-items: center; gap: 8px; }
+.ds-odhlaseni-tl .ft-i { width: 16px; height: 16px; }
+.ds-odhlaseni-dotaz { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--ink); }
+.ds-odhlaseni-akce { display: flex; flex-wrap: wrap; gap: 8px; }
+.ds-odhlaseni-akce form { margin: 0; }
+.ds-odhlaseni-poznamka { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+
+/* Ve sloupci (varianta="sloupec", .ft-side-pata v globals.css). Čáru nese
+   pata sloupce. Tlačítko vypadá jako položka sloupce — tmavý podklad,
+   tlumený text, ikona a slovo —, ne jako .ft-tl: obrysové tlačítko
+   s tmavým písmem by na tmavém sloupci zmizelo. Dotaz je světlá karta
+   s běžnými tlačítky: na počítači ve sloupci, na tabletu vedle něj. */
+.ds-odhlaseni-sloupec { padding-top: 0; border-top: 0; }
+.ds-odhlaseni-sloupec .ds-odhlaseni-tl {
+  appearance: none; border: 0; background: none; font: inherit; cursor: pointer;
+  width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 8px; gap: 10px;
+  font-size: 13.5px; color: var(--rail-tlum); text-align: left;
+}
+.ds-odhlaseni-sloupec .ds-odhlaseni-tl:hover { color: var(--rail-ink); background: var(--rail); }
+.ds-odhlaseni-sloupec .ds-odhlaseni-tl:focus-visible { outline: 2px solid var(--mosaz-sv); outline-offset: 1px; }
+.ds-odhlaseni-sloupec .ds-odhlaseni-tl .ft-i { width: 17px; height: 17px; }
+.ds-odhlaseni-sloupec .ds-odhlaseni-otazka {
+  padding: 12px; border-radius: 12px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line);
+}
 
 /* =====================================================================
    Směny na počítači — pracovní plocha manažera (`ds-smd-*`)
