@@ -153,8 +153,11 @@ jobs:
               || { echo "CHYBÍ hláška: KROK ${n}"; chybi=1; }
           done
 
-          # Záloha na pobočce výdeje (57). Krok 56 je na jiné větvi —
-          # zapíše se tam, kde vznikl.
+          # Pozvánka podle ověřené adresy účtu, ne profilu (56).
+          grep -qE '^[[:space:]]*== KROK 56 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 56"; chybi=1; }
+
+          # Záloha na pobočce výdeje (57).
           grep -qE '^[[:space:]]*== KROK 57 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 57"; chybi=1; }
 
