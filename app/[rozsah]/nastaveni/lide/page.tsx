@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { getUser, hasAccess } from "@/lib/authz";
+import { getUser, hasAccess, smiSpravovatPrava } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
 import { smimPridelit } from "@/lib/prideleni";
@@ -64,6 +64,10 @@ export default async function NastaveniLide({
     opravneni?: string;
     kdo?: string;
     mail?: string;
+    /** Oprávnění uložené člověku bez účtu — začne platit po přihlášení. */
+    bezuctu?: string;
+    /** Účet má, pozvánku nepřijal — rozsah se doplní po přijetí. */
+    bezclenstvi?: string;
     pozice?: string;
     nazev?: string;
     /** Komu se přiděluje PIN. Samotný PIN adresou NIKDY nechodí. */
@@ -79,6 +83,8 @@ export default async function NastaveniLide({
     opravneni: opravneniProId,
     kdo: kdoUlozen,
     mail: chybaMailu,
+    bezuctu,
+    bezclenstvi,
     pozice: poziceStav,
     nazev: nazevPozice,
     pin: pinProId,
@@ -266,8 +272,12 @@ export default async function NastaveniLide({
     kdo vidí mzdy". Formulář zaměstnance běží pod `people.manage` —
     kdyby se tu zaškrtávátka daly ukládat, otevřela by se ta díra
     jinými dveřmi. Vedoucí je proto vidí, ale neuloží.
+
+    Ptá se na FIRMU, ne na pobočku z adresy (`smiSpravovatPrava`). Do
+    25. 9. 2026 tu šel do `hasAccess` slug z adresy místo id pobočky,
+    databáze ho odmítla a zaškrtávátka byla zamčená i majiteli.
   */
-  const smiMenitPrava = await hasAccess(tenantId, "settings.manage", rozsah);
+  const smiMenitPrava = await smiSpravovatPrava(tenantId);
 
   /*
     Členství drží už jen ROZSAH a to, že člověk do firmy patří.
@@ -650,15 +660,27 @@ export default async function NastaveniLide({
               {textChyby ? ` (${textChyby})` : ""}
             </p>
           )}
+          {/*
+            Člověk bez účtu nebo bez přijaté pozvánky nedostal nic —
+            nemá kam. Hláška to proto nesmí tvrdit; říká, kdy to začne
+            platit. Dřív tyhle dva případy chodily jako `?chyba=`
+            a kreslily se červeně, přestože se všechno uložilo.
+          */}
           {ulozeno === "opravneni" ? (
             <p style={{ margin: "0 0 16px", fontSize: "14px", color: "var(--dobre)" }}>
               Oprávnění uloženo{kdoUlozen ? ` — ${kdoUlozen}` : ""}.{" "}
-              {chybaMailu
-                ? `Upozornění v aplikaci má, ale e-mail neodešel: ${chybaMailu}.`
-                : "Dostal upozornění v aplikaci i e-mailem."}
+              {bezuctu
+                ? "Začne platit, až se přihlásí. Rozsah (firma/pobočka) se nastaví po přijetí pozvánky."
+                : bezclenstvi
+                  ? "Rozsah (firma/pobočka) se doplní, až přijme pozvánku."
+                  : chybaMailu
+                    ? `Upozornění v aplikaci má, ale e-mail neodešel: ${chybaMailu}.`
+                    : "Dostal upozornění v aplikaci i e-mailem."}
             </p>
           ) : null}
-          {ulozeno && <p style={{ ...chybaHlaska, color: "var(--good)" }}>Uloženo.</p>}
+          {ulozeno && ulozeno !== "opravneni" ? (
+            <p style={{ ...chybaHlaska, color: "var(--good)" }}>Uloženo.</p>
+          ) : null}
 
           {/*
             Když někdo napíše „číšník“ a v databázi je „Číšník“, druhá
@@ -869,7 +891,7 @@ export default async function NastaveniLide({
                     </span>
                   ) : (
                     <Link
-                      href={`/${rozsah}/nastaveni/lide?opravneni=${z.id}`}
+                      href={`/${rozsah}/nastaveni/lide?opravneni=${z.id}#opravneni`}
                       style={z.position_id || z.je_majitel ? undefined : cekaNaPrideleni}
                       title="Přidělit oprávnění a rozsah"
                     >
@@ -919,6 +941,26 @@ export default async function NastaveniLide({
                         Upravit
                       </Link>
                       {/*
+                        Oprávnění. Do 25. 9. 2026 k nim vedl jen odkaz
+                        ve sloupci Oprávnění — na telefonu mimo obrazovku
+                        vpravo a psaný jako název zařazení, ne jako akce.
+                        V nabídce, kde člověk hledá „co s ním jde dělat",
+                        chyběly.
+
+                        `#opravneni`: panel se kreslí nad tabulkou, pod
+                        formulářem zaměstnance. Bez kotvy zůstane po
+                        kliknutí stránka nahoře a panel mimo obrazovku —
+                        vypadá to, že se nestalo nic.
+                      */}
+                      {!z.deleted_at && !posledniMajitel(z.id) ? (
+                        <Link
+                          href={`/${rozsah}/nastaveni/lide?opravneni=${z.id}#opravneni`}
+                          className="ft-kebab-polozka"
+                        >
+                          Oprávnění
+                        </Link>
+                      ) : null}
+                      {/*
                         PIN. Kreslí se jen tomu, kdo spravuje docházku —
                         a jen u nesmazaného člověka. U brigádníka bez
                         účtu je to jediná cesta, jak mu píchání
@@ -937,8 +979,13 @@ export default async function NastaveniLide({
                         v databázi to odmítne. Tlačítko se proto
                         nenabízí a je u toho vysvětlení; klikat na
                         něco, co skončí chybou, nemá smysl nabízet.
+
+                        `z.id`, ne `z.user_id`: majitelé jsou od 9. 9.
+                        2026 množina ZAMĚSTNANCŮ. S `user_id` se tu
+                        nikdo nenašel a Smazat se nabízelo i jedinému
+                        majiteli.
                       */}
-                      {!z.deleted_at && posledniMajitel(z.user_id) ? (
+                      {!z.deleted_at && posledniMajitel(z.id) ? (
                         <span
                           className="ft-kebab-polozka"
                           style={{ color: "var(--muted)", fontSize: "12.5px" }}
@@ -947,7 +994,7 @@ export default async function NastaveniLide({
                           Jediný majitel
                         </span>
                       ) : null}
-                      {!z.deleted_at && !posledniMajitel(z.user_id) && (
+                      {!z.deleted_at && !posledniMajitel(z.id) && (
                         <div className="ft-kebab-polozka" style={{ padding: "4px 6px" }}>
                           <SmazatZamestnance
                             akce={smazatZamestnance}
@@ -1096,11 +1143,9 @@ function popisChyby(kod: string): string {
     // Text píše databáze a chodí v adrese; tenhle je jen návěští.
     case "smazani":
       return "Smazat se to nepovedlo.";
-    // Zařazení jde nastavit i člověku bez účtu — uloží se a začne
-    // platit, jakmile se přihlásí. Bez členství nejde jen ROZSAH:
-    // ten říká, kde ta práva platí, a bez přihlášení není u koho.
-    case "opravneni-bez-clenstvi":
-      return "Zařazení se uložilo. Rozsah (firma/pobočka) se doplní, až člověk přijme pozvánku — do té chvíle není u koho ho vést.";
+    // Člověk bez účtu nebo bez přijaté pozvánky sem nechodí: uložilo
+    // se všechno, co jde, a hlásí se to jako úspěch (`bezuctu`,
+    // `bezclenstvi` u `ulozeno=opravneni`).
     case "opravneni-neprovedeno":
       return "Oprávnění se neuložilo. Buď je to vaše vlastní členství (to měnit nejde), nebo přidělujete víc, než máte sami.";
     case "opravneni-pobocky":

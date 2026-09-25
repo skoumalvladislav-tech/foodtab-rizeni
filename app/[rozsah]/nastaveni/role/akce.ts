@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { smiSpravovatPrava } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -42,6 +43,17 @@ export async function ulozitOpravneni(formData: FormData): Promise<void> {
 
   const pristup = await zkusPristup(tenantId, 'settings.manage', rozsah)
   if (pristup.stav !== 'ok') redirect('/')
+
+  /*
+    A navíc na FIRMĚ. `zkusPristup` se ptá na pobočku z adresy, kdežto
+    politika `position_permissions_*` chce `settings.manage` za celou
+    firmu. Provozní jedné pobočky by tu jinak prošel, databáze by mu
+    přidání odmítla chybou — a odebrání zahodila POTICHU, takže by
+    obrazovka hlásila „odebráno 2", i když se nestalo nic.
+  */
+  if (!(await smiSpravovatPrava(tenantId))) {
+    redirect(`/${rozsah}/nastaveni/role?chyba=pravo`)
+  }
 
   const supabase = await getServerSupabase()
 

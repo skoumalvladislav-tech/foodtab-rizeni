@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { NAZVY_MODULU } from "../../nabidka";
-import { hasAccess } from "@/lib/authz";
+import { smiSpravovatPrava } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { smimPridelit } from "@/lib/prideleni";
 import { seznam } from "@/lib/supabase/dotaz";
@@ -112,8 +112,15 @@ export default async function NastaveniOpravneni({
   }
 
   const { ctx } = pristup;
-  // Práva zařazení mění jen settings.manage. Seznam smí i people.manage.
-  const smiMenitPrava = await hasAccess(tenantId, "settings.manage", rozsah);
+  /*
+    Práva zařazení mění jen settings.manage, a to FIREMNÍ — stejně jako
+    politika na `position_permissions`. Seznam smí i people.manage.
+
+    Do 25. 9. 2026 tu šel do `hasAccess` slug z adresy („firma") místo
+    id pobočky. Databáze ho odmítla jako chybu, z chyby bylo „nesmí"
+    a zaškrtávátka byla zamčená všem, majiteli taky.
+  */
+  const smiMenitPrava = await smiSpravovatPrava(tenantId);
   const supabase = await getServerSupabase();
 
   const zarazeni = await seznam<Zarazeni>(

@@ -105,7 +105,10 @@ export default function PanelOpravneni({
       : []
 
   return (
-    <section style={karta}>
+    // `id` je cíl odkazů `…?opravneni=…#opravneni` ze seznamu lidí:
+    // panel stojí pod formulářem zaměstnance a bez kotvy by po kliknutí
+    // zůstal mimo obrazovku.
+    <section id="opravneni" style={karta}>
       <h2 style={nadpis}>Oprávnění pro {jmeno}</h2>
 
       {jaSam ? (
@@ -355,6 +358,8 @@ const karta = {
   padding: '16px 18px',
   marginTop: '16px',
   maxWidth: '640px',
+  // Po skoku na kotvu ať nadpis nezajede pod horní lištu.
+  scrollMarginTop: '80px',
 } as const
 
 const nadpis = { margin: '0 0 8px', fontSize: '17px', color: 'var(--ink)' } as const
