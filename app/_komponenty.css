@@ -1001,13 +1001,62 @@ span.ds-sm-dl { cursor: default; }
 .ds-sm-pridat-v-listu { width: 100%; }
 
 /* --- telefon: pruh modulů pod lištou pryč ---------------------------- */
-/* Moduly se na telefonu přepínají přes „Více“ (rozcestník všech
-   obrazovek); rolovací řádka pod lištou brala nejcennější místo.
+/* Moduly se na telefonu přepínají přes „Více“ (menu všech obrazovek
+   ve spodní liště, do 25. 9. 2026 rozcestník); rolovací řádka pod
+   lištou brala nejcennější místo.
    Selektor je o třídu delší, protože pravidlo v globals.css se načítá
    až po tomhle souboru. */
 @media (max-width: 640px) {
   .ft-shell .ft-mob-mods { display: none; }
 }
+
+/* --- telefon: menu „Více“ (components/shell/MobileVice.tsx) ------------ */
+/* Výsuvný list zdola místo zrušeného rozcestníku. Dlaždice po dvou vedle
+   sebe — na 375 px se tak vejde celý Provoz bez rolování. Vzhled podle
+   Rychlých akcí na Dnes (`.ds-rychla`): obrysová ikona v mosazi, linka,
+   radius 10; nadpisy skupin patkové (pravidlo h1–h3 výš). */
+
+.ds-vice { display: grid; gap: 20px; padding-bottom: var(--vlozka-dole); }
+/* Dojetý seznam nemá rolovat stránku pod listem. */
+.ds-drawer:has(.ds-vice) { overscroll-behavior: contain; }
+.ds-vice-nabidka { display: grid; gap: 18px; }
+.ds-vice-skupina h3 { margin: 0 0 8px; font-size: 17px; line-height: 1.25; font-weight: 600; }
+.ds-vice-mrizka {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+.ds-vice-mrizka a, .ds-vice-chystane {
+  display: flex; align-items: center; gap: 10px; min-width: 0; height: 100%;
+  /* Dotykový cíl nejméně 44 px, jako ve spodní liště. */
+  min-height: 48px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  color: var(--ink); text-decoration: none; font-size: 14px; line-height: 1.25;
+  overflow-wrap: anywhere; transition: background .12s, border-color .12s;
+}
+.ds-vice-mrizka a:hover { background: var(--sunken); border-color: var(--line-2); }
+.ds-vice-mrizka a:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 2px; }
+/* Kde člověk právě je: linka, podklad A tučné písmo — barva nikdy sama. */
+.ds-vice-mrizka a[aria-current="page"] {
+  border-color: var(--mosaz); font-weight: 600;
+  background: color-mix(in srgb, var(--mosaz-sv) 22%, var(--card));
+}
+.ds-vice-mrizka .ft-i { flex: none; width: 18px; height: 18px; color: var(--mosaz); }
+.ds-vice-chystane { border-style: dashed; background: transparent; color: var(--muted); }
+.ds-vice-chystane .ft-i { color: var(--faint); }
+.ds-vice-chystane small { display: block; margin-top: 2px; font-size: 11.5px; }
+
+.ds-vice-radek {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-top: 16px; border-top: 1px solid var(--line);
+  font-size: 14px; color: var(--muted);
+}
+.ds-vice-odhlaseni { padding-top: 16px; border-top: 1px solid var(--line); }
+.ds-vice-odhlasit { display: inline-flex; align-items: center; gap: 8px; }
+.ds-vice-odhlasit .ft-i { width: 16px; height: 16px; }
+.ds-vice-dotaz { margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--ink); }
+.ds-vice-akce { display: flex; flex-wrap: wrap; gap: 8px; }
+.ds-vice-akce form { margin: 0; }
+.ds-vice-poznamka { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 
 /* =====================================================================
    Směny na počítači — pracovní plocha manažera (`ds-smd-*`)

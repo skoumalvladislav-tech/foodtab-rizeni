@@ -171,8 +171,9 @@ console.log('\n== 3. Kam se po přihlášení vrátit ========================')
 
 ma('obyčejná cesta projde', bezpecnyCil('/firma/rozhovory'), '/firma/rozhovory')
 ma('cesta s dotazem projde', bezpecnyCil('/perla/ukoly?ukol=1'), '/perla/ukoly?ukol=1')
-ma('prázdno vede na rozcestník', bezpecnyCil(''), '/')
-ma('nic vede na rozcestník', bezpecnyCil(null), '/')
+// `/` je úvod (app/page.tsx), odtud se jde na Dnes.
+ma('prázdno vede na úvod', bezpecnyCil(''), '/')
+ma('nic vede na úvod', bezpecnyCil(null), '/')
 
 /*
   `//zloduch.cz` je platná adresa, kterou prohlížeč přečte jako CIZÍ
@@ -575,21 +576,25 @@ ma('odhlášení je na Moje údaje', zdrojMojeUdaje.includes('Odhlásit se'), tr
 ma('a volá serverovou akci', zdrojMojeUdaje.includes('odhlasit'), true)
 
 /*
-  A JE I NA ROZCESTNÍKU.
+  A JE I POD „VÍCE".
 
   Na Mých údajích bylo od 6. 9. a bylo udělané dobře — jen ho tam nikdo
   nenašel. Cesta k němu vede přes Více → Moje údaje → sjet úplně dolů,
   pod souhlasy a stahování dat; Šéfík ho nenašel, ačkoli věděl, že tam
-  je. Rozcestník je to místo pod „Více", kam člověk jde, když hledá
-  „něco ostatního".
+  je. Pod „Více" jde člověk, když hledá „něco ostatního".
+
+  Do 25. 9. 2026 to byl rozcestník (`app/[rozsah]/page.tsx`); ten je
+  zrušený a odhlášení se přestěhovalo do výsuvného menu „Více"
+  (components/shell/MobileVice.tsx). Že se v něm opravdu vykreslí
+  a nejdřív se ptá, ověřuje scripts/nabidka.test.mjs.
 
   Na Mých údajích zůstává taky — tam patří k výdeji dat a k souhlasům.
   Obě místa se hlídají zvlášť, aby se jedno nedalo omylem zrušit
   s tím, že „je to přece i vedle".
 */
-const zdrojRozcestnik = nacti('app/[rozsah]/page.tsx')
-ma('odhlášení je i na rozcestníku', zdrojRozcestnik.includes('Odhlásit se'), true)
-ma('a taky přes serverovou akci', zdrojRozcestnik.includes('odhlasit'), true)
+const zdrojVice = nacti('components/shell/MobileVice.tsx')
+ma('odhlášení je i pod „Více"', zdrojVice.includes('Odhlásit se'), true)
+ma('a taky přes serverovou akci', /action=\{odhlasit\}/.test(zdrojVice), true)
 
 /*
   V HORNÍ LIŠTĚ NE. Omylem ťuknutý odhlas uprostřed směny je horší než

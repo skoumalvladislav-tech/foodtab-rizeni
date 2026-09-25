@@ -35,6 +35,7 @@ const IKONA_MODULU: Record<string, IkonaKlic> = {
  */
 export default function GlobalTopbar({
   rozsah,
+  domu,
   moduly,
   vybranyModul,
   rozsahy,
@@ -47,6 +48,8 @@ export default function GlobalTopbar({
   iniciraly,
 }: {
   rozsah: string;
+  /** Kam vede logo — výchozí obrazovka rozsahu (Dnes), ne holá adresa. */
+  domu: string;
   moduly: ModulProp[];
   vybranyModul: string | null;
   rozsahy: RozsahProp[];
@@ -91,7 +94,9 @@ export default function GlobalTopbar({
   return (
     <>
       <header className="ft-topbar">
-        <Link href={`/${rozsah}`} className="ft-brand">
+        {/* Do 25. 9. 2026 vedlo logo na rozcestník; ten je zrušený a logo
+            vede domů, na Dnes — rovnou, bez přesměrování z holé adresy. */}
+        <Link href={domu} className="ft-brand">
           Food<em>tab</em>
         </Link>
 
@@ -128,9 +133,9 @@ export default function GlobalTopbar({
           </div>
 
           {/*
-            Na telefonu se přepínač režimu z lišty stěhuje na rozcestník
-            („Více“). Nemizí — jen nesedí na nejdražším místě aplikace.
-            Viz .ft-rezim v globals.css.
+            Na telefonu se přepínač režimu z lišty stěhuje do menu „Více“
+            ve spodní liště (MobileVice). Nemizí — jen nesedí na
+            nejdražším místě aplikace. Viz .ft-rezim v globals.css.
           */}
           <span className="ft-rezim">
             <PrepinacRezimu />
@@ -195,7 +200,7 @@ export default function GlobalTopbar({
           {cilNastaveni ? (
             <>
               <span className="ft-divider" />
-              {/* Na telefonu taky pryč — Nastavení je pod „Více“. */}
+              {/* Na telefonu taky pryč — Nastavení je v menu „Více“. */}
               <Link href={cilNastaveni} className="ft-ikona ram ft-nastaveni" title="Nastavení" aria-label="Nastavení">
                 <Ikona klic="kolo" />
               </Link>

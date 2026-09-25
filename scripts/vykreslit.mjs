@@ -134,9 +134,20 @@ export async function nactiKomponentu(soubor, nahrady = []) {
  * výchozí export a které se mají spustit s podstrčenou databází.
  */
 export async function nactiModul(soubor, nahrady = []) {
-  const cil = new URL(soubor, KOREN)
-  const adresa = naAdresu(cil, nahrady, new Map())
-  return import(adresa)
+  return import(adresaModulu(soubor, nahrady))
+}
+
+/**
+ * Přeložený soubor jako adresa, kterou jde předat DALŠÍMU souboru
+ * v `nahrady`.
+ *
+ * Pro `.ts` se skutečnými importy přes `@/`: sourozenecký `.ts` se
+ * jinak načítá tak, jak je, a Node `@/…` nezná. Takhle jde podstrčit
+ * skutečný `nabidka.ts`, který si sáhne na skutečný `lib/authz.ts`,
+ * a podstrčená je jen databáze pod ním — ne rozhodování nad ní.
+ */
+export function adresaModulu(soubor, nahrady = []) {
+  return naAdresu(new URL(soubor, KOREN), nahrady, new Map())
 }
 
 /**

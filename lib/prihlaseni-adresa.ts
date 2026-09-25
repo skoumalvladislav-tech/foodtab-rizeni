@@ -36,8 +36,8 @@ export async function odkazNaPrihlaseni(
   const kam = bezpecnyCil(adresa)
 
   const q = new URLSearchParams(parametry)
-  // Na rozcestník se vracet nemusí, to je stejně výchozí cíl — a kratší
-  // adresa se líp čte v protokolu i v e-mailu.
+  // Na úvod (`/`, odtud na Dnes) se vracet nemusí, to je stejně výchozí
+  // cíl — a kratší adresa se líp čte v protokolu i v e-mailu.
   if (kam !== '/') q.set('kam', kam)
 
   const dotaz = q.toString()
