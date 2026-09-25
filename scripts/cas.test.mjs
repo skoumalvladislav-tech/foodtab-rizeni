@@ -34,6 +34,7 @@
 
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -219,7 +220,10 @@ try {
   for (const tz of ['UTC', 'America/New_York', 'Europe/Prague']) {
     const ven = execFileSync(
       process.execPath,
-      ['--experimental-strip-types', soubor.pathname.replace(/^\//, '')],
+      // fileURLToPath, ne `pathname` bez lomítka: to dávalo cestu jen
+      // na Windows (C:/…), na linuxovém běžci CI z ní bylo relativní
+      // home/runner/… a test spadl (25. 9., první běh CI Aplikace).
+      ['--experimental-strip-types', fileURLToPath(soubor)],
       { encoding: 'utf8', env: { ...process.env, TZ: tz } },
     )
     ma(`pod TZ=${tz} pořád 22:00`, ven.trim(), '22:00')

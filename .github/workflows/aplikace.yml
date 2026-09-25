@@ -13,6 +13,12 @@ name: Aplikace
 #
 # Žádná tajemství: testy běží proti podstrčené databázi a nikam
 # nevolají. Kdyby si jednou nějaký řekl o klíč, patří jinam, ne sem.
+#
+# NOVÝ TEST: každý scripts/*.test.mjs musí být v TESTY, nebo ve
+# VYNECHANE (dole v kroku Testy). Nezařazený shodí job, i když sám
+# prochází. Platí i pro testy z větví, které se sem teprve sloučí:
+# kdo slučuje, připíše je ve stejném PR (25. 9. 2026 to čeká `ucet`
+# z větve dochazka-ucet-naklady).
 on:
   push:
     branches: [main]
@@ -60,7 +66,11 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      # Testy git nepotřebují. Token z checkoutu by jinak ležel
+      # v .git/config po celý běh kódu z PR (npm ci, testy).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Node 24: na něm se seznam níž ověřil (25. 9. 2026, v24.19.0).
       # package.json chce ">=22.13.0". Databáze Node nepotřebuje, pouští

@@ -478,6 +478,14 @@ select pg_temp.check('výjimku pod firmou B našemu člověku nezapíše — „
      values (%L, %L, %L, true)', :'tenant_b', :'xaver', 'settings.manage'),
     '23514', 'Zaměstnanec nepatří této firmě'));
 
+-- A vzít mu právo taky ne. Politika firmy B řádek pustí a na strop
+-- se u `granted = false` neptá — zastavit ho musí spoušť sama.
+select pg_temp.check('odebírací výjimku pod firmou B našemu člověku nezapíše',
+  pg_temp.spadne_hlaskou(format(
+    'insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted)
+     values (%L, %L, %L, false)', :'tenant_b', :'xaver', 'shifts.read'),
+    '23514', 'Zaměstnanec nepatří této firmě'));
+
 select pg_temp.check('právo pod firmou B našemu zařazení nezapíše — „Zařazení nepatří"',
   pg_temp.spadne_hlaskou(format(
     'insert into public.position_permissions (tenant_id, position_id, permission_key)
