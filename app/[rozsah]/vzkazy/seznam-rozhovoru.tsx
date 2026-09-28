@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
+import { slovoPodleCisla } from '@/lib/upozorneni-text'
 import Ikona from '../ikona'
 import type { IkonaKlic } from '../nabidka'
 
@@ -54,6 +55,8 @@ export default function SeznamRozhovoru({
   aktivniId,
   posledniText,
   nazvyOsobnich,
+  tlacitkoKanaluPobocky = false,
+  tlacitkoKanaluUseku = false,
 }: {
   rozsah: string
   rozhovory: Rozhovor[]
@@ -63,12 +66,34 @@ export default function SeznamRozhovoru({
   posledniText?: Map<string, string>
   /** Názvy osobních rozhovorů bez názvu — jména ostatních (jmena_osobnich_rozhovoru). */
   nazvyOsobnich?: Map<string, string>
+  /** Stránka nad seznamem kreslí „+ Otevřít kanál pobočky“ (jen na úrovni pobočky). */
+  tlacitkoKanaluPobocky?: boolean
+  /** Stránka nad seznamem kreslí „+ Otevřít kanál úseku“ (jen kdo úsek má). */
+  tlacitkoKanaluUseku?: boolean
 }) {
+  /*
+    Do 27. 9. tu stálo „Osobní rozhovor zatím zakládá vedoucí.“ To
+    nikdy neplatilo celé a od 21. 9. vůbec: rozhovor založí kdokoli
+    s účtem (výběr příjemců, `komu_muzu_psat`). Návod říká jen to, co
+    opravdu jde — a od 28. 9. i jen o tlačítkách, která nahoře opravdu
+    jsou: na úrovni celé firmy tlačítko kanálu pobočky není a kanál
+    úseku má jen ten, kdo úsek má.
+  */
   if (rozhovory.length === 0) {
+    const kanal =
+      tlacitkoKanaluPobocky && tlacitkoKanaluUseku
+        ? 'kanál své pobočky nebo úseku'
+        : tlacitkoKanaluPobocky
+          ? 'kanál své pobočky'
+          : tlacitkoKanaluUseku
+            ? 'kanál svého úseku'
+            : null
+    const navod = kanal
+      ? `Kolegovi napíšete přes „+ Nový rozhovor“, ${kanal} otevřete tlačítkem nahoře a vedoucímu nebo majiteli napíšete přes „Napsat vedení“.`
+      : 'Kolegovi napíšete přes „+ Nový rozhovor“ a vedoucímu nebo majiteli přes „Napsat vedení“.'
     return (
-      <p style={{ fontSize: '13.5px', color: 'var(--muted)', padding: '4px 2px' }}>
-        Kanál své pobočky otevřete tlačítkem nahoře. Osobní rozhovor
-        zatím zakládá vedoucí.
+      <p style={{ fontSize: '13.5px', color: 'var(--muted)', padding: '4px 2px', lineHeight: 1.5 }}>
+        Zatím tu žádný rozhovor není. {navod}
       </p>
     )
   }
@@ -176,7 +201,7 @@ export default function SeznamRozhovoru({
                   >
                     {r.ceka > 0
                       ? `${r.ceka} z ${r.neprectenych} čeká na píchnutí`
-                      : `${r.neprectenych} nepřečtené`}
+                      : `${r.neprectenych} ${slovoPodleCisla(r.neprectenych, 'nepřečtená', 'nepřečtené', 'nepřečtených')}`}
                   </span>
                 ) : null}
               </span>

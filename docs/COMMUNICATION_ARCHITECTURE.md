@@ -219,12 +219,33 @@ se nepřejmenovávají ani nepřepisují. Adresy `/vzkazy`, `/vzkazy/[konverzace
 
 Podle přiloženého vizuálu (desktop tři sloupce, mobil obrazovky 1–8).
 
-* **Provozní centrum** = záložky *Přehled · Komunikace · Úkoly · Checklisty ·
-  Nástěnka* nad stávajícími trasami (`/dnes`, `/vzkazy`, `/ukoly`,
-  `/vzkazy?zalozka=nastenka`); nic se nepřesouvá, jen se sjednotí navigace.
-* **Desktop `/vzkazy/[konverzace]`:** seznam konverzací | vlákno | panel
-  „O konverzaci“ (účastníci, sdílené soubory, rychlé akce, související úkoly,
-  systémové události).
+* **„Vzkazy a úkoly“** (do 22. 9. „Provozní centrum“; stav k 27. 9.) =
+  položka v nabídce se ČTYŘMI záložkami *Komunikace · Úkoly · Checklisty ·
+  Nástěnka* nad stávajícími trasami (`/vzkazy`, `/ukoly`,
+  `/ukoly/checklisty`, `/vzkazy?zalozka=nastenka`). Záložka „Přehled“
+  (odkaz na `/dnes`) odpadla 22. 9. — Dnes má vlastní položku.
+  * Každá stránka pod položkou má **jednu hlavičku**: nadpisek „Vzkazy
+    a úkoly“ (`OCI_VZKAZU`), velký nadpis = záložka nebo věc (název
+    rozhovoru, název úkolu). Checklisty mají vlastní rozvržení z 23. 9.
+  * **Čísla u záložek a skryté záložky počítá jedna funkce**
+    `nactiZalozky` (`app/[rozsah]/provozni-centrum/pocty.ts`) a posílá je
+    každá stránka. Komunikace = nepřečtené zprávy (`moje_rozhovory`),
+    Úkoly = OTEVŘENÉ úkoly pobočky (čtečka čte „otevřené“, ne
+    „nepřečtené“), Nástěnka = nepřečtená oznámení z téhož dotazu jako
+    seznam (`dotazNastenky`), Checklisty bez čísla.
+  * Úkoly a Checklisty se skrývají bez `tasks.read`, **Nástěnka bez
+    `communication.read`** (`skryteZalozky`, `lib/komunikace/zalozky.ts`).
+    Komunikace se neskrývá nikdy — rozhovory autorizuje účastnictví.
+* **Desktop `/vzkazy/[konverzace]`:** seznam rozhovorů | vlákno | panel
+  „O rozhovoru“ (účastníci, sdílené soubory, rychlé akce) | „Úkoly
+  a události“. Na telefonu jen vlákno s „← Komunikace“, bez velkého nadpisu
+  a záložek; panely sbalené pod „Podrobnosti rozhovoru“.
+* **Přečtení (27. 9.):** rozhovor se označí za přečtený po zobrazení
+  (`oznacit-po-zobrazeni.tsx`, ne při vykreslení na serveru — prefetch)
+  a při odpovědi. Dělítko „Nové zprávy“ drží hodnotu z prvního vykreslení.
+  U kanálu pobočky a úseku je řádek v `konverzace_ucastnici` jen záložka
+  čtení, přístup nedává (`app.ucastnici_vypsani`, migrace
+  `20260927100000_cteni_rozhovoru`, scénář `krok62`).
 * **Zpráva → úkol:** akce u zprávy otevře formulář s pravidlovým návrhem
   (název, termín, komu); úkol vznikne až potvrzením, do konverzace přibude
   systémová událost a odkaz zpět na zprávu.

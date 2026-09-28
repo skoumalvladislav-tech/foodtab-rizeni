@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import PrepinacRezimu from "@/app/prepinac-rezimu";
 import Ikona from "@/app/[rozsah]/ikona";
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import PrepinacRozsahu, { type RozsahProp } from "@/app/[rozsah]/prepinac-rozsahu";
+import { otevritUpozorneni, oznacitVsePrectene } from "@/app/[rozsah]/upozorneni/otevrit";
 import { datumACasVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { nadpisUpozorneni, obdobiRozpisu } from "@/lib/upozorneni-text";
-import type { ModulProp, UpozorneniProp } from "./AppShell";
+import type { ModulProp, RozpadZvonecku, UpozorneniProp } from "./AppShell";
 import MenuUctu from "./MenuUctu";
 
 /**
@@ -44,6 +46,7 @@ export default function GlobalTopbar({
   aktivniRozsah,
   cilRozsahu,
   neprectenych,
+  rozpad,
   posledniUpozorneni,
   cilNastaveni,
   nazevFirmy,
@@ -58,6 +61,8 @@ export default function GlobalTopbar({
   aktivniRozsah: string;
   cilRozsahu: (slug: string) => string;
   neprectenych: number;
+  /** Z čeho se číslo na zvonečku skládá; panel to ukáže po řádcích. */
+  rozpad?: RozpadZvonecku;
   posledniUpozorneni: UpozorneniProp[];
   cilNastaveni: string | null;
   nazevFirmy: string;
@@ -66,12 +71,28 @@ export default function GlobalTopbar({
   /*
     Vysouvací panel místo rovnou celé stránky — zadání ("KOMUNIKACE /
     VZKAZY 2.0", bod 15) navrhuje náhled u zvonečku, ne jen odkaz.
-    Panel jen NÁHLÍŽÍ; otevírá se z něj tatáž `/upozorneni`, kde se
-    dá i cokoli udělat (potvrdit, označit přečtené) — dvojitou
-    logiku pro totéž tady nemá cenu stavět.
+
+    Od 27. 9. panel ukazuje, CO číslo na zvonečku počítá: sčítají se
+    tři zdroje (upozornění, nepřečtené zprávy, nová oznámení) a do té
+    doby byl v panelu jen první — kdo měl na zvonečku „5“ a v panelu
+    nic nového, nevěděl, kde to je. Klepnutí na upozornění ho označí za
+    přečtené a otevře věc, ke které patří (`otevritUpozorneni`).
   */
   const [otevreno, setOtevreno] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  /*
+    Klepnutí na upozornění odešle formulář a server přesměruje na věc
+    (27. 9.). Lišta je v rámu a přechodem se nepřekreslí od nuly, takže
+    by panel zůstal otevřený nad novou stránkou — zavře se proto při
+    každé změně adresy (úprava stavu při vykreslení, ne v efektu).
+  */
+  const cesta = usePathname();
+  const [cestaPanelu, setCestaPanelu] = useState(cesta);
+  if (cestaPanelu !== cesta) {
+    setCestaPanelu(cesta);
+    if (otevreno) setOtevreno(false);
+  }
 
   useEffect(() => {
     if (!otevreno) return;
@@ -149,10 +170,8 @@ export default function GlobalTopbar({
             nešlo by se k přečteným upozorněním vrátit.
 
             Tlačítko místo odkazu — otevírá panel NA MÍSTĚ, ne celou
-            stránku. Panel jen náhlíží; klik na položku i "Zobrazit
-            všechna" stejně vedou na `/upozorneni`, kde se dá s nimi
-            i něco udělat (potvrdit, označit přečtené) — druhou logiku
-            pro totéž tady nemá cenu stavět.
+            stránku. Ikona je zvonek (do 27. 9. bublina, stejná jako
+            Vzkazy — nešlo je od sebe poznat).
           */}
           <div ref={panelRef} style={{ position: "relative" }}>
             <button
@@ -165,7 +184,7 @@ export default function GlobalTopbar({
               aria-haspopup="true"
               style={{ position: "relative", border: "none", background: "none", padding: 0, font: "inherit", cursor: "pointer" }}
             >
-              <Ikona klic="zprava" />
+              <Ikona klic="zvonek" />
               {neprectenych > 0 ? (
                 <span
                   aria-hidden="true"
@@ -194,6 +213,7 @@ export default function GlobalTopbar({
               <PanelUpozorneni
                 rozsah={rozsah}
                 upozorneni={posledniUpozorneni}
+                rozpad={rozpad}
                 onZavrit={() => setOtevreno(false)}
               />
             ) : null}
@@ -267,94 +287,96 @@ function Modul({ modul, vybrany }: { modul: ModulProp; vybrany: boolean }) {
 /**
  * Rozbalovací panel u zvonečku.
  *
- * Jen náhled — potvrdit, označit přečtené a odkazy na konkrétní objekt
- * umí plná stránka `/upozorneni`, tady by to bylo zdvojení. Klik na
- * položku i patičku vedou tam.
+ * Nahoře řádky „Nepřečtené zprávy“ a „Nová oznámení“ (jen když nejsou
+ * nula) — číslo na zvonečku je sčítá, tak je musí být v panelu vidět.
+ * „Zprávy“, ne „rozhovory“ (28. 9.): číslo je součet nepřečtených ZPRÁV
+ * ze všech rozhovorů (`moje_rozhovory.neprectenych`). Kanál se šesti
+ * novými zprávami byl „Nepřečtené rozhovory: 6“ a filtr pak našel jeden.
+ * Pod nimi posledních pár upozornění. Každé je formulář: klepnutí ho
+ * označí za přečtené a přesměruje na věc (`otevritUpozorneni`; cíl se
+ * počítá z uloženého řádku, ne z panelu). Dole „Označit vše za
+ * přečtené“, „Nastavení upozornění“ a celá stránka Upozornění.
  */
-function PanelUpozorneni({
+export function PanelUpozorneni({
   rozsah,
   upozorneni,
+  rozpad,
   onZavrit,
 }: {
   rozsah: string;
   upozorneni: UpozorneniProp[];
+  rozpad?: RozpadZvonecku;
   onZavrit: () => void;
 }) {
+  const nejakeNeprectene = upozorneni.some((z) => !z.read_at) || (rozpad?.upozorneni ?? 0) > 0;
   return (
-    <div
-      role="dialog"
-      aria-label="Upozornění"
-      style={{
-        position: "absolute",
-        top: "calc(100% + 8px)",
-        insetInlineEnd: 0,
-        width: "min(340px, calc(100vw - 24px))",
-        maxHeight: "min(480px, calc(100vh - 80px))",
-        overflowY: "auto",
-        background: "var(--card)",
-        border: "1px solid var(--line)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "var(--shadow)",
-        zIndex: 50,
-      }}
-    >
-      <div
-        style={{
-          padding: "12px 14px",
-          borderBottom: "1px solid var(--line)",
-          fontSize: "14px",
-          fontWeight: 700,
-        }}
-      >
-        Upozornění
+    <div role="dialog" aria-label="Upozornění" className="ds-plocha ft-zvonek-panel">
+      <div className="ft-zvonek-hlava">
+        <Ikona klic="zvonek" />
+        <h2>Upozornění</h2>
+        <Link href={`/${rozsah}/upozorneni/nastaveni`} onClick={onZavrit} className="ft-zvonek-nastaveni">
+          Nastavení
+        </Link>
       </div>
 
-      {upozorneni.length === 0 ? (
-        <p style={{ margin: 0, padding: "16px 14px", fontSize: "13px", color: "var(--muted)" }}>
-          Zatím tu nic není.
-        </p>
-      ) : (
-        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {upozorneni.map((z) => (
-            <li key={z.id} style={{ borderBottom: "1px solid var(--line)" }}>
-              <Link
-                href={`/${rozsah}/upozorneni`}
-                onClick={onZavrit}
-                style={{
-                  display: "block",
-                  padding: "10px 14px",
-                  color: "inherit",
-                  textDecoration: "none",
-                  borderInlineStart: z.read_at ? "3px solid transparent" : "3px solid var(--mosaz)",
-                }}
-              >
-                <strong style={{ display: "block", fontSize: "13.5px" }}>
-                  {nadpisUpozorneni(z.druh, z.telo, obdobiRozpisu)}
-                </strong>
-                <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-                  {datumACasVPasmu(z.created_at, ZONA_VYCHOZI)}
-                  {!z.read_at ? " · nové" : ""}
-                </span>
+      {(rozpad?.rozhovory ?? 0) > 0 || (rozpad?.nastenka ?? 0) > 0 ? (
+        <ul className="ft-zvonek-souhrn">
+          {(rozpad?.rozhovory ?? 0) > 0 ? (
+            <li>
+              <Link href={`/${rozsah}/vzkazy?filtr=neprectene`} onClick={onZavrit}>
+                <Ikona klic="zprava" />
+                <span>Nepřečtené zprávy: {rozpad?.rozhovory}</span>
+                <Ikona klic="sipkaVpravo" />
               </Link>
+            </li>
+          ) : null}
+          {(rozpad?.nastenka ?? 0) > 0 ? (
+            <li>
+              <Link href={`/${rozsah}/vzkazy?zalozka=nastenka`} onClick={onZavrit}>
+                <Ikona klic="praporek" />
+                <span>Nová oznámení: {rozpad?.nastenka}</span>
+                <Ikona klic="sipkaVpravo" />
+              </Link>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+
+      {upozorneni.length === 0 ? (
+        <p className="ft-zvonek-prazdno">Zatím tu nic není.</p>
+      ) : (
+        <ul className="ft-zvonek-seznam">
+          {upozorneni.map((z) => (
+            <li key={z.id}>
+              <form action={otevritUpozorneni}>
+                <input type="hidden" name="rozsah" value={rozsah} />
+                <input type="hidden" name="id" value={z.id} />
+                <button type="submit" data-nove={z.read_at ? undefined : "1"}>
+                  <strong>{nadpisUpozorneni(z.druh, z.telo, obdobiRozpisu)}</strong>
+                  <span>
+                    {datumACasVPasmu(z.created_at, ZONA_VYCHOZI)}
+                    {!z.read_at ? " · nové" : ""}
+                  </span>
+                </button>
+              </form>
             </li>
           ))}
         </ul>
       )}
 
-      <Link
-        href={`/${rozsah}/upozorneni`}
-        onClick={onZavrit}
-        style={{
-          display: "block",
-          padding: "10px 14px",
-          fontSize: "13px",
-          fontWeight: 600,
-          color: "var(--mosaz)",
-          textDecoration: "none",
-        }}
-      >
-        Zobrazit všechna upozornění →
-      </Link>
+      <div className="ft-zvonek-pata">
+        {nejakeNeprectene ? (
+          <form action={oznacitVsePrectene}>
+            <input type="hidden" name="rozsah" value={rozsah} />
+            <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
+              <Ikona klic="fajfka" /> Označit vše za přečtené
+            </button>
+          </form>
+        ) : null}
+        <Link href={`/${rozsah}/upozorneni`} onClick={onZavrit} className="ft-zvonek-vse">
+          Zobrazit všechna upozornění →
+        </Link>
+      </div>
     </div>
   );
 }

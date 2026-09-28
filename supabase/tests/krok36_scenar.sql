@@ -57,6 +57,14 @@ select id as clen_nora from public.memberships
 insert into public.membership_branches (membership_id, branch_id) values
   (:'clen_nora', :'perla');
 
+-- Od migrace 20260927100000 dostane upozornění na oznámení jen ten, kdo
+-- Nástěnku smí číst. Nora ho mít musí, jinak by oddíl 4 měřil právo
+-- místo přepínače „nástěnka".
+select id as nora from public.employees
+ where user_id = '36360001-0000-0000-0000-000000000001' \gset
+insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted)
+values (:'tenant', :'nora', 'communication.read', true);
+
 select set_config('test.tenant', :'tenant', false);
 
 
@@ -312,6 +320,13 @@ select id as clen_olda36 from public.memberships
 
 insert into public.membership_branches (membership_id, branch_id) values
   (:'clen_olda36', :'perla');
+
+-- Olda Nástěnku číst SMÍ — ať kontrola „nedostane" níž měří úsek, ne
+-- chybějící právo (od migrace 20260927100000 by bez práva nedostal nic).
+select id as olda36 from public.employees
+ where user_id = '36360002-0000-0000-0000-000000000002' \gset
+insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted)
+values (:'tenant', :'olda36', 'communication.read', true);
 
 -- Majitel pošle oznámení pro úsek Kuchyně — Olda je na STEJNÉ pobočce
 -- (Perla), ale v JINÉM úseku (Bar), takže nesmí dostat nic. Kdyby

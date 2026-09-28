@@ -55,6 +55,11 @@ import {
   seskupitPrijemce,
   souhrnVyberu,
 } from '../lib/komunikace/prijemci.ts'
+// 27. 9. 2026 (docs/komunikace-stav-a-plan-2026-09-27.md, T4–T6)
+import { cekaNaMe, jeNoveProMe, jeProMe, seraditOznameni } from '../lib/komunikace/nastenka.ts'
+import { OCI_VZKAZU, odznakPoctu, popisPoctu, skryteZalozky } from '../lib/komunikace/zalozky.ts'
+import { vetaODoruceni, vetaOPushi } from '../lib/komunikace/veta-o-pushi.ts'
+import { popisVzkazuNaDnes } from '../lib/komunikace/dnes.ts'
 
 let chyb = 0
 const je = (popis, skutecne, ocekavane) => {
@@ -425,6 +430,203 @@ je('text zprávy: víc příloh bez popisku', textZpravyPrilohy('   ', ['a.pdf',
 je('text zprávy: název v textu je očištěný', textZpravyPrilohy('', ['../x/a.pdf']), 'Příloha: a.pdf')
 je('text zprávy: dlouhý popisek se ořízne na 4000', textZpravyPrilohy('x'.repeat(5000), []).length, 4000)
 je('text zprávy: nikdy prázdný', textZpravyPrilohy('', []), 'Příloha')
+
+/* =====================================================================
+   27. 9. 2026 — plán docs/komunikace-stav-a-plan-2026-09-27.md
+   ===================================================================== */
+
+console.log('\n== Nástěnka: pořadí (T6, zadání 5., 6. a 8. 9.) ==')
+
+/*
+  Nepotvrzená s „Beru na vědomí“ NAHOŘE a OD NEJSTARŠÍHO, pak připnutá,
+  pak ostatní od nejnovějšího. Do 27. 9. bylo „připnuté, pak nejnovější“
+  a nepotvrzené oznámení sjelo pod novinky.
+*/
+const OZ = (id, den, { pinned = false, ack = false, ...adresa } = {}) => ({
+  id, pinned, requires_acknowledgment: ack, created_at: `2026-09-${den}T10:00:00Z`,
+  author_id: null, employee_id: null, usek_id: null, position_id: null, branch_id: null, ...adresa,
+})
+/** Čtenář: kuchař na Perle (úsek Kuchyně, pozice Kuchař). */
+const JA = { userId: 'u-ja', employeeId: 'e-ja', branchId: 'perla', usekId: 'kuchyne', positionId: 'kuchar' }
+const oznameni = [
+  OZ('novinka', '26'),
+  OZ('pripnute-stare', '10', { pinned: true }),
+  OZ('potvrdit-nove', '25', { ack: true }),
+  OZ('potvrdit-stare', '20', { ack: true }),
+  OZ('potvrzene', '24', { ack: true }),
+  OZ('pripnute-nove', '22', { pinned: true }),
+  OZ('stara-novinka', '21'),
+  OZ('pripnute-k-potvrzeni', '15', { pinned: true, ack: true }),
+]
+const serazena = seraditOznameni(oznameni, new Set(['potvrzene']), JA).map((z) => z.id)
+je('nepotvrzená s potvrzením nahoře, od nejstaršího (i připnuté k potvrzení mezi nimi)',
+  serazena.slice(0, 3), ['pripnute-k-potvrzeni', 'potvrdit-stare', 'potvrdit-nove'])
+je('pak připnutá, od nejnovějšího', serazena.slice(3, 5), ['pripnute-nove', 'pripnute-stare'])
+je('pak ostatní od nejnovějšího (potvrzené už mezi ně patří)', serazena.slice(5), ['novinka', 'potvrzene', 'stara-novinka'])
+je('nic se neztratí ani nezdvojí', [...serazena].sort(), oznameni.map((z) => z.id).sort())
+je('vstup se nemění (řadí se kopie)', oznameni[0].id, 'novinka')
+je('přečtené oznámení BEZ potvrzení nahoru nejde',
+  seraditOznameni([OZ('a', '20'), OZ('b', '21')], new Set(), JA).map((z) => z.id), ['b', 'a'])
+
+console.log('\n== Nástěnka: „pro mě“ — čeká a počítá se jen to, co je mně (28. 9.) ==')
+
+/*
+  RLS pustí vedoucímu i oznámení cizích úseků a autorovi jeho vlastní.
+  Do 28. 9. se všechno počítalo jako „Čeká na vaše potvrzení“ a „Nová
+  oznámení“. Pravidla jsou STEJNÁ jako trigger upozornění a „Nepotvrdili“:
+  ne autor; člověk, jinak úsek, jinak pozice, jinak domovská pobočka,
+  jinak celá firma.
+*/
+je('celá firma → pro mě', jeProMe(OZ('f', '20'), JA), true)
+je('moje vlastní oznámení → NE (autor = já)', jeProMe(OZ('v', '20', { author_id: 'u-ja' }), JA), false)
+je('osobní pro mě / pro jiného', [jeProMe(OZ('o', '20', { employee_id: 'e-ja' }), JA), jeProMe(OZ('o2', '20', { employee_id: 'e-jiny' }), JA)], [true, false])
+je('úsek můj / cizí', [jeProMe(OZ('u', '20', { usek_id: 'kuchyne' }), JA), jeProMe(OZ('u2', '20', { usek_id: 'bar' }), JA)], [true, false])
+je('úsek má přednost před pobočkou (úsekové oznámení nese pobočku úseku)',
+  jeProMe(OZ('u3', '20', { usek_id: 'bar', branch_id: 'perla' }), JA), false)
+je('pozice moje / cizí', [jeProMe(OZ('p', '20', { position_id: 'kuchar' }), JA), jeProMe(OZ('p2', '20', { position_id: 'barman' }), JA)], [true, false])
+je('pobočka domovská / jiná', [jeProMe(OZ('b', '20', { branch_id: 'perla' }), JA), jeProMe(OZ('b2', '20', { branch_id: 'bar' }), JA)], [true, false])
+je('bez úseku nesedí žádné úsekové oznámení', jeProMe(OZ('u4', '20', { usek_id: 'kuchyne' }), { ...JA, usekId: null }), false)
+je('bez zaměstnaneckého záznamu není pro mě nic', jeProMe(OZ('f2', '20'), { ...JA, employeeId: null }), false)
+{
+  const vlastni = OZ('vlastni-k-potvrzeni', '10', { ack: true, author_id: 'u-ja' })
+  const cizi = OZ('bar-k-potvrzeni', '11', { ack: true, usek_id: 'bar' })
+  const moje = OZ('moje-k-potvrzeni', '25', { ack: true })
+  const poradi = seraditOznameni([vlastni, cizi, moje], new Set(), JA).map((z) => z.id)
+  je('nahoře jen to, co čeká na MĚ; vlastní a cizí úsek ne (i když jsou starší)', poradi[0], 'moje-k-potvrzeni')
+  je('cekaNaMe: vlastní ne, cizí úsek ne, moje ano',
+    [cekaNaMe(vlastni, new Set(), JA), cekaNaMe(cizi, new Set(), JA), cekaNaMe(moje, new Set(), JA)], [false, false, true])
+  je('počet nových (zvoneček, záložka) jen pro mě a nepřečtené',
+    [vlastni, cizi, moje, OZ('prectene', '12')].filter((z) => jeNoveProMe(z, new Set(['prectene']), JA)).map((z) => z.id),
+    ['moje-k-potvrzeni'])
+}
+
+console.log('\n== Záložky „Vzkazy a úkoly“ (T4) ==')
+
+je('nadpisek je jeden pro všechny záložky', OCI_VZKAZU, 'Vzkazy a úkoly')
+je('se všemi právy se nic neskrývá', skryteZalozky({ ukoly: true, nastenka: true }), [])
+je('bez tasks.read pryč Úkoly i Checklisty', skryteZalozky({ ukoly: false, nastenka: true }), ['ukoly', 'checklisty'])
+je('bez communication.read pryč Nástěnka (do 27. 9. se kreslila a odmítla)',
+  skryteZalozky({ ukoly: true, nastenka: false }), ['nastenka'])
+je('Komunikace se neskrývá nikdy', skryteZalozky({ ukoly: false, nastenka: false }).includes('komunikace'), false)
+je('u Úkolů čtečka čte „otevřené“, ne „nepřečtené“', popisPoctu('ukoly', 3), '3 otevřené')
+je('… 1 otevřený, 5 otevřených', [popisPoctu('ukoly', 1), popisPoctu('ukoly', 5)], ['1 otevřený', '5 otevřených'])
+je('u Komunikace a Nástěnky „nepřečtené“', [popisPoctu('komunikace', 2), popisPoctu('nastenka', 7)], ['2 nepřečtené', '7 nepřečtených'])
+je('nula se nekreslí', [odznakPoctu(0), odznakPoctu(undefined), odznakPoctu(-1)], [null, null, null])
+je('nad 99 je 99+', [odznakPoctu(5), odznakPoctu(100)], ['5', '99+'])
+
+console.log('\n== Věty o telefonu podle čtenáře (T5) ==')
+
+/*
+  Do 27. 9. stálo všem „chodí jen během směny“ — majiteli chodí kdykoli
+  (22. 9.) a naléhavé zprávy komukoli i mimo směnu.
+*/
+const bezKlicu = vetaOPushi({ pushNastaveny: false, jeMajitel: true })
+je('bez klíčů VAPID: nechodí, bez odkazu na nastavení', [bezKlicu.odkaz, bezKlicu.text.includes('zatím nechodí')], [false, true])
+const majitel = vetaOPushi({ pushNastaveny: true, jeMajitel: true })
+je('majiteli: kdykoli, ne „jen během směny“', [majitel.text.includes('kdykoli'), majitel.text.includes('jen během směny')], [true, false])
+const zamestnanec = vetaOPushi({ pushNastaveny: true, jeMajitel: false })
+je('ostatním: během směny, naléhavé i mimo ni',
+  [zamestnanec.text.includes('během vaší směny'), zamestnanec.text.includes('naléhavé zprávy i mimo ni')], [true, true])
+je('pod psaním: zvoneček hned, telefon na směně těm, kdo ho mají zapnutý, majitelům hned',
+  ['zvonečku se zpráva ukáže hned', 'těm, kdo mají upozornění zapnutá, až budou na směně', 'majitelům hned']
+    .every((c) => vetaODoruceni({ smiNalehavou: false, pushNastaveny: true }).includes(c)), true)
+je('s právem na naléhavou i věta o naléhavé', vetaODoruceni({ smiNalehavou: true, pushNastaveny: true }).includes('Naléhavá přijde na telefon i mimo směnu'), true)
+je('bez práva věta o naléhavé není', vetaODoruceni({ smiNalehavou: false, pushNastaveny: true }).includes('Naléhavá'), false)
+// 28. 9.: bez klíčů VAPID neslibuje telefon (stála pod čtenářskou větou
+// „zatím nechodí“, která na detailu rozhovoru stojí hned pod ní).
+je('bez klíčů VAPID: pod psaním jen zvoneček, o telefonu nic, i s naléhavou',
+  [vetaODoruceni({ smiNalehavou: true, pushNastaveny: false }), vetaODoruceni({ smiNalehavou: false, pushNastaveny: false })],
+  ['Ve zvonečku se zpráva ukáže hned.', 'Ve zvonečku se zpráva ukáže hned.'])
+
+console.log('\n== Dnes: „z vedení“ jen autorovi vzkazu (T5) ==')
+
+je('vedení, kterému vzkaz přišel: „Nový vzkaz pro vedení“',
+  popisVzkazuNaDnes([{ zalozil: 'zamestnanec' }], 'majitel', 1).text, 'Nový vzkaz pro vedení')
+je('autorovi vzkazu, kterému vedení odpovědělo: „Nová zpráva z vedení“',
+  popisVzkazuNaDnes([{ zalozil: 'ja' }], 'ja', 1).text, 'Nová zpráva z vedení')
+je('obojí naráz: přednost má to, co čeká na vedení',
+  popisVzkazuNaDnes([{ zalozil: 'ja' }, { zalozil: 'jiny' }], 'ja', 2).text, 'Nový vzkaz pro vedení')
+je('neznámý autor (null) se nebere jako „z vedení“ (opatrnější)',
+  popisVzkazuNaDnes([{ zalozil: null }], 'ja', 1).text, 'Nový vzkaz pro vedení')
+je('jen běžné nepřečtené: „Čeká na přečtení“, ne naléhavě',
+  popisVzkazuNaDnes([], 'ja', 3), { text: 'Čeká na přečtení', dulezite: false })
+je('nic nepřečteného: žádná věta', popisVzkazuNaDnes([], 'ja', 0), { text: null, dulezite: false })
+
+console.log('\n== Migrace: čas čtení v konverzace_ucastnici nepřečte nikdo cizí (28. 9.) ==')
+
+/*
+  Sloupcový grant z 3. 9. (bez `precteno_do`) v ostré databázi neplatí:
+  výchozí práva Supabase daly `authenticated` tabulkové SELECT a žádná
+  migrace ho neodebrala. Opravuje to oddíl 10 migrace 20260927100000
+  (revoke select + sloupcový grant bez `precteno_do` a bez `pridan_kdy`).
+
+  Scénáře běží v čisté databázi bez výchozích práv Supabase — tam díra
+  s `precteno_do` není a kontrola by prošla i bez oddílu 10. Proto se
+  hlídá i TEXT migrací: po POSLEDNÍM `revoke select|all … on
+  konverzace_ucastnici from authenticated` smí přijít jen sloupcový grant
+  bez těch dvou sloupců — žádné tabulkové ani plošné „on all tables“.
+
+  Kontrola se v tomhle souboru sama rozbije na třech úpravách skutečného
+  textu (revoke pryč, grant s precteno_do, s pridan_kdy) a musí spadnout.
+*/
+function grantyUcastniku(sql) {
+  const prikazy = sql
+    .replace(/--[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(';')
+    .map((p) => p.replace(/\s+/g, ' ').trim().toLowerCase())
+  const TABULKA = String.raw`public\.konverzace_ucastnici`
+  const jeRevoke = new RegExp(String.raw`^revoke (select|all)( privileges)?( on)? (table )?${TABULKA} from [^;]*\bauthenticated\b`)
+  let posledni = -1
+  prikazy.forEach((p, i) => { if (jeRevoke.test(p)) posledni = i })
+  if (posledni < 0) return { ok: false, proc: 'žádný revoke select na konverzace_ucastnici od authenticated' }
+  const potom = prikazy.slice(posledni + 1)
+  const problemy = []
+  let sloupcovy = null
+  for (const p of potom) {
+    if (/^grant /.test(p) && / on all tables in schema public /.test(p) && /\bauthenticated\b/.test(p)) {
+      problemy.push('plošný grant on all tables: ' + p.slice(0, 90))
+      continue
+    }
+    if (!new RegExp(String.raw`^grant .* on (table )?${TABULKA} to [^;]*\bauthenticated\b`).test(p)) continue
+    const s = p.match(new RegExp(String.raw`^grant select \(([^)]*)\) on (table )?${TABULKA} `))
+    if (s) {
+      const sloupce = s[1].split(',').map((x) => x.trim())
+      if (sloupce.includes('precteno_do') || sloupce.includes('pridan_kdy')) problemy.push('sloupcový grant s ' + sloupce.join(', '))
+      sloupcovy = sloupce
+    } else if (/^grant (.*\b(select|all)\b)/.test(p.split(' on ')[0])) {
+      problemy.push('tabulkový grant: ' + p.slice(0, 90))
+    }
+  }
+  if (!sloupcovy) problemy.push('po revoke chybí sloupcový grant (detail rozhovoru čte employee_id)')
+  else if (!['konverzace_id', 'employee_id', 'odesel_kdy'].every((c) => sloupcovy.includes(c))) {
+    problemy.push('sloupcový grant bez konverzace_id / employee_id / odesel_kdy: ' + sloupcovy.join(', '))
+  }
+  return { ok: problemy.length === 0, proc: problemy.join('; ') }
+}
+
+{
+  const SLOZKA = 'supabase/migrations'
+  const text = fs
+    .readdirSync(SLOZKA)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => fs.readFileSync(`${SLOZKA}/${f}`, 'utf8'))
+    .join('\n;\n')
+  const vysledek = grantyUcastniku(text)
+  je(`skutečné migrace: po posledním revoke jen sloupcový grant bez precteno_do a pridan_kdy${vysledek.ok ? '' : ' — ' + vysledek.proc}`, vysledek.ok, true)
+
+  const GRANT = /grant select \(konverzace_id, employee_id, odesel_kdy\)\s+on public\.konverzace_ucastnici to authenticated;/
+  je('  (grant, který kontrola hlídá, v textu opravdu je)', GRANT.test(text), true)
+  const bezRevoke = text.replace(/revoke select on public\.konverzace_ucastnici from authenticated;/g, '')
+  je('  rozbití: revoke pryč → kontrola spadne', grantyUcastniku(bezRevoke).ok, false)
+  je('  rozbití: grant s precteno_do → spadne',
+    grantyUcastniku(text.replace(GRANT, 'grant select (konverzace_id, employee_id, precteno_do, odesel_kdy) on public.konverzace_ucastnici to authenticated;')).ok, false)
+  je('  rozbití: grant s pridan_kdy (jako 3. 9.) → spadne',
+    grantyUcastniku(text.replace(GRANT, 'grant select (konverzace_id, employee_id, pridan_kdy, odesel_kdy) on public.konverzace_ucastnici to authenticated;')).ok, false)
+  je('  rozbití: pozdější tabulkový grant → spadne',
+    grantyUcastniku(text + '\ngrant select on public.konverzace_ucastnici to authenticated;').ok, false)
+}
 
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO\n' : `\nCHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)

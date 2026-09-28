@@ -504,6 +504,14 @@ select pg_temp.check('… bez termínu firemní úkol vznikne',
 \echo ''
 \echo '== 7. kdo_nepotvrdil vyžaduje oprávnění ===================='
 
+-- Od 28. 9. vypisuje kdo_nepotvrdil jen ty, kdo Nástěnku smí číst
+-- (migrace 20260927100000, oddíl 11; měří to krok62 oddíl 9). Tenhle
+-- oddíl měří PRÁVO VOLAJÍCÍHO a ROZSAH, ne právo adresátů — lidé
+-- z Perly proto dostanou communication.read (zařazení, ne role).
+insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted)
+select :'tenant', t.e, 'communication.read', true
+  from (values (:'anna'::uuid), (:'borek'::uuid), (:'dana'::uuid), (:'petr'::uuid)) t(e);
+
 insert into public.announcements (tenant_id, branch_id, body, author_id, requires_acknowledgment)
 values (:'tenant', :'perla', 'Krok43: potvrďte.', :'sef', true)
 returning id as oz \gset

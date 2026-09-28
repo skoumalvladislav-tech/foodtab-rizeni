@@ -350,10 +350,13 @@ import { createElement } from ${JSON.stringify(import.meta.resolve('react'))}
 export default function Link({ href, children, ...z }) { return createElement('a', { href, ...z }, children) }`)
 const NAVIGACE_RAMU = js('export function usePathname() { return globalThis.__cesta }')
 const AKCE_PRIHLASENI = js('export async function odhlasit() { globalThis.__odhlaseni += 1 }')
+// Akce panelu u zvonečku (27. 9.) — serverové, do vykreslení z nich nic nejde.
+const AKCE_ZVONECKU = js('export async function otevritUpozorneni() {}\nexport async function oznacitVsePrectene() {}')
 const NAHRADY_RAMU = [
   ['next/navigation', NAVIGACE_RAMU],
   ['next/link', ODKAZ],
   ['@/app/prihlaseni/akce', AKCE_PRIHLASENI],
+  ['@/app/[rozsah]/upozorneni/otevrit', AKCE_ZVONECKU],
   ...KLIKAT,
 ]
 const AppShell = await nactiKomponentu('components/shell/AppShell.tsx', NAHRADY_RAMU)
@@ -1038,7 +1041,32 @@ await scena('číšník', [CISNIK, 'cerna-perla', '/cerna-perla/dochazka'], ({ h
       !['Marketing', 'Finance', 'Tvorba menu'].some((n) => vice.includes(`<h3>${n}</h3>`)))
   ok('  ani nastavení firmy', panel !== null && !vice.includes('/cerna-perla/nastaveni/'))
   ok('  ani chystané obrazovky', panel !== null && !vice.includes('Připravujeme'))
+  // T8 (27. 9.): Šéfík 22. 9. „v nastavení není okénko upozornění“.
+  // Položka je osobní (pravo null) — má ji i číšník bez jakéhokoli práva.
+  ok('  v menu i Nastavení upozornění (27. 9.)',
+    panel !== null && maOdkaz(vice, '/cerna-perla/upozorneni/nastaveni') && vice.includes('Upozornění'))
+  // T2 (27. 9.): zvoneček má vlastní ikonu, ne bublinu Vzkazů. Hledá se
+  // tvar zvonku přímo v tlačítku zvonečku (aria-label „Upozornění“).
+  const zvonek = h.html().match(/<button[^>]*aria-label="Upozornění[^"]*"[^>]*>([\s\S]*?)<\/button>/)
+  ok('  zvoneček se v liště našel', Boolean(zvonek))
+  ok('  a má ikonu zvonku, ne bublinu Vzkazů',
+    Boolean(zvonek) && zvonek[1].includes('M5 13.5V9a5 5 0 0110 0') && !zvonek[1].includes('M3.5 5.5a2 2 0 012-2h9'))
 })
+
+console.log('\n== Nastavení → Upozornění (T8) ==')
+
+{
+  const nast = nabidka.NASTAVENI.find((p) => p.segment === 'upozorneni/nastaveni')
+  ok('položka „Upozornění“ v NASTAVENI je', Boolean(nast))
+  ok('  pro každého (pravo null), hotová, ikona zvonku',
+    nast?.pravo === null && nast?.hotovo === true && nast?.ikona === 'zvonek' && nast?.nazev === 'Upozornění')
+  ok('  stránka pro ni existuje', existsSync('app/[rozsah]/upozorneni/nastaveni/page.tsx'))
+  const iMoje = nabidka.NASTAVENI.findIndex((p) => p.segment === 'moje-udaje')
+  const iUpo = nabidka.NASTAVENI.findIndex((p) => p.segment === 'upozorneni/nastaveni')
+  // Ozubené kolo vede na první položku, kterou člověk vidí — zaměstnanci
+  // mají dál otvírat Moje údaje, ne nastavení upozornění.
+  ok('  stojí ZA Mými údaji (ozubené kolo vede dál na Moje údaje)', iMoje >= 0 && iUpo > iMoje)
+}
 
 // Méně obrazovek, než je míst: nic se neschová, „Více" zůstává.
 await scena('tři obrazovky', [

@@ -1,13 +1,17 @@
+import { randomUUID } from 'node:crypto'
+
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-import { getContext, getUser, hasAccess } from '@/lib/authz'
+import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
+import { OCI_VZKAZU } from '@/lib/komunikace/zalozky'
 import type { Prijemce } from '@/lib/komunikace/prijemci'
-import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
+import { nactiZalozky } from '../../provozni-centrum/pocty'
 import PcZalozky from '../../provozni-centrum/zalozky'
 import { zalozitOsobniRozhovor } from '../akce'
 import VyberPrijemcu from './vyber-prijemcu'
@@ -15,7 +19,9 @@ import VyberPrijemcu from './vyber-prijemcu'
 export const dynamic = 'force-dynamic'
 
 /**
- * Nová zpráva — výběr příjemců.
+ * Nový rozhovor — výběr příjemců (do 27. 9. „Nová zpráva“; slovník
+ * v docs/komunikace-stav-a-plan-2026-09-27.md, oddíl 9: rozhovor je
+ * vlákno, zpráva je to, co se do něj napíše).
  *
  * Seznam kolegů dává `public.komu_muzu_psat`: lidé s účtem z téže firmy,
  * ne sám volající. Běžný zaměstnanec nesmí číst tabulku `employees`, proto
@@ -24,8 +30,8 @@ export const dynamic = 'force-dynamic'
  * Rozhovor se zakládá jako osobní (jeden příjemce, nebo skupina). Kanál
  * pobočky a úseku se nezakládá tady — ty se otevírají tlačítky na seznamu.
  *
- * KÓD SE NASAZUJE DŘÍV NEŽ MIGRACE: bez `komu_muzu_psat` obrazovka řekne,
- * že čeká na databázi, a nespadne.
+ * První zpráva je nepovinná (27. 9.): s ní odejde hned po založení
+ * a příjemce dostane upozornění hned.
  */
 export default async function NovaZprava({
   params,
@@ -59,67 +65,50 @@ export default async function NovaZprava({
     return <Sdeleni nadpis="Sem nemáte přístup">Tahle část Foodtabu vám není otevřená.</Sdeleni>
   }
 
-  // Záložky Úkoly a Checklisty jen tomu, kdo na ně má právo (jako na ostatních
-  // stránkách Provozního centra).
-  const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
-
   const supabase = await getServerSupabase()
+  // Čísla a skryté záložky — jedna funkce pro všechny stránky „Vzkazy a úkoly“.
+  const zalozky = await nactiZalozky(supabase, { tenantId, userId: user.id, branchId: scope.branchId })
   const { data, error } = await supabase.rpc('komu_muzu_psat', { p_tenant: tenantId })
 
-  let lide: Prijemce[] = []
-  let ceka = false
-  if (error) {
-    if (funkceNeexistuje(error)) ceka = true
-    else throw new DotazSelhal('seznam kolegů', error)
-  } else {
-    lide = ((data ?? []) as Record<string, unknown>[]).map((r) => ({
-      employee_id: r.employee_id as string,
-      jmeno: String(r.jmeno ?? '').trim() || 'Bez jména',
-      branch_id: (r.branch_id as string | null) ?? null,
-      usek_id: (r.usek_id as string | null) ?? null,
-      position_id: (r.position_id as string | null) ?? null,
-      na_me_pobocce: r.na_me_pobocce === true,
-    }))
-  }
+  // Rámeček „Výběr příjemců čeká na nasazení databáze“ tu byl do 27. 9.;
+  // migrace je nasazená od 22. 9. Chyba je chyba.
+  if (error) throw new DotazSelhal('seznam kolegů', error)
+  const lide: Prijemce[] = ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    employee_id: r.employee_id as string,
+    jmeno: String(r.jmeno ?? '').trim() || 'Bez jména',
+    branch_id: (r.branch_id as string | null) ?? null,
+    usek_id: (r.usek_id as string | null) ?? null,
+    position_id: (r.position_id as string | null) ?? null,
+    na_me_pobocce: r.na_me_pobocce === true,
+  }))
 
   return (
     <>
       <Nadpis
-        oci="Provoz"
-        popis="Vyberte, komu chcete napsat."
+        oci={OCI_VZKAZU}
+        popis="Vyberte, komu chcete napsat. Psát můžete komukoli ve firmě, kdo má účet."
         vpravo={
           <Link href={`/${rozsah}/vzkazy`} className="ft-tl">
             Zpět na rozhovory
           </Link>
         }
       >
-        Nová zpráva
+        Nový rozhovor
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '720px' }}>
-        <PcZalozky
-          rozsah={rozsah}
-          aktivni="komunikace"
-          skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
-        />
+        <PcZalozky rozsah={rozsah} aktivni="komunikace" {...zalozky} />
 
-        {ceka ? (
-          <p className="pc-poznamka-navrhu">
-            <strong>Výběr příjemců čeká na nasazení databáze.</strong> Přibude migrací{' '}
-            <code>20260921110000_provozni_centrum</code>. Do té doby jde psát jen do
-            kanálu pobočky nebo úseku a poslat vzkaz vedení (na seznamu rozhovorů).
-          </p>
-        ) : (
-          <section className="ds-plocha">
-            <VyberPrijemcu
-              lide={lide}
-              pobocky={ctx.branches.map((b) => [b.id, b.name] as [string, string])}
-              akce={zalozitOsobniRozhovor}
-              rozsah={rozsah}
-              chyba={chyba ?? null}
-            />
-          </section>
-        )}
+        <section className="ds-plocha">
+          <VyberPrijemcu
+            lide={lide}
+            pobocky={ctx.branches.map((b) => [b.id, b.name] as [string, string])}
+            akce={zalozitOsobniRozhovor}
+            rozsah={rozsah}
+            chyba={chyba ?? null}
+            klientId={randomUUID()}
+          />
+        </section>
       </div>
     </>
   )

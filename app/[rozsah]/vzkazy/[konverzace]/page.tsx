@@ -6,29 +6,45 @@ import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/hlasove-zpravy'
 import { KBELIK_PRILOH, PLATNOST_ODKAZU_PRILOH_S } from '@/lib/komunikace/prilohy'
-import { poskladatVlakno } from '@/lib/komunikace/vlakno'
+import { vetaODoruceni } from '@/lib/komunikace/veta-o-pushi'
+import { nactiKliceVapid } from '@/lib/komunikace/web-push'
+import { OCI_VZKAZU } from '@/lib/komunikace/zalozky'
 import { DotazSelhal, sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
+import Ikona from '../../ikona'
 import Nadpis from '../../nadpis'
+import { nactiZalozky } from '../../provozni-centrum/pocty'
 import PcZalozky from '../../provozni-centrum/zalozky'
 import VetaOPushi from '../../provozni-centrum/veta-o-pushi'
 import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from '../seznam-rozhovoru'
 import { nactiJmenaVRozhovoru, nactiNazvyOsobnich, nactiPosledniTexty } from '../nazvy'
 import HlasovkaNahravac from './hlasovka-nahravac'
+import OznacitPoZobrazeni from './oznacit-po-zobrazeni'
 import PanelKonverzace, { type UcastnikUI, type UkolUI } from './panel-konverzace'
 import PanelUkolyUdalosti from './panel-ukoly-udalosti'
 import PosunNaKonec from './posun-na-konec'
 import PridatPrilohu from './priloha-pridat'
-import SkladaniZpravy from './skladani-zpravy'
+import Psani from './psani'
 import VlaknoZprav, { type ZpravaUI } from './vlakno-zprav'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Jeden rozhovor — čtyři sloupce: seznam | vlákno | O konverzaci | Úkoly a události.
+ * Jeden rozhovor — čtyři sloupce: seznam | vlákno | O rozhovoru | Úkoly a události.
  * Poslední dva jsou od 22. 9. oddělené (vzhled podle Šéfíkova obrázku) —
  * dřív byly jeden dlouhý panel, dnes dvě karty vedle sebe.
+ *
+ * PŘEČTENÍ (27. 9.). Rozhovor se označí za přečtený, až je vlákno na
+ * obrazovce (`oznacit-po-zobrazeni.tsx`), a když do něj člověk odpoví.
+ * Ne při vykreslení tady na serveru: odkaz v seznamu si stránku umí
+ * načíst dopředu a označil by nepřečtené, aniž by je kdo viděl.
+ * Dělítko „Nové zprávy“ drží vlákno z prvního vykreslení.
+ *
+ * NA TELEFONU (T7, 27. 9.) nad vláknem zmizí velký nadpis a záložky
+ * (`.pc-rozhovor-stranka`, stejně jako Checklisty) — nahoře zůstane
+ * „← Komunikace“ a název rozhovoru. Panely „O rozhovoru“ a „Úkoly
+ * a události“ jsou sbalené pod „Podrobnosti“.
  *
  * OBSAH SE TU NESCHOVÁVÁ, ANI MIMO SMĚNU. Pravidlo o doručení chrání
  * před vyrušením, ne před informací — kdo si sám otevře aplikaci, čte.
@@ -154,22 +170,8 @@ export default async function Rozhovor({
     .eq('id', konverzace)
     .maybeSingle()
 
-  if (tabulkaNeexistuje(chybaHlavicka)) {
-    return (
-      <>
-        <Nadpis oci="Provoz" popis="Rozhovor.">
-          Rozhovor
-        </Nadpis>
-        <div style={{ padding: '16px' }}>
-          <p style={ramecek}>
-            <strong>Tahle obrazovka čeká na nasazení databáze.</strong>{' '}
-            Rozhovory přibudou migrací{' '}
-            <code>20260903100000_komunikace_zaklad</code> a dvěma dalšími.
-          </p>
-        </div>
-      </>
-    )
-  }
+  // Rámeček „čeká na nasazení databáze“ tu byl do 27. 9.; tabulky jsou
+  // nasazené od 3. 9. a mrtvý rámeček jen mátl. Chyba je chyba.
   if (chybaHlavicka) throw new DotazSelhal('hlavička rozhovoru', chybaHlavicka)
 
   /*
@@ -293,14 +295,26 @@ export default async function Rozhovor({
   if (chybaJa) throw new DotazSelhal('můj zaměstnanecký záznam', chybaJa)
   const mojeId = (ja?.id as string | undefined) ?? null
 
-  // Účastníci s výslovným záznamem. Kanál pobočky a úseku je odvozený
-  // (řádky tu nejsou), takže tam se místo seznamu píše věta.
-  const { data: ucastniciData } = await supabase
-    .from('konverzace_ucastnici')
-    .select('employee_id')
-    .eq('konverzace_id', konverzace)
-    .is('odesel_kdy', null)
-  const idUcastniku = ((ucastniciData ?? []) as { employee_id: string }[]).map((u) => u.employee_id)
+  /*
+    Účastníci s výslovným záznamem — JEN u druhů, kde řádek znamená
+    účastníka (osobní, mezi pobočkami, vzkaz vedení; v databázi
+    `app.ucastnici_vypsani`). Kanál pobočky a úseku je odvozený: od
+    27. 9. v něm řádek vzniká prvním čtením a je to jen záložka „kam
+    jsem dočetl“. Kdyby se četl i tady, šla by jména lidí, kteří si kanál
+    jen otevřeli (a třeba z úseku mezitím odešli), do klientského vlákna
+    (`jmena`). U kanálu se místo seznamu píše věta a jména autorů dodá
+    `lide_v_rozhovoru`.
+  */
+  const DRUHY_S_UCASTNIKY = ['osobni', 'mezi_pobockami', 'vedeni']
+  let idUcastniku: string[] = []
+  if (DRUHY_S_UCASTNIKY.includes(String(hlavicka.druh))) {
+    const { data: ucastniciData } = await supabase
+      .from('konverzace_ucastnici')
+      .select('employee_id')
+      .eq('konverzace_id', konverzace)
+      .is('odesel_kdy', null)
+    idUcastniku = ((ucastniciData ?? []) as { employee_id: string }[]).map((u) => u.employee_id)
+  }
 
   // Jména autorů a účastníků. `full_name` je ve sloupcovém grantu, telefon
   // a e-mail schválně ne — ty se čtou jen průzorem v Lidech.
@@ -335,11 +349,19 @@ export default async function Rozhovor({
 
   const smiNalehavou = await hasAccess(tenantId, 'communication.urgent', null)
   const smiUkoly = await hasAccess(tenantId, 'tasks.manage', scope.branchId)
-  // Záložky Úkoly a Checklisty se skrývají podle ČTENÍ (jako jinde v Provozním centru), ne podle zadávání.
-  const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
+  // Čísla a skryté záložky — jedna funkce pro všechny stránky „Vzkazy a úkoly“
+  // (Úkoly a Checklisty se skrývají podle ČTENÍ, ne podle zadávání).
+  const zalozky = await nactiZalozky(supabase, {
+    tenantId,
+    userId: user.id,
+    branchId: scope.branchId,
+    rozhovory: seznamData ? rozhovory : null,
+  })
 
   // Do kdy mám přečteno — pro dělítko „Nové zprávy“. Čas přečtení vidí jen
   // vlastník (moje_precteno_do), ne ostatní účastníci. Chyba = žádné dělítko.
+  // Čte se PŘED označením za přečtené (to udělá až prohlížeč po zobrazení),
+  // a vlákno si z prvního vykreslení hodnotu podrží.
   const { data: precetoDoData } = await supabase.rpc('moje_precteno_do', { p_konverzace: konverzace })
   const precetoDo = typeof precetoDoData === 'string' ? precetoDoData : null
 
@@ -421,12 +443,11 @@ export default async function Rozhovor({
     prilohy: prilohyZpravy.get(z.id) ?? [],
   }))
 
-  const polozky = poskladatVlakno(zpravyUI, {
-    ja: mojeId,
-    zona: ZONA,
-    dnes: denVPasmu(new Date(), ZONA),
-    precetoDo,
-  })
+  // Nejnovější zpráva od ostatních — nová zpráva během čtení (živá
+  // aktualizace) = nové označení za přečtené.
+  const posledniCizi =
+    [...zpravyUI].reverse().find((z) => z.typ === 'zprava' && z.autor !== mojeId)?.vytvoreno ?? ''
+  const mojeNeprectene = rozhovory.find((r) => r.konverzace_id === konverzace)?.neprectenych ?? 0
 
   const ucastniciPanel: UcastnikUI[] | null =
     druh === 'pobocka' || druh === 'usek'
@@ -438,29 +459,30 @@ export default async function Rozhovor({
   const zpravaProUkol =
     [...zpravyUI].reverse().find((z) => z.typ === 'zprava' && !z.stornovana && z.text.trim() !== '')?.id ?? null
 
-  const neprecteneCelkem = rozhovory.reduce((s, r) => s + r.neprectenych, 0)
-
   return (
-    <>
+    <div className="pc-rozhovor-stranka">
       {/*
-        Trvalá hlavička „Vzkazy a úkoly“ (22. 9., přejmenováno z „Provozní
-        centrum“ při sloučení s Úkoly a checklisty). Dřív se tu vypisoval
-        NÁZEV KONVERZACE a nadpis modulu zmizel; ten teď zůstává v hlavičce
-        vlákna (pc-vlakno-hlava níž), kde je i tak potřeba pro „Zpět“.
+        JEDNA HLAVIČKA (27. 9.): nadpisek „Vzkazy a úkoly“ jako na všech
+        záložkách, velký nadpis = název rozhovoru. Na telefonu se hlavička
+        i záložky schovají (`.pc-rozhovor-stranka` v _komponenty.css)
+        a název nese hlavička vlákna s „← Komunikace“.
       */}
-      <Nadpis oci="Provoz" popis="Komunikace, úkoly, checklisty a oznámení na jednom místě.">
-        Vzkazy a úkoly
+      <Nadpis oci={OCI_VZKAZU} popis={[NAZVY_DRUHU[druh], nazevPobocky].filter(Boolean).join(' · ')}>
+        {nazev}
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '1440px' }}>
-        <PcZalozky
+        <PcZalozky rozsah={rozsah} aktivni="komunikace" {...zalozky} />
+
+        {/* Rozhovor se označí za přečtený, až je vlákno opravdu vidět. */}
+        <OznacitPoZobrazeni
           rozsah={rozsah}
-          aktivni="komunikace"
-          pocty={{ komunikace: neprecteneCelkem }}
-          skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
+          konverzace={konverzace}
+          neprectenych={mojeNeprectene}
+          klic={posledniCizi}
         />
 
-        {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
+        {chyba ? <p className="hlaska-chyba" role="alert">{chyba}</p> : null}
         {novyUkol ? (
           <p className="pc-poznamka-navrhu" style={{ marginBottom: '14px' }}>
             Úkol je vytvořený. <Link href={`/${rozsah}/ukoly/ukol/${novyUkol}`}>Otevřít úkol</Link>
@@ -468,9 +490,10 @@ export default async function Rozhovor({
         ) : null}
 
         {/*
-          TŘI SLOUPCE (od 1280 px): seznam | vlákno | O konverzaci. Pod
-          1280 px jde panel pod vlákno, pod 900 px je vidět jen vlákno
-          (seznam se otevírá tlačítkem „Zpět na rozhovory“).
+          ČTYŘI SLOUPCE (od 1480 px): seznam | vlákno | O rozhovoru |
+          Úkoly a události. Pod 1480 px jdou panely pod vlákno, pod 900 px
+          je vidět jen vlákno („← Komunikace“ vede na seznam) a panely jsou
+          sbalené pod „Podrobnosti“ (přepínač níž, bez JavaScriptu).
         */}
         <div className="ds-vzkazy-split" data-zobrazit="detail" data-ctyri="1">
           <div className="ds-vzkazy-seznam">
@@ -488,10 +511,11 @@ export default async function Rozhovor({
             <section className="ds-plocha pc-vlakno-karta" aria-label={`Rozhovor ${nazev}`}>
               <div className="pc-vlakno-hlava">
                 <Link href={`/${rozsah}/vzkazy`} className="ft-tl ft-tl-vedlejsi ft-tl-male pc-zpet">
-                  Zpět
+                  <Ikona klic="sipkaVlevo" /> Komunikace
                 </Link>
                 <div style={{ minWidth: 0 }}>
-                  <h2>{nazev}</h2>
+                  {/* Na počítači nese název velký nadpis stránky; tady je pro telefon. */}
+                  <h2 className="pc-vlakno-nazev">{nazev}</h2>
                   <p>
                     {[NAZVY_DRUHU[druh], nazevPobocky, hlavicka.uzavreno_kdy ? 'uzavřeno' : null]
                       .filter(Boolean)
@@ -512,9 +536,13 @@ export default async function Rozhovor({
               ) : null}
 
               <VlaknoZprav
+                key={konverzace}
                 rozsah={rozsah}
                 konverzace={konverzace}
-                polozky={polozky}
+                zpravy={zpravyUI}
+                ja={mojeId}
+                dnes={denVPasmu(new Date(), ZONA)}
+                precetoDo={precetoDo}
                 jmena={Object.fromEntries(jmena)}
                 ukolyPodleId={Object.fromEntries(ukolyPodleId)}
                 zona={ZONA}
@@ -528,34 +556,47 @@ export default async function Rozhovor({
                   Tenhle rozhovor je uzavřený. Psát do něj už nejde.
                 </p>
               ) : (
-                <>
-                  <SkladaniZpravy
-                    rozsah={rozsah}
-                    konverzace={konverzace}
-                    uzivatel={user.id}
-                    smiNalehavou={smiNalehavou}
-                  />
-                  <div style={{ padding: '0 18px 16px' }}>
-                    <HlasovkaNahravac rozsah={rozsah} konverzace={konverzace} />
-                  </div>
-                  {prilohyDostupne ? (
-                    <div style={{ padding: '0 18px 16px' }}>
+                /*
+                  Hlasovka a příloha jsou od 27. 9. dvě ikony v řádku psaní
+                  (`psani.tsx`), ne dva velké bloky pod sebou.
+                */
+                <Psani
+                  rozsah={rozsah}
+                  konverzace={konverzace}
+                  uzivatel={user.id}
+                  smiNalehavou={smiNalehavou}
+                  vetaODoruceni={vetaODoruceni({ smiNalehavou, pushNastaveny: nactiKliceVapid(process.env) !== null })}
+                  hlasovka={<HlasovkaNahravac rozsah={rozsah} konverzace={konverzace} />}
+                  priloha={
+                    prilohyDostupne ? (
                       <PridatPrilohu rozsah={rozsah} konverzace={konverzace} tenantId={tenantId} />
-                    </div>
-                  ) : null}
-                </>
+                    ) : null
+                  }
+                />
               )}
             </section>
 
             {/*
-              Push do mobilu zatím nechodí a NEPÍŠE SE, že chodí. Věta
-              o telefonu, která není pravda, je horší než žádná: člověk by
-              na ni spoléhal a zprávu by si nepřišel přečíst.
+              Věta o telefonu podle toho, kdo ji čte (majiteli chodí
+              kdykoli, ostatním během směny a naléhavé i mimo ni). Věta,
+              která není pravda, je horší než žádná.
             */}
             <p style={{ marginTop: '12px', fontSize: '12px', color: 'var(--muted)' }}>
-              <VetaOPushi rozsah={rozsah} />
+              <VetaOPushi rozsah={rozsah} jeMajitel={ctx.jeMajitel} />
             </p>
           </div>
+
+          {/*
+            „Podrobnosti“ na telefonu — přepínač bez JavaScriptu. Na počítači
+            ho CSS schová a panely jsou vidět pořád; na telefonu jsou
+            sbalené, dokud se na „Podrobnosti“ neklepne. Do 27. 9. o tom
+            CSS mluvilo, ale přepínač neexistoval a panely stály pod
+            vláknem pořád.
+          */}
+          <input type="checkbox" id="pc-podrobnosti" className="sr-only pc-podrobnosti-prepinac" />
+          <label htmlFor="pc-podrobnosti" className="ft-tl ft-tl-vedlejsi pc-podrobnosti-tlacitko">
+            <Ikona klic="seznam" /> Podrobnosti rozhovoru
+          </label>
 
           <div className="ds-vzkazy-panel">
             <PanelKonverzace
@@ -598,7 +639,7 @@ export default async function Rozhovor({
           </div>
         </div>
       </div>
-    </>
+    </div>
   )
 }
 

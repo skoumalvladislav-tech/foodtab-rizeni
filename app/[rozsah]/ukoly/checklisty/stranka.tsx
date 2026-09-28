@@ -9,6 +9,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import Ikona from "../../ikona";
 import Nadpis from "../../nadpis";
+import { nactiZalozky } from "../../provozni-centrum/pocty";
 import PcZalozky from "../../provozni-centrum/zalozky";
 import BokBehu from "./bok";
 import {
@@ -142,9 +143,14 @@ export default async function ChecklistyStranka({
   const pobocka = branchId ? ctx.branches.find((b) => b.id === branchId) : undefined;
   const zona = pobocka?.timezone ?? ctx.tenant.timezone ?? ZONA_VYCHOZI;
 
-  const [seznam, smiSpravovat] = await Promise.all([
+  const [seznam, smiSpravovat, zalozky] = await Promise.all([
     branchId ? nactiSeznam(supabase, tenantId, branchId, mujEmployeeId, filtr, ted) : Promise.resolve(null),
     branchId ? hasAccess(tenantId, "tasks.manage", branchId) : Promise.resolve(false),
+    // Čísla u záložek „Vzkazy a úkoly“ — táž funkce jako na ostatních
+    // záložkách (27. 9.), ať při přepnutí na Checklisty nezmizí.
+    user
+      ? nactiZalozky(supabase, { tenantId, userId: user.id, branchId: scope.branchId })
+      : Promise.resolve(undefined),
   ]);
 
   const souvisejici = detail ? await nactiSouvisejici(supabase, tenantId, detail.beh.id, lide) : [];
@@ -255,7 +261,7 @@ export default async function ChecklistyStranka({
       </Nadpis>
 
       <div style={{ padding: "16px", paddingBottom: "32px", maxWidth: "1480px" }}>
-        <PcZalozky rozsah={rozsah} aktivni="checklisty" />
+        <PcZalozky rozsah={rozsah} aktivni="checklisty" {...zalozky} />
 
         {hledani.ulozeno ? (
           <p className="ck-hlaska-ok" role="status" style={{ marginBottom: "14px" }}>

@@ -1,11 +1,13 @@
+'use client'
+
+import { useState } from 'react'
 import Link from 'next/link'
 
 import Ikona from '@/app/[rozsah]/ikona'
 import { datumACasVPasmu, hodinaVPasmu } from '@/lib/cas'
 import { mmss } from '@/lib/hlasove-zpravy'
-import { popisStavuPrepisu } from '@/lib/komunikace/prepis'
 import { jeObrazek, velikostText } from '@/lib/komunikace/prilohy'
-import type { PolozkaVlakna, ZpravaVlakna } from '@/lib/komunikace/vlakno'
+import { poskladatVlakno, type ZpravaVlakna } from '@/lib/komunikace/vlakno'
 import { slovoPodleCisla } from '@/lib/upozorneni-text'
 import { stornovatZpravu } from '../akce'
 import { iniciely, type UkolUI } from './panel-konverzace'
@@ -18,6 +20,14 @@ import { PevnaHlasovka, PevnyObrazek } from './pevny-zdroj'
  * `poskladatVlakno`; tady se položky jen kreslí. Komponenta nesahá do
  * databáze, takže se dá vykreslit i mimo přihlášenou aplikaci (dočasný
  * náhled na snímky obrazovky).
+ *
+ * DĚLÍTKO „NOVÉ ZPRÁVY“ DRŽÍ POZICI Z PRVNÍHO VYKRESLENÍ (vzor
+ * `pevny-zdroj.tsx`). Rozhovor se po zobrazení sám označí za přečtený
+ * (`oznacit-po-zobrazeni.tsx`) a stránka se tím překreslí s novou
+ * záložkou „přečteno do“ — kdyby se dělítko počítalo z ní, zmizelo by
+ * člověku zpod rukou dřív, než nové zprávy dočte. Proto je to klientská
+ * komponenta a záložka se bere jen jednou, při prvním vykreslení.
+ * Zprávy, které přijdou během čtení, se pod dělítko přidají.
  *
  * OBSAH SE NESCHOVÁVÁ ani mimo směnu — pravidlo o doručení chrání před
  * vyrušením, ne před informací (viz stránka rozhovoru).
@@ -58,7 +68,10 @@ const STITKY: Record<'important' | 'urgent', string> = {
 export default function VlaknoZprav({
   rozsah,
   konverzace,
-  polozky,
+  zpravy,
+  ja,
+  dnes,
+  precetoDo,
   jmena,
   ukolyPodleId = {},
   zona,
@@ -66,7 +79,14 @@ export default function VlaknoZprav({
 }: {
   rozsah: string
   konverzace: string
-  polozky: PolozkaVlakna<ZpravaUI>[]
+  /** Zprávy od nejstarší. */
+  zpravy: ZpravaUI[]
+  /** employees.id přihlášeného, nebo null. */
+  ja: string | null
+  /** Dnešní den v pásmu pobočky (YYYY-MM-DD). */
+  dnes: string
+  /** Do kdy má přihlášený přečteno — platí jen hodnota z PRVNÍHO vykreslení. */
+  precetoDo: string | null
   /** employees.id → jméno. */
   jmena: Record<string, string>
   /**
@@ -79,6 +99,12 @@ export default function VlaknoZprav({
   /** Smí přihlášený zakládat úkoly (tasks.manage)? Jen pak se nabízí „Vytvořit úkol“. */
   smiUkoly: boolean
 }) {
+  // Záložka z prvního vykreslení; další překreslení (po označení za
+  // přečtené, po živé aktualizaci) ji už nemění. Stránka komponentu
+  // klíčuje rozhovorem, takže jiný rozhovor začíná znovu.
+  const [pevnePrecteno] = useState(precetoDo)
+  const polozky = poskladatVlakno(zpravy, { ja, zona, dnes, precetoDo: pevnePrecteno })
+
   if (polozky.length === 0) {
     return (
       <div className="pc-vlakno-prazdne">
@@ -165,7 +191,6 @@ export default function VlaknoZprav({
         const z = p.zprava
         const autor = z.autor ? (jmena[z.autor] ?? 'kdosi') : 'systém'
         const stitek = z.priorita === 'normal' ? null : STITKY[z.priorita]
-        const prepis = popisStavuPrepisu(null)
 
         return (
           <div
@@ -193,7 +218,7 @@ export default function VlaknoZprav({
                 </span>
               ) : null}
               {z.text}
-              {z.stornovana ? <span className="pc-zprava-meta"> · staženo</span> : null}
+              {z.stornovana ? <span className="pc-zprava-meta"> · zpráva zrušena</span> : null}
 
               {z.prilohy.length > 0 ? (
                 <div className="pc-prilohy">
@@ -239,9 +264,12 @@ export default function VlaknoZprav({
                   ) : (
                     <small>Hlasovku se nepodařilo načíst.</small>
                   )}
-                  <small>
-                    Hlasová zpráva{z.zvukDelkaS ? ` · ${mmss(z.zvukDelkaS)}` : ''} · {prepis.text}
-                  </small>
+                  {/*
+                    Věta „Přepis na text není dostupný.“ tu u každé hlasovky
+                    byla do 27. 9. Přepis je vypnutý volbou Šéfíka (17. 9.,
+                    otázka 28) a opakovat to u každé zprávy nic neříká.
+                  */}
+                  <small>Hlasová zpráva{z.zvukDelkaS ? ` · ${mmss(z.zvukDelkaS)}` : ''}</small>
                 </div>
               ) : null}
             </div>
@@ -254,11 +282,24 @@ export default function VlaknoZprav({
                   </Link>
                 ) : null}
                 {p.moje ? (
-                  <form action={stornovatZpravu}>
+                  /*
+                    „Zrušit zprávu“, ne „Stáhnout“ — hned vedle hlasovek
+                    a příloh se „stáhnout“ četlo jako stažení souboru.
+                    Zrušení je storno se stopou (pravidlo 9), ale vrátit
+                    nejde, proto potvrzení.
+                  */
+                  <form
+                    action={stornovatZpravu}
+                    onSubmit={(e) => {
+                      if (!window.confirm('Zrušit zprávu? Ostatní uvidí, že jste ji zrušili. Vrátit to nejde.')) {
+                        e.preventDefault()
+                      }
+                    }}
+                  >
                     <input type="hidden" name="rozsah" value={rozsah} />
                     <input type="hidden" name="konverzace" value={konverzace} />
                     <input type="hidden" name="zprava" value={z.id} />
-                    <button type="submit">Stáhnout</button>
+                    <button type="submit">Zrušit zprávu</button>
                   </form>
                 ) : null}
               </div>

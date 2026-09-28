@@ -137,6 +137,17 @@ select m.id,
   from public.memberships m
  where m.user_id::text like '42420000-%' and m.tenant_id = :'tenant';
 
+-- Nástěnku smí číst Anna, Bořek, Cyril, Dana a Emil. Od migrace
+-- 20260927100000 upozornění na oznámení dostane jen ten, kdo Nástěnku
+-- číst smí — bez tohohle by oddíl 7 měřil právo, ne adresování (Cyril
+-- „nedostal" by prošel kvůli chybějícímu právu, ne kvůli jiné pobočce).
+insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted)
+select :'tenant', e.id, 'communication.read', true
+  from public.employees e
+ where e.user_id in ('42420000-0000-0000-0000-00000000000a', '42420000-0000-0000-0000-00000000000b',
+                     '42420000-0000-0000-0000-00000000000c', '42420000-0000-0000-0000-00000000000d',
+                     '42420000-0000-0000-0000-00000000000e');
+
 -- Anna a Bořek střídají směny i na baru (oddíl 8: dvě směny jednoho dne).
 insert into public.membership_branches (membership_id, branch_id)
 select m.id, :'bar'::uuid
