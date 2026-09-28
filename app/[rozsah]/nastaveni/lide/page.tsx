@@ -431,6 +431,13 @@ export default async function NastaveniLide({
   const smiPin = await hasAccess(tenantId, "attendance.manage", null);
 
   /*
+    Docházka člověka po dnech (27. 9. 2026) — odkaz v nabídce řádku.
+    Stejná otázka jako vstup na tu obrazovku: attendance.read v rozsahu
+    z adresy. Co z docházky kdo uvidí, rozhoduje databáze po záznamu.
+  */
+  const vidiDochazku = await hasAccess(tenantId, "attendance.read", pristup.scope.branchId);
+
+  /*
     Stav PINu a návrh nového. Návrh chodí z databáze, protože jen ona
     ví, který je na té pobočce volný — vygenerovat ho v prohlížeči by
     znamenalo hádat a nechat se odmítnout až při uložení.
@@ -966,6 +973,14 @@ export default async function NastaveniLide({
                         účtu je to jediná cesta, jak mu píchání
                         zpřístupnit.
                       */}
+                      {vidiDochazku && !z.deleted_at ? (
+                        <Link
+                          href={`/${rozsah}/dochazka/clovek/${z.id}?z=lide`}
+                          className="ft-kebab-polozka"
+                        >
+                          Docházka po dnech
+                        </Link>
+                      ) : null}
                       {smiPin && !z.deleted_at ? (
                         <Link
                           href={`/${rozsah}/nastaveni/lide?pin=${z.id}`}

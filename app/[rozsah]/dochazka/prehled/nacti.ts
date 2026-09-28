@@ -1,5 +1,7 @@
-import { hodinaVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
+import { datumACasVPasmu, hodinaVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import {
+  nulovyUsek,
+  otevrenePrichody,
   sestavitPrehledDne,
   type SmenaDne,
   type StavRadku,
@@ -50,6 +52,27 @@ export type RadekPrehledu = {
   minut: number
   /** Provozní den otevřeného příchodu z dřívějška („2026-09-20“), jinak `null`. */
   otevrenyZeDne: string | null
+  /**
+   * Id a pobočka otevřeného příchodu — pro „Stornovat příchod“ (píchnutí
+   * omylem) v bočním panelu. Týž příchod, podle kterého je člověk „v práci“
+   * (`otevrenyPrichod` = zrcadlo app.otevreny_prichod).
+   */
+  otevrenyPrichodId: string | null
+  otevrenyPrichodPobocka: string | null
+  /** Čas toho příchodu („08:05", z jiného dne „26. 9. 22:00") — ne první příchod dne. */
+  otevrenyPrichodCas: string | null
+  /**
+   * Týž příchod má v tomtéž provozním dni odchod ve STEJNOU chvíli: mzda
+   * ho bere jako úsek 0 min, přehled jako „v práci". Storno samotného
+   * příchodu by databáze odmítla — panel místo tlačítka pošle na
+   * obrazovku člověka.
+   */
+  nulovyUsek: boolean
+  /**
+   * Další otevřený příchod („07:30"), když jich je víc. Po stornu toho
+   * nejnovějšího zůstane člověk v práci podle tohohle.
+   */
+  dalsiOtevreny: string | null
   /** Název pobočky, kde se píchl, když je to jiná než tahle. */
   pobockaPrichodu: string | null
   /** Kdy směna začíná / končí — pro popisky „začíná v 12:00“. */
@@ -130,7 +153,7 @@ export async function nactiPrehledDne(v: {
   const [udalostiOdp, lideOdp] = await Promise.all([
     supabase
       .from('attendance_events')
-      .select('employee_id, kind, occurred_at, business_date, branch_id, stornovano_kdy, uzavreno_systemem')
+      .select('id, employee_id, kind, occurred_at, business_date, branch_id, stornovano_kdy, uzavreno_systemem')
       .eq('tenant_id', tenantId)
       .in('employee_id', idLidi)
       .gte('business_date', vcera)
@@ -188,6 +211,12 @@ export async function nactiPrehledDne(v: {
       .filter((u) => u.employee_id === r.osobaId && u.stornovano_kdy == null && u.business_date === den)
       .sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at))
     const jinaPobocka = r.pritomnost.pobockaId && r.pritomnost.pobockaId !== branchId ? r.pritomnost.pobockaId : null
+    const udalostiOsoby = udalosti.filter((u) => u.employee_id === r.osobaId)
+    const otevrene = otevrenePrichody(udalostiOsoby)
+    const otevreny = otevrene[0] ?? null
+    // Čas otevřeného příchodu; z jiného provozního dne i s datem.
+    const casPrichodu = (u: UdalostDochazky | undefined) =>
+      u ? (u.business_date === den ? hodinaVPasmu(u.occurred_at, zona) : datumACasVPasmu(u.occurred_at, zona)) : null
 
     return {
       osobaId: r.osobaId,
@@ -203,6 +232,11 @@ export async function nactiPrehledDne(v: {
       odchod: cas(r.pritomnost.odchod),
       minut: r.pritomnost.minutNaMiste,
       otevrenyZeDne: r.pritomnost.otevrenyZeDne,
+      otevrenyPrichodId: otevreny?.id ?? null,
+      otevrenyPrichodPobocka: otevreny?.branch_id ?? null,
+      otevrenyPrichodCas: casPrichodu(otevreny ?? undefined),
+      nulovyUsek: otevreny ? nulovyUsek(otevreny, udalostiOsoby) : false,
+      dalsiOtevreny: casPrichodu(otevrene[1]),
       pobockaPrichodu: jinaPobocka ? (v.pobocky.get(jinaPobocka) ?? null) : null,
       zacatekPlanu: smenyOsoby[0] ? hhmm(smenyOsoby[0].starts_at) : null,
       konecPlanu: smenyOsoby.length ? hhmm(smenyOsoby[smenyOsoby.length - 1].ends_at) : null,

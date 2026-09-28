@@ -364,13 +364,22 @@ begin
   select id, branch_id into v_marek_e, v_branch
   from public.employees where user_id = v_marek;
 
+  /*
+    Od 20260927110000 smí přihlášený vložit do docházky jen sedm sloupců
+    (tenant_id, branch_id, employee_id, kind, occurred_at, source, note).
+    business_date ani entered_by mezi nimi nejsou — pokusy níž je proto
+    bez nich, ať měří to, co měřit mají (politiku a omezení), ne sloupcové
+    právo. Že sloupce navíc spadnou na právech, hlídá oddíl „Kdo ho
+    zadal" a krok63.
+  */
+
   -- Zaměstnanec si ruční záznam sám nezadá
   perform set_config('test.user_id', v_marek::text, false);
   set local role authenticated;
   begin
     insert into public.attendance_events
-      (tenant_id, branch_id, employee_id, kind, business_date, source, note)
-    values (v_tenant, v_branch, v_marek_e, 'in', current_date, 'manual', 'zapomněl telefon');
+      (tenant_id, branch_id, employee_id, kind, source, note)
+    values (v_tenant, v_branch, v_marek_e, 'in', 'manual', 'zapomněl telefon');
     v_ok := false;
   exception when insufficient_privilege then v_ok := true;
   end;
@@ -380,14 +389,29 @@ begin
   perform set_config('test.user_id', v_majitel::text, false);
   begin
     insert into public.attendance_events
-      (tenant_id, branch_id, employee_id, kind, business_date, source, note)
-    values (v_tenant, v_branch, v_marek_e, 'in', current_date, 'manual', '');
+      (tenant_id, branch_id, employee_id, kind, source, note)
+    values (v_tenant, v_branch, v_marek_e, 'in', 'manual', '');
     v_ok := false;
   exception when check_violation then v_ok := true;
   end;
   perform pg_temp.check('ruční záznam bez důvodu neprojde', v_ok);
 
-  -- Kdo ho zadal, se nedá podvrhnout
+  -- Kdo ho zadal, se nedá podvrhnout. Přímo přes rozhraní databáze
+  -- sloupec entered_by přihlášený vůbec nevloží…
+  begin
+    insert into public.attendance_events
+      (tenant_id, branch_id, employee_id, kind, source, note, entered_by)
+    values (v_tenant, v_branch, v_marek_e, 'in', 'manual', 'zapomněl telefon', v_marek);
+    v_ok := false;
+  exception when insufficient_privilege then v_ok := sqlerrm like 'permission denied%';
+  end;
+  perform pg_temp.check('zadavatele přihlášený do požadavku vůbec nenapíše (sloupcové právo)', v_ok);
+
+  -- … a kdyby ho tam dostala jiná cesta (definer funkce, superuživatel),
+  -- spoušť ho stejně přepíše z přihlášeného. Záznam se zakládá zpod
+  -- superuživatele s přihlášeným majitelem a s pevným provozním dnem,
+  -- jako dřív — na tomhle záznamu stojí kontroly níž.
+  reset role;
   insert into public.attendance_events
     (tenant_id, branch_id, employee_id, kind, business_date, source, note, entered_by)
   values (v_tenant, v_branch, v_marek_e, 'in', current_date, 'manual',
@@ -395,6 +419,7 @@ begin
   returning id, entered_by into v_id, v_kdo;
   perform pg_temp.check('zadavatel se přepíše z přihlášeného účtu, ne z požadavku',
                         v_kdo = v_majitel);
+  set local role authenticated;
 
   -- Ruční záznam je rozeznatelný a je v auditu
   select count(*) into v_pocet from public.attendance_events e
@@ -420,9 +445,10 @@ begin
   perform set_config('test.user_id', v_marek::text, false);
   set local role authenticated;
   begin
+    -- Bez business_date (sloupcové právo, viz výš) — měří se politika.
     insert into public.attendance_events
-      (tenant_id, branch_id, employee_id, kind, business_date, source)
-    values (v_tenant, v_branch, v_marek_e, 'out', current_date, 'app');
+      (tenant_id, branch_id, employee_id, kind, source)
+    values (v_tenant, v_branch, v_marek_e, 'out', 'app');
     v_ok := false;
   exception when insufficient_privilege then v_ok := true;
   end;

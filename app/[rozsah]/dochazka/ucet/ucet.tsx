@@ -4,7 +4,9 @@ import type { ReactNode } from "react";
 import { hodinyAMinuty, koruny, nazevMesice, sazbaZaHodinu } from "@/lib/mzdy";
 import { pocet } from "@/lib/sklonovani";
 import { denZkraceny } from "@/lib/upozorneni-text";
+import { denNadpis, minutySlovy, type DenUseku } from "@/lib/useky-dochazky";
 import { KpiKarta, PanelHlava } from "../../dnes/prvky";
+import SeznamUseku from "../clovek/seznam-useku";
 
 /**
  * Můj pracovní účet — kreslicí část záložky Můj účet v Docházce.
@@ -67,6 +69,9 @@ export default function UcetZamestnance({
   obdobi,
   predchozi,
   nasledujici,
+  useky = null,
+  dnes = null,
+  pobocky = {},
 }: {
   radky: RadekUctu[];
   /**
@@ -80,6 +85,15 @@ export default function UcetZamestnance({
   /** Odkazy přepínače měsíců. `nasledujici` prázdné = dál se nejde. */
   predchozi: { href: string; mesic: string };
   nasledujici: { href: string; mesic: string } | null;
+  /**
+   * Vlastní úseky po dnech (27. 9. 2026), jen pro čtení — z
+   * `public.useky_cloveka`. NULL = funkce ještě není nasazená.
+   */
+  useky?: DenUseku[] | null;
+  /** Dnešní provozní den (u otevřeného úseku „v práci od"). */
+  dnes?: string | null;
+  /** Názvy poboček podle id. */
+  pobocky?: Record<string, string>;
 }) {
   const dny = [...radky].sort((a, b) => a.den.localeCompare(b.den));
   const s = souhrn(dny);
@@ -236,6 +250,27 @@ export default function UcetZamestnance({
           </section>
         </>
       )}
+
+      {useky && useky.length > 0 ? (
+        <section className="ds-plocha" aria-label="Moje úseky po dnech">
+          <PanelHlava ikona="hodiny" nadpis="Moje úseky" />
+          <p className="ds-vy-poznamka">
+            Příchody a odchody po dnech. Co upravil nebo stornoval vedoucí, je tu i s tím, kdo
+            a proč — nic se nemaže.
+          </p>
+          <div className="ds-uc-muj">
+            {useky.map((d) => (
+              <details key={d.den} className="ds-uc-muj-den" data-den={d.den}>
+                <summary>
+                  <span>{denNadpis(d.den)}</span>
+                  <span>{souhrnDne(d)}</span>
+                </summary>
+                <SeznamUseku den={d} dnes={dnes} pobocky={pobocky} viceBranches={viceBranches(useky)} />
+              </details>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <ul className="ds-vy-vysvetlivky">
         <li>
@@ -401,6 +436,25 @@ function souhrn(dny: RadekUctu[]) {
   }
   s.zbyva = dny[dny.length - 1]?.zustatek_haleru ?? 0;
   return s;
+}
+
+/** „8 h 2 min · upraveno" — souhrn dne v řádku Moje úseky. */
+function souhrnDne(d: DenUseku): string {
+  const kusy: string[] = [];
+  if (d.denMinut !== null && d.denMinut > 0) kusy.push(minutySlovy(d.denMinut));
+  if (d.useky.some((u) => u.druh === "otevreny")) kusy.push("chybí odchod");
+  else if (d.nezapocitane.length > 0) kusy.push("nezapočítaný záznam");
+  if (d.stornovane.length > 0) kusy.push("upraveno");
+  return kusy.join(" · ");
+}
+
+/** Měsíc má záznamy na víc pobočkách — pak se u úseku píše pobočka. */
+function viceBranches(dny: DenUseku[]): boolean {
+  const p = new Set<string>();
+  for (const d of dny)
+    for (const r of [...d.useky, ...d.nezapocitane, ...d.stornovane])
+      for (const z of [r.prichod, r.odchod]) if (z?.pobocka) p.add(z.pobocka);
+  return p.size > 1;
 }
 
 function velkym(slovo: string): string {

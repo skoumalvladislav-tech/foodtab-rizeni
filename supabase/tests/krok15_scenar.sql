@@ -92,13 +92,19 @@ reset role;
 \echo ''
 \echo '== Storno ================================================'
 
-set role authenticated;
+/*
+  Od 20260927110000 nemá role authenticated na stornovat_dochazku
+  EXECUTE (obcházela pravidla storna úseku; aplikace ji nevolá — krok63
+  hlídá, že ji přihlášený spustit nesmí). Scénář ji proto volá jako
+  superuživatel s přihlášeným v test.user_id: pravidla UVNITŘ funkce
+  (právo na pobočce přes auth.uid(), důvod, podruhé ne) platí dál
+  a zkouší se níž stejně jako dřív.
+*/
+reset role;
 select set_config('test.user_id', :'majitel', false);
 
 select public.stornovat_dochazku(
   :'tenant', :'ud_out', 'Zkušební záznam z doby před opravou časového pásma.');
-
-reset role;
 
 select pg_temp.check('záznam se NESMAZAL, jen je označený',
   exists (select 1 from public.attendance_events where id = :'ud_out'));
@@ -177,7 +183,8 @@ select pg_temp.check('přestávka zdědila den otevřeného příchodu',
 \echo ''
 \echo '== Storno podruhé neprojde, a bez práva vůbec ============'
 
-set role authenticated;
+-- Superuživatel s přihlášeným v test.user_id (viz oddíl Storno).
+reset role;
 select set_config('test.user_id', :'majitel', false);
 
 do $$

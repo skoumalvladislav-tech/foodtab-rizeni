@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import Nadpis from "@/app/[rozsah]/nadpis";
@@ -48,6 +48,7 @@ export default function PrehledDochazky({
   vybranaZUrl,
   zalozky,
   podZalozkami = null,
+  sprava = null,
 }: {
   data: PrehledProps;
   /** „pondělí 21. 9.“ */
@@ -69,8 +70,22 @@ export default function PrehledDochazky({
    * pod celým přehledem.
    */
   podZalozkami?: ReactNode;
+  /**
+   * Kdo smí v panelu stornovat příchod píchnutý omylem (27. 9. 2026) a
+   * výsledek storna. Jen kreslení — rozhoduje stornovat_usek_dochazky.
+   */
+  sprava?: {
+    /** Pobočky, na kterých volající docházku spravuje. */
+    spravovane: string[];
+    jeMajitel: boolean;
+    /** Vlastní zaměstnanecký záznam — vlastní příchod stornuje jen majitel. */
+    vlastniId: string | null;
+    hlaskaStorna: { druh: "ok" } | { druh: "chyba"; text: string } | null;
+  } | null;
 }) {
   const [vybrana, setVybrana] = useState<string | null>(vybranaZUrl);
+  // Stálá funkce: Drawer má efekt závislý na onZavrit (fokus).
+  const zavritDetail = useCallback(() => setVybrana(null), []);
   const { souhrn, radky } = data;
 
   const vPraci = radky.filter((r) => r.stav === "v_praci");
@@ -78,6 +93,13 @@ export default function PrehledDochazky({
   const odesli = radky.filter((r) => r.stav === "odesel");
   const nesrovnalosti = radky.filter((r) => r.stav === "nepresel");
   const vybranyRadek = radky.find((r) => r.osobaId === vybrana) ?? null;
+  /*
+    Výsledek storna z bočního panelu patří do panelu toho člověka
+    (?osoba= ho po návratu znovu otevře) — nahoře nad kartami by ho panel
+    zakryl: na telefonu celý, na počítači ztmavení. Nahoře jen tehdy, když
+    panel toho člověka otevřený není (třeba po stornu z přehledu zmizel).
+  */
+  const hlaskaVPanelu = Boolean(sprava?.hlaskaStorna && vybranyRadek && vybranyRadek.osobaId === vybranaZUrl);
 
   return (
     <div className="ds-dh">
@@ -107,6 +129,18 @@ export default function PrehledDochazky({
       </Nadpis>
 
       {zalozky}
+
+      {sprava?.hlaskaStorna && !hlaskaVPanelu ? (
+        sprava.hlaskaStorna.druh === "ok" ? (
+          <p className="ds-uc-hlaska" data-ton="dobre" role="status">
+            Příchod stornovaný. Nesmazal se — zůstal přeškrtnutý v docházce člověka a smí se píchnout znovu.
+          </p>
+        ) : (
+          <p className="hlaska-chyba ds-uc-hlaska" role="alert">
+            {sprava.hlaskaStorna.text}
+          </p>
+        )
+      ) : null}
 
       {podZalozkami}
 
@@ -209,7 +243,15 @@ export default function PrehledDochazky({
           radek={vybranyRadek}
           rozsah={rozsah}
           den={den}
-          onZavrit={() => setVybrana(null)}
+          smiStornovat={Boolean(
+            sprava &&
+              vybranyRadek.otevrenyPrichodId &&
+              vybranyRadek.otevrenyPrichodPobocka &&
+              sprava.spravovane.includes(vybranyRadek.otevrenyPrichodPobocka) &&
+              (vybranyRadek.osobaId !== sprava.vlastniId || sprava.jeMajitel),
+          )}
+          hlaskaStorna={hlaskaVPanelu ? (sprava?.hlaskaStorna ?? null) : null}
+          onZavrit={zavritDetail}
         />
       ) : null}
     </div>

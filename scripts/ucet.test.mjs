@@ -518,6 +518,53 @@ const bezDne = await stranka({ den: null })
 ma('bez provozního dne: věta a žádný dotaz na účet',
   `${text(bezDne.html).includes('Nepodařilo se zjistit provozní den.')} / ${bezDne.rpc.length}`, 'true / 0')
 
+console.log('\n== Moje úseky po dnech (27. 9.) — jen pro čtení ==')
+/*
+  Úsek, který vedoucí upravil: odchod ručně, starý odchod přeškrtnutý.
+  Sloupce jako public.useky_cloveka (kontrakt hlídá
+  scripts/dochazka-cloveka.test.mjs).
+*/
+const USEK = {
+  druh: 'usek', den: '2026-05-04', poradi: 1, udalost_druh: null,
+  prichod_id: 'p1', prichod: '2026-05-04T08:00:00Z', prichod_pobocka: 'B1', prichod_zona: 'Europe/Prague',
+  prichod_zdroj: 'kod', prichod_poznamka: null, prichod_zadal: null, prichod_nahrazuje: null,
+  prichod_mimo_rozpis: false, prichod_uzavreno: null,
+  odchod_id: 'o2', odchod: '2026-05-04T16:00:00Z', odchod_pobocka: 'B1', odchod_zona: 'Europe/Prague',
+  odchod_zdroj: 'rucne', odchod_poznamka: 'zapomněl se odpíchnout', odchod_zadal: 'Vedoucí Věra',
+  odchod_nahrazuje: 'o1', odchod_mimo_rozpis: false, odchod_uzavreno: null,
+  prestavky_sekund: 0, pausal_minut: 30, hrubych_sekund: 28800, cistych_sekund: 27000,
+  stornovano_kdy: null, stornoval_jmeno: null, duvod_storna: null, nahrazeno: false,
+  den_minut: 450, smi_spravovat: false,
+}
+const STORNO = {
+  ...USEK, druh: 'stornovano', poradi: null, udalost_druh: 'out', prichod_id: null, prichod: null,
+  odchod_id: 'o1', odchod: '2026-05-04T14:00:00Z', odchod_zdroj: 'kod', odchod_poznamka: null, odchod_zadal: null,
+  odchod_nahrazuje: null, stornovano_kdy: '2026-05-05T09:00:00Z', stornoval_jmeno: 'Vedoucí Věra',
+  duvod_storna: 'Oprava úseku: zapomněl se odpíchnout', nahrazeno: true,
+}
+const sUseky = await stranka({
+  odpoved: (jmeno) => (jmeno === 'useky_cloveka' ? { data: [USEK, STORNO], error: null } : { data: ZUZANA, error: null }),
+})
+const dotazUseku = sUseky.rpc.find((r) => r[0] === 'useky_cloveka')
+ma('na úseky se ptá useky_cloveka se SVÝM záznamem a měsícem účtu',
+  JSON.stringify(dotazUseku?.[1]), JSON.stringify({ p_tenant: 't1', p_employee: 'e1', p_mesic: '2026-05-01' }))
+ma('… až po účtu (účet je první dotaz)', sUseky.rpc[0]?.[0], 'muj_pracovni_ucet')
+const oddil = (sUseky.html.match(/<section[^>]*aria-label="Moje úseky po dnech"[\s\S]*?<\/section>/) ?? [''])[0]
+ma('oddíl Moje úseky je na stránce', oddil.length > 0, true)
+ma('den v rozbalovátku s tím, že byl upraven', /<details class="ds-uc-muj-den" data-den="2026-05-04"><summary><span>Po 4\. 5\.<\/span><span>7 h 30 min · upraveno<\/span>/.test(oddil.replace(/\u00a0/g, ' ')), true)
+ma('vidí, kdo a proč odchod upravil', text(oddil).includes('Odchod ručně · Vedoucí Věra: zapomněl se odpíchnout'), true)
+ma('starý odchod přeškrtnutý s důvodem', /<s>16:00 odchod · kód<\/s>/.test(oddil) && text(oddil).includes('Nahrazeno opravou'), true)
+ma('jen pro čtení: žádné tlačítko ani formulář', /<button|<form/.test(oddil), false)
+ma('bez úseků se oddíl nekreslí', s.html.includes('Moje úseky po dnech'), false)
+const bezFunkce = await stranka({
+  odpoved: (jmeno) => (jmeno === 'useky_cloveka' ? { data: null, error: { code: 'PGRST202', message: 'x' } } : { data: ZUZANA, error: null }),
+})
+ma('nenasazená funkce: účet zůstane, oddíl ne', `${bezFunkce.chyba}/${bezFunkce.html.includes('Moje úseky')}/${bezFunkce.html.includes('ds-vy-tabulka')}`, 'null/false/true')
+const poruchaUseku = await stranka({
+  odpoved: (jmeno) => (jmeno === 'useky_cloveka' ? { data: null, error: { code: '42501', message: 'permission denied' } } : { data: ZUZANA, error: null }),
+})
+ma('jiná chyba úseků se nezamete — spadne', poruchaUseku.chyba instanceof Error, true)
+
 console.log('\n== Stránka Můj účet: nenasazená databáze ==')
 const nenasazeno = await stranka({ odpoved: () => ({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }) })
 ma('věta o nasazení', text(nenasazeno.html).includes('Pracovní účet bude dostupný po nasazení databáze.'), true)

@@ -2691,3 +2691,195 @@ span.ck-box { cursor: default; }
   .ds-vy-dny .ds-vy-tabulka-obal { display: none; }
   .ds-vy-dny .ds-vy-karty { display: block; }
 }
+
+/* =====================================================================
+   Docházka člověka po dnech (27. 9. 2026) — /dochazka/clovek/[id]
+   a oddíl „Moje úseky" v Můj účet.
+
+   Stojí na `.ds-vy` (lišta měsíce, vysvětlivky, @container) a na
+   `.ds-plocha` / `KpiKarta` podle oddílu 11 vzhledu. Každý den je jedna
+   karta; úsek je řádek s časem velkým patkovým písmem.
+
+   Co se do mzdy nepočítá, nese vždycky SLOVO (a tvar — čárkovaný
+   rámeček, levý pruh), nikdy jen barvu (oddíl 7). Dotykové cíle 44 px.
+   Pod 1100 px jeden sloupec; boční panel „Nedokončené" se pak schová —
+   tytéž kotvy na dny má karta Nedokončené nahoře.
+   ===================================================================== */
+
+.ds-uc-zpet {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
+  margin: 4px 16px 0; padding: 0 2px; font-size: 14px; color: var(--muted); text-decoration: none;
+}
+.ds-uc-zpet:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.ds-uc-zpet .ft-i { flex: none; }
+
+.ds-uc-pruh {
+  margin: 0; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.45;
+  background: var(--pozor-bg); color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--pozor) 45%, var(--line));
+}
+
+.ds-uc-rozlozeni { display: grid; grid-template-columns: minmax(0, 1fr) 272px; gap: 22px; align-items: start; }
+.ds-uc-dny { display: grid; gap: 14px; min-width: 0; }
+.ds-uc-bok { display: grid; gap: 16px; min-width: 0; position: sticky; top: 16px; }
+/* Až ZA základními pravidly, jinak by je přebila (stejná specificita). */
+@media (max-width: 1100px) {
+  .ds-uc-rozlozeni { grid-template-columns: minmax(0, 1fr); }
+  .ds-uc-bok { display: none; }
+}
+.ds-uc-bok-text { margin: 0; font-size: 13.5px; color: var(--muted); }
+.ds-uc-bok-seznam { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-size: 13.5px; }
+.ds-uc-bok-seznam li { display: grid; gap: 1px; }
+.ds-uc-bok-seznam a, .ds-uc-kotvy a {
+  color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: 3px;
+}
+.ds-uc-bok-seznam span { color: var(--muted); }
+
+.ds-uc-den { padding: 16px 18px; scroll-margin-top: 84px; }
+.ds-uc-den[data-nedokoncene] { box-shadow: inset 4px 0 0 var(--pozor), var(--shadow-sm); }
+.ds-uc-den-hlava {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
+  gap: 4px 14px; margin: 0 0 8px;
+}
+.ds-uc-den-nadpis { margin: 0; font-size: 19px; font-weight: 600; line-height: 1.2; }
+.ds-uc-den-soucet {
+  margin: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px;
+  font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.ds-uc-den-penize { font-size: 14px; font-weight: 500; color: var(--muted); }
+.ds-uc-castecne { font-size: 13px; font-weight: 400; color: var(--muted); }
+
+.ds-uc-useky { list-style: none; margin: 0; padding: 0; display: grid; }
+.ds-uc-usek {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px 16px;
+  padding: 12px 0; border-top: 1px solid var(--line); min-width: 0;
+}
+.ds-uc-usek:first-child { border-top: 0; padding-top: 4px; }
+.ds-uc-usek[data-druh="otevreny"] { padding-left: 12px; border-left: 3px solid var(--pozor); }
+.ds-uc-usek[data-druh="navic_prichod"],
+.ds-uc-usek[data-druh="odchod_bez_prichodu"],
+.ds-uc-usek[data-druh="prestavka_mimo"] {
+  margin-top: 8px; padding: 10px 12px; border: 1px dashed var(--line-2); border-radius: 12px;
+}
+.ds-uc-usek-telo { display: grid; gap: 5px; min-width: 0; }
+.ds-uc-cas { margin: 0; font-size: 22px; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums lining-nums; }
+/* Slovo vedle patkového času je text, ne číslo: bezpatkové. */
+.ds-uc-druh { font-family: var(--font-archivo), ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 500; color: var(--muted); }
+.ds-uc-chybi { color: var(--pozor); }
+.ds-uc-cipy { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.ds-uc-cip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px; border-radius: 999px;
+  font-size: 12.5px; line-height: 1.5; color: var(--ink); background: var(--sunken); border: 1px solid var(--line);
+}
+.ds-uc-cip[data-zdroj="rucne"] { border-style: dashed; border-color: var(--line-2); }
+.ds-uc-cip .ft-i { width: 13px; height: 13px; flex: none; }
+.ds-uc-cip-kdo { color: var(--muted); }
+.ds-uc-rucne, .ds-uc-oprava, .ds-uc-vypocet { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.ds-uc-vypocet { font-variant-numeric: tabular-nums; }
+.ds-uc-nepocita { margin: 0; display: flex; gap: 6px; align-items: flex-start; font-size: 13.5px; line-height: 1.45; color: var(--ink); }
+.ds-uc-nepocita .ft-i { flex: none; margin-top: 2px; color: var(--pozor); }
+.ds-uc-prazdny { margin: 0; font-size: 13.5px; color: var(--muted); }
+
+.ds-uc-akce { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: none; }
+.ds-uc-tlacitko { min-height: 44px; }
+
+.ds-uc-storna { margin-top: 10px; border-top: 1px solid var(--line); }
+.ds-uc-storna > summary {
+  min-height: 44px; display: flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 13.5px; color: var(--muted); list-style: none;
+}
+.ds-uc-storna > summary:hover { color: var(--ink); }
+/* display:flex vypne značku <details>; vlastní šipka jako .ck-sekce, ať
+   je vidět, že se to dá rozbalit (tady vpředu, text je krátký). */
+.ds-uc-storna > summary::-webkit-details-marker,
+.ds-uc-muj-den > summary::-webkit-details-marker { display: none; }
+.ds-uc-storna > summary::before,
+.ds-uc-muj-den > summary::before { content: "▸"; flex: none; width: 14px; font-size: 14px; line-height: 1; color: var(--ink); }
+.ds-uc-storna[open] > summary::before,
+.ds-uc-muj-den[open] > summary::before { content: "▾"; }
+.ds-uc-storna ul { list-style: none; margin: 0; padding: 0 0 4px; display: grid; gap: 8px; }
+.ds-uc-storna li { display: grid; gap: 2px; font-size: 13.5px; }
+.ds-uc-storna s { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ds-uc-storno-proc { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+
+.ds-uc-hlaska { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; font-size: 14px; line-height: 1.45; }
+.ds-uc-hlaska[data-ton="dobre"] {
+  color: var(--ink); background: color-mix(in srgb, var(--dobre) 12%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--dobre) 40%, var(--line));
+}
+.ds-uc-novy { display: flex; }
+.ds-vy-prazdno .ds-uc-novy { margin-top: 12px; }
+
+/* Telefon (podle šířky obsahu, ne okna): tlačítka pod úsekem na celou šířku. */
+@container (max-width: 560px) {
+  .ds-uc-usek { flex-direction: column; align-items: stretch; }
+  .ds-uc-akce { justify-content: stretch; }
+  .ds-uc-akce .ft-tl { flex: 1 1 auto; }
+  .ds-uc-den { padding: 14px; }
+  .ds-uc-cas { font-size: 20px; }
+}
+
+/* --- Formulář úpravy v panelu --------------------------------------- */
+
+.ds-uc-form { display: grid; gap: 14px; }
+.ds-uc-form fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; min-width: 0; }
+.ds-uc-form legend {
+  padding: 0; margin: 0 0 6px; font-family: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  font-size: 17px; font-weight: 600; color: var(--ink);
+}
+.ds-uc-form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); min-width: 0; }
+.ds-uc-form input[type="date"], .ds-uc-form input[type="time"], .ds-uc-form select, .ds-uc-form textarea {
+  width: 100%; min-width: 0; min-height: 44px; padding: 8px 12px; font-size: 16px; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line-2); border-radius: 10px;
+}
+.ds-uc-form textarea { min-height: 84px; resize: vertical; font-family: inherit; }
+.ds-uc-dvojice { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.ds-uc-form .ds-uc-volba {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14.5px; color: var(--ink);
+}
+.ds-uc-volba input { width: 20px; height: 20px; flex: none; }
+.ds-uc-pulnoc { justify-self: start; min-height: 44px; }
+.ds-uc-form-ted {
+  margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--sunken);
+  font-size: 14px; font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.ds-uc-varovani {
+  margin: 0; display: flex; gap: 6px; align-items: flex-start; padding: 8px 12px; border-radius: 10px;
+  background: var(--pozor-bg); color: var(--ink); font-size: 14px; line-height: 1.45;
+}
+.ds-uc-varovani .ft-i { flex: none; margin-top: 2px; color: var(--pozor); }
+.ds-uc-form-tlacitka { display: flex; flex-wrap: wrap; gap: 8px; }
+.ds-uc-form-tlacitka .ft-tl { flex: 1 1 auto; }
+.ds-uc-form-storno { padding-top: 12px; border-top: 1px solid var(--line); }
+.ds-uc-storno-veta { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); }
+
+/* Jméno ve Výdělcích jako odkaz na docházku člověka. Podtržené, ne jen
+   barevné; na telefonu (karty) dotykový cíl 44 px. */
+.ds-vy-jmeno-odkaz {
+  color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+}
+.ds-vy-jmeno-odkaz:hover { text-decoration-color: currentColor; }
+.ds-vy-karta .ds-vy-jmeno-odkaz { display: inline-flex; align-items: center; min-height: 44px; }
+
+/* Boční panel živého přehledu: storno na místě a odkaz na měsíc. */
+.ds-dh-storno { display: grid; gap: 8px; margin-top: 12px; }
+.ds-dh-storno .ds-uc-form { gap: 10px; }
+/* Výsledek storna v kartě Skutečnost (nahoře by ho panel zakryl). */
+.ds-dh-hlaska { margin: 12px 0 0; }
+/* Příchod a odchod ve stejné chvíli: slovo a ikona, ne jen barva. */
+.ds-dh-nulovy { display: flex; gap: 6px; align-items: flex-start; margin-top: 12px; color: var(--ink); }
+.ds-dh-nulovy .ft-i { flex: none; margin-top: 2px; color: var(--pozor); }
+
+/* --- Můj účet: vlastní úseky po dnech (jen pro čtení) ---------------- */
+
+.ds-uc-muj { display: grid; gap: 8px; }
+.ds-uc-muj-den { border: 1px solid var(--line); border-radius: 12px; padding: 0 14px; background: var(--card); }
+.ds-uc-muj-den > summary {
+  min-height: 44px; display: flex; align-items: center; flex-wrap: wrap;
+  gap: 4px 10px; cursor: pointer; font-weight: 600; list-style: none;
+}
+/* Den vlevo (za šipkou), souhrn vpravo. */
+.ds-uc-muj-den > summary span:first-child { flex: 1 1 auto; }
+.ds-uc-muj-den > summary span:last-child { font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ds-uc-muj-den[open] { padding-bottom: 10px; }

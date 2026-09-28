@@ -166,6 +166,16 @@ export default async function Vydelky({
   const predchozi = posunMesic(mesic, -1);
   const nasledujici = posunMesic(mesic, 1);
   const nejdal = posunMesic(tenhleMesic, 1);
+
+  /*
+    Jméno je odkaz na docházku člověka po dnech (27. 9. 2026) — jen tomu,
+    kdo má attendance.read ve svém rozsahu (táž vstupní kontrola jako
+    ta stránka). Výdělky samy chtějí payroll.read; docházka je jiné právo.
+  */
+  const vidiDochazku = (await zkusPristup(tenantId, "attendance.read", rozsah)).stav === "ok";
+  const odkazNaCloveka = vidiDochazku
+    ? (id: string) => `/${rozsah}/dochazka/clovek/${id}?mesic=${mesic.slice(0, 7)}&z=vydelky`
+    : null;
   const odkaz = (m: string) => `/${rozsah}/dochazka/vydelky?mesic=${m.slice(0, 7)}`;
 
   return (
@@ -182,6 +192,7 @@ export default async function Vydelky({
           predchozi={{ href: odkaz(predchozi), mesic: predchozi }}
           nasledujici={nasledujici <= nejdal ? { href: odkaz(nasledujici), mesic: nasledujici } : null}
           poDnech={<NakladyPoDnech radky={poDnech} mesic={mesic} />}
+          odkazNaCloveka={odkazNaCloveka}
         />
       </div>
     </>

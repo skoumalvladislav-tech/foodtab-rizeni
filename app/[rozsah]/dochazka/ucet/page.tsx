@@ -5,6 +5,7 @@ import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { provozniDen } from "@/lib/provozni-den";
 import { DotazSelhal, funkceNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
+import { naRadekUseku, seskupitPoDnech, type RadekUseku } from "@/lib/useky-dochazky";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
 import DochazkaZalozky from "../zalozky";
@@ -191,6 +192,27 @@ export default async function MujUcet({
     zobrazeni = naZobrazeni((nastaveni as { zalohy_zobrazeni?: unknown } | null)?.zalohy_zobrazeni);
   }
 
+  /*
+    Moje úseky po dnech (27. 9. 2026) — jen pro čtení. Když vedoucí úsek
+    upraví nebo stornuje, člověk to uvidí tady u dne, i kdo a proč
+    (otázka 26: jiné upozornění zatím není). Tatáž funkce jako obrazovka
+    vedoucího; „já" pozná databáze z přihlášení, ne z tohohle id.
+    Nenasazená funkce oddíl jen vynechá, jiná chyba padá.
+  */
+  const { data: usekyData, error: usekyChyba } = await supabase.rpc("useky_cloveka", {
+    p_tenant: tenantId,
+    p_employee: ja.id,
+    p_mesic: mesic,
+  });
+  if (usekyChyba && !funkceNeexistuje(usekyChyba)) throw new DotazSelhal("moje úseky", usekyChyba);
+  const mojeUseky = usekyChyba
+    ? null
+    : seskupitPoDnech(
+        ((usekyData ?? []) as Record<string, unknown>[])
+          .map(naRadekUseku)
+          .filter((r): r is RadekUseku => r !== null),
+      );
+
   const predchozi = posunMesic(mesic, -1);
   const nasledujici = posunMesic(mesic, 1);
   const odkaz = (m: string) => `/${rozsah}/dochazka/ucet?mesic=${m.slice(0, 7)}`;
@@ -207,6 +229,9 @@ export default async function MujUcet({
           obdobi={obdobi}
           predchozi={{ href: odkaz(predchozi), mesic: predchozi }}
           nasledujici={nasledujici <= tenhleMesic ? { href: odkaz(nasledujici), mesic: nasledujici } : null}
+          useky={mojeUseky}
+          dnes={dnes}
+          pobocky={Object.fromEntries(ctx.branches.map((b) => [b.id, b.name]))}
         />
       </div>
     </>
