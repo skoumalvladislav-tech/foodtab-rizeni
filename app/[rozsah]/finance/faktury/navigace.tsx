@@ -115,8 +115,10 @@ export default function Navigace({
 
   return (
     <div className="modul-ram">
-      {/* Sloupec místo levého sloupce aplikace (ten tu CSS schová), proto
-          na jeho konci i odhlášení vlevo dole — viz ModuleSidebar. */}
+      {/* Na počítači sloupec místo levého sloupce aplikace (ten tu CSS
+          od 1024 px schová), proto na jeho konci i odhlášení vlevo dole —
+          viz ModuleSidebar. Na tabletu je schovaný tenhle a vlevo zůstává
+          ikonový sloupec aplikace. */}
       <div className="modul-sloupec">
         <nav className="modul-sloupec-nav" aria-label="Faktury">
           <div className="modul-skupina">Faktury</div>

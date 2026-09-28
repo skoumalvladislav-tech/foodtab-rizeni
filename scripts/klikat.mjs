@@ -39,9 +39,13 @@
  *     DŘÍV, než přijde click, jako když člověk tlačítko ještě drží; co
  *     mezitím ze stromu zmizelo, click nedostane; `onClick` probublá
  *     nahoru a odesílací tlačítko pak zavolá `action` formuláře,
- *   - `zamerit()` přesune fokus jako Tab (i s `onBlur`); fokus se chová
- *     jako v Chromu — Safari tlačítko ani odkaz kliknutím nezaměří
- *     (`relatedTarget` je tam prázdný) a to tu vidět není,
+ *   - `zamerit()` přesune fokus jako Tab (i s `onBlur`),
+ *   - `klik(uzel, { safari: true })` kliká jako Safari (Mac i iPad):
+ *     tlačítko ani odkaz se kliknutím nezaměří, fokus odejde na
+ *     nejbližšího zaměřitelného předka (třeba panel s `tabIndex`), a když
+ *     žádný není, pryč — `onBlur` pak dostane prázdný `relatedTarget`.
+ *     Bez toho by tu nešlo ověřit, že dotaz a nabídka při kliknutí na
+ *     vlastní tlačítko nezmizí dřív, než klik doběhne,
  *   - `createPortal` kreslí na místě, `document` umí posluchače
  *     událostí a `activeElement`,
  *   - `useSyncExternalStore` vrací serverovou hodnotu.
@@ -193,9 +197,18 @@ class Uzel {
   }
 }
 
-/** Dá se na prvek kliknutím zaměřit? (Chrome: tlačítko, odkaz, pole, tabIndex.) */
-function zameritelny(u) {
+/**
+ * Dá se na prvek kliknutím zaměřit? Chrome: tlačítko, odkaz, pole,
+ * tabIndex. Safari: tlačítka, odkazy a zaškrtávátka ne — jen pole
+ * na psaní, výběr a prvky s tabIndex.
+ */
+const TLACITKOVY_VSTUP = new Set(['button', 'submit', 'reset', 'image', 'checkbox', 'radio', 'file', 'color', 'range'])
+function zameritelny(u, safari) {
   if (u.props.disabled) return false
+  if (safari) {
+    if (['button', 'a', 'summary'].includes(u.typ)) return false
+    if (u.typ === 'input' && TLACITKOVY_VSTUP.has(u.props.type)) return false
+  }
   if (['button', 'input', 'select', 'textarea', 'summary'].includes(u.typ)) return true
   if (u.typ === 'a' && u.props.href != null) return true
   return u.props.tabIndex != null
@@ -482,8 +495,11 @@ export function spustit(vytvor) {
     },
     prekreslit,
 
-    /** Klik jako v Chromu. Uzel musí být z posledního vykreslení. */
-    klik(uzel) {
+    /**
+     * Klik jako v Chromu, s `{ safari: true }` jako v Safari (fokus viz
+     * hlavička). Uzel musí být z posledního vykreslení.
+     */
+    klik(uzel, { safari = false } = {}) {
       if (!uzel) throw new Error('klik(): uzel nenalezen')
       if (!zivy(uzel)) throw new Error('klik(): uzel není v posledním vykreslení — najdi ho znovu')
 
@@ -501,7 +517,7 @@ export function spustit(vytvor) {
       // prázdný. `preventDefault()` na mousedown ho nechá na místě.
       if (!zadnyFokus) {
         let cil = null
-        for (let u = uzel; u && !cil; u = u.rodic) if (zameritelny(u)) cil = u
+        for (let u = uzel; u && !cil; u = u.rodic) if (zameritelny(u, safari)) cil = u
         if (cil) cil.focus()
         else tady.fokus?.blur()
       }

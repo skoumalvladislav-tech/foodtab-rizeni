@@ -1,9 +1,11 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import { odhlasit } from "@/app/prihlaseni/akce";
+import { jeOtevrena, poZmeneAdresy, ZAVRENA, type StavNabidky } from "@/lib/stav-nabidky";
 
 /**
  * ODHLÁŠENÍ S DOTAZEM (podmínka Šéfíka, 8. 9.).
@@ -31,10 +33,17 @@ import { odhlasit } from "@/app/prihlaseni/akce";
  * Ve sloupci se dotaz sám zavře, když člověk odejde jinam (klik mimo,
  * Tab ven) nebo zmáčkne Escape. Sloupec se při přechodu na jinou
  * obrazovku nepřekresluje a dotaz by v něm jinak visel dál — na tabletu
- * jako karta přes obsah. V menu „Více" tohle obstarává samo menu.
+ * jako karta přes obsah. Proto se zavře i po změně adresy bez ukazatele
+ * (Alt+←, gesto zpět na iPadu, přesměrování po odeslání formuláře):
+ * pamatuje se adresa, kde se otevřel, stejně jako u nabídek
+ * (lib/stav-nabidky.ts). V menu „Více" tohle obstarává samo menu.
  */
 export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "sloupec" }) {
-  const [ptaSe, setPtaSe] = useState(false);
+  const cesta = usePathname() ?? "";
+  const [stav, setStav] = useState<StavNabidky>(ZAVRENA);
+  const platny = poZmeneAdresy(stav, cesta);
+  if (platny !== stav) setStav(platny);
+  const ptaSe = jeOtevrena(platny, cesta);
   const presunoutFokus = useRef(false);
   const obalRef = useRef<HTMLDivElement>(null);
   const odhlasitRef = useRef<HTMLButtonElement>(null);
@@ -52,7 +61,7 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
   useEffect(() => {
     if (!veSloupci || !ptaSe) return;
     function naKlikMimo(e: PointerEvent) {
-      if (obalRef.current && !obalRef.current.contains(e.target as Node)) setPtaSe(false);
+      if (obalRef.current && !obalRef.current.contains(e.target as Node)) setStav(ZAVRENA);
     }
     document.addEventListener("pointerdown", naKlikMimo);
     return () => document.removeEventListener("pointerdown", naKlikMimo);
@@ -60,7 +69,7 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
 
   function prepnout(novy: boolean) {
     presunoutFokus.current = true;
-    setPtaSe(novy);
+    setStav(novy ? cesta : ZAVRENA);
   }
 
   // Na obalu, ne na document: Escape zmáčknutý jinde se dotazu netýká
@@ -69,13 +78,15 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
     if (e.key === "Escape" && ptaSe) prepnout(false);
   }
 
-  // Jen když je známo, KAM fokus odešel (Tab ven). Safari fokus při
-  // kliknutí na tlačítko nepřesune a `relatedTarget` je prázdný —
-  // zavírat i tehdy by dotaz schovalo dřív, než klik na „Odhlásit"
-  // doběhne. Kliknutí mimo řeší posluchač výš.
+  // Jen když je známo, KAM fokus odešel (Tab ven). Safari (Mac i iPad)
+  // tlačítko kliknutím nezaměří: fokus z „Zpět" při stisku myši na
+  // „Odhlásit" odejde nikam a `relatedTarget` je prázdný. Zavírat
+  // i tehdy by dotaz zmizel dřív, než klik doběhne, a odhlášení by se
+  // potichu neodeslalo. Kliknutí mimo řeší posluchač výš. Hlídá to
+  // scripts/nabidka.test.mjs („Safari: …", klik s { safari: true }).
   function naOdchodFokusu(e: FocusEvent<HTMLDivElement>) {
     const kam = e.relatedTarget as Node | null;
-    if (ptaSe && kam && !e.currentTarget.contains(kam)) setPtaSe(false);
+    if (ptaSe && kam && !e.currentTarget.contains(kam)) setStav(ZAVRENA);
   }
 
   const poznamka = (
@@ -119,16 +130,14 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
           {veSloupci ? poznamka : null}
         </div>
       ) : (
-        // Ikona A slovo. Samotná ikona se dá splést s čímkoli — zvlášť
-        // u něčeho, co se nesmí ťuknout omylem. Na tabletu je sloupec
-        // jen z ikon a slovo schová CSS; jméno pak nese aria-label
-        // a myši title.
+        // Ikona A slovo, všude — i v ikonovém sloupci na tabletu, kde je
+        // slovo malé pod ikonou (globals.css). Samotná ikona se dá
+        // splést s čímkoli, zvlášť u něčeho, co se nesmí ťuknout omylem.
+        // Jméno pro odečítač je to slovo; aria-label ani title netřeba.
         <button
           ref={odhlasitRef}
           type="button"
           className={veSloupci ? "ds-odhlaseni-tl" : "ft-tl ft-tl-vedlejsi ds-odhlaseni-tl"}
-          aria-label={veSloupci ? "Odhlásit se" : undefined}
-          title={veSloupci ? "Odhlásit se" : undefined}
           onClick={() => prepnout(true)}
         >
           <Ikona klic="odhlasit" />

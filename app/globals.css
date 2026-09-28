@@ -170,12 +170,16 @@
    tu není: je vlevo dole na konci levého sloupce (.ft-side-pata).
    Panel vypadá jako ten u zvonečku: karta pod lištou, zarovnaná vpravo. */
 .ft-ucet { position: relative; flex: none; }
+/* Dotykový cíl 44 × 44 (na tabletu u baru se ťuká prstem), kroužek
+   uprostřed zůstává 28 px. Záporný okraj vodorovně drží v liště místo
+   32 px — na úzkém tabletu se nástroje lišty vejdou jen tak tak (zlom
+   960 px výš); na výšku je v liště 48 px, 44 se vejde. */
 .ft-ucet-tl {
   appearance: none; border: 0; background: none; padding: 0; font: inherit;
-  width: 32px; height: 32px; border-radius: 50%;
+  width: 44px; height: 44px; margin: 0 -6px; border-radius: 50%;
   display: grid; place-items: center; cursor: pointer;
 }
-.ft-ucet-tl:focus-visible { outline: 2px solid var(--mosaz-sv); outline-offset: 1px; }
+.ft-ucet-tl:focus-visible { outline: 2px solid var(--mosaz-sv); outline-offset: -5px; }
 /* Otevřená nabídka: prstenec kolem kroužku. Tvar, ne jen barva —
    a aria-expanded to řekne i odečítači. */
 .ft-ucet-tl[aria-expanded="true"] .ft-avatar {
@@ -475,6 +479,13 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
   padding: 10px 10px max(10px, var(--vlozka-dole));
   background: var(--rail-2); border-top: 1px solid var(--rail);
 }
+/* Připnutá pata zakrývá spodní pás posuvného sloupce. Prohlížeč při
+   Tab / Shift+Tab neroluje k položce, která v tom pásu leží — formálně
+   je vidět, jenže pod patou — a fokus by zůstal schovaný (WCAG 2.4.11).
+   `scroll-padding` mu řekne, že spodních N px vidět není. N je pata
+   (65 px na počítači, 73 na tabletu, kde má slovo pod ikonou) s rezervou
+   a s vložkou dole, o kterou pata na iPhonu na šířku povyroste. */
+.ft-side, .modul-sloupec { scroll-padding-bottom: calc(84px + var(--vlozka-dole)); }
 
 .ft-main {
   flex: 1; min-width: 0;
@@ -505,7 +516,18 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
 
 /* ---- Tablet: sloupec se scvrkne na ikonovou lištu 72 px --------- */
 @media (max-width: 1023px) {
-  .ft-side { width: 72px; align-items: center; padding-top: 12px; }
+  /* ŠÍŘKA IKONOVÉHO SLOUPCE JE JEDNA PROMĚNNÁ. Počítá s ní i to, co stojí
+     vedle sloupce: karta dotazu na odhlášení a spodní lišta Marketingu
+     a Faktur (níž). Kdyby se rozešly, lišta přikryje „Odhlásit se" —
+     a přesně tak v Marketingu a Fakturách na tabletu odhlášení nebylo
+     nikde (do 27. 9. 2026).
+
+     72 px na ikony PLUS vložka vlevo. Sloupec má `padding-left: vložka`
+     a `box-sizing: border-box`; s pevnými 72 px zbylo na iPhonu na
+     šířku (vložka 47 px) na ikony 25 px a z „Odhlásit se" jen
+     „Odhlásit". Bez vložky vyjde zase přesných 72. */
+  .ft-shell { --ikonovy-sloupec: calc(72px + var(--vlozka-vlevo)); }
+  .ft-side { width: var(--ikonovy-sloupec); align-items: center; padding-top: 12px; }
   .ft-side-head { padding: 0 0 8px; border-bottom: 0; width: 40px; }
   .ft-side-head b, .ft-side-head span { display: none; }
   .ft-nav { padding: 0; gap: 10px; align-items: center; width: 100%; }
@@ -517,24 +539,39 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
   .ft-nav .stitek, .ft-nav .soon small { display: none; }
   .ft-nav hr { width: 40px; }
 
-  /* Odhlásit se: v ikonovém sloupci jen ikona (jméno nese aria-label
-     a title, Odhlaseni.tsx), cíl 46 × 44. Dotaz se do 72 px nevejde —
-     vyskočí jako karta vedle sloupce, u jeho spodní hrany. `fixed`,
-     protože sloupec má overflow a kartu by jinak ořízl; z-index na
-     sloupci, ať ji nepřekryje obsah s vlastním z-indexem. */
+  /* Odhlásit se: i v ikonovém sloupci ikona A POD NÍ SLOVO, jako ve
+     spodní liště na telefonu. Šéfík 8. 9. (6.6): „samotná ikona se dá
+     splést s čímkoli" — a title, který by jméno nesl, na dotykovém
+     tabletu nikdo neuvidí. „Odhlásit se" v 10 px se do 72 px vejde
+     celé (naměřeno v Chromu), cíl je pak 68 × 54.
+
+     Dotaz se do 72 px nevejde — vyskočí jako karta vedle sloupce, u jeho
+     spodní hrany. `fixed`, protože sloupec má overflow a kartu by jinak
+     ořízl; z-index na sloupci, ať ji nepřekryje obsah s vlastním
+     z-indexem. */
   .ft-side { z-index: 15; }
-  .ft-side-pata { display: flex; justify-content: center; padding: 8px 0 max(10px, var(--vlozka-dole)); }
-  .ft-side-pata .stitek { display: none; }
-  .ft-side-pata .ds-odhlaseni-tl { width: 46px; padding: 0; justify-content: center; gap: 0; }
+  .ft-side-pata { padding: 8px 2px max(10px, var(--vlozka-dole)); }
+  .ft-side-pata .ds-odhlaseni-tl {
+    min-height: 54px; padding: 6px 0; gap: 3px;
+    flex-direction: column; justify-content: center; align-items: center;
+    font-size: 10px; line-height: 1.2; text-align: center; white-space: nowrap;
+  }
+  .ft-side-pata .ds-odhlaseni-tl .ft-i { width: 20px; height: 20px; }
   .ft-side-pata .ds-odhlaseni-otazka {
     position: fixed; z-index: 30;
-    left: calc(72px + 8px); bottom: calc(12px + var(--vlozka-dole));
+    left: calc(var(--ikonovy-sloupec) + 8px); bottom: calc(12px + var(--vlozka-dole));
     width: 280px; box-shadow: var(--shadow);
     max-height: calc(100dvh - var(--vysoka-lista) - 24px); overflow-y: auto;
   }
   .ft-main {
     padding: 20px max(22px, var(--vlozka-vpravo)) 20px max(22px, var(--vlozka-vlevo));
   }
+}
+/* Vedle ikonového sloupce nese vložku vlevo on (--ikonovy-sloupec),
+   obsah ji znovu nepřičítá. Bez sloupce (Moje údaje) zůstává max() výš.
+   Jen na tabletu: na telefonu je sloupec schovaný a platí zlom 640. */
+@media (min-width: 641px) and (max-width: 1023px) {
+  .ft-side ~ .ft-main { padding-left: 22px; }
 }
 
 .ft-mob-mods { display: none; }
@@ -588,9 +625,18 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
      spodní hranu okna. Na krátké stránce se tam nedalo dorolovat, a přesně
      tam od 25. 9. stojí „Odhlásit se“ (.ft-side-pata): na 1280 × 800 bylo
      vidět jen jeho horní čáru. Řádka má proto pevnou výšku a sloupec
-     s ní počítá. Kreslí se jen vedení (moduly), proto :has(). */
+     s ní počítá. Kreslí se jen vedení (moduly), proto :has().
+
+     47 = 30 (záložka: 12,5 px písmo na řádce 19,4 + 2 × 5 odsazení)
+        + 2 × 8 (odsazení řádky) + 1 (čára dole).
+     Výšku záložky ale odvozuje CSS z proměnné, ne naopak: kdyby se
+     záložka změnila (větší písmo, odznak, minimální velikost písma
+     v prohlížeči), řádka nepřeteče a sloupec pod ní nepřečnívá okno —
+     nanejvýš se ořízne obsah záložky, a to je vidět. `overflow-y:
+     hidden`, jinak by řádka s `overflow-x: auto` dostala i svislý posun. */
   .ft-shell { --radka-modulu: 47px; }
-  .ft-mob-mods { height: var(--radka-modulu); align-items: center; }
+  .ft-mob-mods { height: var(--radka-modulu); align-items: center; overflow-y: hidden; }
+  .ft-mob-mods .ft-mod { height: calc(var(--radka-modulu) - 17px); }
   .ft-shell:has(> .ft-mob-mods) .ft-side,
   .ft-shell:has(> .ft-mob-mods) .modul-sloupec {
     top: calc(var(--vysoka-lista) + var(--radka-modulu));
@@ -720,9 +766,33 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
    Rám by jinak kreslil vlastní sloupec i lištu vedle marketingových
    a navigace by byla dvakrát. Klientská komponenta se renderuje už na
    serveru, takže :has() platí od prvního vykreslení, bez probliknutí. */
-.ft-shell:has(.modul-ram) .ft-body > .ft-side,
 .ft-shell:has(.modul-ram) > .ft-mob-bottom { display: none; }
 .ft-shell:has(.modul-ram) .ft-main { padding: 0; }
+
+/* Levý sloupec aplikace ustoupí jen tam, kde ho vlastní sloupec modulu
+   opravdu nahradí — od 1024 px. Na tabletu je sloupec modulu schovaný
+   (má spodní lištu) a do 25. 9. 2026 tu ustupoval i sloupec aplikace:
+   v Marketingu a Fakturách pak nebylo „Odhlásit se" vlevo dole nikde
+   (Šéfík 8. 9., 6.6). Na tabletu proto zůstává ikonový sloupec aplikace
+   jako všude jinde a spodní lišta modulu začíná až za ním.
+
+   Za ním PŘESNĚ: `left` je táž proměnná jako šířka sloupce. Lišta je
+   `fixed` s vyšším z-indexem než sloupec (20 proti 15) — kdyby začínala
+   dřív, přikryje patu i s „Odhlásit se" a nikdo si toho nevšimne,
+   protože nic není schované. Hlídá to scripts/nabidka.test.mjs. Vložku
+   vlevo nese sloupec, lišta ani obsah ji znovu nepřičítají. */
+@media (min-width: 1024px) {
+  .ft-shell:has(.modul-ram) .ft-body > .ft-side { display: none; }
+}
+@media (min-width: 641px) and (max-width: 1023px) {
+  .ft-shell:has(.modul-ram) .modul-spodni { left: var(--ikonovy-sloupec); padding-left: 0; }
+  .ft-shell:has(.modul-ram) .modul-obsah { padding-left: 22px; }
+  /* Dotaz na odhlášení (karta vedle sloupce) nad spodní lištou, ne pod ní. */
+  .ft-shell:has(.modul-ram) .ft-side-pata .ds-odhlaseni-otazka {
+    bottom: calc(62px + var(--vlozka-dole) + 12px);
+    max-height: calc(100dvh - var(--vysoka-lista) - 62px - var(--vlozka-dole) - 24px);
+  }
+}
 
 .modul-ram { display: flex; min-height: 100%; }
 

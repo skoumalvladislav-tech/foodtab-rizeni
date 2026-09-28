@@ -1,6 +1,7 @@
 /**
- * Stav výsuvné nabídky — menu „Více" na telefonu (MobileVice) a nabídka
- * účtu pod iniciálami v horní liště na počítači a tabletu (MenuUctu).
+ * Stav výsuvné nabídky — menu „Více" na telefonu (MobileVice), nabídka
+ * účtu pod iniciálami v horní liště na počítači a tabletu (MenuUctu)
+ * a dotaz „Odhlásit se?" vlevo dole (Odhlaseni).
  *
  * Pamatuje se ADRESA, na které se nabídka otevřela; `null` = zavřená.
  * Otevřená je jen na téže adrese: po přechodu jinam (odkazem z nabídky,

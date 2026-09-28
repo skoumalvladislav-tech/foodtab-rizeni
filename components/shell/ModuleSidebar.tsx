@@ -29,15 +29,17 @@ import Odhlaseni from "./Odhlaseni";
  *
  * Připnuté dole (globals.css, `.ft-side-pata`): když je seznam
  * obrazovek dlouhý, sloupec se roluje a odhlášení zůstává vidět, ne až
- * pod posledním Nastavením. Na tabletu je sloupec jen z ikon — tam je
- * jen ikona s popiskem pro odečítač a dotaz vyskočí jako karta vedle.
+ * pod posledním Nastavením. Položku s fokusem pod patu neschová
+ * `scroll-padding-bottom`. Na tabletu je sloupec jen z ikon — odhlášení
+ * tam má ikonu a pod ní malé slovo (jako spodní lišta na telefonu)
+ * a dotaz vyskočí jako karta vedle.
  *
  * Marketing a Faktury mají na počítači vlastní sloupec a kreslí totéž
  * na jeho konci (`app/[rozsah]/marketing/navigace.tsx`,
- * `app/[rozsah]/finance/faktury/navigace.tsx`). Na tabletu tam sloupec
- * není žádný (mají vlastní spodní lištu) a cesta vede přes záložku
- * Provoz. Moje údaje leží mimo rozsah a mají vlastní odhlášení dole
- * na stránce.
+ * `app/[rozsah]/finance/faktury/navigace.tsx`). Na tabletu je jejich
+ * sloupec schovaný (mají spodní lištu), a tak tam zůstává tenhle
+ * ikonový sloupec i s odhlášením. Moje údaje leží mimo rozsah a mají
+ * vlastní odhlášení dole na stránce.
  */
 export default function ModuleSidebar({
   rozsah,

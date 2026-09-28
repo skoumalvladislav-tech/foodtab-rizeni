@@ -83,9 +83,10 @@ export default function MenuUctu({
     tlacitkoRef.current?.focus();
   }
 
-  // Jen když je známo, KAM fokus odešel (Tab ven). Safari fokus při
-  // kliknutí na odkaz nepřesune a `relatedTarget` je prázdný — zavírat
-  // i tehdy by panel zmizel dřív, než klik na Moje údaje doběhne.
+  // Jen když je známo, KAM fokus odešel (Tab ven). Safari tlačítko ani
+  // odkaz kliknutím nezaměří a `relatedTarget` je prázdný — zavírat
+  // i tehdy by třeba druhý klik na iniciály nabídku zavřel při stisku
+  // a hned zase otevřel. Hlídá to scripts/nabidka.test.mjs („Safari: …").
   function naOdchodFokusu(e: FocusEvent<HTMLDivElement>) {
     const kam = e.relatedTarget as Node | null;
     if (otevreno && kam && !e.currentTarget.contains(kam)) zavrit();

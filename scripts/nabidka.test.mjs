@@ -599,8 +599,10 @@ await scena('odhlášení vlevo dole', [MAJITEL, 'cerna-perla', '/cerna-perla/dn
   const stitek = tl ? h.podleTridy('stitek', tl) : null
   ok('  ikona i slovo',
     tl !== null && h.najdi((u) => u.typ === 'svg', tl) !== null && stitek !== null && h.text(stitek) === 'Odhlásit se')
-  ok('  a jméno i v ikonovém sloupci na tabletu (aria-label a title)',
-    tl?.props['aria-label'] === 'Odhlásit se' && tl?.props.title === 'Odhlásit se')
+  // Slovo je vidět i na tabletu (malé pod ikonou, CSS kontrola níž),
+  // takže jméno pro odečítač je ono; aria-label by se s ním mohl rozejít.
+  ok('  jméno pro odečítač je to viditelné slovo',
+    tl !== null && (tl.props['aria-label'] ?? h.text(tl).trim()) === 'Odhlásit se')
   ok('  jedním ťuknutím neodhlásí (bez dotazu žádný formulář)', pata !== null && !h.html(pata).includes('<form'))
 
   const lista = h.najdi((u) => u.typ === 'header')
@@ -648,6 +650,17 @@ await scena('odhlášení vlevo dole', [MAJITEL, 'cerna-perla', '/cerna-perla/dn
   ok('Escape, když fokus v dotazu není, ho na „Odhlásit se" nepřehodí', h.fokus === null)
   h.klik(h.najdi((u) => u.typ === 'main'))
 
+  // Změna adresy bez ukazatele (Alt+←, gesto zpět na iPadu,
+  // přesměrování): sloupec se nepřekresluje a dotaz by na nové obrazovce
+  // visel dál — na tabletu jako karta přes obsah.
+  h.klik(vlevoDole(h).tl)
+  globalThis.__cesta = '/cerna-perla/smeny'
+  h.prekreslit()
+  ok('změna adresy dotaz zavře', !ptaSeVlevo(h) && vlevoDole(h).tl !== null)
+  globalThis.__cesta = '/cerna-perla/dnes'
+  h.prekreslit()
+  ok('  a po návratu na původní adresu se sám neotevře', !ptaSeVlevo(h))
+
   h.klik(vlevoDole(h).tl)
   p = vlevoDole(h).pata
   h.klik(h.tlacitko('Odhlásit', p))
@@ -655,6 +668,22 @@ await scena('odhlášení vlevo dole', [MAJITEL, 'cerna-perla', '/cerna-perla/dn
 
   h.klik(zpet())
   ok('bez dotazu po sobě nenechá posluchače na document', !ptaSeVlevo(h) && h.dokument.pocetPosluchacu() === 0)
+})
+
+/*
+  Safari (Mac i iPad — hlavní tablet u baru) tlačítko kliknutím
+  nezaměří. Stisk myši na „Odhlásit" proto fokus ze „Zpět" pustí
+  NIKAM a onBlur dostane prázdný relatedTarget. Kdyby dotaz zavíral
+  i tehdy, zmizel by dřív, než klik doběhne: odhlášení by se potichu
+  neodeslalo a člověk by zůstal přihlášený.
+*/
+await scena('Safari: odhlášení vlevo dole', [MAJITEL, 'cerna-perla', '/cerna-perla/dnes'], ({ h }) => {
+  const safari = { safari: true }
+  h.klik(vlevoDole(h).tl, safari)
+  const zpet = h.tlacitko('Zpět', vlevoDole(h).pata)
+  ok('Safari: ťuknutí na „Odhlásit se" ukáže dotaz a fokus je na „Zpět"', ptaSeVlevo(h) && h.fokus === zpet)
+  h.klik(h.tlacitko('Odhlásit', vlevoDole(h).pata), safari)
+  ok('Safari: „Odhlásit" v dotazu odhlásí, i když stisk myši fokus pustí nikam', globalThis.__odhlaseni === 1)
 })
 
 // Každý, na každé obrazovce: číšník, obrazovka bez položky v nabídce
@@ -685,8 +714,9 @@ console.log('\n== Sloupce Marketingu a Faktur (počítač) ==')
 /*
   Marketing a Faktury mají na počítači vlastní levý sloupec místo
   sloupce aplikace (globals.css: `.ft-shell:has(.modul-ram) … .ft-side`
-  schová). Vlevo dole tam musí být totéž — kreslí se jejich skutečná
-  navigace.
+  schová od 1024 px). Vlevo dole tam musí být totéž — kreslí se jejich
+  skutečná navigace. Na tabletu je jejich sloupec schovaný a zůstává
+  ikonový sloupec aplikace (hlídá CSS kontrola níž).
 */
 for (const [popis, soubor, vlastnosti] of [
   ['Marketing', 'app/[rozsah]/marketing/navigace.tsx', { hlavni: [], nastaveni: [], spodni: [] }],
@@ -715,28 +745,123 @@ for (const [popis, soubor, vlastnosti] of [
 
 {
   /*
-    CSS: „Odhlásit se" vlevo dole nesmí nad 640 px zmizet — je to tam
-    jediná cesta ven kromě konce Mých údajů. Každé pravidlo, které
-    schová (display: none i visibility: hidden) sloupec, jeho patu nebo
-    tlačítko, musí stát v @media (max-width: 640px), kde je totéž ve
-    „Více". Výjimka je sloupec schovaný v Marketingu a Fakturách: tam
-    ho nahrazuje jejich vlastní, s patou taky (kontrola výš).
+    CSS: „Odhlásit se" vlevo dole nesmí nad 640 px zmizet — tlačítko
+    ani slovo u ikony (Šéfík 8. 9.: ikona A slovo; title na dotykovém
+    tabletu nikdo neuvidí). Je to tam jediná cesta ven kromě konce Mých
+    údajů.
 
-    Slovo „Odhlásit se" smí CSS schovat jen v ikonovém sloupci
-    na tabletu (do 1023 px); na počítači musí být vidět.
+    Každé pravidlo, které něco schová (display: none, visibility:
+    hidden, font-size: 0 a další — SCHOVA dole) a v selektoru má
+    sloupec, jeho patu, odhlášení nebo sloupec
+    Marketingu a Faktur — KDEKOLI, ne jen jako poslední prvek:
+    `.ft-side-pata button` i `.modul-sloupec > div:last-child` schovají
+    totéž —, musí stát v @media (max-width: 640px), kde je totéž ve
+    „Více". Výjimky, kde jeden sloupec nahrazuje druhý:
+      - sloupec aplikace v Marketingu a Fakturách, ale jen od 1024 px
+        (tam je jejich vlastní, s patou — kontrola výš),
+      - sloupec Marketingu a Faktur celý, ale jen do 1023 px (tam zůstává
+        ikonový sloupec aplikace, protože výjimka výš platí až od 1024).
   */
   const pravidla = [
     ...pravidlaSchovani(readFileSync('app/globals.css', 'utf8')),
     ...pravidlaSchovani(readFileSync('app/_komponenty.css', 'utf8')),
   ]
-  const CIL = /\.(ft-side|ft-side-pata|ds-odhlaseni|ds-odhlaseni-sloupec|ds-odhlaseni-tl)(?![\w-])/
-  const schovaTlacitko = pravidla.filter((r) => r.casti.some((c) => CIL.test(posledniCast(c)) && !c.includes(':has(.modul-ram)')))
-  ok('CSS: sloupec ani odhlášení vlevo dole neschovává nic kromě telefonu',
-    schovaTlacitko.length > 0 && schovaTlacitko.every((r) => /max-width:\s*640px/.test(r.media)))
-  const schovaSlovo = pravidla.filter((r) =>
-    r.casti.some((c) => /\.(ft-side-pata|ds-odhlaseni[\w-]*)\b/.test(c) && /\.stitek$/.test(posledniCast(c))))
-  ok('CSS: slovo „Odhlásit se" schovává jen tablet (ikonový sloupec)',
-    schovaSlovo.length > 0 && schovaSlovo.every((r) => /max-width:\s*1023px/.test(r.media)))
+  const CIL = /\.(ft-side|ft-side-pata|ds-odhlaseni[\w-]*|modul-sloupec)(?![\w-])/
+  const jenPocitac = (m) => /min-width:\s*1024px/.test(m) && !/max-width/.test(m)
+  const jenDo1023 = (m) => /max-width:\s*1023px/.test(m) && !/min-width/.test(m)
+  const vyjimka = (c, m) =>
+    (c.includes(':has(.modul-ram)') && posledniCast(c) === '.ft-side' && jenPocitac(m)) ||
+    (c === '.modul-sloupec' && jenDo1023(m))
+  const schova = pravidla.flatMap((r) => r.casti.filter((c) => CIL.test(c)).map((c) => ({ c, media: r.media })))
+  const spatne = schova.filter(({ c, media }) => !/max-width:\s*640px/.test(media) && !vyjimka(c, media))
+  ok('CSS: sloupec ani odhlášení vlevo dole (ani jeho slovo) neschovává nic kromě telefonu' +
+     (spatne.length ? ` — ${spatne.map((s) => `${s.c} v ${s.media || 'každé šířce'}`).join('; ')}` : ''),
+    schova.length > 0 && spatne.length === 0)
+
+  /*
+    Kladné kontroly čtou VÝSLEDNOU hodnotu (funkce `vysledna` dole:
+    kaskáda v malém, se specificitou, pořadím a zkratkami), ne první
+    výskyt. Do 28. 9. se těla pravidel slepila, a tak prošlo i pozdější
+    `flex-direction: row` nebo `scroll-padding-bottom: 0`. Kontext je
+    výčet tříd, které v DOMu u prvku a nad ním opravdu jsou —
+    s `.modul-ram` jde o Marketing a Faktury.
+  */
+  const vsechna = [
+    ...vsechnaPravidla(readFileSync('app/_komponenty.css', 'utf8')), // @import na začátku globals.css
+    ...vsechnaPravidla(readFileSync('app/globals.css', 'utf8')),
+  ]
+  const SHELL = ['ft-shell', 'ft-mob-mods', 'ft-body']
+  const MODUL = [...SHELL, 'ft-main', 'modul-ram']
+  const PATA = ['ft-side', 'ft-side-pata', 'ds-odhlaseni', 'ds-odhlaseni-sloupec']
+  const KONTEXTY = [['rozcestník', SHELL], ['Marketing a Faktury', MODUL]]
+  const TABLET = [641, 768, 1023]
+  const hodnoty = (prvek, kontext, vlastnosti, sirky) => sirky.flatMap((sirka) =>
+    vlastnosti.map((v) => ({ sirka, v, h: vysledna(vsechna, prvek, [...kontext, prvek], v, sirka) })))
+  const vypis = (vadne) =>
+    vadne.length ? ' — ' + vadne.map((x) => `${x.kde ?? ''}${x.sirka} px ${x.v}: ${x.h}`).join('; ') : ''
+
+  // A kladně: v ikonovém sloupci na tabletu je slovo POD ikonou (sloupeček
+  // jako spodní lišta na telefonu), písmem aspoň 10 px, a celé tlačítko
+  // je dotykový cíl aspoň 44 px vysoký (docs/vzhled-zadani.md, 11). Jen
+  // ikona tu do 27. 9. byla — jméno neslo title, a ten na dotykovém
+  // tabletu nikdo neuvidí. Že se slovo do sloupce opravdu vejde, měří
+  // snímek (Chrome).
+  const tlNaTabletu = KONTEXTY.flatMap(([kde, k]) =>
+    hodnoty('ds-odhlaseni-tl', [...k, ...PATA], ['flex-direction', 'font-size', 'min-height', 'height', 'max-height'], TABLET)
+      .map((x) => ({ ...x, kde: `${kde}: ` })))
+  const spatneTl = tlNaTabletu.filter(({ v, h }) =>
+    v === 'flex-direction' ? h !== 'column'
+      : v === 'font-size' ? !(px(h) >= 10)
+        : v === 'min-height' ? !(px(h) >= 44)
+          : !aspon(h, 44))
+  ok('CSS: na tabletu je pod ikonou „Odhlásit se" i slovo (ikona nad slovem, písmo aspoň 10 px), cíl aspoň 44 px vysoký — i v Marketingu a Fakturách' +
+     vypis(spatneTl), tlNaTabletu.length > 0 && spatneTl.length === 0)
+
+  // Připnutá pata zakrývá spodní pás posuvného sloupce; bez scroll-padding
+  // prohlížeč při Tab / Shift+Tab neroluje k položce, která pod ní leží,
+  // a fokus zůstane schovaný. Kolik to zakrývá, měří snímky (Chrome).
+  // Pata je 65 px vysoká na počítači a 73 na tabletu.
+  const odsazeni = [
+    ...hodnoty('ft-side', SHELL, ['scroll-padding-bottom'], [768, 1280]).map((x) => ({ ...x, kde: 'sloupec ' })),
+    ...hodnoty('ft-side', MODUL, ['scroll-padding-bottom'], [768]).map((x) => ({ ...x, kde: 'sloupec v Marketingu ' })),
+    ...hodnoty('modul-sloupec', MODUL, ['scroll-padding-bottom'], [1280]).map((x) => ({ ...x, kde: 'sloupec Marketingu ' })),
+  ]
+  const spatneOds = odsazeni.filter(({ h }) => !(px(h) >= 73))
+  ok('CSS: položka s fokusem nezaleze pod patu (scroll-padding-bottom aspoň na výšku paty, 73 px), ani v Marketingu' +
+     vypis(spatneOds), spatneOds.length === 0)
+
+  /*
+    Marketing a Faktury na tabletu: vlevo zůstává ikonový sloupec aplikace
+    s „Odhlásit se" a jejich spodní lišta (`fixed`, z-index 20 nad
+    sloupcem s 15) musí začínat PŘESNĚ za ním. Kdyby začínala od kraje,
+    patu i s odhlášením přikryje — nic se přitom neschová, takže kontrola
+    schovávání výš mlčí. Proto: šířka sloupce, `left` lišty i `left`
+    karty dotazu jsou táž proměnná, a ta počítá s vložkou vlevo (iPhone
+    na šířku; s pevnými 72 px zbylo na „Odhlásit se" 25 px). Karta
+    dotazu stojí nad lištou, ne pod ní.
+  */
+  const sirkaSloupce = vysledna(vsechna, 'ft-shell', ['ft-shell'], '--ikonovy-sloupec', 768)
+  ok('CSS: šířka ikonového sloupce je jedna proměnná a počítá s vložkou vlevo' + (sirkaSloupce ? '' : ' — --ikonovy-sloupec chybí'),
+    px(sirkaSloupce) >= 72 && /var\(--vlozka-vlevo\)/.test(sirkaSloupce ?? ''))
+  const VAR = 'var(--ikonovy-sloupec)'
+  const vedleSloupce = [
+    ...KONTEXTY.flatMap(([kde, k]) => hodnoty('ft-side', k, ['width'], TABLET)
+      .map((x) => ({ ...x, kde: `${kde}: sloupec `, dobre: x.h === VAR }))),
+    ...hodnoty('modul-spodni', MODUL, ['left'], TABLET)
+      .map((x) => ({ ...x, kde: 'Marketing a Faktury: spodní lišta ', dobre: x.h === VAR })),
+    ...KONTEXTY.flatMap(([kde, k]) => hodnoty('ds-odhlaseni-otazka', [...k, ...PATA], ['left'], TABLET)
+      .map((x) => ({ ...x, kde: `${kde}: dotaz `, dobre: (x.h ?? '').includes(VAR) }))),
+  ]
+  const spatneVedle = vedleSloupce.filter((x) => !x.dobre)
+  ok('CSS: na tabletu začíná spodní lišta Marketingu a Faktur i karta dotazu přesně za ikonovým sloupcem (táž proměnná)' +
+     vypis(spatneVedle), vedleSloupce.length > 0 && spatneVedle.length === 0)
+  const vyskaListy = hodnoty('modul-spodni', MODUL, ['height'], TABLET)
+  const dotazDole = hodnoty('ds-odhlaseni-otazka', [...MODUL, ...PATA], ['bottom'], TABLET)
+  const spatneDole = dotazDole.filter((x, i) =>
+    !(px(vyskaListy[i].h) >= 44 && px(x.h) >= px(vyskaListy[i].h) && /var\(--vlozka-dole\)/.test(x.h ?? '')))
+  ok('CSS: v Marketingu a Fakturách stojí karta dotazu nad spodní lištou, ne pod ní' +
+     vypis(spatneDole) + (spatneDole.length ? ` (lišta ${vyskaListy.map((x) => x.h).join(', ')})` : ''),
+    dotazDole.length > 0 && spatneDole.length === 0)
 
   const pata = readFileSync('app/globals.css', 'utf8').match(/\.ft-side-pata\s*\{([^}]*)\}/)?.[1] ?? ''
   ok('CSS: pata je připnutá dole (sticky, bottom: 0, margin-top: auto)',
@@ -745,11 +870,16 @@ for (const [popis, soubor, vlastnosti] of [
   // Pod řádkou modulů (vedení, do 1360 px) se sloupec lepí až pod ni
   // a je o ni nižší. Dřív o ni přečníval spodní hranu okna: na 1280 × 800
   // byla z „Odhlásit se" vidět jen čára. Vidět je to na snímku; tady se
-  // hlídá, že pravidlo nezmizí.
+  // hlídá, že pravidlo nezmizí — a že výšku záložky v řádce odvozuje CSS
+  // z téže proměnné (47 = záložka + 2 × 8 odsazení + 1 čára), takže se
+  // řádka a sloupec nemůžou rozejít, ani když se záložka změní.
   const g = readFileSync('app/globals.css', 'utf8')
   ok('CSS: pod řádkou modulů je sloupec o její výšku nižší (i sloupec Marketingu)',
     /\.ft-mob-mods\s*\{[^}]*height:\s*var\(--radka-modulu\)/.test(g) &&
       /\.ft-shell:has\(> \.ft-mob-mods\) \.ft-side,\s*\.ft-shell:has\(> \.ft-mob-mods\) \.modul-sloupec\s*\{[^}]*height:\s*calc\(100dvh - var\(--vysoka-lista\) - var\(--radka-modulu\)\)/.test(g))
+  ok('  a záložka v řádce má výšku z téže proměnné, řádka svisle nepřeteče',
+    /\.ft-mob-mods \.ft-mod\s*\{[^}]*height:\s*calc\(var\(--radka-modulu\) - 17px\)/.test(g) &&
+      /\.ft-mob-mods\s*\{[^}]*height:\s*var\(--radka-modulu\)[^}]*overflow-y:\s*hidden/.test(g))
 }
 
 console.log('\n== Nabídka pod iniciálami: Moje údaje a vzhled, odhlášení ne ==')
@@ -827,6 +957,26 @@ await scena('nabídka účtu', [MAJITEL, 'cerna-perla', '/cerna-perla/dnes'], ({
   ok('zavřená po sobě nenechá posluchače na document', h.dokument.pocetPosluchacu() === 0)
 })
 
+/*
+  Safari tlačítko ani odkaz kliknutím nezaměří. Druhý klik na iniciály
+  proto při stisku myši pustí fokus z panelu NIKAM (relatedTarget
+  prázdný). Kdyby nabídka zavírala i tehdy, stisk by ji zavřel a klik
+  hned zase otevřel — v Safari by nešla zavřít iniciálami.
+*/
+await scena('Safari: nabídka účtu', [MAJITEL, 'cerna-perla', '/cerna-perla/dnes'], ({ h }) => {
+  const safari = { safari: true }
+  const tl = () => h.tlacitko('Můj účet')
+  const panelUctu = () => h.podleTridy('ft-ucet-panel')
+  h.klik(tl(), safari)
+  ok('Safari: klik na iniciály nabídku otevře a fokus je v ní', panelUctu() !== null && panelUctu().contains(h.fokus))
+  h.klik(tl(), safari)
+  ok('Safari: druhý klik na iniciály ji zavře (ne zavře a hned zase otevře)',
+    panelUctu() === null && tl().props['aria-expanded'] === false)
+  h.klik(tl(), safari)
+  h.klik(h.najdi((u) => u.typ === 'a' && u.props.href === '/moje-udaje', panelUctu()), safari)
+  ok('Safari: klik na Moje údaje projde a nabídku zavře', panelUctu() === null)
+})
+
 {
   /*
     Nabídka pod iniciálami se nad 640 px nesmí ztratit — na tabletu je
@@ -840,6 +990,22 @@ await scena('nabídka účtu', [MAJITEL, 'cerna-perla', '/cerna-perla/dnes'], ({
   ].filter((r) => r.casti.some((c) => /\.ft-ucet(?:-tl)?(?![\w-])/.test(posledniCast(c))))
   ok('CSS: nabídku účtu schovává jen telefon',
     schovani.length > 0 && schovani.every((r) => /max-width:\s*640px/.test(r.media)))
+
+  // Iniciály jsou od 25. 9. tlačítko a na tabletu se na ně ťuká prstem:
+  // dotykový cíl nejméně 44 × 44 (hlavička globals.css). Kroužek uvnitř
+  // zůstává menší. Výsledná hodnota (kaskáda, `vysledna` dole), takže
+  // neprojde ani pozdější přebití na tabletu.
+  const vsechna = [
+    ...vsechnaPravidla(readFileSync('app/_komponenty.css', 'utf8')),
+    ...vsechnaPravidla(readFileSync('app/globals.css', 'utf8')),
+  ]
+  const KONTEXT = ['ft-shell', 'ft-topbar', 'ft-tools', 'ft-ucet', 'ft-ucet-tl']
+  const rozmery = [641, 768, 1023, 1280].flatMap((sirka) =>
+    ['width', 'height', 'max-width', 'max-height'].map((v) => ({ sirka, v, h: vysledna(vsechna, 'ft-ucet-tl', KONTEXT, v, sirka) })))
+  const male = rozmery.filter(({ v, h }) => (v.startsWith('max-') ? !aspon(h, 44) : !(px(h) >= 44)))
+  ok('CSS: iniciály jsou dotykový cíl aspoň 44 × 44 (i na tabletu)' +
+     (male.length ? ' — ' + male.map((x) => `${x.sirka} px ${x.v}: ${x.h}`).join('; ') : ''),
+    male.length === 0)
 }
 
 console.log('\n== Spodní lišta podle toho, kolik kdo má obrazovek ==')
@@ -911,26 +1077,28 @@ await scena('vedoucí', [VEDOUCI, 'cerna-perla', '/cerna-perla/dnes'], ({ h, pol
 })
 
 /**
- * Pravidla CSS, která prvek schovají (`display: none` nebo
- * `visibility: hidden`), s částmi selektoru a @media, ve kterých
- * stojí. Stačí na soubory appky: bez vnořování, složené závorky jen jako
- * bloky.
+ * Všechna pravidla CSS v pořadí zápisu: selektor, jeho části, @media,
+ * ve kterých stojí, a tělo. Stačí na soubory appky: bez vnořování,
+ * složené závorky jen jako bloky.
  */
-function pravidlaSchovani(css) {
+function vsechnaPravidla(css) {
   const vysledek = []
   const otevrene = []
   let kus = ''
   for (const znak of css.replace(/\/\*[\s\S]*?\*\//g, '')) {
     if (znak === '{') {
-      otevrene.push(kus.trim())
+      // Středník v hlavičce nebývá; před ní ale může stát příkaz bez
+      // bloku (`@import "./_komponenty.css";`) a ten k ní nepatří.
+      otevrene.push(kus.replace(/^[\s\S]*;/, '').trim())
       kus = ''
     } else if (znak === '}') {
       const hlavicka = otevrene.pop() ?? ''
-      if (!hlavicka.startsWith('@') && /display\s*:\s*none|visibility\s*:\s*hidden/.test(kus)) {
+      if (!hlavicka.startsWith('@')) {
         vysledek.push({
           selektor: hlavicka,
           casti: hlavicka.split(',').map((c) => c.trim()),
           media: otevrene.filter((o) => o.startsWith('@')).join(' '),
+          telo: kus,
         })
       }
       kus = ''
@@ -941,9 +1109,146 @@ function pravidlaSchovani(css) {
   return vysledek
 }
 
+/*
+  Pravidla, která něco schovají (SCHOVA). Nejen display: none
+  a visibility: hidden — slovo u ikony zmizí stejně spolehlivě
+  s font-size: 0, s nulovou šířkou nebo průhledností (min-width: 0 ani
+  opacity: .5 se nepočítají).
+*/
+function pravidlaSchovani(css) {
+  const SCHOVA = /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?![.\d])|font-size\s*:\s*0(?![.\d])|(?:^|[;\s])(?:max-)?(?:width|height)\s*:\s*0(?![.\d])|clip-path\s*:\s*inset\(\s*50%/
+  return vsechnaPravidla(css).filter((r) => SCHOVA.test(r.telo))
+}
+
 /** Poslední složka selektoru — prvek, který pravidlo opravdu zasáhne. */
 function posledniCast(selektor) {
   return selektor.replace(/\([^)]*\)/g, '()').trim().split(/\s*[\s>+~]\s*/).filter(Boolean).at(-1) ?? ''
+}
+
+/*
+  VÝSLEDNÁ HODNOTA vlastnosti, kterou prvek v dané šířce okna dostane —
+  kaskáda v malém. Ze všech pravidel, jejichž část selektoru na prvek
+  míří (`miri`) a jejichž @media v té šířce platí, vyhraje !important,
+  pak vyšší specificita a při shodě pozdější zápis. Zkratky
+  (scroll-padding, inset, flex-flow, font…) se rozloží. `null` = nikde
+  nenastaveno.
+
+  Stačí na soubory appky (bez vnořování, bez @layer); dědičnost
+  a vyhodnocení var() neřeší — to měří snímky v Chromu.
+*/
+function vysledna(pravidla, prvek, kontext, vlastnost, sirka) {
+  let vitez = null
+  pravidla.forEach((r, poradi) => {
+    if (!platiNaSirce(r.media, sirka)) return
+    const casti = r.casti.filter((c) => miri(c, prvek, kontext))
+    if (!casti.length) return
+    const spec = Math.max(...casti.map(specificita))
+    for (const radek of r.telo.split(';')) {
+      const i = radek.indexOf(':')
+      if (i < 0) continue
+      const surova = radek.slice(i + 1).trim()
+      const dulezite = /!\s*important$/.test(surova)
+      const h = zeZkratky(radek.slice(0, i).trim(), surova.replace(/\s*!\s*important$/, ''), vlastnost)
+      if (h === null) continue
+      const klic = [dulezite ? 1 : 0, spec, poradi]
+      const pozdeji = !vitez || klic[0] > vitez.klic[0] ||
+        (klic[0] === vitez.klic[0] && (klic[1] > vitez.klic[1] || (klic[1] === vitez.klic[1] && klic[2] >= vitez.klic[2])))
+      if (pozdeji) vitez = { klic, h }
+    }
+  })
+  return vitez?.h ?? null
+}
+
+/*
+  Platí @media v téhle šířce okna? (min-width / max-width v px, spojené
+  `and`, i vnořené; ostatní podmínky, třeba prefers-color-scheme, se
+  berou jako splněné.)
+*/
+function platiNaSirce(media, sirka) {
+  for (const [, kraj, hodnota] of media.matchAll(/(min|max)-width:\s*(\d+)px/g)) {
+    if (kraj === 'min' ? sirka < Number(hodnota) : sirka > Number(hodnota)) return false
+  }
+  return true
+}
+
+/*
+  Míří část selektoru na prvek s třídou `prvek`, když jsou v DOMu u něj
+  a nad ním (i jako cíl :has) jen třídy z `kontext`? Poslední složka
+  musí mít tu třídu a každá třída v části musí být v kontextu. Stavy
+  (:hover, :focus…) se neberou — hlídá se klidový vzhled; :not() se
+  přeskočí.
+*/
+function miri(cast, prvek, kontext) {
+  if (/:(?:hover|focus|focus-visible|focus-within|active|disabled|checked)(?![\w-])/.test(cast)) return false
+  if (!new RegExp(`\\.${prvek}(?![\\w-])`).test(posledniCast(cast))) return false
+  return [...cast.replace(/:not\([^)]*\)/g, '').matchAll(/\.([\w-]+)/g)].every((m) => kontext.includes(m[1]))
+}
+
+/** Specificita části selektoru jako jedno číslo (id, třídy a pseudotřídy, prvky). */
+function specificita(cast) {
+  const s = cast.replace(/:where\([^)]*\)/g, '').replace(/:(?:is|not|has)\(([^)]*)\)/g, ' $1 ')
+  const id = (s.match(/#[\w-]+/g) ?? []).length
+  const tridy = (s.match(/\.[\w-]+|\[[^\]]*\]|(?<!:):[\w-]+/g) ?? []).length
+  const prvky = (s.replace(/\[[^\]]*\]/g, '').match(/(?:^|[\s>+~])[a-z][\w-]*/gi) ?? []).length +
+    (s.match(/::[\w-]+/g) ?? []).length
+  return id * 10000 + tridy * 100 + prvky
+}
+
+/*
+  Hodnota `vlastnost` z deklarace `nazev: hodnota`, i když je to zkratka;
+  `null`, když se jí deklarace netýká. Pořadí složek jako v CSS: inset
+  a scroll-padding „nahoře vpravo dole vlevo" (chybějící se doplní
+  z protější), *-block „začátek konec". (Tabulka je uvnitř funkce:
+  kontroly výš běží dřív, než by se konstanta na konci souboru
+  inicializovala.)
+*/
+function zeZkratky(nazev, hodnota, vlastnost) {
+  if (nazev === vlastnost) return hodnota
+  const ZKRATKY = {
+    'scroll-padding-bottom': { 'scroll-padding': [2, 0], 'scroll-padding-block': [1, 0], 'scroll-padding-block-end': [0] },
+    left: { inset: [3, 1, 0], 'inset-inline': [0], 'inset-inline-start': [0] },
+    bottom: { inset: [2, 0], 'inset-block': [1, 0], 'inset-block-end': [0] },
+    width: { 'inline-size': [0] },
+    height: { 'block-size': [0] },
+    'min-height': { 'min-block-size': [0] },
+    'max-width': { 'max-inline-size': [0] },
+    'max-height': { 'max-block-size': [0] },
+    'flex-direction': { 'flex-flow': 'smer' },
+    'font-size': { font: 'pismo' },
+  }
+  const z = ZKRATKY[vlastnost]?.[nazev]
+  if (!z) return null
+  if (z === 'pismo') return hodnota.match(/(?:^|\s)(\d+(?:\.\d+)?(?:px|rem|em|%))(?=\/|\s|$)/)?.[1] ?? hodnota
+  const kusy = []
+  let hloubka = 0
+  let kus = ''
+  for (const znak of hodnota) {
+    if (znak === '(') hloubka++
+    if (znak === ')') hloubka--
+    if (/\s/.test(znak) && hloubka === 0) {
+      if (kus) kusy.push(kus)
+      kus = ''
+    } else {
+      kus += znak
+    }
+  }
+  if (kus) kusy.push(kus)
+  if (z === 'smer') return kusy.find((k) => /^(?:row|column)(?:-reverse)?$/.test(k)) ?? 'row'
+  for (const i of z) if (kusy[i] !== undefined) return kusy[i]
+  return null
+}
+
+/** Kolik px je hodnota (`44px`, `0`, `calc(84px + …)` → 84); jinak NaN. */
+function px(hodnota) {
+  const h = (hodnota ?? '').trim()
+  if (/^0(?:px)?$/.test(h)) return 0
+  const m = h.match(/^(?:calc\(\s*)?(\d+(?:\.\d+)?)px/)
+  return m ? Number(m[1]) : NaN
+}
+
+/** Nenastaveno, `auto`/`none`, nebo aspoň `min` px. */
+function aspon(hodnota, min) {
+  return hodnota === null || hodnota === 'auto' || hodnota === 'none' || px(hodnota) >= min
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
