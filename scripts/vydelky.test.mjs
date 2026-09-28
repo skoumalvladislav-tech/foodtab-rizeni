@@ -348,6 +348,19 @@ ma('Po dnech je pod tabulkou lidí a nad vysvětlivkami',
   kde(sDny, 'ds-vy-karty') < kde(sDny, 'id="po-dnech"') && kde(sDny, 'id="po-dnech"') < kde(sDny, 'ds-vy-vysvetlivky'), true)
 ma('vysvětlivka: součet dnů = sloupec Vyděláno', text(sDny).includes('Součet dnů je přesně součet sloupce Vyděláno'), true)
 
+console.log('\n== Jméno jako odkaz na docházku člověka (27. 9.) ==')
+const sOdkazem = renderToStaticMarkup(
+  createElement(TabulkaVydelku, {
+    radky: LIDE, mesic: '2026-09-01', obdobi: 'tento', naPobocce: true, pobocky: {},
+    predchozi: { href: '#', mesic: '2026-08-01' }, nasledujici: null,
+    odkazNaCloveka: (id) => `/cerna-perla/dochazka/clovek/${id}?mesic=2026-09&z=vydelky`,
+  }),
+)
+ma('s odkazem: jméno v tabulce vede na docházku člověka',
+  /<tr[^>]*data-clovek="cyril"[^>]*><th scope="row"><span class="ds-vy-clovek"><a href="\/cerna-perla\/dochazka\/clovek\/cyril\?mesic=2026-09&amp;z=vydelky"/.test(sOdkazem), true)
+ma('… i na kartě telefonu', /<li[^>]*data-clovek="cyril"[^>]*><span class="ds-vy-clovek"><a href="\/cerna-perla\/dochazka\/clovek\/cyril/.test(sOdkazem), true)
+ma('bez odkazu (bez attendance.read): jméno je jen text', html.includes('/dochazka/clovek/'), false)
+
 /* ======================================================================
    2. LIŠTA ZÁLOŽEK
    ====================================================================== */
@@ -527,6 +540,15 @@ ma('a s firmou', sPravem.rpc[0]?.[2]?.p_tenant, 't1')
 ma('záložky dostaly pobočku z rozsahu', JSON.stringify(sPravem.volani.find((v) => v[0] === 'zalozky')), JSON.stringify(['zalozky', 'B1']))
 ma('jeden nadpis „Docházka“', (sPravem.html.match(/<h1>/g) ?? []).length === 1 && sPravem.html.includes('<h1>Docházka</h1>'), true)
 ma('záložka Výdělky je aktivní', /href="\/cerna-perla\/dochazka\/vydelky" aria-current="page"/.test(sPravem.html), true)
+ma('jen payroll.read (docházku nevidí): jména nejsou odkazy', sPravem.html.includes('/dochazka/clovek/'), false)
+ma('… a na attendance.read se ptá s rozsahem z adresy',
+  JSON.stringify(sPravem.volani.find((v) => v[0] === 'zkusPristup' && v[1] === 'attendance.read')), JSON.stringify(['zkusPristup', 'attendance.read', 'cerna-perla']))
+const sDochazkou = await stranka({
+  pristup: (p) => (p === 'payroll.read' || p === 'attendance.read' ? { stav: 'ok', ctx: CTX, scope: POBOCKA } : { stav: 'odepren' }),
+  mesic: '2026-08',
+})
+ma('s attendance.read: jméno vede na docházku člověka téhož měsíce',
+  sDochazkou.html.includes('href="/cerna-perla/dochazka/clovek/cyril?mesic=2026-08&amp;z=vydelky"'), true)
 
 const naFirme = await stranka({
   pristup: (p, r) => (p === 'payroll.read' && r === 'firma' ? { stav: 'ok', ctx: CTX, scope: FIRMA_ROZSAH } : { stav: 'odepren' }),

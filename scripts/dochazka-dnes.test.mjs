@@ -24,6 +24,8 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 import {
+  nulovyUsek,
+  otevrenePrichody,
   otevrenyPrichod,
   pritomnostOsoby,
   sestavitPrehledDne,
@@ -118,6 +120,22 @@ je(
   otevrenyPrichod([ud('a', 'in', '08:00'), ud('a', 'break_start', '12:00'), ud('a', 'break_end', '12:30')]).occurred_at,
   v('08:00'),
 )
+
+console.log('\n== Všechny otevřené příchody a úsek 0 min (boční panel přehledu) ==')
+je('dvojí příchod: oba otevřené, nejnovější první',
+  otevrenePrichody([ud('a', 'in', '08:00'), ud('a', 'in', '08:05')]).map((u) => u.occurred_at), [v('08:05'), v('08:00')])
+je('otevrenyPrichod = první z nich', otevrenyPrichod([ud('a', 'in', '08:00'), ud('a', 'in', '08:05')]).occurred_at, v('08:05'))
+je('uzavřený úsek a otevřený: jen ten otevřený',
+  otevrenePrichody([ud('a', 'in', '08:00'), ud('a', 'out', '12:00'), ud('a', 'in', '13:00')]).length, 1)
+const nula = [ud('a', 'in', '09:00'), ud('a', 'out', '09:00')]
+je('odchod ve STEJNÉ chvíli: zrcadlo app.otevreny_prichod ho bere jako otevřený', otevrenyPrichod(nula)?.occurred_at, v('09:00'))
+je('… a nulovyUsek to pozná (automat mzdy z toho dělá úsek 0 min)', nulovyUsek(otevrenyPrichod(nula), nula), true)
+je('odchod o minutu později: úsek, nic otevřeného', otevrenyPrichod([ud('a', 'in', '09:00'), ud('a', 'out', '09:01')]), null)
+je('stornovaný odchod ve stejné chvíli se nepočítá',
+  nulovyUsek(nula[0], [nula[0], { ...nula[1], stornovano_kdy: '2026-09-21T08:00:00Z' }]), false)
+je('odchod ve stejné chvíli, ale jiný provozní den: nulový není',
+  nulovyUsek(nula[0], [nula[0], { ...nula[1], business_date: '2026-09-22' }]), false)
+je('příchod bez odchodu: nulový není', nulovyUsek(nula[0], [nula[0]]), false)
 
 console.log('\n== Přítomnost jednoho člověka ==')
 const p1 = pritomnostOsoby([ud('a', 'in', '07:57')], DEN, ted('15:09'))

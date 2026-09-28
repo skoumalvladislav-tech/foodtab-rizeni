@@ -65,6 +65,7 @@ export default function TabulkaVydelku({
   predchozi,
   nasledujici,
   poDnech = null,
+  odkazNaCloveka = null,
 }: {
   radky: RadekVydelku[];
   /** První den měsíce, RRRR-MM-DD. */
@@ -79,6 +80,12 @@ export default function TabulkaVydelku({
   nasledujici: { href: string; mesic: string } | null;
   /** Oddíl „Po dnech“ (po-dnech.tsx) — kreslí se pod lidmi. */
   poDnech?: ReactNode;
+  /**
+   * Adresa docházky člověka po dnech (27. 9. 2026) — jméno je pak odkaz.
+   * Posílá ji stránka jen tomu, kdo má attendance.read ve svém rozsahu;
+   * tabulka sama o právech nerozhoduje.
+   */
+  odkazNaCloveka?: ((id: string) => string) | null;
 }) {
   const serazene = [...radky].sort((a, b) => a.full_name.localeCompare(b.full_name, "cs"));
   const s = souhrn(serazene);
@@ -219,7 +226,7 @@ export default function TabulkaVydelku({
                   {serazene.map((r) => (
                     <tr key={r.employee_id} data-clovek={r.employee_id}>
                       <th scope="row">
-                        <Clovek r={r} pobocka={naPobocce ? null : jmenoPobocky(r, pobocky)} />
+                        <Clovek r={r} pobocka={naPobocce ? null : jmenoPobocky(r, pobocky)} odkaz={odkazNaCloveka} />
                       </th>
                       {bunky(r).map((b, i) => (
                         <td key={SLOUPCE[i + 1]} className={zvyraznit(SLOUPCE[i + 1])}>
@@ -236,7 +243,7 @@ export default function TabulkaVydelku({
             <ul className="ds-vy-karty">
               {serazene.map((r) => (
                 <li key={r.employee_id} className="ds-vy-karta" data-clovek={r.employee_id}>
-                  <Clovek r={r} pobocka={naPobocce ? null : jmenoPobocky(r, pobocky)} />
+                  <Clovek r={r} pobocka={naPobocce ? null : jmenoPobocky(r, pobocky)} odkaz={odkazNaCloveka} />
                   <dl>
                     {bunky(r).map((b, i) => (
                       <div
@@ -325,10 +332,24 @@ const POPIS_OBDOBI: Record<Obdobi, string> = {
   budouci: "měsíc teprve přijde — zatím jen podle rozpisu",
 };
 
-function Clovek({ r, pobocka }: { r: RadekVydelku; pobocka: string | null }) {
+function Clovek({
+  r,
+  pobocka,
+  odkaz,
+}: {
+  r: RadekVydelku;
+  pobocka: string | null;
+  odkaz: ((id: string) => string) | null;
+}) {
   return (
     <span className="ds-vy-clovek">
-      <span className="ds-vy-jmeno">{r.full_name}</span>
+      {odkaz ? (
+        <Link href={odkaz(r.employee_id)} className="ds-vy-jmeno ds-vy-jmeno-odkaz">
+          {r.full_name}
+        </Link>
+      ) : (
+        <span className="ds-vy-jmeno">{r.full_name}</span>
+      )}
       <span className="ds-vy-sazba">
         {r.hodinova_haleru !== null ? sazbaZaHodinu(r.hodinova_haleru) : "bez sazby"}
         {pobocka ? ` · ${pobocka}` : ""}

@@ -7,6 +7,9 @@ import Ikona from "@/app/[rozsah]/ikona";
 import Drawer from "@/components/ui/Drawer";
 import { koruny } from "@/lib/mzdy";
 import { hodinyKratce, inicialy } from "@/lib/rozpis-mobil";
+import { adresaCloveka } from "@/lib/useky-dochazky";
+
+import { StornoNaMiste } from "../clovek/uprava-useku";
 
 import { nactiMesicCloveka, type MesicCloveka } from "./detail-akce";
 import type { RadekPrehledu } from "./nacti";
@@ -27,11 +30,24 @@ export default function Detail({
   radek,
   rozsah,
   den,
+  smiStornovat = false,
+  hlaskaStorna = null,
   onZavrit,
 }: {
   radek: RadekPrehledu;
   rozsah: string;
   den: string;
+  /**
+   * Nabídnout storno otevřeného příchodu (píchnutí omylem). Jen
+   * kreslení — rozhoduje stornovat_usek_dochazky.
+   */
+  smiStornovat?: boolean;
+  /**
+   * Výsledek storna TOHOHLE člověka (redirect z akce.ts). Kreslí se
+   * v kartě Skutečnost — nahoře nad kartami přehledu by ho panel
+   * zakryl (na telefonu celý, na počítači ztmavení).
+   */
+  hlaskaStorna?: { druh: "ok" } | { druh: "chyba"; text: string } | null;
   onZavrit: () => void;
 }) {
   // `undefined` = ještě se načítá, `null` = není (bez práva / bez dat).
@@ -102,6 +118,49 @@ export default function Detail({
             <p className="ds-smd-karta-mlcky">Píchl(a) se na pobočce {radek.pobockaPrichodu}.</p>
           ) : null}
           <p className="ds-smd-karta-mlcky">Čas na místě je od příchodu do odchodu, bez odečtu přestávek.</p>
+          {hlaskaStorna ? (
+            hlaskaStorna.druh === "chyba" ? (
+              <p className="hlaska-chyba ds-uc-hlaska ds-dh-hlaska" role="alert">
+                {hlaskaStorna.text}
+              </p>
+            ) : (
+              <p className="ds-uc-hlaska ds-dh-hlaska" data-ton="dobre" role="status">
+                {radek.stav === "v_praci"
+                  ? `Příchod stornovaný — nesmazal se, zůstal přeškrtnutý v docházce za měsíc. V práci je ale dál podle příchodu ${radek.otevrenyPrichodCas ? `v ${radek.otevrenyPrichodCas}` : "z dřívějška"}; kdyby i ten byl omyl, stornujte ho taky.`
+                  : "Příchod stornovaný — nesmazal se, zůstal přeškrtnutý v docházce za měsíc. Smí se píchnout znovu."}
+              </p>
+            )
+          ) : null}
+          {radek.stav === "v_praci" && radek.nulovyUsek ? (
+            <p className="ds-smd-karta-mlcky ds-dh-nulovy">
+              <Ikona klic="varovani" velikost={15} />
+              <span>
+                Příchod a odchod mají stejný čas{radek.otevrenyPrichodCas ? ` (${radek.otevrenyPrichodCas})` : ""}. Tady
+                to vypadá jako „v práci“, mzda to počítá jako úsek 0 min. Opravte odchod v docházce za měsíc — odkaz
+                je dole.
+              </span>
+            </p>
+          ) : smiStornovat && radek.stav === "v_praci" && radek.otevrenyPrichodId ? (
+            <div className="ds-dh-storno">
+              <p className="ds-smd-karta-mlcky">
+                {radek.dalsiOtevreny
+                  ? `Má otevřené dva příchody. Stornovat jde ten pozdější (${radek.otevrenyPrichodCas ?? "—"}); v práci pak zůstane podle příchodu v ${radek.dalsiOtevreny}.`
+                  : `Píchl(a) se omylem? Příchod${radek.otevrenyPrichodCas ? ` v ${radek.otevrenyPrichodCas}` : ""} jde stornovat — nesmaže se, jen se přestane počítat.`}
+              </p>
+              <StornoNaMiste
+                rozsah={rozsah}
+                zamestnanec={radek.osobaId}
+                mesic={den.slice(0, 7)}
+                odkud="prehled"
+                den={null}
+                prichodId={radek.otevrenyPrichodId}
+                odchodId={null}
+                popisTed={radek.otevrenyPrichodCas ? `Příchod v ${radek.otevrenyPrichodCas}, bez odchodu` : null}
+                zpet="prehled"
+                popisek={radek.dalsiOtevreny ? "Stornovat pozdější příchod" : "Stornovat příchod"}
+              />
+            </div>
+          ) : null}
         </section>
 
         <section className="ds-smd-karta" aria-labelledby="ds-dh-zaznamy">
@@ -149,6 +208,10 @@ export default function Detail({
           <Link href={odkazNaSmeny} className="ft-tl ft-tl-male ft-tl-vedlejsi">
             <Ikona klic="kalendar" velikost={15} />
             Zobrazit směny
+          </Link>
+          <Link href={adresaCloveka(rozsah, radek.osobaId, { odkud: "prehled" })} className="ft-tl ft-tl-male ft-tl-vedlejsi">
+            <Ikona klic="hodiny" velikost={15} />
+            Docházka za měsíc →
           </Link>
         </div>
       </div>

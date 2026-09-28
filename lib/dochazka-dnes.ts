@@ -41,6 +41,8 @@ import { okamzikVPasmu, ZONA_VYCHOZI } from './cas.ts'
 /* --- vstupy ---------------------------------------------------------- */
 
 export type UdalostDochazky = {
+  /** Id záznamu — jen kvůli stornu příchodu z bočního panelu (nepovinné). */
+  id?: string
   employee_id: string
   /** 'in' | 'out' | 'break_start' | 'break_end' */
   kind: string
@@ -71,18 +73,44 @@ const ms = (iso: string) => Date.parse(iso)
  * pro jednoho člověka. Události mají být jeho, ze všech poboček.
  */
 export function otevrenyPrichod(udalosti: UdalostDochazky[]): UdalostDochazky | null {
+  return otevrenePrichody(udalosti)[0] ?? null
+}
+
+/**
+ * VŠECHNY příchody bez odchodu podle pravidel `app.otevreny_prichod`,
+ * nejnovější první. Víc než jeden = dvojí příchod (nebo zapomenutý
+ * odchod jiný den): boční panel přehledu pak ví, že po stornu toho
+ * nejnovějšího zůstane člověk „v práci" podle dalšího.
+ */
+export function otevrenePrichody(udalosti: UdalostDochazky[]): UdalostDochazky[] {
   const platne = udalosti.filter((u) => u.stornovano_kdy == null)
   const odchody = platne.filter((u) => u.kind === 'out')
 
-  const otevrene = platne
+  return platne
     .filter((u) => u.kind === 'in' && u.uzavreno_systemem == null)
     .filter(
       (a) =>
         !odchody.some((o) => o.business_date === a.business_date && ms(o.occurred_at) > ms(a.occurred_at)),
     )
     .sort((a, b) => ms(b.occurred_at) - ms(a.occurred_at))
+}
 
-  return otevrene[0] ?? null
+/**
+ * Otevřený příchod, který má v témže provozním dni odchod ve STEJNOU
+ * chvíli (ostrá DB 27. 9.: ruční příchod i odchod 09:00:00). Zrcadlo
+ * app.otevreny_prichod chce odchod ostře později, takže ho bere jako
+ * „v práci"; automat mzdy (app.useky_dochazky) ho spáruje jako úsek
+ * 0 min. Storno samotného příchodu by databáze odmítla — opravuje se
+ * na obrazovce člověka (otázka 33: sjednotit obě pravidla).
+ */
+export function nulovyUsek(prichod: UdalostDochazky, udalosti: UdalostDochazky[]): boolean {
+  return udalosti.some(
+    (u) =>
+      u.stornovano_kdy == null &&
+      u.kind === 'out' &&
+      u.business_date === prichod.business_date &&
+      ms(u.occurred_at) === ms(prichod.occurred_at),
+  )
 }
 
 export type StavPritomnosti = 'v_praci' | 'odesel' | 'nebyl'

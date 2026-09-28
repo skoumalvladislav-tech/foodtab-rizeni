@@ -148,6 +148,11 @@ export default async function Dochazka({
      */
     zaloha?: string;
     duvod?: string;
+    /**
+     * Výsledek storna příchodu z bočního panelu přehledu: 'ok' nebo
+     * 'chyba' (hláška z databáze v `text`, beze změny).
+     */
+    storno?: string;
   }>;
 }) {
   const { rozsah } = await params;
@@ -164,6 +169,7 @@ export default async function Dochazka({
     osoba: osobaZUrl,
     zaloha: vysledekZalohy,
     duvod: duvodZalohy,
+    storno: vysledekStorna,
   } = await searchParams;
 
   /* --- 1. KONTROLA PŘÍSTUPU ------------------------------------- */
@@ -215,6 +221,23 @@ export default async function Dochazka({
     "attendance.manage",
     scope.branchId,
   );
+
+  /*
+    Storno příchodu píchnutého omylem v bočním panelu přehledu (27. 9.).
+    Kreslí se jen u otevřeného příchodu na TÉHLE pobočce tomu, kdo tu
+    docházku spravuje, a u vlastního jen majiteli — příchod jinde se
+    stornuje z obrazovky člověka. Rozhoduje stornovat_usek_dochazky.
+  */
+  const spravaPrehledu = {
+    spravovane: smiZapsatRucne && scope.branchId ? [scope.branchId] : [],
+    jeMajitel: ctx.jeMajitel,
+    hlaskaStorna:
+      vysledekStorna === "ok"
+        ? ({ druh: "ok" } as const)
+        : vysledekStorna === "chyba"
+          ? ({ druh: "chyba", text: chybaText?.trim() || "Storno se nepovedlo." } as const)
+          : null,
+  };
 
   // Záložky Docházka · Výdělky · Zálohy (24. 9.). Co se kreslí, říká
   // zalozky-prava.ts; číšník má jen Docházku, a pak se lišta nekreslí.
@@ -309,6 +332,7 @@ export default async function Dochazka({
             }}
             vybranaZUrl={osobaZUrl ?? null}
             zalozky={zalozky}
+            sprava={{ ...spravaPrehledu, vlastniId: null }}
           />
         ) : (
           <HlavickaDochazky />
@@ -913,6 +937,7 @@ export default async function Dochazka({
           vybranaZUrl={osobaZUrl ?? null}
           zalozky={zalozky}
           podZalozkami={kdeZalohy === "v-prehledu" ? blokZaloh : null}
+          sprava={{ ...spravaPrehledu, vlastniId: ja.id }}
         />
       ) : (
         <HlavickaDochazky />

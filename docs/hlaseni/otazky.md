@@ -504,3 +504,143 @@ výzva k něčemu, co už neplatí.
   posílal přes serverovou akci aplikace, která po úspěchu naplánuje push
   (jako dnes telefon a majitel). Je to změna na kiosku, proto ne bez
   rozhodnutí — souvisí s otázkou 16.
+
+---
+
+Otázky 25–33 vznikly 27. a 28. 9. 2026 u docházky člověka po dnech
+(úprava a storno úseků; migrace `20260927110000_dochazka_smeny_cloveka.sql`,
+obrazovka `/[rozsah]/dochazka/clovek/[id]`). Čísla 18–24 si drží jiné
+rozpracované větve.
+
+## 25. Smí vedoucí upravit nebo stornovat SVOU vlastní docházku?
+
+**Vzniklo:** 27. 9. 2026, úprava úseků.
+
+Vedoucí s právem spravovat docházku by si jinak mohl sám prodloužit
+směnu, a zápis by byl jeho vlastním jménem.
+
+**Co jsem vybral do té doby:** ne. Úprava i storno vlastního úseku
+projdou jen **majiteli**; vedoucímu je databáze odmítne větou „Vlastní
+docházku si upravit nemůžete — udělá to majitel nebo jiný vedoucí."
+a obrazovka mu u vlastních úseků tlačítka nekreslí.
+
+**Pozor na rozpor:** starý ruční zápis na Docházce
+(`zapsat_rucni_dochazku`) vedoucímu zapsat vlastní příchod či odchod
+dnes **dovoluje**. Sjednotit (zakázat i tam), nebo tady povolit?
+
+**Druhá cesta, už zavřená (28. 9.):** stará funkce
+`stornovat_dochazku` (storno jednoho záznamu z 2. 9.) měla pro
+přihlášené EXECUTE a pravidlo „vlastní jen majitel" v ní nebylo —
+vedoucí si stornem vlastního odchodu na oběd a příchodu po obědě udělal
+z 8–12 a 13–17 jeden úsek 8–17 (+30 min). Aplikace ji nevolá, takže jí
+migrace `20260927110000` EXECUTE odebírá (tělo se nemění). Kdyby se
+měla vracet, musí do ní dostat pravidla storna úseku.
+
+## 26. Má zaměstnanec dostat upozornění, když mu vedoucí úsek upraví nebo stornuje?
+
+**Co jsem vybral do té doby:** žádné nové upozornění. Zaměstnanec to
+uvidí v **Můj účet → Moje úseky** u dne („upraveno", kdo a proč,
+přeškrtnutý původní záznam). Audit má souhrnný řádek
+`attendance.usek_upraven` / `attendance.usek_stornovan`.
+
+**Když to má být jinak:** upozornění do zvonečku (a případně push) při
+každé úpravě — jedna věc navíc ve funkcích úpravy, druh upozornění je
+potřeba založit.
+
+## 27. Mají jít upravovat i minulé, už vyplacené měsíce?
+
+**Co jsem vybral do té doby:** jde to, s pruhem „Uzavřený měsíc — úprava
+změní už spočítanou mzdu" nahoře a s auditem. Uzávěrka mezd v aplikaci
+není, takže nic zamknout nejde.
+
+**Když to má být jinak:** zamknout po výplatě (potřebuje „uzávěrku"
+měsíce jako nový údaj), nebo úpravu minulého měsíce povolit jen
+majiteli.
+
+## 28. Doplnit „kdo zapsal" u deseti ručních záznamů stornovaných 2. 9.?
+
+Spoušť dosud při každé změně záznamu přepsala „kdo ho zapsal" na toho,
+kdo změnu udělal. U deseti ručních záznamů stornovaných 2. 9. (migrace
+bez přihlášeného) je proto zadavatel prázdný, i když ho audit
+„attendance.manual" zná. Spoušť je od `20260927110000` opravená, ale
+jen do budoucna.
+
+**Co jsem vybral do té doby:** data se nemění. Doplnit se to dá jednou
+migrací z auditu, ale je to zásah do ostrých dat — bez rozhodnutí ne.
+
+## 29. Nejdelší úsek 24 h? A má úprava umět přesunout úsek do jiného provozního dne?
+
+**Co jsem vybral do té doby:**
+- úsek delší než 24 hodin databáze odmítne,
+- příchod, který by po úpravě patřil do jiného **provozního** dne (třeba
+  pekař v 4:30 při začátku dne v 5:00), odmítne s radou úsek stornovat
+  a zapsat nový v tom dni.
+
+Důvod: přesun mezi dny mění párování i měsíc mzdy (pravidlo 12) a dva
+kroky (storno + nový) jsou v auditu čitelnější.
+
+## 30. Kdo smí vidět úseky člověka? Stačí právo na mzdy?
+
+**Co jsem vybral do té doby:** úseky vidí jen ten, kdo **čte docházku**
+(`attendance.read`) — po záznamu, jako všude jinde v docházce (vedoucí
+pobočky jen svou pobočku). Peníze po dnech navíc chtějí `payroll.read`.
+Účetní jen s právem na mzdy úseky nevidí (Výdělky ano).
+
+## 31. Zavřít úplně přímý zápis do docházky (INSERT mimo funkce)?
+
+Úprava a mazání záznamů přímo v tabulce jsou od `20260927110000`
+zavřené (šly obejít: přepsat čas, smazat, „odstornovat" — u píchnutí
+bez auditu).
+
+**INSERT je zúžený na sedm sloupců** (`tenant_id, branch_id,
+employee_id, kind, occurred_at, source, note`) — přesně ty, na kterých
+stojí dva starší scénáře (krok2, krok6). Dřív šel na VŠECH sloupcích:
+vedoucí uměl vložit záznam „stornovaný majitelem" s vlastním důvodem,
+„opravu" (`nahrazuje`), „PIN na tabletu" nebo záznam s jiným provozním
+dnem (`business_date` spoušť nepřepíše) — a obrazovka by to ukázala
+jako fakt, bez auditu. Zmizel i MAINTAIN z výchozích práv Supabase.
+Scénář krok5 vkládal pod přihlášeným i `business_date` a `entered_by`;
+je upravený tak, aby dál měřil politiku a omezení, a přibyla v něm
+kontrola, že sloupec `entered_by` přihlášený do požadavku nenapíše.
+
+**Co zůstává otevřené:** vedoucí přes rozhraní databáze pořád umí
+vložit obyčejný záznam, který vypadá jako píchnutí (`source = 'app'`),
+a audit ho nezapíše. **Doporučuji zavřít INSERT úplně v dalším kroku**
+(krok2 a krok6 přepsat na superuživatele) — aplikace sama do tabulky
+přímo nezapisuje nikde.
+
+## 32. Má si člověk, který se píchl omylem, příchod sám odvolat?
+
+Třeba do 5 minut na tabletu nebo v telefonu.
+
+**Co jsem vybral do té doby:** ne. Stornovat úsek smí jen vedoucí
+s právem spravovat docházku na té pobočce, nebo majitel (v bočním panelu
+přehledu „Stornovat příchod…", na obrazovce člověka u úseku).
+
+## 33. Sjednotit, kdy je člověk „v práci", s tím, jak páruje mzda?
+
+**Vzniklo:** 28. 9. 2026, nezávislá kontrola.
+
+Dvě pravidla se rozcházejí:
+- `app.otevreny_prichod` (přehled „v práci", Dnes, kiosek, píchání)
+  chce odchod **ostře později** než příchod a o pořadí shod nerozhoduje,
+- automat mzdy (`app.worked_minutes`, `app.useky_dochazky`) spáruje
+  i odchod ve **stejné chvíli** (úsek 0 min).
+
+V ostré DB to 27. 9. nastalo: ruční příchod i odchod v 09:00:00.
+Přehled ukazuje člověka „v práci od 27. 9.", mzda má úsek 0 min
+a storno samotného příchodu databáze odmítne („Mezitím to někdo
+změnil"), protože v automatu ten příchod otevřený není. Obdobně při
+dvou otevřených příchodech přehled bere ten novější, automat ten starší.
+
+**Co jsem vybral do té doby:** pravidla se nemění (týká se to kiosku
+a píchání, to je samostatný krok). Boční panel přehledu u takového
+příchodu storno nenabízí a pošle na obrazovku člověka; ta úsek 0 min
+popíše slovy („Příchod a odchod ve stejnou chvíli — zkontrolujte
+odchod"). U dvou otevřených příchodů panel stornuje ten pozdější
+a řekne, podle kterého člověk v práci zůstane.
+
+**Návrh:** `app.otevreny_prichod` přepsat na řádek „otevreny"
+z `app.useky_dochazky` (odchod >= příchod, pořadí shod podle
+`created_at`) a totéž v `lib/dochazka-dnes.ts`. Chce to kontrolu shody
+nad kopií ostrých dat jako u mzdy.

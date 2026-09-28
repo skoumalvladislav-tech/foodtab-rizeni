@@ -746,5 +746,23 @@ console.log('\n== 9. hasAccess při chybě odmítne a řekne proč ==')
   ma('smiSpravovatPrava: majitel ano', await authz.smiSpravovatPrava(T), true)
 }
 
+console.log('\n== Lidé: odkaz „Docházka po dnech" jen s attendance.read (27. 9.) ==')
+{
+  svet(U_MAJITEL)
+  const html = await vykreslit(StrankaLide, 'firma')
+  ma('majitel: u člověka odkaz na jeho docházku po dnech',
+    html.includes(`href="/firma/dochazka/clovek/${E_JANA}?z=lide"`), true)
+  const db = svet(U_VEDOUCI)
+  ma('vedoucí s attendance.read: odkaz ano',
+    (await vykreslit(StrankaLide, 'firma')).includes(`/dochazka/clovek/${E_JANA}?z=lide`), true)
+  // Výjimka u člověka odebere docházku; správa lidí zůstane.
+  db.employee_permissions.push({
+    id: crypto.randomUUID(), tenant_id: T, employee_id: E_VEDOUCI, permission_key: 'attendance.read', granted: false,
+  })
+  const bezDochazky = await vykreslit(StrankaLide, 'firma')
+  ma('people.manage bez attendance.read: stránka ano, odkaz na docházku ne',
+    `${bezDochazky.includes('Petr Číšník')}/${bezDochazky.includes('/dochazka/clovek/')}`, 'true/false')
+}
+
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO' : `\nSELHALO: ${chyb}`)
 process.exit(chyb === 0 ? 0 : 1)
