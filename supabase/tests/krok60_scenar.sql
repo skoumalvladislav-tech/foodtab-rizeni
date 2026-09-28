@@ -353,6 +353,15 @@ reset role;
 select set_config('test.user_id', '', false);
 update public.employees set deleted_at = now() where id = :'dan';
 
+-- Od 20260925150000 smazání v Lidech pozastaví i členství. Tady se
+-- měří filtr SMAZANÉHO v potvrzení, ne členství — Dan proto dostane
+-- členství zpátky. Tak vypadají lidé smazaní před tou migrací (záznam
+-- smazaný, členství živé; v ostré databázi 25. 9. dva takoví byli).
+-- Bez toho by „smazaný Dan svou zálohu nepotvrdí" narazil na členství
+-- („Do téhle firmy nepatříte") a filtr smazaného by nic neměřilo.
+update public.memberships set status = 'active'
+  where tenant_id = :'tenant' and user_id = '60600000-0000-0000-0000-000000000005';
+
 set role authenticated;
 select set_config('test.user_id', '60600000-0000-0000-0000-000000000005', false);
 select pg_temp.check('označený smazaný Dan svou zálohu nevidí',

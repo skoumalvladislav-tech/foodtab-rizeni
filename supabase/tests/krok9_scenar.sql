@@ -244,21 +244,42 @@ set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
 do $$
-declare v_pocet integer;
+declare
+  v_pocet  integer;
+  v_cisnik uuid;
 begin
+  /*
+    Účet číšníka se zjišťuje PŘEDEM. Od 20260925150000 smazání v Lidech
+    pozastaví i jeho členství — a profil člověka s pozastaveným členstvím
+    kolegové nevidí (`profiles_select_colleagues`). Dotaz na profil při
+    obnovení by vrátil prázdno, obnovení by nic nezměnilo a další
+    scénáře by koukaly na smazaného číšníka.
+  */
+  select user_id into v_cisnik from public.profiles where email = 'cisnik@foodtab.cz';
+
   update public.employees set deleted_at = now()
-   where user_id = (select user_id from public.profiles where email = 'cisnik@foodtab.cz')
+   where user_id = v_cisnik
      and tenant_id = current_setting('test.tenant')::uuid;
   get diagnostics v_pocet = row_count;
   perform pg_temp.check('smazat číšníka jde', v_pocet = 1);
 
   -- A zpátky, ať další scénáře nekoukají na smazaného člověka.
   update public.employees set deleted_at = null
-   where user_id = (select user_id from public.profiles where email = 'cisnik@foodtab.cz')
+   where user_id = v_cisnik
      and tenant_id = current_setting('test.tenant')::uuid;
+  get diagnostics v_pocet = row_count;
+  perform pg_temp.check('a obnovit ho taky', v_pocet = 1);
 end $$;
 
 reset role;
+
+-- Obnovení vrátilo i členství (20260925150000, spoušť na deleted_at).
+select pg_temp.check('obnovený číšník je zase aktivním členem firmy',
+  exists (select 1 from public.memberships m
+          join public.profiles p on p.user_id = m.user_id
+          where p.email = 'cisnik@foodtab.cz'
+            and m.tenant_id = current_setting('test.tenant')::uuid
+            and m.status = 'active'));
 
 
 \echo ''

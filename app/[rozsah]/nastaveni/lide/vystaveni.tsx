@@ -8,14 +8,70 @@ interface Zamestnanec {
   full_name: string
   /** Pobočka z Lidí. Předvyplní se, ale jde přepsat. */
   branch_id: string | null
+  /** Člověk už účet má — pozvánka na jinou adresu je PŘESUN. */
+  maUcet?: boolean
+  /** Zamaskovaný kontakt toho účtu (k***@email.cz), když ho databáze dala. */
+  ucet?: string | null
+  jeMajitel?: boolean
 }
 
+/**
+ * Věta pod výběrem člověka, když už účet má (hlášení 25. 9. 2026).
+ *
+ * Majitel poslal Kateřině, která účet měla, čtyři pozvánky na novou
+ * adresu. Každá „prošla" a nic se nestalo — nový účet zůstal bez práv.
+ * Od 20260925150000 je taková pozvánka PŘESUN: po přijetí se přístup
+ * přestěhuje na novou adresu a starý účet se od firmy odpojí. Smí to jen
+ * majitel a nikdy ne u majitele; tady se to říká DŘÍV, než se klikne.
+ * Rozhoduje databáze (`create_invitation`) — věta je jen vysvětlení.
+ */
+export function PoznamkaKUctu({
+  clovek,
+  jsemMajitel,
+}: {
+  clovek: Zamestnanec | null
+  jsemMajitel: boolean
+}) {
+  if (!clovek?.maUcet) return null
+
+  const ucet = clovek.ucet ? ` (${clovek.ucet})` : ''
+
+  if (clovek.jeMajitel) {
+    return (
+      <p style={poznamka} data-poznamka="majitel">
+        {clovek.full_name} je majitel a účet už má{ucet}. Pozvánkou se
+        účet majitele nepřesouvá — přihlašovací adresu majitele zatím
+        změní jen správce Foodtabu.
+      </p>
+    )
+  }
+
+  if (!jsemMajitel) {
+    return (
+      <p style={poznamka} data-poznamka="jen-majitel">
+        {clovek.full_name} už má účet{ucet}. Pozvánku na tutéž adresu
+        vystavit můžete. Přesunout přístup na jinou adresu může jen
+        majitel — požádejte ho.
+      </p>
+    )
+  }
+
+  return (
+    <p style={poznamka} data-poznamka="presun">
+      {clovek.full_name} už má účet{ucet}. Pozvánka na jinou adresu
+      přesune přístup: po přijetí se bude přihlašovat novou adresou a starý
+      účet se od firmy odpojí. Směny a docházka zůstanou v Lidech, jak jsou.
+    </p>
+  )
+}
 
 export default function VystavitPozvankuFormular({
   rozsah,
   zamestnanci,
   pobocky,
   smiFiremni,
+  jsemMajitel = false,
+  otevreno = false,
 }: {
   rozsah: string
   zamestnanci: Zamestnanec[]
@@ -23,12 +79,22 @@ export default function VystavitPozvankuFormular({
   pobocky: { id: string; nazev: string }[]
   /** Firemní rozsah nabízí jen ten, kdo ho má sám. */
   smiFiremni: boolean
+  /** Přesun účtu na novou adresu vystaví jen majitel. */
+  jsemMajitel?: boolean
+  /**
+   * Rozbalený hned. Okno „čeká na oprávnění" sem u účtu bez záznamu
+   * vede odkazem `?pozvat=1#pozvanka` (lib/ceka-na-opravneni.ts) —
+   * sbalený panel pod tabulkou by nikdo nenašel (kontrola 28. 9. 2026).
+   */
+  otevreno?: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(otevreno)
   const [hotovo, setHotovo] = useState<VysledekPozvanky | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [vybranyId, setVybranyId] = useState('')
+  const vybrany = zamestnanci.find((z) => z.id === vybranyId) ?? null
 
   /*
     Pobočka se předvyplní podle Lidí, ale je VIDĚT a jde přepsat —
@@ -73,8 +139,10 @@ export default function VystavitPozvankuFormular({
   }
 
   return (
-    <div style={panel}>
+    <div style={panel} id="pozvanka">
       <button
+        type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
         style={zahlavi}
       >
@@ -95,6 +163,7 @@ export default function VystavitPozvankuFormular({
                   onChange={(e) => {
                     const z = zamestnanci.find((x) => x.id === e.target.value)
                     setPobocka(z?.branch_id ?? (smiFiremni ? 'firma' : ''))
+                    setVybranyId(e.target.value)
                   }}
                 >
                   <option value="">— Vyberte —</option>
@@ -105,6 +174,8 @@ export default function VystavitPozvankuFormular({
                   ))}
                 </select>
               </label>
+
+              <PoznamkaKUctu clovek={vybrany} jsemMajitel={jsemMajitel} />
 
               <label style={formularLabel}>
                 <span>Kanál</span>
@@ -218,6 +289,9 @@ export default function VystavitPozvankuFormular({
               <button
                 onClick={() => {
                   setHotovo(null)
+                  // Formulář se kreslí znovu s prázdným výběrem — věta
+                  // o účtu nesmí zůstat viset u nikoho.
+                  setVybranyId('')
                 }}
                 className="ft-tl ft-tl-vedlejsi"
               >
@@ -239,6 +313,8 @@ const panel = {
   borderRadius: 'var(--radius-md)',
   marginTop: '32px',
   overflow: 'hidden',
+  // Kotva #pozvanka: jako panel oprávnění, ať nezajede pod horní lištu.
+  scrollMarginTop: '80px',
 } as const
 
 const zahlavi = {
@@ -314,6 +390,20 @@ const vysvetlivka = {
 const vysledek = {
   display: 'grid',
   gap: '12px',
+} as const
+
+/* Stejný rámeček jako „e-mail neodešel": je to věc, kterou je potřeba
+   vědět předem, ne chyba. */
+const poznamka = {
+  margin: 0,
+  padding: '10px 12px',
+  border: '1px solid var(--pozor)',
+  borderRadius: 'var(--radius-sm)',
+  background: 'var(--pozor-bg)',
+  color: 'var(--ink)',
+  fontSize: '13.5px',
+  lineHeight: 1.5,
+  maxWidth: '62ch',
 } as const
 
 const tokenBox = {

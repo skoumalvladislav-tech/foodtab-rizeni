@@ -1,5 +1,6 @@
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
+import CestaVen from './cesta-ven'
 import PrijmoutPozvanku from './prijmout-pozvanku'
 
 /**
@@ -76,6 +77,14 @@ export default function CekajiciPozvanka({
           Po přijetí uvidíte to, co vám ve firmě přidělili. Když ještě
           nic, řekne vám to obrazovka — a ozve se, až se to změní.
         </p>
+
+        {/*
+          Přijetí může skončit „V téhle firmě už máte jiný účet"
+          (20260925150000) — pak je jediná cesta dál jiný účet.
+          Bez tohohle se odsud odhlásit nešlo (kontrola #85). Moje údaje
+          ne: bez firmy ukážou jen „Účet zatím nepatří k žádné firmě".
+        */}
+        <CestaVen jinaAdresa />
       </div>
     </main>
   )

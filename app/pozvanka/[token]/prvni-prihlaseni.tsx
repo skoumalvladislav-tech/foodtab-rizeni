@@ -4,6 +4,7 @@ import { useRef, useState, useSyncExternalStore } from 'react'
 
 import { normalizujKod } from '@/lib/prihlaseni'
 import { overitPrvniKod, poslatPrvniKod } from './akce'
+import JinyUcet from './jiny-ucet'
 import PoslatZnovu from './poslat-znovu'
 
 /**
@@ -45,6 +46,8 @@ export default function PrvniPrihlaseni({
   // Přihlášený je, jen pozvánka se nepřijala — ukáže se hláška
   // a „Pokračovat", žádné slepé obnovení stránky.
   const [jenPrihlasen, setJenPrihlasen] = useState(false)
+  // …a pozvánka je pro člověka, který má ve firmě jiný účet.
+  const [jinyUcet, setJinyUcet] = useState(false)
   const poleKodu = useRef<HTMLInputElement>(null)
   const umiSchranku = useSyncExternalStore(nicNeodebira, maCteniSchranky, naServeru)
 
@@ -87,6 +90,7 @@ export default function PrvniPrihlaseni({
         return
       }
       if (v.prihlasen) setJenPrihlasen(true)
+      setJinyUcet(v.jinyUcet === true)
       setChyba(v.chyba ?? 'Kód se nepodařilo ověřit.')
     } catch {
       setChyba(SPOJENI)
@@ -104,6 +108,14 @@ export default function PrvniPrihlaseni({
     } catch {
       // Schránka je prázdná nebo ji prohlížeč nevydal — kód jde opsat.
     }
+  }
+
+  /*
+    „Pokračovat“ by jen obnovilo stránku a nabídlo „Přijmout pozvánku“,
+    která skončí touž chybou. Tady je jediná cesta dál jiný účet.
+  */
+  if (jenPrihlasen && jinyUcet && chyba) {
+    return <JinyUcet hlaska={chyba} />
   }
 
   if (jenPrihlasen) {

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getUser } from '@/lib/authz'
+import { odkazNaPrijatouPozvanku } from '@/lib/ceka-na-opravneni'
 import { getCurrentTenantId } from '@/lib/firma'
 import { sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
@@ -147,6 +148,38 @@ export default async function Upozorneni({
   })) as unknown as Zprava[]
   const neprectene = zpravy.filter((z) => !z.read_at).length
 
+  /*
+    „Přijal pozvánku a čeká“: tlačítko vede na oprávnění TOHO ČLOVĚKA
+    v Lidech (`?opravneni=<id zaměstnance>#opravneni`). Zpráva nese jen
+    id ÚČTU (`telo.kdo`) a Lidé podle účtu nic neotevřou — do 25. 9. 2026
+    tu stál odkaz `?clovek=<účet>` a vedl na holý seznam (hlášení
+    majitele). Zaměstnanec se proto dohledá teď, podle dnešního stavu,
+    takže správný odkaz dostanou i staré zprávy. Bez živého záznamu vede
+    odkaz na kartu čekajících v Lidech. Chyba dotazu jen vrátí ten
+    obecnější odkaz — kvůli tlačítku stránka padat nemá.
+  */
+  const cekajiciUcty = [
+    ...new Set(
+      zpravy
+        .filter((z) => z.druh === 'pozvanka.prijata' && z.telo.ceka && z.telo.kdo)
+        .map((z) => String(z.telo.kdo)),
+    ),
+  ]
+  const zamestnanecUctu = new Map<string, string>()
+  if (cekajiciUcty.length > 0) {
+    const { data: zaznamy } = await supabase
+      .from('employees')
+      .select('id, user_id')
+      .eq('tenant_id', tenantId)
+      .is('deleted_at', null)
+      .in('user_id', cekajiciUcty)
+    for (const r of (zaznamy ?? []) as { id: string; user_id: string }[]) {
+      zamestnanecUctu.set(String(r.user_id), String(r.id))
+    }
+  }
+  const zamestnanecZpravy = (kdo: unknown): string | null =>
+    kdo ? zamestnanecUctu.get(String(kdo)) ?? null : null
+
   return (
     <>
       <Nadpis oci="Provoz" popis="Co se změnilo a týká se vás. Cizí směny se sem nedostanou.">
@@ -218,11 +251,18 @@ export default async function Upozorneni({
                         nic než své údaje.
                       </p>
                       <p style={{ margin: '10px 0 0' }}>
+                        {/*
+                          Popisek podle cíle: bez živého záznamu v Lidech
+                          (druhý účet, smazaný člověk) vede odkaz na kartu
+                          čekajících, kde oprávnění přidělit nejde — jen
+                          pozvat nebo odebrat. „Přidělit oprávnění" by tam
+                          sliboval, co karta neumí.
+                        */}
                         <Link
-                          href={`/${rozsah}/nastaveni/lide?clovek=${z.telo.kdo ?? ''}`}
-                          className="ft-tl ft-tl-hlavni ft-tl-male"
+                          href={odkazNaPrijatouPozvanku(rozsah, zamestnanecZpravy(z.telo.kdo))}
+                          className="ft-tl ft-tl-hlavni"
                         >
-                          Přidělit oprávnění
+                          {zamestnanecZpravy(z.telo.kdo) ? 'Přidělit oprávnění' : 'Otevřít v Lidech'}
                         </Link>
                       </p>
                     </>

@@ -507,9 +507,128 @@ výzva k něčemu, co už neplatí.
 
 ---
 
+## 18. Pozvánka pro člověka, který už účet má — přesun, odebrání z firmy
+
+**Vzniklo:** 25. 9. 2026, hlášení majitele ve 14:38 (Kateřina Jirášková
+nemá práva, okno „čeká na oprávnění" píše „Nový člověk" a odkaz otevře
+holé Lidi). Čísla 16 a 17 si bere větev záloh (PR #83).
+**Kde je to v kódu:** `supabase/migrations/20260925150000_pozvanka_druhy_ucet.sql`
+(hlavička), `lib/ceka-na-opravneni.ts`, `app/[rozsah]/ceka-na-opravneni.tsx`.
+
+**Co se stalo:** Kateřina má dva účty. Pozvánku na první adresu přijala
+a její řádek v Lidech se s tím účtem propojil. Pak dostala čtyři
+pozvánky na druhou adresu pro TENTÝŽ řádek. Přijetí řádek potichu
+nepřepojilo (už účet měl), ale členství vzniklo — druhý účet byl ve
+firmě bez jediného práva.
+
+**Co jsem vybral (nejopatrnější varianta):**
+
+1. Pozvánka pro člověka, který už má JINÝ účet, se nepřijme: „V téhle
+   firmě už máte jiný účet (k***@email.cz). Přihlaste se jím, nebo
+   požádejte majitele o novou pozvánku." Členství nevznikne.
+2. Pozvánka na JINOU adresu pro člověka s účtem je **přesun**. Vystaví
+   ji jen majitel, nikdy pro majitele. Po přijetí má řádek v Lidech nový
+   účet, starý účet má ve firmě pozastavené členství (nesmaže se).
+   Směny a docházka zůstávají, visí na člověku, ne na účtu. Kdyby se
+   řádek mezitím přepojil jinam, pozvánka neplatí.
+3. Vedoucí se správou lidí přesun nevystaví. Pozvánku na TUTÉŽ adresu,
+   jakou účet má, vystavit smí (přesun to není).
+4. Okno „čeká na oprávnění" a nová karta v Lidech ukazují jméno z Lidí
+   (jinak e-mail), kontakt a důvod. Tlačítko vede na oprávnění toho
+   člověka, u zařazení bez práv na to zařazení. U účtu bez řádku v Lidech
+   nebo se smazaným řádkem se nabízí „Odebrat z firmy" (pozastaví
+   členství, s potvrzením).
+5. Smazání člověka v Lidech pozastaví jeho členství, obnovení ho vrátí.
+6. Účet u existujícího člověka v Lidech se přímým zápisem nepřepojí ani
+   neodpojí, ani majitelem — jen přijetím pozvánky. Do dneška to šlo
+   každému se správou lidí (i odpojit majitele od jeho řádku).
+
+Po nezávislé kontrole 28. 9. přibylo:
+
+7. Účet, který ve firmě UŽ PATŘÍ k člověku v Lidech (živému i
+   smazanému), žádnou další pozvánku pro někoho jiného nepřijme — ani
+   pozvánku BEZ člověka. Ta dřív přepsala rozsah, pobočky i stav jeho
+   členství bez stropu: vedoucí tak mohl kolegovi rozšířit rozsah nad
+   svůj, vrátit pozastavené členství, nebo jedinému majiteli zúžit
+   rozsah na jednu pobočku a zamknout ho. (Stará díra, od 1. 9.)
+8. **Obnovení** smazaného člověka má strop: obnovit smí jen ten, kdo by
+   mu jeho práva směl přidělit (jako přeřazení). **Majitele** v Lidech
+   smaže jen majitel. **Tvrdé smazání** záznamu přes API je zavřené
+   (aplikace ho nepoužívá). Bez toho by vedoucí smazáním a obnovením
+   vrátil přístup člověku, kterému ho majitel pozastavil, a smazáním
+   vyřadil druhého majitele z firmy.
+9. **Zrušit pozvánku** jde v Lidech (karta „Čekající pozvánky",
+   s potvrzením). Přesun zruší jen majitel. Dřív zrušení šlo jen přímo
+   přes API a po zavření zápisu do pozvánek by nešlo vůbec.
+10. Okno „čeká na oprávnění" u účtu bez řádku v Lidech nabízí „Pozvat
+    z Lidí" (formulář pozvánky rovnou rozbalený). Člen firmy bez práv
+    (druhý Kateřinin účet) vidí čekající pozvánku i na obrazovce „Účet
+    je hotový" a přijme ji tam — nemusí hledat e-mail.
+
+**Rozhodnout:**
+
+- **a)** Má jít účet „bez řádku v Lidech" propojit s někým přímo z okna?
+  Zatím NE: byla by to druhá cesta vedle pozvánky, bez kontroly adresy.
+  Okno místo toho odkáže na formulář pozvánky v Lidech („Pozvat
+  z Lidí" → vybrat člověka → adresa účtu). Když ten člověk už účet má,
+  je to přesun a vystaví ho jen majitel.
+- **b)** Smí přesun vystavit i někdo jiný než majitel (třeba Provozní)?
+  Zatím jen majitel.
+- **c)** Kdo spravuje lidi, smí dál členství jiných upravit i smazat
+  přímo (i druhého majitele, pokud není poslední). „Odebrat z firmy" je
+  pohodlí s kontrolami, ne jediná cesta. Zavřít to jako u pozvánek?
+- **d)** E-mail „někdo přijal pozvánku" (`komu_ohlasit_prijeti`) pořád
+  počítá „čeká" podle staré role, od 9. 9. tedy nespolehlivě. Opravit?
+- **e)** Obnovení smazaného člověka vrací i členství, které se pozastavilo
+  jinak (majitelem, „Odebrat z firmy"). Od 28. 9. má ale strop — obnovit
+  smí jen ten, kdo by mu jeho práva směl přidělit, tedy i členství
+  vrátit přímo. Obnovit v aplikaci dnes nejde vůbec; jde to přímým
+  zápisem přes API (ten strop hlídá) nebo ručně v databázi. Chcete
+  v Lidech tlačítko „Obnovit"?
+- **f)** Smazaný člověk přestane být členem firmy — a kolegové pak nevidí
+  jeho profil. Autor starého oznámení na nástěnce, kterého mezitím
+  smazali, zůstane bez jména (Lidé, rozpis a docházka berou jména ze
+  záznamu zaměstnance, tam se to neděje). Stojí to za úpravu?
+- **g)** Sdělení mimo rám („Účet zatím nepatří k žádné firmě", „Firmu se
+  nepodařilo načíst", „Sem nemáte přístup", „Není kam vás pustit",
+  čekající pozvánka, „Účet je hotový") mají od teď odhlášení s dotazem
+  (`app/cesta-ven.tsx`, kontrola #85). Je to vlastní malá kopie, protože
+  sdílené `components/shell/Odhlaseni.tsx` je zatím jen ve větvi #85.
+  Až bude na main, nahradit? (Navrhuji ano — jedno odhlášení, jedna
+  věta.) Moje údaje jsou u sdělení jen tam, kde člověk firmu má; bez
+  firmy ukážou Moje údaje zase jen „Účet zatím nepatří k žádné firmě".
+- **h)** Pozvánka BEZ člověka z Lidí (přes API, ne z obrazovky) dál
+  vyrobí člena bez záznamu — je to záměr z 1. 9. (krok7, krok12). Okno
+  ho pak ukáže jako „Účet není propojený s nikým v Lidech". Zakázat?
+  V ostré databázi 25. 9. žádná taková čekající pozvánka nebyla. Účet,
+  který v Lidech JE, ji od 28. 9. nepřijme (bod 7).
+- **i)** Účet, jehož člověk je v Lidech SMAZANÝ, nepřijme pozvánku pro
+  nový záznam („smazat a založit znovu" — v ostré databázi lucka
+  a Láďa). Hláška pošle majitele za správcem Foodtabu: obnova smazaného
+  v aplikaci není a přepojit účet by znamenalo sáhnout na smazaný
+  záznam (a s ním na historii toho účtu). Má jít smazanému záznamu
+  účet odpojit a přepojit na nový — s auditem?
+- **j)** **Přihlašovací adresu** účtu aplikace měnit neumí. Moje údaje
+  mění kontakt v Lidech, ne účet. Majiteli ji dnes změní jen správce
+  Foodtabu (hláška u pozvánky to tak i říká). Ostatním se adresa
+  „mění" přesunem (bod 2). Chcete změnu adresy účtu v Mých údajích
+  (s ověřením nové adresy kódem)?
+
+**Kateřina v ostré databázi zůstává, jak je** (dva účty, oba aktivní).
+Ručně se nic neopravuje. Po nasazení to majitel udělá v aplikaci:
+buď pošle z Lidí novou pozvánku na gmail (přesun — přístup přejde na
+gmail, účet `k***@email.cz` se od firmy odpojí; Kateřina ji přijme
+z odkazu v e-mailu, nebo se přihlásí gmailem a přijme ji na obrazovce
+„Účet je hotový"), nebo v okně „čeká na oprávnění" u gmailového účtu
+zvolí „Odebrat z firmy" (Kateřina pak zůstane u `k***@email.cz`).
+Adresu přesunu zkontrolujte dvakrát; překlep jde v Lidech zrušit
+(„Čekající pozvánky").
+
+---
+
 Otázky 25–33 vznikly 27. a 28. 9. 2026 u docházky člověka po dnech
 (úprava a storno úseků; migrace `20260927110000_dochazka_smeny_cloveka.sql`,
-obrazovka `/[rozsah]/dochazka/clovek/[id]`). Čísla 18–24 si drží jiné
+obrazovka `/[rozsah]/dochazka/clovek/[id]`). Čísla 19–24 si drží jiné
 rozpracované větve.
 
 ## 25. Smí vedoucí upravit nebo stornovat SVOU vlastní docházku?

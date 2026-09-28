@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getUser, hasAccess, smiSpravovatPrava } from "@/lib/authz";
+import type { Cekajici } from "@/lib/ceka-na-opravneni";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { prvniDenMesice, sazbaZaHodinu } from "@/lib/mzdy";
 import { smimPridelit } from "@/lib/prideleni";
@@ -10,6 +11,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import { kratkyUvazek, UVAZKY } from "@/lib/uvazky";
 import { BARVY_LIDI, NAZVY_BAREV_LIDI } from "@/lib/barvy-lidi";
 import ZnackaOsoby from "@/app/znacka-osoby";
+import { SeznamCekajicich } from "../../ceka-na-opravneni";
 import Ikona from "../../ikona";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
@@ -19,6 +21,7 @@ import PanelOpravneni from "./panel-opravneni";
 import PanelPinu from "./pin";
 import SmazatZamestnance from "./smazani";
 import VystavitPozvankuFormular from "./vystaveni";
+import CekajiciPozvanky, { type CekajiciPozvankaFirmy } from "./cekajici-pozvanky";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +75,8 @@ export default async function NastaveniLide({
     nazev?: string;
     /** Komu se přiděluje PIN. Samotný PIN adresou NIKDY nechodí. */
     pin?: string;
+    /** Formulář pozvánky rovnou rozbalený (odkaz „Pozvat z Lidí" z okna čekajících). */
+    pozvat?: string;
   }>;
 }) {
   const { rozsah } = await params;
@@ -88,6 +93,7 @@ export default async function NastaveniLide({
     pozice: poziceStav,
     nazev: nazevPozice,
     pin: pinProId,
+    pozvat,
   } = await searchParams;
 
   const tenantId = await getCurrentTenantId();
@@ -337,6 +343,80 @@ export default async function NastaveniLide({
     jeMajitel(zamestnanecId);
 
   /*
+    KDO ČEKÁ NA OPRÁVNĚNÍ — táž data jako okno při přihlášení
+    (app/[rozsah]/ceka-na-opravneni.tsx). Okno se zavírá „Teď ne“ a do
+    dalšího přihlášení by čekající nebylo kde najít; upozornění „přijal
+    pozvánku“ sem vede, když člověk v Lidech záznam nemá (hlášení
+    25. 9. 2026).
+
+    Chyba se nevyhazuje: bez migrace 20260925150000 vrací funkce starý
+    tvar (jméno bez důvodu) a karta se ukáže i tak. Kdyby selhala celá,
+    Lidé kvůli ní padat nemají — čekající zůstanou v okně a ve zvonečku.
+  */
+  const { data: cekajiciData } = await supabase.rpc("cekaji_na_opravneni", {
+    p_tenant: tenantId,
+  });
+  const cekajici = (cekajiciData ?? []) as Cekajici[];
+
+  /*
+    Účty lidí, zamaskovaně (k***@email.cz). Formulář pozvánky podle toho
+    předem řekne, že člověk účet už má a že pozvánka na jinou adresu ho
+    přesune — a že to smí jen majitel (20260925150000, hlavička B).
+    Bez migrace se jen neukáže adresa; rozhoduje stejně databáze.
+  */
+  const { data: uctyData } = await supabase.rpc("ucty_lidi", { p_tenant: tenantId });
+  const ucty = new Map(
+    ((uctyData ?? []) as { employee_id: string; ucet: string | null }[]).map((u) => [
+      u.employee_id,
+      u.ucet,
+    ]),
+  );
+
+  /*
+    ČEKAJÍCÍ POZVÁNKY — aby šly zrušit (20260925150000, oddíl 11).
+    Čte je jen správce lidí za celou firmu (politika `invitations_manage`);
+    ostatním dotaz vrátí prázdno a karta se neukáže. Sloupce vyjmenované:
+    otisk tokenu se přes API nečte (20260826180000).
+
+    Chyba se nevyhazuje: bez migrace neexistuje `nahrazuje_ucet` a dotaz
+    spadne celý — Lidé kvůli tomu padat nemají, karta jen nebude.
+  */
+  const { data: pozvankyData } = await supabase
+    .from("invitations")
+    .select("id, employee_id, channel, email, phone, expires_at, nahrazuje_ucet")
+    .eq("tenant_id", tenantId)
+    .is("accepted_at", null)
+    .is("revoked_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .order("expires_at", { ascending: true });
+  const cekajiciPozvanky: CekajiciPozvankaFirmy[] = (
+    (pozvankyData ?? []) as {
+      id: string;
+      employee_id: string | null;
+      channel: string;
+      email: string | null;
+      phone: string | null;
+      expires_at: string;
+      nahrazuje_ucet: string | null;
+    }[]
+  ).map((p) => {
+    // Pozvánka pro člověka, kterého mezitím smazali, se nepřijme
+    // („už ve firmě v Lidech není") — ať je vidět, že patří zrušit.
+    const z = p.employee_id ? (zamestnanci ?? []).find((x) => x.id === p.employee_id) : null;
+    return {
+      id: p.id,
+      jmeno: p.employee_id
+        ? z && !z.deleted_at
+          ? z.full_name
+          : `${z?.full_name ?? "Člověk"} (v Lidech smazaný)`
+        : null,
+      kontakt: (p.channel === "sms" ? p.phone : p.email) ?? "",
+      presun: Boolean(p.nahrazuje_ucet),
+      expires_at: p.expires_at,
+    };
+  });
+
+  /*
     Podklad pro panel přidělení. Načítá se jen pro toho jednoho člověka,
     kterého má vedoucí zrovna otevřeného — rozsahy všech by byl dotaz
     navíc kvůli sloupci, který v tabulce stejně není.
@@ -478,6 +558,20 @@ export default async function NastaveniLide({
       >
         Lidé
       </Nadpis>
+
+      {cekajici.length > 0 ? (
+        <section id="cekaji" className="ds-plocha" style={{ marginBottom: "24px" }}>
+          <div className="ds-plocha-hlava">
+            <Ikona klic="lide" />
+            <h2>Čekají na oprávnění</h2>
+          </div>
+          <p style={{ margin: "0 0 6px", fontSize: "13.5px", color: "var(--muted)", maxWidth: "62ch" }}>
+            Jsou ve firmě, ale zatím nemají odkud vzít ani jedno oprávnění —
+            v aplikaci vidí jen své údaje.
+          </p>
+          <SeznamCekajicich rozsah={rozsah} lide={cekajici} />
+        </section>
+      ) : null}
 
       {/*
         key je tu podstatné, ne kosmetika.
@@ -1028,6 +1122,8 @@ export default async function NastaveniLide({
         </table>
       </div>
 
+      <CekajiciPozvanky pozvanky={cekajiciPozvanky} jsemMajitel={ctx.jeMajitel} />
+
       {/* Vystavení pozvánky */}
       <VystavitPozvankuFormular
         rozsah={rozsah}
@@ -1035,9 +1131,14 @@ export default async function NastaveniLide({
           id: z.id,
           full_name: z.full_name,
           branch_id: z.branch_id,
+          maUcet: Boolean(z.user_id),
+          ucet: ucty.get(z.id) ?? null,
+          jeMajitel: z.je_majitel,
         }))}
         pobocky={ctx.branches.map((b) => ({ id: b.id, nazev: b.name }))}
         smiFiremni={ctx.membership.scope === "tenant"}
+        jsemMajitel={ctx.jeMajitel}
+        otevreno={pozvat === "1"}
       />
     </>
   );

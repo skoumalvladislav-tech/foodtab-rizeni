@@ -5,6 +5,7 @@ import { ohlasPrijetiPozvanky } from '@/lib/ohlas-prijeti'
 import {
   adresaProPrvniKod,
   hlaskaProChybu,
+  jeJinyUcet,
   jeStrop,
   normalizujKod,
   ucetUzExistuje,
@@ -39,6 +40,11 @@ export type VysledekPrijeti = {
   chyba?: string
   /** Pozvánka je na jinou adresu — obrazovka nabídne přepnutí účtu. */
   jinaAdresa?: boolean
+  /**
+   * Člověk z pozvánky už má ve firmě JINÝ účet (20260925150000) —
+   * obrazovka nabídne odhlášení a přihlášení tím účtem, ne obecnou chybu.
+   */
+  jinyUcet?: boolean
 }
 
 export async function prijmoutPozvankuAction(
@@ -58,6 +64,7 @@ export async function prijmoutPozvankuAction(
       // Kód se používá k tomu, k čemu je: rozhodnout, co nabídnout dál.
       // Text zůstává ten z databáze.
       jinaAdresa: error.message?.includes('vystavena na jin') === true,
+      jinyUcet: jeJinyUcet(error.message),
     }
   }
 
@@ -114,6 +121,25 @@ export async function prihlasitSeAdresouZPozvanky(
   return { ok: true }
 }
 
+/**
+ * Přihlásit se JINÝM účtem — člověk z pozvánky už ve firmě účet má
+ * (20260925150000, „V téhle firmě už máte jiný účet").
+ *
+ * Na rozdíl od `prihlasitSeAdresouZPozvanky` se tu nenabízí kód na
+ * adresu z pozvánky: tou adresou je člověk přihlášený právě teď a firma
+ * ho pod ní nezná. Jen se odhlásí a obrazovka pošle na přihlašovací
+ * stránku, kde se přihlásí tím účtem, který ve firmě má.
+ *
+ * Ne akcí `odhlasit` z přihlašovací stránky: ta patří jen k odhlášení
+ * s dotazem v nabídce a na Mých údajích. `local` jako výš — odhlásí jen
+ * tenhle prohlížeč.
+ */
+export async function prepnoutNaJinyUcet(): Promise<{ ok: boolean }> {
+  const supabase = await getServerSupabase()
+  await supabase.auth.signOut({ scope: 'local' })
+  return { ok: true }
+}
+
 /* ======================================================================
    PRVNÍ PŘIHLÁŠENÍ Z POZVÁNKY (člověk, který ještě nemá účet)
    ======================================================================
@@ -154,6 +180,8 @@ export type StavPrvnihoKodu = {
    * kódu, ne ho nechat viset na „Poslat kód".
    */
   zadatKod?: boolean
+  /** Přihlásil se, ale člověk z pozvánky má ve firmě jiný účet. */
+  jinyUcet?: boolean
 }
 
 const UZ_POSLANO =
@@ -223,6 +251,7 @@ export async function overitPrvniKod(token: string, kodVstup: string): Promise<S
     return {
       prihlasen: true,
       chyba: chybaPrijeti?.message || 'Přihlášení proběhlo, pozvánku se ale nepodařilo přijmout. Ťukněte na Pokračovat a zkuste ji přijmout znovu.',
+      jinyUcet: jeJinyUcet(chybaPrijeti?.message),
     }
   }
 

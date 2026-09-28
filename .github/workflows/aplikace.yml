@@ -89,7 +89,7 @@ jobs:
           # SEZNAM. Každý z nich na main (0a38fb6) prošel, v pásmu Praha
           # i UTC. Nový test sem připiš, jakmile prochází.
           TESTY=(
-            adresa cas dochazka-cloveka dochazka-dnes dochazka-stav faktury-filtry
+            adresa cas ceka-na-opravneni dochazka-cloveka dochazka-dnes dochazka-stav faktury-filtry
             faktury-navigace fronta-push kiosek komunikace manifest
             marketing marketing-audit marketing-granty marketing-kalendar
             marketing-kampane marketing-kanaly marketing-media

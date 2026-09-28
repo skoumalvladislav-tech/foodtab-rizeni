@@ -720,7 +720,10 @@ const STUB_POZVANKA =
   'data:text/javascript,' +
   encodeURIComponent(
     'export async function poslatPrvniKod() { return { ok: true, odeslanoKdy: 1 } }\n' +
-      'export async function overitPrvniKod() { return { ok: true } }\n',
+      'export async function overitPrvniKod() { return { ok: true } }\n' +
+      // Okénko „máte jiný účet" (jiny-ucet.tsx, 25. 9. 2026) — tady se
+      // jen načte, nevolá.
+      'export async function prepnoutNaJinyUcet() { return { ok: true } }\n',
   )
 const PrvniPrihlaseni = await nactiKomponentu(
   'app/pozvanka/[token]/prvni-prihlaseni.tsx',

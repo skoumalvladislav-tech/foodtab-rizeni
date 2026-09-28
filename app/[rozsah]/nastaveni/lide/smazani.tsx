@@ -87,7 +87,8 @@ export default function SmazatZamestnance({
           }}
         >
           Ze seznamu zmizí, ale nesmaže se — zůstane označený jako
-          odešlý. Odpracované směny a docházka na něm drží dál.
+          odešlý. Odpracované směny a docházka na něm drží dál. Když
+          má účet, přestane do firmy vidět (členství se pozastaví).
         </p>
       ) : null}
     </form>

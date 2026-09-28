@@ -271,12 +271,19 @@ export default async function NastaveniOpravneni({
             return (
               <li
                 key={r.id}
+                /*
+                  Kotva pro okno „čeká na oprávnění": u člověka, jehož
+                  zařazení nemá žádná práva, vede tlačítko rovnou sem
+                  (lib/ceka-na-opravneni.ts).
+                */
+                id={`zarazeni-${r.id}`}
                 style={{
                   background: "var(--card)",
                   border: "1px solid var(--line)",
                   borderRadius: "var(--radius-lg)",
                   boxShadow: "var(--shadow)",
                   padding: "18px",
+                  scrollMarginTop: "72px",
                 }}
               >
                 <h2 style={{ margin: 0, fontSize: "18px", color: "var(--ink)" }}>
