@@ -14,12 +14,16 @@ import { viditelnaNabidka } from "./nabidka";
  * a odhlášení. Domovská obrazovka je od 16. 9. Dnes a všechno ostatní
  * se přestěhovalo do výsuvného menu „Více" ve spodní liště na telefonu
  * (`components/shell/MobileVice.tsx`) — obrazovky všech modulů,
- * Nastavení, Moje údaje, Vzhled i Odhlásit se.
+ * Nastavení, Moje údaje, Vzhled i Odhlásit se. Na počítači a tabletu
+ * je Odhlásit se vlevo dole na konci levého sloupce
+ * (`components/shell/ModuleSidebar.tsx`), Moje údaje a Vzhled
+ * v nabídce pod iniciálami v horní liště (`components/shell/MenuUctu.tsx`).
  *
  * Adresa zůstává a přesměruje tam, kam vede i logo: na Dnes, a když by
  * ji člověk neměl, na první hotovou obrazovku, kterou smí
  * (`lib/vychozi-obrazovka.ts`). Starý odkaz na dotaz k odhlášení
- * (`?odhlasit=1`) skončí taky na Dnes — dotaz je teď v „Více".
+ * (`?odhlasit=1`) skončí taky na Dnes — dotaz je teď v „Více"
+ * a vlevo dole.
  *
  * ---------------------------------------------------------------------
  * PROČ `redirect`, NE `permanentRedirect`

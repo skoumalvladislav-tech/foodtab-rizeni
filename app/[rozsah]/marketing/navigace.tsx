@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
+import Odhlaseni from '@/components/shell/Odhlaseni'
 import {
   aktivniKlic,
   type MarketingIkona,
@@ -111,12 +112,21 @@ export default function Navigace({
 
   return (
     <div className="modul-ram">
-      <nav className="modul-sloupec" aria-label="Marketing">
-        <div className="modul-skupina">Provozovna</div>
-        {hlavni.map((p) => odkaz(p, false))}
-        {nastaveni.length > 0 ? <div className="modul-skupina">Nastavení</div> : null}
-        {nastaveni.map((p) => odkaz(p, false))}
-      </nav>
+      {/* Na počítači sloupec místo levého sloupce aplikace (ten tu CSS
+          od 1024 px schová), proto na jeho konci i odhlášení vlevo dole —
+          viz ModuleSidebar. Na tabletu je schovaný tenhle a vlevo zůstává
+          ikonový sloupec aplikace. */}
+      <div className="modul-sloupec">
+        <nav className="modul-sloupec-nav" aria-label="Marketing">
+          <div className="modul-skupina">Provozovna</div>
+          {hlavni.map((p) => odkaz(p, false))}
+          {nastaveni.length > 0 ? <div className="modul-skupina">Nastavení</div> : null}
+          {nastaveni.map((p) => odkaz(p, false))}
+        </nav>
+        <div className="ft-side-pata">
+          <Odhlaseni varianta="sloupec" />
+        </div>
+      </div>
 
       <div className="modul-obsah">
         <div className="modul-obsah-vnitrek">{children}</div>

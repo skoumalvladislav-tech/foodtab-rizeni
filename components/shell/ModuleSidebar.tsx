@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import type { PolozkaProp, SkupinaNavigace } from "./AppShell";
+import Odhlaseni from "./Odhlaseni";
 
 /**
  * Levý sloupec — hlavička rozsahu a VŠECHNY moduly najednou jako
@@ -9,6 +10,36 @@ import type { PolozkaProp, SkupinaNavigace } from "./AppShell";
  * Šéfíkovo rozhodnutí podle master promptu a schváleného mockupu:
  * sloupec se nepřepíná podle vybraného modulu, ukazuje celou appku
  * — horní lišta zůstává jako rychlý odkaz/zvýraznění aktuální sekce).
+ *
+ * ---------------------------------------------------------------------
+ * ODHLÁSIT SE VLEVO DOLE — PROČ TADY (25. 9. 2026)
+ *
+ * Šéfík 8. 9.: „ikonu odhlásit dát na základní obrazovku třeba vlevo
+ * dolů, teď je schovaná" (docs/zarazeni-misto-roli.md, 6.6) — ikona
+ * a slovo, oddělené čarou, a s dotazem. Do 25. 9. to byl rozcestník;
+ * ten je zrušený a na počítači a tabletu (nad 640 px, kde spodní lišta
+ * s „Více" není) je levý sloupec to, co je vlevo dole na každé
+ * obrazovce uvnitř rozsahu — i na upozorněních, rozhovorech a na
+ * /firma bez zapnutého modulu.
+ *
+ * Do horní lišty ne (7. 9.: „Omylem ťuknuté odhlášení uprostřed směny
+ * je horší než o jedno ťuknutí delší cesta") — ani schované pod
+ * iniciálami, to by bylo zase schované. Hlídá to
+ * scripts/prihlaseni.test.mjs.
+ *
+ * Připnuté dole (globals.css, `.ft-side-pata`): když je seznam
+ * obrazovek dlouhý, sloupec se roluje a odhlášení zůstává vidět, ne až
+ * pod posledním Nastavením. Položku s fokusem pod patu neschová
+ * `scroll-padding-bottom`. Na tabletu je sloupec jen z ikon — odhlášení
+ * tam má ikonu a pod ní malé slovo (jako spodní lišta na telefonu)
+ * a dotaz vyskočí jako karta vedle.
+ *
+ * Marketing a Faktury mají na počítači vlastní sloupec a kreslí totéž
+ * na jeho konci (`app/[rozsah]/marketing/navigace.tsx`,
+ * `app/[rozsah]/finance/faktury/navigace.tsx`). Na tabletu je jejich
+ * sloupec schovaný (mají spodní lištu), a tak tam zůstává tenhle
+ * ikonový sloupec i s odhlášením. Moje údaje leží mimo rozsah a mají
+ * vlastní odhlášení dole na stránce.
  */
 export default function ModuleSidebar({
   rozsah,
@@ -62,6 +93,10 @@ export default function ModuleSidebar({
           </div>
         ))}
       </nav>
+
+      <div className="ft-side-pata">
+        <Odhlaseni varianta="sloupec" />
+      </div>
     </div>
   );
 }

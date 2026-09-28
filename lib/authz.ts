@@ -154,7 +154,7 @@ export type Branch = {
   timezone?: string
 }
 
-/** Modul firmy. `active: false` = firma ho nemá — v rozcestníku zašedlý. */
+/** Modul firmy. `active: false` = firma ho nemá — v řadě modulů zašedlý. */
 export type Module = {
   key: ModuleKey
   label: string
