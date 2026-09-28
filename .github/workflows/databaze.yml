@@ -183,6 +183,13 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 60 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 60"; chybi=1; }
 
+          # Pozvánka pro člověka s jiným účtem, přesun účtu na novou
+          # adresu, okno „čeká na oprávnění" s důvodem, odebrat z firmy
+          # (61). Aplikační půlku hlídá scripts/ceka-na-opravneni.test.mjs
+          # (workflow Aplikace).
+          grep -qE '^[[:space:]]*== KROK 61 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 61"; chybi=1; }
+
           # Docházka člověka po dnech: úseky, úprava a storno (63 —
           # mimo jiné shoda úseků s app.worked_minutes a zavřený přímý
           # UPDATE/DELETE docházky).

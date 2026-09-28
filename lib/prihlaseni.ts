@@ -171,3 +171,16 @@ export function ucetUzExistuje(chyba: unknown): boolean {
   if (e.code === 'email_exists' || e.code === 'user_already_exists') return true
   return typeof e.message === 'string' && /already (been )?(registered|exists)/i.test(e.message)
 }
+
+/**
+ * Přijetí odmítla databáze, protože člověk z pozvánky už má ve firmě
+ * JINÝ účet (20260925150000). Obrazovka pozvánky pak místo obecné chyby
+ * nabídne odhlášení a přihlášení tím účtem (`app/pozvanka/[token]/jiny-ucet.tsx`).
+ *
+ * Pozná se podle věty, kterou píše databáze — stejně jako „vystavena na
+ * jin…" v akci přijetí. Kontrola ceka-na-opravneni.test.mjs bere tu větu
+ * přímo z migrace, takže se nerozejdou potichu.
+ */
+export function jeJinyUcet(hlaska: string | null | undefined): boolean {
+  return hlaska?.includes('V téhle firmě už máte jiný účet') === true
+}

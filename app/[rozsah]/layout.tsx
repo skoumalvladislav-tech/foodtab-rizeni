@@ -16,8 +16,10 @@ import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import type { TeloUpozorneni } from "@/lib/upozorneni-text";
 import Sdeleni from "@/app/sdeleni";
+import CestaVen from "@/app/cesta-ven";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import CekaNaOpravneni from "./ceka-na-opravneni";
+import type { Cekajici } from "@/lib/ceka-na-opravneni";
 import ZivaAktualizace from "@/components/shell/ZivaAktualizace";
 import { NAZVY_MODULU, polozkyNastaveni, polozkyModulu } from "./nabidka";
 import AppShell, { type ModulProp, type PolozkaProp, type UpozorneniProp } from "@/components/shell/AppShell";
@@ -70,8 +72,14 @@ export default async function RozsahLayout({
       return <CekajiciPozvanka pozvanky={cekajici} />;
     }
 
+    /*
+      Tři sdělení tady se kreslí mimo rám, kde je odhlášení (menu
+      „Více"). Kdo se přihlásil špatným účtem, musí mít cestu ven
+      (kontrola #85, 25. 9. 2026) — app/cesta-ven.tsx. Moje údaje jen
+      u „Sem nemáte přístup": bez firmy ukážou zase jen tohle sdělení.
+    */
     return (
-      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě">
+      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě" pata={<CestaVen jinaAdresa />}>
         Až vás někdo do firmy pozve, přijde vám e-mail s odkazem — stačí
         počkat, nebo se ozvat tomu, kdo firmu spravuje.
       </Sdeleni>
@@ -81,7 +89,7 @@ export default async function RozsahLayout({
   const ctx = await getContext(tenantId);
   if (!ctx) {
     return (
-      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst">
+      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst" pata={<CestaVen />}>
         Zkuste to prosím za chvíli znovu. Pokud potíž trvá, ozvěte se
         správci firmy.
       </Sdeleni>
@@ -100,7 +108,7 @@ export default async function RozsahLayout({
   const scope = bezpecnyRozsah(ctx, rozsah);
   if (!scope) {
     return (
-      <Sdeleni samostatne nadpis="Sem nemáte přístup">
+      <Sdeleni samostatne nadpis="Sem nemáte přístup" pata={<CestaVen mojeUdaje />}>
         Tahle část Foodtabu vám není otevřená. Pokud si myslíte, že by
         měla být, řekněte si správci firmy o úpravu oprávnění.
       </Sdeleni>
@@ -338,7 +346,7 @@ export default async function RozsahLayout({
       <ZivaAktualizace userId={user.id} />
       <CekaNaOpravneni
         rozsah={rozsah}
-        lide={(cekajiciNaOpravneni ?? []) as { user_id: string; jmeno: string }[]}
+        lide={(cekajiciNaOpravneni ?? []) as Cekajici[]}
       />
       {children}
     </AppShell>

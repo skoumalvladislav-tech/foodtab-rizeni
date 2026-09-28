@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 export default function Sdeleni({
   nadpis,
   samostatne = false,
+  pata,
   children,
 }: {
   nadpis: string;
@@ -20,6 +21,12 @@ export default function Sdeleni({
    * .ft-main v ram.tsx a druhý <main> by odečítači zamotal orientaci.
    */
   samostatne?: boolean;
+  /**
+   * Co pod větou — u samostatného sdělení cesta ven (`app/cesta-ven.tsx`):
+   * mimo rám není menu, a tedy ani odhlášení (kontrola #85, 25. 9. 2026).
+   * Zvlášť, ne v `children`: věta je `<p>` a tlačítka do něj nepatří.
+   */
+  pata?: ReactNode;
   children: ReactNode;
 }) {
   const Obal = samostatne ? "main" : "div";
@@ -52,6 +59,7 @@ export default function Sdeleni({
         <p style={{ margin: 0, color: "var(--muted)", fontSize: "14px" }}>
           {children}
         </p>
+        {pata}
       </div>
     </Obal>
   );

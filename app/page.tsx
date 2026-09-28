@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getContext, getUser, maOpravneni } from "@/lib/authz";
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import Sdeleni from "@/app/sdeleni";
+import CestaVen from "@/app/cesta-ven";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ export default async function Home() {
     }
 
     return (
-      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě">
+      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě" pata={<CestaVen jinaAdresa />}>
         Přihlášení proběhlo v pořádku, ale k žádné firmě zatím nemáte
         členství. Až vás někdo do firmy pozve, přijde vám e-mail
         s odkazem — stačí počkat, nebo se ozvat tomu, kdo firmu spravuje.
@@ -44,7 +45,7 @@ export default async function Home() {
   const ctx = await getContext(tenantId);
   if (!ctx) {
     return (
-      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst">
+      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst" pata={<CestaVen />}>
         Zkuste to prosím za chvíli znovu. Pokud potíž trvá, ozvěte se
         správci firmy.
       </Sdeleni>
@@ -67,7 +68,7 @@ export default async function Home() {
   const scope = bezpecnyRozsah(ctx);
   if (!scope) {
     return (
-      <Sdeleni samostatne nadpis="Není kam vás pustit">
+      <Sdeleni samostatne nadpis="Není kam vás pustit" pata={<CestaVen mojeUdaje />}>
         Vaše členství je vedené na pobočku, ale žádná vám zatím není
         přiřazená. Doplní ji správce firmy.
       </Sdeleni>

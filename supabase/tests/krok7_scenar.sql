@@ -330,6 +330,36 @@ reset role;
 -- ale právě proto se to musí ověřit, ne předpokládat. Vedoucí, který
 -- omylem pošle druhou pozvánku kolegovi, který už uvnitř je, ho
 -- nesmí vyřadit z aplikace.
+--
+-- Zařazení a práva ale nejsou všechno: členství nese ROZSAH a POBOČKY.
+-- Tahle pozvánka (bez člověka, výchozí rozsah 'branch' bez poboček)
+-- je dřív přepsala — Marek po ní neviděl ani Perlu, a kontroly na
+-- zařazení a `ma_pravo_clovek` byly zelené dál, protože rozsah
+-- nevidí. Od 20260925150000 se pozvánka BEZ člověka účtem, který
+-- v Lidech je, nepřijme vůbec (nezávislá kontrola 28. 9. 2026: bez
+-- stropu šlo tudy kolegovi rozsah rozšířit i majiteli zúžit).
+
+create or replace function pg_temp.spadne_hlaskou(p_sql text, p_stav text, p_hlaska text)
+returns boolean language plpgsql as $$
+begin
+  execute p_sql;
+  return false;
+exception when others then
+  return sqlstate = p_stav and sqlerrm like '%' || p_hlaska || '%';
+end $$;
+
+create temp table krok7_clenstvi_pred as
+select m.scope, m.status,
+       array(select mb.branch_id from public.membership_branches mb
+              where mb.membership_id = m.id order by mb.branch_id) as pobocky
+  from public.memberships m
+ where m.user_id = :'marek' and m.tenant_id = :'tenant';
+
+set role authenticated;
+select set_config('test.user_id', :'marek', false);
+select pg_temp.check('před druhou pozvánkou Marek na Perle vidí rozpis (jinak by další nic neměřila)',
+  app.has_access(:'tenant', 'shifts.read', :'perla'));
+reset role;
 
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
@@ -339,8 +369,20 @@ reset role;
 
 set role authenticated;
 select set_config('test.user_id', :'marek', false);
-select app.accept_invitation(:'tok2');
+select pg_temp.check('druhou pozvánku BEZ člověka Marek nepřijme — v Lidech už je',
+  pg_temp.spadne_hlaskou(format('select app.accept_invitation(%L)', :'tok2'),
+    '23514', 'Váš účet už ve firmě patří k člověku v Lidech'));
+select pg_temp.check('a na Perle vidí rozpis dál',
+  app.has_access(:'tenant', 'shifts.read', :'perla'));
 reset role;
+
+select pg_temp.check('jeho členství se nezměnilo (rozsah, stav i pobočky)',
+  (select (m.scope, m.status,
+           array(select mb.branch_id from public.membership_branches mb
+                  where mb.membership_id = m.id order by mb.branch_id))
+          = (p.scope, p.status, p.pobocky)
+     from public.memberships m, krok7_clenstvi_pred p
+    where m.user_id = :'marek' and m.tenant_id = :'tenant'));
 
 select pg_temp.check('číšníkovi jeho zařazení zůstalo',
   (select position_id from public.employees

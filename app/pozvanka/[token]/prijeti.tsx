@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { prihlasitSeAdresouZPozvanky, prijmoutPozvankuAction } from './akce'
+import JinyUcet from './jiny-ucet'
 
 /**
  * Přijetí pozvánky.
@@ -29,6 +30,7 @@ export default function PrijmoutPozvankuFormular({
   const [ceka, setCeka] = useState(false)
   const [chyba, setChyba] = useState<string | null>(null)
   const [jinaAdresa, setJinaAdresa] = useState(false)
+  const [jinyUcet, setJinyUcet] = useState(false)
 
   async function prijmout(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -44,6 +46,7 @@ export default function PrijmoutPozvankuFormular({
 
     setChyba(v.chyba ?? 'Pozvánku se nepodařilo přijmout.')
     setJinaAdresa(v.jinaAdresa === true)
+    setJinyUcet(v.jinyUcet === true)
     setCeka(false)
   }
 
@@ -58,6 +61,14 @@ export default function PrijmoutPozvankuFormular({
     }
     setChyba(v.chyba ?? 'Přepnout účet se nepodařilo.')
     setCeka(false)
+  }
+
+  /*
+    Člověk z pozvánky už má ve firmě jiný účet (20260925150000). Tlačítko
+    „Přijmout“ by jen opakovalo tutéž chybu — místo formuláře cesta ven.
+  */
+  if (jinyUcet && chyba) {
+    return <JinyUcet hlaska={chyba} />
   }
 
   return (

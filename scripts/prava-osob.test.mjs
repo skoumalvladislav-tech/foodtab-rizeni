@@ -240,6 +240,8 @@ function dotaz(db, tabulka) {
     eq(k, v) { s.filtry.push((r) => String(r[k]) === String(v)); return b },
     in(k, arr) { const m = arr.map(String); s.filtry.push((r) => m.includes(String(r[k]))); return b },
     is(k, v) { s.filtry.push((r) => (r[k] ?? null) === v); return b },
+    // Čekající pozvánky v Lidech (`expires_at > teď`, 28. 9. 2026).
+    gt(k, v) { s.filtry.push((r) => String(r[k]) > String(v)); return b },
     order(k, o = {}) { s.poradi.push([k, o.ascending !== false]); return b },
     limit(n) { s.limit = n; return b },
     maybeSingle() { s.jeden = true; return b },
@@ -344,11 +346,16 @@ const SPOLECNE = [
 const AKCE_LIDE = adresaModulu('app/[rozsah]/nastaveni/lide/akce.ts', SPOLECNE)
 const AKCE_ROLE = adresaModulu('app/[rozsah]/nastaveni/role/akce.ts', SPOLECNE)
 const NABIDKA = adresaModulu('app/[rozsah]/nabidka.ts', SPOLECNE)
+// Karta „čekají na oprávnění" v Lidech (25. 9. 2026) si bere akci
+// „Odebrat z firmy", karta čekajících pozvánek (28. 9.) akci „Zrušit";
+// tady se jen načtou, nevolají.
+const CEKA_AKCE = adresaModulu('app/[rozsah]/ceka-akce.ts', SPOLECNE)
+const POZVANKY_AKCE = adresaModulu('app/[rozsah]/nastaveni/lide/pozvanky-akce.ts', SPOLECNE)
 
 const akceLide = await import(AKCE_LIDE)
 const akceRole = await import(AKCE_ROLE)
 const StrankaLide = (await nactiModul('app/[rozsah]/nastaveni/lide/page.tsx', [
-  ...SPOLECNE, ['./akce', AKCE_LIDE],
+  ...SPOLECNE, ['./akce', AKCE_LIDE], ['./ceka-akce', CEKA_AKCE], ['./pozvanky-akce', POZVANKY_AKCE],
 ])).default
 const StrankaRole = (await nactiModul('app/[rozsah]/nastaveni/role/page.tsx', [
   ...SPOLECNE, ['./akce', AKCE_ROLE], ['../../nabidka', NABIDKA],
