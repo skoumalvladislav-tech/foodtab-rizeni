@@ -13,6 +13,7 @@ import {
   popisMarketingu,
   popisOpravneni,
   popisPinu,
+  popisSmenaOdmitnuta,
   popisZalohy,
   popisZapomenuteho,
   odkazNaZalohu,
@@ -368,6 +369,25 @@ export default async function Upozorneni({
                         </Link>
                       </p>
                     ) : null}
+                  </>
+                ) : null}
+
+                {/*
+                  ODMÍTNUTÁ SMĚNA (29. 9. 2026). Jde jen vedoucímu — tělo
+                  nenese jméno toho, kdo odmítl (viz popisSmenaOdmitnuta),
+                  proto tlačítko vede na přehled Potvrzení směn, kde je
+                  u řádku i jméno a jde tam dohledat i ostatní čekající.
+                */}
+                {z.druh === 'smena.odmitnuta' ? (
+                  <>
+                    <p style={{ margin: '8px 0 0', fontSize: '14px' }}>
+                      {popisSmenaOdmitnuta(z.telo)}
+                    </p>
+                    <p style={{ margin: '10px 0 0' }}>
+                      <Link href={`/${rozsah}/smeny/potvrzeni`} className="ft-tl ft-tl-hlavni ft-tl-male">
+                        Otevřít potvrzení směn
+                      </Link>
+                    </p>
                   </>
                 ) : null}
 

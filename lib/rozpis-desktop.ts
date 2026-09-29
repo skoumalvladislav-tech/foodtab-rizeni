@@ -125,7 +125,14 @@ export type PotvrzeniSmeny = {
   ends_at: string
   pauza_od: string | null
   pauza_do: string | null
-  confirmed_at: string
+  /**
+   * `null` u řádku, který nese ODMÍTNUTÍ, ne potvrzení (migrace
+   * 20260929100000 — `smeny_potvrzeni.confirmed_at` přestala být `not
+   * null`). Čtenáři téhle tabulky (puntík v rozpisu, detail směny)
+   * filtrují na zdroji `confirmed_at is not null`, ale typ to nese
+   * i tak — `potvrzeniPlatne` níž se na to nespoléhá jen na ně.
+   */
+  confirmed_at: string | null
 }
 
 /**
@@ -159,7 +166,11 @@ export function potvrzeniZRadku(radky: PotvrzeniSmeny[], pobocky: string[], bezU
  * zpátky, potvrzení platí zas.
  */
 export function potvrzeniPlatne(s: SmenaD, p: PotvrzeniSmeny | null | undefined): boolean {
-  if (!p || !s.employee_id || p.employee_id !== s.employee_id) return false
+  // `confirmed_at` chybí u řádku, který nese ODMÍTNUTÍ (od migrace
+  // 20260929100000 sloupec není „not null“) — takový řádek platné
+  // potvrzení není, ať se do téhle funkce dostane odkudkoli (dotaz na
+  // zdroji filtruje taky, ale tohle je druhá linie, ne jediná).
+  if (!p || !p.confirmed_at || !s.employee_id || p.employee_id !== s.employee_id) return false
   return (
     p.branch_id === s.branch_id &&
     p.shift_date === s.shift_date &&

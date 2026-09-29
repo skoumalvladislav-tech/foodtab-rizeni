@@ -281,6 +281,7 @@ export default function MobilniRozpis(p: MobilProps) {
           <MojeSmeny
             dnes={dnesni}
             ctx={p.ctx}
+            rozsah={p.rozsah}
             moje={p.mojeSmeny}
             zalozka={zalozka}
             den={denUrl}

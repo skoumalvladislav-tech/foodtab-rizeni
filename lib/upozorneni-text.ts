@@ -80,6 +80,11 @@ export type TeloUpozorneni = {
   castka_haleru?: number
   zaloha?: string
   jak?: string
+  // smena.odmitnuta (20260929100000) — id odmítnuté směny; den/od/do/duvod
+  // sdílí pole výš (stejná jména jako u smena.zmenena/marketing). Kdo
+  // odmítl, tělo NENESE — notifikaci dostává jen vedoucí pobočky a
+  // otevřením přehledu (odkazUpozorneni) se to dozví z tabulky.
+  smena?: string
 }
 
 /**
@@ -182,6 +187,14 @@ export function nadpisUpozorneni(
       return `Odebrali vám směnu ${denCesky(telo.den)}`
     case 'smena.zrusena':
       return `Zrušili vám směnu ${denCesky(telo.den)}`
+    /*
+      ODMÍTNUTÍ (29. 9. 2026, migrace 20260929100000). Jde jen vedoucímu
+      pobočky té směny, nikdy tomu, kdo odmítl. Tělo nenese jméno toho,
+      kdo odmítl (app.notifikovat u odmitnout_smenu ho neposílá) — nadpis
+      proto mluví o SMĚNĚ, ne o člověku; kdo je popisSmenaOdmitnuta níž.
+    */
+    case 'smena.odmitnuta':
+      return `Odmítnutá směna ${denCesky(telo.den)}`
     case 'ukol.pridelen':
       return telo.nazev ? `Nový úkol: ${telo.nazev}` : 'Máte nový úkol'
     case 'oznameni.nova':
@@ -384,6 +397,18 @@ export function popisZalohy(druh: string, telo: TeloUpozorneni): string {
     return `${castka}${kdy}. Pokud jste ji nedostali, ozvěte se vedení.`
   }
   return ''
+}
+
+/**
+ * Věta pod nadpisem u odmítnuté směny (29. 9. 2026): čas a povinný důvod.
+ * Kdo odmítl, se sem NEPÍŠE — tělo to nenese (viz nadpisUpozorneni).
+ * Vedoucí se to dozví po otevření přehledu (odkaz níž vede na Potvrzení
+ * směn), kde je u řádku i jméno.
+ */
+export function popisSmenaOdmitnuta(telo: TeloUpozorneni): string {
+  const cas = telo.od && telo.do ? `${telo.od}–${telo.do}` : ''
+  const duvod = telo.duvod?.trim() ? `Důvod: ${telo.duvod.trim()}` : 'Bez uvedeného důvodu.'
+  return [cas, duvod].filter(Boolean).join(' · ')
 }
 
 /**

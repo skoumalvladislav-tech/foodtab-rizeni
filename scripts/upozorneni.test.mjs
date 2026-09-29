@@ -30,6 +30,7 @@ import {
   obdobiRozpisu,
   popisMarketingu,
   popisOpravneni,
+  popisSmenaOdmitnuta,
   popisZapomenuteho,
   vyzadujePotvrzeni,
   zmenaSmeny,
@@ -317,6 +318,9 @@ const OBRAZOVKA_KOD = OBRAZOVKA
 
 ma('obrazovka volá popisMarketingu', /popisMarketingu\(/.test(OBRAZOVKA_KOD), true)
 ma('a kreslí všechny marketingové druhy', /marketing\./.test(OBRAZOVKA_KOD), true)
+ma('obrazovka volá popisSmenaOdmitnuta', /popisSmenaOdmitnuta\(z\.telo\)/.test(OBRAZOVKA_KOD), true)
+ma('odmítnutá směna vede na přehled Potvrzení směn',
+  /smeny\/potvrzeni/.test(OBRAZOVKA_KOD), true)
 
 /*
   ŽÁDOST VEDE DO FRONTY, OSTATNÍ DO PŘÍSPĚVKU. Cesta ke splnění úkolu
@@ -378,6 +382,21 @@ ma('nová směna potvrzení nevyžaduje', vyzadujePotvrzeni('smena.nova'), false
 ma('odebraná směna potvrzení nevyžaduje', vyzadujePotvrzeni('smena.odebrana'), false)
 ma('ostatní druhy potvrzení nevyžadují', vyzadujePotvrzeni('vzkaz.novy'), false)
 ma('ani neznámý druh', vyzadujePotvrzeni('neco.noveho'), false)
+// odmítnutí (29. 9. 2026) potvrzení nevyžaduje — jde vedoucímu, ne
+// tomu, kdo o směnu rozhodl; „potvrdit, že jsem si přečetl“ tu nemá smysl.
+ma('odmítnutá směna potvrzení nevyžaduje', vyzadujePotvrzeni('smena.odmitnuta'), false)
+
+/*
+  ODMÍTNUTÁ SMĚNA (29. 9. 2026, migrace 20260929100000). Tělo NENESE
+  jméno toho, kdo odmítl (app.notifikovat u odmitnout_smenu ho neposílá)
+  — nadpis proto mluví o směně, ne o člověku.
+*/
+ma('nadpis odmítnuté směny mluví o směně, ne o člověku (jméno tělo nenese)',
+  nadpisUpozorneni('smena.odmitnuta', { den: '2026-09-28' }, obdobi), 'Odmítnutá směna pondělí 28. 9.')
+ma('popis nese čas a důvod', popisSmenaOdmitnuta({ od: '08:00', do: '16:00', duvod: 'nemoc' }), '08:00–16:00 · Důvod: nemoc')
+ma('bez důvodu (nemělo by nastat, RPC ho vyžaduje) se to řekne nahlas, ne mlčí',
+  popisSmenaOdmitnuta({ od: '08:00', do: '16:00' }), '08:00–16:00 · Bez uvedeného důvodu.')
+ma('bez časů zůstane jen důvod', popisSmenaOdmitnuta({ duvod: 'nemoc' }), 'Důvod: nemoc')
 
 ma('obrazovka volá vyzadujePotvrzeni',
   /vyzadujePotvrzeni\(z\.druh\)/.test(OBRAZOVKA_KOD), true)
@@ -490,6 +509,8 @@ ma('nová směna → rozpis na ten den, rovnou detail směny',
 ma('změněná směna čeká na POTVRZENÍ → na stránku Upozornění (tam je „Potvrdit“)',
   cil('smena.zmenena', { den: '2026-09-28' }, { shift_id: U }), '/perla/upozorneni')
 ma('zrušená směna taky', cil('smena.zrusena', { den: '2026-09-28' }), '/perla/upozorneni')
+ma('odmítnutá směna → přehled Potvrzení směn (vedoucí, ne „moje směny“)',
+  cil('smena.odmitnuta', { den: '2026-09-28' }, { shift_id: U }), '/perla/smeny/potvrzeni')
 ma('směna bez dne → obecná stránka, nic se nevymýšlí', cil('smena.nova', {}), '/perla/upozorneni')
 ma('úkol → detail úkolu', cil('ukol.pridelen', { ukol: U }), `/perla/ukoly/ukol/${U}`)
 ma('úkol s nesmyslným id → seznam úkolů', cil('ukol.pridelen', { ukol: '../../x' }), '/perla/ukoly')
