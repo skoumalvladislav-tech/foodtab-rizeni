@@ -1485,8 +1485,35 @@ div.ds-smd-smena:hover { box-shadow: none; }
 /* Dva časy nepotřebují šířku celého panelu. */
 .ds-smd-form .ds-sm-cas .ds-sm-pole-obal { width: fit-content; max-width: 100%; gap: 8px; }
 .ds-smd-form .ds-sm-pole-obal input[type="time"] { width: 4.6em !important; }
+/* Mřížka výběru víc dnů je na počítači nižší, stejnou úvahou jako pole
+   výš (panel je pracovní nástroj, ne obrazovka na dotyk). */
+.ds-smd-form .ds-sm-vd-den { min-height: 40px; }
 .ds-smd-souhrn-hodin { margin: -4px 0 0; font-size: 12.5px; color: var(--muted); }
 .ds-smd-souhrn-hodin strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* --- výběr víc dnů (nová směna, formular-smeny.tsx / vyber-dnu.tsx) --- */
+
+.ds-sm-vd { display: grid; gap: 6px; }
+.ds-sm-vd-hlavicka { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; padding: 0 1px; }
+.ds-sm-vd-hlavicka span { text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); }
+.ds-sm-vd-mrizka { display: grid; gap: 4px; }
+.ds-sm-vd-tyden { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+/* Výchozí (telefon) 52 px — stejná dotyková výška jako `.ds-sm-mesic-den`
+   (mobilní měsíční kalendář) a `.ds-sm-pole-obal`, ne 40 px navlečených
+   z panelu na počítači. Na počítači ji zmenší `.ds-smd-form` níž, stejně
+   jako u `.ds-sm-pole-obal`. */
+.ds-sm-vd-den {
+  min-height: 52px; padding: 0; border: 1px solid var(--line-2); border-radius: 8px;
+  background: var(--card); color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.ds-sm-vd-den[data-vikend] { background: color-mix(in srgb, var(--mosaz-sv) 10%, var(--card)); }
+.ds-sm-vd-den[data-vybrano] {
+  background: var(--branch-soft); border-color: var(--branch); color: var(--branch); font-weight: 700;
+}
+.ds-sm-vd-vic {
+  justify-self: start; min-height: 36px; padding: 0 4px; border: 0; background: transparent;
+  color: var(--mosaz); font-size: 13px; font-weight: 600; cursor: pointer;
+}
 .ds-smd-hlavicka-smeny { display: grid; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .ds-smd-hlavicka-osoba { display: flex; align-items: center; gap: 12px; }
 .ds-smd-hlavicka-jmeno { font-size: 16px; font-weight: 600; }

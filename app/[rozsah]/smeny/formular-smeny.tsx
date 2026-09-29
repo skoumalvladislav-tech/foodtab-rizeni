@@ -6,14 +6,18 @@ import { useRouter } from 'next/navigation'
 import Ikona from '@/app/[rozsah]/ikona'
 import type { IkonaKlic } from '@/app/[rozsah]/nabidka'
 import Drawer from '@/components/ui/Drawer'
+import { denKratce } from '@/lib/rozpis-desktop'
+import { pocet } from '@/lib/sklonovani'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
 import { zkratkaDoSmeny } from '@/lib/sablony'
 import { ukazatZarazeni, zarazeniProUlozeni } from '@/lib/smeny-formular'
 import { denVTydnu, hodinyKratce, minutSmeny, ZKRATKY_DNU } from '@/lib/rozpis-mobil'
+import { barvaSouhrnu, prepnoutDen, souhrnZalozeni, TYDNU_KROK, TYDNU_MAX, TYDNU_VYCHOZI, zapnoutVicDni } from '@/lib/vyber-dnu'
 import HlavickaSmeny, { type KontextSmeny } from './desktop/hlavicka-smeny'
 import { ListMobil } from './mobil/sheet'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
 import { smazatSmenu, ulozitSmenu, type StavSmeny } from './smena'
+import VyberDnu from './vyber-dnu'
 
 export type SmenaKUprave = {
   id: string
@@ -251,6 +255,17 @@ export default function FormularSmeny({
   const [pauzaDo, setPauzaDo] = useState((zdroj?.pauza_do ?? '').slice(0, 5))
 
   /*
+    Víc dní najednou (Šéfík 29. 9. 2026) — jen u NOVÉ směny, u úpravy
+    nedává smysl. Zapnutím se pole „den“ nahradí mřížkou pro výběr víc
+    dnů (vyber-dnu.tsx); posílají se pak jako opakované pole `dny`, ne
+    jako `den`, a `ulozitSmenu` z nich založí tolik směn, kolik dnů je
+    vybraných — viz jeho hlavičku.
+  */
+  const [vicDni, setVicDni] = useState(false)
+  const [vybraneDny, setVybraneDny] = useState<string[]>([])
+  const [pocetTydnuOkna, setPocetTydnuOkna] = useState(TYDNU_VYCHOZI)
+
+  /*
     „Uložit a přidat další den“. Druhé odesílací tlačítko jen poznamená, že
     po uložení se má otevřít další směna; hlavní tlačítko to zase zruší
     (včetně odeslání Enterem, které klikne na první odesílací tlačítko).
@@ -314,9 +329,15 @@ export default function FormularSmeny({
     Průběžný součet: co má člověk v týdnu bez téhle směny → s ní. Nová
     délka se počítá týmž výpočtem jako všude jinde (`minutSmeny`: směna
     přes půlnoc je kladná, pauza uvnitř se odečte).
+
+    Při výběru víc dnů se neukazuje — směny padnou do víc různých týdnů
+    a součet JEDNOHO týdne (toho, kde leží `datum`) by byl jen zdánlivě
+    přesný.
   */
   const predSmenou =
-    souctyTydne && zamestnanec && datum ? souctyTydne(zamestnanec, datum, smena?.id || null) : null
+    souctyTydne && zamestnanec && datum && !vicDni
+      ? souctyTydne(zamestnanec, datum, smena?.id || null)
+      : null
   const novychMinut =
     od && doKdy
       ? minutSmeny({
@@ -394,26 +415,60 @@ export default function FormularSmeny({
     <>
       {hotovo ? (
         <>
-          <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
-            {smena ? 'Změna uložena.' : 'Směna přidána do rozpisu.'}
-          </p>
+          {stav.dny ? (
+            /*
+              Výsledek výběru VÍC dnů — souhrn počtu a pak, jen pokud je
+              co hlásit, den po dni: chyba i varování musí být vidět, ne
+              tiše spolknuté (bod B zadání). Kdo den vidí v seznamu bez
+              poznámky, ten se založil beze zbytku.
+            */
+            <>
+              <p style={{ margin: '0 0 12px', fontSize: '14px', color: barvaSouhrnu(stav.dny) }}>
+                {souhrnZalozeni(stav.dny)}.
+              </p>
+              {stav.dny.some((v) => v.chyba !== null || v.varovani.length > 0) ? (
+                <ul style={varovaniSeznam}>
+                  {stav.dny
+                    .filter((v) => v.chyba !== null || v.varovani.length > 0)
+                    .map((v) => (
+                      <li key={v.den} style={v.chyba !== null ? chybaDneRadek : varovaniRadek}>
+                        <strong>{denKratce(v.den)}: </strong>
+                        {v.chyba !== null ? `Nezaloženo — ${v.chyba}` : v.varovani.join(' ')}
+                      </li>
+                    ))}
+                </ul>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
+                {smena ? 'Změna uložena.' : 'Směna přidána do rozpisu.'}
+              </p>
 
-          {/*
-            Varování až tady, u výsledku. Kdyby se ukazovala předem,
-            člověk by je odklikl dřív, než by měl co odklikávat.
-          */}
-          {stav.varovani.length > 0 ? (
-            <ul style={varovaniSeznam}>
-              {stav.varovani.map((v, i) => (
-                <li key={i} style={varovaniRadek}>
-                  {v}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+              {/*
+                Varování až tady, u výsledku. Kdyby se ukazovala předem,
+                člověk by je odklikl dřív, než by měl co odklikávat.
+              */}
+              {stav.varovani.length > 0 ? (
+                <ul style={varovaniSeznam}>
+                  {stav.varovani.map((v, i) => (
+                    <li key={i} style={varovaniRadek}>
+                      {v}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          )}
 
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            {!smena?.id && onDalsiDen ? (
+            {/*
+              „Přidat další den“ patří jen k jednodenní cestě — bere
+              časy z polí formuláře pro JEDEN den; u výběru víc dnů se
+              místo toho zase otevře prázdný formulář a nabídne se
+              vlastní výběr dnů znovu.
+            */}
+            {!smena?.id && onDalsiDen && !stav.dny ? (
               <button type="button" onClick={() => onDalsiDen(dalsiPodklady())} className="ft-tl ft-tl-vedlejsi">
                 Přidat další den
               </button>
@@ -511,19 +566,83 @@ export default function FormularSmeny({
             </Pole>
           </label>
 
-          <label style={{ ...S.label, ...poradi(2) }}>
-            <span>Datum</span>
-            <Pole ikona="kalendar">
-              <input
-                name="den"
-                type="date"
-                required
-                value={datum}
-                onChange={(e) => setDatum(e.target.value)}
-                style={S.pole}
-              />
-            </Pole>
-          </label>
+          {/*
+            Datum jednoho dne, nebo (jen u NOVÉ směny) přepínač na výběr
+            víc dnů najednou. „div“ místo „label“ schválně: label by při
+            výběru víc dnů obalil hromadu zaškrtávátek a klik na popisek
+            by přepnul všechny naráz.
+          */}
+          <div style={{ ...S.label, ...poradi(2) }} role="group" aria-labelledby={ID_DATUM}>
+            <span
+              id={ID_DATUM}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}
+            >
+              Datum
+              {!smena ? (
+                <label style={vicDniPrepinac}>
+                  <input
+                    type="checkbox"
+                    checked={vicDni}
+                    onChange={(e) => {
+                      const zapnuto = e.target.checked
+                      setVicDni(zapnuto)
+                      /*
+                        Zapnutím se nepřijde o den, který už měl vybraný
+                        v poli, ani o dosavadní VÍCEDENNÍ výběr — kdo
+                        přepínač omylem vypne a hned zapne zpátky (třeba
+                        aby se mrknul na pole data), nesmí tichým smazáním
+                        přijít o to, co už měl zaškrtnuté (`zapnoutVicDni`).
+                      */
+                      if (zapnuto) {
+                        setVybraneDny((v) => zapnoutVicDni(v, datum))
+                        setPocetTydnuOkna(TYDNU_VYCHOZI)
+                      }
+                    }}
+                  />
+                  Víc dní
+                </label>
+              ) : null}
+            </span>
+
+            {vicDni ? (
+              <>
+                <VyberDnu
+                  zacatek={datum || den}
+                  vybrane={vybraneDny}
+                  pocetTydnu={pocetTydnuOkna}
+                  onPrepnout={(d) => setVybraneDny((v) => prepnoutDen(v, d))}
+                  onVicTydnu={
+                    pocetTydnuOkna < TYDNU_MAX
+                      ? () => setPocetTydnuOkna((n) => Math.min(TYDNU_MAX, n + TYDNU_KROK))
+                      : undefined
+                  }
+                />
+                <span style={vysvetlivka}>
+                  {vybraneDny.length === 0
+                    ? 'Vyberte aspoň jeden den, pro který se směna založí.'
+                    : `Vybráno ${pocet(vybraneDny.length, 'den', 'dny', 'dní')}: ${vybraneDny.map(denKratce).join(', ')}.`}
+                </span>
+                {/*
+                  Formulář se pošle jako opakované pole „dny“ — server
+                  (ulozitSmenu) z nich založí tolik směn, kolik jich tu je.
+                */}
+                {vybraneDny.map((d) => (
+                  <input key={d} type="hidden" name="dny" value={d} />
+                ))}
+              </>
+            ) : (
+              <Pole ikona="kalendar">
+                <input
+                  name="den"
+                  type="date"
+                  required
+                  value={datum}
+                  onChange={(e) => setDatum(e.target.value)}
+                  style={S.pole}
+                />
+              </Pole>
+            )}
+          </div>
 
           {/*
             Šablona stojí těsně nad časy, které vyplňuje. Kdyby byla
@@ -697,14 +816,25 @@ export default function FormularSmeny({
               <button
                 type="submit"
                 className="ft-tl ft-tl-hlavni"
-                disabled={ceka}
+                disabled={ceka || (vicDni && vybraneDny.length === 0)}
                 onClick={() => {
                   dalsiRef.current = null
                 }}
               >
-                {ceka ? 'Ukládám…' : smena?.id ? 'Uložit změny' : 'Přidat směnu'}
+                {ceka
+                  ? 'Ukládám…'
+                  : vicDni
+                    ? `Uložit na ${pocet(vybraneDny.length, 'den', 'dny', 'dní')}`
+                    : smena?.id
+                      ? 'Uložit změny'
+                      : 'Přidat směnu'}
               </button>
-              {!smena?.id && onDalsiDen ? (
+              {/*
+                Patří jen k jednodennímu zadávání — u výběru víc dnů dělá
+                totéž najednou samotné odeslání, druhé tlačítko by bylo
+                matoucí navíc.
+              */}
+              {!smena?.id && onDalsiDen && !vicDni ? (
                 <button
                   type="submit"
                   className="ft-tl ft-tl-vedlejsi ds-smd-form-dalsi"
@@ -843,9 +973,15 @@ export default function FormularSmeny({
             type="submit"
             form={ID_FORMULARE}
             className="ds-sm-pridat ds-sm-pridat-v-listu"
-            disabled={ceka}
+            disabled={ceka || (vicDni && vybraneDny.length === 0)}
           >
-            {ceka ? 'Ukládám…' : smena ? 'Uložit změnu' : 'Uložit směnu'}
+            {ceka
+              ? 'Ukládám…'
+              : vicDni
+                ? `Uložit na ${pocet(vybraneDny.length, 'den', 'dny', 'dní')}`
+                : smena
+                  ? 'Uložit změnu'
+                  : 'Uložit směnu'}
           </button>
         )
       }
@@ -859,6 +995,7 @@ export default function FormularSmeny({
 
 const ID_FORMULARE = 'ds-sm-formular-smeny'
 const ID_CAS = 'ds-sm-cas-popisek'
+const ID_DATUM = 'ds-sm-datum-popisek'
 
 /**
  * Obal pole v mobilní variantě: rámeček s ikonou vlevo a šipkou vpravo.
@@ -947,6 +1084,34 @@ const varovaniRadek = {
   color: 'var(--pozor)',
   fontSize: '13.5px',
   lineHeight: 1.5,
+} as const
+
+/** Den z výběru víc dnů, který selhal tvrdou chybou — odlišeno od pouhého varování. */
+const chybaDneRadek = {
+  ...varovaniRadek,
+  border: '1px solid var(--bad)',
+  background: 'var(--bad-bg)',
+  color: 'var(--bad)',
+} as const
+
+/**
+ * Přepínač „Víc dní“ vedle popisku pole Datum — písmo malé, ne velké
+ * jako popisek samotný, ale dotyková výška 44 px jako sesterský
+ * checkbox „Trhaná směna“ o pár řádků níž a jako `.ds-sm-volba`
+ * (app/_komponenty.css) — je to jediný vstup do celé vícedenní volby,
+ * nesmí být menší než ostatní zaškrtávátka ve stejném formuláři.
+ */
+const vicDniPrepinac = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '6px',
+  minHeight: '44px',
+  fontSize: '13px',
+  fontWeight: 400,
+  textTransform: 'none' as const,
+  letterSpacing: 'normal',
+  color: 'var(--ink)',
+  cursor: 'pointer',
 } as const
 
 /*

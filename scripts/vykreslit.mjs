@@ -76,6 +76,11 @@ function naAdresu(soubor, nahrady, hotove) {
 
   // `@/neco` z kořene projektu.
   for (const m of s.matchAll(/from ['"]@\/([^'"]+)['"]/g)) {
+    // Podstrčené se nepřekládá znovu — jinak by se muselo umět přeložit
+    // i to, co je záměrně nahrazené (typicky proto, že mimo prohlížeč
+    // samo spadne, jako `react-dom` v Drawer.tsx). Stejná pojistka jako
+    // u sourozeneckých importů níž.
+    if (nahrady.some(([co]) => co === '@/' + m[1])) continue
     const cil = najdi(m[1])
     if (!cil) throw new Error(`Nenašel jsem modul pro @/${m[1]}`)
     vlastni.push([
