@@ -30,6 +30,7 @@ export default function VyberPrijemcu({
   akce,
   rozsah,
   chyba,
+  klientId,
 }: {
   lide: Prijemce[]
   /** [id, název] — Map se přes hranici server → klient nepřenáší. */
@@ -37,6 +38,8 @@ export default function VyberPrijemcu({
   akce: (formData: FormData) => void | Promise<void>
   rozsah: string
   chyba?: string | null
+  /** Klientské id první zprávy (vyrobí ho stránka při vykreslení). */
+  klientId: string
 }) {
   const [dotaz, setDotaz] = useState('')
   const [vybrani, setVybrani] = useState<string[]>([])
@@ -138,6 +141,28 @@ export default function VyberPrijemcu({
           onChange={(e) => setNazev(e.target.value)}
           placeholder={vybraniLide.length > 0 ? souhrnVyberu(vybraniLide) : 'Když nic nezadáte, použijí se jména'}
         />
+      </div>
+
+      {/*
+        První zpráva (27. 9.) — nepovinná. S ní odejde rovnou a příjemce
+        dostane upozornění hned; bez ní se napíše až v rozhovoru.
+        Klientské id vzniká při vykreslení: když se odeslání zopakuje,
+        databáze pozná, že je to tatáž zpráva.
+      */}
+      <div>
+        <label htmlFor="pc-prvni-zprava" style={{ display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' }}>
+          První zpráva (nepovinné)
+        </label>
+        <textarea
+          id="pc-prvni-zprava"
+          name="zprava"
+          className="pc-vyber-hledani"
+          rows={3}
+          maxLength={4000}
+          placeholder="Můžete napsat hned, nebo až v rozhovoru."
+          style={{ minHeight: '84px', resize: 'vertical' }}
+        />
+        <input type="hidden" name="klient_id" value={klientId} />
       </div>
 
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>

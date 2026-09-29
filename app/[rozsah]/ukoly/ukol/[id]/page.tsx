@@ -1,12 +1,14 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-import { getContext, getUser, hasAccess } from '@/lib/authz'
+import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
+import { OCI_VZKAZU } from '@/lib/komunikace/zalozky'
 import { DotazSelhal, sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
+import { nactiZalozky } from '../../../provozni-centrum/pocty'
 import PcZalozky from '../../../provozni-centrum/zalozky'
 import { dokoncitUkolZDetailu } from './akce'
 import DetailUkolu from './detail-ukolu'
@@ -157,28 +159,26 @@ export default async function StrankaDetailuUkolu({
   }
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
-  const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
+  // Čísla a skryté záložky — jedna funkce pro všechny stránky „Vzkazy a úkoly“.
+  const zalozky = await nactiZalozky(supabase, { tenantId, userId: user.id, branchId: scope.branchId })
 
   return (
     <>
+      {/* Jedna hlavička (27. 9.): nadpisek „Vzkazy a úkoly“, nadpis = název úkolu. */}
       <Nadpis
-        oci="Provoz"
-        popis="Detail úkolu."
+        oci={OCI_VZKAZU}
+        popis="Úkol"
         vpravo={
           <Link href={`/${rozsah}/ukoly`} className="ft-tl">
             Zpět na úkoly
           </Link>
         }
       >
-        Úkol
+        {ukol.title}
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px' }}>
-        <PcZalozky
-          rozsah={rozsah}
-          aktivni="ukoly"
-          skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
-        />
+        <PcZalozky rozsah={rozsah} aktivni="ukoly" {...zalozky} />
 
         <DetailUkolu
           rozsah={rozsah}

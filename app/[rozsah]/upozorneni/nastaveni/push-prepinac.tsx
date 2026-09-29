@@ -39,11 +39,17 @@ export default function PushPrepinac({
   verejnyKlic,
   ulozit,
   zrusit,
+  jeMajitel = false,
 }: {
   /** Veřejný klíč VAPID (base64url), nebo null, když ho server nemá. */
   verejnyKlic: string | null
   ulozit: (odber: { endpoint: string; p256dh: string; auth: string; agent: string }) => Promise<Vysledek>
   zrusit: (endpoint: string) => Promise<Vysledek>
+  /**
+   * Majiteli chodí upozornění do telefonu kdykoli (rozhodnutí 22. 9.),
+   * ostatním během směny. Do 27. 9. tu všem stálo „jen během směny“.
+   */
+  jeMajitel?: boolean
 }) {
   const [stav, setStav] = useState<Stav>('zjistuji')
   const [chyba, setChyba] = useState<string | null>(null)
@@ -158,8 +164,12 @@ export default function PushPrepinac({
         <>
           <p className="pc-prazdno" style={{ marginBottom: '10px' }}>
             {stav === 'zapnuto'
-              ? 'Na tomhle zařízení jsou zapnutá. Mimo směnu se neozývají — čekající zprávy se sloučí do jedné, až přijdete do práce. Jen naléhavá zpráva může zapípat i mimo směnu.'
-              : 'Na tomhle zařízení jsou vypnutá. Po zapnutí přijde upozornění, když vám někdo napíše, změní směnu nebo zadá úkol — jen během směny.'}
+              ? jeMajitel
+                ? 'Na tomhle zařízení jsou zapnutá. Jako majiteli vám chodí kdykoli, i mimo směnu.'
+                : 'Na tomhle zařízení jsou zapnutá. Mimo směnu se neozývají — čekající zprávy se sloučí do jedné, až přijdete do práce. Jen naléhavá zpráva může zapípat i mimo směnu.'
+              : jeMajitel
+                ? 'Na tomhle zařízení jsou vypnutá. Po zapnutí přijde upozornění, když vám někdo napíše, změní směnu nebo zadá úkol — jako majiteli kdykoli.'
+                : 'Na tomhle zařízení jsou vypnutá. Po zapnutí přijde upozornění, když vám někdo napíše, změní směnu nebo zadá úkol — během směny; naléhavá zpráva i mimo ni.'}
           </p>
           <button
             type="button"

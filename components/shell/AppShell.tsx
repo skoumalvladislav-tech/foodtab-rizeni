@@ -74,6 +74,19 @@ export type UpozorneniProp = {
   read_at: string | null;
 };
 
+/**
+ * Z čeho se skládá číslo na zvonečku (27. 9.). Sčítají se tři zdroje
+ * a panel je ukazuje zvlášť — do té doby ukazoval jen první.
+ */
+export type RozpadZvonecku = {
+  /** Nepřečtená upozornění mimo vzkazy a oznámení (ty mají své řádky níž). */
+  upozorneni: number;
+  /** Nepřečtené zprávy v rozhovorech. */
+  rozhovory: number;
+  /** Nepřečtená oznámení na Nástěnce. */
+  nastenka: number;
+};
+
 export type AppShellProps = {
   rozsah: string;
   /** Klíč barvy pobočky z branches.color. Firemní úroveň má slate. */
@@ -90,6 +103,8 @@ export type AppShellProps = {
   iniciraly: string;
   /** Počet nepřečtených upozornění do zvonečku. */
   neprectenych: number;
+  /** Totéž číslo po částech — panel zvonečku ukazuje, co počítá. */
+  rozpadZvonecku?: RozpadZvonecku;
   /** Posledních pár upozornění pro rozbalovací panel zvonečku. */
   posledniUpozorneni: UpozorneniProp[];
   /**
@@ -133,6 +148,7 @@ export default function AppShell({
   nazevFirmy,
   iniciraly,
   neprectenych,
+  rozpadZvonecku,
   posledniUpozorneni,
   odznaky,
   moduly,
@@ -263,6 +279,7 @@ export default function AppShell({
         aktivniRozsah={aktivniRozsah}
         cilRozsahu={cilRozsahu}
         neprectenych={neprectenych}
+        rozpad={rozpadZvonecku}
         posledniUpozorneni={posledniUpozorneni}
         cilNastaveni={cilNastaveni}
         nazevFirmy={nazevFirmy}

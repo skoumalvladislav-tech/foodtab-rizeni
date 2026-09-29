@@ -711,6 +711,9 @@ ma('ani v nabídce pod iniciálami', /odhl[aá]s/i.test(zdrojMenuUctu), false)
     'app/prihlaseni/akce.ts',
     'components/shell/Odhlaseni.tsx',
     'app/moje-udaje/page.tsx',
+    // Obrazovky mimo AppShell (#87, 28. 9.) nemají Odhlaseni ani Moje
+    // údaje po ruce — cesta-ven.tsx volá akci přímo, stejně jako ony dvě.
+    'app/cesta-ven.tsx',
   ])
   const nalezy = []
   for (const soubor of zdrojakyAplikace(['app', 'components', 'lib'])) {

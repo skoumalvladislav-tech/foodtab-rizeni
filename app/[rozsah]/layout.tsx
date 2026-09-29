@@ -15,6 +15,7 @@ import {
 import { bezpecnyRozsah, getCurrentTenantId } from "@/lib/firma";
 import { getServerSupabase } from "@/lib/supabase/server";
 import type { TeloUpozorneni } from "@/lib/upozorneni-text";
+import { neprectenaNastenka } from "./vzkazy/nastenka-dotaz";
 import Sdeleni from "@/app/sdeleni";
 import CestaVen from "@/app/cesta-ven";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
@@ -213,8 +214,7 @@ export default async function RozsahLayout({
   const [
     { count: neprectenychUpozorneni },
     { data: rozhovoryData },
-    { data: nastenkaData },
-    { data: nastenkaPrectena },
+    neprecteneNastenka,
     { data: posledniUpozornenaData },
   ] = await Promise.all([
     /*
@@ -234,18 +234,13 @@ export default async function RozsahLayout({
     supabaseForCount
       .rpc("moje_rozhovory", { p_tenant: tenantId })
       .then((r) => ({ data: r.error ? null : r.data })),
-    supabaseForCount
-      .from("announcements")
-      .select("id")
-      .eq("tenant_id", tenantId)
-      .limit(200)
-      .then((r) => ({ data: r.error ? null : r.data })),
-    supabaseForCount
-      .from("announcement_reads")
-      .select("announcement_id")
-      .eq("user_id", user.id)
-      .limit(200)
-      .then((r) => ({ data: r.error ? null : r.data })),
+    /*
+      Nástěnka se počítá TÝMŽ dotazem jako seznam na Nástěnce a číslo
+      u záložky (`dotazNastenky`, 27. 9.). Dřív se tu počítala všechna
+      oznámení firmy, na která člověk dosáhne, a kdo dělá na dvou
+      pobočkách, měl číslo, které nikdy nezmizelo.
+    */
+    neprectenaNastenka(supabaseForCount, tenantId, user.id, scope.branchId),
     /*
       Náhled do rozbalovacího panelu zvonečku — jen z `notifications`
       (vzkazy a nástěnka mají vlastní obrazovky s vlastním seznamem,
@@ -264,10 +259,6 @@ export default async function RozsahLayout({
 
   const neprecteneVzkazy = rozhovoryData
     ? (rozhovoryData as { neprectenych: number }[]).reduce((s, r) => s + r.neprectenych, 0)
-    : 0
-  const prectenaIds = new Set((nastenkaPrectena ?? []).map((c) => (c as { announcement_id: string }).announcement_id))
-  const neprecteneNastenka = nastenkaData
-    ? nastenkaData.filter((z) => !prectenaIds.has((z as { id: string }).id)).length
     : 0
   const neprectenych = (neprectenychUpozorneni ?? 0) + neprecteneVzkazy + neprecteneNastenka
 
@@ -314,6 +305,11 @@ export default async function RozsahLayout({
       nazevFirmy={ctx.tenant.name}
       iniciraly={iniciraly(user.email)}
       neprectenych={neprectenych ?? 0}
+      rozpadZvonecku={{
+        upozorneni: neprectenychUpozorneni ?? 0,
+        rozhovory: neprecteneVzkazy,
+        nastenka: neprecteneNastenka,
+      }}
       odznaky={{ 'vzkazy-a-ukoly': neprecteneVzkazy + neprecteneNastenka }}
       posledniUpozorneni={posledniUpozorneni}
       moduly={moduly}

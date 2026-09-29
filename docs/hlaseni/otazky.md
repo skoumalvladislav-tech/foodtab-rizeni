@@ -87,6 +87,12 @@ slovo, kód se kvůli tomu měnit nemusí.
 
 **Stav:** sloučení zatím není hotové (viz hlášení k 7. 9.).
 
+**Stav 27. 9. 2026: překonáno.** 23. 9. přišel pokyn „modul přejmenuj
+na vzkazy a úkoly": položka v nabídce je „Vzkazy a úkoly", na spodní
+liště telefonu „Vzkazy", záložka uvnitř „Komunikace" (zadání
+Checklisty 2.0: „nahoře zachovej Komunikace | Úkoly | Checklisty |
+Nástěnka"). Viz `docs/komunikace-stav-a-plan-2026-09-27.md`, oddíl 9.
+
 ---
 
 ## 5. Je člověk na přestávce „v práci"?
@@ -626,10 +632,139 @@ Adresu přesunu zkontrolujte dvakrát; překlep jde v Lidech zrušit
 
 ---
 
-Otázky 25–33 vznikly 27. a 28. 9. 2026 u docházky člověka po dnech
-(úprava a storno úseků; migrace `20260927110000_dochazka_smeny_cloveka.sql`,
-obrazovka `/[rozsah]/dochazka/clovek/[id]`). Čísla 19–24 si drží jiné
-rozpracované větve.
+Otázka 18 vznikla 25. 9. 2026 u pozvánky pro člověka s jiným účtem
+(PR #87). Otázky 19–24 vznikly 27. 9. 2026 u rešerše Komunikace (viz
+`docs/komunikace-stav-a-plan-2026-09-27.md`), otázky 25–33 téhož a
+následujícího dne u docházky člověka po dnech (úprava a storno úseků;
+migrace `20260927110000_dochazka_smeny_cloveka.sql`, obrazovka
+`/[rozsah]/dochazka/clovek/[id]`), otázky 34–38 zase u Komunikace —
+čísla 25–29 už mezitím zabrala docházka, proto pokračují od 34.
+
+## 19. Upozornění na změnu směny: hned při uložení, nebo až při vydání rozpisu?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace
+(`docs/komunikace-stav-a-plan-2026-09-27.md`, rozpor R1).
+
+Dne 1. 9. bylo zadáno, že upozornění na směny odchází **až při vydání
+rozpisu, ne při každé úpravě** (`docs/upozorneni-smeny-zadani.md`),
+8. 9. zopakováno. Aplikace dnes posílá upozornění „změna směny" **už při
+uložení** směny v rozpisu, který ještě není vydaný, a při vydání přijde
+ještě souhrn „rozpis vydán". Člověk se tak může dozvědět o směně, kterou
+vedoucí teprve zkouší, a pak dostat druhou zprávu.
+
+**Co platí do rozhodnutí:** beze změny. Směny se bez důvodu nepřestavují
+(zadání 20. 9.). Obrácení by navíc mohlo spolknout upozornění na změnu
+už vydaného rozpisu — a to je horší než jedno upozornění navíc.
+
+**Když to má být jinak:**
+- *jen při vydání:* dokud rozpis není vydaný, změna nikomu nic nepošle;
+  po vydání jde každá další změna hned (to, co bylo zadáno 1. 9.). Je to
+  změna ve Směnách a v jedné databázové funkci, s vlastním scénářem.
+- *nechat, jak je:* jen se opraví dokumentace, aby zadání z 1. 9.
+  neslibovalo něco jiného.
+
+---
+
+## 20. Má „důležitá změna směny" pípnout na telefon i mimo směnu?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (rozpor R2).
+
+Nastavení → Firma → „Důležité změny směn" slibuje, že změna směny
+začínající do několika hodin „se dostane k člověku i mimo pracovní
+dobu". Ve skutečnosti se jen označí jako důležitá a **na telefon čeká
+na příchod na směnu** jako každá běžná věc. Mimo směnu dnes vyruší jen
+naléhavá zpráva, kritický úkol z checklistu a cokoli majiteli.
+
+Zadání se tu rozcházejí: 17. 9. a Směny 2.0 (19. 9.) chtějí, aby
+důležitá změna směny mohla přijít i mimo pracovní dobu; zadání 20. 9.
+říká „neposílej agresivní push mimo pracovní dobu", výjimka jen naléhavé.
+
+**Co platí do rozhodnutí:** nepípne. Text v Nastavení se opraví, aby
+říkal pravdu (důležitá = zvýrazněná, do telefonu počká na směnu).
+
+**Když to má být jinak:** jedna změna v databázi — upozornění na směnu
+s prioritou „důležitá" pouštět do telefonu hned, stejnou cestou jako
+naléhavé, ale bez označení NALÉHAVÉ. Firma si pak nastavením hodin sama
+určí, co je „důležité".
+
+---
+
+## 21. Noční klid podle hodin? A má čekající upozornění propadat po 48 h?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (rozpor R3, pravidlo 48 h).
+
+Upozornění do telefonu dnes řídí jen **skutečná směna** (otevřený
+příchod v docházce): v práci chodí hned, mimo ni čeká na příchod.
+Zadání 1. 9. a 16.–17. 9. chtěla navíc **noční klid podle hodin**
+(např. 22:00–7:00) jako nastavení firmy — to nikdy nevzniklo. Směna
+nepokrývá noční směnu ani brigádníka, který nepíchá.
+
+Druhá věc: čekající upozornění **propadá po 48 hodinách** (zůstane jen
+ve zvonečku). To je moje pravidlo z 21. 9., schválené nikdy nebylo.
+Kdo má volno přes víkend, v pondělí na telefon nedostane nic z pátku.
+
+**Co platí do rozhodnutí:** jen vazba na směnu; 48 h platí.
+
+**Když to má být jinak:**
+- *noční klid:* nastavení firmy „od–do"; v tu dobu nepípne nic kromě
+  naléhavého. Doplní vazbu na směnu, nenahradí ji.
+- *48 h:* jiná lhůta (např. 7 dní), nebo nepropadat vůbec a při příchodu
+  poslat jeden souhrn.
+
+---
+
+## 22. Kdo smí komu psát?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (rozpor R8).
+
+Zadání 16. 9. chtělo samostatná práva na druhy zpráv (osobní, pobočce,
+celé firmě, mezi pobočkami, vedení, naléhavá); 17. 9. „zaměstnanec ↔
+zaměstnanec, pokud to firemní pravidla dovolují" a „pobočka → pobočka
+jen oprávnění". Dnes smí **každý s účtem napsat komukoli ve firmě**.
+Zpřísnění se 21. 9. zkoušelo a vrátilo, protože bez vašeho rozhodnutí
+by se někomu tiše vzala možnost, kterou dnes má.
+
+**Co platí do rozhodnutí:** každý komukoli ve firmě. Naléhavou zprávu
+smí jen ten, kdo má právo.
+
+**Když to má být jinak:** řekněte, kdo smí psát komu (např. „zaměstnanec
+jen lidem své pobočky a vedení; mezi pobočkami jen vedoucí"). Udělá se
+to jako práva v Zařazení, ne podle role.
+
+---
+
+## 23. Naléhavé zprávy: strop a povinné „proč"?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (rozpor R20).
+
+Zadání 16. a 17. 9. chtěla, aby naléhavé zprávy měly **strop** (aby se
+jimi nedalo zaplavit lidi mimo směnu) a aby záznam nesl i **proč**.
+Nic z toho není a nikdo to nezrušil. Dnes: naléhavou smí jen ten, kdo
+má právo, musí ji potvrdit a jde do záznamu (kdo, komu, kdy, bez textu).
+
+**Co platí do rozhodnutí:** bez stropu, bez „proč".
+
+**Když to má být jinak:** řekněte číslo (např. „nejvýš 3 naléhavé za
+hodinu na odesílatele, pak jen běžné") a jestli má být „proč" povinné
+pole. Obojí je malá změna s vlastním scénářem.
+
+---
+
+## 24. Odhlášení na sdíleném telefonu — vypnout upozornění do toho telefonu?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (nález z 22. 9.).
+
+Kdo si zapne upozornění do telefonu, má je zapnutá pro **ten prohlížeč
+v tom telefonu**. Odhlášení je dnes nevypne. Na služebním telefonu, který
+koluje mezi lidmi, by tak další člověk viděl na zamčené obrazovce
+upozornění předchozího (jen nadpis typu „Nová zpráva", nikdy text).
+
+**Co platí do rozhodnutí:** odhlášení upozornění nevypne.
+
+**Když to má být jinak:** při odhlášení se upozornění do toho telefonu
+zruší; po dalším přihlášení je člověk zapne znovu jedním klepnutím.
+
+---
 
 ## 25. Smí vedoucí upravit nebo stornovat SVOU vlastní docházku?
 
@@ -763,3 +898,106 @@ a řekne, podle kterého člověk v práci zůstane.
 z `app.useky_dochazky` (odchod >= příchod, pořadí shod podle
 `created_at`) a totéž v `lib/dochazka-dnes.ts`. Chce to kontrolu shody
 nad kopií ostrých dat jako u mzdy.
+
+---
+
+## 34. Jak dlouho se zprávy uchovávají?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (zadání 3. 9.: „nevymýšlet,
+jen nechat místo").
+
+Zprávy, hlasovky a přílohy se dnes **nemažou nikdy** (smazání zprávy je
+jen zrušení se stopou). Je to osobní údaj; doba uchování je rozhodnutí
+firmy, ne programu.
+
+**Co platí do rozhodnutí:** nic se nemaže.
+
+**Když to má být jinak:** řekněte lhůtu (např. „zprávy 12 měsíců,
+hlasovky 3 měsíce"). Mazání pak poběží samo podle data.
+
+---
+
+## 35. Zprávy na tabletu (kiosku) po PINu: dostavět, nebo zatím vypnout?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (rozpor R19).
+
+Zadání 3.–6. 9.: tablet na baru ukáže jen, **kolika lidem** něco leží
+(bez jmen), a obsah až po PINu, s odpočtem do zavření. V databázi to
+6. 9. vzniklo, **obrazovka tabletu to ale nikdy nedostala** — nic v
+aplikaci to nevolá. Funkce jsou přístupné bez přihlášení (tak tablet
+funguje), chrání je klíč tabletu a PIN.
+
+**Co platí do rozhodnutí:** zůstává, jak je.
+
+**Když to má být jinak:**
+- *dostavět:* obrazovka tabletu dostane „Zprávy čekají na N lidí" a po
+  PINu přečtení s odpočtem.
+- *vypnout:* databázová část se zavře (odebere se přístup), dokud ji
+  nebudete chtít; návod, jak ji vrátit, zůstane v migraci.
+
+---
+
+## 36. Která upozornění smí člověk vypnout a chcete je i e-mailem?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (rozpor R7).
+
+Dnes jde v Nastavení upozornění vypnout jen **vzkazy** a **Nástěnku**.
+Změny směn nejdou vypnout (správně). Úkoly, checklisty, zálohy
+a zapomenutý odchod (49 ze 118 upozornění v ostré verzi) vypnout nejdou.
+Zadání 8. 9. chtělo i přepínač úkolů a **e-mail** (u směn zapnutý,
+jinde vypnutý), zadání 16.–17. 9. kategorie Přímé zprávy / Směny / Úkoly
+/ Oznámení / Marketing. E-mail jako kanál upozornění dnes neexistuje.
+
+**Co platí do rozhodnutí:** vypnout jdou vzkazy a Nástěnka, e-mail ne.
+
+**Když to má být jinak:** řekněte, co smí člověk vypnout (a co ne, např.
+zálohy k potvrzení) a jestli chcete e-mail. U e-mailu se drží pravidla
+z 8. 9.: jen naléhavé, souhrn nejvýš jednou za hodinu, v noci ticho,
+v patičce jak vypnout.
+
+---
+
+## 37. Jazykový model pro návrh úkolu a přepis hlasovek?
+
+**Vzniklo:** 27. 9. 2026, rešerše Komunikace (rozpor R5; otevřené
+od 17. a 22. 9.).
+
+Zadání 16.–20. 9. chtěla automatický přepis hlasovek a „AI návrh úkolu"
+ze zprávy. Pravidlo 8 a zadání 3. 9. říkají, že z komunikace nejde do
+jazykového modelu nic. 17. 9. jste zvolil „zatím bez AI přepisu". Návrh
+úkolu dnes dělají jednoduchá pravidla (termín, priorita podle slov
+v textu), bez modelu. Přepis hlasu do cizí služby znamená nového
+dodavatele a smlouvu o zpracování osobních údajů.
+
+**Co platí do rozhodnutí:** bez modelu; přepis vypnutý (z aplikace
+zmizí věty, které to každému připomínají).
+
+**Když to má být jinak:** řekněte, jestli ano, a pro co (jen přepis,
+jen návrh úkolu, obojí) a kterého dodavatele. Mzdy, docházka a zálohy
+do modelu nepůjdou nikdy.
+
+---
+
+## 38. Oznámení pobočky: má ho potvrdit i ten, kdo tam jen vypomáhá?
+
+**Vzniklo:** 28. 9. 2026, oprava Komunikace po nezávislých kontrolách
+(`docs/komunikace-stav-a-plan-2026-09-27.md`, oddíl 0.1).
+
+Oznámení pro pobočku (např. „Zítra inventura na Perle") dnes **uvidí
+každý, kdo na pobočku dosáhne** — i brigádník, který na Perle jen
+vypomáhá a doma je na Baru. Upozornění, seznam „Nepotvrdili: …"
+a od 28. 9. i štítek „Čeká na vaše potvrzení" a číslo ve zvonečku ale
+berou jen lidi, kteří mají pobočku jako **domovskou**. Vypomáhající
+oznámení na Nástěnce najde, jen na něj nečeká a nikdo ho neurguje.
+
+Do 28. 9. se to rozcházelo: číslo a štítek počítaly každého, kdo
+oznámení viděl, upozornění a „Nepotvrdili" jen domovské. Teď všechna
+čtyři místa počítají stejně.
+
+**Co platí do rozhodnutí:** jen domovská pobočka (stejně jako
+upozornění z kanálu pobočky, plán P5). Nikomu to nepřidává povinnost,
+kterou dnes nemá.
+
+**Když to má být jinak:** „potvrzuje každý, kdo na pobočce dělá"
+(podle přístupu k pobočce, nebo podle směny v posledních dnech).
+Změní se najednou upozornění, „Nepotvrdili" i štítek, spolu s P5.

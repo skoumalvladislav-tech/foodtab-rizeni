@@ -41,7 +41,7 @@ export default function PanelUkolyUdalosti({
         {ukoly === null ? (
           <p className="pc-prazdno">Úkoly se k rozhovorům přiřadí po nasazení databáze.</p>
         ) : ukoly.length === 0 ? (
-          <p className="pc-prazdno">Z téhle konverzace zatím žádný úkol nevznikl.</p>
+          <p className="pc-prazdno">Z tohoto rozhovoru zatím žádný úkol nevznikl.</p>
         ) : (
           <ul className="pc-seznam">
             {ukoly.map((u) => (

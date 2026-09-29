@@ -316,15 +316,23 @@ export default async function NastaveniFirma({
         {/*
           Důležitá změna směny. Pravidlo NENÍ zapsané v kódu — firma si ho
           zapne, jak potřebuje (Směny 2.0, oddíl 23). Prázdné = nikdy.
+
+          TEXT ŘÍKÁ PRAVDU (27. 9.). Do té doby sliboval, že se důležitá
+          změna „dostane k člověku i mimo pracovní dobu“. Nedostane:
+          „důležitá“ se doručuje jako běžná a na telefon mimo směnu
+          nepípne (mimo směnu vyruší jen naléhavá zpráva a majitele
+          cokoli). Jestli má pípnout, je otázka 20 pro Šéfíka
+          (docs/hlaseni/otazky.md); chování se tu nemění.
         */}
         {maDulezitou ? (
           <>
             <h2 style={{ ...nadpis, marginTop: '28px' }}>Důležité změny směn</h2>
             <p style={popis}>
               Změna směny, která začíná <strong>do několika hodin</strong>,
-              se považuje za důležitou — dostane se k člověku i mimo
-              pracovní dobu. Běžná změna počká. Necháte-li pole prázdné,
-              žádná změna se za důležitou nepovažuje.
+              se označí jako důležitá — v aplikaci je zvýrazněná. Na telefon
+              mimo směnu zatím nepřijde: tam upozornění počká, až člověk
+              píchne příchod, stejně jako běžná změna. Necháte-li pole
+              prázdné, žádná změna se za důležitou nepovažuje.
             </p>
 
             <form action={ulozitDulezitouZmenu} style={karta}>

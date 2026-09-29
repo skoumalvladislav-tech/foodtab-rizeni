@@ -2910,3 +2910,166 @@ span.ck-box { cursor: default; }
 .ds-uc-muj-den > summary span:first-child { flex: 1 1 auto; }
 .ds-uc-muj-den > summary span:last-child { font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ds-uc-muj-den[open] { padding-bottom: 10px; }
+
+/* =====================================================================
+   KOMUNIKACE 27. 9. 2026 (docs/komunikace-stav-a-plan-2026-09-27.md)
+   Zvoneček, Nástěnka, rozhovor na telefonu, Nastavení upozornění.
+   Vzhled podle mockupu Dnes (oddíl 11 vzhled-zadani.md): karty
+   `.ds-plocha`, patkové nadpisy, ikony jen ze sdílené sady.
+   ===================================================================== */
+
+/* --- Panel u zvonečku (T2) --------------------------------------------- */
+
+.ft-zvonek-panel {
+  position: absolute; top: calc(100% + 8px); inset-inline-end: 0; z-index: 50;
+  width: min(360px, calc(100vw - 24px)); max-height: min(520px, calc(100vh - 80px));
+  overflow-y: auto; padding: 0; box-shadow: var(--shadow);
+}
+.ft-zvonek-hlava {
+  display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.ft-zvonek-hlava > .ft-i { width: 20px; height: 20px; flex: none; }
+.ft-zvonek-hlava h2 { margin: 0; font-size: 18px; line-height: 1.2; font-weight: 600; }
+.ft-zvonek-nastaveni {
+  margin-left: auto; font-size: 13px; color: var(--muted); text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ft-zvonek-nastaveni:hover { color: var(--ink); }
+.ft-zvonek-souhrn { list-style: none; margin: 0; padding: 8px; display: grid; gap: 4px; border-bottom: 1px solid var(--line); }
+.ft-zvonek-souhrn a {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px;
+  border-radius: 10px; background: color-mix(in srgb, var(--mosaz-sv) 22%, var(--card));
+  color: var(--ink); text-decoration: none; font-size: 14px; font-weight: 600;
+}
+.ft-zvonek-souhrn a span { flex: 1; min-width: 0; }
+.ft-zvonek-souhrn .ft-i { width: 18px; height: 18px; flex: none; }
+.ft-zvonek-souhrn a:hover { background: color-mix(in srgb, var(--mosaz-sv) 40%, var(--card)); }
+.ft-zvonek-seznam { list-style: none; margin: 0; padding: 0; }
+.ft-zvonek-seznam li + li { border-top: 1px solid var(--line); }
+.ft-zvonek-seznam form { margin: 0; }
+.ft-zvonek-seznam button {
+  display: block; width: 100%; padding: 10px 16px; border: 0; background: none; cursor: pointer;
+  text-align: left; font: inherit; color: inherit; border-inline-start: 3px solid transparent;
+}
+.ft-zvonek-seznam button[data-nove] { border-inline-start-color: var(--mosaz); }
+.ft-zvonek-seznam button:hover, .ft-zvonek-seznam button:focus-visible { background: var(--sunken); }
+.ft-zvonek-seznam strong { display: block; font-size: 13.5px; }
+.ft-zvonek-seznam span { font-size: 12px; color: var(--muted); }
+.ft-zvonek-prazdno { margin: 0; padding: 16px; font-size: 13px; color: var(--muted); }
+.ft-zvonek-pata {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid var(--line);
+}
+.ft-zvonek-pata form { margin: 0; }
+.ft-zvonek-vse { font-size: 13px; font-weight: 600; color: var(--mosaz); text-decoration: none; }
+.ft-zvonek-vse:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* --- Seznam rozhovorů: akce, filtry, „Napsat vedení“ (T3, T10) ----------- */
+
+/* Vybraný filtr je odkaz, nese aria-current (ne aria-pressed). */
+.ft-tl-vedlejsi[aria-current="true"] {
+  background: var(--sunken); border-color: var(--ink); font-weight: 600;
+}
+.pc-akce-seznamu { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px; }
+/* Formulář vzkazu vedení je sbalený pod tlačítkem; rozbalený je kartou. */
+.pc-vedeni { margin: 0 0 14px; }
+.pc-vedeni > summary { list-style: none; width: fit-content; }
+.pc-vedeni > summary::-webkit-details-marker { display: none; }
+.pc-vedeni[open] {
+  padding: 12px 14px 16px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 16px; box-shadow: var(--shadow-sm);
+}
+.pc-vedeni[open] > summary { margin-bottom: 4px; }
+
+/* --- Nástěnka (T6) -------------------------------------------------------- */
+
+.pc-nastenka { display: grid; gap: 16px; }
+.pc-oznameni-formular { display: grid; gap: 4px; }
+.pc-oznameni-popisek { display: block; font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+.pc-oznameni-rada { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.pc-oznameni-radek {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 12px;
+}
+.pc-oznameni-volby { display: flex; flex-wrap: wrap; gap: 14px; }
+.pc-oznameni-volby label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.pc-oznameni-ok {
+  display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 14px; color: var(--dobre);
+}
+.pc-oznameni-ok .ft-i { width: 18px; height: 18px; }
+.pc-oznameni-seznam { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.pc-oznameni[data-ceka] { border-left: 4px solid var(--pozor); }
+.pc-oznameni[data-pripnute]:not([data-ceka]) { border-left: 4px solid var(--mosaz); }
+.pc-oznameni[data-prectene] { opacity: .78; }
+.pc-oznameni-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0;
+  font-size: 12.5px; color: var(--muted);
+}
+.pc-oznameni-stitek {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 6px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: .02em;
+}
+.pc-oznameni-stitek .ft-i { width: 14px; height: 14px; }
+.pc-oznameni-stitek[data-druh="potvrdit"] { background: var(--pozor-bg); color: var(--pozor); }
+.pc-oznameni-stitek[data-druh="pripnuto"] { background: var(--sunken); color: var(--ink); }
+.pc-oznameni-text { margin: 8px 0 0; font-size: 15.5px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pc-oznameni-hotovo { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: 13px; color: var(--dobre); }
+.pc-oznameni-hotovo .ft-i { width: 16px; height: 16px; }
+.pc-oznameni-nepotvrdili {
+  margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line);
+  font-size: 12.5px; color: var(--muted);
+}
+
+/* --- Rozhovor na telefonu (T7) -------------------------------------------- */
+
+/* Na počítači nese název rozhovoru velký nadpis stránky; v hlavičce
+   vlákna je jen na telefonu, kde se hlavička stránky schová. */
+@media (min-width: 901px) {
+  .pc-vlakno-hlava .pc-vlakno-nazev { display: none; }
+}
+@media (max-width: 900px) {
+  /* Jako v Checklistech (`.ck-stranka`): nad vláknem žádný velký nadpis
+     ani lišta záložek — nahoře „← Komunikace“ a název rozhovoru. */
+  .pc-rozhovor-stranka > .ft-hlava,
+  .pc-rozhovor-stranka .pc-zalozky { display: none; }
+}
+
+/* Hlasovka a příloha — dvě ikony v řádku psaní. */
+.pc-doplnky { display: flex; gap: 6px; }
+.pc-doplnek {
+  display: inline-grid; place-items: center; width: 42px; height: 42px; padding: 0;
+  border: 1px solid var(--line-2); border-radius: 10px; background: var(--card);
+  color: var(--muted); cursor: pointer;
+}
+.pc-doplnek .ft-i { width: 20px; height: 20px; }
+.pc-doplnek:hover { color: var(--ink); background: var(--sunken); }
+.pc-doplnek[aria-expanded="true"] { color: var(--ink); border-color: var(--ink); background: var(--sunken); }
+.pc-doplnek-panel { padding: 0 18px 16px; background: var(--card); }
+
+/* „Podrobnosti rozhovoru“ — přepínač bez JavaScriptu, jen na telefonu. */
+/* Specifičtěji než .ft-tl (globals.css se načítá po tomhle souboru a jeho
+   display: inline-flex by jinak vyhrál i na počítači). */
+.ds-vzkazy-split .pc-podrobnosti-tlacitko { display: none; }
+@media (max-width: 900px) {
+  .ds-vzkazy-split .pc-podrobnosti-tlacitko { display: inline-flex; margin-top: 16px; width: 100%; }
+  .pc-podrobnosti-prepinac:not(:checked) ~ .ds-vzkazy-panel { display: none; }
+  .pc-podrobnosti-prepinac:focus-visible + .pc-podrobnosti-tlacitko { outline: 2px solid var(--mosaz); outline-offset: 2px; }
+  .pc-podrobnosti-prepinac:checked + .pc-podrobnosti-tlacitko { border-color: var(--ink); }
+}
+
+/* --- Nastavení upozornění (T8) -------------------------------------------- */
+
+.ds-nu { display: grid; gap: 16px; }
+.ds-nu-ok { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; color: var(--dobre); }
+.ds-nu-ok .ft-i { width: 18px; height: 18px; }
+.ds-nu-seznam { display: grid; gap: 10px; }
+.ds-nu-radek {
+  display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
+}
+.ds-nu-radek input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
+.ds-nu-radek > .ft-i { width: 18px; height: 18px; margin-top: 2px; flex: none; color: var(--muted); }
+.ds-nu-radek strong { display: block; font-size: 14.5px; }
+.ds-nu-radek span > span { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); line-height: 1.45; }
+.ds-nu-radek[data-zamceno] { background: var(--sunken); }

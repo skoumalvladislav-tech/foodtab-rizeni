@@ -2,14 +2,17 @@ import Link from "next/link";
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { redirect } from "next/navigation";
 
-import { hasAccess } from "@/lib/authz";
+import { getUser, hasAccess } from "@/lib/authz";
 import { getCurrentTenantId, zkusPristup } from "@/lib/firma";
 import { DotazSelhal, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
 import EmptyState from "@/components/ui/EmptyState";
+import { OCI_VZKAZU } from "@/lib/komunikace/zalozky";
 import Nadpis from "../nadpis";
+import { nactiZalozky } from "../provozni-centrum/pocty";
 import PcZalozky from "../provozni-centrum/zalozky";
+import TlacitkoOdeslat from "../vzkazy/tlacitko-odeslat";
 import Ikona from "../ikona";
 import { dokoncitUkol, zadatUkol } from "./akce";
 
@@ -26,8 +29,9 @@ export const dynamic = "force-dynamic";
  * s oprávněním — proto se na pobočkové adrese ptáme na „moje pobočka nebo
  * nic“, ne jen na pobočku.
  *
- * Odškrtnout úkol smí podle politiky tasks_write jen ten, kdo má
- * tasks.manage. Ostatním se seznam ukáže, ale bez tlačítka.
+ * Splnit úkol smí každý, kdo ho vidí (`public.complete_task`; jméno
+ * u úkolu je štítek, ne zámek — rozhodnutí 6. 9.). Zadávat smí jen
+ * tasks.manage.
  */
 
 type Ukol = {
@@ -186,19 +190,25 @@ export default async function Ukoly({
 
   const smiZadat = await hasAccess(tenantId, "tasks.manage", scope.branchId);
 
+  // Čísla a skryté záložky — jedna funkce pro všechny stránky „Vzkazy a úkoly“.
+  // U Úkolů je číslo OTEVŘENÝCH úkolů tímtéž filtrem jako seznam níž.
+  const user = await getUser();
+  const zalozky = user
+    ? await nactiZalozky(supabase, { tenantId, userId: user.id, branchId: scope.branchId })
+    : undefined;
+
   /* --- 3. VYKRESLENÍ -------------------------------------------- */
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]));
 
   return (
     <>
-      <Nadpis oci="Vzkazy a úkoly" popis="Jednorázová práce — co se má udělat, komu a do kdy.">
+      <Nadpis oci={OCI_VZKAZU} popis="Jednorázová práce — co se má udělat, komu a do kdy.">
         Úkoly
       </Nadpis>
 
       <div style={{ padding: "16px", paddingBottom: "32px" }}>
-        {/* Záložky Provozního centra — kdo tuhle obrazovku vidí, má tasks.read. */}
-        <PcZalozky rozsah={rozsah} aktivni="ukoly" pocty={{ ukoly: ukoly.length }} />
+        <PcZalozky rozsah={rozsah} aktivni="ukoly" {...zalozky} />
 
         {/*
           Kompaktní souhrn — UX redesign, druhé kolo (oddíl 9). Jen
@@ -290,14 +300,14 @@ export default async function Ukoly({
                 </label>
 
                 {/*
-                  Jmenovité přiřazení je štítek, ne zámek — až na to, že
-                  dnes zámek ještě je. Radši to napsat, než aby vedoucí
-                  čekal na zástup, který úkol splnit nesmí.
-                  Viz docs/hlaseni/stav-2026-09-06.md.
+                  Jmenovité přiřazení je ŠTÍTEK, NE ZÁMEK (rozhodnutí 6. 9.,
+                  `public.complete_task`). Do 27. 9. tu stála věta z doby
+                  před změnou („smí splnit jen on sám nebo vedoucí,
+                  chystá se změna“) — změna je dávno hotová.
                 */}
                 <p style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--muted)" }}>
-                  Úkol na člověka dnes smí splnit jen on sám nebo vedoucí.
-                  Chystá se změna, aby mohl zaskočit kdokoli.
+                  Jméno u úkolu je štítek: splnit ho může kdokoli, kdo úkol
+                  vidí, a zapíše se, kdo ho opravdu splnil.
                 </p>
               </fieldset>
 
@@ -340,9 +350,10 @@ export default async function Ukoly({
                 </label>
               </fieldset>
 
-              <button type="submit" className="ft-tl ft-tl-hlavni">
+              {/* Chráněné proti dvojkliku — dva stejné úkoly by jinak vznikly naráz. */}
+              <TlacitkoOdeslat className="ft-tl ft-tl-hlavni" pracuje="Zadávám…">
                 Zadat úkol
-              </button>
+              </TlacitkoOdeslat>
             </form>
           </details>
         ) : null}
@@ -351,12 +362,18 @@ export default async function Ukoly({
         <h2 style={nadpisSekce}>Otevřené úkoly</h2>
 
         {ukoly.length === 0 ? (
+          /*
+            Do 27. 9. tu stálo „Nemáte žádné otevřené úkoly“ — seznam ale
+            ukazuje úkoly POBOČKY (a celé firmy), ne jen vaše.
+          */
           <EmptyState
             ikona={<Ikona klic="fajfka" />}
             nadpis="Všechno je hotové"
             akce={smiZadat ? <a href="#zadat-ukol" className="ft-tl ft-tl-hlavni ft-tl-male">+ Zadat úkol</a> : undefined}
           >
-            Nemáte žádné otevřené úkoly.
+            {scope.level === "tenant"
+              ? "Ve firmě teď nejsou žádné otevřené úkoly."
+              : "Na této pobočce nejsou otevřené úkoly."}
           </EmptyState>
         ) : (
           <ul style={seznam}>
@@ -441,9 +458,9 @@ export default async function Ukoly({
                 <form action={dokoncitUkol} style={{ marginTop: "10px" }}>
                   <input type="hidden" name="rozsah" value={rozsah} />
                   <input type="hidden" name="ukol" value={u.id} />
-                  <button type="submit" className="ft-tl ft-tl-hlavni ft-tl-male">
+                  <TlacitkoOdeslat className="ft-tl ft-tl-hlavni ft-tl-male" pracuje="Ukládám…">
                     Hotovo
-                  </button>
+                  </TlacitkoOdeslat>
                 </form>
 
                 {chybnyUkol === u.id && chyba ? (

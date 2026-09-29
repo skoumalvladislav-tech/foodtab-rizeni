@@ -1,7 +1,10 @@
 import Link from 'next/link'
 
+import { odznakPoctu, popisPoctu, type KlicZalozky } from '@/lib/komunikace/zalozky'
 import Ikona from '../ikona'
 import type { IkonaKlic } from '../nabidka'
+
+export type { KlicZalozky }
 
 /**
  * Záložky „Vzkazy a úkoly“ (do 22. 9. „Provozní centrum“): Komunikace ·
@@ -16,11 +19,12 @@ import type { IkonaKlic } from '../nabidka'
  * položku v levém sloupci, takže to byla druhá cesta ke stejné obrazovce.
  *
  * Přepíná se adresou, ne skriptem (funguje i bez JavaScriptu, odkaz jde
- * poslat dál). Čísla u záložek jsou nepřečtené věci z TÉHOŽ zdroje jako
- * odznak ve zvonečku — nepočítají se tu podruhé po svém.
+ * poslat dál).
+ *
+ * ČÍSLA A SKRYTÉ ZÁLOŽKY POČÍTÁ JEDNA FUNKCE (`nactiZalozky` v
+ * `pocty.ts`) a každá stránka je sem jen posílá (27. 9.). Dřív si je
+ * každá stránka počítala po svém a při přepínání se objevovala a mizela.
  */
-
-export type KlicZalozky = 'komunikace' | 'ukoly' | 'checklisty' | 'nastenka'
 
 const ZALOZKY: {
   klic: KlicZalozky
@@ -42,15 +46,16 @@ export default function PcZalozky({
 }: {
   rozsah: string
   aktivni: KlicZalozky
-  /** Nepřečtené / otevřené věci u jednotlivých záložek; nula se nekreslí. */
+  /** Nepřečtené (u Úkolů otevřené) věci u jednotlivých záložek; nula se nekreslí. */
   pocty?: Partial<Record<KlicZalozky, number>>
-  /** Záložky, na které člověk nemá právo (úkoly a checklisty) — nekreslí se. */
+  /** Záložky, na které člověk nemá právo — nekreslí se (`skryteZalozky`). */
   skryte?: KlicZalozky[]
 }) {
   return (
     <nav className="pc-zalozky" aria-label="Vzkazy a úkoly">
       {ZALOZKY.filter((z) => !skryte.includes(z.klic)).map((z) => {
         const pocet = pocty[z.klic] ?? 0
+        const odznak = odznakPoctu(pocet)
         return (
           <Link
             key={z.klic}
@@ -59,10 +64,10 @@ export default function PcZalozky({
           >
             <Ikona klic={z.ikona} />
             {z.nazev}
-            {pocet > 0 ? (
+            {odznak ? (
               <span className="pc-pocet">
-                <span className="sr-only">{pocet} nepřečtených: </span>
-                {pocet > 99 ? '99+' : pocet}
+                <span className="sr-only">{`, ${popisPoctu(z.klic, pocet)}`}</span>
+                <span aria-hidden="true">{odznak}</span>
               </span>
             ) : null}
           </Link>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 
 import Ikona from '@/app/[rozsah]/ikona'
@@ -86,12 +86,18 @@ export default function SkladaniZpravy({
   konverzace,
   uzivatel,
   smiNalehavou,
+  vetaODoruceni,
+  tlacitka,
 }: {
   rozsah: string
   konverzace: string
   /** Přihlášený člověk — fronta neodeslaných zpráv patří jemu, ne prohlížeči. */
   uzivatel: string
   smiNalehavou: boolean
+  /** Pravdivá věta, kdy zpráva příjemce vyruší (`lib/komunikace/veta-o-pushi.ts`). */
+  vetaODoruceni?: string
+  /** Ikony hlasovky a přílohy do řádku psaní (`psani.tsx`). Jen tlačítka, žádné formuláře. */
+  tlacitka?: ReactNode
 }) {
   const router = useRouter()
   const [text, setText] = useState('')
@@ -281,7 +287,8 @@ export default function SkladaniZpravy({
       ) : null}
 
       <div className="pc-skladani-radek">
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: 'var(--muted)' }}>
+        {tlacitka}
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: 'var(--muted)', marginRight: 'auto' }}>
           Priorita
           <select
             name="priorita"
@@ -300,10 +307,13 @@ export default function SkladaniZpravy({
           Odeslat
         </button>
       </div>
-      {!smiNalehavou ? (
-        <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
-          Doručí se, až bude příjemce na směně. Přečíst si zprávu může kdykoli, když aplikaci otevře.
-        </p>
+      {/*
+        Do 27. 9. tu stálo jen „Doručí se, až bude příjemce na směně“ — ve
+        zvonečku se ale zpráva ukáže hned a majitelům chodí na telefon
+        kdykoli. Věta se skládá v lib/komunikace/veta-o-pushi.ts.
+      */}
+      {vetaODoruceni ? (
+        <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>{vetaODoruceni}</p>
       ) : null}
     </form>
   )

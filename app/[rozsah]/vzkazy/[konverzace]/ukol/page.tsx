@@ -4,12 +4,14 @@ import Link from 'next/link'
 import { ZONA_VYCHOZI, denVPasmu } from '@/lib/cas'
 import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
-import { modelovyPoskytovatel, vybratPoskytovateleNavrhu } from '@/lib/komunikace/navrh-ukolu'
+import { vybratPoskytovateleNavrhu } from '@/lib/komunikace/navrh-ukolu'
 import { popisStavuPrepisu } from '@/lib/komunikace/prepis'
-import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from '@/lib/supabase/dotaz'
+import { OCI_VZKAZU } from '@/lib/komunikace/zalozky'
+import { DotazSelhal, sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
+import { nactiZalozky } from '../../../provozni-centrum/pocty'
 import PcZalozky from '../../../provozni-centrum/zalozky'
 import { zalozitUkolZeZpravy } from './akce'
 import FormularUkolu from './formular-ukolu'
@@ -122,7 +124,7 @@ export default async function UkolZeZpravy({
   if (!z || z.stornovano_kdy) {
     return (
       <Sdeleni nadpis="Tuhle zprávu nejde použít">
-        Zpráva neexistuje, byla stažená, nebo k ní nemáte přístup.{' '}
+        Zpráva neexistuje, byla zrušená, nebo k ní nemáte přístup.{' '}
         <Link href={zpet}>Zpět do rozhovoru</Link>.
       </Sdeleni>
     )
@@ -145,8 +147,6 @@ export default async function UkolZeZpravy({
       nalezy: [...navrh.nalezy, 'Navržený termín už uplynul (zpráva je starší) — ověřte ho.'],
     }
   }
-  const stavModelu = modelovyPoskytovatel.stav()
-
   // Adresáti. Úseky a pozice čte každý člen firmy; lidi dává `komu_muzu_psat`
   // (jen s účtem — úkol pro někoho bez účtu by nikoho nenotifikoval).
   const [{ data: usekyData, error: chybaUseky }, { data: poziceData, error: chybaPozice }, lideOdpoved] = await Promise.all([
@@ -154,27 +154,21 @@ export default async function UkolZeZpravy({
     supabase.from('positions').select('id, label').eq('tenant_id', tenantId).eq('active', true).order('label', { ascending: true }),
     supabase.rpc('komu_muzu_psat', { p_tenant: tenantId }),
   ])
-  // Bez migrace (funkce není) se formulář vůbec nenabízí — o chybějící
-  // `zalozit_ukol_ze_zpravy` by se člověk dozvěděl až po odeslání. Jakákoli
-  // JINÁ chyba se vyhazuje: prázdný seznam lidí by vypadal jako správně
-  // vykreslený formulář s prázdným výběrem.
-  if (lideOdpoved.error && funkceNeexistuje(lideOdpoved.error)) {
-    return (
-      <Sdeleni nadpis="Úkol ze zprávy čeká na nasazení databáze">
-        Bude fungovat po nasazení migrace <code>20260921110000_provozni_centrum</code>.{' '}
-        <Link href={zpet}>Zpět do rozhovoru</Link>.
-      </Sdeleni>
-    )
-  }
+  // Chyba se vyhazuje: prázdný seznam lidí by vypadal jako správně
+  // vykreslený formulář s prázdným výběrem. (Rámeček „čeká na nasazení
+  // databáze“ tu byl do 27. 9.; migrace je nasazená od 22. 9.)
   if (lideOdpoved.error) throw new DotazSelhal('seznam kolegů', lideOdpoved.error)
   if (chybaUseky) throw new DotazSelhal('úseky', chybaUseky)
   if (chybaPozice) throw new DotazSelhal('pozice', chybaPozice)
   const lide = (lideOdpoved.data ?? []) as { employee_id: string; jmeno: string }[]
 
+  // Čísla a skryté záložky — jedna funkce pro všechny stránky „Vzkazy a úkoly“.
+  const zalozky = await nactiZalozky(supabase, { tenantId, userId: user.id, branchId: scope.branchId })
+
   return (
     <>
       <Nadpis
-        oci="Provoz"
+        oci={OCI_VZKAZU}
         popis="Zkontrolujte návrh a potvrďte. Úkol vznikne až po odeslání."
         vpravo={
           <Link href={zpet} className="ft-tl">
@@ -186,7 +180,7 @@ export default async function UkolZeZpravy({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px' }}>
-        <PcZalozky rozsah={rozsah} aktivni="komunikace" />
+        <PcZalozky rozsah={rozsah} aktivni="komunikace" {...zalozky} />
 
         {scope.branchId === null ? (
           <p className="pc-poznamka-navrhu">
@@ -204,7 +198,12 @@ export default async function UkolZeZpravy({
           vytvoreno={z.vytvoreno_kdy}
           jeHlasovka={jeHlasovka}
           navrh={navrh}
-          duvodBezModelu={stavModelu.dostupny ? null : stavModelu.duvod}
+          /*
+            Věta „Návrh jazykovým modelem zapnutý není…“ tu byla do 27. 9.
+            Je to vývojářská věta — model se komunikaci nedává (pravidlo 8,
+            otázka 28) a návrh je pravidlový; formulář to říká i bez ní.
+          */
+          duvodBezModelu={null}
           poznamkaKPrepisu={popisStavuPrepisu(null).text}
           chyba={chyba ?? null}
           lide={lide}

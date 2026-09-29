@@ -22,6 +22,7 @@ import Badge from "@/components/ui/Badge";
 import Ikona from "../ikona";
 import Nadpis from "../nadpis";
 import VetaOPushi from "../provozni-centrum/veta-o-pushi";
+import { popisVzkazuNaDnes } from "@/lib/komunikace/dnes";
 import { nactiMojeChecklisty, type MujChecklist } from "../ukoly/checklisty/data";
 import { Pruh, StavChip } from "../ukoly/checklisty/prvky";
 import { STAV_TON, terazMs } from "../ukoly/checklisty/spolecne";
@@ -471,7 +472,25 @@ export default async function Dnes({
     .then((r) => ({ data: r.error ? null : (r.data as Rozhovor[] | null) }));
   const rozhovory = rozhovoryData ?? [];
   const neprecteneVzkazy = rozhovory.reduce((s, r) => s + r.neprectenych, 0);
-  const maVedeniVzkaz = rozhovory.some((r) => r.druh === "vedeni" && r.neprectenych > 0);
+
+  /*
+    Věta pod kartou Vzkazy (27. 9.): „Nová zpráva z vedení“ jen autorovi
+    vzkazu vedení; vedení samo (majitel, vedoucí) vidí „Nový vzkaz pro
+    vedení“. Kdo vzkaz založil, říká `konverzace.zalozil` — RLS pustí
+    jen účastníka, takže se tu nic cizího nečte.
+  */
+  const idVedeni = rozhovory.filter((r) => r.druh === "vedeni" && r.neprectenych > 0).map((r) => r.konverzace_id);
+  const { data: vedeniData } = idVedeni.length > 0
+    ? await supabase.from("konverzace").select("zalozil").in("id", idVedeni)
+    : { data: [] as { zalozil: string | null }[] };
+  const vzkazyPopis = popisVzkazuNaDnes(
+    // Bez odpovědi databáze se vzkaz bere jako „pro vedení“ — opatrnější
+    // (věta nenaznačí, že odpověď přišla, když to nevíme).
+    idVedeni.map((_, i) => ({ zalozil: (vedeniData?.[i]?.zalozil as string | null | undefined) ?? null })),
+    den.employee_id,
+    neprecteneVzkazy,
+  );
+  const maVedeniVzkaz = vzkazyPopis.dulezite;
 
   /*
     Poslední vzkazy — náhled pro Dnes (design systém, 16.9.2026,
@@ -771,9 +790,11 @@ export default async function Dnes({
   if (canSee(ctx, "marketing.read")) {
     rychleAkce.push({ popisek: "Nahrát fotky a obsah", href: `/${rozsah}/marketing/media`, ikona: "fotka" });
   }
-  if (canSee(ctx, "tasks.read")) {
+  if (canSee(ctx, "tasks.manage")) {
     // Míří na formulář v Úkolech — kotva je na formuláři uvnitř `details`,
     // takže ho prohlížeč sám rozbalí (viz komentář v ukoly/page.tsx).
+    // Jen s `tasks.manage` (27. 9.): formulář se bez něj nekreslí a odkaz
+    // vedl 8 z 10 lidí na stránku, kde úkol zadat nešlo.
     rychleAkce.push({ popisek: "Přidat úkol", href: `/${rozsah}/ukoly#zadat-ukol`, ikona: "fajfkaCtverec" });
   }
   if (canSee(ctx, "shifts.manage")) {
@@ -1019,7 +1040,7 @@ export default async function Dnes({
               odznak={neprecteneVzkazy}
               titulek="Vzkazy"
               hodnota={neprecteneVzkazy > 0 ? pocet(neprecteneVzkazy, "nová zpráva", "nové zprávy", "nových zpráv") : "Vše přečteno"}
-              popisy={[maVedeniVzkaz ? "Nová zpráva z vedení" : neprecteneVzkazy > 0 ? "Čeká na přečtení" : null]}
+              popisy={[vzkazyPopis.text]}
               popisTon={maVedeniVzkaz ? "bad" : undefined}
               paticka={<KpiOdkaz href={`/${rozsah}/vzkazy`} popisek="Otevřít vzkazy" />}
             />
@@ -1128,7 +1149,7 @@ export default async function Dnes({
             spoléhal.
           */}
           <p style={{ ...prazdno, fontSize: "12px", margin: 0 }}>
-            <VetaOPushi rozsah={rozsah} />
+            <VetaOPushi rozsah={rozsah} jeMajitel={ctx.jeMajitel} />
           </p>
         </aside>
       </div>

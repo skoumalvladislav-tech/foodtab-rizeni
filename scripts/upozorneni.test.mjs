@@ -41,6 +41,7 @@ import {
   slovoPodleCisla,
   souhrnCekajicich,
 } from '../lib/upozorneni-text.ts'
+import { odkazUpozorneni } from '../lib/upozorneni-odkaz.ts'
 
 let chyb = 0
 const ma = (popis, sk, ce) => {
@@ -472,6 +473,51 @@ ma('bez jména změnitele je null, nevymýšlí se', kartaZmenySmeny({ den: '202
 ma('prázdné jméno = null', kartaZmenySmeny({ den: '2026-09-22', od: '16:00', do: '22:00', puvodni_od: '18:00', puvodni_do: '22:00', zmenil: '   ' })?.zmenil, null)
 ma('starší upozornění bez původního stavu kartu nemá', kartaZmenySmeny({ den: '2026-09-22', od: '16:00', do: '22:00' }), null)
 ma('bez dne kartu nemá', kartaZmenySmeny({ od: '16:00', do: '22:00', puvodni_od: '18:00', puvodni_do: '22:00' }), null)
+
+console.log('\n== Klepnutí na upozornění vede na věc (T2, 27. 9.) ==')
+
+/*
+  Do 27. 9. vedla každá položka panelu zvonečku na obecnou /upozorneni.
+  Cíl se počítá z ULOŽENÉHO řádku (serverová akce otevrit.ts), tady se
+  ověřuje, kam který druh vede — a že nic z `telo` nevytáhne adresu ven.
+*/
+const U = '11111111-2222-4333-8444-555555555555'
+const U2 = '66666666-7777-4888-8999-aaaaaaaaaaaa'
+const cil = (druh, telo = {}, dalsi = {}, konv) => odkazUpozorneni('perla', { druh, telo, ...dalsi }, konv)
+
+ma('nová směna → rozpis na ten den, rovnou detail směny',
+  cil('smena.nova', { den: '2026-09-28' }, { shift_id: U }), `/perla/smeny?pohled=moje&den=2026-09-28&smena=${U}`)
+ma('změněná směna čeká na POTVRZENÍ → na stránku Upozornění (tam je „Potvrdit“)',
+  cil('smena.zmenena', { den: '2026-09-28' }, { shift_id: U }), '/perla/upozorneni')
+ma('zrušená směna taky', cil('smena.zrusena', { den: '2026-09-28' }), '/perla/upozorneni')
+ma('směna bez dne → obecná stránka, nic se nevymýšlí', cil('smena.nova', {}), '/perla/upozorneni')
+ma('úkol → detail úkolu', cil('ukol.pridelen', { ukol: U }), `/perla/ukoly/ukol/${U}`)
+ma('úkol s nesmyslným id → seznam úkolů', cil('ukol.pridelen', { ukol: '../../x' }), '/perla/ukoly')
+ma('checklist → běh na pobočce běhu, u problému položka',
+  cil('checklist.problem', { beh: U, pobocka_slug: 'bernard-bar', polozka: U2 }), `/bernard-bar/ukoly/checklisty/${U}/polozka/${U2}`)
+ma('checklist s podvrženým slugem → obecná stránka',
+  cil('checklist.prideleno', { beh: U, pobocka_slug: '//zly.example' }), '/perla/upozorneni')
+ma('záloha k potvrzení → Docházka', cil('zaloha.vyplacena'), '/perla/dochazka')
+ma('potvrzená záloha vydávajícímu → Zálohy', cil('zaloha.potvrzena'), '/perla/dochazka/zalohy')
+ma('zapomenutý odchod → předvyplněný formulář',
+  cil('dochazka.zapomenuty_odchod', { pobocka_slug: 'perla', zamestnanec: U, den: '2026-09-26' }),
+  `/perla/dochazka?doplnit=${U}&den=2026-09-26`)
+ma('marketing žádost → fronta ke schválení', cil('marketing.zadost'), '/perla/marketing/schvalovani')
+ma('marketing příspěvek → příspěvek', cil('marketing.vraceno', { prispevek: U }), `/perla/marketing/${U}`)
+ma('oznámení → Nástěnka', cil('oznameni.nova'), '/perla/vzkazy?zalozka=nastenka')
+ma('nový vzkaz s dohledaným rozhovorem → rozhovor', cil('vzkaz.novy', {}, { zdroj_typ: 'zprava', zdroj_id: U }, U2), `/perla/vzkazy/${U2}`)
+ma('nový vzkaz bez rozhovoru (už nejsem účastník) → seznam', cil('vzkaz.novy', {}, { zdroj_id: U }, null), '/perla/vzkazy')
+// 28. 9.: „3 nové zprávy“ se slučují za den a můžou být ze tří rozhovorů;
+// zdroj_id nese jen ten poslední. Vést do něj by ostatní dva schovalo.
+ma('sloučené „3 nové zprávy“ → seznam nepřečtených, ne rozhovor poslední zprávy',
+  cil('vzkaz.novy', { pocet: 3 }, { zdroj_typ: 'zprava', zdroj_id: U }, U2), '/perla/vzkazy?filtr=neprectene')
+ma('… s pocet 1 dál do rozhovoru', cil('vzkaz.novy', { pocet: 1 }, { zdroj_typ: 'zprava', zdroj_id: U }, U2), `/perla/vzkazy/${U2}`)
+ma('pozvánka → obecná stránka (odkaz mění souběžná úloha)', cil('pozvanka.prijata', { ceka: true, kdo: U }), '/perla/upozorneni')
+ma('neznámý druh → obecná stránka', cil('neco.noveho'), '/perla/upozorneni')
+ma('podvržený rozsah → kořen, ne cizí adresa', odkazUpozorneni('//zly.example', { druh: 'oznameni.nova', telo: {} }), '/')
+ma('žádný cíl nevede mimo aplikaci',
+  [cil('ukol.pridelen', { ukol: 'https://x' }), cil('marketing.x', { prispevek: '//x' }), cil('checklist.x', { beh: 'x' })]
+    .every((c) => c.startsWith('/') && !c.startsWith('//')), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

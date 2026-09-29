@@ -3,10 +3,14 @@ import Link from 'next/link'
 import Ikona from '@/app/[rozsah]/ikona'
 import { datumACasVPasmu } from '@/lib/cas'
 import { mmss } from '@/lib/hlasove-zpravy'
-import { oznacitPrecteno } from '../akce'
 
 /**
- * Panel „O konverzaci“ — třetí sloupec desktopu.
+ * Panel „O rozhovoru“ — třetí sloupec desktopu (do 27. 9. „O konverzaci“;
+ * slovník v docs/komunikace-stav-a-plan-2026-09-27.md, oddíl 9).
+ *
+ * Tlačítko „Označit za přečtené“ tu do 27. 9. bylo a za tři týdny ho
+ * nikdo nepoužil. Rozhovor se teď označí sám, když ho člověk otevře
+ * (`oznacit-po-zobrazeni.tsx`) nebo do něj odpoví.
  *
  * Ukazuje jen to, co aplikace OPRAVDU ví:
  *   * účastníky (nebo větu, koho se týká odvozený kanál),
@@ -94,10 +98,10 @@ export default function PanelKonverzace({
   prilohyDostupne?: boolean
 }) {
   return (
-    <aside className="ds-plocha pc-panel" aria-label="O konverzaci">
+    <aside className="ds-plocha pc-panel" aria-label="O rozhovoru">
       <div className="ds-plocha-hlava">
         <Ikona klic="lide" />
-        <h2>O konverzaci</h2>
+        <h2>O rozhovoru</h2>
       </div>
 
       <section className="pc-sekce">
@@ -157,26 +161,19 @@ export default function PanelKonverzace({
         )}
       </section>
 
-      <section className="pc-sekce">
-        <h3>Rychlé akce</h3>
-        <div className="pc-rychle">
-          {smiUkoly && zpravaProUkol ? (
+      {smiUkoly && zpravaProUkol ? (
+        <section className="pc-sekce">
+          <h3>Rychlé akce</h3>
+          <div className="pc-rychle">
             <Link
               href={`/${rozsah}/vzkazy/${konverzace}/ukol?zprava=${zpravaProUkol}`}
               className="ft-tl ft-tl-hlavni ft-tl-male"
             >
               <Ikona klic="fajfkaCtverec" /> Úkol z poslední zprávy
             </Link>
-          ) : null}
-          <form action={oznacitPrecteno}>
-            <input type="hidden" name="rozsah" value={rozsah} />
-            <input type="hidden" name="konverzace" value={konverzace} />
-            <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male" style={{ width: '100%' }}>
-              <Ikona klic="fajfka" /> Označit za přečtené
-            </button>
-          </form>
-        </div>
-      </section>
+          </div>
+        </section>
+      ) : null}
     </aside>
   )
 }

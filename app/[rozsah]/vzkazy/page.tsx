@@ -1,16 +1,22 @@
+import { randomUUID } from 'node:crypto'
+
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
-import { getContext, getUser, hasAccess } from '@/lib/authz'
+import { getContext, getUser } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
+import { OCI_VZKAZU } from '@/lib/komunikace/zalozky'
 import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
+import Ikona from '../ikona'
 import Nadpis from '../nadpis'
+import { nactiZalozky } from '../provozni-centrum/pocty'
 import PcZalozky from '../provozni-centrum/zalozky'
 import Nastenka from './nastenka'
 import SeznamRozhovoru, { NAZVY_DRUHU, type Rozhovor } from './seznam-rozhovoru'
-import { otevritKanalPobocky, otevritKanalUseku, zalozitVzkazVedeni } from './akce'
+import { otevritKanalPobocky, otevritKanalUseku } from './akce'
+import FormularVedeni from './formular-vedeni'
 import { nactiNazvyOsobnich, nactiPosledniTexty } from './nazvy'
 
 type FiltrKlic = 'vse' | 'neprectene' | 'pobocka' | 'usek' | 'prime'
@@ -62,13 +68,14 @@ export default async function Rozhovory({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; zalozka?: string; filtr?: string; hledat?: string }>
+  searchParams: Promise<{ chyba?: string; zalozka?: string; filtr?: string; hledat?: string; vedeni?: string }>
 }) {
   const { rozsah } = await params
   // Sem chodí hlášky z akcí — mimo jiné „Vyberte pobočku, ke které
   // vzkaz patří.“ Bez tohohle by se odpověď databáze ztratila
-  // v adrese a formulář by jen mlčky nic neudělal.
-  const { chyba, zalozka: zalozkaZAdresy, filtr: filtrZAdresy, hledat } = await searchParams
+  // v adrese a formulář by jen mlčky nic neudělal. `vedeni=1` = hláška
+  // patří formuláři „Napsat vedení“, ten se proto ukáže rozbalený.
+  const { chyba, zalozka: zalozkaZAdresy, filtr: filtrZAdresy, hledat, vedeni } = await searchParams
 
   const filtrAktivni: FiltrKlic = FILTRY.some((f) => f.klic === filtrZAdresy)
     ? (filtrZAdresy as FiltrKlic)
@@ -136,32 +143,22 @@ export default async function Rozhovory({
     { p_tenant: tenantId },
   )
 
-  // Nenasazená migrace obrazovku neshodí — rámeček místo pádu.
-  if (funkceNeexistuje(chybaSeznam)) {
-    return (
-      <>
-        <Nadpis oci="Provoz" popis="Rozhovory mezi lidmi a pobočkami.">
-          Rozhovory
-        </Nadpis>
-        <div style={{ padding: '16px' }}>
-          <p style={ramecek}>
-            <strong>Tahle obrazovka čeká na nasazení databáze.</strong>{' '}
-            Rozhovory přibudou migracemi{' '}
-            <code>20260906010000_doruceni_po_pichnuti</code> a{' '}
-            <code>20260906020000_odvozene_kanaly</code>.
-          </p>
-        </div>
-      </>
-    )
-  }
+  // Rámeček „čeká na nasazení databáze“ tu byl do 27. 9.; migrace jsou
+  // dávno nasazené a mrtvý rámeček jen mátl. Chyba je chyba.
   if (chybaSeznam) throw new DotazSelhal('seznam rozhovorů', chybaSeznam)
 
   const rozhovory = (seznamData ?? []) as Rozhovor[]
+  // Čísla a skryté záložky — jedna funkce pro všechny stránky „Vzkazy a úkoly“.
+  const zalozky = await nactiZalozky(supabase, {
+    tenantId,
+    userId: user.id,
+    branchId: scope.branchId,
+    rozhovory,
+  })
 
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
   // Osobní rozhovor bez názvu = jména ostatních účastníků (každý vidí toho druhého).
   const nazvyOsobnich = await nactiNazvyOsobnich(supabase, tenantId)
-  const smiVidetUkoly = await hasAccess(tenantId, 'tasks.read', scope.branchId)
 
   /*
     Kanál MÉHO úseku — stejná úvaha jako u kanálu pobočky výš (řádek
@@ -268,67 +265,40 @@ export default async function Rozhovory({
 
   const cekaCelkem = rozhovory.reduce((s, r) => s + r.ceka, 0)
   const doruceno = rozhovory.reduce((s, r) => s + (r.neprectenych - r.ceka), 0)
-  const neprecteneVzkazy = rozhovory.reduce((s, r) => s + r.neprectenych, 0)
 
   /*
-    NEPŘEČTENÉ NA NÁSTĚNCE — pro číslo u druhé záložky.
-
-    Počítá se i tehdy, když je člověk na záložce Vzkazy: jinak by se
-    o tom, že na Nástěnce něco leží, nedozvěděl, dokud tam nepřepne.
-    Sčítá se to do jednoho čísla u ikony v nabídce (rozhodnutí Šéfíka
-    6. 9.), ale u záložek se ukazuje po částech — člověk potřebuje
-    vědět, KAM má jít.
-
-    Chyba se schválně nevyhazuje: nepřečtené je pomocný údaj a kvůli
-    číslu u záložky nemá padat celá obrazovka. Když se nepovede, ukáže
-    se prostě bez čísla.
+    Čísla u záložek (i u Nástěnky, když je člověk na Komunikaci) dává
+    `nactiZalozky` výš — stejná funkce jako na ostatních stránkách pod
+    „Vzkazy a úkoly“. Nástěnka se počítá TÝMŽ dotazem jako její seznam.
   */
-  let neprecteneNastenka = 0
-  const { data: nastenkaIds } = await supabase
-    .from('announcements')
-    .select('id')
-    .eq('tenant_id', tenantId)
-    .limit(200)
 
-  if (nastenkaIds && nastenkaIds.length > 0) {
-    const { data: prectene } = await supabase
-      .from('announcement_reads')
-      .select('announcement_id')
-      .eq('user_id', user.id)
-      .in(
-        'announcement_id',
-        nastenkaIds.map((z) => z.id as string),
-      )
-    const uz = new Set((prectene ?? []).map((c) => c.announcement_id as string))
-    neprecteneNastenka = nastenkaIds.filter((z) => !uz.has(z.id as string)).length
-  }
-
+  /*
+    JEDNA HLAVIČKA PRO VŠECHNY ZÁLOŽKY (27. 9.): nadpisek „Vzkazy
+    a úkoly“, velký nadpis = záložka. Do té doby měla každá záložka jiný
+    nadpisek i nadpis („Provoz · Vzkazy a úkoly“ tady, „Vzkazy a úkoly ·
+    Úkoly“ na Úkolech).
+  */
   return (
     <>
       <Nadpis
-        oci="Provoz"
+        oci={OCI_VZKAZU}
         popis={
           naNastence
-            ? 'Co se má vědět. Nejnovější nahoře.'
-            : 'Nepřečtené nahoře, od nejstaršího.'
+            ? 'Oznámení pro všechny. Co čeká na „Beru na vědomí“, je nahoře.'
+            : 'Rozhovory s kolegy, pobočkou, úsekem a vedením. Nepřečtené nahoře.'
         }
       >
-        Vzkazy a úkoly
+        {naNastence ? 'Nástěnka' : 'Komunikace'}
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: naNastence ? '760px' : '1080px' }}>
         {/*
-          ZÁLOŽKY PROVOZNÍHO CENTRA. Slučuje se vchod, ne obsah (rozhodnutí
+          ZÁLOŽKY „VZKAZY A ÚKOLY“. Slučuje se vchod, ne obsah (rozhodnutí
           Šéfíka 6. 9. 2026): Vzkazy jsou rozhovor, Nástěnka je sdělení, obojí
           se dál kreslí zvlášť — mění se jen to, že se do všeho chodí jednou
           lištou. Přepíná se adresou, ne skriptem.
         */}
-        <PcZalozky
-          rozsah={rozsah}
-          aktivni={naNastence ? 'nastenka' : 'komunikace'}
-          pocty={{ komunikace: neprecteneVzkazy, nastenka: neprecteneNastenka }}
-          skryte={smiVidetUkoly ? [] : ['ukoly', 'checklisty']}
-        />
+        <PcZalozky rozsah={rozsah} aktivni={naNastence ? 'nastenka' : 'komunikace'} {...zalozky} />
 
         {naNastence ? (
           <Nastenka
@@ -339,7 +309,7 @@ export default async function Rozhovory({
           />
         ) : (
           <>
-        {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
+        {chyba && vedeni !== '1' ? <p className="hlaska-chyba" role="alert">{chyba}</p> : null}
 
         {/*
           ZADRŽENÉ ZPRÁVY SE PŘIZNÁVAJÍ, NESCHOVÁVAJÍ.
@@ -381,9 +351,14 @@ export default async function Rozhovory({
               je normální GET formulář (funguje i bez JS, stejný vzor
               jako Finance → Faktury), filtry jsou odkazy s `?filtr=`.
             */}
-            <form method="get" action={`/${rozsah}/vzkazy`} style={{ marginBottom: '10px' }}>
+            <form method="get" action={`/${rozsah}/vzkazy`} role="search" style={{ marginBottom: '10px' }}>
               <input type="hidden" name="filtr" value={filtrAktivni} />
+              {/* Popisek pro čtečku (27. 9.) — samotný placeholder se nečte spolehlivě. */}
+              <label htmlFor="pc-hledat-rozhovor" className="sr-only">
+                Hledat rozhovor podle názvu
+              </label>
               <input
+                id="pc-hledat-rozhovor"
                 type="search"
                 name="hledat"
                 defaultValue={hledat ?? ''}
@@ -391,17 +366,34 @@ export default async function Rozhovory({
                 style={poleHledani}
               />
             </form>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+            {/*
+              Filtry jsou ODKAZY, takže vybraný nese aria-current, ne
+              aria-pressed (to patří přepínacím tlačítkům a u odkazu ho
+              čtečka neohlásí).
+            */}
+            <nav aria-label="Filtr rozhovorů" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
               {FILTRY.map((f) => (
                 <Link
                   key={f.klic}
                   href={f.klic === 'vse' ? `/${rozsah}/vzkazy` : `/${rozsah}/vzkazy?filtr=${f.klic}`}
                   className="ft-tl ft-tl-vedlejsi ft-tl-male"
-                  aria-pressed={filtrAktivni === f.klic}
+                  aria-current={filtrAktivni === f.klic ? 'true' : undefined}
                 >
                   {f.nazev}
                 </Link>
               ))}
+            </nav>
+
+            {/*
+              „+ Nový rozhovor“ (do 27. 9. „+ Nová zpráva“ — rozhovor je
+              vlákno, zpráva je to, co se do něj píše; slovník v plánu
+              z 27. 9., oddíl 9). Vedle „Napsat vedení“: formulář je
+              sbalený, na telefonu nezabírá půl seznamu.
+            */}
+            <div className="pc-akce-seznamu">
+              <Link href={`/${rozsah}/vzkazy/nova`} className="ft-tl ft-tl-hlavni ft-tl-male">
+                <Ikona klic="plus" /> Nový rozhovor
+              </Link>
             </div>
 
             {/*
@@ -409,11 +401,6 @@ export default async function Rozhovory({
               když ještě neexistuje, vyrobí ho databáze. Seznam členů se
               nikde nezadává — plyne z dosahu na pobočku.
             */}
-            <div style={{ marginBottom: '10px' }}>
-              <Link href={`/${rozsah}/vzkazy/nova`} className="ft-tl ft-tl-hlavni ft-tl-male">
-                + Nová zpráva
-              </Link>
-            </div>
 
             {scope.level === 'branch' && scope.branchId ? (
               <form action={otevritKanalPobocky} style={{ marginBottom: '10px' }}>
@@ -441,97 +428,19 @@ export default async function Rozhovory({
             ) : null}
 
             {/*
-          VZKAZ VEDENÍ.
-
-          Odesílatel vybírá adresáta a — když dosáhne na víc poboček —
-          i pobočku. Odvozovat ji z domovského záznamu nestačí: člověk,
-          co dělá na dvou provozovnách, si stěžuje na to, co zažil tam,
-          kde zrovna byl, a vzkaz by přistál u vedoucího té druhé.
-          Rozhodnutí Šéfíka 6. 9. 2026.
-
-          Kdo to uvidí, se na obrazovce vypisuje JMENOVITĚ a jména si
-          bere z `kdo_uvidi_vzkaz` — tedy z téže funkce, kterou se pak
-          vybírají účastníci. Kdyby si to obrazovka počítala po svém,
-          slíbila by jeden okruh a konverzace by vznikla s jiným.
-        */}
-        <details style={ramecekFormulare}>
-          <summary style={{ cursor: 'pointer', fontSize: '15px' }}>
-            Napsat vedení
-          </summary>
-
-          <p style={{ margin: '10px 0 0', fontSize: '13px', color: 'var(--muted)' }}>
-            Anonymní to není. Ve dvanáctičlenném provozu je anonymita
-            stejně průhledná a zve to k útokům, na které se nedá
-            odpovědět. Místo toho platí úzký okruh adresátů — a je
-            vypsaný níž, ať víte, komu píšete, dřív než začnete.
-          </p>
-
-          <form action={zalozitVzkazVedeni} style={{ marginTop: '12px' }}>
-            <input type="hidden" name="rozsah" value={rozsah} />
-
-            <fieldset style={poleSkupina}>
-              <legend style={popisek}>Komu</legend>
-
-              <label style={volba}>
-                <input type="radio" name="adresat" value="vedouci" defaultChecked />
-                vedoucí pobočky
-              </label>
-              {vedouciJmena.length > 0 ? (
-                <p style={kdoUvidi}>Uvidí: {vedouciJmena.join(', ')}</p>
-              ) : (
-                <p style={kdoUvidi}>
-                  Na vybrané pobočce zatím nikdo s právem spravovat lidi není.
-                </p>
-              )}
-
-              <label style={{ ...volba, marginTop: '10px' }}>
-                <input type="radio" name="adresat" value="majitel" />
-                majitel firmy
-              </label>
-              <p style={kdoUvidi}>
-                Uvidí: {majitelJmena.length > 0 ? majitelJmena.join(', ') : '—'}.
-                Vedoucí pobočky se k tomu nedostane, ani nikdo se správou
-                lidí.
-              </p>
-            </fieldset>
-
-            {/*
-              Pobočku vybírá jen ten, kdo dosáhne na víc než jednu.
-              Ostatním se otázka neklade — odvodí se.
+              VZKAZ VEDENÍ — sbalený formulář (`formular-vedeni.tsx`).
+              Kdo to uvidí, se vypisuje jmenovitě z `kdo_uvidi_vzkaz`.
             */}
-            {ctx.branches.length > 1 ? (
-              <fieldset style={poleSkupina}>
-                <legend style={popisek}>Které pobočky se to týká</legend>
-                <select name="pobocka" style={vyber} defaultValue={scope.branchId ?? ''}>
-                  <option value="">— vyberte —</option>
-                  {ctx.branches.map((b) => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-                <p style={kdoUvidi}>
-                  Platí pro volbu „vedoucí pobočky“. U majitele na
-                  pobočce nezáleží.
-                </p>
-              </fieldset>
-            ) : null}
-
-            <fieldset style={poleSkupina}>
-              <legend style={popisek}>Čeho se to týká</legend>
-              <input
-                type="text"
-                name="nazev"
-                required
-                maxLength={120}
-                placeholder="Krátce, o co jde"
-                style={pole}
-              />
-            </fieldset>
-
-            <button type="submit" className="ft-tl">
-              Založit vzkaz
-            </button>
-          </form>
-        </details>
+            <FormularVedeni
+              rozsah={rozsah}
+              otevreno={vedeni === '1'}
+              chyba={chyba && vedeni === '1' ? chyba : null}
+              vedouciJmena={vedouciJmena}
+              majitelJmena={majitelJmena}
+              pobocky={ctx.branches.map((b) => ({ id: b.id, name: b.name }))}
+              vychoziPobocka={scope.branchId}
+              klientId={randomUUID()}
+            />
 
             {rozhovoryZobrazene.length === 0 && rozhovory.length > 0 ? (
               <p style={{ fontSize: '13.5px', color: 'var(--muted)', padding: '4px 2px' }}>
@@ -544,10 +453,13 @@ export default async function Rozhovory({
                 nazvyPobocek={nazvyPobocek}
                 posledniText={posledniText}
                 nazvyOsobnich={nazvyOsobnich}
+                tlacitkoKanaluPobocky={scope.level === 'branch' && Boolean(scope.branchId)}
+                tlacitkoKanaluUseku={Boolean(mujUsekId)}
               />
             )}
 
-            {doruceno > 0 || cekaCelkem > 0 ? null : (
+            {/* Bez jediného rozhovoru není co mít přečtené (28. 9.). */}
+            {rozhovory.length === 0 || doruceno > 0 || cekaCelkem > 0 ? null : (
               <p style={{ marginTop: '16px', fontSize: '13px', color: 'var(--muted)' }}>
                 Všechno přečtené.
               </p>
@@ -593,16 +505,6 @@ const ramecek: React.CSSProperties = {
   lineHeight: 1.5,
 }
 
-/* --- Vzhled formuláře vzkazu vedení ----------------------------- */
-
-const ramecekFormulare: React.CSSProperties = {
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 'var(--radius-md)',
-  padding: '10px 12px',
-  marginBottom: '14px',
-}
-
 const poleHledani: React.CSSProperties = {
   width: '100%',
   height: '38px',
@@ -613,49 +515,3 @@ const poleHledani: React.CSSProperties = {
   background: 'var(--sunken)',
   color: 'var(--ink)',
 }
-
-const poleSkupina: React.CSSProperties = {
-  border: 'none',
-  padding: 0,
-  margin: '14px 0 0',
-}
-
-const popisek: React.CSSProperties = {
-  fontSize: '13px',
-  color: 'var(--muted)',
-  padding: 0,
-  marginBottom: '6px',
-}
-
-const volba: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  fontSize: '14px',
-  color: 'var(--ink)',
-}
-
-/*
-  Věta „kdo to uvidí“. Schválně blízko u té volby, ke které patří —
-  odsazená, aby bylo vidět, že mluví o ní, a ne o té pod ní.
-*/
-const kdoUvidi: React.CSSProperties = {
-  margin: '4px 0 0 26px',
-  fontSize: '12px',
-  color: 'var(--muted)',
-  lineHeight: 1.45,
-}
-
-const pole: React.CSSProperties = {
-  width: '100%',
-  padding: '10px 12px',
-  // 16 px schválně: iOS jinak při zaostření pole zoomuje celou stránku.
-  fontSize: '16px',
-  borderRadius: 'var(--radius-sm)',
-  border: '1px solid var(--line-2)',
-  background: 'var(--paper)',
-  color: 'var(--ink)',
-  minHeight: '44px',
-}
-
-const vyber: React.CSSProperties = { ...pole, minHeight: '44px' }

@@ -13,8 +13,10 @@ export const dynamic = "force-dynamic";
  * někomu poslat nebo si ho uložit do záložek prohlížeče — a mrtvý odkaz
  * na denním nástroji je horší než o jedno přesměrování delší cesta.
  *
- * Vlastní obsah zůstal v `../vzkazy/nastenka.tsx`; akce (`./akce`) se
- * odsud dál používají, proto ten soubor nemizí.
+ * Vlastní obsah zůstal v `../vzkazy/nastenka.tsx`. Akce bydlely tady
+ * v `./akce.ts` do 27. 9.; přestěhovaly se k Nástěnce
+ * (`../vzkazy/akce-nastenka.ts`), protože po odeslání obnovovaly tuhle
+ * adresu, která jen přesměrovává.
  */
 export default async function StaraNastenka({
   params,

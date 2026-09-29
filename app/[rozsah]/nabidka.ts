@@ -61,6 +61,13 @@ export type IkonaKlic =
   | 'zavrit'
   | 'schranka'
   | 'odhlasit'
+  // Zvoneček (27. 9.): do té doby měl stejnou bublinu jako Vzkazy a nešlo
+  // je od sebe poznat. Mikrofon a sponka nahradily emoji 🎤 u hlasovky
+  // a přílohy, zámek emoji 🔒 v Nastavení upozornění.
+  | 'zvonek'
+  | 'mikrofon'
+  | 'sponka'
+  | 'zamek'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */
@@ -256,6 +263,12 @@ export const NASTAVENI: Polozka[] = [
   // aplikace vede, oprava kontaktu, souhlasy a výpis. Proto pravo: null
   // — patřit do firmy stačí.
   { segment: 'moje-udaje', adresa: '/moje-udaje', nazev: 'Moje údaje', kratky: 'Moje údaje', modul: 'provoz', pravo: null, hotovo: true, ikona: 'clovek' },
+  // Co mi má chodit do zvonečku a na telefon. Osobní jako Moje údaje,
+  // proto pravo: null. Šéfík 22. 9.: „v nastavení není okénko
+  // upozornění“ — do té doby se sem šlo jen ze stránky Upozornění.
+  // Stojí ZA Mojimi údaji schválně: ozubené kolo vede na první položku,
+  // kterou člověk vidí, a zaměstnanci má dál otvírat Moje údaje.
+  { segment: 'upozorneni/nastaveni', nazev: 'Upozornění', kratky: 'Upozornění', modul: 'provoz', pravo: null, hotovo: true, ikona: 'zvonek' },
   // Zařízení pobočky — tablety, na kterých běží kiosek. Patří
   // k nastavení pobočky, proto settings.manage.
   { segment: 'nastaveni/zarizeni', nazev: 'Zařízení', kratky: 'Zařízení', modul: 'provoz', pravo: 'settings.manage', hotovo: true, ikona: 'kolo' },

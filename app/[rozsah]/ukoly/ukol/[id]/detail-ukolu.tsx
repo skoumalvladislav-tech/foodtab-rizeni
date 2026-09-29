@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { ZONA_VYCHOZI, datumACasVPasmu } from '@/lib/cas'
 import Ikona from '../../../ikona'
+import TlacitkoOdeslat from '../../../vzkazy/tlacitko-odeslat'
 
 /**
  * Detail úkolu — jen vykreslení. Data dodá stránka, komponenta nesahá do
@@ -75,7 +76,8 @@ export default function DetailUkolu({
             <Ikona klic={ukol.status === 'done' ? 'fajfkaKruh' : 'fajfkaCtverec'} />
           </span>
           <div style={{ minWidth: 0 }}>
-            <h2>{ukol.title}</h2>
+            {/* Název úkolu nese od 27. 9. velký nadpis stránky (jedna hlavička „Vzkazy a úkoly“). */}
+            <h2>O úkolu</h2>
             <p style={{ margin: '6px 0 0', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               <span className="pc-chip" data-stav={ukol.status === 'done' ? 'hotovo' : poTerminu ? 'pozde' : undefined}>
                 {poTerminu ? 'Po termínu' : STAV[ukol.status]}
@@ -118,9 +120,9 @@ export default function DetailUkolu({
           <form action={akceDokoncit} style={{ marginTop: '18px' }}>
             <input type="hidden" name="rozsah" value={rozsah} />
             <input type="hidden" name="ukol" value={ukol.id} />
-            <button type="submit" className="ft-tl ft-tl-hlavni">
+            <TlacitkoOdeslat className="ft-tl ft-tl-hlavni" pracuje="Ukládám…">
               Označit jako hotové
-            </button>
+            </TlacitkoOdeslat>
           </form>
         ) : null}
       </section>

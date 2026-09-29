@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 
+import { getUser } from '@/lib/authz'
 import { KBELIK, MAX_DELKA_S, cestaVUlozisti, priponaZMime } from '@/lib/hlasove-zpravy'
 import { naplanovatPushKeZprave } from '@/lib/komunikace/push-hned'
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
@@ -173,7 +174,9 @@ export async function odeslatZpravuKlient(vstup: {
   const zpravaId = String(data)
   naplanovatPushKeZprave(zpravaId, z.tenantId)
 
-  revalidatePath(`/${z.rozsah}/vzkazy/${konverzace}`)
+  // Kdo odpověděl, rozhovor četl. Počty jsou v rámu → celý layout.
+  await zapsatPrecteni(supabase, z.tenantId, konverzace)
+  revalidatePath(`/${z.rozsah}`, 'layout')
   return { ok: true, id: zpravaId }
 }
 
@@ -222,7 +225,8 @@ export async function poslatZpravu(formData: FormData): Promise<void> {
   const zpravaId = String(data)
   naplanovatPushKeZprave(zpravaId, z.tenantId)
 
-  revalidatePath(zpet)
+  await zapsatPrecteni(supabase, z.tenantId, konverzace)
+  revalidatePath(`/${z.rozsah}`, 'layout')
   redirect(zpet)
 }
 
@@ -302,46 +306,99 @@ export async function odeslatHlasovku(formData: FormData): Promise<void> {
   const zpravaId = String(data)
   naplanovatPushKeZprave(zpravaId, z.tenantId)
 
-  revalidatePath(zpet)
+  await zapsatPrecteni(supabase, z.tenantId, konverzace)
+  revalidatePath(`/${z.rozsah}`, 'layout')
   redirect(zpet)
 }
 
 /**
- * Označit rozhovor za přečtený.
+ * Zapsat, že mám rozhovor přečtený — a když už nemám nepřečtený žádný,
+ * označit za přečtená i svoje upozornění „nový vzkaz“ ve zvonečku.
  *
- * Na kliknutí, ne při vykreslení. Zápis do databáze jen proto, že si
- * někdo otevřel stránku, je vedlejší účinek, který do vykreslování
- * nepatří — a u rozhovorů navíc: „přečteno“ je údaj o člověku, ne
- * o tom, že se načetlo HTML.
+ * Jedna zpráva měla dřív dvě nezávislá „nepřečteno“: rozhovor a řádek
+ * ve zvonečku. Kdo si všechno přečetl v rozhovorech, měl ve zvonečku
+ * dál „nový vzkaz“ (plán 27. 9., oddíl 4, bod 2). Upozornění „nový
+ * vzkaz“ je slučované za den a nenese rozhovor, takže se nedá říct,
+ * ke kterému rozhovoru patří — proto se označí, až když nepřečtené
+ * nezbude žádné, ne po každém rozhovoru.
+ *
+ * Záložka je v databázi jen „kam jsem dočetl“. U kanálu pobočky
+ * a úseku přístup nedává (migrace 20260927100000, pojistka), takže
+ * přečtením kanálu se do něj nikdo nezapíše natrvalo.
+ *
+ * Chyby se nevyhazují: přečtení je pomocný zápis a kvůli němu nemá
+ * spadnout odeslání zprávy ani otevření rozhovoru.
  */
-export async function oznacitPrecteno(formData: FormData): Promise<void> {
-  const z = await zaklad(formData)
-  if (!z) return
+async function zapsatPrecteni(
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+  tenantId: string,
+  konverzace: string,
+): Promise<boolean> {
+  /*
+    `precist_rozhovor`, ne `oznacit_precteno`: nová funkce vzniká TOUŽ
+    migrací jako pojistka kanálů (20260927100000). Kód se nasazuje
+    sloučením PR, migrace až ručně — kdyby aplikace zapisovala čtení
+    dřív, než je v databázi pojistka, zapsala by čtenáře kanálu natrvalo.
+    Dokud funkce není, čtení se nezapisuje vůbec (jako do 27. 9.).
+  */
+  const { error } = await supabase.rpc('precist_rozhovor', { p_konverzace: konverzace })
+  if (error) return false
 
-  const konverzace = String(formData.get('konverzace') ?? '')
-  if (konverzace === '') return
+  const user = await getUser()
+  if (!user) return true
 
-  const supabase = await getServerSupabase()
-  const { error } = await supabase.rpc('oznacit_precteno', {
-    p_konverzace: konverzace,
-  })
-  if (error) {
-    redirect(
-      `/${z.rozsah}/vzkazy/${konverzace}?chyba=${encodeURIComponent(error.message)}`,
-    )
+  const { data: rozhovory, error: chybaSeznam } = await supabase.rpc('moje_rozhovory', { p_tenant: tenantId })
+  if (chybaSeznam) return true
+  const zbyva = ((rozhovory ?? []) as { neprectenych: number }[]).reduce((s, r) => s + (r.neprectenych ?? 0), 0)
+  if (zbyva === 0) {
+    // Politika na `notifications` pustí úpravu jen u vlastních řádků;
+    // `user_id` je tu navíc, ať je z dotazu vidět, čí řádky to jsou.
+    await supabase
+      .from('notifications')
+      .update({ read_at: new Date().toISOString() })
+      .eq('tenant_id', tenantId)
+      .eq('user_id', user.id)
+      .eq('druh', 'vzkaz.novy')
+      .is('read_at', null)
   }
-
-  // Odznak s nepřečtenými je v rámu, takže se překresluje i layout.
-  revalidatePath(`/${z.rozsah}`, 'layout')
-  redirect(`/${z.rozsah}/vzkazy/${konverzace}`)
+  return true
 }
 
 /**
- * Stáhnout vlastní zprávu.
+ * Označit rozhovor za přečtený — po ZOBRAZENÍ, ne při vykreslení.
+ *
+ * Volá ji klientská součástka `oznacit-po-zobrazeni.tsx`, až je vlákno
+ * opravdu na obrazovce. Na serveru při vykreslení se to dělat nesmí:
+ * odkaz v seznamu rozhovorů si stránku umí načíst dopředu (prefetch)
+ * a rozhovor by se označil jako přečtený, aniž by ho kdo otevřel.
+ *
+ * Nic nepřesměrovává — volá se z efektu, ne z formuláře. Počty ve
+ * zvonečku, na liště a u záložek jsou v rámu, proto se překresluje
+ * celý layout.
+ */
+export async function oznacitPrectenoPoZobrazeni(vstup: {
+  rozsah: string
+  konverzace: string
+}): Promise<{ ok: boolean }> {
+  const z = await zakladZRozsahu(String(vstup.rozsah ?? ''))
+  if (!z) return { ok: false }
+  const konverzace = String(vstup.konverzace ?? '')
+  if (!UUID.test(konverzace)) return { ok: false }
+
+  const supabase = await getServerSupabase()
+  const ok = await zapsatPrecteni(supabase, z.tenantId, konverzace)
+  if (ok) revalidatePath(`/${z.rozsah}`, 'layout')
+  return { ok }
+}
+
+/**
+ * Zrušit vlastní zprávu (v rozhraní „Zrušit zprávu“; do 27. 9. se
+ * tlačítko jmenovalo „Stáhnout“ a četlo se jako stažení souboru).
  *
  * Mazání je STORNO, ne výmaz (pravidlo 9). Řádek zůstane a je vidět,
- * že ho někdo stáhl — zpráva, která zmizí beze stopy, je v pracovním
- * nástroji horší než zpráva se škrtnutím.
+ * že ho někdo zrušil — zpráva, která zmizí beze stopy, je v pracovním
+ * nástroji horší než zpráva se škrtnutím. Potvrzení se ptá prohlížeč
+ * (`vlakno-zprav.tsx`).
  */
 export async function stornovatZpravu(formData: FormData): Promise<void> {
   const z = await zaklad(formData)
@@ -382,6 +439,14 @@ export async function zalozitOsobniRozhovor(formData: FormData): Promise<void> {
     redirect(`${zpet}?chyba=${encodeURIComponent('Vyberte aspoň jednoho člověka.')}`)
   }
 
+  // Délka první zprávy se ověří DŘÍV, než rozhovor vznikne (28. 9.).
+  // Do té doby šel dlouhý text (formulář odeslaný mimo prohlížeč, pole
+  // má maxLength) až po založení — rozhovor zůstal bez zprávy.
+  const prvni = String(formData.get('zprava') ?? '').trim()
+  if (prvni.length > MAX_DELKA_ZPRAVY) {
+    redirect(`${zpet}?chyba=${encodeURIComponent(`Zpráva je moc dlouhá (nejvíc ${MAX_DELKA_ZPRAVY} znaků).`)}`)
+  }
+
   const supabase = await getServerSupabase()
 
   // Bez názvu se NEukládají jména příjemců: název je jeden pro všechny
@@ -403,8 +468,71 @@ export async function zalozitOsobniRozhovor(formData: FormData): Promise<void> {
     redirect(`${zpet}?chyba=${encodeURIComponent(error.message)}`)
   }
 
-  revalidatePath(`/${z.rozsah}/vzkazy`)
-  redirect(`/${z.rozsah}/vzkazy/${String(data)}`)
+  const konverzace = String(data)
+
+  // První zpráva je NEPOVINNÁ (T3, 27. 9.): osobní rozhovor bez textu
+  // dává smysl — člověk ho založí a napíše hned v rozhovoru. S textem
+  // ale odejde rovnou a příjemce dostane upozornění hned.
+  if (prvni !== '') {
+    const chybaZpravy = await poslatPrvniZpravu(supabase, z.tenantId, konverzace, prvni, formData)
+    revalidatePath(`/${z.rozsah}`, 'layout')
+    if (chybaZpravy) {
+      redirect(`/${z.rozsah}/vzkazy/${konverzace}?chyba=${encodeURIComponent(chybaZpravy)}`)
+    }
+  } else {
+    revalidatePath(`/${z.rozsah}/vzkazy`)
+  }
+  redirect(`/${z.rozsah}/vzkazy/${konverzace}`)
+}
+
+/**
+ * První zpráva nového rozhovoru — hned po založení, s klientským id.
+ *
+ * Proč hned: do 27. 9. vznikal vzkaz vedení jen s názvem a text se psal
+ * až v rozhovoru. Upozornění vedení ale vzniká až první ZPRÁVOU —
+ * a kdo po založení odešel, vedení nic nedoručil. V ostré databázi
+ * takhle zůstalo 11 ze 14 vzkazů vedení bez jediné zprávy.
+ *
+ * Klientské id přišlo s formulářem (vyrobené při vykreslení).
+ * `poslat_zpravu` podle něj pozná tutéž zprávu JEN UVNITŘ JEDNOHO
+ * rozhovoru (unikátní index na konverzaci + klientské id). Dvojí
+ * odeslání celého formuláře ale napřed založí DRUHÝ rozhovor, a v něm
+ * je zpráva nová — proti tomu chrání jen `TlacitkoOdeslat` v prohlížeči
+ * (po načtení JavaScriptu). Založení podle klientského id by chtělo
+ * změnu `zalozit_rozhovor` v databázi (plán, oddíl 7, P23).
+ *
+ * Délku textu hlídají akce DŘÍV, než rozhovor založí; tady je to jen
+ * pojistka pro volání odjinud.
+ *
+ * Vrací hlášku pro člověka, nebo null. TEXT SE DO ADRESY NEDÁVÁ —
+ * zpráva může být stížnost na vedoucího a adresa zůstává v historii
+ * prohlížeče i v logu serveru.
+ */
+async function poslatPrvniZpravu(
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+  tenantId: string,
+  konverzace: string,
+  text: string,
+  formData: FormData,
+): Promise<string | null> {
+  if (text.length > MAX_DELKA_ZPRAVY) {
+    return `Rozhovor je založený, ale zpráva byla moc dlouhá (nejvíc ${MAX_DELKA_ZPRAVY} znaků). Napište ji prosím znovu, kratší.`
+  }
+  const klientVstup = String(formData.get('klient_id') ?? '')
+  const klientId = UUID.test(klientVstup) ? klientVstup : randomUUID()
+
+  const { data, error } = await supabase.rpc('poslat_zpravu', {
+    p_konverzace: konverzace,
+    p_text: text,
+    p_priorita: 'normal',
+    p_klient_id: klientId,
+  })
+  if (error) {
+    return `Rozhovor je založený, ale zprávu se nepodařilo odeslat (${error.message}). Napište ji prosím znovu.`
+  }
+
+  naplanovatPushKeZprave(String(data), tenantId)
+  return null
 }
 
 /**
@@ -426,7 +554,25 @@ export async function zalozitVzkazVedeni(formData: FormData): Promise<void> {
   if (!z) return
 
   const nazev = String(formData.get('nazev') ?? '').trim()
-  if (nazev === '') return
+  const zprava = String(formData.get('zprava') ?? '').trim()
+  const zpetFormular = `/${z.rozsah}/vzkazy?vedeni=1`
+
+  // Bez textu se vzkaz NEZAKLÁDÁ (27. 9.). Prázdný vzkaz vedení nic
+  // nedoručí — upozornění vzniká až zprávou — a přesně takhle jich
+  // v ostré databázi zůstalo 11 ze 14. Pole je v prohlížeči povinné;
+  // tady je to pojistka proti formuláři odeslanému jinak.
+  if (nazev === '') {
+    redirect(`${zpetFormular}&chyba=${encodeURIComponent('Napište krátce, čeho se vzkaz týká.')}`)
+  }
+  if (zprava === '') {
+    redirect(`${zpetFormular}&chyba=${encodeURIComponent('Napište zprávu, kterou má vedení dostat.')}`)
+  }
+  // Délka se ověří DŘÍV, než vzkaz vznikne (28. 9.): jinak by dlouhý
+  // text (formulář odeslaný mimo prohlížeč) založil vzkaz vedení bez
+  // zprávy — přesně to, co T3 odstraňuje.
+  if (zprava.length > MAX_DELKA_ZPRAVY) {
+    redirect(`${zpetFormular}&chyba=${encodeURIComponent(`Zpráva je moc dlouhá (nejvíc ${MAX_DELKA_ZPRAVY} znaků). Zkraťte ji prosím.`)}`)
+  }
 
   // Cokoli jiného než tyhle dvě volby je pokus o podvržení. Databáze
   // by to odmítla taky (omezení na sloupci), ale posílat nesmysl dál
@@ -456,11 +602,17 @@ export async function zalozitVzkazVedeni(formData: FormData): Promise<void> {
   // Hlášku psala databáze a je pro člověka — nepřepisuje se. Patří sem
   // i „Vyberte pobočku, ke které vzkaz patří.“
   if (error) {
-    redirect(
-      `/${z.rozsah}/vzkazy?chyba=${encodeURIComponent(error.message)}`,
-    )
+    redirect(`${zpetFormular}&chyba=${encodeURIComponent(error.message)}`)
   }
 
-  revalidatePath(`/${z.rozsah}/vzkazy`)
-  redirect(`/${z.rozsah}/vzkazy/${String(data)}`)
+  // Zpráva jde HNED, ať vedení dostane upozornění. Když neodejde,
+  // rozhovor už existuje — přesměruje se do něj s hláškou a zprávu jde
+  // napsat znovu tam (text se do adresy nedává).
+  const konverzace = String(data)
+  const chybaZpravy = await poslatPrvniZpravu(supabase, z.tenantId, konverzace, zprava, formData)
+  revalidatePath(`/${z.rozsah}`, 'layout')
+  if (chybaZpravy) {
+    redirect(`/${z.rozsah}/vzkazy/${konverzace}?chyba=${encodeURIComponent(chybaZpravy)}`)
+  }
+  redirect(`/${z.rozsah}/vzkazy/${konverzace}`)
 }

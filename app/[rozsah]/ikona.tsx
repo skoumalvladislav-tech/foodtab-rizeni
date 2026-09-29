@@ -174,6 +174,31 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <path d="M13 13.5L16.5 10 13 6.5M16.5 10H7.5" />
     </>
   ),
+  // Zvoneček — upozornění. Do 27. 9. měl zvoneček bublinu jako Vzkazy.
+  zvonek: (
+    <>
+      <path d="M5 13.5V9a5 5 0 0110 0v4.5l1.5 2h-13l1.5-2z" />
+      <path d="M8.3 17.3a1.9 1.9 0 003.4 0" />
+    </>
+  ),
+  // Hlasová zpráva (místo emoji 🎤).
+  mikrofon: (
+    <>
+      <rect x="7.5" y="2.5" width="5" height="9" rx="2.5" />
+      <path d="M4.8 9.5a5.2 5.2 0 0010.4 0M10 14.7v2.8M7 17.5h6" />
+    </>
+  ),
+  // Příloha — sponka.
+  sponka: (
+    <path d="M15.3 9.3l-5.8 5.8a3.3 3.3 0 01-4.7-4.7l6.4-6.4a2.2 2.2 0 013.1 3.1l-6.3 6.3a1.1 1.1 0 01-1.6-1.6l5.6-5.6" />
+  ),
+  // Zamčené nastavení (místo emoji 🔒).
+  zamek: (
+    <>
+      <rect x="4.5" y="9" width="11" height="8.5" rx="1.8" />
+      <path d="M7 9V6.5a3 3 0 016 0V9" />
+    </>
+  ),
 };
 
 export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {

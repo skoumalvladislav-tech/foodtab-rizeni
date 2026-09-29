@@ -190,6 +190,11 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 61 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 61"; chybi=1; }
 
+          # Přečtení kanálu nikoho nezapíše do kanálu natrvalo, upozornění
+          # na oznámení jen tomu, kdo Nástěnku smí číst (62).
+          grep -qE '^[[:space:]]*== KROK 62 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 62"; chybi=1; }
+
           # Docházka člověka po dnech: úseky, úprava a storno (63 —
           # mimo jiné shoda úseků s app.worked_minutes a zavřený přímý
           # UPDATE/DELETE docházky).

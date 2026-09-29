@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import Ikona from '@/app/[rozsah]/ikona'
 import { AUDIO_BITRATE_BPS, MAX_DELKA_S, mmss, priponaZMime } from '@/lib/hlasove-zpravy'
 import { odeslatHlasovku } from '../akce'
 
@@ -188,8 +189,9 @@ export default function HlasovkaNahravac({
   if (stav === 'klid') {
     return (
       <div>
+        {/* Ikona ze sdílené sady místo emoji 🎤 (pravidlo vzhledu 19. 9.). */}
         <button type="button" className="ft-tl ft-tl-vedlejsi ft-tl-male" onClick={zacitNahravat}>
-          🎤 Nahrát hlasovku
+          <Ikona klic="mikrofon" /> Nahrát hlasovku
         </button>
         {chyba ? (
           <p style={{ margin: '6px 0 0', fontSize: '12.5px', color: 'var(--bad)' }}>{chyba}</p>
@@ -215,7 +217,7 @@ export default function HlasovkaNahravac({
           Nahrávám… {mmss(uplynulo)}
         </span>
         <button type="button" className="ft-tl ft-tl-hlavni ft-tl-male" onClick={ukoncitNahravani}>
-          ⏹ Ukončit
+          Ukončit nahrávání
         </button>
       </div>
     )
