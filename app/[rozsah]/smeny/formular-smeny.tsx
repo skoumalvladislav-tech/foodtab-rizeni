@@ -442,7 +442,7 @@ export default function FormularSmeny({
           ) : (
             <>
               <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
-                {smena ? 'Změna uložena.' : 'Směna přidána do rozpisu.'}
+                {smena?.id ? 'Změna uložena.' : 'Směna přidána do rozpisu.'}
               </p>
 
               {/*
@@ -491,7 +491,7 @@ export default function FormularSmeny({
             </p>
           ) : null}
           <input type="hidden" name="rozsah" value={rozsah} />
-          {smena ? <input type="hidden" name="smena" value={smena.id} /> : null}
+          {smena?.id ? <input type="hidden" name="smena" value={smena.id} /> : null}
 
           <label style={{ ...S.label, ...poradi(1) }}>
             <span>Zaměstnanec</span>
@@ -578,7 +578,7 @@ export default function FormularSmeny({
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}
             >
               Datum
-              {!smena ? (
+              {!smena?.id ? (
                 <label style={vicDniPrepinac}>
                   <input
                     type="checkbox"
@@ -961,7 +961,7 @@ export default function FormularSmeny({
   */
   return (
     <ListMobil
-      nadpis={smena ? 'Upravit směnu' : 'Přidat směnu'}
+      nadpis={smena?.id ? 'Upravit směnu' : 'Přidat směnu'}
       onZavrit={zavrit}
       pata={
         hotovo ? (

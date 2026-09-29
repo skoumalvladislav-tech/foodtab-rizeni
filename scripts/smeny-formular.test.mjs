@@ -181,6 +181,35 @@ const uprava = formular({
 ma('u ÚPRAVY se přepínač „Víc dní“ vůbec nenabízí (jen nová směna)', uprava.includes('Víc dní'), false)
 ma('a mřížka výběru dnů taky ne', uprava.includes('ds-sm-vd'), false)
 
+/*
+  Tlačítko „Přidat“ u řádku konkrétní osoby v mřížce (mrizka.tsx,
+  novaSmenaProOsobu) posílá `smena` PŘEDVYPLNĚNOU daty osoby, ale
+  s `id: ''` — je to pořád NOVÁ směna, ne úprava. Test na `!smena`
+  (místo `!smena?.id`) by tenhle případ spletl s úpravou a schoval
+  přepínač „Víc dní“ přesně tomu, kdo směnu zakládá nejčastěji —
+  přes tlačítko u konkrétního člověka, ne přes prázdnou buňku.
+  Nahlásil to Šéfík 29. 9. 2026 (produkce, main): „stále nefunguje
+  při zadávání směn označit více dní“.
+*/
+const predvyplnenaNova = formular({
+  smena: {
+    id: '',
+    branch_id: 'b1',
+    employee_id: 'e1',
+    position_id: null,
+    shift_date: '2026-10-07',
+    starts_at: '08:00',
+    ends_at: '16:00',
+    note: '',
+    pauza_od: null,
+    pauza_do: null,
+  },
+})
+ma('předvyplněná NOVÁ směna (id: "", tlačítko „Přidat“ u osoby): přepínač „Víc dní“ JE vidět',
+  predvyplnenaNova.includes('Víc dní'), true)
+ma('…a nadpis říká „Přidat směnu“, ne „Upravit směnu“',
+  predvyplnenaNova.includes('Přidat směnu') || predvyplnenaNova.includes('Nová směna'), true)
+
 // Mobil nemá dosud ŽÁDNÝ mechanismus na víc dnů (na rozdíl od počítače,
 // kde aspoň bylo „Uložit a přidat další den“) — tělo formuláře je ale
 // sdílené (viz hlavičku formular-smeny.tsx), takže totéž musí být vidět
