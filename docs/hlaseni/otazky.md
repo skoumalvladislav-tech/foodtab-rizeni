@@ -1001,3 +1001,64 @@ kterou dnes nemá.
 **Když to má být jinak:** „potvrzuje každý, kdo na pobočce dělá"
 (podle přístupu k pobočce, nebo podle směny v posledních dnech).
 Změní se najednou upozornění, „Nepotvrdili" i štítek, spolu s P5.
+
+---
+
+## 39. Potvrzovací tabulka směn: má vedoucí umět potvrdit/odmítnout SMĚNU ZA zaměstnance?
+
+**Vzniklo:** 29. 9. 2026, potvrzovací tabulka směn (PR #90).
+
+Zadání: „možnost potvrzení všech směn a nebo možnost nepotvrdit třeba
+jednu nebo více směn." Na rozdíl od záloh (kde zadání výslovně chtělo
+i variantu „majitel potvrdí za zaměstnance", `potvrdit_zalohu_za_zamestnance`)
+tady o „za zaměstnance" nepadlo ani slovo. Implementace je proto
+**čistě self-service** — každý potvrzuje a odmítá jen svoje vlastní
+směny, hromadně (Potvrdit vše) nebo po jedné. Vedoucí s `shifts.manage`
+vidí přehled „Kdo potvrdil", ale jen ke čtení, nemůže tam nic za
+nikoho udělat.
+
+**Co platí do rozhodnutí:** jen self-service. Vedoucí, který chce, aby
+někdo potvrdil směnu, musí za ním dojít nebo napsat.
+
+**Když to má být jinak:** nová RPC `potvrdit_smenu_za_zamestnance` /
+`odmitnout_smenu_za_zamestnance`, analogie zálohové dvojice, plus
+tlačítka v přehledu „Kdo potvrdil". Stojí za zvážení stejná otázka jako
+u záloh: má to smět jen majitel (`app.is_owner`, „kdo vydává, si
+nesmí sám potvrzovat"), nebo `shifts.manage` obecně?
+
+---
+
+## 40. Přehled „Kdo potvrdil" — pevné okno ±14 dní, nebo výběr data?
+
+**Vzniklo:** 29. 9. 2026, potvrzovací tabulka směn (PR #90).
+
+`smeny_potvrzeni_pobocky(p_tenant, p_branch, p_od, p_do)` bere rozsah
+data jako parametr, ale UI ho zatím neposílá — obrazovka ukazuje pevné
+okno ±14 dní od dneška bez možnosti změnit. Zadání ani vzor
+(`zalohy_pobocky`, který taky nemá date picker) číslo pro okno
+nedávaly, tak jsem zvolil rozumnou výchozí hodnotu.
+
+**Co platí do rozhodnutí:** ±14 dní, bez volby.
+
+**Když to má být jinak:** RPC parametry `p_od`/`p_do` už existují —
+stačí do `app/[rozsah]/smeny/potvrzeni/page.tsx` přidat výběr rozsahu
+(žádná migrace).
+
+---
+
+## 41. Upozornění na odmítnutou směnu nenese jméno, kdo ji odmítl
+
+**Vzniklo:** 29. 9. 2026, potvrzovací tabulka směn (PR #90).
+
+Notifikace `smena.odmitnuta`, kterou dostane vedoucí pobočky, nese jen
+den, čas a důvod odmítnutí — ne jméno zaměstnance, který směnu odmítl.
+Text i odkaz to nepředstírají a vedou rovnou na přehled, kde jméno je.
+Nesahal jsem kvůli tomu do migrace (JSON tělo `app.notifikovat`
+u `odmitnout_smenu`).
+
+**Co platí do rozhodnutí:** bez jména v samotném upozornění, doklikat
+se na tabulku.
+
+**Když to má být jinak:** doplnit jméno zaměstnance do `p_telo` volání
+`app.notifikovat` v `public.odmitnout_smenu` (migrace) a promítnout do
+textu upozornění (`lib/upozorneni-text.ts`).
