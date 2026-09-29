@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import Ikona from "@/app/[rozsah]/ikona";
 import {
   BEZ_USEKU,
@@ -518,6 +520,8 @@ export type MojeProps = {
   /** Vlastní směny v načteném okně. */
   moje: SmenaM[];
   ctx: KontextM;
+  /** Do odkazu na potvrzovací tabulku (Šéfík 29. 9. 2026). */
+  rozsah: string;
   zalozka: "nadchazejici" | "kalendar";
   /** Měsíc kalendáře / vybraný den. */
   den: string;
@@ -551,6 +555,23 @@ export function MojeSmeny(p: MojeProps) {
             Další dny v kalendáři
             <Ikona klic="sipkaVpravo" velikost={14} />
           </button>
+
+          {/*
+            Potvrzovací tabulka (Šéfík 29. 9. 2026): odsud si zaměstnanec
+            potvrdí/odmítne SVOJE vydané směny. Stejná karta jako „Tým
+            dnes“ níž (`ds-sm-karta-tym`), jiná ikona a cíl — žádný nový
+            styl se pro to nevymýšlí.
+          */}
+          <Link href={`/${p.rozsah}/smeny/potvrzeni`} className="ds-sm-karta-tym">
+            <span className="ds-sm-karta-tym-ikona" aria-hidden="true">
+              <Ikona klic="fajfkaKruh" velikost={22} />
+            </span>
+            <span className="ds-sm-karta-tym-text">
+              <b>Potvrzení směn</b>
+              <span>Potvrdit nebo odmítnout svoje vydané směny</span>
+            </span>
+            <Ikona klic="sipkaVpravo" velikost={16} />
+          </Link>
 
           {p.smiVidetTym ? (
             <button type="button" className="ds-sm-karta-tym" onClick={p.onTym}>

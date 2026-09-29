@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { pocet } from "@/lib/sklonovani";
 import {
@@ -528,43 +529,55 @@ export default function RozpisView({
         <Nadpis
           popis="Plánujte směny, sledujte obsazenost a jednoduše vydávejte změny."
           vpravo={
-            planovani ? (
-              <>
-                {/*
-                  Export tabulky za měsíc, který se zrovna prohlíží. Je to
-                  obyčejný odkaz na soubor (`/api/smeny/export`): právo
-                  `shifts.manage` si ověří server, ne tlačítko.
-                */}
-                <DropdownMenu
-                  zarovnani="end"
-                  spoustec={
-                    <span className="ft-tl ft-tl-male ft-tl-vedlejsi">
-                      <Ikona klic="faktura" velikost={15} />
-                      Export
-                    </span>
-                  }
-                  polozky={(["xlsx", "pdf"] as const).map((format) => ({
-                    klic: format,
-                    nazev: `${format === "xlsx" ? "Excel (.xlsx)" : "PDF"} — ${nazevMesice(den.slice(0, 7))}`,
-                    href: `/api/smeny/export?rozsah=${encodeURIComponent(planovani.rozsah)}&mesic=${den.slice(0, 7)}&format=${format}${
-                      filtr.pobocky.length === 1 ? `&pobocka=${encodeURIComponent(filtr.pobocky[0])}` : ""
-                    }`,
-                  }))}
-                />
-                <button type="button" className="ft-tl ft-tl-male ft-tl-vedlejsi" onClick={() => setImportOtevren(true)}>
-                  <Ikona klic="seznam" velikost={15} />
-                  Import z tabulky
-                </button>
-                <button
-                  type="button"
-                  className={`ft-tl ft-tl-male ${cekaVydani ? "ft-tl-vedlejsi" : "ft-tl-hlavni"}`}
-                  onClick={novaSmena}
-                >
-                  <Ikona klic="plus" velikost={15} />
-                  Přidat směnu
-                </button>
-              </>
-            ) : null
+            <>
+              {/*
+                Potvrzovací tabulka (Šéfík 29. 9. 2026). Odkaz stojí tu,
+                mimo `planovani ? … : null` — chce ho vidět KAŽDÝ, kdo
+                rozpis vidí, ne jen ten, kdo plánuje: zaměstnanec bez
+                shifts.manage sem chodí potvrdit/odmítnout SVOJE směny.
+              */}
+              <Link href={`/${mobil.rozsah}/smeny/potvrzeni`} className="ft-tl ft-tl-male ft-tl-vedlejsi">
+                <Ikona klic="fajfkaKruh" velikost={15} />
+                Potvrzení směn
+              </Link>
+              {planovani ? (
+                <>
+                  {/*
+                    Export tabulky za měsíc, který se zrovna prohlíží. Je to
+                    obyčejný odkaz na soubor (`/api/smeny/export`): právo
+                    `shifts.manage` si ověří server, ne tlačítko.
+                  */}
+                  <DropdownMenu
+                    zarovnani="end"
+                    spoustec={
+                      <span className="ft-tl ft-tl-male ft-tl-vedlejsi">
+                        <Ikona klic="faktura" velikost={15} />
+                        Export
+                      </span>
+                    }
+                    polozky={(["xlsx", "pdf"] as const).map((format) => ({
+                      klic: format,
+                      nazev: `${format === "xlsx" ? "Excel (.xlsx)" : "PDF"} — ${nazevMesice(den.slice(0, 7))}`,
+                      href: `/api/smeny/export?rozsah=${encodeURIComponent(planovani.rozsah)}&mesic=${den.slice(0, 7)}&format=${format}${
+                        filtr.pobocky.length === 1 ? `&pobocka=${encodeURIComponent(filtr.pobocky[0])}` : ""
+                      }`,
+                    }))}
+                  />
+                  <button type="button" className="ft-tl ft-tl-male ft-tl-vedlejsi" onClick={() => setImportOtevren(true)}>
+                    <Ikona klic="seznam" velikost={15} />
+                    Import z tabulky
+                  </button>
+                  <button
+                    type="button"
+                    className={`ft-tl ft-tl-male ${cekaVydani ? "ft-tl-vedlejsi" : "ft-tl-hlavni"}`}
+                    onClick={novaSmena}
+                  >
+                    <Ikona klic="plus" velikost={15} />
+                    Přidat směnu
+                  </button>
+                </>
+              ) : null}
+            </>
           }
         >
           Rozpis směn

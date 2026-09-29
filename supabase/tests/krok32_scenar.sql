@@ -59,6 +59,18 @@ values (:'tenant', :'perla', '32320000-0000-0000-0000-000000000032',
         'Krok32 Smenar', 'hpp')
 returning id as e_smenar \gset
 
+-- Aktivní členství, ne jen zaměstnanecký řádek: `app.rozdil_rozpisu`
+-- (migrace 20260929100000, bod 7b) i `app.notifikovat` teď žádají
+-- AKTIVNÍ `memberships`, ne jen existující `employees` — bez týhle
+-- řádky by kontrola „zrušení čeká na vydání rozpisu“ níž spadla nad
+-- SPRÁVNÝM kódem (rozdíl by tohohle zaměstnance vůbec neviděl).
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'tenant', '32320000-0000-0000-0000-000000000032', null, 'branch', 'active')
+returning id as m_smenar \gset
+
+insert into public.membership_branches (membership_id, branch_id)
+values (:'m_smenar', :'perla');
+
 -- Nevydaná směna.
 insert into public.shifts (tenant_id, branch_id, employee_id, shift_date, starts_at, ends_at)
 values (:'tenant', :'perla', :'e_smenar', date '2026-10-20', '08:00', '16:00')
@@ -224,6 +236,8 @@ end $$;
 -- Uklidit po sobě: `run.sh` na konci porovnává počty řádků.
 reset role;
 delete from public.shifts where id = :'s_cizi_pokus' or id = :'s_vydana';
+delete from public.membership_branches where membership_id = :'m_smenar';
+delete from public.memberships where id = :'m_smenar';
 delete from public.employees where id = :'e_smenar';
 
 

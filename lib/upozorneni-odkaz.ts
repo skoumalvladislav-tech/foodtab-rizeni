@@ -73,6 +73,15 @@ export function odkazUpozorneni(rozsah: string, z: RadekUpozorneni, konverzace?:
     return odkazNaSmenu(rozsah, { den: telo.den }, jeUuid(z.shift_id) ? z.shift_id : null)
   }
 
+  /*
+    Odmítnutí (29. 9. 2026): jde jen vedoucímu, který na tuhle konkrétní
+    směnu nemusí ani plánovat na svém rozsahu (dostal ji podle práva na
+    pobočce SMĚNY, ne podle toho, kde zrovna je) — proto NE odkazNaSmenu
+    (ta by čekala „moje směny“), ale rovnou přehled Potvrzení směn, kde
+    je vidět kdo/kdy/proč.
+  */
+  if (z.druh === 'smena.odmitnuta') return `/${rozsah}/smeny/potvrzeni`
+
   if (z.druh === 'ukol.pridelen') {
     return jeUuid(telo.ukol) ? `/${rozsah}/ukoly/ukol/${telo.ukol}` : `/${rozsah}/ukoly`
   }

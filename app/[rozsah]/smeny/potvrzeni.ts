@@ -189,7 +189,11 @@ async function nactiPotvrzeniSmeny(
   const [ja, clovek, potvrzeni] = await Promise.all([
     supabase.from('employees').select('id').eq('tenant_id', tenantId).eq('user_id', userId).is('deleted_at', null).limit(1),
     supabase.from('employees').select('user_id').eq('id', s.employee_id).maybeSingle(),
-    supabase.from('smeny_potvrzeni').select(SLOUPCE_POTVRZENI).eq('shift_id', smenaId),
+    // `confirmed_at is not null`: od migrace 20260929100000 nese tahle
+    // tabulka i ODMÍTNUTÉ směny (confirmed_at prázdné, rejected_at
+    // vyplněné) — ty sem nepatří, `platnePotvrzeni` zajímá jen skutečné
+    // potvrzení (viz stejný filtr v ../potvrzeni-okna.ts).
+    supabase.from('smeny_potvrzeni').select(SLOUPCE_POTVRZENI).eq('shift_id', smenaId).not('confirmed_at', 'is', null),
   ])
   if (potvrzeni.error) {
     if (!tabulkaNeexistuje(potvrzeni.error)) console.error('smeny_potvrzeni selhalo', potvrzeni.error)

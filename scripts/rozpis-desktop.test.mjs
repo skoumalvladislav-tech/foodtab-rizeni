@@ -212,6 +212,18 @@ je('potvrzení jiného člověka (směna se po potvrzení přeřadila) neplatí 
 je('po přeřazení: platí potvrzení toho, kdo směnu má teď (řádky jsou dva, od dvou lidí)',
   puntikSmeny({ ...v1, employee_id: 'b', published_employee_id: 'b' }, okno([potvrzeniK(v1), potvrzeniK(v1, { employee_id: 'b' })]), DNES), 'potvrzeno')
 je('potvrzeniPlatne: bez záznamu nebo bez člověka na směně neplatí', [potvrzeniPlatne(v1, null), potvrzeniPlatne(v1, undefined), potvrzeniPlatne({ ...v1, employee_id: null }, potvrzeniK(v1))], [false, false, false])
+
+/*
+  ODMÍTNUTÍ (29. 9. 2026, migrace 20260929100000): smeny_potvrzeni teď
+  nese i odmítnuté směny (confirmed_at prázdné, rejected_at vyplněné).
+  Dotaz na zdroji filtruje `confirmed_at is not null` (potvrzeni-okna.ts,
+  potvrzeni.ts), ale kdyby to někde chybělo, tahle druhá pojistka —
+  přímo v potvrzeniPlatne — nesmí odmítnutý řádek přečíst jako zelený
+  puntík jen proto, že se opis (branch/den/čas/pauza/člověk) shoduje.
+*/
+je('odmítnutý řádek (confirmed_at null) neplatí jako potvrzení, i když opis sedí',
+  [potvrzeniPlatne(v1, potvrzeniK(v1, { confirmed_at: null })), puntikSmeny(v1, okno([potvrzeniK(v1, { confirmed_at: null })]), DNES)],
+  [false, 'nepotvrzeno'])
 je('slova k puntíkům (legenda, title, odečítač) mají jediné místo',
   [POPIS_PUNTIKU.nevydano, POPIS_PUNTIKU.nepotvrzeno, POPIS_PUNTIKU.potvrzeno], ['Nevydáno', 'Vydáno, nepotvrzeno', 'Vydáno a potvrzeno'])
 je('všechny tři barvy se opravdu dají dostat', [...new Set([v1, v2, koncept('2026-09-23', 'a', '08:00', '16:00')].map((s) => puntikSmeny(s, mAno, DNES)))].sort(), ['nepotvrzeno', 'nevydano', 'potvrzeno'])

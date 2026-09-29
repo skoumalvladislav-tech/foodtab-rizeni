@@ -19,6 +19,13 @@ import type { getServerSupabase } from '@/lib/supabase/server'
  * musí mít pevné pořadí, jinak by stránky mohly řádek vynechat nebo
  * zdvojit. Kdyby jich bylo nepředstavitelně mnoho, radši „nevíme“ než
  * ořezaný výsledek, který by chybějící potvrzení četl jako žluté.
+ *
+ * FILTR `confirmed_at is not null` (29. 9. 2026): od migrace
+ * 20260929100000 nese `smeny_potvrzeni` i ODMÍTNUTÉ směny (`rejected_at`
+ * vyplněné, `confirmed_at` prázdné). Bez týhle podmínky by se sem
+ * takový řádek natáhl taky a `potvrzeniPlatne` (lib/rozpis-desktop.ts)
+ * ho — přes vlastní druhou pojistku — nepočítá jako potvrzení, ale
+ * nemá smysl ho vůbec tahat: puntík zajímá jen to, co je fakt zelené.
  */
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
@@ -46,6 +53,7 @@ export async function nactiPotvrzeniOkna(
       // Bez filtru na pobočku: RLS čte podle SOUČASNÉ pobočky směny (uložená se po přesunu
       // směny liší) a klient stejně bere jen `pobocky`.
       .eq('tenant_id', tenantId)
+      .not('confirmed_at', 'is', null)
       .gte('shift_date', od)
       .lte('shift_date', doKdy)
       .order('shift_date', { ascending: true })

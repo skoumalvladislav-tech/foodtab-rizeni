@@ -201,6 +201,12 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 63 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 63"; chybi=1; }
 
+          # Hromadná notifikace při vydání rozpisu centrální cestou
+          # (app.notifikovat), hromadné potvrzení a explicitní odmítnutí
+          # směny s povinným důvodem (64).
+          grep -qE '^[[:space:]]*== KROK 64 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 64"; chybi=1; }
+
           # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
           # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —
           # run.sh ho pouští až za provozními scénáři.
