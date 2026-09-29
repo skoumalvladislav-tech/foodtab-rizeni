@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import { getBrowserSupabase } from "@/lib/supabase/client";
+import { odebiratZmeny } from "@/lib/supabase/zive";
 
 /**
  * Živý checklist — když kolega na jiném telefonu odškrtne položku, tady
@@ -21,17 +22,19 @@ import { getBrowserSupabase } from "@/lib/supabase/client";
  *
  * Bez realtime (migrace nenasazená, výpadek, blokované websockety) se
  * nic nestane — obrazovka se obnoví po akci a po navigaci jako dřív.
+ *
+ * Kanál se připojuje přes `odebiratZmeny` — až s tokenem přihlášeného.
+ * Při načtení stránky checklistu se dřív připojil jako `anon` (v logu
+ * „invalid column for filter id“, 25. 9. 2026), viz lib/supabase/zive.ts.
  */
 export default function ZivyChecklist({ beh }: { beh: string }) {
   const router = useRouter();
 
   useEffect(() => {
     let casovac: ReturnType<typeof setTimeout> | null = null;
-    let kanal: ReturnType<ReturnType<typeof getBrowserSupabase>["channel"]> | null = null;
-    let supabase: ReturnType<typeof getBrowserSupabase> | null = null;
+    let zrusit: (() => void) | null = null;
 
     try {
-      supabase = getBrowserSupabase();
       const obnovit = () => {
         if (casovac) return;
         casovac = setTimeout(() => {
@@ -40,19 +43,19 @@ export default function ZivyChecklist({ beh }: { beh: string }) {
         }, 800);
       };
 
-      kanal = supabase
-        .channel(`checklist:${beh}`)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "checklist_entries", filter: `run_id=eq.${beh}` }, obnovit)
-        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "checklist_entries", filter: `run_id=eq.${beh}` }, obnovit)
-        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "checklist_runs", filter: `id=eq.${beh}` }, obnovit)
-        .subscribe();
+      zrusit = odebiratZmeny(getBrowserSupabase(), `checklist:${beh}`, (kanal) =>
+        kanal
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "checklist_entries", filter: `run_id=eq.${beh}` }, obnovit)
+          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "checklist_entries", filter: `run_id=eq.${beh}` }, obnovit)
+          .on("postgres_changes", { event: "UPDATE", schema: "public", table: "checklist_runs", filter: `id=eq.${beh}` }, obnovit),
+      );
     } catch {
       // Bez nastavení nebo websocketů: jede se bez živé aktualizace.
     }
 
     return () => {
       if (casovac) clearTimeout(casovac);
-      if (supabase && kanal) void supabase.removeChannel(kanal);
+      zrusit?.();
     };
   }, [beh, router]);
 
