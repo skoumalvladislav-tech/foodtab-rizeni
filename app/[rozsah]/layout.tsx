@@ -17,7 +17,7 @@ import { getServerSupabase } from "@/lib/supabase/server";
 import type { TeloUpozorneni } from "@/lib/upozorneni-text";
 import { neprectenaNastenka } from "./vzkazy/nastenka-dotaz";
 import Sdeleni from "@/app/sdeleni";
-import CestaVen from "@/app/cesta-ven";
+import Odhlaseni from "@/components/shell/Odhlaseni";
 import CekajiciPozvanka, { nactiCekajici } from "@/app/cekajici-pozvanka";
 import CekaNaOpravneni from "./ceka-na-opravneni";
 import type { Cekajici } from "@/lib/ceka-na-opravneni";
@@ -76,11 +76,12 @@ export default async function RozsahLayout({
     /*
       Tři sdělení tady se kreslí mimo rám, kde je odhlášení (menu
       „Více"). Kdo se přihlásil špatným účtem, musí mít cestu ven
-      (kontrola #85, 25. 9. 2026) — app/cesta-ven.tsx. Moje údaje jen
-      u „Sem nemáte přístup": bez firmy ukážou zase jen tohle sdělení.
+      (kontrola #85, 25. 9. 2026) — sdílené components/shell/Odhlaseni.tsx
+      (varianta="samostatne", otázka 18 g). Moje údaje jen u „Sem
+      nemáte přístup": bez firmy ukážou zase jen tohle sdělení.
     */
     return (
-      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě" pata={<CestaVen jinaAdresa />}>
+      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě" pata={<Odhlaseni varianta="samostatne" jinaAdresa />}>
         Až vás někdo do firmy pozve, přijde vám e-mail s odkazem — stačí
         počkat, nebo se ozvat tomu, kdo firmu spravuje.
       </Sdeleni>
@@ -90,7 +91,7 @@ export default async function RozsahLayout({
   const ctx = await getContext(tenantId);
   if (!ctx) {
     return (
-      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst" pata={<CestaVen />}>
+      <Sdeleni samostatne nadpis="Firmu se nepodařilo načíst" pata={<Odhlaseni varianta="samostatne" />}>
         Zkuste to prosím za chvíli znovu. Pokud potíž trvá, ozvěte se
         správci firmy.
       </Sdeleni>
@@ -109,7 +110,7 @@ export default async function RozsahLayout({
   const scope = bezpecnyRozsah(ctx, rozsah);
   if (!scope) {
     return (
-      <Sdeleni samostatne nadpis="Sem nemáte přístup" pata={<CestaVen mojeUdaje />}>
+      <Sdeleni samostatne nadpis="Sem nemáte přístup" pata={<Odhlaseni varianta="samostatne" mojeUdaje />}>
         Tahle část Foodtabu vám není otevřená. Pokud si myslíte, že by
         měla být, řekněte si správci firmy o úpravu oprávnění.
       </Sdeleni>

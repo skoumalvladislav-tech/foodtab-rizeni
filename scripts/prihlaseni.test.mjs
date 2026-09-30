@@ -709,11 +709,13 @@ ma('ani v nabídce pod iniciálami', /odhl[aá]s/i.test(zdrojMenuUctu), false)
 {
   const POVOLENE = new Set([
     'app/prihlaseni/akce.ts',
+    // Obrazovky mimo AppShell (#87, 28. 9.) nemají Odhlaseni ani Moje
+    // údaje po ruce — Odhlaseni (varianta="samostatne") volá akci
+    // přímo, stejně jako Odhlaseni v dotazu a Moje údaje. Do 29. 9.
+    // to dělala vlastní kopie `app/cesta-ven.tsx` (otázka 18 g) —
+    // ta je pryč, sloučeno sem.
     'components/shell/Odhlaseni.tsx',
     'app/moje-udaje/page.tsx',
-    // Obrazovky mimo AppShell (#87, 28. 9.) nemají Odhlaseni ani Moje
-    // údaje po ruce — cesta-ven.tsx volá akci přímo, stejně jako ony dvě.
-    'app/cesta-ven.tsx',
   ])
   const nalezy = []
   for (const soubor of zdrojakyAplikace(['app', 'components', 'lib'])) {
@@ -730,6 +732,14 @@ ma('ani v nabídce pod iniciálami', /odhl[aá]s/i.test(zdrojMenuUctu), false)
     /\bodhlasit\b/.test(bezRetezcu(zdrojOdhlaseni)) && /\bodhlasit\b/.test(bezRetezcu(zdrojMojeUdaje)), true)
   ma(`akci odhlášení jinde nikdo nevolá ani nepřeposílá${nalezy.length ? ' — ' + [...new Set(nalezy)].join(', ') : ''}`,
     nalezy.length, 0)
+
+  // Otázka 18 g (29. 9. 2026): `app/cesta-ven.tsx` byla vlastní kopie,
+  // dokud sdílená Odhlaseni.tsx nebyla na main. Teď má zpátky NEJÍT —
+  // kdyby se objevila znovu (např. při mergi staré větve), POVOLENE
+  // by ji mlčky přijalo přes soubor `components/shell/Odhlaseni.tsx`,
+  // aniž by si toho tenhle test všiml, takže existenci hlídá zvlášť.
+  ma('app/cesta-ven.tsx (vlastní kopie před #87) se nevrátila',
+    zdrojakyAplikace(['app']).includes('app/cesta-ven.tsx'), false)
 }
 
 /*

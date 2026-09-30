@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { getContext, getUser, maOpravneni } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import Sdeleni from '@/app/sdeleni'
-import CestaVen from '@/app/cesta-ven'
+import Odhlaseni from '@/components/shell/Odhlaseni'
 import CekajiciPozvanka, { nactiCekajici } from '@/app/cekajici-pozvanka'
 import PrijmoutPozvanku from '@/app/prijmout-pozvanku'
 
@@ -41,7 +41,7 @@ export default async function ZatimBezOpravneni() {
     if (cekajici.length > 0) return <CekajiciPozvanka pozvanky={cekajici} />
 
     return (
-      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě" pata={<CestaVen jinaAdresa />}>
+      <Sdeleni samostatne nadpis="Účet zatím nepatří k žádné firmě" pata={<Odhlaseni varianta="samostatne" jinaAdresa />}>
         Přihlášení proběhlo v pořádku, ale k žádné firmě zatím nemáte
         členství. Až vás někdo do firmy pozve, přijde vám e-mail
         s odkazem — stačí počkat, nebo se ozvat tomu, kdo firmu spravuje.
@@ -105,7 +105,7 @@ export default async function ZatimBezOpravneni() {
           firmy bez záznamu v Lidech. Odhlášení bylo jen dole na Mých
           údajích — kdo se přihlásil špatnou adresou, má ho mít po ruce.
         */}
-        <CestaVen jinaAdresa />
+        <Odhlaseni varianta="samostatne" jinaAdresa />
       </div>
     </main>
   )

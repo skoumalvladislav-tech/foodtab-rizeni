@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 
@@ -10,12 +11,18 @@ import { jeOtevrena, poZmeneAdresy, ZAVRENA, type StavNabidky } from "@/lib/stav
 /**
  * ODHLÁŠENÍ S DOTAZEM (podmínka Šéfíka, 8. 9.).
  *
- * Kreslí se podle šířky obrazovky na jednom ze dvou míst:
+ * Kreslí se na třech místech:
  *
  *   - `varianta="menu"` — na telefonu v menu „Více" (MobileVice),
  *   - `varianta="sloupec"` — nad 640 px vlevo dole, na konci levého
  *     sloupce (ModuleSidebar a sloupce Marketingu a Faktur). Proč
  *     zrovna tam, stojí v ModuleSidebar.
+ *   - `varianta="samostatne"` — MIMO AppShell, na sděleních bez rámu
+ *     aplikace („Účet zatím nepatří k žádné firmě", „Sem nemáte
+ *     přístup", čekající pozvánka …). Do 29. 9. 2026 tam byla vlastní
+ *     kopie (`app/cesta-ven.tsx`, kontrola #85, 25. 9.) — sdílená
+ *     komponenta ještě nebyla na main (PR #85 běžel souběžně).
+ *     Sloučeno, jakmile byla (otázka 18 g, docs/hlaseni/otazky.md).
  *
  * Do 25. 9. 2026 bylo na rozcestníku, kam vedlo logo; rozcestník je
  * zrušený. Na Mých údajích zůstává taky — tam patří k výdeji dat
@@ -37,13 +44,39 @@ import { jeOtevrena, poZmeneAdresy, ZAVRENA, type StavNabidky } from "@/lib/stav
  * (Alt+←, gesto zpět na iPadu, přesměrování po odeslání formuláře):
  * pamatuje se adresa, kde se otevřel, stejně jako u nabídek
  * (lib/stav-nabidky.ts). V menu „Více" tohle obstarává samo menu.
+ *
+ * Samostatná varianta tohle pathname-driven zavírání NEPOUŽÍVÁ (vlastní
+ * stav místo `stav-nabidky.ts`): na těchhle obrazovkách se nedá nikam
+ * jinam přejít, jen odhlásit nebo otevřít Moje údaje, takže by zavírání
+ * podle adresy nemělo co dělat. `ptaSeNaZacatku` je jen pro kontrolu
+ * (scripts/ceka-na-opravneni.test.mjs), která bez prohlížeče neumí
+ * ťuknout a druhý stav (dotaz) by jinak nikdy neviděla.
  */
-export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "sloupec" }) {
+export default function Odhlaseni({
+  varianta = "menu",
+  mojeUdaje = false,
+  jinaAdresa = false,
+  ptaSeNaZacatku = false,
+}: {
+  varianta?: "menu" | "sloupec" | "samostatne";
+  /** Jen `varianta="samostatne"`: odkaz na Moje údaje (kde firma je). */
+  mojeUdaje?: boolean;
+  /**
+   * Jen `varianta="samostatne"`: rada „přihlásili jste se jinou
+   * adresou, než na kterou přišla pozvánka?". Jen tam, kde to může být
+   * příčina (kontrola 28. 9. 2026).
+   */
+  jinaAdresa?: boolean;
+  /** Jen `varianta="samostatne"`, jen pro kontrolu bez prohlížeče. */
+  ptaSeNaZacatku?: boolean;
+}) {
+  const veSamostatne = varianta === "samostatne";
   const cesta = usePathname() ?? "";
   const [stav, setStav] = useState<StavNabidky>(ZAVRENA);
+  const [ptaSeSamostatne, setPtaSeSamostatne] = useState(ptaSeNaZacatku);
   const platny = poZmeneAdresy(stav, cesta);
-  if (platny !== stav) setStav(platny);
-  const ptaSe = jeOtevrena(platny, cesta);
+  if (!veSamostatne && platny !== stav) setStav(platny);
+  const ptaSe = veSamostatne ? ptaSeSamostatne : jeOtevrena(platny, cesta);
   const presunoutFokus = useRef(false);
   const obalRef = useRef<HTMLDivElement>(null);
   const odhlasitRef = useRef<HTMLButtonElement>(null);
@@ -69,7 +102,8 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
 
   function prepnout(novy: boolean) {
     presunoutFokus.current = true;
-    setStav(novy ? cesta : ZAVRENA);
+    if (veSamostatne) setPtaSeSamostatne(novy);
+    else setStav(novy ? cesta : ZAVRENA);
   }
 
   // Na obalu, ne na document: Escape zmáčknutý jinde se dotazu netýká
@@ -98,7 +132,14 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
   return (
     <div
       ref={obalRef}
-      className={veSloupci ? "ds-odhlaseni ds-odhlaseni-sloupec" : "ds-odhlaseni"}
+      data-odhlaseni-samostatne={veSamostatne ? "" : undefined}
+      className={
+        veSamostatne
+          ? "ds-odhlaseni ds-odhlaseni-samostatne"
+          : veSloupci
+            ? "ds-odhlaseni ds-odhlaseni-sloupec"
+            : "ds-odhlaseni"
+      }
       onKeyDown={veSloupci ? naKlavesu : undefined}
       onBlur={veSloupci ? naOdchodFokusu : undefined}
     >
@@ -129,6 +170,26 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
               seznamem obrazovek. */}
           {veSloupci ? poznamka : null}
         </div>
+      ) : veSamostatne ? (
+        // Samostatná varianta: řádek vedle sebe s volitelným odkazem na
+        // Moje údaje (jen kde firma je — CestaVen dřív, otázka 18 g).
+        <div className="ds-odhlaseni-radek">
+          {mojeUdaje ? (
+            <Link href="/moje-udaje" className="ft-tl ft-tl-vedlejsi">
+              Moje údaje
+            </Link>
+          ) : null}
+          {/* Ikona A slovo — samotná ikona se dá splést s čímkoli. */}
+          <button
+            ref={odhlasitRef}
+            type="button"
+            className="ft-tl ft-tl-vedlejsi"
+            onClick={() => prepnout(true)}
+          >
+            <Ikona klic="odhlasit" />
+            Odhlásit se
+          </button>
+        </div>
       ) : (
         // Ikona A slovo, všude — i v ikonovém sloupci na tabletu, kde je
         // slovo malé pod ikonou (globals.css). Samotná ikona se dá
@@ -144,7 +205,18 @@ export default function Odhlaseni({ varianta = "menu" }: { varianta?: "menu" | "
           <span className="stitek">Odhlásit se</span>
         </button>
       )}
-      {veSloupci ? null : poznamka}
+      {veSamostatne
+        ? jinaAdresa
+          ? (
+              <p className="ds-odhlaseni-jina-adresa">
+                Přihlásili jste se jinou adresou, než na kterou vám přišla
+                pozvánka? Odhlaste se a přihlaste se tou správnou.
+              </p>
+            )
+          : null
+        : veSloupci
+          ? null
+          : poznamka}
     </div>
   );
 }

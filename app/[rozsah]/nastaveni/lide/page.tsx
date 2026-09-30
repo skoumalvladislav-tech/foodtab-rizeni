@@ -15,11 +15,12 @@ import { SeznamCekajicich } from "../../ceka-na-opravneni";
 import Ikona from "../../ikona";
 import Sdeleni from "@/app/sdeleni";
 import Nadpis from "../../nadpis";
-import { nastavitSazbu, upravitZamestnance, smazatZamestnance } from "./akce";
+import { nastavitSazbu, upravitZamestnance, smazatZamestnance, obnovitZamestnance } from "./akce";
 import PolePozice from "./pole-pozice";
 import PanelOpravneni from "./panel-opravneni";
 import PanelPinu from "./pin";
 import SmazatZamestnance from "./smazani";
+import ObnovitZamestnance from "./obnoveni";
 import VystavitPozvankuFormular from "./vystaveni";
 import CekajiciPozvanky, { type CekajiciPozvankaFirmy } from "./cekajici-pozvanky";
 
@@ -1042,6 +1043,23 @@ export default async function NastaveniLide({
                         Upravit
                       </Link>
                       {/*
+                        Obnovit smazaného (otázka 18 e). Server-side
+                        logika (spoušť app.clenstvi_podle_zaznamu, se
+                        stropem app.smi_pridelit_zamestnance) existuje
+                        a je otestovaná už od 20260925150000 — chybělo
+                        jen tlačítko. Dva kroky jako Smazat.
+                      */}
+                      {z.deleted_at ? (
+                        <div className="ft-kebab-polozka" style={{ padding: "4px 6px" }}>
+                          <ObnovitZamestnance
+                            akce={obnovitZamestnance}
+                            id={z.id}
+                            rozsah={rozsah}
+                            jmeno={z.full_name}
+                          />
+                        </div>
+                      ) : null}
+                      {/*
                         Oprávnění. Do 25. 9. 2026 k nim vedl jen odkaz
                         ve sloupci Oprávnění — na telefonu mimo obrazovku
                         vpravo a psaný jako název zařazení, ne jako akce.
@@ -1259,6 +1277,10 @@ function popisChyby(kod: string): string {
     // Text píše databáze a chodí v adrese; tenhle je jen návěští.
     case "smazani":
       return "Smazat se to nepovedlo.";
+    // Strop app.smi_pridelit_zamestnance (otázka 18 e): text u něj
+    // vysvětlí, čí práva by se vracela.
+    case "obnoveni":
+      return "Obnovit se to nepovedlo.";
     // Člověk bez účtu nebo bez přijaté pozvánky sem nechodí: uložilo
     // se všechno, co jde, a hlásí se to jako úspěch (`bezuctu`,
     // `bezclenstvi` u `ulozeno=opravneni`).

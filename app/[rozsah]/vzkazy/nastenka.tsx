@@ -1,6 +1,6 @@
 import { getUser, hasAccess, type Context, type Scope } from '@/lib/authz'
 import { jeProMe, seraditOznameni, type CtenarNastenky } from '@/lib/komunikace/nastenka'
-import { DotazSelhal } from '@/lib/supabase/dotaz'
+import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import FormularOznameni from './formular-oznameni'
@@ -111,19 +111,42 @@ export default async function Nastenka({
   const zpravy = seraditOznameni(nactene, prectene, ja)
   const proMe = zpravy.filter((z) => jeProMe(z, ja)).map((z) => z.id)
 
-  // Jména autorů. Politika profiles_select_colleagues pouští profily lidí
-  // ze stejné firmy, takže dotaz projde; kdo se nenajde, zůstane bez jména.
+  /*
+    Jména autorů. Přímé čtení `public.profiles` tu do 29. 9. 2026
+    nevrátilo autora, kterého mezitím smazali v Lidech: smazání
+    pozastaví jeho členství (20260925150000, oddíl 7) a
+    `profiles_select_colleagues` pustí cizí profil jen mezi dvěma
+    AKTIVNÍMI členstvími. Autor starého oznámení tak zůstal bez jména
+    (otázka 18 f). `jmena_autoru_oznameni` je SECURITY DEFINER a bere
+    jméno i ze smazaného záznamu — filtr live/smazaný patří jen dosahu
+    (RLS na announcements), ne zobrazení jména.
+  */
   const autori = new Map<string, string>()
   const idAutoru = [...new Set(zpravy.map((z) => z.author_id).filter((i): i is string => Boolean(i)))]
   if (idAutoru.length > 0) {
-    const { data: profily, error: chybaProfily } = await supabase
-      .from('profiles')
-      .select('user_id, full_name')
-      .in('user_id', idAutoru)
-    if (chybaProfily) throw new DotazSelhal('profily lidí', chybaProfily)
-    for (const p of profily ?? []) {
-      const jmeno = String(p.full_name ?? '').trim()
-      if (jmeno !== '') autori.set(p.user_id as string, jmeno)
+    const { data: jmena, error: chybaJmen } = await supabase.rpc('jmena_autoru_oznameni', {
+      p_tenant: tenantId,
+      p_branch: scope.branchId,
+      p_user_ids: idAutoru,
+    })
+    if (chybaJmen && !funkceNeexistuje(chybaJmen)) throw new DotazSelhal('jména autorů oznámení', chybaJmen)
+    if (!chybaJmen) {
+      for (const r of (jmena ?? []) as { user_id: string; jmeno: string | null }[]) {
+        const jmeno = String(r.jmeno ?? '').trim()
+        if (jmeno !== '') autori.set(r.user_id, jmeno)
+      }
+    } else {
+      // Migrace 20260929120000 ještě nenasazená (funkceNeexistuje):
+      // chování jako do 29. 9. 2026 — smazaný autor zůstane bez jména.
+      const { data: profily, error: chybaProfily } = await supabase
+        .from('profiles')
+        .select('user_id, full_name')
+        .in('user_id', idAutoru)
+      if (chybaProfily) throw new DotazSelhal('profily lidí', chybaProfily)
+      for (const p of profily ?? []) {
+        const jmeno = String(p.full_name ?? '').trim()
+        if (jmeno !== '') autori.set(p.user_id as string, jmeno)
+      }
     }
   }
 
