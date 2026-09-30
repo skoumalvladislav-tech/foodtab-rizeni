@@ -101,7 +101,7 @@ jobs:
             osloveni penize prava-osob prideleni prihlaseni provoz-granty
             qr ranni-prehled rozpis-desktop rozpis-export rozpis-mobil
             scenare sklonovani smeny-formular smeny-potvrzeni tabulka ucet upozorneni vydelky
-            web-push xlsx zalohy
+            web-push xlsx zalohy ziva-aktualizace
           )
 
           # VYNECHANÉ. Na main padají už dnes, většinou na podstrčených
