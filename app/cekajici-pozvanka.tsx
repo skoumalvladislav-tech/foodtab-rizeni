@@ -1,6 +1,6 @@
 import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
-import CestaVen from './cesta-ven'
+import Odhlaseni from '@/components/shell/Odhlaseni'
 import PrijmoutPozvanku from './prijmout-pozvanku'
 
 /**
@@ -84,7 +84,7 @@ export default function CekajiciPozvanka({
           Bez tohohle se odsud odhlásit nešlo (kontrola #85). Moje údaje
           ne: bez firmy ukážou jen „Účet zatím nepatří k žádné firmě".
         */}
-        <CestaVen jinaAdresa />
+        <Odhlaseni varianta="samostatne" jinaAdresa />
       </div>
     </main>
   )

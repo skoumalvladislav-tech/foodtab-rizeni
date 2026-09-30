@@ -1068,6 +1068,18 @@ span.ds-sm-dl { cursor: default; }
 .ds-odhlaseni-akce form { margin: 0; }
 .ds-odhlaseni-poznamka { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 
+/* Mimo AppShell (varianta="samostatne") — sdělení bez rámu aplikace
+   („Účet zatím nepatří k žádné firmě", „Sem nemáte přístup" …). Do
+   29. 9. 2026 vlastní kopie app/cesta-ven.tsx (kontrola #85); nahrazeno
+   sdílenou komponentou, jakmile byla sdílená Odhlaseni.tsx na main
+   (otázka 18 g). Bez poznámky „Odhlásí vás z tohoto zařízení" — na
+   těchhle obrazovkách stačí jedna věta (jinaAdresa), ne dvě. Odsazení
+   a čára nad tlačítky jsou opsané z původního `cesta-ven.tsx` (`obal`)
+   — bez nich by tlačítka splývala rovnou s větou nad nimi. */
+.ds-odhlaseni-samostatne { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.ds-odhlaseni-radek { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ds-odhlaseni-jina-adresa { margin: 10px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+
 /* Ve sloupci (varianta="sloupec", .ft-side-pata v globals.css). Čáru nese
    pata sloupce. Tlačítko vypadá jako položka sloupce — tmavý podklad,
    tlumený text, ikona a slovo —, ne jako .ft-tl: obrysové tlačítko

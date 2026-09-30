@@ -188,6 +188,51 @@ export async function smazatZamestnance(formData: FormData): Promise<void> {
 }
 
 /**
+ * Obnovení smazaného zaměstnance (otázka 18 e, docs/hlaseni/otazky.md).
+ *
+ * Zrcadlo `smazatZamestnance` — `deleted_at` zpátky na null. Vlastní
+ * chování na to nesahá vůbec: spoušť `app.clenstvi_podle_zaznamu`
+ * (migrace 20260925150000, oddíl 7) obnovený řádek vrátí i do
+ * `memberships` (aktivní), a to POD STROPEM —
+ * `app.smi_pridelit_zamestnance(tenant, id, 'tenant')`: obnovit smí
+ * jen ten, kdo by tomu člověku jeho práva (i majitelství) směl
+ * přidělit, jako u přeřazení. Kdo na to nemá, dostane z databáze
+ * chybu „Obnovit člověka s oprávněními, která sami nemáte, nemůžete."
+ * — a ta se propouští stejně jako chyba smazání, ne polyká.
+ *
+ * Žádná nová RPC funkce: cesta je tatáž jako u ručního zápisu, který
+ * dřív fungoval jen přímo přes API (`employees_write` + spoušť výš) —
+ * chybělo jen tlačítko v appce. Ověřeno proti skutečné funkci
+ * v supabase/tests/krok61_scenar.sql (i selhání stropu).
+ */
+export async function obnovitZamestnance(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '')
+  const rozsah = String(formData.get('rozsah') ?? '')
+  if (!id) return
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return
+
+  const pristup = await zkusPristup(tenantId, 'people.manage', rozsah)
+  if (pristup.stav !== 'ok') return
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase
+    .from('employees')
+    .update({ deleted_at: null })
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    redirect(
+      `/${rozsah}/nastaveni/lide?chyba=obnoveni&text=${encodeURIComponent(error.message)}`,
+    )
+  }
+
+  revalidatePath(`/${rozsah}/nastaveni/lide`)
+}
+
+/**
  * Zadání hodinové sazby.
  *
  * Zakládá NOVÝ řádek historie, nikdy nepřepisuje starý — sazba je

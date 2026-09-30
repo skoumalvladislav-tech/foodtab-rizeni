@@ -333,7 +333,11 @@ const STUB_SERVER = js('export async function getServerSupabase() { return globa
 const STUB_NAV = js(
   'export function redirect(u) { const e = new Error("NEXT_REDIRECT " + u); e.presmerovani = u; throw e }\n' +
   'export function notFound() { throw new Error("NOT_FOUND") }\n' +
-  'export function useRouter() { return { push() {}, refresh() {} } }',
+  'export function useRouter() { return { push() {}, refresh() {} } }\n' +
+  // Odhlaseni.tsx volá usePathname bez ohledu na variantu (Rules of
+  // Hooks) — varianta="samostatne" (oddíl 9) ho ale nepoužívá k ničemu,
+  // takže na konkrétní adrese tady nezáleží.
+  'export function usePathname() { return "/" }',
 )
 const STUB_CACHE = js('export function revalidatePath(...a) { globalThis.__ceka.revalidace.push(a) }')
 const STUB_HEADERS = js('export async function headers() { return new Map([["host", "localhost:3000"]]) }')
@@ -428,7 +432,7 @@ const lib = await import('../lib/ceka-na-opravneni.ts')
 const STUB_ODHLASIT = js('export async function odhlasit() {}')
 const STUB_PRIJMOUT = js('export async function prijmoutMojiPozvanku() { return { stav: "nic" } }')
 const CESTA = [...SPOLECNE, ['@/app/prihlaseni/akce', STUB_ODHLASIT], ['./prijmout-akce', STUB_PRIJMOUT]]
-const CestaVen = (await nactiModul('app/cesta-ven.tsx', CESTA)).default
+const Odhlaseni = (await nactiModul('components/shell/Odhlaseni.tsx', CESTA)).default
 const Sdeleni = (await nactiModul('app/sdeleni.tsx', CESTA)).default
 const StrankaUvod = (await nactiModul('app/page.tsx', CESTA)).default
 const StrankaBezOpravneni = (await nactiModul('app/zatim-bez-opravneni/page.tsx', CESTA)).default
@@ -565,7 +569,8 @@ const htmlOkna = renderToStaticMarkup(createElement(Okno, { rozsah: 'firma', lid
 
   /*
     Druhý krok. Bez prohlížeče se na tlačítko ťuknout nedá — komponenta
-    se proto vykreslí rovnou s otázkou (`ptaSeNaZacatku`, jako CestaVen).
+    se proto vykreslí rovnou s otázkou (`ptaSeNaZacatku`, jako Odhlaseni
+    varianta="samostatne").
   */
   const dotaz = renderToStaticMarkup(createElement(OdebratZFirmy, {
     ucet: U_KATA, jmeno: 'katarinajiraskova4@gmail.com', ptaSeNaZacatku: true,
@@ -930,51 +935,51 @@ console.log('\n== 9. Cesta ven ze sdělení mimo rám ==')
       text: dekodovat(m[2].replace(/<[^>]+>/g, '')).trim(),
     }))
 
-  const klid = renderToStaticMarkup(createElement(CestaVen, {}))
+  const klid = renderToStaticMarkup(createElement(Odhlaseni, { varianta: 'samostatne' }))
   ma('cesta ven: tlačítko „Odhlásit se", které jen ZEPTÁ (type=button, žádný formulář)',
     [tlacitka(klid), /<form\b/.test(klid)], [[{ typ: 'button', text: 'Odhlásit se' }], false])
   ma('… bez firmy žádný odkaz na Moje údaje (vedly by zase sem)', odkazy(klid).length, 0)
 
-  const sUdaji = renderToStaticMarkup(createElement(CestaVen, { mojeUdaje: true }))
+  const sUdaji = renderToStaticMarkup(createElement(Odhlaseni, { varianta: 'samostatne', mojeUdaje: true }))
   ma('… s firmou i Moje údaje', odkazy(sUdaji), [{ href: '/moje-udaje', text: 'Moje údaje' }])
 
   /*
     Rada „přihlásili jste se jinou adresou, než na kterou přišla
     pozvánka?" jen tam, kde to může být příčina (kontrola 28. 9. 2026).
   */
-  const sRadou = renderToStaticMarkup(createElement(CestaVen, { jinaAdresa: true }))
+  const sRadou = renderToStaticMarkup(createElement(Odhlaseni, { varianta: 'samostatne', jinaAdresa: true }))
   ma('rada o jiné adrese jen na požádání, bez věty o kódu z e-mailu',
     [/jinou adresou/.test(klid), /jinou adresou/.test(sRadou), /Příště/.test(sRadou)],
     [false, true, false])
 
-  const dotaz = renderToStaticMarkup(createElement(CestaVen, { ptaSeNaZacatku: true }))
+  const dotaz = renderToStaticMarkup(createElement(Odhlaseni, { varianta: 'samostatne', ptaSeNaZacatku: true }))
   ma('dotaz: „Odhlásit se?", odhlásí až formulář, vedle „Zpět"',
     [dotaz.includes('Odhlásit se?'), /<form\b[\s\S]*?<button type="submit"[^>]*>Odhlásit<\/button>[\s\S]*?<\/form>/.test(dotaz),
       tlacitka(dotaz).find((t) => t.text === 'Zpět')?.typ],
     [true, true, 'button'])
 
-  const zdrojCesty = (await import('node:fs')).readFileSync(new URL('../app/cesta-ven.tsx', import.meta.url), 'utf8')
-  ma('formulář odhlašuje akcí z přihlášení (ne vlastní kopií)',
-    /import \{ odhlasit \} from '@\/app\/prihlaseni\/akce'/.test(zdrojCesty) && /<form action=\{odhlasit\}/.test(zdrojCesty), true)
+  const zdrojOdhlaseni = (await import('node:fs')).readFileSync(new URL('../components/shell/Odhlaseni.tsx', import.meta.url), 'utf8')
+  ma('formulář odhlašuje akcí z přihlášení (jedna sdílená komponenta, ne kopie)',
+    /import \{ odhlasit \} from "@\/app\/prihlaseni\/akce"/.test(zdrojOdhlaseni) && /<form action=\{odhlasit\}/.test(zdrojOdhlaseni), true)
 
   // Sdělení: cesta ven POD větou, ne v ní (věta je <p>).
   const sdeleni = renderToStaticMarkup(createElement(Sdeleni, {
-    samostatne: true, nadpis: 'Účet zatím nepatří k žádné firmě', pata: createElement(CestaVen, {}),
+    samostatne: true, nadpis: 'Účet zatím nepatří k žádné firmě', pata: createElement(Odhlaseni, { varianta: 'samostatne' }),
   }, 'Věta.'))
   ma('Sdělení vykreslí cestu ven pod větou (ne uvnitř <p>)',
-    /<p[^>]*>Věta\.<\/p><div data-cesta-ven=""/.test(sdeleni), true)
+    /<p[^>]*>Věta\.<\/p><div data-odhlaseni-samostatne=""/.test(sdeleni), true)
 
   // Skutečné stránky mimo rám.
   svet(U_NIKDO)
   const uvod = renderToStaticMarkup(await StrankaUvod())
   ma('úvod (/) bez firmy: sdělení s cestou ven i radou o jiné adrese',
-    [uvod.includes('Účet zatím nepatří k žádné firmě'), uvod.includes('data-cesta-ven'), odkazy(uvod).length,
+    [uvod.includes('Účet zatím nepatří k žádné firmě'), uvod.includes('data-odhlaseni-samostatne'), odkazy(uvod).length,
       /jinou adresou/.test(uvod)], [true, true, 0, true])
 
   svet(U_NIKDO)
   const bezFirmy = renderToStaticMarkup(await StrankaBezOpravneni())
   ma('/zatim-bez-opravneni bez firmy: sdělení s cestou ven',
-    [bezFirmy.includes('Účet zatím nepatří k žádné firmě'), bezFirmy.includes('data-cesta-ven')], [true, true])
+    [bezFirmy.includes('Účet zatím nepatří k žádné firmě'), bezFirmy.includes('data-odhlaseni-samostatne')], [true, true])
 
   // Druhý Kateřinin účet: člen firmy bez záznamu v Lidech.
   svet(U_KATA)
@@ -1028,12 +1033,12 @@ console.log('\n== 9. Cesta ven ze sdělení mimo rám ==')
     ['app/zatim-bez-opravneni/page.tsx', [['Účet zatím nepatří k žádné firmě', false, true]]],
   ]) {
     const zdroj = fs.readFileSync(new URL(`../${soubor}`, import.meta.url), 'utf8')
-    // Celá značka na jednom řádku; `pata={<CestaVen />}` má vlastní `>`.
+    // Celá značka na jednom řádku; `pata={<Odhlaseni varianta="samostatne" />}` má vlastní `>`.
     const znacky = [...zdroj.matchAll(/<Sdeleni samostatne(.*)>\s*$/gm)].map((m) => ({
       nadpis: m[1].match(/nadpis="([^"]*)"/)?.[1],
-      udaje: /pata=\{<CestaVen[^}]* mojeUdaje[ /]/.test(m[1]),
-      rada: /pata=\{<CestaVen[^}]* jinaAdresa[ /]/.test(m[1]),
-      cesta: /pata=\{<CestaVen( mojeUdaje| jinaAdresa)* \/>\}/.test(m[1]),
+      udaje: /pata=\{<Odhlaseni varianta="samostatne"[^}]* mojeUdaje[ /]/.test(m[1]),
+      rada: /pata=\{<Odhlaseni varianta="samostatne"[^}]* jinaAdresa[ /]/.test(m[1]),
+      cesta: /pata=\{<Odhlaseni varianta="samostatne"( mojeUdaje| jinaAdresa)* \/>\}/.test(m[1]),
     }))
     ma(`${soubor}: každé samostatné sdělení má cestu ven, Moje údaje jen s firmou, radu jen bez firmy`,
       znacky, cekam.map(([nadpis, udaje, rada]) => ({ nadpis, udaje, rada, cesta: true })))

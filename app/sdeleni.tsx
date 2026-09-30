@@ -22,7 +22,8 @@ export default function Sdeleni({
    */
   samostatne?: boolean;
   /**
-   * Co pod větou — u samostatného sdělení cesta ven (`app/cesta-ven.tsx`):
+   * Co pod větou — u samostatného sdělení cesta ven
+   * (`<Odhlaseni varianta="samostatne" />`, components/shell/Odhlaseni.tsx):
    * mimo rám není menu, a tedy ani odhlášení (kontrola #85, 25. 9. 2026).
    * Zvlášť, ne v `children`: věta je `<p>` a tlačítka do něj nepatří.
    */

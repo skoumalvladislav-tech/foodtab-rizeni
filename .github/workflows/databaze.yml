@@ -213,6 +213,12 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 65 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 65"; chybi=1; }
 
+          # Úklid otázky 18 (d, f): komu_ohlasit_prijeti počítá „čeká"
+          # podle zařazení, ne podle staré role; jméno autora oznámení
+          # na Nástěnce se vrátí i po smazání jeho záznamu v Lidech (66).
+          grep -qE '^[[:space:]]*== KROK 66 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 66"; chybi=1; }
+
           # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
           # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —
           # run.sh ho pouští až za provozními scénáři.
