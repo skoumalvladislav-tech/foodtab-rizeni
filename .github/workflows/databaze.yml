@@ -219,6 +219,22 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 66 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 66"; chybi=1; }
 
+          # Úklid otázek 25, 31, 33 (docházka) — vlastní docházku vedoucího
+          # zapsat_rucni_dochazku odmítne, přímý INSERT do
+          # attendance_events je pro authenticated zavřený úplně,
+          # app.otevreny_prichod sjednocen s app.useky_dochazky (67).
+          # Jiná závěrečná hláška než konvenční „== KROK NN HOTOV ==",
+          # proto vlastní vzorec.
+          grep -qE '^[[:space:]]*KROK 67 — VŠECHNY KONTROLY PROŠLY[[:space:]]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 67"; chybi=1; }
+
+          # Nezávislé druhé ověření téhož úklidu (67): vlastní lidé a
+          # data, navíc přesné znění hlášky u otázky 25, grant-vs-RLS
+          # rozlišení u otázky 31 a přímé porovnání obou zdrojů pravdy
+          # u otázky 33 (68).
+          grep -qE '^[[:space:]]*== KROK 68 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 68"; chybi=1; }
+
           # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
           # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —
           # run.sh ho pouští až za provozními scénáři.

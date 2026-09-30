@@ -386,15 +386,35 @@ begin
   perform pg_temp.check('zaměstnanec si ruční záznam sám nezadá', v_ok);
 
   -- Ruční záznam bez důvodu neprojde
+  --
+  -- Od otázky 31 (docs/hlaseni/otazky.md, migrace 20260929110000) je
+  -- INSERT do attendance_events pro authenticated zavřený úplně, i pro
+  -- majitele — přímý insert teď spadne na oprávnění dřív, než se vůbec
+  -- dostane k omezení „důvod aspoň tři znaky"
+  -- (attendance_rucni_ma_duvod). Ta validace se PROTO ověřuje zvlášť,
+  -- rovnou na RPC, o kousek níž — ne přes krok14/krok16, které RPC
+  -- volají vždy s plnohodnotným důvodem a tuhle větev nikdy nezasáhnou.
   perform set_config('test.user_id', v_majitel::text, false);
   begin
     insert into public.attendance_events
       (tenant_id, branch_id, employee_id, kind, source, note)
     values (v_tenant, v_branch, v_marek_e, 'in', 'manual', '');
     v_ok := false;
-  exception when check_violation then v_ok := true;
+  exception when insufficient_privilege then v_ok := true;
   end;
-  perform pg_temp.check('ruční záznam bez důvodu neprojde', v_ok);
+  perform pg_temp.check('ani majiteli přímý insert neprojde (otázka 31 — INSERT zavřený úplně)', v_ok);
+
+  -- Jediná dosažitelná cesta k „důvod aspoň tři znaky" je teď RPC
+  -- (přímý insert je zavřený grantem, výš) — ověřeno tady přímo, ne
+  -- jen tvrzením v komentáři vedle.
+  begin
+    perform public.zapsat_rucni_dochazku(
+      v_tenant, v_branch, v_marek_e, 'in', timestamp '2026-01-01 08:00', 'ab');
+    v_ok := false;
+  exception when check_violation then
+    v_ok := sqlerrm = 'Napište prosím, proč se záznam zadává ručně. Aspoň tři znaky.';
+  end;
+  perform pg_temp.check('RPC odmítne ruční záznam s důvodem kratším než tři znaky', v_ok);
 
   -- Kdo ho zadal, se nedá podvrhnout. Přímo přes rozhraní databáze
   -- sloupec entered_by přihlášený vůbec nevloží…

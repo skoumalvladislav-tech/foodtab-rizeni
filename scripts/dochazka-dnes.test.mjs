@@ -10,6 +10,10 @@
  *      příchod, systémem uzavřený příchod a stornovaný odchod se chovají
  *      stejně jako v databázi (přesně ta chyba, kvůli které vznikl
  *      lib/dochazka-stav.ts),
+ *   1b. od 20260929110000 (otázka 33) totéž sekvenční párování jako
+ *      `app.useky_dochazky`: odchod ve STEJNOU chvíli jako příchod ho
+ *      zavírá (dřív zůstal „otevřený" a mzda s přehledem se rozešly),
+ *      dva příchody bez odchodu TÉHOŽ dne nechají otevřený jen PRVNÍ,
  *   2. stavy řádku odpovídají jen tomu, co se ví: směna ještě nezačala /
  *      už začala a příchod chybí / už skončila. Žádné „zpoždění“ s
  *      vymyšleným prahem,
@@ -122,15 +126,52 @@ je(
 )
 
 console.log('\n== Všechny otevřené příchody a úsek 0 min (boční panel přehledu) ==')
-je('dvojí příchod: oba otevřené, nejnovější první',
-  otevrenePrichody([ud('a', 'in', '08:00'), ud('a', 'in', '08:05')]).map((u) => u.occurred_at), [v('08:05'), v('08:00')])
-je('otevrenyPrichod = první z nich', otevrenyPrichod([ud('a', 'in', '08:00'), ud('a', 'in', '08:05')]).occurred_at, v('08:05'))
+
+/*
+  Otázka 33 (docs/hlaseni/otazky.md, 20260929110000): dřív byla tahle
+  sekce postavená na JINÉ definici „otevřeno" než app.useky_dochazky
+  (mzda) — dva příchody téhož dne bez odchodu brala OBA jako otevřené
+  a vracela ten POZDĚJŠÍ; teď (jako mzda) zůstává otevřený jen PRVNÍ,
+  druhý je navic_prichod. Kdyby zůstal otevřený „ten pozdější", mzda
+  a přehled by si mohly ukazovat každá jiného člověka jako „v práci" —
+  přesně tenhle rozjezd byl loňský nález.
+*/
+je('dvojí příchod TÉHOŽ dne: otevřený zůstává jen PRVNÍ (druhý je navic_prichod, jako app.useky_dochazky)',
+  otevrenePrichody([ud('a', 'in', '08:00'), ud('a', 'in', '08:05')]).map((u) => u.occurred_at), [v('08:00')])
+je('otevrenyPrichod = ten první — mzda a přehled se teď shodnou',
+  otevrenyPrichod([ud('a', 'in', '08:00'), ud('a', 'in', '08:05')])?.occurred_at, v('08:00'))
 je('uzavřený úsek a otevřený: jen ten otevřený',
   otevrenePrichody([ud('a', 'in', '08:00'), ud('a', 'out', '12:00'), ud('a', 'in', '13:00')]).length, 1)
+
 const nula = [ud('a', 'in', '09:00'), ud('a', 'out', '09:00')]
-je('odchod ve STEJNÉ chvíli: zrcadlo app.otevreny_prichod ho bere jako otevřený', otevrenyPrichod(nula)?.occurred_at, v('09:00'))
-je('… a nulovyUsek to pozná (automat mzdy z toho dělá úsek 0 min)', nulovyUsek(otevrenyPrichod(nula), nula), true)
+/*
+  Přesně ostrá DB 27. 9. 2026: ruční příchod i odchod v 09:00:00. Dřív
+  app.otevreny_prichod chtěl odchod OSTŘE později, takže tenhle případ
+  bral jako „v práci", zatímco mzda (app.useky_dochazky) ho spárovala
+  jako úsek 0 min — storno příchodu pak databáze odmítla, protože
+  v automatu otevřený nebyl. Teď (otázka 33) odchod ve STEJNOU chvíli
+  příchod zavírá, přesně jako mzda.
+*/
+je('odchod ve STEJNOU chvíli JIŽ zavírá (otázka 33 — sjednoceno s app.useky_dochazky)', otevrenyPrichod(nula), null)
 je('odchod o minutu později: úsek, nic otevřeného', otevrenyPrichod([ud('a', 'in', '09:00'), ud('a', 'out', '09:01')]), null)
+
+/*
+  Pořadí shod rozhoduje created_at, ne pořadí ve VSTUPNÍM poli (jako
+  app.useky_dochazky) — tenhle pár je v poli schválně OBRÁCENĚ (out
+  první, in druhý), a přesto se spáruje správně.
+*/
+je('pořadí shod podle created_at, ne podle pořadí ve vstupu',
+  otevrenyPrichod([
+    ud('a', 'out', '09:00', { created_at: '2026-09-21T06:55:00Z' }),
+    ud('a', 'in', '09:00', { created_at: '2026-09-21T06:50:00Z' }),
+  ]), null)
+
+/*
+  nulovyUsek zůstává jako samostatná pojistka (viz její doc-komentář
+  v lib/dochazka-dnes.ts) — testuje se dál přímo, ne přes
+  otevrenyPrichod, protože ten už žádný takový příchod nevrátí.
+*/
+je('nulovyUsek pozná stejnochvilový pár i samostatně', nulovyUsek(nula[0], nula), true)
 je('stornovaný odchod ve stejné chvíli se nepočítá',
   nulovyUsek(nula[0], [nula[0], { ...nula[1], stornovano_kdy: '2026-09-21T08:00:00Z' }]), false)
 je('odchod ve stejné chvíli, ale jiný provozní den: nulový není',

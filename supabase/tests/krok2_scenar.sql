@@ -24,6 +24,7 @@ where full_name = 'Občasná výpomoc' \gset
 select set_config('test.tenant', :'tenant', false);
 select set_config('test.perla',  :'perla',  false);
 select set_config('test.bar',    :'bar',    false);
+select set_config('test.jana',   :'jana',   false);
 
 \echo ''
 \echo '== Provozní den ==========================================='
@@ -78,10 +79,33 @@ select pg_temp.check('brigádníka bez účtu jde zařadit na směnu',
 
 \echo ''
 \echo '== Docházka ==============================================='
+
+-- Od otázky 31 (docs/hlaseni/otazky.md, migrace 20260929110000) je
+-- INSERT do attendance_events pro authenticated zavřený úplně —
+-- aplikace do ní přímo nezapisuje nikde, jen přes RPC. Kontrola je
+-- proto NEGATIVNÍ: přímý insert, i jen na sedmi dřív povolených
+-- sloupcích, musí spadnout na oprávnění. Dřív to tu bylo pozitivní
+-- (grant dovoloval přesně tuhle pětici sloupců).
+do $$
+declare v_ok boolean := false;
+begin
+  begin
+    insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, occurred_at)
+    values (current_setting('test.tenant')::uuid, current_setting('test.perla')::uuid,
+            current_setting('test.jana')::uuid, 'in', '2026-08-25 13:52+02');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  if not v_ok then raise exception 'SELHALO: authenticated přímý INSERT do attendance_events prošel'; end if;
+  raise notice '  OK    authenticated přímý INSERT do attendance_events neprojde (otázka 31)';
+end $$;
+
+reset role;
 insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, occurred_at)
 values (:'tenant', :'perla', :'jana', 'in', '2026-08-25 13:52+02');
 select pg_temp.check('provozní den se doplnil sám',
   (select business_date from public.attendance_events limit 1) = date '2026-08-25');
+set role authenticated;
+select set_config('test.user_id', '22222222-2222-2222-2222-222222222222', false);
 
 \echo ''
 \echo '== Checklist s hodnotou ==================================='

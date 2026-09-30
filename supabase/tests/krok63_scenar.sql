@@ -1373,12 +1373,15 @@ select pg_temp.check('authenticated nemá UPDATE ani DELETE na attendance_events
 select pg_temp.check('SELECT zůstal celý, INSERT už ne na celé tabulce',
   has_table_privilege('authenticated', 'public.attendance_events', 'SELECT')
   and not has_table_privilege('authenticated', 'public.attendance_events', 'INSERT'));
-select pg_temp.check('INSERT jen na sedmi sloupcích krok2/krok6 (otázka 31)',
-  (select string_agg(a.attname, ',' order by a.attname)
-     from pg_attribute a
-    where a.attrelid = 'public.attendance_events'::regclass and a.attnum > 0 and not a.attisdropped
-      and has_column_privilege('authenticated', a.attrelid, a.attnum, 'INSERT'))
-    = 'branch_id,employee_id,kind,note,occurred_at,source,tenant_id');
+-- Od 20260929110000 (otázka 31): INSERT zavřený úplně, i na těch
+-- dřív povolených sedmi neutrálních sloupcích. Dřív tahle kontrola
+-- čekala přesně ten seznam; teď čeká, že žádný sloupec insert nemá.
+select pg_temp.check('INSERT nemá žádný sloupec — grant zavřený úplně (otázka 31)',
+  not exists (
+    select 1
+      from pg_attribute a
+     where a.attrelid = 'public.attendance_events'::regclass and a.attnum > 0 and not a.attisdropped
+       and has_column_privilege('authenticated', a.attrelid, a.attnum, 'INSERT')));
 -- Katalog tabulky: authenticated má na úrovni tabulky JEN select (žádný
 -- MAINTAIN z výchozích práv Supabase na PG 17). aclexplode projde na
 -- PG 16 i 17 — has_table_privilege(…, 'MAINTAIN') by na PG 16 spadl.
@@ -1415,10 +1418,12 @@ select pg_temp.check('přímý insert s nahrazuje („opraveno z …") spadne na
   pg_temp.spadne_pravem(format(
     'insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, occurred_at, source, note, nahrazuje) values (%L, %L, %L, ''in'', ''2026-07-02 10:00+02'', ''manual'', ''x'', %L)',
     :'firma', :'pob_a', :'novy', :'p1_out')));
--- Obráceně: se sedmi sloupci krok2/krok6 insert projde (kontroly výš
--- tedy neměří jen to, že insert nejde vůbec).
-select pg_temp.check('přímý insert jen se sedmi sloupci projde (krok2, krok6)',
-  pg_temp.projde(format(
+-- Obráceně: od otázky 31 INSERT nejde už ani na těch sedmi dřív
+-- neutrálních sloupcích krok2/krok6 — grant se zavřel úplně
+-- (20260929110000). Dřív tu byl pozitivní test (`pg_temp.projde`);
+-- teď je to `spadne_pravem`, jako tři kontroly výš.
+select pg_temp.check('přímý insert i jen se sedmi sloupci (krok2, krok6) teď spadne na právech (otázka 31)',
+  pg_temp.spadne_pravem(format(
     'insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, occurred_at, source, note) values (%L, %L, %L, ''in'', ''2026-07-02 11:00+02'', ''app'', ''přímý zápis'')',
     :'firma', :'pob_a', :'novy')));
 -- Stará storno funkce jednoho záznamu: vedoucí by si stornem vlastního
@@ -1428,8 +1433,10 @@ select pg_temp.check('stará stornovat_dochazku: vedoucí vlastní odchod → sp
 reset role;
 select set_config('test.user_id', '', false);
 
-select pg_temp.check('po pokusech: nic se nevložilo kromě jednoho povoleného příchodu a odchod vedoucího platí',
-  (select count(*) from public.attendance_events where employee_id = :'novy') = 1
+-- Od otázky 31 nevloží authenticated přímým insertem nic vůbec — dřív
+-- tu prošel právě jeden (sedm neutrálních sloupců), teď 0.
+select pg_temp.check('po pokusech: authenticated nevložil přímým insertem nic (otázka 31) a odchod vedoucího platí',
+  (select count(*) from public.attendance_events where employee_id = :'novy') = 0
   and (select stornovano_kdy is null from public.attendance_events where id = :'v_out'));
 select pg_temp.check('stornovat_dochazku: EXECUTE nemá authenticated ani anon (katalog)',
   not has_function_privilege('authenticated', 'public.stornovat_dochazku(uuid, uuid, text)', 'EXECUTE')

@@ -710,6 +710,12 @@ end $$;
 
 reset role;
 
+-- Od otázky 31 (docs/hlaseni/otazky.md, migrace 20260929110000) je
+-- INSERT do attendance_events pro authenticated zavřený úplně, i pro
+-- majitele — ruční záznam jde jen přes zapsat_rucni_dochazku (RPC),
+-- ne přímým insertem přes rozhraní databáze. Kontrola byla POZITIVNÍ
+-- (vedoucí s attendance.manage přímým insertem zapíše); teď je
+-- negativní nad tím, co grant dovoloval naposledy.
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
@@ -717,18 +723,18 @@ do $$
 declare
   v_tenant uuid;
   v_perla  uuid;
-  v_pocet  integer;
+  v_ok     boolean := false;
 begin
   select id into v_tenant from public.tenants limit 1;
   select id into v_perla from public.branches where slug = 'cerna-perla';
 
-  insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, source, note)
-  values (v_tenant, v_perla, current_setting('test.zaskok_e')::uuid, 'out', 'manual',
-          'zapsal vedoucí — zaskakuje');
-
-  select count(*) into v_pocet from public.attendance_events
-  where source = 'manual' and note <> '';
-  perform pg_temp.check('vedoucí s attendance.manage ruční záznam zapíše', v_pocet >= 1);
+  begin
+    insert into public.attendance_events (tenant_id, branch_id, employee_id, kind, source, note)
+    values (v_tenant, v_perla, current_setting('test.zaskok_e')::uuid, 'out', 'manual',
+            'zapsal vedoucí — zaskakuje');
+  exception when insufficient_privilege then v_ok := true;
+  end;
+  perform pg_temp.check('ani majitel přímým INSERTem ruční záznam nezapíše (otázka 31 — jen přes RPC)', v_ok);
 end $$;
 
 reset role;
