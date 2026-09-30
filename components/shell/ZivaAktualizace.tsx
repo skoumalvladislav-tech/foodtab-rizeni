@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 import { getBrowserSupabase } from "@/lib/supabase/client";
+import { odebiratZmeny } from "@/lib/supabase/zive";
 
 /**
  * Živá aktualizace — nová zpráva, oznámení nebo úkol osvěží obrazovku sama.
@@ -21,17 +22,19 @@ import { getBrowserSupabase } from "@/lib/supabase/client";
  * KDYŽ REALTIME NENÍ (migrace 20260921120000 nenasazená, výpadek, blokované
  * websockety), nic se nestane — odběr prostě nic nedoručí a obrazovky se
  * obnovují jako dřív (po akci a po navigaci). Nic nespadne a nic se netvrdí.
+ *
+ * Kanál se připojuje přes `odebiratZmeny` — až s tokenem přihlášeného.
+ * Rovnou `.subscribe()` se po načtení stránky připojil jako `anon`
+ * a Realtime odběr zamítl (proč, viz lib/supabase/zive.ts).
  */
 export default function ZivaAktualizace({ userId }: { userId: string }) {
   const router = useRouter();
 
   useEffect(() => {
     let casovac: ReturnType<typeof setTimeout> | null = null;
-    let kanal: ReturnType<ReturnType<typeof getBrowserSupabase>["channel"]> | null = null;
-    let supabase: ReturnType<typeof getBrowserSupabase> | null = null;
+    let zrusit: (() => void) | null = null;
 
     try {
-      supabase = getBrowserSupabase();
       // Dávka: víc upozornění naráz (nová zpráva do kanálu pro celou pobočku)
       // vyvolá jedno obnovení, ne deset.
       const obnovit = () => {
@@ -42,21 +45,20 @@ export default function ZivaAktualizace({ userId }: { userId: string }) {
         }, 800);
       };
 
-      kanal = supabase
-        .channel(`notifikace:${userId}`)
-        .on(
+      zrusit = odebiratZmeny(getBrowserSupabase(), `notifikace:${userId}`, (kanal) =>
+        kanal.on(
           "postgres_changes",
           { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
           obnovit,
-        )
-        .subscribe();
+        ),
+      );
     } catch {
       // Chybí nastavení nebo prohlížeč websockety neumí: aplikace jede bez živé aktualizace.
     }
 
     return () => {
       if (casovac) clearTimeout(casovac);
-      if (supabase && kanal) void supabase.removeChannel(kanal);
+      zrusit?.();
     };
   }, [userId, router]);
 
