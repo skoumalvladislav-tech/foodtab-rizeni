@@ -771,5 +771,59 @@ console.log('\n== Lidé: odkaz „Docházka po dnech" jen s attendance.read (27.
     `${bezDochazky.includes('Petr Číšník')}/${bezDochazky.includes('/dochazka/clovek/')}`, 'true/false')
 }
 
+/* =====================================================================
+   10. OBNOVIT SMAZANÉHO V LIDECH (otázka 18 e, docs/hlaseni/otazky.md)
+
+   Server-side strop (app.smi_pridelit_zamestnance přes spoušť
+   app.clenstvi_podle_zaznamu) je otestovaný proti opravdové databázi
+   v supabase/tests/krok61_scenar.sql — tahle kontrola ho nezkouší
+   znovu. Ověřuje PRVNÍ linii: že smazaný člověk má v Lidech tlačítko
+   Obnovit (a živý ne), že u smazaného zmizí Smazat, a že formulář,
+   který se ve skutečnosti odešle, volá SKUTEČNOU akci
+   `obnovitZamestnance` (ne omylem `smazatZamestnance` nebo nic) —
+   stejná past jako v hlášení 24. 9. u oprávnění (viz hlavička souboru).
+   ================================================================== */
+
+console.log('\n== 10. Obnovit smazaného v Lidech (otázka 18 e) ==')
+{
+  const db = svet(U_MAJITEL)
+  const jana = db.employees.find((e) => e.id === E_JANA)
+  jana.deleted_at = '2026-09-20T08:00:00Z'
+
+  const html = await vykreslit(StrankaLide, 'firma')
+  const radek = (jmeno) => {
+    const r = [...html.matchAll(/<tr\b[\s\S]*?<\/tr>/g)].map((m) => m[0]).find((x) => x.includes(`Akce pro ${jmeno}`))
+    return r ?? ''
+  }
+  const smazana = radek('Jana Brigádnice')
+  ma('smazaný člověk (Jana): řádek má tlačítko Obnovit', />Obnovit</.test(smazana), true)
+  ma('… a NEMÁ tlačítko Smazat (už smazaný je)', />Smazat</.test(smazana), false)
+
+  const zivy = radek('Petr Číšník')
+  ma('živý člověk (Petr): tlačítko Obnovit nemá', />Obnovit</.test(zivy), false)
+  ma('… ale Smazat ano', />Smazat</.test(zivy), true)
+
+  // Formulář tak, jak ho odešle prohlížeč — a skutečná serverová akce.
+  const prvky = formular(html, '>Obnovit<')
+  ma('formulář Obnovit se našel', prvky !== null, true)
+  const { fd, odeslatJde } = kliknoutAOdeslat(prvky)
+  ma('tlačítko Obnovit jde odeslat (není zamčené)', odeslatJde, true)
+  ma('formulář nese id Jany a rozsah', [fd.get('id'), fd.get('rozsah')], [E_JANA, 'firma'])
+
+  await odeslat(akceLide.obnovitZamestnance, fd)
+  ma('… a doopravdy zavolal obnovitZamestnance: deleted_at zpátky na null',
+    db.employees.find((e) => e.id === E_JANA)?.deleted_at, null)
+  ma('… přes UPDATE employees (ne INSERT, ne jiná tabulka)',
+    db.zapisy.some((z) => z.op === 'update' && z.tabulka === 'employees' && z.data.deleted_at === null), true)
+
+  // Bez people.manage se Obnovit vůbec nenabídne — stejná brána jako
+  // u ostatních akcí v Lidech (přístup se ověřuje znovu i v akci samé).
+  const db2 = svet(U_PETR)
+  db2.employees.find((e) => e.id === E_JANA).deleted_at = '2026-09-20T08:00:00Z'
+  const bezPrava = await vykreslit(StrankaLide, 'firma')
+  ma('Petr (bez people.manage) obrazovku Lidé vůbec nevidí',
+    bezPrava.includes('Akce pro Jana Brigádnice'), false)
+}
+
 console.log(chyb === 0 ? '\nVŠECHNO PROŠLO' : `\nSELHALO: ${chyb}`)
 process.exit(chyb === 0 ? 0 : 1)

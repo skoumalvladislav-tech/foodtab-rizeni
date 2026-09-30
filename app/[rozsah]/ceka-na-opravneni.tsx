@@ -193,7 +193,7 @@ export function SeznamCekajicich({
  * nezalamuje — na telefonu přeteklo z okna i ze stránky.
  *
  * `ptaSeNaZacatku` je pro kontrolu (scripts/ceka-na-opravneni.test.mjs),
- * která bez prohlížeče neumí ťuknout — jako u `CestaVen`.
+ * která bez prohlížeče neumí ťuknout — jako u `Odhlaseni varianta="samostatne"`.
  */
 export function OdebratZFirmy({
   ucet,
