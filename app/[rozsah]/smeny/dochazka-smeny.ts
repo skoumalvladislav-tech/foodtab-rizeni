@@ -55,7 +55,9 @@ export async function nactiDochazkuKeSmene(
   const supabase = await getServerSupabase()
   const { data, error } = await supabase
     .from('attendance_events')
-    .select('employee_id, kind, occurred_at, business_date, branch_id, stornovano_kdy, uzavreno_systemem')
+    // created_at: pořadí shod v occurred_at, stejně jako
+    // app.useky_dochazky (otázka 33).
+    .select('employee_id, kind, occurred_at, created_at, business_date, branch_id, stornovano_kdy, uzavreno_systemem')
     .eq('tenant_id', tenantId)
     .eq('employee_id', zamestnanec)
     .gte('business_date', posunDatum(den, -1))

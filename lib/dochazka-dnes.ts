@@ -8,14 +8,26 @@
  * ---------------------------------------------------------------------
  * JEDNA DEFINICE „JE V PRÁCI“
  *
- * Zdroj pravdy je `app.otevreny_prichod` (20260905010000): poslední
- * příchod bez odchodu, nestornovaný a systémem neuzavřený, přičemž
- * odchod se páruje v TÉMŽE provozním dni a musí být pozdější.
- * `otevrenyPrichod` níž je jeho zrcadlo pro jednoho člověka — přesně
- * tatáž pravidla, stejný pořadí podmínek. Dřív obrazovka „v práci“
- * poznávala podle POSLEDNÍ UDÁLOSTI a po stornu příchodu nabízela
- * odchod ke směně, která neexistuje (viz lib/dochazka-stav.ts). Tady se
- * na to nikdy nesahá přes poslední událost.
+ * Zdroj pravdy je `app.otevreny_prichod`, který od 20260929110000
+ * (otázka 33, docs/hlaseni/otazky.md) čte řádek `otevreny` z
+ * `app.useky_dochazky` — TENTÝŽ automat, který počítá mzdu. Příchod je
+ * „otevřený“, když v témže provozním dni nepřišel odchod SE STEJNÝM
+ * NEBO POZDĚJŠÍM časem (odchod PŘESNĚ ve chvíli příchodu ho tedy
+ * zavírá — úsek 0 min, jako mzda), stornovaný a systémem uzavřený se
+ * nepočítá. `otevrenePrichody` níž je jeho zrcadlo — sekvenční
+ * párování po dnech, pořadí shod podle `created_at`, přesně jako
+ * `app.useky_dochazky`.
+ *
+ * Do 20260929110000 tu byla JINÁ definice („odchod ostře později“,
+ * o pořadí shod nerozhodovalo nic) — v ostré DB 27. 9. 2026 se kvůli
+ * tomu rozešla s mzdou u ručního příchodu i odchodu ve STEJNOU chvíli
+ * (přehled tvrdil „v práci“, mzda úsek 0 min, storno příchodu databáze
+ * odmítla). Dvě různá „otevřeno“ vedle sebe se ukázala jako chyba
+ * i tady, stejně jako dřív se lišila obrazovka od `app.otevreny_prichod`
+ * (viz lib/dochazka-stav.ts, kvůli čemu vznikl) — poznávala „v práci“
+ * podle POSLEDNÍ UDÁLOSTI a po stornu příchodu nabízela odchod ke
+ * směně, která neexistuje. Tady se na to nikdy nesahá přes poslední
+ * událost.
  *
  * ---------------------------------------------------------------------
  * CO SE SCHVÁLNĚ NEVYMÝŠLÍ
@@ -48,6 +60,14 @@ export type UdalostDochazky = {
   kind: string
   /** Okamžik, ISO. */
   occurred_at: string
+  /**
+   * Kdy záznam vznikl v databázi, ISO. Rozhoduje shody v `occurred_at`
+   * stejně jako `app.useky_dochazky` (pořadí: occurred_at, created_at,
+   * id) — otázka 33. Nepovinné: bez něj se shoda řeší podle pořadí ve
+   * vstupním poli (stabilní řazení), což stačí, kde `created_at` nikdo
+   * nepředá (např. testy).
+   */
+  created_at?: string
   /** Provozní den (RRRR-MM-DD), ne kalendářní. */
   business_date: string
   branch_id: string
@@ -78,30 +98,71 @@ export function otevrenyPrichod(udalosti: UdalostDochazky[]): UdalostDochazky | 
 
 /**
  * VŠECHNY příchody bez odchodu podle pravidel `app.otevreny_prichod`,
- * nejnovější první. Víc než jeden = dvojí příchod (nebo zapomenutý
- * odchod jiný den): boční panel přehledu pak ví, že po stornu toho
- * nejnovějšího zůstane člověk „v práci" podle dalšího.
+ * nejnovější první. Víc než jeden = dvojí příchod jiný den (zapomenutý
+ * odchod, `uzavreno_systemem` je ještě `null`): boční panel přehledu
+ * pak ví, že po stornu toho nejnovějšího zůstane člověk „v práci"
+ * podle dalšího.
+ *
+ * SEKVENČNÍ PÁROVÁNÍ PO PROVOZNÍCH DNECH — přesně `app.useky_dochazky`
+ * (otázka 33, docs/hlaseni/otazky.md): události dne se seřadí podle
+ * `occurred_at`, shody podle `created_at`, pak `id`; první příchod
+ * otevře den, další `out` ho zavře (i ve STEJNOU chvíli — neporovnává
+ * se čas, jen pořadí), druhý `in`, dokud je první otevřený, je
+ * navíc-příchod a otevřený stav neposouvá (přesně jako `navic_prichod`
+ * v automatu). Bez tohohle by mzda a přehled mohly ukázat každá jiného
+ * člověka jako „v práci" — přesně to se stalo v ostré DB 27. 9. 2026.
  */
 export function otevrenePrichody(udalosti: UdalostDochazky[]): UdalostDochazky[] {
-  const platne = udalosti.filter((u) => u.stornovano_kdy == null)
-  const odchody = platne.filter((u) => u.kind === 'out')
+  const platne = udalosti.filter(
+    (u) => u.stornovano_kdy == null && (u.kind === 'in' || u.kind === 'out'),
+  )
 
-  return platne
-    .filter((u) => u.kind === 'in' && u.uzavreno_systemem == null)
-    .filter(
-      (a) =>
-        !odchody.some((o) => o.business_date === a.business_date && ms(o.occurred_at) > ms(a.occurred_at)),
-    )
-    .sort((a, b) => ms(b.occurred_at) - ms(a.occurred_at))
+  const podleDne = new Map<string, UdalostDochazky[]>()
+  for (const u of platne) {
+    const pole = podleDne.get(u.business_date)
+    if (pole) pole.push(u)
+    else podleDne.set(u.business_date, [u])
+  }
+
+  // Stejné pořadí jako `app.useky_dochazky`: occurred_at, pak
+  // created_at, pak id. Chybí-li created_at (test bez něj), term
+  // vyjde 0 a rozhodne stabilní řazení pole (Array#sort je stabilní).
+  const poradi = (a: UdalostDochazky, b: UdalostDochazky) =>
+    ms(a.occurred_at) - ms(b.occurred_at) ||
+    (a.created_at != null && b.created_at != null ? ms(a.created_at) - ms(b.created_at) : 0) ||
+    (a.id != null && b.id != null ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : 0)
+
+  const otevrene: UdalostDochazky[] = []
+  for (const udalostiDne of podleDne.values()) {
+    const dne = [...udalostiDne].sort(poradi)
+    let otevreny: UdalostDochazky | null = null
+    for (const u of dne) {
+      if (u.kind === 'in') {
+        // Druhý příchod, dokud je první otevřený: navic_prichod,
+        // otevřený stav se nemění.
+        if (otevreny === null) otevreny = u
+      } else if (otevreny !== null) {
+        // 'out' v pořadí PO otevřeném příchodu ho zavírá — i ve
+        // stejnou chvíli (o čas se tu neopírá, jen o pořadí).
+        otevreny = null
+      }
+    }
+    if (otevreny && otevreny.uzavreno_systemem == null) otevrene.push(otevreny)
+  }
+
+  return otevrene.sort((a, b) => ms(b.occurred_at) - ms(a.occurred_at))
 }
 
 /**
  * Otevřený příchod, který má v témže provozním dni odchod ve STEJNOU
- * chvíli (ostrá DB 27. 9.: ruční příchod i odchod 09:00:00). Zrcadlo
- * app.otevreny_prichod chce odchod ostře později, takže ho bere jako
- * „v práci"; automat mzdy (app.useky_dochazky) ho spáruje jako úsek
- * 0 min. Storno samotného příchodu by databáze odmítla — opravuje se
- * na obrazovce člověka (otázka 33: sjednotit obě pravidla).
+ * chvíli. Od 20260929110000 (otázka 33) takový příchod už
+ * `otevrenePrichody` NEVRÁTÍ vůbec — sekvenční párování ho spáruje se
+ * stejnochvilovým odchodem stejně jako `app.useky_dochazky` (úsek
+ * 0 min), takže se tahle funkce v běžném provozu nespustí (volá se jen
+ * na příchodu z `otevrenePrichody`). Zůstává jako samostatná pojistka
+ * pro výjimečné pořadí (odchod v databázi vznikl DŘÍV než příchod,
+ * i když má stejný `occurred_at` — pak `otevrenePrichody` příchod
+ * pořád vrátí jako otevřený, protože ho žádný pozdější `out` nezavřel).
  */
 export function nulovyUsek(prichod: UdalostDochazky, udalosti: UdalostDochazky[]): boolean {
   return udalosti.some(
