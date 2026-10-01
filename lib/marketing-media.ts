@@ -19,7 +19,12 @@ export const KBELIK = 'marketing'
  */
 export const PLATNOST_ODKAZU_S = 3600
 
-/** Sbírky, do kterých se fotky třídí. Musí sedět s `check` na sloupci. */
+/**
+ * Sbírky, do kterých se fotky třídí ruční volbou při nahrání. Musí
+ * sedět s `check` na sloupci — ale NE celým výčtem: `SBIRKA_KANDIDAT_ZNACKY`
+ * níž je šestá povolená hodnota na stejném sloupci, schválně tu
+ * chybí (viz její vlastní hlavička).
+ */
 export const SBIRKY = [
   { klic: 'jidla', nazev: 'Jídla' },
   { klic: 'interier', nazev: 'Interiér' },
@@ -27,6 +32,23 @@ export const SBIRKY = [
   { klic: 'akce', nazev: 'Akce' },
   { klic: 'ostatni', nazev: 'Ostatní' },
 ] as const
+
+/**
+ * Vlastní sbírka pro kandidátní logo z nástroje „Najít na webu"
+ * (Marketing → Značka, `znacka/akce-ai.ts`) — NE pro ruční výběr
+ * (proto není v `SBIRKY` výš a nepatří do rozbalovacího seznamu).
+ *
+ * Nález kontroly konzistence: bez rozlišení od běžně nahrané fotky
+ * (`sbirka = 'ostatni'`) by kandidát hned skončil ve sdílené Knihovně
+ * fotek i ve výběru pro příspěvek, i když ho nikdo nepřijal. Všude,
+ * kde se fotky vypisují nebo ověřují k výběru do příspěvku, se proto
+ * tahle hodnota vyřazuje — `media/page.tsx`, `tvorba/page.tsx`,
+ * `[prispevek]/page.tsx`, `marketing/akce.ts`. Při přijetí
+ * (`znacka/akce.ts`, `ulozitZnacku`) se řádek přeřadí na `'ostatni'`
+ * a chová se dál jako kterákoli jiná fotka. Povoleno migrací
+ * `20260929150000_marketing_media_kandidat_sbirka.sql`.
+ */
+export const SBIRKA_KANDIDAT_ZNACKY = 'kandidat_znacky'
 
 /**
  * Cesta v úložišti: firma / pobočka / soubor.
