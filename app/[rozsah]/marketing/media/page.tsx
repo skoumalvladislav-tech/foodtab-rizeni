@@ -7,7 +7,7 @@ import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { KBELIK, PLATNOST_ODKAZU_S, SBIRKY } from '@/lib/marketing-media'
+import { KBELIK, PLATNOST_ODKAZU_S, SBIRKA_KANDIDAT_ZNACKY, SBIRKY } from '@/lib/marketing-media'
 import { sestavPouziti, type PouzitiFotky } from '@/lib/marketing-media-pouziti'
 import { popisStavu } from '@/lib/marketing-text'
 import { nahratFotku, smazatFotku, ulozitPrava } from './akce'
@@ -113,6 +113,13 @@ export default async function Media({
     .select('id, nazev_souboru, cesta, mime, velikost_bajtu, sirka, vyska, sbirka, popis, alt_text, puvod, souhlas_poznamka, pouzitelne_do, vytvoreno_kdy')
     .eq('tenant_id', tenantId)
     .is('archivovano_kdy', null)
+    // Kandidátní logo nabídnuté nástrojem „Najít na webu“ (Marketing →
+    // Značka) se sem nezařazuje, dokud ho člověk nepřijme stisknutím
+    // „Uložit“ — do tý chvíle to je jen návrh k doladění, ne schválená
+    // fotka, kterou by šlo vybrat do příspěvku (nález konzistence,
+    // app/[rozsah]/marketing/znacka/akce-ai.ts). Po přijetí `ulozitZnacku`
+    // řádek přeřadí zpátky na `ostatni` a tady se objeví jako běžná fotka.
+    .neq('sbirka', SBIRKA_KANDIDAT_ZNACKY)
     .order('vytvoreno_kdy', { ascending: false })
     .limit(200)
 

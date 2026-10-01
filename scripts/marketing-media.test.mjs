@@ -18,7 +18,7 @@
 
 import { readFileSync } from 'node:fs'
 
-import { KBELIK, PLATNOST_ODKAZU_S, SBIRKY, cestaVUlozisti } from '../lib/marketing-media.ts'
+import { KBELIK, PLATNOST_ODKAZU_S, SBIRKA_KANDIDAT_ZNACKY, SBIRKY, cestaVUlozisti } from '../lib/marketing-media.ts'
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -35,8 +35,14 @@ const bezCrlf = (s) => s.replace(/\r\n/g, '\n')
 const migraceUlozne = bezCrlf(readFileSync('supabase/migrations/20260913170000_marketing_ulozne.sql', 'utf8'))
 const migracePodklady = bezCrlf(readFileSync('supabase/migrations/20260909180000_marketing_podklady.sql', 'utf8'))
 const migraceFronta = bezCrlf(readFileSync('supabase/migrations/20260910040000_marketing_fronta.sql', 'utf8'))
+const migraceKandidat = bezCrlf(readFileSync('supabase/migrations/20260929150000_marketing_media_kandidat_sbirka.sql', 'utf8'))
 const akce = bezCrlf(readFileSync('app/[rozsah]/marketing/media/akce.ts', 'utf8'))
 const obrazovka = bezCrlf(readFileSync('app/[rozsah]/marketing/media/page.tsx', 'utf8'))
+const tvorba = bezCrlf(readFileSync('app/[rozsah]/marketing/tvorba/page.tsx', 'utf8'))
+const detailPrispevku = bezCrlf(readFileSync('app/[rozsah]/marketing/[prispevek]/page.tsx', 'utf8'))
+const marketingAkce = bezCrlf(readFileSync('app/[rozsah]/marketing/akce.ts', 'utf8'))
+const znackaAkceAi = bezCrlf(readFileSync('app/[rozsah]/marketing/znacka/akce-ai.ts', 'utf8'))
+const znackaAkce = bezCrlf(readFileSync('app/[rozsah]/marketing/znacka/akce.ts', 'utf8'))
 
 console.log('\n== Kbelík ==')
 
@@ -136,6 +142,47 @@ console.log('\n== Sbírky ==')
 for (const s of SBIRKY) {
   ok(`sbírka ${s.klic} je i v omezení sloupce`, migracePodklady.includes(`'${s.klic}'`))
 }
+
+console.log('\n== Kandidátní logo z „Najít na webu“ se neschovává ve výchozí sbírce ==')
+
+/*
+  Nález kontroly konzistence k nástroji „Najít na webu“ (Marketing →
+  Značka): kandidátní logo dřív dostávalo stejnou `sbirka = 'ostatni'`
+  jako běžná fotka, takže bylo hned vidět ve sdílené Knihovně fotek
+  i ve výběru pro příspěvek, i když ho nikdo nepřijal. Oprava: vlastní
+  sbírka, kterou appka na všech místech, kde se fotky NABÍZEJÍ k výběru
+  nebo validují jako vybrané, schválně vyřazuje.
+*/
+
+ok('SBIRKA_KANDIDAT_ZNACKY NENÍ v nabídce pro ruční výběr (SBIRKY)',
+  !SBIRKY.some((s) => s.klic === SBIRKA_KANDIDAT_ZNACKY))
+
+ok('ale je povolená v CHECK na sloupci (nová migrace)',
+  migraceKandidat.includes(`'${SBIRKA_KANDIDAT_ZNACKY}'`))
+
+ok('původní migrace o ní nic neví (přidává ji až ta nová)',
+  !migracePodklady.includes(SBIRKA_KANDIDAT_ZNACKY))
+
+for (const [popis, zdroj] of [
+  ['Knihovna fotek (media/page.tsx)', obrazovka],
+  ['výběr pro příspěvek z nuly (tvorba/page.tsx)', tvorba],
+  ['výběr pro příspěvek s existujícím obsahem ([prispevek]/page.tsx)', detailPrispevku],
+]) {
+  ok(`${popis} vyřazuje kandidáty z výpisu (.neq)`,
+    new RegExp(`\\.neq\\(\\s*'sbirka',\\s*SBIRKA_KANDIDAT_ZNACKY\\s*\\)`).test(zdroj))
+}
+
+ok('marketing/akce.ts ověřuje vybrané fotky dvakrát (ulozitVerzi i naplanovat) a obě vyřazují kandidáty',
+  (marketingAkce.match(/\.neq\(\s*'sbirka',\s*SBIRKA_KANDIDAT_ZNACKY\s*\)/g) ?? []).length >= 2)
+
+ok('akce-ai.ts (nástroj „Najít na webu“) ukládá kandidáta s touhle sbírkou, ne s „ostatni“',
+  /sbirka:\s*SBIRKA_KANDIDAT_ZNACKY/.test(znackaAkceAi))
+
+ok('ulozitZnacku při přijetí loga přeřadí řádek zpátky na „ostatni“',
+  /update\(\{\s*sbirka:\s*'ostatni'\s*\}\)/.test(znackaAkce))
+
+ok('…a promění jen kandidáta, ne libovolné jiné logo (podmínka na starou sbírku)',
+  /\.update\(\{\s*sbirka:\s*'ostatni'\s*\}\)[\s\S]{0,200}\.eq\(\s*'sbirka',\s*SBIRKA_KANDIDAT_ZNACKY\s*\)/.test(znackaAkce))
 
 console.log('\n== Práva k použití hlídá fronta, ne obrazovka ==')
 

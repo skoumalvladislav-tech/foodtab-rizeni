@@ -7,6 +7,7 @@ import { getUser, type Permission } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { navrhnout } from '@/lib/marketing-ai'
 import { rozsifrovat } from '@/lib/marketing-klice'
+import { SBIRKA_KANDIDAT_ZNACKY } from '@/lib/marketing-media'
 import { precistMenu } from '@/lib/marketing-menu-ai'
 import { rozpoznatMenuZTextu, type MenuRozpoznanaPolozka } from '@/lib/marketing-menu-text'
 import { precistObrazek } from '@/lib/marketing-obrazek'
@@ -201,7 +202,11 @@ export async function ulozitVerzi(formData: FormData): Promise<void> {
         .select('id')
         .eq('tenant_id', tenantId)
         .in('id', vybrane)
-        .is('archivovano_kdy', null),
+        .is('archivovano_kdy', null)
+        // Druhá linie stejná jako u výběru v tvorba/page.tsx: kandidátní
+        // logo z „Najít na webu“ se do příspěvku nedostane, ani kdyby
+        // někdo id poslal rovnou formulářem místo přes knihovnu.
+        .neq('sbirka', SBIRKA_KANDIDAT_ZNACKY),
     )
     const platne = new Set(nalezene.map((m) => m.id))
     // Pořadí se drží podle formuláře, ne podle databáze — je to pořadí,
@@ -749,8 +754,11 @@ export async function vytvoritZTvorby(formData: FormData): Promise<void> {
   if (vybraneMedia.length > 0) {
     const nalezene = await seznam<{ id: string }>(
       'vybrané fotky',
+      // Stejná druhá linie jako ve `vybrane` výš — kandidátní logo
+      // (sbirka 'kandidat_znacky') se do příspěvku nedostane.
       supabase.from('marketing_media').select('id')
-        .eq('tenant_id', tenantId).in('id', vybraneMedia).is('archivovano_kdy', null),
+        .eq('tenant_id', tenantId).in('id', vybraneMedia).is('archivovano_kdy', null)
+        .neq('sbirka', SBIRKA_KANDIDAT_ZNACKY),
     )
     const platne = new Set(nalezene.map((m) => m.id))
     mediaIds = vybraneMedia.filter((id) => platne.has(id))

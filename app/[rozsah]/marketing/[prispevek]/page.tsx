@@ -10,7 +10,7 @@ import { jeden, seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/marketing-media'
+import { KBELIK, PLATNOST_ODKAZU_S, SBIRKA_KANDIDAT_ZNACKY } from '@/lib/marketing-media'
 import { n8nJeNastaveny } from '@/lib/marketing-n8n'
 import { aiJeNastavena } from '@/lib/marketing-ai'
 import { naplanovat, navrhnoutText, pozadatOSchvaleni, rozhodnoutOSchvaleni, ulozitVerzi } from '../akce'
@@ -175,6 +175,9 @@ export default async function DetailPrispevku({
     .select('id, nazev_souboru, cesta, alt_text, pouzitelne_do')
     .eq('tenant_id', tenantId)
     .is('archivovano_kdy', null)
+    // Stejný filtr jako tvorba/page.tsx a media/page.tsx — kandidátní
+    // logo z „Najít na webu“ se tu nenabízí, dokud se nepřijme uložením.
+    .neq('sbirka', SBIRKA_KANDIDAT_ZNACKY)
     .order('vytvoreno_kdy', { ascending: false })
     .limit(60)
 

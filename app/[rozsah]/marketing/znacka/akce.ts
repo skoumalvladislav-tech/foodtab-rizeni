@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { SBIRKA_KANDIDAT_ZNACKY } from '@/lib/marketing-media'
 import { delkaVidea, neboNull, seznamVyrazu } from '@/lib/marketing-text'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden } from '@/lib/supabase/dotaz'
@@ -35,6 +36,57 @@ export async function ulozitZnacku(formData: FormData): Promise<void> {
   const branchId = pristup.scope.branchId
   const supabase = await getServerSupabase()
 
+  /*
+    LOGO SE PŘEBÍRÁ JEN JAKO ODKAZ NA JIŽ EXISTUJÍCÍ ZÁZNAM, NE JAKO
+    SOUBOR — formulář tu neumí nahrát logo ručně (to zůstává mimo
+    rozsah, viz docs zadání 1. 10. 2026), jen PŘEVZÍT id, které už dřív
+    vytvořil buď návrh z webu (`./akce-ai.ts`), nebo dřívější nahrání.
+
+    Vlastnictví se ověřuje TADY, ne až v databázi: skryté pole v
+    formuláři je stejně nedůvěryhodné jako `branch_id` (pravidlo 4) —
+    kdokoli přihlášený by si mohl zkusit podstrčit cizí `id`. RLS
+    (`marketing_media_select`) by cizí firmě stejně nic nevrátila, ale
+    tahle kontrola je DRUHÁ linie, ne náhrada za ni (pravidlo 3).
+  */
+  const logoMediaIdVstup = neboNull(String(formData.get('logo_media_id') ?? ''))
+  let logoMediaId: string | null = null
+
+  if (logoMediaIdVstup) {
+    const logo = await jeden<{ id: string }>(
+      'logo pro značku',
+      supabase
+        .from('marketing_media')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('id', logoMediaIdVstup)
+        .is('archivovano_kdy', null)
+        .maybeSingle(),
+    )
+
+    if (!logo) {
+      redirect(`/${rozsah}/marketing/znacka?chyba=${encodeURIComponent('Vybrané logo v knihovně není — zkuste návrh znovu.')}`)
+    }
+
+    logoMediaId = logo.id
+
+    /*
+      Přijetí kandidátního loga z „Najít na webu" (./akce-ai.ts) — řádek
+      v `marketing_media` dostal `sbirka = 'kandidat_znacky'` právě proto,
+      aby se neobjevil ve sdílené Knihovně fotek ani ve výběru pro
+      příspěvek, dokud ho člověk nepřijme (nález kontroly konzistence).
+      Teď, když se značka opravdu ukládá s tímhle logem, se promění na
+      běžnou fotku — stejnou `sbirka` jako cokoli jiné v knihovně. Nic
+      se nestane, když to není kandidát (ruční nahrání, starší logo):
+      `.eq('sbirka', 'kandidat_znacky')` zasáhne jen tenhle jeden případ.
+    */
+    await supabase
+      .from('marketing_media')
+      .update({ sbirka: 'ostatni' })
+      .eq('tenant_id', tenantId)
+      .eq('id', logoMediaId)
+      .eq('sbirka', SBIRKA_KANDIDAT_ZNACKY)
+  }
+
   const radek = {
     tenant_id: tenantId,
     branch_id: branchId,
@@ -42,13 +94,21 @@ export async function ulozitZnacku(formData: FormData): Promise<void> {
     pouzivat_emoji: formData.get('pouzivat_emoji') === 'ano',
     barva_hlavni: neboNull(String(formData.get('barva_hlavni') ?? '')),
     barva_doplnkova: neboNull(String(formData.get('barva_doplnkova') ?? '')),
+    barva_pozadi: neboNull(String(formData.get('barva_pozadi') ?? '')),
     pismo_nadpisy: neboNull(String(formData.get('pismo_nadpisy') ?? '')),
     pismo_text: neboNull(String(formData.get('pismo_text') ?? '')),
+    logo_media_id: logoMediaId,
     podpis: String(formData.get('podpis') ?? '').trim(),
     kontakt: String(formData.get('kontakt') ?? '').trim(),
     vyrazy_ano: seznamVyrazu(String(formData.get('vyrazy_ano') ?? '')),
     vyrazy_ne: seznamVyrazu(String(formData.get('vyrazy_ne') ?? '')),
     video_sekundy: delkaVidea(formData.get('video_sekundy')),
+    // Stejná úvaha jako u podpisu/kontaktu: prázdný řetězec JE hodnota
+    // „nezadáno“, ne NULL (viz migrace 20260929140000).
+    popis_firmy: String(formData.get('popis_firmy') ?? '').trim().slice(0, 2000),
+    web_url: String(formData.get('web_url') ?? '').trim().slice(0, 300),
+    instagram_url: String(formData.get('instagram_url') ?? '').trim().slice(0, 300),
+    facebook_url: String(formData.get('facebook_url') ?? '').trim().slice(0, 300),
     zmeneno_kdy: new Date().toISOString(),
   }
 

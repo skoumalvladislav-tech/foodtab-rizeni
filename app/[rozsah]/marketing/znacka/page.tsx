@@ -2,19 +2,22 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/marketing-media'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jeden, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { ulozitZnacku } from './akce'
+import ZnackaFormular from './formular'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Značka provozovny — barvy, písmo, podpis, tón hlasu.
+ * Značka provozovny — barvy, písmo, podpis, tón hlasu, popis a odkazy
+ * na web a sociální sítě.
  *
- * Zadání: docs/marketing-je-modul.md.
+ * Zadání: docs/marketing-je-modul.md; návrh z webu podle zadání Šéfíka
+ * 1. 10. 2026 (`app/[rozsah]/marketing/znacka/akce-ai.ts`).
  *
  * Rozsah se řídí adresou: na pobočce se ukládá značka pobočky, na
  * firemní úrovni firemní. Pobočková přebíjí firemní — rozhoduje o tom
@@ -22,34 +25,18 @@ export const dynamic = 'force-dynamic'
  *
  * Prázdné pole znamená „nezadáno", ne prázdná hodnota. Návrh si to
  * nedomýšlí: co tu není, do příspěvku nepatří.
+ *
+ * Vlastní formulář (vč. tlačítka „Najít na webu“) je v `./formular.tsx`
+ * — klientská komponenta, protože návrh z webu musí po úspěchu
+ * předvyplnit stav TÉHOŽ formuláře, který se ukládá přes `ulozitZnacku`.
  */
-
-const karta = {
-  background: 'var(--card)',
-  border: '1px solid var(--line)',
-  borderRadius: 'var(--radius-lg)',
-  padding: '16px',
-} as const
-
-const pole = {
-  display: 'block',
-  width: '100%',
-  padding: '8px 10px',
-  border: '1px solid var(--line-2)',
-  borderRadius: 'var(--radius-sm)',
-  background: 'var(--paper)',
-  color: 'inherit',
-  fontSize: '14px',
-  minHeight: '44px',
-} as const
-
-const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const
 
 type Znacka = {
   ton_hlasu: string
   pouzivat_emoji: boolean
   barva_hlavni: string | null
   barva_doplnkova: string | null
+  barva_pozadi: string | null
   pismo_nadpisy: string | null
   pismo_text: string | null
   podpis: string
@@ -57,6 +44,11 @@ type Znacka = {
   vyrazy_ano: string[]
   vyrazy_ne: string[]
   video_sekundy: number
+  popis_firmy: string
+  web_url: string
+  instagram_url: string
+  facebook_url: string
+  logo_media_id: string | null
 }
 
 export default async function ZnackaStranka({
@@ -92,12 +84,19 @@ export default async function ZnackaStranka({
   const branchId = pristup.scope.branchId
   const supabase = await getServerSupabase()
 
+  /*
+    Sloupce se musí psát jako ŘETĚZCOVÝ LITERÁL přímo v `.select(...)`,
+    ne poskládané do proměnné: Supabase typuje výsledek podle PŘESNĚHO
+    literálu, který `.select()` dostane, a za proměnnou typ nedohledá
+    (prošlo by to za běhu, ale TypeScript by result typoval jako
+    neurčitou chybu — chytil to `npx tsc --noEmit`, ne úvaha).
+  */
   const dotaz = branchId === null
     ? supabase.from('marketing_nastaveni')
-        .select('ton_hlasu, pouzivat_emoji, barva_hlavni, barva_doplnkova, pismo_nadpisy, pismo_text, podpis, kontakt, vyrazy_ano, vyrazy_ne, video_sekundy')
+        .select('ton_hlasu, pouzivat_emoji, barva_hlavni, barva_doplnkova, barva_pozadi, pismo_nadpisy, pismo_text, podpis, kontakt, vyrazy_ano, vyrazy_ne, video_sekundy, popis_firmy, web_url, instagram_url, facebook_url, logo_media_id')
         .eq('tenant_id', tenantId).is('branch_id', null).maybeSingle()
     : supabase.from('marketing_nastaveni')
-        .select('ton_hlasu, pouzivat_emoji, barva_hlavni, barva_doplnkova, pismo_nadpisy, pismo_text, podpis, kontakt, vyrazy_ano, vyrazy_ne, video_sekundy')
+        .select('ton_hlasu, pouzivat_emoji, barva_hlavni, barva_doplnkova, barva_pozadi, pismo_nadpisy, pismo_text, podpis, kontakt, vyrazy_ano, vyrazy_ne, video_sekundy, popis_firmy, web_url, instagram_url, facebook_url, logo_media_id')
         .eq('tenant_id', tenantId).eq('branch_id', branchId).maybeSingle()
 
   const odpoved = await dotaz
@@ -123,6 +122,24 @@ export default async function ZnackaStranka({
 
   const kdeJsme = pristup.scope.branchName ?? 'celá firma'
 
+  /*
+    Náhled aktuálního loga — stejný vzor jako knihovna fotek
+    (app/[rozsah]/marketing/media/page.tsx): kbelík je soukromý, takže
+    adresa souboru samotná nikam nevede a musí se podepsat.
+  */
+  let logoNahled: string | null = null
+  if (z?.logo_media_id) {
+    const logo = await jeden<{ cesta: string }>(
+      'cesta k logu',
+      supabase.from('marketing_media').select('cesta').eq('id', z.logo_media_id).maybeSingle(),
+    ).catch(() => null)
+
+    if (logo) {
+      const podepsano = await supabase.storage.from(KBELIK).createSignedUrl(logo.cesta, PLATNOST_ODKAZU_S)
+      logoNahled = podepsano.data?.signedUrl ?? null
+    }
+  }
+
   return (
     <>
       <Nadpis
@@ -142,86 +159,13 @@ export default async function ZnackaStranka({
         ) : null}
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
 
-        <form action={ulozitZnacku} style={{ ...karta, display: 'grid', gap: '16px' }}>
-          <input type="hidden" name="rozsah" value={rozsah} />
-
-          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-            <label>
-              <span style={popisek}>Tón hlasu</span>
-              <select name="ton_hlasu" defaultValue={z?.ton_hlasu ?? 'neformalni'} style={pole} disabled={!smiMenit}>
-                <option value="formalni">Formální — vykáme, bez nadsázky</option>
-                <option value="neformalni">Neformální — vykáme, ale lidsky</option>
-                <option value="hrave">Hravý — nadsázka, kratší věty</option>
-              </select>
-            </label>
-
-            <label>
-              <span style={popisek}>Emoji v textu</span>
-              <select name="pouzivat_emoji" defaultValue={(z?.pouzivat_emoji ?? true) ? 'ano' : 'ne'} style={pole} disabled={!smiMenit}>
-                <option value="ano">Používat</option>
-                <option value="ne">Nepoužívat</option>
-              </select>
-            </label>
-
-            <label>
-              <span style={popisek}>Hlavní barva</span>
-              <input name="barva_hlavni" defaultValue={z?.barva_hlavni ?? ''} placeholder="#7a1f2b" style={pole} disabled={!smiMenit} />
-            </label>
-
-            <label>
-              <span style={popisek}>Doplňková barva</span>
-              <input name="barva_doplnkova" defaultValue={z?.barva_doplnkova ?? ''} placeholder="#d8ab4e" style={pole} disabled={!smiMenit} />
-            </label>
-
-            <label>
-              <span style={popisek}>Písmo nadpisů</span>
-              <input name="pismo_nadpisy" defaultValue={z?.pismo_nadpisy ?? ''} placeholder="Newsreader" style={pole} disabled={!smiMenit} />
-            </label>
-
-            <label>
-              <span style={popisek}>Písmo textu</span>
-              <input name="pismo_text" defaultValue={z?.pismo_text ?? ''} placeholder="Archivo" style={pole} disabled={!smiMenit} />
-            </label>
-          </div>
-
-          <label>
-            <span style={popisek}>Podpis pod příspěvkem</span>
-            <input name="podpis" defaultValue={z?.podpis ?? ''} placeholder="Černá Perla" style={pole} disabled={!smiMenit} />
-          </label>
-
-          <label>
-            <span style={popisek}>Kontakt do patičky obrázku</span>
-            <input name="kontakt" defaultValue={z?.kontakt ?? ''} placeholder="Náměstí 1, Tábor · 777 123 456" style={pole} disabled={!smiMenit} />
-          </label>
-
-          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
-            <label>
-              <span style={popisek}>Výrazy, které používáme (oddělené čárkou)</span>
-              <input name="vyrazy_ano" defaultValue={(z?.vyrazy_ano ?? []).join(', ')} placeholder="poctivé, domácí, sezónní" style={pole} disabled={!smiMenit} />
-            </label>
-
-            <label>
-              <span style={popisek}>Výrazy, kterým se vyhýbáme</span>
-              <input name="vyrazy_ne" defaultValue={(z?.vyrazy_ne ?? []).join(', ')} placeholder="levné, akce, mňam" style={pole} disabled={!smiMenit} />
-            </label>
-          </div>
-
-          <label style={{ maxWidth: '220px' }}>
-            <span style={popisek}>Délka videa v sekundách (3–90)</span>
-            <input name="video_sekundy" type="number" min={3} max={90} defaultValue={z?.video_sekundy ?? 20} style={pole} disabled={!smiMenit} />
-          </label>
-
-          {smiMenit ? (
-            <div>
-              <button type="submit" className="ft-tl ft-tl-hlavni">Uložit značku</button>
-            </div>
-          ) : (
-            <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-              Značku mění ten, kdo smí připravovat příspěvky. Vy ji vidíte,
-              ale neuložíte.
-            </p>
-          )}
-        </form>
+        <ZnackaFormular
+          rozsah={rozsah}
+          smiMenit={smiMenit}
+          znacka={z}
+          logoMediaId={z?.logo_media_id ?? null}
+          logoNahled={logoNahled}
+        />
 
         <p style={{ margin: 0, fontSize: '13px' }}>
           <Link href={`/${rozsah}/marketing`}>Zpět na Marketing</Link>

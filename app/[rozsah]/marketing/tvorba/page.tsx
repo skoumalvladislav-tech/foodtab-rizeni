@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { KANALY } from '@/lib/marketing'
-import { KBELIK, PLATNOST_ODKAZU_S } from '@/lib/marketing-media'
+import { KBELIK, PLATNOST_ODKAZU_S, SBIRKA_KANDIDAT_ZNACKY } from '@/lib/marketing-media'
 import { sablona } from '@/lib/marketing-sablony'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
@@ -110,6 +110,10 @@ export default async function Tvorba({
     .select('id, nazev_souboru, cesta, alt_text')
     .eq('tenant_id', tenantId)
     .is('archivovano_kdy', null)
+    // Kandidátní logo z „Najít na webu“ (Marketing → Značka) se do
+    // výběru pro příspěvek nenabízí, dokud ho člověk nepřijme uložením
+    // značky — viz stejný filtr a vysvětlení v media/page.tsx.
+    .neq('sbirka', SBIRKA_KANDIDAT_ZNACKY)
     .order('vytvoreno_kdy', { ascending: false })
     .limit(60)
 
