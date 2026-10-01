@@ -314,12 +314,20 @@ export async function navrhnoutProfil(
           name: 'web_fetch',
           max_uses: 6,
           allowed_domains: domeny,
+          // Bez tohohle appka od Anthropic API dostane 400: verze
+          // _20260209 bez allowed_callers míří na dynamické filtrování
+          // přes interní code execution, a to buď vyžaduje model s
+          // podporou programatického volání nástrojů, nebo je u účtů se
+          // Zero Data Retention rovnou nepřípustné. Přímé volání nám
+          // stačí (Anthropic dok. „ZDR and allowed_callers“).
+          allowed_callers: ['direct'],
         },
         {
           type: 'web_search_20260209',
           name: 'web_search',
           max_uses: 3,
           allowed_domains: domeny,
+          allowed_callers: ['direct'],
         },
       ],
       messages: [{ role: 'user', content: podkladyProfil(odkaz) }],
