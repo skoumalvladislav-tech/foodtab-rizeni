@@ -150,6 +150,9 @@ ok('neplatný klíč má srozumitelnou hlášku, ne „authentication_error"',
   /AuthenticationError/.test(zdroj) && /Klíč k AI neplatí/.test(zdroj))
 ok('nástroje jsou omezené na domeny (allowed_domains), ne volné',
   /allowed_domains:\s*domeny/.test(zdroj))
+ok('web_fetch i web_search volají přímo (allowed_callers: direct), ne přes code execution '
+  + '— bez toho Anthropic API vrací 400 (ZDR nebo model bez programatického volání)',
+  (zdroj.match(/allowed_callers:\s*\['direct'\]/g) ?? []).length === 2)
 
 console.log('\n== Druhá linie proti domýšlení (ozdravitNavrh) ==')
 
