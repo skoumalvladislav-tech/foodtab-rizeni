@@ -12,7 +12,7 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 | Instalace skillů `supabase`, `supabase-postgres-best-practices`, `frontend-design`, `webapp-testing` | `70ed0dd` | ne |
 | Uložení obou zadávacích dokumentů do `docs/` | `70ed0dd` | ne |
 | `docs/finance-marketing-audit.md` — 7 nezávislých auditních průchodů kódem | `f46f354` | ne |
-| Faktury: tenant_id izolace fáze 1 (aplikační filtr ve všech dotazech) + regresní test + SQL pro Šéfíka | `19e406b` | **ano — SQL v `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md` musí proběhnout PŘED nasazením tohohle kódu, jinak appka spadne na chybějící sloupec** |
+| Faktury: tenant_id izolace fáze 1 (aplikační filtr ve všech dotazech) + regresní test + SQL pro Šéfíka | `19e406b` (NENÍ v žádném sloučeném PR — čeká na SQL, nasadí se samostatně, viz blokery níž) | **ano — SQL v `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md` musí proběhnout PŘED nasazením tohohle kódu, jinak appka spadne na chybějící sloupec** |
 | Baseline `tsc --noEmit` | čistý, bez chyb | — |
 | Přepínač firem pro členy víc firem zároveň (P1) + regresní test | `35ae439` | ne |
 | `docs/tenant-isolation.md` (povinný výstup) | `f8fb3a1` | — |
@@ -20,7 +20,9 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 | `docs/integrations-setup.md` (povinný výstup) | `edabb63` | — |
 | `docs/data-flows.md` (povinný výstup) | (tento commit) | — |
 | Marketing: test zkoušky spojení + oprava reálné díry (klíč v chybě sítě mohl utéct do hlášky) | `c8353a9` | ne |
-| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d` | ne (aditivní, ale db push po sloučení) |
+| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d`, `514d153` | ne (aditivní, ale db push po sloučení) |
+| Opraveny 3 zastaralé skilly (`foodtab-finance`, `foodtab-db-security`, `foodtab-e2e`) | `6e369d7`, (tento commit) | — |
+| UI katalogu surovin (seznam, detail, historie cen) + editor receptur se živým foodcostem + druhá linie obrany na `recipe_ingredients.ingredient_id` | `6e1f3dc` | ne (aditivní, ale db push po sloučení) |
 
 ## Zádrhel ve workflow na sklad/suroviny — řešeno osobní kontrolou
 
@@ -68,13 +70,33 @@ publikační fronta je hotová, ale n8n je provozně vypnuté (P0 byznysově).
 
 ## Další krok
 
-Katalog surovin/cen je hotový (viz výš) — zbytek P0/P1 seznamu z audit
-dokumentu ("Priority souhrn") zatím nedotčený: sklad (pohyby/inventury),
-UI pro Tvorbu menu/receptur (teď už by stavělo na reálném katalogu surovin,
-dřív by to bylo předčasné), dva křehké SECURITY DEFINER vzory
-(zálohy/docházka — vyžaduje novou migraci + úpravu `run.sh`), procure-to-pay
-(platby/transakce), marketingové CRM/GDPR. Žádný další souběžný Workflow
-neběží, takže `supabase/tests/run.sh` je teď volné pro další práci.
+Katalog surovin/cen a UI surovin/receptur jsou hotové (viz výš). Zbytek
+P0/P1 seznamu z audit dokumentu: dva křehké SECURITY DEFINER vzory
+(zálohy/docházka, P1 — hotové na původní větvi, čekají v další skupině
+rozděleného PR), procure-to-pay (platby/transakce k fakturám),
+marketingové CRM/GDPR, Dotykačka adaptér. **Tvorba menu (AI návrh)
+zůstává samostatně blokovaná** — jiný modul než plain Receptury, viz
+`docs/modul-menu-zadani.md`. Žádný Workflow neběží, `supabase/tests/run.sh`
+je volné.
+
+Tahle větev je výřez z `gastro-erp-marketing` — původní jedno velké PR
+(#98, 30 souborů) narazilo na blok "Merge Without Review" na GitHubu,
+proto se celá práce rozděluje na menší, nezávisle sloučitelné PR podle
+tématu. [PR #99](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/99)
+(audit + stav + přepínač firem) a
+[PR #100](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/100)
+(dokumenty + marketing) jsou sloučené. Tahle skupina (katalog surovin +
+UI) je třetí v pořadí; bezpečnostní zpevnění (`krok71`/`krok72`) a
+rozhodnutí Šéfíka o skladu jsou poslední.
+
+## Mimo rozsah téhle práce, nahlášeno zvlášť
+
+Při psaní `krok72_scenar.sql` se potvrdil reálný bug: `delete from
+tenants`/`delete from branches` spadne, pokud ta firma/pobočka má řádek
+v `audit_log` (FK `on delete set null` naráží na pravidlo
+`audit_log_no_update`) — blokuje GDPR výmaz firmy. Nesouvisí s touhle
+větví, nahlášeno jako samostatný úkol (`spawn_task`, task_92418cfb),
+needitoval jsem existující migraci.
 
 ## Rozhodnutí
 
