@@ -61,7 +61,7 @@ export default async function FakturyLayout({
     )
   }
 
-  const pocty = await nactiPocty()
+  const pocty = await nactiPocty(tenantId)
   const { hlavni, mobil } = sestavNavigaci(rozsah, pocty)
 
   return (
@@ -79,19 +79,19 @@ export default async function FakturyLayout({
  * Chyba se nevyhazuje: dokud appka běží nad prázdnou/nedostupnou
  * databází, počítadla mají ukázat nulu, ne položit celý modul.
  */
-async function nactiPocty(): Promise<{ needsReview: number; overdue: number; pendingApproval: number }> {
+async function nactiPocty(tenantId: string): Promise<{ needsReview: number; overdue: number; pendingApproval: number }> {
   try {
     const supabase = getFakturySupabase()
     const dnes = new Date().toISOString().slice(0, 10)
 
     const [needsReview, overdue, pendingApproval] = await Promise.all([
       supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('is_archived', false).eq('needs_review', true),
+        .eq('tenant_id', tenantId).eq('is_archived', false).eq('needs_review', true),
       supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('is_archived', false).neq('status', STAV_UHRAZENO).neq('status', STAV_KE_SCHVALENI)
+        .eq('tenant_id', tenantId).eq('is_archived', false).neq('status', STAV_UHRAZENO).neq('status', STAV_KE_SCHVALENI)
         .not('due_date', 'is', null).lt('due_date', dnes),
       supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('is_archived', false).eq('status', STAV_KE_SCHVALENI),
+        .eq('tenant_id', tenantId).eq('is_archived', false).eq('status', STAV_KE_SCHVALENI),
     ])
 
     return {

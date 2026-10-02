@@ -33,7 +33,7 @@ async function pripravit(rozsah: string, pravo: 'faktury.read' | 'faktury.manage
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/faktury`)
 
-  return { supabase: getFakturySupabase() }
+  return { supabase: getFakturySupabase(), tenantId }
 }
 
 function nepovinnePole(formData: FormData, nazev: string): string | null {
@@ -44,7 +44,7 @@ function nepovinnePole(formData: FormData, nazev: string): string | null {
 /** Ruční zadání faktury (papírový doklad, platba na místě) — viz `faktury/nova`. */
 export async function zalozitFakturu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
   const dodavatel = String(formData.get('supplier') ?? '').trim()
   const castkaRaw = String(formData.get('amount') ?? '').replace(',', '.')
@@ -58,7 +58,9 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
   let pdfUrl: string | null = null
   if (foto instanceof File && foto.size > 0) {
     const pripona = foto.name.includes('.') ? foto.name.split('.').pop() : 'jpg'
-    const cesta = `rucne-zadane/${Date.now()}-${crypto.randomUUID()}.${pripona}`
+    // Tenant v cestě je jen pro pořádek (lepší přehled v Storage) — skutečnou
+    // izolaci dělá tenant_id na řádku invoices, ne cesta k souboru.
+    const cesta = `rucne-zadane/${tenantId}/${Date.now()}-${crypto.randomUUID()}.${pripona}`
     const nahrano = await supabase.storage
       .from('faktury-pdf')
       .upload(cesta, foto, { contentType: foto.type || 'image/jpeg' })
@@ -68,6 +70,7 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
   }
 
   const { error } = await supabase.from('invoices').insert({
+    tenant_id: tenantId,
     received_at: new Date().toISOString(),
     email_sender: null,
     email_subject: 'Ručně zadáno v appce',
@@ -102,9 +105,9 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
 export async function oznacitUpominkuVyresenou(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
-  await supabase.from('invoices').update({ reminder_sent_at: new Date().toISOString() }).eq('id', id)
+  await supabase.from('invoices').update({ reminder_sent_at: new Date().toISOString() }).eq('id', id).eq('tenant_id', tenantId)
   revalidatePath(`/${rozsah}/finance/faktury/upominky`)
   redirect(`/${rozsah}/finance/faktury/upominky`)
 }
@@ -112,9 +115,9 @@ export async function oznacitUpominkuVyresenou(formData: FormData): Promise<void
 export async function archivovatFakturu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
-  await supabase.from('invoices').update({ is_archived: true }).eq('id', id)
+  await supabase.from('invoices').update({ is_archived: true }).eq('id', id).eq('tenant_id', tenantId)
   revalidatePath(`/${rozsah}/finance/faktury/seznam`)
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
@@ -122,9 +125,9 @@ export async function archivovatFakturu(formData: FormData): Promise<void> {
 export async function obnovitFakturu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
-  await supabase.from('invoices').update({ is_archived: false }).eq('id', id)
+  await supabase.from('invoices').update({ is_archived: false }).eq('id', id).eq('tenant_id', tenantId)
   revalidatePath(`/${rozsah}/finance/faktury/seznam`)
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
@@ -134,9 +137,9 @@ export async function obnovitFakturu(formData: FormData): Promise<void> {
 export async function smazatFakturu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
-  await supabase.from('invoices').delete().eq('id', id)
+  await supabase.from('invoices').delete().eq('id', id).eq('tenant_id', tenantId)
   revalidatePath(`/${rozsah}/finance/faktury/seznam`)
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
@@ -146,9 +149,9 @@ export async function smazatFakturu(formData: FormData): Promise<void> {
 export async function potvrditFakturu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
-  await supabase.from('invoices').update({ status: 'Ke kontrole úhrady', review_note: null }).eq('id', id)
+  await supabase.from('invoices').update({ status: 'Ke kontrole úhrady', review_note: null }).eq('id', id).eq('tenant_id', tenantId)
   revalidatePath(`/${rozsah}/finance/faktury`)
   redirect(`/${rozsah}/finance/faktury/schvaleni`)
 }
@@ -158,9 +161,9 @@ export async function potvrditFakturu(formData: FormData): Promise<void> {
 export async function odmitnoutFakturu(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
-  await supabase.from('invoices').delete().eq('id', id)
+  await supabase.from('invoices').delete().eq('id', id).eq('tenant_id', tenantId)
   revalidatePath(`/${rozsah}/finance/faktury`)
   redirect(`/${rozsah}/finance/faktury/schvaleni`)
 }
@@ -174,23 +177,23 @@ export async function odmitnoutFakturu(formData: FormData): Promise<void> {
 export async function oznacitJakoUpominku(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
   const { data: faktura } = await supabase.from('invoices')
-    .select('supplier, email_sender').eq('id', id).maybeSingle()
+    .select('supplier, email_sender').eq('id', id).eq('tenant_id', tenantId).maybeSingle()
 
   await supabase.from('invoices')
     .update({ status: 'Upomínka - zkontrolovat', review_note: null, is_archived: false })
-    .eq('id', id)
+    .eq('id', id).eq('tenant_id', tenantId)
 
-  const vyrazeno = await najitSouvisejiciFaktury(supabase, id, faktura?.supplier, faktura?.email_sender, STAV_KE_SCHVALENI)
+  const vyrazeno = await najitSouvisejiciFaktury(supabase, tenantId, id, faktura?.supplier, faktura?.email_sender, STAV_KE_SCHVALENI)
   if (vyrazeno.size > 0) {
     const poznamka = faktura?.supplier
       ? `Automaticky přeřazeno na upomínku – jiný dokument od dodavatele „${faktura.supplier}“ byl právě označen jako upomínka.`
       : `Automaticky přeřazeno na upomínku – jiný dokument od stejného odesílatele byl právě označen jako upomínka.`
     await supabase.from('invoices')
       .update({ status: 'Upomínka - zkontrolovat', review_note: poznamka, is_archived: false })
-      .in('id', Array.from(vyrazeno))
+      .in('id', Array.from(vyrazeno)).eq('tenant_id', tenantId)
   }
 
   revalidatePath(`/${rozsah}/finance/faktury`)
@@ -221,6 +224,7 @@ function escapovatIlike(hodnota: string): string {
  */
 async function najitSouvisejiciFaktury(
   supabase: ReturnType<typeof getFakturySupabase>,
+  tenantId: string,
   fakturaId: string,
   dodavatel: string | null | undefined,
   odesilatel: string | null | undefined,
@@ -235,7 +239,7 @@ async function najitSouvisejiciFaktury(
     const predpona = escapovatIlike(normalizovane.slice(0, 15))
 
     let dotaz = supabase.from('invoices').select('id, supplier')
-      .neq('id', fakturaId).ilike('supplier', `${predpona}%`)
+      .eq('tenant_id', tenantId).neq('id', fakturaId).ilike('supplier', `${predpona}%`)
     if (filtrStavu) dotaz = dotaz.eq('status', filtrStavu)
     const { data, error } = await dotaz
 
@@ -250,7 +254,7 @@ async function najitSouvisejiciFaktury(
 
   if (!jmenoDodavatele && jmenoOdesilatele) {
     let dotaz = supabase.from('invoices').select('id, supplier')
-      .neq('id', fakturaId).ilike('email_sender', escapovatIlike(jmenoOdesilatele))
+      .eq('tenant_id', tenantId).neq('id', fakturaId).ilike('email_sender', escapovatIlike(jmenoOdesilatele))
     if (filtrStavu) dotaz = dotaz.eq('status', filtrStavu)
     const { data, error } = await dotaz
 
@@ -269,6 +273,7 @@ async function najitSouvisejiciFaktury(
  * tomhle kroku nesmí nikdy selhat. Vrací počet vyřazených řádků. */
 async function vyradSouvisejiciFaktury(
   supabase: ReturnType<typeof getFakturySupabase>,
+  tenantId: string,
   fakturaId: string,
   dodavatel: string | null | undefined,
   odesilatel: string | null | undefined,
@@ -279,7 +284,7 @@ async function vyradSouvisejiciFaktury(
   if (!jmenoDodavatele && !jmenoOdesilatele) return 0
 
   try {
-    const nalezene = await najitSouvisejiciFaktury(supabase, fakturaId, jmenoDodavatele, jmenoOdesilatele)
+    const nalezene = await najitSouvisejiciFaktury(supabase, tenantId, fakturaId, jmenoDodavatele, jmenoOdesilatele)
     if (nalezene.size === 0) return 0
     const ids = Array.from(nalezene)
 
@@ -291,7 +296,7 @@ async function vyradSouvisejiciFaktury(
 
     const { error } = await supabase.from('invoices')
       .update({ status: 'Odmítnuto', review_note: poznamka, is_archived: true })
-      .in('id', ids)
+      .in('id', ids).eq('tenant_id', tenantId)
 
     return error ? 0 : ids.length
   } catch {
@@ -306,22 +311,25 @@ async function vyradSouvisejiciFaktury(
  * rozhodovat podle obsahu přílohy a textu v mailu a ne podle odesílatele") rozpoznala
  * sama. Zápis příkladu je jen „nice to have" — selhání nikdy neblokuje odmítnutí.
  *
- * ⚠️ Zápis do `rejection_examples` dnes tiše selhává — tabulka má RLS zapnuté bez
- * jediné politiky (otevřený bod #1 ze zadání, SQL připravené, čeká na Šéfíka).
+ * Zápis do `rejection_examples` byl opraven a živě ověřen 15. 9. 2026 (RLS politika
+ * „allow all with anon key", `docs/hlaseni/faktury-rejection-examples-rls-2026-09-15.md`).
+ * `rejection_examples` dnes nemá vlastní `tenant_id` (sdílí se napříč zákazníky jako
+ * trénovací příklady pro AI, žádná osobní/finanční data, jen úryvek textu) — to je
+ * vědomý rozdíl od `invoices`, ne opomenutí.
  */
 export async function odmitnoutAZapamatovat(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
   const druh = String(formData.get('druh') ?? 'not_invoice') as DruhOdmitnuti
-  const { supabase } = await pripravit(rozsah, 'faktury.manage')
+  const { supabase, tenantId } = await pripravit(rozsah, 'faktury.manage')
 
   const { data: faktura } = await supabase.from('invoices')
     .select('document_text_excerpt, supplier, email_subject, email_sender')
-    .eq('id', id).maybeSingle()
+    .eq('id', id).eq('tenant_id', tenantId).maybeSingle()
 
-  const vyrazeno = await vyradSouvisejiciFaktury(supabase, id, faktura?.supplier, faktura?.email_sender, druh)
+  const vyrazeno = await vyradSouvisejiciFaktury(supabase, tenantId, id, faktura?.supplier, faktura?.email_sender, druh)
 
-  await supabase.from('invoices').delete().eq('id', id)
+  await supabase.from('invoices').delete().eq('id', id).eq('tenant_id', tenantId)
 
   const excerpt = (faktura?.document_text_excerpt as string | null)?.trim()
   if (excerpt) {

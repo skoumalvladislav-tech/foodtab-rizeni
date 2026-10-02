@@ -29,14 +29,14 @@ const karta = {
   padding: '16px',
 } as const
 
-async function nactiCekajici(): Promise<Faktura[]> {
+async function nactiCekajici(tenantId: string): Promise<Faktura[]> {
   const supabase = getFakturySupabase()
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
     const { data, error } = await supabase
-      .from('invoices').select('*').eq('status', STAV_KE_SCHVALENI)
+      .from('invoices').select('*').eq('tenant_id', tenantId).eq('status', STAV_KE_SCHVALENI)
       .order('received_at', { ascending: false }).order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
@@ -67,7 +67,7 @@ export default async function FakturySchvaleni({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Schvalovat smí ten, kdo má právo „Zadávat, schvalovat a mazat faktury“.</Sdeleni>
   }
 
-  const cekajici = await nactiCekajici()
+  const cekajici = await nactiCekajici(tenantId)
 
   return (
     <>

@@ -728,9 +728,9 @@ export default async function Dnes({
             const dnesniDatum = den.provozni_den;
             const [keKontrole, poSplatnosti] = await Promise.all([
               fakturySupabase.from("invoices").select("*", { count: "exact", head: true })
-                .eq("is_archived", false).eq("needs_review", true),
+                .eq("tenant_id", tenantId).eq("is_archived", false).eq("needs_review", true),
               fakturySupabase.from("invoices").select("*", { count: "exact", head: true })
-                .eq("is_archived", false).neq("status", STAV_UHRAZENO).neq("status", STAV_KE_SCHVALENI)
+                .eq("tenant_id", tenantId).eq("is_archived", false).neq("status", STAV_UHRAZENO).neq("status", STAV_KE_SCHVALENI)
                 .not("due_date", "is", null).lt("due_date", dnesniDatum),
             ]);
             return { keKontrole: keKontrole.count ?? 0, poSplatnosti: poSplatnosti.count ?? 0 };

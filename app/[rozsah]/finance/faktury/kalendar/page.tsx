@@ -27,14 +27,14 @@ const karta = {
   padding: '16px',
 } as const
 
-async function nactiNezaplacene(): Promise<Faktura[]> {
+async function nactiNezaplacene(tenantId: string): Promise<Faktura[]> {
   const supabase = getFakturySupabase()
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
     const { data, error } = await supabase
-      .from('invoices').select('*').not('due_date', 'is', null)
+      .from('invoices').select('*').eq('tenant_id', tenantId).not('due_date', 'is', null)
       .order('supplier', { ascending: true }).order('due_date', { ascending: true }).order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
@@ -58,7 +58,7 @@ export default async function FakturyKalendar({ params }: { params: Promise<{ ro
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Faktury vidí ten, kdo má právo „Vidět přijaté faktury“.</Sdeleni>
   }
 
-  const faktury = await nactiNezaplacene()
+  const faktury = await nactiNezaplacene(tenantId)
   const celkem = faktury.reduce((s, f) => s + Number(f.amount || 0), 0)
   const mena = faktury[0]?.currency ?? 'CZK'
   const poSplatnosti = faktury.filter((f) => dniPoSplatnosti(f.due_date) > 0).length

@@ -30,14 +30,14 @@ const karta = {
   padding: '16px',
 } as const
 
-async function nactiPoSplatnosti(): Promise<Faktura[]> {
+async function nactiPoSplatnosti(tenantId: string): Promise<Faktura[]> {
   const supabase = getFakturySupabase()
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
     const { data, error } = await supabase
-      .from('invoices').select('*').not('due_date', 'is', null)
+      .from('invoices').select('*').eq('tenant_id', tenantId).not('due_date', 'is', null)
       .order('due_date', { ascending: true }).order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
@@ -62,7 +62,7 @@ export default async function FakturyUpominky({ params }: { params: Promise<{ ro
   }
   const smiSpravovat = (await zkusPristup(tenantId, 'faktury.manage', rozsah)).stav === 'ok'
 
-  const faktury = await nactiPoSplatnosti()
+  const faktury = await nactiPoSplatnosti(tenantId)
 
   return (
     <>

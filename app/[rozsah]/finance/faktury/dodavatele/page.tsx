@@ -36,14 +36,14 @@ type StatDodavatele = {
   posledniPrijata: string
 }
 
-async function nactiFaktury(): Promise<Faktura[]> {
+async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
   const supabase = getFakturySupabase()
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
     const { data, error } = await supabase
-      .from('invoices').select('*').eq('is_archived', false)
+      .from('invoices').select('*').eq('tenant_id', tenantId).eq('is_archived', false)
       .order('received_at', { ascending: false }).order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
@@ -74,7 +74,7 @@ export default async function FakturyDodavatele({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Faktury vidí ten, kdo má právo „Vidět přijaté faktury“.</Sdeleni>
   }
 
-  const faktury = await nactiFaktury()
+  const faktury = await nactiFaktury(tenantId)
   const dotaz = (hledat ?? '').trim()
 
   const podleDodavatele = new Map<string, StatDodavatele>()
