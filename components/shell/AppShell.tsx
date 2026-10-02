@@ -7,6 +7,7 @@ import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import type { RozsahProp } from "@/app/[rozsah]/prepinac-rozsahu";
 import type { TeloUpozorneni } from "@/lib/upozorneni-text";
 import { vychoziObrazovka } from "@/lib/vychozi-obrazovka";
+import type { FirmaProp } from "./MenuUctu";
 import GlobalTopbar from "./GlobalTopbar";
 import ModuleSidebar from "./ModuleSidebar";
 import MobileBottomNav from "./MobileBottomNav";
@@ -100,6 +101,9 @@ export type AppShellProps = {
   /** Segment firemní úrovně z authz (TENANT_SCOPE_SEGMENT). */
   segmentFirmy: string;
   nazevFirmy: string;
+  /** Víc než jedna položka jen u člena víc firem zároveň. */
+  firmy?: FirmaProp[];
+  aktivniFirmaId?: string;
   iniciraly: string;
   /** Počet nepřečtených upozornění do zvonečku. */
   neprectenych: number;
@@ -146,6 +150,8 @@ export default function AppShell({
   aktivniRozsah,
   segmentFirmy,
   nazevFirmy,
+  firmy,
+  aktivniFirmaId,
   iniciraly,
   neprectenych,
   rozpadZvonecku,
@@ -283,6 +289,8 @@ export default function AppShell({
         posledniUpozorneni={posledniUpozorneni}
         cilNastaveni={cilNastaveni}
         nazevFirmy={nazevFirmy}
+        firmy={firmy}
+        aktivniFirmaId={aktivniFirmaId}
         iniciraly={iniciraly}
       />
 

@@ -6,6 +6,7 @@ import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 import {
   canSee,
   getContext,
+  getMyTenants,
   getUser,
   jeVedeni,
   maOpravneni,
@@ -168,6 +169,18 @@ export default async function RozsahLayout({
       })
     : [];
 
+  /*
+    Přepínač firmy (2. 10. 2026) — jen u člena víc firem zároveň; pro
+    naprostou většinu uživatelů dnes `getMyTenants()` vrátí jednu položku
+    a appka se chová přesně jako dřív (`firmy` zůstane prázdné, sekce
+    v nabídce účtu se vůbec nekreslí). Výběr samotný řeší
+    `prepnoutFirmu` (app/firma-prepnuti.ts) + cookie v `lib/firma.ts`.
+  */
+  const mojeFirmy = await getMyTenants();
+  const firmy = mojeFirmy.length > 1
+    ? mojeFirmy.map((t) => ({ tenantId: t.tenantId, nazev: t.name }))
+    : undefined;
+
   const nastaveni: PolozkaProp[] = polozkyNastaveni(ctx).map((p) => ({
     segment: p.segment,
     adresa: p.adresa,
@@ -304,6 +317,8 @@ export default async function RozsahLayout({
       aktivniRozsah={scope.branchSlug ?? TENANT_SCOPE_SEGMENT}
       segmentFirmy={TENANT_SCOPE_SEGMENT}
       nazevFirmy={ctx.tenant.name}
+      firmy={firmy}
+      aktivniFirmaId={tenantId}
       iniciraly={iniciraly(user.email)}
       neprectenych={neprectenych ?? 0}
       rozpadZvonecku={{

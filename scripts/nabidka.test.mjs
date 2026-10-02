@@ -208,8 +208,14 @@ const AUTHZ = adresaModulu('lib/authz.ts', [
   ['server-only', PRAZDNY],
   ['@/lib/supabase/server', SERVER],
 ])
+// Prázdná cookie = appka se chová jako dřív (bere se první firma).
+// Přepínač firem (2. 10. 2026) má vlastní kontrolu, viz
+// scripts/firma-prepnuti.test.mjs — tahle se jen nemá rozbít podstrčeným
+// importem.
+const STUB_COOKIES = js('export async function cookies() { return { get: () => undefined, set: () => {} } }')
 const FIRMA = adresaModulu('lib/firma.ts', [
   ['server-only', PRAZDNY],
+  ['next/headers', STUB_COOKIES],
   ['@/lib/authz', AUTHZ],
 ])
 const NABIDKA = adresaModulu('app/[rozsah]/nabidka.ts', [['@/lib/authz', AUTHZ]])
@@ -352,11 +358,16 @@ const NAVIGACE_RAMU = js('export function usePathname() { return globalThis.__ce
 const AKCE_PRIHLASENI = js('export async function odhlasit() { globalThis.__odhlaseni += 1 }')
 // Akce panelu u zvonečku (27. 9.) — serverové, do vykreslení z nich nic nejde.
 const AKCE_ZVONECKU = js('export async function otevritUpozorneni() {}\nexport async function oznacitVsePrectene() {}')
+// Přepínač firmy (2. 10. 2026) — MenuUctu volá serverovou akci přímo;
+// vykreslení rámu ji nepotřebuje skutečnou (ta má vlastní kontrolu,
+// scripts/firma-prepnuti.test.mjs).
+const AKCE_FIRMA = js('export async function prepnoutFirmu() {}')
 const NAHRADY_RAMU = [
   ['next/navigation', NAVIGACE_RAMU],
   ['next/link', ODKAZ],
   ['@/app/prihlaseni/akce', AKCE_PRIHLASENI],
   ['@/app/[rozsah]/upozorneni/otevrit', AKCE_ZVONECKU],
+  ['@/app/firma-prepnuti', AKCE_FIRMA],
   ...KLIKAT,
 ]
 const AppShell = await nactiKomponentu('components/shell/AppShell.tsx', NAHRADY_RAMU)
