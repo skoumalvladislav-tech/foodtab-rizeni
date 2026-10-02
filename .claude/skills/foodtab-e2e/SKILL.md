@@ -63,8 +63,15 @@ nad databází vůbec, prochází **text** migračních souborů a ptá se,
 jestli ke každé `marketing_*` tabulce existuje `revoke`. Tenhle typ
 kontroly (nad zdrojovým textem, ne nad běžící DB) je jediný způsob,
 jak chytit chybějící `revoke` dřív, než se nasadí — PGlite to
-neověří (`foodtab-db-security`). Pro provozní tabulky obdobná
-kontrola zatím neexistuje.
+neověří (`foodtab-db-security`). Pro provozní tabulky je totéž od
+17. 9. 2026 v `scripts/provoz-granty.test.mjs` (všechny tabulky mimo
+`marketing_*`, bez jmenovaného seznamu). Podobně strážní testy nad
+zdrojovým textem: `scripts/faktury-tenant-izolace.test.mjs` (každý dotaz
+na `invoices` filtruje `tenant_id`) a pravidlo 8 v `marketing-ai.test.mjs`.
+Spouštěj před commitem VŠECHNY testy ze seznamu `TESTY` v
+`.github/workflows/aplikace.yml`, ne jen ty, které se tě týkají — nová
+migrace shodila `provoz-granty` a nikdo si toho nevšiml, dokud to
+nespustil znovu.
 
 **`scripts/barvy.js`** — kontrast a rozlišitelnost barevné palety
 (`app/_tokeny.css`, `app/globals.css`). Měří dvě různé věci: kontrastní
