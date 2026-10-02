@@ -89,15 +89,19 @@ nástroj recykluje tenhle vzor beze změny; nevymýšlej nové úložiště.
 
 ## Krok 5 — testy
 
-**Mezera zjištěná při psaní tohohle dokumentu**: `lib/marketing-katalog.ts`
-a `lib/marketing-spojeni.ts` dnes NEMAJÍ vlastní `scripts/*.test.mjs` —
-ověřeno výpisem `scripts/` adresáře, žádný soubor s těmito názvy
-neexistuje. Nová větev zkoušky spojení nebo nová katalogová položka se
-tedy dnes neověří žádným automatizovaným testem, jen ručně přes UI. Než
-se přidá další poskytovatel, stálo by za to napsat
-`scripts/marketing-spojeni.test.mjs` (vzor: `scripts/faktury-filtry.test.mjs`
-— falešné volání/proxy nad síťovým voláním) — mimo rozsah týhle dávky práce,
-zapsáno jako samostatný dluh.
+`scripts/marketing-spojeni.test.mjs` (doplněno 2. 10. 2026, předtím
+chybělo) pokrývá všechny reálně dosažitelné větve `otestovatSpojeni()` —
+nová větev pro další poskytovatele se otestuje stejným vzorem (podstrčený
+`fetch`, manipulace `process.env`, žádná proxy nad databází). Při psaní
+testu se potvrdil jeden skutečný nedostatek: chyba sítě v
+`zeptatSeAnthropicu` vkládala text výjimky do hlášky bez ochrany proti
+tomu, že by mohl nést klíč (spoléhalo se na komentář "klíč v ní není", ne
+na kód) — opraveno ve stejném commitu (aktivní odstranění klíče z textu
+před uložením do hlášky).
+
+`lib/marketing-katalog.ts` sám o sobě (metadata bez chování) stále nemá
+vlastní test — nižší priorita, protože špatná metadata se projeví hned při
+prvním ručním vyzkoušení nové položky v UI, ne až po nasazení.
 
 Integrace se NIKDY neoznačí jako "připojeno", dokud není skutečně ověřená
 — testovací/demo adaptér se v UI i v hlášení pojmenuje jako testovací, ne
