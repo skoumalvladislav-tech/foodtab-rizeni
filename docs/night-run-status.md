@@ -19,15 +19,29 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 | `docs/provider-development.md` (povinný výstup) | `d9ae1cd` | — |
 | `docs/integrations-setup.md` (povinný výstup) | `edabb63` | — |
 | `docs/data-flows.md` (povinný výstup) | (tento commit) | — |
-| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | **běží na pozadí** (Workflow práce→testy→kontrola→dodělávky; krok69 scénář už vznikl, krok70 a registrace v `run.sh` ještě ne), zatím necommitnuto | — |
+| Marketing: test zkoušky spojení + oprava reálné díry (klíč v chybě sítě mohl utéct do hlášky) | `c8353a9` | ne |
+| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d` | ne (aditivní, ale db push po sloučení) |
 
-## Proč teď jen dokumentace a žádný další kód
+## Zádrhel ve workflow na sklad/suroviny — řešeno osobní kontrolou
 
-`supabase/tests/run.sh` (společný seznam scénářů) právě upravuje běžící
-Workflow na katalog surovin. Další DB práce (např. zpevnění dvou křehkých
-SECURITY DEFINER vzorů, zálohy/docházka) by do stejného souboru zapisovala
-souběžně — čekám, až Workflow doběhne a výsledek se commitne, pak
-pokračuji dál (viz "Priority souhrn" v audit dokumentu).
+Fáze "Práce" i "Testy" workflow (práce→testy→kontrola→dodělávky) odvedly
+solidní, osobně ověřenou práci — opravily neplatnou SQL syntaxi, chybějící
+druhou linii obrany a immutabilitu historie cen, napsaly 42 mutačně
+ověřených kontrol (`krok69`/`krok70_scenar.sql`). **Ale fáze "Kontrola"
+(bezpečnostní review) a "Dodělávky" se zmátly** — místo zadané recenze
+katalogu surovin se obě chybně rozhodly, že mají "najít modul Faktury"
+(text, který patřil do téhle konverzace se mnou, ne do jejich zadání), a
+bezpečnostní review katalogu surovin vůbec neprovedly. Korektnostní
+review (druhý souběžný recenzent) zmatené nebylo a našlo 2 reálné nálezy.
+
+**Nedůvěřoval jsem samoobslužné zprávě workflow** — sám jsem přečetl
+výslednou migraci, oba scénáře a `run.sh`, spustil `node
+scripts/scenare-pglite.mjs` (2894 kontrol), a opravil oba korektnostní
+nálezy sám (Nález A: chybějící kontrola shody jednotky — vážné, tiše
+špatný výsledek; Nález B: nekonzistentní zaokrouhlení — drobné), včetně
+mutačního ověření opravy A. Bezpečnostní review katalogu surovin, který
+workflow nedodal, jsem udělal čtením sám při verifikaci (RLS, granty,
+druhá linie — vše v migraci existuje a odpovídá vzoru `krok58`).
 
 ## Zjištění (viz `docs/finance-marketing-audit.md` pro plné znění)
 
@@ -52,12 +66,15 @@ publikační fronta je hotová, ale n8n je provozně vypnuté (P0 byznysově).
 4. **n8n marketingový webhook** je provozně vypnutý — rozhodnutí, zda a kdy
    ho znovu zapnout, patří vlastníkovi (provozní riziko, ne kódová chyba).
 
-## Další krok (bez čekání na blokery výše)
+## Další krok
 
-Pokračuji implementací P0 oblasti, která blokery výše nepotřebuje: společný
-datový model pro sklad/suroviny/nákupní ceny (oddíl 4 a 7 zadání) —
-aditivní migrace + PGlite scénáře, stejně jako celý dosavadní vývoj v tomto
-projektu. Priority a pořadí viz "Priority souhrn" na konci audit dokumentu.
+Katalog surovin/cen je hotový (viz výš) — zbytek P0/P1 seznamu z audit
+dokumentu ("Priority souhrn") zatím nedotčený: sklad (pohyby/inventury),
+UI pro Tvorbu menu/receptur (teď už by stavělo na reálném katalogu surovin,
+dřív by to bylo předčasné), dva křehké SECURITY DEFINER vzory
+(zálohy/docházka — vyžaduje novou migraci + úpravu `run.sh`), procure-to-pay
+(platby/transakce), marketingové CRM/GDPR. Žádný další souběžný Workflow
+neběží, takže `supabase/tests/run.sh` je teď volné pro další práci.
 
 ## Rozhodnutí
 
