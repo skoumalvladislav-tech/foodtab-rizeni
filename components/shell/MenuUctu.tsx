@@ -6,7 +6,10 @@ import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type 
 
 import Ikona from "@/app/[rozsah]/ikona";
 import PrepinacRezimu from "@/app/prepinac-rezimu";
+import { prepnoutFirmu } from "@/app/firma-prepnuti";
 import { jeOtevrena, poKliknuti, poZmeneAdresy, ZAVRENA, type StavNabidky } from "@/lib/stav-nabidky";
+
+export type FirmaProp = { tenantId: string; nazev: string };
 
 /**
  * Nabídka účtu pod iniciálami v horní liště — Moje údaje a Vzhled.
@@ -46,9 +49,14 @@ import { jeOtevrena, poKliknuti, poZmeneAdresy, ZAVRENA, type StavNabidky } from
 export default function MenuUctu({
   iniciraly,
   nazevFirmy,
+  firmy,
+  aktivniFirmaId,
 }: {
   iniciraly: string;
   nazevFirmy: string;
+  /** Víc než jedna položka jen u člena víc firem zároveň — jinak se sekce nekreslí. */
+  firmy?: FirmaProp[];
+  aktivniFirmaId?: string;
 }) {
   const cesta = usePathname() ?? "";
   const [stav, setStav] = useState<StavNabidky>(ZAVRENA);
@@ -140,6 +148,36 @@ export default function MenuUctu({
             <span>Vzhled</span>
             <PrepinacRezimu />
           </div>
+
+          {/*
+            Přepínač firmy — jen u člena víc firem zároveň (2. 10. 2026).
+            Schovaná položka u jedné firmy není zámek, je to jen to, že
+            není co přepínat. Čisté odeslání formuláře jako všude jinde
+            v appce (žádný confirm() v prohlížeči, žádný klientský stav).
+          */}
+          {firmy && firmy.length > 1 ? (
+            <div className="ft-ucet-firmy">
+              <span className="ft-ucet-firmy-nadpis">Firma</span>
+              <ul>
+                {firmy.map((f) => (
+                  <li key={f.tenantId}>
+                    {f.tenantId === aktivniFirmaId ? (
+                      <span className="ft-ucet-firma-aktivni" aria-current="true">
+                        {f.nazev}
+                      </span>
+                    ) : (
+                      <form action={prepnoutFirmu}>
+                        <input type="hidden" name="tenantId" value={f.tenantId} />
+                        <button type="submit" className="ft-ucet-firma-tl">
+                          {f.nazev}
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

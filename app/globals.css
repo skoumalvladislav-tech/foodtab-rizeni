@@ -222,6 +222,29 @@
 /* V liště má přepínač 32 px; tady je to dotykový cíl na tabletu u baru. */
 .ft-ucet-radek .ft-ikona { width: 44px; height: 44px; }
 
+/* Přepínač firmy — jen u člena víc firem zároveň (2. 10. 2026). */
+.ft-ucet-firmy {
+  display: grid; gap: 6px;
+  padding-top: 10px; border-top: 1px solid var(--line);
+}
+.ft-ucet-firmy-nadpis {
+  font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+}
+.ft-ucet-firmy ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ft-ucet-firma-aktivni {
+  display: block; min-height: 36px; padding: 6px 12px;
+  font-size: 14px; font-weight: 600; color: var(--ink);
+  border: 1px solid var(--mosaz); border-radius: 10px; background: var(--mosaz-sv);
+}
+.ft-ucet-firma-tl {
+  display: block; width: 100%; min-height: 36px; padding: 6px 12px;
+  font: inherit; font-size: 14px; text-align: left; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 10px; background: none; cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.ft-ucet-firma-tl:hover { background: var(--sunken); border-color: var(--line-2); }
+.ft-ucet-firma-tl:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 2px; }
+
 
 /* ---- Vyhledávání ------------------------------------------------ */
 /* Pole je zatím jen vzhled — nic nehledá a na model se neptá.

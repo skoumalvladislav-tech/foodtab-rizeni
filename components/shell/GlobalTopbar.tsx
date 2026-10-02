@@ -12,7 +12,7 @@ import { otevritUpozorneni, oznacitVsePrectene } from "@/app/[rozsah]/upozorneni
 import { datumACasVPasmu, ZONA_VYCHOZI } from "@/lib/cas";
 import { nadpisUpozorneni, obdobiRozpisu } from "@/lib/upozorneni-text";
 import type { ModulProp, RozpadZvonecku, UpozorneniProp } from "./AppShell";
-import MenuUctu from "./MenuUctu";
+import MenuUctu, { type FirmaProp } from "./MenuUctu";
 
 /**
  * Ikona modulu v horní liště — mockup Šéfíka ji u záložek má, appka
@@ -50,6 +50,8 @@ export default function GlobalTopbar({
   posledniUpozorneni,
   cilNastaveni,
   nazevFirmy,
+  firmy,
+  aktivniFirmaId,
   iniciraly,
 }: {
   rozsah: string;
@@ -66,6 +68,8 @@ export default function GlobalTopbar({
   posledniUpozorneni: UpozorneniProp[];
   cilNastaveni: string | null;
   nazevFirmy: string;
+  firmy?: FirmaProp[];
+  aktivniFirmaId?: string;
   iniciraly: string;
 }) {
   /*
@@ -232,7 +236,12 @@ export default function GlobalTopbar({
           {/* Iniciály jsou tlačítko nabídky účtu: Moje údaje a Vzhled.
               Na telefonu schované, tam je totéž ve „Více“. Cesta ven
               z aplikace sem nepatří — je vlevo dole (ModuleSidebar). */}
-          <MenuUctu iniciraly={iniciraly} nazevFirmy={nazevFirmy} />
+          <MenuUctu
+            iniciraly={iniciraly}
+            nazevFirmy={nazevFirmy}
+            firmy={firmy}
+            aktivniFirmaId={aktivniFirmaId}
+          />
         </div>
       </header>
 

@@ -340,7 +340,13 @@ const STUB_NAV = js(
   'export function usePathname() { return "/" }',
 )
 const STUB_CACHE = js('export function revalidatePath(...a) { globalThis.__ceka.revalidace.push(a) }')
-const STUB_HEADERS = js('export async function headers() { return new Map([["host", "localhost:3000"]]) }')
+const STUB_HEADERS = js(
+  'export async function headers() { return new Map([["host", "localhost:3000"]]) }\n' +
+  // Prázdná cookie = appka se chová jako dřív (bere se první firma) —
+  // přepínač firem (2. 10. 2026) má vlastní kontrolu, tahle se jen nemá
+  // rozbít podstrčeným importem.
+  'export async function cookies() { return { get: () => undefined, set: () => {} } }',
+)
 const STUB_EMAIL = js('export async function odeslatEmail() { return { stav: "odeslano" } }')
 const STUB_LINK = js(
   `import { createElement } from ${JSON.stringify(REACT)}\n` +
