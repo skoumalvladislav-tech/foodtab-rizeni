@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { cookies } from 'next/headers'
 import { cache } from 'react'
 
 import {
@@ -14,18 +15,34 @@ import {
 } from '@/lib/authz'
 
 /**
+ * Cookie s ručně vybranou firmou u člena víc firem zároveň — zapisuje ji
+ * jen `prepnoutFirmu` (app/firma-prepnuti.ts). Vlastní export, ne řetězec
+ * na dvou místech: kdyby se název někdy změnil, obě místa to musí vidět
+ * stejně.
+ */
+export const COOKIE_FIRMA = 'ft_firma_id'
+
+/**
  * Která firma se právě zobrazuje.
  *
- * Rozhraní je zatím jednofiremní — bere se první firma, kterou uživateli
- * vrátila databáze. Až přibude přepínač firem, přepíše se to tady a ne
- * na každé stránce zvlášť.
+ * Výchozí je první firma, kterou uživateli vrátila databáze — ale kdo
+ * patří do víc firem a přepnul si to (`prepnoutFirmu`), vyhraje cookie.
+ * Hodnotě z cookie se NEVĚŘÍ naslepo: musí být mezi firmami, které
+ * `getMyTenants()` doopravdy vrátil, jinak se použije stejný výchozí
+ * postup jako dřív. Stejný vzor jako `resolveScope()` u pobočky — cizí
+ * nebo smazané členství cookie potichu ignoruje, nespadne na něm.
  *
  * Vrací null, když uživatel nepatří k žádné firmě. Tenhle stav není
  * chyba: čerstvě přihlášený člověk bez pozvánky je přesně tenhle případ.
  */
 export const getCurrentTenantId = cache(async (): Promise<string | null> => {
   const tenants = await getMyTenants()
-  return tenants[0]?.tenantId ?? null
+  if (tenants.length === 0) return null
+
+  const vybrana = (await cookies()).get(COOKIE_FIRMA)?.value
+  if (vybrana && tenants.some((t) => t.tenantId === vybrana)) return vybrana
+
+  return tenants[0].tenantId
 })
 
 /**

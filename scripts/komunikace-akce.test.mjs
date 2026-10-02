@@ -483,6 +483,9 @@ const { PanelUpozorneni } = await nactiModul('components/shell/GlobalTopbar.tsx'
   ['next/link', LINK],
   ['next/navigation', js('export function usePathname() { return "/perla/dnes" }\nexport function useRouter() { return { push() {}, refresh() {} } }')],
   ['@/app/[rozsah]/upozorneni/otevrit', js('export async function otevritUpozorneni() {}\nexport async function oznacitVsePrectene() {}')],
+  // Přepínač firmy (2. 10. 2026) — MenuUctu volá serverovou akci přímo;
+  // tenhle soubor testuje jen panel zvonečku, ne nabídku účtu.
+  ['@/app/firma-prepnuti', js('export async function prepnoutFirmu() {}')],
 ])
 
 {
