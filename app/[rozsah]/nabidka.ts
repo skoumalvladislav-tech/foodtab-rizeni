@@ -171,7 +171,7 @@ export const NABIDKA: Polozka[] = [
   // počítají. Obrazovka se přestěhovala na /dochazka/zalohy a je to
   // záložka Docházky, viditelná podle práva (dochazka/zalozky-prava.ts).
   // Starou adresu /:rozsah/zalohy drží přesměrování v next.config.ts.
-  { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: false, ikona: 'kniha' },
+  { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: true, ikona: 'kniha' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },
   // Obrazovka zatím jen říká, že se modul připravuje — ale existuje,
@@ -217,6 +217,10 @@ export const NABIDKA: Polozka[] = [
   // i serverová akce, ne tahle řádka.
   { segment: 'marketing/nastroje', nazev: 'Nástroje', kratky: 'Nástroje', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'kolo' },
   { segment: 'marketing', nazev: 'Příspěvky', kratky: 'Příspěvky', modul: 'marketing', pravo: 'marketing.read', hotovo: true, ikona: 'zprava' },
+  // Suroviny — katalog a historie nákupních cen (sklad_suroviny_zaklad,
+  // 2.10.2026). `purchasing.read`/`purchasing.manage` existovaly v
+  // katalogu oprávnění od začátku a dosud nebyly použité nikde v kódu.
+  { segment: 'suroviny', nazev: 'Suroviny', kratky: 'Suroviny', modul: 'objednavky', pravo: 'purchasing.read', hotovo: true, ikona: 'vidlicka' },
   { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
 ]
 

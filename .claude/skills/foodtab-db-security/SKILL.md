@@ -75,7 +75,9 @@ chyběla. Oprava: `20260913180000_marketing_granty_uklid.sql`.
 výchozí práva Supabase nemá. Hlídá se to nad TEXTEM migrací:
 `scripts/marketing-granty.test.mjs` projde všechny `marketing_*`
 tabulky a ptá se, jestli k nim někde je `revoke`. Pro provozní
-tabulky taková kontrola zatím **neexistuje**.
+tabulky taková kontrola od 17. 9. 2026 existuje:
+`scripts/provoz-granty.test.mjs` (bere VŠECHNY tabulky mimo `marketing_*`,
+ne jmenovaný seznam — nová tabulka bez `revoke` ji shodí v CI).
 
 ## TRUNCATE obchází RLS — a výchozí práva ho dávají taky
 
@@ -89,13 +91,21 @@ revoke truncate, references, trigger … from authenticated;
 Zjištěno 14. 9. 2026 při nasazení marketingu. Modul marketing je
 uklizený (`20260914190000_marketing_granty_uklid2.sql`).
 
-**Otevřený stav k 14. 9. 2026: provozní tabulky uklizené NEJSOU.**
-51 tabulek v `public` (mimo `marketing_*`) má pro `authenticated`
-grant `TRUNCATE`, `REFERENCES`, `TRIGGER`, a totéž pro `anon` — mezi
-nimi `audit_log`, kde pravidla proti `update`/`delete` `truncate`
-nezastaví. Zadání pro opravu: `docs/granty-provoz-zadani.md`. Než se
-to opraví, **nespoléhej, že provozní tabulky mají jen to, co jim dala
-migrace** — ověř to dotazem, ne čtením migračních souborů.
+**Stav k 2. 10. 2026: provozní tabulky jsou uklizené.** Nález z 14. 9.
+(51 tabulek s `TRUNCATE`/`REFERENCES`/`TRIGGER` pro `authenticated` a
+týmiž právy pro `anon`, včetně `audit_log`) opravila
+`20260917000000_granty_provoz_uklid.sql` (zadání
+`docs/granty-provoz-zadani.md`) a od té doby to hlídá
+`scripts/provoz-granty.test.mjs`. Dřívější verze tohohle skillu tvrdila,
+že je to stále otevřené — neplatilo to už 17. 9.
+
+**Nová tabulka musí `revoke` přidat sama.** Dne 2. 10. 2026 to u katalogu
+surovin zapomněl i autor s tímhle skillem v ruce (test v CI by ho shodil).
+Pozor na druhou stranu téhož: když chceš `authenticated` právo DENIED
+(např. DELETE u insert-only historie), nestačí ho nevypsat do `grant` —
+výchozí práva ho dávají sama. Použij `revoke all … from anon, authenticated`
+a teprve POTOM `grant` jen toho, co smí. Lokální PGlite výchozí práva
+nemá, takže scénář nad tím projde i tehdy, když na ostré databázi ne.
 
 ## Rozšíření Postgresu — nepoužívej je
 
