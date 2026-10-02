@@ -14,7 +14,20 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 | `docs/finance-marketing-audit.md` — 7 nezávislých auditních průchodů kódem | `f46f354` | ne |
 | Faktury: tenant_id izolace fáze 1 (aplikační filtr ve všech dotazech) + regresní test + SQL pro Šéfíka | `19e406b` | **ano — SQL v `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md` musí proběhnout PŘED nasazením tohohle kódu, jinak appka spadne na chybějící sloupec** |
 | Baseline `tsc --noEmit` | čistý, bez chyb | — |
-| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | **běží na pozadí** (Workflow práce→testy→kontrola→dodělávky), zatím necommitnuto | — |
+| Přepínač firem pro členy víc firem zároveň (P1) + regresní test | `35ae439` | ne |
+| `docs/tenant-isolation.md` (povinný výstup) | `f8fb3a1` | — |
+| `docs/provider-development.md` (povinný výstup) | `d9ae1cd` | — |
+| `docs/integrations-setup.md` (povinný výstup) | `edabb63` | — |
+| `docs/data-flows.md` (povinný výstup) | (tento commit) | — |
+| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | **běží na pozadí** (Workflow práce→testy→kontrola→dodělávky; krok69 scénář už vznikl, krok70 a registrace v `run.sh` ještě ne), zatím necommitnuto | — |
+
+## Proč teď jen dokumentace a žádný další kód
+
+`supabase/tests/run.sh` (společný seznam scénářů) právě upravuje běžící
+Workflow na katalog surovin. Další DB práce (např. zpevnění dvou křehkých
+SECURITY DEFINER vzorů, zálohy/docházka) by do stejného souboru zapisovala
+souběžně — čekám, až Workflow doběhne a výsledek se commitne, pak
+pokračuji dál (viz "Priority souhrn" v audit dokumentu).
 
 ## Zjištění (viz `docs/finance-marketing-audit.md` pro plné znění)
 
