@@ -130,7 +130,16 @@ async function zeptatSeAnthropicu(apiKlic: string): Promise<VysledekTestu> {
 
     return { ok: false, zprava: zkratit(`Poskytovatel odpověděl chybou ${odpoved.status}.`) }
   } catch (e) {
-    // Text výjimky může obsahovat adresu, ale ne hlavičky — klíč v ní není.
-    return { ok: false, zprava: zkratit(`Spojení se nepovedlo: ${e instanceof Error ? e.message : String(e)}`) }
+    /*
+      Text výjimky obvykle mluví jen o adrese/timeoutu, ne o hlavičkách —
+      ale "obvykle" není záruka: jiná verze fetch knihovny nebo jiný
+      poskytovatel spojení může jednou vypsat i text požadavku. Klíč se
+      proto z textu AKTIVNĚ odstraní, místo aby se jen předpokládalo,
+      že tam není (stejné pravidlo jako "KLÍČ SE NEDOSTANE DO HLÁŠKY"
+      výš v souboru).
+    */
+    const text = e instanceof Error ? e.message : String(e)
+    const bezKlice = apiKlic ? text.split(apiKlic).join('[klíč]') : text
+    return { ok: false, zprava: zkratit(`Spojení se nepovedlo: ${bezKlice}`) }
   }
 }
