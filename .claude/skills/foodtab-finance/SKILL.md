@@ -38,11 +38,19 @@ skill je mapa a seznam pastí, ne zadání.
 
 ## Co NEexistuje (ověřeno čtením kódu 2. 10.)
 
-Sklad (pohyby, inventury, příjemky), objednávky dodavatelům, tabulka
-plateb/transakcí a přiřazení platby k faktuře, bankovní import, rozpočty,
-CRM kontaktů (dodavatel je jen volný text `invoices.supplier`), POS adaptér
-(Dotykačka), tržby a cashflow pod `/finance/`, příplatky ve mzdách.
-Neplet si „Faktury fungují" s „Finance je hotové".
+Objednávky dodavatelům, tabulka plateb/transakcí a přiřazení platby
+k faktuře, bankovní import, rozpočty, CRM kontaktů (dodavatel je jen
+volný text `invoices.supplier`), POS adaptér (Dotykačka), tržby a
+cashflow pod `/finance/`, příplatky ve mzdách. Neplet si „Faktury
+fungují" s „Finance je hotové".
+
+**Sklad (pohyby, fyzické inventury, příjemky/výdejky) — NEBUDE EXISTOVAT.**
+ROZHODNUTÍ ŠÉFÍKA (2. 10. 2026): tohle dělá pokladní systém (Dotykačka),
+appka si to nemá duplikovat. Nenavrhuj tabulky skladových pohybů ani
+inventur, ani když to zadání (`docs/Foodtab_Claude_Code_nocni_zadani.md`,
+oddíl 7) žádá — tenhle bod je rozhodnutím uzavřený. Skutečná (ne jen
+teoretická z receptury) spotřeba půjde přes budoucí adaptér na
+Dotykačku, až bude.
 
 ## Pasti
 
