@@ -1,49 +1,63 @@
 ---
 name: foodtab-finance
-description: Stav modulu Finance ve Foodtabu — z velké části NEEXISTUJE, jen rezervované jméno modulu a oprávnění. Použij dřív, než začneš cokoli stavět pod finance nebo bankovní napojení, aby ses nedomýšlel architekturu, která zatím nebyla rozhodnutá.
+description: Stav modulu Finance ve Foodtabu — od 15. 9. 2026 existuje sekce Faktury (data v oddělené databázi), gastro ERP (sklad, nákup, foodcost, platby) zatím prakticky ne. Použij dřív, než začneš cokoli stavět pod finance, faktury, suroviny nebo bankovní napojení, aby sis nedomýšlel architekturu, která nebyla rozhodnutá.
 ---
 
-# Modul Finance — stav k 14. 9. 2026
+# Modul Finance — stav k 2. 10. 2026
 
-**Tenhle skill schválně nepopisuje, jak má finance fungovat — protože
-to zatím nikde není rozhodnuté.** Cílem je zabránit tomu, aby si
-relace domyslela schéma nebo obrazovky bez zadání.
+Předchozí verze tohohle skillu (14. 9.) tvrdila, že Finance neexistuje.
+Od 15. 9. 2026 to neplatí — viz `docs/hlaseni/FOODTAB-CURRENT-HANDOFF.md`
+a plný rozbor v `docs/finance-marketing-audit.md` (2. 10. 2026). Tenhle
+skill je mapa a seznam pastí, ne zadání.
 
 ## Co existuje
 
-- Slot v systému modulů: `MODULES` v `lib/authz.ts` obsahuje
-  `'finance'`, takže firma modul teoreticky může zapnout.
-- Rezervovaná oprávnění v `PERMISSIONS` (`lib/authz.ts`):
-  `finance.read`, `finance.manage`, `banking.read`.
-- Jedno závazné rozhodnutí z CLAUDE.md, „Závazná rozhodnutí":
-  **Banka je výhradně pro čtení, nikdy platební příkazy.** Cokoli
-  budoucího napojení na bankovní API musí tohle dodržet od první
-  řádky — nejde to „nejdřív udělat a pak zabezpečit".
+- **Faktury** (`app/[rozsah]/finance/faktury/*`, `lib/faktury-*.ts`,
+  `lib/supabase/faktury.ts`, `app/api/faktury/export`): 8 obrazovek,
+  9 serverových akcí, CSV export. Oprávnění `faktury.read` / `faktury.manage`
+  pod modulem `finance` (migrace `20260915100000_modul_faktury.sql`).
+  Modul se zapíná per firma ručním řádkem v `tenant_modules`.
+- **Data faktur NEJSOU v hlavní databázi.** Žijí v samostatném Supabase
+  projektu `ctqtwahlzhyjerqulqyn` (rozhodnutí Šéfíka 15. 9., „Možnost A").
+  Ta databáze nemá sdílené přihlášení a RLS na ní je „allow all" s anon
+  klíčem. Izolace zákazníků je proto zatím JEN aplikační: každý dotaz
+  filtruje `.eq('tenant_id', tenantId)` (fáze 1, 2. 10. 2026) — a pojistku
+  proti zapomenutému filtru drží `scripts/faktury-tenant-izolace.test.mjs`.
+  Sloupec `tenant_id` v té databázi musí doplnit Šéfík ručním SQL
+  (`docs/hlaseni/faktury-tenant-izolace-2026-10-02.md`) PŘED nasazením.
+  Skutečná RLS (fáze 2) potřebuje JWT Secret toho projektu — nerozhodnuto.
+- **Katalog surovin a nákupní ceny** (od 2. 10., migrace
+  `20261002100000_sklad_suroviny_zaklad.sql`): `ingredients`,
+  `ingredient_purchase_prices` (insert-only historie), vazba
+  `recipe_ingredients.ingredient_id`, `app.recipe_cost_per_portion`.
+  Oprávnění `purchasing.read` / `purchasing.manage` (modul `objednavky`).
+  Výpočet vrací NULL + seznam chybějících položek, nikdy tichý odhad;
+  jednotka receptury se musí shodovat se základní jednotkou suroviny.
+- Rezervované, nepoužité: `banking.read`. Závazné rozhodnutí z CLAUDE.md:
+  **banka je výhradně pro čtení, nikdy platební příkazy.**
 
-## Co NEexistuje
+## Co NEexistuje (ověřeno čtením kódu 2. 10.)
 
-Podle `docs/FOODTAB-MASTER-AUDIT-2026-09-14.md`, oddíl „MODUL:
-FINANCE": žádný `app/[rozsah]/finance/` adresář, žádné migrace,
-žádné tabulky, žádná obrazovka. Status: **CHYBÍ**.
+Sklad (pohyby, inventury, příjemky), objednávky dodavatelům, tabulka
+plateb/transakcí a přiřazení platby k faktuře, bankovní import, rozpočty,
+CRM kontaktů (dodavatel je jen volný text `invoices.supplier`), POS adaptér
+(Dotykačka), tržby a cashflow pod `/finance/`, příplatky ve mzdách.
+Neplet si „Faktury fungují" s „Finance je hotové".
 
-Poznámka k oddělenému projektu Faktury (`skoumalvladislav-tech/
-faktury-app`): je to blízký, ale **samostatný produkt** s vlastní
-databází (`ctqtwahlzhyjerqulqyn`, jiný Supabase projekt než Foodtab).
-Sloučení do Foodtabu je otevřená architektonická otázka, na kterou
-čeká Šéfíkovo rozhodnutí (viz master audit, oddíl „Architektonická
-otázka"). Neplet si přebírání faktur s modulem finance výše — dokud
-Šéfík nerozhodne o sloučení, jsou to dvě různé věci.
+## Pasti
 
-## Než začneš cokoli psát
+1. Před jakoukoli prací nad fakturami: každý nový dotaz na `invoices`
+   MUSÍ filtrovat `tenant_id` (test to hlídá, ale nespoléhej na to).
+2. Nezaváděj druhý katalog surovin ani druhou tabulku cen — rozšiřuj
+   `ingredients` / `ingredient_purchase_prices`.
+3. Faktury a hlavní databáze jsou dva projekty: nelze mezi nimi dělat FK
+   ani join. Vazba je volný text (`ingredient_purchase_prices.source_invoice_id`).
+4. Peníze jsou celé haléře (`*_haleru`), výsledky dělení se zaokrouhlují
+   na celé haléře (`round(x)`), ne na setiny.
+5. Chybějící data se ukazují jako chybějící, ne jako nula.
 
-Podle CLAUDE.md, „Jak spolu pracujeme": *„Ptej se jen na to, co
-v dokumentech není."* U financí dnes není napsané skoro nic — takže
-se ptá skoro na všechno: jaké obrazovky, jaké tabulky, jaký vztah
-k modulu Faktury. Nedomýšlej si pravidla provozu restaurace ani
-architekturu, která nebyla odsouhlasená.
+## Kam dál
 
-Až vznikne zadání pro finance (obdoba `docs/etapa0-specifikace.md`
-pro základ nebo `docs/marketing-zadani.md` pro marketing), doplň do
-tohohle skillu: schéma tabulek, oprávnění v akci, vztah k modulu
-Faktury, a odkaz na to zadání. Do té doby tenhle soubor zůstává
-záměrně tenký.
+`docs/finance-marketing-audit.md` (stav a priority), `docs/data-flows.md`,
+`docs/tenant-isolation.md`, `docs/Foodtab_Claude_Code_nocni_zadani.md`
+(oddíly 4–7: cílový stav gastro ERP — je to zadání, ne popis dneška).
