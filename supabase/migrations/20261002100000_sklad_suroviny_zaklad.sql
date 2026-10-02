@@ -9,8 +9,15 @@
 -- s komentářem "naplní se z modulu Objednávky, až bude".
 --
 -- Tahle migrace zakládá katalog surovin + historii cen + výpočet nákladu
--- receptury. Sklad (pohyby, inventury) je VĚDOMĚ MIMO rozsah — samostatná
--- navazující práce.
+-- receptury — teoretický foodcost (nákupní cena × platná receptura).
+--
+-- ROZHODNUTÍ ŠÉFÍKA (2. 10. 2026): sklad (skladové pohyby, fyzické
+-- inventury) se ve Foodtabu NEBUDE stavět — ty už dělá pokladní systém
+-- (Dotykačka). Skutečná spotřeba (ne jen teoretická z receptury) tedy
+-- půjde v budoucnu přes adaptér na Dotykačku, ne přes vlastní tabulky
+-- skladových pohybů. Tahle migrace na tom rozhodnutí nic nemění —
+-- katalog surovin a historie cen jsou potřeba i tak (nákupní cena
+-- nejde číst z pokladny, ta prodej neviděla za co se koupilo).
 --
 -- Oprávnění: `purchasing.read` / `purchasing.manage` už existují
 -- v katalogu (20260823120100_catalog.sql, modul `objednavky`) a dosud

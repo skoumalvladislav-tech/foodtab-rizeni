@@ -23,6 +23,7 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 | Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d`, `514d153` | ne (aditivní, ale db push po sloučení) |
 | Opraveny 3 zastaralé skilly (`foodtab-finance`, `foodtab-db-security`, `foodtab-e2e`) | `6e369d7`, (tento commit) | — |
 | UI katalogu surovin (seznam, detail, historie cen) + editor receptur se živým foodcostem + druhá linie obrany na `recipe_ingredients.ingredient_id` | `6e1f3dc` | ne (aditivní, ale db push po sloučení) |
+| Zpevnění dvou křehkých SECURITY DEFINER vzorů (zálohy, docházka) + regresní scénáře `krok71`/`krok72` (P1) | `2e4ae01` | ne (aditivní, ale db push po sloučení) |
 
 ## Zádrhel ve workflow na sklad/suroviny — řešeno osobní kontrolou
 
@@ -68,26 +69,39 @@ publikační fronta je hotová, ale n8n je provozně vypnuté (P0 byznysově).
 4. **n8n marketingový webhook** je provozně vypnutý — rozhodnutí, zda a kdy
    ho znovu zapnout, patří vlastníkovi (provozní riziko, ne kódová chyba).
 
+## ROZHODNUTÍ ŠÉFÍKA (2. 10. 2026): modul sklad/inventury se nestaví
+
+Sklad (skladové pohyby, fyzické inventury) dělá pokladní systém
+(Dotykačka) — appka si ho nemá duplikovat. Zrušeno z priorit (bylo P0
+v auditu). Skutečná spotřeba půjde v budoucnu přes adaptér na Dotykačku,
+ne přes vlastní tabulky pohybů. Promítnuto do
+`docs/finance-marketing-audit.md`, `docs/data-flows.md` a skillu
+`foodtab-finance`; komentář v migraci `20261002100000_sklad_suroviny_zaklad.sql`
+opraven (netvrdí už, že sklad je „budoucí navazující práce").
+
 ## Další krok
 
-Katalog surovin/cen a UI surovin/receptur jsou hotové (viz výš). Zbytek
-P0/P1 seznamu z audit dokumentu: dva křehké SECURITY DEFINER vzory
-(zálohy/docházka, P1 — hotové na původní větvi, čekají v další skupině
-rozděleného PR), procure-to-pay (platby/transakce k fakturám),
-marketingové CRM/GDPR, Dotykačka adaptér. **Tvorba menu (AI návrh)
-zůstává samostatně blokovaná** — jiný modul než plain Receptury, viz
-`docs/modul-menu-zadani.md`. Žádný Workflow neběží, `supabase/tests/run.sh`
-je volné.
-
-Tahle větev je výřez z `gastro-erp-marketing` — původní jedno velké PR
-(#98, 30 souborů) narazilo na blok "Merge Without Review" na GitHubu,
-proto se celá práce rozděluje na menší, nezávisle sloučitelné PR podle
-tématu. [PR #99](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/99)
-(audit + stav + přepínač firem) a
+Tohle je poslední, čtvrtá skupina rozděleného PR — celá noční práce
+(audit, přepínač firem, povinné dokumenty, oprava marketingu, katalog
+surovin + UI receptur, zpevnění bezpečnostních vzorů, rozhodnutí o
+skladu) je po jejím sloučení v `main`.
+[PR #99](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/99),
 [PR #100](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/100)
-(dokumenty + marketing) jsou sloučené. Tahle skupina (katalog surovin +
-UI) je třetí v pořadí; bezpečnostní zpevnění (`krok71`/`krok72`) a
-rozhodnutí Šéfíka o skladu jsou poslední.
+a [PR #101](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/101)
+jsou sloučené (původní jedno PR #98, 30 souborů, narazilo na blok "Merge
+Without Review" — proto rozdělení na 4 menší).
+
+Zbytek P0/P1 seznamu z audit dokumentu, co zůstává nedotčené: procure-to-pay
+(platby/transakce k fakturám), marketingové CRM/GDPR, Dotykačka adaptér
+(reálná spotřeba surovin). **Tvorba menu (AI návrh)** zůstává samostatně
+blokovaná — jiný modul než plain Receptury, viz `docs/modul-menu-zadani.md`.
+**Faktury tenant-izolace** (`19e406b`) čeká na Šéfíkovo SQL v oddělené
+databázi, nasadí se jako samostatná budoucí PR. Žádný Workflow neběží,
+`supabase/tests/run.sh` je volné.
+
+**Zbývá `supabase db push`** pro všechny nové migrace z katalogu surovin
+a tohoto commitu (`krok71`/`krok72`) — vyžaduje výslovný pokyn Šéfíka
+pokaždé znovu (skill `nasazeni`), nespouští se automaticky.
 
 ## Mimo rozsah téhle práce, nahlášeno zvlášť
 
