@@ -11,8 +11,10 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 |---|---|---|
 | Instalace skillů `supabase`, `supabase-postgres-best-practices`, `frontend-design`, `webapp-testing` | `70ed0dd` | ne |
 | Uložení obou zadávacích dokumentů do `docs/` | `70ed0dd` | ne |
-| `docs/finance-marketing-audit.md` — 7 nezávislých auditních průchodů kódem | (tento commit) | ne |
+| `docs/finance-marketing-audit.md` — 7 nezávislých auditních průchodů kódem | `f46f354` | ne |
+| Faktury: tenant_id izolace fáze 1 (aplikační filtr ve všech dotazech) + regresní test + SQL pro Šéfíka | `19e406b` | **ano — SQL v `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md` musí proběhnout PŘED nasazením tohohle kódu, jinak appka spadne na chybějící sloupec** |
 | Baseline `tsc --noEmit` | čistý, bez chyb | — |
+| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | **běží na pozadí** (Workflow práce→testy→kontrola→dodělávky), zatím necommitnuto | — |
 
 ## Zjištění (viz `docs/finance-marketing-audit.md` pro plné znění)
 
