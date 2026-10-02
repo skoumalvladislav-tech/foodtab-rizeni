@@ -1,5 +1,18 @@
 # Night run status — gastro ERP + marketing
 
+> **POZNÁMKA K TÉTO VĚTVI (`gastro-erp-marketing-deploy`, 2. 10. 2026):**
+> Tahle větev je `main` + VŠECHNY commity z `gastro-erp-marketing` KROMĚ
+> `19e406b` ("Faktury: tenant_id izolace fáze 1") — ten commit vyžaduje,
+> aby Šéfík nejdřív spustil SQL v oddělené databázi Faktur
+> (`docs/hlaseni/faktury-tenant-izolace-2026-10-02.md`, ten soubor proto
+> v téhle větvi ani není), jinak by nasazení appku na `/finance/faktury/*`
+> rozbilo (chybějící sloupec `tenant_id`). Řádek níž o téhle fázi zůstává
+> v textu beze změny (historický popis), ale **kód z `19e406b` v téhle
+> větvi NENÍ** — Faktury se chovají přesně jako dnes v produkci (bez
+> tenant_id filtru), žádná regrese, jen ještě bez opravy. Až SQL proběhne,
+> `19e406b` se nasadí samostatně (cherry-pick na `main`, ne celá větev
+> `gastro-erp-marketing` znovu).
+
 Větev: `gastro-erp-marketing` (worktree `C:\Users\vladi\foodtab-gastro-erp`,
 založeno z `main` @ `7df7292`). Vlastní samostatný `node_modules` (junction na
 `foodtab-nasazeni`), nesahá na `foodtab-rizeni` (ten je rozdělaný na jiné
