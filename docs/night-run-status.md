@@ -20,9 +20,9 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 | `docs/integrations-setup.md` (povinný výstup) | `edabb63` | — |
 | `docs/data-flows.md` (povinný výstup) | (tento commit) | — |
 | Marketing: test zkoušky spojení + oprava reálné díry (klíč v chybě sítě mohl utéct do hlášky) | `c8353a9` | ne |
-| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d`, `514d153` | ne (aditivní, ale db push po sloučení) |
+| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d`, `514d153` | **ne — nasazeno `db push` 2. 10. 2026** |
 | Opraveny 3 zastaralé skilly (`foodtab-finance`, `foodtab-db-security`, `foodtab-e2e`) | `6e369d7`, (tento commit) | — |
-| UI katalogu surovin (seznam, detail, historie cen) + editor receptur se živým foodcostem + druhá linie obrany na `recipe_ingredients.ingredient_id` | `6e1f3dc` | ne (aditivní, ale db push po sloučení) |
+| UI katalogu surovin (seznam, detail, historie cen) + editor receptur se živým foodcostem + druhá linie obrany na `recipe_ingredients.ingredient_id` | `6e1f3dc` | **ne — nasazeno `db push` 2. 10. 2026** |
 | Zpevnění dvou křehkých SECURITY DEFINER vzorů (zálohy, docházka) + regresní scénáře `krok71`/`krok72` (P1) | `2e4ae01` | ne (aditivní, ale db push po sloučení) |
 
 ## Zádrhel ve workflow na sklad/suroviny — řešeno osobní kontrolou
@@ -81,15 +81,21 @@ opraven (netvrdí už, že sklad je „budoucí navazující práce").
 
 ## Další krok
 
-Tohle je poslední, čtvrtá skupina rozděleného PR — celá noční práce
-(audit, přepínač firem, povinné dokumenty, oprava marketingu, katalog
-surovin + UI receptur, zpevnění bezpečnostních vzorů, rozhodnutí o
-skladu) je po jejím sloučení v `main`.
+Celá noční práce (audit, přepínač firem, povinné dokumenty, oprava
+marketingu, katalog surovin + UI receptur, zpevnění bezpečnostních vzorů,
+rozhodnutí o skladu) je sloučená v `main` a nasazená na Vercelu —
 [PR #99](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/99),
-[PR #100](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/100)
-a [PR #101](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/101)
-jsou sloučené (původní jedno PR #98, 30 souborů, narazilo na blok "Merge
-Without Review" — proto rozdělení na 4 menší).
+[#100](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/100),
+[#101](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/101) a
+[#102](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/102)
+(původní jedno PR #98, 30 souborů, narazilo na blok "Merge Without
+Review" — proto rozdělení na 4 menší, každé mergnuté zvlášť).
+
+**`supabase db push` proběhl 2. 10. 2026** (3 migrace: katalog surovin,
+průzor pro mazání suroviny, API receptur) — ověřeno `supabase migration
+list --linked` (local i remote se shodují u všech tří). Katalog surovin
+a editor receptur jsou tak od tohohle okamžiku v produkci plně funkční,
+ne jen jako "čeká na nasazení databáze".
 
 Zbytek P0/P1 seznamu z audit dokumentu, co zůstává nedotčené: procure-to-pay
 (platby/transakce k fakturám), marketingové CRM/GDPR, Dotykačka adaptér
@@ -98,10 +104,6 @@ blokovaná — jiný modul než plain Receptury, viz `docs/modul-menu-zadani.md`
 **Faktury tenant-izolace** (`19e406b`) čeká na Šéfíkovo SQL v oddělené
 databázi, nasadí se jako samostatná budoucí PR. Žádný Workflow neběží,
 `supabase/tests/run.sh` je volné.
-
-**Zbývá `supabase db push`** pro všechny nové migrace z katalogu surovin
-a tohoto commitu (`krok71`/`krok72`) — vyžaduje výslovný pokyn Šéfíka
-pokaždé znovu (skill `nasazeni`), nespouští se automaticky.
 
 ## Mimo rozsah téhle práce, nahlášeno zvlášť
 
