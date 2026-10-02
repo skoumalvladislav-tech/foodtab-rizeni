@@ -112,7 +112,7 @@ souboru**; řádky označené „PŘEDPOKLAD" nebyly ověřeny až na dno.
 | Nákupní balení/jednotky/převody | — | **Neexistuje** | Nejde spočítat cenu na recepturovou jednotku | P1 |
 | Receptury s porcemi/výtěžností/verzemi | `recipes`, `recipe_ingredients` | Částečné — jen počet porcí, RLS hotové | Žádná výtěžnost, ztráty, verze, účinnost od data | P1 |
 | Vazba na nákupní ceny | `recipe_ingredients.cost_haleru` | Prázdné pole, nic ho neplní | Navíc faktury jsou v jiné databázi (viz výš) | **P0** (pokud má foodcost být skutečný) |
-| Sklad (pohyby/inventury/příjemky/výdejky) | — | **Zcela neexistuje** — jen 2 jména oprávnění bez tabulek | Celá oblast | **P0** |
+| Sklad (pohyby/inventury/příjemky/výdejky) | — | **Zcela neexistuje** — jen 2 jména oprávnění bez tabulek | **ROZHODNUTÍ ŠÉFÍKA (2. 10. 2026): nebude se stavět.** Sklad a fyzické inventury dělá pokladní systém (Dotykačka) — Foodtab si je nemá duplikovat. Skutečná spotřeba (ne jen teoretická z receptury) půjde přes budoucí adaptér na Dotykačku, ne přes vlastní tabulky pohybů. | uzavřeno |
 | Foodcost/beverage cost/marže na porci | — | **Žádný výpočet** nikde | Důsledek chybějících tří oblastí výše | **P0** |
 | Menu jako jednotný zdroj ↔ marketing | `marketing_menu*` (vlastní, funkční OCR/text import) vs. `menus.*` (prázdná dílna) | Dvě oddělené evidence, vědomě/zdokumentovaně | Žádné sdílení dat; `zdroj='foodtab'` připravené, nepoužívané | P2 (dokud `menus.*` nemá UI) |
 | UI pro Tvorbu menu | `app/[rozsah]/menu/page.tsx` | **Stub** („Připravujeme") | Žádný CRUD nad recepturami/menu | P1 |
@@ -153,8 +153,10 @@ souboru**; řádky označené „PŘEDPOKLAD" nebyly ověřeny až na dno.
 ## Priority souhrn pro plánování (P0 → P1 → P2)
 
 **P0 — bez tohoto nejde prodat/bezpečně rozšířit:**
-- Izolace dat faktur (samostatná DB bez tenant_id/RLS)
-- Sklad + katalog surovin + vazba na nákupní ceny + foodcost výpočet (celá oblast neexistuje)
+- Izolace dat faktur (samostatná DB bez tenant_id/RLS) — **hotovo, fáze 1**
+- Katalog surovin + vazba na nákupní ceny + teoretický foodcost výpočet — **hotovo**.
+  Sklad/pohyby/inventury (fyzický stav zásob) se NESTAVÍ — rozhodnutí Šéfíka,
+  patří do pokladního systému.
 - Ověřit v produkci, že Realtime kanály jedou jako `authenticated`, ne `anon` (PR #92)
 - Publikační fronta marketingu reálně nic nepublikuje (n8n vypnuté) — byznysový P0, ne bezpečnostní
 

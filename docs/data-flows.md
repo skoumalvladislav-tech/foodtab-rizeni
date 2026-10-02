@@ -18,8 +18,8 @@ oblastech) — tenhle dokument je jen průřez napříč moduly.
 | produkty pokladny | **Ne.** Žádný POS adaptér (Dotykačka) ani tabulka prodejů. | — |
 | suroviny a nákupní balení | **Založeno 2. 10. 2026** (tahle dávka práce, běží na pozadí) — `public.ingredients`, `public.ingredient_purchase_prices`. | nová migrace `20261002100000_sklad_suroviny_zaklad.sql` |
 | receptury a verze | Receptury ano (`recipes`/`recipe_ingredients`), **verze ne** — jen `active` příznak, žádné historické verzování obsahu. | `supabase/migrations/20260823130000_provoz.sql` |
-| sklady a pohyby | **Ne.** Žádná tabulka skladových pohybů ani skladu samotného. | — |
-| inventury | **Ne.** | — |
+| sklady a pohyby | **Ne — a nebude.** ROZHODNUTÍ ŠÉFÍKA (2. 10. 2026): sklad a fyzické inventury dělá pokladní systém (Dotykačka), Foodtab si je nemá duplikovat. Skutečná spotřeba půjde přes budoucí Dotykačka adaptér, ne přes vlastní tabulky. | uzavřeno |
+| inventury | **Ne — a nebude** (totéž rozhodnutí). | uzavřeno |
 | směny a skutečná docházka | Ano, dobře rozpracováno — `shifts` (plán) vs. `attendance_events` (skutečnost), historické sazby. | `20260823130000_provoz.sql`, `20260831010000_mzdy_sazby.sql` |
 | rozpočty | **Ne.** Žádná tabulka rozpočtů/forecastu nikde v repozitáři. | — |
 | kampaně, příspěvky, kanály, výsledky | Ano, marketing modul je nejrozpracovanější oblast — kalendář, schvalování, fronta publikací, UTM/odkazy. | `supabase/migrations/20260909*`, `lib/marketing-*.ts` |
@@ -90,7 +90,8 @@ důsledně tam, kde integrace existuje:
 
 ## Co tenhle dokument neřeší
 
-Detailní návrh chybějících tabulek (sklad/pohyby/inventury, platby,
-rozpočty) — to je rozsah navazující práce, ne shrnutí dnešního stavu.
+Detailní návrh chybějících tabulek (platby, rozpočty) — to je rozsah
+navazující práce, ne shrnutí dnešního stavu. Sklad/pohyby/inventury
+záměrně vynechány (rozhodnutí Šéfíka, viz tabulka výš).
 Prioritizace je v `docs/finance-marketing-audit.md`, sekce "Priority
 souhrn".

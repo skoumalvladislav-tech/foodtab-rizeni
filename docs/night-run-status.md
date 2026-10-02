@@ -20,7 +20,9 @@ větvi `komunikace-hlasove-zpravy` z jiné relace).
 | `docs/integrations-setup.md` (povinný výstup) | `edabb63` | — |
 | `docs/data-flows.md` (povinný výstup) | (tento commit) | — |
 | Marketing: test zkoušky spojení + oprava reálné díry (klíč v chybě sítě mohl utéct do hlášky) | `c8353a9` | ne |
-| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d` | ne (aditivní, ale db push po sloučení) |
+| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d`, `514d153` | ne (aditivní, ale db push po sloučení) |
+| Opraveny 3 zastaralé skilly (`foodtab-finance`, `foodtab-db-security`, `foodtab-e2e`) | `6e369d7`, (tento commit) | — |
+| Zpevnění dvou křehkých SECURITY DEFINER vzorů (zálohy, docházka) + regresní scénáře `krok71`/`krok72` (P1) | `2e4ae01` | ne (aditivní, ale db push po sloučení) |
 
 ## Zádrhel ve workflow na sklad/suroviny — řešeno osobní kontrolou
 
@@ -66,15 +68,32 @@ publikační fronta je hotová, ale n8n je provozně vypnuté (P0 byznysově).
 4. **n8n marketingový webhook** je provozně vypnutý — rozhodnutí, zda a kdy
    ho znovu zapnout, patří vlastníkovi (provozní riziko, ne kódová chyba).
 
+## ROZHODNUTÍ ŠÉFÍKA (2. 10. 2026): modul sklad/inventury se nestaví
+
+Sklad (skladové pohyby, fyzické inventury) dělá pokladní systém
+(Dotykačka) — appka si ho nemá duplikovat. Zrušeno z priorit (bylo P0
+v auditu). Skutečná spotřeba půjde v budoucnu přes adaptér na Dotykačku,
+ne přes vlastní tabulky pohybů. Promítnuto do
+`docs/finance-marketing-audit.md`, `docs/data-flows.md` a skillu
+`foodtab-finance`; komentář v migraci `20261002100000_sklad_suroviny_zaklad.sql`
+opraven (netvrdí už, že sklad je „budoucí navazující práce").
+
 ## Další krok
 
-Katalog surovin/cen je hotový (viz výš) — zbytek P0/P1 seznamu z audit
-dokumentu ("Priority souhrn") zatím nedotčený: sklad (pohyby/inventury),
-UI pro Tvorbu menu/receptur (teď už by stavělo na reálném katalogu surovin,
-dřív by to bylo předčasné), dva křehké SECURITY DEFINER vzory
-(zálohy/docházka — vyžaduje novou migraci + úpravu `run.sh`), procure-to-pay
-(platby/transakce), marketingové CRM/GDPR. Žádný další souběžný Workflow
-neběží, takže `supabase/tests/run.sh` je teď volné pro další práci.
+Katalog surovin/cen a oba bezpečnostní vzory jsou hotové (viz výš).
+Zbytek P0/P1 seznamu z audit dokumentu: UI pro Tvorbu menu/receptur
+(teď už staví na reálném katalogu surovin), procure-to-pay (platby/
+transakce k fakturám), marketingové CRM/GDPR, Dotykačka adaptér. Žádný
+Workflow neběží, `supabase/tests/run.sh` je volné.
+
+## Mimo rozsah téhle práce, nahlášeno zvlášť
+
+Při psaní `krok72_scenar.sql` se potvrdil reálný bug: `delete from
+tenants`/`delete from branches` spadne, pokud ta firma/pobočka má řádek
+v `audit_log` (FK `on delete set null` naráží na pravidlo
+`audit_log_no_update`) — blokuje GDPR výmaz firmy. Nesouvisí s touhle
+větví, nahlášeno jako samostatný úkol (`spawn_task`, task_92418cfb),
+needitoval jsem existující migraci.
 
 ## Rozhodnutí
 
