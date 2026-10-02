@@ -78,8 +78,12 @@ alter table public.ingredients enable row level security;
 -- na to, že je nikdo nedal — `recipes` sama tohle ještě nedělala (je
 -- z 23. 8.), ale `marketing_menu`, `notification_preferences` a další
 -- zářijové migrace ano. Řídím se aktuální (bezpečnější) konvencí.
-grant select, insert, update, delete on public.ingredients to authenticated;
+-- TRUNCATE se RLS neřídí (vysypal by katalog všech firem) a výchozí práva
+-- Supabase ho `authenticated` dávají samy — musí se odebrat výslovně
+-- (20260917000000_granty_provoz_uklid.sql; hlídá scripts/provoz-granty.test.mjs).
 revoke all on public.ingredients from anon;
+revoke truncate, references, trigger on public.ingredients from authenticated;
+grant select, insert, update, delete on public.ingredients to authenticated;
 
 create policy ingredients_read on public.ingredients for select to authenticated
   using (app.can_read_scoped(tenant_id, 'purchasing.read', null));
@@ -193,8 +197,18 @@ alter table public.ingredient_purchase_prices enable row level security;
 -- (ověřeno v krok70_scenar.sql, oddíl o smazání suroviny). Řádek proto
 -- NEgrantuje `delete` — stejná dvojí linie (chybějící grant + RLS), ne
 -- jen RLS samotná, kterou by šlo obejít budoucí přidanou politikou.
+--
+-- DOPLNĚNO 2. 10. 2026 (osobní kontrola po workflow): samotné nevypsání
+-- DELETE do `grant` NESTAČÍ. Výchozí práva Supabase (`alter default
+-- privileges … grant all on tables to anon, authenticated`) dávají
+-- `authenticated` DELETE i TRUNCATE na každou novou tabulku, ať migrace
+-- píše cokoli — lokální PGlite je nemá, proto to scénář krok70 nechytil
+-- (stejná past jako marketing_tajemstvi, foodtab-db-security). Nejdřív
+-- se proto odebere VŠE obou rolím (jako u employee_rates) a teprve
+-- potom se vypíše, co smí `authenticated` doopravdy. Pořadí je důležité:
+-- grant před revoke by práva zase smazal.
+revoke all on public.ingredient_purchase_prices from anon, authenticated;
 grant select, insert, update on public.ingredient_purchase_prices to authenticated;
-revoke all on public.ingredient_purchase_prices from anon;
 
 create policy ingredient_purchase_prices_read on public.ingredient_purchase_prices for select to authenticated
   using (app.can_read_scoped(tenant_id, 'purchasing.read', null));
