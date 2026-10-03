@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic'
  *
  * Ruční zápis pohybu, přehled posledních transakcí a fronta návrhů
  * párování s fakturami. Návrhy se POČÍTAJÍ při každém načtení (nic se
- * neukládá jako „navrženo") — uložený řádek v `platby_faktury` vzniká
+ * neukládá jako „navrženo“) — uložený řádek v `platby_faktury` vzniká
  * teprve potvrzením, vždy lidským kliknutím (zadání, oddíl 5).
  */
 
@@ -109,10 +109,10 @@ export default async function FinancePlatby({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string }>
+  searchParams: Promise<{ chyba?: string; importovano?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba } = await searchParams
+  const { chyba, importovano } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -152,6 +152,11 @@ export default async function FinancePlatby({
 
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', maxWidth: '900px' }}>
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
+        {importovano ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
+            Import hotový — zapsáno {importovano} {importovano === '1' ? 'nová platba' : 'nových plateb'}.
+          </p>
+        ) : null}
 
         <div style={{ display: 'flex', gap: '10px' }}>
           <Link href={`/${rozsah}/finance/platby/import`} className="ft-tl">Importovat výpis (CSV)</Link>
