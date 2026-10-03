@@ -1,125 +1,136 @@
-# Night run status — gastro ERP + marketing
+# Night run status — Finance a účetnictví (gastro ERP)
 
-Větev: `gastro-erp-marketing` (worktree `C:\Users\vladi\foodtab-gastro-erp`,
-založeno z `main` @ `7df7292`). Vlastní samostatný `node_modules` (junction na
-`foodtab-nasazeni`), nesahá na `foodtab-rizeni` (ten je rozdělaný na jiné
-větvi `komunikace-hlasove-zpravy` z jiné relace).
+Větev: `finance-ucetnictvi-erp` (worktree `C:\Users\vladi\foodtab-finance-erp`,
+založeno z `main` @ `6609630`, tj. po nasazení katalogu surovin/receptur
+2. 10. 2026). Vlastní samostatný `node_modules` (junction na
+`foodtab-nasazeni`).
 
-## Hotovo
+Předchozí noc (gastro ERP + marketing, `gastro-erp-marketing` větev) je
+hotová a sloučená — vlastní historie v `main`, ne tady. Tenhle soubor
+popisuje JEN tuhle novou práci (Finance/účetnictví).
 
-| Co | Commit | Čeká na db push? |
-|---|---|---|
-| Instalace skillů `supabase`, `supabase-postgres-best-practices`, `frontend-design`, `webapp-testing` | `70ed0dd` | ne |
-| Uložení obou zadávacích dokumentů do `docs/` | `70ed0dd` | ne |
-| `docs/finance-marketing-audit.md` — 7 nezávislých auditních průchodů kódem | `f46f354` | ne |
-| Faktury: tenant_id izolace fáze 1 (aplikační filtr ve všech dotazech) + regresní test + SQL pro Šéfíka | `19e406b` (NENÍ v žádném sloučeném PR — čeká na SQL, nasadí se samostatně, viz blokery níž) | **ano — SQL v `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md` musí proběhnout PŘED nasazením tohohle kódu, jinak appka spadne na chybějící sloupec** |
-| Baseline `tsc --noEmit` | čistý, bez chyb | — |
-| Přepínač firem pro členy víc firem zároveň (P1) + regresní test | `35ae439` | ne |
-| `docs/tenant-isolation.md` (povinný výstup) | `f8fb3a1` | — |
-| `docs/provider-development.md` (povinný výstup) | `d9ae1cd` | — |
-| `docs/integrations-setup.md` (povinný výstup) | `edabb63` | — |
-| `docs/data-flows.md` (povinný výstup) | (tento commit) | — |
-| Marketing: test zkoušky spojení + oprava reálné díry (klíč v chybě sítě mohl utéct do hlášky) | `c8353a9` | ne |
-| Katalog surovin + historie nákupních cen + `app.recipe_cost_per_portion` (P0, oddíl 7 zadání) | `3ae449d`, `514d153` | **ne — nasazeno `db push` 2. 10. 2026** |
-| Opraveny 3 zastaralé skilly (`foodtab-finance`, `foodtab-db-security`, `foodtab-e2e`) | `6e369d7`, (tento commit) | — |
-| UI katalogu surovin (seznam, detail, historie cen) + editor receptur se živým foodcostem + druhá linie obrany na `recipe_ingredients.ingredient_id` | `6e1f3dc` | **ne — nasazeno `db push` 2. 10. 2026** |
-| Zpevnění dvou křehkých SECURITY DEFINER vzorů (zálohy, docházka) + regresní scénáře `krok71`/`krok72` (P1) | `2e4ae01` | ne (aditivní, ale db push po sloučení) |
+Plán: `C:\Users\vladi\.claude\plans\proud-scribbling-glade.md`, oddíl
+„Finance a účetnictví — gastro ERP modul" (odsouhlasený Šéfíkem
+2.–3. 10. 2026). Zadání: `docs/Foodtab_Claude_Code_nocni_zadani.md`,
+oddíly 4–11 (cílový stav), 12 (priority), 13 (akceptační scénáře).
 
-## Zádrhel ve workflow na sklad/suroviny — řešeno osobní kontrolou
+## Závazný mantinel
 
-Fáze "Práce" i "Testy" workflow (práce→testy→kontrola→dodělávky) odvedly
-solidní, osobně ověřenou práci — opravily neplatnou SQL syntaxi, chybějící
-druhou linii obrany a immutabilitu historie cen, napsaly 42 mutačně
-ověřených kontrol (`krok69`/`krok70_scenar.sql`). **Ale fáze "Kontrola"
-(bezpečnostní review) a "Dodělávky" se zmátly** — místo zadané recenze
-katalogu surovin se obě chybně rozhodly, že mají "najít modul Faktury"
-(text, který patřil do téhle konverzace se mnou, ne do jejich zadání), a
-bezpečnostní review katalogu surovin vůbec neprovedly. Korektnostní
-review (druhý souběžný recenzent) zmatené nebylo a našlo 2 reálné nálezy.
+**Sklad/inventury (fyzické pohyby, příjemky/výdejky, šarže) se NESTAVÍ.**
+Rozhodnutí Šéfíka 2. 10. 2026 (`eb9bd63`, v `main`) — dělá to Dotykačka,
+appka si to nemá duplikovat. Teoretická spotřeba (recept × prodané
+množství) ano, fyzická inventura nikdy. Dodrženo v celé téhle práci.
 
-**Nedůvěřoval jsem samoobslužné zprávě workflow** — sám jsem přečetl
-výslednou migraci, oba scénáře a `run.sh`, spustil `node
-scripts/scenare-pglite.mjs` (2894 kontrol), a opravil oba korektnostní
-nálezy sám (Nález A: chybějící kontrola shody jednotky — vážné, tiše
-špatný výsledek; Nález B: nekonzistentní zaokrouhlení — drobné), včetně
-mutačního ověření opravy A. Bezpečnostní review katalogu surovin, který
-workflow nedodal, jsem udělal čtením sám při verifikaci (RLS, granty,
-druhá linie — vše v migraci existuje a odpovídá vzoru `krok58`).
+## Hotovo — celé P0 podle plánu
 
-## Zjištění (viz `docs/finance-marketing-audit.md` pro plné znění)
+| Co | Commit |
+|---|---|
+| Krok 0: izolace Faktur donesena z `gastro-erp-marketing` | `4c98277` |
+| Plán zapsán, stav | `2c2f534` |
+| Migrace 1–6: `integrace_pripojeni`/`integrace_tajemstvi`, `kontakty`(_osoby), `platebni_ucty`/`import_davky`/`transakce`, `platby_faktury`, `predpisy_plateb`, `app.cashflow_prehled`(_firma) + `krok73`/`krok74_scenar.sql` | `a39eb1c` |
+| `public.*` průzor pro PostgREST (cashflow_prehled*, integrace_uloz/precti/smaz_tajemstvi) + `finance/layout.tsx`+`navigace.tsx` + nabídka | `ad63683` |
+| `lib/finance-prehled.ts`, `finance-plan.ts`, `finance-parovani.ts`, `finance-csv-import.ts` + 3 nové `*.test.mjs` | `61a8aeb` |
+| Obrazovky Přehled/Kontakty/Platby + `public.importovat_transakce` + `krok76_scenar.sql` | `069e5b6` |
+| Obrazovka Integrace + CSV import (dvoukrokový náhled/potvrzení) | `2712805` |
 
-Nejdůležitější: Faktury žijí v oddělené Supabase DB bez tenant_id/RLS (P0);
-sklad+katalog surovin+foodcost zcela neexistují (P0); cross-tenant eskalace
-práv byla v produkci 17 dní, opravena 25.9., hloubkový sken 115 aktuálně
-platných SECURITY DEFINER funkcí nenašel další díru (2 křehké vzory k
-zpevnění, P1); produkce má 1 firmu a UI bez přepínače firem (P1); marketingová
-publikační fronta je hotová, ale n8n je provozně vypnuté (P0 byznysově).
+Žádná migrace nečeká na SQL od Šéfíka (na rozdíl od kroku 0 — Faktury
+samy pořád čekají na jeho ruční SQL, viz `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md`,
+beze změny od minulé noci).
 
-## Blokery vyžadující lidský krok
+## Čísla — a z čeho jsou
 
-1. **Přístup k databázi Faktur** (`ctqtwahlzhyjerqulqyn`, odlišná od hlavní
-   `spekntcsuroqhehmjssv`) — potřeba pro opravu tenant izolace. Supabase MCP
-   v této relaci nemá připojený žádný projekt (`list_projects` vrátil prázdno).
-2. **`.env.local`** (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)
-   — chybí v každém worktree, které jsem našel. Bez něj nejde spustit `next dev`
-   proti reálné testovací databázi a testovat v prohlížeči. Anon klíč není
-   tajný (jde do prohlížeče), jde bezpečně předat.
-3. **Ověření produkčních Realtime logů** (claims_role po PR #92) — nemám
-   přístup k Vercel/Supabase produkčním logům (MCP nástroje vrací 403/prázdno).
-4. **n8n marketingový webhook** je provozně vypnutý — rozhodnutí, zda a kdy
-   ho znovu zapnout, patří vlastníkovi (provozní riziko, ne kódová chyba).
+- **PGlite** (`node scripts/scenare-pglite.mjs`): **3098 kontrol, nic
+  nespadlo.** Nové scénáře: `krok73` (19), `krok74` (28), `krok75` (11),
+  `krok76` (12) — registrovány v `supabase/tests/run.sh`. **PGlite
+  neověří RLS ani sloupcové granty** — rozhoduje až `supabase/tests/run.sh`
+  proti reálnému PostgreSQL (GitHub Actions), který jsem nepustil (žádný
+  lokální PostgreSQL v tomhle prostředí, stejná situace jako minulé noci).
+- `node scripts/provoz-granty.test.mjs`: **čisté**, nové tabulky mají
+  revoke-před-grant přesně podle vzoru.
+- **4 nové `scripts/*.test.mjs`** (čistá logika, bez databáze): `finance-plan`
+  (20 kontrol), `finance-parovani` (14), `finance-csv-import` (30),
+  `integrace-klice` (34) — **98 kontrol, všechny prošly.** `integrace-klice`
+  je ve `VYNECHANE` v `.github/workflows/aplikace.yml` (stejný důvod jako
+  `marketing-klice` — `import 'server-only'` bez podmínky `react-server`
+  v generickém běhu CI spadne na záměrné výjimce toho balíčku).
+- `npx tsc --noEmit`: **čisté** napříč celou větví.
+- `npx eslint .`: **0 chyb**, 9 varování — všechna předcházející téhle
+  práci (nesouvisí s Financemi).
 
-## ROZHODNUTÍ ŠÉFÍKA (2. 10. 2026): modul sklad/inventury se nestaví
+## Na co jsem narazil a nešlo to hned
 
-Sklad (skladové pohyby, fyzické inventury) dělá pokladní systém
-(Dotykačka) — appka si ho nemá duplikovat. Zrušeno z priorit (bylo P0
-v auditu). Skutečná spotřeba půjde v budoucnu přes adaptér na Dotykačku,
-ne přes vlastní tabulky pohybů. Promítnuto do
-`docs/finance-marketing-audit.md`, `docs/data-flows.md` a skillu
-`foodtab-finance`; komentář v migraci `20261002100000_sklad_suroviny_zaklad.sql`
-opraven (netvrdí už, že sklad je „budoucí navazující práce").
+- **`ON DELETE SET NULL` na `import_davka_id` kolidovalo s immutabilitou
+  ledgeru.** `transakce_no_update` (pravidlo na UPDATE) blokuje i interní
+  UPDATE, který by FK akce SET NULL potřebovala při mazání `import_davky`
+  — PGlite na to spadlo hláškou „referential integrity query ... gave
+  unexpected result". Oprava: `on delete restrict`. Zdokumentováno
+  v migraci `20261003120000_platebni_ucty_transakce.sql`.
+- **Druhé kolo (CI proti reálnému PostgreSQL, po otevření PR #104):**
+  `krok74_scenar.sql` spadl, protože PGlite a reálný PostgreSQL hlásí
+  tohle RESTRICT porušení JINÝM kódem — PGlite 23001 („violates RESTRICT
+  setting..."), reálný Postgres obyčejné 23503 („violates foreign key
+  constraint...", stejně jako NO ACTION — RESTRICT se od NO ACTION liší
+  jen v odložitelnosti, ne v chybovém kódu při porušení). Test teď
+  přijímá oba kódy. `krok75_scenar.sql` padal jako DŮSLEDEK tohohle —
+  `krok74` se zastavil (`ON_ERROR_STOP`) dřív, než doběhl do svého
+  úklidu, a zbylá transakce na Černé Perle/dnešním datu zkreslila
+  `krok75`ho součet cashflow. Žádná oprava v `krok75` nebyla potřeba,
+  jen doběhnutí `krok74` do konce.
+- **`INSERT ... ON CONFLICT` na `transakce` nejde použít VŮBEC** —
+  skutečné omezení PostgreSQL („cannot be used with table that has
+  INSERT or UPDATE rules"), ne PGlite. Platí pro JAKÉKOLI pravidlo na
+  tabulce, i když se netýká INSERTu. `public.importovat_transakce`
+  (idempotentní hromadný import) proto dedupuje anti-joinem před
+  insertem, ne `ON CONFLICT`. Zdokumentováno v
+  `20261003170000_import_transakce_rpc.sql`.
+- **`supabase.rpc()` z appky vidí jen schéma `public`** (PostgREST,
+  `supabase/config.toml`) — všechny `app.*` funkce z migrací 1 a 6
+  potřebovaly tenký přeposílající obal v `public` (`20261003160000_finance_public_rpc.sql`),
+  stejný vzor jako `public.has_access`. Bez něj by appka na ně vůbec
+  nedosáhla, ověřilo by se to až při psaní obrazovek.
+- **Vizuální ověření v prohlížeči se nedokončilo.** Spustil jsem lokální
+  dev server (`--webpack`, port 3101, stejná poznámka o Turbopacku jako
+  u jiných pracovních kopií) a ověřil, že všech pět nových cest
+  (`/finance`, `/finance/kontakty`, `/finance/platby`, `/finance/platby/import`,
+  `/finance/integrace`) se bez přihlášení SPRÁVNĚ přesměruje na
+  `/prihlaseni?kam=...` — tedy že se každá stránka serverově vykreslí
+  bez pádu. **Přihlásit se ale nešlo**: appka používá kód z e-mailu
+  (Supabase OTP), a odeslání toho formuláře by poslalo skutečný e-mail
+  na `majitel@foodtab.cz` jménem uživatele — to bez výslovného svolení
+  nedělám (a i kdybych ho poslal, nemám k té schránce přístup, abych kód
+  přečetl). **Žádná z nových obrazovek tedy nebyla viděná PO
+  přihlášení** — ne tabulka Přehledu, ne formuláře, ne navigace v
+  levém sloupci. Riziko: vizuální chyba (rozbité CSS, špatně napojené
+  pole formuláře) by tímhle neprošla. Doporučení: až bude Šéfík u
+  počítače, otevřít `/firma/finance` po běžném přihlášení a projet
+  všech pět obrazovek.
+- **`.env.local` do worktree zkopírován** z `foodtab-rizeni` (stejný
+  `foodtab-test` projekt) + vygenerovaný `INTEGRACE_KLIC_SIFRY` navíc —
+  jen pro lokální test, je v `.gitignore`, nikam se neposílá.
 
-## Další krok
+## Vědomé mezery v P0 (ne skryté, prostě nestihnuté)
 
-Celá noční práce (audit, přepínač firem, povinné dokumenty, oprava
-marketingu, katalog surovin + UI receptur, zpevnění bezpečnostních vzorů,
-rozhodnutí o skladu) je sloučená v `main` a nasazená na Vercelu —
-[PR #99](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/99),
-[#100](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/100),
-[#101](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/101) a
-[#102](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/102)
-(původní jedno PR #98, 30 souborů, narazilo na blok "Merge Without
-Review" — proto rozdělení na 4 menší, každé mergnuté zvlášť).
+- **Kontaktní osoby** (`kontakty_osoby`) nemají vlastní obrazovku —
+  tabulka a RLS existují a jsou scénářem ověřené, ale `finance/kontakty`
+  je nekreslí ani nenabízí přidat. Rozšíření o jednu sekci na detailu
+  kontaktu.
+- **`predpisy_plateb`** se dají jen přes RLS/scénář, appka pro ně nemá
+  vlastní formulář (Přehled je jen ČTE pro rozpočet plánu). Doplnit
+  jednoduchý CRUD, podobný `platby/page.tsx`.
+- **Párování** v `platby/page.tsx` nabízí jen JEDEN nejlepší návrh na
+  transakci, ne výběr z víc kandidátů, a nemá tlačítko „odmítnout"
+  (zamítnutý návrh se příští načtení prostě znovu nabídne). Funkční pro
+  P0, ale chybí UI pro případ, kdy je nejlepší návrh špatný.
+- Vizuální ověření viz výš.
 
-**`supabase db push` proběhl 2. 10. 2026** (3 migrace: katalog surovin,
-průzor pro mazání suroviny, API receptur) — ověřeno `supabase migration
-list --linked` (local i remote se shodují u všech tří). Katalog surovin
-a editor receptur jsou tak od tohohle okamžiku v produkci plně funkční,
-ne jen jako "čeká na nasazení databáze".
+## P1 (podle plánu, nedotčeno)
 
-Zbytek P0/P1 seznamu z audit dokumentu, co zůstává nedotčené: procure-to-pay
-(platby/transakce k fakturám), marketingové CRM/GDPR, Dotykačka adaptér
-(reálná spotřeba surovin). **Tvorba menu (AI návrh)** zůstává samostatně
-blokovaná — jiný modul než plain Receptury, viz `docs/modul-menu-zadani.md`.
-**Faktury tenant-izolace** (`19e406b`) čeká na Šéfíkovo SQL v oddělené
-databázi, nasadí se jako samostatná budoucí PR. Žádný Workflow neběží,
-`supabase/tests/run.sh` je volné.
+Objednávky dodavatelům + příjem zboží (bez fyzického skladu), kostra
+adaptéru na Dotykačku, prime-cost report, zobecněný účetní export. Nic
+z toho nebylo v týhle noci rozpracováno.
 
-## Mimo rozsah téhle práce, nahlášeno zvlášť
+## Rozhodnutí a otázky
 
-Při psaní `krok72_scenar.sql` se potvrdil reálný bug: `delete from
-tenants`/`delete from branches` spadne, pokud ta firma/pobočka má řádek
-v `audit_log` (FK `on delete set null` naráží na pravidlo
-`audit_log_no_update`) — blokuje GDPR výmaz firmy. Nesouvisí s touhle
-větví, nahlášeno jako samostatný úkol (`spawn_task`, task_92418cfb),
-needitoval jsem existující migraci.
-
-## Rozhodnutí
-
-- Model/effort: relace běžela na Sonnet 5 / aktuální effort; uživatel zvolil
-  přepnout na Opus + high, ale nástroj pro změnu modelu vlastní relace je
-  záměrně blokovaný ("a session must not silently re-price its own turns") —
-  přepnutí čeká na uživatele přímo v UI aplikace.
-- Nová práce jde do samostatného worktree/větve (`gastro-erp-marketing`), ne
-  do `foodtab-rizeni` ani žádné existující feature větve — podle zavedené
-  konvence projektu (jedna větev na jednu souvislou práci).
+Žádné nové otázky pro Šéfíka nad rámec toho, co stálo v plánu. Faktury
+pořád čekají na jeho SQL krok (nezměněno od minulé noci) — Finance na
+něm nezávisí, modul funguje i bez něj.

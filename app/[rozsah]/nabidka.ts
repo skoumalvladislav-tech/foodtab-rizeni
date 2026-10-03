@@ -180,16 +180,27 @@ export const NABIDKA: Polozka[] = [
   // záložka modulu by nikam nevedla a nebylo by co odmítnout vypnutým
   // modulem, jak žádá pravidlo 5.
   { segment: 'menu', nazev: 'Tvorba menu', kratky: 'Menu', modul: 'menu', pravo: 'menu_ai.use', hotovo: true, ikona: 'kniha' },
-  // FINANCE ZATÍM = FAKTURY.
+  // FINANCE — GASTRO ERP MODUL (nová noční práce, 3. 10. 2026).
   //
-  // Faktury byly do 15. 9. 2026 vlastní modul (`/faktury`), Šéfík
-  // rozhodl přesunout je jako sekci dovnitř Finance (`/finance/faktury`)
-  // — stejný nested-nav vzor jako marketing výš, detailní navigace
-  // (8 obrazovek) žije v app/[rozsah]/finance/faktury/ jako vlastní
-  // vnořený layout (lib/faktury-navigace.ts). Kořen modulu vede rovnou
-  // na Přehled faktur, protože Finance dnes nic jiného nenabízí — až
-  // přibude další část (např. banking.read je připravené právo),
-  // dostane vlastní položku tady a samostatnou kořenovou obrazovku.
+  // Do 3. 10. 2026 Finance = Faktury (jediná položka, viz historie téhle
+  // řádky). Teď je Finance deštníková obrazovka (app/[rozsah]/finance/layout.tsx)
+  // s vlastním Přehledem (cashflow, skutečnost i plán odděleně),
+  // Kontakty (CRM dodavatelů/odběratelů), Platby (ruční zápis + CSV
+  // import bankovního/pokladního pohybu) a Integrace (registr připojení
+  // k poskytovatelům — dnes jen „čeká na připojení"/CSV, žádná živá
+  // volání). Faktury zůstávají SEKCÍ uvnitř, se svým vlastním vnořeným
+  // layoutem a oprávněními (faktury.read/manage) beze změny.
+  //
+  // Přehled musí být PRVNÍ záznam modulu `finance` v tomhle poli — podle
+  // něj si app/[rozsah]/layout.tsx vybírá, kam vede ikona modulu v horní
+  // liště (`polozky.find((p) => p.modul === m.key && p.hotovo)`).
+  { segment: 'finance', nazev: 'Přehled', kratky: 'Přehled', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'mince' },
+  { segment: 'finance/kontakty', nazev: 'Kontakty', kratky: 'Kontakty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lide' },
+  { segment: 'finance/platby', nazev: 'Platby', kratky: 'Platby', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'vozik' },
+  // Vidět je má každý, kdo do Financí dosáhne — stejný vzor jako
+  // marketing/nastroje výš. Připojovat/odpojovat smí jen finance.manage,
+  // o to se stará obrazovka i serverová akce, ne tahle řádka.
+  { segment: 'finance/integrace', nazev: 'Integrace', kratky: 'Integrace', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'kolo' },
   { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha' },
   // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.
   //

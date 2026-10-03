@@ -6,6 +6,12 @@
  */
 export type Faktura = {
   id: string
+  /**
+   * `tenants.id` z hlavní FoodTab databáze — cizí hodnota bez FK (jiný Supabase
+   * projekt, žádné sdílené přihlášení). Přidáno 2. 10. 2026, viz
+   * `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md`.
+   */
+  tenant_id: string
   received_at: string
   email_sender: string | null
   email_subject: string | null

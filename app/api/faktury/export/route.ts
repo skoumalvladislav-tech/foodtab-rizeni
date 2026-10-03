@@ -73,7 +73,7 @@ export async function GET(request: Request) {
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
-    let dotaz = supabase.from('invoices').select('*')
+    let dotaz = supabase.from('invoices').select('*').eq('tenant_id', tenantId)
       .order('duzp', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
     dotaz = pouzitFiltry(dotaz, filtry)
     const { data, error } = await dotaz.range(od, od + velikostStranky - 1)

@@ -34,7 +34,7 @@ const karta = {
   padding: '16px',
 } as const
 
-async function nactiFaktury(): Promise<Faktura[]> {
+async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
   const supabase = getFakturySupabase()
   // Supabase/PostgREST má strop 1000 řádků na odpověď (db.max_rows) — stránkuje
   // se přes .range() přes stejný filtrovaný/seřazený dotaz, dokud stránka
@@ -47,6 +47,7 @@ async function nactiFaktury(): Promise<Faktura[]> {
     const { data, error } = await supabase
       .from('invoices')
       .select('*')
+      .eq('tenant_id', tenantId)
       .eq('is_archived', false)
       .order('received_at', { ascending: false })
       .order('id', { ascending: true })
@@ -85,7 +86,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
     )
   }
 
-  const faktury = await nactiFaktury()
+  const faktury = await nactiFaktury(tenantId)
   const mena = faktury[0]?.currency ?? 'CZK'
 
   const cekaNaSchvaleni = faktury.filter((f) => f.status === STAV_KE_SCHVALENI)

@@ -28,14 +28,14 @@ const karta = {
   padding: '16px',
 } as const
 
-async function nactiFaktury(): Promise<Faktura[]> {
+async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
   const supabase = getFakturySupabase()
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
     const { data, error } = await supabase
-      .from('invoices').select('*').eq('is_archived', false)
+      .from('invoices').select('*').eq('tenant_id', tenantId).eq('is_archived', false)
       .order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
@@ -80,7 +80,7 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Faktury vidí ten, kdo má právo „Vidět přijaté faktury“.</Sdeleni>
   }
 
-  const vsechny = await nactiFaktury()
+  const vsechny = await nactiFaktury(tenantId)
   const cekaNaSchvaleni = vsechny.filter((f) => f.status === STAV_KE_SCHVALENI)
   // Dokumenty čekající na schválení a odmítnuté (AI vyhodnotila, že nejde
   // o fakturu) se do přehledu nákladů nepočítají.

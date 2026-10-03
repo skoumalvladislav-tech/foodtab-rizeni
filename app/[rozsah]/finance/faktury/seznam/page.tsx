@@ -90,17 +90,17 @@ export default async function FakturySeznam({
   const supabase = getFakturySupabase()
   const od = (pozadovanaStrana - 1) * NA_STRANU
 
-  let dotazDat = supabase.from('invoices').select('*')
+  let dotazDat = supabase.from('invoices').select('*').eq('tenant_id', tenantId)
     .order('duzp', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
   dotazDat = pouzitFiltry(dotazDat, filtry)
 
-  let dotazPoctu = supabase.from('invoices').select('*', { count: 'exact', head: true })
+  let dotazPoctu = supabase.from('invoices').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId)
   dotazPoctu = pouzitFiltry(dotazPoctu, filtry)
 
   const [{ data, error }, { count }, { count: archivovanychCelkem }] = await Promise.all([
     dotazDat.range(od, od + NA_STRANU - 1),
     dotazPoctu,
-    supabase.from('invoices').select('*', { count: 'exact', head: true }).eq('is_archived', true),
+    supabase.from('invoices').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('is_archived', true),
   ])
 
   if (error) console.error(error)
@@ -110,7 +110,7 @@ export default async function FakturySeznam({
   const aktualniStrana = Math.min(pozadovanaStrana, celkemStran)
 
   // Měsíce DUZP pro chipy — nezávisle na ostatních filtrech, čte se jen sloupec duzp.
-  const mesicniDotaz = supabase.from('invoices').select('duzp').eq('is_archived', filtry.archiv)
+  const mesicniDotaz = supabase.from('invoices').select('duzp').eq('tenant_id', tenantId).eq('is_archived', filtry.archiv)
   const { data: mesicniData } = filtry.archiv || filtry.stav === STAV_ODMITNUTO
     ? await mesicniDotaz
     : await mesicniDotaz.neq('status', STAV_ODMITNUTO)
