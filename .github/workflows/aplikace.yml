@@ -90,7 +90,7 @@ jobs:
           # i UTC. Nový test sem připiš, jakmile prochází.
           TESTY=(
             adresa cas ceka-na-opravneni dochazka-cloveka dochazka-dnes dochazka-stav faktury-filtry
-            faktury-navigace faktury-tenant-izolace finance-csv-import finance-plan finance-parovani finance-rolling-vyhled firma-prepnuti fronta-push kiosek komunikace komunikace-akce manifest
+            faktury-navigace faktury-tenant-izolace finance-csv-import finance-plan finance-parovani finance-rolling-vyhled pokladna-csv-import firma-prepnuti fronta-push kiosek komunikace komunikace-akce manifest
             marketing marketing-audit marketing-granty marketing-kalendar
             marketing-kampane marketing-kanaly marketing-media
             marketing-media-pouziti marketing-menu marketing-menu-tabulka
