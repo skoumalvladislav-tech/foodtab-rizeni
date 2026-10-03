@@ -9,7 +9,17 @@
  * nevykresluje jejich osm obrazovek znovu.
  */
 
-export type FinanceIkona = 'prehled' | 'kontakty' | 'platby' | 'integrace' | 'faktury'
+export type FinanceIkona =
+  | 'prehled'
+  | 'cashflow'
+  | 'kontakty'
+  | 'platby'
+  | 'nakup'
+  | 'zakazky'
+  | 'rozpocty'
+  | 'vybaveni'
+  | 'integrace'
+  | 'faktury'
 
 type Definice = {
   klic: string
@@ -19,10 +29,24 @@ type Definice = {
   ikona: FinanceIkona
 }
 
+/**
+ * Struktura podle zadání (oddíl 11): „Přehled, Faktury, Cashflow a
+ * platby, Nákup/objednávky, Sklad/inventury [vynecháno — mantinel],
+ * Receptury/výroba/kalkulace [žije v modulu Provoz], Kontakty/zakázky,
+ * Náklady práce [žije v Docházce — vydelky_prehled], Rozpočty a
+ * controlling, Vybavení, Integrace." Kontakty a Zakázky jsou tu dvě
+ * položky, ne jedna — jasnější menu, stejná CRM entita (kontakty) pod
+ * oběma.
+ */
 const POLOZKY: readonly Definice[] = [
   { klic: 'prehled', segment: '', nazev: 'Přehled', kratky: 'Přehled', ikona: 'prehled' },
-  { klic: 'kontakty', segment: 'kontakty', nazev: 'Kontakty', kratky: 'Kontakty', ikona: 'kontakty' },
+  { klic: 'cashflow', segment: 'cashflow', nazev: 'Cashflow', kratky: 'Cashflow', ikona: 'cashflow' },
   { klic: 'platby', segment: 'platby', nazev: 'Platby', kratky: 'Platby', ikona: 'platby' },
+  { klic: 'nakup', segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', ikona: 'nakup' },
+  { klic: 'kontakty', segment: 'kontakty', nazev: 'Kontakty', kratky: 'Kontakty', ikona: 'kontakty' },
+  { klic: 'zakazky', segment: 'zakazky', nazev: 'Zakázky', kratky: 'Zakázky', ikona: 'zakazky' },
+  { klic: 'rozpocty', segment: 'rozpocty', nazev: 'Rozpočty a controlling', kratky: 'Rozpočty', ikona: 'rozpocty' },
+  { klic: 'vybaveni', segment: 'vybaveni', nazev: 'Vybavení', kratky: 'Vybavení', ikona: 'vybaveni' },
   { klic: 'integrace', segment: 'integrace', nazev: 'Integrace', kratky: 'Integrace', ikona: 'integrace' },
   { klic: 'faktury', segment: 'faktury', nazev: 'Faktury', kratky: 'Faktury', ikona: 'faktury' },
 ]

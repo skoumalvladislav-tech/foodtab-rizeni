@@ -195,8 +195,17 @@ export const NABIDKA: Polozka[] = [
   // něj si app/[rozsah]/layout.tsx vybírá, kam vede ikona modulu v horní
   // liště (`polozky.find((p) => p.modul === m.key && p.hotovo)`).
   { segment: 'finance', nazev: 'Přehled', kratky: 'Přehled', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'mince' },
+  // Plná šíře zadání (3. 10. 2026, druhá fáze téže noci): procure-to-pay
+  // (Nákup), order-to-cash/CRM zakázek (Zakázky), plan-to-control
+  // (Rozpočty a controlling), evidence vybavení — vše BEZ fyzického
+  // skladu/inventur (ty dělá POS, Šéfíkovo explicitní rozhodnutí).
+  { segment: 'finance/cashflow', nazev: 'Cashflow', kratky: 'Cashflow', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'hodiny' },
   { segment: 'finance/kontakty', nazev: 'Kontakty', kratky: 'Kontakty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lide' },
   { segment: 'finance/platby', nazev: 'Platby', kratky: 'Platby', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'vozik' },
+  { segment: 'finance/nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'finance', pravo: 'purchasing.read', hotovo: true, ikona: 'seznam' },
+  { segment: 'finance/zakazky', nazev: 'Zakázky', kratky: 'Zakázky', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'praporek' },
+  { segment: 'finance/rozpocty', nazev: 'Rozpočty a controlling', kratky: 'Rozpočty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lupa' },
+  { segment: 'finance/vybaveni', nazev: 'Vybavení', kratky: 'Vybavení', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'blesk' },
   // Vidět je má každý, kdo do Financí dosáhne — stejný vzor jako
   // marketing/nastroje výš. Připojovat/odpojovat smí jen finance.manage,
   // o to se stará obrazovka i serverová akce, ne tahle řádka.
