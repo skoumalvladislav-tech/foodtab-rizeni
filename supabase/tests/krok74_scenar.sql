@@ -49,6 +49,22 @@ exception when others then
   return false;
 end $$;
 
+-- NÁLEZ PŘI OVĚŘOVÁNÍ PROTI REÁLNÉMU POSTGRESU (CI, 3. 10. 2026): PGlite
+-- hlásí RESTRICT vlastním kódem 23001 ("violates RESTRICT setting of
+-- foreign key constraint"), ale reálný PostgreSQL stejnou situaci hlásí
+-- jako obyčejné porušení FK, 23503 ("violates foreign key constraint") —
+-- RESTRICT a NO ACTION se v PostgreSQL liší jen tím, jde-li akci odložit
+-- (deferrable), ne chybovým kódem při samotném porušení. Kontrola proto
+-- přijímá OBA kódy, aby platila na obou.
+create or replace function pg_temp.spadne_fk_restrict(p_sql text)
+returns boolean language plpgsql as $$
+begin
+  execute p_sql;
+  return false;
+exception when others then
+  return sqlstate in ('23001', '23503');
+end $$;
+
 reset role;
 select set_config('test.user_id', '', false);
 
@@ -226,12 +242,11 @@ select pg_temp.check('transakce s vlastní dávkou se zapsala',
   exists (select 1 from public.transakce where id = :'transakce_s_davkou'));
 
 reset role;
--- SQLSTATE 23001 (restrict_violation), NE 23503 (foreign_key_violation) —
--- RESTRICT má v PostgreSQL vlastní kód odlišný od běžného FK porušení.
+-- Viz pg_temp.spadne_fk_restrict výš — PGlite a reálný PostgreSQL se
+-- v přesném kódu RESTRICT porušení rozcházejí, kontrola přijímá oba.
 select pg_temp.check('smazání dávky, na kterou transakce odkazuje, spadne (restrict, ne set null)',
-  pg_temp.spadne_hlaskou(
-    format('delete from public.import_davky where id = %L', :'davka_vlastni'),
-    '23001', 'RESTRICT'));
+  pg_temp.spadne_fk_restrict(
+    format('delete from public.import_davky where id = %L', :'davka_vlastni')));
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 

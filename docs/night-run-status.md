@@ -63,9 +63,19 @@ beze změny od minulé noci).
   ledgeru.** `transakce_no_update` (pravidlo na UPDATE) blokuje i interní
   UPDATE, který by FK akce SET NULL potřebovala při mazání `import_davky`
   — PGlite na to spadlo hláškou „referential integrity query ... gave
-  unexpected result". Oprava: `on delete restrict` (SQLSTATE 23001, ne
-  23503 — to jsem si nejdřív spletl a test to ukázal). Zdokumentováno
+  unexpected result". Oprava: `on delete restrict`. Zdokumentováno
   v migraci `20261003120000_platebni_ucty_transakce.sql`.
+- **Druhé kolo (CI proti reálnému PostgreSQL, po otevření PR #104):**
+  `krok74_scenar.sql` spadl, protože PGlite a reálný PostgreSQL hlásí
+  tohle RESTRICT porušení JINÝM kódem — PGlite 23001 („violates RESTRICT
+  setting..."), reálný Postgres obyčejné 23503 („violates foreign key
+  constraint...", stejně jako NO ACTION — RESTRICT se od NO ACTION liší
+  jen v odložitelnosti, ne v chybovém kódu při porušení). Test teď
+  přijímá oba kódy. `krok75_scenar.sql` padal jako DŮSLEDEK tohohle —
+  `krok74` se zastavil (`ON_ERROR_STOP`) dřív, než doběhl do svého
+  úklidu, a zbylá transakce na Černé Perle/dnešním datu zkreslila
+  `krok75`ho součet cashflow. Žádná oprava v `krok75` nebyla potřeba,
+  jen doběhnutí `krok74` do konce.
 - **`INSERT ... ON CONFLICT` na `transakce` nejde použít VŮBEC** —
   skutečné omezení PostgreSQL („cannot be used with table that has
   INSERT or UPDATE rules"), ne PGlite. Platí pro JAKÉKOLI pravidlo na
