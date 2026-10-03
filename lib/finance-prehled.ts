@@ -89,3 +89,51 @@ export async function nactiCashflowPrehled(
 
   return { pobocky, firma }
 }
+
+/** Jeden řádek `app.vysledovka` pro jedno středisko (pobočka, nebo firma). */
+export type RadekVysledovkyStrediska = {
+  branchId: string | null
+  stredisko: string
+  kategorie: string
+  smer: 'prijem' | 'vydaj'
+  castkaHaleru: number
+}
+
+/**
+ * `app.vysledovka` běží na JEDNU pobočku (nebo `null` = firemní účty)
+ * za volání — tahle funkce ji zavolá pro každé středisko a vrátí
+ * plochý seznam napříč celou firmou. Sdílené mezi Přehledem (KPI karty,
+ * graf nákladů) a AI analytikem (app/[rozsah]/finance/analytik/akce.ts) —
+ * dřív dvě kopie téhož cyklu, teď jedna.
+ */
+export async function nactiVysledovkuCelofirmy(
+  tenantId: string,
+  branches: readonly { id: string; name: string }[],
+  od: string,
+  doData: string,
+): Promise<RadekVysledovkyStrediska[]> {
+  const supabase = await getServerSupabase()
+
+  const strediska: { id: string | null; nazev: string }[] = [
+    ...branches.map((b) => ({ id: b.id as string | null, nazev: b.name })),
+    { id: null, nazev: 'Celá firma (účty bez pobočky)' },
+  ]
+
+  const vysledky = await Promise.all(
+    strediska.map(async (s) => {
+      const { data, error } = await supabase.rpc('vysledovka', { p_tenant: tenantId, p_branch: s.id, p_od: od, p_do: doData })
+      if (error) throw error
+      return ((data ?? []) as { kategorie: string; smer: 'prijem' | 'vydaj'; castka_haleru: number }[]).map(
+        (r): RadekVysledovkyStrediska => ({
+          branchId: s.id,
+          stredisko: s.nazev,
+          kategorie: r.kategorie,
+          smer: r.smer,
+          castkaHaleru: Number(r.castka_haleru),
+        }),
+      )
+    }),
+  )
+
+  return vysledky.flat()
+}

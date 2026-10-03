@@ -199,6 +199,14 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <path d="M7 9V6.5a3 3 0 016 0V9" />
     </>
   ),
+  // Trend u KPI karet — jedna stoupající šipka, na „klesá" se v KpiKarta
+  // otáčí (transform: scaleY(-1)), ne druhá samostatná ikona.
+  trend: (
+    <>
+      <path d="M3.5 13.5l4.5-4.5 3 3 5.5-6.5" />
+      <path d="M12.5 5.5h4v4" />
+    </>
+  ),
 };
 
 export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {

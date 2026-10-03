@@ -68,6 +68,8 @@ export type IkonaKlic =
   | 'mikrofon'
   | 'sponka'
   | 'zamek'
+  // Trend u KPI karet (Finance → Přehled).
+  | 'trend'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */

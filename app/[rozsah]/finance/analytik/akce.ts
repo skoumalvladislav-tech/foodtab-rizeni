@@ -3,6 +3,7 @@
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiRollingVyhledy } from '@/lib/finance-rolling-prehled'
+import { nactiVysledovkuCelofirmy } from '@/lib/finance-prehled'
 import {
   vysvetlitCisla,
   type Vysledek,
@@ -49,19 +50,17 @@ export async function zeptatSeAnalytika(_predchozi: StavAnalytika, formData: For
     .is('deleted_at', null)
   const branches = (branchesData ?? []) as { id: string; name: string }[]
 
-  const vysledovka: RadekVysledovky[] = []
-  const strediska: { id: string | null; nazev: string }[] = [
-    ...branches.map((b) => ({ id: b.id as string | null, nazev: b.name })),
-    { id: null, nazev: 'Celá firma (účty bez pobočky)' },
-  ]
-  for (const s of strediska) {
-    const { data } = await supabase.rpc('vysledovka', { p_tenant: tenantId, p_branch: s.id, p_od: obdobiOd, p_do: obdobiDo })
-    const radky = (data ?? []) as { kategorie: string; smer: string; castka_haleru: number }[]
-    const trzby = radky.filter((r) => r.smer === 'prijem').reduce((sum, r) => sum + Number(r.castka_haleru), 0)
-    const naklady = radky.filter((r) => r.smer === 'vydaj').reduce((sum, r) => sum + Number(r.castka_haleru), 0)
-    if (trzby === 0 && naklady === 0) continue
-    vysledovka.push({ stredisko: s.nazev, trzbyHaleru: trzby, nakladyHaleru: naklady, prispevekHaleru: trzby - naklady })
+  const radkyVysledovky = await nactiVysledovkuCelofirmy(tenantId, branches, obdobiOd, obdobiDo)
+  const podleStrediska = new Map<string, { trzby: number; naklady: number }>()
+  for (const r of radkyVysledovky) {
+    const aktualni = podleStrediska.get(r.stredisko) ?? { trzby: 0, naklady: 0 }
+    if (r.smer === 'prijem') aktualni.trzby += r.castkaHaleru
+    else aktualni.naklady += r.castkaHaleru
+    podleStrediska.set(r.stredisko, aktualni)
   }
+  const vysledovka: RadekVysledovky[] = [...podleStrediska.entries()]
+    .filter(([, v]) => v.trzby !== 0 || v.naklady !== 0)
+    .map(([stredisko, v]) => ({ stredisko, trzbyHaleru: v.trzby, nakladyHaleru: v.naklady, prispevekHaleru: v.trzby - v.naklady }))
 
   const { data: rozpocetData } = await supabase.rpc('rozpocet_prehled', { p_tenant: tenantId, p_branch: null, p_rok: rok, p_mesic: mesic })
   const rozpocet: RadekRozpoctu[] = ((rozpocetData ?? []) as { kategorie: string; smer: 'prijem' | 'vydaj'; plan_haleru: number; skutecnost_haleru: number; odchylka_haleru: number }[]).map((r) => ({
