@@ -65,7 +65,13 @@ create table public.rozpocty (
   updated_at    timestamptz not null default now()
 );
 
-create unique index rozpocty_tenant_obdobi on public.rozpocty (tenant_id, coalesce(branch_id, '00000000-0000-0000-0000-000000000000'), kategorie, smer, rok, mesic);
+-- NULLS NOT DISTINCT (ne coalesce): appka ukládá přes supabase-js
+-- `.upsert(..., {onConflict: 'tenant_id,branch_id,...'})`, který cílí
+-- ON CONFLICT přesně na sloupce — funkční index s coalesce() by se
+-- s tím textově neshodl (stejná třída nálezu jako u importovat_transakce:
+-- PostgREST/supabase-js neumí mířit na výraz, jen na holé sloupce).
+create unique index rozpocty_tenant_obdobi on public.rozpocty
+  (tenant_id, branch_id, kategorie, smer, rok, mesic) nulls not distinct;
 create index rozpocty_tenant_rok_mesic on public.rozpocty (tenant_id, rok, mesic);
 
 alter table public.rozpocty enable row level security;
