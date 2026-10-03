@@ -202,7 +202,13 @@ export const NABIDKA: Polozka[] = [
   { segment: 'finance/cashflow', nazev: 'Cashflow', kratky: 'Cashflow', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'hodiny' },
   { segment: 'finance/kontakty', nazev: 'Kontakty', kratky: 'Kontakty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lide' },
   { segment: 'finance/platby', nazev: 'Platby', kratky: 'Platby', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'vozik' },
-  { segment: 'finance/nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'finance', pravo: 'purchasing.read', hotovo: true, ikona: 'seznam' },
+  // Nákup (procure-to-pay) NENÍ tady — `purchasing.read` patří modulu
+  // `objednavky`, ne `finance` (stejně jako u Surovin níž). Záznam je
+  // v bloku Surovin/Objednávek, segment zůstává `finance/nakup`
+  // (appka ho tam skutečně vykresluje), jen je zařazený pod SVŮJ modul,
+  // ať zmizí z menu, když firma Objednávky nemá zapnuté — i kdyby
+  // `finance` zůstal zapnutý. Chyba v tomhle (modul: 'finance') spadla
+  // na scripts/nabidka.test.mjs („vypnutý modul (Nákup) v menu není").
   { segment: 'finance/zakazky', nazev: 'Zakázky', kratky: 'Zakázky', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'praporek' },
   { segment: 'finance/rozpocty', nazev: 'Rozpočty a controlling', kratky: 'Rozpočty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lupa' },
   { segment: 'finance/vybaveni', nazev: 'Vybavení', kratky: 'Vybavení', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'blesk' },
@@ -241,7 +247,11 @@ export const NABIDKA: Polozka[] = [
   // 2.10.2026). `purchasing.read`/`purchasing.manage` existovaly v
   // katalogu oprávnění od začátku a dosud nebyly použité nikde v kódu.
   { segment: 'suroviny', nazev: 'Suroviny', kratky: 'Suroviny', modul: 'objednavky', pravo: 'purchasing.read', hotovo: true, ikona: 'vidlicka' },
-  { segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: false, ikona: 'kniha' },
+  // Dřív stub na /nakup (hotovo: false) — plná šíře zadání (3. 10. 2026)
+  // Nákup (procure-to-pay) postavila na /finance/nakup. Segment se
+  // přepsal na skutečnou adresu, hotovo na true; modul zůstává stejný,
+  // jako měl vždycky (purchasing.read patří Objednávkám, ne Financím).
+  { segment: 'finance/nakup', nazev: 'Nákup', kratky: 'Nákup', modul: 'objednavky', pravo: 'purchasing.read', hotovo: true, ikona: 'seznam' },
 ]
 
 /**
