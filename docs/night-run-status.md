@@ -37,6 +37,29 @@ množství) ano, fyzická inventura nikdy. Dodrženo v celé téhle práci.
 samy pořád čekají na jeho ruční SQL, viz `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md`,
 beze změny od minulé noci).
 
+## Nasazeno do `foodtab-test`
+
+PR [#104](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/104)
+sloučen do `main` (`94e6ed6`) po zeleném CI proti reálnému PostgreSQL
+(oprava `krok74_scenar.sql` níž). `supabase db push` proběhl —
+`migration list --linked` ukazuje všech 170 migrací `local`=`remote`,
+včetně nových 8 (`20261003100000`–`20261003170000`).
+
+Ověřeno po nasazení (`supabase db query`, čtecí dotazy):
+- všech 9 nových tabulek existuje (`integrace_pripojeni`, `integrace_tajemstvi`,
+  `kontakty`, `kontakty_osoby`, `platebni_ucty`, `import_davky`, `transakce`,
+  `platby_faktury`, `predpisy_plateb`);
+- všech 11 funkcí existuje na svém místě (5 v `app.*`, 6 v `public.*` včetně
+  `importovat_transakce`, která `app.*` protějšek nemá);
+- RLS zapnuté na všech pěti kontrolovaných tabulkách; `integrace_tajemstvi`
+  má `authenticated` jen SELECT (žádný insert/update/delete), `transakce`
+  jen insert/select (žádný update/delete) — přesně podle návrhu; `anon`
+  nikde nic;
+- `trg_firma_transakce` (druhá linie), `trg_audit_transakce` a
+  `transakce_no_update` (immutabilita) existují na `transakce`;
+- `public.cashflow_prehled('00000000-...')` proběhlo bez chyby, vrátilo
+  prázdno pro neexistující firmu (žádný pád).
+
 ## Čísla — a z čeho jsou
 
 - **PGlite** (`node scripts/scenare-pglite.mjs`): **3098 kontrol, nic
