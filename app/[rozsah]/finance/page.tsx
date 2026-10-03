@@ -152,6 +152,7 @@ export default async function FinancePrehled({
           <Link href={`${zaklad}/platby/import`} className="ft-tl">Importovat výpis (CSV)</Link>
           <Link href={`${zaklad}/kontakty`} className="ft-tl">Kontakty</Link>
           <Link href={`${zaklad}/faktury`} className="ft-tl">Faktury</Link>
+          <Link href={`${zaklad}/analytik`} className="ft-tl">Zeptat se AI analytika</Link>
         </div>
       </div>
     </Navigace>

@@ -40,7 +40,7 @@ export type VysledekImportu = {
 }
 
 /** Bez diakritiky, malá písmena, bez mezer navíc — na porovnání názvu sloupce, ne na zobrazení. */
-function normalizovatNazev(text: string): string {
+export function normalizovatNazev(text: string): string {
   return text
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -60,7 +60,7 @@ const ALIASY: Record<string, string[]> = {
 }
 
 /** Jeden řádek CSV na pole buněk — respektuje uvozovky (`"a;b"` je jedna buňka), stejná konvence jako export. */
-function rozdelitRadek(radek: string, oddelovac: string): string[] {
+export function rozdelitRadek(radek: string, oddelovac: string): string[] {
   const bunky: string[] = []
   let aktualni = ''
   let vUvozovkach = false
@@ -84,14 +84,14 @@ function rozdelitRadek(radek: string, oddelovac: string): string[] {
 }
 
 /** `;` i v hlavičce, i v datovém řádku — jinak rozhoduje, co se v souboru vyskytuje víc. */
-function odhadnoutOddelovac(prvniRadek: string): string {
+export function odhadnoutOddelovac(prvniRadek: string): string {
   const stredniky = prvniRadek.split(';').length
   const carky = prvniRadek.split(',').length
   return stredniky >= carky ? ';' : ','
 }
 
 /** `'15.3.2026'`, `'15/3/2026'` i `'2026-03-15'` → `'2026-03-15'`. Null, když to nejde rozpoznat. */
-function naDatum(text: string): string | null {
+export function naDatum(text: string): string | null {
   const t = text.trim()
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t)
   if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`
@@ -106,7 +106,7 @@ function naDatum(text: string): string | null {
  * `'1 234,50'`, `'-1234.5'`, `'1234'` → haléře (celé číslo), se znaménkem.
  * Null, když to není číslo — nikdy netiše nezaokrouhlí na nejbližší smysl.
  */
-function naHalereSeZnamenkem(text: string): number | null {
+export function naHalereSeZnamenkem(text: string): number | null {
   const t = text.replace(/[\s ]/g, '').replace(',', '.')
   if (!/^-?\d+(\.\d{1,2})?$/.test(t)) return null
   const zaporne = t.startsWith('-')

@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
@@ -110,7 +111,11 @@ export default async function FinanceIntegrace({
 
   return (
     <Navigace rozsah={rozsah}>
-      <Nadpis oci="Finance" popis="Registr připojení k poskytovatelům. Žádné se nepřipojuje živě bez ověřeného přístupu.">
+      <Nadpis
+        oci="Finance"
+        popis="Registr připojení k poskytovatelům. Žádné se nepřipojuje živě bez ověřeného přístupu."
+        vpravo={<Link href={`/${rozsah}/finance/integrace/prodeje`} className="ft-tl">Import prodejů (pokladna) →</Link>}
+      >
         Integrace
       </Nadpis>
 

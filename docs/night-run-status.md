@@ -146,14 +146,143 @@ Ověřeno po nasazení (`supabase db query`, čtecí dotazy):
   P0, ale chybí UI pro případ, kdy je nejlepší návrh špatný.
 - Vizuální ověření viz výš.
 
-## P1 (podle plánu, nedotčeno)
+## P1 (podle plánu) — DOTAŽENO, viz další oddíl
 
-Objednávky dodavatelům + příjem zboží (bez fyzického skladu), kostra
-adaptéru na Dotykačku, prime-cost report, zobecněný účetní export. Nic
-z toho nebylo v týhle noci rozpracováno.
+> Tohle tvrdilo „nic z toho nebylo rozpracováno" — už neplatí. Šéfík si
+> po přečtení zadání ověřil, že P0 výřez byl „rozšířený finanční
+> dashboard, ne ERP", a zadal **plnou šíři** (bez skladu/inventur —
+> ty dělá POS). Pokračování je celé v dalším oddílu.
 
 ## Rozhodnutí a otázky
 
 Žádné nové otázky pro Šéfíka nad rámec toho, co stálo v plánu. Faktury
 pořád čekají na jeho SQL krok (nezměněno od minulé noci) — Finance na
 něm nezávisí, modul funguje i bez něj.
+
+---
+
+# Pokračování — Finance ERP v plné šíři (3. 10. 2026)
+
+Stejná větev (`finance-erp-plna-sire`), stejný worktree. **Tahle práce
+NENÍ sloučená ani nasazená** — otevření PR a `db push` čeká na
+Šéfíkův výslovný pokyn, stejně jako u P0.
+
+## Proč se vracíme
+
+Šéfík: *„nevím jestli ses přesně držel zadání ale chtěl jsem moderní
+erp systém. projdi zadání"* → po porovnání s
+`docs/Foodtab_Claude_Code_nocni_zadani.md` (oddíly 4–11) se ukázalo,
+že P0 pokrývá jen cashflow/platby/párování — chybí procure-to-pay,
+order-to-cash, plan-to-control, evidence vybavení, POS adaptér
+a účetní export. Šéfík: *„teď to udělej tedy v plné šíři ale bez
+skladů a inventur, ty má každý v POS."* Mantinel „bez skladu"
+(`eb9bd63`, nezměněn) se tím ROZŠIŘUJE o výslovné potvrzení, že
+objednávky/zakázky/rozpočty (doklady a peníze, ne fyzické pohyby)
+se STAVÍ.
+
+## Hotovo — všech 9 bodů z plánu
+
+| Co | Commit(y) |
+|---|---|
+| Cashflow — rolling výhled na 13 týdnů, 3 scénáře (základní/konzervativní/optimistický) | `c1efdc2` |
+| Nákup — objednávky dodavatelům + příjem zboží (procure-to-pay, bez fyzického skladu) | `a61a8e2`, `738e92e` |
+| Rozpočty a controlling — plán vs. skutečnost, `app.vysledovka`/`app.rozpocet_prehled` | `2eaf773`, `7f6ae51` |
+| Zakázky — order-to-cash/CRM cateringu (poptávka→zakázka→platba) | `0316a59`, `8fadf10` |
+| Vybavení — evidence bez odpisů (ověřená daňová pravidla tu nejsou) | `60ce41f`, `af274a1` |
+| Dotykačka adaptér (kostra, provider-neutrální) — `pokladna_prodeje_denni` + CSV import | `2b3b284` |
+| Účetní export (CSV) — zobecnění exportu faktur na doklad/středisko/kategorie/částka | `326e1cf` |
+| AI finanční analytik (omezený, auditovatelný) — vysvětluje hotová čísla, nikdy je nepočítá | `8cc6395` |
+| Navigace | zapsána v `c1efdc2` (5 nových položek), beze zbytku dalších úprav |
+
+Dvě nové obrazovky (Integrace → Prodeje, Finance → AI analytik) jsou
+vědomě JEN jako odkaz ze stávající stránky, ne vlastní položka
+levého menu — obě jsou skeleton/omezené funkce, ne hlavní cíl modulu.
+
+## Čísla — a z čeho jsou
+
+- **PGlite** (`node scripts/scenare-pglite.mjs`): rostlo postupně
+  s každým krokem, poslední potvrzený běh **3160 kontrol, nic
+  nespadlo** (po opravě `krok82_scenar.sql` — viz níž). Nové scénáře
+  tohoto pokračování: `krok78`–`krok82` (Nákup/Rozpočty/Zakázky/
+  Vybavení/Pokladní prodeje). **PGlite neověří RLS ani sloupcové
+  granty** — stejná výhrada jako u P0, rozhoduje až běh proti
+  reálnému PostgreSQL (GitHub Actions), který z téhle relace nejde
+  pustit (žádný lokální PostgreSQL).
+- `node scripts/provoz-granty.test.mjs`: **čisté** po každém kroku,
+  nové tabulky (`pokladna_prodeje_denni`, `vybaveni`, `zakazky`(_polozky),
+  `objednavky_dodavatelum`(_polozky), `prijemky`(_polozky), `rozpocty`)
+  mají revoke-před-grant přesně podle vzoru.
+- **5 nových `scripts/*.test.mjs`**: `finance-rolling-vyhled` (22),
+  `pokladna-csv-import` (18), `ucetni-export` (16),
+  `finance-ai-analytik` (23, vyžaduje `--conditions=react-server`,
+  proto ve `VYNECHANE`) — čistá logika, bez databáze, všechny prošly.
+- `npx tsc --noEmit`: **čisté** po každém commitu, napříč celou větví.
+- `npx eslint` na každý nový/změněný soubor: **0 chyb** po každém kroku.
+
+## Na co jsem narazil a nešlo to hned
+
+- **`krok82_scenar.sql` — fixtura cizí firmy spadla na RLS.** Založení
+  pobočky pro throwaway `tenant_b` PŘÍMO jako nově vytvořený majitel
+  (`set role authenticated`) spadlo na `branches_insert` politiku
+  („new row violates row-level security policy for table branches") —
+  `app.has_access(..., 'settings.manage')` majiteli sice práva dá, ale
+  objevil jsem až druhou vrstvu: fixtury cizí firmy se v existujících
+  scénářích (vzor `krok71_scenar.sql`) zakládají BEZ role authenticated
+  (`reset role`, tj. RLS bypass), protože to je jen podklad pro druhou
+  linii obrany, ne předmět testu. Oprava podle přesně tohoto vzoru.
+- **Stejný scénář, druhý pád** — úklid mazal fixturní pobočku cizí
+  firmy a spadl na FK z `audit_log` (branch_id). Oprava: nemazat ji
+  vůbec — `krok71_scenar.sql` taky svoje throwaway `tenant_b` fixtury
+  v úklidu nemaže, nechává je ležet (izolované cizím `tenant_id`,
+  nikomu nepřekáží).
+- **`zakazka_id` FK `on delete set null`** — STEJNÁ třída chyby jako
+  `import_davka_id` v P0 (SET NULL potřebuje interní UPDATE, blokuje ho
+  `transakce_no_update` RULE). Opraveno na `on delete restrict`, podruhé
+  v téže práci — psáno do paměti jako vzor, ne jen jako jednorázová
+  oprava.
+- **`p_mesic smallint` parametr** u `app.rozpocet_prehled` — PostgreSQL
+  nedovodí implicitní cast literálu `integer` na `smallint` při
+  rozlišování přetížení. Parametr změněn na `integer` (sloupec tabulky
+  zůstal `smallint`, tam to problém nemá).
+- **`rozpocty` unique index s `coalesce(branch_id,...)`** rozbil
+  `supabase-js .upsert({onConflict: 'tenant_id,branch_id,...'})` —
+  `ON CONFLICT` se párovalo textově se jmény sloupců indexu, ne s jeho
+  výrazem. Oprava: `NULLS NOT DISTINCT` na holých sloupcích (vzor
+  `integrace_pripojeni_zive`).
+- **Vizuální ověření v prohlížeči se NEDOKONČILO ani v tomhle
+  pokračování** — ze stejného důvodu jako u P0 (OTP e-mail, žádný
+  přístup ke schránce) a navíc kvůli omezením tohoto konkrétního
+  stroje při souběhu dev serveru a headless prohlížeče (málo RAM,
+  zaznamenáno dřív). **Žádná z devíti nových obrazovek nebyla viděná
+  po přihlášení** — jen tsc/eslint/PGlite. Riziko: vizuální chyba
+  (rozbité CSS, špatně napojené pole formuláře) by tímhle neprošla.
+  Doporučení stejné jako u P0: až bude Šéfík u počítače, projet
+  Nákup/Rozpočty/Zakázky/Vybavení/Integrace→Prodeje/Finance→AI
+  analytik po běžném přihlášení.
+- **AI finanční analytik běží jen v režimu mock/foodtab** — zákaznický
+  klíč (`integrace_pripojeni.oblast='ai'`) by vyžadoval rozšíření
+  CHECK omezení a UI pro uložení klíče; lib funkce (`vysvetlitCisla`)
+  už parametr `klicZakaznika` přijímá, jen obrazovka ho dnes nenosí.
+  Vědomá mezera, ne skrytá.
+
+## Vědomé mezery (ne skryté, prostě mimo rozsah tohoto průchodu)
+
+- Zákaznický AI klíč pro finančního analytika (viz výš).
+- Vizuální ověření devíti nových obrazovek (viz výš).
+- Scénáře 1/8/16 akceptačního seznamu (OCR dedup, souběžné číslování
+  faktur, samoobslužný onboarding) — mimo rozsah zadání i téhle noci,
+  žijí v jiných modulech/pipeline.
+- Catering jako plně propojený cyklus nákup→výroba→faktura→marže
+  (scénář 19, část) — zakázky mají poptávku/nabídku/platbu, ale
+  nejsou propojené s Nákupem automaticky (žádná objednávka vzniklá
+  ze zakázky).
+
+## Co zbývá, než se tohle nasadí
+
+1. Otevřít PR `finance-erp-plna-sire` → `main`, čekat na zelené CI
+   proti reálnému PostgreSQL (`supabase/tests/run.sh`) — jediné, co
+   doopravdy ověří RLS a sloupcové granty.
+2. Sloučit — **jen na výslovný pokyn Šéfíka** (`foodtab-release`).
+3. `supabase db push` proti `foodtab-test` — **jen na výslovný
+   pokyn**, po ověření napojeného projektu (`nasazeni`).
+4. Vizuální průchod po běžném přihlášení (viz výš).

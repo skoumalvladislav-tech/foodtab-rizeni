@@ -42,6 +42,36 @@ const TVARY: Record<FinanceIkona, ReactNode> = {
       <path d="M9 8h6M9 12h6M9 16h4" />
     </>
   ),
+  cashflow: (
+    <>
+      <path d="M3 17l5-5 4 4 8-8" />
+      <path d="M15 8h5v5" />
+    </>
+  ),
+  nakup: (
+    <>
+      <path d="M4 7h16l-1.5 11a2 2 0 0 1-2 1.8H7.5a2 2 0 0 1-2-1.8L4 7z" />
+      <path d="M8 7V5a4 4 0 0 1 8 0v2" />
+    </>
+  ),
+  zakazky: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M9 9h6M9 13h6M9 17h3" />
+    </>
+  ),
+  rozpocty: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 3" />
+    </>
+  ),
+  vybaveni: (
+    <>
+      <rect x="4" y="3" width="16" height="12" rx="1.5" />
+      <path d="M8 21h8M12 15v6" />
+    </>
+  ),
 }
 
 function Ikona({ klic }: { klic: FinanceIkona }) {
