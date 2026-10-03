@@ -144,6 +144,10 @@ export default async function FinancePlatby({
 
   const navrhy = await nactiNavrhyParovani(tenantId, transakce, jizSparovane)
 
+  const dnes = new Date()
+  const prvniDenMesice = `${dnes.getFullYear()}-${String(dnes.getMonth() + 1).padStart(2, '0')}-01`
+  const posledniDenMesice = new Date(dnes.getFullYear(), dnes.getMonth() + 1, 0).toISOString().slice(0, 10)
+
   return (
     <Navigace rozsah={rozsah}>
       <Nadpis oci="Finance" popis="Ruční zápis pohybu a fronta návrhů párování s fakturami.">
@@ -158,8 +162,11 @@ export default async function FinancePlatby({
           </p>
         ) : null}
 
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <Link href={`/${rozsah}/finance/platby/import`} className="ft-tl">Importovat výpis (CSV)</Link>
+          <a href={`/api/ucetni/export?rozsah=${encodeURIComponent(rozsah)}&od=${prvniDenMesice}&do=${posledniDenMesice}`} className="ft-tl">
+            Export pro účetního (tento měsíc)
+          </a>
         </div>
 
         {navrhy.length > 0 ? (
