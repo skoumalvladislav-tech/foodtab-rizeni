@@ -277,12 +277,34 @@ levého menu — obě jsou skeleton/omezené funkce, ne hlavní cíl modulu.
   nejsou propojené s Nákupem automaticky (žádná objednávka vzniklá
   ze zakázky).
 
-## Co zbývá, než se tohle nasadí
+## Nasazeno do `foodtab-test` (3. 10. 2026, na výslovný pokyn)
 
-1. Otevřít PR `finance-erp-plna-sire` → `main`, čekat na zelené CI
-   proti reálnému PostgreSQL (`supabase/tests/run.sh`) — jediné, co
-   doopravdy ověří RLS a sloupcové granty.
-2. Sloučit — **jen na výslovný pokyn Šéfíka** (`foodtab-release`).
-3. `supabase db push` proti `foodtab-test` — **jen na výslovný
-   pokyn**, po ověření napojeného projektu (`nasazeni`).
-4. Vizuální průchod po běžném přihlášení (viz výš).
+PR [#105](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/105)
+sloučen do `main` (merge commit `8d70731`) po zeleném CI proti
+reálnému PostgreSQL — cestou k zelené spadl `scripts/nabidka.test.mjs`
+(`finance/nakup` měl `modul: 'finance'`, ale `purchasing.read` patří
+modulu `objednavky` — stejná třída chyby, kterou si `finance/nakup/page.tsx`
+sám už pohlídal; oprava `870c0f8`, detaily v commitu). `supabase db push`
+proběhl — `migration list --linked` ukazuje všech 7 nových migrací
+`local`=`remote`.
+
+Ověřeno po nasazení (`supabase db query --linked`, čtecí dotazy):
+- všech 10 nových tabulek existuje (`objednavky_dodavatelum`(_polozky),
+  `prijemky`(_polozky), `rozpocty`, `zakazky`(_polozky), `vybaveni`,
+  `pokladna_prodeje_denni`, `cislovani_rad`);
+- všech 8 kontrolovaných funkcí existuje v `public.*`
+  (`zalozit_objednavku`, `zapsat_prijem_zbozi`, `vysledovka`,
+  `rozpocet_prehled`, `zalozit_zakazku`, `zakazka_uhrazeno`,
+  `aktualni_zustatky_uctu`, `importovat_pokladna_prodeje`);
+- RLS zapnuté na všech 5 kontrolovaných tabulkách; `anon` nemá žádný
+  grant na `pokladna_prodeje_denni`.
+
+## Co zbývá
+
+1. Vizuální průchod po běžném přihlášení (viz výš) — appka je teď
+   nasazená, ale ještě neviděná po přihlášení.
+2. Přestylovat Finance obrazovky (Přehled především) podle mockupu
+   moderního ERP dashboardu, který Šéfík poslal 3. 10. 2026 — layout
+   (KPI karty s trendem, graf cashflow skutečnost/predikce, graf
+   nákladů, tabulka „Co vyžaduje pozornost", stav integrací), ne barvy
+   (ty zůstávají podle zadání appky). Rozpracováno v téhle relaci.
