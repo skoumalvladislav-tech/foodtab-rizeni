@@ -40,3 +40,13 @@ export function posunDatum(datum: string, dnu: number): string {
   const posunuty = new Date(Date.UTC(r, m - 1, d + dnu))
   return posunuty.toISOString().slice(0, 10)
 }
+
+/** První a poslední den měsíce, který obsahuje `datum` (YYYY-MM-DD). */
+export function mesicniRozsah(datum: string): { od: string; do: string } {
+  const [r, m] = datum.split('-').map(Number)
+  const posledniDen = new Date(Date.UTC(r, m, 0)).getUTCDate()
+  return {
+    od: `${r}-${String(m).padStart(2, '0')}-01`,
+    do: `${r}-${String(m).padStart(2, '0')}-${String(posledniDen).padStart(2, '0')}`,
+  }
+}

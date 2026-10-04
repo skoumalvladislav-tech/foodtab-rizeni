@@ -386,7 +386,14 @@ export default function RozpisView({
   /* --- vydání rozpisu ---------------------------------------------- */
 
   const zmeny = vydani ? zmenyRozpisu([...smeny, ...zrusene]) : [];
-  const obdobi = popisObdobi(zacatek, "sedm");
+  /*
+    Dřív natvrdo "sedm" — platilo to, dokud vydání VŽDYCKY šlo jen na
+    sedm dní bez ohledu na pohled (ten samý nedostatek, co page.tsx
+    teď opravuje u vydani.od/doKdy). V měsíčním pohledu popisObdobi
+    sama vrátí "Září 2026" místo rozsahu dnů — ať pruh/panel vydání
+    hlásí stejné období, jaké appka doopravdy vydá.
+  */
+  const obdobi = popisObdobi(zacatek, pohled);
   const cekaVydani = souhrnZmen(zmeny).smen > 0 && vydani?.pobockaId != null && vydani.mozeVydat;
 
   /*
