@@ -38,7 +38,15 @@ export async function zalozitPripojeni(formData: FormData): Promise<void> {
   const rezim = String(formData.get('rezim') ?? '')
   const nazev = nepovinnePole(formData, 'nazev') ?? poskytovatel
 
-  if (!['pokladna', 'banka', 'ucetnictvi', 'email_dokladu'].includes(oblast) || !poskytovatel || !['zakaznicky', 'csv', 'demo'].includes(rezim)) {
+  // Banka má od bankovního modulu (20261004100000) VLASTNÍ obrazovku
+  // s živým ověřením (Fio) — tenhle obecný formulář jen zaregistruje
+  // záznam BEZ jakéhokoli připojení, což u banky působilo, jako by se
+  // appka pokusila připojit a nic se nestalo (nález 4. 10. 2026).
+  if (oblast === 'banka') {
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Bankovní účet se připojuje na týhle stránce (Fio) nebo čeká na Enable Banking u ostatních bank — ne přes obecný formulář.')}`)
+  }
+
+  if (!['pokladna', 'ucetnictvi', 'email_dokladu'].includes(oblast) || !poskytovatel || !['zakaznicky', 'csv', 'demo'].includes(rezim)) {
     redirect(`/${rozsah}/finance/integrace?chyba=${encodeURIComponent('Vyplňte oblast, poskytovatele a režim.')}`)
   }
 
