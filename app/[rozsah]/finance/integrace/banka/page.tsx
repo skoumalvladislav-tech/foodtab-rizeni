@@ -137,17 +137,21 @@ export default async function FinanceIntegraceBanka({
     ale appka ji aspoň zaloguje, ať není tichá.
   */
   let banky: { nazev: string; maxSouhlasDnu: number | null }[] = []
+  let chybaBank: string | null = null
   if (enableBankingNakonfigurovano()) {
     const vysledekBank = await nactiBanky()
     if (vysledekBank.stav === 'ok') banky = vysledekBank.banky
-    else console.error('nactiBanky selhalo', vysledekBank.duvod)
+    else {
+      chybaBank = vysledekBank.duvod
+      console.error('nactiBanky selhalo', vysledekBank.duvod)
+    }
   }
 
   return (
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="Fio banka: token ověřený živě před uložením. Ostatní banky čekají na Enable Banking — kostra, bez obchodního přístupu se nic nezkouší."
+        popis="Fio banka: token ověřený živě před uložením. Ostatní banky (KB/ČSOB/ČS/Raiffeisenbank) přes Enable Banking — appka přesměruje na souhlas banky."
         vpravo={<Link href={`/${rozsah}/finance/integrace`} className="ft-tl">← Zpět na integrace</Link>}
       >
         Banka
@@ -276,6 +280,7 @@ export default async function FinanceIntegraceBanka({
                 ) : banky.length === 0 ? (
                   <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>
                     Seznam bank se nepodařilo natáhnout — zkuste stránku načíst znovu za chvíli.
+                    {chybaBank ? <span style={{ display: 'block', marginTop: '4px', color: 'var(--muted)' }}>({chybaBank})</span> : null}
                   </p>
                 ) : (
                   <>
