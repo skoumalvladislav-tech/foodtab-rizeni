@@ -76,7 +76,7 @@ export function pondelekTydne(datum: string): string {
   return zeDne(den - posunZpet)
 }
 
-function pridatDny(datum: string, pocet: number): string {
+export function pridatDny(datum: string, pocet: number): string {
   return zeDne(naDen(datum) + pocet)
 }
 

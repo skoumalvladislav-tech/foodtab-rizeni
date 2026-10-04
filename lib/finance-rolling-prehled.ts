@@ -5,6 +5,7 @@ import type { RadekPredpisu } from '@/lib/finance-plan.ts'
 import {
   agregovatPoTydnech,
   pondelekTydne,
+  pridatDny,
   sestavRollingVyhled,
   type RollingVyhled,
   type Scenar,
@@ -90,4 +91,92 @@ export async function nactiRollingVyhledy(
   vysledky.push({ branchId: null, pobocka: 'Celá firma (účty bez pobočky)', vyhled: vyhledFirma })
 
   return vysledky
+}
+
+/** Jeden bod kombinovaného grafu (Přehled) — zůstatek napříč VŠEMI účty, bez rozpadu po pobočkách. */
+export type BodCashflowGrafu = { tydenOd: string; tydenDo: string; zustatekHaleru: number; budouci: boolean }
+
+/**
+ * Historických N týdnů PŘED tímto týdnem, zůstatek napříč všemi účty.
+ *
+ * Jediný skutečný bod je DNEŠNÍ celkový zůstatek (`aktualni_zustatky_uctu`)
+ * — zbytek se dopočítá chůzí NAZPÁTEK podle skutečných zapsaných transakcí
+ * (ne podle plánu, na rozdíl od `sestavRollingVyhled`, který jde dopředu).
+ * Poslední vrácený bod je zůstatek na KONCI minulého týdne, tj. přesně
+ * tam, kde navazuje `pocatecniZustatekHaleru` dopředného výhledu.
+ */
+export async function nactiHistorickyCashflow(
+  tenantId: string,
+  pocetTydnu: number,
+): Promise<BodCashflowGrafu[]> {
+  const supabase = await getServerSupabase()
+  const dnes = new Date().toISOString().slice(0, 10)
+  const zacatekAktualnihoTydne = pondelekTydne(dnes)
+  const zacatekHistorie = pridatDny(zacatekAktualnihoTydne, -pocetTydnu * 7)
+
+  const [zustatkyRes, transakceRes] = await Promise.all([
+    supabase.rpc('aktualni_zustatky_uctu', { p_tenant: tenantId }),
+    supabase
+      .from('transakce')
+      .select('datum, smer, castka_haleru')
+      .eq('tenant_id', tenantId)
+      .gte('datum', zacatekHistorie)
+      .lt('datum', zacatekAktualnihoTydne),
+  ])
+  if (zustatkyRes.error) throw zustatkyRes.error
+  if (transakceRes.error) throw transakceRes.error
+
+  const aktualniCelkem = ((zustatkyRes.data ?? []) as { zustatek_haleru: number }[])
+    .reduce((s, r) => s + Number(r.zustatek_haleru), 0)
+
+  const poTydnech = agregovatPoTydnech(
+    ((transakceRes.data ?? []) as { datum: string; smer: string; castka_haleru: number }[]).map(
+      (r): SurovaTransakce => ({ datum: r.datum, smer: r.smer, castkaHaleru: r.castka_haleru }),
+    ),
+  )
+
+  // Kolik se za celou historii pohnulo, abychom se od dnešního (reálného)
+  // zůstatku dostali k zůstatku PŘED první historickou týdnem.
+  let celkovyPohybHistorie = 0
+  for (const v of poTydnech.values()) celkovyPohybHistorie += v.prijmyHaleru - v.vydajeHaleru
+
+  let zustatek = aktualniCelkem - celkovyPohybHistorie
+  const body: BodCashflowGrafu[] = []
+  for (let i = 0; i < pocetTydnu; i++) {
+    const tydenOd = pridatDny(zacatekHistorie, i * 7)
+    const tydenDo = pridatDny(tydenOd, 6)
+    const tyden = poTydnech.get(tydenOd) ?? { prijmyHaleru: 0, vydajeHaleru: 0 }
+    zustatek += tyden.prijmyHaleru - tyden.vydajeHaleru
+    body.push({ tydenOd, tydenDo, zustatekHaleru: zustatek, budouci: false })
+  }
+  return body
+}
+
+/**
+ * Kombinovaný graf pro Přehled: historie (skutečnost, `budouci: false`)
+ * navazující na dopředný výhled (`budouci: true`), napříč VŠEMI účty
+ * (žádný rozpad po pobočkách — ten má svůj vlastní detail na
+ * `/finance/cashflow`). Zůstatky jsou aditivní, takže součet přes
+ * pobočky+firmu v KAŽDÉM týdnu je platný celkový zůstatek.
+ */
+export async function nactiKombinovanyCashflowGraf(
+  tenantId: string,
+  scenar: Scenar,
+  pocetHistorickychTydnu = 6,
+): Promise<BodCashflowGrafu[]> {
+  const [historie, vyhledy] = await Promise.all([
+    nactiHistorickyCashflow(tenantId, pocetHistorickychTydnu),
+    nactiRollingVyhledy(tenantId, scenar),
+  ])
+
+  const pocetBudoucichTydnu = vyhledy[0]?.vyhled.tydny.length ?? 0
+  const budouci: BodCashflowGrafu[] = []
+  for (let i = 0; i < pocetBudoucichTydnu; i++) {
+    const radek = vyhledy[0]?.vyhled.tydny[i]
+    if (!radek) continue
+    const zustatekCelkem = vyhledy.reduce((s, v) => s + (v.vyhled.tydny[i]?.zustatekNaKonciHaleru ?? 0), 0)
+    budouci.push({ tydenOd: radek.tydenOd, tydenDo: radek.tydenDo, zustatekHaleru: zustatekCelkem, budouci: true })
+  }
+
+  return [...historie, ...budouci]
 }
