@@ -1,0 +1,63 @@
+name: Banka — synchronizace
+
+# Naplánovaná úloha: stažení pohybů z napojených bankovních účtů (Fio).
+# Stejný vzor jako zapomenuty-odchod.yml — GitHub Actions, ne Vercel
+# Cron (Hobby tarif hodinový cron odmítá, viz ten soubor).
+#
+# Běží každé 4 hodiny — appka je read-only a Fio token má limit jen na
+# 30 sekund mezi voláními (ne denní strop), ale appka se chová
+# obezřetně: víc bank/firem zpracovaných jedno po druhém by se při
+# hodinovém běhu mohlo protáhnout přes hodinu samo.
+
+on:
+  schedule:
+    - cron: '15 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: banka-synchronizace
+  cancel-in-progress: false
+
+jobs:
+  synchronizovat:
+    name: Synchronizovat bankovní připojení
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci."
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu."
+            exit 1
+          fi
+
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 120 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/banka-synchronizace")
+
+          echo "HTTP ${KOD}"
+          cat telo.json || true
+          echo
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          cat telo.json >> "$GITHUB_STEP_SUMMARY" || true

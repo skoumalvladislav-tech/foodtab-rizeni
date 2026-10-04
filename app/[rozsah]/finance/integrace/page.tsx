@@ -114,7 +114,12 @@ export default async function FinanceIntegrace({
       <Nadpis
         oci="Finance"
         popis="Registr připojení k poskytovatelům. Žádné se nepřipojuje živě bez ověřeného přístupu."
-        vpravo={<Link href={`/${rozsah}/finance/integrace/prodeje`} className="ft-tl">Import prodejů (pokladna) →</Link>}
+        vpravo={
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <Link href={`/${rozsah}/finance/integrace/banka`} className="ft-tl">Bankovní účty →</Link>
+            <Link href={`/${rozsah}/finance/integrace/prodeje`} className="ft-tl">Import prodejů (pokladna) →</Link>
+          </div>
+        }
       >
         Integrace
       </Nadpis>

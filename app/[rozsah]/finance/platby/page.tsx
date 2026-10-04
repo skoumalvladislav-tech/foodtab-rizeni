@@ -172,26 +172,37 @@ export default async function FinancePlatby({
         {navrhy.length > 0 ? (
           <section style={{ display: 'grid', gap: '10px' }}>
             <h2 style={{ margin: 0, fontSize: '15px' }}>Návrhy párování ({navrhy.length})</h2>
-            {navrhy.map(({ navrh, faktura }) => (
-              <div key={`${navrh.transakceId}-${navrh.fakturaId}`} style={{ ...karta, display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: '13.5px' }}>
-                    Platba {koruny(transakce.find((t) => t.id === navrh.transakceId)?.castka_haleru ?? 0)} ↔ faktura {faktura.dodavatel ?? '—'} ({koruny(faktura.castkaHaleru)})
+            {navrhy.map(({ navrh, faktura }) => {
+              const castkaPlatbyHaleru = transakce.find((t) => t.id === navrh.transakceId)?.castka_haleru ?? 0
+              // Alokovat NEJVÝŠ tolik, kolik platba skutečně nese — dřív
+              // se sem natvrdo dávala celá částka faktury, takže platba
+              // nižší než faktura (částečná úhrada) by appku nahlásila
+              // jako plně uhrazenou. `app.potvrdit_alokaci_platby` tohle
+              // i tak ověří (nikdy nedůvěřuje jen klientovi), tohle je
+              // jen rozumná výchozí hodnota pro tlačítko.
+              const castkaKAlokaciHaleru = Math.min(castkaPlatbyHaleru, faktura.castkaHaleru)
+              return (
+                <div key={`${navrh.transakceId}-${navrh.fakturaId}`} style={{ ...karta, display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: '13.5px' }}>
+                      Platba {koruny(castkaPlatbyHaleru)} ↔ faktura {faktura.dodavatel ?? '—'} ({koruny(faktura.castkaHaleru)})
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Jistota {Math.round(navrh.jistota * 100)} %</div>
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Jistota {Math.round(navrh.jistota * 100)} %</div>
+                  {smiPsat ? (
+                    <form action={potvrditParovani}>
+                      <input type="hidden" name="rozsah" value={rozsah} />
+                      <input type="hidden" name="transakce_id" value={navrh.transakceId} />
+                      <input type="hidden" name="faktura_id" value={navrh.fakturaId} />
+                      <input type="hidden" name="castka_haleru" value={castkaKAlokaciHaleru} />
+                      <input type="hidden" name="castka_faktury_celkem_haleru" value={faktura.castkaHaleru} />
+                      <input type="hidden" name="jistota" value={navrh.jistota} />
+                      <button type="submit" className="ft-tl ft-tl-hlavni">Potvrdit párování</button>
+                    </form>
+                  ) : null}
                 </div>
-                {smiPsat ? (
-                  <form action={potvrditParovani}>
-                    <input type="hidden" name="rozsah" value={rozsah} />
-                    <input type="hidden" name="transakce_id" value={navrh.transakceId} />
-                    <input type="hidden" name="faktura_id" value={navrh.fakturaId} />
-                    <input type="hidden" name="castka_haleru" value={faktura.castkaHaleru} />
-                    <input type="hidden" name="jistota" value={navrh.jistota} />
-                    <button type="submit" className="ft-tl ft-tl-hlavni">Potvrdit párování</button>
-                  </form>
-                ) : null}
-              </div>
-            ))}
+              )
+            })}
           </section>
         ) : null}
 
