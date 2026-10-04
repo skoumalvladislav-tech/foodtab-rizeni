@@ -240,14 +240,41 @@ export default async function FinanceIntegraceBanka({
           </form>
         ) : null}
 
-        <div style={{ ...karta, display: 'grid', gap: '6px' }}>
+        <div style={{ ...karta, display: 'grid', gap: '10px' }}>
           <h2 style={{ margin: 0, fontSize: '15px' }}>Ostatní banky (KB, ČSOB, Česká spořitelna, Raiffeisenbank)</h2>
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-            Přes Enable Banking — appka sama není licencovaný poskytovatel platebních informačních služeb,
-            jede přes zprostředkovatele. {enableBankingNakonfigurovano()
-              ? 'Nakonfigurováno, ale propojení s obrazovkou ještě čeká na dokončení.'
-              : 'Zatím nenakonfigurováno — krok pro Šéfíka je založit si zdarma kontrolní panel na enablebanking.com/sign-in (bez smlouvy). Detaily v docs/hlaseni/banka-poskytovatele-2026-10-04.md.'}
+            Appka sama není licencovaný poskytovatel platebních informačních služeb — jede přes
+            zprostředkovatele Enable Banking. Jedno připojení pak odemkne všechny tyhle banky pro celou appku.
           </p>
+
+          {enableBankingNakonfigurovano() ? (
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>
+              Přístup je nastavený, ale propojení s touhle obrazovkou ještě čeká na dokončení — zatím se tu
+              žádný účet KB/ČSOB/ČS/Raiffeisenbank nepřipojí.
+            </p>
+          ) : (
+            <>
+              <div style={{ display: 'grid', gap: '6px', fontSize: '13px', color: 'var(--muted)' }}>
+                <div style={{ display: 'flex', gap: '8px' }}><span>1.</span><span>Vytvořte si zdarma účet na Enable Banking — bez smlouvy, stačí e-mail.</span></div>
+                <div style={{ display: 'flex', gap: '8px' }}><span>2.</span><span>V kontrolním panelu vytvořte API aplikaci a stáhněte soukromý klíč.</span></div>
+                <div style={{ display: 'flex', gap: '8px' }}><span>3.</span><span>Klíč zadejte do appky (ve Vercelu, Settings → Environment Variables, jako <code>ENABLEBANKING_APPLICATION_ID</code> a <code>ENABLEBANKING_PRIVATE_KEY</code>).</span></div>
+              </div>
+              <div>
+                <a
+                  href="https://enablebanking.com/sign-in"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ft-tl ft-tl-hlavni"
+                >
+                  Vytvořit účet na Enable Banking →
+                </a>
+              </div>
+              <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                Tenhle krok dělá FoodTab jednou za celou appku, ne každý podnik zvlášť — jakmile je hotový,
+                KB/ČSOB/ČS/Raiffeisenbank půjdou připojit stejně snadno jako Fio výš.
+              </p>
+            </>
+          )}
         </div>
       </div>
     </Navigace>

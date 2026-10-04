@@ -314,11 +314,26 @@ e-mail, appka nemá přístup) — nezměněno od P0.
 
 # Pokračování — Bankovní modul (4. 10. 2026)
 
-Formální zadání: `docs/bankovni-modul-zadani-2026-10-04.md`. Nová
-větev `finance-banka-napojeni`, založená z `main` @ `55142b5`.
-**Neslitá, nepushnutá.** Plný stav, audit, akceptační scénáře a
-vědomé mezery: `docs/hlaseni/banka-modul-stav-2026-10-04.md` — tenhle
-zápis je jen stručné shrnutí pro průběžný přehled.
+Formální zadání: `docs/bankovni-modul-zadani-2026-10-04.md`. Větev
+`finance-banka-napojeni`, založená z `main` @ `55142b5`. Plný stav,
+audit, akceptační scénáře a vědomé mezery:
+`docs/hlaseni/banka-modul-stav-2026-10-04.md` — tenhle zápis je jen
+stručné shrnutí pro průběžný přehled.
+
+**HOTOVO a nasazeno.** PR [#107](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/107)
+sloučen do `main` (merge commit `604d3a2`) po zeleném CI proti
+reálnému PostgreSQL (3182 PGlite kontrol, 0 pádů). `supabase db push`
+proběhl na výslovný pokyn — `migration list --linked` ukazuje
+`20261004100000_banka_napojeni.sql` jako `local`=`remote`.
+
+Ověřeno po nasazení (`supabase db query --linked`, čtecí dotazy):
+- obě nové tabulky existují (`bankovni_zustatky`, `synchronizace_behy`);
+- RPC funkce existují (`potvrdit_alokaci_platby`, `zrusit_alokaci_platby`,
+  `mozne_duplicity_transakci`, obě funkce druhé linie obrany
+  `hlida_firmu_bankovni_zustatky`/`hlida_firmu_integrace_pripojeni`);
+- grant `INSERT` na `platby_faktury` má jen `service_role`/`postgres` —
+  `authenticated` tam skutečně není, přímý zápis mimo RPC je blokovaný;
+- `transakce_zdroj_check` povoluje `'fio_api'`.
 
 Zkráceně: Fio banka adaptér je PLNĖ FUNKČNÍ (čtení zůstatků i
 pohybů, ověřeno proti FIO API BANKOVNICTVÍ v1.9), Enable Banking
@@ -330,12 +345,40 @@ faktury je souběh-odolná (advisory zámek) a opravuje nalezenou chybu
 (částečná úhrada se dřív tvářila jako „Uhrazeno"). CSV import, Fio
 a Enable Banking jedou přes stejný `BankDataProvider` kontrakt.
 
+## Dotažení (4. 10. 2026, po nasazení PR #107) — větev `finance-banka-dokonceni`
+
+Pokyn „zkontroluj vercel a pokračuj". Vercel se odsud zkontrolovat
+NEŠLO (Vercel konektor je „připojený", ale API vrací 403 na scope
+`skoumalvladislav-tech`, `list_teams` nevrací žádný tým — potřebuje
+znovu-autorizaci na straně Šéfíka, appka to odsud nepřepíše).
+Pokračováno na nezávislých mezerách z
+`docs/hlaseni/banka-modul-stav-2026-10-04.md`, bez čekání na externí
+klíče:
+
+- **`zrusitAlokaci` napojeno na UI** — nová sekce „Potvrzená
+  párování" na `finance/platby` s tlačítkem „Zrušit párování". Server
+  akce existovala od PR #107, jen nebyla odnikud zavolaná.
+- **`krok84_scenar.sql`** (15 kontrol, nový) — akceptační scénář #1
+  dotažen (explicitní RLS SELECT na `bankovni_zustatky`/
+  `synchronizace_behy` — krok83 testoval jen druhou linii při
+  INSERTu; a shodný VS+externí ID u DVOU firem na jejich vlastních
+  účtech nekoliduje) a #7 část (jedna transakce rozdělená na DVĖ
+  různé faktury, třetí alokace přesahující zbytek platby spadne).
+- PGlite po doplnění: **3197 kontrol, nic nespadlo** (bylo 3182).
+  `npx tsc --noEmit`: čisté.
+
+**Neslitá, nepushnutá** — čeká na výslovný pokyn, stejně jako doteď.
+
 ## Co zbývá
 
 1. Vizuální průchod po běžném přihlášení — pořád nezměněno.
 2. Enable Banking: dokončit podpis JWT a UI propojení, až budou
-   `ENABLEBANKING_APPLICATION_ID`/`PRIVATE_KEY` k dispozici.
-3. Akceptační scénáře #3, #4, #7, #9, #10 (oddíl 7 zadání) — částečně
-   nebo vůbec neřešené, vypsáno v `docs/hlaseni/banka-modul-stav-2026-10-04.md`.
-4. Otevřít PR, čekat na zelené CI, sloučit a nasadit — **jen na
-   výslovný pokyn Šéfíka**, stejně jako doteď.
+   `ENABLEBANKING_APPLICATION_ID`/`PRIVATE_KEY` k dispozici (krok pro
+   Šéfíka, ne appky — self-serve zdarma na `enablebanking.com`).
+3. Akceptační scénáře #3, #4, #9, #10 a zbytek #7 (zálohy, dobropisy,
+   refundy) — částečně nebo vůbec neřešené, vypsáno v
+   `docs/hlaseni/banka-modul-stav-2026-10-04.md`.
+4. Vercel konektor potřebuje znovu-autorizaci pro scope
+   `skoumalvladislav-tech`, než půjde odsud ověřit nasazení appky.
+5. Otevřít PR, čekat na zelené CI, sloučit — **jen na výslovný pokyn
+   Šéfíka**, stejně jako doteď.

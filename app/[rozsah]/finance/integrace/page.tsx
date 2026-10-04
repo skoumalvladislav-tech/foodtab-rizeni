@@ -164,10 +164,14 @@ export default async function FinanceIntegrace({
                 <span style={popisek}>Oblast *</span>
                 <select name="oblast" required style={pole}>
                   <option value="pokladna">Pokladna (POS)</option>
-                  <option value="banka">Banka</option>
                   <option value="ucetnictvi">Účetnictví</option>
                   <option value="email_dokladu">E-mail dokladů</option>
                 </select>
+                <small style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--muted)' }}>
+                  Banka se připojuje na vlastní stránce{' '}
+                  <Link href={`/${rozsah}/finance/integrace/banka`} style={{ color: 'inherit', textDecoration: 'underline' }}>Bankovní účty</Link>{' '}
+                  — tam appka přístup živě ověří, tenhle formulář jen zaregistruje poskytovatele, nikdy nic nepřipojí.
+                </small>
               </label>
               <label>
                 <span style={popisek}>Poskytovatel *</span>
