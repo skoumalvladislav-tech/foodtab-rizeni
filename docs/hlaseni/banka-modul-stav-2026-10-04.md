@@ -23,7 +23,8 @@ produkce ani do reálného bankovního účtu.**
 | UI: připojit/odpojit/synchronizovat Fio účet | **Hotovo** (minimální) | `app/[rozsah]/finance/integrace/banka/` |
 | UI: Enable Banking | **Blokováno** | čeká na `ENABLEBANKING_APPLICATION_ID`/`PRIVATE_KEY` (krok pro Šéfíka — self-serve, zdarma) |
 | Oprava: částečná úhrada se dřív hlásila jako „Uhrazeno" | **Hotovo** | `platby/akce.ts`, `potvrditParovani` — nalezeno při stavbě RPC, opraveno |
-| PGlite scénáře (nová entity) | **Hotovo** | `krok83_scenar.sql`, 13 kontrol; `krok74_scenar.sql` přepsaný na novou RPC, +18 kontrol |
+| PGlite scénáře (nová entity) | **Hotovo** | `krok83_scenar.sql`, 13 kontrol; `krok74_scenar.sql` přepsaný na novou RPC, +18 kontrol; `krok84_scenar.sql` (4. 10., dotažení), 15 kontrol |
+| UI: zrušit potvrzenou alokaci | **Hotovo** | `finance/platby/page.tsx` — sekce „Potvrzená párování" s tlačítkem, server akce `zrusitAlokaci` existovala, jen nebyla napojená |
 | Node testy adaptérů (bez sítě) | **Hotovo** | `integrace-fio.test.mjs` (24), `integrace-enablebanking.test.mjs` (10) |
 | Akceptační scénář #2 (částečná úhrada, opakovaný sync) | **Hotovo** | krok74, sekce 3 |
 | Akceptační scénář #5 (API+CSV stejné pohyby, cizí duplicity nesloučeny) | **Hotovo** (detekce) | krok83, sekce 4 — slabý VS signál se NEPOUŽIJE, appka ho sama nikdy neslučuje |
@@ -72,12 +73,14 @@ produkce ani do reálného bankovního účtu.**
 ## Co appka NESTIHLA / vědomé mezery
 
 - **Akceptační scénář #1** (dva klienti, stejné VS a externí ID —
-  žádný únik): STRUKTURÁLNĖ zajištěno (tenant_id ve všech klíčích,
-  `externi_id` unique je PER ÚČET, ne globálně, RLS na všech nových
-  tabulkách) — ale appka NEPSALA samostatný PGlite scénář, který by
-  tohle explicitně provedl pro bankovní tabulky (existující krok73/82
-  testují podobné pro `integrace_pripojeni`/`pokladna_prodeje_denni`,
-  ne pro `bankovni_zustatky`/`synchronizace_behy` konkrétně).
+  žádný únik): **Doplněno 4. 10. 2026** (`krok84_scenar.sql`, sekce
+  1–2) — explicitní RLS SELECT test pro `bankovni_zustatky` a
+  `synchronizace_behy` (cizí firma neuvidí řádek, i když zná jeho ID —
+  dřív to krok83 testoval jen na úrovni druhé linie při INSERTu, ne
+  SELECTu), a explicitní test, že stejný VS + stejné externí ID u DVOU
+  firem na JEJICH VLASTNÍCH účtech nekoliduje (unikátní index je per
+  `ucet_id`, ne globální) a appka mezi firmami možné duplicity ani
+  nehledá.
 - **Akceptační scénář #3** (dvě různé faktury s VS 123 a stejnou
   částkou → ruční kontrola): appka NEPSALA explicitní test ani kód,
   který by tohle rozlišil od „jasné shody" — `navrhnoutParovani`
@@ -94,12 +97,14 @@ produkce ani do reálného bankovního účtu.**
   bezpředmětný, ale až bude Enable Banking funkční, bude potřeba
   dořešit.
 - **Akceptační scénář #7** (jedna platba na dvě faktury, záloha a
-  její zúčtování, přeplatek, dobropis, refund): `app.potvrdit_alokaci_platby`
-  podporuje „jedna platba na dvě faktury" strukturálně (víc řádků se
-  stejným `transakce_id`), ale appka NEPSALA test přesně na tenhle
-  případ ani na zálohy/dobropisy/refundy — `zakazky`/zálohy (z
-  předchozí noci) existují samostatně, propojení s TOUHLE bezpečnou
-  alokací nebylo ověřeno.
+  její zúčtování, přeplatek, dobropis, refund): **Část doplněna
+  4. 10. 2026** (`krok84_scenar.sql`, sekce 3) — jedna transakce
+  rozdělená na DVĖ různé faktury teď má explicitní test (dřív
+  `krok74_scenar.sql` testoval jen opačný směr: jedna faktura, dvě
+  platby/doplatek), včetně toho, že třetí alokace přesahující zbytek
+  částky platby spadne. Zálohy/dobropisy/refundy appka POŘÁD nemá
+  samostatně ověřené — `zakazky`/zálohy (z předchozí noci) existují
+  nezávisle, propojení s touhle bezpečnou alokací zůstává neprověřené.
 - **Akceptační scénář #9** (karetní prodej 10000 vs. settlement 9800,
   200 Kč poplatek doložitelný): appka TOHLE VŮBEC NEŘEŠILA — žádná
   logika, která by settlement z bankovního pohybu spojila s

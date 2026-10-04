@@ -12,7 +12,7 @@ import { navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type N
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
-import { zalozitPlatebniUcet, zapsatTransakci, potvrditParovani } from './akce'
+import { zalozitPlatebniUcet, zapsatTransakci, potvrditParovani, zrusitAlokaci } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,6 +55,78 @@ const pole = {
 } as const
 
 const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const
+
+type PotvrzenaAlokace = {
+  id: string
+  transakceId: string
+  fakturaId: string
+  castkaHaleru: number
+  potvrzenoKdy: string | null
+  transakce: { datum: string; protistrana: string } | null
+  dodavatel: string | null
+}
+
+async function nactiPotvrzeneAlokace(
+  tenantId: string,
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+): Promise<PotvrzenaAlokace[]> {
+  const { data } = await supabase
+    .from('platby_faktury')
+    .select('id, transakce_id, faktura_id, castka_haleru, potvrzeno_kdy')
+    .eq('tenant_id', tenantId)
+    .eq('stav', 'potvrzeno')
+    .order('potvrzeno_kdy', { ascending: false })
+    .limit(20)
+
+  const alokace = (data ?? []) as {
+    id: string
+    transakce_id: string
+    faktura_id: string
+    castka_haleru: number
+    potvrzeno_kdy: string | null
+  }[]
+  if (alokace.length === 0) return []
+
+  const transakceIds = [...new Set(alokace.map((a) => a.transakce_id))]
+  const { data: transakceData } = await supabase
+    .from('transakce')
+    .select('id, datum, protistrana')
+    .in('id', transakceIds)
+  const transakceMapa = new Map(
+    ((transakceData ?? []) as { id: string; datum: string; protistrana: string }[]).map((t) => [t.id, t]),
+  )
+
+  // Jméno dodavatele je jen pro zobrazení — appka tu znovu NEČTE
+  // `invoices.status` jako zdroj pravdy (ten zůstal v Fakturách jen
+  // jako best-effort kopie), pouze dodavatele k číslu faktury.
+  let dodavateleMapa = new Map<string, string>()
+  if (fakturyJsouNastavene()) {
+    try {
+      const fakturyIds = [...new Set(alokace.map((a) => a.faktura_id))]
+      const supabaseFaktury = getFakturySupabase()
+      const { data: fakturyData } = await supabaseFaktury
+        .from('invoices')
+        .select('id, supplier')
+        .eq('tenant_id', tenantId)
+        .in('id', fakturyIds)
+      dodavateleMapa = new Map(
+        ((fakturyData ?? []) as { id: string; supplier: string | null }[]).map((f) => [f.id, f.supplier ?? '']),
+      )
+    } catch {
+      // Best-effort — bez dodavatele appka ukáže jen číslo faktury.
+    }
+  }
+
+  return alokace.map((a) => ({
+    id: a.id,
+    transakceId: a.transakce_id,
+    fakturaId: a.faktura_id,
+    castkaHaleru: a.castka_haleru,
+    potvrzenoKdy: a.potvrzeno_kdy,
+    transakce: transakceMapa.get(a.transakce_id) ?? null,
+    dodavatel: dodavateleMapa.get(a.faktura_id) ?? null,
+  }))
+}
 
 async function nactiNavrhyParovani(
   tenantId: string,
@@ -143,6 +215,7 @@ export default async function FinancePlatby({
   const jizSparovane = new Set(((sparovaneRes.data ?? []) as { transakce_id: string }[]).map((r) => r.transakce_id))
 
   const navrhy = await nactiNavrhyParovani(tenantId, transakce, jizSparovane)
+  const potvrzeneAlokace = await nactiPotvrzeneAlokace(tenantId, supabase)
 
   const dnes = new Date()
   const prvniDenMesice = `${dnes.getFullYear()}-${String(dnes.getMonth() + 1).padStart(2, '0')}-01`
@@ -203,6 +276,29 @@ export default async function FinancePlatby({
                 </div>
               )
             })}
+          </section>
+        ) : null}
+
+        {potvrzeneAlokace.length > 0 ? (
+          <section style={{ display: 'grid', gap: '10px' }}>
+            <h2 style={{ margin: 0, fontSize: '15px' }}>Potvrzená párování ({potvrzeneAlokace.length})</h2>
+            {potvrzeneAlokace.map((a) => (
+              <div key={a.id} style={{ ...karta, display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontSize: '13.5px' }}>
+                    {koruny(a.castkaHaleru)} ↔ faktura {a.dodavatel || a.fakturaId}
+                    {a.transakce ? ` · ${a.transakce.protistrana || '—'} (${a.transakce.datum})` : ''}
+                  </div>
+                </div>
+                {smiPsat ? (
+                  <form action={zrusitAlokaci}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="alokace_id" value={a.id} />
+                    <button type="submit" className="ft-tl">Zrušit párování</button>
+                  </form>
+                ) : null}
+              </div>
+            ))}
           </section>
         ) : null}
 
