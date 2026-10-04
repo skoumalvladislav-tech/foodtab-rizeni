@@ -299,12 +299,43 @@ Ověřeno po nasazení (`supabase db query --linked`, čtecí dotazy):
 - RLS zapnuté na všech 5 kontrolovaných tabulkách; `anon` nemá žádný
   grant na `pokladna_prodeje_denni`.
 
+## Dashboard podle mockupu — HOTOVO a nasazeno
+
+PR [#106](https://github.com/skoumalvladislav-tech/foodtab-rizeni/pull/106)
+sloučen (`55142b5`) — KPI karty s trendem, graf vývoje zůstatku,
+graf nákladů podle kategorie, „Co vyžaduje pozornost", stav integrací.
+Žádná migrace, jen aplikační vrstva. Detaily: commit `9078497` na
+sloučené větvi `finance-erp-vzhled-dashboard` (už smazaná, sloučená).
+
+Vizuální průchod po běžném přihlášení pořád nebyl provedený (OTP
+e-mail, appka nemá přístup) — nezměněno od P0.
+
+---
+
+# Pokračování — Bankovní modul (4. 10. 2026)
+
+Formální zadání: `docs/bankovni-modul-zadani-2026-10-04.md`. Nová
+větev `finance-banka-napojeni`, založená z `main` @ `55142b5`.
+**Neslitá, nepushnutá.** Plný stav, audit, akceptační scénáře a
+vědomé mezery: `docs/hlaseni/banka-modul-stav-2026-10-04.md` — tenhle
+zápis je jen stručné shrnutí pro průběžný přehled.
+
+Zkráceně: Fio banka adaptér je PLNĖ FUNKČNÍ (čtení zůstatků i
+pohybů, ověřeno proti FIO API BANKOVNICTVÍ v1.9), Enable Banking
+(KB/ČSOB/ČS/Raiffeisenbank) je KOSTRA čekající na `ENABLEBANKING_*`
+klíče (self-serve, zdarma, krok pro Šéfíka — ne appky). Zůstatky teď
+appka ukládá jako snapshoty (ne jako odvozený součet pohybů — oprava
+anti-patternu, který zadání výslovně zakázalo), alokace plateb na
+faktury je souběh-odolná (advisory zámek) a opravuje nalezenou chybu
+(částečná úhrada se dřív tvářila jako „Uhrazeno"). CSV import, Fio
+a Enable Banking jedou přes stejný `BankDataProvider` kontrakt.
+
 ## Co zbývá
 
-1. Vizuální průchod po běžném přihlášení (viz výš) — appka je teď
-   nasazená, ale ještě neviděná po přihlášení.
-2. Přestylovat Finance obrazovky (Přehled především) podle mockupu
-   moderního ERP dashboardu, který Šéfík poslal 3. 10. 2026 — layout
-   (KPI karty s trendem, graf cashflow skutečnost/predikce, graf
-   nákladů, tabulka „Co vyžaduje pozornost", stav integrací), ne barvy
-   (ty zůstávají podle zadání appky). Rozpracováno v téhle relaci.
+1. Vizuální průchod po běžném přihlášení — pořád nezměněno.
+2. Enable Banking: dokončit podpis JWT a UI propojení, až budou
+   `ENABLEBANKING_APPLICATION_ID`/`PRIVATE_KEY` k dispozici.
+3. Akceptační scénáře #3, #4, #7, #9, #10 (oddíl 7 zadání) — částečně
+   nebo vůbec neřešené, vypsáno v `docs/hlaseni/banka-modul-stav-2026-10-04.md`.
+4. Otevřít PR, čekat na zelené CI, sloučit a nasadit — **jen na
+   výslovný pokyn Šéfíka**, stejně jako doteď.

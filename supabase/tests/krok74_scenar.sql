@@ -253,26 +253,78 @@ select set_config('test.user_id', :'majitel', false);
 
 
 \echo ''
-\echo '== 3. Párování plateb s fakturami ============================'
+\echo '== 3. Párování plateb s fakturami (bezpečná alokace, 20261004100000) =='
 
-insert into public.platby_faktury (tenant_id, transakce_id, faktura_id, castka_haleru, jistota, stav)
-values (:'tenant', :'transakce1', 'FAKTURA-TEXT-123', 50000, 0.95, 'navrzeno')
-returning id as platba \gset
-
-select pg_temp.check('návrh párování se zapsal',
-  exists (select 1 from public.platby_faktury where id = :'platba'));
-
-update public.platby_faktury set stav = 'potvrzeno', potvrdil = :'majitel', potvrzeno_kdy = now()
- where id = :'platba';
-
-select pg_temp.check('potvrzení párování prošlo (platby_faktury update grant existuje)',
-  (select stav from public.platby_faktury where id = :'platba') = 'potvrzeno');
-
-select pg_temp.check('párování s transakce_id cizí firmy spadne (druhá linie)',
+select pg_temp.check('přímý INSERT do platby_faktury je OD TÉHLE MIGRACE odepřený — jediná cesta je app.potvrdit_alokaci_platby',
   pg_temp.spadne_hlaskou(
     format('insert into public.platby_faktury (tenant_id, transakce_id, faktura_id, castka_haleru, stav) values (%L, %L, %L, %L, %L)',
-      :'tenant_b', :'transakce1', 'FAKTURA-X', 1000, 'navrzeno'),
-    '23514', ''));
+      :'tenant', :'transakce1', 'FAKTURA-TEXT-123', 10000, 'potvrzeno'),
+    '42501', ''));
+
+-- transakce1 má castka_haleru = 50000 (založena výš). Faktura „na
+-- 100000" se zaplatí na DVĖ alokace — scénář 2 akceptačních testů
+-- (docs/bankovni-modul-zadani-2026-10-04.md, oddíl 7): částečná úhrada
+-- nejdřív, doplatek pak, opakovaný běh nezmění výsledek.
+select alokovano_celkem_haleru as alokovano_1, plne_uhrazeno as plne_1
+  from public.potvrdit_alokaci_platby(:'tenant', :'transakce1', 'FAKTURA-TEXT-123', 50000, 100000, 0.95) \gset
+
+select pg_temp.check('první alokace (50000 z 50000 platby) se zapsala',
+  (select count(*) from public.platby_faktury where transakce_id = :'transakce1' and stav = 'potvrzeno') = 1);
+select pg_temp.check('alokováno na fakturu celkem 50000', :'alokovano_1'::integer = 50000);
+select pg_temp.check('faktura 100000 PO první alokaci NENÍ plně uhrazená (zbývá 50000)', :'plne_1'::boolean = false);
+
+\echo ''
+\echo '-- druhá linie: transakce cizí firmy, přesah částky platby/faktury --'
+
+select pg_temp.check('transakce_id cizí firmy spadne (transakce nepatří této firmě)',
+  pg_temp.spadne_hlaskou(
+    format('select * from public.potvrdit_alokaci_platby(%L, %L, %L, %L, %L, %L)',
+      :'tenant_b', :'transakce1', 'FAKTURA-X', 1000, 100000, null),
+    '23514', 'nepatří'));
+
+select pg_temp.check('alokace přesahující částku PLATBY (transakce1 = 50000, druhý pokus na stejnou transakci) spadne',
+  pg_temp.spadne_hlaskou(
+    format('select * from public.potvrdit_alokaci_platby(%L, %L, %L, %L, %L, %L)',
+      :'tenant', :'transakce1', 'FAKTURA-TEXT-123', 1, 100000, null),
+    '23514', 'přesahuje částku platby'));
+
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj)
+values (:'tenant', :'ucet', 'prijem', 60000, current_date, 'rucni')
+returning id as transakce_doplatek \gset
+
+select pg_temp.check('alokace přesahující NEZAPLACENÝ ZBYTEK faktury (50000 už alokováno, +60000 > 100000) spadne',
+  pg_temp.spadne_hlaskou(
+    format('select * from public.potvrdit_alokaci_platby(%L, %L, %L, %L, %L, %L)',
+      :'tenant', :'transakce_doplatek', 'FAKTURA-TEXT-123', 60000, 100000, null),
+    '23514', 'přesahuje nezaplacený zůstatek'));
+
+\echo ''
+\echo '-- doplatek přesně na zbytek (50000) dokončí fakturu --'
+
+select alokovano_celkem_haleru as alokovano_2, plne_uhrazeno as plne_2
+  from public.potvrdit_alokaci_platby(:'tenant', :'transakce_doplatek', 'FAKTURA-TEXT-123', 50000, 100000, null) \gset
+
+select pg_temp.check('po doplatku je alokováno celkem 100000', :'alokovano_2'::integer = 100000);
+select pg_temp.check('faktura je TEĎ plně uhrazená', :'plne_2'::boolean = true);
+
+select pg_temp.check('dvě samostatné alokace, ne jedna přepsaná',
+  (select count(*) from public.platby_faktury where faktura_id = 'FAKTURA-TEXT-123' and stav = 'potvrzeno') = 2);
+
+\echo ''
+\echo '-- zrušení alokace je vratné s auditem, uvolní místo pro novou --'
+
+select id as alokace_doplatku from public.platby_faktury
+  where transakce_id = :'transakce_doplatek' and stav = 'potvrzeno' \gset
+
+select app.zrusit_alokaci_platby(:'tenant', :'alokace_doplatku', 'test: zkusmé zrušení');
+
+select pg_temp.check('zrušená alokace zůstává v tabulce (historie), jen se stavem zamitnuto',
+  (select stav from public.platby_faktury where id = :'alokace_doplatku') = 'zamitnuto');
+
+select alokovano_celkem_haleru as alokovano_3
+  from public.potvrdit_alokaci_platby(:'tenant', :'transakce_doplatek', 'FAKTURA-TEXT-123', 50000, 100000, null) \gset
+
+select pg_temp.check('po zrušení šlo stejnou částku alokovat znovu (uvolnilo se místo)', :'alokovano_3'::integer = 100000);
 
 
 \echo ''
@@ -306,10 +358,11 @@ select pg_temp.check('cashflow_prehled vrátil řádek pro pobočku Černá Perl
   :'cf_perla_prijmy' is not null);
 
 -- Příjmy: 50000 z transakce1 + 7700 z transakce se zavedenou dávkou
--- (sekce restrict výš) = 57700. Výdaje: 10000 z CSV testu (NE 20000 —
--- viz nález níž).
-select pg_temp.check('Černá Perla: příjmy sedí (57700)',
-  :'cf_perla_prijmy'::integer = 57700);
+-- (sekce restrict výš) + 60000 z transakce_doplatek (sekce 3, bezpečná
+-- alokace) = 117700. Výdaje: 10000 z CSV testu (NE 20000 — viz nález
+-- níž).
+select pg_temp.check('Černá Perla: příjmy sedí (117700)',
+  :'cf_perla_prijmy'::integer = 117700);
 
 select pg_temp.check('Černá Perla: výdaje sedí (10000 z CSV testu)',
   :'cf_perla_vydaje'::integer = 10000);
