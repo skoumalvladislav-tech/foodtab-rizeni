@@ -16,6 +16,7 @@ type Receptura = {
   id: string;
   name: string;
   category: string;
+  druh: string;
   portions: number;
   instructions: string;
   active: boolean;
@@ -64,7 +65,7 @@ export default async function DetailReceptury({
   const supabase = await getServerSupabase();
   const receptura = await jeden<Receptura>(
     "receptura",
-    supabase.from("recipes").select("id, name, category, portions, instructions, active").eq("id", recept).single(),
+    supabase.from("recipes").select("id, name, category, druh, portions, instructions, active").eq("id", recept).single(),
   );
   if (!receptura) {
     return <Sdeleni nadpis="Receptura nenalezena">Buď neexistuje, nebo na ni (RLS) nemáte přístup.</Sdeleni>;
@@ -92,6 +93,7 @@ export default async function DetailReceptury({
   const vychozi: HodnotyReceptury = {
     nazev: receptura.name,
     kategorie: receptura.category,
+    druh: receptura.druh,
     porce: String(receptura.portions),
     instrukce: receptura.instructions,
     aktivni: receptura.active,

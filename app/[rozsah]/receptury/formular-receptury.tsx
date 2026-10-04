@@ -40,6 +40,8 @@ const prazdnyRadek = (): RadekSuroviny => ({
 export type HodnotyReceptury = {
   nazev: string;
   kategorie: string;
+  /** "jidlo" | "napoj" — appka na tomhle rozlišuje foodcost % od beverage cost % (Finance → Přehled). */
+  druh?: string;
   porce: string;
   instrukce: string;
   aktivni: boolean;
@@ -119,7 +121,17 @@ export default function FormularReceptury({
               <span className="ck-popisek">Počet porcí</span>
               <input type="number" name="porce" min={1} max={999} step={1} defaultValue={vychozi?.porce ?? "1"} />
             </label>
+            <label>
+              <span className="ck-popisek">Druh</span>
+              <select name="druh" defaultValue={vychozi?.druh ?? "jidlo"}>
+                <option value="jidlo">Jídlo</option>
+                <option value="napoj">Nápoj</option>
+              </select>
+            </label>
           </div>
+          <p style={{ margin: 0, fontSize: "12px", color: "var(--muted)" }}>
+            Druh rozhoduje, jestli se náklad téhle receptury počítá do foodcostu, nebo do beverage costu (Finance → Přehled).
+          </p>
 
           <label>
             <span className="ck-popisek">Instrukce</span>

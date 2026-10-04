@@ -16,6 +16,7 @@ type RadekReceptury = {
   id: string;
   name: string;
   category: string;
+  druh: string;
   portions: number;
 };
 
@@ -54,7 +55,7 @@ export default async function Receptury({
   const supabase = await getServerSupabase();
   const { data, error } = await supabase
     .from("recipes")
-    .select("id, name, category, portions")
+    .select("id, name, category, druh, portions")
     .eq("tenant_id", tenantId)
     .eq("active", true)
     .order("name", { ascending: true });
@@ -127,7 +128,7 @@ export default async function Receptury({
                 style={{ display: "flex", alignItems: "center", gap: "12px", textDecoration: "none", color: "inherit" }}
               >
                 <span aria-hidden="true" style={{ color: "var(--muted)" }}>
-                  <Ikona klic="kniha" />
+                  <Ikona klic={r.druh === "napoj" ? "napoj" : "vidlicka"} />
                 </span>
                 <span style={{ display: "grid", gap: "2px", minWidth: 0, flex: 1 }}>
                   <strong>{r.name}</strong>
