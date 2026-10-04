@@ -74,6 +74,11 @@ function porceZFormulare(formData: FormData): number {
   return Math.max(1, Math.min(999, Math.round(raw)))
 }
 
+/** Neznámá/chybějící hodnota spadne na "jidlo" — stejný výchozí stav jako databázový default. */
+function druhZFormulare(formData: FormData): 'jidlo' | 'napoj' {
+  return String(formData.get('druh') ?? '') === 'napoj' ? 'napoj' : 'jidlo'
+}
+
 /**
  * Založení nové receptury i se surovinami. Právo drží politika
  * recipes_write/recipe_ingredients_write (recipes.manage na rozsahu);
@@ -99,6 +104,7 @@ export async function vytvoritRecepturu(formData: FormData): Promise<void> {
   const instrukce = String(formData.get('instrukce') ?? '').trim().slice(0, 5000)
   const porce = porceZFormulare(formData)
   const radky = radkySurovin(formData)
+  const druh = druhZFormulare(formData)
 
   const user = await getUser()
   const supabase = await getServerSupabase()
@@ -112,6 +118,7 @@ export async function vytvoritRecepturu(formData: FormData): Promise<void> {
       category: kategorie,
       portions: porce,
       instructions: instrukce,
+      druh,
       created_by: user?.id ?? null,
     })
     .select('id')
@@ -167,6 +174,7 @@ export async function upravitRecepturu(formData: FormData): Promise<void> {
   const instrukce = String(formData.get('instrukce') ?? '').trim()
   const porce = porceZFormulare(formData)
   const radky = radkySurovin(formData)
+  const druh = druhZFormulare(formData)
 
   const supabase = await getServerSupabase()
   const { error } = await supabase.rpc('upravit_recepturu', {
@@ -185,6 +193,7 @@ export async function upravitRecepturu(formData: FormData): Promise<void> {
       unit: r.unit,
       note: r.note,
     })),
+    p_druh: druh,
   })
 
   if (error) {

@@ -207,6 +207,13 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <path d="M12.5 5.5h4v4" />
     </>
   ),
+  // Beverage cost karta — sklenička, vedle vidlicka (Foodcost).
+  napoj: (
+    <>
+      <path d="M6 3.5h8l-1.1 12.3a1.3 1.3 0 01-1.3 1.2H8.4a1.3 1.3 0 01-1.3-1.2L6 3.5z" />
+      <path d="M6.6 7h6.8" />
+    </>
+  ),
 };
 
 export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {

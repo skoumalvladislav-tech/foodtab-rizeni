@@ -382,3 +382,86 @@ klíče:
    `skoumalvladislav-tech`, než půjde odsud ověřit nasazení appky.
 5. Otevřít PR, čekat na zelené CI, sloučit — **jen na výslovný pokyn
    Šéfíka**, stejně jako doteď.
+
+(Body 1–5 výš se mezitím z velké části staly: Enable Banking je
+dotažený a sloučený (PR #109/#110), Vercel konektor zprovozněn bez
+teamId. Zůstává hlavně bod 1 a 3.)
+
+---
+
+# Pokračování — Foodcost % a beverage cost % (4. 10. 2026, podvečer)
+
+Šéfík: „chybí ve financích food cost a bavarage cost, v zadání to
+bylo — projdi ještě jednou zadání a dopracuj co chybí." Audit
+(samostatný Explore agent) potvrdil: zadání (oddíl 7, ř. 139/144) chce
+**dvě oddělené metriky** (foodcost %, beverage cost %), každou vůči
+odpovídající čisté tržbě, počítané z **teoretické spotřeby** (prodané
+množství × platná receptura) — appka měla jen JEDNO sloučené číslo
+(`lib/finance-kpi.ts`, z peněžního výdeje kategorie `suroviny`, jídlo
+a nápoje spolu). Kořenová příčina byla datová: nikde v appce nešlo
+poznat, jestli je receptura/prodej jídlo nebo nápoj.
+
+Větev `finance-foodcost-beverage`, založená z `main` @ `a6d23fa`.
+**Neslitá, nepushnutá.**
+
+## Co appka udělala
+
+- **`recipes.druh`** (nový sloupec, `'jidlo'`/`'napoj'`, výchozí
+  `'jidlo'`) — appka na něm teď rozlišuje. Existující receptury se
+  nastaví na `'jidlo'` jako odhad, NE zjištěný fakt — kdo má nápojové
+  receptury, musí je ručně přepnout v úpravě (nová volba „Druh" ve
+  formuláři).
+- **`app.foodcost_beverage_prehled`** (+ `public.*` průzor) — teoretický
+  náklad (`recipe_cost_per_portion` × prodané množství z
+  `pokladna_prodeje_denni`), skupina po `druh`. Prodej bez napojené
+  nebo s NEÚPLNOU recepturou (chybí cena suroviny) se nezapočítá do
+  nákladu — appka nesmí domýšlet — ale počítá se do samostatného
+  `trzby_bez_nakladu_haleru`, aby šlo upřímně vidět, jak velká část
+  tržeb zůstává bez spočítaného nákladu.
+- **`lib/finance-kpi.ts`** — `foodcostProcento` přepočítané na tuhle
+  teoretickou metodu (dřív peněžní výdej, co se spíš podobalo než
+  odpovídalo zadání); nové `beverageCostProcento` + `*Pokrytoprocento`
+  pro obě (typ je hotový, UI na "pokryto" ještě nesahá — vědomá mezera,
+  ne skrytá).
+- **Finance → Přehled**: nová karta „Beverage cost" vedle „Foodcost"
+  (nová ikona `napoj`, sklenička).
+- **Receptury**: formulář má nové pole „Druh" (Jídlo/Nápoj), seznam
+  receptur teď ukazuje ikonu podle druhu (vidlička/sklenička) — ať se
+  dá rychle procházet a opravit výchozí odhad.
+- `public.upravit_recepturu` rozšířené o `p_druh` (stará 8parametrová
+  signatura smazána, ne jen "or replace" — přidání parametru je nová
+  signatura).
+- `supabase/tests/krok85_scenar.sql` (nový) — jídlo/nápoj/nezařazeno/
+  neúplný náklad, druhá linie (cizí firma vidí svůj agregát, ne náš).
+
+## Vědomě mimo rozsah
+
+- **Vyčíst položky z faktur a roztřídit je** (jídlo/nápoje/koloniál/
+  úklid/pohonné hmoty — Šéfíkův další požadavek ve stejném vlákně):
+  appka na to NESÁHLA. Faktury appka dnes ukládá jen jako JEDNU
+  celkovou částku (`amount`), žádné položky — a celý systém Faktur
+  žije v JINÉM repozitáři/databázi (`faktury-app`,
+  `ctqtwahlzhyjerqulqyn`). Rozklad na položky by vyžadoval buď
+  rozšíření appky Faktury samotné (mimo dosah téhle relace), nebo AI/
+  OCR čtení PDF (`pdf_url` existuje) — nová, samostatná funkce se
+  svými pravidly (appka nesmí domýšlet cenu ani kategorii). Zapsáno
+  jako otevřený bod, NErozpracováno.
+- **Pivo na sudy/čepování a ztráty** (zadání, ř. 142) — fyzický
+  skladový jev, mimo mantinel „bez fyzického skladu" (Šéfík 2. 10.
+  2026), beze změny.
+- **UI pro `*Pokrytoprocento`** (kolik % tržeb má appka reálně
+  pokryté spočítaným nákladem) — typ existuje, karta/tooltip ne.
+
+## Ověření
+
+- PGlite (`node scripts/scenare-pglite.mjs`): **3214 kontrol, nic
+  nespadlo** (bylo 3197). Nový `krok85_scenar.sql`: 17 kontrol.
+  Dvě schválná rozbití narazila na vlastní past: `format()`+`execute`
+  i přímé volání `public.upravit_recepturu(...)` s devíti literály
+  appka musela výslovně přetypovat (`%L::uuid` apod.) — bez toho
+  Postgres/PGlite nedokázal přetížení s jen citovanými literály
+  vyřešit a hlásil „function ... does not exist", i když funkce
+  existuje.
+- `npx tsc --noEmit`, `npx eslint` na dotčené soubory: čisté.
+- Vizuální ověření v prohlížeči NEPROVEDENO (stejná dlouhodobá mezera
+  — OTP e-mail, appka nemá přístup).

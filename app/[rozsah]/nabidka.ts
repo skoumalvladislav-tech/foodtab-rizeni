@@ -70,6 +70,8 @@ export type IkonaKlic =
   | 'zamek'
   // Trend u KPI karet (Finance → Přehled).
   | 'trend'
+  // Beverage cost karta (Finance → Přehled), vedle vidlicka (Foodcost).
+  | 'napoj'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */

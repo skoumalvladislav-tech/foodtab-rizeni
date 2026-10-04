@@ -173,6 +173,13 @@ export default async function FinancePrehled({
                 srovnaniS={nazevMesice(mesicPredchozi)}
               />
             ) : null}
+            {kpi.beverageCostProcento !== null ? (
+              <FinanceKpiKarta
+                ikona="napoj" titulek="Beverage cost" hodnota={`${kpi.beverageCostProcento.toFixed(1).replace('.', ',')} %`}
+                trend={trend(kpi.beverageCostProcento, kpi.beverageCostProcentoPredchozi, 'p. b.', false)}
+                srovnaniS={nazevMesice(mesicPredchozi)}
+              />
+            ) : null}
             {kpi.nakladyPraceProcento !== null ? (
               <FinanceKpiKarta
                 ikona="lide" titulek="Náklady práce" hodnota={`${kpi.nakladyPraceProcento.toFixed(1).replace('.', ',')} %`}
