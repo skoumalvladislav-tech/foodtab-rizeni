@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { canSee } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiFinanceKpi, type FinanceKpi } from '@/lib/finance-kpi'
@@ -29,9 +30,14 @@ export const dynamic = 'force-dynamic'
  * beze změny (`app/_tokeny.css`, zadání appky). Čísla jsou pořád
  * jen to, co appka SKUTEČNĚ spočítala (`lib/finance-kpi.ts`,
  * `lib/finance-rolling-prehled.ts`, `lib/finance-pozornost.ts`) —
- * žádná ukázková/vymyšlená hodnota, žádná karta, která by předstírala
- * číslo, na které appka nemá podklad (foodcost/náklady práce chybí,
- * když chybí kategorizace transakcí nebo `payroll.read`).
+ * žádná ukázková/vymyšlená hodnota.
+ *
+ * Karty SE NESCHOVÁVAJÍ, když appka nemá číslo — zobrazí „–" (stejný
+ * vzor jako „Neúplné"/„–" u receptur). Jediná výjimka je „Náklady
+ * práce": tu appka vynechá úplně, protože její nepřítomnost je dána
+ * chybějícím oprávněním `payroll.read` (`finance.read` ho nezaručuje),
+ * ne chybějícími daty — schovaná karta tu znamená „na tohle nemáte
+ * právo", ne „appka nemá co počítat".
  */
 
 const karta = {
@@ -75,6 +81,11 @@ function zkratka(haleru: number): string {
 function kratkyDen(isoDatum: string): string {
   const [, m, d] = isoDatum.split('-')
   return `${Number(d)}. ${Number(m)}.`
+}
+
+/** Zobrazitelná hodnota KPI procenta — „–", když appka nemá podklad (ne 0 %, to by byla lež). */
+function procentoNeboPomlcka(hodnota: number | null): string {
+  return hodnota !== null ? `${hodnota.toFixed(1).replace('.', ',')} %` : '–'
 }
 
 /** Procentuální/bodová změna vůči předchozímu období — `null`, když se nedá srovnat (nulový základ nebo chybějící údaj). */
@@ -136,6 +147,7 @@ export default async function FinancePrehled({
 
   const integrace = (integraceRes.data ?? []) as { id: string; oblast: string; poskytovatel: string; nazev: string; stav: string }[]
   const zaklad = `/${rozsah}/finance`
+  const smiVidetMzdy = canSee(pristup.ctx, 'payroll.read')
 
   return (
     <Navigace rozsah={rozsah}>
@@ -166,24 +178,20 @@ export default async function FinancePrehled({
               trend={trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />
-            {kpi.foodcostProcento !== null ? (
+            <FinanceKpiKarta
+              ikona="vidlicka" titulek="Foodcost" hodnota={procentoNeboPomlcka(kpi.foodcostProcento)}
+              trend={kpi.foodcostProcento !== null ? trend(kpi.foodcostProcento, kpi.foodcostProcentoPredchozi, 'p. b.', false) : null}
+              srovnaniS={nazevMesice(mesicPredchozi)}
+            />
+            <FinanceKpiKarta
+              ikona="napoj" titulek="Beverage cost" hodnota={procentoNeboPomlcka(kpi.beverageCostProcento)}
+              trend={kpi.beverageCostProcento !== null ? trend(kpi.beverageCostProcento, kpi.beverageCostProcentoPredchozi, 'p. b.', false) : null}
+              srovnaniS={nazevMesice(mesicPredchozi)}
+            />
+            {smiVidetMzdy ? (
               <FinanceKpiKarta
-                ikona="vidlicka" titulek="Foodcost" hodnota={`${kpi.foodcostProcento.toFixed(1).replace('.', ',')} %`}
-                trend={trend(kpi.foodcostProcento, kpi.foodcostProcentoPredchozi, 'p. b.', false)}
-                srovnaniS={nazevMesice(mesicPredchozi)}
-              />
-            ) : null}
-            {kpi.beverageCostProcento !== null ? (
-              <FinanceKpiKarta
-                ikona="napoj" titulek="Beverage cost" hodnota={`${kpi.beverageCostProcento.toFixed(1).replace('.', ',')} %`}
-                trend={trend(kpi.beverageCostProcento, kpi.beverageCostProcentoPredchozi, 'p. b.', false)}
-                srovnaniS={nazevMesice(mesicPredchozi)}
-              />
-            ) : null}
-            {kpi.nakladyPraceProcento !== null ? (
-              <FinanceKpiKarta
-                ikona="lide" titulek="Náklady práce" hodnota={`${kpi.nakladyPraceProcento.toFixed(1).replace('.', ',')} %`}
-                trend={trend(kpi.nakladyPraceProcento, kpi.nakladyPraceProcentoPredchozi, 'p. b.', false)}
+                ikona="lide" titulek="Náklady práce" hodnota={procentoNeboPomlcka(kpi.nakladyPraceProcento)}
+                trend={kpi.nakladyPraceProcento !== null ? trend(kpi.nakladyPraceProcento, kpi.nakladyPraceProcentoPredchozi, 'p. b.', false) : null}
                 srovnaniS={nazevMesice(mesicPredchozi)}
               />
             ) : null}
