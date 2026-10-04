@@ -195,6 +195,19 @@ export default async function Rozpis({
   const konecMesice = mesicniOkno[mesicniOkno.length - 1];
   const nacistDo = konecMesice && konecMesice > konecTydne ? konecMesice : konecTydne;
 
+  /*
+    Rozsah, který se VYDÁ (zazvoní lidem) — dřív to bylo VŽDYCKY přesně
+    DNU_V_ROZPISU (7) dní od odKdy, bez ohledu na pohled. V měsíčním
+    kalendáři (mesic/osoby) appka ukazuje celý měsíc a „čeká na vydání“
+    počítá změny z celého měsíce (mřížka výš), ale samo vydání šlo jen
+    na prvních sedm dní z něj — zbytek měsíce zůstal nevydaný, aniž by
+    to kdokoli poznal. Šéfík 4. 10. 2026: „vydávání směn, teď to lze
+    jen na týden.“ V měsíčním pohledu se teď vydá přesně to, co je
+    vidět v mřížce (stejný rozsah jako mesicniOkno výš).
+  */
+  const vydaniOd = mesicniOkno.length ? mesicniOkno[0] : odKdy;
+  const vydaniDoKdy = mesicniOkno.length ? mesicniOkno[mesicniOkno.length - 1] : doKdy;
+
   const mrizka = mesicniMrizka(odKdy).flat();
   const nadchazejiciDo = posunDatum(dnesProvozni, 13);
   const mojeOd = dnesProvozni < mrizka[0] ? dnesProvozni : mrizka[0];
@@ -545,7 +558,7 @@ export default async function Rozpis({
     pobockyProPlanovani.some((b) => b.id === scope.branchId);
 
   const dataVydani = smiVydavat
-    ? await nactiDataVydani(supabase, tenantId, scope.branchId as string, odKdy, doKdy)
+    ? await nactiDataVydani(supabase, tenantId, scope.branchId as string, vydaniOd, vydaniDoKdy)
     : null;
 
   /*
@@ -557,8 +570,8 @@ export default async function Rozpis({
   const vydani = planovani
     ? {
         pobockaId: smiVydavat ? scope.branchId : null,
-        od: odKdy,
-        doKdy,
+        od: vydaniOd,
+        doKdy: vydaniDoKdy,
         mozeVydat: dataVydani !== null,
         vydanoKdy: dataVydani?.stav?.vydano_kdy ?? null,
         zprav: ucetVNahledu.size,
@@ -605,8 +618,8 @@ export default async function Rozpis({
           <PanelVydani
             rozsah={rozsah}
             branchId={scope.branchId}
-            od={odKdy}
-            doKdy={doKdy}
+            od={vydaniOd}
+            doKdy={vydaniDoKdy}
             data={dataVydani}
           />
         </div>
