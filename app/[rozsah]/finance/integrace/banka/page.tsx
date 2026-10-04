@@ -6,11 +6,11 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
-import { jeNakonfigurovano as enableBankingNakonfigurovano } from '@/lib/integrace-enablebanking'
+import { jeNakonfigurovano as enableBankingNakonfigurovano, nactiBanky } from '@/lib/integrace-enablebanking'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
-import { pripojitFioUcet, synchronizovatTeto, odpojitBankovniUcet } from './akce'
+import { pripojitFioUcet, synchronizovatTeto, odpojitBankovniUcet, zahajitPripojeniEnableBanking } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,10 +79,10 @@ export default async function FinanceIntegraceBanka({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; synchronizovano?: string }>
+  searchParams: Promise<{ chyba?: string; synchronizovano?: string; enablebanking?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, synchronizovano } = await searchParams
+  const { chyba, synchronizovano, enablebanking } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -129,6 +129,20 @@ export default async function FinanceIntegraceBanka({
 
   const nazevUctu = (id: string | null) => ucty.find((u) => u.id === id)?.nazev ?? '—'
 
+  /*
+    Seznam bank se natáhne jen když je appka nakonfigurovaná — appka ho
+    NIKDY nezkouší bez klíčů (`nactiBanky` by stejně vrátila `chyba`,
+    ale zbytečné volání navíc). Chyba se tu nehlásí nahlas (appka
+    normálně ukáže formulář bez bank a nechá chybu na pokusu připojit),
+    ale appka ji aspoň zaloguje, ať není tichá.
+  */
+  let banky: { nazev: string; maxSouhlasDnu: number | null }[] = []
+  if (enableBankingNakonfigurovano()) {
+    const vysledekBank = await nactiBanky()
+    if (vysledekBank.stav === 'ok') banky = vysledekBank.banky
+    else console.error('nactiBanky selhalo', vysledekBank.duvod)
+  }
+
   return (
     <Navigace rozsah={rozsah}>
       <Nadpis
@@ -145,6 +159,9 @@ export default async function FinanceIntegraceBanka({
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
             Synchronizace hotová — {synchronizovano} {synchronizovano === '1' ? 'nový pohyb' : 'nových pohybů'}.
           </p>
+        ) : null}
+        {enablebanking === 'pripojeno' ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>Účet přes Enable Banking je připojený.</p>
         ) : null}
 
         {pripojeni.length === 0 ? (
@@ -248,10 +265,53 @@ export default async function FinanceIntegraceBanka({
           </p>
 
           {enableBankingNakonfigurovano() ? (
-            <p style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>
-              Přístup je nastavený, ale propojení s touhle obrazovkou ještě čeká na dokončení — zatím se tu
-              žádný účet KB/ČSOB/ČS/Raiffeisenbank nepřipojí.
-            </p>
+            smiPsat ? (
+              <form action={zahajitPripojeniEnableBanking} style={{ display: 'grid', gap: '12px' }}>
+                <input type="hidden" name="rozsah" value={rozsah} />
+                {volneUcty.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                    Nejdřív založte platební účet (nebo uvolněte existující) na stránce{' '}
+                    <Link href={`/${rozsah}/finance/platby`} className="ft-tl">Platby</Link>.
+                  </p>
+                ) : banky.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>
+                    Seznam bank se nepodařilo natáhnout — zkuste stránku načíst znovu za chvíli.
+                  </p>
+                ) : (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                      <label>
+                        <span style={popisek}>Banka *</span>
+                        <select name="aspsp_nazev" required style={pole}>
+                          {banky.map((b) => (
+                            <option key={b.nazev} value={b.nazev}>
+                              {b.nazev}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span style={popisek}>Platební účet *</span>
+                        <select name="platebni_ucet_id" required style={pole}>
+                          {volneUcty.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.nazev}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                      Appka vás přesměruje přímo do vybrané banky, kde souhlas potvrdíte stejně jako v
+                      internetovém bankovnictví. Appka při tom nikdy neuvidí přihlašovací údaje k vaší bance.
+                    </p>
+                    <div>
+                      <button type="submit" className="ft-tl ft-tl-hlavni">Připojit účet</button>
+                    </div>
+                  </>
+                )}
+              </form>
+            ) : null
           ) : (
             <>
               <div style={{ display: 'grid', gap: '6px', fontSize: '13px', color: 'var(--muted)' }}>

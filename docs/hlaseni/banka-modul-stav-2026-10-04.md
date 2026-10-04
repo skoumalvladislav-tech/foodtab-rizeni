@@ -12,7 +12,7 @@ produkce ani do reálného bankovního účtu.**
 | Audit existujícího kódu (faktury, platby, cashflow, RLS, integrace) | **Hotovo** | viz oddíl „Audit" níž |
 | `BankDataProvider` kontrakt | **Hotovo** | `lib/bank-provider-contract.ts` — žádná změna párování/cashflow při přidání adaptéru |
 | Fio banka adaptér (čtení zůstatků i pohybů) | **Hotovo** | `lib/integrace-fio.ts`, ověřeno proti FIO API BANKOVNICTVÍ v1.9 (16.10.2025), 24 testů bez sítě |
-| Enable Banking adaptér (KB/ČSOB/ČS/Raiffeisenbank) | **Kostra** | `lib/integrace-enablebanking.ts` — bez `ENABLEBANKING_*` appka nikdy nezkouší zavolat ven; podpis JWT (krok 1 toku) vědomě nedokončen, nebylo by jak ho vyzkoušet |
+| Enable Banking adaptér (KB/ČSOB/ČS/Raiffeisenbank) | **Hotovo** (4. 10., dotažení) | `lib/integrace-enablebanking.ts` — podpis JWT (RS256, `node:crypto`), `GET /aspsps`, `POST /auth`, `POST /sessions` dokončené a ověřené živě proti dokumentaci; appka stejně bez `ENABLEBANKING_*` nic nevolá |
 | CSV import jako plnohodnotný adapter | **Hotovo** | existoval od P0 (`lib/finance-csv-import.ts`), teď formálně stejná cílová data (`RadekImportu`) jako Fio/Enable Banking |
 | Zůstatky jako snapshoty (ne odvozené) | **Hotovo** | `bankovni_zustatky` — append-only, book/available zvlášť, vlastní `platny_k` |
 | Bezpečná alokace plateb (souběh, přesah) | **Hotovo** | `app.potvrdit_alokaci_platby` — advisory zámek, kontrola proti částce platby i faktury; `app.zrusit_alokaci_platby` vratná s auditem |
@@ -21,11 +21,11 @@ produkce ani do reálného bankovního účtu.**
 | Naplánovaná synchronizace (cron) | **Hotovo** | `app/api/uloha/banka-synchronizace`, `.github/workflows/banka-synchronizace.yml`, každé 4 h |
 | Manuální synchronizace (stejná cesta, stejný limit) | **Hotovo** | `app/[rozsah]/finance/integrace/banka/akce.ts` → stejná funkce jako cron |
 | UI: připojit/odpojit/synchronizovat Fio účet | **Hotovo** (minimální) | `app/[rozsah]/finance/integrace/banka/` |
-| UI: Enable Banking | **Blokováno** | čeká na `ENABLEBANKING_APPLICATION_ID`/`PRIVATE_KEY` (krok pro Šéfíka — self-serve, zdarma) |
+| UI: Enable Banking | **Hotovo** (4. 10., dotažení) | `finance/integrace/banka` — výběr banky (živě z `GET /aspsps`) + platebního účtu, přesměrování na souhlas banky, zpětná cesta `app/api/integrace/enablebanking/vratit`. Aplikace v kontrolním panelu Enable Banking je dnes `Neaktivní` (Restricted Production) — živý konec na konec appka neověřila, to musí Šéfík sám přes „Aktivace propojením účtů" |
 | Oprava: částečná úhrada se dřív hlásila jako „Uhrazeno" | **Hotovo** | `platby/akce.ts`, `potvrditParovani` — nalezeno při stavbě RPC, opraveno |
 | PGlite scénáře (nová entity) | **Hotovo** | `krok83_scenar.sql`, 13 kontrol; `krok74_scenar.sql` přepsaný na novou RPC, +18 kontrol; `krok84_scenar.sql` (4. 10., dotažení), 15 kontrol |
 | UI: zrušit potvrzenou alokaci | **Hotovo** | `finance/platby/page.tsx` — sekce „Potvrzená párování" s tlačítkem, server akce `zrusitAlokaci` existovala, jen nebyla napojená |
-| Node testy adaptérů (bez sítě) | **Hotovo** | `integrace-fio.test.mjs` (24), `integrace-enablebanking.test.mjs` (10) |
+| Node testy adaptérů (bez sítě) | **Hotovo** | `integrace-fio.test.mjs` (24), `integrace-enablebanking.test.mjs` (23, vč. reálného podpisu/ověření JWT a schválného rozbití cizím klíčem) |
 | Akceptační scénář #2 (částečná úhrada, opakovaný sync) | **Hotovo** | krok74, sekce 3 |
 | Akceptační scénář #5 (API+CSV stejné pohyby, cizí duplicity nesloučeny) | **Hotovo** (detekce) | krok83, sekce 4 — slabý VS signál se NEPOUŽIJE, appka ho sama nikdy neslučuje |
 | Akceptační scénář #6 (dva souběžné joby nepřiřadí dvakrát) | **Hotovo** | advisory zámek (alokace) + partial unique index (sync) — oba mechanismy ověřeny |
@@ -141,15 +141,19 @@ produkce ani do reálného bankovního účtu.**
    NE platební příkazy), zadá ho v appce (Finance → Integrace →
    Banka). Appka ho ověří živě před uložením.
 2. **Enable Banking** (KB/ČSOB/ČS/Raiffeisenbank) — Šéfík (FoodTab
-   jako provozovatel, ne jednotliví klienti) si musí:
-   a. Založit kontrolní panel na `enablebanking.com/sign-in`
-      (e-mail, zdarma, bez smlouvy).
-   b. Vytvořit API aplikaci (sandbox), stáhnout soukromý klíč.
-   c. Zapsat `ENABLEBANKING_APPLICATION_ID`/`ENABLEBANKING_PRIVATE_KEY`
-      do prostředí appky (Vercel).
-   d. Appka DOPÍŠE podpis JWT a propojí ho s UI — zbývající
-      engineering krok, teprve POTOM mají jednotliví klienti co
-      používat.
+   jako provozovatel, ne jednotliví klienti) udělal a/b/c (4. 10.
+   2026, aplikace „Tablet s jídlem", prostředí Výroba);
+   `ENABLEBANKING_APPLICATION_ID`/`ENABLEBANKING_PRIVATE_KEY` jsou ve
+   Vercelu. Appka dopsala podpis JWT a UI (`d`) — zbývá:
+   a. ~~Založit kontrolní panel~~ hotovo.
+   b. ~~Vytvořit API aplikaci, stáhnout soukromý klíč~~ hotovo.
+   c. ~~Zapsat klíče do Vercelu~~ hotovo.
+   d. ~~Appka dopíše podpis JWT a UI~~ hotovo (4. 10., dotažení) —
+      appka to ale NEOVĖŘILA proti živému konci: aplikace je u
+      poskytovatele ve stavu „Neaktivní" (Restricted Production),
+      dokud Šéfík sám nepropojí svůj vlastní účet tlačítkem
+      „Aktivace propojením účtů" v kontrolním panelu Enable Banking
+      — appka tenhle krok nesmí (ani nemůže) udělat za něj.
    e. Pro VEŘEJNÉ zpřístupnění klientům (ne jen Šéfíkovo vlastní
       testování) bude pravděpodobně potřeba podepsaná smlouva +
       KYB u Enable Banking — appka tohle NEPODEPISUJE ani

@@ -1,5 +1,6 @@
 'use server'
 
+import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
@@ -8,6 +9,24 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { zasifrovat } from '@/lib/integrace-klice'
 import { overitPripojeniFio } from '@/lib/integrace-fio'
 import { synchronizovatFioPripojeni } from '@/lib/integrace-fio-sync'
+import { enableBankingProvider } from '@/lib/integrace-enablebanking'
+
+/**
+ * Stejný vzor jako `zakladniAdresa` v nastaveni/lide/akce.ts (pozvánky
+ * e-mailem) — zdvojené schválně, ne přes import: jiný modul (pravidlo
+ * „do cizího modulu nesahej"), tady navíc jde o absolutní adresu pro
+ * CIZÍ server (Enable Banking musí znát přesný návrat), ne jen o
+ * odkaz do e-mailu.
+ */
+async function zakladniAdresa(): Promise<string> {
+  const nastavena = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (nastavena) return nastavena.replace(/\/+$/, '')
+
+  const h = await headers()
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3000'
+  const protokol = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https')
+  return `${protokol}://${host}`
+}
 
 async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
@@ -86,6 +105,61 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/finance/integrace/banka`)
   redirect(`/${rozsah}/finance/integrace/banka`)
+}
+
+/**
+ * Zahájení souhlasu u Enable Banking (KB/ČSOB/ČS/Raiffeisenbank).
+ *
+ * Appka NEJDŘÍV založí `integrace_pripojeni` se stavem `pripojuje_se`
+ * (appka tenhle stav má v CHECKu od P0, jen ho dřív nikdo nenastavoval)
+ * — teprve JEHO id appka vloží do návratové adresy, aby po návratu
+ * z banky poznala, který rozjetý pokus dokončuje. Nic se nehlásí jako
+ * „připojeno", dokud se appka nevrátí z banky s potvrzeným souhlasem
+ * (zadání §2).
+ */
+export async function zahajitPripojeniEnableBanking(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const platebniUcetId = String(formData.get('platebni_ucet_id') ?? '')
+  const aspspNazev = String(formData.get('aspsp_nazev') ?? '').trim()
+
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  if (!platebniUcetId || !aspspNazev) {
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Vyberte platební účet a banku.')}`)
+  }
+
+  const { data: pripojeni, error: chybaPripojeni } = await supabase
+    .from('integrace_pripojeni')
+    .insert({
+      tenant_id: tenantId,
+      oblast: 'banka',
+      poskytovatel: `enablebanking-${crypto.randomUUID().slice(0, 8)}`,
+      rezim: 'zakaznicky',
+      nazev: `${aspspNazev} (Enable Banking)`,
+      platebni_ucet_id: platebniUcetId,
+      stav: 'pripojuje_se',
+      externi_ucet: { aspsp: aspspNazev },
+      capabilities: { cteni: true, zapis: false, inkrementalni_sync: false, firemni_ucty: true },
+    })
+    .select('id')
+    .single()
+
+  if (chybaPripojeni || !pripojeni) {
+    const zprava = chybaPripojeni?.code === '23505' ? 'Tahle oblast a poskytovatel už mají živé připojení.' : 'Připojení se nepodařilo založit.'
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
+  }
+
+  const zaklad = await zakladniAdresa()
+  const navratovaAdresa = `${zaklad}/api/integrace/enablebanking/vratit?pripojeni=${pripojeni.id}&rozsah=${encodeURIComponent(rozsah)}`
+
+  const vysledek = await enableBankingProvider.zahajitPripojeni!(navratovaAdresa, aspspNazev)
+  if (vysledek.stav === 'chyba') {
+    // Rozjetý pokus se neschovává — zůstane vidět jako `chyba`, ne tiše zmizí.
+    await supabase.from('integrace_pripojeni').update({ stav: 'chyba', posledni_chyba: vysledek.duvod }).eq('id', pripojeni.id)
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(vysledek.duvod)}`)
+  }
+
+  redirect(vysledek.presmerovatNa)
 }
 
 /** Manuální synchronizace — STEJNÁ cesta jako naplánovaná úloha (lib/integrace-fio-sync.ts), jen spuštěná z tlačítka po ověření finance.manage. */

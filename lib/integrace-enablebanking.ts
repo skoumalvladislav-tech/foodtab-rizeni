@@ -49,7 +49,9 @@
 
 import 'server-only'
 
-import type { BankDataProvider, VysledekZustatku, VysledekTransakci } from './bank-provider-contract.ts'
+import { createPrivateKey, createSign } from 'node:crypto'
+
+import type { BankDataProvider, VysledekOvereni, VysledekZustatku, VysledekTransakci } from './bank-provider-contract.ts'
 
 const ZAKLAD = 'https://api.enablebanking.com'
 
@@ -61,21 +63,35 @@ const NENAKONFIGUROVANO =
   'Enable Banking není nakonfigurovaný (chybí ENABLEBANKING_APPLICATION_ID/ENABLEBANKING_PRIVATE_KEY) — appka proto nic nevolá. ' +
   'Krok pro Šéfíka: založit si kontrolní panel na enablebanking.com/sign-in (zdarma, appka to nesmí udělat sama) a zapsat klíče do prostředí.'
 
+function base64url(vstup: Buffer | string): string {
+  return Buffer.from(vstup).toString('base64url')
+}
+
 /**
- * Appka si JWT podepisuje sama (RS256) — vlastní, ne cizí balíček.
- * `jose`/`jsonwebtoken` by šly přidat jako závislost, ale appka tuhle
- * funkci nikdy nezavolá bez nakonfigurovaných klíčů (viz guard níž),
- * takže se podpis nezkouší implementovat, dokud appka nemá co
- * podepsat — žádný kód, který by se nedal ani vyzkoušet.
+ * Appka si JWT podepisuje sama (RS256, bez cizího balíčku —
+ * `jose`/`jsonwebtoken` by šly přidat, ale ruční podpis je tu jen tři
+ * řádky a appka už má vlastní crypto vzor v `lib/integrace-klice.ts`).
+ *
+ * Tvar ověřený živě proti enablebanking.com/docs/api/reference/:
+ * header `{typ:"JWT", alg:"RS256", kid:<application_id>}`, tělo
+ * `{iss:"enablebanking.com", aud:"api.enablebanking.com", iat, exp}`.
+ * Appka dává platnost jen 1 hodinu (poskytovatel dovolí až 24, appka
+ * si ale nenechává podepsaný token naležavo déle, než potřebuje).
  */
 async function podepsatJwt(): Promise<string> {
-  throw new Error(
-    'Podpis JWT (RS256) pro Enable Banking appka nedokončila — bez ' +
-      'reálného application id / privátního klíče by se nedal ani ' +
-      'vyzkoušet. Hotovo je kontrakt a HTTP volání; podpis dopsat, ' +
-      'až budou k dispozici klíče z kontrolního panelu (viz komentář ' +
-      'v hlavičce souboru).',
-  )
+  const applicationId = process.env.ENABLEBANKING_APPLICATION_ID
+  const privatniKlic = process.env.ENABLEBANKING_PRIVATE_KEY
+  if (!applicationId || !privatniKlic) throw new Error(NENAKONFIGUROVANO)
+
+  const hlavicka = { typ: 'JWT', alg: 'RS256', kid: applicationId }
+  const ted = Math.floor(Date.now() / 1000)
+  const telo = { iss: 'enablebanking.com', aud: 'api.enablebanking.com', iat: ted, exp: ted + 3600 }
+
+  const zprava = `${base64url(JSON.stringify(hlavicka))}.${base64url(JSON.stringify(telo))}`
+  const klic = createPrivateKey(privatniKlic)
+  const podpis = createSign('RSA-SHA256').update(zprava).sign(klic)
+
+  return `${zprava}.${base64url(podpis)}`
 }
 
 async function zavolat<T>(cesta: string, token: string, init?: RequestInit): Promise<{ stav: 'ok'; data: T } | { stav: 'chyba'; duvod: string }> {
@@ -164,6 +180,146 @@ async function nactiTransakce(ucetId: string, token: string, od: string, doData:
   return { stav: 'ok', radky }
 }
 
+export type NabizenaBanka = { nazev: string; maxSouhlasDnu: number | null }
+
+/**
+ * Seznam bank appka natáhne VŽDYCKY znovu (id/jméno se podle zadání
+ * nesmí ukládat napevno — poskytovatel je může změnit) — jen pro
+ * ČR, appka jiné trhy nenabízí.
+ */
+export async function nactiBanky(): Promise<{ stav: 'ok'; banky: NabizenaBanka[] } | { stav: 'chyba'; duvod: string }> {
+  if (!jeNakonfigurovano()) return { stav: 'chyba', duvod: NENAKONFIGUROVANO }
+  let token: string
+  try {
+    token = await podepsatJwt()
+  } catch (e) {
+    return { stav: 'chyba', duvod: e instanceof Error ? e.message : 'Podpis JWT se nepodařil.' }
+  }
+
+  const vysledek = await zavolat<{ aspsps: { name: string; country: string; maximum_consent_validity?: number }[] }>(
+    '/aspsps?country=cz',
+    token,
+  )
+  if (vysledek.stav === 'chyba') return vysledek
+
+  return {
+    stav: 'ok',
+    banky: vysledek.data.aspsps
+      .map((a) => ({
+        nazev: a.name,
+        maxSouhlasDnu: typeof a.maximum_consent_validity === 'number' ? Math.floor(a.maximum_consent_validity / 86400) : null,
+      }))
+      .sort((a, b) => a.nazev.localeCompare(b.nazev, 'cs')),
+  }
+}
+
+type EbAuthOdpoved = { url: string }
+
+/**
+ * Zahájení souhlasu (PSD2 redirect). `navratovaAdresa` si appka
+ * SAMA opatří o `?pripojeni=<id>` — Enable Banking k ní jen přidá
+ * `code`/`state`/`error` (ověřeno živě: „additional parameters added
+ * in its query string"), appka tedy svoje id z adresy dostane zpátky
+ * beze ztráty i bez spoléhání na `state`.
+ *
+ * Platnost souhlasu appka žádá na 90 dní — rozumný strop, NE
+ * domyšlené maximum konkrétní banky (to appka čte z `nactiBanky()`
+ * a jen ukazuje v UI; banka si o kratší platnost může sama řekne).
+ */
+async function zahajitPripojeni(
+  navratovaAdresa: string,
+  aspspNazev: string,
+): Promise<{ stav: 'ok'; presmerovatNa: string } | { stav: 'chyba'; duvod: string }> {
+  if (!jeNakonfigurovano()) return { stav: 'chyba', duvod: NENAKONFIGUROVANO }
+  let token: string
+  try {
+    token = await podepsatJwt()
+  } catch (e) {
+    return { stav: 'chyba', duvod: e instanceof Error ? e.message : 'Podpis JWT se nepodařil.' }
+  }
+
+  const platnostDo = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+
+  const vysledek = await zavolat<EbAuthOdpoved>('/auth', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      aspsp: { name: aspspNazev, country: 'CZ' },
+      access: { valid_until: platnostDo },
+      redirect_url: navratovaAdresa,
+      state: navratovaAdresa,
+      psu_type: 'business',
+    }),
+  })
+  if (vysledek.stav === 'chyba') return vysledek
+  if (!vysledek.data.url) return { stav: 'chyba', duvod: 'Enable Banking nevrátilo adresu pro přesměrování.' }
+
+  return { stav: 'ok', presmerovatNa: vysledek.data.url }
+}
+
+type EbSessionAccount = {
+  uid: string
+  account_id?: { iban?: string }
+  identification_hash?: string
+}
+type EbSessionOdpoved = { session_id: string; accounts: EbSessionAccount[] }
+
+/**
+ * Po návratu z banky appka zjistí výsledek dotazem na STAV u
+ * poskytovatele (`POST /sessions` s `code` z callbacku), NE z
+ * parametrů v URL — ty appka nedostane ověřené a `error`/
+ * `error_description` appka přečte zvlášť (zavolat() by na chybovou
+ * bankovní odpověď bez JSON těla spadlo jinak).
+ *
+ * Appka vezme PRVNÍ vrácený účet — souhlas v „Restricted Production"
+ * je stejně omezený na vyjmenované účty, víceúčtový výběr appka
+ * nestaví, dokud by ho měl kdo reálně využít.
+ */
+async function dokoncitCallback(odkaz: string): Promise<VysledekOvereni> {
+  if (!jeNakonfigurovano()) return { stav: 'chyba', duvod: NENAKONFIGUROVANO }
+
+  let kod: string
+  try {
+    const adresa = new URL(odkaz)
+    const chyba = adresa.searchParams.get('error')
+    if (chyba) {
+      return { stav: 'chyba', duvod: `Banka odmítla souhlas: ${adresa.searchParams.get('error_description') || chyba}` }
+    }
+    kod = adresa.searchParams.get('code') ?? ''
+  } catch {
+    return { stav: 'chyba', duvod: 'Návratová adresa z banky nejde rozebrat.' }
+  }
+  if (!kod) return { stav: 'chyba', duvod: 'Banka nevrátila autorizační kód.' }
+
+  let token: string
+  try {
+    token = await podepsatJwt()
+  } catch (e) {
+    return { stav: 'chyba', duvod: e instanceof Error ? e.message : 'Podpis JWT se nepodařil.' }
+  }
+
+  const vysledek = await zavolat<EbSessionOdpoved>('/sessions', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: kod }),
+  })
+  if (vysledek.stav === 'chyba') return vysledek
+  if (vysledek.data.accounts.length === 0) return { stav: 'chyba', duvod: 'Banka nevrátila žádný účet k připojení.' }
+
+  const ucty = vysledek.data.accounts.map((a) => ({
+    providerAccountId: a.uid,
+    cisloUctu: null,
+    iban: a.account_id?.iban ?? null,
+    // CZK natvrdo — appka tenhle adaptér nabízí jen pro české banky;
+    // skutečnou měnu stejně ukáže až první zůstatek (nactiZustatky,
+    // balance_amount.currency), tohle je jen předběžný popis.
+    mena: 'CZK',
+    firemniUcet: null,
+  }))
+
+  return { stav: 'ok', ucty }
+}
+
 /** BankDataProvider registrace — totéž rozhraní jako Fio/CSV (lib/bank-provider-contract.ts). */
 export const enableBankingProvider: BankDataProvider = {
   klic: 'enablebanking',
@@ -178,6 +334,8 @@ export const enableBankingProvider: BankDataProvider = {
     pendingTransakce: true,
     inkrementalniSync: false,
   },
+  zahajitPripojeni,
+  dokoncitCallback,
   nactiZustatky,
   nactiTransakce,
 }
