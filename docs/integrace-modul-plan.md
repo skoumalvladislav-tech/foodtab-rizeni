@@ -167,9 +167,18 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
 8. Zastaralý/matoucí komentář o `integrace-gocardless.ts` (nikdy
    nevzniklo) opraven v `lib/integrace-fio.ts`.
 
-**Ověřeno jen přes PGlite dosud** (viz níž, „Zbývá ověřit") — žádný
-`db push` neproběhl, nic z tohodle nebylo potvrzeno proti reálnému
-Postgresu.
+**Ověřeno jen přes PGlite dosud** — žádný `db push` neproběhl, nic
+z tohodle nebylo potvrzeno proti reálnému Postgresu. Commit `2e43e2b`
+(větev `integrace-modul-centralni`). Ověřovací běh: PGlite celá sada
+**3258 kontrol, 0 spadlých** (vč. nového `krok89_scenar.sql` a
+upravených `krok3`/`krok73`/`krok74`), `tsc --noEmit` čisté, `eslint`
+čisté na všech dotčených souborech, `scripts/provoz-granty.test.mjs`
+čisté. Cestou se chytily a opravily dvě vlastní chyby: `integrace.manage`
+chybělo v `lib/authz.ts` i v hardcoded seznamu `krok3_scenar.sql` (DB
+katalog se jim rozešel, spadlo 30 scénářů kaskádou), a `krok89`
+mazání `auth.users`/`profiles` v úklidu narazilo na PGlite referenční
+kvirk — opraveno tak, že se (stejně jako `krok30`/`krok73`) tyhle
+jednorázové testovací identity v úklidu nemažou.
 
 ## Co zbývá (prioritizovaný seznam, ne nutně v tomhle pořadí)
 
