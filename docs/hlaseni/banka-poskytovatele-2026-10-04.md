@@ -120,3 +120,144 @@ dostupný) nebude vyžadovat změnu párování ani cashflow.
 3. Volitelně ověřit „Restricted Production" mechaniku přímo
    v kontrolním panelu — appka tenhle krok nedoložila líp než
    nepřímo.
+
+---
+
+## Oprava + pokračování — 6. 10. 2026
+
+Bod 3 výš („ověřit přímo v kontrolním panelu, ne nepřímo") se
+potvrdil jako správná obava. Šéfík si kontrolní panel skutečně
+založil a živě (screenshot) zjistil: **„Aktivace propojením účtů"
+(samoobslužná, zdarma, bez smlouvy) v rozbalovacím seznamu zemí
+NEMÁ Česko** — jen „Požádat o aktivaci" (`/cp/billing`, poptávkový
+formulář se zemí, objemem, regulatorním stavem) Česko nabízí. Tím
+padá přesně ta část „DŮVOD VOLBY" výš, která řekla „Restricted
+Production — reálné bankovní připojení, zdarma, bez smlouvy" — to
+platí pro JINÉ země, ne pro ČR. **Sandbox (fiktivní data) zůstává
+zdarma a samoobslužný beze změny** — jen reálné bankovní připojení
+pro ČR vyžaduje tu placenou poptávkovou cestu.
+
+Šéfík zadal znovu posoudit **Salt Edge Partners AIS** (ne obecné
+„Account Information API" pro už licencované subjekty) a
+**Finbricks MULTIBANK** jako náhradu/doplnění. Dva nezávislé živé
+průzkumy (6. 10. 2026) + moje vlastní ověření GoCardless přímo na
+jejich domácí stránce přinesly stejný vzorec jako u Enable
+Banking — **žádný ze tří kandidátů nemá potvrzený bezplatný
+samoobslužný přístup k reálným českým bankovním datům.**
+
+### GoCardless Bank Account Data — potvrzeno definitivně vyřazeno
+
+Přímo na `bankaccountdata.gocardless.com/new-signups-disabled`
+(vlastní domén GoCardless, ne blog ani status page): „New signups
+for Bank Account Data are currently disabled." Nový projekt dnes
+nejde založit vůbec.
+
+### Salt Edge Partners AIS
+
+- **Není samoobslužné.** Partner Program začíná pozvánkou od
+  obchodu (`saltedge.com/products/account_information/partner_program`).
+  Appka/firma nejdřív dostane stav „Pending" (jen fake/sandbox
+  banky), pak na žádost „Test" (do 2 prac. dnů), pak „Live"
+  vyžaduje podepsanou Service Provision Agreement. **Jejich VLASTNÍ
+  dokumentace si odporuje**, jestli „Test" (obecně zdarma, 100
+  připojení, 90 dnů) platí i pro Partnery s reálnými ČR bankami —
+  nepotvrzeno veřejně, jen obchodem.
+- **Licenci na ČR účty nemá Salt Edge sám** — pro EU/EEA účty
+  (včetně ČR) je v jejich vlastních podmínkách (`dashboard/terms_of_service`)
+  jmenovaný „Gateway Partner" **SPENDEE a.s.** (Praha, AISP
+  licence ČNB z 12. 12. 2018, S-Sp-2018/00139/CNB/571) — Salt Edge
+  je jen technická vrstva nad jeho licencí.
+- **Pokrytí bank** (živě z `saltedge.com/backend/v1/providers?country_code=CZ`,
+  6. 10. 2026): všech 10 požadovaných bank je PSD2/open-banking
+  „live". 9 z 10 má firemní i osobní účty — **Banka CREDITAS jen
+  osobní, firemní NE.** OSVČ appka nedohledala u žádné banky ani
+  jedno, ani druhé.
+- **Souhlas se neobnovuje tiše** — po vypršení appka musí uživatele
+  poslat zpátky přes widget (nové přihlášení v bance).
+- **Cena nikde veřejně** — řeší se smlouvou.
+- Tok je přesměrování (jako Enable Banking `/auth`), appka nikdy
+  nevidí heslo — ale KAŽDÝ podnik navíc dostane vlastní Salt Edge
+  dashboard účet a musí odkliknout anglické podmínky Salt Edge
+  i Spendee.
+
+### Finbricks MULTIBANK
+
+- **Finbricks, s.r.o.** (IČO 10669205, Praha), 100% dceřiná
+  společnost KB SmartSolutions (fintech ramene Komerční
+  banky/Société Générale) — ověřeno v obchodním rejstříku. Od
+  3/2025 vedená u ČNB jako platební instituce s oprávněním i pro
+  AIS.
+- **Není samoobslužné.** `docs.finbricks.com`, „Get Started": kontaktní
+  formulář → obchodní hovor → **podpis před-smlouvy** → TEPRVE PAK
+  sandbox — a ten sandbox běží proti REÁLNÉMU produkčnímu
+  bankovnímu API (platby omezené na 1 Kč, ne mock prostředí).
+- **Nejasné, jestli appka může mít JEDNU smlouvu pro VÍC nezávislých
+  restaurací.** Jediný veřejně dohledaný precedent (napojení na
+  ABRA/FlexiBee) si sám odporuje mezi dvěma verzemi dokumentace:
+  jednou měl každý koncový klient smlouvu přímo s KB, jednou s
+  Finbricks. Appka tohle NEVÍ jistě — kritická otázka pro obchod.
+- **Pokrytí bank**: status page (`status.finbricks.com`) ukazuje
+  živé AISP komponenty pro všech 10 požadovaných bank (plus J&T
+  a Partners banka, 12 celkem) — ale „enabledForMerchant" (co má
+  appka SMLUVNĚ povolené) je samostatný, soukromý přepínač.
+  Firemní/OSVČ podporu nedokládá žádná banka ani v jednom, ani
+  v druhém směru.
+- **ČSOB a UniCredit nemají stabilní `fbxReference`** (unikátní
+  id transakce) — appka by si u nich musela dedup řešit jinak,
+  bez záruky jedinečnosti.
+- Tok je přesměrování, appka nikdy nevidí heslo. Žádné JS/TS SDK
+  (jen stará PHP knihovna) — appka by si podpis žádostí (RSA-4096,
+  JWS) psala sama.
+
+### Shrnutí — co se tím mění
+
+| Poskytovatel | Self-serve k reálným ČR bankám | Licence na ČR | Pokrytí 10 bank | Příští krok |
+|---|---|---|---|---|
+| Enable Banking | **NE** (jen sandbox; ČR chybí v „Aktivace propojením účtů") | finská FIN-FSA (passporting) | 4/10 (KB/ČSOB/ČS/Raiffeisenbank) | zaplatit/poptat `/cp/billing`, nebo nechat jako je |
+| Salt Edge Partners | Nejasné (obchod) | cizí — Spendee (ČNB) | 10/10 (CREDITAS jen osobní) | poslat otázky obchodu (níž) |
+| Finbricks MULTIBANK | NE (před-smlouva → sandbox) | vlastní ČNB licence | 10/10 (nejasné firemní/OSVČ) | poslat otázky obchodu (níž) |
+| GoCardless | NE — nepřijímá nové účty | — | — | vyřazeno definitivně |
+| **Fio banka (přímý)** | **ANO** — appka to má hotové | netřeba (vlastní token) | 1/10 | žádný, funguje |
+
+**Appka na tomhle nic neimplementuje navíc** (kód `BankDataProvider`
+kontrakt má místo pro další adaptér hotové, žádná změna párování/
+cashflow by to nevyžadovala — `lib/bank-provider-contract.ts`), dokud
+Šéfík nezíská konkrétní odpověď od obchodu Salt Edge nebo Finbricks.
+Rozhodnutí, se kterým poskytovatelem jednat (nebo jen zaplatit
+Enable Banking poptávku), je obchodní/smluvní, ne technické — appka
+ho nedělá za Šéfíka.
+
+### Otázky pro obchod — Salt Edge (sales@saltedge.com / kontaktní formulář)
+
+1. Pozvete FoodTab (český s.r.o., B2B SaaS pro restaurace,
+   read-only, žádné platby) do Partner Programu? Jaký je čas od
+   pozvánky k podpisu?
+2. Umožňuje Partner „Test" stav reálná připojení k 10 jmenovaným
+   ČR bankám přes vaši/Spendee licenci BEZ podepsané smlouvy? Jaký
+   je limit připojení a doba platnosti — vaše dokumentace si
+   odporuje.
+3. Potvrďte, že Gateway Partner pro ČR účty je SPENDEE a.s.
+   (S-Sp-2018/00139/CNB/571) pro všech 10 bank. Co se stane se
+   stávajícími souhlasy, pokud se tahle spolupráce skončí?
+4. Potřebuje FoodTab nebo každý klient registraci u ČNB (zákon
+   370/2017 Sb.)?
+5. Firemní (s.r.o.) a OSVČ účty u všech 10 bank — konkrétně Banka
+   CREDITAS (firemní účty appka vidí jako nepokryté veřejně)?
+6. Cena: jednotka (připojení/lead/účet), minimální měsíční
+   poplatek, zřizovací poplatek, minimální doba smlouvy?
+
+### Otázky pro obchod — Finbricks (sales@finbricks.com)
+
+1. Může FoodTab mít JEDNU smlouvu a onboardovat víc restaurací
+   jako koncové uživatele (clientId), nebo musí každá restaurace
+   mít vlastní smlouvu/merchantId (jako u ABRA)?
+2. Jaká je právní role FoodTabu — agent registrovaný u ČNB,
+   technický poskytovatel, nebo reseller? Kdo je AIS poskytovatel
+   vůči bankám a na souhlasové obrazovce?
+3. Existuje AIS-only smlouva (bez platební brány)? Minimální
+   měsíční poplatek, jednotka ceny, zřizovací poplatek?
+4. Co přesně zavazuje před-smlouva, co odemyká sandbox? Jak dlouho
+   je zdarma? Musí appka testovat na reálných bankovních účtech?
+5. Firemní (s.r.o.) a OSVČ účty u všech 10 bank — potvrzeno?
+6. Jedno aktivní připojení na uživatele (chyba 768) — u kterých
+   bank? Jak to řeší jeden majitel s víc restauracemi?
