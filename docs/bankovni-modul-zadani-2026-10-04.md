@@ -110,3 +110,62 @@ Odevzdej kód, aditivní migrace, bezpečný env.example, testy, dokumentaci pro
 - ČNB — oprávnění pro platební služby: https://www.cnb.cz/cs/dohled-financni-trh/vykon-dohledu/povolovaci-a-schvalovaci-rizeni/povolovaci-schvalovaci-rizeni-a-zapis-do-registru-platebni-instituce-a-poskytovatel-platebnich-sluzeb-maleho-rozsahu/
 
 Přesné ceny, dostupnost konkrétních bankovních produktů a smluvní role nebyly potvrzeny obchodní nabídkou; před produkčním spuštěním se musí ověřit.
+
+## Upřesnění — 6. 10. 2026
+
+Po auditu skutečné implementace (bezpečnostní nálezy → PR #113/#114/#115,
+`docs/hlaseni/stav-2026-10-06.md`) a živém ověření Enable Banking (ČR
+chybí v samoobslužné aktivaci — `docs/hlaseni/banka-poskytovatele-2026-10-04.md`)
+Šéfík upřesnil další postup:
+
+- **Výhradně AIS** — čtení účtů, zůstatků, transakcí. Žádné platební
+  příkazy, appka si nevyžaduje ani neověřuje platební oprávnění
+  u žádného poskytovatele. (Shoduje se s dosavadním mantinelem
+  „banka jen pro čtení", CLAUDE.md — upřesnění jen potvrzuje rozsah.)
+- **Hlavní kandidáti na produkčního poskytovatele: Finbricks MULTIBANK
+  a Salt Edge Partners Account Information** (ne obecné Account
+  Information API pro už licencované subjekty — specificky Partners).
+  Výběr podmíněn POTVRZENÝM pokrytím českých FIREMNÍCH účtů a cenou —
+  obojí u obou kandidátů dnes NEPOTVRZENO (viz otázky pro obchod
+  v `banka-poskytovatele-2026-10-04.md`), appka tedy nevybírá finálně
+  sama.
+- Fio (přímý adaptér) a CSV import zůstávají jako alternativy, ne
+  jako jediná cesta.
+- **Průvodce „Připojit banku" per klient**: firma → banka → souhlas
+  jen ke čtení → výběr účtů → první synchronizace. Dnešní UI
+  (`finance/integrace/banka`) tohle zjednodušuje — audit (6. 10.)
+  zapsal konkrétní mezery (žádný výběr účtu u Enable Banking, žádné
+  vysvětlení rozsahu dat, žádná kontrola shody čísla účtu).
+- **Zůstatky**: appka je ukládá s měnou/typem/časem aktuálnosti
+  (`bankovni_zustatky`, hotovo) — explicitně zopakováno jako pojistka
+  proti tomu, co appka dřív dělala (`app.aktualni_zustatky_uctu` jako
+  součet všech stažených pohybů, zadání to zakazuje jako JEDINÝ zdroj).
+- **Párování faktur uvnitř appky** (ne u poskytovatele), nad
+  ZAÚČTOVANÝMI transakcemi, podle reference/VS, částky, měny, směru,
+  protistrany. Podporovat částečné úhrady, přeplatky, víc plateb,
+  ruční kontrolu nejednoznačných shod, dedup, audit, opravu přiřazení.
+  Audit (6. 10.) zapsal, co z tohoto appka dnes NEUMÍ přes UI (jen
+  přes RPC/testy): rozdělení platby na víc faktur, přeplatek, zrušení
+  alokace bez vrácení stavu faktury.
+- **Cashflow**: vlastní převody nejsou tržby, kartový settlement
+  nesmí zdvojit výnos z pokladny — audit (6. 10.) zapsal, že appka
+  tohle DNES NEŘEŠÍ (žádný kód nikdy nevytváří `prevod_*`, žádná
+  vazba settlement↔`pokladna_prodeje_denni`).
+- **Bezpečnost klíčů/tokenů**: jen serverově, data klientů oddělená,
+  ověřovat autorizační návraty i podpisy callbacků podle dokumentace
+  poskytovatele. Shoduje se s dosavadní architekturou
+  (`lib/integrace-klice.ts`, `integrace_tajemstvi` bez grantu pro
+  `authenticated`) — upřesnění potvrzuje směr, nemění ho.
+- **Pokračovat autonomně** ve vývoji UI, společné logiky, testů.
+  Chybějící smlouvu/přístupy evidovat jako konkrétní blokaci (ne
+  tichou mezeru). Nikdy neoznačit demo/připravený konektor za
+  produkční připojení (shoduje se s dosavadním „čeká na konfiguraci",
+  upřesnění potvrzuje).
+
+**Co z tohohle appka ještě NEPOSTAVILA** (zapsáno jako příští práce,
+ne provedeno v téhle úpravě dokumentu): výběr účtu u Enable Banking
+callbacku, vysvětlení rozsahu dat v UI, kontrola shody čísla účtu,
+UI pro rozdělení platby/přeplatek/zrušení s vrácením stavu faktury,
+`prevod_*` klasifikace vlastních převodů, vazba settlement↔pokladna.
+Viz tabulka akceptačních scénářů v `docs/hlaseni/stav-2026-10-06.md`
+a audit v `banka-modul-stav-2026-10-04.md` pro úplný seznam mezer.
