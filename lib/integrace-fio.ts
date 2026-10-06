@@ -10,7 +10,10 @@
  * nenabízí ani nevyžaduje, banka zůstává výhradně pro čtení, CLAUDE.md).
  * Ostatní banky (KB/ČSOB/ČS/Raiffeisenbank, PSD2 open banking) by appka
  * směla napojit jen přes licencovaného zprostředkovatele (AISP) —
- * viz `lib/integrace-gocardless.ts`, kostra.
+ * viz `lib/integrace-enablebanking.ts`. GoCardless byl jako kandidát
+ * definitivně vyřazen (nové registrace pro samostatné Bank Account
+ * Data zastavené, docs/hlaseni/stav-2026-10-06.md) — žádný
+ * `integrace-gocardless.ts` se proto nestaví.
  *
  * Token je vázaný na JEDEN konkrétní účet (ne na klienta) a omezený na
  * jedno volání za 30 sekund (HTTP 409 při porušení) — appka proto NIKDY

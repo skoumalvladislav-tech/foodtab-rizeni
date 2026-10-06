@@ -197,22 +197,49 @@ select pg_temp.check('po útoku cizí firmy je naše tajemství beze změny',
 
 
 \echo ''
-\echo '== 5. Jedno živé připojení na poskytovatele a rozsah ========'
+\echo '== 5. Víc připojení stejného poskytovatele je OD 7.10.2026 V POŘÁDKU =='
+-- Zadání (Foodtab_Integrace_Claude_Code.md, oddíl 2): „Jeden klient
+-- může mít více připojení stejného typu." Dřív appka tohle uměla jen
+-- obchvatem — `poskytovatel` s náhodnou přílohou (nález auditu
+-- 7. 10. 2026, banka/akce.ts) — protože unikátní index byl právě na
+-- (tenant, branch, oblast, poskytovatel). Ten index je od migrace
+-- 20261007110000 pryč; živou jedinečnost teď hlídá CÍL (platební
+-- účet), ne jméno poskytovatele — oddíl 6 níž.
 
-select pg_temp.check('druhé připojení se STEJNÝM poskytovatelem a rozsahem spadne na unikátní index',
-  pg_temp.spadne_hlaskou(
-    format('insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim) values (%L, %L, %L, %L)',
-      :'tenant', 'banka', 'csv_import', 'csv'),
-    '23505', ''));
-
--- Po odpojení (odpojeno_kdy vyplněné) smí vzniknout nové se stejným
--- poskytovatelem — unikátní index je `where odpojeno_kdy is null`.
-update public.integrace_pripojeni set odpojeno_kdy = now() where id = :'pripojeni';
-
-select pg_temp.check('po odpojení smí vzniknout nové se stejným poskytovatelem',
+select pg_temp.check('druhé připojení se STEJNÝM poskytovatelem, oblastí a BEZ cíle teď v pořádku projde',
   pg_temp.projde(
     format('insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim) values (%L, %L, %L, %L)',
       :'tenant', 'banka', 'csv_import', 'csv')));
+
+select pg_temp.check('obě připojení skutečně existují živá, ne že druhé přepsalo první',
+  (select count(*) from public.integrace_pripojeni
+    where tenant_id = :'tenant' and oblast = 'banka' and poskytovatel = 'csv_import'
+      and odpojeno_kdy is null) = 2);
+
+
+\echo ''
+\echo '== 6. Jedno živé bankovní připojení na CÍLOVÝ platební účet ======'
+
+insert into public.platebni_ucty (tenant_id, nazev, typ)
+values (:'tenant', 'Krok73 testovací bankovní účet', 'banka')
+returning id as ucet \gset
+
+insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, platebni_ucet_id)
+values (:'tenant', 'banka', 'fio', 'zakaznicky', :'ucet')
+returning id as pripojeni_banka \gset
+
+select pg_temp.check('druhé bankovní připojení na STEJNÝ platební účet (i JINÝ poskytovatel) spadne na unikátní index',
+  pg_temp.spadne_hlaskou(
+    format('insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, platebni_ucet_id) values (%L, %L, %L, %L, %L)',
+      :'tenant', 'banka', 'enablebanking', 'zakaznicky', :'ucet'),
+    '23505', ''));
+
+update public.integrace_pripojeni set odpojeno_kdy = now() where id = :'pripojeni_banka';
+
+select pg_temp.check('po odpojení smí na STEJNÝ účet vzniknout nové bankovní připojení',
+  pg_temp.projde(
+    format('insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, platebni_ucet_id) values (%L, %L, %L, %L, %L)',
+      :'tenant', 'banka', 'enablebanking', 'zakaznicky', :'ucet')));
 
 
 \echo ''
@@ -222,6 +249,7 @@ reset role;
 delete from public.integrace_tajemstvi where pripojeni_id in
   (select id from public.integrace_pripojeni where tenant_id in (:'tenant', :'tenant_b'));
 delete from public.integrace_pripojeni where tenant_id in (:'tenant', :'tenant_b');
+delete from public.platebni_ucty where tenant_id in (:'tenant', :'tenant_b');
 
 select pg_temp.check('úklid: po scénáři nezůstalo žádné připojení kroku 73',
   not exists (select 1 from public.integrace_pripojeni where tenant_id in (:'tenant', :'tenant_b')));

@@ -93,7 +93,7 @@ export default async function FinanceIntegraceBanka({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Banku vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
 
-  const smiPsat = canSee(pristup.ctx, 'finance.manage')
+  const smiPsat = canSee(pristup.ctx, 'integrace.manage')
   const supabase = await getServerSupabase()
 
   const [pripojeniRes, uctyRes] = await Promise.all([

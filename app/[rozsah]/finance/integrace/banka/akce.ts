@@ -32,7 +32,7 @@ async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'finance.manage', rozsah)
+  const pristup = await zkusPristup(tenantId, 'integrace.manage', rozsah)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/integrace/banka`)
 
@@ -68,7 +68,10 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
     .insert({
       tenant_id: tenantId,
       oblast: 'banka',
-      poskytovatel: `fio-${crypto.randomUUID().slice(0, 8)}`,
+      // Čistá hodnota — žádná náhodná přípona. Jedinečnost živého
+      // bankovního připojení od 7.10.2026 hlídá `platebni_ucet_id`
+      // (index integrace_pripojeni_banka_jeden_ucet), ne tenhle sloupec.
+      poskytovatel: 'fio',
       rezim: 'zakaznicky',
       nazev: nazev || `Fio — ${overeni.info.cisloUctu}`,
       platebni_ucet_id: platebniUcetId,
@@ -82,7 +85,7 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
     .single()
 
   if (chybaPripojeni || !pripojeni) {
-    const zprava = chybaPripojeni?.code === '23505' ? 'Tahle oblast a poskytovatel už mají živé připojení.' : 'Připojení se nepodařilo založit.'
+    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
   }
 
@@ -133,7 +136,7 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
     .insert({
       tenant_id: tenantId,
       oblast: 'banka',
-      poskytovatel: `enablebanking-${crypto.randomUUID().slice(0, 8)}`,
+      poskytovatel: 'enablebanking',
       rezim: 'zakaznicky',
       nazev: `${aspspNazev} (Enable Banking)`,
       platebni_ucet_id: platebniUcetId,
@@ -145,7 +148,7 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
     .single()
 
   if (chybaPripojeni || !pripojeni) {
-    const zprava = chybaPripojeni?.code === '23505' ? 'Tahle oblast a poskytovatel už mají živé připojení.' : 'Připojení se nepodařilo založit.'
+    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
   }
 
@@ -165,10 +168,10 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
 /**
  * Manuální synchronizace — STEJNÁ cesta jako naplánovaná úloha
  * (lib/integrace-fio-sync.ts), jen spuštěná z tlačítka po ověření
- * finance.manage. `synchronizovatFioPripojeni` běží přes
+ * integrace.manage. `synchronizovatFioPripojeni` běží přes
  * `service_role` (sdílí kód s cron úlohou, která nemá session) a
  * dohledá připojení jen podle `id` — BEZ týhle kontroly by
- * `finance.manage` ve VLASTNÍ firmě stačilo k vyvolání synchronizace
+ * `integrace.manage` ve VLASTNÍ firmě stačilo k vyvolání synchronizace
  * CIZÍHO připojení, kdyby volající znal nebo uhodl jeho UUID.
  */
 export async function synchronizovatTeto(formData: FormData): Promise<void> {

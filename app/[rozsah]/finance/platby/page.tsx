@@ -181,10 +181,10 @@ export default async function FinancePlatby({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; importovano?: string }>
+  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, importovano } = await searchParams
+  const { chyba, importovano, prebytek } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -232,6 +232,12 @@ export default async function FinancePlatby({
         {importovano ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
             Import hotový — zapsáno {importovano} {importovano === '1' ? 'nová platba' : 'nových plateb'}.
+          </p>
+        ) : null}
+        {prebytek ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>
+            Párování uloženo — faktura je přeplacená o {koruny(Number(prebytek))}. Appka to sama na jinou
+            fakturu nepřevede, rozhodněte, co se s přebytkem stane (jiná faktura, dobropis, vrácení).
           </p>
         ) : null}
 

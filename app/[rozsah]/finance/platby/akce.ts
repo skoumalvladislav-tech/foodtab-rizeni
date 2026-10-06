@@ -7,6 +7,7 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { getFakturySupabase } from '@/lib/supabase/faktury'
 import { naHalere } from '@/lib/mzdy'
+import { STAV_UHRAZENO, STAV_CASTECNE, STAV_NEUHRAZENO } from '@/lib/faktury-types'
 
 async function pripravit(rozsah: string, pravo: 'finance.read' | 'finance.manage') {
   const tenantId = await getCurrentTenantId()
@@ -118,23 +119,36 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
   }
 
   const plneUhrazeno = Boolean(data?.[0]?.plne_uhrazeno)
+  const prebytekHaleru = Number(data?.[0]?.prebytek_haleru ?? 0)
 
   try {
     const faktury = getFakturySupabase()
-    await faktury.from('invoices').update({ status: plneUhrazeno ? 'Uhrazeno' : 'Částečně uhrazeno' }).eq('id', fakturaId).eq('tenant_id', tenantId)
+    await faktury.from('invoices').update({ status: plneUhrazeno ? STAV_UHRAZENO : STAV_CASTECNE }).eq('id', fakturaId).eq('tenant_id', tenantId)
   } catch {
     // Best-effort — viz komentář funkce. Nesoulad zůstává dohledatelný
     // přímo ve Fakturách (stav tam neodpovídá platby_faktury tady).
   }
 
   revalidatePath(`/${rozsah}/finance/platby`)
-  redirect(`/${rozsah}/finance/platby`)
+  // Přeplatek appka od 7.10.2026 nezakazuje (zadání: „podporuj...
+  // přeplatky"), jen o něm nahlas řekne — co se s penězi navíc stane
+  // (jiná faktura, dobropis, vrácení), rozhoduje člověk.
+  redirect(
+    prebytekHaleru > 0
+      ? `/${rozsah}/finance/platby?prebytek=${prebytekHaleru}`
+      : `/${rozsah}/finance/platby`
+  )
 }
 
 /**
  * Zrušení potvrzené alokace — vratné s auditem
  * (`app.zrusit_alokaci_platby`). Řádek zůstává (historie), jen stav
  * jde na `zamitnuto` — uvolní se tím místo pro novou alokaci.
+ *
+ * Stav faktury ve Fakturách se po zrušení PŘEPOČÍTÁ znovu (best-effort,
+ * stejně jako `potvrditParovani`) — dřív appka po zrušení JEDINÉ
+ * alokace nechávala fakturu nahlášenou jako „Uhrazeno"/„Částečně
+ * uhrazeno", i když se platba zrušila (nález 6.–7. 10. 2026).
  */
 export async function zrusitAlokaci(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
@@ -143,6 +157,13 @@ export async function zrusitAlokaci(formData: FormData): Promise<void> {
 
   const { supabase, tenantId } = await pripravit(rozsah, 'finance.manage')
 
+  const { data: alokace } = await supabase
+    .from('platby_faktury')
+    .select('faktura_id')
+    .eq('id', alokaceId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
   const { error } = await supabase.rpc('zrusit_alokaci_platby', {
     p_tenant: tenantId,
     p_alokace: alokaceId,
@@ -150,6 +171,36 @@ export async function zrusitAlokaci(formData: FormData): Promise<void> {
   })
 
   if (error) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Zrušení párování se nepodařilo.')}`)
+
+  if (alokace?.faktura_id) {
+    try {
+      const { data: zbyvajici } = await supabase
+        .from('platby_faktury')
+        .select('castka_haleru')
+        .eq('faktura_id', alokace.faktura_id)
+        .eq('tenant_id', tenantId)
+        .eq('stav', 'potvrzeno')
+
+      const soucetHaleru = (zbyvajici ?? []).reduce((s, r) => s + r.castka_haleru, 0)
+
+      const faktury = getFakturySupabase()
+      const { data: faktura } = await faktury
+        .from('invoices')
+        .select('amount')
+        .eq('id', alokace.faktura_id)
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+
+      const celkemHaleru = faktura?.amount != null ? Math.round(faktura.amount * 100) : null
+      const novyStav =
+        soucetHaleru <= 0 ? STAV_NEUHRAZENO : celkemHaleru !== null && soucetHaleru >= celkemHaleru ? STAV_UHRAZENO : STAV_CASTECNE
+
+      await faktury.from('invoices').update({ status: novyStav }).eq('id', alokace.faktura_id).eq('tenant_id', tenantId)
+    } catch {
+      // Best-effort — viz komentář funkce. Nesoulad zůstává dohledatelný
+      // přímo ve Fakturách (stav tam neodpovídá platby_faktury tady).
+    }
+  }
 
   revalidatePath(`/${rozsah}/finance/platby`)
   redirect(`/${rozsah}/finance/platby`)
