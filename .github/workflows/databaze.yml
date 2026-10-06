@@ -235,6 +235,63 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 68 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 68"; chybi=1; }
 
+          # Kontroly pro krok 69+ se tu zastavily u kroku 68 — run.sh
+          # mezitím narostl až po krok 86, ale tahle explicitní kotva
+          # (jediná, co odhalí tichý pád do pozdějšího kroku, viz
+          # komentář u kroku 24) s ním neporostla. Doplněno zpětně,
+          # krok72_scenar.sql nemá vlastní "HOTOV" hlášku (starší styl,
+          # neopravuje se tady, mimo rozsah téhle změny).
+          grep -qE '^[[:space:]]*== KROK 69 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 69"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 70 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 70"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 71 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 71"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 73 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 73"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 74 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 74"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 75 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 75"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 76 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 76"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 77 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 77"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 78 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 78"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 79 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 79"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 80 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 80"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 81 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 81"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 82 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 82"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 83 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 83"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 84 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 84"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 85 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 85"; chybi=1; }
+
+          grep -qE '^[[:space:]]*== KROK 86 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 86"; chybi=1; }
+
           # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
           # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —
           # run.sh ho pouští až za provozními scénáři.
