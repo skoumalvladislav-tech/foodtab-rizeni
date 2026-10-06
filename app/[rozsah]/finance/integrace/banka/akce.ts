@@ -162,12 +162,30 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
   redirect(vysledek.presmerovatNa)
 }
 
-/** Manuální synchronizace — STEJNÁ cesta jako naplánovaná úloha (lib/integrace-fio-sync.ts), jen spuštěná z tlačítka po ověření finance.manage. */
+/**
+ * Manuální synchronizace — STEJNÁ cesta jako naplánovaná úloha
+ * (lib/integrace-fio-sync.ts), jen spuštěná z tlačítka po ověření
+ * finance.manage. `synchronizovatFioPripojeni` běží přes
+ * `service_role` (sdílí kód s cron úlohou, která nemá session) a
+ * dohledá připojení jen podle `id` — BEZ týhle kontroly by
+ * `finance.manage` ve VLASTNÍ firmě stačilo k vyvolání synchronizace
+ * CIZÍHO připojení, kdyby volající znal nebo uhodl jeho UUID.
+ */
 export async function synchronizovatTeto(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const pripojeniId = String(formData.get('pripojeni_id') ?? '')
 
-  await pripravit(rozsah)
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  const { data: pripojeni } = await supabase
+    .from('integrace_pripojeni')
+    .select('id')
+    .eq('id', pripojeniId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (!pripojeni) {
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Připojení nepatří vaší firmě nebo neexistuje.')}`)
+  }
 
   const vysledek = await synchronizovatFioPripojeni(pripojeniId)
 
