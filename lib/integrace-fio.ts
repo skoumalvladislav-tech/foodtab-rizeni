@@ -66,12 +66,21 @@ function hodnotaSloupce(t: FioTransakceRaw, index: number): unknown {
   return t[`column${index}`]?.value ?? null
 }
 
-/** Fio v JSONu vrací datum jako epoch v milisekundách (číslo), ne ISO text — na rozdíl od XML/CSV. */
+/**
+ * Fio v JSONu vrací datum jako epoch v milisekundách (číslo), ne ISO
+ * text — na rozdíl od XML/CSV. Epoch je PRAŽSKÁ půlnoc (ověřeno proti
+ * `API_Bankovnictvi.pdf`, kap. 5.3.1.6 — dotaz „od 26. 6. 2012" vrací
+ * `dateStart: 1340661600000`, což je `2012-06-26T00:00:00+02:00`).
+ * `toISOString().slice(0,10)` by vzal UTC den, a protože Praha je
+ * +1/+2 podle letního času, vyšel by o den dřív — ne jednou za čas,
+ * ale u KAŽDÉ transakce. `en-CA` formát dá rok-měsíc-den přímo
+ * v pražském pásmu, správně v zimě (CET) i v létě (CEST).
+ */
 function epochNaIsoDatum(hodnota: unknown): string | null {
   if (typeof hodnota !== 'number' || !Number.isFinite(hodnota)) return null
   const d = new Date(hodnota)
   if (Number.isNaN(d.getTime())) return null
-  return d.toISOString().slice(0, 10)
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(d)
 }
 
 function naHalereSeZnamenkem(objem: unknown): number | null {
@@ -122,6 +131,12 @@ export function naparsovatOdpovedFio(telo: unknown): FioVysledek {
       datum,
       smer: castkaSeZnamenkem < 0 ? 'vydaj' : 'prijem',
       castkaHaleru: Math.abs(castkaSeZnamenkem),
+      // Fio nedává měnu per transakci v tomhle výpisu — appka použije
+      // měnu ÚČTU (info.currency, o pár řádků výš ověřená jako string).
+      // Fio účet má jednu měnu; cizoměnová platba na něj dojde už
+      // přepočtená do měny účtu (appka si tohle nevymýšlí, jen ho
+      // nedomýšlí jako CZK natvrdo, jak appka dřív dělala).
+      mena: info.currency,
       protistrana: (typeof nazevProtiuctu === 'string' && nazevProtiuctu) || (typeof protiucet === 'string' && protiucet) || '',
       vs: String(hodnotaSloupce(t, SLOUPEC.vs) ?? ''),
       poznamka: String(hodnotaSloupce(t, SLOUPEC.zprava) ?? ''),

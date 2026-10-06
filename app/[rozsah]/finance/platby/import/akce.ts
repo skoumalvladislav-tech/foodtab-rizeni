@@ -64,7 +64,14 @@ export async function potvrditImport(formData: FormData): Promise<void> {
     p_ucet: ucetId,
     p_davka: davka.id,
     p_zdroj: zdroj,
-    p_radky: radky,
+    // `jsonb_to_recordset` v RPC čeká SNAKE_CASE klíče — `RadekImportu`
+    // je camelCase (shoda s TS konvencí appky). Posílání `radky` přímo
+    // by `castka_haleru`/`externi_id` nechalo padnout na NULL (nález
+    // 7. 10., oprava v 20261007100000_importovat_transakce_mena.sql).
+    p_radky: radky.map((r) => ({
+      datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru, mena: r.mena,
+      protistrana: r.protistrana, vs: r.vs, poznamka: r.poznamka, externi_id: r.externiId,
+    })),
   })
 
   if (chybaImportu) {
@@ -73,10 +80,8 @@ export async function potvrditImport(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/platby/import?chyba=${encodeURIComponent('Import se nepodařilo dokončit — zkuste to znovu.')}`)
   }
 
-  await supabase
-    .from('import_davky')
-    .update({ pocet_novych: pocetVlozenych ?? 0 })
-    .eq('id', davka.id)
+  // import_davky.pocet_novych zapisuje RPC sama (stejná transakce) —
+  // samostatný klientský .update() tu dřív tiše padal (žádný grant).
 
   revalidatePath(`/${rozsah}/finance/platby`)
   redirect(`/${rozsah}/finance/platby?importovano=${pocetVlozenych ?? 0}`)

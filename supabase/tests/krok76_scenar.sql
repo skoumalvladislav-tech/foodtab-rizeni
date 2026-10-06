@@ -96,6 +96,32 @@ select pg_temp.check('součet příjmů z importu sedí (10000+20000)',
   (select coalesce(sum(castka_haleru),0) from public.transakce
     where import_davka_id = :'davka' and smer = 'prijem') = 30000);
 
+select pg_temp.check('bez mena appka NEDOMÝŠLÍ nic jiného než CZK (default tabulky, ne hádaná hodnota)',
+  (select count(*) from public.transakce where import_davka_id = :'davka' and mena = 'CZK') = 3);
+
+select pg_temp.check('import_davky.pocet_novych zapsala RPC sama, ne rozbitý klientský .update()',
+  (select pocet_novych from public.import_davky where id = :'davka') = 3);
+
+
+\echo ''
+\echo '== 1b. Měna jde od zdroje, appka ji nenahrazuje natvrdo CZK ======'
+
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'tenant', :'perla', 'Krok76 EUR účet', 'banka')
+returning id as ucet_eur \gset
+
+insert into public.import_davky (tenant_id, typ, soubor_hash, stav)
+values (:'tenant', 'banka_csv', 'krok76-hash-eur', 'zpracovano')
+returning id as davka_eur \gset
+
+select public.importovat_transakce(
+  :'tenant', :'ucet_eur', :'davka_eur', 'csv_banka',
+  '[{"datum":"2026-10-01","smer":"vydaj","castka_haleru":9900,"mena":"EUR","protistrana":"Lieferant GmbH","vs":"","poznamka":"","externi_id":"k76-eur-001"}]'::jsonb
+) as pocet_eur \gset
+
+select pg_temp.check('EUR transakce se zapsala s mena=EUR, ne s tiše dosazeným CZK', :'pocet_eur' = 1 and
+  (select mena from public.transakce where import_davka_id = :'davka_eur') = 'EUR');
+
 
 \echo ''
 \echo '== 2. Idempotence =============================================='
@@ -171,9 +197,9 @@ select pg_temp.check('po útoku cizí firmy se útočný řádek nevložil',
 \echo ''
 \echo '== Úklid ======================================================'
 
-delete from public.transakce where import_davka_id = :'davka' or externi_id like 'k76-%';
-delete from public.import_davky where id = :'davka';
-delete from public.platebni_ucty where id in (:'ucet', :'ucet_cizi');
+delete from public.transakce where import_davka_id in (:'davka', :'davka_eur') or externi_id like 'k76-%';
+delete from public.import_davky where id in (:'davka', :'davka_eur');
+delete from public.platebni_ucty where id in (:'ucet', :'ucet_cizi', :'ucet_eur');
 
 select pg_temp.check('úklid: po scénáři nezůstala žádná transakce kroku 76',
   not exists (select 1 from public.transakce where externi_id like 'k76-%'));

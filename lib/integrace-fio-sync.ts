@@ -136,7 +136,7 @@ export async function synchronizovatFioPripojeni(integracePripojeniId: string): 
       p_davka: davka.id,
       p_zdroj: 'fio_api',
       p_radky: vysledekFio.radky.map((r) => ({
-        datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru,
+        datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru, mena: r.mena,
         protistrana: r.protistrana, vs: r.vs, poznamka: r.poznamka, externi_id: r.externiId,
       })),
     })

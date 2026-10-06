@@ -23,6 +23,7 @@ export type RadekImportu = {
   datum: string
   smer: SmerPohybu
   castkaHaleru: number
+  mena: string
   protistrana: string
   vs: string
   poznamka: string
@@ -57,6 +58,7 @@ const ALIASY: Record<string, string[]> = {
   vs: ['vs', 'variabilnisymbol', 'variablesymbol'],
   poznamka: ['poznamka', 'note', 'zprava', 'memo'],
   externi_id: ['externiid', 'id', 'cislopohybu', 'transactionid', 'referencnicislo'],
+  mena: ['mena', 'currency', 'kodmeny'],
 }
 
 /** Jeden řádek CSV na pole buněk — respektuje uvozovky (`"a;b"` je jedna buňka), stejná konvence jako export. */
@@ -142,6 +144,7 @@ export function naparsovatCsv(obsah: string): VysledekImportu {
     vs: indexSloupce('vs'),
     poznamka: indexSloupce('poznamka'),
     externiId: indexSloupce('externi_id'),
+    mena: indexSloupce('mena'),
   }
 
   const chyby: ChybaImportu[] = []
@@ -172,10 +175,17 @@ export function naparsovatCsv(obsah: string): VysledekImportu {
     else if (smerText === 'vydaj' || smerText === 'debit' || smerText === 'out') smer = 'vydaj'
     else smer = castkaSeZnamenkem < 0 ? 'vydaj' : 'prijem'
 
+    // Appka vlastní šablonu nemá povinný sloupec Měna — domácí CZK
+    // export ho nepotřebuje. Bez sloupce appka CZK NEDOMÝŠLÍ naslepo
+    // pro každý možný účet, ale je to jediný rozumný výchozí stav pro
+    // appčinu VLASTNÍ šablonu (ne nativní export konkrétní banky).
+    const menaText = idx.mena !== -1 ? (bunky[idx.mena] ?? '').trim().toUpperCase() : ''
+
     radky.push({
       datum,
       smer,
       castkaHaleru: Math.abs(castkaSeZnamenkem),
+      mena: menaText || 'CZK',
       protistrana: idx.protistrana !== -1 ? (bunky[idx.protistrana] ?? '') : '',
       vs: idx.vs !== -1 ? (bunky[idx.vs] ?? '') : '',
       poznamka: idx.poznamka !== -1 ? (bunky[idx.poznamka] ?? '') : '',
