@@ -1062,3 +1062,69 @@ se na tabulku.
 **Když to má být jinak:** doplnit jméno zaměstnance do `p_telo` volání
 `app.notifikovat` v `public.odmitnout_smenu` (migrace) a promítnout do
 textu upozornění (`lib/upozorneni-text.ts`).
+
+---
+
+## 42. E-mail/OCR faktur — vlastní příjem appky, nebo zůstat na n8n?
+
+**Vzniklo:** 7. 10. 2026, modul Integrace (`Foodtab_Integrace_Claude_Code.md`).
+
+OCR čtení e-mailových faktur dnes běží mimo appku, v n8n, a píše do
+oddělené databáze Faktur (`lib/supabase/faktury.ts`). Nové zadání chce
+e-mailovou kategorii v appce samotné, a napojení appka dnes umí (IMAP
+konektor, `lib/integrace-mail-imap.ts`, hotový a ověřuje reálné
+přihlášení). Appka ale nerozhodla sama, jestli má postavit VLASTNÍ
+příjem e-mailu (IMAP → Storage → OCR, vzor `lib/komunikace/prilohy.ts`),
+nebo zůstat na dnešní n8n pipeline a jen rozšířit, co z Faktur-DB
+čte/zobrazuje — druhá varianta je mnohem menší zásah, ale neumí
+rozlišit typy dokladu (faktura/zálohová/dobropis/dodací list), jak
+zadání chce.
+
+**Co platí do rozhodnutí:** IMAP konektor appka postavila (ověření +
+uložení schránky), ale NEČTE žádné zprávy — stojí a čeká na tohle
+rozhodnutí, aby appka nerozjela konkurenční pipeline bokem.
+
+**Když to má být jinak:** stačí řekne „appka ať čte sama" nebo „zůstává
+na n8n" — obě cesty jsou v `docs/integrace-modul-plan.md`, oddíl P2,
+rozepsané i s odhadem dopadu.
+
+---
+
+## 43. Dotykačka partnerská/testovací licence
+
+**Vzniklo:** 7. 10. 2026, modul Integrace.
+
+Appka má kontraktovou kostru (`PosProvider`) i cílovou tabulku
+(`pokladna_prodeje_denni`), ale žádný živý HTTP klient — oficiální API
+(`docs.api.dotypos.com`) vyžaduje partnerskou/testovací licenci, o
+kterou appka nesmí sama žádat (obchodní poptávka).
+
+**Co platí do rozhodnutí:** appka zůstává jen na CSV importu prodejů,
+`zdroj='dotykacka_api'` je povolená hodnota v databázi, ale nic ji
+neplní.
+
+**Když to má být jinak:** kdo s Dotykačkou jedná a získá přístup, ať
+appce dá API klíč/dokumentaci k autentizaci — appka postaví konkrétní
+klienta, ne dřív.
+
+---
+
+## 44. Salt Edge partnerská pozvánka
+
+**Vzniklo:** 7. 10. 2026 večer, rozhodnutí o bankovní integraci.
+
+Rozhodnuto (psaný pokyn): první bankovní integrace jde přes Salt Edge
+Partners AIS. Appka postavila celou architekturu (`lib/integrace-saltedge.ts`
+a související), ale Salt Edge **není samoobslužný** — vyžaduje žádost
+o partnerský přístup dřív, než vůbec existuje sandbox. Appka si ho
+sama nesmí vyžádat ani podepsat smlouvu.
+
+**Co platí do rozhodnutí:** appka zůstává u kategorie Banka → Salt
+Edge ve stavu „připraveno bez přístupu", Fio zůstává jediný živě
+funkční bankovní zdroj.
+
+**Když to má být jinak:** kdo s Salt Edge jedná, ať appce po získání
+přístupu dá přesně pět věcí — `docs/hlaseni/stav-2026-10-07.md`, oddíl
+„Co appka nemohla a nemá dodat", má úplný seznam (App-id/Secret,
+webhook URL k zaregistrování, aktuální veřejný klíč pro podpis,
+potvrzení pokrytí firemních účtů u konkrétních bank).

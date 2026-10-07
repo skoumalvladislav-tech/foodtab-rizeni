@@ -7,10 +7,19 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
 import { jeNakonfigurovano as enableBankingNakonfigurovano, nactiBanky } from '@/lib/integrace-enablebanking'
+import { jeNakonfigurovano as saltEdgeNakonfigurovano, nactiBankyCz, nactiUctySaltEdge } from '@/lib/integrace-saltedge'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
-import { pripojitFioUcet, synchronizovatTeto, odpojitBankovniUcet, zahajitPripojeniEnableBanking, upravitIntervalSynchronizace } from './akce'
+import {
+  pripojitFioUcet,
+  synchronizovatTeto,
+  odpojitBankovniUcet,
+  zahajitPripojeniEnableBanking,
+  zahajitPripojeniSaltEdgeAkce,
+  vybratUcetSaltEdge,
+  upravitIntervalSynchronizace,
+} from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +80,7 @@ type Pripojeni = {
   posledni_chyba: string | null
   platebni_ucet_id: string | null
   interval_synchronizace_minut: number | null
+  externi_ucet: { connection_id?: string; account_id?: string } | null
 }
 type Ucet = { id: string; nazev: string }
 type Zustatek = { platebni_ucet_id: string; typ: string; castka_haleru: number; platny_k: string }
@@ -100,7 +110,7 @@ export default async function FinanceIntegraceBanka({
   const [pripojeniRes, uctyRes] = await Promise.all([
     supabase
       .from('integrace_pripojeni')
-      .select('id, nazev, poskytovatel, stav, posledni_sync_kdy, posledni_sync_pocet_radku, posledni_chyba, platebni_ucet_id, interval_synchronizace_minut')
+      .select('id, nazev, poskytovatel, stav, posledni_sync_kdy, posledni_sync_pocet_radku, posledni_chyba, platebni_ucet_id, interval_synchronizace_minut, externi_ucet')
       .eq('tenant_id', tenantId)
       .eq('oblast', 'banka')
       .is('odpojeno_kdy', null)
@@ -145,6 +155,36 @@ export default async function FinanceIntegraceBanka({
     else {
       chybaBank = vysledekBank.duvod
       console.error('nactiBanky selhalo', vysledekBank.duvod)
+    }
+  }
+
+  /*
+    Salt Edge: appka NIKDY nenabízí pevný seznam 10 požadovaných bank
+    jako potvrzený (zadání: „Nabízej české banky podle skutečné
+    dostupnosti pro náš partnerský účet.") — jen to, co appka doopravdy
+    dostala z /providers?country_code=CZ, a jen firemní účty
+    (`firemniUcty` — appka nezaměňuje osobní a firemní pokrytí).
+  */
+  let bankySaltEdge: { kod: string; nazev: string; firemniUcty: boolean; osobniUcty: boolean }[] = []
+  let chybaBankSaltEdge: string | null = null
+  if (saltEdgeNakonfigurovano()) {
+    const vysledekBank = await nactiBankyCz()
+    if (vysledekBank.stav === 'ok') bankySaltEdge = vysledekBank.banky.filter((b) => b.firemniUcty)
+    else chybaBankSaltEdge = vysledekBank.duvod
+  }
+
+  /*
+    Připojení u Salt Edge, kde webhook potvrdil `stav='pripojeno'`, ale
+    appka ještě nemá vybraný konkrétní účet (`account_id` v
+    `externi_ucet`) — appka pro ně živě natáhne seznam účtů z Salt Edge,
+    ať je z čeho vybírat (zadání §2: „průvodce... výběr zdrojů").
+  */
+  const ucetVyberNaPripojeni = new Map<string, { id: string; popis: string }[]>()
+  for (const p of pripojeni) {
+    if (p.poskytovatel !== 'saltedge' || p.stav !== 'pripojeno' || p.externi_ucet?.account_id || !p.externi_ucet?.connection_id) continue
+    const vysledek = await nactiUctySaltEdge(p.externi_ucet.connection_id)
+    if (vysledek.stav === 'ok') {
+      ucetVyberNaPripojeni.set(p.id, vysledek.ucty.map((u) => ({ id: u.providerAccountId, popis: `${u.cisloUctu ?? u.providerAccountId} (${u.mena})` })))
     }
   }
 
@@ -203,6 +243,19 @@ export default async function FinanceIntegraceBanka({
                       {' '}· Vlastní odstup: {p.interval_synchronizace_minut ? `${p.interval_synchronizace_minut} min` : 'žádný (jen podle naplánované úlohy)'}
                     </span>
                   </div>
+                  {smiPsat && ucetVyberNaPripojeni.has(p.id) ? (
+                    <form action={vybratUcetSaltEdge} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input type="hidden" name="rozsah" value={rozsah} />
+                      <input type="hidden" name="id" value={p.id} />
+                      <span style={{ fontSize: '12.5px' }}>Banka vrátila víc účtů — vyberte, který appka má sledovat:</span>
+                      <select name="account_id" required style={{ ...pole, width: 'auto', minHeight: '36px' }}>
+                        {ucetVyberNaPripojeni.get(p.id)!.map((u) => (
+                          <option key={u.id} value={u.id}>{u.popis}</option>
+                        ))}
+                      </select>
+                      <button type="submit" className="ft-tl ft-tl-hlavni">Vybrat účet</button>
+                    </form>
+                  ) : null}
                   {smiPsat ? (
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <form action={synchronizovatTeto}>
@@ -284,7 +337,76 @@ export default async function FinanceIntegraceBanka({
         ) : null}
 
         <div style={{ ...karta, display: 'grid', gap: '10px' }}>
-          <h2 style={{ margin: 0, fontSize: '15px' }}>Ostatní banky (KB, ČSOB, Česká spořitelna, Raiffeisenbank)</h2>
+          <h2 style={{ margin: 0, fontSize: '15px' }}>Ostatní banky — Salt Edge</h2>
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+            Hlavní bankovní agregátor appky (rozhodnutí 7.10.2026). Appka sama není licencovaný
+            poskytovatel platebních informačních služeb — jede přes partnerský program Salt Edge.
+            Appka nabízí jen banky, které náš partnerský účet doopravdy potvrdil, a jen pro firemní
+            účty — ne podle toho, co appka předpokládá.
+          </p>
+
+          {saltEdgeNakonfigurovano() ? (
+            smiPsat ? (
+              <form action={zahajitPripojeniSaltEdgeAkce} style={{ display: 'grid', gap: '12px' }}>
+                <input type="hidden" name="rozsah" value={rozsah} />
+                {volneUcty.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+                    Nejdřív založte platební účet (nebo uvolněte existující) na stránce{' '}
+                    <Link href={`/${rozsah}/finance/platby`} className="ft-tl">Platby</Link>.
+                  </p>
+                ) : bankySaltEdge.length === 0 ? (
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>
+                    Seznam bank se nepodařilo natáhnout, nebo náš partnerský účet pro ČR žádnou firemní banku nepotvrzuje.
+                    {chybaBankSaltEdge ? <span style={{ display: 'block', marginTop: '4px', color: 'var(--muted)' }}>({chybaBankSaltEdge})</span> : null}
+                  </p>
+                ) : (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                      <label>
+                        <span style={popisek}>Banka *</span>
+                        <select name="provider" required style={pole}>
+                          {bankySaltEdge.map((b) => (
+                            <option key={b.kod} value={`${b.kod}::${b.nazev}`}>
+                              {b.nazev}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span style={popisek}>Platební účet *</span>
+                        <select name="platebni_ucet_id" required style={pole}>
+                          {volneUcty.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.nazev}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                      Appka vás přesměruje přímo do vybrané banky, kde souhlas potvrdíte stejně jako v
+                      internetovém bankovnictví — jen ke ČTENÍ, appka nikdy nevidí přihlašovací údaje k vaší bance.
+                      Po návratu appka ještě chvíli čeká na potvrzení (asynchronní), ukáže se jako „Připojuje se…“.
+                    </p>
+                    <div>
+                      <button type="submit" className="ft-tl ft-tl-hlavni">Připojit účet</button>
+                    </div>
+                  </>
+                )}
+              </form>
+            ) : null
+          ) : (
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+              Appka nemá partnerský účet u Salt Edge (nejde o samoobslužné přihlášení — vyžaduje
+              pozvánku od Salt Edge). Appka ji sama nesmí vyžádat; jakmile vznikne, appce stačí
+              nastavit <code>SALTEDGE_APP_ID</code>/<code>SALTEDGE_SECRET</code>
+              (a pro webhook <code>SALTEDGE_WEBHOOK_URL</code>/<code>SALTEDGE_WEBHOOK_PUBLIC_KEY</code>) ve Vercelu.
+            </p>
+          )}
+        </div>
+
+        <div style={{ ...karta, display: 'grid', gap: '10px', opacity: 0.7 }}>
+          <h2 style={{ margin: 0, fontSize: '15px' }}>Enable Banking (přehodnocuje se)</h2>
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
             Appka sama není licencovaný poskytovatel platebních informačních služeb — jede přes
             zprostředkovatele Enable Banking. Jedno připojení pak odemkne všechny tyhle banky pro celou appku.

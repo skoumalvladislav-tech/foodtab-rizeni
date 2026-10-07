@@ -10,6 +10,7 @@ import { zasifrovat } from '@/lib/integrace-klice'
 import { overitPripojeniFio } from '@/lib/integrace-fio'
 import { synchronizovatFioPripojeni } from '@/lib/integrace-fio-sync'
 import { enableBankingProvider } from '@/lib/integrace-enablebanking'
+import { zahajitPripojeniSaltEdge, odvolatSouhlasSaltEdge } from '@/lib/integrace-saltedge'
 
 /**
  * Stejný vzor jako `zakladniAdresa` v nastaveni/lide/akce.ts (pozvánky
@@ -176,6 +177,100 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
 }
 
 /**
+ * Zahájení souhlasu u Salt Edge (rozhodnutí Šéfíka 7.10.2026, hlavní
+ * bankovní agregátor). Appka založí `integrace_pripojeni` se stavem
+ * `pripojuje_se`, STEJNĖ jako u Enable Banking — ale AUTORITATIVNÍ
+ * potvrzení `stav='pripojeno'` tady nezapisuje návrat z banky
+ * (`/api/integrace/saltedge/vratit`, nepodepsaný), zapisuje ho
+ * výhradně podepsaný webhook (`/api/integrace/saltedge/webhook`,
+ * dokumentace: „správa připojení je asynchronní"). Appka páruje
+ * webhook s tímhle připojením přes `tenant_id` (Salt Edge `customer_id`)
+ * + `stav='pripojuje_se'`, ne přes id v URL — Salt Edge žádné appčino
+ * id v redirectu nezaručuje.
+ */
+export async function zahajitPripojeniSaltEdgeAkce(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const platebniUcetId = String(formData.get('platebni_ucet_id') ?? '')
+  // Appka kóduje banku jako "kod::nazev" v jedné hodnotě <select> — appka
+  // je čistý server komponent (žádný klientský JS), tohle je nejlevnější
+  // způsob, jak formulář bez JS pošle appce oboje najednou.
+  const [providerCode, nazevBanky] = String(formData.get('provider') ?? '').split('::')
+
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  if (!platebniUcetId || !providerCode) {
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Vyberte platební účet a banku.')}`)
+  }
+
+  const { data: pripojeni, error: chybaPripojeni } = await supabase
+    .from('integrace_pripojeni')
+    .insert({
+      tenant_id: tenantId,
+      oblast: 'banka',
+      poskytovatel: 'saltedge',
+      rezim: 'zakaznicky',
+      nazev: nazevBanky ? `${nazevBanky} (Salt Edge)` : 'Salt Edge',
+      platebni_ucet_id: platebniUcetId,
+      stav: 'pripojuje_se',
+      externi_ucet: { provider_code: providerCode, nazev_banky: nazevBanky },
+      capabilities: { cteni: true, zapis: false, inkrementalni_sync: true, firemni_ucty: true },
+    })
+    .select('id')
+    .single()
+
+  if (chybaPripojeni || !pripojeni) {
+    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
+  }
+
+  const zaklad = await zakladniAdresa()
+  const navratovaAdresa = `${zaklad}/api/integrace/saltedge/vratit?rozsah=${encodeURIComponent(rozsah)}`
+
+  const vysledek = await zahajitPripojeniSaltEdge(navratovaAdresa, tenantId, providerCode)
+  if (vysledek.stav === 'chyba') {
+    await supabase.from('integrace_pripojeni').update({ stav: 'chyba', posledni_chyba: vysledek.duvod }).eq('id', pripojeni.id)
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(vysledek.duvod)}`)
+  }
+
+  redirect(vysledek.presmerovatNa)
+}
+
+/**
+ * Výběr konkrétního účtu u Salt Edge PO dokončeném souhlasu — appka
+ * jedno `connection_id` (od banky) může vracet víc účtů, appka si
+ * nevybírá sama, nechá to na klientovi (zadání §2: „průvodce...
+ * výběr zdrojů"). `account_id` appka doplní do `externi_ucet`, teprve
+ * od té chvíle ví synchronizační job, který konkrétní účet stahovat.
+ */
+export async function vybratUcetSaltEdge(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const accountId = String(formData.get('account_id') ?? '').trim()
+
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  const { data: pripojeni } = await supabase
+    .from('integrace_pripojeni')
+    .select('externi_ucet')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .eq('stav', 'pripojeno')
+    .maybeSingle()
+
+  if (!pripojeni || !accountId) {
+    redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Připojení nepatří vaší firmě, nebo účet nebyl vybrán.')}`)
+  }
+
+  await supabase
+    .from('integrace_pripojeni')
+    .update({ externi_ucet: { ...(pripojeni.externi_ucet as Record<string, unknown>), account_id: accountId } })
+    .eq('id', id)
+
+  revalidatePath(`/${rozsah}/finance/integrace/banka`)
+  redirect(`/${rozsah}/finance/integrace/banka`)
+}
+
+/**
  * Manuální synchronizace — STEJNÁ cesta jako naplánovaná úloha
  * (lib/integrace-fio-sync.ts), jen spuštěná z tlačítka po ověření
  * integrace.manage. `synchronizovatFioPripojeni` běží přes
@@ -235,10 +330,34 @@ export async function upravitIntervalSynchronizace(formData: FormData): Promise<
   redirect(`/${rozsah}/finance/integrace/banka`)
 }
 
+/**
+ * Odpojení — u Salt Edge appka NEJDŘÍV odvolá souhlas u poskytovatele
+ * (`odvolatSouhlasSaltEdge`, zadání §6: „bezpečně zpracuj... odvolání
+ * souhlasu") a TEPRVE PAK smaže lokální tajemství. Chybu při odvolání
+ * appka appka nahlásí, ne tiše pokračuje — odpojení v appce bez
+ * odvolání u banky by nechalo souhlas živý na druhé straně.
+ */
 export async function odpojitBankovniUcet(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
   const { supabase, tenantId } = await pripravit(rozsah)
+
+  const { data: pripojeni } = await supabase
+    .from('integrace_pripojeni')
+    .select('poskytovatel, externi_ucet')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+
+  if (pripojeni?.poskytovatel === 'saltedge') {
+    const consentId = (pripojeni.externi_ucet as Record<string, unknown> | null)?.consent_id as string | undefined
+    if (consentId) {
+      const vysledek = await odvolatSouhlasSaltEdge(consentId)
+      if (vysledek.stav === 'chyba') {
+        redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(`Odvolání souhlasu u Salt Edge se nepodařilo: ${vysledek.duvod}`)}`)
+      }
+    }
+  }
 
   const { error: chybaSmazani } = await supabase.rpc('integrace_smaz_tajemstvi', { p_pripojeni: id })
   if (chybaSmazani) {

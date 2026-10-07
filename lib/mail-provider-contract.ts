@@ -7,26 +7,37 @@
  * pro přeposílání faktur).
  *
  * NEIMPLEMENTOVÁNO — ŽÁDNÝ ADAPTÉR TOHLE ROZHRANÍ DNES NEPOUŽÍVÁ. Je to
- * kontraktová kostra pro budoucí práci, ne hotová integrace. Důvody:
+ * kontraktová kostra pro budoucí práci, ne hotová integrace.
  *
- * 1. OTEVŘENÁ ARCHITEKTONICKÁ OTÁZKA (čeká na Šéfíka,
- *    docs/integrace-modul-plan.md, oddíl "Otázky pro Šéfíka"): OCR čtení
- *    e-mailových faktur dnes běží mimo tenhle repozitář, v n8n, a píše
- *    do ODDĚLENÉ databáze Faktur (`lib/supabase/faktury.ts`). Appka by
- *    tímhle kontraktem mohla buď (a) postavit VLASTNÍ příjem e-mailu
- *    (Graph/Gmail/IMAP → Storage → OCR), nebo (b) zůstat na n8n pipeline
- *    a jen rozšířit, co appka z Faktur-DB čte/zobrazuje. Tohle je
- *    rozhodnutí s velkým dopadem (duplicitní/konkurenční pipeline), ne
- *    implementační detail — appka ho nedělá jednostranně.
- * 2. Appka NEMÁ OAuth registraci u Microsoft Graph ani Gmail API — ty
- *    vyžadují ověření aplikace u poskytovatele (ne jen kód), skutečná
- *    externí registrace/schválení, žádný chybějící soubor.
+ * UPŘESNĖNÍ ŠÉFÍKA (7.10.2026): napojení e-mailu má appka řešit přes
+ * NASTAVENÍ POŠTOVNÍHO SERVERU (IMAP — hostitel, port, TLS, přihlašovací
+ * jméno, heslo/aplikační heslo zadané klientem), ne jako primárně
+ * závislé na OAuth registraci appky u Microsoft Graph/Gmail API. `imap`
+ * je proto PRVNÍ volba `ZpusobPripojeniMail`, ne poslední — appka
+ * uloženou přihlašovací dvojici zašifruje stejným vzorem jako Fio token
+ * (`lib/integrace-klice.ts`), appka se nikdy nepřihlašuje jménem
+ * hlavního e-mailového účtu klienta přes prohlížeč. `oauth_graph`/
+ * `oauth_gmail` zůstávají ve výčtu pro klienty, kteří OAuth vyžadují
+ * (Graph/Gmail postupně vypínají prostý IMAP+heslo) — appka k nim
+ * nemá vlastní OAuth registraci (skutečná externí registrace u
+ * poskytovatele, ne chybějící kód), proto zůstávají neimplementované,
+ * dokud nebude konkrétní klient, který je potřebuje.
+ *
+ * OTEVŘENÁ ARCHITEKTONICKÁ OTÁZKA (čeká na Šéfíka,
+ * docs/integrace-modul-plan.md, oddíl "Otázky pro Šéfíka"): OCR čtení
+ * e-mailových faktur dnes běží mimo tenhle repozitář, v n8n, a píše
+ * do ODDĚLENÉ databáze Faktur (`lib/supabase/faktury.ts`). Appka by
+ * tímhle kontraktem mohla buď (a) postavit VLASTNÍ příjem e-mailu
+ * (IMAP → Storage → OCR), nebo (b) zůstat na n8n pipeline a jen
+ * rozšířit, co appka z Faktur-DB čte/zobrazuje. Tohle je rozhodnutí
+ * s velkým dopadem (duplicitní/konkurenční pipeline), appka ho nedělá
+ * jednostranně.
  *
  * Kontrakt níž je proto JEN tvar kapabilit a normalizovaného výsledku —
- * žádný konkrétní HTTP klient, žádné vymyšlené endpointy.
+ * žádný konkrétní HTTP/IMAP klient, žádné vymyšlené endpointy.
  */
 
-export type ZpusobPripojeniMail = 'oauth_graph' | 'oauth_gmail' | 'imap' | 'presmerovaci_adresa'
+export type ZpusobPripojeniMail = 'imap' | 'presmerovaci_adresa' | 'oauth_graph' | 'oauth_gmail'
 
 export type SchopnostiMailProvidera = {
   zpusobPripojeni: ZpusobPripojeniMail

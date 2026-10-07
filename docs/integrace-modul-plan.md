@@ -28,6 +28,34 @@ Banka: AIS pouze čtení (beze změny z dřívějšího zadání, jen upřesněn
 Finbricks MULTIBANK / Salt Edge Partners jako hlavní kandidáti, GoCardless
 definitivně mimo, Fio a CSV import zůstávají jako alternativy).
 
+## Rozhodnutí a práce 7. 10. 2026 (večer) — banka přes Salt Edge, e-mail přes IMAP
+
+**Banka.** Enable Banking zůstalo zaseknuté u poskytovatele (manuální
+aktivace, mimo appku) — appka proto prověřila alternativy. GoCardless
+Bank Account Data je definitivně zavřený novým samoobslužným AIS
+projektům. Finbricks i Salt Edge Partners **nejsou samoobslužné** —
+obojí vyžaduje žádost o partnerský přístup/obchodní kontakt dřív, než
+vůbec existuje sandbox. Tink je samoobslužný, ale pokrytí ČR bank je
+nejisté. **Šéfík rozhodl (psaný pokyn 7.10.2026 večer): první bankovní
+integrace jde přes Salt Edge Partner Program / Partners Account
+Information API**, výslovně AIS-only (žádné platební příkazy), appka
+nesmí sama podepsat placenou smlouvu ani odeslat obchodní poptávku.
+
+Architektura je podle tohodle rozhodnutí postavená celá (seznam ČR
+bank, wizard „Připojit banku", výběr účtu, stránkovaná synchronizace
+pohybů, obnova zůstatků, odvolání souhlasu, podepsaný webhook jako
+jediný zdroj pravdy o stavu připojení) — **ale nic z toho appka
+nemohla ověřit proti živému prostředí ani sandboxu**, protože Salt
+Edge vyžaduje partnerskou pozvánku, kterou appka sama nesmí vyžádat.
+Detaily, otestovaný podpis webhooku a přesný seznam, co chybí pro
+první reálné připojení → `docs/hlaseni/stav-2026-10-07.md`.
+
+**E-mail.** IMAP konektor (ověření připojení + uložení zašifrovaných
+přihlašovacích údajů, bez čtení zpráv) je hotový a funkční — řeší
+dřívější „zatím nemohu připojit e-maily přes IMAP". Nemění nic na
+otevřené otázce P2 níž (vlastní příjem vs. n8n pipeline) — konektor
+jen ověřuje a ukládá schránku, nezačal nic číst.
+
 ## Audit existujícího stavu (provedeno 7. 10. 2026, 4 paralelní agenti)
 
 ### Banka — nejzralejší, ale se 4 konkrétními mezerami
@@ -98,13 +126,14 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
 ### Rezervace/CRM — nic neexistuje, musí se stavět od nuly
 
 - Žádná tabulka/obrazovka rezervací hostů.
-- `Choice`/`Choice QR` nikde v kódu — jen v CLAUDE.md a novém zadání.
-  Veřejné API dokumenty nedostupné (stránka `choiceqr.com` vrátila 403 na
-  pokus o přečtení — partnerský přístup vyžaduje přímý kontakt, který
-  appka sama nesmí navazovat, zadání §1: „neposílej obchodní poptávky").
-  **`ReservationProvider` kontrakt proto musí zůstat obecný (lifecycle
-  rezervace: vznik/změna/zrušení/stav/počet hostů/provozovna), ne
-  Choice-specifický, dokud nejsou k dispozici reálné dokumenty.**
+- **Upřesnění 7.10.2026: appka se NEVÁŽE na jednoho poskytovatele**
+  (Choice/Choice QR byl jen jeden z kandidátů v původním zadání, ne
+  rozhodnutí) — každý klient může mít jiného poskytovatele rezervací/
+  objednávek. `ReservationProvider` kontrakt je proto obecný (lifecycle
+  rezervace: vznik/změna/zrušení/stav/počet hostů/provozovna) od
+  začátku, ne odvozený z jednoho konkrétního produktu. Konkrétní adaptér
+  vzniká, až konkrétní klient přinese konkrétního poskytovatele
+  s dostupnou dokumentací.
 - `public.kontakty`/`kontakty_osoby` existují, ale jsou čistě B2B
   (dodavatel/odběratel/partner, firemní úroveň bez `branch_id`, žádné
   pole souhlasu) — **nepoužitelné pro hosty bez rozšíření.**
@@ -124,17 +153,23 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
 - Dnešní uložené pole: jen `amount` (celková částka), žádné položky
   dokladu, žádné rozlišení faktura/zálohová faktura/dobropis/dodací
   list/upomínka (zadání §8 to explicitně chce).
-- Appka NEMÁ Microsoft Graph/Gmail OAuth registraci ani IMAP schránku
-  vlastní — to je skutečná externí registrace/schválení (Microsoft/
-  Google vyžadují ověření aplikace), ne jen chybějící kód.
+- **Upřesnění 7.10.2026: appka napojuje e-mail PŘES NASTAVENÍ SERVERU
+  (IMAP — host/port/TLS/jméno/heslo zadané klientem), ne primárně přes
+  OAuth app registraci appky.** To zásadně snižuje vnější blokátor —
+  appka nepotřebuje schválení u Microsoftu/Googlu k tomu, aby klient
+  mohl napojit IMAP schránku svým vlastním (přednostně aplikačním)
+  heslem, zašifrovaným stejně jako Fio token. `oauth_graph`/`oauth_gmail`
+  zůstávají v `MailProvider` kontraktu pro klienty, které IMAP+heslo
+  nepodporují (Graph/Gmail postupně vypínají prostý IMAP), ale appka
+  k nim nemá vlastní OAuth registraci — ty se nestaví, dokud nebude
+  konkrétní klient, který je potřebuje.
 - Vzor uploadu příloh (`lib/komunikace/prilohy.ts` +
   `20260921130000_prilohy.sql`) je čistý, znovupoužitelný předpis pro
   ukládání e-mailových příloh do Storage appky, KDYBY appka převzala
   příjem e-mailu sama (místo n8n) — rozhodnutí o tomhle architektonickém
-  posunu (appka vlastní IMAP/Graph/Gmail napojení vs. zůstat na n8n
-  pipeline a jen rozšířit, co appka z Faktur-DB čte) **čeká na Šéfíka**,
-  je to příliš velký zásah, aby se udělal jednostranně — viz „Otázky
-  pro Šéfíka" níž.
+  posunu (appka vlastní IMAP napojení vs. zůstat na n8n pipeline a jen
+  rozšířit, co appka z Faktur-DB čte) **čeká na Šéfíka**, je to příliš
+  velký zásah, aby se udělal jednostranně — viz „Otázky pro Šéfíka" níž.
 
 ### Bezpečnost/provoz — vzory, žádná nová obecná abstrakce
 
@@ -166,6 +201,23 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
    Fakturách (dřív zůstávalo „Uhrazeno" i po zrušení jediné platby).
 8. Zastaralý/matoucí komentář o `integrace-gocardless.ts` (nikdy
    nevzniklo) opraven v `lib/integrace-fio.ts`.
+9. Rezervace/pokladna reframovány obecně (žádný konkrétní poskytovatel
+   jmenovaný natvrdo), `MailProvider` reframováno na IMAP jako primární
+   cestu — hlavičky kontraktů + UI text (viz oddíl výš).
+10. IMAP e-mailový konektor (`lib/integrace-mail-imap.ts`, akce+UI pod
+    `/finance/integrace/email`) — živé ověření připojení (TLS/STARTTLS,
+    přihlášení, výpis složek, odhlášení), uložení zašifrovaných
+    přihlašovacích údajů. Čtení zpráv NEIMPLEMENTOVÁNO (čeká na P2
+    rozhodnutí níž).
+11. Salt Edge adaptér podle rozhodnutí výš — `lib/integrace-saltedge.ts`
+    (seznam ČR bank, zahájení připojení přes Connect Widget, stránkovaná
+    `nactiTransakceSaltEdge`, odvolání souhlasu, ověření podpisu webhooku
+    RSA-SHA256), `lib/integrace-saltedge-sync.ts` (sync job po vzoru
+    Fio), `app/api/integrace/saltedge/webhook` (podepsaný, autoritativní
+    stav připojení) + `/vratit` (lehký, neautoritativní návrat z banky),
+    UI wizard a výběr účtu v `.../banka/{akce.ts,page.tsx}`, napojeno do
+    cron úlohy `banka-synchronizace`. **Postaveno, ne ověřeno** — žádný
+    přístup k partnerskému API dnes appka nemá (viz oddíl výš).
 
 **Ověřeno jen přes PGlite dosud** — žádný `db push` neproběhl, nic
 z tohodle nebylo potvrzeno proti reálnému Postgresu. Commit `2e43e2b`
@@ -179,6 +231,16 @@ katalog se jim rozešel, spadlo 30 scénářů kaskádou), a `krok89`
 mazání `auth.users`/`profiles` v úklidu narazilo na PGlite referenční
 kvirk — opraveno tak, že se (stejně jako `krok30`/`krok73`) tyhle
 jednorázové testovací identity v úklidu nemažou.
+
+**Body 9–11 (IMAP, Salt Edge) nemění žádnou migraci** — žádné nové
+`krokN_scenar.sql`, PGlite počet výš se jich netýká. Vlastní ověření:
+`node --experimental-strip-types --conditions=react-server
+scripts/integrace-saltedge.test.mjs` (6 kontrol — platný podpis +
+5 schválných rozbití podpisu webhooku, všechny OK), `tsc --noEmit`
+a `eslint` čisté na celé nové dávce souborů (Salt Edge i IMAP). Nic
+nebylo spuštěno proti živému Salt Edge API ani proti reálné IMAP
+schránce — appka na to dnes nemá přístupy (banka) nebo klienta
+(e-mail), kteří by appku ověřili v souvislosti s reálnými daty.
 
 ## Co zbývá (prioritizovaný seznam, ne nutně v tomhle pořadí)
 
@@ -200,55 +262,92 @@ jednorázové testovací identity v úklidu nemažou.
 - [x] `interval_synchronizace_minut` na `integrace_pripojeni` + UI +
       úprava sync joblogiky (commit `cf99a57`).
 - [ ] ~~Surfacing `souhlas_platny_do` v UI~~ — ODLOŽENO, ne zapomenuto:
-      žádný dnešní adaptér (Fio, Enable Banking) tohle pole ve
-      skutečnosti NEPLNÍ (Fio token nemá zjistitelnou expiraci přes
-      API, Enable Banking se nikdy neověřilo proti živé bance), takže
-      UI by dnes ukazovalo jen „neznámé" všude — nic by appka tím
-      nezlepšila, jen přidala prázdný řádek na obrazovku. Čeká na
-      skutečného poskytovatele s konkrétní hodnotou k zobrazení.
+      žádný dnešní adaptér (Fio, Enable Banking, ani nový Salt Edge)
+      tohle pole ve skutečnosti NEPLNÍ (Fio token nemá zjistitelnou
+      expiraci přes API, Enable Banking se nikdy neověřilo proti živé
+      bance, Salt Edge consent expiraci v dokumentaci Partners API
+      nevrací jako pole appka by mohla zapsat bez ověření proti živému
+      účtu), takže UI by dnes ukazovalo jen „neznámé" všude — nic by
+      appka tím nezlepšila, jen přidala prázdný řádek na obrazovku.
+      Čeká na skutečného poskytovatele s konkrétní hodnotou k zobrazení.
 - [ ] ~~`integrace_fronta` tabulka~~ — ODLOŽENO: žádný dnešní kód by ji
       nečetl ani nezapisoval (nic nepřijímá webhooky, e-mailová
       architektura není rozhodnutá) — postavit frontu bez volajícího
       je přesně ta spekulativní infrastruktura, které se appka
       vyhýbá. Staví se, až bude mít co doručovat.
 
+### Upřesnění 7.10.2026 (Šéfík) — mění prioritu níže
+
+- **Rezervace**: appka se neváže na jednoho poskytovatele (Choice byl
+  jen kandidát, ne rozhodnutí) — každý klient může přinést jiného.
+  Žádné „čeká na přístup k X" už tu nedává smysl, dokud nepřijde
+  konkrétní klient s konkrétním poskytovatelem.
+- **E-mail**: napojení přes NASTAVENÍ SERVERU (IMAP — host/port/TLS/
+  jméno/heslo klienta), ne primárně přes OAuth app appky. Tím padá
+  největší vnější blokátor (schválení u Microsoftu/Googlu) — IMAP
+  konektor je teď P0/P1 práce (appka ho může postavit), ne čekání na
+  externí registraci. Otevřená architektonická otázka (vlastní příjem
+  vs. n8n) ale ZŮSTÁVÁ, viz P2 níž — IMAP konektor by k ní měl
+  směřovat, ne ji obejít tichým druhým příjmem.
+- **Pokladna**: potvrzeno — přes API nebo jinak podle možností
+  konkrétního poskytovatele, žádná změna (kontrakt už byl obecný).
+- **Banka**: potřebovala se „rozchodit" — produkční blokátor byl
+  chybějící `INTEGRACE_KLIC_SIFRY` ve Vercelu (OPRAVENO, nastaveno a
+  nasazeno 7.10.2026 se svolením, redeploy proveden a ověřen). Druhý
+  blokátor (Enable Banking zaseknuté u poskytovatele) vyřešen
+  rozhodnutím výměnit primárního poskytovatele za Salt Edge — viz
+  oddíl „Rozhodnutí a práce 7.10.2026 (večer)" nahoře.
+
 ### P1 — vyžaduje externí registraci/přístup, appka zatím nemá
 
 - [ ] Dotykačka: partnerská/test licence (appka nesmí sama žádat o
       obchodní podmínky — konkrétní otázky pro Šéfíka níž).
-- [ ] Choice/Choice QR: žádná veřejná dokumentace, nutný přímý kontakt.
-- [ ] Microsoft Graph / Gmail API: OAuth app registrace + schválení.
-- [ ] Finbricks MULTIBANK / Salt Edge Partners: obchodní rozhodnutí,
-      viz dřívější `docs/hlaseni/banka-poskytovatele-2026-10-04.md`.
-- [ ] Enable Banking: aktivace u poskytovatele (appka to nemůže udělat
+- [ ] **Salt Edge Partners**: ROZHODNUTO 7.10.2026 (Šéfík) jako první
+      bankovní integrace — architektura hotová (viz „Co je HOTOVO",
+      body 9–11), ale appka nemá partnerskou pozvánku a nesmí si ji
+      sama vyžádat ani podepsat placenou smlouvu. Přesný seznam, co
+      chybí pro první reálné připojení → `docs/hlaseni/stav-2026-10-07.md`.
+- [ ] Enable Banking: DEMOVÁNO na druhou volbu (přehodnocuje se,
+      nevyřazeno úplně) — appka k němu nepokročí, dokud nebude Salt
+      Edge vyzkoušený. Aktivace u poskytovatele (appka to nemůže udělat
       sama, čeká na krok mimo appku).
+- [ ] Microsoft Graph / Gmail API — jen pro klienty, kteří nemůžou
+      použít IMAP+heslo (viz P2, IMAP je teď primární cesta).
 
 ### P2 — architektonické rozhodnutí čeká na Šéfíka
 
-- [ ] E-mail/OCR faktur: appka postaví VLASTNÍ příjem (IMAP/Graph/Gmail
-      + Storage dle vzoru `prilohy.ts`), nebo zůstává na n8n pipeline a
-      jen se rozšíří, co appka z Faktur-DB čte/zobrazuje (rozlišení
-      typů dokladu, dedup podle hashe přílohy)? Tohle je velké
-      rozhodnutí — n8n pipeline dnes FUNGUJE a appka ji nesmí
-      duplikovat bezhlavě.
+- [ ] E-mail/OCR faktur: appka postaví VLASTNÍ příjem (IMAP + Storage
+      dle vzoru `prilohy.ts`), nebo zůstává na n8n pipeline a jen se
+      rozšíří, co appka z Faktur-DB čte/zobrazuje (rozlišení typů
+      dokladu, dedup podle hashe přílohy)? Tohle je velké rozhodnutí —
+      n8n pipeline dnes FUNGUJE a appka ji nesmí duplikovat bezhlavě.
+      IMAP konektor (host/port/TLS/přihlašovací údaje) je teď technicky
+      bez externí registrace, ale POČKÁ na tohle rozhodnutí, ať appka
+      nepostaví konkurenční pipeline bokem.
 - [ ] Víc právních subjektů pod jedním tenantem (dnes `tenant_id` ==
       právní subjekt 1:1) — potřebné, než bude „právní subjekt" ve
       formuláři Připojit banku znamenat něco jiného než firmu samu.
 
 ## Otázky pro Šéfíka (do `docs/hlaseni/otazky.md` při psaní hlášení)
 
-1. E-mail/OCR architektura — vlastní příjem vs. rozšíření n8n pipeline
-   (P2 výš).
+1. E-mail/OCR architektura — vlastní příjem (IMAP) vs. rozšíření n8n
+   pipeline (P2 výš). IMAP teď nečeká na externí registraci, ale čeká
+   na tohle rozhodnutí.
 2. Dotykačka partnerská licence — appka nesmí sama vyplnit formulář s
    obchodními podmínkami, potřebuje konkrétní zadání/rozhodnutí, kdo to
    udělá.
-3. Choice/Choice QR — bez jakékoli veřejné dokumentace nejde nic víc
-   než obecný kontrakt; potvrzení, že tahle kategorie zůstává
-   „připraveno bez přístupu" dlouho, je v pořádku.
+3. Salt Edge partnerská pozvánka — appka nesmí sama žádat o partnerský
+   přístup/podepsat smlouvu. Potřebné údaje, jakmile pozvánka existuje
+   → `docs/hlaseni/stav-2026-10-07.md` (přesný seznam).
 
 ## Critical files
 
 - `lib/bank-provider-contract.ts` — vzor kontraktu pro nové providery.
+- `lib/integrace-saltedge.ts` + `lib/integrace-saltedge-sync.ts` +
+  `app/api/integrace/saltedge/{webhook,vratit}/route.ts` — celá Salt
+  Edge architektura, dokumentační mezery rozepsané přímo v komentářích.
+- `lib/integrace-mail-imap.ts` + `app/[rozsah]/finance/integrace/email/**`
+  — IMAP konektor (ověření + uložení, bez čtení zpráv).
 - `supabase/migrations/20261003100000_integrace_registr.sql` +
   `20261004100000_banka_napojeni.sql` + `20261007110000_integrace_opravneni_a_sjednoceni.sql`
   — celý registr připojení/tajemství + dnešní opravy.
