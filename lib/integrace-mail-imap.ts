@@ -20,7 +20,7 @@
 
 import 'server-only'
 
-import { ImapFlow } from 'imapflow'
+import { ImapFlow, type ImapFlowOptions } from 'imapflow'
 
 export type ZabezpeceniImap = 'tls' | 'starttls'
 
@@ -51,6 +51,34 @@ export function hlaskaProChybu(e: unknown): string {
   return `Připojení se nepodařilo: ${zprava}`
 }
 
+/** Strop na jednu odpověď serveru — n8n na téhle práci padal na nedostatek paměti (UID 4365). */
+export const MAX_VELIKOST_LITERALU = 40 * 1024 * 1024
+
+/**
+ * Nastavení spojení — jedno místo pro ověření i stahování dokladů.
+ *
+ * `doSTARTTLS: true` u STARTTLS je povinné: bez něj imapflow při
+ * serveru, který STARTTLS neohlásí (nebo kterému to útočník na cestě
+ * z nabídky vyškrtne), pokračuje NEŠIFROVANĚ a heslo odejde v čistém
+ * textu. S ním spojení raději spadne.
+ */
+export function moznostiImap(prihlaseni: PrihlaseniImap): ImapFlowOptions {
+  return {
+    host: prihlaseni.host,
+    port: prihlaseni.port,
+    secure: prihlaseni.zabezpeceni === 'tls',
+    ...(prihlaseni.zabezpeceni === 'starttls' ? { doSTARTTLS: true } : {}),
+    auth: { user: prihlaseni.uzivatel, pass: prihlaseni.heslo },
+    logger: false,
+    connectionTimeout: 20_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 60_000,
+    disableAutoIdle: true,
+    maxLiteralSize: MAX_VELIKOST_LITERALU,
+    maxResponseSize: MAX_VELIKOST_LITERALU + 1024 * 1024,
+  }
+}
+
 /**
  * Živé ověření: přihlásí se, vybere INBOX (bez čtení zpráv), vrátí
  * seznam dostupných složek, a hned se odhlásí. Appka tímhle NIKDY
@@ -58,17 +86,15 @@ export function hlaskaProChybu(e: unknown): string {
  * fungují.
  */
 export async function overitPripojeniImap(prihlaseni: PrihlaseniImap): Promise<VysledekOvereniImap> {
-  const klient = new ImapFlow({
-    host: prihlaseni.host,
-    port: prihlaseni.port,
-    secure: prihlaseni.zabezpeceni === 'tls',
-    auth: { user: prihlaseni.uzivatel, pass: prihlaseni.heslo },
-    logger: false,
-  })
+  const klient = new ImapFlow(moznostiImap(prihlaseni))
 
   try {
     await klient.connect()
     const slozky = (await klient.list()).map((s) => s.path)
+    // Hlavička slibuje „vybere INBOX" — bez tohohle by se ověřilo jen
+    // přihlášení, ne že účet smí schránku číst. Jen pro čtení (EXAMINE).
+    const zamek = await klient.getMailboxLock('INBOX', { readOnly: true })
+    zamek.release()
     await klient.logout()
     return { stav: 'ok', slozky }
   } catch (e) {
