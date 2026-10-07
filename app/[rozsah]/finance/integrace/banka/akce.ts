@@ -46,11 +46,20 @@ async function pripravit(rozsah: string) {
  * token zašifruje a uloží první zůstatkový snapshot. Neúspěšné
  * ověření nezaloží nic polorozbitého.
  */
+/** Prázdné/nulové/záporné → appka žádný vlastní odstup nevynucuje (NULL, ne 0 — 0 minut by znamenalo „pokaždé", což appka nikdy nedomýšlí sama). */
+function intervalSynchronizaceZFormulare(formData: FormData): number | null {
+  const text = String(formData.get('interval_synchronizace_minut') ?? '').trim()
+  if (!text) return null
+  const cislo = Number(text)
+  return Number.isFinite(cislo) && cislo > 0 ? Math.round(cislo) : null
+}
+
 export async function pripojitFioUcet(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const platebniUcetId = String(formData.get('platebni_ucet_id') ?? '')
   const token = String(formData.get('token') ?? '').trim()
   const nazev = String(formData.get('nazev') ?? '').trim()
+  const intervalSynchronizaceMinut = intervalSynchronizaceZFormulare(formData)
 
   const { supabase, tenantId } = await pripravit(rozsah)
 
@@ -80,6 +89,7 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
       capabilities: { cteni: true, zapis: false, inkrementalni_sync: true, firemni_ucty: true },
       posledni_test_kdy: new Date().toISOString(),
       posledni_test_ok: true,
+      interval_synchronizace_minut: intervalSynchronizaceMinut,
     })
     .select('id')
     .single()
@@ -198,6 +208,31 @@ export async function synchronizovatTeto(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/finance/integrace/banka`)
   redirect(`/${rozsah}/finance/integrace/banka?${parametr}`)
+}
+
+/**
+ * Změna vlastního odstupu synchronizace existujícího připojení (zadání
+ * §2) — appka ho nenastavuje jen jednou při vzniku, klient si ho může
+ * kdykoli rozmyslet. Prázdné pole = appka se vrátí k tomu, že si žádný
+ * vlastní odstup nevynucuje (řídí se jen frekvencí naplánované úlohy).
+ */
+export async function upravitIntervalSynchronizace(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const intervalSynchronizaceMinut = intervalSynchronizaceZFormulare(formData)
+
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  const { error } = await supabase
+    .from('integrace_pripojeni')
+    .update({ interval_synchronizace_minut: intervalSynchronizaceMinut })
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+
+  if (error) redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Interval se nepodařilo uložit.')}`)
+
+  revalidatePath(`/${rozsah}/finance/integrace/banka`)
+  redirect(`/${rozsah}/finance/integrace/banka`)
 }
 
 export async function odpojitBankovniUcet(formData: FormData): Promise<void> {
