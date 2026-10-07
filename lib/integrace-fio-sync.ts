@@ -136,7 +136,7 @@ export async function synchronizovatFioPripojeni(integracePripojeniId: string): 
       p_davka: davka.id,
       p_zdroj: 'fio_api',
       p_radky: vysledekFio.radky.map((r) => ({
-        datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru,
+        datum: r.datum, smer: r.smer, castka_haleru: r.castkaHaleru, mena: r.mena,
         protistrana: r.protistrana, vs: r.vs, poznamka: r.poznamka, externi_id: r.externiId,
       })),
     })
@@ -166,19 +166,40 @@ export async function synchronizovatFioPripojeni(integracePripojeniId: string): 
   return dokoncit({ stav: 'ok', pocetNovychRadku: pocetNovych })
 }
 
-/** Všechna aktivní Fio připojení napříč VŠEMI tenanty — appka je zpracuje jedno po druhém (appka je read-only, žádný paralelní zápis do stejné banky). */
+/**
+ * Je čas synchronizovat tohle připojení znovu? Čistá logika (žádné IO),
+ * testovatelná bez databáze — `interval_synchronizace_minut` je
+ * volitelný VLASTNÍ odstup per připojení (zadání §2), navíc k tomu, jak
+ * často vůbec běží naplánovaná úloha (to řídí jen `.github/workflows/`,
+ * appka to tady nezdvojuje).
+ */
+export function jeNaCaseSynchronizovat(
+  posledniSyncKdy: string | null,
+  intervalSynchronizaceMinut: number | null,
+  ted: Date = new Date(),
+): boolean {
+  if (!posledniSyncKdy) return true
+  if (intervalSynchronizaceMinut === null) return true
+  const uplynuloMinut = (ted.getTime() - new Date(posledniSyncKdy).getTime()) / 60_000
+  return uplynuloMinut >= intervalSynchronizaceMinut
+}
+
+/** Všechna aktivní Fio připojení napříč VŠEMI tenanty, u kterých už má smysl zkusit sync — appka je zpracuje jedno po druhém (appka je read-only, žádný paralelní zápis do stejné banky). */
 export async function vsechnaAktivniFioPripojeni(): Promise<{ id: string }[]> {
   const supabase = klientSluzby()
   if (!supabase) return []
 
   const { data } = await supabase
     .from('integrace_pripojeni')
-    .select('id')
+    .select('id, posledni_sync_kdy, interval_synchronizace_minut')
     .eq('oblast', 'banka')
     .eq('rezim', 'zakaznicky')
-    .like('poskytovatel', 'fio%')
+    .eq('poskytovatel', 'fio')
     .not('platebni_ucet_id', 'is', null)
     .is('odpojeno_kdy', null)
 
-  return data ?? []
+  const vsechna = (data ?? []) as { id: string; posledni_sync_kdy: string | null; interval_synchronizace_minut: number | null }[]
+  return vsechna
+    .filter((p) => jeNaCaseSynchronizovat(p.posledni_sync_kdy, p.interval_synchronizace_minut))
+    .map((p) => ({ id: p.id }))
 }

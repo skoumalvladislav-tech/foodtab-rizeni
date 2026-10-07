@@ -93,6 +93,12 @@ export const PERMISSIONS = [
   // stejně jako advances.manage je vlastní právo uvnitř provozu.
   'faktury.read',
   'faktury.manage',
+  // Integrace — správa NAPOJENÍ (registr, tajemství, test/odpojení),
+  // ODDĚLENÉ od finance.manage od 7.10.2026 (zadání
+  // Foodtab_Integrace_Claude_Code.md, oddíl 2): kdo smí přepojit banku
+  // nesmí tím automaticky získat právo mazat/opravovat faktury a
+  // platby, a naopak. Čtení registru zůstává na finance.read.
+  'integrace.manage',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]

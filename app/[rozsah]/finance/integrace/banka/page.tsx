@@ -10,7 +10,7 @@ import { jeNakonfigurovano as enableBankingNakonfigurovano, nactiBanky } from '@
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
-import { pripojitFioUcet, synchronizovatTeto, odpojitBankovniUcet, zahajitPripojeniEnableBanking } from './akce'
+import { pripojitFioUcet, synchronizovatTeto, odpojitBankovniUcet, zahajitPripojeniEnableBanking, upravitIntervalSynchronizace } from './akce'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,6 +70,7 @@ type Pripojeni = {
   posledni_sync_pocet_radku: number | null
   posledni_chyba: string | null
   platebni_ucet_id: string | null
+  interval_synchronizace_minut: number | null
 }
 type Ucet = { id: string; nazev: string }
 type Zustatek = { platebni_ucet_id: string; typ: string; castka_haleru: number; platny_k: string }
@@ -93,13 +94,13 @@ export default async function FinanceIntegraceBanka({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Banku vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
 
-  const smiPsat = canSee(pristup.ctx, 'finance.manage')
+  const smiPsat = canSee(pristup.ctx, 'integrace.manage')
   const supabase = await getServerSupabase()
 
   const [pripojeniRes, uctyRes] = await Promise.all([
     supabase
       .from('integrace_pripojeni')
-      .select('id, nazev, poskytovatel, stav, posledni_sync_kdy, posledni_sync_pocet_radku, posledni_chyba, platebni_ucet_id')
+      .select('id, nazev, poskytovatel, stav, posledni_sync_kdy, posledni_sync_pocet_radku, posledni_chyba, platebni_ucet_id, interval_synchronizace_minut')
       .eq('tenant_id', tenantId)
       .eq('oblast', 'banka')
       .is('odpojeno_kdy', null)
@@ -198,13 +199,29 @@ export default async function FinanceIntegraceBanka({
                       ? `Poslední synchronizace: ${new Date(p.posledni_sync_kdy).toLocaleString('cs-CZ')} (${p.posledni_sync_pocet_radku ?? 0} nových pohybů)`
                       : 'Ještě nesynchronizováno.'}
                     {p.posledni_chyba ? <span style={{ color: 'var(--bad)' }}> — {p.posledni_chyba}</span> : null}
+                    <span>
+                      {' '}· Vlastní odstup: {p.interval_synchronizace_minut ? `${p.interval_synchronizace_minut} min` : 'žádný (jen podle naplánované úlohy)'}
+                    </span>
                   </div>
                   {smiPsat ? (
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
                       <form action={synchronizovatTeto}>
                         <input type="hidden" name="rozsah" value={rozsah} />
                         <input type="hidden" name="pripojeni_id" value={p.id} />
                         <button type="submit" className="ft-tl">Synchronizovat teď</button>
+                      </form>
+                      <form action={upravitIntervalSynchronizace} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <input type="hidden" name="rozsah" value={rozsah} />
+                        <input type="hidden" name="id" value={p.id} />
+                        <input
+                          type="number"
+                          name="interval_synchronizace_minut"
+                          min={1}
+                          defaultValue={p.interval_synchronizace_minut ?? ''}
+                          placeholder="min"
+                          style={{ ...pole, width: '80px', minHeight: '36px' }}
+                        />
+                        <button type="submit" className="ft-tl">Uložit odstup</button>
                       </form>
                       <form action={odpojitBankovniUcet}>
                         <input type="hidden" name="rozsah" value={rozsah} />
@@ -251,6 +268,11 @@ export default async function FinanceIntegraceBanka({
             <label>
               <span style={popisek}>Token *</span>
               <input type="password" name="token" required autoComplete="off" style={pole} />
+            </label>
+
+            <label>
+              <span style={popisek}>Vlastní odstup synchronizace (minuty, volitelné)</span>
+              <input type="number" name="interval_synchronizace_minut" min={1} placeholder="prázdné = jen podle naplánované úlohy" style={pole} />
             </label>
 
             {volneUcty.length > 0 ? (

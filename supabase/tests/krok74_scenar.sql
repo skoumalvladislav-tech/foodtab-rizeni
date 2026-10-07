@@ -292,20 +292,19 @@ insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zd
 values (:'tenant', :'ucet', 'prijem', 60000, current_date, 'rucni')
 returning id as transakce_doplatek \gset
 
-select pg_temp.check('alokace přesahující NEZAPLACENÝ ZBYTEK faktury (50000 už alokováno, +60000 > 100000) spadne',
-  pg_temp.spadne_hlaskou(
-    format('select * from public.potvrdit_alokaci_platby(%L, %L, %L, %L, %L, %L)',
-      :'tenant', :'transakce_doplatek', 'FAKTURA-TEXT-123', 60000, 100000, null),
-    '23514', 'přesahuje nezaplacený zůstatek'));
-
 \echo ''
-\echo '-- doplatek přesně na zbytek (50000) dokončí fakturu --'
+\echo '-- doplatek PŘESAHUJE zbytek faktury (50000 už alokováno, +60000 > 100000) — appka od 7.10.2026 přeplatek NEODMÍTÁ --'
+-- Zadání (Foodtab_Integrace_Claude_Code.md, oddíl 7): „Podporuj...
+-- přeplatky." Appka dřív tenhle pokus zamítla (raise exception) — teď
+-- alokaci ULOŽÍ a vrátí částku navíc v `prebytek_haleru`, rozhodnutí
+-- co s penězi dál nechává na člověku.
 
-select alokovano_celkem_haleru as alokovano_2, plne_uhrazeno as plne_2
-  from public.potvrdit_alokaci_platby(:'tenant', :'transakce_doplatek', 'FAKTURA-TEXT-123', 50000, 100000, null) \gset
+select alokovano_celkem_haleru as alokovano_2, plne_uhrazeno as plne_2, prebytek_haleru as prebytek_2
+  from public.potvrdit_alokaci_platby(:'tenant', :'transakce_doplatek', 'FAKTURA-TEXT-123', 60000, 100000, null) \gset
 
-select pg_temp.check('po doplatku je alokováno celkem 100000', :'alokovano_2'::integer = 100000);
-select pg_temp.check('faktura je TEĎ plně uhrazená', :'plne_2'::boolean = true);
+select pg_temp.check('přeplatek se ULOŽÍ (50000+60000=110000), appka ho neodmítne', :'alokovano_2'::integer = 110000);
+select pg_temp.check('faktura je po přeplacení plně uhrazená', :'plne_2'::boolean = true);
+select pg_temp.check('appka nahlásí přeplatek 10000 (110000-100000), ne 0', :'prebytek_2'::integer = 10000);
 
 select pg_temp.check('dvě samostatné alokace, ne jedna přepsaná',
   (select count(*) from public.platby_faktury where faktura_id = 'FAKTURA-TEXT-123' and stav = 'potvrzeno') = 2);
@@ -321,10 +320,11 @@ select app.zrusit_alokaci_platby(:'tenant', :'alokace_doplatku', 'test: zkusmé 
 select pg_temp.check('zrušená alokace zůstává v tabulce (historie), jen se stavem zamitnuto',
   (select stav from public.platby_faktury where id = :'alokace_doplatku') = 'zamitnuto');
 
-select alokovano_celkem_haleru as alokovano_3
+select alokovano_celkem_haleru as alokovano_3, prebytek_haleru as prebytek_3
   from public.potvrdit_alokaci_platby(:'tenant', :'transakce_doplatek', 'FAKTURA-TEXT-123', 50000, 100000, null) \gset
 
-select pg_temp.check('po zrušení šlo stejnou částku alokovat znovu (uvolnilo se místo)', :'alokovano_3'::integer = 100000);
+select pg_temp.check('po zrušení šlo přesnou částku (bez přeplatku) alokovat znovu (uvolnilo se místo)', :'alokovano_3'::integer = 100000);
+select pg_temp.check('a tentokrát žádný přeplatek (přesně 100000)', :'prebytek_3'::integer = 0);
 
 
 \echo ''

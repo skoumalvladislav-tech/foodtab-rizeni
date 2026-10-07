@@ -37,6 +37,20 @@ ok('protistrana se přečetla', vysledek1.radky[0].protistrana === 'ABC s.r.o.')
 ok('VS se přečetl', vysledek1.radky[0].vs === '20260001')
 ok('externí id se přečetlo', vysledek1.radky[0].externiId === 'tx-001')
 ok('chybějící VS je prázdný řetězec, ne null', vysledek1.radky[1].vs === '')
+ok('bez sloupce Měna appka použije CZK (vlastní šablona, ne domýšlení kurzu)', vysledek1.radky[0].mena === 'CZK')
+
+console.log('\n== Sloupec Měna, když je v souboru ==')
+
+const CSV_MENA = [
+  'Datum;Částka;Měna;Protistrana;VS;Poznámka;Externí ID',
+  '15.3.2026;100;eur;Dodavatel GmbH;;Faktura;tx-eur-001',
+  '16.3.2026;200;;Tuzemský s.r.o.;;;tx-czk-001',
+].join('\r\n')
+
+const vysledekMena = naparsovatCsv(CSV_MENA)
+ok('žádné chyby', vysledekMena.chyby.length === 0)
+ok('měna se přečetla a převedla na velká písmena (eur → EUR)', vysledekMena.radky[0].mena === 'EUR')
+ok('prázdná buňka Měna padá na CZK, ne na prázdný řetězec', vysledekMena.radky[1].mena === 'CZK')
 
 console.log('\n== BOM na začátku souboru se odstraní ==')
 

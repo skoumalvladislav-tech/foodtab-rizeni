@@ -32,7 +32,7 @@ async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'finance.manage', rozsah)
+  const pristup = await zkusPristup(tenantId, 'integrace.manage', rozsah)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/integrace/banka`)
 
@@ -46,11 +46,20 @@ async function pripravit(rozsah: string) {
  * token zašifruje a uloží první zůstatkový snapshot. Neúspěšné
  * ověření nezaloží nic polorozbitého.
  */
+/** Prázdné/nulové/záporné → appka žádný vlastní odstup nevynucuje (NULL, ne 0 — 0 minut by znamenalo „pokaždé", což appka nikdy nedomýšlí sama). */
+function intervalSynchronizaceZFormulare(formData: FormData): number | null {
+  const text = String(formData.get('interval_synchronizace_minut') ?? '').trim()
+  if (!text) return null
+  const cislo = Number(text)
+  return Number.isFinite(cislo) && cislo > 0 ? Math.round(cislo) : null
+}
+
 export async function pripojitFioUcet(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
   const platebniUcetId = String(formData.get('platebni_ucet_id') ?? '')
   const token = String(formData.get('token') ?? '').trim()
   const nazev = String(formData.get('nazev') ?? '').trim()
+  const intervalSynchronizaceMinut = intervalSynchronizaceZFormulare(formData)
 
   const { supabase, tenantId } = await pripravit(rozsah)
 
@@ -68,7 +77,10 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
     .insert({
       tenant_id: tenantId,
       oblast: 'banka',
-      poskytovatel: `fio-${crypto.randomUUID().slice(0, 8)}`,
+      // Čistá hodnota — žádná náhodná přípona. Jedinečnost živého
+      // bankovního připojení od 7.10.2026 hlídá `platebni_ucet_id`
+      // (index integrace_pripojeni_banka_jeden_ucet), ne tenhle sloupec.
+      poskytovatel: 'fio',
       rezim: 'zakaznicky',
       nazev: nazev || `Fio — ${overeni.info.cisloUctu}`,
       platebni_ucet_id: platebniUcetId,
@@ -77,12 +89,13 @@ export async function pripojitFioUcet(formData: FormData): Promise<void> {
       capabilities: { cteni: true, zapis: false, inkrementalni_sync: true, firemni_ucty: true },
       posledni_test_kdy: new Date().toISOString(),
       posledni_test_ok: true,
+      interval_synchronizace_minut: intervalSynchronizaceMinut,
     })
     .select('id')
     .single()
 
   if (chybaPripojeni || !pripojeni) {
-    const zprava = chybaPripojeni?.code === '23505' ? 'Tahle oblast a poskytovatel už mají živé připojení.' : 'Připojení se nepodařilo založit.'
+    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
   }
 
@@ -133,7 +146,7 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
     .insert({
       tenant_id: tenantId,
       oblast: 'banka',
-      poskytovatel: `enablebanking-${crypto.randomUUID().slice(0, 8)}`,
+      poskytovatel: 'enablebanking',
       rezim: 'zakaznicky',
       nazev: `${aspspNazev} (Enable Banking)`,
       platebni_ucet_id: platebniUcetId,
@@ -145,7 +158,7 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
     .single()
 
   if (chybaPripojeni || !pripojeni) {
-    const zprava = chybaPripojeni?.code === '23505' ? 'Tahle oblast a poskytovatel už mají živé připojení.' : 'Připojení se nepodařilo založit.'
+    const zprava = chybaPripojeni?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent(zprava)}`)
   }
 
@@ -165,10 +178,10 @@ export async function zahajitPripojeniEnableBanking(formData: FormData): Promise
 /**
  * Manuální synchronizace — STEJNÁ cesta jako naplánovaná úloha
  * (lib/integrace-fio-sync.ts), jen spuštěná z tlačítka po ověření
- * finance.manage. `synchronizovatFioPripojeni` běží přes
+ * integrace.manage. `synchronizovatFioPripojeni` běží přes
  * `service_role` (sdílí kód s cron úlohou, která nemá session) a
  * dohledá připojení jen podle `id` — BEZ týhle kontroly by
- * `finance.manage` ve VLASTNÍ firmě stačilo k vyvolání synchronizace
+ * `integrace.manage` ve VLASTNÍ firmě stačilo k vyvolání synchronizace
  * CIZÍHO připojení, kdyby volající znal nebo uhodl jeho UUID.
  */
 export async function synchronizovatTeto(formData: FormData): Promise<void> {
@@ -195,6 +208,31 @@ export async function synchronizovatTeto(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/finance/integrace/banka`)
   redirect(`/${rozsah}/finance/integrace/banka?${parametr}`)
+}
+
+/**
+ * Změna vlastního odstupu synchronizace existujícího připojení (zadání
+ * §2) — appka ho nenastavuje jen jednou při vzniku, klient si ho může
+ * kdykoli rozmyslet. Prázdné pole = appka se vrátí k tomu, že si žádný
+ * vlastní odstup nevynucuje (řídí se jen frekvencí naplánované úlohy).
+ */
+export async function upravitIntervalSynchronizace(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const intervalSynchronizaceMinut = intervalSynchronizaceZFormulare(formData)
+
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  const { error } = await supabase
+    .from('integrace_pripojeni')
+    .update({ interval_synchronizace_minut: intervalSynchronizaceMinut })
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+
+  if (error) redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Interval se nepodařilo uložit.')}`)
+
+  revalidatePath(`/${rozsah}/finance/integrace/banka`)
+  redirect(`/${rozsah}/finance/integrace/banka`)
 }
 
 export async function odpojitBankovniUcet(formData: FormData): Promise<void> {

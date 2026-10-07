@@ -298,6 +298,9 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 88 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 88"; chybi=1; }
 
+          grep -qE '^[[:space:]]*== KROK 89 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 89"; chybi=1; }
+
           # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
           # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —
           # run.sh ho pouští až za provozními scénáři.

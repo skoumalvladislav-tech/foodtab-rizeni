@@ -37,6 +37,10 @@ const SOUBORY = [
   'app/[rozsah]/finance/faktury/akce.ts',
   'app/api/faktury/export/route.ts',
   'app/[rozsah]/dnes/page.tsx',
+  // Modul Platby (banka) čte/zapisuje invoices.status mimo modul Faktury
+  // od 20261004100000 (potvrditParovani) a od 7.10.2026 i zrusitAlokaci —
+  // izolace platí stejně, ať sahá odkudkoli.
+  'app/[rozsah]/finance/platby/akce.ts',
 ]
 
 console.log('\nKaždé .from(\'invoices\') má vedle sebe tenant_id (čtení/zápis přes .eq, insert přes pole objektu)')

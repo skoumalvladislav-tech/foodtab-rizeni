@@ -217,8 +217,11 @@ export const NABIDKA: Polozka[] = [
   { segment: 'finance/rozpocty', nazev: 'Rozpočty a controlling', kratky: 'Rozpočty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lupa' },
   { segment: 'finance/vybaveni', nazev: 'Vybavení', kratky: 'Vybavení', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'blesk' },
   // Vidět je má každý, kdo do Financí dosáhne — stejný vzor jako
-  // marketing/nastroje výš. Připojovat/odpojovat smí jen finance.manage,
-  // o to se stará obrazovka i serverová akce, ne tahle řádka.
+  // marketing/nastroje výš. Připojovat/odpojovat smí jen integrace.manage
+  // (ODDĚLENÉ od finance.manage od 7.10.2026), o to se stará obrazovka
+  // i serverová akce, ne tahle řádka. Čtyři kategorie zadání (pokladna/
+  // rezervace/banka/e-mail) žijí na téhle jedné stránce — rezervace jako
+  // „připravujeme", ostatní tři jako funkční registr/CSV/živý Fio.
   { segment: 'finance/integrace', nazev: 'Integrace', kratky: 'Integrace', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'kolo' },
   { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha' },
   // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.

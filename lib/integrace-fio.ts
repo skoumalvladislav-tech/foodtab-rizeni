@@ -10,7 +10,10 @@
  * nenabízí ani nevyžaduje, banka zůstává výhradně pro čtení, CLAUDE.md).
  * Ostatní banky (KB/ČSOB/ČS/Raiffeisenbank, PSD2 open banking) by appka
  * směla napojit jen přes licencovaného zprostředkovatele (AISP) —
- * viz `lib/integrace-gocardless.ts`, kostra.
+ * viz `lib/integrace-enablebanking.ts`. GoCardless byl jako kandidát
+ * definitivně vyřazen (nové registrace pro samostatné Bank Account
+ * Data zastavené, docs/hlaseni/stav-2026-10-06.md) — žádný
+ * `integrace-gocardless.ts` se proto nestaví.
  *
  * Token je vázaný na JEDEN konkrétní účet (ne na klienta) a omezený na
  * jedno volání za 30 sekund (HTTP 409 při porušení) — appka proto NIKDY
@@ -26,6 +29,7 @@
 import 'server-only'
 
 import type { RadekImportu } from './finance-csv-import.ts'
+import type { BankDataProvider, VysledekOvereni, VysledekTransakci, VysledekZustatku } from './bank-provider-contract.ts'
 
 const ZAKLAD = 'https://fioapi.fio.cz/v1/rest'
 
@@ -66,12 +70,21 @@ function hodnotaSloupce(t: FioTransakceRaw, index: number): unknown {
   return t[`column${index}`]?.value ?? null
 }
 
-/** Fio v JSONu vrací datum jako epoch v milisekundách (číslo), ne ISO text — na rozdíl od XML/CSV. */
+/**
+ * Fio v JSONu vrací datum jako epoch v milisekundách (číslo), ne ISO
+ * text — na rozdíl od XML/CSV. Epoch je PRAŽSKÁ půlnoc (ověřeno proti
+ * `API_Bankovnictvi.pdf`, kap. 5.3.1.6 — dotaz „od 26. 6. 2012" vrací
+ * `dateStart: 1340661600000`, což je `2012-06-26T00:00:00+02:00`).
+ * `toISOString().slice(0,10)` by vzal UTC den, a protože Praha je
+ * +1/+2 podle letního času, vyšel by o den dřív — ne jednou za čas,
+ * ale u KAŽDÉ transakce. `en-CA` formát dá rok-měsíc-den přímo
+ * v pražském pásmu, správně v zimě (CET) i v létě (CEST).
+ */
 function epochNaIsoDatum(hodnota: unknown): string | null {
   if (typeof hodnota !== 'number' || !Number.isFinite(hodnota)) return null
   const d = new Date(hodnota)
   if (Number.isNaN(d.getTime())) return null
-  return d.toISOString().slice(0, 10)
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(d)
 }
 
 function naHalereSeZnamenkem(objem: unknown): number | null {
@@ -122,6 +135,12 @@ export function naparsovatOdpovedFio(telo: unknown): FioVysledek {
       datum,
       smer: castkaSeZnamenkem < 0 ? 'vydaj' : 'prijem',
       castkaHaleru: Math.abs(castkaSeZnamenkem),
+      // Fio nedává měnu per transakci v tomhle výpisu — appka použije
+      // měnu ÚČTU (info.currency, o pár řádků výš ověřená jako string).
+      // Fio účet má jednu měnu; cizoměnová platba na něj dojde už
+      // přepočtená do měny účtu (appka si tohle nevymýšlí, jen ho
+      // nedomýšlí jako CZK natvrdo, jak appka dřív dělala).
+      mena: info.currency,
       protistrana: (typeof nazevProtiuctu === 'string' && nazevProtiuctu) || (typeof protiucet === 'string' && protiucet) || '',
       vs: String(hodnotaSloupce(t, SLOUPEC.vs) ?? ''),
       poznamka: String(hodnotaSloupce(t, SLOUPEC.zprava) ?? ''),
@@ -166,13 +185,18 @@ async function zavolatFioApi(url: string): Promise<FioVysledek> {
   return naparsovatOdpovedFio(telo)
 }
 
+/** Obecný dotaz na libovolné období — základ pro `nactiPosledniPohybyFio` i pro `fioProvider.nactiTransakce` (BankDataProvider kontrakt). Obě data `'YYYY-MM-DD'`. */
+export async function nactiPohybyFio(token: string, odIso: string, doIso: string): Promise<FioVysledek> {
+  return zavolatFioApi(`${ZAKLAD}/periods/${token}/${odIso}/${doIso}/transactions.json`)
+}
+
 /** Pohyby za posledních `POCET_DNU_ZPATKY` dní — bezpečně hluboko pod limity (90 dní, 50 000 pohybů). */
 export async function nactiPosledniPohybyFio(token: string): Promise<FioVysledek> {
   const dnes = new Date()
   const od = new Date(dnes)
   od.setDate(od.getDate() - POCET_DNU_ZPATKY)
   const naIso = (d: Date) => d.toISOString().slice(0, 10)
-  return zavolatFioApi(`${ZAKLAD}/periods/${token}/${naIso(od)}/${naIso(dnes)}/transactions.json`)
+  return nactiPohybyFio(token, naIso(od), naIso(dnes))
 }
 
 /**
@@ -182,5 +206,64 @@ export async function nactiPosledniPohybyFio(token: string): Promise<FioVysledek
  */
 export async function overitPripojeniFio(token: string): Promise<FioVysledek> {
   const dnes = new Date().toISOString().slice(0, 10)
-  return zavolatFioApi(`${ZAKLAD}/periods/${token}/${dnes}/${dnes}/transactions.json`)
+  return nactiPohybyFio(token, dnes, dnes)
+}
+
+/**
+ * `fioProvider` — Fio zabalený do `BankDataProvider` (zadání §3:
+ * „přidání nového adaptéru nesmí vyžadovat změnu párování nebo
+ * cashflow"). ČISTĚ ADITIVNÍ export — `pripojitFioUcet`/
+ * `synchronizovatFioPripojeni` dál volají `overitPripojeniFio`/
+ * `nactiPosledniPohybyFio` přímo jménem (ověřené, produkčně bojované
+ * cesty se tímhle nepřepisují), ale nový kód, co chce providery řešit
+ * obecně (a ne po jednom `if poskytovatel==='fio'`), má odsud kam sáhnout.
+ */
+export const fioProvider: BankDataProvider = {
+  klic: 'fio',
+  nazev: 'Fio banka',
+  schopnosti: {
+    zpusobPripojeni: 'rucni_token',
+    firemniUcty: true,
+    soukromeUcty: true,
+    dostupneZustatky: ['knihovni'],
+    historieDnu: POCET_DNU_ZPATKY,
+    vsReference: true,
+    pendingTransakce: false,
+    inkrementalniSync: true,
+  },
+
+  async overitToken(token: string): Promise<VysledekOvereni> {
+    const vysledek = await overitPripojeniFio(token)
+    if (vysledek.stav === 'chyba') return vysledek
+    return {
+      stav: 'ok',
+      ucty: [{
+        providerAccountId: vysledek.info.cisloUctu,
+        cisloUctu: vysledek.info.cisloUctu,
+        iban: null,
+        mena: vysledek.info.mena,
+        firemniUcet: null,
+      }],
+    }
+  },
+
+  async nactiZustatky(_ucet: string, token: string): Promise<VysledekZustatku> {
+    const vysledek = await overitPripojeniFio(token)
+    if (vysledek.stav === 'chyba') return vysledek
+    return {
+      stav: 'ok',
+      zustatky: [{
+        typ: 'knihovni',
+        castkaHaleru: vysledek.info.zustatekHaleru,
+        mena: vysledek.info.mena,
+        platnyK: new Date().toISOString(),
+      }],
+    }
+  },
+
+  async nactiTransakce(_ucet: string, token: string, od: string, doData: string): Promise<VysledekTransakci> {
+    const vysledek = await nactiPohybyFio(token, od, doData)
+    if (vysledek.stav === 'chyba') return vysledek
+    return { stav: 'ok', radky: vysledek.radky }
+  },
 }

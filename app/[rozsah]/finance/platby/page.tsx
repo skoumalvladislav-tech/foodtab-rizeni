@@ -131,9 +131,9 @@ async function nactiPotvrzeneAlokace(
 async function nactiNavrhyParovani(
   tenantId: string,
   transakce: readonly Transakce[],
-  jizSparovane: ReadonlySet<string>,
-): Promise<{ navrh: Navrh; faktura: KandidatFaktura }[]> {
-  if (!fakturyJsouNastavene()) return []
+  alokovanoMapa: ReadonlyMap<string, number>,
+): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[] }> {
+  if (!fakturyJsouNastavene()) return { navrhy: [], faktury: [] }
 
   let faktury: Faktura[] = []
   try {
@@ -145,10 +145,10 @@ async function nactiNavrhyParovani(
       .eq('is_archived', false)
     faktury = ((data ?? []) as Faktura[]).filter(jeNezaplacena)
   } catch {
-    return []
+    return { navrhy: [], faktury: [] }
   }
 
-  if (faktury.length === 0) return []
+  if (faktury.length === 0) return { navrhy: [], faktury: [] }
 
   const kandidati: KandidatFaktura[] = faktury.map((f) => ({
     id: f.id,
@@ -160,11 +160,15 @@ async function nactiNavrhyParovani(
 
   const vysledky: { navrh: Navrh; faktura: KandidatFaktura }[] = []
   for (const t of transakce) {
-    if (t.smer !== 'vydaj' || jizSparovane.has(t.id)) continue
+    // Jen plně nespárované NEBO částečně spárované s nevyčerpaným
+    // zbytkem (hromadná platba) — appka transakci nepustí z očí jen
+    // proto, že na ni leží JEDNA dřívější alokace.
+    const zbyva = t.castka_haleru - (alokovanoMapa.get(t.id) ?? 0)
+    if (t.smer !== 'vydaj' || zbyva <= 0) continue
     const kandidatTransakce: KandidatTransakce = {
       id: t.id,
       vs: t.vs,
-      castkaHaleru: t.castka_haleru,
+      castkaHaleru: zbyva,
       protistrana: t.protistrana,
       datum: t.datum,
     }
@@ -173,7 +177,7 @@ async function nactiNavrhyParovani(
     const faktura = kandidati.find((k) => k.id === navrh.fakturaId)
     if (faktura) vysledky.push({ navrh, faktura })
   }
-  return vysledky
+  return { navrhy: vysledky, faktury: kandidati }
 }
 
 export default async function FinancePlatby({
@@ -181,10 +185,10 @@ export default async function FinancePlatby({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; importovano?: string }>
+  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, importovano } = await searchParams
+  const { chyba, importovano, prebytek } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -198,7 +202,7 @@ export default async function FinancePlatby({
   const smiPsat = canSee(pristup.ctx, 'finance.manage')
   const supabase = await getServerSupabase()
 
-  const [ucty, transakceRes, sparovaneRes] = await Promise.all([
+  const [ucty, transakceRes, alokaceRes] = await Promise.all([
     supabase.from('platebni_ucty').select('id, nazev, typ, branch_id').eq('tenant_id', tenantId).eq('aktivni', true).order('nazev'),
     supabase
       .from('transakce')
@@ -207,15 +211,31 @@ export default async function FinancePlatby({
       .order('datum', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(30),
-    supabase.from('platby_faktury').select('transakce_id').eq('tenant_id', tenantId),
+    // Jen POTVRZENÉ alokace — zamítnutá (zrušená) alokace nesmí
+    // transakci navždy vyřadit z návrhů párování (nález 7.10.2026:
+    // dřív se počítala každá existující řádka bez ohledu na stav).
+    supabase.from('platby_faktury').select('transakce_id, castka_haleru').eq('tenant_id', tenantId).eq('stav', 'potvrzeno'),
   ])
 
   const platebniUcty = (ucty.data ?? []) as PlatebniUcet[]
   const transakce = (transakceRes.data ?? []) as Transakce[]
-  const jizSparovane = new Set(((sparovaneRes.data ?? []) as { transakce_id: string }[]).map((r) => r.transakce_id))
 
-  const navrhy = await nactiNavrhyParovani(tenantId, transakce, jizSparovane)
+  // Součet potvrzených alokací PER TRANSAKCE — appka podle toho pozná,
+  // kolik z platby ještě zbývá nepárováno (zadání oddíl 7: hromadná
+  // platba na víc faktur musí jít párovat opakovaně, dokud zbývá
+  // částka, ne jen jednou a pak transakce navždy zmizí z návrhů).
+  const alokovanoMapa = new Map<string, number>()
+  for (const r of (alokaceRes.data ?? []) as { transakce_id: string; castka_haleru: number }[]) {
+    alokovanoMapa.set(r.transakce_id, (alokovanoMapa.get(r.transakce_id) ?? 0) + r.castka_haleru)
+  }
+  const zbyvaNaTransakci = (t: Transakce) => t.castka_haleru - (alokovanoMapa.get(t.id) ?? 0)
+
+  const { navrhy, faktury: fakturyKandidati } = await nactiNavrhyParovani(tenantId, transakce, alokovanoMapa)
   const potvrzeneAlokace = await nactiPotvrzeneAlokace(tenantId, supabase)
+
+  // Pro ruční párování (hromadná platba) — jen výdaje s nevyčerpaným
+  // zbytkem, ať appka nenabízí platbu, která už je plně spárovaná.
+  const transakceSeZbytkem = transakce.filter((t) => t.smer === 'vydaj' && zbyvaNaTransakci(t) > 0)
 
   const dnes = new Date()
   const prvniDenMesice = `${dnes.getFullYear()}-${String(dnes.getMonth() + 1).padStart(2, '0')}-01`
@@ -234,6 +254,12 @@ export default async function FinancePlatby({
             Import hotový — zapsáno {importovano} {importovano === '1' ? 'nová platba' : 'nových plateb'}.
           </p>
         ) : null}
+        {prebytek ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>
+            Párování uloženo — faktura je přeplacená o {koruny(Number(prebytek))}. Appka to sama na jinou
+            fakturu nepřevede, rozhodněte, co se s přebytkem stane (jiná faktura, dobropis, vrácení).
+          </p>
+        ) : null}
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <Link href={`/${rozsah}/finance/platby/import`} className="ft-tl">Importovat výpis (CSV)</Link>
@@ -246,19 +272,22 @@ export default async function FinancePlatby({
           <section style={{ display: 'grid', gap: '10px' }}>
             <h2 style={{ margin: 0, fontSize: '15px' }}>Návrhy párování ({navrhy.length})</h2>
             {navrhy.map(({ navrh, faktura }) => {
-              const castkaPlatbyHaleru = transakce.find((t) => t.id === navrh.transakceId)?.castka_haleru ?? 0
-              // Alokovat NEJVÝŠ tolik, kolik platba skutečně nese — dřív
+              const transakceNavrhu = transakce.find((t) => t.id === navrh.transakceId)
+              // Zbytek platby, ne celá — u hromadné platby (víc faktur na
+              // jednu transakci) UŽ část mohla být alokovaná dřív.
+              const zbyvaHaleru = transakceNavrhu ? zbyvaNaTransakci(transakceNavrhu) : 0
+              // Alokovat NEJVÝŠ tolik, kolik z platby ještě zbývá — dřív
               // se sem natvrdo dávala celá částka faktury, takže platba
               // nižší než faktura (částečná úhrada) by appku nahlásila
               // jako plně uhrazenou. `app.potvrdit_alokaci_platby` tohle
               // i tak ověří (nikdy nedůvěřuje jen klientovi), tohle je
               // jen rozumná výchozí hodnota pro tlačítko.
-              const castkaKAlokaciHaleru = Math.min(castkaPlatbyHaleru, faktura.castkaHaleru)
+              const castkaKAlokaciHaleru = Math.min(zbyvaHaleru, faktura.castkaHaleru)
               return (
                 <div key={`${navrh.transakceId}-${navrh.fakturaId}`} style={{ ...karta, display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
                   <div>
                     <div style={{ fontSize: '13.5px' }}>
-                      Platba {koruny(castkaPlatbyHaleru)} ↔ faktura {faktura.dodavatel ?? '—'} ({koruny(faktura.castkaHaleru)})
+                      Zbývá {koruny(zbyvaHaleru)} ↔ faktura {faktura.dodavatel ?? '—'} ({koruny(faktura.castkaHaleru)})
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Jistota {Math.round(navrh.jistota * 100)} %</div>
                   </div>
@@ -268,7 +297,6 @@ export default async function FinancePlatby({
                       <input type="hidden" name="transakce_id" value={navrh.transakceId} />
                       <input type="hidden" name="faktura_id" value={navrh.fakturaId} />
                       <input type="hidden" name="castka_haleru" value={castkaKAlokaciHaleru} />
-                      <input type="hidden" name="castka_faktury_celkem_haleru" value={faktura.castkaHaleru} />
                       <input type="hidden" name="jistota" value={navrh.jistota} />
                       <button type="submit" className="ft-tl ft-tl-hlavni">Potvrdit párování</button>
                     </form>
@@ -276,6 +304,50 @@ export default async function FinancePlatby({
                 </div>
               )
             })}
+          </section>
+        ) : null}
+
+        {smiPsat && fakturyKandidati.length > 0 && transakceSeZbytkem.length > 0 ? (
+          <section style={{ ...karta, display: 'grid', gap: '12px' }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '15px' }}>Ruční párování</h2>
+              <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: 'var(--muted)' }}>
+                Pro hromadnou platbu (jedna platba na víc faktur) nebo když návrh výš nenabídl tu
+                správnou fakturu — zopakujte se stejnou platbou a zbývající částkou.
+              </p>
+            </div>
+            <form action={potvrditParovani} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', alignItems: 'end' }}>
+              <input type="hidden" name="rozsah" value={rozsah} />
+              <label>
+                <span style={popisek}>Platba *</span>
+                <select name="transakce_id" required style={pole} defaultValue="">
+                  <option value="" disabled>— vyberte —</option>
+                  {transakceSeZbytkem.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.datum} · {t.protistrana || '—'} · zbývá {koruny(zbyvaNaTransakci(t))}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span style={popisek}>Faktura *</span>
+                <select name="faktura_id" required style={pole} defaultValue="">
+                  <option value="" disabled>— vyberte —</option>
+                  {fakturyKandidati.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.dodavatel ?? '—'} · {koruny(f.castkaHaleru)}{f.vs ? ` · VS ${f.vs}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span style={popisek}>Částka k alokaci (Kč) *</span>
+                <input type="text" name="castka" required placeholder="1234,50" style={pole} />
+              </label>
+              <div>
+                <button type="submit" className="ft-tl ft-tl-hlavni">Potvrdit</button>
+              </div>
+            </form>
           </section>
         ) : null}
 

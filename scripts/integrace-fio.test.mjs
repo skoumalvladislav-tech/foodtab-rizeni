@@ -24,7 +24,13 @@ function sloupec(value, name, id) {
 function vzorovaTransakce(zmeny = {}) {
   return {
     column22: sloupec(1148734530, 'ID pohybu', 22),
-    column0: sloupec(1727740800000, 'Datum', 0), // 2024-10-01T00:00:00.000Z
+    // 1789423200000 = 2026-09-15T00:00:00+02:00 (PRAŽSKÁ půlnoc, CEST) —
+    // záměrně ne UTC půlnoc. Dřívější fixtura (1727740800000, UTC
+    // půlnoc) dávala stejný kalendářní den v UTC i v Praze, takže
+    // schovala chybu: `toISOString().slice(0,10)` u skutečné pražské
+    // půlnoci (jak Fio doopravdy posílá, viz API_Bankovnictvi.pdf
+    // kap. 5.3.1.6) vrací den PŘEDTÍM.
+    column0: sloupec(1789423200000, 'Datum', 0), // 2026-09-15T00:00:00+02:00
     column1: sloupec(1234.5, 'Objem', 1),
     column14: sloupec('CZK', 'Měna', 14),
     column2: sloupec('123456789', 'Protiúčet', 2),
@@ -63,7 +69,7 @@ ok('číslo účtu se přečetlo', v1.stav === 'ok' && v1.info.cisloUctu === '23
 ok('kód banky se přečetl', v1.stav === 'ok' && v1.info.kodBanky === '2010')
 ok('zůstatek v haléřích (closingBalance 11234.50 → 1123450)', v1.stav === 'ok' && v1.info.zustatekHaleru === 1123450)
 ok('jeden řádek', v1.stav === 'ok' && v1.radky.length === 1)
-ok('datum z epoch ms (1727740800000 → 2024-10-01)', v1.stav === 'ok' && v1.radky[0].datum === '2024-10-01')
+ok('datum z PRAŽSKÉ půlnoci (1789423200000 → 2026-09-15, ne 2026-09-14)', v1.stav === 'ok' && v1.radky[0].datum === '2026-09-15')
 ok('kladný Objem 1234,50 → příjem, 123450 haléřů', v1.stav === 'ok' && v1.radky[0].smer === 'prijem' && v1.radky[0].castkaHaleru === 123450)
 ok('protistrana z Názvu protiúčtu', v1.stav === 'ok' && v1.radky[0].protistrana === 'ABC s.r.o.')
 ok('VS se přečetl', v1.stav === 'ok' && v1.radky[0].vs === '20260001')

@@ -11,7 +11,7 @@ async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'finance.manage', rozsah)
+  const pristup = await zkusPristup(tenantId, 'integrace.manage', rozsah)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/integrace`)
 

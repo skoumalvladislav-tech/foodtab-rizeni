@@ -18,7 +18,10 @@ export const dynamic = 'force-dynamic'
  *
  * Registr připojení k poskytovatelům (pokladna/banka/účetnictví/
  * e-mail dokladů) — stejný vzor jako marketing/nastroje, viditelný
- * všem s finance.read, správa jen finance.manage. Appka ŽÁDNÉHO
+ * všem s finance.read, správa (založení/odpojení/tajemství) jen
+ * integrace.manage — ODDĚLENÉ od finance.manage od 7.10.2026, aby
+ * správa napojení (vidí/mění přístupové údaje) nebyla automaticky
+ * svázaná s právem mazat/opravovat faktury a platby. Appka ŽÁDNÉHO
  * poskytovatele nepřipojuje živě: stav se ukazuje přesně tak, jak je
  * ("čeká na připojení", nikdy "připojeno" bez ověřeného přístupu).
  */
@@ -97,7 +100,7 @@ export default async function FinanceIntegrace({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Integrace vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
 
-  const smiPsat = canSee(pristup.ctx, 'finance.manage')
+  const smiPsat = canSee(pristup.ctx, 'integrace.manage')
 
   const supabase = await getServerSupabase()
   const { data } = await supabase
@@ -114,18 +117,39 @@ export default async function FinanceIntegrace({
       <Nadpis
         oci="Finance"
         popis="Registr připojení k poskytovatelům. Žádné se nepřipojuje živě bez ověřeného přístupu."
-        vpravo={
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <Link href={`/${rozsah}/finance/integrace/banka`} className="ft-tl">Bankovní účty →</Link>
-            <Link href={`/${rozsah}/finance/integrace/prodeje`} className="ft-tl">Import prodejů (pokladna) →</Link>
-          </div>
-        }
       >
         Integrace
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', maxWidth: '900px' }}>
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
+
+        {/*
+          Čtyři kategorie zadání (Foodtab_Integrace_Claude_Code.md,
+          oddíl 2). Rezervace/objednávky nemají žádný adaptér ani
+          registrovatelnou oblast (Choice/Choice QR nemá veřejnou
+          dokumentaci, appka sama nenavazuje obchodní kontakt) — kreslí
+          se jako „připravujeme", NE jako klikatelný odkaz, ať appka
+          nepředstírá funkčnost, která neexistuje (zadání §1, §2).
+        */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '10px' }}>
+          <Link href={`/${rozsah}/finance/integrace/prodeje`} className="ft-tl" style={{ ...karta, display: 'block' }}>
+            <strong>Pokladní systémy</strong>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Import prodejů (CSV) →</div>
+          </Link>
+          <Link href={`/${rozsah}/finance/integrace/banka`} className="ft-tl" style={{ ...karta, display: 'block' }}>
+            <strong>Bankovní účty</strong>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Fio, Enable Banking →</div>
+          </Link>
+          <div style={{ ...karta, opacity: 0.6 }}>
+            <strong>Rezervace a objednávky</strong>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Připravujeme — Choice/Choice QR</div>
+          </div>
+          <div style={{ ...karta, opacity: 0.85 }}>
+            <strong>E-mailové schránky</strong>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Registrace níž (oblast „E-mail dokladů“), bez živého čtení schránky</div>
+          </div>
+        </div>
 
         {pripojeni.length === 0 ? (
           <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Zatím žádná připojení.</p>
