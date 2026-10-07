@@ -145,10 +145,10 @@ export default async function FinanceIntegrace({
             <strong>Rezervace a objednávky</strong>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Připravujeme — každý klient může mít jiného poskytovatele</div>
           </div>
-          <div style={{ ...karta, opacity: 0.85 }}>
+          <Link href={`/${rozsah}/finance/integrace/email`} className="ft-tl" style={{ ...karta, display: 'block' }}>
             <strong>E-mailové schránky</strong>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Registrace níž (oblast „E-mail dokladů“) — napojení přes nastavení poštovního serveru (IMAP), bez živého čtení schránky</div>
-          </div>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>IMAP — appka ověří přístup, stažení dokladů čeká na rozhodnutí →</div>
+          </Link>
         </div>
 
         {pripojeni.length === 0 ? (
