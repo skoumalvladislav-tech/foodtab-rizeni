@@ -143,11 +143,11 @@ export default async function FinanceIntegrace({
           </Link>
           <div style={{ ...karta, opacity: 0.6 }}>
             <strong>Rezervace a objednávky</strong>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Připravujeme — Choice/Choice QR</div>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Připravujeme — každý klient může mít jiného poskytovatele</div>
           </div>
           <div style={{ ...karta, opacity: 0.85 }}>
             <strong>E-mailové schránky</strong>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Registrace níž (oblast „E-mail dokladů“), bez živého čtení schránky</div>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Registrace níž (oblast „E-mail dokladů“) — napojení přes nastavení poštovního serveru (IMAP), bez živého čtení schránky</div>
           </div>
         </div>
 

@@ -3,24 +3,22 @@
  * adaptéry.
  *
  * Zadání: C:\Users\vladi\Foodtab_Integrace_Claude_Code.md, oddíl 3 a 6
- * ("Choice / Choice QR" jako první kandidát, "V první verzi preferuj
- * čtení. Zápis do zdroje přidávej jen na základě konkrétního požadavku
- * a podporovaného API.").
+ * ("V první verzi preferuj čtení. Zápis do zdroje přidávej jen na
+ * základě konkrétního požadavku a podporovaného API."). Upřesnění
+ * Šéfíka (7.10.2026): KAŽDÝ klient může mít jiného poskytovatele
+ * rezervací/objednávek — appka se neváže na jeden konkrétní produkt,
+ * kontrakt je proto záměrně obecný, ne postavený kolem jednoho jména.
  *
  * NA ROZDÍL OD `bank-provider-contract.ts`/`pos-provider-contract.ts`
  * TADY NEEXISTUJE ŽÁDNÝ STÁVAJÍCÍ CÍLOVÝ TVAR (appka dnes nemá žádnou
  * tabulku rezervací hostů) — `RadekRezervace` níž je proto NOVÝ
  * normalizovaný tvar, ne zrcadlo existujícího importu.
  *
- * ŽÁDNÝ KONKRÉTNÍ ENDPOINT/AUTH TVAR TADY NENÍ. Choice/Choice QR nemá
- * veřejně dostupnou API dokumentaci (ověřeno 7.10.2026 — stránka
- * choiceqr.com vrátila 403 na pokus o přečtení, žádný veřejný odkaz
- * "pro vývojáře"/partnerský program nebyl dohledatelný bez přihlášení).
- * Appka nesmí sama navazovat obchodní kontakt (zadání §1), takže
- * konkrétní HTTP klient pro Choice se NEPÍŠE, dokud nebudou reálné
- * dokumenty/přístup k dispozici — kontrakt níž je obecný model
- * rezervace (vznik/změna/zrušení/stav/počet hostů/provozovna), platný
- * pro libovolný rezervační systém, ne vymyšlený podle Choice.
+ * ŽÁDNÝ KONKRÉTNÍ ENDPOINT/AUTH TVAR TADY NENÍ — appka si ho nevymýšlí
+ * předem. Jakmile konkrétní klient přinese konkrétního poskytovatele
+ * s dostupnou dokumentací, napíše se k němu vlastní adaptér podle
+ * TOHOHLE kontraktu (vznik/změna/zrušení/stav/počet hostů/provozovna) —
+ * ne vymyšlený podle jednoho konkrétního poskytovatele předem.
  */
 
 export type ZpusobPripojeniRezervace = 'api_klic' | 'oauth' | 'webhook'

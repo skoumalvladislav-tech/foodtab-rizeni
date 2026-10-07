@@ -98,13 +98,14 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
 ### Rezervace/CRM — nic neexistuje, musí se stavět od nuly
 
 - Žádná tabulka/obrazovka rezervací hostů.
-- `Choice`/`Choice QR` nikde v kódu — jen v CLAUDE.md a novém zadání.
-  Veřejné API dokumenty nedostupné (stránka `choiceqr.com` vrátila 403 na
-  pokus o přečtení — partnerský přístup vyžaduje přímý kontakt, který
-  appka sama nesmí navazovat, zadání §1: „neposílej obchodní poptávky").
-  **`ReservationProvider` kontrakt proto musí zůstat obecný (lifecycle
-  rezervace: vznik/změna/zrušení/stav/počet hostů/provozovna), ne
-  Choice-specifický, dokud nejsou k dispozici reálné dokumenty.**
+- **Upřesnění 7.10.2026: appka se NEVÁŽE na jednoho poskytovatele**
+  (Choice/Choice QR byl jen jeden z kandidátů v původním zadání, ne
+  rozhodnutí) — každý klient může mít jiného poskytovatele rezervací/
+  objednávek. `ReservationProvider` kontrakt je proto obecný (lifecycle
+  rezervace: vznik/změna/zrušení/stav/počet hostů/provozovna) od
+  začátku, ne odvozený z jednoho konkrétního produktu. Konkrétní adaptér
+  vzniká, až konkrétní klient přinese konkrétního poskytovatele
+  s dostupnou dokumentací.
 - `public.kontakty`/`kontakty_osoby` existují, ale jsou čistě B2B
   (dodavatel/odběratel/partner, firemní úroveň bez `branch_id`, žádné
   pole souhlasu) — **nepoužitelné pro hosty bez rozšíření.**
@@ -124,17 +125,23 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
 - Dnešní uložené pole: jen `amount` (celková částka), žádné položky
   dokladu, žádné rozlišení faktura/zálohová faktura/dobropis/dodací
   list/upomínka (zadání §8 to explicitně chce).
-- Appka NEMÁ Microsoft Graph/Gmail OAuth registraci ani IMAP schránku
-  vlastní — to je skutečná externí registrace/schválení (Microsoft/
-  Google vyžadují ověření aplikace), ne jen chybějící kód.
+- **Upřesnění 7.10.2026: appka napojuje e-mail PŘES NASTAVENÍ SERVERU
+  (IMAP — host/port/TLS/jméno/heslo zadané klientem), ne primárně přes
+  OAuth app registraci appky.** To zásadně snižuje vnější blokátor —
+  appka nepotřebuje schválení u Microsoftu/Googlu k tomu, aby klient
+  mohl napojit IMAP schránku svým vlastním (přednostně aplikačním)
+  heslem, zašifrovaným stejně jako Fio token. `oauth_graph`/`oauth_gmail`
+  zůstávají v `MailProvider` kontraktu pro klienty, které IMAP+heslo
+  nepodporují (Graph/Gmail postupně vypínají prostý IMAP), ale appka
+  k nim nemá vlastní OAuth registraci — ty se nestaví, dokud nebude
+  konkrétní klient, který je potřebuje.
 - Vzor uploadu příloh (`lib/komunikace/prilohy.ts` +
   `20260921130000_prilohy.sql`) je čistý, znovupoužitelný předpis pro
   ukládání e-mailových příloh do Storage appky, KDYBY appka převzala
   příjem e-mailu sama (místo n8n) — rozhodnutí o tomhle architektonickém
-  posunu (appka vlastní IMAP/Graph/Gmail napojení vs. zůstat na n8n
-  pipeline a jen rozšířit, co appka z Faktur-DB čte) **čeká na Šéfíka**,
-  je to příliš velký zásah, aby se udělal jednostranně — viz „Otázky
-  pro Šéfíka" níž.
+  posunu (appka vlastní IMAP napojení vs. zůstat na n8n pipeline a jen
+  rozšířit, co appka z Faktur-DB čte) **čeká na Šéfíka**, je to příliš
+  velký zásah, aby se udělal jednostranně — viz „Otázky pro Šéfíka" níž.
 
 ### Bezpečnost/provoz — vzory, žádná nová obecná abstrakce
 
@@ -212,39 +219,59 @@ jednorázové testovací identity v úklidu nemažou.
       je přesně ta spekulativní infrastruktura, které se appka
       vyhýbá. Staví se, až bude mít co doručovat.
 
+### Upřesnění 7.10.2026 (Šéfík) — mění prioritu níže
+
+- **Rezervace**: appka se neváže na jednoho poskytovatele (Choice byl
+  jen kandidát, ne rozhodnutí) — každý klient může přinést jiného.
+  Žádné „čeká na přístup k X" už tu nedává smysl, dokud nepřijde
+  konkrétní klient s konkrétním poskytovatelem.
+- **E-mail**: napojení přes NASTAVENÍ SERVERU (IMAP — host/port/TLS/
+  jméno/heslo klienta), ne primárně přes OAuth app appky. Tím padá
+  největší vnější blokátor (schválení u Microsoftu/Googlu) — IMAP
+  konektor je teď P0/P1 práce (appka ho může postavit), ne čekání na
+  externí registraci. Otevřená architektonická otázka (vlastní příjem
+  vs. n8n) ale ZŮSTÁVÁ, viz P2 níž — IMAP konektor by k ní měl
+  směřovat, ne ji obejít tichým druhým příjmem.
+- **Pokladna**: potvrzeno — přes API nebo jinak podle možností
+  konkrétního poskytovatele, žádná změna (kontrakt už byl obecný).
+- **Banka**: potřebuje se dnes „rozchodit" — produkční blokátor je
+  chybějící `INTEGRACE_KLIC_SIFRY` ve Vercelu (OPRAVENO, nastaveno
+  7.10.2026 se svolením), čeká na nové nasazení (redeploy), které
+  appka sama spustit nemohla (zablokováno „Production Deploy").
+
 ### P1 — vyžaduje externí registraci/přístup, appka zatím nemá
 
 - [ ] Dotykačka: partnerská/test licence (appka nesmí sama žádat o
       obchodní podmínky — konkrétní otázky pro Šéfíka níž).
-- [ ] Choice/Choice QR: žádná veřejná dokumentace, nutný přímý kontakt.
-- [ ] Microsoft Graph / Gmail API: OAuth app registrace + schválení.
 - [ ] Finbricks MULTIBANK / Salt Edge Partners: obchodní rozhodnutí,
       viz dřívější `docs/hlaseni/banka-poskytovatele-2026-10-04.md`.
 - [ ] Enable Banking: aktivace u poskytovatele (appka to nemůže udělat
       sama, čeká na krok mimo appku).
+- [ ] Microsoft Graph / Gmail API — jen pro klienty, kteří nemůžou
+      použít IMAP+heslo (viz P2, IMAP je teď primární cesta).
 
 ### P2 — architektonické rozhodnutí čeká na Šéfíka
 
-- [ ] E-mail/OCR faktur: appka postaví VLASTNÍ příjem (IMAP/Graph/Gmail
-      + Storage dle vzoru `prilohy.ts`), nebo zůstává na n8n pipeline a
-      jen se rozšíří, co appka z Faktur-DB čte/zobrazuje (rozlišení
-      typů dokladu, dedup podle hashe přílohy)? Tohle je velké
-      rozhodnutí — n8n pipeline dnes FUNGUJE a appka ji nesmí
-      duplikovat bezhlavě.
+- [ ] E-mail/OCR faktur: appka postaví VLASTNÍ příjem (IMAP + Storage
+      dle vzoru `prilohy.ts`), nebo zůstává na n8n pipeline a jen se
+      rozšíří, co appka z Faktur-DB čte/zobrazuje (rozlišení typů
+      dokladu, dedup podle hashe přílohy)? Tohle je velké rozhodnutí —
+      n8n pipeline dnes FUNGUJE a appka ji nesmí duplikovat bezhlavě.
+      IMAP konektor (host/port/TLS/přihlašovací údaje) je teď technicky
+      bez externí registrace, ale POČKÁ na tohle rozhodnutí, ať appka
+      nepostaví konkurenční pipeline bokem.
 - [ ] Víc právních subjektů pod jedním tenantem (dnes `tenant_id` ==
       právní subjekt 1:1) — potřebné, než bude „právní subjekt" ve
       formuláři Připojit banku znamenat něco jiného než firmu samu.
 
 ## Otázky pro Šéfíka (do `docs/hlaseni/otazky.md` při psaní hlášení)
 
-1. E-mail/OCR architektura — vlastní příjem vs. rozšíření n8n pipeline
-   (P2 výš).
+1. E-mail/OCR architektura — vlastní příjem (IMAP) vs. rozšíření n8n
+   pipeline (P2 výš). IMAP teď nečeká na externí registraci, ale čeká
+   na tohle rozhodnutí.
 2. Dotykačka partnerská licence — appka nesmí sama vyplnit formulář s
    obchodními podmínkami, potřebuje konkrétní zadání/rozhodnutí, kdo to
    udělá.
-3. Choice/Choice QR — bez jakékoli veřejné dokumentace nejde nic víc
-   než obecný kontrakt; potvrzení, že tahle kategorie zůstává
-   „připraveno bez přístupu" dlouho, je v pořádku.
 
 ## Critical files
 
