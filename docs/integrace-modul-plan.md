@@ -28,6 +28,34 @@ Banka: AIS pouze čtení (beze změny z dřívějšího zadání, jen upřesněn
 Finbricks MULTIBANK / Salt Edge Partners jako hlavní kandidáti, GoCardless
 definitivně mimo, Fio a CSV import zůstávají jako alternativy).
 
+## Rozhodnutí a práce 7. 10. 2026 (večer) — banka přes Salt Edge, e-mail přes IMAP
+
+**Banka.** Enable Banking zůstalo zaseknuté u poskytovatele (manuální
+aktivace, mimo appku) — appka proto prověřila alternativy. GoCardless
+Bank Account Data je definitivně zavřený novým samoobslužným AIS
+projektům. Finbricks i Salt Edge Partners **nejsou samoobslužné** —
+obojí vyžaduje žádost o partnerský přístup/obchodní kontakt dřív, než
+vůbec existuje sandbox. Tink je samoobslužný, ale pokrytí ČR bank je
+nejisté. **Šéfík rozhodl (psaný pokyn 7.10.2026 večer): první bankovní
+integrace jde přes Salt Edge Partner Program / Partners Account
+Information API**, výslovně AIS-only (žádné platební příkazy), appka
+nesmí sama podepsat placenou smlouvu ani odeslat obchodní poptávku.
+
+Architektura je podle tohodle rozhodnutí postavená celá (seznam ČR
+bank, wizard „Připojit banku", výběr účtu, stránkovaná synchronizace
+pohybů, obnova zůstatků, odvolání souhlasu, podepsaný webhook jako
+jediný zdroj pravdy o stavu připojení) — **ale nic z toho appka
+nemohla ověřit proti živému prostředí ani sandboxu**, protože Salt
+Edge vyžaduje partnerskou pozvánku, kterou appka sama nesmí vyžádat.
+Detaily, otestovaný podpis webhooku a přesný seznam, co chybí pro
+první reálné připojení → `docs/hlaseni/stav-2026-10-07.md`.
+
+**E-mail.** IMAP konektor (ověření připojení + uložení zašifrovaných
+přihlašovacích údajů, bez čtení zpráv) je hotový a funkční — řeší
+dřívější „zatím nemohu připojit e-maily přes IMAP". Nemění nic na
+otevřené otázce P2 níž (vlastní příjem vs. n8n pipeline) — konektor
+jen ověřuje a ukládá schránku, nezačal nic číst.
+
 ## Audit existujícího stavu (provedeno 7. 10. 2026, 4 paralelní agenti)
 
 ### Banka — nejzralejší, ale se 4 konkrétními mezerami
@@ -173,6 +201,23 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
    Fakturách (dřív zůstávalo „Uhrazeno" i po zrušení jediné platby).
 8. Zastaralý/matoucí komentář o `integrace-gocardless.ts` (nikdy
    nevzniklo) opraven v `lib/integrace-fio.ts`.
+9. Rezervace/pokladna reframovány obecně (žádný konkrétní poskytovatel
+   jmenovaný natvrdo), `MailProvider` reframováno na IMAP jako primární
+   cestu — hlavičky kontraktů + UI text (viz oddíl výš).
+10. IMAP e-mailový konektor (`lib/integrace-mail-imap.ts`, akce+UI pod
+    `/finance/integrace/email`) — živé ověření připojení (TLS/STARTTLS,
+    přihlášení, výpis složek, odhlášení), uložení zašifrovaných
+    přihlašovacích údajů. Čtení zpráv NEIMPLEMENTOVÁNO (čeká na P2
+    rozhodnutí níž).
+11. Salt Edge adaptér podle rozhodnutí výš — `lib/integrace-saltedge.ts`
+    (seznam ČR bank, zahájení připojení přes Connect Widget, stránkovaná
+    `nactiTransakceSaltEdge`, odvolání souhlasu, ověření podpisu webhooku
+    RSA-SHA256), `lib/integrace-saltedge-sync.ts` (sync job po vzoru
+    Fio), `app/api/integrace/saltedge/webhook` (podepsaný, autoritativní
+    stav připojení) + `/vratit` (lehký, neautoritativní návrat z banky),
+    UI wizard a výběr účtu v `.../banka/{akce.ts,page.tsx}`, napojeno do
+    cron úlohy `banka-synchronizace`. **Postaveno, ne ověřeno** — žádný
+    přístup k partnerskému API dnes appka nemá (viz oddíl výš).
 
 **Ověřeno jen přes PGlite dosud** — žádný `db push` neproběhl, nic
 z tohodle nebylo potvrzeno proti reálnému Postgresu. Commit `2e43e2b`
@@ -186,6 +231,16 @@ katalog se jim rozešel, spadlo 30 scénářů kaskádou), a `krok89`
 mazání `auth.users`/`profiles` v úklidu narazilo na PGlite referenční
 kvirk — opraveno tak, že se (stejně jako `krok30`/`krok73`) tyhle
 jednorázové testovací identity v úklidu nemažou.
+
+**Body 9–11 (IMAP, Salt Edge) nemění žádnou migraci** — žádné nové
+`krokN_scenar.sql`, PGlite počet výš se jich netýká. Vlastní ověření:
+`node --experimental-strip-types --conditions=react-server
+scripts/integrace-saltedge.test.mjs` (6 kontrol — platný podpis +
+5 schválných rozbití podpisu webhooku, všechny OK), `tsc --noEmit`
+a `eslint` čisté na celé nové dávce souborů (Salt Edge i IMAP). Nic
+nebylo spuštěno proti živému Salt Edge API ani proti reálné IMAP
+schránce — appka na to dnes nemá přístupy (banka) nebo klienta
+(e-mail), kteří by appku ověřili v souvislosti s reálnými daty.
 
 ## Co zbývá (prioritizovaný seznam, ne nutně v tomhle pořadí)
 
@@ -207,12 +262,14 @@ jednorázové testovací identity v úklidu nemažou.
 - [x] `interval_synchronizace_minut` na `integrace_pripojeni` + UI +
       úprava sync joblogiky (commit `cf99a57`).
 - [ ] ~~Surfacing `souhlas_platny_do` v UI~~ — ODLOŽENO, ne zapomenuto:
-      žádný dnešní adaptér (Fio, Enable Banking) tohle pole ve
-      skutečnosti NEPLNÍ (Fio token nemá zjistitelnou expiraci přes
-      API, Enable Banking se nikdy neověřilo proti živé bance), takže
-      UI by dnes ukazovalo jen „neznámé" všude — nic by appka tím
-      nezlepšila, jen přidala prázdný řádek na obrazovku. Čeká na
-      skutečného poskytovatele s konkrétní hodnotou k zobrazení.
+      žádný dnešní adaptér (Fio, Enable Banking, ani nový Salt Edge)
+      tohle pole ve skutečnosti NEPLNÍ (Fio token nemá zjistitelnou
+      expiraci přes API, Enable Banking se nikdy neověřilo proti živé
+      bance, Salt Edge consent expiraci v dokumentaci Partners API
+      nevrací jako pole appka by mohla zapsat bez ověření proti živému
+      účtu), takže UI by dnes ukazovalo jen „neznámé" všude — nic by
+      appka tím nezlepšila, jen přidala prázdný řádek na obrazovku.
+      Čeká na skutečného poskytovatele s konkrétní hodnotou k zobrazení.
 - [ ] ~~`integrace_fronta` tabulka~~ — ODLOŽENO: žádný dnešní kód by ji
       nečetl ani nezapisoval (nic nepřijímá webhooky, e-mailová
       architektura není rozhodnutá) — postavit frontu bez volajícího
@@ -234,18 +291,25 @@ jednorázové testovací identity v úklidu nemažou.
   směřovat, ne ji obejít tichým druhým příjmem.
 - **Pokladna**: potvrzeno — přes API nebo jinak podle možností
   konkrétního poskytovatele, žádná změna (kontrakt už byl obecný).
-- **Banka**: potřebuje se dnes „rozchodit" — produkční blokátor je
-  chybějící `INTEGRACE_KLIC_SIFRY` ve Vercelu (OPRAVENO, nastaveno
-  7.10.2026 se svolením), čeká na nové nasazení (redeploy), které
-  appka sama spustit nemohla (zablokováno „Production Deploy").
+- **Banka**: potřebovala se „rozchodit" — produkční blokátor byl
+  chybějící `INTEGRACE_KLIC_SIFRY` ve Vercelu (OPRAVENO, nastaveno a
+  nasazeno 7.10.2026 se svolením, redeploy proveden a ověřen). Druhý
+  blokátor (Enable Banking zaseknuté u poskytovatele) vyřešen
+  rozhodnutím výměnit primárního poskytovatele za Salt Edge — viz
+  oddíl „Rozhodnutí a práce 7.10.2026 (večer)" nahoře.
 
 ### P1 — vyžaduje externí registraci/přístup, appka zatím nemá
 
 - [ ] Dotykačka: partnerská/test licence (appka nesmí sama žádat o
       obchodní podmínky — konkrétní otázky pro Šéfíka níž).
-- [ ] Finbricks MULTIBANK / Salt Edge Partners: obchodní rozhodnutí,
-      viz dřívější `docs/hlaseni/banka-poskytovatele-2026-10-04.md`.
-- [ ] Enable Banking: aktivace u poskytovatele (appka to nemůže udělat
+- [ ] **Salt Edge Partners**: ROZHODNUTO 7.10.2026 (Šéfík) jako první
+      bankovní integrace — architektura hotová (viz „Co je HOTOVO",
+      body 9–11), ale appka nemá partnerskou pozvánku a nesmí si ji
+      sama vyžádat ani podepsat placenou smlouvu. Přesný seznam, co
+      chybí pro první reálné připojení → `docs/hlaseni/stav-2026-10-07.md`.
+- [ ] Enable Banking: DEMOVÁNO na druhou volbu (přehodnocuje se,
+      nevyřazeno úplně) — appka k němu nepokročí, dokud nebude Salt
+      Edge vyzkoušený. Aktivace u poskytovatele (appka to nemůže udělat
       sama, čeká na krok mimo appku).
 - [ ] Microsoft Graph / Gmail API — jen pro klienty, kteří nemůžou
       použít IMAP+heslo (viz P2, IMAP je teď primární cesta).
@@ -272,10 +336,18 @@ jednorázové testovací identity v úklidu nemažou.
 2. Dotykačka partnerská licence — appka nesmí sama vyplnit formulář s
    obchodními podmínkami, potřebuje konkrétní zadání/rozhodnutí, kdo to
    udělá.
+3. Salt Edge partnerská pozvánka — appka nesmí sama žádat o partnerský
+   přístup/podepsat smlouvu. Potřebné údaje, jakmile pozvánka existuje
+   → `docs/hlaseni/stav-2026-10-07.md` (přesný seznam).
 
 ## Critical files
 
 - `lib/bank-provider-contract.ts` — vzor kontraktu pro nové providery.
+- `lib/integrace-saltedge.ts` + `lib/integrace-saltedge-sync.ts` +
+  `app/api/integrace/saltedge/{webhook,vratit}/route.ts` — celá Salt
+  Edge architektura, dokumentační mezery rozepsané přímo v komentářích.
+- `lib/integrace-mail-imap.ts` + `app/[rozsah]/finance/integrace/email/**`
+  — IMAP konektor (ověření + uložení, bez čtení zpráv).
 - `supabase/migrations/20261003100000_integrace_registr.sql` +
   `20261004100000_banka_napojeni.sql` + `20261007110000_integrace_opravneni_a_sjednoceni.sql`
   — celý registr připojení/tajemství + dnešní opravy.

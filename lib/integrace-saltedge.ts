@@ -1,32 +1,51 @@
 /**
- * Salt Edge Partners Account Information API — AIS adaptér (zadání §7:
- * „Finbricks MULTIBANK a Salt Edge Partners Account Information" jako
- * hlavní kandidáti na multibankovního agregátora; Enable Banking se
- * 7.10.2026 přehodnocuje pro uvízlou aktivaci u poskytovatele).
+ * Salt Edge Partners Account Information API — AIS adaptér.
+ *
+ * ROZHODNUTÍ ŠÉFÍKA (7.10.2026): první bankovní integrace Foodtab jde
+ * přes Salt Edge Partner Program / Partners Account Information API
+ * — ne přes Enable Banking (ten zůstává v kódu, ale dál se nerozvíjí;
+ * uvízl na aktivaci u poskytovatele) a ne přes běžné (nepartnerské)
+ * Account Information API (to je pro licencované AISP subjekty samotné,
+ * jiný smluvní režim — appka ho NEPOUŽÍVÁ jako náhradu za partnerský
+ * produkt).
  *
  * ENDPOINTY NÍŽE JSOU OVĖŘENÉ přímo z `docs.saltedge.com/partners/v1/`
- * (WebFetch 7.10.2026), ne vymyšlené. CO V DOKUMENTACI NENÍ (a proto
- * tady NENÍ domýšleno): přesný formát `vs`/variabilního symbolu u
- * českých bank (Salt Edge je obecný EU formát, žádné dedikované pole
- * pro VS se nenašlo — appka ho nechává prázdné, ne hádá z `description`).
+ * (WebFetch 7.10.2026), ne vymyšlené. Zdroj pravdy pro cokoli
+ * nejasného je VŽDY aktuální dokumentace, ne tenhle komentář.
  *
  * ———————————————————————————————————————————————————————————————
  * NEOVĖŘENO PROTI ŽIVÉMU API — appka nemá partnerský účet.
  *
  * Salt Edge NENÍ samoobslužný: `App-id`/`Secret` appka dostane až po
  * „request invitation" (obchodní krok u Salt Edge, appka ho sama
- * nesmí iniciovat — zadání §1: „neposílej obchodní poptávky"). Dokud
- * účet nevznikne, appka nemá ani sandbox — tenhle soubor je proto
- * kontraktově správný tvar, NE vyzkoušený klient. `jeNakonfigurovano()`
- * appku chrání před tím, aby to předstírala (stejný vzor jako
- * `integrace-enablebanking.ts`).
+ * nesmí iniciovat — zadání §1: „neposílej obchodní poptávky",
+ * „neuzavírej placenou smlouvu"). Dokud účet nevznikne, appka nemá
+ * ani sandbox (dokumentace: „sandbox/fake poskytovatelé se odemknou
+ * až po vzniku pozvaného účtu") — tenhle soubor je proto kontraktově
+ * správný tvar, NE vyzkoušený klient. `jeNakonfigurovano()` appku
+ * chrání před tím, aby to předstírala.
+ *
+ * DOKUMENTAČNÍ MEZERY (appka je NEDOMÝŠLÍ, jen je tu zapisuje, ať se
+ * ověří s partnerským přístupem v ruce):
+ *   - Přesný zdroj `callback_url` pro ověření podpisu webhooku —
+ *     dokumentace neříká, jde-li o URL ZAREGISTROVANOU appkou v
+ *     Partner Dashboardu, nebo URL PŘÍCHOZÍHO requestu. Appka používá
+ *     `SALTEDGE_WEBHOOK_URL` (zaregistrovanou appkou), ne URL z
+ *     requestu — bezpečnější výchozí bod, ale je to appčin výběr, ne
+ *     dokumentovaný fakt.
+ *   - Aktuální PRODUKČNÍ veřejný klíč pro ověření podpisu — appka ho
+ *     NEHARDCODUJE z ukázky v dokumentaci (ta je výslovně neoznačená
+ *     jako produkční/testovací), čte ho z `SALTEDGE_WEBHOOK_PUBLIC_KEY`.
+ *   - Maximální `per_page` u transakcí — nespecifikováno, appka
+ *     stránkuje přes `from_id`, dokud API vrací další stránku.
  * ———————————————————————————————————————————————————————————————
  */
 
 import 'server-only'
 
+import { createVerify } from 'node:crypto'
 import type { RadekImportu } from './finance-csv-import.ts'
-import type { BankDataProvider, VysledekOvereni, VysledekTransakci, VysledekZustatku } from './bank-provider-contract.ts'
+import type { BankDataProvider, BodZustatku, VysledekOvereni, VysledekTransakci, VysledekZustatku } from './bank-provider-contract.ts'
 
 const ZAKLAD = 'https://www.saltedge.com/api/partners/v1'
 
@@ -42,6 +61,14 @@ function hlavicky(): Record<string, string> {
     Accept: 'application/json',
     'Content-type': 'application/json',
   }
+}
+
+type SaltEdgeProvider = {
+  code: string
+  name: string
+  country_code: string
+  supported_account_types: ('personal' | 'business')[]
+  mode: string
 }
 
 type SaltEdgeAccount = {
@@ -64,7 +91,7 @@ type SaltEdgeTransaction = {
   duplicated: boolean
 }
 
-async function zavolatSaltEdge<T>(cesta: string): Promise<{ stav: 'ok'; data: T; nextId: string | null } | { stav: 'chyba'; duvod: string }> {
+async function zavolatSaltEdge<T>(cesta: string): Promise<{ stav: 'ok'; data: T; dalsiId: string | null } | { stav: 'chyba'; duvod: string }> {
   let odpoved: Response
   try {
     odpoved = await fetch(`${ZAKLAD}${cesta}`, { headers: hlavicky() })
@@ -84,20 +111,53 @@ async function zavolatSaltEdge<T>(cesta: string): Promise<{ stav: 'ok'; data: T;
   }
 
   const telo = (await odpoved.json()) as { data: T; meta?: { next_id?: string } }
-  return { stav: 'ok', data: telo.data, nextId: telo.meta?.next_id ?? null }
+  return { stav: 'ok', data: telo.data, dalsiId: telo.meta?.next_id ?? null }
+}
+
+export type CeskaBanka = { kod: string; nazev: string; firemniUcty: boolean; osobniUcty: boolean }
+
+/**
+ * Skutečně dostupné banky PRO NÁŠ PARTNERSKÝ ÚČET — appka nikdy
+ * nenabízí pevný seznam 10 požadovaných bank jako by byl potvrzený
+ * (zadání: „Nabízej české banky podle skutečné dostupnosti pro náš
+ * partnerský účet. Nezaměňuj osobní a firemní pokrytí."). Dokud appka
+ * nemá klíče, vrátí se `chyba` — UI to NIKDY nenahradí pevným seznamem.
+ */
+export async function nactiBankyCz(): Promise<{ stav: 'ok'; banky: CeskaBanka[] } | { stav: 'chyba'; duvod: string }> {
+  if (!jeNakonfigurovano()) return { stav: 'chyba', duvod: 'Salt Edge není nastaven (chybí partnerský účet).' }
+
+  const vysledek = await zavolatSaltEdge<SaltEdgeProvider[]>('/providers?country_code=CZ')
+  if (vysledek.stav === 'chyba') return vysledek
+
+  return {
+    stav: 'ok',
+    banky: vysledek.data.map((p) => ({
+      kod: p.code,
+      nazev: p.name,
+      firemniUcty: p.supported_account_types.includes('business'),
+      osobniUcty: p.supported_account_types.includes('personal'),
+    })),
+  }
 }
 
 /**
  * Zahájení souhlasu (Connect Widget přes Lead Session) — appka
- * přesměruje uživatele na vrácenou `redirect_url`, stejný vzor jako
- * `enableBankingProvider.zahajitPripojeni`. `return_to` appka posílá
- * explicitně (dokumentace: bez něj appka musí mít `home_url` nastavené
- * v Client Dashboardu — appka na tohle nastavení nespoléhá, posílá
- * adresu vždy).
+ * přesměruje uživatele na vrácenou `redirect_url`. `customer_id`
+ * appka nastaví na `tenantId` — Salt Edge tím dostane STEJNÉ oddělení
+ * klientů appka, ne jen appčina DB (zadání §5: „Odděl připojení,
+ * externí identity a souhlasy jednotlivých klientů. Stejný e-mail
+ * nesmí propojit data různých tenantů." — appka navíc žádný e-mail
+ * Salt Edge nepředává vůbec, jen neprůhledné `tenantId`).
+ * `return_connection_id: true` appka posílá, aby se po návratu
+ * z banky dalo hned zkusit najít připojení — AUTORITATIVNÍ stav ale
+ * appka čte z webhooku (`app/api/integrace/saltedge/webhook`), ne
+ * jen z téhle redirect hodnoty (dokumentace: „nejdůležitější části
+ * — správa připojení — jsou asynchronní").
  */
 export async function zahajitPripojeniSaltEdge(
   navratovaAdresa: string,
-  zeme = 'CZ',
+  tenantId: string,
+  providerCode: string,
 ): Promise<{ stav: 'ok'; presmerovatNa: string } | { stav: 'chyba'; duvod: string }> {
   if (!jeNakonfigurovano()) return { stav: 'chyba', duvod: 'Salt Edge není nastaven (chybí partnerský účet — appka ho nesmí sama zřídit).' }
 
@@ -107,12 +167,15 @@ export async function zahajitPripojeniSaltEdge(
       method: 'POST',
       headers: hlavicky(),
       body: JSON.stringify({
-        country_code: zeme,
+        customer_id: tenantId,
+        provider_code: providerCode,
+        country_code: 'CZ',
         consent: {
           scopes: ['account_details', 'transactions_details'],
         },
         attempt: {
           return_to: navratovaAdresa,
+          return_connection_id: true,
         },
       }),
     })
@@ -152,24 +215,31 @@ export async function nactiZustatkySaltEdge(connectionId: string, accountId: str
   if (!ucet) return { stav: 'chyba', duvod: 'Účet se v odpovědi Salt Edge nenašel.' }
 
   const platnyK = new Date().toISOString()
-  const zustatky = [{ typ: 'knihovni' as const, castkaHaleru: Math.round(ucet.balance * 100), mena: ucet.currency_code, platnyK }]
+  const zustatky: BodZustatku[] = [{ typ: 'knihovni', castkaHaleru: Math.round(ucet.balance * 100), mena: ucet.currency_code, platnyK }]
   if (ucet.available_balance != null) {
-    zustatky.push({ typ: 'disponibilni' as const, castkaHaleru: Math.round(ucet.available_balance * 100), mena: ucet.currency_code, platnyK })
+    zustatky.push({ typ: 'disponibilni', castkaHaleru: Math.round(ucet.available_balance * 100), mena: ucet.currency_code, platnyK })
   }
   return { stav: 'ok', zustatky }
 }
+
+export type VysledekTransakciStrankovane = (VysledekTransakci & { dalsiId: string | null })
 
 /**
  * Jen ZAÚČTOVANÉ (`status: 'posted'`) pohyby — `pending` appka
  * nevrací vůbec (`transakce` je ledger zaúčtovaných pohybů, ne
  * rozpracovaných; pending se appce vrátí jako posted při dalším
  * běhu, ne že by appka musela řešit přechod stavu).
+ *
+ * JEDNA STRÁNKA na volání (`odId` → parametr `from_id`, `dalsiId` ←
+ * `meta.next_id`) — volající (sync job, `lib/integrace-saltedge-sync.ts`)
+ * stránkuje smyčkou, appka tady nepředpokládá, kolik stránek bude.
  */
-export async function nactiTransakceSaltEdge(connectionId: string, accountId: string): Promise<VysledekTransakci> {
+export async function nactiTransakceSaltEdge(connectionId: string, accountId: string, odId?: string | null): Promise<VysledekTransakciStrankovane> {
+  const dalsiParametr = odId ? `&from_id=${encodeURIComponent(odId)}` : ''
   const vysledek = await zavolatSaltEdge<SaltEdgeTransaction[]>(
-    `/transactions?connection_id=${encodeURIComponent(connectionId)}&account_id=${encodeURIComponent(accountId)}`,
+    `/transactions?connection_id=${encodeURIComponent(connectionId)}&account_id=${encodeURIComponent(accountId)}${dalsiParametr}`,
   )
-  if (vysledek.stav === 'chyba') return vysledek
+  if (vysledek.stav === 'chyba') return { ...vysledek, dalsiId: null }
 
   const radky: RadekImportu[] = vysledek.data
     .filter((t) => t.status === 'posted' && !t.duplicated)
@@ -185,7 +255,57 @@ export async function nactiTransakceSaltEdge(connectionId: string, accountId: st
       externiId: t.id,
     }))
 
-  return { stav: 'ok', radky }
+  return { stav: 'ok', radky, dalsiId: vysledek.dalsiId }
+}
+
+/**
+ * Odvolání souhlasu (Partner Consent Revoke) — appka ho volá při
+ * odpojení, ne jen smaže lokální tajemství (zadání §6: „bezpečně
+ * zpracuj... odvolání souhlasu"). `consentId` appka má uložené z
+ * doby, kdy ho Salt Edge vrátil (webhook/success callback) — pokud
+ * appka žádné nemá (připojení skončilo dřív, než dorazil webhook),
+ * revoke se nepovede a appka to řekne nahlas, ne tiše přeskočí.
+ */
+export async function odvolatSouhlasSaltEdge(consentId: string): Promise<{ stav: 'ok' } | { stav: 'chyba'; duvod: string }> {
+  if (!jeNakonfigurovano()) return { stav: 'chyba', duvod: 'Salt Edge není nastaven.' }
+
+  let odpoved: Response
+  try {
+    odpoved = await fetch(`${ZAKLAD}/partner_consents/${encodeURIComponent(consentId)}/revoke`, { method: 'POST', headers: hlavicky() })
+  } catch (e) {
+    return { stav: 'chyba', duvod: `Salt Edge API se nepodařilo spojit: ${e instanceof Error ? e.message : 'neznámá chyba'}` }
+  }
+
+  if (!odpoved.ok) return { stav: 'chyba', duvod: `Odvolání souhlasu spadlo na chybě ${odpoved.status}.` }
+  return { stav: 'ok' }
+}
+
+/**
+ * Ověření podpisu webhooku (RSA-SHA256, dokumentace: „base64 encoded
+ * SHA256 signature of the string callback_url|post_body, signed with
+ * Salt Edge's private key"). Čistá funkce — žádné IO, testovatelná
+ * bez živého API (`scripts/integrace-saltedge.test.mjs`).
+ *
+ * `callbackUrl` appka posílá jako URL, kterou má ZAREGISTROVANOU
+ * (`SALTEDGE_WEBHOOK_URL`), ne URL příchozího requestu — dokumentace
+ * neříká, které z toho dvojího appka má použít, tohle je appčin
+ * bezpečnější výchozí předpoklad, ne dokumentovaný fakt (viz hlavička
+ * souboru).
+ */
+export function overitPodpisWebhookuSaltEdge(
+  callbackUrl: string,
+  syroveTelo: string,
+  podpisBase64: string,
+  verejnyKlicPem: string,
+): boolean {
+  try {
+    const overovac = createVerify('RSA-SHA256')
+    overovac.update(`${callbackUrl}|${syroveTelo}`, 'utf8')
+    return overovac.verify(verejnyKlicPem, podpisBase64, 'base64')
+  } catch {
+    // Poškozený/cizí podpis appka hlásí jako „neplatný", ne jako pád.
+    return false
+  }
 }
 
 export const saltEdgeProvider: BankDataProvider = {
@@ -204,16 +324,14 @@ export const saltEdgeProvider: BankDataProvider = {
     inkrementalniSync: true,
   },
 
-  async zahajitPripojeni(navratovaAdresa: string, zeme: string) {
-    return zahajitPripojeniSaltEdge(navratovaAdresa, zeme)
+  // Kontrakt `zahajitPripojeni(navratovaAdresa, odkaz)` nemá místo pro
+  // `tenantId`/`providerCode` — appka proto u Salt Edge nevolá tuhle
+  // metodu kontraktu, ale `zahajitPripojeniSaltEdge` přímo (stejná
+  // mezera jako u `nactiZustatky`/`nactiTransakce` níž).
+  async zahajitPripojeni(navratovaAdresa: string, odkaz: string) {
+    return { stav: 'chyba' as const, duvod: `Salt Edge vyžaduje tenantId a providerCode navíc (odkaz: ${odkaz}) — volejte zahajitPripojeniSaltEdge přímo.` }
   },
 
-  // Kontrakt dává appce jen `ucet` (providerAccountId), ale Salt Edge
-  // vyžaduje k němu i `connection_id` (appka ho má uložené z
-  // `externi_ucet` při zahájení připojení) — appka proto v praxi volá
-  // `nactiZustatkySaltEdge(connectionId, accountId)`/`nactiTransakceSaltEdge`
-  // přímo, ne přes tyhle dvě metody kontraktu. Zůstávají tu jen pro
-  // typovou shodu s `BankDataProvider` a hlásí to nahlas, ne tiše.
   async nactiZustatky(ucet: string): Promise<VysledekZustatku> {
     return { stav: 'chyba', duvod: `Salt Edge vyžaduje connection_id navíc k účtu ${ucet} — volejte nactiZustatkySaltEdge přímo.` }
   },
