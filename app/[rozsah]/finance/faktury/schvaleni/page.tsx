@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { STAV_KE_SCHVALENI, type Faktura } from '@/lib/faktury-types'
@@ -30,13 +30,15 @@ const karta = {
 } as const
 
 async function nactiCekajici(tenantId: string): Promise<Faktura[]> {
-  const supabase = getFakturySupabase()
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') return []
+  const supabase = pristupFaktury.faktury
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
     const { data, error } = await supabase
-      .from('invoices').select('*').eq('tenant_id', tenantId).eq('status', STAV_KE_SCHVALENI)
+      .from('invoices').select('*').eq('status', STAV_KE_SCHVALENI)
       .order('received_at', { ascending: false }).order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }

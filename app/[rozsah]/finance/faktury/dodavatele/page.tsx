@@ -3,10 +3,10 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
-import { dniPoSplatnosti, jeNezaplacena, type Faktura } from '@/lib/faktury-types'
+import { dniPoSplatnosti, jeNezaplacena, potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 
@@ -37,13 +37,15 @@ type StatDodavatele = {
 }
 
 async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
-  const supabase = getFakturySupabase()
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') return []
+  const supabase = pristupFaktury.faktury
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
     const { data, error } = await supabase
-      .from('invoices').select('*').eq('tenant_id', tenantId).eq('is_archived', false)
+      .from('invoices').select('*').eq('is_archived', false)
       .order('received_at', { ascending: false }).order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
@@ -87,7 +89,7 @@ export default async function FakturyDodavatele({
     aktualni.celkem += Number(f.amount || 0)
     aktualni.pocet += 1
     if (!aktualni.ico && f.supplier_ico) aktualni.ico = f.supplier_ico
-    if (f.needs_review) aktualni.keKontrole += 1
+    if (potrebujeKontrolu(f)) aktualni.keKontrole += 1
     if (jeNezaplacena(f)) {
       aktualni.nezaplaceno += 1
       if (dniPoSplatnosti(f.due_date) > 0) aktualni.poSplatnosti += 1

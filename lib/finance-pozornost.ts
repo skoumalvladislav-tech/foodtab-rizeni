@@ -1,8 +1,8 @@
 import 'server-only'
 
 import { getServerSupabase } from '@/lib/supabase/server'
-import { getFakturySupabase, fakturyJsouNastavene } from '@/lib/supabase/faktury'
-import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { jeNezaplacena, potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
 import { navrhnoutParovani, type KandidatFaktura } from '@/lib/finance-parovani'
 import { koruny } from '@/lib/mzdy'
 
@@ -15,9 +15,9 @@ import { koruny } from '@/lib/mzdy'
  *      app/[rozsah]/finance/platby/page.tsx, jen přes vlastní dotaz —
  *      viz komentář tam, proč se to nerozebírá do jedné sdílené
  *      funkce: `lib/finance-parovani.ts` je vědomě bez IO).
- *   2. Faktury s `needs_review` (OCR si nebyl jistý).
+ *   2. Faktury, které potřebují ruční kontrolu (`potrebujeKontrolu`).
  *
- * Když appka Fakturám nedosáhne (`fakturyJsouNastavene()` false, nebo
+ * Když appka Fakturám nedosáhne (`pristupKFakturam()` není ok, nebo
  * dotaz na jejich databázi selže), vrátí prázdno — ne chybu, ne
  * vymyšlenou řádku.
  */
@@ -38,14 +38,14 @@ export async function nactiPolozkyKPozornosti(
   rozsah: string,
   limitTransakci = 60,
 ): Promise<PolozkaPozornosti[]> {
-  if (!fakturyJsouNastavene()) return []
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') return []
 
   const polozky: PolozkaPozornosti[] = []
 
   let faktury: Faktura[] = []
   try {
-    const supabaseFaktury = getFakturySupabase()
-    const { data } = await supabaseFaktury.from('invoices').select('*').eq('tenant_id', tenantId).eq('is_archived', false)
+    const { data } = await pristupFaktury.faktury.from('invoices').select('*').eq('is_archived', false)
     faktury = (data ?? []) as Faktura[]
   } catch {
     return []
@@ -108,7 +108,7 @@ export async function nactiPolozkyKPozornosti(
 
   // 2. Faktury, u kterých si zpracování nebylo jisté.
   for (const f of faktury) {
-    if (!f.needs_review) continue
+    if (!potrebujeKontrolu(f)) continue
     polozky.push({
       klic: `faktura-${f.id}`,
       typ: 'faktura_kontrola',

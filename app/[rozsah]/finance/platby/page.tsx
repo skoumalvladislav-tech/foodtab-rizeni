@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { fakturyJsouNastavene, getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
@@ -100,14 +100,13 @@ async function nactiPotvrzeneAlokace(
   // `invoices.status` jako zdroj pravdy (ten zůstal v Fakturách jen
   // jako best-effort kopie), pouze dodavatele k číslu faktury.
   let dodavateleMapa = new Map<string, string>()
-  if (fakturyJsouNastavene()) {
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav === 'ok') {
     try {
       const fakturyIds = [...new Set(alokace.map((a) => a.faktura_id))]
-      const supabaseFaktury = getFakturySupabase()
-      const { data: fakturyData } = await supabaseFaktury
+      const { data: fakturyData } = await pristupFaktury.faktury
         .from('invoices')
         .select('id, supplier')
-        .eq('tenant_id', tenantId)
         .in('id', fakturyIds)
       dodavateleMapa = new Map(
         ((fakturyData ?? []) as { id: string; supplier: string | null }[]).map((f) => [f.id, f.supplier ?? '']),
@@ -133,15 +132,14 @@ async function nactiNavrhyParovani(
   transakce: readonly Transakce[],
   alokovanoMapa: ReadonlyMap<string, number>,
 ): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[] }> {
-  if (!fakturyJsouNastavene()) return { navrhy: [], faktury: [] }
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') return { navrhy: [], faktury: [] }
 
   let faktury: Faktura[] = []
   try {
-    const supabaseFaktury = getFakturySupabase()
-    const { data } = await supabaseFaktury
+    const { data } = await pristupFaktury.faktury
       .from('invoices')
       .select('*')
-      .eq('tenant_id', tenantId)
       .eq('is_archived', false)
     faktury = ((data ?? []) as Faktura[]).filter(jeNezaplacena)
   } catch {

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { barvaDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import {
@@ -11,6 +11,7 @@ import {
   jeNezaplacena,
   STAV_KE_SCHVALENI,
   type Faktura,
+  potrebujeKontrolu,
 } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
@@ -22,7 +23,7 @@ export const dynamic = 'force-dynamic'
  * Faktury — přehled (dashboard).
  *
  * Přeneseno z faktury-app (src/app/page.tsx), beze změny logiky KPI —
- * jen zdroj dat (`getFakturySupabase()` místo přímého klienta) a rám
+ * jen zdroj dat (`pristupKFakturam()` místo přímého klienta) a rám
  * (Foodtabova `Nadpis`/`Sdeleni` a vnořená navigace v layout.tsx místo
  * vlastního `Shell.tsx`).
  */
@@ -35,7 +36,9 @@ const karta = {
 } as const
 
 async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
-  const supabase = getFakturySupabase()
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') return []
+  const supabase = pristupFaktury.faktury
   // Supabase/PostgREST má strop 1000 řádků na odpověď (db.max_rows) — stránkuje
   // se přes .range() přes stejný filtrovaný/seřazený dotaz, dokud stránka
   // nepřijde kratší, a spojí se do jednoho pole. Stejný postup jako
@@ -47,7 +50,7 @@ async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
     const { data, error } = await supabase
       .from('invoices')
       .select('*')
-      .eq('tenant_id', tenantId)
+      
       .eq('is_archived', false)
       .order('received_at', { ascending: false })
       .order('id', { ascending: true })
@@ -96,7 +99,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
 
   const nezaplacene = faktury.filter(jeNezaplacena)
   const poSplatnosti = nezaplacene.filter((f) => dniPoSplatnosti(f.due_date) > 0)
-  const kKontrole = faktury.filter((f) => f.needs_review)
+  const kKontrole = faktury.filter(potrebujeKontrolu)
 
   const celkemNezaplaceno = nezaplacene.reduce((s, f) => s + Number(f.amount || 0), 0)
   const celkemPoSplatnosti = poSplatnosti.reduce((s, f) => s + Number(f.amount || 0), 0)

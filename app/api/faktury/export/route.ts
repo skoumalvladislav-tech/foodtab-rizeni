@@ -2,8 +2,8 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { getFakturySupabase } from '@/lib/supabase/faktury'
-import { type Faktura } from '@/lib/faktury-types'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
 
 export const dynamic = 'force-dynamic'
@@ -37,7 +37,7 @@ const SLOUPCE: { hlavicka: string; z: (f: Faktura) => string | number | null }[]
   { hlavicka: 'Splatnost', z: (f) => f.due_date },
   { hlavicka: 'Číslo účtu dodavatele', z: (f) => f.supplier_account },
   { hlavicka: 'Stav úhrady', z: (f) => f.status },
-  { hlavicka: 'Nutná ruční kontrola', z: (f) => (f.needs_review ? 'ano' : 'ne') },
+  { hlavicka: 'Nutná ruční kontrola', z: (f) => (potrebujeKontrolu(f) ? 'ano' : 'ne') },
   { hlavicka: 'Možná duplicita', z: (f) => (f.is_duplicate ? 'ano' : 'ne') },
   { hlavicka: 'Datum přijetí', z: (f) => f.received_at },
   { hlavicka: 'E-mail odesílatel', z: (f) => f.email_sender },
@@ -68,12 +68,14 @@ export async function GET(request: Request) {
     duplicity: searchParams.get('duplicity') === '1',
   }
 
-  const supabase = getFakturySupabase()
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') return new Response('Faktury pro tuto firmu nejsou napojené.', { status: 404 })
+  const supabase = pristupFaktury.faktury
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
-    let dotaz = supabase.from('invoices').select('*').eq('tenant_id', tenantId)
+    let dotaz = supabase.from('invoices').select('*')
       .order('duzp', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
     dotaz = pouzitFiltry(dotaz, filtry)
     const { data, error } = await dotaz.range(od, od + velikostStranky - 1)

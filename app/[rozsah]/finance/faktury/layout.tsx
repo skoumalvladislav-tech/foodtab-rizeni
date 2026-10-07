@@ -2,9 +2,10 @@ import type { ReactNode } from 'react'
 
 import { canSee, getContext, isModuleActive } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
-import { fakturyJsouNastavene, getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam, type FakturyKlient } from '@/lib/supabase/faktury'
+import { FAKTURY_DB_ICO_VLASTNIKA } from '@/lib/faktury-vlastnik'
 import { sestavNavigaci } from '@/lib/faktury-navigace'
-import { STAV_KE_SCHVALENI, STAV_UHRAZENO } from '@/lib/faktury-types'
+import { FILTR_KE_KONTROLE, STAV_KE_SCHVALENI, STAV_UHRAZENO } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
 import Navigace from './navigace'
 
@@ -52,7 +53,8 @@ export default async function FakturyLayout({
     )
   }
 
-  if (!fakturyJsouNastavene()) {
+  const pristup = await pristupKFakturam(tenantId)
+  if (pristup.stav === 'nenastaveno') {
     return (
       <Sdeleni nadpis="Faktury zatím nejsou připojené">
         Chybí FAKTURY_SUPABASE_URL a FAKTURY_SUPABASE_ANON_KEY v nastavení
@@ -60,8 +62,18 @@ export default async function FakturyLayout({
       </Sdeleni>
     )
   }
+  if (pristup.stav === 'jina_firma') {
+    return (
+      <Sdeleni nadpis="Faktury pro tuto firmu nejsou napojené">
+        Napojená databáze faktur patří firmě s IČO {FAKTURY_DB_ICO_VLASTNIKA}. Tahle firma
+        má v appce {pristup.icoFirmy ? `IČO ${pristup.icoFirmy}` : 'nevyplněné IČO'}. Pokud
+        jde o stejnou firmu, doplňte jí správné IČO, nebo nastavte FAKTURY_DB_TENANT_ID
+        v nastavení prostředí.
+      </Sdeleni>
+    )
+  }
 
-  const pocty = await nactiPocty(tenantId)
+  const pocty = await nactiPocty(pristup.faktury)
   const { hlavni, mobil } = sestavNavigaci(rozsah, pocty)
 
   return (
@@ -79,19 +91,18 @@ export default async function FakturyLayout({
  * Chyba se nevyhazuje: dokud appka běží nad prázdnou/nedostupnou
  * databází, počítadla mají ukázat nulu, ne položit celý modul.
  */
-async function nactiPocty(tenantId: string): Promise<{ needsReview: number; overdue: number; pendingApproval: number }> {
+async function nactiPocty(supabase: FakturyKlient): Promise<{ needsReview: number; overdue: number; pendingApproval: number }> {
   try {
-    const supabase = getFakturySupabase()
     const dnes = new Date().toISOString().slice(0, 10)
 
     const [needsReview, overdue, pendingApproval] = await Promise.all([
       supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('is_archived', false).eq('needs_review', true),
+        .eq('is_archived', false).or(FILTR_KE_KONTROLE),
       supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('is_archived', false).neq('status', STAV_UHRAZENO).neq('status', STAV_KE_SCHVALENI)
+        .eq('is_archived', false).neq('status', STAV_UHRAZENO).neq('status', STAV_KE_SCHVALENI)
         .not('due_date', 'is', null).lt('due_date', dnes),
       supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('tenant_id', tenantId).eq('is_archived', false).eq('status', STAV_KE_SCHVALENI),
+        .eq('is_archived', false).eq('status', STAV_KE_SCHVALENI),
     ])
 
     return {
