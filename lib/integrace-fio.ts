@@ -29,6 +29,7 @@
 import 'server-only'
 
 import type { RadekImportu } from './finance-csv-import.ts'
+import type { BankDataProvider, VysledekOvereni, VysledekTransakci, VysledekZustatku } from './bank-provider-contract.ts'
 
 const ZAKLAD = 'https://fioapi.fio.cz/v1/rest'
 
@@ -184,13 +185,18 @@ async function zavolatFioApi(url: string): Promise<FioVysledek> {
   return naparsovatOdpovedFio(telo)
 }
 
+/** Obecný dotaz na libovolné období — základ pro `nactiPosledniPohybyFio` i pro `fioProvider.nactiTransakce` (BankDataProvider kontrakt). Obě data `'YYYY-MM-DD'`. */
+export async function nactiPohybyFio(token: string, odIso: string, doIso: string): Promise<FioVysledek> {
+  return zavolatFioApi(`${ZAKLAD}/periods/${token}/${odIso}/${doIso}/transactions.json`)
+}
+
 /** Pohyby za posledních `POCET_DNU_ZPATKY` dní — bezpečně hluboko pod limity (90 dní, 50 000 pohybů). */
 export async function nactiPosledniPohybyFio(token: string): Promise<FioVysledek> {
   const dnes = new Date()
   const od = new Date(dnes)
   od.setDate(od.getDate() - POCET_DNU_ZPATKY)
   const naIso = (d: Date) => d.toISOString().slice(0, 10)
-  return zavolatFioApi(`${ZAKLAD}/periods/${token}/${naIso(od)}/${naIso(dnes)}/transactions.json`)
+  return nactiPohybyFio(token, naIso(od), naIso(dnes))
 }
 
 /**
@@ -200,5 +206,64 @@ export async function nactiPosledniPohybyFio(token: string): Promise<FioVysledek
  */
 export async function overitPripojeniFio(token: string): Promise<FioVysledek> {
   const dnes = new Date().toISOString().slice(0, 10)
-  return zavolatFioApi(`${ZAKLAD}/periods/${token}/${dnes}/${dnes}/transactions.json`)
+  return nactiPohybyFio(token, dnes, dnes)
+}
+
+/**
+ * `fioProvider` — Fio zabalený do `BankDataProvider` (zadání §3:
+ * „přidání nového adaptéru nesmí vyžadovat změnu párování nebo
+ * cashflow"). ČISTĚ ADITIVNÍ export — `pripojitFioUcet`/
+ * `synchronizovatFioPripojeni` dál volají `overitPripojeniFio`/
+ * `nactiPosledniPohybyFio` přímo jménem (ověřené, produkčně bojované
+ * cesty se tímhle nepřepisují), ale nový kód, co chce providery řešit
+ * obecně (a ne po jednom `if poskytovatel==='fio'`), má odsud kam sáhnout.
+ */
+export const fioProvider: BankDataProvider = {
+  klic: 'fio',
+  nazev: 'Fio banka',
+  schopnosti: {
+    zpusobPripojeni: 'rucni_token',
+    firemniUcty: true,
+    soukromeUcty: true,
+    dostupneZustatky: ['knihovni'],
+    historieDnu: POCET_DNU_ZPATKY,
+    vsReference: true,
+    pendingTransakce: false,
+    inkrementalniSync: true,
+  },
+
+  async overitToken(token: string): Promise<VysledekOvereni> {
+    const vysledek = await overitPripojeniFio(token)
+    if (vysledek.stav === 'chyba') return vysledek
+    return {
+      stav: 'ok',
+      ucty: [{
+        providerAccountId: vysledek.info.cisloUctu,
+        cisloUctu: vysledek.info.cisloUctu,
+        iban: null,
+        mena: vysledek.info.mena,
+        firemniUcet: null,
+      }],
+    }
+  },
+
+  async nactiZustatky(_ucet: string, token: string): Promise<VysledekZustatku> {
+    const vysledek = await overitPripojeniFio(token)
+    if (vysledek.stav === 'chyba') return vysledek
+    return {
+      stav: 'ok',
+      zustatky: [{
+        typ: 'knihovni',
+        castkaHaleru: vysledek.info.zustatekHaleru,
+        mena: vysledek.info.mena,
+        platnyK: new Date().toISOString(),
+      }],
+    }
+  },
+
+  async nactiTransakce(_ucet: string, token: string, od: string, doData: string): Promise<VysledekTransakci> {
+    const vysledek = await nactiPohybyFio(token, od, doData)
+    if (vysledek.stav === 'chyba') return vysledek
+    return { stav: 'ok', radky: vysledek.radky }
+  },
 }
