@@ -184,30 +184,33 @@ jednorázové testovací identity v úklidu nemažou.
 
 ### P0 — architektura, bez cizích přístupů
 
-- [ ] `PosProvider`, `ReservationProvider`, `MailProvider` TS kontrakty
-      (mirror `lib/bank-provider-contract.ts`), kapability podle
-      skutečně zjištěných entit (Dotypos) / obecného modelu (Choice,
-      mail).
-- [ ] `BankDataProvider`: zabalit Fio do kontraktu (dnes volané přímo
-      jménem) — ověřit, že párování/UI nemusí znát rozdíl mezi
-      providery.
-- [ ] Centrální navigační položka „Integrace" (4 kategorie) —
-      `lib/integrace-navigace.ts` + `app/[rozsah]/integrace/layout.tsx`
-      podle vzoru `lib/marketing-navigace.ts`/`lib/faktury-navigace.ts`.
-      Rozhodnutí: nechat dnešní `/finance/integrace/**` jako cílovou
-      cestu pro kategorii Banka/Pokladna (nerozbíjet existující odkazy),
-      nová položka jen sjednotí vstup a přidá placeholder pro
-      Rezervace/E-mail (zadání: budoucí kategorie nezobrazovat jako
-      funkční).
-- [ ] `integrace_fronta` tabulka (claim-and-release, vzor
-      `marketing_fronta`) pro budoucí webhook/e-mail příjem.
-- [ ] UI pro rozdělení jedné platby na víc faktur (hromadné platby) —
-      DB už to umí (žádná změna schématu), jen formulář/akce.
-- [ ] `interval_synchronizace_minut` na `integrace_pripojeni` + UI +
-      úprava cron úlohy, aby respektovala per-připojení interval místo
-      globálních 4 h.
-- [ ] Surfacing `souhlas_platny_do` v UI (countdown/upozornění na
-      blížící se vypršení).
+- [x] `PosProvider`, `ReservationProvider`, `MailProvider` TS kontrakty
+      (commit `2e43e2b`) — kapacitní, bez vymyšlených endpointů.
+- [x] `BankDataProvider`: zabalit Fio do kontraktu (commit `9c442c4`) —
+      čistě aditivní (`fioProvider` export), existující volající se
+      nepřepisovaly.
+- [x] Čtyři kategorie na stránce Integrace, 4 kategorie zadání vidět
+      (commit `2e43e2b`) — nová samostatná navigační položka/layout se
+      NESTAVĚLA, protože `/finance/integrace` už existuje a je v
+      `nabidka.ts` — druhý vstupní bod by byl zmatek navíc, ne
+      zjednodušení.
+- [x] UI pro rozdělení jedné platby na víc faktur (commit `e766d0e`) —
+      „Ruční párování" + oprava `jizSparovane`, co dřív vyřazovalo
+      částečně spárovanou transakci z návrhů navždy.
+- [x] `interval_synchronizace_minut` na `integrace_pripojeni` + UI +
+      úprava sync joblogiky (commit `cf99a57`).
+- [ ] ~~Surfacing `souhlas_platny_do` v UI~~ — ODLOŽENO, ne zapomenuto:
+      žádný dnešní adaptér (Fio, Enable Banking) tohle pole ve
+      skutečnosti NEPLNÍ (Fio token nemá zjistitelnou expiraci přes
+      API, Enable Banking se nikdy neověřilo proti živé bance), takže
+      UI by dnes ukazovalo jen „neznámé" všude — nic by appka tím
+      nezlepšila, jen přidala prázdný řádek na obrazovku. Čeká na
+      skutečného poskytovatele s konkrétní hodnotou k zobrazení.
+- [ ] ~~`integrace_fronta` tabulka~~ — ODLOŽENO: žádný dnešní kód by ji
+      nečetl ani nezapisoval (nic nepřijímá webhooky, e-mailová
+      architektura není rozhodnutá) — postavit frontu bez volajícího
+      je přesně ta spekulativní infrastruktura, které se appka
+      vyhýbá. Staví se, až bude mít co doručovat.
 
 ### P1 — vyžaduje externí registraci/přístup, appka zatím nemá
 
