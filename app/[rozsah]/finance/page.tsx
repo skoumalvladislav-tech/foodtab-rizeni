@@ -141,7 +141,7 @@ export default async function FinancePrehled({
   const [kpi, bodyGrafu, pozornost, integraceRes] = await Promise.all([
     nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni').catch(() => []),
-    nactiPolozkyKPozornosti(tenantId, rozsah).catch((): PolozkaPozornosti[] => []),
+    nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read')).catch((): PolozkaPozornosti[] => []),
     supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
   ])
 

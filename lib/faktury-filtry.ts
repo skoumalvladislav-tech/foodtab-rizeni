@@ -1,4 +1,4 @@
-import { STAV_ODMITNUTO } from './faktury-types.ts'
+import { FILTR_KE_KONTROLE, STAV_ODMITNUTO } from './faktury-types.ts'
 
 /**
  * Sdílené filtry nad tabulkou `invoices` — vytaženo ze Seznamu (Krok 1
@@ -30,7 +30,7 @@ export function pouzitFiltry(dotaz: any, f: FakturyFiltry): any {
     dotaz = dotaz.neq('status', STAV_ODMITNUTO)
   }
   if (f.kontrola) {
-    dotaz = dotaz.eq('needs_review', true)
+    dotaz = dotaz.or(FILTR_KE_KONTROLE)
   } else if (f.stav) {
     dotaz = dotaz.eq('status', f.stav)
   }

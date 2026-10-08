@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { STAV_ODMITNUTO, type Faktura } from '@/lib/faktury-types'
@@ -87,20 +87,24 @@ export default async function FakturySeznam({
   }
   const pozadovanaStrana = Math.max(1, parseInt(sp.strana ?? '1', 10) || 1)
 
-  const supabase = getFakturySupabase()
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') {
+    return <Sdeleni nadpis="Faktury pro tuto firmu nejsou napojené">Databáze faktur patří jiné firmě, nebo není nastavená.</Sdeleni>
+  }
+  const supabase = pristupFaktury.faktury
   const od = (pozadovanaStrana - 1) * NA_STRANU
 
-  let dotazDat = supabase.from('invoices').select('*').eq('tenant_id', tenantId)
+  let dotazDat = supabase.from('invoices').select('*')
     .order('duzp', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
   dotazDat = pouzitFiltry(dotazDat, filtry)
 
-  let dotazPoctu = supabase.from('invoices').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId)
+  let dotazPoctu = supabase.from('invoices').select('*', { count: 'exact', head: true })
   dotazPoctu = pouzitFiltry(dotazPoctu, filtry)
 
   const [{ data, error }, { count }, { count: archivovanychCelkem }] = await Promise.all([
     dotazDat.range(od, od + NA_STRANU - 1),
     dotazPoctu,
-    supabase.from('invoices').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('is_archived', true),
+    supabase.from('invoices').select('*', { count: 'exact', head: true }).eq('is_archived', true),
   ])
 
   if (error) console.error(error)
@@ -110,7 +114,7 @@ export default async function FakturySeznam({
   const aktualniStrana = Math.min(pozadovanaStrana, celkemStran)
 
   // Měsíce DUZP pro chipy — nezávisle na ostatních filtrech, čte se jen sloupec duzp.
-  const mesicniDotaz = supabase.from('invoices').select('duzp').eq('tenant_id', tenantId).eq('is_archived', filtry.archiv)
+  const mesicniDotaz = supabase.from('invoices').select('duzp').eq('is_archived', filtry.archiv)
   const { data: mesicniData } = filtry.archiv || filtry.stav === STAV_ODMITNUTO
     ? await mesicniDotaz
     : await mesicniDotaz.neq('status', STAV_ODMITNUTO)

@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { naHalere } from '@/lib/mzdy'
 import { STAV_UHRAZENO, STAV_CASTECNE, STAV_NEUHRAZENO } from '@/lib/faktury-types'
 
@@ -124,14 +124,17 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Vyberte platbu, fakturu a vyplňte kladnou částku.')}`)
   }
 
+  // Párování čte částku faktury — bez práva na faktury nejde (stejně jako na stránce Plateb).
+  if ((await zkusPristup(tenantId, 'faktury.read', rozsah)).stav !== 'ok') {
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Párovat s fakturami smí ten, kdo má právo „Vidět přijaté faktury“.')}`)
+  }
+
   let castkaFakturyCelkemHaleru: number | null = null
   try {
-    const { data: faktura } = await getFakturySupabase()
-      .from('invoices')
-      .select('amount')
-      .eq('id', fakturaId)
-      .eq('tenant_id', tenantId)
-      .maybeSingle()
+    const pristupFaktury = await pristupKFakturam(tenantId)
+    const { data: faktura } = pristupFaktury.stav === 'ok'
+      ? await pristupFaktury.faktury.from('invoices').select('amount').eq('id', fakturaId).maybeSingle()
+      : { data: null }
     castkaFakturyCelkemHaleru = faktura?.amount != null ? Math.round(faktura.amount * 100) : null
   } catch {
     castkaFakturyCelkemHaleru = null
@@ -159,8 +162,10 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
   const prebytekHaleru = Number(data?.[0]?.prebytek_haleru ?? 0)
 
   try {
-    const faktury = getFakturySupabase()
-    await faktury.from('invoices').update({ status: plneUhrazeno ? STAV_UHRAZENO : STAV_CASTECNE }).eq('id', fakturaId).eq('tenant_id', tenantId)
+    const pristupFaktury = await pristupKFakturam(tenantId)
+    if (pristupFaktury.stav === 'ok') {
+      await pristupFaktury.faktury.from('invoices').update({ status: plneUhrazeno ? STAV_UHRAZENO : STAV_CASTECNE }).eq('id', fakturaId)
+    }
   } catch {
     // Best-effort — viz komentář funkce. Nesoulad zůstává dohledatelný
     // přímo ve Fakturách (stav tam neodpovídá platby_faktury tady).
@@ -220,19 +225,21 @@ export async function zrusitAlokaci(formData: FormData): Promise<void> {
 
       const soucetHaleru = (zbyvajici ?? []).reduce((s, r) => s + r.castka_haleru, 0)
 
-      const faktury = getFakturySupabase()
-      const { data: faktura } = await faktury
-        .from('invoices')
-        .select('amount')
-        .eq('id', alokace.faktura_id)
-        .eq('tenant_id', tenantId)
-        .maybeSingle()
+      const pristupFaktury = await pristupKFakturam(tenantId)
+      if (pristupFaktury.stav === 'ok') {
+        const faktury = pristupFaktury.faktury
+        const { data: faktura } = await faktury
+          .from('invoices')
+          .select('amount')
+          .eq('id', alokace.faktura_id)
+          .maybeSingle()
 
-      const celkemHaleru = faktura?.amount != null ? Math.round(faktura.amount * 100) : null
-      const novyStav =
-        soucetHaleru <= 0 ? STAV_NEUHRAZENO : celkemHaleru !== null && soucetHaleru >= celkemHaleru ? STAV_UHRAZENO : STAV_CASTECNE
+        const celkemHaleru = faktura?.amount != null ? Math.round(faktura.amount * 100) : null
+        const novyStav =
+          soucetHaleru <= 0 ? STAV_NEUHRAZENO : celkemHaleru !== null && soucetHaleru >= celkemHaleru ? STAV_UHRAZENO : STAV_CASTECNE
 
-      await faktury.from('invoices').update({ status: novyStav }).eq('id', alokace.faktura_id).eq('tenant_id', tenantId)
+        await faktury.from('invoices').update({ status: novyStav }).eq('id', alokace.faktura_id)
+      }
     } catch {
       // Best-effort — viz komentář funkce. Nesoulad zůstává dohledatelný
       // přímo ve Fakturách (stav tam neodpovídá platby_faktury tady).

@@ -22,15 +22,7 @@ import 'server-only'
 
 import { ImapFlow } from 'imapflow'
 
-export type ZabezpeceniImap = 'tls' | 'starttls'
-
-export type PrihlaseniImap = {
-  host: string
-  port: number
-  zabezpeceni: ZabezpeceniImap
-  uzivatel: string
-  heslo: string
-}
+import { moznostiImap, type PrihlaseniImap } from './integrace-mail-imap-moznosti.ts'
 
 export type VysledekOvereniImap =
   | { stav: 'ok'; slozky: string[] }
@@ -40,6 +32,8 @@ export type VysledekOvereniImap =
 export function hlaskaProChybu(e: unknown): string {
   const zprava = e instanceof Error ? e.message : String(e)
   const kod = (e as { authenticationFailed?: boolean; code?: string })?.code
+  // imapflow dává důvod od serveru do responseText, ne do message ("Command failed").
+  const odpovedServeru = (e as { responseText?: unknown })?.responseText
 
   if (/auth/i.test(zprava) || (e as { authenticationFailed?: boolean })?.authenticationFailed) {
     return 'Přihlašovací jméno nebo heslo bylo odmítnuto. U Gmailu/Outlooku zkuste aplikační heslo, ne hlavní heslo k účtu.'
@@ -48,6 +42,9 @@ export function hlaskaProChybu(e: unknown): string {
   if (kod === 'ECONNREFUSED') return 'Server odmítl spojení — zkontrolujte port a zabezpečení (TLS/STARTTLS).'
   if (kod === 'ETIMEDOUT' || /timeout/i.test(zprava)) return 'Server neodpověděl včas — zkontrolujte adresu, port a že server povoluje IMAP zvenku.'
   if (/certificate|self signed|SSL/i.test(zprava)) return 'Problém s TLS certifikátem serveru — zkontrolujte zabezpečení (TLS/STARTTLS) a port.'
+  if (typeof odpovedServeru === 'string' && odpovedServeru.trim()) {
+    return `Server odpověděl: ${odpovedServeru.trim().slice(0, 300)}`
+  }
   return `Připojení se nepodařilo: ${zprava}`
 }
 
@@ -58,17 +55,24 @@ export function hlaskaProChybu(e: unknown): string {
  * fungují.
  */
 export async function overitPripojeniImap(prihlaseni: PrihlaseniImap): Promise<VysledekOvereniImap> {
-  const klient = new ImapFlow({
-    host: prihlaseni.host,
-    port: prihlaseni.port,
-    secure: prihlaseni.zabezpeceni === 'tls',
-    auth: { user: prihlaseni.uzivatel, pass: prihlaseni.heslo },
-    logger: false,
-  })
+  const klient = new ImapFlow(moznostiImap(prihlaseni))
+  // Bez posluchače by chyba spojení PO přihlášení (vypršení, ECONNRESET)
+  // vyletěla jako nezachycená výjimka a shodila proces; takhle ji odchytí catch níž.
+  klient.on('error', () => {})
 
   try {
     await klient.connect()
     const slozky = (await klient.list()).map((s) => s.path)
+    // Hlavička slibuje „vybere INBOX" — bez tohohle by se ověřilo jen
+    // přihlášení, ne že účet smí schránku číst. Jen pro čtení (EXAMINE).
+    let zamek
+    try {
+      zamek = await klient.getMailboxLock('INBOX', { readOnly: true })
+    } catch (e) {
+      await klient.logout().catch(() => {})
+      return { stav: 'chyba', duvod: `Přihlášení prošlo, ale schránku INBOX se nepodařilo otevřít pro čtení. ${hlaskaProChybu(e)}` }
+    }
+    zamek.release()
     await klient.logout()
     return { stav: 'ok', slozky }
   } catch (e) {

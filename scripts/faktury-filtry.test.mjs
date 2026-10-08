@@ -10,6 +10,7 @@
  */
 
 import { escapovatHledani, pouzitFiltry } from '../lib/faktury-filtry.ts'
+import { FILTR_KE_KONTROLE } from '../lib/faktury-types.ts'
 
 let chyb = 0
 const ok = (popis, podminka, detail) => {
@@ -67,7 +68,9 @@ console.log('\npouzitFiltry — kontrola vyhrává nad stav (vzájemně se vylu�
 {
   const { proxy, volani } = faloveVolani()
   pouzitFiltry(proxy, { ...zakladniFiltry, kontrola: true, stav: 'Uhrazeno' })
-  ma('eq(needs_review, true)', volani.find((v) => v[0] === 'eq' && v[1] === 'needs_review'), ['eq', 'needs_review', true])
+  // needs_review je v živé DB vždy false — ke kontrole je i stav „Nutná ruční kontrola (…)".
+  ma('or(needs_review | stav „Nutná ruční kontrola…")', volani.find((v) => v[0] === 'or'), ['or', FILTR_KE_KONTROLE])
+  ok('needs_review se nefiltruje samo (ukazovalo by vždycky nulu)', !volani.some((v) => v[0] === 'eq' && v[1] === 'needs_review'))
   ok('stav se ignoruje', !volani.some((v) => v[1] === 'status' && v[0] === 'eq'))
 }
 

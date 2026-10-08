@@ -6,12 +6,6 @@
  */
 export type Faktura = {
   id: string
-  /**
-   * `tenants.id` z hlavní FoodTab databáze — cizí hodnota bez FK (jiný Supabase
-   * projekt, žádné sdílené přihlášení). Přidáno 2. 10. 2026, viz
-   * `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md`.
-   */
-  tenant_id: string
   received_at: string
   email_sender: string | null
   email_subject: string | null
@@ -56,6 +50,23 @@ export function jeNezaplacena(faktura: Pick<Faktura, 'status'>): boolean {
     faktura.status !== STAV_KE_SCHVALENI &&
     faktura.status !== STAV_ODMITNUTO
   )
+}
+
+/**
+ * „Nutná ruční kontrola (…)" je PŘEDPONA stavu, kterou píše n8n i nový
+ * příjem z e-mailu. Sloupec `needs_review` měl být podle schema.sql
+ * počítaný ze stavu, ale v živé databázi je to obyčejný sloupec a n8n ho
+ * nikdy nenastavil (7.10.2026: false u všech řádků, i u stovek „Nutná
+ * ruční kontrola"). Kontrola proto platí podle obou — co by se dívalo jen
+ * na `needs_review`, ukazovalo by vždycky nulu.
+ */
+export const PREDPONA_RUCNI_KONTROLY = 'Nutná ruční kontrola'
+
+/** Totéž jako `potrebujeKontrolu`, pro `.or(...)` v dotazu na databázi Faktur. */
+export const FILTR_KE_KONTROLE = `needs_review.is.true,status.like."${PREDPONA_RUCNI_KONTROLY}%"`
+
+export function potrebujeKontrolu(faktura: Pick<Faktura, 'needs_review' | 'status'>): boolean {
+  return faktura.needs_review === true || (faktura.status ?? '').startsWith(PREDPONA_RUCNI_KONTROLY)
 }
 
 export function dniPoSplatnosti(splatnost: string | null): number {

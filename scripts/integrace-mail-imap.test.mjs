@@ -2,6 +2,7 @@
 /**
  * `hlaskaProChybu` — čistá logika z lib/integrace-mail-imap.ts, žádné
  * IO. Mapuje syrové chyby z `imapflow` na srozumitelné české hlášky.
+ * (Nastavení spojení hlídá v CI scripts/integrace-mail-imap-moznosti.test.mjs.)
  *
  * Pusť `node --experimental-strip-types --conditions=react-server
  * scripts/integrace-mail-imap.test.mjs` (`server-only`, stejný důvod
@@ -33,6 +34,13 @@ ok('ETIMEDOUT → neodpověděl včas', /neodpověděl včas/.test(hlaskaProChyb
 
 console.log('\n== TLS problém ==')
 ok('zpráva s "certificate" → hláška o TLS', /TLS certifik/.test(hlaskaProChybu(new Error('self signed certificate'))))
+
+console.log('\n== Odmítnutí serverem (imapflow: message "Command failed", důvod v responseText) ==')
+{
+  const e = Object.assign(new Error('Command failed'), { responseText: 'NO [NOPERM] Mailbox INBOX not readable' })
+  const hlaska = hlaskaProChybu(e)
+  ok('ukáže důvod od serveru, ne holé "Command failed"', hlaska.includes('NOPERM') && !hlaska.includes('Command failed'))
+}
 
 console.log('\n== Neznámá chyba — appka ji nezahodí, ukáže aspoň zprávu ==')
 ok('neznámá chyba obsahuje původní zprávu', hlaskaProChybu(new Error('Něco úplně jiného')).includes('Něco úplně jiného'))

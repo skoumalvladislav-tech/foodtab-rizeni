@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { fakturyJsouNastavene, getFakturySupabase } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
@@ -69,6 +69,7 @@ type PotvrzenaAlokace = {
 async function nactiPotvrzeneAlokace(
   tenantId: string,
   supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+  vidiFaktury: boolean,
 ): Promise<PotvrzenaAlokace[]> {
   const { data } = await supabase
     .from('platby_faktury')
@@ -100,14 +101,13 @@ async function nactiPotvrzeneAlokace(
   // `invoices.status` jako zdroj pravdy (ten zůstal v Fakturách jen
   // jako best-effort kopie), pouze dodavatele k číslu faktury.
   let dodavateleMapa = new Map<string, string>()
-  if (fakturyJsouNastavene()) {
+  const pristupFaktury = vidiFaktury ? await pristupKFakturam(tenantId) : null
+  if (pristupFaktury?.stav === 'ok') {
     try {
       const fakturyIds = [...new Set(alokace.map((a) => a.faktura_id))]
-      const supabaseFaktury = getFakturySupabase()
-      const { data: fakturyData } = await supabaseFaktury
+      const { data: fakturyData } = await pristupFaktury.faktury
         .from('invoices')
         .select('id, supplier')
-        .eq('tenant_id', tenantId)
         .in('id', fakturyIds)
       dodavateleMapa = new Map(
         ((fakturyData ?? []) as { id: string; supplier: string | null }[]).map((f) => [f.id, f.supplier ?? '']),
@@ -128,22 +128,32 @@ async function nactiPotvrzeneAlokace(
   }))
 }
 
+/** PostgREST vrací nejvýš 1000 řádků na dotaz; aktivních faktur je víc (7.10.2026: 1872). */
+const STRANKA_FAKTUR = 1000
+
 async function nactiNavrhyParovani(
   tenantId: string,
   transakce: readonly Transakce[],
   alokovanoMapa: ReadonlyMap<string, number>,
+  vidiFaktury: boolean,
 ): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[] }> {
-  if (!fakturyJsouNastavene()) return { navrhy: [], faktury: [] }
+  if (!vidiFaktury) return { navrhy: [], faktury: [] }
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') return { navrhy: [], faktury: [] }
 
-  let faktury: Faktura[] = []
+  const faktury: Faktura[] = []
   try {
-    const supabaseFaktury = getFakturySupabase()
-    const { data } = await supabaseFaktury
-      .from('invoices')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('is_archived', false)
-    faktury = ((data ?? []) as Faktura[]).filter(jeNezaplacena)
+    for (let strana = 0; strana < 10; strana++) {
+      const { data, error } = await pristupFaktury.faktury
+        .from('invoices')
+        .select('id, supplier, variable_symbol, amount, due_date, issue_date, status')
+        .eq('is_archived', false)
+        .order('id', { ascending: true })
+        .range(strana * STRANKA_FAKTUR, strana * STRANKA_FAKTUR + STRANKA_FAKTUR - 1)
+      if (error) return { navrhy: [], faktury: [] }
+      faktury.push(...((data ?? []) as Faktura[]).filter(jeNezaplacena))
+      if (!data || data.length < STRANKA_FAKTUR) break
+    }
   } catch {
     return { navrhy: [], faktury: [] }
   }
@@ -230,8 +240,10 @@ export default async function FinancePlatby({
   }
   const zbyvaNaTransakci = (t: Transakce) => t.castka_haleru - (alokovanoMapa.get(t.id) ?? 0)
 
-  const { navrhy, faktury: fakturyKandidati } = await nactiNavrhyParovani(tenantId, transakce, alokovanoMapa)
-  const potvrzeneAlokace = await nactiPotvrzeneAlokace(tenantId, supabase)
+  // Platby stačí `finance.read`, data faktur (dodavatel, částka, VS) ale chtějí `faktury.read`.
+  const vidiFaktury = canSee(pristup.ctx, 'faktury.read')
+  const { navrhy, faktury: fakturyKandidati } = await nactiNavrhyParovani(tenantId, transakce, alokovanoMapa, vidiFaktury)
+  const potvrzeneAlokace = await nactiPotvrzeneAlokace(tenantId, supabase, vidiFaktury)
 
   // Pro ruční párování (hromadná platba) — jen výdaje s nevyčerpaným
   // zbytkem, ať appka nenabízí platbu, která už je plně spárovaná.
@@ -267,6 +279,12 @@ export default async function FinancePlatby({
             Export pro účetního (tento měsíc)
           </a>
         </div>
+
+        {!vidiFaktury ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+            Párování plateb s fakturami vidí ten, kdo má právo „Vidět přijaté faktury“.
+          </p>
+        ) : null}
 
         {navrhy.length > 0 ? (
           <section style={{ display: 'grid', gap: '10px' }}>

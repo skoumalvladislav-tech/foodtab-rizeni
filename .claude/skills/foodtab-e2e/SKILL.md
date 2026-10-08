@@ -67,7 +67,8 @@ neověří (`foodtab-db-security`). Pro provozní tabulky je totéž od
 17. 9. 2026 v `scripts/provoz-granty.test.mjs` (všechny tabulky mimo
 `marketing_*`, bez jmenovaného seznamu). Podobně strážní testy nad
 zdrojovým textem: `scripts/faktury-tenant-izolace.test.mjs` (každý dotaz
-na `invoices` filtruje `tenant_id`) a pravidlo 8 v `marketing-ai.test.mjs`.
+na `invoices` jde přes bránu `pristupKFakturam` a nefiltruje neexistující
+`tenant_id`) a pravidlo 8 v `marketing-ai.test.mjs`.
 Spouštěj před commitem VŠECHNY testy ze seznamu `TESTY` v
 `.github/workflows/aplikace.yml`, ne jen ty, které se tě týkají — nová
 migrace shodila `provoz-granty` a nikdo si toho nevšiml, dokud to
