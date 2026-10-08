@@ -33,20 +33,35 @@ export type PolozkaPozornosti = {
   akceText: string
 }
 
+/** PostgREST vrací nejvýš 1000 řádků na dotaz; aktivních faktur je víc (7.10.2026: 1872). */
+const STRANKA = 1000
+const MAX_STRANEK = 10
+
 export async function nactiPolozkyKPozornosti(
   tenantId: string,
   rozsah: string,
+  /** `faktury.read` — Finance stačí `finance.read`, data faktur ale ne. */
+  vidiFaktury: boolean,
   limitTransakci = 60,
 ): Promise<PolozkaPozornosti[]> {
+  if (!vidiFaktury) return []
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') return []
 
   const polozky: PolozkaPozornosti[] = []
 
-  let faktury: Faktura[] = []
+  const faktury: Faktura[] = []
   try {
-    const { data } = await pristupFaktury.faktury.from('invoices').select('*').eq('is_archived', false)
-    faktury = (data ?? []) as Faktura[]
+    for (let strana = 0; strana < MAX_STRANEK; strana++) {
+      const { data, error } = await pristupFaktury.faktury.from('invoices')
+        .select('id, supplier, invoice_number, variable_symbol, amount, due_date, issue_date, status, needs_review')
+        .eq('is_archived', false)
+        .order('id', { ascending: true })
+        .range(strana * STRANKA, strana * STRANKA + STRANKA - 1)
+      if (error) return []
+      faktury.push(...((data ?? []) as Faktura[]))
+      if (!data || data.length < STRANKA) break
+    }
   } catch {
     return []
   }
@@ -106,17 +121,20 @@ export async function nactiPolozkyKPozornosti(
     }
   }
 
-  // 2. Faktury, u kterých si zpracování nebylo jisté.
-  for (const f of faktury) {
-    if (!potrebujeKontrolu(f)) continue
+  // 2. Faktury, u kterých si zpracování nebylo jisté — jeden souhrnný řádek,
+  // ne stovky stejných (v provozu jich čeká přes 500).
+  const keKontrole = faktury.filter(potrebujeKontrolu)
+  if (keKontrole.length > 0) {
     polozky.push({
-      klic: `faktura-${f.id}`,
+      klic: 'faktury-ke-kontrole',
       typ: 'faktura_kontrola',
-      popis: `Faktura ${f.supplier ?? '—'} (${f.invoice_number ?? 'bez čísla'}) vyžaduje ruční kontrolu`,
+      popis: keKontrole.length === 1
+        ? `Faktura ${keKontrole[0].supplier || '—'} (${keKontrole[0].invoice_number ?? 'bez čísla'}) vyžaduje ruční kontrolu`
+        : `${keKontrole.length} faktur vyžaduje ruční kontrolu`,
       stredisko: '—',
-      castkaHaleru: Math.round(f.amount * 100),
+      castkaHaleru: keKontrole.reduce((soucet, f) => soucet + Math.round((f.amount ?? 0) * 100), 0),
       stav: 'nutne',
-      akceHref: `/${rozsah}/finance/faktury`,
+      akceHref: `/${rozsah}/finance/faktury/seznam?kontrola=1`,
       akceText: 'Zkontrolovat',
     })
   }

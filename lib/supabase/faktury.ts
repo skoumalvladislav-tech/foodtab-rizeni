@@ -1,9 +1,7 @@
 import 'server-only'
 
-import { cache } from 'react'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-import { getServerSupabase } from '@/lib/supabase/server'
 import { jeVlastnikFakturyDb } from '@/lib/faktury-vlastnik'
 
 /**
@@ -24,10 +22,12 @@ import { jeVlastnikFakturyDb } from '@/lib/faktury-vlastnik'
  * sloupec filtroval, takže každý dotaz padal a modul ukazoval prázdno.
  *
  * Izolace proto stojí na jediné bráně: `pristupKFakturam()` pustí dál
- * jen firmu, které databáze patří (lib/faktury-vlastnik.ts). Klient
- * k databázi Faktur se mimo tenhle soubor NEVYTVÁŘÍ — hlídá to
- * scripts/faktury-tenant-izolace.test.mjs. Oprávnění na obrazovku
- * (`faktury.read`/`faktury.manage`) si dál ověřuje každá stránka sama.
+ * jen firmu z nastavení FAKTURY_DB_TENANT_ID (lib/faktury-vlastnik.ts —
+ * proč ne podle IČO, je rozepsané tam). Bez nastavení je brána zavřená
+ * pro všechny. Klient k databázi Faktur se mimo tenhle soubor
+ * NEVYTVÁŘÍ — hlídá to scripts/faktury-tenant-izolace.test.mjs.
+ * Oprávnění na obrazovku (`faktury.read`/`faktury.manage`) si dál
+ * ověřuje každá stránka sama.
  *
  * ---------------------------------------------------------------------
  * VEŘEJNÝ KLÍČ, NE SERVISNÍ
@@ -53,37 +53,28 @@ function vytvoritKlienta(): FakturyKlient {
 export type PristupKFakturam =
   | { stav: 'ok'; faktury: FakturyKlient }
   | { stav: 'nenastaveno' }
-  | { stav: 'jina_firma'; icoFirmy: string | null }
+  /** Chybí FAKTURY_DB_TENANT_ID — databáze zatím nepatří nikomu, brána je zavřená. */
+  | { stav: 'bez_vlastnika' }
+  | { stav: 'jina_firma' }
 
-const icoFirmy = cache(async (tenantId: string): Promise<string | null> => {
-  const supabase = await getServerSupabase()
-  const { data } = await supabase.from('tenants').select('ico').eq('id', tenantId).maybeSingle()
-  return (data?.ico as string | null | undefined) ?? null
-})
+function rozhodnout(tenantId: string): PristupKFakturam {
+  if (!fakturyJsouNastavene()) return { stav: 'nenastaveno' }
+  if (!(process.env.FAKTURY_DB_TENANT_ID ?? '').trim()) return { stav: 'bez_vlastnika' }
+  if (!jeVlastnikFakturyDb(tenantId, process.env.FAKTURY_DB_TENANT_ID)) return { stav: 'jina_firma' }
+  return { stav: 'ok', faktury: vytvoritKlienta() }
+}
 
 /**
  * Jediná cesta k databázi Faktur pro přihlášeného uživatele.
  *
  * `tenantId` musí pocházet ze serveru (`getCurrentTenantId()`), nikdy
- * z formuláře. IČO se čte pod RLS přihlášeného uživatele — firmu, do
- * které nepatří, appka ani neuvidí.
+ * z formuláře.
  */
 export async function pristupKFakturam(tenantId: string): Promise<PristupKFakturam> {
-  if (!fakturyJsouNastavene()) return { stav: 'nenastaveno' }
-  const ico = await icoFirmy(tenantId)
-  if (!jeVlastnikFakturyDb({ id: tenantId, ico }, process.env.FAKTURY_DB_TENANT_ID)) {
-    return { stav: 'jina_firma', icoFirmy: ico }
-  }
-  return { stav: 'ok', faktury: vytvoritKlienta() }
+  return rozhodnout(tenantId)
 }
 
-/**
- * Totéž pro naplánovanou úlohu bez přihlášeného uživatele. IČO firmy
- * dodá volající ze servisního klienta podle `tenant_id` připojení —
- * nikdy z požadavku.
- */
-export function pristupKFakturamUlohy(firma: { id: string; ico: string | null }): PristupKFakturam {
-  if (!fakturyJsouNastavene()) return { stav: 'nenastaveno' }
-  if (!jeVlastnikFakturyDb(firma, process.env.FAKTURY_DB_TENANT_ID)) return { stav: 'jina_firma', icoFirmy: firma.ico }
-  return { stav: 'ok', faktury: vytvoritKlienta() }
+/** Totéž pro naplánovanou úlohu — `tenantId` z řádku připojení, nikdy z požadavku. */
+export function pristupKFakturamUlohy(tenantId: string): PristupKFakturam {
+  return rozhodnout(tenantId)
 }

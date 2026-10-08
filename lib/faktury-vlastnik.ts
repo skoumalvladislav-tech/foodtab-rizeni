@@ -6,27 +6,18 @@
  * bez přihlášení do toho Supabase projektu ani proběhnout nemůže) a
  * všechny řádky v ní zapsal n8n pro Foodtab s.r.o. Izolace firem proto
  * nestojí na filtru v dotazu, ale na tom, KDO se k databázi vůbec
- * dostane: jen firma, které patří. Ostatní firmy dostanou „nenapojeno",
- * ne cizí faktury.
+ * dostane: jen firma, jejíž id je v nastavení prostředí
+ * FAKTURY_DB_TENANT_ID. Bez nastavení se nedostane nikdo.
+ *
+ * PROČ NE PODLE IČO: IČO si správce firmy (settings.manage) může v
+ * tabulce `tenants` přepsat sám a není unikátní — kdo by si napsal
+ * 21249946, dostal by faktury Foodtabu. Nastavení prostředí uživatel
+ * appky změnit nemůže a id firmy se nemění.
  *
  * Bez `server-only`, ať se rozhodnutí dá testovat i v CI bez Next.js.
  */
 
-export const FAKTURY_DB_ICO_VLASTNIKA = '21249946'
-
-/** IČO se v různých zdrojích píše s mezerami nebo s předponou „CZ" (DIČ). */
-export function normalizovatIco(ico: string | null | undefined): string {
-  return (ico ?? '').replace(/\s+/g, '').replace(/^CZ/i, '')
-}
-
-/**
- * `tenantIdVlastnika` je výslovné nastavení (FAKTURY_DB_TENANT_ID) pro
- * případ, že firma nemá v appce vyplněné IČO — má přednost, protože ho
- * někdo nastavil vědomě. Prázdné nastavení se ignoruje, nikdy nepovolí
- * všechny.
- */
-export function jeVlastnikFakturyDb(firma: { id: string; ico: string | null | undefined }, tenantIdVlastnika?: string | null): boolean {
-  const vynuceny = (tenantIdVlastnika ?? '').trim()
-  if (vynuceny) return firma.id === vynuceny
-  return normalizovatIco(firma.ico) === FAKTURY_DB_ICO_VLASTNIKA
+export function jeVlastnikFakturyDb(tenantId: string, tenantIdVlastnika: string | null | undefined): boolean {
+  const vlastnik = (tenantIdVlastnika ?? '').trim().toLowerCase()
+  return vlastnik !== '' && tenantId.trim().toLowerCase() === vlastnik
 }

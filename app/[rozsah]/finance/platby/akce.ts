@@ -124,6 +124,11 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Vyberte platbu, fakturu a vyplňte kladnou částku.')}`)
   }
 
+  // Párování čte částku faktury — bez práva na faktury nejde (stejně jako na stránce Plateb).
+  if ((await zkusPristup(tenantId, 'faktury.read', rozsah)).stav !== 'ok') {
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Párovat s fakturami smí ten, kdo má právo „Vidět přijaté faktury“.')}`)
+  }
+
   let castkaFakturyCelkemHaleru: number | null = null
   try {
     const pristupFaktury = await pristupKFakturam(tenantId)

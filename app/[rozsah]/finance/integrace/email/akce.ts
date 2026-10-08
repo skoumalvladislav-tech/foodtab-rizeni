@@ -6,7 +6,8 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { zasifrovat } from '@/lib/integrace-klice'
-import { overitPripojeniImap, type ZabezpeceniImap } from '@/lib/integrace-mail-imap'
+import { overitPripojeniImap } from '@/lib/integrace-mail-imap'
+import type { ZabezpeceniImap } from '@/lib/integrace-mail-imap-moznosti'
 
 async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()

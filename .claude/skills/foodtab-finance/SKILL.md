@@ -20,12 +20,16 @@ skill je mapa a seznam pastí, ne zadání.
 - **Data faktur NEJSOU v hlavní databázi.** Žijí v samostatném Supabase
   projektu `ctqtwahlzhyjerqulqyn` (rozhodnutí Šéfíka 15. 9., „Možnost A").
   Ta databáze nemá sdílené přihlášení a RLS na ní je „allow all" s anon
-  klíčem. Izolace zákazníků je proto zatím JEN aplikační: každý dotaz
-  filtruje `.eq('tenant_id', tenantId)` (fáze 1, 2. 10. 2026) — a pojistku
-  proti zapomenutému filtru drží `scripts/faktury-tenant-izolace.test.mjs`.
-  Sloupec `tenant_id` v té databázi musí doplnit Šéfík ručním SQL
-  (`docs/hlaseni/faktury-tenant-izolace-2026-10-02.md`) PŘED nasazením.
-  Skutečná RLS (fáze 2) potřebuje JWT Secret toho projektu — nerozhodnuto.
+  klíčem. **Sloupec `tenant_id` v ní NEEXISTUJE** (SQL z
+  `docs/hlaseni/faktury-tenant-izolace-2026-10-02.md` nikdy neproběhlo a
+  do toho projektu se dnes nikdo nepřihlásí) — dotaz s `.eq('tenant_id', …)`
+  spadne a stránka ukáže prázdno (tak to bylo v provozu 3.–8. 10. 2026).
+  Databáze je JEDNOFIREMNÍ: izolace stojí na bráně `pristupKFakturam()`
+  (`lib/supabase/faktury.ts`), která pustí jen firmu z nastavení prostředí
+  `FAKTURY_DB_TENANT_ID` — bez něj nikoho, a NIKDY podle IČO (to si správce
+  firmy může přepsat sám). Hlídá to `scripts/faktury-tenant-izolace.test.mjs`.
+  `needs_review` je v živé DB vždy false — „ke kontrole" počítej přes
+  `potrebujeKontrolu` / `FILTR_KE_KONTROLE` (`lib/faktury-types.ts`).
 - **Katalog surovin a nákupní ceny** (od 2. 10., migrace
   `20261002100000_sklad_suroviny_zaklad.sql`): `ingredients`,
   `ingredient_purchase_prices` (insert-only historie), vazba
@@ -55,7 +59,9 @@ Dotykačku, až bude.
 ## Pasti
 
 1. Před jakoukoli prací nad fakturami: každý nový dotaz na `invoices`
-   MUSÍ filtrovat `tenant_id` (test to hlídá, ale nespoléhej na to).
+   MUSÍ jít přes `pristupKFakturam()` a NESMÍ filtrovat `tenant_id`
+   (sloupec neexistuje). Data faktur chtějí `faktury.read`, ne jen
+   `finance.read`. Test to hlídá, ale nespoléhej na to.
 2. Nezaváděj druhý katalog surovin ani druhou tabulku cen — rozšiřuj
    `ingredients` / `ingredient_purchase_prices`.
 3. Faktury a hlavní databáze jsou dva projekty: nelze mezi nimi dělat FK

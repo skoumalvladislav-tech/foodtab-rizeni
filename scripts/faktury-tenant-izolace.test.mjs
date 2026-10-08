@@ -12,8 +12,8 @@
  *   2. každý soubor, který sahá na `invoices`, jde přes `pristupKFakturam`
  *      (nebo dostane hotového klienta jako `FakturyKlient` od toho, kdo
  *      bránou prošel),
- *   3. brána pustí jen firmu, které databáze patří (IČO 21249946, nebo
- *      výslovné FAKTURY_DB_TENANT_ID),
+ *   3. brána pustí jen firmu z nastavení FAKTURY_DB_TENANT_ID — bez něj
+ *      nikoho; NIKDY podle IČO (to si správce firmy může přepsat sám),
  *   4. žádný dotaz na `invoices` nefiltruje neexistující `tenant_id`.
  *
  * Pusť:
@@ -24,7 +24,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { FAKTURY_DB_ICO_VLASTNIKA, jeVlastnikFakturyDb, normalizovatIco } from '../lib/faktury-vlastnik.ts'
+import { jeVlastnikFakturyDb } from '../lib/faktury-vlastnik.ts'
 import { FILTR_KE_KONTROLE, potrebujeKontrolu } from '../lib/faktury-types.ts'
 
 const KOREN = fileURLToPath(new URL('..', import.meta.url))
@@ -62,7 +62,8 @@ console.log('\n1. Klient k databázi Faktur vzniká jen v ' + BRANA)
   ok(`nechráněný getFakturySupabase() neexistuje (${stary.map((s) => s.cesta).join(', ') || 'nikde'})`, stary.length === 0)
   const brana = soubory.find((s) => s.cesta === BRANA)?.zdroj ?? ''
   ok('vytvoritKlienta() není exportovaná', /\nfunction vytvoritKlienta\(/.test(brana) && !/export\s+function\s+vytvoritKlienta/.test(brana))
-  ok('brána se ptá na vlastníka přes jeVlastnikFakturyDb', (brana.match(/jeVlastnikFakturyDb\(/g) ?? []).length >= 2)
+  ok('brána se ptá na vlastníka přes jeVlastnikFakturyDb', /jeVlastnikFakturyDb\(/.test(brana))
+  ok('klient vzniká jen v jednom místě rozhodnutí (rozhodnout)', (brana.match(/(?<!function )vytvoritKlienta\(\)/g) ?? []).length === 1)
 }
 
 console.log('\n2. Každý, kdo sahá na invoices, jde přes bránu')
@@ -79,19 +80,22 @@ for (const s of naFaktury) {
   ok(`${s.cesta} (${retezy.length} dotazů)`, spatne.length === 0)
 }
 
-console.log('\n4. Kdo je vlastník databáze Faktur')
+console.log('\n4. Kdo je vlastník databáze Faktur — jen podle FAKTURY_DB_TENANT_ID, nikdy podle IČO')
 {
-  const foodtab = { id: 'aaaa', ico: FAKTURY_DB_ICO_VLASTNIKA }
-  ok('firma s IČO vlastníka projde', jeVlastnikFakturyDb(foodtab))
-  ok('IČO s mezerami projde', jeVlastnikFakturyDb({ id: 'aaaa', ico: '212 49 946' }))
-  ok('DIČ s předponou CZ projde', jeVlastnikFakturyDb({ id: 'aaaa', ico: 'CZ21249946' }))
-  ok('jiná firma neprojde', !jeVlastnikFakturyDb({ id: 'bbbb', ico: '12345678' }))
-  ok('firma bez IČO neprojde', !jeVlastnikFakturyDb({ id: 'bbbb', ico: null }))
-  ok('prázdné IČO neprojde', !jeVlastnikFakturyDb({ id: 'bbbb', ico: '' }))
-  ok('výslovné FAKTURY_DB_TENANT_ID pustí firmu bez IČO', jeVlastnikFakturyDb({ id: 'cccc', ico: null }, 'cccc'))
-  ok('výslovné FAKTURY_DB_TENANT_ID má přednost i před správným IČO', !jeVlastnikFakturyDb(foodtab, 'cccc'))
-  ok('prázdné FAKTURY_DB_TENANT_ID nic nepovolí navíc', !jeVlastnikFakturyDb({ id: 'bbbb', ico: null }, '   '))
-  ok('normalizace IČO', normalizovatIco(' cz 2124 9946 ') === '21249946')
+  const vlastnik = '11111111-1111-1111-1111-111111111111'
+  ok('firma z nastavení projde', jeVlastnikFakturyDb(vlastnik, vlastnik))
+  ok('totéž id jinými velkými písmeny / s mezerami projde', jeVlastnikFakturyDb(vlastnik, `  ${vlastnik.toUpperCase()} `))
+  ok('jiná firma neprojde', !jeVlastnikFakturyDb('22222222-2222-2222-2222-222222222222', vlastnik))
+  ok('bez nastavení neprojde NIKDO (brána zavřená)', !jeVlastnikFakturyDb(vlastnik, undefined))
+  ok('prázdné nastavení nepovolí nikoho', !jeVlastnikFakturyDb(vlastnik, '   '))
+  ok('null nastavení nepovolí nikoho', !jeVlastnikFakturyDb(vlastnik, null))
+
+  // IČO si správce firmy (settings.manage) může v tabulce tenants přepsat
+  // sám a není unikátní — rozhodnutí o přístupu na něm stát nesmí.
+  const rozhodnuti = [soubory.find((s) => s.cesta === 'lib/faktury-vlastnik.ts'), soubory.find((s) => s.cesta === BRANA)]
+    .map((s) => (s?.zdroj ?? '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''))
+    .join('\n')
+  ok('vlastnictví se nerozhoduje podle IČO ani tabulky tenants', !/\bico\b/i.test(rozhodnuti) && !/from\(\s*['"]tenants['"]\s*\)/.test(rozhodnuti))
 }
 
 console.log('\n5. Co potřebuje ruční kontrolu (needs_review je v živé DB vždy false)')

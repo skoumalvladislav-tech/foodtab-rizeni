@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { canSee, getContext, isModuleActive } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import { pristupKFakturam, type FakturyKlient } from '@/lib/supabase/faktury'
-import { FAKTURY_DB_ICO_VLASTNIKA } from '@/lib/faktury-vlastnik'
 import { sestavNavigaci } from '@/lib/faktury-navigace'
 import { FILTR_KE_KONTROLE, STAV_KE_SCHVALENI, STAV_UHRAZENO } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
@@ -62,13 +61,19 @@ export default async function FakturyLayout({
       </Sdeleni>
     )
   }
+  if (pristup.stav === 'bez_vlastnika') {
+    return (
+      <Sdeleni nadpis="Databáze faktur zatím není přiřazená žádné firmě">
+        Faktury se ukážou, až bude v nastavení prostředí (Vercel) proměnná
+        FAKTURY_DB_TENANT_ID s id firmy, které databáze faktur patří.
+        {canSee(ctx, 'settings.manage') ? ` Id téhle firmy: ${tenantId}` : ' Nastaví ji Šéfík.'}
+      </Sdeleni>
+    )
+  }
   if (pristup.stav === 'jina_firma') {
     return (
       <Sdeleni nadpis="Faktury pro tuto firmu nejsou napojené">
-        Napojená databáze faktur patří firmě s IČO {FAKTURY_DB_ICO_VLASTNIKA}. Tahle firma
-        má v appce {pristup.icoFirmy ? `IČO ${pristup.icoFirmy}` : 'nevyplněné IČO'}. Pokud
-        jde o stejnou firmu, doplňte jí správné IČO, nebo nastavte FAKTURY_DB_TENANT_ID
-        v nastavení prostředí.
+        Napojená databáze faktur patří jiné firmě.
       </Sdeleni>
     )
   }
