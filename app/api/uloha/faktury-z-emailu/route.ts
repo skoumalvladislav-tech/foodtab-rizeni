@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { tajemstviSedi } from '@/lib/supabase/uloha'
 import { vsechnaPripojeniSPrijmem, zpracovatPrijem, type VysledekPrijmu } from '@/lib/faktury-prijem-sync'
+import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
 
 /**
  * Naplánovaná úloha: průběžný příjem faktur z připojených schránek
@@ -42,6 +43,14 @@ export async function GET(request: Request): Promise<NextResponse> {
     }
   }
 
+  // Nová faktura může přijít až po platbě — zkusit ji hned spárovat (jen
+  // jednoznačná shoda; viz lib/finance-automaticke-parovani.ts).
+  const vlastnikFaktur = process.env.FAKTURY_DB_TENANT_ID?.trim()
+  // Jen když zbývá aspoň 15 s z rozpočtu — načtení dat trvá pár sekund.
+  const parovani = vlastnikFaktur && vysledky.some((v) => v.zapsano > 0) && Date.now() < konecMs - 15_000
+    ? await automatickyParovatPlatby(vlastnikFaktur, { konecMs: konecMs + 5_000 })
+    : null
+
   const neprobehla = pripojeni.length - vysledky.length
   const pokrok = vysledky.some((v) => v.nalezeno + v.zapsano + v.existuje + v.kontrola > 0)
   const zbyvaPrace = neprobehla > 0 || vysledky.some((v) => v.stav === 'ok' && (v.zbyva > 0 || !v.schrankaDoctena))
@@ -49,6 +58,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   return NextResponse.json({
     schranek: pripojeni.length,
     zapsano: vysledky.reduce((s, v) => s + v.zapsano, 0),
+    uhrazeno: parovani?.sparovano ?? 0,
     nalezeno: vysledky.reduce((s, v) => s + v.nalezeno, 0),
     kontrola: vysledky.reduce((s, v) => s + v.kontrola, 0),
     zbyva: vysledky.reduce((s, v) => s + v.zbyva, 0),

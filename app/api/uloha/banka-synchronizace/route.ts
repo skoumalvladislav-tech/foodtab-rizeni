@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { tajemstviSedi } from '@/lib/supabase/uloha'
 import { synchronizovatFioPripojeni, vsechnaAktivniFioPripojeni } from '@/lib/integrace-fio-sync'
 import { synchronizovatSaltEdgePripojeni, vsechnaAktivniSaltEdgePripojeni } from '@/lib/integrace-saltedge-sync'
+import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
 
 /**
  * Naplánovaná úloha: synchronizace bankovních připojení (Fio, Salt Edge).
@@ -35,6 +36,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ chyba: 'Nepovoleno.' }, { status: 401 })
   }
 
+  const zacatek = Date.now()
   const [fioPripojeni, saltEdgePripojeni] = await Promise.all([vsechnaAktivniFioPripojeni(), vsechnaAktivniSaltEdgePripojeni()])
 
   const vysledky: { id: string; stav: string; detail: string }[] = []
@@ -55,7 +57,18 @@ export async function GET(request: Request): Promise<NextResponse> {
     })
   }
 
+  // Nové pohyby z banky → jednoznačné shody s fakturami se spárují samy
+  // a faktura přejde na „Uhrazeno" (Šéfík 8. 10. 2026). Faktury patří
+  // jedné firmě (FAKTURY_DB_TENANT_ID) — brána uvnitř to ověří znovu.
+  // Jen když po synchronizaci zbývá čas (maxDuration 60 s); jinak příště.
+  const vlastnikFaktur = process.env.FAKTURY_DB_TENANT_ID?.trim()
+  const parovani = vlastnikFaktur && Date.now() < zacatek + 40_000
+    ? await automatickyParovatPlatby(vlastnikFaktur, { konecMs: zacatek + 55_000 })
+    : null
+
   return NextResponse.json({
+    // Jen čísla a stav — odpověď končí ve veřejném logu GitHub Actions.
+    parovani: parovani ? { stav: parovani.stav, sparovano: parovani.sparovano, dorovnano: parovani.dorovnano } : null,
     zpracovano: vysledky.length,
     ok: vysledky.filter((v) => v.stav === 'ok').length,
     chyby: vysledky.filter((v) => v.stav === 'chyba').length,

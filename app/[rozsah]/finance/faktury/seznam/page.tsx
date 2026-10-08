@@ -6,12 +6,13 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
-import { STAV_ODMITNUTO, type Faktura } from '@/lib/faktury-types'
+import { STAV_ODMITNUTO, STAV_UHRAZENO, type Faktura } from '@/lib/faktury-types'
+import { smiOznacitUhrazenou } from '@/lib/finance-parovani'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
 import Sdeleni from '@/app/sdeleni'
 import Ikona from '../../../ikona'
 import Nadpis from '../../../nadpis'
-import { archivovatFakturu, obnovitFakturu, odmitnoutAZapamatovat, smazatFakturu } from '../akce'
+import { archivovatFakturu, obnovitFakturu, odmitnoutAZapamatovat, oznacitUhrazenou, smazatFakturu, vratitNeuhrazenou } from '../akce'
 import StavZnacka from '../stav-znacka'
 
 export const dynamic = 'force-dynamic'
@@ -58,7 +59,7 @@ export default async function FakturySeznam({
   params: Promise<{ rozsah: string }>
   searchParams: Promise<{
     stav?: string; mesic?: string; kontrola?: string; archiv?: string
-    dodavatel?: string; hledat?: string; duplicity?: string; strana?: string; vyrazeno?: string
+    dodavatel?: string; hledat?: string; duplicity?: string; strana?: string; vyrazeno?: string; chyba?: string
   }>
 }) {
   const { rozsah } = await params
@@ -160,6 +161,8 @@ export default async function FakturySeznam({
             Zároveň vyřazeno {sp.vyrazeno} dalších faktur od stejného dodavatele.
           </p>
         ) : null}
+
+        {sp.chyba ? <p role="alert" style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{sp.chyba}</p> : null}
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           {filtry.dodavatel ? (
@@ -265,6 +268,23 @@ export default async function FakturySeznam({
                             <Ikona klic="tecky" />
                           </summary>
                           <div className="ft-kebab-panel">
+                            {f.status === STAV_UHRAZENO ? (
+                              <form action={vratitNeuhrazenou}>
+                                <input type="hidden" name="rozsah" value={rozsah} />
+                                <input type="hidden" name="id" value={f.id} />
+                                <button type="submit" className="ft-kebab-polozka" style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+                                  Vrátit mezi neuhrazené
+                                </button>
+                              </form>
+                            ) : smiOznacitUhrazenou(f.status) ? (
+                              <form action={oznacitUhrazenou}>
+                                <input type="hidden" name="rozsah" value={rozsah} />
+                                <input type="hidden" name="id" value={f.id} />
+                                <button type="submit" className="ft-kebab-polozka" style={{ border: 0, background: 'none', cursor: 'pointer', font: 'inherit', textAlign: 'left' }}>
+                                  Označit jako uhrazenou
+                                </button>
+                              </form>
+                            ) : null}
                             <form action={f.is_archived ? obnovitFakturu : archivovatFakturu}>
                               <input type="hidden" name="rozsah" value={rozsah} />
                               <input type="hidden" name="id" value={f.id} />

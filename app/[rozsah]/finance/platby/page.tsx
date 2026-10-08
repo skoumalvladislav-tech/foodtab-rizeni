@@ -8,7 +8,7 @@ import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
-import { navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type Navrh } from '@/lib/finance-parovani'
+import { jeVracena, navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type Navrh } from '@/lib/finance-parovani'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
@@ -62,6 +62,9 @@ type PotvrzenaAlokace = {
   fakturaId: string
   castkaHaleru: number
   potvrzenoKdy: string | null
+  automaticky: boolean
+  /** Automatické párování, jehož platbu banka po spárování (možná) vrátila — k ruční kontrole. */
+  moznaVracena: boolean
   transakce: { datum: string; protistrana: string } | null
   dodavatel: string | null
 }
@@ -70,14 +73,35 @@ async function nactiPotvrzeneAlokace(
   tenantId: string,
   supabase: Awaited<ReturnType<typeof getServerSupabase>>,
   vidiFaktury: boolean,
+  fakturaId: string | null = null,
 ): Promise<PotvrzenaAlokace[]> {
-  const { data } = await supabase
+  // S filtrem `faktura`: VŠECHNA párování té faktury (odkaz z Faktur, když
+  // nejde vrátit „Uhrazeno" — chybné párování musí jít najít a zrušit
+  // i po měsících). Bez filtru: 20 nejnovějších RUČNÍCH a 50 nejnovějších
+  // automatických zvlášť — automatika nesmí ruční párování vytlačit.
+  // Před db push migrace 20261008120000 sloupec `zpusob` neexistuje:
+  // pak se načte jen to, co šlo dřív.
+  const zaklad = () => supabase
     .from('platby_faktury')
-    .select('id, transakce_id, faktura_id, castka_haleru, potvrzeno_kdy')
+    .select('id, transakce_id, faktura_id, castka_haleru, potvrzeno_kdy, zpusob')
     .eq('tenant_id', tenantId)
     .eq('stav', 'potvrzeno')
     .order('potvrzeno_kdy', { ascending: false })
-    .limit(20)
+  const [rucni, automaticka] = fakturaId
+    ? [await zaklad().eq('faktura_id', fakturaId).limit(200), { data: [], error: null }]
+    : await Promise.all([zaklad().eq('zpusob', 'rucne').limit(20), zaklad().eq('zpusob', 'automaticky').limit(50)])
+  const zalozni = () => {
+    const dotaz = supabase
+      .from('platby_faktury')
+      .select('id, transakce_id, faktura_id, castka_haleru, potvrzeno_kdy')
+      .eq('tenant_id', tenantId)
+      .eq('stav', 'potvrzeno')
+      .order('potvrzeno_kdy', { ascending: false })
+    return fakturaId ? dotaz.eq('faktura_id', fakturaId).limit(200) : dotaz.limit(20)
+  }
+  const { data } = rucni.error || automaticka.error
+    ? await zalozni()
+    : { data: [...(rucni.data ?? []), ...(automaticka.data ?? [])] }
 
   const alokace = (data ?? []) as {
     id: string
@@ -85,17 +109,37 @@ async function nactiPotvrzeneAlokace(
     faktura_id: string
     castka_haleru: number
     potvrzeno_kdy: string | null
+    zpusob?: string | null
   }[]
   if (alokace.length === 0) return []
 
   const transakceIds = [...new Set(alokace.map((a) => a.transakce_id))]
   const { data: transakceData } = await supabase
     .from('transakce')
-    .select('id, datum, protistrana')
+    .select('id, datum, protistrana, vs, castka_haleru')
     .in('id', transakceIds)
-  const transakceMapa = new Map(
-    ((transakceData ?? []) as { id: string; datum: string; protistrana: string }[]).map((t) => [t.id, t]),
-  )
+  const transakceRadky = (transakceData ?? []) as { id: string; datum: string; protistrana: string; vs: string; castka_haleru: number }[]
+  const transakceMapa = new Map(transakceRadky.map((t) => [t.id, t]))
+
+  // Vrátila banka platbu z automatického párování až po spárování? Pro
+  // každé zvlášť cílený dotaz: příjmy 0–30 dní po platbě, částka 97–100 %
+  // (stejné okno jako jeVracena) — úzké okno dá malý výsledek bez vlastního
+  // stropu řádků (jen obecný strop PostgRESTu 1000), takže čerstvé vrácení
+  // mezi tisíci příjmy (karty, pokladna) nepřehlédne.
+  const plusDny = (datum: string, dny: number) => new Date(Date.parse(`${datum}T00:00:00Z`) + dny * 86_400_000).toISOString().slice(0, 10)
+  const vracene = new Set<string>()
+  await Promise.all(alokace.filter((a) => a.zpusob === 'automaticky').map(async (a) => {
+    const t = transakceMapa.get(a.transakce_id)
+    if (!t) return
+    const { data: prijmyData } = await supabase.from('transakce').select('vs, castka_haleru, datum, protistrana')
+      .eq('tenant_id', tenantId).eq('smer', 'prijem')
+      .gte('datum', t.datum).lte('datum', plusDny(t.datum, 30))
+      .gte('castka_haleru', Math.floor(t.castka_haleru * 0.97)).lte('castka_haleru', t.castka_haleru)
+      .order('datum', { ascending: true })
+    const prijmy = ((prijmyData ?? []) as { vs: string | null; castka_haleru: number; datum: string; protistrana: string | null }[])
+      .map((p) => ({ vs: p.vs ?? '', castkaHaleru: p.castka_haleru, datum: p.datum, protistrana: p.protistrana ?? '' }))
+    if (jeVracena({ vs: t.vs ?? '', castkaHaleru: t.castka_haleru, datum: t.datum, protistrana: t.protistrana ?? '' }, prijmy)) vracene.add(a.id)
+  }))
 
   // Jméno dodavatele je jen pro zobrazení — appka tu znovu NEČTE
   // `invoices.status` jako zdroj pravdy (ten zůstal v Fakturách jen
@@ -123,6 +167,8 @@ async function nactiPotvrzeneAlokace(
     fakturaId: a.faktura_id,
     castkaHaleru: a.castka_haleru,
     potvrzenoKdy: a.potvrzeno_kdy,
+    automaticky: a.zpusob === 'automaticky',
+    moznaVracena: vracene.has(a.id),
     transakce: transakceMapa.get(a.transakce_id) ?? null,
     dodavatel: dodavateleMapa.get(a.faktura_id) ?? null,
   }))
@@ -195,10 +241,10 @@ export default async function FinancePlatby({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string }>
+  searchParams: Promise<{ chyba?: string; importovano?: string; prebytek?: string; sparovano?: string; faktura?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, importovano, prebytek } = await searchParams
+  const { chyba, importovano, prebytek, sparovano, faktura: fakturaFiltr } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -243,7 +289,7 @@ export default async function FinancePlatby({
   // Platby stačí `finance.read`, data faktur (dodavatel, částka, VS) ale chtějí `faktury.read`.
   const vidiFaktury = canSee(pristup.ctx, 'faktury.read')
   const { navrhy, faktury: fakturyKandidati } = await nactiNavrhyParovani(tenantId, transakce, alokovanoMapa, vidiFaktury)
-  const potvrzeneAlokace = await nactiPotvrzeneAlokace(tenantId, supabase, vidiFaktury)
+  const potvrzeneAlokace = await nactiPotvrzeneAlokace(tenantId, supabase, vidiFaktury, fakturaFiltr?.trim() || null)
 
   // Pro ruční párování (hromadná platba) — jen výdaje s nevyčerpaným
   // zbytkem, ať appka nenabízí platbu, která už je plně spárovaná.
@@ -264,6 +310,7 @@ export default async function FinancePlatby({
         {importovano ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>
             Import hotový — zapsáno {importovano} {importovano === '1' ? 'nová platba' : 'nových plateb'}.
+            {sparovano && sparovano !== '0' ? ` Jednoznačně spárováno s fakturami: ${sparovano} (ve Fakturách se přepnou na Uhrazeno nejpozději při příští synchronizaci).` : ''}
           </p>
         ) : null}
         {prebytek ? (
@@ -371,7 +418,10 @@ export default async function FinancePlatby({
 
         {potvrzeneAlokace.length > 0 ? (
           <section style={{ display: 'grid', gap: '10px' }}>
-            <h2 style={{ margin: 0, fontSize: '15px' }}>Potvrzená párování ({potvrzeneAlokace.length})</h2>
+            <h2 style={{ margin: 0, fontSize: '15px' }}>
+              {fakturaFiltr ? `Párování faktury ${fakturaFiltr}` : 'Potvrzená párování'} ({potvrzeneAlokace.length})
+            </h2>
+            {fakturaFiltr ? <Link href={`/${rozsah}/finance/platby`} className="ft-tl ft-tl-male">← Všechna párování</Link> : null}
             {potvrzeneAlokace.map((a) => (
               <div key={a.id} style={{ ...karta, display: 'flex', gap: '14px', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
                 <div>
@@ -379,6 +429,14 @@ export default async function FinancePlatby({
                     {koruny(a.castkaHaleru)} ↔ faktura {a.dodavatel || a.fakturaId}
                     {a.transakce ? ` · ${a.transakce.protistrana || '—'} (${a.transakce.datum})` : ''}
                   </div>
+                  {a.automaticky ? (
+                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Spárováno automaticky (stejný VS a částka) — když nesedí, zrušte.</div>
+                  ) : null}
+                  {a.moznaVracena ? (
+                    <div role="alert" style={{ fontSize: '12px', color: 'var(--pozor)' }}>
+                      Banka platbu možná vrátila (přišel příjem stejné částky) — když ano, párování zrušte, ať faktura není vedená jako zaplacená.
+                    </div>
+                  ) : null}
                 </div>
                 {smiPsat ? (
                   <form action={zrusitAlokaci}>
