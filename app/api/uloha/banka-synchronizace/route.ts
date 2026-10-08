@@ -37,22 +37,17 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   const [fioPripojeni, saltEdgePripojeni] = await Promise.all([vsechnaAktivniFioPripojeni(), vsechnaAktivniSaltEdgePripojeni()])
 
-  const vysledky: { id: string; stav: string; detail: string }[] = []
+  // Bez id připojení a bez textů chyb: odpověď končí v logu GitHub Actions a
+  // repozitář je veřejný. Důvod chyby je u připojení v Integracích → Banka
+  // (`integrace_pripojeni.posledni_chyba`) a u běhu (`synchronizace_behy.chyba`).
+  const vysledky: { stav: string; novychRadku: number }[] = []
   for (const p of fioPripojeni) {
     const vysledek = await synchronizovatFioPripojeni(p.id)
-    vysledky.push({
-      id: p.id,
-      stav: vysledek.stav,
-      detail: vysledek.stav === 'ok' ? `${vysledek.pocetNovychRadku} nových řádků` : vysledek.duvod,
-    })
+    vysledky.push({ stav: vysledek.stav, novychRadku: vysledek.stav === 'ok' ? vysledek.pocetNovychRadku : 0 })
   }
   for (const p of saltEdgePripojeni) {
     const vysledek = await synchronizovatSaltEdgePripojeni(p.id)
-    vysledky.push({
-      id: p.id,
-      stav: vysledek.stav,
-      detail: vysledek.stav === 'ok' ? `${vysledek.pocetNovychRadku} nových řádků` : vysledek.duvod,
-    })
+    vysledky.push({ stav: vysledek.stav, novychRadku: vysledek.stav === 'ok' ? vysledek.pocetNovychRadku : 0 })
   }
 
   return NextResponse.json({
