@@ -159,9 +159,15 @@ select set_config('test.user_id', :'majitel', false);
 \echo ''
 \echo '== 4. Možné duplicity mezi zdroji (detekce, NE automatické sloučení)'
 
+-- Řádek „z Fio" zapisuje jen synchronizace (service_role) — od migrace
+-- 20261008120000 ho přihlášený uživatel založit nesmí (trigger
+-- hlida_zdroj_transakce). Proto mimo roli authenticated.
+reset role;
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
 values (:'tenant', :'ucet', 'vydaj', 15000, current_date, 'ABC s.r.o.', '20260099', 'fio_api', 'fio-83-001')
 returning id as transakce_api \gset
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
 
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
 values (:'tenant', :'ucet', 'vydaj', 15000, current_date, 'ABC s.r.o.', '20260099', 'csv_banka', 'csv-radek-83-001')
