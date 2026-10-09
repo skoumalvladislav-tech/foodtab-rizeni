@@ -1,0 +1,31 @@
+-- ---------------------------------------------------------------------
+-- Dopravek k 20261008100000_faktury_prijem_z_emailu.sql: rozbor cesty
+-- přílohy `app.faktury_priloha_firma(text)` tam dostal jen
+-- `grant execute … to authenticated, service_role` a chybí mu
+-- `revoke all … from public, anon`. Nová funkce ale má EXECUTE pro
+-- PUBLIC už od `create function`, takže ji mohl volat i nepřihlášený —
+-- ukázal to ověřovací dotaz po db push 9. 10. 2026
+-- (`has_function_privilege('anon', …, 'execute')` = true).
+--
+-- Neškodné to bylo: anon nemá USAGE na schéma `app` a funkce je čistý
+-- `immutable` rozbor textu bez `security definer` — nic nečte. Ale
+-- sesterské funkce pro ostatní kbelíky (`app.marketing_cesta_rozsah`,
+-- `app.pobocky_cesta_rozsah`, `app.hlasovka_cesta_rozsah`,
+-- `app.checklist_fotka_cesta_rozsah`) mají anon zavřené a tahle má
+-- vypadat stejně, ať se příští úklid nemusí ptát, proč je jiná.
+--
+-- `grant` se opakuje schválně: `revoke all … from public` nechá
+-- authenticated i service_role na pokoji (mají vlastní jmenovitý
+-- grant), ale stojí vedle sebe, jak to dělají všechny ostatní funkce —
+-- a scripts/provoz-granty.test.mjs hledá právě tuhle dvojici.
+--
+-- NEDĚLÁ se nic víc. Tělo funkce se nemění (žádné `create or replace`)
+-- a politika `faktury_prilohy_select` na storage.objects taky ne —
+-- volá funkci jako authenticated, a ten EXECUTE má dál.
+--
+-- Hlídá: scripts/provoz-granty.test.mjs (text migrací) a
+-- supabase/tests/krok92_scenar.sql (opravdová databáze).
+-- ---------------------------------------------------------------------
+
+revoke all on function app.faktury_priloha_firma(text) from public, anon;
+grant execute on function app.faktury_priloha_firma(text) to authenticated, service_role;
