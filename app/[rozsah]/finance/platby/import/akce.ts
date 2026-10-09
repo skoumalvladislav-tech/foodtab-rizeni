@@ -6,6 +6,8 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import type { RadekImportu } from '@/lib/finance-csv-import'
+import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 
 /**
  * Krok 2 ze dvou: POTVRZENÍ náhledu z akce-nahled.ts — teprve tady se
@@ -83,6 +85,16 @@ export async function potvrditImport(formData: FormData): Promise<void> {
   // import_davky.pocet_novych zapisuje RPC sama (stejná transakce) —
   // samostatný klientský .update() tu dřív tiše padal (žádný grant).
 
+  // Nové platby z výpisu → jednoznačné shody s fakturami se spárují samy
+  // a faktura přejde na „Uhrazeno" (Šéfík 8. 10. 2026). Jen když import
+  // dělá člověk, který smí spravovat Faktury za celou firmu — CSV si může
+  // napsat kdokoli s financemi a bez téhle podmínky by jím „zaplatil"
+  // fakturu, kterou sám ručně označit nesmí. Důvěryhodná je jen TAHLE dávka.
+  const smiFaktury = (await zkusPristup(tenantId, 'faktury.manage', TENANT_SCOPE_SEGMENT)).stav === 'ok'
+  const parovani = smiFaktury
+    ? await automatickyParovatPlatby(tenantId, { konecMs: Date.now() + 20_000, duveryhodneDavky: [{ id: davka.id, pocet: Number(pocetVlozenych ?? 0) }] })
+    : { sparovano: 0 }
+
   revalidatePath(`/${rozsah}/finance/platby`)
-  redirect(`/${rozsah}/finance/platby?importovano=${pocetVlozenych ?? 0}`)
+  redirect(`/${rozsah}/finance/platby?importovano=${pocetVlozenych ?? 0}&sparovano=${parovani.sparovano}`)
 }

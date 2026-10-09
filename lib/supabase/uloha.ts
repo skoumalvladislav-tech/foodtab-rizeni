@@ -35,6 +35,17 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
  *   * `app/pozvanka/[token]/akce.ts` (`poslatPrvniKod`) — založení účtu
  *     pro nově pozvaného, JEN pro adresu z platné pozvánky v databázi
  *     (`pozvanka_info`), nikdy pro adresu z prohlížeče.
+ *   * `app/[rozsah]/finance/integrace/email/akce.ts` (`spustitPrijemTed`,
+ *     `zapsatNavrhyAkce` → `lib/faktury-prijem-sync.ts`) — příjem faktur
+ *     hned / zápis návrhů, až po `integrace.manage` + `faktury.manage`
+ *     a dohledání schránky uživatelským klientem s `tenant_id` firmy.
+ *   * `app/[rozsah]/finance/faktury/akce.ts` (`vratitNeuhrazenou`) — jen
+ *     součet párování JEDNÉ faktury vlastní firmy, po `faktury.manage`
+ *     (uživatelský klient by bez práva na Platby viděl nulu).
+ *   * `app/[rozsah]/finance/platby/import/akce.ts` (`potvrditImport` →
+ *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
+ *     importu výpisu, jen když importující má `finance.manage`
+ *     i `faktury.manage`, jen vlastní firma a z CSV jen právě nahraná dávka.
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ

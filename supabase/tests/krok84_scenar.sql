@@ -114,8 +114,10 @@ select set_config('test.user_id', :'majitel', false);
 -- na (tenant_id, externi_id) ani globálně — dvě různé firmy na SVÝCH
 -- VLASTNÍCH účtech musí moct mít shodné VS i shodné externí ID ze svých
 -- bank bez jakékoli kolize.
+-- (Zdroj csv_banka, ne fio_api: platbu „z Fio" od migrace 20261008120000
+-- zapisuje jen synchronizace — tady jde o externí ID, ne o zdroj.)
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
-values (:'tenant', :'ucet', 'prijem', 33300, current_date, 'Shodná protistrana', '999888', 'fio_api', 'SHODNE-EXTERNI-ID')
+values (:'tenant', :'ucet', 'prijem', 33300, current_date, 'Shodná protistrana', '999888', 'csv_banka', 'SHODNE-EXTERNI-ID')
 returning id as transakce_nase \gset
 
 select pg_temp.check('naše transakce se zapsala', exists (select 1 from public.transakce where id = :'transakce_nase'));
@@ -128,7 +130,7 @@ values (:'tenant_b', 'Krok84 cizí účet', 'banka')
 returning id as ucet_cizi \gset
 
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
-values (:'tenant_b', :'ucet_cizi', 'prijem', 77700, current_date, 'Shodná protistrana', '999888', 'fio_api', 'SHODNE-EXTERNI-ID')
+values (:'tenant_b', :'ucet_cizi', 'prijem', 77700, current_date, 'Shodná protistrana', '999888', 'csv_banka', 'SHODNE-EXTERNI-ID')
 returning id as transakce_cizi \gset
 
 select pg_temp.check('cizí firma se STEJNÝM VS a STEJNÝM externím ID na SVÉM VLASTNÍM účtu nekoliduje (unikátní index je per ucet_id, ne globální)',

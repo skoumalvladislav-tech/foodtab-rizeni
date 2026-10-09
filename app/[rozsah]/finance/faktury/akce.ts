@@ -5,7 +5,11 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { pristupKFakturam, type FakturyKlient } from '@/lib/supabase/faktury'
-import { STAV_KE_SCHVALENI } from '@/lib/faktury-types'
+import { STAV_KE_SCHVALENI, STAV_UHRAZENO } from '@/lib/faktury-types'
+import { klientUlohy } from '@/lib/supabase/uloha'
+import { STAVY_PRO_RUCNI_UHRAZENI, stavPoVraceni } from '@/lib/finance-parovani'
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
+import { getServerSupabase } from '@/lib/supabase/server'
 
 /**
  * Server akce modulu Faktury.
@@ -131,6 +135,97 @@ export async function obnovitFakturu(formData: FormData): Promise<void> {
 
   await supabase.from('invoices').update({ is_archived: false }).eq('id', id)
   revalidatePath(`/${rozsah}/finance/faktury/seznam`)
+  redirect(`/${rozsah}/finance/faktury/seznam`)
+}
+
+/**
+ * Ručně „Uhrazeno" — zaplaceno mimo výpis (hotově, kartou, z jiného účtu).
+ * Šéfík 8. 10. 2026: „…a nebo přesunout ručně". Jen ze SCHVÁLENÝCH stavů
+ * (Ke kontrole úhrady, Neuhrazeno, Částečně uhrazeno): neschválený doklad,
+ * upomínka nebo nečitelný dokument by se jinak přes „Uhrazeno" a „Vrátit
+ * mezi neuhrazené" dostal mezi schválené faktury bez kontroly.
+ */
+export async function oznacitUhrazenou(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  // Faktury patří celé firmě — stav úhrady mění jen správce za celou firmu.
+  const { supabase } = await pripravit(TENANT_SCOPE_SEGMENT, 'faktury.manage')
+
+  const { data } = await supabase.from('invoices').update({ status: STAV_UHRAZENO }).eq('id', id)
+    .in('status', [...STAVY_PRO_RUCNI_UHRAZENI]).select('id')
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  if ((data ?? []).length === 0) {
+    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Fakturu nejde označit jako uhrazenou — není schválená k úhradě (nejdřív ji schvalte).')}`)
+  }
+  redirect(`/${rozsah}/finance/faktury/seznam`)
+}
+
+/**
+ * Zpět mezi neuhrazené. Člověk tím říká, že faktura zaplacená NENÍ:
+ * AUTOMATICKÁ párování k ní se proto zruší (zamítnutá — automatika je
+ * znovu nezaloží). Z ručních párování pak: bez nich → „Ke kontrole úhrady",
+ * část → „Částečně uhrazeno", celá → nejde (ruční párování ruší ten, kdo
+ * má právo na Platby — jinak by stav neodpovídal penězům). Rozhodnutí je
+ * stavPoVraceni v lib/finance-parovani.ts. Párování se čtou a ruší
+ * službou (výjimka zapsaná v lib/supabase/uloha.ts): kdo nemá právo na
+ * Platby, by je jinak neviděl.
+ */
+export async function vratitNeuhrazenou(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  // Ruší i párování plateb (službou) — jen správce Faktur za CELOU firmu.
+  const { supabase, tenantId } = await pripravit(TENANT_SCOPE_SEGMENT, 'faktury.manage')
+
+  // Když se párování nedají zjistit, radši nic — jinak by se stav
+  // přepínal tam a zpátky s každou synchronizací banky.
+  const nelze: () => never = () => redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Nepodařilo se ověřit platby k faktuře — zkuste to znovu.')}`)
+  const sluzba = klientUlohy()
+  if (!sluzba) nelze()
+  const { data: faktura } = await supabase.from('invoices').select('amount, status, currency').eq('id', id).maybeSingle()
+  const platby = await sluzba.from('platby_faktury').select('id, castka_haleru, zpusob')
+    .eq('tenant_id', tenantId).eq('faktura_id', id).eq('stav', 'potvrzeno')
+  if (platby.error || !platby.data || !faktura) nelze()
+  // Stav se ověří PŘED rušením párování (zrušené párování je natrvalo
+  // zamítnuté — nesmí zůstat zamítnuté, když se vrácení stejně neprovede).
+  if (faktura.status !== STAV_UHRAZENO) {
+    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Faktura není ve stavu Uhrazeno — nic se nezměnilo.')}`)
+  }
+  const radky = platby.data as { id: string; castka_haleru: number; zpusob: string }[]
+  const rucne = radky.filter((p) => p.zpusob !== 'automaticky').reduce((s, p) => s + p.castka_haleru, 0)
+  // Párování se vede v haléřích (Kč); u faktury v cizí měně se částky
+  // porovnat nedají — ruční párování pak rozhodne člověk v Platbách.
+  const vKc = ((faktura.currency as string | null) ?? 'CZK').trim().toUpperCase() === 'CZK'
+  if (!vKc && rucne > 0) {
+    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Faktura je v cizí měně a má ručně potvrzenou platbu — párování zkontrolujte ve Financích → Platby.')}`)
+  }
+  const castka = typeof faktura.amount === 'number' ? Math.round(faktura.amount * 100) : 0
+  // Rozhodnout NEJDŘÍV (podle ručních párování) — automatická se ruší, až
+  // když je jisté, že vrácení projde; jinak by zůstala zbytečně zamítnutá.
+  const cil = stavPoVraceni(rucne, castka)
+  if (cil === null) {
+    const vidiPlatby = (await zkusPristup(tenantId, 'finance.read', rozsah)).stav === 'ok'
+    const zprava = 'Faktura je podle ručně potvrzené platby z výpisu zaplacená celá. Když platba k faktuře nepatří, musí párování zrušit někdo s právem na Finance → Platby.'
+    redirect(vidiPlatby
+      ? `/${rozsah}/finance/platby?faktura=${encodeURIComponent(id)}&chyba=${encodeURIComponent(zprava)}`
+      : `/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(zprava)}`)
+  }
+
+  const { data: prihlaseny } = await (await getServerSupabase()).auth.getUser()
+  for (const p of radky) {
+    if (p.zpusob !== 'automaticky') continue
+    const { error } = await sluzba.rpc('zrusit_automaticke_parovani', {
+      p_tenant: tenantId, p_alokace: p.id,
+      p_duvod: `Ve Fakturách vráceno mezi neuhrazené (uživatel ${prihlaseny.user?.id ?? 'neznámý'}).`,
+    })
+    if (error) nelze()
+  }
+
+  const { data: zmeneno, error: chybaZmeny } = await supabase.from('invoices').update({ status: cil }).eq('id', id).eq('status', STAV_UHRAZENO).select('id')
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  if (chybaZmeny || (zmeneno ?? []).length === 0) {
+    // Automatická párování už jsou zrušená; další klik to dokončí.
+    redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent('Stav faktury se nepodařilo změnit (mezitím ho mohl změnit někdo jiný) — zkuste to znovu.')}`)
+  }
   redirect(`/${rozsah}/finance/faktury/seznam`)
 }
 

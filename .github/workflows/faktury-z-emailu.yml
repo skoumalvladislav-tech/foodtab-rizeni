@@ -50,7 +50,7 @@ jobs:
               "${ADRESA}/api/uloha/faktury-z-emailu")
 
             # Jen souhrnná čísla — repozitář je veřejný, log vidí kdokoli.
-            SOUHRN=$(jq -c '{schranek, nalezeno, zapsano, kontrola, zbyva, pokracovat}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+            SOUHRN=$(jq -c '{schranek, nalezeno, zapsano, uhrazeno, kontrola, zbyva, pokracovat}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
             echo "Kolo ${KOLO}: HTTP ${KOD} ${SOUHRN}"
 
             case "$KOD" in
