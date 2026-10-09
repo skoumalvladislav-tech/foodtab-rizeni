@@ -5,22 +5,26 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
+import { pristupKFakturam } from '@/lib/supabase/faktury'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
 import { pripojitEmailSchranku, odpojitEmailSchranku } from './akce'
+import PrijemFaktur from './prijem-faktur'
 
 export const dynamic = 'force-dynamic'
+// „Zpracovat teď" (spustitPrijemTed) běží až ~45 s — akce dědí limit stránky.
+export const maxDuration = 60
 
 /**
  * Finance — Integrace — E-mail.
  *
  * IMAP schránka: appka přihlašovací údaje PŘED uložením živě ověří
- * (`lib/integrace-mail-imap.ts`) — stejný vzor jako Fio. Appka tímhle
- * NESTAHUJE žádné zprávy ani přílohy, jen dokazuje, že přístup
- * funguje — příjem a zpracování dokladů (OCR, směrování do Faktur)
- * je samostatná, zatím nerozhodnutá práce
- * (docs/integrace-modul-plan.md, „Otázky pro Šéfíka").
+ * (`lib/integrace-mail-imap.ts`) — stejný vzor jako Fio.
+ *
+ * Příjem faktur (Šéfík 7.–8. 10. 2026, otázka 42): u každé schránky se
+ * dá zapnout; appka ji pak sama prochází a faktury z příloh zapisuje do
+ * Faktur jako dřív n8n (lib/faktury-prijem-*.ts, panel prijem-faktur.tsx).
  */
 
 const karta = {
@@ -66,7 +70,8 @@ type Pripojeni = {
   stav: string
   posledni_test_kdy: string | null
   posledni_chyba: string | null
-  externi_ucet: { host?: string; port?: number; zabezpeceni?: string; uzivatel?: string; pocet_slozek?: number } | null
+  posledni_sync_kdy: string | null
+  externi_ucet: { host?: string; port?: number; zabezpeceni?: string; uzivatel?: string; pocet_slozek?: number; prijem_dokladu?: unknown } | null
 }
 
 export default async function FinanceIntegraceEmail({
@@ -74,10 +79,10 @@ export default async function FinanceIntegraceEmail({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string }>
+  searchParams: Promise<{ chyba?: string; zprava?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba } = await searchParams
+  const { chyba, zprava } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -89,11 +94,16 @@ export default async function FinanceIntegraceEmail({
   }
 
   const smiPsat = canSee(pristup.ctx, 'integrace.manage')
+  // Příjem faktur zapisuje do Faktur: čísla vidí kdo vidí Faktury, ovládá kdo je i spravuje.
+  const vidiFaktury = canSee(pristup.ctx, 'faktury.read')
+  const smiPrijem = smiPsat && canSee(pristup.ctx, 'faktury.manage')
+  const databazeFakturOk = vidiFaktury ? (await pristupKFakturam(tenantId)).stav === 'ok' : false
+  const dnes = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Prague' }).format(new Date())
   const supabase = await getServerSupabase()
 
   const { data } = await supabase
     .from('integrace_pripojeni')
-    .select('id, nazev, stav, posledni_test_kdy, posledni_chyba, externi_ucet')
+    .select('id, nazev, stav, posledni_test_kdy, posledni_chyba, posledni_sync_kdy, externi_ucet')
     .eq('tenant_id', tenantId)
     .eq('oblast', 'email_dokladu')
     .is('odpojeno_kdy', null)
@@ -105,14 +115,15 @@ export default async function FinanceIntegraceEmail({
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="IMAP schránka — appka jen ověří přístup a uloží přihlašovací údaje. Stažení a zpracování e-mailových dokladů je samostatná práce, zatím nerozhodnutá."
+        popis="IMAP schránka — appka ověří přístup a uloží přihlašovací údaje. U schránky pak jde zapnout příjem faktur: appka ji sama prochází a faktury zapisuje do Faktur."
         vpravo={<Link href={`/${rozsah}/finance/integrace`} className="ft-tl">← Zpět na integrace</Link>}
       >
         E-mail
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', maxWidth: '900px' }}>
-        {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
+        {chyba ? <p role="alert" style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
+        {zprava ? <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>{zprava}</p> : null}
 
         {pripojeni.length === 0 ? (
           <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Zatím žádná e-mailová schránka.</p>
@@ -135,6 +146,17 @@ export default async function FinanceIntegraceEmail({
                     : 'Ještě neověřeno.'}
                   {p.posledni_chyba ? <span style={{ color: 'var(--bad)' }}> — {p.posledni_chyba}</span> : null}
                 </div>
+                {vidiFaktury ? (
+                  <PrijemFaktur
+                    rozsah={rozsah}
+                    pripojeniId={p.id}
+                    prijemSurovy={p.externi_ucet?.prijem_dokladu}
+                    posledniBeh={p.posledni_sync_kdy}
+                    smiMenit={smiPrijem}
+                    databazeFakturOk={databazeFakturOk}
+                    dnes={dnes}
+                  />
+                ) : null}
                 {smiPsat ? (
                   <form action={odpojitEmailSchranku}>
                     <input type="hidden" name="rozsah" value={rozsah} />

@@ -1,0 +1,71 @@
+name: Faktury — příjem z e-mailu
+
+# Naplánovaná úloha: průběžný příjem faktur z připojených schránek
+# (Šéfík 8. 10. 2026: „faktury ať se zpracovávají průběžně"). Nahrazuje
+# n8n, který do Faktur naposledy zapsal 5. 9. 2026.
+#
+# Stejný vzor jako banka-synchronizace.yml (GitHub Actions, ne Vercel
+# Cron — Hobby tarif častý cron odmítá). Jedno volání úlohy má ~50 s;
+# když úloha vrátí "pokracovat": true (něco se pohnulo a práce zbývá —
+# typicky první dočet od 1. 1. 2026), workflow ji zavolá znovu, nejvýš
+# 15× za běh. Naměřeně GitHub plánované běhy zpožďuje i o hodiny, proto
+# tohle opakování v rámci jednoho běhu.
+
+on:
+  schedule:
+    - cron: '9,39 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: faktury-z-emailu
+  cancel-in-progress: false
+
+jobs:
+  prijmout:
+    name: Přijmout faktury ze schránek
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Zavolat naplánovanou úlohu (opakovaně, dokud je co dělat)
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci."
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu."
+            exit 1
+          fi
+
+          for KOLO in $(seq 1 15); do
+            KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+              --max-time 120 \
+              -H "Authorization: Bearer ${TAJEMSTVI}" \
+              "${ADRESA}/api/uloha/faktury-z-emailu")
+
+            # Jen souhrnná čísla — repozitář je veřejný, log vidí kdokoli.
+            SOUHRN=$(jq -c '{schranek, nalezeno, zapsano, kontrola, zbyva, pokracovat}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+            echo "Kolo ${KOLO}: HTTP ${KOD} ${SOUHRN}"
+
+            case "$KOD" in
+              200) ;;
+              401)
+                echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+                exit 1 ;;
+              *)
+                echo "::error::Úloha vrátila HTTP ${KOD}."
+                exit 1 ;;
+            esac
+
+            echo "Kolo ${KOLO}: ${SOUHRN}" >> "$GITHUB_STEP_SUMMARY" || true
+
+            if ! grep -q '"pokracovat":true' telo.json; then
+              break
+            fi
+          done

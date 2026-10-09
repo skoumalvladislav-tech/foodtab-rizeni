@@ -1088,6 +1088,12 @@ rozhodnutí, aby appka nerozjela konkurenční pipeline bokem.
 na n8n" — obě cesty jsou v `docs/integrace-modul-plan.md`, oddíl P2,
 rozepsané i s odhadem dopadu.
 
+> **ROZHODNUTÍ ŠÉFÍKA (7.–8. 10. 2026):** appka čte schránky SAMA a
+> **postupně nahradí n8n úplně**; faktury zapisuje do **stávající databáze
+> Faktur** (jako n8n); faktury se zpracovávají **průběžně**, s
+> **automatickou kontrolou a prací**. Tahle otázka je tím uzavřená.
+> Postaveno v noci 7.→8. 10. — viz `docs/hlaseni/stav-2026-10-08.md`.
+
 ---
 
 ## 43. Dotykačka partnerská/testovací licence
@@ -1128,3 +1134,48 @@ přístupu dá přesně pět věcí — `docs/hlaseni/stav-2026-10-07.md`, oddí
 „Co appka nemohla a nemá dodat", má úplný seznam (App-id/Secret,
 webhook URL k zaregistrování, aktuální veřejný klíč pro podpis,
 potvrzení pokrytí firemních účtů u konkrétních bank).
+
+---
+
+## 45. Přestěhovat faktury z odděleného projektu do appky?
+
+**Vzniklo:** 8. 10. 2026 v noci — do Supabase projektu Faktur
+(`ctqtwahlzhyjerqulqyn`) se dnes nikdo nepřihlásí.
+
+Databázi, do které nikdo nemá přístup, nejde spravovat: nedá se do ní
+přidat sloupec `tenant_id`, nastavit skutečná RLS, opravit veřejný
+kbelík s PDF (otázka 46), zálohovat ji ani přidat pojistku proti
+duplicitám. Přestěhovat ji ale JDE i bez přihlášení — appka do ní čte
+i zapisuje přes veřejný (anon) klíč, takže si 3 021 faktur i jejich PDF
+umí zkopírovat do vlastní databáze (tabulka s `tenant_id`, RLS,
+soukromé úložiště) a pak číst a zapisovat jen tam. ID faktur se dají
+ponechat, takže párování plateb (`platby_faktury.faktura_id`) zůstane
+platné.
+
+**Co platí do rozhodnutí:** appka zůstává na odděleném projektu
+(rozhodnutí 7. 10.: „do stávající databáze Faktur"), přístup jen přes
+bránu `pristupKFakturam` a `FAKTURY_DB_TENANT_ID`.
+
+**Když to má být jinak:** jedna noc práce — migrace s tabulkou faktur,
+idempotentní kopie (opakovatelná, nic nezdvojí), přepnutí čtení a
+zápisu, a teprve po kontrole počtů odpojení starého projektu. Doporučuju.
+
+---
+
+## 46. Veřejný kbelík `faktury-pdf` v projektu Faktur
+
+**Vzniklo:** 8. 10. 2026 v noci, průzkum databáze Faktur.
+
+n8n ukládal PDF faktur do kbelíku `faktury-pdf`, který je **veřejný**:
+kdo zná (nebo uhodne) adresu souboru, otevře fakturu bez přihlášení
+(845 z 1 000 zkontrolovaných faktur má takový odkaz). Bez přihlášení do
+projektu Faktur to appka neopraví.
+
+**Co platí do rozhodnutí:** nové přílohy z vlastního příjmu jdou do
+SOUKROMÉHO kbelíku `faktury-prilohy` v naší databázi a odkaz vede přes
+appku s kontrolou oprávnění (`/api/faktury/priloha/…`). Staré odkazy
+zůstávají veřejné.
+
+**Když to má být jinak:** buď se někdo do projektu Faktur přihlásí a
+kbelík přepne na soukromý (pak ale přestanou fungovat staré odkazy
+v `pdf_url`), nebo se to vyřeší přestěhováním (otázka 45).

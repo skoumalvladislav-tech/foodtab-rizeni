@@ -316,23 +316,26 @@ schránce — appka na to dnes nemá přístupy (banka) nebo klienta
 
 ### P2 — architektonické rozhodnutí čeká na Šéfíka
 
-- [ ] E-mail/OCR faktur: appka postaví VLASTNÍ příjem (IMAP + Storage
-      dle vzoru `prilohy.ts`), nebo zůstává na n8n pipeline a jen se
-      rozšíří, co appka z Faktur-DB čte/zobrazuje (rozlišení typů
-      dokladu, dedup podle hashe přílohy)? Tohle je velké rozhodnutí —
-      n8n pipeline dnes FUNGUJE a appka ji nesmí duplikovat bezhlavě.
-      IMAP konektor (host/port/TLS/přihlašovací údaje) je teď technicky
-      bez externí registrace, ale POČKÁ na tohle rozhodnutí, ať appka
-      nepostaví konkurenční pipeline bokem.
+- [x] E-mail/OCR faktur — **ROZHODNUTO (Šéfík 7.–8. 10. 2026, otázka 42):**
+      appka postaví VLASTNÍ příjem a postupně nahradí n8n úplně; faktury
+      zapisuje do STÁVAJÍCÍ databáze Faktur (`invoices`) jako n8n,
+      zpracovává průběžně a sama kontroluje („automatická kontrola
+      a práce" — člověk dostane jen skutečné výjimky). n8n tam naposledy
+      zapsal 5. 9. 2026. **Postaveno ve větvi `faktury-prijem-z-emailu`**
+      (8. 10.): `lib/faktury-prijem-*.ts`, migrace
+      `20261008100000_faktury_prijem_z_emailu.sql` (evidence příjmu,
+      kurzory, soukromý kbelík `faktury-prilohy`), úloha
+      `/api/uloha/faktury-z-emailu` + `.github/workflows/faktury-z-emailu.yml`
+      (každých 30 min), panel „Příjem faktur" v Integracích → E-mail.
+      Stav a kroky k zapnutí → `docs/hlaseni/stav-2026-10-08.md`.
 - [ ] Víc právních subjektů pod jedním tenantem (dnes `tenant_id` ==
       právní subjekt 1:1) — potřebné, než bude „právní subjekt" ve
       formuláři Připojit banku znamenat něco jiného než firmu samu.
 
 ## Otázky pro Šéfíka (do `docs/hlaseni/otazky.md` při psaní hlášení)
 
-1. E-mail/OCR architektura — vlastní příjem (IMAP) vs. rozšíření n8n
-   pipeline (P2 výš). IMAP teď nečeká na externí registraci, ale čeká
-   na tohle rozhodnutí.
+1. ~~E-mail/OCR architektura — vlastní příjem (IMAP) vs. rozšíření n8n
+   pipeline~~ — rozhodnuto 7. 10. (otázka 42): vlastní příjem, viz P2 výš.
 2. Dotykačka partnerská licence — appka nesmí sama vyplnit formulář s
    obchodními podmínkami, potřebuje konkrétní zadání/rozhodnutí, kdo to
    udělá.
@@ -347,7 +350,10 @@ schránce — appka na to dnes nemá přístupy (banka) nebo klienta
   `app/api/integrace/saltedge/{webhook,vratit}/route.ts` — celá Salt
   Edge architektura, dokumentační mezery rozepsané přímo v komentářích.
 - `lib/integrace-mail-imap.ts` + `app/[rozsah]/finance/integrace/email/**`
-  — IMAP konektor (ověření + uložení, bez čtení zpráv).
+  — IMAP konektor (ověření + uložení) a od 8. 10. panel „Příjem faktur".
+- `lib/faktury-prijem-*.ts` + `app/api/uloha/faktury-z-emailu/route.ts` +
+  `app/api/faktury/priloha/[id]/route.ts` — příjem faktur z e-mailu (větev
+  `faktury-prijem-z-emailu`).
 - `supabase/migrations/20261003100000_integrace_registr.sql` +
   `20261004100000_banka_napojeni.sql` + `20261007110000_integrace_opravneni_a_sjednoceni.sql`
   — celý registr připojení/tajemství + dnešní opravy.
