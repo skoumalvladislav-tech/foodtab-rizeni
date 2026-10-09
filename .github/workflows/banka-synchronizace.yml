@@ -48,7 +48,7 @@ jobs:
 
           # Jen souhrnná čísla — repozitář je veřejný, log vidí kdokoli. Důvod
           # chyby u konkrétního připojení je v appce (Integrace → Banka).
-          SOUHRN=$(jq -c '{zpracovano, ok, chyby, preskoceno}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+          SOUHRN=$(jq -c '{zpracovano, ok, chyby, preskoceno, parovani}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
           echo "HTTP ${KOD} ${SOUHRN}"
 
           case "$KOD" in
