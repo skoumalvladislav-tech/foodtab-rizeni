@@ -1,18 +1,24 @@
 'use server'
 
+import { randomUUID } from 'node:crypto'
+
 import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { zasifrovat } from '@/lib/integrace-klice'
+import { rozsifrovat, zasifrovat } from '@/lib/integrace-klice'
 import { overitPripojeniFio } from '@/lib/integrace-fio'
 import { synchronizovatFioPripojeni } from '@/lib/integrace-fio-sync'
 import { synchronizovatSaltEdgePripojeni } from '@/lib/integrace-saltedge-sync'
 import { synchronizovatPodlePoskytovatele } from '@/lib/banka-synchronizace'
 import { enableBankingProvider } from '@/lib/integrace-enablebanking'
 import { zahajitPripojeniSaltEdge, odvolatSouhlasSaltEdge } from '@/lib/integrace-saltedge'
+import { adresaAutorizace, adresaRegistrace, konfiguraceKb, novyKlicSifrovani, type ExterniUcetKb, type TajemstviKb } from '@/lib/kb-adaa'
+import { synchronizovatKbPripojeni } from '@/lib/kb-adaa-sync'
+import { vytvoritStavKb } from '@/lib/kb-adaa-stav'
+import { ucetKbJinde } from '@/lib/kb-adaa-ucty'
 
 /**
  * Stejný vzor jako `zakladniAdresa` v nastaveni/lide/akce.ts (pozvánky
@@ -301,7 +307,7 @@ export async function synchronizovatTeto(formData: FormData): Promise<void> {
   // Podle poskytovatele, ne vždy Fio — viz lib/banka-synchronizace.ts (nález 11. 10. 2026).
   const vysledek = await synchronizovatPodlePoskytovatele(
     { id: pripojeni.id as string, poskytovatel: pripojeni.poskytovatel as string },
-    { fio: synchronizovatFioPripojeni, saltedge: synchronizovatSaltEdgePripojeni },
+    { fio: synchronizovatFioPripojeni, saltedge: synchronizovatSaltEdgePripojeni, kb_adaa: synchronizovatKbPripojeni },
   )
 
   const parametr = vysledek.stav === 'ok'
@@ -375,4 +381,194 @@ export async function odpojitBankovniUcet(formData: FormData): Promise<void> {
 
   revalidatePath(`/${rozsah}/finance/integrace/banka`)
   redirect(`/${rozsah}/finance/integrace/banka`)
+}
+
+// ---------------------------------------------------------------------
+// Komerční banka — přímé napojení (ADAA). Rozhodnutí Šéfíka 11. 10. 2026.
+// Tok a adresy: lib/kb-adaa.ts. Návraty z KB: app/api/integrace/kb/*.
+// ---------------------------------------------------------------------
+
+function cestaBanky(rozsah: string, parametry?: Record<string, string>): string {
+  return `/${rozsah}/finance/integrace/banka${parametry ? `?${new URLSearchParams(parametry)}` : ''}`
+}
+
+/** `historie_od` z formuláře: platné datum v posledních 2 letech, ne v budoucnu; prázdné = 1. 1. letošního roku. */
+function historieOdZFormulare(formData: FormData): string | null {
+  const dnes = new Date().toISOString().slice(0, 10)
+  const text = String(formData.get('historie_od') ?? '').trim()
+  if (!text) return `${dnes.slice(0, 4)}-01-01`
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || Number.isNaN(Date.parse(`${text}T00:00:00Z`))) return null
+  const nejstarsi = new Date(Date.now() - 728 * 86_400_000).toISOString().slice(0, 10)
+  if (text > dnes) return null
+  // Starší než 2 roky KB nevrátí — zkrátit, ne odmítnout (u „Dokončit
+  // připojení v KB" se datum posílá skryté a stárne).
+  return text < nejstarsi ? nejstarsi : text
+}
+
+/**
+ * „Připojit Komerční banku": připojení ve stavu „Připojuje se…",
+ * zašifrovaný klíč pro odpověď registrace a přesměrování do KB, kde se
+ * klient přihlásí KB Klíčem a vybere účty. Návrat:
+ * `/api/integrace/kb/registrace` → souhlas → `/api/integrace/kb/vratit`.
+ */
+export async function zahajitPripojeniKb(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const platebniUcetId = String(formData.get('platebni_ucet_id') ?? '')
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  const konf = konfiguraceKb()
+  if (!konf) redirect(cestaBanky(rozsah, { chyba: 'Napojení na Komerční banku zatím není na serveru nastavené.' }))
+  if (!platebniUcetId) redirect(cestaBanky(rozsah, { chyba: 'Vyberte platební účet.' }))
+
+  const historieOd = historieOdZFormulare(formData)
+  if (!historieOd) redirect(cestaBanky(rozsah, { chyba: '„Načíst pohyby od" musí být platné datum, ne v budoucnu.' }))
+
+  const navratUri = `${await zakladniAdresa()}/api/integrace/kb/vratit`
+  const pokus = randomUUID()
+  const zacatek: ExterniUcetKb = { prostredi: konf.prostredi, historie_od: historieOd, navrat_uri: navratUri, pokus, pokus_kdy: new Date().toISOString(), rozsah }
+
+  // Pokus o KB na tomtéž platebním účtu, kde registrace aplikace
+  // nedoběhla (člověk se z KB nevrátil, nebo selhala), se použije
+  // znovu — jinak by platební účet blokoval (jedno živé bankovní
+  // připojení na účet). Zaregistrované připojení se NEpřepisuje: smazalo
+  // by se uložené client_id/secret i souhlas; na to je „Obnovit souhlas".
+  const { data: existujici } = await supabase
+    .from('integrace_pripojeni')
+    .select('id, poskytovatel, stav, externi_ucet')
+    .eq('tenant_id', tenantId)
+    .eq('oblast', 'banka')
+    .eq('platebni_ucet_id', platebniUcetId)
+    .is('odpojeno_kdy', null)
+    .maybeSingle()
+
+  let pripojeniId: string
+  if (existujici) {
+    if (existujici.poskytovatel !== 'kb_adaa' || (existujici.stav !== 'pripojuje_se' && existujici.stav !== 'chyba')) {
+      redirect(cestaBanky(rozsah, { chyba: 'Tenhle platební účet už má živé bankovní připojení.' }))
+    }
+    if ((existujici.externi_ucet as ExterniUcetKb | null)?.client_id) {
+      redirect(cestaBanky(rozsah, { chyba: 'Komerční banka už aplikaci u tohoto účtu zaregistrovala — dokončete připojení přes „Obnovit souhlas v KB“, nebo ho odpojte.' }))
+    }
+    pripojeniId = existujici.id as string
+    const { error } = await supabase
+      .from('integrace_pripojeni')
+      .update({ stav: 'pripojuje_se', posledni_chyba: null, externi_ucet: zacatek })
+      .eq('id', pripojeniId)
+    if (error) redirect(cestaBanky(rozsah, { chyba: 'Připojení se nepodařilo připravit.' }))
+  } else {
+    const { data: pripojeni, error } = await supabase
+      .from('integrace_pripojeni')
+      .insert({
+        tenant_id: tenantId,
+        oblast: 'banka',
+        poskytovatel: 'kb_adaa',
+        rezim: 'zakaznicky',
+        nazev: 'Komerční banka',
+        platebni_ucet_id: platebniUcetId,
+        stav: 'pripojuje_se',
+        externi_ucet: zacatek,
+        capabilities: { cteni: true, zapis: false, inkrementalni_sync: true, firemni_ucty: true },
+        // KB: 50 stažení měsíčně zdarma, častěji placené — výchozí 1× denně.
+        interval_synchronizace_minut: 1440,
+      })
+      .select('id')
+      .single()
+    if (error || !pripojeni) {
+      const zprava = error?.code === '23505' ? 'Tenhle platební účet už má živé bankovní připojení.' : 'Připojení se nepodařilo založit.'
+      redirect(cestaBanky(rozsah, { chyba: zprava }))
+    }
+    pripojeniId = pripojeni.id as string
+  }
+  const pripojeni = { id: pripojeniId }
+
+  const klicSifrovani = novyKlicSifrovani()
+  const { sifra, otisk } = zasifrovat({ klic_sifrovani: klicSifrovani } satisfies TajemstviKb)
+  const { error: chybaKlice } = await supabase.rpc('integrace_uloz_tajemstvi', { p_pripojeni: pripojeni.id, p_sifra: sifra, p_otisk: otisk })
+  if (chybaKlice) {
+    await supabase.from('integrace_pripojeni').update({ stav: 'chyba', posledni_chyba: 'Nepodařilo se připravit šifrování registrace.' }).eq('id', pripojeni.id)
+    redirect(cestaBanky(rozsah, { chyba: 'Připojení se nepodařilo připravit — zkuste to znovu.' }))
+  }
+
+  redirect(adresaRegistrace(konf, { klicSifrovani, navratUri, state: vytvoritStavKb(pripojeni.id as string, rozsah, 'registrace', pokus) }))
+}
+
+/**
+ * Obnova souhlasu (po 12 měsících, nebo když KB přístup odmítne): nový
+ * autorizační kód pro tutéž registraci — nová registrace aplikace není
+ * potřeba, pokud souhlas dává tentýž klient KB.
+ */
+export async function obnovitSouhlasKb(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  const konf = konfiguraceKb()
+  if (!konf) redirect(cestaBanky(rozsah, { chyba: 'Napojení na Komerční banku zatím není na serveru nastavené.' }))
+
+  const { data: pripojeni } = await supabase
+    .from('integrace_pripojeni')
+    .select('id, externi_ucet')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .eq('oblast', 'banka')
+    .eq('poskytovatel', 'kb_adaa')
+    .is('odpojeno_kdy', null)
+    .maybeSingle()
+  if (!pripojeni) redirect(cestaBanky(rozsah, { chyba: 'Připojení neexistuje.' }))
+
+  const { data: sifra } = await supabase.rpc('integrace_precti_tajemstvi', { p_pripojeni: pripojeni.id })
+  let udaje: TajemstviKb = {}
+  try {
+    udaje = typeof sifra === 'string' ? (rozsifrovat(sifra) as TajemstviKb) : {}
+  } catch {
+    udaje = {}
+  }
+  if (!udaje.client_id) redirect(cestaBanky(rozsah, { chyba: 'Registrace u KB chybí — odpojte účet a připojte ho znovu.' }))
+
+  const ucet = (pripojeni.externi_ucet ?? {}) as ExterniUcetKb
+  if (ucet.prostredi && ucet.prostredi !== konf.prostredi) {
+    redirect(cestaBanky(rozsah, { chyba: 'Připojení vzniklo v jiném prostředí Komerční banky, než na jaké je server nastavený — odpojte ho a připojte znovu.' }))
+  }
+  const navratUri = ucet.navrat_uri ?? `${await zakladniAdresa()}/api/integrace/kb/vratit`
+  redirect(adresaAutorizace(konf, { clientId: udaje.client_id, navratUri, state: vytvoritStavKb(pripojeni.id as string, rozsah, 'souhlas') }))
+}
+
+/** Klient v KB vybral víc účtů — člověk určí, který patří k platebnímu účtu připojení. */
+export async function vybratUcetKb(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const accountId = String(formData.get('account_id') ?? '')
+  const { supabase, tenantId } = await pripravit(rozsah)
+
+  const { data: pripojeni } = await supabase
+    .from('integrace_pripojeni')
+    .select('id, externi_ucet')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .eq('oblast', 'banka')
+    .eq('poskytovatel', 'kb_adaa')
+    .is('odpojeno_kdy', null)
+    .maybeSingle()
+  if (!pripojeni) redirect(cestaBanky(rozsah, { chyba: 'Připojení neexistuje.' }))
+
+  const ucet = (pripojeni.externi_ucet ?? {}) as ExterniUcetKb
+  if (ucet.account_id) redirect(cestaBanky(rozsah, { chyba: 'Účet z Komerční banky už je u tohoto připojení vybraný.' }))
+  const vybrany = (ucet.ucty ?? []).find((u) => u.account_id === accountId)
+  if (!vybrany) redirect(cestaBanky(rozsah, { chyba: 'Vyberte účet ze seznamu, který vrátila Komerční banka.' }))
+  const obsazeny = await ucetKbJinde(supabase, tenantId, pripojeni.id as string, vybrany)
+  if (obsazeny) redirect(cestaBanky(rozsah, { chyba: obsazeny }))
+
+  const { error } = await supabase
+    .from('integrace_pripojeni')
+    .update({
+      stav: 'pripojeno',
+      posledni_chyba: null,
+      externi_ucet: { ...ucet, account_id: vybrany.account_id, iban: vybrany.iban, mena: vybrany.mena, nazev_uctu: vybrany.nazev, stazeno_do: undefined } satisfies ExterniUcetKb,
+    })
+    .eq('id', pripojeni.id)
+  if (error) redirect(cestaBanky(rozsah, { chyba: 'Výběr účtu se nepodařilo uložit.' }))
+
+  const vysledek = await synchronizovatKbPripojeni(pripojeni.id as string)
+  revalidatePath(cestaBanky(rozsah))
+  redirect(cestaBanky(rozsah, vysledek.stav === 'ok' ? { synchronizovano: String(vysledek.pocetNovychRadku) } : { chyba: vysledek.duvod }))
 }

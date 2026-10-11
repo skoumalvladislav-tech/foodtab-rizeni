@@ -4,6 +4,7 @@ import { tajemstviSedi } from '@/lib/supabase/uloha'
 import { synchronizovatFioPripojeni, vsechnaAktivniFioPripojeni } from '@/lib/integrace-fio-sync'
 import { synchronizovatSaltEdgePripojeni, vsechnaAktivniSaltEdgePripojeni } from '@/lib/integrace-saltedge-sync'
 import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
+import { synchronizovatKbPripojeni, vsechnaAktivniKbPripojeni } from '@/lib/kb-adaa-sync'
 
 /**
  * Naplánovaná úloha: synchronizace bankovních připojení (Fio, Salt Edge).
@@ -37,7 +38,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   const zacatek = Date.now()
-  const [fioPripojeni, saltEdgePripojeni] = await Promise.all([vsechnaAktivniFioPripojeni(), vsechnaAktivniSaltEdgePripojeni()])
+  const [fioPripojeni, saltEdgePripojeni, kbPripojeni] = await Promise.all([vsechnaAktivniFioPripojeni(), vsechnaAktivniSaltEdgePripojeni(), vsechnaAktivniKbPripojeni()])
 
   // Bez id připojení a bez textů chyb: odpověď končí v logu GitHub Actions a
   // repozitář je veřejný. Důvod chyby je u připojení v Integracích → Banka
@@ -49,6 +50,18 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   for (const p of saltEdgePripojeni) {
     const vysledek = await synchronizovatSaltEdgePripojeni(p.id)
+    vysledky.push({ stav: vysledek.stav, novychRadku: vysledek.stav === 'ok' ? vysledek.pocetNovychRadku : 0 })
+  }
+  // Komerční banka (ADAA): odstup řídí interval připojení — výchozí 1× denně kvůli poplatkům KB.
+  // Jeden běh KB trvá až ~30 s (stahování má strop 25 s) — další připojení
+  // se začne jen do 25 s od začátku úlohy (strop 60 s), ostatní zůstanou
+  // na řadě a vezme je příští spuštění.
+  for (const p of kbPripojeni) {
+    if (Date.now() - zacatek > 25_000) {
+      vysledky.push({ stav: 'preskoceno', novychRadku: 0 })
+      continue
+    }
+    const vysledek = await synchronizovatKbPripojeni(p.id)
     vysledky.push({ stav: vysledek.stav, novychRadku: vysledek.stav === 'ok' ? vysledek.pocetNovychRadku : 0 })
   }
 
