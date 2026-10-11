@@ -55,16 +55,23 @@ export default async function FinanceIntegraceProdeje({
     supabase.from('branches').select('id, name').eq('tenant_id', tenantId).eq('active', true).is('deleted_at', null),
     supabase
       .from('pokladna_prodeje_denni')
-      .select('datum, trzba_haleru')
+      .select('datum, branch_id, zdroj, trzba_haleru')
       .eq('tenant_id', tenantId)
       .order('datum', { ascending: false })
       .limit(2000),
   ])
 
   const branches = (branchesRes.data ?? []) as { id: string; name: string }[]
+  const radky = (prodejeRes.data ?? []) as { datum: string; branch_id: string; zdroj: string; trzba_haleru: number }[]
+
+  // Stejné pravidlo jako foodcost (20261011100000): má-li pobočka v daný
+  // den data z napojené pokladny, CSV téhož dne se nepočítá — jinak by se
+  // den, který API dohnalo, ukázal dvakrát.
+  const dnyZPokladny = new Set(radky.filter((r) => r.zdroj !== 'csv').map((r) => `${r.branch_id}|${r.datum}`))
 
   const podleDne = new Map<string, DenniSouhrn>()
-  for (const r of (prodejeRes.data ?? []) as { datum: string; trzba_haleru: number }[]) {
+  for (const r of radky) {
+    if (r.zdroj === 'csv' && dnyZPokladny.has(`${r.branch_id}|${r.datum}`)) continue
     const souhrn = podleDne.get(r.datum) ?? { datum: r.datum, trzbaHaleru: 0, pocetProduktu: 0 }
     souhrn.trzbaHaleru += r.trzba_haleru
     souhrn.pocetProduktu += 1
@@ -76,8 +83,8 @@ export default async function FinanceIntegraceProdeje({
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="Denní souhrn prodeje po produktu — vstup pro budoucí porovnání s teoretickou spotřebou. Bez živého připojení jde jen o CSV."
-        vpravo={<Link href={`/${rozsah}/finance/integrace`} className="ft-tl">← Zpět na integrace</Link>}
+        popis="Ruční nahrání denních prodejů ze souboru — pro pokladnu bez API. Napojenou pokladnu spravujete v Pokladních systémech."
+        vpravo={<Link href={`/${rozsah}/finance/integrace/pokladna`} className="ft-tl">← Pokladní systémy</Link>}
       >
         Prodeje
       </Nadpis>

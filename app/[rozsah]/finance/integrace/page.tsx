@@ -133,9 +133,9 @@ export default async function FinanceIntegrace({
           nepředstírá funkčnost, která neexistuje (zadání §1, §2).
         */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '10px' }}>
-          <Link href={`/${rozsah}/finance/integrace/prodeje`} className="ft-tl" style={{ ...karta, display: 'block' }}>
+          <Link href={`/${rozsah}/finance/integrace/pokladna`} className="ft-tl" style={{ ...karta, display: 'block' }}>
             <strong>Pokladní systémy</strong>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Import prodejů (CSV) →</div>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Dotykačka, příjmové API, CSV →</div>
           </Link>
           <Link href={`/${rozsah}/finance/integrace/banka`} className="ft-tl" style={{ ...karta, display: 'block' }}>
             <strong>Bankovní účty</strong>
@@ -187,19 +187,19 @@ export default async function FinanceIntegrace({
               <label>
                 <span style={popisek}>Oblast *</span>
                 <select name="oblast" required style={pole}>
-                  <option value="pokladna">Pokladna (POS)</option>
                   <option value="ucetnictvi">Účetnictví</option>
                   <option value="email_dokladu">E-mail dokladů</option>
                 </select>
                 <small style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--muted)' }}>
-                  Banka se připojuje na vlastní stránce{' '}
-                  <Link href={`/${rozsah}/finance/integrace/banka`} style={{ color: 'inherit', textDecoration: 'underline' }}>Bankovní účty</Link>{' '}
+                  Banka a pokladna se připojují na vlastních stránkách{' '}
+                  <Link href={`/${rozsah}/finance/integrace/banka`} style={{ color: 'inherit', textDecoration: 'underline' }}>Bankovní účty</Link> a{' '}
+                  <Link href={`/${rozsah}/finance/integrace/pokladna`} style={{ color: 'inherit', textDecoration: 'underline' }}>Pokladní systémy</Link>{' '}
                   — tam appka přístup živě ověří, tenhle formulář jen zaregistruje poskytovatele, nikdy nic nepřipojí.
                 </small>
               </label>
               <label>
                 <span style={popisek}>Poskytovatel *</span>
-                <input type="text" name="poskytovatel" required placeholder="např. dotykacka, csv_import" style={pole} />
+                <input type="text" name="poskytovatel" required placeholder="např. pohoda, money_s3" style={pole} />
               </label>
               <label>
                 <span style={popisek}>Režim *</span>

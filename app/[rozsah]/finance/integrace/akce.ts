@@ -46,7 +46,14 @@ export async function zalozitPripojeni(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Bankovní účet se připojuje na týhle stránce (Fio) nebo čeká na Enable Banking u ostatních bank — ne přes obecný formulář.')}`)
   }
 
-  if (!['pokladna', 'ucetnictvi', 'email_dokladu'].includes(oblast) || !poskytovatel || !['zakaznicky', 'csv', 'demo'].includes(rezim)) {
+  // Pokladna má od 11. 10. 2026 vlastní obrazovku s živým ověřením
+  // tokenu a přiřazením provozoven — záznam bez ověření by tam visel
+  // jako připojení, které nic nestahuje (stejný důvod jako u banky výš).
+  if (oblast === 'pokladna') {
+    redirect(`/${rozsah}/finance/integrace/pokladna?chyba=${encodeURIComponent('Pokladna se připojuje tady — vyberte ji ze seznamu a vložte přístup.')}`)
+  }
+
+  if (!['ucetnictvi', 'email_dokladu'].includes(oblast) || !poskytovatel || !['zakaznicky', 'csv', 'demo'].includes(rezim)) {
     redirect(`/${rozsah}/finance/integrace?chyba=${encodeURIComponent('Vyplňte oblast, poskytovatele a režim.')}`)
   }
 

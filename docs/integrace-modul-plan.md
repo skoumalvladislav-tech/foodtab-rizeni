@@ -103,7 +103,25 @@ Nová migrace `20261007110000_integrace_opravneni_a_sjednoceni.sql`:
 - `finance/platby/prodeje/*` (CSV import tržeb) VĖDOMĖ beze změny —
   je to zápis finančních dat, ne správa napojení/tajemství.
 
-### POS/Dotykačka — částečný zdroj existuje, žádný živý adaptér
+### POS — univerzální napojení (11. 10. 2026)
+
+> **Stav od 11. 10. 2026** (větev `pokladna-dotykacka-api`, pokyn
+> Šéfíka „univerzální forma připojení… okénko na API token… provozovna
+> přiřaditelná k profilu v appce"): Integrace → **Pokladní systémy**
+> (`app/[rozsah]/finance/integrace/pokladna/`). Formulář se kreslí ze
+> seznamu `lib/pokladna-poskytovatele.ts`; adaptér podle
+> `lib/pos-provider-contract.ts`. **Dotykačka** má živého klienta
+> (`lib/pokladna-dotykacka.ts`) podle veřejné dokumentace — autentizace
+> (refresh token + Cloud ID, Connector v2) je zdokumentovaná, původní
+> obava níž („není z veřejné navigace jistý") neplatí. Provozovny
+> pokladny se přiřazují k pobočkám u připojení. Ostatní pokladny:
+> **příjmové API** `POST /api/pokladna/prodeje` (`docs/pokladna-api.md`).
+> Hodinová úloha `pokladna-synchronizace`. Migrace
+> `20261011100000_pokladna_univerzalni_napojeni.sql`, scénář krok93.
+> Zbývá mimo appku: registrace Client Application u Dotykačky (otázka 43).
+> Text níž je stav ze 7. 10., ponechaný kvůli historii.
+
+#### Stav 7. 10. 2026 (překonané)
 
 - `public.pokladna_prodeje_denni` + `importovat_pokladna_prodeje` RPC
   existují a krmí `foodcost_beverage_prehled` — **jen přes CSV import**

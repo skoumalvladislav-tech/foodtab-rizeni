@@ -1113,6 +1113,23 @@ neplní.
 appce dá API klíč/dokumentaci k autentizaci — appka postaví konkrétní
 klienta, ne dřív.
 
+> **POKYN ŠÉFÍKA (11. 10. 2026):** „potřebuji dokončit napojení POS…
+> přes API… univerzální formu připojení — je spoustu POS… okénko, kam
+> se vloží API token a POS se připojí… a provozovna šla přiřadit ke
+> konkrétnímu profilu zde v appce." Postaveno 11. 10. ve větvi
+> `pokladna-dotykacka-api`: klient Dotykačky podle veřejné dokumentace
+> (autentizace refresh token + Cloud ID je zdokumentovaná, nic se
+> nedomýšlelo), univerzální formulář, přiřazení provozoven k pobočkám,
+> příjmové API pro ostatní pokladny. Viz `docs/hlaseni/stav-2026-10-11.md`.
+>
+> **Co pořád zbývá mimo appku:** Dotykačka vydává přístup jen
+> registrované „Client Application" (formulář na
+> docs.api.dotypos.com/getting-started). Appka ho sama nevyplňuje —
+> kdo ho vyplní, dostane Client ID a Client Secret; ty se dají do
+> Vercelu (`DOTYKACKA_CLIENT_ID`, `DOTYKACKA_CLIENT_SECRET`) a v appce
+> se objeví tlačítko „Přihlásit přes Dotykačku". Do té doby jde
+> Dotykačka připojit jen vložením tokenu a Cloud ID, pokud je někdo má.
+
 ---
 
 ## 44. Salt Edge partnerská pozvánka
