@@ -98,16 +98,24 @@ Rozhodnutí, která jsem udělal sám (nejopatrnější varianta):
   měsíčně zdarma a počítá i zůstatky. Denní pohyby (~31) + zůstatek, jen
   když je poslední starší než 40 hodin (~15) se do 50 vejde. Interval jde
   u připojení změnit (častější stahování je u KB placené).
-- **Pohyby po měsících s uloženým postupem.** Stáhnout celou historii
-  najednou by u rušného účtu přeteklo a skončilo chybou pokaždé znovu.
-  Jeden běh stáhne nejvýš 50 stránek, zbytek dotáhne příště.
+- **Pohyby jedním dotazem, postup se ukládá.** KB dovoluje stáhnout
+  nezměněná data jen jednou za 61 minut, takže appka nestahuje po kusech
+  (druhý kus by narazil na limit). Jeden běh stáhne nejvýš 50 stránek
+  a 25 sekund. Když nedoběhne, uloží, co přišlo, a pokračuje příště od
+  posledního dne. To ale jen tehdy, když KB pohyby opravdu vrací od
+  nejstarších; appka to kontroluje přímo na datech. Jinak by tiše
+  přeskočila, co ještě nepřišlo, a připojení radši čeká na člověka.
 - **Úloha zkouší připojení 1× za interval i po chybě** (počítá od
   posledního pokusu, ne úspěchu). Trvalá chyba by jinak stahovala a platila
   totéž stažení při každém spuštění úlohy (à 4 h). Chyba je vidět
   u připojení a „Synchronizovat teď" jde kdykoli.
-- **Jeden účet KB = jeden platební účet.** Stejný účet KB (podle id i
-  IBANu) appka k druhému platebnímu účtu nepřipojí — pohyby by se
-  započítaly dvakrát.
+- **Jeden účet KB = jeden platební účet.** Stejný účet KB (podle id,
+  nebo IBANu a měny) appka k druhému platebnímu účtu nepřipojí, jinak by
+  se pohyby započítaly dvakrát. Vícoměnový účet má jeden IBAN a pro
+  každou měnu vlastní účet, ty jdou připojit zvlášť.
+- **Storno** (`reversalIndicator`) má vlastní klíč. Kdyby neslo stejný
+  identifikátor jako původní platba, dedup by ho zahodil a faktura by
+  zůstala zaplacená.
 - **Obnova souhlasu nesmí změnit účet.** Když nový souhlas v KB
   nezahrnuje dosud připojený účet, appka nic neuloží a starý souhlas
   zůstává.
@@ -121,34 +129,78 @@ Rozhodnutí, která jsem udělal sám (nejopatrnější varianta):
 
 ## Čísla — a z čeho jsou
 
-- `scripts/kb-adaa.test.mjs`: **77 kontrol**, zapsáno do CI (`aplikace.yml`).
+- `scripts/kb-adaa.test.mjs`: **80 kontrol**, zapsáno do CI (`aplikace.yml`).
   Testují `lib/kb-adaa.ts` proti napodobeným odpovědím KB, tvar odpovědí
   podle oficiálního swaggeru a ukázek KB. **Neověřují skutečnou KB.**
-- **27 schválných rozbití** (`lib/kb-adaa.ts`), každé spadlo na kontrole,
-  na kterou mířilo: PDNG se zapíše, `entryReference` místo
-  `accountServicer`, prohozený směr, záporná částka, VS se ztratí, jen
-  první stránka, prohozený účetní/disponibilní zůstatek, zůstatek bez
-  znaménka, šifra bez ověřovací značky, scope s platbami, `invalid_grant`
-  jako dočasná chyba, `invalid_client` jako „obnovte souhlas", kód chyby
-  jen malými písmeny, kód jen z OAuth tvaru, každé 401/403 jako chyba
-  souhlasu, 429 jako trvalá chyba, částka přes 21 mil. Kč se zapíše,
-  okno bez 7denního překryvu, víc než 2 roky zpátky, celá historie
-  jedním oknem, smyčka bez konce po dohnání, bez stropu stránek, bez
-  časového stropu, chyba zápisu nezastaví stahování, postup se neposune,
-  plánování bez tolerance, plánování jen od úspěchu.
+- **30 schválných rozbití** (`lib/kb-adaa.ts`), každé spadlo na kontrole,
+  na kterou mířilo. Převod pohybu: PDNG se zapíše, `entryReference`
+  místo `accountServicer`, storno bez vlastního klíče, prohozený směr,
+  záporná částka, VS se ztratí, částka přes 21 mil. Kč se zapíše.
+  Stahování: jen první stránka, týž identifikátor dvakrát v dávce, bez
+  kontroly řazení, bez časového stropu, posun postupu i bez pohybu vpřed,
+  posun i u neseřazených, nedoběhlé stažení brané jako celé, chyba
+  zápisu se ztratí, doběhlé stažení brané jako nedoběhlé, okno bez
+  7denního překryvu, víc než 2 roky zpátky. Zůstatky: prohozený účetní
+  a disponibilní, bez znaménka. Registrace a chyby: šifra bez ověřovací
+  značky, scope s platbami, `invalid_grant` jako dočasná chyba,
+  `invalid_client` jako „obnovte souhlas", kód chyby jen malými
+  písmeny, kód jen z OAuth tvaru, každé 401/403 jako chyba souhlasu, 429
+  jako trvalá chyba. Plánování: bez tolerance, jen od úspěchu.
 - **Netestované automaticky:** `lib/kb-adaa-sync.ts`, `lib/kb-adaa-ucty.ts`
   a oba návraty z KB (`server-only`, potřebují databázi a KB). Ověřené
   typy, lintem, čtením a kontrolou kódu (níž).
 - `tsc --noEmit` a `eslint` na změněných souborech čisté; celá sada CI
   testů (74 souborů) lokálně prošla.
 
+## Kontrola kódu (5 pohledů, každý nález ověřen dalším agentem)
+
+Bezpečnost návratů z KB, OAuth a tajemství, synchronizace, akce
+a obrazovka, soulad s dokumentací KB (tu kontrola četla přímo na
+developers.kb.cz). **22 nálezů, všechny opravené**, kromě jednoho
+zbytku (níž). Nejdůležitější:
+
+- **Obnova souhlasu mohla tiše přepojit platební účet na jiný účet KB**
+  (třeba jiné firmy, kam má přihlašující přístup), a ještě přepsat
+  fungující souhlas dřív, než se ověřil. Teď se nový souhlas uloží až
+  po kontrole, že zahrnuje dosud připojený účet.
+- **KB hlásí neplatný souhlas jako `INVALID_GRANT` v jiném tvaru
+  odpovědi**, než appka čekala. Neplatný souhlas by se nepoznal.
+- **Každé 401/403 vyřadilo připojení natrvalo**, i když šlo o špatný
+  API klíč appky nebo firewall KB. Jedna chyba v nastavení by vypnula
+  všechna připojení. Teď „vyžaduje pozornost" jen to, co musí opravit
+  firma.
+- **Stahování po měsících by u druhého měsíce narazilo na limit KB**
+  (61 minut). Nejnovější platby by tak přišly poslední, po dnech.
+  Předěláno na jeden dotaz.
+- **Pohyb nad 21 mil. Kč** (třeba čerpání úvěru) nebo **dvojí
+  identifikátor v jedné dávce** by stahování zasekl natrvalo. Úloha by
+  pak každé 4 h znovu platila za stejná stažení. Teď se takový pohyb
+  vynechá a ohlásí, a úloha počítá další pokus od posledního pokusu.
+- Starý nebo zopakovaný návrat z KB (druhá záložka, tlačítko Zpět)
+  shodil platný pokus na „chyba". Teď je návrat vázaný na konkrétní
+  pokus.
+- Akce i úloha mohly přesáhnout časový limit serveru (60 s). Teď mají
+  časový strop.
+- Další: přerušený pokus s uplynulým datem nešel dokončit, připojení
+  z testovacího prostředí KB nabízelo nefunkční obnovu, „1× denně"
+  vycházelo na 28 h a některý den vypadl, jeden účet KB šel připojit ke
+  dvěma platebním účtům.
+
+**Zbytek, který jsem nechal:** když KB po registraci nevrátí `state`
+a přihlášený zároveň smí spravovat přes 10 novějších nedokončených
+pokusů o KB, nemusí appka ten svůj najít. Je to málo pravděpodobné (ověřovatel:
+„oba předpoklady naráz"), ukáže to sandbox.
+
 ## Snímky obrazovky
 
 Viděl jsem vykreslené (desktop i mobil 390 px) **dočasný náhled
 s vymyšlenými daty**: kartu „Připojit", kartu bez nastavení, připojený
-účet, souhlas brzy vyprší, výběr z více účtů. Na mobilu přetékal výběr
-účtu s dlouhým IBANem — opraveno. **Neviděl jsem** skutečnou stránku nad
-databází, stránky KB ani návrat z nich (bez klíčů nejdou).
+účet, připojení z jiného prostředí KB, výběr z více účtů, přerušené
+připojení s „Dokončit připojení v KB". Na mobilu přetékal výběr účtu
+s dlouhým IBANem — opraveno. U připojení z jiného prostředí radila
+appka zároveň „odpojte" i „obnovte souhlas" — opraveno. **Neviděl
+jsem** skutečnou stránku nad databází, stránky KB ani návrat z nich
+(bez klíčů nejdou).
 
 ## Co čeká na Šéfíka
 

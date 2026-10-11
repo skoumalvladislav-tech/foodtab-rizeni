@@ -184,12 +184,20 @@ export function adresaAutorizace(konf: KonfiguraceKb, v: { clientId: string; nav
  * `docasna` — KB teď neodpovídá nebo omezuje (429): příště znovu.
  * `jina` — chyba v požadavku nebo odpověď, které appka nerozumí.
  */
-export type ChybaKb = { stav: 'chyba'; druh: 'pristup' | 'docasna' | 'jina'; duvod: string; zkusitZaSekund?: number }
+/**
+ * `pristup` = souhlas/účet v KB (opraví firma), `zasah` = jinak
+ * neřešitelné bez člověka (úloha to nemá zkoušet dokola za placená
+ * stažení), `docasna` = příště znovu, `jina` = ostatní (příště znovu).
+ */
+export type ChybaKb = { stav: 'chyba'; druh: 'pristup' | 'zasah' | 'docasna' | 'jina'; duvod: string; zkusitZaSekund?: number }
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>
 
 const CASOVY_LIMIT_MS = 20_000
-/** Dokumentace: další stránku transakcí stáhnout do 10 s; víc stránek než tohle na jeden běh appka nečte. */
+/**
+ * Dokumentace: další stránku transakcí stáhnout do 10 s. Víc stránek než
+ * tohle appka na jeden běh nečte — KB účtuje každou stránku (50 zdarma měsíčně).
+ */
 const MAX_STRANEK = 50
 const MAX_HALERU = 2_147_483_647
 
@@ -380,8 +388,12 @@ function castka(hodnota: unknown): number | null {
 export function prevestTransakci(t: Record<string, unknown>, menaUctu: string): RadekImportu | null {
   if (t.status !== 'BOOK') return null
   const reference = (t.references ?? {}) as Record<string, unknown>
-  const externiId = typeof reference.accountServicer === 'string' ? reference.accountServicer.trim() : ''
-  if (!externiId) return null
+  const identifikator = typeof reference.accountServicer === 'string' ? reference.accountServicer.trim() : ''
+  if (!identifikator) return null
+  // `accountServicer` spojuje životní cyklus platby; kdyby storno
+  // (`reversalIndicator`) neslo týž identifikátor jako původní platba,
+  // bez přípony by ho dedup zahodil a platba by zůstala „zaplacená".
+  const externiId = t.reversalIndicator === true ? `${identifikator}:storno` : identifikator
 
   const smer = t.creditDebitIndicator === 'CREDIT' ? 'prijem' : t.creditDebitIndicator === 'DEBIT' ? 'vydaj' : null
   if (!smer) return null
@@ -420,18 +432,30 @@ export function prevestTransakci(t: Record<string, unknown>, menaUctu: string): 
 }
 
 /**
- * Pohyby za období `[od, do]` — všechny stránky (page od 0, size 100,
- * dokud `last` není true). Řazení je v KB vždy od starších k novějším.
+ * Pohyby za období `[od, do]` po stránkách (page od 0, size 100, dokud
+ * `last` není true). Skončí dřív po `maxStranek` stránkách, nebo když
+ * `stihnout()` vrátí false — pak `uplne: false`.
+ *
+ * Hlídá i pořadí: dokumentace KB píše „od starších k novějším" a na tom
+ * stojí postup po částech (`stahnoutPohyby`) — proto se ověřuje na
+ * datech (`vzestupne`), ne jen věří. Týž identifikátor dvakrát v jednom
+ * stažení se zapíše jednou: dvojice by shodila zápis celé dávky na
+ * unikátním indexu a stahování by se na ní zaseklo.
  */
 export async function nactiTransakce(
   konf: KonfiguraceKb,
-  v: { accessToken: string; accountId: string; menaUctu: string; od: Date; do: Date },
+  v: { accessToken: string; accountId: string; menaUctu: string; od: Date; do: Date; maxStranek?: number; stihnout?: () => boolean },
   fetchFn: Fetch = (u, i) => fetch(u, i),
-): Promise<{ stav: 'ok'; radky: RadekImportu[]; vynechano: number; stranek: number } | ChybaKb> {
+): Promise<{ stav: 'ok'; radky: RadekImportu[]; vynechano: number; stranek: number; uplne: boolean; vzestupne: boolean; posledniDatum: string | null } | ChybaKb> {
   const radky: RadekImportu[] = []
+  const videne = new Set<string>()
   let vynechano = 0
   let stranek = 0
-  for (let page = 0; page < MAX_STRANEK; page++) {
+  let vzestupne = true
+  let posledniDatum: string | null = null
+  const hotovo = (uplne: boolean) => ({ stav: 'ok' as const, radky, vynechano, stranek, uplne, vzestupne, posledniDatum })
+  for (let page = 0; page < (v.maxStranek ?? MAX_STRANEK); page++) {
+    if (page > 0 && v.stihnout && !v.stihnout()) return hotovo(false)
     const parametry = new URLSearchParams({
       fromDateTime: v.od.toISOString(),
       toDateTime: v.do.toISOString(),
@@ -448,13 +472,24 @@ export async function nactiTransakce(
     if (!stranka || !Array.isArray(stranka.content)) return { stav: 'chyba', druh: 'jina', duvod: 'Pohyby z Komerční banky mají neočekávaný tvar.' }
     stranek++
     for (const t of stranka.content as Record<string, unknown>[]) {
-      const radek = t && typeof t === 'object' ? prevestTransakci(t, v.menaUctu) : null
-      if (radek) radky.push(radek)
-      else if (t && typeof t === 'object' && t.status === 'BOOK') vynechano++
+      if (!t || typeof t !== 'object') continue
+      const radek = prevestTransakci(t, v.menaUctu)
+      const klic = radek?.externiId ?? ''
+      if (radek && !videne.has(klic)) {
+        videne.add(klic)
+        radky.push(radek)
+      } else if (t.status === 'BOOK') {
+        vynechano++
+      }
+      if (t.status === 'BOOK' && typeof t.bookingDate === 'string' && /^\d{4}-\d{2}-\d{2}/.test(t.bookingDate)) {
+        const den = t.bookingDate.slice(0, 10)
+        if (posledniDatum && den < posledniDatum) vzestupne = false
+        posledniDatum = den
+      }
     }
-    if (stranka.last !== false) return { stav: 'ok', radky, vynechano, stranek }
+    if (stranka.last !== false) return hotovo(true)
   }
-  return { stav: 'chyba', druh: 'jina', duvod: `Za jeden měsíc je v Komerční bance víc než ${MAX_STRANEK * 100} pohybů — tolik appka najednou stáhnout neumí.` }
+  return hotovo(false)
 }
 
 /**
@@ -509,17 +544,8 @@ export async function nactiZustatky(
 const PREKRYV_DNU = 7
 const NEJSTARSI_DNU = 2 * 365 - 2
 /**
- * Jedno okno nejvýš na měsíc. Stažení celé historie najednou by u rušného
- * účtu přeteklo přes `MAX_STRANEK` a skončilo chybou pokaždé znovu (okno
- * by se nikdy neposunulo). Po měsících se postup ukládá (`stazeno_do`)
- * a přetečení hrozí až od ~160 pohybů denně.
- */
-const OKNO_DNU = 31
-/** Strop stránek na jeden běh synchronizace — KB účtuje každou stránku (50 zdarma měsíčně). */
-const STRANEK_NA_BEH = 50
-/**
  * Časový strop jednoho běhu: synchronizace běží i v akci stránky a v návratu
- * z KB (`maxDuration` 60 s) — po 25 s se další okno nezačne, zbytek příště.
+ * z KB (`maxDuration` 60 s) — po 25 s se další stránka nezačne, zbytek příště.
  */
 const CAS_NA_BEH_MS = 25_000
 
@@ -536,6 +562,9 @@ export type ExterniUcetKb = {
   historie_od?: string
   /** Náhodné id rozjetého pokusu o připojení — kontroluje se proti `state` z návratu z KB. */
   pokus?: string
+  /** Kdy pokus začal (ISO) a z jaké stránky — pro návrat z registrace, když KB nevrátí `state`. */
+  pokus_kdy?: string
+  rozsah?: string
   /** Pohyby vybraného účtu jsou stažené kompletně až do tohoto okamžiku (ISO). */
   stazeno_do?: string
 }
@@ -543,20 +572,18 @@ export type ExterniUcetKb = {
 export type TajemstviKb = { client_id?: string; client_secret?: string; refresh_token?: string; klic_sifrovani?: string }
 
 /**
- * Další okno stahování — čistá funkce pro test. Od `stazenoDo` minus
- * 7 dní (dodatečně zaúčtované pohyby), napoprvé od `historie_od`
- * (výchozí 1. 1. letošního roku); nejvýš měsíc, nejvýš do teď.
- * `posledni` = okno končí v přítomnosti (historie je dohnaná).
+ * Odkud stahovat — čistá funkce pro test. Od `stazenoDo` minus 7 dní
+ * (dodatečně zaúčtované pohyby), napoprvé od `historie_od` (výchozí
+ * 1. 1. letošního roku); nejvýš 2 roky zpátky, do teď.
  */
-export function oknoStahovani(stazenoDo: string | null, historieOd: string | undefined, ted: Date): { od: Date; do: Date; posledni: boolean } {
+export function oknoStahovani(stazenoDo: string | null, historieOd: string | undefined, ted: Date): { od: Date; do: Date } {
   const nejstarsi = new Date(ted.getTime() - NEJSTARSI_DNU * 86_400_000)
   let od: Date
   if (stazenoDo) od = new Date(new Date(stazenoDo).getTime() - PREKRYV_DNU * 86_400_000)
   else od = historieOd ? new Date(`${historieOd}T00:00:00Z`) : new Date(Date.UTC(ted.getUTCFullYear(), 0, 1))
   if (Number.isNaN(od.getTime()) || od < nejstarsi) od = nejstarsi
   if (od > ted) od = new Date(ted.getTime() - PREKRYV_DNU * 86_400_000)
-  const konecOkna = new Date(od.getTime() + OKNO_DNU * 86_400_000)
-  return konecOkna >= ted ? { od, do: ted, posledni: true } : { od, do: konecOkna, posledni: false }
+  return { od, do: ted }
 }
 
 /**
@@ -577,35 +604,55 @@ export function kbJeNaCase(posledniSyncKdy: string | null, posledniTestKdy: stri
 }
 
 /**
- * Stáhne pohyby od posledního uloženého postupu po měsících až do teď.
- * Každé okno hned předá `ulozit` (zápis + posun `stazeno_do`), takže
- * přerušený běh příště pokračuje, kde skončil. Skončí po dohnání, nebo
- * po `STRANEK_NA_BEH` stránkách nebo `CAS_NA_BEH_MS` (zbytek příště,
- * `dohnano: false`).
+ * Stáhne pohyby od uloženého postupu do teď JEDNÍM stažením po stránkách.
+ * Ne po kusech: KB dovoluje stáhnout nezměněná data jen jednou za 61
+ * minut (429 REQUEST_IS_THROTTLED), takže druhý dotaz hned po prvním by
+ * narazil a nejnovější platby by přišly poslední.
+ *
+ * Když stažení nedoběhne (strop `MAX_STRANEK` stránek nebo
+ * `CAS_NA_BEH_MS`), uloží se, co přišlo, a postup se posune na začátek
+ * dne posledního staženého pohybu — jen když KB opravdu vrací od
+ * nejstarších (ověřeno na datech), jinak by se tiše přeskočilo, co ještě
+ * nepřišlo. Příště se pokračuje odtud s překryvem 7 dní (duplicity hlídá
+ * identifikátor). Když se postup posunout nedá, je to `zasah` — úloha
+ * to nemá zkoušet dokola za placená stažení.
+ * `ulozit(radky, null)` = zapsat bez posunu postupu.
  */
 export async function stahnoutPohyby(
   konf: KonfiguraceKb,
   v: { accessToken: string; accountId: string; menaUctu: string; stazenoDo: string | null; historieOd?: string; ted: Date },
-  ulozit: (radky: RadekImportu[], stazenoDo: Date) => Promise<ChybaKb | null>,
+  ulozit: (radky: RadekImportu[], stazenoDo: Date | null) => Promise<ChybaKb | null>,
   fetchFn: Fetch = (u, i) => fetch(u, i),
   hodiny: () => number = () => Date.now(),
 ): Promise<{ stav: 'ok'; vynechano: number; stranek: number; dohnano: boolean } | ChybaKb> {
   const zacatek = hodiny()
-  let stazenoDo = v.stazenoDo
-  let vynechano = 0
-  let stranek = 0
-  for (;;) {
-    const okno = oknoStahovani(stazenoDo, v.historieOd, v.ted)
-    const pohyby = await nactiTransakce(konf, { accessToken: v.accessToken, accountId: v.accountId, menaUctu: v.menaUctu, od: okno.od, do: okno.do }, fetchFn)
-    if (pohyby.stav === 'chyba') return pohyby
-    stranek += pohyby.stranek
-    vynechano += pohyby.vynechano
+  const okno = oknoStahovani(v.stazenoDo, v.historieOd, v.ted)
+  const pohyby = await nactiTransakce(konf, {
+    accessToken: v.accessToken,
+    accountId: v.accountId,
+    menaUctu: v.menaUctu,
+    od: okno.od,
+    do: okno.do,
+    stihnout: () => hodiny() - zacatek < CAS_NA_BEH_MS,
+  }, fetchFn)
+  if (pohyby.stav === 'chyba') return pohyby
+  const souhrn = { vynechano: pohyby.vynechano, stranek: pohyby.stranek }
+
+  if (pohyby.uplne) {
     const chyba = await ulozit(pohyby.radky, okno.do)
-    if (chyba) return chyba
-    stazenoDo = okno.do.toISOString()
-    if (okno.posledni) return { stav: 'ok', vynechano, stranek, dohnano: true }
-    if (stranek >= STRANEK_NA_BEH) return { stav: 'ok', vynechano, stranek, dohnano: false }
-    if (hodiny() - zacatek >= CAS_NA_BEH_MS) return { stav: 'ok', vynechano, stranek, dohnano: false }
+    return chyba ?? { stav: 'ok', ...souhrn, dohnano: true }
+  }
+
+  const hranice = pohyby.vzestupne && pohyby.posledniDatum ? new Date(`${pohyby.posledniDatum}T00:00:00Z`) : null
+  const posun = hranice !== null && hranice.getTime() - PREKRYV_DNU * 86_400_000 > okno.od.getTime()
+  const chyba = await ulozit(pohyby.radky, posun ? hranice : null)
+  if (chyba) return chyba
+  if (posun) return { stav: 'ok', ...souhrn, dohnano: false }
+  return {
+    stav: 'chyba',
+    druh: 'zasah',
+    duvod: hranice
+      ? `Za týden je v Komerční bance víc pohybů, než appka stáhne najednou (${MAX_STRANEK * 100}) — ozvěte se podpoře Foodtabu.`
+      : 'Pohybů je na jedno stažení moc a Komerční banka je nevrátila seřazené — odpojte připojení a připojte ho znovu s kratším „Načíst pohyby od“.',
   }
 }
-

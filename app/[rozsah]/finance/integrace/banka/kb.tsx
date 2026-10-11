@@ -135,7 +135,8 @@ export function DetailKb({
             Připojení vzniklo v {ucet.prostredi === 'sandbox' ? 'testovacím' : 'ostrém'} prostředí KB, server je teď nastavený jinak — odpojte ho a připojte znovu.
           </span>
         ) : null}
-        {souhlasDo ? (
+        {/* U jiného prostředí se souhlas obnovit nedá (viz výš) — „obnovte ho" by radilo něco, co nejde. */}
+        {souhlasDo && !jineProstredi ? (
           <span style={{ color: brzy ? 'var(--pozor)' : undefined }}>
             {souhlasDo < dnesIso
               ? 'Souhlas v KB vypršel — obnovte ho.'

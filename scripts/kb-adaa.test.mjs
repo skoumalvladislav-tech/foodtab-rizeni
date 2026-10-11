@@ -149,6 +149,7 @@ console.log('\n== Převod pohybu ==')
   ok('nulová částka se nezapisuje', prevestTransakci({ ...zakl, amount: { value: 0, currency: 'CZK' } }, 'CZK') === null)
   ok('bez jména protistrany → číslo účtu/kód banky', prevestTransakci({ ...zakl, counterParty: { accountNo: '19-2000145399', bankCode: '0800' } }, 'CZK')?.protistrana === '19-2000145399/0800')
   ok('neznámý směr → nezapisovat', prevestTransakci({ ...zakl, creditDebitIndicator: 'X' }, 'CZK') === null)
+  ok('storno (reversalIndicator) má vlastní klíč — nezahodí se jako duplicita původní platby', prevestTransakci({ ...zakl, reversalIndicator: true }, 'CZK')?.externiId === 'SGWD000000653288:storno')
   ok('částka přes 21 mil. Kč (mimo sloupec integer) se vynechá, nezasekne zápis okna', prevestTransakci({ ...zakl, amount: { value: 25_000_000, currency: 'CZK' } }, 'CZK') === null
     && prevestTransakci({ ...zakl, amount: { value: 21_474_836.47, currency: 'CZK' } }, 'CZK')?.castkaHaleru === 2_147_483_647)
 }
@@ -231,52 +232,70 @@ console.log('\n== Okno stahování ==')
 {
   const ted = new Date('2026-10-11T10:00:00Z')
   const prvni = oknoStahovani(null, '2026-03-01', ted)
-  ok('první stažení od historie_od, okno nejvýš 31 dní', prvni.od.toISOString() === '2026-03-01T00:00:00.000Z' && prvni.do.toISOString() === '2026-04-01T00:00:00.000Z' && prvni.posledni === false)
+  ok('první stažení od historie_od do teď', prvni.od.toISOString() === '2026-03-01T00:00:00.000Z' && prvni.do === ted)
   ok('bez historie_od od 1. 1. letošního roku', oknoStahovani(null, undefined, ted).od.toISOString() === '2026-01-01T00:00:00.000Z')
   const dalsi = oknoStahovani('2026-10-10T06:00:00Z', '2026-01-01', ted)
-  ok('další stažení od uloženého postupu minus 7 dní až do teď', dalsi.od.toISOString() === '2026-10-03T06:00:00.000Z' && dalsi.do === ted && dalsi.posledni === true)
+  ok('další stažení od uloženého postupu minus 7 dní', dalsi.od.toISOString() === '2026-10-03T06:00:00.000Z' && dalsi.do === ted)
   const stara = oknoStahovani(null, '2023-01-01', ted)
   ok('nikdy víc než 2 roky zpátky (KB starší vrací chybou)', ted.getTime() - stara.od.getTime() < 2 * 365 * 86_400_000)
 }
 
-console.log('\n== Stahování po měsících ==')
+console.log('\n== Stahování ==')
 {
   const ted = new Date('2026-10-11T10:00:00Z')
-  const t = (id) => ({ status: 'BOOK', bookingDate: '2026-09-01', creditDebitIndicator: 'CREDIT', amount: { value: 1, currency: 'CZK' }, references: { accountServicer: id } })
+  const den = (i) => new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10)
+  const t = (id, datum = '2026-09-01') => ({ status: 'BOOK', bookingDate: datum, creditDebitIndicator: 'CREDIT', amount: { value: 1, currency: 'CZK' }, references: { accountServicer: id } })
   const stranka = (obsah, last = true) => ({ status: 200, telo: { content: obsah, last } })
+  const zadani = (historieOd = '2026-01-01') => ({ accessToken: 'AT', accountId: 'Q1', menaUctu: 'CZK', stazenoDo: null, historieOd, ted })
 
-  // Historie od 1. 8.: tři okna (1. 8.–1. 9., 25. 8.–25. 9., 18. 9.–teď), každé se hned uloží.
-  const s = sit([stranka([t('A')]), stranka([t('B')]), stranka([t('C')])])
+  // Celá historie jedním dotazem po stránkách — žádný druhý dotaz hned po prvním (KB: nezměněná data 1× za 61 min).
+  const s = sit([stranka([t('A')], false), stranka([t('B')], false), stranka([t('C')])])
   const ulozeno = []
-  const v = await stahnoutPohyby(KONF, { accessToken: 'AT', accountId: 'Q1', menaUctu: 'CZK', stazenoDo: null, historieOd: '2026-08-01', ted },
-    async (radky, doKdy) => { ulozeno.push([radky.map((r) => r.externiId).join(), doKdy.toISOString()]); return null }, s.fetchFn)
-  const oknaOd = s.pozadavky.map((p) => new URL(p.url).searchParams.get('fromDateTime'))
-  ok('dlouhá historie se stahuje po měsících, každé okno navazuje s překryvem 7 dní',
-    oknaOd.join() === '2026-08-01T00:00:00.000Z,2026-08-25T00:00:00.000Z,2026-09-18T00:00:00.000Z')
-  ok('každé okno se uloží hned i s postupem (stazeno_do)',
-    JSON.stringify(ulozeno) === JSON.stringify([['A', '2026-09-01T00:00:00.000Z'], ['B', '2026-09-25T00:00:00.000Z'], ['C', '2026-10-11T10:00:00.000Z']]))
-  ok('po dohnání do teď: ok, dohnano', v.stav === 'ok' && v.dohnano === true && v.stranek === 3)
+  const v = await stahnoutPohyby(KONF, zadani('2026-08-01'), async (radky, doKdy) => { ulozeno.push([radky.map((r) => r.externiId).join(), doKdy?.toISOString() ?? null]); return null }, s.fetchFn)
+  const od = s.pozadavky.map((q) => new URL(q.url).searchParams.get('fromDateTime'))
+  ok('jedno stažení po stránkách: všechny stránky téhož dotazu, žádný další dotaz (limit 61 min)',
+    s.pozadavky.length === 3 && od.every((x) => x === '2026-08-01T00:00:00.000Z') && s.pozadavky.map((q) => new URL(q.url).searchParams.get('page')).join() === '0,1,2')
+  ok('doběhlé stažení se uloží celé s postupem až do teď', JSON.stringify(ulozeno) === JSON.stringify([['A,B,C', '2026-10-11T10:00:00.000Z']]) && v.stav === 'ok' && v.dohnano === true)
 
-  // Strop stránek na běh: první okno má 50 stránek → konec, zbytek příště.
-  const plne = Array.from({ length: 50 }, (_, i) => stranka([t(`P${i}`)], i === 49))
-  const s2 = sit(plne)
-  let ulozeni2 = 0
-  const v2 = await stahnoutPohyby(KONF, { accessToken: 'AT', accountId: 'Q1', menaUctu: 'CZK', stazenoDo: null, historieOd: '2026-01-01', ted },
-    async () => { ulozeni2++; return null }, s2.fetchFn)
-  ok('po 50 stránkách běh skončí a nechá zbytek na příště (dohnano: false)', v2.stav === 'ok' && v2.dohnano === false && ulozeni2 === 1 && s2.pozadavky.length === 50)
+  // Strop 50 stránek, KB řadí od nejstarších → uloží se, postup na začátek dne posledního pohybu.
+  const s2 = sit(Array.from({ length: 50 }, (_, i) => stranka([t(`P${i}`, den(i))], false)))
+  const ulozeno2 = []
+  const v2 = await stahnoutPohyby(KONF, zadani(), async (radky, doKdy) => { ulozeno2.push([radky.length, doKdy?.toISOString() ?? null]); return null }, s2.fetchFn)
+  ok('po 50 stránkách: co přišlo, se uloží, postup na začátek dne posledního pohybu, zbytek příště',
+    v2.stav === 'ok' && v2.dohnano === false && s2.pozadavky.length === 50 && JSON.stringify(ulozeno2) === JSON.stringify([[50, '2026-02-19T00:00:00.000Z']]))
 
-  // Chyba zápisu okna zastaví stahování — postup se neposune.
-  const s3 = sit([stranka([t('X')]), stranka([t('Y')])])
-  const v3 = await stahnoutPohyby(KONF, { accessToken: 'AT', accountId: 'Q1', menaUctu: 'CZK', stazenoDo: null, historieOd: '2026-08-01', ted },
-    async () => ({ stav: 'chyba', druh: 'jina', duvod: 'zápis selhal' }), s3.fetchFn)
-  ok('chyba zápisu okna → chyba, další okno se nestahuje', v3.stav === 'chyba' && v3.duvod === 'zápis selhal' && s3.pozadavky.length === 1)
+  // Neseřazené pohyby → postup se neposune (jinak by se tiše přeskočilo, co ještě nepřišlo).
+  // Data rostou, jen uprostřed jeden starší pohyb — konec by na postup stačil, zastavit to musí jen řazení.
+  const s3 = sit(Array.from({ length: 50 }, (_, i) => stranka([t(`N${i}`, i === 25 ? den(3) : den(i))], false)))
+  const ulozeno3 = []
+  const v3 = await stahnoutPohyby(KONF, zadani(), async (radky, doKdy) => { ulozeno3.push(doKdy); return null }, s3.fetchFn)
+  ok('neseřazené pohyby od KB: uloží se bez posunu postupu a připojení čeká na člověka (ne dokola za placená stažení)',
+    v3.stav === 'chyba' && v3.druh === 'zasah' && ulozeno3.length === 1 && ulozeno3[0] === null)
 
-  // Časový strop: každé okno „trvá" 20 s → po druhém (40 s) se další nezačne.
-  const s4 = sit([stranka([t('A')]), stranka([t('B')]), stranka([t('C')])])
+  // Víc pohybů za týden, než se vejde do 50 stránek → postup by se nepohnul → zásah, ne smyčka.
+  const s4 = sit(Array.from({ length: 50 }, (_, i) => stranka([t(`H${i}`, den(Math.floor(i / 10)))], false)))
+  const ulozeno4 = []
+  const v4 = await stahnoutPohyby(KONF, zadani(), async (radky, doKdy) => { ulozeno4.push(doKdy); return null }, s4.fetchFn)
+  ok('za týden víc pohybů než 50 stránek: bez posunu, zásah', v4.stav === 'chyba' && v4.druh === 'zasah' && v4.duvod.includes('týden') && ulozeno4[0] === null)
+
+  // Časový strop mezi stránkami: každá „trvá" 10 s → po 25 s další nezačne.
+  const s5 = sit(Array.from({ length: 10 }, (_, i) => stranka([t(`C${i}`, den(20 * i))], false)))
   let cas = 0
-  const v4 = await stahnoutPohyby(KONF, { accessToken: 'AT', accountId: 'Q1', menaUctu: 'CZK', stazenoDo: null, historieOd: '2026-08-01', ted },
-    async () => { cas += 20_000; return null }, s4.fetchFn, () => cas)
-  ok('po 25 s běh další okno nezačne (dohnano: false) — akce i návrat z KB mají strop 60 s', v4.stav === 'ok' && v4.dohnano === false && s4.pozadavky.length === 2)
+  const pomale = async (url, init) => { cas += 10_000; return s5.fetchFn(url, init) }
+  const ulozeno5 = []
+  const v5 = await stahnoutPohyby(KONF, zadani(), async (radky, doKdy) => { ulozeno5.push(doKdy?.toISOString() ?? null); return null }, pomale, () => cas)
+  ok('časový strop: po 25 s další stránka nezačne, uloženo s postupem (akce i návrat z KB mají strop 60 s)',
+    v5.stav === 'ok' && v5.dohnano === false && s5.pozadavky.length === 3 && ulozeno5[0] === '2026-02-10T00:00:00.000Z')
+
+  // Chyba zápisu → chyba (postup se neposune).
+  const s6 = sit([stranka([t('X')])])
+  const v6 = await stahnoutPohyby(KONF, zadani('2026-08-01'), async () => ({ stav: 'chyba', druh: 'jina', duvod: 'zápis selhal' }), s6.fetchFn)
+  ok('chyba zápisu → chyba', v6.stav === 'chyba' && v6.duvod === 'zápis selhal')
+
+  // Týž identifikátor dvakrát v jednom stažení → jednou (dvojice by shodila zápis celé dávky).
+  const s7 = sit([stranka([t('D'), t('D'), t('E')])])
+  const v7 = await nactiTransakce(KONF, { accessToken: 'AT', accountId: 'Q1', menaUctu: 'CZK', od: new Date('2026-08-01T00:00:00Z'), do: ted }, s7.fetchFn)
+  ok('týž identifikátor dvakrát v jednom stažení se zapíše jednou, druhý do vynechaných', v7.stav === 'ok' && v7.radky.map((r) => r.externiId).join() === 'D,E' && v7.vynechano === 1)
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')

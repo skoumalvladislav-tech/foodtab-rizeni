@@ -31,8 +31,9 @@ export async function GET(request: NextRequest) {
   const stav = precistStavKb(searchParams.get('state'))
   if (!stav || stav.f !== 'souhlas') return NextResponse.redirect(new URL('/', request.url))
 
+  // Prázdný rozsah by z adresy udělal `//finance/…` (jiný server) — pak raději na úvod.
   const cil = (parametry: Record<string, string>) =>
-    NextResponse.redirect(new URL(`/${stav.r}/finance/integrace/banka?${new URLSearchParams(parametry)}`, request.url))
+    NextResponse.redirect(new URL(stav.r ? `/${stav.r}/finance/integrace/banka?${new URLSearchParams(parametry)}` : '/', request.url))
 
   const konf = konfiguraceKb()
   if (!konf) return cil({ chyba: 'Napojení na Komerční banku není na serveru nastavené.' })

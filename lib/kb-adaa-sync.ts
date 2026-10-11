@@ -20,8 +20,8 @@ import type { RadekImportu } from './finance-csv-import.ts'
  *
  * Okno stahování: od uloženého postupu (`externi_ucet.stazeno_do`)
  * minus 7 dní (dodatečně zaúčtované pohyby), při první synchronizaci od
- * `historie_od` (výchozí 1. 1. letošního roku), po měsících až do teď —
- * viz `stahnoutPohyby`. KB vrací nejvýš 2 roky zpátky.
+ * `historie_od` (výchozí 1. 1. letošního roku) do teď, jedním stažením
+ * po stránkách — viz `stahnoutPohyby`. KB vrací nejvýš 2 roky zpátky.
  */
 
 const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
@@ -83,14 +83,14 @@ export async function synchronizovatKbPripojeni(pripojeniId: string): Promise<Vy
   }
 
   /**
-   * Chyba KB: přístup → „vyžaduje pozornost" (úloha ho nebere, opraví
-   * člověk obnovou souhlasu); ostatní → jen důvod, příště znovu. Čas
+   * Chyba KB: přístup nebo zásah → „vyžaduje pozornost" (úloha ho nebere,
+   * opraví člověk); ostatní → jen důvod, příště znovu. Čas
    * pokusu se zapíše vždy — úloha pak další pokus počítá od něj
    * (`kbJeNaCase`), ne každé 4 h znovu za placená stažení.
    */
   const nahlasit = async (chyba: ChybaKb) => {
     const pokus = { posledni_chyba: chyba.duvod, posledni_test_kdy: new Date().toISOString(), posledni_test_ok: false }
-    await supabase.from('integrace_pripojeni').update(chyba.druh === 'pristup' ? { stav: 'vyzaduje_pozornost', ...pokus } : pokus).eq('id', pripojeniId)
+    await supabase.from('integrace_pripojeni').update(chyba.druh === 'pristup' || chyba.druh === 'zasah' ? { stav: 'vyzaduje_pozornost', ...pokus } : pokus).eq('id', pripojeniId)
     return dokoncit({ stav: 'chyba', duvod: chyba.duvod })
   }
 
@@ -112,8 +112,8 @@ export async function synchronizovatKbPripojeni(pripojeniId: string): Promise<Vy
   const menaUctu = ucet.mena ?? 'CZK'
   let pocetNovych = 0
 
-  /** Zapíše pohyby jednoho okna a posune `stazeno_do` — přerušený běh příště pokračuje odtud. */
-  const ulozitOkno = async (radky: RadekImportu[], stazenoDo: Date): Promise<ChybaKb | null> => {
+  /** Zapíše stažené pohyby a posune `stazeno_do` (`null` = bez posunu) — přerušený běh příště pokračuje odtud. */
+  const ulozitPohyby = async (radky: RadekImportu[], stazenoDo: Date | null): Promise<ChybaKb | null> => {
     if (radky.length > 0) {
       const { data: davka, error: chybaDavky } = await supabase
         .from('import_davky')
@@ -121,7 +121,7 @@ export async function synchronizovatKbPripojeni(pripojeniId: string): Promise<Vy
           tenant_id: pripojeni.tenant_id,
           typ: 'bankovni_agregator',
           soubor_nazev: `kb-adaa-sync-${new Date().toISOString().slice(0, 10)}`,
-          soubor_hash: `kb-adaa-${pripojeniId}-${stazenoDo.getTime()}-${Date.now()}`,
+          soubor_hash: `kb-adaa-${pripojeniId}-${Date.now()}`,
           pocet_radku: radky.length,
           stav: 'zpracovano',
         })
@@ -142,6 +142,8 @@ export async function synchronizovatKbPripojeni(pripojeniId: string): Promise<Vy
       if (chybaImportu) return { stav: 'chyba', druh: 'jina', duvod: `Pohyby se nepodařilo zapsat: ${chybaImportu.message}` }
       pocetNovych += (pocet as number | null) ?? 0
     }
+
+    if (!stazenoDo) return null
 
     // Postup se zapisuje do čerstvě přečteného `externi_ucet` (obnova
     // souhlasu nebo výběr účtu mohly mezitím změnit jiná pole). Když se
@@ -169,14 +171,14 @@ export async function synchronizovatKbPripojeni(pripojeniId: string): Promise<Vy
       historieOd: ucet.historie_od,
       ted: new Date(),
     },
-    ulozitOkno,
+    ulozitPohyby,
   )
   if (pohyby.stav === 'chyba') return nahlasit(pohyby)
 
   // Zůstatek je doplněk — pohyby jsou uložené; chyba se zapíše jako poznámka, nespolkne se.
   const poznamky: string[] = []
   if (!pohyby.dohnano) poznamky.push('Starší pohyby se ještě stahují — appka pokračuje při další synchronizaci.')
-  if (pohyby.vynechano > 0) poznamky.push(`${pohyby.vynechano} zaúčtovaných pohybů appka vynechala (chyběl identifikátor platby od banky, nebo částka přes 21 milionů Kč, kterou appka neuloží).`)
+  if (pohyby.vynechano > 0) poznamky.push(`${pohyby.vynechano} zaúčtovaných pohybů appka vynechala (chyběl identifikátor platby od banky, stejný identifikátor přišel dvakrát, nebo částka přes 21 milionů Kč, kterou appka neuloží).`)
   // KB účtuje /transactions i /balances (50 využití měsíčně zdarma). Zůstatek
   // stačí jednou za ~2 dny: když je poslední z tohoto připojení mladší
   // než 40 h, appka ho nestahuje — při denní synchronizaci tak vyjde

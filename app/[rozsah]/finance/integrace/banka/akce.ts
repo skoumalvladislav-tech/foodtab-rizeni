@@ -425,7 +425,7 @@ export async function zahajitPripojeniKb(formData: FormData): Promise<void> {
 
   const navratUri = `${await zakladniAdresa()}/api/integrace/kb/vratit`
   const pokus = randomUUID()
-  const zacatek: ExterniUcetKb = { prostredi: konf.prostredi, historie_od: historieOd, navrat_uri: navratUri, pokus }
+  const zacatek: ExterniUcetKb = { prostredi: konf.prostredi, historie_od: historieOd, navrat_uri: navratUri, pokus, pokus_kdy: new Date().toISOString(), rozsah }
 
   // Pokus o KB na tomtéž platebním účtu, kde registrace aplikace
   // nedoběhla (člověk se z KB nevrátil, nebo selhala), se použije

@@ -111,14 +111,16 @@ musí obnovit tentýž uživatel KB, který připojení zakládal.
 
 ## Kolik stažení spotřebuje první připojení
 
-Pohyby se stahují po měsících, každé stažení stránky (nejvýš 100 pohybů)
-je u KB jedno využití. Připojení s historií od 1. 1. tak napoprvé
-spotřebuje zhruba jedno využití na každý měsíc historie a další za každých
-100 pohybů navíc. U 9 měsíců a ~10 pohybů denně je to kolem 30 využití,
-jednorázově. Jeden běh synchronizace stáhne nejvýš 50 stránek, zbytek
-dotáhne další den (u připojení je poznámka „Starší pohyby se ještě
-stahují“). Kdo chce bezplatných 50 využití šetřit, zvolí při připojení
-kratší „Načíst pohyby od“.
+Pohyby se stahují jedním dotazem po stránkách. Každá stránka (nejvýš 100
+pohybů) je u KB jedno využití. Připojení s historií od 1. 1. tak napoprvé
+spotřebuje jedno využití na každých 100 pohybů. U 9 měsíců a ~10 pohybů
+denně je to kolem 28 využití, jednorázově. Jeden běh stáhne nejvýš 50
+stránek (a nejvýš 25 sekund), zbytek dotáhne další den (u připojení je
+poznámka „Starší pohyby se ještě stahují“). Kdo chce bezplatných 50
+využití šetřit, zvolí při připojení kratší „Načíst pohyby od“.
+
+Proč ne po měsících: KB dovoluje stáhnout nezměněná data jen jednou za
+61 minut. Druhý dotaz hned po prvním by narazil na limit.
 
 ## Text dotazu (k odeslání z firemního e-mailu)
 
