@@ -8,6 +8,8 @@ import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
 import { jeNakonfigurovano as enableBankingNakonfigurovano, nactiBanky } from '@/lib/integrace-enablebanking'
 import { jeNakonfigurovano as saltEdgeNakonfigurovano, nactiBankyCz, nactiUctySaltEdge } from '@/lib/integrace-saltedge'
+import { konfiguraceKb, type ExterniUcetKb } from '@/lib/kb-adaa'
+import { posunoutDen } from '@/lib/pokladna-cas'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
@@ -20,8 +22,12 @@ import {
   vybratUcetSaltEdge,
   upravitIntervalSynchronizace,
 } from './akce'
+import { DetailKb, KartaKb } from './kb'
 
 export const dynamic = 'force-dynamic'
+// Akce stránky (výběr účtu KB, „Synchronizovat teď") stahují historii
+// po měsících — stejný strop jako návrat z KB (`api/integrace/kb/vratit`).
+export const maxDuration = 60
 
 /**
  * Napojení přes Salt Edge v tomhle souboru stojí na partnerském API v1
@@ -92,7 +98,7 @@ type Pripojeni = {
   posledni_chyba: string | null
   platebni_ucet_id: string | null
   interval_synchronizace_minut: number | null
-  externi_ucet: { connection_id?: string; account_id?: string } | null
+  externi_ucet: (ExterniUcetKb & { connection_id?: string }) | null
 }
 type Ucet = { id: string; nazev: string }
 type Zustatek = { platebni_ucet_id: string; typ: string; castka_haleru: number; platny_k: string }
@@ -102,10 +108,13 @@ export default async function FinanceIntegraceBanka({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; synchronizovano?: string; enablebanking?: string }>
+  searchParams: Promise<{ chyba?: string; synchronizovano?: string; enablebanking?: string; kb?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, synchronizovano, enablebanking } = await searchParams
+  const { chyba, synchronizovano, enablebanking, kb } = await searchParams
+  const konfKb = konfiguraceKb()
+  const dnesIso = new Date().toISOString().slice(0, 10)
+  const zaMesicIso = posunoutDen(dnesIso, 30)
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -217,6 +226,7 @@ export default async function FinanceIntegraceBanka({
             Synchronizace hotová — {synchronizovano} {synchronizovano === '1' ? 'nový pohyb' : 'nových pohybů'}.
           </p>
         ) : null}
+        {kb ? <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>{kb}</p> : null}
         {enablebanking === 'pripojeno' ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--dobre)' }}>Účet přes Enable Banking je připojený.</p>
         ) : null}
@@ -255,6 +265,17 @@ export default async function FinanceIntegraceBanka({
                       {' '}· Vlastní odstup: {p.interval_synchronizace_minut ? `${p.interval_synchronizace_minut} min` : 'žádný (jen podle naplánované úlohy)'}
                     </span>
                   </div>
+                  {p.poskytovatel === 'kb_adaa' ? (
+                    <DetailKb
+                      rozsah={rozsah}
+                      pripojeni={p}
+                      nazevPlatebnihoUctu={nazevUctu(p.platebni_ucet_id)}
+                      smiPsat={smiPsat}
+                      prostrediServeru={konfKb?.prostredi ?? null}
+                      dnesIso={dnesIso}
+                      zaMesicIso={zaMesicIso}
+                    />
+                  ) : null}
                   {smiPsat && ucetVyberNaPripojeni.has(p.id) ? (
                     <form action={vybratUcetSaltEdge} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                       <input type="hidden" name="rozsah" value={rozsah} />
@@ -347,6 +368,8 @@ export default async function FinanceIntegraceBanka({
             ) : null}
           </form>
         ) : null}
+
+        <KartaKb rozsah={rozsah} prostredi={konfKb?.prostredi ?? null} smiPsat={smiPsat} volneUcty={volneUcty} dnesIso={dnesIso} />
 
         <div style={{ ...karta, display: 'grid', gap: '10px' }}>
           <h2 style={{ margin: 0, fontSize: '15px' }}>Ostatní banky — Salt Edge (pozastaveno)</h2>

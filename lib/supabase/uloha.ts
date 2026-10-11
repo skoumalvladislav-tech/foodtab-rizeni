@@ -51,6 +51,11 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
  *     první stažení po připojení) a `pokladna_odebrat_prodeje` po změně
  *     přiřazení provozovny — až po `integrace.manage` a dohledání
  *     připojení uživatelským klientem s `tenant_id` firmy.
+ *   * `lib/kb-adaa-sync.ts` z `app/[rozsah]/finance/integrace/banka/akce.ts`
+ *     („Synchronizovat teď", výběr účtu) a `app/api/integrace/kb/vratit`
+ *     (první stažení po souhlasu v KB) — až po dohledání připojení
+ *     uživatelským klientem (RLS) a uložení tajemství přes RPC, které
+ *     samo ověří `integrace.manage`.
  *   * `app/[rozsah]/finance/platby/import/akce.ts` (`potvrditImport` →
  *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
  *     importu výpisu, jen když importující má `finance.manage`
