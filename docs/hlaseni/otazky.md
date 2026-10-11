@@ -1117,7 +1117,7 @@ klienta, ne dřív.
 > přes API… univerzální formu připojení — je spoustu POS… okénko, kam
 > se vloží API token a POS se připojí… a provozovna šla přiřadit ke
 > konkrétnímu profilu zde v appce." Postaveno 11. 10. ve větvi
-> `pokladna-dotykacka-api`: klient Dotykačky podle veřejné dokumentace
+> `pokladna-dotykacka-api` (sloučeno a nasazeno 11. 10., `429f52c`, db push ověřen): klient Dotykačky podle veřejné dokumentace
 > (autentizace refresh token + Cloud ID je zdokumentovaná, nic se
 > nedomýšlelo), univerzální formulář, přiřazení provozoven k pobočkám,
 > příjmové API pro ostatní pokladny. Viz `docs/hlaseni/stav-2026-10-11.md`.
