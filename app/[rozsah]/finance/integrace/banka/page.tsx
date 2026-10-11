@@ -24,6 +24,18 @@ import {
 export const dynamic = 'force-dynamic'
 
 /**
+ * Napojení přes Salt Edge v tomhle souboru stojí na partnerském API v1
+ * (`lib/integrace-saltedge.ts`), které Salt Edge 16. 7. 2024 ohlásil
+ * jako ukončené (docs.saltedge.com/v6/changelog). Účet Foodtabu u Salt
+ * Edge je navíc klientský „Open Banking Gateway" (API v6) — určený
+ * pro firmy s vlastní licencí. Appka proto připojení přes Salt Edge
+ * nenabízí, dokud nebude přepis na v6 a písemné potvrzení licence.
+ * Rozhodnutí Šéfíka 11. 10. 2026: Komerční banka přes přímé napojení
+ * KB (ADAA). Průzkum: docs/hlaseni/stav-2026-10-11-banka.md.
+ */
+const SALTEDGE_V1_UKONCENO = true
+
+/**
  * Finance — Integrace — Banka.
  *
  * Napojení bankovního účtu: Fio (plně funkční, token appka ověří živě
@@ -167,7 +179,7 @@ export default async function FinanceIntegraceBanka({
   */
   let bankySaltEdge: { kod: string; nazev: string; firemniUcty: boolean; osobniUcty: boolean }[] = []
   let chybaBankSaltEdge: string | null = null
-  if (saltEdgeNakonfigurovano()) {
+  if (!SALTEDGE_V1_UKONCENO && saltEdgeNakonfigurovano()) {
     const vysledekBank = await nactiBankyCz()
     if (vysledekBank.stav === 'ok') bankySaltEdge = vysledekBank.banky.filter((b) => b.firemniUcty)
     else chybaBankSaltEdge = vysledekBank.duvod
@@ -181,7 +193,7 @@ export default async function FinanceIntegraceBanka({
   */
   const ucetVyberNaPripojeni = new Map<string, { id: string; popis: string }[]>()
   for (const p of pripojeni) {
-    if (p.poskytovatel !== 'saltedge' || p.stav !== 'pripojeno' || p.externi_ucet?.account_id || !p.externi_ucet?.connection_id) continue
+    if (SALTEDGE_V1_UKONCENO || p.poskytovatel !== 'saltedge' || p.stav !== 'pripojeno' || p.externi_ucet?.account_id || !p.externi_ucet?.connection_id) continue
     const vysledek = await nactiUctySaltEdge(p.externi_ucet.connection_id)
     if (vysledek.stav === 'ok') {
       ucetVyberNaPripojeni.set(p.id, vysledek.ucty.map((u) => ({ id: u.providerAccountId, popis: `${u.cisloUctu ?? u.providerAccountId} (${u.mena})` })))
@@ -192,7 +204,7 @@ export default async function FinanceIntegraceBanka({
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="Fio banka: token ověřený živě před uložením. Ostatní banky (KB/ČSOB/ČS/Raiffeisenbank) přes Enable Banking — appka přesměruje na souhlas banky."
+        popis="Fio banka: token ověřený živě před uložením. Komerční banka: připravujeme přímé napojení přes KB (ADAA). Do té doby výpisy přes import v Platbách."
         vpravo={<Link href={`/${rozsah}/finance/integrace`} className="ft-tl">← Zpět na integrace</Link>}
       >
         Banka
@@ -337,15 +349,15 @@ export default async function FinanceIntegraceBanka({
         ) : null}
 
         <div style={{ ...karta, display: 'grid', gap: '10px' }}>
-          <h2 style={{ margin: 0, fontSize: '15px' }}>Ostatní banky — Salt Edge</h2>
+          <h2 style={{ margin: 0, fontSize: '15px' }}>Ostatní banky — Salt Edge (pozastaveno)</h2>
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-            Hlavní bankovní agregátor appky (rozhodnutí 7.10.2026). Appka sama není licencovaný
-            poskytovatel platebních informačních služeb — jede přes partnerský program Salt Edge.
-            Appka nabízí jen banky, které náš partnerský účet doopravdy potvrdil, a jen pro firemní
-            účty — ne podle toho, co appka předpokládá.
+            Salt Edge ukončil partnerské rozhraní, na kterém bylo tohle napojení postavené. Náš účet
+            u Salt Edge je navíc určený pro firmy s vlastní bankovní licencí. Než Salt Edge písemně
+            potvrdí, že přes něj smíme připojit skutečnou banku, appka připojení nenabízí.
+            Komerční banku připojíme napřímo přes KB (služba „Přímý přístup k účtu“).
           </p>
 
-          {saltEdgeNakonfigurovano() ? (
+          {SALTEDGE_V1_UKONCENO ? null : saltEdgeNakonfigurovano() ? (
             smiPsat ? (
               <form action={zahajitPripojeniSaltEdgeAkce} style={{ display: 'grid', gap: '12px' }}>
                 <input type="hidden" name="rozsah" value={rozsah} />

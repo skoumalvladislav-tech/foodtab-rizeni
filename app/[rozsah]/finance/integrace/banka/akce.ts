@@ -9,6 +9,8 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { zasifrovat } from '@/lib/integrace-klice'
 import { overitPripojeniFio } from '@/lib/integrace-fio'
 import { synchronizovatFioPripojeni } from '@/lib/integrace-fio-sync'
+import { synchronizovatSaltEdgePripojeni } from '@/lib/integrace-saltedge-sync'
+import { synchronizovatPodlePoskytovatele } from '@/lib/banka-synchronizace'
 import { enableBankingProvider } from '@/lib/integrace-enablebanking'
 import { zahajitPripojeniSaltEdge, odvolatSouhlasSaltEdge } from '@/lib/integrace-saltedge'
 
@@ -287,15 +289,20 @@ export async function synchronizovatTeto(formData: FormData): Promise<void> {
 
   const { data: pripojeni } = await supabase
     .from('integrace_pripojeni')
-    .select('id')
+    .select('id, poskytovatel')
     .eq('id', pripojeniId)
     .eq('tenant_id', tenantId)
+    .eq('oblast', 'banka')
     .maybeSingle()
   if (!pripojeni) {
     redirect(`/${rozsah}/finance/integrace/banka?chyba=${encodeURIComponent('Připojení nepatří vaší firmě nebo neexistuje.')}`)
   }
 
-  const vysledek = await synchronizovatFioPripojeni(pripojeniId)
+  // Podle poskytovatele, ne vždy Fio — viz lib/banka-synchronizace.ts (nález 11. 10. 2026).
+  const vysledek = await synchronizovatPodlePoskytovatele(
+    { id: pripojeni.id as string, poskytovatel: pripojeni.poskytovatel as string },
+    { fio: synchronizovatFioPripojeni, saltedge: synchronizovatSaltEdgePripojeni },
+  )
 
   const parametr = vysledek.stav === 'ok'
     ? `synchronizovano=${vysledek.pocetNovychRadku}`

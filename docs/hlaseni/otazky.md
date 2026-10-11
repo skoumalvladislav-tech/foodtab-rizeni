@@ -1152,6 +1152,14 @@ přístupu dá přesně pět věcí — `docs/hlaseni/stav-2026-10-07.md`, oddí
 webhook URL k zaregistrování, aktuální veřejný klíč pro podpis,
 potvrzení pokrytí firemních účtů u konkrétních bank).
 
+> **ROZHODNUTÍ ŠÉFÍKA (11. 10. 2026):** Komerční banka **napřímo přes
+> KB (ADAA)**, Salt Edge pozastavený. Důvody: partnerské API v1, na
+> kterém je napojení postavené, Salt Edge ukončil. Účet, který firma
+> u Salt Edge má, je klientský Open Banking Gateway (API v6) pro firmy
+> s vlastní licencí. Viz `docs/hlaseni/stav-2026-10-11-banka.md`.
+> K Salt Edge se appka vrátí, jen když písemně potvrdí, že smíme bez
+> licence připojit skutečnou banku. Pak je nutný přepis na API v6.
+
 ---
 
 ## 45. Přestěhovat faktury z odděleného projektu do appky?
