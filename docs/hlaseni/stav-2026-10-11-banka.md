@@ -66,7 +66,7 @@ vysvětlení, proč je pozastavený.
 rozbití, obě spadla na své kontrole. Synchronizace Salt Edge testy nemá
 (je `server-only`), opravy v ní jsou ověřené jen typy a čtením.
 
-## Komerční banka napřímo (ADAA) — co je hotové (větev `banka-kb-adaa`)
+## Komerční banka napřímo (ADAA) — co je hotové (PR #129, sloučený 11. 10.)
 
 Napojení je napsané celé, **ale proti skutečné KB ještě neproběhlo ani
 jednou** — chybí registrace na portálu KB a klíče (viz „Co čeká na
@@ -217,7 +217,7 @@ Podrobně s příkazy v `docs/kb-adaa-navod.md`:
 5. Pro ostrý provoz **kvalifikovaný certifikát pro elektronickou pečeť**
    (I.CA nebo PostSignum, s názvem firmy a IČO, kolem 858 Kč ročně).
 6. Poslat dotaz na **api@kb.cz** (text je v návodu, 6 otázek).
-7. Sloučit PR s KB, až ho projdete (db push není potřeba).
+7. ~~Sloučit PR s KB~~ — sloučeno na váš pokyn 11. 10. (PR #129, `55ffbeb`).
 8. Salt Edge: zatím nic nezakládat. Volitelně se jich zeptat, jestli
    klientský účet bez licence smí připojit KB pod jejich licencí.
 
@@ -236,7 +236,12 @@ Podrobně s příkazy v `docs/kb-adaa-navod.md`:
 - Dokumentace Salt Edge v6 si sama odporuje, jestli stav Test pustí
   skutečné banky (Statuses ano, Quick Start ne).
 
-## Nenasazoval jsem
+## Co jsem nasadil a co ne
 
-Nic. Žádný merge PR s KB, žádný db push, žádné proměnné ve Vercelu,
-v Salt Edge ani na portálu KB jsem nic nezakládal.
+> **POKYN ŠÉFÍKA (11. 10.): „sluč 129“.** PR #129 sloučen jako `55ffbeb`,
+> Vercel nasadil do produkce (stav nasazení „success“). Ověřeno zvenku: obě
+> nové návratové adresy KB bez parametrů přesměrují na úvod, jak mají.
+
+Bez proměnných `KB_ADAA_*` karta Komerční banky v appce jen vysvětluje,
+co chybí, a nic nespouští. Žádný db push (není potřeba), žádné proměnné
+ve Vercelu, v Salt Edge ani na portálu KB jsem nic nezakládal.
