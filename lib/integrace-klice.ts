@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 
 /**
  * Finance: šifrování přístupových údajů k poskytovatelům (banka,
@@ -101,4 +101,20 @@ export function zaslepit(hodnota: string): string {
   if (!hodnota) return ''
   if (hodnota.length <= 4) return '…'
   return `…${hodnota.slice(-4)}`
+}
+
+/**
+ * Podpis krátkého textu (např. `state` při přihlášení do pokladny) —
+ * aby se po návratu od poskytovatele dalo poznat, že adresu appka
+ * opravdu vydala a nikdo si ji nevymyslel. Stejný klíč jako šifra,
+ * ale s vlastní předponou, takže podpis nejde zaměnit s ničím jiným.
+ */
+export function podepsatText(text: string): string {
+  return createHmac('sha256', klic()).update(`podpis-textu:v1:${text}`, 'utf8').digest('base64url')
+}
+
+export function podpisSedi(text: string, podpis: string): boolean {
+  const ocekavany = Buffer.from(podepsatText(text), 'utf8')
+  const prislo = Buffer.from(podpis, 'utf8')
+  return ocekavany.length === prislo.length && timingSafeEqual(ocekavany, prislo)
 }

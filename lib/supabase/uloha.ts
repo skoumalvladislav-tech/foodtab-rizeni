@@ -42,6 +42,15 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
  *   * `app/[rozsah]/finance/faktury/akce.ts` (`vratitNeuhrazenou`) — jen
  *     součet párování JEDNÉ faktury vlastní firmy, po `faktury.manage`
  *     (uživatelský klient by bez práva na Platby viděl nulu).
+ *   * `app/api/pokladna/prodeje` — příjmové API pro pokladny: klíč
+ *     nahrazuje přihlášení, určuje připojení a tím firmu i pobočku;
+ *     z těla se bere jen obsah prodeje (zápis přes
+ *     `pokladna_nahradit_prodeje`, která pobočku hlídá znovu).
+ *   * `lib/pokladna-sync.ts` z `app/[rozsah]/finance/integrace/pokladna/akce.ts`
+ *     a `app/api/integrace/dotykacka/vratit` („Synchronizovat teď",
+ *     první stažení po připojení) a `pokladna_odebrat_prodeje` po změně
+ *     přiřazení provozovny — až po `integrace.manage` a dohledání
+ *     připojení uživatelským klientem s `tenant_id` firmy.
  *   * `app/[rozsah]/finance/platby/import/akce.ts` (`potvrditImport` →
  *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
  *     importu výpisu, jen když importující má `finance.manage`

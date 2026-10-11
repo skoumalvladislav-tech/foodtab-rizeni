@@ -1,0 +1,65 @@
+name: Pokladna — synchronizace
+
+# Naplánovaná úloha: stažení denních prodejů z napojených pokladen
+# (Dotykačka a další, kterých se appka ptá sama). Stejný vzor jako
+# banka-synchronizace.yml — GitHub Actions, ne Vercel Cron (Hobby tarif
+# hodinový cron odmítá, viz zapomenuty-odchod.yml).
+#
+# Každou hodinu: dnešek a pár dní zpátky se přepisují aktuálními čísly
+# (storna přicházejí dodatečně), zbytek času jde na dohánění historie.
+# Pokladny přes příjmové API Foodtabu (/api/pokladna/prodeje) tahle
+# úloha nevolá — ty posílají data samy.
+
+on:
+  schedule:
+    - cron: '40 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: pokladna-synchronizace
+  cancel-in-progress: false
+
+jobs:
+  synchronizovat:
+    name: Synchronizovat pokladny
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci."
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu."
+            exit 1
+          fi
+
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 120 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/pokladna-synchronizace")
+
+          # Jen souhrnná čísla — repozitář je veřejný, log vidí kdokoli. Důvod
+          # chyby u konkrétní pokladny je v appce (Integrace → Pokladní systémy).
+          SOUHRN=$(jq -c '{pokladen, zpracovano, ok, chyby, preskoceno}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+          echo "HTTP ${KOD} ${SOUHRN}"
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          echo "${SOUHRN}" >> "$GITHUB_STEP_SUMMARY" || true
