@@ -84,7 +84,11 @@ export async function synchronizovatSaltEdgePripojeni(integracePripojeniId: stri
   do {
     const vysledekStranky = await nactiTransakceSaltEdge(externiUcet.connection_id, externiUcet.account_id, odId)
     if (vysledekStranky.stav === 'chyba') {
-      await supabase.from('integrace_pripojeni').update({ stav: 'vyzaduje_pozornost', posledni_chyba: vysledekStranky.duvod }).eq('id', integracePripojeniId)
+      // Stav se NEMĚNÍ, jen se zapíše důvod. Dřív se připojení přepnulo na
+      // „vyzaduje_pozornost" — a protože výběr pro úlohu bere jen
+      // „pripojeno", po jediné přechodné chybě API se už nikdy znovu
+      // nesynchronizovalo (nález 11. 10. 2026). Další běh to zkusí sám.
+      await supabase.from('integrace_pripojeni').update({ posledni_chyba: vysledekStranky.duvod }).eq('id', integracePripojeniId)
       return dokoncit({ stav: 'chyba', duvod: vysledekStranky.duvod })
     }
 
@@ -122,11 +126,15 @@ export async function synchronizovatSaltEdgePripojeni(integracePripojeniId: stri
     odId = vysledekStranky.dalsiId
   } while (odId)
 
+  // Zůstatek je doplněk — transakce jsou uložené beze změny a další běh
+  // ho dokreslí. Chyba se ale nespolkne potichu: supabase-js ji nevyhazuje,
+  // vrací ji v `error`, takže try/catch sám nic nezachytil.
+  let poznamkaZustatku: string | null = null
   try {
     const zustatky = await nactiZustatkySaltEdge(externiUcet.connection_id, externiUcet.account_id)
     if (zustatky.stav === 'ok') {
       for (const z of zustatky.zustatky) {
-        await supabase.from('bankovni_zustatky').insert({
+        const { error: chybaZustatku } = await supabase.from('bankovni_zustatky').insert({
           tenant_id: pripojeni.tenant_id,
           platebni_ucet_id: pripojeni.platebni_ucet_id,
           typ: z.typ,
@@ -136,17 +144,20 @@ export async function synchronizovatSaltEdgePripojeni(integracePripojeniId: stri
           zdroj: 'bankovni_agregator',
           integrace_pripojeni_id: integracePripojeniId,
         })
+        if (chybaZustatku) poznamkaZustatku = 'Pohyby jsou uložené, zůstatek se nepodařilo zapsat.'
       }
+    } else {
+      poznamkaZustatku = `Pohyby jsou uložené, zůstatek se nepodařilo načíst: ${zustatky.duvod}`
     }
   } catch {
-    // Zůstatek dokreslí další synchronizace — transakce jsou uložené beze změny.
+    poznamkaZustatku = 'Pohyby jsou uložené, zůstatek se nepodařilo načíst.'
   }
 
   await supabase.from('integrace_pripojeni').update({
     stav: 'pripojeno',
     posledni_sync_kdy: new Date().toISOString(),
     posledni_sync_pocet_radku: pocetCelkem,
-    posledni_chyba: null,
+    posledni_chyba: poznamkaZustatku,
   }).eq('id', integracePripojeniId)
 
   return dokoncit({ stav: 'ok', pocetNovychRadku: pocetCelkem })

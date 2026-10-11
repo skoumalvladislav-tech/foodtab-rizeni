@@ -43,10 +43,14 @@ export async function synchronizovatFioPripojeni(integracePripojeniId: string): 
     .from('integrace_pripojeni')
     .select('id, tenant_id, platebni_ucet_id')
     .eq('id', integracePripojeniId)
+    // Jen Fio: připojení jiné banky by tu nenašlo token a níž by se
+    // přepnulo na „chyba" (nález 11. 10. 2026, viz lib/banka-synchronizace.ts).
+    .eq('oblast', 'banka')
+    .eq('poskytovatel', 'fio')
     .is('odpojeno_kdy', null)
     .maybeSingle()
 
-  if (chybaPripojeni || !pripojeni) return { stav: 'chyba', duvod: 'Připojení neexistuje nebo je odpojené.' }
+  if (chybaPripojeni || !pripojeni) return { stav: 'chyba', duvod: 'Připojení k Fio neexistuje nebo je odpojené.' }
   if (!pripojeni.platebni_ucet_id) return { stav: 'chyba', duvod: 'Připojení ještě nemá vybraný platební účet.' }
 
   // Zámek: jeden "bezi" řádek na připojení. Zaseknutý (starý) běh appka
