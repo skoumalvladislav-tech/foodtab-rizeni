@@ -33,12 +33,18 @@ export default function LineChart({
   formatovatHodnotu,
   vyska = 240,
   prazdno,
+  nazev = 'Vývoj zůstatku v čase',
+  popisekPosledni = 'Dnes',
 }: {
   body: BodCaroveGrafu[]
   formatovatOsu: (haleru: number) => string
   formatovatHodnotu: (haleru: number) => string
   vyska?: number
   prazdno?: string
+  /** Popis grafu pro čtečky obrazovky (`aria-label`). */
+  nazev?: string
+  /** Popisek hodnoty pod grafem — poslední bod skutečnosti. */
+  popisekPosledni?: string
 }) {
   if (body.length < 2) {
     return <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>{prazdno ?? 'Nedostatek dat pro graf.'}</p>
@@ -50,7 +56,10 @@ export default function LineChart({
   let max = Math.max(...hodnoty, 0)
   if (min === max) { min -= 100; max += 100 }
   const odsazeni = (max - min) * 0.12
-  min -= odsazeni
+  // Bez záporných hodnot (tržby) osa začíná nulou — popisek „-5 tis. Kč"
+  // by naznačoval, že záporná tržba je možná. Zůstatek (může být pod nulou)
+  // si odsazení dolů nechává.
+  if (min < 0) min -= odsazeni
   max += odsazeni
 
   const sirkaPlochy = SIRKA - OKRAJ_LEVY - OKRAJ_PRAVY
@@ -103,7 +112,7 @@ export default function LineChart({
         ) : null}
       </div>
 
-      <svg viewBox={`0 0 ${SIRKA} ${VYSKA}`} preserveAspectRatio="none" style={{ width: '100%', height: `${vyska}px` }} role="img" aria-label="Vývoj zůstatku v čase">
+      <svg viewBox={`0 0 ${SIRKA} ${VYSKA}`} preserveAspectRatio="none" style={{ width: '100%', height: `${vyska}px` }} role="img" aria-label={nazev}>
         <defs>
           <linearGradient id={idPrechodu} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--mosaz)" stopOpacity="0.22" />
@@ -151,7 +160,7 @@ export default function LineChart({
       </svg>
 
       <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
-        Dnes: <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{formatovatHodnotu(hodnoty[hranice])}</strong>
+        {popisekPosledni}: <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{formatovatHodnotu(hodnoty[hranice])}</strong>
       </p>
     </div>
   )

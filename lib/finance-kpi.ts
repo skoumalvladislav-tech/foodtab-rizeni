@@ -3,12 +3,22 @@ import 'server-only'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee, type Context } from '@/lib/authz'
 import { nactiCashflowPrehled, nactiVysledovkuCelofirmy } from '@/lib/finance-prehled'
+import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
+import { trzbaObdobi } from '@/lib/pokladna-trzby'
 
 /**
  * KPI karty a graf nákladů pro Finance → Přehled.
  *
- * Tržby/cashflow stojí na `app.cashflow_prehled` (stejný zdroj jako
- * dnešní tabulka). Rozpad nákladů podle kategorie (suroviny/mzdy/
+ * Tržby jsou od 12. 10. 2026 TRŽBY Z POKLADEN (`pokladna_prehled_trzeb`),
+ * pokud firma má z pokladny v jednom ze dvou srovnávaných měsíců aspoň
+ * jeden den dat. Rozpad po dnech, provozovnách a platbách je na
+ * Finance → Tržby. Dřív to byly příjmy z plateb (`transakce`) — u firmy
+ * bez nahraných výpisů nula, i když z Dotykačky ležel v databázi celý
+ * rok prodejů. Firma bez pokladny má dál příjmy z plateb; karta říká,
+ * odkud číslo je (`zdrojTrzeb`). Oba srovnávané měsíce mají VŽDY stejný
+ * zdroj — jinak by trend srovnával pokladnu s bankou.
+ *
+ * Cashflow zůstává na `app.cashflow_prehled` (peníze, ne prodeje). Rozpad nákladů podle kategorie (suroviny/mzdy/
  * nájem/energie/...) stojí na `app.vysledovka` — to je PENĖŽNÍ pohled
  * (kdy se co zaplatilo).
  *
@@ -41,6 +51,8 @@ const NAZVY_KATEGORII: Record<string, string> = {
 export type RadekNakladu = { kategorie: string; nazev: string; castkaHaleru: number }
 
 export type FinanceKpi = {
+  /** Odkud jsou `trzbyHaleru` (a tím i jmenovatel nákladů práce). */
+  zdrojTrzeb: 'pokladna' | 'platby'
   trzbyHaleru: number
   trzbyHaleruPredchozi: number
   cashflowHaleru: number
@@ -104,7 +116,7 @@ export async function nactiFinanceKpi(
 ): Promise<FinanceKpi> {
   const smiVidetMzdy = canSee(ctx, 'payroll.read')
 
-  const [cfAktualni, cfPredchozi, vysAktualni, fbAktualni, fbPredchozi, mzdyAktualni, mzdyPredchozi] = await Promise.all([
+  const [cfAktualni, cfPredchozi, vysAktualni, fbAktualni, fbPredchozi, mzdyAktualni, mzdyPredchozi, pokladny] = await Promise.all([
     nactiCashflowPrehled(tenantId, obdobi.od, obdobi.doData),
     nactiCashflowPrehled(tenantId, predchoziObdobi.od, predchoziObdobi.doData),
     nactiVysledovkuCelofirmy(tenantId, branches, obdobi.od, obdobi.doData),
@@ -112,10 +124,18 @@ export async function nactiFinanceKpi(
     nactiFoodcostBeverage(tenantId, predchoziObdobi.od, predchoziObdobi.doData),
     smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, obdobi.od) : Promise.resolve(null),
     smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, predchoziObdobi.od) : Promise.resolve(null),
+    // Oba měsíce jedním dotazem, po měsících (obdobi = 1. den měsíce).
+    nactiPrehledTrzeb(tenantId, predchoziObdobi.od, obdobi.doData, 'mesic'),
   ])
 
-  const { prijmy: trzbyHaleru, vydaje: vydajeHaleru } = soucetPrijmyVydaje(cfAktualni)
-  const { prijmy: trzbyHaleruPredchozi, vydaje: vydajePredchozi } = soucetPrijmyVydaje(cfPredchozi)
+  const { prijmy: prijmyHaleru, vydaje: vydajeHaleru } = soucetPrijmyVydaje(cfAktualni)
+  const { prijmy: prijmyHaleruPredchozi, vydaje: vydajePredchozi } = soucetPrijmyVydaje(cfPredchozi)
+
+  const posAktualni = pokladny ? trzbaObdobi(pokladny, obdobi.od) : null
+  const posPredchozi = pokladny ? trzbaObdobi(pokladny, predchoziObdobi.od) : null
+  const zdrojTrzeb = posAktualni?.maData || posPredchozi?.maData ? 'pokladna' : 'platby'
+  const trzbyHaleru = zdrojTrzeb === 'pokladna' ? (posAktualni?.trzbaHaleru ?? 0) : prijmyHaleru
+  const trzbyHaleruPredchozi = zdrojTrzeb === 'pokladna' ? (posPredchozi?.trzbaHaleru ?? 0) : prijmyHaleruPredchozi
 
   const nakladyPodleKategorieMapa = new Map<string, number>()
   for (const r of vysAktualni) {
@@ -128,10 +148,11 @@ export async function nactiFinanceKpi(
     .sort((a, b) => b.castkaHaleru - a.castkaHaleru)
 
   return {
+    zdrojTrzeb,
     trzbyHaleru,
     trzbyHaleruPredchozi,
-    cashflowHaleru: trzbyHaleru - vydajeHaleru,
-    cashflowHaleruPredchozi: trzbyHaleruPredchozi - vydajePredchozi,
+    cashflowHaleru: prijmyHaleru - vydajeHaleru,
+    cashflowHaleruPredchozi: prijmyHaleruPredchozi - vydajePredchozi,
     foodcostProcento: procentoNakladu(fbAktualni, 'jidlo'),
     foodcostProcentoPredchozi: procentoNakladu(fbPredchozi, 'jidlo'),
     foodcostPokrytoProcento: procentoPokryti(fbAktualni, 'jidlo'),

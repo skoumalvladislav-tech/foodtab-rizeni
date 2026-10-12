@@ -153,7 +153,7 @@ export default async function FinancePrehled({
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="Skutečnost ze zapsaných plateb a výsledovky — appka počítá, nikdy neodhaduje."
+        popis="Tržby z pokladen, peníze ze zapsaných plateb a výsledovky — appka počítá, nikdy neodhaduje."
         vpravo={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <Link href={`${zaklad}?mesic=${sousedniMesic(mesic, -1)}`} className="ft-tl">← Dřívější</Link>
@@ -165,16 +165,19 @@ export default async function FinancePrehled({
         Přehled
       </Nadpis>
 
-      <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px' }}>
+      {/* containerType: karty `.ds-kpi-mrizka` se skládají podle šířky obsahu (@container) — bez kontejneru zůstaly na telefonu čtyři vedle sebe. */}
+      <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', containerType: 'inline-size' }}>
         {kpi ? (
           <div className="ds-kpi-mrizka">
             <FinanceKpiKarta
               ikona="mince" titulek="Tržby" hodnota={koruny(kpi.trzbyHaleru)}
+              zdroj={kpi.zdrojTrzeb === 'pokladna' ? 'z pokladen' : 'z přijatých plateb'}
               trend={trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true)}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />
             <FinanceKpiKarta
               ikona="blesk" titulek="Cashflow" hodnota={koruny(kpi.cashflowHaleru)}
+              zdroj="příjmy − výdaje z plateb"
               trend={trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />

@@ -10,6 +10,7 @@ import { oknoProvoznihoDne, planDnu, provozniDen, vychoziHistorieOd } from './po
 import { probehnoutBeh, type UkolBehu } from './pokladna-beh.ts'
 import { prirazeneProvozovny, type ExterniUcetPokladny, type ProvozovnaUctu } from './pokladna-prirazeni.ts'
 import type { ChybaPos, RelacePos } from './pos-provider-contract.ts'
+import { funkceNeexistuje } from './supabase/dotaz.ts'
 
 export type { ExterniUcetPokladny, ProvozovnaUctu }
 
@@ -34,6 +35,8 @@ export type { ExterniUcetPokladny, ProvozovnaUctu }
  *
  * Každý den jde do databáze přes `public.pokladna_nahradit_prodeje`,
  * která sama odmítne pobočku, kam tahle provozovna přiřazená není.
+ * Platby po způsobu (hotovost, karta…) jdou v témže volání (`p_platby`),
+ * pokud je pokladna poslala — prodeje a platby dne se přepíšou spolu.
  * Kurzory se na konci zapíšou přes `public.pokladna_ulozit_postup` —
  * ta sloučí JEN kurzory provozoven, jejichž přiřazení se mezitím
  * nezměnilo. Dřív běh zapsal celé `externi_ucet` ze stavu na svém
@@ -189,6 +192,7 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
   let zapsanoRadku = 0
   let vynechano = 0
   let prazdnych = 0
+  let databazeUmiPlatby = true
 
   // Provozovny, které pokladna teď zná — jen když nějaký den přijde prázdný
   // („nic nemám" smí znamenat zavřeno, ne „takovou provozovnu neznám").
@@ -218,13 +222,24 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
       // Zapíše se prázdný den — co bylo dřív stažené a pak celé stornované, zmizí.
     }
 
-    const { data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', {
+    const parametry = {
       p_pripojeni: p.id,
       p_branch: o.branch_id,
       p_dny: [den],
       p_radky: prodeje.radky.map((r) => ({ datum: den, produkt_nazev: r.produktNazev, mnozstvi: r.mnozstvi, trzba_haleru: r.trzbaHaleru })),
       p_provozovna: o.id,
-    })
+    }
+    // Platby jen když je pokladna poslala a databáze je umí uložit.
+    const platby = databazeUmiPlatby && prodeje.platby
+      ? prodeje.platby.map((z) => ({ datum: den, zpusob: z.zpusob, nazev: z.nazev, druh: z.druh, pocet: z.pocet, castka_haleru: z.castkaHaleru }))
+      : null
+    let { data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', platby ? { ...parametry, p_platby: platby } : parametry)
+    if (platby && funkceNeexistuje(error)) {
+      // Kód nasazený dřív než migrace 20261012200000: funkce ještě nezná
+      // `p_platby`. Den se zapíše bez plateb, zbytek běhu se už neptá.
+      databazeUmiPlatby = false
+      ;({ data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', parametry))
+    }
     if (error) return { stav: 'chyba', druh: 'jina', duvod: `Prodeje provozovny ${o.nazev} za ${den} se nepodařilo zapsat.` }
 
     zapsanoRadku += (pocet as number | null) ?? 0

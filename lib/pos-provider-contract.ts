@@ -42,6 +42,36 @@ export type RadekProdeje = {
   trzbaHaleru: number
 }
 
+/** Skupina způsobu platby pro přehled — stejný výčet jako CHECK v `pokladna_platby_denni.druh`. */
+export type DruhPlatby = 'hotovost' | 'karta' | 'stravenky' | 'poukaz' | 'prevod' | 'online' | 'rozvoz' | 'odpis' | 'jine'
+
+/**
+ * Součet plateb jednoho způsobu za jedno okno. `zpusob` = klíč U
+ * POSKYTOVATELE (Dotykačka: id platební metody), `druh` rozhoduje
+ * adaptér — appka podle něj skládá přehled, nehádá z názvu.
+ * `castkaHaleru` může být záporná (vratky převážily).
+ */
+export type RadekPlatby = {
+  zpusob: string
+  nazev: string
+  druh: DruhPlatby
+  pocet: number
+  castkaHaleru: number
+}
+
+/**
+ * Výsledek jednoho okna. `platby` neuvedené = pokladna rozpad plateb
+ * neposílá (nebo mu appka v téhle odpovědi nerozuměla) → synchronizace
+ * platby dne NEMĚNÍ. Prázdný seznam = den bez plateb → smažou se.
+ */
+export type VysledekProdeju = {
+  stav: 'ok'
+  radky: RadekProdeje[]
+  vynechano: number
+  prazdne?: boolean
+  platby?: RadekPlatby[]
+}
+
 /**
  * `pristup` — token neplatí (vypršel, odvolaný, překlep): připojení
  *   potřebuje člověka, appka ho označí „Vyžaduje pozornost".
@@ -66,7 +96,7 @@ export type RelacePos = {
    * (Dotykačka: 404). Synchronizace pak nic nemaže — jen ověří, že
    * provozovna pořád existuje, a den bere jako hotový (zavřeno, svátek).
    */
-  prodeje(externiProvozovna: string, odMs: number, doMs: number): Promise<{ stav: 'ok'; radky: RadekProdeje[]; vynechano: number; prazdne?: boolean } | ChybaPos>
+  prodeje(externiProvozovna: string, odMs: number, doMs: number): Promise<VysledekProdeju | ChybaPos>
 }
 
 export type SchopnostiPosProvidera = {

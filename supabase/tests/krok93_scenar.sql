@@ -98,13 +98,13 @@ returning id as ucto \gset
 \echo '== 1. Zápis a úklid smí jen service_role ========================'
 
 select pg_temp.check('anon nemá EXECUTE na pokladna_nahradit_prodeje',
-  not has_function_privilege('anon', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute'));
+  not has_function_privilege('anon', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text, jsonb)', 'execute'));
 select pg_temp.check('authenticated nemá EXECUTE na pokladna_nahradit_prodeje (zapisuje za pokladnu, ne za sebe)',
-  not has_function_privilege('authenticated', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute'));
+  not has_function_privilege('authenticated', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text, jsonb)', 'execute'));
 select pg_temp.check('authenticated nemá EXECUTE na pokladna_odebrat_prodeje',
   not has_function_privilege('authenticated', 'public.pokladna_odebrat_prodeje(uuid, uuid)', 'execute'));
 select pg_temp.check('service_role EXECUTE na obě má',
-  has_function_privilege('service_role', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute')
+  has_function_privilege('service_role', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text, jsonb)', 'execute')
   and has_function_privilege('service_role', 'public.pokladna_odebrat_prodeje(uuid, uuid)', 'execute'));
 
 set role authenticated;

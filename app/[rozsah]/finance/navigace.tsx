@@ -15,6 +15,13 @@ const TVARY: Record<FinanceIkona, ReactNode> = {
       <path d="M2 20h20" />
     </>
   ),
+  // Účtenka: pokladní tržba.
+  trzby: (
+    <>
+      <path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 21V3z" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </>
+  ),
   kontakty: (
     <>
       <circle cx="9" cy="8" r="3.2" />

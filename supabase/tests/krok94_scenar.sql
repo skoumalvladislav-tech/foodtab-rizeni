@@ -68,8 +68,8 @@ select pg_temp.check('authenticated nemá EXECUTE na pokladna_ulozit_postup (kur
 select pg_temp.check('service_role ano',
   has_function_privilege('service_role', 'public.pokladna_ulozit_postup(uuid, jsonb, date)', 'execute'));
 select pg_temp.check('zapisovací funkce má i s provozovnou EXECUTE jen service_role',
-  not has_function_privilege('authenticated', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute')
-  and has_function_privilege('service_role', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute'));
+  not has_function_privilege('authenticated', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text, jsonb)', 'execute')
+  and has_function_privilege('service_role', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text, jsonb)', 'execute'));
 
 
 \echo ''

@@ -11,6 +11,7 @@
 
 export type FinanceIkona =
   | 'prehled'
+  | 'trzby'
   | 'cashflow'
   | 'kontakty'
   | 'platby'
@@ -40,6 +41,8 @@ type Definice = {
  */
 const POLOZKY: readonly Definice[] = [
   { klic: 'prehled', segment: '', nazev: 'Přehled', kratky: 'Přehled', ikona: 'prehled' },
+  // Šéfík 12. 10.: tržby z pokladen po provozovnách, platbách, dnech, měsících a rocích.
+  { klic: 'trzby', segment: 'trzby', nazev: 'Tržby', kratky: 'Tržby', ikona: 'trzby' },
   { klic: 'cashflow', segment: 'cashflow', nazev: 'Cashflow', kratky: 'Cashflow', ikona: 'cashflow' },
   { klic: 'platby', segment: 'platby', nazev: 'Platby', kratky: 'Platby', ikona: 'platby' },
   { klic: 'nakup', segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', ikona: 'nakup' },
