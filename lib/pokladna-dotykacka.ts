@@ -167,7 +167,7 @@ function chybaZeStavu(status: number, coDelam: string, telo: unknown = null): Ch
   if (status === 401 || status === 403) {
     const duvod = duvodOdmitnuti(telo)
     if (DUVODY_DOCASNE.has(duvod)) {
-      return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka odmítla krátkodobý přístupový token (${duvod}) — appka se příště přihlásí znovu.` }
+      return { stav: 'chyba', druh: 'docasna', celoplosna: true, duvod: `Dotykačka odmítla krátkodobý přístupový token (${duvod}) — appka se příště přihlásí znovu.` }
     }
     if (duvod === 'CLOUD_FORBIDDEN') {
       return { stav: 'chyba', druh: 'pristup', duvod: 'Dotykačka už appce nepovoluje přístup k tomuto cloudu (CLOUD_FORBIDDEN) — přihlaste se přes Dotykačku znovu.' }
@@ -181,7 +181,7 @@ function chybaZeStavu(status: number, coDelam: string, telo: unknown = null): Ch
     return { stav: 'chyba', druh: 'pristup', duvod: 'Dotykačka odmítla přístup — token je neplatný, vypršel, nebo byl v Dotykačce odebrán. Přihlaste se znovu.' }
   }
   if (status === 429) {
-    return { stav: 'chyba', druh: 'docasna', duvod: 'Dotykačka teď odmítá další dotazy (příliš mnoho najednou) — appka to zkusí při příští synchronizaci.' }
+    return { stav: 'chyba', druh: 'docasna', celoplosna: true, duvod: 'Dotykačka teď odmítá další dotazy (příliš mnoho najednou) — appka to zkusí při příští synchronizaci.' }
   }
   if (status >= 500) {
     return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka hlásí chybu na své straně (HTTP ${status}) — appka to zkusí příště.` }

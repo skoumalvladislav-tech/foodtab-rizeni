@@ -10,18 +10,26 @@
  *   2. mezera po výpadku (`souvisleDo` … poslední dny), od nejstaršího —
  *      jinak by delší výpadek nechal v datech tichou díru;
  *   3. historie dozadu od `dohnanoOd` k `historie_od`.
+ * Provozovny jdou od té, na kterou se nejdéle nedostalo (`souvisleDo`
+ * nejstarší, nová napřed) — při pevném pořadí by se na poslední v seznamu
+ * při krátkém čase nikdy nedostalo.
  *
- * CHYBY: neplatný přístup (`pristup`) a nedostupná pokladna (`docasna`)
- * zastaví celý běh — týkají se všech provozoven pod jedním tokenem.
- * Ostatní (`jina`: den, kterému appka nerozumí, provozovna zrušená
- * v pokladně) zastaví jen TU provozovnu; ostatní běží dál. Dřív jedna
- * vadná provozovna (nebo jeden vadný den v historii) zastavila všechny
- * a kurzor historie na tom dni visel navždy.
+ * CHYBY: neplatný přístup (`pristup`) a chyby celé pokladny
+ * (`celoplosna` — limit dotazů, krátký token) zastaví celý běh.
+ * Ostatní (den, kterému appka nerozumí; výpadek jednoho dne) zastaví jen
+ * TU provozovnu, ostatní běží dál. Den, který u téže provozovny selže
+ * `POKUSU_NEZ_PRESKOCIT`× po sobě, appka přeskočí a ohlásí — jinak by na
+ * něm kurzor visel navždy.
  */
 
 import type { ChybaPos } from './pos-provider-contract.ts'
 
+export const POKUSU_NEZ_PRESKOCIT = 3
+
 export type PlanProvozovny = { posledni: string[]; mezera: string[]; dohnat: string[] }
+
+/** Den, na kterém stahování provozovny uvázlo, a kolikrát po sobě selhal. */
+export type Uvazl = { den: string; pokusu: number }
 
 export type UkolBehu = {
   id: string
@@ -30,17 +38,30 @@ export type UkolBehu = {
   dnes: string
   dohnanoOd: string | null
   souvisleDo: string | null
+  uvazl: Uvazl | null
   plan: PlanProvozovny
 }
 
-export type PostupProvozovny = { id: string; dohnanoOd: string | null; souvisleDo: string | null; chyba: ChybaPos | null }
+export type PostupProvozovny = {
+  id: string
+  dohnanoOd: string | null
+  souvisleDo: string | null
+  uvazl: Uvazl | null
+  chyba: ChybaPos | null
+  /** Dny přeskočené po opakovaném selhání — appka je ohlásí u připojení. */
+  preskocene: { den: string; duvod: string }[]
+}
 
 export type VysledekBehu = {
   postup: PostupProvozovny[]
-  /** Chyba, která zastavila celý běh (`pristup`/`docasna`), jinak `null`. */
+  /** Chyba, která zastavila celý běh (`pristup` nebo celoplošná), jinak `null`. */
   globalni: ChybaPos | null
   dnu: number
   zbyvaDnu: number
+}
+
+export function jeCeloplosna(chyba: ChybaPos): boolean {
+  return chyba.druh === 'pristup' || chyba.celoplosna === true
 }
 
 /**
@@ -54,31 +75,49 @@ export async function probehnoutBeh(
 ): Promise<VysledekBehu> {
   let globalni: ChybaPos | null = null
   let dnu = 0
-  const stav = new Map<string, PostupProvozovny & { posledniHotovo: boolean; mezeraHotovo: number }>()
-  for (const u of ukoly) stav.set(u.id, { id: u.id, dohnanoOd: u.dohnanoOd, souvisleDo: u.souvisleDo, chyba: null, posledniHotovo: false, mezeraHotovo: 0 })
 
-  const smiDal = (s: { chyba: ChybaPos | null }) => !globalni && !s.chyba && !casDosel()
+  type Stav = PostupProvozovny & { posledniHotovo: boolean; posledniZpracovano: number; mezeraHotovo: number }
+  const stav = new Map<string, Stav>()
+  for (const u of ukoly) {
+    stav.set(u.id, { id: u.id, dohnanoOd: u.dohnanoOd, souvisleDo: u.souvisleDo, uvazl: u.uvazl, chyba: null, preskocene: [], posledniHotovo: false, posledniZpracovano: 0, mezeraHotovo: 0 })
+  }
+  // Nejdéle neobsloužená napřed (nová = bez souvisleDo úplně první); stabilně.
+  const poradi = [...ukoly].sort((a, b) => (a.souvisleDo ?? '').localeCompare(b.souvisleDo ?? ''))
 
-  /** Jeden den; při chybě rozhodne, jestli končí celý běh, nebo jen provozovna. */
-  const den = async (u: UkolBehu, s: { chyba: ChybaPos | null }, d: string): Promise<boolean> => {
+  const muzeDal = () => !globalni && !casDosel()
+
+  /** Jeden den: `ok` (hotovo nebo přeskočeno po opakovaném selhání), nebo `chyba` (provozovna pro teď končí). */
+  const den = async (u: UkolBehu, s: Stav, d: string): Promise<'ok' | 'chyba'> => {
     const chyba = await zpracovat(u, d)
     if (!chyba) {
+      if (s.uvazl?.den === d) s.uvazl = null
       dnu++
-      return true
+      return 'ok'
     }
-    if (chyba.druh === 'pristup' || chyba.druh === 'docasna') globalni = chyba
-    else s.chyba = chyba
-    return false
+    if (jeCeloplosna(chyba)) {
+      globalni = chyba
+      return 'chyba'
+    }
+    const pokusu = (s.uvazl?.den === d ? s.uvazl.pokusu : 0) + 1
+    if (pokusu >= POKUSU_NEZ_PRESKOCIT) {
+      s.uvazl = null
+      s.preskocene.push({ den: d, duvod: chyba.duvod })
+      return 'ok'
+    }
+    s.uvazl = { den: d, pokusu }
+    s.chyba = chyba
+    return 'chyba'
   }
 
-  // 1) Poslední dny všech provozoven.
-  for (const u of ukoly) {
+  // 1) Poslední dny. Chyba dne neukončí ostatní poslední dny téže provozovny
+  //    (jsou na sobě nezávislé), jen se pak neposune nic, co předpokládá souvislost.
+  for (const u of poradi) {
     const s = stav.get(u.id)!
     let hotovo = 0
     for (const d of u.plan.posledni) {
-      if (!smiDal(s)) break
-      if (!(await den(u, s, d))) break
-      hotovo++
+      if (!muzeDal()) break
+      s.posledniZpracovano++
+      if ((await den(u, s, d)) === 'ok') hotovo++
     }
     if (hotovo > 0 && hotovo === u.plan.posledni.length) {
       s.posledniHotovo = true
@@ -91,12 +130,12 @@ export async function probehnoutBeh(
   //    „souvisle do dneška" lhalo i při PRÁZDNÉ mezeře: den, který v posledních
   //    dnech pořád selhává, by po vypadnutí z okna posledních dní už nikdo
   //    nestáhl.
-  for (const u of ukoly) {
+  for (const u of poradi) {
     const s = stav.get(u.id)!
     if (!s.posledniHotovo) continue
     let vse = true
     for (const d of u.plan.mezera) {
-      if (!smiDal(s) || !(await den(u, s, d))) {
+      if (!muzeDal() || (await den(u, s, d)) === 'chyba') {
         vse = false
         break
       }
@@ -106,13 +145,13 @@ export async function probehnoutBeh(
     if (vse) s.souvisleDo = u.dnes
   }
 
-  // 3) Historie dozadu.
-  for (const u of ukoly) {
+  // 3) Historie dozadu — kurzor jen po souvislé řadě hotových dnů.
+  for (const u of poradi) {
     const s = stav.get(u.id)!
     if (s.dohnanoOd === null) continue
     for (const d of u.plan.dohnat) {
       if (d >= s.dohnanoOd) continue
-      if (!smiDal(s) || !(await den(u, s, d))) break
+      if (!muzeDal() || (await den(u, s, d)) === 'chyba') break
       s.dohnanoOd = d
     }
   }
@@ -120,12 +159,16 @@ export async function probehnoutBeh(
   let zbyvaDnu = 0
   for (const u of ukoly) {
     const s = stav.get(u.id)!
+    zbyvaDnu += u.plan.posledni.length - s.posledniZpracovano
     if (s.souvisleDo !== u.dnes) zbyvaDnu += u.plan.mezera.length - s.mezeraHotovo
     zbyvaDnu += u.plan.dohnat.filter((d) => s.dohnanoOd === null || d < s.dohnanoOd).length
   }
 
   return {
-    postup: [...stav.values()].map(({ id, dohnanoOd, souvisleDo, chyba }) => ({ id, dohnanoOd, souvisleDo, chyba })),
+    postup: ukoly.map((u) => {
+      const { id, dohnanoOd, souvisleDo, uvazl, chyba, preskocene } = stav.get(u.id)!
+      return { id, dohnanoOd, souvisleDo, uvazl, chyba, preskocene }
+    }),
     globalni,
     dnu,
     zbyvaDnu,

@@ -29,7 +29,8 @@ import { posunoutDen, vychoziHistorieOd } from '@/lib/pokladna-cas'
  * (uživatelským klientem, přes RLS).
  */
 
-const PRVNI_SYNCHRONIZACE_MS = 20_000
+/** Tvrdý konec akce: strop stránky je 60 s (`page.tsx`, maxDuration), měří se od začátku akce. */
+const KONEC_AKCE_MS = 57_000
 
 function cesta(rozsah: string): string {
   return `/${rozsah}/finance/integrace/pokladna`
@@ -109,6 +110,7 @@ function zpravaSynchronizace(v: VysledekSynchronizacePokladny): string {
  * k přiřazení.
  */
 export async function pripojitPokladnu(formData: FormData): Promise<void> {
+  const zacatek = Date.now()
   const rozsah = String(formData.get('rozsah') ?? '')
   const popis = najitPokladnu(String(formData.get('pokladna') ?? ''))
 
@@ -166,7 +168,7 @@ export async function pripojitPokladnu(formData: FormData): Promise<void> {
     zpet(rozsah, { ok: `${popis.nazev} je ověřená (${ulozeni.celkem} provozoven). Teď u ní přiřaďte provozovny k pobočkám v appce.` })
   }
 
-  const prvni = await synchronizovatPokladnu(pripojeniId, { konecMs: Date.now() + PRVNI_SYNCHRONIZACE_MS })
+  const prvni = await synchronizovatPokladnu(pripojeniId, { konecMs: zacatek + KONEC_AKCE_MS })
   zpet(rozsah, prvni.stav === 'chyba'
     ? { chyba: `${popis.nazev} je připojená, ale první stažení se nepovedlo: ${prvni.duvod}` }
     : { ok: `${popis.nazev} je připojená. ${zpravaSynchronizace(prvni)}` })
@@ -179,6 +181,7 @@ export async function pripojitPokladnu(formData: FormData): Promise<void> {
  * appka smaže, co z ní dřív zapsala — jinak by tam zůstala cizí čísla.
  */
 export async function ulozitPrirazeni(formData: FormData): Promise<void> {
+  const zacatek = Date.now()
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
   const { supabase, tenantId } = await pripravit(rozsah)
@@ -241,7 +244,7 @@ export async function ulozitPrirazeni(formData: FormData): Promise<void> {
   const uklid = smazano > 0 ? ` Z původních poboček appka odebrala ${smazano} řádků, nová pobočka je dostane znovu z pokladny.` : ''
   if (prirazeno === 0) zpet(rozsah, { ok: `Přiřazení uloženo — žádná provozovna se teď nestahuje.${uklid}` })
 
-  const prvni = await synchronizovatPokladnu(pripojeni.id as string, { konecMs: Date.now() + PRVNI_SYNCHRONIZACE_MS })
+  const prvni = await synchronizovatPokladnu(pripojeni.id as string, { konecMs: zacatek + KONEC_AKCE_MS })
   zpet(rozsah, prvni.stav === 'chyba'
     ? { chyba: `Přiřazení uloženo, ale stažení se nepovedlo: ${prvni.duvod}${uklid}` }
     : { ok: `Přiřazení uloženo. ${zpravaSynchronizace(prvni)}${uklid}` })
@@ -249,6 +252,7 @@ export async function ulozitPrirazeni(formData: FormData): Promise<void> {
 
 /** „Synchronizovat teď" — stejná cesta jako hodinová úloha, jen hned a pro jedno připojení. */
 export async function synchronizovatPokladnuTed(formData: FormData): Promise<void> {
+  const zacatek = Date.now()
   const rozsah = String(formData.get('rozsah') ?? '')
   const id = String(formData.get('id') ?? '')
   const { supabase, tenantId } = await pripravit(rozsah)
@@ -268,7 +272,7 @@ export async function synchronizovatPokladnuTed(formData: FormData): Promise<voi
     zpet(rozsah, { chyba: 'Nejdřív přiřaďte provozovny pokladny k pobočkám.' })
   }
 
-  const vysledek = await synchronizovatPokladnu(pripojeni.id as string, { konecMs: Date.now() + 25_000 })
+  const vysledek = await synchronizovatPokladnu(pripojeni.id as string, { konecMs: zacatek + KONEC_AKCE_MS })
   revalidatePath(cesta(rozsah))
   zpet(rozsah, vysledek.stav === 'chyba' ? { chyba: vysledek.duvod } : { ok: zpravaSynchronizace(vysledek) })
 }
@@ -312,12 +316,11 @@ export async function odpojitPokladnu(formData: FormData): Promise<void> {
   if (smazatProdeje) {
     const sluzba = klientUlohy()
     if (!sluzba) zpet(rozsah, { chyba: 'Pokladna je odpojená, ale stažené prodeje se smazat nepodařilo (úloha není nastavená).' })
-    const { data: pobocky } = await sluzba.from('pokladna_prodeje_denni').select('branch_id').eq('tenant_id', tenantId).eq('integrace_pripojeni_id', pripojeni.id)
-    for (const branchId of new Set(((pobocky ?? []) as { branch_id: string }[]).map((r) => r.branch_id))) {
-      const { data: pocet, error: chybaUklidu } = await sluzba.rpc('pokladna_odebrat_prodeje', { p_pripojeni: pripojeni.id, p_branch: branchId })
-      if (chybaUklidu) zpet(rozsah, { chyba: 'Pokladna je odpojená, ale stažené prodeje se nepodařilo smazat celé — zkuste to u podpory.' })
-      smazano += (pocet as number | null) ?? 0
-    }
+    // Všechny pobočky naráz (p_branch = null) — seznam poboček z dotazu by
+    // databáze uřízla na 1000 řádků a druhá pobočka by zůstala.
+    const { data: pocet, error: chybaUklidu } = await sluzba.rpc('pokladna_odebrat_prodeje', { p_pripojeni: pripojeni.id, p_branch: null })
+    if (chybaUklidu) zpet(rozsah, { chyba: 'Pokladna je odpojená, ale stažené prodeje se nepodařilo smazat — zkuste to u podpory.' })
+    smazano = (pocet as number | null) ?? 0
   }
 
   revalidatePath(cesta(rozsah))
@@ -358,11 +361,18 @@ export async function zahajitPrihlaseniDotykacka(formData: FormData): Promise<vo
     .is('odpojeno_kdy', null)
   const rozjety = ((rozjete ?? []) as { id: string; externi_ucet: ExterniUcetPokladny | null }[]).find((x) => !x.externi_ucet?.cloud_id) ?? null
 
-  let pripojeniId: string
+  let pripojeniId: string | null = null
   if (rozjety) {
-    pripojeniId = rozjety.id as string
-    await supabase.from('integrace_pripojeni').update({ stav: 'pripojuje_se', posledni_chyba: null, externi_ucet: { historie_od: historieOd } }).eq('id', pripojeniId)
-  } else {
+    const { data: znovu } = await supabase
+      .from('integrace_pripojeni')
+      .update({ stav: 'pripojuje_se', posledni_chyba: null, externi_ucet: { historie_od: historieOd } })
+      .eq('id', rozjety.id)
+      .in('stav', ['pripojuje_se', 'chyba'])
+      .is('externi_ucet->>cloud_id', null)
+      .select('id')
+    if ((znovu ?? []).length === 1) pripojeniId = rozjety.id
+  }
+  if (!pripojeniId) {
     const { data: nove, error } = await supabase
       .from('integrace_pripojeni')
       .insert({

@@ -37,10 +37,13 @@ export function klientDotykacky(): { clientId: string; clientSecret: string } | 
 }
 
 /**
- * Živé ověření přístupu: přihlášení, seznam provozoven a jedno malé
- * čtení tržeb (poslední hodina první provozovny). Bez toho třetího by
- * připojení s platným tokenem, ale bez práva na přehled tržeb (licence,
- * zakázaná cesta), skončilo „Připojeno" a selhalo až při stahování.
+ * Živé ověření přístupu: přihlášení, seznam provozoven a malé čtení
+ * tržeb (poslední hodina). Bez toho třetího by připojení s platným
+ * tokenem, ale bez práva na přehled tržeb (licence, zakázaná cesta),
+ * skončilo „Připojeno" a selhalo až při stahování. Stačí, když přehled
+ * půjde u JEDNÉ z prvních pár provozoven — stará nebo nahrazená
+ * provozovna na začátku seznamu (vlastní licence) nesmí zablokovat
+ * připojení celého cloudu.
  */
 export async function overitPokladnu(klic: string, udaje: UdajePos): Promise<{ stav: 'ok'; provozovny: ProvozovnaPos[] } | { stav: 'chyba'; druh: ChybaPos['druh']; duvod: string }> {
   const adapter = ADAPTERY_POKLADEN[klic]
@@ -54,10 +57,15 @@ export async function overitPokladnu(klic: string, udaje: UdajePos): Promise<{ s
   if (seznam.provozovny.length === 0) return { stav: 'chyba', druh: 'jina', duvod: 'Přístup platí, ale pokladna nemá žádnou provozovnu.' }
 
   const ted = Date.now()
-  const zkouska = await otevreni.relace.prodeje(seznam.provozovny[0].externiId, ted - 3_600_000, ted)
-  if (zkouska.stav === 'chyba') return { ...zkouska, duvod: `Přihlášení platí, ale přehled tržeb se načíst nepodařilo — ${zkouska.duvod}` }
-
-  return { stav: 'ok', provozovny: seznam.provozovny }
+  let prvniChyba: ChybaPos | null = null
+  for (const o of seznam.provozovny.slice(0, 3)) {
+    const zkouska = await otevreni.relace.prodeje(o.externiId, ted - 3_600_000, ted)
+    if (zkouska.stav === 'ok') return { stav: 'ok', provozovny: seznam.provozovny }
+    // Token nebo celá pokladna — další provozovna by dopadla stejně.
+    if (zkouska.druh === 'pristup' || zkouska.celoplosna) return { ...zkouska, duvod: `Přihlášení platí, ale přehled tržeb se načíst nepodařilo — ${zkouska.duvod}` }
+    prvniChyba ??= zkouska
+  }
+  return { ...prvniChyba!, duvod: `Přihlášení platí, ale přehled tržeb se nepodařilo načíst u žádné z prvních provozoven — ${prvniChyba!.duvod}` }
 }
 
 /** Netajná pole přístupu (Cloud ID) — podle nich appka pozná, že jde o TENTÝŽ účet pokladny, a uloží je k zobrazení. */

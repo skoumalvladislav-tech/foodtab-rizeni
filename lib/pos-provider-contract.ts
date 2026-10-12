@@ -48,8 +48,12 @@ export type RadekProdeje = {
  * `docasna` — pokladna teď neodpovídá nebo odmítá rychlé dotazy:
  *   appka to zkusí příště sama, připojení nepřepíná.
  * `jina` — odpověď, které appka nerozumí, nebo chyba v datech.
+ *
+ * `celoplosna` — dočasná chyba, která se týká CELÉ pokladny, ne jednoho
+ *   dne (limit dotazů, krátkodobý token): synchronizace zastaví celý běh.
+ *   Bez ní (výpadek jednoho dne, 5xx, timeout) se zastaví jen provozovna.
  */
-export type ChybaPos = { stav: 'chyba'; druh: 'pristup' | 'docasna' | 'jina'; duvod: string }
+export type ChybaPos = { stav: 'chyba'; druh: 'pristup' | 'docasna' | 'jina'; duvod: string; celoplosna?: boolean }
 
 export type RelacePos = {
   /** Provozovny U POSKYTOVATELE — appka je nabídne k přiřazení na vlastní pobočku. */

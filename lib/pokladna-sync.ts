@@ -42,6 +42,14 @@ export type { ExterniUcetPokladny, ProvozovnaUctu }
 
 const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
 
+/**
+ * Rezerva před tvrdým koncem (`konecMs`): jeden rozběhnutý dotaz na
+ * pokladnu (časový limit adaptéru 20 s) a závěrečné zápisy. Nový den se
+ * po `konecMs - REZERVA_BEHU_MS` nezačne — jinak by funkci na serveru
+ * ukončil časový strop dřív, než uloží postup a uvolní zámek.
+ */
+export const REZERVA_BEHU_MS = 25_000
+
 export type VysledekSynchronizacePokladny =
   | { stav: 'ok'; zapsanoRadku: number; dnu: number; prazdnych: number; zbyvaDohnatDnu: number }
   | { stav: 'preskoceno'; duvod: string }
@@ -94,6 +102,7 @@ async function kalendarPobocek(supabase: SupabaseClient, tenantId: string): Prom
   return mapa
 }
 
+/** `konecMs` = TVRDÝ konec (kdy musí být všechno uložené), ne konec stahování — rezervu odečte synchronizace sama. */
 export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { konecMs: number }): Promise<VysledekSynchronizacePokladny> {
   const supabase = klientUlohy()
   if (!supabase) return { stav: 'chyba', duvod: 'Úloha není nastavená — chybí SUPABASE_SERVICE_ROLE_KEY.' }
@@ -170,6 +179,7 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
       dnes,
       dohnanoOd: o.dohnano_od,
       souvisleDo: o.souvisle_do ?? null,
+      uvazl: o.uvazl ?? null,
       plan: planDnu({ dnes, historieOd, dohnanoOd: o.dohnano_od, souvisleDo: o.souvisle_do ?? null }),
       o,
       kal,
@@ -199,12 +209,13 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
     if (prodeje.stav === 'chyba') return prodeje
 
     if (prodeje.prazdne) {
+      // „Nic nemám" smí znamenat jen zavřeno — ne „takovou provozovnu neznám"
+      // (ta by den smazala). Ověří se seznamem provozoven pokladny.
       const existuje = await provozovnaExistuje(o.id)
       if (typeof existuje !== 'boolean') return existuje
       if (!existuje) return { stav: 'chyba', druh: 'jina', duvod: `Provozovna ${o.nazev} v pokladně už není — přiřaďte ji znovu, nebo ji v přiřazení odeberte.` }
-      // Zavřeno: nic se nemaže (prázdná odpověď nesmí smazat dřív stažený den), den je hotový.
       prazdnych++
-      return null
+      // Zapíše se prázdný den — co bylo dřív stažené a pak celé stornované, zmizí.
     }
 
     const { data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', {
@@ -221,7 +232,7 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
     return null
   }
 
-  const beh = await probehnoutBeh(ukoly, zpracovatDen, () => Date.now() > moznosti.konecMs)
+  const beh = await probehnoutBeh(ukoly, zpracovatDen, () => Date.now() > moznosti.konecMs - REZERVA_BEHU_MS)
 
   // Kurzory: jen provozovny, jejichž přiřazení je pořád stejné (sloučí databáze, atomicky).
   const { error: chybaPostupu } = await supabase.rpc('pokladna_ulozit_postup', {
@@ -229,11 +240,15 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
     p_historie_od: historieOd,
     p_postup: beh.postup.map((x) => {
       const u = ukoly.find((k) => k.id === x.id)!
-      return { id: x.id, branch_id: u.o.branch_id, dohnano_od: x.dohnanoOd, souvisle_do: x.souvisleDo }
+      return { id: x.id, branch_id: u.o.branch_id, dohnano_od: x.dohnanoOd, souvisle_do: x.souvisleDo, uvazl: x.uvazl }
     }),
   })
 
   const chybyProvozoven = beh.postup.filter((x) => x.chyba).map((x) => x.chyba!.duvod)
+  const preskocene = beh.postup.flatMap((x) => {
+    const nazev = ukoly.find((k) => k.id === x.id)!.nazev
+    return x.preskocene.map((d) => `Provozovna ${nazev}: den ${d.den} appka po opakovaném selhání přeskočila (${d.duvod}).`)
+  })
   const ted = new Date().toISOString()
 
   if (beh.globalni) {
@@ -246,9 +261,16 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
     return dokoncit({ stav: 'chyba', duvod: chyba.duvod })
   }
 
-  const poznamky = [...chybyProvozoven]
+  const poznamky = [...chybyProvozoven, ...preskocene]
   if (chybaPostupu) poznamky.push('Postup stahování se nepodařilo uložit — další běh stáhne pár dní znovu.')
   if (vynechano > 0) poznamky.push(`${vynechano} položek appka vynechala (záporný součet po vratkách nebo chybějící údaje).`)
+
+  // Žádný den se nepovedl a provozovny hlásí chyby (např. 403 u všech) —
+  // „ověřeno a synchronizováno" by lhalo; jen důvod, stav beze změny.
+  if (beh.dnu === 0 && chybyProvozoven.length > 0) {
+    await supabase.from('integrace_pripojeni').update({ posledni_chyba: poznamky.join(' ') }).eq('id', p.id)
+    return dokoncit({ stav: 'chyba', duvod: chybyProvozoven.join(' ') })
+  }
 
   await supabase.from('integrace_pripojeni').update({
     stav: 'pripojeno',

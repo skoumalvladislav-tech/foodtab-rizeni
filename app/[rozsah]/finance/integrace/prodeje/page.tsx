@@ -30,11 +30,6 @@ const karta = {
 
 type DenniSouhrn = { datum: string; trzbaHaleru: number; pocetProduktu: number }
 
-/** Datum (RRRR-MM-DD, UTC) před `dny` dny — mimo komponentu, ať render zůstane čistý. */
-function datumPred(dny: number): string {
-  return new Date(Date.now() - dny * 86_400_000).toISOString().slice(0, 10)
-}
-
 export default async function FinanceIntegraceProdeje({
   params,
 }: {
@@ -56,54 +51,20 @@ export default async function FinanceIntegraceProdeje({
 
   const supabase = await getServerSupabase()
 
-  type Radek = { datum: string; branch_id: string; zdroj: string; trzba_haleru: number }
-
-  /**
-   * Řádky posledních 60 dní PO STRÁNKÁCH. Databáze vrací nejvýš 1000
-   * řádků na dotaz (max_rows) — s napojenou pokladnou (stovky produktů
-   * denně) by dřívější `.limit(2000)` ukázal jen pár dní a nejstarší
-   * z nich useknutý v půlce (s nižší tržbou, než měl).
-   */
-  const nacistRadky = async (): Promise<Radek[]> => {
-    const od = datumPred(60)
-    const vse: Radek[] = []
-    for (let strana = 0; strana < 50; strana++) {
-      const { data } = await supabase
-        .from('pokladna_prodeje_denni')
-        .select('datum, branch_id, zdroj, trzba_haleru')
-        .eq('tenant_id', tenantId)
-        .gte('datum', od)
-        .order('datum', { ascending: false })
-        .order('id')
-        .range(strana * 1000, strana * 1000 + 999)
-      const cast = (data ?? []) as Radek[]
-      vse.push(...cast)
-      if (cast.length < 1000) break
-    }
-    return vse
-  }
-
-  const [branchesRes, radky] = await Promise.all([
+  // Denní součty počítá databáze jedním dotazem (`pokladna_prodeje_souhrn`,
+  // 20261012100000): stejné pravidlo jako foodcost — CSV se za den a pobočku
+  // nepočítá, má-li data z napojené pokladny. Dřív se sčítalo v appce z řádků,
+  // kterých databáze vrátí nejvýš 1000: s napojenou pokladnou by se ukázalo
+  // jen pár dní a nejstarší s useknutou tržbou.
+  const [branchesRes, souhrnRes] = await Promise.all([
     supabase.from('branches').select('id, name').eq('tenant_id', tenantId).eq('active', true).is('deleted_at', null),
-    nacistRadky(),
+    supabase.rpc('pokladna_prodeje_souhrn', { p_tenant: tenantId, p_dnu: 14 }),
   ])
 
   const branches = (branchesRes.data ?? []) as { id: string; name: string }[]
-
-  // Stejné pravidlo jako foodcost (20261011100000): má-li pobočka v daný
-  // den data z napojené pokladny, CSV téhož dne se nepočítá — jinak by se
-  // den, který API dohnalo, ukázal dvakrát.
-  const dnyZPokladny = new Set(radky.filter((r) => r.zdroj !== 'csv').map((r) => `${r.branch_id}|${r.datum}`))
-
-  const podleDne = new Map<string, DenniSouhrn>()
-  for (const r of radky) {
-    if (r.zdroj === 'csv' && dnyZPokladny.has(`${r.branch_id}|${r.datum}`)) continue
-    const souhrn = podleDne.get(r.datum) ?? { datum: r.datum, trzbaHaleru: 0, pocetProduktu: 0 }
-    souhrn.trzbaHaleru += r.trzba_haleru
-    souhrn.pocetProduktu += 1
-    podleDne.set(r.datum, souhrn)
-  }
-  const posledniDny = [...podleDne.values()].sort((a, b) => (a.datum < b.datum ? 1 : -1)).slice(0, 14)
+  const souhrnChyba = Boolean(souhrnRes.error)
+  const posledniDny: DenniSouhrn[] = ((souhrnRes.data ?? []) as { datum: string; trzba_haleru: number | string; polozek: number | string }[])
+    .map((d) => ({ datum: d.datum, trzbaHaleru: Number(d.trzba_haleru), pocetProduktu: Number(d.polozek) }))
 
   return (
     <Navigace rozsah={rozsah}>
@@ -124,7 +85,9 @@ export default async function FinanceIntegraceProdeje({
 
         <div style={{ ...karta, display: 'grid', gap: '10px' }}>
           <h2 style={{ margin: 0, fontSize: '15px' }}>Posledních 14 dní s daty</h2>
-          {posledniDny.length === 0 ? (
+          {souhrnChyba ? (
+            <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--pozor)' }}>Přehled dní se teď nepodařilo načíst — zkuste stránku obnovit.</p>
+          ) : posledniDny.length === 0 ? (
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>Zatím žádné importované prodeje.</p>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>

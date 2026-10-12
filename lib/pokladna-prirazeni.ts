@@ -30,6 +30,8 @@ export type ProvozovnaUctu = {
    * Chybí u provozovny, která se ještě nestahovala.
    */
   souvisle_do?: string | null
+  /** Den, na kterém stahování uvázlo, a kolikrát po sobě selhal (`lib/pokladna-beh.ts`). */
+  uvazl?: { den: string; pokusu: number } | null
 }
 
 /** `integrace_pripojeni.externi_ucet` u pokladny s tokenem. */
@@ -53,7 +55,7 @@ export function sloucitProvozovny(nove: ProvozovnaPos[], dosavadni: ProvozovnaUc
   const podleId = new Map(dosavadni.map((p) => [p.id, p]))
   return nove.map((n) => {
     const stara = podleId.get(n.externiId)
-    return { id: n.externiId, nazev: n.nazev, branch_id: stara?.branch_id ?? null, dohnano_od: stara?.dohnano_od ?? null, souvisle_do: stara?.souvisle_do ?? null }
+    return { id: n.externiId, nazev: n.nazev, branch_id: stara?.branch_id ?? null, dohnano_od: stara?.dohnano_od ?? null, souvisle_do: stara?.souvisle_do ?? null, uvazl: stara?.uvazl ?? null }
   })
 }
 
@@ -65,7 +67,7 @@ export function automatickePrirazeni(provozovny: ProvozovnaUctu[], pobockyFirmy:
   if (provozovny.length !== 1 || pobockyFirmy.length !== 1) return provozovny
   const [jedina] = provozovny
   if (jedina.branch_id || obsazeneJinde.has(pobockyFirmy[0])) return provozovny
-  return [{ ...jedina, branch_id: pobockyFirmy[0], dohnano_od: null, souvisle_do: null }]
+  return [{ ...jedina, branch_id: pobockyFirmy[0], dohnano_od: null, souvisle_do: null, uvazl: null }]
 }
 
 export type VysledekPrirazeni =
@@ -115,7 +117,7 @@ export function zkontrolovatPrirazeni(
       continue
     }
     if (p.branch_id) opustene.add(p.branch_id)
-    vysledek.push({ ...p, branch_id: nova, dohnano_od: null, souvisle_do: null })
+    vysledek.push({ ...p, branch_id: nova, dohnano_od: null, souvisle_do: null, uvazl: null })
   }
 
   // I pobočka, kterou hned obsadila jiná provozovna, se čistí: do té doby,

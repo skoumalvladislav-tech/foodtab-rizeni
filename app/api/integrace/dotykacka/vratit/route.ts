@@ -47,6 +47,8 @@ function rozebratStav(state: string | null): Stav | null {
 }
 
 export async function GET(request: NextRequest) {
+  // Strop 60 s platí pro požadavek I práci v after() dohromady — počítá se od teď.
+  const zacatek = Date.now()
   const { searchParams } = new URL(request.url)
   const stav = rozebratStav(searchParams.get('state'))
   if (!stav) return NextResponse.redirect(new URL('/', request.url))
@@ -120,7 +122,7 @@ export async function GET(request: NextRequest) {
 
   // Výsledek stažení se ukáže u připojení (poslední synchronizace / chyba).
   after(async () => {
-    await synchronizovatPokladnu(ciloveId, { konecMs: Date.now() + 40_000 })
+    await synchronizovatPokladnu(ciloveId, { konecMs: zacatek + 57_000 })
   })
   return cil({ ok: 'Dotykačka je připojená. První prodeje se stahují — za minutu obnovte stránku.' })
 }
