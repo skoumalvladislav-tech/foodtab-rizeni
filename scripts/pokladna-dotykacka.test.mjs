@@ -95,6 +95,8 @@ console.log('\n== Přehled tržeb: výklad productSales ==')
   ok('záporný součet (vratky) a nečitelné číslo se vynechají a započítají', !podle.has('Vrácené') && !podle.has('Rozbité') && r.vynechano === 2)
   ok('bez productSales → null (nerozumím)', naparsovatReport({ revenue: {} }) === null)
   ok('prázdný den → žádné řádky, žádná chyba', naparsovatReport({ productSales: [] })?.radky.length === 0)
+  ok('řídicí znaky v názvu (i \\u0000, který databáze v JSONu odmítne) pryč',
+    naparsovatReport({ productSales: [{ name: 'Ko\u0000fo\nla ', count: '1', value: '1' }] })?.radky[0].produktNazev === 'Ko fo la')
 }
 
 console.log('\n== Přihlášení (signin/token) ==')
@@ -173,6 +175,45 @@ console.log('\n== Tržby za okno (sales-report) ==')
   const pred = pozadavky.length
   const spatne = await o.relace.prodeje('456/../../jinam', od, doMs)
   ok('id provozovny, které není číslo → chyba bez volání', spatne.stav === 'chyba' && pozadavky.length === pred)
+}
+
+console.log('\n== Den bez prodejů a důvody odmítnutí (reason) ==')
+{
+  const od = Date.UTC(2026, 9, 10, 3, 0)
+  const doMs = Date.UTC(2026, 9, 11, 3, 0)
+  const s = sit([
+    { status: 201, telo: { accessToken: 'AT-4' } },
+    { status: 404 },
+    { status: 403, telo: { reason: 'LICENSE_UPGRADE_REQUIRED', status: '403' } },
+    { status: 403, telo: { reason: 'DOMAIN_FORBIDDEN' } },
+    { status: 403, telo: { reason: 'ACCESS_TOKEN_EXPIRED' } },
+    { status: 403, telo: { reason: 'INVALID_ACCESS_TOKEN' } },
+    { status: 403, telo: { reason: 'CLOUD_FORBIDDEN' } },
+    { status: 401, telo: { reason: 'INVALID_REFRESH_TOKEN' } },
+    { status: 403, telo: { reason: '<script>' } },
+  ])
+  const o = await vytvoritDotykacku(s.fetchFn).otevrit(UDAJE)
+  const zavreno = await o.relace.prodeje('456', od, doMs)
+  ok('404 u přehledu tržeb (zavřeno) → prázdný den s příznakem „prazdne", ne chyba', zavreno.stav === 'ok' && zavreno.radky.length === 0 && zavreno.prazdne === true)
+
+  const licence = await o.relace.prodeje('456', od, doMs)
+  ok('403 LICENSE_UPGRADE_REQUIRED → NE „neplatný token" (jina), s kódem v hlášce', licence.stav === 'chyba' && licence.druh === 'jina' && licence.duvod.includes('LICENSE_UPGRADE_REQUIRED') && !licence.duvod.includes('Přihlaste se znovu'))
+  const cesta = await o.relace.prodeje('456', od, doMs)
+  ok('403 DOMAIN_FORBIDDEN → jina, s kódem (opraví podpora, ne nové přihlášení)', cesta.stav === 'chyba' && cesta.druh === 'jina' && cesta.duvod.includes('DOMAIN_FORBIDDEN'))
+  const vyprsel = await o.relace.prodeje('456', od, doMs)
+  ok('403 ACCESS_TOKEN_EXPIRED → dočasná (příště nové přihlášení samo)', vyprsel.stav === 'chyba' && vyprsel.druh === 'docasna')
+  const spatnyAT = await o.relace.prodeje('456', od, doMs)
+  ok('403 INVALID_ACCESS_TOKEN → dočasná (krátký token se příště vezme nový)', spatnyAT.stav === 'chyba' && spatnyAT.druh === 'docasna')
+  const cloud = await o.relace.prodeje('456', od, doMs)
+  ok('403 CLOUD_FORBIDDEN → chyba přístupu (přihlásit znovu)', cloud.stav === 'chyba' && cloud.druh === 'pristup')
+  const refresh = await o.relace.prodeje('456', od, doMs)
+  ok('401 INVALID_REFRESH_TOKEN → chyba přístupu', refresh.stav === 'chyba' && refresh.druh === 'pristup')
+  const divny = await o.relace.prodeje('456', od, doMs)
+  ok('nesmyslný reason se do hlášky nedostane (bere se jako bez důvodu)', divny.stav === 'chyba' && divny.druh === 'pristup' && !divny.duvod.includes('<script>'))
+
+  const sLicence = sit([{ status: 403, telo: { reason: 'LICENSE_UPGRADE_REQUIRED' } }])
+  const nLicence = await vytvoritDotykacku(sLicence.fetchFn).otevrit(UDAJE)
+  ok('i u přihlášení: licence → jina, ne „token nepřijala"', nLicence.stav === 'chyba' && nLicence.druh === 'jina' && nLicence.duvod.includes('LICENSE_UPGRADE_REQUIRED'))
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')

@@ -1129,6 +1129,12 @@ klienta, ne dřív.
 > Vercelu (`DOTYKACKA_CLIENT_ID`, `DOTYKACKA_CLIENT_SECRET`) a v appce
 > se objeví tlačítko „Přihlásit přes Dotykačku". Do té doby jde
 > Dotykačka připojit jen vložením tokenu a Cloud ID, pokud je někdo má.
+>
+> **12. 10. 2026: Dotykačka poslala Client ID a Client Secret** (registrace
+> vyřízená). Licenční klíč, který přišel s nimi, je jen na testovací
+> cloud — k připojení skutečných provozoven není potřeba. Zbývá vložit
+> údaje do Vercelu a sloučit opravy před spuštěním (`docs/hlaseni/stav-2026-10-12.md`).
+> Tahle otázka je tím uzavřená.
 
 ---
 

@@ -7,6 +7,7 @@ import { rozsifrovat } from './integrace-klice.ts'
 import { jeNaCaseSynchronizovat } from './integrace-fio-sync.ts'
 import { ADAPTERY_POKLADEN } from './pokladna-adaptery.ts'
 import { oknoProvoznihoDne, planDnu, provozniDen, vychoziHistorieOd } from './pokladna-cas.ts'
+import { probehnoutBeh, type UkolBehu } from './pokladna-beh.ts'
 import { prirazeneProvozovny, type ExterniUcetPokladny, type ProvozovnaUctu } from './pokladna-prirazeni.ts'
 import type { ChybaPos, RelacePos } from './pos-provider-contract.ts'
 
@@ -26,22 +27,23 @@ export type { ExterniUcetPokladny, ProvozovnaUctu }
  * v appce"). Přiřazení drží `externi_ucet.provozovny[]`:
  *   `{ id, nazev, branch_id, dohnano_od }`.
  *
- * Co dělá jeden běh:
- *   1. ověří přístup u pokladny (`adapter.otevrit`),
- *   2. u KAŽDÉ přiřazené provozovny přepíše posledních pár provozních
- *      dní (dnešek ještě běží, storna přicházejí dodatečně) — podle
- *      provozního dne a pásma JEJÍ pobočky,
- *   3. zbytek času dohání historii od `historie_od`, provozovnu po
- *      provozovně; kurzor `dohnano_od` se posune až za hotovým dnem,
- *      takže přerušený běh příště pokračuje, kde skončil.
+ * Co dělá jeden běh: ověří přístup u pokladny (`adapter.otevrit`)
+ * a pustí `probehnoutBeh` (`lib/pokladna-beh.ts` — poslední dny,
+ * mezera po výpadku, historie; chyby po provozovnách). Den se počítá
+ * podle provozního dne a pásma pobočky, KAM provozovna patří.
+ *
  * Každý den jde do databáze přes `public.pokladna_nahradit_prodeje`,
- * která sama odmítne pobočku bez přiřazení.
+ * která sama odmítne pobočku, kam tahle provozovna přiřazená není.
+ * Kurzory se na konci zapíšou přes `public.pokladna_ulozit_postup` —
+ * ta sloučí JEN kurzory provozoven, jejichž přiřazení se mezitím
+ * nezměnilo. Dřív běh zapsal celé `externi_ucet` ze stavu na svém
+ * začátku a přiřazení uložené mezitím tiše vrátil.
  */
 
 const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
 
 export type VysledekSynchronizacePokladny =
-  | { stav: 'ok'; zapsanoRadku: number; dnu: number; zbyvaDohnatDnu: number }
+  | { stav: 'ok'; zapsanoRadku: number; dnu: number; prazdnych: number; zbyvaDohnatDnu: number }
   | { stav: 'preskoceno'; duvod: string }
   | { stav: 'chyba'; duvod: string }
 
@@ -156,94 +158,109 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
   const kalendar = await kalendarPobocek(supabase, p.tenant_id)
   const historieOd = ucet.historie_od ?? vychoziHistorieOd(provozniDen(Date.now(), '05:00', 'Europe/Prague'))
 
-  // Pracovní kopie přiřazení — kurzory se v ní posouvají a na konci se uloží celé.
-  const provozovny: ProvozovnaUctu[] = (ucet.provozovny ?? []).map((o) => ({ ...o }))
+  type Ukol = UkolBehu & { o: ProvozovnaUctu & { branch_id: string }; kal: { pasmo: string; denZacina: string } }
+  const ukoly: Ukol[] = []
+  for (const o of prirazeneProvozovny(ucet)) {
+    const kal = kalendar.get(o.branch_id)
+    if (!kal) continue // pobočka mezitím zmizela — RPC by zápis stejně odmítla
+    const dnes = provozniDen(Date.now(), kal.denZacina, kal.pasmo)
+    ukoly.push({
+      id: o.id,
+      nazev: o.nazev,
+      dnes,
+      dohnanoOd: o.dohnano_od,
+      souvisleDo: o.souvisle_do ?? null,
+      plan: planDnu({ dnes, historieOd, dohnanoOd: o.dohnano_od, souvisleDo: o.souvisle_do ?? null }),
+      o,
+      kal,
+    })
+  }
 
   let zapsanoRadku = 0
-  let dnu = 0
   let vynechano = 0
-  let chyba: ChybaPos | null = null
+  let prazdnych = 0
 
-  const zpracovatDen = async (o: ProvozovnaUctu & { branch_id: string }, den: string, kal: { pasmo: string; denZacina: string }): Promise<ChybaPos | null> => {
-    const { odMs, doMs } = oknoProvoznihoDne(den, kal.denZacina, kal.pasmo)
-    const prodeje = await relace.prodeje(o.id, odMs, doMs)
+  // Provozovny, které pokladna teď zná — jen když nějaký den přijde prázdný
+  // („nic nemám" smí znamenat zavřeno, ne „takovou provozovnu neznám").
+  let znameProvozovny: Set<string> | ChybaPos | null = null
+  const provozovnaExistuje = async (id: string): Promise<boolean | ChybaPos> => {
+    if (znameProvozovny === null) {
+      const seznam = await relace.provozovny()
+      znameProvozovny = seznam.stav === 'ok' ? new Set(seznam.provozovny.map((x) => x.externiId)) : seznam
+    }
+    return znameProvozovny instanceof Set ? znameProvozovny.has(id) : znameProvozovny
+  }
+
+  const zpracovatDen = async (u: UkolBehu, den: string): Promise<ChybaPos | null> => {
+    const { o, kal } = u as Ukol
+    const okno = oknoProvoznihoDne(den, kal.denZacina, kal.pasmo)
+    // Konec dneška je v budoucnu — pokladna se ptá jen do teď.
+    const prodeje = await relace.prodeje(o.id, okno.odMs, Math.min(okno.doMs, Date.now()))
     if (prodeje.stav === 'chyba') return prodeje
+
+    if (prodeje.prazdne) {
+      const existuje = await provozovnaExistuje(o.id)
+      if (typeof existuje !== 'boolean') return existuje
+      if (!existuje) return { stav: 'chyba', druh: 'jina', duvod: `Provozovna ${o.nazev} v pokladně už není — přiřaďte ji znovu, nebo ji v přiřazení odeberte.` }
+      // Zavřeno: nic se nemaže (prázdná odpověď nesmí smazat dřív stažený den), den je hotový.
+      prazdnych++
+      return null
+    }
 
     const { data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', {
       p_pripojeni: p.id,
       p_branch: o.branch_id,
       p_dny: [den],
       p_radky: prodeje.radky.map((r) => ({ datum: den, produkt_nazev: r.produktNazev, mnozstvi: r.mnozstvi, trzba_haleru: r.trzbaHaleru })),
+      p_provozovna: o.id,
     })
     if (error) return { stav: 'chyba', druh: 'jina', duvod: `Prodeje provozovny ${o.nazev} za ${den} se nepodařilo zapsat.` }
 
     zapsanoRadku += (pocet as number | null) ?? 0
     vynechano += prodeje.vynechano
-    dnu++
     return null
   }
 
-  type Ukol = { o: ProvozovnaUctu & { branch_id: string }; kal: { pasmo: string; denZacina: string }; plan: ReturnType<typeof planDnu> }
-  const ukoly: Ukol[] = []
-  for (const o of provozovny) {
-    if (!o.branch_id) continue
-    const kal = kalendar.get(o.branch_id)
-    if (!kal) continue // pobočka mezitím zmizela — RPC by zápis stejně odmítla
-    const dnes = provozniDen(Date.now(), kal.denZacina, kal.pasmo)
-    ukoly.push({ o: o as ProvozovnaUctu & { branch_id: string }, kal, plan: planDnu({ dnes, historieOd, dohnanoOd: o.dohnano_od }) })
-  }
+  const beh = await probehnoutBeh(ukoly, zpracovatDen, () => Date.now() > moznosti.konecMs)
 
-  // 1) Poslední dny všech provozoven — to, co lidé uvidí jako první.
-  for (const u of ukoly) {
-    let hotovo = 0
-    for (const den of u.plan.posledni) {
-      if (chyba || Date.now() > moznosti.konecMs) break
-      chyba = await zpracovatDen(u.o, den, u.kal)
-      if (!chyba) hotovo++
-    }
-    // Kurzor dohánění začíná za posledními dny, až když je appka má všechny.
-    if (!chyba && u.o.dohnano_od === null && hotovo === u.plan.posledni.length && hotovo > 0) {
-      u.o.dohnano_od = u.plan.posledni[u.plan.posledni.length - 1]
-    }
-  }
+  // Kurzory: jen provozovny, jejichž přiřazení je pořád stejné (sloučí databáze, atomicky).
+  const { error: chybaPostupu } = await supabase.rpc('pokladna_ulozit_postup', {
+    p_pripojeni: p.id,
+    p_historie_od: historieOd,
+    p_postup: beh.postup.map((x) => {
+      const u = ukoly.find((k) => k.id === x.id)!
+      return { id: x.id, branch_id: u.o.branch_id, dohnano_od: x.dohnanoOd, souvisle_do: x.souvisleDo }
+    }),
+  })
 
-  // 2) Historie — provozovnu po provozovně, dokud je čas.
-  for (const u of ukoly) {
-    if (chyba || u.o.dohnano_od === null) continue
-    for (const den of u.plan.dohnat) {
-      if (den >= u.o.dohnano_od) continue
-      if (chyba || Date.now() > moznosti.konecMs) break
-      chyba = await zpracovatDen(u.o, den, u.kal)
-      if (chyba) break
-      u.o.dohnano_od = den
-    }
-  }
-
-  const zbyvaDohnatDnu = ukoly.reduce((soucet, u) => soucet + u.plan.dohnat.filter((den) => u.o.dohnano_od === null || den < u.o.dohnano_od).length, 0)
-  const novyUcet: ExterniUcetPokladny = { ...ucet, historie_od: historieOd, provozovny }
+  const chybyProvozoven = beh.postup.filter((x) => x.chyba).map((x) => x.chyba!.duvod)
   const ted = new Date().toISOString()
 
-  if (chyba) {
+  if (beh.globalni) {
+    const chyba = beh.globalni as ChybaPos
     await supabase.from('integrace_pripojeni').update({
-      externi_ucet: novyUcet,
       stav: chyba.druh === 'pristup' ? 'vyzaduje_pozornost' : p.stav,
       posledni_chyba: chyba.duvod,
+      ...(chyba.druh === 'pristup' ? { posledni_test_kdy: ted, posledni_test_ok: false } : {}),
     }).eq('id', p.id)
     return dokoncit({ stav: 'chyba', duvod: chyba.duvod })
   }
 
+  const poznamky = [...chybyProvozoven]
+  if (chybaPostupu) poznamky.push('Postup stahování se nepodařilo uložit — další běh stáhne pár dní znovu.')
+  if (vynechano > 0) poznamky.push(`${vynechano} položek appka vynechala (záporný součet po vratkách nebo chybějící údaje).`)
+
   await supabase.from('integrace_pripojeni').update({
-    externi_ucet: novyUcet,
     stav: 'pripojeno',
     posledni_sync_kdy: ted,
     posledni_sync_pocet_radku: zapsanoRadku,
     posledni_test_kdy: ted,
     posledni_test_ok: true,
-    // Vynechané položky nejsou chyba spojení, ale člověk o nich má vědět.
-    posledni_chyba: vynechano > 0 ? `Uloženo; ${vynechano} položek appka vynechala (záporný součet po vratkách nebo chybějící údaje).` : null,
+    posledni_chyba: poznamky.length > 0 ? poznamky.join(' ') : null,
   }).eq('id', p.id)
 
-  return dokoncit({ stav: 'ok', zapsanoRadku, dnu, zbyvaDohnatDnu })
+  if (chybyProvozoven.length > 0) return dokoncit({ stav: 'chyba', duvod: chybyProvozoven.join(' ') })
+  return dokoncit({ stav: 'ok', zapsanoRadku, dnu: beh.dnu, prazdnych, zbyvaDohnatDnu: beh.zbyvaDnu })
 }
 
 /**

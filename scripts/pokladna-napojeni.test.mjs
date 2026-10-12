@@ -6,6 +6,7 @@
  *   lib/pokladna-cas.ts           — provozní den, okno od–do, plán dnů
  *   lib/pokladna-prijem-api.ts    — klíč a dávka příjmového API
  *   lib/pokladna-prirazeni.ts     — přiřazení provozoven k pobočkám
+ *   lib/pokladna-beh.ts           — jeden běh synchronizace (pořadí dnů, kurzory, chyby)
  *
  * Pusť `node scripts/pokladna-napojeni.test.mjs`. Výsledek nesmí
  * záviset na pásmu stroje — časy se počítají v Europe/Prague výslovně.
@@ -15,6 +16,7 @@ const { POKLADNY, najitPokladnu, prectiUdaje, zdrojPokladny } = await import('..
 const { mistniCasNaMs, oknoProvoznihoDne, planDnu, provozniDen, posunoutDen, vychoziHistorieOd } = await import('../lib/pokladna-cas.ts')
 const { MAX_RADKU, overitDavku, rozebratKlicPrijmu, slozitKlicPrijmu } = await import('../lib/pokladna-prijem-api.ts')
 const { automatickePrirazeni, prirazeneProvozovny, sloucitProvozovny, zkontrolovatPrirazeni } = await import('../lib/pokladna-prirazeni.ts')
+const { probehnoutBeh } = await import('../lib/pokladna-beh.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -87,6 +89,17 @@ console.log('\n== Plán dnů (poslední dny + dohánění historie) ==')
 
   const novejsiKurzor = planDnu({ dnes: '2026-10-11', historieOd: '2026-10-01', dohnanoOd: '2026-10-10' })
   ok('kurzor novější než poslední dny (dnes posunutý) → dohánění od konce posledních', novejsiKurzor.dohnat[0] === '2026-10-08')
+
+  // Výpadek: poslední běh doběhl 3. 10., dnes je 11. 10. → mezera 3.–8. 10. (3. 10. znovu, tehdy byl rozběhnutý).
+  const vypadek = planDnu({ dnes: '2026-10-11', historieOd: '2026-01-01', dohnanoOd: '2026-01-01', souvisleDo: '2026-10-03' })
+  ok('po výpadku se dotáhne mezera mezi posledním souvislým dnem a posledními dny, od nejstaršího',
+    JSON.stringify(vypadek.mezera) === JSON.stringify(['2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08']))
+  ok('… a historie, která je kompletní, se nestahuje znovu', vypadek.dohnat.length === 0)
+  const bezVypadku = planDnu({ dnes: '2026-10-11', historieOd: '2026-01-01', dohnanoOd: '2026-01-01', souvisleDo: '2026-10-11' })
+  ok('bez výpadku (souvisle do dneška) žádná mezera', bezVypadku.mezera.length === 0)
+  const vcera = planDnu({ dnes: '2026-10-11', historieOd: '2026-01-01', dohnanoOd: '2026-01-01', souvisleDo: '2026-10-09' })
+  ok('souvisle do dne, který je mezi posledními dny → žádná mezera (poslední dny ho přepíšou)', vcera.mezera.length === 0)
+  ok('nová provozovna (bez souvisle_do) mezeru nemá', prvni.mezera.length === 0)
 }
 
 console.log('\n== Příjmové API: klíč ==')
@@ -151,6 +164,8 @@ console.log('\n== Přiřazení provozoven k pobočkám ==')
   const slouceno = sloucitProvozovny([{ externiId: '1', nazev: 'Černá Perla' }, { externiId: '2', nazev: 'Bernard' }], dosavadni)
   ok('známá provozovna si nechá pobočku i kurzor, název se obnoví',
     slouceno[0].branch_id === A && slouceno[0].dohnano_od === '2026-03-01' && slouceno[0].nazev === 'Černá Perla')
+  const sloucenoSouvisle = sloucitProvozovny([{ externiId: '1', nazev: 'P' }], [{ id: '1', nazev: 'P', branch_id: A, dohnano_od: '2026-03-01', souvisle_do: '2026-10-05' }])
+  ok('nové přihlášení zachová souvisle_do (mezera po výpadku se pak dotáhne)', sloucenoSouvisle[0].souvisle_do === '2026-10-05')
   ok('nová provozovna je nepřiřazená', slouceno[1].id === '2' && slouceno[1].branch_id === null)
   ok('provozovna zrušená v pokladně z přiřazení vypadne', slouceno.length === 2 && !slouceno.some((p) => p.id === '9'))
   ok('přiřazené = jen ty s pobočkou', prirazeneProvozovny({ provozovny: slouceno }).length === 1)
@@ -175,10 +190,15 @@ console.log('\n== Přiřazení provozoven k pobočkám ==')
   const dvakrat = zkontrolovatPrirazeni(dve, { 1: A, 2: A }, firma, nic)
   ok('jedna pobočka dvakrát → chyba', dvakrat.stav === 'chyba' && dvakrat.duvod.includes('jen jednu'))
   const jinde = zkontrolovatPrirazeni(dve, { 1: A, 2: B }, firma, new Set([B]))
-  ok('pobočka, kterou tahle pokladna plní v jiném připojení → chyba', jinde.stav === 'chyba' && jinde.duvod.includes('jinde'))
+  ok('pobočka, kterou plní jiné napojení pokladny → chyba', jinde.stav === 'chyba' && jinde.duvod.includes('jiného napojení'))
+  const vypnuta = zkontrolovatPrirazeni([{ id: '1', nazev: 'Perla', branch_id: C, dohnano_od: '2026-03-01' }], { 1: C }, firma, new Set([C]))
+  ok('nezměněné přiřazení k (mezitím vypnuté) pobočce projde a nic neuklízí',
+    vypnuta.stav === 'ok' && vypnuta.provozovny[0].branch_id === C && vypnuta.provozovny[0].dohnano_od === '2026-03-01' && vypnuta.opustenePobocky.length === 0)
 
   const presun = zkontrolovatPrirazeni(dve, { 1: B, 2: '' }, firma, nic)
   ok('přesun provozovny do jiné pobočky vynuluje kurzor', presun.stav === 'ok' && presun.provozovny[0].branch_id === B && presun.provozovny[0].dohnano_od === null)
+  const presunSouvisle = zkontrolovatPrirazeni([{ id: '1', nazev: 'P', branch_id: A, dohnano_od: '2026-03-01', souvisle_do: '2026-10-10' }], { 1: B }, firma, nic)
+  ok('… i souvisle_do (nová pobočka začíná od nuly, ne od mezery staré)', presunSouvisle.stav === 'ok' && presunSouvisle.provozovny[0].souvisle_do === null)
   ok('… a původní pobočka se uklidí', presun.stav === 'ok' && JSON.stringify(presun.opustenePobocky) === JSON.stringify([A]))
 
   const odebrat = zkontrolovatPrirazeni(dve, { 1: '', 2: '' }, firma, nic)
@@ -189,6 +209,89 @@ console.log('\n== Přiřazení provozoven k pobočkám ==')
     { 1: B, 2: A }, firma, nic)
   ok('prohození dvou provozoven uklidí obě pobočky (do dohnání by tam zůstala cizí čísla)',
     vymena.stav === 'ok' && vymena.opustenePobocky.length === 2 && vymena.provozovny.every((p) => p.dohnano_od === null))
+}
+
+console.log('\n== Běh synchronizace (pořadí, kurzory, chyby po provozovnách) ==')
+{
+  const plan = (dnes, souvisleDo, dohnanoOd, historieOd = '2026-10-01') => planDnu({ dnes, historieOd, dohnanoOd, souvisleDo })
+  const ukol = (id, { dohnanoOd = null, souvisleDo = null, dnes = '2026-10-11' } = {}) => ({ id, nazev: `P${id}`, dnes, dohnanoOd, souvisleDo, plan: plan(dnes, souvisleDo, dohnanoOd) })
+  const chyba = (druh, duvod = druh) => ({ stav: 'chyba', druh, duvod })
+  const zaznam = () => {
+    const dny = []
+    return { dny, zpracovat: (vysledky = {}) => async (u, den) => { dny.push(`${u.id}:${den}`); return vysledky[`${u.id}:${den}`] ?? null } }
+  }
+
+  // Nová provozovna: poslední 3 dny, pak historie dozadu; souvisle_do = dnes.
+  const z1 = zaznam()
+  const b1 = await probehnoutBeh([ukol('A')], z1.zpracovat(), () => false)
+  const a1 = b1.postup[0]
+  ok('nová provozovna: nejdřív poslední dny, pak historie od novější ke starší',
+    z1.dny.slice(0, 4).join() === 'A:2026-10-11,A:2026-10-10,A:2026-10-09,A:2026-10-08' && z1.dny.at(-1) === 'A:2026-10-01')
+  ok('… kurzory: historie dohnaná do historie_od, souvisle do dneška', a1.dohnanoOd === '2026-10-01' && a1.souvisleDo === '2026-10-11' && b1.zbyvaDnu === 0)
+
+  // Den v historii, kterému appka nerozumí (jina): zastaví jen tu provozovnu, druhá jede dál.
+  const z2 = zaznam()
+  const b2 = await probehnoutBeh([ukol('A'), ukol('B')], z2.zpracovat({ 'A:2026-10-05': chyba('jina', 'divný den') }), () => false)
+  const [a2, bb2] = b2.postup
+  ok('chyba jednoho dne v historii provozovny A nezastaví historii provozovny B',
+    bb2.dohnanoOd === '2026-10-01' && z2.dny.includes('B:2026-10-01') && !b2.globalni)
+  ok('… A má chybu a kurzor stojí za posledním dobrým dnem', a2.chyba?.duvod === 'divný den' && a2.dohnanoOd === '2026-10-06')
+
+  // Neplatný token (pristup) nebo nedostupná pokladna (docasna) zastaví všechno.
+  const z3 = zaznam()
+  const b3 = await probehnoutBeh([ukol('A'), ukol('B')], z3.zpracovat({ 'A:2026-10-10': chyba('pristup', 'token') }), () => false)
+  ok('neplatný přístup u jedné provozovny zastaví celý běh (token je společný)', b3.globalni?.druh === 'pristup' && !z3.dny.some((d) => d.startsWith('B:')))
+  const z3b = zaznam()
+  const b3b = await probehnoutBeh([ukol('A'), ukol('B')], z3b.zpracovat({ 'A:2026-10-11': chyba('docasna') }), () => false)
+  ok('nedostupná pokladna taky (zkusí se příště celé)', b3b.globalni?.druh === 'docasna' && z3b.dny.length === 1)
+
+  // Výpadek: souvisle do 3. 10., dnes 11. 10. → poslední dny, pak mezera 3.–8. 10. od nejstaršího.
+  const z4 = zaznam()
+  const b4 = await probehnoutBeh([ukol('A', { dohnanoOd: '2026-10-01', souvisleDo: '2026-10-03' })], z4.zpracovat(), () => false)
+  ok('po výpadku: poslední dny, pak mezera od nejstaršího dne',
+    z4.dny.join() === 'A:2026-10-11,A:2026-10-10,A:2026-10-09,A:2026-10-03,A:2026-10-04,A:2026-10-05,A:2026-10-06,A:2026-10-07,A:2026-10-08')
+  ok('… a souvisle_do je zase dnešek', b4.postup[0].souvisleDo === '2026-10-11' && b4.zbyvaDnu === 0)
+
+  // Mezera přerušená časem: souvisle_do = poslední hotový den mezery, zbytek se počítá.
+  const z5 = zaznam()
+  let kroku = 0
+  const b5 = await probehnoutBeh([ukol('A', { dohnanoOd: '2026-10-01', souvisleDo: '2026-10-03' })], z5.zpracovat(), () => ++kroku > 5)
+  ok('přerušená mezera: souvisle_do = poslední hotový den, zbývající dny se hlásí',
+    b5.postup[0].souvisleDo === '2026-10-04' && b5.zbyvaDnu === 4)
+
+  // Poslední dny nedoběhly → souvisle_do se neposune (jinak by „souvisle do dneška" lhalo).
+  const z6 = zaznam()
+  const b6 = await probehnoutBeh([ukol('A', { dohnanoOd: '2026-10-01', souvisleDo: '2026-10-03' })], z6.zpracovat({ 'A:2026-10-09': chyba('jina') }), () => false)
+  ok('nedoběhlé poslední dny → souvisle_do i mezera beze změny', b6.postup[0].souvisleDo === '2026-10-03' && !z6.dny.includes('A:2026-10-03'))
+
+  // Prázdná mezera (souvisle do včerejška), ale den v posledních dnech selhal → souvisle_do se NESMÍ posunout na dnešek,
+  // jinak by ten den po vypadnutí z okna posledních dní už nikdo nestáhl.
+  const z6b = zaznam()
+  const b6b = await probehnoutBeh([ukol('A', { dohnanoOd: '2026-10-01', souvisleDo: '2026-10-10' })], z6b.zpracovat({ 'A:2026-10-10': chyba('jina') }), () => false)
+  ok('chyba v posledních dnech při prázdné mezeře → souvisle_do zůstane (ne „dnešek")', b6b.postup[0].souvisleDo === '2026-10-10')
+  const z6c = zaznam()
+  let kroku6c = 0
+  const b6c = await probehnoutBeh([ukol('A', { dohnanoOd: '2026-10-01', souvisleDo: '2026-10-10' })], z6c.zpracovat(), () => ++kroku6c > 1)
+  ok('došel čas v posledních dnech při prázdné mezeře → souvisle_do zůstane', b6c.postup[0].souvisleDo === '2026-10-10')
+
+  // Nová provozovna, poslední dny nedoběhly → historie se nezačne (kurzor neexistuje).
+  const z7 = zaznam()
+  const b7 = await probehnoutBeh([ukol('A')], z7.zpracovat({ 'A:2026-10-10': chyba('jina') }), () => false)
+  ok('nová provozovna s chybou v posledních dnech: žádný kurzor, žádná historie', b7.postup[0].dohnanoOd === null && z7.dny.length === 2)
+}
+
+console.log('\n== Příjmové API: limity, které databáze unese ==')
+{
+  const dnes = '2026-10-11'
+  const radek = (produkt, trzba) => ({ datum: '2026-10-10', produkt, mnozstvi: 1, trzba })
+  const preteceni = overitDavku({ prodeje: [radek('Pivo', 15_000_000), radek('Pivo', 15_000_000)] }, dnes)
+  ok('stejný produkt za den nad 21 474 836 Kč (součet) → chyba dávky, ne pád databáze', preteceni.stav === 'chyba' && preteceni.duvod.includes('haléře'))
+  const jeden = overitDavku({ prodeje: [radek('Pivo', 21_000_000)] }, dnes)
+  ok('jedna položka nad 20 mil. Kč (pod limitem sloupce) → chyba, i když by se do databáze vešla', jeden.stav === 'chyba' && jeden.duvod.includes('Položka 1'))
+  const ridici = overitDavku({ prodeje: [radek('Ko\u0000la\t', 10)] }, dnes)
+  ok('řídicí znaky v názvu produktu pryč (\\u0000 by databáze odmítla)', ridici.stav === 'ok' && ridici.radky[0].produktNazev === 'Ko la')
+  const mezery = overitDavku({ prodeje: [radek('Pilsner  0,5 l', 10)] }, dnes)
+  ok('vnitřní mezery v názvu zůstávají (shoda s recepturou)', mezery.stav === 'ok' && mezery.radky[0].produktNazev === 'Pilsner  0,5 l')
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')

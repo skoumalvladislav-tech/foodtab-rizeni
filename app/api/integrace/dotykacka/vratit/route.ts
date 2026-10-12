@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server'
+import { after, NextResponse, type NextRequest } from 'next/server'
 
 import { getServerSupabase } from '@/lib/supabase/server'
 import { podpisSedi } from '@/lib/integrace-klice'
@@ -17,7 +17,9 @@ import { synchronizovatPokladnu } from '@/lib/pokladna-sync'
  *
  * Refresh token přijde v adrese — tak to Dotykačka navrhla. Appka ho
  * hned zašifruje a přesměruje na čistou adresu, aby nezůstal v historii
- * prohlížeče.
+ * prohlížeče. První stažení prodejů běží AŽ PO odpovědi (`after`) —
+ * kdyby běželo před přesměrováním a funkce na serveru narazila na časový
+ * strop, prohlížeči by zůstala chybová stránka s tokenem v adrese.
  *
  * Když už firma tenhle cloud připojený má (Cloud ID se shoduje), token
  * dostane TO připojení (přiřazení provozoven zůstane) a rozjetý pokus
@@ -76,8 +78,16 @@ export async function GET(request: NextRequest) {
 
   const overeni = await overitPokladnu(popis.klic, udaje)
   if (overeni.stav === 'chyba') {
-    await supabase.from('integrace_pripojeni').update({ stav: 'chyba', posledni_chyba: overeni.duvod }).eq('id', pripojeni.id)
-    return cil({ chyba: `Dotykačka: přístup se nepodařilo ověřit — ${overeni.duvod}` })
+    // Dočasná nedostupnost o tokenu nic neříká — pokus zůstane „Připojuje se…"
+    // a další kliknutí na „Přihlásit přes Dotykačku" ho použije znovu.
+    await supabase.from('integrace_pripojeni').update(
+      overeni.druh === 'docasna' ? { posledni_chyba: overeni.duvod } : { stav: 'chyba', posledni_chyba: overeni.duvod },
+    ).eq('id', pripojeni.id)
+    return cil({
+      chyba: overeni.druh === 'docasna'
+        ? `Dotykačka teď neodpovídá — přihlaste se za chvíli znovu. (${overeni.duvod})`
+        : `Dotykačka: přístup se nepodařilo ověřit — ${overeni.duvod}`,
+    })
   }
 
   const tenantId = pripojeni.tenant_id as string
@@ -108,8 +118,9 @@ export async function GET(request: NextRequest) {
     return cil({ ok: `Dotykačka je ověřená (${ulozeni.celkem} provozoven). Teď u ní přiřaďte provozovny k pobočkám v appce.` })
   }
 
-  const prvni = await synchronizovatPokladnu(ciloveId, { konecMs: Date.now() + 20_000 })
-  return cil(prvni.stav === 'chyba'
-    ? { chyba: `Dotykačka je připojená, ale první stažení se nepovedlo: ${prvni.duvod}` }
-    : { ok: prvni.stav === 'ok' ? `Dotykačka je připojená. Staženo ${prvni.dnu} dní, ${prvni.zapsanoRadku} řádků prodeje.` : prvni.duvod })
+  // Výsledek stažení se ukáže u připojení (poslední synchronizace / chyba).
+  after(async () => {
+    await synchronizovatPokladnu(ciloveId, { konecMs: Date.now() + 40_000 })
+  })
+  return cil({ ok: 'Dotykačka je připojená. První prodeje se stahují — za minutu obnovte stránku.' })
 }

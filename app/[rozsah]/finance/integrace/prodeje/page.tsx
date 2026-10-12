@@ -30,6 +30,11 @@ const karta = {
 
 type DenniSouhrn = { datum: string; trzbaHaleru: number; pocetProduktu: number }
 
+/** Datum (RRRR-MM-DD, UTC) před `dny` dny — mimo komponentu, ať render zůstane čistý. */
+function datumPred(dny: number): string {
+  return new Date(Date.now() - dny * 86_400_000).toISOString().slice(0, 10)
+}
+
 export default async function FinanceIntegraceProdeje({
   params,
 }: {
@@ -51,18 +56,39 @@ export default async function FinanceIntegraceProdeje({
 
   const supabase = await getServerSupabase()
 
-  const [branchesRes, prodejeRes] = await Promise.all([
+  type Radek = { datum: string; branch_id: string; zdroj: string; trzba_haleru: number }
+
+  /**
+   * Řádky posledních 60 dní PO STRÁNKÁCH. Databáze vrací nejvýš 1000
+   * řádků na dotaz (max_rows) — s napojenou pokladnou (stovky produktů
+   * denně) by dřívější `.limit(2000)` ukázal jen pár dní a nejstarší
+   * z nich useknutý v půlce (s nižší tržbou, než měl).
+   */
+  const nacistRadky = async (): Promise<Radek[]> => {
+    const od = datumPred(60)
+    const vse: Radek[] = []
+    for (let strana = 0; strana < 50; strana++) {
+      const { data } = await supabase
+        .from('pokladna_prodeje_denni')
+        .select('datum, branch_id, zdroj, trzba_haleru')
+        .eq('tenant_id', tenantId)
+        .gte('datum', od)
+        .order('datum', { ascending: false })
+        .order('id')
+        .range(strana * 1000, strana * 1000 + 999)
+      const cast = (data ?? []) as Radek[]
+      vse.push(...cast)
+      if (cast.length < 1000) break
+    }
+    return vse
+  }
+
+  const [branchesRes, radky] = await Promise.all([
     supabase.from('branches').select('id, name').eq('tenant_id', tenantId).eq('active', true).is('deleted_at', null),
-    supabase
-      .from('pokladna_prodeje_denni')
-      .select('datum, branch_id, zdroj, trzba_haleru')
-      .eq('tenant_id', tenantId)
-      .order('datum', { ascending: false })
-      .limit(2000),
+    nacistRadky(),
   ])
 
   const branches = (branchesRes.data ?? []) as { id: string; name: string }[]
-  const radky = (prodejeRes.data ?? []) as { datum: string; branch_id: string; zdroj: string; trzba_haleru: number }[]
 
   // Stejné pravidlo jako foodcost (20261011100000): má-li pobočka v daný
   // den data z napojené pokladny, CSV téhož dne se nepočítá — jinak by se

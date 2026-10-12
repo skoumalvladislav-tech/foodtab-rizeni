@@ -58,8 +58,11 @@ export type RelacePos = {
    * Prodej po produktech v okně `[odMs, doMs)`. Stejný produkt nejvýš
    * jednou (adaptér sčítá). `vynechano` = položky, které appka nemohla
    * uložit (např. záporný součet po vratkách) — počítá se, nemlčí se.
+   * `prazdne` = pokladna výslovně řekla „za tohle okno nic nemám"
+   * (Dotykačka: 404). Synchronizace pak nic nemaže — jen ověří, že
+   * provozovna pořád existuje, a den bere jako hotový (zavřeno, svátek).
    */
-  prodeje(externiProvozovna: string, odMs: number, doMs: number): Promise<{ stav: 'ok'; radky: RadekProdeje[]; vynechano: number } | ChybaPos>
+  prodeje(externiProvozovna: string, odMs: number, doMs: number): Promise<{ stav: 'ok'; radky: RadekProdeje[]; vynechano: number; prazdne?: boolean } | ChybaPos>
 }
 
 export type SchopnostiPosProvidera = {

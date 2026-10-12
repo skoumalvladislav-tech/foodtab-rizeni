@@ -98,13 +98,13 @@ returning id as ucto \gset
 \echo '== 1. Zápis a úklid smí jen service_role ========================'
 
 select pg_temp.check('anon nemá EXECUTE na pokladna_nahradit_prodeje',
-  not has_function_privilege('anon', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb)', 'execute'));
+  not has_function_privilege('anon', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute'));
 select pg_temp.check('authenticated nemá EXECUTE na pokladna_nahradit_prodeje (zapisuje za pokladnu, ne za sebe)',
-  not has_function_privilege('authenticated', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb)', 'execute'));
+  not has_function_privilege('authenticated', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute'));
 select pg_temp.check('authenticated nemá EXECUTE na pokladna_odebrat_prodeje',
   not has_function_privilege('authenticated', 'public.pokladna_odebrat_prodeje(uuid, uuid)', 'execute'));
 select pg_temp.check('service_role EXECUTE na obě má',
-  has_function_privilege('service_role', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb)', 'execute')
+  has_function_privilege('service_role', 'public.pokladna_nahradit_prodeje(uuid, uuid, date[], jsonb, text)', 'execute')
   and has_function_privilege('service_role', 'public.pokladna_odebrat_prodeje(uuid, uuid)', 'execute'));
 
 set role authenticated;
@@ -182,7 +182,7 @@ reset role;
 set role service_role;
 select public.pokladna_nahradit_prodeje(:'dotyk', :'perla', array['2026-10-05']::date[], '[
   {"datum":"2026-10-05","produkt_nazev":"Krok93 Svíčková","mnozstvi":3,"trzba_haleru":75000}
-]'::jsonb) as zapsano_4 \gset
+]'::jsonb, '11') as zapsano_4 \gset
 reset role;
 
 select pg_temp.check('provozovna přiřazená k Perle zapsala do Perly, zdroj dotykacka_api',
@@ -192,7 +192,7 @@ select pg_temp.check('provozovna přiřazená k Perle zapsala do Perly, zdroj do
 set role service_role;
 select pg_temp.check('pobočka bez přiřazené provozovny (Bar) → odmítnuto',
   pg_temp.spadne_hlaskou(
-    format('select public.pokladna_nahradit_prodeje(%L, %L, array[%L]::date[], %L::jsonb)', :'dotyk', :'bar', '2026-10-05', '[]'),
+    format('select public.pokladna_nahradit_prodeje(%L, %L, array[%L]::date[], %L::jsonb, %L)', :'dotyk', :'bar', '2026-10-05', '[]', '12'),
     '23514', 'není přiřazená'));
 select pg_temp.check('bez pobočky u firemního připojení → odmítnuto',
   pg_temp.spadne_hlaskou(
@@ -212,8 +212,8 @@ update public.integrace_pripojeni
 set role service_role;
 select pg_temp.check('cizí pobočka v přiřazení → druhá linie („Pobočka nepatří této firmě")',
   pg_temp.spadne_hlaskou(
-    format('select public.pokladna_nahradit_prodeje(%L, %L, array[%L]::date[], %L::jsonb)', :'dotyk', :'cizi_pobocka', '2026-10-05',
-      '[{"datum":"2026-10-05","produkt_nazev":"X","mnozstvi":1,"trzba_haleru":1}]'),
+    format('select public.pokladna_nahradit_prodeje(%L, %L, array[%L]::date[], %L::jsonb, %L)', :'dotyk', :'cizi_pobocka', '2026-10-05',
+      '[{"datum":"2026-10-05","produkt_nazev":"X","mnozstvi":1,"trzba_haleru":1}]', '12'),
     '23514', 'Pobočka nepatří'));
 reset role;
 update public.integrace_pripojeni

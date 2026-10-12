@@ -21,6 +21,11 @@
  *     produktu, který `pokladna_prodeje_denni` drží.
  *   * „Všechna čísla v odpovědi jsou řetězce" — appka bere číslo
  *     i číselný text.
+ *   * 401/403 nesou pole `reason` (api-reference/general/common-error-responses).
+ *     Neplatný token je jen část z nich — licence, zakázaná cesta nebo
+ *     cloud se opravují jinak, viz `chybaZeStavu`.
+ *   * GET bez shody vrací 404 („did not find any entity matching the
+ *     filter") — u přehledu tržeb = den bez prodejů (`prazdne`).
  *
  * CO APPKA ODVODILA, NE OVĚŘILA (dokumentace to výslovně neříká):
  *   * `value` je tržba S DPH — vedle je `valueWithoutVAT`. Ověří se
@@ -114,7 +119,8 @@ export function naparsovatReport(telo: unknown): { radky: RadekProdeje[]; vynech
   let vynechano = 0
 
   for (const p of polozky as Record<string, unknown>[]) {
-    const nazev = (typeof p?.name === 'string' && p.name.trim()) || (p?.id !== undefined && p?.id !== null ? `Produkt ${String(p.id)}` : '')
+    const jmeno = typeof p?.name === 'string' ? p.name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim() : ''
+    const nazev = jmeno || (p?.id !== undefined && p?.id !== null ? `Produkt ${String(p.id)}` : '')
     const mnozstvi = cislo(p?.count)
     const hodnota = cislo(p?.value)
     if (!nazev || mnozstvi === null || hodnota === null) {
@@ -140,9 +146,39 @@ export function naparsovatReport(telo: unknown): { radky: RadekProdeje[]; vynech
   return { radky, vynechano }
 }
 
-function chybaZeStavu(status: number, coDelam: string): ChybaPos {
+/** `reason` z 401/403 (velká písmena a podtržítka) — do hlášky jen tohle, text odpovědi ne. */
+export function duvodOdmitnuti(telo: unknown): string {
+  const r = (telo as { reason?: unknown } | null)?.reason
+  return typeof r === 'string' && /^[A-Z_]{1,40}$/.test(r.trim().toUpperCase()) ? r.trim().toUpperCase() : ''
+}
+
+/** Neplatný nebo odebraný refresh token — opraví jen nové přihlášení. */
+const DUVODY_TOKENU = new Set(['INVALID_AUTH_HEADER', 'INVALID_REFRESH_TOKEN', 'UNAUTHORIZED'])
+/** Krátký přístupový token — appka si příště vezme nový sama. */
+const DUVODY_DOCASNE = new Set(['INVALID_ACCESS_TOKEN', 'ACCESS_TOKEN_EXPIRED'])
+
+/**
+ * 401/403 podle `reason`: jen neplatný token (nebo chybějící důvod)
+ * je `pristup` — připojení pak čeká na nové přihlášení. Licence,
+ * zakázaná cesta nebo interní chyba Dotykačky token neopraví; kdyby se
+ * hlásily jako „vložte nový token", člověk by se přihlašoval dokola.
+ */
+function chybaZeStavu(status: number, coDelam: string, telo: unknown = null): ChybaPos {
   if (status === 401 || status === 403) {
-    return { stav: 'chyba', druh: 'pristup', duvod: 'Dotykačka odmítla přístup — token je neplatný, vypršel, nebo byl v Dotykačce odebrán. Vložte nový.' }
+    const duvod = duvodOdmitnuti(telo)
+    if (DUVODY_DOCASNE.has(duvod)) {
+      return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka odmítla krátkodobý přístupový token (${duvod}) — appka se příště přihlásí znovu.` }
+    }
+    if (duvod === 'CLOUD_FORBIDDEN') {
+      return { stav: 'chyba', druh: 'pristup', duvod: 'Dotykačka už appce nepovoluje přístup k tomuto cloudu (CLOUD_FORBIDDEN) — přihlaste se přes Dotykačku znovu.' }
+    }
+    if (duvod === 'LICENSE_UPGRADE_REQUIRED') {
+      return { stav: 'chyba', druh: 'jina', duvod: `Dotykačka odmítla ${coDelam}: vyžaduje vyšší licenci (LICENSE_UPGRADE_REQUIRED). Token je v pořádku — obraťte se na podporu Dotykačky.` }
+    }
+    if (duvod && !DUVODY_TOKENU.has(duvod)) {
+      return { stav: 'chyba', druh: 'jina', duvod: `Dotykačka odmítla ${coDelam} (${duvod}). Nejde o neplatný token — obraťte se na podporu Dotykačky.` }
+    }
+    return { stav: 'chyba', druh: 'pristup', duvod: 'Dotykačka odmítla přístup — token je neplatný, vypršel, nebo byl v Dotykačce odebrán. Přihlaste se znovu.' }
   }
   if (status === 429) {
     return { stav: 'chyba', druh: 'docasna', duvod: 'Dotykačka teď odmítá další dotazy (příliš mnoho najednou) — appka to zkusí při příští synchronizaci.' }
@@ -205,9 +241,11 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
       })
       if (jeChyba(prihlaseni)) return prihlaseni
       if (prihlaseni.status === 401 || prihlaseni.status === 403) {
+        const chyba = chybaZeStavu(prihlaseni.status, 'přihlášení', prihlaseni.telo)
+        if (chyba.druh !== 'pristup') return chyba
         return { stav: 'chyba', druh: 'pristup', duvod: 'Dotykačka token nepřijala — zkontrolujte, že je celý a že Cloud ID patří k němu.' } satisfies ChybaPos
       }
-      if (prihlaseni.status !== 200 && prihlaseni.status !== 201) return chybaZeStavu(prihlaseni.status, 'přihlášení')
+      if (prihlaseni.status !== 200 && prihlaseni.status !== 201) return chybaZeStavu(prihlaseni.status, 'přihlášení', prihlaseni.telo)
 
       const accessToken = (prihlaseni.telo as { accessToken?: unknown } | null)?.accessToken
       if (typeof accessToken !== 'string' || !accessToken) {
@@ -224,7 +262,7 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
             if (jeChyba(odpoved)) return odpoved
             // „lastPage … pro prázdná data API zatím vrací 404" (api-reference/general/paging)
             if (odpoved.status === 404) break
-            if (odpoved.status !== 200) return chybaZeStavu(odpoved.status, 'čtení provozoven')
+            if (odpoved.status !== 200) return chybaZeStavu(odpoved.status, 'čtení provozoven', odpoved.telo)
 
             const cast = naparsovatProvozovny(odpoved.telo)
             if (!cast) return { stav: 'chyba', druh: 'jina', duvod: 'Seznam provozoven z Dotykačky má neočekávaný tvar.' } satisfies ChybaPos
@@ -246,7 +284,9 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
             { headers: hlavicky },
           )
           if (jeChyba(odpoved)) return odpoved
-          if (odpoved.status !== 200) return chybaZeStavu(odpoved.status, 'čtení tržeb')
+          // „GET … did not find any entity matching the filter" — za tohle okno nic (zavřeno).
+          if (odpoved.status === 404) return { stav: 'ok', radky: [], vynechano: 0, prazdne: true }
+          if (odpoved.status !== 200) return chybaZeStavu(odpoved.status, 'čtení tržeb', odpoved.telo)
 
           const report = naparsovatReport(odpoved.telo)
           if (!report) return { stav: 'chyba', druh: 'jina', duvod: 'Přehled tržeb z Dotykačky má neočekávaný tvar (chybí productSales).' } satisfies ChybaPos
