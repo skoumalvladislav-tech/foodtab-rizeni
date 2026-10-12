@@ -7,6 +7,7 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { podepsatText, sifrovaniJeNastavene } from '@/lib/integrace-klice'
 import { zakladniAdresaAplikace } from '@/lib/integrace-adresa'
 import { CONNECTOR_DOTYKACKA, parametryConnectoru } from '@/lib/pokladna-dotykacka'
+import { klientDotykacky } from '@/lib/pokladna-pripojeni'
 import Sdeleni from '@/app/sdeleni'
 import OdeslatHned from './odeslat-hned'
 
@@ -63,9 +64,8 @@ export default async function PrihlaseniDotykacka({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Pokladny připojuje ten, kdo má právo „Správa napojení na externí systémy“.</Sdeleni>
   }
 
-  const clientId = process.env.DOTYKACKA_CLIENT_ID
-  const clientSecret = process.env.DOTYKACKA_CLIENT_SECRET
-  if (!clientId || !clientSecret || !sifrovaniJeNastavene()) {
+  const klient = klientDotykacky()
+  if (!klient || !sifrovaniJeNastavene()) {
     return <Sdeleni nadpis="Přihlášení přes Dotykačku není nastavené">Vložte token a Cloud ID ručně na stránce Pokladní systémy.</Sdeleni>
   }
 
@@ -87,8 +87,8 @@ export default async function PrihlaseniDotykacka({
   const pole = podepsanyFormular({
     pripojeniId: pripojeni.id as string,
     rozsah,
-    clientId,
-    clientSecret,
+    clientId: klient.clientId,
+    clientSecret: klient.clientSecret,
     redirectUri: `${await zakladniAdresaAplikace()}/api/integrace/dotykacka/vratit`,
   })
 
@@ -103,7 +103,7 @@ export default async function PrihlaseniDotykacka({
         <button type="submit" className="ft-tl ft-tl-hlavni">Pokračovat do Dotykačky</button>
       </form>
       <Link href={`/${rozsah}/finance/integrace/pokladna`} className="ft-tl" style={{ justifySelf: 'start' }}>Zrušit</Link>
-      <OdeslatHned formular="dotykacka-connector" />
+      <OdeslatHned formular="dotykacka-connector" zpet={`/${rozsah}/finance/integrace/pokladna`} />
     </main>
   )
 }

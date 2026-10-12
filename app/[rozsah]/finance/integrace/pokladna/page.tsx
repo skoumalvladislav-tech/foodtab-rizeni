@@ -6,11 +6,14 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
 import { sifrovaniJeNastavene } from '@/lib/integrace-klice'
 import { vychoziHistorieOd } from '@/lib/pokladna-cas'
+import { klientDotykacky } from '@/lib/pokladna-pripojeni'
 import Sdeleni from '@/app/sdeleni'
 import Navigace from '../../navigace'
 import ObsahPokladen, { type Pripojeni } from './obsah'
 
 export const dynamic = 'force-dynamic'
+// Akce stránky („Ověřit a připojit", přiřazení, „Synchronizovat teď") stahují prodeje — strop 60 s.
+export const maxDuration = 60
 
 /**
  * Integrace → Pokladní systémy.
@@ -51,7 +54,7 @@ export default async function PokladniSystemy({
 
   const smiPsat = canSee(pristup.ctx, 'integrace.manage')
   const sifrovani = sifrovaniJeNastavene()
-  const prihlaseniDotykacka = Boolean(process.env.DOTYKACKA_CLIENT_ID && process.env.DOTYKACKA_CLIENT_SECRET)
+  const prihlaseniDotykacka = klientDotykacky() !== null
 
   const supabase = await getServerSupabase()
   const [pobockyRes, pripojeniRes] = await Promise.all([

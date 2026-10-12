@@ -98,7 +98,17 @@ export async function POST(request: Request): Promise<NextResponse> {
     p_dny: davka.dny,
     p_radky: davka.radky.map((r) => ({ datum: r.datum, produkt_nazev: r.produktNazev, mnozstvi: r.mnozstvi, trzba_haleru: r.trzbaHaleru })),
   })
-  if (error) return chyba(500, 'zapis_selhal', 'Prodeje se nepodařilo zapsat — zkuste to znovu.')
+  if (error) {
+    // Chyba v datech (mimo rozsah, neplatný text, kontrola) se opakováním
+    // nespraví — 422 a důvod u připojení, ne „zkuste znovu" do nekonečna.
+    const vData = ['22003', '22P02', '22P05', '22007', '22008', '23514'].includes(error.code ?? '')
+    await supabase.from('integrace_pripojeni').update({
+      posledni_chyba: vData ? `Poslední dávka odmítnuta databází (${error.code}).` : `Zápis poslední dávky selhal (${error.code ?? 'neznámá chyba'}) — pokladna ho má zopakovat.`,
+    }).eq('id', pripojeni.id)
+    return vData
+      ? chyba(422, 'neplatna_data', 'Data dávky databáze odmítla (mimo rozsah nebo neplatný text) — opakování nepomůže, opravte je.')
+      : chyba(500, 'zapis_selhal', 'Prodeje se nepodařilo zapsat — zkuste to znovu.')
+  }
 
   const ted = new Date().toISOString()
   await supabase.from('integrace_pripojeni').update({

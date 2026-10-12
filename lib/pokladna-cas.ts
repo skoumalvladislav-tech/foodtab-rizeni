@@ -117,9 +117,17 @@ export function provozniDen(ms: number, denZacina: string, pasmo: string): strin
  * Kurzor je výslovný, ne „nejstarší den s daty": den, kdy měla
  * provozovna zavřeno, nemá ani jeden řádek — appka by se na něj
  * ptala pořád dokola a dál by se nedostala.
+ *
+ * `mezera` — dny mezi `souvisleDo` (nejnovější den, do kterého appka
+ * měla data souvisle, když naposledy doběhla) a posledními dny. Po
+ * výpadku delším než pár dní (neplatný token, nedostupná pokladna,
+ * nefunkční úloha) by jinak v datech zůstala tichá díra: posledních
+ * pár dní se přepisuje a historie se dohání jen DOZADU od `dohnanoOd`.
+ * Od nejstaršího dne, `souvisleDo` včetně (tehdy mohl být rozběhnutý).
  */
-export function planDnu(vstup: { dnes: string; historieOd: string; dohnanoOd: string | null; poslednich?: number }): { posledni: string[]; dohnat: string[] } {
+export function planDnu(vstup: { dnes: string; historieOd: string; dohnanoOd: string | null; souvisleDo?: string | null; poslednich?: number }): { posledni: string[]; mezera: string[]; dohnat: string[] } {
   const { dnes, historieOd, dohnanoOd } = vstup
+  const souvisleDo = vstup.souvisleDo ?? null
   const poslednich = vstup.poslednich ?? 3
 
   const posledni: string[] = []
@@ -128,13 +136,19 @@ export function planDnu(vstup: { dnes: string; historieOd: string; dohnanoOd: st
     if (den < historieOd) break
     posledni.push(den)
   }
-  if (posledni.length === 0) return { posledni, dohnat: [] }
+  if (posledni.length === 0) return { posledni, mezera: [], dohnat: [] }
 
   const nejstarsiPosledni = posledni[posledni.length - 1]
+
+  const mezera: string[] = []
+  if (souvisleDo && souvisleDo < nejstarsiPosledni) {
+    for (let den = souvisleDo < historieOd ? historieOd : souvisleDo; den < nejstarsiPosledni; den = posunoutDen(den, 1)) mezera.push(den)
+  }
+
   const odkud = dohnanoOd && dohnanoOd < nejstarsiPosledni ? dohnanoOd : nejstarsiPosledni
 
   const dohnat: string[] = []
   for (let den = posunoutDen(odkud, -1); den >= historieOd; den = posunoutDen(den, -1)) dohnat.push(den)
 
-  return { posledni, dohnat }
+  return { posledni, mezera, dohnat }
 }

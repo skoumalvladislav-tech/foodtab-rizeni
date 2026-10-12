@@ -27,8 +27,18 @@ export const MAX_RADKU = 5000
 export const MAX_DNU = 62
 const MAX_DELKA_PRODUKTU = 200
 const MAX_MNOZSTVI = 10_000_000
-/** 100 milionů Kč za jeden produkt a den — víc je překlep (haléře místo korun), ne prodej. */
-const MAX_TRZBA_KC = 100_000_000
+/**
+ * 20 milionů Kč za jeden produkt a den — víc je překlep (haléře místo
+ * korun), ne prodej. A hlavně: sloupec `trzba_haleru` je integer (nejvýš
+ * 21 474 836,47 Kč); co se do něj nevejde, shodilo by zápis celé dávky.
+ */
+const MAX_TRZBA_KC = 20_000_000
+const MAX_HALERU = 2_147_483_647
+
+/** Řídicí znaky (i \u0000, který databáze v JSONu odmítne celou dávkou) pryč — z názvu produktu. */
+export function bezRidicichZnaku(text: string): string {
+  return text.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
+}
 
 const RE_KLIC = /^ftpos_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_([A-Za-z0-9_-]{43})$/
 
@@ -92,7 +102,7 @@ export function overitDavku(telo: unknown, dnes: string): VysledekDavky {
     if (!platneDatum(p.datum)) return { stav: 'chyba', duvod: `${kde}: „datum" musí být RRRR-MM-DD.` }
     if (p.datum < '2000-01-01' || p.datum > zitra) return { stav: 'chyba', duvod: `${kde}: datum ${p.datum} je mimo rozumný rozsah.` }
 
-    const produkt = typeof p.produkt === 'string' ? p.produkt.trim() : ''
+    const produkt = typeof p.produkt === 'string' ? bezRidicichZnaku(p.produkt) : ''
     if (!produkt) return { stav: 'chyba', duvod: `${kde}: chybí „produkt".` }
     if (produkt.length > MAX_DELKA_PRODUKTU) return { stav: 'chyba', duvod: `${kde}: název produktu je delší než ${MAX_DELKA_PRODUKTU} znaků.` }
 
@@ -104,6 +114,15 @@ export function overitDavku(telo: unknown, dnes: string): VysledekDavky {
 
     dny.add(p.datum)
     radky.push({ datum: p.datum, produktNazev: produkt, mnozstvi, trzbaHaleru: Math.round(trzba * 100) })
+  }
+
+  // Stejný produkt v jednom dni se v databázi sečte — i součet se musí vejít.
+  const soucty = new Map<string, number>()
+  for (const r of radky) {
+    const klic = `${r.datum}|${r.produktNazev}`
+    const soucet = (soucty.get(klic) ?? 0) + r.trzbaHaleru
+    if (soucet > MAX_HALERU) return { stav: 'chyba', duvod: `Produkt „${r.produktNazev}" má ${r.datum} tržbu přes 21 474 836 Kč — nejspíš haléře místo korun.` }
+    soucty.set(klic, soucet)
   }
 
   if (dny.size > MAX_DNU) return { stav: 'chyba', duvod: `Nejvýš ${MAX_DNU} různých dní v jedné dávce.` }

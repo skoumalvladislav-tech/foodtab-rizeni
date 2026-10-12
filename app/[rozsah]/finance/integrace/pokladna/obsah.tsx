@@ -157,6 +157,9 @@ export default function ObsahPokladen({
                             </span>
                             <select name={`pobocka_${o.id}`} defaultValue={o.branch_id ?? ''} style={pole}>
                               <option value="">— nestahovat —</option>
+                              {/* Pobočka mezitím vypnutá: bez téhle volby by formulář předvybral „nestahovat"
+                                  a jakékoli uložení by provozovnu tiše odpojilo a smazalo její historii. */}
+                              {o.branch_id && !nazevPobocky.has(o.branch_id) ? <option value={o.branch_id}>(vypnutá pobočka)</option> : null}
                               {pobocky.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                             </select>
                           </label>
@@ -187,10 +190,14 @@ export default function ObsahPokladen({
                         </form>
                       ) : null}
                       {popis?.zpusob === 'prijem' ? <KlicPrijmu rozsah={rozsah} id={p.id} pole={pole} /> : null}
-                      <form action={odpojitPokladnu}>
+                      <form action={odpojitPokladnu} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <input type="hidden" name="rozsah" value={rozsah} />
                         <input type="hidden" name="id" value={p.id} />
                         <button type="submit" className="ft-tl">Odpojit</button>
+                        <label style={{ display: 'flex', gap: '6px', alignItems: 'center', ...drobne }}>
+                          <input type="checkbox" name="smazat_prodeje" value="ano" />
+                          smazat i prodeje, které appka z téhle pokladny stáhla
+                        </label>
                       </form>
                     </div>
                   ) : null}

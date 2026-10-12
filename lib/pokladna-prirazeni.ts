@@ -24,6 +24,14 @@ export type ProvozovnaUctu = {
   branch_id: string | null
   /** Nejstarší provozní den, který appka pro tuhle provozovnu už má souvisle až do dneška. */
   dohnano_od: string | null
+  /**
+   * Nejnovější provozní den, do kterého appka měla data souvisle, když
+   * běh naposledy doběhl (`lib/pokladna-cas.ts`, `planDnu` → `mezera`).
+   * Chybí u provozovny, která se ještě nestahovala.
+   */
+  souvisle_do?: string | null
+  /** Den, na kterém stahování uvázlo, a kolikrát po sobě selhal (`lib/pokladna-beh.ts`). */
+  uvazl?: { den: string; pokusu: number } | null
 }
 
 /** `integrace_pripojeni.externi_ucet` u pokladny s tokenem. */
@@ -47,7 +55,7 @@ export function sloucitProvozovny(nove: ProvozovnaPos[], dosavadni: ProvozovnaUc
   const podleId = new Map(dosavadni.map((p) => [p.id, p]))
   return nove.map((n) => {
     const stara = podleId.get(n.externiId)
-    return { id: n.externiId, nazev: n.nazev, branch_id: stara?.branch_id ?? null, dohnano_od: stara?.dohnano_od ?? null }
+    return { id: n.externiId, nazev: n.nazev, branch_id: stara?.branch_id ?? null, dohnano_od: stara?.dohnano_od ?? null, souvisle_do: stara?.souvisle_do ?? null, uvazl: stara?.uvazl ?? null }
   })
 }
 
@@ -59,7 +67,7 @@ export function automatickePrirazeni(provozovny: ProvozovnaUctu[], pobockyFirmy:
   if (provozovny.length !== 1 || pobockyFirmy.length !== 1) return provozovny
   const [jedina] = provozovny
   if (jedina.branch_id || obsazeneJinde.has(pobockyFirmy[0])) return provozovny
-  return [{ ...jedina, branch_id: pobockyFirmy[0], dohnano_od: null }]
+  return [{ ...jedina, branch_id: pobockyFirmy[0], dohnano_od: null, souvisle_do: null, uvazl: null }]
 }
 
 export type VysledekPrirazeni =
@@ -75,8 +83,11 @@ export type VysledekPrirazeni =
  * Nové přiřazení z formuláře (`volby`: id provozovny → id pobočky, nebo
  * prázdné = nepřiřazovat). Pobočka musí patřit firmě, jedna pobočka
  * nejvýš jednou (dvě provozovny do jedné pobočky by si přepisovaly dny)
- * a ne taková, kterou už stejná pokladna plní v jiném připojení.
- * Provozovna, která mění pobočku, začne historii znovu.
+ * a ne taková, kterou už plní JINÉ napojení pokladny (jakékoli — dvě
+ * napojení jedné pobočky by se ve foodcostu sečetla). Provozovna, která
+ * mění pobočku, začne historii znovu. Nezměněné přiřazení se nekontroluje
+ * proti `pobockyFirmy` — pobočka mezitím mohla být vypnutá a formulář
+ * ji jinak nenabídne; tiché odpojení by smazalo její historii.
  */
 export function zkontrolovatPrirazeni(
   provozovny: ProvozovnaUctu[],
@@ -93,9 +104,11 @@ export function zkontrolovatPrirazeni(
     const nova = volba || null
 
     if (nova !== null) {
-      if (!pobockyFirmy.has(nova)) return { stav: 'chyba', duvod: `Provozovna ${p.nazev}: vybraná pobočka nepatří vaší firmě.` }
       if (pouzite.has(nova)) return { stav: 'chyba', duvod: 'Jedna pobočka může mít z téhle pokladny jen jednu provozovnu.' }
-      if (obsazeneJinde.has(nova)) return { stav: 'chyba', duvod: `Provozovna ${p.nazev}: vybraná pobočka už má tuhle pokladnu připojenou jinde.` }
+      if (nova !== p.branch_id) {
+        if (!pobockyFirmy.has(nova)) return { stav: 'chyba', duvod: `Provozovna ${p.nazev}: vybraná pobočka nepatří vaší firmě.` }
+        if (obsazeneJinde.has(nova)) return { stav: 'chyba', duvod: `Provozovna ${p.nazev}: vybraná pobočka už dostává prodeje z jiného napojení pokladny — dvě napojení by se v ní sečetla.` }
+      }
       pouzite.add(nova)
     }
 
@@ -104,7 +117,7 @@ export function zkontrolovatPrirazeni(
       continue
     }
     if (p.branch_id) opustene.add(p.branch_id)
-    vysledek.push({ ...p, branch_id: nova, dohnano_od: null })
+    vysledek.push({ ...p, branch_id: nova, dohnano_od: null, souvisle_do: null, uvazl: null })
   }
 
   // I pobočka, kterou hned obsadila jiná provozovna, se čistí: do té doby,
