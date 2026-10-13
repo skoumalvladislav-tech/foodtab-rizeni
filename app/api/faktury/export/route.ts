@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { pristupKFakturam } from '@/lib/supabase/faktury'
@@ -14,9 +15,9 @@ export const dynamic = 'force-dynamic'
  * (`lib/faktury-filtry.ts`, sdílené), aby export vrátil přesně to, co
  * uživatel zrovna vidí na obrazovce.
  *
- * Rozsah (firma) chodí jako `?rozsah=` — tahle cesta stojí mimo
- * `app/[rozsah]/...`, protože API route bez uživatelského rozhraní
- * podobnou strukturu nepotřebuje.
+ * Rozsah se z adresy (`?rozsah=`) NEBERE: faktury pobočku nemají, takže
+ * `?rozsah=<pobočka>` pustilo vedoucího jedné pobočky k CSV všech faktur
+ * firmy (kontrola 13. 10. 2026). Právo se ověřuje vždy za celou firmu.
  */
 
 function csvBunka(hodnota: string | number | null | undefined): string {
@@ -49,12 +50,11 @@ const SLOUPCE: { hlavicka: string; z: (f: Faktura) => string | number | null }[]
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const rozsah = searchParams.get('rozsah') ?? ''
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return new Response('Účet zatím nepatří k žádné firmě.', { status: 400 })
 
-  const pristup = await zkusPristup(tenantId, 'faktury.read', rozsah)
+  const pristup = await zkusPristup(tenantId, 'faktury.read', TENANT_SCOPE_SEGMENT)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') return new Response('Na tohle nemáte oprávnění.', { status: 403 })
 

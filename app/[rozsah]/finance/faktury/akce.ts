@@ -33,7 +33,11 @@ async function pripravit(rozsah: string, pravo: 'faktury.read' | 'faktury.manage
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, pravo, rozsah)
+  // Právo VŽDY za celou firmu, ne za rozsah z formuláře: faktury pobočku
+  // nemají (oddělená databáze), takže „faktury.manage na Bernard Baru“
+  // by jinak pustilo vedoucího jedné pobočky k fakturám celé firmy
+  // (kontrola 13. 10. 2026). `rozsah` zůstává jen pro návratovou adresu.
+  const pristup = await zkusPristup(tenantId, pravo, TENANT_SCOPE_SEGMENT)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/faktury`)
 
