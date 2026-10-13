@@ -4,7 +4,8 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee, type Context } from '@/lib/authz'
 import { nactiCashflowPrehled, nactiVysledovkuCelofirmy } from '@/lib/finance-prehled'
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
-import { pokrytiObdobi } from '@/lib/pokladna-trzby'
+import { pokrytiRozsahu } from '@/lib/pokladna-trzby'
+import type { SrovnaniMesice } from '@/lib/finance-obdobi'
 
 /**
  * KPI karty a graf nákladů pro Finance → Přehled.
@@ -65,10 +66,17 @@ export type FinanceKpi = {
   /** U tržeb z pokladen: kolik aktivních poboček má v měsíci data z pokladny. */
   pokrytiPokladnou: { maji: number; celkem: number } | null
   trzbyHaleru: number
-  /** `null` = srovnání nemá smysl (jiná sada poboček s pokladnou než teď). */
-  trzbyHaleruPredchozi: number | null
+  /** `false` = za měsíc zatím žádná tržba z pokladny (karta ukáže „–", ne 0 Kč). */
+  trzbyMajiData: boolean
+  /**
+   * Trend tržeb: u rozběhnutého měsíce STEJNÉ DNY obou měsíců
+   * (`lib/finance-obdobi.ts`), u uzavřeného celé měsíce. `null` = nesrovnává
+   * se (první den měsíce, jiná sada poboček s pokladnou, nenačteno).
+   */
+  trendTrzby: { aktualni: number; predchozi: number } | null
   cashflowHaleru: number
-  cashflowHaleruPredchozi: number
+  /** Trend cashflow — stejné dny jako u tržeb. */
+  trendCashflow: { aktualni: number; predchozi: number } | null
   /**
    * Teoretický foodcost — prodané množství × platná receptura (zadání,
    * oddíl 7), ne peněžní výdej za nákup surovin. `null` = buď nulové
@@ -125,10 +133,17 @@ export async function nactiFinanceKpi(
   branches: readonly { id: string; name: string }[],
   obdobi: { od: string; doData: string },
   predchoziObdobi: { od: string; doData: string },
+  /** Co se u trendu Tržeb a Cashflow srovnává (`srovnaniMesice` v lib/finance-obdobi.ts). */
+  srovnani: SrovnaniMesice,
 ): Promise<FinanceKpi> {
   const smiVidetMzdy = canSee(ctx, 'payroll.read')
+  // Rozsahy pro trend: stejné dny (rozběhnutý měsíc), celé měsíce (uzavřený), nebo žádný.
+  const rozsahyTrendu = srovnani.druh === 'stejne_dny'
+    ? { aktualni: srovnani.aktualni, predchozi: srovnani.predchozi }
+    : srovnani.druh === 'cele' ? { aktualni: obdobi, predchozi: predchoziObdobi } : null
+  const stejneDny = srovnani.druh === 'stejne_dny'
 
-  const [cfAktualni, cfPredchozi, vysAktualni, fbAktualni, fbPredchozi, mzdyAktualni, mzdyPredchozi, pokladny] = await Promise.all([
+  const [cfAktualni, cfPredchozi, vysAktualni, fbAktualni, fbPredchozi, mzdyAktualni, mzdyPredchozi, pokladny, cfTrendAktualni, cfTrendPredchozi] = await Promise.all([
     nactiCashflowPrehled(tenantId, obdobi.od, obdobi.doData),
     nactiCashflowPrehled(tenantId, predchoziObdobi.od, predchoziObdobi.doData),
     nactiVysledovkuCelofirmy(tenantId, branches, obdobi.od, obdobi.doData),
@@ -136,26 +151,47 @@ export async function nactiFinanceKpi(
     nactiFoodcostBeverage(tenantId, predchoziObdobi.od, predchoziObdobi.doData),
     smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, obdobi.od) : Promise.resolve(null),
     smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, predchoziObdobi.od) : Promise.resolve(null),
-    // Oba měsíce jedním dotazem, po měsících (obdobi = 1. den měsíce).
-    // Chyba tržeb z pokladen nesmí shodit Cashflow ani náklady (dřív na
-    // pokladně nezávisely) — karta Tržby pak řekne, že se nenačetly.
-    nactiPrehledTrzeb(tenantId, predchoziObdobi.od, obdobi.doData, 'mesic').catch((): 'chyba' => 'chyba'),
+    // Oba měsíce jedním dotazem PO DNECH (≤ 62 dní) — z něj se sečtou celé
+    // měsíce i stejné dny pro trend. Chyba tržeb z pokladen nesmí shodit
+    // Cashflow ani náklady (dřív na pokladně nezávisely) — karta Tržby pak
+    // řekne, že se nenačetly.
+    nactiPrehledTrzeb(tenantId, predchoziObdobi.od, obdobi.doData, 'den').catch((): 'chyba' => 'chyba'),
+    stejneDny ? nactiCashflowPrehled(tenantId, srovnani.aktualni.od, srovnani.aktualni.doData) : Promise.resolve(null),
+    stejneDny ? nactiCashflowPrehled(tenantId, srovnani.predchozi.od, srovnani.predchozi.doData) : Promise.resolve(null),
   ])
 
   const { prijmy: prijmyHaleru, vydaje: vydajeHaleru } = soucetPrijmyVydaje(cfAktualni)
   const { prijmy: prijmyHaleruPredchozi, vydaje: vydajePredchozi } = soucetPrijmyVydaje(cfPredchozi)
+  // Platby pro trend: u stejných dnů vlastní dotazy, u celých měsíců ty měsíční.
+  const platbyTrendu = rozsahyTrendu === null
+    ? null
+    : stejneDny && cfTrendAktualni && cfTrendPredchozi
+      ? { aktualni: soucetPrijmyVydaje(cfTrendAktualni), predchozi: soucetPrijmyVydaje(cfTrendPredchozi) }
+      : { aktualni: { prijmy: prijmyHaleru, vydaje: vydajeHaleru }, predchozi: { prijmy: prijmyHaleruPredchozi, vydaje: vydajePredchozi } }
 
   const aktivni = branches.map((b) => b.id)
   const prehledPokladen = pokladny === 'chyba' ? null : pokladny
-  const posAktualni = prehledPokladen ? pokrytiObdobi(prehledPokladen, obdobi.od, aktivni) : null
-  const posPredchozi = prehledPokladen ? pokrytiObdobi(prehledPokladen, predchoziObdobi.od, aktivni) : null
+  const posAktualni = prehledPokladen ? pokrytiRozsahu(prehledPokladen, obdobi.od, obdobi.doData, aktivni) : null
+  const posPredchozi = prehledPokladen ? pokrytiRozsahu(prehledPokladen, predchoziObdobi.od, predchoziObdobi.doData, aktivni) : null
   // Nenačtené tržby z pokladen se NEnahrazují příjmy z plateb — karta by
   // nesla číslo z jiného zdroje pod stejným jménem.
   const zdrojTrzeb: FinanceKpi['zdrojTrzeb'] = pokladny === 'chyba' ? 'nenacteno' : posAktualni?.maData || posPredchozi?.maData ? 'pokladna' : 'platby'
   const zPokladen = zdrojTrzeb === 'pokladna'
-  const stejnePobocky = posAktualni !== null && posPredchozi !== null && posAktualni.pobocky.join() === posPredchozi.pobocky.join()
   const trzbyHaleru = zdrojTrzeb === 'platby' ? prijmyHaleru : (posAktualni?.trzbaHaleru ?? 0)
-  const trzbyHaleruPredchozi = zdrojTrzeb === 'platby' ? prijmyHaleruPredchozi : zPokladen && stejnePobocky ? (posPredchozi?.trzbaHaleru ?? 0) : null
+
+  // Trend tržeb z pokladen jen mezi stejnými sadami poboček (jinak by
+  // pobočka, která se připojila v půli, vypadala jako růst).
+  let trendTrzby: FinanceKpi['trendTrzby'] = null
+  if (zdrojTrzeb === 'platby' && platbyTrendu) {
+    trendTrzby = { aktualni: platbyTrendu.aktualni.prijmy, predchozi: platbyTrendu.predchozi.prijmy }
+  } else if (zPokladen && prehledPokladen && rozsahyTrendu) {
+    const a = pokrytiRozsahu(prehledPokladen, rozsahyTrendu.aktualni.od, rozsahyTrendu.aktualni.doData, aktivni)
+    const p = pokrytiRozsahu(prehledPokladen, rozsahyTrendu.predchozi.od, rozsahyTrendu.predchozi.doData, aktivni)
+    if (a.maData && p.maData && a.pobocky.join() === p.pobocky.join()) trendTrzby = { aktualni: a.trzbaHaleru, predchozi: p.trzbaHaleru }
+  }
+  const trendCashflow: FinanceKpi['trendCashflow'] = platbyTrendu
+    ? { aktualni: platbyTrendu.aktualni.prijmy - platbyTrendu.aktualni.vydaje, predchozi: platbyTrendu.predchozi.prijmy - platbyTrendu.predchozi.vydaje }
+    : null
   // Náklady práce: mzdy jsou za všechny pobočky — z pokladen jen při úplném pokrytí.
   const praceAktualni = zdrojTrzeb === 'platby' || (zPokladen && (posAktualni?.uplne ?? false))
   const pracePredchozi = zdrojTrzeb === 'platby' || (zPokladen && (posPredchozi?.uplne ?? false))
@@ -178,9 +214,10 @@ export async function nactiFinanceKpi(
     zdrojTrzeb,
     pokrytiPokladnou: zPokladen && posAktualni ? { maji: posAktualni.pokrytych, celkem: posAktualni.aktivnich } : null,
     trzbyHaleru,
-    trzbyHaleruPredchozi,
+    trzbyMajiData: zdrojTrzeb === 'platby' || (zPokladen && (posAktualni?.maData ?? false)),
+    trendTrzby,
     cashflowHaleru: prijmyHaleru - vydajeHaleru,
-    cashflowHaleruPredchozi: prijmyHaleruPredchozi - vydajePredchozi,
+    trendCashflow,
     foodcostProcento: procentoNakladu(fbAktualni, 'jidlo'),
     foodcostProcentoPredchozi: procentoNakladu(fbPredchozi, 'jidlo'),
     foodcostPokrytoProcento: procentoPokryti(fbAktualni, 'jidlo'),

@@ -110,7 +110,9 @@ export default async function FinanceTrzby({
   const cleneni: Cleneni = jeCleneni(po) ? po : 'den'
   const dnes = provozniDnes()
   const rozsahObdobi = urcitObdobi(cleneni, obdobiParam, dnes)
-  // Transakce vidí jen `finance.read` za celou firmu (RLS) — Finance se otevírá jen na firemní úrovni.
+  // Finance se otevírá jen na firemní úrovni (layout) a příjmy z banky vrací
+  // přehled podle stejných práv jako RLS transakcí — firemní účty a účty
+  // viditelných poboček.
   const bankaVidi = pristup.scope.level === 'tenant'
 
   const supabase = await getServerSupabase()

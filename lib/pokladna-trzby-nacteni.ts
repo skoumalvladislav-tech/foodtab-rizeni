@@ -5,10 +5,11 @@ import { DotazSelhal, funkceNeexistuje } from '@/lib/supabase/dotaz'
 import { prevestPrehled, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-trzby'
 
 /**
- * Přehled tržeb z pokladen (`pokladna_prehled_trzeb`, RLS volajícího).
+ * Přehled tržeb z pokladen (`pokladna_prehled_trzeb`, práva volajícího —
+ * funkce si je ověří sama, stejně jako RLS).
  *
  * `null` = funkce v databázi ještě není (kód nasazený dřív než
- * migrace 20261012200000) — stránka pak řekne „čeká na nasazení
+ * migrace 20261012200000) — stránka pak řekne „čeká na aktualizaci
  * databáze", nespadne. Jakákoli jiná chyba se vyhodí: prázdný přehled
  * by vypadal jako „žádné prodeje", a to je lež.
  */

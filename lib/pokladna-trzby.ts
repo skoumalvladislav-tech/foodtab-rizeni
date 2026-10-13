@@ -11,8 +11,9 @@
  *   * platby jsou jen za dny, kdy je pokladna poslala (`dnuSPlatbami`) —
  *     historie před 12. 10. 2026 je nemá, dokud ji synchronizace znovu
  *     nedožene; přehled to musí říct, ne tvářit se, že součet sedí;
- *   * banka `null` = volající transakce nevidí (nemá `finance.read` za
- *     celou firmu), ne „nic nepřišlo".
+ *   * banka `null` = stránka banku neukazuje (`bankaVidi` false), ne „nic
+ *     nepřišlo". Kdo smí co: `finance.read` vidí příjmy firemních účtů
+ *     a účtů poboček, které vidí — stejně jako RLS transakcí a účtů.
  *
  * Datum je PROVOZNÍ den pobočky (`lib/pokladna-cas.ts`), `obdobi` první
  * den dne/měsíce/roku.
@@ -321,6 +322,15 @@ export function pokrytiObdobi(p: PrehledTrzeb, obdobi: string, aktivniPobocky: r
     aktivnich: aktivniPobocky.length,
     uplne: aktivniPobocky.length > 0 && pokrytych === aktivniPobocky.length,
   }
+}
+
+/**
+ * Totéž jako `pokrytiObdobi`, jen přes rozsah dní `od`–`doData` (včetně)
+ * z přehledu po dnech — pro srovnání stejných dnů dvou měsíců.
+ */
+export function pokrytiRozsahu(p: PrehledTrzeb, od: string, doData: string, aktivniPobocky: readonly string[]): ReturnType<typeof pokrytiObdobi> {
+  const vyber: PrehledTrzeb = { ...p, trzby: p.trzby.filter((t) => t.obdobi >= od && t.obdobi <= doData).map((t) => ({ ...t, obdobi: od })) }
+  return pokrytiObdobi(vyber, od, aktivniPobocky)
 }
 
 /** Tržba jednoho období (KPI na Přehledu) — přes všechny pobočky, které volající vidí. */

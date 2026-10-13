@@ -6,6 +6,9 @@ import { canSee } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiFinanceKpi, type FinanceKpi } from '@/lib/finance-kpi'
+import { popisRozsahu, srovnaniMesice } from '@/lib/finance-obdobi'
+import { provozniDen } from '@/lib/pokladna-cas'
+import { ZONA_VYCHOZI } from '@/lib/cas'
 import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
 import { koruny } from '@/lib/mzdy'
@@ -47,8 +50,13 @@ const karta = {
   padding: '16px',
 } as const
 
+/** Dnešní PROVOZNÍ den (od 05:00, jako tržby z pokladen) — podle něj se pozná rozběhnutý měsíc. */
+function provozniDnes(): string {
+  return provozniDen(Date.now(), '05:00', ZONA_VYCHOZI)
+}
+
 function tentoMesic(): string {
-  return new Date().toISOString().slice(0, 7)
+  return provozniDnes().slice(0, 7)
 }
 
 function hraniceMesice(mesic: string): { od: string; doData: string } {
@@ -128,6 +136,10 @@ export default async function FinancePrehled({
   const { od, doData } = hraniceMesice(mesic)
   const mesicPredchozi = sousedniMesic(mesic, -1)
   const { od: odPredchozi, doData: doDataPredchozi } = hraniceMesice(mesicPredchozi)
+  // Trend Tržeb a Cashflow: u rozběhnutého měsíce stejné dny obou měsíců,
+  // jinak by 12 dní proti celému minulému měsíci svítilo červeně vždycky.
+  const srovnani = srovnaniMesice(mesic, provozniDnes())
+  const srovnaniCastek = srovnani.druh === 'stejne_dny' ? `${popisRozsahu(srovnani.predchozi)} (stejné dny)` : nazevMesice(mesicPredchozi)
 
   const supabase = await getServerSupabase()
   const { data: branchesData } = await supabase
@@ -139,7 +151,7 @@ export default async function FinancePrehled({
   const branches = (branchesData ?? []) as { id: string; name: string }[]
 
   const [kpi, bodyGrafu, pozornost, integraceRes] = await Promise.all([
-    nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }).catch((): FinanceKpi | null => null),
+    nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }, srovnani).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni').catch(() => []),
     nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read')).catch((): PolozkaPozornosti[] => []),
     supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
@@ -170,24 +182,26 @@ export default async function FinancePrehled({
         {kpi ? (
           <div className="ds-kpi-mrizka">
             <FinanceKpiKarta
-              ikona="mince" titulek="Tržby" hodnota={kpi.zdrojTrzeb === 'nenacteno' ? '–' : koruny(kpi.trzbyHaleru)}
+              ikona="mince" titulek="Tržby" hodnota={kpi.zdrojTrzeb === 'nenacteno' || !kpi.trzbyMajiData ? '–' : koruny(kpi.trzbyHaleru)}
               zdroj={
                 kpi.zdrojTrzeb === 'nenacteno'
                   ? 'tržby z pokladen se nepodařilo načíst'
                   : kpi.zdrojTrzeb === 'platby'
                     ? 'z přijatých plateb'
-                    : kpi.pokrytiPokladnou && kpi.pokrytiPokladnou.maji < kpi.pokrytiPokladnou.celkem
+                    : !kpi.trzbyMajiData
+                      ? 'pokladna za tento měsíc zatím nic neposlala'
+                      : kpi.pokrytiPokladnou && kpi.pokrytiPokladnou.maji < kpi.pokrytiPokladnou.celkem
                       ? `z pokladen · ${kpi.pokrytiPokladnou.maji} z ${kpi.pokrytiPokladnou.celkem} provozoven`
                       : 'z pokladen'
               }
-              trend={kpi.zdrojTrzeb === 'nenacteno' ? null : trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true)}
-              srovnaniS={nazevMesice(mesicPredchozi)}
+              trend={kpi.trendTrzby ? trend(kpi.trendTrzby.aktualni, kpi.trendTrzby.predchozi, '%', true) : null}
+              srovnaniS={srovnaniCastek}
             />
             <FinanceKpiKarta
               ikona="blesk" titulek="Cashflow" hodnota={koruny(kpi.cashflowHaleru)}
               zdroj="příjmy − výdaje z plateb"
-              trend={trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
-              srovnaniS={nazevMesice(mesicPredchozi)}
+              trend={kpi.trendCashflow ? trend(kpi.trendCashflow.aktualni, kpi.trendCashflow.predchozi, '%', true) : null}
+              srovnaniS={srovnaniCastek}
             />
             <FinanceKpiKarta
               ikona="vidlicka" titulek="Foodcost" hodnota={procentoNeboPomlcka(kpi.foodcostProcento)}

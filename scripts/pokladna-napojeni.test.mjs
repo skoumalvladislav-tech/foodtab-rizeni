@@ -17,6 +17,7 @@ const { mistniCasNaMs, oknoProvoznihoDne, planDnu, provozniDen, posunoutDen, vyc
 const { MAX_RADKU, overitDavku, rozebratKlicPrijmu, slozitKlicPrijmu } = await import('../lib/pokladna-prijem-api.ts')
 const { automatickePrirazeni, prirazeneProvozovny, sloucitProvozovny, zkontrolovatPrirazeni } = await import('../lib/pokladna-prirazeni.ts')
 const { konecProPokladnu, kurzorHistorie, kurzoryKUlozeni, probehnoutBeh } = await import('../lib/pokladna-beh.ts')
+const { databazeMaPlatby, zapsatDen } = await import('../lib/pokladna-zapis.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -361,6 +362,54 @@ console.log('\n== Kurzor plateb a dělení času mezi pokladny ==')
   ok('jedna pokladna dostane celý běh', konecProPokladnu(T, konec, 1, 25_000) === konec)
   ok('na stahování zbývá míň než 5 s → další pokladna se nespustí', konecProPokladnu(T + 28_000, konec, 1, 25_000) === null)
   ok('žádná zbývající pokladna → null', konecProPokladnu(T, konec, 0, 25_000) === null)
+}
+
+console.log('\n== Zápis dne: záložní cesty (podstrčená databáze) ==')
+{
+  // Podstrčené RPC: odpovídá podle toho, co dostalo, a zapisuje si volání.
+  const databaze = (chovani) => {
+    const volani = []
+    return { volani, volat: async (args) => { volani.push(args); return chovani(args) } }
+  }
+  const parametry = { p_pripojeni: 'p', p_branch: 'b', p_dny: ['2026-10-13'], p_radky: [], p_provozovna: '1' }
+  const platby = [{ datum: '2026-10-13', zpusob: '900000001', nazev: 'Hotovost', druh: 'hotovost', pocet: 1, castka_haleru: 100 }]
+
+  const bezne = databaze(() => ({ data: 5, error: null }))
+  const v1 = await zapsatDen(bezne.volat, parametry, platby)
+  ok('běžný den: jedno volání i s platbami, 5 řádků, nic záložního',
+    bezne.volani.length === 1 && bezne.volani[0].p_platby === platby && v1.pocet === 5 && !v1.databazeNeumiPlatby && v1.platbyOdmitnuty === null && v1.chyba === null)
+
+  const bezFunkce = databaze((a) => ('p_platby' in a ? { data: null, error: { code: 'PGRST202' } } : { data: 3, error: null }))
+  const v2 = await zapsatDen(bezFunkce.volat, parametry, platby)
+  ok('databáze p_platby nezná (PGRST202): druhé volání BEZ p_platby, prodeje zapsané, příznak pro zbytek běhu',
+    bezFunkce.volani.length === 2 && !('p_platby' in bezFunkce.volani[1]) && v2.pocet === 3 && v2.databazeNeumiPlatby && v2.chyba === null)
+  const postgres42883 = databaze((a) => ('p_platby' in a ? { data: null, error: { code: '42883' } } : { data: 1, error: null }))
+  ok('… totéž pro 42883 (Postgres)', (await zapsatDen(postgres42883.volat, parametry, platby)).databazeNeumiPlatby)
+
+  const odmitnute = databaze((a) => (Array.isArray(a.p_platby) && a.p_platby.length > 0 ? { data: null, error: { code: '23514' } } : { data: 4, error: null }))
+  const v3 = await zapsatDen(odmitnute.volat, parametry, platby)
+  ok('platby odmítnuté CHECKem (23514): znovu s PRÁZDNÝMI platbami (starý snímek zmizí), prodeje zapsané, kód ohlášený',
+    odmitnute.volani.length === 2 && Array.isArray(odmitnute.volani[1].p_platby) && odmitnute.volani[1].p_platby.length === 0
+    && v3.pocet === 4 && v3.platbyOdmitnuty === '23514' && !v3.databazeNeumiPlatby && v3.chyba === null)
+
+  const vadneProdeje = databaze(() => ({ data: null, error: { code: '22003' } }))
+  const v4 = await zapsatDen(vadneProdeje.volat, parametry, platby)
+  ok('chyba v prodejích (neprojde ani s prázdnými platbami): den selže, platby se NEohlásí jako viník',
+    vadneProdeje.volani.length === 2 && v4.chyba?.code === '22003' && v4.platbyOdmitnuty === null)
+
+  const jinaChyba = databaze(() => ({ data: null, error: { code: '42501' } }))
+  const v5 = await zapsatDen(jinaChyba.volat, parametry, platby)
+  ok('jiná chyba (práva): žádný druhý pokus, den selže', jinaChyba.volani.length === 1 && v5.chyba?.code === '42501')
+
+  const bezPlateb = databaze((a) => ('p_platby' in a ? { data: null, error: { code: 'X' } } : { data: 2, error: null }))
+  const v6 = await zapsatDen(bezPlateb.volat, parametry, null)
+  ok('bez plateb (pokladna je neposílá): volání bez p_platby, jedno', bezPlateb.volani.length === 1 && !('p_platby' in bezPlateb.volani[0]) && v6.pocet === 2)
+
+  const klient = (vysledek) => ({ from: (t) => ({ select: (s, volby) => ({ limit: async () => { klient.posledni = { t, s, volby }; return vysledek } }) }) })
+  ok('sonda: tabulka plateb je → režim plateb', await databazeMaPlatby(klient({ error: null })) && klient.posledni.t === 'pokladna_platby_denni')
+  ok('sonda: chybějící tabulka (PGRST205) → bez režimu plateb', !(await databazeMaPlatby(klient({ error: { code: 'PGRST205' } }))))
+  ok('sonda se ptá GET dotazem na sloupec, ne HEAD (u HEAD klient Supabase chybějící tabulku přepíše na úspěch)',
+    klient.posledni.s === 'id' && klient.posledni.volby?.head !== true)
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')
