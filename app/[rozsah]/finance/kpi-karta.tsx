@@ -31,6 +31,7 @@ export default function FinanceKpiKarta({
   hodnota,
   trend,
   srovnaniS,
+  zdroj,
 }: {
   ikona: IkonaKlic
   titulek: string
@@ -38,6 +39,8 @@ export default function FinanceKpiKarta({
   trend: TrendKpi
   /** Text co se srovnává, např. „srpen 2026“. */
   srovnaniS?: string
+  /** Odkud číslo je, např. „z pokladen“ — u karty, kde to není samozřejmé. */
+  zdroj?: string
 }) {
   const tonTrendu = barvaTrendu(trend)
 
@@ -50,6 +53,7 @@ export default function FinanceKpiKarta({
         <h2 className="ds-kpi-titulek">{titulek}</h2>
       </div>
       <p className="ds-kpi-hodnota ds-cislo">{hodnota}</p>
+      {zdroj ? <p className="ds-kpi-popis">{zdroj}</p> : null}
       {trend ? (
         <p className="ds-kpi-popis" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
           <span

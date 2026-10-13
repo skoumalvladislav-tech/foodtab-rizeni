@@ -18,7 +18,10 @@
  *     (`dateFrom`/`dateTo` jako ISO s pásmem nebo epoch ms, `vatPayer`,
  *     `lang`) — „Base Sales Report", v něm `productSales[]` s `name`,
  *     `count`, `value`, `valueWithoutVAT`. Přesně denní souhrn po
- *     produktu, který `pokladna_prodeje_denni` drží.
+ *     produktu, který `pokladna_prodeje_denni` drží. Ve stejné odpovědi
+ *     je `revenue.paymentTypeInfo[]` (`typeId`, `count`, `total`) —
+ *     platby po způsobu za totéž okno (`pokladna_platby_denni`, od 12. 10.).
+ *     Čísla způsobů: api-reference/enums/payment-methods.
  *   * „Všechna čísla v odpovědi jsou řetězce" — appka bere číslo
  *     i číselný text.
  *   * 401/403 nesou pole `reason` (api-reference/general/common-error-responses).
@@ -35,6 +38,9 @@
  *   * `dateTo` se bere jako konec okna (začátek dalšího provozního dne).
  *     Kdyby Dotykačka brala konec včetně, započítala by se navíc jen
  *     účtenka přesně v 05:00:00.000.
+ *   * `paymentTypeInfo[].typeId` jsou id z výčtu platebních metod
+ *     a `total` je částka v hlavní měně (vedle je `rawTotal`). Ověří se
+ *     prvním živým porovnáním s uzávěrkou (hotovost/karta).
  *
  * Bez `server-only` schválně: síťové volání jde podstrčit (`vytvoritDotykacku(fetchFn)`),
  * takže `scripts/pokladna-dotykacka.test.mjs` ověří tvar požadavků
@@ -44,7 +50,7 @@
 
 import { createHmac } from 'node:crypto'
 
-import type { ChybaPos, PosProvider, ProvozovnaPos, RadekProdeje, RelacePos, UdajePos } from './pos-provider-contract.ts'
+import type { ChybaPos, DruhPlatby, PosProvider, ProvozovnaPos, RadekPlatby, RadekProdeje, RelacePos, UdajePos } from './pos-provider-contract.ts'
 
 export const API_DOTYKACKA = 'https://api.dotykacka.cz/v2'
 export const CONNECTOR_DOTYKACKA = 'https://admin.dotykacka.cz/client/connect/v2'
@@ -85,6 +91,86 @@ function cislo(hodnota: unknown): number | null {
 
 function pravda(hodnota: unknown): boolean {
   return hodnota === true || hodnota === 'true' || hodnota === 1 || hodnota === '1'
+}
+
+/**
+ * Způsoby platby Dotykačky (api-reference/enums/payment-methods, 12. 10.
+ * 2026: 31 hodnot). Název česky, `druh` = skupina v přehledu tržeb.
+ * Dokumentace výslovně říká, že výčet není úplný — neznámé id dostane
+ * „Jiný způsob (č. …)" a druh `jine`, nezahodí se.
+ */
+export const ZPUSOBY_PLATBY_DOTYKACKY: Readonly<Record<string, { nazev: string; druh: DruhPlatby }>> = {
+  '900000001': { nazev: 'Hotovost', druh: 'hotovost' },
+  '900000002': { nazev: 'Platební karta', druh: 'karta' },
+  '900000003': { nazev: 'Šek', druh: 'jine' },
+  '900000004': { nazev: 'Stravenky', druh: 'stravenky' },
+  '900000009': { nazev: 'Bankovní převod', druh: 'prevod' },
+  '900000010': { nazev: 'Elektronické stravenky', druh: 'stravenky' },
+  '900000011': { nazev: 'Dárkový poukaz', druh: 'poukaz' },
+  '900000012': { nazev: 'Odpis', druh: 'odpis' },
+  '900000014': { nazev: 'SumUp', druh: 'karta' },
+  '900000016': { nazev: 'Uber Eats', druh: 'rozvoz' },
+  '900000017': { nazev: 'Vyzvednisi Online', druh: 'online' },
+  '900000018': { nazev: 'QR platba', druh: 'prevod' },
+  '900000019': { nazev: 'Online platba', druh: 'online' },
+  '900000020': { nazev: 'Na pokoj', druh: 'jine' },
+  '900000021': { nazev: 'Platební automat', druh: 'hotovost' },
+  '900000022': { nazev: 'MultiSport', druh: 'stravenky' },
+  '901000001': { nazev: 'Qerko', druh: 'online' },
+  '901000002': { nazev: 'Corrency', druh: 'jine' },
+  '901000003': { nazev: 'Bolt Food', druh: 'rozvoz' },
+  '901000004': { nazev: 'Wolt', druh: 'rozvoz' },
+  '901000005': { nazev: 'Speedlo', druh: 'rozvoz' },
+  '901000006': { nazev: 'Choice QR', druh: 'online' },
+  '901000007': { nazev: 'Previo', druh: 'jine' },
+  '901000008': { nazev: 'Foodora', druh: 'rozvoz' },
+  '901000009': { nazev: 'Foodora (hotově)', druh: 'rozvoz' },
+  '901000010': { nazev: 'Slevomat', druh: 'poukaz' },
+  '901000011': { nazev: 'Zľavomat', druh: 'poukaz' },
+  '901000012': { nazev: 'Pyszne', druh: 'rozvoz' },
+  '901000013': { nazev: 'Glovo', druh: 'rozvoz' },
+  '901000014': { nazev: 'Apetigo', druh: 'rozvoz' },
+  '901000015': { nazev: 'Bistro.sk', druh: 'rozvoz' },
+}
+
+/**
+ * „Base Sales Report" → platby po způsobu (`revenue.paymentTypeInfo[]`
+ * s `typeId`, `count`, `total`). Stejný způsob dvakrát se sečte.
+ *
+ * Dotykačka platby posílá vždycky, takže chybějící rozpad (bez `revenue`
+ * nebo `paymentTypeInfo`) i jediná nečitelná položka znamenají „nerozumím"
+ * (`necitelne`) a výsledek je PRÁZDNÝ seznam — synchronizace platby dne
+ * smaže a ohlásí to. Kdyby je nechala, dnešek by zůstal zamrzlý na
+ * snímku z dřívějšího běhu a v přehledu by vypadal jako celý.
+ *
+ * Vratka může u jednoho způsobu převážit: záporná částka i záporný počet
+ * projdou, počet plateb se na konci ořízne na nulu (je jen informativní,
+ * databáze záporný nepřijme).
+ */
+export function naparsovatPlatby(telo: unknown): { platby: RadekPlatby[]; necitelne: boolean } {
+  const info = (telo as { revenue?: { paymentTypeInfo?: unknown } | null } | null)?.revenue?.paymentTypeInfo
+  if (!Array.isArray(info)) return { platby: [], necitelne: true }
+
+  const podleZpusobu = new Map<string, RadekPlatby>()
+  for (const p of info as Record<string, unknown>[]) {
+    const id = cislo(p?.typeId)
+    const castka = cislo(p?.total)
+    const pocet = p?.count === undefined || p?.count === null ? 0 : cislo(p.count)
+    if (id === null || !Number.isSafeInteger(id) || id < 0 || castka === null || pocet === null) return { platby: [], necitelne: true }
+    const zpusob = String(id)
+    const znamy = ZPUSOBY_PLATBY_DOTYKACKY[zpusob]
+    const radek = podleZpusobu.get(zpusob) ?? {
+      zpusob,
+      nazev: znamy?.nazev ?? `Jiný způsob (č. ${zpusob})`,
+      druh: znamy?.druh ?? 'jine',
+      pocet: 0,
+      castkaHaleru: 0,
+    }
+    radek.pocet += Math.round(pocet)
+    radek.castkaHaleru += Math.round(castka * 100)
+    podleZpusobu.set(zpusob, radek)
+  }
+  return { platby: [...podleZpusobu.values()].map((r) => ({ ...r, pocet: Math.max(0, r.pocet) })), necitelne: false }
 }
 
 /** Stránka `GET …/branches` → provozovny; smazané vynechá. `null` = tvar, kterému appka nerozumí. */
@@ -223,7 +309,7 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
       // Dotykačka webhooky má (others/webhook), appka je zatím nepoužívá — stahuje každou hodinu.
       webhooky: false,
       historieDnu: null,
-      platebniMetody: false,
+      platebniMetody: true,
       poskytujeSkladovePohyby: false,
     },
 
@@ -285,12 +371,13 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
           )
           if (jeChyba(odpoved)) return odpoved
           // „GET … did not find any entity matching the filter" — za tohle okno nic (zavřeno).
-          if (odpoved.status === 404) return { stav: 'ok', radky: [], vynechano: 0, prazdne: true }
+          if (odpoved.status === 404) return { stav: 'ok', radky: [], vynechano: 0, prazdne: true, platby: [] }
           if (odpoved.status !== 200) return chybaZeStavu(odpoved.status, 'čtení tržeb', odpoved.telo)
 
           const report = naparsovatReport(odpoved.telo)
           if (!report) return { stav: 'chyba', druh: 'jina', duvod: 'Přehled tržeb z Dotykačky má neočekávaný tvar (chybí productSales).' } satisfies ChybaPos
-          return { stav: 'ok', ...report }
+          const { platby, necitelne } = naparsovatPlatby(odpoved.telo)
+          return { stav: 'ok', ...report, platby, ...(necitelne ? { platbyNecitelne: true } : {}) }
         },
       }
 

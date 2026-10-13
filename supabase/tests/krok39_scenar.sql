@@ -261,6 +261,12 @@ select pg_temp.check('kdo změnu udělal, tomu žádné „změněno“ nechodí
 select (current_date + 1)::text  as zitra  \gset
 select (current_date + 20)::text as pozdeji \gset
 
+-- Začátky v půl hodiny schválně: ostatní oddíly mají směny téhož
+-- zaměstnance v Perle napevno na 12.–15. 10. 2026 v CELÉ hodiny. Se
+-- začátkem ve 12:00 se 13. 10. 2026 („zítra" = 14. 10.) srazila tahle
+-- směna se směnou z oddílu 7 na unikátním klíči člověk/den/pobočka/začátek
+-- a scénář spadl — jen ten jeden den v roce, v každé větvi.
+
 -- Výchozí stav: nastavení prázdné, nic není „důležité“.
 update public.tenant_settings set smeny_dulezita_hodin = null where tenant_id = :'tenant';
 
@@ -269,7 +275,7 @@ select set_config('test.user_id', :'majitel', false);
 
 select smena as s_bez_pravidla from public.ulozit_smenu(
   :'tenant', null, :'perla', :'e_ucet', null,
-  :'zitra'::date, time '12:00', time '20:00', 'bez pravidla') \gset
+  :'zitra'::date, time '12:30', time '20:30', 'bez pravidla') \gset
 
 reset role;
 
@@ -284,10 +290,10 @@ select public.nastavit_dulezitou_zmenu_smeny(:'tenant', 48);
 
 select smena as s_blizka from public.ulozit_smenu(
   :'tenant', null, :'perla', :'e_ucet', null,
-  :'zitra'::date, time '13:00', time '21:00', 'blízká') \gset
+  :'zitra'::date, time '13:30', time '21:30', 'blízká') \gset
 select smena as s_daleka from public.ulozit_smenu(
   :'tenant', null, :'perla', :'e_ucet', null,
-  :'pozdeji'::date, time '13:00', time '21:00', 'daleká') \gset
+  :'pozdeji'::date, time '13:30', time '21:30', 'daleká') \gset
 
 reset role;
 

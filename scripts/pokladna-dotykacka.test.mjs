@@ -17,6 +17,8 @@ import { createHmac } from 'node:crypto'
 
 const {
   API_DOTYKACKA,
+  ZPUSOBY_PLATBY_DOTYKACKY,
+  naparsovatPlatby,
   naparsovatProvozovny,
   naparsovatReport,
   parametryConnectoru,
@@ -99,6 +101,36 @@ console.log('\n== Přehled tržeb: výklad productSales ==')
     naparsovatReport({ productSales: [{ name: 'Ko\u0000fo\nla ', count: '1', value: '1' }] })?.radky[0].produktNazev === 'Ko fo la')
 }
 
+console.log('\n== Platby: výklad revenue.paymentTypeInfo ==')
+{
+  const vysledek = naparsovatPlatby({ revenue: { paymentTypeInfo: [
+    { typeId: '900000001', count: '3', total: '450.50', currency: 'CZK' },
+    { typeId: 900000001, count: 1, total: 49.5 },
+    { typeId: '901000004', count: '-1', total: '-80' },
+    { typeId: '987654321', count: '1', total: '10' },
+  ] } })
+  const podle = new Map(vysledek.platby.map((z) => [z.zpusob, z]))
+  ok('čitelný rozpad → necitelne false', vysledek.necitelne === false && vysledek.platby.length === 3)
+  ok('stejné id dvakrát se sečte (450,50 + 49,50 = 500 Kč, 4 platby)', podle.get('900000001')?.castkaHaleru === 50000 && podle.get('900000001')?.pocet === 4)
+  ok('hotovost: český název a druh', podle.get('900000001')?.nazev === 'Hotovost' && podle.get('900000001')?.druh === 'hotovost')
+  ok('Wolt → rozvoz; vratka se záporným počtem projde, částka −80 Kč, počet oříznutý na 0',
+    podle.get('901000004')?.druh === 'rozvoz' && podle.get('901000004')?.castkaHaleru === -8000 && podle.get('901000004')?.pocet === 0)
+  ok('neznámé id → „Jiný způsob (č. …)", druh jine (výčet není úplný)', podle.get('987654321')?.nazev === 'Jiný způsob (č. 987654321)' && podle.get('987654321')?.druh === 'jine')
+  const nerozumim = (telo) => { const v = naparsovatPlatby(telo); return v.necitelne === true && Array.isArray(v.platby) && v.platby.length === 0 }
+  ok('bez revenue → prázdný seznam + necitelne (starý snímek dne zmizí, sync to ohlásí)', nerozumim({ productSales: [] }))
+  ok('revenue null → prázdný seznam + necitelne', nerozumim({ revenue: null }))
+  ok('revenue bez paymentTypeInfo → prázdný seznam + necitelne', nerozumim({ revenue: { totalWithVat: '1' } }))
+  ok('prázdný paymentTypeInfo → prázdný seznam, NE necitelne (den bez plateb)', (() => { const v = naparsovatPlatby({ revenue: { paymentTypeInfo: [] } }); return v.platby.length === 0 && v.necitelne === false })())
+  ok('jedna nečitelná položka → celé nečitelné (žádný neúplný součet)',
+    nerozumim({ revenue: { paymentTypeInfo: [{ typeId: '900000001', total: '10' }, { typeId: '900000002', total: 'x' }] } }))
+  ok('chybějící typeId → nečitelné', nerozumim({ revenue: { paymentTypeInfo: [{ total: '10' }] } }))
+  ok('nečitelný počet → nečitelné', nerozumim({ revenue: { paymentTypeInfo: [{ typeId: '1', count: 'x', total: '10' }] } }))
+  ok('chybějící count = 0 plateb, částka platí', naparsovatPlatby({ revenue: { paymentTypeInfo: [{ typeId: '900000002', total: '5' }] } }).platby[0].pocet === 0)
+  const druhy = new Set(['hotovost', 'karta', 'stravenky', 'poukaz', 'prevod', 'online', 'rozvoz', 'odpis', 'jine'])
+  ok('výčet Dotykačky: 31 způsobů, každý s druhem, který databáze přijme',
+    Object.keys(ZPUSOBY_PLATBY_DOTYKACKY).length === 31 && Object.values(ZPUSOBY_PLATBY_DOTYKACKY).every((z) => druhy.has(z.druh) && z.nazev.trim().length > 0))
+}
+
 console.log('\n== Přihlášení (signin/token) ==')
 {
   const { fetchFn, pozadavky } = sit([{ status: 201, telo: { accessToken: 'AT-1' } }])
@@ -155,7 +187,11 @@ console.log('\n== Tržby za okno (sales-report) ==')
   const doMs = Date.UTC(2026, 9, 11, 3, 0)
   const { fetchFn, pozadavky } = sit([
     { status: 201, telo: { accessToken: 'AT-3' } },
-    { status: 200, telo: { productSales: [{ id: '1', name: 'Kofola', count: '4', value: '196' }] } },
+    { status: 200, telo: {
+      productSales: [{ id: '1', name: 'Kofola', count: '4', value: '196' }],
+      revenue: { totalWithVat: '196', paymentTypeInfo: [{ typeId: '900000001', count: '1', total: '96', rawTotal: '96', currency: 'CZK' }, { typeId: 900000002, count: 1, total: 100 }] },
+    } },
+    { status: 200, telo: { productSales: [{ id: '1', name: 'Kofola', count: '1', value: '49' }] } },
     { status: 429 },
     { status: 403 },
   ])
@@ -166,6 +202,14 @@ console.log('\n== Tržby za okno (sales-report) ==')
   ok('dateFrom/dateTo jako epoch ms okna', url.searchParams.get('dateFrom') === String(od) && url.searchParams.get('dateTo') === String(doMs))
   ok('vatPayer=true, lang=cs', url.searchParams.get('vatPayer') === 'true' && url.searchParams.get('lang') === 'cs')
   ok('řádek prodeje přečtený', t.stav === 'ok' && t.radky[0].produktNazev === 'Kofola' && t.radky[0].trzbaHaleru === 19600)
+  ok('platby ze stejné odpovědi: hotovost 96 Kč + karta 100 Kč, bez příznaku nečitelnosti',
+    t.stav === 'ok' && t.platby?.length === 2 && t.platbyNecitelne === undefined
+    && t.platby.find((z) => z.druh === 'hotovost')?.castkaHaleru === 9600
+    && t.platby.find((z) => z.druh === 'karta')?.castkaHaleru === 10000)
+  const bezPlateb = await o.relace.prodeje('456', od, doMs)
+  ok('odpověď bez revenue.paymentTypeInfo → platby [] + platbyNecitelne (sync je smaže a ohlásí), prodeje ano',
+    bezPlateb.stav === 'ok' && Array.isArray(bezPlateb.platby) && bezPlateb.platby.length === 0
+    && bezPlateb.platbyNecitelne === true && bezPlateb.radky.length === 1)
 
   const zahlceno = await o.relace.prodeje('456', od, doMs)
   ok('429 → dočasná chyba celé pokladny (celoplošná — zastaví celý běh)', zahlceno.stav === 'chyba' && zahlceno.druh === 'docasna' && zahlceno.celoplosna === true)
@@ -195,6 +239,7 @@ console.log('\n== Den bez prodejů a důvody odmítnutí (reason) ==')
   const o = await vytvoritDotykacku(s.fetchFn).otevrit(UDAJE)
   const zavreno = await o.relace.prodeje('456', od, doMs)
   ok('404 u přehledu tržeb (zavřeno) → prázdný den s příznakem „prazdne", ne chyba', zavreno.stav === 'ok' && zavreno.radky.length === 0 && zavreno.prazdne === true)
+  ok('… a platby prázdný seznam (smažou se), ne neuvedené', zavreno.stav === 'ok' && Array.isArray(zavreno.platby) && zavreno.platby.length === 0)
 
   const licence = await o.relace.prodeje('456', od, doMs)
   ok('403 LICENSE_UPGRADE_REQUIRED → NE „neplatný token" (jina), s kódem v hlášce', licence.stav === 'chyba' && licence.druh === 'jina' && licence.duvod.includes('LICENSE_UPGRADE_REQUIRED') && !licence.duvod.includes('Přihlaste se znovu'))

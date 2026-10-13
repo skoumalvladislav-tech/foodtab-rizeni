@@ -153,7 +153,7 @@ export default async function FinancePrehled({
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="Skutečnost ze zapsaných plateb a výsledovky — appka počítá, nikdy neodhaduje."
+        popis="Tržby z pokladen, peníze ze zapsaných plateb a výsledovky — appka počítá, nikdy neodhaduje."
         vpravo={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <Link href={`${zaklad}?mesic=${sousedniMesic(mesic, -1)}`} className="ft-tl">← Dřívější</Link>
@@ -165,16 +165,27 @@ export default async function FinancePrehled({
         Přehled
       </Nadpis>
 
-      <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px' }}>
+      {/* containerType: karty `.ds-kpi-mrizka` se skládají podle šířky obsahu (@container) — bez kontejneru zůstaly na telefonu čtyři vedle sebe. */}
+      <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', containerType: 'inline-size' }}>
         {kpi ? (
           <div className="ds-kpi-mrizka">
             <FinanceKpiKarta
-              ikona="mince" titulek="Tržby" hodnota={koruny(kpi.trzbyHaleru)}
-              trend={trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true)}
+              ikona="mince" titulek="Tržby" hodnota={kpi.zdrojTrzeb === 'nenacteno' ? '–' : koruny(kpi.trzbyHaleru)}
+              zdroj={
+                kpi.zdrojTrzeb === 'nenacteno'
+                  ? 'tržby z pokladen se nepodařilo načíst'
+                  : kpi.zdrojTrzeb === 'platby'
+                    ? 'z přijatých plateb'
+                    : kpi.pokrytiPokladnou && kpi.pokrytiPokladnou.maji < kpi.pokrytiPokladnou.celkem
+                      ? `z pokladen · ${kpi.pokrytiPokladnou.maji} z ${kpi.pokrytiPokladnou.celkem} provozoven`
+                      : 'z pokladen'
+              }
+              trend={kpi.zdrojTrzeb === 'nenacteno' ? null : trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true)}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />
             <FinanceKpiKarta
               ikona="blesk" titulek="Cashflow" hodnota={koruny(kpi.cashflowHaleru)}
+              zdroj="příjmy − výdaje z plateb"
               trend={trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />

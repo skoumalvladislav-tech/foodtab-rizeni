@@ -199,6 +199,8 @@ export const NABIDKA: Polozka[] = [
   // něj si app/[rozsah]/layout.tsx vybírá, kam vede ikona modulu v horní
   // liště (`polozky.find((p) => p.modul === m.key && p.hotovo)`).
   { segment: 'finance', nazev: 'Přehled', kratky: 'Přehled', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'mince' },
+  // Tržby z pokladen po dnech/měsících/rocích, provozovnách a způsobech platby (12. 10. 2026).
+  { segment: 'finance/trzby', nazev: 'Tržby', kratky: 'Tržby', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'trend' },
   // Plná šíře zadání (3. 10. 2026, druhá fáze téže noci): procure-to-pay
   // (Nákup), order-to-cash/CRM zakázek (Zakázky), plan-to-control
   // (Rozpočty a controlling), evidence vybavení — vše BEZ fyzického
