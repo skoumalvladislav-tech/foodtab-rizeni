@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import type { RozsahProp } from "@/app/[rozsah]/prepinac-rozsahu";
 import type { TeloUpozorneni } from "@/lib/upozorneni-text";
-import { vychoziObrazovka } from "@/lib/vychozi-obrazovka";
+import { cilPrepnutiRozsahu, polozkaNaCeste, vychoziObrazovka } from "@/lib/vychozi-obrazovka";
 import type { FirmaProp } from "./MenuUctu";
 import GlobalTopbar from "./GlobalTopbar";
 import ModuleSidebar from "./ModuleSidebar";
@@ -49,6 +49,8 @@ export type PolozkaProp = {
   modul: string;
   /** Bez pobočky nedává smysl — při přepnutí na firmu se jde jinam. */
   jenPobocka?: boolean;
+  /** Patří celé firmě — při přepnutí na pobočku se jde jinam (na pobočce se položka vůbec nekreslí). */
+  jenFirma?: boolean;
   /**
    * Další segmenty, na kterých se tahle položka taky zvýrazní — pro
    * sloučenou položku, která vede na jednu adresu (`segment`), ale
@@ -171,10 +173,8 @@ export default function AppShell({
   const vsechny = [...polozky, ...nastaveni];
   // Položka se pozná podle vlastního segmentu, nebo podle libovolného
   // z `dalsiSegmenty` (sloučená položka rozkročená přes víc adres).
-  const odpovidaSegmentu = (s: string) => segment === s || (segment?.startsWith(s + "/") ?? false);
-  const zde = vsechny.find(
-    (p) => odpovidaSegmentu(p.segment) || (p.dalsiSegmenty ?? []).some(odpovidaSegmentu),
-  );
+  // Vyhrává nejdelší shoda — na finance/cashflow je to Cashflow, ne Přehled.
+  const zde = polozkaNaCeste(segment, vsechny);
 
   // Jen pro spodní mobilní lištu a přepnutí rozsahu — ta zůstává
   // kontextová na aktuálním modulu, dlouhý sdružený seznam by se na
@@ -260,18 +260,9 @@ export default function AppShell({
    * (lib/vychozi-obrazovka.ts).
    */
   function cilRozsahu(novy: string): string {
-    const zaklad = zde?.segment;
-    if (!zaklad) {
-      const vychoziTam = vychoziObrazovka(polozky, novy === segmentFirmy);
-      return vychoziTam ? `/${novy}/${vychoziTam}` : `/${novy}`;
-    }
-
-    if (novy === segmentFirmy && zde.jenPobocka) {
-      const nahrada = polozky.find((p) => p.modul === zde.modul && p.hotovo && !p.jenPobocka);
-      return nahrada ? `/${novy}/${nahrada.segment}` : `/${novy}`;
-    }
-
-    return `/${novy}/${zaklad}`;
+    // Obrazovka jen pro firmu (`jenFirma`) se na pobočce nahradí stejně
+    // jako obrazovka jen pro pobočku na firmě (lib/vychozi-obrazovka.ts).
+    return cilPrepnutiRozsahu(zde, novy, segmentFirmy, polozky);
   }
 
   return (
