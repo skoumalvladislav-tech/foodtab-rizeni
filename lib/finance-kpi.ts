@@ -57,8 +57,11 @@ const NAZVY_KATEGORII: Record<string, string> = {
 export type RadekNakladu = { kategorie: string; nazev: string; castkaHaleru: number }
 
 export type FinanceKpi = {
-  /** Odkud jsou `trzbyHaleru` (a tím i jmenovatel nákladů práce). */
-  zdrojTrzeb: 'pokladna' | 'platby'
+  /**
+   * Odkud jsou `trzbyHaleru` (a tím i jmenovatel nákladů práce).
+   * `nenacteno` = tržby z pokladen se nepodařilo načíst — karta ukáže „–".
+   */
+  zdrojTrzeb: 'pokladna' | 'platby' | 'nenacteno'
   /** U tržeb z pokladen: kolik aktivních poboček má v měsíci data z pokladny. */
   pokrytiPokladnou: { maji: number; celkem: number } | null
   trzbyHaleru: number
@@ -134,23 +137,28 @@ export async function nactiFinanceKpi(
     smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, obdobi.od) : Promise.resolve(null),
     smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, predchoziObdobi.od) : Promise.resolve(null),
     // Oba měsíce jedním dotazem, po měsících (obdobi = 1. den měsíce).
-    nactiPrehledTrzeb(tenantId, predchoziObdobi.od, obdobi.doData, 'mesic'),
+    // Chyba tržeb z pokladen nesmí shodit Cashflow ani náklady (dřív na
+    // pokladně nezávisely) — karta Tržby pak řekne, že se nenačetly.
+    nactiPrehledTrzeb(tenantId, predchoziObdobi.od, obdobi.doData, 'mesic').catch((): 'chyba' => 'chyba'),
   ])
 
   const { prijmy: prijmyHaleru, vydaje: vydajeHaleru } = soucetPrijmyVydaje(cfAktualni)
   const { prijmy: prijmyHaleruPredchozi, vydaje: vydajePredchozi } = soucetPrijmyVydaje(cfPredchozi)
 
   const aktivni = branches.map((b) => b.id)
-  const posAktualni = pokladny ? pokrytiObdobi(pokladny, obdobi.od, aktivni) : null
-  const posPredchozi = pokladny ? pokrytiObdobi(pokladny, predchoziObdobi.od, aktivni) : null
-  const zdrojTrzeb = posAktualni?.maData || posPredchozi?.maData ? 'pokladna' : 'platby'
+  const prehledPokladen = pokladny === 'chyba' ? null : pokladny
+  const posAktualni = prehledPokladen ? pokrytiObdobi(prehledPokladen, obdobi.od, aktivni) : null
+  const posPredchozi = prehledPokladen ? pokrytiObdobi(prehledPokladen, predchoziObdobi.od, aktivni) : null
+  // Nenačtené tržby z pokladen se NEnahrazují příjmy z plateb — karta by
+  // nesla číslo z jiného zdroje pod stejným jménem.
+  const zdrojTrzeb: FinanceKpi['zdrojTrzeb'] = pokladny === 'chyba' ? 'nenacteno' : posAktualni?.maData || posPredchozi?.maData ? 'pokladna' : 'platby'
   const zPokladen = zdrojTrzeb === 'pokladna'
   const stejnePobocky = posAktualni !== null && posPredchozi !== null && posAktualni.pobocky.join() === posPredchozi.pobocky.join()
-  const trzbyHaleru = zPokladen ? (posAktualni?.trzbaHaleru ?? 0) : prijmyHaleru
-  const trzbyHaleruPredchozi = zPokladen ? (stejnePobocky ? (posPredchozi?.trzbaHaleru ?? 0) : null) : prijmyHaleruPredchozi
+  const trzbyHaleru = zdrojTrzeb === 'platby' ? prijmyHaleru : (posAktualni?.trzbaHaleru ?? 0)
+  const trzbyHaleruPredchozi = zdrojTrzeb === 'platby' ? prijmyHaleruPredchozi : zPokladen && stejnePobocky ? (posPredchozi?.trzbaHaleru ?? 0) : null
   // Náklady práce: mzdy jsou za všechny pobočky — z pokladen jen při úplném pokrytí.
-  const praceAktualni = !zPokladen || (posAktualni?.uplne ?? false)
-  const pracePredchozi = !zPokladen || (posPredchozi?.uplne ?? false)
+  const praceAktualni = zdrojTrzeb === 'platby' || (zPokladen && (posAktualni?.uplne ?? false))
+  const pracePredchozi = zdrojTrzeb === 'platby' || (zPokladen && (posPredchozi?.uplne ?? false))
 
   const nakladyPodleKategorieMapa = new Map<string, number>()
   for (const r of vysAktualni) {

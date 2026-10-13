@@ -6,6 +6,7 @@ import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
 import { dalsiObdobi, popisObdobi, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-trzby'
 import Sdeleni from '@/app/sdeleni'
@@ -119,7 +120,11 @@ export default async function FinanceTrzby({
     supabase.from('platebni_ucty').select('branch_id').eq('tenant_id', tenantId).eq('typ', 'banka'),
     supabase.from('integrace_pripojeni').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('oblast', 'pokladna').is('odpojeno_kdy', null),
   ])
-  if (pobockyRes.error) throw pobockyRes.error
+  // Prázdný výsledek není důkaz (lib/supabase/dotaz.ts): chyba dotazu by se
+  // jinak tvářila jako „banka není napojená" nebo „žádná pokladna".
+  if (pobockyRes.error) throw new DotazSelhal('pobočky firmy', pobockyRes.error)
+  if (uctyRes.error) throw new DotazSelhal('bankovní účty firmy', uctyRes.error)
+  if (pokladnyRes.error) throw new DotazSelhal('napojené pokladny', pokladnyRes.error)
   const pobocky = (pobockyRes.data ?? []) as { id: string; name: string; active: boolean }[]
   const nazvyPobocek = new Map(pobocky.map((b) => [b.id, b.active ? b.name : `${b.name} (vypnutá)`]))
   const aktivniPobocky = pobocky.filter((b) => b.active)
