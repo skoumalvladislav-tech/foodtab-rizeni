@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { denVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
+import { ZONA_VYCHOZI } from '@/lib/cas'
+import { provozniDen } from '@/lib/pokladna-cas'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
@@ -33,6 +34,15 @@ export const dynamic = 'force-dynamic'
  */
 
 const LET_ZPET = 9
+
+/**
+ * PROVOZNÍ den (začíná v 05:00), ne kalendářní: tak je zapsaná tržba.
+ * Ve 1:30 v noci 1. 11. ještě běží 31. 10. — přehled nesmí skočit na
+ * prázdný listopad.
+ */
+function provozniDnes(): string {
+  return provozniDen(Date.now(), '05:00', ZONA_VYCHOZI)
+}
 
 function jeCleneni(v: string | undefined): v is Cleneni {
   return v === 'den' || v === 'mesic' || v === 'rok'
@@ -97,7 +107,7 @@ export default async function FinanceTrzby({
   }
 
   const cleneni: Cleneni = jeCleneni(po) ? po : 'den'
-  const dnes = denVPasmu(new Date(), ZONA_VYCHOZI)
+  const dnes = provozniDnes()
   const rozsahObdobi = urcitObdobi(cleneni, obdobiParam, dnes)
   // Transakce vidí jen `finance.read` za celou firmu (RLS) — Finance se otevírá jen na firemní úrovni.
   const bankaVidi = pristup.scope.level === 'tenant'
@@ -105,7 +115,8 @@ export default async function FinanceTrzby({
   const supabase = await getServerSupabase()
   const [pobockyRes, uctyRes, pokladnyRes] = await Promise.all([
     supabase.from('branches').select('id, name, active').eq('tenant_id', tenantId).is('deleted_at', null).order('name'),
-    supabase.from('platebni_ucty').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('typ', 'banka').eq('aktivni', true),
+    // I vypnuté účty — jejich historické příjmy přehled pořád sčítá.
+    supabase.from('platebni_ucty').select('branch_id').eq('tenant_id', tenantId).eq('typ', 'banka'),
     supabase.from('integrace_pripojeni').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('oblast', 'pokladna').is('odpojeno_kdy', null),
   ])
   if (pobockyRes.error) throw pobockyRes.error
@@ -113,7 +124,10 @@ export default async function FinanceTrzby({
   const nazvyPobocek = new Map(pobocky.map((b) => [b.id, b.active ? b.name : `${b.name} (vypnutá)`]))
   const aktivniPobocky = pobocky.filter((b) => b.active)
   const vybranaPobocka = pobockaParam && aktivniPobocky.some((b) => b.id === pobockaParam) ? pobockaParam : null
-  const maBankovniUcet = (uctyRes.count ?? 0) > 0
+  // U jedné provozovny jen její účty: firemní účet k žádné nepatří a „0 Kč"
+  // by tvrdilo, že nic nepřišlo, místo „provozovna účet nemá".
+  const bankovniUcty = (uctyRes.data ?? []) as { branch_id: string | null }[]
+  const maBankovniUcet = vybranaPobocka ? bankovniUcty.some((u) => u.branch_id === vybranaPobocka) : bankovniUcty.length > 0
   const maPokladnu = (pokladnyRes.count ?? 0) > 0
 
   let prehled: PrehledTrzeb | null = null
@@ -129,8 +143,10 @@ export default async function FinanceTrzby({
     const p = new URLSearchParams()
     const c = zmena.po ?? cleneni
     if (c !== 'den') p.set('po', c)
-    // Přepnutí členění bez výslovného období: z měsíců/dnů na měsíce zůstane rok, jinak výchozí (teď).
-    const vychoziPriPrepnuti = c === 'mesic' ? rozsahObdobi.od.slice(0, 4) : ''
+    // Přepnutí členění bez výslovného období: ze dnů na měsíce zůstane rok
+    // zobrazeného měsíce, jinak výchozí (teď). Z „Po rocích" ne — tam `od`
+    // ukazuje deset let zpátky a měsíce by se otevřely v roce bez dat.
+    const vychoziPriPrepnuti = c === 'mesic' && cleneni === 'den' ? rozsahObdobi.od.slice(0, 4) : ''
     const o = zmena.obdobi === undefined ? (c !== cleneni ? vychoziPriPrepnuti : rozsahObdobi.klic) : zmena.obdobi
     if (o) p.set('obdobi', o)
     const b = zmena.pobocka === undefined ? vybranaPobocka : zmena.pobocka

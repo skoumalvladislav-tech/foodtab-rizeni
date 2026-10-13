@@ -252,6 +252,9 @@ export function radkyPoPobockach(p: PrehledTrzeb, pobocky: readonly string[], ba
   const vsechny = [...pobocky]
   for (const t of p.trzby) if (!vsechny.includes(t.branchId)) vsechny.push(t.branchId)
   for (const z of p.platby) if (!vsechny.includes(z.branchId)) vsechny.push(z.branchId)
+  // I účet vypnuté pobočky, která v období nic neprodala — jinak by sloupec
+  // banky po pobočkách nedal součet z karty nahoře.
+  if (bankaVidi) for (const x of p.banka) if (x.branchId !== null && !vsechny.includes(x.branchId)) vsechny.push(x.branchId)
   const radky: RadekPobocky[] = []
   for (const b of vsechny) {
     const r: RadekPobocky = { branchId: b, ...prazdnySouhrn(bankaVidi) }
@@ -285,6 +288,39 @@ export function zpusobyVRozsahu(p: PrehledTrzeb, branchId: string | null): Omit<
 /** Druhy plateb, které se v řádcích vyskytují, v pevném pořadí (sloupce tabulky). */
 export function pouziteDruhy(radky: readonly SouhrnTrzeb[]): DruhPlatby[] {
   return DRUHY_PLATEB.filter((d) => radky.some((r) => r.platbyPoDruhu[d] !== undefined))
+}
+
+/**
+ * Tržba jednoho období pro KPI na Přehledu a kolik aktivních poboček ji
+ * pokrývá. Firma, kde pokladnu má jen část poboček, nesmí dostat „tržby"
+ * jen za ty pobočky vydávané za celou firmu: náklady práce (mzdy všech
+ * poboček) by se dělily menším číslem a trend by srovnával jiné sady
+ * poboček. `pobocky` = id poboček s daty (seřazená — kvůli srovnání).
+ */
+export function pokrytiObdobi(p: PrehledTrzeb, obdobi: string, aktivniPobocky: readonly string[]): {
+  trzbaHaleru: number
+  maData: boolean
+  pobocky: string[]
+  pokrytych: number
+  aktivnich: number
+  uplne: boolean
+} {
+  const sData = new Set<string>()
+  let trzbaHaleru = 0
+  for (const t of p.trzby) {
+    if (t.obdobi !== obdobi) continue
+    trzbaHaleru += t.trzbaHaleru
+    sData.add(t.branchId)
+  }
+  const pokrytych = aktivniPobocky.filter((b) => sData.has(b)).length
+  return {
+    trzbaHaleru,
+    maData: sData.size > 0,
+    pobocky: [...sData].sort(),
+    pokrytych,
+    aktivnich: aktivniPobocky.length,
+    uplne: aktivniPobocky.length > 0 && pokrytych === aktivniPobocky.length,
+  }
 }
 
 /** Tržba jednoho období (KPI na Přehledu) — přes všechny pobočky, které volající vidí. */

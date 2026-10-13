@@ -61,8 +61,13 @@ export type RadekPlatby = {
 
 /**
  * Výsledek jednoho okna. `platby` neuvedené = pokladna rozpad plateb
- * neposílá (nebo mu appka v téhle odpovědi nerozuměla) → synchronizace
- * platby dne NEMĚNÍ. Prázdný seznam = den bez plateb → smažou se.
+ * vůbec neposílá (adaptér bez `platebniMetody`) → synchronizace platby
+ * dne NEMĚNÍ. Prázdný seznam = den bez plateb → smažou se.
+ *
+ * `platbyNecitelne` = pokladna platby posílá, ale v téhle odpovědi jim
+ * appka nerozuměla (chybí, nebo nečitelná položka). Adaptér pak vrátí
+ * prázdný seznam — starší snímek plateb dne zmizí, místo aby zůstal
+ * vypadat jako celý — a synchronizace to ohlásí u připojení.
  */
 export type VysledekProdeju = {
   stav: 'ok'
@@ -70,6 +75,7 @@ export type VysledekProdeju = {
   vynechano: number
   prazdne?: boolean
   platby?: RadekPlatby[]
+  platbyNecitelne?: boolean
 }
 
 /**

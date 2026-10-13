@@ -25,6 +25,7 @@ const {
   radkyPoObdobich,
   radkyPoPobockach,
   soucet,
+  pokrytiObdobi,
   trzbaObdobi,
   zacatekObdobi,
   zpusobyVRozsahu,
@@ -144,6 +145,25 @@ console.log('\n== KPI měsíce (Finance → Přehled) ==')
   ], platby: [], zpusoby: [], banka: [] })
   ok('říjen = 250 přes pobočky, má data', trzbaObdobi(p, '2026-10-01').trzbaHaleru === 250 && trzbaObdobi(p, '2026-10-01').maData)
   ok('srpen bez řádku: nemá data (karta pak nesrovnává pokladnu s bankou)', !trzbaObdobi(p, '2026-08-01').maData)
+
+  const rijen = pokrytiObdobi(p, '2026-10-01', [A, B])
+  const zari = pokrytiObdobi(p, '2026-09-01', [A, B])
+  ok('říjen: obě aktivní pobočky s daty → úplné pokrytí, 250', rijen.uplne && rijen.pokrytych === 2 && rijen.trzbaHaleru === 250)
+  ok('září: data jen z A → neúplné (1 ze 2) — náklady práce se z toho nepočítají', !zari.uplne && zari.pokrytych === 1 && zari.aktivnich === 2)
+  ok('sady poboček září × říjen se liší → trend Přehled nesrovná', zari.pobocky.join() !== rijen.pobocky.join())
+  ok('pobočka s daty, která už není aktivní, se do pokrytí nepočítá',
+    pokrytiObdobi(p, '2026-10-01', [A]).pokrytych === 1 && pokrytiObdobi(p, '2026-10-01', [A]).uplne)
+  ok('firma bez aktivních poboček nemá úplné pokrytí (žádné dělení nulou)', !pokrytiObdobi(p, '2026-10-01', []).uplne)
+  ok('období bez dat: maData false, pobočky prázdné', !pokrytiObdobi(p, '2026-08-01', [A, B]).maData && pokrytiObdobi(p, '2026-08-01', [A, B]).pobocky.length === 0)
+}
+
+console.log('\n== Po pobočkách: banka vypnuté pobočky ==')
+{
+  const D = 'dddddddd-0000-0000-0000-000000000004'
+  const p = prevestPrehled({ ...DATA, banka: [...DATA.banka, { obdobi: '2026-10-02', branch_id: D, prijmy_haleru: 7000 }] })
+  const r = radkyPoPobockach(p, [A, B], true)
+  ok('účet vypnuté pobočky bez prodejů má vlastní řádek (součet sloupce sedí na kartu)', r.some((x) => x.branchId === D && x.bankaHaleru === 7000))
+  ok('… a bez práva na banku se neobjeví', !radkyPoPobockach(p, [A, B], false).some((x) => x.branchId === D))
 }
 
 console.log('\n== Druhy plateb: appka = databáze ==')

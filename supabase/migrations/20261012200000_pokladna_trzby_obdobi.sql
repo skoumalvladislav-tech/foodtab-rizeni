@@ -22,13 +22,12 @@
 --      platby po druhu, rozpad po způsobu a příjmy na bankovní účty,
 --      po dnech / měsících / rocích a po pobočkách. Vrací JSON (jeden
 --      řádek), takže ho nemůže potichu useknout strop řádků PostgRESTu.
---   5. Dotykačka znovu dožene historii — jen tak se k ní doplní platby.
---
--- POŘADÍ NASAZENÍ: NEJDŘÍV kód (PR s tímhle souborem), PAK `db push`.
--- Kód bez téhle migrace funguje (sync zapisuje bez plateb, přehled
--- hlásí „čeká na nasazení databáze"). Opačně by krok 5 nechal starý
--- kód stáhnout celou historii znovu — BEZ plateb — a kurzory by se
--- posunuly, takže by se platby k historii už samy nedoplnily.
+--   5. `pokladna_ulozit_postup` slučuje i kurzor plateb `platby_dohnano_od`
+--      a kurzory historie necouvají — synchronizace podle něj dožene
+--      historii znovu, tentokrát s platbami. Migrace žádný kurzor nemaže,
+--      takže na pořadí nasazení kódu a migrace nezáleží (kód bez migrace
+--      zapisuje bez plateb a přehled hlásí „čeká na aktualizaci databáze";
+--      starý kód s migrací platby jen nestahuje).
 -- =====================================================================
 
 
@@ -319,12 +318,23 @@ grant execute on function public.pokladna_odebrat_prodeje(uuid, uuid) to service
 -- synchronizace znovu nedožene) — přehled podle toho pozná, že součet
 -- plateb pokrývá jen část tržeb.
 --
--- `banka` = příjmy (`transakce.smer = 'prijem'`) na účty typu banka;
--- `branch_id` null = firemní účet bez pobočky. Transakce vidí jen
--- `finance.read` za celou firmu (RLS) — kdo ho má jen v pobočce,
--- dostane prázdný seznam.
+-- `banka` = příjmy (`transakce.smer = 'prijem'`) v CZK na účty typu
+-- banka; `branch_id` null = firemní účet bez pobočky. Jen CZK: tržby
+-- z pokladen jsou v korunách a eurocenty by se k haléřům sečetly.
 --
--- SECURITY INVOKER: všechno přes RLS volajícího, funkce jen sčítá.
+-- SECURITY DEFINER s právy ověřenými JEDNOU na začátku. Jako SECURITY
+-- INVOKER (RLS volajícího) stála kontrola práv ~0,1 ms na každý řádek:
+-- 32 tis. řádků prodejů = 3,2 s pod rolí authenticated (změřeno 13. 10.
+-- nad ostrými daty, jen tržní část) a s každým dalším rokem by přehled
+-- rostl k 8s stropu dotazu. Výsledek je STEJNÝ jako přes RLS:
+--   * prodeje a platby: politika `app.can_read_scoped(tenant,
+--     'finance.read', branch_id)` = `app.has_permission(tenant,
+--     'finance.read')` a pobočka ve `app.visible_branch_ids(tenant)` —
+--     tady `v_smi` a `branch_id = any (v_pobocky)`;
+--   * transakce: `can_read_scoped(tenant, 'finance.read', null)` =
+--     `v_smi`; platební účet: pobočka null, nebo ve `v_pobocky`.
+-- Definer nemá druhou linii (RLS) — firma se proto filtruje v KAŽDÉM
+-- dotazu výslovně a bez práva vrací funkce prázdný přehled.
 -- ---------------------------------------------------------------------
 
 create function public.pokladna_prehled_trzeb(
@@ -334,10 +344,12 @@ create function public.pokladna_prehled_trzeb(
   p_cleneni text default 'den' -- 'den' | 'mesic' | 'rok'
 )
 returns jsonb
-language plpgsql stable security invoker set search_path = ''
+language plpgsql stable security definer set search_path = ''
 as $$
 declare
   v_jednotka text;
+  v_smi      boolean;
+  v_pobocky  uuid[];
   v_trzby    jsonb;
   v_platby   jsonb;
   v_zpusoby  jsonb;
@@ -357,10 +369,18 @@ begin
     raise exception 'Období je delší než 30 let.' using errcode = 'invalid_parameter_value';
   end if;
 
+  -- Práva jednou, ne po řádcích — přesně to, co by RLS spočítala u každého řádku.
+  v_smi := coalesce(app.has_permission(p_tenant, 'finance.read'), false);
+  if not v_smi then
+    return jsonb_build_object('trzby', '[]'::jsonb, 'platby', '[]'::jsonb, 'zpusoby', '[]'::jsonb, 'banka', '[]'::jsonb);
+  end if;
+  v_pobocky := array(select app.visible_branch_ids(p_tenant));
+
   with dny as (
     select p.branch_id, p.datum, sum(p.trzba_haleru)::bigint as trzba, count(*)::bigint as polozek
       from public.pokladna_prodeje_denni p
      where p.tenant_id = p_tenant
+       and p.branch_id = any (v_pobocky)
        and p.datum between p_od and p_do
        and (p.zdroj <> 'csv'
             or not exists (select 1 from public.pokladna_prodeje_denni a
@@ -372,6 +392,7 @@ begin
     select distinct z.branch_id, z.datum
       from public.pokladna_platby_denni z
      where z.tenant_id = p_tenant
+       and z.branch_id = any (v_pobocky)
        and z.datum between p_od and p_do
   ),
   souhrn as (
@@ -398,6 +419,7 @@ begin
                  sum(z.castka_haleru)::bigint as castka, sum(z.pocet)::bigint as pocet
             from public.pokladna_platby_denni z
            where z.tenant_id = p_tenant
+             and z.branch_id = any (v_pobocky)
              and z.datum between p_od and p_do
            group by 1, 2, 3) x;
 
@@ -410,6 +432,7 @@ begin
                  sum(z.castka_haleru)::bigint as castka, sum(z.pocet)::bigint as pocet
             from public.pokladna_platby_denni z
            where z.tenant_id = p_tenant
+             and z.branch_id = any (v_pobocky)
              and z.datum between p_od and p_do
            group by z.branch_id, z.zpusob) x;
 
@@ -423,8 +446,10 @@ begin
             join public.platebni_ucty u on u.id = t.ucet_id
            where t.tenant_id = p_tenant
              and u.tenant_id = p_tenant
+             and (u.branch_id is null or u.branch_id = any (v_pobocky))
              and u.typ = 'banka'
              and t.smer = 'prijem'
+             and t.mena = 'CZK'
              and t.datum between p_od and p_do
            group by 1, 2) x;
 
@@ -433,31 +458,99 @@ end $$;
 
 comment on function public.pokladna_prehled_trzeb(uuid, date, date, text) is
   'Přehled tržeb z pokladen po dnech/měsících/rocích a pobočkách: tržby, '
-  'platby po druhu, rozpad po způsobu za celé období a příjmy na bankovní '
-  'účty. Jeden JSON (žádný strop řádků). SECURITY INVOKER — RLS volajícího.';
+  'platby po druhu, rozpad po způsobu za celé období a příjmy v CZK na '
+  'bankovní účty. Jeden JSON (žádný strop řádků). SECURITY DEFINER s právy '
+  'ověřenými jednou (finance.read + viditelné pobočky) — stejný výsledek '
+  'jako RLS, bez kontroly po řádcích.';
 
 revoke all on function public.pokladna_prehled_trzeb(uuid, date, date, text) from public, anon;
 grant execute on function public.pokladna_prehled_trzeb(uuid, date, date, text) to authenticated;
 
 
 -- ---------------------------------------------------------------------
--- 5. HISTORIE ZNOVU — ať se k ní doplní platby
+-- 5. KURZOR PLATEB A KURZORY, KTERÉ NECOUVAJÍ
 --
--- Dotykačka posílá platby ve stejné odpovědi jako prodeje, ale appka je
--- do dneška zahazovala. Smazaný kurzor `dohnano_od` (a uvázlý den) =
--- synchronizace dožene historii od začátku znovu, po hodinových bězích.
--- Prodeje se přepíší stejnými čísly (přepis dne je atomický, přehled
--- mezitím nic neztratí), platby přibydou. `souvisle_do` zůstává —
--- poslední dny se stahují pokaždé. Viz POŘADÍ NASAZENÍ nahoře.
+-- Historie stažená před 12. 10. platby nemá. Synchronizace ji v režimu
+-- plateb dožene znovu podle VLASTNÍHO kurzoru `platby_dohnano_od`
+-- (`lib/pokladna-beh.ts`, `kurzorHistorie`). Migrace žádný kurzor nemaže:
+-- dřívější verze tu `dohnano_od` smazala, jenže běh, který zrovna
+-- probíhal (nebo starý kód před nasazením), by ho na konci zapsal zpátky
+-- a platby by se k historii už nikdy nedoplnily. Kurzor plateb starý ani
+-- souběžný běh nezná, takže ho vrátit nemůže.
+--
+-- Beze změny proti 20261012100000 kromě:
+--   * slučuje i `platby_dohnano_od`;
+--   * `dohnano_od` i `platby_dohnano_od` berou MENŠÍ z uloženého
+--     a poslaného — dohánění jde vždy dozadu, kurzor nikdy necouvá
+--     (běh v režimu plateb začíná od dneška a kurzor prodejů, který už
+--     je u 1. 1., nesmí posunout dopředu).
 -- ---------------------------------------------------------------------
 
-update public.integrace_pripojeni c
-   set externi_ucet = jsonb_set(
-         c.externi_ucet,
-         '{provozovny}',
-         (select coalesce(jsonb_agg(e.hodnota - 'dohnano_od' - 'uvazl' order by e.poradi), '[]'::jsonb)
-            from jsonb_array_elements(c.externi_ucet -> 'provozovny') with ordinality as e(hodnota, poradi)))
- where c.oblast = 'pokladna'
-   and c.poskytovatel = 'dotykacka'
-   and c.odpojeno_kdy is null
-   and jsonb_typeof(c.externi_ucet -> 'provozovny') = 'array';
+create or replace function public.pokladna_ulozit_postup(
+  p_pripojeni   uuid,
+  p_postup      jsonb, -- [{id, branch_id, dohnano_od, souvisle_do, uvazl, platby_dohnano_od}]
+  p_historie_od date default null
+)
+returns void
+-- SECURITY DEFINER: dopárování čte receptury a mění `recipe_id`, na což
+-- service_role práva nemá (a nemá je dostat plošně). Volat ji smí jen
+-- service_role (grant níž); firmu si funkce hlídá sama — jen řádky
+-- TOHOTO připojení a jen receptury téže firmy jako řádek.
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  update public.integrace_pripojeni c
+     set externi_ucet = jsonb_set(
+           coalesce(c.externi_ucet, '{}'::jsonb)
+             || case when p_historie_od is null or coalesce(c.externi_ucet, '{}'::jsonb) ? 'historie_od'
+                     then '{}'::jsonb
+                     else jsonb_build_object('historie_od', p_historie_od) end,
+           '{provozovny}',
+           coalesce((
+             select jsonb_agg(
+                      case when n.id is null then e
+                           -- `uvazl` je vždy celý stav z běhu: null = den se mezitím povedl.
+                           else (e - 'uvazl')
+                                || jsonb_strip_nulls(jsonb_build_object(
+                                     -- ISO data (RRRR-MM-DD) se dají porovnat jako text.
+                                     'dohnano_od', case when nullif(e ->> 'dohnano_od', '') is null then n.dohnano_od
+                                                        else least(e ->> 'dohnano_od', n.dohnano_od) end,
+                                     'platby_dohnano_od', case when nullif(e ->> 'platby_dohnano_od', '') is null then n.platby_dohnano_od
+                                                               else least(e ->> 'platby_dohnano_od', n.platby_dohnano_od) end,
+                                     'souvisle_do', n.souvisle_do))
+                                || case when n.uvazl is null or jsonb_typeof(n.uvazl) = 'null' then '{}'::jsonb
+                                        else jsonb_build_object('uvazl', n.uvazl) end
+                      end
+                      order by x.poradi)
+               from jsonb_array_elements(coalesce(c.externi_ucet -> 'provozovny', '[]'::jsonb)) with ordinality as x(e, poradi)
+               left join jsonb_to_recordset(coalesce(p_postup, '[]'::jsonb))
+                    as n(id text, branch_id text, dohnano_od text, souvisle_do text, uvazl jsonb, platby_dohnano_od text)
+                 on n.id = x.e ->> 'id'
+                and n.branch_id = x.e ->> 'branch_id'
+           ), '[]'::jsonb))
+   where c.id = p_pripojeni
+     and c.oblast = 'pokladna'
+     and c.odpojeno_kdy is null;
+
+  -- Receptura k prodejům tohoto připojení, kde chybí — totéž pravidlo jako
+  -- trigger na recepturách (20261012100000, část 3). Prodej zapsaný SOUBĚŽNĚ
+  -- se založením receptury by ji jinak nedostal nikdy.
+  update public.pokladna_prodeje_denni p
+     set recipe_id = r.id
+    from public.recipes r
+   where p.integrace_pripojeni_id = p_pripojeni
+     and p.recipe_id is null
+     and r.tenant_id = p.tenant_id
+     and r.active
+     and (r.branch_id is null or r.branch_id = p.branch_id)
+     and lower(btrim(r.name)) = lower(btrim(p.produkt_nazev));
+end $$;
+
+comment on function public.pokladna_ulozit_postup(uuid, jsonb, date) is
+  'Kurzory synchronizace pokladny (dohnano_od, platby_dohnano_od, souvisle_do, '
+  'uvazl) — sloučí jen provozovnám se stejným id i pobočkou, přiřazení nemění; '
+  'kurzory historie necouvají (bere se menší datum). Dopáruje receptury '
+  'k prodejům připojení. Jen service_role.';
+
+revoke all on function public.pokladna_ulozit_postup(uuid, jsonb, date) from public, anon, authenticated;
+grant execute on function public.pokladna_ulozit_postup(uuid, jsonb, date) to service_role;

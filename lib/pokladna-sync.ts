@@ -7,7 +7,7 @@ import { rozsifrovat } from './integrace-klice.ts'
 import { jeNaCaseSynchronizovat } from './integrace-fio-sync.ts'
 import { ADAPTERY_POKLADEN } from './pokladna-adaptery.ts'
 import { oknoProvoznihoDne, planDnu, provozniDen, vychoziHistorieOd } from './pokladna-cas.ts'
-import { probehnoutBeh, type UkolBehu } from './pokladna-beh.ts'
+import { kurzorHistorie, kurzoryKUlozeni, probehnoutBeh, type UkolBehu } from './pokladna-beh.ts'
 import { prirazeneProvozovny, type ExterniUcetPokladny, type ProvozovnaUctu } from './pokladna-prirazeni.ts'
 import type { ChybaPos, RelacePos } from './pos-provider-contract.ts'
 import { funkceNeexistuje } from './supabase/dotaz.ts'
@@ -37,6 +37,14 @@ export type { ExterniUcetPokladny, ProvozovnaUctu }
  * která sama odmítne pobočku, kam tahle provozovna přiřazená není.
  * Platby po způsobu (hotovost, karta…) jdou v témže volání (`p_platby`),
  * pokud je pokladna poslala — prodeje a platby dne se přepíšou spolu.
+ *
+ * REŽIM PLATEB (od 12. 10. 2026): pokladna platby posílá a databáze má
+ * tabulku `pokladna_platby_denni`. Historie stažená dřív platby nemá, proto
+ * se v tomhle režimu dohání znovu podle VLASTNÍHO kurzoru
+ * `platby_dohnano_od` (`lib/pokladna-beh.ts`, `kurzorHistorie`). Kurzor
+ * prodejů `dohnano_od` necouvá — databáze bere menší z obou. Starý nebo
+ * souběžný běh kurzor plateb nezná, takže ho nemůže vrátit zpátky; na
+ * pořadí nasazení kódu a migrace proto nezáleží.
  * Kurzory se na konci zapíšou přes `public.pokladna_ulozit_postup` —
  * ta sloučí JEN kurzory provozoven, jejichž přiřazení se mezitím
  * nezměnilo. Dřív běh zapsal celé `externi_ucet` ze stavu na svém
@@ -52,6 +60,20 @@ const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
  * ukončil časový strop dřív, než uloží postup a uvolní zámek.
  */
 export const REZERVA_BEHU_MS = 25_000
+
+/**
+ * Datové chyby zápisu (mimo rozsah, neplatná hodnota, CHECK, NOT NULL):
+ * když je způsobí platby, den se zapíše znovu s prázdnými platbami — prodeje
+ * dne nesmí padnout kvůli rozpadu plateb (po třech pokusech by se den
+ * přeskočil a prodeje by chyběly natrvalo).
+ */
+const DATOVE_CHYBY = new Set(['22003', '22P02', '22023', '23502', '23514'])
+
+/** Má databáze tabulku plateb (migrace 20261012200000)? Jakákoli chyba = ne — běh pak jede jako dřív. */
+async function databazeMaPlatby(supabase: SupabaseClient): Promise<boolean> {
+  const { error } = await supabase.from('pokladna_platby_denni').select('id', { head: true }).limit(1)
+  return !error
+}
 
 export type VysledekSynchronizacePokladny =
   | { stav: 'ok'; zapsanoRadku: number; dnu: number; prazdnych: number; zbyvaDohnatDnu: number }
@@ -169,6 +191,7 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
 
   const kalendar = await kalendarPobocek(supabase, p.tenant_id)
   const historieOd = ucet.historie_od ?? vychoziHistorieOd(provozniDen(Date.now(), '05:00', 'Europe/Prague'))
+  const rezimPlateb = adapter.schopnosti.platebniMetody && (await databazeMaPlatby(supabase))
 
   type Ukol = UkolBehu & { o: ProvozovnaUctu & { branch_id: string }; kal: { pasmo: string; denZacina: string } }
   const ukoly: Ukol[] = []
@@ -176,14 +199,15 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
     const kal = kalendar.get(o.branch_id)
     if (!kal) continue // pobočka mezitím zmizela — RPC by zápis stejně odmítla
     const dnes = provozniDen(Date.now(), kal.denZacina, kal.pasmo)
+    const dohnanoOd = kurzorHistorie(o, rezimPlateb)
     ukoly.push({
       id: o.id,
       nazev: o.nazev,
       dnes,
-      dohnanoOd: o.dohnano_od,
+      dohnanoOd,
       souvisleDo: o.souvisle_do ?? null,
       uvazl: o.uvazl ?? null,
-      plan: planDnu({ dnes, historieOd, dohnanoOd: o.dohnano_od, souvisleDo: o.souvisle_do ?? null }),
+      plan: planDnu({ dnes, historieOd, dohnanoOd, souvisleDo: o.souvisle_do ?? null }),
       o,
       kal,
     })
@@ -192,7 +216,11 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
   let zapsanoRadku = 0
   let vynechano = 0
   let prazdnych = 0
-  let databazeUmiPlatby = true
+  // `false`, když se uprostřed běhu ukáže, že databáze `p_platby` nezná
+  // (zastaralá cache schématu) — kurzor plateb se pak neposune.
+  let platbyZapsany = true
+  let dnuNecitelnychPlateb = 0
+  const nezapsanePlatby: string[] = []
 
   // Provozovny, které pokladna teď zná — jen když nějaký den přijde prázdný
   // („nic nemám" smí znamenat zavřeno, ne „takovou provozovnu neznám").
@@ -229,16 +257,25 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
       p_radky: prodeje.radky.map((r) => ({ datum: den, produkt_nazev: r.produktNazev, mnozstvi: r.mnozstvi, trzba_haleru: r.trzbaHaleru })),
       p_provozovna: o.id,
     }
-    // Platby jen když je pokladna poslala a databáze je umí uložit.
-    const platby = databazeUmiPlatby && prodeje.platby
+    // Platby jen v režimu plateb a jen když je pokladna poslala.
+    const platby = rezimPlateb && platbyZapsany && prodeje.platby
       ? prodeje.platby.map((z) => ({ datum: den, zpusob: z.zpusob, nazev: z.nazev, druh: z.druh, pocet: z.pocet, castka_haleru: z.castkaHaleru }))
       : null
+    if (platby && prodeje.platbyNecitelne) dnuNecitelnychPlateb++
     let { data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', platby ? { ...parametry, p_platby: platby } : parametry)
-    if (platby && funkceNeexistuje(error)) {
-      // Kód nasazený dřív než migrace 20261012200000: funkce ještě nezná
-      // `p_platby`. Den se zapíše bez plateb, zbytek běhu se už neptá.
-      databazeUmiPlatby = false
+    if (platby && error && funkceNeexistuje(error)) {
+      // Databáze `p_platby` ještě nezná (cache schématu po nasazení migrace).
+      // Den se zapíše bez plateb a zbytek běhu se už neptá; kurzor plateb se
+      // na konci neposune, takže se ty dny stáhnou znovu.
+      platbyZapsany = false
       ;({ data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', parametry))
+    } else if (platby && platby.length > 0 && error && DATOVE_CHYBY.has(error.code ?? '')) {
+      // Rozpad plateb databáze odmítla — prodeje dne nesmí padnout s ním.
+      // Prázdné platby: starý snímek dne zmizí, místo aby vypadal jako celý.
+      // Když neprojde ani tohle, chyba byla v prodejích, ne v platbách.
+      const kod = error.code
+      ;({ data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', { ...parametry, p_platby: [] }))
+      if (!error) nezapsanePlatby.push(`${o.nazev} ${den} (${kod})`)
     }
     if (error) return { stav: 'chyba', druh: 'jina', duvod: `Prodeje provozovny ${o.nazev} za ${den} se nepodařilo zapsat.` }
 
@@ -255,7 +292,7 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
     p_historie_od: historieOd,
     p_postup: beh.postup.map((x) => {
       const u = ukoly.find((k) => k.id === x.id)!
-      return { id: x.id, branch_id: u.o.branch_id, dohnano_od: x.dohnanoOd, souvisle_do: x.souvisleDo, uvazl: x.uvazl }
+      return { id: x.id, branch_id: u.o.branch_id, ...kurzoryKUlozeni(x.dohnanoOd, rezimPlateb, platbyZapsany), souvisle_do: x.souvisleDo, uvazl: x.uvazl }
     }),
   })
 
@@ -279,6 +316,8 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
   const poznamky = [...chybyProvozoven, ...preskocene]
   if (chybaPostupu) poznamky.push('Postup stahování se nepodařilo uložit — další běh stáhne pár dní znovu.')
   if (vynechano > 0) poznamky.push(`${vynechano} položek appka vynechala (záporný součet po vratkách nebo chybějící údaje).`)
+  if (dnuNecitelnychPlateb > 0) poznamky.push(`Rozpad plateb podle způsobu appka nepřečetla (počet dní: ${dnuNecitelnychPlateb}) — ty dny jsou v přehledu tržeb bez plateb.`)
+  if (nezapsanePlatby.length > 0) poznamky.push(`Platby se nepodařilo uložit: ${nezapsanePlatby.join(', ')} — prodeje uložené jsou.`)
 
   // Žádný den se nepovedl a provozovny hlásí chyby (např. 403 u všech) —
   // „ověřeno a synchronizováno" by lhalo; jen důvod, stav beze změny.
@@ -318,6 +357,9 @@ export async function pokladnyKSynchronizaci(): Promise<{ id: string }[]> {
     .eq('rezim', 'zakaznicky')
     .in('poskytovatel', Object.keys(ADAPTERY_POKLADEN))
     .is('odpojeno_kdy', null)
+    // Nejdéle nesynchronizovaná první: kdyby jedna pokladna dlouho doháněla
+    // historii, druhá se pak dostane na řadu v dalším běhu, ne náhodou.
+    .order('posledni_sync_kdy', { ascending: true, nullsFirst: true })
 
   type Radek = { id: string; stav: string; externi_ucet: ExterniUcetPokladny | null; posledni_sync_kdy: string | null; interval_synchronizace_minut: number | null }
   return ((data ?? []) as Radek[])

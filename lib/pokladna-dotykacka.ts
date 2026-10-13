@@ -137,20 +137,26 @@ export const ZPUSOBY_PLATBY_DOTYKACKY: Readonly<Record<string, { nazev: string; 
  * „Base Sales Report" → platby po způsobu (`revenue.paymentTypeInfo[]`
  * s `typeId`, `count`, `total`). Stejný způsob dvakrát se sečte.
  *
- * `undefined` = odpověď rozpad plateb nemá, nebo některé položce appka
- * nerozumí — synchronizace pak platby dne NEMĚNÍ. Radši den bez plateb
- * (přehled ho tak i ukáže) než neúplný součet, který vypadá jako celý.
+ * Dotykačka platby posílá vždycky, takže chybějící rozpad (bez `revenue`
+ * nebo `paymentTypeInfo`) i jediná nečitelná položka znamenají „nerozumím"
+ * (`necitelne`) a výsledek je PRÁZDNÝ seznam — synchronizace platby dne
+ * smaže a ohlásí to. Kdyby je nechala, dnešek by zůstal zamrzlý na
+ * snímku z dřívějšího běhu a v přehledu by vypadal jako celý.
+ *
+ * Vratka může u jednoho způsobu převážit: záporná částka i záporný počet
+ * projdou, počet plateb se na konci ořízne na nulu (je jen informativní,
+ * databáze záporný nepřijme).
  */
-export function naparsovatPlatby(telo: unknown): RadekPlatby[] | undefined {
+export function naparsovatPlatby(telo: unknown): { platby: RadekPlatby[]; necitelne: boolean } {
   const info = (telo as { revenue?: { paymentTypeInfo?: unknown } | null } | null)?.revenue?.paymentTypeInfo
-  if (!Array.isArray(info)) return undefined
+  if (!Array.isArray(info)) return { platby: [], necitelne: true }
 
   const podleZpusobu = new Map<string, RadekPlatby>()
   for (const p of info as Record<string, unknown>[]) {
     const id = cislo(p?.typeId)
     const castka = cislo(p?.total)
     const pocet = p?.count === undefined || p?.count === null ? 0 : cislo(p.count)
-    if (id === null || !Number.isSafeInteger(id) || id < 0 || castka === null || pocet === null || pocet < 0) return undefined
+    if (id === null || !Number.isSafeInteger(id) || id < 0 || castka === null || pocet === null) return { platby: [], necitelne: true }
     const zpusob = String(id)
     const znamy = ZPUSOBY_PLATBY_DOTYKACKY[zpusob]
     const radek = podleZpusobu.get(zpusob) ?? {
@@ -164,7 +170,7 @@ export function naparsovatPlatby(telo: unknown): RadekPlatby[] | undefined {
     radek.castkaHaleru += Math.round(castka * 100)
     podleZpusobu.set(zpusob, radek)
   }
-  return [...podleZpusobu.values()]
+  return { platby: [...podleZpusobu.values()].map((r) => ({ ...r, pocet: Math.max(0, r.pocet) })), necitelne: false }
 }
 
 /** Stránka `GET …/branches` → provozovny; smazané vynechá. `null` = tvar, kterému appka nerozumí. */
@@ -370,7 +376,8 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
 
           const report = naparsovatReport(odpoved.telo)
           if (!report) return { stav: 'chyba', druh: 'jina', duvod: 'Přehled tržeb z Dotykačky má neočekávaný tvar (chybí productSales).' } satisfies ChybaPos
-          return { stav: 'ok', ...report, platby: naparsovatPlatby(odpoved.telo) }
+          const { platby, necitelne } = naparsovatPlatby(odpoved.telo)
+          return { stav: 'ok', ...report, platby, ...(necitelne ? { platbyNecitelne: true } : {}) }
         },
       }
 

@@ -6,7 +6,8 @@
 -- Pokrývá:
 --   1. práva: platby čte authenticated jen přes RLS, píše jen
 --      service_role (přes pokladna_nahradit_prodeje); přehled smí
---      authenticated, anon ne; přehled je SECURITY INVOKER;
+--      authenticated, anon ne; přehled je SECURITY DEFINER s právy
+--      ověřenými jednou (rychlost — RLS po řádcích stála sekundy);
 --   2. zápis plateb v téže transakci jako prodeje: přepis dne, sečtení
 --      téhož způsobu, `p_platby = null` platby nechá, `[]` je smaže,
 --      platba ke dni mimo p_dny a součet mimo rozsah odmítnuty;
@@ -16,7 +17,12 @@
 --      s API se nepočítá, dny s platbami, platby po druhu, rozpad po
 --      způsobu za období, příjmy jen na bankovní účty a jen příjmy;
 --      neplatné členění a příliš dlouhé období po dnech odmítnuty;
---   5. RLS: majitel vidí obě pobočky, člověk z cizí firmy nic.
+--   5. práva přehledu = RLS: majitel vidí obě pobočky; kdo má
+--      finance.read jen v Perle, dostane jen Perlu (a banku jako přes
+--      RLS: firemní účet a účet Perly) — a přesně tytéž pobočky, jaké mu
+--      ukáže RLS přímým dotazem; bez finance.read nic; cizí firma nic;
+--   6. kurzory synchronizace: `platby_dohnano_od` se slučuje, kurzory
+--      historie necouvají (bere se menší datum), přiřazení se nemění.
 --
 -- Navazuje na etapa0_scenar.sql (firma „Foodtab s.r.o.", pobočky
 -- cerna-perla a bernard-bar).
@@ -67,6 +73,38 @@ select set_config('test.user_id', '', false);
 insert into public.branches (tenant_id, name, slug, active) values (:'tenant_b', 'Krok95 cizí pobočka', 'krok95-cizi', true)
 returning id as cizi_pobocka \gset
 
+-- Práva přehledu stojí na modulu finance (app.has_permission má modulovou bránu).
+insert into public.tenant_modules (tenant_id, module_key)
+values (:'tenant', 'finance')
+on conflict (tenant_id, module_key) do nothing;
+
+-- Pro oddíl 5 (vzor krok70): finance.read jen v Perle (rozsah pobočky)
+-- a člen celé firmy BEZ finance.read.
+insert into auth.users (id, email, raw_user_meta_data) values
+  ('95950000-0000-0000-0000-000000000002', 'perla95@foodtab.cz', '{"full_name":"Perla Devadesátpět"}'),
+  ('95950000-0000-0000-0000-000000000003', 'bez95@foodtab.cz',   '{"full_name":"Bez Práva Devadesátpět"}');
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'tenant', 'krok95_finance', 'Zkouška 95 — finance', 'kuchyne', true)
+returning id as z_fin \gset
+insert into public.positions (tenant_id, key, label, department, active)
+values (:'tenant', 'krok95_bez', 'Zkouška 95 — bez financí', 'kuchyne', true)
+returning id as z_bez \gset
+insert into public.position_permissions (tenant_id, position_id, permission_key) values
+  (:'tenant', :'z_fin', 'finance.read');
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', '95950000-0000-0000-0000-000000000002', :'z_fin', 'Perla Devadesátpět', 'hpp')
+returning id as e_fin \gset
+insert into public.employees (tenant_id, branch_id, user_id, position_id, full_name, employment_type)
+values (:'tenant', :'perla', '95950000-0000-0000-0000-000000000003', :'z_bez', 'Bez Práva Devadesátpět', 'hpp')
+returning id as e_bez \gset
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'tenant', '95950000-0000-0000-0000-000000000002', null, 'branch', 'active')
+returning id as m_fin \gset
+insert into public.membership_branches (membership_id, branch_id) values (:'m_fin', :'perla');
+insert into public.memberships (tenant_id, user_id, role_id, scope, status)
+values (:'tenant', '95950000-0000-0000-0000-000000000003', null, 'tenant', 'active')
+returning id as m_bez \gset
+
 -- Firemní připojení se dvěma provozovnami (vlastní poskytovatel — Dotykačku
 -- už má firma z krok94 a dvě živá připojení téhož poskytovatele nejdou).
 insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, stav, externi_ucet)
@@ -102,8 +140,8 @@ select pg_temp.check('stará pětiparametrová verze zmizela (žádné dvojí p�
 select pg_temp.check('přehled: authenticated ano, anon ne',
   has_function_privilege('authenticated', 'public.pokladna_prehled_trzeb(uuid, date, date, text)', 'execute')
   and not has_function_privilege('anon', 'public.pokladna_prehled_trzeb(uuid, date, date, text)', 'execute'));
-select pg_temp.check('přehled je SECURITY INVOKER (nic nezpřístupní, jen sčítá)',
-  not (select prosecdef from pg_proc where oid = 'public.pokladna_prehled_trzeb(uuid, date, date, text)'::regprocedure));
+select pg_temp.check('přehled je SECURITY DEFINER s pevnou search_path (práva si ověří jednou, oddíl 5)',
+  (select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid = 'public.pokladna_prehled_trzeb(uuid, date, date, text)'::regprocedure));
 
 
 \echo ''
@@ -258,10 +296,18 @@ insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zd
   (:'tenant', :'ucet_perla', 'vydaj',   999, '2031-03-02', 'rucni'),
   (:'tenant', :'ucet_firma', 'prijem',  300, '2031-03-20', 'rucni'),
   (:'tenant', :'ucet_kasa',  'prijem',  555, '2031-03-02', 'rucni');
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, mena, datum, zdroj) values
+  (:'tenant', :'ucet_perla', 'prijem', 777, 'EUR', '2031-03-03', 'rucni');
 
+-- Přehled si práva ověřuje sám (definer) — volá ho majitel, ne superuser
+-- bez přihlášení (ten by dostal prázdno a kontroly níž by neměřily nic).
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
 select public.pokladna_prehled_trzeb(:'tenant', '2031-03-01', '2031-03-31', 'den') as den_json \gset
 select public.pokladna_prehled_trzeb(:'tenant', '2031-01-01', '2031-12-31', 'mesic') as mesic_json \gset
 select public.pokladna_prehled_trzeb(:'tenant', '2031-01-01', '2032-12-31', 'rok') as rok_json \gset
+select pg_temp.check('příprava: majitel dostal neprázdný přehled (jinak by kontroly níž neměřily nic)',
+  jsonb_array_length(:'den_json'::jsonb -> 'trzby') > 0);
 
 select pg_temp.check('po dnech: Perla 1. 3. = jen API 1500 (CSV 9999 téhož dne ne), 2 položky',
   exists (select 1 from jsonb_array_elements(:'den_json'::jsonb -> 'trzby') e
@@ -307,6 +353,11 @@ select pg_temp.check('obrácené období odmítnuto',
 select pg_temp.check('období bez dat: prázdné seznamy, ne chyba',
   (select public.pokladna_prehled_trzeb(:'tenant', '2030-01-01', '2030-01-31', 'den'))
     = '{"trzby":[],"platby":[],"zpusoby":[],"banka":[]}'::jsonb);
+select pg_temp.check('banka jen v CZK: eurový příjem se k haléřům nepřičte',
+  (select sum((e ->> 'prijmy_haleru')::bigint)
+     from jsonb_array_elements(public.pokladna_prehled_trzeb(:'tenant', '2031-03-01', '2031-03-31', 'den') -> 'banka') e) = 2300);
+reset role;
+select set_config('test.user_id', '', false);
 
 
 \echo ''
@@ -328,8 +379,83 @@ select pg_temp.check('člověk z cizí firmy nedostane nic, ani když zná id fi
   (select public.pokladna_prehled_trzeb(:'tenant', '2031-01-01', '2031-12-31', 'mesic'))
     = '{"trzby":[],"platby":[],"zpusoby":[],"banka":[]}'::jsonb);
 
+-- finance.read jen v Perle: přehled = přesně to, co ukáže RLS.
+select set_config('test.user_id', '95950000-0000-0000-0000-000000000002', false);
+select public.pokladna_prehled_trzeb(:'tenant', '2031-03-01', '2031-03-31', 'den') as perla_json \gset
+select pg_temp.check('jen Perla: tržby března 1500 + 700 = 2200, Bar (300) chybí',
+  (select sum((e ->> 'trzba_haleru')::bigint) from jsonb_array_elements(:'perla_json'::jsonb -> 'trzby') e) = 2200
+  and not exists (select 1 from jsonb_array_elements(:'perla_json'::jsonb -> 'trzby') e where e ->> 'branch_id' = :'bar'));
+select pg_temp.check('jen Perla: přehled počítá PŘESNĚ pobočky, které RLS ukáže přímým dotazem',
+  (select coalesce(array_agg(distinct p.branch_id::text order by p.branch_id::text), '{}')
+     from public.pokladna_prodeje_denni p
+    where p.tenant_id = :'tenant' and p.datum between '2031-03-01' and '2031-03-31')
+  = (select coalesce(array_agg(distinct e ->> 'branch_id' order by e ->> 'branch_id'), '{}')
+       from jsonb_array_elements(:'perla_json'::jsonb -> 'trzby') e)
+  and (select count(distinct p.branch_id) from public.pokladna_prodeje_denni p
+        where p.tenant_id = :'tenant' and p.datum between '2031-03-01' and '2031-03-31') = 1);
+select pg_temp.check('jen Perla: platby a způsoby jen z Perly',
+  jsonb_array_length(:'perla_json'::jsonb -> 'zpusoby') = 1
+  and not exists (select 1 from jsonb_array_elements(:'perla_json'::jsonb -> 'platby') e where e ->> 'branch_id' <> :'perla'));
+select pg_temp.check('jen Perla: banka = součet, který dá RLS přímým dotazem (účet Perly 2000 + firemní 300)',
+  (select sum((e ->> 'prijmy_haleru')::bigint) from jsonb_array_elements(:'perla_json'::jsonb -> 'banka') e)
+  = (select sum(t.castka_haleru) from public.transakce t join public.platebni_ucty u on u.id = t.ucet_id
+      where t.tenant_id = :'tenant' and u.typ = 'banka' and t.smer = 'prijem' and t.mena = 'CZK'
+        and t.datum between '2031-03-01' and '2031-03-31')
+  and (select sum((e ->> 'prijmy_haleru')::bigint) from jsonb_array_elements(:'perla_json'::jsonb -> 'banka') e) = 2300);
+
+-- Člen firmy bez finance.read: nic — a RLS mu přímo také nic neukáže.
+select set_config('test.user_id', '95950000-0000-0000-0000-000000000003', false);
+select pg_temp.check('bez finance.read: přehled prázdný, stejně jako přímý dotaz přes RLS',
+  (select public.pokladna_prehled_trzeb(:'tenant', '2031-01-01', '2031-12-31', 'mesic'))
+    = '{"trzby":[],"platby":[],"zpusoby":[],"banka":[]}'::jsonb
+  and not exists (select 1 from public.pokladna_prodeje_denni where tenant_id = :'tenant'));
+
 reset role;
 select set_config('test.user_id', '', false);
+
+
+\echo ''
+\echo '== 6. Kurzory: platby_dohnano_od, kurzory necouvají ==============='
+
+set role service_role;
+select public.pokladna_ulozit_postup(:'pos', jsonb_build_array(
+  jsonb_build_object('id', '1', 'branch_id', :'perla', 'dohnano_od', '2031-10-09', 'platby_dohnano_od', '2031-10-09', 'souvisle_do', '2031-10-12'),
+  jsonb_build_object('id', '2', 'branch_id', :'perla', 'platby_dohnano_od', '2031-05-05')));
+reset role;
+select externi_ucet as ucet6 from public.integrace_pripojeni where id = :'pos' \gset
+select pg_temp.check('kurzor prodejů necouvá: 1. 1. zůstává, i když běh poslal 9. 10.',
+  (:'ucet6'::jsonb -> 'provozovny' -> 0 ->> 'dohnano_od') = '2031-01-01');
+select pg_temp.check('kurzor plateb se zapíše (chyběl → 9. 10.) a souvisle_do taky',
+  (:'ucet6'::jsonb -> 'provozovny' -> 0 ->> 'platby_dohnano_od') = '2031-10-09'
+  and (:'ucet6'::jsonb -> 'provozovny' -> 0 ->> 'souvisle_do') = '2031-10-12');
+select pg_temp.check('jiná pobočka v postupu (provozovna 2 je v Baru) nic nedostane',
+  not (:'ucet6'::jsonb -> 'provozovny' -> 1) ? 'platby_dohnano_od');
+select pg_temp.check('přiřazení a názvy beze změny',
+  (:'ucet6'::jsonb -> 'provozovny' -> 0 ->> 'branch_id') = :'perla'
+  and (:'ucet6'::jsonb -> 'provozovny' -> 1 ->> 'branch_id') = :'bar'
+  and (:'ucet6'::jsonb -> 'provozovny' -> 0 ->> 'nazev') = 'Perla');
+
+set role service_role;
+select public.pokladna_ulozit_postup(:'pos', jsonb_build_array(
+  jsonb_build_object('id', '1', 'branch_id', :'perla', 'dohnano_od', '2030-12-01', 'platby_dohnano_od', '2031-03-01')));
+reset role;
+select pg_temp.check('starší datum projde u obou kurzorů (dohánění jde dozadu)',
+  (select externi_ucet -> 'provozovny' -> 0 ->> 'dohnano_od' from public.integrace_pripojeni where id = :'pos') = '2030-12-01'
+  and (select externi_ucet -> 'provozovny' -> 0 ->> 'platby_dohnano_od' from public.integrace_pripojeni where id = :'pos') = '2031-03-01');
+
+set role service_role;
+select public.pokladna_ulozit_postup(:'pos', jsonb_build_array(
+  jsonb_build_object('id', '1', 'branch_id', :'perla', 'dohnano_od', '2031-06-01', 'platby_dohnano_od', '2031-06-01')));
+select public.pokladna_ulozit_postup(:'pos', jsonb_build_array(
+  jsonb_build_object('id', '1', 'branch_id', :'perla', 'dohnano_od', null, 'platby_dohnano_od', null)));
+reset role;
+select pg_temp.check('pozdější datum (souběžný nebo starý běh) kurzory nevrátí; null je nechá',
+  (select externi_ucet -> 'provozovny' -> 0 ->> 'dohnano_od' from public.integrace_pripojeni where id = :'pos') = '2030-12-01'
+  and (select externi_ucet -> 'provozovny' -> 0 ->> 'platby_dohnano_od' from public.integrace_pripojeni where id = :'pos') = '2031-03-01');
+select pg_temp.check('ukládání kurzorů smí jen service_role',
+  has_function_privilege('service_role', 'public.pokladna_ulozit_postup(uuid, jsonb, date)', 'execute')
+  and not has_function_privilege('authenticated', 'public.pokladna_ulozit_postup(uuid, jsonb, date)', 'execute')
+  and not has_function_privilege('anon', 'public.pokladna_ulozit_postup(uuid, jsonb, date)', 'execute'));
 
 
 -- Úklid: prodeje, platby a transakce pryč (transakce nemají grant delete —
@@ -338,6 +464,11 @@ delete from public.pokladna_platby_denni where zdroj like 'krok95%';
 delete from public.pokladna_prodeje_denni where produkt_nazev ilike 'krok95%';
 delete from public.transakce where ucet_id in (:'ucet_perla', :'ucet_firma', :'ucet_kasa');
 delete from public.platebni_ucty where id in (:'ucet_perla', :'ucet_firma', :'ucet_kasa');
+delete from public.membership_branches where membership_id in (:'m_fin', :'m_bez');
+delete from public.memberships where id in (:'m_fin', :'m_bez');
+delete from public.employees where id in (:'e_fin', :'e_bez');
+delete from public.position_permissions where position_id in (:'z_fin', :'z_bez');
+delete from public.positions where id in (:'z_fin', :'z_bez');
 
 \echo ''
 \echo '== KROK 95 HOTOV =============================================='

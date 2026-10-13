@@ -60,6 +60,45 @@ export type VysledekBehu = {
   zbyvaDnu: number
 }
 
+/**
+ * Kurzor historie, podle kterého se plánuje běh (krok 3).
+ *
+ * V režimu plateb (pokladna posílá platby podle způsobu a databáze je umí
+ * uložit) se historie dohání znovu podle `platby_dohnano_od` — prodeje
+ * stažené dřív platby nemají. Bez režimu plateb podle `dohnano_od`.
+ * Chybějící klíč = `null` (ne `undefined`): `probehnoutBeh` se ptá
+ * `=== null`.
+ */
+export function kurzorHistorie(o: { dohnano_od?: string | null; platby_dohnano_od?: string | null }, rezimPlateb: boolean): string | null {
+  return (rezimPlateb ? o.platby_dohnano_od : o.dohnano_od) ?? null
+}
+
+/**
+ * Co po běhu poslat do `pokladna_ulozit_postup`. Databáze z kurzoru
+ * prodejů i plateb bere MENŠÍ z uloženého a poslaného (kurzor nikdy
+ * necouvá), takže `dohnano_od` jde vždycky. Kurzor plateb jen tehdy,
+ * když běh platby opravdu zapisoval — kdyby se uprostřed běhu ukázalo,
+ * že databáze je ještě neumí, posunul by se přes dny zapsané bez nich.
+ */
+export function kurzoryKUlozeni(dohnanoOd: string | null, rezimPlateb: boolean, platbyZapsany: boolean): { dohnano_od: string | null; platby_dohnano_od: string | null } {
+  return { dohnano_od: dohnanoOd, platby_dohnano_od: rezimPlateb && platbyZapsany ? dohnanoOd : null }
+}
+
+/**
+ * Tvrdý konec pro další pokladnu v úloze, která jich synchronizuje víc
+ * za sebou (`app/api/uloha/pokladna-synchronizace`). Každá zbývající
+ * dostane STEJNÝ díl času, který po odečtení rezervy zbývá — jinak by
+ * první pokladna, která dohání historii, spotřebovala skoro celý běh
+ * a druhá by nestihla ani dnešek. Na poslední vyjde celý zbytek.
+ * `null` = na další pokladnu už nezbývá rozumný čas (méně než
+ * `nejmeneMs` na stahování).
+ */
+export function konecProPokladnu(tedMs: number, konecUlohyMs: number, zbyvaPokladen: number, rezervaMs: number, nejmeneMs = 5_000): number | null {
+  const naStahovani = konecUlohyMs - rezervaMs - tedMs
+  if (zbyvaPokladen < 1 || naStahovani < nejmeneMs) return null
+  return tedMs + Math.floor(naStahovani / zbyvaPokladen) + rezervaMs
+}
+
 export function jeCeloplosna(chyba: ChybaPos): boolean {
   return chyba.druh === 'pristup' || chyba.celoplosna === true
 }

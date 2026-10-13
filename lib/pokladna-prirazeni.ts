@@ -32,6 +32,13 @@ export type ProvozovnaUctu = {
   souvisle_do?: string | null
   /** Den, na kterém stahování uvázlo, a kolikrát po sobě selhal (`lib/pokladna-beh.ts`). */
   uvazl?: { den: string; pokusu: number } | null
+  /**
+   * Nejstarší provozní den, od kterého appka má k prodejům i PLATBY podle
+   * způsobu (od 12. 10. 2026 — historie stažená dřív je nemá). Chybí =
+   * historie plateb se ještě nedoháněla. Samostatný kurzor, ne `dohnano_od`:
+   * starý nebo souběžný běh ho nezná, takže ho ani nemůže vrátit zpátky.
+   */
+  platby_dohnano_od?: string | null
 }
 
 /** `integrace_pripojeni.externi_ucet` u pokladny s tokenem. */
@@ -55,7 +62,15 @@ export function sloucitProvozovny(nove: ProvozovnaPos[], dosavadni: ProvozovnaUc
   const podleId = new Map(dosavadni.map((p) => [p.id, p]))
   return nove.map((n) => {
     const stara = podleId.get(n.externiId)
-    return { id: n.externiId, nazev: n.nazev, branch_id: stara?.branch_id ?? null, dohnano_od: stara?.dohnano_od ?? null, souvisle_do: stara?.souvisle_do ?? null, uvazl: stara?.uvazl ?? null }
+    return {
+      id: n.externiId,
+      nazev: n.nazev,
+      branch_id: stara?.branch_id ?? null,
+      dohnano_od: stara?.dohnano_od ?? null,
+      souvisle_do: stara?.souvisle_do ?? null,
+      uvazl: stara?.uvazl ?? null,
+      platby_dohnano_od: stara?.platby_dohnano_od ?? null,
+    }
   })
 }
 
@@ -67,7 +82,7 @@ export function automatickePrirazeni(provozovny: ProvozovnaUctu[], pobockyFirmy:
   if (provozovny.length !== 1 || pobockyFirmy.length !== 1) return provozovny
   const [jedina] = provozovny
   if (jedina.branch_id || obsazeneJinde.has(pobockyFirmy[0])) return provozovny
-  return [{ ...jedina, branch_id: pobockyFirmy[0], dohnano_od: null, souvisle_do: null, uvazl: null }]
+  return [{ ...jedina, branch_id: pobockyFirmy[0], dohnano_od: null, souvisle_do: null, uvazl: null, platby_dohnano_od: null }]
 }
 
 export type VysledekPrirazeni =
@@ -117,7 +132,7 @@ export function zkontrolovatPrirazeni(
       continue
     }
     if (p.branch_id) opustene.add(p.branch_id)
-    vysledek.push({ ...p, branch_id: nova, dohnano_od: null, souvisle_do: null, uvazl: null })
+    vysledek.push({ ...p, branch_id: nova, dohnano_od: null, souvisle_do: null, uvazl: null, platby_dohnano_od: null })
   }
 
   // I pobočka, kterou hned obsadila jiná provozovna, se čistí: do té doby,

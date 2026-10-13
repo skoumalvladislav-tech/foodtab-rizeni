@@ -16,7 +16,7 @@ const { POKLADNY, najitPokladnu, prectiUdaje, zdrojPokladny } = await import('..
 const { mistniCasNaMs, oknoProvoznihoDne, planDnu, provozniDen, posunoutDen, vychoziHistorieOd } = await import('../lib/pokladna-cas.ts')
 const { MAX_RADKU, overitDavku, rozebratKlicPrijmu, slozitKlicPrijmu } = await import('../lib/pokladna-prijem-api.ts')
 const { automatickePrirazeni, prirazeneProvozovny, sloucitProvozovny, zkontrolovatPrirazeni } = await import('../lib/pokladna-prirazeni.ts')
-const { probehnoutBeh } = await import('../lib/pokladna-beh.ts')
+const { konecProPokladnu, kurzorHistorie, kurzoryKUlozeni, probehnoutBeh } = await import('../lib/pokladna-beh.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -167,6 +167,8 @@ console.log('\n== Přiřazení provozoven k pobočkám ==')
   const sloucenoSouvisle = sloucitProvozovny([{ externiId: '1', nazev: 'P' }], [{ id: '1', nazev: 'P', branch_id: A, dohnano_od: '2026-03-01', souvisle_do: '2026-10-05', uvazl: { den: '2026-09-01', pokusu: 1 } }])
   ok('nové přihlášení zachová souvisle_do (mezera po výpadku se pak dotáhne)', sloucenoSouvisle[0].souvisle_do === '2026-10-05')
   ok('… i uvázlý den (počítání pokusů pokračuje)', sloucenoSouvisle[0].uvazl?.pokusu === 1)
+  const sloucenoPlatby = sloucitProvozovny([{ externiId: '1', nazev: 'P' }], [{ id: '1', nazev: 'P', branch_id: A, dohnano_od: '2026-01-01', platby_dohnano_od: '2026-06-01' }])
+  ok('… i kurzor plateb (nové načtení provozoven ho nesmí zahodit — historie by se stahovala znovu)', sloucenoPlatby[0].platby_dohnano_od === '2026-06-01')
   ok('nová provozovna je nepřiřazená', slouceno[1].id === '2' && slouceno[1].branch_id === null)
   ok('provozovna zrušená v pokladně z přiřazení vypadne', slouceno.length === 2 && !slouceno.some((p) => p.id === '9'))
   ok('přiřazené = jen ty s pobočkou', prirazeneProvozovny({ provozovny: slouceno }).length === 1)
@@ -201,6 +203,12 @@ console.log('\n== Přiřazení provozoven k pobočkám ==')
   const presunSouvisle = zkontrolovatPrirazeni([{ id: '1', nazev: 'P', branch_id: A, dohnano_od: '2026-03-01', souvisle_do: '2026-10-10', uvazl: { den: '2026-09-01', pokusu: 2 } }], { 1: B }, firma, nic)
   ok('… i souvisle_do (nová pobočka začíná od nuly, ne od mezery staré)', presunSouvisle.stav === 'ok' && presunSouvisle.provozovny[0].souvisle_do === null)
   ok('… i uvázlý den staré pobočky', presunSouvisle.stav === 'ok' && presunSouvisle.provozovny[0].uvazl === null)
+  const presunPlatby = zkontrolovatPrirazeni([{ id: '1', nazev: 'P', branch_id: A, dohnano_od: '2026-03-01', platby_dohnano_od: '2026-05-01' }], { 1: B }, firma, nic)
+  ok('… i kurzor plateb (nová pobočka nemá ani prodeje, ani platby)', presunPlatby.stav === 'ok' && presunPlatby.provozovny[0].platby_dohnano_od === null)
+  const bezZmenyPlatby = zkontrolovatPrirazeni([{ id: '1', nazev: 'P', branch_id: A, dohnano_od: '2026-03-01', platby_dohnano_od: '2026-05-01' }], { 1: A }, firma, nic)
+  ok('beze změny pobočky zůstane i kurzor plateb', bezZmenyPlatby.stav === 'ok' && bezZmenyPlatby.provozovny[0].platby_dohnano_od === '2026-05-01')
+  ok('automatické přiřazení začíná bez kurzoru plateb',
+    automatickePrirazeni([{ id: '1', nazev: 'P', branch_id: null, dohnano_od: null, platby_dohnano_od: '2026-05-01' }], [A], nic)[0].platby_dohnano_od === null)
   ok('… a původní pobočka se uklidí', presun.stav === 'ok' && JSON.stringify(presun.opustenePobocky) === JSON.stringify([A]))
 
   const odebrat = zkontrolovatPrirazeni(dve, { 1: '', 2: '' }, firma, nic)
@@ -329,6 +337,30 @@ console.log('\n== Příjmové API: limity, které databáze unese ==')
   ok('řídicí znaky v názvu produktu pryč (\\u0000 by databáze odmítla)', ridici.stav === 'ok' && ridici.radky[0].produktNazev === 'Ko la')
   const mezery = overitDavku({ prodeje: [radek('Pilsner  0,5 l', 10)] }, dnes)
   ok('vnitřní mezery v názvu zůstávají (shoda s recepturou)', mezery.stav === 'ok' && mezery.radky[0].produktNazev === 'Pilsner  0,5 l')
+}
+
+console.log('\n== Kurzor plateb a dělení času mezi pokladny ==')
+{
+  const o = { dohnano_od: '2026-01-01', platby_dohnano_od: '2026-08-01' }
+  ok('režim plateb plánuje podle kurzoru plateb', kurzorHistorie(o, true) === '2026-08-01')
+  ok('bez režimu plateb podle kurzoru prodejů (chování jako dřív)', kurzorHistorie(o, false) === '2026-01-01')
+  ok('chybějící kurzor plateb = null, ne undefined (probehnoutBeh se ptá === null) → historie od dneška',
+    kurzorHistorie({ dohnano_od: '2026-01-01' }, true) === null && kurzorHistorie({}, false) === null)
+
+  ok('po běhu v režimu plateb jdou oba kurzory (databáze vezme menší)',
+    JSON.stringify(kurzoryKUlozeni('2026-09-01', true, true)) === JSON.stringify({ dohnano_od: '2026-09-01', platby_dohnano_od: '2026-09-01' }))
+  ok('když se uprostřed běhu ukázalo, že databáze platby neumí, kurzor plateb se neposune',
+    kurzoryKUlozeni('2026-09-01', true, false).platby_dohnano_od === null && kurzoryKUlozeni('2026-09-01', true, false).dohnano_od === '2026-09-01')
+  ok('bez režimu plateb se kurzor plateb nikdy neposílá', kurzoryKUlozeni('2026-09-01', false, true).platby_dohnano_od === null)
+
+  const T = 1_000_000
+  const konec = T + 57_000
+  const prvni = konecProPokladnu(T, konec, 2, 25_000)
+  ok('dvě pokladny: první dostane polovinu času na stahování (16 s) + rezervu', prvni === T + 16_000 + 25_000)
+  ok('… druhá po ní zbytek až do konce úlohy', konecProPokladnu(T + 20_000, konec, 1, 25_000) === konec)
+  ok('jedna pokladna dostane celý běh', konecProPokladnu(T, konec, 1, 25_000) === konec)
+  ok('na stahování zbývá míň než 5 s → další pokladna se nespustí', konecProPokladnu(T + 28_000, konec, 1, 25_000) === null)
+  ok('žádná zbývající pokladna → null', konecProPokladnu(T, konec, 0, 25_000) === null)
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')

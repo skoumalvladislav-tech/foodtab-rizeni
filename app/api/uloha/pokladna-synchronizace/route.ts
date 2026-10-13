@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { tajemstviSedi } from '@/lib/supabase/uloha'
+import { konecProPokladnu } from '@/lib/pokladna-beh'
 import { pokladnyKSynchronizaci, REZERVA_BEHU_MS, synchronizovatPokladnu } from '@/lib/pokladna-sync'
 
 /**
@@ -9,18 +10,18 @@ import { pokladnyKSynchronizaci, REZERVA_BEHU_MS, synchronizovatPokladnu } from 
  *
  * Stejný vzor jako `app/api/uloha/banka-synchronizace` — Bearer
  * CRON_SECRET, `service_role`, žádný přihlášený uživatel. Pokladny jdou
- * JEDNA PO DRUHÉ: každá dostane svůj díl času (dohánění historie umí
- * skončit uprostřed a příště pokračovat), poslední zbytek dostane ta,
- * na kterou vyjde. Pokladna, která se dnes nestihne, přijde na řadu
- * příští hodinu — pořadí dává seznam, ne priorita.
+ * JEDNA PO DRUHÉ, nejdéle nesynchronizovaná první, a každá zbývající
+ * dostane stejný díl času (`konecProPokladnu`). Dřív dostala první až
+ * 25 s; když doháněla historii, na druhou často nezbylo nic a ta neměla
+ * aktuální ani dnešek. Dohánění historie umí skončit uprostřed
+ * a příště pokračovat.
  */
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-/** Tvrdý konec úlohy (limit 60 s) a nejvýš času na stahování jedné pokladny. */
+/** Tvrdý konec úlohy (limit 60 s). */
 const KONEC_PO_MS = 57_000
-const NEJVYS_NA_POKLADNU_MS = 25_000
 
 export async function GET(request: Request): Promise<NextResponse> {
   const hlavicka = request.headers.get('authorization')
@@ -36,11 +37,12 @@ export async function GET(request: Request): Promise<NextResponse> {
   // Bez id připojení a bez textů chyb: odpověď končí ve veřejném logu
   // GitHub Actions. Důvod je u připojení v Integracích → Pokladní systémy.
   const vysledky: { stav: string; zapsanoRadku: number; zbyvaDohnatDnu: number }[] = []
-  for (const p of pokladny) {
+  for (const [i, p] of pokladny.entries()) {
     // Synchronizace bere `konecMs` jako tvrdý konec a sama si nechá rezervu
     // na rozběhnutý dotaz a zápis — další pokladna má smysl, jen když po ní něco zbývá.
-    if (Date.now() > konecUlohy - REZERVA_BEHU_MS - 5_000) break
-    const vysledek = await synchronizovatPokladnu(p.id, { konecMs: Math.min(konecUlohy, Date.now() + NEJVYS_NA_POKLADNU_MS + REZERVA_BEHU_MS) })
+    const konecMs = konecProPokladnu(Date.now(), konecUlohy, pokladny.length - i, REZERVA_BEHU_MS)
+    if (konecMs === null) break
+    const vysledek = await synchronizovatPokladnu(p.id, { konecMs })
     vysledky.push({
       stav: vysledek.stav,
       zapsanoRadku: vysledek.stav === 'ok' ? vysledek.zapsanoRadku : 0,

@@ -171,7 +171,13 @@ export default async function FinancePrehled({
           <div className="ds-kpi-mrizka">
             <FinanceKpiKarta
               ikona="mince" titulek="Tržby" hodnota={koruny(kpi.trzbyHaleru)}
-              zdroj={kpi.zdrojTrzeb === 'pokladna' ? 'z pokladen' : 'z přijatých plateb'}
+              zdroj={
+                kpi.zdrojTrzeb === 'platby'
+                  ? 'z přijatých plateb'
+                  : kpi.pokrytiPokladnou && kpi.pokrytiPokladnou.maji < kpi.pokrytiPokladnou.celkem
+                    ? `z pokladen · ${kpi.pokrytiPokladnou.maji} z ${kpi.pokrytiPokladnou.celkem} provozoven`
+                    : 'z pokladen'
+              }
               trend={trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true)}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />

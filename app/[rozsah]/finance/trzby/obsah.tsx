@@ -84,6 +84,12 @@ export default function Obsah({
   const druhy = pouziteDruhy([...radky, celkem])
   const bankaZobrazit = bankaVidi && maBankovniUcet
   const platbyCastecne = celkem.dnu > 0 && celkem.dnuSPlatbami < celkem.dnu
+  // Graf jen z období s prodeji na začátku a konci: dnešek před první
+  // synchronizací nebo zavřený poslední den by čáru utnul na „0 Kč" —
+  // období bez dat není nulová tržba. Mezery uprostřed (zavřeno) zůstávají.
+  const prvniSProdeji = radky.findIndex((r) => r.dnu > 0)
+  const posledniSProdeji = radky.findLastIndex((r) => r.dnu > 0)
+  const grafRadky = prvniSProdeji < 0 ? [] : radky.slice(prvniSProdeji, posledniSProdeji + 1)
 
   if (celkem.dnu === 0 && celkem.platbyCelkemHaleru === 0 && (celkem.bankaHaleru ?? 0) === 0) {
     return (
@@ -139,7 +145,13 @@ export default function Obsah({
           ikona="kniha"
           titulek="Příjmy na bankovní účty"
           hodnota={bankaZobrazit ? koruny(celkem.bankaHaleru ?? 0) : '–'}
-          zdroj={!bankaVidi ? 'jen s právem pro celou firmu' : !maBankovniUcet ? 'banka zatím není napojená' : vybranaPobocka ? 'účty této provozovny' : 'všechny bankovní účty'}
+          zdroj={
+            !bankaVidi
+              ? 'jen s právem pro celou firmu'
+              : !maBankovniUcet
+                ? vybranaPobocka ? 'provozovna nemá vlastní bankovní účet' : 'banka zatím není napojená'
+                : vybranaPobocka ? 'účty této provozovny' : 'všechny bankovní účty'
+          }
           trend={null}
         />
         <FinanceKpiKarta ikona="tecky" titulek="Ostatní platby" hodnota="–" zdroj="modul se připravuje" trend={null} />
@@ -147,20 +159,21 @@ export default function Obsah({
 
       {platbyCastecne ? (
         <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
-          Rozpad podle způsobu platby stahuje appka od 12. 10. 2026. Starší dny se doplňují postupně při hodinové synchronizaci —
-          do té doby pokrývají platby jen část tržeb.
+          Rozpad podle způsobu platby má appka jen za dny, kdy ho pokladna poslala. Dotykačka ho posílá od 12. 10. 2026
+          a starší dny se doplňují postupně při synchronizaci; ruční import (CSV) a příjmové API ho neposílají vůbec.
+          Do té doby pokrývají platby jen část tržeb.
         </p>
       ) : null}
 
-      {radky.length >= 2 ? (
+      {grafRadky.length >= 2 ? (
         <div style={{ ...karta, minWidth: 0 }}>
           <h2 style={{ margin: '0 0 12px', fontSize: '15px' }}>Tržby z pokladen — {NAZVY_CLENENI[cleneni].toLowerCase()}</h2>
           <LineChart
-            body={radky.map((r) => ({ popisek: popisObdobi(r.obdobi, cleneni), hodnotaHaleru: r.trzbaHaleru, budouci: false }))}
+            body={grafRadky.map((r) => ({ popisek: popisObdobi(r.obdobi, cleneni), hodnotaHaleru: r.trzbaHaleru, budouci: false }))}
             formatovatOsu={zkratka}
             formatovatHodnotu={koruny}
             nazev={`Tržby z pokladen ${NAZVY_CLENENI[cleneni].toLowerCase()}`}
-            popisekPosledni={popisObdobi(radky[radky.length - 1].obdobi, cleneni)}
+            popisekPosledni={popisObdobi(grafRadky[grafRadky.length - 1].obdobi, cleneni)}
           />
         </div>
       ) : null}
