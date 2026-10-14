@@ -16,7 +16,8 @@
   GitHub zůstává jako záloha.
 - **Nově zámek proti dvojímu spuštění ve všech 9 úlohách.** Při souběžném
   volání (GitHub + databáze) by jinak přišly dva pushe „Čekají na vás
-  zprávy" a dva koncepty marketingového příspěvku.
+  zprávy" a dva koncepty marketingového příspěvku. Příjem faktur zámek
+  po doběhnutí uvolní, protože ho GitHub volá ve smyčce až 15× za sebou.
 
 ## Co je hotové
 
@@ -26,8 +27,9 @@
 | Srovnání variant a doporučení | `ac29a80` (`docs/planovac-pg-cron.md`) | — |
 | Migrace plánovače: tabulka úloh, `app.naplanovat_ulohy`, `app.zrusit_planovac`, `app.planovac_stav`, `app.spustit_ulohu`, úklid | `ac29a80` | ano — a pak ruční zapnutí |
 | Zámek `public.uloha_zabrat` + `uzBezi` ve všech `app/api/uloha/*` | `ac29a80` | zámek ano; kód do té doby běží bez něj jako dnes |
-| Kontrola `scripts/planovac.test.mjs` (zapsaná v workflow Aplikace) | `ac29a80` | — |
-| Scénář `krok96` (zapsaný v `run.sh` a workflow Databáze) | `ac29a80` | — |
+| Uvolnění zámku `public.uloha_uvolnit` u faktur (smyčka v GitHub workflow) | `3157668` | ano |
+| Kontrola `scripts/planovac.test.mjs` (zapsaná v workflow Aplikace) | `ac29a80`, `3157668` | — |
+| Scénář `krok96` (zapsaný v `run.sh` a workflow Databáze) | `ac29a80`, `3157668` | — |
 | Návod pro Šéfíka, otázka 47, tohle hlášení | (commit s hlášením) | — |
 
 ## Čísla — a z čeho jsou
@@ -51,22 +53,23 @@
 
 **Kontroly:**
 
-- `scripts/planovac.test.mjs`: **147 kontrol**, všechny prošly. Spouští
+- `scripts/planovac.test.mjs`: **149 kontrol**, všechny prošly. Spouští
   skutečný `route.ts` všech 9 úloh; podstrčená je jen databáze a knihovny
   pod nimi. Na každou úlohu: 7 špatných podob tajemství + 2 stavy
   chybějícího/prázdného `CRON_SECRET` → 401 a **nesáhne na nic, ani na
   zámek**; kontrolní běh se správným tajemstvím; zámek drží jiný → 200
   „běží jinde"; zámek čeká na migraci → běží bez něj; porucha zámku →
-  500 bez detailu. Plus shoda jmen a plánů migrace × úlohy × GitHub
-  a limity.
-- `krok96` nad PGlite: **49 kontrol** (+ 39 etapa0, celkem 88), všechny
-  prošly. PGlite **neověří RLS ani sloupcové granty** a role tam nejsou
+  500 bez detailu. Plus úloha volaná ve smyčce zámek uvolní (faktury),
+  shoda jmen a plánů migrace × úlohy × GitHub a limity.
+- `krok96` nad PGlite: **54 kontrol**, všechny prošly. PGlite **neověří RLS ani sloupcové granty** a role tam nejsou
   skutečné — kontroly práv tu čtou jen katalog (`has_function_privilege`).
   Rozhoduje workflow Databáze proti PostgreSQL 16 (poběží na PR).
   `cron`, `net` a `vault` jsou ve scénáři napodobeniny se stejnými
   podpisy — skutečné pg_cron/pg_net se lokálně neověří vůbec.
 
-**Schválná rozbití — aplikace (6, každé spadlo):**
+- `npx tsc --noEmit` a `eslint` nad změněnými soubory: bez chyb.
+
+**Schválná rozbití — aplikace (7, každé spadlo):**
 
 | Rozbití | Spadlo |
 |---|---|
@@ -76,12 +79,30 @@
 | checklisty-terminy: zámek pod cizím jménem (chyba kopírování) | 4× — kontroly zámku |
 | `uzBezi` pustí úlohu dál při jakékoli chybě zámku | 9× — porucha zámku ve všech úlohách |
 | marketing-fronta: výsledek zámku se nevyhodnotí | 2× — „běží jinde" a porucha |
+| faktury: zámek se po doběhnutí neuvolní | 2× — kontrola workflow se smyčkou i skutečný průchod |
 
 Zámek a tajemství jsem rozbil víc způsoby schválně: „vypnuté ověření"
 a „zámek před ověřením" jsou dvě různé chyby, které by obě prošly, kdyby
 kontrola hlídala jen kód odpovědi 401 a ne to, na co se sáhlo.
 
-**Schválná rozbití — databáze:** viz konec hlášení.
+**Schválná rozbití — databáze (9, každé spadlo; `krok96` nad PGlite):**
+
+| Rozbití | Spadla kontrola |
+|---|---|
+| `uloha_zabrat` bez `revoke` pro anon/authenticated | „uloha_zabrat nesmí anon ani authenticated" |
+| zámek bez podmínky na vypršení | „druhé zabrání téže úlohy → false" |
+| adresa bez kontroly https | „http:// → odmítnuto" |
+| naplánování bez předchozího ověření Vaultu | „naplánování bez tajemství → odmítnuto" |
+| tajemství v textu úlohy cronu (u všech úloh) | „text úlohy volá app.spustit_ulohu jménem" |
+| tajemství v textu úlohy cronu (u všech kromě jedné) | „ŽÁDNÁ úloha v cronu neobsahuje tajemství ani adresu" |
+| `spustit_ulohu` nezapíše volání | „volání zapsané pod číslem požadavku" |
+| `uloha_uvolnit` přepíše i vypršený zámek | „uvolnění sáhne jen na platný zámek" |
+| `uloha_uvolnit` bez `revoke` | „uloha_uvolnit nesmí anon ani authenticated" |
+
+Tajemství v cronu jsem rozbil dvakrát schválně: první rozbití chytila
+přísnější kontrola o řádek dřív a o té samotné („žádné tajemství
+v cronu") neřeklo nic. Druhé rozbití nechalo jednu úlohu čistou, aby
+přísnější kontrola prošla a musela spadnout ta správná.
 
 ## Co čeká na Šéfíka
 
@@ -135,6 +156,15 @@ kontrola hlídala jen kód odpovědi 401 a ne to, na co se sáhlo.
   schránkách, dva souběžné běhy) by mohl založit duplicitní fakturu —
   dnes jeden běh schránky prochází po řadě, a zámek úlohy to tak drží
   i nadále.
+- **Vlastní chyba v první verzi zámku**: zámek se neuvolňoval nikde,
+  a faktury-z-emailu.yml volá úlohu ve smyčce, dokud `pokracovat` —
+  druhé kolo by narazilo na zámek z prvního a dohánění schránek by se
+  zastavilo po jednom kole. Našel jsem to při kontrole, jak workflow
+  čtou odpovědi; opraveno v `3157668` (`uloha_uvolnit`) i s kontrolou,
+  která chytí každé další workflow se smyčkou.
+- **Faktury po vypnutí GitHubu**: pg_cron je zavolá jednou za 30 minut,
+  jedno kolo. Při velkém dohánění to bude pomalejší než GitHubových
+  až 15 kol najednou. Plán faktur jsem neměnil (drží se dnešního).
 - **Vercel dostane víc volání** — kolik bylo vždycky v plánu, ~440 denně
   místo dnešních ~40. Spotřebu na tarifu Hobby jsem neověřoval.
 - Nic se nevykresluje, takže žádné obrazovky; nic jsem neviděl běžet

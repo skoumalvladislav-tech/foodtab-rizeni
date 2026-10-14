@@ -101,6 +101,13 @@ Proto **zámek úlohy**: první volání úlohu zabere na její limit (90 s, neb
 „běží jinde" a neudělá nic. Zámek vyprší sám; nejkratší rozestup v plánu je
 15 minut, takže příští plánovaný běh nikdy nezablokuje.
 
+Výjimka: **příjem faktur** zámek po doběhnutí uvolní. GitHub ho volá ve
+smyčce (až 15 kol za sebou, dokud zbývá dohánět schránky) a druhé kolo
+by jinak narazilo na zámek z prvního. pg_cron volá faktury jednou za
+30 minut, jedno kolo — při velkém dohánění bude po vypnutí GitHubu
+pomalejší (jedno kolo za 30 min místo až 15 kol najednou); kdyby to
+vadilo, stačí faktury plánovat častěji.
+
 ## 5. Postup zapnutí (Šéfík)
 
 Každý krok jen na tvůj pokyn. Kroky 1–2 jsou běžné nasazení, kroky 3–6 jsou
