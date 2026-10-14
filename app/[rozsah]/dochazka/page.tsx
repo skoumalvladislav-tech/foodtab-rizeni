@@ -1249,7 +1249,7 @@ export default async function Dochazka({
           media dotazu, samo se to podsune pod sebe, když se dvě 320px
           položky vedle sebe nevejdou.
         */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px", alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(320px, 100%), 1fr))", gap: "24px", alignItems: "start" }}>
         <div>
         {/* 3. Moje nejbližší směny */}
         <h2 style={nadpisSekce}>Moje nejbližší směny</h2>

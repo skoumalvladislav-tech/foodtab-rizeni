@@ -179,6 +179,12 @@ export async function nactiFinanceKpi(
   predchoziObdobi: { od: string; doData: string },
   /** Pobočka rozsahu (`pobockaFinanci`), `null` = celá firma jako dřív. */
   pobocka: string | null = null,
+  /**
+   * Předchozí období NENÍ celý měsíc (rozběhnutý měsíc proti stejným dnům
+   * minulého — `srovnatelnaObdobi`, lib/finance-obdobi.ts). Mzdy se počítají
+   * jen po celých měsících, takže náklady práce se pak nesrovnávají.
+   */
+  srovnaniCastecne = false,
 ): Promise<FinanceKpi> {
   const smiVidetMzdy = canSee(ctx, 'payroll.read')
 
@@ -189,11 +195,20 @@ export async function nactiFinanceKpi(
     nactiFoodcostBeverage(tenantId, pobocka, obdobi.od, obdobi.doData),
     nactiFoodcostBeverage(tenantId, pobocka, predchoziObdobi.od, predchoziObdobi.doData),
     smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, pobocka, obdobi.od) : Promise.resolve(null),
-    smiVidetMzdy ? nactiSoucetMzdyHaleru(tenantId, pobocka, predchoziObdobi.od) : Promise.resolve(null),
-    // Oba měsíce jedním dotazem, po měsících (obdobi = 1. den měsíce).
-    // Chyba tržeb z pokladen nesmí shodit Cashflow ani náklady (dřív na
-    // pokladně nezávisely) — karta Tržby pak řekne, že se nenačetly.
-    nactiPrehledTrzeb(tenantId, predchoziObdobi.od, obdobi.doData, 'mesic').catch((): 'chyba' => 'chyba'),
+    smiVidetMzdy && !srovnaniCastecne ? nactiSoucetMzdyHaleru(tenantId, pobocka, predchoziObdobi.od) : Promise.resolve(null),
+    // Každé období svým dotazem, po měsících (obdobi = 1. den měsíce): jeden
+    // dotaz od začátku minulého měsíce by u rozběhnutého měsíce sečetl celý
+    // minulý měsíc, ne jen srovnatelné dny. Chyba tržeb z pokladen nesmí
+    // shodit Cashflow ani náklady — karta Tržby pak řekne, že se nenačetly.
+    Promise.all([
+      nactiPrehledTrzeb(tenantId, obdobi.od, obdobi.doData, 'mesic'),
+      nactiPrehledTrzeb(tenantId, predchoziObdobi.od, predchoziObdobi.doData, 'mesic'),
+    ]).then(([a, b]) => (a === null || b === null ? null : {
+      trzby: [...a.trzby, ...b.trzby],
+      platby: [...a.platby, ...b.platby],
+      zpusoby: [...a.zpusoby, ...b.zpusoby],
+      banka: [...a.banka, ...b.banka],
+    })).catch((): 'chyba' => 'chyba'),
     pobocka === null ? Promise.resolve(true) : pobockaMaUcet(tenantId, pobocka),
   ])
 
