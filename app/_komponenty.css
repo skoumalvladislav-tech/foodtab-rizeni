@@ -985,6 +985,10 @@ span.ds-sm-dl { cursor: default; }
   background: color-mix(in srgb, var(--bad) 8%, var(--card));
 }
 .ds-sm-potvrzeni p { margin: 0; font-size: 15px; color: var(--ink); }
+/* Vysvětlující věta pod otázkou („Zůstane vidět jako zrušená…“) — tlumeně jako na
+   počítači. Do 14. 10. 2026 nesla třídu jednořádkového údaje .ds-sm-mista (nowrap +
+   výpustka) a na telefonu se uřízla na „až roz…“. */
+.ds-sm-potvrzeni p.ds-sm-potvrzeni-pozn { font-size: 14px; color: var(--muted); }
 .ds-sm-potvrzeni-akce { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 /* --- formulář „Přidat směnu“ -------------------------------------------- */
@@ -1528,6 +1532,55 @@ div.ds-smd-smena:hover { box-shadow: none; }
   justify-self: start; min-height: 36px; padding: 0 4px; border: 0; background: transparent;
   color: var(--mosaz); font-size: 13px; font-weight: 600; cursor: pointer;
 }
+/* Den vybraný napevno (den rušené směny) — dvojitý okraj, kurzor bez kliku. */
+.ds-sm-vd-den[data-zamceno] { cursor: default; box-shadow: inset 0 0 0 1px var(--branch); }
+/* Celá mřížka zamčená (`zakazano`) — rušení ve víc dnech během odesílání. */
+.ds-sm-vd-den:disabled, .ds-sm-vd-vic:disabled { cursor: default; opacity: .6; }
+
+/* --- zrušit / smazat i v jiné dny (ruseni-vice-dni.tsx) ---------------- */
+
+.ds-sm-rv { display: grid; gap: 10px; }
+/* Zaškrtávátko „…i v jiné dny“ — 44 px na dotyk jako „Víc dní“ u zakládání. */
+.ds-sm-rv-volba {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+  font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer;
+}
+/* 20 px v mosazi jako `.ds-sm-volba input`, ne drobný modrý výchozí checkbox prohlížeče. */
+.ds-sm-rv-volba input { width: 20px; height: 20px; flex: none; margin: 0; accent-color: var(--mosaz); }
+/* Během odesílání zamčené (výsledek by se ztratil) — ať je to vidět. */
+.ds-sm-rv-volba:has(input:disabled) { cursor: default; opacity: .6; }
+/* `.ds-sm-rv p…` kvůli `.ds-sm-potvrzeni p` v detailu na telefonu. */
+.ds-sm-rv p.ds-sm-rv-vysvetleni { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.ds-sm-rv p.ds-sm-rv-souhrn { margin: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
+/* Totéž pro chyby (náhled, odmítnutí): `.ds-sm-potvrzeni p` (0,1,1) by přebilo
+   červenou z `.hlaska-chyba` (0,1,0) a na telefonu by byly inkoustové v 15 px. */
+.ds-sm-rv p.hlaska-chyba { margin: 0; font-size: 13px; color: var(--bad); }
+/* Samotné „Zpět“ (bez platného náhledu, po odmítnutí) přes celou šířku —
+   na telefonu je řada `.ds-sm-potvrzeni-akce` mřížka 1fr 1fr a jediné
+   tlačítko by zabralo levou půlku. Jen tady, potvrzení jedné směny má
+   tlačítka vždy dvě. */
+.ds-sm-rv .ds-sm-potvrzeni-akce > :only-child { grid-column: 1 / -1; }
+.ds-sm-rv-nahled { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ds-sm-rv-den {
+  display: grid; grid-template-columns: 4.8em minmax(0, 1fr); gap: 8px; align-items: start;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); font-size: 13.5px;
+}
+.ds-sm-rv-den[data-prazdny] { background: var(--sunken); border-style: dashed; }
+.ds-sm-rv-datum { font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ds-sm-rv-nic { color: var(--muted); }
+.ds-sm-rv-den > ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ds-sm-rv-smena { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.ds-sm-rv-cas { color: var(--ink); font-variant-numeric: tabular-nums; }
+.ds-sm-rv-kdo { min-width: 0; color: var(--muted); }
+.ds-sm-rv-akce { margin-left: auto; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ds-sm-rv-akce[data-akce="zrusit"] { color: var(--pozor); background: var(--pozor-bg); }
+.ds-sm-rv-akce[data-akce="smazat"] { color: var(--bad); background: var(--bad-bg); }
+.ds-sm-rv-chyby { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ds-sm-rv-chyby li {
+  padding: 8px 10px; border: 1px solid var(--bad); border-radius: 10px;
+  background: var(--bad-bg); color: var(--bad); font-size: 13px; line-height: 1.45;
+}
+.ds-sm-rv-tlacitka { display: flex; flex-wrap: wrap; gap: 8px; }
 .ds-smd-hlavicka-smeny { display: grid; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .ds-smd-hlavicka-osoba { display: flex; align-items: center; gap: 12px; }
 .ds-smd-hlavicka-jmeno { font-size: 16px; font-weight: 600; }
