@@ -1239,3 +1239,26 @@ nerozhodnete jinak. V kódu jsou tato místa označená `ROZHODNOUT:`.
    - **Když to má být jinak:** zadání (ř. 152) chce mzdy podle skutečné práce. Potřebuje novou funkci nad docházkou.
 6. **Kontakty, Integrace, import výpisů a AI analytik** jsou jen za celou firmu. Na pobočce ukazují větu a odkaz na celou firmu.
 7. **Párování plateb s fakturami** a změna stavu faktury na „Uhrazeno“ jdou jen za celou firmu.
+
+## 49. Rušení směn po více dnech — co přesně se v ostatních dnech zruší
+
+**Vzniklo:** 14. 10. 2026. Šéfík: „potřebuji u rušení směn označit více
+dní." U smazání / zrušení směny jde teď zaškrtnout „…i v jiné dny"
+a vybrat dny v mřížce. Před potvrzením appka ukáže náhled, které směny
+to budou. Na každý bod jsem vybral nejopatrnější variantu. Appka podle
+ní funguje, dokud nerozhodnete jinak. V kódu `lib/ruseni-smen.ts` jsou
+tato místa označená `ROZHODNOUT:`.
+
+1. **Které směny se v ostatních dnech vezmou.**
+   - **Teď:** u směny s člověkem všechny směny téhož člověka na téže pobočce v daném dni (i jiný čas — „ten den nepřijde"). U neobsazené směny všechny neobsazené směny se stejnou pozicí a stejným časem od–do.
+   - **Pozor na nesymetrii:** ve dni, kde jste rušení otevřel, se zruší jen ta jedna směna. V ostatních dnech všechno, co pravidlu odpovídá. Pobočka se třemi stejnými sloty „Číšník 10–22" denně tak ve výchozím dni ubere jeden slot, v ostatních dnech všechny tři. Náhled to ukáže směnu po směně, takže se nic nestane potichu.
+   - **Když to má být jinak:** (a) u neobsazených rušit v každém dni jen jeden slot; (b) i u člověka brát jen směny se stejným časem; (c) ve výchozím dni rušit i další směnu téhož člověka.
+2. **Dny v minulosti.**
+   - **Teď:** mřížka nabízí 12 týdnů od pondělí týdne výchozí směny a minulé dny nezamyká. Jde tedy zrušit i už odpracované směny. Zrušená vydaná směna pak vypadne z výpočtu „dnů bez docházky" u mezd.
+   - **Když to má být jinak:** buď minulé dny v náhledu jen označit („z toho N dní v minulosti"), nebo je v mřížce zamknout a server je odmítne. Souvisí s otázkou 27 (minulá období).
+3. **Zavření okna během rušení.**
+   - **Teď:** tlačítko Zpět, volba i mřížka jsou během rušení zamčené. Okno ale jde zavřít křížkem (nebo Esc). Rušení na serveru doběhne, jen neuvidíte souhrn výsledku. Po obnovení stránky jsou směny zrušené. Stejně se to dnes chová i u ukládání jedné směny.
+   - **Když to má být jinak:** zamknout během odesílání i zavření okna, u ukládání i u rušení najednou.
+4. **Strop 150 směn na jedno potvrzení.**
+   - **Teď:** víc než 150 směn najednou appka odmítne v náhledu i v potvrzení („vyberte méně dní"). Směny se ruší jedna po druhé a každá zakládá upozornění. Kdyby akce narazila na časový limit serveru uprostřed, část by byla pryč a nevědělo by se která.
+   - **Když to má být jinak:** vyšší strop chce delší časový limit akce (`maxDuration` na Vercelu) nebo rušení v jedné databázové funkci najednou (migrace).

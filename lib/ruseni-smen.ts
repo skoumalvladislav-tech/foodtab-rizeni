@@ -82,7 +82,7 @@ export type OvereneDny = { ok: true; dny: string[] } | { ok: false; text: string
  * a den mimo okno mřížky (`TYDNU_MAX` týdnů od pondělí týdne výchozí
  * směny) — server nepustí nic, co by obrazovka nenabídla.
  *
- * ROZHODNOUT: okno začíná PONDĚLÍM týdne výchozí směny, ne jejím dnem,
+ * ROZHODNOUT (docs/hlaseni/otazky.md #49, bod 2): okno začíná PONDĚLÍM týdne výchozí směny, ne jejím dnem,
  * a nehlídá, jestli den není v minulosti. Když se rušení otevře u směny
  * z minulého měsíce, jde jedním potvrzením zrušit (vydané) nebo smazat
  * (nevydané) až dvanáct týdnů už odpracovaných směn. Zrušená vydaná
@@ -132,7 +132,7 @@ export function stejnyCas(a: string, b: string): boolean {
  * Vždy: stejná pobočka jako výchozí směna, jiný den než výchozí směna
  * (v jejím dni se ruší jen ona sama, jako dosud) a ne už zrušená.
  *
- * ROZHODNOUT: pravidlo po dnech je výchozí, opatrné rozhodnutí této
+ * ROZHODNOUT (docs/hlaseni/otazky.md #49, bod 1): pravidlo po dnech je výchozí, opatrné rozhodnutí této
  * relace, Šéfík ho zatím nepotvrdil.
  *   - Výchozí směna MÁ člověka: všechny směny téhož člověka na téže
  *     pobočce v tom dni (i když má jiný čas — „ten den nepřijde“).
