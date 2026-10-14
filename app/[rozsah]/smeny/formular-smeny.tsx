@@ -15,6 +15,7 @@ import { denVTydnu, hodinyKratce, minutSmeny, ZKRATKY_DNU } from '@/lib/rozpis-m
 import { barvaSouhrnu, prepnoutDen, souhrnZalozeni, TYDNU_KROK, TYDNU_MAX, TYDNU_VYCHOZI, zapnoutVicDni } from '@/lib/vyber-dnu'
 import HlavickaSmeny, { type KontextSmeny } from './desktop/hlavicka-smeny'
 import { ListMobil } from './mobil/sheet'
+import RuseniViceDni from './ruseni-vice-dni'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
 import { smazatSmenu, ulozitSmenu, type StavSmeny } from './smena'
 import VyberDnu from './vyber-dnu'
@@ -127,6 +128,7 @@ export default function FormularSmeny({
   souctyTydne,
   onDalsiDen,
   potvrzeni,
+  onPodrzet,
 }: {
   rozsah: string
   /** Předvyplněné datum u nové směny. */
@@ -172,6 +174,12 @@ export default function FormularSmeny({
   onDalsiDen?: (dalsi: DalsiSmena) => void
   /** Věta nad formulářem: co se právě uložilo, když sem člověk přišel z „přidat další den“. */
   potvrzeni?: string
+  /**
+   * Panel na počítači: zrušení ve víc dnech odešlo. Rodič si okno podrží,
+   * i když rušená směna po obnovení dat z rozpisu zmizí — jinak by s ní
+   * zmizel i výsledek (co se zrušilo a co neprošlo).
+   */
+  onPodrzet?: () => void
 }) {
   const router = useRouter()
   const [stav, akce, ceka] = useActionState<StavSmeny, FormData>(ulozitSmenu, {
@@ -191,6 +199,13 @@ export default function FormularSmeny({
   // Ptá se to, než smaže. Rozpis se staví večer a jedno ťuknutí vedle
   // by sebralo směnu, kterou už někdo naplánoval.
   const [ptaSeNaSmazani, setPtaSeNaSmazani] = useState(false)
+  /*
+    „…i v jiné dny“ (Šéfík 14. 10. 2026). Zapnuté nahradí potvrzení jedné
+    směny výběrem dnů s náhledem (ruseni-vice-dni.tsx) a schová formulář
+    úprav — ten se týká jedné směny a vedle hromadného rušení by mátl.
+    Vypnuté = jedna směna přesně jako dřív.
+  */
+  const [ruseniViceDni, setRuseniViceDni] = useState(false)
   const [zavreno, setZavreno] = useState(false)
   const prvni = useRef<HTMLSelectElement>(null)
   const poznamkaRef = useRef<HTMLInputElement>(null)
@@ -411,9 +426,12 @@ export default function FormularSmeny({
   */
   const jeVydana = Boolean(smena?.published_at)
 
+  // Rušení ve víc dnech je zapnuté — panel ukazuje jen je (viz `ruseniViceDni`).
+  const rusiViceDni = ptaSeNaSmazani && ruseniViceDni && Boolean(smena?.id) && !mobil
+
   const telo = (
     <>
-      {hotovo ? (
+      {rusiViceDni ? null : hotovo ? (
         <>
           {stav.dny ? (
             /*
@@ -871,10 +889,22 @@ export default function FormularSmeny({
         správná úvaha se špatným závěrem: rozpis se VYDÁ a teprve pak
         se v něm škrtá, takže odmítnutí u vydané znamenalo, že nešlo
         smazat prakticky nic.
+
+        „…i v jiné dny“ (14. 10. 2026) je zaškrtávátko BEZ `name` — do
+        formuláře jedné směny nic nepřidá. Zapnuté ho nahradí výběrem dnů
+        s náhledem (ruseni-vice-dni.tsx), který má vlastní formulář a akci.
       */}
       {!hotovo && smena?.id && !mobil ? (
-        <div style={mazaniPruh}>
-          {ptaSeNaSmazani ? (
+        <div style={rusiViceDni ? undefined : mazaniPruh}>
+          {rusiViceDni ? (
+            <RuseniViceDni
+              rozsah={rozsah}
+              smena={smena}
+              onZpet={() => setRuseniViceDni(false)}
+              onOdeslano={onPodrzet}
+              onHotovo={zavrit}
+            />
+          ) : ptaSeNaSmazani ? (
             <form action={akceSmazat} style={{ display: 'grid', gap: '8px' }}>
               <input type="hidden" name="rozsah" value={rozsah} />
               <input type="hidden" name="smena" value={smena.id} />
@@ -894,6 +924,10 @@ export default function FormularSmeny({
                   vydáte.
                 </p>
               ) : null}
+              <label className="ds-sm-rv-volba">
+                <input type="checkbox" checked={false} onChange={() => setRuseniViceDni(true)} />
+                {jeVydana ? 'Zrušit i v jiné dny' : 'Smazat i v jiné dny'}
+              </label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button type="submit" className="ft-tl" disabled={cekaSmazani}>
                   {cekaSmazani
@@ -948,7 +982,7 @@ export default function FormularSmeny({
         <div className="ds-sm-form ds-smd-form">
           {kontext && smena?.id ? <HlavickaSmeny kontext={kontext} /> : null}
           {telo}
-          {dole}
+          {rusiViceDni ? null : dole}
         </div>
       </Drawer>
     )

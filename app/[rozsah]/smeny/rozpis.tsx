@@ -726,6 +726,12 @@ export default function RozpisView({
           potvrzeni={okno.potvrzeni}
           onDalsiDen={!okno.smena?.id && !naTelefonu ? dalsiDen : undefined}
           onDuplikovat={okno.smena?.id ? () => duplikovat(okno.smena as SmenaKUprave) : undefined}
+          /*
+            Zrušení ve víc dnech: okno otevřené odkazem (`?smena=`) je
+            odvozené z dat a po zrušení by zmizelo i s výsledkem — podrží
+            se jako otevřené ručně. Ručně otevřené (`otevrene`) zůstává.
+          */
+          onPodrzet={() => setOtevrene((o) => o ?? okno)}
           dole={
             upravovana ? (
               <PanelKeSmene
