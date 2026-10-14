@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
 
+import { hasAccess } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import {
@@ -18,6 +20,12 @@ export const dynamic = 'force-dynamic'
  * středisko/kategorie/částka. Zdroj: `transakce` + `platby_faktury`
  * (jen potvrzené páry). Rozsah dat je povinný (`od`/`do`), ať export
  * nikdy netiše nevytáhne celou historii.
+ *
+ * Na pobočce (`?rozsah=<pobočka>`, od 13. 10. 2026) jen platby z účtů
+ * té pobočky — a jen pro toho, kdo má finance.read za celou firmu.
+ * Do té doby export s pobočkovým rozsahem vracel transakce CELÉ firmy:
+ * RLS transakcí (`can_read_scoped(…, null)`) rozsah členství nehlídá,
+ * takže by je stáhl i vedoucí jedné pobočky (kontrola 13. 10. 2026).
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -32,20 +40,29 @@ export async function GET(request: Request) {
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') return new Response('Na tohle nemáte oprávnění.', { status: 403 })
 
+  const pobocka = pobockaFinanci(pristup.scope)
+  if (pobocka && !(await hasAccess(tenantId, 'finance.read', null))) {
+    return new Response('Export pobočky zatím jen s finančním přehledem za celou firmu.', { status: 403 })
+  }
+
   if (!/^\d{4}-\d{2}-\d{2}$/.test(od) || !/^\d{4}-\d{2}-\d{2}$/.test(doData)) {
     return new Response('Vyplňte rozsah dat (od/do, formát RRRR-MM-DD).', { status: 400 })
   }
 
   const supabase = await getServerSupabase()
 
+  // Na pobočce `!inner` + filtr na účet: transakce firemních účtů a účtů
+  // jiných poboček v exportu nejsou.
+  let dotazTransakci = supabase
+    .from('transakce')
+    .select(`id, datum, smer, castka_haleru, protistrana, vs, kategorie, zdroj, platebni_ucty${pobocka ? '!inner' : ''}(branch_id)`)
+    .eq('tenant_id', tenantId)
+    .gte('datum', od)
+    .lte('datum', doData)
+  if (pobocka) dotazTransakci = dotazTransakci.eq('platebni_ucty.branch_id', pobocka)
+
   const [transakceRes, branchesRes] = await Promise.all([
-    supabase
-      .from('transakce')
-      .select('id, datum, smer, castka_haleru, protistrana, vs, kategorie, zdroj, platebni_ucty(branch_id)')
-      .eq('tenant_id', tenantId)
-      .gte('datum', od)
-      .lte('datum', doData)
-      .order('datum'),
+    dotazTransakci.order('datum'),
     supabase.from('branches').select('id, name').eq('tenant_id', tenantId),
   ])
 

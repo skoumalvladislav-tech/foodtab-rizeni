@@ -21,7 +21,12 @@ export async function potvrditImport(formData: FormData): Promise<void> {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'finance.manage', rozsah)
+  // Import výpisu je jen za celou firmu (import/layout.tsx, Finance po
+  // pobočkách 13. 10. 2026): dávka pobočku nemá a jednoznačné shody se
+  // rovnou párují s fakturami celé firmy. Právo proto VŽDY za celou
+  // firmu, ne za rozsah z formuláře — na pobočce by jinak prošel i
+  // vedoucí jedné pobočky. `rozsah` zůstává jen pro návratovou adresu.
+  const pristup = await zkusPristup(tenantId, 'finance.manage', TENANT_SCOPE_SEGMENT)
   if (pristup.stav !== 'ok') redirect(`/${rozsah}/finance/platby/import`)
 
   const ucetId = String(formData.get('ucet_id') ?? '')

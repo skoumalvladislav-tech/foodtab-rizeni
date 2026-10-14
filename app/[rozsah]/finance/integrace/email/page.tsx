@@ -11,6 +11,7 @@ import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
 import { pripojitEmailSchranku, odpojitEmailSchranku } from './akce'
 import PrijemFaktur from './prijem-faktur'
+import { jeRozsahFirmy } from '../../jen-pro-firmu'
 
 export const dynamic = 'force-dynamic'
 // „Zpracovat teď" (spustitPrijemTed) běží až ~45 s — akce dědí limit stránky.
@@ -82,6 +83,9 @@ export default async function FinanceIntegraceEmail({
   searchParams: Promise<{ chyba?: string; zprava?: string }>
 }) {
   const { rozsah } = await params
+  // Na pobočce kreslí obrazovku layout (JenProFirmu) — stránka nic
+  // nenačítá ani nevrací, ani když ji Next vyrenderuje souběžně s ním.
+  if (!jeRozsahFirmy(rozsah)) return null
   const { chyba, zprava } = await searchParams
 
   const tenantId = await getCurrentTenantId()

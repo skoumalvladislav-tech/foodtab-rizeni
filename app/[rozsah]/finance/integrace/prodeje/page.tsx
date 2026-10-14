@@ -10,6 +10,7 @@ import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
 import ImportFormular from './formular'
+import { jeRozsahFirmy } from '../../jen-pro-firmu'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,6 +37,9 @@ export default async function FinanceIntegraceProdeje({
   params: Promise<{ rozsah: string }>
 }) {
   const { rozsah } = await params
+  // Na pobočce kreslí obrazovku layout (JenProFirmu) — stránka nic
+  // nenačítá ani nevrací, ani když ji Next vyrenderuje souběžně s ním.
+  if (!jeRozsahFirmy(rozsah)) return null
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>

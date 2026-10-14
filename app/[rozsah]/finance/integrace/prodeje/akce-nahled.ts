@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { naparsovatCsvPokladny, type RadekPokladny, type ChybaImportu } from '@/lib/pokladna-csv-import'
@@ -26,12 +27,13 @@ export type StavNahleduProdeje =
     }
 
 export async function naparsovatSouborProdeje(_predchozi: StavNahleduProdeje, formData: FormData): Promise<StavNahleduProdeje> {
-  const rozsah = String(formData.get('rozsah') ?? '')
-
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
 
-  const pristup = await zkusPristup(tenantId, 'finance.manage', rozsah)
+  // Právo VŽDY za celou firmu, ne za rozsah z formuláře — stejně jako
+  // potvrzení v akce.ts (import je jen za celou firmu, Finance po
+  // pobočkách 13. 10. 2026). Rozsah formuláře tu proto nic neříká.
+  const pristup = await zkusPristup(tenantId, 'finance.manage', TENANT_SCOPE_SEGMENT)
   if (pristup.stav !== 'ok') return { stav: 'chyba', text: 'Na import prodejů nemáte oprávnění.' }
 
   const branchId = String(formData.get('branch_id') ?? '')

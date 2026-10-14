@@ -4,7 +4,9 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { canSee, isModuleActive } from '@/lib/authz'
+import { canSee, isModuleActive, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
+import { pobockaFinanci } from '@/lib/finance-rozsah'
+import { POZNAMKA_OBJEDNAVKY_FIRMY } from '@/lib/finance-evidence-pobocka'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
@@ -18,6 +20,11 @@ export const dynamic = 'force-dynamic'
  * Objednávky dodavatelům — procure-to-pay BEZ fyzického skladu (mantinel).
  * `purchasing.read`/`purchasing.manage` patří v katalogu modulu
  * `objednavky`, ne `finance` — appka proto kontroluje OBA moduly.
+ *
+ * Na pobočce (Finance po pobočkách, 13. 10. 2026) jen objednávky TÉ
+ * pobočky; objednávky celé firmy (`branch_id` null) jsou v pohledu
+ * Celá firma. Nová objednávka na pobočce patří vždy jí — výběr pobočky
+ * tu není a akce bere pobočku z rozsahu, ne z formuláře.
  */
 
 type Objednavka = {
@@ -91,11 +98,16 @@ export default async function FinanceNakup({
   const smiPsat = canSee(pristup.ctx, 'purchasing.manage')
   const supabase = await getServerSupabase()
 
+  // Pobočka z rozsahu adresy (lib/finance-rozsah.ts), `null` = celá firma.
+  const pobocka = pobockaFinanci(pristup.scope)
+  let dotazObjednavek = supabase
+    .from('objednavky_dodavatelum')
+    .select('id, cislo, stav, datum_objednani, pozadovane_datum_dodani, kontakty(nazev)')
+    .eq('tenant_id', tenantId)
+  if (pobocka) dotazObjednavek = dotazObjednavek.eq('branch_id', pobocka)
+
   const [objednavkyRes, kontaktyRes, branchesRes] = await Promise.all([
-    supabase
-      .from('objednavky_dodavatelum')
-      .select('id, cislo, stav, datum_objednani, pozadovane_datum_dodani, kontakty(nazev)')
-      .eq('tenant_id', tenantId)
+    dotazObjednavek
       .order('created_at', { ascending: false })
       .limit(50),
     supabase.from('kontakty').select('id, nazev').eq('tenant_id', tenantId).eq('je_dodavatel', true).is('deleted_at', null).order('nazev'),
@@ -108,7 +120,10 @@ export default async function FinanceNakup({
 
   return (
     <Navigace rozsah={rozsah}>
-      <Nadpis oci="Finance" popis={`${objednavky.length} ${objednavky.length === 1 ? 'objednávka' : 'objednávek'}.`}>
+      <Nadpis
+        oci="Finance"
+        popis={`${objednavky.length} ${objednavky.length === 1 ? 'objednávka' : 'objednávek'}${pobocka ? ` pobočky ${pristup.scope.branchName ?? ''}` : ''}.`}
+      >
         Nákup
       </Nadpis>
 
@@ -116,7 +131,9 @@ export default async function FinanceNakup({
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
 
         {objednavky.length === 0 ? (
-          <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Zatím žádné objednávky.</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
+            {pobocka ? 'Pobočka zatím nemá žádné objednávky.' : 'Zatím žádné objednávky.'}
+          </p>
         ) : (
           <div style={{ ...karta, overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13.5px' }}>
@@ -146,6 +163,8 @@ export default async function FinanceNakup({
           </div>
         )}
 
+        {pobocka ? <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>{POZNAMKA_OBJEDNAVKY_FIRMY}</p> : null}
+
         {smiPsat ? (
           <form action={zalozitObjednavku} style={{ ...karta, display: 'grid', gap: '14px' }}>
             <input type="hidden" name="rozsah" value={rozsah} />
@@ -154,7 +173,7 @@ export default async function FinanceNakup({
             {dodavatele.length === 0 ? (
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
                 Nejdřív založte dodavatele v{' '}
-                <Link href={`/${rozsah}/finance/kontakty`} className="ft-tl">Kontaktech</Link> (zaškrtněte „Dodavatel“).
+                <Link href={`/${pobocka ? TENANT_SCOPE_SEGMENT : rozsah}/finance/kontakty`} className="ft-tl">Kontaktech{pobocka ? ' (za celou firmu)' : ''}</Link> (zaškrtněte „Dodavatel“).
               </p>
             ) : (
               <>
@@ -165,13 +184,25 @@ export default async function FinanceNakup({
                       {dodavatele.map((d) => <option key={d.id} value={d.id}>{d.nazev}</option>)}
                     </select>
                   </label>
-                  <label>
-                    <span style={popisek}>Pobočka</span>
-                    <select name="branch_id" style={pole} defaultValue="">
-                      <option value="">Celá firma</option>
-                      {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </label>
+                  {pobocka ? (
+                    // Na pobočce bere akce pobočku z rozsahu adresy — skryté
+                    // pole nečte (kdokoli si ho přepíše), výběr tu proto není.
+                    <div>
+                      <span style={popisek}>Pobočka</span>
+                      <input type="hidden" name="branch_id" value={pobocka} />
+                      <p style={{ margin: 0, fontSize: '13.5px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>
+                        {pristup.scope.branchName}
+                      </p>
+                    </div>
+                  ) : (
+                    <label>
+                      <span style={popisek}>Pobočka</span>
+                      <select name="branch_id" style={pole} defaultValue="">
+                        <option value="">Celá firma</option>
+                        {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </label>
+                  )}
                   <label>
                     <span style={popisek}>Požadované datum dodání</span>
                     <input type="date" name="pozadovane_datum_dodani" style={pole} />
