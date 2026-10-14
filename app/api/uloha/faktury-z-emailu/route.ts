@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { tajemstviSedi } from '@/lib/supabase/uloha'
+import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
 import { vsechnaPripojeniSPrijmem, zpracovatPrijem, type VysledekPrijmu } from '@/lib/faktury-prijem-sync'
 import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
 
@@ -26,6 +26,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!tajemstviSedi(prislo, process.env.CRON_SECRET)) {
     return NextResponse.json({ chyba: 'Nepovoleno.' }, { status: 401 })
   }
+
+  // Druhý plánovač (pg_cron vedle GitHubu) nesmí tutéž úlohu pustit podruhé.
+  const bezi = await uzBezi('faktury-z-emailu')
+  if (bezi) return bezi
 
   const konecMs = Date.now() + ROZPOCET_MS
   const pripojeni = await vsechnaPripojeniSPrijmem()

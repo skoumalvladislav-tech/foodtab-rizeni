@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { odeslatFrontu, PRAZDNY_VYSLEDEK } from '@/lib/komunikace/fronta-push'
 import { nactiKliceVapid } from '@/lib/komunikace/web-push'
 import { funkceNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
-import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
+import { klientUlohy, tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
 
 /**
  * Naplánovaná úloha: externí oznámení (push).
@@ -53,6 +53,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!tajemstviSedi(prislo, process.env.CRON_SECRET)) {
     return NextResponse.json({ chyba: 'Nepovoleno.' }, { status: 401 })
   }
+
+  // Druhý plánovač (pg_cron vedle GitHubu) nesmí tutéž úlohu pustit podruhé.
+  const bezi = await uzBezi('notifikace-push')
+  if (bezi) return bezi
 
   const supabase = klientUlohy()
   if (!supabase) {

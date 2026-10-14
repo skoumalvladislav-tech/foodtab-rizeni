@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { KBELIK } from '@/lib/marketing-media'
 import type { Obrazek } from '@/lib/marketing-n8n'
 import { odeslat, type Uloha } from '@/lib/marketing-odeslani'
-import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
+import { klientUlohy, tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
 
 /**
  * Naplánovaná úloha: fronta publikací.
@@ -80,6 +80,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!tajemstviSedi(prislo, process.env.CRON_SECRET)) {
     return NextResponse.json({ chyba: 'Nepovoleno.' }, { status: 401 })
   }
+
+  // Druhý plánovač (pg_cron vedle GitHubu) nesmí tutéž úlohu pustit podruhé.
+  const bezi = await uzBezi('marketing-fronta')
+  if (bezi) return bezi
 
   const supabase = klientUlohy()
   if (!supabase) {
