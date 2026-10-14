@@ -5,12 +5,22 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
+import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import { zalozitVybaveni, smazatVybaveni } from './akce'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Finance — Vybavení (evidence bez odpisů).
+ *
+ * Na pobočce (Finance po pobočkách, 13. 10. 2026) jen vybavení TÉ
+ * pobočky; vybavení celé firmy (`branch_id` null) je v pohledu Celá
+ * firma (`POZNAMKA_FIREMNI`). Nové vybavení na pobočce patří vždy jí —
+ * výběr pobočky tu není a akce bere pobočku z rozsahu, ne z formuláře.
+ */
 
 type Vybaveni = {
   id: string
@@ -72,13 +82,17 @@ export default async function FinanceVybaveni({
   const smiPsat = canSee(pristup.ctx, 'finance.manage')
   const supabase = await getServerSupabase()
 
+  // Pobočka z rozsahu adresy (lib/finance-rozsah.ts), `null` = celá firma.
+  const pobocka = pobockaFinanci(pristup.scope)
+  let dotazVybaveni = supabase
+    .from('vybaveni')
+    .select('id, nazev, kategorie, datum_porizeni, cena_haleru, zaruka_do, servis_dalsi_kdy')
+    .eq('tenant_id', tenantId)
+    .is('deleted_at', null)
+  if (pobocka) dotazVybaveni = dotazVybaveni.eq('branch_id', pobocka)
+
   const [vybaveniRes, branchesRes] = await Promise.all([
-    supabase
-      .from('vybaveni')
-      .select('id, nazev, kategorie, datum_porizeni, cena_haleru, zaruka_do, servis_dalsi_kdy')
-      .eq('tenant_id', tenantId)
-      .is('deleted_at', null)
-      .order('nazev'),
+    dotazVybaveni.order('nazev'),
     supabase.from('branches').select('id, name').eq('tenant_id', tenantId).eq('active', true).is('deleted_at', null),
   ])
 
@@ -87,7 +101,10 @@ export default async function FinanceVybaveni({
 
   return (
     <Navigace rozsah={rozsah}>
-      <Nadpis oci="Finance" popis={`${vybaveniSeznam.length} ${vybaveniSeznam.length === 1 ? 'položka' : 'položek'}. Bez odpisů — jen evidence.`}>
+      <Nadpis
+        oci="Finance"
+        popis={`${vybaveniSeznam.length} ${vybaveniSeznam.length === 1 ? 'položka' : 'položek'}${pobocka ? ` pobočky ${pristup.scope.branchName ?? ''}` : ''}. Bez odpisů — jen evidence.`}
+      >
         Vybavení
       </Nadpis>
 
@@ -95,7 +112,9 @@ export default async function FinanceVybaveni({
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
 
         {vybaveniSeznam.length === 0 ? (
-          <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Zatím žádné vybavení.</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
+            {pobocka ? 'Pobočka zatím nemá žádné evidované vybavení.' : 'Zatím žádné vybavení.'}
+          </p>
         ) : (
           <div style={{ display: 'grid', gap: '10px' }}>
             {vybaveniSeznam.map((v) => (
@@ -129,6 +148,8 @@ export default async function FinanceVybaveni({
           </div>
         )}
 
+        {pobocka ? <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p> : null}
+
         {smiPsat ? (
           <form action={zalozitVybaveni} style={{ ...karta, display: 'grid', gap: '14px' }}>
             <input type="hidden" name="rozsah" value={rozsah} />
@@ -142,13 +163,25 @@ export default async function FinanceVybaveni({
                 <span style={popisek}>Kategorie</span>
                 <input type="text" name="kategorie" placeholder="kuchyňské zařízení" style={pole} />
               </label>
-              <label>
-                <span style={popisek}>Pobočka</span>
-                <select name="branch_id" style={pole} defaultValue="">
-                  <option value="">Celá firma</option>
-                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              </label>
+              {pobocka ? (
+                // Na pobočce bere akce pobočku z rozsahu adresy — skryté
+                // pole nečte (kdokoli si ho přepíše), výběr tu proto není.
+                <div>
+                  <span style={popisek}>Pobočka</span>
+                  <input type="hidden" name="branch_id" value={pobocka} />
+                  <p style={{ margin: 0, fontSize: '13.5px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>
+                    {pristup.scope.branchName}
+                  </p>
+                </div>
+              ) : (
+                <label>
+                  <span style={popisek}>Pobočka</span>
+                  <select name="branch_id" style={pole} defaultValue="">
+                    <option value="">Celá firma</option>
+                    {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </label>
+              )}
               <label>
                 <span style={popisek}>Datum pořízení</span>
                 <input type="date" name="datum_porizeni" style={pole} />

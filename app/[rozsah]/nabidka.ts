@@ -353,10 +353,33 @@ function smiVidet(ctx: Context, p: Polozka): boolean {
   return p.pravo === null || canSee(ctx, p.pravo)
 }
 
-/** Obrazovky jednoho modulu, na které uživatel dosáhne. */
-export function polozkyModulu(ctx: Context, modul: ModuleKey): Polozka[] {
+/**
+ * OBRAZOVKY JEN PRO FIRMU SE NA POBOČCE NEKRESLÍ.
+ *
+ * Šéfík 13. 10. 2026: Finance mají jít vidět po pobočkách. Kontakty,
+ * Integrace a Faktury ale pobočku nemají (`jenFirma`) — na pobočce by
+ * vedly jen na hlášku „jen za celou firmu". Do 13. 10. tenhle filtr
+ * stál jen v app/[rozsah]/layout.tsx; holá adresa rozsahu
+ * (app/[rozsah]/page.tsx) ani scripts/nabidka.test.mjs o něm nevěděly.
+ * Teď ho berou obě místa odsud.
+ *
+ * `naFirme` je POVINNÉ — na rozsah se musí zeptat každý, kdo nabídku
+ * skládá (stejné jméno jako ve `vychoziObrazovka(polozky, naFirme)`).
+ * Kdo by ho přesto vynechal (soubor .mjs mimo kontrolu typů), dostane
+ * opatrnější variantu: nabídku pobočky, bez `jenFirma`.
+ *
+ * Pořád jen kreslení, ne zámek: obrazovky jen pro firmu pobočku
+ * odmítají samy (vnořený layout s `JenProFirmu` a první řádek stránky)
+ * a jejich serverové akce chtějí právo za celou firmu.
+ */
+function patriDoRozsahu(p: Polozka, naFirme: boolean): boolean {
+  return naFirme === true || !p.jenFirma
+}
+
+/** Obrazovky jednoho modulu, na které uživatel v tomhle rozsahu dosáhne. */
+export function polozkyModulu(ctx: Context, modul: ModuleKey, naFirme: boolean): Polozka[] {
   if (!isModuleActive(ctx, modul)) return []
-  return NABIDKA.filter((p) => p.modul === modul && smiVidet(ctx, p))
+  return NABIDKA.filter((p) => p.modul === modul && smiVidet(ctx, p) && patriDoRozsahu(p, naFirme))
 }
 
 /** Obrazovky nastavení. Jen se settings.manage. */
@@ -364,9 +387,9 @@ export function polozkyNastaveni(ctx: Context): Polozka[] {
   return NASTAVENI.filter((p) => smiVidet(ctx, p))
 }
 
-/** Všechno, na co uživatel dosáhne, napříč zapnutými moduly. */
-export function viditelnaNabidka(ctx: Context): Polozka[] {
-  return NABIDKA.filter((p) => isModuleActive(ctx, p.modul) && smiVidet(ctx, p))
+/** Všechno, na co uživatel v tomhle rozsahu dosáhne, napříč zapnutými moduly. */
+export function viditelnaNabidka(ctx: Context, naFirme: boolean): Polozka[] {
+  return NABIDKA.filter((p) => isModuleActive(ctx, p.modul) && smiVidet(ctx, p) && patriDoRozsahu(p, naFirme))
 }
 
 /**

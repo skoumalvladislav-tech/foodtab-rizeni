@@ -11,8 +11,15 @@
  *   * platby jsou jen za dny, kdy je pokladna poslala (`dnuSPlatbami`) —
  *     historie před 12. 10. 2026 je nemá, dokud ji synchronizace znovu
  *     nedožene; přehled to musí říct, ne tvářit se, že součet sedí;
- *   * banka `null` = volající transakce nevidí (nemá `finance.read` za
- *     celou firmu), ne „nic nepřišlo".
+ *   * banka `null` = stránka banku neukazuje (volající nemá `finance.read`
+ *     za celou firmu), ne „nic nepřišlo". Rozhoduje STRÁNKA, ne databáze:
+ *     funkce je od 13. 10. SECURITY DEFINER a bankovní řádky vrací
+ *     každému s `finance.read` (stejný výsledek jako RLS transakcí,
+ *     `can_read_scoped(…, null)` — rozsah členství nehlídá).
+ *
+ * Finance po pobočkách (Šéfík 13. 10. 2026): na pobočce se celý přehled
+ * nejdřív zúží na ni (`jenPobocka`) — firemní bankovní účet bez pobočky
+ * ani cizí pobočky na její stránku vůbec nedojdou.
  *
  * Datum je PROVOZNÍ den pobočky (`lib/pokladna-cas.ts`), `obdobi` první
  * den dne/měsíce/roku.
@@ -296,6 +303,9 @@ export function pouziteDruhy(radky: readonly SouhrnTrzeb[]): DruhPlatby[] {
  * jen za ty pobočky vydávané za celou firmu: náklady práce (mzdy všech
  * poboček) by se dělily menším číslem a trend by srovnával jiné sady
  * poboček. `pobocky` = id poboček s daty (seřazená — kvůli srovnání).
+ *
+ * Sčítá VŠECHNY řádky přehledu — na pobočce ho proto volající dostane
+ * už zúžený (`jenPobocka`) a `aktivniPobocky` = jen ta pobočka.
  */
 export function pokrytiObdobi(p: PrehledTrzeb, obdobi: string, aktivniPobocky: readonly string[]): {
   trzbaHaleru: number
@@ -321,6 +331,47 @@ export function pokrytiObdobi(p: PrehledTrzeb, obdobi: string, aktivniPobocky: r
     aktivnich: aktivniPobocky.length,
     uplne: aktivniPobocky.length > 0 && pokrytych === aktivniPobocky.length,
   }
+}
+
+/**
+ * Přehled zúžený na jednu pobočku (rozsah pobočky ve Financích) — tržby,
+ * platby, způsoby i banka JEN s `branchId` té pobočky. Firemní bankovní
+ * účet (`branchId` null) k žádné pobočce nepatří a nerozpočítává se
+ * (lib/finance-rozsah.ts). `null` = celá firma, přehled beze změny.
+ *
+ * Funkce v databázi vrací všechny pobočky, které volající vidí (nemá
+ * parametr pobočky) — zúžení je proto tady, jedno místo pro Přehled
+ * i Tržby, a navazující skládání (`pokrytiObdobi`, `radkyPoObdobich`…)
+ * pak cizí pobočku ani nedostane.
+ */
+export function jenPobocka(p: PrehledTrzeb, branchId: string | null): PrehledTrzeb {
+  if (branchId === null) return p
+  return {
+    trzby: p.trzby.filter((t) => t.branchId === branchId),
+    platby: p.platby.filter((z) => z.branchId === branchId),
+    zpusoby: p.zpusoby.filter((z) => z.branchId === branchId),
+    banka: p.banka.filter((b) => b.branchId === branchId),
+  }
+}
+
+/**
+ * Posílá tohle připojení pokladny tržby za pobočku? Buď je připojení
+ * přímo pobočky (`branch_id`, příjmové API), nebo je firemní (jeden
+ * přístup, víc provozoven) a některá jeho provozovna je přiřazená téhle
+ * pobočce (`externi_ucet.provozovny[].branch_id`, lib/pokladna-prirazeni.ts).
+ *
+ * `externi_ucet` je JSON z databáze — tvar se tu nevěří, nečekaný tvar
+ * = „nepatří" (karta pak řekne, že pokladna chybí, nevymyslí ji).
+ */
+export function pokladnaPatriPobocce(
+  pripojeni: { branch_id: string | null; externi_ucet: unknown },
+  branchId: string,
+): boolean {
+  if (pripojeni.branch_id !== null) return pripojeni.branch_id === branchId
+  const ucet = pripojeni.externi_ucet
+  const provozovny = ucet && typeof ucet === 'object' ? (ucet as { provozovny?: unknown }).provozovny : null
+  if (!Array.isArray(provozovny)) return false
+  return provozovny.some((p) => p !== null && typeof p === 'object' && (p as { branch_id?: unknown }).branch_id === branchId)
 }
 
 /** Tržba jednoho období (KPI na Přehledu) — přes všechny pobočky, které volající vidí. */

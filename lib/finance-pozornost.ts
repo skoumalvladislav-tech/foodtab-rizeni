@@ -1,6 +1,8 @@
 import 'server-only'
 
 import { getServerSupabase } from '@/lib/supabase/server'
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
+import { ucetVRozsahu } from '@/lib/finance-rolling-vyhled'
 import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { jeNezaplacena, potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
 import { navrhnoutParovani, type KandidatFaktura } from '@/lib/finance-parovani'
@@ -20,6 +22,13 @@ import { koruny } from '@/lib/mzdy'
  * Když appka Fakturám nedosáhne (`pristupKFakturam()` není ok, nebo
  * dotaz na jejich databázi selže), vrátí prázdno — ne chybu, ne
  * vymyšlenou řádku.
+ *
+ * Na pobočce (`pobocka`, Finance po pobočkách 13. 10. 2026):
+ *   1. návrhy párování jen pro platby z účtů TÉ pobočky (firemní účet
+ *      a cizí pobočky ne). Párování mění stav faktury celé firmy, takže
+ *      akce vede na Platby za celou firmu, ne na stránku pobočky;
+ *   2. souhrn faktur ke kontrole se nekreslí — faktury pobočku nemají
+ *      (oddělená databáze), byl by to řádek celé firmy pod pobočkou.
  */
 
 export type PolozkaPozornosti = {
@@ -42,6 +51,8 @@ export async function nactiPolozkyKPozornosti(
   rozsah: string,
   /** `faktury.read` — Finance stačí `finance.read`, data faktur ale ne. */
   vidiFaktury: boolean,
+  /** Pobočka rozsahu (`pobockaFinanci`), `null` = celá firma jako dřív. */
+  pobocka: string | null = null,
   limitTransakci = 60,
 ): Promise<PolozkaPozornosti[]> {
   if (!vidiFaktury) return []
@@ -78,14 +89,16 @@ export async function nactiPolozkyKPozornosti(
     }))
 
     const supabase = await getServerSupabase()
+    // Na pobočce `!inner` + filtr na účet: platby firemních účtů a jiných
+    // poboček nepřijdou (vzor app/api/ucetni/export); níž se to hlídá znovu.
+    let dotazTransakci = supabase
+      .from('transakce')
+      .select(`id, castka_haleru, datum, protistrana, vs, platebni_ucty${pobocka ? '!inner' : ''}(branch_id, nazev)`)
+      .eq('tenant_id', tenantId)
+      .eq('smer', 'vydaj')
+    if (pobocka) dotazTransakci = dotazTransakci.eq('platebni_ucty.branch_id', pobocka)
     const [transakceRes, sparovaneRes] = await Promise.all([
-      supabase
-        .from('transakce')
-        .select('id, castka_haleru, datum, protistrana, vs, platebni_ucty(branch_id, nazev)')
-        .eq('tenant_id', tenantId)
-        .eq('smer', 'vydaj')
-        .order('datum', { ascending: false })
-        .limit(limitTransakci),
+      dotazTransakci.order('datum', { ascending: false }).limit(limitTransakci),
       supabase.from('platby_faktury').select('transakce_id').eq('tenant_id', tenantId),
     ])
 
@@ -102,12 +115,13 @@ export async function nactiPolozkyKPozornosti(
 
     for (const t of (transakceRes.data ?? []) as RadekTransakce[]) {
       if (jizSparovane.has(t.id)) continue
+      const ucet = Array.isArray(t.platebni_ucty) ? t.platebni_ucty[0] : t.platebni_ucty
+      if (!ucetVRozsahu(ucet?.branch_id ?? null, pobocka)) continue
       const navrh = navrhnoutParovani({ id: t.id, vs: t.vs, castkaHaleru: t.castka_haleru, protistrana: t.protistrana, datum: t.datum }, kandidati)
       if (!navrh) continue
       const faktura = kandidati.find((k) => k.id === navrh.fakturaId)
       if (!faktura) continue
 
-      const ucet = Array.isArray(t.platebni_ucty) ? t.platebni_ucty[0] : t.platebni_ucty
       polozky.push({
         klic: `parovani-${t.id}`,
         typ: 'parovani',
@@ -115,15 +129,17 @@ export async function nactiPolozkyKPozornosti(
         stredisko: ucet?.nazev ?? '—',
         castkaHaleru: t.castka_haleru,
         stav: 'ceka',
-        akceHref: `/${rozsah}/finance/platby`,
-        akceText: 'Spárovat',
+        // Spárování = stav faktury celé firmy → Platby za celou firmu.
+        akceHref: pobocka ? `/${TENANT_SCOPE_SEGMENT}/finance/platby` : `/${rozsah}/finance/platby`,
+        akceText: pobocka ? 'Spárovat za firmu' : 'Spárovat',
       })
     }
   }
 
   // 2. Faktury, u kterých si zpracování nebylo jisté — jeden souhrnný řádek,
-  // ne stovky stejných (v provozu jich čeká přes 500).
-  const keKontrole = faktury.filter(potrebujeKontrolu)
+  // ne stovky stejných (v provozu jich čeká přes 500). Jen za celou firmu:
+  // faktury pobočku nemají.
+  const keKontrole: Faktura[] = pobocka ? [] : faktury.filter(potrebujeKontrolu)
   if (keKontrole.length > 0) {
     polozky.push({
       klic: 'faktury-ke-kontrole',

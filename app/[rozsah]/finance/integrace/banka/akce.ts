@@ -6,6 +6,7 @@ import { headers } from 'next/headers'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { rozsifrovat, zasifrovat } from '@/lib/integrace-klice'
@@ -37,11 +38,26 @@ async function zakladniAdresa(): Promise<string> {
   return `${protokol}://${host}`
 }
 
+/**
+ * Všechny akce banky jdou přes tohle — a právo se ptá VŽDY za celou
+ * firmu, ne za rozsah z formuláře (Finance po pobočkách, 13. 10. 2026).
+ *
+ * Do té doby stačilo `integrace.manage` v jedné pobočce: správce
+ * napojení Bernard Baru si poslal formulář s `rozsah=bernard-bar`
+ * a mohl připojit, odpojit nebo „Synchronizovat teď" bankovní připojení
+ * celé firmy — synchronizace přitom jede přes `service_role`
+ * (lib/integrace-fio-sync.ts), takže ji RLS nezastaví. Bankovní účty
+ * založené v appce jsou dnes všechny firemní (bez pobočky).
+ * `rozsah` zůstává jen pro návratovou adresu.
+ */
 async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'integrace.manage', rozsah)
+  // ROZHODNOUT: má správce napojení jedné pobočky smět připojit banku
+  // k platebnímu účtu SVÉ pobočky? Zatím ne (opatrnější varianta) — šlo
+  // by to až s kontrolou `platebni_ucty.branch_id` proti rozsahu.
+  const pristup = await zkusPristup(tenantId, 'integrace.manage', TENANT_SCOPE_SEGMENT)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/integrace/banka`)
 

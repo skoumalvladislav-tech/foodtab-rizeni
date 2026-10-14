@@ -23,6 +23,7 @@ import {
   upravitIntervalSynchronizace,
 } from './akce'
 import { DetailKb, KartaKb } from './kb'
+import { jeRozsahFirmy } from '../../jen-pro-firmu'
 
 export const dynamic = 'force-dynamic'
 // Akce stránky (výběr účtu KB, „Synchronizovat teď") stahují historii
@@ -111,6 +112,9 @@ export default async function FinanceIntegraceBanka({
   searchParams: Promise<{ chyba?: string; synchronizovano?: string; enablebanking?: string; kb?: string }>
 }) {
   const { rozsah } = await params
+  // Na pobočce kreslí obrazovku layout (JenProFirmu) — stránka nic
+  // nenačítá ani nevrací, ani když ji Next vyrenderuje souběžně s ním.
+  if (!jeRozsahFirmy(rozsah)) return null
   const { chyba, synchronizovano, enablebanking, kb } = await searchParams
   const konfKb = konfiguraceKb()
   const dnesIso = new Date().toISOString().slice(0, 10)

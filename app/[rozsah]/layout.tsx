@@ -120,21 +120,21 @@ export default async function RozsahLayout({
 
   // Na pobočce se obrazovky jen pro celou firmu (Kontakty, Integrace,
   // Faktury) nekreslí — nemají podle čeho filtrovat a vedly by na hlášku.
-  const naPobocce = scope.level === "branch";
+  // Filtr je v nabidka.ts (`polozkyModulu`), sdílený s holou adresou
+  // rozsahu (page.tsx) a hlídaný scripts/nabidka.test.mjs.
+  const naFirme = scope.level === "tenant";
   const polozky: PolozkaProp[] = ctx.modules.flatMap((m) =>
-    polozkyModulu(ctx, m.key)
-      .filter((p) => !(naPobocce && p.jenFirma))
-      .map((p) => ({
-        segment: p.segment,
-        nazev: p.nazev,
-        kratky: p.kratky,
-        ikona: p.ikona,
-        hotovo: p.hotovo,
-        modul: p.modul,
-        jenPobocka: p.jenPobocka,
-        jenFirma: p.jenFirma,
-        dalsiSegmenty: p.dalsiSegmenty,
-      })),
+    polozkyModulu(ctx, m.key, naFirme).map((p) => ({
+      segment: p.segment,
+      nazev: p.nazev,
+      kratky: p.kratky,
+      ikona: p.ikona,
+      hotovo: p.hotovo,
+      modul: p.modul,
+      jenPobocka: p.jenPobocka,
+      jenFirma: p.jenFirma,
+      dalsiSegmenty: p.dalsiSegmenty,
+    })),
   );
 
   /*

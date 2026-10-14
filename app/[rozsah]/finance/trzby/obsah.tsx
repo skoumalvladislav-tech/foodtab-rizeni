@@ -55,7 +55,7 @@ export default function Obsah({
   bankaVidi,
   maBankovniUcet,
   maPokladnu,
-  rozsah,
+  zakladIntegraci,
   odkazNaObdobi,
   odkazNaPobocku,
 }: {
@@ -70,7 +70,11 @@ export default function Obsah({
   bankaVidi: boolean
   maBankovniUcet: boolean
   maPokladnu: boolean
-  rozsah: string
+  /**
+   * Adresa Integrací, např. `/firma/finance/integrace`. Integrace patří
+   * celé firmě, takže i z pobočky vede na firemní (stránka ji spočítá).
+   */
+  zakladIntegraci: string
   odkazNaObdobi: (obdobi: string) => string | null
   /** Proklik na provozovnu ve stejném členění a období. */
   odkazNaPobocku: (branchId: string) => string
@@ -99,7 +103,7 @@ export default function Obsah({
           {maPokladnu
             ? 'Pokladna za tohle období žádné prodeje neposlala — buď bylo zavřeno, nebo je synchronizace ještě nestáhla.'
             : 'Zatím není připojená žádná pokladna.'}{' '}
-          <Link href={`/${rozsah}/finance/integrace/pokladna`} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>Pokladní systémy →</Link>
+          <Link href={`${zakladIntegraci}/pokladna`} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>Pokladní systémy →</Link>
         </p>
       </div>
     )
@@ -269,7 +273,7 @@ export default function Obsah({
 
       <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
         Tržby jsou za provozní den pobočky, jak je posílá pokladna.{' '}
-        <Link href={`/${rozsah}/finance/integrace/prodeje`} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>Prodeje po produktech →</Link>
+        <Link href={`${zakladIntegraci}/prodeje`} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>Prodeje po produktech →</Link>
       </p>
     </>
   )

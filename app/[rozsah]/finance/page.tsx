@@ -2,12 +2,14 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { canSee } from '@/lib/authz'
+import { canSee, hasAccess, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiFinanceKpi, type FinanceKpi } from '@/lib/finance-kpi'
 import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
+import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
+import { pokladnaPatriPobocce } from '@/lib/pokladna-trzby'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
 import DataTable from '@/components/ui/DataTable'
@@ -38,6 +40,15 @@ export const dynamic = 'force-dynamic'
  * chybějícím oprávněním `payroll.read` (`finance.read` ho nezaručuje),
  * ne chybějícími daty — schovaná karta tu znamená „na tohle nemáte
  * právo", ne „appka nemá co počítat".
+ *
+ * POBOČKA (Šéfík 13. 10. 2026: „mám otevřený Bernard Bar, budou vidět
+ * finance, které se týkají jen Bernard Baru"): na rozsahu pobočky je
+ * každé číslo jen za ni (`pobockaFinanci`, lib/finance-kpi.ts) — nadpis
+ * nese její jméno, firemní řádky (společný účet, faktury) tu nejsou
+ * a nerozpočítávají se, odkazy na obrazovky jen pro celou firmu
+ * (Kontakty, Faktury, Import, AI analytik) se nekreslí. Stav integrací
+ * ukazuje jen pokladny, které posílají tržby TÉHLE pobočky. Kdo sem smí,
+ * hlídá finance/layout.tsx (finance.read za celou firmu).
  */
 
 const karta = {
@@ -96,6 +107,27 @@ function trend(aktualni: number, predchozi: number | null, jednotka: JednotkaTre
   return { zmena: ((aktualni - predchozi) / Math.abs(predchozi)) * 100, jednotka, rustJeDobre }
 }
 
+/**
+ * Má karta Tržby číslo? Ne, když se nenačetly, když je pobočka nemá
+ * odkud vzít, nebo když pokladna pobočky za měsíc nic neposlala (data
+ * má jen v tom předchozím) — „0 Kč" by tvrdilo, že nic neprodala.
+ * Celá firma beze změny: tam „0 Kč · 0 z N provozoven" zůstává.
+ */
+function trzbyMajiCislo(kpi: FinanceKpi, naPobocce: boolean): boolean {
+  if (kpi.zdrojTrzeb === 'nenacteno' || kpi.zdrojTrzeb === 'bez_zdroje') return false
+  return !(naPobocce && kpi.zdrojTrzeb === 'pokladna' && kpi.pokrytiPokladnou?.maji === 0)
+}
+
+function zdrojTrzeb(kpi: FinanceKpi, naPobocce: boolean): string {
+  if (kpi.zdrojTrzeb === 'nenacteno') return 'tržby z pokladen se nepodařilo načíst'
+  if (kpi.zdrojTrzeb === 'bez_zdroje') return 'pobočka nemá data z pokladny ani vlastní platební účet'
+  if (kpi.zdrojTrzeb === 'platby') return naPobocce ? 'z přijatých plateb na účty pobočky' : 'z přijatých plateb'
+  if (naPobocce) return kpi.pokrytiPokladnou?.maji === 0 ? 'pokladna pobočky za tento měsíc nic neposlala' : 'z pokladny pobočky'
+  return kpi.pokrytiPokladnou && kpi.pokrytiPokladnou.maji < kpi.pokrytiPokladnou.celkem
+    ? `z pokladen · ${kpi.pokrytiPokladnou.maji} z ${kpi.pokrytiPokladnou.celkem} provozoven`
+    : 'z pokladen'
+}
+
 const STAV_INTEGRACE: Record<string, { stav: 'aktivni' | 'neaktivni' | 'cekajici' | 'chyba'; text: string }> = {
   pripojeno: { stav: 'aktivni', text: 'Připojeno' },
   pripojuje_se: { stav: 'cekajici', text: 'Připojuje se' },
@@ -124,6 +156,18 @@ export default async function FinancePrehled({
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Finance vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
 
+  // `null` = celá firma; jinak id pobočky z adresy — každé číslo jen za ni.
+  const pobocka = pobockaFinanci(pristup.scope)
+  const naPobocce = pobocka !== null
+  // Druhá linie k finance/layout.tsx (layout stránku nezastaví — Next ji
+  // může vykreslit souběžně): pobočka jen s finance.read za celou firmu.
+  if (naPobocce && !(await hasAccess(tenantId, 'finance.read', null))) {
+    return <Sdeleni nadpis="Finance pobočky zatím jen s přehledem celé firmy">Finance jednotlivé pobočky zatím vidí jen ten, kdo má finanční přehled za celou firmu.</Sdeleni>
+  }
+  const nazevPobocky = pristup.scope.branchName ?? 'Pobočka'
+  // Odkaz na obrazovku celé firmy jen tomu, kdo na „Celou firmu" smí (jako JenProFirmu).
+  const smiNaFirmu = pristup.ctx.membership.scope === 'tenant'
+
   const mesic = mesicParam && /^\d{4}-\d{2}$/.test(mesicParam) ? mesicParam : tentoMesic()
   const { od, doData } = hraniceMesice(mesic)
   const mesicPredchozi = sousedniMesic(mesic, -1)
@@ -139,13 +183,18 @@ export default async function FinancePrehled({
   const branches = (branchesData ?? []) as { id: string; name: string }[]
 
   const [kpi, bodyGrafu, pozornost, integraceRes] = await Promise.all([
-    nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }).catch((): FinanceKpi | null => null),
-    nactiKombinovanyCashflowGraf(tenantId, 'zakladni').catch(() => []),
-    nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read')).catch((): PolozkaPozornosti[] => []),
-    supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
+    nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }, pobocka).catch((): FinanceKpi | null => null),
+    nactiKombinovanyCashflowGraf(tenantId, 'zakladni', pobocka).catch(() => []),
+    nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka).catch((): PolozkaPozornosti[] => []),
+    supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav, branch_id, externi_ucet').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
   ])
 
-  const integrace = (integraceRes.data ?? []) as { id: string; oblast: string; poskytovatel: string; nazev: string; stav: string }[]
+  type Pripojeni = { id: string; oblast: string; poskytovatel: string; nazev: string; stav: string; branch_id: string | null; externi_ucet: unknown }
+  // Na pobočce jen pokladny, které posílají JEJÍ tržby (vlastní připojení,
+  // nebo firemní s provozovnou přiřazenou téhle pobočce). Banka, účetnictví
+  // a e-mail dokladů jsou napojení celé firmy — pod pobočkou nemají co dělat.
+  const integrace = ((integraceRes.data ?? []) as Pripojeni[])
+    .filter((i) => pobocka === null || (i.oblast === 'pokladna' && pokladnaPatriPobocce(i, pobocka)))
   const zaklad = `/${rozsah}/finance`
   const smiVidetMzdy = canSee(pristup.ctx, 'payroll.read')
 
@@ -153,7 +202,11 @@ export default async function FinancePrehled({
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="Tržby z pokladen, peníze ze zapsaných plateb a výsledovky — appka počítá, nikdy neodhaduje."
+        popis={
+          naPobocce
+            ? `Jen ${nazevPobocky}: tržby z její pokladny, peníze z jejích účtů — appka počítá, nikdy neodhaduje.`
+            : 'Tržby z pokladen, peníze ze zapsaných plateb a výsledovky — appka počítá, nikdy neodhaduje.'
+        }
         vpravo={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <Link href={`${zaklad}?mesic=${sousedniMesic(mesic, -1)}`} className="ft-tl">← Dřívější</Link>
@@ -162,31 +215,26 @@ export default async function FinancePrehled({
           </div>
         }
       >
-        Přehled
+        {naPobocce ? `Přehled — ${nazevPobocky}` : 'Přehled'}
       </Nadpis>
 
       {/* containerType: karty `.ds-kpi-mrizka` se skládají podle šířky obsahu (@container) — bez kontejneru zůstaly na telefonu čtyři vedle sebe. */}
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px', containerType: 'inline-size' }}>
+        {naPobocce ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p> : null}
+
         {kpi ? (
           <div className="ds-kpi-mrizka">
             <FinanceKpiKarta
-              ikona="mince" titulek="Tržby" hodnota={kpi.zdrojTrzeb === 'nenacteno' ? '–' : koruny(kpi.trzbyHaleru)}
-              zdroj={
-                kpi.zdrojTrzeb === 'nenacteno'
-                  ? 'tržby z pokladen se nepodařilo načíst'
-                  : kpi.zdrojTrzeb === 'platby'
-                    ? 'z přijatých plateb'
-                    : kpi.pokrytiPokladnou && kpi.pokrytiPokladnou.maji < kpi.pokrytiPokladnou.celkem
-                      ? `z pokladen · ${kpi.pokrytiPokladnou.maji} z ${kpi.pokrytiPokladnou.celkem} provozoven`
-                      : 'z pokladen'
-              }
-              trend={kpi.zdrojTrzeb === 'nenacteno' ? null : trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true)}
+              ikona="mince" titulek="Tržby" hodnota={trzbyMajiCislo(kpi, naPobocce) ? koruny(kpi.trzbyHaleru) : '–'}
+              zdroj={zdrojTrzeb(kpi, naPobocce)}
+              trend={trzbyMajiCislo(kpi, naPobocce) ? trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true) : null}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />
+            {/* Pobočka bez vlastního účtu cashflow NEMÁ — „0 Kč" by tvrdilo, že se nic nepohnulo. */}
             <FinanceKpiKarta
-              ikona="blesk" titulek="Cashflow" hodnota={koruny(kpi.cashflowHaleru)}
-              zdroj="příjmy − výdaje z plateb"
-              trend={trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
+              ikona="blesk" titulek="Cashflow" hodnota={kpi.pobockaBezUctu ? '–' : koruny(kpi.cashflowHaleru)}
+              zdroj={kpi.pobockaBezUctu ? 'pobočka nemá vlastní platební účet' : naPobocce ? 'příjmy − výdaje z účtů pobočky' : 'příjmy − výdaje z plateb'}
+              trend={kpi.pobockaBezUctu ? null : trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />
             <FinanceKpiKarta
@@ -202,6 +250,8 @@ export default async function FinancePrehled({
             {smiVidetMzdy ? (
               <FinanceKpiKarta
                 ikona="lide" titulek="Náklady práce" hodnota={procentoNeboPomlcka(kpi.nakladyPraceProcento)}
+                // Na pobočce mzdy lidí s DOMOVSKOU pobočkou (vydelky_prehled) — viz ROZHODNOUT v lib/finance-kpi.ts.
+                zdroj={naPobocce ? 'mzdy lidí s domovskou pobočkou tady' : undefined}
                 trend={kpi.nakladyPraceProcento !== null ? trend(kpi.nakladyPraceProcento, kpi.nakladyPraceProcentoPredchozi, 'p. b.', false) : null}
                 srovnaniS={nazevMesice(mesicPredchozi)}
               />
@@ -218,7 +268,11 @@ export default async function FinancePrehled({
               body={bodyGrafu.map((b) => ({ popisek: kratkyDen(b.tydenOd), hodnotaHaleru: b.zustatekHaleru, budouci: b.budouci }))}
               formatovatOsu={zkratka}
               formatovatHodnotu={koruny}
-              prazdno="Zatím bez platebních účtů nebo transakcí."
+              prazdno={
+                naPobocce
+                  ? 'Pobočka zatím nemá vlastní aktivní platební účet, takže appka její zůstatek nezná. Účty celé firmy jsou v pohledu Celá firma.'
+                  : 'Zatím bez platebních účtů nebo transakcí.'
+              }
             />
           </div>
           <div style={{ ...karta, minWidth: 0 }}>
@@ -227,7 +281,11 @@ export default async function FinancePrehled({
               radky={(kpi?.nakladyPodleKategorie ?? []).map((r) => ({
                 klic: r.kategorie, popisek: r.nazev, hodnota: r.castkaHaleru, zformatovanaHodnota: koruny(r.castkaHaleru),
               }))}
-              prazdno="Zatím žádné kategorizované náklady za tohle období."
+              prazdno={
+                kpi?.pobockaBezUctu
+                  ? 'Pobočka zatím nemá vlastní platební účet — náklady z plateb za ni appka nemá.'
+                  : 'Zatím žádné kategorizované náklady za tohle období.'
+              }
             />
           </div>
         </div>
@@ -251,9 +309,11 @@ export default async function FinancePrehled({
           </div>
 
           <div style={{ ...karta, flex: '1 1 260px', minWidth: 0 }}>
-            <h2 style={{ margin: '0 0 12px', fontSize: '15px' }}>Stav integrací</h2>
+            <h2 style={{ margin: '0 0 12px', fontSize: '15px' }}>{naPobocce ? 'Pokladny pobočky' : 'Stav integrací'}</h2>
             {integrace.length === 0 ? (
-              <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>Zatím žádná připojení.</p>
+              <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
+                {naPobocce ? 'K téhle pobočce zatím není připojená ani přiřazená žádná pokladna.' : 'Zatím žádná připojení.'}
+              </p>
             ) : (
               <div style={{ display: 'grid', gap: '10px' }}>
                 {integrace.map((i) => {
@@ -266,18 +326,32 @@ export default async function FinancePrehled({
                 })}
               </div>
             )}
-            <div style={{ marginTop: '14px' }}>
-              <Link href={`${zaklad}/integrace`} className="ft-tl">Správa integrací →</Link>
-            </div>
+            {/* Integrace patří celé firmě (JenProFirmu) — z pobočky rovnou na firemní správu. */}
+            {naPobocce ? (
+              smiNaFirmu ? (
+                <div style={{ marginTop: '14px' }}>
+                  <Link href={`/${TENANT_SCOPE_SEGMENT}/finance/integrace`} className="ft-tl">Správa integrací (celá firma) →</Link>
+                </div>
+              ) : null
+            ) : (
+              <div style={{ marginTop: '14px' }}>
+                <Link href={`${zaklad}/integrace`} className="ft-tl">Správa integrací →</Link>
+              </div>
+            )}
           </div>
         </div>
 
+        {/* Na pobočce jen to, co pobočka má: import výpisů, Kontakty, Faktury a AI analytik patří celé firmě. */}
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
           <Link href={`${zaklad}/platby`} className="ft-tl">Zapsat platbu</Link>
-          <Link href={`${zaklad}/platby/import`} className="ft-tl">Importovat výpis (CSV)</Link>
-          <Link href={`${zaklad}/kontakty`} className="ft-tl">Kontakty</Link>
-          <Link href={`${zaklad}/faktury`} className="ft-tl">Faktury</Link>
-          <Link href={`${zaklad}/analytik`} className="ft-tl">Zeptat se AI analytika</Link>
+          {naPobocce ? null : (
+            <>
+              <Link href={`${zaklad}/platby/import`} className="ft-tl">Importovat výpis (CSV)</Link>
+              <Link href={`${zaklad}/kontakty`} className="ft-tl">Kontakty</Link>
+              <Link href={`${zaklad}/faktury`} className="ft-tl">Faktury</Link>
+              <Link href={`${zaklad}/analytik`} className="ft-tl">Zeptat se AI analytika</Link>
+            </>
+          )}
         </div>
       </div>
     </Navigace>

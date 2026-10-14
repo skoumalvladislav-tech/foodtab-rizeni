@@ -10,8 +10,16 @@
  * součtu přes všech 13.
  */
 
-const { pondelekTydne, agregovatPoTydnech, sestavRollingVyhled, KOEFICIENTY_SCENARU, POCET_TYDNU } =
-  await import('../lib/finance-rolling-vyhled.ts')
+const {
+  pondelekTydne,
+  agregovatPoTydnech,
+  sestavRollingVyhled,
+  KOEFICIENTY_SCENARU,
+  POCET_TYDNU,
+  ucetVRozsahu,
+  zustatekRozsahu,
+  historieZustatku,
+} = await import('../lib/finance-rolling-vyhled.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -96,6 +104,53 @@ const vicPobocek = [
 ]
 const jenPerla = sestavRollingVyhled(vicPobocek, new Map(), 0, '2026-10-03', 'zakladni', 'perla')
 ok('jen perla se promítla do výdajů, ne bernard', jenPerla.tydny[1].planVydajeHaleru === 100000)
+
+console.log('\n== Rozsah Financí: celá firma × pobočka (Šéfík 13. 10. 2026) ==')
+
+ok('celá firma bere i firemní účet (bez pobočky)', ucetVRozsahu(null, null) && ucetVRozsahu('perla', null))
+ok('pobočka bere jen svůj účet', ucetVRozsahu('bernard', 'bernard'))
+ok('pobočka NEbere firemní účet (null se nerozpočítává)', !ucetVRozsahu(null, 'bernard'))
+ok('pobočka NEbere účet cizí pobočky', !ucetVRozsahu('perla', 'bernard'))
+
+const ZUSTATKY = [
+  { branchId: null, zustatekHaleru: 5000000 }, // společný firemní účet
+  { branchId: 'perla', zustatekHaleru: 300000 },
+]
+ok('celá firma: součet všech řádků i s firemním účtem (53 000 Kč)', zustatekRozsahu(ZUSTATKY, null) === 5300000)
+ok('pobočka s účtem: jen její řádek (3 000 Kč)', zustatekRozsahu(ZUSTATKY, 'perla') === 300000)
+ok('pobočka bez účtu: null (zůstatek NEZNÁMÝ), ne 0 a ne firemní účet', zustatekRozsahu(ZUSTATKY, 'bernard') === null)
+ok('celá firma bez účtů: 0 jako dřív (beze změny)', zustatekRozsahu([], null) === 0)
+
+console.log('\n== historieZustatku: chůze nazpátek od dnešního zůstatku ==')
+
+// Dnes čtvrtek 15. 10. 2026 → aktuální týden od 12. 10., dva historické
+// týdny 28. 9. a 5. 10. Dnešní zůstatek 10 000 Kč.
+const historie = historieZustatku(1000000, [
+  { datum: '2026-09-29', smer: 'prijem', castkaHaleru: 200000 },
+  { datum: '2026-10-06', smer: 'vydaj', castkaHaleru: 50000 },
+  { datum: '2026-10-13', smer: 'prijem', castkaHaleru: 777777 }, // tento týden — do historie nepatří
+  { datum: '2026-09-01', smer: 'vydaj', castkaHaleru: 888888 }, // před historií — nepatří
+  { datum: '2026-10-07', smer: 'prevod_ven', castkaHaleru: 999999 }, // převod se nepočítá
+], '2026-10-15', 2)
+ok('dva týdny, první od 28. 9.', historie.length === 2 && historie[0].tydenOd === '2026-09-28' && historie[1].tydenOd === '2026-10-05')
+ok('konec minulého týdne = dnešní zůstatek (10 000 Kč), pohyb tohoto týdne se nevrací', historie[1].zustatekHaleru === 1000000)
+ok('konec týdne 28. 9. = před výdajem 500 Kč z 5. 10. (10 500 Kč)', historie[0].zustatekHaleru === 1050000)
+ok('týden do neděle 4. 10.', historie[0].tydenDo === '2026-10-04')
+
+// Pobočka: stejná chůze, jen z jejích transakcí a jejího zůstatku — firemní
+// příjem 1 mil. Kč (z účtu bez pobočky) se do historie pobočky nedostane.
+const RADKY = [
+  { datum: '2026-09-29', smer: 'prijem', castkaHaleru: 100000000, branchId: null },
+  { datum: '2026-10-06', smer: 'prijem', castkaHaleru: 30000, branchId: 'perla' },
+]
+const historiePerly = historieZustatku(
+  zustatekRozsahu(ZUSTATKY, 'perla'),
+  RADKY.filter((r) => ucetVRozsahu(r.branchId, 'perla')),
+  '2026-10-15',
+  2,
+)
+ok('pobočka: konec týdne 28. 9. = její zůstatek mínus její příjem (3 000 − 300 = 2 700 Kč)', historiePerly[0].zustatekHaleru === 270000)
+ok('pobočka: konec minulého týdne = její dnešní zůstatek (3 000 Kč), firemní milion v ní není', historiePerly[1].zustatekHaleru === 300000)
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)
