@@ -1,14 +1,16 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
 import { datumACasSRokemVPasmu, datumACasVPasmu } from "@/lib/cas";
+import type { StavRuseni } from "@/lib/ruseni-smen";
 import { vyzadujePotvrzeni as vyzadujePotvrzeniDruhu } from "@/lib/upozorneni-text";
 import { delkaPopis, minutSmeny, popisDne, rozsahCasu } from "@/lib/rozpis-mobil";
 import { nactiStavSmeny, potvrditSmenu, potvrditZmenuSmeny, type StavUpozorneniSmeny } from "../potvrzeni";
+import { zrusitViceDni } from "../ruseni";
 import RuseniViceDni from "../ruseni-vice-dni";
 import { smazatSmenu, type StavSmeny } from "../smena";
 import { AvatarM } from "./prvky";
@@ -67,6 +69,15 @@ export default function DetailSmeny({
   });
   const [pta, setPta] = useState(false);
   const [viceDni, setViceDni] = useState(false);
+  /*
+    Stav rušení ve víc dnech drží detail, ne RuseniViceDni — zaškrtávátko
+    „…i v jiné dny“ je tady a během odesílání se musí zamknout, po
+    výsledku schovat (viz hlavičku ../ruseni-vice-dni.tsx).
+  */
+  const [stavRuseni, akceRuseni, cekaRuseni] = useActionState<StavRuseni, FormData>(zrusitViceDni, {
+    stav: "nic",
+  });
+  const volbaRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (stavSmazani.stav === "hotovo") {
@@ -335,42 +346,67 @@ export default function DetailSmeny({
               </>
             )}
 
-            {pta && viceDni ? (
+            {/*
+              Zaškrtávátko „…i v jiné dny“ je MIMO formulář jedné směny
+              (Enter by ho jinak odeslal — implicitní odeslání) a kreslí
+              se jednou pro obě podoby na stejném místě, ať při přepnutí
+              zůstane tentýž prvek i s fokusem. Viz formular-smeny.tsx.
+            */}
+            {pta ? (
               <div className="ds-sm-potvrzeni">
-                <RuseniViceDni
-                  rozsah={rozsah}
-                  smena={smena}
-                  telefon
-                  onZpet={() => setViceDni(false)}
-                  onOdeslano={() => onPodrzet?.(smena)}
-                  onHotovo={onZavrit}
-                />
-              </div>
-            ) : pta ? (
-              <form action={akceSmazat} className="ds-sm-potvrzeni">
-                <input type="hidden" name="rozsah" value={rozsah} />
-                <input type="hidden" name="smena" value={smena.id} />
-                <p>
-                  <b>{jeVydana ? "Zrušit tuhle směnu?" : "Smazat tuhle směnu?"}</b>
-                </p>
-                {jeVydana ? (
+                {viceDni ? null : (
+                  <p>
+                    <b>{jeVydana ? "Zrušit tuhle směnu?" : "Smazat tuhle směnu?"}</b>
+                  </p>
+                )}
+                {!viceDni && jeVydana ? (
                   <p className="ds-sm-mista">Zůstane vidět jako zrušená a lidem zmizí, až rozpis vydáte.</p>
                 ) : null}
-                {/* Bez `name` — do formuláře jedné směny nic nepřidá, jen přepne na víc dnů. */}
-                <label className="ds-sm-rv-volba">
-                  <input type="checkbox" checked={false} onChange={() => setViceDni(true)} />
-                  {jeVydana ? "Zrušit i v jiné dny" : "Smazat i v jiné dny"}
-                </label>
-                <div className="ds-sm-potvrzeni-akce">
-                  <button type="submit" className="ds-sm-tl ds-sm-tl-nebezpeci" disabled={cekaSmazani}>
-                    {cekaSmazani ? (jeVydana ? "Ruším…" : "Mažu…") : jeVydana ? "Zrušit směnu" : "Smazat směnu"}
-                  </button>
-                  <button type="button" className="ds-sm-tl" onClick={() => setPta(false)}>
-                    Zpět
-                  </button>
-                </div>
-                {stavSmazani.stav === "chyba" ? <p className="hlaska-chyba">{stavSmazani.text}</p> : null}
-              </form>
+                {/* Bez `name` a mimo formulář — do formuláře jedné směny nic nepřidá, jen přepne na víc dnů. */}
+                {stavRuseni.stav === "hotovo" ? null : (
+                  <label className="ds-sm-rv-volba">
+                    <input
+                      ref={volbaRef}
+                      type="checkbox"
+                      checked={viceDni}
+                      disabled={cekaRuseni}
+                      onChange={(e) => setViceDni(e.target.checked)}
+                    />
+                    {viceDni ? "Zrušit / smazat i v jiné dny" : jeVydana ? "Zrušit i v jiné dny" : "Smazat i v jiné dny"}
+                  </label>
+                )}
+                {viceDni ? (
+                  <RuseniViceDni
+                    rozsah={rozsah}
+                    smena={smena}
+                    telefon
+                    stav={stavRuseni}
+                    akce={akceRuseni}
+                    ceka={cekaRuseni}
+                    onZpet={() => {
+                      setViceDni(false);
+                      // „Zpět“ zmizí s výběrem dnů — fokus na zaškrtávátko, ne na <body>.
+                      volbaRef.current?.focus();
+                    }}
+                    onOdeslano={() => onPodrzet?.(smena)}
+                    onHotovo={onZavrit}
+                  />
+                ) : (
+                  <form action={akceSmazat} style={{ display: "contents" }}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="smena" value={smena.id} />
+                    <div className="ds-sm-potvrzeni-akce">
+                      <button type="submit" className="ds-sm-tl ds-sm-tl-nebezpeci" disabled={cekaSmazani}>
+                        {cekaSmazani ? (jeVydana ? "Ruším…" : "Mažu…") : jeVydana ? "Zrušit směnu" : "Smazat směnu"}
+                      </button>
+                      <button type="button" className="ds-sm-tl" onClick={() => setPta(false)}>
+                        Zpět
+                      </button>
+                    </div>
+                    {stavSmazani.stav === "chyba" ? <p className="hlaska-chyba">{stavSmazani.text}</p> : null}
+                  </form>
+                )}
+              </div>
             ) : (
               <button type="button" className="ds-sm-tl ds-sm-tl-nebezpeci" onClick={() => setPta(true)}>
                 <Ikona klic="kos" velikost={18} />

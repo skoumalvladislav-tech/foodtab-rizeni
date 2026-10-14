@@ -9,6 +9,7 @@ import {
   dnyTydne,
   posunDatum,
   posunMesic,
+  vyberDetailu,
   type FiltrSmen,
 } from "@/lib/rozpis-mobil";
 import DetailSmeny from "./detail";
@@ -122,10 +123,7 @@ export default function MobilniRozpis(p: MobilProps) {
     poslední známá podoba, dokud člověk detail sám nezavře.
   */
   const [podrzeny, setPodrzeny] = useState<SmenaM | null>(null);
-  const detail = detailId
-    ? ([...p.smeny, ...p.mojeSmeny].find((s) => s.id === detailId) ??
-      (podrzeny?.id === detailId ? podrzeny : null))
-    : null;
+  const detail = vyberDetailu([...p.smeny, ...p.mojeSmeny], detailId, podrzeny);
 
   function zavritDetail() {
     setDetailId(null);

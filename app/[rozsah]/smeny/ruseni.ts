@@ -6,10 +6,12 @@ import { hasAccess } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import {
   akceRuseni,
+  MAX_SMEN_RUSENI,
   nahledPoDnech,
   otiskRadku,
   overitDnyRuseni,
   stejneSmeny,
+  TEXT_MOC_SMEN,
   vybratKeZruseni,
   vysledekZRpc,
   type PolozkaNahledu,
@@ -53,13 +55,20 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * ---------------------------------------------------------------------
  * DOTAZ ZUŽUJE, PRAVIDLO ROZHODUJE
  *
- * Dotaz na kandidáty si řekne jen o pobočku výchozí směny, vybrané dny
- * a téhož člověka (u neobsazené směny o neobsazené). Není to druhá kopie
- * pravidla „pro jistotu“, ale strop velikosti odpovědi: bez zúžení podle
- * člověka by pobočka za dvanáct týdnů přerostla limit řádků PostgRESTu
- * a chybějící řádky by se tvářily jako „nic k zrušení“. Kdo pravidlo
- * změní (třeba na „jen stejný čas“), mění `odpovidaPravidlu`; dotaz smí
- * vrátit víc, nikdy míň. Zúžení hlídá scripts/smeny-ruseni.test.mjs.
+ * Dotaz na kandidáty si řekne jen o pobočku výchozí směny, vybrané dny,
+ * nezrušené směny a téhož člověka — u neobsazené výchozí směny o neobsazené
+ * se stejnou pozicí, začátkem i koncem. Není to druhá kopie pravidla „pro
+ * jistotu“, ale strop velikosti odpovědi: bez zúžení by pobočka za dvanáct
+ * týdnů přerostla limit řádků PostgRESTu (max_rows 1000, supabase/
+ * config.toml) a chybějící řádky by se tvářily jako „nic ke zrušení“. Kdo
+ * pravidlo změní (třeba na „jen stejný čas“), mění `odpovidaPravidlu`;
+ * dotaz smí vrátit víc, nikdy míň. Zúžení hlídá scripts/smeny-ruseni.test.mjs.
+ *
+ * Pojistka za zúžením: dotaz si řekne i o počet (`count: 'exact'`) a je
+ * seřazený. Když PostgREST vrátí méně řádků, než kolik jich odpovídá
+ * (useknutí limitem), náhled i potvrzení se ODMÍTNOU — nikdy se nevydává
+ * neúplný výsledek za „nic ke zrušení“ a náhled s potvrzením nemůžou
+ * dostat dvě různé podmnožiny. Totéž pro strop `MAX_SMEN_RUSENI`.
  */
 
 const SLOUPCE = 'id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, published_at'
@@ -112,6 +121,18 @@ async function najitKeZruseni(rozsah: string, smenaId: string, surove: string[])
     return { stav: 'chyba', text: 'Tahle směna patří pobočce, kterou nespravujete.' }
   }
 
+  /*
+    Už zrušená výchozí směna by se v náhledu ukázala jako „zruší se“,
+    započítala by se do tlačítka i souhrnu a výsledek by pak hlásil „už
+    dřív zrušeno“ — v jiných dnech se přitom zrušené vynechávají. Stane
+    se to, když ji mezitím zrušil někdo jiný (nebo se otevřela odkazem
+    ve chvíli zrušení). Potvrzení výchozí směnu načítá znovu, takže tohle
+    chytí i souběh mezi náhledem a potvrzením.
+  */
+  if (zaklad.status === 'cancelled') {
+    return { stav: 'chyba', text: 'Tahle směna už je zrušená — obnovte rozpis.' }
+  }
+
   const overene = overitDnyRuseni(surove, zaklad.shift_date)
   if (!overene.ok) return { stav: 'chyba', text: overene.text }
 
@@ -121,18 +142,31 @@ async function najitKeZruseni(rozsah: string, smenaId: string, surove: string[])
     // Zúžení, ne pravidlo — viz hlavičku („Dotaz zužuje, pravidlo rozhoduje“).
     let dotaz = supabase
       .from('shifts')
-      .select(SLOUPCE)
+      .select(SLOUPCE, { count: 'exact' })
       .eq('tenant_id', tenantId)
       .eq('branch_id', zaklad.branch_id)
       .in('shift_date', dalsiDny)
-    dotaz =
-      zaklad.employee_id !== null
-        ? dotaz.eq('employee_id', zaklad.employee_id)
-        : dotaz.is('employee_id', null)
-    const { data, error } = await dotaz
+      .neq('status', 'cancelled')
+    if (zaklad.employee_id !== null) {
+      dotaz = dotaz.eq('employee_id', zaklad.employee_id)
+    } else {
+      dotaz = dotaz.is('employee_id', null)
+      dotaz = zaklad.position_id !== null ? dotaz.eq('position_id', zaklad.position_id) : dotaz.is('position_id', null)
+      // `time` z databáze („HH:MM:SS“) — stejný tvar, jaký porovnává `stejnyCas`.
+      dotaz = dotaz.eq('starts_at', zaklad.starts_at).eq('ends_at', zaklad.ends_at)
+    }
+    const { data, error, count } = await dotaz.order('shift_date').order('starts_at').order('id')
     if (error) return { stav: 'chyba', text: 'Směny ve vybraných dnech se nepodařilo načíst.' }
     kandidati = (data ?? []) as unknown as SmenaKRuseni[]
+    // Useknutá odpověď (limit řádků) nebo neznámý počet: odmítnout, ne tvářit se jako „nic“.
+    if (count === null || count > kandidati.length) {
+      return { stav: 'chyba', text: 'Ve vybraných dnech je příliš mnoho směn — vyberte méně dní.' }
+    }
   }
+
+  const smeny = vybratKeZruseni(zaklad, kandidati, overene.dny)
+  // Stejné odmítnutí v náhledu i v potvrzení — viz `MAX_SMEN_RUSENI`.
+  if (smeny.length > MAX_SMEN_RUSENI) return { stav: 'chyba', text: TEXT_MOC_SMEN }
 
   return {
     stav: 'ok',
@@ -140,7 +174,7 @@ async function najitKeZruseni(rozsah: string, smenaId: string, surove: string[])
     tenantId,
     zaklad,
     dny: overene.dny,
-    smeny: vybratKeZruseni(zaklad, kandidati, overene.dny),
+    smeny,
   }
 }
 

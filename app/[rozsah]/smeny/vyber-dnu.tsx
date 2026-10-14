@@ -25,6 +25,7 @@ export default function VyberDnu({
   onVicTydnu,
   zamcene = [],
   popisek = "Dny, pro které se založí směna",
+  zakazano = false,
 }: {
   /** Den, kolem kterého se sestaví první týden okna (obvykle předvyplněný den formuláře). */
   zacatek: string;
@@ -37,6 +38,11 @@ export default function VyberDnu({
   zamcene?: string[];
   /** Popis skupiny pro odečítač — co výběr dnů znamená. */
   popisek?: string;
+  /**
+   * Celá mřížka mimo provoz — rušení ve víc dnech během odesílání
+   * (ruseni-vice-dni.tsx): výběr, ke kterému běží akce, se nesmí měnit.
+   */
+  zakazano?: boolean;
 }) {
   const tydny = tydnyOkna(zacatek, pocetTydnu);
   const vybranaMnozina = new Set(vybrane);
@@ -66,6 +72,7 @@ export default function VyberDnu({
                   aria-pressed={vybran}
                   aria-disabled={zamcen ? true : undefined}
                   aria-label={zamcen ? `${popisDne(den)}, den této směny — zůstává vybraný` : popisDne(den)}
+                  disabled={zakazano}
                   onClick={zamcen ? undefined : () => onPrepnout(den)}
                 >
                   {cisloDne(den)}
@@ -76,7 +83,7 @@ export default function VyberDnu({
         ))}
       </div>
       {onVicTydnu ? (
-        <button type="button" className="ds-sm-vd-vic" onClick={onVicTydnu}>
+        <button type="button" className="ds-sm-vd-vic" onClick={onVicTydnu} disabled={zakazano}>
           Zobrazit další týdny
         </button>
       ) : null}

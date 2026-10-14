@@ -1530,6 +1530,8 @@ div.ds-smd-smena:hover { box-shadow: none; }
 }
 /* Den vybraný napevno (den rušené směny) — dvojitý okraj, kurzor bez kliku. */
 .ds-sm-vd-den[data-zamceno] { cursor: default; box-shadow: inset 0 0 0 1px var(--branch); }
+/* Celá mřížka zamčená (`zakazano`) — rušení ve víc dnech během odesílání. */
+.ds-sm-vd-den:disabled, .ds-sm-vd-vic:disabled { cursor: default; opacity: .6; }
 
 /* --- zrušit / smazat i v jiné dny (ruseni-vice-dni.tsx) ---------------- */
 
@@ -1539,9 +1541,21 @@ div.ds-smd-smena:hover { box-shadow: none; }
   display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
   font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer;
 }
+/* 20 px v mosazi jako `.ds-sm-volba input`, ne drobný modrý výchozí checkbox prohlížeče. */
+.ds-sm-rv-volba input { width: 20px; height: 20px; flex: none; margin: 0; accent-color: var(--mosaz); }
+/* Během odesílání zamčené (výsledek by se ztratil) — ať je to vidět. */
+.ds-sm-rv-volba:has(input:disabled) { cursor: default; opacity: .6; }
 /* `.ds-sm-rv p…` kvůli `.ds-sm-potvrzeni p` v detailu na telefonu. */
 .ds-sm-rv p.ds-sm-rv-vysvetleni { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
 .ds-sm-rv p.ds-sm-rv-souhrn { margin: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
+/* Totéž pro chyby (náhled, odmítnutí): `.ds-sm-potvrzeni p` (0,1,1) by přebilo
+   červenou z `.hlaska-chyba` (0,1,0) a na telefonu by byly inkoustové v 15 px. */
+.ds-sm-rv p.hlaska-chyba { margin: 0; font-size: 13px; color: var(--bad); }
+/* Samotné „Zpět“ (bez platného náhledu, po odmítnutí) přes celou šířku —
+   na telefonu je řada `.ds-sm-potvrzeni-akce` mřížka 1fr 1fr a jediné
+   tlačítko by zabralo levou půlku. Jen tady, potvrzení jedné směny má
+   tlačítka vždy dvě. */
+.ds-sm-rv .ds-sm-potvrzeni-akce > :only-child { grid-column: 1 / -1; }
 .ds-sm-rv-nahled { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .ds-sm-rv-den {
   display: grid; grid-template-columns: 4.8em minmax(0, 1fr); gap: 8px; align-items: start;

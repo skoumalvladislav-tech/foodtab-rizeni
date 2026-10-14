@@ -38,6 +38,18 @@ import { tydnyOkna, TYDNU_MAX } from './vyber-dnu.ts'
  */
 export const MAX_DNU_RUSENI = 92
 
+/**
+ * Strop počtu SMĚN na jedno potvrzení. Strop na dny nestačí: u neobsazené
+ * směny se pravidlo týká všech stejných slotů v dni, takže dvanáct týdnů
+ * po třech slotech je přes 250 volání `smazat_smenu` v jedné akci — po
+ * sobě, každé zakládá upozornění. Kdyby akce narazila na časový limit
+ * nebo spadlo spojení uprostřed, část směn by byla pryč a člověk by se
+ * nedozvěděl, která. Odmítne se proto dřív: v náhledu i v potvrzení
+ * stejně (`najitKeZruseni` v app/[rozsah]/smeny/ruseni.ts).
+ */
+export const MAX_SMEN_RUSENI = 150
+export const TEXT_MOC_SMEN = `Najednou jde zrušit nejvýš ${MAX_SMEN_RUSENI} směn — vyberte méně dní.`
+
 /** Sloupce `public.shifts`, které pravidlo a náhled potřebují. */
 export type SmenaKRuseni = {
   id: string
@@ -69,6 +81,21 @@ export type OvereneDny = { ok: true; dny: string[] } | { ok: false; text: string
  * Odmítne: víc než `MAX_DNU_RUSENI` položek, cokoli, co není datum,
  * a den mimo okno mřížky (`TYDNU_MAX` týdnů od pondělí týdne výchozí
  * směny) — server nepustí nic, co by obrazovka nenabídla.
+ *
+ * ROZHODNOUT: okno začíná PONDĚLÍM týdne výchozí směny, ne jejím dnem,
+ * a nehlídá, jestli den není v minulosti. Když se rušení otevře u směny
+ * z minulého měsíce, jde jedním potvrzením zrušit (vydané) nebo smazat
+ * (nevydané) až dvanáct týdnů už odpracovaných směn. Zrušená vydaná
+ * směna pak vypadne z `dnu_bez_dochazky` ve výpočtu mezd (počítá jen
+ * `status <> 'cancelled'`), smazané nevydané vezmou s sebou potvrzení
+ * a docházce zůstane `shift_id` prázdné. U jedné směny jde totéž, výběr
+ * dnů to jen znásobí. Šéfík zatím nerozhodl (viz docs/hlaseni/otazky.md
+ * #27 k minulým obdobím) — možnosti:
+ *   - nechat, jak je, a v náhledu dny před dnešním provozním dnem jen
+ *     označit („minulý den“, v souhrnu „z toho N dní v minulosti“);
+ *   - přísně: odmítnout dny dřív než max(den výchozí směny, dnešní
+ *     provozní den) a v mřížce je zamknout — pak sem musí přijít „dnes“
+ *     jako parametr, ať funkce zůstane čistá a testovatelná.
  */
 export function overitDnyRuseni(surove: string[], zakladniDen: string): OvereneDny {
   if (surove.length > MAX_DNU_RUSENI) {
@@ -114,6 +141,18 @@ export function stejnyCas(a: string, b: string): boolean {
  *   Alternativa: i u člověka brát jen směny se stejným časem (od–do)
  *   jako výchozí — pak by dělená směna nebo jiný čas v jiném dni
  *   zůstaly stát.
+ *
+ *   NESYMETRIE, na kterou je potřeba odpověď: ve dni výchozí směny se
+ *   ruší JEN ona, v každém dalším dni VŠECHNO, co pravidlu odpovídá.
+ *   Pobočka se třemi stejnými neobsazenými sloty „Číšník 10–22“ denně,
+ *   která chce na příští týden ubrat jeden: ve výchozím dni zmizí jeden
+ *   slot, v ostatních dnech všechny tři. U člověka ve výchozím dni
+ *   zůstane jeho druhá směna, v jiných dnech zmizí všechny. Obrazovka
+ *   to říká v textu u volby a náhled ukazuje každou směnu, ale pravidlo
+ *   samo je otevřená otázka:
+ *     - neobsazená: má se v každém dalším dni rušit jen tolik stejných
+ *       slotů, kolik jich jde ve výchozím dni (tedy jeden)?
+ *     - člověk: má se i ve výchozím dni rušit jeho další směna?
  */
 export function odpovidaPravidlu(zaklad: SmenaKRuseni, kandidat: SmenaKRuseni): boolean {
   if (kandidat.id === zaklad.id) return false
@@ -185,7 +224,7 @@ export type DenNahledu = { den: string; smeny: PolozkaNahledu[] }
 /**
  * Náhled po dnech: každý vybraný den (v pořadí kalendáře) se směnami,
  * které se v něm zruší — a i den, ve kterém není co rušit (prázdný
- * seznam). Ten se v náhledu ukáže výslovně „nic k zrušení“, ať člověk
+ * seznam). Ten se v náhledu ukáže výslovně „nic ke zrušení“, ať člověk
  * nemusí hádat, jestli se na něj zapomnělo.
  */
 export function nahledPoDnech(dny: string[], polozky: PolozkaNahledu[]): DenNahledu[] {
@@ -209,13 +248,13 @@ export function pocetNahledu(dny: DenNahledu[]): { zrusit: number; smazat: numbe
   }
 }
 
-/** „K zrušení 2 směny, ke smazání 3 směny, nic k zrušení: 1 den.“ (bez tečky) */
+/** „Ke zrušení 2 směny, ke smazání 3 směny, nic ke zrušení: 1 den.“ (bez tečky) */
 export function souhrnNahledu(dny: DenNahledu[]): string {
   const { zrusit, smazat, prazdnych } = pocetNahledu(dny)
   const casti: string[] = []
-  if (zrusit > 0) casti.push(`k zrušení ${pocet(zrusit, 'směna', 'směny', 'směn')}`)
+  if (zrusit > 0) casti.push(`ke zrušení ${pocet(zrusit, 'směna', 'směny', 'směn')}`)
   if (smazat > 0) casti.push(`ke smazání ${pocet(smazat, 'směna', 'směny', 'směn')}`)
-  if (prazdnych > 0) casti.push(`nic k zrušení: ${pocet(prazdnych, 'den', 'dny', 'dní')}`)
+  if (prazdnych > 0) casti.push(`nic ke zrušení: ${pocet(prazdnych, 'den', 'dny', 'dní')}`)
   return sVelkym(casti.join(', '))
 }
 
@@ -290,7 +329,7 @@ export function vysledekZRpc(
 }
 
 /**
- * Souhrn po zrušení: „Zrušeno 2, smazáno 3, nic k zrušení: 1 den,
+ * Souhrn po zrušení: „Zrušeno 2, smazáno 3, nic ke zrušení: 1 den,
  * 1 chyba“ (bez tečky). Nulové části se vynechávají; chyba se ukáže
  * vždycky, když nějaká je — neúspěch musí být vidět.
  */
@@ -303,7 +342,7 @@ export function souhrnRuseni(vysledky: VysledekRuseni[], dnuBezSmen: number): st
   if (zruseno > 0) casti.push(`zrušeno ${zruseno}`)
   if (smazano > 0) casti.push(`smazáno ${smazano}`)
   if (uz > 0) casti.push(`už dřív zrušeno ${uz}`)
-  if (dnuBezSmen > 0) casti.push(`nic k zrušení: ${pocet(dnuBezSmen, 'den', 'dny', 'dní')}`)
+  if (dnuBezSmen > 0) casti.push(`nic ke zrušení: ${pocet(dnuBezSmen, 'den', 'dny', 'dní')}`)
   if (chyb > 0) casti.push(pocet(chyb, 'chyba', 'chyby', 'chyb'))
   return sVelkym(casti.join(', ') || 'nic se nezměnilo')
 }
@@ -330,3 +369,56 @@ export type StavRuseni =
   | { stav: 'nic' }
   | { stav: 'chyba'; text: string }
   | { stav: 'hotovo'; smeny: VysledekRuseni[]; dnyBezSmen: string[] }
+
+/* ---------------------------------------------------------------------
+   ROZHODNUTÍ OBRAZOVKY (ruseni-vice-dni.tsx)
+
+   Co obrazovka smí ukázat a potvrdit, je tady — čistě, ať to jde
+   zkoušet Nodem. Komponenta drží jen stav a kreslí.
+   ------------------------------------------------------------------ */
+
+/** Náhled tak, jak ho drží obrazovka: pro který výběr dnů se načetl a kdy. */
+export type NacetlyNahled = {
+  /** Klíč výběru dnů, ke kterému se náhled načetl (`klicVyberu`). */
+  pro: string
+  dny: DenNahledu[]
+  /** Pořadí načtení — potvrzení si pamatuje, s kterým náhledem odešlo. */
+  verze: number
+}
+
+/** Klíč výběru dnů — na pořadí kliknutí nezáleží. */
+export function klicVyberu(vybrane: string[]): string {
+  return [...vybrane].sort().join(',')
+}
+
+/**
+ * Náhled, který smí obrazovka ukázat a potvrdit: jen ten, který se načetl
+ * přesně pro SOUČASNÝ výběr dnů. Kdo pak den přidá nebo odebere, dostane
+ * `null` — potvrzovací tlačítko zmizí, dokud se náhled nenačte znovu.
+ * Nepotvrzuje se nic, co nebylo vidět.
+ */
+export function platnyNahled(nahled: NacetlyNahled | null, vybrane: string[]): NacetlyNahled | null {
+  return nahled && nahled.pro === klicVyberu(vybrane) ? nahled : null
+}
+
+/**
+ * Ukázat zamítnutí potvrzení („Rozpis se od náhledu změnil… Nic se
+ * nezrušilo“) místo potvrzovacího tlačítka? Jen když:
+ *   - akce právě NEBĚŽÍ — `useActionState` drží až do odpovědi předchozí
+ *     stav, takže při druhém odeslání by stará hláška tvrdila „nic se
+ *     nezrušilo“, zatímco server ruší směnu za směnou, a tlačítko
+ *     „Provádím…“ by zmizelo;
+ *   - poslední odpověď je chyba;
+ *   - a patří k náhledu, se kterým se odesílalo (`odeslanaVerze`). Dokud
+ *     se nenačte nový, znovu potvrdit nejde — stejná data by server
+ *     odmítl zase. Po novém náhledu hláška zmizí.
+ */
+export function jeZamitnuto(
+  stav: StavRuseni,
+  odeslanaVerze: number | null,
+  nahled: Pick<NacetlyNahled, 'verze'> | null,
+  ceka: boolean,
+): boolean {
+  if (ceka) return false
+  return stav.stav === 'chyba' && odeslanaVerze !== null && nahled?.verze === odeslanaVerze
+}

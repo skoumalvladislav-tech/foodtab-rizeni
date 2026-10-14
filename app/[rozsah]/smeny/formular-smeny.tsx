@@ -13,8 +13,10 @@ import { zkratkaDoSmeny } from '@/lib/sablony'
 import { ukazatZarazeni, zarazeniProUlozeni } from '@/lib/smeny-formular'
 import { denVTydnu, hodinyKratce, minutSmeny, ZKRATKY_DNU } from '@/lib/rozpis-mobil'
 import { barvaSouhrnu, prepnoutDen, souhrnZalozeni, TYDNU_KROK, TYDNU_MAX, TYDNU_VYCHOZI, zapnoutVicDni } from '@/lib/vyber-dnu'
+import type { StavRuseni } from '@/lib/ruseni-smen'
 import HlavickaSmeny, { type KontextSmeny } from './desktop/hlavicka-smeny'
 import { ListMobil } from './mobil/sheet'
+import { zrusitViceDni } from './ruseni'
 import RuseniViceDni from './ruseni-vice-dni'
 import { nabidnoutSablony, type NabidnutaSablona } from './sablony'
 import { smazatSmenu, ulozitSmenu, type StavSmeny } from './smena'
@@ -206,6 +208,16 @@ export default function FormularSmeny({
     Vypnuté = jedna směna přesně jako dřív.
   */
   const [ruseniViceDni, setRuseniViceDni] = useState(false)
+  /*
+    Stav rušení ve víc dnech drží panel, ne RuseniViceDni: zaškrtávátko
+    „…i v jiné dny“ je tady (kreslí se jednou, mimo oba formuláře) a během
+    odesílání se musí zamknout, po výsledku schovat. Viz hlavičku
+    ruseni-vice-dni.tsx.
+  */
+  const [stavRuseni, akceRuseni, cekaRuseni] = useActionState<StavRuseni, FormData>(zrusitViceDni, {
+    stav: 'nic',
+  })
+  const volbaRef = useRef<HTMLInputElement>(null)
   const [zavreno, setZavreno] = useState(false)
   const prvni = useRef<HTMLSelectElement>(null)
   const poznamkaRef = useRef<HTMLInputElement>(null)
@@ -890,63 +902,90 @@ export default function FormularSmeny({
         se v něm škrtá, takže odmítnutí u vydané znamenalo, že nešlo
         smazat prakticky nic.
 
-        „…i v jiné dny“ (14. 10. 2026) je zaškrtávátko BEZ `name` — do
-        formuláře jedné směny nic nepřidá. Zapnuté ho nahradí výběrem dnů
-        s náhledem (ruseni-vice-dni.tsx), který má vlastní formulář a akci.
+        „…i v jiné dny“ (14. 10. 2026) je zaškrtávátko BEZ `name` a stojí
+        MIMO formulář jedné směny — Enter na zaměřeném zaškrtávátku by
+        jinak formulář rovnou odeslal (implicitní odeslání) a směna by
+        byla pryč bez náhledu. Kreslí se jednou pro obě podoby (jedna
+        směna / víc dnů) na stejném místě, takže při přepnutí zůstane
+        tentýž prvek i s fokusem. Zapnuté nahradí formulář jedné směny
+        výběrem dnů s náhledem (ruseni-vice-dni.tsx), který má vlastní
+        formulář a akci. Během odesílání je zamčené (výsledek by se
+        ztratil), po výsledku se schová.
       */}
       {!hotovo && smena?.id && !mobil ? (
         <div style={rusiViceDni ? undefined : mazaniPruh}>
-          {rusiViceDni ? (
-            <RuseniViceDni
-              rozsah={rozsah}
-              smena={smena}
-              onZpet={() => setRuseniViceDni(false)}
-              onOdeslano={onPodrzet}
-              onHotovo={zavrit}
-            />
-          ) : ptaSeNaSmazani ? (
-            <form action={akceSmazat} style={{ display: 'grid', gap: '8px' }}>
-              <input type="hidden" name="rozsah" value={rozsah} />
-              <input type="hidden" name="smena" value={smena.id} />
-              <p style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
-                <strong>
-                  {jeVydana ? 'Zrušit tuhle směnu?' : 'Smazat tuhle směnu?'}
-                </strong>
-              </p>
+          {ptaSeNaSmazani ? (
+            <div style={{ display: 'grid', gap: '8px' }}>
+              {rusiViceDni ? null : (
+                <p style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
+                  <strong>
+                    {jeVydana ? 'Zrušit tuhle směnu?' : 'Smazat tuhle směnu?'}
+                  </strong>
+                </p>
+              )}
               {/*
                 U vydané se říká, KDY to lidi uvidí. Bez toho by to
                 vypadalo, že se nic nestalo — v jejich rozpisu směna
                 do vydání zůstane.
               */}
-              {jeVydana ? (
+              {!rusiViceDni && jeVydana ? (
                 <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
                   Zůstane vidět jako zrušená a lidem zmizí, až rozpis
                   vydáte.
                 </p>
               ) : null}
-              <label className="ds-sm-rv-volba">
-                <input type="checkbox" checked={false} onChange={() => setRuseniViceDni(true)} />
-                {jeVydana ? 'Zrušit i v jiné dny' : 'Smazat i v jiné dny'}
-              </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button type="submit" className="ft-tl" disabled={cekaSmazani}>
-                  {cekaSmazani
-                    ? jeVydana
-                      ? 'Ruším…'
-                      : 'Mažu…'
-                    : jeVydana
-                      ? 'Zrušit'
-                      : 'Smazat'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPtaSeNaSmazani(false)}
-                  className="ft-tl ft-tl-vedlejsi"
-                >
-                  Zpět
-                </button>
-              </div>
-            </form>
+              {stavRuseni.stav === 'hotovo' ? null : (
+                <label className="ds-sm-rv-volba">
+                  <input
+                    ref={volbaRef}
+                    type="checkbox"
+                    checked={rusiViceDni}
+                    disabled={cekaRuseni}
+                    onChange={(e) => setRuseniViceDni(e.target.checked)}
+                  />
+                  {rusiViceDni ? 'Zrušit / smazat i v jiné dny' : jeVydana ? 'Zrušit i v jiné dny' : 'Smazat i v jiné dny'}
+                </label>
+              )}
+              {rusiViceDni ? (
+                <RuseniViceDni
+                  rozsah={rozsah}
+                  smena={smena}
+                  stav={stavRuseni}
+                  akce={akceRuseni}
+                  ceka={cekaRuseni}
+                  onZpet={() => {
+                    setRuseniViceDni(false)
+                    // „Zpět“ zmizí s výběrem dnů — fokus na zaškrtávátko, ne na <body>.
+                    volbaRef.current?.focus()
+                  }}
+                  onOdeslano={onPodrzet}
+                  onHotovo={zavrit}
+                />
+              ) : (
+                <form action={akceSmazat} style={{ display: 'contents' }}>
+                  <input type="hidden" name="rozsah" value={rozsah} />
+                  <input type="hidden" name="smena" value={smena.id} />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button type="submit" className="ft-tl" disabled={cekaSmazani}>
+                      {cekaSmazani
+                        ? jeVydana
+                          ? 'Ruším…'
+                          : 'Mažu…'
+                        : jeVydana
+                          ? 'Zrušit'
+                          : 'Smazat'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPtaSeNaSmazani(false)}
+                      className="ft-tl ft-tl-vedlejsi"
+                    >
+                      Zpět
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           ) : (
             <div className="ds-smd-form-druhotne">
               {onDuplikovat ? (
@@ -966,7 +1005,12 @@ export default function FormularSmeny({
             </div>
           )}
 
-          {stavSmazani.stav === 'chyba' ? (
+          {/*
+            Chyba rušení JEDNÉ směny patří k jejímu formuláři. Pod výběrem
+            dnů, náhledem nebo výsledkem rušení ve víc dnech by vypadala
+            jako chyba hromadného rušení.
+          */}
+          {!rusiViceDni && stavSmazani.stav === 'chyba' ? (
             <p className="hlaska-chyba" style={{ marginTop: '8px' }}>
               {stavSmazani.text}
             </p>

@@ -1,22 +1,26 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { denKratce } from '@/lib/rozpis-desktop'
 import {
   barvaRuseni,
+  jeZamitnuto,
+  klicVyberu,
   otiskSmeny,
+  platnyNahled,
   souhrnNahledu,
   souhrnRuseni,
   textTlacitkaRuseni,
   type DenNahledu,
+  type NacetlyNahled,
   type StavRuseni,
   type VysledekRuseni,
 } from '@/lib/ruseni-smen'
 import { pocet } from '@/lib/sklonovani'
 import { prepnoutDen, TYDNU_KROK, TYDNU_MAX, TYDNU_VYCHOZI } from '@/lib/vyber-dnu'
-import { nahledRuseni, zrusitViceDni } from './ruseni'
+import { nahledRuseni } from './ruseni'
 import VyberDnu from './vyber-dnu'
 
 /**
@@ -42,11 +46,29 @@ import VyberDnu from './vyber-dnu'
  *
  * Potvrzovací tlačítko se objeví až s náhledem, a o kus níž než tlačítko
  * náhledu — dvojklik na „Ukázat, co se zruší“ tak nemůže trefit potvrzení.
+ *
+ * CO JE U RODIČE
+ *
+ * Zaškrtávátko „…i v jiné dny“ a stav akce (`useActionState(zrusitViceDni)`)
+ * drží rodič. Zaškrtávátko se kreslí JEDNOU, mimo formulář jedné směny
+ * i mimo tuhle komponentu: Enter na něm tak nic neodešle a při přepnutí
+ * zůstane tentýž prvek i s fokusem. Stav akce u rodiče přežije přepnutí
+ * a rodič podle něj zaškrtávátko během odesílání zamkne a po výsledku
+ * schová.
+ *
+ * DOKUD AKCE BĚŽÍ (`ceka`), SE NIC NEMĚNÍ
+ *
+ * „Zpět“, mřížka dnů i „Načíst náhled znovu“ jsou zamčené. Jinak by šlo
+ * komponentu během rušení odpojit (výsledek i seznam toho, co neprošlo,
+ * by zmizel) nebo vyměnit náhled, ke kterému odpověď patří.
  */
 export default function RuseniViceDni({
   rozsah,
   smena,
   telefon = false,
+  stav,
+  akce,
+  ceka,
   onZpet,
   onOdeslano,
   onHotovo,
@@ -55,6 +77,10 @@ export default function RuseniViceDni({
   smena: { id: string; shift_date: string; employee_id: string | null }
   /** Detail na telefonu — dotyková tlačítka `.ds-sm-tl`, jinak `.ft-tl` panelu. */
   telefon?: boolean
+  /** Stav akce `zrusitViceDni` — `useActionState` u rodiče, viz hlavičku. */
+  stav: StavRuseni
+  akce: (formData: FormData) => void
+  ceka: boolean
   /** Zpátky k potvrzení jedné směny (volba se vypne). */
   onZpet: () => void
   /**
@@ -69,28 +95,19 @@ export default function RuseniViceDni({
   const den = smena.shift_date
   const [vybrane, setVybrane] = useState<string[]>([den])
   const [pocetTydnu, setPocetTydnu] = useState(TYDNU_VYCHOZI)
-  /*
-    Náhled platí jen pro výběr, ke kterému se načetl (`pro`). Kdo pak
-    přidá nebo odebere den, potvrzovací tlačítko zmizí, dokud se náhled
-    nenačte znovu — nepotvrzuje se nic, co nebylo vidět.
-  */
-  const [nahled, setNahled] = useState<{ pro: string; dny: DenNahledu[]; verze: number } | null>(null)
+  // Náhled platí jen pro výběr, ke kterému se načetl — viz `platnyNahled`.
+  const [nahled, setNahled] = useState<NacetlyNahled | null>(null)
   const [chybaNahledu, setChybaNahledu] = useState<string | null>(null)
   const [nacita, setNacita] = useState(false)
   const [odeslanaVerze, setOdeslanaVerze] = useState<number | null>(null)
-  const [stav, akce, ceka] = useActionState<StavRuseni, FormData>(zrusitViceDni, { stav: 'nic' })
 
   useEffect(() => {
     if (stav.stav === 'hotovo') router.refresh()
   }, [stav, router])
 
-  const platny = nahled && nahled.pro === vybrane.join(',') ? nahled : null
-  /*
-    Zamítnutí potvrzení (rozpis se od náhledu změnil…) patří k náhledu,
-    se kterým se odesílalo. Dokud se nenačte nový, hláška zůstává a znovu
-    potvrdit nejde — stejná data by server odmítl zase.
-  */
-  const zamitnuto = stav.stav === 'chyba' && odeslanaVerze !== null && nahled?.verze === odeslanaVerze
+  const platny = platnyNahled(nahled, vybrane)
+  // Zamítnutí patří k náhledu, se kterým se odesílalo, a jen když akce neběží — viz `jeZamitnuto`.
+  const zamitnuto = jeZamitnuto(stav, odeslanaVerze, nahled, ceka)
   // Potvrzení je nevratné — na počítači `.ft-tl-nebezpecne` (globals.css: „co nejde vzít zpět“).
   const tl = telefon
     ? { hlavni: 'ds-sm-tl ds-sm-tl-hlavni', nebezpeci: 'ds-sm-tl ds-sm-tl-nebezpeci', vedlejsi: 'ds-sm-tl', rada: 'ds-sm-potvrzeni-akce' }
@@ -103,7 +120,7 @@ export default function RuseniViceDni({
     try {
       const r = await nahledRuseni(rozsah, smena.id, pro)
       if (r.stav === 'ok') {
-        setNahled({ pro: pro.join(','), dny: r.dny, verze: Date.now() })
+        setNahled({ pro: klicVyberu(pro), dny: r.dny, verze: Date.now() })
       } else {
         setNahled(null)
         setChybaNahledu(r.text)
@@ -122,14 +139,10 @@ export default function RuseniViceDni({
 
   return (
     <div className="ds-sm-rv">
-      <label className="ds-sm-rv-volba">
-        <input type="checkbox" checked onChange={onZpet} />
-        Zrušit / smazat i v jiné dny
-      </label>
       <p className="ds-sm-rv-vysvetleni">
         {smena.employee_id
           ? 'V každém dalším vybraném dni se zruší všechny směny téhož člověka na této pobočce.'
-          : 'V každém dalším vybraném dni se zruší neobsazené směny na této pobočce se stejnou pozicí a stejným časem.'}{' '}
+          : 'V každém dalším vybraném dni se zruší všechny neobsazené směny na této pobočce se stejnou pozicí a stejným časem — i když jich je v tom dni víc.'}{' '}
         Vydané se zruší, nevydané smažou — co přesně, ukáže náhled před potvrzením.
       </p>
 
@@ -138,6 +151,7 @@ export default function RuseniViceDni({
         vybrane={vybrane}
         pocetTydnu={pocetTydnu}
         zamcene={[den]}
+        zakazano={ceka}
         popisek="Dny, ve kterých se směny zruší nebo smažou"
         onPrepnout={(d) => setVybrane((v) => (d === den ? v : prepnoutDen(v, d)))}
         onVicTydnu={
@@ -150,10 +164,14 @@ export default function RuseniViceDni({
           : `Vybráno ${pocet(vybrane.length, 'den', 'dny', 'dní')}: ${vybrane.map(denKratce).join(', ')}`}
       </p>
 
-      <button type="button" className={tl.vedlejsi} onClick={ukazat} disabled={nacita || vybrane.length < 2}>
+      <button type="button" className={tl.vedlejsi} onClick={ukazat} disabled={nacita || ceka || vybrane.length < 2}>
         {nacita ? 'Načítám náhled…' : platny ? 'Načíst náhled znovu' : 'Ukázat, co se zruší'}
       </button>
-      {chybaNahledu ? <p className="hlaska-chyba">{chybaNahledu}</p> : null}
+      {chybaNahledu ? (
+        <p className="hlaska-chyba" role="alert">
+          {chybaNahledu}
+        </p>
+      ) : null}
 
       {platny ? (
         <>
@@ -162,7 +180,11 @@ export default function RuseniViceDni({
         </>
       ) : null}
 
-      {zamitnuto ? <p className="hlaska-chyba">{stav.text}</p> : null}
+      {zamitnuto && stav.stav === 'chyba' ? (
+        <p className="hlaska-chyba" role="alert">
+          {stav.text}
+        </p>
+      ) : null}
 
       {/*
         Vlastní formulář — nevnořuje se do formuláře jedné směny, stojí
@@ -192,7 +214,7 @@ export default function RuseniViceDni({
               {ceka ? 'Provádím…' : textTlacitkaRuseni(platny.dny)}
             </button>
           ) : null}
-          <button type="button" className={tl.vedlejsi} onClick={onZpet}>
+          <button type="button" className={tl.vedlejsi} onClick={onZpet} disabled={ceka}>
             Zpět
           </button>
         </div>
@@ -203,7 +225,7 @@ export default function RuseniViceDni({
 
 /**
  * Náhled po dnech — jen kreslí, data dodá `nahledRuseni`. Den bez směny
- * se ukáže výslovně („nic k zrušení“), ať nikdo nehádá, jestli se na něj
+ * se ukáže výslovně („nic ke zrušení“), ať nikdo nehádá, jestli se na něj
  * zapomnělo.
  */
 export function NahledRuseni({ dny }: { dny: DenNahledu[] }) {
@@ -215,7 +237,7 @@ export function NahledRuseni({ dny }: { dny: DenNahledu[] }) {
           <li key={d.den} className="ds-sm-rv-den" data-prazdny={d.smeny.length === 0 ? '' : undefined}>
             <span className="ds-sm-rv-datum">{denKratce(d.den)}</span>
             {d.smeny.length === 0 ? (
-              <span className="ds-sm-rv-nic">nic k zrušení</span>
+              <span className="ds-sm-rv-nic">nic ke zrušení</span>
             ) : (
               <ul>
                 {d.smeny.map((s) => (
@@ -249,6 +271,10 @@ export function NahledRuseni({ dny }: { dny: DenNahledu[] }) {
 /**
  * Výsledek po zrušení: souhrn počtů a pak každá směna, která neprošla —
  * s hláškou z databáze. Neúspěch musí být vidět, ne jen v počtu.
+ *
+ * Výsledek nahradí odeslací tlačítko, na kterém byl fokus — ten by spadl
+ * na `<body>` a odečítač by živou oblast, která se připojí naráz i s
+ * obsahem, často neohlásil. Fokus se proto přenese sem (`tabIndex={-1}`).
  */
 export function PrehledVysledku({
   smeny,
@@ -261,9 +287,13 @@ export function PrehledVysledku({
   tlacitko: string
   onHotovo: () => void
 }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
   const chyby = smeny.filter((v) => v.chyba !== null)
   return (
-    <div className="ds-sm-rv" role="status">
+    <div className="ds-sm-rv" role="status" tabIndex={-1} ref={ref}>
       <p className="ds-sm-rv-souhrn" style={{ color: barvaRuseni(smeny) }}>
         {souhrnRuseni(smeny, dnuBezSmen)}.
       </p>
