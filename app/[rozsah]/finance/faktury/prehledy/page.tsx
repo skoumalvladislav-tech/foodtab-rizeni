@@ -164,7 +164,7 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
           </div>
         </div>
 
-        <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
+        <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))' }}>
           <section style={{ ...karta, display: 'grid', gap: '10px' }}>
             <h2 style={{ margin: 0, fontSize: '15px' }}>Měsíční náklady (podle DUZP)</h2>
             {mesice.length === 0 ? (

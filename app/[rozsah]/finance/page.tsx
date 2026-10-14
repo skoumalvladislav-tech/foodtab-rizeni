@@ -10,6 +10,8 @@ import { nactiFinanceKpi, type FinanceKpi } from '@/lib/finance-kpi'
 import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
+import { popisCastecnehoObdobi, srovnatelnaObdobi } from '@/lib/finance-obdobi'
+import { denVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 import { pokladnaPatriPobocce } from '@/lib/pokladna-trzby'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
@@ -58,17 +60,6 @@ const karta = {
   borderRadius: 'var(--radius-lg)',
   padding: '16px',
 } as const
-
-function tentoMesic(): string {
-  return new Date().toISOString().slice(0, 7)
-}
-
-function hraniceMesice(mesic: string): { od: string; doData: string } {
-  const [y, m] = mesic.split('-').map(Number)
-  const od = `${mesic}-01`
-  const posledni = new Date(Date.UTC(y, m, 0)).getUTCDate()
-  return { od, doData: `${mesic}-${String(posledni).padStart(2, '0')}` }
-}
 
 function sousedniMesic(mesic: string, posun: 1 | -1): string {
   const [y, m] = mesic.split('-').map(Number)
@@ -164,10 +155,19 @@ export default async function FinancePrehled({
   // Odkaz na obrazovku celé firmy jen tomu, kdo na „Celou firmu" smí (jako JenProFirmu).
   const smiNaFirmu = pristup.ctx.membership.scope === 'tenant'
 
-  const mesic = mesicParam && /^\d{4}-\d{2}$/.test(mesicParam) ? mesicParam : tentoMesic()
-  const { od, doData } = hraniceMesice(mesic)
+  // Dnešek v pásmu appky, ne UTC — kolem půlnoci by jinak výchozí měsíc i
+  // „rozběhnutý měsíc" ujely o den.
+  const dnes = denVPasmu(new Date(), ZONA_VYCHOZI)
+  const mesic = mesicParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(mesicParam) ? mesicParam : dnes.slice(0, 7)
   const mesicPredchozi = sousedniMesic(mesic, -1)
-  const { od: odPredchozi, doData: doDataPredchozi } = hraniceMesice(mesicPredchozi)
+  // Rozběhnutý měsíc se srovnává se STEJNÝMI dny minulého měsíce (1.–14. 10.
+  // proti 1.–14. 9.), uzavřený s celým minulým — lib/finance-obdobi.ts.
+  // Do 14. 10. 2026 se půlka měsíce srovnávala s celým minulým a tržby
+  // vždycky „padaly" (v produkci −47 % u Bernard Baru, −56,5 % za firmu).
+  const srovnani = srovnatelnaObdobi(mesic, dnes)
+  const { od, doData } = srovnani.obdobi
+  const { od: odPredchozi, doData: doDataPredchozi } = srovnani.predchozi
+  const srovnaniS = srovnani.castecne ? popisCastecnehoObdobi(srovnani.predchozi) : nazevMesice(mesicPredchozi)
 
   const supabase = await getServerSupabase()
   const { data: branchesData } = await supabase
@@ -179,7 +179,7 @@ export default async function FinancePrehled({
   const branches = (branchesData ?? []) as { id: string; name: string }[]
 
   const [kpi, bodyGrafu, pozornost, integraceRes] = await Promise.all([
-    nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }, pobocka).catch((): FinanceKpi | null => null),
+    nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }, pobocka, srovnani.castecne).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni', pobocka).catch(() => []),
     nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka).catch((): PolozkaPozornosti[] => []),
     supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav, branch_id, externi_ucet').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
@@ -224,27 +224,27 @@ export default async function FinancePrehled({
               ikona="mince" titulek="Tržby" hodnota={trzbyMajiCislo(kpi, naPobocce) ? koruny(kpi.trzbyHaleru) : '–'}
               zdroj={zdrojTrzeb(kpi, naPobocce)}
               trend={trzbyMajiCislo(kpi, naPobocce) ? trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true) : null}
-              srovnaniS={nazevMesice(mesicPredchozi)}
+              srovnaniS={srovnaniS}
             />
             {/* Pobočka bez vlastního účtu cashflow NEMÁ — „0 Kč" by tvrdilo, že se nic nepohnulo. */}
             <FinanceKpiKarta
               ikona="blesk" titulek="Cashflow" hodnota={kpi.pobockaBezUctu ? '–' : koruny(kpi.cashflowHaleru)}
               zdroj={kpi.pobockaBezUctu ? 'pobočka nemá vlastní platební účet' : naPobocce ? 'příjmy − výdaje z účtů pobočky' : 'příjmy − výdaje z plateb'}
               trend={kpi.pobockaBezUctu ? null : trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
-              srovnaniS={nazevMesice(mesicPredchozi)}
+              srovnaniS={srovnaniS}
             />
             <FinanceKpiKarta
               ikona="vidlicka" titulek="Foodcost" hodnota={procentoNeboPomlcka(kpi.foodcostProcento)}
               // Na pobočce „–" s důvodem (za celou firmu beze změny).
               zdroj={naPobocce && kpi.foodcostProcento === null ? 'bez prodejů jídel se spárovanou recepturou' : undefined}
               trend={kpi.foodcostProcento !== null ? trend(kpi.foodcostProcento, kpi.foodcostProcentoPredchozi, 'p. b.', false) : null}
-              srovnaniS={nazevMesice(mesicPredchozi)}
+              srovnaniS={srovnaniS}
             />
             <FinanceKpiKarta
               ikona="napoj" titulek="Beverage cost" hodnota={procentoNeboPomlcka(kpi.beverageCostProcento)}
               zdroj={naPobocce && kpi.beverageCostProcento === null ? 'bez prodejů nápojů se spárovanou recepturou' : undefined}
               trend={kpi.beverageCostProcento !== null ? trend(kpi.beverageCostProcento, kpi.beverageCostProcentoPredchozi, 'p. b.', false) : null}
-              srovnaniS={nazevMesice(mesicPredchozi)}
+              srovnaniS={srovnaniS}
             />
             {smiVidetMzdy ? (
               <FinanceKpiKarta
@@ -261,7 +261,7 @@ export default async function FinancePrehled({
                         : 'tržby pobočky za tento měsíc chybí nebo nejsou úplné'
                 }
                 trend={kpi.nakladyPraceProcento !== null ? trend(kpi.nakladyPraceProcento, kpi.nakladyPraceProcentoPredchozi, 'p. b.', false) : null}
-                srovnaniS={nazevMesice(mesicPredchozi)}
+                srovnaniS={srovnaniS}
               />
             ) : null}
           </div>
@@ -269,7 +269,7 @@ export default async function FinancePrehled({
           <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Přehled se nepodařilo načíst.</p>
         )}
 
-        <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))' }}>
+        <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))' }}>
           <div style={{ ...karta, minWidth: 0 }}>
             <h2 style={{ margin: '0 0 12px', fontSize: '15px' }}>Vývoj zůstatku</h2>
             <LineChart
