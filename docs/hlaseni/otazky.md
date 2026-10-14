@@ -1213,7 +1213,7 @@ v `pdf_url`), nebo se to vyřeší přestěhováním (otázka 45).
 
 ---
 
-## 47. Finance po pobočkách — kdo je vidí a co v nich je
+## 48. Finance po pobočkách — kdo je vidí a co v nich je
 
 **Vzniklo:** 13. 10. 2026. Šéfík: „mám otevřený Bernard Bar, budou
 vidět finance, které se týkají jen Bernard Baru." Na každý bod jsem
