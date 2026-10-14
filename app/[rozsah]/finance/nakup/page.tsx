@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { canSee, isModuleActive } from '@/lib/authz'
+import { canSee, isModuleActive, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { POZNAMKA_OBJEDNAVKY_FIRMY } from '@/lib/finance-evidence-pobocka'
 import Sdeleni from '@/app/sdeleni'
@@ -173,7 +173,7 @@ export default async function FinanceNakup({
             {dodavatele.length === 0 ? (
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
                 Nejdřív založte dodavatele v{' '}
-                <Link href={`/${rozsah}/finance/kontakty`} className="ft-tl">Kontaktech</Link> (zaškrtněte „Dodavatel“).
+                <Link href={`/${pobocka ? TENANT_SCOPE_SEGMENT : rozsah}/finance/kontakty`} className="ft-tl">Kontaktech{pobocka ? ' (za celou firmu)' : ''}</Link> (zaškrtněte „Dodavatel“).
               </p>
             ) : (
               <>

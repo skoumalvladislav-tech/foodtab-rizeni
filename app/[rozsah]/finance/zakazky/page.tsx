@@ -5,7 +5,7 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { canSee } from '@/lib/authz'
+import { canSee, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { POZNAMKA_ZAKAZKY_FIRMY } from '@/lib/finance-evidence-pobocka'
@@ -171,7 +171,7 @@ export default async function FinanceZakazky({
             {odberatele.length === 0 ? (
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
                 Nejdřív založte odběratele v{' '}
-                <Link href={`/${rozsah}/finance/kontakty`} className="ft-tl">Kontaktech</Link> (zaškrtněte „Odběratel“).
+                <Link href={`/${pobocka ? TENANT_SCOPE_SEGMENT : rozsah}/finance/kontakty`} className="ft-tl">Kontaktech{pobocka ? ' (za celou firmu)' : ''}</Link> (zaškrtněte „Odběratel“).
               </p>
             ) : (
               <>

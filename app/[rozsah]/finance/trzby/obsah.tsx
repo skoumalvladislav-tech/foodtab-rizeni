@@ -102,7 +102,10 @@ export default function Obsah({
         <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
           {maPokladnu
             ? 'Pokladna za tohle období žádné prodeje neposlala — buď bylo zavřeno, nebo je synchronizace ještě nestáhla.'
-            : 'Zatím není připojená žádná pokladna.'}{' '}
+            : vybranaPobocka !== null
+              // Na pobočce `maPokladnu` = pokladna TÉ pobočky; pokladna firmy může existovat, jen nemá přiřazenou provozovnu.
+              ? 'K téhle pobočce zatím není připojená ani přiřazená žádná pokladna — provozovnu přiřadíte za celou firmu v Integrace → Pokladní systémy.'
+              : 'Zatím není připojená žádná pokladna.'}{' '}
           <Link href={`${zakladIntegraci}/pokladna`} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>Pokladní systémy →</Link>
         </p>
       </div>

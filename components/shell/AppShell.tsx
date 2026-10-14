@@ -120,6 +120,13 @@ export type AppShellProps = {
   odznaky?: Record<string, number>;
   moduly: ModulProp[];
   polozky: PolozkaProp[];
+  /**
+   * Na pobočce i obrazovky jen pro firmu (`jenFirma`) — JEN k poznání,
+   * na které obrazovce člověk je, nekreslí se. Bez nich by na Kontaktech
+   * otevřených přímou adresou svítil Přehled a přepnutí na Celou firmu
+   * vedlo tam. Na firmě `undefined` (`polozky` už je obsahují).
+   */
+  polozkyKPoznani?: PolozkaProp[];
   nastaveni: PolozkaProp[];
   cilNastaveni: string | null;
   /**
@@ -161,6 +168,7 @@ export default function AppShell({
   odznaky,
   moduly,
   polozky,
+  polozkyKPoznani,
   nastaveni,
   cilNastaveni,
   nazvyModulu,
@@ -170,7 +178,7 @@ export default function AppShell({
   const predpona = `/${rozsah}/`;
   const segment = cesta.startsWith(predpona) ? cesta.slice(predpona.length) : null;
 
-  const vsechny = [...polozky, ...nastaveni];
+  const vsechny = [...(polozkyKPoznani ?? polozky), ...nastaveni];
   // Položka se pozná podle vlastního segmentu, nebo podle libovolného
   // z `dalsiSegmenty` (sloučená položka rozkročená přes víc adres).
   // Vyhrává nejdelší shoda — na finance/cashflow je to Cashflow, ne Přehled.

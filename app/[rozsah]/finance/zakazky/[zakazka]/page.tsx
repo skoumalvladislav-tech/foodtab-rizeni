@@ -119,6 +119,8 @@ export default async function FinanceZakazkaDetail({
   // Uhrazeno = všechny platby propojené s TOUTO zakázkou, i když přišly
   // na firemní účet — je to údaj zakázky pobočky (kolik zákazník za ni
   // zaplatil), ne součet celé firmy. Bez nich by „Zbývá uhradit" lhalo.
+  // ROZHODNOUT: na pobočce počítat jen platby na účty pobočky? (Pak by
+  // zakázka zaplacená na firemní účet vypadala nezaplaceně.) Zatím vše.
   const uhrazenoHaleru = Number(uhrazenoRes.data ?? 0)
   const ucty = (uctyRes.data ?? []) as PlatebniUcet[]
   const zbyvaHaleru = zakazkaData.cena_celkem_haleru - uhrazenoHaleru

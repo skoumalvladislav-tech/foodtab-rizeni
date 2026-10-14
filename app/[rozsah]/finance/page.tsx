@@ -235,11 +235,14 @@ export default async function FinancePrehled({
             />
             <FinanceKpiKarta
               ikona="vidlicka" titulek="Foodcost" hodnota={procentoNeboPomlcka(kpi.foodcostProcento)}
+              // Na pobočce „–" s důvodem (za celou firmu beze změny).
+              zdroj={naPobocce && kpi.foodcostProcento === null ? 'bez prodejů jídel se spárovanou recepturou' : undefined}
               trend={kpi.foodcostProcento !== null ? trend(kpi.foodcostProcento, kpi.foodcostProcentoPredchozi, 'p. b.', false) : null}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />
             <FinanceKpiKarta
               ikona="napoj" titulek="Beverage cost" hodnota={procentoNeboPomlcka(kpi.beverageCostProcento)}
+              zdroj={naPobocce && kpi.beverageCostProcento === null ? 'bez prodejů nápojů se spárovanou recepturou' : undefined}
               trend={kpi.beverageCostProcento !== null ? trend(kpi.beverageCostProcento, kpi.beverageCostProcentoPredchozi, 'p. b.', false) : null}
               srovnaniS={nazevMesice(mesicPredchozi)}
             />
@@ -247,7 +250,16 @@ export default async function FinancePrehled({
               <FinanceKpiKarta
                 ikona="lide" titulek="Náklady práce" hodnota={procentoNeboPomlcka(kpi.nakladyPraceProcento)}
                 // Na pobočce mzdy lidí s DOMOVSKOU pobočkou (vydelky_prehled) — viz ROZHODNOUT v lib/finance-kpi.ts.
-                zdroj={naPobocce ? 'mzdy lidí s domovskou pobočkou tady' : undefined}
+                // „–" musí říct proč, jinak by popisek vedle pomlčky vypadal jako výše mezd.
+                zdroj={
+                  !naPobocce
+                    ? undefined
+                    : kpi.nakladyPraceProcento !== null
+                      ? `mzdy lidí s domovskou pobočkou „${nazevPobocky}“`
+                      : !trzbyMajiCislo(kpi, naPobocce)
+                        ? 'bez tržeb pobočky to nejde spočítat'
+                        : 'tržby pobočky za tento měsíc chybí nebo nejsou úplné'
+                }
                 trend={kpi.nakladyPraceProcento !== null ? trend(kpi.nakladyPraceProcento, kpi.nakladyPraceProcentoPredchozi, 'p. b.', false) : null}
                 srovnaniS={nazevMesice(mesicPredchozi)}
               />

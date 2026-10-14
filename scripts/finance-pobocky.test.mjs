@@ -243,8 +243,15 @@ console.log('\n== Rám (layout.tsx) a holá adresa (page.tsx) skládají nabídk
 {
   const layout = zdroj('app/[rozsah]/layout.tsx')
   ok('layout: naFirme podle úrovně rozsahu', /const naFirme = scope\.level === "tenant";/.test(layout))
-  ok('layout: polozkyModulu dostává naFirme', /polozkyModulu\(ctx, m\.key, naFirme\)/.test(layout))
+  ok('layout: kreslená nabídka = polozkyModulu pro úroveň rozsahu',
+    /polozkyModulu\(ctx, m\.key, naFirmeNabidka\)/.test(layout) && /const polozky = naProp\(naFirme\);/.test(layout))
   ok('layout: jiné volání polozkyModulu tam není', (layout.match(/polozkyModulu\(/g) ?? []).length === 1)
+  // Na pobočce i obrazovky jen pro firmu — JEN k poznání, kde člověk je (nekreslí se).
+  ok('layout: k poznání obrazovky na pobočce celá nabídka firmy, na firmě nic navíc',
+    /const polozkyKPoznani = naFirme \? undefined : naProp\(true\);/.test(layout) && /polozkyKPoznani=\{polozkyKPoznani\}/.test(layout))
+  const shell = zdroj('components/shell/AppShell.tsx')
+  ok('AppShell: obrazovku pozná i podle položek jen pro firmu, kreslí jen `polozky`',
+    /const vsechny = \[\.\.\.\(polozkyKPoznani \?\? polozky\), \.\.\.nastaveni\];/.test(shell) && /const zde = polozkaNaCeste\(segment, vsechny\);/.test(shell))
   const stranka = zdroj('app/[rozsah]/page.tsx')
   ok('page: naFirme podle úrovně rozsahu', /const naFirme = scope\.level === "tenant";/.test(stranka))
   ok('page: viditelnaNabidka i vychoziObrazovka dostávají naFirme',

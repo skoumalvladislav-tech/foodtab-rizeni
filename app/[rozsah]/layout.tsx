@@ -123,19 +123,25 @@ export default async function RozsahLayout({
   // Filtr je v nabidka.ts (`polozkyModulu`), sdílený s holou adresou
   // rozsahu (page.tsx) a hlídaný scripts/nabidka.test.mjs.
   const naFirme = scope.level === "tenant";
-  const polozky: PolozkaProp[] = ctx.modules.flatMap((m) =>
-    polozkyModulu(ctx, m.key, naFirme).map((p) => ({
-      segment: p.segment,
-      nazev: p.nazev,
-      kratky: p.kratky,
-      ikona: p.ikona,
-      hotovo: p.hotovo,
-      modul: p.modul,
-      jenPobocka: p.jenPobocka,
-      jenFirma: p.jenFirma,
-      dalsiSegmenty: p.dalsiSegmenty,
-    })),
-  );
+  const naProp = (naFirmeNabidka: boolean): PolozkaProp[] =>
+    ctx.modules.flatMap((m) =>
+      polozkyModulu(ctx, m.key, naFirmeNabidka).map((p) => ({
+        segment: p.segment,
+        nazev: p.nazev,
+        kratky: p.kratky,
+        ikona: p.ikona,
+        hotovo: p.hotovo,
+        modul: p.modul,
+        jenPobocka: p.jenPobocka,
+        jenFirma: p.jenFirma,
+        dalsiSegmenty: p.dalsiSegmenty,
+      })),
+    );
+  const polozky = naProp(naFirme);
+  // Jen k poznání, NA KTERÉ obrazovce člověk je (AppShell `zde`): na pobočce
+  // i ty jen pro firmu — otevřené přímou adresou jinak svítil Přehled
+  // a přepnutí na Celou firmu vedlo tam místo zpět na Kontakty.
+  const polozkyKPoznani = naFirme ? undefined : naProp(true);
 
   /*
     ŘADA MODULŮ JEN VEDENÍ.
@@ -336,6 +342,7 @@ export default async function RozsahLayout({
       posledniUpozorneni={posledniUpozorneni}
       moduly={moduly}
       polozky={polozky}
+      polozkyKPoznani={polozkyKPoznani}
       nastaveni={nastaveni}
       cilNastaveni={cilNastaveni}
       nazvyModulu={NAZVY_MODULU}

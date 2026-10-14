@@ -400,7 +400,7 @@ export default async function FinancePlatby({
 
         {pobocka && platebniUcty.length === 0 ? (
           <div role="status" style={{ ...karta, display: 'grid', gap: '6px' }}>
-            <h2 style={{ margin: 0, fontSize: '15px' }}>Pobočka zatím nemá platební účet</h2>
+            <h2 style={{ margin: 0, fontSize: '15px' }}>Pobočka zatím nemá aktivní platební účet</h2>
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
               Platby patří pobočce přes platební účet a {nazevPobocky} zatím žádný aktivní nemá. Účty založené
               dosud jsou firemní (bez pobočky) — jejich platby jsou v pohledu Celá firma, ne tady, takže prázdný

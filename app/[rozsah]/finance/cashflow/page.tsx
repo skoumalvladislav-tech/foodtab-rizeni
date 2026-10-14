@@ -119,7 +119,7 @@ export default async function FinanceCashflow({
 
         {bezUctu ? (
           <div style={karta}>
-            <h2 style={{ margin: '0 0 6px', fontSize: '15px' }}>{nazevPobocky} zatím nemá vlastní platební účet</h2>
+            <h2 style={{ margin: '0 0 6px', fontSize: '15px' }}>{nazevPobocky} zatím nemá vlastní aktivní platební účet</h2>
             <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
               Bez aktivního účtu pobočky appka nezná její zůstatek, takže výhled by začínal vymyšlenou nulou.
               Platební účty jsou zatím vedené za celou firmu — výhled společných účtů je v pohledu Celá firma.
@@ -137,7 +137,7 @@ export default async function FinanceCashflow({
             {naPobocce
               ? chybaNacteni
                 ? 'Výhled se nepodařilo načíst. Zkuste stránku obnovit.'
-                : 'Pobočka je vypnutá — výhled se počítá jen aktivním pobočkám.'
+                : 'Pobočka je vypnutá — výhled se počítá jen pro aktivní pobočky.'
               : 'Zatím žádné platební účty, nebo se výhled nepodařilo načíst.'}
           </p>
         ) : (
