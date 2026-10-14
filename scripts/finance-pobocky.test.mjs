@@ -294,7 +294,8 @@ function predci(soubor) {
  * parametrů.
  */
 function odmitaPobockuHned(s) {
-  const m = s.match(/export default async function \w+\([\s\S]*?\n {2}const \{ rozsah \} = await params\s*\n\s*if \(!jeRozsahFirmy\(rozsah\)\) return null\n/)
+  // Mezi parametry a odmítnutím smí stát jen řádkové komentáře (Faktury tam mají důvod).
+  const m = s.match(/export default async function \w+\([\s\S]*?\n {2}const \{ rozsah \} = await params\s*\n(?:\s*\/\/[^\n]*\n)*\s*if \(!jeRozsahFirmy\(rozsah\)\) return null\n/)
   return Boolean(m) && (m[0].match(/await /g) ?? []).length === 1
 }
 
@@ -316,10 +317,17 @@ for (const soubor of stranky) {
       odmitaPobockuHned(s))
   } else if (soubor.startsWith(`${KOREN_FINANCI}/faktury/`)) {
     tvary.faktury++
-    ok(`${kratce}: pod bránou Faktur`, fakturyBrana)
+    // Brána Faktur je layout — stránku nezastaví (viz výš), proto ještě vlastní odmítnutí.
+    ok(`${kratce}: pod bránou Faktur a pobočku odmítá prvním řádkem`, fakturyBrana && odmitaPobockuHned(s))
   } else {
     tvary.pobockova++
     ok(`${kratce}: bere pobočku z rozsahu (pobockaFinanci)`, /pobockaFinanci\(/.test(s))
+    // Druhá podmínka pobočky (finance.read za celou firmu) jen přes zkusPristupFinanci —
+    // layout stránku nezastaví. Nákup má právo purchasing.* (modul Objednávky), ne finance.
+    if (!soubor.startsWith(`${KOREN_FINANCI}/nakup/`)) {
+      ok(`${kratce}: vstup přes zkusPristupFinanci, ne holý zkusPristup`,
+        /zkusPristupFinanci\(tenantId, 'finance\.(read|manage)', rozsah\)/.test(s) && !/\bzkusPristup\(tenantId, 'finance\./.test(s))
+    }
   }
 }
 ok(`všechny tři tvary se opravdu vyskytly (pobočkové ${tvary.pobockova}, jen pro firmu ${tvary.jenProFirmu}, Faktury ${tvary.faktury})`,

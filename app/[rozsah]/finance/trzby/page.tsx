@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { hasAccess, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
+import { getCurrentTenantId } from '@/lib/firma'
+import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
@@ -111,7 +112,7 @@ export default async function FinanceTrzby({
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
+  const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Tržby vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
@@ -119,16 +120,12 @@ export default async function FinanceTrzby({
 
   // `null` = celá firma (s přepínačem provozoven); jinak pobočka z adresy.
   const pobockaRozsahu = pobockaFinanci(pristup.scope)
-  // Banku (příjmy na účty) ukazuje stránka jen tomu, kdo má `finance.read`
-  // ZA CELOU FIRMU: RLS transakcí (`can_read_scoped(…, null)`) rozsah
-  // členství nehlídá a `pokladna_prehled_trzeb` (SECURITY DEFINER) vrací
-  // bankovní řádky každému s finance.read — rozhoduje proto tahle stránka.
-  // Na firemním rozsahu to `zkusPristup` už ověřil; na pobočce se to ověří
-  // výslovně (druhá linie k finance/layout.tsx, který sem jinak nepustí).
-  const bankaVidi = pristup.scope.level === 'tenant' || (await hasAccess(tenantId, 'finance.read', null))
-  if (pobockaRozsahu !== null && !bankaVidi) {
-    return <Sdeleni nadpis="Finance pobočky zatím jen s přehledem celé firmy">Finance jednotlivé pobočky zatím vidí jen ten, kdo má finanční přehled za celou firmu.</Sdeleni>
-  }
+  // Banku (příjmy na účty) smí vidět jen ten, kdo má `finance.read` ZA
+  // CELOU FIRMU: RLS transakcí rozsah členství nehlídá a
+  // `pokladna_prehled_trzeb` (SECURITY DEFINER) vrací bankovní řádky
+  // každému s finance.read. Na firmě to ověřil `zkusPristup`, na pobočce
+  // `zkusPristupFinanci` (bez toho sem nepustí) — sem se tedy dostane jen on.
+  const bankaVidi = true
 
   const cleneni: Cleneni = jeCleneni(po) ? po : 'den'
   const dnes = provozniDnes()

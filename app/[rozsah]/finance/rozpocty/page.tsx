@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { getCurrentTenantId } from '@/lib/firma'
+import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
@@ -90,7 +91,7 @@ export default async function FinanceRozpocty({
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
+  const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Rozpočty vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>

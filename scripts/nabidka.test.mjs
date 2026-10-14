@@ -340,8 +340,14 @@ for (const [popis, db, rozsah, cil] of [
     (`jenFirma` — Faktury) výchozí na pobočce být nesmí, vedla by na
     hlášku „Faktury patří celé firmě". Člověk s firemním členstvím, který
     má jen faktury.read, a firma bez Provozu (Dnes tedy není): na firmě
-    Faktury, na pobočce věta. Hlídá viditelnaNabidka(ctx, naFirme)
-    i vychoziObrazovka dohromady — tak, jak je volá stránka.
+    Faktury, na pobočce věta.
+
+    Hlídá VÝSLEDEK stránky, ne jednu vrstvu: Faktury na pobočce
+    přeskočí nabídka rozsahu (`viditelnaNabidka(ctx, naFirme)`) i sama
+    `vychoziObrazovka(…, naFirme)`. Spadne, až když zmizí obě — vyndání
+    jedné ji neshodí (zkoušeno rozbitím 14. 10. 2026). Každou vrstvu
+    zvlášť hlídá scripts/finance-pobocky.test.mjs (nabídka, výchozí
+    obrazovka, volání v page.tsx).
   */
   const jenFaktury = {
     ...MAJITEL,

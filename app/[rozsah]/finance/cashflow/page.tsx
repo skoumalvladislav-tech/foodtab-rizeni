@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { hasAccess, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
+import { getCurrentTenantId } from '@/lib/firma'
+import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { nactiRollingVyhledy } from '@/lib/finance-rolling-prehled'
 import { KOEFICIENTY_SCENARU, type Scenar } from '@/lib/finance-rolling-vyhled'
@@ -60,7 +61,7 @@ export default async function FinanceCashflow({
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
+  const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Cashflow vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
@@ -70,10 +71,6 @@ export default async function FinanceCashflow({
   const pobocka = pobockaFinanci(pristup.scope)
   const naPobocce = pobocka !== null
   const nazevPobocky = pristup.scope.branchName ?? 'Pobočka'
-  // Druhá linie k finance/layout.tsx: pobočka jen s finance.read za celou firmu.
-  if (naPobocce && !(await hasAccess(tenantId, 'finance.read', null))) {
-    return <Sdeleni nadpis="Finance pobočky zatím jen s přehledem celé firmy">Finance jednotlivé pobočky zatím vidí jen ten, kdo má finanční přehled za celou firmu.</Sdeleni>
-  }
 
   const scenar: Scenar = scenarParam === 'konzervativni' || scenarParam === 'optimisticky' ? scenarParam : 'zakladni'
 

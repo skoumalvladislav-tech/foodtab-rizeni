@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { canSee, hasAccess, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
+import { getCurrentTenantId } from '@/lib/firma'
+import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { canSee, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiFinanceKpi, type FinanceKpi } from '@/lib/finance-kpi'
@@ -150,7 +151,7 @@ export default async function FinancePrehled({
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
+  const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Finance vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
@@ -159,11 +160,6 @@ export default async function FinancePrehled({
   // `null` = celá firma; jinak id pobočky z adresy — každé číslo jen za ni.
   const pobocka = pobockaFinanci(pristup.scope)
   const naPobocce = pobocka !== null
-  // Druhá linie k finance/layout.tsx (layout stránku nezastaví — Next ji
-  // může vykreslit souběžně): pobočka jen s finance.read za celou firmu.
-  if (naPobocce && !(await hasAccess(tenantId, 'finance.read', null))) {
-    return <Sdeleni nadpis="Finance pobočky zatím jen s přehledem celé firmy">Finance jednotlivé pobočky zatím vidí jen ten, kdo má finanční přehled za celou firmu.</Sdeleni>
-  }
   const nazevPobocky = pristup.scope.branchName ?? 'Pobočka'
   // Odkaz na obrazovku celé firmy jen tomu, kdo na „Celou firmu" smí (jako JenProFirmu).
   const smiNaFirmu = pristup.ctx.membership.scope === 'tenant'
@@ -296,7 +292,8 @@ export default async function FinancePrehled({
             <DataTable<PolozkaPozornosti>
               zebra
               klicRadku={(r) => r.klic}
-              prazdno="Nic nevyžaduje pozornost."
+              // Na pobočce se seznam nenačítá (faktury pobočku nemají) — neříkat „nic", když se nehledalo.
+              prazdno={naPobocce ? 'Párování plateb s fakturami a kontrola faktur jsou v pohledu Celá firma.' : 'Nic nevyžaduje pozornost.'}
               sloupce={[
                 { klic: 'popis', hlavicka: 'Popis', vykresli: (r) => r.popis },
                 { klic: 'stredisko', hlavicka: 'Středisko', vykresli: (r) => r.stredisko },
