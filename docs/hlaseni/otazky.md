@@ -1210,3 +1210,29 @@ zůstávají veřejné.
 **Když to má být jinak:** buď se někdo do projektu Faktur přihlásí a
 kbelík přepne na soukromý (pak ale přestanou fungovat staré odkazy
 v `pdf_url`), nebo se to vyřeší přestěhováním (otázka 45).
+
+---
+
+## 47. Plánovač úloh v databázi — výjimka pro pg_cron a pg_net?
+
+**Vzniklo:** 14. 10. 2026, plánovač úloh (`docs/planovac-pg-cron.md`).
+
+GitHub spouští naplánované úlohy (pokladny, banky, faktury, push,
+checklisty…) jen asi 4× denně místo plánu — 5–17 % běhů, mezery až
+12 h. Doporučené řešení je plánovač přímo v Supabase: rozšíření
+`pg_cron` (plán) a `pg_net` (zavolání adresy), tajemství ve Vaultu.
+CLAUDE.md ale říká *„Rozšíření Postgresu — nepoužívej je… zeptej se"*.
+Důvod toho pravidla (jiné schéma na Supabase a lokálně) se těchhle
+rozšíření netýká — mají vlastní pevná schémata `cron`, `net`, `vault`.
+
+**Co platí do rozhodnutí:** PR připravuje migraci, která rozšíření
+NEZAPÍNÁ a nic nenaplánuje. Úlohy dál spouští jen GitHub. Zámek proti
+dvojímu spuštění, který PR přidává do všech úloh, platí hned po db push
+i bez pg_cronu (a neškodí).
+
+**Když to má být jinak:** „ano" = postup v `docs/planovac-pg-cron.md`,
+oddíl 5 (zapnout dvě rozšíření, dvě tajemství do Vaultu, jeden příkaz).
+„ne" = migrace se může nasadit i tak (zámek se hodí), plánovač zůstane
+nezapnutý; alternativa je externí plánovač (cron-job.org utíná volání po
+30 s, pokladny a banky běží až 60 s; Upstash QStash zdarma jen do 1 000
+volání denně) — tajemství by pak leželo u třetí firmy.
