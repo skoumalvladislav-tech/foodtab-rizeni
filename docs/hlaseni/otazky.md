@@ -1210,3 +1210,32 @@ zůstávají veřejné.
 **Když to má být jinak:** buď se někdo do projektu Faktur přihlásí a
 kbelík přepne na soukromý (pak ale přestanou fungovat staré odkazy
 v `pdf_url`), nebo se to vyřeší přestěhováním (otázka 45).
+
+---
+
+## 48. Finance po pobočkách — kdo je vidí a co v nich je
+
+**Vzniklo:** 13. 10. 2026. Šéfík: „mám otevřený Bernard Bar, budou
+vidět finance, které se týkají jen Bernard Baru." Na každý bod jsem
+vybral nejopatrnější variantu. Appka podle ní teď funguje, dokud
+nerozhodnete jinak. V kódu jsou tato místa označená `ROZHODNOUT:`.
+
+1. **Kdo vidí Finance pobočky.**
+   - **Teď:** jen ten, kdo má finanční přehled za celou firmu (vy).
+   - **Proč:** vedoucí jedné pobočky s právem na finance zůstává venku. Databázová pravidla u bankovních plateb, kontaktů, párování a zůstatků totiž rozsah člověka nehlídají. Přes ně by viděl údaje celé firmy.
+   - **Když to má být jinak:** migrace pravidel stejně jako u mezd (firemní řádky jen pro celou firmu), zúžit i souhrn tržeb a vědomě přepsat test krok95 (oddíl 5).
+2. **Firemní položky bez pobočky.** Patří sem společný bankovní účet a jeho platby, firemní rozpočty, předpisy plateb, vybavení a zakázky bez pobočky.
+   - **Teď:** na pobočce se neukazují ani nerozpočítávají. Pod obrazovkou je o tom věta.
+   - **Když to má být jinak:** původní zadání (ř. 72) chce sdílené náklady rozpočítat dohledatelným pravidlem s možností ručního přepsání. Je to samostatná práce a potřebuju od vás klíč (podle tržeb z pokladen, pevným podílem, nebo ručně u každé platby).
+3. **Bankovní účty a pobočky.**
+   - **Dnes:** všechny účty vznikly jako firemní, takže banka a cashflow pobočky jsou prázdné.
+   - **Nově:** v Platbách jde u účtu nastavit pobočku. Pozor: tím se k pobočce přesunou i všechny minulé platby toho účtu.
+   - **Na vás:** který účet (KB, Fio, pokladna) patří které pobočce.
+4. **Faktury** pobočku nemají, leží v oddělené databázi.
+   - **Teď:** na pobočce jsou schované.
+   - **Když to má být jinak:** faktury přijaté do schránky pobočky (např. `bernardbar@…`) jde přiřazovat podle schránky, a to tabulkou v naší databázi, bez zásahu do databáze Faktur. Starší faktury z n8n zůstanou bez pobočky.
+5. **Mzdy pobočky.**
+   - **Teď:** počítají se podle domovské pobočky zaměstnance, ne podle toho, kde směnu odpracoval. Majitel a lidé bez pobočky nespadnou do žádné pobočky.
+   - **Když to má být jinak:** zadání (ř. 152) chce mzdy podle skutečné práce. Potřebuje novou funkci nad docházkou.
+6. **Kontakty, Integrace, import výpisů a AI analytik** jsou jen za celou firmu. Na pobočce ukazují větu a odkaz na celou firmu.
+7. **Párování plateb s fakturami** a změna stavu faktury na „Uhrazeno“ jdou jen za celou firmu.

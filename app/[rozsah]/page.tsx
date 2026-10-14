@@ -62,7 +62,10 @@ export default async function RozsahBezObrazovky({
   const scope = bezpecnyRozsah(ctx, rozsah);
   if (!scope) return null;
 
-  const cil = vychoziObrazovka(viditelnaNabidka(ctx), scope.level === "tenant");
+  // Táž nabídka, jakou rám kreslí v tomhle rozsahu (na pobočce bez
+  // obrazovek jen pro firmu) — výchozí obrazovka je vždycky jedna z nich.
+  const naFirme = scope.level === "tenant";
+  const cil = vychoziObrazovka(viditelnaNabidka(ctx, naFirme), naFirme);
 
   if (!cil) {
     return (

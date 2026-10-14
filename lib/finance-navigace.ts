@@ -28,7 +28,17 @@ type Definice = {
   nazev: string
   kratky: string
   ikona: FinanceIkona
+  /** Jen pro celou firmu — na pobočce se nekreslí (stejný příznak jako v app/[rozsah]/nabidka.ts). */
+  jenFirma?: boolean
 }
+
+/**
+ * Segment adresy celé firmy — tatáž hodnota jako `TENANT_SCOPE_SEGMENT`
+ * v lib/authz.ts. Tady zvlášť, protože navigaci kreslí klientská
+ * komponenta a authz je jen pro server; shodu hlídá
+ * scripts/finance-pobocky.test.mjs.
+ */
+export const SEGMENT_FIRMY = 'firma'
 
 /**
  * Struktura podle zadání (oddíl 11): „Přehled, Faktury, Cashflow a
@@ -46,12 +56,12 @@ const POLOZKY: readonly Definice[] = [
   { klic: 'cashflow', segment: 'cashflow', nazev: 'Cashflow', kratky: 'Cashflow', ikona: 'cashflow' },
   { klic: 'platby', segment: 'platby', nazev: 'Platby', kratky: 'Platby', ikona: 'platby' },
   { klic: 'nakup', segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', ikona: 'nakup' },
-  { klic: 'kontakty', segment: 'kontakty', nazev: 'Kontakty', kratky: 'Kontakty', ikona: 'kontakty' },
+  { klic: 'kontakty', segment: 'kontakty', nazev: 'Kontakty', kratky: 'Kontakty', ikona: 'kontakty', jenFirma: true },
   { klic: 'zakazky', segment: 'zakazky', nazev: 'Zakázky', kratky: 'Zakázky', ikona: 'zakazky' },
   { klic: 'rozpocty', segment: 'rozpocty', nazev: 'Rozpočty a controlling', kratky: 'Rozpočty', ikona: 'rozpocty' },
   { klic: 'vybaveni', segment: 'vybaveni', nazev: 'Vybavení', kratky: 'Vybavení', ikona: 'vybaveni' },
-  { klic: 'integrace', segment: 'integrace', nazev: 'Integrace', kratky: 'Integrace', ikona: 'integrace' },
-  { klic: 'faktury', segment: 'faktury', nazev: 'Faktury', kratky: 'Faktury', ikona: 'faktury' },
+  { klic: 'integrace', segment: 'integrace', nazev: 'Integrace', kratky: 'Integrace', ikona: 'integrace', jenFirma: true },
+  { klic: 'faktury', segment: 'faktury', nazev: 'Faktury', kratky: 'Faktury', ikona: 'faktury', jenFirma: true },
 ]
 
 export type PolozkaNavigace = {
@@ -62,9 +72,16 @@ export type PolozkaNavigace = {
   ikona: FinanceIkona
 }
 
+/**
+ * Položky pro rozsah z adresy. Na pobočce (Šéfík 13. 10.: „mám otevřený
+ * Bernard Bar…“) chybí obrazovky jen pro celou firmu — Kontakty
+ * (bez pobočky), Integrace (napojení firmy) a Faktury (oddělená
+ * databáze bez pobočky).
+ */
 export function sestavNavigaci(rozsah: string): { hlavni: PolozkaNavigace[]; mobil: PolozkaNavigace[] } {
   const zaklad = `/${rozsah}/finance`
-  const hlavni = POLOZKY.map((d) => ({
+  const naFirme = rozsah === SEGMENT_FIRMY
+  const hlavni = POLOZKY.filter((d) => naFirme || !d.jenFirma).map((d) => ({
     klic: d.klic,
     href: d.segment ? `${zaklad}/${d.segment}` : zaklad,
     nazev: d.nazev,

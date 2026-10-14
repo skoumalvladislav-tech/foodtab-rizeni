@@ -16,7 +16,13 @@ async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'integrace.manage', rozsah)
+  // Právo VŽDY za celou firmu, ne za rozsah z formuláře: schránka dokladů
+  // je firemní (integrace/layout.tsx) a odpojení bere `id` z formuláře —
+  // správce napojení jedné pobočky by jinak připojil nebo odpojil
+  // schránku celé firmy (Finance po pobočkách, 13. 10. 2026). Příjem
+  // faktur níž chce navíc faktury.manage za celou firmu.
+  // `rozsah` zůstává jen pro návratovou adresu.
+  const pristup = await zkusPristup(tenantId, 'integrace.manage', TENANT_SCOPE_SEGMENT)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/integrace/email`)
 

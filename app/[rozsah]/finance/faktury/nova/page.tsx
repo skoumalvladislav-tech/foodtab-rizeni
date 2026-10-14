@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { jeRozsahFirmy } from '../../jen-pro-firmu'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
@@ -48,6 +49,10 @@ export default async function FakturyNova({
   searchParams: Promise<{ chyba?: string }>
 }) {
   const { rozsah } = await params
+  // Faktury pobočku nemají (oddělená databáze): na pobočce stránka nic
+  // nenačte. Brána ve faktury/layout.tsx ji nezastaví — Next stránku
+  // vykreslí souběžně a její data by poslal do prohlížeče (kontrola 14. 10.).
+  if (!jeRozsahFirmy(rozsah)) return null
   const { chyba } = await searchParams
 
   const tenantId = await getCurrentTenantId()

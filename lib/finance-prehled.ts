@@ -105,19 +105,27 @@ export type RadekVysledovkyStrediska = {
  * plochý seznam napříč celou firmou. Sdílené mezi Přehledem (KPI karty,
  * graf nákladů) a AI analytikem (app/[rozsah]/finance/analytik/akce.ts) —
  * dřív dvě kopie téhož cyklu, teď jedna.
+ *
+ * S `pobocka` (Finance po pobočkách, 13. 10. 2026) jen středisko té
+ * pobočky — bez firemního střediska „účty bez pobočky", to se na
+ * pobočce neukazuje ani nerozpočítává (lib/finance-rozsah.ts). Pobočka,
+ * která v `branches` není (vypnutá), vrátí prázdno.
  */
 export async function nactiVysledovkuCelofirmy(
   tenantId: string,
   branches: readonly { id: string; name: string }[],
   od: string,
   doData: string,
+  pobocka: string | null = null,
 ): Promise<RadekVysledovkyStrediska[]> {
   const supabase = await getServerSupabase()
 
-  const strediska: { id: string | null; nazev: string }[] = [
-    ...branches.map((b) => ({ id: b.id as string | null, nazev: b.name })),
-    { id: null, nazev: 'Celá firma (účty bez pobočky)' },
-  ]
+  const strediska: { id: string | null; nazev: string }[] = pobocka
+    ? branches.filter((b) => b.id === pobocka).map((b) => ({ id: b.id as string | null, nazev: b.name }))
+    : [
+        ...branches.map((b) => ({ id: b.id as string | null, nazev: b.name })),
+        { id: null, nazev: 'Celá firma (účty bez pobočky)' },
+      ]
 
   const vysledky = await Promise.all(
     strediska.map(async (s) => {

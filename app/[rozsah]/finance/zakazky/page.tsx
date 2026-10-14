@@ -1,17 +1,29 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { getCurrentTenantId } from '@/lib/firma'
+import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { canSee } from '@/lib/authz'
+import { canSee, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
+import { pobockaFinanci } from '@/lib/finance-rozsah'
+import { POZNAMKA_ZAKAZKY_FIRMY } from '@/lib/finance-evidence-pobocka'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import { zalozitZakazku } from './akce'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Finance — Zakázky.
+ *
+ * Na pobočce (Finance po pobočkách, 13. 10. 2026) jen zakázky TÉ
+ * pobočky; zakázky celé firmy (`branch_id` null) jsou v pohledu Celá
+ * firma. Nová zakázka na pobočce patří vždy jí — výběr pobočky tu není
+ * a akce bere pobočku z rozsahu, ne z formuláře.
+ */
 
 type Zakazka = {
   id: string
@@ -73,7 +85,7 @@ export default async function FinanceZakazky({
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
+  const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Zakázky vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
@@ -82,11 +94,16 @@ export default async function FinanceZakazky({
   const smiPsat = canSee(pristup.ctx, 'finance.manage')
   const supabase = await getServerSupabase()
 
+  // Pobočka z rozsahu adresy (lib/finance-rozsah.ts), `null` = celá firma.
+  const pobocka = pobockaFinanci(pristup.scope)
+  let dotazZakazek = supabase
+    .from('zakazky')
+    .select('id, cislo, nazev, stav, datum_akce, cena_celkem_haleru, kontakty(nazev)')
+    .eq('tenant_id', tenantId)
+  if (pobocka) dotazZakazek = dotazZakazek.eq('branch_id', pobocka)
+
   const [zakazkyRes, kontaktyRes, branchesRes] = await Promise.all([
-    supabase
-      .from('zakazky')
-      .select('id, cislo, nazev, stav, datum_akce, cena_celkem_haleru, kontakty(nazev)')
-      .eq('tenant_id', tenantId)
+    dotazZakazek
       .order('created_at', { ascending: false })
       .limit(50),
     supabase.from('kontakty').select('id, nazev').eq('tenant_id', tenantId).eq('je_odberatel', true).is('deleted_at', null).order('nazev'),
@@ -99,7 +116,10 @@ export default async function FinanceZakazky({
 
   return (
     <Navigace rozsah={rozsah}>
-      <Nadpis oci="Finance" popis={`${zakazky.length} ${zakazky.length === 1 ? 'zakázka' : 'zakázek'}.`}>
+      <Nadpis
+        oci="Finance"
+        popis={`${zakazky.length} ${zakazky.length === 1 ? 'zakázka' : 'zakázek'}${pobocka ? ` pobočky ${pristup.scope.branchName ?? ''}` : ''}.`}
+      >
         Zakázky
       </Nadpis>
 
@@ -107,7 +127,9 @@ export default async function FinanceZakazky({
         {chyba ? <p style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{chyba}</p> : null}
 
         {zakazky.length === 0 ? (
-          <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Zatím žádné zakázky.</p>
+          <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
+            {pobocka ? 'Pobočka zatím nemá žádné zakázky.' : 'Zatím žádné zakázky.'}
+          </p>
         ) : (
           <div style={{ ...karta, overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13.5px' }}>
@@ -139,6 +161,8 @@ export default async function FinanceZakazky({
           </div>
         )}
 
+        {pobocka ? <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>{POZNAMKA_ZAKAZKY_FIRMY}</p> : null}
+
         {smiPsat ? (
           <form action={zalozitZakazku} style={{ ...karta, display: 'grid', gap: '14px' }}>
             <input type="hidden" name="rozsah" value={rozsah} />
@@ -147,7 +171,7 @@ export default async function FinanceZakazky({
             {odberatele.length === 0 ? (
               <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
                 Nejdřív založte odběratele v{' '}
-                <Link href={`/${rozsah}/finance/kontakty`} className="ft-tl">Kontaktech</Link> (zaškrtněte „Odběratel“).
+                <Link href={`/${pobocka ? TENANT_SCOPE_SEGMENT : rozsah}/finance/kontakty`} className="ft-tl">Kontaktech{pobocka ? ' (za celou firmu)' : ''}</Link> (zaškrtněte „Odběratel“).
               </p>
             ) : (
               <>
@@ -162,13 +186,25 @@ export default async function FinanceZakazky({
                     <span style={popisek}>Název akce *</span>
                     <input type="text" name="nazev" required placeholder="např. Vánoční večírek" style={pole} />
                   </label>
-                  <label>
-                    <span style={popisek}>Pobočka</span>
-                    <select name="branch_id" style={pole} defaultValue="">
-                      <option value="">Celá firma</option>
-                      {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </label>
+                  {pobocka ? (
+                    // Na pobočce bere akce pobočku z rozsahu adresy — skryté
+                    // pole nečte (kdokoli si ho přepíše), výběr tu proto není.
+                    <div>
+                      <span style={popisek}>Pobočka</span>
+                      <input type="hidden" name="branch_id" value={pobocka} />
+                      <p style={{ margin: 0, fontSize: '13.5px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>
+                        {pristup.scope.branchName}
+                      </p>
+                    </div>
+                  ) : (
+                    <label>
+                      <span style={popisek}>Pobočka</span>
+                      <select name="branch_id" style={pole} defaultValue="">
+                        <option value="">Celá firma</option>
+                        {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </label>
+                  )}
                   <label>
                     <span style={popisek}>Datum akce</span>
                     <input type="date" name="datum_akce" style={pole} />

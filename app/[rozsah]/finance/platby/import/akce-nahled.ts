@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { naparsovatCsv, type ChybaImportu, type RadekImportu } from '@/lib/finance-csv-import'
@@ -32,13 +33,16 @@ export type StavNahledu =
     }
 
 export async function naparsovatSoubor(_predchozi: StavNahledu, formData: FormData): Promise<StavNahledu> {
-  const rozsah = String(formData.get('rozsah') ?? '')
-
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
 
-  const pristup = await zkusPristup(tenantId, 'finance.manage', rozsah)
-  if (pristup.stav !== 'ok') return { stav: 'chyba', text: 'Na import plateb nemáte oprávnění.' }
+  // Import výpisu je jen za celou firmu (import/layout.tsx, 13. 10. 2026)
+  // — právo VŽDY za celou firmu, ne za rozsah z formuláře (pole `rozsah`
+  // se proto ani nečte), stejně jako potvrzení v akce.ts.
+  const pristup = await zkusPristup(tenantId, 'finance.manage', TENANT_SCOPE_SEGMENT)
+  if (pristup.stav !== 'ok') {
+    return { stav: 'chyba', text: 'Výpisy importuje jen ten, kdo má právo „Správa financí“ za celou firmu.' }
+  }
 
   const ucetId = String(formData.get('ucet_id') ?? '')
   if (!ucetId) return { stav: 'chyba', text: 'Vyberte platební účet.' }

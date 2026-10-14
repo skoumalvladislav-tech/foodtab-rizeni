@@ -10,6 +10,7 @@ import { CONNECTOR_DOTYKACKA, parametryConnectoru } from '@/lib/pokladna-dotykac
 import { klientDotykacky } from '@/lib/pokladna-pripojeni'
 import Sdeleni from '@/app/sdeleni'
 import OdeslatHned from './odeslat-hned'
+import { jeRozsahFirmy } from '../../../jen-pro-firmu'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,6 +54,9 @@ export default async function PrihlaseniDotykacka({
   searchParams: Promise<{ pripojeni?: string }>
 }) {
   const { rozsah } = await params
+  // Na pobočce kreslí obrazovku layout (JenProFirmu) — stránka nic
+  // nenačítá ani nevrací, ani když ji Next vyrenderuje souběžně s ním.
+  if (!jeRozsahFirmy(rozsah)) return null
   const { pripojeni: pripojeniId } = await searchParams
 
   const tenantId = await getCurrentTenantId()

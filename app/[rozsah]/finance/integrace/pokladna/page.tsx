@@ -10,6 +10,7 @@ import { klientDotykacky } from '@/lib/pokladna-pripojeni'
 import Sdeleni from '@/app/sdeleni'
 import Navigace from '../../navigace'
 import ObsahPokladen, { type Pripojeni } from './obsah'
+import { jeRozsahFirmy } from '../../jen-pro-firmu'
 
 export const dynamic = 'force-dynamic'
 // Akce stránky („Ověřit a připojit", přiřazení, „Synchronizovat teď") stahují prodeje — strop 60 s.
@@ -41,6 +42,9 @@ export default async function PokladniSystemy({
   searchParams: Promise<{ chyba?: string; ok?: string }>
 }) {
   const { rozsah } = await params
+  // Na pobočce kreslí obrazovku layout (JenProFirmu) — stránka nic
+  // nenačítá ani nevrací, ani když ji Next vyrenderuje souběžně s ním.
+  if (!jeRozsahFirmy(rozsah)) return null
   const { chyba, ok } = await searchParams
 
   const tenantId = await getCurrentTenantId()

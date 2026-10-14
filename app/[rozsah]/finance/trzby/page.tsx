@@ -1,14 +1,17 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { getCurrentTenantId } from '@/lib/firma'
+import { zkusPristupFinanci } from '@/lib/finance-pristup'
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
+import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
-import { dalsiObdobi, popisObdobi, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-trzby'
+import { dalsiObdobi, jenPobocka, pokladnaPatriPobocce, popisObdobi, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-trzby'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
@@ -24,7 +27,8 @@ export const dynamic = 'force-dynamic'
  * + „dej obojí" (způsob platby z pokladny i příjmy z banky) + „dále tam
  * dej ostatní platby, to bude modul, který ještě vybudujeme".
  *
- * Všechno z jednoho dotazu `pokladna_prehled_trzeb` (RLS volajícího),
+ * Všechno z jednoho dotazu `pokladna_prehled_trzeb` (SECURITY DEFINER,
+ * práva ověřená jednou — finance.read + viditelné pobočky volajícího),
  * skládání v `lib/pokladna-trzby.ts`. Čísla jen ta, která appka má:
  *   * období bez prodejů je „–", ne 0 Kč;
  *   * platby po způsobu pokrývají jen dny, kdy je pokladna poslala —
@@ -32,6 +36,13 @@ export const dynamic = 'force-dynamic'
  *   * banka bez napojeného účtu je „–" s vysvětlením, ne 0 Kč;
  *   * „Ostatní platby" jsou modul, který zatím neexistuje — karta to
  *     říká, žádné číslo si nevymýšlí.
+ *
+ * Na pobočce (Šéfík 13. 10. 2026: „mám otevřený Bernard Bar, budou vidět
+ * finance, které se týkají jen Bernard Baru") je provozovna dána
+ * rozsahem adresy: přepínač „Celá firma / pobočky" se nekreslí,
+ * `?pobocka=` se nečte a přehled se zúží na pobočku dřív, než dojde do
+ * kreslení (`jenPobocka`). Banka = jen účty té pobočky, firemní účet ne.
+ * Za celou firmu beze změny, i s přepínačem.
  */
 
 const LET_ZPET = 9
@@ -101,24 +112,33 @@ export default async function FinanceTrzby({
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
+  const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Tržby vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
 
+  // `null` = celá firma (s přepínačem provozoven); jinak pobočka z adresy.
+  const pobockaRozsahu = pobockaFinanci(pristup.scope)
+  // Banku (příjmy na účty) smí vidět jen ten, kdo má `finance.read` ZA
+  // CELOU FIRMU: RLS transakcí rozsah členství nehlídá a
+  // `pokladna_prehled_trzeb` (SECURITY DEFINER) vrací bankovní řádky
+  // každému s finance.read. Na firmě to ověřil `zkusPristup`, na pobočce
+  // `zkusPristupFinanci` (bez toho sem nepustí) — sem se tedy dostane jen on.
+  const bankaVidi = true
+
   const cleneni: Cleneni = jeCleneni(po) ? po : 'den'
   const dnes = provozniDnes()
   const rozsahObdobi = urcitObdobi(cleneni, obdobiParam, dnes)
-  // Transakce vidí jen `finance.read` za celou firmu (RLS) — Finance se otevírá jen na firemní úrovni.
-  const bankaVidi = pristup.scope.level === 'tenant'
 
   const supabase = await getServerSupabase()
   const [pobockyRes, uctyRes, pokladnyRes] = await Promise.all([
     supabase.from('branches').select('id, name, active').eq('tenant_id', tenantId).is('deleted_at', null).order('name'),
     // I vypnuté účty — jejich historické příjmy přehled pořád sčítá.
     supabase.from('platebni_ucty').select('branch_id').eq('tenant_id', tenantId).eq('typ', 'banka'),
-    supabase.from('integrace_pripojeni').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('oblast', 'pokladna').is('odpojeno_kdy', null),
+    // Pobočka a přiřazení provozoven: na pobočce se počítá jen pokladna,
+    // která posílá JEJÍ tržby (`pokladnaPatriPobocce`).
+    supabase.from('integrace_pripojeni').select('branch_id, externi_ucet').eq('tenant_id', tenantId).eq('oblast', 'pokladna').is('odpojeno_kdy', null),
   ])
   // Prázdný výsledek není důkaz (lib/supabase/dotaz.ts): chyba dotazu by se
   // jinak tvářila jako „banka není napojená" nebo „žádná pokladna".
@@ -128,12 +148,15 @@ export default async function FinanceTrzby({
   const pobocky = (pobockyRes.data ?? []) as { id: string; name: string; active: boolean }[]
   const nazvyPobocek = new Map(pobocky.map((b) => [b.id, b.active ? b.name : `${b.name} (vypnutá)`]))
   const aktivniPobocky = pobocky.filter((b) => b.active)
-  const vybranaPobocka = pobockaParam && aktivniPobocky.some((b) => b.id === pobockaParam) ? pobockaParam : null
+  // Na pobočce je provozovna daná adresou a `?pobocka=` se nečte — jinak by
+  // šlo z adresy Bernard Baru otevřít tržby Černé Perly.
+  const vybranaPobocka = pobockaRozsahu ?? (pobockaParam && aktivniPobocky.some((b) => b.id === pobockaParam) ? pobockaParam : null)
   // U jedné provozovny jen její účty: firemní účet k žádné nepatří a „0 Kč"
   // by tvrdilo, že nic nepřišlo, místo „provozovna účet nemá".
   const bankovniUcty = (uctyRes.data ?? []) as { branch_id: string | null }[]
   const maBankovniUcet = vybranaPobocka ? bankovniUcty.some((u) => u.branch_id === vybranaPobocka) : bankovniUcty.length > 0
-  const maPokladnu = (pokladnyRes.count ?? 0) > 0
+  const pokladny = (pokladnyRes.data ?? []) as { branch_id: string | null; externi_ucet: unknown }[]
+  const maPokladnu = pobockaRozsahu ? pokladny.some((p) => pokladnaPatriPobocce(p, pobockaRozsahu)) : pokladny.length > 0
 
   let prehled: PrehledTrzeb | null = null
   let chybaNacteni = false
@@ -142,8 +165,12 @@ export default async function FinanceTrzby({
   } catch {
     chybaNacteni = true
   }
+  // Na pobočce dojdou do kreslení jen její řádky (tržby, platby, způsoby, banka).
+  if (prehled !== null && pobockaRozsahu !== null) prehled = jenPobocka(prehled, pobockaRozsahu)
 
   const zaklad = `/${rozsah}/finance/trzby`
+  // Integrace (pokladny, prodeje po produktech) patří celé firmě — z pobočky rovnou tam.
+  const zakladIntegraci = `/${pobockaRozsahu ? TENANT_SCOPE_SEGMENT : rozsah}/finance/integrace`
   const odkaz = (zmena: { po?: Cleneni; obdobi?: string | null; pobocka?: string | null }) => {
     const p = new URLSearchParams()
     const c = zmena.po ?? cleneni
@@ -154,19 +181,24 @@ export default async function FinanceTrzby({
     const vychoziPriPrepnuti = c === 'mesic' && cleneni === 'den' ? rozsahObdobi.od.slice(0, 4) : ''
     const o = zmena.obdobi === undefined ? (c !== cleneni ? vychoziPriPrepnuti : rozsahObdobi.klic) : zmena.obdobi
     if (o) p.set('obdobi', o)
-    const b = zmena.pobocka === undefined ? vybranaPobocka : zmena.pobocka
+    // Na pobočce ji nese adresa, ne parametr.
+    const b = pobockaRozsahu ? null : zmena.pobocka === undefined ? vybranaPobocka : zmena.pobocka
     if (b) p.set('pobocka', b)
     const q = p.toString()
     return q ? `${zaklad}?${q}` : zaklad
   }
 
-  const nazevRozsahu = vybranaPobocka ? (nazvyPobocek.get(vybranaPobocka) ?? 'Provozovna') : 'Celá firma'
+  const nazevRozsahu = vybranaPobocka ? (nazvyPobocek.get(vybranaPobocka) ?? pristup.scope.branchName ?? 'Provozovna') : 'Celá firma'
 
   return (
     <Navigace rozsah={rozsah}>
       <Nadpis
         oci="Finance"
-        popis="Tržby z pokladen po provozovnách a způsobech platby, vedle nich příjmy na bankovní účty. Appka počítá, nikdy neodhaduje."
+        popis={
+          pobockaRozsahu
+            ? `Jen ${nazevRozsahu}: tržby z její pokladny po způsobech platby, vedle nich příjmy na její bankovní účty. Appka počítá, nikdy neodhaduje.`
+            : 'Tržby z pokladen po provozovnách a způsobech platby, vedle nich příjmy na bankovní účty. Appka počítá, nikdy neodhaduje.'
+        }
         vpravo={
           rozsahObdobi.predchozi !== null ? (
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -183,7 +215,7 @@ export default async function FinanceTrzby({
           )
         }
       >
-        Tržby
+        {pobockaRozsahu ? `Tržby — ${nazevRozsahu}` : 'Tržby'}
       </Nadpis>
 
       {/* containerType: karty `.ds-kpi-mrizka` se skládají podle šířky obsahu (@container) — bez kontejneru zůstaly na telefonu čtyři vedle sebe. */}
@@ -196,16 +228,21 @@ export default async function FinanceTrzby({
           ))}
         </nav>
 
-        <div role="group" aria-label="Provozovna" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <Link href={odkaz({ pobocka: null })} className="ft-tl ft-tl-vedlejsi ft-tl-male" aria-current={vybranaPobocka === null ? 'true' : undefined}>
-            Celá firma
-          </Link>
-          {aktivniPobocky.map((b) => (
-            <Link key={b.id} href={odkaz({ pobocka: b.id })} className="ft-tl ft-tl-vedlejsi ft-tl-male" aria-current={vybranaPobocka === b.id ? 'true' : undefined}>
-              {b.name}
+        {/* Přepínač provozoven jen za celou firmu — na pobočce ji určuje adresa (přepínač rozsahu nahoře). */}
+        {pobockaRozsahu ? (
+          <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>{POZNAMKA_FIREMNI}</p>
+        ) : (
+          <div role="group" aria-label="Provozovna" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <Link href={odkaz({ pobocka: null })} className="ft-tl ft-tl-vedlejsi ft-tl-male" aria-current={vybranaPobocka === null ? 'true' : undefined}>
+              Celá firma
             </Link>
-          ))}
-        </div>
+            {aktivniPobocky.map((b) => (
+              <Link key={b.id} href={odkaz({ pobocka: b.id })} className="ft-tl ft-tl-vedlejsi ft-tl-male" aria-current={vybranaPobocka === b.id ? 'true' : undefined}>
+                {b.name}
+              </Link>
+            ))}
+          </div>
+        )}
 
         {chybaNacteni ? (
           <p className="hlaska-chyba" style={{ margin: 0 }}>Přehled tržeb se nepodařilo načíst. Zkuste stránku obnovit.</p>
@@ -229,7 +266,7 @@ export default async function FinanceTrzby({
             bankaVidi={bankaVidi}
             maBankovniUcet={maBankovniUcet}
             maPokladnu={maPokladnu}
-            rozsah={rozsah}
+            zakladIntegraci={zakladIntegraci}
             odkazNaObdobi={(o) => (cleneni === 'rok' ? odkaz({ po: 'mesic', obdobi: o.slice(0, 4) }) : cleneni === 'mesic' ? odkaz({ po: 'den', obdobi: o.slice(0, 7) }) : null)}
             odkazNaPobocku={(id) => odkaz({ pobocka: id })}
           />

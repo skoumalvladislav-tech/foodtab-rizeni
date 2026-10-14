@@ -8,6 +8,7 @@ import { canSee } from '@/lib/authz'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
+import { jeRozsahFirmy } from '../../jen-pro-firmu'
 import ImportFormular from './formular'
 
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,9 @@ export default async function FinancePlatbyImport({
   params: Promise<{ rozsah: string }>
 }) {
   const { rozsah } = await params
+  // Na pobočce kreslí obrazovku layout.tsx (JenProFirmu) — stránka nic
+  // nenačítá ani nevrací, ani kdyby ji Next vyrenderoval souběžně s ním.
+  if (!jeRozsahFirmy(rozsah)) return null
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>

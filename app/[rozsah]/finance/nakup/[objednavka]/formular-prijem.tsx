@@ -42,12 +42,10 @@ export type RadekKZapis = {
 export default function FormularPrijem({
   rozsah,
   objednavkaId,
-  branchId,
   radky,
 }: {
   rozsah: string
   objednavkaId: string
-  branchId: string | null
   radky: RadekKZapis[]
 }) {
   const [stavy, setStavy] = useState(
@@ -79,7 +77,7 @@ export default function FormularPrijem({
     <form action={odeslat} style={{ ...karta, display: 'grid', gap: '12px' }}>
       <input type="hidden" name="rozsah" value={rozsah} />
       <input type="hidden" name="objednavka_id" value={objednavkaId} />
-      <input type="hidden" name="branch_id" value={branchId ?? ''} />
+      {/* Pobočku příjemky bere akce z objednávky v databázi, ne odsud. */}
       <h2 style={{ margin: 0, fontSize: '15px' }}>Zapsat příjem</h2>
       <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
         Zaškrtněte přijaté položky a upravte množství/cenu — doplní se podle objednávky.
