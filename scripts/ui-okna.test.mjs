@@ -25,7 +25,7 @@
  * Pusť `node scripts/ui-okna.test.mjs`.
  */
 
-import { nactiKomponentu } from './vykreslit.mjs'
+import { nactiKomponentu, nactiModul } from './vykreslit.mjs'
 
 let chyb = 0
 const ma = (popis, skutecne, ocekavane) => {
@@ -47,6 +47,18 @@ export function useRef(pocatek) {
   return h.sloty[i]
 }
 export function useId() { globalThis.__haky.i++; return ':r0:' }
+// Nastavení stavu při vykreslování (odvozený stav) vykreslí komponentu
+// hned znovu, než se cokoli zapíše — jako React.
+export function useState(pocatek) {
+  const h = globalThis.__haky
+  const i = h.i++
+  if (!(i in h.stavy)) h.stavy[i] = typeof pocatek === 'function' ? pocatek() : pocatek
+  const nastavit = (v) => {
+    const nova = typeof v === 'function' ? v(h.stavy[i]) : v
+    if (!Object.is(nova, h.stavy[i])) { h.stavy[i] = nova; h.znovu = true }
+  }
+  return [h.stavy[i], nastavit]
+}
 export function useEffect(fn, zavislosti) {
   const h = globalThis.__haky
   const i = h.i++
@@ -63,16 +75,21 @@ const NAHRADY = [
   ['react-dom', REACT_DOM],
 ]
 
-/** Prvek stránky: umí focus() a contains(), zná rodiče. */
+/**
+ * Prvek stránky: umí focus() a contains(), zná rodiče. Jako v prohlížeči
+ * přijme fokus jen prvek, který ho přijmout umí — `div` panelu jen
+ * s `tabIndex` (bez něj by `focus()` neudělal nic).
+ */
 function prostredi() {
   const zaznam = { fokusy: [] }
   let aktivni = null
   const posluchaci = []
-  function uzel(jmeno, rodic = null) {
+  function uzel(jmeno, rodic = null, fokusovatelny = true) {
     const u = {
       jmeno,
       rodic,
       focus(volby) {
+        if (!fokusovatelny) return
         zaznam.fokusy.push(volby?.preventScroll ? `${jmeno} (bez posunu)` : jmeno)
         aktivni = u
       },
@@ -88,16 +105,18 @@ function prostredi() {
   globalThis.document = {
     body,
     get activeElement() { return aktivni },
-    addEventListener: (typ, fn) => posluchaci.push({ typ, fn }),
-    removeEventListener: (typ, fn) => {
-      const i = posluchaci.findIndex((p) => p.typ === typ && p.fn === fn)
+    // Odebrat jde jen se stejným typem, funkcí i `capture` (jako v prohlížeči).
+    addEventListener: (typ, fn, volby) => posluchaci.push({ typ, fn, capture: capture(volby) }),
+    removeEventListener: (typ, fn, volby) => {
+      const i = posluchaci.findIndex((p) => p.typ === typ && p.fn === fn && p.capture === capture(volby))
       if (i >= 0) posluchaci.splice(i, 1)
     },
   }
+  const capture = (volby) => (typeof volby === 'boolean' ? volby : Boolean(volby?.capture))
 
   /** Jedna instance okna (jako jedno připojení komponenty v Reactu). */
   function instance(Okno) {
-    const h = { sloty: [], efekty: new Map(), i: 0, fronta: [] }
+    const h = { sloty: [], efekty: new Map(), stavy: {}, i: 0, fronta: [], znovu: false }
     let panel = null
     let refy = []
 
@@ -109,7 +128,7 @@ function prostredi() {
         const p = x.props ?? {}
         if (p.ref && typeof p.ref === 'object') {
           if (p.role === 'dialog') {
-            if (!panel) panel = uzel('panel', body)
+            if (!panel) panel = uzel('panel', body, p.tabIndex !== undefined)
             p.ref.current = panel
           } else p.ref.current = uzel('prvek', panel ?? body)
           nove.push(p.ref)
@@ -140,9 +159,15 @@ function prostredi() {
       /** `predEfekty` = co se stane mezi vykreslením a efekty (autoFocus). */
       vykreslit(props, predEfekty) {
         globalThis.__haky = h
-        h.i = 0
-        h.fronta = []
-        const strom = Okno({ nadpis: 'Okno', ...props })
+        let strom
+        let kol = 0
+        do {
+          if (++kol > 5) throw new Error('Komponenta se při vykreslování pořád znovu vykresluje.')
+          h.i = 0
+          h.fronta = []
+          h.znovu = false
+          strom = Okno({ nadpis: 'Okno', ...props })
+        } while (h.znovu)
         if (strom === null) odebratPanel()
         else refy = pripojitRefy(strom)
         predEfekty?.(panel)
@@ -199,6 +224,8 @@ for (const [jmeno, soubor] of [
     ma(`${jmeno}: zavření vrátí fokus na tlačítko, které okno otevřelo, bez posunu stránky`,
       [s.aktivni()?.jmeno, s.zaznam.fokusy.at(-1)], ['tlačítko', 'tlačítko (bez posunu)'])
     ma(`${jmeno}: po zavření žádný posluchač nezůstal`, s.posluchacu(), 0)
+    s.stisk('Escape')
+    ma(`${jmeno}: Esc po zavření už nic nevolá`, volano, ['třetí'])
 
     // Znovu otevřít a zavřít odpojením — tak se Drawer v appce zavírá nejčastěji.
     okno.vykreslit({ otevreno: true, onZavrit: () => volano.push('pátá') })
@@ -242,8 +269,39 @@ for (const [jmeno, soubor] of [
     })
     ma(`${jmeno}: panel poli s autoFocus fokus nesebere`, s.aktivni()?.jmeno, 'pole s autoFocus')
     okno.vykreslit({ otevreno: false, onZavrit: () => {} })
-    ma(`${jmeno}: zavření pak fokus nevrací na zmizelé pole`, s.aktivni()?.jmeno, 'body')
+    ma(`${jmeno}: zavření vrátí fokus na tlačítko, které okno otevřelo (ne na <body>)`, s.aktivni()?.jmeno, 'tlačítko')
   }
+  {
+    // Storno úseku v Docházce: okno připojené zavřené, otevře ho tlačítko
+    // a hned v něm je pole s autoFocus.
+    const s = prostredi()
+    const tlacitko = s.uzel('tlačítko Stornovat', s.body)
+    const okno = s.instance(Okno)
+    okno.vykreslit({ otevreno: false, onZavrit: () => {} })
+    tlacitko.focus()
+    okno.vykreslit({ otevreno: true, onZavrit: () => {} }, (panel) => s.uzel('pole s autoFocus', panel).focus())
+    ma(`${jmeno}: otevřené z připojeného zavřeného okna — autoFocus zůstane`, s.aktivni()?.jmeno, 'pole s autoFocus')
+    okno.vykreslit({ otevreno: false, onZavrit: () => {} })
+    ma(`${jmeno}: … a zavření vrátí fokus na tlačítko Stornovat`, s.aktivni()?.jmeno, 'tlačítko Stornovat')
+  }
+}
+
+console.log('\n== zameritKdyzSeZtratil (hlášky po odeslání) ==')
+{
+  const { zameritKdyzSeZtratil } = await nactiModul('components/ui/fokus-okna.tsx', NAHRADY)
+  const s = prostredi()
+  const hlaska = s.uzel('hláška', s.body)
+  const pole = s.uzel('pole', s.body)
+  // Zakázané tlačítko přišlo o fokus → je na <body>.
+  zameritKdyzSeZtratil(hlaska)
+  ma('fokus na <body> → přesune se na hlášku', s.aktivni()?.jmeno, 'hláška')
+  // Kdo odeslal Enterem z pole a fokus v něm má, tomu se nebere.
+  pole.focus()
+  zameritKdyzSeZtratil(hlaska)
+  ma('fokus v poli → zůstane v poli', s.aktivni()?.jmeno, 'pole')
+  s.setAktivni(s.body)
+  zameritKdyzSeZtratil(null)
+  ma('bez hlášky (null) nic neudělá a nespadne', s.aktivni()?.jmeno, 'body')
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')

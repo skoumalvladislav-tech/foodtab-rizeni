@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Ikona from '@/app/[rozsah]/ikona'
 import type { IkonaKlic } from '@/app/[rozsah]/nabidka'
 import Drawer from '@/components/ui/Drawer'
+import { zameritKdyzSeZtratil } from '@/components/ui/fokus-okna'
 import { denKratce } from '@/lib/rozpis-desktop'
 import { pocet } from '@/lib/sklonovani'
 import { VETA_JEN_NOVE } from '@/lib/sablony-text'
@@ -429,6 +430,8 @@ export default function FormularSmeny({
   const otazkaRef = useRef<HTMLParagraphElement>(null)
   const smazatRef = useRef<HTMLButtonElement>(null)
   const vysledekRef = useRef<HTMLParagraphElement>(null)
+  const chybaUlozeniRef = useRef<HTMLParagraphElement>(null)
+  const chybaSmazaniRef = useRef<HTMLParagraphElement>(null)
   const ptaloSe = useRef(ptaSeNaSmazani)
   useEffect(() => {
     if (ptaloSe.current === ptaSeNaSmazani) return
@@ -436,9 +439,15 @@ export default function FormularSmeny({
     if (ptaSeNaSmazani) (otazkaRef.current ?? volbaRef.current)?.focus()
     else smazatRef.current?.focus()
   }, [ptaSeNaSmazani])
+  // Chyba: tlačítko bylo během čekání zakázané a Chrome mu fokus vzal —
+  // na hlášku, ale jen když se fokus ztratil (viz zameritKdyzSeZtratil).
   useEffect(() => {
     if (stav.stav === 'hotovo') vysledekRef.current?.focus()
+    else if (stav.stav === 'chyba') zameritKdyzSeZtratil(chybaUlozeniRef.current)
   }, [stav])
+  useEffect(() => {
+    if (stavSmazani.stav === 'chyba') zameritKdyzSeZtratil(chybaSmazaniRef.current)
+  }, [stavSmazani])
 
   function zavrit() {
     setZavreno(true)
@@ -859,7 +868,7 @@ export default function FormularSmeny({
           </label>
 
           {stav.stav === 'chyba' ? (
-            <p className="hlaska-chyba" style={poradi(11)}>{stav.text}</p>
+            <p ref={chybaUlozeniRef} tabIndex={-1} role="alert" className="hlaska-chyba" style={poradi(11)}>{stav.text}</p>
           ) : null}
 
           {/* Na telefonu je tlačítko pevně dole (viz `pata` níž). */}
@@ -1034,7 +1043,7 @@ export default function FormularSmeny({
             jako chyba hromadného rušení.
           */}
           {!rusiViceDni && stavSmazani.stav === 'chyba' ? (
-            <p className="hlaska-chyba" style={{ marginTop: '8px' }}>
+            <p ref={chybaSmazaniRef} tabIndex={-1} role="alert" className="hlaska-chyba" style={{ marginTop: '8px' }}>
               {stavSmazani.text}
             </p>
           ) : null}

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
+import { zameritKdyzSeZtratil } from "@/components/ui/fokus-okna";
 import { datumACasSRokemVPasmu, datumACasVPasmu } from "@/lib/cas";
 import type { StavRuseni } from "@/lib/ruseni-smen";
 import { vyzadujePotvrzeni as vyzadujePotvrzeniDruhu } from "@/lib/upozorneni-text";
@@ -86,6 +87,7 @@ export default function DetailSmeny({
   */
   const otazkaRef = useRef<HTMLParagraphElement>(null);
   const smazatRef = useRef<HTMLButtonElement>(null);
+  const chybaSmazaniRef = useRef<HTMLParagraphElement>(null);
   const ptaloSe = useRef(pta);
   useEffect(() => {
     if (ptaloSe.current === pta) return;
@@ -93,6 +95,10 @@ export default function DetailSmeny({
     if (pta) (otazkaRef.current ?? volbaRef.current)?.focus();
     else smazatRef.current?.focus();
   }, [pta]);
+  // „Zrušit směnu“ bylo během čekání zakázané — fokus na chybu, když se ztratil.
+  useEffect(() => {
+    if (stavSmazani.stav === "chyba") zameritKdyzSeZtratil(chybaSmazaniRef.current);
+  }, [stavSmazani]);
 
   useEffect(() => {
     if (stavSmazani.stav === "hotovo") {
@@ -418,7 +424,11 @@ export default function DetailSmeny({
                         Zpět
                       </button>
                     </div>
-                    {stavSmazani.stav === "chyba" ? <p className="hlaska-chyba">{stavSmazani.text}</p> : null}
+                    {stavSmazani.stav === "chyba" ? (
+                      <p ref={chybaSmazaniRef} tabIndex={-1} role="alert" className="hlaska-chyba">
+                        {stavSmazani.text}
+                      </p>
+                    ) : null}
                   </form>
                 )}
               </div>

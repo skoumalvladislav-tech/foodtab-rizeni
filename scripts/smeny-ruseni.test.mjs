@@ -885,5 +885,51 @@ je(
   true,
 )
 
+/*
+  Chybové cesty: odesílací tlačítko je během čekání zakázané a Chrome mu
+  fokus vezme. Bez přesunu na hlášku skončí na <body> (do 14. 10. 2026 ho
+  omylem chytal panel). Samotné „jen když se ztratil“ hlídá ui-okna.
+*/
+console.log('\n== Fokus na chybových cestách ==')
+je(
+  'panel: chyba uložení — fokus na hlášku, hláška se ohlásí',
+  /else if \(stav\.stav === 'chyba'\) zameritKdyzSeZtratil\(chybaUlozeniRef\.current\)/.test(zdrojFormulare) &&
+    zdrojFormulare.includes('<p ref={chybaUlozeniRef} tabIndex={-1} role="alert" className="hlaska-chyba"'),
+  true,
+)
+je(
+  'panel: chyba smazání jedné směny — fokus na hlášku, hláška se ohlásí',
+  /if \(stavSmazani\.stav === 'chyba'\) zameritKdyzSeZtratil\(chybaSmazaniRef\.current\)/.test(zdrojFormulare) &&
+    zdrojFormulare.includes('<p ref={chybaSmazaniRef} tabIndex={-1} role="alert" className="hlaska-chyba"'),
+  true,
+)
+{
+  const detail = cist('app/[rozsah]/smeny/mobil/detail.tsx')
+  je(
+    'telefon: chyba zrušení směny — fokus na hlášku, hláška se ohlásí',
+    /if \(stavSmazani\.stav === "chyba"\) zameritKdyzSeZtratil\(chybaSmazaniRef\.current\)/.test(detail) &&
+      detail.includes('<p ref={chybaSmazaniRef} tabIndex={-1} role="alert" className="hlaska-chyba"'),
+    true,
+  )
+  const rv = cist('app/[rozsah]/smeny/ruseni-vice-dni.tsx')
+  je(
+    'víc dnů: po načtení náhledu fokus na chybu náhledu, jinak na souhrn',
+    rv.includes('zameritKdyzSeZtratil(chybaNahleduRef.current ?? souhrnRef.current)') &&
+      rv.includes('<p ref={chybaNahleduRef} tabIndex={-1}') &&
+      rv.includes('<p ref={souhrnRef} tabIndex={-1} className="ds-sm-rv-souhrn"'),
+    true,
+  )
+  je(
+    'víc dnů: … jen po skončeném načítání (ne při prvním vykreslení)',
+    /if \(nacita\) \{\s*nacitalo\.current = true\s*return\s*\}\s*if \(!nacitalo\.current\) return/.test(rv),
+    true,
+  )
+  je(
+    'víc dnů: odmítnutí — fokus na hlášku',
+    /if \(zamitnuto\) zameritKdyzSeZtratil\(zamitnutiRef\.current\)/.test(rv) && rv.includes('<p ref={zamitnutiRef} tabIndex={-1}'),
+    true,
+  )
+}
+
 console.log(chyb === 0 ? '\n  VŠECHNY KONTROLY PROŠLY\n' : `\n  CHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)

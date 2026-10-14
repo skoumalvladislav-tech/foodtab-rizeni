@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { zameritKdyzSeZtratil } from '@/components/ui/fokus-okna'
 import { denKratce } from '@/lib/rozpis-desktop'
 import {
   barvaRuseni,
@@ -108,6 +109,30 @@ export default function RuseniViceDni({
   const platny = platnyNahled(nahled, vybrane)
   // Zamítnutí patří k náhledu, se kterým se odesílalo, a jen když akce neběží — viz `jeZamitnuto`.
   const zamitnuto = jeZamitnuto(stav, odeslanaVerze, nahled, ceka)
+
+  /*
+    Fokus po čekání. „Ukázat, co se zruší“ i potvrzení jsou během čekání
+    zakázané a Chrome jim fokus vezme — bez tohohle by skončil na <body>
+    (do 14. 10. 2026 ho omylem chytal panel, viz components/ui/fokus-okna.tsx).
+    Po náhledu na souhrn (nebo chybu náhledu), po odmítnutí na hlášku;
+    jen když se fokus ztratil. Výsledek si fokus bere sám (PrehledVysledku).
+  */
+  const souhrnRef = useRef<HTMLParagraphElement>(null)
+  const chybaNahleduRef = useRef<HTMLParagraphElement>(null)
+  const zamitnutiRef = useRef<HTMLParagraphElement>(null)
+  const nacitalo = useRef(false)
+  useEffect(() => {
+    if (nacita) {
+      nacitalo.current = true
+      return
+    }
+    if (!nacitalo.current) return
+    nacitalo.current = false
+    zameritKdyzSeZtratil(chybaNahleduRef.current ?? souhrnRef.current)
+  }, [nacita])
+  useEffect(() => {
+    if (zamitnuto) zameritKdyzSeZtratil(zamitnutiRef.current)
+  }, [zamitnuto])
   // Potvrzení je nevratné — na počítači `.ft-tl-nebezpecne` (globals.css: „co nejde vzít zpět“).
   const tl = telefon
     ? { hlavni: 'ds-sm-tl ds-sm-tl-hlavni', nebezpeci: 'ds-sm-tl ds-sm-tl-nebezpeci', vedlejsi: 'ds-sm-tl', rada: 'ds-sm-potvrzeni-akce' }
@@ -168,20 +193,20 @@ export default function RuseniViceDni({
         {nacita ? 'Načítám náhled…' : platny ? 'Načíst náhled znovu' : 'Ukázat, co se zruší'}
       </button>
       {chybaNahledu ? (
-        <p className="hlaska-chyba" role="alert">
+        <p ref={chybaNahleduRef} tabIndex={-1} className="hlaska-chyba" role="alert">
           {chybaNahledu}
         </p>
       ) : null}
 
       {platny ? (
         <>
-          <p className="ds-sm-rv-souhrn">{souhrnNahledu(platny.dny)}.</p>
+          <p ref={souhrnRef} tabIndex={-1} className="ds-sm-rv-souhrn">{souhrnNahledu(platny.dny)}.</p>
           <NahledRuseni dny={platny.dny} />
         </>
       ) : null}
 
       {zamitnuto && stav.stav === 'chyba' ? (
-        <p className="hlaska-chyba" role="alert">
+        <p ref={zamitnutiRef} tabIndex={-1} className="hlaska-chyba" role="alert">
           {stav.text}
         </p>
       ) : null}

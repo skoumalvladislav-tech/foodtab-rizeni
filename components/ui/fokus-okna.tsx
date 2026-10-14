@@ -1,6 +1,23 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+
+/** Prvek s fokusem, nebo null mimo prohlížeč (vykreslení na serveru). */
+function aktivniPrvek(): HTMLElement | null {
+  return typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null);
+}
+
+/**
+ * Zaměří `prvek`, jen když se fokus ztratil (je na `<body>`). Pro hlášky,
+ * které se objeví po odeslání: tlačítko, které formulář odeslalo, je během
+ * čekání zakázané a Chrome mu fokus sebere — bez tohohle by skončil na
+ * `<body>` a čtečka by nevěděla, kde je. Kdo odeslal Enterem z pole a fokus
+ * v něm pořád má, tomu se nebere (hlášku stejně ohlásí `role="alert"`).
+ */
+export function zameritKdyzSeZtratil(prvek: HTMLElement | null | undefined) {
+  const aktivni = aktivniPrvek();
+  if (prvek && (!aktivni || aktivni === document.body)) prvek.focus();
+}
 
 /**
  * Fokus a Esc pro Drawer a Dialog — jedno místo, obě okna se chovají stejně.
@@ -8,6 +25,10 @@ import { useEffect, useRef, type RefObject } from "react";
  *   * Při otevření dostane fokus panel, aby čtečka věděla, kde je. Když
  *     už je fokus UVNITŘ (pole s `autoFocus`, třeba „Proč se stornuje“
  *     v Docházce), nechá se tam — dřív ho panel tomu poli sebral.
+ *   * Kdo okno otevřel, se zjistí při vykreslení, ve kterém se `otevreno`
+ *     přepne na true — tedy DŘÍV, než React při zápisu do DOM dá fokus poli
+ *     s `autoFocus`. V efektu by už bylo pozdě a okno s takovým polem by po
+ *     zavření fokus nevrátilo nikam (spadl by na `<body>`).
  *   * Při zavření se vrátí tam, odkud se okno otevřelo, ale jen když
  *     zůstal v panelu (nebo s ním zmizel na `<body>`). Kdo mezitím klikl
  *     jinam — na jinou směnu v rozpisu vedle nemodálního panelu — tomu se
@@ -35,12 +56,21 @@ export function useFokusOkna(
     zavrit.current = onZavrit;
   });
 
+  // Otvírač: při připojení už otevřeného okna, nebo při přepnutí na otevřeno
+  // (odvozený stav z minulého vykreslení — vzor z dokumentace Reactu).
+  const [otvirac, setOtvirac] = useState<HTMLElement | null>(() => (otevreno ? aktivniPrvek() : null));
+  const [bylo, setBylo] = useState(otevreno);
+  if (otevreno !== bylo) {
+    setBylo(otevreno);
+    setOtvirac(otevreno ? aktivniPrvek() : null);
+  }
+
   useEffect(() => {
     if (!otevreno) return;
     const panel = panelRef.current;
     const aktivni = document.activeElement as HTMLElement | null;
     const uzUvnitr = Boolean(panel && aktivni && panel.contains(aktivni));
-    const predchozi = uzUvnitr ? null : aktivni;
+    const predchozi = uzUvnitr ? otvirac : aktivni;
     if (!uzUvnitr) panel?.focus();
 
     function naKlavesu(e: KeyboardEvent) {
@@ -53,5 +83,5 @@ export function useFokusOkna(
       if (ted && ted !== document.body && !panel?.contains(ted)) return;
       predchozi?.focus({ preventScroll: true });
     };
-  }, [otevreno, panelRef]);
+  }, [otevreno, panelRef, otvirac]);
 }
