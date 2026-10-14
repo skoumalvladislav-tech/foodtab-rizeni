@@ -211,6 +211,40 @@ for (const uloha of ULOHY) {
     porucha.stav === 500 && !porucha.telo.includes('tajny-detail-db') && porucha.log.at(-1) === zabrat)
 }
 
+/* --- úloha volaná ve smyčce zámek uvolní -------------------------------- */
+
+// faktury-z-emailu.yml volá znovu hned, dokud odpověď nese
+// `pokracovat: true`. Kdyby si adresa zámek nechala, druhé kolo by
+// dostalo „běží jinde" a dohánění schránek by se zastavilo po prvním.
+console.log('\nÚloha volaná ve smyčce')
+
+for (const f of readdirSync('.github/workflows').filter((f) => f.endsWith('.yml'))) {
+  const t = readFileSync(`.github/workflows/${f}`, 'utf8')
+  const adresa = t.match(/\/api\/uloha\/([a-z0-9-]+)/)?.[1]
+  if (!adresa || !/for \w+ in \$\(seq/.test(t)) continue
+  const zdroj = readFileSync(`app/api/uloha/${adresa}/route.ts`, 'utf8')
+  ok(`${f} volá ${adresa} ve smyčce → adresa volá uvolnitUlohu('${adresa}')`,
+    zdroj.includes(`uvolnitUlohu('${adresa}')`))
+}
+
+{
+  // Skutečný průchod: schránek žádná, adresa doběhne celá.
+  const soubor = 'app/api/uloha/faktury-z-emailu/route.ts'
+  svet.log = []
+  const { GET } = await nactiModul(soubor, [
+    ['next/server', NEXT],
+    ['@/lib/supabase/uloha', ULOHA],
+    ['@/lib/faktury-prijem-sync', js(`export async function vsechnaPripojeniSPrijmem() { return [] }
+export const zpracovatPrijem = globalThis.__kanarek('zpracovatPrijem')`)],
+    ['@/lib/finance-automaticke-parovani', js(`export const automatickyParovatPlatby = globalThis.__kanarek('automatickyParovatPlatby')`)],
+  ])
+  process.env.CRON_SECRET = SPRAVNE
+  const r = await zavolat(GET, 'Bearer ' + SPRAVNE)
+  const zabrat = r.log.indexOf(`rpc:uloha_zabrat:${JSON.stringify({ p_uloha: 'faktury-z-emailu' })}`)
+  const uvolnit = r.log.indexOf(`rpc:uloha_uvolnit:${JSON.stringify({ p_uloha: 'faktury-z-emailu' })}`)
+  ok('faktury: doběhne 200 a zámek uvolní až po zabrání', r.stav === 200 && zabrat >= 0 && uvolnit > zabrat)
+}
+
 /* --- jména a plány: migrace × adresy × workflow ------------------------ */
 
 console.log('\nJména a plány')

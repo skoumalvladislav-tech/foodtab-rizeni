@@ -18,7 +18,8 @@
 --      tajemství NEOBSAHUJE, opakované naplánování nic nezdvojí,
 --      úloha vyřazená z tabulky z cronu zmizí, zrušení smaže vše;
 --   5. zámek `uloha_zabrat`: první true, druhý false, po vypršení zase
---      true; neznámá úloha odmítnuta;
+--      true; neznámá úloha odmítnuta; `uloha_uvolnit` pustí další kolo
+--      hned a vypršený zámek nepřepíše;
 --   6. stav: poslední kód odpovědi podle čísla požadavku;
 --   7. úklid maže staré záznamy;
 --   8. práva: anon/authenticated/service_role na plánovač nedosáhnou,
@@ -269,6 +270,19 @@ select pg_temp.check('po vypršení zámku → zase true',
 select pg_temp.check('neznámá úloha → 22023',
   pg_temp.spadne_hlaskou($$select public.uloha_zabrat('neexistuje')$$, '22023', 'Neznámá'));
 
+-- Uvolnění (úloha volaná ve smyčce): další kolo hned zabere znovu.
+select pg_temp.check('faktury: zabráno, druhé kolo bez uvolnění → false',
+  public.uloha_zabrat('faktury-z-emailu') and not public.uloha_zabrat('faktury-z-emailu'));
+select public.uloha_uvolnit('faktury-z-emailu');
+select pg_temp.check('po uloha_uvolnit → další kolo zabere hned',
+  public.uloha_zabrat('faktury-z-emailu'));
+
+-- Vypršený zámek uvolnění nepřepíše (podmínka `zamceno_do > now()`).
+update app.planovac_ulohy set zamceno_do = now() - interval '1 minute' where uloha = 'faktury-z-emailu';
+select public.uloha_uvolnit('faktury-z-emailu');
+select pg_temp.check('uvolnění sáhne jen na platný zámek',
+  (select zamceno_do < now() from app.planovac_ulohy where uloha = 'faktury-z-emailu'));
+
 \echo '-- 6. stav'
 
 insert into net._http_response (id, status_code, created) values (:pozadavek, 401, now() + interval '1 second');
@@ -326,6 +340,12 @@ select pg_temp.check('uloha_zabrat smí service_role',
 select pg_temp.check('uloha_zabrat nesmí anon ani authenticated',
   not has_function_privilege('anon', 'public.uloha_zabrat(text)', 'execute')
   and not has_function_privilege('authenticated', 'public.uloha_zabrat(text)', 'execute'));
+
+select pg_temp.check('uloha_uvolnit smí service_role',
+  has_function_privilege('service_role', 'public.uloha_uvolnit(text)', 'execute'));
+select pg_temp.check('uloha_uvolnit nesmí anon ani authenticated',
+  not has_function_privilege('anon', 'public.uloha_uvolnit(text)', 'execute')
+  and not has_function_privilege('authenticated', 'public.uloha_uvolnit(text)', 'execute'));
 
 -- Úklid po scénáři: napodobeniny pryč, zámky a volání zpět.
 drop schema cron cascade;

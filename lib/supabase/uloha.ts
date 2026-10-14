@@ -157,3 +157,24 @@ export async function uzBezi(uloha: string): Promise<NextResponse | null> {
   console.error(`[${uloha}] zámek úlohy vrátil nečekanou hodnotu:`, data)
   return NextResponse.json({ chyba: 'Zámek úlohy selhal.' }, { status: 500 })
 }
+
+/**
+ * Uvolnit zámek hned po doběhnutí — jen u úlohy, kterou plánovač volá
+ * ve SMYČCE, dokud odpovídá `pokracovat: true` (faktury-z-emailu.yml,
+ * až 15 kol za sebou). Bez uvolnění by druhé kolo narazilo na vlastní
+ * zámek z prvního a dohánění by se zastavilo po jednom kole.
+ *
+ * Ostatní úlohy zámek schválně nechávají vypršet: drží tak i krátký
+ * odstup mezi plánovači (Fio odmítne druhé volání do 30 s).
+ *
+ * Chyba se jen zapíše — zámek stejně vyprší sám.
+ */
+export async function uvolnitUlohu(uloha: string): Promise<void> {
+  const supabase = klientUlohy()
+  if (!supabase) return
+
+  const { error } = await supabase.rpc('uloha_uvolnit', { p_uloha: uloha })
+  if (error && !funkceNeexistuje(error)) {
+    console.error(`[${uloha}] uvolnění zámku selhalo:`, error.code, error.message)
+  }
+}

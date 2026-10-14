@@ -60,7 +60,8 @@
 -- `{ bezi_jinde: true }` a nedělá nic. Zámek se schválně NEUVOLŇUJE,
 -- vyprší sám: nejkratší rozestup v plánu je 15 minut a limit nejvýš
 -- 5 minut, takže další plánovaný běh na něj nenarazí — jen duplicitní
--- volání od druhého plánovače.
+-- volání od druhého plánovače. Jediná výjimka je úloha, kterou GitHub
+-- volá ve smyčce (faktury-z-emailu, `public.uloha_uvolnit`).
 --
 -- ---------------------------------------------------------------------
 -- TAJEMSTVÍ
@@ -436,6 +437,26 @@ comment on function public.uloha_zabrat(text) is
   'Zabere úlohu na limit_sekund. true = běž; false = stejná úloha běží '
   'nebo právě doběhla (druhý plánovač). Jen service_role.';
 
+-- Uvolnění hned po doběhnutí — jen pro úlohu, kterou plánovač volá ve
+-- SMYČCE (faktury-z-emailu.yml: znovu, dokud `pokracovat`). Bez něj by
+-- druhé kolo narazilo na zámek z prvního. Ostatní úlohy ho nevolají:
+-- zámek, který vyprší sám, drží i krátký odstup mezi plánovači.
+--
+-- Uvolní jen zámek, který ještě platí. Cizí zámek tím uvolnit nejde:
+-- dokud platí ten náš, nikdo jiný úlohu nezabere, a limit je vždycky
+-- delší než nejdelší povolený běh adresy (hlídá scripts/planovac.test.mjs).
+create function public.uloha_uvolnit(p_uloha text)
+returns void
+language sql security definer set search_path = '' as $$
+  update app.planovac_ulohy u
+     set zamceno_do = null
+   where u.uloha = p_uloha
+     and u.zamceno_do > now();
+$$;
+
+comment on function public.uloha_uvolnit(text) is
+  'Uvolní zámek úlohy po doběhnutí (úloha volaná ve smyčce). Jen service_role.';
+
 
 -- ---------------------------------------------------------------------
 -- 9. PRÁVA
@@ -455,3 +476,6 @@ revoke all on function app.planovac_stav()     from public, anon, authenticated,
 
 revoke all on function public.uloha_zabrat(text) from public, anon, authenticated;
 grant execute on function public.uloha_zabrat(text) to service_role;
+
+revoke all on function public.uloha_uvolnit(text) from public, anon, authenticated;
+grant execute on function public.uloha_uvolnit(text) to service_role;

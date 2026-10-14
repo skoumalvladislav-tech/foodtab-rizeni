@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
+import { tajemstviSedi, uvolnitUlohu, uzBezi } from '@/lib/supabase/uloha'
 import { vsechnaPripojeniSPrijmem, zpracovatPrijem, type VysledekPrijmu } from '@/lib/faktury-prijem-sync'
 import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
 
@@ -58,6 +58,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   const neprobehla = pripojeni.length - vysledky.length
   const pokrok = vysledky.some((v) => v.nalezeno + v.zapsano + v.existuje + v.kontrola > 0)
   const zbyvaPrace = neprobehla > 0 || vysledky.some((v) => v.stav === 'ok' && (v.zbyva > 0 || !v.schrankaDoctena))
+
+  // Workflow volá znovu hned, dokud `pokracovat` — další kolo nesmí narazit na tenhle zámek.
+  await uvolnitUlohu('faktury-z-emailu')
 
   return NextResponse.json({
     schranek: pripojeni.length,
