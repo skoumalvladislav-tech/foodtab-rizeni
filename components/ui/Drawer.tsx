@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useFokusOkna } from "./fokus-okna";
 
 /**
  * Vysouvací panel z boku (desktop) nebo zdola (mobil) — stejná
@@ -33,21 +34,8 @@ export default function Drawer({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const nadpisId = useId();
-
-  useEffect(() => {
-    if (!otevreno) return;
-    const predchozi = document.activeElement as HTMLElement | null;
-    panelRef.current?.focus();
-
-    function naKlavesu(e: KeyboardEvent) {
-      if (e.key === "Escape") onZavrit();
-    }
-    document.addEventListener("keydown", naKlavesu);
-    return () => {
-      document.removeEventListener("keydown", naKlavesu);
-      predchozi?.focus();
-    };
-  }, [otevreno, onZavrit]);
+  // Fokus při otevření/zavření a Esc — viz fokus-okna.tsx.
+  useFokusOkna(otevreno, onZavrit, panelRef);
 
   if (!otevreno || typeof document === "undefined") return null;
 

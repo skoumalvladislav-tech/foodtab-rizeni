@@ -418,6 +418,28 @@ export default function FormularSmeny({
     else if (!mobil) prvni.current?.focus()
   }, [zamerit, mobil])
 
+  /*
+    Kam s fokusem, když prvek, který ho měl, zmizí: „Smazat směnu“ nahradí
+    otázka, „Zpět“ zmizí i s ní, „Uložit změny“ nahradí výsledek. Bez
+    toho spadne fokus na <body> a čtečka neví, co se stalo. Do 14. 10.
+    2026 ho omylem chytal panel (Drawer bral fokus při každém překreslení,
+    viz components/ui/fokus-okna.tsx). Na otázku, ne na „Smazat“ — Enter
+    by směnu rovnou smazal.
+  */
+  const otazkaRef = useRef<HTMLParagraphElement>(null)
+  const smazatRef = useRef<HTMLButtonElement>(null)
+  const vysledekRef = useRef<HTMLParagraphElement>(null)
+  const ptaloSe = useRef(ptaSeNaSmazani)
+  useEffect(() => {
+    if (ptaloSe.current === ptaSeNaSmazani) return
+    ptaloSe.current = ptaSeNaSmazani
+    if (ptaSeNaSmazani) (otazkaRef.current ?? volbaRef.current)?.focus()
+    else smazatRef.current?.focus()
+  }, [ptaSeNaSmazani])
+  useEffect(() => {
+    if (stav.stav === 'hotovo') vysledekRef.current?.focus()
+  }, [stav])
+
   function zavrit() {
     setZavreno(true)
     onZavrit()
@@ -453,7 +475,7 @@ export default function FormularSmeny({
               poznámky, ten se založil beze zbytku.
             */
             <>
-              <p style={{ margin: '0 0 12px', fontSize: '14px', color: barvaSouhrnu(stav.dny) }}>
+              <p ref={vysledekRef} tabIndex={-1} style={{ margin: '0 0 12px', fontSize: '14px', color: barvaSouhrnu(stav.dny) }}>
                 {souhrnZalozeni(stav.dny)}.
               </p>
               {stav.dny.some((v) => v.chyba !== null || v.varovani.length > 0) ? (
@@ -471,7 +493,7 @@ export default function FormularSmeny({
             </>
           ) : (
             <>
-              <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
+              <p ref={vysledekRef} tabIndex={-1} style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--dobre)' }}>
                 {smena?.id ? 'Změna uložena.' : 'Směna přidána do rozpisu.'}
               </p>
 
@@ -917,7 +939,7 @@ export default function FormularSmeny({
           {ptaSeNaSmazani ? (
             <div style={{ display: 'grid', gap: '8px' }}>
               {rusiViceDni ? null : (
-                <p style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
+                <p ref={otazkaRef} tabIndex={-1} style={{ margin: 0, fontSize: '14px', color: 'var(--ink)' }}>
                   <strong>
                     {jeVydana ? 'Zrušit tuhle směnu?' : 'Smazat tuhle směnu?'}
                   </strong>
@@ -995,6 +1017,7 @@ export default function FormularSmeny({
                 </button>
               ) : null}
               <button
+                ref={smazatRef}
                 type="button"
                 onClick={() => setPtaSeNaSmazani(true)}
                 className="ft-tl ft-tl-male ft-tl-vedlejsi ds-smd-smazat"

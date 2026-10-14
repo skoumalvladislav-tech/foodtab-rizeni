@@ -985,6 +985,10 @@ span.ds-sm-dl { cursor: default; }
   background: color-mix(in srgb, var(--bad) 8%, var(--card));
 }
 .ds-sm-potvrzeni p { margin: 0; font-size: 15px; color: var(--ink); }
+/* Vysvětlující věta pod otázkou („Zůstane vidět jako zrušená…“) — tlumeně jako na
+   počítači. Do 14. 10. 2026 nesla třídu jednořádkového údaje .ds-sm-mista (nowrap +
+   výpustka) a na telefonu se uřízla na „až roz…“. */
+.ds-sm-potvrzeni p.ds-sm-potvrzeni-pozn { font-size: 14px; color: var(--muted); }
 .ds-sm-potvrzeni-akce { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 /* --- formulář „Přidat směnu“ -------------------------------------------- */

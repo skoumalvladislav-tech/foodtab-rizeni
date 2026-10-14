@@ -78,6 +78,21 @@ export default function DetailSmeny({
     stav: "nic",
   });
   const volbaRef = useRef<HTMLInputElement>(null);
+  /*
+    Kam s fokusem, když tlačítko, které ho mělo, zmizí: „Zrušit směnu“
+    nahradí otázka, „Zpět“ zmizí i s ní. Bez toho spadne fokus na <body>
+    a čtečka neví, co se stalo. Na otázku, ne na „Zrušit směnu“ v ní —
+    Enter by směnu rovnou zrušil. Stejně formular-smeny.tsx na počítači.
+  */
+  const otazkaRef = useRef<HTMLParagraphElement>(null);
+  const smazatRef = useRef<HTMLButtonElement>(null);
+  const ptaloSe = useRef(pta);
+  useEffect(() => {
+    if (ptaloSe.current === pta) return;
+    ptaloSe.current = pta;
+    if (pta) (otazkaRef.current ?? volbaRef.current)?.focus();
+    else smazatRef.current?.focus();
+  }, [pta]);
 
   useEffect(() => {
     if (stavSmazani.stav === "hotovo") {
@@ -355,12 +370,12 @@ export default function DetailSmeny({
             {pta ? (
               <div className="ds-sm-potvrzeni">
                 {viceDni ? null : (
-                  <p>
+                  <p ref={otazkaRef} tabIndex={-1}>
                     <b>{jeVydana ? "Zrušit tuhle směnu?" : "Smazat tuhle směnu?"}</b>
                   </p>
                 )}
                 {!viceDni && jeVydana ? (
-                  <p className="ds-sm-mista">Zůstane vidět jako zrušená a lidem zmizí, až rozpis vydáte.</p>
+                  <p className="ds-sm-potvrzeni-pozn">Zůstane vidět jako zrušená a lidem zmizí, až rozpis vydáte.</p>
                 ) : null}
                 {/* Bez `name` a mimo formulář — do formuláře jedné směny nic nepřidá, jen přepne na víc dnů. */}
                 {stavRuseni.stav === "hotovo" ? null : (
@@ -408,7 +423,7 @@ export default function DetailSmeny({
                 )}
               </div>
             ) : (
-              <button type="button" className="ds-sm-tl ds-sm-tl-nebezpeci" onClick={() => setPta(true)}>
+              <button ref={smazatRef} type="button" className="ds-sm-tl ds-sm-tl-nebezpeci" onClick={() => setPta(true)}>
                 <Ikona klic="kos" velikost={18} />
                 {jeVydana ? "Zrušit směnu" : "Smazat směnu"}
               </button>

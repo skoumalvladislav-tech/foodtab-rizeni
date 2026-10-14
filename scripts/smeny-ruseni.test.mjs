@@ -844,6 +844,46 @@ je(
 je('zaškrtávátko „…i v jiné dny“ 20 px v mosazi', /\.ds-sm-rv-volba input \{[^}]*width: 20px; height: 20px;[^}]*accent-color: var\(--mosaz\)/.test(css), true)
 je('samotné „Zpět“ přes celou šířku — jen uvnitř .ds-sm-rv', css.includes('.ds-sm-rv .ds-sm-potvrzeni-akce > :only-child { grid-column: 1 / -1; }'), true)
 je('… potvrzení jedné směny (vždy dvě tlačítka) se nemění', /^\.ds-sm-potvrzeni-akce > :only-child/m.test(css), false)
+je(
+  'věta pod otázkou na telefonu tlumeně a zalomená (přebije `.ds-sm-potvrzeni p`)',
+  /\.ds-sm-potvrzeni p\.ds-sm-potvrzeni-pozn \{[^}]*color: var\(--muted\)/.test(css) && !/\.ds-sm-potvrzeni-pozn \{[^}]*nowrap/.test(css),
+  true,
+)
+je(
+  '… a detail ji už nekreslí třídou jednořádkového údaje .ds-sm-mista (uřízla se na „až roz…“)',
+  /<p className="ds-sm-mista">Zůstane vidět/.test(cist('app/[rozsah]/smeny/mobil/detail.tsx')),
+  false,
+)
+
+/*
+  Fokus, když zaměřené tlačítko zmizí. Do 14. 10. 2026 ho omylem chytal
+  panel (Drawer bral fokus při každém překreslení — scripts/ui-okna.test.mjs);
+  po opravě Draweru by spadl na <body>. Chování ověřeno klávesnicí
+  v headless Chrome, tady se hlídá zapojení.
+*/
+console.log('\n== Fokus v potvrzení smazání ==')
+for (const [soubor, prepinac] of [
+  ['app/[rozsah]/smeny/formular-smeny.tsx', 'ptaSeNaSmazani'],
+  ['app/[rozsah]/smeny/mobil/detail.tsx', 'pta'],
+]) {
+  const zdroj = cist(soubor)
+  je(`${soubor}: otázka „…tuhle směnu?“ má ref a jde zaměřit`, /<p ref=\{otazkaRef\} tabIndex=\{-1\}/.test(zdroj), true)
+  je(`${soubor}: tlačítko „Smazat/Zrušit směnu“ má ref`, /ref=\{smazatRef\}[\s\S]{0,120}onClick=\{\(\) => setPta(SeNaSmazani)?\(true\)\}/.test(zdroj), true)
+  je(
+    `${soubor}: otevření potvrzení zaměří otázku, „Zpět“ tlačítko — jen při změně, ne při prvním vykreslení`,
+    new RegExp(
+      `if \\(ptaloSe\\.current === ${prepinac}\\) return;?\\s*ptaloSe\\.current = ${prepinac};?\\s*` +
+        `if \\(${prepinac}\\) \\(otazkaRef\\.current \\?\\? volbaRef\\.current\\)\\?\\.focus\\(\\);?\\s*else smazatRef\\.current\\?\\.focus\\(\\)`,
+    ).test(zdroj),
+    true,
+  )
+}
+je(
+  'panel: výsledek uložení dostane fokus (nahradí formulář i s tlačítkem „Uložit“)',
+  /if \(stav\.stav === 'hotovo'\) vysledekRef\.current\?\.focus\(\)/.test(zdrojFormulare) &&
+    zdrojFormulare.split('<p ref={vysledekRef} tabIndex={-1}').length - 1 === 2,
+  true,
+)
 
 console.log(chyb === 0 ? '\n  VŠECHNY KONTROLY PROŠLY\n' : `\n  CHYB: ${chyb}\n`)
 process.exit(chyb === 0 ? 0 : 1)

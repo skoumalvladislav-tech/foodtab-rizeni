@@ -84,7 +84,8 @@ export default function PrehledDochazky({
   } | null;
 }) {
   const [vybrana, setVybrana] = useState<string | null>(vybranaZUrl);
-  // Stálá funkce: Drawer má efekt závislý na onZavrit (fokus).
+  // Stálá funkce — od 14. 10. 2026 už ne nutná, Drawer si onZavrit drží
+  // v refu (components/ui/fokus-okna.tsx).
   const zavritDetail = useCallback(() => setVybrana(null), []);
   const { souhrn, radky } = data;
 
