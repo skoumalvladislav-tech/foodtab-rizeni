@@ -3,6 +3,9 @@ import 'server-only'
 import { timingSafeEqual } from 'node:crypto'
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { NextResponse } from 'next/server'
+
+import { funkceNeexistuje } from '@/lib/supabase/dotaz'
 
 /**
  * Klient pro naplánované úlohy.
@@ -97,4 +100,81 @@ export function tajemstviSedi(prislo: string | null, ocekavane: string | undefin
   if (a.length !== b.length) return false
 
   return timingSafeEqual(a, b)
+}
+
+/**
+ * Zámek proti dvojímu spuštění téže úlohy.
+ *
+ * ---------------------------------------------------------------------
+ * PROČ
+ *
+ * Úlohy volají dva plánovače: pg_cron v databázi a GitHub Actions jako
+ * záloha (docs/planovac-pg-cron.md). Když přijdou naráz, některé úlohy
+ * udělají práci dvakrát — dva pushe „Čekají na vás zprávy", dva
+ * koncepty příspěvku. Zámek drží `public.uloha_zabrat` v databázi:
+ * první volání úlohu zabere na její limit, každé další v té době
+ * dostane `{ bezi_jinde: true }` a nedělá nic. Zámek vyprší sám.
+ *
+ * ---------------------------------------------------------------------
+ * POUŽITÍ — hned za ověřením tajemství, nikdy před ním
+ *
+ *   const bezi = await uzBezi('jmeno-ulohy')
+ *   if (bezi) return bezi
+ *
+ * Jméno = složka v `app/api/uloha/` = řádek v `app.planovac_ulohy`.
+ * Hlídá to scripts/planovac.test.mjs.
+ *
+ * Vrací odpověď, kterou má adresa hned vrátit, nebo `null` = pokračuj.
+ *
+ * ---------------------------------------------------------------------
+ * KDY SE POKRAČUJE BEZ ZÁMKU
+ *
+ * Jen když funkce v databázi ještě NENÍ (kód se nasadí sloučením,
+ * migrace až db push). Úloha pak běží jako dřív. Jiná chyba zámku je
+ * porucha a končí 500 — tiše pustit úlohu bez zámku by vypadalo stejně
+ * jako zámek, který funguje.
+ */
+export async function uzBezi(uloha: string): Promise<NextResponse | null> {
+  const supabase = klientUlohy()
+  // Bez klíče úloha stejně nic neudělá a řekne to sama (503).
+  if (!supabase) return null
+
+  const { data, error } = await supabase.rpc('uloha_zabrat', { p_uloha: uloha })
+
+  if (error) {
+    if (funkceNeexistuje(error)) {
+      console.warn(`[${uloha}] zámek úlohy čeká na migraci 20261014120000_planovac_pg_cron — běží bez něj`)
+      return null
+    }
+    console.error(`[${uloha}] zámek úlohy selhal:`, error.code, error.message)
+    // Bez textu chyby: odpověď končí ve veřejném logu GitHub Actions.
+    return NextResponse.json({ chyba: 'Zámek úlohy selhal.' }, { status: 500 })
+  }
+
+  if (data === true) return null
+  if (data === false) return NextResponse.json({ bezi_jinde: true })
+
+  console.error(`[${uloha}] zámek úlohy vrátil nečekanou hodnotu:`, data)
+  return NextResponse.json({ chyba: 'Zámek úlohy selhal.' }, { status: 500 })
+}
+
+/**
+ * Uvolnit zámek hned po doběhnutí — jen u úlohy, kterou plánovač volá
+ * ve SMYČCE, dokud odpovídá `pokracovat: true` (faktury-z-emailu.yml,
+ * až 15 kol za sebou). Bez uvolnění by druhé kolo narazilo na vlastní
+ * zámek z prvního a dohánění by se zastavilo po jednom kole.
+ *
+ * Ostatní úlohy zámek schválně nechávají vypršet: drží tak i krátký
+ * odstup mezi plánovači (Fio odmítne druhé volání do 30 s).
+ *
+ * Chyba se jen zapíše — zámek stejně vyprší sám.
+ */
+export async function uvolnitUlohu(uloha: string): Promise<void> {
+  const supabase = klientUlohy()
+  if (!supabase) return
+
+  const { error } = await supabase.rpc('uloha_uvolnit', { p_uloha: uloha })
+  if (error && !funkceNeexistuje(error)) {
+    console.error(`[${uloha}] uvolnění zámku selhalo:`, error.code, error.message)
+  }
 }

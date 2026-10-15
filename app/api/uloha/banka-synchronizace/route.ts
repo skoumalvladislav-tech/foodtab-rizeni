@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { tajemstviSedi } from '@/lib/supabase/uloha'
+import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
 import { synchronizovatFioPripojeni, vsechnaAktivniFioPripojeni } from '@/lib/integrace-fio-sync'
 import { synchronizovatSaltEdgePripojeni, vsechnaAktivniSaltEdgePripojeni } from '@/lib/integrace-saltedge-sync'
 import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
@@ -36,6 +36,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (!tajemstviSedi(prislo, process.env.CRON_SECRET)) {
     return NextResponse.json({ chyba: 'Nepovoleno.' }, { status: 401 })
   }
+
+  // Druhý plánovač (pg_cron vedle GitHubu) nesmí tutéž úlohu pustit podruhé.
+  const bezi = await uzBezi('banka-synchronizace')
+  if (bezi) return bezi
 
   const zacatek = Date.now()
   const [fioPripojeni, saltEdgePripojeni, kbPripojeni] = await Promise.all([vsechnaAktivniFioPripojeni(), vsechnaAktivniSaltEdgePripojeni(), vsechnaAktivniKbPripojeni()])
