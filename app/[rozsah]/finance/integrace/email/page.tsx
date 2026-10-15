@@ -181,7 +181,7 @@ export default async function FinanceIntegraceEmail({
               U Gmailu/Outlooku použijte aplikační heslo, ne hlavní heslo k účtu. Appka přístup před uložením živě ověří.
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '12px' }}>
               <label>
                 <span style={popisek}>Název (volitelné)</span>
                 <input type="text" name="nazev" placeholder="např. Faktury — hlavní schránka" style={pole} />

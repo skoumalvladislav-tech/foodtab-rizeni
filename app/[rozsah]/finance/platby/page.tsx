@@ -469,7 +469,7 @@ export default async function FinancePlatby({
                 správnou fakturu — zopakujte se stejnou platbou a zbývající částkou.
               </p>
             </div>
-            <form action={potvrditParovani} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', alignItems: 'end' }}>
+            <form action={potvrditParovani} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '12px', alignItems: 'end' }}>
               <input type="hidden" name="rozsah" value={rozsah} />
               <label>
                 <span style={popisek}>Platba *</span>
@@ -588,7 +588,7 @@ export default async function FinancePlatby({
                   : 'Nejdřív založte platební účet níže.'}
               </p>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
                 <label>
                   <span style={popisek}>Účet *</span>
                   <select name="ucet_id" required style={pole}>
@@ -695,7 +695,7 @@ export default async function FinancePlatby({
                 Účet se založí pro pobočku {nazevPobocky} — jeho platby uvidíte tady i v pohledu Celá firma.
               </p>
             ) : null}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
               <label>
                 <span style={popisek}>Název *</span>
                 <input type="text" name="nazev" required placeholder="např. Hlavní bankovní účet" style={pole} />

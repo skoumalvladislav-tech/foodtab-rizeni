@@ -199,7 +199,7 @@ export default async function FinanceZakazkaDetail({
             <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
               Platba se zapíše do Plateb jako běžný příjem a propojí se s touto zakázkou — žádné dvojí počítání v cashflow.
             </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
               <select name="ucet_id" required style={pole}>
                 {ucty.map((u) => <option key={u.id} value={u.id}>{u.nazev}</option>)}
               </select>

@@ -175,7 +175,7 @@ export function PrijemFakturPanel({
       ) : null}
 
       {nastaveni.zapnuto || !nicNeni ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '6px 12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(150px, 100%), 1fr))', gap: '6px 12px' }}>
           {pocty.map((p) => (
             <div key={p.klic} style={{ fontSize: '12.5px' }}>
               <span style={{ fontSize: '16px', fontWeight: 600, color: p.pocet > 0 && p.barva ? p.barva : 'inherit' }}>{p.pocet}</span>{' '}

@@ -97,7 +97,7 @@ export default async function FinanceCashflow({
         oci="Finance"
         popis={`${naPobocce ? 'Výhled na 13 týdnů. ' : ''}Scénář: ${NAZVY_SCENARU[scenar]} (${popisPredpokladu(scenar)}). Zůstatek se počítá z plánu, skutečnost aktuálního týdne je jen informativní.`}
         vpravo={
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {(Object.keys(NAZVY_SCENARU) as Scenar[]).map((s) => (
               <a
                 key={s}

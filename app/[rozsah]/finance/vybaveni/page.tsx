@@ -155,7 +155,7 @@ export default async function FinanceVybaveni({
           <form action={zalozitVybaveni} style={{ ...karta, display: 'grid', gap: '14px' }}>
             <input type="hidden" name="rozsah" value={rozsah} />
             <h2 style={{ margin: 0, fontSize: '15px' }}>Nové vybavení</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: '12px' }}>
               <label>
                 <span style={popisek}>Název *</span>
                 <input type="text" name="nazev" required placeholder="např. Konvektomat" style={pole} />

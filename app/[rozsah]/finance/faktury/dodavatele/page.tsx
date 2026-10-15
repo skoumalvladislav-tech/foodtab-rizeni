@@ -128,7 +128,7 @@ export default async function FakturyDodavatele({
             {dotaz ? 'Žádný dodavatel neodpovídá hledání.' : 'Zatím žádné faktury s vyplněným dodavatelem.'}
           </p>
         ) : (
-          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))' }}>
             {dodavatele.map((d) => {
               const barva = barvaDodavatele(d.jmeno)
               let stitek = { bg: 'var(--dobre-bg)', barva: 'var(--dobre)', text: 'V pořádku' }

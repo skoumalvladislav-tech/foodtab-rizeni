@@ -150,7 +150,7 @@ export default function ObsahPokladen({
                         <input type="hidden" name="id" value={p.id} />
                         <div style={{ fontSize: '13px', fontWeight: 600 }}>Provozovny v pokladně → pobočky v appce</div>
                         {provozovny.map((o) => (
-                          <label key={o.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, 1fr) minmax(180px, 1.2fr)', gap: '10px', alignItems: 'center' }}>
+                          <label key={o.id} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(160px, 100%), 1fr))', gap: '10px', alignItems: 'center' }}>
                             <span style={{ fontSize: '13.5px' }}>
                               {o.nazev}
                               <span style={{ display: 'block', ...drobne }}>{stavHistorie(o, ucet.historie_od)}</span>
@@ -230,7 +230,7 @@ export default function ObsahPokladen({
                     </ol>
 
                     {popis.klic === 'dotykacka' && prihlaseniDotykacka ? (
-                      <form action={zahajitPrihlaseniDotykacka} style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', alignItems: 'end' }}>
+                      <form action={zahajitPrihlaseniDotykacka} style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', alignItems: 'end' }}>
                         <input type="hidden" name="rozsah" value={rozsah} />
                         {vyberHistorie}
                         <div>
@@ -244,7 +244,7 @@ export default function ObsahPokladen({
                         <input type="hidden" name="rozsah" value={rozsah} />
                         <input type="hidden" name="pokladna" value={popis.klic} />
                         {popis.klic === 'dotykacka' && prihlaseniDotykacka ? <div style={drobne}>…nebo vložte přístup ručně:</div> : null}
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
                           {popis.pole.map((p) => (
                             <label key={p.klic}>
                               <span style={popisek}>{p.nazev} *</span>

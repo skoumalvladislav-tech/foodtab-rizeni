@@ -61,7 +61,7 @@ export function KartaKb({
           ) : (
             <form action={zahajitPripojeniKb} style={{ display: 'grid', gap: '12px' }}>
               <input type="hidden" name="rozsah" value={rozsah} />
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
                 <label>
                   <span style={popisek}>Platební účet *</span>
                   <select name="platebni_ucet_id" required style={pole}>

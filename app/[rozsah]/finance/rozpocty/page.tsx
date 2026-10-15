@@ -292,7 +292,7 @@ export default async function FinanceRozpocty({
           <form action={zalozitRozpocet} style={{ ...karta, display: 'grid', gap: '14px' }}>
             <input type="hidden" name="rozsah" value={rozsah} />
             <h2 style={{ margin: 0, fontSize: '15px' }}>Zadat rozpočet</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(160px, 100%), 1fr))', gap: '12px' }}>
               {pobocka ? (
                 // Na pobočce bere akce pobočku z rozsahu adresy — skryté
                 // pole nečte (kdokoli si ho přepíše); „Celá firma" tu není.

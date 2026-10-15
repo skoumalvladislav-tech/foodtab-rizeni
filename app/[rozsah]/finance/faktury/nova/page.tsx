@@ -97,7 +97,7 @@ export default async function FakturyNova({
             <input type="text" name="supplier" required placeholder="např. Bidfood Czech Republic" style={pole} />
           </label>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '12px' }}>
             <label>
               <span style={popisek}>IČO dodavatele</span>
               <input type="text" name="supplier_ico" placeholder="12345678" style={pole} />

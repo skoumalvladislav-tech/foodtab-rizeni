@@ -132,7 +132,7 @@ export default async function FakturyPrehledy({ params }: { params: Promise<{ ro
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', display: 'grid', gap: '16px' }}>
-        <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+        <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(170px, 100%), 1fr))' }}>
           <div style={karta}>
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>Celkem sledováno</span>
             <div style={{ fontSize: '20px', marginTop: '4px' }}>{formatCastku(celkemSledovano, mena)}</div>
