@@ -1,22 +1,36 @@
 /**
- * Srovnatelná období pro trendy na Finance → Přehled.
+ * Srovnatelná období pro trendy na Finance → Přehled — čistá logika, bez
+ * importů.
  *
  * Do 14. 10. 2026 srovnával Přehled rozběhnutý měsíc (1.–14. 10.)
  * s CELÝM minulým měsícem (1.–30. 9.) — tržby proto v polovině měsíce
  * vždycky „padaly“ o desítky procent (Bernard Bar −47 %, firma −56,5 %),
  * i když se prodávalo stejně (kontrola v produkci 14. 10.).
  *
- *   * rozběhnutý měsíc (dnešek do něj patří) → 1.–dnes proti stejným
- *     dnům minulého měsíce, oříznutým na jeho konec (31. 3. proti 1.–28. 2.);
- *   * uzavřený (nebo budoucí) měsíc → celé měsíce jako dřív.
+ * Hodnoty na kartách jsou dál za CELÝ zobrazený měsíc. Jen TREND srovnává
+ * srovnatelné dny (`srovnaniMesice`):
+ *   * rozběhnutý měsíc → 1. až VČEREJŠEK (dnešek ještě běží a pokladna ho
+ *     dosílá) proti týmž dnům minulého měsíce, oříznutým na jeho konec
+ *     (31. 3. → 1.–30. 3. proti 1.–28. 2.);
+ *   * první den rozběhnutého měsíce (žádný ukončený den) a budoucí měsíc
+ *     → bez trendu na všech kartách;
+ *   * uzavřený měsíc → celý proti celému minulému.
+ * „Dnes" je PROVOZNÍ den (od 05:00, `provozniDen` v lib/pokladna-cas.ts),
+ * jako tržby z pokladen — ve 2 ráno 1. 11. pořád běží 31. 10.
  *
- * `castecne` říká, že předchozí období není celý měsíc — co se počítá
- * jen po celých měsících (mzdy, `vydelky_prehled`), se pak nesrovnává.
- *
- * Čistá funkce, bez importů — zkouší ji scripts/finance-obdobi.test.mjs.
+ * Testy: scripts/finance-obdobi.test.mjs (i že je Přehled a výpočet
+ * KPI opravdu používají) a scripts/pokladna-trzby.test.mjs.
  */
 
-export type Obdobi = { od: string; doData: string }
+export type Rozsah = { od: string; doData: string }
+
+export type SrovnaniMesice =
+  /** Uzavřený (minulý) měsíc — celý proti celému předchozímu. */
+  | { druh: 'cele' }
+  /** První den rozběhnutého měsíce, nebo budoucí měsíc — trend se nekreslí. */
+  | { druh: 'zadne' }
+  /** Rozběhnutý měsíc — dny 1…`dnu` proti týmž dnům předchozího měsíce. */
+  | { druh: 'stejne_dny'; dnu: number; aktualni: Rozsah; predchozi: Rozsah }
 
 const MESIC = /^\d{4}-(0[1-9]|1[0-2])$/
 const DATUM = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
@@ -30,7 +44,7 @@ function dva(n: number): string {
 }
 
 /** První a poslední den měsíce `RRRR-MM`. */
-export function hraniceMesice(mesic: string): Obdobi {
+export function hraniceMesice(mesic: string): Rozsah {
   if (!MESIC.test(mesic)) throw new Error(`Neplatný měsíc „${mesic}".`)
   const [r, m] = mesic.split('-').map(Number)
   return { od: `${mesic}-01`, doData: `${mesic}-${dva(posledniDen(r, m))}` }
@@ -43,26 +57,33 @@ export function predchoziMesic(mesic: string): string {
   return m === 1 ? `${r - 1}-12` : `${r}-${dva(m - 1)}`
 }
 
-export function srovnatelnaObdobi(mesic: string, dnes: string): { obdobi: Obdobi; predchozi: Obdobi; castecne: boolean } {
+/**
+ * Co se u trendu srovnává. `mesic` = zobrazený měsíc 'RRRR-MM', `dnes` =
+ * dnešní PROVOZNÍ den 'RRRR-MM-DD'.
+ */
+export function srovnaniMesice(mesic: string, dnes: string): SrovnaniMesice {
+  if (!MESIC.test(mesic)) throw new Error(`Neplatný měsíc „${mesic}".`)
   if (!DATUM.test(dnes)) throw new Error(`Neplatné datum „${dnes}".`)
-  const cele = hraniceMesice(mesic)
-  const minuly = predchoziMesic(mesic)
-  const celyMinuly = hraniceMesice(minuly)
-  if (dnes.slice(0, 7) !== mesic) return { obdobi: cele, predchozi: celyMinuly, castecne: false }
+  const bezi = dnes.slice(0, 7)
+  if (mesic < bezi) return { druh: 'cele' }
+  if (mesic > bezi) return { druh: 'zadne' }
 
-  const den = Number(dnes.slice(8, 10))
+  // Ukončené dny rozběhnutého měsíce: 1. až včerejšek.
+  const dnu = Number(dnes.slice(8, 10)) - 1
+  if (dnu < 1) return { druh: 'zadne' }
+  const minuly = predchoziMesic(mesic)
   const [r, m] = minuly.split('-').map(Number)
-  const denMinuly = Math.min(den, posledniDen(r, m))
   return {
-    obdobi: { od: cele.od, doData: dnes },
-    predchozi: { od: celyMinuly.od, doData: `${minuly}-${dva(denMinuly)}` },
-    // Poslední den měsíce = vlastně celý měsíc proti celému minulému.
-    castecne: dnes !== cele.doData,
+    druh: 'stejne_dny',
+    dnu,
+    aktualni: { od: `${mesic}-01`, doData: `${mesic}-${dva(dnu)}` },
+    predchozi: { od: `${minuly}-01`, doData: `${minuly}-${dva(Math.min(dnu, posledniDen(r, m)))}` },
   }
 }
 
-/** „1.–14. 9." — popisek srovnávaného období u trendu (rozběhnutý měsíc). */
-export function popisCastecnehoObdobi(o: Obdobi): string {
-  const m = Number(o.od.slice(5, 7))
-  return `${Number(o.od.slice(8, 10))}.–${Number(o.doData.slice(8, 10))}. ${m}.`
+/** „1.–12. 9." (jeden den „1. 9.") — popisek srovnávaného rozsahu u trendu. */
+export function popisRozsahu(r: Rozsah): string {
+  const den = (d: string) => Number(d.slice(8, 10))
+  const mesic = Number(r.doData.slice(5, 7))
+  return den(r.od) === den(r.doData) ? `${den(r.od)}. ${mesic}.` : `${den(r.od)}.–${den(r.doData)}. ${mesic}.`
 }

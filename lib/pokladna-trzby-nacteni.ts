@@ -15,7 +15,7 @@ import { prevestPrehled, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-
  * lib/pokladna-trzby.ts) a o zobrazení banky rozhoduje stránka.
  *
  * `null` = funkce v databázi ještě není (kód nasazený dřív než
- * migrace 20261012200000) — stránka pak řekne „čeká na nasazení
+ * migrace 20261012200000) — stránka pak řekne „čeká na aktualizaci
  * databáze", nespadne. Jakákoli jiná chyba se vyhodí: prázdný přehled
  * by vypadal jako „žádné prodeje", a to je lež.
  */

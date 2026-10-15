@@ -28,11 +28,13 @@ const {
   radkyPoPobockach,
   soucet,
   pokrytiObdobi,
+  pokrytiRozsahu,
   trzbaObdobi,
   zacatekObdobi,
   zpusobyVRozsahu,
 } = await import('../lib/pokladna-trzby.ts')
 const { ZPUSOBY_PLATBY_DOTYKACKY } = await import('../lib/pokladna-dotykacka.ts')
+const { popisRozsahu, srovnaniMesice } = await import('../lib/finance-obdobi.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -213,6 +215,52 @@ console.log('\n== Pokladna pobočky: vlastní připojení, nebo přiřazená pro
     !pokladnaPatriPobocce({ branch_id: null, externi_ucet: null }, A)
     && !pokladnaPatriPobocce({ branch_id: null, externi_ucet: { provozovny: 'x' } }, A)
     && !pokladnaPatriPobocce({ branch_id: null, externi_ucet: { provozovny: [null, 5] } }, A))
+}
+
+console.log('\n== Trend na Přehledu: stejné dny rozběhnutého měsíce ==')
+{
+  const r = srovnaniMesice('2026-10', '2026-10-13')
+  ok('rozběhnutý měsíc 13. 10.: srovnávají se 1.–12. 10. proti 1.–12. 9. (dnešek ještě běží)',
+    r.druh === 'stejne_dny' && r.dnu === 12 && r.aktualni.od === '2026-10-01' && r.aktualni.doData === '2026-10-12'
+    && r.predchozi.od === '2026-09-01' && r.predchozi.doData === '2026-09-12')
+  ok('uzavřený měsíc: celý proti celému', srovnaniMesice('2026-09', '2026-10-13').druh === 'cele')
+  ok('první den měsíce: žádný ukončený den → trend se nekreslí', srovnaniMesice('2026-10', '2026-10-01').druh === 'zadne')
+  ok('budoucí měsíc: nic k srovnání', srovnaniMesice('2026-11', '2026-10-13').druh === 'zadne')
+  const brezen = srovnaniMesice('2026-03', '2026-03-31')
+  ok('31. 3.: 1.–30. 3. proti 1.–28. 2. (únor kratší — useknutý na poslední den)',
+    brezen.druh === 'stejne_dny' && brezen.predchozi.doData === '2026-02-28' && brezen.aktualni.doData === '2026-03-30')
+  const leden = srovnaniMesice('2027-01', '2027-01-10')
+  ok('leden srovnává s prosincem předchozího roku', leden.druh === 'stejne_dny' && leden.predchozi.od === '2026-12-01' && leden.predchozi.doData === '2026-12-09')
+  ok('popisek rozsahu „1.–12. 9."', r.druh === 'stejne_dny' && popisRozsahu(r.predchozi) === '1.–12. 9.')
+  ok('popisek jednoho dne „1. 9."', popisRozsahu({ od: '2026-09-01', doData: '2026-09-01' }) === '1. 9.')
+  ok('nesmyslný vstup → chyba', hodi(() => srovnaniMesice('2026-13', 'x')))
+
+  const den = prevestPrehled({ trzby: [
+    { obdobi: '2026-09-05', branch_id: A, trzba_haleru: 100, polozek: 1, dnu: 1, dnu_s_platbami: 0 },
+    { obdobi: '2026-09-20', branch_id: A, trzba_haleru: 900, polozek: 1, dnu: 1, dnu_s_platbami: 0 },
+    { obdobi: '2026-10-05', branch_id: A, trzba_haleru: 200, polozek: 1, dnu: 1, dnu_s_platbami: 0 },
+    { obdobi: '2026-10-05', branch_id: B, trzba_haleru: 50, polozek: 1, dnu: 1, dnu_s_platbami: 0 },
+  ], platby: [], zpusoby: [], banka: [] })
+  ok('součet stejných dnů září: jen do 12. 9. (100), ne celé září (1000)', pokrytiRozsahu(den, '2026-09-01', '2026-09-12', [A, B]).trzbaHaleru === 100)
+  ok('celé září z dat po dnech: 1000', pokrytiRozsahu(den, '2026-09-01', '2026-09-30', [A, B]).trzbaHaleru === 1000)
+  ok('pokrytí z rozsahu: říjen má obě pobočky, září jen A (trend se nesrovná)',
+    pokrytiRozsahu(den, '2026-10-01', '2026-10-12', [A, B]).uplne && !pokrytiRozsahu(den, '2026-09-01', '2026-09-12', [A, B]).uplne)
+  // Finance po pobočkách + stejné dny: Přehled skládá pokrytiRozsahu nad přehledem zúženým jenPobocka.
+  const rijenA = pokrytiRozsahu(jenPobocka(den, A), '2026-10-01', '2026-10-12', [A])
+  const zariA = pokrytiRozsahu(jenPobocka(den, A), '2026-09-01', '2026-09-12', [A])
+  ok('pobočka A, stejné dny: 200 proti 100 bez tržby B a se sadou [A] v obou (trend se srovná)',
+    rijenA.trzbaHaleru === 200 && zariA.trzbaHaleru === 100 && rijenA.pobocky.join() === A && zariA.pobocky.join() === A && rijenA.uplne)
+
+  // Kraje rozsahu jsou VČETNĚ: 1. den, poslední den okna trendu a poslední
+  // den měsíce. Částky jsou různé mocniny 10 — ze součtu je vidět, který den
+  // chybí nebo přebývá. Hodnota karty Tržby se teď sčítá z těchhle dnů.
+  const radekA = (obdobi, trzba_haleru) => ({ obdobi, branch_id: A, trzba_haleru, polozek: 1, dnu: 1, dnu_s_platbami: 0 })
+  const kraje = prevestPrehled({ trzby: [
+    radekA('2026-09-30', 1), radekA('2026-10-01', 10), radekA('2026-10-12', 100), radekA('2026-10-13', 1000), radekA('2026-10-31', 10000), radekA('2026-11-01', 100000),
+  ], platby: [], zpusoby: [], banka: [] })
+  ok('okno 1.–12. 10.: 1. i 12. den se počítají, 30. 9. a 13. 10. ne (110)', pokrytiRozsahu(kraje, '2026-10-01', '2026-10-12', [A]).trzbaHaleru === 110)
+  ok('celý říjen: od 1. do 31. včetně, bez 30. 9. a 1. 11. (11110)', pokrytiRozsahu(kraje, '2026-10-01', '2026-10-31', [A]).trzbaHaleru === 11110)
+  ok('jednodenní okno 1. 10.: jen ten den (10)', pokrytiRozsahu(kraje, '2026-10-01', '2026-10-01', [A]).trzbaHaleru === 10)
 }
 
 console.log('\n== Druhy plateb: appka = databáze ==')
