@@ -1237,6 +1237,14 @@ nezapnutý; alternativa je externí plánovač (cron-job.org utíná volání po
 30 s, pokladny a banky běží až 60 s; Upstash QStash zdarma jen do 1 000
 volání denně) — tajemství by pak leželo u třetí firmy.
 
+> **ROZHODNUTÍ ŠÉFÍKA (15. 10. 2026): „47 ano podle tebe."** Plánovač
+> v databázi se zapne (pg_cron + pg_net, tajemství ve Vaultu) postupem
+> z `docs/planovac-pg-cron.md`, oddíl 5. Kroky 1–2 (sloučení, db push) až
+> na výslovný pokyn; kroky 3–5 dělá Šéfík v Supabase (rozšíření, Data API,
+> Vault — tajemství nikdy do SQL Editoru); krok 6 `select * from
+> app.naplanovat_ulohy();`. Adresa aplikace pro `foodtab_app_url` je
+> `https://foodtab-rizeni.vercel.app`.
+
 ## 48. Finance po pobočkách — kdo je vidí a co v nich je
 
 **Vzniklo:** 13. 10. 2026. Šéfík: „mám otevřený Bernard Bar, budou
