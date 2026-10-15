@@ -6,12 +6,14 @@ import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { canSee, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { nactiFinanceKpi, type FinanceKpi } from '@/lib/finance-kpi'
+import { nactiFinanceKpi, type DvojiceTrendu, type FinanceKpi } from '@/lib/finance-kpi'
+import { popisZdrojeTrzeb } from '@/lib/finance-kpi-vypocet'
 import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
-import { popisCastecnehoObdobi, srovnatelnaObdobi } from '@/lib/finance-obdobi'
-import { denVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
+import { hraniceMesice, popisRozsahu, predchoziMesic, srovnaniMesice } from '@/lib/finance-obdobi'
+import { ZONA_VYCHOZI } from '@/lib/cas'
+import { provozniDen } from '@/lib/pokladna-cas'
 import { pokladnaPatriPobocce } from '@/lib/pokladna-trzby'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
@@ -91,33 +93,22 @@ function procentoNeboPomlcka(hodnota: number | null): string {
   return hodnota !== null ? `${hodnota.toFixed(1).replace('.', ',')} %` : '–'
 }
 
-/** Procentuální/bodová změna vůči předchozímu období — `null`, když se nedá srovnat (nulový základ nebo chybějící údaj). */
-function trend(aktualni: number, predchozi: number | null, jednotka: JednotkaTrendu, rustJeDobre: boolean): TrendKpi {
-  if (predchozi === null) return null
+/**
+ * Procentuální/bodová změna aktuálního okna trendu vůči předchozímu —
+ * `null`, když se nesrovnává (`lib/finance-kpi-vypocet.ts`) nebo je
+ * nulový základ.
+ */
+function trend(dvojice: DvojiceTrendu | null, jednotka: JednotkaTrendu, rustJeDobre: boolean): TrendKpi {
+  if (dvojice === null) return null
+  const { aktualni, predchozi } = dvojice
   if (jednotka === 'p. b.') return { zmena: aktualni - predchozi, jednotka, rustJeDobre }
   if (predchozi === 0) return null
   return { zmena: ((aktualni - predchozi) / Math.abs(predchozi)) * 100, jednotka, rustJeDobre }
 }
 
-/**
- * Má karta Tržby číslo? Ne, když se nenačetly, když je pobočka nemá
- * odkud vzít, nebo když pokladna pobočky za měsíc nic neposlala (data
- * má jen v tom předchozím) — „0 Kč" by tvrdilo, že nic neprodala.
- * Celá firma beze změny: tam „0 Kč · 0 z N provozoven" zůstává.
- */
-function trzbyMajiCislo(kpi: FinanceKpi, naPobocce: boolean): boolean {
-  if (kpi.zdrojTrzeb === 'nenacteno' || kpi.zdrojTrzeb === 'bez_zdroje') return false
-  return !(naPobocce && kpi.zdrojTrzeb === 'pokladna' && kpi.pokrytiPokladnou?.maji === 0)
-}
-
-function zdrojTrzeb(kpi: FinanceKpi, naPobocce: boolean): string {
-  if (kpi.zdrojTrzeb === 'nenacteno') return 'tržby z pokladen se nepodařilo načíst'
-  if (kpi.zdrojTrzeb === 'bez_zdroje') return 'pobočka nemá data z pokladny ani vlastní platební účet'
-  if (kpi.zdrojTrzeb === 'platby') return naPobocce ? 'z přijatých plateb na účty pobočky' : 'z přijatých plateb'
-  if (naPobocce) return kpi.pokrytiPokladnou?.maji === 0 ? 'pokladna pobočky za tento měsíc nic neposlala' : 'z pokladny pobočky'
-  return kpi.pokrytiPokladnou && kpi.pokrytiPokladnou.maji < kpi.pokrytiPokladnou.celkem
-    ? `z pokladen · ${kpi.pokrytiPokladnou.maji} z ${kpi.pokrytiPokladnou.celkem} provozoven`
-    : 'z pokladen'
+/** Dnešní PROVOZNÍ den (od 05:00, jako tržby z pokladen) — podle něj výchozí a rozběhnutý měsíc. */
+function provozniDnes(): string {
+  return provozniDen(Date.now(), '05:00', ZONA_VYCHOZI)
 }
 
 const STAV_INTEGRACE: Record<string, { stav: 'aktivni' | 'neaktivni' | 'cekajici' | 'chyba'; text: string }> = {
@@ -155,19 +146,18 @@ export default async function FinancePrehled({
   // Odkaz na obrazovku celé firmy jen tomu, kdo na „Celou firmu" smí (jako JenProFirmu).
   const smiNaFirmu = pristup.ctx.membership.scope === 'tenant'
 
-  // Dnešek v pásmu appky, ne UTC — kolem půlnoci by jinak výchozí měsíc i
-  // „rozběhnutý měsíc" ujely o den.
-  const dnes = denVPasmu(new Date(), ZONA_VYCHOZI)
+  // Provozní den v pásmu appky (ne UTC, ne kalendářní) — kolem půlnoci by
+  // jinak výchozí i „rozběhnutý" měsíc ujely o den proti tržbám z pokladen.
+  const dnes = provozniDnes()
   const mesic = mesicParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(mesicParam) ? mesicParam : dnes.slice(0, 7)
-  const mesicPredchozi = sousedniMesic(mesic, -1)
-  // Rozběhnutý měsíc se srovnává se STEJNÝMI dny minulého měsíce (1.–14. 10.
-  // proti 1.–14. 9.), uzavřený s celým minulým — lib/finance-obdobi.ts.
+  const mesicPredchozi = predchoziMesic(mesic)
+  // Hodnoty karet za celý měsíc; trend u rozběhnutého měsíce srovnává
+  // 1. až včerejšek s týmiž dny minulého (1.–13. 10. proti 1.–13. 9.),
+  // uzavřený celý s celým, první den měsíce nic — lib/finance-obdobi.ts.
   // Do 14. 10. 2026 se půlka měsíce srovnávala s celým minulým a tržby
   // vždycky „padaly" (v produkci −47 % u Bernard Baru, −56,5 % za firmu).
-  const srovnani = srovnatelnaObdobi(mesic, dnes)
-  const { od, doData } = srovnani.obdobi
-  const { od: odPredchozi, doData: doDataPredchozi } = srovnani.predchozi
-  const srovnaniS = srovnani.castecne ? popisCastecnehoObdobi(srovnani.predchozi) : nazevMesice(mesicPredchozi)
+  const srovnani = srovnaniMesice(mesic, dnes)
+  const srovnaniS = srovnani.druh === 'stejne_dny' ? popisRozsahu(srovnani.predchozi) : nazevMesice(mesicPredchozi)
 
   const supabase = await getServerSupabase()
   const { data: branchesData } = await supabase
@@ -179,7 +169,7 @@ export default async function FinancePrehled({
   const branches = (branchesData ?? []) as { id: string; name: string }[]
 
   const [kpi, bodyGrafu, pozornost, integraceRes] = await Promise.all([
-    nactiFinanceKpi(tenantId, pristup.ctx, branches, { od, doData }, { od: odPredchozi, doData: doDataPredchozi }, pobocka, srovnani.castecne).catch((): FinanceKpi | null => null),
+    nactiFinanceKpi(tenantId, pristup.ctx, branches, hraniceMesice(mesic), hraniceMesice(mesicPredchozi), srovnani, pobocka).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni', pobocka).catch(() => []),
     nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka).catch((): PolozkaPozornosti[] => []),
     supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav, branch_id, externi_ucet').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
@@ -220,30 +210,32 @@ export default async function FinancePrehled({
 
         {kpi ? (
           <div className="ds-kpi-mrizka">
+            {/* Trendy všech karet ze stejných oken (lib/finance-kpi-vypocet.ts) — `null` (první den měsíce, budoucí měsíc…) = bez šipky i popisku „vs.". */}
+            {/* Tržby bez dat „–" s důvodem, ne 0 Kč — to by tvrdilo, že se nic neprodalo. */}
             <FinanceKpiKarta
-              ikona="mince" titulek="Tržby" hodnota={trzbyMajiCislo(kpi, naPobocce) ? koruny(kpi.trzbyHaleru) : '–'}
-              zdroj={zdrojTrzeb(kpi, naPobocce)}
-              trend={trzbyMajiCislo(kpi, naPobocce) ? trend(kpi.trzbyHaleru, kpi.trzbyHaleruPredchozi, '%', true) : null}
+              ikona="mince" titulek="Tržby" hodnota={kpi.trzbyMajiData ? koruny(kpi.trzbyHaleru) : '–'}
+              zdroj={popisZdrojeTrzeb(kpi, naPobocce)}
+              trend={trend(kpi.trendTrzby, '%', true)}
               srovnaniS={srovnaniS}
             />
             {/* Pobočka bez vlastního účtu cashflow NEMÁ — „0 Kč" by tvrdilo, že se nic nepohnulo. */}
             <FinanceKpiKarta
               ikona="blesk" titulek="Cashflow" hodnota={kpi.pobockaBezUctu ? '–' : koruny(kpi.cashflowHaleru)}
               zdroj={kpi.pobockaBezUctu ? 'pobočka nemá vlastní platební účet' : naPobocce ? 'příjmy − výdaje z účtů pobočky' : 'příjmy − výdaje z plateb'}
-              trend={kpi.pobockaBezUctu ? null : trend(kpi.cashflowHaleru, kpi.cashflowHaleruPredchozi, '%', true)}
+              trend={trend(kpi.trendCashflow, '%', true)}
               srovnaniS={srovnaniS}
             />
             <FinanceKpiKarta
               ikona="vidlicka" titulek="Foodcost" hodnota={procentoNeboPomlcka(kpi.foodcostProcento)}
               // Na pobočce „–" s důvodem (za celou firmu beze změny).
               zdroj={naPobocce && kpi.foodcostProcento === null ? 'bez prodejů jídel se spárovanou recepturou' : undefined}
-              trend={kpi.foodcostProcento !== null ? trend(kpi.foodcostProcento, kpi.foodcostProcentoPredchozi, 'p. b.', false) : null}
+              trend={trend(kpi.trendFoodcost, 'p. b.', false)}
               srovnaniS={srovnaniS}
             />
             <FinanceKpiKarta
               ikona="napoj" titulek="Beverage cost" hodnota={procentoNeboPomlcka(kpi.beverageCostProcento)}
               zdroj={naPobocce && kpi.beverageCostProcento === null ? 'bez prodejů nápojů se spárovanou recepturou' : undefined}
-              trend={kpi.beverageCostProcento !== null ? trend(kpi.beverageCostProcento, kpi.beverageCostProcentoPredchozi, 'p. b.', false) : null}
+              trend={trend(kpi.trendBeverageCost, 'p. b.', false)}
               srovnaniS={srovnaniS}
             />
             {smiVidetMzdy ? (
@@ -256,11 +248,12 @@ export default async function FinancePrehled({
                     ? undefined
                     : kpi.nakladyPraceProcento !== null
                       ? `mzdy lidí s domovskou pobočkou „${nazevPobocky}“`
-                      : !trzbyMajiCislo(kpi, naPobocce)
+                      : !kpi.trzbyMajiData
                         ? 'bez tržeb pobočky to nejde spočítat'
                         : 'tržby pobočky za tento měsíc chybí nebo nejsou úplné'
                 }
-                trend={kpi.nakladyPraceProcento !== null ? trend(kpi.nakladyPraceProcento, kpi.nakladyPraceProcentoPredchozi, 'p. b.', false) : null}
+                // Mzdy jsou jen po celých měsících — trend jen u uzavřeného měsíce.
+                trend={trend(kpi.trendNakladyPrace, 'p. b.', false)}
                 srovnaniS={srovnaniS}
               />
             ) : null}

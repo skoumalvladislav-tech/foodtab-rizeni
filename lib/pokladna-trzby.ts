@@ -374,6 +374,15 @@ export function pokladnaPatriPobocce(
   return provozovny.some((p) => p !== null && typeof p === 'object' && (p as { branch_id?: unknown }).branch_id === branchId)
 }
 
+/**
+ * Totéž jako `pokrytiObdobi`, jen přes rozsah dní `od`–`doData` (včetně)
+ * z přehledu po dnech — pro srovnání stejných dnů dvou měsíců.
+ */
+export function pokrytiRozsahu(p: PrehledTrzeb, od: string, doData: string, aktivniPobocky: readonly string[]): ReturnType<typeof pokrytiObdobi> {
+  const vyber: PrehledTrzeb = { ...p, trzby: p.trzby.filter((t) => t.obdobi >= od && t.obdobi <= doData).map((t) => ({ ...t, obdobi: od })) }
+  return pokrytiObdobi(vyber, od, aktivniPobocky)
+}
+
 /** Tržba jednoho období (KPI na Přehledu) — přes všechny pobočky, které volající vidí. */
 export function trzbaObdobi(p: PrehledTrzeb, obdobi: string): { trzbaHaleru: number; maData: boolean } {
   let trzbaHaleru = 0

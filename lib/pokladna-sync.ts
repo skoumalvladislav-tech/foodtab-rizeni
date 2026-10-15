@@ -10,7 +10,7 @@ import { oknoProvoznihoDne, planDnu, provozniDen, vychoziHistorieOd } from './po
 import { kurzorHistorie, kurzoryKUlozeni, probehnoutBeh, type UkolBehu } from './pokladna-beh.ts'
 import { prirazeneProvozovny, type ExterniUcetPokladny, type ProvozovnaUctu } from './pokladna-prirazeni.ts'
 import type { ChybaPos, RelacePos } from './pos-provider-contract.ts'
-import { funkceNeexistuje } from './supabase/dotaz.ts'
+import { databazeMaPlatby, zapsatDen } from './pokladna-zapis.ts'
 
 export type { ExterniUcetPokladny, ProvozovnaUctu }
 
@@ -60,20 +60,6 @@ const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
  * ukončil časový strop dřív, než uloží postup a uvolní zámek.
  */
 export const REZERVA_BEHU_MS = 25_000
-
-/**
- * Datové chyby zápisu (mimo rozsah, neplatná hodnota, CHECK, NOT NULL):
- * když je způsobí platby, den se zapíše znovu s prázdnými platbami — prodeje
- * dne nesmí padnout kvůli rozpadu plateb (po třech pokusech by se den
- * přeskočil a prodeje by chyběly natrvalo).
- */
-const DATOVE_CHYBY = new Set(['22003', '22P02', '22023', '23502', '23514'])
-
-/** Má databáze tabulku plateb (migrace 20261012200000)? Jakákoli chyba = ne — běh pak jede jako dřív. */
-async function databazeMaPlatby(supabase: SupabaseClient): Promise<boolean> {
-  const { error } = await supabase.from('pokladna_platby_denni').select('id', { head: true }).limit(1)
-  return !error
-}
 
 export type VysledekSynchronizacePokladny =
   | { stav: 'ok'; zapsanoRadku: number; dnu: number; prazdnych: number; zbyvaDohnatDnu: number }
@@ -262,24 +248,14 @@ export async function synchronizovatPokladnu(pripojeniId: string, moznosti: { ko
       ? prodeje.platby.map((z) => ({ datum: den, zpusob: z.zpusob, nazev: z.nazev, druh: z.druh, pocet: z.pocet, castka_haleru: z.castkaHaleru }))
       : null
     if (platby && prodeje.platbyNecitelne) dnuNecitelnychPlateb++
-    let { data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', platby ? { ...parametry, p_platby: platby } : parametry)
-    if (platby && error && funkceNeexistuje(error)) {
-      // Databáze `p_platby` ještě nezná (cache schématu po nasazení migrace).
-      // Den se zapíše bez plateb a zbytek běhu se už neptá; kurzor plateb se
-      // na konci neposune, takže se ty dny stáhnou znovu.
-      platbyZapsany = false
-      ;({ data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', parametry))
-    } else if (platby && platby.length > 0 && error && DATOVE_CHYBY.has(error.code ?? '')) {
-      // Rozpad plateb databáze odmítla — prodeje dne nesmí padnout s ním.
-      // Prázdné platby: starý snímek dne zmizí, místo aby vypadal jako celý.
-      // Když neprojde ani tohle, chyba byla v prodejích, ne v platbách.
-      const kod = error.code
-      ;({ data: pocet, error } = await supabase.rpc('pokladna_nahradit_prodeje', { ...parametry, p_platby: [] }))
-      if (!error) nezapsanePlatby.push(`${o.nazev} ${den} (${kod})`)
-    }
-    if (error) return { stav: 'chyba', druh: 'jina', duvod: `Prodeje provozovny ${o.nazev} za ${den} se nepodařilo zapsat.` }
+    // Záložní cesty (databáze `p_platby` nezná, platby odmítla) — `lib/pokladna-zapis.ts`.
+    const zapis = await zapsatDen((args) => supabase.rpc('pokladna_nahradit_prodeje', args), parametry, platby)
+    // Kurzor plateb se pak na konci neposune, takže se ty dny stáhnou znovu.
+    if (zapis.databazeNeumiPlatby) platbyZapsany = false
+    if (zapis.platbyOdmitnuty) nezapsanePlatby.push(`${o.nazev} ${den} (${zapis.platbyOdmitnuty})`)
+    if (zapis.chyba) return { stav: 'chyba', druh: 'jina', duvod: `Prodeje provozovny ${o.nazev} za ${den} se nepodařilo zapsat.` }
 
-    zapsanoRadku += (pocet as number | null) ?? 0
+    zapsanoRadku += zapis.pocet
     vynechano += prodeje.vynechano
     return null
   }
