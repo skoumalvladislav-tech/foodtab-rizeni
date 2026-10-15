@@ -1534,6 +1534,20 @@ div.ds-smd-smena:hover { box-shadow: none; }
 }
 /* Den vybraný napevno (den rušené směny) — dvojitý okraj, kurzor bez kliku. */
 .ds-sm-vd-den[data-zamceno] { cursor: default; box-shadow: inset 0 0 0 1px var(--branch); }
+/* Den se směnou (rušení ve víc dnech, `oznacene`) — tečka pod číslem.
+   Na vybraném dni v barvě výběru, jinak mosaz; vzor v legendě pod mřížkou. */
+.ds-sm-vd-den[data-ma-smenu] { position: relative; }
+.ds-sm-vd-tecka, .ds-sm-vd-tecka-vzor {
+  display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--mosaz);
+}
+.ds-sm-vd-tecka { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); }
+.ds-sm-vd-den[data-vybrano] .ds-sm-vd-tecka { background: var(--branch); }
+/* Průhledná vrstva přes celý den jen kvůli bublince s časy (`title`) — skrytá
+   odečítači, ten má časy v popisku tlačítka. Klik projde na tlačítko. */
+.ds-sm-vd-bublina { position: absolute; inset: 0; border-radius: inherit; }
+/* `.ds-sm-rv p…` kvůli `.ds-sm-potvrzeni p` (15 px, inkoust) v detailu na telefonu. */
+.ds-sm-rv p.ds-sm-rv-legenda { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.ds-sm-vd-tecka-vzor { display: inline-block; flex: none; }
 /* Celá mřížka zamčená (`zakazano`) — rušení ve víc dnech během odesílání. */
 .ds-sm-vd-den:disabled, .ds-sm-vd-vic:disabled { cursor: default; opacity: .6; }
 

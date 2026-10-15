@@ -23,6 +23,7 @@
  */
 
 import { pondeliTydne, posunDatum } from './rozpis-mobil.ts'
+import { pocet } from './sklonovani.ts'
 
 /** Kolik týdnů okno nabízí napoprvé. */
 export const TYDNU_VYCHOZI = 4
@@ -104,4 +105,26 @@ export function barvaSouhrnu(vysledky: VysledekDne[]): string {
   if (zalozeno === 0) return 'var(--bad)'
   if (zalozeno === vysledky.length) return 'var(--dobre)'
   return 'var(--pozor)'
+}
+
+/**
+ * Časy směn jednoho dne do bublinky mřížky (`oznacene` ve vyber-dnu.tsx,
+ * rušení ve víc dnech): stejné časy sloučené — tři stejné neobsazené sloty
+ * jsou „3× 18:00–02:00“, ne tentýž čas třikrát. Pořadí podle prvního výskytu.
+ */
+export function casyDne(casy: string[]): string {
+  const skupiny = new Map<string, number>()
+  for (const c of casy) skupiny.set(c, (skupiny.get(c) ?? 0) + 1)
+  return [...skupiny].map(([c, n]) => (n > 1 ? `${n}× ${c}` : c)).join(', ')
+}
+
+/**
+ * Totéž do popisku dne pro odečítač: „má směnu 08:00–16:00“, „má 2 směny
+ * 08:00–16:00, 18:00–22:00“, „má 3 směny 18:00–02:00“. Bez směn prázdné.
+ */
+export function popisSmenDne(casy: string[]): string {
+  if (casy.length === 0) return ''
+  if (casy.length === 1) return `má směnu ${casy[0]}`
+  const jedenCas = new Set(casy).size === 1
+  return `má ${pocet(casy.length, 'směnu', 'směny', 'směn')} ${jedenCas ? casy[0] : casyDne(casy)}`
 }

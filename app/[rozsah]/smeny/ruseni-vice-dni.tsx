@@ -21,7 +21,7 @@ import {
 } from '@/lib/ruseni-smen'
 import { pocet } from '@/lib/sklonovani'
 import { prepnoutDen, TYDNU_KROK, TYDNU_MAX, TYDNU_VYCHOZI } from '@/lib/vyber-dnu'
-import { nahledRuseni } from './ruseni'
+import { dnySeSmenou, nahledRuseni } from './ruseni'
 import VyberDnu from './vyber-dnu'
 
 /**
@@ -101,6 +101,9 @@ export default function RuseniViceDni({
   const [chybaNahledu, setChybaNahledu] = useState<string | null>(null)
   const [nacita, setNacita] = useState(false)
   const [odeslanaVerze, setOdeslanaVerze] = useState<number | null>(null)
+  const [oznacene, setOznacene] = useState<{ dny: Record<string, string[]>; obsazena: boolean } | null>(null)
+  const [chybaOznaceni, setChybaOznaceni] = useState<string | null>(null)
+  const [obnovaZnacek, setObnovaZnacek] = useState(0)
 
   useEffect(() => {
     if (stav.stav === 'hotovo') router.refresh()
@@ -109,6 +112,44 @@ export default function RuseniViceDni({
   const platny = platnyNahled(nahled, vybrane)
   // Zamítnutí patří k náhledu, se kterým se odesílalo, a jen když akce neběží — viz `jeZamitnuto`.
   const zamitnuto = jeZamitnuto(stav, odeslanaVerze, nahled, ceka)
+
+  /*
+    Ve kterých dnech mřížky taková směna je (Šéfík 15. 10. 2026: „při rušení
+    směn potřebuji mít označené dny, kdy je směna v kalendáři, teď hádám“).
+    Za celé okno mřížky — jen čtení, stejné pravidlo jako náhled
+    (`dnySeSmenou` v ruseni.ts). Načte se po otevření a znovu po každém
+    náhledu (`obnovaZnacek`) a po odmítnutí potvrzení — obojí říká, že
+    rozpis se mohl změnit, a tečky nemají ukazovat starý stav. Pozdní
+    odpověď předchozího načtení zahodí `zruseno`. Během nového načtení
+    zůstanou staré tečky (nebliká to); při chybě zmizí a legenda řekne proč.
+
+    Serverové akce Next pouští po jedné: náhled spuštěný hned po otevření
+    počká, než první čtení doběhne (jedno čtení, vědomě přijato). Po náhledu
+    se proto značky načítají až PO něm, ne souběžně s ním.
+  */
+  const znovuPoZamitnuti = zamitnuto ? odeslanaVerze : null
+  useEffect(() => {
+    let zruseno = false
+    dnySeSmenou(rozsah, smena.id)
+      .then((r) => {
+        if (zruseno) return
+        if (r.stav === 'ok') {
+          setOznacene({ dny: r.dny, obsazena: r.obsazena })
+          setChybaOznaceni(null)
+        } else {
+          setOznacene(null)
+          setChybaOznaceni(r.text)
+        }
+      })
+      .catch(() => {
+        if (zruseno) return
+        setOznacene(null)
+        setChybaOznaceni('Dny se směnou se nepodařilo načíst.')
+      })
+    return () => {
+      zruseno = true
+    }
+  }, [rozsah, smena.id, obnovaZnacek, znovuPoZamitnuti])
 
   /*
     Fokus po čekání. „Ukázat, co se zruší“ i potvrzení jsou během čekání
@@ -155,6 +196,7 @@ export default function RuseniViceDni({
       setChybaNahledu('Náhled se nepodařilo načíst. Zkuste to znovu.')
     } finally {
       setNacita(false)
+      setObnovaZnacek((n) => n + 1)
     }
   }
 
@@ -177,12 +219,29 @@ export default function RuseniViceDni({
         pocetTydnu={pocetTydnu}
         zamcene={[den]}
         zakazano={ceka}
+        oznacene={oznacene?.dny}
         popisek="Dny, ve kterých se směny zruší nebo smažou"
         onPrepnout={(d) => setVybrane((v) => (d === den ? v : prepnoutDen(v, d)))}
         onVicTydnu={
           pocetTydnu < TYDNU_MAX ? () => setPocetTydnu((n) => Math.min(TYDNU_MAX, n + TYDNU_KROK)) : undefined
         }
       />
+      <p className="ds-sm-rv-legenda" aria-live="polite">
+        {oznacene ? (
+          <>
+            <span className="ds-sm-vd-tecka-vzor" aria-hidden="true" />
+            {/* Živá oblast ohlásí změnu — bez tečky by holá věta nedávala smysl. */}
+            <span className="sr-only">Dny se směnou jsou v mřížce označené. Tečka: </span>
+            {oznacene.obsazena
+              ? 'Den, kdy má tenhle člověk na pobočce směnu.'
+              : 'Den se stejnou neobsazenou směnou (pozice a čas).'}
+          </>
+        ) : chybaOznaceni ? (
+          `${chybaOznaceni} Vyberte dny podle rozpisu.`
+        ) : (
+          'Hledám, ve kterých dnech směna je…'
+        )}
+      </p>
       <p className="ds-sm-rv-vysvetleni">
         {vybrane.length < 2
           ? 'Vyberte v mřížce další dny.'
