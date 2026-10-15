@@ -53,8 +53,8 @@ function soubory(adresar) {
 console.log('\n== Společná pravidla (app/globals.css) ==')
 {
   const css = zdroj('app/globals.css')
-  ok('kořen stránky modulu: jediný sloupec minmax(0, 1fr), ne podle nejširšího obsahu',
-    /\.modul-obsah-vnitrek > \* \{ grid-template-columns: minmax\(0, 1fr\); \}/.test(css))
+  ok('kořen stránky modulu: jediný sloupec minmax(0, 1fr), ne podle nejširšího obsahu — s nulovou specifičností',
+    /:where\(\.modul-obsah-vnitrek\) > \* \{ grid-template-columns: minmax\(0, 1fr\); \}/.test(css))
   ok('tlačítka v záhlaví stránky se zalamují', /\.ft-hlava-vpravo \{[^}]*flex-wrap: wrap;[^}]*\}/.test(css))
 }
 

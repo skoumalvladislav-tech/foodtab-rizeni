@@ -871,8 +871,9 @@ a.ft-kebab-polozka:hover { background: var(--sunken); }
    tabulka v posuvném obalu ho neomezí — a celá stránka na telefonu
    přetekla (Finance → Přehled 535 px při šířce 360, 15. 10. 2026).
    S minmax(0, 1fr) se obsah vejde a široká tabulka se posouvá ve svém
-   obalu. Stránky, které si sloupce nastaví samy, to nemění (inline styl). */
-.modul-obsah-vnitrek > * { grid-template-columns: minmax(0, 1fr); }
+   obalu. Nulová specifičnost (:where) — stránka nebo třída, která si
+   sloupce nastaví sama, vyhraje vždycky, nezávisle na pořadí v souboru. */
+:where(.modul-obsah-vnitrek) > * { grid-template-columns: minmax(0, 1fr); }
 
 .modul-spodni { display: none; }
 
