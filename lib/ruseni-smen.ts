@@ -151,14 +151,15 @@ export function stejnyCas(a: string, b: string): boolean {
  *   jako výchozí — pak by dělená směna nebo jiný čas v jiném dni
  *   zůstaly stát.
  *
- *   NESYMETRIE, na kterou je potřeba odpověď: ve dni výchozí směny se
+ *   NESYMETRIE (součást otázky 49 bod 1 — Šéfík 15. 10. 2026 potvrdil,
+ *   že zůstává): ve dni výchozí směny se
  *   ruší JEN ona, v každém dalším dni VŠECHNO, co pravidlu odpovídá.
  *   Pobočka se třemi stejnými neobsazenými sloty „Číšník 10–22“ denně,
  *   která chce na příští týden ubrat jeden: ve výchozím dni zmizí jeden
  *   slot, v ostatních dnech všechny tři. U člověka ve výchozím dni
  *   zůstane jeho druhá směna, v jiných dnech zmizí všechny. Obrazovka
- *   to říká v textu u volby a náhled ukazuje každou směnu, ale pravidlo
- *   samo je otevřená otázka:
+ *   to říká v textu u volby a náhled ukazuje každou směnu. Kdyby se to
+ *   mělo změnit (otazky.md, otázka 49), jde o tyhle dvě otázky:
  *     - neobsazená: má se v každém dalším dni rušit jen tolik stejných
  *       slotů, kolik jich jde ve výchozím dni (tedy jeden)?
  *     - člověk: má se i ve výchozím dni rušit jeho další směna?
@@ -390,10 +391,16 @@ export function barvaRuseni(vysledky: VysledekRuseni[]): string {
   return 'var(--pozor)'
 }
 
-/** Stav náhledu (čtecí serverová akce `nahledRuseni`). */
-/** Výsledek akce `dnySeSmenou` (app/[rozsah]/smeny/ruseni.ts). */
-export type StavDnuSeSmenou = { stav: 'ok'; dny: Record<string, string[]> } | { stav: 'chyba'; text: string }
+/**
+ * Výsledek akce `dnySeSmenou` (app/[rozsah]/smeny/ruseni.ts). `obsazena`
+ * podle řádku v databázi, ne podle rozpisu v prohlížeči — legenda pod
+ * mřížkou pak vysvětluje totéž pravidlo, podle kterého jsou tečky.
+ */
+export type StavDnuSeSmenou =
+  | { stav: 'ok'; dny: Record<string, string[]>; obsazena: boolean }
+  | { stav: 'chyba'; text: string }
 
+/** Stav náhledu (čtecí serverová akce `nahledRuseni`). */
 export type StavNahledu =
   | { stav: 'ok'; dny: DenNahledu[] }
   | { stav: 'chyba'; text: string }

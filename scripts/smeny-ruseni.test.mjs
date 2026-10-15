@@ -55,6 +55,7 @@ import {
   vysledekZRpc,
 } from '../lib/ruseni-smen.ts'
 import { vyberDetailu } from '../lib/rozpis-mobil.ts'
+import { casyDne, popisSmenDne } from '../lib/vyber-dnu.ts'
 import { nactiKomponentu, nactiModul } from './vykreslit.mjs'
 
 let chyb = 0
@@ -980,6 +981,16 @@ console.log('\n== Dny se směnou: čistá funkce (stejné pravidlo jako náhled)
     { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['08:00–16:00'], '2026-10-17': ['08:00–16:00', '08:00–16:00'] },
   )
   je('čas směny „08:00–16:00“', casSmenyKRuseni({ starts_at: '08:00:00', ends_at: '16:00:00' }), '08:00–16:00')
+  je(
+    'časy dne do bublinky: stejné sloučené, pořadí podle prvního výskytu',
+    [casyDne(['08:00–16:00']), casyDne(['18:00–02:00', '18:00–02:00', '18:00–02:00']), casyDne(['08:00–16:00', '08:00–12:00', '08:00–16:00'])],
+    ['08:00–16:00', '3× 18:00–02:00', '2× 08:00–16:00, 08:00–12:00'],
+  )
+  je(
+    'popisek dne pro odečítač: číslo a tvar podle počtu',
+    [popisSmenDne([]), popisSmenDne(['08:00–16:00']), popisSmenDne(['08:00–16:00', '18:00–22:00']), popisSmenDne(Array(3).fill('18:00–02:00')), popisSmenDne(Array(5).fill('10:00–22:00'))],
+    ['', 'má směnu 08:00–16:00', 'má 2 směny 08:00–16:00, 18:00–22:00', 'má 3 směny 18:00–02:00', 'má 5 směn 10:00–22:00'],
+  )
   je('okno mřížky: 12 týdnů od pondělí týdne výchozí směny', oknoRuseni(ZAKLADNI_DEN), { od: '2026-10-12', doDne: '2027-01-03' })
   je(
     '… stejné okno, jaké hlídá ověření dnů (poslední den ano, den po něm ne)',
@@ -995,8 +1006,9 @@ console.log('\n== Dny se směnou: akce (jen čte, celé okno, stejné zúžení)
   je(
     'člověk: dny jeho směn v okně (i 20. 10.), výchozí den jen ona — ne druhá směna téhož dne, cizí firma, pobočka ani zrušená',
     d1,
-    { stav: 'ok', dny: { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['10:00–18:00'], '2026-10-16': ['08:00–16:00', '18:00–22:00'], '2026-10-20': ['08:00–16:00'] } },
+    { stav: 'ok', dny: { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['10:00–18:00'], '2026-10-16': ['08:00–16:00', '18:00–22:00'], '2026-10-20': ['08:00–16:00'] }, obsazena: true },
   )
+  je('id s mezerami: argumenty se srovnají jako u náhledu (`nacistZaklad`)', await akce.dnySeSmenou('cerna-perla', ' s0 '), d1)
   je('nic neruší', globalThis.__r.volani.filter((x) => x[0] === 'rpc').length, 0)
   je(
     'obě linie práv jako u náhledu',
@@ -1014,7 +1026,7 @@ console.log('\n== Dny se směnou: akce (jen čte, celé okno, stejné zúžení)
     ],
   )
   priprava()
-  je('neobsazená: jen stejné sloty (pozice a čas)', await akce.dnySeSmenou('cerna-perla', 'o0'), { stav: 'ok', dny: { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['08:00–16:00'] } })
+  je('neobsazená: jen stejné sloty (pozice a čas); `obsazena` z řádku v databázi', await akce.dnySeSmenou('cerna-perla', 'o0'), { stav: 'ok', dny: { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['08:00–16:00'] }, obsazena: false })
   priprava({ maxRadku: 2 })
   const useknuto = await akce.dnySeSmenou('cerna-perla', 's0')
   je('useknutá odpověď (limit řádků) → chyba, ne „tady nic není“', useknuto.stav === 'chyba' && /příliš mnoho/.test(useknuto.text), true)
@@ -1034,9 +1046,18 @@ console.log('\n== Dny se směnou: mřížka (vyber-dnu.tsx) ==')
   const den = (d) => html.match(new RegExp(`<button[^>]*aria-label="[^"]*${d}[^"]*"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? ''
   je('dva dny se směnou, dvě tečky', [(html.match(/data-ma-smenu=""/g) ?? []).length, (html.match(/class="ds-sm-vd-tecka"/g) ?? []).length], [2, 2])
   je(
-    'pátek 16.: čas v popisku pro odečítač i v bublince, tečka',
-    ['aria-label="Pátek 16. října, má směnu 08:00–16:00, 18:00–22:00"', 'title="08:00–16:00, 18:00–22:00"', 'ds-sm-vd-tecka'].every((x) => den('Pátek 16. října').includes(x)),
+    'pátek 16.: časy v popisku pro odečítač, bublinka na vrstvě skryté odečítači, tečka',
+    ['aria-label="Pátek 16. října, má 2 směny 08:00–16:00, 18:00–22:00"', '<span class="ds-sm-vd-bublina" title="08:00–16:00, 18:00–22:00" aria-hidden="true"></span>', 'ds-sm-vd-tecka'].every((x) => den('Pátek 16. října').includes(x)),
     true,
+  )
+  je('tlačítko samo `title` nemá (odečítač by časy přečetl podruhé jako popis)', /^<button[^>]*>/.exec(den('Pátek 16. října'))?.[0].includes('title='), false)
+  const tri = renderToStaticMarkup(
+    createElement(VyberDnu, { ...props, oznacene: { '2026-10-17': ['18:00–02:00', '18:00–02:00', '18:00–02:00'] } }),
+  )
+  je(
+    'tři stejné neobsazené sloty: „má 3 směny 18:00–02:00“, v bublince „3× 18:00–02:00“',
+    [tri.includes('aria-label="Sobota 17. října, má 3 směny 18:00–02:00"'), tri.includes('title="3× 18:00–02:00"')],
+    [true, true],
   )
   je('zamčený den výchozí směny: čas i „den této směny“', den('Středa 14. října').includes('Středa 14. října, má směnu 08:00–16:00, den této směny'), true)
   je('den bez směny (čtvrtek 15.) bez značky', !den('Čtvrtek 15. října').includes('data-ma-smenu') && !den('Čtvrtek 15. října').includes('ds-sm-vd-tecka'), true)
@@ -1047,12 +1068,24 @@ console.log('\n== Dny se směnou: mřížka (vyber-dnu.tsx) ==')
 console.log('\n== Dny se směnou: zapojení v okně rušení ==')
 {
   const rv = cist('app/[rozsah]/smeny/ruseni-vice-dni.tsx')
-  je('okno načte dny se směnou jednou po otevření (s ochranou proti pozdní odpovědi)',
+  je('okno načte dny se směnou po otevření (s ochranou proti pozdní odpovědi)',
     rv.includes("import { dnySeSmenou, nahledRuseni } from './ruseni'")
-      && /useEffect\(\(\) => \{\s*let zruseno = false\s*dnySeSmenou\(rozsah, smena\.id\)/.test(rv)
-      && /\}, \[rozsah, smena\.id\]\)/.test(rv),
+      && /useEffect\(\(\) => \{\s*let zruseno = false\s*dnySeSmenou\(rozsah, smena\.id\)/.test(rv),
     true)
-  je('… a předá je mřížce', rv.includes('oznacene={oznacene ?? undefined}'), true)
+  je('… a znovu po každém náhledu a po odmítnutí potvrzení (rozpis se mohl změnit)',
+    rv.includes('}, [rozsah, smena.id, obnovaZnacek, znovuPoZamitnuti])')
+      && rv.includes('const znovuPoZamitnuti = zamitnuto ? odeslanaVerze : null')
+      && /\} finally \{\s*setNacita\(false\)\s*setObnovaZnacek\(\(n\) => n \+ 1\)\s*\}/.test(rv),
+    true)
+  je('… při chybě staré tečky zmizí (legenda ukáže chybu, ne starý stav)',
+    /\} else \{\s*setOznacene\(null\)\s*setChybaOznaceni\(r\.text\)/.test(rv)
+      && /\.catch\(\(\) => \{\s*if \(zruseno\) return\s*setOznacene\(null\)/.test(rv),
+    true)
+  je('… a předá je mřížce', rv.includes('oznacene={oznacene?.dny}'), true)
+  je('legenda podle řádku v databázi (`obsazena`), ne podle rozpisu v prohlížeči',
+    /\{oznacene\.obsazena\s*\? 'Den, kdy má tenhle člověk na pobočce směnu\.'/.test(rv), true)
+  je('živá oblast legendy řekne odečítači, k čemu věta patří',
+    rv.includes('<span className="sr-only">Dny se směnou jsou v mřížce označené. Tečka: </span>'), true)
   je('legenda pod mřížkou: načítání, vysvětlení tečky (člověk / neobsazená) i chyba',
     ['Hledám, ve kterých dnech směna je…', 'Den, kdy má tenhle člověk na pobočce směnu.', 'Den se stejnou neobsazenou směnou (pozice a čas).', 'Vyberte dny podle rozpisu.'].every((t) => rv.includes(t)),
     true)
@@ -1060,6 +1093,9 @@ console.log('\n== Dny se směnou: zapojení v okně rušení ==')
   const css = cist('app/_komponenty.css')
   je('CSS: legenda drobně a tlumeně i v detailu na telefonu (přebije `.ds-sm-potvrzeni p`)',
     /\.ds-sm-rv p\.ds-sm-rv-legenda \{[^}]*font-size: 12\.5px;[^}]*color: var\(--muted\)/.test(css), true)
+  je('CSS: vrstva s bublinkou přes celý den (klik projde na tlačítko)',
+    /\.ds-sm-vd-den\[data-ma-smenu\] \{ position: relative; \}/.test(css) && /\.ds-sm-vd-bublina \{ position: absolute; inset: 0;/.test(css),
+    true)
   je('CSS: tečka pod číslem dne, na vybraném dni v barvě výběru',
     /\.ds-sm-vd-tecka \{ position: absolute;[^}]*bottom: 6px;/.test(css) && /\.ds-sm-vd-den\[data-vybrano\] \.ds-sm-vd-tecka \{ background: var\(--branch\); \}/.test(css),
     true)

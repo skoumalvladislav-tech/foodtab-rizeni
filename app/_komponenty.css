@@ -1542,6 +1542,9 @@ div.ds-smd-smena:hover { box-shadow: none; }
 }
 .ds-sm-vd-tecka { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); }
 .ds-sm-vd-den[data-vybrano] .ds-sm-vd-tecka { background: var(--branch); }
+/* Průhledná vrstva přes celý den jen kvůli bublince s časy (`title`) — skrytá
+   odečítači, ten má časy v popisku tlačítka. Klik projde na tlačítko. */
+.ds-sm-vd-bublina { position: absolute; inset: 0; border-radius: inherit; }
 /* `.ds-sm-rv p…` kvůli `.ds-sm-potvrzeni p` (15 px, inkoust) v detailu na telefonu. */
 .ds-sm-rv p.ds-sm-rv-legenda { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
 .ds-sm-vd-tecka-vzor { display: inline-block; flex: none; }

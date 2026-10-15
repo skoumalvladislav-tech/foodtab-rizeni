@@ -29,7 +29,9 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * Zrušení / smazání směny i v JINÉ DNY (Šéfík 14. 10. 2026: „potřebuji
  * u rušení směn označit více dní“).
  *
- * Dvě akce nad jedním výpočtem (`najitKeZruseni`):
+ * Tři akce nad společným načtením výchozí směny (`nacistZaklad`) a dotazem
+ * na kandidáty (`dotazKandidatu`); náhled a zrušení navíc sdílí výpočet
+ * `najitKeZruseni`:
  *
  *   nahledRuseni   jen ČTE — co by se ve vybraných dnech zrušilo/smazalo.
  *   zrusitViceDni  totéž spočítá ZNOVU a teprve pak ruší.
@@ -60,8 +62,9 @@ import { getServerSupabase } from '@/lib/supabase/server'
  * ---------------------------------------------------------------------
  * DOTAZ ZUŽUJE, PRAVIDLO ROZHODUJE
  *
- * Dotaz na kandidáty si řekne jen o pobočku výchozí směny, vybrané dny,
- * nezrušené směny a téhož člověka — u neobsazené výchozí směny o neobsazené
+ * Dotaz na kandidáty si řekne jen o pobočku výchozí směny, vybrané dny
+ * (u `dnySeSmenou` celé okno mřížky), nezrušené směny a téhož člověka —
+ * u neobsazené výchozí směny o neobsazené
  * se stejnou pozicí, začátkem i koncem. Není to druhá kopie pravidla „pro
  * jistotu“, ale strop velikosti odpovědi: bez zúžení by pobočka za dvanáct
  * týdnů přerostla limit řádků PostgRESTu (max_rows 1000, supabase/
@@ -71,9 +74,11 @@ import { getServerSupabase } from '@/lib/supabase/server'
  *
  * Pojistka za zúžením: dotaz si řekne i o počet (`count: 'exact'`) a je
  * seřazený. Když PostgREST vrátí méně řádků, než kolik jich odpovídá
- * (useknutí limitem), náhled i potvrzení se ODMÍTNOU — nikdy se nevydává
- * neúplný výsledek za „nic ke zrušení“ a náhled s potvrzením nemůžou
- * dostat dvě různé podmnožiny. Totéž pro strop `MAX_SMEN_RUSENI`.
+ * (useknutí limitem), náhled, potvrzení i značky v mřížce (`dnySeSmenou`)
+ * se ODMÍTNOU — nikdy se nevydává neúplný výsledek za „nic ke zrušení“
+ * a náhled s potvrzením nemůžou
+ * dostat dvě různé podmnožiny. Totéž pro strop `MAX_SMEN_RUSENI` (ten jen
+ * u náhledu a potvrzení).
  */
 
 const SLOUPCE = 'id, branch_id, employee_id, position_id, shift_date, starts_at, ends_at, status, published_at'
@@ -97,8 +102,14 @@ type Zaklad =
   | { stav: 'ok'; supabase: Supabase; tenantId: string; zaklad: SmenaKRuseni }
   | { stav: 'chyba'; text: string }
 
-/** Výchozí směna i s oběma kontrolami práv — společné pro všechny tři akce. */
-async function nacistZaklad(rozsah: string, smenaId: string): Promise<Zaklad> {
+/**
+ * Výchozí směna i s oběma kontrolami práv — společné pro všechny tři akce.
+ * Argumenty serverové akce jsou vstup z prohlížeče — typ se srovná tady,
+ * pro všechny akce stejně (i pro tu, která na to zapomene).
+ */
+async function nacistZaklad(rozsahVstup: string, smenaVstup: string): Promise<Zaklad> {
+  const rozsah = String(rozsahVstup ?? '')
+  const smenaId = String(smenaVstup ?? '').trim()
   if (!smenaId) return { stav: 'chyba', text: 'Nevím, kterou směnu mám zrušit.' }
 
   const tenantId = await getCurrentTenantId()
@@ -232,7 +243,7 @@ export async function dnySeSmenou(rozsah: string, smena: string): Promise<StavDn
   if (count === null || count > kandidati.length) {
     return { stav: 'chyba', text: 'Směn je v nabízených týdnech příliš mnoho — dny se směnou se neoznačí.' }
   }
-  return { stav: 'ok', dny: dnySeSmenouKRuseni(zaklad, kandidati) }
+  return { stav: 'ok', dny: dnySeSmenouKRuseni(zaklad, kandidati), obsazena: zaklad.employee_id !== null }
 }
 
 /**
@@ -327,6 +338,6 @@ export async function zrusitViceDni(_predchozi: StavRuseni, formData: FormData):
   // Obnovit rozpis, jen když se aspoň jedna směna opravdu změnila.
   if (vysledky.some((v) => v.chyba === null)) revalidatePath(`/${rozsah}/smeny`)
 
-  const dnySeSmenou = new Set(nalez.smeny.map((s) => s.shift_date))
-  return { stav: 'hotovo', smeny: vysledky, dnyBezSmen: nalez.dny.filter((d) => !dnySeSmenou.has(d)) }
+  const dnyRusenychSmen = new Set(nalez.smeny.map((s) => s.shift_date))
+  return { stav: 'hotovo', smeny: vysledky, dnyBezSmen: nalez.dny.filter((d) => !dnyRusenychSmen.has(d)) }
 }

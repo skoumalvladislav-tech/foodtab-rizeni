@@ -1,5 +1,5 @@
 import { cisloDne, jeVikend, popisDne, ZKRATKY_DNU } from "@/lib/rozpis-mobil";
-import { tydnyOkna } from "@/lib/vyber-dnu";
+import { casyDne, popisSmenDne, tydnyOkna } from "@/lib/vyber-dnu";
 
 /**
  * Mřížka pro výběr víc dnů — kreslí `formular-smeny.tsx`, když je zapnuté
@@ -17,7 +17,9 @@ import { tydnyOkna } from "@/lib/vyber-dnu";
  * Šéfík 14. 10. 2026). Tam je den rušené směny vybraný napevno
  * (`zamcene`) — ta se ruší v každém případě, kvůli ní se dialog otevřel —
  * a dny, kdy taková směna je, nesou tečku (`oznacene`, Šéfík 15. 10.:
- * „teď hádám“). Čas směny jde do popisku pro odečítač a do bublinky.
+ * „teď hádám“). Čas směny jde do popisku pro odečítač; bublinka pro myš
+ * (`title`) sedí na průhledné vrstvě skryté odečítači (`.ds-sm-vd-bublina`,
+ * aria-hidden) — na tlačítku samém by ho odečítač přečetl podruhé jako popis.
  */
 export default function VyberDnu({
   zacatek,
@@ -67,7 +69,7 @@ export default function VyberDnu({
               const zamcen = zamcenaMnozina.has(den);
               const vybran = zamcen || vybranaMnozina.has(den);
               const casy = oznacene?.[den] ?? [];
-              const smena = casy.length > 0 ? `, má směnu ${casy.join(", ")}` : "";
+              const smena = casy.length > 0 ? `, ${popisSmenDne(casy)}` : "";
               return (
                 <button
                   key={den}
@@ -77,7 +79,6 @@ export default function VyberDnu({
                   data-vikend={jeVikend(den) ? "" : undefined}
                   data-zamceno={zamcen ? "" : undefined}
                   data-ma-smenu={casy.length > 0 ? "" : undefined}
-                  title={casy.length > 0 ? casy.join(", ") : undefined}
                   aria-pressed={vybran}
                   aria-disabled={zamcen ? true : undefined}
                   aria-label={zamcen ? `${popisDne(den)}${smena}, den této směny — zůstává vybraný` : `${popisDne(den)}${smena}`}
@@ -85,7 +86,12 @@ export default function VyberDnu({
                   onClick={zamcen ? undefined : () => onPrepnout(den)}
                 >
                   {cisloDne(den)}
-                  {casy.length > 0 ? <span className="ds-sm-vd-tecka" aria-hidden="true" /> : null}
+                  {casy.length > 0 ? (
+                    <>
+                      <span className="ds-sm-vd-tecka" aria-hidden="true" />
+                      <span className="ds-sm-vd-bublina" title={casyDne(casy)} aria-hidden="true" />
+                    </>
+                  ) : null}
                 </button>
               );
             })}
