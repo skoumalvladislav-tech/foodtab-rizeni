@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs'
 
 const { hraniceMesice, popisRozsahu, predchoziMesic, srovnaniMesice } = await import('../lib/finance-obdobi.ts')
-const { popisZdrojeTrzeb, sestavitFinanceKpi } = await import('../lib/finance-kpi-vypocet.ts')
+const { popisZdrojeTrzeb, sestavitFinanceKpi, zmenaTrendu } = await import('../lib/finance-kpi-vypocet.ts')
 const { prevestPrehled } = await import('../lib/pokladna-trzby.ts')
 
 let chyb = 0
@@ -257,6 +257,38 @@ console.log('\n== Jiná sada poboček s pokladnou: trend tržeb se nesrovná =='
   ok('B poslala až v říjnu → trend tržeb null (ne „růst")', kpi !== null && kpi.trendTrzby === null && kpi.trzbyHaleru === 260)
 }
 
+console.log('\n== Rozběhnutý měsíc bez pokladny: tržby z plateb, trend 1.–12. ==')
+{
+  // Firma bez pokladny: tržby = příjmy plateb (řádek A + firemní účty).
+  const { kpi } = await kpiPro('2026-10', '2026-10-13', { ...ROZBEHNUTY, pokladny: null })
+  ok('hodnota Tržeb z plateb za celý říjen (11000), trend 1.–12. 10. (3000) proti 1.–12. 9. (2500), ne celý říjen',
+    kpi?.zdrojTrzeb === 'platby' && kpi.trzbyHaleru === 11000 && stejne(kpi.trendTrzby, { aktualni: 3000, predchozi: 2500 }))
+}
+
+console.log('\n== Pravidla karet z #132 a #136 ==')
+{
+  // B v říjnu nic neposlala → pokrytí 1 z 2; mzdy jsou za všechny pobočky,
+  // dělit je tržbou jedné by náklady práce přestřelilo.
+  const neuplne = { ...ROZBEHNUTY, pokladny: dny([['2026-09-05', A, 100], ['2026-09-06', B, 40], ['2026-10-05', A, 200]]) }
+  const k = (await kpiPro('2026-10', '2026-10-13', neuplne)).kpi
+  ok('celá firma, neúplné pokrytí (1 z 2): náklady práce se nepočítají („–"), ne 62 / 200',
+    k !== null && stejne(k.pokrytiPokladnou, { maji: 1, celkem: 2 }) && k.nakladyPraceProcento === null)
+  // Pobočka bez pokladních dat a bez vlastního účtu nemá tržby odkud vzít.
+  const bezZdroje = (await kpiPro('2026-10', '2026-10-13', { ...ROZBEHNUTY, pokladny: dny([['2026-09-05', A, 100], ['2026-10-05', A, 200]]), maUcet: false }, { pobocka: B })).kpi
+  ok('pobočka bez dat z pokladny i bez účtu: zdroj „bez_zdroje", „–" s důvodem, ne „0 Kč z přijatých plateb"',
+    bezZdroje?.zdrojTrzeb === 'bez_zdroje' && bezZdroje.trzbyMajiData === false && bezZdroje.trendTrzby === null
+    && popisZdrojeTrzeb(bezZdroje, true) === 'pobočka nemá data z pokladny ani vlastní platební účet')
+}
+
+console.log('\n== Šipka trendu: znaménko a jednotka (zmenaTrendu) ==')
+ok('růst o 10 % je +10, pokles o 10 % je −10',
+  zaokr(zmenaTrendu({ aktualni: 110, predchozi: 100 }, '%')) === 10 && zaokr(zmenaTrendu({ aktualni: 90, predchozi: 100 }, '%')) === -10)
+ok('procentní body jsou rozdíl: 25 % proti 20 % = +5 p. b., 20 % proti 25 % = −5 p. b.',
+  zmenaTrendu({ aktualni: 25, predchozi: 20 }, 'p. b.') === 5 && zmenaTrendu({ aktualni: 20, predchozi: 25 }, 'p. b.') === -5)
+ok('záporný základ (cashflow −100 → −50) je zlepšení: +50 %', zaokr(zmenaTrendu({ aktualni: -50, predchozi: -100 }, '%')) === 50)
+ok('nulový základ u procent a nesrovnané období: bez šipky',
+  zmenaTrendu({ aktualni: 5, predchozi: 0 }, '%') === null && zmenaTrendu(null, '%') === null && zmenaTrendu(null, 'p. b.') === null)
+
 console.log('\n== Stránka a lib/finance-kpi.ts to opravdu používají ==')
 {
   const stranka = zdroj('../app/[rozsah]/finance/page.tsx')
@@ -283,6 +315,14 @@ console.log('\n== Stránka a lib/finance-kpi.ts to opravdu používají ==')
     /titulek="Tržby" hodnota=\{kpi\.trzbyMajiData \? koruny\(kpi\.trzbyHaleru\) : '–'\}/.test(stranka)
     && /zdroj=\{popisZdrojeTrzeb\(kpi, naPobocce\)\}/.test(stranka))
   ok('mřížka grafů se na telefonu nevynucuje 360 px', /minmax\(min\(360px, 100%\), 1fr\)/.test(stranka) && !/minmax\(360px, 1fr\)/.test(stranka))
+  for (const cesta of ['../app/[rozsah]/finance/faktury/page.tsx', '../app/[rozsah]/finance/faktury/prehledy/page.tsx', '../app/[rozsah]/dochazka/page.tsx']) {
+    const s = zdroj(cesta)
+    ok(`${cesta.slice(3)}: mřížka se na telefonu nevynucuje 320 px`, /minmax\(min\(320px, 100%\), 1fr\)/.test(s) && !/minmax\(320px, 1fr\)/.test(s))
+  }
+  ok('šipka trendu se počítá přes zmenaTrendu (otestovanou výš), ne vlastním vzorcem na stránce',
+    /const zmena = zmenaTrendu\(dvojice, jednotka\)/.test(stranka) && !/\/ Math\.abs\(predchozi\)/.test(stranka))
+  ok('„← Dřívější" vede na týž předchozí měsíc, se kterým se srovnává (mesicPredchozi)',
+    /href=\{`\$\{zaklad\}\?mesic=\$\{mesicPredchozi\}`\}/.test(stranka) && !/sousedniMesic\(mesic, -1\)/.test(stranka))
 
   const kpi = zdroj('../lib/finance-kpi.ts')
   ok('nactiFinanceKpi počítá přes sestavitFinanceKpi se srovnani a pobočkou',

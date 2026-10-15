@@ -7,7 +7,7 @@ import { canSee, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiFinanceKpi, type DvojiceTrendu, type FinanceKpi } from '@/lib/finance-kpi'
-import { popisZdrojeTrzeb } from '@/lib/finance-kpi-vypocet'
+import { popisZdrojeTrzeb, zmenaTrendu } from '@/lib/finance-kpi-vypocet'
 import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
@@ -99,11 +99,8 @@ function procentoNeboPomlcka(hodnota: number | null): string {
  * nulový základ.
  */
 function trend(dvojice: DvojiceTrendu | null, jednotka: JednotkaTrendu, rustJeDobre: boolean): TrendKpi {
-  if (dvojice === null) return null
-  const { aktualni, predchozi } = dvojice
-  if (jednotka === 'p. b.') return { zmena: aktualni - predchozi, jednotka, rustJeDobre }
-  if (predchozi === 0) return null
-  return { zmena: ((aktualni - predchozi) / Math.abs(predchozi)) * 100, jednotka, rustJeDobre }
+  const zmena = zmenaTrendu(dvojice, jednotka)
+  return zmena === null ? null : { zmena, jednotka, rustJeDobre }
 }
 
 /** Dnešní PROVOZNÍ den (od 05:00, jako tržby z pokladen) — podle něj výchozí a rozběhnutý měsíc. */
@@ -195,7 +192,7 @@ export default async function FinancePrehled({
         }
         vpravo={
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <Link href={`${zaklad}?mesic=${sousedniMesic(mesic, -1)}`} className="ft-tl">← Dřívější</Link>
+            <Link href={`${zaklad}?mesic=${mesicPredchozi}`} className="ft-tl">← Dřívější</Link>
             <span style={{ fontSize: '13.5px', fontWeight: 600 }}>{nazevMesice(mesic)}</span>
             <Link href={`${zaklad}?mesic=${sousedniMesic(mesic, 1)}`} className="ft-tl">Pozdější →</Link>
           </div>

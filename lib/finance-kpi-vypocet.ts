@@ -256,6 +256,20 @@ export async function sestavitFinanceKpi(v: VstupKpi, nacti: NacitaniKpi): Promi
   }
 }
 
+/**
+ * Změna aktuálního okna trendu vůči předchozímu: `%` vůči předchozímu,
+ * `p. b.` jako rozdíl. `null` = nesrovnává se, nebo je u procent nulový
+ * základ. Kladná = vzrostlo (u záporného základu, třeba cashflow −100 → −50,
+ * taky kladná: zlepšení).
+ */
+export function zmenaTrendu(dvojice: DvojiceTrendu | null, jednotka: '%' | 'p. b.'): number | null {
+  if (dvojice === null) return null
+  const { aktualni, predchozi } = dvojice
+  if (jednotka === 'p. b.') return aktualni - predchozi
+  if (predchozi === 0) return null
+  return ((aktualni - predchozi) / Math.abs(predchozi)) * 100
+}
+
 /** Odkud je číslo na kartě Tržby — „–" na kartě musí říct proč. */
 export function popisZdrojeTrzeb(kpi: FinanceKpi, naPobocce: boolean): string {
   if (kpi.zdrojTrzeb === 'nenacteno') return 'tržby z pokladen se nepodařilo načíst'

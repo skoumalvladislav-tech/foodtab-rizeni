@@ -250,6 +250,17 @@ console.log('\n== Trend na Přehledu: stejné dny rozběhnutého měsíce ==')
   const zariA = pokrytiRozsahu(jenPobocka(den, A), '2026-09-01', '2026-09-12', [A])
   ok('pobočka A, stejné dny: 200 proti 100 bez tržby B a se sadou [A] v obou (trend se srovná)',
     rijenA.trzbaHaleru === 200 && zariA.trzbaHaleru === 100 && rijenA.pobocky.join() === A && zariA.pobocky.join() === A && rijenA.uplne)
+
+  // Kraje rozsahu jsou VČETNĚ: 1. den, poslední den okna trendu a poslední
+  // den měsíce. Částky jsou různé mocniny 10 — ze součtu je vidět, který den
+  // chybí nebo přebývá. Hodnota karty Tržby se teď sčítá z těchhle dnů.
+  const radekA = (obdobi, trzba_haleru) => ({ obdobi, branch_id: A, trzba_haleru, polozek: 1, dnu: 1, dnu_s_platbami: 0 })
+  const kraje = prevestPrehled({ trzby: [
+    radekA('2026-09-30', 1), radekA('2026-10-01', 10), radekA('2026-10-12', 100), radekA('2026-10-13', 1000), radekA('2026-10-31', 10000), radekA('2026-11-01', 100000),
+  ], platby: [], zpusoby: [], banka: [] })
+  ok('okno 1.–12. 10.: 1. i 12. den se počítají, 30. 9. a 13. 10. ne (110)', pokrytiRozsahu(kraje, '2026-10-01', '2026-10-12', [A]).trzbaHaleru === 110)
+  ok('celý říjen: od 1. do 31. včetně, bez 30. 9. a 1. 11. (11110)', pokrytiRozsahu(kraje, '2026-10-01', '2026-10-31', [A]).trzbaHaleru === 11110)
+  ok('jednodenní okno 1. 10.: jen ten den (10)', pokrytiRozsahu(kraje, '2026-10-01', '2026-10-01', [A]).trzbaHaleru === 10)
 }
 
 console.log('\n== Druhy plateb: appka = databáze ==')

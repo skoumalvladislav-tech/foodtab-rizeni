@@ -18,6 +18,7 @@ const { MAX_RADKU, overitDavku, rozebratKlicPrijmu, slozitKlicPrijmu } = await i
 const { automatickePrirazeni, prirazeneProvozovny, sloucitProvozovny, zkontrolovatPrirazeni } = await import('../lib/pokladna-prirazeni.ts')
 const { konecProPokladnu, kurzorHistorie, kurzoryKUlozeni, probehnoutBeh } = await import('../lib/pokladna-beh.ts')
 const { databazeMaPlatby, zapsatDen } = await import('../lib/pokladna-zapis.ts')
+const { readFileSync } = await import('node:fs')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -410,6 +411,20 @@ console.log('\n== Zápis dne: záložní cesty (podstrčená databáze) ==')
   ok('sonda: chybějící tabulka (PGRST205) → bez režimu plateb', !(await databazeMaPlatby(klient({ error: { code: 'PGRST205' } }))))
   ok('sonda se ptá GET dotazem na sloupec, ne HEAD (u HEAD klient Supabase chybějící tabulku přepíše na úspěch)',
     klient.posledni.s === 'id' && klient.posledni.volby?.head !== true)
+
+  // Kontroly výš sahají na lib/pokladna-zapis.ts; tady se hlídá, že je
+  // synchronizace opravdu používá a nemá vedle vlastní sondu ani přímý zápis
+  // bez záložních cest. Zdroj bez komentářů (hlavička tabulky jmenuje).
+  const sync = readFileSync(new URL('../lib/pokladna-sync.ts', import.meta.url), 'utf8')
+    .replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ok('synchronizace bere sondu i zápis dne z lib/pokladna-zapis.ts',
+    /import \{ databazeMaPlatby, zapsatDen \} from '\.\/pokladna-zapis\.ts'/.test(sync)
+    && /&& \(await databazeMaPlatby\(supabase\)\)/.test(sync))
+  ok('… bez vlastní sondy na tabulku plateb (žádný from(\'pokladna_platby_denni\') ani head: true)',
+    !/from\(['"]pokladna_platby_denni['"]\)/.test(sync) && !/head:\s*true/.test(sync))
+  ok('… a den zapisuje jen přes zapsatDen (jediné volání pokladna_nahradit_prodeje, uvnitř něj)',
+    (sync.match(/rpc\(['"]pokladna_nahradit_prodeje['"]/g) ?? []).length === 1
+    && /zapsatDen\(\(args\) => supabase\.rpc\('pokladna_nahradit_prodeje', args\), parametry, platby\)/.test(sync))
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')
