@@ -180,7 +180,7 @@ export default async function FakturyPrehled({ params }: { params: Promise<{ roz
           </div>
         ) : null}
 
-        <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+        <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(170px, 100%), 1fr))' }}>
           <div style={karta}>
             <span style={{ fontSize: '13px', color: 'var(--muted)' }}>Otevřeno k úhradě</span>
             <div style={{ fontSize: '22px', marginTop: '4px' }}>{formatCastku(celkemNezaplaceno, mena)}</div>

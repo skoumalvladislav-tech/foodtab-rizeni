@@ -136,12 +136,12 @@ export default async function FinanceIntegrace({
           se jako „připravujeme", NE jako klikatelný odkaz, ať appka
           nepředstírá funkčnost, která neexistuje (zadání §1, §2).
         */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '10px' }}>
-          <Link href={`/${rozsah}/finance/integrace/pokladna`} className="ft-tl" style={{ ...karta, display: 'block' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))', gap: '10px' }}>
+          <Link href={`/${rozsah}/finance/integrace/pokladna`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
             <strong>Pokladní systémy</strong>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Dotykačka, příjmové API, CSV →</div>
           </Link>
-          <Link href={`/${rozsah}/finance/integrace/banka`} className="ft-tl" style={{ ...karta, display: 'block' }}>
+          <Link href={`/${rozsah}/finance/integrace/banka`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
             <strong>Bankovní účty</strong>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Fio, Enable Banking →</div>
           </Link>
@@ -149,7 +149,7 @@ export default async function FinanceIntegrace({
             <strong>Rezervace a objednávky</strong>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Připravujeme — každý klient může mít jiného poskytovatele</div>
           </div>
-          <Link href={`/${rozsah}/finance/integrace/email`} className="ft-tl" style={{ ...karta, display: 'block' }}>
+          <Link href={`/${rozsah}/finance/integrace/email`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
             <strong>E-mailové schránky</strong>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>IMAP — appka ověří přístup, stažení dokladů čeká na rozhodnutí →</div>
           </Link>
@@ -187,7 +187,7 @@ export default async function FinanceIntegrace({
             <input type="hidden" name="rozsah" value={rozsah} />
             <h2 style={{ margin: 0, fontSize: '15px' }}>Nové připojení</h2>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
               <label>
                 <span style={popisek}>Oblast *</span>
                 <select name="oblast" required style={pole}>

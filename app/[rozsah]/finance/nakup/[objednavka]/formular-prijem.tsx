@@ -110,7 +110,7 @@ export default function FormularPrijem({
         </div>
       ))}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
         <label>
           <span style={popisek}>Číslo/ID faktury (volitelné)</span>
           <input type="text" name="faktura_id" style={pole} />

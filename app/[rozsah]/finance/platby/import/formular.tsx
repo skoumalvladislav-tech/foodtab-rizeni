@@ -48,7 +48,7 @@ export default function ImportFormular({ rozsah, ucty }: { rozsah: string; ucty:
         <input type="hidden" name="rozsah" value={rozsah} />
         <h2 style={{ margin: 0, fontSize: '15px' }}>1. Nahrát výpis</h2>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
           <label>
             <span style={popisek}>Účet *</span>
             <select name="ucet_id" required style={pole}>

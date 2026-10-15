@@ -175,7 +175,7 @@ export default async function FinanceZakazky({
               </p>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
                   <label>
                     <span style={popisek}>Odběratel *</span>
                     <select name="kontakt_id" required style={pole}>

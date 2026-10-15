@@ -341,7 +341,7 @@ export default async function FinanceIntegraceBanka({
                 <Link href={`/${rozsah}/finance/platby`} className="ft-tl">Platby</Link>.
               </p>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
                 <label>
                   <span style={popisek}>Platební účet *</span>
                   <select name="platebni_ucet_id" required style={pole}>
@@ -400,7 +400,7 @@ export default async function FinanceIntegraceBanka({
                   </p>
                 ) : (
                   <>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
                       <label>
                         <span style={popisek}>Banka *</span>
                         <select name="provider" required style={pole}>
@@ -467,7 +467,7 @@ export default async function FinanceIntegraceBanka({
                   </p>
                 ) : (
                   <>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
                       <label>
                         <span style={popisek}>Banka *</span>
                         <select name="aspsp_nazev" required style={pole}>

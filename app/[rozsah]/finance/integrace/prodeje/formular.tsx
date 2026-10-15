@@ -44,7 +44,7 @@ export default function ImportFormular({ rozsah, branches }: { rozsah: string; b
           Sloupce: Datum, Produkt, Množství, Tržba. Opakovaný import téhož dne a produktu hodnotu přepíše, ne zdvojí.
         </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '12px' }}>
           <label>
             <span style={popisek}>Pobočka *</span>
             <select name="branch_id" required style={pole}>
