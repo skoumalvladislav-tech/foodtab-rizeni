@@ -15,7 +15,9 @@ import { tydnyOkna } from "@/lib/vyber-dnu";
  *
  * Stejnou mřížku používá i rušení směny ve víc dnech (ruseni-vice-dni.tsx,
  * Šéfík 14. 10. 2026). Tam je den rušené směny vybraný napevno
- * (`zamcene`) — ta se ruší v každém případě, kvůli ní se dialog otevřel.
+ * (`zamcene`) — ta se ruší v každém případě, kvůli ní se dialog otevřel —
+ * a dny, kdy taková směna je, nesou tečku (`oznacene`, Šéfík 15. 10.:
+ * „teď hádám“). Čas směny jde do popisku pro odečítač a do bublinky.
  */
 export default function VyberDnu({
   zacatek,
@@ -26,6 +28,7 @@ export default function VyberDnu({
   zamcene = [],
   popisek = "Dny, pro které se založí směna",
   zakazano = false,
+  oznacene,
 }: {
   /** Den, kolem kterého se sestaví první týden okna (obvykle předvyplněný den formuláře). */
   zacatek: string;
@@ -43,6 +46,8 @@ export default function VyberDnu({
    * (ruseni-vice-dni.tsx): výběr, ke kterému běží akce, se nesmí měnit.
    */
   zakazano?: boolean;
+  /** Dny se směnou → její časy („08:00–16:00“). Den dostane tečku. */
+  oznacene?: Record<string, string[]>;
 }) {
   const tydny = tydnyOkna(zacatek, pocetTydnu);
   const vybranaMnozina = new Set(vybrane);
@@ -61,6 +66,8 @@ export default function VyberDnu({
             {tyden.map((den) => {
               const zamcen = zamcenaMnozina.has(den);
               const vybran = zamcen || vybranaMnozina.has(den);
+              const casy = oznacene?.[den] ?? [];
+              const smena = casy.length > 0 ? `, má směnu ${casy.join(", ")}` : "";
               return (
                 <button
                   key={den}
@@ -69,13 +76,16 @@ export default function VyberDnu({
                   data-vybrano={vybran ? "" : undefined}
                   data-vikend={jeVikend(den) ? "" : undefined}
                   data-zamceno={zamcen ? "" : undefined}
+                  data-ma-smenu={casy.length > 0 ? "" : undefined}
+                  title={casy.length > 0 ? casy.join(", ") : undefined}
                   aria-pressed={vybran}
                   aria-disabled={zamcen ? true : undefined}
-                  aria-label={zamcen ? `${popisDne(den)}, den této směny — zůstává vybraný` : popisDne(den)}
+                  aria-label={zamcen ? `${popisDne(den)}${smena}, den této směny — zůstává vybraný` : `${popisDne(den)}${smena}`}
                   disabled={zakazano}
                   onClick={zamcen ? undefined : () => onPrepnout(den)}
                 >
                   {cisloDne(den)}
+                  {casy.length > 0 ? <span className="ds-sm-vd-tecka" aria-hidden="true" /> : null}
                 </button>
               );
             })}

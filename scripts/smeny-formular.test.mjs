@@ -123,7 +123,8 @@ const SABLONY_AKCE = js('export async function nabidnoutSablony() { return [] }'
 // Rušení ve víc dnech (ruseni-vice-dni.tsx) — serverové akce mimo Next spadnou, podstrčí se.
 const RUSENI_AKCE = js(
   'export async function nahledRuseni() { return { stav: "chyba", text: "" } }\n' +
-    'export async function zrusitViceDni() { return { stav: "nic" } }\n',
+    'export async function zrusitViceDni() { return { stav: "nic" } }\n' +
+    'export async function dnySeSmenou() { return { stav: "chyba", text: "" } }\n',
 )
 /*
   Drawer (počítač) a ListMobil (telefon) jedou přes `createPortal` do

@@ -6,8 +6,10 @@ import { hasAccess } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import {
   akceRuseni,
+  dnySeSmenouKRuseni,
   MAX_SMEN_RUSENI,
   nahledPoDnech,
+  oknoRuseni,
   otiskRadku,
   overitDnyRuseni,
   stejneSmeny,
@@ -16,6 +18,7 @@ import {
   vysledekZRpc,
   type PolozkaNahledu,
   type SmenaKRuseni,
+  type StavDnuSeSmenou,
   type StavNahledu,
   type StavRuseni,
   type VysledekRuseni,
@@ -30,6 +33,8 @@ import { getServerSupabase } from '@/lib/supabase/server'
  *
  *   nahledRuseni   jen ČTE — co by se ve vybraných dnech zrušilo/smazalo.
  *   zrusitViceDni  totéž spočítá ZNOVU a teprve pak ruší.
+ *   dnySeSmenou    jen ČTE — ve kterých dnech mřížky taková směna je
+ *                  (značky v mřížce; Šéfík 15. 10. 2026: „teď hádám“).
  *
  * Které směny se v jiných dnech ruší, rozhoduje SERVER pravidlem
  * `odpovidaPravidlu` (lib/ruseni-smen.ts) nad řádky z databáze. Prohlížeč
@@ -88,7 +93,12 @@ type Nalez =
     }
   | { stav: 'chyba'; text: string }
 
-async function najitKeZruseni(rozsah: string, smenaId: string, surove: string[]): Promise<Nalez> {
+type Zaklad =
+  | { stav: 'ok'; supabase: Supabase; tenantId: string; zaklad: SmenaKRuseni }
+  | { stav: 'chyba'; text: string }
+
+/** Výchozí směna i s oběma kontrolami práv — společné pro všechny tři akce. */
+async function nacistZaklad(rozsah: string, smenaId: string): Promise<Zaklad> {
   if (!smenaId) return { stav: 'chyba', text: 'Nevím, kterou směnu mám zrušit.' }
 
   const tenantId = await getCurrentTenantId()
@@ -133,29 +143,49 @@ async function najitKeZruseni(rozsah: string, smenaId: string, surove: string[])
     return { stav: 'chyba', text: 'Tahle směna už je zrušená — obnovte rozpis.' }
   }
 
+  return { stav: 'ok', supabase, tenantId, zaklad }
+}
+
+/**
+ * Dotaz na kandidáty: pobočka výchozí směny, nezrušené, týž člověk (nebo
+ * u neobsazené tatáž pozice a čas), seřazené a s přesným počtem. Dny
+ * doplní volající (`in` vybrané dny, nebo celé okno mřížky). Zúžení,
+ * ne pravidlo — viz hlavičku („Dotaz zužuje, pravidlo rozhoduje“).
+ */
+function dotazKandidatu(supabase: Supabase, tenantId: string, zaklad: SmenaKRuseni) {
+  let dotaz = supabase
+    .from('shifts')
+    .select(SLOUPCE, { count: 'exact' })
+    .eq('tenant_id', tenantId)
+    .eq('branch_id', zaklad.branch_id)
+    .neq('status', 'cancelled')
+  if (zaklad.employee_id !== null) {
+    dotaz = dotaz.eq('employee_id', zaklad.employee_id)
+  } else {
+    dotaz = dotaz.is('employee_id', null)
+    dotaz = zaklad.position_id !== null ? dotaz.eq('position_id', zaklad.position_id) : dotaz.is('position_id', null)
+    // `time` z databáze („HH:MM:SS“) — stejný tvar, jaký porovnává `stejnyCas`.
+    dotaz = dotaz.eq('starts_at', zaklad.starts_at).eq('ends_at', zaklad.ends_at)
+  }
+  return dotaz
+}
+
+async function najitKeZruseni(rozsah: string, smenaId: string, surove: string[]): Promise<Nalez> {
+  const nacteni = await nacistZaklad(rozsah, smenaId)
+  if (nacteni.stav !== 'ok') return nacteni
+  const { supabase, tenantId, zaklad } = nacteni
+
   const overene = overitDnyRuseni(surove, zaklad.shift_date)
   if (!overene.ok) return { stav: 'chyba', text: overene.text }
 
   const dalsiDny = overene.dny.filter((d) => d !== zaklad.shift_date)
   let kandidati: SmenaKRuseni[] = []
   if (dalsiDny.length > 0) {
-    // Zúžení, ne pravidlo — viz hlavičku („Dotaz zužuje, pravidlo rozhoduje“).
-    let dotaz = supabase
-      .from('shifts')
-      .select(SLOUPCE, { count: 'exact' })
-      .eq('tenant_id', tenantId)
-      .eq('branch_id', zaklad.branch_id)
+    const { data, error, count } = await dotazKandidatu(supabase, tenantId, zaklad)
       .in('shift_date', dalsiDny)
-      .neq('status', 'cancelled')
-    if (zaklad.employee_id !== null) {
-      dotaz = dotaz.eq('employee_id', zaklad.employee_id)
-    } else {
-      dotaz = dotaz.is('employee_id', null)
-      dotaz = zaklad.position_id !== null ? dotaz.eq('position_id', zaklad.position_id) : dotaz.is('position_id', null)
-      // `time` z databáze („HH:MM:SS“) — stejný tvar, jaký porovnává `stejnyCas`.
-      dotaz = dotaz.eq('starts_at', zaklad.starts_at).eq('ends_at', zaklad.ends_at)
-    }
-    const { data, error, count } = await dotaz.order('shift_date').order('starts_at').order('id')
+      .order('shift_date')
+      .order('starts_at')
+      .order('id')
     if (error) return { stav: 'chyba', text: 'Směny ve vybraných dnech se nepodařilo načíst.' }
     kandidati = (data ?? []) as unknown as SmenaKRuseni[]
     // Useknutá odpověď (limit řádků) nebo neznámý počet: odmítnout, ne tvářit se jako „nic“.
@@ -176,6 +206,33 @@ async function najitKeZruseni(rozsah: string, smenaId: string, surove: string[])
     dny: overene.dny,
     smeny,
   }
+}
+
+/**
+ * Dny se směnou pro mřížku (Šéfík 15. 10. 2026: „při rušení směn potřebuji
+ * mít označené dny, kdy je směna v kalendáři, teď hádám“). Jen ČTE: celé
+ * okno mřížky (`oknoRuseni`) jedním dotazem, stejné zúžení i pravidlo
+ * jako náhled — značka v mřížce tedy říká přesně „tady by rušení něco
+ * vzalo“. Useknutá odpověď se odmítne, ne tváří jako „tady nic není“.
+ */
+export async function dnySeSmenou(rozsah: string, smena: string): Promise<StavDnuSeSmenou> {
+  const nacteni = await nacistZaklad(rozsah, smena)
+  if (nacteni.stav !== 'ok') return nacteni
+  const { supabase, tenantId, zaklad } = nacteni
+
+  const { od, doDne } = oknoRuseni(zaklad.shift_date)
+  const { data, error, count } = await dotazKandidatu(supabase, tenantId, zaklad)
+    .gte('shift_date', od)
+    .lte('shift_date', doDne)
+    .order('shift_date')
+    .order('starts_at')
+    .order('id')
+  if (error) return { stav: 'chyba', text: 'Dny se směnou se nepodařilo načíst.' }
+  const kandidati = (data ?? []) as unknown as SmenaKRuseni[]
+  if (count === null || count > kandidati.length) {
+    return { stav: 'chyba', text: 'Směn je v nabízených týdnech příliš mnoho — dny se směnou se neoznačí.' }
+  }
+  return { stav: 'ok', dny: dnySeSmenouKRuseni(zaklad, kandidati) }
 }
 
 /**

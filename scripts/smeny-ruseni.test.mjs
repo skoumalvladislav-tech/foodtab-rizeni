@@ -31,6 +31,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 import {
   barvaRuseni,
+  casSmenyKRuseni,
+  dnySeSmenouKRuseni,
   jeIsoDatum,
   jeZamitnuto,
   klicVyberu,
@@ -38,6 +40,7 @@ import {
   MAX_SMEN_RUSENI,
   nahledPoDnech,
   odpovidaPravidlu,
+  oknoRuseni,
   otiskRadku,
   otiskSmeny,
   overitDnyRuseni,
@@ -52,7 +55,7 @@ import {
   vysledekZRpc,
 } from '../lib/ruseni-smen.ts'
 import { vyberDetailu } from '../lib/rozpis-mobil.ts'
-import { nactiModul } from './vykreslit.mjs'
+import { nactiKomponentu, nactiModul } from './vykreslit.mjs'
 
 let chyb = 0
 const je = (nazev, skutecne, ocekavane) => {
@@ -325,6 +328,8 @@ export async function getServerSupabase() {
           : op === 'neq' ? radek[sloupec] !== hodnota
           : op === 'in' ? hodnota.includes(radek[sloupec])
           : op === 'is' ? radek[sloupec] === hodnota
+          : op === 'gte' ? radek[sloupec] >= hodnota
+          : op === 'lte' ? radek[sloupec] <= hodnota
           : false))
         return razeni.length === 0 ? radky : [...radky].sort((a, b) => {
           for (const s of razeni) {
@@ -340,6 +345,8 @@ export async function getServerSupabase() {
         neq(s, h) { filtry.push(['neq', s, h]); return q },
         in(s, h) { filtry.push(['in', s, h]); return q },
         is(s, h) { filtry.push(['is', s, h]); return q },
+        gte(s, h) { filtry.push(['gte', s, h]); return q },
+        lte(s, h) { filtry.push(['lte', s, h]); return q },
         order(s) { razeni.push(s); return q },
         async maybeSingle() { return { data: vysledek()[0] ?? null, error: null } },
         then(ano, ne) {
@@ -682,7 +689,8 @@ je('bez práva na pobočce té směny: odmítnuto, žádné RPC', [cizíPobocka.
 const NAVIGACE = js('export function useRouter() { return { push() {}, replace() {}, refresh() {} } }\n')
 const RUSENI_AKCE = js(
   'export async function nahledRuseni() { return { stav: "chyba", text: "" } }\n' +
-    'export async function zrusitViceDni() { return { stav: "nic" } }\n',
+    'export async function zrusitViceDni() { return { stav: "nic" } }\n' +
+    'export async function dnySeSmenou() { return { stav: "chyba", text: "" } }\n',
 )
 const modulRuseni = await nactiModul('app/[rozsah]/smeny/ruseni-vice-dni.tsx', [
   ['next/navigation', NAVIGACE],
@@ -929,6 +937,132 @@ je(
     /if \(zamitnuto\) zameritKdyzSeZtratil\(zamitnutiRef\.current\)/.test(rv) && rv.includes('<p ref={zamitnutiRef} tabIndex={-1}'),
     true,
   )
+}
+
+/* =====================================================================
+   Dny se směnou v mřížce (Šéfík 15. 10. 2026: „při rušení směn potřebuji
+   mít označené dny, kdy je směna v kalendáři, teď hádám“)
+   ================================================================== */
+
+console.log('\n== Dny se směnou: čistá funkce (stejné pravidlo jako náhled) ==')
+{
+  const kandidati = [
+    smena('a', { shift_date: '2026-10-15', starts_at: '10:00:00', ends_at: '18:00:00' }),
+    smena('c', { shift_date: '2026-10-16', starts_at: '18:00:00', ends_at: '22:00:00' }),
+    smena('b', { shift_date: '2026-10-16' }),
+    smena('d', { shift_date: '2026-10-17', employee_id: 'e2' }), // jiný člověk
+    smena('e', { shift_date: '2026-10-18', branch_id: 'b2' }), // jiná pobočka
+    smena('f', { shift_date: '2026-10-19', status: 'cancelled' }), // zrušená
+    smena('g', { shift_date: ZAKLADNI_DEN, starts_at: '18:00:00', ends_at: '20:00:00' }), // druhá ve výchozím dni
+  ]
+  const dny = dnySeSmenouKRuseni(zakladClovek, kandidati)
+  je(
+    'člověk: dny jeho směn na pobočce s časy (seřazenými); výchozí den jen ona; jiný člověk, pobočka, zrušená nic',
+    dny,
+    { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['10:00–18:00'], '2026-10-16': ['08:00–16:00', '18:00–22:00'] },
+  )
+  const kolikByVzal = (d) => vybratKeZruseni(zakladClovek, kandidati, [d]).filter((s) => s.shift_date === d).length
+  je(
+    'značka v každém dni sedí s tím, co by náhled v tom dni vzal',
+    Object.fromEntries(Object.entries(dny).map(([d, c]) => [d, c.length])),
+    Object.fromEntries(Object.keys(dny).map((d) => [d, kolikByVzal(d)])),
+  )
+  const volne = [
+    smena('o1', { employee_id: null, shift_date: '2026-10-15' }),
+    smena('o2', { employee_id: null, shift_date: '2026-10-15', position_id: 'p2' }),
+    smena('o3', { employee_id: null, shift_date: '2026-10-16', starts_at: '09:00:00' }),
+    smena('o4', { employee_id: null, shift_date: '2026-10-17' }),
+    smena('o5', { employee_id: null, shift_date: '2026-10-17' }),
+  ]
+  je(
+    'neobsazená: jen stejná pozice a čas; dva stejné sloty v jednom dni = dva časy',
+    dnySeSmenouKRuseni(zakladVolna, volne),
+    { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['08:00–16:00'], '2026-10-17': ['08:00–16:00', '08:00–16:00'] },
+  )
+  je('čas směny „08:00–16:00“', casSmenyKRuseni({ starts_at: '08:00:00', ends_at: '16:00:00' }), '08:00–16:00')
+  je('okno mřížky: 12 týdnů od pondělí týdne výchozí směny', oknoRuseni(ZAKLADNI_DEN), { od: '2026-10-12', doDne: '2027-01-03' })
+  je(
+    '… stejné okno, jaké hlídá ověření dnů (poslední den ano, den po něm ne)',
+    [overitDnyRuseni(['2027-01-03'], ZAKLADNI_DEN).ok, overitDnyRuseni(['2027-01-04'], ZAKLADNI_DEN).ok, overitDnyRuseni(['2026-10-11'], ZAKLADNI_DEN).ok],
+    [true, false, false],
+  )
+}
+
+console.log('\n== Dny se směnou: akce (jen čte, celé okno, stejné zúžení) ==')
+{
+  priprava()
+  const d1 = await akce.dnySeSmenou('cerna-perla', 's0')
+  je(
+    'člověk: dny jeho směn v okně (i 20. 10.), výchozí den jen ona — ne druhá směna téhož dne, cizí firma, pobočka ani zrušená',
+    d1,
+    { stav: 'ok', dny: { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['10:00–18:00'], '2026-10-16': ['08:00–16:00', '18:00–22:00'], '2026-10-20': ['08:00–16:00'] } },
+  )
+  je('nic neruší', globalThis.__r.volani.filter((x) => x[0] === 'rpc').length, 0)
+  je(
+    'obě linie práv jako u náhledu',
+    [globalThis.__r.volani.find((x) => x[0] === 'zkusPristup'), globalThis.__r.volani.find((x) => x[0] === 'hasAccess')],
+    [['zkusPristup', 'shifts.manage', 'cerna-perla'], ['hasAccess', 'shifts.manage', 'b1']],
+  )
+  const dotazOkna = globalThis.__r.dotazy.find((d) => d.tabulka === 'shifts' && d.filtry.some(([op]) => op === 'gte'))
+  je(
+    'dotaz: firma, pobočka, celé okno mřížky, nezrušené, týž člověk; seřazený a s přesným počtem',
+    dotazOkna && [filtry(dotazOkna), dotazOkna.razeni, dotazOkna.pocet],
+    [
+      ['eq branch_id "b1"', 'eq employee_id "e1"', 'eq tenant_id "t1"', 'gte shift_date "2026-10-12"', 'lte shift_date "2027-01-03"', 'neq status "cancelled"'],
+      ['shift_date', 'starts_at', 'id'],
+      'exact',
+    ],
+  )
+  priprava()
+  je('neobsazená: jen stejné sloty (pozice a čas)', await akce.dnySeSmenou('cerna-perla', 'o0'), { stav: 'ok', dny: { '2026-10-14': ['08:00–16:00'], '2026-10-15': ['08:00–16:00'] } })
+  priprava({ maxRadku: 2 })
+  const useknuto = await akce.dnySeSmenou('cerna-perla', 's0')
+  je('useknutá odpověď (limit řádků) → chyba, ne „tady nic není“', useknuto.stav === 'chyba' && /příliš mnoho/.test(useknuto.text), true)
+  priprava({ pristup: false })
+  je('bez práva na směny nic', (await akce.dnySeSmenou('cerna-perla', 's0')).stav, 'chyba')
+  priprava({ pobocky: ['b2'] })
+  je('cizí pobočka té směny nic', (await akce.dnySeSmenou('cerna-perla', 's0')).stav, 'chyba')
+  priprava()
+  je('už zrušená výchozí směna nic', (await akce.dnySeSmenou('cerna-perla', 's6')).stav, 'chyba')
+}
+
+console.log('\n== Dny se směnou: mřížka (vyber-dnu.tsx) ==')
+{
+  const VyberDnu = await nactiKomponentu('app/[rozsah]/smeny/vyber-dnu.tsx')
+  const props = { zacatek: ZAKLADNI_DEN, vybrane: [ZAKLADNI_DEN, '2026-10-16'], pocetTydnu: 1, zamcene: [ZAKLADNI_DEN], onPrepnout() {} }
+  const html = renderToStaticMarkup(createElement(VyberDnu, { ...props, oznacene: { [ZAKLADNI_DEN]: ['08:00–16:00'], '2026-10-16': ['08:00–16:00', '18:00–22:00'] } }))
+  const den = (d) => html.match(new RegExp(`<button[^>]*aria-label="[^"]*${d}[^"]*"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? ''
+  je('dva dny se směnou, dvě tečky', [(html.match(/data-ma-smenu=""/g) ?? []).length, (html.match(/class="ds-sm-vd-tecka"/g) ?? []).length], [2, 2])
+  je(
+    'pátek 16.: čas v popisku pro odečítač i v bublince, tečka',
+    ['aria-label="Pátek 16. října, má směnu 08:00–16:00, 18:00–22:00"', 'title="08:00–16:00, 18:00–22:00"', 'ds-sm-vd-tecka'].every((x) => den('Pátek 16. října').includes(x)),
+    true,
+  )
+  je('zamčený den výchozí směny: čas i „den této směny“', den('Středa 14. října').includes('Středa 14. října, má směnu 08:00–16:00, den této směny'), true)
+  je('den bez směny (čtvrtek 15.) bez značky', !den('Čtvrtek 15. října').includes('data-ma-smenu') && !den('Čtvrtek 15. října').includes('ds-sm-vd-tecka'), true)
+  const bez = renderToStaticMarkup(createElement(VyberDnu, props))
+  je('bez `oznacene` (zakládání víc dnů) se nic nemění', [bez.includes('data-ma-smenu'), bez.includes('ds-sm-vd-tecka'), bez.includes('má směnu')], [false, false, false])
+}
+
+console.log('\n== Dny se směnou: zapojení v okně rušení ==')
+{
+  const rv = cist('app/[rozsah]/smeny/ruseni-vice-dni.tsx')
+  je('okno načte dny se směnou jednou po otevření (s ochranou proti pozdní odpovědi)',
+    rv.includes("import { dnySeSmenou, nahledRuseni } from './ruseni'")
+      && /useEffect\(\(\) => \{\s*let zruseno = false\s*dnySeSmenou\(rozsah, smena\.id\)/.test(rv)
+      && /\}, \[rozsah, smena\.id\]\)/.test(rv),
+    true)
+  je('… a předá je mřížce', rv.includes('oznacene={oznacene ?? undefined}'), true)
+  je('legenda pod mřížkou: načítání, vysvětlení tečky (člověk / neobsazená) i chyba',
+    ['Hledám, ve kterých dnech směna je…', 'Den, kdy má tenhle člověk na pobočce směnu.', 'Den se stejnou neobsazenou směnou (pozice a čas).', 'Vyberte dny podle rozpisu.'].every((t) => rv.includes(t)),
+    true)
+  je('v okně se legenda „Hledám…“ ukáže hned (bez značek se dá vybírat dál)', vykreslit().includes('Hledám, ve kterých dnech směna je…'), true)
+  const css = cist('app/_komponenty.css')
+  je('CSS: legenda drobně a tlumeně i v detailu na telefonu (přebije `.ds-sm-potvrzeni p`)',
+    /\.ds-sm-rv p\.ds-sm-rv-legenda \{[^}]*font-size: 12\.5px;[^}]*color: var\(--muted\)/.test(css), true)
+  je('CSS: tečka pod číslem dne, na vybraném dni v barvě výběru',
+    /\.ds-sm-vd-tecka \{ position: absolute;[^}]*bottom: 6px;/.test(css) && /\.ds-sm-vd-den\[data-vybrano\] \.ds-sm-vd-tecka \{ background: var\(--branch\); \}/.test(css),
+    true)
 }
 
 console.log(chyb === 0 ? '\n  VŠECHNY KONTROLY PROŠLY\n' : `\n  CHYB: ${chyb}\n`)

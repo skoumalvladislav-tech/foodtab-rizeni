@@ -1262,3 +1262,9 @@ tato místa označená `ROZHODNOUT:`.
 4. **Strop 150 směn na jedno potvrzení.**
    - **Teď:** víc než 150 směn najednou appka odmítne v náhledu i v potvrzení („vyberte méně dní"). Směny se ruší jedna po druhé a každá zakládá upozornění. Kdyby akce narazila na časový limit serveru uprostřed, část by byla pryč a nevědělo by se která.
    - **Když to má být jinak:** vyšší strop chce delší časový limit akce (`maxDuration` na Vercelu) nebo rušení v jedné databázové funkci najednou (migrace).
+
+> **ROZHODNUTÍ ŠÉFÍKA (15. 10. 2026): „49 je ok, akorát při rušení směn
+> potřebuji mít označené dny, kdy je směna v kalendáři, teď hádám.“**
+> Body 1–4 zůstávají, jak jsou popsané výš. Mřížka dnů při rušení nově
+> označí tečkou dny, kdy taková směna je (stejné pravidlo jako náhled),
+> a v popisku dne je její čas. Otázka je tím uzavřená.

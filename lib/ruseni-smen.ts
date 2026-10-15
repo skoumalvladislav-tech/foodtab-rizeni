@@ -82,15 +82,19 @@ export type OvereneDny = { ok: true; dny: string[] } | { ok: false; text: string
  * a den mimo okno mřížky (`TYDNU_MAX` týdnů od pondělí týdne výchozí
  * směny) — server nepustí nic, co by obrazovka nenabídla.
  *
- * ROZHODNOUT (docs/hlaseni/otazky.md #49, bod 2): okno začíná PONDĚLÍM týdne výchozí směny, ne jejím dnem,
+ * ROZHODNUTÍ ŠÉFÍKA (15. 10. 2026, otázka 49 bod 2): zůstává, jak je
+ * popsáno níž — minulé dny se nezamykají.
+ *
+ * Okno začíná PONDĚLÍM týdne výchozí směny, ne jejím dnem,
  * a nehlídá, jestli den není v minulosti. Když se rušení otevře u směny
  * z minulého měsíce, jde jedním potvrzením zrušit (vydané) nebo smazat
  * (nevydané) až dvanáct týdnů už odpracovaných směn. Zrušená vydaná
  * směna pak vypadne z `dnu_bez_dochazky` ve výpočtu mezd (počítá jen
  * `status <> 'cancelled'`), smazané nevydané vezmou s sebou potvrzení
  * a docházce zůstane `shift_id` prázdné. U jedné směny jde totéž, výběr
- * dnů to jen znásobí. Šéfík zatím nerozhodl (viz docs/hlaseni/otazky.md
- * #27 k minulým obdobím) — možnosti:
+ * dnů to jen znásobí. Šéfík 15. 10. 2026 potvrdil, že to tak zůstane
+ * (otázka 49). Kdyby se to mělo změnit (souvisí s otázkou 27 k minulým
+ * obdobím), možnosti:
  *   - nechat, jak je, a v náhledu dny před dnešním provozním dnem jen
  *     označit („minulý den“, v souhrnu „z toho N dní v minulosti“);
  *   - přísně: odmítnout dny dřív než max(den výchozí směny, dnešní
@@ -106,9 +110,7 @@ export function overitDnyRuseni(surove: string[], zakladniDen: string): OvereneD
     if (!jeIsoDatum(d)) return { ok: false, text: 'Ve výběru dnů je neplatné datum.' }
   }
 
-  const okno = tydnyOkna(zakladniDen, TYDNU_MAX).flat()
-  const od = okno[0]
-  const doDne = okno[okno.length - 1]
+  const { od, doDne } = oknoRuseni(zakladniDen)
   for (const d of dny) {
     if (d < od || d > doDne) {
       return { ok: false, text: 'Vybraný den je mimo nabízené týdny.' }
@@ -117,6 +119,12 @@ export function overitDnyRuseni(surove: string[], zakladniDen: string): OvereneD
 
   if (!dny.includes(zakladniDen)) dny.push(zakladniDen)
   return { ok: true, dny: dny.sort() }
+}
+
+/** Nabízené dny mřížky: `TYDNU_MAX` týdnů od pondělí týdne výchozí směny. */
+export function oknoRuseni(zakladniDen: string): { od: string; doDne: string } {
+  const okno = tydnyOkna(zakladniDen, TYDNU_MAX).flat()
+  return { od: okno[0], doDne: okno[okno.length - 1] }
 }
 
 /** „08:00“ a „08:00:00“ je tentýž čas; porovnává se celé „HH:MM:SS“. */
@@ -132,8 +140,9 @@ export function stejnyCas(a: string, b: string): boolean {
  * Vždy: stejná pobočka jako výchozí směna, jiný den než výchozí směna
  * (v jejím dni se ruší jen ona sama, jako dosud) a ne už zrušená.
  *
- * ROZHODNOUT (docs/hlaseni/otazky.md #49, bod 1): pravidlo po dnech je výchozí, opatrné rozhodnutí této
- * relace, Šéfík ho zatím nepotvrdil.
+ * ROZHODNUTÍ ŠÉFÍKA (15. 10. 2026, otázka 49 bod 1): pravidlo platí, jak je.
+ * Mřížka navíc ukazuje, ve kterých dnech taková směna je
+ * (`dnySeSmenouKRuseni`) — „teď hádám“.
  *   - Výchozí směna MÁ člověka: všechny směny téhož člověka na téže
  *     pobočce v tom dni (i když má jiný čas — „ten den nepřijde“).
  *   - Výchozí směna je NEOBSAZENÁ: neobsazené směny na téže pobočce se
@@ -168,6 +177,28 @@ export function odpovidaPravidlu(zaklad: SmenaKRuseni, kandidat: SmenaKRuseni): 
     stejnyCas(kandidat.starts_at, zaklad.starts_at) &&
     stejnyCas(kandidat.ends_at, zaklad.ends_at)
   )
+}
+
+/** „08:00–16:00“ — čas směny v mřížce a v popisku pro odečítač. */
+export function casSmenyKRuseni(s: Pick<SmenaKRuseni, 'starts_at' | 'ends_at'>): string {
+  return `${s.starts_at.slice(0, 5)}–${s.ends_at.slice(0, 5)}`
+}
+
+/**
+ * Dny se směnou pro mřížku rušení (Šéfík 15. 10. 2026: „při rušení směn
+ * potřebuji mít označené dny, kdy je směna v kalendáři, teď hádám“):
+ * den → časy směn, které by rušení v tom dni vzalo — STEJNÉ pravidlo jako
+ * náhled i potvrzení (`odpovidaPravidlu`), ve dni výchozí směny jen ona.
+ * Dny bez takové směny chybí. Časy seřazené.
+ */
+export function dnySeSmenouKRuseni(zaklad: SmenaKRuseni, kandidati: SmenaKRuseni[]): Record<string, string[]> {
+  const dny: Record<string, string[]> = { [zaklad.shift_date]: [casSmenyKRuseni(zaklad)] }
+  const serazene = [...kandidati].sort((a, b) => a.shift_date.localeCompare(b.shift_date) || a.starts_at.localeCompare(b.starts_at))
+  for (const k of serazene) {
+    if (!odpovidaPravidlu(zaklad, k)) continue
+    ;(dny[k.shift_date] ??= []).push(casSmenyKRuseni(k))
+  }
+  return dny
 }
 
 /**
@@ -360,6 +391,9 @@ export function barvaRuseni(vysledky: VysledekRuseni[]): string {
 }
 
 /** Stav náhledu (čtecí serverová akce `nahledRuseni`). */
+/** Výsledek akce `dnySeSmenou` (app/[rozsah]/smeny/ruseni.ts). */
+export type StavDnuSeSmenou = { stav: 'ok'; dny: Record<string, string[]> } | { stav: 'chyba'; text: string }
+
 export type StavNahledu =
   | { stav: 'ok'; dny: DenNahledu[] }
   | { stav: 'chyba'; text: string }

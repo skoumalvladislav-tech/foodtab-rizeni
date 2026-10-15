@@ -21,7 +21,7 @@ import {
 } from '@/lib/ruseni-smen'
 import { pocet } from '@/lib/sklonovani'
 import { prepnoutDen, TYDNU_KROK, TYDNU_MAX, TYDNU_VYCHOZI } from '@/lib/vyber-dnu'
-import { nahledRuseni } from './ruseni'
+import { dnySeSmenou, nahledRuseni } from './ruseni'
 import VyberDnu from './vyber-dnu'
 
 /**
@@ -101,6 +101,30 @@ export default function RuseniViceDni({
   const [chybaNahledu, setChybaNahledu] = useState<string | null>(null)
   const [nacita, setNacita] = useState(false)
   const [odeslanaVerze, setOdeslanaVerze] = useState<number | null>(null)
+  /*
+    Ve kterých dnech mřížky taková směna je (Šéfík 15. 10. 2026: „při rušení
+    směn potřebuji mít označené dny, kdy je směna v kalendáři, teď hádám“).
+    Načte se jednou po otevření za celé okno mřížky — jen čtení, stejné
+    pravidlo jako náhled (`dnySeSmenou` v ruseni.ts). Bez značek jde vybírat
+    dál; hláška pod mřížkou řekne proč.
+  */
+  const [oznacene, setOznacene] = useState<Record<string, string[]> | null>(null)
+  const [chybaOznaceni, setChybaOznaceni] = useState<string | null>(null)
+  useEffect(() => {
+    let zruseno = false
+    dnySeSmenou(rozsah, smena.id)
+      .then((r) => {
+        if (zruseno) return
+        if (r.stav === 'ok') setOznacene(r.dny)
+        else setChybaOznaceni(r.text)
+      })
+      .catch(() => {
+        if (!zruseno) setChybaOznaceni('Dny se směnou se nepodařilo načíst.')
+      })
+    return () => {
+      zruseno = true
+    }
+  }, [rozsah, smena.id])
 
   useEffect(() => {
     if (stav.stav === 'hotovo') router.refresh()
@@ -177,12 +201,27 @@ export default function RuseniViceDni({
         pocetTydnu={pocetTydnu}
         zamcene={[den]}
         zakazano={ceka}
+        oznacene={oznacene ?? undefined}
         popisek="Dny, ve kterých se směny zruší nebo smažou"
         onPrepnout={(d) => setVybrane((v) => (d === den ? v : prepnoutDen(v, d)))}
         onVicTydnu={
           pocetTydnu < TYDNU_MAX ? () => setPocetTydnu((n) => Math.min(TYDNU_MAX, n + TYDNU_KROK)) : undefined
         }
       />
+      <p className="ds-sm-rv-legenda" aria-live="polite">
+        {oznacene ? (
+          <>
+            <span className="ds-sm-vd-tecka-vzor" aria-hidden="true" />
+            {smena.employee_id
+              ? 'Den, kdy má tenhle člověk na pobočce směnu.'
+              : 'Den se stejnou neobsazenou směnou (pozice a čas).'}
+          </>
+        ) : chybaOznaceni ? (
+          `${chybaOznaceni} Vyberte dny podle rozpisu.`
+        ) : (
+          'Hledám, ve kterých dnech směna je…'
+        )}
+      </p>
       <p className="ds-sm-rv-vysvetleni">
         {vybrane.length < 2
           ? 'Vyberte v mřížce další dny.'
