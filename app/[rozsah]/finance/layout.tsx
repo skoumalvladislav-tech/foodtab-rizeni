@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { canSee, getContext, isModuleActive } from '@/lib/authz'
+import { canSee, getContext, hasAccess, isModuleActive } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
 import Sdeleni from '@/app/sdeleni'
 
@@ -23,12 +23,21 @@ import Sdeleni from '@/app/sdeleni'
  * nebo chybějící kontrola na obrazovce samotné by jinak byla jediná.
  *
  * ---------------------------------------------------------------------
- * ÚROVEŇ FIRMY, NE POBOČKY
+ * POBOČKA — JEN PRO TOHO, KDO VIDÍ FINANCE CELÉ FIRMY
  *
- * Kopie vzoru `finance/faktury/layout.tsx`. Přehled je cross-branch
- * (app.cashflow_prehled počítá VŠECHNY pobočky najednou, ne jednu) a
- * Kontakty žijí jen na úrovni firmy (bez branch_id) — modul se proto na
- * jedné pobočce nevykresluje, jen řekne, kam přepnout.
+ * Do 13. 10. 2026 se modul na pobočce nevykresloval vůbec („Finance
+ * patří celé firmě“). Šéfík 13. 10.: „mám otevřený Bernard Bar, budou
+ * vidět finance, které se týkají jen Bernard Baru.“ Každá obrazovka si
+ * teď bere pobočku z rozsahu (`pobockaFinanci`, lib/finance-rozsah.ts)
+ * a filtruje podle ní; obrazovky jen pro firmu (Kontakty, Integrace,
+ * Faktury, AI analytik) mají vlastní vnořenou bránu (`JenProFirmu`).
+ *
+ * Na pobočku ale smí jen ten, kdo má `finance.read` ZA CELOU FIRMU
+ * (`hasAccess(…, null)`): RLS části finančních tabulek (transakce,
+ * kontakty, párování, bankovní zůstatky — `can_read_scoped(…, null)`)
+ * rozsah členství nehlídá, takže člověk s finance.read jen v jedné
+ * pobočce by přes ně dosáhl na data celé firmy. Pustit ho sem jde až po
+ * zúžení těch politik (migrace) — ROZHODNOUT, docs/hlaseni/otazky.md.
  */
 export default async function FinanceLayout({
   children,
@@ -50,10 +59,11 @@ export default async function FinanceLayout({
   const scope = bezpecnyRozsah(ctx, rozsah)
   if (!scope) return <>{children}</>
 
-  if (scope.level !== 'tenant') {
+  if (scope.level !== 'tenant' && !(await hasAccess(tenantId, 'finance.read', null))) {
     return (
-      <Sdeleni nadpis="Finance patří celé firmě">
-        Modul se neváže na jednu provozovnu — přepněte se nahoře na „Celá firma“.
+      <Sdeleni nadpis="Finance pobočky zatím jen s přehledem celé firmy">
+        Finance jednotlivé pobočky zatím vidí jen ten, kdo má finanční přehled za celou firmu.
+        Část údajů (banka, kontakty, párování plateb) se po pobočkách zatím oddělit nedá.
       </Sdeleni>
     )
   }

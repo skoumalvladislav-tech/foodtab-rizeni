@@ -6,6 +6,8 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee, isModuleActive } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
+import { pobockaFinanci } from '@/lib/finance-rozsah'
+import { zaznamPatriRozsahu } from '@/lib/finance-evidence-pobocka'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
@@ -80,6 +82,20 @@ export default async function FinanceNakupDetail({
   const objednavkaData = objednavkaRes.data as { id: string; cislo: string; stav: string; branch_id: string | null; datum_objednani: string; pozadovane_datum_dodani: string | null; poznamka: string; kontakty: { nazev: string } | { nazev: string }[] | null } | null
   if (!objednavkaData) return <Sdeleni nadpis="Objednávka nenalezena">Zkontrolujte adresu nebo se vraťte na seznam.</Sdeleni>
 
+  // Na pobočce jen objednávka TÉ pobočky — objednávka celé firmy nebo
+  // jiné pobočky se tu neukáže (ani její položky a příjemky, načtené
+  // výš souběžně), i kdyby na ni RLS dovolila.
+  const pobocka = pobockaFinanci(pristup.scope)
+  if (!zaznamPatriRozsahu(pobocka, objednavkaData)) {
+    return (
+      <Sdeleni nadpis="Objednávka nepatří této pobočce">
+        {objednavkaData.branch_id === null
+          ? 'Tahle objednávka patří celé firmě, ne jedné pobočce — otevřete ji v pohledu Celá firma.'
+          : 'Tahle objednávka patří jiné pobočce. Přepněte se nahoře na její pobočku, nebo na Celou firmu.'}
+      </Sdeleni>
+    )
+  }
+
   const dodavatel = Array.isArray(objednavkaData.kontakty) ? objednavkaData.kontakty[0]?.nazev : objednavkaData.kontakty?.nazev
   const polozky = (polozkyRes.data ?? []) as Polozka[]
   const prijemky = (prijemkyRes.data ?? []) as Prijemka[]
@@ -150,7 +166,6 @@ export default async function FinanceNakupDetail({
           <FormularPrijem
             rozsah={rozsah}
             objednavkaId={objednavkaData.id}
-            branchId={objednavkaData.branch_id}
             radky={polozky.map((p) => ({
               id: p.id,
               nazev: p.nazev,

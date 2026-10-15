@@ -1,14 +1,18 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import Ikona from "@/app/[rozsah]/ikona";
 import type { IkonaKlic } from "@/app/[rozsah]/nabidka";
+import { zameritKdyzSeZtratil } from "@/components/ui/fokus-okna";
 import { datumACasSRokemVPasmu, datumACasVPasmu } from "@/lib/cas";
+import type { StavRuseni } from "@/lib/ruseni-smen";
 import { vyzadujePotvrzeni as vyzadujePotvrzeniDruhu } from "@/lib/upozorneni-text";
 import { delkaPopis, minutSmeny, popisDne, rozsahCasu } from "@/lib/rozpis-mobil";
 import { nactiStavSmeny, potvrditSmenu, potvrditZmenuSmeny, type StavUpozorneniSmeny } from "../potvrzeni";
+import { zrusitViceDni } from "../ruseni";
+import RuseniViceDni from "../ruseni-vice-dni";
 import { smazatSmenu, type StavSmeny } from "../smena";
 import { AvatarM } from "./prvky";
 import { ListMobil } from "./sheet";
@@ -27,6 +31,11 @@ import type { KontextM, SmenaM } from "./typy";
  * Tady se jen vybírá slovo na tlačítku a ptá se, než se to stane:
  * rozpis se staví večer a jedno ťuknutí vedle by sebralo směnu, kterou
  * už někdo naplánoval.
+ *
+ * „…i v jiné dny“ (Šéfík 14. 10. 2026) — zaškrtávátko v potvrzení
+ * přepne na výběr dnů s náhledem (../ruseni-vice-dni.tsx, tatáž
+ * komponenta jako v panelu na počítači). Bez něj se ruší jedna směna
+ * přesně jako dřív.
  */
 
 export default function DetailSmeny({
@@ -38,6 +47,7 @@ export default function DetailSmeny({
   onUpravit,
   onPoznamka,
   onDuplikovat,
+  onPodrzet,
 }: {
   smena: SmenaM;
   ctx: KontextM;
@@ -47,12 +57,48 @@ export default function DetailSmeny({
   onUpravit: (s: SmenaM) => void;
   onPoznamka: (s: SmenaM) => void;
   onDuplikovat: (s: SmenaM) => void;
+  /**
+   * Zrušení ve víc dnech odešlo. Detail se drží podle id v datech, takže
+   * by se po zrušení zavřel sám i s výsledkem — rodič si směnu podrží,
+   * dokud člověk výsledek nezavře.
+   */
+  onPodrzet?: (s: SmenaM) => void;
 }) {
   const router = useRouter();
   const [stavSmazani, akceSmazat, cekaSmazani] = useActionState<StavSmeny, FormData>(smazatSmenu, {
     stav: "nic",
   });
   const [pta, setPta] = useState(false);
+  const [viceDni, setViceDni] = useState(false);
+  /*
+    Stav rušení ve víc dnech drží detail, ne RuseniViceDni — zaškrtávátko
+    „…i v jiné dny“ je tady a během odesílání se musí zamknout, po
+    výsledku schovat (viz hlavičku ../ruseni-vice-dni.tsx).
+  */
+  const [stavRuseni, akceRuseni, cekaRuseni] = useActionState<StavRuseni, FormData>(zrusitViceDni, {
+    stav: "nic",
+  });
+  const volbaRef = useRef<HTMLInputElement>(null);
+  /*
+    Kam s fokusem, když tlačítko, které ho mělo, zmizí: „Zrušit směnu“
+    nahradí otázka, „Zpět“ zmizí i s ní. Bez toho spadne fokus na <body>
+    a čtečka neví, co se stalo. Na otázku, ne na „Zrušit směnu“ v ní —
+    Enter by směnu rovnou zrušil. Stejně formular-smeny.tsx na počítači.
+  */
+  const otazkaRef = useRef<HTMLParagraphElement>(null);
+  const smazatRef = useRef<HTMLButtonElement>(null);
+  const chybaSmazaniRef = useRef<HTMLParagraphElement>(null);
+  const ptaloSe = useRef(pta);
+  useEffect(() => {
+    if (ptaloSe.current === pta) return;
+    ptaloSe.current = pta;
+    if (pta) (otazkaRef.current ?? volbaRef.current)?.focus();
+    else smazatRef.current?.focus();
+  }, [pta]);
+  // „Zrušit směnu“ bylo během čekání zakázané — fokus na chybu, když se ztratil.
+  useEffect(() => {
+    if (stavSmazani.stav === "chyba") zameritKdyzSeZtratil(chybaSmazaniRef.current);
+  }, [stavSmazani]);
 
   useEffect(() => {
     if (stavSmazani.stav === "hotovo") {
@@ -301,40 +347,93 @@ export default function DetailSmeny({
 
         {jeVedouci ? (
           <div className="ds-sm-detail-akce">
-            <button type="button" className="ds-sm-tl ds-sm-tl-hlavni" onClick={() => onUpravit(smena)}>
-              Upravit směnu
-            </button>
-            <button type="button" className="ds-sm-tl" onClick={() => onPoznamka(smena)}>
-              <Ikona klic="tuzka" velikost={18} />
-              {smena.note ? "Upravit poznámku" : "Přidat poznámku"}
-            </button>
-            <button type="button" className="ds-sm-tl" onClick={() => onDuplikovat(smena)}>
-              <Ikona klic="kopie" velikost={18} />
-              Duplikovat směnu
-            </button>
+            {/*
+              Při rušení ve víc dnech se úpravy jedné směny schovají — po
+              zrušení by vedly na směnu, která už v rozpisu není.
+            */}
+            {pta && viceDni ? null : (
+              <>
+                <button type="button" className="ds-sm-tl ds-sm-tl-hlavni" onClick={() => onUpravit(smena)}>
+                  Upravit směnu
+                </button>
+                <button type="button" className="ds-sm-tl" onClick={() => onPoznamka(smena)}>
+                  <Ikona klic="tuzka" velikost={18} />
+                  {smena.note ? "Upravit poznámku" : "Přidat poznámku"}
+                </button>
+                <button type="button" className="ds-sm-tl" onClick={() => onDuplikovat(smena)}>
+                  <Ikona klic="kopie" velikost={18} />
+                  Duplikovat směnu
+                </button>
+              </>
+            )}
 
+            {/*
+              Zaškrtávátko „…i v jiné dny“ je MIMO formulář jedné směny
+              (Enter by ho jinak odeslal — implicitní odeslání) a kreslí
+              se jednou pro obě podoby na stejném místě, ať při přepnutí
+              zůstane tentýž prvek i s fokusem. Viz formular-smeny.tsx.
+            */}
             {pta ? (
-              <form action={akceSmazat} className="ds-sm-potvrzeni">
-                <input type="hidden" name="rozsah" value={rozsah} />
-                <input type="hidden" name="smena" value={smena.id} />
-                <p>
-                  <b>{jeVydana ? "Zrušit tuhle směnu?" : "Smazat tuhle směnu?"}</b>
-                </p>
-                {jeVydana ? (
-                  <p className="ds-sm-mista">Zůstane vidět jako zrušená a lidem zmizí, až rozpis vydáte.</p>
+              <div className="ds-sm-potvrzeni">
+                {viceDni ? null : (
+                  <p ref={otazkaRef} tabIndex={-1}>
+                    <b>{jeVydana ? "Zrušit tuhle směnu?" : "Smazat tuhle směnu?"}</b>
+                  </p>
+                )}
+                {!viceDni && jeVydana ? (
+                  <p className="ds-sm-potvrzeni-pozn">Zůstane vidět jako zrušená a lidem zmizí, až rozpis vydáte.</p>
                 ) : null}
-                <div className="ds-sm-potvrzeni-akce">
-                  <button type="submit" className="ds-sm-tl ds-sm-tl-nebezpeci" disabled={cekaSmazani}>
-                    {cekaSmazani ? (jeVydana ? "Ruším…" : "Mažu…") : jeVydana ? "Zrušit směnu" : "Smazat směnu"}
-                  </button>
-                  <button type="button" className="ds-sm-tl" onClick={() => setPta(false)}>
-                    Zpět
-                  </button>
-                </div>
-                {stavSmazani.stav === "chyba" ? <p className="hlaska-chyba">{stavSmazani.text}</p> : null}
-              </form>
+                {/* Bez `name` a mimo formulář — do formuláře jedné směny nic nepřidá, jen přepne na víc dnů. */}
+                {stavRuseni.stav === "hotovo" ? null : (
+                  <label className="ds-sm-rv-volba">
+                    <input
+                      ref={volbaRef}
+                      type="checkbox"
+                      checked={viceDni}
+                      disabled={cekaRuseni}
+                      onChange={(e) => setViceDni(e.target.checked)}
+                    />
+                    {viceDni ? "Zrušit / smazat i v jiné dny" : jeVydana ? "Zrušit i v jiné dny" : "Smazat i v jiné dny"}
+                  </label>
+                )}
+                {viceDni ? (
+                  <RuseniViceDni
+                    rozsah={rozsah}
+                    smena={smena}
+                    telefon
+                    stav={stavRuseni}
+                    akce={akceRuseni}
+                    ceka={cekaRuseni}
+                    onZpet={() => {
+                      setViceDni(false);
+                      // „Zpět“ zmizí s výběrem dnů — fokus na zaškrtávátko, ne na <body>.
+                      volbaRef.current?.focus();
+                    }}
+                    onOdeslano={() => onPodrzet?.(smena)}
+                    onHotovo={onZavrit}
+                  />
+                ) : (
+                  <form action={akceSmazat} style={{ display: "contents" }}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="smena" value={smena.id} />
+                    <div className="ds-sm-potvrzeni-akce">
+                      <button type="submit" className="ds-sm-tl ds-sm-tl-nebezpeci" disabled={cekaSmazani}>
+                        {cekaSmazani ? (jeVydana ? "Ruším…" : "Mažu…") : jeVydana ? "Zrušit směnu" : "Smazat směnu"}
+                      </button>
+                      <button type="button" className="ds-sm-tl" onClick={() => setPta(false)}>
+                        Zpět
+                      </button>
+                    </div>
+                    {stavSmazani.stav === "chyba" ? (
+                      <p ref={chybaSmazaniRef} tabIndex={-1} role="alert" className="hlaska-chyba">
+                        {stavSmazani.text}
+                      </p>
+                    ) : null}
+                  </form>
+                )}
+              </div>
             ) : (
-              <button type="button" className="ds-sm-tl ds-sm-tl-nebezpeci" onClick={() => setPta(true)}>
+              <button ref={smazatRef} type="button" className="ds-sm-tl ds-sm-tl-nebezpeci" onClick={() => setPta(true)}>
                 <Ikona klic="kos" velikost={18} />
                 {jeVydana ? "Zrušit směnu" : "Smazat směnu"}
               </button>

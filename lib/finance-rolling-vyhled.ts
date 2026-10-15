@@ -80,6 +80,73 @@ export function pridatDny(datum: string, pocet: number): string {
   return zeDne(naDen(datum) + pocet)
 }
 
+// ---------------------------------------------------------------------
+// Rozsah — celá firma, nebo jedna pobočka (Šéfík 13. 10. 2026: „mám
+// otevřený Bernard Bar, budou vidět finance, které se týkají jen
+// Bernard Baru"). Pobočka = JEN účty s její `branch_id`; firemní účet
+// bez pobočky se na ní neukazuje ani nerozpočítává (lib/finance-rozsah.ts).
+// ---------------------------------------------------------------------
+
+/** Patří platební účet (jeho `branch_id`) do rozsahu? `pobocka` null = celá firma, všechny účty i firemní. */
+export function ucetVRozsahu(branchIdUctu: string | null, pobocka: string | null): boolean {
+  return pobocka === null || branchIdUctu === pobocka
+}
+
+/**
+ * Dnešní zůstatek rozsahu z `aktualni_zustatky_uctu` (řádek po pobočce,
+ * `null` = firemní účty; jen aktivní účty). Celá firma = součet všech
+ * řádků (i bez účtů 0, jako dřív). Pobočka = jen její řádek — a `null`,
+ * když ho nemá: pobočka bez aktivního účtu zůstatek NEMÁ, „0 Kč" by
+ * tvrdilo, že na účtu nic není.
+ */
+export function zustatekRozsahu(
+  zustatky: readonly { branchId: string | null; zustatekHaleru: number }[],
+  pobocka: string | null,
+): number | null {
+  const radky = zustatky.filter((z) => ucetVRozsahu(z.branchId, pobocka))
+  if (pobocka !== null && radky.length === 0) return null
+  return radky.reduce((s, z) => s + z.zustatekHaleru, 0)
+}
+
+export type BodHistorie = { tydenOd: string; tydenDo: string; zustatekHaleru: number }
+
+/**
+ * Historických `pocetTydnu` týdnů PŘED týdnem, do kterého patří `dnes`.
+ *
+ * Jediný skutečný bod je DNEŠNÍ zůstatek — zbytek se dopočítá chůzí
+ * NAZPÁTEK podle skutečných transakcí téhož rozsahu (ne podle plánu, na
+ * rozdíl od `sestavRollingVyhled`, který jde dopředu). Poslední bod je
+ * zůstatek na KONCI minulého týdne, tj. přesně tam, kde navazuje
+ * počáteční zůstatek dopředného výhledu. Transakce mimo historii (tento
+ * týden, starší) se ignorují.
+ */
+export function historieZustatku(
+  aktualniZustatekHaleru: number,
+  transakce: readonly SurovaTransakce[],
+  dnes: string,
+  pocetTydnu: number,
+): BodHistorie[] {
+  const zacatekAktualnihoTydne = pondelekTydne(dnes)
+  const zacatekHistorie = pridatDny(zacatekAktualnihoTydne, -pocetTydnu * 7)
+  const poTydnech = agregovatPoTydnech(transakce.filter((t) => t.datum >= zacatekHistorie && t.datum < zacatekAktualnihoTydne))
+
+  // Kolik se za celou historii pohnulo, abychom se od dnešního (reálného)
+  // zůstatku dostali k zůstatku PŘED prvním historickým týdnem.
+  let celkovyPohybHistorie = 0
+  for (const v of poTydnech.values()) celkovyPohybHistorie += v.prijmyHaleru - v.vydajeHaleru
+
+  let zustatek = aktualniZustatekHaleru - celkovyPohybHistorie
+  const body: BodHistorie[] = []
+  for (let i = 0; i < pocetTydnu; i++) {
+    const tydenOd = pridatDny(zacatekHistorie, i * 7)
+    const tydenDo = pridatDny(tydenOd, 6)
+    const tyden = poTydnech.get(tydenOd) ?? { prijmyHaleru: 0, vydajeHaleru: 0 }
+    zustatek += tyden.prijmyHaleru - tyden.vydajeHaleru
+    body.push({ tydenOd, tydenDo, zustatekHaleru: zustatek })
+  }
+  return body
+}
+
 /** Skutečné transakce rozdělené po týdnech (pondělí jako klíč). Převody (prijem/vydaj jen) se nepočítají. */
 export function agregovatPoTydnech(transakce: readonly SurovaTransakce[]): Map<string, SkutecnostTydne> {
   const mapa = new Map<string, SkutecnostTydne>()

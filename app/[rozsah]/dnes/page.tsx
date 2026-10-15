@@ -703,6 +703,16 @@ export default async function Dnes({
   }
 
   /*
+    FAKTURY JEN NA ROZSAHU CELÉ FIRMY (Finance po pobočkách, 13. 10. 2026).
+    Faktury žijí v oddělené databázi bez pobočky. Na pobočce by tu stály
+    počty CELÉ firmy („3 faktury jsou po splatnosti") pod hlavičkou
+    pobočky a odkaz i rychlá akce „Nová faktura" by vedly na hlášku
+    „Faktury patří celé firmě" (finance/faktury/layout.tsx). Na pobočce
+    se proto faktury nenačítají ani nenabízejí; na celé firmě beze změny.
+  */
+  const fakturyVRozsahu = scope.level === "tenant";
+
+  /*
     Tým dnes — kolik z naplánovaných je zrovna přítomno. Přítomnost je
     „otevřený příchod ke dnešnímu provoznímu dni" — TÁŽ RPC jako
     o pár řádků níž pro nedokončené záznamy, jen s rozsahem den–den
@@ -722,7 +732,7 @@ export default async function Dnes({
         p_do: posunDatum(den.provozni_den, -1),
         p_branch: pobockaProDochazku,
       }),
-      canSee(ctx, "faktury.read")
+      fakturyVRozsahu && canSee(ctx, "faktury.read")
         ? (async () => {
             const pristupFaktury = await pristupKFakturam(tenantId);
             if (pristupFaktury.stav !== "ok") return null;
@@ -802,7 +812,7 @@ export default async function Dnes({
   if (canSee(ctx, "shifts.manage")) {
     rychleAkce.push({ popisek: "Zapsat směnu", href: `/${rozsah}/smeny`, ikona: "kalendar" });
   }
-  if (canSee(ctx, "faktury.manage") && (await pristupKFakturam(tenantId)).stav === "ok") {
+  if (fakturyVRozsahu && canSee(ctx, "faktury.manage") && (await pristupKFakturam(tenantId)).stav === "ok") {
     rychleAkce.push({ popisek: "Nová faktura", href: `/${rozsah}/finance/faktury/nova`, ikona: "faktura" });
   }
 

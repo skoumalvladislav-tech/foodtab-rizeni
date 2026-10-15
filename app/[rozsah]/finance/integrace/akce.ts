@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { zasifrovat } from '@/lib/integrace-klice'
@@ -11,7 +12,12 @@ async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'integrace.manage', rozsah)
+  // Právo VŽDY za celou firmu, ne za rozsah z formuláře: registr
+  // připojení je firemní (integrace/layout.tsx) a odpojení bere `id`
+  // z formuláře — správce napojení jedné pobočky by jinak založil nebo
+  // odpojil připojení celé firmy (Finance po pobočkách, 13. 10. 2026).
+  // `rozsah` zůstává jen pro návratovou adresu.
+  const pristup = await zkusPristup(tenantId, 'integrace.manage', TENANT_SCOPE_SEGMENT)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/integrace`)
 

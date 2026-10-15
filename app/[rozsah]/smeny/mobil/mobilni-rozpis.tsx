@@ -9,6 +9,7 @@ import {
   dnyTydne,
   posunDatum,
   posunMesic,
+  vyberDetailu,
   type FiltrSmen,
 } from "@/lib/rozpis-mobil";
 import DetailSmeny from "./detail";
@@ -115,10 +116,18 @@ export default function MobilniRozpis(p: MobilProps) {
     ať ho obnovení stránky neotevře znovu.
   */
   const [detailId, setDetailId] = useState<string | null>(params.get("smena"));
-  const detail = detailId ? ([...p.smeny, ...p.mojeSmeny].find((s) => s.id === detailId) ?? null) : null;
+  /*
+    Výjimka z „zmizela → zavře se“: zrušení ve víc dnech (detail.tsx,
+    `onPodrzet`). Výsledek — co se zrušilo a co neprošlo — se ukazuje
+    v detailu té směny, která po zrušení z dat zmizí. Podrží se proto
+    poslední známá podoba, dokud člověk detail sám nezavře.
+  */
+  const [podrzeny, setPodrzeny] = useState<SmenaM | null>(null);
+  const detail = vyberDetailu([...p.smeny, ...p.mojeSmeny], detailId, podrzeny);
 
   function zavritDetail() {
     setDetailId(null);
+    setPodrzeny(null);
     if (params.get("smena")) {
       const q = new URLSearchParams(params.toString());
       q.delete("smena");
@@ -322,6 +331,7 @@ export default function MobilniRozpis(p: MobilProps) {
             zavritDetail();
             p.onDuplikovat(s);
           }}
+          onPodrzet={setPodrzeny}
         />
       ) : null}
 

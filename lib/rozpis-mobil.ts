@@ -517,6 +517,23 @@ export function smenyPodleDne<S extends SmenaZaklad>(smeny: S[]): Map<string, S[
   return mapa
 }
 
+/**
+ * Kterou směnu ukázat v detailu. Detail se drží podle id, ne jako kopie:
+ * po úpravě přijdou ze serveru nová data a detail má ukázat je. Směna,
+ * která mezitím z dat zmizela (smazaná, zrušená), se nenajde a detail se
+ * zavře sám — s jedinou výjimkou: PODRŽENÁ směna (zrušení ve víc dnech,
+ * mobil/detail.tsx `onPodrzet`). Výsledek toho rušení se ukazuje v jejím
+ * detailu, a ten by jinak zmizel i s výsledkem.
+ */
+export function vyberDetailu<S extends { id: string }>(
+  smeny: S[],
+  detailId: string | null,
+  podrzeny: S | null,
+): S | null {
+  if (!detailId) return null
+  return smeny.find((s) => s.id === detailId) ?? (podrzeny?.id === detailId ? podrzeny : null)
+}
+
 /* --- upozornění a alarmy --------------------------------------------- */
 
 /** „1 neobsazená směna“, „3 neobsazené směny“, „5 neobsazených směn“. */

@@ -90,7 +90,7 @@ jobs:
           # i UTC. Nový test sem připiš, jakmile prochází.
           TESTY=(
             adresa cas ceka-na-opravneni dochazka-cloveka dochazka-dnes dochazka-stav faktury-filtry
-            faktury-navigace faktury-prijem faktury-prijem-jadro faktury-tenant-izolace integrace-mail-imap-moznosti finance-csv-import finance-plan finance-parovani finance-rolling-vyhled banka-synchronizace kb-adaa pokladna-csv-import pokladna-dotykacka pokladna-napojeni pokladna-trzby ucetni-export firma-prepnuti fronta-push kiosek komunikace komunikace-akce manifest
+            faktury-navigace faktury-prijem faktury-prijem-jadro faktury-tenant-izolace integrace-mail-imap-moznosti finance-csv-import finance-plan finance-parovani finance-rolling-vyhled finance-pobocky finance-platby-pobocka finance-evidence-pobocka banka-synchronizace kb-adaa pokladna-csv-import pokladna-dotykacka pokladna-napojeni pokladna-trzby finance-obdobi ucetni-export firma-prepnuti fronta-push kiosek komunikace komunikace-akce manifest
             marketing marketing-audit marketing-granty marketing-kalendar
             marketing-kampane marketing-kanaly marketing-media
             marketing-media-pouziti marketing-menu marketing-menu-tabulka
@@ -100,7 +100,7 @@ jobs:
             marketing-schvalovani marketing-tvorba nabidka nahrani-lidi
             osloveni penize planovac prava-osob prideleni prihlaseni provoz-granty
             qr ranni-prehled rozpis-desktop rozpis-export rozpis-mobil
-            scenare sklonovani smeny-formular smeny-potvrzeni tabulka ucet upozorneni vydelky
+            scenare sklonovani smeny-formular smeny-potvrzeni smeny-ruseni tabulka ucet ui-okna upozorneni vydelky
             web-push xlsx zalohy ziva-aktualizace
           )
 

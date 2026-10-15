@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -11,7 +12,12 @@ async function pripravit(rozsah: string, pravo: 'finance.read' | 'finance.manage
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, pravo, rozsah)
+  // Právo VŽDY za celou firmu, ne za rozsah z formuláře: kontakty pobočku
+  // nemají (kontakty/layout.tsx), takže „finance.manage na Bernard Baru"
+  // by jinak pustilo vedoucího jedné pobočky zakládat a mazat kontakty
+  // celé firmy (Finance po pobočkách, 13. 10. 2026). `rozsah` zůstává
+  // jen pro návratovou adresu.
+  const pristup = await zkusPristup(tenantId, pravo, TENANT_SCOPE_SEGMENT)
   if (pristup.stav === 'neprihlasen') redirect('/prihlaseni')
   if (pristup.stav === 'odepren') redirect(`/${rozsah}/finance/kontakty`)
 

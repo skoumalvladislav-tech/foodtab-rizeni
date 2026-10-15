@@ -12,6 +12,10 @@ import { tydnyOkna } from "@/lib/vyber-dnu";
  * telefonu (`.ds-sm-mesic-den`, `.ds-sm-pole-obal`); na počítači ji
  * zmenší `.ds-smd-form .ds-sm-vd-den` na 40 px, stejnou úvahou jako
  * u ostatních polí panelu (app/_komponenty.css).
+ *
+ * Stejnou mřížku používá i rušení směny ve víc dnech (ruseni-vice-dni.tsx,
+ * Šéfík 14. 10. 2026). Tam je den rušené směny vybraný napevno
+ * (`zamcene`) — ta se ruší v každém případě, kvůli ní se dialog otevřel.
  */
 export default function VyberDnu({
   zacatek,
@@ -19,6 +23,9 @@ export default function VyberDnu({
   pocetTydnu,
   onPrepnout,
   onVicTydnu,
+  zamcene = [],
+  popisek = "Dny, pro které se založí směna",
+  zakazano = false,
 }: {
   /** Den, kolem kterého se sestaví první týden okna (obvykle předvyplněný den formuláře). */
   zacatek: string;
@@ -27,9 +34,19 @@ export default function VyberDnu({
   onPrepnout: (den: string) => void;
   /** Rozšíří okno o další týdny; vynechá se, když je okno na svém stropu. */
   onVicTydnu?: () => void;
+  /** Dny vybrané napevno — kliknutím se nepřepínají vůbec. */
+  zamcene?: string[];
+  /** Popis skupiny pro odečítač — co výběr dnů znamená. */
+  popisek?: string;
+  /**
+   * Celá mřížka mimo provoz — rušení ve víc dnech během odesílání
+   * (ruseni-vice-dni.tsx): výběr, ke kterému běží akce, se nesmí měnit.
+   */
+  zakazano?: boolean;
 }) {
   const tydny = tydnyOkna(zacatek, pocetTydnu);
   const vybranaMnozina = new Set(vybrane);
+  const zamcenaMnozina = new Set(zamcene);
 
   return (
     <div className="ds-sm-vd">
@@ -38,11 +55,12 @@ export default function VyberDnu({
           <span key={z}>{z}</span>
         ))}
       </div>
-      <div className="ds-sm-vd-mrizka" role="group" aria-label="Dny, pro které se založí směna">
+      <div className="ds-sm-vd-mrizka" role="group" aria-label={popisek}>
         {tydny.map((tyden) => (
           <div key={tyden[0]} className="ds-sm-vd-tyden">
             {tyden.map((den) => {
-              const vybran = vybranaMnozina.has(den);
+              const zamcen = zamcenaMnozina.has(den);
+              const vybran = zamcen || vybranaMnozina.has(den);
               return (
                 <button
                   key={den}
@@ -50,9 +68,12 @@ export default function VyberDnu({
                   className="ds-sm-vd-den"
                   data-vybrano={vybran ? "" : undefined}
                   data-vikend={jeVikend(den) ? "" : undefined}
+                  data-zamceno={zamcen ? "" : undefined}
                   aria-pressed={vybran}
-                  aria-label={popisDne(den)}
-                  onClick={() => onPrepnout(den)}
+                  aria-disabled={zamcen ? true : undefined}
+                  aria-label={zamcen ? `${popisDne(den)}, den této směny — zůstává vybraný` : popisDne(den)}
+                  disabled={zakazano}
+                  onClick={zamcen ? undefined : () => onPrepnout(den)}
                 >
                   {cisloDne(den)}
                 </button>
@@ -62,7 +83,7 @@ export default function VyberDnu({
         ))}
       </div>
       {onVicTydnu ? (
-        <button type="button" className="ds-sm-vd-vic" onClick={onVicTydnu}>
+        <button type="button" className="ds-sm-vd-vic" onClick={onVicTydnu} disabled={zakazano}>
           Zobrazit další týdny
         </button>
       ) : null}

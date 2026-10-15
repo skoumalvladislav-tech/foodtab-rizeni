@@ -79,10 +79,11 @@ export default function UpravaUseku({
   const [otevreno, setOtevreno] = useState(false);
   const [krok, setKrok] = useState<"formular" | "storno">(rezim === "storno" ? "storno" : "formular");
 
-  // Stálá funkce: Drawer má efekt závislý na onZavrit. Nová funkce při
-  // každém překreslení (přepnutí na storno) by efekt spustila znovu —
-  // fokus by odskočil na tlačítko za ztmavením a zpátky na panel, a
-  // autoFocus pole „Proč se stornuje" by propadl.
+  // Stálé funkce. Do 14. 10. 2026 nutné: Drawer měl efekt závislý na
+  // onZavrit a nová funkce při každém překreslení (přepnutí na storno)
+  // by fokus přehodila a autoFocus pole „Proč se stornuje" by propadl.
+  // Od té doby si Drawer onZavrit drží v refu a poli s autoFocus fokus
+  // nebere (components/ui/fokus-okna.tsx), takže už jen neškodí.
   const zavrit = useCallback(() => {
     setOtevreno(false);
     setKrok(rezim === "storno" ? "storno" : "formular");

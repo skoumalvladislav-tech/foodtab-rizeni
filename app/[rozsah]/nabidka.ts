@@ -107,6 +107,14 @@ export type Polozka = {
    */
   jenPobocka?: boolean
   /**
+   * Opak `jenPobocka`: obrazovka patří celé firmě a na pobočce nemá co
+   * filtrovat (Kontakty bez pobočky, Integrace firmy, Faktury v oddělené
+   * databázi bez pobočky). Na pobočce se v nabídce nekreslí a přepnutí
+   * rozsahu z ní na pobočku vede na první obrazovku téhož modulu.
+   * Šéfík 13. 10. 2026: Finance mají jít vidět po pobočkách.
+   */
+  jenFirma?: boolean
+  /**
    * Další segmenty, na kterých se položka taky zvýrazní v levém sloupci
    * i na spodní liště — pro sloučenou položku, jejíž obrazovky zůstaly
    * na starých adresách (22. 9., sloučení Provozního centra a Úkolů do
@@ -206,7 +214,7 @@ export const NABIDKA: Polozka[] = [
   // (Rozpočty a controlling), evidence vybavení — vše BEZ fyzického
   // skladu/inventur (ty dělá POS, Šéfíkovo explicitní rozhodnutí).
   { segment: 'finance/cashflow', nazev: 'Cashflow', kratky: 'Cashflow', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'hodiny' },
-  { segment: 'finance/kontakty', nazev: 'Kontakty', kratky: 'Kontakty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lide' },
+  { segment: 'finance/kontakty', nazev: 'Kontakty', kratky: 'Kontakty', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'lide', jenFirma: true },
   { segment: 'finance/platby', nazev: 'Platby', kratky: 'Platby', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'vozik' },
   // Nákup (procure-to-pay) NENÍ tady — `purchasing.read` patří modulu
   // `objednavky`, ne `finance` (stejně jako u Surovin níž). Záznam je
@@ -224,8 +232,8 @@ export const NABIDKA: Polozka[] = [
   // i serverová akce, ne tahle řádka. Čtyři kategorie zadání (pokladna/
   // rezervace/banka/e-mail) žijí na téhle jedné stránce — rezervace jako
   // „připravujeme", ostatní tři jako funkční registr/CSV/živý Fio.
-  { segment: 'finance/integrace', nazev: 'Integrace', kratky: 'Integrace', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'kolo' },
-  { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha' },
+  { segment: 'finance/integrace', nazev: 'Integrace', kratky: 'Integrace', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'kolo', jenFirma: true },
+  { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha', jenFirma: true },
   // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.
   //
   // Do 14. 9. 2026 tu stála jediná položka a v levém sloupci proto nebylo
@@ -345,10 +353,33 @@ function smiVidet(ctx: Context, p: Polozka): boolean {
   return p.pravo === null || canSee(ctx, p.pravo)
 }
 
-/** Obrazovky jednoho modulu, na které uživatel dosáhne. */
-export function polozkyModulu(ctx: Context, modul: ModuleKey): Polozka[] {
+/**
+ * OBRAZOVKY JEN PRO FIRMU SE NA POBOČCE NEKRESLÍ.
+ *
+ * Šéfík 13. 10. 2026: Finance mají jít vidět po pobočkách. Kontakty,
+ * Integrace a Faktury ale pobočku nemají (`jenFirma`) — na pobočce by
+ * vedly jen na hlášku „jen za celou firmu". Do 13. 10. tenhle filtr
+ * stál jen v app/[rozsah]/layout.tsx; holá adresa rozsahu
+ * (app/[rozsah]/page.tsx) ani scripts/nabidka.test.mjs o něm nevěděly.
+ * Teď ho berou obě místa odsud.
+ *
+ * `naFirme` je POVINNÉ — na rozsah se musí zeptat každý, kdo nabídku
+ * skládá (stejné jméno jako ve `vychoziObrazovka(polozky, naFirme)`).
+ * Kdo by ho přesto vynechal (soubor .mjs mimo kontrolu typů), dostane
+ * opatrnější variantu: nabídku pobočky, bez `jenFirma`.
+ *
+ * Pořád jen kreslení, ne zámek: obrazovky jen pro firmu pobočku
+ * odmítají samy (vnořený layout s `JenProFirmu` a první řádek stránky)
+ * a jejich serverové akce chtějí právo za celou firmu.
+ */
+function patriDoRozsahu(p: Polozka, naFirme: boolean): boolean {
+  return naFirme === true || !p.jenFirma
+}
+
+/** Obrazovky jednoho modulu, na které uživatel v tomhle rozsahu dosáhne. */
+export function polozkyModulu(ctx: Context, modul: ModuleKey, naFirme: boolean): Polozka[] {
   if (!isModuleActive(ctx, modul)) return []
-  return NABIDKA.filter((p) => p.modul === modul && smiVidet(ctx, p))
+  return NABIDKA.filter((p) => p.modul === modul && smiVidet(ctx, p) && patriDoRozsahu(p, naFirme))
 }
 
 /** Obrazovky nastavení. Jen se settings.manage. */
@@ -356,9 +387,9 @@ export function polozkyNastaveni(ctx: Context): Polozka[] {
   return NASTAVENI.filter((p) => smiVidet(ctx, p))
 }
 
-/** Všechno, na co uživatel dosáhne, napříč zapnutými moduly. */
-export function viditelnaNabidka(ctx: Context): Polozka[] {
-  return NABIDKA.filter((p) => isModuleActive(ctx, p.modul) && smiVidet(ctx, p))
+/** Všechno, na co uživatel v tomhle rozsahu dosáhne, napříč zapnutými moduly. */
+export function viditelnaNabidka(ctx: Context, naFirme: boolean): Polozka[] {
+  return NABIDKA.filter((p) => isModuleActive(ctx, p.modul) && smiVidet(ctx, p) && patriDoRozsahu(p, naFirme))
 }
 
 /**

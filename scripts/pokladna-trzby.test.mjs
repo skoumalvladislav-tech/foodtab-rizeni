@@ -18,6 +18,8 @@ import { readFileSync } from 'node:fs'
 const {
   DRUHY_PLATEB,
   NAZVY_DRUHU_PLATEB,
+  jenPobocka,
+  pokladnaPatriPobocce,
   obdobiVRozsahu,
   popisObdobi,
   pouziteDruhy,
@@ -164,6 +166,53 @@ console.log('\n== Po pobočkách: banka vypnuté pobočky ==')
   const r = radkyPoPobockach(p, [A, B], true)
   ok('účet vypnuté pobočky bez prodejů má vlastní řádek (součet sloupce sedí na kartu)', r.some((x) => x.branchId === D && x.bankaHaleru === 7000))
   ok('… a bez práva na banku se neobjeví', !radkyPoPobockach(p, [A, B], false).some((x) => x.branchId === D))
+}
+
+console.log('\n== Finance po pobočkách: přehled zúžený na pobočku (Šéfík 13. 10. 2026) ==')
+{
+  const p = prevestPrehled(DATA)
+  const jenA = jenPobocka(p, A)
+  ok('tržby jen pobočky A (2 dny), B tam není', jenA.trzby.length === 2 && jenA.trzby.every((t) => t.branchId === A))
+  ok('platby a způsoby jen A', jenA.platby.every((z) => z.branchId === A) && jenA.zpusoby.every((z) => z.branchId === A) && jenA.zpusoby.length === 2)
+  ok('banka jen účty A — firemní účet (null) se na pobočku nerozpočítává', jenA.banka.length === 1 && jenA.banka[0].branchId === A)
+  ok('celá firma (null): přehled beze změny, i s firemním účtem', jenPobocka(p, null) === p)
+  const C = 'cccccccc-0000-0000-0000-000000000003'
+  const prazdna = jenPobocka(p, C)
+  ok('pobočka bez dat: všechny seznamy prázdné (žádná cizí čísla)',
+    prazdna.trzby.length === 0 && prazdna.platby.length === 0 && prazdna.zpusoby.length === 0 && prazdna.banka.length === 0)
+
+  // KPI Přehledu na pobočce: pokrytiObdobi nad zúženým přehledem.
+  const mesice = prevestPrehled({ trzby: [
+    { obdobi: '2026-09-01', branch_id: B, trzba_haleru: 100, polozek: 1, dnu: 1, dnu_s_platbami: 0 },
+    { obdobi: '2026-10-01', branch_id: A, trzba_haleru: 200, polozek: 1, dnu: 1, dnu_s_platbami: 0 },
+    { obdobi: '2026-10-01', branch_id: B, trzba_haleru: 50, polozek: 1, dnu: 1, dnu_s_platbami: 0 },
+  ], platby: [], zpusoby: [], banka: [] })
+  const firma = pokrytiObdobi(mesice, '2026-10-01', [A, B])
+  const rijenA = pokrytiObdobi(jenPobocka(mesice, A), '2026-10-01', [A])
+  ok('kontrola: za celou firmu říjen = 250 (obě pobočky)', firma.trzbaHaleru === 250)
+  ok('pobočka A říjen: jen 200, ne 250 celé firmy; úplné pokrytí 1 z 1', rijenA.trzbaHaleru === 200 && rijenA.uplne && rijenA.pokrytych === 1 && rijenA.aktivnich === 1)
+  const zariA = pokrytiObdobi(jenPobocka(mesice, A), '2026-09-01', [A])
+  ok('pobočka A září: bez dat (data B se nepřimíchají), 0 z 1', !zariA.maData && zariA.trzbaHaleru === 0 && zariA.pokrytych === 0 && !zariA.uplne)
+  const zariB = pokrytiObdobi(jenPobocka(mesice, B), '2026-09-01', [B])
+  ok('pobočka B září: 100, sada poboček [B] — trend září × říjen se srovná', zariB.trzbaHaleru === 100 && zariB.pobocky.join() === pokrytiObdobi(jenPobocka(mesice, B), '2026-10-01', [B]).pobocky.join())
+}
+
+console.log('\n== Pokladna pobočky: vlastní připojení, nebo přiřazená provozovna ==')
+{
+  ok('připojení pobočky (příjmové API) patří své pobočce', pokladnaPatriPobocce({ branch_id: A, externi_ucet: {} }, A))
+  ok('… a cizí ne', !pokladnaPatriPobocce({ branch_id: B, externi_ucet: {} }, A))
+  ok('připojení pobočky B s provozovnou přiřazenou A — rozhoduje branch_id připojení, ne JSON',
+    !pokladnaPatriPobocce({ branch_id: B, externi_ucet: { provozovny: [{ id: '1', branch_id: A }] } }, A))
+  const firemni = { branch_id: null, externi_ucet: { provozovny: [{ id: '1', nazev: 'Perla', branch_id: B }, { id: '2', nazev: 'Bar', branch_id: A }] } }
+  ok('firemní pokladna s provozovnou přiřazenou A patří A', pokladnaPatriPobocce(firemni, A))
+  const C = 'cccccccc-0000-0000-0000-000000000003'
+  ok('… a pobočce bez přiřazené provozovny ne', !pokladnaPatriPobocce(firemni, C))
+  ok('nepřiřazená provozovna (branch_id null) nepatří nikomu',
+    !pokladnaPatriPobocce({ branch_id: null, externi_ucet: { provozovny: [{ id: '1', branch_id: null }] } }, A))
+  ok('nečekaný tvar JSONu = nepatří (nic se nevymýšlí)',
+    !pokladnaPatriPobocce({ branch_id: null, externi_ucet: null }, A)
+    && !pokladnaPatriPobocce({ branch_id: null, externi_ucet: { provozovny: 'x' } }, A)
+    && !pokladnaPatriPobocce({ branch_id: null, externi_ucet: { provozovny: [null, 5] } }, A))
 }
 
 console.log('\n== Druhy plateb: appka = databáze ==')

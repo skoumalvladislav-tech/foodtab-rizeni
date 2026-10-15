@@ -73,9 +73,9 @@ export default function MobileVice({
   if (platny !== stav) setStav(platny);
   const otevreno = jeOtevrena(platny, cesta);
 
-  // Stálá funkce: Drawer má `onZavrit` v závislostech efektu, který
-  // přesouvá fokus. Nová funkce při každém vykreslení by fokus
-  // přehazovala sem a tam.
+  // Stálá funkce. Do 14. 10. 2026 nutná (Drawer měl `onZavrit`
+  // v závislostech efektu, který přesouvá fokus); od té doby si ji
+  // Drawer drží v refu (components/ui/fokus-okna.tsx), takže už jen neškodí.
   const zavrit = useCallback(() => setStav(ZAVRENA), []);
 
   return (

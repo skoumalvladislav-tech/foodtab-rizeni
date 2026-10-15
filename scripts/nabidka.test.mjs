@@ -334,6 +334,36 @@ for (const [popis, db, rozsah, cil] of [
   ok('  ale věta, co dělat', html.includes('Zatím tu pro vás nic není'))
   ok('  a žádný rozcestník', !ZNAKY_ROZCESTNIKU.test(html))
 }
+{
+  /*
+    Finance po pobočkách (13. 10. 2026): obrazovka jen pro celou firmu
+    (`jenFirma` — Faktury) výchozí na pobočce být nesmí, vedla by na
+    hlášku „Faktury patří celé firmě". Člověk s firemním členstvím, který
+    má jen faktury.read, a firma bez Provozu (Dnes tedy není): na firmě
+    Faktury, na pobočce věta.
+
+    Hlídá VÝSLEDEK stránky, ne jednu vrstvu: Faktury na pobočce
+    přeskočí nabídka rozsahu (`viditelnaNabidka(ctx, naFirme)`) i sama
+    `vychoziObrazovka(…, naFirme)`. Spadne, až když zmizí obě — vyndání
+    jedné ji neshodí (zkoušeno rozbitím 14. 10. 2026). Každou vrstvu
+    zvlášť hlídá scripts/finance-pobocky.test.mjs (nabídka, výchozí
+    obrazovka, volání v page.tsx).
+  */
+  const jenFaktury = {
+    ...MAJITEL,
+    kontext: {
+      ...MAJITEL.kontext,
+      jeMajitel: false,
+      modules: MODULY.map((m) => ({ ...m, active: m.key === 'finance' })),
+      permissions: ['faktury.read'],
+    },
+  }
+  ok('jen Faktury na /firma → /firma/finance/faktury',
+    (await otevrit(jenFaktury, 'firma')).kam === '/firma/finance/faktury')
+  const naPobocce = await otevrit(jenFaktury, 'cerna-perla')
+  ok('jen Faktury na pobočce: žádné přesměrování na Faktury pobočky', naPobocce.kam === null)
+  ok('  ale věta, co dělat', naPobocce.html.includes('Zatím tu pro vás nic není'))
+}
 
 /* =====================================================================
  * RÁM SE SPOUŠTÍ A KLIKÁ SE DO NĚJ (25. 9. 2026)
@@ -385,7 +415,10 @@ async function scena(popis, [databaze, rozsah, cesta, rozsahy = []], kontroly) {
   globalThis.__cesta = cesta
   globalThis.__odhlaseni = 0
   const ctx = await authz.getContext('t1')
-  const polozky = ctx.modules.flatMap((m) => nabidka.polozkyModulu(ctx, m.key))
+  // Jako layout: rozsah z adresy přes skutečné resolveScope. Na pobočce
+  // nabídka nenese obrazovky jen pro firmu (Finance po pobočkách, 13. 10.).
+  const naFirme = authz.resolveScope(ctx, rozsah).level === 'tenant'
+  const polozky = ctx.modules.flatMap((m) => nabidka.polozkyModulu(ctx, m.key, naFirme))
   const nastaveni = nabidka.polozkyNastaveni(ctx)
   const h = spustit(() =>
     createElement(AppShell, {
@@ -474,7 +507,18 @@ await scena('majitel, Více', [MAJITEL, 'cerna-perla', '/cerna-perla/dnes', OBA_
      (chybi.length ? ` — chybí ${chybi.map((p) => p.segment).join(', ')}` : ''),
      hotove.length > 20 && chybi.length === 0)
   ok('  mezi nimi každý zapnutý modul',
-    ['dnes', 'menu', 'finance/faktury', 'marketing/media'].every((s) => maOdkaz(vice, `/cerna-perla/${s}`)))
+    ['dnes', 'menu', 'finance', 'marketing/media'].every((s) => maOdkaz(vice, `/cerna-perla/${s}`)))
+  // Finance po pobočkách (13. 10. 2026): Kontakty, Integrace a Faktury
+  // patří celé firmě — na pobočce v nabídce nejsou (na /firma ano, scéna
+  // níž). Do 13. 10. tu stál odkaz /cerna-perla/finance/faktury a vedl
+  // na hlášku „Faktury patří celé firmě".
+  const jenFirma = ['finance/kontakty', 'finance/integrace', 'finance/faktury']
+  const naPobocce = jenFirma.filter((s) => maOdkaz(vice, `/cerna-perla/${s}`) || polozky.some((p) => p.segment === s))
+  ok('  ale ne obrazovky jen pro celou firmu (Kontakty, Integrace, Faktury)' +
+     (naPobocce.length ? ` — na pobočce jsou ${naPobocce.join(', ')}` : ''),
+    panel !== null && naPobocce.length === 0)
+  ok('  a ostatní Finance ano (Tržby, Cashflow, Platby)',
+    ['finance/trzby', 'finance/cashflow', 'finance/platby'].every((s) => maOdkaz(vice, `/cerna-perla/${s}`)))
   ok('  i Nastavení a Moje údaje',
     maOdkaz(vice, '/cerna-perla/nastaveni/lide') && maOdkaz(vice, '/moje-udaje'))
   ok('  a nadpis skupiny u každého modulu i Nastavení',
@@ -512,6 +556,47 @@ await scena('přepnutí z upozornění', [MAJITEL, 'cerna-perla', '/cerna-perla/
 await scena('přepnutí z Docházky', [MAJITEL, 'cerna-perla', '/cerna-perla/dochazka', OBA_ROZSAHY], ({ h }) => {
   ok('přepnutí na firmu z Docházky vede na /firma/dochazka',
     /<a [^>]*href="\/firma\/dochazka"[^>]*data-branch="firma"/.test(h.html()))
+})
+
+console.log('\n== Finance po pobočkách: celá firma má všechno, přepínač drží obrazovku ==')
+
+/*
+  Druhá půlka kontroly „na pobočce chybí obrazovky jen pro firmu" výš:
+  na /firma tytéž tři obrazovky v nabídce JSOU (jinak by kontrola výš
+  prošla i nad filtrem, který je schová všude).
+*/
+await scena('majitel na /firma, Více', [MAJITEL, 'firma', '/firma/dnes', OBA_ROZSAHY], ({ h, polozky, nastaveni }) => {
+  const panel = otevritVice(h)
+  const vice = panel ? h.html(panel) : ''
+  const hotove = [...polozky, ...nastaveni].filter((p) => p.hotovo)
+  const chybi = hotove.filter((p) => !maOdkaz(vice, adresa('firma', p)))
+  ok(`/firma: v menu je odkaz na každou hotovou obrazovku (${hotove.length})` +
+     (chybi.length ? ` — chybí ${chybi.map((p) => p.segment).join(', ')}` : ''),
+     hotove.length > 20 && chybi.length === 0)
+  ok('  včetně Kontaktů, Integrací a Faktur',
+    ['finance/kontakty', 'finance/integrace', 'finance/faktury'].every((s) => maOdkaz(vice, `/firma/${s}`)))
+})
+
+/*
+  Přepnutí rozsahu (lib/vychozi-obrazovka.ts → AppShell): z obrazovky
+  jen pro firmu na pobočku vede na první obrazovku téhož modulu
+  (Přehled), z Cashflow zůstane v Cashflow — vyhrává nejdelší shoda,
+  ne první položka modulu.
+*/
+// data-branch nese BARVU volby (prepinac-rozsahu.tsx): Černá perla = amber, firma = firma.
+const prepnutiNa = (html, kam, barva) =>
+  new RegExp(`<a [^>]*href="${escRe(kam)}"[^>]*data-branch="${escRe(barva)}"`).test(html)
+await scena('přepnutí z Kontaktů', [MAJITEL, 'firma', '/firma/finance/kontakty', OBA_ROZSAHY], ({ h }) => {
+  ok('z /firma/finance/kontakty na pobočku → /cerna-perla/finance (ne na hlášku)',
+    prepnutiNa(h.html(), '/cerna-perla/finance', 'amber'))
+})
+await scena('přepnutí z Faktur', [MAJITEL, 'firma', '/firma/finance/faktury/seznam', OBA_ROZSAHY], ({ h }) => {
+  ok('z /firma/finance/faktury/seznam na pobočku → /cerna-perla/finance',
+    prepnutiNa(h.html(), '/cerna-perla/finance', 'amber'))
+})
+await scena('přepnutí z Cashflow', [MAJITEL, 'cerna-perla', '/cerna-perla/finance/cashflow', OBA_ROZSAHY], ({ h }) => {
+  ok('z /cerna-perla/finance/cashflow na firmu → /firma/finance/cashflow (ne Přehled)',
+    prepnutiNa(h.html(), '/firma/finance/cashflow', 'firma'))
 })
 
 console.log('\n== „Více" se zase zavře ==')

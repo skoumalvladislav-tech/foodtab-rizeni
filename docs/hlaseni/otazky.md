@@ -1236,3 +1236,53 @@ oddíl 5 (zapnout dvě rozšíření, dvě tajemství do Vaultu, jeden příkaz)
 nezapnutý; alternativa je externí plánovač (cron-job.org utíná volání po
 30 s, pokladny a banky běží až 60 s; Upstash QStash zdarma jen do 1 000
 volání denně) — tajemství by pak leželo u třetí firmy.
+
+## 48. Finance po pobočkách — kdo je vidí a co v nich je
+
+**Vzniklo:** 13. 10. 2026. Šéfík: „mám otevřený Bernard Bar, budou
+vidět finance, které se týkají jen Bernard Baru." Na každý bod jsem
+vybral nejopatrnější variantu. Appka podle ní teď funguje, dokud
+nerozhodnete jinak. V kódu jsou tato místa označená `ROZHODNOUT:`.
+
+1. **Kdo vidí Finance pobočky.**
+   - **Teď:** jen ten, kdo má finanční přehled za celou firmu (vy).
+   - **Proč:** vedoucí jedné pobočky s právem na finance zůstává venku. Databázová pravidla u bankovních plateb, kontaktů, párování a zůstatků totiž rozsah člověka nehlídají. Přes ně by viděl údaje celé firmy.
+   - **Když to má být jinak:** migrace pravidel stejně jako u mezd (firemní řádky jen pro celou firmu), zúžit i souhrn tržeb a vědomě přepsat test krok95 (oddíl 5).
+2. **Firemní položky bez pobočky.** Patří sem společný bankovní účet a jeho platby, firemní rozpočty, předpisy plateb, vybavení a zakázky bez pobočky.
+   - **Teď:** na pobočce se neukazují ani nerozpočítávají. Pod obrazovkou je o tom věta.
+   - **Když to má být jinak:** původní zadání (ř. 72) chce sdílené náklady rozpočítat dohledatelným pravidlem s možností ručního přepsání. Je to samostatná práce a potřebuju od vás klíč (podle tržeb z pokladen, pevným podílem, nebo ručně u každé platby).
+3. **Bankovní účty a pobočky.**
+   - **Dnes:** všechny účty vznikly jako firemní, takže banka a cashflow pobočky jsou prázdné.
+   - **Nově:** v Platbách jde u účtu nastavit pobočku. Pozor: tím se k pobočce přesunou i všechny minulé platby toho účtu.
+   - **Na vás:** který účet (KB, Fio, pokladna) patří které pobočce.
+4. **Faktury** pobočku nemají, leží v oddělené databázi.
+   - **Teď:** na pobočce jsou schované.
+   - **Když to má být jinak:** faktury přijaté do schránky pobočky (např. `bernardbar@…`) jde přiřazovat podle schránky, a to tabulkou v naší databázi, bez zásahu do databáze Faktur. Starší faktury z n8n zůstanou bez pobočky.
+5. **Mzdy pobočky.**
+   - **Teď:** počítají se podle domovské pobočky zaměstnance, ne podle toho, kde směnu odpracoval. Majitel a lidé bez pobočky nespadnou do žádné pobočky.
+   - **Když to má být jinak:** zadání (ř. 152) chce mzdy podle skutečné práce. Potřebuje novou funkci nad docházkou.
+6. **Kontakty, Integrace, import výpisů a AI analytik** jsou jen za celou firmu. Na pobočce ukazují větu a odkaz na celou firmu.
+7. **Párování plateb s fakturami** a změna stavu faktury na „Uhrazeno“ jdou jen za celou firmu.
+
+## 49. Rušení směn po více dnech — co přesně se v ostatních dnech zruší
+
+**Vzniklo:** 14. 10. 2026. Šéfík: „potřebuji u rušení směn označit více
+dní." U smazání / zrušení směny jde teď zaškrtnout „…i v jiné dny"
+a vybrat dny v mřížce. Před potvrzením appka ukáže náhled, které směny
+to budou. Na každý bod jsem vybral nejopatrnější variantu. Appka podle
+ní funguje, dokud nerozhodnete jinak. V kódu `lib/ruseni-smen.ts` jsou
+tato místa označená `ROZHODNOUT:`.
+
+1. **Které směny se v ostatních dnech vezmou.**
+   - **Teď:** u směny s člověkem všechny směny téhož člověka na téže pobočce v daném dni (i jiný čas — „ten den nepřijde"). U neobsazené směny všechny neobsazené směny se stejnou pozicí a stejným časem od–do.
+   - **Pozor na nesymetrii:** ve dni, kde jste rušení otevřel, se zruší jen ta jedna směna. V ostatních dnech všechno, co pravidlu odpovídá. Pobočka se třemi stejnými sloty „Číšník 10–22" denně tak ve výchozím dni ubere jeden slot, v ostatních dnech všechny tři. Náhled to ukáže směnu po směně, takže se nic nestane potichu.
+   - **Když to má být jinak:** (a) u neobsazených rušit v každém dni jen jeden slot; (b) i u člověka brát jen směny se stejným časem; (c) ve výchozím dni rušit i další směnu téhož člověka.
+2. **Dny v minulosti.**
+   - **Teď:** mřížka nabízí 12 týdnů od pondělí týdne výchozí směny a minulé dny nezamyká. Jde tedy zrušit i už odpracované směny. Zrušená vydaná směna pak vypadne z výpočtu „dnů bez docházky" u mezd.
+   - **Když to má být jinak:** buď minulé dny v náhledu jen označit („z toho N dní v minulosti"), nebo je v mřížce zamknout a server je odmítne. Souvisí s otázkou 27 (minulá období).
+3. **Zavření okna během rušení.**
+   - **Teď:** tlačítko Zpět, volba i mřížka jsou během rušení zamčené. Okno ale jde zavřít křížkem (nebo Esc). Rušení na serveru doběhne, jen neuvidíte souhrn výsledku. Po obnovení stránky jsou směny zrušené. Stejně se to dnes chová i u ukládání jedné směny.
+   - **Když to má být jinak:** zamknout během odesílání i zavření okna, u ukládání i u rušení najednou.
+4. **Strop 150 směn na jedno potvrzení.**
+   - **Teď:** víc než 150 směn najednou appka odmítne v náhledu i v potvrzení („vyberte méně dní"). Směny se ruší jedna po druhé a každá zakládá upozornění. Kdyby akce narazila na časový limit serveru uprostřed, část by byla pryč a nevědělo by se která.
+   - **Když to má být jinak:** vyšší strop chce delší časový limit akce (`maxDuration` na Vercelu) nebo rušení v jedné databázové funkci najednou (migrace).

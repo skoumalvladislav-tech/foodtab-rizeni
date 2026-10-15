@@ -1,11 +1,15 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { getCurrentTenantId } from '@/lib/firma'
+import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
+import { pobockaFinanci } from '@/lib/finance-rozsah'
+import { zaznamPatriRozsahu } from '@/lib/finance-evidence-pobocka'
+import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
@@ -57,7 +61,7 @@ export default async function FinanceZakazkaDetail({
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
+  const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Zakázky vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
@@ -66,28 +70,57 @@ export default async function FinanceZakazkaDetail({
   const smiPsat = canSee(pristup.ctx, 'finance.manage')
   const supabase = await getServerSupabase()
 
+  // Pobočka z rozsahu adresy (lib/finance-rozsah.ts), `null` = celá firma.
+  // Na pobočce se k platbě nabízejí jen platební účty TÉ pobočky (akce
+  // to ověřuje znovu); za celou firmu všechny aktivní účty jako dosud.
+  const pobocka = pobockaFinanci(pristup.scope)
+  let dotazUctu = supabase.from('platebni_ucty').select('id, nazev').eq('tenant_id', tenantId).eq('aktivni', true)
+  if (pobocka) dotazUctu = dotazUctu.eq('branch_id', pobocka)
+
   const [zakazkaRes, polozkyRes, uhrazenoRes, uctyRes] = await Promise.all([
     supabase
       .from('zakazky')
-      .select('id, cislo, nazev, stav, datum_akce, pocet_hostu, cena_celkem_haleru, zaloha_pozadovana_haleru, faktura_id, poznamka, kontakty(nazev)')
+      .select('id, cislo, nazev, stav, branch_id, datum_akce, pocet_hostu, cena_celkem_haleru, zaloha_pozadovana_haleru, faktura_id, poznamka, kontakty(nazev)')
       .eq('tenant_id', tenantId)
       .eq('id', zakazkaId)
       .maybeSingle(),
     supabase.from('zakazky_polozky').select('id, popis, mnozstvi, cena_za_jednotku_haleru').eq('tenant_id', tenantId).eq('zakazka_id', zakazkaId),
     supabase.rpc('zakazka_uhrazeno', { p_tenant: tenantId, p_zakazka: zakazkaId }),
-    supabase.from('platebni_ucty').select('id, nazev').eq('tenant_id', tenantId).eq('aktivni', true),
+    dotazUctu,
   ])
 
   const zakazkaData = zakazkaRes.data as {
-    id: string; cislo: string; nazev: string; stav: string; datum_akce: string | null
+    id: string; cislo: string; nazev: string; stav: string; branch_id: string | null; datum_akce: string | null
     pocet_hostu: number | null; cena_celkem_haleru: number; zaloha_pozadovana_haleru: number
     faktura_id: string | null; poznamka: string; kontakty: { nazev: string } | { nazev: string }[] | null
   } | null
 
   if (!zakazkaData) return <Sdeleni nadpis="Zakázka nenalezena">Zkontrolujte adresu nebo se vraťte na seznam.</Sdeleni>
 
+  // Na pobočce jen zakázka TÉ pobočky — zakázka celé firmy nebo jiné
+  // pobočky se tu neukáže (ani její položky a úhrady, načtené výš
+  // souběžně), i kdyby na ni RLS dovolila.
+  if (!zaznamPatriRozsahu(pobocka, zakazkaData)) {
+    return (
+      <Sdeleni nadpis="Zakázka nepatří této pobočce">
+        {zakazkaData.branch_id === null
+          ? 'Tahle zakázka patří celé firmě, ne jedné pobočce — otevřete ji v pohledu Celá firma.'
+          : 'Tahle zakázka patří jiné pobočce. Přepněte se nahoře na její pobočku, nebo na Celou firmu.'}
+      </Sdeleni>
+    )
+  }
+
+  // Na pobočce věta „pobočka nemá účet" nesmí být spadlý dotaz
+  // (lib/supabase/dotaz.ts) — za celou firmu chování beze změny.
+  if (pobocka && uctyRes.error) throw new DotazSelhal('platební účty pobočky', uctyRes.error)
+
   const odberatel = Array.isArray(zakazkaData.kontakty) ? zakazkaData.kontakty[0]?.nazev : zakazkaData.kontakty?.nazev
   const polozky = (polozkyRes.data ?? []) as Polozka[]
+  // Uhrazeno = všechny platby propojené s TOUTO zakázkou, i když přišly
+  // na firemní účet — je to údaj zakázky pobočky (kolik zákazník za ni
+  // zaplatil), ne součet celé firmy. Bez nich by „Zbývá uhradit" lhalo.
+  // ROZHODNOUT: na pobočce počítat jen platby na účty pobočky? (Pak by
+  // zakázka zaplacená na firemní účet vypadala nezaplaceně.) Zatím vše.
   const uhrazenoHaleru = Number(uhrazenoRes.data ?? 0)
   const ucty = (uctyRes.data ?? []) as PlatebniUcet[]
   const zbyvaHaleru = zakazkaData.cena_celkem_haleru - uhrazenoHaleru
@@ -176,6 +209,13 @@ export default async function FinanceZakazkaDetail({
               <button type="submit" className="ft-tl ft-tl-hlavni">Zapsat platbu</button>
             </div>
           </form>
+        ) : null}
+
+        {smiPsat && pobocka && ucty.length === 0 ? (
+          <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
+            Platbu na zakázku tu zatím zapsat nejde: pobočka nemá přiřazený žádný aktivní platební účet. Zapište ji
+            v pohledu Celá firma, nebo nejdřív přiřaďte účet pobočce (Celá firma → Platby).
+          </p>
         ) : null}
       </div>
     </Navigace>

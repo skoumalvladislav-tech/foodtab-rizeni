@@ -20,6 +20,12 @@ import { koruny } from '@/lib/mzdy'
  * Když appka Fakturám nedosáhne (`pristupKFakturam()` není ok, nebo
  * dotaz na jejich databázi selže), vrátí prázdno — ne chybu, ne
  * vymyšlenou řádku.
+ *
+ * Na pobočce (Finance po pobočkách, 13.–14. 10. 2026) prázdno: obě
+ * položky stojí na fakturách, které pobočku nemají (oddělená databáze),
+ * a spárování mění stav faktury celé firmy — patří do Plateb za celou
+ * firmu. Dřív se tu na pobočce nabízelo párování s dodavatelem firemní
+ * faktury (kontrola 14. 10.).
  */
 
 export type PolozkaPozornosti = {
@@ -42,9 +48,11 @@ export async function nactiPolozkyKPozornosti(
   rozsah: string,
   /** `faktury.read` — Finance stačí `finance.read`, data faktur ale ne. */
   vidiFaktury: boolean,
+  /** Pobočka rozsahu (`pobockaFinanci`), `null` = celá firma. Na pobočce se nic nenačítá. */
+  pobocka: string | null = null,
   limitTransakci = 60,
 ): Promise<PolozkaPozornosti[]> {
-  if (!vidiFaktury) return []
+  if (!vidiFaktury || pobocka !== null) return []
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') return []
 

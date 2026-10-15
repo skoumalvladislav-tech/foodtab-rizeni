@@ -39,6 +39,8 @@ export type ObrazovkaNabidky = {
   segment: string
   hotovo: boolean
   jenPobocka?: boolean
+  /** Obrazovka jen pro celou firmu (Kontakty, Integrace, Faktury) — na pobočce výchozí být nemůže. */
+  jenFirma?: boolean
   /** Osobní obrazovka mimo rozsah (Moje údaje) — výchozí být nemůže. */
   adresa?: string
 }
@@ -56,8 +58,65 @@ export function vychoziObrazovka(
   naFirme: boolean,
 ): string | null {
   const kandidati = polozky.filter(
-    (p) => p.hotovo && !p.adresa && !(naFirme && p.jenPobocka),
+    (p) => p.hotovo && !p.adresa && !(naFirme && p.jenPobocka) && !(!naFirme && p.jenFirma),
   )
   const domovska = kandidati.find((p) => p.segment === DOMOVSKA_OBRAZOVKA)
   return (domovska ?? kandidati[0])?.segment ?? null
+}
+
+/** Položka s adresou — kolik je potřeba k poznání, kde člověk je. */
+export type PolozkaNaCeste = {
+  segment: string
+  dalsiSegmenty?: string[]
+}
+
+/**
+ * Položka nabídky, na jejíž obrazovce člověk je (`segment` = cesta za
+ * `/<rozsah>/`). Vyhrává NEJDELŠÍ shoda: na `finance/cashflow` je to
+ * Cashflow, ne Přehled (`finance`), i když Přehled stojí v nabídce dřív.
+ * Do 13. 10. 2026 vyhrávala první shoda a přepnutí rozsahu z kterékoli
+ * podstránky Financí končilo na Přehledu.
+ */
+export function polozkaNaCeste<T extends PolozkaNaCeste>(segment: string | null, polozky: readonly T[]): T | undefined {
+  if (segment === null) return undefined
+  const delka = (s: string) => (segment === s || segment.startsWith(s + '/') ? s.length : -1)
+  let nejlepsi: T | undefined
+  let nejdelsi = -1
+  for (const p of polozky) {
+    const d = Math.max(delka(p.segment), ...(p.dalsiSegmenty ?? []).map(delka))
+    if (d > nejdelsi) {
+      nejlepsi = p
+      nejdelsi = d
+    }
+  }
+  return nejdelsi >= 0 ? nejlepsi : undefined
+}
+
+/**
+ * Kam vede přepnutí rozsahu z obrazovky `zde` na rozsah `novy`.
+ *
+ * Drží se stejná obrazovka (podadresa se zahazuje — identifikátor patří
+ * jiné pobočce). Obrazovka vázaná na pobočku (`jenPobocka`) se na firmě
+ * a obrazovka jen pro firmu (`jenFirma`) na pobočce nahradí první
+ * hotovou obrazovkou téhož modulu, ať se nepřistane na hlášce.
+ * Obrazovka bez položky v nabídce vede na výchozí obrazovku rozsahu.
+ */
+export function cilPrepnutiRozsahu(
+  zde: (ObrazovkaNabidky & { modul?: string }) | undefined,
+  novy: string,
+  segmentFirmy: string,
+  polozky: readonly (ObrazovkaNabidky & { modul?: string })[],
+): string {
+  const naFirmu = novy === segmentFirmy
+  if (!zde) {
+    const vychoziTam = vychoziObrazovka(polozky, naFirmu)
+    return vychoziTam ? `/${novy}/${vychoziTam}` : `/${novy}`
+  }
+  if ((naFirmu && zde.jenPobocka) || (!naFirmu && zde.jenFirma)) {
+    const nahrada = polozky.find(
+      (p) => p.modul === zde.modul && p.hotovo && !p.adresa && !(naFirmu ? p.jenPobocka : p.jenFirma),
+    )
+    return nahrada ? `/${novy}/${nahrada.segment}` : `/${novy}`
+  }
+  return `/${novy}/${zde.segment}`
 }

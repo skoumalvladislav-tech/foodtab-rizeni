@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import type { RadekPokladny } from '@/lib/pokladna-csv-import'
@@ -14,7 +15,11 @@ export async function potvrditImportProdeje(formData: FormData): Promise<void> {
   const tenantId = await getCurrentTenantId()
   if (!tenantId) redirect('/')
 
-  const pristup = await zkusPristup(tenantId, 'finance.manage', rozsah)
+  // Import je jen za celou firmu (integrace/layout.tsx, Finance po
+  // pobočkách 13. 10. 2026): dávka `import_davky` pobočku nemá a pobočka
+  // prodejů přichází z formuláře (`branch_id`), ne z rozsahu. Právo proto
+  // VŽDY za celou firmu — `rozsah` zůstává jen pro návratovou adresu.
+  const pristup = await zkusPristup(tenantId, 'finance.manage', TENANT_SCOPE_SEGMENT)
   if (pristup.stav !== 'ok') redirect(`/${rozsah}/finance/integrace/prodeje`)
 
   const branchId = String(formData.get('branch_id') ?? '')

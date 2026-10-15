@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { jeRozsahFirmy } from '../../jen-pro-firmu'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { pristupKFakturam } from '@/lib/supabase/faktury'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
@@ -50,6 +51,10 @@ async function nactiNezaplacene(tenantId: string): Promise<Faktura[]> {
 
 export default async function FakturyKalendar({ params }: { params: Promise<{ rozsah: string }> }) {
   const { rozsah } = await params
+  // Faktury pobočku nemají (oddělená databáze): na pobočce stránka nic
+  // nenačte. Brána ve faktury/layout.tsx ji nezastaví — Next stránku
+  // vykreslí souběžně a její data by poslal do prohlížeče (kontrola 14. 10.).
+  if (!jeRozsahFirmy(rozsah)) return null
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>

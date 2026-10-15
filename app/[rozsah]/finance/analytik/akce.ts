@@ -1,5 +1,6 @@
 'use server'
 
+import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { nactiRollingVyhledy } from '@/lib/finance-rolling-prehled'
@@ -25,15 +26,19 @@ export type StavAnalytika =
  * ať otázka nemusí nosit datum.
  */
 export async function zeptatSeAnalytika(_predchozi: StavAnalytika, formData: FormData): Promise<StavAnalytika> {
-  const rozsah = String(formData.get('rozsah') ?? '')
   const otazka = String(formData.get('otazka') ?? '').trim()
   if (!otazka) return { stav: 'chyba', text: 'Napište otázku.' }
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
 
-  const pristup = await zkusPristup(tenantId, 'finance.read', rozsah)
-  if (pristup.stav !== 'ok') return { stav: 'chyba', text: 'Na tohle nemáte oprávnění.' }
+  // Podklady níž jsou čísla CELÉ firmy (výsledovka všech středisek,
+  // rozpočet s `p_branch: null`, cashflow firmy) — právo proto VŽDY za
+  // celou firmu, ne za rozsah z formuláře. Do 13. 10. 2026 stačilo
+  // finance.read v jedné pobočce a analytik by vedoucímu pobočky
+  // vyprávěl čísla celé firmy (Finance po pobočkách; analytik/layout.tsx).
+  const pristup = await zkusPristup(tenantId, 'finance.read', TENANT_SCOPE_SEGMENT)
+  if (pristup.stav !== 'ok') return { stav: 'chyba', text: 'AI analytik zatím pracuje jen s čísly celé firmy — ptát se ho smí ten, kdo má finanční přehled za celou firmu.' }
 
   const dnes = new Date()
   const rok = dnes.getFullYear()

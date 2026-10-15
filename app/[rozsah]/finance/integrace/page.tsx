@@ -10,6 +10,7 @@ import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import { zalozitPripojeni, odpojitPripojeni } from './akce'
+import { jeRozsahFirmy } from '../jen-pro-firmu'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,6 +90,9 @@ export default async function FinanceIntegrace({
   searchParams: Promise<{ chyba?: string }>
 }) {
   const { rozsah } = await params
+  // Na pobočce kreslí obrazovku layout (JenProFirmu) — stránka nic
+  // nenačítá ani nevrací, ani když ji Next vyrenderuje souběžně s ním.
+  if (!jeRozsahFirmy(rozsah)) return null
   const { chyba } = await searchParams
 
   const tenantId = await getCurrentTenantId()
