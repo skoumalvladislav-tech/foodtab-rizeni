@@ -1300,3 +1300,85 @@ tato místa označená `ROZHODNOUT:`.
 > Body 1–4 zůstávají, jak jsou popsané výš. Mřížka dnů při rušení nově
 > označí tečkou dny, kdy taková směna je (stejné pravidlo jako náhled),
 > a v popisku dne je její čas. Otázka je tím uzavřená.
+
+## 50. Jiné platby — kde a jak se počítají Ostatní tržby
+
+**Vzniklo:** 16. 10. 2026, zadání „Finance → Tržby → Jiné platby“ (15. 10.).
+Zadání mluví o „existující agendě Ostatní tržby“. Ta ale neexistovala, na
+Tržbách byla jen prázdná karta „Ostatní platby — modul se připravuje“.
+Vznikla proto jediná nová evidence `ostatni_trzby`. Do tržeb z pokladny ani
+do bankovních plateb appka nepíše nic.
+
+1. **Kde se Ostatní tržby ukazují.**
+   - **Teď:** na Tržbách vlastní karta „Ostatní tržby“ (jen CZK, jiné měny zvlášť větou). Do „Tržby z pokladen“, do tabulky po dnech ani do karty Tržby na Přehledu Financí se **nepřičítají**.
+   - **Proč:** nejopatrnější varianta. Přehled a trend na Přehledu zůstávají přesně jako dnes.
+   - **Když to má být jinak:** přidat sloupec „Ostatní“ do tabulky Tržeb a součet „Tržby celkem“ na Přehled. Je to úprava přehledu tržeb a jeho testů, bez zásahu do dat.
+2. **Prodej, který už v pokladně je.**
+   - **Teď:** jen se propojí (`zapocitat = false`), ukáže se v Jiných platbách a do součtu se nepřičte. Rozhoduje kontrola v pokladně, nebo ruční doložení s důvodem.
+   - **Když to má být jinak:** nic se nemění v datech, jen v tom, co se kde ukazuje.
+
+## 51. Jiné platby — vydané faktury appka zatím nevystavuje
+
+**Vzniklo:** 16. 10. 2026. Zadání chce „vytvořit návrh vydané faktury nebo
+propojit existující, použij současné zákazníky, číselné řady a fakturační
+logiku“. Vydané faktury ale v appce neexistují vůbec. Modul Faktury umí jen
+přijaté faktury v oddělené databázi bez rozlišení firem (otázka 45) a tam
+psát nesmím.
+
+- **Teď:** záznam umí **podklady** (odběratel z Kontaktů, položky, ceny a měna jen z ověřených údajů, seznam toho, co chybí) a **propojit existující fakturu** podle čísla a zdroje (pokladna, nebo jiný systém). Faktura není tržba a úhrada je zvlášť.
+- **Co chybí k vystavení:** tabulka vydaných faktur v naší databázi, číselná řada (např. `FV-2026-0001`), informace, jestli je firma plátce DPH, adresa sídla (v appce není), vzhled PDF, storno a opravný doklad (dobropis).
+- **Když to má být jinak:** řekněte, kde se mají faktury vystavovat:
+  - (a) v Foodtabu, samostatná práce zhruba na noc;
+  - (b) v Dotykačce (doklad typu faktura) a appka je jen propojí;
+  - (c) v účetním programu.
+
+## 52. Jiné platby — „Potvrdit výdej do POS“ pro konkrétní provozovny
+
+**Vzniklo:** 16. 10. 2026. Zadání: „přiřazuj uživatelům pro konkrétní
+provozovny“.
+
+- **Teď:** je to běžné oprávnění (`jine_platby.vydej_pos`) a platí na pobočkách, kde má člověk členství. Vedoucí jen Bernard Baru schvaluje jen Bernard Bar. Člověk s rozsahem celé firmy (vy, provozní ředitel) schvaluje všude. Ověřuje to scénář krok97.
+- **Proč:** o přístupu rozhoduje jediné místo (`app.has_access`). Vlastní seznam „schvalovatelů po pobočkách“ by byl druhý model oprávnění vedle něj (pravidlo 2 v CLAUDE.md).
+- **Když to má být jinak:** jemnější přidělení, kdy jeden člověk má právo X jen na pobočce A, ale jiná práva i jinde, chce úpravu modelu oprávnění pro celou appku, ne jen pro Jiné platby.
+
+## 53. Jiné platby — potvrzená spotřeba a Foodcost
+
+**Vzniklo:** 16. 10. 2026. Zadání: „Potvrzenou spotřebu propoj s Foodcost
+a Beverage cost. Pozdější synchronizace nesmí vytvořit další spotřebu.“
+
+- **Teď:** spotřeba z provedeného výdeje je dohledatelná (funkce `jine_platby_spotreba`), ale do procent Foodcost a Beverage cost se **nepřičítá**.
+- **Proč:** foodcost se počítá z prodejů pokladny. Nevíme, jestli Dotykačka odpis (*Odpis*) ve svém denním reportu prodejů neukazuje. Kdyby ano, přičtením by se spotřeba započítala dvakrát.
+- **Když to má být jinak:** po ověření na testovacím cloudu (viz `docs/jine-platby-pos-operace.md`) přidat potvrzenou spotřebu do výpočtu foodcostu. Je to migrace funkce `foodcost_beverage_prehled` a jejích testů.
+
+## 54. Jiné platby — zapnout zápis výdeje do Dotykačky?
+
+**Vzniklo:** 16. 10. 2026.
+
+- **Teď:** výdej v Dotykačce dělá schvalovatel ručně (účet zaplacený *Odpisem*) a v appce ho doloží číslem dokladu. Stav je „Ručně doloženo“, ne „Odečteno v POS“. Funkce pro automatický zápis přes POS akci je napsaná a otestovaná na podvržených odpovědích, ale **vypnutá v kódu**.
+- **Co je potřeba:** ověření na testovacím cloudu Dotykačky (seznam v `docs/jine-platby-pos-operace.md`) a pak výslovný pokyn „zapni zápis do Dotykačky“.
+- **Když to má být jinak:** jediná změna v `lib/pokladna-dotykacka.ts` a jeden řádek testu.
+
+## 55. Jiné platby — jak se má řešit otevřený účet, ke kterému chce host fakturu
+
+**Vzniklo:** 16. 10. 2026. Appka umí obě cesty, návod pro obsluhu ale
+potřebuje jednu doporučenou.
+
+- (a) **Účet se v pokladně uzavře** způsobem platby „faktura / převodem“. Tržbu i sklad pak má pokladna. V Jiných platbách se prodej jen propojí a připojí se číslo faktury. Žádný výdej se nedělá.
+- (b) **Účet se v pokladně stornuje** a prodej se eviduje mimo pokladnu. V Jiných platbách se zapíše nová tržba a výdej se schválí a provede (dnes ručně).
+- **Teď:** návod popisuje obě a doporučuje (a), protože tam nic nemůže zůstat napůl.
+- **Když to má být jinak:** jen změna návodu.
+
+## 56. Jiné platby — souhlas s posíláním fotek dokladů AI
+
+**Vzniklo:** 16. 10. 2026. Zadání: „Citlivé údaje neposílej neschválené
+AI službě.“
+
+- **Teď:** fotka se pošle k rozpoznání jen po kliknutí na „Rozpoznat z dokladu“, a to stejné službě (Anthropic, klíč Foodtabu) jako u faktur z e-mailu. Pošle se jen obrázek nebo PDF, žádné jméno obsluhy ani nic dalšího. Strop 200 rozpoznání za den na firmu. Bez klíče appka nic nevymýšlí a nabídne ruční zadání.
+- **Když to má být jinak:** vypínač „AI pro Jiné platby“ v nastavení firmy, nebo vlastní klíč zákazníka (zákaznický režim). Obojí je malá práce.
+
+## 57. Jiné platby — obsluha bez finančních práv
+
+**Vzniklo:** 16. 10. 2026.
+
+- **Teď:** kdo má jen práva Jiných plateb (založit, upravit, odeslat ke schválení), dostane se do Finance → Tržby → Jiné platby a uvidí záznamy své pobočky. Zbytek Financí dál vyžaduje finanční přehled (otázka 48).
+- **Když to má být jinak:** například vstup přes Dnes místo Financí. Je to jen úprava navigace.
