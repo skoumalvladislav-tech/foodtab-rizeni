@@ -164,7 +164,8 @@ set role service_role;
 select public.pos_katalog_nahradit(:'pos', jsonb_build_array(
   jsonb_build_object('externi_id', 'P1', 'nazev', 'Svíčková', 'jednotka', 'Piece', 'odecita_sklad', false, 'ma_recepturu', true),
   jsonb_build_object('externi_id', 'P2', 'nazev', 'Pivo 0,5 l', 'jednotka', 'Liter', 'mira', 0.5, 'odecita_sklad', true, 'ma_recepturu', false),
-  jsonb_build_object('externi_id', 'P3', 'nazev', 'Vstupné', 'jednotka', 'Piece', 'odecita_sklad', false, 'ma_recepturu', false)
+  jsonb_build_object('externi_id', 'P3', 'nazev', 'Vstupné', 'jednotka', 'Piece', 'odecita_sklad', false, 'ma_recepturu', false),
+  jsonb_build_object('externi_id', 'P4', 'nazev', 'Polévka dne', 'jednotka', 'Piece', 'odecita_sklad', false)
 )) as katalog_pocet \gset
 reset role;
 
@@ -192,7 +193,7 @@ select pg_temp.check('funkce pro přihlášené: authenticated ano, anon ne, vš
       and p.proname not in ('jine_platby_zahajit_rozpoznani', 'jine_platby_dokoncit_rozpoznani', 'jine_platby_zapsat_kontrolu')
       and has_function_privilege('authenticated', p.oid, 'execute')
       and not has_function_privilege('anon', p.oid, 'execute')
-      and p.prosecdef and p.proconfig @> array['search_path=""']) = 19);
+      and p.prosecdef and p.proconfig @> array['search_path=""']) = 20);
 
 select pg_temp.check('serverové funkce (AI, kontrola v pokladně, operace, katalog): jen service_role',
   (select count(*) from pg_proc p
@@ -203,7 +204,7 @@ select pg_temp.check('serverové funkce (AI, kontrola v pokladně, operace, kata
       and not has_function_privilege('authenticated', p.oid, 'execute')
       and not has_function_privilege('anon', p.oid, 'execute')) = 6);
 
-select pg_temp.check('katalog se nahrál (3 produkty)', :'katalog_pocet'::integer = 3);
+select pg_temp.check('katalog se nahrál (4 produkty)', :'katalog_pocet'::integer = 4);
 
 
 \echo ''
@@ -341,7 +342,10 @@ select jsonb_build_array(
     'pos_produkt_id', 'P3', 'pos_produkt_nazev', 'Vstupné', 'pos_mnozstvi', '2', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false),
   jsonb_build_object('nazev_puvodni', 'Tip', 'nazev', 'Spropitné', 'mnozstvi', null, 'jednotka', null,
     'cena_jednotkova_haleru', null, 'cena_celkem_haleru', 16000, 'zdroj', 'ai', 'druh', 'spropitne',
-    'mapovani', 'neskladova', 'vyzaduje_kontrolu', false)
+    'mapovani', 'neskladova', 'vyzaduje_kontrolu', false),
+  jsonb_build_object('nazev_puvodni', 'Polevka', 'nazev', 'Polévka dne', 'mnozstvi', '1', 'jednotka', 'ks',
+    'cena_jednotkova_haleru', 0, 'cena_celkem_haleru', 0, 'zdroj', 'rucne', 'druh', 'pokrm',
+    'pos_produkt_id', 'P4', 'pos_produkt_nazev', 'Polévka dne', 'pos_mnozstvi', '1', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false)
 )::text as polozky \gset
 
 set role authenticated;
@@ -378,8 +382,8 @@ select public.jine_platby_oznacit_zkontrolovano(:'z1', :'verze_z1');
 reset role;
 select set_config('test.user_id', '', false);
 
-select pg_temp.check('návrh: 4 položky, verze 3, zkontrolováno, částka 1 400 Kč',
-  (select count(*) from public.jine_platby_polozky where zaznam_id = :'z1') = 4
+select pg_temp.check('návrh: 5 položek, verze 3, zkontrolováno, částka 1 400 Kč',
+  (select count(*) from public.jine_platby_polozky where zaznam_id = :'z1') = 5
   and (select verze = 3 and stav_kontroly = 'zkontrolovano' and castka_haleru = 140000 from public.jine_platby where id = :'z1'));
 
 
@@ -516,9 +520,9 @@ select set_config('test.user_id', '', false);
 set role authenticated;
 select set_config('test.user_id', '97970000-0000-0000-0000-000000000001', false);
 select public.jine_platby_sestavit_vydej(:'z1')::text as vydej \gset
-select pg_temp.check('výdej: svíčková JAKO POKRM (2) a pivo (4 kusy); bez spropitného a bez vstupného, které pokladna neodečítá',
+select pg_temp.check('výdej: svíčková JAKO POKRM (2), pivo (4 kusy) a polévka (receptura neznámá → zůstává); bez spropitného a bez vstupného, které pokladna výslovně neodečítá',
   (select jsonb_agg(e ->> 'pos_produkt_id' order by e ->> 'pos_produkt_id') from jsonb_array_elements(:'vydej'::jsonb -> 'obsah' -> 'polozky') e)
-    = '["P1", "P2"]'::jsonb
+    = '["P1", "P2", "P4"]'::jsonb
   and (select (e ->> 'mnozstvi')::numeric from jsonb_array_elements(:'vydej'::jsonb -> 'obsah' -> 'polozky') e where e ->> 'pos_produkt_id' = 'P2') = 4
   and jsonb_array_length(:'vydej'::jsonb -> 'blokace') = 0);
 select public.jine_platby_odeslat_sklad(:'z1', :'verze_z1') as navrh1 \gset
@@ -553,7 +557,7 @@ select public.jine_platby_rozhodnout_vydej(:'navrh1', :'otisk1', true) as op1 \g
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.check('schváleno: operace „připraveno" s klíčem, položky z návrhu, schvalovatel zapsaný',
-  (select stav = 'pripraveno' and idempotencni_klic like 'ftjp%' and jsonb_array_length(polozky) = 2 and externi_provozovna = '11'
+  (select stav = 'pripraveno' and idempotencni_klic like 'ftjp%' and jsonb_array_length(polozky) = 3 and externi_provozovna = '11'
      from public.pos_operace where id = :'op1')
   and (select stav = 'schvaleno' and schvalil::text = '97970000-0000-0000-0000-000000000003' from public.jine_platby_skladove_navrhy where id = :'navrh1'));
 
@@ -598,6 +602,39 @@ select pg_temp.check('se změnou položky obsah návrhu jiný (5 piv) a otisk ji
   and (select (e ->> 'mnozstvi')::numeric from public.jine_platby_skladove_navrhy n, jsonb_array_elements(n.obsah -> 'polozky') e
         where n.id = :'navrh2' and e ->> 'pos_produkt_id' = 'P2') = 5);
 
+
+set role authenticated;
+select set_config('test.user_id', '97970000-0000-0000-0000-000000000001', false);
+select pg_temp.check('obsluha (bez finance.read) vidí pokladnu své pobočky — jen netajné údaje a provozovnu 11',
+  (select count(*) = 1 and min(pos_provozovna) = '11' and min(id::text) = :'pos' from public.jine_platby_pokladny(:'tenant', :'perla')));
+select pg_temp.check('obsluha Perly nedostane pokladny Baru (bez práva na pobočce = prázdno)',
+  (select count(*) from public.jine_platby_pokladny(:'tenant', :'bar')) = 0);
+select set_config('test.user_id', '97970000-0000-0000-0000-000000000004', false);
+select pg_temp.check('vedoucí Baru vidí obě pokladny, které Bar obsluhují',
+  (select count(*) from public.jine_platby_pokladny(:'tenant', :'bar')) = 2);
+select set_config('test.user_id', '97970000-0000-0000-0000-000000000005', false);
+select pg_temp.check('cizí firma pokladny naší firmy nedostane',
+  (select count(*) from public.jine_platby_pokladny(:'tenant', :'perla')) = 0);
+-- Záznam bez pokladny: návrh výdeje nevznikne, oprávněná osoba doloží ručně.
+select set_config('test.user_id', '97970000-0000-0000-0000-000000000001', false);
+select public.jine_platby_ulozit_navrh(:'z3', 1, jsonb_set(:'hlavicka'::jsonb, '{externi_ucet}', 'null'), '[]') as verze_z3 \gset
+select set_config('test.user_id', '97970000-0000-0000-0000-000000000003', false);
+select pg_temp.check('bez pokladny: nezkontrolovaný záznam ručně doložit nejde',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rucne_dolozit_vydej(%L, %L, %L)', :'z3', 'X', 'Zkouším bez kontroly.'),
+    '23514', 'Nejdřív zkontrolujte'));
+select set_config('test.user_id', '97970000-0000-0000-0000-000000000001', false);
+select public.jine_platby_oznacit_zkontrolovano(:'z3', :'verze_z3');
+select set_config('test.user_id', '97970000-0000-0000-0000-000000000003', false);
+select pg_temp.check('záznam s pokladnou bez schváleného návrhu ručně doložit nejde',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rucne_dolozit_vydej(%L, %L, %L)', :'z4', 'X', 'Zkouším bez schválení.'),
+    '23514', 'jen schválený návrh'));
+select public.jine_platby_rucne_dolozit_vydej(:'z3', 'VYD-papír-12', 'Provozovna nemá pokladnu se skladem, zapsáno do papírové výdejky.');
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('bez pokladny: ručně doloženo s dokladem, žádný návrh ani operace',
+  (select stav_skladu = 'rucne_dolozeno' and vydej_doklad = 'VYD-papír-12' from public.jine_platby where id = :'z3')
+  and (select count(*) from public.jine_platby_skladove_navrhy where zaznam_id = :'z3') = 0
+  and (select count(*) from public.pos_operace where zaznam_id = :'z3') = 0);
 
 \echo ''
 \echo '== 9. Operace v pokladně: souběh, timeout, obnova ================'

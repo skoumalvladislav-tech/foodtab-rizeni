@@ -1,0 +1,211 @@
+import { datumACasSRokemVPasmu } from '@/lib/cas'
+import { formatHaleru, mnozstviNaText } from '@/lib/jine-platby-castky'
+import type { KontrolaDokladu } from '@/lib/jine-platby-kontrola'
+import { popisDruhu, popisStavuKontroly, popisTypuDokladu, type AkceJinePlatby } from '@/lib/jine-platby-stav'
+import type { PolozkaNavrhu, ZaznamJinePlatby } from '@/lib/jine-platby-typy'
+
+import { PanelHlava } from '../../../../dnes/prvky'
+import Ikona from '../../../../ikona'
+import { oznacitZkontrolovano, ulozitNavrh } from '../akce'
+import { rozpoznat } from '../akce-ai'
+import { nacistKatalog } from '../akce-pos'
+import ZnackaStavu from '../znacka-stavu'
+import EditorNavrhu, { type HlavickaEditoru, type PolozkaEditoru, type ProduktEditoru } from './editor-navrhu'
+import FormularAkce from './formular-akce'
+import { datumCesky, HLASKA_BEZ_AI, popisPuvoduCastky } from './logika'
+import { Oddil, Udaj, Udaje, Vysvetleni } from './prvky'
+
+/**
+ * Sekce (a) Kontrola dokladu: hlavička, rozpoznání přes AI, přehled
+ * částek z dokladu (co je tržba a co ne), položky s úpravou a „Označit
+ * jako zkontrolované". Nic z toho nezapisuje tržbu ani sklad.
+ */
+export default function SekceKontrola({
+  zakl,
+  z,
+  akce,
+  smiUpravit,
+  editor,
+  polozky,
+  rozpoznani,
+  kontrolaRozpoznani,
+  zbyvaKeKontrole,
+  ai,
+  katalog,
+  zona,
+}: {
+  zakl: { zaznam: string; verze: number; rozsah: string }
+  z: ZaznamJinePlatby
+  akce: ReadonlySet<AkceJinePlatby>
+  smiUpravit: boolean
+  editor: { hlavicka: HlavickaEditoru; polozky: PolozkaEditoru[]; katalog: ProduktEditoru[]; kontakty: { id: string; nazev: string; ico: string | null }[] | null }
+  polozky: PolozkaNavrhu[]
+  rozpoznani: { stav: string; vytvoreno: string; duvod: string | null } | null
+  kontrolaRozpoznani: KontrolaDokladu | null
+  /** Co v uloženém návrhu brání „zkontrolováno“ (zkontrolovatNavrh nad daty z databáze). */
+  zbyvaKeKontrole: string[]
+  ai: { zapnuto: boolean; pocetSouboru: number }
+  katalog: { umi: boolean; pocet: number; aktualizovano: string | null } | null
+  zona: string
+}) {
+  const castka = (h: number | null) => (h === null ? 'neuvedeno' : formatHaleru(h, z.mena))
+  const k = kontrolaRozpoznani
+  const zruseno = z.stavKontroly === 'zruseno'
+
+  return (
+    <section className="ds-plocha" style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
+      <PanelHlava ikona="seznam" nadpis="Kontrola dokladu" />
+      <div>
+        <ZnackaStavu popis={popisStavuKontroly(z.stavKontroly)} />
+      </div>
+
+      <Udaje>
+        <Udaj nazev="Datum prodeje (provozní den)">{z.datumProdeje ? datumCesky(z.datumProdeje) : 'neuvedeno'}</Udaj>
+        <Udaj nazev="Označení">{z.oznaceni || '—'}</Udaj>
+        <Udaj nazev="Měna">{z.mena ?? 'neuvedena (nedomýšlí se)'}</Udaj>
+        <Udaj nazev="Celková cena prodeje">
+          <span className="ds-cislo" style={{ fontSize: '17px' }}>
+            {castka(z.castkaHaleru)}
+          </span>
+          {z.castkaHaleru !== null ? <span style={{ color: 'var(--muted)', fontSize: '13px' }}> · {popisPuvoduCastky(z.castkaPuvod)}</span> : null}
+        </Udaj>
+        <Udaj nazev="Typ dokladu">{popisTypuDokladu(z.typDokladu)}</Udaj>
+        <Udaj nazev="Číslo účtu / dokladu">{z.externiUcet ?? '—'}</Udaj>
+      </Udaje>
+
+      {/* ---------- Rozpoznání přes AI ---------- */}
+      {smiUpravit && !zruseno ? (
+        <Oddil nadpis="Rozpoznání z dokladu">
+          {!ai.zapnuto ? (
+            <Vysvetleni>{HLASKA_BEZ_AI}</Vysvetleni>
+          ) : ai.pocetSouboru === 0 ? (
+            <Vysvetleni>Nejdřív nahrajte fotku nebo PDF dokladu (vlevo). Bez dokladu zadejte položky ručně.</Vysvetleni>
+          ) : akce.has('rozpoznat') ? (
+            <FormularAkce
+              akce={rozpoznat}
+              {...zakl}
+              tlacitko="Rozpoznat z dokladu"
+              vzhled={polozky.length === 0 ? 'hlavni' : 'vedlejsi'}
+              potvrzeni={
+                polozky.length > 0
+                  ? {
+                      text: `Rozpoznání nahradí současné položky (${polozky.length}) a údaje, které na dokladu přečte. Co nepřečte, zůstane, jak je. Pokračovat?`,
+                      ano: 'Ano, rozpoznat znovu',
+                    }
+                  : undefined
+              }
+            >
+              <Vysvetleni>
+                Snímky dokladu se pošlou ke čtení schválené AI službě Anthropic — nic jiného (žádná jména, ceník ani další údaje z appky). Výsledek je
+                jen návrh: nic se nezapíše do tržeb ani do skladu, dokud ho nezkontrolujete. Čtení trvá až dvě minuty.
+              </Vysvetleni>
+            </FormularAkce>
+          ) : null}
+          {rozpoznani ? (
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+              Naposledy: {datumACasSRokemVPasmu(rozpoznani.vytvoreno, zona)} —{' '}
+              {rozpoznani.stav === 'ok' ? 'přečteno' : rozpoznani.stav === 'bezi' ? 'probíhá' : rozpoznani.stav === 'bez_klice' ? 'AI není zapnutá' : 'nepovedlo se'}
+              {rozpoznani.stav === 'chyba' && rozpoznani.duvod ? `: ${rozpoznani.duvod}` : ''}
+            </p>
+          ) : null}
+        </Oddil>
+      ) : null}
+
+      {/* ---------- Částky z dokladu ---------- */}
+      {k ? (
+        <Oddil nadpis="Částky na dokladu (z posledního rozpoznání)">
+          <Vysvetleni dulezite>
+            Do tržby jde jen celková cena prodeje (zboží a služby po slevách, bez spropitného). „K úhradě“ ani přijatá hotovost tržba nejsou — host mohl
+            platit zálohu, doplácet nebo dostat zpátky.
+          </Vysvetleni>
+          <Udaje>
+            <Udaj nazev="Celkem — cena prodeje (jde do tržby)">{castka(k.castky.celkem)}</Udaj>
+            <Udaj nazev="K úhradě (není tržba)">{castka(k.castky.kUhrade)}</Udaj>
+            <Udaj nazev="Zaplaceno">{castka(k.castky.zaplaceno)}</Udaj>
+            <Udaj nazev="Zbývá doplatit">{castka(k.castky.zbyva)}</Udaj>
+            <Udaj nazev="Přijato hotově (není tržba)">{castka(k.castky.prijatoHotove)}</Udaj>
+            <Udaj nazev="Vráceno">{castka(k.castky.vraceno)}</Udaj>
+            <Udaj nazev="Sleva">{castka(k.castky.sleva)}</Udaj>
+            <Udaj nazev="Spropitné (nepatří do ceny prodeje)">{castka(k.castky.spropitne)}</Udaj>
+            <Udaj nazev="Součet položek">{castka(k.soucetPolozekHaleru)}</Udaj>
+          </Udaje>
+          {k.navrhCelkem ? (
+            <Vysvetleni dulezite>
+              Celková cena na dokladu chybí. Vypočtený součet položek {castka(k.navrhCelkem.haleru)} je jen návrh — potvrďte ho v úpravě níž („Použít
+              součet jako návrh celkové ceny“).
+            </Vysvetleni>
+          ) : null}
+          {k.nesoulad ? <p className="hlaska-vareni" style={{ margin: 0 }}>{k.nesoulad.popis}</p> : null}
+          {k.duvody.length > 0 ? (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: '14px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>Upozornění z kontroly dokladu ({k.duvody.length})</summary>
+              <ul style={{ margin: '6px 0 0', paddingLeft: '20px', fontSize: '13.5px' }}>
+                {k.duvody.map((d) => (
+                  <li key={d}>{d}</li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </Oddil>
+      ) : null}
+
+      {/* ---------- Položky ---------- */}
+      <Oddil nadpis="Položky a přiřazení k pokladně">
+        {smiUpravit && akce.has('upravit') ? (
+          <EditorNavrhu akce={ulozitNavrh} {...zakl} mena={z.mena} {...editor} />
+        ) : polozky.length === 0 ? (
+          <Vysvetleni>Záznam zatím nemá položky.</Vysvetleni>
+        ) : (
+          <ol style={{ margin: 0, paddingLeft: '20px', display: 'grid', gap: '8px', fontSize: '14px' }}>
+            {polozky.map((p, i) => (
+              <li key={i} style={{ background: p.vyzadujeKontrolu ? 'color-mix(in srgb, var(--pozor) 8%, transparent)' : undefined, overflowWrap: 'anywhere' }}>
+                <strong>{p.nazev}</strong> · {p.mnozstvi ? mnozstviNaText(p.mnozstvi) : '? '}
+                {p.jednotka ?? ''} · {p.cenaCelkemHaleru !== null ? castka(p.cenaCelkemHaleru) : 'cena chybí'} · {popisDruhu(p.druh)}
+                {p.posProduktNazev ? ` · v pokladně: ${p.posProduktNazev}${p.mapovani === 'overeno' ? ' (ověřeno)' : ' (návrh)'}` : ''}
+                {p.vyzadujeKontrolu ? (
+                  <span style={{ display: 'block', color: 'var(--pozor)', fontSize: '13px' }}>
+                    <Ikona klic="varovani" velikost={14} /> {p.duvodKontroly || 'Ke kontrole'}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        )}
+
+        {katalog && smiUpravit && !zruseno ? (
+          <div style={{ display: 'grid', gap: '8px' }}>
+            <Vysvetleni>
+              Katalog pokladny: {katalog.pocet > 0 ? `${katalog.pocet} produktů` : 'zatím nenačtený'}
+              {katalog.aktualizovano ? `, aktualizováno ${datumACasSRokemVPasmu(katalog.aktualizovano, zona)}` : ''}. Přiřazení podle podobnosti názvu je jen návrh;
+              ověřené přiřazení dělá člověk.
+            </Vysvetleni>
+            {katalog.umi && akce.has('upravit') ? <FormularAkce akce={nacistKatalog} {...zakl} tlacitko="Načíst katalog z pokladny" /> : null}
+            {!katalog.umi ? <Vysvetleni>Tahle pokladna katalog neposílá — položky přiřazujte podle názvů z prodeje; výdej pak jen ručně.</Vysvetleni> : null}
+          </div>
+        ) : null}
+      </Oddil>
+
+      {/* ---------- Zkontrolováno ---------- */}
+      {akce.has('oznacit_zkontrolovano') ? (
+        <Oddil nadpis="Označit jako zkontrolované">
+          {zbyvaKeKontrole.length > 0 ? (
+            <div style={{ display: 'grid', gap: '4px', fontSize: '13.5px' }}>
+              <span>Co ještě brání (podle uloženého návrhu):</span>
+              <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                {zbyvaKeKontrole.map((d) => (
+                  <li key={d}>{d}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <FormularAkce akce={oznacitZkontrolovano} {...zakl} tlacitko="Označit jako zkontrolované" vzhled="hlavni">
+            <Vysvetleni>
+              Potvrzujete, že datum prodeje, měna, celková cena a položky sedí s dokladem. Tím se nic nezapíše do tržeb ani do skladu — to jsou další
+              kroky.
+            </Vysvetleni>
+          </FormularAkce>
+        </Oddil>
+      ) : null}
+    </section>
+  )
+}

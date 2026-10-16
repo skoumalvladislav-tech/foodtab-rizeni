@@ -17,8 +17,10 @@ import {
   type SouhrnTrzeb,
 } from '@/lib/pokladna-trzby'
 import type { DruhPlatby } from '@/lib/pos-provider-contract'
+import { formatHaleru } from '@/lib/jine-platby-castky'
 import DataTable, { type SloupecTabulky } from '@/components/ui/DataTable'
 import LineChart from '@/components/ui/LineChart'
+import { PanelHlava } from '../../dnes/prvky'
 import FinanceKpiKarta from '../kpi-karta'
 
 /**
@@ -26,6 +28,75 @@ import FinanceKpiKarta from '../kpi-karta'
  * od stránky (page.tsx), sám nic nenačítá ani nekontroluje práva. Díky
  * tomu se dá vykreslit i s ukázkovými daty bez přihlášení.
  */
+
+/** Řádek `ostatni_trzby`, jak ho stránka načte (RLS, období a pobočka už vyfiltrované). */
+export type RadekOstatniTrzby = {
+  branch_id: string
+  datum: string
+  castka_haleru: number
+  mena: string
+  zapocitat: boolean
+  stav: string
+}
+
+export type SouhrnOstatnichTrzeb = {
+  /** Součet započítaných platných tržeb v CZK (haléře). */
+  czkHaleru: number
+  /** Kolik řádků v CZK se sečetlo — 0 = za období nic (karta „–", ne „0 Kč"). */
+  czkPocet: number
+  /** Jiné měny ZVLÁŠŤ — nepřepočítávají se ani nesčítají s korunami. */
+  jineMeny: { mena: string; haleru: number }[]
+}
+
+/**
+ * Ostatní tržby (z Jiných plateb) za období: jen `zapocitat = true`
+ * a `stav = 'platna'`. Řádek se `zapocitat = false` je prodej, který už
+ * je v tržbách z pokladny (jen propojený) — přičíst ho by znamenalo
+ * počítat tutéž tržbu dvakrát. Stornovaná tržba se nepočítá. Měny se
+ * nesčítají: koruny zvlášť, každá cizí měna zvlášť.
+ *
+ * Tohle je JEDINÉ místo, kde se ty dvě podmínky uplatní (stránka je
+ * v dotazu nemá) — kontrola nad nimi tak umí spadnout.
+ */
+export function souhrnOstatnichTrzeb(radky: readonly RadekOstatniTrzby[]): SouhrnOstatnichTrzeb {
+  let czkHaleru = 0
+  let czkPocet = 0
+  const jine = new Map<string, number>()
+  for (const r of radky) {
+    if (r.zapocitat !== true || r.stav !== 'platna') continue
+    if (!Number.isSafeInteger(r.castka_haleru)) continue
+    const mena = String(r.mena ?? '').trim().toUpperCase()
+    if (mena === 'CZK') {
+      czkHaleru += r.castka_haleru
+      czkPocet += 1
+    } else if (/^[A-Z]{3}$/.test(mena)) {
+      jine.set(mena, (jine.get(mena) ?? 0) + r.castka_haleru)
+    }
+  }
+  return {
+    czkHaleru,
+    czkPocet,
+    jineMeny: [...jine.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([mena, haleru]) => ({ mena, haleru })),
+  }
+}
+
+/**
+ * Karta „Jiné platby" pod přehledem: co agenda je a odkaz do ní. Kreslí
+ * se vždycky — i když pokladna za období nic neposlala (prodeje mimo
+ * pokladnu existují i tak).
+ */
+function KartaJinychPlateb({ zakladJinychPlateb }: { zakladJinychPlateb: string }) {
+  return (
+    <section className="ds-plocha" aria-label="Jiné platby">
+      <PanelHlava ikona="faktura" nadpis="Jiné platby" odkaz={{ popisek: 'Jiné platby', href: zakladJinychPlateb }} />
+      <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
+        Prodeje mimo pokladnu podle fotky dokladu (sjetina, otevřený účet, ručně psané položky). Tržba, faktura, úhrada a sklad
+        se u každého záznamu evidují zvlášť — zapsaná tržba neznamená odečtený sklad ani zaplacenou fakturu. Prodej, který už je
+        v pokladně, se jen propojí a do tržeb se nepřičte podruhé.
+      </p>
+    </section>
+  )
+}
 
 export const karta = {
   background: 'var(--card)',
@@ -58,6 +129,8 @@ export default function Obsah({
   zakladIntegraci,
   odkazNaObdobi,
   odkazNaPobocku,
+  ostatniTrzby,
+  zakladJinychPlateb,
 }: {
   prehled: PrehledTrzeb
   cleneni: Cleneni
@@ -78,6 +151,14 @@ export default function Obsah({
   odkazNaObdobi: (obdobi: string) => string | null
   /** Proklik na provozovnu ve stejném členění a období. */
   odkazNaPobocku: (branchId: string) => string
+  /**
+   * Řádky `ostatni_trzby` za období a rozsah (stránka je načetla přes RLS).
+   * `null` = tabulka zatím v databázi není (migrace nenasazená).
+   * Do tržeb z pokladny se NIKDY nepřičítají — mají vlastní kartu.
+   */
+  ostatniTrzby: RadekOstatniTrzby[] | null
+  /** Adresa agendy, např. `/firma/finance/trzby/jine-platby`. */
+  zakladJinychPlateb: string
 }) {
   const vsechnaObdobi = obdobiVRozsahu(od, doData, cleneni)
   const radkyVse = radkyPoObdobich(prehled, vsechnaObdobi, { branchId: vybranaPobocka, bankaVidi })
@@ -95,20 +176,53 @@ export default function Obsah({
   const posledniSProdeji = radky.findLastIndex((r) => r.dnu > 0)
   const grafRadky = prvniSProdeji < 0 ? [] : radky.slice(prvniSProdeji, posledniSProdeji + 1)
 
+  const ostatni = ostatniTrzby === null ? null : souhrnOstatnichTrzeb(ostatniTrzby)
+  // Ostatní tržby mají VLASTNÍ kartu — do „Tržeb z pokladen" se nic nepřičítá.
+  const kartaOstatnich = (
+    <FinanceKpiKarta
+      ikona="faktura"
+      titulek="Ostatní tržby"
+      hodnota={ostatni !== null && ostatni.czkPocet > 0 ? koruny(ostatni.czkHaleru) : '–'}
+      zdroj={
+        ostatni === null
+          ? 'čeká na aktualizaci databáze'
+          : ostatni.czkPocet > 0
+            ? 'z Jiných plateb'
+            : 'z Jiných plateb — za období žádné v korunách'
+      }
+      trend={null}
+    />
+  )
+  const vetaJinychMen =
+    ostatni !== null && ostatni.jineMeny.length > 0 ? (
+      <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+        Ostatní tržby v jiné měně se do korun nepřepočítávají ani nesčítají:{' '}
+        {ostatni.jineMeny.map((m) => formatHaleru(m.haleru, m.mena)).join(', ')}.
+      </p>
+    ) : null
+
   if (celkem.dnu === 0 && celkem.platbyCelkemHaleru === 0 && (celkem.bankaHaleru ?? 0) === 0) {
     return (
-      <div style={karta}>
-        <h2 style={{ margin: '0 0 6px', fontSize: '15px' }}>Za tohle období tu nic není</h2>
-        <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
-          {maPokladnu
-            ? 'Pokladna za tohle období žádné prodeje neposlala — buď bylo zavřeno, nebo je synchronizace ještě nestáhla.'
-            : vybranaPobocka !== null
-              // Na pobočce `maPokladnu` = pokladna TÉ pobočky; pokladna firmy může existovat, jen nemá přiřazenou provozovnu.
-              ? 'K téhle pobočce zatím není připojená ani přiřazená žádná pokladna — provozovnu přiřadíte za celou firmu v Integrace → Pokladní systémy.'
-              : 'Zatím není připojená žádná pokladna.'}{' '}
-          <Link href={`${zakladIntegraci}/pokladna`} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>Pokladní systémy →</Link>
-        </p>
-      </div>
+      <>
+        <div style={karta}>
+          <h2 style={{ margin: '0 0 6px', fontSize: '15px' }}>Za tohle období tu nic není</h2>
+          <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
+            {maPokladnu
+              ? 'Pokladna za tohle období žádné prodeje neposlala — buď bylo zavřeno, nebo je synchronizace ještě nestáhla.'
+              : vybranaPobocka !== null
+                // Na pobočce `maPokladnu` = pokladna TÉ pobočky; pokladna firmy může existovat, jen nemá přiřazenou provozovnu.
+                ? 'K téhle pobočce zatím není připojená ani přiřazená žádná pokladna — provozovnu přiřadíte za celou firmu v Integrace → Pokladní systémy.'
+                : 'Zatím není připojená žádná pokladna.'}{' '}
+            <Link href={`${zakladIntegraci}/pokladna`} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>Pokladní systémy →</Link>
+          </p>
+        </div>
+        {/* Pokladna nic, ale prodeje mimo ni být můžou — jejich karta se ukáže i tak. */}
+        {ostatni !== null && (ostatni.czkPocet > 0 || ostatni.jineMeny.length > 0) ? (
+          <div className="ds-kpi-mrizka">{kartaOstatnich}</div>
+        ) : null}
+        {vetaJinychMen}
+        <KartaJinychPlateb zakladJinychPlateb={zakladJinychPlateb} />
+      </>
     )
   }
 
@@ -161,8 +275,10 @@ export default function Obsah({
           }
           trend={null}
         />
-        <FinanceKpiKarta ikona="tecky" titulek="Ostatní platby" hodnota="–" zdroj="modul se připravuje" trend={null} />
+        {kartaOstatnich}
       </div>
+
+      {vetaJinychMen}
 
       {platbyCastecne ? (
         <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
@@ -267,12 +383,7 @@ export default function Obsah({
         />
       </section>
 
-      <div style={karta}>
-        <h2 style={{ margin: '0 0 6px', fontSize: '15px' }}>Ostatní platby</h2>
-        <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--muted)' }}>
-          Samostatný modul, který se teprve připravuje. Až vznikne, objeví se jeho platby tady vedle pokladny a banky.
-        </p>
-      </div>
+      <KartaJinychPlateb zakladJinychPlateb={zakladJinychPlateb} />
 
       <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
         Tržby jsou za provozní den pobočky, jak je posílá pokladna.{' '}

@@ -796,8 +796,14 @@ begin
       elsif v_p.pos_mnozstvi is null then
         v_blokace := v_blokace || jsonb_build_object('poradi', v_p.poradi, 'nazev', v_p.nazev,
           'duvod', 'Chybí množství v jednotkách pokladny.');
-      elsif v_p.k_odecita is false and v_p.k_receptura is not true then
-        null;  -- pokladna tuhle položku ze skladu neodečítá — do výdeje nepatří
+      elsif v_p.k_odecita is false and v_p.k_receptura is false then
+        -- Pokladna VÝSLOVNĚ říká „neodečítá a nemá recepturu" → do výdeje
+        -- nepatří. Když o receptuře neví (Dotykačka ji bez include=ingredients
+        -- neprozradí, `ma_recepturu` je null), položka v návrhu zůstane:
+        -- pokrm s recepturou má v Dotykačce „Odečítat ze skladu" vypnuté a
+        -- suroviny odečte až podle receptury. Při odpisu pokladna odečte,
+        -- co má nastavené — nebo nic.
+        null;
       else
         v_polozky := v_polozky || jsonb_build_object(
           'poradi', v_p.poradi,
@@ -1592,6 +1598,11 @@ grant execute on function public.jine_platby_propojit_vydej(uuid, integer, text,
 
 -- 8.12 Ručně provedeno v pokladně (API zápis neumí, nebo neprošel).
 -- NENÍ to „Odečteno v POS" — stav 'rucne_dolozeno'.
+--
+-- Bez pokladny (záznam bez připojení) návrh výdeje vzniknout nemůže —
+-- není katalog ani provozovna. Aby záznam nezůstal navždy „bez návrhu",
+-- smí oprávněná osoba rovnou doložit, jak se spotřeba vyřešila (třeba
+-- papírová výdejka), s povinným důvodem.
 create function public.jine_platby_rucne_dolozit_vydej(p_zaznam uuid, p_doklad text, p_duvod text)
 returns void
 language plpgsql security definer set search_path = ''
@@ -1605,6 +1616,21 @@ begin
   v_z := app.jp_nacist(p_zaznam);
   perform app.jp_vyzadovat(v_z, 'jine_platby.vydej_pos', 'Ruční výdej smí doložit jen oprávněná osoba pro tuto provozovnu.');
   v_duvod := app.jp_duvod(p_duvod);
+
+  if v_z.pripojeni_id is null then
+    if v_z.stav_kontroly <> 'zkontrolovano' then
+      raise exception 'Nejdřív zkontrolujte údaje dokladu.' using errcode = 'check_violation';
+    end if;
+    if v_z.stav_skladu not in ('bez_navrhu', 'zamitnuto') then
+      raise exception 'Sklad tohoto záznamu už je vyřízený.' using errcode = 'check_violation';
+    end if;
+    update public.jine_platby
+       set stav_skladu = 'rucne_dolozeno', vydej_doklad = left(nullif(btrim(coalesce(p_doklad, '')), ''), 100), zmeneno = now()
+     where id = v_z.id;
+    perform app.jp_historie(v_z, 'vydej_rucne_dolozen', jsonb_build_object('doklad', p_doklad, 'duvod', v_duvod, 'bez_pokladny', true));
+    return;
+  end if;
+
   select * into v_n from public.jine_platby_skladove_navrhy where zaznam_id = v_z.id and stav = 'schvaleno' for update;
   if not found then
     raise exception 'Ručně doložit jde jen schválený návrh výdeje.' using errcode = 'check_violation';
@@ -1941,7 +1967,36 @@ end $$;
 revoke all on function public.jine_platby_ulozit_mapovani(uuid, text, text) from public, anon;
 grant execute on function public.jine_platby_ulozit_mapovani(uuid, text, text) to authenticated;
 
--- 8.19 Potvrzená spotřeba (pro budoucí napojení na Foodcost — otázka 53).
+-- 8.19 Pokladny, které obsluhují pobočku — jen netajné údaje.
+-- `integrace_pripojeni` čte přes RLS jen ten, kdo má finance.read, ale
+-- obsluha zakládající záznam a schvalovatel výdeje musí vidět, do které
+-- pokladny se záznam váže. Žádné tajemství, žádné kurzory synchronizace.
+-- Bez práva na pobočce = prázdný seznam (ne chyba).
+create function public.jine_platby_pokladny(p_tenant uuid, p_branch uuid)
+returns table (id uuid, nazev text, poskytovatel text, stav text, pos_provozovna text, provozovna_nazev text)
+language sql stable security definer set search_path = ''
+as $$
+  select p.id, p.nazev, p.poskytovatel, p.stav,
+         case when p.branch_id is null then pv ->> 'id' end,
+         case when p.branch_id is null then pv ->> 'nazev' end
+    from public.integrace_pripojeni p
+    left join lateral (
+      select e as pv from jsonb_array_elements(coalesce(p.externi_ucet -> 'provozovny', '[]'::jsonb)) e
+       where e ->> 'branch_id' = p_branch::text
+       limit 1
+    ) x on true
+   where p.tenant_id = p_tenant
+     and p.oblast = 'pokladna'
+     and p.odpojeno_kdy is null
+     and (p.branch_id = p_branch or (p.branch_id is null and x.pv is not null))
+     and app.jine_platby_vidi(p_tenant, p_branch)
+   order by p.nazev
+$$;
+
+revoke all on function public.jine_platby_pokladny(uuid, uuid) from public, anon;
+grant execute on function public.jine_platby_pokladny(uuid, uuid) to authenticated;
+
+-- 8.20 Potvrzená spotřeba (pro budoucí napojení na Foodcost — otázka 53).
 create function public.jine_platby_spotreba(p_tenant uuid, p_branch uuid, p_od date, p_do date)
 returns table (datum date, branch_id uuid, pos_produkt_id text, nazev text, mnozstvi numeric, druh text)
 language sql stable security definer set search_path = ''

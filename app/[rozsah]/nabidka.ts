@@ -234,6 +234,14 @@ export const NABIDKA: Polozka[] = [
   // „připravujeme", ostatní tři jako funkční registr/CSV/živý Fio.
   { segment: 'finance/integrace', nazev: 'Integrace', kratky: 'Integrace', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'kolo', jenFirma: true },
   { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha', jenFirma: true },
+  // Jiné platby (16. 10. 2026, docs/jine-platby-navrh.md): vchod pro OBSLUHU
+  // s `jine_platby.zadat`, která finanční přehled nemá — jinak by se do
+  // agendy dostala jen přímým odkazem. Kdo má finance.read, chodí sem i
+  // z karty v Tržbách. `pravo` je jedno právo, takže kdo má jen jiné právo
+  // agendy (třeba jen potvrzení výdeje), položku nevidí a jde přes Tržby.
+  // Stojí NA KONCI Financí schválně: spodní lišta bere první čtyři položky
+  // modulu a těm, kdo Finance vidí celé, se tím nic neposune.
+  { segment: 'finance/trzby/jine-platby', nazev: 'Jiné platby', kratky: 'Jiné platby', modul: 'finance', pravo: 'jine_platby.zadat', hotovo: true, ikona: 'faktura' },
   // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.
   //
   // Do 14. 9. 2026 tu stála jediná položka a v levém sloupci proto nebylo

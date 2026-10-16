@@ -63,6 +63,17 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
  *     importu výpisu, jen když importující má `finance.manage`
  *     i `faktury.manage`, jen vlastní firma a z CSV jen právě nahraná dávka.
+ *   * Jiné platby — `app/[rozsah]/finance/trzby/jine-platby/akce-pos.ts`
+ *     a `akce-ai.ts` (a přes ně `lib/pokladna-relace.ts`): otevření relace
+ *     pokladny (rozšifrování tokenu), výsledek dohledání v pokladně
+ *     (`jine_platby_zapsat_kontrolu`), zabrání a ukončení výdeje
+ *     (`pos_operace_zahajit` / `_dokoncit`), katalog (`pos_katalog_nahradit`),
+ *     pokus a výsledek rozpoznání AI (`jine_platby_zahajit_rozpoznani` /
+ *     `_dokoncit_rozpoznani`). Vždy až po `pripravit()`: firma z členství,
+ *     záznam načtený uživatelským klientem (RLS) a právo agendy na pobočce
+ *     záznamu (`hasAccess`), a jen s id toho záznamu a jeho připojení.
+ *     Tyhle funkce jsou v databázi jen pro service_role schválně: „ověřeno
+ *     v pokladně" a „rozpoznala AI" se nesmí dát zapsat z prohlížeče.
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ

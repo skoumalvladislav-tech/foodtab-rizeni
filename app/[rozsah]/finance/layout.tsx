@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { headers } from 'next/headers'
 
 import { canSee, getContext, hasAccess, isModuleActive } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
@@ -58,6 +59,16 @@ export default async function FinanceLayout({
 
   const scope = bezpecnyRozsah(ctx, rozsah)
   if (!scope) return <>{children}</>
+
+  // Jiné platby (Finance → Tržby → Jiné platby) mají vlastní vstupní
+  // kontrolu (`zkusPristupJinymPlatbam`, hlídá scripts/finance-pobocky.test.mjs)
+  // a jejich data jsou vždy jen řádky pobočky (`branch_id not null`, RLS
+  // na pobočce) — firemní data, kvůli kterým tahle brána existuje, tam nejsou.
+  // Vedoucí s finance.read jen na své pobočce by jinak místo agendy viděl
+  // „jen s přehledem celé firmy". Adresu podává proxy.ts; i kdyby ji někdo
+  // podvrhl, ostatní stránky Financí se hlídají samy (zkusPristupFinanci).
+  const adresa = (await headers()).get('x-foodtab-adresa') ?? ''
+  if (adresa.startsWith(`/${rozsah}/finance/trzby/jine-platby`)) return <>{children}</>
 
   if (scope.level !== 'tenant' && !(await hasAccess(tenantId, 'finance.read', null))) {
     return (

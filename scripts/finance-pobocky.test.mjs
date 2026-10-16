@@ -306,6 +306,21 @@ function odmitaPobockuHned(s) {
   return Boolean(m) && (m[0].match(/await /g) ?? []).length === 1
 }
 
+/**
+ * Stránka Jiných plateb: vstupní kontrola `zkusPristupJinymPlatbam` stojí
+ * na začátku — před ní nic nesahá do databáze (žádné `getServerSupabase(`,
+ * `.from(`, `.rpc(`) a z `await` jsou tam jen parametry a firma. Stejný
+ * důvod jako u `odmitaPobockuHned`: Next stránku vyrenderuje i tam, kde ji
+ * layout nevloží.
+ */
+function jinePlatbyHned(s) {
+  const telo = s.match(/export default async function \w+\([\s\S]*?\n {2}const pristup = await zkusPristupJinymPlatbam\(tenantId, rozsah\)\n/)?.[0]
+  if (!telo) return false
+  const awaity = [...telo.matchAll(/await ([\w.]+)/g)].map((m) => m[1])
+  return awaity.every((a) => ['params', 'searchParams', 'getCurrentTenantId', 'zkusPristupJinymPlatbam'].includes(a)) &&
+    !/getServerSupabase\(|\.from\(|\.rpc\(/.test(telo)
+}
+
 const fakturyLayout = zdroj(`${KOREN_FINANCI}/faktury/layout.tsx`)
 const fakturyBrana = /if \(scope\.level !== 'tenant'\) \{\s*return \(\s*<Sdeleni nadpis="Faktury patří celé firmě">/.test(fakturyLayout)
 ok('Faktury: vlastní brána celé firmy ve faktury/layout.tsx', fakturyBrana)
@@ -313,7 +328,7 @@ ok('Faktury: vlastní brána celé firmy ve faktury/layout.tsx', fakturyBrana)
 const stranky = soubory(KOREN_FINANCI, /^page\.tsx$/)
 ok(`stránek Financí se našlo dost (${stranky.length})`, stranky.length >= 25)
 
-const tvary = { pobockova: 0, jenProFirmu: 0, faktury: 0 }
+const tvary = { pobockova: 0, jenProFirmu: 0, faktury: 0, jinePlatby: 0 }
 for (const soubor of stranky) {
   const s = zdroj(soubor)
   const kratce = soubor.slice(KOREN_FINANCI.length + 1)
@@ -326,6 +341,23 @@ for (const soubor of stranky) {
     tvary.faktury++
     // Brána Faktur je layout — stránku nezastaví (viz výš), proto ještě vlastní odmítnutí.
     ok(`${kratce}: pod bránou Faktur a pobočku odmítá prvním řádkem`, fakturyBrana && odmitaPobockuHned(s))
+  } else if (soubor.startsWith(`${KOREN_FINANCI}/trzby/jine-platby/`)) {
+    /*
+      VÝJIMKA S DŮVODEM — Jiné platby (docs/jine-platby-navrh.md, oddíl 6).
+      Agendu používá i OBSLUHA bez finance.read: vyfotí doklad a založí
+      záznam (jine_platby.zadat), finanční přehled vidět nemá a mít nemá.
+      zkusPristupFinanci by ji odmítl (chce finance.read, na pobočce dokonce
+      za celou firmu). Vstup je proto vlastní — lib/jine-platby-pristup.ts:
+      kterékoli právo agendy NA POBOČCE ROZSAHU, stejné pravidlo jako RLS
+      (app.jine_platby_vidi). Pobočka se bere z rozsahu jako všude jinde
+      a kontrola musí stát na začátku. Mimo tenhle adresář výjimka neplatí.
+    */
+    tvary.jinePlatby++
+    ok(`${kratce}: bere pobočku z rozsahu (pobockaFinanci)`, /pobockaFinanci\(/.test(s))
+    ok(`${kratce}: vstup přes zkusPristupJinymPlatbam (i obsluha bez finance.read), dřív než cokoli načte`, jinePlatbyHned(s))
+    ok(`${kratce}: nepřihlášený i odmítnutý se odbaví hned`,
+      /if \(pristup\.stav === 'neprihlasen'\) redirect\(/.test(s) && /if \(pristup\.stav === 'odepren'\)/.test(s))
+    ok(`${kratce}: a ne přes holý zkusPristup ani zkusPristupFinanci`, !/\bzkusPristup(?:Financi)?\(/.test(s))
   } else {
     tvary.pobockova++
     ok(`${kratce}: bere pobočku z rozsahu (pobockaFinanci)`, /pobockaFinanci\(/.test(s))
@@ -337,8 +369,8 @@ for (const soubor of stranky) {
     }
   }
 }
-ok(`všechny tři tvary se opravdu vyskytly (pobočkové ${tvary.pobockova}, jen pro firmu ${tvary.jenProFirmu}, Faktury ${tvary.faktury})`,
-  tvary.pobockova >= 8 && tvary.jenProFirmu >= 9 && tvary.faktury >= 8)
+ok(`všechny čtyři tvary se opravdu vyskytly (pobočkové ${tvary.pobockova}, jen pro firmu ${tvary.jenProFirmu}, Faktury ${tvary.faktury}, Jiné platby ${tvary.jinePlatby})`,
+  tvary.pobockova >= 8 && tvary.jenProFirmu >= 9 && tvary.faktury >= 8 && tvary.jinePlatby >= 2)
 
 console.log('\n== Layouty obrazovek jen pro firmu ==')
 

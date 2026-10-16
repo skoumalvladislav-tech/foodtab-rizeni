@@ -1,0 +1,16 @@
+/*
+ * Detail záznamu Jiných plateb — jen to, co inline styl neumí:
+ * obrázek dokladu z `PevnyObrazek` (komponenta nebere className ani
+ * style) se musí vejít do sloupce i na telefonu (375 px).
+ * Barvy jen přes tokeny — světlý i tmavý režim.
+ */
+.original img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--sunken);
+}
