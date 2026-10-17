@@ -398,8 +398,9 @@ ok('prázdný seznam úloh → problém', problemyPlanovace([], TED).length === 
   ok('workflow hlídače se ptá /api/planovac/hlidac s tajemstvím',
     t.includes('/api/planovac/hlidac') && t.includes('Authorization: Bearer ${TAJEMSTVI}'))
   ok('… má plán i ruční spuštění', /^\s*-\s*cron:\s*'[^']+'/m.test(t) && /^\s*workflow_dispatch:/m.test(t))
-  ok('… a 503 končí exit 1',
-    /503\)[\s\S]*?exit 1 ;;/.test(t))
+  // Jen větev `503)` až po její `;;` — `exit 1` z jiné větve se nepočítá.
+  const vetev503 = t.match(/^\s*503\)([\s\S]*?);;/m)?.[1] ?? ''
+  ok('… a 503 končí exit 1', /\bexit 1\b/.test(vetev503))
   ok('hlídač není úloha pg_cronu (nehlídá sám sebe)',
     !existsSync('app/api/uloha/planovac-hlidac') && !plan.has('planovac-hlidac'))
 }
