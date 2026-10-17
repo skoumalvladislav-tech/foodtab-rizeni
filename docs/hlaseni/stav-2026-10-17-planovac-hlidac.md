@@ -23,8 +23,8 @@
 | `/api/planovac/hlidac` + `lib/planovac-hlidac.ts` (co je problém) | `211ecea` | adresa do db push odpovídá 503 „čeká na migraci" |
 | Workflow `planovac-hlidac.yml` (každé 3 h + ručně) | `211ecea` | — |
 | Kontroly: `scripts/planovac.test.mjs` +41, scénář `krok97` | `211ecea` | — |
-| Oprava kontroly workflow (větev `503)`) | (commit před hlášením) | — |
-| Návod `docs/planovac-pg-cron.md`, oddíl 7, a úprava kroků 7–8 | (commit s hlášením) | — |
+| Oprava kontroly workflow (větev `503)`) | `5c19607` | — |
+| Návod `docs/planovac-pg-cron.md`, oddíl 7, a úprava kroků 7–8 | `54fa5d8` | — |
 
 Hlídač je schválně mimo `/api/uloha` a není v `app.planovac_ulohy` —
 nesmí záviset na tom, co hlídá.
