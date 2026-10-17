@@ -1,0 +1,72 @@
+name: Plánovač — hlídač
+
+# Hlídá plánovač úloh v databázi (pg_cron, docs/planovac-pg-cron.md).
+#
+# pg_cron nikomu nenapíše, když přestane volat nebo když úloha vrací
+# chybu. Tenhle workflow se zeptá `/api/planovac/hlidac` a při čemkoli
+# jiném než HTTP 200 skončí červeně — GitHub pak pošle e-mail. Co je
+# špatně, vypíše jako ::error:: řádky (jméno úlohy a důvod).
+#
+# GitHub ho spustí jen párkrát denně a pozdě (měření 7.–14. 10.: ~4× denně
+# u každého workflow). Na hlídání to stačí: nejdelší mezera v plánu úloh
+# jsou 4 hodiny, hlídač se ptá na stav za posledních 6 h.
+#
+# Hlídač schválně NENÍ úloha pg_cronu — nesmí záviset na tom, co hlídá.
+
+on:
+  schedule:
+    - cron: '23 */3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: planovac-hlidac
+  cancel-in-progress: false
+
+jobs:
+  zkontrolovat:
+    name: Zkontrolovat plánovač
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Zeptat se na stav plánovače
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci."
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu."
+            exit 1
+          fi
+
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 60 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/planovac/hlidac")
+
+          # Jen jména úloh, kódy a minuty — repozitář je veřejný.
+          SOUHRN=$(jq -c '{ulohy, v_poradku, chyb_6h, stav}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+          echo "HTTP ${KOD} ${SOUHRN}"
+          jq -r '.problemy[]? | "::error::\(.uloha): \(.duvod)"' telo.json 2>/dev/null || true
+          echo "${SOUHRN}" >> "$GITHUB_STEP_SUMMARY" || true
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            503)
+              if grep -q '"stav":"ceka_na_migraci"' telo.json; then
+                echo "::error::Migrace 20261017100000_planovac_hlidac ještě není nasazená (db push)."
+              fi
+              exit 1 ;;
+            *)
+              echo "::error::Hlídač vrátil HTTP ${KOD}."
+              exit 1 ;;
+          esac

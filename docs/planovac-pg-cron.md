@@ -162,10 +162,15 @@ nové.
    | `posledni_zacatek` | kdy úloha naposledy opravdu začala (z databáze i z GitHubu) |
    | `volani_6h`, `chyb_6h` | počty za 6 h (déle si pg_net odpovědi nedrží) |
 
-8. **Za 2–3 dny**, když `chyb_6h` zůstává 0: samostatný PR, který z GitHub
-   workflow odstraní `schedule` (ruční `workflow_dispatch` zůstane). Pak
-   rozhoduje o čase jen databáze. Kontrola `scripts/planovac.test.mjs`
+   Totéž bez SQL Editoru: GitHub → Actions → **Plánovač — hlídač** →
+   *Run workflow* (oddíl 7). Zelená = všech 9 úloh v pořádku.
+
+8. **Za 2–3 dny**, když je hlídač zelený: samostatný PR, který z GitHub
+   workflow úloh odstraní `schedule` (ruční `workflow_dispatch` zůstane).
+   Pak rozhoduje o čase jen databáze. Kontrola `scripts/planovac.test.mjs`
    v tu chvíli potřebuje upravit (dnes hlídá, že GitHub plánuje totéž).
+   **Bez hlídače (oddíl 7) to nedělat** — zastavený plánovač by nikdo
+   nepoznal.
 
 **Vypnutí** kdykoli, bez db push:
 
@@ -183,13 +188,43 @@ select app.zrusit_planovac();
 - **Vercel bude dostávat víc volání** — přesně tolik, kolik bylo vždycky
   v plánu: ~440 denně místo dnešních ~40. Na Hobby by to mělo stačit, ale
   první týden se podívat do Vercel → Usage.
-- **pg_cron nikomu nepíše.** Když úloha padá, ukáže to jen
-  `app.planovac_stav()`. Dokud běží GitHub jako záloha, ten při chybě e-mail
-  pošle; až se GitHub vypne, chce to hlídání (návrh: jeden denní GitHub
-  workflow, který se zeptá na stav — samostatný krok).
+- **pg_cron nikomu nepíše.** Proto hlídač (oddíl 7): jeho e-maily od
+  GitHubu jsou jediné upozornění, že plánovač stojí. Nevypínat ho.
 - **Prefix `foodtab-`** v názvech úloh v pg_cronu patří plánovači:
   `app.zrusit_planovac()` smaže vše, co tak začíná. Jiné úlohy tak
   nepojmenovávat.
 - **Úprava plánu** = nová migrace, která změní řádek v `app.planovac_ulohy`,
   a pak znovu `select * from app.naplanovat_ulohy();`. Dokud běží GitHub,
   změnit plán i v příslušném workflow (hlídá to `scripts/planovac.test.mjs`).
+
+## 7. Hlídač plánovače
+
+Migrace `20261017100000_planovac_hlidac.sql`, adresa `/api/planovac/hlidac`,
+workflow `.github/workflows/planovac-hlidac.yml`, rozhodování
+v `lib/planovac-hlidac.ts`, scénář `krok97`.
+
+GitHub ho spouští několikrát denně (plán každé 3 h; GitHub ho stejně pustí
+méně často a pozdě — na hlídání to stačí) a jde pustit ručně: Actions →
+**Plánovač — hlídač** → *Run workflow*. Zeptá se aplikace a ta databáze
+(`public.planovac_zdravi()` = totéž co `app.planovac_stav()`, jen pro
+service_role).
+
+**Zčervená a GitHub pošle e-mail**, když u některé úlohy:
+
+- není naplánovaná v pg_cronu (nikdo nespustil `app.naplanovat_ulohy()`),
+- databáze ji nezavolala déle, než je nejdelší mezera v jejím plánu
+  + 10 minut (třeba hodinová úloha víc než 70 minut),
+- poslední odpověď nebyla 200 — **401 znamená, že tajemství ve Vaultu
+  nesedí s `CRON_SECRET` na Vercelu**,
+- poslední volání vypršelo nebo spadlo na síti,
+
+a taky když migrace hlídače ještě není nasazená. V logu běhu je u každého
+problému řádek s jménem úlohy a důvodem (jen jména, kódy a minuty —
+repozitář je veřejný). Podrobnosti pak `select * from app.planovac_stav();`.
+
+**Dokud plánovač v Supabase nezapneš, bude hlídač červený** („není
+naplánovaná v pg_cronu" u všech 9 úloh). To je správně — říká přesně to,
+co chybí. Kdyby se zapnutí mělo odložit, jde workflow dočasně vypnout:
+Actions → Plánovač — hlídač → ⋯ → *Disable workflow*.
+
+Hlídač schválně není úloha pg_cronu: nesmí záviset na tom, co hlídá.
