@@ -83,6 +83,7 @@ export function createClient() {
     rpc: async (jmeno, args) => {
       svet.log.push('rpc:' + jmeno + ':' + JSON.stringify(args ?? {}))
       if (jmeno === 'uloha_zabrat') return svet.zamek
+      if (svet.odpovedi && jmeno in svet.odpovedi) return svet.odpovedi[jmeno]
       return { data: null, error: chyba }
     },
     from: (t) => { svet.log.push('from:' + t); return retez(svet, 'from:' + t) },
@@ -286,6 +287,121 @@ for (const [uloha, p] of plan) {
   const max = Number(zdroj.match(/export const maxDuration = (\d+)/)?.[1] ?? 270)
   ok(`${uloha}: limit ${p.limit} s ≥ běh ${max} s + 30 s a < rozestup ${rozestupMinut(p.cron)} min`,
     p.limit >= max + 30 && p.limit <= 300 && p.limit < rozestupMinut(p.cron) * 60)
+}
+
+/* --- hlídač plánovače ---------------------------------------------------- */
+
+// Migrace 20261017100000_planovac_hlidac, adresa app/api/planovac/hlidac,
+// workflow planovac-hlidac.yml. pg_cron sám nikomu nenapíše, když
+// přestane volat — tohle je jediné místo, které to pozná.
+console.log('\nHlídač plánovače')
+
+const { nejdelsiMezeraMinut, problemyPlanovace, REZERVA_MINUT } = await import('../lib/planovac-hlidac.ts')
+
+// Nejdelší mezera v plánu: ručně spočítané hodnoty, ne druhá implementace.
+const OCEKAVANA_MEZERA = {
+  'banka-synchronizace': 240,
+  'checklisty-naplanovat': 60,
+  'checklisty-terminy': 15,
+  'faktury-z-emailu': 30,
+  'marketing-automatizace': 60,
+  'marketing-fronta': 15,
+  'notifikace-push': 15,
+  'pokladna-synchronizace': 60,
+  'zapomenuty-odchod': 60,
+}
+for (const [uloha, p] of plan) {
+  ok(`${uloha}: nejdelší mezera '${p.cron}' = ${OCEKAVANA_MEZERA[uloha]} min`, nejdelsiMezeraMinut(p.cron) === OCEKAVANA_MEZERA[uloha])
+}
+ok('nerovnoměrný plán: nejdelší, ne nejkratší mezera (0,50 → 50 min)', nejdelsiMezeraMinut('0,50 * * * *') === 50)
+ok('nerovnoměrné hodiny (1,23 → 22 h)', nejdelsiMezeraMinut('0 1,23 * * *') === 22 * 60)
+ok('plán, kterému hlídač nerozumí → null (den, minuta 60, nesmysl, prázdný)',
+  [ '0 0 1 * *', '60 * * * *', 'nesmysl', '', '*/0 * * * *' ].every((c) => nejdelsiMezeraMinut(c) === null))
+
+const TED = new Date('2026-10-17T12:00:00Z')
+const pred = (minut) => new Date(TED.getTime() - minut * 60_000).toISOString()
+const radek = (zmena = {}) => ({
+  uloha: 'pokladna-synchronizace', plan_utc: '40 * * * *', v_cronu: true,
+  posledni_volani: pred(20), posledni_kod: 200, posledni_chyba: null, chyb_6h: 0, ...zmena,
+})
+const duvody = (zmena) => problemyPlanovace([radek(zmena)], TED).map((p) => p.duvod)
+
+ok('zdravá úloha → žádný problém', duvody({}).length === 0)
+ok(`volání před 60 + ${REZERVA_MINUT} min → ještě v pořádku`, duvody({ posledni_volani: pred(60 + REZERVA_MINUT) }).length === 0)
+ok('volání o minutu později → problém s minutami', duvody({ posledni_volani: pred(61 + REZERVA_MINUT) })[0]?.includes(`před ${61 + REZERVA_MINUT} min`))
+ok('není v pg_cronu → problém s návodem', duvody({ v_cronu: false })[0]?.includes('naplanovat_ulohy'))
+ok('databáze ji nezavolala → problém', duvody({ posledni_volani: null }).length === 1)
+ok('HTTP 401 → problém, který jmenuje tajemství', duvody({ posledni_kod: 401 })[0]?.includes('tajemství'))
+ok('HTTP 500 → problém', duvody({ posledni_kod: 500 })[0] === 'poslední odpověď HTTP 500')
+ok('volání ještě běží (bez odpovědi) → v pořádku', duvody({ posledni_kod: null, posledni_chyba: 'zatím bez odpovědi' }).length === 0)
+ok('vypršelo → problém', duvody({ posledni_kod: null, posledni_chyba: 'vypršel čas' })[0] === 'poslední volání vypršelo')
+const sit = duvody({ posledni_kod: null, posledni_chyba: 'Could not connect: Bearer tajne-ABC' })
+ok('síťová chyba → problém BEZ textu z pg_net (log je veřejný)', sit.length === 1 && !sit[0].includes('tajne'))
+ok('neznámý plán → problém', duvody({ plan_utc: '0 0 1 * *' })[0]?.includes('neznámý tvar'))
+ok('prázdný seznam úloh → problém', problemyPlanovace([], TED).length === 1)
+
+// Adresa: skutečný route.ts, podstrčená databáze.
+{
+  const soubor = 'app/api/planovac/hlidac/route.ts'
+  svet.log = []
+  const { GET } = await nactiModul(soubor, [
+    ['next/server', NEXT],
+    ['@/lib/supabase/uloha', ULOHA],
+    ['@/lib/supabase/dotaz', DOTAZ],
+  ])
+  ok('hlídač: adresa se dá načíst a nic při tom nesáhla na databázi', typeof GET === 'function' && svet.log.length === 0)
+
+  process.env.CRON_SECRET = SPRAVNE
+  for (const [popis, hlavicka] of SPATNE) {
+    svet.odpovedi = { planovac_zdravi: { data: [], error: null } }
+    const r = await zavolat(GET, hlavicka)
+    ok(`hlídač: ${popis} → 401, na nic nesáhl`, r.stav === 401 && r.log.length === 0)
+  }
+
+  const zdrave = [...plan].map(([uloha, p]) => ({
+    uloha, plan_utc: p.cron, v_cronu: true, posledni_zacatek: null,
+    posledni_volani: new Date(Date.now() - 60_000).toISOString(), posledni_kod: 200,
+    posledni_chyba: null, volani_6h: 6, chyb_6h: 0,
+  }))
+  const dotaz = async (odpoved) => {
+    svet.odpovedi = { planovac_zdravi: odpoved }
+    const r = await zavolat(GET, 'Bearer ' + SPRAVNE)
+    let telo = null
+    try { telo = JSON.parse(r.telo) } catch { /* zůstane null */ }
+    return { ...r, telo, surove: r.telo }
+  }
+
+  const v = await dotaz({ data: zdrave, error: null })
+  ok('hlídač: 9 zdravých úloh → 200, v pořádku 9, bez problémů',
+    v.stav === 200 && v.telo?.v_poradku === 9 && v.telo?.problemy.length === 0
+    && v.log.includes('rpc:planovac_zdravi:{}'))
+
+  const stara = zdrave.map((u) => (u.uloha === 'zapomenuty-odchod' ? { ...u, posledni_volani: new Date(Date.now() - 3 * 3600_000).toISOString() } : u))
+  const s = await dotaz({ data: stara, error: null })
+  ok('hlídač: jedna úloha nevolaná 3 h → 503 a jmenuje ji',
+    s.stav === 503 && s.telo?.v_poradku === 8 && s.telo?.problemy.length === 1 && s.telo.problemy[0].uloha === 'zapomenuty-odchod')
+
+  const m = await dotaz({ data: null, error: { code: 'PGRST202', message: 'nenalezeno' } })
+  ok('hlídač: migrace nenasazená → 503 ceka_na_migraci (ne zeleně)', m.stav === 503 && m.telo?.stav === 'ceka_na_migraci')
+
+  const p = await dotaz({ data: null, error: { code: 'XX000', message: 'tajny-detail-db' } })
+  ok('hlídač: porucha čtení → 500 bez detailu', p.stav === 500 && !p.surove.includes('tajny-detail-db'))
+
+  const n = await dotaz({ data: [], error: null })
+  ok('hlídač: žádné úlohy → 503', n.stav === 503)
+}
+
+// Workflow: existuje, ptá se hlídače, při ne-200 skončí červeně.
+{
+  const f = '.github/workflows/planovac-hlidac.yml'
+  const t = existsSync(f) ? readFileSync(f, 'utf8') : ''
+  ok('workflow hlídače se ptá /api/planovac/hlidac s tajemstvím',
+    t.includes('/api/planovac/hlidac') && t.includes('Authorization: Bearer ${TAJEMSTVI}'))
+  ok('… má plán i ruční spuštění', /^\s*-\s*cron:\s*'[^']+'/m.test(t) && /^\s*workflow_dispatch:/m.test(t))
+  ok('… a 503 končí exit 1',
+    /503\)[\s\S]*?exit 1 ;;/.test(t))
+  ok('hlídač není úloha pg_cronu (nehlídá sám sebe)',
+    !existsSync('app/api/uloha/planovac-hlidac') && !plan.has('planovac-hlidac'))
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')
