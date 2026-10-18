@@ -984,6 +984,20 @@ select pg_temp.check('vedoucí s finančním přehledem jen na Perle nenapáruje
   pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 13100)', :'z6', :'t_firma'), '42501', 'nemáte přístup'));
 select set_config('test.user_id', :'majitel', false);
 select public.jine_platby_evidovat_uhradu(:'z6', :'t_firma', 13100);
+-- Změna částky po napárování úhrady stav úhrady přepočítá.
+select verze as v6u from public.jine_platby where id = :'z6' \gset
+select public.jine_platby_ulozit_navrh(:'z6', :'v6u', (:'hl5'::jsonb || '{"castka_haleru": 39300}'::jsonb), :'pol5'::jsonb) as v6 \gset
+select pg_temp.check('po zvýšení částky nad napárovanou úhradu je stav úhrady „částečně“, ne „uhrazeno“',
+  (select stav_uhrady = 'castecne' from public.jine_platby where id = :'z6'));
+-- Změna odběratele v podkladech faktury zvedne verzi: otevřený editor
+-- návrhu by ho jinak při uložení tiše přepsal.
+reset role;
+insert into public.kontakty (tenant_id, nazev, je_odberatel) values (:'tenant', 'Krok98 Odběratel s.r.o.', true) returning id as kontakt98 \gset
+set role authenticated;
+select public.jine_platby_faktura(:'z6', 'podklady', jsonb_build_object('kontakt_id', :'kontakt98', 'podklady', '{}'::jsonb));
+select pg_temp.check('změna odběratele v podkladech faktury zvedne verzi (editor se starou verzí neuloží)',
+  (select verze = :'v6'::integer + 1 and kontakt_id = :'kontakt98'::uuid from public.jine_platby where id = :'z6')
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_ulozit_navrh(%L, %s, %L::jsonb, %L::jsonb)', :'z6', :'v6', :'hl5', :'pol5'), '40001', ''));
 select pg_temp.check('záznam s napárovanou úhradou nejde zrušit',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_zrusit(%L, %L)', :'z6', 'Omylem založeno.'), '23514', 'odpojte úhradu'));
 select public.jine_platby_evidovat_uhradu(:'z6', null, null);
@@ -1135,6 +1149,7 @@ delete from public.jine_platby_soubory where tenant_id = :'tenant';
 delete from public.ostatni_trzby where tenant_id = :'tenant' and nahrazuje is not null;
 delete from public.ostatni_trzby where tenant_id = :'tenant';
 delete from public.jine_platby where tenant_id = :'tenant';
+delete from public.kontakty where tenant_id = :'tenant' and nazev = 'Krok98 Odběratel s.r.o.';
 delete from public.pos_mapovani where tenant_id = :'tenant';
 delete from public.pos_katalog where tenant_id = :'tenant';
 delete from storage.objects where bucket_id = 'jine-platby';
