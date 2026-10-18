@@ -1380,5 +1380,16 @@ AI službě.“
 
 **Vzniklo:** 16. 10. 2026.
 
-- **Teď:** kdo má jen práva Jiných plateb (založit, upravit, odeslat ke schválení), dostane se do Finance → Tržby → Jiné platby a uvidí záznamy své pobočky. Zbytek Financí dál vyžaduje finanční přehled (otázka 48).
+- **Teď:** kdo má jen práva Jiných plateb (založit, upravit, odeslat ke schválení), dostane se do Finance → Tržby → Jiné platby a uvidí záznamy své pobočky. Položka v menu se mu ukáže, když má kterékoli právo agendy. Zbytek Financí dál vyžaduje finanční přehled (otázka 48).
+- **Co neuvidí (doplněno 18. 10.):** bankovní platby a Kontakty firmy. Na detailu je dostane jen ten, kdo má finanční přehled za **celou firmu**; ostatní zadají číslo faktury ručně a úhradu nenapárují. Katalog pokladny a zapamatovaná přiřazení vidí jen u pokladny, která obsluhuje jeho pobočku.
 - **Když to má být jinak:** například vstup přes Dnes místo Financí. Je to jen úprava navigace.
+
+## 58. Jiné platby — kontrola tržby po pozdějším importu z pokladny
+
+**Vzniklo:** 18. 10. 2026 z nezávislé kontroly. Zadání chce deduplikaci „i při
+pozdějším importu z POS“: tržbu zapsanou do Ostatních tržeb může pokladna
+později přinést znovu (otevřený účet se uzavře).
+
+- **Teď:** po zápisu tržby jde na detailu kdykoli kliknout **Zkontrolovat v pokladně** (u pokladny, která umí dohledat účty, dnes Dotykačka). Když pokladna prodej najde, záznam dostane varování **„Možná zapsáno dvakrát“**, v přehledu je na to filtr a detail vede na storno. Appka nic nestornuje sama, rozhodne člověk. Databáze to ověřuje ve scénáři krok98.
+- **Co se neděje:** nic se nekontroluje **samo** po každé synchronizaci pokladny. Plánovač v databázi zatím neběží (zapnutí v Supabase je na vás) a automatické volání pokladny za uživatele by byla nová úloha s klíči pokladny.
+- **Když to má být jinak:** úloha v plánovači jednou denně projde zapsané tržby s pokladnou za posledních 7 dní a výsledek zapíše stejnou cestou jako tlačítko. Je to samostatná práce (úloha, strop volání pokladny, testy), bez změny tabulek.

@@ -97,7 +97,8 @@ V části **Tržba (Ostatní tržby)**:
    - stejnou provozovnu, den, částku a měnu, nebo
    - stejné číslo účtu (mezery a velká písmena nevadí) do 7 dnů u téže pokladny. Záznam bez pokladny jen na stejné provozovně, protože „stůl 5“ je na každé provozovně jiný.
    - Když je podobný záznam na provozovně, kterou nevidíte, appka neukáže, který to je. Rozhodne někdo s přístupem k oběma.
-4. **Opravit / stornovat** (právo na opravy): původní řádek zůstane v historii, oprava je nový řádek. Když je propojená faktura, je potřeba číslo opravného dokladu (dobropisu).
+4. **Po zápisu**: když hrozí, že pokladna prodej přinese později (otevřený účet se uzavře), klikněte znovu **Zkontrolovat v pokladně**. Když ho pokladna najde, záznam dostane varování **„Možná zapsáno dvakrát“** (v přehledu je na to filtr) a detail nabídne storno. Sama to appka nekontroluje ani nestornuje (otázka 58).
+5. **Opravit / stornovat** (právo na opravy): původní řádek zůstane v historii, oprava je nový řádek. Když je propojená faktura, je potřeba číslo opravného dokladu (dobropisu).
 
 **Fotografie sjetiny nedokazuje, že host zaplatil.** Zápis tržby
 nepřidá ani korunu na účet ani do cashflow.
@@ -174,4 +175,6 @@ vyřešila (např. papírová výdejka).
 | Na dokladu chybí celková částka | Appka nabídne součet položek jako **návrh** s poznámkou „vypočtený součet“. Potvrdíte ho, nebo opravíte. |
 | „K úhradě“ je jiné než celkem | Tržba je celková cena prodeje. „K úhradě“, přijatá hotovost a vrácené peníze tržba nejsou, appka je ukáže jen pro kontrolu. |
 | AI nečte nebo není zapnutá | Zadejte položky ručně, appka nic nevymýšlí. Za den jde nejvýš 200 rozpoznání na firmu. |
+| Velká fotka | Fotku nad 5 MB (a fotku z iPhonu ve formátu HEIC) appka při nahrání sama zmenší. K rozpoznání jde fotka do 5 MB, PDF do 8 MB, dohromady nejvýš 20 MB, po pořadí stránek. Co se nevejde, appka vyjmenuje. |
+| Položka bez čitelného názvu | Appka ji pojmenuje „Položka č. N (název nečitelný)“ a nechá ke kontrole. Doplňte název podle dokladu. |
 | Záznam omylem | **Zrušit záznam** jde, dokud nic neproběhlo. Autor smí zrušit svůj rozpracovaný záznam, jinak je potřeba právo na opravy. Nejdřív je potřeba odpojit fakturu a úhradu a stornovat zapsanou tržbu. Během ručního odpisu zrušit nejde (viz výš). Fotky zůstanou v historii zrušeného záznamu a stejný doklad jde nahrát ke správnému záznamu. |

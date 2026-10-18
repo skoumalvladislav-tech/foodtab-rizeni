@@ -1074,6 +1074,20 @@ select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false)
 select public.jine_platby_prohlasit(:'z8', :'v8', 'trzba', 'nenalezeno', 'Ručně psaný účet, v pokladně není.');
 select pg_temp.check('stejné číslo účtu bez pokladny na JINÉ pobočce duplicita není (zapíše se bez důvodu)',
   pg_temp.projde(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L)', :'z8', :'v8', 'nova')));
+-- Dodatečná kontrola po zápisu (pozdější import z pokladny): výsledek jde
+-- zapsat i k zapsané tržbě, appka podle něj varuje „možná zapsáno dvakrát“.
+-- Nic se samo nestornuje — rozhodne člověk.
+reset role;
+select verze as v8b from public.jine_platby where id = :'z8' \gset
+set role service_role;
+select pg_temp.check('dodatečná kontrola jde zapsat i k zapsané tržbě',
+  pg_temp.projde(format('select public.jine_platby_zapsat_kontrolu(%L, %s, %L, %L, %L::jsonb, null)', :'z8', :'v8b', 'trzba', 'nalezeno', '{"doklad": "D-9"}')));
+reset role;
+select pg_temp.check('po dodatečné kontrole tržba zůstala zapsaná a započtená, výsledek je „nalezeno“',
+  (select stav_trzby = 'zapsano' and kontrola_trzby ->> 'vysledek' = 'nalezeno' from public.jine_platby where id = :'z8')
+  and exists (select 1 from public.ostatni_trzby where zaznam_id = :'z8' and stav = 'platna' and zapocitat));
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
 select public.jine_platby_prohlasit(:'z9', :'v9', 'trzba', 'nenalezeno', 'Ručně psaný účet, v pokladně není.');
 select pg_temp.check('stejné číslo účtu (bez mezer) v téže pobočce do 7 dní = možná duplicita s id viditelného záznamu',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L)', :'z9', :'v9', 'nova'), '23514', :'z8'));
