@@ -310,6 +310,15 @@ select pg_temp.check('úloha během převodu: změna stavu bez značky → odmí
 select pg_temp.check('úloha během převodu: kopie přílohy (jen priloha_cesta) projde',
   pg_temp.projde(format('update public.faktury set priloha_cesta = %L where id = %L',
     :'tenant' || '/' || repeat('a', 64) || '.pdf', 'a0000000-0000-4000-8000-000000000001')));
+-- Čas založení: převod ho opravit smí (stará databáze ho mezi běhy
+-- změnila — jinak by převod uvízl), bez převodní značky nikdo.
+select pg_temp.check('převod smí opravit čas založení (se značkou)',
+  pg_temp.projde($s$update public.faktury set vytvoreno_kdy = '2026-09-05T10:11:13.6+00:00', prevedeno_kdy = clock_timestamp() where id = 'a0000000-0000-4000-8000-000000000002'$s$));
+update public.faktury set vytvoreno_kdy = '2026-09-05T10:11:13.5+00:00', prevedeno_kdy = clock_timestamp()
+ where id = 'a0000000-0000-4000-8000-000000000002';
+select pg_temp.check('… bez převodní značky čas založení nezmění nikdo',
+  pg_temp.spadne_hlaskou($s$update public.faktury set vytvoreno_kdy = now() where id = 'a0000000-0000-4000-8000-000000000002'$s$,
+    '42501', 'Čas založení'));
 select pg_temp.check('úloha: příloha jiné firmy do faktury nepatří (kontrola cesty)',
   pg_temp.spadne_hlaskou(format('update public.faktury set priloha_cesta = %L where id = %L',
     :'tenant_b' || '/' || repeat('b', 64) || '.pdf', 'a0000000-0000-4000-8000-000000000003'), '23514', 'faktury_priloha_firmy'));
@@ -346,8 +355,12 @@ select app.faktury_prevod_zahajit(:'tenant', 'ctqtwahlzhyjerqulqyn.supabase.co',
 select pg_temp.check('po zrušení jde zahájit znovu → probiha', :'stav_zahajeni' = 'probiha');
 
 select app.faktury_prevod_dokoncit(:'tenant', 5, 0) as dokonceni \gset
+-- Každé odmítnutí se ověřuje i PODLE DŮVODU: dokud nejsou přílohy
+-- zkopírované, dokončení odmítá i kvůli nim — kontrola jen na „ok = false"
+-- by prošla i bez brány, kterou má hlídat (zjištěno rozbitím 19. 10.).
 select pg_temp.check('jiný počet ve staré databázi (5 ≠ 4): dokončení odmítnuto, nic se nezměnilo',
   (:'dokonceni'::jsonb ->> 'ok')::boolean = false
+  and exists (select 1 from jsonb_array_elements_text(:'dokonceni'::jsonb -> 'duvody') d where d like 'Kopie staré databáze má 4 faktur, stará databáze 5%')
   and app.faktury_stav_prevodu(:'tenant') = 'probiha');
 
 -- Převedená faktura se liší od kopie staré databáze → dokončení odmítne
@@ -360,6 +373,7 @@ select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
 select pg_temp.check('převedená faktura se liší od kopie: dokončení odmítnuto (pole po poli)',
   (:'dokonceni'::jsonb ->> 'ok')::boolean = false
   and (:'dokonceni'::jsonb -> 'porovnani' ->> 'lisi')::int = 1
+  and exists (select 1 from jsonb_array_elements_text(:'dokonceni'::jsonb -> 'duvody') d where d like 'Převedené faktury nesedí s kopií:%liší se 1,%')
   and app.faktury_stav_prevodu(:'tenant') = 'probiha');
 set role service_role;
 update public.faktury set poznamka_kontroly = null, prevedeno_kdy = clock_timestamp()
@@ -370,6 +384,7 @@ select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
 select pg_temp.check('nezkopírované přílohy (2 ze 3): dokončení odmítnuto',
   (:'dokonceni'::jsonb ->> 'ok')::boolean = false
   and (:'dokonceni'::jsonb -> 'mereni' -> 'prilohy' ->> 'stare_bez_kopie')::int = 2
+  and exists (select 1 from jsonb_array_elements_text(:'dokonceni'::jsonb -> 'duvody') d where d like 'Zbývá zkopírovat 2 příloh%')
   and app.faktury_stav_prevodu(:'tenant') = 'probiha');
 
 -- Chyba u jiné faktury (příloha z evidence příjmu, smazaná faktura) se
@@ -385,6 +400,7 @@ select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
 select pg_temp.check('chyba u jiné faktury nevyrovná nezkopírovanou přílohu: dokončení odmítnuto',
   (:'dokonceni'::jsonb ->> 'ok')::boolean = false
   and (:'dokonceni'::jsonb -> 'mereni' -> 'prilohy' ->> 'stare_bez_kopie_nevykazane')::int = 1
+  and exists (select 1 from jsonb_array_elements_text(:'dokonceni'::jsonb -> 'duvody') d where d like 'Zbývá zkopírovat 1 příloh%')
   and app.faktury_stav_prevodu(:'tenant') = 'probiha');
 
 -- Dvě přílohy se „nepodařilo zkopírovat" — úloha je zapíše jako chyby.
