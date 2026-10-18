@@ -22,15 +22,20 @@
  *   databázích ho přepisuje spoušť při každé změně.
  *
  * ---------------------------------------------------------------------
- * MĚŘENÍ A OTISK — tři nezávislé zápisy téhož pořadí polí
+ * MĚŘENÍ A OTISK — dva nezávislé zápisy téhož pořadí polí
  *
  * `kanonickyTextStareho` čte STARÁ jména sloupců, `kanonickyTextHlavniho`
- * NOVÁ, a databáze má třetí kopii v app.faktury_prevod_mereni
- * (supabase/migrations/20261018100000_faktury_v_hlavni_databazi.sql).
- * Je to schválně — kdyby se otisk staral z MAPA_SLOUPCU, prohozená dvojice
- * v mapě (duzp ↔ due_date) by se promítla do obou stran stejně a otisk by
- * prošel. Takhle spadne: hlavní databáze má v `duzp` hodnotu, kterou stará
- * měla v `due_date`. Hlídá to scripts/faktury-prevod.test.mjs.
+ * NOVÁ. Je to schválně — kdyby se otisk skládal z MAPA_SLOUPCU, prohozená
+ * dvojice v mapě (duzp ↔ due_date) by se promítla do obou stran stejně
+ * a otisk by prošel. Takhle spadne: hlavní databáze má v `duzp` hodnotu,
+ * kterou stará měla v `due_date`. Hlídá to scripts/faktury-prevod.test.mjs.
+ *
+ * Databáze otisk nepočítá — porovnává pole po poli sama
+ * (app.faktury_prevod_porovnat v 20261018100000_faktury_v_hlavni_databazi.sql,
+ * kopie staré databáze proti hlavní). Časy obě strany porovnávají na
+ * MIKROSEKUNDY (přesnost timestamptz): kdyby JS sekl na milisekundy,
+ * převod by změnu pod milisekundu „neviděl" a dokončení by ji v SQL
+ * pokaždé odmítlo — převod by uvízl.
  *
  * Bez `server-only` a s příponami `.ts` v importech — běží přímo Nodem.
  */
@@ -174,25 +179,41 @@ export function halereNaCastku(halere: number): string {
   return `${halere < 0 ? '-' : ''}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`
 }
 
+// BigInt bez literálů `1000n` — tsconfig míří na ES2017.
+const TISIC = BigInt(1000)
+const NULA = BigInt(0)
+const JEDNA = BigInt(1)
+
 /**
- * Okamžik → milisekundy od 1970, zbytek pod milisekundu useknutý (stejně
- * jako `floor(extract(epoch …) * 1000)` v databázi). Vlastní rozbor, ne
- * jen Date.parse: šest desetinných míst z PostgRESTu musí dopadnout
- * stejně na každém Nodu. `null` = není to rozpoznatelný okamžik.
+ * Okamžik → mikrosekundy od 1970 (přesnost timestamptz). Vlastní rozbor,
+ * ne Date.parse: šest desetinných míst z PostgRESTu musí dopadnout stejně
+ * na každém Nodu a Date má jen milisekundy. Víc než šest míst Postgres
+ * nevydá; kdyby přišla, sedmé a další se useknou. `null` = není to
+ * rozpoznatelný okamžik.
  */
-export function casNaMs(text: string | null | undefined): number | null {
+export function casNaMikro(text: string | null | undefined): bigint | null {
   if (text === null || text === undefined) return null
   const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}(?::?\d{2})?)?$/.exec(text.trim())
   if (!m) return null
   const [, r, mes, d, h, min, s, zlomek = '', pasmo = 'Z'] = m
-  let ms = Date.UTC(Number(r), Number(mes) - 1, Number(d), Number(h), Number(min), Number(s)) + Number((zlomek + '000').slice(0, 3))
+  let ms = Date.UTC(Number(r), Number(mes) - 1, Number(d), Number(h), Number(min), Number(s))
+  if (!Number.isFinite(ms)) return null
   if (pasmo !== 'Z') {
     const pm = /^([+-])(\d{2}):?(\d{2})?$/.exec(pasmo)
     if (!pm) return null
     const posun = (Number(pm[2]) * 60 + Number(pm[3] ?? '0')) * 60_000
     ms -= pm[1] === '+' ? posun : -posun
   }
-  return Number.isFinite(ms) ? ms : null
+  return BigInt(ms) * TISIC + BigInt((zlomek + '000000').slice(0, 6))
+}
+
+/** Okamžik → milisekundy od 1970 (zbytek pod milisekundu useknutý). */
+export function casNaMs(text: string | null | undefined): number | null {
+  const mikro = casNaMikro(text)
+  if (mikro === null) return null
+  // Useknout k menší hodnotě i před rokem 1970 (dělení BigInt jde k nule).
+  const ms = mikro / TISIC - (mikro % TISIC < NULA ? JEDNA : NULA)
+  return Number(ms)
 }
 
 // ---------------------------------------------------------------------
@@ -276,8 +297,8 @@ const RADEK = '\u001e'
 
 const t = (x: string | null | undefined) => (x === null || x === undefined ? NIC : x)
 const b = (x: boolean | null | undefined) => (x === true ? '1' : '0')
-const ms = (x: string | null | undefined) => {
-  const v = casNaMs(x)
+const cas = (x: string | null | undefined) => {
+  const v = casNaMikro(x)
   return v === null ? NIC : String(v)
 }
 
@@ -305,9 +326,9 @@ export function kanonickyTextHlavniho(r: RadekHlavni): string {
     t(r.vytah_textu),
     t(r.odkaz_onedrive),
     t(r.odkaz_pdf),
-    ms(r.prijato_kdy),
-    ms(r.upominka_odeslana_kdy),
-    ms(r.vytvoreno_kdy),
+    cas(r.prijato_kdy),
+    cas(r.upominka_odeslana_kdy),
+    cas(r.vytvoreno_kdy),
   ].join(POLE)
 }
 
@@ -341,9 +362,9 @@ export function kanonickyTextStareho(r: RadekStare): string {
     t(r.document_text_excerpt),
     t(r.onedrive_url),
     t(r.pdf_url),
-    ms(r.received_at),
-    ms(r.reminder_sent_at),
-    ms(r.created_at),
+    cas(r.received_at),
+    cas(r.reminder_sent_at),
+    cas(r.created_at),
   ].join(POLE)
 }
 
@@ -533,8 +554,10 @@ export function jeVerejnySouborStare(odkaz: string | null | undefined, adresaSta
   } catch {
     return false
   }
+  // `new URL` cestu normalizuje (`/a/../b` → `/b`), takže prefix se
+  // kontroluje až na výsledné cestě — `..` z něj nevyleze.
   return cil.protocol === 'https:' && cil.origin === zaklad.origin && cil.pathname.startsWith('/storage/v1/object/public/')
-    && !cil.pathname.includes('/../') && cil.search === ''
+    && cil.search === ''
 }
 
 /** Id evidence příjmu z odkazu `…/api/faktury/priloha/<id>` (faktury z vlastního příjmu), jinak null. */

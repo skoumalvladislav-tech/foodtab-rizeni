@@ -28,6 +28,7 @@ on:
           - prevest
           - prilohy
           - dokoncit
+          - zrusit
           - vratit
           - zpet_nanecisto
           - zpet
@@ -74,13 +75,19 @@ jobs:
             exit 1
           fi
 
-          TELO=$(jq -cn --arg r "$REZIM" --arg p "$POTVRZENI" \
-            --argjson s "$SMAZAT_VIC" --argjson z "$ZNOVU_CHYBY" \
-            '{rezim: $r, potvrzeni: $p, smazatVic: $s, znovuChyby: $z}')
+          telo() {
+            jq -cn --arg r "$REZIM" --arg p "$POTVRZENI" \
+              --argjson s "$SMAZAT_VIC" --argjson z "$1" \
+              '{rezim: $r, potvrzeni: $p, smazatVic: $s, znovuChyby: $z}'
+          }
 
           # Přílohy a dlouhý převod jdou po dávkách — volá se znovu, dokud
-          # krok vrací "pokracovat": true (nejvýš 40× za běh).
+          # krok vrací "pokracovat": true (nejvýš 40× za běh). „Znovu
+          # i chyby" platí jen pro první kolo: další kola by jinak zkoušela
+          # pořád dokola tytéž rozbité přílohy a na nové by nedošlo.
+          DOKONCENO=0
           for KOLO in $(seq 1 40); do
+            if [ "$KOLO" = "1" ]; then TELO=$(telo "$ZNOVU_CHYBY"); else TELO=$(telo false); fi
             KOD=$(curl -sS -o telo.json -w '%{http_code}' --max-time 120 \
               -X POST -H "Authorization: Bearer ${TAJEMSTVI}" -H 'Content-Type: application/json' \
               --data "$TELO" "${ADRESA}/api/prevod-faktur")
@@ -96,9 +103,14 @@ jobs:
               exit 1
             fi
             if ! grep -q '"pokracovat":true' telo.json; then
+              DOKONCENO=1
               break
             fi
           done
+
+          if [ "$DOKONCENO" != "1" ]; then
+            echo "::warning::Po 40 kolech je pořád co dělat — spusťte stejný krok znovu."
+          fi
 
           if ! grep -q '"ok":true' telo.json; then
             echo "::warning::Krok neskončil úspěchem — viz „duvod" výš."

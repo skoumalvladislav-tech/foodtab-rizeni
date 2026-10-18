@@ -148,6 +148,22 @@ $$;
 revoke all on function app.faktury_stav_prevodu(uuid) from public, anon;
 grant execute on function app.faktury_stav_prevodu(uuid) to authenticated, service_role;
 
+-- Zrušení celé firmy (kaskáda z tenants): firma už neexistuje a brány
+-- níž nemají co chránit — bez téhle výjimky by smazání firmy s fakturami
+-- spadlo (kaskáda maže jako vlastník tabulky, tedy „převodním" mazáním
+-- mimo stav probiha). Stejná zkratka jako app.audit_zmenu. Volá se jen
+-- pro mazání mimo přihlášeného (vnořené if, ne `and` — pořadí
+-- vyhodnocení podmínek Postgres nezaručuje).
+create function app.faktury_firma_zanikla(p_tenant uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select not exists (select 1 from public.tenants t where t.id = p_tenant);
+$$;
+
+revoke all on function app.faktury_firma_zanikla(uuid) from public, anon, authenticated;
+grant execute on function app.faktury_firma_zanikla(uuid) to service_role;
+
 
 -- NEW při mazání a OLD při vkládání se tu ani ve spouštích níž nečtou
 -- (ani ve větvi, která se nevykoná) — jsou NULL a čtení jejich polí se
@@ -162,6 +178,11 @@ declare
 begin
   if tg_op = 'DELETE' then
     v_tenant := old.tenant_id;
+    if current_user not in ('authenticated', 'anon') then
+      if app.faktury_firma_zanikla(v_tenant) then
+        return old;
+      end if;
+    end if;
   else
     v_tenant := new.tenant_id;
   end if;
@@ -314,8 +335,11 @@ grant execute on function app.faktury_rucni_priloha_firma(text) to authenticated
 
 alter table public.faktury
   add constraint faktury_priloha_firmy
+  -- `is not distinct from`, ne `=`: cesta, kterou nepozná ani jeden
+  -- vzor, dá NULL — a kontrola s výsledkem NULL by prošla.
   check (priloha_cesta is null
-         or coalesce(app.faktury_priloha_firma(priloha_cesta), app.faktury_rucni_priloha_firma(priloha_cesta)) = tenant_id);
+         or coalesce(app.faktury_priloha_firma(priloha_cesta), app.faktury_rucni_priloha_firma(priloha_cesta))
+            is not distinct from tenant_id);
 
 
 -- ---------------------------------------------------------------------
@@ -347,6 +371,11 @@ declare
 begin
   if tg_op = 'DELETE' then
     v_tenant := old.tenant_id;
+    if current_user not in ('authenticated', 'anon') then
+      if app.faktury_firma_zanikla(v_tenant) then
+        return old;
+      end if;
+    end if;
   else
     v_tenant := new.tenant_id;
   end if;
@@ -356,9 +385,6 @@ begin
     if new.id is distinct from old.id or new.tenant_id is distinct from old.tenant_id then
       raise exception 'Fakturu nejde přesunout do jiné firmy ani jí změnit id.'
         using errcode = 'insufficient_privilege';
-    end if;
-    if new.vytvoreno_kdy is distinct from old.vytvoreno_kdy then
-      raise exception 'Čas založení faktury nejde změnit.' using errcode = 'insufficient_privilege';
     end if;
     v_zmena := (to_jsonb(new) - 'zmeneno_kdy') is distinct from (to_jsonb(old) - 'zmeneno_kdy');
   end if;
@@ -370,6 +396,13 @@ begin
     v_prevodni := new.prevedeno_kdy is not null;
   else
     v_prevodni := new.prevedeno_kdy is distinct from old.prevedeno_kdy;
+  end if;
+
+  -- Čas založení mění jen převod (stará databáze ho mohla mezi běhy
+  -- opravit — bez výjimky by se převod zasekl na každém dalším běhu).
+  if tg_op = 'UPDATE' and new.vytvoreno_kdy is distinct from old.vytvoreno_kdy
+     and not (v_prevodni and current_user not in ('authenticated', 'anon')) then
+    raise exception 'Čas založení faktury nejde změnit.' using errcode = 'insufficient_privilege';
   end if;
 
   if current_user in ('authenticated', 'anon') then
@@ -627,7 +660,9 @@ begin
 
   if new.faktura is null then
     if v_text_zmenen
-       and new.faktura_id ~* '^\s*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s*$' then
+       -- Jen mezery kolem (` *`, ne `\s*`): btrim níž ořízne jen mezery,
+       -- tabulátor nebo konec řádku by převod na uuid shodil.
+       and new.faktura_id ~* '^ *[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} *$' then
       select f.id into new.faktura
         from public.faktury f
        where f.tenant_id = new.tenant_id
@@ -660,14 +695,21 @@ create trigger trg_faktury_prijem_odkaz
 -- ---------------------------------------------------------------------
 -- Spoušť: párování plateb podle stavu převodu
 -- ---------------------------------------------------------------------
---   probiha    — párování se nemění vůbec. Kdyby se během převodu
---                zrušilo (třeba starou appkou, která ještě někde běží),
---                převedený stav faktury by mu neodpovídal.
+--   probiha    — párování se nemění. Kdyby se během převodu zrušilo
+--                (třeba starou appkou, která ještě někde běží), převedený
+--                stav faktury by mu neodpovídal. Výjimka mimo přihlášeného:
+--                vynulovat uuid faktury (zahájení převodu, aby převod
+--                mohl smazat fakturu, kterou mezitím smazala stará appka)
+--                a potvrdil (smazání profilu, ON DELETE SET NULL).
 --   dokonceno  — jen nová cesta: vložení s uuid faktury (stará vkládá jen
---                text) a změnu stavu párování jen z nových funkcí (ty si
---                v transakci nastaví foodtab.faktury_cesta = 'nova').
---                Stará cesta by párovala s částkou, kterou dodá volající,
---                a stav faktury by nepřepočítala.
+--                text), změna stavu párování a přepojení potvrzeného
+--                párování (jiná faktura, jiná částka) jen z nových funkcí —
+--                ty mají foodtab.faktury_cesta = 'nova' jako vlastnost
+--                funkce (platí jen po dobu jejich běhu). Stará cesta by
+--                párovala s částkou, kterou dodá volající, a stav faktury
+--                by nepřepočítala. Značka je rozlišení cesty v kódu, ne
+--                zámek: přihlášený ji nastavit neumí (PostgREST set_config
+--                nevystaví) a přímý zápis do tabulky stejně nemá.
 --   vraceno, bez řádku — stará cesta funguje (návrat zpět).
 -- Jméno řadí spoušť PŘED trg_platby_faktury_odkaz: musí vidět, jestli
 -- vkládající uuid dodal sám, dřív než ho spoušť odkazu dohledá z textu.
@@ -681,6 +723,13 @@ declare
   v_stav text := app.faktury_stav_prevodu(new.tenant_id);
 begin
   if v_stav = 'probiha' then
+    if tg_op = 'UPDATE' and current_user not in ('authenticated', 'anon') then
+      if (to_jsonb(new) - 'faktura' - 'potvrdil') = (to_jsonb(old) - 'faktura' - 'potvrdil')
+         and (new.faktura is null or new.faktura is not distinct from old.faktura)
+         and (new.potvrdil is null or new.potvrdil is not distinct from old.potvrdil) then
+        return new;
+      end if;
+    end if;
     raise exception 'Během stěhování faktur se párování plateb nemění.'
       using errcode = 'insufficient_privilege';
   end if;
@@ -689,10 +738,21 @@ begin
       raise exception 'Po přestěhování faktur se páruje jen novou cestou (sparovat_platbu_s_fakturou).'
         using errcode = 'insufficient_privilege';
     end if;
-    if tg_op = 'UPDATE' and new.stav is distinct from old.stav
-       and coalesce(current_setting('foodtab.faktury_cesta', true), '') <> 'nova' then
-      raise exception 'Po přestěhování faktur se párování ruší jen novou cestou (zrusit_parovani_faktury).'
-        using errcode = 'insufficient_privilege';
+    if tg_op = 'UPDATE' and coalesce(current_setting('foodtab.faktury_cesta', true), '') <> 'nova' then
+      if new.stav is distinct from old.stav then
+        raise exception 'Po přestěhování faktur se párování ruší jen novou cestou (zrusit_parovani_faktury).'
+          using errcode = 'insufficient_privilege';
+      end if;
+      -- Potvrzené párování drží stav faktury: jiná faktura nebo jiná částka
+      -- bez přepočtu by ho rozbila. Doplnění uuid k textu (dokončení
+      -- převodu) přepojení není — old.faktura je prázdné.
+      if old.stav = 'potvrzeno'
+         and (new.castka_haleru is distinct from old.castka_haleru
+              or new.faktura_id is distinct from old.faktura_id
+              or (old.faktura is not null and new.faktura is distinct from old.faktura)) then
+        raise exception 'Potvrzené párování nejde přepojit ani změnit jeho částku — zrušte ho a spárujte znovu.'
+          using errcode = 'insufficient_privilege';
+      end if;
     end if;
   end if;
   return new;
@@ -704,6 +764,11 @@ revoke all on function app.platby_faktury_brana() from public, anon, authenticat
 create trigger trg_platby_faktury_brana
   before insert or update on public.platby_faktury
   for each row execute function app.platby_faktury_brana();
+
+-- Mazání a TRUNCATE párování nedělá žádný kód (jen kaskáda, ta běží jako
+-- vlastník); výchozí práva Supabase je úloze (service_role) přesto dávají.
+-- TRUNCATE by obešel i spoušť výš. (Přihlášený je nemá od 20261006130000.)
+revoke delete, truncate on public.platby_faktury from service_role;
 
 
 -- =====================================================================
@@ -920,25 +985,28 @@ grant execute on function public.sparovat_platbu_s_fakturou(uuid, uuid, uuid, in
 -- na 'zamitnuto'; stav faktury se přepočítá ve stejné transakci.
 create function app.zrusit_parovani_faktury(p_tenant uuid, p_alokace uuid, p_duvod text)
 returns text
-language plpgsql security definer set search_path = ''
+language plpgsql security definer set search_path = '' set foodtab.faktury_cesta = 'nova'
 as $$
 declare
-  v_branch  uuid;
-  v_faktura uuid;
-  v_castka  integer;
-  v_mena    text;
-  v_soucet  bigint;
-  v_stav    text;
+  v_branch   uuid;
+  v_faktura  uuid;
+  v_parovani text;
+  v_castka   integer;
+  v_mena     text;
+  v_soucet   bigint;
+  v_stav     text;
 begin
   if app.faktury_stav_prevodu(p_tenant) is distinct from 'dokonceno' then
     raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
   end if;
 
-  select u.branch_id, p.faktura into v_branch, v_faktura
+  -- Zamknout řádek párování: dvojí kliknutí počká a uvidí, že už je zrušené.
+  select u.branch_id, p.faktura, p.stav into v_branch, v_faktura, v_parovani
     from public.platby_faktury p
     join public.transakce t on t.id = p.transakce_id
     join public.platebni_ucty u on u.id = t.ucet_id
-   where p.id = p_alokace and p.tenant_id = p_tenant;
+   where p.id = p_alokace and p.tenant_id = p_tenant
+     for update of p;
 
   if not found then
     raise exception 'Párování nepatří této firmě.' using errcode = 'check_violation';
@@ -952,6 +1020,13 @@ begin
     raise exception 'Rušit párování s fakturami smí ten, kdo má právo „Vidět přijaté faktury" za celou firmu.'
       using errcode = 'insufficient_privilege';
   end if;
+  -- Až po kontrole práv (jinak by se dalo zjišťovat stav cizích párování).
+  -- Bez toho by opakované zrušení (stará stránka, dvojí kliknutí) znovu
+  -- přepočítalo stav faktury a přepsalo ručně nastavený stav.
+  if v_parovani is distinct from 'potvrzeno' then
+    raise exception 'Párování už není potvrzené (stav: %) — není co rušit.', v_parovani
+      using errcode = 'check_violation';
+  end if;
 
   -- Řádek faktury zamknout PŘED změnou párování — souběžné spárování téže
   -- faktury počká a přepočte stav až po nás.
@@ -960,7 +1035,6 @@ begin
       from public.faktury f where f.id = v_faktura for no key update;
   end if;
 
-  perform set_config('foodtab.faktury_cesta', 'nova', true);
   update public.platby_faktury set stav = 'zamitnuto' where id = p_alokace;
 
   -- Bez faktury (párování na fakturu, která ve staré databázi zmizela) se
@@ -1106,7 +1180,7 @@ grant execute on function public.automaticky_sparovat_fakturu(uuid, uuid, uuid, 
 -- jen nová cesta (vrací uuid faktury, ne text).
 create function app.zrusit_automaticke_parovani_faktury(p_tenant uuid, p_alokace uuid, p_duvod text)
 returns boolean
-language plpgsql security definer set search_path = ''
+language plpgsql security definer set search_path = '' set foodtab.faktury_cesta = 'nova'
 as $$
 declare
   v_faktura uuid;
@@ -1115,7 +1189,6 @@ begin
     return false;
   end if;
 
-  perform set_config('foodtab.faktury_cesta', 'nova', true);
   update public.platby_faktury
      set stav = 'zamitnuto'
    where id = p_alokace and tenant_id = p_tenant and zpusob = 'automaticky' and stav = 'potvrzeno'
@@ -1257,7 +1330,7 @@ as $$
       's_odkazem_pdf', (select count(*) from z where coalesce(z.radek ->> 'pdf_url', '') <> ''),
       's_onedrive',    (select count(*) from z where coalesce(z.radek ->> 'onedrive_url', '') <> ''),
       'castky_haleru', coalesce((select jsonb_object_agg(x.mena, x.soucet) from (
-                          select z.radek ->> 'currency' as mena, sum((z.radek ->> 'amount')::numeric * 100) as soucet
+                          select coalesce(z.radek ->> 'currency', '(bez měny)') as mena, sum((z.radek ->> 'amount')::numeric * 100) as soucet
                             from z group by 1) x), '{}'::jsonb)),
     'hlavni', jsonb_build_object(
       'pocet',         (select count(*) from f),
@@ -1267,7 +1340,7 @@ as $$
       's_odkazem_pdf', (select count(*) from f where coalesce(f.odkaz_pdf, '') <> ''),
       's_onedrive',    (select count(*) from f where coalesce(f.odkaz_onedrive, '') <> ''),
       'castky_haleru', coalesce((select jsonb_object_agg(x.mena, x.soucet) from (
-                          select f.mena, sum(f.castka_haleru) as soucet from f group by 1) x), '{}'::jsonb),
+                          select coalesce(f.mena, '(bez měny)') as mena, sum(f.castka_haleru) as soucet from f group by 1) x), '{}'::jsonb),
       'vznikle_po_prevodu', (select count(*) from f where f.prevedeno_kdy is null)),
     'parovani', jsonb_build_object(
       'pocet',                   (select count(*) from p),
@@ -1287,7 +1360,14 @@ as $$
                                and f.priloha_cesta is null),
       'nepodarene',         (select count(*) from jsonb_object_keys(coalesce(
                                (select pr.prilohy -> 'chyby' from public.faktury_prevod pr where pr.tenant_id = p_tenant),
-                               '{}'::jsonb)))),
+                               '{}'::jsonb))),
+      -- Bez kopie a bez zapsaného důvodu, proč se kopie nepodařila — tohle
+      -- musí být před dokončením 0 (stará databáze může usnout).
+      'stare_bez_kopie_nevykazane', (select count(*) from f
+                               where f.odkaz_pdf like '%/storage/v1/object/public/faktury-pdf/%'
+                                 and f.priloha_cesta is null
+                                 and not (coalesce((select pr.prilohy -> 'chyby' from public.faktury_prevod pr
+                                                     where pr.tenant_id = p_tenant), '{}'::jsonb) ? f.id::text))),
     'vzory', jsonb_build_object(
       'stara',  (select count(*) from public.faktury_prevod_zdroj k where k.tenant_id = p_tenant and k.tabulka = 'rejection_examples'),
       'hlavni', (select count(*) from public.faktury_vzory_odmitnuti v where v.tenant_id = p_tenant))
@@ -1359,6 +1439,13 @@ begin
     raise exception 'Převod je dokončený — nejdřív ho vraťte (režim „vratit"), jinak by převod přepsal změny udělané v appce.'
       using errcode = 'check_violation';
   end if;
+
+  -- Po vrácení starý kód páruje textem a spoušť odkazu doplňuje uuid
+  -- (i uuid z doby „dokonceno" zůstala). Smaže-li stará appka takovou
+  -- fakturu, převod by ji v hlavní databázi smazat nemohl (cizí klíč bez
+  -- akce) a v probiha nejde párování změnit — převod by uvízl. Uuid se
+  -- proto vynuluje; text zůstává a dokončení uuid doplní znovu.
+  update public.platby_faktury set faktura = null where tenant_id = p_tenant and faktura is not null;
 
   insert into public.faktury_prevod (tenant_id, stav, zdroj, mereni_zahajeni)
   values (p_tenant, 'probiha', p_zdroj, p_mereni)
@@ -1434,10 +1521,10 @@ begin
   end if;
   -- Přílohy musí být zkopírované PŘED otevřením: stará databáze může
   -- usnout (Free tarif, 7 dní bez provozu) a nikdo ji nevzbudí.
-  if (v_mereni -> 'prilohy' ->> 'stare_bez_kopie')::integer > (v_mereni -> 'prilohy' ->> 'nepodarene')::integer then
+  if (v_mereni -> 'prilohy' ->> 'stare_bez_kopie_nevykazane')::integer > 0 then
     v_duvody := v_duvody || jsonb_build_array(format(
       'Zbývá zkopírovat %s příloh ze starého veřejného úložiště (režim „prilohy").',
-      (v_mereni -> 'prilohy' ->> 'stare_bez_kopie')::integer - (v_mereni -> 'prilohy' ->> 'nepodarene')::integer));
+      v_mereni -> 'prilohy' ->> 'stare_bez_kopie_nevykazane'));
   end if;
 
   if jsonb_array_length(v_duvody) > 0 then
@@ -1491,6 +1578,46 @@ $$;
 
 revoke all on function public.faktury_prevod_dokoncit(uuid, integer, integer) from public, anon, authenticated;
 grant execute on function public.faktury_prevod_dokoncit(uuid, integer, integer) to service_role;
+
+
+-- Zrušení probíhajícího převodu (bez dokončení): stav „vraceno" — Faktury
+-- v nové appce zůstanou zavřené a stará cesta párování se otevře, takže
+-- předchozí verze appky (revert PR) může párovat. Bez toho by z „probiha"
+-- nevedla cesta ven a předchozí verze appky by párovat nemohla.
+create function app.faktury_prevod_zrusit(p_tenant uuid)
+returns text
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_stav text;
+begin
+  select pr.stav into v_stav from public.faktury_prevod pr where pr.tenant_id = p_tenant for update;
+  if v_stav is distinct from 'probiha' then
+    raise exception 'Zrušit jde jen probíhající převod (stav: %).', coalesce(v_stav, 'nezahájen')
+      using errcode = 'check_violation';
+  end if;
+
+  update public.faktury_prevod
+     set stav = 'vraceno', vraceno_kdy = now(), zmeneno_kdy = now()
+   where tenant_id = p_tenant;
+
+  perform app.audit(p_tenant, 'faktury.prevod_zrusen', 'faktury_prevod', p_tenant::text, null,
+                    jsonb_build_object('stav', v_stav), jsonb_build_object('stav', 'vraceno'));
+  return 'vraceno';
+end $$;
+
+revoke all on function app.faktury_prevod_zrusit(uuid) from public, anon, authenticated;
+grant execute on function app.faktury_prevod_zrusit(uuid) to service_role;
+
+create function public.faktury_prevod_zrusit(p_tenant uuid)
+returns text
+language sql security invoker set search_path = ''
+as $$
+  select app.faktury_prevod_zrusit(p_tenant);
+$$;
+
+revoke all on function public.faktury_prevod_zrusit(uuid) from public, anon, authenticated;
+grant execute on function public.faktury_prevod_zrusit(uuid) to service_role;
 
 
 -- Vrácení: Faktury se pro firmu zavřou (hlavní databáze se už nemění),

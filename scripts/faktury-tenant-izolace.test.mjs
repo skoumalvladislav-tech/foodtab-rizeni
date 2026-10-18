@@ -140,5 +140,34 @@ console.log('\n5. Co potřebuje ruční kontrolu')
   ok('filtr do databáze hlídá oba příznaky (česká jména sloupců)', /ke_kontrole\.is\.true/.test(FILTR_KE_KONTROLE) && /stav\.like\."Nutná ruční kontrola%"/.test(FILTR_KE_KONTROLE))
 }
 
+console.log('\n6. Granty nových tabulek — z TEXTU migrace')
+{
+  // Čistá databáze z supabase/tests/run.sh nemá výchozí práva Supabase
+  // (`grant all` každé nové tabulce pro anon, authenticated i service_role),
+  // takže kontroly „X nemá" v krok99 projdou i bez řádku `revoke`. Tady
+  // se proto hlídá text: každá nová tabulka nejdřív všechno odebere všem
+  // třem rolím a teprve potom jmenovitě přidá.
+  const MIGRACE = 'supabase/migrations/20261018100000_faktury_v_hlavni_databazi.sql'
+  const sql = readFileSync(join(KOREN, MIGRACE), 'utf8')
+  ok('migrace se přečetla (zakládá public.faktury)', /create table public\.faktury \(/.test(sql))
+  for (const t of ['faktury', 'faktury_prevod', 'faktury_prevod_zdroj', 'faktury_vzory_odmitnuti']) {
+    const odebrat = sql.search(new RegExp(`revoke all on public\\.${t} from anon, authenticated;`))
+    const odebratUloze = sql.search(new RegExp(`revoke all on public\\.${t} from service_role;`))
+    const grantPrihlasenym = sql.search(new RegExp(`\\ngrant [^;]* on public\\.${t} to authenticated`))
+    const grantUloze = sql.search(new RegExp(`\\ngrant [^;]* on public\\.${t} to service_role`))
+    ok(`${t}: revoke all od anon a authenticated`, odebrat >= 0)
+    ok(`${t}: revoke all od service_role`, odebratUloze >= 0)
+    ok(`${t}: granty až po revoke (každé roli zvlášť)`,
+      (grantPrihlasenym < 0 || grantPrihlasenym > odebrat) && (grantUloze < 0 || grantUloze > odebratUloze))
+    ok(`${t}: anon nedostane nic`, !new RegExp(`\\ngrant [^;]* on public\\.${t} to [^;]*\\banon\\b`).test(sql))
+    ok(`${t}: nikdo nedostane TRUNCATE`, !new RegExp(`\\ngrant [^;]*truncate[^;]* on public\\.${t} `, 'i').test(sql))
+  }
+  ok('faktury_prevod: úloha mění jen seznam příloh (sloupcový grant), stav ne',
+    /grant update \(prilohy\) on public\.faktury_prevod to service_role;/.test(sql)
+    && !/grant [^;]*update(?! \()[^;]* on public\.faktury_prevod to service_role/.test(sql))
+  ok('platby_faktury: úloze odebrané mazání i TRUNCATE',
+    /revoke delete, truncate on public\.platby_faktury from service_role;/.test(sql))
+}
+
 console.log(chyb ? `\n${chyb} chyb` : '\nVšechno sedí')
 process.exit(chyb ? 1 : 0)

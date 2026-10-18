@@ -165,6 +165,11 @@ $$;
 \echo ''
 \echo '== 1. Granty: první linie ================================================'
 
+-- POZOR: čistá databáze z run.sh nemá výchozí práva Supabase (`grant all`
+-- každé nové tabulce), takže kontroly „X NEMÁ" tady projdou i bez řádku
+-- `revoke` v migraci. Ty hlídá text migrace (scripts/faktury-tenant-
+-- izolace.test.mjs, oddíl granty). Kontroly „X MÁ" tady spadnout umí.
+
 select pg_temp.check('faktury: anon nic (ani select)',
   not has_table_privilege('anon', 'public.faktury', 'select')
   and not has_table_privilege('anon', 'public.faktury', 'insert'));
@@ -238,8 +243,9 @@ insert into public.platby_faktury (tenant_id, transakce_id, faktura_id, castka_h
 values (:'tenant', :'t4', 'b9999999-0000-4000-8000-000000000999', 20000, 'potvrzeno', now()) returning id as visici_parovani \gset
 select pg_temp.projde(pg_temp.prijem_sql(:'tenant', :'schranka', 1, 'a0000000-0000-4000-8000-000000000002')) as ok_pomocny \gset
 select pg_temp.check('před převodem: staré párování i evidence bez uuid faktury',
-  (select faktura from public.platby_faktury where id = :'stare_parovani') is null
-  and (select faktura from public.faktury_prijem where pripojeni_id = :'schranka' and uid = 1) is null);
+  :'ok_pomocny'::boolean
+  and (select faktura from public.platby_faktury where id = :'stare_parovani') is null
+  and exists (select 1 from public.faktury_prijem where pripojeni_id = :'schranka' and uid = 1 and faktura is null));
 
 
 \echo ''
@@ -307,6 +313,9 @@ select pg_temp.check('úloha během převodu: kopie přílohy (jen priloha_cesta
 select pg_temp.check('úloha: příloha jiné firmy do faktury nepatří (kontrola cesty)',
   pg_temp.spadne_hlaskou(format('update public.faktury set priloha_cesta = %L where id = %L',
     :'tenant_b' || '/' || repeat('b', 64) || '.pdf', 'a0000000-0000-4000-8000-000000000003'), '23514', 'faktury_priloha_firmy'));
+select pg_temp.check('úloha: cesta přílohy mimo oba vzory → odmítnuta (NULL z kontroly neprojde)',
+  pg_temp.spadne_hlaskou(format('update public.faktury set priloha_cesta = %L where id = %L',
+    'nesmysl.pdf', 'a0000000-0000-4000-8000-000000000003'), '23514', 'faktury_priloha_firmy'));
 reset role;
 
 set role authenticated;
@@ -324,6 +333,17 @@ select set_config('test.user_id', '', false);
 
 \echo ''
 \echo '== 4. Dokončení ==========================================================='
+
+-- Cesta ven bez dokončení: zrušit → vraceno (stará cesta párování se
+-- otevře pro předchozí verzi appky), potom jde zahájit znovu.
+select app.faktury_prevod_zrusit(:'tenant') as stav_zruseni \gset
+select pg_temp.check('zrušení probíhajícího převodu → vraceno (a v auditu)',
+  :'stav_zruseni' = 'vraceno' and app.faktury_stav_prevodu(:'tenant') = 'vraceno'
+  and (select count(*) from public.audit_log where tenant_id = :'tenant' and action = 'faktury.prevod_zrusen') = 1);
+select pg_temp.check('zrušit jde jen probíhající převod',
+  pg_temp.spadne_hlaskou(format('select app.faktury_prevod_zrusit(%L)', :'tenant'), '23514', 'jen probíhající'));
+select app.faktury_prevod_zahajit(:'tenant', 'ctqtwahlzhyjerqulqyn.supabase.co', '{"pocet": 4}') as stav_zahajeni \gset
+select pg_temp.check('po zrušení jde zahájit znovu → probiha', :'stav_zahajeni' = 'probiha');
 
 select app.faktury_prevod_dokoncit(:'tenant', 5, 0) as dokonceni \gset
 select pg_temp.check('jiný počet ve staré databázi (5 ≠ 4): dokončení odmítnuto, nic se nezměnilo',
@@ -350,6 +370,21 @@ select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
 select pg_temp.check('nezkopírované přílohy (2 ze 3): dokončení odmítnuto',
   (:'dokonceni'::jsonb ->> 'ok')::boolean = false
   and (:'dokonceni'::jsonb -> 'mereni' -> 'prilohy' ->> 'stare_bez_kopie')::int = 2
+  and app.faktury_stav_prevodu(:'tenant') = 'probiha');
+
+-- Chyba u jiné faktury (příloha z evidence příjmu, smazaná faktura) se
+-- nesmí započítat za nezkopírovanou veřejnou přílohu: dvě chyby proti
+-- dvěma nezkopírovaným by počty „vyrovnaly", jedna příloha ale zůstala.
+set role service_role;
+update public.faktury_prevod
+   set prilohy = jsonb_build_object('chyby', jsonb_build_object(
+     'a0000000-0000-4000-8000-000000000003', 'HEIC', 'b9999999-0000-4000-8000-000000000999', 'evidence bez souboru'))
+ where tenant_id = :'tenant';
+reset role;
+select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
+select pg_temp.check('chyba u jiné faktury nevyrovná nezkopírovanou přílohu: dokončení odmítnuto',
+  (:'dokonceni'::jsonb ->> 'ok')::boolean = false
+  and (:'dokonceni'::jsonb -> 'mereni' -> 'prilohy' ->> 'stare_bez_kopie_nevykazane')::int = 1
   and app.faktury_stav_prevodu(:'tenant') = 'probiha');
 
 -- Dvě přílohy se „nepodařilo zkopírovat" — úloha je zapíše jako chyby.
@@ -499,12 +534,33 @@ select pg_temp.check('zrušení posledního párování → „Neuhrazeno" ve st
   :'p1_zruseno' = 'Neuhrazeno'
   and (select stav from public.faktury where id = 'a0000000-0000-4000-8000-000000000004') = 'Neuhrazeno'
   and (select stav from public.platby_faktury where id = :'p1_alokace') = 'zamitnuto');
+-- Podruhé totéž (stará stránka, dvojí kliknutí) nesmí znovu přepočítat
+-- stav faktury — přepsal by, co mezitím nastavil člověk.
+reset role;
+select set_config('test.user_id', '', false);
+set role service_role;
+update public.faktury set stav = 'Ručně nastavený stav' where id = 'a0000000-0000-4000-8000-000000000004';
+reset role;
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('podruhé zrušit totéž párování nejde',
+  pg_temp.spadne_hlaskou(format($s$select public.zrusit_parovani_faktury(%L, %L, 'znovu')$s$, :'tenant', :'p1_alokace'),
+    '23514', 'není co rušit'));
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('… a stav faktury zůstal, jak ho nastavil člověk',
+  (select stav from public.faktury where id = 'a0000000-0000-4000-8000-000000000004') = 'Ručně nastavený stav');
+set role service_role;
+update public.faktury set stav = 'Neuhrazeno' where id = 'a0000000-0000-4000-8000-000000000004';
+reset role;
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
 select pg_temp.check('stará cesta párování je po dokončení zavřená',
   pg_temp.spadne_hlaskou(format('select * from public.potvrdit_alokaci_platby(%L, %L, %L, 1000, 9999999)',
     :'tenant', :'t1', 'a0000000-0000-4000-8000-000000000004'), '42501', 'jen novou cestou'));
 select pg_temp.check('staré rušení párování je po dokončení zavřené',
   pg_temp.spadne_hlaskou(format($s$select public.zrusit_alokaci_platby(%L, %L, 'x')$s$, :'tenant', :'stare_parovani'), '42501', 'jen novou cestou'));
-select pg_temp.check('faktura cizí firmy: odmítnuto',
+select pg_temp.check('neexistující faktura: odmítnuto (cizí firma s existující fakturou v oddílu 8)',
   pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 100, null)',
     :'tenant', :'t2', gen_random_uuid()), '23514', 'Faktura nepatří této firmě'));
 
@@ -561,8 +617,14 @@ select pg_temp.projde(pg_temp.prijem_sql(:'tenant', :'schranka', 4, 'FAKTURA-TEX
 select pg_temp.check('evidence: text existující faktury → uuid doplněné',
   (select faktura from public.faktury_prijem where pripojeni_id = :'schranka' and uid = 2) = :'fa'::uuid);
 select pg_temp.check('evidence: neznámé id / ne-uuid text → uuid prázdné, text zůstává',
-  (select faktura from public.faktury_prijem where pripojeni_id = :'schranka' and uid = 3) is null
+  exists (select 1 from public.faktury_prijem where pripojeni_id = :'schranka' and uid = 3 and faktura is null)
   and (select faktura_id from public.faktury_prijem where pripojeni_id = :'schranka' and uid = 4) = 'FAKTURA-TEXT-123');
+-- Id s koncem řádku: vzor uuid ho nesmí pustit k převodu na uuid (btrim
+-- ořízne jen mezery) — jinak by zápis evidence spadl.
+select pg_temp.projde(pg_temp.prijem_sql(:'tenant', :'schranka', 6, E'a0000000-0000-4000-8000-000000000001\n')) as ok_pomocny \gset
+select pg_temp.check('evidence: id s koncem řádku → zápis projde, uuid prázdné',
+  :'ok_pomocny'::boolean
+  and exists (select 1 from public.faktury_prijem where pripojeni_id = :'schranka' and uid = 6 and faktura is null));
 -- Obojí změněné, každé na jinou fakturu = rozpor. (Změna jen textu
 -- se stejným uuid se bere jako změna textu — uuid se dohledá znovu.)
 select pg_temp.check('evidence: uuid a text změněné na různé faktury → odmítnuto',
@@ -599,15 +661,32 @@ set role service_role;
 insert into public.faktury (tenant_id, dodavatel, castka_haleru, prevedeno_kdy)
 values (:'tenant_b', 'Cizí dodavatel', 100, now()) returning id as cizi_faktura \gset
 reset role;
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('faktura cizí firmy (existuje, jen jinde): párování odmítnuto',
+  pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 100, null)',
+    :'tenant', :'t2', :'cizi_faktura'), '23514', 'Faktura nepatří této firmě'));
+reset role;
+select set_config('test.user_id', '', false);
 select pg_temp.check('párování na fakturu cizí firmy → cizí klíč odmítne',
   pg_temp.spadne_hlaskou(format($s$insert into public.platby_faktury (tenant_id, transakce_id, faktura, castka_haleru, stav) values (%L, %L, %L, 1, 'navrzeno')$s$,
     :'tenant', :'t2', :'cizi_faktura'), '23503', ''));
-select pg_temp.check('… ani starou cestou textem (uuid se nedohledá, zůstane prázdné)',
+select pg_temp.check('… stará cesta textem je po dokončení zavřená (cizí id se nedohledá — oddíl 10)',
   pg_temp.spadne_hlaskou(format($s$insert into public.platby_faktury (tenant_id, transakce_id, faktura_id, castka_haleru, stav) values (%L, %L, %L, 1, 'navrzeno')$s$,
     :'tenant', :'t2', :'cizi_faktura'), '42501', 'jen novou cestou'));
 
+-- Potvrzené párování drží stav faktury: přepojit ho nebo změnit částku
+-- smí jen nová cesta (značka cesty, kterou mají nové funkce).
+select pg_temp.check('po dokončení: potvrzené párování mimo novou cestu nejde přepojit',
+  pg_temp.spadne_hlaskou(format('update public.platby_faktury set faktura = %L where id = %L', :'fa', :'stare_parovani'),
+    '42501', 'nejde přepojit'));
+select pg_temp.check('… ani změnit jeho částku',
+  pg_temp.spadne_hlaskou(format('update public.platby_faktury set castka_haleru = 1 where id = %L', :'stare_parovani'),
+    '42501', 'nejde přepojit'));
 -- Nová cesta přepojí párování na jinou fakturu jen uuid → text se srovná.
+select set_config('foodtab.faktury_cesta', 'nova', false);
 update public.platby_faktury set faktura = :'fa' where id = :'stare_parovani';
+select set_config('foodtab.faktury_cesta', '', false);
 select pg_temp.check('změna jen uuid → text faktura_id se srovná',
   (select faktura_id from public.platby_faktury where id = :'stare_parovani') = :'fa');
 
@@ -677,6 +756,20 @@ select pg_temp.check('starou cestou zapsané párování má i uuid (faktura v h
   = 'a0000000-0000-4000-8000-000000000004');
 select app.faktury_prevod_zahajit(:'tenant', 'ctqtwahlzhyjerqulqyn.supabase.co', null) as stav_znovu \gset
 select pg_temp.check('z vráceného jde zahájit znovu → probiha', :'stav_znovu' = 'probiha');
+select pg_temp.check('nové zahájení: uuid faktur v párování vynulované, text zůstal',
+  not exists (select 1 from public.platby_faktury where tenant_id = :'tenant' and faktura is not null)
+  and exists (select 1 from public.platby_faktury where tenant_id = :'tenant' and stav = 'potvrzeno'
+                and faktura_id = 'a0000000-0000-4000-8000-000000000004'));
+-- Stará appka po vrácení fakturu smazala → převod ji musí smazat i tady,
+-- i když na ni vede párování (jinak cizí klíč a převod uvízne).
+set role service_role;
+select pg_temp.check('… převod pak smaže i fakturu s párováním',
+  pg_temp.projde($s$delete from public.faktury where id = 'a0000000-0000-4000-8000-000000000004'$s$));
+reset role;
+select pg_temp.check('během převodu: mimo přihlášeného jde párování jen odpojit (potvrdil, uuid), nic jiného',
+  pg_temp.projde(format('update public.platby_faktury set potvrdil = null where id = %L', :'stare_parovani'))
+  and pg_temp.spadne_hlaskou(format('update public.platby_faktury set castka_haleru = 1 where id = %L', :'stare_parovani'),
+    '42501', 'Během stěhování'));
 
 
 \echo ''
@@ -684,6 +777,23 @@ select pg_temp.check('z vráceného jde zahájit znovu → probiha', :'stav_znov
 
 reset role;
 select set_config('test.user_id', '', false);
+-- Cizí firma B: kopie s řádkem bez měny, převedená faktura, stav
+-- „dokonceno" — měření nesmí spadnout a zrušení celé firmy musí projít
+-- (kaskáda maže jako vlastník tabulky, ne jako převod).
+set role service_role;
+insert into public.faktury_prevod_zdroj (tenant_id, tabulka, klic, radek)
+values (:'tenant_b', 'invoices', 'b0000000-0000-4000-8000-000000000001', '{"currency": null, "amount": "1"}');
+reset role;
+select pg_temp.check('měření: řádek staré databáze bez měny měření neshodí',
+  pg_temp.projde(format('select app.faktury_prevod_mereni(%L)', :'tenant_b')));
+update public.faktury_prevod set stav = 'dokonceno' where tenant_id = :'tenant_b';
+-- Zvlášť příkaz a zvlášť kontrola (dotaz v témže příkazu by smazání neviděl).
+select pg_temp.projde(format('delete from public.tenants where id = %L', :'tenant_b')) as ok_pomocny \gset
+select pg_temp.check('zrušení celé firmy s fakturami a kopií projde i po dokončení převodu',
+  :'ok_pomocny'::boolean
+  and not exists (select 1 from public.faktury where tenant_id = :'tenant_b')
+  and not exists (select 1 from public.faktury_prevod_zdroj where tenant_id = :'tenant_b'));
+
 -- Stav probiha (výš): převodní mazání faktur a kopie je povolené.
 delete from storage.objects where bucket_id = 'faktury-prilohy' and name like :'tenant' || '/rucne/%';
 delete from public.faktury_prijem where pripojeni_id = :'schranka';
@@ -700,7 +810,8 @@ delete from public.memberships where id in (:'m_cte', :'m_pobocka', :'m_finance'
 delete from public.employees where id in (:'e_cte', :'e_pobocka', :'e_finance');
 delete from public.position_permissions where position_id in (:'poz_cte', :'poz_pobocka', :'poz_finance');
 delete from public.positions where id in (:'poz_cte', :'poz_pobocka', :'poz_finance');
--- Cizí firma, auth.users a profiles zůstávají (konvence krok30/krok73/krok89).
+-- Cizí firmu smazala kontrola výš (zrušení firmy); auth.users a profiles
+-- zůstávají (konvence krok30/krok73/krok89).
 
 select pg_temp.check('úklid: po scénáři nezůstala žádná faktura ani stav převodu',
   not exists (select 1 from public.faktury where tenant_id = :'tenant')

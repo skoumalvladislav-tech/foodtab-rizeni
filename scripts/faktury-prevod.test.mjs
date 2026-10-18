@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   MAPA_SLOUPCU,
+  casNaMikro,
   casNaMs,
   castkaNaHalere,
   cestaPrilohy,
@@ -113,7 +114,19 @@ console.log('\n1. Částka na celé haléře — přesně, nebo vůbec')
   ok('halereNaCastku(-5) = "-0.05"', halereNaCastku(-5) === '-0.05')
 }
 
-console.log('\n2. Čas na milisekundy — useknutí jako floor() v databázi')
+console.log('\n2. Čas na mikrosekundy (jako timestamptz) a na milisekundy')
+{
+  const mikro = BigInt(Date.UTC(2026, 8, 5, 10, 11, 12)) * BigInt(1000)
+  ok('mikrosekundy přesně (.123456)', casNaMikro('2026-09-05T10:11:12.123456+00:00') === mikro + BigInt(123456))
+  ok('.5 = 500 000 µs', casNaMikro('2026-09-05 10:11:12.5+00') === mikro + BigInt(500000))
+  ok('Z i +00:00 i +0000 je týž okamžik',
+    casNaMikro('2026-09-05T10:11:12.1Z') === casNaMikro('2026-09-05T10:11:12.100000+00:00')
+    && casNaMikro('2026-09-05T10:11:12.1+0000') === mikro + BigInt(100000))
+  ok('sedmé místo se usekne', casNaMikro('2026-09-05T10:11:12.1234569+00:00') === mikro + BigInt(123456))
+  ok('před rokem 1970 (záporné) — ms useknuté dolů jako floor()',
+    casNaMs('1969-12-31T23:59:59.9995+00:00') === -1)
+  ok('nesmysl → null', casNaMikro('včera') === null && casNaMikro(null) === null)
+}
 {
   const zaklad = Date.UTC(2026, 8, 5, 10, 11, 12)
   ok('mikrosekundy se useknou (.123999 → 123 ms, ne 124)', casNaMs('2026-09-05T10:11:12.123999+00:00') === zaklad + 123)
@@ -178,7 +191,7 @@ console.log('\n3. Převod řádku tam a zpátky')
   ok('id velkými písmeny → malými (jak ho vrací databáze)', velkeId.ok && velkeId.radek.id === 'a0000000-0000-4000-8000-00000000000f')
 }
 
-console.log('\n4. Tři zápisy kanonického textu — a prohozený sloupec spadne')
+console.log('\n4. Dva zápisy kanonického textu — a prohozený sloupec spadne')
 const DATA = [
   stary(),
   stary({ id: 'a0000000-0000-4000-8000-000000000002', amount: -350, currency: 'EUR', status: 'Nutná ruční kontrola (chybí IČO)', needs_review: null, is_duplicate: true, supplier_ico: null, pdf_url: null, onedrive_url: 'https://onedrive.live.com/x', due_date: null, reminder_sent_at: '2026-10-01T07:00:00.999999+00:00' }),
@@ -232,7 +245,13 @@ console.log('\n5. Porovnání po řádcích')
   ok('liší se řádek 3 v čase přijetí (jiná milisekunda)', r.lisi.some((x) => x.id === prevedene[2].id && x.pole.includes('prijato_kdy')))
   ok('řádek 1 se neliší', !r.lisi.some((x) => x.id === prevedene[0].id))
   ok('stejné sady: žádný rozdíl', (() => { const x = porovnat(prevedene, prevedene); return x.chybi.length + x.lisi.length + x.navic.length === 0 })())
-  ok('mikrosekundy pod milisekundu se nepočítají jako rozdíl', porovnat([prevedene[0]], [{ ...prevedene[0], prijato_kdy: '2026-09-05T10:11:12.123999+00:00' }]).lisi.length === 0)
+  // Databáze (app.faktury_prevod_porovnat) porovnává timestamptz na
+  // mikrosekundy. Kdyby JS sekal na milisekundy, takovou změnu by převod
+  // „neviděl", nepřepsal ji — a dokončení by ji v SQL odmítalo napořád.
+  ok('rozdíl pod milisekundu (jen v mikrosekundách) JE rozdíl — jako v databázi',
+    porovnat([prevedene[0]], [{ ...prevedene[0], prijato_kdy: '2026-09-05T10:11:12.123999+00:00' }]).lisi.length === 1)
+  ok('stejný okamžik jinak zapsaný (Z místo +00:00) rozdíl není',
+    porovnat([prevedene[0]], [{ ...prevedene[0], prijato_kdy: prevedene[0].prijato_kdy.replace('+00:00', 'Z') }]).lisi.length === 0)
 }
 
 console.log('\n6. Přílohy — stahuje se jen ze staré databáze')
