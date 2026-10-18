@@ -134,6 +134,25 @@ věcí. Všechny jsou opravené v tomhle PR:
 | Workflow při 503/500 s polem `chyba` (třeba chybí klíč na Vercelu) nevypsal důvod. | nízká | `chyba` v souhrnu i jako `::error::`; nová kontrola blok `run:` opravdu spustí (bash, podstrčený `curl`, skutečný jq) pro 200/503/500/401/ne-JSON/chybějící adresu. |
 | Hlášení, návod i workflow slibovaly odhalení „za pár hodin"; měření GitHubu ukazuje mezery až ~12 h. | nízká | Všude napsaná skutečná nejhorší latence (~12 h). |
 
+**Čísla po opravě (18. 10.):** `scripts/planovac.test.mjs` 213 kontrol
+s jq (202 bez — spuštění bloku `run:` se lokálně přeskočí),
+`scripts/provoz-granty.test.mjs` 249, `krok96` + `krok97` nad PGlite 64
+(krok97 nově 10), celá sada z workflow Aplikace 83 souborů bez pádu,
+`tsc --noEmit` a eslint bez chyb. Proti PostgreSQL 16 pustí scénáře CI.
+
+**Schválná rozbití oprav (10, každé spadlo):** bez odpovědi zase bez
+ohledu na stáří (3×, včetně průchodu adresou se zaseknutým pg_net);
+stáří „bez odpovědi" měřené proti mezeře plánu místo limitu volání
+(stejné 3); hlídání začátku vypnuté celé („začala o minutu později" +
+průchod adresou — chytí 15minutové úlohy, u kterých je volání vždycky
+čerstvé) a jen pro „nikdy nezačala" (1); chyby za 6 h nehodnocené (2);
+práh natvrdo 1 (1); text bez vysvětlení pro čerstvé zapnutí (1);
+`planovac_zdravi` bez revoke od authenticated (provoz-granty, 2); pravidlo
+pro authenticated vypnuté (3 kontroly kontroly); workflow bez `chyba` (2).
+Bod 4 a 6 jsem rozbil každý zvlášť schválně: zaseknutý pg_net u hodinové
+úlohy chytí bod 4, u patnáctiminutové jen bod 6 — jedna kontrola by
+druhou zakryla.
+
 **Spuštění bloku `run:` potřebuje jq.** V CI (ubuntu) je; lokálně na
 Windows ne — tam se kontrola viditelně přeskočí. Ověřil jsem ji tady
 s dočasnou náhradou jq mimo repo (umí jen filtry z workflow); skutečný jq
