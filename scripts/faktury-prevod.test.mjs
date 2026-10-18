@@ -271,20 +271,33 @@ console.log('\n7. Vzory odmítnutí')
 }
 
 // ---------------------------------------------------------------------
-// 8. Otisk JS = otisk databáze (krok99_scenar.sql)
+// 8. Převod v JS = porovnání v databázi (krok99_scenar.sql)
 // ---------------------------------------------------------------------
-const sqlText = (x) => (x === null || x === undefined ? 'null' : `'${String(x).replace(/'/g, "''")}'`)
+// Blok do scénáře: doslovná kopie starých řádků (jak je uloží úloha do
+// faktury_prevod_zdroj) a TÝŽ řádek převedený naRadekHlavni (jak ho
+// úloha vloží do faktury). Scénář pak chce od app.faktury_prevod_porovnat
+// nula rozdílů — porovnání v SQL je nezávislý zápis převodu, takže se
+// tím ověří, že oba zápisy říkají totéž. Data jdou přes JSON, ať se
+// znaky jako nový řádek nebo tabulátor nemusí přepisovat do SQL.
+const sqlJson = (objekt) => `'${JSON.stringify(objekt).replace(/'/g, "''")}'::jsonb`
 function blokProKrok99() {
   const prevedene = DATA.map((r) => naRadekHlavni(r, TENANT)).filter((v) => v.ok).map((v) => v.radek)
-  const sloupce = ['id', 'tenant_id', ...MAPA_SLOUPCU.map(([, n]) => n)]
-  const radky = prevedene.map((r) => `  (${sloupce.map((s) => (s === 'tenant_id' ? `:'tenant'` : typeof r[s] === 'boolean' || typeof r[s] === 'number' ? String(r[s]) : sqlText(r[s]))).join(', ')}, now())`)
-  const m = mereniZdroje(DATA, 0)
+  const sloupce = ['id', ...MAPA_SLOUPCU.map(([, n]) => n)]
+  const zdroj = DATA.map((r) => `  (:'tenant', 'invoices', '${r.id}', ${sqlJson(r)})`)
+  const faktury = prevedene.map((r) => {
+    const { tenant_id: _, ...bezFirmy } = r
+    return `  (${sqlJson(bezFirmy)})`
+  })
   return [
-    '-- DATA PRO OTISK (začátek) — generuje scripts/faktury-prevod.test.mjs --vypsat, ručně neupravovat',
-    `insert into public.faktury (${sloupce.join(', ')}, prevedeno_kdy) values`,
-    radky.join(',\n') + ';',
-    `select '${m.otisk_obsahu}' as otisk_obsahu_js, '${m.otisk_id}' as otisk_id_js \\gset`,
-    '-- DATA PRO OTISK (konec)',
+    '-- DATA PRO POROVNÁNÍ (začátek) — generuje scripts/faktury-prevod.test.mjs --vypsat, ručně neupravovat',
+    'insert into public.faktury_prevod_zdroj (tenant_id, tabulka, klic, radek) values',
+    zdroj.join(',\n') + ';',
+    `insert into public.faktury (tenant_id, prevedeno_kdy, ${sloupce.join(', ')})`,
+    `select :'tenant', now(), ${sloupce.map((s) => `r.${s}`).join(', ')}`,
+    '  from (values',
+    faktury.join(',\n'),
+    `  ) as v(j), jsonb_populate_record(null::public.faktury, v.j) as r;`,
+    '-- DATA PRO POROVNÁNÍ (konec)',
   ].join('\n')
 }
 
@@ -293,7 +306,7 @@ if (process.argv.includes('--vypsat')) {
   process.exit(0)
 }
 
-console.log('\n8. Otisk z JS = otisk, který ověřuje databáze (krok99_scenar.sql)')
+console.log('\n8. Převod v JS = porovnání v databázi (krok99_scenar.sql)')
 {
   const soubor = fileURLToPath(new URL('../supabase/tests/krok99_scenar.sql', import.meta.url))
   const scenar = existsSync(soubor) ? readFileSync(soubor, 'utf8').replace(/\r\n/g, '\n') : ''
