@@ -330,6 +330,22 @@ select pg_temp.check('jiný počet ve staré databázi (5 ≠ 4): dokončení od
   (:'dokonceni'::jsonb ->> 'ok')::boolean = false
   and app.faktury_stav_prevodu(:'tenant') = 'probiha');
 
+-- Převedená faktura se liší od kopie staré databáze → dokončení odmítne
+-- (porovnání pole po poli v SQL, ne jen počty).
+set role service_role;
+update public.faktury set poznamka_kontroly = 'jinak', prevedeno_kdy = clock_timestamp()
+ where id = 'a0000000-0000-4000-8000-000000000003';
+reset role;
+select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
+select pg_temp.check('převedená faktura se liší od kopie: dokončení odmítnuto (pole po poli)',
+  (:'dokonceni'::jsonb ->> 'ok')::boolean = false
+  and (:'dokonceni'::jsonb -> 'porovnani' ->> 'lisi')::int = 1
+  and app.faktury_stav_prevodu(:'tenant') = 'probiha');
+set role service_role;
+update public.faktury set poznamka_kontroly = null, prevedeno_kdy = clock_timestamp()
+ where id = 'a0000000-0000-4000-8000-000000000003';
+reset role;
+
 select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
 select pg_temp.check('nezkopírované přílohy (2 ze 3): dokončení odmítnuto',
   (:'dokonceni'::jsonb ->> 'ok')::boolean = false
@@ -644,6 +660,18 @@ select pg_temp.check('po vrácení stará cesta párování funguje (předchozí
     :'tenant', :'t1', 'a0000000-0000-4000-8000-000000000004')));
 reset role;
 select set_config('test.user_id', '', false);
+-- Stará cesta s id faktury CIZÍ firmy: spoušť odkazu ji nedohledá
+-- (filtr na firmu), párování zůstane bez uuid — a cizí klíč tak nemá co
+-- odmítnout. Bez filtru by uuid dohledala a zápis by spadl.
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('po vrácení: stará cesta s id faktury cizí firmy zapíše, ale uuid nedohledá',
+  pg_temp.projde(format('select * from public.potvrdit_alokaci_platby(%L, %L, %L, 500, 9999999)',
+    :'tenant', :'t1', :'cizi_faktura')));
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('… párování na cizí fakturu má uuid prázdné',
+  (select faktura from public.platby_faktury where transakce_id = :'t1' and faktura_id = :'cizi_faktura') is null);
 select pg_temp.check('starou cestou zapsané párování má i uuid (faktura v hlavní databázi je)',
   (select faktura from public.platby_faktury where transakce_id = :'t1' and stav = 'potvrzeno' and zpusob = 'rucne' and castka_haleru = 1000)
   = 'a0000000-0000-4000-8000-000000000004');

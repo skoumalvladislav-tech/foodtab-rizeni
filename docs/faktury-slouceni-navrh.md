@@ -3,151 +3,131 @@
 **Zadání:** Šéfík 18. 10. 2026: „potřebuji sloučit apku faktury s apkou foodtab".
 Navazuje na otázku 45 (8. 10.: „přestěhovat faktury z odděleného projektu
 do appky?") a 46 (veřejný kbelík s PDF). Tím, že chce sloučení, je 45
-rozhodnutá — „ano". Způsob přepnutí rozhoduje tenhle dokument; co zbývá
-na Šéfíkovi, je v `docs/hlaseni/otazky.md` (otázky 58–62).
+rozhodnutá — „ano". Co zbývá na Šéfíkovi: `docs/hlaseni/otazky.md`, 58–63.
+Hlášení: `docs/hlaseni/stav-2026-10-18-faktury-slouceni.md`.
+
+Návrh prošel dvěma nezávislými kontrolami před psaním kódu (bezpečnost
+databáze; bezpečnost přepnutí dat) — 27 nálezů, zapracované. Hotový kód
+prošel další trojicí kontrol (viz hlášení).
 
 ## 1. Co je dnes „apka faktury"
 
 | Část | Kde | Stav k 18. 10. |
 |---|---|---|
-| Původní samostatná appka | repo `skoumalvladislav-tech/faktury-app` (klon `C:\Users\vladi\faktury-app`), vlastní Vercel projekt | obrazovky převzaté do Foodtabu 15. 9. (`/finance/faktury`), sama se už nevyvíjí |
-| Data | Supabase projekt `ctqtwahlzhyjerqulqyn` (eu-north-1): `invoices` (3 020 řádků), `rejection_examples` (1), kbelík `faktury-pdf` (veřejný) | RLS „allow all" pro anon klíč, bez `tenant_id`, do projektu se nikdo nepřihlásí |
-| Spojení z Foodtabu | `lib/supabase/faktury.ts` (anon klíč, `FAKTURY_SUPABASE_URL/_ANON_KEY`), brána `FAKTURY_DB_TENANT_ID` | jediná izolace firem je ta brána v aplikaci |
-| Příjem z e-mailu | `lib/faktury-prijem-*.ts`, úloha `faktury-z-emailu` (GitHub Actions) | evidence `faktury_prijem` a soukromý kbelík `faktury-prilohy` už JSOU v hlavní DB, faktury ale zapisuje do `invoices` v oddělené |
-| n8n | workflow `bbHArwVIUQBDNPuI` | vypnutý, naposledy zapsal 5. 9. 2026, **nezapínat** |
-| Vazby v hlavní DB | `platby_faktury.faktura_id text`, `faktury_prijem.faktura_id text` (+ nepoužívané `prijemky.faktura_id` volný text, `vybaveni.faktura_id`, `ingredient_purchase_prices.source_invoice_id`) | bez FK — mezi dvěma databázemi nejde |
+| Původní samostatná appka | repo `skoumalvladislav-tech/faktury-app` (klon `C:\Users\vladi\faktury-app`), vlastní Vercel projekt, **bez přihlášení**, veřejný klíč v prohlížeči | obrazovky převzaté do Foodtabu 15. 9. (`/finance/faktury`); pořád ale může do staré databáze zapisovat (otázka 58, bod 1) |
+| Data | Supabase projekt `ctqtwahlzhyjerqulqyn`: `invoices` (3 020 řádků 18. 10.), `rejection_examples` (1), kbelík `faktury-pdf` (veřejný) | RLS „allow all" pro veřejný klíč, bez `tenant_id`, do projektu se nikdo nepřihlásí |
+| Spojení z Foodtabu | `lib/supabase/faktury.ts` (veřejný klíč, `FAKTURY_SUPABASE_URL/_ANON_KEY`), brána `FAKTURY_DB_TENANT_ID` | izolace firem jen v aplikaci |
+| Příjem z e-mailu | `lib/faktury-prijem-*.ts`, úloha `faktury-z-emailu` | evidence a soukromý kbelík `faktury-prilohy` v hlavní DB; faktury zapisoval do staré |
+| n8n | workflow `bbHArwVIUQBDNPuI` | vypnutý od 5. 9. 2026, **nezapínat** |
+| Vazby v hlavní DB | `platby_faktury.faktura_id text`, `faktury_prijem.faktura_id text` (+ `prijemky.faktura_id` volný text, `vybaveni.faktura_id`, `source_invoice_id` nepoužívané) | bez cizího klíče |
 
-## 2. Cílový stav
+## 2. Cílový stav (migrace `20261018100000_faktury_v_hlavni_databazi.sql`)
 
-Jedna aplikace, jedna databáze. Faktury jsou tabulky v hlavní DB Foodtabu
-se stejnými pravidly jako zbytek Financí:
+- `public.faktury` — přijaté faktury, česká jména sloupců, částka
+  **`castka_haleru integer`**, `tenant_id`, `id` zachované ze staré databáze.
+- `public.faktury_vzory_odmitnuti` — dřív `rejection_examples`, s firmou.
+- `public.faktury_prevod` — stav převodu za firmu (`probiha` → `dokonceno`
+  → případně `vraceno`), měření, nepovedené přílohy, zámek úlohy.
+- `public.faktury_prevod_zdroj` — **doslovná kopie** řádků staré databáze:
+  základ pro porovnání pole po poli, pro návrat zpět a záloha (otázka 45).
+- **Skutečné cizí klíče** `platby_faktury.faktura`, `faktury_prijem.faktura`
+  → `faktury(tenant_id, id)`: odkaz na fakturu cizí firmy odmítne databáze.
+  Fakturu s párováním nejde smazat (dřív zůstal viset text).
+- **RLS jen za celou firmu** (`faktury.read` čte, `faktury.manage` mění),
+  počítané jednou za dotaz (`app.firmy_s_pristupem`), ne pro každý řádek.
+  Nově za celou firmu i přílohy a evidence příjmu (otázka 59).
+- **Brána podle stavu převodu — v databázi, pro všechny role**
+  (`app.faktury_brana`): zapisovat do faktur jde jen u firmy ve stavu
+  `dokonceno`; úloha převodu jen ve stavu `probiha`; párování plateb se
+  během převodu nemění (`app.platby_faktury_brana`).
+- **Párování v jedné transakci:** `sparovat_platbu_s_fakturou`,
+  `zrusit_parovani_faktury`, `automaticky_sparovat_fakturu` si částku
+  faktury čtou samy a stav přepnou ve stejné transakci (dřív best-effort
+  zápis do druhé databáze). Faktura v cizí měně nebo bez částky: stav
+  se nezmění (otázka 61).
+- **Přílohy:** soukromý kbelík `faktury-prilohy`; kopie ze staré
+  databáze pod otiskem obsahu (zapisuje jen úloha), ruční nahrání do
+  `<firma>/rucne/` — podvrhnout soubor pod cizí otisk nejde.
 
-- `public.faktury` — přijaté faktury. Česká jména sloupců (modul Finance je
-  česky, CLAUDE.md „uvnitř modulu se jazyky nemíchají"), částka
-  **`castka_haleru integer`** (pravidlo peníze v haléřích), `tenant_id`.
-- `public.faktury_vzory_odmitnuti` — dřívější `rejection_examples`, nově s `tenant_id`.
-- `public.faktury_prevod` — stav přestěhování za firmu (brána, měření, návrat).
-- **Skutečné cizí klíče** `platby_faktury.faktura` a `faktury_prijem.faktura`
-  → `faktury(tenant_id, id)`. Složený klíč s `tenant_id` znamená, že
-  párování ani evidence nemůže ukázat na fakturu CIZÍ firmy — hlídá to
-  databáze sama, ne spoušť, kterou by šlo obejít.
-- RLS: číst `faktury.read`, měnit `faktury.manage`, **obojí jen za celou
-  firmu** (`app.has_access(tenant_id, …, null)`) — přesně jako dnešní
-  aplikace (`pripravit(…, TENANT_SCOPE_SEGMENT)`) a Finance po pobočkách
-  (otázka 48, bod 4 a 7).
-- Granty revoke→grant: `revoke all … from anon, authenticated`, pak
-  jmenovitě, co `authenticated` smí. `service_role` jen to, co potřebují úlohy.
-- Párování plateb **v jedné transakci**: nové funkce
-  `sparovat_platbu_s_fakturou` / `zrusit_parovani_faktury` /
-  `automaticky_sparovat_fakturu` si částku faktury čtou samy z databáze
-  (dřív ji musel dodat volající, protože žila jinde) a stav faktury
-  („Uhrazeno" / „Částečně uhrazeno") přepnou ve stejné transakci —
-  dřív to byl „best-effort" zápis do druhé databáze, který mohl nevyjít.
-- PDF: soukromý kbelík `faktury-prilohy` (už existuje), odkaz přes appku
-  s kontrolou práva. Staré veřejné odkazy se zkopírují.
-
-Co se schválně **nedělá**:
-
-- Faktury **nedostávají pobočku**. Na pobočce zůstávají schované jako dnes.
-  Přiřazování pobočkám je otázka 59 (sloupec se přidá, až bude jasné pravidlo).
-- `prijemky.faktura_id` je **volný text, který píše člověk** (číslo faktury
-  z papíru), ne id — převod na FK by byl hádání. `vybaveni.faktura_id`
-  a `source_invoice_id` nikdo nezapisuje. Zůstávají, jak jsou (otázka 61).
-- Cashflow výhled faktury **nezapočítává** do čísel — předpisy plateb
-  (nájem, energie) a faktury za totéž by se sečetly dvakrát. Neuhrazené
-  faktury se ukazují vedle výhledu jako samostatný údaj (otázka 60).
-- Stavy faktur zůstávají textové (jak je psal n8n i příjem). Pevný výčet
-  by převod na starých datech shodil.
+Schválně se **nedělá**: pobočky faktur (otázka 59), Faktury pro další
+firmy (otázka 60), cizí klíč u příjemek/vybavení (otázka 62), pevný výčet
+stavů, limity délky převzatých textů, započítání faktur do cashflow
+výhledu (předpisy plateb a faktury za totéž by se sečetly dvakrát).
 
 ## 3. Proč dvě migrace a ne jedna
 
-Data jde zkopírovat jen přes úlohu (anon klíč ke staré DB má jen appka).
-Migrace běží dřív, než data existují. Proto:
+1. **Rozšíření (tahle PR)** jen přidává. Staré textové `faktura_id`
+   a staré funkce párování zůstávají, aby po návratu zpět fungovala
+   předchozí verze appky. Po dokončení převodu je databáze zavře
+   (`app.platby_faktury_brana`), po vrácení zase otevře.
+2. **Úklid** (`docs/faktury-slouceni-uklid.sql`, samostatná PR po zkušební
+   době) — `faktura` povinné, staré sloupce a funkce pryč, staré spojení
+   pryč. Nesmí do `main` dřív než převod: `db push` by ho pustil hned.
 
-1. **Rozšíření (tahle PR, `20261018100000_faktury_v_hlavni_databazi.sql`)**
-   — jen přidává: nové tabulky, nové funkce, nové sloupce `faktura uuid`
-   (zatím nepovinné). Staré sloupce `faktura_id text` a staré funkce
-   (`potvrdit_alokaci_platby`, `automaticky_sparovat_platbu`) zůstávají
-   **beze změny**. Starý kód (při návratu zpět) proto funguje dál.
-   Spoušť drží `faktura_id` a `faktura` v souladu oběma směry, takže
-   i starý kód po návratu plní cizí klíč, kde faktura existuje.
-2. **Úklid (samostatná PR až po zkušební době, návrh v
-   `docs/faktury-slouceni-uklid.sql`)** — `faktura` povinné, staré textové
-   sloupce a staré funkce pryč, `lib/supabase/faktury.ts` a úloha převodu pryč.
-   Nesmí do `main` dřív, než převod proběhne: `db push` by ji pustil
-   spolu s první a cizí klíče by spadly na ještě neexistujících fakturách.
-
-## 4. Převod dat (úloha `faktury-prevod`)
+## 4. Úloha převodu
 
 Spouští **jen Šéfík**: GitHub → Actions → „Faktury — převod do hlavní
-databáze" → Run workflow, s volbou režimu. Úloha
-`/api/uloha/faktury-prevod` (Bearer `CRON_SECRET`, jako ostatní úlohy).
-Výstup v logu jsou jen souhrnná čísla — repozitář je veřejný.
+databáze" → Run workflow, krok + potvrzení (napsat název kroku). Adresa
+`/api/prevod-faktur` (Bearer `CRON_SECRET`, mimo `/api/uloha` — plánovač
+ji nezná). Do veřejného logu jdou jen čísla.
 
-| Režim | Co dělá | Zapisuje? |
+| Krok | Smí ve stavu | Co dělá |
 |---|---|---|
-| `nanecisto` (výchozí) | přečte starou DB, spočítá měření a rozdíly proti hlavní | nic |
-| `zahajit` | zavře Faktury pro vlastníka (stav `probiha`), zapíše měření zdroje | `faktury_prevod` |
-| `prevest` | srovná hlavní DB se starou: vloží chybějící, opraví odlišné, smaže převedené, které ve staré už nejsou. Opakovatelné, nic nezdvojí (klíč = původní `id`) | `faktury`, `faktury_vzory_odmitnuti` |
-| `prilohy` | zkopíruje PDF ze starého veřejného kbelíku do soukromého, po dávkách; pokračuje, kde skončil | úložiště + `faktury.priloha_cesta` |
-| `dokoncit` | databáze sama spočítá měření převedených dat a porovná je se zdrojem; doplní cizí klíče u párování a evidence; když cokoli nesedí, **odmítne** a nic nezmění | `faktury_prevod` → `dokonceno`, `faktura` v párování a evidenci |
-| `vratit` | zavře Faktury (stav `vraceno`), aby se v hlavní DB už nic neměnilo | `faktury_prevod` |
-| `zpet_nanecisto` / `zpet` | rozdíly hlavní → stará; `zpet` je zapíše do staré DB (vložit, opravit, smazat) | stará DB |
+| `nanecisto` | kdykoli | jen čte: anomálie, rozdíly, měření, visící párování; po dokončení i „změnilo se ve staré od převodu" |
+| `zahajit` | bez řádku, `vraceno` | Faktury firmy se zavřou; odmítne, když jsou anomálie nebo 0 faktur |
+| `prevest` | `probiha` | kopie staré databáze + vložení / oprava / smazání faktur, opakovatelné; víc než 20 mazání jen s volbou |
+| `prilohy` | `probiha`, `dokonceno` | PDF ze starého veřejného kbelíku do soukromého, po dávkách; odkazy příjmu z e-mailu se nestahují (vedou na appku), vezme se soubor evidence |
+| `dokoncit` | `probiha` | stará databáze se od posledního převodu nesmí změnit; databáze porovná každou fakturu pole po poli, počty, přílohy; teprve pak `dokonceno` a doplní cizí klíče |
+| `vratit` | `dokonceno` | Faktury v appce se zavřou, stará cesta párování se otevře |
+| `zpet_nanecisto` / `zpet` | `vraceno` | tři strany (kopie z dokončení, appka, stará): přenese jen změny z appky; co se změnilo i ve staré, je konflikt a nepřepíše se |
 
-Pravidla převodu (`lib/faktury-prevod.ts`, čistá funkce, testovaná):
+Pravidla převodu řádku (`lib/faktury-prevod.ts`): `id` se zachová; částka
+na celé haléře **přesně, nebo anomálie**; text, data a stav beze změny;
+prázdné příznaky → `false` (vykáže se); převedené řádky spoušť duplicit
+neoznačuje (podle převodní značky). Čtení staré databáze po stránkách
+podle id, ale počet se ověřuje zvlášť (`count=exact`) — krátké čtení by
+jinak vypadalo jako „faktura ve staré databázi není" a převod by mazal.
 
-- `id` se zachovává → párování plateb a evidence příjmu zůstávají platné.
-- Částka: `amount` × 100 musí vyjít na celý haléř a vejít se do `integer`,
-  jinak je řádek **anomálie** a převod se nedokončí (nic se nezaokrouhlí potichu).
-- Textová pole, data, stav: beze změny. Prázdné příznaky (`null` u
-  `needs_review`/`is_duplicate`/`is_archived`) → `false`, počet se vykáže
-  (aplikace je i dnes čte jako `=== true`).
-- Spoušť „Duplicitní – zkontrolovat" se na převáděné řádky **nevolá** —
-  jinak by převod sám přepsal stav u 216 duplicit.
-- Zpětný převod je přesná inverze (test: stará → nová → stará = stejný řádek).
+**Bez dvojího započítání:** klíč je původní `id`, kopie se srovnává
+porovnáním; párování plateb se nekopíruje (už v hlavní databázi jsou),
+jen se jim doplní uuid faktury. `docs/hlaseni/faktury-prevod-mereni.sql`
+to měří před a po.
 
-**Bez dvojího započítání:** klíčem je původní `id` (vložení `on conflict
-do nothing`, rozdíly přes porovnání polí), takže opakovaný běh nic
-nezdvojí. Párování plateb se převodem nekopíruje vůbec — ta už
-v hlavní DB jsou. Měří se, že jejich počet a součet se převodem nezmění.
+## 5. Brána v appce (`lib/faktury-pristup.ts`, `lib/faktury-brana.ts`)
 
-## 5. Brána během přestěhování
-
-`lib/faktury-pristup.ts` nahrazuje `lib/supabase/faktury.ts` všude
-kromě úlohy převodu (test `faktury-tenant-izolace` to hlídá).
-
-- Firma z `FAKTURY_DB_TENANT_ID` (vlastník staré DB) vidí Faktury, jen když
-  je převod `dokonceno`. Jinak hláška „Faktury se stěhují" — a příjem
-  z e-mailu i automatické párování ji přeskočí (nic nezapíšou do napůl
-  převedených dat; evidence a kurzor schránky zůstanou, doženou se potom).
-- Ostatní firmy (nemají co stěhovat) mají Faktury hned — prázdné, vlastní.
-- Stav `vraceno` zavře Faktury i vlastníkovi.
+Faktury jsou otevřené jen ve stavu `dokonceno`. Jinak věta: „připravují
+se" (kód je venku dřív než `db push`), „stěhují se" (vlastník staré
+databáze), „vrácené", „zatím nejsou zapnuté" (ostatní firmy). Příjem
+z e-mailu a automatické párování zavřenou firmu přeskočí (schránku ani
+nečtou). Dnes a upozornění ve Financích během stěhování řeknou, že se
+Faktury stěhují (ne „nic po splatnosti"). Každý dotaz nese firmu
+(`fakturyFirmy`).
 
 ## 6. Plán přepnutí (kroky pro Šéfíka)
 
-0. Sloučit PR do `main` (Vercel nasadí). **Faktury se pro Foodtab zavřou**
-   („stěhují se") — od teď do staré DB nikdo nezapisuje.
-1. `supabase db push` (migrace `20261018100000`).
-2. Actions → převod, režim `nanecisto` → zkontrolovat čísla.
-3. `zahajit`, `prevest`, znovu `nanecisto` (rozdíly musí být 0).
-4. `prilohy` (opakovat, dokud hlásí `zbyva > 0`).
-5. `dokoncit` → Faktury se otevřou. Zkontrolovat obrazovky (počty faktur
-   na Přehledu, Seznamu a v Platbách sedí s krokem 2).
-6. Zkušební doba (otázka 62 — navrhuju 14 dní a jeden měsíční export
-   pro účetní). Stará DB zůstává netknutá.
-7. Úklid: PR s `docs/faktury-slouceni-uklid.sql` + smazat
-   `FAKTURY_SUPABASE_URL`, `FAKTURY_SUPABASE_ANON_KEY`, `FAKTURY_DB_TENANT_ID`
-   ve Vercelu = druhé spojení je vypnuté. Starý projekt nechat zálohou
-   (nebo smazat — otázka 62).
+**Předem:** pozastavit `faktury-app` ve Vercelu, smazat `FAKTURY_SUPABASE_*`
+z Preview a Development, n8n nechat vypnuté (otázka 58, bod 1).
 
-Odstávka Faktur: od kroku 0 do kroku 5, odhadem 30–60 minut (PDF jsou
-nejdelší, ale krok 5 na ně nečeká — dokud se nezkopírují, vede odkaz na
-starý veřejný soubor).
+0. Sloučit PR do `main` (Vercel nasadí). Faktury: „připravují se".
+1. `supabase db push` (migrace `20261018100000`). Faktury: „stěhují se".
+2. Krok `nanecisto` → anomálie 0? Zapsat si čísla (stara_faktur…).
+3. `zahajit` → `prevest` (opakovat, dokud „pokracovat").
+4. `prilohy` (opakovat, dokud „pokracovat"; nepovedené přílohy si přečíst).
+5. `nanecisto` → chybi = lisi = navic = 0.
+6. `dokoncit` → Faktury se otevřou. Zkontrolovat počty na Přehledu,
+   Seznamu a v Platbách proti kroku 2; pustit měřicí SQL.
+7. Zkušební doba (navrhuju 7 dní, otázka 58, bod 5); každé 2–3 dny `nanecisto`.
+8. Úklid (`docs/faktury-slouceni-uklid.sql`) — druhé spojení vypnuté.
+
+Odstávka Faktur: od kroku 0 do kroku 6, odhadem 30–60 minut.
 
 ## 7. Návrat zpět
 
 | Kdy | Jak |
 |---|---|
-| Před `dokoncit` | Vercel → Deployments → předchozí nasazení → „Instant Rollback". Stará DB je netknutá, nic se nevrací. Nové tabulky zůstanou prázdné/napůl, nikomu nevadí. |
-| Po `dokoncit`, před úklidem | 1) `vratit` (zastaví změny v hlavní DB), 2) `zpet_nanecisto` (co se od přepnutí změnilo), 3) `zpet` (zapíše to do staré DB), 4) Vercel „Instant Rollback". Párování plateb mají díky spoušti vyplněné i staré textové `faktura_id`, starý kód je přečte. |
-| Po úklidu | Návrat už jen ze zálohy — proto úklid až po zkušební době. |
+| Před `dokoncit` | Revert PR v `main` (Faktury se vrátí na starou databázi, ta je netknutá). Nové tabulky zůstanou, nikomu nevadí. |
+| Po `dokoncit`, před úklidem | 1) `vratit`, 2) `zpet_nanecisto`, 3) `zpet` (opakovat, dokud nehlásí 0 k přenesení; konflikty rozhodne člověk), 4) revert PR v `main`. Párování mají vyplněné i staré textové `faktura_id`, předchozí verze appky je přečte a stará cesta párování je ve stavu `vraceno` otevřená. |
+| Po úklidu | Jen ze zálohy — proto úklid až po zkušební době. |
+
+Vercel „Instant Rollback" jen v nouzi: po něm Vercel přestane sám
+nasazovat `main` (otázka 58, bod 6).
