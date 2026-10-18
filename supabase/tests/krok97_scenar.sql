@@ -9,7 +9,8 @@
 --      nic v cronu;
 --   2. s napodobeninami `cron` a `net`: stále PŘESNĚ app.planovac_stav()
 --      (žádná vlastní logika, která by se rozešla) — úloha v cronu,
---      poslední volání a kód odpovědi;
+--      poslední volání a kód odpovědi; volání bez odpovědi (zaseknutý
+--      pg_net) databáze vykáže jako „zatím bez odpovědi" s chyb_6h 0;
 --   3. service_role stav přečte JEN přes planovac_zdravi, app.planovac_stav
 --      napřímo ne;
 --   4. práva: anon ani authenticated planovac_zdravi nespustí.
@@ -71,8 +72,21 @@ insert into net._http_response (id, status_code, created) values (970001, 401, n
 select pg_temp.check('pokladna: v cronu, poslední kód 401, 1 chyba za 6 h',
   (select v_cronu and posledni_kod = 401 and chyb_6h = 1 and posledni_volani is not null
      from public.planovac_zdravi() where uloha = 'pokladna-synchronizace'));
+-- Zaseknutý pg_net: volání před 20 min, odpověď žádná. Databáze to
+-- vykáže jako „zatím bez odpovědi" a do chyb_6h to NEPOČÍTÁ — rozpoznat
+-- to musí hlídač podle stáří volání (lib/planovac-hlidac.ts, bod 4).
+insert into cron.job (jobname, schedule, command)
+values ('foodtab-uloha-zapomenuty-odchod', '5 * * * *', $c$select app.spustit_ulohu('zapomenuty-odchod')$c$);
+insert into app.planovac_volani (request_id, uloha, zavolano_kdy)
+values (970002, 'zapomenuty-odchod', now() - interval '20 minutes');
+
+select pg_temp.check('volání před 20 min bez odpovědi → „zatím bez odpovědi", kód NULL, chyb_6h 0',
+  (select posledni_chyba = 'zatím bez odpovědi' and posledni_kod is null and chyb_6h = 0 and volani_6h = 1
+          and posledni_volani < now() - interval '19 minutes'
+     from public.planovac_zdravi() where uloha = 'zapomenuty-odchod'));
+
 select pg_temp.check('ostatní úlohy v cronu nejsou',
-  (select count(*) = 8 from public.planovac_zdravi() where not v_cronu));
+  (select count(*) = 7 from public.planovac_zdravi() where not v_cronu));
 select pg_temp.check('pořád přesně app.planovac_stav()',
   (select jsonb_agg(to_jsonb(t) order by t.uloha) from public.planovac_zdravi() t)
   = (select jsonb_agg(to_jsonb(t) order by t.uloha) from app.planovac_stav() t));

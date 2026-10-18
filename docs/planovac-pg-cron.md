@@ -156,21 +156,30 @@ nové.
    | Sloupec | Co má být |
    |---|---|
    | `v_cronu` | `true` u všech 9 |
-   | `posledni_volani` | čas posledního volání z databáze |
+   | `posledni_volani` | čas posledního volání z databáze — za 20 minut ho mají jen úlohy, které už přišly na řadu (po 15 a 30 minutách); hodinové do hodiny, **banka až do 4 hodin** |
    | `posledni_kod` | `200`. **`401` = tajemství ve Vaultu nesedí s Vercelem.** |
    | `posledni_chyba` | prázdné |
    | `posledni_zacatek` | kdy úloha naposledy opravdu začala (z databáze i z GitHubu) |
    | `volani_6h`, `chyb_6h` | počty za 6 h (déle si pg_net odpovědi nedrží) |
 
-   Totéž bez SQL Editoru: GitHub → Actions → **Plánovač — hlídač** →
-   *Run workflow* (oddíl 7). Zelená = všech 9 úloh v pořádku.
+   **Hlídač (oddíl 7) pusť až zhruba 4,5 hodiny po `naplanovat_ulohy()`**
+   — teprve pak má každá úloha za sebou první volání. Dřív bude červený
+   s textem „databáze ji za posledních 6 h nezavolala — hned po zapnutí
+   plánovače je to normální…": to není porucha, ani e-mail od plánovaného
+   běhu hlídače z téhle doby. Potom: GitHub → Actions → **Plánovač —
+   hlídač** → *Run workflow*. Zelená = všech 9 úloh volaných včas,
+   s odpovědí 200, nejvýš jednou chybou za 6 h a úloha v aplikaci opravdu
+   začíná.
 
-8. **Za 2–3 dny**, když je hlídač zelený: samostatný PR, který z GitHub
-   workflow úloh odstraní `schedule` (ruční `workflow_dispatch` zůstane).
-   Pak rozhoduje o čase jen databáze. Kontrola `scripts/planovac.test.mjs`
-   v tu chvíli potřebuje upravit (dnes hlídá, že GitHub plánuje totéž).
-   **Bez hlídače (oddíl 7) to nedělat** — zastavený plánovač by nikdo
-   nepoznal.
+8. **Za 2–3 dny**, když je hlídač zelený **a** `chyb_6h` je 0 u všech
+   úloh (`select * from app.planovac_stav();`): samostatný PR, který
+   z GitHub workflow úloh odstraní `schedule` (ruční `workflow_dispatch`
+   zůstane). Pak rozhoduje o čase jen databáze. Kontrola
+   `scripts/planovac.test.mjs` v tu chvíli potřebuje upravit (dnes hlídá,
+   že GitHub plánuje totéž). **Bez hlídače (oddíl 7) to nedělat** —
+   zastavený plánovač by nikdo nepoznal. A počítat s tím, že i s hlídačem
+   se zastavení pozná až za několik hodin, v nejhorším případě zhruba za
+   12 (oddíl 7).
 
 **Vypnutí** kdykoli, bez db push:
 
@@ -203,24 +212,38 @@ Migrace `20261017100000_planovac_hlidac.sql`, adresa `/api/planovac/hlidac`,
 workflow `.github/workflows/planovac-hlidac.yml`, rozhodování
 v `lib/planovac-hlidac.ts`, scénář `krok97`.
 
-GitHub ho spouští několikrát denně (plán každé 3 h; GitHub ho stejně pustí
-méně často a pozdě — na hlídání to stačí) a jde pustit ručně: Actions →
-**Plánovač — hlídač** → *Run workflow*. Zeptá se aplikace a ta databáze
-(`public.planovac_zdravi()` = totéž co `app.planovac_stav()`, jen pro
-service_role).
+Plán má každé 3 h a jde pustit ručně: Actions → **Plánovač — hlídač** →
+*Run workflow*. Zeptá se aplikace a ta databáze (`public.planovac_zdravi()`
+= totéž co `app.planovac_stav()`, jen pro service_role).
+
+**Jak rychle se zastavení pozná:** hlídač sám běží na GitHubu, a ten ho
+podle vlastního měření (oddíl 1) pustí jen asi 4× denně s mezerami **až
+~12 hodin**. V nejhorším případě se tedy zastavený plánovač pozná zhruba
+za 12 hodin — ne za pár. S tím se počítá i při vypnutí `schedule` u úloh
+(krok 8). Rychlejší by byl externí monitoring adresy hlídače (služba,
+která ji volá třeba každých 15 minut a pošle e-mail při 503) — znamená
+ale nového dodavatele a CRON_SECRET u něj, proto zatím ne.
 
 **Zčervená a GitHub pošle e-mail**, když u některé úlohy:
 
 - není naplánovaná v pg_cronu (nikdo nespustil `app.naplanovat_ulohy()`),
 - databáze ji nezavolala déle, než je nejdelší mezera v jejím plánu
-  + 10 minut (třeba hodinová úloha víc než 70 minut),
+  + 10 minut (třeba hodinová úloha víc než 70 minut), nebo za 6 h vůbec
+  (hned po zapnutí normální, viz krok 7),
 - poslední odpověď nebyla 200 — **401 znamená, že tajemství ve Vaultu
   nesedí s `CRON_SECRET` na Vercelu**,
-- poslední volání vypršelo nebo spadlo na síti,
+- poslední volání vypršelo nebo spadlo na síti, **nebo je bez odpovědi
+  déle než 15 minut** — pg_net musí odpovědět do 5 minut; starší volání
+  bez odpovědi znamená, že pg_net požadavky neodesílá (v SQL Editoru
+  `select net.check_worker_is_up();`, oprava `select net.worker_restart();`),
+- za 6 h vrátila **2 a víc chyb**, i když poslední volání vyšlo,
+- volání chodí, ale úloha v aplikaci naposledy **začala** déle, než je
+  mezera v plánu + 10 minut (zaseknutý zámek, adresa vede jinam),
 
-a taky když migrace hlídače ještě není nasazená. V logu běhu je u každého
-problému řádek s jménem úlohy a důvodem (jen jména, kódy a minuty —
-repozitář je veřejný). Podrobnosti pak `select * from app.planovac_stav();`.
+a taky když migrace hlídače ještě není nasazená nebo adresa nemůže stav
+přečíst (důvod je v logu). V logu běhu je u každého problému řádek
+s jménem úlohy a důvodem (jen jména, kódy, počty a minuty — repozitář je
+veřejný). Podrobnosti pak `select * from app.planovac_stav();`.
 
 **Dokud plánovač v Supabase nezapneš, bude hlídač červený** („není
 naplánovaná v pg_cronu" u všech 9 úloh). To je správně — říká přesně to,

@@ -10,10 +10,12 @@
 - **Proto jsem ještě nevypnul `schedule` na GitHubu.** Kdyby pg_cron
   neběžel, zastavily by se všechny úlohy a nikdo by to nepoznal: pg_cron
   na rozdíl od GitHubu nikomu nepíše.
-- **Hotový je hlídač** (PR níž): workflow, které se několikrát denně zeptá
-  aplikace, jestli databáze volá všech 9 úloh a jestli dostávají 200.
-  Když ne, zčervená a GitHub pošle e-mail. Je to zároveň ten důkaz, že
-  plánovač běží — a podmínka pro vypnutí `schedule`.
+- **Hotový je hlídač** (PR #145): workflow, které se několikrát denně zeptá
+  aplikace, jestli databáze volá všech 9 úloh včas, jestli dostávají 200,
+  jestli odpovědi vůbec přicházejí a jestli úlohy v aplikaci opravdu
+  začínají. Když ne, zčervená a GitHub pošle e-mail. Je to zároveň ten
+  důkaz, že plánovač běží — a podmínka pro vypnutí `schedule`.
+  (Doplněno 18. 10. po kontrole — oddíl na konci.)
 
 ## Co je hotové
 
@@ -73,11 +75,15 @@ ji jen nerovnoměrné plány, které jsem kvůli tomu přidal.
    — `v_cronu` true a `posledni_kod` 200 u všech 9.
 2. Review a sloučení PR hlídače, pak **db push** migrace
    `20261017100000_planovac_hlidac`.
-3. Actions → **Plánovač — hlídač** → *Run workflow*. Zelená = plánovač
-   běží. Červená vypíše, co chybí.
-4. Až bude hlídač pár dní zelený: PR, který z workflow úloh vyndá
-   `schedule` (připravím na pokyn — je to malá změna, ale bez zeleného
-   hlídače ji nechci mít ani rozpracovanou, ať ji nikdo nesloučí dřív).
+3. **Zhruba 4,5 h po `naplanovat_ulohy()`** (dřív nemá banka, která jede
+   jednou za 4 h, za sebou ani první volání): Actions → **Plánovač —
+   hlídač** → *Run workflow*. Zelená = plánovač běží. Červená vypíše, co
+   chybí; dřív než za 4,5 h je červená s textem „hned po zapnutí … je to
+   normální" očekávaná (opraveno 18. 10., dřív tu stálo „za 20 minut").
+4. Až bude hlídač pár dní zelený **a `chyb_6h` u všech úloh 0**: PR, který
+   z workflow úloh vyndá `schedule` (připravím na pokyn — je to malá
+   změna, ale bez zeleného hlídače ji nechci mít ani rozpracovanou, ať ji
+   nikdo nesloučí dřív).
 
 ## Otázky
 
@@ -107,10 +113,34 @@ ji jen nerovnoměrné plány, které jsem kvůli tomu přidal.
 - **Hlídač vidí jen 6 hodin zpátky** — tak dlouho drží pg_net odpovědi
   a `app.planovac_stav()` počítá volání. Úloha s nejdelší mezerou (banka,
   4 h) se do okna vejde.
-- **Hlídač sám běží na GitHubu**, tedy nepravidelně (~4× denně). Na
-  hlídání stačí: zastavený plánovač se pozná nejpozději za pár hodin, ne
-  za týden. Spolehlivější by byl externí monitoring adresy — nedělal jsem,
-  nový dodavatel.
+- **Hlídač sám běží na GitHubu**, tedy nepravidelně (~4× denně, podle
+  vlastního měření s mezerami **až ~12 h**). Zastavený plánovač se proto
+  v nejhorším případě pozná zhruba **za 12 hodin**, ne „za pár hodin",
+  jak tu stálo do 18. 10. S tím se počítá i při vypnutí `schedule`.
+  Rychlejší by byl externí monitoring adresy hlídače — nedělal jsem, nový
+  dodavatel a CRON_SECRET u něj.
+
+## Doplněno 18. 10. — nálezy z nezávislé kontroly PR #145
+
+Kontrola (3 pohledy, každý nález ověřený dalším agentem) našla 6 různých
+věcí. Všechny jsou opravené v tomhle PR:
+
+| Nález | Závažnost | Oprava |
+|---|---|---|
+| Volání „zatím bez odpovědi" se propouštělo bez ohledu na stáří. Když se zasekne pg_net (pg_cron dál zapisuje čerstvá volání, odpověď nepřijde), byl hlídač **zelený**, a po vypnutí `schedule` by se všechny úlohy tiše zastavily. Moje kontrola „volání ještě běží → v pořádku" to dokonce potvrzovala s voláním starým 20 min. | vysoká | Bez odpovědi déle než 15 min (nejdelší limit volání 5 min + rezerva) = problém s návodem na `net.worker_restart()`. Navíc hlídač hlídá `posledni_zacatek` z aplikace: volání chodí, ale úloha nezačíná = problém. To chytí i úlohy po 15 minutách, u kterých je poslední volání vždycky čerstvé. |
+| `chyb_6h` hlídač nehodnotil, rozhodovalo jen poslední volání — a návod přitom podmínku kroku 8 zmírnil z „chyb_6h 0" na „hlídač zelený". | střední | 2 a víc chyb za 6 h = problém (`CHYB_6H_PRAH`); krok 8 zase „zelený **a** chyb_6h 0". |
+| Hned po zapnutí je hlídač červený (úlohy ještě nepřišly na řadu, banka až 4 h), návod sliboval zelenou za 20 min. | střední | Návod: hlídač pustit ~4,5 h po zapnutí; text problému říká, že hned po zapnutí je to normální a do kdy. |
+| Kontrola „planovac_zdravi nesmí anon ani authenticated" v krok97 nemůže spadnout na výchozích právech Supabase (harness je nemá). | nízká | Pravidlo v `scripts/provoz-granty.test.mjs`: funkce v `public`, kterou authenticated nedostal grantem, musí mít revoke i od authenticated — plus 7 kontrol kontroly. Dnešní migrace ho splňují. |
+| Workflow při 503/500 s polem `chyba` (třeba chybí klíč na Vercelu) nevypsal důvod. | nízká | `chyba` v souhrnu i jako `::error::`; nová kontrola blok `run:` opravdu spustí (bash, podstrčený `curl`, skutečný jq) pro 200/503/500/401/ne-JSON/chybějící adresu. |
+| Hlášení, návod i workflow slibovaly odhalení „za pár hodin"; měření GitHubu ukazuje mezery až ~12 h. | nízká | Všude napsaná skutečná nejhorší latence (~12 h). |
+
+**Spuštění bloku `run:` potřebuje jq.** V CI (ubuntu) je; lokálně na
+Windows ne — tam se kontrola viditelně přeskočí. Ověřil jsem ji tady
+s dočasnou náhradou jq mimo repo (umí jen filtry z workflow); skutečný jq
+ji spustí až CI na tomhle PR.
+
+**Co mě to naučilo:** kontrola „v pořádku" nad stavem, který může trvat
+libovolně dlouho, musí mít horní mez — jinak je to díra, ne tolerance.
 
 ## Kde jsem skončil a co zbývá
 
