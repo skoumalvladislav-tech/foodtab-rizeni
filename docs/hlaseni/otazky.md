@@ -1352,6 +1352,8 @@ nerozhodnete jinak.
    tlačítkem „Instant Rollback" ve Vercelu — po něm Vercel přestane
    sám nasazovat další změny z `main` a dá se na to snadno zapomenout.
    Instant Rollback jen v nouzi a hned po něm „Promote" správné verze.
+   Když už převod začal a ještě není dokončený, nejdřív krok **„zrusit"**
+   (jinak by předchozí verze appky nemohla párovat platby), pak revert.
 
 ## 59. Faktury a pobočky
 
@@ -1390,6 +1392,8 @@ transakci (dřív „best-effort" do druhé databáze).
      v EUR — čísla se nedají porovnat) a vypadla by z upomínek.
    - **Když to má být jinak:** (a) párování s takovou fakturou úplně
      zakázat; (b) přepočítávat kurzem ČNB (samostatná práce).
+   - **Nově:** Platby takové faktury **nenavrhují** k párování (eurové
+     centy by se porovnávaly s haléři). Ručně spárovat je jde dál.
 2. **Kdo smí zrušit párování.**
    - **Teď:** kromě práva na Platby (`finance.manage` za celou firmu)
      nově i právo „Vidět přijaté faktury" — zrušení mění stav faktury
@@ -1419,3 +1423,16 @@ transakci (dřív „best-effort" do druhé databáze).
   nanečisto a připravím jako krok, spustí se jen na váš pokyn); (c) smazat celý projekt
   (chce přihlášení do Supabase, které teď nemáte).
 - **Doporučuju (b)**, protože (a) nechává faktury veřejně dostupné.
+
+## 64. Velikost fotky u ručně zadané faktury
+
+**Vzniklo:** 19. 10. 2026, kontrola sloučení Faktur.
+
+- **Teď:** fotka nebo PDF u ručně zadané faktury smí mít nejvýš **1 MB**
+  (strop formulářů v appce; stejné jako dosud, jen to teď formulář
+  říká). Větší soubor appka odmítne obecnou chybou dřív, než se dostane
+  ke kontrole. Fotka z mobilu má často 2–5 MB.
+- **Když to má být jinak:** zvednout strop formulářů na 4 MB (víc
+  nedovolí Vercel). Je to jedno nastavení, ale platí pro všechny
+  formuláře appky — proto jen na váš pokyn. Druhá možnost: zmenšovat
+  fotku v prohlížeči před odesláním (samostatná práce).
