@@ -2,7 +2,8 @@ import type { ReactNode } from 'react'
 
 import { canSee, getContext, isModuleActive } from '@/lib/authz'
 import { bezpecnyRozsah, getCurrentTenantId } from '@/lib/firma'
-import { pristupKFakturam, type FakturyKlient } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam, type PristupKFakturam } from '@/lib/faktury-pristup'
+import { hlaskaBrany } from '@/lib/faktury-brana'
 import { sestavNavigaci } from '@/lib/faktury-navigace'
 import { FILTR_KE_KONTROLE, STAV_KE_SCHVALENI, STAV_UHRAZENO } from '@/lib/faktury-types'
 import Sdeleni from '@/app/sdeleni'
@@ -52,33 +53,15 @@ export default async function FakturyLayout({
     )
   }
 
+  // Faktury jsou v hlavní databázi; otevřené jen u firmy s dokončeným
+  // převodem (lib/faktury-brana.ts). Jinak věta, proč — ne prázdný seznam.
   const pristup = await pristupKFakturam(tenantId)
-  if (pristup.stav === 'nenastaveno') {
-    return (
-      <Sdeleni nadpis="Faktury zatím nejsou připojené">
-        Chybí FAKTURY_SUPABASE_URL a FAKTURY_SUPABASE_ANON_KEY v nastavení
-        prostředí. Doplní je Šéfík.
-      </Sdeleni>
-    )
-  }
-  if (pristup.stav === 'bez_vlastnika') {
-    return (
-      <Sdeleni nadpis="Databáze faktur zatím není přiřazená žádné firmě">
-        Faktury se ukážou, až bude v nastavení prostředí (Vercel) proměnná
-        FAKTURY_DB_TENANT_ID s id firmy, které databáze faktur patří.
-        {canSee(ctx, 'settings.manage') ? ` Id téhle firmy: ${tenantId}` : ' Nastaví ji Šéfík.'}
-      </Sdeleni>
-    )
-  }
-  if (pristup.stav === 'jina_firma') {
-    return (
-      <Sdeleni nadpis="Faktury pro tuto firmu nejsou napojené">
-        Napojená databáze faktur patří jiné firmě.
-      </Sdeleni>
-    )
+  if (pristup.stav !== 'ok') {
+    const h = hlaskaBrany(pristup)
+    return <Sdeleni nadpis={h.nadpis}>{h.text}</Sdeleni>
   }
 
-  const pocty = await nactiPocty(pristup.faktury)
+  const pocty = await nactiPocty(pristup)
   const { hlavni, mobil } = sestavNavigaci(rozsah, pocty)
 
   return (
@@ -96,18 +79,18 @@ export default async function FakturyLayout({
  * Chyba se nevyhazuje: dokud appka běží nad prázdnou/nedostupnou
  * databází, počítadla mají ukázat nulu, ne položit celý modul.
  */
-async function nactiPocty(supabase: FakturyKlient): Promise<{ needsReview: number; overdue: number; pendingApproval: number }> {
+async function nactiPocty(pristup: Extract<PristupKFakturam, { stav: 'ok' }>): Promise<{ needsReview: number; overdue: number; pendingApproval: number }> {
   try {
     const dnes = new Date().toISOString().slice(0, 10)
 
     const [needsReview, overdue, pendingApproval] = await Promise.all([
-      supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('is_archived', false).or(FILTR_KE_KONTROLE),
-      supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('is_archived', false).neq('status', STAV_UHRAZENO).neq('status', STAV_KE_SCHVALENI)
-        .not('due_date', 'is', null).lt('due_date', dnes),
-      supabase.from('invoices').select('*', { count: 'exact', head: true })
-        .eq('is_archived', false).eq('status', STAV_KE_SCHVALENI),
+      fakturyFirmy(pristup, 'id', { count: 'exact', head: true })
+        .eq('archivovano', false).or(FILTR_KE_KONTROLE),
+      fakturyFirmy(pristup, 'id', { count: 'exact', head: true })
+        .eq('archivovano', false).neq('stav', STAV_UHRAZENO).neq('stav', STAV_KE_SCHVALENI)
+        .not('splatnost', 'is', null).lt('splatnost', dnes),
+      fakturyFirmy(pristup, 'id', { count: 'exact', head: true })
+        .eq('archivovano', false).eq('stav', STAV_KE_SCHVALENI),
     ])
 
     return {

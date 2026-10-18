@@ -30,6 +30,14 @@ export type ZdrojovaTransakce = {
   branchId: string | null
 }
 
+/** Popis faktury do exportu: „číslo (dodavatel)", bez čísla jen dodavatel. */
+export function popisFaktury(cislo: string | null | undefined, dodavatel: string | null | undefined): string {
+  const c = (cislo ?? '').trim()
+  const d = (dodavatel ?? '').trim()
+  if (c && d) return `${c} (${d})`
+  return c || d || 'faktura bez čísla'
+}
+
 export type ZdrojovaPlatba = {
   transakceId: string
   fakturaId: string
@@ -60,17 +68,24 @@ const NAZVY_SMERU: Record<SmerTransakce, string> = {
  * Jeden řádek na jednu transakci. `platby` se seskupí podle
  * `transakceId` a jen POTVRZENÉ párování se promítne do sloupce
  * Faktury — návrh bez lidského potvrzení není účetní fakt.
+ *
+ * `popisyFaktur` (id → „číslo faktury (dodavatel)") — od sloučení Faktur
+ * do hlavní databáze (18. 10. 2026) je appka zná; účetní s id faktury
+ * nic neudělá. Faktura bez popisu (ve staré databázi zmizela, nebo
+ * exportující nemá právo na Faktury) zůstane jako id.
  */
 export function sestavitRadkyExportu(
   transakce: readonly ZdrojovaTransakce[],
   platby: readonly ZdrojovaPlatba[],
   nazvyPobocek: Readonly<Record<string, string>>,
+  popisyFaktur: Readonly<Record<string, string>> = {},
 ): RadekExportu[] {
   const fakturyPodleTransakce = new Map<string, string[]>()
   for (const p of platby) {
     if (p.stav !== 'potvrzeno') continue
     const seznam = fakturyPodleTransakce.get(p.transakceId) ?? []
-    if (!seznam.includes(p.fakturaId)) seznam.push(p.fakturaId)
+    const popis = popisyFaktur[p.fakturaId] ?? p.fakturaId
+    if (!seznam.includes(popis)) seznam.push(popis)
     fakturyPodleTransakce.set(p.transakceId, seznam)
   }
 

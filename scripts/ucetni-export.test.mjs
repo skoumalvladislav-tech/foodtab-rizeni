@@ -9,7 +9,7 @@
  * jeden na TRANSAKCI, ne jeden na PÁROVÁNÍ.
  */
 
-const { sestavitRadkyExportu, vygenerovatCsvExportu } = await import('../lib/ucetni-export.ts')
+const { popisFaktury, sestavitRadkyExportu, vygenerovatCsvExportu } = await import('../lib/ucetni-export.ts')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -42,6 +42,16 @@ const radky2 = sestavitRadkyExportu(transakce1, [
   { transakceId: 't1', fakturaId: 'FA-ZAMITNUTO', stav: 'zamitnuto' },
 ], {})
 ok('návrh bez potvrzení se neobjeví', radky2[0].faktury === '')
+
+console.log('\n== Číslo faktury a dodavatel místo id (Faktury v hlavní databázi) ==')
+const radkyPopis = sestavitRadkyExportu(
+  [{ id: 't1', datum: '2026-10-01', smer: 'vydaj', castkaHaleru: 1000, protistrana: 'X', vs: '1', kategorie: null, zdroj: 'csv_banka', branchId: null }],
+  [{ transakceId: 't1', fakturaId: 'f1', stav: 'potvrzeno' }, { transakceId: 't1', fakturaId: 'f-zmizela', stav: 'potvrzeno' }],
+  {},
+  { f1: popisFaktury('FV2026/0815', 'Dodavatel s.r.o.') },
+)
+ok('popis „číslo (dodavatel)", neznámá faktura zůstane jako id', radkyPopis[0].faktury === 'FV2026/0815 (Dodavatel s.r.o.), f-zmizela')
+ok('bez čísla jen dodavatel, bez obojího věta', popisFaktury(null, 'D') === 'D' && popisFaktury('', '') === 'faktura bez čísla')
 
 console.log('\n== branchId null → středisko "Firma" ==')
 

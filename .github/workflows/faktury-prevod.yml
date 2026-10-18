@@ -1,0 +1,105 @@
+name: Faktury — převod do hlavní databáze
+
+# Přestěhování faktur ze samostatné databáze (Supabase projekt
+# ctqtwahlzhyjerqulqyn) do hlavní databáze Foodtabu. Návrh a pořadí
+# kroků: docs/faktury-slouceni-navrh.md, oddíl 6 („Plán přepnutí").
+#
+# SPOUŠTÍ JEN ŠÉFÍK, ručně: Actions → tenhle workflow → Run workflow.
+# Žádný plán (schedule) — každý krok je rozhodnutí člověka.
+#
+# Kroky, které zapisují, chtějí do „potvrzeni" napsat PŘESNĚ název kroku
+# (překlik v nabídce tak nic nespustí). Pořadí hlídá databáze — krok ve
+# špatném pořadí nic nezapíše a řekne proč.
+#
+# Repozitář je VEŘEJNÝ: do logu jdou jen čísla a věta „co dál", nikdy
+# data faktur ani jejich id.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rezim:
+        description: 'Krok převodu'
+        required: true
+        default: nanecisto
+        type: choice
+        options:
+          - nanecisto
+          - zahajit
+          - prevest
+          - prilohy
+          - dokoncit
+          - vratit
+          - zpet_nanecisto
+          - zpet
+      potvrzeni:
+        description: 'Kroky, které zapisují: napište sem znovu název kroku (u nanecisto nechte prázdné)'
+        required: false
+        default: ''
+        type: string
+      smazat_vic:
+        description: 'prevest: povolit smazat víc než 20 faktur, které ve staré databázi nejsou'
+        required: false
+        default: false
+        type: boolean
+      znovu_chyby:
+        description: 'prilohy: zkusit znovu i přílohy, které už jednou selhaly'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: faktury-prevod
+  cancel-in-progress: false
+
+jobs:
+  krok:
+    name: Krok převodu faktur
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Zavolat krok (opakovaně, dokud je co dělat)
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+          REZIM: ${{ inputs.rezim }}
+          POTVRZENI: ${{ inputs.potvrzeni }}
+          SMAZAT_VIC: ${{ inputs.smazat_vic }}
+          ZNOVU_CHYBY: ${{ inputs.znovu_chyby }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ] || [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret APP_URL nebo CRON_SECRET."
+            exit 1
+          fi
+
+          TELO=$(jq -cn --arg r "$REZIM" --arg p "$POTVRZENI" \
+            --argjson s "$SMAZAT_VIC" --argjson z "$ZNOVU_CHYBY" \
+            '{rezim: $r, potvrzeni: $p, smazatVic: $s, znovuChyby: $z}')
+
+          # Přílohy a dlouhý převod jdou po dávkách — volá se znovu, dokud
+          # krok vrací "pokracovat": true (nejvýš 40× za běh).
+          for KOLO in $(seq 1 40); do
+            KOD=$(curl -sS -o telo.json -w '%{http_code}' --max-time 120 \
+              -X POST -H "Authorization: Bearer ${TAJEMSTVI}" -H 'Content-Type: application/json' \
+              --data "$TELO" "${ADRESA}/api/prevod-faktur")
+
+            # Jen čísla, stav a věta „co dál" — podrobnosti (id faktur) do
+            # veřejného logu nepatří.
+            SOUHRN=$(jq -c '{ok, stav, duvod, pokracovat, cisla}' telo.json 2>/dev/null || jq -c '{chyba}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+            echo "Kolo ${KOLO}: HTTP ${KOD} ${SOUHRN}"
+            echo "Kolo ${KOLO}: ${SOUHRN}" >> "$GITHUB_STEP_SUMMARY" || true
+
+            if [ "$KOD" != "200" ]; then
+              echo "::error::Krok vrátil HTTP ${KOD}."
+              exit 1
+            fi
+            if ! grep -q '"pokracovat":true' telo.json; then
+              break
+            fi
+          done
+
+          if ! grep -q '"ok":true' telo.json; then
+            echo "::warning::Krok neskončil úspěchem — viz „duvod" výš."
+          fi

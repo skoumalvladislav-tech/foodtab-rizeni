@@ -77,7 +77,7 @@ export default async function FakturyNova({
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '640px' }}>
         {chyba ? (
           <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--bad)' }}>
-            Fakturu se nepodařilo uložit: {chyba}. Zkontrolujte, že jsou vyplněny dodavatel a částka (číslo), a zkuste to znovu.
+            Fakturu se nepodařilo uložit: {chyba}
           </p>
         ) : null}
 
@@ -86,9 +86,9 @@ export default async function FakturyNova({
 
           <label>
             <span style={popisek}>Vyfotit / nahrát fakturu</span>
-            <input type="file" name="fotografie" accept="image/*" style={pole} />
+            <input type="file" name="fotografie" accept="image/jpeg,image/png,image/webp,application/pdf" style={pole} />
             <small style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--muted)' }}>
-              Volitelné — nahradí odkaz na PDF níže, pokud vyplníte obojí.
+              Volitelné — JPEG, PNG, WebP nebo PDF do 10 MB. Uloží se k faktuře (neveřejně, otevře ho jen ten, kdo vidí Faktury).
             </small>
           </label>
 

@@ -3,7 +3,8 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { jeRozsahFirmy } from '../../jen-pro-firmu'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { naFaktury, odkazNaPrilohu, SLOUPCE_FAKTURY, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import { STAV_KE_SCHVALENI, type Faktura } from '@/lib/faktury-types'
@@ -33,18 +34,16 @@ const karta = {
 async function nactiCekajici(tenantId: string): Promise<Faktura[]> {
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') return []
-  const supabase = pristupFaktury.faktury
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
-    const { data, error } = await supabase
-      .from('invoices').select('*').eq('status', STAV_KE_SCHVALENI)
-      .order('received_at', { ascending: false }).order('id', { ascending: true })
+    const { data, error } = await fakturyFirmy(pristupFaktury, SLOUPCE_FAKTURY).eq('stav', STAV_KE_SCHVALENI)
+      .order('prijato_kdy', { ascending: false }).order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
     if (!data || data.length === 0) break
-    vse.push(...(data as Faktura[]))
+    vse.push(...naFaktury(data as unknown as RadekFaktury[]))
     if (data.length < velikostStranky) break
     od += velikostStranky
   }
@@ -121,9 +120,9 @@ export default async function FakturySchvaleni({
               ) : null}
 
               <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center', fontSize: '13px' }}>
-                {f.pdf_url ? <a href={f.pdf_url} target="_blank" rel="noreferrer">Otevřít PDF →</a> : null}
+                {odkazNaPrilohu(f) ? <a href={odkazNaPrilohu(f) ?? undefined} target="_blank" rel="noreferrer">Otevřít PDF →</a> : null}
                 {f.onedrive_url ? <a href={f.onedrive_url} target="_blank" rel="noreferrer">OneDrive</a> : null}
-                {!f.pdf_url && !f.onedrive_url ? <span style={{ color: 'var(--faint)' }}>Bez přiloženého souboru</span> : null}
+                {!odkazNaPrilohu(f) && !f.onedrive_url ? <span style={{ color: 'var(--faint)' }}>Bez přiloženého souboru</span> : null}
               </div>
 
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', borderTop: '1px solid var(--line)', paddingTop: '10px' }}>

@@ -12,7 +12,7 @@ import { KBELIK as KBELIK_POZADI, PLATNOST_ODKAZU_S as PLATNOST_ODKAZU_POZADI_S 
 import { nactiPocasi, type Pocasi } from "@/lib/pocasi";
 import { odkazNaPrihlaseni } from "@/lib/prihlaseni-adresa";
 import { DotazSelhal, funkceNeexistuje, sloupecNeexistuje } from "@/lib/supabase/dotaz";
-import { pristupKFakturam } from "@/lib/supabase/faktury";
+import { fakturyFirmy, pristupKFakturam } from "@/lib/faktury-pristup";
 import { FILTR_KE_KONTROLE, STAV_KE_SCHVALENI, STAV_UHRAZENO } from "@/lib/faktury-types";
 import { getServerSupabase } from "@/lib/supabase/server";
 import { odkazNaSmenu, type TeloUpozorneni } from "@/lib/upozorneni-text";
@@ -735,17 +735,21 @@ export default async function Dnes({
       fakturyVRozsahu && canSee(ctx, "faktury.read")
         ? (async () => {
             const pristupFaktury = await pristupKFakturam(tenantId);
+            // Během stěhování Faktur nemá Dnes mlčet — „nic po splatnosti"
+            // by bylo nepravdivé (kontrola 18. 10., nález 14).
+            if (pristupFaktury.stav === "zavreno" && (pristupFaktury.duvod === "probiha" || pristupFaktury.duvod === "ceka_na_prevod")) {
+              return { stehuji: true as const, keKontrole: 0, poSplatnosti: 0 };
+            }
             if (pristupFaktury.stav !== "ok") return null;
-            const fakturySupabase = pristupFaktury.faktury;
             const dnesniDatum = den.provozni_den;
             const [keKontrole, poSplatnosti] = await Promise.all([
-              fakturySupabase.from("invoices").select("*", { count: "exact", head: true })
-                .eq("is_archived", false).or(FILTR_KE_KONTROLE),
-              fakturySupabase.from("invoices").select("*", { count: "exact", head: true })
-                .eq("is_archived", false).neq("status", STAV_UHRAZENO).neq("status", STAV_KE_SCHVALENI)
-                .not("due_date", "is", null).lt("due_date", dnesniDatum),
+              fakturyFirmy(pristupFaktury, "id", { count: "exact", head: true })
+                .eq("archivovano", false).or(FILTR_KE_KONTROLE),
+              fakturyFirmy(pristupFaktury, "id", { count: "exact", head: true })
+                .eq("archivovano", false).neq("stav", STAV_UHRAZENO).neq("stav", STAV_KE_SCHVALENI)
+                .not("splatnost", "is", null).lt("splatnost", dnesniDatum),
             ]);
-            return { keKontrole: keKontrole.count ?? 0, poSplatnosti: poSplatnosti.count ?? 0 };
+            return { stehuji: false as const, keKontrole: keKontrole.count ?? 0, poSplatnosti: poSplatnosti.count ?? 0 };
           })()
         : Promise.resolve(null),
       supabase.rpc("nedokoncena_dochazka", {
@@ -772,7 +776,14 @@ export default async function Dnes({
     }
 
     if (fakturyRes.status === "fulfilled" && fakturyRes.value) {
-      const { keKontrole, poSplatnosti } = fakturyRes.value;
+      const { stehuji, keKontrole, poSplatnosti } = fakturyRes.value;
+      if (stehuji) {
+        pozornost.push({
+          uroven: "info",
+          text: "Faktury se stěhují do hlavní databáze — faktury po splatnosti a ke kontrole se ukážou po dokončení.",
+          akce: { popisek: "Stav Faktur", href: `/${rozsah}/finance/faktury` },
+        });
+      }
       if (poSplatnosti > 0) {
         pozornost.push({
           uroven: "critical",

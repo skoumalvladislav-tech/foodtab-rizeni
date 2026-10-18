@@ -563,3 +563,95 @@ export function cestaPrilohy(tenantId: string, data: Uint8Array, pripona: string
 
 /** Soukromý kbelík bere nejvýš 10 MB (20261008100000_faktury_prijem_z_emailu.sql). */
 export const MAX_VELIKOST_PRILOHY = 10 * 1024 * 1024
+
+// ---------------------------------------------------------------------
+// Kopie staré databáze: stejný řádek? (pro „změnilo se od převodu")
+// ---------------------------------------------------------------------
+
+/** JSON se seřazenými klíči — pořadí klíčů z PostgRESTu nesmí rozhodovat. */
+export function stabilniJson(hodnota: unknown): string {
+  if (hodnota === null || typeof hodnota !== 'object') return JSON.stringify(hodnota ?? null)
+  if (Array.isArray(hodnota)) return `[${hodnota.map(stabilniJson).join(',')}]`
+  const o = hodnota as Record<string, unknown>
+  return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stabilniJson(o[k])}`).join(',')}}`
+}
+
+// ---------------------------------------------------------------------
+// Návrat zpět (režim „zpet"): tři strany
+// ---------------------------------------------------------------------
+
+export type PlanNavratu = {
+  /** Vznikly v appce po převodu → vložit do staré databáze. */
+  vlozit: RadekHlavni[]
+  /** Změněné v appce (a ve staré ne) → přepsat ve staré. */
+  upravit: RadekHlavni[]
+  /** Smazané v appce, ve staré beze změny → smazat ve staré. */
+  smazat: string[]
+  /** Změněné na obou stranách (nebo ve staré smazané) → NIC se nedělá, rozhodne člověk. */
+  konflikty: { id: string; duvod: string }[]
+  /** Změněné jen ve staré databázi (někdo do ní po převodu zapisoval) → nechá se, vykáže se. */
+  zmenenaJenVeStare: string[]
+  /** Ve staré databázi vznikly po převodu (cizí zápis) → nechá se, vykáže se. */
+  jenVeStare: string[]
+}
+
+/**
+ * Co přenést zpátky do staré databáze. Tři strany:
+ *   zaklad — kopie staré databáze z okamžiku dokončení (faktury_prevod_zdroj),
+ *   hlavni — public.faktury teď,
+ *   stara  — stará databáze teď.
+ * Pravidlo: staré databázi se přepíše jen to, co se od převodu změnilo
+ * v appce a ve staré NE. Co se mezitím změnilo ve staré (do ní neměl
+ * nikdo zapisovat — vykáže se), se nepřepisuje ani nemaže. Opakovaný
+ * běh nic nezdvojí: co už ve staré odpovídá appce, se přeskočí.
+ * Porovnává se kanonický text (bez času změny — ten přepisují spouště).
+ */
+export function planNavratu(
+  zaklad: readonly RadekHlavni[],
+  hlavni: readonly RadekHlavni[],
+  stara: readonly RadekHlavni[],
+): PlanNavratu {
+  const z = new Map(zaklad.map((r) => [r.id, r]))
+  const h = new Map(hlavni.map((r) => [r.id, r]))
+  const s = new Map(stara.map((r) => [r.id, r]))
+  const k = kanonickyTextHlavniho
+  const plan: PlanNavratu = { vlozit: [], upravit: [], smazat: [], konflikty: [], zmenenaJenVeStare: [], jenVeStare: [] }
+
+  for (const [id, rh] of h) {
+    const rz = z.get(id)
+    const rs = s.get(id)
+    if (!rz) {
+      // Vznikla v appce po převodu. Ve staré je jen, když ji tam vložil
+      // dřívější běh návratu (spoušť staré databáze jí mohla přepsat stav).
+      if (!rs) plan.vlozit.push(rh)
+      else if (k(rs) !== k(rh)) plan.upravit.push(rh)
+      continue
+    }
+    if (!rs) {
+      plan.konflikty.push({ id, duvod: 've staré databázi po převodu smazaná' })
+      continue
+    }
+    const zmenaH = k(rh) !== k(rz)
+    const zmenaS = k(rs) !== k(rz)
+    if (!zmenaH) {
+      if (zmenaS) plan.zmenenaJenVeStare.push(id)
+    } else if (!zmenaS) {
+      plan.upravit.push(rh)
+    } else if (k(rs) !== k(rh)) {
+      plan.konflikty.push({ id, duvod: 'změněná v appce i ve staré databázi' })
+    }
+  }
+
+  for (const [id, rz] of z) {
+    if (h.has(id)) continue
+    const rs = s.get(id)
+    if (!rs) continue
+    if (k(rs) === k(rz)) plan.smazat.push(id)
+    else plan.konflikty.push({ id, duvod: 'v appce smazaná, ve staré databázi se mezitím změnila' })
+  }
+
+  for (const id of s.keys()) {
+    if (!z.has(id) && !h.has(id)) plan.jenVeStare.push(id)
+  }
+  return plan
+}

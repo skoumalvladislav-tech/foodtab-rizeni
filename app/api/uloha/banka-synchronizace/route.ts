@@ -4,6 +4,7 @@ import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
 import { synchronizovatFioPripojeni, vsechnaAktivniFioPripojeni } from '@/lib/integrace-fio-sync'
 import { synchronizovatSaltEdgePripojeni, vsechnaAktivniSaltEdgePripojeni } from '@/lib/integrace-saltedge-sync'
 import { automatickyParovatPlatby } from '@/lib/finance-automaticke-parovani'
+import { firmySOtevrenymiFakturami } from '@/lib/faktury-pristup'
 import { synchronizovatKbPripojeni, vsechnaAktivniKbPripojeni } from '@/lib/kb-adaa-sync'
 
 /**
@@ -70,13 +71,22 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   // Nové pohyby z banky → jednoznačné shody s fakturami se spárují samy
-  // a faktura přejde na „Uhrazeno" (Šéfík 8. 10. 2026). Faktury patří
-  // jedné firmě (FAKTURY_DB_TENANT_ID) — brána uvnitř to ověří znovu.
-  // Jen když po synchronizaci zbývá čas (maxDuration 60 s); jinak příště.
-  const vlastnikFaktur = process.env.FAKTURY_DB_TENANT_ID?.trim()
-  const parovani = vlastnikFaktur && Date.now() < zacatek + 40_000
-    ? await automatickyParovatPlatby(vlastnikFaktur, { konecMs: zacatek + 55_000 })
-    : null
+  // a faktura přejde na „Uhrazeno" (Šéfík 8. 10. 2026). Firmy s otevřenými
+  // Fakturami bere z databáze (dřív jediná z FAKTURY_DB_TENANT_ID) — brána
+  // uvnitř párování to ověří znovu. Jen když po synchronizaci zbývá čas
+  // (maxDuration 60 s); jinak příště.
+  let parovani = null as { stav: string; sparovano: number; dorovnano: number } | null
+  if (Date.now() < zacatek + 40_000) {
+    for (const tenantId of await firmySOtevrenymiFakturami()) {
+      if (Date.now() >= zacatek + 50_000) break
+      const r = await automatickyParovatPlatby(tenantId, { konecMs: zacatek + 55_000 })
+      parovani = {
+        stav: parovani && parovani.stav !== r.stav ? 'smisene' : r.stav,
+        sparovano: (parovani?.sparovano ?? 0) + r.sparovano,
+        dorovnano: (parovani?.dorovnano ?? 0) + r.dorovnano,
+      }
+    }
+  }
 
   return NextResponse.json({
     // Jen čísla a stav — odpověď končí ve veřejném logu GitHub Actions.

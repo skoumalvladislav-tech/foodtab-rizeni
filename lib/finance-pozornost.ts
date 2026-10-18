@@ -1,7 +1,8 @@
 import 'server-only'
 
 import { getServerSupabase } from '@/lib/supabase/server'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
 import { navrhnoutParovani, type KandidatFaktura } from '@/lib/finance-parovani'
 import { koruny } from '@/lib/mzdy'
@@ -61,13 +62,13 @@ export async function nactiPolozkyKPozornosti(
   const faktury: Faktura[] = []
   try {
     for (let strana = 0; strana < MAX_STRANEK; strana++) {
-      const { data, error } = await pristupFaktury.faktury.from('invoices')
-        .select('id, supplier, invoice_number, variable_symbol, amount, due_date, issue_date, status, needs_review')
-        .eq('is_archived', false)
+      const { data, error } = await fakturyFirmy(pristupFaktury,
+        'id, supplier:dodavatel, invoice_number:cislo_faktury, variable_symbol:variabilni_symbol, castka_haleru, due_date:splatnost, issue_date:datum_vystaveni, status:stav, needs_review:ke_kontrole')
+        .eq('archivovano', false)
         .order('id', { ascending: true })
         .range(strana * STRANKA, strana * STRANKA + STRANKA - 1)
       if (error) return []
-      faktury.push(...((data ?? []) as Faktura[]))
+      faktury.push(...naFaktury(data as unknown as RadekFaktury[]))
       if (!data || data.length < STRANKA) break
     }
   } catch {
@@ -80,7 +81,7 @@ export async function nactiPolozkyKPozornosti(
     const kandidati: KandidatFaktura[] = nezaplacene.map((f) => ({
       id: f.id,
       vs: f.variable_symbol,
-      castkaHaleru: Math.round(f.amount * 100),
+      castkaHaleru: f.castka_haleru,
       dodavatel: f.supplier,
       datum: f.due_date ?? f.issue_date,
     }))
@@ -140,7 +141,7 @@ export async function nactiPolozkyKPozornosti(
         ? `Faktura ${keKontrole[0].supplier || '—'} (${keKontrole[0].invoice_number ?? 'bez čísla'}) vyžaduje ruční kontrolu`
         : `${keKontrole.length} faktur vyžaduje ruční kontrolu`,
       stredisko: '—',
-      castkaHaleru: keKontrole.reduce((soucet, f) => soucet + Math.round((f.amount ?? 0) * 100), 0),
+      castkaHaleru: keKontrole.reduce((soucet, f) => soucet + (f.castka_haleru ?? 0), 0),
       stav: 'nutne',
       akceHref: `/${rozsah}/finance/faktury/seznam?kontrola=1`,
       akceText: 'Zkontrolovat',

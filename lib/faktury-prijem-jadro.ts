@@ -119,8 +119,12 @@ export type Repozitar = {
   nactiHeslo(id: string): Promise<string | null>
   /** Jen pro kontrolu odběratele na faktuře — NIKDY pro rozhodnutí o přístupu (IČO si firma může přepsat). */
   icoFirmy(tenantId: string): Promise<string | null>
-  /** Databáze Faktur pro tuhle firmu — null, když jí nepatří (brána pristupKFakturamUlohy, jen podle FAKTURY_DB_TENANT_ID). */
-  fakturyProFirmu(tenantId: string): FakturyDb | null
+  /**
+   * Faktury firmy (public.faktury) — null, když jsou pro firmu ZAVŘENÉ
+   * (stěhují se do hlavní databáze, vráceno, nebo nezapnuté; brána
+   * pristupKFakturamUlohy). Příjem pak schránku ani nečte — e-maily počkají.
+   */
+  fakturyProFirmu(tenantId: string): FakturyDb | null | Promise<FakturyDb | null>
   oznacitPripojeni(id: string, zmena: { stav?: string; posledni_chyba?: string | null; posledni_sync_kdy?: string; posledni_sync_pocet_radku?: number }): Promise<void>
   zamknout(tenantId: string, pripojeniId: string): Promise<{ ok: true; behId: string } | { ok: false; duvod: string }>
   odemknout(behId: string, vysledek: { ok: boolean; pocet: number; chyba: string | null }): Promise<void>
@@ -266,9 +270,9 @@ export async function zpracovatPrijemJadro(
   if (!nastaveni.zapnuto) return prazdnyVysledek('preskoceno', 'Příjem faktur je u schránky vypnutý.')
 
   const ico = await repo.icoFirmy(pripojeni.tenantId)
-  const faktury = repo.fakturyProFirmu(pripojeni.tenantId)
+  const faktury = await repo.fakturyProFirmu(pripojeni.tenantId)
   if (!faktury) {
-    const duvod = 'Databáze faktur patří jiné firmě, nebo není nastavená — příjem nemá kam zapisovat.'
+    const duvod = 'Faktury jsou pro tuto firmu zavřené (stěhují se do hlavní databáze, nebo nejsou zapnuté) — příjem počká, e-maily zůstávají ve schránce.'
     await repo.oznacitPripojeni(pripojeniId, { posledni_chyba: duvod })
     return prazdnyVysledek('chyba', duvod)
   }
@@ -767,8 +771,8 @@ export async function zapsatNavrhyJadro(
 ): Promise<{ zapsano: number; chyby: number; zbyva: number; duvod: string | null }> {
   const pripojeni = await repo.nactiPripojeni(pripojeniId)
   if (!pripojeni || pripojeni.tenantId !== tenantId) return { zapsano: 0, chyby: 0, zbyva: 0, duvod: 'Schránka neexistuje.' }
-  const faktury = repo.fakturyProFirmu(tenantId)
-  if (!faktury) return { zapsano: 0, chyby: 0, zbyva: 0, duvod: 'Databáze faktur pro tuhle firmu není napojená.' }
+  const faktury = await repo.fakturyProFirmu(tenantId)
+  if (!faktury) return { zapsano: 0, chyby: 0, zbyva: 0, duvod: 'Faktury jsou pro tuto firmu zavřené (stěhují se, nebo nejsou zapnuté).' }
   const zamek = await repo.zamknout(tenantId, pripojeniId)
   if (!zamek.ok) return { zapsano: 0, chyby: 0, zbyva: 0, duvod: zamek.duvod }
 

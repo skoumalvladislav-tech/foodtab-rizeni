@@ -37,7 +37,9 @@ import {
   naRadekHlavni,
   naRadekStare,
   naVzorHlavni,
+  planNavratu,
   porovnat,
+  stabilniJson,
   rozdilyMereni,
   typPrilohy,
 } from '../lib/faktury-prevod.ts'
@@ -268,6 +270,41 @@ console.log('\n7. Vzory odmítnutí')
   ok('vzor se převede s puvodni_id', v.ok && v.vzor.puvodni_id === 7 && v.vzor.druh === 'not_invoice' && v.vzor.vytah === 'Reklama')
   ok('vzor bez úryvku: anomálie', !naVzorHlavni({ id: 8, kind: 'not_invoice', excerpt: null, supplier_guess: null, email_subject: null, created_at: '2026-09-15T08:00:00+00:00' }, TENANT).ok)
   ok('id jako text "9" se přečte', (() => { const x = naVzorHlavni({ id: '9', kind: 'not_supplier', excerpt: 'x', supplier_guess: null, email_subject: null, created_at: '2026-09-15T08:00:00+00:00' }, TENANT); return x.ok && x.vzor.puvodni_id === 9 })())
+}
+
+console.log('\n7b. Návrat zpět: tři strany (kopie z dokončení, appka, stará databáze)')
+{
+  const z = DATA.map((r) => naRadekHlavni(r, TENANT)).filter((v) => v.ok).map((v) => v.radek)
+  const [a, b, c, d] = z
+  const nova = { ...a, id: 'a0000000-0000-4000-8000-0000000000aa', cislo_faktury: 'NOVA-1' }
+  // appka: a beze změny, b změněná (Uhrazeno), c smazaná, d změněná, + nová
+  const hlavni = [a, { ...b, stav: 'Uhrazeno' }, { ...d, stav: 'Uhrazeno' }, nova]
+  // stará: a beze změny, b beze změny, c beze změny, d změněná jinak, + cizí zápis
+  const ciziZapis = { ...a, id: 'a0000000-0000-4000-8000-0000000000cc' }
+  const stara = [a, b, c, { ...d, poznamka_kontroly: 'někdo psal do staré' }, ciziZapis]
+  const p = planNavratu(z, hlavni, stara)
+  ok('nová faktura z appky → vložit', p.vlozit.length === 1 && p.vlozit[0].id === nova.id)
+  ok('změněná jen v appce → přepsat ve staré', p.upravit.length === 1 && p.upravit[0].id === b.id)
+  ok('smazaná v appce, ve staré beze změny → smazat', p.smazat.length === 1 && p.smazat[0] === c.id)
+  ok('změněná v appce i ve staré → konflikt, nic se nepřepíše', p.konflikty.length === 1 && p.konflikty[0].id === d.id)
+  ok('cizí zápis do staré → jen vykázat, nemazat', p.jenVeStare.length === 1 && p.jenVeStare[0] === ciziZapis.id && !p.smazat.includes(ciziZapis.id))
+
+  // Druhý běh po přenosu: stará = appka → nic k přenesení (nic se nezdvojí).
+  const staraPoPrenosu = [a, { ...b, stav: 'Uhrazeno' }, { ...d, poznamka_kontroly: 'někdo psal do staré' }, nova, ciziZapis]
+  const p2 = planNavratu(z, hlavni, staraPoPrenosu)
+  ok('opakovaný běh: nic vložit, upravit ani smazat', p2.vlozit.length === 0 && p2.upravit.length === 0 && p2.smazat.length === 0)
+  // Spoušť staré databáze přepsala stav vložené faktury na „Duplicitní…" → srovnat.
+  const p3 = planNavratu(z, hlavni, [...staraPoPrenosu.filter((r) => r.id !== nova.id), { ...nova, stav: 'Duplicitní - zkontrolovat (Ke kontrole úhrady)' }])
+  ok('vložená, ale spouští staré databáze změněná → srovnat (upravit)', p3.upravit.some((r) => r.id === nova.id))
+  // Ve staré smazaná faktura, kterou appka pořád má → konflikt, ne vložit.
+  const p4 = planNavratu(z, hlavni, stara.filter((r) => r.id !== b.id))
+  ok('ve staré smazaná (cizí zápis) → konflikt, ne znovu vložit', p4.konflikty.some((x) => x.id === b.id) && !p4.vlozit.some((r) => r.id === b.id))
+  // Smazaná v appce, ale ve staré mezitím změněná → konflikt, nemazat.
+  const p5 = planNavratu(z, hlavni, stara.map((r) => (r.id === c.id ? { ...r, stav: 'Uhrazeno' } : r)))
+  ok('smazaná v appce, ve staré změněná → konflikt, nemazat', !p5.smazat.includes(c.id) && p5.konflikty.some((x) => x.id === c.id))
+
+  ok('stabilní JSON nezávisí na pořadí klíčů', stabilniJson({ b: 1, a: [1, { d: 2, c: null }] }) === stabilniJson({ a: [1, { c: null, d: 2 }], b: 1 }))
+  ok('…ale pozná změnu hodnoty', stabilniJson({ a: 1 }) !== stabilniJson({ a: 2 }) && stabilniJson({ a: null }) !== stabilniJson({}))
 }
 
 // ---------------------------------------------------------------------

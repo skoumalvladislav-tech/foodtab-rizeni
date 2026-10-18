@@ -5,7 +5,8 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
@@ -102,12 +103,14 @@ async function nactiPotvrzeneAlokace(
   // pak se načte jen to, co šlo dřív.
   const zaklad = () => supabase
     .from('platby_faktury')
-    .select('id, transakce_id, faktura_id, castka_haleru, potvrzeno_kdy, zpusob')
+    .select('id, transakce_id, faktura, faktura_id, castka_haleru, potvrzeno_kdy, zpusob')
     .eq('tenant_id', tenantId)
     .eq('stav', 'potvrzeno')
     .order('potvrzeno_kdy', { ascending: false })
+  // Filtr z adresy jen jako uuid — jinak by dotaz spadl na přetypování.
+  const fakturaUuid = fakturaId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fakturaId) ? fakturaId : null
   const [rucni, automaticka] = fakturaId
-    ? [await zaklad().eq('faktura_id', fakturaId).limit(200), { data: [], error: null }]
+    ? [fakturaUuid ? await zaklad().eq('faktura', fakturaUuid).limit(200) : { data: [], error: null }, { data: [], error: null }]
     : await Promise.all([zaklad().eq('zpusob', 'rucne').limit(20), zaklad().eq('zpusob', 'automaticky').limit(50)])
   const zalozni = () => {
     const dotaz = supabase
@@ -122,14 +125,15 @@ async function nactiPotvrzeneAlokace(
     ? await zalozni()
     : { data: [...(rucni.data ?? []), ...(automaticka.data ?? [])] }
 
-  const alokace = (data ?? []) as {
+  const alokace = ((data ?? []) as {
     id: string
     transakce_id: string
+    faktura?: string | null
     faktura_id: string
     castka_haleru: number
     potvrzeno_kdy: string | null
     zpusob?: string | null
-  }[]
+  }[]).map((a) => ({ ...a, faktura_id: a.faktura ?? a.faktura_id }))
   if (alokace.length === 0) return []
 
   const transakceIds = [...new Set(alokace.map((a) => a.transakce_id))]
@@ -160,20 +164,16 @@ async function nactiPotvrzeneAlokace(
     if (jeVracena({ vs: t.vs ?? '', castkaHaleru: t.castka_haleru, datum: t.datum, protistrana: t.protistrana ?? '' }, prijmy)) vracene.add(a.id)
   }))
 
-  // Jméno dodavatele je jen pro zobrazení — appka tu znovu NEČTE
-  // `invoices.status` jako zdroj pravdy (ten zůstal v Fakturách jen
-  // jako best-effort kopie), pouze dodavatele k číslu faktury.
+  // Jméno dodavatele jen pro zobrazení. Párování bez faktury (ve staré
+  // databázi zmizela) zůstane jen s číslem — jde zrušit.
   let dodavateleMapa = new Map<string, string>()
   const pristupFaktury = vidiFaktury ? await pristupKFakturam(tenantId) : null
   if (pristupFaktury?.stav === 'ok') {
     try {
       const fakturyIds = [...new Set(alokace.map((a) => a.faktura_id))]
-      const { data: fakturyData } = await pristupFaktury.faktury
-        .from('invoices')
-        .select('id, supplier')
-        .in('id', fakturyIds)
+      const { data: fakturyData } = await fakturyFirmy(pristupFaktury, 'id, dodavatel').in('id', fakturyIds)
       dodavateleMapa = new Map(
-        ((fakturyData ?? []) as { id: string; supplier: string | null }[]).map((f) => [f.id, f.supplier ?? '']),
+        ((fakturyData ?? []) as unknown as { id: string; dodavatel: string | null }[]).map((f) => [f.id, f.dodavatel ?? '']),
       )
     } catch {
       // Best-effort — bez dodavatele appka ukáže jen číslo faktury.
@@ -209,14 +209,13 @@ async function nactiNavrhyParovani(
   const faktury: Faktura[] = []
   try {
     for (let strana = 0; strana < 10; strana++) {
-      const { data, error } = await pristupFaktury.faktury
-        .from('invoices')
-        .select('id, supplier, variable_symbol, amount, due_date, issue_date, status')
-        .eq('is_archived', false)
+      const { data, error } = await fakturyFirmy(pristupFaktury,
+        'id, supplier:dodavatel, variable_symbol:variabilni_symbol, castka_haleru, due_date:splatnost, issue_date:datum_vystaveni, status:stav')
+        .eq('archivovano', false)
         .order('id', { ascending: true })
         .range(strana * STRANKA_FAKTUR, strana * STRANKA_FAKTUR + STRANKA_FAKTUR - 1)
       if (error) return { navrhy: [], faktury: [] }
-      faktury.push(...((data ?? []) as Faktura[]).filter(jeNezaplacena))
+      faktury.push(...naFaktury(data as unknown as RadekFaktury[]).filter(jeNezaplacena))
       if (!data || data.length < STRANKA_FAKTUR) break
     }
   } catch {
@@ -228,7 +227,7 @@ async function nactiNavrhyParovani(
   const kandidati: KandidatFaktura[] = faktury.map((f) => ({
     id: f.id,
     vs: f.variable_symbol,
-    castkaHaleru: Math.round(f.amount * 100),
+    castkaHaleru: f.castka_haleru,
     dodavatel: f.supplier,
     datum: f.due_date ?? f.issue_date,
   }))

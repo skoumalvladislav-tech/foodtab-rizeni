@@ -9,8 +9,11 @@ import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 export const dynamic = 'force-dynamic'
 
 /**
- * Otevře přílohu faktury přijaté z e-mailu (`invoices.pdf_url` míří sem:
- * `/api/faktury/priloha/<id řádku faktury_prijem>`).
+ * Otevře přílohu faktury přijaté z e-mailu (`faktury.odkaz_pdf`, dřív
+ * `invoices.pdf_url` ve staré databázi, míří sem:
+ * `/api/faktury/priloha/<id řádku faktury_prijem>`). Adresa zůstává
+ * i po sloučení — vedou na ni odkazy z CSV, které už dostala účetní.
+ * Soubor podle id FAKTURY: /api/faktury/soubor/<id>.
  *
  * Kbelík `faktury-prilohy` je soukromý — na rozdíl od starého veřejného
  * `faktury-pdf` (otázka 46). Odkaz ve Fakturách proto není adresa souboru,

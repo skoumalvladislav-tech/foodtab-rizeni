@@ -5,7 +5,9 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
 import {
+  popisFaktury,
   sestavitRadkyExportu,
   vygenerovatCsvExportu,
   type ZdrojovaTransakce,
@@ -100,20 +102,37 @@ export async function GET(request: Request) {
   if (idTransakci.length > 0) {
     const { data } = await supabase
       .from('platby_faktury')
-      .select('transakce_id, faktura_id, stav')
+      .select('transakce_id, faktura, faktura_id, stav')
       .eq('tenant_id', tenantId)
       .in('transakce_id', idTransakci)
-    platby = ((data ?? []) as { transakce_id: string; faktura_id: string; stav: ZdrojovaPlatba['stav'] }[]).map((p) => ({
+    platby = ((data ?? []) as { transakce_id: string; faktura: string | null; faktura_id: string; stav: ZdrojovaPlatba['stav'] }[]).map((p) => ({
       transakceId: p.transakce_id,
-      fakturaId: p.faktura_id,
+      fakturaId: p.faktura ?? p.faktura_id,
       stav: p.stav,
     }))
+  }
+
+  // Číslo faktury a dodavatel místo id — jen když exportující Faktury vidí
+  // (faktury.read za celou firmu) a jsou otevřené; jinak zůstane id.
+  const popisyFaktur: Record<string, string> = {}
+  const idFaktur = [...new Set(platby.filter((p) => p.stav === 'potvrzeno').map((p) => p.fakturaId))]
+  if (idFaktur.length > 0 && (await hasAccess(tenantId, 'faktury.read', null))) {
+    const pristupFaktury = await pristupKFakturam(tenantId)
+    if (pristupFaktury.stav === 'ok') {
+      const uuid = idFaktur.filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+      for (let i = 0; i < uuid.length; i += 200) {
+        const { data } = await fakturyFirmy(pristupFaktury, 'id, cislo_faktury, dodavatel').in('id', uuid.slice(i, i + 200))
+        for (const f of (data ?? []) as unknown as { id: string; cislo_faktury: string | null; dodavatel: string | null }[]) {
+          popisyFaktur[f.id] = popisFaktury(f.cislo_faktury, f.dodavatel)
+        }
+      }
+    }
   }
 
   const nazvyPobocek: Record<string, string> = {}
   for (const b of (branchesRes.data ?? []) as { id: string; name: string }[]) nazvyPobocek[b.id] = b.name
 
-  const radky = sestavitRadkyExportu(transakce, platby, nazvyPobocek)
+  const radky = sestavitRadkyExportu(transakce, platby, nazvyPobocek, popisyFaktur)
   const csv = vygenerovatCsvExportu(radky)
 
   return new Response(csv, {

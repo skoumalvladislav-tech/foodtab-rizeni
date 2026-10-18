@@ -6,9 +6,8 @@ import { redirect } from 'next/navigation'
 import { hasAccess, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { pristupKFakturam } from '@/lib/faktury-pristup'
 import { naHalere } from '@/lib/mzdy'
-import { STAV_UHRAZENO, STAV_CASTECNE, STAV_NEUHRAZENO } from '@/lib/faktury-types'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { pobockaUctu, ucetPatriRozsahu } from '@/lib/finance-platby-pobocka'
 
@@ -212,6 +211,11 @@ export async function zmenitPobockuUctu(formData: FormData): Promise<void> {
   redirect(`/${rozsah}/finance/platby?pobocka_uctu=1`)
 }
 
+const VZOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Faktury firmy jsou zavřené (stěhují se do hlavní databáze, nebo vráceno). */
+const FAKTURY_ZAVRENE = 'Faktury jsou teď zavřené (stěhují se do hlavní databáze) — párování počká na dokončení.'
+
 /** Odmítnutí párování mimo celou firmu — viz `pripravitFiremni`. */
 const PAROVANI_JEN_FIRMA =
   'Párování plateb s fakturami smí jen ten, kdo má právo „Správa financí“ za celou firmu — mění stav faktury celé firmy.'
@@ -222,22 +226,19 @@ const PAROVANI_JEN_FIRMA =
  * i pro RUČNÍ párování (zadání, oddíl 7: „hromadné platby" — jedna
  * platba na víc faktur, appka to podpoří tím, že se tahle akce
  * zavolá vícekrát se stejnou platbou a jinou fakturou/zbývající
- * částkou). Zapisuje VÝHRADNĖ přes `app.potvrdit_alokaci_platby`
- * (20261004100000) — přímý INSERT do `platby_faktury` appka od téhle
- * migrace nemá (grant odebraný), protože jen tahle RPC hlídá souběh
- * (advisory zámek) a to, že alokace nepřesáhne ani částku platby, ani
- * nezaplacený zůstatek faktury. Stav Faktur (`invoices.status`) se
- * pak zapisuje best-effort podle toho, jestli RPC vrátila
- * `plne_uhrazeno` — PLNĖ, nebo ČÁSTEČNĖ, nikdy natvrdo „Uhrazeno"
- * jako dřív (ta chyba dovolila, aby částečná úhrada appku nahlásila
- * jako plně zaplacenou fakturu).
+ * částkou). Zapisuje VÝHRADNĖ přes `sparovat_platbu_s_fakturou`
+ * (20261018100000) — přímý INSERT do `platby_faktury` appka nemá
+ * (grant odebraný). Funkce hlídá souběh (advisory zámek + zámek řádku
+ * faktury), to, že alokace nepřesáhne částku platby, a ve STEJNÉ
+ * transakci přepne stav faktury („Uhrazeno" / „Částečně uhrazeno").
+ * Dřív to byl best-effort zápis do druhé databáze, který mohl nevyjít.
  *
- * Celková částka faktury (`castka_faktury_celkem_haleru`) se NEBERE
- * z formuláře — appka si ji od 7.10.2026 zjistí SAMA z databáze
- * Faktur podle `faktura_id`. Dřív to posílal klient skrytým polem
- * (fungovalo jen u návrhu, který appka sama spočítala) — ruční
- * párování žádnou takovou předpočítanou hodnotu nemá a appka by si
- * jinak musela důvěřovat, že ji klient nepodvrhl.
+ * Celkovou částku faktury si funkce přečte sama z `public.faktury` —
+ * z formuláře se nebere nic kromě id a alokované částky.
+ *
+ * Faktura v jiné měně než CZK nebo bez kladné částky: párování se
+ * zapíše, stav faktury se NEZMĚNÍ (platby jsou v Kč a porovnat se
+ * nedají) — appka to řekne, rozhodne člověk (otázka 61).
  *
  * Od 13. 10. 2026 jen s právem za celou firmu (`pripravitFiremni`) —
  * stránka párování na pobočce neukazuje vůbec.
@@ -268,49 +269,38 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
     redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Párovat s fakturami smí ten, kdo má právo „Vidět přijaté faktury“.')}`)
   }
 
-  let castkaFakturyCelkemHaleru: number | null = null
-  try {
-    const pristupFaktury = await pristupKFakturam(tenantId)
-    const { data: faktura } = pristupFaktury.stav === 'ok'
-      ? await pristupFaktury.faktury.from('invoices').select('amount').eq('id', fakturaId).maybeSingle()
-      : { data: null }
-    castkaFakturyCelkemHaleru = faktura?.amount != null ? Math.round(faktura.amount * 100) : null
-  } catch {
-    castkaFakturyCelkemHaleru = null
-  }
-
-  if (castkaFakturyCelkemHaleru === null) {
+  if (!VZOR_UUID.test(fakturaId)) {
     redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Faktura se nenašla — zkontrolujte číslo faktury.')}`)
   }
 
-  const { data, error } = await supabase.rpc('potvrdit_alokaci_platby', {
+  // Faktury zavřené (stěhují se) → párování počká; databáze by ho odmítla taky.
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') {
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(FAKTURY_ZAVRENE)}`)
+  }
+
+  const { data, error } = await supabase.rpc('sparovat_platbu_s_fakturou', {
     p_tenant: tenantId,
     p_transakce: transakceId,
     p_faktura: fakturaId,
     p_castka_haleru: castkaHaleru,
-    p_castka_faktury_celkem: castkaFakturyCelkemHaleru,
     p_jistota: jistota,
   })
 
   if (error) {
-    const zprava = /přesahuje/.test(error.message) ? error.message : 'Párování se nepodařilo uložit.'
+    // Hlášky funkce jsou psané pro lidi (česky, bez id) — ukázat je.
+    const zprava = /přesahuje|nepatří|oprávnění|Vidět přijaté|otevřené/.test(error.message) ? error.message : 'Párování se nepodařilo uložit.'
     redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(zprava)}`)
   }
 
-  const plneUhrazeno = Boolean(data?.[0]?.plne_uhrazeno)
-  const prebytekHaleru = Number(data?.[0]?.prebytek_haleru ?? 0)
-
-  try {
-    const pristupFaktury = await pristupKFakturam(tenantId)
-    if (pristupFaktury.stav === 'ok') {
-      await pristupFaktury.faktury.from('invoices').update({ status: plneUhrazeno ? STAV_UHRAZENO : STAV_CASTECNE }).eq('id', fakturaId)
-    }
-  } catch {
-    // Best-effort — viz komentář funkce. Nesoulad zůstává dohledatelný
-    // přímo ve Fakturách (stav tam neodpovídá platby_faktury tady).
-  }
+  const vysledek = (data as { prebytek_haleru: number | null; stav_faktury: string | null }[] | null)?.[0]
+  const prebytekHaleru = Number(vysledek?.prebytek_haleru ?? 0)
 
   revalidatePath(`/${rozsah}/finance/platby`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
+  if (vysledek && vysledek.stav_faktury === null) {
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Platba je spárovaná, ale stav faktury se nezměnil — faktura není v Kč nebo nemá přečtenou částku. Stav nastavte ve Fakturách ručně.')}`)
+  }
   // Přeplatek appka od 7.10.2026 nezakazuje (zadání: „podporuj...
   // přeplatky"), jen o něm nahlas řekne — co se s penězi navíc stane
   // (jiná faktura, dobropis, vrácení), rozhoduje člověk.
@@ -323,15 +313,15 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
 
 /**
  * Zrušení potvrzené alokace — vratné s auditem
- * (`app.zrusit_alokaci_platby`). Řádek zůstává (historie), jen stav
- * jde na `zamitnuto` — uvolní se tím místo pro novou alokaci.
+ * (`zrusit_parovani_faktury`, 20261018100000). Řádek zůstává (historie),
+ * jen stav jde na `zamitnuto` — uvolní se tím místo pro novou alokaci —
+ * a stav faktury se přepočítá ve STEJNÉ transakci (dřív best-effort
+ * zápis do druhé databáze; nález 6.–7. 10. 2026: po zrušení zůstávala
+ * faktura „Uhrazeno"). Párování na fakturu, která ve staré databázi
+ * zmizela (převod ho vykázal), jde zrušit taky — stav není čemu přepočítat.
  *
- * Stav faktury ve Fakturách se po zrušení PŘEPOČÍTÁ znovu (best-effort,
- * stejně jako `potvrditParovani`) — dřív appka po zrušení JEDINÉ
- * alokace nechávala fakturu nahlášenou jako „Uhrazeno"/„Částečně
- * uhrazeno", i když se platba zrušila (nález 6.–7. 10. 2026).
- *
- * Stejně jako potvrzení jen s právem za celou firmu (`pripravitFiremni`).
+ * Stejně jako potvrzení jen s právem za celou firmu (`pripravitFiremni`)
+ * a s právem „Vidět přijaté faktury" (mění stav faktury).
  */
 export async function zrusitAlokaci(formData: FormData): Promise<void> {
   const rozsah = String(formData.get('rozsah') ?? '')
@@ -340,53 +330,23 @@ export async function zrusitAlokaci(formData: FormData): Promise<void> {
 
   const { supabase, tenantId } = await pripravitFiremni(rozsah, 'finance.manage', PAROVANI_JEN_FIRMA)
 
-  const { data: alokace } = await supabase
-    .from('platby_faktury')
-    .select('faktura_id')
-    .eq('id', alokaceId)
-    .eq('tenant_id', tenantId)
-    .maybeSingle()
+  const pristupFaktury = await pristupKFakturam(tenantId)
+  if (pristupFaktury.stav !== 'ok') {
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(FAKTURY_ZAVRENE)}`)
+  }
 
-  const { error } = await supabase.rpc('zrusit_alokaci_platby', {
+  const { error } = await supabase.rpc('zrusit_parovani_faktury', {
     p_tenant: tenantId,
     p_alokace: alokaceId,
     p_duvod: duvod || null,
   })
 
-  if (error) redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Zrušení párování se nepodařilo.')}`)
-
-  if (alokace?.faktura_id) {
-    try {
-      const { data: zbyvajici } = await supabase
-        .from('platby_faktury')
-        .select('castka_haleru')
-        .eq('faktura_id', alokace.faktura_id)
-        .eq('tenant_id', tenantId)
-        .eq('stav', 'potvrzeno')
-
-      const soucetHaleru = (zbyvajici ?? []).reduce((s, r) => s + r.castka_haleru, 0)
-
-      const pristupFaktury = await pristupKFakturam(tenantId)
-      if (pristupFaktury.stav === 'ok') {
-        const faktury = pristupFaktury.faktury
-        const { data: faktura } = await faktury
-          .from('invoices')
-          .select('amount')
-          .eq('id', alokace.faktura_id)
-          .maybeSingle()
-
-        const celkemHaleru = faktura?.amount != null ? Math.round(faktura.amount * 100) : null
-        const novyStav =
-          soucetHaleru <= 0 ? STAV_NEUHRAZENO : celkemHaleru !== null && soucetHaleru >= celkemHaleru ? STAV_UHRAZENO : STAV_CASTECNE
-
-        await faktury.from('invoices').update({ status: novyStav }).eq('id', alokace.faktura_id)
-      }
-    } catch {
-      // Best-effort — viz komentář funkce. Nesoulad zůstává dohledatelný
-      // přímo ve Fakturách (stav tam neodpovídá platby_faktury tady).
-    }
+  if (error) {
+    const zprava = /oprávnění|Vidět přijaté|nepatří|otevřené/.test(error.message) ? error.message : 'Zrušení párování se nepodařilo.'
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(zprava)}`)
   }
 
   revalidatePath(`/${rozsah}/finance/platby`)
+  revalidatePath(`/${rozsah}/finance/faktury`)
   redirect(`/${rozsah}/finance/platby`)
 }
