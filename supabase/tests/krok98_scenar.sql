@@ -939,6 +939,20 @@ select pg_temp.check('schválení odmítne návrh s nevyřešenou skladovou polo
 reset role;
 delete from public.jine_platby_polozky where zaznam_id = :'z6' and poradi = 99;
 set role authenticated;
+-- Uložení po odeslání, které výdej nemění (jen jiné označení), návrh nechá —
+-- ale záznam už není zkontrolovaný a schválit ho nejde, dokud ho někdo
+-- znovu nezkontroluje.
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_ulozit_navrh(:'z6', :'v6', (:'hl5'::jsonb || '{"oznaceni": "Perla — dvě piva (přejmenováno)"}'::jsonb), :'pol5'::jsonb) as v6 \gset
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_prohlasit(:'z6', :'v6', 'sklad', 'neodecteno', 'Ověřeno v pokladně.');
+select pg_temp.check('po uložení bez změny výdeje návrh zůstal ke schválení',
+  (select stav = 'ceka_na_schvaleni' from public.jine_platby_skladove_navrhy where id = :'navrh6'));
+select pg_temp.check('schválení ale čeká na novou kontrolu záznamu',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true, %L)', :'navrh6', :'otisk6', 'Jiný host.'),
+    '23514', 'není zkontrolovaný'));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_oznacit_zkontrolovano(:'z6', :'v6', 'Na účtence zaokrouhleno na celou korunu nahoru.');
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
 select pg_temp.check('druhý výdej téže sjetiny (pobočka + den + částka + měna) bez důvodu neprojde',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true)', :'navrh6', :'otisk6'),
@@ -1066,6 +1080,27 @@ select pg_temp.check('stejné číslo účtu (bez mezer) v téže pobočce do 7 
 select public.jine_platby_prohlasit(:'z10', :'v10', 'trzba', 'nenalezeno', 'Ručně psaný účet, v pokladně není.');
 select pg_temp.check('stejné číslo účtu o 13 dní později duplicita není (stoly se opakují)',
   pg_temp.projde(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L)', :'z10', :'v10', 'nova')));
+-- Duplicita výdeje na jiné provozovně téže pokladny (pokladna firmy
+-- obsluhuje Perlu i Bar): majitel v hlášce vidí id podobného záznamu,
+-- vedoucí Baru se id záznamu Perly nedozví.
+select set_config('test.user_id', :'majitel', false);
+select public.jine_platby_zalozit(:'tenant', :'bar', :'pos', 'Bar — účet 125', '98980000-aaaa-0000-0000-00000000000d') as z11 \gset
+select public.jine_platby_ulozit_navrh(:'z11', 1,
+  jsonb_build_object('datum_prodeje', '2026-03-16', 'oznaceni', 'Bar — účet 125', 'mena', 'CZK', 'castka_haleru', 6500,
+    'castka_puvod', 'doklad', 'typ_dokladu', 'uzavreny_prodej', 'externi_ucet', 'účet125', 'kontakt_id', null),
+  jsonb_build_array(jsonb_build_object('nazev', 'Pivo 0,5 l', 'mnozstvi', '1', 'jednotka', 'ks',
+    'cena_jednotkova_haleru', 6500, 'cena_celkem_haleru', 6500, 'zdroj', 'rucne', 'druh', 'rozlevany_napoj',
+    'pos_produkt_id', 'P2', 'pos_mnozstvi', '1', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false))) as v11 \gset
+select public.jine_platby_oznacit_zkontrolovano(:'z11', :'v11');
+select public.jine_platby_odeslat_sklad(:'z11', :'v11') as navrh11 \gset
+select otisk as otisk11 from public.jine_platby_skladove_navrhy where id = :'navrh11' \gset
+select public.jine_platby_prohlasit(:'z11', :'v11', 'sklad', 'neodecteno', 'Ověřeno v pokladně.');
+select pg_temp.check('duplicita výdeje u téže pokladny napříč provozovnami: majitel vidí id podobného záznamu',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true)', :'navrh11', :'otisk11'), '23514', :'z1'));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000004', false);
+select pg_temp.check('vedoucí Baru se z hlášky o duplicitě nedozví id záznamu Perly',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true)', :'navrh11', :'otisk11'), '23514', 'kterou nevidíte')
+  and not pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true)', :'navrh11', :'otisk11'), '23514', :'z1'));
 reset role;
 select set_config('test.user_id', '', false);
 

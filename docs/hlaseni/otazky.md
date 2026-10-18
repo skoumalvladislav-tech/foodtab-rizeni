@@ -1337,7 +1337,7 @@ psát nesmím.
 **Vzniklo:** 16. 10. 2026. Zadání: „přiřazuj uživatelům pro konkrétní
 provozovny“.
 
-- **Teď:** je to běžné oprávnění (`jine_platby.vydej_pos`) a platí na pobočkách, kde má člověk členství. Vedoucí jen Bernard Baru schvaluje jen Bernard Bar. Člověk s rozsahem celé firmy (vy, provozní ředitel) schvaluje všude. Ověřuje to scénář krok98.
+- **Teď:** je to běžné oprávnění (`jine_platby.vydej_pos`) a platí na pobočkách, kde má člověk členství. Vedoucí Bernard Baru schvaluje jen výdeje Bernard Baru. Člověk s rozsahem celé firmy (vy, provozní ředitel) schvaluje všude. Ověřuje to scénář krok98.
 - **Proč:** o přístupu rozhoduje jediné místo (`app.has_access`). Vlastní seznam „schvalovatelů po pobočkách“ by byl druhý model oprávnění vedle něj (pravidlo 2 v CLAUDE.md).
 - **Když to má být jinak:** jemnější přidělení, kdy jeden člověk má právo X jen na pobočce A, ale jiná práva i jinde, chce úpravu modelu oprávnění pro celou appku, ne jen pro Jiné platby.
 

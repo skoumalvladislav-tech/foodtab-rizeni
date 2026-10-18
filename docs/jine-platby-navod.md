@@ -1,6 +1,6 @@
 # Jiné platby: návod pro obsluhu a schvalovatele
 
-Finance → Tržby → Jiné platby. Stav k 16. 10. 2026.
+Finance → Tržby → Jiné platby. Stav k 18. 10. 2026.
 
 ## Nejdřív: co z toho už běží
 
@@ -32,7 +32,7 @@ A název „Jiné platby“ neznamená, že je zaplaceno.
 ## Kdo co smí
 
 Práva se přidělují v Nastavení → Oprávnění. Platí na pobočkách, kde
-člověk pracuje. Vedoucí jen Bernard Baru schvaluje jen Bernard Bar.
+člověk pracuje. Vedoucí Bernard Baru schvaluje jen výdeje Bernard Baru.
 
 | Právo | Typicky má |
 |---|---|
@@ -68,6 +68,8 @@ Práva se přidělují v Nastavení → Oprávnění. Platí na pobočkách, kde
    - Vyberte **produkt v pokladně**. Návrh appky je jen návrh, potvrďte ho, nebo vyberte jiný. Zaškrtnutím si appka přiřazení zapamatuje pro příště.
    - Řádek, který sedí, potvrďte zaškrtnutím.
 7. **Uložit návrh**, potom **Označit jako zkontrolované**. Dokud něco čeká na kontrolu, označit to nejde.
+   - Když součet položek nesedí s celkovou částkou (u korun o víc než 50 haléřů), appka chce vědět proč, například „celkem je včetně spropitného“. Napište to do pole **Proč rozdíl nevadí**, nebo položky opravte.
+   - Každé další uložení vrátí záznam ke kontrole. Schvalovatel ho schválí až po novém označení.
 8. **Odeslat ke schválení** (sklad). Tím se **sklad nemění**, jen to dostane schvalovatel.
 
 **Pivo:** „2× pivo 0,5 l“ zapište jako 2 kusy produktu „Pivo 0,5 l“.
@@ -91,7 +93,10 @@ V části **Tržba (Ostatní tržby)**:
 2. Podle výsledku:
    - **Zapsat do Ostatních tržeb**: jen když je vyloučené, že prodej je v pokladně. Tržba se započítá.
    - **Jen propojit (do součtu se nepřičte)**: prodej už v pokladně je. Ukáže se, ale nezapočítá se znovu.
-3. Když appka hlásí **možnou duplicitu** (stejná provozovna, den, částka a měna, nebo stejné číslo účtu), otevřete ten druhý záznam. Když to duplicita není, napište důvod.
+3. Když appka hlásí **možnou duplicitu**, otevřete ten druhý záznam. Když to duplicita není, napište důvod do pole **Proč to není duplicita**. Za možnou duplicitu appka považuje:
+   - stejnou provozovnu, den, částku a měnu, nebo
+   - stejné číslo účtu (mezery a velká písmena nevadí) do 7 dnů u téže pokladny. Záznam bez pokladny jen na stejné provozovně, protože „stůl 5“ je na každé provozovně jiný.
+   - Když je podobný záznam na provozovně, kterou nevidíte, appka neukáže, který to je. Rozhodne někdo s přístupem k oběma.
 4. **Opravit / stornovat** (právo na opravy): původní řádek zůstane v historii, oprava je nový řádek. Když je propojená faktura, je potřeba číslo opravného dokladu (dobropisu).
 
 **Fotografie sjetiny nedokazuje, že host zaplatil.** Zápis tržby
@@ -116,7 +121,9 @@ Na kartě záznamu uvidíte:
    - **neodečteno** → **Potvrdit výdej do POS** (dvoukrokově);
    - **nelze zjistit** → ověřte v pokladně a doložte s důvodem.
 3. Nesouhlasíte? **Zamítnout** s povinným důvodem. Obsluha návrh opraví a pošle znovu.
-4. **Změna po schválení:** když někdo změní položky, množství, přiřazení nebo pokladnu, schválení **propadne** a návrh se musí schválit znovu.
+4. Schválit jde jen **zkontrolovaný** záznam, ve kterém nic nečeká na vyřešení (nejasná položka, chybějící produkt v pokladně).
+5. **Možná duplicita výdeje:** když je podobný výdej (stejná provozovna, den a částka, nebo stejné číslo účtu) už odeslaný nebo provedený, appka chce důvod, proč to není tatáž sjetina. Jinak by se sklad odečetl dvakrát.
+6. **Změna po schválení:** když někdo změní produkt, množství nebo pokladnu, schválení **propadne** a návrh se musí schválit znovu. Totéž, když přibude nejasná položka. Přejmenování položky nebo jiné označení záznamu výdej nemění, záznam se ale musí znovu označit jako zkontrolovaný.
 
 ### Provedení výdeje u Dotykačky (dnes ručně)
 
@@ -124,6 +131,10 @@ Appka zatím do Dotykačky nezapisuje. Po schválení ukáže podklad:
 1. V Dotykačce založte účet se schválenými položkami a zaplaťte ho způsobem **Odpis**. Pokladna odečte suroviny podle své receptury a do tržeb se to nepočítá.
 2. V appce klikněte **Ručně doloženo** a zadejte číslo dokladu z Dotykačky a důvod.
 3. Stav bude **„Ručně doloženo (neověřeno pokladnou)“**. Stav „Odečteno v POS“ appka nastaví jen tehdy, když výdej sama ověří v pokladně, a to dnes neumí.
+
+Dokud výdej čeká na ruční odpis, **položky a množství nejde měnit** ani záznam zrušit. Kdyby se to dalo, mohl by vzniknout druhý odpis.
+- **Ručně doloženo** se váže na návrh, který máte otevřený. Když ho mezitím někdo vyměnil, appka doložení odmítne. Načtěte stránku a doložte to, co jste v pokladně opravdu odepsali.
+- Když jste v pokladně **nic neodepsali** (host odešel, chyba v návrhu), klikněte **Zrušit schválení** a napište důvod. Výdej se vrátí do stavu „bez návrhu“ a obsluha ho může opravit a poslat znovu. Zrušit schválení smí jen ten, kdo smí výdej potvrdit.
 
 Pokrm se vydává **jako pokrm**, nikdy jeho suroviny zvlášť. Suroviny
 odečte pokladna sama. Služby, spropitné a položky, které pokladna ze
@@ -146,7 +157,8 @@ vyřešila (např. papírová výdejka).
 
 - **Uložit podklady**: odběratel z Kontaktů, položky a ceny jen z ověřených údajů. Appka vypíše, co chybí, například IČO nebo DPH.
 - **Propojit fakturu**: číslo faktury vystavené v pokladně nebo v účetním programu. Faktura není tržba.
-- **Napárovat platbu**: úhrada se eviduje jen podle **skutečné příchozí platby z banky** ve stejné měně. Napárovat jde jen platbu, kterou smíte vidět (finanční přehled). Do té doby platí **„Úhrada neověřena“**.
+  - Faktura **z pokladny** znamená, že tržbu má pokladna. K tržbě zapsané do Ostatních tržeb ji proto propojit nejde: nejdřív Ostatní tržbu stornujte a prodej z pokladny propojte. Se zapsanou fakturou z pokladny zase nejde zapsat novou Ostatní tržbu.
+- **Napárovat platbu**: úhrada se eviduje jen podle **skutečné příchozí platby z banky** ve stejné měně. Napárovat jde jen platbu, kterou smíte vidět (finanční přehled): u účtu pobočky přehled té pobočky, u firemního účtu přehled za celou firmu. Do té doby platí **„Úhrada neověřena“**.
 
 **Vystavení faktury ani výdej skladu neznamenají zaplacení.**
 
@@ -162,4 +174,4 @@ vyřešila (např. papírová výdejka).
 | Na dokladu chybí celková částka | Appka nabídne součet položek jako **návrh** s poznámkou „vypočtený součet“. Potvrdíte ho, nebo opravíte. |
 | „K úhradě“ je jiné než celkem | Tržba je celková cena prodeje. „K úhradě“, přijatá hotovost a vrácené peníze tržba nejsou, appka je ukáže jen pro kontrolu. |
 | AI nečte nebo není zapnutá | Zadejte položky ručně, appka nic nevymýšlí. Za den jde nejvýš 200 rozpoznání na firmu. |
-| Záznam omylem | **Zrušit záznam** jde, dokud nic neproběhlo. Autor smí zrušit svůj rozpracovaný záznam, jinak je potřeba právo na opravy. |
+| Záznam omylem | **Zrušit záznam** jde, dokud nic neproběhlo. Autor smí zrušit svůj rozpracovaný záznam, jinak je potřeba právo na opravy. Nejdřív je potřeba odpojit fakturu a úhradu a stornovat zapsanou tržbu. Během ručního odpisu zrušit nejde (viz výš). Fotky zůstanou v historii zrušeného záznamu a stejný doklad jde nahrát ke správnému záznamu. |

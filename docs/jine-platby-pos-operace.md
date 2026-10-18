@@ -1,6 +1,6 @@
 # Jiné platby: co appka umí s pokladnou
 
-Stav k 16. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
+Stav k 18. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
 Technický návrh je v `docs/jine-platby-navrh.md`.
 
 **Tahle agenda zatím nic neprovedla v žádné skutečné pokladně.** Nic
@@ -41,8 +41,9 @@ Zdroj: oficiální dokumentace https://docs.api.dotypos.com/ (verze API
 1. Obsluha připraví návrh. Schvalovatel ho zkontroluje v appce: originál, položky, množství, přiřazení k produktům a výsledek kontroly „už odečteno?“.
 2. Schvalovatel klikne **Potvrdit výdej do POS**. Appka zaznamená schválení konkrétní verze návrhu a ukáže **podklad pro ruční zpracování**.
 3. Schvalovatel provede odpis v Dotykačce sám: účet s těmito položkami zaplatí způsobem *Odpis*. Pokladna odečte suroviny podle **své** receptury.
-4. V appce klikne **Ručně doloženo**, zadá číslo dokladu z pokladny a důvod.
+4. V appce klikne **Ručně doloženo**, zadá číslo dokladu z pokladny a důvod. Doložení se váže na otisk návrhu, který měl otevřený; když se návrh mezitím vyměnil, appka ho odmítne.
 5. Stav je **„Ručně doloženo (neověřeno pokladnou)“**, nikdy „Odečteno v POS“.
+6. Mezi kroky 2 a 4 (stav „předáno k ručnímu odpisu“) nejde měnit produkty ani množství a záznam nejde zrušit. Když schvalovatel v pokladně nic neodepsal, klikne **Zrušit schválení** s důvodem.
 
 ## Co musí proběhnout, než se zápis do Dotykačky zapne
 
@@ -81,6 +82,9 @@ Nový konektor dodá svůj adaptér a obrazovka ani databáze se nemění.
 | Souběžné kliknutí nic neodešle dvakrát | `pos_operace_zahajit` (zámek bez čekání) |
 | Timeout se neopakuje naslepo | `lib/jine-platby-pos-operace.ts`: stav „nejasný výsledek“ a jen dohledání |
 | „Odečteno v POS“ jen s ID operace z pokladny | check `stav <> 'uspech' or externi_id is not null` |
-| Schválení platí jen pro tu verzi návrhu, kterou schvalovatel viděl | otisk obsahu v `jine_platby_skladove_navrhy` |
+| Schválení platí jen pro tu verzi návrhu, kterou schvalovatel viděl | otisk obsahu v `jine_platby_skladove_navrhy` (produkt + množství + pokladna); nová nejasná položka návrh zneplatní (`zmena`) |
+| Schválit jde jen zkontrolovaný záznam bez nevyřešených položek | `jine_platby_rozhodnout_vydej` |
+| Druhý výdej téže sjetiny (jinak vyfocené) chce důvod | `app.jp_mozne_duplicity` (stejná pobočka + den + částka, nebo číslo účtu ±7 dní) |
+| Během ručního odpisu se výdej nezmění ani nezruší; uvolní ho jen oprávněná osoba | `jine_platby_ulozit_navrh`, `jine_platby_zrusit`, `jine_platby_zrusit_schvaleni` |
 | Kontrola „už odečteno?“ se opakuje těsně před schválením a před odesláním | platnost 15 minut, vázaná na verzi záznamu |
 | Klíče pokladny jen na serveru | `lib/pokladna-relace.ts` (`server-only`, service_role po ověření práva) |
