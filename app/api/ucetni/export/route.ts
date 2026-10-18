@@ -100,12 +100,17 @@ export async function GET(request: Request) {
   const idTransakci = transakce.map((t) => t.id)
   let platby: ZdrojovaPlatba[] = []
   if (idTransakci.length > 0) {
-    const { data } = await supabase
+    const dotaz = (sloupce: string) => supabase
       .from('platby_faktury')
-      .select('transakce_id, faktura, faktura_id, stav')
+      .select(sloupce)
       .eq('tenant_id', tenantId)
       .in('transakce_id', idTransakci)
-    platby = ((data ?? []) as { transakce_id: string; faktura: string | null; faktura_id: string; stav: ZdrojovaPlatba['stav'] }[]).map((p) => ({
+    let { data, error } = await dotaz('transakce_id, faktura, faktura_id, stav')
+    // Kód nasazený dřív než migrace (sloupec faktura ještě není): bez něj,
+    // ne prázdný sloupec Faktury v exportu pro účetní.
+    if (error) ({ data, error } = await dotaz('transakce_id, faktura_id, stav'))
+    if (error) return new Response('Nepodařilo se načíst párování plateb s fakturami.', { status: 500 })
+    platby = ((data ?? []) as unknown as { transakce_id: string; faktura: string | null; faktura_id: string; stav: ZdrojovaPlatba['stav'] }[]).map((p) => ({
       transakceId: p.transakce_id,
       fakturaId: p.faktura ?? p.faktura_id,
       stav: p.stav,

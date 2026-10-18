@@ -84,6 +84,9 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
   const foto = formData.get('fotografie')
   let prilohaCesta: string | null = null
   if (foto instanceof File && foto.size > 0) {
+    // Strop formuláře (serverová akce) je 1 MB na celý odeslaný formulář —
+    // větší soubor Next odmítne dřív, než se sem dostane. MAX_VELIKOST_PRILOHY
+    // (10 MB) platí pro přílohy z e-mailu a převodu, ne pro tenhle formulář.
     if (foto.size > MAX_VELIKOST_PRILOHY) chyba('Soubor je větší než 10 MB.')
     const data = new Uint8Array(await foto.arrayBuffer())
     const typ = typPrilohy(data)
@@ -448,13 +451,16 @@ export async function odmitnoutAZapamatovat(formData: FormData): Promise<void> {
   const { data } = await fakturyFirmy(p, 'vytah_textu, dodavatel, email_predmet, email_odesilatel').eq('id', id).maybeSingle()
   const faktura = data as unknown as { vytah_textu: string | null; dodavatel: string | null; email_predmet: string | null; email_odesilatel: string | null } | null
 
-  const vyrazeno = await vyradSouvisejiciFaktury(p, id, faktura?.dodavatel, faktura?.email_odesilatel, druh)
-
+  // Nejdřív smazat, až potom vyřadit ostatní od stejného dodavatele: faktura
+  // s párováním plateb smazat nejde (cizí klíč) — a pak se nesmí vyřadit
+  // nic jiného, jinak by zůstala jen ona a ostatní by zmizely z přehledů.
   const { error } = await p.supabase.from('faktury').delete().eq('tenant_id', p.tenantId).eq('id', id)
   if (error) {
     revalidatePath(`/${rozsah}/finance/faktury`)
     redirect(`/${rozsah}/finance/faktury/seznam?chyba=${encodeURIComponent(error.code === '23503' ? MA_PAROVANI : 'Dokument se nepodařilo odmítnout — zkuste to znovu.')}`)
   }
+
+  const vyrazeno = await vyradSouvisejiciFaktury(p, id, faktura?.dodavatel, faktura?.email_odesilatel, druh)
 
   const vytah = faktura?.vytah_textu?.trim()
   if (vytah) {

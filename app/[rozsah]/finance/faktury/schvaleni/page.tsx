@@ -55,7 +55,7 @@ export default async function FakturySchvaleni({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ prerazeno?: string }>
+  searchParams: Promise<{ prerazeno?: string; chyba?: string }>
 }) {
   const { rozsah } = await params
   // Faktury pobočku nemají (oddělená databáze): na pobočce stránka nic
@@ -85,6 +85,8 @@ export default async function FakturySchvaleni({
       </Nadpis>
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '720px', display: 'grid', gap: '12px' }}>
+        {sp.chyba ? <p role="alert" style={{ margin: 0, fontSize: '13px', color: 'var(--bad)' }}>{sp.chyba}</p> : null}
+
         {sp.prerazeno ? (
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--mosaz)' }}>
             Zároveň přeřazeno jako upomínka {sp.prerazeno} dalších dokumentů od stejného dodavatele.

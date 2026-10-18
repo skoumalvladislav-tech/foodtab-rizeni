@@ -77,7 +77,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   // (maxDuration 60 s); jinak příště.
   let parovani = null as { stav: string; sparovano: number; dorovnano: number } | null
   if (Date.now() < zacatek + 40_000) {
-    for (const tenantId of await firmySOtevrenymiFakturami()) {
+    const firmy = await firmySOtevrenymiFakturami()
+    if (firmy === null) parovani = { stav: 'chyba', sparovano: 0, dorovnano: 0 }
+    for (const tenantId of firmy ?? []) {
       if (Date.now() >= zacatek + 50_000) break
       const r = await automatickyParovatPlatby(tenantId, { konecMs: zacatek + 55_000 })
       parovani = {

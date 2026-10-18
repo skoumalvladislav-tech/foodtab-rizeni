@@ -7,6 +7,7 @@ import { hasAccess, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { pristupKFakturam } from '@/lib/faktury-pristup'
+import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { pobockaUctu, ucetPatriRozsahu } from '@/lib/finance-platby-pobocka'
@@ -213,8 +214,12 @@ export async function zmenitPobockuUctu(formData: FormData): Promise<void> {
 
 const VZOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** Faktury firmy jsou zavřené (stěhují se do hlavní databáze, nebo vráceno). */
-const FAKTURY_ZAVRENE = 'Faktury jsou teď zavřené (stěhují se do hlavní databáze) — párování počká na dokončení.'
+/** Proč teď párovat nejde — věta podle stavu brány Faktur (stěhují se, vrácené, chyba…). */
+function fakturyZavrene(pristup: Parameters<typeof hlaskaBrany>[0]): string {
+  return `${hlaskaBrany(pristup).text} Párování s fakturami teď nejde.`
+}
+
+const BEZ_FAKTUR = 'Párovat s fakturami (a rušit párování) smí ten, kdo má právo „Vidět přijaté faktury“ — mění stav faktury.'
 
 /** Odmítnutí párování mimo celou firmu — viz `pripravitFiremni`. */
 const PAROVANI_JEN_FIRMA =
@@ -266,7 +271,7 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
   // Párování čte částku faktury — bez práva na faktury nejde (stejně jako na stránce Plateb).
   // Faktury pobočku nemají: právo za celou firmu, jako faktury/akce.ts.
   if ((await zkusPristup(tenantId, 'faktury.read', TENANT_SCOPE_SEGMENT)).stav !== 'ok') {
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Párovat s fakturami smí ten, kdo má právo „Vidět přijaté faktury“.')}`)
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(BEZ_FAKTUR)}`)
   }
 
   if (!VZOR_UUID.test(fakturaId)) {
@@ -276,7 +281,7 @@ export async function potvrditParovani(formData: FormData): Promise<void> {
   // Faktury zavřené (stěhují se) → párování počká; databáze by ho odmítla taky.
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') {
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(FAKTURY_ZAVRENE)}`)
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(fakturyZavrene(pristupFaktury))}`)
   }
 
   const { data, error } = await supabase.rpc('sparovat_platbu_s_fakturou', {
@@ -330,9 +335,14 @@ export async function zrusitAlokaci(formData: FormData): Promise<void> {
 
   const { supabase, tenantId } = await pripravitFiremni(rozsah, 'finance.manage', PAROVANI_JEN_FIRMA)
 
+  // Právo na Faktury výslovně a PRVNÍ: bez něj by brána (stav převodu čte
+  // jen ten, kdo Faktury vidí) vypadala jako „Faktury se stěhují".
+  if ((await zkusPristup(tenantId, 'faktury.read', TENANT_SCOPE_SEGMENT)).stav !== 'ok') {
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(BEZ_FAKTUR)}`)
+  }
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') {
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(FAKTURY_ZAVRENE)}`)
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(fakturyZavrene(pristupFaktury))}`)
   }
 
   const { error } = await supabase.rpc('zrusit_parovani_faktury', {
@@ -342,7 +352,7 @@ export async function zrusitAlokaci(formData: FormData): Promise<void> {
   })
 
   if (error) {
-    const zprava = /oprávnění|Vidět přijaté|nepatří|otevřené/.test(error.message) ? error.message : 'Zrušení párování se nepodařilo.'
+    const zprava = /oprávnění|Vidět přijaté|nepatří|otevřené|není co rušit/.test(error.message) ? error.message : 'Zrušení párování se nepodařilo.'
     redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(zprava)}`)
   }
 

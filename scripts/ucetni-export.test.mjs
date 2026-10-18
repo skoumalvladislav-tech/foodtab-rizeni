@@ -52,6 +52,14 @@ const radkyPopis = sestavitRadkyExportu(
 )
 ok('popis „číslo (dodavatel)", neznámá faktura zůstane jako id', radkyPopis[0].faktury === 'FV2026/0815 (Dodavatel s.r.o.), f-zmizela')
 ok('bez čísla jen dodavatel, bez obojího věta', popisFaktury(null, 'D') === 'D' && popisFaktury('', '') === 'faktura bez čísla')
+const radkyDve = sestavitRadkyExportu(
+  [{ id: 't1', datum: '2026-10-01', smer: 'vydaj', castkaHaleru: 1000, protistrana: 'X', vs: '1', kategorie: null, zdroj: 'csv_banka', branchId: null }],
+  [{ transakceId: 't1', fakturaId: 'f1', stav: 'potvrzeno' }, { transakceId: 't1', fakturaId: 'f2', stav: 'potvrzeno' },
+   { transakceId: 't1', fakturaId: 'f1', stav: 'potvrzeno' }],
+  {},
+  { f1: popisFaktury(null, 'Makro'), f2: popisFaktury(null, 'Makro') },
+)
+ok('dvě faktury se stejným popisem jsou v exportu dvakrát, táž faktura jednou', radkyDve[0].faktury === 'Makro, Makro')
 
 console.log('\n== branchId null → středisko "Firma" ==')
 

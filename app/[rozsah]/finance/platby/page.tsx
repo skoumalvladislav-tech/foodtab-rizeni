@@ -6,6 +6,7 @@ import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
@@ -201,36 +202,45 @@ async function nactiNavrhyParovani(
   transakce: readonly Transakce[],
   alokovanoMapa: ReadonlyMap<string, number>,
   vidiFaktury: boolean,
-): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[] }> {
-  if (!vidiFaktury) return { navrhy: [], faktury: [] }
+): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[]; zavreno: string | null }> {
+  if (!vidiFaktury) return { navrhy: [], faktury: [], zavreno: null }
   const pristupFaktury = await pristupKFakturam(tenantId)
-  if (pristupFaktury.stav !== 'ok') return { navrhy: [], faktury: [] }
+  // Zavřené Faktury (stěhují se, vrácené, chyba) — říct proč, ne mlčet.
+  if (pristupFaktury.stav !== 'ok') {
+    return { navrhy: [], faktury: [], zavreno: `${hlaskaBrany(pristupFaktury).text} Párování s fakturami teď nejde.` }
+  }
+  const nenacteno = { navrhy: [], faktury: [], zavreno: 'Faktury pro párování se nepodařilo načíst — zkuste stránku obnovit.' }
 
   const faktury: Faktura[] = []
   try {
     for (let strana = 0; strana < 10; strana++) {
       const { data, error } = await fakturyFirmy(pristupFaktury,
-        'id, supplier:dodavatel, variable_symbol:variabilni_symbol, castka_haleru, due_date:splatnost, issue_date:datum_vystaveni, status:stav')
+        'id, supplier:dodavatel, variable_symbol:variabilni_symbol, castka_haleru, currency:mena, due_date:splatnost, issue_date:datum_vystaveni, status:stav')
         .eq('archivovano', false)
         .order('id', { ascending: true })
         .range(strana * STRANKA_FAKTUR, strana * STRANKA_FAKTUR + STRANKA_FAKTUR - 1)
-      if (error) return { navrhy: [], faktury: [] }
+      if (error) return nenacteno
       faktury.push(...naFaktury(data as unknown as RadekFaktury[]).filter(jeNezaplacena))
       if (!data || data.length < STRANKA_FAKTUR) break
     }
   } catch {
-    return { navrhy: [], faktury: [] }
+    return nenacteno
   }
 
-  if (faktury.length === 0) return { navrhy: [], faktury: [] }
+  if (faktury.length === 0) return { navrhy: [], faktury: [], zavreno: null }
 
-  const kandidati: KandidatFaktura[] = faktury.map((f) => ({
+  const naKandidata = (f: Faktura): KandidatFaktura => ({
     id: f.id,
     vs: f.variable_symbol,
     castkaHaleru: f.castka_haleru,
     dodavatel: f.supplier,
     datum: f.due_date ?? f.issue_date,
-  }))
+  })
+  // Ruční párování nabízí všechny; NÁVRHY jen faktury v Kč — platby jsou
+  // v Kč a centy eurové faktury by se porovnaly s haléři (stejně jako
+  // automatické párování, vybratAutomatickaParovani).
+  const kandidati: KandidatFaktura[] = faktury.map(naKandidata)
+  const kandidatiNavrhu: KandidatFaktura[] = faktury.filter((f) => f.currency === 'CZK').map(naKandidata)
 
   const vysledky: { navrh: Navrh; faktura: KandidatFaktura }[] = []
   for (const t of transakce) {
@@ -246,12 +256,12 @@ async function nactiNavrhyParovani(
       protistrana: t.protistrana,
       datum: t.datum,
     }
-    const navrh = navrhnoutParovani(kandidatTransakce, kandidati)
+    const navrh = navrhnoutParovani(kandidatTransakce, kandidatiNavrhu)
     if (!navrh) continue
-    const faktura = kandidati.find((k) => k.id === navrh.fakturaId)
+    const faktura = kandidatiNavrhu.find((k) => k.id === navrh.fakturaId)
     if (faktura) vysledky.push({ navrh, faktura })
   }
-  return { navrhy: vysledky, faktury: kandidati }
+  return { navrhy: vysledky, faktury: kandidati, zavreno: null }
 }
 
 export default async function FinancePlatby({
@@ -342,7 +352,7 @@ export default async function FinancePlatby({
   // Párování (návrhy, ruční, potvrzená) jen za celou firmu — na pobočce
   // se nenačítá ani databáze Faktur.
   const parovani: Awaited<ReturnType<typeof nactiNavrhyParovani>> = pobocka
-    ? { navrhy: [], faktury: [] }
+    ? { navrhy: [], faktury: [], zavreno: null }
     : await nactiNavrhyParovani(tenantId, transakce, alokovanoMapa, vidiFaktury)
   const { navrhy, faktury: fakturyKandidati } = parovani
   const potvrzeneAlokace: PotvrzenaAlokace[] = pobocka
@@ -418,6 +428,8 @@ export default async function FinancePlatby({
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
             Párování plateb s fakturami vidí ten, kdo má právo „Vidět přijaté faktury“.
           </p>
+        ) : parovani.zavreno ? (
+          <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>{parovani.zavreno}</p>
         ) : null}
 
         {navrhy.length > 0 ? (

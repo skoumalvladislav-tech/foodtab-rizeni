@@ -80,12 +80,13 @@ export function sestavitRadkyExportu(
   nazvyPobocek: Readonly<Record<string, string>>,
   popisyFaktur: Readonly<Record<string, string>> = {},
 ): RadekExportu[] {
+  // Bez opakování podle ID faktury, ne podle popisu: dvě faktury Makra bez
+  // čísla mají stejný popis („Makro") a účetní musí vidět, že jsou dvě.
   const fakturyPodleTransakce = new Map<string, string[]>()
   for (const p of platby) {
     if (p.stav !== 'potvrzeno') continue
     const seznam = fakturyPodleTransakce.get(p.transakceId) ?? []
-    const popis = popisyFaktur[p.fakturaId] ?? p.fakturaId
-    if (!seznam.includes(popis)) seznam.push(popis)
+    if (!seznam.includes(p.fakturaId)) seznam.push(p.fakturaId)
     fakturyPodleTransakce.set(p.transakceId, seznam)
   }
 
@@ -98,7 +99,7 @@ export function sestavitRadkyExportu(
     castkaHaleru: t.castkaHaleru,
     protistrana: t.protistrana,
     vs: t.vs,
-    faktury: (fakturyPodleTransakce.get(t.id) ?? []).join(', '),
+    faktury: (fakturyPodleTransakce.get(t.id) ?? []).map((id) => popisyFaktur[id] ?? id).join(', '),
     zdroj: t.zdroj,
   }))
 

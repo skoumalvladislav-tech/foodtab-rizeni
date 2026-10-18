@@ -88,7 +88,7 @@ export default async function FakturyNova({
             <span style={popisek}>Vyfotit / nahrát fakturu</span>
             <input type="file" name="fotografie" accept="image/jpeg,image/png,image/webp,application/pdf" style={pole} />
             <small style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--muted)' }}>
-              Volitelné — JPEG, PNG, WebP nebo PDF do 10 MB. Uloží se k faktuře (neveřejně, otevře ho jen ten, kdo vidí Faktury).
+              Volitelné — JPEG, PNG, WebP nebo PDF do 1 MB (větší fotku zmenšete). Uloží se k faktuře (neveřejně, otevře ho jen ten, kdo vidí Faktury).
             </small>
           </label>
 

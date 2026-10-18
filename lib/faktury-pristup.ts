@@ -74,10 +74,12 @@ export function fakturyFirmy(
  * (banka, příjem z e-mailu). Dřív to byla jediná firma z nastavení
  * prostředí FAKTURY_DB_TENANT_ID; teď rozhoduje databáze.
  */
-export async function firmySOtevrenymiFakturami(): Promise<string[]> {
+export async function firmySOtevrenymiFakturami(): Promise<string[] | null> {
   const supabase = klientUlohy()
-  if (!supabase) return []
+  if (!supabase) return null
   const { data, error } = await supabase.from('faktury_prevod').select('tenant_id').eq('stav', 'dokonceno')
-  if (error) return []
+  // `null` = nevím (chyba, chybí klíč úlohy) — volající to musí odlišit
+  // od „žádná firma Faktury otevřené nemá".
+  if (error) return null
   return ((data ?? []) as { tenant_id: string }[]).map((r) => r.tenant_id)
 }

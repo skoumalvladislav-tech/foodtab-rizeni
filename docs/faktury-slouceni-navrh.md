@@ -74,10 +74,11 @@ ji nezná). Do veřejného logu jdou jen čísla.
 | Krok | Smí ve stavu | Co dělá |
 |---|---|---|
 | `nanecisto` | kdykoli | jen čte: anomálie, rozdíly, měření, visící párování; po dokončení i „změnilo se ve staré od převodu" |
-| `zahajit` | bez řádku, `vraceno` | Faktury firmy se zavřou; odmítne, když jsou anomálie nebo 0 faktur |
+| `zahajit` | bez řádku, `vraceno` | Faktury firmy se zavřou; odmítne, když jsou anomálie nebo 0 faktur; po vrácení odmítne, dokud `zpet` nepřenesl všechny změny z appky (jinak by je převod přepsal); uvolní uuid faktur v párování |
 | `prevest` | `probiha` | kopie staré databáze + vložení / oprava / smazání faktur, opakovatelné; víc než 20 mazání jen s volbou |
 | `prilohy` | `probiha`, `dokonceno` | PDF ze starého veřejného kbelíku do soukromého, po dávkách; odkazy příjmu z e-mailu se nestahují (vedou na appku), vezme se soubor evidence |
 | `dokoncit` | `probiha` | stará databáze se od posledního převodu nesmí změnit; databáze porovná každou fakturu pole po poli, počty, přílohy; teprve pak `dokonceno` a doplní cizí klíče |
+| `zrusit` | `probiha` | cesta ven bez dokončení: stav `vraceno` — Faktury v appce zůstanou zavřené, stará cesta párování se otevře (pro předchozí verzi appky) |
 | `vratit` | `dokonceno` | Faktury v appce se zavřou, stará cesta párování se otevře |
 | `zpet_nanecisto` / `zpet` | `vraceno` | tři strany (kopie z dokončení, appka, stará): přenese jen změny z appky; co se změnilo i ve staré, je konflikt a nepřepíše se |
 
@@ -99,8 +100,9 @@ Faktury jsou otevřené jen ve stavu `dokonceno`. Jinak věta: „připravují
 se" (kód je venku dřív než `db push`), „stěhují se" (vlastník staré
 databáze), „vrácené", „zatím nejsou zapnuté" (ostatní firmy). Příjem
 z e-mailu a automatické párování zavřenou firmu přeskočí (schránku ani
-nečtou). Dnes a upozornění ve Financích během stěhování řeknou, že se
-Faktury stěhují (ne „nic po splatnosti"). Každý dotaz nese firmu
+nečtou). Dnes, Platby a upozornění ve Financích se zavřenými Fakturami
+řeknou proč (stěhují se, vrácené, chyba) — ne „nic po splatnosti";
+chyba dotazu se nepočítá jako nula. Každý dotaz nese firmu
 (`fakturyFirmy`).
 
 ## 6. Plán přepnutí (kroky pro Šéfíka)
@@ -125,7 +127,8 @@ Odstávka Faktur: od kroku 0 do kroku 6, odhadem 30–60 minut.
 
 | Kdy | Jak |
 |---|---|
-| Před `dokoncit` | Revert PR v `main` (Faktury se vrátí na starou databázi, ta je netknutá). Nové tabulky zůstanou, nikomu nevadí. |
+| Před `zahajit` (jen `db push`) | Revert PR v `main` (Faktury se vrátí na starou databázi, ta je netknutá). Nové tabulky zůstanou, nikomu nevadí. |
+| Po `zahajit`, před `dokoncit` | 1) `zrusit` (bez něj by předchozí verze appky nemohla párovat — v `probiha` se párování nemění), 2) revert PR v `main`. Stará databáze je netknutá; v appce mezi tím nic nevzniklo (Faktury byly zavřené). |
 | Po `dokoncit`, před úklidem | 1) `vratit`, 2) `zpet_nanecisto`, 3) `zpet` (opakovat, dokud nehlásí 0 k přenesení; konflikty rozhodne člověk), 4) revert PR v `main`. Párování mají vyplněné i staré textové `faktura_id`, předchozí verze appky je přečte a stará cesta párování je ve stavu `vraceno` otevřená. |
 | Po úklidu | Jen ze zálohy — proto úklid až po zkušební době. |
 

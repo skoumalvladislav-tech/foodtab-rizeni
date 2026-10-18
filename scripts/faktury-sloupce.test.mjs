@@ -11,7 +11,8 @@
  * Pusť: node scripts/faktury-sloupce.test.mjs
  */
 
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { halereZFormulare, naFakturu, odkazNaPrilohu, SLOUPCE_FAKTURY } from '../lib/faktury-sloupce.ts'
 
@@ -39,6 +40,43 @@ const vracene = new Set(casti.map((c) => c.split(':')[0]))
 const nevraci = pole.filter((p) => p !== 'amount' && !vracene.has(p))
 ok(`každé pole typu Faktura (kromě amount) dotaz vrací${nevraci.length ? ' — CHYBÍ: ' + nevraci.join(', ') : ''}`, pole.length >= 20 && nevraci.length === 0)
 ok('úryvek textu dokladu se do seznamů netahá (jen u odmítnutí)', !cil.includes('vytah_textu'))
+
+console.log('\n1b. Každý dotaz fakturyFirmy(…) v app/ a lib/ — i ty s vlastním výčtem sloupců')
+{
+  // Typ výsledku je `unknown` přetypovaný na tvar řádku: alias na neexistující
+  // sloupec by prošel překladem i tsc a spadl až v ostré (prázdná stránka).
+  const soubory = []
+  const projit = (adresar) => {
+    for (const jmeno of readdirSync(adresar)) {
+      const cesta = join(adresar, jmeno)
+      if (statSync(cesta).isDirectory()) projit(cesta)
+      else if (/\.(ts|tsx)$/.test(jmeno)) soubory.push(cesta)
+    }
+  }
+  projit('app')
+  projit('lib')
+  let volani = 0
+  let sVyctem = 0
+  const nezname = []
+  const spatne = []
+  for (const cesta of soubory) {
+    const zdroj = readFileSync(cesta, 'utf8')
+    for (const m of zdroj.matchAll(/fakturyFirmy\(\s*[\w.]+\s*,\s*(?:(['"])([^'"]*)\1|([\w.]+)|(\S))/g)) {
+      volani++
+      if (m[3] === 'SLOUPCE_FAKTURY') continue // oddíl 1
+      if (m[2] === undefined) { nezname.push(`${cesta}: ${m[3] ?? m[4]}`); continue }
+      const lit = [m[0], m[1], m[2]]
+      sVyctem++
+      for (const cast of lit[2].split(',').map((c) => c.trim()).filter(Boolean)) {
+        const sloupec = cast.includes(':') ? cast.split(':')[1].trim() : cast
+        if (!sloupce.has(sloupec)) spatne.push(`${cesta}: ${cast}`)
+      }
+    }
+  }
+  ok(`nalezeno ${volani} volání, z toho ${sVyctem} s vlastním výčtem`, volani >= 20 && sVyctem >= 10)
+  ok(`každé volání má výčet jako text nebo SLOUPCE_FAKTURY${nezname.length ? ' — NEZNÁMÉ: ' + nezname.join('; ') : ''}`, nezname.length === 0)
+  ok(`každý sloupec ve výčtech existuje${spatne.length ? ' — CHYBÍ: ' + spatne.join('; ') : ''}`, spatne.length === 0)
+}
 
 console.log('\n2. Částka: haléře se počítají, koruny jen ukazují')
 {
