@@ -1,7 +1,7 @@
 # Stav k 19. 10. 2026 — sloučení appky Faktury s Foodtabem
 
 > Zadání 18. 10. 2026: „potřebuji sloučit apku faktury s apkou foodtab".
-> Větev `faktury-slouceni`, PR **#ČÍSLO**. Nic z toho není nasazené:
+> Větev `faktury-slouceni`, PR **#147**. Nic z toho není nasazené:
 > nic jsem neslučoval, nespouštěl `db push`, nepřeváděl data a neměnil
 > nic ve Vercelu. To všechno je na váš výslovný pokyn.
 
@@ -48,14 +48,16 @@
 
 - **Databáze (scénář `krok99`):** 125 kontrol, všechny prošly v PGlite.
   PGlite **neověří** pravidla přístupu ani granty — o tom rozhoduje CI
-  „Migrace a scénáře" proti skutečnému PostgreSQL. Výsledek CI:
-  **doplním po doběhnutí**.
+  „Migrace a scénáře" proti skutečnému PostgreSQL 16: **zelená**, krok99
+  tam prošel taky se **125 kontrolami**, celá sada databáze má 3661
+  kontrol (commit `ee23b9f`).
   - Pokrývá: zavřené Faktury pro všechny před převodem, porovnání pole
     po poli, dokončení jen když vše sedí (a každé odmítnutí ověřené
     podle důvodu), čtení jen za celou firmu, párování ve stejném kroku,
     cizí firma nikde, úložiště jen do vlastní složky, zrušení převodu,
     vrácení a nové zahájení, zrušení celé firmy.
-- **Node testy:** v seznamu CI je **85 sad**, všechny lokálně prošly.
+- **Node testy:** v seznamu CI je **85 sad**, všechny prošly lokálně
+  i v CI „Testy aplikace".
   Nové nebo přepsané pro Faktury:
   - `faktury-prevod` 111 kontrol (převod řádku tam a zpátky, částka na
     haléř přesně, čas na mikrosekundy, tři strany návratu zpět);
@@ -66,7 +68,9 @@
     které existují);
   - upravené `faktury-filtry` 22, `faktury-prijem-jadro` 83,
     `ucetni-export` 18, `finance-platby-pobocka` 46.
-- `tsc` čisté. Sestavení (`npm run build`): **doplním**.
+- `tsc` čisté. Sestavení prošlo (`next build --webpack` — Turbopack
+  v pracovní kopii vedle hlavní padá na odkazu `node_modules`, s kódem
+  to nesouvisí; Vercel náhled je zelený).
 - **Schválná rozbití:** 18 v posledním kole, každé spadlo na kontrole,
   na kterou mířilo. Jedno odhalilo kontrolu, která by prošla i bez
   brány, kterou hlídá: dokončení odmítlo kvůli přílohám, ne kvůli
@@ -149,7 +153,10 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
 
 - **#146 Jiné platby** a **#145 hlídač plánovače:** střet je jen
   v seznamech (CI testy, `run.sh`, `databaze.yml`, `otazky.md`) — při
-  slučování ponechat obě strany. Scénáře se nesrážejí (krok97 / 98 /
+  slučování ponechat obě strany. Ověřené nanečisto: migrace a scénáře
+  všech tří větví poskládané dohromady, celý řetěz v jedné databázi jako
+  v CI — 3808 kontrol v PGlite, nic nespadlo (krok97 10, krok98 140,
+  krok99 125). Scénáře se nesrážejí (krok97 / 98 /
   99), otázky taky ne (#146 má 50–57, Faktury 58–64).
 - Obsahově se #146 Faktur netýká: Jiné platby pracují s **vydanými**
   fakturami (`faktura_cislo`), ne s přijatými, a nesahají na párování
