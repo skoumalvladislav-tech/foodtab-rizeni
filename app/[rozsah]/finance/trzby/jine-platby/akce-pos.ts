@@ -1,7 +1,6 @@
 'use server'
 
 import { obnovitOperaci, provestOperaci, type OperacePos, type PosProOperaci, type RepoOperaci, type VysledekOdeslani, type ZaverOperace } from '@/lib/jine-platby-pos-operace'
-import { oknoProvoznihoDne, posunoutDen } from '@/lib/pokladna-cas'
 import { otevritRelaciPokladny, type RelacePokladny } from '@/lib/pokladna-relace'
 import type { RelacePos } from '@/lib/pos-provider-contract'
 import { klientUlohy } from '@/lib/supabase/uloha'
@@ -11,15 +10,19 @@ import {
   dohledaniZUctu,
   HLASKA_BEZ_DOHLEDANI,
   HLASKA_VERZE,
+  jeHlaskaDuplicity,
   jeUuid,
+  oknaKontroly,
   operaceZDb,
   pole,
   POPIS_VYSLEDKU_SKLADU,
   POPIS_VYSLEDKU_TRZBY,
+  sloucitUcty,
   textChybyDb,
   verzeZFormulare,
   vyhodnotitKontroluSkladu,
   vyhodnotitKontroluTrzby,
+  vysledekBezHledaniPodleUzavreni,
   zahajeniZDb,
   type DohledaniOdpisu,
   type DotazUctu,
@@ -116,19 +119,28 @@ async function zjistitVPokladne(p: Pripraveno, rel: RelaceOk, druh: 'trzba' | 's
   const provozovny = p.z.posProvozovna ? [p.z.posProvozovna] : rel.provozovny.filter((o) => o.branch_id === p.z.branchId).map((o) => o.id)
   if (provozovny.length === 0) return { chyba: 'Provozovna pokladny není přiřazená k pobočce (Integrace → Pokladní systémy) — není kde hledat.' }
 
-  // Okno: provozní den prodeje ± 1 den (účet z 2:15 patří k včerejšku, fotka mohla vzniknout den po).
+  // Dva dotazy na provozovnu (oknaKontroly, ./[zaznam]/logika.ts):
+  //   * uzavřené účty podle data UZAVŘENÍ, provozní den −1 až +2 — účet otevřený
+  //     den předem a uzavřený den prodeje (nebo po něm) okno podle vytvoření mine;
+  //   * otevřené účty podle vytvoření, od dne −60 — otevřený účet může běžet týdny.
+  // Výsledky se sloučí bez opakování; úplné jsou jen tehdy, když jsou úplné oba.
   const kal = await kalendarPobocky(p.supabase, p.tenantId, p.z.branchId)
-  const okno = {
-    odMs: oknoProvoznihoDne(posunoutDen(p.z.datumProdeje, -1), kal.denZacina, kal.pasmo).odMs,
-    doMs: oknoProvoznihoDne(posunoutDen(p.z.datumProdeje, 1), kal.denZacina, kal.pasmo).doMs,
-  }
+  const okna = oknaKontroly(p.z.datumProdeje, kal.denZacina, kal.pasmo)
+  const okno = { ...okna.uzavrene, otevrene: okna.otevrene }
 
   const dotazy: DotazUctu[] = []
   for (const provozovna of provozovny) {
-    const r = await ucty(provozovna, okno.odMs, okno.doMs)
+    const uzavrene = await ucty(provozovna, okna.uzavrene.odMs, okna.uzavrene.doMs, { podle: 'uzavreni' })
+    if (uzavrene.stav !== 'ok') {
+      // Trvalá chyba (pokladna hledání podle uzavření neumí): výsledek „nelze ověřit“ s vysvětlením —
+      // okno podle vytvoření by bylo jen odhadem. Dočasná chyba NENÍ výsledek: nic se nezapíše.
+      if (uzavrene.druh === 'jina') return vysledekBezHledaniPodleUzavreni(druh, uzavrene.duvod, okna, provozovny)
+      return { chyba: `Pokladna teď neodpověděla: ${uzavrene.duvod}` }
+    }
+    const otevrene = await ucty(provozovna, okna.otevrene.odMs, okna.otevrene.doMs, { jenOtevrene: true })
     // Chyba pokladny NENÍ výsledek kontroly — nic se nezapíše, starší kontrola zůstane.
-    if (r.stav !== 'ok') return { chyba: `Pokladna teď neodpověděla: ${r.duvod}` }
-    dotazy.push({ provozovna, ucty: r.ucty, uplne: r.uplne })
+    if (otevrene.stav !== 'ok') return { chyba: `Pokladna teď neodpověděla: ${otevrene.duvod}` }
+    dotazy.push(sloucitUcty(provozovna, uzavrene, otevrene))
   }
 
   if (druh === 'trzba') return vyhodnotitKontroluTrzby(p.z, dotazy, okno)
@@ -177,6 +189,11 @@ async function zapsatKontrolu(p: Pripraveno, druh: 'trzba' | 'sklad', v: Zjisten
  * s obsahem, který sama znovu sestaví, a chce čerstvou kontrolu
  * „neodečteno“. Po schválení se operace rovnou provede (u pokladny
  * bez zápisu přes API ji orchestrátor sám uzavře jako „nepodporováno“).
+ *
+ * `p_duvod` znamená u každého rozhodnutí něco jiného, proto dvě pole:
+ * zamítnutí → `duvod` (důvod zamítnutí, povinný); schválení →
+ * `duplicita_duvod` (proč to není duplicita výdeje, nepovinné — databáze
+ * ho chce, jen když najde podobný výdej téže pobočky).
  */
 export async function rozhodnoutVydej(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.vydej_pos')
@@ -189,6 +206,10 @@ export async function rozhodnoutVydej(_predchozi: StavAkce, formData: FormData):
   if (rozhodnuti !== 'schvalit' && rozhodnuti !== 'zamitnout') return chyba('Vyberte, jestli výdej potvrdit, nebo zamítnout.')
   const duvod = pole(p.f, 'duvod')
   if (rozhodnuti === 'zamitnout' && duvod.length < 5) return { stav: 'chyba', text: 'Napište důvod zamítnutí.', chyby: { duvod: 'Napište důvod zamítnutí.' } }
+  const duplicita = pole(p.f, 'duplicita_duvod')
+  if (rozhodnuti === 'schvalit' && duplicita !== '' && duplicita.length < 5) {
+    return { stav: 'chyba', text: 'Napište, proč to není duplicita (aspoň pár slov).', chyby: { duplicita_duvod: 'Napište, proč to není duplicita (aspoň pár slov).' } }
+  }
 
   // Návrh musí patřit TOMUHLE (ověřenému) záznamu — id z formuláře je jen návrh.
   const { data: navrh, error: chybaNavrhu } = await p.supabase
@@ -204,9 +225,13 @@ export async function rozhodnoutVydej(_predchozi: StavAkce, formData: FormData):
     p_navrh: navrhId,
     p_otisk: otisk,
     p_schvalit: rozhodnuti === 'schvalit',
-    p_duvod: rozhodnuti === 'zamitnout' ? duvod.slice(0, 1000) : null,
+    p_duvod: rozhodnuti === 'zamitnout' ? duvod.slice(0, 1000) : duplicita === '' ? null : duplicita.slice(0, 1000),
   })
-  if (error) return vysledekChyby(error, 'rozhodnutí o výdeji')
+  if (error) {
+    const stav = vysledekChyby(error, 'rozhodnutí o výdeji')
+    // „Možná duplicita výdeje…“ → k poli s důvodem (formulář ho zaměří, napsaný text zůstane).
+    return rozhodnuti === 'schvalit' && error.code === '23514' && jeHlaskaDuplicity(stav.text) ? { ...stav, chyby: { duplicita_duvod: stav.text } } : stav
+  }
   if (rozhodnuti === 'zamitnout') return hotovo(p, 'Výdej zamítnut s důvodem. Sklad se nemění.')
 
   const provedeni = await provestPripravenou(p)

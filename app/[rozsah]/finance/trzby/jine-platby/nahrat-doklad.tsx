@@ -30,10 +30,13 @@ import { pripojitSoubor } from './akce-soubory'
  * `pripojitSoubor` soubor stáhne, pozná typ z obsahu, spočítá otisk
  * a připojí ho přes `jine_platby_pripojit_soubor`.
  *
- * Fotka se zmenšuje JEN, když musí (větší než strop pro AI nebo HEIC),
- * a vlastní funkcí pro doklady (delší strana 4000 px, JPEG 0,9) — ne
- * `lib/obrazky.ts`, který by drobné písmo účtenky rozmazal
- * (lib/jine-platby-soubory.ts).
+ * Fotka se zmenšuje JEN, když musí (větší než strop fotky pro AI
+ * `MAX_BAJTU_OBRAZKU_PRO_AI`, 5 MB, nebo HEIC), a vlastní funkcí pro
+ * doklady (delší strana 4000 px a JPEG 0,9, pak 0,8, nakonec 3000 px) —
+ * ne `lib/obrazky.ts`, který by drobné písmo účtenky rozmazal
+ * (lib/jine-platby-soubory.ts). Fotka, která se pod strop nevejde ani
+ * tak, se nenahraje a řekne se proč (`zkontrolovatPoZmenseni`) — AI by
+ * ji stejně odmítla.
  *
  * ČESTNĚ: bez spojení nahrání selže nahlas, do fronty se nic neukládá.
  * Soubor, který se nahrál a nepřipojil (zavřená karta uprostřed), zůstane
@@ -89,22 +92,24 @@ export default function NahratDoklad({
       for (const [poradi, polozka] of kontrola.polozky.entries()) {
         const s = soubory[polozka.index]
         const nazev = ocistitNazev(s.name)
-        setPrubeh(`Nahrávám ${poradi + 1} z ${kontrola.polozky.length}: ${nazev}`)
 
         let blob: Blob = s
         let mime = typSouboru(s)
         if (polozka.akce === 'zmensit') {
+          setPrubeh(`Zmenšuji ${poradi + 1} z ${kontrola.polozky.length}: ${nazev}`)
           const zmenseny = await zmensitDoklad(s)
           if (zmenseny) {
             blob = zmenseny
             mime = 'image/jpeg'
           }
         }
+        // Fotka nad stropem pro AI (nezmenšená, nebo ani po zmenšení) se odmítne s vysvětlením.
         const problem = zkontrolovatPoZmenseni(s.name, mime, blob.size)
         if (problem || !jeTypSouboru(mime)) {
           nove.push({ text: problem ?? `„${nazev}“: tenhle typ souboru nejde nahrát.`, odkaz: null })
           continue
         }
+        setPrubeh(`Nahrávám ${poradi + 1} z ${kontrola.polozky.length}: ${nazev}`)
 
         const cesta = cestaSouboru(tenantId, branchId, zaznamId, noveId(), mime)
         const { error } = await supabase.storage.from(KBELIK_JINYCH_PLATEB).upload(cesta, blob, {

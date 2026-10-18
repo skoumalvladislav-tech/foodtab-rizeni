@@ -12,7 +12,7 @@ import { haleruNaText } from '@/lib/jine-platby-castky'
 import { hlavickaZeZaznamu, numericNaText, SLOUPCE_POLOZKY, SLOUPCE_ZAZNAMU, zDbPolozka, zDbZaznam } from '@/lib/jine-platby-db'
 import { mozneDuplicity, type IdentitaZaznamu } from '@/lib/jine-platby-duplicity'
 import { sestavitPodklady, type KontaktFaktury } from '@/lib/jine-platby-faktura'
-import { zkontrolovatDoklad, zkontrolovatNavrh, type KontrolaDokladu } from '@/lib/jine-platby-kontrola'
+import { zkontrolovatDoklad, type KontrolaDokladu } from '@/lib/jine-platby-kontrola'
 import { navrhnoutMapovani } from '@/lib/jine-platby-mapovani'
 import { zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
 import { dostupneAkce, krokyPruvodce, muzeSchvalitVydej } from '@/lib/jine-platby-stav'
@@ -26,7 +26,7 @@ import Nadpis from '../../../../nadpis'
 import { aliasyPripojeni, kalendarPobocky, katalogPripojeni } from './akce-zaklad'
 import type { PolozkaEditoru } from './editor-navrhu'
 import Kroky from './kroky'
-import { datumCesky, jeUuid } from './logika'
+import { coZkontrolovat, datumCesky, jednotkaCesky, jeUuid } from './logika'
 import { metadataPokladny } from './nacteni'
 import Originaly from './originaly'
 import SekceKontrola from './sekce-kontrola'
@@ -63,6 +63,14 @@ export const maxDuration = 120
  * záznamu)` — tady se proto ptáme na totéž, ať tlačítko neslibuje, co
  * databáze odmítne. Co nakreslit, říká `dostupneAkce` (zrcadlo pravidel
  * databáze); rozhoduje vždy databáze.
+ *
+ * ---------------------------------------------------------------------
+ * BANKOVNÍ PLATBY A KONTAKTY: jen s finance.read ZA CELOU FIRMU
+ *
+ * RLS `transakce` i `kontakty` je za celou firmu, ne za pobočku — stejné
+ * pravidlo jako zkusPristupFinanci na pobočce. Proto se platby, napárovaná
+ * platba i odběratelé načítají jen při `hasAccess(tenantId, 'finance.read',
+ * null)`; jinak věta HLASKA_BEZ_FINANCI_FIRMY a žádný výběr platby.
  */
 
 /** Okamžik vykreslení — mimo komponentu, ať je vidět, že kreslení na něm závisí (čerstvost kontrol). */
@@ -97,8 +105,9 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
   const tedMs = ted()
   const zakl = { zaznam: z.id, verze: z.verze, rozsah }
 
-  const [pravaPole, uzivatel, kal, soubory, polozkyRadky, rozpoznaniRadek, navrhRadek, operaceRadek, historieRadky, trzbyRadky] = await Promise.all([
+  const [pravaPole, financeFirmy, uzivatel, kal, soubory, polozkyRadky, rozpoznaniRadek, navrhRadek, operaceRadek, historieRadky, trzbyRadky] = await Promise.all([
     Promise.all(PRAVA_CTENI_JINYCH_PLATEB.map(async (p) => [p, await hasAccess(tenantId, p, z.branchId)] as const)),
+    hasAccess(tenantId, 'finance.read', null),
     getUser(),
     kalendarPobocky(supabase, tenantId, z.branchId),
     supabase.from('jine_platby_soubory').select('id, poradi, mime, velikost, otisk').eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('poradi'),
@@ -143,12 +152,17 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
   const operaceRaw = operaceRadek.data as Record<string, unknown> | null
 
   // Pokladna záznamu (netajné údaje přes jine_platby_pokladny — až TEĎ, po RLS a zaznamPatriRozsahu, viz ./nacteni.ts).
-  const [pokladna, katalog, aliasy, vydejNahled] = await Promise.all([
+  // Katalog a aliasy se čtou po stránkách; nenačtený nebo moc velký katalog (strop stránek) stránku
+  // neshodí — ukáže se chyba u katalogu, přiřazení se nenabídne a uložení návrhu ho odmítne taky.
+  const [pokladna, nactenyKatalog, vydejNahled] = await Promise.all([
     z.pripojeniId ? metadataPokladny(supabase, z.pripojeniId, tenantId, z.branchId) : Promise.resolve(null),
-    katalogPripojeni(supabase, tenantId, z.pripojeniId),
-    aliasyPripojeni(supabase, tenantId, z.pripojeniId),
+    Promise.all([katalogPripojeni(supabase, tenantId, z.pripojeniId), aliasyPripojeni(supabase, tenantId, z.pripojeniId)]).then(
+      ([k, a]) => ({ katalog: k, aliasy: a, chyba: null as string | null }),
+      (e: unknown) => ({ katalog: [], aliasy: [], chyba: e instanceof Error ? e.message : 'Katalog pokladny se nepodařilo načíst.' }),
+    ),
     z.pripojeniId ? supabase.rpc('jine_platby_sestavit_vydej', { p_zaznam: z.id }) : Promise.resolve(null),
   ])
+  const { katalog, aliasy, chyba: chybaKatalogu } = nactenyKatalog
 
   const akce = dostupneAkce(z, prava, {
     maPokladnu,
@@ -156,6 +170,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
     stavOperace: typeof operaceRaw?.stav === 'string' ? operaceRaw.stav : null,
     tedMs,
     uzivatelId: uzivatel?.id ?? null,
+    dohledaniUctu: pokladna?.dohledaniUctu === true,
   })
   const kroky = krokyPruvodce(z, { pocetSouboru: seznamSouboru.length, pocetPolozek: polozky.length, maPokladnu, maZiveNavrhSkladu: zivyNavrh })
 
@@ -169,11 +184,12 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
       kontrolaRozpoznani = null
     }
   }
-  const kontrolaNavrhu = zkontrolovatNavrh(polozky, hlavickaZeZaznamu(z))
-  const keKontrole = polozky.filter((p) => p.vyzadujeKontrolu).length
-  const zbyvaKeKontrole = [...(keKontrole > 0 ? [`Položek ke kontrole: ${keKontrole}`] : []), ...kontrolaNavrhu.duvody]
+  // Co zkontrolovat a co z toho „Označit jako zkontrolované“ blokuje (nad ULOŽENÝMI položkami, jako databáze).
+  const kontrolaNavrhu = coZkontrolovat(polozky, hlavickaZeZaznamu(z))
 
   const katalogZivy = katalog.filter((k) => !k.smazano)
+  /** Jednotka prodeje pokladny podle produktu (česky) — pro panel skladu. */
+  const jednotkyProduktu: Record<string, string> = Object.fromEntries(katalogZivy.map((k) => [k.externiId, jednotkaCesky(k.jednotka)]))
   const polozkyEditoru: PolozkaEditoru[] = polozkySId.map((p) => ({
     id: p.id,
     nazevPuvodni: p.nazevPuvodni,
@@ -211,9 +227,9 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
     katalogAktualizovan = (data as { aktualizovano: string } | null)?.aktualizovano ?? null
   }
 
-  /* ---------- Odběratelé (kontakty patří celé firmě: RLS finance.read) ---------- */
+  /* ---------- Odběratelé (kontakty patří celé firmě: jen s finance.read za firmu) ---------- */
   let kontakty: { id: string; nazev: string; ico: string | null; dic: string | null }[] | null = null
-  if (prava.has('jine_platby.faktura')) {
+  if (financeFirmy && prava.has('jine_platby.faktura')) {
     const { data, error } = await supabase
       .from('kontakty')
       .select('id, nazev, ico, dic')
@@ -222,18 +238,16 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
       .is('deleted_at', null)
       .order('nazev')
       .limit(500)
-    const seznam = (data ?? []) as { id: string; nazev: string; ico: string | null; dic: string | null }[]
-    // Prázdno bez finance.read = RLS je nepustila (ne „firma nemá odběratele“) → jen ruční číslo faktury.
-    kontakty = error || (seznam.length === 0 && !prava.has('finance.read')) ? null : seznam
+    kontakty = error ? null : ((data ?? []) as { id: string; nazev: string; ico: string | null; dic: string | null }[])
   }
   let kontaktFaktury: KontaktFaktury | null = kontakty?.find((k) => k.id === z.kontaktId) ?? null
-  if (!kontaktFaktury && z.kontaktId && prava.has('finance.read')) {
+  if (!kontaktFaktury && z.kontaktId && financeFirmy) {
     const { data } = await supabase.from('kontakty').select('id, nazev, ico, dic').eq('id', z.kontaktId).eq('tenant_id', tenantId).maybeSingle()
     kontaktFaktury = (data as KontaktFaktury | null) ?? null
   }
   const podklady = sestavitPodklady(z, polozky, kontaktFaktury)
 
-  /* ---------- Úhrada (bankovní platby jen s finance.read) ---------- */
+  /* ---------- Úhrada (bankovní platby jen s finance.read za firmu) ---------- */
   let platby: PlatbaBanky[] | null = null
   let naparovana: PlatbaBanky | null = null
   const naPlatbu = (t: Record<string, unknown>): PlatbaBanky => ({
@@ -244,7 +258,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
     protistrana: String(t.protistrana ?? ''),
     vs: String(t.vs ?? ''),
   })
-  if (prava.has('finance.read')) {
+  if (financeFirmy) {
     if (prava.has('jine_platby.faktura') && z.mena) {
       const { data } = await supabase
         .from('transakce')
@@ -464,15 +478,16 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
                   kontaktId: z.kontaktId ?? '',
                 },
                 polozky: polozkyEditoru,
-                katalog: katalogZivy.map((k) => ({ externiId: k.externiId, nazev: k.nazev, jednotka: k.jednotka, mira: k.mira })),
+                katalog: katalogZivy.map((k) => ({ externiId: k.externiId, nazev: k.nazev, jednotka: jednotkaCesky(k.jednotka) || null, mira: k.mira })),
                 kontakty: kontakty?.map((k) => ({ id: k.id, nazev: k.nazev, ico: k.ico })) ?? null,
               }}
               polozky={polozky}
               rozpoznani={rozpoznani ? { stav: rozpoznani.stav, vytvoreno: rozpoznani.vytvoreno, duvod: rozpoznani.duvod } : null}
               kontrolaRozpoznani={kontrolaRozpoznani}
-              zbyvaKeKontrole={zbyvaKeKontrole}
+              coZkontrolovat={kontrolaNavrhu.body}
+              nesoulad={kontrolaNavrhu.nesoulad?.popis ?? null}
               ai={{ zapnuto: rozpoznavaniJeNastavene(), pocetSouboru: seznamSouboru.length }}
-              katalog={maPokladnu ? { umi: pokladna?.katalog === true, pocet: katalogZivy.length, aktualizovano: katalogAktualizovan } : null}
+              katalog={maPokladnu ? { umi: pokladna?.katalog === true, pocet: katalogZivy.length, aktualizovano: katalogAktualizovan, chyba: chybaKatalogu } : null}
               zona={zona}
             />
             <SekceTrzba
@@ -507,6 +522,8 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
                 mapovani: p.mapovani,
               }))}
               originaly={seznamSouboru.map((s) => ({ id: s.id, poradi: s.poradi }))}
+              duplicity={duplicity}
+              jednotkyProduktu={jednotkyProduktu}
               muzeSchvalit={muzeSchvalitVydej(z, tedMs)}
               vydej={{
                 externiId: typeof r.vydej_externi_id === 'string' ? r.vydej_externi_id : null,

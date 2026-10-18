@@ -33,17 +33,18 @@ import { PRAVA_CTENI_JINYCH_PLATEB, type PravoJinychPlateb } from '@/lib/jine-pl
  * stránku beze změny.
  *
  * ---------------------------------------------------------------------
- * PAST: finance.read JEN NA POBOČCE
+ * POZOR: finance.read JEN NA POBOČCE
  *
- * Kdo má `finance.read` jen na své pobočce (členství pobočky), tomu rám
- * Financí na pobočce místo stránky ukáže větu „Finance pobočky zatím jen
- * s přehledem celé firmy" — i v Jiných platbách, kam by podle práv
- * agendy smět měl (RLS mu ukáže jen jeho pobočku, žádná díra tu není).
- * Stránka to obejít nemůže: layout ji do sebe prostě nevloží. Tahle
- * funkce takového člověka PUSTÍ — serverové akce a odkaz na originál pro
- * něj fungují, jen obrazovku za něj schová rám. ROZHODNOUT: oprava patří
- * do layoutu Financí (třeba pustit na pobočce i toho, kdo na ní má právo
- * agendy — ostatní stránky Financí se brání samy přes zkusPristupFinanci).
+ * Kdo má `finance.read` jen na své pobočce (členství pobočky), toho
+ * tahle funkce PUSTÍ a rám Financí pro adresu Jiných plateb udělá výjimku
+ * (app/[rozsah]/finance/layout.tsx) — záznamy agendy mu RLS ukáže jen
+ * z jeho pobočky. Díra by tu ale BYLA: detail záznamu sahá i na data
+ * celé firmy (bankovní platby k párování úhrady, Kontakty pro odběratele
+ * faktury), jejichž RLS rozsah členství nehlídá (`can_read_scoped(…, null)`).
+ * Proto je detail načítá jen s `finance.read` ZA CELOU FIRMU
+ * (`hasAccess(…, 'finance.read', null)`), ne s tím, co vrátí tahle
+ * funkce — `prava` tady platí jen v rozsahu adresy a na pobočce
+ * `finance.read` neznamená přístup k firemním datům.
  *
  * ---------------------------------------------------------------------
  * VYPNUTÝ MODUL

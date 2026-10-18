@@ -187,8 +187,15 @@ function desetinne(cislo: bigint, mocnina: number): string {
 /**
  * Množství z dokladu → množství v prodejních kusech pokladny.
  *
- *   – jednotka dokladu prázdná / „ks" / „x" → stejné množství (pokladna
- *     dostane „2 kusy" a kolik je to litrů, odečte podle své položky);
+ *   – jednotka dokladu prázdná / „ks" / „x":
+ *       · položka pokladny v kusech („Piece") nebo bez jednotky → stejné
+ *         množství (pokladna dostane „2 kusy" a sklad odečte podle své
+ *         položky);
+ *       · položka v litrech/kilogramech s mírou → stejné množství kusů
+ *         (pokladna ví, kolik je jeden kus);
+ *       · položka v litrech/kilogramech BEZ míry → `nejasne`: pokladna
+ *         pak počítá prodej v litrech, „2 ks" by odešlo jako 2 litry;
+ *       · položka v jednotce, které appka nerozumí → `nejasne`;
  *   – doklad v l/dl/cl/ml/kg/dkg/g a položka pokladny ve stejné skupině
  *     s mírou → množství ÷ míra (výsledek musí vyjít přesně na tisíciny);
  *   – jednotka dokladu stejná jako jednotka položky a míra neuvedená →
@@ -210,13 +217,25 @@ export function prevestNaJednotkyPos(
   const mira = miraNaZlomek(produkt.mira)
 
   if (jd.druh === 'kus') {
-    if (jp?.druh === 'mira' && mira) {
+    if (jp?.druh === 'mira') {
+      // Bez míry pokladna prodává položku v litrech/kilogramech — kolik je
+      // jeden kus, neví ani ona, ani appka. 1:1 by z „2 ks" udělalo 2 litry.
+      if (!mira) {
+        return {
+          stav: 'nejasne',
+          duvod: `Pokladna u položky vede ${jp.skupina === 'objem' ? 'litry' : 'kilogramy'}, ale neuvádí, kolik je v jednom kusu — zapište množství v jednotkách pokladny`,
+        }
+      }
       const vMire = desetinne(BigInt(tisicin) * mira.cislice, 3 + mira.mocnina)
       return {
         stav: 'ok',
         posMnozstvi: q,
         popis: `${mnozstviNaText(q)} × ${mnozstviNaText(mira.text)} ${jp.zkratka} = ${mnozstviNaText(vMire)} ${jp.zkratka} podle nastavení položky v pokladně`,
       }
+    }
+    // 1:1 jen u položky v kusech nebo bez jednotky; cizí jednotka pokladny se nehádá.
+    if (jp?.druh === 'neznama') {
+      return { stav: 'nejasne', duvod: `Pokladna u položky vede jednotku „${jp.text}", kterou appka neumí převést — zapište množství v jednotkách pokladny` }
     }
     return { stav: 'ok', posMnozstvi: q, popis: `${mnozstviNaText(q)} ks z dokladu = ${mnozstviNaText(q)} prodaných kusů v pokladně` }
   }

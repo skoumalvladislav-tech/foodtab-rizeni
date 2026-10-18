@@ -170,18 +170,53 @@ type RadekKatalogu = {
   smazano: boolean
 }
 
-/** Katalog pokladny pro připojení záznamu (RLS: kdo má nějaké právo agendy). Prázdný = pokladna katalog nedodala. */
+/** Velikost stránky PostgRESTu (výchozí strop odpovědi Supabase je 1000 řádků). */
+export const STRANKA_KATALOGU = 1000
+/** Nejvýš stránek katalogu / aliasů. Víc = CHYBA, ne tichý ořez (chybějící produkt by vypadal, že v pokladně není). */
+export const MAX_STRANEK_KATALOGU = 20
+
+/**
+ * Načte všechny řádky po stránkách (`.range`), dokud chodí plné stránky.
+ * Strop `MAX_STRANEK_KATALOGU` → výjimka: neúplný katalog se nesmí tvářit
+ * jako celý. `stranka(od, do)` musí řadit podle jednoznačného klíče, jinak
+ * se řádky mezi stránkami můžou opakovat nebo ztratit.
+ */
+async function vsechnyStranky<T>(
+  co: string,
+  stranka: (od: number, do_: number) => PromiseLike<{ data: unknown; error: { code?: string | null } | null }>,
+): Promise<T[]> {
+  const vse: T[] = []
+  for (let i = 0; i < MAX_STRANEK_KATALOGU; i++) {
+    const od = i * STRANKA_KATALOGU
+    const { data, error } = await stranka(od, od + STRANKA_KATALOGU - 1)
+    if (error) throw new Error(`${co} se nepodařilo načíst (${error.code ?? 'bez kódu'}).`)
+    const radky = (data ?? []) as T[]
+    vse.push(...radky)
+    if (radky.length < STRANKA_KATALOGU) return vse
+  }
+  throw new Error(`${co} má víc než ${MAX_STRANEK_KATALOGU * STRANKA_KATALOGU} řádků — appka by ho načetla jen zčásti, proto ho nepoužije.`)
+}
+
+/**
+ * Katalog pokladny pro připojení záznamu — jen produkty, které v pokladně
+ * ještě jsou (`smazano = false`), všechny stránky. RLS: jen kdo vidí
+ * některou pobočku, kterou ta pokladna obsluhuje. Prázdný = pokladna
+ * katalog nedodala. Moc velký nebo nenačtený katalog = výjimka.
+ */
 export async function katalogPripojeni(supabase: Supabase, tenantId: string, pripojeniId: string | null): Promise<ProduktKatalogu[]> {
   if (!pripojeniId) return []
-  const { data, error } = await supabase
-    .from('pos_katalog')
-    .select('externi_id, nazev, jednotka, mira, odecita_sklad, ma_recepturu, plu, ean, smazano')
-    .eq('tenant_id', tenantId)
-    .eq('pripojeni_id', pripojeniId)
-    .order('nazev')
-    .limit(5000)
-  if (error) throw new Error(`Katalog pokladny se nepodařilo načíst (${error.code ?? 'bez kódu'}).`)
-  return ((data ?? []) as RadekKatalogu[]).map((r) => ({
+  const radky = await vsechnyStranky<RadekKatalogu>('Katalog pokladny', (od, do_) =>
+    supabase
+      .from('pos_katalog')
+      .select('externi_id, nazev, jednotka, mira, odecita_sklad, ma_recepturu, plu, ean, smazano')
+      .eq('tenant_id', tenantId)
+      .eq('pripojeni_id', pripojeniId)
+      .eq('smazano', false)
+      .order('nazev')
+      .order('externi_id')
+      .range(od, do_),
+  )
+  return radky.map((r) => ({
     externiId: r.externi_id,
     nazev: r.nazev,
     jednotka: r.jednotka,
@@ -194,15 +229,11 @@ export async function katalogPripojeni(supabase: Supabase, tenantId: string, pri
   }))
 }
 
-/** Ověřené aliasy „název z dokladu → produkt“ pro připojení. */
+/** Ověřené aliasy „název z dokladu → produkt“ pro připojení — všechny stránky (alias je v připojení jednoznačný). */
 export async function aliasyPripojeni(supabase: Supabase, tenantId: string, pripojeniId: string | null): Promise<AliasMapovani[]> {
   if (!pripojeniId) return []
-  const { data, error } = await supabase
-    .from('pos_mapovani')
-    .select('alias, pos_produkt_id')
-    .eq('tenant_id', tenantId)
-    .eq('pripojeni_id', pripojeniId)
-    .limit(5000)
-  if (error) throw new Error(`Ověřená přiřazení se nepodařilo načíst (${error.code ?? 'bez kódu'}).`)
-  return ((data ?? []) as { alias: string; pos_produkt_id: string }[]).map((r) => ({ alias: r.alias, posProduktId: r.pos_produkt_id }))
+  const radky = await vsechnyStranky<{ alias: string; pos_produkt_id: string }>('Seznam ověřených přiřazení', (od, do_) =>
+    supabase.from('pos_mapovani').select('alias, pos_produkt_id').eq('tenant_id', tenantId).eq('pripojeni_id', pripojeniId).order('alias').range(od, do_),
+  )
+  return radky.map((r) => ({ alias: r.alias, posProduktId: r.pos_produkt_id }))
 }

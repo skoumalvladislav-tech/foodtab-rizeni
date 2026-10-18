@@ -27,7 +27,14 @@ const {
   sestavitObsah,
   naRozpoznanyDoklad,
 } = await import('../lib/jine-platby-ai-jadro.ts')
-const { DRUHY_POLOZEK, TYPY_DOKLADU, MAX_BAJTU_PRO_AI, MAX_SOUBORU_PRO_AI } = await import('../lib/jine-platby-typy.ts')
+const {
+  DRUHY_POLOZEK,
+  TYPY_DOKLADU,
+  MAX_BAJTU_PRO_AI,
+  MAX_BAJTU_OBRAZKU_PRO_AI,
+  MAX_BAJTU_CELKEM_PRO_AI: CELKEM_Z_TYPU,
+  MAX_SOUBORU_PRO_AI,
+} = await import('../lib/jine-platby-typy.ts')
 const { zodOutputFormat } = await import('@anthropic-ai/sdk/helpers/zod')
 
 let chyb = 0
@@ -87,12 +94,12 @@ console.log('\n== Kontrola podkladu: co se vůbec nepošle ==')
   ok('prázdný druhý soubor → chyba s jeho pořadím', typeof prazdny === 'string' && /Soubor č\. 2/.test(prazdny) && /prázdný/.test(prazdny))
 
   const velky = new Uint8Array(MAX_BAJTU_PRO_AI + 1)
-  velky.set([0xff, 0xd8, 0xff])
-  const nadStropem = zkontrolovatPodklad({ soubory: [soubor(velky, 'image/jpeg')] })
-  ok('soubor o bajt nad 8 MB → chyba', typeof nadStropem === 'string' && /8 MB/.test(nadStropem))
+  velky.set([0x25, 0x50, 0x44, 0x46])
+  const nadStropem = zkontrolovatPodklad({ soubory: [soubor(velky, 'application/pdf')] })
+  ok('PDF o bajt nad 8 MB → chyba', typeof nadStropem === 'string' && /8 MB/.test(nadStropem) && /PDF/.test(nadStropem))
   const naStropu = new Uint8Array(MAX_BAJTU_PRO_AI)
-  naStropu.set([0xff, 0xd8, 0xff])
-  ok('soubor přesně 8 MB projde (strop je včetně)', zkontrolovatPodklad({ soubory: [soubor(naStropu, 'image/jpeg')] }) === null)
+  naStropu.set([0x25, 0x50, 0x44, 0x46])
+  ok('PDF přesně 8 MB projde (strop je včetně)', zkontrolovatPodklad({ soubory: [soubor(naStropu, 'application/pdf')] }) === null)
 
   const neshoda = zkontrolovatPodklad({ soubory: [soubor(PNG, 'image/jpeg')] })
   ok('deklarovaný JPEG, obsah PNG → chyba (rozhoduje obsah)', typeof neshoda === 'string' && /image\/png/.test(neshoda) && /image\/jpeg/.test(neshoda))
@@ -101,6 +108,36 @@ console.log('\n== Kontrola podkladu: co se vůbec nepošle ==')
   const ciziTyp = zkontrolovatPodklad({ soubory: [soubor(GIF, 'image/gif')] })
   ok('deklarovaný image/gif → chyba (mimo uzavřený výčet)', typeof ciziTyp === 'string' && /JPEG, PNG, WebP/.test(ciziTyp))
   ok('data, která nejsou Uint8Array → chyba', typeof zkontrolovatPodklad({ soubory: [{ data: 'ffd8ff', mime: 'image/jpeg' }] }) === 'string')
+
+  // FOTKA má přísnější strop: API bere obrázek nejvýš 10 MB až v base64 —
+  // 8 MB fotka by měla ~10,7 MB a API by ji odmítlo (dřív to appka pustila).
+  ok('strop fotky pro AI je 5 MB (ve sdílených typech)', MAX_BAJTU_OBRAZKU_PRO_AI === 5 * MB)
+  const sVelikosti = (hlavicka, bajtu) => {
+    const d = new Uint8Array(bajtu)
+    d.set(hlavicka)
+    return d
+  }
+  const HL = { jpeg: [0xff, 0xd8, 0xff], png: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], webp: [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50], pdf: [0x25, 0x50, 0x44, 0x46] }
+  ok('fotka přesně 5 MB projde (strop je včetně)', zkontrolovatPodklad({ soubory: [soubor(sVelikosti(HL.jpeg, 5 * MB), 'image/jpeg')] }) === null)
+  for (const [klic, mime] of [['jpeg', 'image/jpeg'], ['png', 'image/png'], ['webp', 'image/webp']]) {
+    const v = zkontrolovatPodklad({ soubory: [soubor(sVelikosti(HL[klic], 5 * MB + 1), mime)] })
+    ok(`${mime} o bajt nad 5 MB → chyba „moc velká fotka … 5 MB"`, typeof v === 'string' && /fotka/.test(v) && /5 MB/.test(v))
+  }
+  const osmMbFotka = zkontrolovatPodklad({ soubory: [soubor(sVelikosti(HL.jpeg, 8 * MB), 'image/jpeg')] })
+  ok('8 MB fotka (dřívější strop) → chyba — v base64 by přesáhla 10 MB', typeof osmMbFotka === 'string' && /5 MB/.test(osmMbFotka))
+  ok('PDF 6 MB projde (PDF má strop 8 MB, ne strop fotky)', zkontrolovatPodklad({ soubory: [soubor(sVelikosti(HL.pdf, 6 * MB), 'application/pdf')] }) === null)
+  const druhaVelka = zkontrolovatPodklad({ soubory: [soubor(JPEG, 'image/jpeg'), soubor(sVelikosti(HL.png, 6 * MB), 'image/png')] })
+  ok('velká druhá fotka → chyba s jejím pořadím', typeof druhaVelka === 'string' && /Soubor č. 2/.test(druhaVelka))
+  ok('MAX_BAJTU_CELKEM_PRO_AI: jádro vyváží tutéž hodnotu jako sdílené typy (20 MB)', MAX_BAJTU_CELKEM_PRO_AI === CELKEM_Z_TYPU && CELKEM_Z_TYPU === 20 * MB)
+  const presneCelkem = [
+    soubor(sVelikosti(HL.jpeg, 5 * MB), 'image/jpeg'),
+    soubor(sVelikosti(HL.png, 5 * MB), 'image/png'),
+    soubor(sVelikosti(HL.webp, 5 * MB), 'image/webp'),
+    soubor(sVelikosti(HL.pdf, 5 * MB), 'application/pdf'),
+  ]
+  ok('čtyři soubory po 5 MB = přesně 20 MB dohromady projdou (strop je včetně)', zkontrolovatPodklad({ soubory: presneCelkem }) === null)
+  const pres = zkontrolovatPodklad({ soubory: [...presneCelkem, soubor(sVelikosti(HL.jpeg, 16), 'image/jpeg')] })
+  ok('o 16 bajtů víc než 20 MB dohromady → chyba „dohromady"', typeof pres === 'string' && /dohromady/.test(pres))
 
   const tri = Array.from({ length: 3 }, () => {
     const d = new Uint8Array(8 * MB)

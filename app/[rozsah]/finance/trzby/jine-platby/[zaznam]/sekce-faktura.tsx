@@ -7,7 +7,7 @@ import { PanelHlava } from '../../../../dnes/prvky'
 import { evidovatUhradu, faktura } from '../akce'
 import ZnackaStavu from '../znacka-stavu'
 import FormularAkce from './formular-akce'
-import { datumCesky } from './logika'
+import { datumCesky, HLASKA_BEZ_FINANCI_FIRMY } from './logika'
 import { MRIZKA_POLI, Oddil, PoleDuvodu, Udaj, Udaje, VSTUP, Vysvetleni } from './prvky'
 
 type Zakl = { zaznam: string; verze: number; rozsah: string }
@@ -98,7 +98,7 @@ export function SekceFaktura({
                 </select>
               </label>
             ) : (
-              <Vysvetleni>Odběratele (Kontakty) vidí jen ten, kdo má finanční přehled. Číslo faktury můžete propojit i bez nich.</Vysvetleni>
+              <Vysvetleni>{HLASKA_BEZ_FINANCI_FIRMY}</Vysvetleni>
             )}
           </FormularAkce>
         ) : null}
@@ -107,6 +107,12 @@ export function SekceFaktura({
       {akce.has('faktura') && z.stavFaktury !== 'propojena' ? (
         <Oddil nadpis="Propojit vystavenou fakturu">
           <FormularAkce akce={faktura} {...zakl} skryte={{ akce: 'propojit' }} tlacitko="Propojit fakturu" vycistit>
+            {z.stavTrzby === 'zapsano' ? (
+              <Vysvetleni>
+                Tržba je zapsaná v Ostatních tržbách. Fakturu vystavenou v pokladně k ní propojit nejde — pokladna má tržbu z faktury sama a byla by
+                dvakrát. Nejdřív Ostatní tržbu stornujte, nebo propojte fakturu z jiného systému.
+              </Vysvetleni>
+            ) : null}
             <div style={MRIZKA_POLI}>
               <label className="ds-field">
                 <span className="ds-field-label">Číslo faktury</span>
@@ -187,7 +193,7 @@ export function SekceUhrada({
 
       {akce.has('uhrada') ? (
         platby === null ? (
-          <Vysvetleni>Bankovní platby vidí jen ten, kdo má finanční přehled (Finance → Platby).</Vysvetleni>
+          <Vysvetleni>{HLASKA_BEZ_FINANCI_FIRMY}</Vysvetleni>
         ) : z.mena === null ? (
           <Vysvetleni>Doplňte nejdřív měnu záznamu — platbu jde napárovat jen ve stejné měně.</Vysvetleni>
         ) : (

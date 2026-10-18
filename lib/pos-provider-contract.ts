@@ -170,11 +170,21 @@ export type RelacePos = {
    */
   katalog?(): Promise<{ stav: 'ok'; produkty: ProduktPos[] } | ChybaPos>
   /**
-   * NEPOVINNÉ. Účty provozovny vytvořené v okně `[odMs, doMs)`.
+   * NEPOVINNÉ. Účty provozovny v okně `[odMs, doMs)` — podle data
+   * VYTVOŘENÍ (výchozí, `podle: 'vytvoreni'`), nebo podle data UZAVŘENÍ
+   * (`podle: 'uzavreni'`: účet otevřený včera a zaplacený dnes patří
+   * k dnešnímu prodeji). Adaptér, který podle uzavření hledat neumí, vrátí
+   * `ChybaPos` — nikdy tiše okno podle vytvoření.
+   * `jenOtevrene` = jen otevřené účty (s `podle: 'uzavreni'` nedává smysl → chyba).
    * `uplne: false` = seznam není celý (strop stránek, nečitelný účet) —
    * „nenalezeno" pak NIC nedokazuje.
    */
-  ucty?(externiProvozovna: string, odMs: number, doMs: number, moznosti?: { jenOtevrene?: boolean }): Promise<{ stav: 'ok'; ucty: UcetPos[]; uplne: boolean } | ChybaPos>
+  ucty?(
+    externiProvozovna: string,
+    odMs: number,
+    doMs: number,
+    moznosti?: { jenOtevrene?: boolean; podle?: 'vytvoreni' | 'uzavreni' },
+  ): Promise<{ stav: 'ok'; ucty: UcetPos[]; uplne: boolean } | ChybaPos>
   /** NEPOVINNÉ. Účet podle externího klíče operace (idempotence). `null` = pokladna takový nemá. */
   ucetPodleKlice?(klic: string): Promise<{ stav: 'ok'; ucet: UcetPos | null } | ChybaPos>
 }

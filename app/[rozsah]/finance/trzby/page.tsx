@@ -40,7 +40,10 @@ export const dynamic = 'force-dynamic'
  *     tržeb z pokladny se NIKDY nepřičítají: prodej, který už v pokladně
  *     je, má v `ostatni_trzby` `zapocitat = false` (docs/jine-platby-navrh.md,
  *     oddíl 2). Načítají se uživatelským klientem — RLS
- *     `app.jine_platby_vidi` pustí jen pobočky, kde člověk záznamy vidí.
+ *     `app.jine_platby_vidi` pustí jen pobočky, kde člověk záznamy vidí —
+ *     a PO STRÁNKÁCH (PostgREST vrátí nejvýš ~1000 řádků najednou; bez
+ *     stránek by se rok tiše usekl). Nad strop stránek karta ukáže chybu,
+ *     ne useknutý součet.
  *
  * Na pobočce (Šéfík 13. 10. 2026: „mám otevřený Bernard Bar, budou vidět
  * finance, které se týkají jen Bernard Baru") je provozovna dána
@@ -51,6 +54,11 @@ export const dynamic = 'force-dynamic'
  */
 
 const LET_ZPET = 9
+
+/** Ostatní tržby se čtou po stránkách — PostgREST vrátí nejvýš ~1000 řádků na dotaz. */
+const STRANKA_OSTATNICH = 1000
+/** Strop stránek (50 000 řádků). Víc = chyba karty, ne tichý ořez: useknutý součet by vypadal jako celý. */
+const MAX_STRAN_OSTATNICH = 50
 
 /**
  * PROVOZNÍ den (začíná v 05:00), ne kalendářní: tak je zapsaná tržba.
@@ -177,16 +185,37 @@ export default async function FinanceTrzby({
   // sčítají (zapocitat, platna) a že se měny nesčítají, rozhoduje JEDINÉ
   // místo — `souhrnOstatnichTrzeb` v obsah.tsx. `null` = tabulka zatím
   // v databázi není (migrace Jiných plateb nenasazená).
-  let dotazOstatnich = supabase
-    .from('ostatni_trzby')
-    .select('branch_id, datum, castka_haleru, mena, zapocitat, stav')
-    .eq('tenant_id', tenantId)
-    .gte('datum', rozsahObdobi.od)
-    .lte('datum', rozsahObdobi.doData)
-  if (vybranaPobocka) dotazOstatnich = dotazOstatnich.eq('branch_id', vybranaPobocka)
-  const ostatniRes = await dotazOstatnich
-  if (ostatniRes.error && !tabulkaNeexistuje(ostatniRes.error)) throw new DotazSelhal('ostatní tržby', ostatniRes.error)
-  const ostatniTrzby: RadekOstatniTrzby[] | null = ostatniRes.error ? null : ((ostatniRes.data ?? []) as RadekOstatniTrzby[])
+  //
+  // Po stránkách se stálým řazením (`order('id')`), dokud chodí plné
+  // stránky. Strop stránek = chyba karty (`ostatniTrzbyChyba`), ne tiše
+  // useknutý součet.
+  const radkyOstatnich: RadekOstatniTrzby[] = []
+  let tabulkaOstatnichChybi = false
+  let ostatniTrzbyChyba: string | null = null
+  for (let strana = 0; ; strana++) {
+    if (strana === MAX_STRAN_OSTATNICH) {
+      ostatniTrzbyChyba = `Nejde sečíst — za období je víc než ${(MAX_STRAN_OSTATNICH * STRANKA_OSTATNICH).toLocaleString('cs-CZ')} záznamů`
+      break
+    }
+    let dotazOstatnich = supabase
+      .from('ostatni_trzby')
+      .select('branch_id, datum, castka_haleru, mena, zapocitat, stav')
+      .eq('tenant_id', tenantId)
+      .gte('datum', rozsahObdobi.od)
+      .lte('datum', rozsahObdobi.doData)
+    if (vybranaPobocka) dotazOstatnich = dotazOstatnich.eq('branch_id', vybranaPobocka)
+    const odRadku = strana * STRANKA_OSTATNICH
+    const ostatniRes = await dotazOstatnich.order('id').range(odRadku, odRadku + STRANKA_OSTATNICH - 1)
+    if (ostatniRes.error) {
+      if (!tabulkaNeexistuje(ostatniRes.error)) throw new DotazSelhal('ostatní tržby', ostatniRes.error)
+      tabulkaOstatnichChybi = true
+      break
+    }
+    const cast = (ostatniRes.data ?? []) as RadekOstatniTrzby[]
+    radkyOstatnich.push(...cast)
+    if (cast.length < STRANKA_OSTATNICH) break
+  }
+  const ostatniTrzby: RadekOstatniTrzby[] | null = tabulkaOstatnichChybi ? null : radkyOstatnich
 
   const zaklad = `/${rozsah}/finance/trzby`
   // Integrace (pokladny, prodeje po produktech) patří celé firmě — z pobočky rovnou tam.
@@ -290,6 +319,7 @@ export default async function FinanceTrzby({
             odkazNaObdobi={(o) => (cleneni === 'rok' ? odkaz({ po: 'mesic', obdobi: o.slice(0, 4) }) : cleneni === 'mesic' ? odkaz({ po: 'den', obdobi: o.slice(0, 7) }) : null)}
             odkazNaPobocku={(id) => odkaz({ pobocka: id })}
             ostatniTrzby={ostatniTrzby}
+            ostatniTrzbyChyba={ostatniTrzbyChyba}
             zakladJinychPlateb={`/${rozsah}/finance/trzby/jine-platby`}
           />
         )}

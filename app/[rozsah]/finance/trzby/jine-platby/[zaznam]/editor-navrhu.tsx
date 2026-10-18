@@ -9,7 +9,7 @@ import { DRUHY_BEZ_SKLADU, DRUHY_POLOZEK, TYPY_DOKLADU, type DruhPolozky, type P
 
 import Ikona from '../../../../ikona'
 import type { AkceZaznamu } from './formular-akce'
-import { KLID, popisPuvoduCastky, type StavAkce } from './logika'
+import { KLID, MAX_POLOZEK_NAVRHU, popisPuvoduCastky, type StavAkce } from './logika'
 
 /**
  * Formulář návrhu: hlavička dokladu a položky s úpravou (přidat, odebrat,
@@ -28,6 +28,7 @@ import { KLID, popisPuvoduCastky, type StavAkce } from './logika'
  */
 
 export type KandidatEditoru = { externiId: string; nazev: string; skore: number; proc: string }
+/** Produkt katalogu pokladny; `jednotka` už česky (jednotkaCesky: Piece → ks…), `null` = pokladna ji neuvádí. */
 export type ProduktEditoru = { externiId: string; nazev: string; jednotka: string | null; mira: number | null }
 
 export type PolozkaEditoru = {
@@ -72,7 +73,7 @@ type Radek = PolozkaEditoru & {
 }
 
 const MAX_V_NABIDCE = 60
-const MAX_POLOZEK = 200
+const MAX_POLOZEK = MAX_POLOZEK_NAVRHU
 
 const doRadku = (p: PolozkaEditoru, i: number): Radek => ({
   ...p,
@@ -493,7 +494,9 @@ export default function EditorNavrhu({
                             ? 'ověřené člověkem'
                             : 'návrh podle podobnosti názvu — potvrďte ho'}
                       </strong>
-                      {r.produkt !== '' && !zmenenProdukt && r.posMnozstvi ? ` · v pokladně ${r.posMnozstvi.replace('.', ',')} ks` : ''}
+                      {r.produkt !== '' && !zmenenProdukt && r.posMnozstvi
+                        ? ` · v pokladně ${r.posMnozstvi.replace('.', ',')} ${vybrany?.jednotka ?? '(jednotka pokladny neuvedena)'}`
+                        : ''}
                     </p>
                     {r.produkt !== '' && !zmenenProdukt && r.mapovani !== 'overeno' ? (
                       <label style={{ display: 'flex', gap: '8px', alignItems: 'center', minHeight: '44px', fontSize: '14px' }}>

@@ -29,10 +29,19 @@ import type {
 } from '../../../../../../lib/jine-platby-typy.ts'
 import { DRUHY_BEZ_SKLADU, DRUHY_POLOZEK, TYPY_DOKLADU } from '../../../../../../lib/jine-platby-typy.ts'
 import { formatHaleru, prevestCastku, prevestMnozstvi } from '../../../../../../lib/jine-platby-castky.ts'
-import { platneDatum, potvrditRadek, soucetPolozek, zkontrolovatNavrh } from '../../../../../../lib/jine-platby-kontrola.ts'
+import {
+  platneDatum,
+  potvrditRadek,
+  rozdelitDuvody,
+  soucetPolozek,
+  spojitDuvody,
+  zkontrolovatNavrh,
+  type Nesoulad,
+} from '../../../../../../lib/jine-platby-kontrola.ts'
 import { prepocitatPosMnozstvi, type ProduktKatalogu } from '../../../../../../lib/jine-platby-mapovani.ts'
 import { normalizovatUcet } from '../../../../../../lib/jine-platby-duplicity.ts'
 import { STAVY_OPERACE, type OperacePos, type StavOperace, type VysledekDohledani } from '../../../../../../lib/jine-platby-pos-operace.ts'
+import { oknoProvoznihoDne, posunoutDen } from '../../../../../../lib/pokladna-cas.ts'
 import type { UcetPos } from '../../../../../../lib/pos-provider-contract.ts'
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +62,20 @@ export const HLASKA_OBECNA = 'Akce se nepodařila. Zkuste to prosím znovu.'
 export const HLASKA_NENALEZENO = 'Záznam se nenašel.'
 export const HLASKA_BEZ_AI = 'Rozpoznání přes AI není zapnuté — zadejte položky ručně.'
 export const HLASKA_BEZ_DOHLEDANI = 'Pokladna dohledání účtů neumí — použijte ruční prohlášení s důvodem.'
+/**
+ * Bankovní platby (`transakce`) a Kontakty pustí RLS jen s finančním
+ * přehledem ZA CELOU FIRMU (`has_access(…, 'finance.read', null)`) —
+ * stejné pravidlo jako vstup do Financí na pobočce (zkusPristupFinanci).
+ */
+export const HLASKA_BEZ_FINANCI_FIRMY = 'Bankovní platby a Kontakty vidí jen finanční přehled celé firmy — zadejte číslo faktury ručně.'
+
+/** Nejvýš položek v jednom návrhu (stejně jako formulář a `jine_platby_ulozit_navrh`). */
+export const MAX_POLOZEK_NAVRHU = 200
+
+/** Hláška databáze o možné duplicitě (`jine_platby_potvrdit_trzbu`, `jine_platby_rozhodnout_vydej`) — chce důvod. */
+export function jeHlaskaDuplicity(text: string): boolean {
+  return /^Možná duplicita/.test(text.trim())
+}
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -243,7 +266,7 @@ export function nacistNavrh(
   // --- Položky ---
   const klice = [...new Set(f.getAll('radek').map((k) => k.trim()))]
   if (klice.some((k) => !KLIC_RADKU.test(k))) chyby.radky = 'Formulář je poškozený — načtěte stránku znovu.'
-  if (klice.length > 200) chyby.radky = 'Návrh může mít nejvýš 200 položek.'
+  if (klice.length > MAX_POLOZEK_NAVRHU) chyby.radky = `Návrh může mít nejvýš ${MAX_POLOZEK_NAVRHU} položek.`
 
   const podleId = new Map(kontext.puvodni.map((p) => [p.id, p]))
   const katalog = kontext.katalog.filter((k) => !k.smazano)
@@ -314,8 +337,9 @@ export function nacistNavrh(
         const mapovani = zmeneno || overit ? 'overeno' : zaklad.mapovani === 'overeno' ? 'overeno' : 'navrh'
         radek = prepocitatPosMnozstvi({ ...radek, posProduktId: produkt.externiId, posProduktNazev: produkt.nazev, mapovani }, katalog)
         if (f.get(p('zapamatovat')) === 'ano') {
+          // Náhradní název nečitelného řádku („Položka č. 3 (název nečitelný)“) se jako alias nepamatuje.
           const alias = (zaklad.nazevPuvodni.trim() || nazev).slice(0, 300)
-          if (alias !== '') zapamatovat.push({ alias, posProduktId: produkt.externiId })
+          if (alias !== '' && !jeNahradniNazev(alias)) zapamatovat.push({ alias, posProduktId: produkt.externiId })
         }
       }
     }
@@ -369,10 +393,195 @@ function stripId(p: PolozkaSId): PolozkaNavrhu {
 }
 
 /* ------------------------------------------------------------------ */
+/* Co zkontrolovat před „Označit jako zkontrolované“                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `ano`         označení BLOKUJE (databáze ho odmítne);
+ * `bez_duvodu`  blokuje, dokud člověk nenapíše, proč to nevadí (nesoulad součtu);
+ * `ne`          jen upozornění — označení nebrání.
+ */
+export type BodKontroly = { text: string; blokuje: 'ano' | 'bez_duvodu' | 'ne' }
+
+const MAX_RADKU_V_PREHLEDU = 10
+const HLAVICKA_CHYBI = ['Chybí datum prodeje (provozní den)', 'Chybí měna', 'Chybí celková cena prodeje']
+
+/**
+ * Co v uloženém návrhu zkontrolovat a co z toho „Označit jako
+ * zkontrolované“ BLOKUJE. Zrcadlí `jine_platby_oznacit_zkontrolovano`:
+ *
+ *   blokuje     chybí datum, měna nebo celková cena; řádek s příznakem
+ *               ke kontrole (`vyzaduje_kontrolu` tak, jak je ULOŽENÝ —
+ *               databáze se ptá na uložené řádky);
+ *   bez důvodu  součet položek nesedí s celkovou cenou (zkontrolovatNavrh) —
+ *               projde jen s `p_duvod_rozdilu` („Proč rozdíl nevadí“);
+ *   upozornění  všechno ostatní, co zkontrolovatNavrh hlásí.
+ *
+ * `nesoulad` ≠ null → formulář ukáže povinné pole „Proč rozdíl nevadí“.
+ */
+export function coZkontrolovat(polozky: readonly PolozkaNavrhu[], hlavicka: HlavickaNavrhu): { body: BodKontroly[]; nesoulad: Nesoulad | null } {
+  const k = zkontrolovatNavrh(polozky, hlavicka)
+  const body: BodKontroly[] = []
+  if (hlavicka.datumProdeje === null) body.push({ text: HLAVICKA_CHYBI[0], blokuje: 'ano' })
+  if (hlavicka.mena === null) body.push({ text: HLAVICKA_CHYBI[1], blokuje: 'ano' })
+  if (hlavicka.castkaHaleru === null) body.push({ text: HLAVICKA_CHYBI[2], blokuje: 'ano' })
+
+  const sPriznakem = polozky.map((p, i) => ({ p, cislo: i + 1 })).filter(({ p }) => p.vyzadujeKontrolu)
+  for (const { p, cislo } of sPriznakem.slice(0, MAX_RADKU_V_PREHLEDU)) {
+    const nazev = p.nazev.trim() ? ` „${p.nazev.trim().slice(0, 60)}“` : ''
+    body.push({ text: `Položka ${cislo}${nazev}: ${p.duvodKontroly.trim() || 'označena ke kontrole'} — ověřte ji (zaškrtnutí u řádku) nebo opravte`, blokuje: 'ano' })
+  }
+  if (sPriznakem.length > MAX_RADKU_V_PREHLEDU) {
+    body.push({ text: `… a dalších ${sPriznakem.length - MAX_RADKU_V_PREHLEDU} položek s příznakem ke kontrole`, blokuje: 'ano' })
+  }
+
+  if (k.nesoulad) body.push({ text: k.nesoulad.popis, blokuje: 'bez_duvodu' })
+  for (const d of k.duvody) {
+    if (HLAVICKA_CHYBI.includes(d) || d === k.nesoulad?.popis) continue
+    body.push({ text: d, blokuje: 'ne' })
+  }
+  return { body, nesoulad: k.nesoulad }
+}
+
+/* ------------------------------------------------------------------ */
+/* Rozpoznání přes AI: výběr souborů a nečitelné názvy                  */
+/* ------------------------------------------------------------------ */
+
+export type LimityAi = { maxSouboru: number; maxObrazek: number; maxPdf: number; maxCelkem: number }
+
+const MB = 1024 * 1024
+const mb = (b: number) => String(Math.round((b / MB) * 10) / 10).replace('.', ',')
+
+/**
+ * Které soubory jdou do jednoho rozpoznání — PO POŘADÍ (stránky jedné
+ * sjetiny), podle velikosti uložené u souboru:
+ *   * fotka nad `maxObrazek` a PDF nad `maxPdf` se přeskočí (řekne se které);
+ *   * bere se, dokud součet nepřekročí `maxCelkem` a počet `maxSouboru` —
+ *     první soubor, který by strop překročil, výběr UKONČÍ (zbytek se
+ *     nepřeskakuje na menší soubory dál, ať AI nedostane stránky s dírou).
+ * Skutečné bajty po stažení ověří ještě `zkontrolovatPodklad`.
+ */
+export function vybratSouboryProAi<T extends { poradi: number; mime: string; velikost: number }>(
+  soubory: readonly T[],
+  l: LimityAi,
+): { vybrane: T[]; preskocene: { poradi: number; duvod: string }[] } {
+  const vybrane: T[] = []
+  const preskocene: { poradi: number; duvod: string }[] = []
+  let celkem = 0
+  let konec: string | null = null
+  for (const s of soubory) {
+    if (konec) {
+      preskocene.push({ poradi: s.poradi, duvod: konec })
+      continue
+    }
+    const pdf = s.mime === 'application/pdf'
+    const obrazek = s.mime.startsWith('image/')
+    if (!pdf && !obrazek) {
+      preskocene.push({ poradi: s.poradi, duvod: 'není fotka ani PDF' })
+      continue
+    }
+    const strop = pdf ? l.maxPdf : l.maxObrazek
+    if (!(s.velikost > 0) || s.velikost > strop) {
+      preskocene.push({ poradi: s.poradi, duvod: `${pdf ? 'PDF' : 'fotka'} nad ${mb(strop)} MB` })
+      continue
+    }
+    if (vybrane.length >= l.maxSouboru) konec = `najednou jde nejvýš ${l.maxSouboru} souborů`
+    else if (celkem + s.velikost > l.maxCelkem) konec = `dohromady by soubory překročily ${mb(l.maxCelkem)} MB`
+    if (konec) {
+      preskocene.push({ poradi: s.poradi, duvod: konec })
+      continue
+    }
+    vybrane.push(s)
+    celkem += s.velikost
+  }
+  return { vybrane, preskocene }
+}
+
+/** Věta „Do rozpoznání nešly: č. 3 (fotka nad 5 MB), č. 7 (…)“; prázdný seznam → ''. */
+export function popisPreskocenych(preskocene: readonly { poradi: number; duvod: string }[]): string {
+  if (preskocene.length === 0) return ''
+  return `Do rozpoznání nešly soubory: ${preskocene.map((p) => `č. ${p.poradi} (${p.duvod})`).join(', ')}.`
+}
+
+export const DUVOD_NECITELNY_NAZEV = 'Název položky na dokladu nejde přečíst — doplňte ho podle dokladu'
+const NAHRADNI_NAZEV = /^Položka č\. \d+ \(název nečitelný\)$/
+
+export function jeNahradniNazev(s: string): boolean {
+  return NAHRADNI_NAZEV.test(s.trim())
+}
+
+/**
+ * Řádek, jehož název AI nepřečetla: „Položka č. N (název nečitelný)“,
+ * název z dokladu zůstane prázdný a řádek jde ke kontrole s důvodem,
+ * který uložením nezmizí (věcné „Chybí název položky“ by po přepočtu
+ * zmizelo, protože náhradní název prázdný není). Nic se nedomýšlí.
+ */
+export function doplnitNecitelneNazvy(polozky: readonly PolozkaNavrhu[]): PolozkaNavrhu[] {
+  return polozky.map((p, i) =>
+    p.nazev.trim() !== ''
+      ? p
+      : {
+          ...p,
+          nazev: `Položka č. ${i + 1} (název nečitelný)`,
+          nazevPuvodni: '',
+          vyzadujeKontrolu: true,
+          duvodKontroly: spojitDuvody([...rozdelitDuvody(p.duvodKontroly).filter((d) => !d.startsWith('Chybí název položky')), DUVOD_NECITELNY_NAZEV]),
+        },
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Jednotky z katalogu pokladny                                         */
+/* ------------------------------------------------------------------ */
+
+const JEDNOTKY: Record<string, string> = { piece: 'ks', liter: 'l', milliliter: 'ml', kilogram: 'kg', gram: 'g' }
+
+/** Jednotka produktu z katalogu pokladny česky (Piece → ks, Liter → l…); neznámá zůstane, jak je; chybí → ''. */
+export function jednotkaCesky(j: string | null | undefined): string {
+  const t = (j ?? '').trim()
+  return JEDNOTKY[t.toLowerCase()] ?? t
+}
+
+/* ------------------------------------------------------------------ */
 /* Kontrola proti pokladně                                              */
 /* ------------------------------------------------------------------ */
 
 export type DotazUctu = { provozovna: string; ucty: readonly UcetPos[]; uplne: boolean }
+
+export type Okno = { odMs: number; doMs: number }
+
+/**
+ * Okna dotazů do pokladny kolem provozního dne prodeje `datum`:
+ *   uzavrene  podle data UZAVŘENÍ účtu, provozní den −1 až +2 (včetně) —
+ *             účet z fotky mohl být uzavřený i den dva po prodeji;
+ *   otevrene  jen otevřené účty, podle VYTVOŘENÍ, od dne −60 do dne +2 —
+ *             otevřený účet může běžet týdny (firemní účet, akce).
+ */
+export function oknaKontroly(datum: string, denZacina: string, pasmo: string): { uzavrene: Okno; otevrene: Okno } {
+  const konec = oknoProvoznihoDne(posunoutDen(datum, 2), denZacina, pasmo).doMs
+  return {
+    uzavrene: { odMs: oknoProvoznihoDne(posunoutDen(datum, -1), denZacina, pasmo).odMs, doMs: konec },
+    otevrene: { odMs: oknoProvoznihoDne(posunoutDen(datum, -60), denZacina, pasmo).odMs, doMs: konec },
+  }
+}
+
+/**
+ * Výsledky obou dotazů jedné provozovny dohromady, bez opakování podle
+ * `externiId`. Tentýž účet v obou (mezi dotazy se uzavřel) platí jako
+ * UZAVŘENÝ — prodej je pak v tržbách pokladny. Úplné jen když jsou úplné oba.
+ */
+export function sloucitUcty(
+  provozovna: string,
+  uzavrene: { ucty: readonly UcetPos[]; uplne: boolean },
+  otevrene: { ucty: readonly UcetPos[]; uplne: boolean },
+): DotazUctu {
+  const podleId = new Map<string, UcetPos>()
+  for (const u of [...uzavrene.ucty, ...otevrene.ucty]) {
+    const byl = podleId.get(u.externiId)
+    if (!byl || (byl.stav !== 'uzavreny' && u.stav === 'uzavreny')) podleId.set(u.externiId, u)
+  }
+  return { provozovna, ucty: [...podleId.values()], uplne: uzavrene.uplne === true && otevrene.uplne === true }
+}
 
 export type VysledekKontroly<V extends string> = {
   vysledek: V
@@ -382,7 +591,38 @@ export type VysledekKontroly<V extends string> = {
   popis: string
 }
 
-type ZaznamProKontrolu = { externiUcet: string | null; castkaHaleru: number | null; mena: string | null }
+/**
+ * Pokladna neumí hledat účty podle data uzavření (vrátila trvalou chybu).
+ * Bez toho nejde vyloučit, že prodej z fotky v pokladně je — výsledek je
+ * „nelze ověřit“ / „nelze zjistit“, žádný odhad z okna podle vytvoření.
+ */
+export function vysledekBezHledaniPodleUzavreni(
+  druh: 'trzba' | 'sklad',
+  duvodPokladny: string,
+  okna: { uzavrene: Okno },
+  provozovny: readonly string[],
+): VysledekKontroly<'nelze_overit' | 'nelze_zjistit'> {
+  return {
+    vysledek: druh === 'trzba' ? 'nelze_overit' : 'nelze_zjistit',
+    detail: {
+      uplne: false,
+      okno_podle: 'uzavreni',
+      okno_od: new Date(okna.uzavrene.odMs).toISOString(),
+      okno_do: new Date(okna.uzavrene.doMs).toISOString(),
+      provozovny: [...provozovny],
+      chyba_pokladny: duvodPokladny.slice(0, 300),
+    },
+    popis:
+      `Pokladna účty podle data uzavření nevyhledala — neumí to, nebo dotaz odmítla (${duvodPokladny.slice(0, 200)}). ` +
+      'Bez toho nejde vyloučit, že prodej v pokladně je — appka nic neodhaduje. Ověřte to v pokladně a doložte ručním prohlášením s důvodem.',
+  }
+}
+
+type ZaznamProKontrolu = { externiUcet: string | null; castkaHaleru: number | null; mena: string | null; typDokladu?: TypDokladu | null }
+
+/** Fotka OTEVŘENÉHO účtu: bez shody čísla dokladu se z pokladny nedá dokázat „není tam“. */
+const POPIS_OTEVRENY_DOKLAD =
+  'Doklad je fotka otevřeného účtu a pokladna účet se stejným číslem nevrátila. „Není v pokladně“ by nic nedokazovalo — účet mohl být uzavřený pod jiným číslem nebo pořád běží. Ověřte ho v pokladně a doložte ručně s důvodem.'
 
 const shodaCisla = (u: UcetPos, cislo: string) => normalizovatUcet(u.cisloDokladu) === cislo || normalizovatUcet(u.externiId) === cislo
 
@@ -427,12 +667,22 @@ function najitShody(z: ZaznamProKontrolu, dotazy: readonly DotazUctu[]): Shody {
   }
 }
 
-function zakladDetailu(s: Shody, okno: { odMs: number; doMs: number }, dotazy: readonly DotazUctu[]) {
+/** `okno` = okno uzavřených účtů (podle uzavření); `otevrene` = okno otevřených účtů (podle vytvoření), když se ptalo. */
+type OknaKontroly = Okno & { otevrene?: Okno }
+
+function zakladDetailu(s: Shody, okno: OknaKontroly, dotazy: readonly DotazUctu[]) {
   return {
     uplne: s.uplne,
     pocet_uctu: s.pocetUctu,
     okno_od: new Date(okno.odMs).toISOString(),
     okno_do: new Date(okno.doMs).toISOString(),
+    ...(okno.otevrene
+      ? {
+          okno_podle: 'uzavreni',
+          okno_otevrene_od: new Date(okno.otevrene.odMs).toISOString(),
+          okno_otevrene_do: new Date(okno.otevrene.doMs).toISOString(),
+        }
+      : {}),
     provozovny: dotazy.map((d) => d.provozovna),
     hledane_cislo: s.cislo,
   }
@@ -449,14 +699,16 @@ function zakladDetailu(s: Shody, okno: { odMs: number; doMs: number }, dotazy: r
  *                  určitě), nebo víc uzavřených se stejným číslem;
  *   nelze_overit   účet je v pokladně OTEVŘENÝ (po uzavření ho pokladna
  *                  zapíše do tržeb sama — nová tržba by se započítala
- *                  dvakrát), stav účtu neznámý, nebo seznam není úplný;
+ *                  dvakrát), stav účtu neznámý, seznam není úplný, nebo
+ *                  je doklad fotka OTEVŘENÉHO účtu (`typDokladu`
+ *                  'otevreny_ucet') a účet se stejným číslem v pokladně
+ *                  není — takový doklad „nenalezeno“ nikdy nedostane;
  *   nenalezeno     nic z toho a pokladna vrátila ÚPLNÝ seznam účtů.
+ *
+ * `dotazy` = výsledky obou dotazů (uzavřené podle uzavření + otevřené),
+ * sloučené `sloucitUcty`.
  */
-export function vyhodnotitKontroluTrzby(
-  z: ZaznamProKontrolu,
-  dotazy: readonly DotazUctu[],
-  okno: { odMs: number; doMs: number },
-): VysledekKontroly<VysledekKontrolyTrzby> {
+export function vyhodnotitKontroluTrzby(z: ZaznamProKontrolu, dotazy: readonly DotazUctu[], okno: OknaKontroly): VysledekKontroly<VysledekKontrolyTrzby> {
   const s = najitShody(z, dotazy)
   const zaklad = zakladDetailu(s, okno, dotazy)
   const castka = (h: number | null) => (h === null ? 'neuvedeno' : formatHaleru(h, z.mena))
@@ -521,8 +773,12 @@ export function vyhodnotitKontroluTrzby(
     }
   }
 
-  // 3. Nic. „Nenalezeno“ jen nad úplným seznamem.
+  // 3. Nic. „Nenalezeno“ jen nad úplným seznamem — a nikdy u fotky otevřeného účtu
+  //    (sem se dojde jen bez shody čísla u účtu, který v pokladně platí).
   const zruseny = s.poCisle.zrusene.length > 0 ? ` Účet se stejným číslem je v pokladně zrušený (${popisUctu(s.poCisle.zrusene[0])}).` : ''
+  if (z.typDokladu === 'otevreny_ucet') {
+    return { vysledek: 'nelze_overit', detail: { ...zaklad, shoda: null, otevreny_doklad: true }, popis: POPIS_OTEVRENY_DOKLAD + zruseny }
+  }
   if (s.uplne) {
     return {
       vysledek: 'nenalezeno',
@@ -548,7 +804,9 @@ export type DohledaniOdpisu = { klic: string; odpoved: { stav: 'ok'; ucet: UcetP
  *                  podle svého nastavení) → výdej nevytvářet, jen propojit;
  *   nelze_zjistit  účet otevřený, účet jen se stejnou částkou, neznámý stav,
  *                  dohledání klíče selhalo, nebo seznam účtů není úplný;
- *   neodecteno     nic z toho nad ÚPLNÝM seznamem a s úspěšným dohledáním klíčů.
+ *   neodecteno     nic z toho nad ÚPLNÝM seznamem a s úspěšným dohledáním
+ *                  klíčů — a nikdy u fotky otevřeného účtu bez shody čísla
+ *                  (stejně jako u tržby, pak `nelze_zjistit`).
  *
  * U skladu se nehraje na „pravděpodobně“: dvojí výdej odečte sklad dvakrát
  * a nikdo si toho nevšimne až do inventury.
@@ -557,7 +815,7 @@ export function vyhodnotitKontroluSkladu(
   z: ZaznamProKontrolu,
   dotazy: readonly DotazUctu[],
   odpisy: readonly DohledaniOdpisu[],
-  okno: { odMs: number; doMs: number },
+  okno: OknaKontroly,
 ): VysledekKontroly<VysledekKontrolySkladu> {
   const s = najitShody(z, dotazy)
   const zaklad = { ...zakladDetailu(s, okno, dotazy), klice: odpisy.map((o) => o.klic) }
@@ -610,6 +868,9 @@ export function vyhodnotitKontroluSkladu(
   }
   if (!s.uplne) {
     return { vysledek: 'nelze_zjistit', detail: { ...zaklad, zdroj_shody: null }, popis: 'Pokladna nevrátila úplný seznam účtů — „neodečteno“ by nic nedokazovalo.' }
+  }
+  if (z.typDokladu === 'otevreny_ucet') {
+    return { vysledek: 'nelze_zjistit', detail: { ...zaklad, zdroj_shody: null, otevreny_doklad: true }, popis: POPIS_OTEVRENY_DOKLAD }
   }
   return {
     vysledek: 'neodecteno',
@@ -746,6 +1007,7 @@ const UDALOSTI: Record<string, string> = {
   schvaleni_zneplatneno: 'Schválení zneplatněno změnou záznamu',
   vydej_schvalen: 'Výdej do POS potvrzen',
   vydej_zamitnut: 'Výdej zamítnut',
+  schvaleni_zruseno: 'Schválení výdeje zrušeno (v pokladně nic neodepsáno)',
   vydej_znovu: 'Výdej připraven znovu',
   vydej_odesila_se: 'Výdej se odesílá do pokladny',
   vydej_uspech: 'Odečteno v POS (ověřeno)',

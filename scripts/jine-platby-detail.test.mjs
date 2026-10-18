@@ -34,9 +34,24 @@
  *      není „nenalezeno“, samotná částka není „nalezeno“) a převod
  *      formuláře návrhu (nejasná hodnota = chyba u pole).
  *
+ * Opravy po nezávislé kontrole (18. 10. 2026) — každá má vlastní kontrolu:
+ *   * nové podpisy RPC: rucne_dolozit (p_otisk), opravit_trzbu (p_verze),
+ *     oznacit_zkontrolovano (p_duvod_rozdilu), ulozit_mapovani (p_zaznam);
+ *   * nová akce zrusitSchvaleni (vydej_pos, tržní akce ji nesmí volat);
+ *   * „Proč to není duplicita“ u tržby i u schválení výdeje (dvě pole
+ *     u výdeje: důvod zamítnutí ≠ důvod „není duplicita“);
+ *   * platby a kontakty jen s finance.read ZA FIRMU (hasAccess(…, null));
+ *   * AI: výběr souborů po pořadí do stropu součtu, kontrola podkladu před
+ *     započítáním do stropu, nečitelný název, nejvýš 200 položek;
+ *   * pokladna: uzavřené účty oknem podle UZAVŘENÍ, otevřené zvlášť,
+ *     fotka otevřeného účtu nikdy „nenalezeno“, nepodporované hledání
+ *     podle uzavření → „nelze ověřit“;
+ *   * katalog a aliasy po stránkách (bez smazaných, strop = chyba);
+ *   * jednotka produktu z katalogu (Piece → ks).
+ *
  * Statické kontroly čtou zdroj BEZ komentářů a míří na konkrétní tvar
  * (regex), ne na volné „obsahuje“. Každá byla schválně rozbitá a spadla
- * (počty a co přesně spadlo: závěrečná zpráva implementace, 16. 10. 2026).
+ * (počty a co přesně spadlo: závěrečné zprávy implementace, 16. a 18. 10. 2026).
  */
 
 import { readdirSync, readFileSync } from 'node:fs'
@@ -106,6 +121,9 @@ console.log('\n== 1. Stránka detailu: přístup prvními řádky ==')
     iMeta > iPatri && /metadataPokladny\(supabase, z\.pripojeniId, tenantId, z\.branchId\)/.test(s))
   ok('práva pro tlačítka na pobočce ZÁZNAMU: hasAccess(tenantId, p, z.branchId)', /hasAccess\(tenantId, p, z\.branchId\)/.test(s))
   ok('stránka sama klientUlohy nevolá', !/klientUlohy\(/.test(s))
+  const volaniAkci = s.slice(s.indexOf('dostupneAkce(z, prava, {'), s.indexOf('const kroky'))
+  ok('dodatečná kontrola tržby po zápisu: dostupneAkce dostane dohledaniUctu z pokladny',
+    /dohledaniUctu: pokladna\?\.dohledaniUctu === true/.test(volaniAkci))
   const n = zdroj(`${ZAZNAM}/nacteni.ts`)
   // Od integrace (16. 10.): pokladnu čte databázová funkce jine_platby_pokladny
   // (právo agendy na pobočce, netajné sloupce), žádný service_role ani přímý dotaz.
@@ -142,6 +160,7 @@ const PRAVO_RPC = {
   jine_platby_vydej_znovu: ['jine_platby.vydej_pos'],
   jine_platby_propojit_vydej: ['jine_platby.vydej_pos'],
   jine_platby_rucne_dolozit_vydej: ['jine_platby.vydej_pos'],
+  jine_platby_zrusit_schvaleni: ['jine_platby.vydej_pos'],
   jine_platby_faktura: ['jine_platby.faktura'],
   jine_platby_evidovat_uhradu: ['jine_platby.faktura'],
   jine_platby_opravit_trzbu: ['jine_platby.oprava'],
@@ -162,6 +181,7 @@ const SKLADOVE_RPC = [
   'jine_platby_vydej_znovu',
   'jine_platby_propojit_vydej',
   'jine_platby_rucne_dolozit_vydej',
+  'jine_platby_zrusit_schvaleni',
   'jine_platby_korekce_vydeje',
   'pos_operace_zahajit',
   'pos_operace_dokoncit',
@@ -182,6 +202,7 @@ const OCEKAVANA_PRAVA = {
   odeslatSklad: ['jine_platby.sklad_odeslat'],
   propojitVydej: ['jine_platby.vydej_pos'],
   rucneDolozit: ['jine_platby.vydej_pos'],
+  zrusitSchvaleni: ['jine_platby.vydej_pos'],
   korekceVydeje: ['jine_platby.oprava', 'jine_platby.vydej_pos'],
   faktura: ['jine_platby.faktura'],
   evidovatUhradu: ['jine_platby.faktura'],
@@ -257,7 +278,11 @@ for (const soubor of AKCE_SOUBORY) {
   const pos = new Map(funkce(zdroj(`${KOREN}/akce-pos.ts`)).map((x) => [x.jmeno, x.telo]))
   ok("zkontrolovatTrzbu → kontrolaVPokladne(p, 'trzba'), zkontrolovatSklad → (p, 'sklad')",
     /kontrolaVPokladne\(p, 'trzba'\)/.test(pos.get('zkontrolovatTrzbu') ?? '') && /kontrolaVPokladne\(p, 'sklad'\)/.test(pos.get('zkontrolovatSklad') ?? ''))
-  ok(`akcí se našlo dost (${Object.keys(exportovane).length})`, Object.keys(exportovane).length >= 22)
+  ok(`akcí se našlo dost (${Object.keys(exportovane).length})`, Object.keys(exportovane).length >= 23)
+  // Že ji žádná tržní akce nevolá, hlídá smyčka výš („tržní akce nevolá skladovou funkci“ — je v SKLADOVE_RPC).
+  ok('zrusitSchvaleni je exportovaná akce v akce.ts s právem vydej_pos a volá jine_platby_zrusit_schvaleni',
+    exportovane.zrusitSchvaleni?.soubor === 'akce.ts' && JSON.stringify(exportovane.zrusitSchvaleni.prava) === '["jine_platby.vydej_pos"]' &&
+      rpcV(funkce(zdroj(`${KOREN}/akce.ts`)).find((x) => x.jmeno === 'zrusitSchvaleni')?.telo ?? '').includes('jine_platby_zrusit_schvaleni'))
 }
 
 console.log('\n== 3b. pripravit: firma → vstup → záznam s tenantem → právo na pobočce záznamu ==')
@@ -330,7 +355,7 @@ const STUB_LINK = js(
     'export default function Link({ href, children, prefetch, scroll, ...r }) { return createElement("a", { href, ...r }, children) }',
 )
 const STUB_AKCE = js(
-  ['ulozitNavrh', 'oznacitZkontrolovano', 'prohlasitTrzbu', 'prohlasitSklad', 'potvrditTrzbu', 'opravitTrzbu', 'odeslatSklad', 'propojitVydej', 'rucneDolozit', 'korekceVydeje', 'faktura', 'evidovatUhradu', 'ulozitMapovani', 'zrusit']
+  ['ulozitNavrh', 'oznacitZkontrolovano', 'prohlasitTrzbu', 'prohlasitSklad', 'potvrditTrzbu', 'opravitTrzbu', 'odeslatSklad', 'propojitVydej', 'rucneDolozit', 'zrusitSchvaleni', 'korekceVydeje', 'faktura', 'evidovatUhradu', 'ulozitMapovani', 'zrusit']
     .map((n) => `export async function ${n}() { return { stav: 'nic', text: '' } }`)
     .join('\n'),
 )
@@ -426,6 +451,8 @@ const SekceSklad = await nactiKomponentu(`${ZAZNAM}/sekce-sklad.tsx`, KRESLENI)
     operace: null,
     prevody: [],
     originaly: [],
+    duplicity: [],
+    jednotkyProduktu: {},
     muzeSchvalit: false,
     vydej: { externiId: null, doklad: null },
     tedMs: TED,
@@ -452,6 +479,128 @@ const SekceSklad = await nactiKomponentu(`${ZAZNAM}/sekce-sklad.tsx`, KRESLENI)
     createElement(SekceSklad, skladProps(zaznam({ stavSkladu: 'ceka_na_schvaleni' }), ['rozhodnout_vydej'], { navrh: { ...navrh, stav: 'ceka_na_schvaleni' }, muzeSchvalit: false })),
   )
   ok('Sklad: bez čerstvé kontroly „neodečteno“ se „Potvrdit výdej do POS“ nenabídne (zamítnout ano)', !tlacitka(bezKontroly).includes('Potvrdit výdej do POS') && tlacitka(bezKontroly).includes('Zamítnout'))
+
+  console.log('\n-- opravy 18. 10.: sklad --')
+  // Schválení: „Proč to není duplicita“ je ve formuláři schválení VŽDY (i bez duplicit na obrazovce), nepovinné;
+  // zamítnutí má svoje povinné pole `duvod` a pole duplicity nemá (dvě pole, ať se nepletou).
+  const textarea = (form, nazev) => form.match(new RegExp(`<textarea\\b[^>]*name="${nazev}"[^>]*>`))?.[0] ?? null
+  const formZamitnuti = formulare(schvaleni).find((x) => tlacitka(x).includes('Zamítnout')) ?? ''
+  const poleDupl = textarea(formSchvaleni, 'duplicita_duvod')
+  ok('Sklad: formulář schválení má nepovinné pole duplicita_duvod (i bez duplicit) a nemá pole duvod',
+    poleDupl !== null && !/\srequired=""/.test(poleDupl) && textarea(formSchvaleni, 'duvod') === null && textHtml(formSchvaleni).includes('Proč to není duplicita'))
+  ok('Sklad: formulář zamítnutí má povinné pole duvod a NEMÁ duplicita_duvod',
+    /\srequired=""/.test(textarea(formZamitnuti, 'duvod') ?? '') && textarea(formZamitnuti, 'duplicita_duvod') === null && /name="rozhodnuti" value="zamitnout"/.test(formZamitnuti))
+  const sDupl = renderToStaticMarkup(
+    createElement(
+      SekceSklad,
+      skladProps(zaznam({ stavSkladu: 'ceka_na_schvaleni' }), ['rozhodnout_vydej'], {
+        navrh: { ...navrh, stav: 'ceka_na_schvaleni' },
+        muzeSchvalit: true,
+        duplicity: [{ zaznamId: 'Z2', duvod: 'Stejná provozovna, den, částka a měna', jista: false, odkaz: '/bernard-bar/finance/trzby/jine-platby/Z2' }],
+      }),
+    ),
+  )
+  ok('Sklad: možné duplicity se u schválení ukážou s odkazem na druhý záznam',
+    textHtml(sDupl).includes('Možné duplicity výdeje') && textHtml(sDupl).includes('Stejná provozovna, den, částka a měna') && sDupl.includes('href="/bernard-bar/finance/trzby/jine-platby/Z2"'))
+  ok('Sklad: bez duplicit se seznam duplicit nekreslí (kontrola rozezná oba stavy)', !textHtml(schvaleni).includes('Možné duplicity výdeje'))
+
+  // Ručně doloženo: skrytý otisk ŽIVÉHO schváleného návrhu; bez schváleného návrhu (záznam bez pokladny) žádný otisk.
+  const formRucne = formulare(sklad).find((x) => tlacitka(x).includes('Ručně doloženo')) ?? ''
+  ok('Sklad: formulář „Ručně doloženo“ nese otisk schváleného návrhu ve skrytém poli', formRucne.includes(`type="hidden" name="otisk" value="${'a'.repeat(64)}"`))
+  const bezPokladny = renderToStaticMarkup(createElement(SekceSklad, skladProps(zaznam({ pripojeniId: null, stavSkladu: 'bez_navrhu' }), ['rucne_dolozit'], { maPokladnu: false, pokladna: null })))
+  const formBez = formulare(bezPokladny).find((x) => tlacitka(x).includes('Ručně doloženo')) ?? ''
+  ok('Sklad: bez pokladny (bez návrhu) formulář „Ručně doloženo“ otisk nenese', formBez !== '' && !/name="otisk"/.test(formBez))
+
+  // Zrušit schválení: jen s akcí, dvoukrokové, povinný důvod a vysvětlení „když už odepsáno → Ručně doloženo“.
+  const zrus = renderToStaticMarkup(createElement(SekceSklad, skladProps(zaznam({ stavSkladu: 'nepodporovano' }), ['zrusit_schvaleni'], { navrh, operace })))
+  const formZrus = formulare(zrus).find((x) => tlacitka(x).includes('Zrušit schválení (v pokladně nic neodepsáno)')) ?? ''
+  ok('Sklad: s akcí zrusit_schvaleni je tlačítko „Zrušit schválení (v pokladně nic neodepsáno)“ s povinným důvodem',
+    formZrus !== '' && /\srequired=""/.test(textarea(formZrus, 'duvod') ?? ''))
+  ok('Sklad: u zrušení schválení je vysvětlení, že při odepsaném použijte „Ručně doloženo“', /Když už v pokladně odepsáno je[^.]*Ručně doloženo/.test(textHtml(formZrus)))
+  ok('Sklad: bez akce zrusit_schvaleni se tlačítko nekreslí', !tlacitka(sklad).includes('Zrušit schválení (v pokladně nic neodepsáno)'))
+
+  // Jednotka produktu z katalogu (česky), ne natvrdo „ks“.
+  const sJednotkou = textHtml(renderToStaticMarkup(createElement(SekceSklad, skladProps(zaznam({ stavSkladu: 'nepodporovano' }), [], { navrh, operace, jednotkyProduktu: { X1: 'l' } }))))
+  ok('Sklad: množství v panelu nese jednotku produktu z katalogu („2 l“)', sJednotkou.includes('Pivo 0,5 l — 2 l (jednotka prodeje pokladny)'))
+  ok('Sklad: bez jednotky v katalogu „(v jednotkách prodeje pokladny)“, žádné vymyšlené „ks“',
+    textHtml(sklad).includes('Pivo 0,5 l — 2 (v jednotkách prodeje pokladny)') && !/Pivo 0,5 l — 2 ks/.test(textHtml(sklad)))
+
+  console.log('\n-- opravy 18. 10.: tržba --')
+  // „Proč to není duplicita“ u zápisu i propojení VŽDY, nepovinné — i bez duplicit na obrazovce.
+  const formZapis = formulare(zapis).find((x) => tlacitka(x).includes('Zapsat do Ostatních tržeb')) ?? ''
+  const formPropojit = formulare(propojit).find((x) => /value="propojit"/.test(x)) ?? ''
+  ok('Tržba: pole duplicita_duvod je u zápisu i propojení vždy (bez duplicit na obrazovce) a je nepovinné',
+    [formZapis, formPropojit].every((x) => {
+      const t = textarea(x, 'duplicita_duvod')
+      return t !== null && !/\srequired=""/.test(t)
+    }))
+
+  // Dodatečná kontrola: po zápisu pokladna prodej našla → výrazné varování s odkazem na opravu.
+  const zapsana = (vysledek) => zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: { vysledek, zdroj: 'pos_api', verze: 3, kdy, kdo: null, detail: {} } })
+  const dvakrat = renderToStaticMarkup(createElement(SekceTrzba, props(zapsana('nalezeno'), ['opravit_trzbu', 'kontrola_trzby'])))
+  const VAROVANI_DVAKRAT = 'Pokladna tento prodej má — tržba je možná zapsaná dvakrát. Ověřte a případně stornujte Ostatní tržbu.'
+  ok('Tržba: zapsaná tržba + pokladna prodej našla → varování „možná zapsaná dvakrát“ (role=alert) s ikonou a odkazem na opravu',
+    textHtml(dvakrat).includes(VAROVANI_DVAKRAT) && /role="alert"/.test(dvakrat) && dvakrat.includes('href="#oprava-trzby"') && /<details[^>]*id="oprava-trzby"[^>]*open=""/.test(dvakrat))
+  ok('Tržba: po zápisu je „Zkontrolovat v pokladně“ (dodatečná kontrola), když ji akce dovolí', tlacitka(dvakrat).includes('Zkontrolovat v pokladně') && textHtml(dvakrat).includes('Dodatečná kontrola'))
+  const neniDvakrat = textHtml(renderToStaticMarkup(createElement(SekceTrzba, props(zapsana('nenalezeno'), ['opravit_trzbu']))))
+  ok('Tržba: zapsaná tržba a kontrola „nenalezeno“ → žádné varování (kontrola rozezná oba stavy)', !neniDvakrat.includes(VAROVANI_DVAKRAT))
+}
+
+console.log('\n-- opravy 18. 10.: kontrola dokladu („Co zkontrolovat“, důvod rozdílu) --')
+{
+  const STUB_AKCE_AI = js("export async function rozpoznat() { return { stav: 'nic', text: '' } }")
+  const SekceKontrola = await nactiKomponentu(`${ZAZNAM}/sekce-kontrola.tsx`, [...KRESLENI, ['../akce-ai', STUB_AKCE_AI]])
+  const L0 = await import(`../${ZAZNAM}/logika.ts`)
+  const kprops = (body, nesoulad) => ({
+    zakl,
+    z: zaznam({ stavKontroly: 'ke_kontrole' }),
+    akce: new Set(['oznacit_zkontrolovano']),
+    smiUpravit: false,
+    editor: { hlavicka: {}, polozky: [], katalog: [], kontakty: null },
+    polozky: [],
+    rozpoznani: null,
+    kontrolaRozpoznani: null,
+    coZkontrolovat: body,
+    nesoulad,
+    ai: { zapnuto: false, pocetSouboru: 0 },
+    katalog: null,
+    zona: 'Europe/Prague',
+  })
+  const body = [
+    { text: 'Položka 2 „Svíčková“: Řádek přečtený nejistě', blokuje: 'ano' },
+    { text: 'Celkem na dokladu nesedí se součtem položek', blokuje: 'bez_duvodu' },
+    { text: 'Záznam nemá žádné položky', blokuje: 'ne' },
+  ]
+  const s = renderToStaticMarkup(createElement(SekceKontrola, kprops(body, 'Celkem na dokladu (450,00 Kč) nesedí se součtem položek (90,00 Kč) — rozdíl 360,00 Kč')))
+  const t = textHtml(s)
+  ok('Kontrola: nadpis „Co zkontrolovat“ (ne „Co ještě brání“)', t.includes('Co zkontrolovat') && !t.includes('Co ještě brání'))
+  ok('Kontrola: u každého bodu je vidět, jestli označení blokuje, nebo je to jen upozornění',
+    t.includes('Blokuje označení: Položka 2') && t.includes('Blokuje bez důvodu: Celkem na dokladu') && t.includes('Jen upozornění: Záznam nemá žádné položky'))
+  const formOzn = formulare(s).find((x) => tlacitka(x).includes('Označit jako zkontrolované')) ?? ''
+  ok('Kontrola: při nesouladu má formulář povinné pole „Proč rozdíl nevadí“ (duvod_rozdilu)',
+    /<textarea\b[^>]*name="duvod_rozdilu"[^>]*required=""/.test(formOzn) && textHtml(formOzn).includes('Proč rozdíl nevadí'))
+  const bez = renderToStaticMarkup(createElement(SekceKontrola, kprops([], null)))
+  ok('Kontrola: bez nesouladu pole duvod_rozdilu není', !/name="duvod_rozdilu"/.test(bez))
+
+  // coZkontrolovat (spouští se): co blokuje a co je jen upozornění.
+  const pol = (prepis) => ({ nazevPuvodni: '', nazev: 'Pivo', mnozstvi: '2', jednotka: 'ks', cenaJednotkovaHaleru: 4500, cenaCelkemHaleru: 9000, sazbaDph: null, jistota: 0.9, zdroj: 'ai', druh: 'rozlevany_napoj', posProduktId: null, posProduktNazev: null, posMnozstvi: null, mapovani: 'nenamapovano', vyzadujeKontrolu: false, duvodKontroly: '', ...prepis })
+  const hl = (prepis) => ({ datumProdeje: '2026-10-15', oznaceni: '', mena: 'CZK', castkaHaleru: 9000, castkaPuvod: 'doklad', typDokladu: 'uzavreny_prodej', externiUcet: null, kontaktId: null, ...prepis })
+  const sedi = L0.coZkontrolovat([pol()], hl())
+  ok('coZkontrolovat: vše sedí → nic k zkontrolování, žádný nesoulad', sedi.body.length === 0 && sedi.nesoulad === null)
+  const priznak = L0.coZkontrolovat([pol({ vyzadujeKontrolu: true, duvodKontroly: 'Řádek přečtený nejistě (jistota 50 %)' })], hl())
+  ok('coZkontrolovat: řádek s příznakem → blokuje, s číslem a důvodem', priznak.body.length === 1 && priznak.body[0].blokuje === 'ano' && priznak.body[0].text.startsWith('Položka 1 „Pivo“: Řádek přečtený nejistě'))
+  const rozdil = L0.coZkontrolovat([pol()], hl({ castkaHaleru: 9100 }))
+  ok('coZkontrolovat: rozdíl 1 Kč v CZK → „blokuje bez důvodu“ + nesoulad', rozdil.nesoulad !== null && rozdil.body.some((b) => b.blokuje === 'bez_duvodu') && !rozdil.body.some((b) => b.blokuje === 'ano'))
+  const zaokr = L0.coZkontrolovat([pol()], hl({ castkaHaleru: 9050 }))
+  ok('coZkontrolovat: rozdíl do 50 haléřů v CZK je zaokrouhlení (žádný nesoulad)', zaokr.nesoulad === null)
+  const eur = L0.coZkontrolovat([pol()], hl({ mena: 'EUR', castkaHaleru: 9001 }))
+  ok('coZkontrolovat: v EUR nesoulad i o haléř', eur.nesoulad !== null)
+  const chybi = L0.coZkontrolovat([pol()], hl({ datumProdeje: null, mena: null, castkaHaleru: null }))
+  ok('coZkontrolovat: chybí datum, měna a částka → tři blokující body, každý jednou',
+    chybi.body.filter((b) => b.blokuje === 'ano').map((b) => b.text).join('|') === 'Chybí datum prodeje (provozní den)|Chybí měna|Chybí celková cena prodeje' &&
+      chybi.body.filter((b) => /Chybí (měna|datum|celková)/.test(b.text)).length === 3)
+  const prazdny = L0.coZkontrolovat([], hl())
+  ok('coZkontrolovat: bez položek → jen upozornění (databáze označení nebrání)', prazdny.body.length === 1 && prazdny.body[0].blokuje === 'ne')
 }
 
 /* =====================================================================
@@ -559,6 +708,7 @@ function klient(druh) {
         lte: () => q,
         order: () => q,
         limit: () => q,
+        range: (od, do_) => (filtry.push(['range', od, do_]), q),
         maybeSingle: () => Promise.resolve(vysledek(true)),
         then: (a, b) => Promise.resolve(vysledek(false)).then(a, b),
       }
@@ -638,7 +788,10 @@ function svet(prepis = {}) {
       schopnosti: { dohledaniUctu: true, katalog: true, skladovyVydej: 'rucne' },
       provozovny: [{ id: 'PROV1', branch_id: 'B1' }],
       relace: {
-        ucty: async () => ({ stav: 'ok', ucty: [], uplne: true }),
+        ucty: async (provozovna, odMs, doMs, moznosti) => {
+          s.log.push(['ucty', provozovna, odMs, doMs, moznosti ?? null])
+          return { stav: 'ok', ucty: [], uplne: true }
+        },
         ucetPodleKlice: async () => ({ stav: 'ok', ucet: null }),
         katalog: async () => ({ stav: 'ok', produkty: [{ externiId: 'X1', nazev: 'Pivo', jednotka: 'Piece', mira: null, odecitaSklad: true, maRecepturu: false, plu: [], ean: [], smazano: false }] }),
         skladovyVydej: async () => {
@@ -689,7 +842,8 @@ const PRIPADY = {
   opravitTrzbu: [akce, { castka: '400', duvod: 'Sleva dodatečně' }],
   odeslatSklad: [akce, {}],
   propojitVydej: [akce, { duvod: 'Pokladna už odečetla', externi_id: 'U-1' }],
-  rucneDolozit: [akce, { doklad: 'V-12', duvod: 'Výdejka v pokladně' }],
+  rucneDolozit: [akce, { doklad: 'V-12', duvod: 'Výdejka v pokladně', otisk: 'a'.repeat(64) }],
+  zrusitSchvaleni: [akce, { duvod: 'V pokladně nic neodepsáno, opravím množství' }],
   korekceVydeje: [akce, { doklad: 'O-1', duvod: 'Vráceno na sklad' }],
   faktura: [akce, { akce: 'propojit', cislo: 'FV-1', zdroj: 'externi' }],
   evidovatUhradu: [akce, { transakce: '' }],
@@ -882,6 +1036,269 @@ console.log('\n-- výdej do pokladny přes orchestrátor --')
   ok('kontrola nad starou verzí formuláře se nespustí (HLASKA_VERZE)', v6.text === L.HLASKA_VERZE && zaznamy(verze, 'relace').length === 0)
 }
 
+const MiB = 1024 * 1024
+const rpcVolani = (s, nazev) => zaznamy(s, 'rpc').filter((x) => x[2] === nazev)
+const zapsanaKontrola = (s) => rpcVolani(s, 'jine_platby_zapsat_kontrolu')[0]?.[3]
+const radekPolozky = (poradi, prepis = {}) => ({
+  id: `00000000-0000-4000-8000-0000000000${String(poradi).padStart(2, '0')}`,
+  poradi,
+  nazev_puvodni: '',
+  nazev: 'Pivo',
+  mnozstvi: 2,
+  jednotka: 'ks',
+  cena_jednotkova_haleru: 4500,
+  cena_celkem_haleru: 9000,
+  sazba_dph: null,
+  jistota: 0.9,
+  zdroj: 'ai',
+  druh: 'rozlevany_napoj',
+  pos_produkt_id: null,
+  pos_produkt_nazev: null,
+  pos_mnozstvi: null,
+  mapovani: 'nenamapovano',
+  vyzaduje_kontrolu: false,
+  duvod_kontroly: '',
+  ...prepis,
+})
+
+console.log('\n-- opravy 18. 10.: nové parametry RPC --')
+{
+  // rucneDolozit: p_otisk živého schváleného návrhu; bez pokladny null.
+  const r1 = svet()
+  await spustit(akce.rucneDolozit, KLID, formular({ doklad: 'V-12', duvod: 'Výdejka v pokladně', otisk: 'b'.repeat(64) }))
+  const v1 = rpcVolani(r1, 'jine_platby_rucne_dolozit_vydej')[0]?.[3]
+  ok('rucneDolozit: s pokladnou posílá p_otisk ze skrytého pole', v1?.p_otisk === 'b'.repeat(64) && v1.p_doklad === 'V-12' && v1.p_zaznam === ZAZNAM_ID)
+  const r2 = svet()
+  const v2 = await spustit(akce.rucneDolozit, KLID, formular({ doklad: 'V-12', duvod: 'Výdejka v pokladně' }))
+  ok('rucneDolozit: s pokladnou bez otisku → „Formulář je zastaralý…“ a nic se nezavolá', zaznamy(r2, 'rpc').length === 0 && v2.stav === 'chyba' && v2.text.startsWith('Formulář je zastaralý'))
+  const r3 = svet({ zaznam: { pripojeni_id: null, pos_provozovna: null, stav_skladu: 'bez_navrhu' } })
+  await spustit(akce.rucneDolozit, KLID, formular({ doklad: 'V-12', duvod: 'Papírová výdejka', otisk: 'c'.repeat(64) }))
+  const v3 = rpcVolani(r3, 'jine_platby_rucne_dolozit_vydej')[0]?.[3]
+  ok('rucneDolozit: bez pokladny p_otisk: null (i když formulář nějaký pošle)', v3 !== undefined && 'p_otisk' in v3 && v3.p_otisk === null)
+
+  // zrusitSchvaleni: jen p_zaznam + p_duvod, uživatelským klientem; povinný důvod.
+  const z1 = svet()
+  const vz = await spustit(akce.zrusitSchvaleni, KLID, formular({ duvod: 'V pokladně nic neodepsáno' }))
+  const pz = rpcVolani(z1, 'jine_platby_zrusit_schvaleni')[0]
+  ok('zrusitSchvaleni: rpc jine_platby_zrusit_schvaleni(p_zaznam, p_duvod) uživatelským klientem',
+    pz?.[1] === 'uzivatel' && pz[3].p_zaznam === ZAZNAM_ID && pz[3].p_duvod === 'V pokladně nic neodepsáno' && Object.keys(pz[3]).length === 2 && vz.stav === 'ok')
+  const z2 = svet()
+  const vz2 = await spustit(akce.zrusitSchvaleni, KLID, formular({ duvod: 'ne' }))
+  ok('zrusitSchvaleni: bez důvodu (pod 5 znaků) → chyba u pole duvod, nic se nezavolá', zaznamy(z2, 'rpc').length === 0 && Boolean(vz2.chyby?.duvod))
+
+  // opravitTrzbu: p_verze.
+  const o1 = svet()
+  await spustit(akce.opravitTrzbu, KLID, formular({ castka: '400', duvod: 'Sleva dodatečně' }))
+  const po = rpcVolani(o1, 'jine_platby_opravit_trzbu')[0]?.[3]
+  ok('opravitTrzbu: posílá p_verze z formuláře (3)', po?.p_verze === 3 && po.p_nova_castka_haleru === 40000)
+  const o2 = svet()
+  const vo2 = await spustit(akce.opravitTrzbu, KLID, formular({ verze: '', castka: '400', duvod: 'Sleva dodatečně' }))
+  ok('opravitTrzbu: bez verze → „Formulář je zastaralý…“ a nic se nezavolá', zaznamy(o2, 'rpc').length === 0 && vo2.text.startsWith('Formulář je zastaralý'))
+
+  // ulozit_mapovani: p_zaznam místo p_pripojeni (ulozitMapovani i „zapamatovat“ v ulozitNavrh).
+  const m1 = svet()
+  await spustit(akce.ulozitMapovani, KLID, formular({ alias: 'PIVO 0,5', produkt: 'X1' }))
+  const pm = rpcVolani(m1, 'jine_platby_ulozit_mapovani')[0]?.[3]
+  ok('ulozitMapovani: rpc (p_zaznam, p_alias, p_pos_produkt_id), žádné p_pripojeni', pm?.p_zaznam === ZAZNAM_ID && pm.p_alias === 'PIVO 0,5' && pm.p_pos_produkt_id === 'X1' && !('p_pripojeni' in pm))
+  const m2 = svet()
+  m2.tabulky.pos_katalog = [{ externi_id: 'X1', nazev: 'Pivo 0,5', jednotka: 'Piece', mira: null, odecita_sklad: true, ma_recepturu: false, plu: [], ean: [], smazano: false }]
+  await spustit(akce.ulozitNavrh, KLID, formular({ ...PRIPADY.ulozitNavrh[1], p_a_produkt: 'X1', p_a_zapamatovat: 'ano' }))
+  const pm2 = rpcVolani(m2, 'jine_platby_ulozit_mapovani')[0]?.[3]
+  ok('ulozitNavrh se „zapamatovat“: alias přes p_zaznam (pokladna ze záznamu), žádné p_pripojeni', pm2?.p_zaznam === ZAZNAM_ID && pm2.p_alias === 'Pivo' && !('p_pripojeni' in pm2))
+
+  // oznacitZkontrolovano: p_duvod_rozdilu jen při nesouladu součtu (nad ULOŽENÝMI položkami).
+  const nesed = svet()
+  nesed.tabulky.jine_platby_polozky = [radekPolozky(1)] // 90 Kč proti 450 Kč na záznamu
+  const vn = await spustit(akce.oznacitZkontrolovano, KLID, formular({}))
+  ok('oznacitZkontrolovano: součet nesedí a důvod chybí → chyba u pole duvod_rozdilu, nic se nezavolá', zaznamy(nesed, 'rpc').length === 0 && Boolean(vn.chyby?.duvod_rozdilu))
+  const sDuv = svet()
+  sDuv.tabulky.jine_platby_polozky = [radekPolozky(1)]
+  await spustit(akce.oznacitZkontrolovano, KLID, formular({ duvod_rozdilu: 'Sleva 360 Kč mimo položky' }))
+  ok('oznacitZkontrolovano: součet nesedí + důvod → p_duvod_rozdilu s důvodem', rpcVolani(sDuv, 'jine_platby_oznacit_zkontrolovano')[0]?.[3]?.p_duvod_rozdilu === 'Sleva 360 Kč mimo položky')
+  const sedi = svet()
+  sedi.tabulky.jine_platby_polozky = [radekPolozky(1, { cena_jednotkova_haleru: 22500, cena_celkem_haleru: 45000 })]
+  await spustit(akce.oznacitZkontrolovano, KLID, formular({ duvod_rozdilu: 'Nic, jen zkouším' }))
+  const ps = rpcVolani(sedi, 'jine_platby_oznacit_zkontrolovano')[0]?.[3]
+  ok('oznacitZkontrolovano: součet sedí → p_duvod_rozdilu: null (i když formulář pole pošle)', ps !== undefined && 'p_duvod_rozdilu' in ps && ps.p_duvod_rozdilu === null)
+  const dbRozdil = svet()
+  const hlaskaRozdilu = 'Součet položek (90,00 Kč) nesedí s celkovou částkou (450,00 Kč) — napište, proč rozdíl nevadí.'
+  dbRozdil.rpc.jine_platby_oznacit_zkontrolovano = { data: null, error: { code: '23514', message: hlaskaRozdilu } }
+  const vdb = await spustit(akce.oznacitZkontrolovano, KLID, formular({}))
+  ok('oznacitZkontrolovano: hláška databáze „Součet položek… nesedí“ → u pole duvod_rozdilu', vdb.chyby?.duvod_rozdilu === hlaskaRozdilu)
+}
+
+console.log('\n-- opravy 18. 10.: „Proč to není duplicita“ (tržba a schválení výdeje) --')
+{
+  const dup = svet()
+  dup.rpc.jine_platby_potvrdit_trzbu = { data: null, error: { code: '23514', message: 'Možná duplicita: podobný prodej je už zapsaný u záznamu X. Když to duplicita není, napište důvod.' } }
+  const vd = await spustit(akce.potvrditTrzbu, KLID, formular({ rezim: 'nova' }))
+  ok('potvrditTrzbu: „Možná duplicita…“ z databáze → chyba u pole duplicita_duvod (formulář ho zaměří)', vd.stav === 'chyba' && vd.chyby?.duplicita_duvod?.startsWith('Možná duplicita'))
+  const jina = svet()
+  jina.rpc.jine_platby_potvrdit_trzbu = { data: null, error: { code: '23514', message: 'Tržba je už zapsaná nebo propojená.' } }
+  const vj = await spustit(akce.potvrditTrzbu, KLID, formular({ rezim: 'nova' }))
+  ok('potvrditTrzbu: jiná hláška 23514 se k poli duplicity nepřiřadí', vj.stav === 'chyba' && vj.chyby === undefined)
+
+  const NAVRH = { navrh: NAVRH_ID, otisk: 'a'.repeat(64) }
+  const sch = svet({ zaznam: { stav_skladu: 'ceka_na_schvaleni' } })
+  await spustit(akcePos.rozhodnoutVydej, KLID, formular({ ...NAVRH, rozhodnuti: 'schvalit', duplicita_duvod: 'Jiný stůl, jiný host', duvod: 'TOHLE NE' }))
+  const ps = rpcVolani(sch, 'jine_platby_rozhodnout_vydej')[0]?.[3]
+  ok('rozhodnoutVydej schválit: p_duvod = „Proč to není duplicita“, ne pole duvod', ps?.p_schvalit === true && ps.p_duvod === 'Jiný stůl, jiný host')
+  const schBez = svet()
+  await spustit(akcePos.rozhodnoutVydej, KLID, formular({ ...NAVRH, rozhodnuti: 'schvalit' }))
+  ok('rozhodnoutVydej schválit bez důvodu duplicity: p_duvod null', rpcVolani(schBez, 'jine_platby_rozhodnout_vydej')[0]?.[3]?.p_duvod === null)
+  const zam = svet()
+  await spustit(akcePos.rozhodnoutVydej, KLID, formular({ ...NAVRH, rozhodnuti: 'zamitnout', duvod: 'Nesedí množství', duplicita_duvod: 'TOHLE NE' }))
+  const pzam = rpcVolani(zam, 'jine_platby_rozhodnout_vydej')[0]?.[3]
+  ok('rozhodnoutVydej zamítnout: p_duvod = důvod zamítnutí, ne „není duplicita“', pzam?.p_schvalit === false && pzam.p_duvod === 'Nesedí množství')
+  const kratky = svet()
+  const vk = await spustit(akcePos.rozhodnoutVydej, KLID, formular({ ...NAVRH, rozhodnuti: 'schvalit', duplicita_duvod: 'ne' }))
+  ok('rozhodnoutVydej schválit s příliš krátkým důvodem duplicity → chyba u pole, nic se nezavolá', zaznamy(kratky, 'rpc').length === 0 && Boolean(vk.chyby?.duplicita_duvod))
+  const dupV = svet()
+  dupV.rpc.jine_platby_rozhodnout_vydej = { data: null, error: { code: '23514', message: 'Možná duplicita výdeje: podobný výdej téže provozovny je u záznamu X.' } }
+  const vdv = await spustit(akcePos.rozhodnoutVydej, KLID, formular({ ...NAVRH, rozhodnuti: 'schvalit' }))
+  ok('rozhodnoutVydej: „Možná duplicita výdeje…“ → chyba u pole duplicita_duvod', vdv.chyby?.duplicita_duvod?.startsWith('Možná duplicita výdeje') === true)
+}
+
+console.log('\n-- opravy 18. 10.: rozpoznání přes AI (výběr souborů, podklad před stropem, názvy, 200 položek) --')
+{
+  const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 1, 2, 3])
+  const polozkaAi = (nazev) => ({ nazev, mnozstvi: '1', jednotka: 'ks', cenaJednotkova: '10', cenaCelkem: '10', sazbaDph: null, druhNavrh: 'kusove_zbozi', jistota: 0.95, poznamka: null })
+  const dokladAi = (polozky, celkem) => ({
+    polozky, celkem, kUhrade: celkem, zaplaceno: null, prijatoHotove: null, vraceno: null, zbyva: null, sleva: null, spropitne: null,
+    mena: 'CZK', datum: '2026-10-15', externiId: '1234', typDokladu: 'uzavreny_prodej', textDokladu: '', jistota: 0.95, upozorneni: [],
+  })
+  const aiOk = (doklad) => ({ zapnuto: true, vyhodit: false, vysledek: { stav: 'ok', doklad, model: 'claude-opus-5-5', verze: 'jine-platby-v1' } })
+
+  // Po pořadí: fotka nad 5 MB přeskočena, PDF do 8 MB ano, výběr skončí, než by součet překročil 20 MB.
+  const vyber = svet({ ai: aiOk(dokladAi([polozkaAi('Pivo')], '10')) })
+  vyber.tabulky.jine_platby_soubory = [
+    { id: 'S1', poradi: 1, cesta: 'c1', mime: 'image/jpeg', velikost: 6 * MiB },
+    { id: 'S2', poradi: 2, cesta: 'c2', mime: 'application/pdf', velikost: 7 * MiB },
+    { id: 'S3', poradi: 3, cesta: 'c3', mime: 'image/jpeg', velikost: 4 * MiB },
+    { id: 'S4', poradi: 4, cesta: 'c4', mime: 'image/jpeg', velikost: 4.5 * MiB },
+    { id: 'S5', poradi: 5, cesta: 'c5', mime: 'application/pdf', velikost: 6 * MiB },
+    { id: 'S6', poradi: 6, cesta: 'c6', mime: 'image/jpeg', velikost: 1000 },
+  ]
+  vyber.soubory = { c1: JPEG, c2: PDF, c3: JPEG, c4: JPEG, c5: PDF, c6: JPEG }
+  const vv = await spustit(akceAi.rozpoznat, KLID, formular({}))
+  ok('AI: stáhnou se a pošlou jen soubory 2, 3, 4 (fotka nad 5 MB pryč, konec před překročením 20 MB)',
+    JSON.stringify(zaznamy(vyber, 'download').map((x) => x[1])) === '["c2","c3","c4"]' && zaznamy(vyber, 'ai')[0]?.[1] === 3 && vv.stav === 'ok')
+  ok('AI: výsledek řekne, které soubory nešly a proč', /č\. 1 \(fotka nad 5 MB\)/.test(vv.text) && /č\. 5 \(dohromady/.test(vv.text) && /č\. 6 \(dohromady/.test(vv.text))
+
+  // Skutečné bajty dohromady nad 20 MB (uložené velikosti malé): zkontrolovatPodklad PŘED zahájením — nic se nezapočítá.
+  const fotka = (n) => {
+    const b = new Uint8Array(n)
+    b.set([0xff, 0xd8, 0xff, 0xe0])
+    return b
+  }
+  const velke = svet()
+  velke.tabulky.jine_platby_soubory = [1, 2, 3, 4, 5].map((i) => ({ id: `S${i}`, poradi: i, cesta: `v${i}`, mime: 'image/jpeg', velikost: 1000 }))
+  velke.soubory = Object.fromEntries([1, 2, 3, 4, 5].map((i) => [`v${i}`, fotka(4.5 * MiB)]))
+  const vvel = await spustit(akceAi.rozpoznat, KLID, formular({}))
+  ok('AI: podklad, který neprojde zkontrolovatPodklad (dohromady nad 20 MB), se nezapočítá do stropu ani nepošle',
+    zaznamy(velke, 'rpc').length === 0 && zaznamy(velke, 'ai').length === 0 && vvel.stav === 'chyba' && vvel.text.includes('dohromady moc velké') && vvel.text.includes('nezapočítalo'))
+
+  // Položka bez názvu → náhradní název, ke kontrole.
+  const necit = svet({ ai: aiOk(dokladAi([polozkaAi('Pivo'), polozkaAi('')], '20')) })
+  const vnec = await spustit(akceAi.rozpoznat, KLID, formular({}))
+  const ulozeno = rpcVolani(necit, 'jine_platby_ulozit_navrh')[0]?.[3]?.p_polozky ?? []
+  ok('AI: položka bez názvu → „Položka č. 2 (název nečitelný)“, název z dokladu prázdný, ke kontrole s důvodem',
+    ulozeno[0]?.nazev === 'Pivo' && ulozeno[1]?.nazev === 'Položka č. 2 (název nečitelný)' && ulozeno[1].nazev_puvodni === '' && ulozeno[1].vyzaduje_kontrolu === true &&
+      ulozeno[1].duvod_kontroly.includes(L.DUVOD_NECITELNY_NAZEV) && !ulozeno[1].duvod_kontroly.includes('Chybí název položky') && vnec.text.includes('název nečitelný'))
+
+  // Víc než 200 položek → prvních 200 a varování.
+  const moc = svet({ ai: aiOk(dokladAi(Array.from({ length: 205 }, (_, i) => polozkaAi(`Zboží ${i + 1}`)), '2050')) })
+  const vmoc = await spustit(akceAi.rozpoznat, KLID, formular({}))
+  const ulozenoMoc = rpcVolani(moc, 'jine_platby_ulozit_navrh')[0]?.[3]?.p_polozky ?? []
+  ok('AI: 205 položek → uloží se prvních 200 a výsledek varuje', ulozenoMoc.length === 200 && ulozenoMoc[199].nazev === 'Zboží 200' && vmoc.text.includes('uloženo je jen prvních 200'))
+}
+
+console.log('\n-- opravy 18. 10.: kontrola v pokladně (okna, sloučení, otevřený účet, nepodporované hledání) --')
+{
+  const iso = (ms) => new Date(ms).toISOString()
+  const okn = svet()
+  await spustit(akcePos.zkontrolovatTrzbu, KLID, formular({}))
+  const dotazyUcty = zaznamy(okn, 'ucty')
+  const uzav = dotazyUcty.find((x) => x[4]?.podle === 'uzavreni')
+  const otev = dotazyUcty.find((x) => x[4]?.jenOtevrene === true)
+  // Provozní den 15. 10. 2026, den začíná 05:00 v Praze (letní čas, UTC+2) → 05:00 = 03:00Z.
+  ok('kontrola: uzavřené účty podle UZAVŘENÍ, provozní den −1 až +2 (14. 10. 05:00 – 18. 10. 05:00 Praha)',
+    uzav?.[1] === 'PROV1' && iso(uzav[2]) === '2026-10-14T03:00:00.000Z' && iso(uzav[3]) === '2026-10-18T03:00:00.000Z' && uzav[4].jenOtevrene !== true)
+  ok('kontrola: otevřené účty zvlášť (jenOtevrene, podle vytvoření) od dne −60 (16. 8.) do +2',
+    otev?.[1] === 'PROV1' && iso(otev[2]) === '2026-08-16T03:00:00.000Z' && iso(otev[3]) === '2026-10-18T03:00:00.000Z' && otev[4].podle !== 'uzavreni')
+  ok('kontrola: na provozovnu právě dva dotazy (uzavřené + otevřené)', dotazyUcty.length === 2)
+  ok('(protipříklad) uzavřený prodej nad úplným prázdným seznamem → nenalezeno', zapsanaKontrola(okn)?.p_vysledek === 'nenalezeno')
+
+  const slouc = svet()
+  slouc.relace.relace.ucty = async (prov, od, do_, m) =>
+    m?.podle === 'uzavreni'
+      ? { stav: 'ok', ucty: [ucet({ externiId: 'U-100', stav: 'uzavreny' })], uplne: true }
+      : { stav: 'ok', ucty: [ucet({ externiId: 'U-100', stav: 'otevreny' }), ucet({ externiId: 'U-200', cisloDokladu: '9', celkemHaleru: 1, stav: 'otevreny' })], uplne: false }
+  await spustit(akcePos.zkontrolovatTrzbu, KLID, formular({}))
+  const ks = zapsanaKontrola(slouc)
+  ok('kontrola: výsledky obou dotazů sloučené bez opakování (U-100 jednou, jako uzavřený), úplnost = oba úplné',
+    ks?.p_vysledek === 'nalezeno' && ks.p_detail.pos_prodej_id === 'U-100' && ks.p_detail.pocet_uctu === 2 && ks.p_detail.uplne === false)
+
+  const otvDoklad = svet({ zaznam: { typ_dokladu: 'otevreny_ucet' } })
+  await spustit(akcePos.zkontrolovatTrzbu, KLID, formular({}))
+  ok('fotka otevřeného účtu, v pokladně stejné číslo není (úplný seznam) → nelze_overit, ne nenalezeno', zapsanaKontrola(otvDoklad)?.p_vysledek === 'nelze_overit')
+  const otvSklad = svet({ zaznam: { typ_dokladu: 'otevreny_ucet' } })
+  await spustit(akcePos.zkontrolovatSklad, KLID, formular({}))
+  ok('fotka otevřeného účtu u skladu → nelze_zjistit, ne neodecteno', zapsanaKontrola(otvSklad)?.p_vysledek === 'nelze_zjistit')
+
+  const nepodp = svet()
+  nepodp.relace.relace.ucty = async (prov, od, do_, m) =>
+    m?.podle === 'uzavreni' ? { stav: 'chyba', druh: 'jina', duvod: 'Pokladna neumí hledat podle uzavření.' } : { stav: 'ok', ucty: [], uplne: true }
+  const vnp = await spustit(akcePos.zkontrolovatTrzbu, KLID, formular({}))
+  const knp = zapsanaKontrola(nepodp)
+  ok('pokladna neumí hledat podle uzavření (trvalá chyba) → zapíše se nelze_overit s vysvětlením, žádný odhad',
+    knp?.p_vysledek === 'nelze_overit' && String(knp.p_detail.popis).includes('podle data uzavření') && knp.p_detail.uplne === false && vnp.stav === 'ok')
+  const nepodpSklad = svet()
+  nepodpSklad.relace.relace.ucty = nepodp.relace.relace.ucty
+  await spustit(akcePos.zkontrolovatSklad, KLID, formular({}))
+  ok('totéž u skladu → nelze_zjistit', zapsanaKontrola(nepodpSklad)?.p_vysledek === 'nelze_zjistit')
+  const docas = svet()
+  docas.relace.relace.ucty = async (prov, od, do_, m) => (m?.podle === 'uzavreni' ? { stav: 'chyba', druh: 'docasna', duvod: 'Dotykačka neodpověděla' } : { stav: 'ok', ucty: [], uplne: true })
+  const vdo = await spustit(akcePos.zkontrolovatTrzbu, KLID, formular({}))
+  ok('dočasná chyba dotazu podle uzavření NENÍ výsledek: nic se nezapíše', zaznamy(docas, 'rpc').length === 0 && vdo.stav === 'chyba')
+}
+
+console.log('\n-- opravy 18. 10.: katalog a aliasy po stránkách --')
+{
+  const Z = await import(ZAKLAD)
+  const produkt = (i) => ({ externi_id: `P${i}`, nazev: `Produkt ${i}`, jednotka: 'Piece', mira: null, odecita_sklad: true, ma_recepturu: false, plu: [], ean: [], smazano: false })
+  // PostgREST bez .range vrátí nejvýš 1000 řádků — stejně jako Supabase.
+  const strankovany = (celkem, radek) => (filtry) => {
+    const r = filtry.find((f) => f[0] === 'range')
+    const [od, do_] = r ? [r[1], r[2]] : [0, 999]
+    return Array.from({ length: Math.max(0, Math.min(celkem, do_ + 1, od + 1000) - od) }, (_, i) => radek(od + i))
+  }
+  const k1 = svet()
+  k1.tabulky.pos_katalog = strankovany(2500, produkt)
+  const kat = await Z.katalogPripojeni(klient('uzivatel'), 'T1', 'P1')
+  const dotazyKat = zaznamy(k1, 'from').filter((x) => x[2] === 'pos_katalog')
+  ok('katalog: načte se celý po stránkách (2500 produktů ve 3 dotazech .range po 1000)', kat.length === 2500 && dotazyKat.length === 3 && new Set(kat.map((p) => p.externiId)).size === 2500)
+  ok('katalog: každý dotaz jen nesmazané produkty (.eq smazano false) té firmy a pokladny',
+    dotazyKat.every((x) => x[3].some(([t, k, v]) => t === 'eq' && k === 'smazano' && v === false) && x[3].some(([, k, v]) => k === 'tenant_id' && v === 'T1') && x[3].some(([, k, v]) => k === 'pripojeni_id' && v === 'P1')))
+  const k2 = svet()
+  k2.tabulky.pos_katalog = strankovany(1e9, produkt)
+  let vyjimka = null
+  try {
+    await Z.katalogPripojeni(klient('uzivatel'), 'T1', 'P1')
+  } catch (e) {
+    vyjimka = e
+  }
+  ok('katalog: víc než 20 plných stránek → chyba, ne tichý ořez', vyjimka instanceof Error && zaznamy(k2, 'from').filter((x) => x[2] === 'pos_katalog').length === 20)
+  const k3 = svet()
+  k3.tabulky.pos_mapovani = strankovany(1500, (i) => ({ alias: `a${i}`, pos_produkt_id: 'X1' }))
+  const al = await Z.aliasyPripojeni(klient('uzivatel'), 'T1', 'P1')
+  ok('aliasy: taky celé po stránkách (1500 ve 2 dotazech)', al.length === 1500 && zaznamy(k3, 'from').filter((x) => x[2] === 'pos_mapovani').length === 2)
+  const k4 = svet()
+  k4.tabulky.pos_katalog = strankovany(2500, produkt)
+  const vk4 = await spustit(akce.ulozitNavrh, KLID, formular({ ...PRIPADY.ulozitNavrh[1], p_a_produkt: 'P2400' }))
+  ok('návrh: produkt z třetí stránky katalogu (P2400) jde přiřadit', vk4.stav === 'ok' && rpcVolani(k4, 'jine_platby_ulozit_navrh')[0]?.[3]?.p_polozky[0]?.pos_produkt_id === 'P2400')
+}
+
 /* =====================================================================
  * 8. LOGIKA (spouští se)
  * ===================================================================== */
@@ -910,6 +1327,23 @@ console.log('\n== 8. Logika: vyhodnocení kontroly v pokladně ==')
   ok('tržba: jiná měna se stejným číslem částky není shoda', t([ucet({ cisloDokladu: '5', externiId: 'U-5', mena: 'EUR' })], true).vysledek === 'nenalezeno')
   ok('tržba: zrušený účet se stejným číslem není „v pokladně“', t([ucet({ stav: 'zruseny', celkemHaleru: 1 })], true).vysledek === 'nenalezeno')
   ok('tržba: bez přiřazené provozovny → nelze_overit', L.vyhodnotitKontroluTrzby(z, [], okno).vysledek === 'nelze_overit')
+
+  // Fotka OTEVŘENÉHO účtu: bez shody čísla v pokladně nikdy „nenalezeno“ / „neodečteno“.
+  const zo = { ...z, typDokladu: 'otevreny_ucet' }
+  ok('tržba: fotka otevřeného účtu a nic v pokladně (úplný seznam) → nelze_overit', L.vyhodnotitKontroluTrzby(zo, d([], true), okno).vysledek === 'nelze_overit')
+  ok('tržba: fotka otevřeného účtu, v pokladně jen ZRUŠENÝ účet se stejným číslem → nelze_overit',
+    L.vyhodnotitKontroluTrzby(zo, d([ucet({ stav: 'zruseny', celkemHaleru: 1 })], true), okno).vysledek === 'nelze_overit')
+  ok('tržba: fotka otevřeného účtu a UZAVŘENÝ účet se stejným číslem → nalezeno (shoda čísla platí)', L.vyhodnotitKontroluTrzby(zo, d([ucet()], true), okno).vysledek === 'nalezeno')
+  ok('sklad: fotka otevřeného účtu a nic v pokladně → nelze_zjistit', L.vyhodnotitKontroluSkladu(zo, d([]), [], okno).vysledek === 'nelze_zjistit')
+
+  // Sloučení dotazů (uzavřené podle uzavření + otevřené).
+  const sl = L.sloucitUcty('PROV1', { ucty: [ucet({ externiId: 'A', stav: 'otevreny' })], uplne: true }, { ucty: [ucet({ externiId: 'A', stav: 'uzavreny' }), ucet({ externiId: 'B' })], uplne: true })
+  ok('sloučení: bez opakování podle externiId, uzavřený stav vyhraje', sl.ucty.length === 2 && sl.ucty.find((u) => u.externiId === 'A')?.stav === 'uzavreny' && sl.uplne === true)
+  ok('sloučení: úplné jen když jsou úplné oba dotazy',
+    L.sloucitUcty('P', { ucty: [], uplne: true }, { ucty: [], uplne: false }).uplne === false && L.sloucitUcty('P', { ucty: [], uplne: false }, { ucty: [], uplne: true }).uplne === false)
+  const okna = L.oknaKontroly('2026-10-25', '05:00', 'Europe/Prague')
+  ok('okna: přes přechod na zimní čas (25. 10.) — uzavřené od 24. 10. 05:00 letního do 28. 10. 05:00 zimního času',
+    new Date(okna.uzavrene.odMs).toISOString() === '2026-10-24T03:00:00.000Z' && new Date(okna.uzavrene.doMs).toISOString() === '2026-10-28T04:00:00.000Z' && okna.otevrene.doMs === okna.uzavrene.doMs)
 
   const s = (ucty, odpisy = [], uplne = true) => L.vyhodnotitKontroluSkladu(z, d(ucty, uplne), odpisy, okno)
   ok('sklad: výdej s klíčem naší operace v pokladně → jiz_odecteno', s([], [{ klic: 'K1', odpoved: { stav: 'ok', ucet: ucet({ externiId: 'POS-1' }) } }]).vysledek === 'jiz_odecteno')
@@ -977,6 +1411,47 @@ console.log('\n== 8b. Logika: formulář návrhu ==')
   ok('nový řádek (neznámé id) je ruční, bez názvu z dokladu', novy.stav === 'ok' && novy.polozky[1].zdroj === 'rucne' && novy.polozky[1].nazevPuvodni === '')
 
   ok('textChybyDb: 23505 z unikátního indexu neukáže jména tabulek', !L.textChybyDb({ code: '23505', message: 'duplicate key value violates unique constraint "x"' }).includes('constraint'))
+
+  // Náhradní název nečitelného řádku se jako alias nepamatuje (u běžného řádku ano).
+  const NEC = '44444444-2222-4333-8444-555555555555'
+  const sNec = L.nacistNavrh(
+    v({ ...zaklad, radek: ['a', 'b'], p_a_zapamatovat: 'ano', p_b_id: NEC, p_b_nazev: 'Položka č. 2 (název nečitelný)', p_b_mnozstvi: '1', p_b_cena_c: '10', p_b_druh: 'rozlevany_napoj', p_b_produkt: 'X2', p_b_zapamatovat: 'ano' }),
+    { ...kontext, puvodni: [...puvodni, { ...puvodni[0], id: NEC, nazevPuvodni: '', nazev: 'Položka č. 2 (název nečitelný)' }] },
+  )
+  ok('„zapamatovat“ u řádku s náhradním názvem alias neuloží; u běžného ano', sNec.stav === 'ok' && sNec.zapamatovat.length === 1 && sNec.zapamatovat[0].alias === 'PIVO 0,5')
+}
+
+console.log('\n== 8c. Logika: výběr souborů pro AI, nečitelné názvy, jednotky ==')
+{
+  const T = await import('../lib/jine-platby-typy.ts')
+  ok('stropy pro AI, se kterými testy počítají: fotka 5 MB, PDF 8 MB, dohromady 20 MB, 6 souborů',
+    T.MAX_BAJTU_OBRAZKU_PRO_AI === 5 * MiB && T.MAX_BAJTU_PRO_AI === 8 * MiB && T.MAX_BAJTU_CELKEM_PRO_AI === 20 * MiB && T.MAX_SOUBORU_PRO_AI === 6)
+  const lim = { maxSouboru: 3, maxObrazek: 5, maxPdf: 8, maxCelkem: 12 }
+  const sb = (poradi, mime, velikost) => ({ poradi, mime, velikost })
+  const v1 = L.vybratSouboryProAi([sb(1, 'image/jpeg', 6), sb(2, 'application/pdf', 7), sb(3, 'image/png', 4), sb(4, 'image/webp', 2), sb(5, 'image/jpeg', 1)], lim)
+  ok('výběr pro AI: fotka nad strop pryč, PDF podle stropu PDF, konec před překročením součtu — i menší soubory za ním už ne',
+    JSON.stringify(v1.vybrane.map((x) => x.poradi)) === '[2,3]' && JSON.stringify(v1.preskocene.map((x) => x.poradi)) === '[1,4,5]')
+  // `?.` — rozbitý výběr má přeskočených méně; kontrola má spadnout, ne shodit celý běh.
+  ok('výběr pro AI: důvod u každého přeskočeného (fotka nad strop / součet)',
+    v1.preskocene.length === 3 && v1.preskocene[0]?.duvod.startsWith('fotka nad') && /dohromady/.test(v1.preskocene[1]?.duvod ?? '') && /dohromady/.test(v1.preskocene[2]?.duvod ?? ''))
+  const v2 = L.vybratSouboryProAi([1, 2, 3, 4].map((i) => sb(i, 'image/jpeg', 1)), lim)
+  ok('výběr pro AI: nejvýš maxSouboru souborů', v2.vybrane.length === 3 && v2.preskocene.length === 1 && /nejvýš 3/.test(v2.preskocene[0]?.duvod ?? ''))
+  ok('výběr pro AI: PDF nad strop PDF se přeskočí, další soubor se vezme', L.vybratSouboryProAi([sb(1, 'application/pdf', 9), sb(2, 'image/jpeg', 1)], lim).vybrane.map((x) => x.poradi).join() === '2')
+
+  ok('jednotka z katalogu česky: Piece → ks, Liter → l, Milliliter → ml, Kilogram → kg, Gram → g, jinak beze změny',
+    ['Piece', 'Liter', 'Milliliter', 'Kilogram', 'Gram', 'Bottle', null].map(L.jednotkaCesky).join('|') === 'ks|l|ml|kg|g|Bottle|')
+
+  const pp = (nazev, duvod = '') => ({
+    nazevPuvodni: nazev, nazev, mnozstvi: '1', jednotka: null, cenaJednotkovaHaleru: null, cenaCelkemHaleru: 100, sazbaDph: null, jistota: 0.9, zdroj: 'ai',
+    druh: 'kusove_zbozi', posProduktId: null, posProduktNazev: null, posMnozstvi: null, mapovani: 'nenamapovano', vyzadujeKontrolu: duvod !== '', duvodKontroly: duvod,
+  })
+  const dop = L.doplnitNecitelneNazvy([pp('Pivo'), pp('  ', 'Chybí název položky')])
+  ok('nečitelný název: „Položka č. 2 (název nečitelný)“, věcné „Chybí název“ nahrazené důvodem, řádek ke kontrole',
+    dop[0].nazev === 'Pivo' && dop[1].nazev === 'Položka č. 2 (název nečitelný)' && dop[1].nazevPuvodni === '' && dop[1].vyzadujeKontrolu === true && dop[1].duvodKontroly === L.DUVOD_NECITELNY_NAZEV)
+  // Uložení návrhu příznaky přepočítá — důvod nečitelného názvu musí zůstat, jinak by vymyšlený název prošel kontrolou.
+  const K = await import('../lib/jine-platby-kontrola.ts')
+  const poUlozeni = K.zkontrolovatNavrh(dop, { datumProdeje: '2026-10-15', oznaceni: '', mena: 'CZK', castkaHaleru: 200, castkaPuvod: 'doklad', typDokladu: 'uzavreny_prodej', externiUcet: null, kontaktId: null }).polozky[1]
+  ok('nečitelný název: po přepočtu příznaků (uložení návrhu) řádek zůstane ke kontrole', poUlozeni.vyzadujeKontrolu === true && poUlozeni.duvodKontroly.includes(L.DUVOD_NECITELNY_NAZEV))
 }
 
 /* =====================================================================
@@ -993,7 +1468,15 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
     ['next/link', STUB_LINK],
     ['next/navigation', STUB_NAV],
     ['next/cache', js('export function revalidatePath() {}')],
-    ['@/lib/authz', js(`export const TENANT_SCOPE_SEGMENT = 'firma'\nexport async function hasAccess(t, p, b) { return ${DATA}.prava.has(p) }\nexport async function getUser() { return { id: 'U1' } }`)],
+    // Práva za FIRMU (pobočka null) a na pobočce zvlášť — platby a kontakty chtějí finance.read za firmu.
+    [
+      '@/lib/authz',
+      js(
+        "export const TENANT_SCOPE_SEGMENT = 'firma'\n" +
+          `export async function hasAccess(t, p, b) { return b === null ? ${DATA}.pravaFirmy.has(p) : ${DATA}.prava.has(p) }\n` +
+          "export async function getUser() { return { id: 'U1' } }",
+      ),
+    ],
     ['@/lib/firma', js("export async function getCurrentTenantId() { return 'T1' }")],
     ['@/lib/jine-platby-pristup', js(`export async function zkusPristupJinymPlatbam() { return ${DATA}.pristup }`)],
     ['@/lib/prihlaseni-adresa', js("export async function odkazNaPrihlaseni() { return '/prihlaseni' }")],
@@ -1051,15 +1534,23 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
     tenants: { timezone: 'Europe/Prague' },
   }
   const dotaz = (tabulka) => {
+    globalThis.__jpStranka.dotazy.push(tabulka)
     const q = {
-      select: () => q, eq: () => q, neq: () => q, is: () => q, in: () => q, gte: () => q, lte: () => q, order: () => q, limit: () => q,
+      select: () => q, eq: () => q, neq: () => q, is: () => q, in: () => q, gte: () => q, lte: () => q, order: () => q, limit: () => q, range: () => q,
       maybeSingle: () => Promise.resolve({ data: Array.isArray(tabulky[tabulka]) ? (tabulky[tabulka][0] ?? null) : (tabulky[tabulka] ?? null), error: null }),
-      then: (a, b) => Promise.resolve({ data: Array.isArray(tabulky[tabulka]) ? tabulky[tabulka] : [], error: null }).then(a, b),
+      then: (a, b) =>
+        Promise.resolve(
+          globalThis.__jpStranka.chybaTabulky === tabulka
+            ? { data: null, error: { code: 'XX000', message: 'podvržená chyba' } }
+            : { data: Array.isArray(tabulky[tabulka]) ? tabulky[tabulka] : [], error: null },
+        ).then(a, b),
     }
     return q
   }
   globalThis.__jpStranka = {
+    dotazy: [],
     prava: new Set(VSECHNA_PRAVA),
+    pravaFirmy: new Set(VSECHNA_PRAVA),
     pristup: { stav: 'ok', ctx: { branches: [{ id: 'B1', name: 'Bernard Bar', slug: 'bernard-bar' }], tenant: { timezone: 'Europe/Prague' } }, scope: { level: 'branch', branchId: 'B1', branchSlug: 'bernard-bar' } },
     pokladna: { nazev: 'Dotykačka Bernard', nazevPoskytovatele: 'Dotykačka', odpojena: false, katalog: true, dohledaniUctu: true, skladovyVydej: 'rucne', provozovny: [{ id: 'PROV1', nazev: 'Bernard Bar — výčep', branchId: 'B1' }] },
     klient: {
@@ -1094,6 +1585,36 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
     return pole.length > 10 && pole.every((m) => html.lastIndexOf('<label', m.index) > html.lastIndexOf('</label>', m.index))
   })())
   ok('ruční prohlášení u skladu se ukazuje jako ruční', text.includes('ruční prohlášení člověka — pokladnou neověřeno'))
+  ok('panel skladu: jednotka produktu z katalogu česky (Piece → „2 ks“), ne natvrdo', text.includes('Pivo 0,5 — 2 ks (jednotka prodeje pokladny)'))
+  ok('s finance.read ZA FIRMU: bankovní platby a kontakty se načtou a platba jde vybrat',
+    globalThis.__jpStranka.dotazy.includes('transakce') && globalThis.__jpStranka.dotazy.includes('kontakty') && /<select[^>]*name="transakce"/.test(html))
+
+  // finance.read jen NA POBOČCE (ne za firmu): RLS transakcí a kontaktů je za celou firmu → nečíst, jen věta.
+  globalThis.__jpStranka.pravaFirmy = new Set(VSECHNA_PRAVA.filter((p) => p !== 'finance.read'))
+  globalThis.__jpStranka.dotazy = []
+  let html2 = ''
+  try {
+    html2 = renderToStaticMarkup(await Stranka({ params: Promise.resolve({ rozsah: 'bernard-bar', zaznam: ZAZNAM_ID }) }))
+  } catch (e) {
+    console.log(`    stránka spadla: ${e instanceof Error ? e.stack : e}`)
+  }
+  ok('bez finance.read za firmu (jen na pobočce): transakce ani kontakty se vůbec nečtou',
+    html2.length > 1000 && !globalThis.__jpStranka.dotazy.includes('transakce') && !globalThis.__jpStranka.dotazy.includes('kontakty'))
+  ok('… místo výběru platby věta „Bankovní platby a Kontakty vidí jen finanční přehled celé firmy — zadejte číslo faktury ručně.“',
+    textHtml(html2).includes('Bankovní platby a Kontakty vidí jen finanční přehled celé firmy — zadejte číslo faktury ručně.') && !/name="transakce"/.test(html2))
+  globalThis.__jpStranka.pravaFirmy = new Set(VSECHNA_PRAVA)
+
+  // Katalog nejde načíst (chyba dotazu nebo strop stránek): stránka nespadne, chyba je vidět u katalogu.
+  globalThis.__jpStranka.chybaTabulky = 'pos_katalog'
+  let html3 = ''
+  try {
+    html3 = renderToStaticMarkup(await Stranka({ params: Promise.resolve({ rozsah: 'bernard-bar', zaznam: ZAZNAM_ID }) }))
+  } catch (e) {
+    console.log(`    stránka spadla: ${e instanceof Error ? e.message : e}`)
+  }
+  globalThis.__jpStranka.chybaTabulky = null
+  ok('katalog nejde načíst → stránka se vykreslí a u katalogu je chyba (žádný tichý ořez ani pád stránky)',
+    html3.length > 1000 && textHtml(html3).includes('Katalog pokladny se nepodařilo načíst (XX000).') && /role="alert"[^>]*class="hlaska-chyba"/.test(html3))
   if (process.env.NAHLED) {
     const { writeFileSync } = await import('node:fs')
     const css = new URL('../app/globals.css', import.meta.url).href

@@ -31,6 +31,15 @@
  *     operace `eq`, `gteq`, `lt`; okno „created date in interval (left
  *     boundary - inclusive, right - exclusive)". Čas jako epoch ms
  *     (api-reference/general/data-types: „Unix time … milliseconds since Epoch").
+ *   * Okno podle UZAVŘENÍ účtu (`ucty(…, { podle: 'uzavreni' })`) — ověřeno
+ *     18. 10. 2026 v https://docs.api.dotypos.com/entity/order/: atribut
+ *     `completed` („timestamp? — Order is completed.") má stejné značky
+ *     jako `created`: filtrovatelný skupinami `EQUALS`, `ENUM`, `NUMBER`
+ *     a řaditelný (🔽 `BOTH`). Skupina `NUMBER` = operace `gt`, `gteq`,
+ *     `lt`, `lteq` (https://docs.api.dotypos.com/api-reference/general/filter).
+ *     Filtr je proto `completed|gteq|<od>;completed|lt|<do>` se `sort=completed`
+ *     (nově uzavřené účty přibývají na konec, stránkování se nerozhodí).
+ *     Živě neověřeno, stejně jako zbytek souboru.
  *   * Řazení (api-reference/general/sort): `sort=created` (`created` je řaditelné).
  *   * Stránkování (api-reference/general/paging): `limit` nejvýš 100,
  *     prázdná data = 404. U Order „totalItemsCount=null and lastPage=null"
@@ -363,20 +372,36 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
       }
     },
 
-    async ucty(externiProvozovna: string, odMs: number, doMs: number, moznosti: { jenOtevrene?: boolean } = {}) {
+    async ucty(
+      externiProvozovna: string,
+      odMs: number,
+      doMs: number,
+      moznosti: { jenOtevrene?: boolean; podle?: 'vytvoreni' | 'uzavreni' } = {},
+    ) {
       if (!TVAR_ID.test(externiProvozovna)) return { stav: 'chyba', druh: 'jina', duvod: 'Neplatné id provozovny v Dotykačce.' } satisfies ChybaPos
       if (!Number.isSafeInteger(odMs) || !Number.isSafeInteger(doMs) || odMs < 0 || odMs >= doMs) {
         return { stav: 'chyba', druh: 'jina', duvod: 'Neplatné časové okno pro dohledání účtů.' } satisfies ChybaPos
       }
+      const podle = moznosti.podle ?? 'vytvoreni'
+      if (podle !== 'vytvoreni' && podle !== 'uzavreni') {
+        return { stav: 'chyba', druh: 'jina', duvod: 'Neznámý způsob hledání účtů v Dotykačce.' } satisfies ChybaPos
+      }
+      // Otevřený účet datum uzavření nemá — dotaz by vrátil vždycky nic a „nenalezeno" by lhalo.
+      if (podle === 'uzavreni' && moznosti.jenOtevrene) {
+        return { stav: 'chyba', druh: 'jina', duvod: 'Otevřené účty nemají datum uzavření — hledejte je podle vytvoření.' } satisfies ChybaPos
+      }
+      // entity/order: `created` i `completed` jsou filtrovatelné operacemi NUMBER (gteq, lt) a řaditelné (viz hlavička).
+      const pole = podle === 'uzavreni' ? 'completed' : 'created'
 
       const ucty: UcetPos[] = []
       let necitelnych = 0
       for (let strana = 1; strana <= MAX_STRAN_UCTU; strana++) {
         const parametry = new URLSearchParams({
-          // „created date in interval (left boundary - inclusive, right - exclusive)" (api-reference/general/filter)
-          filter: `_branchId|eq|${externiProvozovna};created|gteq|${odMs};created|lt|${doMs}`,
+          // „created date in interval (left boundary - inclusive, right - exclusive)" (api-reference/general/filter);
+          // podle uzavření totéž nad `completed`.
+          filter: `_branchId|eq|${externiProvozovna};${pole}|gteq|${odMs};${pole}|lt|${doMs}`,
           include: 'orderItems',
-          sort: 'created',
+          sort: pole,
           page: String(strana),
           limit: String(LIMIT_STRANKY),
         })

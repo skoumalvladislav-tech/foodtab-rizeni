@@ -8,6 +8,7 @@
  * API 2026.38.2):
  *   GET  …/v2/clouds/:cloudId/products?page=&limit=100
  *   GET  …/v2/clouds/:cloudId/orders?filter=_branchId|eq|…;created|gteq|…;created|lt|…&include=orderItems&sort=created&page=&limit=100[&namedFilter=openOrders]
+ *   GET  …/v2/clouds/:cloudId/orders?filter=_branchId|eq|…;completed|gteq|…;completed|lt|…&include=orderItems&sort=completed&page=&limit=100  (podle uzavření)
  *   GET  …/v2/clouds/:cloudId/orders?filter=externalId|eq|<klíč>&include=orderItems&page=1&limit=100
  *   POST …/v2/clouds/:cloudId/branches/:branchId/pos-actions  {action: order/create-issue-pay, …}
  * a výklad odpovědí („všechna čísla jsou řetězce").
@@ -187,6 +188,44 @@ console.log('\n== Účty: přesný dotaz ==')
   ok('obrácené okno → chyba bez volání', okno.stav === 'chyba' && spatna.pozadavky.length === 0)
   const desetinne = await spatna.relace.ucty('456', OD + 0.5, DO)
   ok('okno, které není celé ms → chyba bez volání', desetinne.stav === 'chyba' && spatna.pozadavky.length === 0)
+}
+
+console.log('\n== Účty podle data UZAVŘENÍ (completed) ==')
+{
+  // docs.api.dotypos.com/entity/order/: `completed` je filtrovatelné skupinou NUMBER (gteq, lt) a řaditelné.
+  const { relace, pozadavky } = await relaceS([{ status: 200, telo: { data: [ucet(1, { completed: String(OD + 5000) })] } }])
+  const v = await relace.ucty('456', OD, DO, { podle: 'uzavreni' })
+  const ocekavana = `${API_DOTYKACKA}/clouds/123/orders?filter=_branchId%7Ceq%7C456%3Bcompleted%7Cgteq%7C${OD}%3Bcompleted%7Clt%7C${DO}&include=orderItems&sort=completed&page=1&limit=100`
+  ok('přesná URL: okno completed [od, do), sort=completed, include=orderItems, page, limit', pozadavky[0]?.url === ocekavana)
+  const url = new URL(pozadavky[0]?.url ?? 'http://x')
+  ok('filtr po dekódování: _branchId|eq|456;completed|gteq|<od>;completed|lt|<do> (žádné created)',
+    url.searchParams.get('filter') === `_branchId|eq|456;completed|gteq|${OD};completed|lt|${DO}` && !url.searchParams.get('filter').includes('created'))
+  ok('účet se vrátí s datem uzavření, seznam úplný', v.stav === 'ok' && v.ucty.length === 1 && v.ucty[0].uzavrenoMs === OD + 5000 && v.uplne === true)
+
+  const vytvoreni = await relaceS([{ status: 200, telo: { data: [] } }])
+  await vytvoreni.relace.ucty('456', OD, DO, { podle: 'vytvoreni' })
+  ok('podle: vytvoreni = výchozí okno created a sort=created',
+    vytvoreni.pozadavky[0]?.url === `${API_DOTYKACKA}/clouds/123/orders?filter=_branchId%7Ceq%7C456%3Bcreated%7Cgteq%7C${OD}%3Bcreated%7Clt%7C${DO}&include=orderItems&sort=created&page=1&limit=100`)
+
+  const dve = await relaceS([
+    { status: 200, telo: { data: Array.from({ length: LIMIT_STRANKY }, (_, i) => ucet(i + 1)) } },
+    { status: 200, telo: { data: [ucet(500)] } },
+  ])
+  const vDve = await dve.relace.ucty('456', OD, DO, { podle: 'uzavreni' })
+  const druha = new URL(dve.pozadavky[1]?.url ?? 'http://x')
+  ok('stránkování podle uzavření: druhá stránka page=2 se stejným filtrem completed',
+    vDve.stav === 'ok' && vDve.ucty.length === 101 && druha.searchParams.get('page') === '2' && druha.searchParams.get('filter')?.includes(';completed|gteq|') && druha.searchParams.get('sort') === 'completed')
+
+  const spatne = await relaceS([])
+  const otevreneUzavreni = await spatne.relace.ucty('456', OD, DO, { podle: 'uzavreni', jenOtevrene: true })
+  ok('podle uzavření + jen otevřené → chyba bez volání (otevřený účet datum uzavření nemá)',
+    otevreneUzavreni.stav === 'chyba' && otevreneUzavreni.druh === 'jina' && spatne.pozadavky.length === 0)
+  const nesmysl = await spatne.relace.ucty('456', OD, DO, { podle: 'zruseni' })
+  ok('neznámé „podle" → chyba bez volání (nehádá se okno)', nesmysl.stav === 'chyba' && spatne.pozadavky.length === 0)
+  const zdrojSkladu = readFileSync(new URL('../lib/pokladna-dotykacka-sklad.ts', import.meta.url), 'utf8')
+  ok('filtr podle completed je podložený odkazem na dokumentaci (entity/order a general/filter)',
+    zdrojSkladu.includes('https://docs.api.dotypos.com/entity/order/') && zdrojSkladu.includes('https://docs.api.dotypos.com/api-reference/general/filter') &&
+      /`completed`[^*]*NUMBER/.test(zdrojSkladu))
 }
 
 console.log('\n== Účty: výklad otevřeného, uzavřeného a zrušeného účtu ==')

@@ -1,12 +1,12 @@
 'use server'
 
 import { prevestCastku } from '@/lib/jine-platby-castky'
-import { doDbHlavicka, doDbPolozky, SLOUPCE_POLOZKY, zDbPolozka } from '@/lib/jine-platby-db'
+import { doDbHlavicka, doDbPolozky, hlavickaZeZaznamu, SLOUPCE_POLOZKY, zDbPolozka } from '@/lib/jine-platby-db'
 import { sestavitPodklady, type KontaktFaktury } from '@/lib/jine-platby-faktura'
 import type { ProduktKatalogu } from '@/lib/jine-platby-mapovani'
 
 import { chyba, hotovo, katalogPripojeni, pripravit, vysledekChyby, type Pripraveno } from './[zaznam]/akce-zaklad'
-import { HLASKA_OBECNA, jeUuid, nacistNavrh, pole, verzeZFormulare, type StavAkce } from './[zaznam]/logika'
+import { coZkontrolovat, HLASKA_OBECNA, jeHlaskaDuplicity, jeUuid, nacistNavrh, pole, verzeZFormulare, type StavAkce } from './[zaznam]/logika'
 
 /**
  * Jiné platby — serverové akce nad záznamem (návrh, kontrola, tržba,
@@ -23,7 +23,8 @@ import { HLASKA_OBECNA, jeUuid, nacistNavrh, pole, verzeZFormulare, type StavAkc
  *
  * Oddělení práv (oddíl 4): akce tržby chtějí `jine_platby.trzba` a nikdy
  * nevolají skladovou funkci; akce skladu chtějí `jine_platby.vydej_pos`
- * (odeslání návrhu `jine_platby.sklad_odeslat`) a nikdy nevolají tržní.
+ * (odeslání návrhu `jine_platby.sklad_odeslat`; zrušení schválení
+ * `zrusitSchvaleni` taky `vydej_pos`) a nikdy nevolají tržní.
  * Proto jsou prohlášení rozdělená na `prohlasitTrzbu` a `prohlasitSklad`.
  * Hlídá scripts/jine-platby-detail.test.mjs.
  *
@@ -32,6 +33,8 @@ import { HLASKA_OBECNA, jeUuid, nacistNavrh, pole, verzeZFormulare, type StavAkc
 
 const HLASKA_ZASTARALY = 'Formulář je zastaralý — načtěte stránku znovu.'
 const HLASKA_DUVOD = 'Napište důvod (aspoň pár slov).'
+/** Otisk skladového návrhu (sha256 hex, `jine_platby_skladove_navrhy.otisk`). */
+const OTISK_RE = /^[0-9a-f]{64}$/
 
 /** Povinný důvod (databáze chce aspoň 5 znaků, `app.jp_duvod`). `null` = chybí. */
 function duvodZ(p: Pripraveno, nazev = 'duvod'): string | null {
@@ -40,6 +43,26 @@ function duvodZ(p: Pripraveno, nazev = 'duvod'): string | null {
 }
 
 const chybaPole = (nazev: string, text: string): StavAkce => ({ stav: 'chyba', text, chyby: { [nazev]: text } })
+
+/**
+ * Chyba databáze → stav formuláře; „Možná duplicita…“ (23514) se navíc
+ * přiřadí k poli s důvodem, ať ho formulář zaměří a napsaný text zůstane.
+ */
+function chybaSDuplicitou(error: { code?: string | null; message?: string | null }, coDelam: string, nazevPole: string): StavAkce {
+  const stav = vysledekChyby(error, coDelam)
+  return error.code === '23514' && jeHlaskaDuplicity(stav.text) ? { ...stav, chyby: { [nazevPole]: stav.text } } : stav
+}
+
+/** Uložené položky záznamu (uživatelský klient, RLS). `null` = nejde načíst. */
+async function polozkyZaznamu(p: Pripraveno): Promise<Record<string, unknown>[] | null> {
+  const { data, error } = await p.supabase
+    .from('jine_platby_polozky')
+    .select(SLOUPCE_POLOZKY)
+    .eq('zaznam_id', p.z.id)
+    .eq('tenant_id', p.tenantId)
+    .order('poradi')
+  return error ? null : ((data ?? []) as unknown as Record<string, unknown>[])
+}
 
 /* ------------------------------------------------------------------ */
 /* Návrh a kontrola                                                     */
@@ -57,14 +80,9 @@ export async function ulozitNavrh(_predchozi: StavAkce, formData: FormData): Pro
   const verze = verzeZFormulare(p.f)
   if (verze === null) return chyba(HLASKA_ZASTARALY)
 
-  const { data: radky, error: chybaPolozek } = await p.supabase
-    .from('jine_platby_polozky')
-    .select(SLOUPCE_POLOZKY)
-    .eq('zaznam_id', p.z.id)
-    .eq('tenant_id', p.tenantId)
-    .order('poradi')
-  if (chybaPolozek) return chyba(HLASKA_OBECNA)
-  const puvodni = ((radky ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...zDbPolozka(r), id: String(r.id) }))
+  const radky = await polozkyZaznamu(p)
+  if (!radky) return chyba(HLASKA_OBECNA)
+  const puvodni = radky.map((r) => ({ ...zDbPolozka(r), id: String(r.id) }))
 
   let katalog: ProduktKatalogu[]
   try {
@@ -84,11 +102,12 @@ export async function ulozitNavrh(_predchozi: StavAkce, formData: FormData): Pro
   })
   if (error) return vysledekChyby(error, 'uložení návrhu')
 
+  // Alias patří pokladně ZÁZNAMU — databáze ji vezme ze záznamu a právo upravit ověří na jeho pobočce.
   const nezapamatovano: string[] = []
   if (p.z.pripojeniId) {
     for (const a of navrh.zapamatovat) {
       const { error: chybaAliasu } = await p.supabase.rpc('jine_platby_ulozit_mapovani', {
-        p_pripojeni: p.z.pripojeniId,
+        p_zaznam: p.z.id,
         p_alias: a.alias,
         p_pos_produkt_id: a.posProduktId,
       })
@@ -107,14 +126,33 @@ export async function ulozitNavrh(_predchozi: StavAkce, formData: FormData): Pro
   return hotovo(p, casti.join(' '))
 }
 
+/**
+ * Označit jako zkontrolované. Když součet položek nesedí s celkovou cenou
+ * (`coZkontrolovat` nad ULOŽENÝMI položkami — totéž, co ukázala obrazovka),
+ * chce databáze důvod, proč rozdíl nevadí (`p_duvod_rozdilu`, zaokrouhlení,
+ * sleva mimo položky…). Bez nesouladu se posílá `null`, i kdyby formulář
+ * pole poslal.
+ */
 export async function oznacitZkontrolovano(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.upravit')
   if (!p.ok) return p.stav
   const verze = verzeZFormulare(p.f)
   if (verze === null) return chyba(HLASKA_ZASTARALY)
 
-  const { error } = await p.supabase.rpc('jine_platby_oznacit_zkontrolovano', { p_zaznam: p.z.id, p_verze: verze })
-  if (error) return vysledekChyby(error, 'označení zkontrolováno')
+  const radky = await polozkyZaznamu(p)
+  if (!radky) return chyba(HLASKA_OBECNA)
+  const { nesoulad } = coZkontrolovat(radky.map(zDbPolozka), hlavickaZeZaznamu(p.z))
+  let duvodRozdilu: string | null = null
+  if (nesoulad) {
+    duvodRozdilu = duvodZ(p, 'duvod_rozdilu')
+    if (!duvodRozdilu) return chybaPole('duvod_rozdilu', `${nesoulad.popis}. Napište, proč rozdíl nevadí (zaokrouhlení, sleva mimo položky…).`)
+  }
+
+  const { error } = await p.supabase.rpc('jine_platby_oznacit_zkontrolovano', { p_zaznam: p.z.id, p_verze: verze, p_duvod_rozdilu: duvodRozdilu })
+  if (error) {
+    const stav = vysledekChyby(error, 'označení zkontrolováno')
+    return error.code === '23514' && /^Součet položek/.test(stav.text) ? { ...stav, chyby: { duvod_rozdilu: stav.text } } : stav
+  }
   return hotovo(p, 'Záznam je zkontrolovaný. Tržba ani sklad se tím nemění — to jsou další kroky.')
 }
 
@@ -204,7 +242,7 @@ export async function potvrditTrzbu(_predchozi: StavAkce, formData: FormData): P
     p_rezim: rezim,
     p_duplicita_duvod: duplicita === '' ? null : duplicita.slice(0, 1000),
   })
-  if (error) return vysledekChyby(error, 'potvrzení tržby')
+  if (error) return chybaSDuplicitou(error, 'potvrzení tržby', 'duplicita_duvod')
   return hotovo(
     p,
     rezim === 'nova'
@@ -217,6 +255,9 @@ export async function potvrditTrzbu(_predchozi: StavAkce, formData: FormData): P
 export async function opravitTrzbu(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.oprava')
   if (!p.ok) return p.stav
+  // Verze z formuláře: oprava podle zastaralé obrazovky (mezitím jiná oprava) databáze odmítne (40001).
+  const verze = verzeZFormulare(p.f)
+  if (verze === null) return chyba(HLASKA_ZASTARALY)
 
   const castkaText = pole(p.f, 'castka')
   let nova: number | null = null
@@ -235,6 +276,7 @@ export async function opravitTrzbu(_predchozi: StavAkce, formData: FormData): Pr
 
   const { error } = await p.supabase.rpc('jine_platby_opravit_trzbu', {
     p_zaznam: p.z.id,
+    p_verze: verze,
     p_nova_castka_haleru: nova,
     p_duvod: duvod,
     p_doklad_opravy: doklad === '' ? null : doklad,
@@ -288,18 +330,46 @@ export async function propojitVydej(_predchozi: StavAkce, formData: FormData): P
  * „Ručně doloženo“: výdej provedl člověk v pokladně. Číslo dokladu
  * z pokladny a důvod jsou povinné. NENÍ to „Odečteno v POS“ — stav
  * `rucne_dolozeno`. Právo `jine_platby.vydej_pos`.
+ *
+ * U záznamu s pokladnou nese formulář otisk ŽIVÉHO schváleného návrhu
+ * (skryté pole) — databáze ho porovná, ať se nedoloží jiný obsah, než
+ * jaký člověk na obrazovce viděl. Bez pokladny návrh není, posílá se `null`.
  */
 export async function rucneDolozit(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.vydej_pos')
   if (!p.ok) return p.stav
+  let otisk: string | null = null
+  if (p.z.pripojeniId) {
+    otisk = pole(p.f, 'otisk')
+    if (!OTISK_RE.test(otisk)) return chyba(HLASKA_ZASTARALY)
+  }
   const doklad = pole(p.f, 'doklad').slice(0, 100)
   if (doklad === '') return chybaPole('doklad', 'Napište číslo dokladu z pokladny (výdejka, odpis).')
   const duvod = duvodZ(p)
   if (!duvod) return chybaPole('duvod', HLASKA_DUVOD)
 
-  const { error } = await p.supabase.rpc('jine_platby_rucne_dolozit_vydej', { p_zaznam: p.z.id, p_doklad: doklad, p_duvod: duvod })
+  const { error } = await p.supabase.rpc('jine_platby_rucne_dolozit_vydej', { p_zaznam: p.z.id, p_otisk: otisk, p_doklad: doklad, p_duvod: duvod })
   if (error) return vysledekChyby(error, 'ruční doložení výdeje')
   return hotovo(p, 'Ručně doloženo. Stav skladu je „Ručně doloženo (neověřeno pokladnou)“ — není to automatické ověření.')
+}
+
+/**
+ * Zrušit schválení výdeje, když v pokladně NIC odepsáno nebylo (schváleno,
+ * předáno k ručnímu odpisu, nebo prokázaná chyba). Sklad se vrátí na „bez
+ * návrhu“, návrh se nahradí a operace zruší; povinný důvod. Když už
+ * v pokladně odepsáno je, patří sem „Ručně doloženo“, ne tohle. Kdy to jde
+ * (stav skladu, poslední operace není na cestě ani hotová), rozhoduje
+ * databáze. Právo `jine_platby.vydej_pos`.
+ */
+export async function zrusitSchvaleni(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
+  const p = await pripravit(formData, 'jine_platby.vydej_pos')
+  if (!p.ok) return p.stav
+  const duvod = duvodZ(p)
+  if (!duvod) return chybaPole('duvod', HLASKA_DUVOD)
+
+  const { error } = await p.supabase.rpc('jine_platby_zrusit_schvaleni', { p_zaznam: p.z.id, p_duvod: duvod })
+  if (error) return vysledekChyby(error, 'zrušení schválení výdeje')
+  return hotovo(p, 'Schválení zrušeno — v pokladně se nic neodepisovalo. Sklad je zpět „bez návrhu“; po úpravě položek pošlete návrh znovu ke schválení.')
 }
 
 /** Korekce provedeného výdeje (ručně doložená). Práva `jine_platby.oprava` A `jine_platby.vydej_pos`. */
@@ -347,14 +417,9 @@ export async function faktura(_predchozi: StavAkce, formData: FormData): Promise
         .maybeSingle()
       kontakt = (data as KontaktFaktury | null) ?? null
     }
-    const { data: radky, error: chybaPolozek } = await p.supabase
-      .from('jine_platby_polozky')
-      .select(SLOUPCE_POLOZKY)
-      .eq('zaznam_id', p.z.id)
-      .eq('tenant_id', p.tenantId)
-      .order('poradi')
-    if (chybaPolozek) return chyba(HLASKA_OBECNA)
-    const polozky = ((radky ?? []) as unknown as Record<string, unknown>[]).map(zDbPolozka)
+    const radky = await polozkyZaznamu(p)
+    if (!radky) return chyba(HLASKA_OBECNA)
+    const polozky = radky.map(zDbPolozka)
     const { podklady, chybi } = sestavitPodklady(p.z, polozky, kontakt)
 
     const { error } = await p.supabase.rpc('jine_platby_faktura', {
@@ -439,7 +504,8 @@ export async function ulozitMapovani(_predchozi: StavAkce, formData: FormData): 
   const produkt = pole(p.f, 'produkt').slice(0, 100)
   if (alias === '' || produkt === '') return chyba('Chybí název nebo produkt.')
 
-  const { error } = await p.supabase.rpc('jine_platby_ulozit_mapovani', { p_pripojeni: p.z.pripojeniId, p_alias: alias, p_pos_produkt_id: produkt })
+  // Pokladnu bere databáze ze záznamu (ne z formuláře) a právo upravit ověří na jeho pobočce.
+  const { error } = await p.supabase.rpc('jine_platby_ulozit_mapovani', { p_zaznam: p.z.id, p_alias: alias, p_pos_produkt_id: produkt })
   if (error) return vysledekChyby(error, 'uložení přiřazení')
   return hotovo(p, 'Přiřazení zapamatováno — příště se nabídne jako ověřené.')
 }

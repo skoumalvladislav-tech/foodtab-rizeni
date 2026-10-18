@@ -21,6 +21,8 @@ import { z } from 'zod'
 
 import {
   DRUHY_POLOZEK,
+  MAX_BAJTU_CELKEM_PRO_AI,
+  MAX_BAJTU_OBRAZKU_PRO_AI,
   MAX_BAJTU_PRO_AI,
   MAX_SOUBORU_PRO_AI,
   TYPY_DOKLADU,
@@ -30,19 +32,18 @@ import {
   type TypSouboru,
 } from './jine-platby-typy.ts'
 
+/**
+ * Stropy podkladu jsou ve sdílených typech (lib/jine-platby-typy.ts), aby
+ * je viděl i prohlížeč (zmenšení fotky). `MAX_BAJTU_CELKEM_PRO_AI` se
+ * odsud dál vyváží kvůli starším importům.
+ */
+export { MAX_BAJTU_CELKEM_PRO_AI }
+
 export const MODEL = 'claude-opus-5-5'
 /** Špatně přečtená cena je horší než pomalejší čtení (u Opus 5.5 je výchozí `medium`). */
 export const NAMAHA = 'high'
 /** Mění se s každou změnou zadání nebo schématu — ukládá se k rozpoznání (`jine_platby_rozpoznani.verze_zadani`). */
 export const VERZE_ZADANI = 'jine-platby-v1'
-
-/**
- * Strop všech souborů jednoho rozpoznání dohromady. API bere nejvýš 32 MB
- * na požadavek a base64 přidá třetinu: 20 MB → ~26,7 MB + zadání. Sdílené
- * typy mají jen strop jednoho souboru (`MAX_BAJTU_PRO_AI`, 8 MB) a počet
- * (`MAX_SOUBORU_PRO_AI`, 6) — šest plných souborů by se do požadavku nevešlo.
- */
-export const MAX_BAJTU_CELKEM_PRO_AI = 20 * 1024 * 1024
 
 /** Doslovný přepis dokladu se ukládá zkrácený (`jine_platby_rozpoznani.text_dokladu`). */
 const MAX_DELKA_TEXTU_DOKLADU = 4000
@@ -224,8 +225,14 @@ export function zkontrolovatPodklad(p: PodkladRozpoznani): string | null {
     if (!s || !(s.data instanceof Uint8Array)) return `${c} chybí.`
     if (!(TYPY_SOUBORU as readonly string[]).includes(s.mime)) return `${c}: AI přečte jen fotku (JPEG, PNG, WebP) nebo PDF.`
     if (s.data.length === 0) return `${c} je prázdný.`
-    if (s.data.length > MAX_BAJTU_PRO_AI) {
-      return `${c} je na rozpoznání moc velký (${Math.ceil(s.data.length / MB)} MB). Vejít se musí do ${MAX_BAJTU_PRO_AI / MB} MB.`
+    // Fotka má přísnější strop než PDF: API měří obrázek po převodu do base64 (MAX_BAJTU_OBRAZKU_PRO_AI).
+    // Strop se volí podle deklarovaného typu — neshodu s obsahem odmítne kontrola hned za tím.
+    const fotka = s.mime !== 'application/pdf'
+    const strop = fotka ? MAX_BAJTU_OBRAZKU_PRO_AI : MAX_BAJTU_PRO_AI
+    if (s.data.length > strop) {
+      return fotka
+        ? `${c} je na rozpoznání moc velká fotka (${Math.ceil(s.data.length / MB)} MB). Pro AI se fotka musí vejít do ${strop / MB} MB.`
+        : `${c} je na rozpoznání moc velké PDF (${Math.ceil(s.data.length / MB)} MB). Vejít se musí do ${strop / MB} MB.`
     }
     const podleObsahu = poznatTypSouboru(s.data)
     if (podleObsahu !== s.mime) {

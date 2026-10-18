@@ -19,14 +19,17 @@
  * z kuchyně je to dost, na účtenku ne: sjetina z pokladny je dlouhý
  * proužek drobného písma a po zmenšení na 2000 px by z řádku „2× pivo
  * 0,5 l 98,00" zbyla šmouha, kterou nepřečte člověk ani AI. Doklad se
- * proto zmenšuje jen tehdy, když musí (větší než strop pro AI nebo
- * formát, který AI ani úložiště nevezmou — HEIC z iPhonu), a jen na
- * delší stranu 4000 px s kvalitou 0,9.
+ * proto zmenšuje jen tehdy, když musí (fotka větší než strop pro AI
+ * `MAX_BAJTU_OBRAZKU_PRO_AI`, 5 MB, nebo formát, který AI ani úložiště
+ * nevezmou — HEIC z iPhonu), a postupně: delší strana 4000 px s kvalitou
+ * 0,9, pak 0,8, a teprve když to pořád nestačí, 3000 px (`POKUSY_ZMENSENI`).
+ * Fotka, která se pod strop nevejde ani tak, se odmítne s vysvětlením
+ * (`zkontrolovatPoZmenseni`) — nahraná by AI stejně nepřečetla.
  */
 
 import {
   KBELIK_JINYCH_PLATEB,
-  MAX_BAJTU_PRO_AI,
+  MAX_BAJTU_OBRAZKU_PRO_AI,
   MAX_BAJTU_SOUBORU,
   MAX_SOUBORU_NA_ZAZNAM,
   TYPY_SOUBORU,
@@ -39,8 +42,21 @@ export { KBELIK_JINYCH_PLATEB, noveId, ocistitNazev, typSouboru, velikostText }
 
 /** Delší strana zmenšeného dokladu. Víc než u fotek ze zpráv (2000) — drobné písmo účtenky musí zůstat čitelné. */
 export const NEJDELSI_STRANA_DOKLADU = 4000
-/** Kvalita JPEG zmenšeného dokladu; druhý pokus, když by první vyšel nad strop pro AI. */
+/** Delší strana posledního pokusu, když se fotka ani s nižší kvalitou nevejde pod strop pro AI. */
+export const NEJDELSI_STRANA_DOKLADU_NOUZOVE = 3000
+/** Kvalita JPEG zmenšeného dokladu; nižší se zkusí, když by vyšší vyšla nad strop pro AI. */
 export const KVALITY_JPEG_DOKLADU = [0.9, 0.8] as const
+
+export type PokusZmenseni = { strana: number; kvalita: number }
+
+/**
+ * Pořadí pokusů o zmenšení: napřed plné rozlišení dokladu s klesající
+ * kvalitou, pak menší rozlišení. Písmo účtenky snese nižší kvalitu JPEG
+ * líp než menší rozlišení, proto rozlišení jde dolů až nakonec.
+ */
+export const POKUSY_ZMENSENI: readonly PokusZmenseni[] = [NEJDELSI_STRANA_DOKLADU, NEJDELSI_STRANA_DOKLADU_NOUZOVE].flatMap((strana) =>
+  KVALITY_JPEG_DOKLADU.map((kvalita) => ({ strana, kvalita })),
+)
 
 /** Přípona v cestě podle typu — musí sedět s `app.jine_platby_cesta` a kontrolou v `jine_platby_pripojit_soubor`. */
 export const PRIPONY_SOUBORU: Record<TypSouboru, 'jpg' | 'png' | 'webp' | 'pdf'> = {
@@ -58,10 +74,11 @@ export type SouborVyberu = { name: string; type: string; size: number }
 
 /**
  * Co se s vybraným souborem udělá:
- *   * `nahrat`  — jde tak, jak je (povolený typ, do stropu pro AI);
- *   * `zmensit` — fotka větší než strop pro AI nebo v typu, který
- *                 úložiště nevezme (HEIC…): zkusí se zmenšit na JPEG
- *                 a po zmenšení se zkontroluje znovu (`zkontrolovatPoZmenseni`).
+ *   * `nahrat`  — jde tak, jak je (povolený typ, fotka do stropu pro AI);
+ *   * `zmensit` — fotka větší než strop pro AI (`MAX_BAJTU_OBRAZKU_PRO_AI`)
+ *                 nebo v typu, který úložiště nevezme (HEIC…): zkusí se
+ *                 zmenšit na JPEG a po zmenšení se zkontroluje znovu
+ *                 (`zkontrolovatPoZmenseni`).
  */
 export type PolozkaVyberu = { index: number; akce: 'nahrat' | 'zmensit' }
 export type VysledekVyberu = { polozky: PolozkaVyberu[]; chyby: string[] }
@@ -98,20 +115,59 @@ export function zkontrolovatVyber(soubory: readonly SouborVyberu[], uzMa: number
       return
     }
     volno -= 1
-    const zmensit = jeObrazek(typ) && (!jeTypSouboru(typ) || s.size > MAX_BAJTU_PRO_AI)
+    const zmensit = jeObrazek(typ) && (!jeTypSouboru(typ) || s.size > MAX_BAJTU_OBRAZKU_PRO_AI)
     polozky.push({ index, akce: zmensit ? 'zmensit' : 'nahrat' })
   })
 
   return { polozky, chyby }
 }
 
-/** Po zmenšení (nebo když se zmenšit nepodařilo): jde soubor nahrát? `null` = ano, jinak věta proč ne. */
+/**
+ * Po zmenšení (nebo když se zmenšit nepodařilo): jde soubor nahrát?
+ * `null` = ano, jinak věta proč ne.
+ *
+ * Fotka musí být pod stropem pro AI (`MAX_BAJTU_OBRAZKU_PRO_AI`) — větší
+ * by se do úložiště sice vešla, ale rozpoznání by ji odmítlo
+ * (`zkontrolovatPodklad`). PDF jen pod stropem úložiště: zmenšit se nedá
+ * a originál se uchová i tak.
+ */
 export function zkontrolovatPoZmenseni(nazev: string, mime: string, velikost: number): string | null {
   const cisty = ocistitNazev(nazev)
   if (!jeTypSouboru(mime)) return `„${cisty}“: tenhle typ fotky se nepodařilo převést na JPEG — vyfoťte doklad znovu, nebo ho pošlete jako PDF.`
   if (!(velikost > 0)) return `„${cisty}“: soubor je prázdný.`
-  if (velikost > MAX_BAJTU_SOUBORU) return `„${cisty}“: je i po zmenšení větší než ${velikostText(MAX_BAJTU_SOUBORU)}.`
+  if (mime !== 'application/pdf' && velikost > MAX_BAJTU_OBRAZKU_PRO_AI) {
+    return (
+      `„${cisty}“: fotku se nepodařilo zmenšit pod ${velikostText(MAX_BAJTU_OBRAZKU_PRO_AI)} (má ${velikostText(velikost)}), ` +
+      'a tak velkou AI nepřečte. Vyfoťte doklad znovu s menším rozlišením, nebo ho pošlete jako PDF.'
+    )
+  }
+  if (velikost > MAX_BAJTU_SOUBORU) return `„${cisty}“: je větší než ${velikostText(MAX_BAJTU_SOUBORU)}.`
   return null
+}
+
+/**
+ * Zkouší pokusy o zmenšení (`POKUSY_ZMENSENI`) po pořadí a vrátí PRVNÍ
+ * výsledek, který se vejde pod `strop`. Když se nevejde žádný, vrátí
+ * nejmenší výsledek s `vejdeSe: false` — odmítne ho `zkontrolovatPoZmenseni`
+ * s vysvětlením. `zakodovat` vrací `null`, když to prohlížeč neumí;
+ * takový pokus se přeskočí.
+ *
+ * Čistá funkce nad podstrčeným kodérem — prohlížečové plátno je
+ * v `zmensitDoklad`, tohle se dá spustit v Node.
+ */
+export async function zmensitPostupne(
+  zakodovat: (pokus: PokusZmenseni) => Promise<Blob | null>,
+  strop: number = MAX_BAJTU_OBRAZKU_PRO_AI,
+  pokusy: readonly PokusZmenseni[] = POKUSY_ZMENSENI,
+): Promise<{ blob: Blob | null; pokus: PokusZmenseni | null; vejdeSe: boolean }> {
+  let nejmensi: { blob: Blob; pokus: PokusZmenseni } | null = null
+  for (const pokus of pokusy) {
+    const blob = await zakodovat(pokus)
+    if (!blob || !(blob.size > 0)) continue
+    if (blob.size <= strop) return { blob, pokus, vejdeSe: true }
+    if (!nejmensi || blob.size < nejmensi.blob.size) nejmensi = { blob, pokus }
+  }
+  return { blob: nejmensi?.blob ?? null, pokus: nejmensi?.pokus ?? null, vejdeSe: false }
 }
 
 /**
@@ -131,31 +187,44 @@ export function rozmeryZmenseni(sirka: number, vyska: number, nejdelsi: number =
  * Zmenšená JPEG kopie fotky dokladu, nebo `null`, když to prohlížeč neumí
  * (starší prohlížeč, HEIC v prohlížeči bez podpory). Jen pro prohlížeč.
  *
- * Kvalita 0,9; kdyby výsledek pořád přesáhl strop pro AI, zkusí se
- * jednou 0,8. Průhledné PNG dostane bílý podklad (v JPEG by bylo černé).
+ * Pokusy jdou podle `POKUSY_ZMENSENI` (`zmensitPostupne`): 4000 px při
+ * kvalitě 0,9 a 0,8, pak 3000 px. Vrátí první, který se vejde pod strop
+ * pro AI; když žádný, ten nejmenší — a `zkontrolovatPoZmenseni` ho
+ * odmítne s vysvětlením. Průhledné PNG dostane bílý podklad (v JPEG by
+ * bylo černé).
  */
 export async function zmensitDoklad(soubor: Blob): Promise<Blob | null> {
+  let bitmapa: ImageBitmap | null = null
   try {
     if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return null
-    const bitmapa = await createImageBitmap(soubor, { imageOrientation: 'from-image' })
-    const { sirka, vyska } = rozmeryZmenseni(bitmapa.width, bitmapa.height)
-    const platno = document.createElement('canvas')
-    platno.width = sirka
-    platno.height = vyska
-    const ctx = platno.getContext('2d')
-    if (!ctx) return null
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, sirka, vyska)
-    ctx.drawImage(bitmapa, 0, 0, sirka, vyska)
-    bitmapa.close?.()
-    let vysledek: Blob | null = null
-    for (const kvalita of KVALITY_JPEG_DOKLADU) {
-      vysledek = await new Promise<Blob | null>((hotovo) => platno.toBlob(hotovo, 'image/jpeg', kvalita))
-      if (vysledek && vysledek.size <= MAX_BAJTU_PRO_AI) break
+    const zdroj = await createImageBitmap(soubor, { imageOrientation: 'from-image' })
+    bitmapa = zdroj
+    const platna = new Map<number, HTMLCanvasElement | null>()
+    const platnoPro = (strana: number): HTMLCanvasElement | null => {
+      if (platna.has(strana)) return platna.get(strana) ?? null
+      const { sirka, vyska } = rozmeryZmenseni(zdroj.width, zdroj.height, strana)
+      const platno = document.createElement('canvas')
+      platno.width = sirka
+      platno.height = vyska
+      const ctx = platno.getContext('2d')
+      if (ctx) {
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, sirka, vyska)
+        ctx.drawImage(zdroj, 0, 0, sirka, vyska)
+      }
+      platna.set(strana, ctx ? platno : null)
+      return ctx ? platno : null
     }
-    return vysledek
+    const { blob } = await zmensitPostupne(async ({ strana, kvalita }) => {
+      const platno = platnoPro(strana)
+      if (!platno) return null
+      return new Promise<Blob | null>((hotovo) => platno.toBlob(hotovo, 'image/jpeg', kvalita))
+    })
+    return blob
   } catch {
     return null
+  } finally {
+    bitmapa?.close?.()
   }
 }
 

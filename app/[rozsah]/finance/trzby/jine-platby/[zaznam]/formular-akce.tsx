@@ -1,6 +1,6 @@
 'use client'
 
-import { startTransition, useActionState, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { startTransition, useActionState, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 
 import { zameritKdyzSeZtratil } from '@/components/ui/fokus-okna'
 
@@ -25,6 +25,10 @@ export type AkceZaznamu = (predchozi: StavAkce, formData: FormData) => Promise<S
  * to varování (ne rovnou na „Ano“ — druhý Enter by potvrdil nečtené),
  * teprve druhé tlačítko odešle. Vzor
  * app/[rozsah]/dochazka/zalohy/potvrzeni-za-zamestnance.tsx.
+ *
+ * Chyba u konkrétního pole (`stav.chyby`, třeba „Možná duplicita…“ →
+ * `duplicita_duvod`): fokus jde na to pole (s `aria-invalid` a odkazem
+ * na hlášku), napsaný text zůstane — formulář se při chybě nemaže.
  */
 export default function FormularAkce({
   akce,
@@ -60,6 +64,7 @@ export default function FormularAkce({
   const hlaska = useRef<HTMLParagraphElement>(null)
   const prvni = useRef<HTMLButtonElement>(null)
   const bylo = useRef(false)
+  const idHlasky = useId()
 
   useEffect(() => {
     if (potvrzuje) varovani.current?.focus()
@@ -69,9 +74,23 @@ export default function FormularAkce({
 
   useEffect(() => {
     if (stav.stav === 'nic') return
-    if (stav.stav === 'ok' && vycistit) formular.current?.reset()
+    const form = formular.current
+    form?.querySelectorAll('[aria-invalid="true"]').forEach((e) => {
+      e.removeAttribute('aria-invalid')
+      if (e.getAttribute('aria-describedby') === idHlasky) e.removeAttribute('aria-describedby')
+    })
+    if (stav.stav === 'ok' && vycistit) form?.reset()
+    // Chyba u pole: zaměřit pole (ne hlášku), ať člověk rovnou doplní, co databáze chce.
+    const nazev = stav.stav === 'chyba' ? Object.keys(stav.chyby ?? {})[0] : undefined
+    const pole = nazev ? form?.elements.namedItem(nazev) : null
+    if (pole instanceof HTMLTextAreaElement || pole instanceof HTMLSelectElement || (pole instanceof HTMLInputElement && pole.type !== 'hidden')) {
+      pole.setAttribute('aria-invalid', 'true')
+      pole.setAttribute('aria-describedby', idHlasky)
+      pole.focus()
+      return
+    }
     zameritKdyzSeZtratil(hlaska.current)
-  }, [stav, vycistit])
+  }, [stav, vycistit, idHlasky])
 
   function poOdeslani(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -134,7 +153,7 @@ export default function FormularAkce({
       )}
 
       {stav.stav === 'chyba' ? (
-        <p ref={hlaska} tabIndex={-1} role="alert" className="hlaska-chyba" style={{ margin: 0 }}>
+        <p ref={hlaska} id={idHlasky} tabIndex={-1} role="alert" className="hlaska-chyba" style={{ margin: 0 }}>
           {stav.text}
         </p>
       ) : stav.stav === 'ok' ? (

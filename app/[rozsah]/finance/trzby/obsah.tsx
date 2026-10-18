@@ -130,6 +130,7 @@ export default function Obsah({
   odkazNaObdobi,
   odkazNaPobocku,
   ostatniTrzby,
+  ostatniTrzbyChyba = null,
   zakladJinychPlateb,
 }: {
   prehled: PrehledTrzeb
@@ -157,6 +158,12 @@ export default function Obsah({
    * Do tržeb z pokladny se NIKDY nepřičítají — mají vlastní kartu.
    */
   ostatniTrzby: RadekOstatniTrzby[] | null
+  /**
+   * Ostatní tržby nejde sečíst celé (stránka narazila na strop stránek).
+   * Karta pak ukáže „–" a tuhle větu — nikdy useknutý součet. Má
+   * přednost před `ostatniTrzby`.
+   */
+  ostatniTrzbyChyba?: string | null
   /** Adresa agendy, např. `/firma/finance/trzby/jine-platby`. */
   zakladJinychPlateb: string
 }) {
@@ -176,7 +183,8 @@ export default function Obsah({
   const posledniSProdeji = radky.findLastIndex((r) => r.dnu > 0)
   const grafRadky = prvniSProdeji < 0 ? [] : radky.slice(prvniSProdeji, posledniSProdeji + 1)
 
-  const ostatni = ostatniTrzby === null ? null : souhrnOstatnichTrzeb(ostatniTrzby)
+  // Neúplná data se nesčítají vůbec — useknutý součet by vypadal jako celý.
+  const ostatni = ostatniTrzbyChyba || ostatniTrzby === null ? null : souhrnOstatnichTrzeb(ostatniTrzby)
   // Ostatní tržby mají VLASTNÍ kartu — do „Tržeb z pokladen" se nic nepřičítá.
   const kartaOstatnich = (
     <FinanceKpiKarta
@@ -184,11 +192,13 @@ export default function Obsah({
       titulek="Ostatní tržby"
       hodnota={ostatni !== null && ostatni.czkPocet > 0 ? koruny(ostatni.czkHaleru) : '–'}
       zdroj={
-        ostatni === null
-          ? 'čeká na aktualizaci databáze'
-          : ostatni.czkPocet > 0
-            ? 'z Jiných plateb'
-            : 'z Jiných plateb — za období žádné v korunách'
+        ostatniTrzbyChyba
+          ? ostatniTrzbyChyba
+          : ostatni === null
+            ? 'čeká na aktualizaci databáze'
+            : ostatni.czkPocet > 0
+              ? 'z Jiných plateb'
+              : 'z Jiných plateb — za období žádné v korunách'
       }
       trend={null}
     />
@@ -217,7 +227,7 @@ export default function Obsah({
           </p>
         </div>
         {/* Pokladna nic, ale prodeje mimo ni být můžou — jejich karta se ukáže i tak. */}
-        {ostatni !== null && (ostatni.czkPocet > 0 || ostatni.jineMeny.length > 0) ? (
+        {ostatniTrzbyChyba || (ostatni !== null && (ostatni.czkPocet > 0 || ostatni.jineMeny.length > 0)) ? (
           <div className="ds-kpi-mrizka">{kartaOstatnich}</div>
         ) : null}
         {vetaJinychMen}

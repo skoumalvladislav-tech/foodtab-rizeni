@@ -61,12 +61,19 @@ export default async function FinanceLayout({
   if (!scope) return <>{children}</>
 
   // Jiné platby (Finance → Tržby → Jiné platby) mají vlastní vstupní
-  // kontrolu (`zkusPristupJinymPlatbam`, hlídá scripts/finance-pobocky.test.mjs)
-  // a jejich data jsou vždy jen řádky pobočky (`branch_id not null`, RLS
-  // na pobočce) — firemní data, kvůli kterým tahle brána existuje, tam nejsou.
-  // Vedoucí s finance.read jen na své pobočce by jinak místo agendy viděl
-  // „jen s přehledem celé firmy". Adresu podává proxy.ts; i kdyby ji někdo
-  // podvrhl, ostatní stránky Financí se hlídají samy (zkusPristupFinanci).
+  // kontrolu (`zkusPristupJinymPlatbam`, hlídá scripts/finance-pobocky.test.mjs).
+  // Záznamy agendy jsou vždy řádky pobočky (`branch_id not null`, RLS na
+  // pobočce), firemní data se ale v agendě objevit MŮŽOU: detail záznamu
+  // čte bankovní platby (párování úhrady) a Kontakty (odběratel faktury) —
+  // přesně ta data, kvůli kterým tahle brána existuje. Detail je proto
+  // načítá jen s `finance.read` ZA CELOU FIRMU (vlastní kontrola
+  // `hasAccess(…, 'finance.read', null)` v [zaznam]/page.tsx, ne tahle
+  // brána); evidenci úhrady z firemního účtu (bez pobočky) pustí databáze
+  // (`jine_platby_evidovat_uhradu`) taky jen s finance.read za celou firmu.
+  // Kdo tu výjimku mění, musí ohlídat i tohle. Vedoucí s finance.read jen
+  // na své pobočce by bez výjimky místo agendy viděl „jen s přehledem celé
+  // firmy". Adresu podává proxy.ts; i kdyby ji někdo podvrhl, ostatní
+  // stránky Financí se hlídají samy (zkusPristupFinanci).
   const adresa = (await headers()).get('x-foodtab-adresa') ?? ''
   if (adresa.startsWith(`/${rozsah}/finance/trzby/jine-platby`)) return <>{children}</>
 

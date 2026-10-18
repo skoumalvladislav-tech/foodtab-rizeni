@@ -7,7 +7,7 @@ import { pobockySPravem, zkusPristupJinymPlatbam } from '@/lib/jine-platby-prist
 import { SLOUPCE_ZAZNAMU, zDbZaznam } from '@/lib/jine-platby-db'
 import { STAVY_SKLADU, type StavSkladu, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 import { formatHaleru } from '@/lib/jine-platby-castky'
-import { popisStavuFaktury, popisStavuKontroly, popisStavuSkladu, popisStavuTrzby, popisStavuUhrady } from '@/lib/jine-platby-stav'
+import { moznaDvakrat, popisStavuFaktury, popisStavuKontroly, popisStavuSkladu, popisStavuTrzby, popisStavuUhrady, type PopisStavu } from '@/lib/jine-platby-stav'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
 import { dalsiObdobi, popisObdobi } from '@/lib/pokladna-trzby'
@@ -43,21 +43,27 @@ export const dynamic = 'force-dynamic'
  *     v KAŽDÉM měsíci, dokud se datum nedoplní — jinak by se neměl kde
  *     objevit a zapadl by;
  *   * `pobocka` jen za celou firmu a jen pobočka, kde člověk záznamy vidí;
- *   * `stav` (FILTRY_STAVU níž);
+ *   * `stav` (FILTRY_STAVU níž). „Možná zapsáno dvakrát" = tržba zapsaná
+ *     v Ostatních tržbách a dodatečná kontrola proti pokladně prodej našla
+ *     (`moznaDvakrat`) — filtruje databáze (`kontrola_trzby->>vysledek`),
+ *     ať strop řádků neusekne právě tyhle;
  *   * `pohled=schvaleni` — fronta „Čeká na schválení výdeje", jen
  *     s `jine_platby.vydej_pos` a jen z poboček, kde to právo má; bez
  *     ohledu na období (schvalovat se má i to, co přišlo minulý měsíc).
+ *     Zrušený záznam do fronty ani do filtru „Čeká na schválení" nepatří,
+ *     i kdyby mu stav skladu zůstal.
  */
 
 const LIMIT = 300
 
-const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const
+const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'mozna_dvakrat', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const
 type FiltrStavu = (typeof FILTRY_STAVU)[number]
 
 const NAZVY_FILTRU: Record<FiltrStavu, string> = {
   vse: 'Vše',
   ke_kontrole: 'Ke kontrole',
   trzba_nezapsana: 'Tržba nezapsána',
+  mozna_dvakrat: 'Možná zapsáno dvakrát',
   ceka_na_schvaleni: 'Čeká na schválení výdeje',
   sklad_neuzavreny: 'Sklad neuzavřený',
   bez_faktury: 'Bez faktury',
@@ -67,6 +73,12 @@ const NAZVY_FILTRU: Record<FiltrStavu, string> = {
 function jeFiltrStavu(v: string | undefined): v is FiltrStavu {
   return (FILTRY_STAVU as readonly string[]).includes(v ?? '')
 }
+
+/** Výsledky dodatečné kontroly tržby, při kterých je tržba nejspíš započítaná dvakrát (stejně jako `moznaDvakrat`). */
+const VYSLEDKY_DVAKRAT = ['nalezeno', 'pravdepodobne']
+
+/** Značka u řádku, kde je tržba možná zapsaná dvakrát — s ikonou varování (barva sama význam nenese). */
+const ZNACKA_DVAKRAT: PopisStavu = { text: 'Možná zapsáno dvakrát', ton: 'danger', varovani: true }
 
 /**
  * Sklad je UZAVŘENÝ, když se ho záznam netýká nebo je výdej hotový
@@ -169,7 +181,7 @@ export default async function JinePlatby({
     .select(`${SLOUPCE_ZAZNAMU}, jine_platby_soubory(count)`)
     .eq('tenant_id', tenantId)
   if (pohledSchvaleni) {
-    dotaz = dotaz.eq('stav_skladu', 'ceka_na_schvaleni').in('branch_id', [...pobockySchvaleni])
+    dotaz = dotaz.eq('stav_skladu', 'ceka_na_schvaleni').neq('stav_kontroly', 'zruseno').in('branch_id', [...pobockySchvaleni])
   } else {
     dotaz = dotaz.or(`datum_prodeje.is.null,and(datum_prodeje.gte.${mesic.od},datum_prodeje.lte.${mesic.doData})`)
     if (vybranaPobocka) dotaz = dotaz.eq('branch_id', vybranaPobocka)
@@ -177,7 +189,8 @@ export default async function JinePlatby({
     if (stav === 'vse') dotaz = dotaz.neq('stav_kontroly', 'zruseno')
     else if (stav === 'ke_kontrole') dotaz = dotaz.in('stav_kontroly', ['rozpracovano', 'ke_kontrole'])
     else if (stav === 'trzba_nezapsana') dotaz = dotaz.eq('stav_trzby', 'nezapsano').neq('stav_kontroly', 'zruseno')
-    else if (stav === 'ceka_na_schvaleni') dotaz = dotaz.eq('stav_skladu', 'ceka_na_schvaleni')
+    else if (stav === 'mozna_dvakrat') dotaz = dotaz.eq('stav_trzby', 'zapsano').in('kontrola_trzby->>vysledek', VYSLEDKY_DVAKRAT)
+    else if (stav === 'ceka_na_schvaleni') dotaz = dotaz.eq('stav_skladu', 'ceka_na_schvaleni').neq('stav_kontroly', 'zruseno')
     else if (stav === 'sklad_neuzavreny') dotaz = dotaz.in('stav_skladu', SKLAD_OTEVRENY).neq('stav_kontroly', 'zruseno')
     else if (stav === 'bez_faktury') dotaz = dotaz.eq('stav_faktury', 'bez_faktury').neq('stav_kontroly', 'zruseno')
     else if (stav === 'zrusene') dotaz = dotaz.eq('stav_kontroly', 'zruseno')
@@ -399,6 +412,7 @@ export default async function JinePlatby({
                         <span style={{ display: 'grid', gap: '4px', justifyItems: 'start' }}>
                           <ZnackaStavu popis={popisStavuKontroly(r.stavKontroly)} />
                           <ZnackaStavu popis={popisStavuTrzby(r.stavTrzby)} />
+                          {moznaDvakrat(r) ? <ZnackaStavu popis={ZNACKA_DVAKRAT} /> : null}
                         </span>
                       ),
                     },

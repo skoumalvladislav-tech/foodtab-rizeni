@@ -208,8 +208,26 @@ export const TYPY_SOUBORU = ['image/jpeg', 'image/png', 'image/webp', 'applicati
 export type TypSouboru = (typeof TYPY_SOUBORU)[number]
 export const MAX_BAJTU_SOUBORU = 10 * 1024 * 1024
 export const MAX_SOUBORU_NA_ZAZNAM = 10
-/** Strop jednoho podkladu pro AI (base64 přidá třetinu; API má strop požadavku 32 MB). */
+/**
+ * Strop jednoho PDF pro AI (base64 přidá třetinu; API má strop požadavku 32 MB).
+ * Fotka má přísnější `MAX_BAJTU_OBRAZKU_PRO_AI`.
+ */
 export const MAX_BAJTU_PRO_AI = 8 * 1024 * 1024
+/**
+ * Konzervativní strop jedné FOTKY pro AI. API bere obrázek nejvýš 10 MB
+ * PO převodu do base64 (platform.claude.com/docs/en/build-with-claude/vision,
+ * „Request limits", čteno 18. 10. 2026) — 8 MB fotka by v base64 měla
+ * ~10,7 MB a API by ji odmítlo. 5 MB je ~6,7 MB v base64, s rezervou.
+ * Prohlížeč fotku nad stropem zmenší (lib/jine-platby-soubory.ts),
+ * server ji před voláním modelu zkontroluje znovu (`zkontrolovatPodklad`).
+ */
+export const MAX_BAJTU_OBRAZKU_PRO_AI = 5 * 1024 * 1024
+/**
+ * Strop všech souborů jednoho rozpoznání dohromady. API bere nejvýš 32 MB
+ * na požadavek a base64 přidá třetinu: 20 MB → ~26,7 MB + zadání. Šest
+ * plných souborů (`MAX_SOUBORU_PRO_AI`) by se do požadavku nevešlo.
+ */
+export const MAX_BAJTU_CELKEM_PRO_AI = 20 * 1024 * 1024
 /** Kolik souborů jde do jednoho rozpoznání (víc stránek / fotek jedné sjetiny). */
 export const MAX_SOUBORU_PRO_AI = 6
 /** Denní strop rozpoznání na firmu (musí sedět s migrací). */

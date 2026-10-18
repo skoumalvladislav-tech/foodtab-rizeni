@@ -19,7 +19,18 @@ export const MAX_HALERU = 2_147_483_647
 /** Strop množství: numeric(12,3) → nejvýš 999 999 999 (a tři desetinná místa). */
 export const MAX_MNOZSTVI_TISICIN = 999_999_999_000
 
-export type VysledekCastky = { stav: 'ok'; haleru: number } | { stav: 'prazdne' } | { stav: 'nejasne'; duvod: string }
+/** Měna, kterou umíme poznat ze značky v textu částky („Kč", „€"…). */
+export type MenaVTextu = 'CZK' | 'EUR'
+
+/**
+ * `menaVTextu` = měna, kterou částka nesla přímo v textu („45 Kč", „€3.20"),
+ * `null` = bez značky (i u čísla na vstupu). Částka se podle ní NEPŘEVÁDÍ —
+ * kontrola dokladu jen přidá důvod, když se liší od měny dokladu.
+ */
+export type VysledekCastky =
+  | { stav: 'ok'; haleru: number; menaVTextu: MenaVTextu | null }
+  | { stav: 'prazdne' }
+  | { stav: 'nejasne'; duvod: string }
 
 export type VysledekMnozstvi = { stav: 'ok'; mnozstvi: string } | { stav: 'prazdne' } | { stav: 'nejasne'; duvod: string }
 
@@ -138,8 +149,15 @@ const bezUvodnichNul = (s: string) => s.replace(/^0+(?=\d)/, '')
 /* Částky                                                               */
 /* ------------------------------------------------------------------ */
 
-/** Měny, které umíme z textu částky odstranit (zbytek musí být číslo). */
-const MENA_V_TEXTU = /^(kč|kc|czk|eur|€|euro)\.?\s*|\s*(kč|kc|czk|eur|€|euro)\.?$/i
+/**
+ * Měny, které umíme z textu částky odstranit (zbytek musí být číslo).
+ * Tečka za značkou jen NA KONCI („45 Kč."): před číslem by „€.50" po jejím
+ * spolknutí dalo 50 € místo nejasného „€ .50". „euro" před „eur", jinak
+ * by z „euro 12" zbylo „o 12".
+ */
+const MENA_PRED = /^(kč|kc|czk|euro|eur|€)\s*/i
+const MENA_ZA = /\s*(kč|kc|czk|euro|eur|€)\.?$/i
+const kodMeny = (znacka: string): MenaVTextu => (/^(kč|kc|czk)$/i.test(znacka) ? 'CZK' : 'EUR')
 
 /**
  * Text (nebo číslo) z dokladu → haléře. Záporné částky propustí
@@ -166,18 +184,27 @@ export function prevestCastku(vstup: string | number | null | undefined): Vysled
       return { stav: 'nejasne', duvod: `Částku ${text} nejde přesně převést na haléře` }
     }
     if (Math.abs(haleru) > MAX_HALERU) return { stav: 'nejasne', duvod: 'Částka je větší, než databáze unese' }
-    return { stav: 'ok', haleru: haleru === 0 ? 0 : haleru }
+    return { stav: 'ok', haleru: haleru === 0 ? 0 : haleru, menaVTextu: null }
   }
 
   if (typeof vstup !== 'string') return { stav: 'nejasne', duvod: 'Částka není text ani číslo' }
   let s = vstup.replace(MEZERY, ' ').trim()
   if (s === '') return { stav: 'prazdne' }
 
-  // Měna před nebo za číslem (i „-12,00 Kč" a „Kč -12,00").
-  let predtim = ''
-  while (s !== predtim) {
-    predtim = s
-    s = s.replace(MENA_V_TEXTU, '').trim()
+  // Měna před nebo za číslem (i „-12,00 Kč" a „Kč -12,00"). Dvě různé
+  // značky v jedné částce („Kč 12 EUR") se nevykládají.
+  let menaVTextu: MenaVTextu | null = null
+  for (;;) {
+    const pred = MENA_PRED.exec(s)
+    const za = pred ? null : MENA_ZA.exec(s)
+    const nalez = pred ?? za
+    if (!nalez) break
+    const kod = kodMeny(nalez[1])
+    if (menaVTextu !== null && menaVTextu !== kod) return { stav: 'nejasne', duvod: `V „${zkratit(vstup)}" jsou dvě různé měny` }
+    menaVTextu = kod
+    s = (pred ? s.slice(nalez[0].length) : s.slice(0, s.length - nalez[0].length)).trim()
+    // „€.50": tečka nebo čárka hned za značkou — desetinná, nebo zkratka? Neumíme rozhodnout.
+    if (pred && /^[.,]/.test(s)) return { stav: 'nejasne', duvod: `V „${zkratit(vstup)}" stojí za značkou měny tečka nebo čárka — ověřte částku` }
   }
   if (s === '') return { stav: 'nejasne', duvod: `V „${zkratit(vstup)}" není číslo` }
 
@@ -190,7 +217,7 @@ export function prevestCastku(vstup: string | number | null | undefined): Vysled
   if (cele.length > 8) return { stav: 'nejasne', duvod: 'Částka je větší, než databáze unese' }
   const haleru = Number(cele) * 100 + Number(r.desetinne.padEnd(2, '0'))
   if (haleru > MAX_HALERU) return { stav: 'nejasne', duvod: 'Částka je větší, než databáze unese' }
-  return { stav: 'ok', haleru: r.zaporne && haleru !== 0 ? -haleru : haleru }
+  return { stav: 'ok', haleru: r.zaporne && haleru !== 0 ? -haleru : haleru, menaVTextu }
 }
 
 /* ------------------------------------------------------------------ */

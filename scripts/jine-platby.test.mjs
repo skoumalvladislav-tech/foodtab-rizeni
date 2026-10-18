@@ -110,6 +110,23 @@ console.log('\n== Částky: text z dokladu → haléře ==')
   ok('Infinity → nejasne', castka(Infinity).stav === 'nejasne')
   ok('číslo nad strop → nejasne', castka(21474836.48).stav === 'nejasne')
   ok('číslo −0 → 0', Object.is(haleru(-0), 0))
+  // Tečka za značkou měny jen na konci: „€.50" spolknutím tečky dávalo 50 €.
+  {
+    const r = castka('€.50')
+    ok(`„€.50" → nejasne, ne 50 € ani 0,50 € (${JSON.stringify(r)})`, r.stav === 'nejasne' && r.duvod.includes('za značkou měny'))
+  }
+  ok('„EUR.50" → nejasne', castka('EUR.50').stav === 'nejasne')
+  ok('„Kč,50" → nejasne', castka('Kč,50').stav === 'nejasne')
+  ok('„12 Kč." (tečka na konci) → 1200', haleru('12 Kč.') === 1200)
+  ok('„euro 12" → 1200 (dřív zbylo „o 12")', haleru('euro 12') === 1200)
+  ok('„Kč 12 EUR" (dvě různé měny) → nejasne', ((r) => r.stav === 'nejasne' && r.duvod.includes('dvě různé měny'))(castka('Kč 12 EUR')))
+  const mena = (v) => ((r) => (r.stav === 'ok' ? r.menaVTextu : r.stav))(castka(v))
+  ok('měna z textu: „45 Kč" → CZK', mena('45 Kč') === 'CZK')
+  ok('měna z textu: „CZK 99" → CZK, „99 kc" → CZK', mena('CZK 99') === 'CZK' && mena('99 kc') === 'CZK')
+  ok('měna z textu: „€3.20" → EUR, „12,50 EUR" → EUR, „12 euro" → EUR', mena('€3.20') === 'EUR' && mena('12,50 EUR') === 'EUR' && mena('12 euro') === 'EUR')
+  ok('měna z textu: bez značky → null', mena('1 234,50') === null && mena('45,-') === null)
+  ok('měna z textu: číslo na vstupu → null', mena(12.5) === null)
+  ok('měna z textu: „Kč -12,00" → CZK i se znaménkem', mena('Kč -12,00') === 'CZK' && haleru('Kč -12,00') === -1200)
   {
     const dlouhy = castka('x'.repeat(5000))
     ok('dlouhý cizí text se do důvodu dostane zkrácený (strop duvod_kontroly 1000)', dlouhy.stav === 'nejasne' && dlouhy.duvod.length < 120)
@@ -396,6 +413,47 @@ console.log('\n== Kontrola dokladu: měna, datum, typ, upozornění ==')
   ok('upozornění AI → „Upozornění: …" (prázdné vynechané)', upoz.duvody.filter((d) => d.startsWith('Upozornění: ')).length === 1 && upoz.vyzadujeKontrolu)
 }
 
+console.log('\n== Kontrola dokladu: měna v textu částky a poznámka AI k řádku ==')
+{
+  const eurRadek = kontrola({ polozky: [radekAi({ cenaJednotkova: '45,00 EUR', cenaCelkem: '90,00 EUR' }), radekAi(SVICKOVA)] })
+  const p0 = eurRadek.polozky[0]
+  ok(`cena v EUR na dokladu v Kč → důvod u řádku (${p0.duvodKontroly})`,
+    p0.vyzadujeKontrolu && p0.duvodKontroly.includes('je v EUR, doklad je v CZK') && p0.duvodKontroly.includes('Cena celkem'))
+  ok('… a částka se nepřevádí ani nezahazuje (9000)', p0.cenaCelkemHaleru === 9000 && p0.cenaJednotkovaHaleru === 4500)
+  ok('řádek s „189,00" bez značky důvod měny nemá', !eurRadek.polozky[1].duvodKontroly.includes('ověřte měnu'))
+  const kcRadek = kontrola({ polozky: [radekAi({ cenaCelkem: '90,00 Kč' }), radekAi(SVICKOVA)] })
+  ok('cena „90,00 Kč" na dokladu v Kč → bez důvodu', !kcRadek.polozky[0].vyzadujeKontrolu)
+  ok('potvrzením řádku důvod měny zmizí (je ze čtení dokladu)', !K.potvrditRadek(p0, 'CZK').duvodKontroly.includes('ověřte měnu'))
+  ok('ruční úpravou (zkontrolovatNavrh) důvod měny nezmizí',
+    K.zkontrolovatNavrh([p0], { datumProdeje: '2026-10-15', oznaceni: '', mena: 'CZK', castkaHaleru: 9000, castkaPuvod: 'rucne', typDokladu: 'uzavreny_prodej', externiUcet: null, kontaktId: null }).polozky[0].duvodKontroly.includes('ověřte měnu'))
+  const eurCelkem = kontrola({ celkem: '279,00 EUR' })
+  ok('„Celkem" v EUR na dokladu v Kč → důvod v hlavičce', maDuvod(eurCelkem, '„Celkem" (279,00 EUR) je v EUR, ale měna dokladu je CZK'))
+  const eurKUhrade = kontrola({ kUhrade: '279 €' })
+  ok('„K úhradě" v € na dokladu v Kč → důvod', maDuvod(eurKUhrade, '„K úhradě"') && maDuvod(eurKUhrade, 'je v EUR'))
+  ok('„Celkem" v Kč na dokladu v Kč → bez důvodu měny', !kontrola().duvody.some((d) => d.includes('měna dokladu')))
+  const bezMeny = kontrola({ mena: null, celkem: '279,00 EUR', polozky: [radekAi({ cenaCelkem: '90,00 EUR' }), radekAi(SVICKOVA)] })
+  ok('doklad bez měny: nic se nesrovnává (jen „Chybí měna")', maDuvod(bezMeny, 'Chybí měna') && !maDuvod(bezMeny, 'měna dokladu') && !bezMeny.polozky[0].duvodKontroly.includes('ověřte měnu'))
+  const eurDoklad = kontrola({ mena: 'EUR', celkem: '279,00 EUR', polozky: [radekAi({ cenaCelkem: '90,00 Kč' }), radekAi(SVICKOVA)] })
+  ok('doklad v EUR, řádek „90,00 Kč" → důvod (… je v CZK, doklad je v EUR)', eurDoklad.polozky[0].duvodKontroly.includes('je v CZK, doklad je v EUR'))
+
+  const sPoznamkou = kontrola({ polozky: [radekAi({ poznamka: 'přeškrtnuto, dopsáno rukou' }), radekAi(SVICKOVA)] })
+  const q0 = sPoznamkou.polozky[0]
+  ok(`poznámka AI → důvod „Poznámka z dokladu: …" (${q0.duvodKontroly})`, q0.vyzadujeKontrolu && q0.duvodKontroly === 'Poznámka z dokladu: přeškrtnuto, dopsáno rukou')
+  ok('bez poznámky (null) i s prázdnou poznámkou žádný důvod',
+    !kontrola().polozky[0].vyzadujeKontrolu && !kontrola({ polozky: [radekAi({ poznamka: '   ' }), radekAi(SVICKOVA)] }).polozky[0].vyzadujeKontrolu)
+  const HN = { datumProdeje: '2026-10-15', oznaceni: '', mena: 'CZK', castkaHaleru: 27900, castkaPuvod: 'doklad', typDokladu: 'uzavreny_prodej', externiUcet: null, kontaktId: null }
+  ok('ruční úpravou (zkontrolovatNavrh) poznámka nezmizí', K.zkontrolovatNavrh([q0, sPoznamkou.polozky[1]], HN).polozky[0].duvodKontroly.includes('Poznámka z dokladu'))
+  const qPotvrzeno = K.potvrditRadek(q0, 'CZK')
+  ok('potvrzením řádku poznámka zmizí a příznak spadne', !qPotvrzeno.vyzadujeKontrolu && qPotvrzeno.duvodKontroly === '')
+  const dlouha = kontrola({ polozky: [radekAi({ poznamka: 'a'.repeat(600) }), radekAi(SVICKOVA)] }).polozky[0].duvodKontroly
+  ok(`dlouhá poznámka se zkrátí (${dlouha.length} znaků)`, dlouha.startsWith('Poznámka z dokladu: ') && dlouha.endsWith('…') && dlouha.length <= 'Poznámka z dokladu: '.length + K.MAX_DELKA_POZNAMKY)
+  const stredniky = kontrola({ polozky: [radekAi({ poznamka: 'dopsáno; přeškrtnuto' }), radekAi(SVICKOVA)] }).polozky[0]
+  ok('poznámka se středníkem zůstane jedním důvodem (spojitDuvody dělí „; ")',
+    K.rozdelitDuvody(stredniky.duvodKontroly).length === 1 && K.rozdelitDuvody(stredniky.duvodKontroly)[0].startsWith('Poznámka z dokladu: '))
+  const sNejistotou = kontrola({ polozky: [radekAi({ poznamka: 'rozmazané', jistota: 0.5 }), radekAi(SVICKOVA)] }).polozky[0]
+  ok('poznámka vedle jiného důvodu ze čtení (nejistota) — oba', sNejistotou.duvodKontroly.includes('Poznámka z dokladu: rozmazané') && sNejistotou.duvodKontroly.includes('Nejistě'))
+}
+
 console.log('\n== Kontrola návrhu po ruční úpravě ==')
 {
   const H = { datumProdeje: '2026-10-15', oznaceni: 'Stůl 4', mena: 'CZK', castkaHaleru: 27900, castkaPuvod: 'rucne', typDokladu: 'uzavreny_prodej', externiUcet: null, kontaktId: null }
@@ -550,6 +608,30 @@ console.log('\n== Převod do jednotek pokladny (jen z dat pokladny) ==')
   ok('množství chybí → nejasne', pr(null, null, kofola).stav === 'nejasne')
   ok('produkt bez jednotky, doklad v l → nejasne', pr('1', 'l', { ...kofola, jednotka: null }).stav === 'nejasne')
 
+  // Kusy z dokladu na položku v litrech/kilogramech BEZ míry: pokladna pak
+  // prodej počítá v litrech a „2 ks" by odešlo jako 2 litry.
+  const LITRY_BEZ_MIRY = 'Pokladna u položky vede litry, ale neuvádí, kolik je v jednom kusu — zapište množství v jednotkách pokladny'
+  const k1 = pr('2', 'ks', vino)
+  ok(`2 ks → položka v litrech bez míry → nejasne s důvodem (${k1.duvod ?? k1.posMnozstvi})`, k1.stav === 'nejasne' && k1.duvod === LITRY_BEZ_MIRY)
+  ok('2 bez jednotky → litry bez míry → nejasne', pr('2', null, vino).stav === 'nejasne')
+  ok('2 „x" → litry bez míry → nejasne', pr('2', 'x', vino).stav === 'nejasne')
+  ok('2 ks → Milliliter bez míry → nejasne', pr('2', 'ks', produkt({ jednotka: 'Milliliter' })).stav === 'nejasne')
+  const k2 = pr('2', 'ks', produkt({ jednotka: 'Kilogram' }))
+  ok('2 ks → Kilogram bez míry → nejasne „… vede kilogramy …"', k2.stav === 'nejasne' && k2.duvod.includes('vede kilogramy'))
+  ok('2 ks → Gram bez míry → nejasne', pr('2', 'ks', produkt({ jednotka: 'Gram' })).stav === 'nejasne')
+  const k3 = pr('2', 'ks', kofola)
+  ok('2 ks → položka v kusech (Piece) → 2', k3.stav === 'ok' && k3.posMnozstvi === '2')
+  const k4 = pr('2', 'ks', produkt({ jednotka: null }))
+  ok('2 ks → položka bez jednotky → 2', k4.stav === 'ok' && k4.posMnozstvi === '2')
+  ok('2 ks → položka s prázdnou jednotkou → 2', pr('2', 'ks', produkt({ jednotka: '  ' })).posMnozstvi === '2')
+  const k5 = pr('2', 'ks', produkt({ jednotka: 'Hour' }))
+  ok(`2 ks → jednotka pokladny, které appka nerozumí (Hour) → nejasne (${k5.duvod ?? k5.posMnozstvi})`, k5.stav === 'nejasne' && k5.duvod.includes('Hour'))
+  ok('2 ks → litry S mírou dál → 2 kusy', pr('2', 'ks', pivo05).posMnozstvi === '2')
+  const sVinem = M.navrhnoutMapovani(navrh({ nazevPuvodni: 'Víno bílé', mnozstvi: '2', jednotka: 'ks' }), KAT, [{ alias: 'Víno bílé', posProduktId: 'p-vino' }])
+  ok('mapování na litry bez míry: produkt přiřazený, množství pro pokladnu prázdné a důvod převodu u řádku',
+    sVinem.polozka.posProduktId === 'p-vino' && sVinem.polozka.posMnozstvi === null && sVinem.polozka.vyzadujeKontrolu &&
+      sVinem.polozka.duvodKontroly.includes(K.PREDPONA_PREVODU + LITRY_BEZ_MIRY))
+
   ok('tykaSeSkladu: spropitné → false', M.tykaSeSkladu(navrh({ druh: 'spropitne' }), pivo05) === false)
   ok('tykaSeSkladu: pokrm s recepturou → true', M.tykaSeSkladu(navrh({ druh: 'pokrm' }), KAT[2]) === true)
   ok('tykaSeSkladu: pivo odečítá sklad → true', M.tykaSeSkladu(navrh(), pivo05) === true)
@@ -583,7 +665,7 @@ console.log('\n== Popisky stavů ==')
   ok('varování nese ikona: každý warning/danger má varovani = true', vse.every(([, p]) => (p.ton === 'warning' || p.ton === 'danger') === p.varovani))
   ok('„Odečteno v POS" jen u odecteno_v_pos', T.STAVY_SKLADU.filter((s) => S.popisStavuSkladu(s).text.includes('Odečteno v POS')).join() === 'odecteno_v_pos')
   ok('rucne_dolozeno = „Ručně doloženo (neověřeno pokladnou)" a není zelené', S.popisStavuSkladu('rucne_dolozeno').text === 'Ručně doloženo (neověřeno pokladnou)' && S.popisStavuSkladu('rucne_dolozeno').ton !== 'success')
-  ok('nepodporovano = „Pokladna to přes API neumí — zpracovat ručně"', S.popisStavuSkladu('nepodporovano').text === 'Pokladna to přes API neumí — zpracovat ručně')
+  ok('nepodporovano = „Schváleno — výdej provést ručně v pokladně" (zahájený výdej, ne „neumí")', S.popisStavuSkladu('nepodporovano').text === 'Schváleno — výdej provést ručně v pokladně' && S.popisStavuSkladu('nepodporovano').varovani)
   ok('neovereno = „Úhrada neověřena" a není zelené', S.popisStavuUhrady('neovereno').text === 'Úhrada neověřena' && S.popisStavuUhrady('neovereno').ton !== 'success')
   ok('typy dokladu a druhy mají české popisky', T.TYPY_DOKLADU.every((t) => S.popisTypuDokladu(t) !== t && S.popisTypuDokladu(t).length > 0) && T.DRUHY_POLOZEK.every((d) => S.popisDruhu(d) !== d && S.popisDruhu(d).length > 0))
 }
@@ -682,26 +764,67 @@ console.log('\n== Dostupné akce ==')
   ok('úhrada se nenabízí bez měny a bez úhrady (spárovat nejde, odpojit není co)', !S.dostupneAkce(zaznam({ mena: null }), VSE, m()).has('uhrada'))
   ok('úhrada jde i u uhrazeného (odpojení)', S.dostupneAkce(zaznam({ stavUhrady: 'uhrazeno' }), VSE, m()).has('uhrada'))
 
+  // Zrušení záznamu: ne se zahájeným ručním výdejem a ne s napárovanou úhradou (databáze odmítne).
+  ok('zrušit ne u „nepodporovano" (schváleno k ručnímu odpisu = zahájený výdej)', !S.dostupneAkce(zaznam({ stavSkladu: 'nepodporovano' }), VSE, m({ maZiveNavrhSkladu: true })).has('zrusit'))
+  ok('zrušit ne s napárovanou úhradou (nejdřív odpojit)', !S.dostupneAkce(zaznam({ uhradaTransakceId: 't1', stavUhrady: 'uhrazeno' }), VSE, m()).has('zrusit'))
+  ok('… ani autor svůj rozpracovaný s úhradou', !S.dostupneAkce(zaznam({ vytvoril: 'u1', uhradaTransakceId: 't1' }), jenZadat, m({ uzivatelId: 'u1' })).has('zrusit'))
+  ok('zrušit dál jde u schváleného (bez operace na cestě) a u chyby', S.dostupneAkce(zaznam({ stavSkladu: 'schvaleno' }), VSE, m({ stavOperace: 'pripraveno' })).has('zrusit') && S.dostupneAkce(zaznam({ stavSkladu: 'chyba' }), VSE, m({ stavOperace: 'chyba' })).has('zrusit'))
+
+  // Zrušit schválení: jen vydej_pos, jen schvaleno / nepodporovano / chyba, operace ne na cestě ani hotová.
+  const zs = (stavSkladu, stavOperace, prava = VSE) => S.dostupneAkce(zaznam({ stavSkladu }), prava, m({ stavOperace, maZiveNavrhSkladu: true })).has('zrusit_schvaleni')
+  ok('zrusit_schvaleni: schvaleno + připravená operace → ano', zs('schvaleno', 'pripraveno'))
+  ok('zrusit_schvaleni: nepodporovano (operace nepodporovano) → ano — jediná cesta, jak ho uvolnit', zs('nepodporovano', 'nepodporovano'))
+  ok('zrusit_schvaleni: chyba + operace chyba → ano', zs('chyba', 'chyba'))
+  ok('zrusit_schvaleni: schvaleno bez operace → ano', zs('schvaleno', null))
+  ok('zrusit_schvaleni: operace odesila_se / nejasny_vysledek / uspech / rucne_dolozeno → ne',
+    ['odesila_se', 'nejasny_vysledek', 'uspech', 'rucne_dolozeno'].every((op) => !zs('schvaleno', op) && !zs('nepodporovano', op) && !zs('chyba', op)))
+  ok('zrusit_schvaleni: jiné stavy skladu → ne (ceka_na_schvaleni, bez_navrhu, odecteno_v_pos, rucne_dolozeno, nejasny_vysledek, zpracovava_se)',
+    ['ceka_na_schvaleni', 'bez_navrhu', 'odecteno_v_pos', 'rucne_dolozeno', 'nejasny_vysledek', 'zpracovava_se', 'zamitnuto', 'nutna_kontrola'].every((st) => !zs(st, 'pripraveno')))
+  ok('zrusit_schvaleni: jen s jine_platby.vydej_pos (s ním samotným ano, se všemi ostatními ne)',
+    zs('schvaleno', 'pripraveno', new Set(['jine_platby.vydej_pos'])) && !zs('schvaleno', 'pripraveno', new Set([...VSE].filter((p) => p !== 'jine_platby.vydej_pos'))))
+  ok('zrusit_schvaleni: s jine_platby.trzba ani s opravou ne', !zs('nepodporovano', 'nepodporovano', new Set(['jine_platby.trzba', 'jine_platby.oprava'])))
+  ok('zrusit_schvaleni: zrušený záznam → ne', !S.dostupneAkce(zaznam({ stavKontroly: 'zruseno', stavSkladu: 'schvaleno' }), VSE, m({ stavOperace: 'pripraveno' })).has('zrusit_schvaleni'))
+
+  // Dodatečná kontrola tržby po zápisu (jde volat i po něm) — jen s dohledáním účtů.
+  const poZapisu = (o = {}, mm = {}, prava = VSE) => S.dostupneAkce(zaznam({ stavTrzby: 'zapsano', ...o }), prava, m({ dohledaniUctu: true, ...mm })).has('kontrola_trzby')
+  ok('kontrola_trzby i po zápisu tržby (pokladna umí dohledat účty)', poZapisu())
+  ok('… ne bez dohledání účtů (ruční prohlášení po zápisu nic neověří)', !poZapisu({}, { dohledaniUctu: false }) && !poZapisu({}, { dohledaniUctu: undefined }))
+  ok('… ne bez pokladny', !poZapisu({ pripojeniId: null }, { maPokladnu: false }))
+  ok('… ne bez práva jine_platby.trzba', !poZapisu({}, {}, new Set([...VSE].filter((p) => p !== 'jine_platby.trzba'))) && poZapisu({}, {}, new Set(['jine_platby.trzba'])))
+  ok('… u propojené tržby ne', !S.dostupneAkce(zaznam({ stavTrzby: 'propojeno' }), VSE, m({ dohledaniUctu: true })).has('kontrola_trzby'))
+  ok('po zápisu se prohlášení ani potvrzení tržby nenabízí', ((a) => !a.has('prohlasit_trzbu') && !a.has('potvrdit_trzbu'))(S.dostupneAkce(zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: kT() }), VSE, m({ dohledaniUctu: true }))))
+
+  // Možná zapsáno dvakrát.
+  const kTv = (vysledek) => kT({ vysledek })
+  ok('moznaDvakrat: zapsáno + kontrola „nalezeno" → ano', S.moznaDvakrat(zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: kTv('nalezeno') })))
+  ok('moznaDvakrat: zapsáno + „pravdepodobne" → ano', S.moznaDvakrat(zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: kTv('pravdepodobne') })))
+  ok('moznaDvakrat: zapsáno + „nenalezeno" / „nelze_overit" / bez kontroly → ne',
+    !S.moznaDvakrat(zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: kTv('nenalezeno') })) && !S.moznaDvakrat(zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: kTv('nelze_overit') })) &&
+      !S.moznaDvakrat(zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: null })))
+  ok('moznaDvakrat: „nalezeno" bez zapsané tržby (nezapsano, propojeno, stornovano) → ne',
+    ['nezapsano', 'propojeno', 'stornovano'].every((st) => !S.moznaDvakrat(zaznam({ stavTrzby: st, kontrolaTrzby: kTv('nalezeno') }))))
+
   // Oddělení práv napříč všemi kombinacemi stavů.
   const TRZBA_AKCE = ['kontrola_trzby', 'prohlasit_trzbu', 'potvrdit_trzbu']
-  const SKLAD_AKCE = ['odeslat_sklad', 'kontrola_skladu', 'prohlasit_sklad', 'rozhodnout_vydej', 'provest_vydej', 'obnovit_vydej', 'vydej_znovu', 'propojit_vydej', 'rucne_dolozit', 'korekce_vydeje']
+  const SKLAD_AKCE = ['odeslat_sklad', 'kontrola_skladu', 'prohlasit_sklad', 'rozhodnout_vydej', 'provest_vydej', 'obnovit_vydej', 'vydej_znovu', 'propojit_vydej', 'rucne_dolozit', 'korekce_vydeje', 'zrusit_schvaleni']
   const PRAVO_AKCE = {
     nahrat: ['jine_platby.zadat', 'jine_platby.upravit'], rozpoznat: ['jine_platby.zadat', 'jine_platby.upravit'], upravit: ['jine_platby.upravit'],
     oznacit_zkontrolovano: ['jine_platby.upravit'], kontrola_trzby: ['jine_platby.trzba'], prohlasit_trzbu: ['jine_platby.trzba'], potvrdit_trzbu: ['jine_platby.trzba'],
     odeslat_sklad: ['jine_platby.sklad_odeslat'], kontrola_skladu: ['jine_platby.vydej_pos'], prohlasit_sklad: ['jine_platby.vydej_pos'], rozhodnout_vydej: ['jine_platby.vydej_pos'],
     provest_vydej: ['jine_platby.vydej_pos'], obnovit_vydej: ['jine_platby.vydej_pos'], vydej_znovu: ['jine_platby.vydej_pos'], propojit_vydej: ['jine_platby.vydej_pos'],
     rucne_dolozit: ['jine_platby.vydej_pos'], faktura: ['jine_platby.faktura'], uhrada: ['jine_platby.faktura'], opravit_trzbu: ['jine_platby.oprava'],
-    korekce_vydeje: ['jine_platby.oprava+jine_platby.vydej_pos'], zrusit: ['jine_platby.oprava'],
+    korekce_vydeje: ['jine_platby.oprava+jine_platby.vydej_pos'], zrusit: ['jine_platby.oprava'], zrusit_schvaleni: ['jine_platby.vydej_pos'],
   }
   const kombinace = []
   for (const stavKontroly of T.STAVY_KONTROLY)
     for (const stavTrzby of T.STAVY_TRZBY)
       for (const stavSkladu of T.STAVY_SKLADU)
         for (const maPokladnu of [true, false])
-          for (const stavOperace of [null, 'pripraveno', 'nejasny_vysledek', 'chyba'])
+          for (const stavOperace of [null, 'pripraveno', 'nejasny_vysledek', 'chyba', 'nepodporovano', 'uspech'])
             for (const ziva of [true, false])
               for (const vysledekSkladu of ['neodecteno', 'jiz_odecteno'])
-                kombinace.push([zaznam({ stavKontroly, stavTrzby, stavSkladu, kontrolaTrzby: kT(), kontrolaSkladu: { ...kT(), vysledek: vysledekSkladu } }), m({ maPokladnu, stavOperace, maZiveNavrhSkladu: ziva })])
+                for (const dohledaniUctu of [true, false])
+                  kombinace.push([zaznam({ stavKontroly, stavTrzby, stavSkladu, kontrolaTrzby: kT(), kontrolaSkladu: { ...kT(), vysledek: vysledekSkladu } }), m({ maPokladnu, stavOperace, maZiveNavrhSkladu: ziva, dohledaniUctu })])
   let jenTrzbaCisty = true
   let jenVydejCisty = true
   let bezPravaNic = true
@@ -730,12 +853,13 @@ console.log('\n== Dostupné akce ==')
   ok('jen finance.read (čtení) → žádná akce', bezPravaNic)
   ok('každou akci odemkne její vlastní právo', pravoOdemyka)
   ok('bez vlastního práva akce nikdy není', pravoNutne)
-  ok('kombinace stavů prošly všech 21 akcí (kontrola měřila všechno)', videno.size === 21)
+  ok(`kombinace stavů prošly všech 22 akcí (kontrola měřila všechno; viděno ${videno.size})`, videno.size === 22)
 
   const kS = (o = {}) => ({ vysledek: 'neodecteno', zdroj: 'pos_api', verze: 3, kdy: pred(5), kdo: null, detail: {}, ...o })
   ok('schválit výdej: čerstvá kontrola „neodečteno" → ano', S.muzeSchvalitVydej(zaznam({ stavSkladu: 'ceka_na_schvaleni', kontrolaSkladu: kS() }), TED))
   ok('schválit výdej: pokladna už odečetla → ne (propojit)', !S.muzeSchvalitVydej(zaznam({ stavSkladu: 'ceka_na_schvaleni', kontrolaSkladu: kS({ vysledek: 'jiz_odecteno' }) }), TED))
   ok('schválit výdej: kontrola 16 min stará → ne (sklad 15 min)', !S.muzeSchvalitVydej(zaznam({ stavSkladu: 'ceka_na_schvaleni', kontrolaSkladu: kS({ kdy: pred(16) }) }), TED))
+  ok('schválit výdej: nezkontrolovaný záznam → ne (databáze ho odmítne)', !S.muzeSchvalitVydej(zaznam({ stavKontroly: 'ke_kontrole', stavSkladu: 'ceka_na_schvaleni', kontrolaSkladu: kS() }), TED))
 }
 
 /* ================================================================== */
@@ -748,13 +872,24 @@ console.log('\n== Možné duplicity (opakované fotografie) ==')
   const prodej = D.mozneDuplicity(id({ posProdejId: 'P-9' }), [id({ id: 'b', posProdejId: 'P-9', datumProdeje: null })])
   ok('stejný prodej v téže pokladně → jistá', prodej.length === 1 && prodej[0].jista)
   ok('stejný prodej v JINÉ pokladně → nic', D.mozneDuplicity(id({ posProdejId: 'P-9' }), [id({ id: 'b', posProdejId: 'P-9', pripojeniId: 'pos2', datumProdeje: null })]).length === 0)
-  const ucet = D.mozneDuplicity(id({ externiUcet: ' 12 34 ', datumProdeje: null }), [id({ id: 'b', externiUcet: '1234', datumProdeje: '2026-10-01' })])
-  ok('stejné číslo účtu (bez mezer) v téže pokladně → možná, ne jistá', ucet.length === 1 && !ucet[0].jista && ucet[0].duvod.includes('číslo účtu'))
-  ok('stejný účet v jiné pokladně → nic', D.mozneDuplicity(id({ externiUcet: '1234', datumProdeje: null }), [id({ id: 'b', externiUcet: '1234', pripojeniId: 'pos2' })]).length === 0)
-  // Stejně jako databáze (`pripojeni_id is not distinct from`): dva záznamy bez pokladny.
-  const bezPokladny = D.mozneDuplicity(id({ externiUcet: 'Stůl 7', pripojeniId: null, datumProdeje: null }), [id({ id: 'b', externiUcet: 'stůl7', pripojeniId: null, datumProdeje: '2026-10-01' })])
-  ok('stejný účet u dvou záznamů BEZ pokladny → možná duplicita (jako v databázi)', bezPokladny.length === 1 && !bezPokladny[0].jista && bezPokladny[0].duvod.includes('bez pokladny'))
-  ok('účet bez pokladny vs. účet s pokladnou → nic', D.mozneDuplicity(id({ externiUcet: '1234', pripojeniId: null, datumProdeje: null }), [id({ id: 'b', externiUcet: '1234' })]).length === 0)
+  // Číslo účtu: jiná částka schválně — shoda „den + částka" se nesmí plést do měření.
+  const uc = (o = {}) => id({ externiUcet: '1234', castkaHaleru: 100, ...o })
+  const ucet = D.mozneDuplicity(id({ externiUcet: ' 12 34 ' }), [uc({ id: 'b', datumProdeje: '2026-10-12' })])
+  ok('stejné číslo účtu (bez mezer) v téže pokladně, 3 dny od sebe → možná, ne jistá', ucet.length === 1 && !ucet[0].jista && ucet[0].duvod.includes('číslo účtu'))
+  ok('stejný účet v jiné pokladně → nic', D.mozneDuplicity(uc(), [uc({ id: 'b', pripojeniId: 'pos2', datumProdeje: '2026-10-14' })]).length === 0)
+  ok('účet přesně 7 dní od sebe → možná (okno včetně)', D.mozneDuplicity(uc(), [uc({ id: 'b', datumProdeje: '2026-10-08' })]).length === 1 && D.mozneDuplicity(uc(), [uc({ id: 'b', datumProdeje: '2026-10-22' })]).length === 1)
+  ok('účet 8 dní od sebe → nic (pokladna čísluje účty dokola)', D.mozneDuplicity(uc(), [uc({ id: 'b', datumProdeje: '2026-10-07' })]).length === 0 && D.mozneDuplicity(uc(), [uc({ id: 'b', datumProdeje: '2026-10-23' })]).length === 0)
+  ok('okno přes přelom měsíce a roku počítá dny, ne text (2026-12-28 ~ 2027-01-03)', D.mozneDuplicity(uc({ datumProdeje: '2026-12-28' }), [uc({ id: 'b', datumProdeje: '2027-01-03' })]).length === 1)
+  ok('účet bez data u jednoho z nich → nic (oba datumy musí být vyplněné)',
+    D.mozneDuplicity(uc({ datumProdeje: null }), [uc({ id: 'b' })]).length === 0 && D.mozneDuplicity(uc(), [uc({ id: 'b', datumProdeje: null })]).length === 0)
+  ok('s pokladnou i napříč pobočkami (jedna pokladna obsluhuje víc poboček) → možná', D.mozneDuplicity(uc(), [uc({ id: 'b', branchId: 'b2', datumProdeje: '2026-10-14' })]).length === 1)
+  // Stejně jako databáze: dva záznamy bez pokladny — jen v téže pobočce.
+  const bezPokladny = D.mozneDuplicity(uc({ externiUcet: 'Stůl 7', pripojeniId: null }), [uc({ id: 'b', externiUcet: 'stůl7', pripojeniId: null, datumProdeje: '2026-10-13' })])
+  ok('stejný účet u dvou záznamů BEZ pokladny v téže pobočce → možná duplicita (jako v databázi)', bezPokladny.length === 1 && !bezPokladny[0].jista && bezPokladny[0].duvod.includes('bez pokladny'))
+  ok('stejný účet BEZ pokladny v JINÉ pobočce → nic („Stůl 7" je jiný stůl)', D.mozneDuplicity(uc({ externiUcet: 'Stůl 7', pripojeniId: null }), [uc({ id: 'b', externiUcet: 'stůl7', pripojeniId: null, branchId: 'b2' })]).length === 0)
+  ok('účet bez pokladny vs. účet s pokladnou → nic', D.mozneDuplicity(uc({ pripojeniId: null }), [uc({ id: 'b', castkaHaleru: 200 })]).length === 0)
+  ok('normalizace: všechny bílé znaky pryč (i nezlomitelná a úzká mezera, tabulátor), malými', D.normalizovatUcet(' Ab\u00a01\u202f2\t3 ') === 'ab123' && D.normalizovatUcet(' \u00a0 ') === null && D.normalizovatUcet(null) === null)
+  ok('účet s nezlomitelnou mezerou se shoduje s účtem bez mezer (jiná částka — měří se jen účet)', ((d) => d.length === 1 && d[0].duvod.includes('číslo účtu'))(D.mozneDuplicity(uc({ externiUcet: 'A\u00a012' }), [uc({ id: 'b', externiUcet: 'a12', castkaHaleru: 200 })])))
   const den = D.mozneDuplicity(id(), [id({ id: 'b' })])
   ok('stejná pobočka + den + částka + měna → možná', den.length === 1 && !den[0].jista && den[0].duvod.includes('den'))
   ok('bez měny → nic', D.mozneDuplicity(id({ mena: null }), [id({ id: 'b', mena: null })]).length === 0)

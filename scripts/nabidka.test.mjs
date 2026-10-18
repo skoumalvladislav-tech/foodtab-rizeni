@@ -1375,5 +1375,49 @@ function aspon(hodnota, min) {
   return hodnota === null || hodnota === 'auto' || hodnota === 'none' || px(hodnota) >= min
 }
 
+console.log('\n== Jiné platby: položku pustí kterékoli právo agendy ==')
+
+/*
+  Položka Jiné platby má seznam práv (PRAVA_CTENI_JINYCH_PLATEB) — stačí
+  kterékoli. Schvalovatel jen s jine_platby.vydej_pos a pokladní jen
+  s jine_platby.trzba Tržby nevidí (chtějí finance.read), takže bez téhle
+  položky by se do agendy dostali jen přímým odkazem. Spouští se skutečné
+  getContext + viditelnaNabidka nad podstrčenou databází (číšník na pobočce).
+*/
+{
+  const { PRAVA_CTENI_JINYCH_PLATEB } = await import('../lib/jine-platby-typy.ts')
+  const SEG = 'finance/trzby/jine-platby'
+  const nabidkaS = async (prava) => {
+    globalThis.__databaze = { ...CISNIK, kontext: { ...CISNIK.kontext, permissions: prava } }
+    const ctx = await authz.getContext('t1')
+    const naFirme = authz.resolveScope(ctx, 'cerna-perla').level === 'tenant'
+    return nabidka.viditelnaNabidka(ctx, naFirme).map((p) => p.segment)
+  }
+  for (const pravo of PRAVA_CTENI_JINYCH_PLATEB) {
+    ok(`jen ${pravo} → Jiné platby v nabídce`, (await nabidkaS([pravo])).includes(SEG))
+  }
+  const schvalovatel = await nabidkaS(['jine_platby.vydej_pos'])
+  ok('schvalovatel jen s vydej_pos: Jiné platby ano, Tržby ne (bez položky by se do agendy nedostal)', schvalovatel.includes(SEG) && !schvalovatel.includes('finance/trzby'))
+  const pokladni = await nabidkaS(['jine_platby.trzba'])
+  ok('pokladní jen s trzba: Jiné platby ano, Tržby ne', pokladni.includes(SEG) && !pokladni.includes('finance/trzby'))
+  ok('bez práva agendy (jen směny a zprávy) položku nevidí', !(await nabidkaS(['shifts.read', 'communication.read'])).includes(SEG))
+  ok('jiné finanční právo (faktury.read) položku nepustí', !(await nabidkaS(['faktury.read'])).includes(SEG))
+
+  const polozka = nabidka.NABIDKA.find((p) => p.segment === SEG)
+  ok('položka Jiné platby má právě PRAVA_CTENI_JINYCH_PLATEB', JSON.stringify(polozka?.pravo) === JSON.stringify(PRAVA_CTENI_JINYCH_PLATEB))
+  ok('ostatní položky beze změny: jedno právo nebo null',
+    [...nabidka.NABIDKA, ...nabidka.NASTAVENI].filter((p) => p.segment !== SEG).every((p) => p.pravo === null || typeof p.pravo === 'string'))
+
+  // Prázdný seznam práv nesmí pustit nikoho — ani majitele se všemi právy.
+  nabidka.NABIDKA.push({ segment: 'zkouska-prazdna-prava', nazev: 'Zkouška', kratky: 'Zkouška', modul: 'finance', pravo: [], hotovo: true, ikona: 'mince' })
+  try {
+    globalThis.__databaze = MAJITEL
+    const ctx = await authz.getContext('t1')
+    ok('prázdný seznam práv nepustí ani majitele', !nabidka.viditelnaNabidka(ctx, true).some((p) => p.segment === 'zkouska-prazdna-prava'))
+  } finally {
+    nabidka.NABIDKA.pop()
+  }
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

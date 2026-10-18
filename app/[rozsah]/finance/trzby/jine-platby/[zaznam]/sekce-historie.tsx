@@ -58,7 +58,10 @@ export function SekceZruseni({ zakl }: { zakl: { zaznam: string; verze: number; 
         vzhled="nebezpecne"
         potvrzeni={{ text: 'Zrušený záznam už nejde upravovat ani obnovit. Zůstane v historii a nic se z něj nezapočítá. Opravdu zrušit?', ano: 'Ano, zrušit záznam' }}
       >
-        <Vysvetleni>Zrušit jde jen záznam bez zapsané tržby, bez propojené faktury a bez zahájeného výdeje.</Vysvetleni>
+        <Vysvetleni>
+          Zrušit jde jen záznam bez zapsané tržby, bez propojené faktury, bez napárované úhrady (nejdřív ji odpojte) a bez zahájeného výdeje —
+          schválený výdej předaný k ručnímu odpisu uvolní jen „Zrušit schválení“ v části Sklad.
+        </Vysvetleni>
         <PoleDuvodu />
       </FormularAkce>
     </section>

@@ -12,8 +12,14 @@ import { nacistKatalog } from '../akce-pos'
 import ZnackaStavu from '../znacka-stavu'
 import EditorNavrhu, { type HlavickaEditoru, type PolozkaEditoru, type ProduktEditoru } from './editor-navrhu'
 import FormularAkce from './formular-akce'
-import { datumCesky, HLASKA_BEZ_AI, popisPuvoduCastky } from './logika'
-import { Oddil, Udaj, Udaje, Vysvetleni } from './prvky'
+import { datumCesky, HLASKA_BEZ_AI, popisPuvoduCastky, type BodKontroly } from './logika'
+import { Oddil, PoleDuvodu, Udaj, Udaje, Vysvetleni } from './prvky'
+
+const ZNACKA_BODU: Record<BodKontroly['blokuje'], string> = {
+  ano: 'Blokuje označení',
+  bez_duvodu: 'Blokuje bez důvodu',
+  ne: 'Jen upozornění',
+}
 
 /**
  * Sekce (a) Kontrola dokladu: hlavička, rozpoznání přes AI, přehled
@@ -29,7 +35,8 @@ export default function SekceKontrola({
   polozky,
   rozpoznani,
   kontrolaRozpoznani,
-  zbyvaKeKontrole,
+  coZkontrolovat,
+  nesoulad,
   ai,
   katalog,
   zona,
@@ -42,10 +49,13 @@ export default function SekceKontrola({
   polozky: PolozkaNavrhu[]
   rozpoznani: { stav: string; vytvoreno: string; duvod: string | null } | null
   kontrolaRozpoznani: KontrolaDokladu | null
-  /** Co v uloženém návrhu brání „zkontrolováno“ (zkontrolovatNavrh nad daty z databáze). */
-  zbyvaKeKontrole: string[]
+  /** Co v uloženém návrhu zkontrolovat a co z toho označení blokuje (coZkontrolovat nad daty z databáze). */
+  coZkontrolovat: BodKontroly[]
+  /** Součet položek nesedí s celkovou cenou → povinné „Proč rozdíl nevadí“ (popis rozdílu), jinak `null`. */
+  nesoulad: string | null
   ai: { zapnuto: boolean; pocetSouboru: number }
-  katalog: { umi: boolean; pocet: number; aktualizovano: string | null } | null
+  /** `chyba` = katalog nebo ověřená přiřazení nejdou načíst celé (chyba dotazu, strop stránek) — žádný tichý ořez. */
+  katalog: { umi: boolean; pocet: number; aktualizovano: string | null; chyba: string | null } | null
   zona: string
 }) {
   const castka = (h: number | null) => (h === null ? 'neuvedeno' : formatHaleru(h, z.mena))
@@ -172,6 +182,11 @@ export default function SekceKontrola({
           </ol>
         )}
 
+        {katalog?.chyba ? (
+          <p role="alert" className="hlaska-chyba" style={{ margin: 0 }}>
+            {katalog.chyba} Přiřazení k produktům pokladny teď nejde; zkuste stránku načíst znovu.
+          </p>
+        ) : null}
         {katalog && smiUpravit && !zruseno ? (
           <div style={{ display: 'grid', gap: '8px' }}>
             <Vysvetleni>
@@ -188,12 +203,19 @@ export default function SekceKontrola({
       {/* ---------- Zkontrolováno ---------- */}
       {akce.has('oznacit_zkontrolovano') ? (
         <Oddil nadpis="Označit jako zkontrolované">
-          {zbyvaKeKontrole.length > 0 ? (
-            <div style={{ display: 'grid', gap: '4px', fontSize: '13.5px' }}>
-              <span>Co ještě brání (podle uloženého návrhu):</span>
-              <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                {zbyvaKeKontrole.map((d) => (
-                  <li key={d}>{d}</li>
+          {coZkontrolovat.length > 0 ? (
+            <div style={{ display: 'grid', gap: '6px', fontSize: '13.5px' }}>
+              <strong style={{ fontSize: '14px' }}>Co zkontrolovat (podle uloženého návrhu)</strong>
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '6px' }}>
+                {coZkontrolovat.map((b, i) => (
+                  <li key={i} data-blokuje={b.blokuje} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', overflowWrap: 'anywhere' }}>
+                    <span aria-hidden="true" style={{ flex: 'none', paddingTop: '1px', color: b.blokuje === 'ne' ? 'var(--muted)' : 'var(--pozor)' }}>
+                      <Ikona klic={b.blokuje === 'ne' ? 'vykricnik' : 'varovani'} velikost={16} />
+                    </span>
+                    <span style={{ minWidth: 0 }}>
+                      <strong style={{ fontWeight: b.blokuje === 'ne' ? 500 : 700 }}>{ZNACKA_BODU[b.blokuje]}:</strong> {b.text}
+                    </span>
+                  </li>
                 ))}
               </ul>
             </div>
@@ -203,6 +225,13 @@ export default function SekceKontrola({
               Potvrzujete, že datum prodeje, měna, celková cena a položky sedí s dokladem. Tím se nic nezapíše do tržeb ani do skladu — to jsou další
               kroky.
             </Vysvetleni>
+            {nesoulad ? (
+              <PoleDuvodu
+                nazev="duvod_rozdilu"
+                popisek="Proč rozdíl nevadí (povinné)"
+                napoveda={`${nesoulad}. Například zaokrouhlení hotovosti nebo sleva mimo položky. Když rozdíl vadí, opravte položky nebo celkovou cenu výš.`}
+              />
+            ) : null}
           </FormularAkce>
         </Oddil>
       ) : null}

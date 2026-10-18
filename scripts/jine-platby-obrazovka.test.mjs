@@ -34,6 +34,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import {
   KVALITY_JPEG_DOKLADU,
   NEJDELSI_STRANA_DOKLADU,
+  NEJDELSI_STRANA_DOKLADU_NOUZOVE,
+  POKUSY_ZMENSENI,
   PRIPONY_SOUBORU,
   cestaSouboru,
   overitCestu,
@@ -41,8 +43,9 @@ import {
   zaznamZDuplicity,
   zkontrolovatPoZmenseni,
   zkontrolovatVyber,
+  zmensitPostupne,
 } from '../lib/jine-platby-soubory.ts'
-import { MAX_BAJTU_PRO_AI, MAX_BAJTU_SOUBORU, MAX_SOUBORU_NA_ZAZNAM, TYPY_SOUBORU } from '../lib/jine-platby-typy.ts'
+import { MAX_BAJTU_OBRAZKU_PRO_AI, MAX_BAJTU_PRO_AI, MAX_BAJTU_SOUBORU, MAX_SOUBORU_NA_ZAZNAM, TYPY_SOUBORU } from '../lib/jine-platby-typy.ts'
 import { prevestPrehled } from '../lib/pokladna-trzby.ts'
 import { nactiKomponentu, nactiModul } from './vykreslit.mjs'
 
@@ -127,10 +130,73 @@ console.log('\n== Kontrola výběru souborů ==')
   ok('plný záznam nevezme nic', zkontrolovatVyber(tri, MAX_SOUBORU_NA_ZAZNAM).polozky.length === 0)
 }
 
+console.log('\n== Strop fotky pro AI (5 MB): co se zmenší ==')
+{
+  // API bere obrázek nejvýš 10 MB až v base64 — fotka mezi 5 a 8 MB se dřív
+  // nahrála beze změny a rozpoznání by ji odmítlo.
+  const v = zkontrolovatVyber(
+    [
+      { name: 'presne.jpg', type: 'image/jpeg', size: MAX_BAJTU_OBRAZKU_PRO_AI },
+      { name: 'nad.jpg', type: 'image/jpeg', size: MAX_BAJTU_OBRAZKU_PRO_AI + 1 },
+      { name: 'sest.png', type: 'image/png', size: 6 * MB },
+      { name: 'sest.webp', type: 'image/webp', size: 6 * MB },
+      { name: 'sest.pdf', type: 'application/pdf', size: 6 * MB },
+    ],
+    0,
+  )
+  const akce = Object.fromEntries(v.polozky.map((p) => [p.index, p.akce]))
+  ok('fotka přesně 5 MB jde tak, jak je', akce[0] === 'nahrat')
+  ok('JPEG o bajt nad 5 MB se zmenší', akce[1] === 'zmensit')
+  ok('PNG 6 MB se zmenší (dřív by šel beze změny — strop byl 8 MB)', akce[2] === 'zmensit')
+  ok('WebP 6 MB se zmenší', akce[3] === 'zmensit')
+  ok('PDF 6 MB jde tak, jak je (zmenšit nejde, strop PDF je jiný)', akce[4] === 'nahrat' && v.chyby.length === 0)
+}
+
 console.log('\n== Po zmenšení ==')
 ok('HEIC, který se převést nepodařilo, se odmítne', zkontrolovatPoZmenseni('a.heic', 'image/heic', MB) !== null)
 ok('JPEG nad 10 MB i po zmenšení se odmítne', zkontrolovatPoZmenseni('a.jpg', 'image/jpeg', MAX_BAJTU_SOUBORU + 1) !== null)
 ok('JPEG 5 MB projde', zkontrolovatPoZmenseni('a.jpg', 'image/jpeg', 5 * MB) === null)
+{
+  const nad = zkontrolovatPoZmenseni('sjetina.jpg', 'image/jpeg', MAX_BAJTU_OBRAZKU_PRO_AI + 1)
+  ok(`fotka i po zmenšení nad 5 MB se odmítne s vysvětlením (${nad})`,
+    typeof nad === 'string' && nad.includes('sjetina.jpg') && nad.includes('nepodařilo zmenšit pod 5,0 MB') && nad.includes('PDF'))
+  ok('PNG 6 MB (nezmenšené, prohlížeč to neuměl) se odmítne', zkontrolovatPoZmenseni('a.png', 'image/png', 6 * MB) !== null)
+  ok('PDF 9 MB projde (pod stropem úložiště 10 MB)', zkontrolovatPoZmenseni('a.pdf', 'application/pdf', 9 * MB) === null)
+  ok('PDF nad 10 MB se odmítne', zkontrolovatPoZmenseni('a.pdf', 'application/pdf', MAX_BAJTU_SOUBORU + 1) !== null)
+}
+
+console.log('\n== Zmenšení po pokusech: 4000 px 0,9 → 0,8 → 3000 px ==')
+{
+  ok('nouzová delší strana 3000 px', NEJDELSI_STRANA_DOKLADU_NOUZOVE === 3000)
+  ok(`pořadí pokusů (${POKUSY_ZMENSENI.map((p) => `${p.strana}/${p.kvalita}`).join(', ')})`,
+    POKUSY_ZMENSENI.map((p) => `${p.strana}/${p.kvalita}`).join() === '4000/0.9,4000/0.8,3000/0.9,3000/0.8')
+  // Podstrčený kodér: velikost výsledku podle pokusu, zapisuje, co se zkoušelo.
+  const koder = (velikosti) => {
+    const volani = []
+    const fn = async (pokus) => {
+      volani.push(`${pokus.strana}/${pokus.kvalita}`)
+      const v = velikosti[volani.length - 1]
+      return v === null ? null : { size: v }
+    }
+    return { fn, volani }
+  }
+  const hned = koder([4 * MB, 1, 1, 1])
+  const r1 = await zmensitPostupne(hned.fn)
+  ok('první pokus se vejde → hned konec (jediné kódování, 4000 px / 0,9)', r1.vejdeSe && r1.blob.size === 4 * MB && hned.volani.join() === '4000/0.9')
+  const treti = koder([6 * MB, 5.5 * MB, 4.5 * MB, 1])
+  const r3 = await zmensitPostupne(treti.fn)
+  ok(`vejde se až 3000 px → ten (${treti.volani.join(', ')})`, r3.vejdeSe && r3.blob.size === 4.5 * MB && r3.pokus.strana === 3000 && treti.volani.length === 3)
+  const nic = koder([7 * MB, 5.2 * MB, 6 * MB, 5.6 * MB])
+  const rNic = await zmensitPostupne(nic.fn)
+  ok('nevejde se žádný → nejmenší výsledek s vejdeSe: false (zkouší všechny čtyři)',
+    !rNic.vejdeSe && rNic.blob.size === 5.2 * MB && nic.volani.length === 4)
+  ok('a ten se pak odmítne s vysvětlením', zkontrolovatPoZmenseni('a.jpg', 'image/jpeg', rNic.blob.size) !== null)
+  const neumi = koder([null, 3 * MB, 1, 1])
+  const rNeumi = await zmensitPostupne(neumi.fn)
+  ok('pokus, který prohlížeč neumí (null), se přeskočí', rNeumi.vejdeSe && rNeumi.blob.size === 3 * MB && rNeumi.pokus.kvalita === 0.8)
+  const nikdy = await zmensitPostupne(koder([null, null, null, null]).fn)
+  ok('prohlížeč neumí nic → blob null (nahraje se originál a kontrola po zmenšení rozhodne)', nikdy.blob === null && !nikdy.vejdeSe)
+}
 ok('typy souborů = smlouva (jpeg, png, webp, pdf)', Object.keys(PRIPONY_SOUBORU).sort().join() === [...TYPY_SOUBORU].sort().join())
 
 console.log('\n== Rozměry zmenšení dokladu (delší strana nejvýš 4000 px) ==')
@@ -483,7 +549,7 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
   const scopePobocky = { level: 'branch', branchId: B, branchName: 'Bernard Bar', branchSlug: 'bernard-bar' }
   const scopeFirmy = { level: 'tenant', branchId: null, branchName: 'Firma', branchSlug: 'firma' }
 
-  const spustit = async ({ rozsah = 'bernard-bar', scope = scopePobocky, prava = ['jine_platby.zadat'], stav = 'ok', hledani = {}, pravaPobocek, chybaZaznamu = null } = {}) => {
+  const spustit = async ({ rozsah = 'bernard-bar', scope = scopePobocky, prava = ['jine_platby.zadat'], stav = 'ok', hledani = {}, pravaPobocek, chybaZaznamu = null, radky = [radekZaznamu] } = {}) => {
     globalThis.__pgTenant = T
     globalThis.__pgPoradi = []
     globalThis.__pgDotazy = []
@@ -491,7 +557,7 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
     globalThis.__pgPravaPobocek = pravaPobocek ?? { [B]: prava, [C]: prava }
     globalThis.__pgOdpoved = (tabulka) => {
       if (tabulka === 'branches') return { data: [{ id: B, name: 'Bernard Bar', active: true }, { id: C, name: 'Černá Perla', active: true }], error: null }
-      if (tabulka === 'jine_platby') return chybaZaznamu ? { data: null, error: chybaZaznamu } : { data: [radekZaznamu], error: null }
+      if (tabulka === 'jine_platby') return chybaZaznamu ? { data: null, error: chybaZaznamu } : { data: radky, error: null }
       if (tabulka === 'profiles') return { data: [{ user_id: AUTOR, full_name: 'Jana Obsluha' }], error: null }
       return { data: [], error: null }
     }
@@ -554,6 +620,32 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
   ok('s vydej_pos: záložka je a fronta = čeká na schválení z poboček s právem, bez období',
     schvalovatel.html.includes('Čeká na schválení výdeje') && ma(schvalovatel.zaznamy, 'eq', 'stav_skladu', 'ceka_na_schvaleni') &&
       ma(schvalovatel.zaznamy, 'in', 'branch_id', [B]) && filtrObdobi(schvalovatel.zaznamy) === null)
+  ok('fronta „Čeká na schválení výdeje" bez zrušených záznamů (.neq stav_kontroly zruseno)', ma(schvalovatel.zaznamy, 'neq', 'stav_kontroly', 'zruseno'))
+  const cekaFiltr = await spustit({ hledani: { stav: 'ceka_na_schvaleni' } })
+  ok('filtr „Čeká na schválení výdeje" taky bez zrušených',
+    ma(cekaFiltr.zaznamy, 'eq', 'stav_skladu', 'ceka_na_schvaleni') && ma(cekaFiltr.zaznamy, 'neq', 'stav_kontroly', 'zruseno'))
+
+  // Možná zapsáno dvakrát: tržba zapsaná a dodatečná kontrola prodej v pokladně našla.
+  const dvakratRadek = {
+    ...radekZaznamu, id: 'e8888888-8888-4888-8888-88888888888e', stav_trzby: 'zapsano', stav_kontroly: 'zkontrolovano',
+    kontrola_trzby: { vysledek: 'pravdepodobne', zdroj: 'pos_api', verze: 3, kdy: '2026-10-14T11:00:00Z', kdo: null, detail: {} },
+  }
+  const dvakrat = await spustit({ hledani: { stav: 'mozna_dvakrat' }, radky: [dvakratRadek] })
+  ok('filtr „Možná zapsáno dvakrát": stav_trzby = zapsano a kontrola_trzby->>vysledek ∈ {nalezeno, pravdepodobne} v dotazu',
+    ma(dvakrat.zaznamy, 'eq', 'stav_trzby', 'zapsano') && ma(dvakrat.zaznamy, 'in', 'kontrola_trzby->>vysledek', ['nalezeno', 'pravdepodobne']))
+  ok('filtr „Možná zapsáno dvakrát" je v nabídce filtrů', dvakrat.html?.includes('Možná zapsáno dvakrát') === true && zakladni.html.includes('stav=mozna_dvakrat'))
+  const znacka = (html, id) => {
+    const i = html.indexOf(`/jine-platby/${id}"`)
+    const j = html.indexOf('</tr>', i)
+    return i < 0 ? '' : html.slice(i, j)
+  }
+  const radekDvakrat = znacka(dvakrat.html ?? '', dvakratRadek.id)
+  ok('řádek s možnou dvojí tržbou: značka „Možná zapsáno dvakrát" s ikonou varování (ft-i)',
+    /<span class="ds-badge"[^>]*><svg class="ft-i"[^>]*>(?:<path[^>]*><\/path>)*<\/svg>Možná zapsáno dvakrát<\/span>/.test(radekDvakrat))
+  const bezDvakrat = znacka(zakladni.html ?? '', ID)
+  ok('řádek bez zapsané tržby tu značku nemá', bezDvakrat !== '' && !bezDvakrat.includes('Možná zapsáno dvakrát'))
+  const nenalezeno = await spustit({ radky: [{ ...dvakratRadek, kontrola_trzby: { ...dvakratRadek.kontrola_trzby, vysledek: 'nenalezeno' } }] })
+  ok('zapsaná tržba s kontrolou „nenalezeno" značku nemá', !znacka(nenalezeno.html ?? '', dvakratRadek.id).includes('Možná zapsáno dvakrát') && znacka(nenalezeno.html ?? '', dvakratRadek.id) !== '')
 
   const firmaCizi = await spustit({ rozsah: 'firma', scope: scopeFirmy, prava: ['finance.read'], pravaPobocek: { [B]: ['finance.read'] }, hledani: { pobocka: CIZI } })
   ok('na firmě cizí ?pobocka= se ignoruje — jen pobočky, kde člověk vidí',
@@ -602,14 +694,15 @@ console.log('\n== Přehled: každý parametr adresy přes seznam povolených hod
   const s = zdroj(SOUBORY.prehled)
   const vyskyty = (jmeno) => (s.match(new RegExp(`\\b${jmeno}\\b`, 'g')) ?? []).length
   ok('stav: jen z FILTRY_STAVU, jinak „vse"', /const stav: FiltrStavu = jeFiltrStavu\(stavParam\) \? stavParam : 'vse'/.test(s) && vyskyty('stavParam') === 3)
-  ok('filtry stavu = zadání (vse, ke_kontrole, trzba_nezapsana, ceka_na_schvaleni, sklad_neuzavreny, bez_faktury, zrusene)',
-    s.includes("const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const"))
+  ok('filtry stavu = zadání (vse, ke_kontrole, trzba_nezapsana, mozna_dvakrat, ceka_na_schvaleni, sklad_neuzavreny, bez_faktury, zrusene)',
+    s.includes("const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'mozna_dvakrat', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const"))
   ok('pohled=schvaleni jen s jine_platby.vydej_pos',
     /const smiSchvalovat = pristup\.prava\.has\('jine_platby\.vydej_pos'\)/.test(s) &&
       /const pohledSchvaleni = pohledParam === 'schvaleni' && smiSchvalovat/.test(s) && vyskyty('pohledParam') === 2)
   ok('záložka „Čeká na schválení" se kreslí jen se smiSchvalovat', /\{smiSchvalovat \? \(\s*<nav className="ds-zalozky"/.test(s))
   ok('fronta schválení jen z poboček s vydej_pos', /pobockySPravem\(tenantId, \[\.\.\.viditelne\], \['jine_platby\.vydej_pos'\]\)/.test(s) &&
-    /dotaz = dotaz\.eq\('stav_skladu', 'ceka_na_schvaleni'\)\.in\('branch_id', \[\.\.\.pobockySchvaleni\]\)/.test(s))
+    /dotaz = dotaz\.eq\('stav_skladu', 'ceka_na_schvaleni'\)\.neq\('stav_kontroly', 'zruseno'\)\.in\('branch_id', \[\.\.\.pobockySchvaleni\]\)/.test(s))
+  ok('značka „Možná zapsáno dvakrát" podle moznaDvakrat z lib/jine-platby-stav (jedno pravidlo)', s.includes('{moznaDvakrat(r) ? <ZnackaStavu popis={ZNACKA_DVAKRAT} /> : null}'))
   ok('pobocka: jen na firmě a jen z nabídky viditelných poboček',
     /const vybranaPobocka = pobockaRozsahu \?\? \(pobockaParam && nabidkaPobocek\.some\(\(b\) => b\.id === pobockaParam\) \? pobockaParam : null\)/.test(s) &&
       vyskyty('pobockaParam') === 4)
@@ -685,13 +778,20 @@ console.log('\n== Nahrání: vlastní zmenšení, ne lib/obrazky ==')
 {
   const s = zdroj(SOUBORY.nahrat)
   ok('nahrat-doklad nepoužívá lib/obrazky ani zmensitObrazek', !s.includes('lib/obrazky') && !s.includes('zmensitObrazek'))
-  ok('zmenšuje zmensitDoklad, jen když kontrola výběru řekne „zmensit"', /if \(polozka\.akce === 'zmensit'\) \{\s*const zmenseny = await zmensitDoklad\(s\)/.test(s))
+  ok('zmenšuje zmensitDoklad, jen když kontrola výběru řekne „zmensit"', /if \(polozka\.akce === 'zmensit'\) \{\s*setPrubeh\([^\n]*\)\s*const zmenseny = await zmensitDoklad\(s\)/.test(s))
+  ok('po zmenšení kontrola zkontrolovatPoZmenseni(…, blob.size) a teprve pak nahrání',
+    s.indexOf('zkontrolovatPoZmenseni(s.name, mime, blob.size)') > s.indexOf('await zmensitDoklad(s)') &&
+      s.indexOf('zkontrolovatPoZmenseni(s.name, mime, blob.size)') < s.indexOf('.upload(cesta, blob'))
   ok('nahrává do kbelíku jine-platby bez přepisu (upsert: false)', /storage\.from\(KBELIK_JINYCH_PLATEB\)\.upload\(cesta, blob, \{\s*contentType: mime,\s*upsert: false,/.test(s))
   ok('cesta přes cestaSouboru (firma/pobočka/záznam/uuid)', /cestaSouboru\(tenantId, branchId, zaznamId, noveId\(\), mime\)/.test(s))
   ok('po dokončení router.refresh()', /if \(pripojeno > 0\) router\.refresh\(\)/.test(s))
   ok('chyby čitelně (role="alert")', s.includes('role="alert"'))
   const lib = zdroj(SOUBORY.soubory)
-  ok('lib: zmenšení přes rozmeryZmenseni (4000 px) a kvality 0,9 → 0,8', /rozmeryZmenseni\(bitmapa\.width, bitmapa\.height\)/.test(lib) && /for \(const kvalita of KVALITY_JPEG_DOKLADU\)/.test(lib))
+  const zmensitDokladTelo = lib.slice(lib.indexOf('export async function zmensitDoklad'))
+  ok('lib: zmensitDoklad kreslí přes rozmeryZmenseni(…, strana) a pokusy jdou přes zmensitPostupne',
+    /rozmeryZmenseni\(zdroj\.width, zdroj\.height, strana\)/.test(zmensitDokladTelo) && /await zmensitPostupne\(/.test(zmensitDokladTelo))
+  ok('lib: výběr zmenšuje fotku nad stropem fotky pro AI (MAX_BAJTU_OBRAZKU_PRO_AI), ne nad 8 MB',
+    /s\.size > MAX_BAJTU_OBRAZKU_PRO_AI/.test(lib) && !/MAX_BAJTU_PRO_AI\b/.test(lib))
   ok('lib: bez server-only a bez importů přes @/ (jde spustit Nodem i v prohlížeči)', !lib.includes('server-only') && !/from '@\//.test(lib))
 }
 
@@ -717,9 +817,121 @@ console.log('\n== Tržby: zdroj ==')
       /if \(vybranaPobocka\) dotazOstatnich = dotazOstatnich\.eq\('branch_id', vybranaPobocka\)/.test(p))
   // Podmínka napsaná dvakrát nejde shodit: zapocitat/platna jen v souhrnOstatnichTrzeb.
   ok('zapocitat/stav jen na jednom místě (souhrnOstatnichTrzeb), ne v dotazu', !/\.eq\('zapocitat'/.test(p) && !/\.eq\('stav'/.test(p))
-  ok('nenasazená tabulka → null (karta „–"), jiná chyba nahlas', /if \(ostatniRes\.error && !tabulkaNeexistuje\(ostatniRes\.error\)\) throw new DotazSelhal/.test(p))
+  ok('po stránkách: .order(\'id\').range(odRadku, odRadku + STRANKA_OSTATNICH - 1), stránka 1000, strop 50',
+    /await dotazOstatnich\.order\('id'\)\.range\(odRadku, odRadku \+ STRANKA_OSTATNICH - 1\)/.test(p) &&
+      /const STRANKA_OSTATNICH = 1000\b/.test(p) && /const MAX_STRAN_OSTATNICH = 50\b/.test(p))
+  ok('obsah dostává i chybu karty (ostatniTrzbyChyba)', /ostatniTrzbyChyba=\{ostatniTrzbyChyba\}/.test(p))
   ok('obsah dostává ostatní tržby a adresu agendy propem', /ostatniTrzby=\{ostatniTrzby\}/.test(p) && /zakladJinychPlateb=\{`\/\$\{rozsah\}\/finance\/trzby\/jine-platby`\}/.test(p))
   ok('obsah.tsx nic nenačítá (čistě kreslicí)', !/getServerSupabase|\.from\(|\.rpc\(/.test(o))
+}
+
+/* =====================================================================
+ * Tržby se SPUSTÍ s podstrčenou databází: Ostatní tržby po stránkách.
+ * Kontroly čtou zapsané dotazy (range, order) a vykreslenou kartu.
+ * ===================================================================== */
+
+console.log('\n== Tržby: Ostatní tržby po stránkách (spuštěná stránka) ==')
+{
+  const A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const stubT = {
+    firma: js(`export async function getCurrentTenantId() { return ${JSON.stringify(T)} }\n`),
+    pristup: js('export async function zkusPristupFinanci() { return globalThis.__trPristup }\n'),
+    authz: js('export const TENANT_SCOPE_SEGMENT = "firma"\n'),
+    prihlaseni: js('export async function odkazNaPrihlaseni() { return "/prihlaseni" }\n'),
+    navigace: js('export function redirect() { throw new Error("PRESMEROVANI") }\n'),
+    dotaz: js('export class DotazSelhal extends Error {}\nexport function tabulkaNeexistuje(c) { return c?.code === "PGRST205" || c?.code === "42P01" }\n'),
+    nacteni: js(
+      `import { prevestPrehled } from ${JSON.stringify(new URL('../lib/pokladna-trzby.ts', import.meta.url).href)}\n` +
+        'export async function nactiPrehledTrzeb() { return prevestPrehled(globalThis.__trPrehled) }\n',
+    ),
+    supabase: js(
+      'export async function getServerSupabase() {\n' +
+        '  return { from(tabulka) {\n' +
+        '    const volani = []\n' +
+        '    globalThis.__trDotazy.push({ tabulka, volani })\n' +
+        '    const b = new Proxy({}, { get(_, k) {\n' +
+        '      if (k === "then") return (ok, ko) => Promise.resolve(globalThis.__trOdpoved(tabulka, volani)).then(ok, ko)\n' +
+        '      return (...a) => { volani.push([k, ...a]); return b }\n' +
+        '    } })\n' +
+        '    return b\n' +
+        '  } }\n' +
+        '}\n',
+    ),
+    obal: js(
+      `import { createElement } from ${JSON.stringify(import.meta.resolve('react'))}\n` +
+        'export default function Navigace({ rozsah, children }) { return createElement("div", { "data-navigace": rozsah }, children) }\n',
+    ),
+  }
+  const Trzby = await nactiKomponentu(SOUBORY.trzbyStranka, [
+    ['next/link', ODKAZ],
+    ['next/navigation', stubT.navigace],
+    ['@/lib/firma', stubT.firma],
+    ['@/lib/finance-pristup', stubT.pristup],
+    ['@/lib/authz', stubT.authz],
+    ['@/lib/prihlaseni-adresa', stubT.prihlaseni],
+    ['@/lib/supabase/server', stubT.supabase],
+    ['@/lib/supabase/dotaz', stubT.dotaz],
+    ['@/lib/pokladna-trzby-nacteni', stubT.nacteni],
+    ['../navigace', stubT.obal],
+  ])
+  const SPROPOKLADNOU = { trzby: [{ obdobi: '2026-09-15', branch_id: A, trzba_haleru: 150000, polozek: 10, dnu: 1, dnu_s_platbami: 0 }], platby: [], zpusoby: [], banka: [] }
+  const BEZ_POKLADNY = { trzby: [], platby: [], zpusoby: [], banka: [] }
+  /** `radku` řádků ostatni_trzby po 1 Kč (CZK, započítané, platné); `chyba` = chyba prvního dotazu. */
+  const tr = async ({ radku = 0, chyba = null, prehled = SPROPOKLADNOU, hledani = { obdobi: '2026-09' } } = {}) => {
+    globalThis.__trDotazy = []
+    globalThis.__trPrehled = prehled
+    globalThis.__trPristup = { stav: 'ok', ctx: {}, scope: { level: 'tenant', branchId: null, branchName: 'Firma', branchSlug: 'firma' } }
+    globalThis.__trOdpoved = (tabulka, volani) => {
+      if (tabulka === 'branches') return { data: [{ id: A, name: 'Bernard Bar', active: true }], error: null }
+      if (tabulka !== 'ostatni_trzby') return { data: [], error: null }
+      if (chyba) return { data: null, error: chyba }
+      const r = volani.find((v) => v[0] === 'range')
+      if (!r) return { data: Array.from({ length: radku }, () => ({ branch_id: A, datum: '2026-09-10', castka_haleru: 100, mena: 'CZK', zapocitat: true, stav: 'platna' })), error: null }
+      const [, od, doRadku] = r
+      const pocet = Math.max(0, Math.min(doRadku - od + 1, radku - od))
+      return { data: Array.from({ length: pocet }, () => ({ branch_id: A, datum: '2026-09-10', castka_haleru: 100, mena: 'CZK', zapocitat: true, stav: 'platna' })), error: null }
+    }
+    let html = null
+    let vyjimka = null
+    try {
+      html = renderToStaticMarkup(await Trzby({ params: Promise.resolve({ rozsah: 'firma' }), searchParams: Promise.resolve(hledani) }))
+    } catch (e) {
+      vyjimka = e
+    }
+    const stranky = globalThis.__trDotazy.filter((d) => d.tabulka === 'ostatni_trzby').map((d) => d.volani)
+    const karta = (() => {
+      const h = html ?? ''
+      const i = h.indexOf('>Ostatní tržby</h2>')
+      return i < 0 ? null : h.slice(i, h.indexOf('</article>', i)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    })()
+    return { html, vyjimka, stranky, karta }
+  }
+  const rozsahy = (stranky) => stranky.map((v) => v.find((x) => x[0] === 'range')?.slice(1).join('–') ?? 'bez range')
+
+  const tri = await tr({ radku: 2500 })
+  ok(`2 500 řádků → tři stránky 0–999, 1000–1999, 2000–2999 (${rozsahy(tri.stranky).join(', ')})`, rozsahy(tri.stranky).join() === '0–999,1000–1999,2000–2999')
+  ok('každá stránka řazená .order(\'id\') a se stejnými filtry (firma, období)',
+    tri.stranky.length === 3 && tri.stranky.every((v) => v.some((x) => x[0] === 'order' && x[1] === 'id') &&
+      v.some((x) => x[0] === 'eq' && x[1] === 'tenant_id' && x[2] === T) && v.some((x) => x[0] === 'gte' && x[1] === 'datum' && x[2] === '2026-09-01') &&
+      v.some((x) => x[0] === 'lte' && x[1] === 'datum' && x[2] === '2026-09-30')))
+  ok(`karta sečte VŠECH 2 500 řádků: 2 500 Kč, ne 1 000 Kč z první stránky (${tri.karta})`, /2\s?500 Kč/.test(tri.karta ?? '') && !/1\s?000 Kč/.test(tri.karta ?? ''))
+  const presne = await tr({ radku: 1000 })
+  ok(`přesně 1 000 řádků → druhá (prázdná) stránka to potvrdí (${rozsahy(presne.stranky).join(', ')}) a součet 1 000 Kč`,
+    rozsahy(presne.stranky).join() === '0–999,1000–1999' && /1\s?000 Kč/.test(presne.karta ?? ''))
+  const nic = await tr({ radku: 0 })
+  ok(`žádný řádek → jediný dotaz a karta „–" (${nic.karta})`, nic.stranky.length === 1 && (nic.karta ?? '').includes('–') && !(nic.karta ?? '').includes('0 Kč'))
+  const moc = await tr({ radku: 60_000 })
+  ok(`víc než 50 plných stránek → přesně 50 dotazů (${moc.stranky.length}), 51. už ne`, moc.stranky.length === 50 && rozsahy(moc.stranky).at(-1) === '49000–49999')
+  ok(`… a karta ukáže chybu, ne useknutý součet 50 000 Kč (${moc.karta})`,
+    (moc.karta ?? '').includes('Nejde sečíst') && (moc.karta ?? '').includes('–') && !/50\s?000 Kč/.test(moc.karta ?? ''))
+  const mocBezPokladny = await tr({ radku: 60_000, prehled: BEZ_POKLADNY })
+  ok('chyba karty i když pokladna za období nic neposlala', (mocBezPokladny.karta ?? '').includes('Nejde sečíst'))
+  const bezTabulky = await tr({ chyba: { code: 'PGRST205', message: 'nenalezeno' } })
+  ok(`nenasazená tabulka → karta „čeká na aktualizaci databáze" (${bezTabulky.karta})`, bezTabulky.vyjimka === null && (bezTabulky.karta ?? '').includes('čeká na aktualizaci databáze'))
+  const porucha = await tr({ chyba: { code: '42501', message: 'permission denied' } })
+  ok('jiná chyba dotazu → výjimka (nahlas), ne prázdná karta', porucha.vyjimka !== null && porucha.html === null)
+  const naPobocce = await tr({ radku: 3, hledani: { obdobi: '2026-09', pobocka: A } })
+  ok('vybraná provozovna: každá stránka i s .eq(branch_id)', naPobocce.stranky.length === 1 && naPobocce.stranky[0].some((x) => x[0] === 'eq' && x[1] === 'branch_id' && x[2] === A))
 }
 
 console.log('\n== Rám Financí pustí Jiné platby i vedoucího s finance.read jen na pobočce ==')
@@ -732,6 +944,20 @@ console.log('\n== Rám Financí pustí Jiné platby i vedoucího s finance.read 
   const iBrana = l.indexOf("if (scope.level !== 'tenant' && !(await hasAccess(tenantId, 'finance.read', null)))")
   ok('layout: výjimka jen pro /<rozsah>/finance/trzby/jine-platby a před pobočkovou bránou', iVyjimka > 0 && iBrana > iVyjimka)
   ok('layout: adresa z hlavičky x-foodtab-adresa (proxy.ts), žádná jiná výjimka', /headers\(\)\)\.get\('x-foodtab-adresa'\)/.test(l) && (l.match(/return <>\{children\}<\/>/g) ?? []).length === 5)
+
+  // Komentáře u výjimky nesmí tvrdit, že v agendě firemní data nejsou: detail
+  // čte bankovní platby a Kontakty — jen s finance.read ZA CELOU FIRMU.
+  const lSKomentari = text('app/[rozsah]/finance/layout.tsx').replace(/\r\n/g, '\n')
+  const komentarVyjimky = lSKomentari.slice(lSKomentari.indexOf('// Jiné platby (Finance → Tržby → Jiné platby)'), lSKomentari.indexOf("const adresa = (await headers())"))
+  ok('layout: komentář výjimky už netvrdí „firemní data … tam nejsou"', komentarVyjimky.length > 0 && !/firemní data[^.]*tam nejsou/.test(komentarVyjimky.replace(/\n\s*\/\/\s*/g, ' ')))
+  ok('layout: komentář říká, že detail čte banku a Kontakty jen s finance.read ZA CELOU FIRMU',
+    /bankovní platby/.test(komentarVyjimky) && /Kontakty/.test(komentarVyjimky) && /ZA CELOU FIRMU/.test(komentarVyjimky))
+  const pSKomentari = text(SOUBORY.pristup).replace(/\r\n/g, '\n')
+  ok('jine-platby-pristup: už netvrdí „žádná díra tu není" a říká, že firemní data detail čte jen ZA CELOU FIRMU',
+    !pSKomentari.includes('žádná díra tu není') && /detail záznamu sahá i na data\s+\*\s+celé firmy/.test(pSKomentari) && pSKomentari.includes('ZA CELOU FIRMU'))
+  // Tvrzení komentářů musí mít oporu v kódu detailu (kdyby kontrola zmizela, komentář by lhal).
+  const detail = zdroj(`${AGENDA}/[zaznam]/page.tsx`)
+  ok('… a detail se opravdu ptá hasAccess(tenantId, \'finance.read\', null)', detail.includes("hasAccess(tenantId, 'finance.read', null)"))
 }
 
 console.log('\n== Vzhled: žádné svg, emoji ani nové const karta; telefon 375 px ==')

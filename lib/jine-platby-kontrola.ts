@@ -26,8 +26,10 @@
  *   2. převod do jednotek pokladny (předpona PREDPONA_PREVODU) — počítá
  *      lib/jine-platby-mapovani.ts, tady se jen přenášejí.
  *   3. čtení dokladu — nejistě přečtený řádek, nula na dokladu, otočené
- *      znaménko slevy, nečitelná DPH. Z údajů je znovu spočítat nejde;
- *      zmizí, až je člověk u řádku výslovně potvrdí (`potvrditRadek`).
+ *      znaménko slevy, nečitelná DPH, cena v jiné měně, než je doklad,
+ *      poznámka AI k řádku („Poznámka z dokladu: přeškrtnuto…"). Z údajů
+ *      je znovu spočítat nejde; zmizí, až je člověk u řádku výslovně
+ *      potvrdí (`potvrditRadek`).
  *
  * Čisté funkce — testuje scripts/jine-platby.test.mjs přímo Nodem.
  */
@@ -75,6 +77,11 @@ export const PREDPONA_PREVODU = 'Převod do jednotek pokladny: '
 
 /** Obecný důvod pro řádek, který někdo označil ke kontrole bez textu. */
 export const DUVOD_OZNACENO = 'Označeno ke kontrole'
+
+/** Začátek důvodu z poznámky AI k řádku (skupina důvodů ze čtení dokladu). */
+export const PREDPONA_POZNAMKY = 'Poznámka z dokladu: '
+/** Poznámka AI jde do důvodu zkrácená — `duvod_kontroly` má v databázi strop 1000 znaků. */
+export const MAX_DELKA_POZNAMKY = 120
 
 export type CastkyDokladu = {
   celkem: number | null
@@ -313,12 +320,24 @@ const procenta = (j: number) => `${Math.round(j * 100)} %`
 /* Položka z AI                                                         */
 /* ------------------------------------------------------------------ */
 
-function cenaZAi(text: string | null, nazev: string, druh: DruhPolozky, cteni: string[]): number | null {
+/**
+ * Měna ze značky v textu částky („12 EUR") se liší od měny dokladu → důvod.
+ * Částka se NEPŘEVÁDÍ ani nezahazuje — rozhodne člověk. Doklad bez měny
+ * nic nesrovnává (důvod „Chybí měna" už má).
+ */
+function jinaMena(menaVTextu: string | null, mena: string | null): boolean {
+  return menaVTextu !== null && mena !== null && menaVTextu !== mena
+}
+
+function cenaZAi(text: string | null, nazev: string, druh: DruhPolozky, cteni: string[], mena: string | null): number | null {
   const v = prevestCastku(text)
   if (v.stav === 'prazdne') return null
   if (v.stav === 'nejasne') {
     cteni.push(`${nazev} z dokladu („${zkratit(text ?? '')}"): ${v.duvod}`)
     return null
+  }
+  if (jinaMena(v.menaVTextu, mena)) {
+    cteni.push(`${nazev} z dokladu („${zkratit(text ?? '')}") je v ${v.menaVTextu}, doklad je v ${mena} — ověřte měnu`)
   }
   if (v.haleru === 0) {
     // Vzor lib/marketing-menu-ai.ts opravitPodezrele: nula je skoro vždycky
@@ -343,11 +362,16 @@ function polozkaZAi(r: RozpoznanaPolozka, mena: string | null): PolozkaNavrhu {
   if (vm.stav === 'ok') mnozstvi = vm.mnozstvi
   else if (vm.stav === 'nejasne') cteni.push(`Množství z dokladu („${zkratit(String(r.mnozstvi))}"): ${vm.duvod}`)
 
-  const cenaJednotkovaHaleru = cenaZAi(r.cenaJednotkova, 'Jednotková cena', druh, cteni)
-  const cenaCelkemHaleru = cenaZAi(r.cenaCelkem, 'Cena celkem', druh, cteni)
+  const cenaJednotkovaHaleru = cenaZAi(r.cenaJednotkova, 'Jednotková cena', druh, cteni, mena)
+  const cenaCelkemHaleru = cenaZAi(r.cenaCelkem, 'Cena celkem', druh, cteni, mena)
 
   const dph = normalizovatSazbu(r.sazbaDph)
   if (dph.duvod) cteni.push(dph.duvod)
+
+  // Poznámka AI k řádku (přeškrtnuto, dopsáno rukou…) — člověk ji má vidět
+  // u řádku. Jeden důvod: „; " by ji spojitDuvody rozdělil na víc kusů.
+  const poznamka = typeof r.poznamka === 'string' ? r.poznamka.replace(/\s+/g, ' ').replace(/;\s/g, ', ').trim() : ''
+  if (poznamka !== '') cteni.push(`${PREDPONA_POZNAMKY}${zkratit(poznamka, MAX_DELKA_POZNAMKY)}`)
 
   const jistota = typeof r.jistota === 'number' && Number.isFinite(r.jistota) ? Math.min(1, Math.max(0, r.jistota)) : null
   if (jistota === null) cteni.push('Nejistě přečtený řádek (jistota neuvedena)')
@@ -390,7 +414,7 @@ const NAZVY_CASTEK: Record<keyof CastkyDokladu, string> = {
   spropitne: 'Spropitné',
 }
 
-function castkyZDokladu(d: RozpoznanyDoklad, duvody: string[]): CastkyDokladu {
+function castkyZDokladu(d: RozpoznanyDoklad, duvody: string[], mena: string | null): CastkyDokladu {
   const jedna = (klic: keyof CastkyDokladu): number | null => {
     const text = d[klic]
     const v = prevestCastku(text)
@@ -398,6 +422,9 @@ function castkyZDokladu(d: RozpoznanyDoklad, duvody: string[]): CastkyDokladu {
     if (v.stav === 'nejasne') {
       duvody.push(`„${NAZVY_CASTEK[klic]}" nejde jednoznačně přečíst: ${v.duvod}`)
       return null
+    }
+    if (jinaMena(v.menaVTextu, mena)) {
+      duvody.push(`„${NAZVY_CASTEK[klic]}" (${zkratit(text ?? '')}) je v ${v.menaVTextu}, ale měna dokladu je ${mena} — ověřte`)
     }
     if (klic === 'sleva') return Math.abs(v.haleru)
     if (v.haleru < 0) {
@@ -473,7 +500,7 @@ export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string
   if (polozky.length === 0) duvody.push('Na dokladu nejsou rozpoznané žádné položky')
 
   // Částky
-  const castky = castkyZDokladu(d, duvody)
+  const castky = castkyZDokladu(d, duvody, mena)
   const tol = tolerance(mena)
   const soucet = soucetPolozek(polozky)
 

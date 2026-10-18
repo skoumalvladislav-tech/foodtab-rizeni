@@ -2,10 +2,11 @@ import Link from 'next/link'
 
 import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { formatHaleru } from '@/lib/jine-platby-castky'
-import { popisStavuTrzby, type AkceJinePlatby } from '@/lib/jine-platby-stav'
+import { moznaDvakrat, popisStavuTrzby, type AkceJinePlatby } from '@/lib/jine-platby-stav'
 import { PLATNOST_KONTROLY_TRZBY_MIN, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 
 import { PanelHlava } from '../../../../dnes/prvky'
+import Ikona from '../../../../ikona'
 import { opravitTrzbu, potvrditTrzbu, prohlasitTrzbu } from '../akce'
 import { zkontrolovatTrzbu } from '../akce-pos'
 import ZnackaStavu from '../znacka-stavu'
@@ -34,6 +35,14 @@ export type RadekTrzby = {
  * u kterého kontrola (dotaz do pokladny, nebo ruční prohlášení s důvodem)
  * řekla „v pokladně není“. Ruční prohlášení se nikdy nevydává za ověření
  * pokladnou. Fotka sjetiny nic neříká o tom, jestli host zaplatil.
+ *
+ * Po zápisu jde kontrola v pokladně zopakovat (dodatečná kontrola — účet
+ * se mohl v pokladně uzavřít až potom). Když pokladna prodej najde
+ * (`moznaDvakrat`), sekce výrazně varuje a vede na storno.
+ *
+ * Pole „Proč to není duplicita“ je u zápisu i propojení VŽDY: databáze
+ * hledá šířeji než obrazovka (u firemní pokladny i jiné pobočky), takže
+ * duplicitu může najít, i když tady žádná vidět není.
  */
 export default function SekceTrzba({
   zakl,
@@ -60,6 +69,8 @@ export default function SekceTrzba({
 }) {
   const vysledek = z.kontrolaTrzby?.vysledek ?? null
   const castka = z.castkaHaleru !== null ? formatHaleru(z.castkaHaleru, z.mena) : 'neuvedeno'
+  const dvakrat = moznaDvakrat(z)
+  const poZapisu = z.stavTrzby === 'zapsano'
 
   return (
     <section className="ds-plocha" style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
@@ -67,6 +78,36 @@ export default function SekceTrzba({
       <div>
         <ZnackaStavu popis={popisStavuTrzby(z.stavTrzby)} />
       </div>
+
+      {dvakrat ? (
+        <div
+          role="alert"
+          style={{
+            display: 'grid',
+            gap: '8px',
+            padding: '12px 14px',
+            borderRadius: '12px',
+            border: '1px solid var(--pozor)',
+            background: 'var(--pozor-bg)',
+            color: 'var(--ink)',
+          }}
+        >
+          <p style={{ margin: 0, display: 'flex', gap: '8px', alignItems: 'flex-start', fontWeight: 700, fontSize: '15px', lineHeight: 1.4 }}>
+            <span aria-hidden="true" style={{ flex: 'none', paddingTop: '2px' }}>
+              <Ikona klic="varovani" velikost={18} />
+            </span>
+            <span style={{ minWidth: 0 }}>Pokladna tento prodej má — tržba je možná zapsaná dvakrát. Ověřte a případně stornujte Ostatní tržbu.</span>
+          </p>
+          {akce.has('opravit_trzbu') ? (
+            <a href="#oprava-trzby" className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>
+              Opravit nebo stornovat tržbu →
+            </a>
+          ) : (
+            <span style={{ fontSize: '13.5px' }}>Storno smí provést ten, kdo má oprávnění na opravy a storna Jiných plateb — dejte mu vědět.</span>
+          )}
+        </div>
+      ) : null}
+
       <Vysvetleni dulezite>
         Fotografie sjetiny nedokazuje přijetí peněz. Tržba se uznává jednou: prodej, který už je v pokladně, se jen propojí; do Ostatních tržeb se
         zapíše jen prodej mimo pokladnu. Zaplacení ověří až bankovní platba.
@@ -87,8 +128,9 @@ export default function SekceTrzba({
           umiDohledani ? (
             <FormularAkce akce={zkontrolovatTrzbu} {...zakl} tlacitko="Zkontrolovat v pokladně">
               <Vysvetleni>
-                Appka se zeptá pokladny na účty provozovny kolem dne prodeje (± 1 den) a hledá číslo účtu z dokladu. Samotná shoda částky stačí jen na
-                „pravděpodobně“.
+                {poZapisu
+                  ? 'Dodatečná kontrola: tržba je zapsaná v Ostatních tržbách. Appka se znovu zeptá pokladny, jestli tenhle prodej mezitím nemá (účet se mohl uzavřít až po zápisu) — pak by byl v tržbách dvakrát.'
+                  : 'Appka se zeptá pokladny na účty provozovny uzavřené kolem dne prodeje (den před až dva dny po) a na otevřené účty, a hledá číslo účtu z dokladu. Samotná shoda částky stačí jen na „pravděpodobně“.'}
               </Vysvetleni>
             </FormularAkce>
           ) : (
@@ -161,9 +203,18 @@ export default function SekceTrzba({
                 ? `Zapíše se nová tržba ${castka} ze dne ${datumCesky(z.datumProdeje)} na tuto provozovnu a započítá se do tržeb.`
                 : `Prodej už je v tržbách pokladny (nebo to nejde vyloučit). Záznam se jen propojí — ${castka} se do součtu podruhé nepřičte. Když víte, že prodej v pokladně není, doložte to ručním prohlášením „není“ — pak půjde zapsat jako nová tržba.`}
             </Vysvetleni>
-            {duplicity.length > 0 ? (
-              <PoleDuvodu nazev="duplicita_duvod" popisek="Proč to není duplicita" povinne={false} napoveda="Povinné, když je podobný prodej už zapsaný v Ostatních tržbách — databáze to pak bez důvodu nepustí." />
+            {vysledek === 'nenalezeno' && z.stavFaktury === 'propojena' && z.fakturaZdroj === 'pos' ? (
+              <Vysvetleni dulezite>
+                K záznamu je propojená faktura vystavená v pokladně — tržbu z ní má pokladna sama. Novou tržbu databáze nepustí; fakturu odpojte, nebo
+                prodej jen propojte.
+              </Vysvetleni>
             ) : null}
+            <PoleDuvodu
+              nazev="duplicita_duvod"
+              popisek="Proč to není duplicita (nepovinné)"
+              povinne={false}
+              napoveda="Vyplňte, když je podobný prodej už zapsaný — databáze hledá i mimo tuto obrazovku (u firemní pokladny i na jiných pobočkách) a bez důvodu zápis nepustí."
+            />
           </FormularAkce>
         </Oddil>
       ) : null}
@@ -192,7 +243,7 @@ export default function SekceTrzba({
 
       {/* ---------- Oprava / storno ---------- */}
       {akce.has('opravit_trzbu') ? (
-        <details>
+        <details id="oprava-trzby" open={dvakrat}>
           <summary style={{ cursor: 'pointer', fontSize: '14px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>Opravit nebo stornovat tržbu</summary>
           <div style={{ marginTop: '8px' }}>
             <FormularAkce

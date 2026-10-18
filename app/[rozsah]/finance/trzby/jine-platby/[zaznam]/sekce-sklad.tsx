@@ -1,3 +1,5 @@
+import Link from 'next/link'
+
 import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { mnozstviNaText } from '@/lib/jine-platby-castky'
 import { popisStavuSkladu, type AkceJinePlatby } from '@/lib/jine-platby-stav'
@@ -5,7 +7,7 @@ import { PLATNOST_KONTROLY_SKLADU_MIN, type ZaznamJinePlatby } from '@/lib/jine-
 
 import { PanelHlava } from '../../../../dnes/prvky'
 import Ikona from '../../../../ikona'
-import { korekceVydeje, odeslatSklad, prohlasitSklad, propojitVydej, rucneDolozit } from '../akce'
+import { korekceVydeje, odeslatSklad, prohlasitSklad, propojitVydej, rucneDolozit, zrusitSchvaleni } from '../akce'
 import { obnovitVydej, provestVydej, rozhodnoutVydej, vydejZnovu, zkontrolovatSklad } from '../akce-pos'
 import ZnackaStavu from '../znacka-stavu'
 import FormularAkce from './formular-akce'
@@ -58,6 +60,14 @@ const POPIS_OPERACE: Record<string, string> = {
  * a stav operace v pokladně. Odeslání ke schválení ani nahrání fotky sklad
  * nemění; „Odečteno v POS“ je jen po ověření v pokladně, ruční doložení
  * se tak nikdy nejmenuje.
+ *
+ * Schválení ukazuje možné duplicity (záznamy téže pobočky ± 7 dní) a vždy
+ * nabízí nepovinné „Proč to není duplicita“ (`duplicita_duvod` → p_duvod
+ * při schválení). Zamítnutí má VLASTNÍ pole `duvod` (důvod zamítnutí) —
+ * dvě pole, ať se nepletou.
+ *
+ * „Ručně doloženo“ nese otisk živého schváleného návrhu (skryté pole);
+ * „Zrušit schválení“ je jen pro případ, že v pokladně nic odepsáno nebylo.
  */
 export default function SekceSklad({
   zakl,
@@ -71,6 +81,8 @@ export default function SekceSklad({
   operace,
   prevody,
   originaly,
+  duplicity,
+  jednotkyProduktu,
   muzeSchvalit,
   vydej,
   tedMs,
@@ -89,6 +101,10 @@ export default function SekceSklad({
   operace: OperaceVydeje | null
   prevody: PrevodPolozky[]
   originaly: { id: string; poradi: number }[]
+  /** Možné duplicity (mozneDuplicity nad záznamy téže pobočky ± 7 dní) — ukážou se u schválení. */
+  duplicity: { zaznamId: string; duvod: string; jista: boolean; odkaz: string }[]
+  /** Jednotka prodeje pokladny podle produktu, česky (jednotkaCesky). Chybí = neuvedena. */
+  jednotkyProduktu: Record<string, string>
   muzeSchvalit: boolean
   vydej: { externiId: string | null; doklad: string | null }
   tedMs: number
@@ -97,6 +113,7 @@ export default function SekceSklad({
 }) {
   const s = z.stavSkladu
   const zivy = navrh !== null && (navrh.stav === 'ceka_na_schvaleni' || navrh.stav === 'schvaleno')
+  const schvalenyNavrh = navrh !== null && navrh.stav === 'schvaleno' ? navrh : null
   const kdo = (id: string | null) => (id ? (jmena[id] ?? 'kolega') : 'neznámo kdo')
   const nazevPokladny = pokladna?.nazev ?? 'pokladna záznamu'
   const plan = textPlanovaneOperace(pokladna?.skladovyVydej ?? 'rucne', pokladna?.nazevPoskytovatele ?? nazevPokladny, provozovna)
@@ -109,7 +126,8 @@ export default function SekceSklad({
         const zdroj = prevody.find((r) => r.poradi === p.poradi) ?? prevody.find((r) => r.posProduktId === p.posProduktId)
         return (
           <li key={`${p.poradi}-${p.posProduktId}`} style={{ overflowWrap: 'anywhere' }}>
-            <strong>{p.nazev}</strong> — {mnozstviNaText(p.mnozstvi)} (v jednotkách prodeje pokladny)
+            <strong>{p.nazev}</strong> — {mnozstviNaText(p.mnozstvi)}{' '}
+            {jednotkyProduktu[p.posProduktId] ? `${jednotkyProduktu[p.posProduktId]} (jednotka prodeje pokladny)` : '(v jednotkách prodeje pokladny)'}
             <span style={{ display: 'block', fontSize: '13px', color: 'var(--muted)' }}>
               {zdroj ? `z dokladu: „${zdroj.nazev}“ ${zdroj.mnozstvi ? mnozstviNaText(zdroj.mnozstvi) : '?'} ${zdroj.jednotka ?? ''}` : ''}
               {zdroj ? ` · přiřazení ${zdroj.mapovani === 'overeno' ? 'ověřené' : zdroj.mapovani}` : ''} · produkt v pokladně {p.posProduktId}
@@ -225,6 +243,25 @@ export default function SekceSklad({
             {akce.has('prohlasit_sklad') ? <RucniProhlaseniSkladu zakl={zakl} /> : null}
           </div>
 
+          {duplicity.length > 0 ? (
+            <div style={{ display: 'grid', gap: '6px' }}>
+              <strong style={{ fontSize: '14px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <Ikona klic="varovani" velikost={16} /> Možné duplicity výdeje (záznamy téže provozovny ± 7 dní)
+              </strong>
+              <ul style={{ margin: 0, paddingLeft: '20px', display: 'grid', gap: '6px', fontSize: '14px' }}>
+                {duplicity.map((d) => (
+                  <li key={d.zaznamId} style={{ overflowWrap: 'anywhere' }}>
+                    <strong>{d.jista ? 'Jistá shoda' : 'Možná shoda'}:</strong> {d.duvod}.{' '}
+                    <Link href={d.odkaz} className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>
+                      Otevřít ten záznam →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              <Vysvetleni>Kdyby šlo o tentýž prodej, sklad by se odečetl dvakrát. Když to duplicita není, napište při potvrzení proč.</Vysvetleni>
+            </div>
+          ) : null}
+
           {akce.has('rozhodnout_vydej') ? (
             <div style={{ display: 'grid', gap: '12px' }}>
               {muzeSchvalit ? (
@@ -242,7 +279,14 @@ export default function SekceSklad({
                     } Zpět to jde jen korekcí.`,
                     ano: 'Ano, potvrdit výdej',
                   }}
-                />
+                >
+                  <PoleDuvodu
+                    nazev="duplicita_duvod"
+                    popisek="Proč to není duplicita (nepovinné)"
+                    povinne={false}
+                    napoveda="Vyplňte, když je podobný výdej téže provozovny už živý nebo provedený (stejný den a částka, nebo stejné číslo účtu) — databáze ho pak bez důvodu nepotvrdí."
+                  />
+                </FormularAkce>
               ) : (
                 <Vysvetleni>Potvrdit výdej jde jen s čerstvou kontrolou (do 15 minut), že pokladna spotřebu neodečetla — dotazem do pokladny nebo ručním prohlášením.</Vysvetleni>
               )}
@@ -327,7 +371,14 @@ export default function SekceSklad({
 
       {akce.has('rucne_dolozit') ? (
         <Oddil nadpis="Ručně doloženo">
-          <FormularAkce akce={rucneDolozit} {...zakl} tlacitko="Ručně doloženo" vycistit>
+          <FormularAkce
+            akce={rucneDolozit}
+            {...zakl}
+            // Otisk ŽIVÉHO schváleného návrhu — databáze ho porovná (doloží se jen to, co bylo schválené a vidět).
+            skryte={schvalenyNavrh ? { otisk: schvalenyNavrh.otisk } : undefined}
+            tlacitko="Ručně doloženo"
+            vycistit
+          >
             <Vysvetleni>
               Použijte, až výdej provedete v pokladně sami. Stav bude „Ručně doloženo (neověřeno pokladnou)“ — není to automatické ověření.
             </Vysvetleni>
@@ -336,6 +387,28 @@ export default function SekceSklad({
               <input className="ds-input" style={VSTUP} name="doklad" required maxLength={100} />
             </label>
             <PoleDuvodu />
+          </FormularAkce>
+        </Oddil>
+      ) : null}
+
+      {akce.has('zrusit_schvaleni') ? (
+        <Oddil nadpis="Zrušit schválení">
+          <FormularAkce
+            akce={zrusitSchvaleni}
+            {...zakl}
+            tlacitko="Zrušit schválení (v pokladně nic neodepsáno)"
+            vzhled="nebezpecne"
+            vycistit
+            potvrzeni={{
+              text: 'Potvrzujete, že v pokladně se z tohoto návrhu NIC neodepsalo. Schválení se zruší, návrh se nahradí a sklad bude zpět „bez návrhu“ — výdej pak půjde připravit znovu. Pokračovat?',
+              ano: 'Ano, zrušit schválení',
+            }}
+          >
+            <Vysvetleni>
+              Jen když v pokladně nic odepsáno nebylo (třeba se položky ještě mění). Když už v pokladně odepsáno je, nerušte schválení — použijte
+              „Ručně doloženo“ s číslem dokladu z pokladny.
+            </Vysvetleni>
+            <PoleDuvodu popisek="Důvod zrušení (povinný)" napoveda="Například: „V pokladně jsem nic neodepsal, množství piva je špatně, opravím a pošlu znovu.“" />
           </FormularAkce>
         </Oddil>
       ) : null}
