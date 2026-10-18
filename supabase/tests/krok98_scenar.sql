@@ -613,13 +613,21 @@ select pg_temp.check('se změnou položky obsah návrhu jiný (5 piv) a otisk ji
 
 set role authenticated;
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
-select pg_temp.check('obsluha (bez finance.read) vidí pokladnu své pobočky — jen netajné údaje a provozovnu 11',
-  (select count(*) = 1 and min(pos_provozovna) = '11' and min(id::text) = :'pos' from public.jine_platby_pokladny(:'tenant', :'perla')));
+-- Jiné scénáře (krok93–95) nechávají ve firmě vlastní pokladny — počítají se
+-- jen pokladny tohoto scénáře.
+select pg_temp.check('jine_platby_pokladny vrací jen netajné sloupce (žádné přístupy, kurzory ani nastavení)',
+  (select array_agg(n order by n) from pg_proc p, unnest(p.proargnames) with ordinality a(n, i)
+    where p.oid = 'public.jine_platby_pokladny(uuid, uuid)'::regprocedure and p.proargmodes[i] = 't')
+  = array['id', 'nazev', 'pos_provozovna', 'poskytovatel', 'provozovna_nazev', 'stav']);
+select pg_temp.check('obsluha (bez finance.read) vidí pokladnu své pobočky s provozovnou 11, pokladnu jen Baru ne',
+  (select count(*) = 1 and min(pos_provozovna) = '11' from public.jine_platby_pokladny(:'tenant', :'perla') where id = :'pos')
+  and not exists (select 1 from public.jine_platby_pokladny(:'tenant', :'perla') where id in (:'pos_bar', :'cizi_pos')));
 select pg_temp.check('obsluha Perly nedostane pokladny Baru (bez práva na pobočce = prázdno)',
   (select count(*) from public.jine_platby_pokladny(:'tenant', :'bar')) = 0);
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000004', false);
 select pg_temp.check('vedoucí Baru vidí obě pokladny, které Bar obsluhují',
-  (select count(*) from public.jine_platby_pokladny(:'tenant', :'bar')) = 2);
+  (select count(*) from public.jine_platby_pokladny(:'tenant', :'bar') where id in (:'pos', :'pos_bar')) = 2
+  and not exists (select 1 from public.jine_platby_pokladny(:'tenant', :'bar') where id = :'cizi_pos'));
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000005', false);
 select pg_temp.check('cizí firma pokladny naší firmy nedostane',
   (select count(*) from public.jine_platby_pokladny(:'tenant', :'perla')) = 0);

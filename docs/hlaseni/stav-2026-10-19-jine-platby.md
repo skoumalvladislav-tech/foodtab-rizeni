@@ -68,7 +68,7 @@ telefon 375 px, telefon v tmavém režimu u panelu schválení).
 ## Čísla — a z čeho jsou
 
 - **Scénář krok98:**
-  - **139 kontrol**, s etapa0 dohromady **178**;
+  - **140 kontrol**, s etapa0 dohromady **179**; se scénáři krok93–95 před ním (jako na CI) **317**;
   - běželo na **PGlite**, ne na PostgreSQL;
   - PGlite **neověří RLS ani sloupcové granty**. Rozhodne workflow „Migrace a scénáře“ na GitHubu, které běží po pushi a jehož výsledek je v PR.
 - **Node testy:** v seznamu CI je **89 sad, všech 89 prošlo**. Z toho Jiné platby:
@@ -87,7 +87,7 @@ telefon 375 px, telefon v tmavém režimu u panelu schválení).
   - `vydelky` napoprvé spadl. Nabídka nově načítá seznam práv Jiných plateb a test výdělků ho neuměl podstrčit. Opraveno, test teď načítá skutečný soubor.
 - `tsc` a `eslint` nad změněnými soubory jsou čisté.
 - **Schválná rozbití:**
-  - **Databáze, 59 rozbití.** Každé shodilo kontrolu.
+  - **Databáze, 61 rozbití.** Každé shodilo kontrolu.
     - B48 (pokladna bez kontroly pobočky) spadlo na **dřívější a přísnější** kontrole „cizí firma nevidí katalog“. Stejné rozbití totiž otevře katalog i cizí firmě.
     - Pravidla, která jdou porušit dvěma způsoby, jsem rozbil oběma. Například rozdíl součtu: bez důvodu i s neomezenou tolerancí. Zrušení záznamu: zůstane ve frontě i drží doklad.
   - **Aplikace po kontrole:** 77 + 77 rozbití (dva implementátoři) a 3 moje. Všechna spadla. Před kontrolou 90 rozbití aplikace a 21 databáze.
@@ -120,6 +120,11 @@ V `docs/hlaseni/otazky.md`:
 
 - **Hlavní pracovní kopie byla na cizí větvi s rozpracovanými změnami jiné relace.** Pracoval jsem proto ve vlastní kopii (`foodtab-jine-platby`) a do cizích změn jsem nesahal.
 - **Srážka s #145:** obě větve přidávaly `krok97_scenar.sql`. Můj scénář je přečíslovaný na **krok98** (soubor, `run.sh`, `databaze.yml`, id lidí ve scénáři). Když #145 přistane v `main` dřív, bude v `run.sh` a `databaze.yml` jednoduchý konflikt na sousedních řádcích.
+- **První běh CI „Migrace a scénáře“ v PR spadl na mojí kontrole, ne na právech.**
+  - Kontrola „obsluha vidí pokladnu své pobočky“ chtěla u Perly přesně jednu pokladnu.
+  - Na CI ale běží všechny scénáře v jedné databázi a krok93–95 tam nechávají další pokladny Perly. PGlite u mě pouštěl jen etapa0 + krok98, proto to neviděl.
+  - Kontrola teď počítá jen pokladny scénáře. Navíc přibyla kontrola, že seznam pokladen pro obsluhu vrací jen netajné sloupce (id, název, poskytovatel, stav, provozovna). Obě jsou schválně rozbité (B60, B61).
+  - Práva jsem neměnil. Starou verzi jsem spadnout nechal i u sebe (krok93–95 + krok98), aby bylo jisté, že příčina je tahle.
 - **Kontrolní a opravný workflow se dvakrát přerušil s koncem procesu aplikace.** Obnovil jsem ho z uloženého stavu, žádná práce se neztratila.
 - **Kompromis, který je vidět:** když je na dokladu spropitné započtené v celkové částce, nesedí součet položek (spropitné do tržby nepatří). Appka pak chce opravit celkovou částku, nebo napsat důvod. Takhle mi napoprvé spadl vlastní scénář. Nechal jsem to tak: tržba je cena prodeje a spropitné do ní nepatří.
 - **Kontrola po pozdějším importu z pokladny je jen ruční** (otázka 58). Automatická by potřebovala plánovač, který v databázi zatím neběží. A volat pokladnu za uživatele by byla nová úloha s klíči pokladny.
