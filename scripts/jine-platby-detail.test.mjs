@@ -479,6 +479,22 @@ const SekceSklad = await nactiKomponentu(`${ZAZNAM}/sekce-sklad.tsx`, KRESLENI)
     createElement(SekceSklad, skladProps(zaznam({ stavSkladu: 'ceka_na_schvaleni' }), ['rozhodnout_vydej'], { navrh: { ...navrh, stav: 'ceka_na_schvaleni' }, muzeSchvalit: false })),
   )
   ok('Sklad: bez čerstvé kontroly „neodečteno“ se „Potvrdit výdej do POS“ nenabídne (zamítnout ano)', !tlacitka(bezKontroly).includes('Potvrdit výdej do POS') && tlacitka(bezKontroly).includes('Zamítnout'))
+  // Databáze schválení s nevyřešenou položkou nebo nad nezkontrolovaným záznamem odmítne — obrazovka řekne proč.
+  const sBlokaci = renderToStaticMarkup(
+    createElement(SekceSklad, skladProps(zaznam({ stavSkladu: 'ceka_na_schvaleni' }), ['rozhodnout_vydej'], {
+      navrh: { ...navrh, stav: 'ceka_na_schvaleni' },
+      muzeSchvalit: true,
+      nahled: { polozky: [], polozek: 1, blokace: [{ poradi: 2, nazev: 'Svíčková', duvod: 'Položka čeká na kontrolu.' }] },
+    })),
+  )
+  ok('Sklad: nevyřešená položka → „Potvrdit výdej do POS“ se nenabídne a je vidět proč (zamítnout ano)',
+    !tlacitka(sBlokaci).includes('Potvrdit výdej do POS') && textHtml(sBlokaci).includes('Návrh má nevyřešené položky') &&
+      textHtml(sBlokaci).includes('Položka 2 (Svíčková): Položka čeká na kontrolu.') && tlacitka(sBlokaci).includes('Zamítnout'))
+  const nezkontrolovany = renderToStaticMarkup(
+    createElement(SekceSklad, skladProps(zaznam({ stavSkladu: 'ceka_na_schvaleni', stavKontroly: 'rozpracovano' }), ['rozhodnout_vydej'], { navrh: { ...navrh, stav: 'ceka_na_schvaleni' }, muzeSchvalit: false })),
+  )
+  ok('Sklad: záznam po úpravě nezkontrolovaný → vysvětlení „není označený jako zkontrolovaný“, ne „chybí kontrola v pokladně“',
+    textHtml(nezkontrolovany).includes('není označený jako zkontrolovaný') && !textHtml(nezkontrolovany).includes('jen s čerstvou kontrolou'))
 
   console.log('\n-- opravy 18. 10.: sklad --')
   // Schválení: „Proč to není duplicita“ je ve formuláři schválení VŽDY (i bez duplicit na obrazovce), nepovinné;

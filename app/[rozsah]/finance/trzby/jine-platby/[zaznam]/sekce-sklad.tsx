@@ -264,7 +264,22 @@ export default function SekceSklad({
 
           {akce.has('rozhodnout_vydej') ? (
             <div style={{ display: 'grid', gap: '12px' }}>
-              {muzeSchvalit ? (
+              {nahled && nahled.blokace.length > 0 ? (
+                // Databáze schválení s nevyřešenou položkou odmítne — tlačítko nenabízet.
+                <div role="status" style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
+                  <strong style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <Ikona klic="varovani" velikost={16} /> Návrh má nevyřešené položky, schválit ho nejde:
+                  </strong>
+                  <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                    {nahled.blokace.map((b, i) => (
+                      <li key={i}>
+                        {b.poradi !== null ? `Položka ${b.poradi}${b.nazev ? ` (${b.nazev})` : ''}: ` : ''}
+                        {b.duvod}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : muzeSchvalit ? (
                 <FormularAkce
                   akce={rozhodnoutVydej}
                   {...zakl}
@@ -287,6 +302,8 @@ export default function SekceSklad({
                     napoveda="Vyplňte, když je podobný výdej téže provozovny už živý nebo provedený (stejný den a částka, nebo stejné číslo účtu) — databáze ho pak bez důvodu nepotvrdí."
                   />
                 </FormularAkce>
+              ) : z.stavKontroly !== 'zkontrolovano' ? (
+                <Vysvetleni>Záznam se od odeslání upravil a není označený jako zkontrolovaný. Potvrdit výdej jde, až ho někdo znovu zkontroluje (Kontrola dokladu → Označit jako zkontrolované).</Vysvetleni>
               ) : (
                 <Vysvetleni>Potvrdit výdej jde jen s čerstvou kontrolou (do 15 minut), že pokladna spotřebu neodečetla — dotazem do pokladny nebo ručním prohlášením.</Vysvetleni>
               )}
