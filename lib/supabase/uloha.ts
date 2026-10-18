@@ -45,6 +45,14 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *   * `app/[rozsah]/finance/faktury/akce.ts` (`vratitNeuhrazenou`) — jen
  *     součet párování JEDNÉ faktury vlastní firmy, po `faktury.manage`
  *     (uživatelský klient by bez práva na Platby viděl nulu).
+ *   * `app/api/prevod-faktur` (`lib/faktury-prevod-sync.ts`) — převod
+ *     faktur ze staré databáze do hlavní; za CRON_SECRET, krok vždy
+ *     výslovně a zapisující s potvrzením, firma VÝHRADNĚ z
+ *     FAKTURY_DB_TENANT_ID. Není pod /api/uloha, protože ji nikdy nespouští
+ *     plánovač — jen Šéfík ručně. Zmizí s úklidem po převodu.
+ *   * `lib/faktury-pristup.ts` (`pristupKFakturamUlohy`,
+ *     `firmySOtevrenymiFakturami`) — brána Faktur pro úlohy výš; čte jen
+ *     stav převodu firmy.
  *   * `app/api/pokladna/prodeje` — příjmové API pro pokladny: klíč
  *     nahrazuje přihlášení, určuje připojení a tím firmu i pobočku;
  *     z těla se bere jen obsah prodeje (zápis přes
@@ -63,14 +71,6 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
  *     importu výpisu, jen když importující má `finance.manage`
  *     i `faktury.manage`, jen vlastní firma a z CSV jen právě nahraná dávka.
- *   * `app/api/prevod-faktur` (`lib/faktury-prevod-sync.ts`) — převod
- *     faktur ze staré databáze do hlavní; za CRON_SECRET, krok vždy
- *     výslovně a zapisující s potvrzením, firma VÝHRADNĚ z
- *     FAKTURY_DB_TENANT_ID. Není pod /api/uloha, protože ji nikdy nespouští
- *     plánovač — jen Šéfík ručně. Zmizí s úklidem po převodu.
- *   * `lib/faktury-pristup.ts` (`pristupKFakturamUlohy`,
- *     `firmySOtevrenymiFakturami`) — brána Faktur pro úlohy výš; čte jen
- *     stav převodu firmy.
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ
