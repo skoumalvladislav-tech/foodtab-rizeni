@@ -513,7 +513,9 @@ console.log('\n13. Stará databáze se čte i před db push a každé 2 dny (ná
     /SMAZAT_VIC: \$\{\{ inputs\.smazat_vic \|\| false \}\}/.test(wf) && /ZNOVU_CHYBY: \$\{\{ inputs\.znovu_chyby \|\| false \}\}/.test(wf))
   // Ve společné skupině by plánovaný běh zrušil čekající ruční krok.
   const skupina = /\nconcurrency:\n  group: (.+)\n/.exec(wf)?.[1] ?? ''
-  ok(`plán má vlastní skupinu souběhu (${skupina})`, /github\.event_name == 'schedule' && '[a-z]+' \|\| '[a-z]+'/.test(skupina))
+  // Obě jména MUSÍ být různá — stejné jméno v obou větvích je zase jedna skupina.
+  const jmena = /github\.event_name == 'schedule' && '([a-z]+)' \|\| '([a-z]+)'/.exec(skupina)
+  ok(`plán má vlastní skupinu souběhu (${skupina})`, !!jmena && jmena[1] !== jmena[2])
 }
 
 console.log(`\n${chyb === 0 ? 'Vše prošlo' : `SELHALO ${chyb}`} — ${kontrol} kontrol (scripts/faktury-prevod.test.mjs).`)

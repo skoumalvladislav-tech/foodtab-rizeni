@@ -175,7 +175,12 @@ dřív — pak by je revert #147 smazal. Mezitím sloučené #145/#146 mohou
 v `aplikace.yml` a `otazky.md` chtít ruční dořešení; řádek
 `otazky-cisla` v `aplikace.yml` musí zůstat.) `migration repair` nedělat.
 Když je #148 v main, obyčejný revert (i tlačítko Revert na GitHubu)
-workflow „Migrace jen přibývají" zastaví — smazaný soubor migrace.
+workflow „Migrace jen přibývají" označí **červeně** (smazaný soubor
+migrace) — sloučení ale samo nezastaví: `main` nemá ochranu větve ani
+povinné kontroly. Aby červená sloučení opravdu zastavila, musí Šéfík
+v nastavení repozitáře zapnout ochranu větve `main` s povinnou kontrolou
+„Migrace jen přibývají". Do té doby: před každým `db push` se podívat na
+poslední běh tohoto workflow na main.
 
 Vercel „Instant Rollback" jen v nouzi: po něm Vercel přestane sám
 nasazovat `main` (otázka 59, bod 6).

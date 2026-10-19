@@ -97,10 +97,12 @@ Opravené jsou **všechny**:
    ta se slučuje úplně první.
 7. **Návrat zpět obyčejným revertem PR** by po `db push` smazal soubor
    nasazené migrace a zablokoval `db push` ostatních PR. Návod teď vrací
-   kód BEZ souboru migrace. Kontrola v CI smazání migrace zastaví — ale
-   jen když je #148 sloučená dřív než #147 (jinak by ji revert #147
-   smazal spolu s migrací; proto je v návodu i v seznamu souborů, které
-   se při návratu ponechají).
+   kód BEZ souboru migrace. Kontrola v CI smazání migrace označí
+   červeně — jen když je #148 sloučená dřív než #147 (jinak by ji revert
+   #147 smazal spolu s migrací; proto je v návodu i v seznamu souborů,
+   které se při návratu ponechají). Sloučení sama nezastaví: `main` nemá
+   ochranu větve — povinnou kontrolu musíte zapnout v nastavení
+   repozitáře (do té doby se před `db push` podívat na její poslední běh).
 8. **Dvě otázky č. 58** (Jiné platby i Faktury). Otázky Faktur jsou nově
    59–65; nový test hlídá, aby se číslo nikdy neopakovalo.
 
