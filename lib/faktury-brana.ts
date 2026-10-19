@@ -8,7 +8,7 @@
  * v appce, ať obrazovka řekne proč, místo aby spadla.
  *
  *   žádný řádek    → zavřeno. Vlastník staré databáze čeká na převod;
- *                    ostatní firmy Faktury zatím nemají (otázka 60).
+ *                    ostatní firmy Faktury zatím nemají (otázka 61).
  *   probiha        → zavřeno, „Faktury se stěhují".
  *   vraceno        → zavřeno, „vráceno do původní databáze".
  *   dokonceno      → otevřeno.

@@ -77,7 +77,7 @@ Dotykačku, až bude.
 3. Po sloučení mají párování a evidence příjmu skutečný cizí klíč
    (`faktura uuid` → `faktury(tenant_id, id)`); textové `faktura_id` zůstává
    do úklidu jen kvůli návratu zpět. Volný text zůstává u příjemek, vybavení
-   a `source_invoice_id` (otázka 62).
+   a `source_invoice_id` (otázka 63).
 4. Peníze jsou celé haléře (`*_haleru`), výsledky dělení se zaokrouhlují
    na celé haléře (`round(x)`), ne na setiny.
 5. Chybějící data se ukazují jako chybějící, ne jako nula.

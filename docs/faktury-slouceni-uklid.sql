@@ -3,7 +3,7 @@
 --
 -- Tohle schválně NENÍ v supabase/migrations: `db push` by ho pustil
 -- spolu s 20261018100000 ještě před převodem dat a cizí klíče by spadly.
--- Až skončí zkušební doba (otázka 58, bod 5) a Šéfík řekne „uklidit",
+-- Až skončí zkušební doba (otázka 59, bod 5) a Šéfík řekne „uklidit",
 -- vznikne z něj samostatná PR: tenhle obsah jako nová migrace
 -- (RRRRMMDDHHMMSS_faktury_uklid.sql) + změny kódu níž, scénář, CI.
 --
@@ -25,7 +25,7 @@
 --      lib/faktury-vlastnik.ts (+ jejich testy), proměnné
 --      FAKTURY_SUPABASE_URL, FAKTURY_SUPABASE_ANON_KEY,
 --      FAKTURY_DB_TENANT_ID ve Vercelu (= druhé spojení vypnuté).
---      Brána (lib/faktury-brana.ts) podle otázky 60 případně otevře
+--      Brána (lib/faktury-brana.ts) podle otázky 61 případně otevře
 --      Faktury i ostatním firmám.
 -- =====================================================================
 
@@ -37,7 +37,7 @@ declare
 begin
   select count(*) into v_bez from public.platby_faktury where faktura is null;
   if v_bez > 0 then
-    raise exception 'Úklid: % párování nemá uuid faktury (faktura ve staré databázi zmizela). Nejdřív je vyřešit (otázka 58, bod 4).', v_bez;
+    raise exception 'Úklid: % párování nemá uuid faktury (faktura ve staré databázi zmizela). Nejdřív je vyřešit (otázka 59, bod 4).', v_bez;
   end if;
   if exists (select 1 from public.faktury_prevod where stav <> 'dokonceno') then
     raise exception 'Úklid: převod faktur není u všech firem dokončený.';
@@ -72,7 +72,7 @@ drop function app.zrusit_automaticke_parovani(uuid, uuid, text);
 
 
 -- 4. Převod: funkce pryč. Kopie staré databáze (faktury_prevod_zdroj)
---    ZŮSTÁVÁ jako záloha, dokud Šéfík nerozhodne jinak (otázka 63);
+--    ZŮSTÁVÁ jako záloha, dokud Šéfík nerozhodne jinak (otázka 64);
 --    faktury_prevod zůstává (brána podle ní rozhoduje).
 drop function public.faktury_prevod_zahajit(uuid, text, jsonb);
 drop function app.faktury_prevod_zahajit(uuid, text, jsonb);

@@ -3,7 +3,7 @@
 **Zadání:** Šéfík 18. 10. 2026: „potřebuji sloučit apku faktury s apkou foodtab".
 Navazuje na otázku 45 (8. 10.: „přestěhovat faktury z odděleného projektu
 do appky?") a 46 (veřejný kbelík s PDF). Tím, že chce sloučení, je 45
-rozhodnutá — „ano". Co zbývá na Šéfíkovi: `docs/hlaseni/otazky.md`, 58–63.
+rozhodnutá — „ano". Co zbývá na Šéfíkovi: `docs/hlaseni/otazky.md`, 59–65.
 Hlášení: `docs/hlaseni/stav-2026-10-18-faktury-slouceni.md`.
 
 Návrh prošel dvěma nezávislými kontrolami před psaním kódu (bezpečnost
@@ -14,7 +14,7 @@ prošel další trojicí kontrol (viz hlášení).
 
 | Část | Kde | Stav k 18. 10. |
 |---|---|---|
-| Původní samostatná appka | repo `skoumalvladislav-tech/faktury-app` (klon `C:\Users\vladi\faktury-app`), vlastní Vercel projekt, **bez přihlášení**, veřejný klíč v prohlížeči | obrazovky převzaté do Foodtabu 15. 9. (`/finance/faktury`); pořád ale může do staré databáze zapisovat (otázka 58, bod 1) |
+| Původní samostatná appka | repo `skoumalvladislav-tech/faktury-app` (klon `C:\Users\vladi\faktury-app`), vlastní Vercel projekt, **bez přihlášení**, veřejný klíč v prohlížeči | obrazovky převzaté do Foodtabu 15. 9. (`/finance/faktury`); pořád ale může do staré databáze zapisovat (otázka 59, bod 1) |
 | Data | Supabase projekt `ctqtwahlzhyjerqulqyn`: `invoices` (3 020 řádků 18. 10.), `rejection_examples` (1), kbelík `faktury-pdf` (veřejný) | RLS „allow all" pro veřejný klíč, bez `tenant_id`, do projektu se nikdo nepřihlásí |
 | Spojení z Foodtabu | `lib/supabase/faktury.ts` (veřejný klíč, `FAKTURY_SUPABASE_URL/_ANON_KEY`), brána `FAKTURY_DB_TENANT_ID` | izolace firem jen v aplikaci |
 | Příjem z e-mailu | `lib/faktury-prijem-*.ts`, úloha `faktury-z-emailu` | evidence a soukromý kbelík `faktury-prilohy` v hlavní DB; faktury zapisoval do staré |
@@ -35,7 +35,7 @@ prošel další trojicí kontrol (viz hlášení).
   Fakturu s párováním nejde smazat (dřív zůstal viset text).
 - **RLS jen za celou firmu** (`faktury.read` čte, `faktury.manage` mění),
   počítané jednou za dotaz (`app.firmy_s_pristupem`), ne pro každý řádek.
-  Nově za celou firmu i přílohy a evidence příjmu (otázka 59).
+  Nově za celou firmu i přílohy a evidence příjmu (otázka 60).
 - **Brána podle stavu převodu — v databázi, pro všechny role**
   (`app.faktury_brana`): zapisovat do faktur jde jen u firmy ve stavu
   `dokonceno`; úloha převodu jen ve stavu `probiha`; párování plateb se
@@ -44,13 +44,13 @@ prošel další trojicí kontrol (viz hlášení).
   `zrusit_parovani_faktury`, `automaticky_sparovat_fakturu` si částku
   faktury čtou samy a stav přepnou ve stejné transakci (dřív best-effort
   zápis do druhé databáze). Faktura v cizí měně nebo bez částky: stav
-  se nezmění (otázka 61).
+  se nezmění (otázka 62).
 - **Přílohy:** soukromý kbelík `faktury-prilohy`; kopie ze staré
   databáze pod otiskem obsahu (zapisuje jen úloha), ruční nahrání do
   `<firma>/rucne/` — podvrhnout soubor pod cizí otisk nejde.
 
-Schválně se **nedělá**: pobočky faktur (otázka 59), Faktury pro další
-firmy (otázka 60), cizí klíč u příjemek/vybavení (otázka 62), pevný výčet
+Schválně se **nedělá**: pobočky faktur (otázka 60), Faktury pro další
+firmy (otázka 61), cizí klíč u příjemek/vybavení (otázka 63), pevný výčet
 stavů, limity délky převzatých textů, započítání faktur do cashflow
 výhledu (předpisy plateb a faktury za totéž by se sečetly dvakrát).
 
@@ -108,18 +108,38 @@ chyba dotazu se nepočítá jako nula. Každý dotaz nese firmu
 ## 6. Plán přepnutí (kroky pro Šéfíka)
 
 **Předem:** pozastavit `faktury-app` ve Vercelu, smazat `FAKTURY_SUPABASE_*`
-z Preview a Development, n8n nechat vypnuté (otázka 58, bod 1).
+z Preview a Development, n8n nechat vypnuté (otázka 59, bod 1).
+
+**Pořadí PR:** Jiné platby (#146, migrace `20261016100000`) se slučují
+PŘED Fakturami (#147, `20261018100000`); hlídač plánovače (#145) je
+přerazítkovaný na `20261019120000` a jde až po nich. `db push` odmítne
+migraci starší než poslední nasazenou (stalo se u #86/#88, hlášení 29. 9.)
+— PR s pozdějším sloučením se proto před sloučením přerazítkuje.
+Hlídá to workflow „Migrace jen přibývají" (`.github/workflows/migrace-poradi.yml`).
 
 0. Sloučit PR do `main` (Vercel nasadí). Faktury: „připravují se".
-1. `supabase db push` (migrace `20261018100000`). Faktury: „stěhují se".
-2. Krok `nanecisto` → anomálie 0? Zapsat si čísla (stara_faktur…).
+   Od teď pouští GitHub krok `nanecisto` sám každé 2 dny — stará databáze
+   neusne, ani když se převod zdrží.
+1. Krok `nanecisto` — jde ještě PŘED `db push` (čte jen starou databázi).
+   Anomálie > 0 → zastavit a vrátit kód (oddíl 7, první řádek); nic se
+   nenasadilo. Jinak si zapsat čísla (stara_faktur, stara_archivovanych,
+   stara_duplicit, stara_s_odkazem_pdf, stara_men, stara_vzoru).
+2. `npx supabase migration list --linked` → nenasazená smí být JEN
+   `20261018100000`. Čeká-li i jiná, zastavit a zeptat se.
+   Pak `supabase db push`. Faktury: „stěhují se".
 3. `zahajit` → `prevest` (opakovat, dokud „pokracovat").
 4. `prilohy` (opakovat, dokud „pokracovat"; nepovedené přílohy si přečíst).
+   Přechodně nepovedené (stará databáze neodpověděla) se zkusí znovu
+   za 10 minut a dokončení je do té doby nepustí; trvalé (404, typ,
+   velikost) se vykážou a dokončení je pustí.
 5. `nanecisto` → chybi = lisi = navic = 0.
 6. `dokoncit` → Faktury se otevřou. Zkontrolovat počty na Přehledu,
-   Seznamu a v Platbách proti kroku 2; pustit měřicí SQL.
-7. Zkušební doba (navrhuju 7 dní, otázka 58, bod 5); každé 2–3 dny `nanecisto`.
-8. Úklid (`docs/faktury-slouceni-uklid.sql`) — druhé spojení vypnuté.
+   Seznamu a v Platbách proti kroku 1; pustit měřicí SQL (součty po
+   měnách z hlavní databáze proti `zdroj_pri_zahajeni`).
+7. Zkušební doba (navrhuju 7 dní, otázka 59, bod 5); `nanecisto` běží
+   samo každé 2 dny — výsledek v Actions.
+8. Úklid (`docs/faktury-slouceni-uklid.sql`) — druhé spojení vypnuté,
+   workflow převodu (i s plánem) smazat.
 
 Odstávka Faktur: od kroku 0 do kroku 6, odhadem 30–60 minut.
 
@@ -127,10 +147,28 @@ Odstávka Faktur: od kroku 0 do kroku 6, odhadem 30–60 minut.
 
 | Kdy | Jak |
 |---|---|
-| Před `zahajit` (jen `db push`) | Revert PR v `main` (Faktury se vrátí na starou databázi, ta je netknutá). Nové tabulky zůstanou, nikomu nevadí. |
-| Po `zahajit`, před `dokoncit` | 1) `zrusit` (bez něj by předchozí verze appky nemohla párovat — v `probiha` se párování nemění), 2) revert PR v `main`. Stará databáze je netknutá; v appce mezi tím nic nevzniklo (Faktury byly zavřené). |
-| Po `dokoncit`, před úklidem | 1) `vratit`, 2) `zpet_nanecisto`, 3) `zpet` (opakovat, dokud nehlásí 0 k přenesení; konflikty rozhodne člověk), 4) revert PR v `main`. Párování mají vyplněné i staré textové `faktura_id`, předchozí verze appky je přečte a stará cesta párování je ve stavu `vraceno` otevřená. |
+| Před `db push` (anomálie v kroku 1) | Revert PR v `main` — migrace ještě nikde není, smazat soubor smí. |
+| Po `db push`, před `zahajit` | **Vrátit kód BEZ souboru migrace** (postup níž). Faktury se vrátí na starou databázi, ta je netknutá; nové tabulky zůstanou, nikomu nevadí. |
+| Po `zahajit`, před `dokoncit` | 1) `zrusit` (bez něj by předchozí verze appky nemohla párovat — v `probiha` se párování nemění), 2) vrátit kód bez souboru migrace. Stará databáze je jediná platná: `zpet` po zrušení do ní nic nezapíše (kopie není stav z dokončení). Nový pokus: `zahajit`. |
+| Po `dokoncit`, před úklidem | 1) `vratit`, 2) `zpet_nanecisto`, 3) `zpet` — i při samých nulách; po přenosu ověří nový plán a návrat označí jako hotový (konflikty rozhodne člověk), 4) vrátit kód bez souboru migrace. Párování mají vyplněné i staré textové `faktura_id`, předchozí verze appky je přečte a stará cesta párování je ve stavu `vraceno` otevřená. Další pokus o převod (`zahajit`) pak převezme i změny, které mezitím udělala stará appka. |
 | Po úklidu | Jen ze zálohy — proto úklid až po zkušební době. |
 
+**Vrácení kódu bez souboru migrace.** Obyčejný revert PR by smazal
+`supabase/migrations/20261018100000_faktury_v_hlavni_databazi.sql`, i když
+je migrace v historii databáze. Další `db push` (i u jiných PR) by pak
+spadl na „Remote migration versions not found in local migrations
+directory" a oprava přes `migration repair` by při novém sloučení #147
+spustila migraci znovu (`already exists`). Proto:
+
+```
+git revert --no-commit -m 1 <sloučení #147>
+git checkout HEAD -- supabase/migrations/20261018100000_faktury_v_hlavni_databazi.sql supabase/tests/krok99_scenar.sql supabase/tests/run.sh .github/workflows/databaze.yml
+git commit
+```
+
+(Mezitím sloučené #145/#146 mohou v `aplikace.yml` a `otazky.md` chtít
+ruční dořešení.) `migration repair` nedělat. Smazaný soubor migrace
+zastaví i workflow „Migrace jen přibývají".
+
 Vercel „Instant Rollback" jen v nouzi: po něm Vercel přestane sám
-nasazovat `main` (otázka 58, bod 6).
+nasazovat `main` (otázka 59, bod 6).

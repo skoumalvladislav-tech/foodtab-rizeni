@@ -1303,10 +1303,12 @@ tato místa označená `ROZHODNOUT:`.
 
 ---
 
-> Otázky 50–57 jsou na větvi `finance-jine-platby` (Jiné platby, zatím
-> nesloučená). Faktury proto pokračují od 58, ať se čísla nesrazí.
+> Otázky 50–58 jsou na větvi `finance-jine-platby` (Jiné platby, PR #146,
+> zatím nesloučená). Faktury (PR #147) proto pokračují od 59, ať se čísla
+> nesrazí — při slučování obě části ponechat. Dvojí číslo hlídá
+> `scripts/otazky-cisla.test.mjs`.
 
-## 58. Sloučení Faktur s Foodtabem — kdy přepnout a jak dlouho držet návrat zpět
+## 59. Sloučení Faktur s Foodtabem — kdy přepnout a jak dlouho držet návrat zpět
 
 **Vzniklo:** 18. 10. 2026. Šéfík: „potřebuji sloučit apku faktury
 s apkou foodtab." Návrh a kroky: `docs/faktury-slouceni-navrh.md`,
@@ -1328,13 +1330,20 @@ nerozhodnete jinak.
      je potřebuje). Udělám to i já, ale jen na váš výslovný pokyn.
 2. **Odstávka Faktur.**
    - **Teď:** od sloučení PR do dokončení převodu jsou Faktury zavřené
-     (obrazovka řekne „Faktury se stěhují"), odhadem 30–60 minut. Příjem
-     z e-mailu počká, e-maily zůstanou ve schránce.
+     (obrazovka řekne „Faktury se připravují / stěhují"), odhadem 30–60
+     minut. Příjem z e-mailu počká, e-maily zůstanou ve schránce.
+   - **Pořadí sloučení:** nejdřív Jiné platby (#146, migrace se starším
+     razítkem 20261016100000), pak Faktury (#147), hlídač plánovače (#145)
+     až po nich (je přerazítkovaný na 20261019120000). Jinak `db push`
+     starší migraci odmítne. Před každým `db push` `migration list`:
+     nenasazená smí být jen migrace toho PR.
    - **Když to má být jinak:** jiný čas (třeba večer) — řekněte kdy.
 3. **Faktury, které nejde převést beze ztráty** (např. částka se třemi
    desetinnými místy, chybějící dodavatel).
    - **Teď:** převod v takovém případě **nezačne** a krok „nanečisto"
      řekne, kolik jich je. Nic se nezaokrouhlí ani nezahodí potichu.
+     „Nanečisto" jde pustit hned po sloučení, ještě PŘED `db push` —
+     když ukáže anomálie, vrátí se kód a nic se nenasazuje.
    - **Když to má být jinak:** pravidlo, třeba „zaokrouhlit na haléř
      a do poznámky napsat původní částku". Rozhodnu s vámi, až uvidíme
      skutečný počet (ukáže ho první krok „nanečisto").
@@ -1344,18 +1353,26 @@ nerozhodnete jinak.
 5. **Zkušební doba (dokdy jde vrátit zpět).**
    - **Teď navrhuju 7 dní.** Stará databáze je nejspíš na tarifu Free
      a po 7 dnech bez provozu se uspí — a vzbudit ji neumí nikdo, kdo
-     se tam nepřihlásí. Během zkušební doby proto každé 2–3 dny spusťte
-     krok „nanečisto" (udrží ji vzhůru a ukáže, jestli do ní někdo nepíše).
+     se tam nepřihlásí. Proto od SLOUČENÍ (ne až od dokončení) pouští
+     GitHub krok „nanečisto" sám každé 2 dny (jen čte; udrží ji vzhůru
+     a ukáže, jestli do ní někdo nepíše). Lhůta tedy neběží ani tehdy,
+     když se převod zdrží.
    - **Když to má být jinak:** delší doba jen s jistotou, že se do
      projektu Faktur dá přihlásit (nebo že není na Free tarifu).
-6. **Návrat zpět** se dělá vrácením kódu v `main` (revert PR), ne
-   tlačítkem „Instant Rollback" ve Vercelu — po něm Vercel přestane
-   sám nasazovat další změny z `main` a dá se na to snadno zapomenout.
-   Instant Rollback jen v nouzi a hned po něm „Promote" správné verze.
-   Když už převod začal a ještě není dokončený, nejdřív krok **„zrusit"**
-   (jinak by předchozí verze appky nemohla párovat platby), pak revert.
+6. **Návrat zpět** se dělá vrácením KÓDU v `main`, ne tlačítkem
+   „Instant Rollback" ve Vercelu — po něm Vercel přestane sám nasazovat
+   další změny z `main` a dá se na to snadno zapomenout. Instant Rollback
+   jen v nouzi a hned po něm „Promote" správné verze.
+   - Po `db push` se vrací kód **bez souboru migrace** (postup v návrhu,
+     oddíl 7). Obyčejný revert PR by soubor nasazené migrace smazal a další
+     `db push` (i u jiných PR) by spadl na nesouladu historie.
+   - Když už převod začal a ještě není dokončený, nejdřív krok **„zrusit"**
+     (jinak by předchozí verze appky nemohla párovat platby). Do staré
+     databáze se pak nic nevrací — ta je jediná platná.
+   - Po dokončeném převodu: „vratit" → „zpet" (i při nulách — označí
+     návrat jako hotový) → vrácení kódu.
 
-## 59. Faktury a pobočky
+## 60. Faktury a pobočky
 
 **Vzniklo:** 18. 10. 2026, sloučení Faktur (navazuje na otázku 48, bod 4).
 
@@ -1368,7 +1385,7 @@ nerozhodnete jinak.
   do které přišly, nebo ručně) a pustit k nim vedoucí pobočky. Potřebuje
   sloupec pobočky a nová pravidla — samostatná práce.
 
-## 60. Faktury pro další firmy
+## 61. Faktury pro další firmy
 
 **Vzniklo:** 18. 10. 2026, sloučení Faktur.
 
@@ -1380,7 +1397,7 @@ nerozhodnete jinak.
 - **Když to má být jinak:** po zkušební době (úklid) je otevřít všem
   firmám se zapnutými Financemi — malá změna brány.
 
-## 61. Párování s fakturou v cizí měně nebo bez částky
+## 62. Párování s fakturou v cizí měně nebo bez částky
 
 **Vzniklo:** 18. 10. 2026. Párování teď mění stav faktury ve stejné
 transakci (dřív „best-effort" do druhé databáze).
@@ -1399,7 +1416,7 @@ transakci (dřív „best-effort" do druhé databáze).
      nově i právo „Vidět přijaté faktury" — zrušení mění stav faktury
      (stejně jako spárování, to ho chtělo i dřív).
 
-## 62. Odkaz na fakturu u příjemek, vybavení a cen surovin
+## 63. Odkaz na fakturu u příjemek, vybavení a cen surovin
 
 **Vzniklo:** 18. 10. 2026, sloučení Faktur.
 
@@ -1410,7 +1427,7 @@ transakci (dřív „best-effort" do druhé databáze).
 - **Když to má být jinak:** u příjemky vybírat fakturu ze seznamu — pak
   jde vazba hlídat i porovnat množství s fakturou (samostatná práce).
 
-## 63. Co se starou databází Faktur po úklidu
+## 64. Co se starou databází Faktur po úklidu
 
 **Vzniklo:** 18. 10. 2026, sloučení Faktur (navazuje na otázku 46).
 
@@ -1424,7 +1441,7 @@ transakci (dřív „best-effort" do druhé databáze).
   (chce přihlášení do Supabase, které teď nemáte).
 - **Doporučuju (b)**, protože (a) nechává faktury veřejně dostupné.
 
-## 64. Velikost fotky u ručně zadané faktury
+## 65. Velikost fotky u ručně zadané faktury
 
 **Vzniklo:** 19. 10. 2026, kontrola sloučení Faktur.
 

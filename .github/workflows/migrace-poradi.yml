@@ -1,0 +1,57 @@
+name: Migrace jen přibývají
+
+# Nová migrace musí mít razítko novější než všechny v main a žádná
+# sloučená migrace se nesmí smazat, přejmenovat ani upravit. Jinak
+# `supabase db push` odmítne starší migraci (#86/#88, hlášení 29. 9.),
+# nebo spadne na nesouladu historie (revert PR po db push). Proč
+# a jak: scripts/migrace-poradi.mjs. Vzniklo po kontrole PR #147
+# (19. 10. 2026) — #145, #146 a #147 měly razítka v jiném pořadí, než
+# se budou slučovat.
+#
+# Běží i po pushi do main: GitHub po posunu main kontroly otevřených PR
+# znovu nepustí, takže PR sloučená druhá by na PR prošla — na main
+# zčervená po sloučení, ještě před db push.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/migrace-poradi.mjs'
+      - '.github/workflows/migrace-poradi.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/migrace-poradi.mjs'
+      - '.github/workflows/migrace-poradi.yml'
+
+jobs:
+  poradi:
+    name: Migrace jen přibývají
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # Celá historie: základ (main před změnou) se musí dát najít.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Migrace proti základu
+        env:
+          UDALOST: ${{ github.event_name }}
+          ZAKLAD_PR: ${{ github.base_ref }}
+          PRED_PUSHEM: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$UDALOST" = "pull_request" ]; then
+            ZAKLAD="origin/$ZAKLAD_PR"
+          else
+            ZAKLAD="$PRED_PUSHEM"
+          fi
+          node scripts/migrace-poradi.mjs "$ZAKLAD"

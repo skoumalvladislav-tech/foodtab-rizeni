@@ -3,7 +3,7 @@
 --
 -- Šéfík 18. 10. 2026: „potřebuji sloučit apku faktury s apkou foodtab".
 -- Návrh, pořadí kroků přepnutí a návrat zpět: docs/faktury-slouceni-navrh.md.
--- Rozhodnutí, která zbývají na Šéfíkovi: docs/hlaseni/otazky.md, 58–63.
+-- Rozhodnutí, která zbývají na Šéfíkovi: docs/hlaseni/otazky.md, 59–65.
 --
 -- Faktury dosud žily v odděleném Supabase projektu (ctqtwahlzhyjerqulqyn)
 -- bez tenant_id a s RLS „allow all" pro veřejný klíč. Foodtab na ně
@@ -22,7 +22,7 @@
 --   `dokonceno` — přihlášený, příjem z e-mailu i párování. Hlídá to
 --   spoušť app.faktury_brana pro všechny role, ne jen RLS (service_role
 --   RLS obchází). Firma bez řádku (každá kromě vlastníka staré databáze)
---   má Faktury ZAVŘENÉ — otevřít je ostatním je otázka 60.
+--   má Faktury ZAVŘENÉ — otevřít je ostatním je otázka 61.
 -- * Úloha převodu (service_role) zapisuje jen ve stavu `probiha`.
 -- * Párování plateb se ve stavu `probiha` nemění vůbec (ani starou cestou).
 --
@@ -45,11 +45,11 @@
 --
 -- * Faktury nemají pobočku. Čtou je a mění jen lidé s právem za CELOU
 --   firmu — jako dnešní appka (pripravit(…, TENANT_SCOPE_SEGMENT)) a Finance
---   po pobočkách (otázka 48, body 4 a 7). Pobočky: otázka 59.
+--   po pobočkách (otázka 48, body 4 a 7). Pobočky: otázka 60.
 -- * prijemky.faktura_id je volný text, který píše člověk (číslo z papírové
 --   faktury), ne id — cizí klíč by byl hádání. vybaveni.faktura_id
 --   a ingredient_purchase_prices.source_invoice_id nikdo nezapisuje.
---   Zůstávají, jak jsou (otázka 62).
+--   Zůstávají, jak jsou (otázka 63).
 -- * Stav faktury je text bez výčtu. Psal ho n8n i příjem z e-mailu
 --   („Nutná ruční kontrola (…)", „Duplicitní - zkontrolovat (…)") a pevný
 --   výčet by převod starých dat shodil.
@@ -921,7 +921,7 @@ create policy faktury_prilohy_insert on storage.objects for insert to authentica
 -- nepřečetla, dobropis) nebo v jiné měně než CZK se stav NEMĚNÍ — platby
 -- jsou v Kč a porovnat se nedají. Dřív by taková faktura po jakékoli
 -- platbě skončila jako „Uhrazeno" a vypadla z upomínek. Rozhodne člověk
--- (otázka 61).
+-- (otázka 62).
 --
 -- Zámky: stejné advisory zámky a stejné pořadí jako staré funkce — kdyby
 -- při přepnutí chvíli běžel starý i nový kód, srazí se na zámku.

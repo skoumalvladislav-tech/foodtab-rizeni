@@ -243,7 +243,7 @@ const PAROVANI_JEN_FIRMA =
  *
  * Faktura v jiné měně než CZK nebo bez kladné částky: párování se
  * zapíše, stav faktury se NEZMĚNÍ (platby jsou v Kč a porovnat se
- * nedají) — appka to řekne, rozhodne člověk (otázka 61).
+ * nedají) — appka to řekne, rozhodne člověk (otázka 62).
  *
  * Od 13. 10. 2026 jen s právem za celou firmu (`pripravitFiremni`) —
  * stránka párování na pobočce neukazuje vůbec.

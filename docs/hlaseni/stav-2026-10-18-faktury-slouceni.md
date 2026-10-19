@@ -26,7 +26,7 @@
 - **Návrat zpět je připravený** pro každou fázi (oddíl „Připravené").
   Stará databáze zůstává netknutá jako záloha až do úklidu po zkušební
   době.
-- **Rozhodnutí pro vás jsou v `otazky.md`, otázky 58–64.** Všude jsem
+- **Rozhodnutí pro vás jsou v `otazky.md`, otázky 59–65.** Všude jsem
   zvolil nejopatrnější variantu a appka podle ní funguje, dokud
   nerozhodnete jinak.
 
@@ -85,7 +85,7 @@
 **Plán přepnutí** (podrobně `docs/faktury-slouceni-navrh.md`, oddíl 6):
 
 0. Předem: pozastavit `faktury-app` ve Vercelu a smazat
-   `FAKTURY_SUPABASE_*` z Preview a Development (otázka 58, bod 1).
+   `FAKTURY_SUPABASE_*` z Preview a Development (otázka 59, bod 1).
 1. Sloučit PR → Faktury ukážou „připravují se".
 2. `supabase db push` → „stěhují se".
 3. Krok **nanecisto**: kolik je faktur, anomálií (musí být 0), visících
@@ -114,7 +114,7 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
 
 1. **Sloučení PR, `db push`, převod dat, změny ve Vercelu** — jen na váš
    výslovný pokyn.
-2. **Otázky 58–64** (`otazky.md`): kdy přepnout, zkušební doba, Faktury
+2. **Otázky 59–65** (`otazky.md`): kdy přepnout, zkušební doba, Faktury
    a pobočky, Faktury pro další firmy, cizí měna, odkazy u příjemek,
    stará databáze po úklidu, velikost fotky.
 3. **Do staré databáze nevidím** (oprávnění k Supabase MCP chybí), proto
@@ -132,7 +132,7 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
   appka řekne „archivujte ji".
 - Přílohy a evidenci příjmu čte jen člověk s právem za **celou firmu**
   (dřív přímým dotazem i člen jedné pobočky — hlášení 8. 10.).
-- Faktury jsou otevřené jen pro Foodtab s.r.o. (otázka 60).
+- Faktury jsou otevřené jen pro Foodtab s.r.o. (otázka 61).
 
 ## Známé mezery (vědomě)
 
@@ -140,7 +140,7 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
   zámek, kopírování příloh) nemá automatický test — testovaná je její
   čistá logika a databázová strana. Proto krok **nanecisto** před
   každým zapisujícím krokem.
-- **Fotka u ručně zadané faktury max. 1 MB** (otázka 64). Když se po
+- **Fotka u ručně zadané faktury max. 1 MB** (otázka 65). Když se po
   nahrání fotky nepovede uložit fakturu, soubor zůstane v soukromém
   úložišti firmy bez faktury (neškodí, nic ho neukazuje).
 - **Typy výsledků dotazů do faktur** si appka přetypovává sama; chybný
@@ -157,7 +157,7 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
   všech tří větví poskládané dohromady, celý řetěz v jedné databázi jako
   v CI — 3808 kontrol v PGlite, nic nespadlo (krok97 10, krok98 140,
   krok99 125). Scénáře se nesrážejí (krok97 / 98 /
-  99), otázky taky ne (#146 má 50–57, Faktury 58–64).
+  99), otázky taky ne (#146 má 50–57, Faktury 59–65).
 - Obsahově se #146 Faktur netýká: Jiné platby pracují s **vydanými**
   fakturami (`faktura_cislo`), ne s přijatými, a nesahají na párování
   plateb ani na Faktury.
