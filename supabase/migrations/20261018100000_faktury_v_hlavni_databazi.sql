@@ -68,8 +68,15 @@ create table public.faktury_prevod (
   -- Adresa projektu, odkud se převádí (host, ne klíč).
   zdroj         text not null check (char_length(zdroj) between 1 and 200),
   zahajeno_kdy  timestamptz not null default now(),
+  -- dokonceno_kdy je vyplněné jen u převodu, který doběhl (zahájení ho
+  -- nuluje, zrušení ho nenastaví): kopie staré databáze je základ pro
+  -- návrat zpět JEN tehdy. Po zrušení je stará databáze jediná pravda.
   dokonceno_kdy timestamptz,
   vraceno_kdy   timestamptz,
+  -- Návrat zpět je hotový (stará databáze má všechno z appky, úloha to
+  -- ověřila novým plánem s nulou). Potom jsou rozdíly staré databáze
+  -- změny staré appky: nový převod je převezme, „zpet" už nic nepřepíše.
+  zpet_hotovo_kdy timestamptz,
   -- Měření staré databáze v okamžiku zahájení (spočítala úloha)
   -- a obou databází v okamžiku dokončení (spočítala databáze sama).
   mereni_zahajeni jsonb,
@@ -92,8 +99,11 @@ alter table public.faktury_prevod enable row level security;
 -- Stav převodu vidí, kdo vidí Faktury (brána v appce se ptá jeho klientem).
 -- Politika až pod app.firmy_s_pristupem (oddíl 2).
 
+-- Jen firma a stav: měření (součty párování plateb), texty chyb úlohy
+-- a zámek přihlášený nepotřebuje — a k párováním se bez finance.read
+-- dostat nemá.
 revoke all on public.faktury_prevod from anon, authenticated;
-grant select on public.faktury_prevod to authenticated;
+grant select (tenant_id, stav) on public.faktury_prevod to authenticated;
 -- Úloha smí přímo měnit jen seznam nepovedených příloh. Stav (a s ním
 -- to, kdo smí zapisovat) mění jen funkce převodu níž — chyba v úloze
 -- tak stav převodu přepnout nemůže.
@@ -136,17 +146,6 @@ revoke all on public.faktury_prevod_zdroj from service_role;
 grant select, insert, update, delete on public.faktury_prevod_zdroj to service_role;
 
 
--- Stav převodu firmy. Security definer: spouště a politiky se ptají
--- i za přihlášeného, který tabulku přímo číst nemusí (nemá faktury.read).
-create function app.faktury_stav_prevodu(p_tenant uuid)
-returns text
-language sql stable security definer set search_path = ''
-as $$
-  select pr.stav from public.faktury_prevod pr where pr.tenant_id = p_tenant;
-$$;
-
-revoke all on function app.faktury_stav_prevodu(uuid) from public, anon;
-grant execute on function app.faktury_stav_prevodu(uuid) to authenticated, service_role;
 
 -- Zrušení celé firmy (kaskáda z tenants): firma už neexistuje a brány
 -- níž nemají co chránit — bez téhle výjimky by smazání firmy s fakturami
@@ -234,6 +233,30 @@ comment on function app.firmy_s_pristupem(text) is
 
 revoke all on function app.firmy_s_pristupem(text) from public, anon;
 grant execute on function app.firmy_s_pristupem(text) to authenticated;
+
+-- Stav převodu firmy. Security definer: spouště a funkce párování se ptají
+-- i za přihlášeného, který tabulku celou číst nesmí.
+--
+-- Přihlášený (role authenticated/anon) se stav dozví JEN u firmy, kde
+-- Faktury smí vidět nebo spravovat — jinak by hláška brány nebo párování
+-- prozradila, jestli a v jakém stavu cizí firma Faktury stěhuje (kontrola
+-- 19. 10.). Pro cizí firmu je NULL, tedy „nezahájen", stejně jako pro
+-- firmu bez převodu. Úlohy a převod (service_role, bez přihlášení) vidí
+-- stav všech firem. Rozhoduje GUC `role`, ne current_user: uvnitř
+-- security definer je current_user vlastník funkce.
+create function app.faktury_stav_prevodu(p_tenant uuid)
+returns text
+language sql stable security definer set search_path = ''
+as $$
+  select pr.stav from public.faktury_prevod pr
+   where pr.tenant_id = p_tenant
+     and (coalesce(current_setting('role', true), 'none') not in ('authenticated', 'anon')
+          or pr.tenant_id in (select app.firmy_s_pristupem('faktury.read'))
+          or pr.tenant_id in (select app.firmy_s_pristupem('faktury.manage')));
+$$;
+
+revoke all on function app.faktury_stav_prevodu(uuid) from public, anon;
+grant execute on function app.faktury_stav_prevodu(uuid) to authenticated, service_role;
 
 create policy faktury_prevod_select on public.faktury_prevod for select to authenticated
   using (tenant_id in (select app.firmy_s_pristupem('faktury.read')));
@@ -505,15 +528,83 @@ create trigger trg_faktury_oznacit_duplicitu
 -- Audit. Vložení převodem se nepíše po řádcích (3 000 kopií celého řádku
 -- by audit zaplavily) — převod jako celek zapisují funkce převodu.
 -- ---------------------------------------------------------------------
+-- Vlastní funkce, ne app.audit_zmenu: audit_log čte i správce bez práva
+-- na Faktury (settings.manage), a celý řádek by mu dal text dokladu,
+-- e-mail odesílatele i účet dodavatele každé zapsané a smazané faktury
+-- (stejná třída chyby jako text zpráv v auditu, 20260906010000).
+-- Obsahové sloupce se vynechají; u změny zůstane jen JMÉNO změněného
+-- (skryte_zmeny), ať úprava z auditu nezmizí. Částka, dodavatel a stav
+-- zůstávají — audit má říct, kdo změnil částku.
+
+create function app.audit_faktury()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_skryt  text[] := array['vytah_textu', 'email_odesilatel', 'email_predmet', 'ucet_dodavatele',
+                           'vytah', 'dodavatel_odhad'];
+  v_entita text := tg_argv[0];
+  v_novy   jsonb;
+  v_stary  jsonb;
+  v_tenant uuid;
+  v_pred   jsonb;
+  v_po     jsonb;
+  v_skryte jsonb;
+begin
+  if tg_op = 'DELETE' then
+    v_stary := to_jsonb(old);
+  elsif tg_op = 'INSERT' then
+    v_novy := to_jsonb(new);
+  else
+    v_stary := to_jsonb(old);
+    v_novy := to_jsonb(new);
+  end if;
+
+  -- Rušení celé firmy (kaskáda): firma už neexistuje, audit by spadl na
+  -- cizím klíči a shodil by celé rušení (jako app.audit_zmenu).
+  v_tenant := (coalesce(v_novy, v_stary) ->> 'tenant_id')::uuid;
+  if v_tenant is null or not exists (select 1 from public.tenants t where t.id = v_tenant) then
+    return null;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    select jsonb_object_agg(s.key, s.value) into v_pred
+      from jsonb_each(v_stary) s
+     where v_novy -> s.key is distinct from s.value and s.key <> all (v_skryt);
+    select jsonb_object_agg(n.key, n.value) into v_po
+      from jsonb_each(v_novy) n
+     where v_stary -> n.key is distinct from n.value and n.key <> all (v_skryt);
+    select jsonb_agg(s.key order by s.key) into v_skryte
+      from jsonb_each(v_stary) s
+     where v_novy -> s.key is distinct from s.value and s.key = any (v_skryt);
+    if v_pred is null and v_skryte is null then
+      return null;
+    end if;
+    if v_skryte is not null then
+      v_po := coalesce(v_po, '{}'::jsonb) || jsonb_build_object('skryte_zmeny', v_skryte);
+    end if;
+  elsif tg_op = 'INSERT' then
+    v_po := v_novy - v_skryt;
+  else
+    v_pred := v_stary - v_skryt;
+  end if;
+
+  perform app.audit(v_tenant, v_entita || '.' || lower(tg_op), v_entita,
+                    coalesce(v_novy, v_stary) ->> 'id', null, v_pred, v_po);
+  return null;
+end
+$$;
+
+revoke all on function app.audit_faktury() from public, anon, authenticated;
 
 create trigger trg_audit_faktury_vlozeni
   after insert on public.faktury
   for each row when (new.prevedeno_kdy is null)
-  execute function app.audit_zmenu('faktura');
+  execute function app.audit_faktury('faktura');
 
 create trigger trg_audit_faktury_zmena
   after update or delete on public.faktury
-  for each row execute function app.audit_zmenu('faktura');
+  for each row execute function app.audit_faktury('faktura');
 
 
 -- ---------------------------------------------------------------------
@@ -537,7 +628,12 @@ create policy faktury_delete on public.faktury for delete to authenticated
 -- Nejdřív VŠE pryč (výchozí práva Supabase by anon i authenticated dala
 -- samy, včetně TRUNCATE, který RLS neřídí), pak jmenovitě.
 revoke all on public.faktury from anon, authenticated;
-grant select, insert, update, delete on public.faktury to authenticated;
+grant select, insert, delete on public.faktury to authenticated;
+-- Úprava jen sloupců, které appka opravdu mění (Faktury → akce). Částku,
+-- měnu ani dodavatele po založení nemění nikdo z appky — stav faktury
+-- drží párování plateb a podvržená částka přes REST by ho rozbila
+-- (memory „RPC bez uzavření tabulky"). zmeneno_kdy píše spoušť.
+grant update (stav, poznamka_kontroly, archivovano, upominka_odeslana_kdy) on public.faktury to authenticated;
 -- Úlohy: příjem z e-mailu (zápis), automatické párování (stav), převod
 -- (vložení, oprava, mazání řádků, které ve staré databázi už nejsou).
 revoke all on public.faktury from service_role;
@@ -587,7 +683,7 @@ grant select, insert on public.faktury_vzory_odmitnuti to service_role;
 create trigger trg_audit_faktury_vzory
   after insert on public.faktury_vzory_odmitnuti
   for each row when (new.puvodni_id is null)
-  execute function app.audit_zmenu('faktura_vzor_odmitnuti');
+  execute function app.audit_faktury('faktura_vzor_odmitnuti');
 
 
 -- =====================================================================
@@ -863,6 +959,7 @@ declare
   v_hash_faktura     bigint := hashtextextended(p_faktura::text, 0);
   v_branch           uuid;
   v_castka_transakce integer;
+  v_smer             text;
   v_castka_faktury   integer;
   v_mena             text;
   v_soucet_transakce bigint;
@@ -874,10 +971,6 @@ begin
     raise exception 'Alokovaná částka musí být kladná.' using errcode = 'check_violation';
   end if;
 
-  if app.faktury_stav_prevodu(p_tenant) is distinct from 'dokonceno' then
-    raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
-  end if;
-
   if v_hash_transakce <= v_hash_faktura then
     perform pg_advisory_xact_lock(v_hash_transakce);
     perform pg_advisory_xact_lock(v_hash_faktura);
@@ -886,7 +979,7 @@ begin
     perform pg_advisory_xact_lock(v_hash_transakce);
   end if;
 
-  select u.branch_id, t.castka_haleru into v_branch, v_castka_transakce
+  select u.branch_id, t.castka_haleru, t.smer into v_branch, v_castka_transakce, v_smer
     from public.transakce t
     join public.platebni_ucty u on u.id = t.ucet_id
    where t.id = p_transakce and t.tenant_id = p_tenant;
@@ -903,6 +996,18 @@ begin
   if not app.has_access(p_tenant, 'faktury.read', null) then
     raise exception 'Párovat s fakturami smí ten, kdo má právo „Vidět přijaté faktury" za celou firmu.'
       using errcode = 'insufficient_privilege';
+  end if;
+  -- Stav převodu až po kontrole práv: přihlášený bez práva na Faktury by
+  -- jinak z hlášky poznal, v jakém stavu převod je.
+  if app.faktury_stav_prevodu(p_tenant) is distinct from 'dokonceno' then
+    raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
+  end if;
+  -- Přijatá faktura se platí ODCHOZÍ platbou (jako automatické párování).
+  -- Příchozí peníze patří Jiným platbám (tržby, úhrady pohledávek) —
+  -- bez téhle podmínky by se tatáž příchozí platba dala rozdělit dvakrát:
+  -- jednou jako úhrada v Jiných platbách, podruhé jako „zaplacená" faktura.
+  if v_smer is distinct from 'vydaj' then
+    raise exception 'S přijatou fakturou jde spárovat jen odchozí platbu (výdaj).' using errcode = 'check_violation';
   end if;
 
   select f.castka_haleru, f.mena into v_castka_faktury, v_mena
@@ -996,10 +1101,6 @@ declare
   v_soucet   bigint;
   v_stav     text;
 begin
-  if app.faktury_stav_prevodu(p_tenant) is distinct from 'dokonceno' then
-    raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
-  end if;
-
   -- Zamknout řádek párování: dvojí kliknutí počká a uvidí, že už je zrušené.
   select u.branch_id, p.faktura, p.stav into v_branch, v_faktura, v_parovani
     from public.platby_faktury p
@@ -1019,6 +1120,10 @@ begin
   if not app.has_access(p_tenant, 'faktury.read', null) then
     raise exception 'Rušit párování s fakturami smí ten, kdo má právo „Vidět přijaté faktury" za celou firmu.'
       using errcode = 'insufficient_privilege';
+  end if;
+  -- Stav převodu až po kontrole práv (hláška by ho jinak prozradila).
+  if app.faktury_stav_prevodu(p_tenant) is distinct from 'dokonceno' then
+    raise exception 'Faktury pro tuto firmu nejsou otevřené.' using errcode = 'insufficient_privilege';
   end if;
   -- Až po kontrole práv (jinak by se dalo zjišťovat stav cizích párování).
   -- Bez toho by opakované zrušení (stará stránka, dvojí kliknutí) znovu
@@ -1451,7 +1556,10 @@ begin
   values (p_tenant, 'probiha', p_zdroj, p_mereni)
   on conflict (tenant_id) do update
     set stav = 'probiha', zdroj = excluded.zdroj, mereni_zahajeni = excluded.mereni_zahajeni,
-        zahajeno_kdy = now(), dokonceno_kdy = null, mereni_dokonceni = null, zmeneno_kdy = now();
+        zahajeno_kdy = now(), dokonceno_kdy = null, mereni_dokonceni = null, zmeneno_kdy = now(),
+        -- Nepovedené přílohy z dřívějšího pokusu neplatí (odkaz mohl být
+        -- mezitím opravený); značka návratu taky ne.
+        prilohy = '{}'::jsonb, zpet_hotovo_kdy = null;
 
   perform app.audit(p_tenant, 'faktury.prevod_zahajen', 'faktury_prevod', p_tenant::text, null,
                     jsonb_build_object('stav', v_stav),
@@ -1637,13 +1745,55 @@ begin
   end if;
 
   update public.faktury_prevod
-     set stav = 'vraceno', vraceno_kdy = now(), zmeneno_kdy = now()
+     set stav = 'vraceno', vraceno_kdy = now(), zpet_hotovo_kdy = null, zmeneno_kdy = now()
    where tenant_id = p_tenant;
 
   perform app.audit(p_tenant, 'faktury.prevod_vracen', 'faktury_prevod', p_tenant::text, null,
                     jsonb_build_object('stav', v_stav), jsonb_build_object('stav', 'vraceno'));
   return 'vraceno';
 end $$;
+
+-- Návrat zpět je hotový: úloha přenesla změny z appky do staré databáze
+-- a nový plán vyšel nulový. Jen po vrácení DOKONČENÉHO převodu — po
+-- zrušení nebylo co vracet (kopie není stav z dokončení a „zpet" by
+-- podle ní mazal skutečné faktury staré databáze).
+create function app.faktury_prevod_zpet_hotovo(p_tenant uuid)
+returns timestamptz
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_stav      text;
+  v_dokonceno timestamptz;
+  v_hotovo    timestamptz;
+begin
+  select pr.stav, pr.dokonceno_kdy, pr.zpet_hotovo_kdy into v_stav, v_dokonceno, v_hotovo
+    from public.faktury_prevod pr where pr.tenant_id = p_tenant for update;
+  if v_stav is distinct from 'vraceno' or v_dokonceno is null then
+    raise exception 'Návrat zpět jde označit jen po vrácení dokončeného převodu (stav: %).', coalesce(v_stav, 'nezahájen')
+      using errcode = 'check_violation';
+  end if;
+  if v_hotovo is not null then
+    return v_hotovo;
+  end if;
+
+  update public.faktury_prevod set zpet_hotovo_kdy = now(), zmeneno_kdy = now() where tenant_id = p_tenant;
+  perform app.audit(p_tenant, 'faktury.prevod_zpet_hotovo', 'faktury_prevod', p_tenant::text, null, null,
+                    jsonb_build_object('stav', v_stav));
+  return now();
+end $$;
+
+revoke all on function app.faktury_prevod_zpet_hotovo(uuid) from public, anon, authenticated;
+grant execute on function app.faktury_prevod_zpet_hotovo(uuid) to service_role;
+
+create function public.faktury_prevod_zpet_hotovo(p_tenant uuid)
+returns timestamptz
+language sql security invoker set search_path = ''
+as $$
+  select app.faktury_prevod_zpet_hotovo(p_tenant);
+$$;
+
+revoke all on function public.faktury_prevod_zpet_hotovo(uuid) from public, anon, authenticated;
+grant execute on function public.faktury_prevod_zpet_hotovo(uuid) to service_role;
 
 revoke all on function app.faktury_prevod_vratit(uuid) from public, anon, authenticated;
 grant execute on function app.faktury_prevod_vratit(uuid) to service_role;
