@@ -4,6 +4,11 @@ Finance → Tržby → Jiné platby podle vašeho zadání z 15. 10. Práce bě�
 16.–19. 10. ve vlastní větvi `finance-jine-platby`, nezávisle na ostatních
 PR.
 
+> **Doplněno 19. 10. večer:** druhá nezávislá kontrola PR #146 (5 pohledů:
+> databáze, peníze, pokladna, aplikace, AI; každý nález ověřil další agent)
+> našla 33 platných nálezů. Opravené jsou všechny, tři jen zčásti — viz
+> oddíl **Druhá kontrola (19. 10.)** níž. Čísla v hlášení jsou po opravách.
+
 ## Nejdřív to podstatné
 
 - **Agenda je hotová v PR, ale v ostré appce zatím není.** Databázová změna `20261016100000_jine_platby` **není nasazená** (`db push` jsem nespustil). Nic jsem nesloučil a do žádné pokladny nic nezapsal. Po sloučení a `db push` se agenda objeví v menu.
@@ -22,6 +27,7 @@ PR.
   - **37 obstálo**: 1 vysoká, 19 středních, 17 nízkých;
   - 12 se nepotvrdilo;
   - opravených je všech 37, jedna z nich jen zčásti (kontrola po pozdějším importu z pokladny je ruční, ne automatická, viz otázka 58).
+- **Druhá kontrola 19. 10.** našla dalších 33 chyb, z toho dvě vysoké (souběh dvou fotek téže sjetiny = dvojí tržba; jedna bankovní platba na fakturu i na Jinou platbu). Opravené jsou všechny, tři zčásti (oddíl Druhá kontrola).
 - **Blokované nebo čeká na vás:** `db push`, vydané faktury (51), zápis do Dotykačky a jeho ověření na testovacím cloudu (54), přičtení spotřeby do Foodcostu (53), automatická kontrola po importu z pokladny (58).
 
 ## Co je hotové
@@ -37,6 +43,10 @@ PR.
 | Scénář krok98: nové kontroly; dokumentace podle oprav | `3f9569e`, `72ca4bf`, `72569d7` | — |
 | Opravy obrazovek a knihoven z nezávislé kontroly | `38d1ab8` | — |
 | Panel schválení řekne, proč schválit nejde | `25e6e35` | — |
+| Kontroly pokladen v krok98 nezávislé na ostatních scénářích (CI) | `aec9cde` | — |
+| **Druhá kontrola:** databáze, scénář krok98 (oddíl 13) | `37e24d2` | **ano** |
+| Druhá kontrola: textová kontrola grantů, dokumentace | `424ba2b`, `f874178` | — |
+| Druhá kontrola: obrazovky, akce, knihovny, navigace Financí, testy | `5fd76d3` | — |
 
 Hlavní opravy z kontroly (podrobně v `docs/jine-platby-navrh.md` a v návodu):
 
@@ -68,34 +78,66 @@ telefon 375 px, telefon v tmavém režimu u panelu schválení).
 ## Čísla — a z čeho jsou
 
 - **Scénář krok98:**
-  - **140 kontrol**, s etapa0 dohromady **179**; se scénáři krok93–95 před ním (jako na CI) **317**;
+  - **181 kontrol**; celý řetěz scénářů ve stejném pořadí jako na CI **3 714 kontrol**, nic nespadlo;
   - běželo na **PGlite**, ne na PostgreSQL;
   - PGlite **neověří RLS ani sloupcové granty**. Rozhodne workflow „Migrace a scénáře“ na GitHubu, které běží po pushi a jehož výsledek je v PR.
 - **Node testy:** v seznamu CI je **89 sad, všech 89 prošlo**. Z toho Jiné platby:
 
   | sada | kontrol |
   |---|---|
-  | `jine-platby` | 448 |
-  | `jine-platby-detail` | 419 |
-  | `jine-platby-obrazovka` | 235 |
-  | `jine-platby-ai` | 112 |
-  | `jine-platby-pos-operace` | 59 |
-  | `pokladna-dotykacka-sklad` | 150 |
+  | `jine-platby` | 507 |
+  | `jine-platby-detail` | 521 |
+  | `jine-platby-obrazovka` | 252 |
+  | `jine-platby-ai` | 181 |
+  | `jine-platby-pos-operace` | 73 |
+  | `pokladna-dotykacka-sklad` | 168 |
   | `nabidka` | 225 |
-  | `finance-pobocky` | 144 |
+  | `finance-pobocky` | 189 |
+  | `provoz-granty` | + 31 nových (Jiné platby bez zápisu pro přihlášené) |
 
   - `vydelky` napoprvé spadl. Nabídka nově načítá seznam práv Jiných plateb a test výdělků ho neuměl podstrčit. Opraveno, test teď načítá skutečný soubor.
 - `tsc` a `eslint` nad změněnými soubory jsou čisté.
 - **Schválná rozbití:**
-  - **Databáze, 61 rozbití.** Každé shodilo kontrolu.
+  - **Databáze, 97 rozbití.** Každé shodilo kontrolu (96 přesně tu, na kterou mířilo).
     - B48 (pokladna bez kontroly pobočky) spadlo na **dřívější a přísnější** kontrole „cizí firma nevidí katalog“. Stejné rozbití totiž otevře katalog i cizí firmě.
     - Pravidla, která jdou porušit dvěma způsoby, jsem rozbil oběma. Například rozdíl součtu: bez důvodu i s neomezenou tolerancí. Zrušení záznamu: zůstane ve frontě i drží doklad.
-  - **Aplikace po kontrole:** 77 + 77 rozbití (dva implementátoři) a 3 moje. Všechna spadla. Před kontrolou 90 rozbití aplikace a 21 databáze.
+  - **Aplikace:** po první kontrole 77 + 77 rozbití a 3 moje, po druhé 49 (detail) + 71 (knihovny a navigace). Všechna spadla. Před první kontrolou 90 rozbití aplikace a 21 databáze.
+  - **Text migrace:** rozbití revoke u Ostatních tržeb (přihlášený by dostal zápis z výchozích práv Supabase) shodí 3 kontroly v `provoz-granty`; krok98 by tohle v čisté databázi nepoznal nikdy.
   - Rozbití odhalila tři slabé kontroly, které prošly i nad rozbitým kódem: dvakrát duplicity, kde shodu zakryla shoda „den + částka“, a jednu kontrolu, která spadla výjimkou místo výsledku. Všechny tři jsou opravené.
 - **Nezávislá kontrola:**
-  - 49 nálezů, každý ověřil samostatný agent;
-  - 37 obstálo, 12 se vyvrátilo;
+  - první (17. 10.): 49 nálezů, každý ověřil samostatný agent; 37 obstálo, 12 se vyvrátilo;
+  - druhá (19. 10.): 34 nálezů, 33 platných (2 vysoké jako možné), 1 vyvrácený;
   - 2 nálezy opravené v databázi neměly kontrolu ve scénáři (přepočet úhrady, verze při změně odběratele), proto jsem je doplnil.
+
+## Druhá kontrola (19. 10.)
+
+Co se opravilo (podrobnosti v `docs/jine-platby-navrh.md`, návodu a `docs/jine-platby-pos-operace.md`):
+
+- **Peníze:**
+  - dvě fotky téže sjetiny potvrzené ve stejnou chvíli už nezapíšou tržbu dvakrát — potvrzování tržeb jedné firmy jde za sebou;
+  - jedna bankovní platba nezaplatí fakturu i Jinou platbu (počítá se i párování s fakturami, stejný zámek), stornovaná platba úhradu neprokazuje, ke zrušenému záznamu úhrada nejde;
+  - „Jen propojit“ bez konkrétního prodeje v pokladně chce důvod (jinak by tržba mimo pokladnu zmizela ze všech součtů); po propojení jde kontrolu zopakovat („Možná nezapočítáno nikde“);
+  - sjetina nebo doklad neurčeného typu s otevřeným účtem v pokladně dá „nelze ověřit“, ne „není v pokladně“; částka se s pokladnou porovná s tolerancí zaokrouhlení; účet zaplacený Odpisem se nebere jako prodej;
+  - ruční „není tam“ nepřepíše, co pokladna našla (jen s právem na opravy);
+  - duplicita podle čísla účtu se hledá i mezi záznamem s pokladnou a bez ní na téže provozovně; kontrola součtu položek bere i množství × jednotkovou cenu.
+- **Sklad:**
+  - schválený výdej (i když provedení selhalo) je zamčený: položky nejde změnit ani záznam zrušit, uvolní ho jen Zrušit schválení;
+  - výdej jen s produkty z katalogu pokladny (bez katalogu se nic neschválí);
+  - kontrola ani výdej nepracují s provozovnou, kterou v Integracích přeřadili jiné pobočce;
+  - pokrm a další zboží v jednom výdeji: varování pro schvalovatele (receptury appka nezná).
+- **Doklady a AI:**
+  - soubor (a jeho otisk) zapíše jen server — dřív šlo poslat vymyšlený otisk a tutéž fotku připojit podruhé;
+  - upozornění AI k celému dokladu (nízká jistota, víc dokladů, pokyn v textu) se ukládají a „zkontrolováno“ chce výslovné „prověřil jsem“;
+  - verze a zapsaná tržba se kontrolují dřív, než se zaplatí čtení; denní strop pod zámkem; PDF nejvýš 20 stran (30 dohromady);
+  - čas tisku účtenky: účet po půlnoci jde na předchozí provozní den s upozorněním;
+  - časový rozpočet čtení se měří od začátku akce, useknutá nebo odmítnutá odpověď dá srozumitelnou hlášku.
+- **Navigace Financí:** rám Financí už nerozhoduje podle adresy (při přechodu přes menu nefungoval); bránu si drží každá stránka. Obsluha bez finančního přehledu vidí v navigaci jen Jiné platby.
+- **Druhá linie v databázi:** vazby operací v pokladně a náhrada tržby hlídané i spouští; krok98 nově zkouší i kontakt a platbu cizí firmy, katalog s cizí pokladnou a nahrávání bez práva.
+
+Co je opravené jen zčásti:
+- **Zápis do Dotykačky (vypnutý):** tvar operace pro zápis je sjednocený, ale u pokladny připojené k jedné pobočce appka provozovnu u záznamu neukládá — před zapnutím ji musí databáze doplnit (zapsané v `docs/jine-platby-pos-operace.md`).
+- **Nejasný výsledek bez východu:** dohledání podle klíče jde teď i u pokladny bez zápisu přes API; když se pokladna nedá otevřít vůbec, záznam zůstane „nejasný“ a vyřeší ho jen ruční zásah. Dnes nenastane, zápis je vypnutý.
+- **Pokrm a jeho suroviny:** jen varování, ne zákaz — appka receptury nečte.
 
 ## Co čeká na Šéfíka
 
@@ -126,9 +168,13 @@ V `docs/hlaseni/otazky.md`:
   - Kontrola teď počítá jen pokladny scénáře. Navíc přibyla kontrola, že seznam pokladen pro obsluhu vrací jen netajné sloupce (id, název, poskytovatel, stav, provozovna). Obě jsou schválně rozbité (B60, B61).
   - Práva jsem neměnil. Starou verzi jsem spadnout nechal i u sebe (krok93–95 + krok98), aby bylo jisté, že příčina je tahle.
 - **Kontrolní a opravný workflow se dvakrát přerušil s koncem procesu aplikace.** Obnovil jsem ho z uloženého stavu, žádná práce se neztratila.
+- **19. 10. oba implementátoři oprav po druhé kontrole spadli na výpadku sítě** (po hodině práce). Jejich změny zůstaly v pracovní kopii.
+  - Jeden skončil uprostřed schválných rozbití a jedno rozbití nechal v souboru (`logika.ts`, odpisový účet bráný jako prodej). Našel jsem ho porovnáním se zálohou před rozbitím a soubor vrátil. Zbylých 42 rozbití jsem dopustil sám.
+  - Druhého jsem nechal dokončit novým agentem: ten dodělal testy AI (předchozí verze padala) a všech 71 rozbití.
+  - Jedno rozbití (rozpoznání neuloží upozornění AI) test chytil, ale pak spadl výjimkou bez souhrnu. Test jsem upravil, teď selže čistě.
 - **Kompromis, který je vidět:** když je na dokladu spropitné započtené v celkové částce, nesedí součet položek (spropitné do tržby nepatří). Appka pak chce opravit celkovou částku, nebo napsat důvod. Takhle mi napoprvé spadl vlastní scénář. Nechal jsem to tak: tržba je cena prodeje a spropitné do ní nepatří.
 - **Kontrola po pozdějším importu z pokladny je jen ruční** (otázka 58). Automatická by potřebovala plánovač, který v databázi zatím neběží. A volat pokladnu za uživatele by byla nová úloha s klíči pokladny.
-- **Drobný rozdíl mezi appkou a databází:** při porovnání čísla účtu appka zahodí i nezlomitelnou mezeru, databáze možná ne (záleží na jejím nastavení). Výsledek: appka ukáže „možná duplicita“, ale databáze důvod nevyžádá. Nebezpečný opačný případ nenastane.
+- **Porovnání čísla účtu:** appka teď odstraňuje stejné bílé znaky jako databáze (bez nezlomitelné mezery). Jak se `\s` chová u unicodových mezer v ostré databázi, záleží na jejím nastavení; neověřoval jsem.
 - **Co jsem neověřil naživo:**
   - **Dotykačka:** hledání podle data uzavření (`completed`) je ověřené jen podle oficiální dokumentace a na podvržených odpovědích. Na skutečné Dotykačce neběželo nic z této agendy.
   - **Zmenšení fotky v prohlížeči:** testovaná je jen logika pokusů, samotné zmenšení ne.
@@ -138,6 +184,8 @@ V `docs/hlaseni/otazky.md`:
   - Snímky jsou ze **statického vykreslení detailu se smyšlenými daty**: skutečné CSS appky, ale bez JavaScriptu, bez databáze a bez klikání.
   - Při 375 i 1440 px nic nepřetéká do šířky a žádné tlačítko není menší než 44 px.
   - Přehled seznamu a formulář nového záznamu jsem dnes nefotil.
+  - Snímky z 19. 10. večer jsou po druhé kontrole (varování pokrm + zboží a nevyřešené položky v panelu skladu). Smyšlená data nemají upozornění AI k dokladu, takže tenhle panel na snímku není (ověřuje ho test vykreslení).
+  - Navigaci Financí a novou bránu na stránkách jsem v prohlížeči neviděl, ověřují je testy vykreslení do HTML.
 - **Lokální `next build` jsem nespouštěl.** V téhle kopii padá na chybějícím balíčku z Marketingu (známé). Rozhoduje build Vercelu v PR.
 
 ## Kde jsem skončil a co zbývá
