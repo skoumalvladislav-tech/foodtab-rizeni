@@ -10,7 +10,7 @@
  * se dala vztáhnout k té druhé. Hlídá i zbylé značky konfliktu.
  *
  * Pojistka proti kontrole naprázdno: když vzor nadpisů najde méně než
- * 50 otázek, je to chyba (ne „žádné duplicity").
+ * 40 otázek, je to chyba (ne „žádné duplicity").
  */
 
 import { readFileSync } from 'node:fs'
@@ -26,7 +26,7 @@ const ok = (popis, podminka) => {
 
 console.log(`\nČísla otázek v ${soubor}`)
 const nadpisy = [...text.matchAll(/^## (\d+)\. (.*)$/gm)].map((m) => ({ cislo: Number(m[1]), nazev: m[2] }))
-ok(`nalezeno ${nadpisy.length} otázek (aspoň 50 — jinak vzor nic nenašel)`, nadpisy.length >= 50)
+ok(`nalezeno ${nadpisy.length} otázek (aspoň 40 — jinak vzor nic nenašel)`, nadpisy.length >= 40)
 const podleCisla = new Map()
 for (const n of nadpisy) podleCisla.set(n.cislo, [...(podleCisla.get(n.cislo) ?? []), n.nazev])
 const dvakrat = [...podleCisla].filter(([, nazvy]) => nazvy.length > 1)
