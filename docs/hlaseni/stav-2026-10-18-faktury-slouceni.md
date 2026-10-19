@@ -113,7 +113,9 @@ a měnou z nabídky.
 - **Databáze (scénář `krok99`):** 142 kontrol, všechny prošly
   v PGlite. PGlite **neověří** pravidla přístupu ani granty — o tom
   rozhoduje CI „Migrace a scénáře" proti skutečnému PostgreSQL 16:
-  doplním po doběhnutí.
+  **zelená** — krok99 tam prošel taky se **142 kontrolami**, celá sada
+  databáze má 3678 kontrol (commit `0aba148`). Zelená je i nová kontrola
+  „Migrace jen přibývají".
   - Pokrývá: zavřené Faktury pro všechny před převodem, porovnání pole
     po poli, dokončení jen když vše sedí (a každé odmítnutí ověřené
     podle důvodu), čtení jen za celou firmu, párování ve stejném kroku,
@@ -122,7 +124,7 @@ a měnou z nabídky.
     vlastní složky, zrušení převodu, vrácení a nové zahájení, zrušení
     celé firmy.
 - **Node testy:** v seznamu CI je **86 sad**, všechny prošly lokálně
-  (CI „Testy aplikace": doplním po doběhnutí). Nové nebo přepsané pro Faktury:
+  (CI „Testy aplikace": **zelená**, commit `0aba148`). Nové nebo přepsané pro Faktury:
   - `faktury-prevod` 143 kontrol (převod řádku tam a zpátky,
     částka na haléř přesně, čas na mikrosekundy, návrat zpět jen po
     dokončení, přechodné chyby příloh, časový rozpočet, nanečisto před
@@ -240,7 +242,9 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
 - Ověřené nanečisto 19. 10. dopoledne: migrace a scénáře všech tří větví
   poskládané dohromady, celý řetěz v jedné databázi jako v CI — 3808
   kontrol v PGlite, nic nespadlo (krok97 10, krok98 140, krok99 125).
-  Znovu 19. 10. odpoledne po opravách z kontroly: doplním.
+  Znovu 19. 10. odpoledne po opravách z kontroly (#145 už
+  přerazítkovaná na 20261019120000): 3825 kontrol, nic nespadlo (krok97 10,
+  krok98 140, krok99 142).
 - Obsahově se #146 přijatých faktur netýká: Jiné platby pracují
   s **vydanými** fakturami (`faktura_cislo`) a s příchozími platbami;
   párování faktur nově bere jen odchozí platby, takže tatáž platba nejde
