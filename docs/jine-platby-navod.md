@@ -31,7 +31,7 @@ A název „Jiné platby“ neznamená, že je zaplaceno.
 
 ## Kdo co smí
 
-Práva se přidělují v Nastavení → Oprávnění. Platí na pobočkách, kde
+Kdo má jen práva Jiných plateb a nemá finanční přehled, vidí v navigaci Financí jen Jiné platby (ostatní obrazovky Financí by mu napsaly, že na ně nemá). Práva se přidělují v Nastavení → Oprávnění. Platí na pobočkách, kde
 člověk pracuje. Vedoucí Bernard Baru schvaluje jen výdeje Bernard Baru.
 
 | Právo | Typicky má |
@@ -184,6 +184,7 @@ vyřešila (např. papírová výdejka).
 | Na dokladu chybí celková částka | Appka nabídne součet položek jako **návrh** s poznámkou „vypočtený součet“. Potvrdíte ho, nebo opravíte. |
 | „K úhradě“ je jiné než celkem | Tržba je celková cena prodeje. „K úhradě“, přijatá hotovost a vrácené peníze tržba nejsou, appka je ukáže jen pro kontrolu. |
 | AI nečte nebo není zapnutá | Zadejte položky ručně, appka nic nevymýšlí. Za den jde nejvýš 200 rozpoznání na firmu. |
-| Velká fotka | Fotku nad 5 MB (a fotku z iPhonu ve formátu HEIC) appka při nahrání sama zmenší. K rozpoznání jde fotka do 5 MB, PDF do 8 MB, dohromady nejvýš 20 MB, po pořadí stránek. Co se nevejde, appka vyjmenuje. |
+| Velká fotka | Fotku nad 5 MB (a fotku z iPhonu ve formátu HEIC) appka při nahrání sama zmenší. K rozpoznání jde fotka do 5 MB, PDF do 8 MB a nejvýš 20 stran, dohromady nejvýš 20 MB a 30 stran, po pořadí stránek. Co se nevejde, appka vyjmenuje dřív, než se pokus započítá. |
+| Účet vytištěný po půlnoci | Když je na účtence čitelný čas a je dřív než začátek provozního dne pobočky, appka datum posune na předchozí provozní den a napíše to jako upozornění. Bez času datum nechá, zkontrolujte ho. |
 | Položka bez čitelného názvu | Appka ji pojmenuje „Položka č. N (název nečitelný)“ a nechá ke kontrole. Doplňte název podle dokladu. |
 | Záznam omylem | **Zrušit záznam** jde, dokud nic neproběhlo. Autor smí zrušit svůj rozpracovaný záznam, jinak je potřeba právo na opravy. Nejdřív je potřeba odpojit fakturu a úhradu a stornovat zapsanou tržbu. Se schváleným výdejem a během ručního odpisu zrušit nejde (nejdřív Zrušit schválení, viz výš). Fotky zůstanou v historii zrušeného záznamu a stejný doklad jde nahrát ke správnému záznamu. |

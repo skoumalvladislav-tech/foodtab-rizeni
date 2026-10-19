@@ -369,7 +369,14 @@ prodej), `P0002` = záznam nenalezen nebo cizí.
 
 Fotky jdou z prohlížeče **přímo do úložiště** (serverová akce má strop
 1 MB). Server pak soubor stáhne, ověří typ podle obsahu (magic bytes),
-spočítá otisk a teprve potom ho připojí.
+spočítá otisk a teprve potom ho připojí (klientem služby, `p_nahral`).
+
+**Rozpoznání AI (po kontrole 19. 10.):**
+- Levné kontroly před placeným čtením: verze formuláře, zapsaná tržba, typ a velikost podkladu, počet stran PDF (nejvýš 20 na PDF a 30 dohromady; stránky se počítají z bajtů souboru včetně komprimovaných proudů). Až potom se pokus započítá do denního stropu (200 za firmu, pod zámkem firmy).
+- Volání `messages.create` se strukturovaným výstupem; nejdřív se kontroluje `stop_reason` (`max_tokens` / `model_context_window_exceeded` → „doklad je na jedno čtení moc dlouhý“, `refusal` → „model doklad odmítl“), teprve pak `JSON.parse` a schéma. Dřív `messages.parse` hodil chybu dřív, než se k `stop_reason` dostal.
+- Časový rozpočet se měří od začátku akce: konec = start + (maxDuration 120 s − rezerva na uložení); volání dostane nejvýš 100 s a nejméně 15 s, jinak se nečte vůbec.
+- Schéma (verze zadání `jine-platby-v2`) má volitelné `cas` (čas tisku účtenky, jen když je čitelný). Když je čas tisku dřív než začátek provozního dne pobočky, datum prodeje se posune o den zpět a přidá se upozornění. Při opakovaném čtení zůstane uložené datum a rozdíl je upozornění.
+- Do `upozorneni_dokladu` patří jen věci k celému dokladu: nízká jistota dokladu, upozornění modelu (víc dokladů, pokyn v textu…), K úhradě / zaplaceno / zbývá nesedí s celkem, posun data. Řádkové důvody zůstávají na řádcích. Nejvýš 20 upozornění po 300 znacích.
 
 ---
 

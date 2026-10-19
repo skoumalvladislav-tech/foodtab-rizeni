@@ -27,9 +27,10 @@ Zdroj: oficiální dokumentace https://docs.api.dotypos.com/ (verze API
 |---|---|---|
 | Přihlášení, seznam provozoven, denní tržby a platby po způsobu | **Produkčně ověřeno** | Hotové od #132, beze změny. Data jsou jen denní součty, ne jednotlivé účty. |
 | Katalog produktů (`GET /products`) | **Testováno** | Načte se do appky kvůli přiřazení položek (přesné ID produktu, jednotka, „odečítat ze skladu“). Receptury se z katalogu nepoznají vždy, kde to nejde, appka napíše „neví“. |
-| Dohledání účtů (`GET /orders`, filtr provozovny a času) | **Testováno** | Kontrola „je tenhle prodej už v pokladně?“ podle čísla dokladu. Uzavřené účty se hledají podle **data uzavření** (den před až dva dny po dni prodeje), takže se najde i účet založený dřív. Samotná shoda částky dá jen „pravděpodobně“, nikdy „nalezeno“. Když pokladna hledání podle uzavření odmítne, výsledek je „nelze ověřit“. Filtr `completed` je ověřený jen podle dokumentace. |
+| Dohledání účtů (`GET /orders`, filtr provozovny a času) | **Testováno** | Kontrola „je tenhle prodej už v pokladně?“ podle čísla dokladu. Uzavřené účty se hledají podle **data uzavření** (den před až dva dny po dni prodeje), takže se najde i účet založený dřív. Samotná shoda částky dá jen „pravděpodobně“, nikdy „nalezeno“; u korun s tolerancí zaokrouhlení 50 haléřů (pokladna vrací zaokrouhlený součet). Účty zaplacené *Odpisem* se u tržby neberou jako prodej. Fotka sjetiny nebo dokladu neurčeného typu s otevřeným účtem v pokladně dá „nelze ověřit“, ne „nenalezeno“. Když pokladna hledání podle uzavření odmítne, výsledek je „nelze ověřit“. Filtr `completed` je ověřený jen podle dokumentace. |
 | Otevřené účty (`namedFilter=openOrders`) | **Testováno** | Otevřené účty se hledají zvlášť podle data založení (až 60 dní zpátky). Otevřený účet appka pozná a fotka otevřeného účtu nikdy nedá „nenalezeno“. Až ho pokladna uzavře, zapíše ho sama do tržeb, appka ho proto nezapočítá znovu. Po zápisu tržby jde kontrolu zopakovat (varování „Možná zapsáno dvakrát“). |
-| Dohledání vlastního požadavku podle externího ID (`externalId`) | **Testováno** | Slouží k obnově po výpadku: appka se nejdřív podívá, jestli pokladna požadavek provedla, a teprve pak by smělo vzniknout cokoli dalšího. |
+| Dohledání vlastního požadavku podle externího ID (`externalId`) | **Testováno** | Slouží k obnově po výpadku: appka se nejdřív podívá, jestli pokladna požadavek provedla, a teprve pak by smělo vzniknout cokoli dalšího. „Odečteno v POS“ jen pro účet uzavřený, zaplacený a označený jako odpis; jiný nalezený účet nechá výsledek nejasný. Dohledání jde i u pokladny bez zápisu přes API (je to jen čtení). |
+| Odpovědi pokladny 4xx | **Testováno** | „Nic se neprovedlo“ jen u kódů, o kterých to dokumentace říká. Jiný kód, 4xx bez těla, 408 a 429 jsou nejasný výsledek — appka nic neopakuje a dohledává. |
 | **Skladový výdej** přes „POS akci“ (účet zaplacený způsobem *Odpis*) | **Připraveno, vypnuto** | Funkce existuje a je otestovaná na podvržených odpovědích, ale **není připojená**: Dotykačka má v appce nastaveno „výdej jen ručně“. Postup zapnutí je níž. |
 | Korekce provedeného výdeje přes API | **Blokováno** | Dokumentace neříká, jak stornovat vystavený doklad. Korekce je proto vždy ručně doložená oprávněnou osobou. Původní operace v historii zůstává. |
 | Čtení skladových pohybů | **Blokováno** | Dotykačka je přes REST nedává (jen webhook). Appka proto výdej ověřuje dohledáním účtu, ne pohybu. |
@@ -47,9 +48,14 @@ Zdroj: oficiální dokumentace https://docs.api.dotypos.com/ (verze API
 
 ## Co musí proběhnout, než se zápis do Dotykačky zapne
 
-Zapnutí je změna jednoho řádku v kódu (`skladovyVydej: 'rucne'` →
-`'api'` v `lib/pokladna-dotykacka.ts` a připojení funkce
-`odeslatVydejDotykacka` k relaci). Smí se udělat **jen** když:
+Zapnutí v kódu: `skladovyVydej: 'api'` v `lib/pokladna-dotykacka.ts` a
+k relaci připojit `zapisVydejeDotykacka(kontext)` (převádí operaci appky na
+tvar, který čeká zápis Dotykačky — dřív se tvary nesešly a každý výdej by
+skončil chybou, kontrola 19. 10.). **Ještě chybí**: u pokladny připojené
+k jedné pobočce (`branch_id` u připojení) appka provozovnu u záznamu
+neukládá, takže operace by neměla cílovou provozovnu a zápis ji odmítne.
+Databáze ji musí doplnit z aktuálního přiřazení provozoven a odmítnout,
+když je jich nula nebo víc. Smí se zapnout **jen** když:
 
 1. Na **testovacím cloudu** Dotykačky (licence z 12. 10. 2026) se ověří:
    - že účet zaplacený *Odpisem* odečte suroviny podle receptury;
