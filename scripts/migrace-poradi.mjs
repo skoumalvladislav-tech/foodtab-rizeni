@@ -2,8 +2,10 @@
 /**
  * Migrace jen přibývají — a nová má razítko NOVĚJŠÍ než všechny v základu.
  *
- * Pusť: node scripts/migrace-poradi.mjs <základ> [--pracovni]
+ * Pusť: node scripts/migrace-poradi.mjs <základ> [--push] [--pracovni]
  *   <základ>    origin/main (u PR) nebo commit před pushem do main
+ *   --push      běh po pushi do main: základ musí být předek HEAD (jinak
+ *               force-push přepsal main) a porovnává se přímo základ..HEAD
  *   --pracovni  počítá i nezapsané změny v pracovní kopii (schválné
  *               rozbití na stroji bez commitu)
  *
@@ -19,6 +21,11 @@
  *      migration versions not found in local migrations directory".
  *      Upravená už sloučená migrace se nikdy znovu nespustí.
  *
+ * Kontrola běh jen OZNAČÍ červeně — zastavit sloučení umí jen povinná
+ * kontrola v nastavení repozitáře (ochrana větve main), kterou zapíná
+ * Šéfík. Před každým db push proto zkontrolovat poslední běh „Migrace
+ * jen přibývají" na main.
+ *
  * Když se základ nenačte (mělký checkout), skončí CHYBOU — prázdný seznam
  * migrací základu by jinak pustil cokoli.
  */
@@ -26,19 +33,36 @@
 import { execFileSync } from 'node:child_process'
 
 const ADRESAR = 'supabase/migrations/'
-const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
+// core.quotePath=false: jméno s diakritikou by git jinak vypsal v uvozovkách
+// s osmičkovými kódy („…_p\305\231…sql"") a kontrola by ho tiše přeskočila.
+const git = (...args) => execFileSync('git', ['-c', 'core.quotePath=false', ...args], { encoding: 'utf8' }).trim()
 const zakladRef = process.argv[2]
 const pracovni = process.argv.includes('--pracovni')
+const poPushi = process.argv.includes('--push')
 
 const konec = (zprava) => {
   console.error(`::error::${zprava}`)
   process.exit(1)
 }
 
+// Přerazítkovat jde jen migraci, která ještě NIKDE nasazená není.
+const RADA_RAZITKO = 'když ještě není v `supabase migration list --linked` (nenasazená), přerazítkuj ji — a jestli už je sloučená v main, červený běh kvůli přejmenování se pak vědomě přijme; když už nasazená je, nepřejmenovávat a zeptat se'
+
 if (!zakladRef) konec('Chybí základ (origin/main nebo commit před pushem).')
 let zaklad
 try {
-  zaklad = git('merge-base', 'HEAD', zakladRef)
+  if (poPushi) {
+    zaklad = git('rev-parse', '--verify', `${zakladRef}^{commit}`)
+    // Po force-pushi není dřívější main předkem nového — porovnání přes
+    // společného předka by smazanou migraci nevidělo.
+    try {
+      git('merge-base', '--is-ancestor', zaklad, 'HEAD')
+    } catch {
+      konec(`Force-push přepsal main: ${zaklad.slice(0, 7)} není předek ${git('rev-parse', '--short', 'HEAD')} — migrace mohly zmizet z historie. Zkontrolovat ručně (git diff ${zaklad.slice(0, 7)} HEAD -- ${ADRESAR}).`)
+    }
+  } else {
+    zaklad = git('merge-base', 'HEAD', zakladRef)
+  }
 } catch {
   konec(`Základ „${zakladRef}" nenalezen — checkout potřebuje celou historii (fetch-depth: 0).`)
 }
@@ -59,12 +83,12 @@ const chyby = []
 for (const [druh, a, b] of zmeny) {
   if (!a.endsWith('.sql') && !(b ?? '').endsWith('.sql')) continue
   if (druh === 'D') chyby.push(`smazaná migrace ${a} — po db push se soubor mazat nesmí (návrat zpět: vrátit kód BEZ souboru migrace)`)
-  else if (druh.startsWith('R')) chyby.push(`přejmenovaná migrace ${a} → ${b} — sloučená migrace se nepřejmenovává`)
+  else if (druh.startsWith('R')) chyby.push(`přejmenovaná migrace ${a} → ${b} — sloučená migrace se nepřejmenovává (výjimka: přerazítkování nenasazené migrace po sloučení ve špatném pořadí — ${RADA_RAZITKO})`)
   else if (druh === 'M') chyby.push(`upravená migrace ${a} — sloučená migrace se neupravuje, přidej novou`)
   else if (druh === 'A') {
     const r = razitko(a)
     if (!r) chyby.push(`${a}: jméno bez razítka RRRRMMDDHHMMSS_`)
-    else if (r <= nejnovejsi) chyby.push(`${a}: razítko ${r} není novější než poslední v main (${nejnovejsi}) — db push by ji odmítl, přerazítkuj ji`)
+    else if (r <= nejnovejsi) chyby.push(`${a}: razítko ${r} není novější než poslední v main (${nejnovejsi}) — db push by ji odmítl; ${RADA_RAZITKO}`)
   }
 }
 

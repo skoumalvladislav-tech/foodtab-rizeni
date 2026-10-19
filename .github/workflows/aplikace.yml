@@ -35,6 +35,7 @@ on:
       - 'next.config.ts'
       - 'proxy.ts'
       - '.github/workflows/aplikace.yml'
+      - 'docs/hlaseni/otazky.md'
   pull_request:
     paths:
       - 'app/**'
@@ -50,6 +51,7 @@ on:
       - 'next.config.ts'
       - 'proxy.ts'
       - '.github/workflows/aplikace.yml'
+      - 'docs/hlaseni/otazky.md'
 
 permissions:
   contents: read

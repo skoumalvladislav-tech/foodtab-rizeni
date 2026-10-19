@@ -9,8 +9,14 @@
  * strany" by v souboru byly dvě otázky 58 a Šéfíkova odpověď „k 58" by
  * se dala vztáhnout k té druhé. Hlídá i zbylé značky konfliktu.
  *
+ * Číselný nadpis musí mít PŘESNĚ tvar „## N. název" — jinak by duplicitu
+ * v odchylném tvaru („## 58 —", „##58.", „### 58.", „## 58)") vzor
+ * nenašel a kontrola by mlčela.
+ *
  * Pojistka proti kontrole naprázdno: když vzor nadpisů najde méně než
  * 40 otázek, je to chyba (ne „žádné duplicity").
+ *
+ * Běží ve workflow Aplikace, i když se mění jen otazky.md (paths).
  */
 
 import { readFileSync } from 'node:fs'
@@ -27,11 +33,15 @@ const ok = (popis, podminka) => {
 console.log(`\nČísla otázek v ${soubor}`)
 const nadpisy = [...text.matchAll(/^## (\d+)\. (.*)$/gm)].map((m) => ({ cislo: Number(m[1]), nazev: m[2] }))
 ok(`nalezeno ${nadpisy.length} otázek (aspoň 40 — jinak vzor nic nenašel)`, nadpisy.length >= 40)
+const odchylne = text.split('\n').filter((r) => /^#{1,6}\s*\d+/.test(r) && !/^## \d+\. \S/.test(r))
+ok(`každý číselný nadpis má tvar „## N. název"${odchylne.length ? ' — ODCHYLNÉ: ' + odchylne.join(' | ') : ''}`, odchylne.length === 0)
 const podleCisla = new Map()
 for (const n of nadpisy) podleCisla.set(n.cislo, [...(podleCisla.get(n.cislo) ?? []), n.nazev])
 const dvakrat = [...podleCisla].filter(([, nazvy]) => nazvy.length > 1)
 ok(`žádné číslo dvakrát${dvakrat.length ? ' — ' + dvakrat.map(([c, n]) => `${c}: ${n.join(' / ')}`).join('; ') : ''}`, dvakrat.length === 0)
-ok('žádná značka konfliktu (<<<<<<< / ======= / >>>>>>>)', !/^(<{7}|={7}|>{7})( |$)/m.test(text))
+// „=======" sám je i podtržení nadpisu v Markdownu — za konflikt se bere
+// jen začátek nebo konec konfliktu.
+ok('žádná značka konfliktu (<<<<<<< … >>>>>>>)', !/^(<{7}|>{7})( |$)/m.test(text))
 
 console.log(chyb ? `\n${chyb} chyb` : '\nVšechno sedí')
 process.exit(chyb ? 1 : 0)
