@@ -74,7 +74,7 @@ ji jen nerovnoměrné plány, které jsem kvůli tomu přidal.
    Nejrychlejší odpověď: `select * from app.planovac_stav();` v SQL Editoru
    — `v_cronu` true a `posledni_kod` 200 u všech 9.
 2. Review a sloučení PR hlídače, pak **db push** migrace
-   `20261017100000_planovac_hlidac`.
+   `20261019120000_planovac_hlidac`.
 3. **Zhruba 4,5 h po `naplanovat_ulohy()`** (dřív nemá banka, která jede
    jednou za 4 h, za sebou ani první volání): Actions → **Plánovač —
    hlídač** → *Run workflow*. Zelená = plánovač běží. Červená vypíše, co
@@ -165,6 +165,20 @@ libovolně dlouho, musí mít horní mez — jinak je to díra, ne tolerance.
 
 Hlídač je celý (migrace, adresa, workflow, kontroly, návod). Vypnutí
 `schedule` na GitHubu čeká na zelený hlídač.
+
+## Doplněno 19. 10. — přerazítkovaná migrace
+
+Migrace hlídače se jmenuje **`20261019120000_planovac_hlidac.sql`** (do
+19. 10. `20261017100000`). Důvod: #145 se sloučí až po zapnutí plánovače
+v Supabase, kdežto #146 (`20261016100000`) a #147 (`20261018100000`)
+půjdou dřív. Se starším razítkem by db push po nasazení #147 migraci
+hlídače odmítl (lokální migrace starší než poslední nasazená). Obsah
+migrace se nezměnil; přejmenované jsou i odkazy v krok97, návodu,
+workflow, adrese hlídače a testu.
+
+Kdyby se #145 slučovala až po dalších PR s pozdějšími migracemi, je
+potřeba přerazítkovat znovu — razítko musí být novější než poslední
+nasazená migrace.
 
 ## Nenasazoval jsem
 

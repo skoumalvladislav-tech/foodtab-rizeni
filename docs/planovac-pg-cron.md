@@ -208,7 +208,7 @@ select app.zrusit_planovac();
 
 ## 7. Hlídač plánovače
 
-Migrace `20261017100000_planovac_hlidac.sql`, adresa `/api/planovac/hlidac`,
+Migrace `20261019120000_planovac_hlidac.sql`, adresa `/api/planovac/hlidac`,
 workflow `.github/workflows/planovac-hlidac.yml`, rozhodování
 v `lib/planovac-hlidac.ts`, scénář `krok97`.
 

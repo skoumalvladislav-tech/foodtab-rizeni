@@ -69,7 +69,7 @@ jobs:
               exit 1 ;;
             503)
               if grep -q '"stav":"ceka_na_migraci"' telo.json; then
-                echo "::error::Migrace 20261017100000_planovac_hlidac ještě není nasazená (db push)."
+                echo "::error::Migrace 20261019120000_planovac_hlidac ještě není nasazená (db push)."
               fi
               exit 1 ;;
             *)

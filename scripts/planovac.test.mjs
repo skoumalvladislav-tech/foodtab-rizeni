@@ -291,7 +291,7 @@ for (const [uloha, p] of plan) {
 
 /* --- hlídač plánovače ---------------------------------------------------- */
 
-// Migrace 20261017100000_planovac_hlidac, adresa app/api/planovac/hlidac,
+// Migrace 20261019120000_planovac_hlidac, adresa app/api/planovac/hlidac,
 // workflow planovac-hlidac.yml. pg_cron sám nikomu nenapíše, když
 // přestane volat — tohle je jediné místo, které to pozná.
 console.log('\nHlídač plánovače')
@@ -520,7 +520,7 @@ ok('prázdný seznam úloh → problém', problemyPlanovace([], TED).length === 
       b.status === 1 && b.vystup.includes('::error::pokladna-synchronizace: poslední odpověď HTTP 500'))
 
     const c = spustit(503, { stav: 'ceka_na_migraci' })
-    ok('workflow: 503 čeká na migraci → červený a řekne to', c.status === 1 && c.vystup.includes('::error::Migrace 20261017100000'))
+    ok('workflow: 503 čeká na migraci → červený a řekne to', c.status === 1 && c.vystup.includes('::error::Migrace 20261019120000'))
 
     const d = spustit(503, { chyba: 'Hlídač není nastavený — chybí SUPABASE_SERVICE_ROLE_KEY.' })
     ok('workflow: 503 s polem chyba → červený a důvod jako ::error::',

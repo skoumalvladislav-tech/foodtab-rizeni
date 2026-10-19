@@ -8,7 +8,7 @@ import { klientUlohy, tajemstviSedi } from '@/lib/supabase/uloha'
  * Hlídač plánovače úloh: volá databáze úlohy, jak má?
  *
  * Rozhodnutí je v `lib/planovac-hlidac.ts`, data z
- * `public.planovac_zdravi()` (migrace 20261017100000_planovac_hlidac).
+ * `public.planovac_zdravi()` (migrace 20261019120000_planovac_hlidac).
  * Volá to `.github/workflows/planovac-hlidac.yml` a při 503 zčervená —
  * GitHub pak pošle e-mail, což pg_cron sám neumí.
  *

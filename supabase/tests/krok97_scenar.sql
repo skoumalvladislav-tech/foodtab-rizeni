@@ -1,6 +1,6 @@
 -- Scénář pro krok 97 — hlídač plánovače úloh: `public.planovac_zdravi()`.
 --
--- Migrace: 20261017100000_planovac_hlidac.sql (navazuje na krok96).
+-- Migrace: 20261019120000_planovac_hlidac.sql (navazuje na krok96).
 -- Rozhodování hlídače (co je problém) a adresu `/api/planovac/hlidac`
 -- hlídá scripts/planovac.test.mjs.
 --
