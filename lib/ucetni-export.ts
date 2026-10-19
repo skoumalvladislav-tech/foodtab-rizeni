@@ -16,6 +16,8 @@
  * (app/api/ucetni/export/route.ts), která si data načte ze Supabase.
  */
 
+import { csvBunka } from './csv-bunka.ts'
+
 export type SmerTransakce = 'prijem' | 'vydaj' | 'prevod_dovnitr' | 'prevod_ven'
 
 export type ZdrojovaTransakce = {
@@ -106,11 +108,6 @@ export function sestavitRadkyExportu(
   return radky.sort((a, b) => (a.datum === b.datum ? a.doklad.localeCompare(b.doklad) : a.datum < b.datum ? -1 : 1))
 }
 
-function csvBunka(hodnota: string | number | null | undefined): string {
-  const s = hodnota === null || hodnota === undefined ? '' : String(hodnota)
-  if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
 
 const SLOUPCE: { hlavicka: string; z: (r: RadekExportu) => string | number }[] = [
   { hlavicka: 'Doklad', z: (r) => r.doklad },

@@ -44,6 +44,13 @@ export const STAV_NEUHRAZENO = 'Neuhrazeno'
 export const STAV_CASTECNE = 'Částečně uhrazeno'
 export const STAV_KE_KONTROLE = 'Ke kontrole úhrady'
 export const STAV_KE_SCHVALENI = 'Ke schválení'
+
+/**
+ * Stavy a měny, které smí mít RUČNĚ zadaná faktura (Faktury → Nová).
+ * Akce je ověřuje na serveru — formulář jde poslat i podvržený.
+ */
+export const STAVY_RUCNIHO_ZADANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno', 'Uhrazeno']
+export const MENY_RUCNIHO_ZADANI: readonly string[] = ['CZK', 'EUR', 'USD']
 export const STAV_ODMITNUTO = 'Odmítnuto'
 
 /**

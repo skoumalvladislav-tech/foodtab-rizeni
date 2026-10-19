@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url'
 
 import { jeVlastnikFakturyDb } from '../lib/faktury-vlastnik.ts'
 import { FILTR_KE_KONTROLE, potrebujeKontrolu } from '../lib/faktury-types.ts'
-import { hlaskaBrany, rozhodnoutBranu } from '../lib/faktury-brana.ts'
+import { hlaskaBrany, prazdnoPozornosti, rozhodnoutBranu } from '../lib/faktury-brana.ts'
 
 const KOREN = fileURLToPath(new URL('..', import.meta.url))
 
@@ -115,6 +115,17 @@ console.log('\n4. Brána: otevřeno jen po dokončení převodu')
   ok('tabulka chybí (kód je venku dřív než db push) → připravuje se', r(null, { code: 'PGRST205' }).stav === 'nepripraveno' && r(null, { code: '42P01' }).stav === 'nepripraveno')
   ok('jiná chyba → zavřeno (při nejistotě se odmítá)', r(null, { code: '57014' }).stav === 'chyba')
   ok('neznámý stav → zavřeno', r({ stav: 'ceka' }).stav === 'chyba')
+  // Finance → Přehled: se zavřenými Fakturami nebo chybou dotazu ne „Nic
+  // nevyžaduje pozornost" (kontrola 19. 10.). Jen firma bez Faktur smí „nic".
+  const zavrene = [{ stav: 'nepripraveno' }, { stav: 'chyba' }, ...['ceka_na_prevod', 'probiha', 'vraceno'].map((d) => ({ stav: 'zavreno', duvod: d }))]
+  ok('Přehled: každé zavření má větu s nadpisem brány', zavrene.every((r) => (prazdnoPozornosti(r) ?? '').includes(hlaskaBrany(r).nadpis)))
+  ok('Přehled: chyba dotazu má větu, firma bez Faktur ne (tam je „nic" pravda)',
+    (prazdnoPozornosti({ stav: 'chyba_dotazu' }) ?? '').length > 20 && prazdnoPozornosti({ stav: 'zavreno', duvod: 'nezapnuto' }) === null)
+  const prehled = soubory.find((s) => s.cesta === 'app/[rozsah]/finance/page.tsx')?.zdroj ?? ''
+  const pozornost = soubory.find((s) => s.cesta === 'lib/finance-pozornost.ts')?.zdroj ?? ''
+  ok('Přehled: prázdný seznam bere větu z načítání (pozornost.hlaska), ne pevné „nic"',
+    prehled.includes("(pozornost.hlaska ?? 'Nic nevyžaduje pozornost.')") && pozornost.length > 0)
+  ok('Přehled: načítání nikde nevrací holé [] (chyba ≠ nula)', pozornost.length > 0 && !/return \[\]/.test(pozornost))
   ok('každé zavření má větu pro člověka', ['nepripraveno', 'chyba'].every((s) => hlaskaBrany({ stav: s }).nadpis.length > 0)
     && ['ceka_na_prevod', 'nezapnuto', 'probiha', 'vraceno'].every((d) => hlaskaBrany({ stav: 'zavreno', duvod: d }).text.length > 20))
 

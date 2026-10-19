@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { podepsatPrilohu } from '@/lib/faktury-priloha-odkaz'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 
 export const dynamic = 'force-dynamic'
@@ -46,10 +47,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const cesta = (data as unknown as { priloha_cesta: string | null } | null)?.priloha_cesta
   if (!cesta) return odpoved('Soubor neexistuje.', 404)
 
-  const { data: podepsano } = await pristupFaktury.supabase.storage.from('faktury-prilohy').createSignedUrl(cesta, PLATNOST_ODKAZU_S)
-  if (!podepsano?.signedUrl) return odpoved('Soubor se nepodařilo otevřít.', 404)
+  // PDF a obrázek se otevře, cokoli jiného (XML…) stáhne — lib/faktury-priloha-odkaz.ts.
+  const odkaz = await podepsatPrilohu(pristupFaktury.supabase.storage.from('faktury-prilohy'), cesta, PLATNOST_ODKAZU_S)
+  if (!odkaz) return odpoved('Soubor se nepodařilo otevřít.', 404)
 
-  const presmerovani = NextResponse.redirect(podepsano.signedUrl, 302)
+  const presmerovani = NextResponse.redirect(odkaz, 302)
   presmerovani.headers.set('cache-control', 'no-store')
   presmerovani.headers.set('referrer-policy', 'no-referrer')
   return presmerovani

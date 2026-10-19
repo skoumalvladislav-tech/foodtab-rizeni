@@ -11,7 +11,7 @@ import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
-import { jeVracena, navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type Navrh } from '@/lib/finance-parovani'
+import { jeVKorunach, jeVracena, kandidatiProNavrhy, navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type Navrh } from '@/lib/finance-parovani'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { CELA_FIRMA, nazevPobockyUctu, volbyPobockyUctu, type PobockaFirmy } from '@/lib/finance-platby-pobocka'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
@@ -235,12 +235,13 @@ async function nactiNavrhyParovani(
     castkaHaleru: f.castka_haleru,
     dodavatel: f.supplier,
     datum: f.due_date ?? f.issue_date,
+    mena: f.currency,
   })
   // Ruční párování nabízí všechny; NÁVRHY jen faktury v Kč — platby jsou
   // v Kč a centy eurové faktury by se porovnaly s haléři (stejně jako
   // automatické párování, vybratAutomatickaParovani).
   const kandidati: KandidatFaktura[] = faktury.map(naKandidata)
-  const kandidatiNavrhu: KandidatFaktura[] = faktury.filter((f) => f.currency === 'CZK').map(naKandidata)
+  const kandidatiNavrhu: KandidatFaktura[] = kandidatiProNavrhy(faktury)
 
   const vysledky: { navrh: Navrh; faktura: KandidatFaktura }[] = []
   for (const t of transakce) {
@@ -499,7 +500,7 @@ export default async function FinancePlatby({
                   <option value="" disabled>— vyberte —</option>
                   {fakturyKandidati.map((f) => (
                     <option key={f.id} value={f.id}>
-                      {f.dodavatel ?? '—'} · {koruny(f.castkaHaleru)}{f.vs ? ` · VS ${f.vs}` : ''}
+                      {f.dodavatel ?? '—'} · {jeVKorunach(f.mena) ? koruny(f.castkaHaleru) : `${(f.castkaHaleru / 100).toFixed(2).replace('.', ',')} ${f.mena}`}{f.vs ? ` · VS ${f.vs}` : ''}
                     </option>
                   ))}
                 </select>

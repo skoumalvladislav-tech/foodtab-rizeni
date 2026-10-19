@@ -7,6 +7,7 @@ import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
 import { naFaktury, odkazNaPrilohu, SLOUPCE_FAKTURY, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
+import { csvBunka } from '@/lib/csv-bunka'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,11 +26,6 @@ export const dynamic = 'force-dynamic'
  * firmy (kontrola 13. 10. 2026). Právo se ověřuje vždy za celou firmu.
  */
 
-function csvBunka(hodnota: string | number | null | undefined): string {
-  const s = hodnota === null || hodnota === undefined ? '' : String(hodnota)
-  if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
 
 /** Původ adresy appky pro absolutní odkazy v CSV (relativní by v Excelu nikam nevedl). */
 function zakladOdkazu(request: Request): string {

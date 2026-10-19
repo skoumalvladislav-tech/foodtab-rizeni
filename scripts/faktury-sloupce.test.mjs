@@ -15,6 +15,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { halereZFormulare, naFakturu, odkazNaPrilohu, SLOUPCE_FAKTURY } from '../lib/faktury-sloupce.ts'
+import { podepsatPrilohu } from '../lib/faktury-priloha-odkaz.ts'
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -99,6 +100,33 @@ console.log('\n3. Odkaz na soubor faktury')
   ok('bez kopie → původní odkaz', odkazNaPrilohu({ id, priloha_cesta: null, pdf_url: 'https://stara/x.pdf' }) === 'https://stara/x.pdf')
   ok('relativní odkaz příjmu → v CSV absolutní', odkazNaPrilohu({ id, priloha_cesta: null, pdf_url: '/api/faktury/priloha/abc' }, 'https://app.cz') === 'https://app.cz/api/faktury/priloha/abc')
   ok('nic → null', odkazNaPrilohu({ id, priloha_cesta: null, pdf_url: null }) === null)
+}
+
+console.log('\n4. Příloha: PDF a obrázek se otevře, XML a cokoli jiného stáhne')
+{
+  // Podvržený kbelík: zapamatuje si volby podepsaného odkazu.
+  const kbelik = (contentType, chybaInfo = false) => {
+    const k = {
+      volby: 'nezavoláno',
+      info: async () => (chybaInfo ? { data: null, error: new Error('nedostupné') } : { data: { contentType }, error: null }),
+      createSignedUrl: async (_cesta, _s, volby) => { k.volby = volby; return { data: { signedUrl: 'https://x/podepsano' }, error: null } },
+    }
+    return k
+  }
+  const stahne = async (k, cesta) => { await podepsatPrilohu(k, cesta, 120); return k.volby?.download === true }
+  const xml = kbelik('application/xml')
+  ok('XML se stáhne (download)', await stahne(xml, 't/abc.xml'))
+  ok('XML schované za příponou .pdf se taky stáhne (rozhoduje uložený typ)', await stahne(kbelik('application/xml'), 't/rucne/x.pdf'))
+  ok('SVG a text/html se stáhnou', await stahne(kbelik('image/svg+xml'), 't/a.svg') && await stahne(kbelik('text/html'), 't/a.html'))
+  ok('když se typ nedá zjistit, stáhne se', await stahne(kbelik(null, true), 't/a.pdf'))
+  // Kladná kontrola: jinak by výš prošla i funkce, která stahuje vždycky.
+  const pdf = kbelik('application/pdf; charset=binary')
+  ok('PDF se otevře v prohlížeči (bez download)', !(await stahne(pdf, 't/a.pdf')) && pdf.volby === undefined)
+  ok('JPEG, PNG a WebP se otevřou', !(await stahne(kbelik('image/jpeg'), 'a')) && !(await stahne(kbelik('image/png'), 'a')) && !(await stahne(kbelik('image/webp'), 'a')))
+  for (const cesta of ['app/api/faktury/soubor/[id]/route.ts', 'app/api/faktury/priloha/[id]/route.ts']) {
+    const zdroj = readFileSync(cesta, 'utf8')
+    ok(`${cesta}: odkaz jen přes podepsatPrilohu`, zdroj.includes('podepsatPrilohu(') && !zdroj.includes('createSignedUrl('))
+  }
 }
 
 console.log(chyb ? `\n${chyb} chyb` : '\nVšechno sedí')

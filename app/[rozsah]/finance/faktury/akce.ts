@@ -7,7 +7,7 @@ import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { fakturyFirmy, pristupKFakturam, type PristupKFakturam } from '@/lib/faktury-pristup'
 import { halereZFormulare } from '@/lib/faktury-sloupce'
 import { typPrilohy, MAX_VELIKOST_PRILOHY } from '@/lib/faktury-prevod'
-import { STAV_KE_SCHVALENI, STAV_UHRAZENO } from '@/lib/faktury-types'
+import { MENY_RUCNIHO_ZADANI, STAV_KE_SCHVALENI, STAV_UHRAZENO, STAVY_RUCNIHO_ZADANI } from '@/lib/faktury-types'
 import { klientUlohy } from '@/lib/supabase/uloha'
 import { STAVY_PRO_RUCNI_UHRAZENI, stavPoVraceni } from '@/lib/finance-parovani'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
@@ -76,6 +76,13 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
   if (!dodavatel || castkaHaleru === null) {
     chyba('Vyplňte dodavatele a částku (nejvýš dvě desetinná místa).')
   }
+  // Stav a měna jen z nabídky formuláře — podvržený formulář by jinak
+  // založil fakturu rovnou „Uhrazeno" s libovolnou měnou.
+  const stav = nepovinnePole(formData, 'status') || 'Ke kontrole úhrady'
+  const mena = nepovinnePole(formData, 'currency') || 'CZK'
+  if (!STAVY_RUCNIHO_ZADANI.includes(stav) || !MENY_RUCNIHO_ZADANI.includes(mena)) {
+    chyba('Neplatný stav nebo měna faktury.')
+  }
 
   // Fotka/PDF do SOUKROMÉHO kbelíku (dřív veřejný faktury-pdf ve staré
   // databázi, otázka 46), do vlastní složky <firma>/rucne/ — typ podle
@@ -107,12 +114,12 @@ export async function zalozitFakturu(formData: FormData): Promise<void> {
     cislo_faktury: nepovinnePole(formData, 'invoice_number'),
     variabilni_symbol: nepovinnePole(formData, 'variable_symbol'),
     castka_haleru: castkaHaleru,
-    mena: nepovinnePole(formData, 'currency') || 'CZK',
+    mena,
     datum_vystaveni: nepovinnePole(formData, 'issue_date'),
     duzp: nepovinnePole(formData, 'duzp'),
     splatnost: nepovinnePole(formData, 'due_date'),
     ucet_dodavatele: nepovinnePole(formData, 'supplier_account'),
-    stav: nepovinnePole(formData, 'status') || 'Ke kontrole úhrady',
+    stav,
     ke_kontrole: false,
     odkaz_onedrive: nepovinnePole(formData, 'onedrive_url'),
     priloha_cesta: prilohaCesta,
@@ -276,8 +283,10 @@ export async function potvrditFakturu(formData: FormData): Promise<void> {
   const id = String(formData.get('id') ?? '')
   const p = await pripravit(rozsah, 'faktury.manage')
 
+  // Jen dokument z fronty ke schválení — podvržený formulář by jinak vrátil
+  // do „Ke kontrole úhrady" i fakturu uhrazenou párováním plateb.
   await p.supabase.from('faktury').update({ stav: 'Ke kontrole úhrady', poznamka_kontroly: null })
-    .eq('tenant_id', p.tenantId).eq('id', id)
+    .eq('tenant_id', p.tenantId).eq('id', id).eq('stav', STAV_KE_SCHVALENI)
   revalidatePath(`/${rozsah}/finance/faktury`)
   redirect(`/${rozsah}/finance/faktury/schvaleni`)
 }

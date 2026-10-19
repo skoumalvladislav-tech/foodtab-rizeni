@@ -893,7 +893,9 @@ create policy faktury_prijem_select on public.faktury_prijem for select to authe
 -- Ruční nahrání fotky/PDF k faktuře. Dřív šlo do VEŘEJNÉHO kbelíku
 -- faktury-pdf ve staré databázi (otázka 46). Jen vložení do vlastní
 -- složky rucne/: přepsat (upsert) ani smazat přihlášený nemůže — na to tu
--- politika není. Typy a velikost hlídá kbelík (10 MB; PDF, JPEG, PNG, WebP).
+-- politika není. Velikost hlídá kbelík (10 MB). Typ kbelík hlídá jen
+-- zčásti (bere i XML z příjmu e-mailem) — XML a cokoli kromě PDF a obrázku
+-- appka proto vždy dává ke STAŽENÍ, ne k otevření (lib/faktury-priloha-odkaz.ts).
 create policy faktury_prilohy_insert on storage.objects for insert to authenticated
   with check (
     bucket_id = 'faktury-prilohy'

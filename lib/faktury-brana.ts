@@ -16,7 +16,7 @@
  *                    `db push` — „Faktury se připravují").
  *   jiná chyba     → zavřeno (při nejistotě se odmítá, authz pravidlo 2).
  *
- * Bez `server-only`, ať jde testovat Nodem (scripts/faktury-brana.test.mjs).
+ * Bez `server-only`, ať jde testovat Nodem (scripts/faktury-tenant-izolace.test.mjs, oddíl 4).
  */
 
 import { jeVlastnikFakturyDb } from './faktury-vlastnik.ts'
@@ -58,6 +58,19 @@ export function rozhodnoutBranu(
   }
   // Neznámý stav = nejistota → zavřeno.
   return { stav: 'chyba' }
+}
+
+/**
+ * Věta místo „Nic nevyžaduje pozornost" na Finance → Přehled, když se
+ * nic zjistit nedalo: Faktury zavřené (stěhují se, vrácené, připravují
+ * se, chyba) nebo selhal dotaz. null = firma Faktury nepoužívá (nezapnuto)
+ * — tam je „nic" pravda. Stejné věty jako na Dnes.
+ */
+export function prazdnoPozornosti(r: Exclude<RozhodnutiBrany, { stav: 'ok' }> | { stav: 'chyba_dotazu' }): string | null {
+  if (r.stav === 'chyba_dotazu') return 'Faktury ke kontrole a návrhy párování se nepodařilo načíst — zkuste stránku obnovit.'
+  if (r.stav === 'zavreno' && r.duvod === 'nezapnuto') return null
+  const stehuji = r.stav === 'zavreno' && (r.duvod === 'probiha' || r.duvod === 'ceka_na_prevod')
+  return `${hlaskaBrany(r).nadpis} — párování plateb a faktury ke kontrole ${stehuji ? 'se ukážou po dokončení' : 'teď nejde zjistit'}.`
 }
 
 /** Co říct na obrazovce, když jsou Faktury zavřené. */

@@ -7,6 +7,7 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import { zalozitFakturu } from '../akce'
+import { MENY_RUCNIHO_ZADANI, STAVY_RUCNIHO_ZADANI } from '@/lib/faktury-types'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +40,6 @@ const pole = {
 
 const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const
 
-const STAVY_UHRADY = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno', 'Uhrazeno']
 
 export default async function FakturyNova({
   params,
@@ -121,15 +121,13 @@ export default async function FakturyNova({
             <label>
               <span style={popisek}>Měna</span>
               <select name="currency" defaultValue="CZK" style={pole}>
-                <option value="CZK">CZK</option>
-                <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
+                {MENY_RUCNIHO_ZADANI.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </label>
             <label>
               <span style={popisek}>Stav úhrady</span>
               <select name="status" defaultValue="Ke kontrole úhrady" style={pole}>
-                {STAVY_UHRADY.map((s) => <option key={s} value={s}>{s}</option>)}
+                {STAVY_RUCNIHO_ZADANI.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
             <label>
