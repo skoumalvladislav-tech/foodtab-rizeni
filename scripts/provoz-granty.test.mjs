@@ -409,5 +409,24 @@ for (const [s, p] of VYJIMKY_FUNKCI) {
     funkce.nedostatky.some((n) => n.jmeno === s && n.podpis === p))
 }
 
+/* =====================================================================
+   JINÉ PLATBY — zápis jen funkcemi, takže authenticated nemá ani
+   insert/update/delete (druhá linie vedle RLS bez zápisových politik).
+   V čisté databázi z run.sh to krok98 neověří: bez výchozích práv
+   Supabase dá `create table` roli authenticated nic, ať revoke je, nebo
+   není (kontrola 19. 10.). Hlídá se proto text migrace.
+   ===================================================================== */
+console.log('\n== Jiné platby: authenticated bez insert/update/delete ==\n')
+
+const MIGRACE_JINE_PLATBY = soubory.find((s) => s.endsWith('_jine_platby.sql'))
+const kodJinychPlateb = MIGRACE_JINE_PLATBY ? bezKomentaru(fs.readFileSync(path.join(SLOZKA, MIGRACE_JINE_PLATBY), 'utf8')) : ''
+const tabulkyJinychPlateb = [...kodJinychPlateb.matchAll(/create\s+table\s+public\.(\w+)/gi)].map((m) => m[1])
+ok('migrace Jiných plateb zakládá 10 tabulek (jinak kontrola pod tím nic nehlídá)', tabulkyJinychPlateb.length === 10)
+for (const t of tabulkyJinychPlateb) {
+  for (const pravo of ['insert', 'update', 'delete']) {
+    ok(`${t} odebírá ${pravo} roli authenticated`, odebranoPravo(t, pravo, 'authenticated'))
+  }
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

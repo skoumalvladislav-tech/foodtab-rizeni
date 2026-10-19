@@ -1,6 +1,6 @@
 # Jiné platby: co appka umí s pokladnou
 
-Stav k 18. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
+Stav k 19. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
 Technický návrh je v `docs/jine-platby-navrh.md`.
 
 **Tahle agenda zatím nic neprovedla v žádné skutečné pokladně.** Nic
@@ -85,6 +85,11 @@ Nový konektor dodá svůj adaptér a obrazovka ani databáze se nemění.
 | Schválení platí jen pro tu verzi návrhu, kterou schvalovatel viděl | otisk obsahu v `jine_platby_skladove_navrhy` (produkt + množství + pokladna); nová nejasná položka návrh zneplatní (`zmena`) |
 | Schválit jde jen zkontrolovaný záznam bez nevyřešených položek | `jine_platby_rozhodnout_vydej` |
 | Druhý výdej téže sjetiny (jinak vyfocené) chce důvod | `app.jp_mozne_duplicity` (stejná pobočka + den + částka, nebo číslo účtu ±7 dní) |
-| Během ručního odpisu se výdej nezmění ani nezruší; uvolní ho jen oprávněná osoba | `jine_platby_ulozit_navrh`, `jine_platby_zrusit`, `jine_platby_zrusit_schvaleni` |
+| Schválený výdej (i když provedení selhalo) a výdej čekající na ruční odpis se nezmění ani nezruší; uvolní ho jen oprávněná osoba | `jine_platby_ulozit_navrh`, `jine_platby_zrusit`, `jine_platby_zrusit_schvaleni` |
+| Ruční doložení ne s nevyřešenou položkou (neodečetla by se nikdy) | `jine_platby_rucne_dolozit_vydej` |
+| Výdej jen s produkty z katalogu pokladny (id a název nejdou z prohlížeče) | blokace v `app.jp_sestavit_vydej`, `jine_platby_ulozit_mapovani` |
+| Kontrola ani výdej nepracují s provozovnou, kterou v Integracích přeřadili jiné pobočce | `app.jp_pokladna_obsluhuje` v sestavení výdeje a v `jine_platby_zapsat_kontrolu` |
+| Ruční prohlášení nepřepíše opačný výsledek z pokladny (kromě práva na opravy) | `jine_platby_prohlasit` |
+| Pokrm a další zboží v jednom výdeji: varování pro schvalovatele (receptury appka nezná) | `varovani` z `jine_platby_sestavit_vydej` |
 | Kontrola „už odečteno?“ se opakuje těsně před schválením a před odesláním | platnost 15 minut, vázaná na verzi záznamu |
 | Klíče pokladny jen na serveru | `lib/pokladna-relace.ts` (`server-only`, service_role po ověření práva) |

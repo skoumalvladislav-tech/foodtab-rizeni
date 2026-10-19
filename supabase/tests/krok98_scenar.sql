@@ -1409,8 +1409,8 @@ select pg_temp.check('druhá linie: katalog s pokladnou cizí firmy neprojde',
     :'tenant', :'cizi_pos', 'X', 'X'), '23514', 'Pokladna nepatří'));
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
-select pg_temp.check('majitel nenapáruje platbu cizí firmy (a nedozví se její částku)',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 100)', :'z13', :'t_cizi'), '23514', 'nepatří této firmě'));
+select pg_temp.check('majitel nenapáruje platbu cizí firmy a z hlášky se nedozví nic o její částce',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 200)', :'z13', :'t_cizi'), '23514', 'Platba nepatří této firmě'));
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
 select pg_temp.check('skladník (bez práva zadat/upravit) nenahraje doklad ani do cesty své pobočky',
   not pg_temp.projde(format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)',

@@ -79,6 +79,7 @@ Peníze jsou `*_haleru integer`, množství `numeric(12,3)`.
 | `uhrada_transakce_id`, `uhrada_castka_haleru` | | |
 | `kontrola_trzby`, `kontrola_skladu` | jsonb null | poslední kontrola proti pokladně (3.7) |
 | `duplicita` | jsonb null | rozhodnutí člověka „není to duplicita“ s důvodem |
+| `upozorneni_dokladu` | jsonb pole textů | upozornění AI k celému dokladu (nízká jistota, víc dokladů, pokyn v textu…); dokud nějaké je, záznam je „ke kontrole“ a „zkontrolováno“ chce výslovné „prověřeno“; ruční uložení je nesmaže |
 | `verze` | integer | roste s každou změnou návrhu |
 | `vytvoril`, `vytvoreno`, `zmeneno` | | |
 
@@ -91,8 +92,11 @@ jednomu záznamu.** Druhá fotka téže sjetiny se na něj nepropojí.
 `zaznam_id`, `branch_id`, `poradi`, `cesta` (unikátní,
 `<tenant>/<pobočka>/<záznam>/<uuid>.<přípona>`), `mime` (jpeg/png/webp/pdf),
 `velikost` (≤ 10 MB), `otisk` (sha256, počítá server ze stažených bajtů),
-`nahral`, `nahrano`. Unikát `(tenant_id, otisk)`: **tentýž soubor nejde
-připojit ke dvěma záznamům.** Nejvýš 10 souborů na záznam.
+`nahral`, `nahrano`. Unikát `(tenant_id, otisk)` nad živými soubory: **tentýž
+soubor nejde připojit ke dvěma živým záznamům.** Nejvýš 10 souborů na záznam.
+Zapsat soubor (a tím otisk) smí jen server: `jine_platby_pripojit_soubor`
+má jen `service_role` (kontrola 19. 10. — přihlášený by jinak poslal
+vymyšlený otisk a tutéž fotku připojil podruhé).
 
 Kbelík `jine-platby` je soukromý, 10 MB a 4 typy. Politiky:
 - číst smí, kdo vidí záznamy pobočky;
@@ -147,7 +151,10 @@ ne prohlížeč:
 - zablokuje se, když je nějaká položka nezařazená, nenamapovaná nebo bez množství.
 
 Pokrm s recepturou se vydá **jako pokrm**: pokladna sama odečte suroviny
-podle své receptury. Appka nikdy nevydává pokrm i jeho suroviny zároveň.
+podle své receptury. Appka receptury nečte, takže nepozná, jestli další
+zboží ve výdeji není surovina téhož pokrmu — databáze to nevynucuje, jen
+přidá schvalovateli varování (`varovani` ze sestavení výdeje), když výdej
+obsahuje pokrm i další zboží.
 
 **Schválení je svázané s verzí a otiskem.** Změna položek, množství,
 mapování, provozovny nebo pokladny zvedne verzi. Živý návrh pak přejde
@@ -187,9 +194,14 @@ podstaty výdeje: pokladna, provozovna a seřazené dvojice „produkt v pokladn
 nemění. `zmena` = sha256(otisk + blokace): když po odeslání přibude
 nejasná skladová položka, návrh se nahradí, i když se otisk nezměnil.
 Název v obsahu výdeje se bere z katalogu pokladny, ne z prohlížeče.
-Ve stavu „předáno k ručnímu odpisu“ (`nepodporovano`) věcnou změnu uložit
-nejde — uvolní ji jen „Zrušit schválení“ (s důvodem), nebo „Ručně
-doloženo“ k tomu otisku, který člověk v pokladně odepsal.
+Ve stavu „schváleno“ i „předáno k ručnímu odpisu“ (`nepodporovano`) nejde
+uložit změnu, která mění otisk, ani přidat nejasnou skladovou položku
+(`zmena`) — schvalovatel může právě odepisovat v pokladně. Uvolní to jen
+„Zrušit schválení“ (s důvodem), nebo „Ručně doloženo“ k tomu otisku, který
+člověk v pokladně odepsal; ruční doložení s nevyřešenou položkou neprojde.
+Výdej se neschválí ani nesestaví, když produkt není v katalogu pokladny
+(katalog nenačtený, produkt zrušený) nebo když pokladna či provozovna
+záznamu už jeho pobočku neobsluhuje (přeřazení v Integracích).
 
 ### 3.7 Kontrola proti pokladně (`kontrola_trzby`, `kontrola_skladu`)
 
@@ -266,23 +278,22 @@ Přihlášený (`authenticated`):
 | funkce | právo | co dělá |
 |---|---|---|
 | `jine_platby_zalozit(p_tenant, p_branch, p_pripojeni, p_oznaceni, p_klient_id) → uuid` | zadat | založí záznam; pokladna musí patřit firmě a obsluhovat pobočku |
-| `jine_platby_pripojit_soubor(p_zaznam, p_cesta, p_otisk) → uuid` | zadat/upravit | soubor musí v úložišti být, nahraný týmž uživatelem, s povoleným typem a velikostí |
 | `jine_platby_ulozit_navrh(p_zaznam, p_verze, p_hlavicka, p_polozky) → integer` | upravit | hlavička + celé položky, kontrola verze, zneplatnění schválení |
-| `jine_platby_oznacit_zkontrolovano(p_zaznam, p_verze, p_duvod_rozdilu)` | upravit | jen bez otevřených příznaků a s částkou, měnou a datem; když součet položek nesedí s celkem (CZK víc než 50 hal.), chce důvod |
-| `jine_platby_prohlasit(p_zaznam, p_verze, p_druh, p_vysledek, p_duvod)` | trzba / vydej_pos | ruční doložení stavu v pokladně s důvodem |
-| `jine_platby_potvrdit_trzbu(p_zaznam, p_verze, p_rezim, p_duplicita_duvod) → uuid` | trzba | zápis nebo propojení v `ostatni_trzby` |
-| `jine_platby_sestavit_vydej(p_zaznam) → jsonb` | čtení | náhled obsahu, otisku a blokací |
+| `jine_platby_oznacit_zkontrolovano(p_zaznam, p_verze, p_duvod_rozdilu, p_upozorneni_provereno)` | upravit | jen bez otevřených příznaků a s částkou, měnou a datem; když součet položek (cena celkem, jinak množství × jednotková cena) nesedí s celkem (CZK víc než 50 hal.), chce důvod; upozornění AI k dokladu chtějí výslovné „prověřeno“ |
+| `jine_platby_prohlasit(p_zaznam, p_verze, p_druh, p_vysledek, p_duvod)` | trzba / vydej_pos | ruční doložení stavu v pokladně s důvodem; opačný výsledek z pokladny k téže verzi přepíše jen právo na opravy |
+| `jine_platby_potvrdit_trzbu(p_zaznam, p_verze, p_rezim, p_duplicita_duvod, p_duvod_propojeni) → uuid` | trzba | zápis nebo propojení v `ostatni_trzby`; propojení bez konkrétního prodeje chce důvod; potvrzení jedné firmy jdou za sebou (zámek) |
+| `jine_platby_sestavit_vydej(p_zaznam) → jsonb` | čtení | náhled obsahu, otisku, blokací a varování |
 | `jine_platby_odeslat_sklad(p_zaznam, p_verze) → uuid` | sklad_odeslat | návrh ke schválení |
 | `jine_platby_rozhodnout_vydej(p_navrh, p_otisk, p_schvalit, p_duvod) → uuid` | vydej_pos | schválení (→ operace `pripraveno`) nebo zamítnutí; schválit jde jen zkontrolovaný záznam bez blokací, možná duplicita výdeje chce důvod |
 | `jine_platby_propojit_vydej(p_zaznam, p_verze, p_externi_id, p_doklad, p_duvod)` | vydej_pos | pokladna už odečetla, jen propojit |
 | `jine_platby_rucne_dolozit_vydej(p_zaznam, p_otisk, p_doklad, p_duvod)` | vydej_pos | provedeno ručně v pokladně; u záznamu s pokladnou jen k návrhu s tímto otiskem |
 | `jine_platby_zrusit_schvaleni(p_zaznam, p_duvod)` | vydej_pos | uvolní schválený nebo „předaný k ručnímu odpisu“ výdej (nic se v pokladně neodepsalo); ne při nejasném nebo provedeném |
 | `jine_platby_faktura(p_zaznam, p_akce, p_data)` | faktura | podklady / propojit / odpojit |
-| `jine_platby_evidovat_uhradu(p_zaznam, p_transakce, p_castka_haleru)` | faktura + finance.read k účtu | jen příchozí bankovní transakce téže firmy a měny; firemní účet chce finanční přehled za celou firmu |
+| `jine_platby_evidovat_uhradu(p_zaznam, p_transakce, p_castka_haleru)` | faktura + finance.read k účtu | jen příchozí nestornovaná bankovní transakce téže firmy a měny, ne na zrušený záznam; firemní účet chce finanční přehled za celou firmu; zbytek platby počítá i z potvrzených plateb faktur (stejný zámek jako faktury) |
 | `jine_platby_opravit_trzbu(p_zaznam, p_verze, p_nova_castka_haleru, p_duvod, p_doklad_opravy)` | oprava | storno + nový řádek; `null` = jen storno |
 | `jine_platby_korekce_vydeje(p_zaznam, p_doklad, p_duvod)` | oprava + vydej_pos | korekce provedeného výdeje (ručně doložená) |
-| `jine_platby_zrusit(p_zaznam, p_duvod)` | oprava (autor rozpracovaného: zadat) | jen bez zapsané tržby, faktury a úhrady, bez zahájeného výdeje a mimo ruční odpis; soubory zůstanou v historii, ale doklad jde připojit znovu |
-| `jine_platby_ulozit_mapovani(p_zaznam, p_alias, p_pos_produkt_id)` | upravit na pobočce záznamu | ověřený alias pro pokladnu záznamu; produkt musí být v katalogu |
+| `jine_platby_zrusit(p_zaznam, p_duvod)` | oprava (autor rozpracovaného: zadat) | jen bez zapsané tržby, faktury a úhrady, bez zahájeného výdeje, mimo schválený výdej a ruční odpis; soubory zůstanou v historii, ale doklad jde připojit znovu |
+| `jine_platby_ulozit_mapovani(p_zaznam, p_alias, p_pos_produkt_id)` | upravit na pobočce záznamu | ověřený alias pro pokladnu záznamu; katalog musí být načtený a produkt v něm |
 | `jine_platby_pokladny(p_tenant, p_branch)` | vidí pobočku | pokladny obsluhující pobočku (bez čtení `integrace_pripojeni`) |
 
 Server (`service_role`), volá ho jen serverová akce po ověření práva:
@@ -290,7 +301,8 @@ Server (`service_role`), volá ho jen serverová akce po ověření práva:
 | funkce | co dělá |
 |---|---|
 | `jine_platby_zapsat_rozpoznani(…)` | pokus (`bezi`) před voláním AI a výsledek po něm |
-| `jine_platby_zapsat_kontrolu(p_zaznam, p_verze, p_druh, p_vysledek, p_detail)` | výsledek dohledání v pokladně (`zdroj = pos_api`) |
+| `jine_platby_zapsat_kontrolu(p_zaznam, p_verze, p_druh, p_vysledek, p_detail)` | výsledek dohledání v pokladně (`zdroj = pos_api`); jen přes pokladnu, která pobočku záznamu pořád obsluhuje |
+| `jine_platby_pripojit_soubor(p_zaznam, p_cesta, p_otisk, p_nahral) → uuid` | připojí soubor z úložiště: nahrál ho `p_nahral`, povolený typ a velikost, otisk spočítal server ze stažených bajtů |
 | `pos_operace_zahajit(p_operace, p_platnost_do) → jsonb` | zabere operaci (`pripraveno`/`chyba` → `odesila_se`); souběžné druhé volání dostane „obsazeno“ |
 | `pos_operace_dokoncit(p_operace, p_stav, p_externi_id, p_doklad, p_vysledek, p_chyba)` | ukončí operaci a přenese stav na záznam |
 | `pos_katalog_nahradit(p_pripojeni, p_produkty)` | uloží katalog z pokladny |
@@ -300,12 +312,11 @@ Server (`service_role`), volá ho jen serverová akce po ověření práva:
 ```text
 -- authenticated
 jine_platby_zalozit(p_tenant uuid, p_branch uuid, p_pripojeni uuid, p_oznaceni text, p_klient_id uuid) returns uuid
-jine_platby_pripojit_soubor(p_zaznam uuid, p_cesta text, p_otisk text) returns uuid
 jine_platby_ulozit_navrh(p_zaznam uuid, p_verze integer, p_hlavicka jsonb, p_polozky jsonb) returns integer
-jine_platby_oznacit_zkontrolovano(p_zaznam uuid, p_verze integer, p_duvod_rozdilu text default null) returns void
+jine_platby_oznacit_zkontrolovano(p_zaznam uuid, p_verze integer, p_duvod_rozdilu text default null, p_upozorneni_provereno boolean default false) returns void
 jine_platby_prohlasit(p_zaznam uuid, p_verze integer, p_druh text, p_vysledek text, p_duvod text, p_pos_prodej_id text default null) returns void
-jine_platby_potvrdit_trzbu(p_zaznam uuid, p_verze integer, p_rezim text, p_duplicita_duvod text default null) returns uuid
-jine_platby_sestavit_vydej(p_zaznam uuid) returns jsonb   -- {obsah, otisk, zmena, polozek, blokace:[{poradi, nazev, duvod}]}
+jine_platby_potvrdit_trzbu(p_zaznam uuid, p_verze integer, p_rezim text, p_duplicita_duvod text default null, p_duvod_propojeni text default null) returns uuid
+jine_platby_sestavit_vydej(p_zaznam uuid) returns jsonb   -- {obsah, otisk, zmena, polozek, blokace:[{poradi, nazev, duvod}], varovani:[text]}
 jine_platby_odeslat_sklad(p_zaznam uuid, p_verze integer) returns uuid          -- null = sklad se netýká (stav 'nevyzaduje')
 jine_platby_rozhodnout_vydej(p_navrh uuid, p_otisk text, p_schvalit boolean, p_duvod text default null) returns uuid  -- id operace při schválení
 jine_platby_vydej_znovu(p_zaznam uuid) returns uuid                               -- nová operace po prokázané chybě
@@ -322,7 +333,8 @@ jine_platby_pokladny(p_tenant uuid, p_branch uuid) returns table(id uuid, nazev 
 jine_platby_spotreba(p_tenant uuid, p_branch uuid, p_od date, p_do date) returns table(datum date, branch_id uuid, pos_produkt_id text, nazev text, mnozstvi numeric, druh text)
 
 -- service_role
-jine_platby_zahajit_rozpoznani(p_zaznam uuid, p_spustil uuid) returns uuid       -- hlídá denní strop
+jine_platby_zahajit_rozpoznani(p_zaznam uuid, p_spustil uuid, p_verze integer default null) returns uuid   -- verze a zapsaná tržba před započtením; denní strop pod zámkem firmy
+jine_platby_pripojit_soubor(p_zaznam uuid, p_cesta text, p_otisk text, p_nahral uuid) returns uuid
 jine_platby_dokoncit_rozpoznani(p_rozpoznani uuid, p_stav text, p_model text, p_verze_zadani text, p_vysledek jsonb, p_text text, p_duvod text) returns void
 jine_platby_zapsat_kontrolu(p_zaznam uuid, p_verze integer, p_druh text, p_vysledek text, p_detail jsonb, p_kdo uuid) returns void
 pos_operace_zahajit(p_operace uuid, p_platnost_do timestamptz) returns jsonb    -- {stav:'ok'|'obsazeno'|'nelze', duvod?, operace?}
