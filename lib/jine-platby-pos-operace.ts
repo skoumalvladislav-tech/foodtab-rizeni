@@ -79,12 +79,30 @@ export const REZERVA_PO_PLATNOSTI_MS = 2 * 60_000
 
 const hlaska = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
-/** Nalezený výsledek se počítá jen s neprázdným ID — „nalezeno" bez ID nic nedokazuje. */
-function uspechZDohledani(d: VysledekDohledani): ZaverOperace | null {
-  if (d && d.stav === 'nalezeno' && typeof d.externiId === 'string' && d.externiId.trim() !== '') {
-    return { stav: 'uspech', externiId: d.externiId, doklad: d.doklad ?? null, vysledek: d.detail ?? {} }
+/** Účet s klíčem operace v pokladně je, ale výdej z něj (zatím) neplyne — nejasný výsledek s touhle větou. */
+export const HLASKA_UCET_NEDOKONCENY = 'Účet v pokladně existuje, ale není uzavřený a zaplacený Odpisem — ověřte ho v pokladně'
+
+/**
+ * Výdej z dohledaného účtu proběhl, jen když je účet UZAVŘENÝ, ZAPLACENÝ
+ * a je to ODPIS (N17): `detail.stav === 'uzavreny'`, `detail.zaplaceno
+ * === true`, `detail.odpis === true` (dohledání plní detail z `UcetPos`).
+ * Otevřený, nezaplacený nebo neodpisový účet s klíčem operace znamená,
+ * že požadavek do pokladny došel, ale skončil napůl (POS akce vrátí
+ * třeba kód 2003 — účet vznikl, platba Odpisem ne): sklad při
+ * `stockDeductionMode = documentIssue` neodečetl a v pokladně visí
+ * otevřený účet. Takový nález NENÍ úspěch.
+ *
+ *   'uspech'      — účet uzavřený, zaplacený a odpis, s neprázdným ID;
+ *   'nedokonceny' — účet je, ale něco z toho chybí (i chybějící údaj);
+ *   null          — nic nenalezeno (nebo „nalezeno" bez ID — nic nedokazuje).
+ */
+function uspechZDohledani(d: VysledekDohledani): { stav: 'uspech'; zaver: ZaverOperace } | { stav: 'nedokonceny' } | null {
+  if (!d || d.stav !== 'nalezeno' || typeof d.externiId !== 'string' || d.externiId.trim() === '') return null
+  const detail = d.detail ?? {}
+  if (detail.stav === 'uzavreny' && detail.zaplaceno === true && detail.odpis === true) {
+    return { stav: 'uspech', zaver: { stav: 'uspech', externiId: d.externiId, doklad: d.doklad ?? null, vysledek: detail } }
   }
-  return null
+  return { stav: 'nedokonceny' }
 }
 
 /**
@@ -143,15 +161,19 @@ export async function provestOperaci(
       // 3. Ověřit: „přijato" nestačí, úspěch je jen to, co pokladna zná.
       try {
         const d = await pos.dohledat(zabrana.klic)
+        const posudek = uspechZDohledani(d)
         zaver =
-          uspechZDohledani(d) ??
-          {
-            stav: 'nejasny_vysledek',
-            duvod:
-              d && d.stav === 'chyba'
-                ? `Pokladna požadavek přijala, ale dohledání selhalo (${d.duvod}) — dohledá se znovu`
-                : 'Pokladna požadavek přijala, ale zatím ho nejde dohledat — může ho ještě zpracovávat',
-          }
+          posudek?.stav === 'uspech'
+            ? posudek.zaver
+            : {
+                stav: 'nejasny_vysledek',
+                duvod:
+                  posudek?.stav === 'nedokonceny'
+                    ? HLASKA_UCET_NEDOKONCENY
+                    : d && d.stav === 'chyba'
+                      ? `Pokladna požadavek přijala, ale dohledání selhalo (${d.duvod}) — dohledá se znovu`
+                      : 'Pokladna požadavek přijala, ale zatím ho nejde dohledat — může ho ještě zpracovávat',
+              }
       } catch (e) {
         zaver = { stav: 'nejasny_vysledek', duvod: `Pokladna požadavek přijala, ale dohledání selhalo (${hlaska(e)}) — dohledá se znovu` }
       }
@@ -168,10 +190,17 @@ export async function provestOperaci(
 /**
  * Obnova nejasného nebo zaseknutého výdeje. NIKDY neodesílá — jen dohledá
  * podle klíče:
- *   nalezeno                            → úspěch
- *   nenalezeno po platnosti + rezervě   → chyba (pokladna už požadavek neprovede;
- *                                         smí se zkusit znovu novou operací)
- *   nenalezeno dřív / chyba dohledání   → beze změny (pokladna ho ještě může provést)
+ *   nalezeno (uzavřený, zaplacený odpis)  → úspěch
+ *   nalezeno, ale nedokončený účet        → beze změny (HLASKA_UCET_NEDOKONCENY;
+ *                                           účet je — chybou ho uzavřít nejde)
+ *   nenalezeno po platnosti + rezervě     → chyba (pokladna už požadavek neprovede;
+ *                                           smí se zkusit znovu novou operací)
+ *   nenalezeno dřív / chyba dohledání     → beze změny (pokladna ho ještě může provést)
+ *
+ * Dohledání je ČTENÍ — pustí se, kdykoli ho pokladna nabízí (`pos.dohledat`),
+ * bez ohledu na schopnost zápisu (N18). Když schopnost mezitím spadne zpět
+ * na 'rucne' (vypnutý zápis přes API), nejasná operace by jinak neměla
+ * východ: databáze nejasný stav jinou cestou uzavřít nedovolí.
  */
 export async function obnovitOperaci(
   op: OperacePos,
@@ -182,7 +211,7 @@ export async function obnovitOperaci(
   if (op.stav !== 'nejasny_vysledek' && op.stav !== 'odesila_se') {
     return { stav: 'beze_zmeny', duvod: `Obnovuje se jen nejasný výsledek nebo zaseknuté odesílání (stav ${op.stav})` }
   }
-  if (pos.schopnost !== 'api' || typeof pos.dohledat !== 'function') {
+  if (typeof pos.dohledat !== 'function') {
     return { stav: 'beze_zmeny', duvod: 'Pokladna neumí požadavek dohledat — ověřte výdej v pokladně ručně a propojte ho nebo ručně doložte' }
   }
 
@@ -193,11 +222,14 @@ export async function obnovitOperaci(
     return { stav: 'beze_zmeny', duvod: `Dohledání selhalo (${hlaska(e)}) — zkuste to znovu` }
   }
 
-  const uspech = uspechZDohledani(d)
-  if (uspech) {
-    await repo.dokoncit(op.id, uspech)
-    return uspech
+  const posudek = uspechZDohledani(d)
+  if (posudek?.stav === 'uspech') {
+    await repo.dokoncit(op.id, posudek.zaver)
+    return posudek.zaver
   }
+  // Účet s klíčem je, ale výdej z něj neplyne: ani úspěch, ani chyba (po platnosti
+  // by „chyba" pustila nový pokus a z otevřeného účtu by mohl vzniknout druhý výdej).
+  if (posudek?.stav === 'nedokonceny') return { stav: 'beze_zmeny', duvod: HLASKA_UCET_NEDOKONCENY }
   if (!d || d.stav !== 'nenalezeno') {
     return { stav: 'beze_zmeny', duvod: `Dohledání selhalo${d && d.stav === 'chyba' ? ` (${d.duvod})` : ''} — zkuste to znovu` }
   }

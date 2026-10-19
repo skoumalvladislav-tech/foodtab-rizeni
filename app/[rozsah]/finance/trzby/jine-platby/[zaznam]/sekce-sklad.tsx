@@ -2,7 +2,7 @@ import Link from 'next/link'
 
 import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { mnozstviNaText } from '@/lib/jine-platby-castky'
-import { popisStavuSkladu, type AkceJinePlatby } from '@/lib/jine-platby-stav'
+import { popisStavuSkladu, prohlaseniProtiPokladne, type AkceJinePlatby } from '@/lib/jine-platby-stav'
 import { PLATNOST_KONTROLY_SKLADU_MIN, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 
 import { PanelHlava } from '../../../../dnes/prvky'
@@ -15,7 +15,14 @@ import { HLASKA_BEZ_DOHLEDANI, POPIS_VYSLEDKU_SKLADU, textPlanovaneOperace } fro
 import { MRIZKA_POLI, Oddil, PoleDuvodu, Udaj, Udaje, VSTUP, VysledekKontroly, Vysvetleni } from './prvky'
 
 export type PolozkaVydeje = { poradi: number | null; posProduktId: string; nazev: string; mnozstvi: string }
-export type NahledVydeje = { polozky: PolozkaVydeje[]; blokace: { poradi: number | null; nazev: string | null; duvod: string }[]; polozek: number }
+export type BlokaceVydeje = { poradi: number | null; nazev: string | null; duvod: string }
+/**
+ * Náhled výdeje z `jine_platby_sestavit_vydej`. `blokace` s `poradi` =
+ * nevyřešená POLOŽKA (schválit ani ručně doložit nejde), bez `poradi` =
+ * věc celého výdeje (pokladna neobsluhuje pobočku…). `varovani` jen
+ * upozorňují (výdej obsahuje pokrm i další zboží…) a nic neblokují.
+ */
+export type NahledVydeje = { polozky: PolozkaVydeje[]; blokace: BlokaceVydeje[]; polozek: number; varovani: string[] }
 export type NavrhVydeje = {
   id: string
   stav: string
@@ -68,11 +75,21 @@ const POPIS_OPERACE: Record<string, string> = {
  *
  * „Ručně doloženo“ nese otisk živého schváleného návrhu (skryté pole);
  * „Zrušit schválení“ je jen pro případ, že v pokladně nic odepsáno nebylo.
+ *
+ * Ve stavu „schváleno“ i „předáno k ručnímu odpisu“ panel ukáže nevyřešené
+ * položky náhledu (`blokace` s pořadím — produkt zrušený v katalogu…);
+ * dokud nějaká je, „Ručně doloženo“ se nenabízí (databáze by doložení
+ * odmítla). Varování náhledu (pokrm i další zboží) ukáže panel schválení
+ * i panel ručního odpisu — neblokují.
+ *
+ * Ruční prohlášení „neodečetla“ proti výsledku dotazu do pokladny k téže
+ * verzi (`prohlaseniProtiPokladne`) se bez práva na opravy nenabízí.
  */
 export default function SekceSklad({
   zakl,
   z,
   akce,
+  smiOpravit,
   maPokladnu,
   pokladna,
   provozovna,
@@ -92,6 +109,8 @@ export default function SekceSklad({
   zakl: { zaznam: string; verze: number; rozsah: string }
   z: ZaznamJinePlatby
   akce: ReadonlySet<AkceJinePlatby>
+  /** Právo na opravy (`jine_platby.oprava`) na pobočce záznamu — smí přepsat výsledek pokladny ručním prohlášením. */
+  smiOpravit: boolean
   maPokladnu: boolean
   pokladna: { nazev: string; nazevPoskytovatele: string; dohledaniUctu: boolean; skladovyVydej: 'api' | 'rucne' | 'nepodporovano' } | null
   provozovna: string
@@ -119,6 +138,32 @@ export default function SekceSklad({
   const plan = textPlanovaneOperace(pokladna?.skladovyVydej ?? 'rucne', pokladna?.nazevPoskytovatele ?? nazevPokladny, provozovna)
   const detailKontroly = (z.kontrolaSkladu?.detail ?? {}) as Record<string, unknown>
   const text = (v: unknown) => (typeof v === 'string' ? v : '')
+  const schvalenoNeboRucne = s === 'schvaleno' || s === 'nepodporovano'
+  /** Blokace náhledu ve schváleném / ručně zpracovávaném výdeji (s pořadím = nevyřešená položka). */
+  const blokaceSchvaleneho = schvalenoNeboRucne && nahled ? nahled.blokace : []
+  const nevyreseneSchvaleneho = blokaceSchvaleneho.filter((b) => b.poradi !== null)
+  const nabidnoutRucneDolozit = akce.has('rucne_dolozit') && nevyreseneSchvaleneho.length === 0
+
+  const seznamBlokaci = (blokace: BlokaceVydeje[]) => (
+    <ul style={{ margin: 0, paddingLeft: '20px' }}>
+      {blokace.map((b, i) => (
+        <li key={i}>
+          {b.poradi !== null ? `Položka ${b.poradi}${b.nazev ? ` (${b.nazev})` : ''}: ` : ''}
+          {b.duvod}
+        </li>
+      ))}
+    </ul>
+  )
+  const varovaniNahledu =
+    nahled && nahled.varovani.length > 0 ? (
+      <div role="note" style={{ display: 'grid', gap: '4px' }}>
+        {nahled.varovani.map((v) => (
+          <Vysvetleni key={v} dulezite>
+            Upozornění: {v}
+          </Vysvetleni>
+        ))}
+      </div>
+    ) : null
 
   const seznamPolozek = (polozky: PolozkaVydeje[]) => (
     <ul style={{ margin: 0, paddingLeft: '20px', display: 'grid', gap: '6px', fontSize: '14px' }}>
@@ -160,19 +205,13 @@ export default function SekceSklad({
             <Udaj nazev="Sklad">podle nastavení provozovny v pokladně</Udaj>
           </Udaje>
           {nahled.polozky.length > 0 ? seznamPolozek(nahled.polozky) : <Vysvetleni>Žádná položka v pokladně sklad neodečítá (služby, spropitné, neskladové položky).</Vysvetleni>}
+          {varovaniNahledu}
           {nahled.blokace.length > 0 ? (
             <div role="status" style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
               <strong style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <Ikona klic="varovani" velikost={16} /> Návrh zatím nejde odeslat:
               </strong>
-              <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                {nahled.blokace.map((b, i) => (
-                  <li key={i}>
-                    {b.poradi !== null ? `Položka ${b.poradi}${b.nazev ? ` (${b.nazev})` : ''}: ` : ''}
-                    {b.duvod}
-                  </li>
-                ))}
-              </ul>
+              {seznamBlokaci(nahled.blokace)}
             </div>
           ) : akce.has('odeslat_sklad') ? (
             <FormularAkce akce={odeslatSklad} {...zakl} tlacitko="Odeslat ke schválení" vzhled="hlavni">
@@ -206,6 +245,7 @@ export default function SekceSklad({
             </div>
           ) : null}
           {seznamPolozek(navrh.polozky)}
+          {varovaniNahledu}
           <Udaje>
             <Udaj nazev="Cílová pokladna">{nazevPokladny}</Udaj>
             <Udaj nazev="Provozovna">{provozovna}</Udaj>
@@ -240,7 +280,7 @@ export default function SekceSklad({
                 <Vysvetleni>{HLASKA_BEZ_DOHLEDANI}</Vysvetleni>
               )
             ) : null}
-            {akce.has('prohlasit_sklad') ? <RucniProhlaseniSkladu zakl={zakl} /> : null}
+            {akce.has('prohlasit_sklad') ? <RucniProhlaseniSkladu zakl={zakl} z={z} smiOpravit={smiOpravit} /> : null}
           </div>
 
           {duplicity.length > 0 ? (
@@ -270,14 +310,7 @@ export default function SekceSklad({
                   <strong style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                     <Ikona klic="varovani" velikost={16} /> Návrh má nevyřešené položky, schválit ho nejde:
                   </strong>
-                  <ul style={{ margin: 0, paddingLeft: '20px' }}>
-                    {nahled.blokace.map((b, i) => (
-                      <li key={i}>
-                        {b.poradi !== null ? `Položka ${b.poradi}${b.nazev ? ` (${b.nazev})` : ''}: ` : ''}
-                        {b.duvod}
-                      </li>
-                    ))}
-                  </ul>
+                  {seznamBlokaci(nahled.blokace)}
                 </div>
               ) : muzeSchvalit ? (
                 <FormularAkce
@@ -342,6 +375,7 @@ export default function SekceSklad({
                 ))}
               </ol>
               {navrh && zivy ? seznamPolozek(navrh.polozky) : null}
+              {varovaniNahledu}
             </div>
           ) : null}
           {akce.has('provest_vydej') ? (
@@ -382,11 +416,28 @@ export default function SekceSklad({
             zona={zona}
           />
           {pokladna?.dohledaniUctu ? <FormularAkce akce={zkontrolovatSklad} {...zakl} tlacitko="Zkontrolovat v pokladně" /> : <Vysvetleni>{HLASKA_BEZ_DOHLEDANI}</Vysvetleni>}
-          {akce.has('prohlasit_sklad') ? <RucniProhlaseniSkladu zakl={zakl} /> : null}
+          {akce.has('prohlasit_sklad') ? <RucniProhlaseniSkladu zakl={zakl} z={z} smiOpravit={smiOpravit} /> : null}
         </Oddil>
       ) : null}
 
-      {akce.has('rucne_dolozit') ? (
+      {/* ---------- Schválený výdej s nevyřešenou položkou (databáze doložení odmítne) ---------- */}
+      {blokaceSchvaleneho.length > 0 ? (
+        <div role="status" style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
+          <strong style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <Ikona klic="varovani" velikost={16} />
+            {nevyreseneSchvaleneho.length > 0 ? ' Návrh výdeje má nevyřešené položky — ručně doložit ho teď nejde:' : ' Pozor u výdeje:'}
+          </strong>
+          {seznamBlokaci(blokaceSchvaleneho)}
+          {nevyreseneSchvaleneho.length > 0 ? (
+            <Vysvetleni>
+              Položky, které se týkají skladu, ve schváleném výdeji měnit nejde. Když jste v pokladně nic neodepsali, schvalovatel schválení zruší
+              („Zrušit schválení“), položky se opraví a výdej se pošle znovu.
+            </Vysvetleni>
+          ) : null}
+        </div>
+      ) : null}
+
+      {nabidnoutRucneDolozit ? (
         <Oddil nadpis="Ručně doloženo">
           <FormularAkce
             akce={rucneDolozit}
@@ -422,8 +473,8 @@ export default function SekceSklad({
             }}
           >
             <Vysvetleni>
-              Jen když v pokladně nic odepsáno nebylo (třeba se položky ještě mění). Když už v pokladně odepsáno je, nerušte schválení — použijte
-              „Ručně doloženo“ s číslem dokladu z pokladny.
+              Jen když v pokladně nic odepsáno nebylo (třeba je potřeba změnit položky — ve schváleném výdeji to nejde). Když už v pokladně odepsáno
+              je, nerušte schválení — použijte „Ručně doloženo“ s číslem dokladu z pokladny.
             </Vysvetleni>
             <PoleDuvodu popisek="Důvod zrušení (povinný)" napoveda="Například: „V pokladně jsem nic neodepsal, množství piva je špatně, opravím a pošlu znovu.“" />
           </FormularAkce>
@@ -473,21 +524,31 @@ export default function SekceSklad({
   )
 }
 
-function RucniProhlaseniSkladu({ zakl }: { zakl: { zaznam: string; verze: number; rozsah: string } }) {
+function RucniProhlaseniSkladu({ zakl, z, smiOpravit }: { zakl: { zaznam: string; verze: number; rozsah: string }; z: ZaznamJinePlatby; smiOpravit: boolean }) {
+  const proti = prohlaseniProtiPokladne(z, 'sklad')
+  const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_SKLADU as Record<string, string>)[proti] ?? proti)
+  const volby: [string, string][] = [
+    ['je', 'už odečetla (prodej je v pokladně uzavřený, nebo výdej už proběhl)'],
+    ...(proti !== null && !smiOpravit ? [] : ([['neni', 'neodečetla (ověřeno v pokladně)']] as [string, string][])),
+    ['nevim', 'nevím — nic nezapisovat'],
+  ]
   return (
     <details>
       <summary style={{ cursor: 'pointer', fontSize: '14px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>Ruční prohlášení s důvodem</summary>
       <div style={{ marginTop: '8px' }}>
         <FormularAkce akce={prohlasitSklad} {...zakl} tlacitko="Zapsat ruční prohlášení" vycistit>
+          {popisProti !== null ? (
+            <Vysvetleni dulezite>
+              {smiOpravit
+                ? `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Prohlášením „neodečetla“ výsledek pokladny přepíšete — zapíše se to do historie s vaším jménem. Nejdřív radši kontrolu v pokladně zopakujte.`
+                : `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Ruční prohlášení „neodečetla“ to nepřepíše, proto se nenabízí — když si myslíte, že se pokladna mýlí, zopakujte kontrolu v pokladně, nebo to rozhodne člověk s právem na opravy.`}
+            </Vysvetleni>
+          ) : null}
           <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: '4px' }}>
             <legend className="ds-field-label" style={{ marginBottom: '4px' }}>
               Spotřebu z tohoto dokladu pokladna
             </legend>
-            {[
-              ['je', 'už odečetla (prodej je v pokladně uzavřený, nebo výdej už proběhl)'],
-              ['neni', 'neodečetla (ověřeno v pokladně)'],
-              ['nevim', 'nevím — nic nezapisovat'],
-            ].map(([hodnota, popis]) => (
+            {volby.map(([hodnota, popis]) => (
               <label key={hodnota} style={{ display: 'flex', gap: '8px', alignItems: 'center', minHeight: '44px', fontSize: '14px' }}>
                 <input type="radio" name="vysledek" value={hodnota} required />
                 <span>{popis}</span>

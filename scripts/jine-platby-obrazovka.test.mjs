@@ -278,7 +278,9 @@ console.log('\n== Vstupní kontrola agendy (zkusPristupJinymPlatbam, pobockySPra
       'export async function hasAccess(tenantId, pravo, branchId) {\n' +
       '  globalThis.__jpVolani.push([tenantId, pravo, branchId])\n' +
       '  return globalThis.__jpPrava.some(([p, b]) => p === pravo && b === branchId)\n' +
-      '}\n',
+      '}\n' +
+      'export function canSee(ctx, p) { return ctx.permissions.includes(p) }\n' +
+      'export function isModuleActive(ctx, m) { return ctx.modules.some((x) => x.key === m && x.active) }\n',
   )
   const FIRMA = js(
     'export function bezpecnyRozsah(ctx, rozsah) {\n' +
@@ -329,6 +331,15 @@ console.log('\n== Vstupní kontrola agendy (zkusPristupJinymPlatbam, pobockySPra
   globalThis.__jpPrava = [['finance.read', B]]
   ok('vidiPobocku: finance.read na pobočce stačí, na jiné ne',
     (await pristupModul.vidiPobocku(T, B)) === true && (await pristupModul.vidiPobocku(T, 'x-druha')) === false)
+
+  // N24: práva pro navigaci Financí na stránkách agendy.
+  const nav = (prava, permissions, moduly = [{ key: 'finance', active: true }, { key: 'objednavky', active: true }]) =>
+    pristupModul.pravaNavigaceFinanci({ stav: 'ok', ctx: { permissions, modules: moduly }, scope: {}, prava: new Set(prava), vidi: true }).sort().join()
+  ok('pravaNavigaceFinanci: obsluha jen se zadat → jen jine_platby.zadat (žádné finance.read, Nákup ani Faktury)', nav(['jine_platby.zadat'], ['jine_platby.zadat']) === 'jine_platby.zadat')
+  ok('pravaNavigaceFinanci: Nákup jen s purchasing.read a zapnutými Objednávkami',
+    nav(['finance.read'], ['finance.read', 'purchasing.read']) === 'finance.read,purchasing.read' &&
+      nav(['finance.read'], ['finance.read', 'purchasing.read'], [{ key: 'objednavky', active: false }]) === 'finance.read')
+  ok('pravaNavigaceFinanci: Faktury s faktury.read', nav(['jine_platby.faktura'], ['jine_platby.faktura', 'faktury.read']) === 'faktury.read,jine_platby.faktura')
 }
 
 /* =====================================================================
@@ -497,6 +508,7 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
     firma: js('export async function getCurrentTenantId() { return globalThis.__pgTenant }\n'),
     pristup: js(
       'export async function zkusPristupJinymPlatbam(tenantId, rozsah) { globalThis.__pgPoradi.push("pristup"); return globalThis.__pgPristup }\n' +
+        'export function pravaNavigaceFinanci(p) { return [...p.prava] }\n' +
         'export async function pobockySPravem(tenantId, kandidati, prava) {\n' +
         '  return new Set(kandidati.filter((b) => prava.some((p) => (globalThis.__pgPravaPobocek[b] ?? []).includes(p))))\n' +
         '}\n',
@@ -523,7 +535,7 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
     navigace: js(`export function redirect() { throw new Error(${JSON.stringify(PRESMEROVANI)}) }\nexport function useRouter() { return {} }\n`),
     obal: js(
       `import { createElement } from ${JSON.stringify(import.meta.resolve('react'))}\n` +
-        'export default function Navigace({ rozsah, children }) { return createElement("div", { "data-navigace": rozsah }, children) }\n',
+        'export default function Navigace({ rozsah, prava, children }) { return createElement("div", { "data-navigace": rozsah, "data-prava": prava === undefined ? "(bez)" : prava.join(" ") }, children) }\n',
     ),
   }
   const Stranka = await nactiKomponentu(SOUBORY.prehled, [
@@ -598,6 +610,7 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
   ok('s právem zadat: „Přidat záznam" vede na nový záznam', zakladni.html.includes('href="/bernard-bar/finance/trzby/jine-platby/novy"'))
   ok('bez vydej_pos: záložka „Čeká na schválení výdeje" není', !zakladni.html.includes('aria-label="Pohled"'))
   ok('obal Navigace s rozsahem', zakladni.html.includes('data-navigace="bernard-bar"'))
+  ok('navigace Financí dostane práva přihlášeného (obsluha jen se zadat → jen Jiné platby, N24)', zakladni.html.includes('data-prava="jine_platby.zadat"'))
 
   const jenPrehled = await spustit({ prava: ['finance.read'] })
   ok('jen s finance.read: bez tlačítka „Přidat záznam"', !jenPrehled.html.includes('/jine-platby/novy'))
@@ -647,6 +660,29 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
   const nenalezeno = await spustit({ radky: [{ ...dvakratRadek, kontrola_trzby: { ...dvakratRadek.kontrola_trzby, vysledek: 'nenalezeno' } }] })
   ok('zapsaná tržba s kontrolou „nenalezeno" značku nemá', !znacka(nenalezeno.html ?? '', dvakratRadek.id).includes('Možná zapsáno dvakrát') && znacka(nenalezeno.html ?? '', dvakratRadek.id) !== '')
 
+  // Možná nezapočítáno (moznaNikde): propojeno, ale pokladna k aktuální verzi prodej nenašla.
+  const nikdeRadek = {
+    ...radekZaznamu, id: 'e7777777-7777-4777-8777-77777777777e', stav_trzby: 'propojeno', stav_kontroly: 'zkontrolovano', verze: 5,
+    kontrola_trzby: { vysledek: 'nenalezeno', zdroj: 'pos_api', verze: 5, kdy: '2026-10-14T11:00:00Z', kdo: null, detail: {} },
+  }
+  const staraVerze = { ...nikdeRadek, id: 'e6666666-6666-4666-8666-66666666666e', verze: 6 }
+  const nikde = await spustit({ hledani: { stav: 'mozna_nikde' }, radky: [nikdeRadek, staraVerze] })
+  ok('filtr „Možná nezapočítáno": v DOTAZU stav_trzby = propojeno, kontrola_trzby->>zdroj = pos_api a ->>vysledek = nenalezeno',
+    ma(nikde.zaznamy, 'eq', 'stav_trzby', 'propojeno') && ma(nikde.zaznamy, 'eq', 'kontrola_trzby->>zdroj', 'pos_api') && ma(nikde.zaznamy, 'eq', 'kontrola_trzby->>vysledek', 'nenalezeno'))
+  ok('… bez zrušených? (propojená tržba zrušená být nemůže — databáze zrušení s tržbou odmítne)', !ma(nikde.zaznamy, 'eq', 'stav_kontroly', 'zruseno'))
+  ok('… kontrola ke starší verzi záznamu (verze 5, záznam 6) se ve filtru neukáže — dořeší moznaNikde',
+    znacka(nikde.html ?? '', nikdeRadek.id) !== '' && znacka(nikde.html ?? '', staraVerze.id) === '')
+  ok('filtr „Možná nezapočítáno" je v nabídce filtrů', zakladni.html.includes('stav=mozna_nikde') && zakladni.html.includes('Možná nezapočítáno'))
+  const radekNikde = znacka(nikde.html ?? '', nikdeRadek.id)
+  ok('řádek s propojenou tržbou, kterou pokladna nenašla: značka „Možná nezapočítáno" s ikonou varování (ft-i)',
+    /<span class="ds-badge"[^>]*><svg class="ft-i"[^>]*>(?:<path[^>]*><\/path>)*<\/svg>Možná nezapočítáno<\/span>/.test(radekNikde))
+  const vse = await spustit({ radky: [nikdeRadek, staraVerze, dvakratRadek] })
+  ok('ve výchozím pohledu značku má jen řádek s kontrolou aktuální verze (ne stará verze, ne zapsaná tržba)',
+    znacka(vse.html ?? '', nikdeRadek.id).includes('Možná nezapočítáno') && !znacka(vse.html ?? '', staraVerze.id).includes('Možná nezapočítáno') &&
+      !znacka(vse.html ?? '', dvakratRadek.id).includes('Možná nezapočítáno') && znacka(vse.html ?? '', staraVerze.id) !== '')
+  const rucne = await spustit({ radky: [{ ...nikdeRadek, kontrola_trzby: { ...nikdeRadek.kontrola_trzby, zdroj: 'rucni_prohlaseni' } }] })
+  ok('ruční prohlášení „nenalezeno" u propojené tržby značku nemá (propojení bez nálezu chtělo důvod)', znacka(rucne.html ?? '', nikdeRadek.id) !== '' && !znacka(rucne.html ?? '', nikdeRadek.id).includes('Možná nezapočítáno'))
+
   const firmaCizi = await spustit({ rozsah: 'firma', scope: scopeFirmy, prava: ['finance.read'], pravaPobocek: { [B]: ['finance.read'] }, hledani: { pobocka: CIZI } })
   ok('na firmě cizí ?pobocka= se ignoruje — jen pobočky, kde člověk vidí',
     !(firmaCizi.zaznamy ?? []).some((v) => v[0] === 'eq' && v[1] === 'branch_id') && ma(firmaCizi.zaznamy, 'in', 'branch_id', [B]))
@@ -686,7 +722,7 @@ for (const soubor of [SOUBORY.prehled, SOUBORY.novy]) {
     /^\s*if \(pristup\.stav === 'neprihlasen'\) redirect\(await odkazNaPrihlaseni\(\)\)\n\s*if \(pristup\.stav === 'odepren'\) \{\n\s*return <Sdeleni /.test(zbytek))
   ok(`${kratce}: pobočka z rozsahu (pobockaFinanci) dřív, než se načte cokoli`,
     zbytek.indexOf('pobockaFinanci(pristup.scope)') > 0 && zbytek.indexOf('pobockaFinanci(pristup.scope)') < zbytek.indexOf('getServerSupabase('))
-  ok(`${kratce}: obal Navigace rozsah={rozsah}`, s.includes('<Navigace rozsah={rozsah}>'))
+  ok(`${kratce}: obal Navigace rozsah={rozsah} s právy přihlášeného (N24)`, s.includes('<Navigace rozsah={rozsah} prava={pravaNavigaceFinanci(pristup)}>'))
 }
 
 console.log('\n== Přehled: každý parametr adresy přes seznam povolených hodnot ==')
@@ -694,8 +730,8 @@ console.log('\n== Přehled: každý parametr adresy přes seznam povolených hod
   const s = zdroj(SOUBORY.prehled)
   const vyskyty = (jmeno) => (s.match(new RegExp(`\\b${jmeno}\\b`, 'g')) ?? []).length
   ok('stav: jen z FILTRY_STAVU, jinak „vse"', /const stav: FiltrStavu = jeFiltrStavu\(stavParam\) \? stavParam : 'vse'/.test(s) && vyskyty('stavParam') === 3)
-  ok('filtry stavu = zadání (vse, ke_kontrole, trzba_nezapsana, mozna_dvakrat, ceka_na_schvaleni, sklad_neuzavreny, bez_faktury, zrusene)',
-    s.includes("const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'mozna_dvakrat', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const"))
+  ok('filtry stavu = zadání (vse, ke_kontrole, trzba_nezapsana, mozna_dvakrat, mozna_nikde, ceka_na_schvaleni, sklad_neuzavreny, bez_faktury, zrusene)',
+    s.includes("const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'mozna_dvakrat', 'mozna_nikde', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const"))
   ok('pohled=schvaleni jen s jine_platby.vydej_pos',
     /const smiSchvalovat = pristup\.prava\.has\('jine_platby\.vydej_pos'\)/.test(s) &&
       /const pohledSchvaleni = pohledParam === 'schvaleni' && smiSchvalovat/.test(s) && vyskyty('pohledParam') === 2)
@@ -703,6 +739,7 @@ console.log('\n== Přehled: každý parametr adresy přes seznam povolených hod
   ok('fronta schválení jen z poboček s vydej_pos', /pobockySPravem\(tenantId, \[\.\.\.viditelne\], \['jine_platby\.vydej_pos'\]\)/.test(s) &&
     /dotaz = dotaz\.eq\('stav_skladu', 'ceka_na_schvaleni'\)\.neq\('stav_kontroly', 'zruseno'\)\.in\('branch_id', \[\.\.\.pobockySchvaleni\]\)/.test(s))
   ok('značka „Možná zapsáno dvakrát" podle moznaDvakrat z lib/jine-platby-stav (jedno pravidlo)', s.includes('{moznaDvakrat(r) ? <ZnackaStavu popis={ZNACKA_DVAKRAT} /> : null}'))
+  ok('značka „Možná nezapočítáno" podle moznaNikde z lib/jine-platby-stav (jedno pravidlo)', s.includes('{moznaNikde(r) ? <ZnackaStavu popis={ZNACKA_NIKDE} /> : null}'))
   ok('pobocka: jen na firmě a jen z nabídky viditelných poboček',
     /const vybranaPobocka = pobockaRozsahu \?\? \(pobockaParam && nabidkaPobocek\.some\(\(b\) => b\.id === pobockaParam\) \? pobockaParam : null\)/.test(s) &&
       vyskyty('pobockaParam') === 4)
@@ -934,30 +971,72 @@ console.log('\n== Tržby: Ostatní tržby po stránkách (spuštěná stránka) 
   ok('vybraná provozovna: každá stránka i s .eq(branch_id)', naPobocce.stranky.length === 1 && naPobocce.stranky[0].some((x) => x[0] === 'eq' && x[1] === 'branch_id' && x[2] === A))
 }
 
-console.log('\n== Rám Financí pustí Jiné platby i vedoucího s finance.read jen na pobočce ==')
+console.log('\n== Rám Financí nerozhoduje; Jiné platby i pro vedoucího s finance.read jen na pobočce (N23) ==')
 {
-  // Brána v layoutu chce na pobočce finance.read za celou firmu (data celé
-  // firmy v bance a kontaktech). Jiné platby mají jen řádky pobočky a vlastní
-  // vstup — výjimka smí platit JEN pro jejich adresu, a musí stát PŘED bránou.
+  // Do 19. 10. dělal rám výjimku pro Jiné platby podle adresy (x-foodtab-adresa) — při
+  // přechodu přes menu se sdílený layout znovu nevykreslil a výjimka nezabrala. Teď
+  // rám nerozhoduje vůbec a hlášku „jen s přehledem celé firmy" si dává každá ostatní
+  // stránka sama (scripts/finance-pobocky.test.mjs); agenda ji dostat nesmí.
   const l = zdroj('app/[rozsah]/finance/layout.tsx')
-  const iVyjimka = l.indexOf("if (adresa.startsWith(`/${rozsah}/finance/trzby/jine-platby`)) return <>{children}</>")
-  const iBrana = l.indexOf("if (scope.level !== 'tenant' && !(await hasAccess(tenantId, 'finance.read', null)))")
-  ok('layout: výjimka jen pro /<rozsah>/finance/trzby/jine-platby a před pobočkovou bránou', iVyjimka > 0 && iBrana > iVyjimka)
-  ok('layout: adresa z hlavičky x-foodtab-adresa (proxy.ts), žádná jiná výjimka', /headers\(\)\)\.get\('x-foodtab-adresa'\)/.test(l) && (l.match(/return <>\{children\}<\/>/g) ?? []).length === 5)
+  ok('layout: žádná výjimka ani brána podle adresy (headers, x-foodtab-adresa, jine-platby)', !/headers\(|x-foodtab-adresa|jine-platby|hasAccess/.test(l))
+  ok('layout: vrací vždy {children} (jediný return)', /return <>\{children\}<\/>/.test(l) && (l.match(/return /g) ?? []).length === 1)
+  for (const soubor of [SOUBORY.prehled, SOUBORY.novy, `${AGENDA}/[zaznam]/page.tsx`]) {
+    ok(`${soubor.slice(AGENDA.length + 1)}: hlášku „jen s přehledem celé firmy" nekreslí`, !/SdeleniPobockyBezFirmy|pobocka_bez_firmy|jen s přehledem celé firmy/.test(zdroj(soubor)))
+  }
 
-  // Komentáře u výjimky nesmí tvrdit, že v agendě firemní data nejsou: detail
+  // Komentáře u vstupu agendy nesmí tvrdit, že v agendě firemní data nejsou: detail
   // čte bankovní platby a Kontakty — jen s finance.read ZA CELOU FIRMU.
-  const lSKomentari = text('app/[rozsah]/finance/layout.tsx').replace(/\r\n/g, '\n')
-  const komentarVyjimky = lSKomentari.slice(lSKomentari.indexOf('// Jiné platby (Finance → Tržby → Jiné platby)'), lSKomentari.indexOf("const adresa = (await headers())"))
-  ok('layout: komentář výjimky už netvrdí „firemní data … tam nejsou"', komentarVyjimky.length > 0 && !/firemní data[^.]*tam nejsou/.test(komentarVyjimky.replace(/\n\s*\/\/\s*/g, ' ')))
-  ok('layout: komentář říká, že detail čte banku a Kontakty jen s finance.read ZA CELOU FIRMU',
-    /bankovní platby/.test(komentarVyjimky) && /Kontakty/.test(komentarVyjimky) && /ZA CELOU FIRMU/.test(komentarVyjimky))
   const pSKomentari = text(SOUBORY.pristup).replace(/\r\n/g, '\n')
   ok('jine-platby-pristup: už netvrdí „žádná díra tu není" a říká, že firemní data detail čte jen ZA CELOU FIRMU',
     !pSKomentari.includes('žádná díra tu není') && /detail záznamu sahá i na data\s+\*\s+celé firmy/.test(pSKomentari) && pSKomentari.includes('ZA CELOU FIRMU'))
+  ok('jine-platby-pristup: netvrdí, že rám Financí dělá výjimku podle adresy', !/udělá výjimku/.test(pSKomentari))
   // Tvrzení komentářů musí mít oporu v kódu detailu (kdyby kontrola zmizela, komentář by lhal).
   const detail = zdroj(`${AGENDA}/[zaznam]/page.tsx`)
   ok('… a detail se opravdu ptá hasAccess(tenantId, \'finance.read\', null)', detail.includes("hasAccess(tenantId, 'finance.read', null)"))
+}
+
+console.log('\n== Tržby (spuštěná stránka): finance.read jen na pobočce → hláška stránky, ne layoutu (N23) ==')
+{
+  const T2 = 'a1111111-1111-4111-8111-11111111111a'
+  const stubB = {
+    firma: js(`export async function getCurrentTenantId() { return ${JSON.stringify(T2)} }\n`),
+    pristup: js('export async function zkusPristupFinanci() { globalThis.__bfPoradi.push("pristup"); return globalThis.__bfPristup }\n'),
+    authz: js('export const TENANT_SCOPE_SEGMENT = "firma"\n'),
+    prihlaseni: js('export async function odkazNaPrihlaseni() { return "/prihlaseni" }\n'),
+    navigace: js('export function redirect() { throw new Error("PRESMEROVANI") }\n'),
+    dotaz: js('export class DotazSelhal extends Error {}\nexport function tabulkaNeexistuje() { return false }\n'),
+    nacteni: js('export async function nactiPrehledTrzeb() { globalThis.__bfPoradi.push("data"); throw new Error("data se nesměla číst") }\n'),
+    supabase: js('export async function getServerSupabase() { globalThis.__bfPoradi.push("supabase"); throw new Error("databáze se nesměla otevřít") }\n'),
+    obal: js(
+      `import { createElement } from ${JSON.stringify(import.meta.resolve('react'))}\n` +
+        'export default function Navigace({ children }) { return createElement("div", null, children) }\n',
+    ),
+  }
+  const TrzbyB = await nactiKomponentu(SOUBORY.trzbyStranka, [
+    ['next/link', ODKAZ],
+    ['next/navigation', stubB.navigace],
+    ['@/lib/firma', stubB.firma],
+    ['@/lib/finance-pristup', stubB.pristup],
+    ['@/lib/authz', stubB.authz],
+    ['@/lib/prihlaseni-adresa', stubB.prihlaseni],
+    ['@/lib/supabase/server', stubB.supabase],
+    ['@/lib/supabase/dotaz', stubB.dotaz],
+    ['@/lib/pokladna-trzby-nacteni', stubB.nacteni],
+    ['../navigace', stubB.obal],
+  ])
+  globalThis.__bfPoradi = []
+  globalThis.__bfPristup = { stav: 'pobocka_bez_firmy' }
+  let html = null
+  let vyjimka = null
+  try {
+    html = renderToStaticMarkup(await TrzbyB({ params: Promise.resolve({ rozsah: 'bernard-bar' }), searchParams: Promise.resolve({}) }))
+  } catch (e) {
+    vyjimka = e
+  }
+  ok(`pobocka_bez_firmy → hláška „Finance pobočky zatím jen s přehledem celé firmy" (${vyjimka ? vyjimka.message : 'bez výjimky'})`,
+    vyjimka === null && (html ?? '').includes('Finance pobočky zatím jen s přehledem celé firmy'))
+  ok('… s odkazem na Jiné platby té pobočky (tam smí)', (html ?? '').includes('href="/bernard-bar/finance/trzby/jine-platby"'))
+  ok('… a před hláškou se nic nenačetlo (jen vstupní kontrola)', globalThis.__bfPoradi.join() === 'pristup')
 }
 
 console.log('\n== Vzhled: žádné svg, emoji ani nové const karta; telefon 375 px ==')

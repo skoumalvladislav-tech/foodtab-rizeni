@@ -26,7 +26,7 @@ import Nadpis from '../../../../nadpis'
 import { aliasyPripojeni, kalendarPobocky, katalogPripojeni } from './akce-zaklad'
 import type { PolozkaEditoru } from './editor-navrhu'
 import Kroky from './kroky'
-import { coZkontrolovat, datumCesky, jednotkaCesky, jeUuid } from './logika'
+import { coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
 import { metadataPokladny } from './nacteni'
 import Originaly from './originaly'
 import SekceKontrola from './sekce-kontrola'
@@ -36,7 +36,11 @@ import SekceSklad, { type NavrhVydeje, type OperaceVydeje, type PolozkaVydeje } 
 import SekceTrzba, { type RadekTrzby } from './sekce-trzba'
 
 export const dynamic = 'force-dynamic'
-/** Rozpoznání dokladu přes AI (akce-ai.ts) běží ve funkci této stránky — model dostane nejvýš 100 s. */
+/**
+ * Rozpoznání dokladu přes AI (akce-ai.ts) běží ve funkci této stránky. Akce
+ * počítá s touhle hodnotou (MAX_DELKA_AKCE_MS): model musí odpovědět do
+ * 120 s − 20 s rezervy od začátku akce. Kdo hodnotu mění, změní i ji.
+ */
 export const maxDuration = 120
 
 /**
@@ -112,7 +116,8 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
     kalendarPobocky(supabase, tenantId, z.branchId),
     supabase.from('jine_platby_soubory').select('id, poradi, mime, velikost, otisk').eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('poradi'),
     supabase.from('jine_platby_polozky').select(SLOUPCE_POLOZKY).eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('poradi'),
-    supabase.from('jine_platby_rozpoznani').select('id, stav, vysledek, duvod, vytvoreno').eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('vytvoreno', { ascending: false }).limit(1).maybeSingle(),
+    // Posledních pár pokusů: panel „Částky na dokladu“ je z toho, ze kterého je uložený návrh (rozpoznaniNavrhu), ne z posledního.
+    supabase.from('jine_platby_rozpoznani').select('id, stav, vysledek, duvod, vytvoreno, verze_zaznamu').eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('vytvoreno', { ascending: false }).limit(10),
     supabase.from('jine_platby_skladove_navrhy').select('id, stav, otisk, obsah, odeslal, odeslano, schvalil, schvaleno, zamitl, zamitnuto, duvod_zamitnuti').eq('zaznam_id', z.id).eq('tenant_id', tenantId)
       .order('odeslano', { ascending: false })
       .limit(1)
@@ -175,17 +180,28 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
   const kroky = krokyPruvodce(z, { pocetSouboru: seznamSouboru.length, pocetPolozek: polozky.length, maPokladnu, maZiveNavrhSkladu: zivyNavrh })
 
   /* ---------- Kontrola dokladu ---------- */
-  const rozpoznani = rozpoznaniRadek.data as { stav: string; vysledek: unknown; duvod: string | null; vytvoreno: string } | null
+  const pokusy: PokusRozpoznani[] = ((rozpoznaniRadek.data ?? []) as Record<string, unknown>[]).map((x) => ({
+    stav: String(x.stav),
+    vysledek: x.vysledek ?? null,
+    duvod: typeof x.duvod === 'string' ? x.duvod : null,
+    vytvoreno: String(x.vytvoreno),
+    verzeZaznamu: typeof x.verze_zaznamu === 'number' ? x.verze_zaznamu : null,
+  }))
+  const rozpoznani = pokusy[0] ?? null
+  const puvod = rozpoznaniNavrhu(pokusy, z.verze)
   let kontrolaRozpoznani: KontrolaDokladu | null = null
-  if (rozpoznani?.stav === 'ok' && rozpoznani.vysledek) {
+  if (puvod.zdroj) {
     try {
-      kontrolaRozpoznani = zkontrolovatDoklad(rozpoznani.vysledek as RozpoznanyDoklad, { dnes })
+      kontrolaRozpoznani = zkontrolovatDoklad(puvod.zdroj.vysledek as RozpoznanyDoklad, {
+        dnes,
+        ...(kal.denZacinaPobocky ? { denZacina: kal.denZacinaPobocky } : {}),
+      })
     } catch {
       kontrolaRozpoznani = null
     }
   }
-  // Co zkontrolovat a co z toho „Označit jako zkontrolované“ blokuje (nad ULOŽENÝMI položkami, jako databáze).
-  const kontrolaNavrhu = coZkontrolovat(polozky, hlavickaZeZaznamu(z))
+  // Co zkontrolovat a co z toho „Označit jako zkontrolované“ blokuje (nad ULOŽENÝMI položkami a upozorněními, jako databáze).
+  const kontrolaNavrhu = coZkontrolovat(polozky, hlavickaZeZaznamu(z), z.upozorneniDokladu)
 
   const katalogZivy = katalog.filter((k) => !k.smazano)
   /** Jednotka prodeje pokladny podle produktu (česky) — pro panel skladu. */
@@ -340,6 +356,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
           return { poradi: typeof o.poradi === 'number' ? o.poradi : null, nazev: typeof o.nazev === 'string' ? o.nazev : null, duvod: String(o.duvod ?? '') }
         }),
         polozek: Number(nahledData.polozek ?? 0),
+        varovani: (Array.isArray(nahledData.varovani) ? nahledData.varovani : []).filter((v): v is string => typeof v === 'string' && v.trim() !== ''),
       }
     : null
   const navrh: NavrhVydeje | null = navrhRaw
@@ -484,6 +501,11 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
               polozky={polozky}
               rozpoznani={rozpoznani ? { stav: rozpoznani.stav, vytvoreno: rozpoznani.vytvoreno, duvod: rozpoznani.duvod } : null}
               kontrolaRozpoznani={kontrolaRozpoznani}
+              puvodCastek={
+                puvod.zdroj
+                  ? { vytvoreno: puvod.zdroj.vytvoreno, novejsi: puvod.novejsi.map((x) => ({ stav: x.stav, vytvoreno: x.vytvoreno })), upravenoPotom: puvod.upravenoPotom }
+                  : null
+              }
               coZkontrolovat={kontrolaNavrhu.body}
               nesoulad={kontrolaNavrhu.nesoulad?.popis ?? null}
               ai={{ zapnuto: rozpoznavaniJeNastavene(), pocetSouboru: seznamSouboru.length }}
@@ -496,6 +518,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
               akce={akce}
               maPokladnu={maPokladnu}
               umiDohledani={pokladna?.dohledaniUctu === true}
+              smiOpravit={prava.has('jine_platby.oprava')}
               duplicity={duplicity}
               trzby={trzby}
               tedMs={tedMs}
@@ -506,6 +529,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
               zakl={zakl}
               z={z}
               akce={akce}
+              smiOpravit={prava.has('jine_platby.oprava')}
               maPokladnu={maPokladnu}
               pokladna={pokladna}
               provozovna={provozovna}

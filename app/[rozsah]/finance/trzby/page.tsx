@@ -13,6 +13,7 @@ import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
 import { dalsiObdobi, jenPobocka, pokladnaPatriPobocce, popisObdobi, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-trzby'
 import Sdeleni from '@/app/sdeleni'
+import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import Obsah, { karta, NAZVY_CLENENI, type RadekOstatniTrzby } from './obsah'
@@ -127,6 +128,7 @@ export default async function FinanceTrzby({
 
   const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
+  if (pristup.stav === 'pobocka_bez_firmy') return <SdeleniPobockyBezFirmy rozsah={rozsah} />
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Tržby vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }

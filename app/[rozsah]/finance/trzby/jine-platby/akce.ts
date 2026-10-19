@@ -1,12 +1,28 @@
 'use server'
 
+import { hasAccess } from '@/lib/authz'
 import { prevestCastku } from '@/lib/jine-platby-castky'
 import { doDbHlavicka, doDbPolozky, hlavickaZeZaznamu, SLOUPCE_POLOZKY, zDbPolozka } from '@/lib/jine-platby-db'
 import { sestavitPodklady, type KontaktFaktury } from '@/lib/jine-platby-faktura'
 import type { ProduktKatalogu } from '@/lib/jine-platby-mapovani'
+import { prohlaseniProtiPokladne } from '@/lib/jine-platby-stav'
 
 import { chyba, hotovo, katalogPripojeni, pripravit, vysledekChyby, type Pripraveno } from './[zaznam]/akce-zaklad'
-import { coZkontrolovat, HLASKA_OBECNA, jeHlaskaDuplicity, jeUuid, nacistNavrh, pole, verzeZFormulare, type StavAkce } from './[zaznam]/logika'
+import {
+  coZkontrolovat,
+  HLASKA_OBECNA,
+  jeHlaskaDuplicity,
+  jeHlaskaDuvoduPropojeni,
+  jeHlaskaUpozorneniAi,
+  jeUuid,
+  nacistNavrh,
+  pole,
+  POPIS_VYSLEDKU_SKLADU,
+  POPIS_VYSLEDKU_TRZBY,
+  propojeniChceDuvod,
+  verzeZFormulare,
+  type StavAkce,
+} from './[zaznam]/logika'
 
 /**
  * Jiné platby — serverové akce nad záznamem (návrh, kontrola, tržba,
@@ -132,12 +148,23 @@ export async function ulozitNavrh(_predchozi: StavAkce, formData: FormData): Pro
  * chce databáze důvod, proč rozdíl nevadí (`p_duvod_rozdilu`, zaokrouhlení,
  * sleva mimo položky…). Bez nesouladu se posílá `null`, i kdyby formulář
  * pole poslal.
+ *
+ * Upozornění AI k celému dokladu (`z.upozorneniDokladu` — nízká jistota,
+ * víc dokladů v jednom, pokyn v textu dokladu…) chtějí výslovné zaškrtnutí
+ * „Upozornění AI jsem prověřil(a)“ (`p_upozorneni_provereno`). `true` se
+ * posílá jen při zaškrtnutí a neprázdných upozorněních ULOŽENÉHO záznamu.
  */
 export async function oznacitZkontrolovano(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.upravit')
   if (!p.ok) return p.stav
   const verze = verzeZFormulare(p.f)
   if (verze === null) return chyba(HLASKA_ZASTARALY)
+
+  const upozorneni = p.z.upozorneniDokladu
+  const provereno = upozorneni.length > 0 && pole(p.f, 'upozorneni_provereno') === 'ano'
+  if (upozorneni.length > 0 && !provereno) {
+    return chybaPole('upozorneni_provereno', `AI k dokladu napsala upozornění (${upozorneni.length}). Prověřte je a zaškrtněte „Upozornění AI jsem prověřil(a)“.`)
+  }
 
   const radky = await polozkyZaznamu(p)
   if (!radky) return chyba(HLASKA_OBECNA)
@@ -148,10 +175,17 @@ export async function oznacitZkontrolovano(_predchozi: StavAkce, formData: FormD
     if (!duvodRozdilu) return chybaPole('duvod_rozdilu', `${nesoulad.popis}. Napište, proč rozdíl nevadí (zaokrouhlení, sleva mimo položky…).`)
   }
 
-  const { error } = await p.supabase.rpc('jine_platby_oznacit_zkontrolovano', { p_zaznam: p.z.id, p_verze: verze, p_duvod_rozdilu: duvodRozdilu })
+  const { error } = await p.supabase.rpc('jine_platby_oznacit_zkontrolovano', {
+    p_zaznam: p.z.id,
+    p_verze: verze,
+    p_duvod_rozdilu: duvodRozdilu,
+    p_upozorneni_provereno: provereno,
+  })
   if (error) {
     const stav = vysledekChyby(error, 'označení zkontrolováno')
-    return error.code === '23514' && /^Součet položek/.test(stav.text) ? { ...stav, chyby: { duvod_rozdilu: stav.text } } : stav
+    if (error.code === '23514' && /^Součet položek/.test(stav.text)) return { ...stav, chyby: { duvod_rozdilu: stav.text } }
+    if (error.code === '23514' && jeHlaskaUpozorneniAi(stav.text)) return { ...stav, chyby: { upozorneni_provereno: stav.text } }
+    return stav
   }
   return hotovo(p, 'Záznam je zkontrolovaný. Tržba ani sklad se tím nemění — to jsou další kroky.')
 }
@@ -163,6 +197,24 @@ export async function oznacitZkontrolovano(_predchozi: StavAkce, formData: FormD
 const NEVIM =
   'Když to nevíte jistě, nic se nezapíše. Ověřte to v pokladně (nebo u toho, kdo účet uzavíral) a pak to doložte, nebo nechte appku zkontrolovat pokladnu.'
 
+/**
+ * Prohlášení „není“ proti výsledku dotazu do pokladny k téže verzi
+ * (`prohlaseniProtiPokladne`: pokladna prodej našla / spotřebu odečetla):
+ * přepsat ho smí jen člověk s právem na opravy — jinak by ruční „není tam“
+ * odemklo druhou tržbu nebo druhý odpis. Databáze to hlídá taky
+ * (`jine_platby_prohlasit`); tohle je první linie. `null` = smí.
+ */
+async function prohlaseniOpacnehoZneni(p: Pripraveno, druh: 'trzba' | 'sklad'): Promise<StavAkce | null> {
+  const proti = prohlaseniProtiPokladne(p.z, druh)
+  if (proti === null) return null
+  if (await hasAccess(p.tenantId, 'jine_platby.oprava', p.z.branchId)) return null
+  const popis = druh === 'trzba' ? (POPIS_VYSLEDKU_TRZBY as Record<string, string>)[proti] : (POPIS_VYSLEDKU_SKLADU as Record<string, string>)[proti]
+  return chybaPole(
+    'vysledek',
+    `Pokladna při kontrole tohle našla (${popis ?? proti}). Ruční prohlášení opačného znění to nepřepíše — zopakujte kontrolu v pokladně, nebo to rozhodne člověk s právem na opravy.`,
+  )
+}
+
 /** Ruční prohlášení k TRŽBĚ: prodej v pokladně je / není. Právo `jine_platby.trzba`. */
 export async function prohlasitTrzbu(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.trzba')
@@ -173,6 +225,10 @@ export async function prohlasitTrzbu(_predchozi: StavAkce, formData: FormData): 
   const volba = pole(p.f, 'vysledek')
   if (volba === 'nevim') return chyba(NEVIM)
   if (volba !== 'je' && volba !== 'neni') return chybaPole('vysledek', 'Vyberte, jestli prodej v pokladně je, nebo není.')
+  if (volba === 'neni') {
+    const proti = await prohlaseniOpacnehoZneni(p, 'trzba')
+    if (proti) return proti
+  }
   const duvod = duvodZ(p)
   if (!duvod) return chybaPole('duvod', HLASKA_DUVOD)
   const posId = pole(p.f, 'pos_prodej_id').slice(0, 100)
@@ -200,6 +256,10 @@ export async function prohlasitSklad(_predchozi: StavAkce, formData: FormData): 
   const volba = pole(p.f, 'vysledek')
   if (volba === 'nevim') return chyba(NEVIM)
   if (volba !== 'je' && volba !== 'neni') return chybaPole('vysledek', 'Vyberte, jestli pokladna spotřebu odečetla, nebo ne.')
+  if (volba === 'neni') {
+    const proti = await prohlaseniOpacnehoZneni(p, 'sklad')
+    if (proti) return proti
+  }
   const duvod = duvodZ(p)
   if (!duvod) return chybaPole('duvod', HLASKA_DUVOD)
 
@@ -224,6 +284,12 @@ export async function prohlasitSklad(_predchozi: StavAkce, formData: FormData): 
  * (`propojit`, prodej je v tržbách pokladny — do součtu se NEPŘIČTE).
  * Který režim smí, rozhoduje databáze podle kontroly (nová jen po
  * „nenalezeno“). Možná duplicita chce důvod.
+ *
+ * Propojení bez konkrétního prodeje v pokladně (kontrola nemá
+ * `pos_prodej_id` — shoda jen částky, nejde ověřit…) chce důvod „Proč je
+ * prodej v pokladně“ (`p_duvod_propojeni`, `propojeniChceDuvod` nad
+ * ULOŽENOU kontrolou); jinak by tržba mimo pokladnu tiše vypadla ze všech
+ * součtů. Kde důvod potřeba není, posílá se `null`.
  */
 export async function potvrditTrzbu(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.trzba')
@@ -235,14 +301,25 @@ export async function potvrditTrzbu(_predchozi: StavAkce, formData: FormData): P
   if (rezim !== 'nova' && rezim !== 'propojit') return chyba('Vyberte, jestli tržbu zapsat, nebo jen propojit.')
   const duplicita = pole(p.f, 'duplicita_duvod')
   if (duplicita !== '' && duplicita.length < 5) return chybaPole('duplicita_duvod', HLASKA_DUVOD)
+  let duvodPropojeni: string | null = null
+  if (rezim === 'propojit' && propojeniChceDuvod(p.z.kontrolaTrzby, p.z.pripojeniId !== null)) {
+    duvodPropojeni = duvodZ(p, 'duvod_propojeni')
+    if (!duvodPropojeni) {
+      return chybaPole('duvod_propojeni', 'Kontrola nenašla konkrétní prodej v pokladně. Napište, proč je prodej v pokladně (aspoň pár slov) — jinak se tržba nezapočítá nikde.')
+    }
+  }
 
   const { error } = await p.supabase.rpc('jine_platby_potvrdit_trzbu', {
     p_zaznam: p.z.id,
     p_verze: verze,
     p_rezim: rezim,
     p_duplicita_duvod: duplicita === '' ? null : duplicita.slice(0, 1000),
+    p_duvod_propojeni: duvodPropojeni,
   })
-  if (error) return chybaSDuplicitou(error, 'potvrzení tržby', 'duplicita_duvod')
+  if (error) {
+    const stav = chybaSDuplicitou(error, 'potvrzení tržby', 'duplicita_duvod')
+    return error.code === '23514' && jeHlaskaDuvoduPropojeni(stav.text) ? { ...stav, chyby: { duvod_propojeni: stav.text } } : stav
+  }
   return hotovo(
     p,
     rezim === 'nova'
@@ -474,6 +551,9 @@ export async function evidovatUhradu(_predchozi: StavAkce, formData: FormData): 
 
   const transakce = pole(p.f, 'transakce')
   let castka: number | null = null
+  // Zrušený záznam úhradu nedostane (jeho částka se do rozdělení platby nepočítá,
+  // takže by tatáž platba „zaplatila“ i jiný záznam). Odpojit jde vždy.
+  if (transakce !== '' && p.z.stavKontroly === 'zruseno') return chyba('Záznam je zrušený — úhradu k němu napárovat nejde.')
   if (transakce !== '') {
     if (!jeUuid(transakce)) return chybaPole('transakce', 'Vyberte bankovní platbu.')
     const c = prevestCastku(pole(p.f, 'castka'))

@@ -6,9 +6,15 @@ import { usePathname } from 'next/navigation'
 
 import Odhlaseni from '@/components/shell/Odhlaseni'
 import { aktivniKlic, sestavNavigaci, type FinanceIkona, type PolozkaNavigace } from '@/lib/finance-navigace'
+import SdilenaIkona from '../ikona'
 
-/** Mřížka 24×24, stejný vzor jako finance/faktury/navigace.tsx. */
-const TVARY: Record<FinanceIkona, ReactNode> = {
+/**
+ * Mřížka 24×24, stejný vzor jako finance/faktury/navigace.tsx. Jiné
+ * platby (přidané 19. 10. 2026) berou ikonu ze sdílené sady
+ * (app/[rozsah]/ikona.tsx, táž jako v levém sloupci aplikace) — nová
+ * vlastní SVG se podle docs/vzhled-zadani.md, oddíl 11, nekreslí.
+ */
+const TVARY: Record<Exclude<FinanceIkona, 'jine_platby'>, ReactNode> = {
   prehled: (
     <>
       <path d="M4 20V10M11 20V4M18 20v-7" />
@@ -82,6 +88,7 @@ const TVARY: Record<FinanceIkona, ReactNode> = {
 }
 
 function Ikona({ klic }: { klic: FinanceIkona }) {
+  if (klic === 'jine_platby') return <SdilenaIkona klic="faktura" />
   return (
     <svg className="ft-i" viewBox="0 0 24 24" aria-hidden="true" style={{ strokeWidth: 2 }}>
       {TVARY[klic]}
@@ -94,9 +101,14 @@ function Ikona({ klic }: { klic: FinanceIkona }) {
  * Kontakty/Platby/Integrace sama (ne společný layout). Důvod je ve
  * finance/layout.tsx: Faktury mají vlastní vnořený `modul-ram` a dva
  * by se vnořily do sebe.
+ *
+ * `prava` (nepovinné, N24): práva přihlášeného — položky, na které
+ * žádné nemá, se nekreslí (stránky Jiných plateb je předávají, ať
+ * obsluha bez finance.read nevidí jen obrazovky, kam nesmí). Bez nich
+ * se kreslí všechno (`sestavNavigaci`).
  */
-export default function Navigace({ rozsah, children }: { rozsah: string; children: ReactNode }) {
-  const { hlavni, mobil } = sestavNavigaci(rozsah)
+export default function Navigace({ rozsah, prava, children }: { rozsah: string; prava?: readonly string[]; children: ReactNode }) {
+  const { hlavni, mobil } = sestavNavigaci(rozsah, prava)
   const aktivni = aktivniKlic(usePathname() ?? '', hlavni)
 
   const odkaz = (p: PolozkaNavigace, kratce: boolean) => {

@@ -19,7 +19,11 @@ import { najitPokladnu } from '@/lib/pokladna-poskytovatele'
  *
  * Funkce vrací jen neodpojené pokladny, které pobočku obsluhují. Pokladna
  * záznamu mezi nimi chybí = mezitím odpojená nebo přeřazená → `null`
- * (stránka pak nenabídne kontrolu ani výdej přes pokladnu).
+ * (stránka pak nezná její schopnosti, takže dohledání v pokladně
+ * nenabídne). Tlačítko ale nic nechrání: kontrolu odmítne akce, když
+ * uložená provozovna záznamu už nepatří jeho pobočce (akce-pos.ts,
+ * `zjistitVPokladne`), a zápis kontroly i výdej databáze
+ * (`app.jp_pokladna_obsluhuje`).
  *
  * Schopnosti jsou z adaptéru (`ADAPTERY_POKLADEN`), ne z databáze: o tom,
  * co pokladna umí, rozhoduje kód adaptéru (Dotykačka: `skladovyVydej:

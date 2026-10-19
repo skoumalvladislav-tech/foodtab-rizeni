@@ -9,6 +9,7 @@ import { chyba, hotovo, kalendarPobocky, obnovit, pripravit, vysledekChyby, type
 import {
   dohledaniZUctu,
   HLASKA_BEZ_DOHLEDANI,
+  HLASKA_PROVOZOVNA_JINDE,
   HLASKA_VERZE,
   jeHlaskaDuplicity,
   jeUuid,
@@ -116,6 +117,12 @@ async function zjistitVPokladne(p: Pripraveno, rel: RelaceOk, druh: 'trzba' | 's
 
   // Provozovna pokladny: u připojení celé firmy ji nese záznam, u připojení
   // pobočky přiřazení provozoven (`externi_ucet.provozovny[]`).
+  // Uložená provozovna platí, jen když ji AKTUÁLNÍ přiřazení pořád dává pobočce
+  // záznamu: po přeřazení v Integracích by se hledalo v pokladně cizí pobočky
+  // a „nenalezeno“ by odemklo druhou tržbu (výdej hlídá databáze, jp_pokladna_obsluhuje).
+  if (p.z.posProvozovna && !rel.provozovny.some((o) => o.id === p.z.posProvozovna && o.branch_id === p.z.branchId)) {
+    return { chyba: HLASKA_PROVOZOVNA_JINDE }
+  }
   const provozovny = p.z.posProvozovna ? [p.z.posProvozovna] : rel.provozovny.filter((o) => o.branch_id === p.z.branchId).map((o) => o.id)
   if (provozovny.length === 0) return { chyba: 'Provozovna pokladny není přiřazená k pobočce (Integrace → Pokladní systémy) — není kde hledat.' }
 

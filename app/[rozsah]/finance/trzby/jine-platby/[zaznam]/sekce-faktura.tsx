@@ -174,6 +174,8 @@ export function SekceUhrada({
 }) {
   const popisPlatby = (t: PlatbaBanky) =>
     `${datumCesky(t.datum)} · ${formatHaleru(t.castkaHaleru, t.mena)}${t.protistrana ? ` · ${t.protistrana}` : ''}${t.vs ? ` · VS ${t.vs}` : ''}`
+  // Zrušený záznam úhradu nedostane (databáze napárování odmítne; jeho částka se do rozdělení platby nepočítá).
+  const zruseno = z.stavKontroly === 'zruseno'
   return (
     <section className="ds-plocha" style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
       <PanelHlava ikona="fajfkaCtverec" nadpis="Úhrada" />
@@ -191,7 +193,9 @@ export function SekceUhrada({
         </Udaje>
       ) : null}
 
-      {akce.has('uhrada') ? (
+      {zruseno ? <Vysvetleni>Záznam je zrušený — úhradu k němu napárovat nejde.</Vysvetleni> : null}
+
+      {akce.has('uhrada') && !zruseno ? (
         platby === null ? (
           <Vysvetleni>{HLASKA_BEZ_FINANCI_FIRMY}</Vysvetleni>
         ) : z.mena === null ? (

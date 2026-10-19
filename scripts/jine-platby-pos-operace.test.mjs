@@ -95,7 +95,7 @@ function novaPokladna({ schopnost = 'api', odeslat = [], dohledat = [], bezOdesl
     return typeof dalsi === 'function' ? dalsi(arg) : dalsi
   }
   const odeslatF = fronta(odeslat, { stav: 'odeslano' })
-  const dohledatF = fronta(dohledat, (klic) => (p.provedeno.has(klic) ? { stav: 'nalezeno', externiId: `POS-${klic}`, doklad: 'D-1', detail: { klic } } : { stav: 'nenalezeno' }))
+  const dohledatF = fronta(dohledat, (klic) => (p.provedeno.has(klic) ? { stav: 'nalezeno', externiId: `POS-${klic}`, doklad: 'D-1', detail: { klic, stav: 'uzavreny', zaplaceno: true, odpis: true } } : { stav: 'nenalezeno' }))
   p.pos = { schopnost }
   if (!bezOdeslat) {
     p.pos.odeslat = async (op) => {
@@ -304,9 +304,58 @@ console.log('\n== Obnova: po platnosti → chyba, kterou jde zkusit znovu ==')
     ok(`obnova ve stavu ${stav} → beze změny, bez dohledání`, r.stav === 'beze_zmeny' && poklx.dohledane.length === 0 && dbx.volani.length === 0)
   }
 
+  // N18: dohledání je ČTENÍ — pustí se i u pokladny, která zápis přes API (už) neumí.
   const db7 = novaDatabaze(nejasna)
   const pokl7 = novaPokladna({ schopnost: 'rucne' })
-  ok('pokladna bez API: obnova beze změny, nic nevolá', (await obnovitOperaci(nejasna, db7.repo, pokl7.pos, hranice + 1)).stav === 'beze_zmeny' && pokl7.dohledane.length === 0 && db7.volani.length === 0)
+  pokl7.provedeno.add('ftjp0001')
+  const rucne = await obnovitOperaci(nejasna, db7.repo, pokl7.pos, hranice + 1)
+  ok('pokladna se schopností „rucne", ale s dohledáním: obnova dohledá a uloží úspěch (nejasná operace má východ)',
+    rucne.stav === 'uspech' && pokl7.dohledane.length === 1 && db7.op.stav === 'uspech')
+  const db7b = novaDatabaze(nejasna)
+  const pokl7b = novaPokladna({ schopnost: 'nepodporovano' })
+  const poPlatnosti = await obnovitOperaci(nejasna, db7b.repo, pokl7b.pos, hranice + 1)
+  ok('… „nepodporovano" s dohledáním, po platnosti nenalezeno → chyba (jde zkusit znovu / zrušit schválení)',
+    poPlatnosti.stav === 'chyba' && pokl7b.dohledane.length === 1 && db7b.op.stav === 'chyba')
+  ok('… a nikdy nic neodeslala', pokl7.odeslane.length === 0 && pokl7b.odeslane.length === 0)
+  const db8 = novaDatabaze(nejasna)
+  const pokl8 = novaPokladna({ schopnost: 'rucne', bezDohledat: true })
+  const bezDohl = await obnovitOperaci(nejasna, db8.repo, pokl8.pos, hranice + 1)
+  ok('pokladna bez dohledání: obnova beze změny, nic nevolá ani neukládá', bezDohl.stav === 'beze_zmeny' && /neumí požadavek dohledat/.test(bezDohl.duvod) && db8.volani.length === 0)
+}
+
+console.log('\n== Úspěch jen u uzavřeného, zaplaceného odpisu (N17) ==')
+{
+  const ucet = (detail) => ({ stav: 'nalezeno', externiId: 'POS-555', doklad: '2026-000555', detail })
+  const NEDOKONCENE = [
+    ['otevřený účet (status new/parked)', { stav: 'otevreny', zaplaceno: false, odpis: false }],
+    ['uzavřený, ale nezaplacený', { stav: 'uzavreny', zaplaceno: false, odpis: true }],
+    ['uzavřený a zaplacený, ale ne odpisem (hotově/kartou)', { stav: 'uzavreny', zaplaceno: true, odpis: false }],
+    ['neznámý stav účtu', { stav: 'neznamy', zaplaceno: true, odpis: true }],
+    ['detail bez údaje o zaplacení', { stav: 'uzavreny', odpis: true }],
+    ['prázdný detail', {}],
+  ]
+  for (const [popis, detail] of NEDOKONCENE) {
+    const db = novaDatabaze(operace())
+    const pokl = novaPokladna({ dohledat: [ucet(detail)] })
+    const r = await provestOperaci(operace(), db.repo, pokl.pos, TED)
+    ok(`provedení: dohledán ${popis} → nejasný výsledek s větou o neuzavřeném účtu, ne úspěch`,
+      r.stav === 'nejasny_vysledek' && r.duvod === lib.HLASKA_UCET_NEDOKONCENY && db.op.stav === 'nejasny_vysledek')
+  }
+  const dbOk = novaDatabaze(operace())
+  const poklOk = novaPokladna({ dohledat: [ucet({ stav: 'uzavreny', zaplaceno: true, odpis: true })] })
+  const rOk = await provestOperaci(operace(), dbOk.repo, poklOk.pos, TED)
+  ok('provedení: uzavřený, zaplacený odpis → úspěch (s detailem)', rOk.stav === 'uspech' && rOk.externiId === 'POS-555' && rOk.vysledek.odpis === true && dbOk.op.stav === 'uspech')
+
+  const platnostDo = new Date(TED).toISOString()
+  const nejasna = operace({ stav: 'nejasny_vysledek', platnostDo, pokusu: 1 })
+  for (const [popis, detail] of NEDOKONCENE.slice(0, 3)) {
+    const db = novaDatabaze(nejasna)
+    const pokl = novaPokladna({ dohledat: [ucet(detail)] })
+    const r = await obnovitOperaci(nejasna, db.repo, pokl.pos, TED + REZERVA_PO_PLATNOSTI_MS + 60 * 60_000)
+    ok(`obnova (i dlouho po platnosti): ${popis} → beze změny s větou, nic neuloženo (ani „chyba" — účet je)`,
+      r.stav === 'beze_zmeny' && r.duvod === lib.HLASKA_UCET_NEDOKONCENY && db.pocet('dokoncit') === 0 && db.op.stav === 'nejasny_vysledek')
+  }
+  ok('věta říká, co ověřit', /není uzavřený a zaplacený Odpisem/.test(lib.HLASKA_UCET_NEDOKONCENY) && /ověřte ho v pokladně/.test(lib.HLASKA_UCET_NEDOKONCENY))
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO (prošlo ${proslo} z ${proslo + chyb})` : `\nVšechny kontroly prošly: ${proslo} z ${proslo}`)

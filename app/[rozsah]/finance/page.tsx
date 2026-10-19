@@ -17,6 +17,7 @@ import { provozniDen } from '@/lib/pokladna-cas'
 import { pokladnaPatriPobocce } from '@/lib/pokladna-trzby'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
+import SdeleniPobockyBezFirmy from './pobocka-bez-firmy'
 import DataTable from '@/components/ui/DataTable'
 import StatusIndicator from '@/components/ui/StatusIndicator'
 import Badge from '@/components/ui/Badge'
@@ -132,6 +133,7 @@ export default async function FinancePrehled({
 
   const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
+  if (pristup.stav === 'pobocka_bez_firmy') return <SdeleniPobockyBezFirmy rozsah={rozsah} />
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Finance vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }

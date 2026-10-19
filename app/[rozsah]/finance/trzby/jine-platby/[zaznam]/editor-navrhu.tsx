@@ -130,6 +130,7 @@ export default function EditorNavrhu({
   katalog,
   kontakty,
   mena,
+  zamekSkladu = null,
 }: {
   akce: AkceZaznamu
   zaznam: string
@@ -142,6 +143,12 @@ export default function EditorNavrhu({
   /** Odběratelé, když je člověk smí vidět (finance.read); `null` = pole se nekreslí, odběratel se nemění. */
   kontakty: { id: string; nazev: string; ico: string | null }[] | null
   mena: string | null
+  /**
+   * Stav skladu, ve kterém databáze NEPUSTÍ změnu položek pro sklad
+   * (`jine_platby_ulozit_navrh`: schválený výdej, výdej předaný k ručnímu
+   * odpisu) — editor to řekne nahoře, dřív než člověk něco přepíše.
+   */
+  zamekSkladu?: 'schvaleno' | 'nepodporovano' | null
 }) {
   const [stav, odeslat, ceka] = useActionState<StavAkce, FormData>(akce, KLID)
   const [verzeDat, setVerzeDat] = useState(verze)
@@ -226,6 +233,35 @@ export default function EditorNavrhu({
       <input type="hidden" name="verze" value={String(verze)} />
       <input type="hidden" name="rozsah" value={rozsah} />
       <input type="hidden" name="castka_puvod" value={puvodCastky} />
+
+      {zamekSkladu ? (
+        <p
+          role="note"
+          style={{
+            margin: 0,
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'flex-start',
+            padding: '10px 12px',
+            borderRadius: '10px',
+            border: '1px solid var(--pozor)',
+            background: 'var(--pozor-bg)',
+            color: 'var(--ink)',
+            fontSize: '14px',
+            fontWeight: 600,
+            lineHeight: 1.45,
+          }}
+        >
+          <span aria-hidden="true" style={{ flex: 'none', paddingTop: '1px' }}>
+            <Ikona klic="varovani" velikost={16} />
+          </span>
+          <span style={{ minWidth: 0 }}>
+            {zamekSkladu === 'schvaleno' ? 'Výdej je schválený' : 'Výdej je předaný k ručnímu provedení v pokladně'} — položky, které se týkají skladu (přidání,
+            odebrání, druh, produkt v pokladně, množství), teď nejde měnit, dokud se výdej neprovede nebo nedoloží („Ručně doloženo“), nebo dokud
+            schvalovatel nezruší schválení. Ostatní údaje uložit jde.
+          </span>
+        </p>
+      ) : null}
 
       {/* ---------- Hlavička ---------- */}
       <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: '10px', minWidth: 0 }}>

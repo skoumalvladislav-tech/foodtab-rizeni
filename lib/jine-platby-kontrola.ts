@@ -111,8 +111,26 @@ export type KontrolaDokladu = {
   navrhCelkem: { haleru: number; puvod: 'vypocet' } | null
   nesoulad: Nesoulad | null
   duvody: string[]
+  /**
+   * Podmnožina `duvody`, která se týká CELÉHO dokladu a z uložených
+   * položek a hlavičky znovu spočítat nejde (N27): nízká jistota dokladu,
+   * každé upozornění AI (zachycený pokyn v textu, „víc dokladů v jednom"…),
+   * K úhradě / zaplaceno / zbývá nesedí s celkem a posun data podle času
+   * tisku (N31). Ukládá se k záznamu (`HlavickaNavrhu.upozorneniDokladu`)
+   * a dokud nějaké je, označit záznam jako zkontrolovaný jde jen
+   * s výslovným potvrzením. Řádkové důvody zůstávají na řádcích, nesoulad
+   * součtu a chybějící údaje hlídá databáze sama — tady nejsou.
+   * Nejvýš `MAX_UPOZORNENI_DOKLADU` položek po `MAX_DELKA_UPOZORNENI_DOKLADU`
+   * znacích (strop databáze).
+   */
+  upozorneniDokladu: string[]
   vyzadujeKontrolu: boolean
 }
+
+/** Strop počtu upozornění k dokladu — musí sedět s `jine_platby_ulozit_navrh` (max 20 × 300 znaků). */
+export const MAX_UPOZORNENI_DOKLADU = 20
+/** Strop délky jednoho upozornění k dokladu (znaky) — musí sedět s migrací. */
+export const MAX_DELKA_UPOZORNENI_DOKLADU = 300
 
 /* ------------------------------------------------------------------ */
 /* Důvody                                                               */
@@ -477,19 +495,65 @@ function popsatNesoulad(celkem: number, ocekavano: number, slevaPopis: string, s
 /* Kontrola rozpoznaného dokladu                                        */
 /* ------------------------------------------------------------------ */
 
+/** „H:MM", „HH:MM" nebo „HH:MM:SS" (i s desetinami sekund) → „HH:MM"; jinak null. */
+export function normalizovatCas(t: unknown): string | null {
+  if (typeof t !== 'string') return null
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(t.trim())
+  if (!m) return null
+  const h = Number(m[1])
+  const min = Number(m[2])
+  if (h > 23 || min > 59) return null
+  return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+/** Den před RRRR-MM-DD (bez pásma — datum prodeje pásmo nemá). */
+function predchoziDen(datum: string): string {
+  const [r, m, d] = datum.split('-').map(Number)
+  return new Date(Date.UTC(r, m - 1, d) - 86_400_000).toISOString().slice(0, 10)
+}
+
+/** „2026-10-17" → „17. 10. 2026". */
+function datumCesky(datum: string): string {
+  const [r, m, d] = datum.split('-').map(Number)
+  return `${d}. ${m}. ${r}`
+}
+
+/** Upozornění k dokladu do stropu databáze: delší se zkrátí, nad počet se poslední nahradí souhrnem. */
+function doStropuUpozorneni(seznam: readonly string[]): string[] {
+  const zkratit1 = (t: string) => (t.length > MAX_DELKA_UPOZORNENI_DOKLADU ? `${t.slice(0, MAX_DELKA_UPOZORNENI_DOKLADU - 1)}…` : t)
+  const vse = [...new Set(seznam.map((t) => t.trim()).filter((t) => t !== ''))].map(zkratit1)
+  if (vse.length <= MAX_UPOZORNENI_DOKLADU) return vse
+  const zbyva = vse.length - (MAX_UPOZORNENI_DOKLADU - 1)
+  return [...vse.slice(0, MAX_UPOZORNENI_DOKLADU - 1), `A další upozornění (${zbyva}) — celý seznam je u rozpoznání dokladu.`]
+}
+
 /**
  * Výstup AI (po kontrole schématu) → návrh položek a hlavičky s důvody
  * ke kontrole. Nic se tu nezapisuje; výsledek je návrh, který člověk
  * potvrdí (`jine_platby_ulozit_navrh` → `jine_platby_oznacit_zkontrolovano`).
  *
  * `moznosti.dnes` = dnešní provozní den RRRR-MM-DD (datum z dokladu
- * nesmí být v budoucnosti). Pozor: datum na dokladu je KALENDÁŘNÍ den
- * tisku — účet vytištěný ve 2:15 patří do včerejšího provozního dne.
- * To posoudí člověk, tady se datum jen převezme.
+ * nesmí být v budoucnosti).
+ *
+ * `moznosti.denZacina` = začátek provozního dne pobočky („HH:MM",
+ * i „HH:MM:SS" z databáze). Datum na dokladu je KALENDÁŘNÍ den tisku —
+ * účet vytištěný ve 2:15 patří do včerejšího provozního dne (pravidlo 10
+ * v CLAUDE.md). Když AI přečetla čas tisku (`cas`) a ten je dřív než
+ * začátek provozního dne, datum se posune o den zpět a do upozornění
+ * k dokladu přibude věta, ať to člověk zkontroluje (N31). Bez času nebo
+ * bez `denZacina` se datum jen převezme — nic se nedomýšlí.
  */
-export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string }): KontrolaDokladu {
+export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string; denZacina?: string }): KontrolaDokladu {
   if (!platneDatum(moznosti.dnes)) throw new RangeError('moznosti.dnes musí být platné datum RRRR-MM-DD')
+  const denZacina = moznosti.denZacina === undefined ? null : normalizovatCas(moznosti.denZacina)
+  if (moznosti.denZacina !== undefined && denZacina === null) throw new RangeError('moznosti.denZacina musí být čas HH:MM')
   const duvody: string[] = []
+  // Upozornění k CELÉMU dokladu (N27) — jdou do `duvody` i sem.
+  const kDokladu: string[] = []
+  const kCelku = (t: string) => {
+    duvody.push(t)
+    kDokladu.push(t)
+  }
 
   // Měna
   const { mena, duvod: duvodMeny } = normalizovatMenu(d.mena)
@@ -531,7 +595,7 @@ export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string
       duvody.push('Celková cena prodeje na dokladu chybí a ze součtu položek ji spočítat nejde — doplňte ji')
     }
     if (castky.kUhrade !== null) {
-      duvody.push(`Doklad uvádí jen „K úhradě" (${castkaTextem(castky.kUhrade, mena)}) — to nemusí být cena prodeje (záloha, spropitné)`)
+      kCelku(`Doklad uvádí jen „K úhradě" (${castkaTextem(castky.kUhrade, mena)}) — to nemusí být cena prodeje (záloha, spropitné)`)
     }
   } else if (ocekavano !== null && Math.abs(castky.celkem - ocekavano) > tol) {
     nesoulad = popsatNesoulad(castky.celkem, ocekavano, slevaPopis, [castky.spropitne, spropitneNaRadcich(polozky)], mena)
@@ -544,7 +608,7 @@ export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string
     const zaokrouhleni = Math.abs(rozdil) <= tol
     const spropitnym = castky.spropitne !== null && rozdil === castky.spropitne
     if (!zaokrouhleni && !spropitnym) {
-      duvody.push(
+      kCelku(
         `K úhradě (${castkaTextem(castky.kUhrade, mena)}) se liší od celkové ceny prodeje (${castkaTextem(castky.celkem, mena)}) — ` +
           'může jít o zálohu, částečnou platbu nebo spropitné; do tržby jde celková cena, ne „K úhradě"',
       )
@@ -556,18 +620,18 @@ export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string
   const nazevZakladu = castky.kUhrade !== null ? '„K úhradě"' : 'celkem'
   if (castky.zaplaceno !== null && castky.zbyva !== null) {
     if (zaklad === null) {
-      duvody.push('Doklad uvádí zaplaceno a zbývá, ale ne „K úhradě" ani celkem')
+      kCelku('Doklad uvádí zaplaceno a zbývá, ale ne „K úhradě" ani celkem')
     } else if (Math.abs(castky.zaplaceno + castky.zbyva - zaklad) > tol) {
-      duvody.push(
+      kCelku(
         `Zaplaceno (${castkaTextem(castky.zaplaceno, mena)}) + zbývá (${castkaTextem(castky.zbyva, mena)}) ` +
           `nedává ${nazevZakladu} (${castkaTextem(zaklad, mena)})`,
       )
     }
   } else if (castky.zaplaceno !== null && zaklad !== null && castky.zaplaceno < zaklad - tol) {
-    duvody.push(`Zaplaceno (${castkaTextem(castky.zaplaceno, mena)}) je méně než ${nazevZakladu} (${castkaTextem(zaklad, mena)}) — částečná platba?`)
+    kCelku(`Zaplaceno (${castkaTextem(castky.zaplaceno, mena)}) je méně než ${nazevZakladu} (${castkaTextem(zaklad, mena)}) — částečná platba?`)
   }
   if (castky.zbyva !== null && castky.zbyva > 0) {
-    duvody.push(
+    kCelku(
       `Zbývá doplatit ${castkaTextem(castky.zbyva, mena)} — prodej není celý zaplacený (otevřený účet nebo částečná platba); úhradu ověří až banka`,
     )
   }
@@ -587,27 +651,34 @@ export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string
     }
   }
 
-  // Datum
+  // Datum. Kalendářní den tisku → provozní den: účet vytištěný před
+  // začátkem provozního dne patří do předchozího (N31). Posun PŘED kontrolou
+  // budoucnosti — účet z 0:30 po půlnoci je kalendářně „zítra", provozně dnes.
   let datumProdeje: string | null = null
+  const cas = normalizovatCas(d.cas)
   if (d.datum === null || d.datum === undefined || String(d.datum).trim() === '') {
     duvody.push('Chybí datum — doklad ho neuvádí, doplňte provozní den')
   } else if (!platneDatum(String(d.datum).trim())) {
     duvody.push(`Datum z dokladu („${zkratit(String(d.datum))}") není platné`)
-  } else if (String(d.datum).trim() > moznosti.dnes) {
-    duvody.push(`Datum z dokladu (${String(d.datum).trim()}) je v budoucnosti — ověřte`)
   } else {
-    datumProdeje = String(d.datum).trim()
+    let datum = String(d.datum).trim()
+    if (cas !== null && denZacina !== null && cas < denZacina) {
+      datum = predchoziDen(datum)
+      kCelku(`Účet vytištěný v ${cas} patří do provozního dne ${datumCesky(datum)} — datum posunuto, zkontrolujte`)
+    }
+    if (datum > moznosti.dnes) duvody.push(`Datum z dokladu (${datum}) je v budoucnosti — ověřte`)
+    else datumProdeje = datum
   }
 
-  // Upozornění modelu
+  // Upozornění modelu (k celému dokladu — zachycený pokyn, víc dokladů v jednom…)
   for (const u of Array.isArray(d.upozorneni) ? d.upozorneni : []) {
-    if (typeof u === 'string' && u.trim() !== '') duvody.push(`Upozornění: ${u.trim()}`)
+    if (typeof u === 'string' && u.trim() !== '') kCelku(`Upozornění: ${u.trim()}`)
   }
 
   // Jistota celého dokladu
   const jistota = typeof d.jistota === 'number' && Number.isFinite(d.jistota) ? d.jistota : null
-  if (jistota === null) duvody.push('Doklad přečtený nejistě (jistota neuvedena)')
-  else if (jistota < MIN_JISTOTA_DOKLADU) duvody.push(`Doklad přečtený nejistě (jistota ${procenta(jistota)})`)
+  if (jistota === null) kCelku('Doklad přečtený nejistě (jistota neuvedena)')
+  else if (jistota < MIN_JISTOTA_DOKLADU) kCelku(`Doklad přečtený nejistě (jistota ${procenta(jistota)})`)
 
   const typDokladu: TypDokladu = (TYPY_DOKLADU as readonly string[]).includes(d.typDokladu) ? d.typDokladu : 'nezjisteno'
   const externi = typeof d.externiId === 'string' ? d.externiId.trim() : ''
@@ -624,14 +695,17 @@ export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string
   }
 
   const duvodyBezOpakovani = [...new Set(duvody)]
+  const upozorneniDokladu = doStropuUpozorneni(kDokladu)
   return {
     polozky,
-    hlavicka,
+    // Hlavička nese upozornění vždy (i prázdné pole): nové čtení nahradí upozornění starého.
+    hlavicka: { ...hlavicka, upozorneniDokladu },
     castky,
     soucetPolozekHaleru: soucet,
     navrhCelkem,
     nesoulad,
     duvody: duvodyBezOpakovani,
+    upozorneniDokladu,
     vyzadujeKontrolu:
       duvodyBezOpakovani.length > 0 || polozky.some((p) => p.vyzadujeKontrolu) || jistota === null || jistota < MIN_JISTOTA_DOKLADU,
   }

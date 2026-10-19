@@ -1,7 +1,9 @@
 import 'server-only'
 
 import {
+  canSee,
   hasAccess,
+  isModuleActive,
   NeprihlasenError,
   PristupOdepren,
   requireContext,
@@ -28,17 +30,17 @@ import { PRAVA_CTENI_JINYCH_PLATEB, type PravoJinychPlateb } from '@/lib/jine-pl
  * stejné pravidlo, jakým databáze pouští řádky (`app.jine_platby_vidi`,
  * RLS všech tabulek agendy). Data hlídá i tak RLS; tohle je první linie.
  *
- * Rám Financí (app/[rozsah]/finance/layout.tsx) obsluhu pustí: ptá se
- * `canSee(ctx, 'finance.read')`, a kdo to právo nemá nikde, dostane
- * stránku beze změny.
+ * Rám Financí (app/[rozsah]/finance/layout.tsx) od 19. 10. 2026 nic
+ * nerozhoduje (N23) — každá stránka Financí si vstup hlídá sama a tahle
+ * funkce je vstup stránek agendy.
  *
  * ---------------------------------------------------------------------
  * POZOR: finance.read JEN NA POBOČCE
  *
  * Kdo má `finance.read` jen na své pobočce (členství pobočky), toho
- * tahle funkce PUSTÍ a rám Financí pro adresu Jiných plateb udělá výjimku
- * (app/[rozsah]/finance/layout.tsx) — záznamy agendy mu RLS ukáže jen
- * z jeho pobočky. Díra by tu ale BYLA: detail záznamu sahá i na data
+ * tahle funkce PUSTÍ (ostatní obrazovky Financí mu ukážou hlášku „jen
+ * s přehledem celé firmy", lib/finance-pristup.ts) — záznamy agendy mu
+ * RLS ukáže jen z jeho pobočky. Díra by tu ale BYLA: detail záznamu sahá i na data
  * celé firmy (bankovní platby k párování úhrady, Kontakty pro odběratele
  * faktury), jejichž RLS rozsah členství nehlídá (`can_read_scoped(…, null)`).
  * Proto je detail načítá jen s `finance.read` ZA CELOU FIRMU
@@ -104,6 +106,25 @@ export async function zkusPristupJinymPlatbam(tenantId: string, rozsah: string):
   if (prava.size === 0) return { stav: 'odepren' }
 
   return { stav: 'ok', ctx, scope, prava, vidi: true }
+}
+
+/**
+ * Práva pro navigaci Financí na stránkách agendy (N24, `sestavNavigaci`
+ * v lib/finance-navigace.ts): práva agendy a `finance.read` V ROZSAHU
+ * adresy (`pristup.prava`) a k tomu Nákup a Faktury podle toho, jestli
+ * je člověk má někde (`canSee`, stejně jako levý sloupec aplikace
+ * v app/[rozsah]/nabidka.ts; Nákup jen se zapnutými Objednávkami).
+ *
+ * Obsluha jen s `jine_platby.zadat` tak v navigaci uvidí jen Jiné platby
+ * — ne Přehled, Tržby ani Platby, kam by ji pustit nešlo. Navigace nic
+ * nechrání (každá stránka si přístup ověří sama); jen nenabízí slepé
+ * odkazy.
+ */
+export function pravaNavigaceFinanci(pristup: Extract<PristupJinePlatby, { stav: 'ok' }>): string[] {
+  const prava: string[] = [...pristup.prava]
+  if (isModuleActive(pristup.ctx, 'objednavky') && canSee(pristup.ctx, 'purchasing.read')) prava.push('purchasing.read')
+  if (canSee(pristup.ctx, 'faktury.read')) prava.push('faktury.read')
+  return prava
 }
 
 /**

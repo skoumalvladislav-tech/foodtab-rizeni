@@ -2,18 +2,28 @@
 /**
  * Jiné platby — rozpoznání dokladu přes AI, bez volání modelu.
  *
- *   lib/jine-platby-ai-jadro.ts — magic bytes, kontrola podkladu, obsah
- *                                 zprávy, zadání, schéma a převod odpovědi
+ *   lib/jine-platby-ai-jadro.ts — magic bytes, kontrola podkladu (i počet
+ *                                 stran PDF), obsah zprávy, zadání, schéma,
+ *                                 časový rozpočet a převod odpovědi
  *                                 (testuje se za běhu);
- *   lib/jine-platby-ai.ts       — `server-only`, proto JEN ze zdroje:
- *                                 kontrola podkladu před klíčem, žádná
- *                                 ukázka, maxRetries 0, žádné thinking.
+ *   lib/jine-platby-ai.ts       — `server-only`; SPOUŠTÍ se taky
+ *                                 (scripts/vykreslit.mjs ho přeloží
+ *                                 s prázdným `server-only`) se SKUTEČNÝM
+ *                                 SDK a podvrženým `fetch`: do sítě nejde
+ *                                 nic, ale odpověď projde celým SDK
+ *                                 i naším převodem — tak je vidět, že se
+ *                                 běh opravdu dostane k větvím max_tokens
+ *                                 a refusal (s `messages.parse` se tam
+ *                                 nedostal, kontrola 19. 10., N33).
  *
  * Pusť `node scripts/jine-platby-ai.test.mjs` (Node 24 odstraní typy sám).
  * Kvalita čtení se tu neověřuje — ta se pozná jen na opravdovém dokladu.
  */
 
 import { readFileSync } from 'node:fs'
+import { deflateSync } from 'node:zlib'
+
+import { adresaModulu } from './vykreslit.mjs'
 
 const {
   MODEL,
@@ -22,6 +32,11 @@ const {
   ZADANI,
   DokladSchema,
   MAX_BAJTU_CELKEM_PRO_AI,
+  CEKANI_NA_MODEL_MS,
+  REZERVA_PO_ODPOVEDI_MS,
+  MIN_CAS_NA_CTENI_MS,
+  casNaCteni,
+  pocetStranPdf,
   poznatTypSouboru,
   zkontrolovatPodklad,
   sestavitObsah,
@@ -34,6 +49,9 @@ const {
   MAX_BAJTU_OBRAZKU_PRO_AI,
   MAX_BAJTU_CELKEM_PRO_AI: CELKEM_Z_TYPU,
   MAX_SOUBORU_PRO_AI,
+  MAX_STRAN_PDF_PRO_AI,
+  MAX_STRAN_PRO_AI,
+  AI_LIMIT_ZA_DEN,
 } = await import('../lib/jine-platby-typy.ts')
 const { zodOutputFormat } = await import('@anthropic-ai/sdk/helpers/zod')
 
@@ -50,6 +68,15 @@ const hodi = (fn) => {
     return e
   }
 }
+/** Kopie objektu bez jednoho klíče. */
+const bezKlice = (o, klic) => {
+  const k = { ...o }
+  delete k[klic]
+  return k
+}
+const js = (kod) => 'data:text/javascript,' + encodeURIComponent(kod)
+/** Zdroj bez komentářů (blokových i řádkových). */
+const bezKomentaru = (t) => t.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '')
 
 const sHlavickou = (hlavicka, delka = 64) => {
   const b = new Uint8Array(Math.max(delka, hlavicka.length))
@@ -149,6 +176,84 @@ console.log('\n== Kontrola podkladu: co se vůbec nepošle ==')
     typeof dohromady === 'string' && /dohromady/.test(dohromady))
 }
 
+/* ------------------------------------------------------------------ */
+/* N25: počet stran PDF — malá PDF vyrobená tady                        */
+/* ------------------------------------------------------------------ */
+
+const bajty = (text) => new Uint8Array(Buffer.from(text, 'latin1'))
+/** PDF s `n` stránkami jako samostatnými objekty (`/Type /Page`) a stromem stránek (`/Type /Pages`). */
+const pdfText = (n, { typStranky = '/Type /Page' } = {}) => {
+  const deti = Array.from({ length: n }, (_, i) => `${i + 3} 0 R`).join(' ')
+  let s = '%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n'
+  s += `2 0 obj\n<< /Type /Pages /Kids [${deti}] /Count ${n} >>\nendobj\n`
+  for (let i = 0; i < n; i++) s += `${i + 3} 0 obj\n<< ${typStranky} /Parent 2 0 R /MediaBox [0 0 200 300] >>\nendobj\n`
+  return s + 'trailer\n<< /Root 1 0 R /Size ' + (n + 3) + ' >>\n%%EOF\n'
+}
+const pdfStran = (n, moznosti) => bajty(pdfText(n, moznosti))
+/**
+ * PDF 1.5+: stránky (i strom stránek) v komprimovaném objektovém proudu
+ * `/Type /ObjStm /Filter /FlateDecode` — v bajtech souboru `/Type /Page`
+ * vůbec není vidět.
+ */
+const pdfVProudu = (n, { delkaOdkazem = false } = {}) => {
+  const objekty = [[2, `<< /Type /Pages /Kids [${Array.from({ length: n }, (_, i) => `${i + 3} 0 R`).join(' ')}] /Count ${n} >>`]]
+  for (let i = 0; i < n; i++) objekty.push([i + 3, '<< /Type /Page /Parent 2 0 R >>'])
+  let hlavicka = ''
+  let telo = ''
+  for (const [cislo, o] of objekty) {
+    hlavicka += `${cislo} ${telo.length} `
+    telo += o + '\n'
+  }
+  const data = deflateSync(Buffer.from(hlavicka + telo, 'latin1'))
+  const delka = delkaOdkazem ? `${n + 4} 0 R` : String(data.length)
+  return new Uint8Array(Buffer.concat([
+    Buffer.from('%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n', 'latin1'),
+    Buffer.from(`${n + 3} 0 obj\n<< /Type /ObjStm /N ${objekty.length} /First ${hlavicka.length} /Filter /FlateDecode /Length ${delka} >>\nstream\n`, 'latin1'),
+    data,
+    Buffer.from(`\nendstream\nendobj\n${delkaOdkazem ? `${n + 4} 0 obj\n${data.length}\nendobj\n` : ''}trailer\n<< /Root 1 0 R >>\n%%EOF\n`, 'latin1'),
+  ]))
+}
+const pdf = (data) => soubor(data, 'application/pdf')
+
+console.log('\n== Počet stran PDF (N25): spočítat z bajtů ==')
+{
+  ok('strop jednoho PDF = 20 stran, všech souborů dohromady = 30 (sdílené typy)', MAX_STRAN_PDF_PRO_AI === 20 && MAX_STRAN_PRO_AI === 30)
+  ok('vyrobené PDF je podle obsahu PDF', poznatTypSouboru(pdfStran(1)) === 'application/pdf')
+  ok('1 stránka → 1', pocetStranPdf(pdfStran(1)) === 1)
+  ok('3 stránky → 3 (strom stránek /Type /Pages se nepočítá)', pocetStranPdf(pdfStran(3)) === 3)
+  ok('21 stránek → 21', pocetStranPdf(pdfStran(21)) === 21)
+  ok('„/Type/Page" bez mezery → počítá se taky', pocetStranPdf(pdfStran(4, { typStranky: '/Type/Page' })) === 4)
+  ok('„/Type /PageLabel" (jiné jméno) stránka není', pocetStranPdf(bajty(pdfText(2) + '9 0 obj\n<< /Type /PageLabel /S /D >>\nendobj\n')) === 2)
+  const prepsana = bajty(pdfText(3) + '4 0 obj\n<< /Type /Page /Parent 2 0 R /Rotate 90 >>\nendobj\nxref\ntrailer\n<< /Prev 0 >>\n%%EOF\n')
+  ok('přírůstková úprava, která stránku přepíše (táž čísla objektu) → pořád 3, ne 4', pocetStranPdf(prepsana) === 3)
+  ok('stránky v komprimovaném objektovém proudu (PDF 1.5+) se rozbalí a spočítají: 5', pocetStranPdf(pdfVProudu(5)) === 5)
+  ok('… i 25 (a /Type /Pages uvnitř proudu se nepočítá)', pocetStranPdf(pdfVProudu(25)) === 25)
+  ok('… i když je délka proudu odkazem na jiný objekt (/Length 9 0 R)', pocetStranPdf(pdfVProudu(25, { delkaOdkazem: true })) === 25)
+  ok('PDF bez jediného objektu stránky (jen hlavička) → null (nejde poznat, strop nevynucovat)', pocetStranPdf(PDF) === null)
+  const jinyFiltr = bajty(pdfText(0).replace('/Count 0', '/Count 7') + '9 0 obj\n<< /Type /ObjStm /N 7 /First 20 /Filter /LZWDecode /Length 4 >>\nstream\nxxxx\nendstream\nendobj\n')
+  ok('proud jiným filtrem (LZW) se nerozbaluje → null', pocetStranPdf(jinyFiltr) === null)
+}
+
+console.log('\n== Počet stran PDF (N25): strop v kontrole podkladu — PŘED klíčem a zahájením ==')
+{
+  ok(`PDF s ${MAX_STRAN_PDF_PRO_AI} stranami projde (strop je včetně)`, zkontrolovatPodklad({ soubory: [pdf(pdfStran(MAX_STRAN_PDF_PRO_AI))] }) === null)
+  const nad = zkontrolovatPodklad({ soubory: [pdf(pdfStran(MAX_STRAN_PDF_PRO_AI + 1))] })
+  ok(`PDF s ${MAX_STRAN_PDF_PRO_AI + 1} stranami → chyba, která říká kolik stran má a kolik jde (${nad})`,
+    typeof nad === 'string' && nad.includes(`${MAX_STRAN_PDF_PRO_AI + 1} stranách`) && nad.includes(`nejvýš ${MAX_STRAN_PDF_PRO_AI} stran`))
+  const druhe = zkontrolovatPodklad({ soubory: [soubor(JPEG, 'image/jpeg'), pdf(pdfVProudu(22))] })
+  ok('dlouhé PDF jako druhý soubor (stránky v proudu) → chyba s jeho pořadím', typeof druhe === 'string' && /^Soubor č\. 2 je PDF o 22 stranách/.test(druhe))
+  ok(`dvě PDF po 15 stranách = přesně ${MAX_STRAN_PRO_AI} dohromady projdou`, zkontrolovatPodklad({ soubory: [pdf(pdfStran(15)), pdf(pdfStran(15))] }) === null)
+  const dohromady = zkontrolovatPodklad({ soubory: [pdf(pdfStran(20)), pdf(pdfStran(11))] })
+  ok(`PDF 20 + 11 stran (každé pod stropem, dohromady 31 > ${MAX_STRAN_PRO_AI}) → chyba „dohromady 31 stran"`,
+    typeof dohromady === 'string' && dohromady.includes('dohromady 31 stran') && dohromady.includes(`nejvýš ${MAX_STRAN_PRO_AI}`))
+  const sFotkami = zkontrolovatPodklad({ soubory: [pdf(pdfStran(20)), pdf(pdfStran(10)), soubor(JPEG, 'image/jpeg')] })
+  ok('fotka se počítá jako jedna strana: PDF 20 + 10 + fotka = 31 → chyba', typeof sFotkami === 'string' && sFotkami.includes('dohromady 31 stran'))
+  ok('PDF, kterému strany spočítat nejde, se bere jako jedna: 20 + 9 + neznámé = 30 projde',
+    zkontrolovatPodklad({ soubory: [pdf(pdfStran(20)), pdf(pdfStran(9)), pdf(PDF)] }) === null)
+  const sNeznamym = zkontrolovatPodklad({ soubory: [pdf(pdfStran(20)), pdf(pdfStran(10)), pdf(PDF)] })
+  ok('… a 20 + 10 + neznámé = 31 → chyba (neznámé PDF není zadarmo)', typeof sNeznamym === 'string' && sNeznamym.includes('dohromady 31 stran'))
+}
+
 console.log('\n== Obsah zprávy: soubory v pořadí stránek, pak pevný pokyn ==')
 {
   const obsah = sestavitObsah({ soubory: [soubor(PDF, 'application/pdf'), soubor(JPEG, 'image/jpeg'), soubor(PNG, 'image/png')] })
@@ -172,7 +277,7 @@ console.log('\n== Model, námaha, verze zadání ==')
 {
   ok('MODEL = claude-opus-5-5', MODEL === 'claude-opus-5-5')
   ok('NAMAHA = high (výchozí u Opus 5.5 je medium)', NAMAHA === 'high')
-  ok('VERZE_ZADANI = jine-platby-v1', VERZE_ZADANI === 'jine-platby-v1')
+  ok('VERZE_ZADANI = jine-platby-v2 (v2 přidala čas tisku, N31)', VERZE_ZADANI === 'jine-platby-v2')
 }
 
 console.log('\n== Zadání: bezpečnost a zákaz hádání ==')
@@ -188,23 +293,28 @@ console.log('\n== Zadání: bezpečnost a zákaz hádání ==')
   ok('částky jako TEXT přesně jak stojí na dokladu', /ceny jako TEXT přesně jak stojí/.test(ZADANI) && /Všechny jako TEXT přesně jak stojí/.test(ZADANI))
   ok('celkem ≠ k úhradě ≠ přijatá hotovost', /`celkem`/.test(ZADANI) && /NENÍ to přijatá hotovost/.test(ZADANI) && /`kUhrade`/.test(ZADANI) && /`prijatoHotove`/.test(ZADANI) && /`vraceno`/.test(ZADANI) && /`zbyva`/.test(ZADANI) && /`zaplaceno`/.test(ZADANI))
   ok('měna jen podle dokladu, jinak null; datum RRRR-MM-DD bez domýšlení roku', /Když měna na dokladu není, dej null/.test(ZADANI) && /RRRR-MM-DD/.test(ZADANI) && /Rok, který na dokladu není/.test(ZADANI))
+  // N31: čas tisku jen čitelný z dokladu, jinak null — nic nedomýšlet.
+  ok('`cas`: HH:MM, jen když je na dokladu čitelný, jinak null a nedomýšlet ani neodhadovat',
+    /- `cas`:/.test(ZADANI) && /HH:MM/.test(ZADANI) && /jen když je na dokladu čitelný/.test(ZADANI) && /dej null — čas si nedomýšlej ani neodhaduj/.test(ZADANI))
   ok('všech osm druhů položky popsaných', DRUHY_POLOZEK.every((d) => ZADANI.includes(`- ${d}:`)))
   ok('všech pět typů dokladu popsaných', TYPY_DOKLADU.every((t) => ZADANI.includes(`- ${t}:`)))
   ok('víc souborů = stránky jednoho dokladu', /stránky TÉHOŽ dokladu/.test(ZADANI))
 }
 
+const KLICE_DOKLADU = [
+  'cas', 'celkem', 'datum', 'externiId', 'jistota', 'kUhrade', 'mena', 'polozky', 'prijatoHotove', 'sleva', 'spropitne', 'textDokladu',
+  'typDokladu', 'upozorneni', 'vraceno', 'zaplaceno', 'zbyva',
+]
+
 console.log('\n== Schéma výstupu (co dostane model) = tvar RozpoznanyDoklad ==')
 {
   const schema = zodOutputFormat(DokladSchema).schema ?? {}
   const klice = Object.keys(schema.properties ?? {}).sort()
-  ok('klíče přesně jako RozpoznanyDoklad', JSON.stringify(klice) === JSON.stringify([
-    'celkem', 'datum', 'externiId', 'jistota', 'kUhrade', 'mena', 'polozky', 'prijatoHotove', 'sleva', 'spropitne', 'textDokladu',
-    'typDokladu', 'upozorneni', 'vraceno', 'zaplaceno', 'zbyva',
-  ]))
+  ok('klíče přesně jako RozpoznanyDoklad (i `cas`, N31)', JSON.stringify(klice) === JSON.stringify(KLICE_DOKLADU))
   ok('všechny klíče povinné a nic navíc (additionalProperties false)', schema.additionalProperties === false && (schema.required ?? []).length === klice.length)
   const nullable = (p) => JSON.stringify(p?.type ?? '').includes('null')
-  ok('částky jsou text NEBO null (neznámá částka není 0)',
-    ['celkem', 'kUhrade', 'zaplaceno', 'prijatoHotove', 'vraceno', 'zbyva', 'sleva', 'spropitne', 'mena', 'datum', 'externiId'].every((k) => nullable(schema.properties[k]) && JSON.stringify(schema.properties[k].type).includes('string')))
+  ok('částky, měna, datum, čas i externí ID jsou text NEBO null (neznámá částka není 0)',
+    ['celkem', 'kUhrade', 'zaplaceno', 'prijatoHotove', 'vraceno', 'zbyva', 'sleva', 'spropitne', 'mena', 'datum', 'cas', 'externiId'].every((k) => nullable(schema.properties[k]) && JSON.stringify(schema.properties[k].type).includes('string')))
   const polozka = schema.properties.polozky?.items ?? {}
   ok('položka: klíče přesně jako RozpoznanaPolozka', JSON.stringify(Object.keys(polozka.properties ?? {}).sort()) === JSON.stringify([
     'cenaCelkem', 'cenaJednotkova', 'druhNavrh', 'jednotka', 'jistota', 'mnozstvi', 'nazev', 'poznamka', 'sazbaDph',
@@ -239,6 +349,7 @@ const VYSTUP = {
   spropitne: '65,50',
   mena: ' czk ',
   datum: '2026-10-15',
+  cas: '1:30',
   externiId: '  Účet 42 ',
   typDokladu: 'uzavreny_prodej',
   textDokladu: 'RESTAURACE U LÍPY\nPilsner 0,5 l   2 x 59,-\n',
@@ -249,10 +360,7 @@ const VYSTUP = {
 console.log('\n== Odpověď modelu → RozpoznanyDoklad ==')
 {
   const d = naRozpoznanyDoklad(VYSTUP)
-  ok('tvar přesně RozpoznanyDoklad', JSON.stringify(Object.keys(d).sort()) === JSON.stringify([
-    'celkem', 'datum', 'externiId', 'jistota', 'kUhrade', 'mena', 'polozky', 'prijatoHotove', 'sleva', 'spropitne', 'textDokladu',
-    'typDokladu', 'upozorneni', 'vraceno', 'zaplaceno', 'zbyva',
-  ]))
+  ok('tvar přesně RozpoznanyDoklad', JSON.stringify(Object.keys(d).sort()) === JSON.stringify(KLICE_DOKLADU))
   ok('částky zůstávají textem přesně jak stály (bez převodu na číslo)', d.celkem === '1 234,50' && d.kUhrade === '1 300,00' && d.spropitne === '65,50' && d.prijatoHotove === '1 500')
   ok('prázdný text ("") → null, ne ""', d.zbyva === null)
   ok('null zůstává null', d.zaplaceno === null && d.sleva === null)
@@ -264,6 +372,15 @@ console.log('\n== Odpověď modelu → RozpoznanyDoklad ==')
   const p = d.polozky[0]
   ok('položka: název a množství ořezané, poznámka z mezer → null', p.nazev === 'Pilsner 0,5 l' && p.mnozstvi === '2' && p.poznamka === null)
   ok('položka: ceny textem, druh a jistota přenesené', p.cenaJednotkova === '59,-' && p.cenaCelkem === '118,-' && p.druhNavrh === 'rozlevany_napoj' && p.jistota === 0.92)
+
+  // N31: čas tisku.
+  ok('čas „1:30" → „01:30"', d.cas === '01:30')
+  ok('čas „23:59:30" → „23:59" (sekundy pryč)', naRozpoznanyDoklad({ ...VYSTUP, cas: '23:59:30' }).cas === '23:59')
+  ok('čas null → null bez upozornění', ((x) => x.cas === null && !x.upozorneni.some((u) => /Čas/.test(u)))(naRozpoznanyDoklad({ ...VYSTUP, cas: null })))
+  const spatnyCas = naRozpoznanyDoklad({ ...VYSTUP, cas: 'půl druhé' })
+  ok('nečitelný čas „půl druhé" → null + upozornění (datum se podle něj neposune)', spatnyCas.cas === null && spatnyCas.upozorneni.some((u) => /Čas „půl druhé" není ve tvaru HH:MM/.test(u)))
+  ok('neexistující čas „24:00" → null + upozornění', ((x) => x.cas === null && x.upozorneni.some((u) => /24:00/.test(u)))(naRozpoznanyDoklad({ ...VYSTUP, cas: '24:00' })))
+  ok('chybějící klíč `cas` → chyba zod (schéma ho chce vždy)', ((bez) => hodi(() => naRozpoznanyDoklad(bez))?.name === 'ZodError')(bezKlice(VYSTUP, 'cas')))
 
   const sevreni = naRozpoznanyDoklad({ ...VYSTUP, jistota: 1.7, polozky: [{ ...POLOZKA, jistota: -0.3 }, { ...POLOZKA, jistota: 5 }] })
   ok('jistota dokladu 1,7 → sevřená na 1', sevreni.jistota === 1)
@@ -301,6 +418,204 @@ console.log('\n== Odpověď modelu → RozpoznanyDoklad ==')
   ok('bez textu na podkladu → textDokladu ""', naRozpoznanyDoklad({ ...VYSTUP, textDokladu: '  ' }).textDokladu === '')
 }
 
+console.log('\n== Časový rozpočet volání (N29): casNaCteni ==')
+{
+  const TED = 1_800_000_000_000
+  ok('výchozí čekání 100 s, rezerva po odpovědi 5 s, pod 15 s se nevolá',
+    CEKANI_NA_MODEL_MS === 100_000 && REZERVA_PO_ODPOVEDI_MS === 5_000 && MIN_CAS_NA_CTENI_MS === 15_000)
+  ok('bez termínu i limitu → 100 s', casNaCteni({}, TED) === 100_000)
+  ok('kratší limit volajícího (50 s) → 50 s; delší (300 s) → pořád 100 s', casNaCteni({ casovyLimitMs: 50_000 }, TED) === 50_000 && casNaCteni({ casovyLimitMs: 300_000 }, TED) === 100_000)
+  ok('termín za 60 s → 55 s (5 s rezerva na převod a zápis)', casNaCteni({ konec: TED + 60_000 }, TED) === 55_000)
+  ok('termín za 10 minut → strop 100 s', casNaCteni({ konec: TED + 600_000 }, TED) === 100_000)
+  ok('termín za 20 s → přesně 15 s, ještě se volá (hranice včetně)', casNaCteni({ konec: TED + 20_000 }, TED) === 15_000)
+  ok('termín za 19,999 s → null (model se nevolá)', casNaCteni({ konec: TED + 19_999 }, TED) === null)
+  ok('termín v minulosti → null', casNaCteni({ konec: TED - 1 }, TED) === null)
+  ok('limit i termín: vyhraje kratší (limit 30 s, termín za 60 s → 30 s; limit 80 s, termín za 60 s → 55 s)',
+    casNaCteni({ casovyLimitMs: 30_000, konec: TED + 60_000 }, TED) === 30_000 && casNaCteni({ casovyLimitMs: 80_000, konec: TED + 60_000 }, TED) === 55_000)
+  ok('limit volajícího pod 15 s → null', casNaCteni({ casovyLimitMs: 10_000 }, TED) === null)
+  ok('nesmyslný termín (NaN) se nebere, platí výchozí', casNaCteni({ konec: Number.NaN }, TED) === 100_000)
+}
+
+/* ------------------------------------------------------------------ */
+/* Volání modelu za běhu — skutečné SDK, podvržený fetch               */
+/* ------------------------------------------------------------------ */
+
+const SDK = import.meta.resolve('@anthropic-ai/sdk')
+const AI = await import(adresaModulu('lib/jine-platby-ai.ts', [
+  ['server-only', js('')],
+  ['@anthropic-ai/sdk/helpers/zod', import.meta.resolve('@anthropic-ai/sdk/helpers/zod')],
+  ['@anthropic-ai/sdk', SDK],
+]))
+const { default: Anthropic } = await import(SDK)
+
+const puvodniFetch = globalThis.fetch
+const puvodniKlic = process.env.ANTHROPIC_API_KEY
+const KLIC = 'sk-ant-test-podvrh-0000'
+
+/** Podvržená síť: vrací připravené odpovědi popořadě a pamatuje si požadavky. NIC neodejde ven. */
+function sit(odpovedi) {
+  const fronta = [...odpovedi]
+  const pozadavky = []
+  const fetchFn = async (url, init = {}) => {
+    const h = new Headers(init.headers)
+    pozadavky.push({ url: String(url), method: init.method, hlavicky: h, telo: typeof init.body === 'string' ? JSON.parse(init.body) : null })
+    const o = fronta.shift() ?? { status: 500, telo: { type: 'error', error: { type: 'api_error', message: 'fronta odpovědí je prázdná' } } }
+    return new Response(JSON.stringify(o.telo), { status: o.status ?? 200, headers: { 'content-type': 'application/json', 'request-id': 'req_test' } })
+  }
+  return { fetchFn, pozadavky }
+}
+/** Odpověď Messages API. */
+const zprava = (stopReason, obsah) => ({
+  status: 200,
+  telo: {
+    id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-opus-5-5-20261001',
+    content: obsah, stop_reason: stopReason, stop_sequence: null, usage: { input_tokens: 1200, output_tokens: 300 },
+  },
+})
+const text = (t) => ({ type: 'text', text: t })
+const chybaApi = (status, typ, zpravaChyby) => ({ status, telo: { type: 'error', error: { type: typ, message: zpravaChyby } } })
+
+const PODKLAD = { soubory: [soubor(JPEG, 'image/jpeg'), soubor(pdfStran(2), 'application/pdf')] }
+/** Spustí rozpoznatDoklad nad podvrženou sítí. `klic` = hodnota ANTHROPIC_API_KEY (null = smazat). */
+async function rozpoznat(odpovedi, { podklad = PODKLAD, moznosti = {}, klic = KLIC } = {}) {
+  const s = sit(odpovedi)
+  globalThis.fetch = s.fetchFn
+  if (klic === null) delete process.env.ANTHROPIC_API_KEY
+  else process.env.ANTHROPIC_API_KEY = klic
+  try {
+    return { v: await AI.rozpoznatDoklad(podklad, moznosti), ...s }
+  } finally {
+    globalThis.fetch = puvodniFetch
+  }
+}
+const USEKNUTY = '{"polozky":[{"nazev":"Pilsner 0,5 l","mnozstvi":"2","jednotka":null,"cenaJednotkova":"59,-","cenaCel'
+
+console.log('\n== Volání modelu: tvar požadavku (skutečné SDK, podvržený fetch) ==')
+try {
+  const { v, pozadavky } = await rozpoznat([zprava('end_turn', [text(JSON.stringify(VYSTUP))])])
+  const p = pozadavky[0]
+  ok(`úspěch → stav ok s dokladem převedeným naRozpoznanyDoklad (${v.stav}${v.duvod ? ': ' + v.duvod : ''})`,
+    v.stav === 'ok' && JSON.stringify(v.doklad) === JSON.stringify(naRozpoznanyDoklad(VYSTUP)))
+  ok('… model z odpovědi a verze zadání VERZE_ZADANI', v.model === 'claude-opus-5-5-20261001' && v.verze === VERZE_ZADANI)
+  ok('právě jeden požadavek: POST …/v1/messages (create, žádné opakování)', pozadavky.length === 1 && p.method === 'POST' && /\/v1\/messages$/.test(p.url))
+  ok('klíč z ANTHROPIC_API_KEY v hlavičce x-api-key', p.hlavicky.get('x-api-key') === KLIC)
+  ok('tělo: model, max_tokens 16000, zadání ZADANI, obsah = sestavitObsah(podklad)',
+    p.telo.model === MODEL && p.telo.max_tokens === 16000 && p.telo.system === ZADANI &&
+      p.telo.messages.length === 1 && p.telo.messages[0].role === 'user' && JSON.stringify(p.telo.messages[0].content) === JSON.stringify(sestavitObsah(PODKLAD)))
+  ok('tělo: output_config { effort: high, format json_schema = schéma DokladSchema }',
+    p.telo.output_config?.effort === NAMAHA && p.telo.output_config?.format?.type === 'json_schema' &&
+      JSON.stringify(p.telo.output_config.format.schema) === JSON.stringify(zodOutputFormat(DokladSchema).schema))
+  ok('tělo: nic navíc — žádné thinking, stream ani nástroje',
+    JSON.stringify(Object.keys(p.telo).sort()) === JSON.stringify(['max_tokens', 'messages', 'model', 'output_config', 'system']))
+  ok('výchozí časový limit volání 100 s (hlavička X-Stainless-Timeout), první pokus', p.hlavicky.get('x-stainless-timeout') === '100' && p.hlavicky.get('x-stainless-retry-count') === '0')
+
+  const sPremyslenim = await rozpoznat([zprava('end_turn', [{ type: 'thinking', thinking: 'počítám řádky', signature: 'x' }, text(JSON.stringify(VYSTUP))])])
+  ok('blok přemýšlení před textem se přeskočí → ok', sPremyslenim.v.stav === 'ok')
+  const veDvou = JSON.stringify(VYSTUP)
+  const dvaBloky = await rozpoznat([zprava('end_turn', [text(veDvou.slice(0, 40)), text(veDvou.slice(40))])])
+  ok('text rozdělený do dvou bloků se spojí → ok', dvaBloky.v.stav === 'ok')
+} catch (e) {
+  ok(`volání modelu se podařilo spustit (${e?.stack ?? e})`, false)
+}
+
+console.log('\n== Volání modelu: stop_reason se rozhodne DŘÍV než čtení JSON (N33) ==')
+try {
+  const dlouhy = await rozpoznat([zprava('max_tokens', [text(USEKNUTY)])])
+  ok(`max_tokens s useknutým JSON → trvalá chyba „moc dlouhý — rozdělte ho" (${dlouhy.v.duvod})`,
+    dlouhy.v.stav === 'chyba' && dlouhy.v.docasna === false && dlouhy.v.duvod === AI.HLASKA_MOC_DLOUHY && /rozdělte ho/.test(AI.HLASKA_MOC_DLOUHY))
+  const okno = await rozpoznat([zprava('model_context_window_exceeded', [text(USEKNUTY)])])
+  ok('model_context_window_exceeded → táž hláška', okno.v.stav === 'chyba' && okno.v.docasna === false && okno.v.duvod === AI.HLASKA_MOC_DLOUHY)
+  const dlouhyPlatny = await rozpoznat([zprava('max_tokens', [text(JSON.stringify(VYSTUP))])])
+  ok('max_tokens i s náhodou platným JSON → pořád „moc dlouhý" (useknutou odpověď nebrat)', dlouhyPlatny.v.stav === 'chyba' && dlouhyPlatny.v.duvod === AI.HLASKA_MOC_DLOUHY)
+  const odmitnuto = await rozpoznat([zprava('refusal', [text('Tohle přečíst nemohu.')])])
+  ok(`refusal s kusem textu → trvalá chyba „Model doklad odmítl přečíst" (${odmitnuto.v.duvod})`,
+    odmitnuto.v.stav === 'chyba' && odmitnuto.v.docasna === false && odmitnuto.v.duvod === AI.HLASKA_ODMITNUTO && /odmítl přečíst/.test(AI.HLASKA_ODMITNUTO))
+  const odmitnutoPrazdne = await rozpoznat([zprava('refusal', [])])
+  ok('refusal bez obsahu → táž hláška (ne „nevrátila nic")', odmitnutoPrazdne.v.duvod === AI.HLASKA_ODMITNUTO)
+  ok('text odpovědi (kus dokladu) se do důvodu nekopíruje', !dlouhy.v.duvod.includes('Pilsner') && !odmitnuto.v.duvod.includes('nemohu'))
+
+  // Proč ne messages.parse: totéž SDK nad touž odpovědí hodí chybu dřív, než je stop_reason vidět.
+  const s = sit([zprava('max_tokens', [text(USEKNUTY)])])
+  let chybaParse = null
+  try {
+    await new Anthropic({ apiKey: KLIC, fetch: s.fetchFn, maxRetries: 0 }).messages.parse({
+      model: MODEL, max_tokens: 16000, output_config: { format: zodOutputFormat(DokladSchema) }, system: ZADANI, messages: [{ role: 'user', content: 'x' }],
+    })
+  } catch (e) {
+    chybaParse = e
+  }
+  ok('(srovnání: messages.parse nad useknutou odpovědí hodí AnthropicError — stop_reason by se nikdy nekontroloval)', chybaParse instanceof Anthropic.AnthropicError)
+
+  const nejson = await rozpoznat([zprava('end_turn', [text('Tady je doklad: {…}')])])
+  ok('end_turn s textem, který není JSON → trvalá chyba „není to platný JSON"', nejson.v.stav === 'chyba' && !nejson.v.docasna && /není to platný JSON/.test(nejson.v.duvod))
+  const mimoSchema = await rozpoznat([zprava('end_turn', [text(JSON.stringify({ ...VYSTUP, typDokladu: 'faktura' }))])])
+  ok('end_turn s JSON mimo schéma (neznámý typ dokladu) → „neodpovídá schématu"', mimoSchema.v.stav === 'chyba' && /neodpovídá schématu/.test(mimoSchema.v.duvod))
+  const bezCasu = await rozpoznat([zprava('end_turn', [text(JSON.stringify(bezKlice(VYSTUP, 'cas')))])])
+  ok('end_turn s JSON bez klíče `cas` → „neodpovídá schématu" (žádný pád)', bezCasu.v.stav === 'chyba' && /neodpovídá schématu/.test(bezCasu.v.duvod))
+  const prazdne = await rozpoznat([zprava('end_turn', [])])
+  ok('end_turn bez textového bloku → „nevrátila žádné rozpoznané údaje"', prazdne.v.stav === 'chyba' && /nevrátila žádné/.test(prazdne.v.duvod))
+} catch (e) {
+  ok(`volání modelu se podařilo spustit (${e?.stack ?? e})`, false)
+}
+
+console.log('\n== Volání modelu: chyby API (jako faktury-prijem-ai) ==')
+try {
+  const r429 = await rozpoznat([chybaApi(429, 'rate_limit_error', 'Too many')])
+  ok('429 → dočasná chyba (přetížení), jediný pokus (maxRetries 0)', r429.v.stav === 'chyba' && r429.v.docasna === true && /přetížená/.test(r429.v.duvod) && r429.pozadavky.length === 1)
+  const r529 = await rozpoznat([chybaApi(529, 'overloaded_error', 'Overloaded')])
+  ok('529 → dočasná „výpadek", jediný pokus', r529.v.docasna === true && /výpadek \(chyba 529\)/.test(r529.v.duvod) && r529.pozadavky.length === 1)
+  const r401 = await rozpoznat([chybaApi(401, 'authentication_error', 'invalid x-api-key')])
+  ok('401 → trvalá „Klíč k AI neplatí"', r401.v.docasna === false && /Klíč k AI neplatí/.test(r401.v.duvod))
+  const r400 = await rozpoznat([chybaApi(400, 'invalid_request_error', 'PDF has too many pages')])
+  ok('400 → trvalá „AI soubor nepřijala (chyba 400): <zpráva API>"', r400.v.docasna === false && /nepřijala \(chyba 400\): PDF has too many pages/.test(r400.v.duvod))
+} catch (e) {
+  ok(`volání modelu se podařilo spustit (${e?.stack ?? e})`, false)
+}
+
+console.log('\n== Volání modelu: co se vůbec nepošle (podklad, klíč, čas — N25, N29) ==')
+try {
+  const bezKlice = await rozpoznat([], { klic: null })
+  ok('bez klíče → bez_klice a žádný požadavek (nikdy vymyšlený doklad)', bezKlice.v.stav === 'bez_klice' && bezKlice.pozadavky.length === 0)
+  const mezery = await rozpoznat([], { klic: '   ' })
+  ok('klíč z mezer → bez_klice', mezery.v.stav === 'bez_klice' && mezery.pozadavky.length === 0)
+  const vadny = await rozpoznat([], { podklad: { soubory: [soubor(GIF, 'image/png')] } })
+  ok('vadný podklad (GIF jako PNG) → trvalá chyba, žádný požadavek', vadny.v.stav === 'chyba' && !vadny.v.docasna && vadny.pozadavky.length === 0)
+  const vadnyBezKlice = await rozpoznat([], { podklad: { soubory: [soubor(GIF, 'image/png')] }, klic: null })
+  ok('… i bez klíče je odpověď o podkladu (kontrola podkladu PŘED klíčem)', vadnyBezKlice.v.stav === 'chyba')
+  const dlouhePdf = await rozpoznat([], { podklad: { soubory: [pdf(pdfStran(MAX_STRAN_PDF_PRO_AI + 1))] } })
+  ok(`PDF s ${MAX_STRAN_PDF_PRO_AI + 1} stranami → chyba o stranách, žádný požadavek (nic se nezaplatí)`,
+    dlouhePdf.v.stav === 'chyba' && /stranách/.test(dlouhePdf.v.duvod) && dlouhePdf.pozadavky.length === 0)
+
+  const pozde = await rozpoznat([zprava('end_turn', [text(JSON.stringify(VYSTUP))])], { moznosti: { konec: Date.now() + 10_000 } })
+  ok(`termín za 10 s → dočasná „Na čtení nezbývá čas", žádný požadavek (${pozde.v.duvod})`,
+    pozde.v.stav === 'chyba' && pozde.v.docasna === true && pozde.v.duvod === AI.HLASKA_NEZBYVA_CAS && pozde.pozadavky.length === 0)
+  const vCas = await rozpoznat([zprava('end_turn', [text(JSON.stringify(VYSTUP))])], { moznosti: { konec: Date.now() + 60_000 } })
+  const t = vCas.pozadavky[0]?.hlavicky.get('x-stainless-timeout')
+  ok(`termín za 60 s → volá se s limitem ~55 s (X-Stainless-Timeout ${t})`, vCas.v.stav === 'ok' && (t === '54' || t === '55'))
+  const kratky = await rozpoznat([zprava('end_turn', [text(JSON.stringify(VYSTUP))])], { moznosti: { casovyLimitMs: 30_000 } })
+  ok('casovyLimitMs 30 s → limit 30 s', kratky.pozadavky[0]?.hlavicky.get('x-stainless-timeout') === '30')
+} catch (e) {
+  ok(`volání modelu se podařilo spustit (${e?.stack ?? e})`, false)
+} finally {
+  globalThis.fetch = puvodniFetch
+  if (puvodniKlic === undefined) delete process.env.ANTHROPIC_API_KEY
+  else process.env.ANTHROPIC_API_KEY = puvodniKlic
+}
+
+console.log('\n== Denní strop rozpoznání: konstanta = migrace (N32) ==')
+{
+  const sql = readFileSync(new URL('../supabase/migrations/20261016100000_jine_platby.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const od = sql.indexOf('create function public.jine_platby_zahajit_rozpoznani(')
+  const telo = od >= 0 ? sql.slice(od, sql.indexOf('end $$;', od)) : ''
+  ok('(funkci jine_platby_zahajit_rozpoznani se podařilo v migraci najít)', telo.length > 200 && telo.includes('pg_advisory_xact_lock'))
+  const stropy = [...telo.matchAll(/v_dnes >= (\d+)/g)].map((m) => Number(m[1]))
+  ok(`strop v migraci (v_dnes >= ${stropy.join(', ') || '?'}) = AI_LIMIT_ZA_DEN (${AI_LIMIT_ZA_DEN}) a je jediný`, stropy.length === 1 && stropy[0] === AI_LIMIT_ZA_DEN)
+  const vHlasce = /Dnešní strop rozpoznání \((\d+) za firmu\)/.exec(telo)
+  ok('a hláška databáze jmenuje totéž číslo', vHlasce !== null && Number(vHlasce[1]) === AI_LIMIT_ZA_DEN)
+  const stranka = readFileSync(new URL('../app/[rozsah]/finance/trzby/jine-platby/novy/page.tsx', import.meta.url), 'utf8')
+  ok('konstanta se v aplikaci opravdu používá (věta o stropu na novém záznamu)', /import \{ AI_LIMIT_ZA_DEN \} from '@\/lib\/jine-platby-typy'/.test(stranka) && /nejvýš \$\{AI_LIMIT_ZA_DEN\} čtení denně/.test(stranka))
+}
+
 console.log('\n== Ze zdroje: uzavřený vstup, jádro bez serveru ==')
 {
   const jadro = readFileSync(new URL('../lib/jine-platby-ai-jadro.ts', import.meta.url), 'utf8')
@@ -328,33 +643,21 @@ console.log('\n== Ze zdroje: uzavřený vstup, jádro bez serveru ==')
   const poleVnitrni = [...vnitrni.matchAll(/(\w+)\??\s*:/g)].map((m) => m[1])
   ok('a soubor má právě data a mime', JSON.stringify(poleVnitrni) === '["data","mime"]')
 
-  ok('jádro nemá server-only (CI ho pouští prostým node)', !/server-only/.test(jadro.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')))
+  ok('jádro nemá server-only (CI ho pouští prostým node)', !/server-only/.test(bezKomentaru(jadro)))
   ok('jádro neimportuje přes @/', !/from '@\//.test(jadro))
 }
 
 console.log('\n== Ze zdroje: volání modelu (lib/jine-platby-ai.ts) ==')
 {
   const zdroj = readFileSync(new URL('../lib/jine-platby-ai.ts', import.meta.url), 'utf8')
+  const kod = bezKomentaru(zdroj)
   ok("první řádek je import 'server-only'", zdroj.split('\n')[0].trim() === "import 'server-only'")
   ok('žádná ukázka ani mock (bez klíče stav bez_klice, nikdy vymyšlený doklad)', !/jeUkazka|ukazka|mock/i.test(zdroj))
-
-  const zacatek = zdroj.indexOf('export async function rozpoznatDoklad')
-  const konec = zacatek >= 0 ? zdroj.indexOf('\nfunction ', zacatek) : -1
-  const telo = zacatek >= 0 && konec > zacatek ? zdroj.slice(zacatek, konec) : ''
-  ok('(tělo rozpoznatDoklad se podařilo vyříznout)', telo.length > 200 && telo.includes('messages.parse'))
-  const kontrola = telo.indexOf('zkontrolovatPodklad(p)')
-  const prostredi = telo.indexOf('process.env')
-  ok('kontrola podkladu je PŘED čtením klíče z process.env', kontrola >= 0 && prostredi >= 0 && kontrola < prostredi)
-  ok('a vadný podklad se vrátí hned (return před klíčem)', /const vada = zkontrolovatPodklad\(p\)\s*\n\s*if \(vada\) return trvala\(vada\)/.test(telo))
-  ok('bez klíče stav bez_klice', /if \(!klic\) return \{ stav: 'bez_klice' \}/.test(telo))
-  ok('klient s maxRetries: 0 a časovým limitem', /new Anthropic\(\{ apiKey: klic, timeout: limit, maxRetries: 0 \}\)/.test(telo))
-  ok('výchozí čekání 100 s', /const CEKANI_MS = 100_000/.test(zdroj))
-  ok('messages.parse s output_config { effort: NAMAHA, format: zodOutputFormat(DokladSchema) }', /output_config: \{ effort: NAMAHA, format: zodOutputFormat\(DokladSchema\) \}/.test(telo))
-  ok('zadání ZADANI a obsah jen ze sestavitObsah(p)', /system: ZADANI/.test(telo) && /content: sestavitObsah\(p\)/.test(telo))
+  ok('volá messages.create, ne messages.parse (N33)', /client\.messages\.create\(/.test(kod) && !/messages\.parse/.test(kod))
+  ok('klient s maxRetries: 0 a časovým limitem z casNaCteni', /new Anthropic\(\{ apiKey: klic, timeout: limit, maxRetries: 0 \}\)/.test(kod) && /const limit = casNaCteni\(moznosti, Date\.now\(\)\)/.test(kod))
   ok('parametr thinking se nikde neposílá', !/thinking/.test(zdroj))
-  ok('refusal a useknutí (max_tokens, okno) → trvalá chyba', /stop_reason === 'refusal'/.test(telo) && /stop_reason === 'max_tokens'/.test(telo) && /model_context_window_exceeded/.test(telo))
-  ok('jediný návrat stav ok, a to z parsed_output přes naRozpoznanyDoklad',
-    (zdroj.match(/stav: 'ok'/g) ?? []).length === 2 /* typ + návrat */ && /const vystup = odpoved\.parsed_output/.test(telo) && /stav: 'ok', doklad: naRozpoznanyDoklad\(vystup\)/.test(telo))
+  ok('jediný návrat stav ok, a to ze schématem ověřené odpovědi přes naRozpoznanyDoklad',
+    (kod.match(/stav: 'ok'/g) ?? []).length === 2 /* typ + návrat */ && /stav: 'ok', doklad: naRozpoznanyDoklad\(vystup\.data\)/.test(kod) && /DokladSchema\.safeParse\(/.test(kod))
   ok('chyby jako faktury-prijem-ai: 401 trvalá, 429/5xx/408/timeout/spojení dočasné',
     /AuthenticationError\)[\s\S]{0,80}trvala/.test(zdroj) && /RateLimitError\)[\s\S]{0,80}docasna/.test(zdroj)
     && /APIConnectionTimeoutError\)[\s\S]{0,80}docasna/.test(zdroj) && /APIConnectionError\)[\s\S]{0,80}docasna/.test(zdroj)

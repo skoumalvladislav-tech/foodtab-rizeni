@@ -109,6 +109,10 @@ export default function NahratDoklad({
           nove.push({ text: problem ?? `„${nazev}“: tenhle typ souboru nejde nahrát.`, odkaz: null })
           continue
         }
+        // Typ musí nést sám Blob: storage-js u Blob/File volbu contentType nepoužije (pošle
+        // multipart s blob.type) — a prohlížeč u nezmenšeného souboru hlásí třeba '' nebo
+        // 'image/jpg', které kbelík nepustí. Typ odvozený kontrolou výběru je `mime`.
+        blob = new Blob([blob], { type: mime })
         setPrubeh(`Nahrávám ${poradi + 1} z ${kontrola.polozky.length}: ${nazev}`)
 
         const cesta = cestaSouboru(tenantId, branchId, zaznamId, noveId(), mime)

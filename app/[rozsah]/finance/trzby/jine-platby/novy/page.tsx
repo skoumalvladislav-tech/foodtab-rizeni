@@ -5,7 +5,8 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId } from '@/lib/firma'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
-import { pobockySPravem, zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
+import { pobockySPravem, pravaNavigaceFinanci, zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
+import { AI_LIMIT_ZA_DEN } from '@/lib/jine-platby-typy'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -79,10 +80,10 @@ export default async function NovyZaznamJinePlatby({ params }: { params: Promise
   }))
 
   return (
-    <Navigace rozsah={rozsah}>
+    <Navigace rozsah={rozsah} prava={pravaNavigaceFinanci(pristup)}>
       <Nadpis
         oci="Finance · Tržby · Jiné platby"
-        popis="Nejdřív provozovna a pokladna. Fotku dokladu nahrajete v dalším kroku, na kartě záznamu."
+        popis={`Nejdřív provozovna a pokladna. Fotku dokladu nahrajete v dalším kroku, na kartě záznamu — položky z ní přečte AI (nejvýš ${AI_LIMIT_ZA_DEN} čtení denně za firmu, pak se zadávají ručně).`}
         vpravo={
           <Link href={zpet} className="ft-tl ft-tl-vedlejsi">
             Zpět na přehled

@@ -147,15 +147,25 @@ export function obnovit(p: Pripraveno): void {
  * Kalendář pobočky: kdy začíná provozní den a v jakém pásmu. Chybí-li
  * (nejde přečíst), výchozí 05:00 a pásmo firmy, jinak Praha — stejně jako
  * synchronizace pokladny (lib/pokladna-sync.ts).
+ *
+ * `denZacinaPobocky` = začátek provozního dne OPRAVDU přečtený z pobočky
+ * ('HH:MM'), `null` když ho přečíst nešlo. Kde by odhad 05:00 něco
+ * rozhodoval (posun data účtu vytištěného po půlnoci, zkontrolovatDoklad),
+ * se předává jen tohle — nic se nedomýšlí.
  */
-export async function kalendarPobocky(supabase: Supabase, tenantId: string, branchId: string): Promise<{ denZacina: string; pasmo: string }> {
+export async function kalendarPobocky(
+  supabase: Supabase,
+  tenantId: string,
+  branchId: string,
+): Promise<{ denZacina: string; pasmo: string; denZacinaPobocky: string | null }> {
   const [{ data: pobocka }, { data: firma }] = await Promise.all([
     supabase.from('branches').select('timezone, day_starts_at').eq('id', branchId).eq('tenant_id', tenantId).maybeSingle(),
     supabase.from('tenants').select('timezone').eq('id', tenantId).maybeSingle(),
   ])
   const p = pobocka as { timezone: string | null; day_starts_at: string | null } | null
   const f = firma as { timezone: string | null } | null
-  return { denZacina: p?.day_starts_at || '05:00', pasmo: p?.timezone || f?.timezone || ZONA_VYCHOZI }
+  const presne = typeof p?.day_starts_at === 'string' ? /^([01]\d|2[0-3]):[0-5]\d/.exec(p.day_starts_at)?.[0] ?? null : null
+  return { denZacina: p?.day_starts_at || '05:00', pasmo: p?.timezone || f?.timezone || ZONA_VYCHOZI, denZacinaPobocky: presne }
 }
 
 type RadekKatalogu = {

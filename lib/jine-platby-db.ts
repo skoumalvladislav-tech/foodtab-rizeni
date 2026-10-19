@@ -22,7 +22,7 @@ import type {
 
 /** Sloupce záznamu pro `select(...)` — jeden seznam pro obrazovku i testy. */
 export const SLOUPCE_ZAZNAMU =
-  'id, tenant_id, branch_id, pripojeni_id, pos_provozovna, datum_prodeje, oznaceni, kontakt_id, mena, castka_haleru, castka_puvod, typ_dokladu, externi_ucet, pos_prodej_id, stav_kontroly, stav_trzby, stav_skladu, stav_faktury, faktura_cislo, faktura_zdroj, faktura_castka_haleru, stav_uhrady, uhrada_transakce_id, uhrada_castka_haleru, kontrola_trzby, kontrola_skladu, verze, vytvoril, vytvoreno, zmeneno'
+  'id, tenant_id, branch_id, pripojeni_id, pos_provozovna, datum_prodeje, oznaceni, kontakt_id, mena, castka_haleru, castka_puvod, typ_dokladu, externi_ucet, pos_prodej_id, stav_kontroly, stav_trzby, stav_skladu, stav_faktury, faktura_cislo, faktura_zdroj, faktura_castka_haleru, stav_uhrady, uhrada_transakce_id, uhrada_castka_haleru, kontrola_trzby, kontrola_skladu, upozorneni_dokladu, verze, vytvoril, vytvoreno, zmeneno'
 
 export const SLOUPCE_POLOZKY =
   'id, poradi, nazev_puvodni, nazev, mnozstvi, jednotka, cena_jednotkova_haleru, cena_celkem_haleru, sazba_dph, jistota, zdroj, druh, pos_produkt_id, pos_produkt_nazev, pos_mnozstvi, mapovani, vyzaduje_kontrolu, duvod_kontroly'
@@ -72,6 +72,7 @@ export function zDbZaznam(r: Radek): ZaznamJinePlatby {
     uhradaCastkaHaleru: cislo(r.uhrada_castka_haleru),
     kontrolaTrzby: (r.kontrola_trzby as KontrolaPos<VysledekKontrolyTrzby> | null) ?? null,
     kontrolaSkladu: (r.kontrola_skladu as KontrolaPos<VysledekKontrolySkladu> | null) ?? null,
+    upozorneniDokladu: Array.isArray(r.upozorneni_dokladu) ? r.upozorneni_dokladu.filter((u): u is string => typeof u === 'string') : [],
     verze: cislo(r.verze) ?? 0,
     vytvoril: text(r.vytvoril),
     vytvoreno: String(r.vytvoreno),
@@ -111,6 +112,8 @@ export function doDbHlavicka(h: HlavickaNavrhu): Record<string, unknown> {
     typ_dokladu: h.typDokladu,
     externi_ucet: h.externiUcet,
     kontakt_id: h.kontaktId,
+    // Klíč jen od rozpoznání — bez něj databáze uložená upozornění ponechá.
+    ...(h.upozorneniDokladu !== undefined ? { upozorneni_dokladu: h.upozorneniDokladu } : {}),
   }
 }
 

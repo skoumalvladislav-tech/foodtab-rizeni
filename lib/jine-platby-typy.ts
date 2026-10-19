@@ -117,6 +117,14 @@ export type HlavickaNavrhu = {
   typDokladu: TypDokladu
   externiUcet: string | null
   kontaktId: string | null
+  /**
+   * Upozornění AI k CELÉMU dokladu (nízká jistota, víc dokladů v jednom,
+   * zachycený pokyn v textu dokladu, kalendářní datum vs. provozní den…).
+   * Posílá je jen rozpoznání. `undefined` = ponechat uložená (ruční
+   * uložení návrhu je nemaže). Dokud nějaké je, označit záznam jako
+   * zkontrolovaný jde jen s `p_upozorneni_provereno = true`.
+   */
+  upozorneniDokladu?: string[]
 }
 
 /* ------------------------------------------------------------------ */
@@ -175,6 +183,8 @@ export type ZaznamJinePlatby = {
   uhradaCastkaHaleru: number | null
   kontrolaTrzby: KontrolaPos<VysledekKontrolyTrzby> | null
   kontrolaSkladu: KontrolaPos<VysledekKontrolySkladu> | null
+  /** Upozornění AI k celému dokladu (viz HlavickaNavrhu.upozorneniDokladu). */
+  upozorneniDokladu: string[]
   verze: number
   vytvoril: string | null
   vytvoreno: string
@@ -230,6 +240,16 @@ export const MAX_BAJTU_OBRAZKU_PRO_AI = 5 * 1024 * 1024
 export const MAX_BAJTU_CELKEM_PRO_AI = 20 * 1024 * 1024
 /** Kolik souborů jde do jednoho rozpoznání (víc stránek / fotek jedné sjetiny). */
 export const MAX_SOUBORU_PRO_AI = 6
+/**
+ * Strop stran JEDNOHO PDF pro AI (N25). API bere až 600 stran na požadavek,
+ * ale doklad Jiných plateb je účtenka, sjetina nebo otevřený účet — PDF
+ * o desítkách stran je skoro jistě něco jiného (měsíční přehled) a jedno
+ * čtení by stálo statisíce tokenů a nevešlo se do času. Kontroluje se
+ * PŘED započtením pokusu do denního stropu (`zkontrolovatPodklad`).
+ */
+export const MAX_STRAN_PDF_PRO_AI = 20
+/** Strop stran všech souborů jednoho rozpoznání dohromady (fotka = 1 strana, PDF = počet jeho stran). */
+export const MAX_STRAN_PRO_AI = 30
 /** Denní strop rozpoznání na firmu (musí sedět s migrací). */
 export const AI_LIMIT_ZA_DEN = 200
 
@@ -274,6 +294,13 @@ export type RozpoznanyDoklad = {
   spropitne: string | null
   mena: string | null
   datum: string | null // RRRR-MM-DD nebo null
+  /**
+   * Čas tisku/vystavení účtenky „HH:MM" (24 h), jen když je na dokladu
+   * čitelný; jinak null — nic se nedomýšlí. Podle něj kontrola posune
+   * kalendářní datum na provozní den (účet z 1:30 patří do včerejška).
+   * Starší uložená rozpoznání ho nemají (čte se jako null).
+   */
+  cas: string | null
   externiId: string | null
   typDokladu: TypDokladu
   /** Doslovný přepis textu dokladu (zkrácený). */

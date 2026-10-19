@@ -66,6 +66,7 @@
  * typy), aby mezi soubory nevznikl kruh.
  */
 
+import type { OperacePos, PosProOperaci } from './jine-platby-pos-operace.ts'
 import type { ChybaPos, PolozkaUctuPos, ProduktPos, RelacePos, UcetPos } from './pos-provider-contract.ts'
 
 /** Jedno volání API: stav a rozparsované tělo (null, když to není JSON), nebo chyba sítě. */
@@ -563,16 +564,30 @@ export function vysledekPosAkce(status: number, telo: unknown, k: Pick<KontextDo
     // „if the device doesn't process the request within 21 seconds … 404" — pokladna ho může provést později, dokud platí.
     return { stav: 'nejasne', duvod: 'Pokladna požadavek nepotvrdila včas (HTTP 404). Může ho ještě provést, dokud platí — appka ho dohledá podle klíče.' }
   }
-  if (status === 429) {
-    // „exceeding the concurrency limit returns 429" — požadavek nepřijat.
-    return { stav: 'odmitnuto', duvod: 'Dotykačka teď nepřijímá další požadavek (HTTP 429) — nic se neprovedlo, zkuste to za chvíli.', kod: '429', docasna: true }
+  if (status === 408 || status === 429) {
+    // 408 (vypršel čas) i 429 (limit souběžných požadavků) přijdou od brány —
+    // dokumentace neslibuje, že požadavek do pokladny vůbec nedošel. „Nic se
+    // neprovedlo" by otevřelo nový pokus a zrušení záznamu (N19), proto nejasné
+    // a dohledá se podle klíče.
+    return { stav: 'nejasne', duvod: `Dotykačka požadavek nepotvrdila (HTTP ${status}). Mohl dojít do pokladny — appka ho dohledá podle klíče, znovu ho naslepo neposílá.` }
   }
   if (status === 401 || status === 403) {
+    // Přihlášení neprošlo — k pokladně se požadavek nedostal.
     const reason = typeof t?.reason === 'string' && /^[A-Z_]{1,40}$/.test(t.reason.trim().toUpperCase()) ? t.reason.trim().toUpperCase() : null
     return { stav: 'odmitnuto', duvod: k.chybaZeStavu(status, 'skladový výdej', telo).duvod, kod: reason ?? String(status), docasna: false }
   }
   if (status >= 400 && status < 500) {
-    return { stav: 'odmitnuto', duvod: `Dotykačka požadavek odmítla (HTTP ${status}${kod !== null ? `, kód ${kod}` : ''}) — nic se neprovedlo.`, kod: kod !== null ? String(kod) : String(status), docasna: false }
+    // Stejné pravidlo jako u HTTP 200 (N19): „nic se neprovedlo" JEN u kódů,
+    // u kterých je to jisté (KODY_NEPROVEDENO). Jiný kód (2003 — účet vznikl,
+    // platba ne; 4001/4002; neznámý) nebo 4xx bez kódu v těle = nejasné.
+    const znamy = kod !== null ? KODY_NEPROVEDENO.get(kod) : undefined
+    if (kod !== null && znamy) {
+      return { stav: 'odmitnuto', duvod: `Dotykačka požadavek odmítla (HTTP ${status}, kód ${kod} ${znamy.nazev}) — nic se neprovedlo.`, kod: String(kod), docasna: znamy.docasna }
+    }
+    return {
+      stav: 'nejasne',
+      duvod: `Dotykačka vrátila HTTP ${status}${kod !== null ? ` s kódem ${kod}` : ' bez kódu výsledku'}, ze kterého nejde poznat, jestli účet vznikl — appka ho dohledá podle klíče.`,
+    }
   }
   // 5xx: chyba mohla vzniknout až po předání pokladně.
   return { stav: 'nejasne', duvod: `Dotykačka hlásí chybu (HTTP ${status}) — nejde poznat, jestli požadavek došel do pokladny. Appka ho dohledá podle klíče.` }
@@ -610,10 +625,12 @@ export function vysledekPosAkce(status: number, telo: unknown, k: Pick<KontextDo
  * KDO DÁ POKYN: Šéfík, výslovně (docs/jine-platby-pos-operace.md). Do té
  * doby výdej dělá člověk v pokladně a appka eviduje „ručně doloženo".
  *
- * JAK PŘIPOJIT: v `vytvoritDotykacku().otevrit()` přidat do relace metodu
- * zápisu podle kontraktu (`(v) => odeslatVydejDotykacka(kontext, v)`),
- * schopnost přepnout na `skladovyVydej: 'api'` a vědomě upravit kontrolu
- * „relace NEMÁ metodu pro zápis skladu" v testu.
+ * JAK PŘIPOJIT: v `vytvoritDotykacku().otevrit()` přidat do relace
+ * `skladovyVydej: zapisVydejeDotykacka(kontext)` (bere `OperacePos`
+ * orchestrátoru a převede ji přes `vydejZOperace`, N20 — NE přímo
+ * `odeslatVydejDotykacka`, ta čeká jiný tvar), schopnost přepnout na
+ * `skladovyVydej: 'api'` a vědomě upravit kontrolu „relace NEMÁ metodu
+ * pro zápis skladu" v testu. Co ještě chybí: viz `vydejZOperace`.
  */
 export async function odeslatVydejDotykacka(k: KontextDotykacky, v: VydejDotykacka, tedMs: number = Date.now()): Promise<VysledekOdeslani> {
   const sestaveno = sestavitTeloVydeje(v, tedMs)
@@ -629,4 +646,57 @@ export async function odeslatVydejDotykacka(k: KontextDotykacky, v: VydejDotykac
     return { stav: 'nejasne', duvod: 'Dotykačka neodpověděla (vypršel čas nebo spadlo spojení). Výdej se mohl provést — appka ho dohledá podle klíče, znovu ho naslepo neposílá.' }
   }
   return vysledekPosAkce(odpoved.status, odpoved.telo, k)
+}
+
+/* ------------------------------------------------------------------ */
+/* Napojení na orchestrátor operací (N20) — NEPŘIPOJENO K ADAPTÉRU      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Operace orchestrátoru (`OperacePos` z lib/jine-platby-pos-operace.ts,
+ * jak ji předá `provestOperaci` po zabrání) → tvar zápisu Dotykačky
+ * (`VydejDotykacka`). Tvary se liší jménem i jednotkou:
+ *   externiProvozovna  → provozovna
+ *   platnostDo (ISO)   → platnostDoMs (epoch ms; Dotykačka bere ms)
+ * Bez převodu by připojení `(v) => odeslatVydejDotykacka(k, v)` odmítlo
+ * každý výdej bez volání („Neplatné id provozovny") a uživatel by
+ * zkoušel znovu dokola (kontrola 19. 10.).
+ *
+ * `{ chyba }` = nic se neodešle (chybí platnost nebo provozovna).
+ *
+ * CO JEŠTĚ CHYBÍ PŘED ZAPNUTÍM: u pokladny připojené k POBOČCE (ne ke
+ * konkrétní provozovně) má záznam `pos_provozovna` NULL
+ * (`jine_platby_zalozit`) a `rozhodnout_vydej` z ní plní
+ * `pos_operace.externi_provozovna` — operace pak provozovnu nemá a tady
+ * skončí chybou. Databáze musí provozovnu doplnit z aktuálního přiřazení
+ * provozoven k pobočce (a odmítnout, když jich je víc nebo žádná).
+ */
+export function vydejZOperace(op: OperacePos): VydejDotykacka | { chyba: string } {
+  const platnostDoMs = op.platnostDo === null ? Number.NaN : Date.parse(op.platnostDo)
+  if (!Number.isFinite(platnostDoMs)) return { chyba: 'Operace nemá platnost požadavku — výdej se do pokladny neodešle.' }
+  if (typeof op.externiProvozovna !== 'string' || op.externiProvozovna.trim() === '') {
+    return { chyba: 'Operace nemá provozovnu pokladny — výdej se do pokladny neodešle (pokladna připojená k pobočce provozovnu u záznamu nenese).' }
+  }
+  return {
+    provozovna: op.externiProvozovna.trim(),
+    klic: op.klic,
+    polozky: op.polozky.map((p) => ({ produktId: p.produktId, mnozstvi: p.mnozstvi })),
+    poznamka: op.poznamka,
+    platnostDoMs,
+  }
+}
+
+/**
+ * Metoda zápisu pro relaci pokladny: přesně typ, který čeká orchestrátor
+ * (`PosProOperaci['odeslat']` — v akce-pos.ts `relace.skladovyVydej`).
+ * Zapnutí zápisu je pak opravdu jen připojení téhle funkce k relaci
+ * (viz `odeslatVydejDotykacka`, oddíl JAK PŘIPOJIT). Typ hlídá `tsc`:
+ * kdyby se tvar operace nebo výsledku rozešel, překlad spadne.
+ */
+export function zapisVydejeDotykacka(k: KontextDotykacky): NonNullable<PosProOperaci['odeslat']> {
+  return async (op) => {
+    const v = vydejZOperace(op)
+    if ('chyba' in v) return { stav: 'odmitnuto', duvod: v.chyba, kod: null, docasna: false }
+    return odeslatVydejDotykacka(k, v)
+  }
 }

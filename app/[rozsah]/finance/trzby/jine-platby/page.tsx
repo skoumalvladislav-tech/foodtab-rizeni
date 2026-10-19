@@ -3,11 +3,11 @@ import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId } from '@/lib/firma'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
-import { pobockySPravem, zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
+import { pobockySPravem, pravaNavigaceFinanci, zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
 import { SLOUPCE_ZAZNAMU, zDbZaznam } from '@/lib/jine-platby-db'
 import { STAVY_SKLADU, type StavSkladu, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 import { formatHaleru } from '@/lib/jine-platby-castky'
-import { moznaDvakrat, popisStavuFaktury, popisStavuKontroly, popisStavuSkladu, popisStavuTrzby, popisStavuUhrady, type PopisStavu } from '@/lib/jine-platby-stav'
+import { moznaDvakrat, moznaNikde, popisStavuFaktury, popisStavuKontroly, popisStavuSkladu, popisStavuTrzby, popisStavuUhrady, type PopisStavu } from '@/lib/jine-platby-stav'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
 import { dalsiObdobi, popisObdobi } from '@/lib/pokladna-trzby'
@@ -46,7 +46,10 @@ export const dynamic = 'force-dynamic'
  *   * `stav` (FILTRY_STAVU níž). „Možná zapsáno dvakrát" = tržba zapsaná
  *     v Ostatních tržbách a dodatečná kontrola proti pokladně prodej našla
  *     (`moznaDvakrat`) — filtruje databáze (`kontrola_trzby->>vysledek`),
- *     ať strop řádků neusekne právě tyhle;
+ *     ať strop řádků neusekne právě tyhle. „Možná nezapočítáno" = tržba
+ *     jen propojená s pokladnou, ale kontrola dotazem do pokladny k aktuální
+ *     verzi prodej nenašla (`moznaNikde`) — filtruje taky databáze, shodu
+ *     verze dořeší aplikace;
  *   * `pohled=schvaleni` — fronta „Čeká na schválení výdeje", jen
  *     s `jine_platby.vydej_pos` a jen z poboček, kde to právo má; bez
  *     ohledu na období (schvalovat se má i to, co přišlo minulý měsíc).
@@ -56,7 +59,7 @@ export const dynamic = 'force-dynamic'
 
 const LIMIT = 300
 
-const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'mozna_dvakrat', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const
+const FILTRY_STAVU = ['vse', 'ke_kontrole', 'trzba_nezapsana', 'mozna_dvakrat', 'mozna_nikde', 'ceka_na_schvaleni', 'sklad_neuzavreny', 'bez_faktury', 'zrusene'] as const
 type FiltrStavu = (typeof FILTRY_STAVU)[number]
 
 const NAZVY_FILTRU: Record<FiltrStavu, string> = {
@@ -64,6 +67,7 @@ const NAZVY_FILTRU: Record<FiltrStavu, string> = {
   ke_kontrole: 'Ke kontrole',
   trzba_nezapsana: 'Tržba nezapsána',
   mozna_dvakrat: 'Možná zapsáno dvakrát',
+  mozna_nikde: 'Možná nezapočítáno',
   ceka_na_schvaleni: 'Čeká na schválení výdeje',
   sklad_neuzavreny: 'Sklad neuzavřený',
   bez_faktury: 'Bez faktury',
@@ -79,6 +83,13 @@ const VYSLEDKY_DVAKRAT = ['nalezeno', 'pravdepodobne']
 
 /** Značka u řádku, kde je tržba možná zapsaná dvakrát — s ikonou varování (barva sama význam nenese). */
 const ZNACKA_DVAKRAT: PopisStavu = { text: 'Možná zapsáno dvakrát', ton: 'danger', varovani: true }
+
+/**
+ * Značka u řádku, kde je tržba jen propojená s pokladnou, ale kontrola
+ * dotazem do pokladny k aktuální verzi prodej nenašla (`moznaNikde`) —
+ * prodej nejspíš není započítaný nikde. Ikona varování, ne jen barva.
+ */
+const ZNACKA_NIKDE: PopisStavu = { text: 'Možná nezapočítáno', ton: 'danger', varovani: true }
 
 /**
  * Sklad je UZAVŘENÝ, když se ho záznam netýká nebo je výdej hotový
@@ -190,6 +201,9 @@ export default async function JinePlatby({
     else if (stav === 'ke_kontrole') dotaz = dotaz.in('stav_kontroly', ['rozpracovano', 'ke_kontrole'])
     else if (stav === 'trzba_nezapsana') dotaz = dotaz.eq('stav_trzby', 'nezapsano').neq('stav_kontroly', 'zruseno')
     else if (stav === 'mozna_dvakrat') dotaz = dotaz.eq('stav_trzby', 'zapsano').in('kontrola_trzby->>vysledek', VYSLEDKY_DVAKRAT)
+    // Možná nezapočítáno (`moznaNikde`): filtruje databáze, ať strop řádků neusekne právě tyhle.
+    // Shodu verze kontroly s verzí záznamu PostgREST neporovná (dva sloupce) — dořeší ji `moznaNikde` níž.
+    else if (stav === 'mozna_nikde') dotaz = dotaz.eq('stav_trzby', 'propojeno').eq('kontrola_trzby->>zdroj', 'pos_api').eq('kontrola_trzby->>vysledek', 'nenalezeno')
     else if (stav === 'ceka_na_schvaleni') dotaz = dotaz.eq('stav_skladu', 'ceka_na_schvaleni').neq('stav_kontroly', 'zruseno')
     else if (stav === 'sklad_neuzavreny') dotaz = dotaz.in('stav_skladu', SKLAD_OTEVRENY).neq('stav_kontroly', 'zruseno')
     else if (stav === 'bez_faktury') dotaz = dotaz.eq('stav_faktury', 'bez_faktury').neq('stav_kontroly', 'zruseno')
@@ -209,7 +223,9 @@ export default async function JinePlatby({
     return { ...zDbZaznam(r), souboru: Number.isFinite(pocet) ? pocet : 0 }
   })
   const oriznuto = nactene.length > LIMIT
-  const radky = oriznuto ? nactene.slice(0, LIMIT) : nactene
+  const prvni = oriznuto ? nactene.slice(0, LIMIT) : nactene
+  // Kontrola ke starší verzi záznamu (po úpravě návrhu) o „nezapočítáno" nic neříká.
+  const radky = !pohledSchvaleni && stav === 'mozna_nikde' ? prvni.filter(moznaNikde) : prvni
 
   // Jména autorů přes existující RLS `profiles_select_colleagues` (jen
   // kolegové s aktivním členstvím). Autor, který už ve firmě není,
@@ -248,7 +264,7 @@ export default async function JinePlatby({
   const filtrovano = !pohledSchvaleni && (stav !== 'vse' || (vybranaPobocka !== null && pobockaRozsahu === null))
 
   return (
-    <Navigace rozsah={rozsah}>
+    <Navigace rozsah={rozsah} prava={pravaNavigaceFinanci(pristup)}>
       <Nadpis
         oci="Finance · Tržby"
         popis="Prodeje mimo pokladnu podle fotky dokladu. Tržba, sklad, faktura a úhrada mají u každého záznamu vlastní stav — hotová jedna část neznamená hotovou jinou."
@@ -413,6 +429,7 @@ export default async function JinePlatby({
                           <ZnackaStavu popis={popisStavuKontroly(r.stavKontroly)} />
                           <ZnackaStavu popis={popisStavuTrzby(r.stavTrzby)} />
                           {moznaDvakrat(r) ? <ZnackaStavu popis={ZNACKA_DVAKRAT} /> : null}
+                          {moznaNikde(r) ? <ZnackaStavu popis={ZNACKA_NIKDE} /> : null}
                         </span>
                       ),
                     },

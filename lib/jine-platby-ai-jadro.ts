@@ -17,6 +17,8 @@
  *     na haléře dělá `lib/jine-platby-castky.ts` bez plovoucí čárky.
  */
 
+import { inflateSync } from 'node:zlib'
+
 import { z } from 'zod'
 
 import {
@@ -25,12 +27,15 @@ import {
   MAX_BAJTU_OBRAZKU_PRO_AI,
   MAX_BAJTU_PRO_AI,
   MAX_SOUBORU_PRO_AI,
+  MAX_STRAN_PDF_PRO_AI,
+  MAX_STRAN_PRO_AI,
   TYPY_DOKLADU,
   TYPY_SOUBORU,
   type RozpoznanaPolozka,
   type RozpoznanyDoklad,
   type TypSouboru,
 } from './jine-platby-typy.ts'
+import { normalizovatCas } from './jine-platby-kontrola.ts'
 
 /**
  * Stropy podkladu jsou ve sdílených typech (lib/jine-platby-typy.ts), aby
@@ -42,8 +47,36 @@ export { MAX_BAJTU_CELKEM_PRO_AI }
 export const MODEL = 'claude-opus-5-5'
 /** Špatně přečtená cena je horší než pomalejší čtení (u Opus 5.5 je výchozí `medium`). */
 export const NAMAHA = 'high'
-/** Mění se s každou změnou zadání nebo schématu — ukládá se k rozpoznání (`jine_platby_rozpoznani.verze_zadani`). */
-export const VERZE_ZADANI = 'jine-platby-v1'
+/**
+ * Mění se s každou změnou zadání nebo schématu — ukládá se k rozpoznání (`jine_platby_rozpoznani.verze_zadani`).
+ * v2 (19. 10. 2026): pole `cas` (čas tisku účtenky, N31).
+ */
+export const VERZE_ZADANI = 'jine-platby-v2'
+
+/* ------------------------------------------------------------------ */
+/* Časový rozpočet volání (N29)                                         */
+/* ------------------------------------------------------------------ */
+
+/** Výchozí (a nejdelší) čekání na model; volající může dát kratší (`casovyLimitMs`) nebo termín (`konec`). */
+export const CEKANI_NA_MODEL_MS = 100_000
+/** Rezerva mezi odpovědí modelu a termínem `konec` — převod odpovědi a zápis výsledku pokusu. */
+export const REZERVA_PO_ODPOVEDI_MS = 5_000
+/** Pod tímhle časem se model vůbec nevolá — odpověď by nestihl a pokus by se jen zaplatil. */
+export const MIN_CAS_NA_CTENI_MS = 15_000
+
+/**
+ * Kolik ms smí čekat jedno volání modelu: nejvýš `CEKANI_NA_MODEL_MS`,
+ * nejvýš `casovyLimitMs` a nejvýš do `konec` (ms epoch) mínus
+ * `REZERVA_PO_ODPOVEDI_MS`. `null` = vyšlo méně než `MIN_CAS_NA_CTENI_MS`,
+ * model se nevolá (serverová akce má pevný strop délky — maxDuration —
+ * a čtení, které by ho přetáhlo, platforma zabije až po zaplacení).
+ */
+export function casNaCteni(moznosti: { casovyLimitMs?: number; konec?: number }, tedMs: number): number | null {
+  let limit = CEKANI_NA_MODEL_MS
+  if (typeof moznosti.casovyLimitMs === 'number' && moznosti.casovyLimitMs > 0) limit = Math.min(limit, moznosti.casovyLimitMs)
+  if (typeof moznosti.konec === 'number' && Number.isFinite(moznosti.konec)) limit = Math.min(limit, moznosti.konec - tedMs - REZERVA_PO_ODPOVEDI_MS)
+  return limit >= MIN_CAS_NA_CTENI_MS ? Math.floor(limit) : null
+}
 
 /** Doslovný přepis dokladu se ukládá zkrácený (`jine_platby_rozpoznani.text_dokladu`). */
 const MAX_DELKA_TEXTU_DOKLADU = 4000
@@ -92,6 +125,7 @@ export const DokladSchema = z.object({
   spropitne: z.string().nullable(),
   mena: z.string().nullable(),
   datum: z.string().nullable(),
+  cas: z.string().nullable(),
   externiId: z.string().nullable(),
   typDokladu: z.enum(TYPY_DOKLADU),
   textDokladu: z.string(),
@@ -167,6 +201,9 @@ export const ZADANI = [
   '  („Kč" → CZK, „€" → EUR). Když měna na dokladu není, dej null.',
   '- `datum`: datum prodeje ve tvaru RRRR-MM-DD. Rok, který na dokladu není,',
   '  si nedomýšlej — pak null a důvod do `upozorneni`.',
+  '- `cas`: čas, kdy byl doklad vytištěn nebo účet uzavřen, ve tvaru HH:MM',
+  '  (24 h, „01:30"), jen když je na dokladu čitelný. Když tam žádný čas není',
+  '  nebo ho nepřečteš jistě, dej null — čas si nedomýšlej ani neodhaduj.',
   '- `externiId`: číslo účtu, stolu s účtem nebo dokladu z pokladny přesně',
   '  jak stojí (např. „Účet 1234", „Doklad č. 2026/0042" → „1234", „2026/0042").',
   '- `typDokladu`:',
@@ -213,6 +250,78 @@ export function poznatTypSouboru(data: Uint8Array): TypSouboru | null {
 
 const MB = 1024 * 1024
 
+/**
+ * Objekt stránky v PDF: slovník s `/Type /Page`. `/Pages` (uzel stromu
+ * stránek) ani `/PageLabel` to nejsou — za jménem musí přijít oddělovač
+ * nebo bílý znak (PDF 32000-1, 7.2.2 a 7.3.5).
+ */
+const TYP_STRANKY = /\/Type\s*\/Page(?![^\s()<>[\]{}/%])/
+/** Strop rozbalených objektových proudů jednoho PDF — ochrana proti „zip bombě". */
+const MAX_ROZBALENO_BAJTU = 32 * MB
+
+/** Číslo z `/Klic 123` ve slovníku, nebo null. */
+function cisloZeSlovniku(slovnik: string, klic: string): number | null {
+  const m = new RegExp(`/${klic}\\s+(\\d+)`).exec(slovnik)
+  return m ? Number(m[1]) : null
+}
+
+/**
+ * Počet stran PDF spočítaný z bajtů (N25): objekty se slovníkem
+ * `/Type /Page`, každé číslo objektu jednou (přírůstková úprava, která
+ * objekt přepíše, se nepočítá dvakrát). Objekty uvnitř komprimovaných
+ * objektových proudů (`/Type /ObjStm` s `/FlateDecode`, PDF 1.5+) se
+ * rozbalí a spočítají taky.
+ *
+ * `null` = nejde poznat (žádný objekt stránky nenalezen — třeba šifrované
+ * PDF nebo proud jiným filtrem). Pak se strop nevynucuje: API takové PDF
+ * posoudí samo a appka nesmí odmítnout doklad, o kterém nic neví.
+ */
+export function pocetStranPdf(data: Uint8Array): number | null {
+  const text = Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('latin1')
+  const stranky = new Set<number>()
+  let rozbaleno = 0
+
+  const zacatek = /(\d+)\s+\d+\s+obj\b/g
+  let m: RegExpExecArray | null
+  while ((m = zacatek.exec(text)) !== null) {
+    const od = m.index + m[0].length
+    const konec = text.indexOf('endobj', od)
+    const telo = konec < 0 ? text.slice(od) : text.slice(od, konec)
+    const iProud = telo.search(/\bstream\r?\n/)
+    const slovnik = iProud < 0 ? telo : telo.slice(0, iProud)
+
+    if (TYP_STRANKY.test(slovnik)) stranky.add(Number(m[1]))
+
+    if (iProud >= 0 && /\/Type\s*\/ObjStm\b/.test(slovnik) && /\/FlateDecode\b/.test(slovnik) && !/\/DecodeParms\b/.test(slovnik)) {
+      const zacatekDat = iProud + (/^stream\r\n/.test(telo.slice(iProud)) ? 8 : 7)
+      const konecDat = telo.indexOf('endstream', zacatekDat)
+      // `/Length 12 0 R` je odkaz na jiný objekt, ne délka — pak rozhodne `endstream`.
+      const delka = /\/Length\s+\d+\s+\d+\s+R\b/.test(slovnik) ? null : cisloZeSlovniku(slovnik, 'Length')
+      const surova = telo.slice(zacatekDat, delka !== null && zacatekDat + delka <= telo.length ? zacatekDat + delka : konecDat < 0 ? telo.length : konecDat)
+      const pocet = cisloZeSlovniku(slovnik, 'N')
+      const prvni = cisloZeSlovniku(slovnik, 'First')
+      if (pocet === null || prvni === null || rozbaleno >= MAX_ROZBALENO_BAJTU) continue
+      let obsah: string
+      try {
+        const buf = inflateSync(Buffer.from(surova, 'latin1'), { maxOutputLength: MAX_ROZBALENO_BAJTU - rozbaleno })
+        rozbaleno += buf.length
+        obsah = buf.toString('latin1')
+      } catch {
+        continue
+      }
+      // Hlavička proudu: dvojice „číslo objektu, posun" × N, objekty začínají na /First.
+      const cisla = obsah.slice(0, prvni).trim().split(/\s+/).map(Number)
+      for (let i = 0; i + 1 < cisla.length && i / 2 < pocet; i += 2) {
+        const posun = prvni + cisla[i + 1]
+        const dalsi = i + 3 < cisla.length ? prvni + cisla[i + 3] : obsah.length
+        if (Number.isFinite(posun) && TYP_STRANKY.test(obsah.slice(posun, dalsi))) stranky.add(cisla[i])
+      }
+    }
+    if (konec >= 0) zacatek.lastIndex = konec
+  }
+  return stranky.size > 0 ? stranky.size : null
+}
+
 /** `null` = podklad je v pořádku; jinak česká hláška, proč se nic neposílá. */
 export function zkontrolovatPodklad(p: PodkladRozpoznani): string | null {
   const soubory = p?.soubory
@@ -220,6 +329,7 @@ export function zkontrolovatPodklad(p: PodkladRozpoznani): string | null {
   if (soubory.length > MAX_SOUBORU_PRO_AI) return `Najednou jde rozpoznat nejvýš ${MAX_SOUBORU_PRO_AI} souborů (stránek jednoho dokladu).`
 
   let celkem = 0
+  let stranCelkem = 0
   for (const [i, s] of soubory.entries()) {
     const c = `Soubor č. ${i + 1}`
     if (!s || !(s.data instanceof Uint8Array)) return `${c} chybí.`
@@ -240,10 +350,24 @@ export function zkontrolovatPodklad(p: PodkladRozpoznani): string | null {
         ? `${c} podle obsahu není fotka (JPEG, PNG, WebP) ani PDF.`
         : `${c} je podle obsahu ${podleObsahu}, ne ${s.mime}.`
     }
+    // Počet stran PDF (N25): dlouhé PDF se odmítne dřív, než se pokus započítá a zaplatí.
+    // Nejde-li strany spočítat, bere se PDF jako jedna strana (strop rozhodne API).
+    let stran = 1
+    if (!fotka) {
+      const spocteno = pocetStranPdf(s.data)
+      if (spocteno !== null && spocteno > MAX_STRAN_PDF_PRO_AI) {
+        return `${c} je PDF o ${spocteno} stranách — na jedno rozpoznání jde nejvýš ${MAX_STRAN_PDF_PRO_AI} stran. Nahrajte jen stránky s položkami dokladu, nebo položky vyplňte ručně.`
+      }
+      stran = spocteno ?? 1
+    }
+    stranCelkem += stran
     celkem += s.data.length
   }
   if (celkem > MAX_BAJTU_CELKEM_PRO_AI) {
     return `Soubory jsou dohromady moc velké (${Math.ceil(celkem / MB)} MB). Na jedno rozpoznání se vejde ${MAX_BAJTU_CELKEM_PRO_AI / MB} MB.`
+  }
+  if (stranCelkem > MAX_STRAN_PRO_AI) {
+    return `Soubory mají dohromady ${stranCelkem} stran — na jedno rozpoznání jde nejvýš ${MAX_STRAN_PRO_AI}. Nahrajte jen stránky s položkami dokladu, nebo položky vyplňte ručně.`
   }
   return null
 }
@@ -330,6 +454,11 @@ export function naRozpoznanyDoklad(vystup: unknown): RozpoznanyDoklad {
     odvozena.push(`Datum „${datum}" není ve tvaru RRRR-MM-DD nebo neexistuje — doplňte ho ručně.`)
     datum = null
   }
+  // Čas tisku „H:MM"/„HH:MM" → „HH:MM". Nečitelný tvar se nezahodí potichu:
+  // null + upozornění (datum se pak podle času neposouvá).
+  const casText = oriznout(v.cas, 20)
+  const cas = normalizovatCas(casText)
+  if (casText !== null && cas === null) odvozena.push(`Čas „${casText}" není ve tvaru HH:MM — datum se podle něj neposune na provozní den, ověřte ho.`)
   const odModelu = v.upozorneni.map((u) => oriznout(u, MAX_DELKA_UPOZORNENI)).filter((u): u is string => u !== null)
 
   return {
@@ -344,6 +473,7 @@ export function naRozpoznanyDoklad(vystup: unknown): RozpoznanyDoklad {
     spropitne: oriznout(v.spropitne, 40),
     mena,
     datum,
+    cas,
     externiId: oriznout(v.externiId, 100),
     typDokladu: v.typDokladu,
     textDokladu: oriznout(v.textDokladu, MAX_DELKA_TEXTU_DOKLADU, true) ?? '',

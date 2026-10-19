@@ -31,6 +31,8 @@ const {
   naparsovatProdukt,
   naparsovatUcet,
   odeslatVydejDotykacka,
+  vydejZOperace,
+  zapisVydejeDotykacka,
 } = await import('../lib/pokladna-dotykacka-sklad.ts')
 
 let chyb = 0
@@ -417,8 +419,29 @@ console.log('\n== Skladový výdej (POS akce) — tvar a výsledek odeslání ==
   ok('HTTP 401 → odmitnuto s důvodem z reason', s401.vysledek.stav === 'odmitnuto' && s401.vysledek.kod === 'INVALID_ACCESS_TOKEN')
   const s403 = await poslat({ status: 403, telo: { reason: 'LICENSE_UPGRADE_REQUIRED' } })
   ok('HTTP 403 licence → odmitnuto, hláška jako u adaptéru', s403.vysledek.stav === 'odmitnuto' && /LICENSE_UPGRADE_REQUIRED/.test(s403.vysledek.duvod))
+  // N19: „nic se neprovedlo" u 4xx JEN pro kódy z KODY_NEPROVEDENO — stejně jako u HTTP 200.
+  const s400p = await poslat({ status: 400, telo: { code: 2003, message: 'Payment method not found' } })
+  ok('HTTP 400 + kód 2003 (účet vznikl, platba ne) → NEJASNE, ne odmítnuto', s400p.vysledek.stav === 'nejasne' && /2003/.test(s400p.vysledek.duvod))
+  const s422 = await poslat({ status: 422, telo: { code: 4001 } })
+  ok('HTTP 422 + kód 4001 (produkt) → nejasne', s422.vysledek.stav === 'nejasne' && /4001/.test(s422.vysledek.duvod))
+  const s400n = await poslat({ status: 400, telo: { code: 9999 } })
+  ok('HTTP 400 + neznámý kód 9999 → nejasne', s400n.vysledek.stav === 'nejasne' && /9999/.test(s400n.vysledek.duvod))
+  const s409 = await poslat({ status: 409, telo: { code: '4002' } })
+  ok('HTTP 409 + kód 4002 (text) → nejasne', s409.vysledek.stav === 'nejasne')
+  const s400b = await poslat({ status: 400 })
+  ok('HTTP 400 bez těla (bez kódu) → nejasne', s400b.vysledek.stav === 'nejasne' && /bez kódu/.test(s400b.vysledek.duvod))
+  const s408 = await poslat({ status: 408 })
+  ok('HTTP 408 bez těla → nejasne (dohledá se podle klíče)', s408.vysledek.stav === 'nejasne' && /dohledá/.test(s408.vysledek.duvod))
+  const s408k = await poslat({ status: 408, telo: { code: 1001 } })
+  ok('HTTP 408 i s kódem 1001 → nejasne (čas vypršel, nevíme)', s408k.vysledek.stav === 'nejasne')
+  const s400z = await poslat({ status: 400, telo: { code: 3001 } })
+  ok('HTTP 400 + kód 3001 REGISTER_CLOSED (ve výčtu) → odmitnuto dočasně', s400z.vysledek.stav === 'odmitnuto' && s400z.vysledek.kod === '3001' && s400z.vysledek.docasna === true)
+  const s400r = await poslat({ status: 400, telo: { code: 1001 } })
+  ok('HTTP 400 + kód 1001 REQUEST_ERROR (ve výčtu) zůstává odmitnuto, trvale („nic se neprovedlo")',
+    s400r.vysledek.stav === 'odmitnuto' && s400r.vysledek.kod === '1001' && s400r.vysledek.docasna === false && /nic se neprovedlo/.test(s400r.vysledek.duvod))
+  ok('text odpovědi se ani u 4xx do důvodu nekopíruje', !s400p.vysledek.duvod.includes('Payment method not found'))
   const s429 = await poslat({ status: 429 })
-  ok('HTTP 429 (souběžný limit) → odmitnuto dočasně', s429.vysledek.stav === 'odmitnuto' && s429.vysledek.docasna === true)
+  ok('HTTP 429 (souběžný limit) → nejasne (brána nic neslibuje — dohledá se)', s429.vysledek.stav === 'nejasne' && /429/.test(s429.vysledek.duvod))
   const s404 = await poslat({ status: 404 })
   ok('HTTP 404 (pokladna nepotvrdila do 21 s) → NEJASNE (může to ještě provést)', s404.vysledek.stav === 'nejasne')
   const s500 = await poslat({ status: 500 })
@@ -453,6 +476,41 @@ console.log('\n== Skladový výdej — co se vůbec neodešle ==')
     const v = await odeslatVydejDotykacka(kontextDotykacky(s.fetchFn, '123', 'AT'), { ...zaklad, ...zmena }, TED)
     ok(`${popis} → odmitnuto bez jediného volání`, v.stav === 'odmitnuto' && v.kod === null && s.pozadavky.length === 0)
   }
+}
+
+console.log('\n== Napojení na orchestrátor: OperacePos → VydejDotykacka (N20) ==')
+{
+  const TED = Date.UTC(2026, 9, 16, 10, 0)
+  const platnostIso = new Date(TED + 5 * 60_000).toISOString()
+  // Přesně tvar, který předá provestOperaci po zabrání (lib/jine-platby-pos-operace.ts, OperacePos).
+  const op = (jine = {}) => ({
+    id: 'op1', klic: 'op-3f2a1b4c-0001', stav: 'odesila_se', pokusu: 1, platnostDo: platnostIso,
+    externiProvozovna: '456', polozky: [{ produktId: '501', mnozstvi: '2' }], poznamka: 'Jiné platby: Stůl 4', ...jine,
+  })
+  const v = vydejZOperace(op())
+  ok('převod: externiProvozovna → provozovna, platnostDo (ISO) → platnostDoMs (ms)', v.provozovna === '456' && v.platnostDoMs === TED + 5 * 60_000)
+  ok('převod: klíč, položky a poznámka beze změny, nic navíc',
+    v.klic === 'op-3f2a1b4c-0001' && JSON.stringify(v.polozky) === '[{"produktId":"501","mnozstvi":"2"}]' && v.poznamka === 'Jiné platby: Stůl 4' &&
+      JSON.stringify(Object.keys(v).sort()) === JSON.stringify(['klic', 'platnostDoMs', 'polozky', 'poznamka', 'provozovna']))
+  ok('bez platnosti → chyba (nic se neodešle)', 'chyba' in vydejZOperace(op({ platnostDo: null })) && 'chyba' in vydejZOperace(op({ platnostDo: 'zítra' })))
+  ok('bez provozovny (pokladna připojená k pobočce) → chyba s vysvětlením', /provozovnu/.test(vydejZOperace(op({ externiProvozovna: '' })).chyba ?? '') && 'chyba' in vydejZOperace(op({ externiProvozovna: null })))
+
+  // Celá cesta jako po zapnutí: metoda zápisu dostane OperacePos a do Dotykačky odejde správné tělo.
+  // zapisVydejeDotykacka bere čas z hodin (jako po zapnutí) — platnost proto od teď.
+  const platnostZiva = Date.now() + 5 * 60_000
+  const s = sit([{ status: 200 }])
+  const zapis = zapisVydejeDotykacka(kontextDotykacky(s.fetchFn, '123', 'AT-Z'))
+  const vysledek = await zapis(op({ platnostDo: new Date(platnostZiva).toISOString() }))
+  const telo = JSON.parse(s.pozadavky[0]?.init.body ?? '{}')
+  ok('zápis s OperacePos: POST na provozovnu 456, external-id = klíč, validity v ms', s.pozadavky[0]?.url === `${API_DOTYKACKA}/clouds/123/branches/456/pos-actions` &&
+    telo['external-id'] === 'op-3f2a1b4c-0001' && telo.validity === platnostZiva)
+  ok('… a výsledek odeslání pro orchestrátor (odeslano, ne úspěch)', vysledek.stav === 'odeslano')
+  const s2 = sit([])
+  const bez = await zapisVydejeDotykacka(kontextDotykacky(s2.fetchFn, '123', 'AT-Z'))(op({ externiProvozovna: '' }))
+  ok('zápis bez provozovny → odmitnuto bez jediného volání', bez.stav === 'odmitnuto' && s2.pozadavky.length === 0)
+  const s3 = sit([])
+  const surove = await odeslatVydejDotykacka(kontextDotykacky(s3.fetchFn, '123', 'AT-Z'), op(), TED)
+  ok('(pro srovnání: OperacePos poslaná napřímo do odeslatVydejDotykacka se odmítne — proto převod)', surove.stav === 'odmitnuto' && s3.pozadavky.length === 0)
 }
 
 console.log('\n== Schopnosti a relace: výdej NENÍ připojený ==')

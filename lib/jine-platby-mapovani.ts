@@ -10,9 +10,14 @@
  *   2. Množství se převádí JEN z dat pokladny. „2× pivo 0,5 l = 1 l" platí
  *      jedině tehdy, když pokladna u položky uvádí, že jeden kus je 0,5 l
  *      (`mira`). Bez toho žádný odhad — řádek jde ke kontrole.
- *   3. Pokrm s recepturou se vydává JAKO POKRM, nikdy jako jeho suroviny:
- *      suroviny odečte pokladna podle SVÉ receptury. Appka vydat pokrm
- *      i suroviny zároveň nesmí (sklad by se odečetl dvakrát).
+ *   3. Pokrm s recepturou se vydává JAKO POKRM: suroviny odečte pokladna
+ *      podle SVÉ receptury. Appka receptury nečte (u Dotykačky je
+ *      `maRecepturu` vždy null), takže NEPOZNÁ, jestli další zboží ve
+ *      výdeji není surovina téhož pokrmu — a databáze to nevynucuje
+ *      (kontrola 19. 10., N21). Výdej s pokrmem i dalším zbožím proto
+ *      jen VARUJE schvalovatele (`varovani` z `jine_platby_sestavit_vydej`:
+ *      „zkontrolujte, že zboží není surovina toho pokrmu"); rozhoduje
+ *      člověk, jinak by se surovina odečetla dvakrát.
  *
  * Pokladna počítá prodané KUSY své položky. Kolik je jeden kus litrů nebo
  * kilogramů, ví jen ona (`jednotka` + `mira`) a podle toho si odečte sklad.
@@ -288,8 +293,10 @@ export function prevestNaJednotkyPos(
  * nebo produkt není přiřazený) — návrh výdeje se pak nesestaví naslepo.
  *
  * Pokrm s recepturou (`maRecepturu`) se týká skladu, ale vydává se
- * JAKO POKRM — suroviny odečte pokladna podle své receptury. Appka
- * suroviny pokrmu nikdy nevydává zvlášť.
+ * JAKO POKRM — suroviny odečte pokladna podle své receptury. Že ve
+ * stejném výdeji není zvlášť i jeho surovina, appka ani databáze
+ * nevynucují (receptury nečteme) — schvalovatel dostane varování ze
+ * sestavení výdeje (`varovani`), viz pravidlo 3 v hlavičce souboru.
  */
 export function tykaSeSkladu(polozka: PolozkaNavrhu, produkt: ProduktKatalogu | null): boolean | null {
   if (DRUHY_BEZ_SKLADU.includes(polozka.druh)) return false

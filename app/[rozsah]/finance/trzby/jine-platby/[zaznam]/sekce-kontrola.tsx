@@ -17,14 +17,31 @@ import { Oddil, PoleDuvodu, Udaj, Udaje, Vysvetleni } from './prvky'
 
 const ZNACKA_BODU: Record<BodKontroly['blokuje'], string> = {
   ano: 'Blokuje označení',
+  bez_potvrzeni: 'Blokuje bez potvrzení',
   bez_duvodu: 'Blokuje bez důvodu',
   ne: 'Jen upozornění',
+}
+
+const POPIS_NOVEJSIHO_POKUSU: Record<string, string> = {
+  ok: 'doklad přečetl, ale návrh se z něj neuložil',
+  chyba: 'skončil chybou',
+  bezi: 'ještě běží, nebo se přerušil',
+  bez_klice: 'neproběhl (AI není zapnutá)',
 }
 
 /**
  * Sekce (a) Kontrola dokladu: hlavička, rozpoznání přes AI, přehled
  * částek z dokladu (co je tržba a co ne), položky s úpravou a „Označit
  * jako zkontrolované". Nic z toho nezapisuje tržbu ani sklad.
+ *
+ * Panel „Částky na dokladu“ je z rozpoznání, ZE KTERÉHO JE ULOŽENÝ NÁVRH
+ * (stránka ho vybere: poslední úspěšné, jehož verze záznamu je starší než
+ * ta dnešní) — ne z posledního pokusu. Novější neúspěšný, běžící nebo
+ * neuložený pokus a ruční úpravy od toho čtení řekne větou.
+ *
+ * Upozornění AI k celému dokladu (`z.upozorneniDokladu`) jsou v „Co
+ * zkontrolovat“ první („Blokuje bez potvrzení“) a formulář označení má
+ * pak povinné zaškrtnutí „Upozornění AI jsem prověřil(a)“.
  */
 export default function SekceKontrola({
   zakl,
@@ -35,6 +52,7 @@ export default function SekceKontrola({
   polozky,
   rozpoznani,
   kontrolaRozpoznani,
+  puvodCastek,
   coZkontrolovat,
   nesoulad,
   ai,
@@ -47,8 +65,12 @@ export default function SekceKontrola({
   smiUpravit: boolean
   editor: { hlavicka: HlavickaEditoru; polozky: PolozkaEditoru[]; katalog: ProduktEditoru[]; kontakty: { id: string; nazev: string; ico: string | null }[] | null }
   polozky: PolozkaNavrhu[]
+  /** Poslední pokus o rozpoznání (jakýkoli stav). */
   rozpoznani: { stav: string; vytvoreno: string; duvod: string | null } | null
+  /** Kontrola rozpoznání, ze kterého je uložený návrh (`null` = žádné takové). */
   kontrolaRozpoznani: KontrolaDokladu | null
+  /** Odkud jsou částky: čas toho čtení, novější pokusy po něm, ruční úpravy návrhu od něj. */
+  puvodCastek?: { vytvoreno: string; novejsi: { stav: string; vytvoreno: string }[]; upravenoPotom: boolean } | null
   /** Co v uloženém návrhu zkontrolovat a co z toho označení blokuje (coZkontrolovat nad daty z databáze). */
   coZkontrolovat: BodKontroly[]
   /** Součet položek nesedí s celkovou cenou → povinné „Proč rozdíl nevadí“ (popis rozdílu), jinak `null`. */
@@ -61,6 +83,11 @@ export default function SekceKontrola({
   const castka = (h: number | null) => (h === null ? 'neuvedeno' : formatHaleru(h, z.mena))
   const k = kontrolaRozpoznani
   const zruseno = z.stavKontroly === 'zruseno'
+  const trzbaZapsana = z.stavTrzby === 'zapsano' || z.stavTrzby === 'propojeno'
+  const upozorneniAi = z.upozorneniDokladu.filter((u) => typeof u === 'string' && u.trim() !== '')
+  // Schválený / ručně zpracovávaný výdej: položky pro sklad databáze nepustí změnit (jine_platby_ulozit_navrh).
+  const zamekSkladu = z.stavSkladu === 'schvaleno' || z.stavSkladu === 'nepodporovano' ? z.stavSkladu : null
+  const novejsi = puvodCastek?.novejsi[0] ?? null
 
   return (
     <section className="ds-plocha" style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
@@ -99,7 +126,7 @@ export default function SekceKontrola({
               potvrzeni={
                 polozky.length > 0
                   ? {
-                      text: `Rozpoznání nahradí současné položky (${polozky.length}) a údaje, které na dokladu přečte. Co nepřečte, zůstane, jak je. Pokračovat?`,
+                      text: `Rozpoznání nahradí současné položky (${polozky.length}) a údaje, které na dokladu přečte. Co nepřečte, zůstane, jak je; uložený provozní den taky (když AI přečte jiné datum, upozorní na to). Pokračovat?`,
                       ano: 'Ano, rozpoznat znovu',
                     }
                   : undefined
@@ -110,6 +137,8 @@ export default function SekceKontrola({
                 jen návrh: nic se nezapíše do tržeb ani do skladu, dokud ho nezkontrolujete. Čtení trvá až dvě minuty.
               </Vysvetleni>
             </FormularAkce>
+          ) : trzbaZapsana ? (
+            <Vysvetleni>Tržba je už zapsaná nebo propojená — nové rozpoznání by měnilo potvrzené údaje. Případné chyby opravte ručně (oprava tržby).</Vysvetleni>
           ) : null}
           {rozpoznani ? (
             <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
@@ -121,9 +150,21 @@ export default function SekceKontrola({
         </Oddil>
       ) : null}
 
-      {/* ---------- Částky z dokladu ---------- */}
+      {/* ---------- Částky z dokladu (z rozpoznání, ze kterého je uložený návrh) ---------- */}
       {k ? (
-        <Oddil nadpis="Částky na dokladu (z posledního rozpoznání)">
+        <Oddil nadpis="Částky na dokladu (z rozpoznání, ze kterého je návrh)">
+          {puvodCastek ? (
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>Čtení z {datumACasSRokemVPasmu(puvodCastek.vytvoreno, zona)}.</p>
+          ) : null}
+          {novejsi ? (
+            <Vysvetleni dulezite>
+              Novější pokus o rozpoznání ({datumACasSRokemVPasmu(novejsi.vytvoreno, zona)}) {POPIS_NOVEJSIHO_POKUSU[novejsi.stav] ?? 'neskončil úspěchem'} — částky níž
+              jsou z dřívějšího čtení, ze kterého je uložený návrh.
+            </Vysvetleni>
+          ) : null}
+          {puvodCastek?.upravenoPotom ? (
+            <Vysvetleni dulezite>Návrh se od toho čtení ručně upravil — částky na dokladu nemusí sedět s uloženými údaji výš.</Vysvetleni>
+          ) : null}
           <Vysvetleni dulezite>
             Do tržby jde jen celková cena prodeje (zboží a služby po slevách, bez spropitného). „K úhradě“ ani přijatá hotovost tržba nejsou — host mohl
             platit zálohu, doplácet nebo dostat zpátky.
@@ -162,7 +203,7 @@ export default function SekceKontrola({
       {/* ---------- Položky ---------- */}
       <Oddil nadpis="Položky a přiřazení k pokladně">
         {smiUpravit && akce.has('upravit') ? (
-          <EditorNavrhu akce={ulozitNavrh} {...zakl} mena={z.mena} {...editor} />
+          <EditorNavrhu akce={ulozitNavrh} {...zakl} mena={z.mena} zamekSkladu={zamekSkladu} {...editor} />
         ) : polozky.length === 0 ? (
           <Vysvetleni>Záznam zatím nemá položky.</Vysvetleni>
         ) : (
@@ -200,6 +241,20 @@ export default function SekceKontrola({
         ) : null}
       </Oddil>
 
+      {/* ---------- Upozornění AI, když označení zatím není na řadě (chybí datum, měna…) ---------- */}
+      {!akce.has('oznacit_zkontrolovano') && upozorneniAi.length > 0 && !zruseno && z.stavKontroly !== 'zkontrolovano' ? (
+        <Oddil nadpis="Upozornění AI k dokladu">
+          <ul style={{ margin: 0, paddingLeft: '20px', display: 'grid', gap: '4px', fontSize: '13.5px' }}>
+            {upozorneniAi.map((u, i) => (
+              <li key={i} style={{ overflowWrap: 'anywhere' }}>
+                {u}
+              </li>
+            ))}
+          </ul>
+          <Vysvetleni>Před označením jako zkontrolované je bude potřeba prověřit a potvrdit.</Vysvetleni>
+        </Oddil>
+      ) : null}
+
       {/* ---------- Zkontrolováno ---------- */}
       {akce.has('oznacit_zkontrolovano') ? (
         <Oddil nadpis="Označit jako zkontrolované">
@@ -208,7 +263,7 @@ export default function SekceKontrola({
               <strong style={{ fontSize: '14px' }}>Co zkontrolovat (podle uloženého návrhu)</strong>
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '6px' }}>
                 {coZkontrolovat.map((b, i) => (
-                  <li key={i} data-blokuje={b.blokuje} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', overflowWrap: 'anywhere' }}>
+                  <li key={`${b.blokuje}-${i}`} data-blokuje={b.blokuje} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', overflowWrap: 'anywhere' }}>
                     <span aria-hidden="true" style={{ flex: 'none', paddingTop: '1px', color: b.blokuje === 'ne' ? 'var(--muted)' : 'var(--pozor)' }}>
                       <Ikona klic={b.blokuje === 'ne' ? 'vykricnik' : 'varovani'} velikost={16} />
                     </span>
@@ -225,6 +280,12 @@ export default function SekceKontrola({
               Potvrzujete, že datum prodeje, měna, celková cena a položky sedí s dokladem. Tím se nic nezapíše do tržeb ani do skladu — to jsou další
               kroky.
             </Vysvetleni>
+            {upozorneniAi.length > 0 ? (
+              <label style={{ display: 'flex', gap: '8px', alignItems: 'center', minHeight: '44px', fontSize: '14px', fontWeight: 600 }}>
+                <input type="checkbox" name="upozorneni_provereno" value="ano" required />
+                <span>Upozornění AI jsem prověřil(a) (povinné — {upozorneniAi.length === 1 ? 'jedno upozornění' : `upozornění: ${upozorneniAi.length}`} v „Co zkontrolovat“)</span>
+              </label>
+            ) : null}
             {nesoulad ? (
               <PoleDuvodu
                 nazev="duvod_rozdilu"

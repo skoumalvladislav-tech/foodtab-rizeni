@@ -60,7 +60,7 @@ export function SekceZruseni({ zakl }: { zakl: { zaznam: string; verze: number; 
       >
         <Vysvetleni>
           Zrušit jde jen záznam bez zapsané tržby, bez propojené faktury, bez napárované úhrady (nejdřív ji odpojte) a bez zahájeného výdeje —
-          schválený výdej předaný k ručnímu odpisu uvolní jen „Zrušit schválení“ v části Sklad.
+          schválený výdej (i ten předaný k ručnímu odpisu) uvolní jen „Zrušit schválení“ v části Sklad.
         </Vysvetleni>
         <PoleDuvodu />
       </FormularAkce>

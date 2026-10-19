@@ -74,6 +74,15 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     záznamu (`hasAccess`), a jen s id toho záznamu a jeho připojení.
  *     Tyhle funkce jsou v databázi jen pro service_role schválně: „ověřeno
  *     v pokladně" a „rozpoznala AI" se nesmí dát zapsat z prohlížeče.
+ *   * Jiné platby — `app/[rozsah]/finance/trzby/jine-platby/akce-soubory.ts`:
+ *     připojení nahraného dokladu (`jine_platby_pripojit_soubor`, jen pro
+ *     service_role — kontrola 19. 10., N1). Otisk sha256 a typ podle obsahu
+ *     počítá server ze stažených bajtů; kdyby RPC smělo volat authenticated,
+ *     poslal by si otisk kdokoli sám a pojistka „stejná fotka podruhé
+ *     neprojde" by nic nehlídala. Až po ověření práva zadat/upravit na
+ *     pobočce záznamu uživatelským klientem, jen s id toho záznamu, cestou
+ *     v jeho složce kbelíku a `p_nahral` = id přihlášeného (vlastník
+ *     objektu v úložišti musí sedět).
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ

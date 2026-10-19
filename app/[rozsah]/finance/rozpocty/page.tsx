@@ -11,6 +11,7 @@ import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { BEZ_UCTU_POBOCKY, hodnotaPohleduRozpoctu, pohledRozpoctu, ROZPOCTY_FIRMY } from '@/lib/finance-evidence-pobocka'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
+import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import { zalozitRozpocet } from './akce'
@@ -93,6 +94,7 @@ export default async function FinanceRozpocty({
 
   const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
+  if (pristup.stav === 'pobocka_bez_firmy') return <SdeleniPobockyBezFirmy rozsah={rozsah} />
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Rozpočty vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }

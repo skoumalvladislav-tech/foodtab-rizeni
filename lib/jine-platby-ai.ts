@@ -28,6 +28,7 @@ import {
   NAMAHA,
   VERZE_ZADANI,
   ZADANI,
+  casNaCteni,
   naRozpoznanyDoklad,
   sestavitObsah,
   zkontrolovatPodklad,
@@ -41,15 +42,36 @@ export type VysledekRozpoznani =
 
 type ChybaRozpoznani = Extract<VysledekRozpoznani, { stav: 'chyba' }>
 
-/** Výchozí čekání na model; serverová akce může dát kratší (`casovyLimitMs`). */
-const CEKANI_MS = 100_000
+/** Strop délky odpovědi (u Opus 5.5 se do něj počítá i přemýšlení). */
+const MAX_TOKENU = 16000
+
+export const HLASKA_NEZBYVA_CAS = 'Na čtení nezbývá čas — zkuste to znovu.'
+export const HLASKA_MOC_DLOUHY = 'Doklad je na jedno čtení moc dlouhý — rozdělte ho, nebo položky vyplňte ručně.'
+export const HLASKA_ODMITNUTO = 'Model doklad odmítl přečíst — vyplňte položky ručně.'
 
 export function rozpoznavaniJeNastavene(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY?.trim())
 }
 
-/** `moznosti` řídí jen volání (časový limit), do modelu z nich nejde nic. */
-export async function rozpoznatDoklad(p: PodkladRozpoznani, moznosti: { casovyLimitMs?: number } = {}): Promise<VysledekRozpoznani> {
+/**
+ * `moznosti` řídí jen volání, do modelu z nich nejde nic:
+ *   `casovyLimitMs` — nejdelší čekání na model (strop `CEKANI_NA_MODEL_MS`);
+ *   `konec`         — termín (ms epoch), do kdy musí být hotovo i se zápisem;
+ *                     model dostane nejvýš `konec − teď − 5 s` (N29). Když
+ *                     vyjde méně než 15 s, model se nevolá a vrátí se dočasná
+ *                     chyba (pokus by se zaplatil a nestihl).
+ *
+ * Volání je `messages.create` se strukturovaným výstupem a odpověď se
+ * převádí TADY (N33): `messages.parse` v SDK 0.125 parsuje JSON dřív, než
+ * vrátí odpověď, takže useknutá (max_tokens) nebo odmítnutá odpověď
+ * s kusem textu skončila obecnou chybou „nešla přečíst" a konkrétní rada
+ * se k člověku nedostala. Teď se nejdřív rozhodne podle `stop_reason`,
+ * až pak JSON.parse a kontrola schématem (zod safeParse).
+ */
+export async function rozpoznatDoklad(
+  p: PodkladRozpoznani,
+  moznosti: { casovyLimitMs?: number; konec?: number } = {},
+): Promise<VysledekRozpoznani> {
   // Kontrola podkladu PŘED klíčem: o vadném souboru se ven nic neposílá.
   const vada = zkontrolovatPodklad(p)
   if (vada) return trvala(vada)
@@ -57,31 +79,51 @@ export async function rozpoznatDoklad(p: PodkladRozpoznani, moznosti: { casovyLi
   const klic = process.env.ANTHROPIC_API_KEY?.trim()
   if (!klic) return { stav: 'bez_klice' }
 
-  const limit = moznosti.casovyLimitMs && moznosti.casovyLimitMs > 0 ? Math.min(CEKANI_MS, moznosti.casovyLimitMs) : CEKANI_MS
+  const limit = casNaCteni(moznosti, Date.now())
+  if (limit === null) return docasna(HLASKA_NEZBYVA_CAS)
+
   // Žádné opakování uvnitř SDK: `timeout` platí pro každý pokus zvlášť, opakování by běh
   // přetáhlo přes strop serverové akce. Další pokus spustí člověk (započítá se do denního stropu).
   const client = new Anthropic({ apiKey: klic, timeout: limit, maxRetries: 0 })
+  // Jen schéma (JSON) — pomocná funkce `parse` z SDK se neposílá ani nepoužívá.
+  const format = zodOutputFormat(DokladSchema)
 
+  let odpoved: Anthropic.Message
   try {
-    const odpoved = await client.messages.parse({
+    odpoved = await client.messages.create({
       model: MODEL,
-      max_tokens: 16000,
-      output_config: { effort: NAMAHA, format: zodOutputFormat(DokladSchema) },
+      max_tokens: MAX_TOKENU,
+      output_config: { effort: NAMAHA, format: { type: format.type, schema: format.schema } },
       system: ZADANI,
       messages: [{ role: 'user', content: sestavitObsah(p) }],
     })
+  } catch (e) {
+    return chyba(e)
+  }
 
-    if (odpoved.stop_reason === 'refusal') {
-      return trvala('Model odmítl doklad zpracovat — vyplňte ho ručně.')
-    }
-    if (odpoved.stop_reason === 'max_tokens' || odpoved.stop_reason === 'model_context_window_exceeded') {
-      return trvala('Odpověď AI byla useknutá (došel limit délky) — doklad je na automatické čtení moc dlouhý. Zkuste méně stránek najednou.')
-    }
+  // 1. Nejdřív proč model skončil — useknutý nebo odmítnutý text se ani nezkouší číst.
+  if (odpoved.stop_reason === 'refusal') return trvala(HLASKA_ODMITNUTO)
+  if (odpoved.stop_reason === 'max_tokens' || odpoved.stop_reason === 'model_context_window_exceeded') return trvala(HLASKA_MOC_DLOUHY)
 
-    const vystup = odpoved.parsed_output
-    if (!vystup) return trvala('AI nevrátila žádné rozpoznané údaje.')
+  // 2. Text odpovědi (přemýšlení a jiné bloky se přeskočí).
+  const text = (Array.isArray(odpoved.content) ? odpoved.content : [])
+    .filter((b): b is Anthropic.TextBlock => b?.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('')
+  if (text.trim() === '') return trvala('AI nevrátila žádné rozpoznané údaje.')
 
-    return { stav: 'ok', doklad: naRozpoznanyDoklad(vystup), model: odpoved.model, verze: VERZE_ZADANI }
+  // 3. JSON a schéma. Text odpovědi (kus dokladu) do důvodu nejde.
+  let surovy: unknown
+  try {
+    surovy = JSON.parse(text)
+  } catch {
+    return trvala('Odpověď AI nešla přečíst jako rozpoznaný doklad (není to platný JSON) — zkuste to znovu, nebo vyplňte položky ručně.')
+  }
+  const vystup = DokladSchema.safeParse(surovy)
+  if (!vystup.success) return trvala('Odpověď AI neodpovídá schématu dokladu — vyplňte ho ručně.')
+
+  try {
+    return { stav: 'ok', doklad: naRozpoznanyDoklad(vystup.data), model: odpoved.model, verze: VERZE_ZADANI }
   } catch (e) {
     return chyba(e)
   }

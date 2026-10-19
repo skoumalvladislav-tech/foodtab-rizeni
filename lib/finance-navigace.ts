@@ -9,9 +9,12 @@
  * nevykresluje jejich osm obrazovek znovu.
  */
 
+import { PRAVA_CTENI_JINYCH_PLATEB } from './jine-platby-typy.ts'
+
 export type FinanceIkona =
   | 'prehled'
   | 'trzby'
+  | 'jine_platby'
   | 'cashflow'
   | 'kontakty'
   | 'platby'
@@ -30,6 +33,8 @@ type Definice = {
   ikona: FinanceIkona
   /** Jen pro celou firmu — na pobočce se nekreslí (stejný příznak jako v app/[rozsah]/nabidka.ts). */
   jenFirma?: boolean
+  /** Položka se ukáže, když má člověk aspoň jedno z těch práv (stejně jako `pravo` v app/[rozsah]/nabidka.ts). */
+  prava: readonly string[]
 }
 
 /**
@@ -48,20 +53,27 @@ export const SEGMENT_FIRMY = 'firma'
  * controlling, Vybavení, Integrace." Kontakty a Zakázky jsou tu dvě
  * položky, ne jedna — jasnější menu, stejná CRM entita (kontakty) pod
  * oběma.
+ *
+ * Jiné platby (Finance → Tržby → Jiné platby, 16. 10. 2026) stojí hned
+ * za Tržbami: agenda je pod nimi a vidí ji i obsluha BEZ finance.read
+ * (kterékoli právo agendy — `PRAVA_CTENI_JINYCH_PLATEB`, stejné pravidlo
+ * jako app/[rozsah]/nabidka.ts a `zkusPristupJinymPlatbam`).
  */
 const POLOZKY: readonly Definice[] = [
-  { klic: 'prehled', segment: '', nazev: 'Přehled', kratky: 'Přehled', ikona: 'prehled' },
+  { klic: 'prehled', segment: '', nazev: 'Přehled', kratky: 'Přehled', ikona: 'prehled', prava: ['finance.read'] },
   // Šéfík 12. 10.: tržby z pokladen po provozovnách, platbách, dnech, měsících a rocích.
-  { klic: 'trzby', segment: 'trzby', nazev: 'Tržby', kratky: 'Tržby', ikona: 'trzby' },
-  { klic: 'cashflow', segment: 'cashflow', nazev: 'Cashflow', kratky: 'Cashflow', ikona: 'cashflow' },
-  { klic: 'platby', segment: 'platby', nazev: 'Platby', kratky: 'Platby', ikona: 'platby' },
-  { klic: 'nakup', segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', ikona: 'nakup' },
-  { klic: 'kontakty', segment: 'kontakty', nazev: 'Kontakty', kratky: 'Kontakty', ikona: 'kontakty', jenFirma: true },
-  { klic: 'zakazky', segment: 'zakazky', nazev: 'Zakázky', kratky: 'Zakázky', ikona: 'zakazky' },
-  { klic: 'rozpocty', segment: 'rozpocty', nazev: 'Rozpočty a controlling', kratky: 'Rozpočty', ikona: 'rozpocty' },
-  { klic: 'vybaveni', segment: 'vybaveni', nazev: 'Vybavení', kratky: 'Vybavení', ikona: 'vybaveni' },
-  { klic: 'integrace', segment: 'integrace', nazev: 'Integrace', kratky: 'Integrace', ikona: 'integrace', jenFirma: true },
-  { klic: 'faktury', segment: 'faktury', nazev: 'Faktury', kratky: 'Faktury', ikona: 'faktury', jenFirma: true },
+  { klic: 'trzby', segment: 'trzby', nazev: 'Tržby', kratky: 'Tržby', ikona: 'trzby', prava: ['finance.read'] },
+  { klic: 'jine_platby', segment: 'trzby/jine-platby', nazev: 'Jiné platby', kratky: 'Jiné platby', ikona: 'jine_platby', prava: PRAVA_CTENI_JINYCH_PLATEB },
+  { klic: 'cashflow', segment: 'cashflow', nazev: 'Cashflow', kratky: 'Cashflow', ikona: 'cashflow', prava: ['finance.read'] },
+  { klic: 'platby', segment: 'platby', nazev: 'Platby', kratky: 'Platby', ikona: 'platby', prava: ['finance.read'] },
+  // Nákup patří modulu Objednávky (purchasing.read), ne Financím.
+  { klic: 'nakup', segment: 'nakup', nazev: 'Nákup', kratky: 'Nákup', ikona: 'nakup', prava: ['purchasing.read'] },
+  { klic: 'kontakty', segment: 'kontakty', nazev: 'Kontakty', kratky: 'Kontakty', ikona: 'kontakty', jenFirma: true, prava: ['finance.read'] },
+  { klic: 'zakazky', segment: 'zakazky', nazev: 'Zakázky', kratky: 'Zakázky', ikona: 'zakazky', prava: ['finance.read'] },
+  { klic: 'rozpocty', segment: 'rozpocty', nazev: 'Rozpočty a controlling', kratky: 'Rozpočty', ikona: 'rozpocty', prava: ['finance.read'] },
+  { klic: 'vybaveni', segment: 'vybaveni', nazev: 'Vybavení', kratky: 'Vybavení', ikona: 'vybaveni', prava: ['finance.read'] },
+  { klic: 'integrace', segment: 'integrace', nazev: 'Integrace', kratky: 'Integrace', ikona: 'integrace', jenFirma: true, prava: ['finance.read'] },
+  { klic: 'faktury', segment: 'faktury', nazev: 'Faktury', kratky: 'Faktury', ikona: 'faktury', jenFirma: true, prava: ['faktury.read'] },
 ]
 
 export type PolozkaNavigace = {
@@ -77,11 +89,25 @@ export type PolozkaNavigace = {
  * Bernard Bar…“) chybí obrazovky jen pro celou firmu — Kontakty
  * (bez pobočky), Integrace (napojení firmy) a Faktury (oddělená
  * databáze bez pobočky).
+ *
+ * `prava` (N24, kontrola 19. 10. 2026) = práva přihlášeného, která
+ * stránka zná (stránky agendy Jiných plateb: práva agendy a finance.read
+ * v rozsahu, Nákup a Faktury podle `canSee` — `pravaNavigaceFinanci`
+ * v lib/jine-platby-pristup.ts). Položka bez některého ze svých práv se
+ * nekreslí: obsluha jen s `jine_platby.zadat` vidí jen Jiné platby, ne
+ * obrazovky, kam by ji pustit nešlo. Bez `prava` (ostatní obrazovky
+ * Financí — tam se dostane jen ten, kdo má finance.read) se kreslí
+ * všechno jako dřív, i Jiné platby (finance.read je jedno z jejich práv).
+ * Navigace nic nechrání — každá stránka si přístup ověří sama.
  */
-export function sestavNavigaci(rozsah: string): { hlavni: PolozkaNavigace[]; mobil: PolozkaNavigace[] } {
+export function sestavNavigaci(
+  rozsah: string,
+  prava?: Iterable<string> | null,
+): { hlavni: PolozkaNavigace[]; mobil: PolozkaNavigace[] } {
   const zaklad = `/${rozsah}/finance`
   const naFirme = rozsah === SEGMENT_FIRMY
-  const hlavni = POLOZKY.filter((d) => naFirme || !d.jenFirma).map((d) => ({
+  const mnozina = prava === undefined || prava === null ? null : new Set(prava)
+  const hlavni = POLOZKY.filter((d) => (naFirme || !d.jenFirma) && (mnozina === null || d.prava.some((p) => mnozina.has(p)))).map((d) => ({
     klic: d.klic,
     href: d.segment ? `${zaklad}/${d.segment}` : zaklad,
     nazev: d.nazev,
@@ -92,7 +118,11 @@ export function sestavNavigaci(rozsah: string): { hlavni: PolozkaNavigace[]; mob
   return { hlavni, mobil: hlavni }
 }
 
-/** Nejdelší shoda vyhrává — přehled je předponou všech ostatních adres. */
+/**
+ * Nejdelší shoda vyhrává — přehled je předponou všech ostatních adres
+ * a Tržby předponou Jiných plateb (na stránkách agendy svítí Jiné
+ * platby, ne Tržby).
+ */
 export function aktivniKlic(cesta: string, polozky: readonly PolozkaNavigace[]): string | null {
   let nejlepsi: PolozkaNavigace | null = null
   for (const p of polozky) {
