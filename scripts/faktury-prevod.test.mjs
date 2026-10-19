@@ -50,6 +50,9 @@ import {
   rozdilyMereni,
   typPrilohy,
   zakladNavratuPlati,
+  zapomenoutChybuPrilohy,
+  zapsatChybuPrilohy,
+  zkusitPrilohu,
 } from '../lib/faktury-prevod.ts'
 
 let chyb = 0
@@ -431,8 +434,36 @@ console.log('\n10. Přílohy: přechodná chyba se nezapíše jako trvalá (nál
 
   const sync = zdroj('lib/faktury-prevod-sync.ts')
   const prilohy = sync.slice(sync.indexOf('async function prilohy('), sync.indexOf('async function dokoncit('))
-  ok('úloha: prilohy dělí chyby podle jeDocasnaChyba a ukládá je hned po každé',
-    /if \(jeDocasnaChyba\(e\)\) \{\s*docasne\[f\.id\]/.test(prilohy) && /nepovedlo\+\+\s*await ulozit\(\)/.test(prilohy))
+  // Chování záznamu, ne text kódu: přechodná chyba NESMÍ skončit v „chyby"
+  // (ty dokončení bere jako vykázané a pustí Faktury bez kopie PDF).
+  const z = { chyby: {}, docasne: {} }
+  const KDY = '2026-10-19T10:00:00.000Z'
+  zapsatChybuPrilohy(z, 'f503', new Error('HTTP 503'), KDY)
+  zapsatChybuPrilohy(z, 'f404', new Error('HTTP 404'), KDY)
+  ok('přechodná (503) jen v „docasne", ne ve vykázaných „chyby"', 'f503' in z.docasne && !('f503' in z.chyby) && z.docasne.f503.duvod === 'HTTP 503')
+  ok('trvalá (404) jen v „chyby"', z.chyby.f404 === 'HTTP 404' && !('f404' in z.docasne))
+  zapsatChybuPrilohy(z, 'f503', new Error('nad 10 MB'), KDY)
+  zapsatChybuPrilohy(z, 'f404', Object.assign(new Error('x'), { name: 'TimeoutError' }), KDY)
+  ok('faktura je vždy jen v jednom seznamu (přechod oběma směry)',
+    z.chyby.f503 === 'nad 10 MB' && !('f503' in z.docasne) && 'f404' in z.docasne && !('f404' in z.chyby))
+  ok('zapomenout: smaže z obou a řekne, že bylo co',
+    zapomenoutChybuPrilohy(z, 'f503') && zapomenoutChybuPrilohy(z, 'f404') && !zapomenoutChybuPrilohy(z, 'f404')
+    && Object.keys(z.chyby).length + Object.keys(z.docasne).length === 0)
+  const t0 = Date.parse(KDY)
+  const z2 = { chyby: { trvala: 'HTTP 404' }, docasne: { docasna: { duvod: 'HTTP 503', kdy: KDY } } }
+  ok('trvalou zkusit jen s volbou „znovu i chyby"', !zkusitPrilohu(z2, 'trvala', false, t0, 600_000) && zkusitPrilohu(z2, 'trvala', true, t0, 600_000))
+  ok('přechodnou až po 10 minutách, novou hned',
+    !zkusitPrilohu(z2, 'docasna', false, t0 + 599_000, 600_000) && zkusitPrilohu(z2, 'docasna', false, t0 + 600_000, 600_000)
+    && zkusitPrilohu(z2, 'nova', false, t0, 600_000))
+  const sync2 = zdroj('lib/faktury-prevod-sync.ts')
+  const prevestTelo = sync2.slice(sync2.indexOf('async function prevest('), sync2.indexOf('function pokracovatPozdeji('))
+  const dokoncitTelo = sync2.slice(sync2.indexOf('async function dokoncit('), sync2.indexOf('async function zrusit('))
+  ok('úloha: prilohy zapisuje a zkouší přes čisté funkce a ukládá hned po každé chybě',
+    /zapsatChybuPrilohy\(z, f\.id, e,/.test(prilohy) && /zkusitPrilohu\(z, f\.id, k\.znovuChyby/.test(prilohy)
+    && /zapsatChybuPrilohy[^\n]*\n\s*nepovedlo\+\+\s*await ulozit\(\)/.test(prilohy))
+  ok('úloha: převod při změněném odkazu na PDF zapomene starou chybu přílohy',
+    /if \(odkazZmenen && zapomenoutChybuPrilohy\(zaznamChyb, id\)\)/.test(prevestTelo))
+  ok('úloha: dokončení vypíše počet nepovedených příloh', /nepodarene_prilohy: Number\(m\.prilohy\?\.nepodarene/.test(dokoncitTelo))
 }
 
 console.log('\n11. Přílohy: i nejpomalejší stažení doběhne do limitu funkce (nález 8)')
@@ -477,6 +508,12 @@ console.log('\n13. Stará databáze se čte i před db push a každé 2 dny (ná
   ok('workflow má plán (schedule)', /\n  schedule:\n    - cron: '[^']+'/.test(wf))
   const rezim = /REZIM: \$\{\{ (.+) \}\}/.exec(wf)?.[1] ?? ''
   ok(`plán spouští jen nanecisto (REZIM: ${rezim})`, /^github\.event_name == 'schedule' && 'nanecisto' \|\| inputs\.rezim$/.test(rezim))
+  // Bez výchozích hodnot by plánovaný běh spadl na jq --argjson ještě před voláním.
+  ok('plán má výchozí hodnoty vstupů (jinak jq spadne na prázdném řetězci)',
+    /SMAZAT_VIC: \$\{\{ inputs\.smazat_vic \|\| false \}\}/.test(wf) && /ZNOVU_CHYBY: \$\{\{ inputs\.znovu_chyby \|\| false \}\}/.test(wf))
+  // Ve společné skupině by plánovaný běh zrušil čekající ruční krok.
+  const skupina = /\nconcurrency:\n  group: (.+)\n/.exec(wf)?.[1] ?? ''
+  ok(`plán má vlastní skupinu souběhu (${skupina})`, /github\.event_name == 'schedule' && '[a-z]+' \|\| '[a-z]+'/.test(skupina))
 }
 
 console.log(`\n${chyb === 0 ? 'Vše prošlo' : `SELHALO ${chyb}`} — ${kontrol} kontrol (scripts/faktury-prevod.test.mjs).`)

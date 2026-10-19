@@ -352,6 +352,14 @@ select pg_temp.check('majitel během převodu: zápis → zavřeno',
 select pg_temp.check('během převodu se párování nemění (ani starou cestou)',
   pg_temp.spadne_hlaskou(format('select public.potvrdit_alokaci_platby(%L, %L, %L, 1000, 9999999)',
     :'tenant', :'t1', 'a0000000-0000-4000-8000-000000000004'), '42501', 'Během stěhování'));
+-- Brána párování rozhoduje podle stavu FIRMY, ne podle toho, co smí volající
+-- vidět: člověk s Platbami bez práva na Faktury stav převodu nevidí, ale
+-- stará cesta se mu kvůli tomu otevřít nesmí (regrese 19. 10.).
+select set_config('test.user_id', '99990000-0000-0000-0000-000000000004', false);
+select pg_temp.check('… ani za člověka s Platbami bez práva na Faktury (stav převodu nevidí)',
+  app.faktury_stav_prevodu(:'tenant') is null
+  and pg_temp.spadne_hlaskou(format('select public.potvrdit_alokaci_platby(%L, %L, %L, 1000, 9999999)',
+    :'tenant', :'t1', 'a0000000-0000-4000-8000-000000000004'), '42501', 'Během stěhování'));
 reset role;
 select set_config('test.user_id', '', false);
 
@@ -380,7 +388,7 @@ select pg_temp.check('po zrušení není čas dokončení (kopie není základ n
   (select dokonceno_kdy from public.faktury_prevod where tenant_id = :'tenant') is null);
 select pg_temp.check('po zrušení návrat zpět označit nejde (nebylo co vracet)',
   pg_temp.spadne_hlaskou(format('select app.faktury_prevod_zpet_hotovo(%L)', :'tenant'), '23514', 'dokončeného'));
-select app.faktury_prevod_zahajit(:'tenant', 'ctqtwahlzhyjerqulqyn.supabase.co', '{"pocet": 4}') as stav_zahajeni \gset
+select app.faktury_prevod_zahajit(:'tenant', 'ctqtwahlzhyjerqulqyn.supabase.co', '{"pocet": 4, "castky_haleru": {"CZK": 1}}') as stav_zahajeni \gset
 select pg_temp.check('po zrušení jde zahájit znovu → probiha', :'stav_zahajeni' = 'probiha');
 select pg_temp.check('nové zahájení zapomene nepovedené přílohy z dřívějšího pokusu',
   (select prilohy from public.faktury_prevod where tenant_id = :'tenant') = '{}'::jsonb);
@@ -434,6 +442,22 @@ select pg_temp.check('chyba u jiné faktury nevyrovná nezkopírovanou přílohu
   and exists (select 1 from jsonb_array_elements_text(:'dokonceni'::jsonb -> 'duvody') d where d like 'Zbývá zkopírovat 1 příloh%')
   and app.faktury_stav_prevodu(:'tenant') = 'probiha');
 
+-- Přechodná chyba (stará databáze neodpověděla) NENÍ vykázaná: dokončení ji
+-- nepustí, i když trvalá chyba u druhé přílohy vykázaná je (nález 7).
+set role service_role;
+update public.faktury_prevod
+   set prilohy = jsonb_build_object(
+     'chyby', jsonb_build_object('a0000000-0000-4000-8000-000000000003', 'HEIC'),
+     'docasne', jsonb_build_object('a0000000-0000-4000-8000-000000000004',
+                                   jsonb_build_object('duvod', 'HTTP 503', 'kdy', now())))
+ where tenant_id = :'tenant';
+reset role;
+select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
+select pg_temp.check('přechodně nepovedená příloha (HTTP 503) dokončení nepustí',
+  (:'dokonceni'::jsonb ->> 'ok')::boolean = false
+  and (:'dokonceni'::jsonb -> 'mereni' -> 'prilohy' ->> 'stare_bez_kopie_nevykazane')::int = 1
+  and app.faktury_stav_prevodu(:'tenant') = 'probiha');
+
 -- Dvě přílohy se „nepodařilo zkopírovat" — úloha je zapíše jako chyby.
 set role service_role;
 update public.faktury_prevod
@@ -448,6 +472,15 @@ reset role;
 select app.faktury_prevod_dokoncit(:'tenant', 4, 0) as dokonceni \gset
 select pg_temp.check('vše sedí: dokončeno',
   (:'dokonceni'::jsonb ->> 'ok')::boolean = true and app.faktury_stav_prevodu(:'tenant') = 'dokonceno');
+-- Audit převodu čte i správce bez práva na Faktury a Platby: počty ano,
+-- součty peněz ne (ty má jen faktury_prevod, čte ho jen úloha).
+select pg_temp.check('audit převodu: měření bez součtů peněz (zahájení i dokončení)',
+  exists (select 1 from public.audit_log where tenant_id = :'tenant' and action = 'faktury.prevod_dokoncen'
+            and (after -> 'mereni' -> 'stara' ->> 'pocet')::int = 4)
+  and (select mereni_zahajeni -> 'castky_haleru' ->> 'CZK' from public.faktury_prevod where tenant_id = :'tenant') = '1'
+  and not exists (select 1 from public.audit_log where tenant_id = :'tenant'
+                    and action in ('faktury.prevod_zahajen', 'faktury.prevod_dokoncen')
+                    and after::text ~ '(castky_haleru|potvrzeno_haleru)'));
 select pg_temp.check('staré párování dostalo uuid faktury (text velkými písmeny s mezerou)',
   (select faktura from public.platby_faktury where id = :'stare_parovani') = 'a0000000-0000-4000-8000-000000000001');
 select pg_temp.check('evidence příjmu dostala uuid faktury',
@@ -557,8 +590,9 @@ select pg_temp.check('vzor odmítnutí s puvodni_id přihlášený nezapíše',
 -- Audit bez obsahu dokladu: audit_log čte i správce bez práva na Faktury.
 -- Text dokladu, e-mail a účet dodavatele se nesmí objevit ani u vložení,
 -- ani u změny, ani u smazání (a ani u vzoru odmítnutí).
-insert into public.faktury (tenant_id, dodavatel, castka_haleru, vytah_textu, email_predmet, email_odesilatel, ucet_dodavatele)
-values (:'tenant', 'Auditní dodavatel', 100, 'TAJNE-99 text', 'TAJNE-99 předmět', 'tajne99@x.cz', 'TAJNE-99/0100')
+insert into public.faktury (tenant_id, dodavatel, castka_haleru, vytah_textu, email_predmet, email_odesilatel, ucet_dodavatele, odkaz_pdf, odkaz_onedrive)
+values (:'tenant', 'Auditní dodavatel', 100, 'TAJNE-99 text', 'TAJNE-99 předmět', 'tajne99@x.cz', 'TAJNE-99/0100',
+        'https://ctqtwahlzhyjerqulqyn.supabase.co/storage/v1/object/public/faktury-pdf/TAJNE-99.pdf', 'https://onedrive.live.com/TAJNE-99')
 returning id as tajna \gset
 insert into public.faktury_vzory_odmitnuti (tenant_id, druh, vytah, email_predmet) values (:'tenant', 'not_invoice', 'TAJNE-99 vzor', 'TAJNE-99');
 reset role;
@@ -575,7 +609,7 @@ select pg_temp.check('audit faktury: vložení, změna i smazání jsou zapsané
                 and after -> 'skryte_zmeny' = '["vytah_textu"]'::jsonb)
   and exists (select 1 from public.audit_log where entity_id = :'tajna' and action = 'faktura.delete')
   and exists (select 1 from public.audit_log where tenant_id = :'tenant' and action = 'faktura_vzor_odmitnuti.insert'));
-select pg_temp.check('… a v auditu není text dokladu, předmět, e-mail ani účet dodavatele',
+select pg_temp.check('… a v auditu není text dokladu, předmět, e-mail, účet dodavatele ani odkaz na PDF',
   not exists (select 1 from public.audit_log where tenant_id = :'tenant'
                 and (coalesce(before::text, '') || coalesce(after::text, '')) ~ '(TAJNE-99|tajne99)'));
 set role authenticated;
@@ -669,6 +703,13 @@ select pg_temp.check('finance bez faktury.read: párovat nesmí',
     :'tenant', :'t1', 'a0000000-0000-4000-8000-000000000004'), '42501', 'Vidět přijaté faktury'));
 select pg_temp.check('finance bez faktury.read: rušit párování (a tím stav faktury) nesmí',
   pg_temp.spadne_hlaskou(format($s$select public.zrusit_parovani_faktury(%L, %L, 'x')$s$, :'tenant', :'stare_parovani'), '42501', 'Vidět přijaté faktury'));
+-- … a ani STAROU cestou (jí stačí finance.manage): stav převodu tenhle člověk
+-- nevidí, brána ale čte stav firmy (regrese 19. 10.).
+select pg_temp.check('finance bez faktury.read: stará cesta párování po dokončení zavřená',
+  pg_temp.spadne_hlaskou(format('select public.potvrdit_alokaci_platby(%L, %L, %L, 1000, 9999999)',
+    :'tenant', :'t1', 'a0000000-0000-4000-8000-000000000004'), '42501', 'jen novou cestou'));
+select pg_temp.check('finance bez faktury.read: staré rušení párování po dokončení zavřené',
+  pg_temp.spadne_hlaskou(format($s$select public.zrusit_alokaci_platby(%L, %L, 'x')$s$, :'tenant', :'stare_parovani'), '42501', 'jen novou cestou'));
 select set_config('test.user_id', '99990000-0000-0000-0000-000000000003', false);
 select pg_temp.check('člen jen pobočky (firemní účet): párovat nesmí',
   pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 100, null)',

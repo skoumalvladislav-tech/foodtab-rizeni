@@ -14,7 +14,6 @@ import {
   cestaPrilohy,
   cislaMereni,
   idEvidenceZOdkazu,
-  jeDocasnaChyba,
   jeVerejnySouborStare,
   mereniZdroje,
   naRadekHlavni,
@@ -27,7 +26,11 @@ import {
   stabilniJson,
   typPrilohy,
   zakladNavratuPlati,
+  zapomenoutChybuPrilohy,
+  zapsatChybuPrilohy,
+  zkusitPrilohu,
   type RadekHlavni,
+  type ZaznamChybPriloh,
   type RadekStare,
   type VzorStary,
 } from './faktury-prevod.ts'
@@ -205,6 +208,14 @@ async function nacistKopii(hlavni: SupabaseClient, tenantId: string, tabulka: 'i
   }
   if (kopie.size !== (count ?? -1)) zastavit(`Kopie staré databáze vrátila ${kopie.size} řádků, podle počtu ${count}.`)
   return kopie
+}
+
+/** Záznam nepovedených příloh z faktury_prevod.prilohy (kopie — mění se a ukládá celý). */
+function nactiZaznamPriloh(zaznam: Record<string, unknown>): ZaznamChybPriloh {
+  return {
+    chyby: { ...((zaznam.chyby as ZaznamChybPriloh['chyby'] | undefined) ?? {}) },
+    docasne: { ...((zaznam.docasne as ZaznamChybPriloh['docasne'] | undefined) ?? {}) },
+  }
 }
 
 async function stavPrevodu(hlavni: SupabaseClient, tenantId: string): Promise<{
@@ -385,6 +396,7 @@ async function zahajit(k: Kontext): Promise<VysledekPrevodu> {
 
 async function prevest(k: Kontext): Promise<VysledekPrevodu> {
   const { stav, prilohy: zaznamPriloh, zpetHotovoKdy } = await stavPrevodu(k.hlavni, k.tenantId)
+  const zaznamChyb = nactiZaznamPriloh(zaznamPriloh)
   if (stav !== 'probiha') zastavit(`Převádět jde jen po zahájení (stav teď: ${stav ?? 'nezahájen'}).`)
 
   const stare = await nacistStare(k.stara)
@@ -457,13 +469,9 @@ async function prevest(k: Kontext): Promise<VysledekPrevodu> {
     const odkazZmenen = puvodni !== undefined && puvodni.odkaz_pdf !== pole.odkaz_pdf
     const prilohaNeplati = odkazZmenen && !!puvodni?.priloha_cesta && !puvodni.priloha_cesta.includes('/rucne/')
     // Změněný odkaz = nová příloha: dřívější nepovedený pokus o kopii neplatí.
-    const chybyPriloh = (zaznamPriloh.chyby ?? {}) as Record<string, unknown>
-    const docasnePriloh = (zaznamPriloh.docasne ?? {}) as Record<string, unknown>
-    if (odkazZmenen && (id in chybyPriloh || id in docasnePriloh)) {
-      delete chybyPriloh[id]
-      delete docasnePriloh[id]
+    if (odkazZmenen && zapomenoutChybuPrilohy(zaznamChyb, id)) {
       const { error: chybaPriloh } = await k.hlavni.from('faktury_prevod')
-        .update({ prilohy: { chyby: chybyPriloh, docasne: docasnePriloh } }).eq('tenant_id', k.tenantId)
+        .update({ prilohy: zaznamChyb }).eq('tenant_id', k.tenantId)
       hodit(chybaPriloh, 'Záznam nepovedených příloh')
     }
     const { error } = await k.hlavni.from('faktury').update({
@@ -516,7 +524,6 @@ const REZERVA_POLOZKY_MS = 15_000
 // workflow zkoušela dokola tytéž soubory a na další by nedošlo.
 const ZNOVU_DOCASNE_PO_MS = 10 * 60_000
 
-type DocasnaChyba = { duvod: string; kdy: string }
 
 /** Stáhne soubor ze starého veřejného úložiště — jen odtamtud, s limitem velikosti. */
 async function stahnoutStarySoubor(odkaz: string): Promise<Uint8Array> {
@@ -551,12 +558,12 @@ async function prilohy(k: Kontext): Promise<VysledekPrevodu> {
   if (stav !== 'probiha' && stav !== 'dokonceno') zastavit(`Přílohy se kopírují jen během převodu nebo po něm (stav teď: ${stav ?? 'nezahájen'}).`)
   // Trvalé chyby (404, nad 10 MB, typ) se počítají za „vykázané" a dokončení
   // je pustí; dočasné (503, vypršený čas) ne — ty se zkusí znovu.
-  const chyby: Record<string, string> = { ...((zaznam.chyby as Record<string, string> | undefined) ?? {}) }
-  const docasne: Record<string, DocasnaChyba> = { ...((zaznam.docasne as Record<string, DocasnaChyba> | undefined) ?? {}) }
+  const z = nactiZaznamPriloh(zaznam)
+  const { chyby, docasne } = z
   // Zápis hned po každé nepovedené příloze: když funkci zastaví limit
   // platformy, záznam se neztratí a příští běh tytéž soubory nezkouší hned.
   const ulozit = async () => {
-    const { error } = await k.hlavni.from('faktury_prevod').update({ prilohy: { chyby, docasne } }).eq('tenant_id', k.tenantId)
+    const { error } = await k.hlavni.from('faktury_prevod').update({ prilohy: z }).eq('tenant_id', k.tenantId)
     hodit(error, 'Záznam nepovedených příloh')
   }
 
@@ -577,9 +584,7 @@ async function prilohy(k: Kontext): Promise<VysledekPrevodu> {
     hodit(error, 'Faktury bez kopie přílohy')
     const strana = (data ?? []) as { id: string; odkaz_pdf: string }[]
     for (const f of strana) {
-      if (!k.znovuChyby && f.id in chyby) continue
-      const d = docasne[f.id]
-      if (d && !k.znovuChyby && Date.now() - Date.parse(d.kdy) < ZNOVU_DOCASNE_PO_MS) continue
+      if (!zkusitPrilohu(z, f.id, k.znovuChyby, Date.now(), ZNOVU_DOCASNE_PO_MS)) continue
       // Další přílohu začít, jen když stihne doběhnout i ta nejpomalejší.
       if (Date.now() + REZERVA_POLOZKY_MS >= k.konecMs) {
         dosel = true
@@ -621,21 +626,10 @@ async function prilohy(k: Kontext): Promise<VysledekPrevodu> {
         const { error: chybaZapisu } = await k.hlavni.from('faktury').update({ priloha_cesta: cesta })
           .eq('tenant_id', k.tenantId).eq('id', f.id).is('priloha_cesta', null)
         hodit(chybaZapisu, 'Zápis cesty přílohy')
-        if (f.id in chyby || f.id in docasne) {
-          delete chyby[f.id]
-          delete docasne[f.id]
-          await ulozit()
-        }
+        if (zapomenoutChybuPrilohy(z, f.id)) await ulozit()
         zkopirovano++
       } catch (e) {
-        const duvod = (e instanceof Error ? e.message : String(e)).slice(0, 200)
-        if (jeDocasnaChyba(e)) {
-          docasne[f.id] = { duvod, kdy: new Date().toISOString() }
-          delete chyby[f.id]
-        } else {
-          chyby[f.id] = duvod
-          delete docasne[f.id]
-        }
+        zapsatChybuPrilohy(z, f.id, e, new Date().toISOString())
         nepovedlo++
         await ulozit()
       }

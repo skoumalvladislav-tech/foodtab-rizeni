@@ -235,7 +235,16 @@ console.log('\n== Návrhy jen s fakturami v Kč (eurové centy ≠ haléře) =='
   for (const cesta of ['app/[rozsah]/finance/platby/page.tsx', 'lib/finance-pozornost.ts']) {
     const zdroj = readFileSync(cesta, 'utf8').split('\r\n').join('\n')
     ok(`${cesta}: návrhy ze sdílené kandidatiProNavrhy`, /kandidatiProNavrhy\(/.test(zdroj) && !/castkaHaleru: f\.castka_haleru/.test(zdroj.replace(/const naKandidata[\s\S]*?\}\)\n/, '')))
+    // Bez měny ve výčtu sloupců by chybějící měna znamenala „Kč" a eurové
+    // faktury by se do návrhů potichu vrátily (jednotkový test výš to nevidí).
+    ok(`${cesta}: dotaz na faktury načítá měnu (currency:mena)`, /fakturyFirmy\([^)]*'[^']*currency:mena[^']*'/.test(zdroj))
   }
+  const platby = readFileSync('app/[rozsah]/finance/platby/page.tsx', 'utf8')
+  ok('ruční párování píše částku cizí měny s její měnou, ne jako Kč',
+    /jeVKorunach\(f\.mena\) \? koruny\(f\.castkaHaleru\) : /.test(platby))
+  const pozornost = readFileSync('lib/finance-pozornost.ts', 'utf8')
+  ok('Přehled: součet faktur ke kontrole jen v Kč',
+    /keKontrole\.filter\(\(f\) => jeVKorunach\(f\.currency\)\)\.reduce/.test(pozornost))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

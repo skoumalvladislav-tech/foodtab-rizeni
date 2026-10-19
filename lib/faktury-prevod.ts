@@ -763,3 +763,46 @@ export function jeDocasnaChyba(e: unknown): boolean {
   const zprava = typeof x.message === 'string' ? x.message : ''
   return /^HTTP (408|425|429|5\d\d)$/.test(zprava) || /^úložiště:/.test(zprava)
 }
+
+/**
+ * Záznam nepovedených příloh (faktury_prevod.prilohy). Faktura je vždy jen
+ * v JEDNOM seznamu: „chyby" = trvalé, vykázané (dokončení převodu je pustí),
+ * „docasne" = přechodné (dokončení je NEPUSTÍ, zkusí se znovu). Kdyby
+ * přechodná skončila v „chyby", dokončení by otevřelo Faktury bez kopie
+ * PDF — přesně nález 7 z kontroly 19. 10.
+ */
+export type ZaznamChybPriloh = {
+  chyby: Record<string, string>
+  docasne: Record<string, { duvod: string; kdy: string }>
+}
+
+export function zapsatChybuPrilohy(z: ZaznamChybPriloh, id: string, e: unknown, kdy: string): void {
+  const duvod = (e instanceof Error ? e.message : String(e)).slice(0, 200)
+  if (jeDocasnaChyba(e)) {
+    z.docasne[id] = { duvod, kdy }
+    delete z.chyby[id]
+  } else {
+    z.chyby[id] = duvod
+    delete z.docasne[id]
+  }
+}
+
+/** Kopie se povedla, nebo se změnil odkaz na PDF: dřívější chyba neplatí. true = bylo co zapomenout. */
+export function zapomenoutChybuPrilohy(z: ZaznamChybPriloh, id: string): boolean {
+  const bylo = id in z.chyby || id in z.docasne
+  delete z.chyby[id]
+  delete z.docasne[id]
+  return bylo
+}
+
+/**
+ * Zkusit přílohu teď? Trvale nepovedenou jen s volbou „znovu i chyby";
+ * přechodně nepovedenou až po `znovuPoMs` (jinak by kola workflow zkoušela
+ * dokola tytéž soubory a na další by nedošlo).
+ */
+export function zkusitPrilohu(z: ZaznamChybPriloh, id: string, znovuChyby: boolean, nyniMs: number, znovuPoMs: number): boolean {
+  if (znovuChyby) return true
+  if (id in z.chyby) return false
+  const d = z.docasne[id]
+  return !d || nyniMs - Date.parse(d.kdy) >= znovuPoMs
+}

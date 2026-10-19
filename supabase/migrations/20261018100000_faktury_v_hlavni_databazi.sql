@@ -260,6 +260,24 @@ $$;
 revoke all on function app.faktury_stav_prevodu(uuid) from public, anon;
 grant execute on function app.faktury_stav_prevodu(uuid) to authenticated, service_role;
 
+-- Stav převodu BEZ ohledu na práva volajícího — jen pro brány, které
+-- rozhodují o ZÁPISU a NULL berou jako „bez převodu, stará cesta platí"
+-- (spoušť párování plateb). Filtrovaná verze výš by přihlášenému bez práva
+-- na Faktury vrátila NULL a staré funkce párování (stačí jim finance.manage)
+-- by mu znovu otevřela starou cestu i po dokončení a během převodu
+-- (kontrola 19. 10., regrese opravy výš). Filtrovaná zůstává pro hlášky
+-- a čtení. Přihlášený tuhle volat nesmí: do párování nepíše přímo, jen přes
+-- funkce (security definer — spoušť pak běží za jejich vlastníka).
+create function app.faktury_stav_prevodu_brana(p_tenant uuid)
+returns text
+language sql stable security definer set search_path = ''
+as $$
+  select pr.stav from public.faktury_prevod pr where pr.tenant_id = p_tenant;
+$$;
+
+revoke all on function app.faktury_stav_prevodu_brana(uuid) from public, anon, authenticated;
+grant execute on function app.faktury_stav_prevodu_brana(uuid) to service_role;
+
 create policy faktury_prevod_select on public.faktury_prevod for select to authenticated
   using (tenant_id in (select app.firmy_s_pristupem('faktury.read')));
 
@@ -543,8 +561,10 @@ returns trigger
 language plpgsql security definer set search_path = ''
 as $$
 declare
+  -- Odkazy na PDF taky: u převedených faktur vedou do VEŘEJNÉHO kbelíku
+  -- staré databáze — čtenář auditu bez práva na Faktury by PDF otevřel.
   v_skryt  text[] := array['vytah_textu', 'email_odesilatel', 'email_predmet', 'ucet_dodavatele',
-                           'vytah', 'dodavatel_odhad'];
+                           'odkaz_pdf', 'odkaz_onedrive', 'vytah', 'dodavatel_odhad'];
   v_entita text := tg_argv[0];
   v_novy   jsonb;
   v_stary  jsonb;
@@ -818,7 +838,9 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  v_stav text := app.faktury_stav_prevodu(new.tenant_id);
+  -- Nefiltrovaný stav: o zápisu rozhoduje stav firmy, ne to, co smí
+  -- volající vidět (app.faktury_stav_prevodu_brana výš).
+  v_stav text := app.faktury_stav_prevodu_brana(new.tenant_id);
 begin
   if v_stav = 'probiha' then
     if tg_op = 'UPDATE' and current_user not in ('authenticated', 'anon') then
@@ -1567,7 +1589,9 @@ begin
 
   perform app.audit(p_tenant, 'faktury.prevod_zahajen', 'faktury_prevod', p_tenant::text, null,
                     jsonb_build_object('stav', v_stav),
-                    jsonb_build_object('stav', 'probiha', 'zdroj', p_zdroj, 'mereni', p_mereni));
+                    -- Do auditu bez součtů peněz (čte ho i správce bez práva
+                    -- na Faktury); úplné měření je ve faktury_prevod (jen úloha).
+                    jsonb_build_object('stav', 'probiha', 'zdroj', p_zdroj, 'mereni', p_mereni - 'castky_haleru'));
   return 'probiha';
 end $$;
 
@@ -1670,8 +1694,12 @@ begin
   v_mereni := app.faktury_prevod_mereni(p_tenant);
   update public.faktury_prevod set mereni_dokonceni = v_mereni where tenant_id = p_tenant;
 
+  -- Do auditu bez součtů peněz (faktur ani potvrzených plateb) — audit čte
+  -- i správce bez práva na Faktury a Platby; úplné měření je ve faktury_prevod.
   perform app.audit(p_tenant, 'faktury.prevod_dokoncen', 'faktury_prevod', p_tenant::text, null, null,
-                    jsonb_build_object('mereni', v_mereni, 'doplneno_platby', v_doplneno_platby,
+                    jsonb_build_object('mereni', v_mereni #- '{parovani,potvrzeno_haleru}'
+                                                         #- '{stara,castky_haleru}' #- '{hlavni,castky_haleru}',
+                                       'doplneno_platby', v_doplneno_platby,
                                        'doplneno_prijem', v_doplneno_prijem));
 
   return jsonb_build_object('ok', true, 'mereni', v_mereni, 'porovnani', v_porovnani,

@@ -56,8 +56,13 @@ on:
         default: false
         type: boolean
 
+# Ruční kroky v jedné frontě (dva zapisující běhy naráz by si přepisovaly
+# kopii). Plánované nanecisto ve VLASTNÍ skupině: ve společné by nově
+# zařazený plánovaný běh zrušil čekající ruční krok (třeba dokoncit za
+# prilohy) — GitHub ve skupině nechá čekat jen jeden běh. Nanecisto jen
+# čte a zámek nebere, souběh mu nevadí.
 concurrency:
-  group: faktury-prevod
+  group: faktury-prevod-${{ github.event_name == 'schedule' && 'plan' || 'rucne' }}
   cancel-in-progress: false
 
 jobs:
