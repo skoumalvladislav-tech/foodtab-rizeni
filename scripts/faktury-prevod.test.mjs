@@ -23,13 +23,17 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 import {
+  BEZ_MENY,
   MAPA_SLOUPCU,
+  MAX_SMAZAT_BEZ_POTVRZENI,
   casNaMikro,
   casNaMs,
   castkaNaHalere,
   cestaPrilohy,
+  cislaMereni,
   halereNaCastku,
   idEvidenceZOdkazu,
+  jeDocasnaChyba,
   jeVerejnySouborStare,
   kanonickyTextHlavniho,
   kanonickyTextStareho,
@@ -40,9 +44,12 @@ import {
   naVzorHlavni,
   planNavratu,
   porovnat,
+  procNeZpet,
+  smazaniPovoleno,
   stabilniJson,
   rozdilyMereni,
   typPrilohy,
+  zakladNavratuPlati,
 } from '../lib/faktury-prevod.ts'
 
 let chyb = 0
@@ -368,6 +375,108 @@ console.log('\n8. Převod v JS = porovnání v databázi (krok99_scenar.sql)')
   const scenar = existsSync(soubor) ? readFileSync(soubor, 'utf8').replace(/\r\n/g, '\n') : ''
   ok('krok99_scenar.sql existuje', scenar !== '')
   ok('krok99_scenar.sql obsahuje přesně blok vygenerovaný z dnešní logiky (jinak: --vypsat a vložit)', scenar.includes(blokProKrok99()))
+}
+
+const zdroj = (cesta) => readFileSync(fileURLToPath(new URL(`../${cesta}`, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+
+console.log('\n9. Návrat zpět jen po DOKONČENÉM převodu (kontrola 19. 10., nálezy 5 a 6)')
+{
+  const PO_DOKONCENI = '2026-10-19T10:00:00+00:00'
+  const zrusene = { stav: 'vraceno', dokoncenoKdy: null, zpetHotovoKdy: null }
+  const vracene = { stav: 'vraceno', dokoncenoKdy: PO_DOKONCENI, zpetHotovoKdy: null }
+  const hotove = { stav: 'vraceno', dokoncenoKdy: PO_DOKONCENI, zpetHotovoKdy: '2026-10-20T10:00:00+00:00' }
+  ok('po zrušení (bez času dokončení) kopie NENÍ základ návratu', zakladNavratuPlati(zrusene) === false)
+  ok('po vrácení dokončeného převodu kopie základ JE', zakladNavratuPlati(vracene) === true)
+  ok('po hotovém návratu už ne (rozdíly jsou změny staré appky)', zakladNavratuPlati(hotove) === false)
+  ok('v probiha ani v dokonceno ne', !zakladNavratuPlati({ ...vracene, stav: 'probiha' }) && !zakladNavratuPlati({ ...vracene, stav: 'dokonceno' }))
+  ok('zpet po zrušení odmítne (stará databáze je jediná platná)', /nebyl dokončen/.test(procNeZpet(zrusene) ?? ''))
+  ok('zpet po hotovém návratu odmítne (přepsal by změny staré appky)', /už je hotový/.test(procNeZpet(hotove) ?? ''))
+  ok('zpet po vrácení dokončeného smí', procNeZpet(vracene) === null)
+  ok('zpet mimo vraceno odmítne', procNeZpet({ ...vracene, stav: 'dokonceno' }) !== null)
+
+  // Regrese nálezu 5: převod se přerušil — kopie má 5 faktur, hlavní jen 2,
+  // stará je beze změny. Plán by 3 faktury „smazal" ze staré databáze;
+  // po zrušení se proto plán vůbec nepoužije.
+  const pet = [1, 2, 3, 4, 5].map((i) => naRadekHlavni(stary({ id: `a0000000-0000-4000-8000-00000000000${i}` }), TENANT).radek)
+  const plan = planNavratu(pet, pet.slice(0, 2), pet)
+  ok('přerušený převod: plán by smazal 3 faktury ve staré databázi …', plan.smazat.length === 3)
+  ok('… proto se po zrušení nepoužije (zahájení ho přeskočí, zpet odmítne)',
+    !zakladNavratuPlati(zrusene) && procNeZpet(zrusene) !== null)
+
+  ok(`smazat ${MAX_SMAZAT_BEZ_POTVRZENI} jde bez potvrzení`, smazaniPovoleno(MAX_SMAZAT_BEZ_POTVRZENI, false))
+  ok(`smazat ${MAX_SMAZAT_BEZ_POTVRZENI + 1} bez potvrzení ne, s potvrzením ano`,
+    !smazaniPovoleno(MAX_SMAZAT_BEZ_POTVRZENI + 1, false) && smazaniPovoleno(MAX_SMAZAT_BEZ_POTVRZENI + 1, true))
+
+  const sync = zdroj('lib/faktury-prevod-sync.ts')
+  const telo = (jmeno) => sync.slice(sync.indexOf(`async function ${jmeno}(`), sync.indexOf('\n}\n', sync.indexOf(`async function ${jmeno}(`)))
+  ok('úloha: zahájení se ptá zakladNavratuPlati, zpet procNeZpet a smazaniPovoleno',
+    /zakladNavratuPlati\(s\)/.test(telo('zahajit')) && /procNeZpet\(s\)/.test(telo('zpet')) && /smazaniPovoleno\(plan\.smazat\.length/.test(telo('zpet')))
+  ok('úloha: zpet označí návrat jako hotový jen po novém plánu s nulou',
+    /if \(zbyva === 0\) \{\s*const \{ error \} = await k\.hlavni\.rpc\('faktury_prevod_zpet_hotovo'/.test(telo('zpet')))
+}
+
+console.log('\n10. Přílohy: přechodná chyba se nezapíše jako trvalá (nález 7)')
+{
+  const casova = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })
+  ok('HTTP 503 a 429 jsou přechodné', jeDocasnaChyba(new Error('HTTP 503')) && jeDocasnaChyba(new Error('HTTP 429')))
+  ok('vypršený čas (TimeoutError) je přechodný', jeDocasnaChyba(casova))
+  ok('výpadek sítě (TypeError: fetch failed) je přechodný', jeDocasnaChyba(new TypeError('fetch failed')))
+  ok('chyba úložiště a databáze (docasna) jsou přechodné',
+    jeDocasnaChyba(new Error('úložiště: Internal Server Error')) && jeDocasnaChyba(Object.assign(new Error('x'), { docasna: true })))
+  ok('HTTP 404, nad 10 MB, typ a odkaz mimo starou databázi jsou trvalé',
+    !jeDocasnaChyba(new Error('HTTP 404')) && !jeDocasnaChyba(new Error('nad 10 MB'))
+    && !jeDocasnaChyba(new Error('nepodporovaný typ souboru (není PDF, JPEG, PNG, WebP ani XML)'))
+    && !jeDocasnaChyba(new Error('odkaz nevede bezpečně do staré databáze (jiný server, http nebo parametry)')))
+  ok('nic neznámého není přechodné (null, text)', !jeDocasnaChyba(null) && !jeDocasnaChyba('HTTP 503'))
+
+  const sync = zdroj('lib/faktury-prevod-sync.ts')
+  const prilohy = sync.slice(sync.indexOf('async function prilohy('), sync.indexOf('async function dokoncit('))
+  ok('úloha: prilohy dělí chyby podle jeDocasnaChyba a ukládá je hned po každé',
+    /if \(jeDocasnaChyba\(e\)\) \{\s*docasne\[f\.id\]/.test(prilohy) && /nepovedlo\+\+\s*await ulozit\(\)/.test(prilohy))
+}
+
+console.log('\n11. Přílohy: i nejpomalejší stažení doběhne do limitu funkce (nález 8)')
+{
+  const route = zdroj('app/api/prevod-faktur/route.ts')
+  const sync = zdroj('lib/faktury-prevod-sync.ts')
+  const cislo = (text, jmeno) => Number((new RegExp(`${jmeno}\\s*=\\s*([\\d_]+)`).exec(text)?.[1] ?? 'NaN').replace(/_/g, ''))
+  const limitFunkce = cislo(route, 'maxDuration') * 1000
+  const rozpocet = cislo(route, 'ROZPOCET_MS')
+  const stazeni = cislo(sync, 'LIMIT_STAZENI_MS')
+  const rezerva = cislo(sync, 'REZERVA_POLOZKY_MS')
+  ok(`čísla se přečetla (funkce ${limitFunkce}, rozpočet ${rozpocet}, stažení ${stazeni}, rezerva ${rezerva} ms)`,
+    [limitFunkce, rozpocet, stazeni, rezerva].every((x) => Number.isFinite(x) && x > 0))
+  ok('rozpočet − rezerva + nejdelší stažení + 5 s na zápis ≤ limit funkce', rozpocet - rezerva + stazeni + 5_000 <= limitFunkce)
+  ok('úloha: další příloha jen s rezervou a stažení s tímhle limitem',
+    sync.includes('if (Date.now() + REZERVA_POLOZKY_MS >= k.konecMs)') && sync.includes('AbortSignal.timeout(LIMIT_STAZENI_MS)'))
+}
+
+console.log('\n12. Návod slibuje jen čísla, která úloha opravdu vypíše (nález 9)')
+{
+  const klice = new Set(Object.keys(cislaMereni(mereniZdroje([stary()], 0), 'stara_')))
+  const zminene = new Set()
+  for (const cesta of ['docs/faktury-slouceni-navrh.md', 'docs/hlaseni/faktury-prevod-mereni.sql']) {
+    for (const m of zdroj(cesta).matchAll(/\bstara_[a-z_]+/g)) zminene.add(m[0])
+  }
+  const nezname = [...zminene].filter((k) => !klice.has(k))
+  ok(`návod zmiňuje ${zminene.size} čísel stara_*`, zminene.size >= 1)
+  ok(`každé existuje ve výstupu úlohy${nezname.length ? ' — NEZNÁMÉ: ' + nezname.join(', ') : ''}`, nezname.length === 0)
+  ok('do veřejného logu nejde žádný součet peněz (jen počet měn)', ![...klice].some((k) => /castk|haler/.test(k)))
+  const bezMeny = mereniZdroje([stary({ currency: null })], 0)
+  ok(`faktura bez měny má klíč „${BEZ_MENY}" jako v databázi`, Object.keys(bezMeny.castky_haleru)[0] === BEZ_MENY)
+}
+
+console.log('\n13. Stará databáze se čte i před db push a každé 2 dny (nález 10)')
+{
+  const sync = zdroj('lib/faktury-prevod-sync.ts')
+  const nanecisto = sync.slice(sync.indexOf('async function nanecisto('), sync.indexOf('async function zahajit('))
+  const prvni = /await (\w+)\(/.exec(nanecisto)?.[1]
+  ok(`nanecisto čte jako první starou databázi (první await: ${prvni})`, prvni === 'nacistStare')
+  ok('nanecisto přežije chybějící tabulky hlavní databáze (před db push)', /TABULKA_CHYBI\.has\(e\.kod/.test(nanecisto))
+  const wf = zdroj('.github/workflows/faktury-prevod.yml')
+  ok('workflow má plán (schedule)', /\n  schedule:\n    - cron: '[^']+'/.test(wf))
+  const rezim = /REZIM: \$\{\{ (.+) \}\}/.exec(wf)?.[1] ?? ''
+  ok(`plán spouští jen nanecisto (REZIM: ${rezim})`, /^github\.event_name == 'schedule' && 'nanecisto' \|\| inputs\.rezim$/.test(rezim))
 }
 
 console.log(`\n${chyb === 0 ? 'Vše prošlo' : `SELHALO ${chyb}`} — ${kontrol} kontrol (scripts/faktury-prevod.test.mjs).`)

@@ -391,6 +391,27 @@ export type Mereni = {
 
 const neprazdny = (x: string | null | undefined) => x !== null && x !== undefined && x !== ''
 
+/** Klíč součtu pro fakturu bez měny — stejný jako v app.faktury_prevod_mereni. */
+export const BEZ_MENY = '(bez měny)'
+
+/**
+ * Čísla měření do VEŘEJNÉHO logu (GitHub Actions) — jen počty, žádné
+ * součty peněz. Součty jsou v podrobnostech odpovědi a v měření uloženém
+ * při zahájení (faktury_prevod.mereni_zahajeni). Na jména klíčů odkazuje
+ * návod (docs/faktury-slouceni-navrh.md, docs/hlaseni/faktury-prevod-mereni.sql)
+ * — hlídá scripts/faktury-prevod.test.mjs.
+ */
+export function cislaMereni(m: Mereni, predpona: string): Record<string, number> {
+  return {
+    [`${predpona}faktur`]: m.pocet,
+    [`${predpona}archivovanych`]: m.archivovanych,
+    [`${predpona}duplicit`]: m.duplicit,
+    [`${predpona}s_odkazem_pdf`]: m.s_odkazem_pdf,
+    [`${predpona}men`]: Object.keys(m.castky_haleru).length,
+    [`${predpona}vzoru`]: m.vzoru,
+  }
+}
+
 /**
  * Měření STARÉ databáze — počítá ze starých jmen sloupců, nezávisle na
  * převodu. Protějšek v databázi: app.faktury_prevod_mereni (nad hlavní).
@@ -398,7 +419,9 @@ const neprazdny = (x: string | null | undefined) => x !== null && x !== undefine
 export function mereniZdroje(radky: readonly RadekStare[], pocetVzoru: number): Mereni {
   const castky: Record<string, number> = {}
   for (const r of radky) {
-    const mena = r.currency ?? ''
+    // Stejný klíč jako app.faktury_prevod_mereni — ruční porovnání čísel
+    // z úlohy a z měřicího dotazu by jinak „nesedělo" o fakturu bez měny.
+    const mena = r.currency ?? BEZ_MENY
     castky[mena] = (castky[mena] ?? 0) + (castkaNaHalere(r.amount) ?? 0)
   }
   const serazene = [...radky].sort((a, c) => (a.id.toLowerCase() < c.id.toLowerCase() ? -1 : a.id.toLowerCase() > c.id.toLowerCase() ? 1 : 0))
@@ -419,7 +442,7 @@ export function mereniZdroje(radky: readonly RadekStare[], pocetVzoru: number): 
 /** Totéž nad řádky HLAVNÍ databáze v JS — pro náhled před dokončením a pro testy. */
 export function mereniHlavni(radky: readonly RadekHlavni[], pocetVzoru: number): Mereni {
   const castky: Record<string, number> = {}
-  for (const r of radky) castky[r.mena] = (castky[r.mena] ?? 0) + r.castka_haleru
+  for (const r of radky) castky[r.mena ?? BEZ_MENY] = (castky[r.mena ?? BEZ_MENY] ?? 0) + r.castka_haleru
   const serazene = [...radky].sort((a, c) => (a.id < c.id ? -1 : a.id > c.id ? 1 : 0))
   return {
     pocet: radky.length,
@@ -677,4 +700,66 @@ export function planNavratu(
     if (!z.has(id) && !h.has(id)) plan.jenVeStare.push(id)
   }
   return plan
+}
+
+// ---------------------------------------------------------------------
+// Návrat zpět: kdy je kopie základ a kdy smí „zpet" psát do staré databáze
+// ---------------------------------------------------------------------
+//
+// Kopie staré databáze (faktury_prevod_zdroj) je stav z okamžiku
+// DOKONČENÍ jen tehdy, když převod doběhl (dokonceno_kdy). Po zrušení
+// uprostřed převodu je v kopii všechno, co se stihlo načíst, ale v hlavní
+// databázi jen část — plán návratu by pak chybějící faktury bral za
+// „smazané v appce" a „zpet" by je smazal ze staré databáze, která je po
+// zrušení jediná platná (kontrola 19. 10., nález 5).
+//
+// Po dokončeném návratu (zpet_hotovo_kdy) jsou rozdíly staré databáze
+// změny STARÉ appky — nový převod je převezme a „zpet" je nesmí přepsat
+// zmrazenou verzí z appky (nález 6).
+
+export type StavNavratu = { stav: string | null; dokoncenoKdy: string | null; zpetHotovoKdy: string | null }
+
+/** Je kopie základ pro návrat zpět (a zahájení se musí ptát, jestli je vše přenesené)? */
+export function zakladNavratuPlati(s: StavNavratu): boolean {
+  return s.stav === 'vraceno' && s.dokoncenoKdy !== null && s.zpetHotovoKdy === null
+}
+
+/** Proč „zpet" nesmí do staré databáze zapsat. null = smí. */
+export function procNeZpet(s: StavNavratu): string | null {
+  if (s.stav !== 'vraceno') return `Zpět se přenáší jen po vrácení (režim vratit; stav teď: ${s.stav ?? 'nezahájen'}).`
+  if (s.dokoncenoKdy === null) {
+    return 'Převod nebyl dokončen (byl zrušený) — v appce nic nevzniklo a stará databáze je jediná platná. Zpět se nic nepřenáší. Nový pokus: zahajit.'
+  }
+  if (s.zpetHotovoKdy !== null) {
+    return 'Návrat zpět už je hotový — stará appka od té doby mění starou databázi a zpet by její změny přepsal. Nový pokus: zahajit.'
+  }
+  return null
+}
+
+/** Víc smazání než tohle chce výslovné potvrzení (převod i návrat zpět). */
+export const MAX_SMAZAT_BEZ_POTVRZENI = 20
+
+export function smazaniPovoleno(pocet: number, smazatVic: boolean): boolean {
+  return pocet <= MAX_SMAZAT_BEZ_POTVRZENI || smazatVic
+}
+
+// ---------------------------------------------------------------------
+// Přílohy: přechodná, nebo trvalá chyba
+// ---------------------------------------------------------------------
+
+/**
+ * Přechodná chyba při kopírování přílohy — stará databáze na Free tarifu
+ * odpověděla 503/429, vypršel čas, vypadla síť nebo úložiště či databáze.
+ * Taková se NEZAPÍŠE jako trvalá: dokončení převodu ji nepustí a příští
+ * běh ji zkusí znovu (kontrola 19. 10., nález 7). Trvalé jsou 404, soubor
+ * nad 10 MB, nepodporovaný typ, odkaz mimo starou databázi.
+ */
+export function jeDocasnaChyba(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null) return false
+  const x = e as { docasna?: unknown; name?: unknown; message?: unknown }
+  if (x.docasna === true) return true
+  if (x.name === 'TimeoutError' || x.name === 'AbortError') return true
+  if (e instanceof TypeError) return true // fetch failed — síť
+  const zprava = typeof x.message === 'string' ? x.message : ''
+  return /^HTTP (408|425|429|5\d\d)$/.test(zprava) || /^úložiště:/.test(zprava)
 }

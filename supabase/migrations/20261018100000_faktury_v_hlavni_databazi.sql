@@ -75,7 +75,9 @@ create table public.faktury_prevod (
   vraceno_kdy   timestamptz,
   -- Návrat zpět je hotový (stará databáze má všechno z appky, úloha to
   -- ověřila novým plánem s nulou). Potom jsou rozdíly staré databáze
-  -- změny staré appky: nový převod je převezme, „zpet" už nic nepřepíše.
+  -- změny staré appky: nový převod je převezme (i smazání faktury, která
+  -- kdysi vznikla v appce), „zpet" už nic nepřepíše. Nové zahájení značku
+  -- NECHÁ (převod podle ní pozná, co smí smazat); vynuluje ji až další vrácení.
   zpet_hotovo_kdy timestamptz,
   -- Měření staré databáze v okamžiku zahájení (spočítala úloha)
   -- a obou databází v okamžiku dokončení (spočítala databáze sama).
@@ -1558,8 +1560,8 @@ begin
     set stav = 'probiha', zdroj = excluded.zdroj, mereni_zahajeni = excluded.mereni_zahajeni,
         zahajeno_kdy = now(), dokonceno_kdy = null, mereni_dokonceni = null, zmeneno_kdy = now(),
         -- Nepovedené přílohy z dřívějšího pokusu neplatí (odkaz mohl být
-        -- mezitím opravený); značka návratu taky ne.
-        prilohy = '{}'::jsonb, zpet_hotovo_kdy = null;
+        -- mezitím opravený).
+        prilohy = '{}'::jsonb;
 
   perform app.audit(p_tenant, 'faktury.prevod_zahajen', 'faktury_prevod', p_tenant::text, null,
                     jsonb_build_object('stav', v_stav),

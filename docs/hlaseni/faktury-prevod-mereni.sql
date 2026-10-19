@@ -18,9 +18,12 @@
 --      změnit (převod párování ani evidenci nekopíruje, jen doplní
 --      uuid faktury) — to je důkaz, že se nic nezapočítalo dvakrát.
 --
--- Úloha převodu vypisuje stejná čísla ze strany staré databáze (krok
--- nanecisto: stara_faktur, stara_castka_czk_haleru…). Porovnejte je
--- s „po.faktury".
+-- Úloha převodu vypisuje do logu jen POČTY ze strany staré databáze
+-- (krok nanecisto: stara_faktur, stara_archivovanych, stara_duplicit,
+-- stara_s_odkazem_pdf, stara_men, stara_vzoru) — součty peněz do
+-- veřejného logu nepatří. Součty po měnách spočítala úloha přímo ze staré
+-- databáze při zahájení a uložila je (níž „zdroj_pri_zahajeni"). Musí se
+-- rovnat „po.hlavni.castky_haleru" i „po.stara.castky_haleru".
 -- =====================================================================
 
 
@@ -57,6 +60,11 @@ select jsonb_build_object(
   -- Stejné počty a součty nad kopií staré databáze i nad hlavní —
   -- „stara" a „hlavni" se musí shodovat (počítá to databáze sama).
   'po', app.faktury_prevod_mereni((select id from firma)),
+
+  -- Nezávislé měření zdroje: součty po měnách, které úloha spočítala
+  -- PŘÍMO ze staré databáze v okamžiku zahájení (ne z kopie).
+  'zdroj_pri_zahajeni', (select pr.mereni_zahajeni -> 'castky_haleru' from public.faktury_prevod pr
+                          where pr.tenant_id = (select id from firma)),
 
   -- Pole po poli: kopie staré databáze proti převedeným fakturám.
   -- Po dokončení: chybi = navic = lisi = 0 (později, během zkušební doby,

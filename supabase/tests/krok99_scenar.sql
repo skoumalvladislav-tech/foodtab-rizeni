@@ -882,8 +882,9 @@ select pg_temp.check('starou cestou zapsané párování má i uuid (faktura v h
   (select faktura from public.platby_faktury where transakce_id = :'t1' and stav = 'potvrzeno' and zpusob = 'rucne' and castka_haleru = 1000)
   = 'a0000000-0000-4000-8000-000000000004');
 select app.faktury_prevod_zahajit(:'tenant', 'ctqtwahlzhyjerqulqyn.supabase.co', null) as stav_znovu \gset
-select pg_temp.check('z vráceného jde zahájit znovu → probiha (značka návratu od nuly)', :'stav_znovu' = 'probiha'
-  and (select zpet_hotovo_kdy from public.faktury_prevod where tenant_id = :'tenant') is null);
+select pg_temp.check('z vráceného jde zahájit znovu → probiha (značka hotového návratu zůstala — převod podle ní pozná změny staré appky)',
+  :'stav_znovu' = 'probiha'
+  and (select zpet_hotovo_kdy from public.faktury_prevod where tenant_id = :'tenant') is not null);
 select pg_temp.check('nové zahájení: uuid faktur v párování vynulované, text zůstal',
   not exists (select 1 from public.platby_faktury where tenant_id = :'tenant' and faktura is not null)
   and exists (select 1 from public.platby_faktury where tenant_id = :'tenant' and stav = 'potvrzeno'

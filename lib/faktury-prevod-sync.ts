@@ -9,9 +9,12 @@ import { adresaStareDatabaze, pristupKFakturamUlohy as pristupKeStareDatabazi } 
 import {
   SLOUPCE_HLAVNI,
   SLOUPCE_STARE,
+  MAX_SMAZAT_BEZ_POTVRZENI,
   MAX_VELIKOST_PRILOHY,
   cestaPrilohy,
+  cislaMereni,
   idEvidenceZOdkazu,
+  jeDocasnaChyba,
   jeVerejnySouborStare,
   mereniZdroje,
   naRadekHlavni,
@@ -19,9 +22,11 @@ import {
   naVzorHlavni,
   planNavratu,
   porovnat,
+  procNeZpet,
+  smazaniPovoleno,
   stabilniJson,
   typPrilohy,
-  type Mereni,
+  zakladNavratuPlati,
   type RadekHlavni,
   type RadekStare,
   type VzorStary,
@@ -67,7 +72,6 @@ export type VysledekPrevodu = {
 }
 
 /** Kolik řádků smí převod smazat najednou bez výslovného potvrzení. */
-export const MAX_SMAZAT_BEZ_POTVRZENI = 20
 const STRANKA = 1000
 const DAVKA = 200
 
@@ -83,11 +87,18 @@ const zastavit = (duvod: string): never => {
  */
 class ChybaDatabaze extends Error {
   readonly detail: string
+  readonly kod: string | null
+  /** U kopírování příloh se chyba databáze bere jako přechodná (zkusit znovu). */
+  readonly docasna = true
   constructor(co: string, error: { message: string; code?: string }) {
     super(`${co}: chyba databáze${error.code ? ` ${error.code}` : ''}`)
     this.detail = error.message
+    this.kod = error.code ?? null
   }
 }
+
+/** Tabulka v hlavní databázi chybí — kód je venku dřív než db push. */
+const TABULKA_CHYBI = new Set(['PGRST205', '42P01'])
 
 function hodit(error: { message: string; code?: string } | null, co: string): void {
   if (error) throw new ChybaDatabaze(co, error)
@@ -196,10 +207,18 @@ async function nacistKopii(hlavni: SupabaseClient, tenantId: string, tabulka: 'i
   return kopie
 }
 
-async function stavPrevodu(hlavni: SupabaseClient, tenantId: string): Promise<{ stav: string | null; prilohy: Record<string, unknown> }> {
-  const { data, error } = await hlavni.from('faktury_prevod').select('stav, prilohy').eq('tenant_id', tenantId).maybeSingle()
+async function stavPrevodu(hlavni: SupabaseClient, tenantId: string): Promise<{
+  stav: string | null; prilohy: Record<string, unknown>; dokoncenoKdy: string | null; zpetHotovoKdy: string | null
+}> {
+  const { data, error } = await hlavni.from('faktury_prevod').select('stav, prilohy, dokonceno_kdy, zpet_hotovo_kdy')
+    .eq('tenant_id', tenantId).maybeSingle()
   hodit(error, 'Stav převodu')
-  return { stav: (data?.stav as string | undefined) ?? null, prilohy: (data?.prilohy as Record<string, unknown> | undefined) ?? {} }
+  return {
+    stav: (data?.stav as string | undefined) ?? null,
+    prilohy: (data?.prilohy as Record<string, unknown> | undefined) ?? {},
+    dokoncenoKdy: (data?.dokonceno_kdy as string | null | undefined) ?? null,
+    zpetHotovoKdy: (data?.zpet_hotovo_kdy as string | null | undefined) ?? null,
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -258,28 +277,38 @@ async function visiciOdkazy(hlavni: SupabaseClient, tenantId: string, idStare: R
   }
 }
 
-const cislaMereni = (m: Mereni, predpona: string) => ({
-  [`${predpona}faktur`]: m.pocet,
-  [`${predpona}archivovanych`]: m.archivovanych,
-  [`${predpona}duplicit`]: m.duplicit,
-  [`${predpona}s_odkazem_pdf`]: m.s_odkazem_pdf,
-  [`${predpona}men`]: Object.keys(m.castky_haleru).length,
-  [`${predpona}vzoru`]: m.vzoru,
-})
-
 // ---------------------------------------------------------------------
 // Kroky
 // ---------------------------------------------------------------------
 
 async function nanecisto(k: Kontext): Promise<VysledekPrevodu> {
-  const { stav } = await stavPrevodu(k.hlavni, k.tenantId)
+  // Stará databáze PRVNÍ: krok musí jít i před db push (hlavní databáze
+  // ještě nemá tabulky Faktur) — anomálie jsou tak vidět dřív, než se
+  // cokoli nasadí, a plánované spouštění drží starou databázi vzhůru
+  // (Free projekt po 7 dnech bez provozu usne; kontrola 19. 10., nález 10).
   const stare = await nacistStare(k.stara)
   const { prevedene, anomalie, normalizaci } = prevestVse(stare.faktury, k.tenantId)
+  const m = mereniZdroje(stare.faktury as unknown as RadekStare[], stare.vzory.length)
+  const verejne = stare.faktury.filter((r) => jeVerejnySouborStare(r.pdf_url as string | null, k.adresaStare)).length
+  let stav: string | null
+  try {
+    ({ stav } = await stavPrevodu(k.hlavni, k.tenantId))
+  } catch (e) {
+    if (!(e instanceof ChybaDatabaze && TABULKA_CHYBI.has(e.kod ?? ''))) throw e
+    return {
+      rezim: k.rezim, ok: anomalie.length === 0, stav: null,
+      duvod: anomalie.length > 0
+        ? `${anomalie.length} faktur nejde převést beze ztráty — převod je nezahájí (podrobnosti v odpovědi). Hlavní databáze ještě nemá tabulky Faktur.`
+        : 'Hlavní databáze ještě nemá tabulky Faktur (db push neproběhl) — čísla jen ze staré databáze, anomálie 0.',
+      cisla: { ...cislaMereni(m, 'stara_'), anomalii: anomalie.length, normalizaci, stare_verejne_pdf: verejne },
+      pokracovat: false,
+      podrobnosti: { mereni: m, anomalie: anomalie.slice(0, 50) },
+    }
+  }
   const hlavni = await nacistHlavni(k.hlavni, k.tenantId)
   const rozdil = porovnat(prevedene, hlavni)
   const idStare = new Set(stare.faktury.map((r) => String(r.id).trim().toLowerCase()))
   const odkazy = await visiciOdkazy(k.hlavni, k.tenantId, idStare)
-  const m = mereniZdroje(stare.faktury as unknown as RadekStare[], stare.vzory.length)
 
   // Po dokončení: změnila se stará databáze od převodu? (Někdo do ní pořád
   // zapisuje — původní appka, n8n, náhled jiné větve.) Tohle se nesmí ztratit.
@@ -293,7 +322,6 @@ async function nanecisto(k: Kontext): Promise<VysledekPrevodu> {
     }).length + [...kopie.keys()].filter((id) => !idStare.has(id.toLowerCase())).length
   }
 
-  const verejne = stare.faktury.filter((r) => jeVerejnySouborStare(r.pdf_url as string | null, k.adresaStare)).length
   return {
     rezim: k.rezim, ok: anomalie.length === 0, stav,
     duvod: anomalie.length > 0
@@ -326,7 +354,7 @@ async function nanecisto(k: Kontext): Promise<VysledekPrevodu> {
 }
 
 async function zahajit(k: Kontext): Promise<VysledekPrevodu> {
-  const { stav } = await stavPrevodu(k.hlavni, k.tenantId)
+  const s = await stavPrevodu(k.hlavni, k.tenantId)
   const stare = await nacistStare(k.stara)
   if (stare.faktury.length === 0) {
     zastavit('Stará databáze vrátila 0 faktur — zkontrolujte nastavení FAKTURY_SUPABASE_URL a klíč. Převod se nezahájil.')
@@ -335,12 +363,16 @@ async function zahajit(k: Kontext): Promise<VysledekPrevodu> {
   if (anomalie.length > 0) {
     zastavit(`${anomalie.length} faktur nejde převést beze ztráty — převod se nezahájil (Faktury zůstávají ve staré databázi). Podrobnosti v režimu nanecisto.`)
   }
-  if (stav === 'vraceno') {
+  // Jen po vrácení DOKONČENÉHO převodu, dokud návrat není hotový: po
+  // zrušení je stará databáze jediná pravda (kopie není stav z dokončení)
+  // a po hotovém návratu jsou rozdíly změny staré appky — obojí převod
+  // převezme (lib/faktury-prevod.ts, zakladNavratuPlati).
+  if (zakladNavratuPlati(s)) {
     const zaklad = prevestVse([...(await nacistKopii(k.hlavni, k.tenantId, 'invoices')).values()], k.tenantId)
     const plan = planNavratu(zaklad.prevedene, await nacistHlavni(k.hlavni, k.tenantId), prevedene)
     const neprenesene = plan.vlozit.length + plan.upravit.length + plan.smazat.length + plan.konflikty.length
     if (neprenesene > 0) {
-      zastavit(`Po vrácení zbývá ${neprenesene} změn z appky, které ve staré databázi nejsou (vložit ${plan.vlozit.length}, upravit ${plan.upravit.length}, smazat ${plan.smazat.length}, konflikty ${plan.konflikty.length}). Nový převod by je přepsal — nejdřív zpet, konflikty rozhodne člověk.`)
+      zastavit(`Po vrácení zbývá ${neprenesene} změn z appky, které ve staré databázi nejsou (vložit ${plan.vlozit.length}, upravit ${plan.upravit.length}, smazat ${plan.smazat.length}, konflikty ${plan.konflikty.length}). Nový převod by je přepsal — nejdřív zpet (i při nulách označí návrat jako hotový), konflikty rozhodne člověk.`)
     }
   }
   const m = mereniZdroje(stare.faktury as unknown as RadekStare[], stare.vzory.length)
@@ -352,7 +384,7 @@ async function zahajit(k: Kontext): Promise<VysledekPrevodu> {
 }
 
 async function prevest(k: Kontext): Promise<VysledekPrevodu> {
-  const { stav } = await stavPrevodu(k.hlavni, k.tenantId)
+  const { stav, prilohy: zaznamPriloh, zpetHotovoKdy } = await stavPrevodu(k.hlavni, k.tenantId)
   if (stav !== 'probiha') zastavit(`Převádět jde jen po zahájení (stav teď: ${stav ?? 'nezahájen'}).`)
 
   const stare = await nacistStare(k.stara)
@@ -361,11 +393,14 @@ async function prevest(k: Kontext): Promise<VysledekPrevodu> {
   const hlavni = await nacistHlavni(k.hlavni, k.tenantId)
   const rozdil = porovnat(prevedene, hlavni)
   const podleIdHlavni = new Map(hlavni.map((r) => [r.id, r]))
+  // Faktura vzniklá v appce, která ve staré databázi není: smazat ji smí
+  // převod jen po hotovém návratu (zpet ji do staré databáze přenesl a stará
+  // appka ji pak smazala). Jinak by převod smazal nepřenesenou práci z appky.
   const vznikleVAppce = rozdil.navic.filter((id) => podleIdHlavni.get(id)?.prevedeno_kdy === null)
-  if (vznikleVAppce.length > 0) {
+  if (vznikleVAppce.length > 0 && zpetHotovoKdy === null) {
     zastavit(`${vznikleVAppce.length} faktur vzniklo v appce a ve staré databázi nejsou — převod by je smazal. Nic se nezapsalo (po vrácení nejdřív zpet).`)
   }
-  if (rozdil.navic.length > MAX_SMAZAT_BEZ_POTVRZENI && !k.smazatVic) {
+  if (!smazaniPovoleno(rozdil.navic.length, k.smazatVic)) {
     zastavit(`Převod by v hlavní databázi smazal ${rozdil.navic.length} faktur, které ve staré nejsou. To je víc než ${MAX_SMAZAT_BEZ_POTVRZENI} — nic se nezapsalo. Když je to v pořádku, spusťte převod s volbou „smazat víc".`)
   }
 
@@ -419,7 +454,18 @@ async function prevest(k: Kontext): Promise<VysledekPrevodu> {
     if (casDosel()) return pokracovatPozdeji(k, cisla)
     const { id: _id, tenant_id: _t, ...pole } = podleId.get(id) as RadekHlavni
     const puvodni = podleIdHlavni.get(id)
-    const prilohaNeplati = puvodni?.priloha_cesta && !puvodni.priloha_cesta.includes('/rucne/') && puvodni.odkaz_pdf !== pole.odkaz_pdf
+    const odkazZmenen = puvodni !== undefined && puvodni.odkaz_pdf !== pole.odkaz_pdf
+    const prilohaNeplati = odkazZmenen && !!puvodni?.priloha_cesta && !puvodni.priloha_cesta.includes('/rucne/')
+    // Změněný odkaz = nová příloha: dřívější nepovedený pokus o kopii neplatí.
+    const chybyPriloh = (zaznamPriloh.chyby ?? {}) as Record<string, unknown>
+    const docasnePriloh = (zaznamPriloh.docasne ?? {}) as Record<string, unknown>
+    if (odkazZmenen && (id in chybyPriloh || id in docasnePriloh)) {
+      delete chybyPriloh[id]
+      delete docasnePriloh[id]
+      const { error: chybaPriloh } = await k.hlavni.from('faktury_prevod')
+        .update({ prilohy: { chyby: chybyPriloh, docasne: docasnePriloh } }).eq('tenant_id', k.tenantId)
+      hodit(chybaPriloh, 'Záznam nepovedených příloh')
+    }
     const { error } = await k.hlavni.from('faktury').update({
       ...pole, prevedeno_kdy: new Date().toISOString(), ...(prilohaNeplati ? { priloha_cesta: null } : {}),
     }).eq('tenant_id', k.tenantId).eq('id', id)
@@ -459,9 +505,22 @@ function pokracovatPozdeji(k: Kontext, cisla: Record<string, number>): VysledekP
   return { rezim: k.rezim, ok: true, stav: 'probiha', duvod: 'Došel čas běhu — pokračuje se dalším voláním (nic se nezdvojí).', cisla, pokracovat: true }
 }
 
+// Funkce má 60 s (maxDuration v app/api/prevod-faktur), rozpočet kroku
+// 45 s. Jedno stažení smí trvat až LIMIT_STAZENI_MS; další příloha se proto
+// začne, jen když do konce rozpočtu zbývá aspoň REZERVA_POLOZKY_MS — i ta
+// nejpomalejší skončí do 45 − 15 + 20 = 50 s a zbude čas na zápis.
+// Hlídá scripts/faktury-prevod.test.mjs (rozpočet − rezerva + limit + 5 s ≤ 60 s).
+const LIMIT_STAZENI_MS = 20_000
+const REZERVA_POLOZKY_MS = 15_000
+// Přechodnou chybu zkusit znovu nejdřív po 10 minutách — jinak by kola
+// workflow zkoušela dokola tytéž soubory a na další by nedošlo.
+const ZNOVU_DOCASNE_PO_MS = 10 * 60_000
+
+type DocasnaChyba = { duvod: string; kdy: string }
+
 /** Stáhne soubor ze starého veřejného úložiště — jen odtamtud, s limitem velikosti. */
 async function stahnoutStarySoubor(odkaz: string): Promise<Uint8Array> {
-  const odpoved = await fetch(odkaz, { redirect: 'error', signal: AbortSignal.timeout(20_000) })
+  const odpoved = await fetch(odkaz, { redirect: 'error', signal: AbortSignal.timeout(LIMIT_STAZENI_MS) })
   if (!odpoved.ok || !odpoved.body) throw new Error(`HTTP ${odpoved.status}`)
   const delka = Number(odpoved.headers.get('content-length') ?? '0')
   if (delka > MAX_VELIKOST_PRILOHY) throw new Error('nad 10 MB')
@@ -490,7 +549,16 @@ async function stahnoutStarySoubor(odkaz: string): Promise<Uint8Array> {
 async function prilohy(k: Kontext): Promise<VysledekPrevodu> {
   const { stav, prilohy: zaznam } = await stavPrevodu(k.hlavni, k.tenantId)
   if (stav !== 'probiha' && stav !== 'dokonceno') zastavit(`Přílohy se kopírují jen během převodu nebo po něm (stav teď: ${stav ?? 'nezahájen'}).`)
+  // Trvalé chyby (404, nad 10 MB, typ) se počítají za „vykázané" a dokončení
+  // je pustí; dočasné (503, vypršený čas) ne — ty se zkusí znovu.
   const chyby: Record<string, string> = { ...((zaznam.chyby as Record<string, string> | undefined) ?? {}) }
+  const docasne: Record<string, DocasnaChyba> = { ...((zaznam.docasne as Record<string, DocasnaChyba> | undefined) ?? {}) }
+  // Zápis hned po každé nepovedené příloze: když funkci zastaví limit
+  // platformy, záznam se neztratí a příští běh tytéž soubory nezkouší hned.
+  const ulozit = async () => {
+    const { error } = await k.hlavni.from('faktury_prevod').update({ prilohy: { chyby, docasne } }).eq('tenant_id', k.tenantId)
+    hodit(error, 'Záznam nepovedených příloh')
+  }
 
   let zkopirovano = 0
   let zEvidence = 0
@@ -510,7 +578,10 @@ async function prilohy(k: Kontext): Promise<VysledekPrevodu> {
     const strana = (data ?? []) as { id: string; odkaz_pdf: string }[]
     for (const f of strana) {
       if (!k.znovuChyby && f.id in chyby) continue
-      if (Date.now() >= k.konecMs) {
+      const d = docasne[f.id]
+      if (d && !k.znovuChyby && Date.now() - Date.parse(d.kdy) < ZNOVU_DOCASNE_PO_MS) continue
+      // Další přílohu začít, jen když stihne doběhnout i ta nejpomalejší.
+      if (Date.now() + REZERVA_POLOZKY_MS >= k.konecMs) {
         dosel = true
         break stranky
       }
@@ -550,33 +621,48 @@ async function prilohy(k: Kontext): Promise<VysledekPrevodu> {
         const { error: chybaZapisu } = await k.hlavni.from('faktury').update({ priloha_cesta: cesta })
           .eq('tenant_id', k.tenantId).eq('id', f.id).is('priloha_cesta', null)
         hodit(chybaZapisu, 'Zápis cesty přílohy')
-        delete chyby[f.id]
+        if (f.id in chyby || f.id in docasne) {
+          delete chyby[f.id]
+          delete docasne[f.id]
+          await ulozit()
+        }
         zkopirovano++
       } catch (e) {
-        chyby[f.id] = (e instanceof ChybaDatabaze ? e.message : e instanceof Error ? e.message : String(e)).slice(0, 200)
+        const duvod = (e instanceof Error ? e.message : String(e)).slice(0, 200)
+        if (jeDocasnaChyba(e)) {
+          docasne[f.id] = { duvod, kdy: new Date().toISOString() }
+          delete chyby[f.id]
+        } else {
+          chyby[f.id] = duvod
+          delete docasne[f.id]
+        }
         nepovedlo++
+        await ulozit()
       }
     }
     if (strana.length < STRANKA) break
     posledni = strana[strana.length - 1].id
   }
 
-  const { error: chybaZaznamu } = await k.hlavni.from('faktury_prevod').update({ prilohy: { chyby } }).eq('tenant_id', k.tenantId)
-  hodit(chybaZaznamu, 'Záznam nepovedených příloh')
-
-  // Kolik zbývá, počítá databáze (stejné pravidlo jako dokončení převodu).
+  // Kolik zbývá, počítá databáze (stejné pravidlo jako dokončení převodu:
+  // dočasné chyby se do „vykázaných" nepočítají).
   const { data: mereni, error: chybaMereni } = await k.hlavni.rpc('faktury_prevod_mereni', { p_tenant: k.tenantId })
   hodit(chybaMereni, 'Měření příloh')
   const zbyva = Number((mereni as { prilohy?: { stare_bez_kopie_nevykazane?: number } } | null)?.prilohy?.stare_bez_kopie_nevykazane ?? 0)
-  const nepovedenoCelkem = Object.keys(chyby).length
+  const trvale = Object.keys(chyby).length
+  const docasnych = Object.keys(docasne).length
   return {
     rezim: k.rezim, ok: true, stav,
-    duvod: dosel ? 'Došel čas běhu — pokračuje se dalším voláním.' : nepovedenoCelkem > 0
-      ? `${nepovedenoCelkem} příloh se nepodařilo zkopírovat (důvody v podrobnostech). Zkusit znovu: volba „znovu i chyby".`
-      : null,
-    cisla: { zkopirovano, z_evidence: zEvidence, nepovedlo_v_behu: nepovedlo, nepovedlo_celkem: nepovedenoCelkem, zbyva },
+    duvod: dosel
+      ? 'Došel čas běhu — pokračuje se dalším voláním.'
+      : docasnych > 0
+        ? `${docasnych} příloh se teď nepodařilo stáhnout (stará databáze neodpověděla nebo vypršel čas) — spusťte prilohy znovu za 10 minut; dokončení je do té doby nepustí.${trvale > 0 ? ` Trvale nepovedených: ${trvale} (důvody v podrobnostech).` : ''}`
+        : trvale > 0
+          ? `${trvale} příloh se nepodařilo zkopírovat (důvody v podrobnostech). Zkusit znovu: volba „znovu i chyby".`
+          : null,
+    cisla: { zkopirovano, z_evidence: zEvidence, nepovedlo_v_behu: nepovedlo, nepovedlo_trvale: trvale, nepovedlo_docasne: docasnych, zbyva },
     pokracovat: dosel && zkopirovano + nepovedlo > 0,
-    podrobnosti: { chyby },
+    podrobnosti: { chyby, docasne },
   }
 }
 
@@ -611,6 +697,9 @@ async function dokoncit(k: Kontext): Promise<VysledekPrevodu> {
       lisi_se: Number(r.porovnani?.lisi ?? 0), chybi: Number(r.porovnani?.chybi ?? 0), navic: Number(r.porovnani?.navic ?? 0),
       doplneno_parovani: r.doplneno_platby ?? 0, doplneno_evidence: r.doplneno_prijem ?? 0,
       parovani_bez_faktury_platna: Number(m.parovani?.bez_faktury_platnych ?? 0),
+      // Trvale nepovedené přílohy dokončení pustí (vykázané) — ať je jejich
+      // počet vidět i v logu dokončení, ne jen u kroku prilohy.
+      nepodarene_prilohy: Number(m.prilohy?.nepodarene ?? 0),
     },
     pokracovat: false,
     podrobnosti: r,
@@ -620,26 +709,34 @@ async function dokoncit(k: Kontext): Promise<VysledekPrevodu> {
 async function zrusit(k: Kontext): Promise<VysledekPrevodu> {
   const { data, error } = await k.hlavni.rpc('faktury_prevod_zrusit', { p_tenant: k.tenantId })
   hodit(error, 'Zrušení převodu')
-  return { rezim: k.rezim, ok: true, stav: String(data), duvod: 'Převod zrušený, stará databáze zůstává platná. Další krok: vrátit předchozí verzi appky (revert PR). Nový pokus: zahajit.', cisla: {}, pokracovat: false }
+  return { rezim: k.rezim, ok: true, stav: String(data), duvod: 'Převod zrušený, stará databáze zůstává platná. Další krok: vrátit kód appky BEZ souboru migrace (návod, oddíl Návrat zpět). Nový pokus: zahajit.', cisla: {}, pokracovat: false }
 }
 
 async function vratit(k: Kontext): Promise<VysledekPrevodu> {
   const { data, error } = await k.hlavni.rpc('faktury_prevod_vratit', { p_tenant: k.tenantId })
   hodit(error, 'Vrácení převodu')
-  return { rezim: k.rezim, ok: true, stav: String(data), duvod: 'Faktury v appce jsou zavřené. Další krok: zpet_nanecisto, zpet, pak vrátit předchozí verzi appky.', cisla: {}, pokracovat: false }
+  return { rezim: k.rezim, ok: true, stav: String(data), duvod: 'Faktury v appce jsou zavřené. Další krok: zpet_nanecisto, zpet (i při nulách — označí návrat jako hotový), pak vrátit kód appky BEZ souboru migrace.', cisla: {}, pokracovat: false }
 }
 
 async function zpet(k: Kontext, zapsat: boolean): Promise<VysledekPrevodu> {
-  const { stav } = await stavPrevodu(k.hlavni, k.tenantId)
-  if (stav !== 'vraceno') zastavit(`Zpět se přenáší jen po vrácení (režim vratit; stav teď: ${stav ?? 'nezahájen'}).`)
+  const s = await stavPrevodu(k.hlavni, k.tenantId)
+  if (s.stav !== 'vraceno') zastavit(`Zpět se přenáší jen po vrácení (režim vratit; stav teď: ${s.stav ?? 'nezahájen'}).`)
+  // Po zrušení (převod nedoběhl) nebo po hotovém návratu se do staré
+  // databáze nepíše NIC — ani nanečisto se neukazuje plán, který by
+  // k zápisu sváděl (lib/faktury-prevod.ts, procNeZpet).
+  const proc = procNeZpet(s)
+  if (proc) return { rezim: k.rezim, ok: true, stav: s.stav, duvod: proc, cisla: {}, pokracovat: false }
 
   const kopie = await nacistKopii(k.hlavni, k.tenantId, 'invoices')
   const zaklad = prevestVse([...kopie.values()], k.tenantId)
-  const stare = await nacistStare(k.stara)
-  const stara = prevestVse(stare.faktury, k.tenantId)
-  if (zaklad.anomalie.length > 0 || stara.anomalie.length > 0) zastavit('Kopii nebo starou databázi nejde porovnat beze ztráty — nic se nezapsalo.')
-  const hlavni = await nacistHlavni(k.hlavni, k.tenantId)
-  const plan = planNavratu(zaklad.prevedene, hlavni, stara.prevedene)
+  const naplanovat = async () => {
+    const stare = await nacistStare(k.stara)
+    const stara = prevestVse(stare.faktury, k.tenantId)
+    if (zaklad.anomalie.length > 0 || stara.anomalie.length > 0) zastavit('Kopii nebo starou databázi nejde porovnat beze ztráty — nic se nezapsalo.')
+    const hlavni = await nacistHlavni(k.hlavni, k.tenantId)
+    return { hlavni, plan: planNavratu(zaklad.prevedene, hlavni, stara.prevedene) }
+  }
+  const { hlavni, plan } = await naplanovat()
   // Co návrat zpět NEPŘENESE (stará databáze na to nemá místo) — vykázat.
   const { count: vzoryJenVAppce, error: chybaVzoru } = await k.hlavni.from('faktury_vzory_odmitnuti')
     .select('id', { count: 'exact', head: true }).eq('tenant_id', k.tenantId).is('puvodni_id', null)
@@ -651,42 +748,67 @@ async function zpet(k: Kontext, zapsat: boolean): Promise<VysledekPrevodu> {
     vzory_odmitnuti_jen_v_appce: vzoryJenVAppce ?? 0,
     vlozeno: 0, upraveno: 0, smazano: 0,
   }
+  const podrobnosti = { konflikty: plan.konflikty.slice(0, 100), zmenenaJenVeStare: plan.zmenenaJenVeStare.slice(0, 100), jenVeStare: plan.jenVeStare.slice(0, 100) }
 
-  if (zapsat) {
-    for (const r of plan.vlozit) {
-      if (Date.now() >= k.konecMs) return { rezim: k.rezim, ok: true, stav, duvod: 'Došel čas běhu — pokračuje se dalším voláním.', cisla, pokracovat: true }
-      const radek: Record<string, unknown> = { ...naRadekStare(r) }
-      const { error } = await k.stara.from('invoices').insert(radek)
-      hodit(error, 'Stará databáze (vložení)')
-      // Spoušť staré databáze mohla stav přepsat na „Duplicitní…" — vrátit.
-      const { id: _id, ...pole } = radek
-      const { error: chybaOpravy } = await k.stara.from('invoices').update(pole).eq('id', r.id)
-      hodit(chybaOpravy, 'Stará databáze (srovnání po vložení)')
-      cisla.vlozeno++
-    }
-    for (const r of plan.upravit) {
-      if (Date.now() >= k.konecMs) return { rezim: k.rezim, ok: true, stav, duvod: 'Došel čas běhu — pokračuje se dalším voláním.', cisla, pokracovat: true }
-      const { id: _id, ...pole } = naRadekStare(r)
-      const { error } = await k.stara.from('invoices').update(pole).eq('id', r.id)
-      hodit(error, 'Stará databáze (oprava)')
-      cisla.upraveno++
-    }
-    for (const id of plan.smazat) {
-      if (Date.now() >= k.konecMs) return { rezim: k.rezim, ok: true, stav, duvod: 'Došel čas běhu — pokračuje se dalším voláním.', cisla, pokracovat: true }
-      const { error } = await k.stara.from('invoices').delete().eq('id', id)
-      hodit(error, 'Stará databáze (smazání)')
-      cisla.smazano++
+  if (!zapsat) {
+    return {
+      rezim: k.rezim, ok: plan.konflikty.length === 0, stav: s.stav,
+      duvod: plan.konflikty.length > 0
+        ? `${plan.konflikty.length} faktur se změnilo v appce i ve staré databázi — ty se nepřenesou, rozhodne člověk (podrobnosti v odpovědi).`
+        : 'Nanečisto. Krok zpet přenese čísla vlozit/upravit/smazat a návrat označí jako hotový — pusťte ho i při samých nulách.',
+      cisla, pokracovat: false, podrobnosti,
     }
   }
 
+  // Druhá linie proti mazání ve staré databázi (jediné platné po návratu).
+  if (!smazaniPovoleno(plan.smazat.length, k.smazatVic)) {
+    zastavit(`Návrat by ve staré databázi smazal ${plan.smazat.length} faktur — víc než ${MAX_SMAZAT_BEZ_POTVRZENI}. Nic se nezapsalo. Když je to v pořádku (faktury smazané v appce), spusťte zpet s volbou „smazat víc".`)
+  }
+  const dosel = () => Date.now() >= k.konecMs
+  const pokracovat = (): VysledekPrevodu => ({ rezim: k.rezim, ok: true, stav: s.stav, duvod: 'Došel čas běhu — pokračuje se dalším voláním.', cisla, pokracovat: true })
+  for (const r of plan.vlozit) {
+    if (dosel()) return pokracovat()
+    const radek: Record<string, unknown> = { ...naRadekStare(r) }
+    const { error } = await k.stara.from('invoices').insert(radek)
+    hodit(error, 'Stará databáze (vložení)')
+    // Spoušť staré databáze mohla stav přepsat na „Duplicitní…" — vrátit.
+    const { id: _id, ...pole } = radek
+    const { error: chybaOpravy } = await k.stara.from('invoices').update(pole).eq('id', r.id)
+    hodit(chybaOpravy, 'Stará databáze (srovnání po vložení)')
+    cisla.vlozeno++
+  }
+  for (const r of plan.upravit) {
+    if (dosel()) return pokracovat()
+    const { id: _id, ...pole } = naRadekStare(r)
+    const { error } = await k.stara.from('invoices').update(pole).eq('id', r.id)
+    hodit(error, 'Stará databáze (oprava)')
+    cisla.upraveno++
+  }
+  for (const id of plan.smazat) {
+    if (dosel()) return pokracovat()
+    const { error } = await k.stara.from('invoices').delete().eq('id', id)
+    hodit(error, 'Stará databáze (smazání)')
+    cisla.smazano++
+  }
+
+  // Ověřit novým plánem a teprve s nulou návrat označit jako hotový — od
+  // té chvíle jsou rozdíly staré databáze změny staré appky.
+  const po = (await naplanovat()).plan
+  const zbyva = po.vlozit.length + po.upravit.length + po.smazat.length + po.konflikty.length
+  if (zbyva === 0) {
+    const { error } = await k.hlavni.rpc('faktury_prevod_zpet_hotovo', { p_tenant: k.tenantId })
+    hodit(error, 'Označení návratu')
+  }
   return {
-    rezim: k.rezim, ok: plan.konflikty.length === 0, stav,
-    duvod: plan.konflikty.length > 0
-      ? `${plan.konflikty.length} faktur se změnilo v appce i ve staré databázi — ty se nepřenesly, rozhodne člověk (podrobnosti v odpovědi).`
-      : zapsat ? 'Přeneseno. Spusťte zpet_nanecisto — má hlásit 0 k přenesení — a pak vraťte předchozí verzi appky.' : null,
-    cisla,
+    rezim: k.rezim, ok: zbyva === 0, stav: s.stav,
+    duvod: zbyva === 0
+      ? 'Přeneseno a ověřeno — návrat zpět je hotový. Další krok: vrátit kód appky BEZ souboru migrace (návod, oddíl Návrat zpět).'
+      : po.konflikty.length > 0
+        ? `Přeneseno, ale ${po.konflikty.length} faktur se změnilo v appce i ve staré databázi — rozhodne člověk (podrobnosti v odpovědi). Návrat není hotový.`
+        : `Přeneseno, ale nový plán ještě ukazuje ${zbyva} změn — spusťte zpet znovu.`,
+    cisla: { ...cisla, zbyva_po_prenosu: zbyva },
     pokracovat: false,
-    podrobnosti: { konflikty: plan.konflikty.slice(0, 100), zmenenaJenVeStare: plan.zmenenaJenVeStare.slice(0, 100), jenVeStare: plan.jenVeStare.slice(0, 100) },
+    podrobnosti: { ...podrobnosti, konflikty: po.konflikty.slice(0, 100) },
   }
 }
 
