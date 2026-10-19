@@ -115,7 +115,11 @@ PŘED Fakturami (#147, `20261018100000`); hlídač plánovače (#145) je
 přerazítkovaný na `20261019120000` a jde až po nich. `db push` odmítne
 migraci starší než poslední nasazenou (stalo se u #86/#88, hlášení 29. 9.)
 — PR s pozdějším sloučením se proto před sloučením přerazítkuje.
-Hlídá to workflow „Migrace jen přibývají" (`.github/workflows/migrace-poradi.yml`).
+Hlídá to workflow „Migrace jen přibývají" (`.github/workflows/migrace-poradi.yml`),
+které přichází samostatnou PR **#148 — ta se slučuje úplně první**
+(pořadí #148 → #146 → #147 → #145). Kdyby přišlo jen s #147, revert #147 by
+ho smazal a právě smazanou migraci by nehlídalo (GitHub bere workflow ze
+stromu kontrolovaného commitu).
 
 0. Sloučit PR do `main` (Vercel nasadí). Faktury: „připravují se".
    Od teď pouští GitHub krok `nanecisto` sám každé 2 dny — stará databáze
@@ -147,7 +151,7 @@ Odstávka Faktur: od kroku 0 do kroku 6, odhadem 30–60 minut.
 
 | Kdy | Jak |
 |---|---|
-| Před `db push` (anomálie v kroku 1) | Revert PR v `main` — migrace ještě nikde není, smazat soubor smí. |
+| Před `db push` (anomálie v kroku 1) | Revert PR v `main` — migrace ještě nikde není, smazat soubor smí. Workflow „Migrace jen přibývají" tu zčervená (smazaná migrace) — to je **očekávané**, revert sloučit i tak. |
 | Po `db push`, před `zahajit` | **Vrátit kód BEZ souboru migrace** (postup níž). Faktury se vrátí na starou databázi, ta je netknutá; nové tabulky zůstanou, nikomu nevadí. |
 | Po `zahajit`, před `dokoncit` | 1) `zrusit` (bez něj by předchozí verze appky nemohla párovat — v `probiha` se párování nemění), 2) vrátit kód bez souboru migrace. Stará databáze je jediná platná: `zpet` po zrušení do ní nic nezapíše (kopie není stav z dokončení). Nový pokus: `zahajit`. |
 | Po `dokoncit`, před úklidem | 1) `vratit`, 2) `zpet_nanecisto`, 3) `zpet` — i při samých nulách; po přenosu ověří nový plán a návrat označí jako hotový (konflikty rozhodne člověk), 4) vrátit kód bez souboru migrace. Párování mají vyplněné i staré textové `faktura_id`, předchozí verze appky je přečte a stará cesta párování je ve stavu `vraceno` otevřená. Další pokus o převod (`zahajit`) pak převezme i změny, které mezitím udělala stará appka. |
@@ -162,13 +166,16 @@ spustila migraci znovu (`already exists`). Proto:
 
 ```
 git revert --no-commit -m 1 <sloučení #147>
-git checkout HEAD -- supabase/migrations/20261018100000_faktury_v_hlavni_databazi.sql supabase/tests/krok99_scenar.sql supabase/tests/run.sh .github/workflows/databaze.yml
+git checkout HEAD -- supabase/migrations/20261018100000_faktury_v_hlavni_databazi.sql supabase/tests/krok99_scenar.sql supabase/tests/run.sh .github/workflows/databaze.yml .github/workflows/migrace-poradi.yml scripts/migrace-poradi.mjs scripts/otazky-cisla.test.mjs
 git commit
 ```
 
-(Mezitím sloučené #145/#146 mohou v `aplikace.yml` a `otazky.md` chtít
-ruční dořešení.) `migration repair` nedělat. Smazaný soubor migrace
-zastaví i workflow „Migrace jen přibývají".
+(Hlídač a test otázek jsou v seznamu pro případ, že #148 nebyla sloučená
+dřív — pak by je revert #147 smazal. Mezitím sloučené #145/#146 mohou
+v `aplikace.yml` a `otazky.md` chtít ruční dořešení; řádek
+`otazky-cisla` v `aplikace.yml` musí zůstat.) `migration repair` nedělat.
+Když je #148 v main, obyčejný revert (i tlačítko Revert na GitHubu)
+workflow „Migrace jen přibývají" zastaví — smazaný soubor migrace.
 
 Vercel „Instant Rollback" jen v nouzi: po něm Vercel přestane sám
 nasazovat `main` (otázka 59, bod 6).

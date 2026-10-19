@@ -9,6 +9,11 @@
 > každý nález ověřený dalším agentem) našla 19 platných nálezů — opravené
 > jsou všechny, viz oddíl „Kontrola PR #147 (19. 10.)". Otázky Faktur jsou
 > nově **59–65** (58 patří Jiným platbám).
+>
+> **Doplněno 19. 10. večer:** nezávislé ověření oprav — 17 z 19 opraveno,
+> 2 částečně a 1 nová chyba, kterou zavedla oprava. Všechno dodělané, viz
+> oddíl „Ověření oprav (19. 10. večer)". Hlídač migrací je teď samostatná
+> malá PR **#148**, která se slučuje úplně první.
 
 ## Nejdřív to podstatné
 
@@ -31,8 +36,9 @@
 - **Návrat zpět je připravený** pro každou fázi (oddíl „Připravené").
   Stará databáze zůstává netknutá jako záloha až do úklidu po zkušební
   době. Do staré databáze se při návratu píše JEN po dokončeném převodu.
-- **Pořadí sloučení:** Jiné platby (#146) → Faktury (#147) → hlídač
-  plánovače (#145). Jinak `db push` starší migraci odmítne.
+- **Pořadí sloučení:** hlídač migrací (#148) → Jiné platby (#146) →
+  Faktury (#147) → hlídač plánovače (#145). Jinak `db push` starší
+  migraci odmítne.
 - **Rozhodnutí pro vás jsou v `otazky.md`, otázky 59–65.** Všude jsem
   zvolil nejopatrnější variantu a appka podle ní funguje, dokud
   nerozhodnete jinak.
@@ -49,7 +55,7 @@
 | Ručně nahraná fotka faktury jde do soukromého úložiště (dřív veřejné) | `faktury/akce.ts` |
 | Export pro účetní píše „číslo faktury (dodavatel)" místo id | `lib/ucetni-export.ts` |
 | Úloha převodu (9 kroků: nanečisto, zahájit, převést, přílohy, dokončit, zrušit, vrátit, zpět nanečisto, zpět); nanečisto běží samo každé 2 dny | `lib/faktury-prevod*.ts`, `app/api/prevod-faktur`, workflow |
-| Kontrola „Migrace jen přibývají" na každém PR a po sloučení do main | `.github/workflows/migrace-poradi.yml` |
+| Kontrola „Migrace jen přibývají" na každém PR a po sloučení do main — samostatná PR **#148**, slučuje se první | `.github/workflows/migrace-poradi.yml` |
 | Druhé spojení na starou databázi má už jen úloha převodu; po úklidu zmizí i ono | `lib/supabase/faktury.ts` |
 
 ## Kontrola PR #147 (19. 10.)
@@ -86,11 +92,15 @@ Opravené jsou **všechny**:
    se zapisovala jako trvalá a dokončení by Faktury otevřelo bez kopie
    PDF. Teď se taková příloha zkusí znovu a dokončení ji nepustí.
 6. **Pořadí migrací:** #146 a #145 měly starší razítko než #147.
-   Doporučené pořadí #146 → #147 → #145 (#145 je už přerazítkovaná) a nová
-   kontrola v CI to bude hlídat.
+   Doporučené pořadí #146 → #147 → #145 (#145 je už přerazítkovaná). Hlídá
+   to nová kontrola v CI, která přichází samostatnou malou PR **#148** —
+   ta se slučuje úplně první.
 7. **Návrat zpět obyčejným revertem PR** by po `db push` smazal soubor
    nasazené migrace a zablokoval `db push` ostatních PR. Návod teď vrací
-   kód BEZ souboru migrace; kontrola v CI smazání migrace zastaví.
+   kód BEZ souboru migrace. Kontrola v CI smazání migrace zastaví — ale
+   jen když je #148 sloučená dřív než #147 (jinak by ji revert #147
+   smazal spolu s migrací; proto je v návodu i v seznamu souborů, které
+   se při návratu ponechají).
 8. **Dvě otázky č. 58** (Jiné platby i Faktury). Otázky Faktur jsou nově
    59–65; nový test hlídá, aby se číslo nikdy neopakovalo.
 
@@ -108,14 +118,40 @@ neztratí; měřicí návod slibuje jen čísla, která úloha opravdu vypíše;
 schválit jde jen dokument z fronty a ručně zadaná faktura jen se stavem
 a měnou z nabídky.
 
+## Ověření oprav (19. 10. večer)
+
+Nezávislí ověřovatelé prošli opravy (4 skupiny + 1 hledač nových chyb):
+17 z 19 nálezů opraveno i se schválným rozbitím, 2 částečně, 1 nová chyba.
+Dodělané:
+
+1. **Nová chyba (zavedla ji oprava stavu převodu):** stav převodu se
+   přihlášenému bez práva na Faktury nově schovává — a spoušť párování
+   plateb ho četla stejnou funkcí. Člověku s právem na Platby bez práva na
+   Faktury se tak znovu otevřela STARÁ cesta párování (staré funkce, jim
+   stačí Platby) i po dokončení a během převodu. Teď spoušť čte stav firmy
+   bez ohledu na to, co smí volající vidět; kontrola pod takovým člověkem
+   v obou stavech.
+2. **Hlídač migrací by po revertu #147 zmizel** (přidávala ho sama #147),
+   takže by právě smazanou migraci nehlídal. Je teď v samostatné malé PR
+   #148, která se slučuje první; návod ho navíc ponechává při návratu.
+   Při návratu PŘED `db push` hlídač zčervená — to je očekávané.
+3. **Plánované nanečisto** bylo ve stejné frontě jako ruční kroky a mohlo
+   zrušit čekající ruční krok (např. dokončení). Má teď vlastní frontu.
+4. **Přechodné chyby příloh** jsou teď testované chováním (dřív jen
+   textem kódu) a databázová kontrola ověřuje, že přechodná chyba
+   dokončení nepustí.
+5. **Audit:** bez odkazu na PDF (u převedených faktur vede do veřejného
+   kbelíku staré databáze) a záznam převodu bez součtů peněz.
+6. Doplněné kontroly mezer z ověření u eurových faktur (měna v dotazu,
+   ruční párování, součet ke kontrole).
+
 ## Co je otestované — a z čeho jsou čísla
 
-- **Databáze (scénář `krok99`):** 142 kontrol, všechny prošly
-  v PGlite. PGlite **neověří** pravidla přístupu ani granty — o tom
-  rozhoduje CI „Migrace a scénáře" proti skutečnému PostgreSQL 16:
-  **zelená** — krok99 tam prošel taky se **142 kontrolami**, celá sada
-  databáze má 3678 kontrol (commit `0aba148`). Zelená je i nová kontrola
-  „Migrace jen přibývají".
+- **Databáze (scénář `krok99`):** po ověření oprav **147 kontrol**,
+  všechny prošly v PGlite. PGlite **neověří** pravidla přístupu ani granty —
+  o tom rozhoduje CI „Migrace a scénáře" proti skutečnému PostgreSQL 16:
+  VYSLEDEK_CI_VECER (odpoledne na `0aba148`: zelená, 142 kontrol krok99,
+  3678 celé sady).
   - Pokrývá: zavřené Faktury pro všechny před převodem, porovnání pole
     po poli, dokončení jen když vše sedí (a každé odmítnutí ověřené
     podle důvodu), čtení jen za celou firmu, párování ve stejném kroku,
@@ -125,7 +161,7 @@ a měnou z nabídky.
     celé firmy.
 - **Node testy:** v seznamu CI je **86 sad**, všechny prošly lokálně
   (CI „Testy aplikace": **zelená**, commit `0aba148`). Nové nebo přepsané pro Faktury:
-  - `faktury-prevod` 143 kontrol (převod řádku tam a zpátky,
+  - `faktury-prevod` 153 kontrol (převod řádku tam a zpátky,
     částka na haléř přesně, čas na mikrosekundy, návrat zpět jen po
     dokončení, přechodné chyby příloh, časový rozpočet, nanečisto před
     db push, plán ve workflow);
@@ -143,8 +179,11 @@ a měnou z nabídky.
 - `tsc` čisté. Sestavení prošlo 19. 10. dopoledne (`next build --webpack`
   — Turbopack v pracovní kopii vedle hlavní padá na odkazu
   `node_modules`, s kódem to nesouvisí); Vercel náhled ověřuje každý push.
-- **Schválná rozbití:** 37 v kole po kontrole 19. 10. (a 18
-  v kole předtím); každé spadlo na kontrole, na kterou mířilo. Souhrnné
+- **Schválná rozbití:** 18 v prvním kole, 37 po kontrole 19. 10.
+  a 19 po ověření oprav (13 v kódu a databázi, 6 u hlídače migrací
+  a čísel otázek); každé spadlo na kontrole, na kterou mířilo — mimo jiné
+  vrácení regrese (brána párování přes filtrovaný stav) a zápis přechodné
+  chyby přílohy mezi vykázané. Souhrnné
   kontroly rozbité dvěma způsoby (směr platby, audit, granty faktur, CSV,
   přílohy, workflow).
 
@@ -176,7 +215,7 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
 
 | kdy | jak |
 |---|---|
-| před `db push` (anomálie) | vrátit PR v `main` |
+| před `db push` (anomálie) | vrátit PR v `main` (kontrola „Migrace jen přibývají" zčervená — očekávané, migrace ještě nikde není) |
 | po `db push`, převod nezačal | vrátit kód **bez souboru migrace** (postup v návrhu, oddíl 7) |
 | převod začal, nedokončený | krok **zrusit**, pak vrátit kód bez souboru migrace; do staré databáze se nic nevrací |
 | po dokončení, před úklidem | **vratit** → **zpet_nanecisto** → **zpet** (i při nulách; konflikty rozhodnete vy) → vrátit kód bez souboru migrace |
@@ -244,7 +283,7 @@ z e-mailu mezitím počká, e-maily zůstanou ve schránce.
   kontrol v PGlite, nic nespadlo (krok97 10, krok98 140, krok99 125).
   Znovu 19. 10. odpoledne po opravách z kontroly (#145 už
   přerazítkovaná na 20261019120000): 3825 kontrol, nic nespadlo (krok97 10,
-  krok98 140, krok99 142).
+  krok98 140, krok99 142). SIMULACE_VECER
 - Obsahově se #146 přijatých faktur netýká: Jiné platby pracují
   s **vydanými** fakturami (`faktura_cislo`) a s příchozími platbami;
   párování faktur nově bere jen odchozí platby, takže tatáž platba nejde

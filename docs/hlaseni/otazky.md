@@ -1332,9 +1332,10 @@ nerozhodnete jinak.
    - **Teď:** od sloučení PR do dokončení převodu jsou Faktury zavřené
      (obrazovka řekne „Faktury se připravují / stěhují"), odhadem 30–60
      minut. Příjem z e-mailu počká, e-maily zůstanou ve schránce.
-   - **Pořadí sloučení:** nejdřív Jiné platby (#146, migrace se starším
-     razítkem 20261016100000), pak Faktury (#147), hlídač plánovače (#145)
-     až po nich (je přerazítkovaný na 20261019120000). Jinak `db push`
+   - **Pořadí sloučení:** úplně první malá PR #148 (kontrola „Migrace
+     jen přibývají"), pak Jiné platby (#146, migrace se starším razítkem
+     20261016100000), pak Faktury (#147), hlídač plánovače (#145) až po
+     nich (je přerazítkovaný na 20261019120000). Jinak `db push`
      starší migraci odmítne. Před každým `db push` `migration list`:
      nenasazená smí být jen migrace toho PR.
    - **Když to má být jinak:** jiný čas (třeba večer) — řekněte kdy.
