@@ -10,7 +10,13 @@ name: Migrace jen přibývají
 #
 # Běží i po pushi do main: GitHub po posunu main kontroly otevřených PR
 # znovu nepustí, takže PR sloučená druhá by na PR prošla — na main
-# zčervená po sloučení, ještě před db push.
+# zčervená po sloučení, ještě před db push. Po pushi navíc hlídá, že
+# nejde o force-push, který by migrace z historie main vymazal.
+#
+# Kontrola běh jen OZNAČÍ červeně, sloučení nezastaví: main nemá ochranu
+# větve (povinnou kontrolu musí zapnout Šéfík v nastavení repozitáře).
+# Před každým db push proto zkontrolovat poslední běh tohoto workflow
+# na main.
 
 on:
   pull_request:
@@ -50,8 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$UDALOST" = "pull_request" ]; then
-            ZAKLAD="origin/$ZAKLAD_PR"
+            node scripts/migrace-poradi.mjs "origin/$ZAKLAD_PR"
           else
-            ZAKLAD="$PRED_PUSHEM"
+            node scripts/migrace-poradi.mjs "$PRED_PUSHEM" --push
           fi
-          node scripts/migrace-poradi.mjs "$ZAKLAD"
