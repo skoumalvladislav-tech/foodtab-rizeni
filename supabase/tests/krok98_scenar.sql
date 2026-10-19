@@ -38,7 +38,14 @@
 --      přehled celé firmy, zrušení s úhradou ne, zrušený záznam uvolní
 --      doklad i frontu, faktura z pokladny ≠ druhá tržba, katalog a alias
 --      jen pro pobočky pokladny, hlášky bez id cizích poboček, duplicita
---      čísla účtu jen ±7 dní a bez pokladny v téže pobočce, audit položek.
+--      čísla účtu jen ±7 dní a bez pokladny v téže pobočce, audit položek;
+--  13. opravy z druhé kontroly 19. 10.: pokladna bez katalogu a přeřazená
+--      provozovna, ruční prohlášení vs. výsledek z pokladny, úhrada na
+--      zrušený záznam / platbou faktury / stornem, „jen propojit“ s důvodem,
+--      součet z množství × ceny, číslo účtu s pokladnou i bez, upozornění
+--      AI k dokladu, zámky firmy a denní strop AI, druhá linie vazeb
+--      operací a tržeb, varování pokrm + zboží; připojení souboru jen přes
+--      server; schválený výdej zamčený (oddíly 4, 8, 12a, 12b).
 --
 -- Navazuje na etapa0_scenar.sql (firma „Foodtab s.r.o.", pobočky
 -- cerna-perla a bernard-bar, majitel@foodtab.cz).
@@ -198,19 +205,20 @@ select pg_temp.check('všech 10 tabulek má RLS a authenticated jen SELECT',
 select pg_temp.check('funkce pro přihlášené: authenticated ano, anon ne, všechny SECURITY DEFINER se search_path=""',
   (select count(*) from pg_proc p
     where p.pronamespace = 'public'::regnamespace and p.proname like 'jine_platby\_%'
-      and p.proname not in ('jine_platby_zahajit_rozpoznani', 'jine_platby_dokoncit_rozpoznani', 'jine_platby_zapsat_kontrolu')
+      and p.proname not in ('jine_platby_zahajit_rozpoznani', 'jine_platby_dokoncit_rozpoznani', 'jine_platby_zapsat_kontrolu',
+                            'jine_platby_pripojit_soubor')
       and has_function_privilege('authenticated', p.oid, 'execute')
       and not has_function_privilege('anon', p.oid, 'execute')
-      and p.prosecdef and p.proconfig @> array['search_path=""']) = 21);
+      and p.prosecdef and p.proconfig @> array['search_path=""']) = 20);
 
-select pg_temp.check('serverové funkce (AI, kontrola v pokladně, operace, katalog): jen service_role',
+select pg_temp.check('serverové funkce (AI, kontrola v pokladně, operace, katalog, připojení souboru): jen service_role',
   (select count(*) from pg_proc p
     where p.pronamespace = 'public'::regnamespace
       and p.proname in ('jine_platby_zahajit_rozpoznani', 'jine_platby_dokoncit_rozpoznani', 'jine_platby_zapsat_kontrolu',
-                        'pos_operace_zahajit', 'pos_operace_dokoncit', 'pos_katalog_nahradit')
+                        'pos_operace_zahajit', 'pos_operace_dokoncit', 'pos_katalog_nahradit', 'jine_platby_pripojit_soubor')
       and has_function_privilege('service_role', p.oid, 'execute')
       and not has_function_privilege('authenticated', p.oid, 'execute')
-      and not has_function_privilege('anon', p.oid, 'execute')) = 6);
+      and not has_function_privilege('anon', p.oid, 'execute')) = 7);
 
 select pg_temp.check('katalog se nahrál (4 produkty)', :'katalog_pocet'::integer = 4);
 
@@ -295,22 +303,29 @@ insert into storage.objects (bucket_id, name, owner, metadata) values
 
 set role authenticated;
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
-select public.jine_platby_pripojit_soubor(:'z1', :'cesta1', repeat('a', 64)) as soubor1 \gset
+-- Otisk a typ podle obsahu ověřuje server ze stažených bajtů; přihlášený by
+-- jinak poslal vymyšlený otisk a tutéž fotku připojil podruhé (kontrola 19. 10.).
+select pg_temp.check('přihlášený soubor sám nepřipojí (vymyšlený otisk) — jen server',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'z1', :'cesta1', repeat('9', 64), '98980000-0000-0000-0000-000000000001'),
+    '42501', 'permission denied'));
+set role service_role;
+select public.jine_platby_pripojit_soubor(:'z1', :'cesta1', repeat('a', 64), '98980000-0000-0000-0000-000000000001') as soubor1 \gset
 select pg_temp.check('druhá stránka (PDF) se připojí s pořadím 2',
-  pg_temp.projde(format('select public.jine_platby_pripojit_soubor(%L, %L, %L)', :'z1', :'cesta2', repeat('b', 64))));
+  pg_temp.projde(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'z1', :'cesta2', repeat('b', 64), '98980000-0000-0000-0000-000000000001')));
 select pg_temp.check('stejná fotka (otisk) k jinému záznamu NEPROJDE — opakovaná sjetina',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L)', :'z2', :'cesta_z2', repeat('a', 64)),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'z2', :'cesta_z2', repeat('a', 64), '98980000-0000-0000-0000-000000000001'),
     '23505', 'už je připojený k záznamu'));
 select pg_temp.check('soubor, který nahrál někdo jiný, nejde připojit',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L)', :'z1', :'cesta_cizi', repeat('c', 64)),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'z1', :'cesta_cizi', repeat('c', 64), '98980000-0000-0000-0000-000000000001'),
     '23514', 'nahrál někdo jiný'));
 select pg_temp.check('cesta jiného záznamu nesedí',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L)', :'z1', :'cesta_z2', repeat('d', 64)),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'z1', :'cesta_z2', repeat('d', 64), '98980000-0000-0000-0000-000000000001'),
     '23514', 'nesedí'));
 select pg_temp.check('soubor, který v úložišti není, nejde připojit',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L)', :'z1',
-    format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'z1', '98980000-bbbb-0000-0000-00000000ffff'), repeat('e', 64)),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'z1',
+    format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'z1', '98980000-bbbb-0000-0000-00000000ffff'), repeat('e', 64), '98980000-0000-0000-0000-000000000001'),
     '23514', 'v úložišti není'));
+set role authenticated;
 select pg_temp.check('obsluha originál čte (politika úložiště)',
   (select count(*) from storage.objects where bucket_id = 'jine-platby' and name = :'cesta1') = 1);
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000004', false);
@@ -569,14 +584,22 @@ select pg_temp.check('schváleno: operace „připraveno" s klíčem, položky z
      from public.pos_operace where id = :'op1')
   and (select stav = 'schvaleno' and schvalil::text = '98980000-0000-0000-0000-000000000003' from public.jine_platby_skladove_navrhy where id = :'navrh1'));
 
--- Změna po schválení: obsluha změní množství piva → schválení padá.
+-- Změna po schválení: schválený výdej může schvalovatel právě odepisovat
+-- v pokladně (i když provedení přes API selhalo) — obsluha ho tiše
+-- nezneplatní. Uvolní ho jen Zrušit schválení (kontrola 19. 10.).
 select (jsonb_set(:'polozky'::jsonb, '{1,pos_mnozstvi}', '"5"'))::text as polozky5 \gset
 set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select pg_temp.check('schválený výdej: obsluha množství nezmění (schválení se tiše nezneplatní)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_ulozit_navrh(%L, %s, %L::jsonb, %L::jsonb)', :'z1', :'verze_z1', :'hlavicka', :'polozky5'),
+    '23514', 'Výdej je schválený'));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_zrusit_schvaleni(:'z1', 'V pokladně nic neodepsáno, obsluha opraví množství piva.');
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
 select public.jine_platby_ulozit_navrh(:'z1', :'verze_z1', :'hlavicka'::jsonb, :'polozky5'::jsonb) as verze_z1 \gset
 reset role;
 select set_config('test.user_id', '', false);
-select pg_temp.check('změna položky po schválení: návrh nahrazený, operace zrušená, sklad znovu „bez návrhu"',
+select pg_temp.check('po Zrušit schválení jde množství změnit: návrh nahrazený, operace zrušená, sklad znovu „bez návrhu"',
   (select stav = 'nahrazeno' from public.jine_platby_skladove_navrhy where id = :'navrh1')
   and (select stav = 'zruseno' from public.pos_operace where id = :'op1')
   and (select stav_skladu = 'bez_navrhu' and stav_trzby = 'zapsano' from public.jine_platby where id = :'z1'));
@@ -895,6 +918,10 @@ select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false)
 select pg_temp.check('během ručního odpisu obsluha nezmění množství (hrozil by druhý odpis)',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_ulozit_navrh(%L, %s, %L::jsonb, %L::jsonb)', :'z5', :'v5', :'hl5',
     jsonb_set(:'pol5'::jsonb, '{0,pos_mnozstvi}', '"3"')::text), '23514', 'předaný k ručnímu provedení'));
+select pg_temp.check('během ručního odpisu obsluha nepřidá ani nejasnou skladovou položku (schválení by ji obešlo)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_ulozit_navrh(%L, %s, %L::jsonb, %L::jsonb)', :'z5', :'v5', :'hl5',
+    (:'pol5'::jsonb || jsonb_build_array(jsonb_build_object('nazev', 'Pivo navíc', 'mnozstvi', '3', 'zdroj', 'rucne',
+      'druh', 'nezarazeno', 'mapovani', 'nenamapovano')))::text), '23514', 'předaný k ručnímu provedení'));
 select pg_temp.check('obsluha schválení zrušit nesmí (jen oprávněná osoba pro výdej)',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_zrusit_schvaleni(%L, %L)', :'z5', 'Nic se neodepsalo.'), '42501', 'oprávněná osoba'));
 select set_config('test.user_id', :'majitel', false);
@@ -904,6 +931,19 @@ select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false)
 select pg_temp.check('ruční doložení s cizím otiskem (stará stránka) neprojde',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_rucne_dolozit_vydej(%L, %L, %L, %L)', :'z5', repeat('0', 64), 'D-1', 'Odepsáno.'),
     '23514', 'Schválený návrh je jiný'));
+-- Druhá linie: nevyřešená položka vložená mimo uložení návrhu.
+reset role;
+insert into public.jine_platby_polozky (tenant_id, branch_id, zaznam_id, poradi, nazev, zdroj, druh, mapovani)
+values (:'tenant', :'perla', :'z5', 99, 'Vložené pivo', 'rucne', 'nezarazeno', 'nenamapovano');
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select pg_temp.check('ruční doložení s nevyřešenou položkou neprojde (neodečetla by se nikdy)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rucne_dolozit_vydej(%L, %L, %L, %L)', :'z5', :'otisk5', 'D-1', 'Odepsáno.'),
+    '23514', 'nevyřešené položky'));
+reset role;
+delete from public.jine_platby_polozky where zaznam_id = :'z5' and poradi = 99;
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
 select public.jine_platby_rucne_dolozit_vydej(:'z5', :'otisk5', 'ODP-2026-0007', 'Odepsáno v Dotykačce způsobem Odpis.');
 reset role;
 select set_config('test.user_id', '', false);
@@ -966,6 +1006,10 @@ select pg_temp.check('druhý výdej téže sjetiny (pobočka + den + částka + 
   pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true)', :'navrh6', :'otisk6'),
     '23514', 'Možná duplicita výdeje'));
 select public.jine_platby_rozhodnout_vydej(:'navrh6', :'otisk6', true, 'Jiný host, stejná objednávka dvou piv.') as op6 \gset
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('schválený výdej: ani majitel záznam nezruší (nejdřív Zrušit schválení)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zrusit(%L, %L)', :'z6', 'Omylem.'), '23514', 'Výdej je schválený'));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
 select public.jine_platby_zrusit_schvaleni(:'z6', 'V pokladně nic neodepsáno, host odešel bez placení.');
 reset role;
 select set_config('test.user_id', '', false);
@@ -985,7 +1029,9 @@ insert into storage.objects (bucket_id, name, owner, metadata) values
   ('jine-platby', :'cesta6', '98980000-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg","size":2000}');
 set role authenticated;
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
-select public.jine_platby_pripojit_soubor(:'z6', :'cesta6', repeat('f', 64));
+set role service_role;
+select public.jine_platby_pripojit_soubor(:'z6', :'cesta6', repeat('f', 64), '98980000-0000-0000-0000-000000000001');
+set role authenticated;
 select public.jine_platby_odeslat_sklad(:'z6', :'v6') as navrh6b \gset
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000006', false);
 select pg_temp.check('vedoucí s finančním přehledem jen na Perle nenapáruje platbu z FIREMNÍHO účtu',
@@ -1023,8 +1069,10 @@ insert into storage.objects (bucket_id, name, owner, metadata) values
   ('jine-platby', :'cesta7', '98980000-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg","size":2000}');
 set role authenticated;
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+set role service_role;
 select pg_temp.check('doklad ze zrušeného záznamu jde připojit ke správnému záznamu',
-  pg_temp.projde(format('select public.jine_platby_pripojit_soubor(%L, %L, %L)', :'z7', :'cesta7', repeat('f', 64))));
+  pg_temp.projde(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'z7', :'cesta7', repeat('f', 64), '98980000-0000-0000-0000-000000000001')));
+set role authenticated;
 
 -- 12d. Faktura z pokladny a dvojí tržba.
 select set_config('test.user_id', :'majitel', false);
@@ -1057,9 +1105,13 @@ insert into storage.objects (bucket_id, name, owner, metadata) values
   ('jine-platby', :'cesta_b', '98980000-0000-0000-0000-000000000004', '{"mimetype":"image/jpeg","size":2000}');
 set role authenticated;
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000004', false);
-select pg_temp.check('stejná fotka jako na Perle: hláška neprozradí id záznamu pobočky, kterou vedoucí Baru nevidí',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L)', :'zb', :'cesta_b', repeat('a', 64)),
-    '23505', 'kterou nevidíte'));
+set role service_role;
+select pg_temp.check('stejná fotka jako na Perle: hláška neprozradí id záznamu jiné pobočky',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'zb', :'cesta_b', repeat('a', 64), '98980000-0000-0000-0000-000000000004'),
+    '23505', 'kterou nevidíte')
+  and not pg_temp.spadne_hlaskou(format('select public.jine_platby_pripojit_soubor(%L, %L, %L, %L)', :'zb', :'cesta_b', repeat('a', 64), '98980000-0000-0000-0000-000000000004'),
+    '23505', :'z1'));
+set role authenticated;
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
 select pg_temp.check('obsluha Perly katalog pokladny Baru nevidí (svou pokladnu ano)',
   (select count(*) from public.pos_katalog where pripojeni_id = :'pos_bar') = 0
@@ -1100,14 +1152,17 @@ select pg_temp.check('stejné číslo účtu bez pokladny na JINÉ pobočce dupl
 -- zapsat i k zapsané tržbě, appka podle něj varuje „možná zapsáno dvakrát“.
 -- Nic se samo nestornuje — rozhodne člověk.
 reset role;
-select verze as v8b from public.jine_platby where id = :'z8' \gset
+select verze as v1b from public.jine_platby where id = :'z1' \gset
 set role service_role;
 select pg_temp.check('dodatečná kontrola jde zapsat i k zapsané tržbě',
-  pg_temp.projde(format('select public.jine_platby_zapsat_kontrolu(%L, %s, %L, %L, %L::jsonb, null)', :'z8', :'v8b', 'trzba', 'nalezeno', '{"doklad": "D-9"}')));
+  pg_temp.projde(format('select public.jine_platby_zapsat_kontrolu(%L, %s, %L, %L, %L::jsonb, null)', :'z1', :'v1b', 'trzba', 'nalezeno', '{"doklad": "D-9"}')));
 reset role;
 select pg_temp.check('po dodatečné kontrole tržba zůstala zapsaná a započtená, výsledek je „nalezeno“',
-  (select stav_trzby = 'zapsano' and kontrola_trzby ->> 'vysledek' = 'nalezeno' from public.jine_platby where id = :'z8')
-  and exists (select 1 from public.ostatni_trzby where zaznam_id = :'z8' and stav = 'platna' and zapocitat));
+  (select stav_trzby = 'zapsano' and kontrola_trzby ->> 'vysledek' = 'nalezeno' from public.jine_platby where id = :'z1')
+  and exists (select 1 from public.ostatni_trzby where zaznam_id = :'z1' and stav = 'platna' and zapocitat));
+select pg_temp.check('kontrolu z pokladny nejde zapsat k záznamu bez pokladny',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zapsat_kontrolu(%L, %s, %L, %L, %L::jsonb, null)', :'z8',
+    (select verze from public.jine_platby where id = :'z8'), 'trzba', 'nalezeno', '{}'), '23514', 'neobsluhuje'));
 set role authenticated;
 select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
 select public.jine_platby_prohlasit(:'z9', :'v9', 'trzba', 'nenalezeno', 'Ručně psaný účet, v pokladně není.');
@@ -1145,6 +1200,237 @@ select pg_temp.check('položky návrhu mají audit',
   exists (select 1 from public.audit_log where tenant_id = :'tenant' and entity_type = 'jina_platba_polozka'));
 
 
+-- ---------------------------------------------------------------------
+-- 13. Opravy z druhé nezávislé kontroly (19. 10.)
+-- ---------------------------------------------------------------------
+reset role;
+select set_config('test.user_id', '', false);
+\echo ''
+\echo '== 13. Druhá kontrola 19. 10. ====================================='
+
+-- 13a. Pokladna bez katalogu: přiřazení ani výdej nejdou ověřit. Pokladna,
+-- jejíž provozovnu v Integracích přeřadili jiné pobočce, nesmí dál sloužit
+-- kontrole ani výdeji.
+insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, stav, externi_ucet)
+values (:'tenant', 'pokladna', 'krok98bez', 'zakaznicky', 'pripojeno',
+  jsonb_build_object('provozovny', jsonb_build_array(
+    jsonb_build_object('id', '31', 'nazev', 'Bar bez katalogu', 'branch_id', :'bar'),
+    jsonb_build_object('id', '32', 'nazev', 'Perla bez katalogu', 'branch_id', :'perla'))))
+returning id as pos_bez \gset
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select public.jine_platby_zalozit(:'tenant', :'bar', :'pos_bez', 'Bar — pokladna bez katalogu', '98980000-aaaa-0000-0000-00000000000e') as z12 \gset
+select public.jine_platby_ulozit_navrh(:'z12', 1,
+  jsonb_build_object('datum_prodeje', '2026-03-18', 'oznaceni', 'Bar bez katalogu', 'mena', 'CZK', 'castka_haleru', 13000,
+    'castka_puvod', 'doklad', 'typ_dokladu', 'uzavreny_prodej', 'externi_ucet', null, 'kontakt_id', null),
+  jsonb_build_array(jsonb_build_object('nazev', 'Pivo 0,5 l', 'mnozstvi', '2', 'jednotka', 'ks',
+    'cena_jednotkova_haleru', 6500, 'cena_celkem_haleru', 13000, 'zdroj', 'rucne', 'druh', 'rozlevany_napoj',
+    'pos_produkt_id', 'DRAHA-LAHEV', 'pos_produkt_nazev', 'Pivo 0,5 l', 'pos_mnozstvi', '2', 'mapovani', 'overeno',
+    'vyzaduje_kontrolu', false))) as v12 \gset
+select pg_temp.check('pokladna bez katalogu: výdej s produktem z prohlížeče je blokovaný (přiřazení nejde ověřit)',
+  (select exists (select 1 from jsonb_array_elements(v -> 'blokace') b
+                   where b ->> 'poradi' = '1' and b ->> 'duvod' like 'Produkt v katalogu pokladny není%')
+          and not exists (select 1 from jsonb_array_elements(v -> 'blokace') b where b ->> 'duvod' like '%neobsluhuje%')
+     from (select public.jine_platby_sestavit_vydej(:'z12') as v) x));
+select pg_temp.check('pokladna bez katalogu: ověřený alias nejde uložit',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_ulozit_mapovani(%L, %L, %L)', :'z12', 'pivo 0,5 l', 'DRAHA-LAHEV'),
+    '23514', 'Katalog pokladny není načtený'));
+-- Přeřazení provozoven v Integracích: 31 teď patří Perle, Baru 32.
+reset role;
+update public.integrace_pripojeni
+   set externi_ucet = jsonb_build_object('provozovny', jsonb_build_array(
+         jsonb_build_object('id', '31', 'nazev', 'Teď Perla', 'branch_id', :'perla'),
+         jsonb_build_object('id', '32', 'nazev', 'Teď Bar', 'branch_id', :'bar')))
+ where id = :'pos_bez';
+select pg_temp.check('po přeřazení provozovny: výdej přes pokladnu záznamu je blokovaný (provozovna patří jiné pobočce)',
+  (select exists (select 1 from jsonb_array_elements(v -> 'blokace') b where b ->> 'poradi' is null and b ->> 'duvod' like '%neobsluhuje%')
+     from (select app.jp_sestavit_vydej(:'z12') as v) x));
+set role service_role;
+select pg_temp.check('po přeřazení provozovny: kontrolu z pokladny nejde zapsat (prohledala by cizí pobočku)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zapsat_kontrolu(%L, %s, %L, %L, %L::jsonb, null)', :'z12', :'v12', 'trzba', 'nenalezeno', '{}'),
+    '23514', 'neobsluhuje'));
+reset role;
+
+-- 13b. Ruční prohlášení nepřepíše opačný výsledek z pokladny (z1 má od 12f
+-- výsledek z pokladny „nalezeno“ k aktuální verzi).
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select pg_temp.check('pokladní ručním „není“ nepřepíše „nalezeno“ z pokladny',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_prohlasit(%L, %s, %L, %L, %L)', :'z1', :'v1b', 'trzba', 'nenalezeno', 'Není tam.'),
+    '23514', 'Pokladna při kontrole tohle našla'));
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'z1', :'v1b', 'sklad', 'jiz_odecteno', '{}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select pg_temp.check('skladník ručním „neodečteno“ nepřepíše „už odečteno“ z pokladny',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_prohlasit(%L, %s, %L, %L, %L)', :'z1', :'v1b', 'sklad', 'neodecteno', 'Nic tam není.'),
+    '23514', 'Pokladna při kontrole tohle našla'));
+select set_config('test.user_id', :'majitel', false);
+select public.jine_platby_prohlasit(:'z1', :'v1b', 'trzba', 'nenalezeno', 'Ověřeno osobně: v pokladně je jiný účet.');
+reset role;
+select pg_temp.check('s právem na opravy jde výsledek z pokladny přepsat a historie to nese',
+  exists (select 1 from public.jine_platby_historie
+           where zaznam_id = :'z1' and udalost = 'rucne_dolozeno_trzba' and detail ->> 'prepsano_pokladny' = 'nalezeno'));
+
+-- 13c. Úhrada: ne na zrušený záznam; ne platbou spárovanou s fakturou; ne stornem.
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('úhradu nejde napárovat na zrušený záznam',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 13100)', :'z6', :'t_firma'), '23514', 'zrušený'));
+reset role;
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, mena, datum, zdroj)
+values (:'tenant', :'ucet_firma', 'prijem', 6500, 'CZK', '2026-03-21', 'rucni') returning id as t_faktura \gset
+insert into public.platby_faktury (tenant_id, transakce_id, faktura_id, castka_haleru, stav, potvrzeno_kdy)
+values (:'tenant', :'t_faktura', 'FV-KROK98-1', 6500, 'potvrzeno', now());
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, mena, datum, zdroj)
+values (:'tenant', :'ucet_firma', 'prijem', 6500, 'CZK', '2026-03-22', 'rucni') returning id as t_storno \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, mena, datum, zdroj, storno_of)
+values (:'tenant', :'ucet_firma', 'vydaj', 6500, 'CZK', '2026-03-23', 'rucni', :'t_storno');
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, mena, datum, zdroj)
+values (:'tenant', :'ucet_firma', 'prijem', 6500, 'CZK', '2026-03-24', 'rucni') returning id as t_volna \gset
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('platba celá spárovaná s fakturou nezaplatí i Jinou platbu',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 6500)', :'z11', :'t_faktura'), '23514', 'nebo fakturám'));
+select pg_temp.check('stornovaná platba úhradu neprokazuje',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 6500)', :'z11', :'t_storno'), '23514', 'stornovaná'));
+select pg_temp.check('volná nestornovaná platba se napáruje (kontrola rozezná oba stavy)',
+  pg_temp.projde(format('select public.jine_platby_evidovat_uhradu(%L, %L, 6500)', :'z11', :'t_volna')));
+reset role;
+
+-- 13d. „Jen propojit“ bez konkrétního prodeje v pokladně chce důvod.
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — catering 450 Kč', '98980000-aaaa-0000-0000-00000000000f') as z13 \gset
+select public.jine_platby_ulozit_navrh(:'z13', 1,
+  jsonb_build_object('datum_prodeje', '2026-03-24', 'oznaceni', 'Catering', 'mena', 'CZK', 'castka_haleru', 45000,
+    'castka_puvod', 'doklad', 'typ_dokladu', 'rucni_spotreba', 'externi_ucet', 'Účet 77', 'kontakt_id', null), '[]') as v13 \gset
+select public.jine_platby_oznacit_zkontrolovano(:'z13', :'v13');
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'z13', :'v13', 'trzba', 'pravdepodobne', '{"shoda": "castka"}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select pg_temp.check('„jen propojit“ při shodě jen částky bez důvodu neprojde (tržba by zmizela ze všech součtů)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L)', :'z13', :'v13', 'propojit'),
+    '23514', 'Propojit jde jen s důvodem'));
+select public.jine_platby_potvrdit_trzbu(:'z13', :'v13', 'propojit', null, 'Obsluha účet 77 v pokladně viděla, číslo dokladu chybí.');
+reset role;
+select pg_temp.check('propojeno s důvodem: nezapočítáno a důvod v historii',
+  (select stav_trzby = 'propojeno' from public.jine_platby where id = :'z13')
+  and exists (select 1 from public.jine_platby_historie
+               where zaznam_id = :'z13' and udalost = 'trzba_propojena' and detail ->> 'duvod_propojeni' like 'Obsluha účet 77%'));
+
+-- 13e. Součet z množství × ceny; číslo účtu i mezi záznamem s pokladnou a bez ní.
+select jsonb_build_object('datum_prodeje', '2026-03-25', 'oznaceni', 'Catering znovu', 'mena', 'CZK', 'castka_haleru', 48000,
+  'castka_puvod', 'doklad', 'typ_dokladu', 'rucni_spotreba', 'externi_ucet', 'účet 77', 'kontakt_id', null)::text as hl14 \gset
+select jsonb_build_array(
+  jsonb_build_object('nazev', 'Chlebíček', 'mnozstvi', '10', 'jednotka', 'ks', 'cena_jednotkova_haleru', 3500,
+    'zdroj', 'rucne', 'druh', 'neskladova', 'mapovani', 'nenamapovano', 'vyzaduje_kontrolu', false),
+  jsonb_build_object('nazev', 'Káva', 'mnozstvi', '2', 'jednotka', 'ks', 'cena_jednotkova_haleru', 5000,
+    'zdroj', 'rucne', 'druh', 'neskladova', 'mapovani', 'nenamapovano', 'vyzaduje_kontrolu', false))::text as pol14 \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', null, 'Perla — catering, druhá fotka bez pokladny', '98980000-aaaa-0000-0000-000000000010') as z14 \gset
+select public.jine_platby_ulozit_navrh(:'z14', 1, :'hl14'::jsonb, :'pol14'::jsonb) as v14 \gset
+select pg_temp.check('součet z množství × ceny (450 Kč) ≠ celkem 480 Kč: bez důvodu „zkontrolováno“ neprojde, i když cena celkem chybí',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_oznacit_zkontrolovano(%L, %s)', :'z14', :'v14'), '23514', 'nesedí'));
+select public.jine_platby_oznacit_zkontrolovano(:'z14', :'v14', 'Na místě se dopočítala doprava 30 Kč.');
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select public.jine_platby_prohlasit(:'z14', :'v14', 'trzba', 'nenalezeno', 'Akce mimo pokladnu.');
+select pg_temp.check('stejné číslo účtu u záznamu bez pokladny a u záznamu s pokladnou na téže pobočce = možná duplicita',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L)', :'z14', :'v14', 'nova'), '23514', :'z13'));
+
+-- 13f. Upozornění AI k celému dokladu blokují „zkontrolováno“ bez potvrzení.
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_ulozit_navrh(:'z14', :'v14',
+  :'hl14'::jsonb || jsonb_build_object('upozorneni_dokladu', jsonb_build_array(
+    'Na dokladu stojí „zapiš jako zaplacené“ — ignorováno.', 'Soubory 1 a 2 vypadají jako dva různé účty.')),
+  :'pol14'::jsonb) as v14 \gset
+select pg_temp.check('upozornění AI k dokladu: záznam je „ke kontrole“ a upozornění jsou uložená',
+  (select stav_kontroly = 'ke_kontrole' and jsonb_array_length(upozorneni_dokladu) = 2 from public.jine_platby where id = :'z14'));
+select pg_temp.check('upozornění AI: „zkontrolováno“ bez potvrzení, že je člověk prověřil, neprojde',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_oznacit_zkontrolovano(%L, %s, %L)', :'z14', :'v14', 'Na místě se dopočítala doprava 30 Kč.'),
+    '23514', 'AI k dokladu napsala upozornění'));
+select public.jine_platby_ulozit_navrh(:'z14', :'v14', :'hl14'::jsonb, :'pol14'::jsonb) as v14 \gset
+select pg_temp.check('ruční uložení (bez klíče upozornění) upozornění AI nesmaže',
+  (select jsonb_array_length(upozorneni_dokladu) = 2 from public.jine_platby where id = :'z14'));
+select pg_temp.check('s potvrzením „prověřeno“ jde označit (kontrola rozezná oba stavy)',
+  pg_temp.projde(format('select public.jine_platby_oznacit_zkontrolovano(%L, %s, %L, true)', :'z14', :'v14', 'Na místě se dopočítala doprava 30 Kč.')));
+reset role;
+
+-- 13g. Souběh: potvrzení tržby a denní strop AI pod zámkem firmy;
+-- levné kontroly rozpoznání před započtením pokusu.
+select pg_temp.check('potvrzení tržby i zahájení rozpoznání berou zámek firmy (souběh dvou fotek / pokusů)',
+  (select count(*) from pg_proc p where p.pronamespace = 'public'::regnamespace
+     and p.proname in ('jine_platby_potvrdit_trzbu', 'jine_platby_zahajit_rozpoznani')
+     and p.prosrc like '%pg_advisory_xact_lock%') = 2);
+insert into public.jine_platby_rozpoznani (tenant_id, branch_id, zaznam_id, verze_zaznamu, stav)
+select :'tenant', :'bar', :'z11', 1, 'chyba'
+  from generate_series(1, 199 - (select count(*)::integer from public.jine_platby_rozpoznani
+                                  where tenant_id = :'tenant'
+                                    and vytvoreno >= (date_trunc('day', now() at time zone 'Europe/Prague') at time zone 'Europe/Prague')));
+set role service_role;
+select pg_temp.check('rozpoznání: stará verze formuláře se odmítne dřív, než se pokus započítá',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zahajit_rozpoznani(%L, %L, 999)', :'z11', :'majitel'), '40001', 'mezitím upravil'));
+select pg_temp.check('rozpoznání: záznam se zapsanou tržbou se znovu nečte',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zahajit_rozpoznani(%L, %L, null)', :'z1', :'majitel'), '23514', 'Tržba je už zapsaná'));
+select pg_temp.check('rozpoznání: dvoustý pokus dne projde',
+  pg_temp.projde(format('select public.jine_platby_zahajit_rozpoznani(%L, %L, null)', :'z11', :'majitel')));
+select pg_temp.check('rozpoznání: dvoustý první pokus už ne (strop 200 za firmu)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zahajit_rozpoznani(%L, %L, null)', :'z12', :'majitel'), '23514', 'strop'));
+reset role;
+
+-- 13h. Druhá linie: vazby, které funkce berou z řádků, hlídá i spoušť.
+select pg_temp.check('druhá linie: operace s návrhem jiného záznamu neprojde',
+  pg_temp.spadne_hlaskou(format('insert into public.pos_operace (tenant_id, branch_id, zaznam_id, navrh_id, druh, idempotencni_klic) values (%L, %L, %L, %L, %L, %L)',
+    :'tenant', :'perla', :'z1', :'navrh6', 'vydej', 'krok98-cizi-navrh-1'), '23514', 'Návrh nepatří'));
+select pg_temp.check('druhá linie: operace s pokladnou cizí firmy neprojde',
+  pg_temp.spadne_hlaskou(format('insert into public.pos_operace (tenant_id, branch_id, zaznam_id, pripojeni_id, druh, idempotencni_klic) values (%L, %L, %L, %L, %L, %L)',
+    :'tenant', :'perla', :'z1', :'cizi_pos', 'vydej', 'krok98-cizi-pokl-1'), '23514', 'Pokladna nepatří'));
+select pg_temp.check('druhá linie: korekce operace jiného záznamu neprojde',
+  pg_temp.spadne_hlaskou(format('insert into public.pos_operace (tenant_id, branch_id, zaznam_id, korekce_pro, druh, idempotencni_klic) values (%L, %L, %L, %L, %L, %L)',
+    :'tenant', :'perla', :'z1', :'op6', 'korekce', 'krok98-cizi-kor-1'), '23514', 'Opravovaná operace'));
+select pg_temp.check('druhá linie: tržba nahrazující tržbu jiného záznamu neprojde',
+  pg_temp.spadne_hlaskou(format('insert into public.ostatni_trzby (tenant_id, branch_id, datum, castka_haleru, mena, zdroj, zaznam_id, zapocitat, nahrazuje) values (%L, %L, %L, 100, %L, %L, %L, false, (select id from public.ostatni_trzby where zaznam_id = %L limit 1))',
+    :'tenant', :'perla', '2026-03-20', 'CZK', 'jine_platby', :'z14', :'z13'), '23514', 'Nahrazovaná tržba'));
+insert into public.kontakty (tenant_id, nazev) values (:'tenant_b', 'Krok98 cizí odběratel') returning id as kontakt_cizi \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ, mena) values (:'tenant_b', null, 'Krok98 cizí účet', 'banka', 'CZK') returning id as ucet_cizi \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, mena, datum, zdroj)
+values (:'tenant_b', :'ucet_cizi', 'prijem', 100, 'CZK', '2026-03-20', 'rucni') returning id as t_cizi \gset
+select pg_temp.check('druhá linie: záznam s kontaktem cizí firmy neprojde',
+  pg_temp.spadne_hlaskou(format('update public.jine_platby set kontakt_id = %L where id = %L', :'kontakt_cizi', :'z13'), '23514', 'Kontakt nepatří'));
+select pg_temp.check('druhá linie: záznam s platbou cizí firmy neprojde',
+  pg_temp.spadne_hlaskou(format('update public.jine_platby set uhrada_transakce_id = %L, uhrada_castka_haleru = 100, stav_uhrady = %L where id = %L',
+    :'t_cizi', 'castecne', :'z13'), '23514', 'Platba nepatří'));
+select pg_temp.check('druhá linie: katalog s pokladnou cizí firmy neprojde',
+  pg_temp.spadne_hlaskou(format('insert into public.pos_katalog (tenant_id, pripojeni_id, externi_id, nazev) values (%L, %L, %L, %L)',
+    :'tenant', :'cizi_pos', 'X', 'X'), '23514', 'Pokladna nepatří'));
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('majitel nenapáruje platbu cizí firmy (a nedozví se její částku)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 100)', :'z13', :'t_cizi'), '23514', 'nepatří této firmě'));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select pg_temp.check('skladník (bez práva zadat/upravit) nenahraje doklad ani do cesty své pobočky',
+  not pg_temp.projde(format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)',
+    'jine-platby', format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'z13', '98980000-bbbb-0000-0000-00000000000d'),
+    '98980000-0000-0000-0000-000000000003', '{"mimetype":"image/jpeg","size":10}')));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select pg_temp.check('obsluha (právo zadat) do cesty své pobočky nahraje (kontrola rozezná oba stavy)',
+  pg_temp.projde(format('insert into storage.objects (bucket_id, name, owner, metadata) values (%L, %L, %L, %L)',
+    'jine-platby', format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'z13', '98980000-bbbb-0000-0000-00000000000e'),
+    '98980000-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg","size":10}')));
+
+-- 13i. Pokrm a další zboží v jednom výdeji: varování pro schvalovatele.
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('výdej s pokrmem i dalším zbožím nese varování pro schvalovatele (neblokuje), jen pivo ne',
+  (select jsonb_array_length(v -> 'varovani') = 1 and v -> 'varovani' ->> 0 like '%pokrm i další zboží%'
+     from (select public.jine_platby_sestavit_vydej(:'z1') as v) x)
+  and (select jsonb_array_length(v -> 'varovani') = 0 from (select public.jine_platby_sestavit_vydej(:'z11') as v) x));
+reset role;
+select set_config('test.user_id', '', false);
+
 -- Úklid: vlastní řádky pryč (zápisové granty nemá nikdo — maže superuživatel).
 -- Pořadí kvůli cizím klíčům. Cizí firma zůstává (jako v krok93/95).
 delete from public.jine_platby_historie where tenant_id = :'tenant';
@@ -1164,7 +1450,10 @@ delete from storage.objects where bucket_id = 'jine-platby';
 delete from public.pokladna_prodeje_denni where produkt_nazev like 'Krok98%';
 delete from public.transakce where ucet_id in (:'ucet', :'ucet_firma');
 delete from public.platebni_ucty where id in (:'ucet', :'ucet_firma');
-delete from public.integrace_pripojeni where id in (:'pos', :'pos_bar', :'cizi_pos');
+delete from public.integrace_pripojeni where id in (:'pos', :'pos_bar', :'cizi_pos', :'pos_bez');
+delete from public.transakce where ucet_id = :'ucet_cizi';
+delete from public.platebni_ucty where id = :'ucet_cizi';
+delete from public.kontakty where id = :'kontakt_cizi';
 delete from public.membership_branches where membership_id in (:'m1', :'m2', :'m3', :'m4', :'m6');
 delete from public.memberships where id in (:'m1', :'m2', :'m3', :'m4', :'m6');
 delete from public.employees where id in (:'e1', :'e2', :'e3', :'e4', :'e6');

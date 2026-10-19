@@ -187,6 +187,11 @@ create table public.jine_platby (
   kontrola_trzby        jsonb,
   kontrola_skladu       jsonb,
   duplicita             jsonb,
+  -- Upozornění AI k CELÉMU dokladu (nízká jistota, víc dokladů v jednom,
+  -- zachycený pokyn v textu dokladu…). Dokud nějaké je, záznam je „ke
+  -- kontrole“ a označit ho jako zkontrolovaný jde jen s výslovným
+  -- potvrzením, že je člověk prověřil (kontrola 19. 10.).
+  upozorneni_dokladu    jsonb not null default '[]'::jsonb check (jsonb_typeof(upozorneni_dokladu) = 'array'),
   zruseni_duvod         text check (zruseni_duvod is null or char_length(zruseni_duvod) <= 1000),
   verze                 integer not null default 1 check (verze >= 1),
   vytvoril              uuid,
@@ -211,7 +216,8 @@ comment on table public.jine_platby is
   'Tržba, sklad, faktura a úhrada mají každá vlastní stav. Zápis jen přes '
   'funkce jine_platby_*. Název neznamená, že je prodej zaplacený.';
 
--- 3.2 Originály. Otisk počítá NÁŠ server ze stažených bajtů.
+-- 3.2 Originály. Otisk počítá NÁŠ server ze stažených bajtů a zapsat ho smí
+-- jen on: jine_platby_pripojit_soubor má jen service_role (kontrola 19. 10.).
 create table public.jine_platby_soubory (
   id         uuid primary key default gen_random_uuid(),
   tenant_id  uuid not null references public.tenants(id) on delete cascade,
@@ -540,6 +546,36 @@ create trigger trg_firma_pos_operace before insert or update of tenant_id, branc
 create trigger trg_firma_jine_platby_historie before insert or update of tenant_id, branch_id, zaznam_id
   on public.jine_platby_historie for each row execute function app.jp_hlida_dite_zaznamu();
 
+-- Operace v pokladně: pokladna, návrh a opravovaná operace patří témuž
+-- záznamu a firmě (kontrola 19. 10. — dřív se hlídal jen záznam).
+create function app.jp_hlida_vazby_operace()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if new.pripojeni_id is not null and not exists (
+       select 1 from public.integrace_pripojeni p
+        where p.id = new.pripojeni_id and p.tenant_id = new.tenant_id and p.oblast = 'pokladna') then
+    raise exception 'Pokladna nepatří této firmě.' using errcode = 'check_violation';
+  end if;
+  if new.navrh_id is not null and not exists (
+       select 1 from public.jine_platby_skladove_navrhy n
+        where n.id = new.navrh_id and n.tenant_id = new.tenant_id and n.zaznam_id = new.zaznam_id) then
+    raise exception 'Návrh nepatří témuž záznamu.' using errcode = 'check_violation';
+  end if;
+  if new.korekce_pro is not null and not exists (
+       select 1 from public.pos_operace o
+        where o.id = new.korekce_pro and o.tenant_id = new.tenant_id and o.zaznam_id = new.zaznam_id) then
+    raise exception 'Opravovaná operace nepatří témuž záznamu.' using errcode = 'check_violation';
+  end if;
+  return new;
+end $$;
+
+revoke all on function app.jp_hlida_vazby_operace() from public, anon, authenticated;
+
+create trigger trg_vazby_pos_operace before insert or update of tenant_id, zaznam_id, pripojeni_id, navrh_id, korekce_pro
+  on public.pos_operace for each row execute function app.jp_hlida_vazby_operace();
+
 create function app.jp_hlida_firmu_pripojeni()
 returns trigger
 language plpgsql security definer set search_path = ''
@@ -578,12 +614,17 @@ begin
         where p.id = new.pos_pripojeni_id and p.tenant_id = new.tenant_id and p.oblast = 'pokladna') then
     raise exception 'Pokladna nepatří této firmě.' using errcode = 'check_violation';
   end if;
+  if new.nahrazuje is not null and not exists (
+       select 1 from public.ostatni_trzby o
+        where o.id = new.nahrazuje and o.tenant_id = new.tenant_id and o.zaznam_id is not distinct from new.zaznam_id) then
+    raise exception 'Nahrazovaná tržba nepatří témuž záznamu.' using errcode = 'check_violation';
+  end if;
   return new;
 end $$;
 
 revoke all on function app.jp_hlida_firmu_trzby() from public, anon, authenticated;
 
-create trigger trg_firma_ostatni_trzby before insert or update of tenant_id, branch_id, zaznam_id, pos_pripojeni_id
+create trigger trg_firma_ostatni_trzby before insert or update of tenant_id, branch_id, zaznam_id, pos_pripojeni_id, nahrazuje
   on public.ostatni_trzby for each row execute function app.jp_hlida_firmu_trzby();
 
 -- Audit (ústřední audit_log). Rozpoznání a katalog se neauditují:
@@ -775,6 +816,32 @@ revoke all on function app.jp_kontrola_plati(jsonb, integer, integer) from publi
 -- k odeslanému návrhu ho musí zneplatnit, i když se otisk nezměnil.
 -- Název ve výdeji je z KATALOGU pokladny (ne z prohlížeče), jinak by
 -- schvalovatel mohl vidět jiné zboží, než se odepíše.
+-- Obsluhuje pokladna záznamu (a u pokladny celé firmy i uložená provozovna)
+-- pořád pobočku záznamu? Přiřazení provozoven jde v Integracích změnit;
+-- kontrola ani výdej pak nesmí pracovat s provozovnou cizí pobočky
+-- (kontrola 19. 10.).
+create function app.jp_pokladna_obsluhuje(p_z public.jine_platby)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select p_z.pripojeni_id is not null and exists (
+    select 1
+      from public.integrace_pripojeni p
+     where p.id = p_z.pripojeni_id
+       and p.tenant_id = p_z.tenant_id
+       and p.oblast = 'pokladna'
+       and p.odpojeno_kdy is null
+       and ((p.branch_id is not null and p.branch_id = p_z.branch_id)
+            or (p.branch_id is null and exists (
+                  select 1
+                    from jsonb_array_elements(coalesce(p.externi_ucet -> 'provozovny', '[]'::jsonb)) e
+                   where e ->> 'branch_id' = p_z.branch_id::text
+                     and (p_z.pos_provozovna is null or e ->> 'id' = p_z.pos_provozovna))))
+  )
+$$;
+
+revoke all on function app.jp_pokladna_obsluhuje(public.jine_platby) from public, anon, authenticated;
+
 create function app.jp_sestavit_vydej(p_zaznam uuid)
 returns jsonb
 language plpgsql stable security definer set search_path = ''
@@ -788,6 +855,9 @@ declare
   v_obsah    jsonb;
   v_podstata jsonb;
   v_otisk    text;
+  v_varovani jsonb := '[]'::jsonb;
+  v_ma_pokrm boolean := false;
+  v_ma_zbozi boolean := false;
 begin
   select * into v_z from public.jine_platby where id = p_zaznam;
   if not found then
@@ -797,11 +867,15 @@ begin
   if v_z.pripojeni_id is null then
     v_blokace := v_blokace || jsonb_build_object('poradi', null, 'nazev', null,
       'duvod', 'Provozovna nemá u záznamu připojenou pokladnu — výdej v appce nejde připravit.');
+  elsif not app.jp_pokladna_obsluhuje(v_z) then
+    v_blokace := v_blokace || jsonb_build_object('poradi', null, 'nazev', null,
+      'duvod', 'Pokladna nebo její provozovna už tuhle pobočku neobsluhuje (změna v Integracích) — výdej přes ni nejde připravit.');
   end if;
 
   for v_p in
     select p.*,
-           k.odecita_sklad as k_odecita, k.ma_recepturu as k_receptura, k.nazev as k_nazev
+           k.odecita_sklad as k_odecita, k.ma_recepturu as k_receptura, k.nazev as k_nazev,
+           k.externi_id as k_id, k.smazano as k_smazano
       from public.jine_platby_polozky p
       left join public.pos_katalog k
              on k.pripojeni_id = v_z.pripojeni_id and k.externi_id = p.pos_produkt_id and k.tenant_id = v_z.tenant_id
@@ -822,6 +896,11 @@ begin
       elsif v_p.pos_mnozstvi is null then
         v_blokace := v_blokace || jsonb_build_object('poradi', v_p.poradi, 'nazev', v_p.nazev,
           'duvod', 'Chybí množství v jednotkách pokladny.');
+      elsif v_p.k_id is null or v_p.k_smazano then
+        -- Bez katalogu (nebo s produktem, který pokladna zrušila) nejde
+        -- ověřit, co se odepíše — id a název by šly z prohlížeče (kontrola 19. 10.).
+        v_blokace := v_blokace || jsonb_build_object('poradi', v_p.poradi, 'nazev', v_p.nazev,
+          'duvod', 'Produkt v katalogu pokladny není (katalog není načtený, nebo produkt v pokladně zrušili) — přiřazení nejde ověřit.');
       elsif v_p.k_odecita is false and v_p.k_receptura is false then
         -- Pokladna VÝSLOVNĚ říká „neodečítá a nemá recepturu" → do výdeje
         -- nepatří. Když o receptuře neví (Dotykačka ji bez include=ingredients
@@ -831,6 +910,7 @@ begin
         -- co má nastavené — nebo nic.
         null;
       else
+        if v_p.druh = 'pokrm' then v_ma_pokrm := true; else v_ma_zbozi := true; end if;
         v_polozky := v_polozky || jsonb_build_object(
           'poradi', v_p.poradi,
           'pos_produkt_id', v_p.pos_produkt_id,
@@ -843,6 +923,12 @@ begin
 
   if v_pocet = 0 then
     v_blokace := v_blokace || jsonb_build_object('poradi', null, 'nazev', null, 'duvod', 'Záznam nemá žádné položky.');
+  end if;
+  -- Pokrm s recepturou odečte pokladna i se surovinami. Appka receptury
+  -- nečte, takže nepozná, jestli další zboží ve výdeji není surovina téhož
+  -- pokrmu — schvalovatel to dostane jako varování (neblokuje, otisk nemění).
+  if v_ma_pokrm and v_ma_zbozi then
+    v_varovani := v_varovani || to_jsonb('Výdej obsahuje pokrm i další zboží. Zkontrolujte, že zboží není surovina toho pokrmu — suroviny pokrmu odečte pokladna podle receptury sama.'::text);
   end if;
 
   v_obsah := jsonb_build_object(
@@ -865,7 +951,8 @@ begin
     'otisk', v_otisk,
     'zmena', encode(sha256(convert_to(v_otisk || v_blokace::text, 'UTF8')), 'hex'),
     'polozek', jsonb_array_length(v_polozky),
-    'blokace', v_blokace);
+    'blokace', v_blokace,
+    'varovani', v_varovani);
 end $$;
 
 revoke all on function app.jp_sestavit_vydej(uuid) from public, anon, authenticated;
@@ -896,8 +983,10 @@ as $$
      and ((o.branch_id = p_z.branch_id and o.datum_prodeje = p_z.datum_prodeje
            and o.castka_haleru = p_z.castka_haleru and o.mena = p_z.mena)
           or (p_z.externi_ucet is not null and o.externi_ucet is not null
-              and o.pripojeni_id is not distinct from p_z.pripojeni_id
-              and (p_z.pripojeni_id is not null or o.branch_id = p_z.branch_id)
+              and ((o.pripojeni_id is not distinct from p_z.pripojeni_id
+                    and (p_z.pripojeni_id is not null or o.branch_id = p_z.branch_id))
+                   -- záznam s pokladnou a záznam bez ní na téže pobočce (kontrola 19. 10.)
+                   or (o.branch_id = p_z.branch_id and (o.pripojeni_id is null) <> (p_z.pripojeni_id is null)))
               and p_z.datum_prodeje is not null and o.datum_prodeje is not null
               and abs(o.datum_prodeje - p_z.datum_prodeje) <= 7
               and lower(regexp_replace(o.externi_ucet, '\s', '', 'g')) = lower(regexp_replace(p_z.externi_ucet, '\s', '', 'g'))))
@@ -1000,7 +1089,11 @@ revoke all on function public.jine_platby_zalozit(uuid, uuid, uuid, text, uuid) 
 grant execute on function public.jine_platby_zalozit(uuid, uuid, uuid, text, uuid) to authenticated;
 
 -- 8.2 Připojení souboru z úložiště.
-create function public.jine_platby_pripojit_soubor(p_zaznam uuid, p_cesta text, p_otisk text)
+-- Jen service_role: otisk a typ podle obsahu ověřuje server ze stažených
+-- bajtů (akce-soubory.ts) a právo zadat/upravit na pobočce záznamu ověřuje
+-- server dřív, než funkci zavolá. Přihlášený by jinak poslal vymyšlený
+-- otisk a obešel „stejná fotka podruhé neprojde“ (kontrola 19. 10.).
+create function public.jine_platby_pripojit_soubor(p_zaznam uuid, p_cesta text, p_otisk text, p_nahral uuid)
 returns uuid
 language plpgsql security definer set search_path = ''
 as $$
@@ -1016,10 +1109,12 @@ declare
   v_poradi   integer;
   v_id       uuid;
 begin
-  v_z := app.jp_nacist(p_zaznam);
-  if not (app.has_access(v_z.tenant_id, 'jine_platby.zadat', v_z.branch_id)
-          or app.has_access(v_z.tenant_id, 'jine_platby.upravit', v_z.branch_id)) then
-    raise exception 'K záznamu nemáte právo nahrávat doklady.' using errcode = 'insufficient_privilege';
+  select * into v_z from public.jine_platby where id = p_zaznam for update;
+  if not found then
+    raise exception 'Záznam nenalezen.' using errcode = 'P0002';
+  end if;
+  if p_nahral is null then
+    raise exception 'Chybí, kdo soubor nahrál.' using errcode = 'check_violation';
   end if;
   if v_z.stav_kontroly = 'zruseno' then
     raise exception 'Zrušený záznam už nejde měnit.' using errcode = 'check_violation';
@@ -1039,7 +1134,7 @@ begin
   if not found then
     raise exception 'Soubor v úložišti není.' using errcode = 'check_violation';
   end if;
-  if v_owner is distinct from auth.uid() then
+  if v_owner is distinct from p_nahral then
     raise exception 'Soubor nahrál někdo jiný.' using errcode = 'check_violation';
   end if;
 
@@ -1065,7 +1160,9 @@ begin
   select s.zaznam_id, s.branch_id into v_jiny, v_jina_pobocka from public.jine_platby_soubory s
    where s.tenant_id = v_z.tenant_id and s.otisk = p_otisk and s.aktivni;
   if v_jiny is not null then
-    if app.jine_platby_vidi(v_z.tenant_id, v_jina_pobocka) then
+    -- Id druhého záznamu jen na pobočce téhož záznamu; aplikace ho ukáže,
+    -- jen když ho uživatel vidí (server volá za něj, auth.uid() tu není).
+    if v_jina_pobocka = v_z.branch_id then
       raise exception 'Tento soubor už je připojený k záznamu %.', v_jiny using errcode = 'unique_violation';
     end if;
     raise exception 'Tento soubor už je připojený k jinému záznamu (na provozovně, kterou nevidíte).' using errcode = 'unique_violation';
@@ -1077,15 +1174,17 @@ begin
   end if;
 
   insert into public.jine_platby_soubory (tenant_id, branch_id, zaznam_id, poradi, cesta, mime, velikost, otisk, nahral)
-  values (v_z.tenant_id, v_z.branch_id, v_z.id, v_poradi, p_cesta, v_mime, v_velikost::integer, p_otisk, auth.uid())
+  values (v_z.tenant_id, v_z.branch_id, v_z.id, v_poradi, p_cesta, v_mime, v_velikost::integer, p_otisk, p_nahral)
   returning id into v_id;
 
-  perform app.jp_historie(v_z, 'soubor_pripojen', jsonb_build_object('poradi', v_poradi, 'mime', v_mime, 'velikost', v_velikost));
+  insert into public.jine_platby_historie (tenant_id, branch_id, zaznam_id, kdo, udalost, detail)
+  values (v_z.tenant_id, v_z.branch_id, v_z.id, p_nahral, 'soubor_pripojen',
+          jsonb_build_object('poradi', v_poradi, 'mime', v_mime, 'velikost', v_velikost));
   return v_id;
 end $$;
 
-revoke all on function public.jine_platby_pripojit_soubor(uuid, text, text) from public, anon;
-grant execute on function public.jine_platby_pripojit_soubor(uuid, text, text) to authenticated;
+revoke all on function public.jine_platby_pripojit_soubor(uuid, text, text, uuid) from public, anon, authenticated;
+grant execute on function public.jine_platby_pripojit_soubor(uuid, text, text, uuid) to service_role;
 
 -- 8.3 Uložení návrhu (hlavička + celé položky najednou, s kontrolou verze).
 create function public.jine_platby_ulozit_navrh(p_zaznam uuid, p_verze integer, p_hlavicka jsonb, p_polozky jsonb)
@@ -1102,6 +1201,7 @@ declare
   v_ext         text;
   v_kontakt     uuid;
   v_oznaceni    text;
+  v_upoz        jsonb;
   v_e           jsonb;
   v_i           integer;
   v_ma_katalog  boolean;
@@ -1167,6 +1267,18 @@ begin
   if v_kontakt is not null and not exists (
        select 1 from public.kontakty k where k.id = v_kontakt and k.tenant_id = v_z.tenant_id and k.deleted_at is null) then
     raise exception 'Odběratel nepatří této firmě.' using errcode = 'check_violation';
+  end if;
+  -- Upozornění AI k celému dokladu: posílá je jen rozpoznání; ruční uložení
+  -- klíč vynechá a upozornění zůstanou, dokud je nenahradí nové čtení.
+  if p_hlavicka ? 'upozorneni_dokladu' then
+    if jsonb_typeof(p_hlavicka -> 'upozorneni_dokladu') <> 'array' then
+      raise exception 'Upozornění k dokladu nemají platný tvar.' using errcode = 'check_violation';
+    end if;
+    select coalesce(jsonb_agg(to_jsonb(left(btrim(e #>> '{}'), 300))), '[]'::jsonb) into v_upoz
+      from (select e from jsonb_array_elements(p_hlavicka -> 'upozorneni_dokladu') e
+             where jsonb_typeof(e) = 'string' and btrim(e #>> '{}') <> '' limit 20) x;
+  else
+    v_upoz := v_z.upozorneni_dokladu;
   end if;
 
   -- Zapsaná tržba a propojená faktura se TIŠE nepřepisují (zadání, oddíl 5).
@@ -1242,8 +1354,18 @@ begin
   --     zrušila schválení uprostřed ručního odpisu a hrozil druhý odpis.
   --   * Jinak změna obsahu NEBO nová blokace (zmena) nahradí živý návrh,
   --     schvaluje se znovu.
-  if v_z.stav_skladu = 'nepodporovano' and v_otisk_po is distinct from v_otisk_pred then
+  --   * Schválený výdej (i když provedení selhalo a obrazovka vede k ručnímu
+  --     odpisu) a předaný k ručnímu odpisu: nejde měnit obsah ANI přidat
+  --     nejasnou skladovou položku. Uvolní ho jen „Zrušit schválení“
+  --     oprávněnou osobou (kontrola 19. 10.).
+  if v_z.stav_skladu = 'nepodporovano'
+     and (v_otisk_po is distinct from v_otisk_pred or v_zmena_po is distinct from v_zmena_pred) then
     raise exception 'Výdej je předaný k ručnímu provedení v pokladně — nejdřív ho doložte (Ručně doloženo), nebo schválení výslovně zrušte.'
+      using errcode = 'check_violation';
+  end if;
+  if v_z.stav_skladu = 'schvaleno'
+     and (v_otisk_po is distinct from v_otisk_pred or v_zmena_po is distinct from v_zmena_pred) then
+    raise exception 'Výdej je schválený — položky, které se týkají skladu, teď nejde měnit. Nejdřív ho proveďte nebo doložte, nebo schválení zrušte (Zrušit schválení).'
       using errcode = 'check_violation';
   end if;
   if v_z.stav_skladu in ('zpracovava_se', 'nejasny_vysledek', 'odecteno_v_pos', 'jiz_odecteno', 'rucne_dolozeno', 'opraveno')
@@ -1269,11 +1391,12 @@ begin
 
   select exists (select 1 from public.jine_platby_polozky p where p.zaznam_id = v_z.id and p.vyzaduje_kontrolu)
     into v_ke_kontrole;
-  v_ke_kontrole := v_ke_kontrole or v_castka is null or v_mena is null or v_datum is null;
+  v_ke_kontrole := v_ke_kontrole or v_castka is null or v_mena is null or v_datum is null or jsonb_array_length(v_upoz) > 0;
 
   update public.jine_platby
      set datum_prodeje = v_datum, mena = v_mena, castka_haleru = v_castka, castka_puvod = v_puvod,
          typ_dokladu = v_typ, externi_ucet = v_ext, oznaceni = v_oznaceni, kontakt_id = v_kontakt,
+         upozorneni_dokladu = v_upoz,
          stav_kontroly = case when v_ke_kontrole then 'ke_kontrole' else 'rozpracovano' end,
          stav_skladu = v_z.stav_skladu,
          -- Úhrada je vazba na skutečnou platbu; stav se po změně částky přepočítá.
@@ -1294,7 +1417,8 @@ revoke all on function public.jine_platby_ulozit_navrh(uuid, integer, jsonb, jso
 grant execute on function public.jine_platby_ulozit_navrh(uuid, integer, jsonb, jsonb) to authenticated;
 
 -- 8.4 Člověk potvrdí, že údaje dokladu sedí.
-create function public.jine_platby_oznacit_zkontrolovano(p_zaznam uuid, p_verze integer, p_duvod_rozdilu text default null)
+create function public.jine_platby_oznacit_zkontrolovano(p_zaznam uuid, p_verze integer, p_duvod_rozdilu text default null,
+                                                         p_upozorneni_provereno boolean default false)
 returns void
 language plpgsql security definer set search_path = ''
 as $$
@@ -1318,13 +1442,23 @@ begin
   if exists (select 1 from public.jine_platby_polozky p where p.zaznam_id = v_z.id and p.vyzaduje_kontrolu) then
     raise exception 'Některé položky pořád čekají na kontrolu.' using errcode = 'check_violation';
   end if;
+  -- Upozornění AI k celému dokladu (nízká jistota, víc dokladů, pokyn
+  -- v textu…) nejdou odkliknout bez výslovného „prověřil jsem“.
+  if jsonb_array_length(v_z.upozorneni_dokladu) > 0 and not coalesce(p_upozorneni_provereno, false) then
+    raise exception 'AI k dokladu napsala upozornění (%). Prověřte je a potvrďte, že jste je prověřili.',
+      (select string_agg(e #>> '{}', '; ') from jsonb_array_elements(v_z.upozorneni_dokladu) e) using errcode = 'check_violation';
+  end if;
 
   -- Nesoulad celku se součtem položek vyžaduje kontrolu (zadání, oddíl 4):
   -- když mají všechny položky cenu celkem a součet (spropitné do ceny
   -- prodeje nepatří) nesedí s celkovou částkou, člověk musí napsat, proč je
   -- rozdíl v pořádku. U CZK je 50 hal. zaokrouhlení hotovosti, jinde nic.
   -- Záznam bez položek (jen celková částka) se nekontroluje — není s čím.
-  select count(*), count(cena_celkem_haleru), coalesce(sum(cena_celkem_haleru), 0)
+  -- Cena řádku: z dokladu, jinak množství × jednotková cena (stejně jako
+  -- obrazovka; jinak by jedna chybějící cena celkem kontrolu vypnula).
+  select count(*),
+         count(coalesce(cena_celkem_haleru, round(mnozstvi * cena_jednotkova_haleru))),
+         coalesce(sum(coalesce(cena_celkem_haleru, round(mnozstvi * cena_jednotkova_haleru))), 0)
     into v_polozek, v_s_cenou, v_soucet
     from public.jine_platby_polozky
    where zaznam_id = v_z.id and druh <> 'spropitne';
@@ -1339,11 +1473,12 @@ begin
 
   update public.jine_platby set stav_kontroly = 'zkontrolovano', zmeneno = now() where id = v_z.id;
   perform app.jp_historie(v_z, 'zkontrolovano', jsonb_build_object('verze', v_z.verze,
+    'upozorneni_proverena', case when jsonb_array_length(v_z.upozorneni_dokladu) > 0 then v_z.upozorneni_dokladu end,
     'rozdil_haleru', case when v_duvod is null then null else v_soucet - v_z.castka_haleru end, 'duvod_rozdilu', v_duvod));
 end $$;
 
-revoke all on function public.jine_platby_oznacit_zkontrolovano(uuid, integer, text) from public, anon;
-grant execute on function public.jine_platby_oznacit_zkontrolovano(uuid, integer, text) to authenticated;
+revoke all on function public.jine_platby_oznacit_zkontrolovano(uuid, integer, text, boolean) from public, anon;
+grant execute on function public.jine_platby_oznacit_zkontrolovano(uuid, integer, text, boolean) to authenticated;
 
 -- 8.5 Ruční doložení stavu v pokladně. NENÍ to automatické ověření —
 -- zdroj 'rucni_prohlaseni', povinný důvod, kdo a kdy (zadání, oddíl 8).
@@ -1357,6 +1492,8 @@ declare
   v_z      public.jine_platby;
   v_duvod  text;
   v_k      jsonb;
+  v_stara  jsonb;
+  v_prepis boolean;
 begin
   v_z := app.jp_nacist(p_zaznam);
   perform app.jp_verze(v_z, p_verze);
@@ -1376,6 +1513,19 @@ begin
     raise exception 'Neznámý druh kontroly.' using errcode = 'check_violation';
   end if;
 
+  -- Výsledek dotazu do pokladny (pos_api) k téže verzi nepřepíše ruční
+  -- prohlášení opačného znění — jinak by „není tam“ odemklo druhou tržbu
+  -- nebo druhý odpis. Rozhodnout to smí jen člověk s právem na opravy
+  -- (kontrola 19. 10.).
+  v_stara := case when p_druh = 'trzba' then v_z.kontrola_trzby else v_z.kontrola_skladu end;
+  v_prepis := v_stara ->> 'zdroj' = 'pos_api' and (v_stara ->> 'verze')::integer = v_z.verze
+     and ((p_druh = 'trzba' and v_stara ->> 'vysledek' in ('nalezeno', 'pravdepodobne') and p_vysledek = 'nenalezeno')
+          or (p_druh = 'sklad' and v_stara ->> 'vysledek' = 'jiz_odecteno' and p_vysledek = 'neodecteno'));
+  if coalesce(v_prepis, false) and not app.has_access(v_z.tenant_id, 'jine_platby.oprava', v_z.branch_id) then
+    raise exception 'Pokladna při kontrole tohle našla (výsledek: %). Ruční prohlášení opačného znění to nepřepíše — zopakujte kontrolu v pokladně, nebo to rozhodne člověk s právem na opravy.',
+      v_stara ->> 'vysledek' using errcode = 'check_violation';
+  end if;
+
   v_k := jsonb_build_object(
     'vysledek', p_vysledek, 'zdroj', 'rucni_prohlaseni', 'verze', v_z.verze,
     'kdy', now(), 'kdo', auth.uid(),
@@ -1386,7 +1536,8 @@ begin
   else
     update public.jine_platby set kontrola_skladu = v_k, zmeneno = now() where id = v_z.id;
   end if;
-  perform app.jp_historie(v_z, 'rucne_dolozeno_' || p_druh, jsonb_build_object('vysledek', p_vysledek, 'duvod', v_duvod));
+  perform app.jp_historie(v_z, 'rucne_dolozeno_' || p_druh, jsonb_build_object('vysledek', p_vysledek, 'duvod', v_duvod,
+    'prepsano_pokladny', case when coalesce(v_prepis, false) then v_stara ->> 'vysledek' end));
 end $$;
 
 revoke all on function public.jine_platby_prohlasit(uuid, integer, text, text, text, text) from public, anon;
@@ -1397,7 +1548,8 @@ grant execute on function public.jine_platby_prohlasit(uuid, integer, text, text
 --   'propojit' = prodej už je v tržbách jinde — jen se ukáže, do součtu se nepřičte.
 -- Propojení nikdy nic nepřičte, takže je povolené při jakémkoli výsledku
 -- kontroly kromě 'nenalezeno'. Nová tržba jen po 'nenalezeno'.
-create function public.jine_platby_potvrdit_trzbu(p_zaznam uuid, p_verze integer, p_rezim text, p_duplicita_duvod text default null)
+create function public.jine_platby_potvrdit_trzbu(p_zaznam uuid, p_verze integer, p_rezim text, p_duplicita_duvod text default null,
+                                                  p_duvod_propojeni text default null)
 returns uuid
 language plpgsql security definer set search_path = ''
 as $$
@@ -1413,6 +1565,7 @@ declare
   v_jina_pobocka uuid;
   v_id        uuid;
   v_duvod     text;
+  v_duvod_prop text;
 begin
   v_z := app.jp_nacist(p_zaznam);
   perform app.jp_vyzadovat(v_z, 'jine_platby.trzba', 'Tržbu smí potvrdit jen ten, kdo má právo evidovat tržby na této provozovně.');
@@ -1426,6 +1579,11 @@ begin
   if v_z.castka_haleru is null or v_z.castka_haleru <= 0 or v_z.mena is null or v_z.datum_prodeje is null then
     raise exception 'Tržba potřebuje kladnou částku, měnu a datum prodeje.' using errcode = 'check_violation';
   end if;
+
+  -- Dvě fotky téže sjetiny potvrzené ve stejnou chvíli: bez zámku by žádná
+  -- transakce neviděla nepotvrzenou tržbu té druhé a obě by se zapsaly.
+  -- Potvrzování tržeb jedné firmy jde proto za sebou (kontrola 19. 10.).
+  perform pg_advisory_xact_lock(hashtextextended('jine_platby_trzba:' || v_z.tenant_id::text, 0));
 
   v_k := v_z.kontrola_trzby;
   if not app.jp_kontrola_plati(v_k, v_z.verze, 30) then
@@ -1453,6 +1611,17 @@ begin
     v_prodej := left(nullif(btrim(coalesce(v_k -> 'detail' ->> 'pos_prodej_id', '')), ''), 100);
     if v_prodej is not null and v_z.pripojeni_id is null then
       v_prodej := null;
+    end if;
+    -- Propojení bez konkrétního prodeje (shoda jen částky, nejde ověřit…)
+    -- by tržbu mimo pokladnu tiše vyřadilo ze všech součtů. Chce důvod;
+    -- výjimkou je ruční prohlášení „prodej v pokladně je“, které důvod nese
+    -- samo (kontrola 19. 10.).
+    if v_prodej is null and not (v_k ->> 'zdroj' = 'rucni_prohlaseni' and v_vys = 'nalezeno') then
+      if nullif(btrim(coalesce(p_duvod_propojeni, '')), '') is null then
+        raise exception 'Kontrola nenašla konkrétní prodej v pokladně (výsledek: %). Propojit jde jen s důvodem, proč je prodej v pokladně — jinak se tržba nezapočítá nikde.',
+          v_vys using errcode = 'check_violation';
+      end if;
+      v_duvod_prop := app.jp_duvod(p_duvod_propojeni);
     end if;
   else
     raise exception 'Neznámý způsob zápisu tržby.' using errcode = 'check_violation';
@@ -1498,14 +1667,14 @@ begin
 
   perform app.jp_historie(v_z, case when v_zapocitat then 'trzba_zapsana' else 'trzba_propojena' end,
     jsonb_build_object('castka_haleru', v_z.castka_haleru, 'mena', v_z.mena, 'kontrola', v_vys,
-                       'zdroj_kontroly', v_k ->> 'zdroj', 'pos_prodej_id', v_prodej));
+                       'zdroj_kontroly', v_k ->> 'zdroj', 'pos_prodej_id', v_prodej, 'duvod_propojeni', v_duvod_prop));
   perform app.audit(v_z.tenant_id, 'finance.ostatni_trzba_potvrzena', 'ostatni_trzby', v_id::text, v_z.branch_id, null,
     jsonb_build_object('zaznam', v_z.id, 'zapocitat', v_zapocitat, 'castka_haleru', v_z.castka_haleru, 'mena', v_z.mena));
   return v_id;
 end $$;
 
-revoke all on function public.jine_platby_potvrdit_trzbu(uuid, integer, text, text) from public, anon;
-grant execute on function public.jine_platby_potvrdit_trzbu(uuid, integer, text, text) to authenticated;
+revoke all on function public.jine_platby_potvrdit_trzbu(uuid, integer, text, text, text) from public, anon;
+grant execute on function public.jine_platby_potvrdit_trzbu(uuid, integer, text, text, text) to authenticated;
 
 -- 8.7 Náhled výdeje (jen čtení).
 create function public.jine_platby_sestavit_vydej(p_zaznam uuid)
@@ -1810,6 +1979,11 @@ begin
     raise exception 'Schválený návrh je jiný, než jaký máte otevřený — načtěte stránku znovu a doložte ten, který jste v pokladně odepsali.'
       using errcode = 'check_violation';
   end if;
+  -- Nevyřešená skladová položka (přidaná mimo uložení návrhu, produkt
+  -- zrušený v katalogu) by se s doložením neodečetla nikdy (kontrola 19. 10.).
+  if exists (select 1 from jsonb_array_elements(app.jp_sestavit_vydej(v_z.id) -> 'blokace') b where b ->> 'poradi' is not null) then
+    raise exception 'Návrh výdeje má nevyřešené položky — doložit jde až po jejich vyřešení (nebo schválení zrušte).' using errcode = 'check_violation';
+  end if;
   select * into v_op from public.pos_operace where navrh_id = v_n.id and druh = 'vydej' order by zahajeno desc limit 1 for update;
   if v_op.stav in ('odesila_se', 'nejasny_vysledek') then
     raise exception 'Požadavek do pokladny má nejasný výsledek — nejdřív ho dohledejte, ať se výdej nezdvojí.' using errcode = 'check_violation';
@@ -1983,10 +2157,16 @@ begin
     perform app.jp_historie(v_z, 'uhrada_odpojena', '{}'::jsonb);
     return;
   end if;
+  if v_z.stav_kontroly = 'zruseno' then
+    raise exception 'Záznam je zrušený — úhradu k němu napárovat nejde.' using errcode = 'check_violation';
+  end if;
+  -- Stejný zámek jako párování plateb s fakturami (app.potvrdit_alokaci_platby),
+  -- ať jedna platba nezaplatí fakturu i Jinou platbu zároveň (kontrola 19. 10.).
+  perform pg_advisory_xact_lock(hashtextextended(p_transakce::text, 0));
 
   -- Zámek platby (pořadí: záznam, pak platba): dvě souběžná párování téže
   -- platby by jinak obě prošla kontrolou součtu (kontrola 17. 10.).
-  select t.id, t.castka_haleru, t.mena, t.smer, u.branch_id into v_t
+  select t.id, t.castka_haleru, t.mena, t.smer, t.storno_of, u.branch_id into v_t
     from public.transakce t join public.platebni_ucty u on u.id = t.ucet_id
    where t.id = p_transakce and t.tenant_id = v_z.tenant_id
    for update of t;
@@ -2002,16 +2182,24 @@ begin
   if v_t.smer <> 'prijem' then
     raise exception 'Úhrada musí být příchozí platba.' using errcode = 'check_violation';
   end if;
+  if v_t.storno_of is not null or exists (
+       select 1 from public.transakce s where s.storno_of = p_transakce and s.tenant_id = v_z.tenant_id) then
+    raise exception 'Platba je stornovaná (nebo je to storno) — úhradu neprokazuje.' using errcode = 'check_violation';
+  end if;
   if v_z.mena is null or v_t.mena is distinct from v_z.mena then
     raise exception 'Měna platby nesedí s měnou záznamu.' using errcode = 'check_violation';
   end if;
   if p_castka_haleru is null or p_castka_haleru <= 0 or p_castka_haleru > v_t.castka_haleru then
     raise exception 'Částka úhrady musí být kladná a nejvýš rovna platbě.' using errcode = 'check_violation';
   end if;
-  select coalesce(sum(uhrada_castka_haleru), 0) into v_jinde
-    from public.jine_platby where uhrada_transakce_id = p_transakce and id <> v_z.id and stav_kontroly <> 'zruseno';
+  -- Soupeři o tutéž platbu: jiné Jiné platby i potvrzené párování s fakturami.
+  select coalesce((select sum(uhrada_castka_haleru) from public.jine_platby
+                    where uhrada_transakce_id = p_transakce and id <> v_z.id and tenant_id = v_z.tenant_id), 0)
+       + coalesce((select sum(castka_haleru) from public.platby_faktury
+                    where transakce_id = p_transakce and tenant_id = v_z.tenant_id and stav = 'potvrzeno'), 0)
+    into v_jinde;
   if v_jinde + p_castka_haleru > v_t.castka_haleru then
-    raise exception 'Platba je už rozdělená k jiným záznamům — zbývá % hal.', v_t.castka_haleru - v_jinde using errcode = 'check_violation';
+    raise exception 'Platba je už rozdělená k jiným záznamům nebo fakturám — zbývá % hal.', v_t.castka_haleru - v_jinde using errcode = 'check_violation';
   end if;
 
   update public.jine_platby
@@ -2166,7 +2354,12 @@ begin
     raise exception 'Výdej je předaný k ručnímu provedení v pokladně — nejdřív ho doložte (Ručně doloženo), nebo nechte schválení zrušit.'
       using errcode = 'check_violation';
   end if;
-  if v_z.stav_skladu not in ('bez_navrhu', 'nevyzaduje', 'zamitnuto', 'ceka_na_schvaleni', 'schvaleno', 'chyba') then
+  -- Schválený výdej může schvalovatel právě odepisovat v pokladně (i když
+  -- provedení přes API selhalo) — uvolní ho jen Zrušit schválení (kontrola 19. 10.).
+  if v_z.stav_skladu = 'schvaleno' then
+    raise exception 'Výdej je schválený — nejdřív ho doložte, nebo schválení zrušte (Zrušit schválení).' using errcode = 'check_violation';
+  end if;
+  if v_z.stav_skladu not in ('bez_navrhu', 'nevyzaduje', 'zamitnuto', 'ceka_na_schvaleni', 'chyba') then
     raise exception 'Výdej proběhl nebo probíhá — záznam nejde zrušit, jen opravit.' using errcode = 'check_violation';
   end if;
   if exists (select 1 from public.pos_operace where zaznam_id = v_z.id and stav in ('odesila_se', 'nejasny_vysledek')) then
@@ -2212,8 +2405,10 @@ begin
   if v_alias = '' or v_produkt is null then
     raise exception 'Chybí název nebo produkt.' using errcode = 'check_violation';
   end if;
-  if exists (select 1 from public.pos_katalog k where k.pripojeni_id = v_z.pripojeni_id and k.tenant_id = v_z.tenant_id)
-     and not exists (select 1 from public.pos_katalog k
+  if not exists (select 1 from public.pos_katalog k where k.pripojeni_id = v_z.pripojeni_id and k.tenant_id = v_z.tenant_id) then
+    raise exception 'Katalog pokladny není načtený — nejdřív ho načtěte, pak jde přiřazení ověřit.' using errcode = 'check_violation';
+  end if;
+  if not exists (select 1 from public.pos_katalog k
                       where k.pripojeni_id = v_z.pripojeni_id and k.tenant_id = v_z.tenant_id
                         and k.externi_id = v_produkt and not k.smazano) then
     raise exception 'Produkt v katalogu pokladny není.' using errcode = 'check_violation';
@@ -2283,7 +2478,7 @@ grant execute on function public.jine_platby_spotreba(uuid, uuid, date, date) to
 -- v pokladně" a „rozpoznala AI" nesmí jít zapsat z prohlížeče.
 -- ---------------------------------------------------------------------
 
-create function public.jine_platby_zahajit_rozpoznani(p_zaznam uuid, p_spustil uuid)
+create function public.jine_platby_zahajit_rozpoznani(p_zaznam uuid, p_spustil uuid, p_verze integer default null)
 returns uuid
 language plpgsql security definer set search_path = ''
 as $$
@@ -2299,11 +2494,21 @@ begin
   if v_z.stav_kontroly = 'zruseno' then
     raise exception 'Zrušený záznam už nejde měnit.' using errcode = 'check_violation';
   end if;
+  -- Levné kontroly PŘED placeným čtením (kontrola 19. 10.).
+  if p_verze is not null and p_verze is distinct from v_z.verze then
+    raise exception 'Záznam mezitím upravil někdo jiný, načtěte ho znovu.' using errcode = 'serialization_failure';
+  end if;
+  if v_z.stav_trzby in ('zapsano', 'propojeno') then
+    raise exception 'Tržba je už zapsaná — nové rozpoznání by měnilo potvrzené údaje. Opravte je ručně.' using errcode = 'check_violation';
+  end if;
   if exists (select 1 from public.jine_platby_rozpoznani
               where zaznam_id = v_z.id and stav = 'bezi' and vytvoreno > now() - interval '3 minutes') then
     raise exception 'Rozpoznání tohohle dokladu už běží.' using errcode = 'check_violation';
   end if;
-  -- Denní strop na firmu (den podle Prahy). Pokus se počítá PŘED voláním AI.
+  -- Denní strop na firmu (den podle Prahy). Pokus se počítá PŘED voláním AI;
+  -- zámek na firmu, jinak by souběžné pokusy na různých záznamech strop
+  -- přešly (kontrola 19. 10.).
+  perform pg_advisory_xact_lock(hashtextextended('jine_platby_ai:' || v_z.tenant_id::text, 0));
   select count(*) into v_dnes from public.jine_platby_rozpoznani
    where tenant_id = v_z.tenant_id
      and vytvoreno >= (date_trunc('day', now() at time zone 'Europe/Prague') at time zone 'Europe/Prague');
@@ -2316,8 +2521,8 @@ begin
   return v_id;
 end $$;
 
-revoke all on function public.jine_platby_zahajit_rozpoznani(uuid, uuid) from public, anon, authenticated;
-grant execute on function public.jine_platby_zahajit_rozpoznani(uuid, uuid) to service_role;
+revoke all on function public.jine_platby_zahajit_rozpoznani(uuid, uuid, integer) from public, anon, authenticated;
+grant execute on function public.jine_platby_zahajit_rozpoznani(uuid, uuid, integer) to service_role;
 
 create function public.jine_platby_dokoncit_rozpoznani(
   p_rozpoznani uuid, p_stav text, p_model text, p_verze_zadani text, p_vysledek jsonb, p_text text, p_duvod text
@@ -2366,6 +2571,9 @@ begin
   end if;
   if p_verze is distinct from v_z.verze then
     raise exception 'Záznam se mezitím změnil — kontrolu zopakujte.' using errcode = 'serialization_failure';
+  end if;
+  if not app.jp_pokladna_obsluhuje(v_z) then
+    raise exception 'Pokladna nebo její provozovna už tuhle pobočku neobsluhuje — kontrolu z ní nejde zapsat.' using errcode = 'check_violation';
   end if;
   if (p_druh = 'trzba' and p_vysledek not in ('nalezeno', 'nenalezeno', 'pravdepodobne', 'nelze_overit'))
      or (p_druh = 'sklad' and p_vysledek not in ('neodecteno', 'jiz_odecteno', 'nelze_zjistit'))
