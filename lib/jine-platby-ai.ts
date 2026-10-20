@@ -29,6 +29,7 @@ import {
   VERZE_ZADANI,
   ZADANI,
   casNaCteni,
+  maxTokenu,
   naRozpoznanyDoklad,
   sestavitObsah,
   zkontrolovatPodklad,
@@ -42,11 +43,13 @@ export type VysledekRozpoznani =
 
 type ChybaRozpoznani = Extract<VysledekRozpoznani, { stav: 'chyba' }>
 
-/** Strop délky odpovědi (u Opus 5.5 se do něj počítá i přemýšlení). */
-const MAX_TOKENU = 16000
-
 export const HLASKA_NEZBYVA_CAS = 'Na čtení nezbývá čas — zkuste to znovu.'
-export const HLASKA_MOC_DLOUHY = 'Doklad je na jedno čtení moc dlouhý — rozdělte ho, nebo položky vyplňte ručně.'
+/**
+ * Useknutá odpověď (`max_tokens`) i vypršený čas (timeout) znamenají totéž:
+ * doklad se do jednoho čtení nevejde. Opakování by dopadlo stejně a každé
+ * se započítá do denního stropu — proto TRVALÁ chyba s radou, ne „zkuste znovu".
+ */
+export const HLASKA_MOC_DLOUHY = 'Doklad je na jedno čtení moc dlouhý — rozdělte ho, nebo zadejte položky ručně.'
 export const HLASKA_ODMITNUTO = 'Model doklad odmítl přečíst — vyplňte položky ručně.'
 
 export function rozpoznavaniJeNastavene(): boolean {
@@ -60,6 +63,13 @@ export function rozpoznavaniJeNastavene(): boolean {
  *                     model dostane nejvýš `konec − teď − 5 s` (N29). Když
  *                     vyjde méně než 15 s, model se nevolá a vrátí se dočasná
  *                     chyba (pokus by se zaplatil a nestihl).
+ *
+ * Strop odpovědi (`max_tokens`) se odvodí z téhož času (`maxTokenu`, C8):
+ * model dostane jen tolik tokenů, kolik za `limit` stihne napsat. Dlouhý
+ * doklad tak skončí včas na `max_tokens` → `HLASKA_MOC_DLOUHY`. Když
+ * přesto vyprší čas (`APIConnectionTimeoutError` — stejně u stropu 100 s
+ * jako u limitu z `konec`, obojí je timeout klienta), je to taky
+ * TRVALÁ chyba `HLASKA_MOC_DLOUHY`, ne „zkuste znovu".
  *
  * Volání je `messages.create` se strukturovaným výstupem a odpověď se
  * převádí TADY (N33): `messages.parse` v SDK 0.125 parsuje JSON dřív, než
@@ -92,7 +102,7 @@ export async function rozpoznatDoklad(
   try {
     odpoved = await client.messages.create({
       model: MODEL,
-      max_tokens: MAX_TOKENU,
+      max_tokens: maxTokenu(limit),
       output_config: { effort: NAMAHA, format: { type: format.type, schema: format.schema } },
       system: ZADANI,
       messages: [{ role: 'user', content: sestavitObsah(p) }],
@@ -137,7 +147,11 @@ function docasna(duvod: string): ChybaRozpoznani {
   return { stav: 'chyba', duvod, docasna: true }
 }
 
-/** Stejné mapování jako lib/faktury-prijem-ai.ts. Text odpovědi (kus dokladu) do důvodu nejde. */
+/**
+ * Mapování jako lib/faktury-prijem-ai.ts, s jedinou výjimkou: timeout je
+ * tady trvalá chyba (viz `HLASKA_MOC_DLOUHY`). Text odpovědi (kus dokladu)
+ * do důvodu nejde.
+ */
 function chyba(e: unknown): ChybaRozpoznani {
   if (e instanceof Anthropic.AuthenticationError) {
     return trvala('Klíč k AI neplatí — zkontrolujte ANTHROPIC_API_KEY na serveru.')
@@ -145,8 +159,11 @@ function chyba(e: unknown): ChybaRozpoznani {
   if (e instanceof Anthropic.RateLimitError) {
     return docasna('AI je právě přetížená (limit požadavků). Zkuste to za chvíli.')
   }
+  // Timeout (strop 100 s i limit z termínu `konec`): max_tokens je sladěný s časem,
+  // takže čtení, které se nestihlo, je na jeden průchod moc dlouhé — trvalá chyba (C8).
+  // Musí stát PŘED APIConnectionError (timeout je jeho podtřída).
   if (e instanceof Anthropic.APIConnectionTimeoutError) {
-    return docasna('AI se neozvala včas. Zkuste to znovu.')
+    return trvala(HLASKA_MOC_DLOUHY)
   }
   if (e instanceof Anthropic.APIConnectionError) {
     return docasna('Nepodařilo se spojit s AI. Zkuste to znovu.')

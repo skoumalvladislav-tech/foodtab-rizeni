@@ -125,6 +125,12 @@ export type HlavickaNavrhu = {
    * zkontrolovaný jde jen s `p_upozorneni_provereno = true`.
    */
   upozorneniDokladu?: string[]
+  /**
+   * Id rozpoznání (`jine_platby_rozpoznani`, stav 'ok'), ze kterého je návrh.
+   * Posílá jen akce rozpoznání; `undefined` = ponechat uloženou vazbu
+   * (ruční uložení). Panel „Částky na dokladu“ čte tenhle řádek.
+   */
+  rozpoznaniId?: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -185,6 +191,8 @@ export type ZaznamJinePlatby = {
   kontrolaSkladu: KontrolaPos<VysledekKontrolySkladu> | null
   /** Upozornění AI k celému dokladu (viz HlavickaNavrhu.upozorneniDokladu). */
   upozorneniDokladu: string[]
+  /** Rozpoznání, ze kterého je uložený návrh (viz HlavickaNavrhu.rozpoznaniId). */
+  rozpoznaniId: string | null
   verze: number
   vytvoril: string | null
   vytvoreno: string

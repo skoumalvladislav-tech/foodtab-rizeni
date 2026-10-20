@@ -50,8 +50,11 @@ export const NAMAHA = 'high'
 /**
  * Mění se s každou změnou zadání nebo schématu — ukládá se k rozpoznání (`jine_platby_rozpoznani.verze_zadani`).
  * v2 (19. 10. 2026): pole `cas` (čas tisku účtenky, N31).
+ * v3 (20. 10. 2026): zpřesněné typy dokladu (C4) — vytištěný nezaplacený
+ *     účet stolu je `otevreny_ucet`, i když vypadá jako sjetina;
+ *     `informativni_sjetina` jen report z pokladny, který není účtem stolu.
  */
-export const VERZE_ZADANI = 'jine-platby-v2'
+export const VERZE_ZADANI = 'jine-platby-v3'
 
 /* ------------------------------------------------------------------ */
 /* Časový rozpočet volání (N29)                                         */
@@ -76,6 +79,37 @@ export function casNaCteni(moznosti: { casovyLimitMs?: number; konec?: number },
   if (typeof moznosti.casovyLimitMs === 'number' && moznosti.casovyLimitMs > 0) limit = Math.min(limit, moznosti.casovyLimitMs)
   if (typeof moznosti.konec === 'number' && Number.isFinite(moznosti.konec)) limit = Math.min(limit, moznosti.konec - tedMs - REZERVA_PO_ODPOVEDI_MS)
   return limit >= MIN_CAS_NA_CTENI_MS ? Math.floor(limit) : null
+}
+
+/**
+ * Strop délky odpovědi sladěný s časem na čtení (C8, kontrola 20. 10.).
+ *
+ * Proč: dřív platil pevný strop 16 000 tokenů při čekání nejvýš ~95 s.
+ * Model při námaze `high` vyrobí zhruba `TOKENU_ZA_SEKUNDU` (~50) tokenů
+ * výstupu za sekundu, a do stropu se u Opus 5.5 počítá i jeho přemýšlení.
+ * 16 000 tokenů by trvalo ~5 minut — dlouhý doklad proto vždycky narazil
+ * na časový limit (a každé opakování se započítalo do denního stropu),
+ * zatímco větev „moc dlouhý" (`stop_reason: 'max_tokens'`) se ke slovu
+ * nedostala. Strop = to, co model za daný čas stihne napsat: dlouhý doklad
+ * skončí včas na `max_tokens` s jasnou radou „rozdělte ho" místo timeoutu.
+ *
+ *   `MIN_TOKENU_ODPOVEDI` (4 000) — pod tím by se nevešla ani běžná účtenka
+ *     (přemýšlení + JSON položek + přepis textu), čtení by padalo jako
+ *     „moc dlouhý" i u krátkých dokladů;
+ *   `MAX_TOKENU_ODPOVEDI` (16 000) — dosavadní strop volání bez streamování
+ *     (SDK chce u dlouhých odpovědí stream); při dnešních 100 s se k němu
+ *     nedojde, platí, kdyby se čekání někdy prodloužilo.
+ *
+ * `maxTokenu(limitMs)` = min(16 000, max(4 000, floor(limit_s × 50))).
+ * Při výchozích 100 s je to 5 000, při 55 s (pozdní start) 4 000.
+ */
+export const TOKENU_ZA_SEKUNDU = 50
+export const MIN_TOKENU_ODPOVEDI = 4_000
+export const MAX_TOKENU_ODPOVEDI = 16_000
+
+export function maxTokenu(limitMs: number): number {
+  if (!Number.isFinite(limitMs) || limitMs <= 0) return MIN_TOKENU_ODPOVEDI
+  return Math.min(MAX_TOKENU_ODPOVEDI, Math.max(MIN_TOKENU_ODPOVEDI, Math.floor((limitMs / 1000) * TOKENU_ZA_SEKUNDU)))
 }
 
 /** Doslovný přepis dokladu se ukládá zkrácený (`jine_platby_rozpoznani.text_dokladu`). */
@@ -207,11 +241,15 @@ export const ZADANI = [
   '- `externiId`: číslo účtu, stolu s účtem nebo dokladu z pokladny přesně',
   '  jak stojí (např. „Účet 1234", „Doklad č. 2026/0042" → „1234", „2026/0042").',
   '- `typDokladu`:',
-  '  - otevreny_ucet: rozpracovaný, nezaplacený účet (předúčet, mezisoučet stolu).',
+  '  - otevreny_ucet: vytištěný NEZAPLACENÝ účet konkrétního stolu nebo zákazníka',
+  '    (předúčet, mezisoučet stolu) — i když vypadá jako sjetina nebo přehled',
+  '    položek. Rozhoduje, že jde o účet jednoho stolu, který ještě není zaplacený.',
   '  - uzavreny_prodej: zaplacená účtenka nebo daňový doklad.',
-  '  - informativni_sjetina: přehled nebo sjetina z pokladny, která není účtenkou.',
+  '  - informativni_sjetina: JEN přehled nebo report z pokladny (třeba souhrn',
+  '    prodejů za směnu nebo za den), který NENÍ účtem konkrétního stolu.',
   '  - rucni_spotreba: ručně psaný seznam spotřeby bez pokladny.',
-  '  - nezjisteno: nejde poznat.',
+  '  - nezjisteno: nejde poznat. Když váháš mezi otevreny_ucet a',
+  '    informativni_sjetina, zvol nezjisteno a napiš proč do `upozorneni`.',
   '- `textDokladu`: doslovný přepis textu dokladu, jak jde za sebou, nejvýš',
   '  zhruba 3000 znaků. Když na podkladu žádný text není, dej prázdný text.',
   '- `jistota`: 0–1 za celý doklad.',

@@ -35,6 +35,10 @@ const {
   CEKANI_NA_MODEL_MS,
   REZERVA_PO_ODPOVEDI_MS,
   MIN_CAS_NA_CTENI_MS,
+  TOKENU_ZA_SEKUNDU,
+  MIN_TOKENU_ODPOVEDI,
+  MAX_TOKENU_ODPOVEDI,
+  maxTokenu,
   casNaCteni,
   pocetStranPdf,
   poznatTypSouboru,
@@ -277,7 +281,7 @@ console.log('\n== Model, námaha, verze zadání ==')
 {
   ok('MODEL = claude-opus-5-5', MODEL === 'claude-opus-5-5')
   ok('NAMAHA = high (výchozí u Opus 5.5 je medium)', NAMAHA === 'high')
-  ok('VERZE_ZADANI = jine-platby-v2 (v2 přidala čas tisku, N31)', VERZE_ZADANI === 'jine-platby-v2')
+  ok('VERZE_ZADANI = jine-platby-v3 (v2 přidala čas tisku, N31; v3 zpřesnila typy dokladu, C4)', VERZE_ZADANI === 'jine-platby-v3')
 }
 
 console.log('\n== Zadání: bezpečnost a zákaz hádání ==')
@@ -298,6 +302,19 @@ console.log('\n== Zadání: bezpečnost a zákaz hádání ==')
     /- `cas`:/.test(ZADANI) && /HH:MM/.test(ZADANI) && /jen když je na dokladu čitelný/.test(ZADANI) && /dej null — čas si nedomýšlej ani neodhaduj/.test(ZADANI))
   ok('všech osm druhů položky popsaných', DRUHY_POLOZEK.every((d) => ZADANI.includes(`- ${d}:`)))
   ok('všech pět typů dokladu popsaných', TYPY_DOKLADU.every((t) => ZADANI.includes(`- ${t}:`)))
+  // C4 (kontrola 20. 10.): typy se nesmí překrývat — nezaplacený účet stolu, i když vypadá jako sjetina, je otevreny_ucet.
+  const typ = (t) => {
+    const od = ZADANI.indexOf(`  - ${t}:`)
+    const dalsi = ZADANI.slice(od + 5).search(/\n {2}- \w+:|\n- `/)
+    return od < 0 ? '' : ZADANI.slice(od, dalsi < 0 ? undefined : od + 5 + dalsi).replace(/\s+/g, ' ')
+  }
+  ok(`otevreny_ucet: vytištěný NEZAPLACENÝ účet stolu, i když vypadá jako sjetina (${typ('otevreny_ucet').slice(0, 60)}…)`,
+    /NEZAPLACENÝ účet konkrétního stolu/.test(typ('otevreny_ucet')) && /předúčet/.test(typ('otevreny_ucet')) && /i když vypadá jako sjetina/.test(typ('otevreny_ucet')))
+  ok('informativni_sjetina: JEN přehled nebo report z pokladny, který NENÍ účtem konkrétního stolu',
+    /JEN přehled nebo report z pokladny/.test(typ('informativni_sjetina')) && /NENÍ účtem konkrétního stolu/.test(typ('informativni_sjetina')))
+  ok('… a sjetina už nemluví jen o „není účtenkou" (dřív se s otevřeným účtem překrývala)', !/která není účtenkou/.test(ZADANI))
+  ok('nejasný případ mezi účtem a sjetinou → nezjisteno s důvodem v `upozorneni`',
+    /váháš mezi otevreny_ucet a informativni_sjetina, zvol nezjisteno a napiš proč do `upozorneni`/.test(typ('nezjisteno')))
   ok('víc souborů = stránky jednoho dokladu', /stránky TÉHOŽ dokladu/.test(ZADANI))
 }
 
@@ -436,6 +453,22 @@ console.log('\n== Časový rozpočet volání (N29): casNaCteni ==')
   ok('nesmyslný termín (NaN) se nebere, platí výchozí', casNaCteni({ konec: Number.NaN }, TED) === 100_000)
 }
 
+console.log('\n== Strop odpovědi sladěný s časem (C8): maxTokenu ==')
+{
+  ok('konstanty: ~50 tokenů/s, nejméně 4 000, nejvýš 16 000', TOKENU_ZA_SEKUNDU === 50 && MIN_TOKENU_ODPOVEDI === 4_000 && MAX_TOKENU_ODPOVEDI === 16_000)
+  ok('výchozích 100 s → 5 000 tokenů (dřív pevných 16 000, model by je za 100 s nestihl)', maxTokenu(100_000) === 5_000 && maxTokenu(CEKANI_NA_MODEL_MS) === 5_000)
+  ok('55 s (pozdní start) a 15 s (nejkratší volání) → spodní strop 4 000', maxTokenu(55_000) === 4_000 && maxTokenu(MIN_CAS_NA_CTENI_MS) === 4_000)
+  ok('80 s → 4 000, 80,02 s → 4 001 (floor(limit_s × 50))', maxTokenu(80_000) === 4_000 && maxTokenu(80_020) === 4_001)
+  ok('320 s a víc → horní strop 16 000', maxTokenu(320_000) === 16_000 && maxTokenu(3_600_000) === 16_000)
+  ok('nesmysl (NaN, 0, záporné) → spodní strop, ne NaN', maxTokenu(Number.NaN) === 4_000 && maxTokenu(0) === 4_000 && maxTokenu(-5) === 4_000)
+  let sladeno = true
+  for (let ms = MIN_CAS_NA_CTENI_MS; ms <= CEKANI_NA_MODEL_MS; ms += 250) {
+    const t = maxTokenu(ms)
+    if (!(Number.isInteger(t) && t <= Math.max(MIN_TOKENU_ODPOVEDI, (ms / 1000) * TOKENU_ZA_SEKUNDU) && t >= MIN_TOKENU_ODPOVEDI)) sladeno = false
+  }
+  ok('pro každý čas, který casNaCteni může dát (15–100 s), strop nepřesáhne, co model za ten čas napíše (nad spodní strop)', sladeno)
+}
+
 /* ------------------------------------------------------------------ */
 /* Volání modelu za běhu — skutečné SDK, podvržený fetch               */
 /* ------------------------------------------------------------------ */
@@ -499,8 +532,8 @@ try {
   ok('… model z odpovědi a verze zadání VERZE_ZADANI', v.model === 'claude-opus-5-5-20261001' && v.verze === VERZE_ZADANI)
   ok('právě jeden požadavek: POST …/v1/messages (create, žádné opakování)', pozadavky.length === 1 && p.method === 'POST' && /\/v1\/messages$/.test(p.url))
   ok('klíč z ANTHROPIC_API_KEY v hlavičce x-api-key', p.hlavicky.get('x-api-key') === KLIC)
-  ok('tělo: model, max_tokens 16000, zadání ZADANI, obsah = sestavitObsah(podklad)',
-    p.telo.model === MODEL && p.telo.max_tokens === 16000 && p.telo.system === ZADANI &&
+  ok(`tělo: model, max_tokens = maxTokenu(100 s) = 5000 (C8, bylo pevných 16000; je ${p.telo.max_tokens}), zadání ZADANI, obsah = sestavitObsah(podklad)`,
+    p.telo.model === MODEL && p.telo.max_tokens === 5000 && p.telo.max_tokens === maxTokenu(100_000) && p.telo.system === ZADANI &&
       p.telo.messages.length === 1 && p.telo.messages[0].role === 'user' && JSON.stringify(p.telo.messages[0].content) === JSON.stringify(sestavitObsah(PODKLAD)))
   ok('tělo: output_config { effort: high, format json_schema = schéma DokladSchema }',
     p.telo.output_config?.effort === NAMAHA && p.telo.output_config?.format?.type === 'json_schema' &&
@@ -568,6 +601,39 @@ try {
   ok('401 → trvalá „Klíč k AI neplatí"', r401.v.docasna === false && /Klíč k AI neplatí/.test(r401.v.duvod))
   const r400 = await rozpoznat([chybaApi(400, 'invalid_request_error', 'PDF has too many pages')])
   ok('400 → trvalá „AI soubor nepřijala (chyba 400): <zpráva API>"', r400.v.docasna === false && /nepřijala \(chyba 400\): PDF has too many pages/.test(r400.v.duvod))
+
+  // C8: timeout. SDK při vypršení svého časového limitu přeruší fetch (AbortError) a hodí
+  // APIConnectionTimeoutError — podvržený fetch přerušení napodobí hned, test nečeká 15 s.
+  const sitHazi = (chybaFetch) => {
+    const pozadavky = []
+    return {
+      pozadavky,
+      fetchFn: async (url, init = {}) => {
+        pozadavky.push({ url: String(url), telo: typeof init.body === 'string' ? JSON.parse(init.body) : null })
+        throw chybaFetch()
+      },
+    }
+  }
+  const sHazenim = async (chybaFetch, moznosti = {}) => {
+    const s = sitHazi(chybaFetch)
+    globalThis.fetch = s.fetchFn
+    process.env.ANTHROPIC_API_KEY = KLIC
+    try {
+      return { v: await AI.rozpoznatDoklad(PODKLAD, moznosti), pozadavky: s.pozadavky }
+    } finally {
+      globalThis.fetch = puvodniFetch
+    }
+  }
+  const preruseni = () => new DOMException('The operation was aborted due to timeout', 'AbortError')
+  const tVychozi = await sHazenim(preruseni)
+  ok(`timeout (strop 100 s) → TRVALÁ chyba „${tVychozi.v.duvod}" (ne „zkuste znovu"), jediný pokus`,
+    tVychozi.v.stav === 'chyba' && tVychozi.v.docasna === false && tVychozi.v.duvod === AI.HLASKA_MOC_DLOUHY && tVychozi.pozadavky.length === 1)
+  ok('… hláška radí rozdělit doklad nebo zadat položky ručně, nic o opakování',
+    AI.HLASKA_MOC_DLOUHY === 'Doklad je na jedno čtení moc dlouhý — rozdělte ho, nebo zadejte položky ručně.' && !/znovu/.test(AI.HLASKA_MOC_DLOUHY))
+  const tKonec = await sHazenim(preruseni, { konec: Date.now() + 40_000 })
+  ok('timeout při limitu z termínu `konec` (vypršení konce) → táž trvalá chyba', tKonec.v.stav === 'chyba' && tKonec.v.docasna === false && tKonec.v.duvod === AI.HLASKA_MOC_DLOUHY && tKonec.pozadavky.length === 1)
+  const spojeni = await sHazenim(() => new TypeError('fetch failed'))
+  ok(`přerušené spojení (ne timeout) zůstává dočasné „Nepodařilo se spojit" (${spojeni.v.duvod})`, spojeni.v.stav === 'chyba' && spojeni.v.docasna === true && /Nepodařilo se spojit/.test(spojeni.v.duvod))
 } catch (e) {
   ok(`volání modelu se podařilo spustit (${e?.stack ?? e})`, false)
 }
@@ -592,8 +658,11 @@ try {
   const vCas = await rozpoznat([zprava('end_turn', [text(JSON.stringify(VYSTUP))])], { moznosti: { konec: Date.now() + 60_000 } })
   const t = vCas.pozadavky[0]?.hlavicky.get('x-stainless-timeout')
   ok(`termín za 60 s → volá se s limitem ~55 s (X-Stainless-Timeout ${t})`, vCas.v.stav === 'ok' && (t === '54' || t === '55'))
+  ok(`… a strop odpovědi z téhož času: max_tokens 4000 (${vCas.pozadavky[0]?.telo?.max_tokens})`, vCas.pozadavky[0]?.telo?.max_tokens === 4000)
   const kratky = await rozpoznat([zprava('end_turn', [text(JSON.stringify(VYSTUP))])], { moznosti: { casovyLimitMs: 30_000 } })
-  ok('casovyLimitMs 30 s → limit 30 s', kratky.pozadavky[0]?.hlavicky.get('x-stainless-timeout') === '30')
+  ok('casovyLimitMs 30 s → limit 30 s a max_tokens 4000', kratky.pozadavky[0]?.hlavicky.get('x-stainless-timeout') === '30' && kratky.pozadavky[0]?.telo?.max_tokens === 4000)
+  const delsi = await rozpoznat([zprava('end_turn', [text(JSON.stringify(VYSTUP))])], { moznosti: { casovyLimitMs: 90_000 } })
+  ok(`casovyLimitMs 90 s → max_tokens 4500 (${delsi.pozadavky[0]?.telo?.max_tokens})`, delsi.pozadavky[0]?.telo?.max_tokens === 4500)
 } catch (e) {
   ok(`volání modelu se podařilo spustit (${e?.stack ?? e})`, false)
 } finally {
@@ -655,12 +724,14 @@ console.log('\n== Ze zdroje: volání modelu (lib/jine-platby-ai.ts) ==')
   ok('žádná ukázka ani mock (bez klíče stav bez_klice, nikdy vymyšlený doklad)', !/jeUkazka|ukazka|mock/i.test(zdroj))
   ok('volá messages.create, ne messages.parse (N33)', /client\.messages\.create\(/.test(kod) && !/messages\.parse/.test(kod))
   ok('klient s maxRetries: 0 a časovým limitem z casNaCteni', /new Anthropic\(\{ apiKey: klic, timeout: limit, maxRetries: 0 \}\)/.test(kod) && /const limit = casNaCteni\(moznosti, Date\.now\(\)\)/.test(kod))
+  ok('max_tokens z téhož limitu (maxTokenu(limit)), žádné pevné číslo', /max_tokens: maxTokenu\(limit\),/.test(kod) && !/max_tokens: \d/.test(kod) && !/MAX_TOKENU\b/.test(kod))
   ok('parametr thinking se nikde neposílá', !/thinking/.test(zdroj))
   ok('jediný návrat stav ok, a to ze schématem ověřené odpovědi přes naRozpoznanyDoklad',
     (kod.match(/stav: 'ok'/g) ?? []).length === 2 /* typ + návrat */ && /stav: 'ok', doklad: naRozpoznanyDoklad\(vystup\.data\)/.test(kod) && /DokladSchema\.safeParse\(/.test(kod))
-  ok('chyby jako faktury-prijem-ai: 401 trvalá, 429/5xx/408/timeout/spojení dočasné',
+  ok('chyby jako faktury-prijem-ai: 401 trvalá, 429/5xx/408/spojení dočasné — ale timeout TRVALÝ „moc dlouhý" (C8)',
     /AuthenticationError\)[\s\S]{0,80}trvala/.test(zdroj) && /RateLimitError\)[\s\S]{0,80}docasna/.test(zdroj)
-    && /APIConnectionTimeoutError\)[\s\S]{0,80}docasna/.test(zdroj) && /APIConnectionError\)[\s\S]{0,80}docasna/.test(zdroj)
+    && /APIConnectionTimeoutError\) \{\n\s*return trvala\(HLASKA_MOC_DLOUHY\)/.test(zdroj) && /APIConnectionError\)[\s\S]{0,80}docasna/.test(zdroj)
+    && zdroj.indexOf('APIConnectionTimeoutError)') < zdroj.indexOf('APIConnectionError)')
     && /status >= 500 \|\| status === 408/.test(zdroj))
 }
 

@@ -27,6 +27,7 @@ import type {
   ZaznamJinePlatby,
 } from './jine-platby-typy.ts'
 import { PLATNOST_KONTROLY_SKLADU_MIN, PLATNOST_KONTROLY_TRZBY_MIN } from './jine-platby-typy.ts'
+import { REZERVA_PO_PLATNOSTI_MS } from './jine-platby-pos-operace.ts'
 
 export type Ton = 'neutral' | 'accent' | 'success' | 'warning' | 'danger'
 
@@ -127,27 +128,43 @@ export function moznaDvakrat(z: ZaznamJinePlatby): boolean {
 }
 
 /**
- * Opak `moznaDvakrat`: tržba je jen PROPOJENÁ s pokladnou (do součtu se
- * nepřičetla, protože „je v pokladně"), ale dodatečná kontrola dotazem do
- * pokladny (`zdroj: 'pos_api'`) k AKTUÁLNÍ verzi záznamu prodej nenašla.
- * Prodej pak nejspíš není započítaný NIKDE — ani v pokladně, ani
- * v Ostatních tržbách. Obrazovka varuje a vede k opravě (storno propojení
- * a zápis tržby); rozhoduje člověk.
+ * Opak `moznaDvakrat`: tržba je PROPOJENÁ s KONKRÉTNÍM prodejem v pokladně
+ * (`posProdejId`; do součtu se nepřičetla, protože „je v pokladně"), ale
+ * dodatečná kontrola dotazem do pokladny (`zdroj: 'pos_api'`) prodej
+ * nenašla. Prodej pak nejspíš není započítaný NIKDE — ani v pokladně, ani
+ * v Ostatních tržbách. Obrazovka varuje a vede k opravě; rozhoduje člověk.
  *
- * Kontrola ke starší verzi se nepočítá — byla o jiném obsahu záznamu.
- * Ruční prohlášení taky ne: propojení bez nálezu v pokladně chce důvod
- * (`p_duvod_propojeni`), člověk tedy o „nenalezeno" věděl.
+ * Jen s `posProdejId` (R1, kontrola 20. 10.): propojení BEZ konkrétního
+ * prodeje vzniká právě tam, kde kontrola účet v pokladně najít neumí
+ * (shoda jen částky, otevřený účet, který se pak uzavřel pod jiným číslem
+ * a dorostlou částkou, ruční „je v pokladně"). Dodatečná kontrola ho
+ * ověřit neumí — „nenalezeno" by byl falešný poplach a rada „zapište jako
+ * novou" by vedla ke dvojí tržbě. Takové propojení se dodatečně
+ * nekontroluje (`dostupneAkce` 'kontrola_trzby' ho nenabídne).
+ *
+ * Verze se neporovnává: kontrola hledá TENTÝŽ prodej (`posProdejId`), který
+ * se uložením návrhu nemění (částku, měnu ani datum zapsané/propojené
+ * tržby `jine_platby_ulozit_navrh` stejně odmítne změnit).
+ *
+ * Ruční prohlášení se nepočítá: propojení bez nálezu v pokladně chce
+ * důvod (`p_duvod_propojeni`), člověk tedy o „nenalezeno" věděl.
+ *
+ * Totéž filtruje přehled v databázi (filtr „Možná nezapočítáno",
+ * app/[rozsah]/finance/trzby/jine-platby/page.tsx) — mění-li se tohle
+ * pravidlo, mění se i ten filtr.
  */
 export function moznaNikde(z: ZaznamJinePlatby): boolean {
   const k = z.kontrolaTrzby
-  return z.stavTrzby === 'propojeno' && k !== null && k.zdroj === 'pos_api' && k.vysledek === 'nenalezeno' && k.verze === z.verze
+  return z.stavTrzby === 'propojeno' && z.posProdejId !== null && k !== null && k.zdroj === 'pos_api' && k.vysledek === 'nenalezeno'
 }
 
+/** Výsledek pokladny, proti kterému ruční prohlášení opačného znění neprojde bez potvrzení (viz `prohlaseniProtiPokladne`). */
+export type ProhlaseniProtiPokladne = { vysledek: string; chceOpravu: boolean }
+
 /**
- * Výsledek kontroly DOTAZEM DO POKLADNY (`zdroj: 'pos_api'`) k aktuální
- * verzi záznamu, který ruční prohlášení opačného znění nepřepíše
- * (`jine_platby_prohlasit` ho odmítne s 23514 — kromě člověka s právem
- * `jine_platby.oprava`):
+ * Poslední kontrola daného druhu je DOTAZ DO POKLADNY (`zdroj: 'pos_api'`)
+ * s výsledkem, který ruční prohlášení opačného znění nepřepíše jen tak
+ * (`jine_platby_prohlasit`, P1 z 20. 10.):
  *
  *   'trzba' — pokladna prodej našla (`nalezeno`) nebo pravděpodobně našla
  *             (`pravdepodobne`); prohlášení „v pokladně není" by z jednoho
@@ -155,19 +172,24 @@ export function moznaNikde(z: ZaznamJinePlatby): boolean {
  *   'sklad' — pokladna už spotřebu odečetla (`jiz_odecteno`); prohlášení
  *             „neodečteno" by vedlo k druhému odpisu.
  *
- * Vrací ten výsledek (text výčtu), aby ho obrazovka mohla jmenovat u
- * zakázaného prohlášení, jinak `null` (prohlásit jde). Platnost v čase se
- * nehlídá — databáze bere kontrolu téže verze bez ohledu na stáří.
+ * BEZ OHLEDU NA VERZI: uložení návrhu zvedne verzi i bez změny a pojistka
+ * vázaná na verzi padla prvním uložením (C1/R2). Výsledek pokladny nahradí
+ * jen novější kontrola v pokladně (nebo prohlášení s potvrzením níž).
+ *
+ * Vrací `{ vysledek, chceOpravu }`, jinak `null` (prohlásit jde volně):
+ *   `vysledek`   — text výčtu, ať ho obrazovka jmenuje u prohlášení;
+ *   `chceOpravu` — `false` jen u `pravdepodobne` (shoda jen částky): přepsat
+ *                  smí kdokoli s právem k prohlášení, s výslovným potvrzením
+ *                  (`p_prepsat_pokladnu = true`, prodej v pokladně je jiný);
+ *                  `true` u `nalezeno` a `jiz_odecteno` (konkrétní prodej nebo
+ *                  odpis): navíc jen s právem `jine_platby.oprava`.
+ * Platnost v čase se nehlídá — databáze ji taky nehlídá.
  */
-export function prohlaseniProtiPokladne(z: ZaznamJinePlatby, druh: 'trzba' | 'sklad'): string | null {
-  if (druh === 'trzba') {
-    const k = z.kontrolaTrzby
-    if (k !== null && k.zdroj === 'pos_api' && k.verze === z.verze && (k.vysledek === 'nalezeno' || k.vysledek === 'pravdepodobne')) return k.vysledek
-    return null
-  }
-  const k = z.kontrolaSkladu
-  if (k !== null && k.zdroj === 'pos_api' && k.verze === z.verze && k.vysledek === 'jiz_odecteno') return k.vysledek
-  return null
+export function prohlaseniProtiPokladne(z: ZaznamJinePlatby, druh: 'trzba' | 'sklad'): ProhlaseniProtiPokladne | null {
+  const k = druh === 'trzba' ? z.kontrolaTrzby : z.kontrolaSkladu
+  if (k === null || k.zdroj !== 'pos_api') return null
+  const brani = druh === 'trzba' ? k.vysledek === 'nalezeno' || k.vysledek === 'pravdepodobne' : k.vysledek === 'jiz_odecteno'
+  return brani ? { vysledek: k.vysledek, chceOpravu: k.vysledek !== 'pravdepodobne' } : null
 }
 
 /** Název agendy „Jiné platby" neznamená zaplaceno — úhradu ověřuje jen napárovaná bankovní transakce. */
@@ -359,13 +381,49 @@ const SKLAD_K_DOLOZENI: readonly StavSkladu[] = ['bez_navrhu', 'ceka_na_schvalen
  * (`jine_platby_zrusit_schvaleni`), nebo ho doložit.
  */
 const SKLAD_LZE_ZRUSIT: readonly StavSkladu[] = ['bez_navrhu', 'nevyzaduje', 'zamitnuto', 'ceka_na_schvaleni', 'chyba']
-/** `jine_platby_zrusit_schvaleni`: ze kterých stavů skladu jde schválení vrátit (v pokladně nic neodepsáno). */
-const SKLAD_LZE_ZRUSIT_SCHVALENI: readonly StavSkladu[] = ['schvaleno', 'nepodporovano', 'chyba']
-/** … a poslední operace nesmí být na cestě ani hotová. */
-const OPERACE_BRANI_ZRUSENI_SCHVALENI = ['odesila_se', 'nejasny_vysledek', 'uspech', 'rucne_dolozeno']
+/**
+ * `jine_platby_zrusit_schvaleni` a `jine_platby_rucne_dolozit_vydej`: stavy
+ * skladu se schváleným výdejem, který nikam neodešel (nebo prokazatelně
+ * selhal). Ručně doložit jde navíc jen živý (schválený) návrh.
+ */
+const SKLAD_SCHVALENY_K_RUCNIMU: readonly StavSkladu[] = ['schvaleno', 'nepodporovano', 'chyba']
+/** Stavy skladu, kdy je požadavek do pokladny na cestě (`zpracovava_se`) nebo nejasný. */
+const SKLAD_OPERACE_NA_CESTE: readonly StavSkladu[] = ['zpracovava_se', 'nejasny_vysledek']
+/** Hotová operace: ruční doložení ani zrušení schválení už nejde (korekce). */
+const OPERACE_HOTOVA = ['uspech', 'rucne_dolozeno']
 /** Autor bez práva na opravy smí zrušit jen záznam, u kterého se sklad ještě nerozjel. */
 const SKLAD_AUTOR_ZRUSI: readonly StavSkladu[] = ['bez_navrhu', 'nevyzaduje', 'zamitnuto']
 const OPERACE_NA_CESTE = ['odesila_se', 'nejasny_vysledek']
+/**
+ * `jine_platby_zahajit_rozpoznani` (P5): schválený nebo provedený výdej —
+ * nové čtení by měnilo skladové položky a `jine_platby_ulozit_navrh` by ho
+ * odmítl až po zaplaceném čtení (C9/R3). Zapsaná tržba čtení NEBRÁNÍ.
+ */
+const SKLAD_BRANI_ROZPOZNANI: readonly StavSkladu[] = [
+  'schvaleno',
+  'nepodporovano',
+  'zpracovava_se',
+  'nejasny_vysledek',
+  'odecteno_v_pos',
+  'jiz_odecteno',
+  'rucne_dolozeno',
+  'opraveno',
+]
+
+/**
+ * Vypršela platnost požadavku do pokladny i s rezervou? `platnostDoIso` +
+ * `REZERVA_PO_PLATNOSTI_MS` (2 min) < `tedMs` — po ní pokladna požadavek
+ * neprovede (stejná hranice jako `obnovitOperaci`). Databáze
+ * (`jine_platby_rucne_dolozit_vydej`, `jine_platby_zrusit_schvaleni`)
+ * pustí ruční východ při `platnost_do + 2 min <= now()`; zrcadlo je
+ * přesně na hranici o chlup přísnější. Chybějící nebo nečitelná platnost
+ * = nevypršela (databáze při `platnost_do is null` taky odmítne).
+ */
+export function platnostOperaceVyprsela(platnostDoIso: string | null | undefined, tedMs: number): boolean {
+  if (typeof platnostDoIso !== 'string') return false
+  const platnost = Date.parse(platnostDoIso)
+  return Number.isFinite(platnost) && platnost + REZERVA_PO_PLATNOSTI_MS < tedMs
+}
 
 /**
  * Akce, které obrazovka nabídne. Zrcadlí pravidla databázových funkcí
@@ -386,11 +444,34 @@ const OPERACE_NA_CESTE = ['odesila_se', 'nejasny_vysledek']
  * `dohledaniUctu` (nepovinné) = pokladna umí dohledat účty
  * (`schopnosti.dohledaniUctu`). Bez něj dodatečná kontrola tržby po
  * zápisu nemá smysl (ruční prohlášení po zápisu nic neověří) a nenabízí se.
+ * `platnostOperace` (nepovinné) = `platnost_do` poslední operace výdeje
+ * (ISO řetězec) nebo null. Operace na cestě (`odesila_se`,
+ * `nejasny_vysledek`), jejíž platnost i s rezervou 2 min vypršela
+ * (`platnostOperaceVyprsela`), už se do pokladny nedostane — oprávněná
+ * osoba pak smí výdej ručně doložit nebo schválení zrušit (C5, P3), jinak
+ * by záznam neměl východ, když pokladna nejde otevřít nebo dohledání
+ * trvale selhává. Bez `platnostOperace` se tenhle východ nenabízí.
+ *
+ * Změny 20. 10. (C5, C9/R1/R3):
+ *   'rozpoznat'        — i u zapsané nebo propojené tržby; NE u schváleného
+ *                        nebo provedeného výdeje (`SKLAD_BRANI_ROZPOZNANI`);
+ *   'kontrola_trzby'   — u propojené tržby jen s konkrétním prodejem
+ *                        (`posProdejId`), viz `moznaNikde`;
+ *   'rucne_dolozit',
+ *   'zrusit_schvaleni' — i při operaci na cestě po vypršení její platnosti.
  */
 export function dostupneAkce(
   z: ZaznamJinePlatby,
   prava: ReadonlySet<string>,
-  m: { maPokladnu: boolean; maZiveNavrhSkladu: boolean; stavOperace: string | null; tedMs: number; uzivatelId?: string | null; dohledaniUctu?: boolean },
+  m: {
+    maPokladnu: boolean
+    maZiveNavrhSkladu: boolean
+    stavOperace: string | null
+    tedMs: number
+    uzivatelId?: string | null
+    dohledaniUctu?: boolean
+    platnostOperace?: string | null
+  },
 ): Set<AkceJinePlatby> {
   const a = new Set<AkceJinePlatby>()
   if (z.stavKontroly === 'zruseno') return a
@@ -410,16 +491,20 @@ export function dostupneAkce(
   const trzbaKZapisu = z.stavTrzby === 'nezapsano' || z.stavTrzby === 'stornovano'
   const trzbaZapsana = z.stavTrzby === 'zapsano' || z.stavTrzby === 'propojeno'
   const kontrolaSkladu = kontrolaPlati(z.kontrolaSkladu, z.verze, PLATNOST_KONTROLY_SKLADU_MIN, m.tedMs) ? (z.kontrolaSkladu?.vysledek ?? null) : null
+  // Operace na cestě, která se do pokladny už nedostane (platnost + 2 min pryč) — P3.
+  const naCeste = op !== null && OPERACE_NA_CESTE.includes(op)
+  const naCestePropadla = naCeste && platnostOperaceVyprsela(m.platnostOperace, m.tedMs)
 
   // Doklad a návrh (pripojit_soubor a ulozit_navrh hlídají zrušení; zapsanou tržbu
   // a rozjetý výdej chrání ulozit_navrh uvnitř — odmítne změnu částky, měny, data
   // nebo položek pro sklad, ostatní projde).
-  // Rozpoznání NE u zapsané ani propojené tržby (`jine_platby_zahajit_rozpoznani`
-  // takový záznam odmítne, N30): AI by přečetla částku a datum, které ulozit_navrh
-  // stejně nepřijme — placené čtení by bylo zbytečné.
+  // Rozpoznání NE u schváleného nebo provedeného výdeje (`jine_platby_zahajit_rozpoznani`
+  // ho odmítne, P5): nové čtení by měnilo skladové položky a uložení by spadlo až po
+  // zaplaceném čtení. Zapsaná nebo propojená tržba čtení nebrání — položky pro sklad
+  // se uloží, částku, měnu a datum akce ponechá (C9/R3).
   if (zadat || upravit) {
     a.add('nahrat')
-    if (z.stavTrzby !== 'zapsano' && z.stavTrzby !== 'propojeno') a.add('rozpoznat')
+    if (!SKLAD_BRANI_ROZPOZNANI.includes(s)) a.add('rozpoznat')
   }
   if (upravit) a.add('upravit')
   if (upravit && !zkontrolovano && z.castkaHaleru !== null && z.mena !== null && z.datumProdeje !== null) a.add('oznacit_zkontrolovano')
@@ -434,8 +519,12 @@ export function dostupneAkce(
   // Dodatečná kontrola po zápisu nebo propojení (`jine_platby_zapsat_kontrolu` jde
   // volat i po nich). Jen s dohledáním účtů:
   //   zapsano   — nenašla pokladna mezitím tentýž prodej? (`moznaDvakrat`)
-  //   propojeno — je prodej v pokladně opravdu? (`moznaNikde`, když ne)
-  if (trzba && (z.stavTrzby === 'zapsano' || z.stavTrzby === 'propojeno') && m.maPokladnu && m.dohledaniUctu === true) a.add('kontrola_trzby')
+  //   propojeno — je propojený prodej v pokladně opravdu? (`moznaNikde`, když ne).
+  //               Jen propojení s KONKRÉTNÍM prodejem (`posProdejId`, R1): propojení
+  //               bez něj vzniká tam, kde kontrola účet najít neumí, a „nenalezeno"
+  //               by byl falešný poplach.
+  const propojenoSProdejem = z.stavTrzby === 'propojeno' && z.posProdejId !== null
+  if (trzba && (z.stavTrzby === 'zapsano' || propojenoSProdejem) && m.maPokladnu && m.dohledaniUctu === true) a.add('kontrola_trzby')
 
   // Sklad — odeslání návrhu jen jine_platby.sklad_odeslat (bez pokladny ho databáze nesestaví).
   if (sklad && zkontrolovano && m.maPokladnu && (s === 'bez_navrhu' || s === 'zamitnuto' || s === 'nevyzaduje')) a.add('odeslat_sklad')
@@ -456,8 +545,12 @@ export function dostupneAkce(
     if (s === 'chyba' && m.maZiveNavrhSkladu && (op === null || op === 'chyba') && kontrolaSkladu === 'neodecteno') a.add('vydej_znovu')
     // Propojit jen s čerstvým doložením „pokladna už odečetla" a bez požadavku na cestě.
     if (SKLAD_K_DOLOZENI.includes(s) && kontrolaSkladu === 'jiz_odecteno') a.add('propojit_vydej')
-    // Ručně doložit jde jen schválený návrh, jehož požadavek není na cestě ani hotový.
-    if (m.maZiveNavrhSkladu && (s === 'schvaleno' || s === 'nepodporovano' || s === 'chyba') && !(op !== null && [...OPERACE_NA_CESTE, 'uspech', 'rucne_dolozeno'].includes(op))) {
+    // Ručně doložit jde jen schválený (živý) návrh, jehož požadavek není hotový
+    // a není na cestě — leda na cestě s propadlou platností (P3, C5): pak se do
+    // pokladny už nedostane a schvalovatel doloží, co v pokladně ověřil.
+    const vydejKRucnimu = SKLAD_SCHVALENY_K_RUCNIMU.includes(s) || (naCestePropadla && SKLAD_OPERACE_NA_CESTE.includes(s))
+    const operaceDovoli = !(op !== null && OPERACE_HOTOVA.includes(op)) && (!naCeste || naCestePropadla)
+    if (m.maZiveNavrhSkladu && vydejKRucnimu && operaceDovoli) {
       a.add('rucne_dolozit')
     }
     // Bez pokladny návrh výdeje vzniknout nemůže (není katalog ani provozovna).
@@ -468,7 +561,9 @@ export function dostupneAkce(
     }
     // Zrušit schválení (v pokladně nic neodepsáno): sklad zpět na bez_navrhu.
     // Jediná cesta, jak uvolnit „nepodporovano" (schváleno k ručnímu odpisu).
-    if (SKLAD_LZE_ZRUSIT_SCHVALENI.includes(s) && !(op !== null && OPERACE_BRANI_ZRUSENI_SCHVALENI.includes(op))) a.add('zrusit_schvaleni')
+    // Operace na cestě jen po vypršení platnosti (P3) — stejná pravidla jako ruční doložení,
+    // jen bez živého návrhu (databáze ho tu nechce).
+    if (vydejKRucnimu && operaceDovoli) a.add('zrusit_schvaleni')
   }
 
   // Faktura a úhrada (úhradu jde i odpojit, proto i u „uhrazeno"). U zrušeného

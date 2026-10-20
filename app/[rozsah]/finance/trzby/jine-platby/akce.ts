@@ -11,6 +11,7 @@ import { chyba, hotovo, katalogPripojeni, pripravit, vysledekChyby, type Priprav
 import {
   coZkontrolovat,
   HLASKA_OBECNA,
+  hlaskaPrepisuPokladny,
   jeHlaskaDuplicity,
   jeHlaskaDuvoduPropojeni,
   jeHlaskaUpozorneniAi,
@@ -198,21 +199,48 @@ const NEVIM =
   'Když to nevíte jistě, nic se nezapíše. Ověřte to v pokladně (nebo u toho, kdo účet uzavíral) a pak to doložte, nebo nechte appku zkontrolovat pokladnu.'
 
 /**
- * Prohlášení „není“ proti výsledku dotazu do pokladny k téže verzi
- * (`prohlaseniProtiPokladne`: pokladna prodej našla / spotřebu odečetla):
- * přepsat ho smí jen člověk s právem na opravy — jinak by ruční „není tam“
- * odemklo druhou tržbu nebo druhý odpis. Databáze to hlídá taky
- * (`jine_platby_prohlasit`); tohle je první linie. `null` = smí.
+ * Prohlášení „není“ proti poslednímu výsledku dotazu do pokladny
+ * (`prohlaseniProtiPokladne` — bez ohledu na verzi záznamu; výsledek
+ * pokladny nahradí jen novější kontrola v pokladně):
+ *
+ *   * „pravděpodobně“ (shoda jen částky) — přepsat smí, kdo prohlašuje, ale
+ *     jen se zaškrtnutým „Prodej v pokladně je jiný, ověřil(a) jsem to“
+ *     (`prepsat_pokladnu` → `p_prepsat_pokladnu = true`);
+ *   * „nalezeno“ (konkrétní účet) a „už odečteno“ — totéž, a navíc jen
+ *     s právem na opravy (`chceOpravu`).
+ *
+ * Jinak by ruční „není tam“ odemklo druhou tržbu nebo druhý odpis.
+ * Databáze to hlídá taky (`jine_platby_prohlasit`); tohle je první linie.
+ * Vrací `{ prepsat }` (co poslat jako `p_prepsat_pokladnu`), nebo chybu u pole.
  */
-async function prohlaseniOpacnehoZneni(p: Pripraveno, druh: 'trzba' | 'sklad'): Promise<StavAkce | null> {
-  const proti = prohlaseniProtiPokladne(p.z, druh)
-  if (proti === null) return null
-  if (await hasAccess(p.tenantId, 'jine_platby.oprava', p.z.branchId)) return null
-  const popis = druh === 'trzba' ? (POPIS_VYSLEDKU_TRZBY as Record<string, string>)[proti] : (POPIS_VYSLEDKU_SKLADU as Record<string, string>)[proti]
-  return chybaPole(
-    'vysledek',
-    `Pokladna při kontrole tohle našla (${popis ?? proti}). Ruční prohlášení opačného znění to nepřepíše — zopakujte kontrolu v pokladně, nebo to rozhodne člověk s právem na opravy.`,
-  )
+async function prepsaniPokladny(p: Pripraveno, druh: 'trzba' | 'sklad', volba: string): Promise<{ prepsat: boolean } | { chyba: StavAkce }> {
+  const proti = volba === 'neni' ? prohlaseniProtiPokladne(p.z, druh) : null
+  if (proti === null) return { prepsat: false }
+  const popis = (druh === 'trzba' ? (POPIS_VYSLEDKU_TRZBY as Record<string, string>) : (POPIS_VYSLEDKU_SKLADU as Record<string, string>))[proti.vysledek] ?? proti.vysledek
+  if (proti.chceOpravu && !(await hasAccess(p.tenantId, 'jine_platby.oprava', p.z.branchId))) {
+    return {
+      chyba: chybaPole(
+        'vysledek',
+        `Pokladna při kontrole tohle našla (${popis}) — konkrétní ${druh === 'trzba' ? 'prodej' : 'prodej nebo odpis'} přepsat ručním prohlášením smí jen člověk s právem na opravy. Když si myslíte, že se pokladna mýlí, zopakujte kontrolu v pokladně.`,
+      ),
+    }
+  }
+  if (pole(p.f, 'prepsat_pokladnu') !== 'ano') {
+    return {
+      chyba: chybaPole(
+        'prepsat_pokladnu',
+        `Pokladna při kontrole tohle našla (${popis}). Prohlášení opačného znění ji přepíše jen s výslovným potvrzením, že ${druh === 'trzba' ? 'prodej' : 'prodej nebo výdej'} v pokladně je jiný — zaškrtněte to, nebo zopakujte kontrolu v pokladně.`,
+      ),
+    }
+  }
+  return { prepsat: true }
+}
+
+/** Chyba `jine_platby_prohlasit` → stav formuláře; hláška o přepisu výsledku pokladny jde k poli, kterého se týká. */
+function chybaProhlaseni(error: { code?: string | null; message?: string | null }, coDelam: string): StavAkce {
+  const stav = vysledekChyby(error, coDelam)
+  const druh = error.code === '23514' ? hlaskaPrepisuPokladny(stav.text) : null
+  return druh === null ? stav : { ...stav, chyby: { [druh === 'pravo' ? 'vysledek' : 'prepsat_pokladnu']: stav.text } }
 }
 
 /** Ruční prohlášení k TRŽBĚ: prodej v pokladně je / není. Právo `jine_platby.trzba`. */
@@ -225,10 +253,8 @@ export async function prohlasitTrzbu(_predchozi: StavAkce, formData: FormData): 
   const volba = pole(p.f, 'vysledek')
   if (volba === 'nevim') return chyba(NEVIM)
   if (volba !== 'je' && volba !== 'neni') return chybaPole('vysledek', 'Vyberte, jestli prodej v pokladně je, nebo není.')
-  if (volba === 'neni') {
-    const proti = await prohlaseniOpacnehoZneni(p, 'trzba')
-    if (proti) return proti
-  }
+  const prepis = await prepsaniPokladny(p, 'trzba', volba)
+  if ('chyba' in prepis) return prepis.chyba
   const duvod = duvodZ(p)
   if (!duvod) return chybaPole('duvod', HLASKA_DUVOD)
   const posId = pole(p.f, 'pos_prodej_id').slice(0, 100)
@@ -241,8 +267,9 @@ export async function prohlasitTrzbu(_predchozi: StavAkce, formData: FormData): 
     p_vysledek: volba === 'je' ? 'nalezeno' : 'nenalezeno',
     p_duvod: duvod,
     p_pos_prodej_id: volba === 'je' ? posId : null,
+    p_prepsat_pokladnu: prepis.prepsat,
   })
-  if (error) return vysledekChyby(error, 'ruční prohlášení k tržbě')
+  if (error) return chybaProhlaseni(error, 'ruční prohlášení k tržbě')
   return hotovo(p, 'Prohlášení zapsáno jako RUČNÍ (pokladnou neověřené). Platí 30 minut a jen pro tuhle verzi záznamu.')
 }
 
@@ -256,10 +283,8 @@ export async function prohlasitSklad(_predchozi: StavAkce, formData: FormData): 
   const volba = pole(p.f, 'vysledek')
   if (volba === 'nevim') return chyba(NEVIM)
   if (volba !== 'je' && volba !== 'neni') return chybaPole('vysledek', 'Vyberte, jestli pokladna spotřebu odečetla, nebo ne.')
-  if (volba === 'neni') {
-    const proti = await prohlaseniOpacnehoZneni(p, 'sklad')
-    if (proti) return proti
-  }
+  const prepis = await prepsaniPokladny(p, 'sklad', volba)
+  if ('chyba' in prepis) return prepis.chyba
   const duvod = duvodZ(p)
   if (!duvod) return chybaPole('duvod', HLASKA_DUVOD)
 
@@ -270,8 +295,9 @@ export async function prohlasitSklad(_predchozi: StavAkce, formData: FormData): 
     p_vysledek: volba === 'je' ? 'jiz_odecteno' : 'neodecteno',
     p_duvod: duvod,
     p_pos_prodej_id: null,
+    p_prepsat_pokladnu: prepis.prepsat,
   })
-  if (error) return vysledekChyby(error, 'ruční prohlášení ke skladu')
+  if (error) return chybaProhlaseni(error, 'ruční prohlášení ke skladu')
   return hotovo(p, 'Prohlášení zapsáno jako RUČNÍ (pokladnou neověřené). Platí 15 minut a jen pro tuhle verzi záznamu.')
 }
 
@@ -411,6 +437,11 @@ export async function propojitVydej(_predchozi: StavAkce, formData: FormData): P
  * U záznamu s pokladnou nese formulář otisk ŽIVÉHO schváleného návrhu
  * (skryté pole) — databáze ho porovná, ať se nedoloží jiný obsah, než
  * jaký člověk na obrazovce viděl. Bez pokladny návrh není, posílá se `null`.
+ *
+ * Požadavek do pokladny s nejasným výsledkem databáze doložit pustí až po
+ * vypršení jeho platnosti (+ 2 min) — člověk to předtím ověří v pokladně
+ * (C5). Doložení blokuje jen nevyřešená položka, ne změna katalogu po
+ * schválení.
  */
 export async function rucneDolozit(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.vydej_pos')
@@ -435,8 +466,8 @@ export async function rucneDolozit(_predchozi: StavAkce, formData: FormData): Pr
  * předáno k ručnímu odpisu, nebo prokázaná chyba). Sklad se vrátí na „bez
  * návrhu“, návrh se nahradí a operace zruší; povinný důvod. Když už
  * v pokladně odepsáno je, patří sem „Ručně doloženo“, ne tohle. Kdy to jde
- * (stav skladu, poslední operace není na cestě ani hotová), rozhoduje
- * databáze. Právo `jine_platby.vydej_pos`.
+ * (stav skladu, poslední operace není hotová a nejasná je až po vypršení
+ * platnosti), rozhoduje databáze. Právo `jine_platby.vydej_pos`.
  */
 export async function zrusitSchvaleni(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.vydej_pos')

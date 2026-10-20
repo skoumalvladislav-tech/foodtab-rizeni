@@ -36,21 +36,25 @@ export type RadekTrzby = {
  * řekla „v pokladně není“. Ruční prohlášení se nikdy nevydává za ověření
  * pokladnou. Fotka sjetiny nic neříká o tom, jestli host zaplatil.
  *
- * Po zápisu i po propojení jde kontrola v pokladně zopakovat (dodatečná
- * kontrola — účet se mohl v pokladně uzavřít až potom, nebo propojení
- * stálo jen na shodě částky). Když pokladna u zapsané tržby prodej najde
- * (`moznaDvakrat`), sekce výrazně varuje a vede na storno; když ho
- * u propojené nenajde (`moznaNikde`), varuje, že tržba možná není
- * započtená nikde.
+ * Po zápisu jde kontrola v pokladně zopakovat (dodatečná kontrola — účet
+ * se mohl v pokladně uzavřít až potom); po propojení jen u propojení
+ * s KONKRÉTNÍM prodejem (`z.posProdejId` — propojení bez něj kontrola
+ * znovu nenajde, rozhoduje `dostupneAkce`). Když pokladna u zapsané tržby
+ * prodej najde (`moznaDvakrat`), sekce výrazně varuje a vede na storno;
+ * když propojený prodej nenajde (`moznaNikde`), varuje a radí ho nejdřív
+ * ověřit v pokladně (účet mohl být zrušený nebo přečíslovaný) — žádná rada
+ * „zapište jako novou“ (R1: vedla ke dvojí tržbě).
  *
  * „Jen propojit“ bez konkrétního prodeje v pokladně (kontrola bez
  * `pos_prodej_id`, kromě ručního prohlášení „je“) má POVINNÉ pole „Proč je
  * prodej v pokladně“ (`duvod_propojeni`) — databáze bez něj propojení
  * odmítne (`propojeniChceDuvod`).
  *
- * Ruční prohlášení „není“ proti výsledku dotazu do pokladny k téže verzi
- * (`prohlaseniProtiPokladne`) se bez práva na opravy nenabízí — databáze
- * by ho odmítla; obrazovka řekne proč.
+ * Ruční prohlášení „není“ proti poslednímu výsledku dotazu do pokladny
+ * (`prohlaseniProtiPokladne`, bez ohledu na verzi): u „pravděpodobně“ jen
+ * s povinným zaškrtnutím „Prodej v pokladně je jiný, ověřil(a) jsem to“
+ * (`prepsat_pokladnu`); u „nalezeno“ totéž a navíc jen s právem na opravy —
+ * bez něj se „není“ nenabízí a obrazovka řekne proč.
  *
  * Pole „Proč to není duplicita“ je u zápisu i propojení VŽDY: databáze
  * hledá šířeji než obrazovka (u firemní pokladny i jiné pobočky), takže
@@ -89,11 +93,18 @@ export default function SekceTrzba({
   const poZapisu = z.stavTrzby === 'zapsano'
   const poPropojeni = z.stavTrzby === 'propojeno'
   const proti = prohlaseniProtiPokladne(z, 'trzba')
-  const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_TRZBY as Record<string, string>)[proti] ?? proti)
+  const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_TRZBY as Record<string, string>)[proti.vysledek] ?? proti.vysledek)
+  /** „Není“ proti výsledku pokladny: u „nalezeno“ jen s právem na opravy (databáze jinak odmítne). */
+  const neniNelze = proti !== null && proti.chceOpravu && !smiOpravit
   const chceDuvodPropojeni = vysledek !== 'nenalezeno' && propojeniChceDuvod(z.kontrolaTrzby, maPokladnu)
   const volbyProhlaseni: [string, string][] = [
     ['je', 'je (prodej je v pokladně — tržba se jen propojí)'],
-    ...(proti !== null && !smiOpravit ? [] : ([['neni', 'není (prodej proběhl mimo pokladnu)']] as [string, string][])),
+    ...(neniNelze
+      ? []
+      : ([[
+          'neni',
+          proti !== null ? 'není (prodej v pokladně je jiný — přepíše výsledek pokladny)' : 'není (prodej proběhl mimo pokladnu)',
+        ]] as [string, string][])),
     ['nevim', 'nevím — nic nezapisovat'],
   ]
 
@@ -150,11 +161,12 @@ export default function SekceTrzba({
             <span aria-hidden="true" style={{ flex: 'none', paddingTop: '2px' }}>
               <Ikona klic="varovani" velikost={18} />
             </span>
-            <span style={{ minWidth: 0 }}>Pozdější kontrola prodej v pokladně nenašla — tržba možná není započtená nikde.</span>
+            <span style={{ minWidth: 0 }}>
+              Pozdější kontrola propojený prodej v pokladně nenašla — ověřte ho v pokladně (účet mohl být zrušený nebo přečíslovaný).
+            </span>
           </p>
           <span style={{ fontSize: '13.5px' }}>
-            Záznam je jen propojený s pokladnou (do součtu se nepřičetl). Když prodej v pokladně opravdu není, propojení stornujte a zapište tržbu jako
-            novou.
+            Teprve když tam opravdu není, opravte tržbu. Záznam je propojený s účtem {z.posProdejId ?? 'v pokladně'} a do součtu se nepřičetl.
           </span>
           {akce.has('opravit_trzbu') ? (
             <a href="#oprava-trzby" className="ds-plocha-odkaz" style={{ marginLeft: 0 }}>
@@ -189,13 +201,15 @@ export default function SekceTrzba({
                 {poZapisu
                   ? 'Dodatečná kontrola: tržba je zapsaná v Ostatních tržbách. Appka se znovu zeptá pokladny, jestli tenhle prodej mezitím nemá (účet se mohl uzavřít až po zápisu) — pak by byl v tržbách dvakrát.'
                   : poPropojeni
-                    ? 'Dodatečná kontrola: prodej je jen propojený s pokladnou (do součtu se nepřičetl). Appka se znovu zeptá pokladny, jestli ho opravdu má — když ne, tržba možná není započtená nikde.'
-                    : 'Appka se zeptá pokladny na účty provozovny uzavřené kolem dne prodeje (den před až dva dny po) a na otevřené účty, a hledá číslo účtu z dokladu. Shoda částky (i po zaokrouhlení hotovosti) stačí jen na „pravděpodobně“; odpisy se za prodej nepočítají.'}
+                    ? `Dodatečná kontrola: prodej je propojený s účtem ${z.posProdejId ?? 'v pokladně'} (do součtu se nepřičetl). Appka se znovu zeptá pokladny, jestli ho opravdu má.`
+                    : 'Appka se zeptá pokladny na účty provozovny uzavřené kolem dne prodeje (den před až dva dny po) a na otevřené účty, a hledá číslo účtu z dokladu. Shoda částky (i po zaokrouhlení hotovosti) stačí jen na „pravděpodobně“; odpisy se za prodej nepočítají. „Není v pokladně“ umí kontrola říct jen u uzavřeného prodeje a ručního seznamu spotřeby — u sjetiny a neurčeného dokladu jen ruční prohlášení s důvodem.'}
               </Vysvetleni>
             </FormularAkce>
           ) : (
             <Vysvetleni>{HLASKA_BEZ_DOHLEDANI}</Vysvetleni>
           )
+        ) : poPropojeni && maPokladnu && !z.posProdejId ? (
+          <Vysvetleni>Tržba je propojená bez konkrétního účtu v pokladně (s důvodem) — dodatečná kontrola by ho nenašla, proto se nenabízí.</Vysvetleni>
         ) : null}
         {!maPokladnu && z.stavTrzby === 'nezapsano' ? <Vysvetleni>Záznam nemá pokladnu — doložte ručně, jestli prodej v pokladně je.</Vysvetleni> : null}
 
@@ -204,11 +218,11 @@ export default function SekceTrzba({
             <summary style={{ cursor: 'pointer', fontSize: '14px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>Ruční prohlášení s důvodem</summary>
             <div style={{ marginTop: '8px' }}>
               <FormularAkce akce={prohlasitTrzbu} {...zakl} tlacitko="Zapsat ruční prohlášení" vycistit>
-                {popisProti !== null ? (
+                {proti !== null ? (
                   <Vysvetleni dulezite>
-                    {smiOpravit
-                      ? `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Prohlášením „není“ výsledek pokladny přepíšete — zapíše se to do historie s vaším jménem. Nejdřív radši kontrolu v pokladně zopakujte.`
-                      : `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Ruční prohlášení „není“ to nepřepíše, proto se nenabízí — když si myslíte, že se pokladna mýlí, zopakujte kontrolu v pokladně, nebo to rozhodne člověk s právem na opravy.`}
+                    {neniNelze
+                      ? `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Konkrétní prodej ručním prohlášením „není“ přepsat smí jen člověk s právem na opravy, proto se tu nenabízí — když si myslíte, že se pokladna mýlí, zopakujte kontrolu v pokladně, nebo dejte vědět tomu, kdo opravy dělá.`
+                      : `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny).${proti.chceOpravu ? ' Konkrétní prodej přepisujete s právem na opravy.' : ''} Prohlášení „není“ výsledek pokladny přepíše jen se zaškrtnutím, že prodej v pokladně je jiný — zapíše se to do historie s vaším jménem. Nejdřív radši kontrolu v pokladně zopakujte.`}
                   </Vysvetleni>
                 ) : null}
                 <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: '4px' }}>
@@ -222,6 +236,12 @@ export default function SekceTrzba({
                     </label>
                   ))}
                 </fieldset>
+                {proti !== null && !neniNelze ? (
+                  <label style={{ display: 'flex', gap: '8px', alignItems: 'center', minHeight: '44px', fontSize: '14px', fontWeight: 600 }}>
+                    <input type="checkbox" name="prepsat_pokladnu" value="ano" />
+                    <span>Prodej v pokladně je jiný, ověřil(a) jsem to (povinné u „není“)</span>
+                  </label>
+                ) : null}
                 <label className="ds-field">
                   <span className="ds-field-label">ID účtu nebo číslo dokladu v pokladně (povinné u „je“)</span>
                   <input className="ds-input" style={VSTUP} name="pos_prodej_id" maxLength={100} defaultValue={z.externiUcet ?? ''} />

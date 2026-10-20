@@ -85,6 +85,23 @@ export function jeHlaskaDuplicity(text: string): boolean {
   return /^Možná duplicita/.test(text.trim())
 }
 
+/**
+ * Hláška `jine_platby_prohlasit`, že ruční prohlášení míří proti výsledku
+ * dotazu do pokladny: `potvrzeni` = chybí výslovné potvrzení
+ * (`p_prepsat_pokladnu`), `pravo` = konkrétní prodej / odpis smí přepsat
+ * jen člověk s právem na opravy; `null` = jiná hláška.
+ */
+export function hlaskaPrepisuPokladny(text: string): 'potvrzeni' | 'pravo' | null {
+  const t = text.trim()
+  if (!/^Pokladna při kontrole tohle našla/.test(t)) return null
+  return /s právem na opravy/.test(t) ? 'pravo' : 'potvrzeni'
+}
+
+/** Hláška `jine_platby_rozhodnout_vydej`, že výdej s pokrmem i kusovým zbožím chce potvrzení `p_bez_surovin`. */
+export function jeHlaskaBezSurovin(text: string): boolean {
+  return /^Výdej obsahuje pokrm i kusové zboží/.test(text.trim())
+}
+
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function jeUuid(v: unknown): v is string {
@@ -467,29 +484,67 @@ export function coZkontrolovat(
 }
 
 /* ------------------------------------------------------------------ */
-/* Rozpoznání přes AI: ze kterého čtení je návrh                        */
+/* Rozpoznání přes AI: kdy ne a ze kterého čtení je návrh               */
 /* ------------------------------------------------------------------ */
 
-/** Řádek `jine_platby_rozpoznani` (od nejnovějšího). `verzeZaznamu` = verze záznamu PŘED uložením návrhu. */
-export type PokusRozpoznani = { stav: string; vysledek: unknown; duvod: string | null; vytvoreno: string; verzeZaznamu: number | null }
+/**
+ * Stavy skladu, ve kterých se rozpoznání nezahajuje (zrcadlo
+ * `jine_platby_zahajit_rozpoznani`, kontrola 20. 10.): výdej je schválený,
+ * předaný k ručnímu odpisu, na cestě nebo provedený. Nové čtení by měnilo
+ * položky skladu a `jine_platby_ulozit_navrh` by je odmítl — až po
+ * zaplaceném a do stropu započteném čtení. Zapsaná nebo propojená tržba
+ * čtení NEBRÁNÍ (akce pak ponechá zapsanou částku, měnu a datum).
+ */
+export const SKLAD_BRANI_ROZPOZNANI: readonly string[] = [
+  'schvaleno',
+  'nepodporovano',
+  'zpracovava_se',
+  'nejasny_vysledek',
+  'odecteno_v_pos',
+  'jiz_odecteno',
+  'rucne_dolozeno',
+  'opraveno',
+]
+export const HLASKA_ROZPOZNANI_SKLAD =
+  'Výdej je schválený nebo provedený — nové rozpoznání by měnilo položky skladu. Změňte je ručně (Zrušit schválení, nebo korekce).'
+
+/** Řádek `jine_platby_rozpoznani`. `verzeZaznamu` = verze záznamu při zahájení čtení (uložení návrhu z něj ji zvedne o 1). */
+export type PokusRozpoznani = { id: string; stav: string; vysledek: unknown; duvod: string | null; vytvoreno: string; verzeZaznamu: number | null }
 
 /**
- * Ze kterého rozpoznání je uložený návrh (panel „Částky na dokladu“):
- * poslední ÚSPĚŠNÉ (`ok` s výsledkem), jehož verze záznamu je starší než
- * dnešní (`verzeZaznamu < verze`) — jen z takového se návrh mohl uložit
- * (uložení verzi zvedne). Ne poslední pokus: po něm může přijít chyba,
- * běžící pokus nebo čtení, jehož uložení databáze odmítla.
+ * Ze kterého rozpoznání je uložený návrh (panel „Částky na dokladu“).
  *
- *   zdroj          to čtení, nebo `null` (žádné takové);
- *   novejsi        pokusy po něm (od nejnovějšího) — obrazovka je řekne větou;
- *   upravenoPotom  návrh se od toho čtení měnil ještě jinak (verze záznamu je
- *                  vyšší než verze po uložení toho čtení).
+ * Rozhoduje VAZBA uložená u záznamu (`jine_platby.rozpoznani_id`): posílá ji
+ * jen akce rozpoznání, když se návrh z toho čtení opravdu uložil
+ * (`jine_platby_ulozit_navrh` ověří, že je to úspěšné čtení téhož záznamu).
+ * Z verzí samotných se neuložené čtení po souběžné úpravě od uloženého
+ * rozeznat nedá (kontrola 20. 10., R5) — proto se z nich nic neodvozuje.
+ *
+ *   `ulozene`  řádek podle `rozpoznani_id` (nebo `null`, když vazba není);
+ *   `posledni` posledních pár pokusů od nejnovějšího (jakýkoli stav).
+ *
+ * Vrací:
+ *   zdroj          uložené čtení, jen když je `ok` s výsledkem, jinak `null`;
+ *   novejsi        pokusy PO něm (od nejnovějšího): chyba, běžící, nebo
+ *                  přečtené, ze kterého se návrh neuložil — obrazovka je řekne
+ *                  větou; bez zdroje všechny;
+ *   upravenoPotom  záznam se od uložení toho čtení měnil (verze je vyšší než
+ *                  verze při čtení + 1 — ruční úprava návrhu, oprava tržby…).
  */
-export function rozpoznaniNavrhu(pokusy: readonly PokusRozpoznani[], verze: number): { zdroj: PokusRozpoznani | null; novejsi: PokusRozpoznani[]; upravenoPotom: boolean } {
-  const i = pokusy.findIndex((r) => r.stav === 'ok' && r.vysledek !== null && r.vysledek !== undefined && typeof r.verzeZaznamu === 'number' && r.verzeZaznamu < verze)
-  if (i < 0) return { zdroj: null, novejsi: [...pokusy], upravenoPotom: false }
-  const zdroj = pokusy[i]
-  return { zdroj, novejsi: pokusy.slice(0, i), upravenoPotom: verze > (zdroj.verzeZaznamu as number) + 1 }
+export function rozpoznaniNavrhu(
+  ulozene: PokusRozpoznani | null,
+  posledni: readonly PokusRozpoznani[],
+  verze: number,
+): { zdroj: PokusRozpoznani | null; novejsi: PokusRozpoznani[]; upravenoPotom: boolean } {
+  const zdroj = ulozene && ulozene.stav === 'ok' && ulozene.vysledek !== null && ulozene.vysledek !== undefined ? ulozene : null
+  if (!zdroj) return { zdroj: null, novejsi: [...posledni], upravenoPotom: false }
+  const i = posledni.findIndex((r) => r.id === zdroj.id)
+  const casZdroje = Date.parse(zdroj.vytvoreno)
+  // Zdroj mezi posledními pokusy: novější jsou ty před ním. Jinak (starší než
+  // všechny načtené) jsou novější všechny, které vznikly po něm.
+  const novejsi = i >= 0 ? posledni.slice(0, i) : posledni.filter((r) => r.id !== zdroj.id && !(Date.parse(r.vytvoreno) <= casZdroje))
+  const upravenoPotom = typeof zdroj.verzeZaznamu === 'number' && verze > zdroj.verzeZaznamu + 1
+  return { zdroj, novejsi, upravenoPotom }
 }
 
 /* ------------------------------------------------------------------ */
@@ -674,18 +729,26 @@ const POPIS_OTEVRENY_DOKLAD =
   'Doklad je fotka otevřeného účtu a pokladna účet se stejným číslem nevrátila. „Není v pokladně“ by nic nedokazovalo — účet mohl být uzavřený pod jiným číslem nebo pořád běží. Ověřte ho v pokladně a doložte ručně s důvodem.'
 
 /**
- * Doklad, u kterého otevřený účet v pokladně bez shody čísla nejde vyloučit:
- * informativní sjetina (vytištěná i z OTEVŘENÉHO účtu — host si mohl od
- * tisku přiobjednat, číslo na ní bývá číslo stolu), neurčený typ a záznam
- * bez typu. Uzavřený prodej a ruční seznam spotřeby beze změny; fotka
- * otevřeného účtu má vlastní, přísnější pravidlo (`POPIS_OTEVRENY_DOKLAD`).
+ * Jen u těchhle typů dokladu dotaz do pokladny PROKÁŽE, že prodej (výdej)
+ * v pokladně není — „nenalezeno“ / „neodečteno“ (whitelist, kontrola 20. 10.;
+ * databáze to hlídá taky, `jine_platby_zapsat_kontrolu`):
+ *   uzavreny_prodej  účet je uzavřený, číslo i částka jsou konečné;
+ *   rucni_spotreba   ruční seznam spotřeby mimo pokladnu.
+ * Informativní sjetina (vytištěná i z OTEVŘENÉHO účtu — host si mohl od tisku
+ * přiobjednat, účet se pak uzavře pod jiným číslem a s jinou částkou),
+ * neurčený typ, záznam bez typu i fotka otevřeného účtu dostanou bez shody
+ * „nelze ověřit“ / „nelze zjistit“ — bez ohledu na to, jestli v pokladně
+ * zrovna nějaký účet běží. Zbývá ruční prohlášení s důvodem.
  */
-const TYP_MUZE_BYT_OTEVRENY = (t: TypDokladu | null | undefined) => t === undefined || t === null || t === 'informativni_sjetina' || t === 'nezjisteno'
+const TYP_PROKAZE_NEPRITOMNOST = (t: TypDokladu | null | undefined) => t === 'uzavreny_prodej' || t === 'rucni_spotreba'
 
-const popisOtevrenych = (pocet: number) =>
-  `V prohledaných provozovnách ${pocet === 1 ? 'je otevřený účet' : `je ${pocet} otevřených účtů`} a doklad není prokazatelně uzavřený prodej. ` +
-  'Sjetina vytištěná z otevřeného účtu může mít jiné číslo i částku, než bude mít účet po uzavření — pak ho pokladna započítá sama. ' +
-  '„Není v pokladně“ by nic nedokazovalo. Ověřte to v pokladně a doložte ručně s důvodem; když je doklad uzavřený prodej nebo ruční seznam spotřeby, nastavte typ dokladu v úpravě návrhu a zkontrolujte znovu.'
+const POPIS_TYPU: Record<string, string> = { informativni_sjetina: 'informativní sjetina', nezjisteno: 'neurčený typ' }
+
+const popisTypuBezDukazu = (typ: TypDokladu | null | undefined, otevrenych: number) =>
+  `Doklad není uzavřený prodej ani ruční seznam spotřeby (typ: ${typ ? (POPIS_TYPU[typ] ?? typ) : 'neuveden'}) a pokladna odpovídající účet nevrátila. ` +
+  'U takového dokladu dotaz do pokladny nepřítomnost prodeje neprokáže — sjetina z otevřeného účtu může být v pokladně pod jiným číslem a s jinou (dorostlou) částkou' +
+  (otevrenych > 0 ? ` (v provozovnách ${otevrenych === 1 ? 'je otevřený účet' : `je ${otevrenych} otevřených účtů`})` : '') +
+  '. Ověřte to v pokladně a doložte ručním prohlášením s důvodem; když je doklad uzavřený prodej nebo ruční seznam spotřeby, nastavte typ dokladu v úpravě návrhu a zkontrolujte znovu.'
 
 const shodaCisla = (u: UcetPos, cislo: string) => normalizovatUcet(u.cisloDokladu) === cislo || normalizovatUcet(u.externiId) === cislo
 
@@ -783,14 +846,13 @@ function zakladDetailu(s: Shody, okno: OknaKontroly, dotazy: readonly DotazUctu[
  *                  uzavřených se stejným číslem;
  *   nelze_overit   účet je v pokladně OTEVŘENÝ (po uzavření ho pokladna
  *                  zapíše do tržeb sama — nová tržba by se započítala
- *                  dvakrát), stav účtu neznámý, seznam není úplný, je
- *                  doklad fotka OTEVŘENÉHO účtu (`typDokladu`
- *                  'otevreny_ucet') a účet se stejným číslem v pokladně
- *                  není — takový doklad „nenalezeno“ nikdy nedostane —,
- *                  nebo je doklad informativní sjetina / neurčený typ a
- *                  v provozovnách je JAKÝKOLI otevřený účet bez shody čísla
- *                  (sjetina z otevřeného účtu, který od tisku dorostl);
- *   nenalezeno     nic z toho a pokladna vrátila ÚPLNÝ seznam účtů.
+ *                  dvakrát), stav účtu neznámý, seznam není úplný, nebo
+ *                  doklad není uzavřený prodej ani ruční seznam spotřeby
+ *                  (`TYP_PROKAZE_NEPRITOMNOST`: fotka otevřeného účtu,
+ *                  informativní sjetina, neurčený typ, bez typu) a shoda
+ *                  není — takový doklad „nenalezeno“ nikdy nedostane;
+ *   nenalezeno     nic z toho, doklad je uzavřený prodej nebo ruční seznam
+ *                  spotřeby a pokladna vrátila ÚPLNÝ seznam účtů.
  *
  * Odpisový účet (`odpis === true`, třeba ruční odpis spotřeby v pokladně
  * nebo výdej appky) NENÍ prodej — do kontroly tržby se nebere vůbec
@@ -868,18 +930,18 @@ export function vyhodnotitKontroluTrzby(z: ZaznamProKontrolu, dotazyVse: readonl
     }
   }
 
-  // 3. Nic. „Nenalezeno“ jen nad úplným seznamem — a nikdy u fotky otevřeného účtu
-  //    (sem se dojde jen bez shody čísla u účtu, který v pokladně platí), ani u
-  //    sjetiny / neurčeného dokladu, když v pokladně běží otevřený účet.
+  // 3. Nic. „Nenalezeno“ jen nad úplným seznamem a jen u uzavřeného prodeje nebo
+  //    ručního seznamu spotřeby — nikdy u fotky otevřeného účtu (sem se dojde jen
+  //    bez shody čísla u účtu, který v pokladně platí), sjetiny ani neurčeného dokladu.
   const zruseny = s.poCisle.zrusene.length > 0 ? ` Účet se stejným číslem je v pokladně zrušený (${popisUctu(s.poCisle.zrusene[0])}).` : ''
   if (z.typDokladu === 'otevreny_ucet') {
     return { vysledek: 'nelze_overit', detail: { ...zaklad, shoda: null, otevreny_doklad: true }, popis: POPIS_OTEVRENY_DOKLAD + zruseny }
   }
-  if (TYP_MUZE_BYT_OTEVRENY(z.typDokladu) && s.otevreneBezCisla.length > 0) {
+  if (!TYP_PROKAZE_NEPRITOMNOST(z.typDokladu)) {
     return {
       vysledek: 'nelze_overit',
-      detail: { ...zaklad, shoda: 'otevreny_bez_cisla', otevrenych: s.otevreneBezCisla.length, ucty: s.otevreneBezCisla.slice(0, 5).map(strucne) },
-      popis: popisOtevrenych(s.otevreneBezCisla.length) + zruseny,
+      detail: { ...zaklad, shoda: 'typ_neprokaze', typ_dokladu: z.typDokladu ?? null, otevrenych: s.otevreneBezCisla.length, ucty: s.otevreneBezCisla.slice(0, 5).map(strucne) },
+      popis: popisTypuBezDukazu(z.typDokladu, s.otevreneBezCisla.length) + zruseny,
     }
   }
   if (s.uplne) {
@@ -910,9 +972,9 @@ export type DohledaniOdpisu = { klic: string; odpoved: { stav: 'ok'; ucet: UcetP
  *                  už provedený ruční odpis), neznámý stav, dohledání klíče
  *                  selhalo, nebo seznam účtů není úplný;
  *   neodecteno     nic z toho nad ÚPLNÝM seznamem a s úspěšným dohledáním
- *                  klíčů — a nikdy u fotky otevřeného účtu bez shody čísla
- *                  ani u sjetiny / neurčeného dokladu, když v pokladně běží
- *                  otevřený účet (stejně jako u tržby, pak `nelze_zjistit`).
+ *                  klíčů — a jen u uzavřeného prodeje nebo ručního seznamu
+ *                  spotřeby (`TYP_PROKAZE_NEPRITOMNOST`, stejně jako u tržby;
+ *                  jinak `nelze_zjistit`).
  *
  * U skladu se nehraje na „pravděpodobně“: dvojí výdej odečte sklad dvakrát
  * a nikdo si toho nevšimne až do inventury.
@@ -979,11 +1041,11 @@ export function vyhodnotitKontroluSkladu(
   if (z.typDokladu === 'otevreny_ucet') {
     return { vysledek: 'nelze_zjistit', detail: { ...zaklad, zdroj_shody: null, otevreny_doklad: true }, popis: POPIS_OTEVRENY_DOKLAD }
   }
-  if (TYP_MUZE_BYT_OTEVRENY(z.typDokladu) && s.otevreneBezCisla.length > 0) {
+  if (!TYP_PROKAZE_NEPRITOMNOST(z.typDokladu)) {
     return {
       vysledek: 'nelze_zjistit',
-      detail: { ...zaklad, zdroj_shody: 'otevreny_bez_cisla', otevrenych: s.otevreneBezCisla.length, ucty: s.otevreneBezCisla.slice(0, 5).map(strucne) },
-      popis: popisOtevrenych(s.otevreneBezCisla.length),
+      detail: { ...zaklad, zdroj_shody: 'typ_neprokaze', typ_dokladu: z.typDokladu ?? null, otevrenych: s.otevreneBezCisla.length, ucty: s.otevreneBezCisla.slice(0, 5).map(strucne) },
+      popis: popisTypuBezDukazu(z.typDokladu, s.otevreneBezCisla.length),
     }
   }
   return {
@@ -1088,6 +1150,34 @@ export function dohledaniZUctu(
     }
   }
   return { stav: 'nalezeno', externiId: u.externiId, doklad: u.cisloDokladu, detail: { stav: u.stav, zaplaceno: u.zaplaceno, odpis: u.odpis, typ_dokladu: u.typDokladu } }
+}
+
+const DRUHY_DO_SKLADU: readonly DruhPolozky[] = ['pokrm', 'rozlevany_napoj', 'kusove_zbozi']
+
+/**
+ * Položky, kvůli kterým „Ručně doloženo“ u schváleného výdeje NEPROJDE —
+ * zrcadlo `jine_platby_rucne_dolozit_vydej` (kontrola 20. 10.): řádek ke
+ * kontrole, nezařazený řádek, nebo skladový druh (pokrm, rozlévaný nápoj,
+ * kusové zboží) bez ověřeného přiřazení nebo bez množství v jednotkách
+ * pokladny. Takový řádek by se s doložením neodečetl nikdy.
+ *
+ * Změna KATALOGU po schválení (produkt v pokladně zrušený — blokace náhledu
+ * z `jine_platby_sestavit_vydej`) doložení nebrání: doložit se smí, co bylo
+ * schváleno a v pokladně odepsáno (R4). Proto se to tady nepočítá.
+ */
+export function nevyresenePolozkyDolozeni(
+  polozky: readonly Pick<PolozkaNavrhu, 'nazev' | 'druh' | 'mapovani' | 'posMnozstvi' | 'vyzadujeKontrolu'>[],
+): { poradi: number; nazev: string; duvod: string }[] {
+  const vystup: { poradi: number; nazev: string; duvod: string }[] = []
+  polozky.forEach((p, i) => {
+    let duvod: string | null = null
+    if (p.vyzadujeKontrolu) duvod = 'Položka čeká na kontrolu.'
+    else if (p.druh === 'nezarazeno') duvod = 'Položka není zařazená (pokrm, nápoj, zboží, služba…).'
+    else if (DRUHY_DO_SKLADU.includes(p.druh) && p.mapovani !== 'overeno') duvod = 'Položka nemá ověřené přiřazení k produktu v pokladně.'
+    else if (DRUHY_DO_SKLADU.includes(p.druh) && p.posMnozstvi === null) duvod = 'Chybí množství v jednotkách pokladny.'
+    if (duvod) vystup.push({ poradi: i + 1, nazev: p.nazev, duvod })
+  })
+  return vystup
 }
 
 /**
@@ -1207,7 +1297,16 @@ export function shrnutiUdalosti(detail: Record<string, unknown> | null | undefin
   const duvodPropojeni = t('duvod_propojeni')
   if (duvodPropojeni) casti.push(`proč je prodej v pokladně: ${duvodPropojeni}`)
   const prepsano = t('prepsano_pokladny')
-  if (prepsano) casti.push(`přepsalo výsledek pokladny (${POPIS_VYSLEDKU_TRZBY[prepsano as VysledekKontrolyTrzby] ?? POPIS_VYSLEDKU_SKLADU[prepsano as VysledekKontrolySkladu] ?? prepsano})`)
+  // Celý přepsaný výsledek pokladny (P1): účet, který pokladna našla, ať se z historie nevytratí.
+  const prepsanyDetail = (detail.prepsany_vysledek as { detail?: Record<string, unknown> } | null | undefined)?.detail
+  const ucetPokladny = prepsanyDetail?.pos_prodej_id ?? prepsanyDetail?.externi_id // tržba / sklad
+  const prepsanyUcet = typeof ucetPokladny === 'string' && ucetPokladny.trim() !== '' ? ucetPokladny.trim() : null
+  if (prepsano) {
+    casti.push(
+      `přepsalo výsledek pokladny (${POPIS_VYSLEDKU_TRZBY[prepsano as VysledekKontrolyTrzby] ?? POPIS_VYSLEDKU_SKLADU[prepsano as VysledekKontrolySkladu] ?? prepsano}${prepsanyUcet ? `, účet ${prepsanyUcet}` : ''})`,
+    )
+  }
+  if (detail.bez_surovin_potvrzeno === true) casti.push('potvrzeno: zboží není surovina pokrmu')
   if (Array.isArray(detail.upozorneni_proverena) && detail.upozorneni_proverena.length > 0) casti.push(`upozornění AI prověřena: ${detail.upozorneni_proverena.length}`)
   return casti.join(' · ')
 }

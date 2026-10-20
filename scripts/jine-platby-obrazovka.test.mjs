@@ -660,26 +660,59 @@ console.log('\n== Přehled: spuštěná stránka (dotazy a HTML) ==')
   const nenalezeno = await spustit({ radky: [{ ...dvakratRadek, kontrola_trzby: { ...dvakratRadek.kontrola_trzby, vysledek: 'nenalezeno' } }] })
   ok('zapsaná tržba s kontrolou „nenalezeno" značku nemá', !znacka(nenalezeno.html ?? '', dvakratRadek.id).includes('Možná zapsáno dvakrát') && znacka(nenalezeno.html ?? '', dvakratRadek.id) !== '')
 
-  // Možná nezapočítáno (moznaNikde): propojeno, ale pokladna k aktuální verzi prodej nenašla.
+  // Možná nezapočítáno (moznaNikde, R1 z 20. 10.): propojeno s KONKRÉTNÍM prodejem (pos_prodej_id), který
+  // pokladna nenašla. Propojení bez konkrétního prodeje dodatečná kontrola ověřit neumí — značku nemá.
+  // Verze se neporovnává (hledá se tentýž prodej, uložení návrhu verzi zvedne i bez změny).
   const nikdeRadek = {
-    ...radekZaznamu, id: 'e7777777-7777-4777-8777-77777777777e', stav_trzby: 'propojeno', stav_kontroly: 'zkontrolovano', verze: 5,
+    ...radekZaznamu, id: 'e7777777-7777-4777-8777-77777777777e', stav_trzby: 'propojeno', stav_kontroly: 'zkontrolovano', verze: 5, pos_prodej_id: 'ORDER-555',
     kontrola_trzby: { vysledek: 'nenalezeno', zdroj: 'pos_api', verze: 5, kdy: '2026-10-14T11:00:00Z', kdo: null, detail: {} },
   }
   const staraVerze = { ...nikdeRadek, id: 'e6666666-6666-4666-8666-66666666666e', verze: 6 }
+  const bezProdeje = { ...nikdeRadek, id: 'e5555555-5555-4555-8555-55555555555e', pos_prodej_id: null }
   const nikde = await spustit({ hledani: { stav: 'mozna_nikde' }, radky: [nikdeRadek, staraVerze] })
-  ok('filtr „Možná nezapočítáno": v DOTAZU stav_trzby = propojeno, kontrola_trzby->>zdroj = pos_api a ->>vysledek = nenalezeno',
-    ma(nikde.zaznamy, 'eq', 'stav_trzby', 'propojeno') && ma(nikde.zaznamy, 'eq', 'kontrola_trzby->>zdroj', 'pos_api') && ma(nikde.zaznamy, 'eq', 'kontrola_trzby->>vysledek', 'nenalezeno'))
+  ok('filtr „Možná nezapočítáno": v DOTAZU stav_trzby = propojeno, pos_prodej_id není null, kontrola_trzby->>zdroj = pos_api a ->>vysledek = nenalezeno',
+    ma(nikde.zaznamy, 'eq', 'stav_trzby', 'propojeno') && ma(nikde.zaznamy, 'not', 'pos_prodej_id', 'is', null) &&
+      ma(nikde.zaznamy, 'eq', 'kontrola_trzby->>zdroj', 'pos_api') && ma(nikde.zaznamy, 'eq', 'kontrola_trzby->>vysledek', 'nenalezeno'))
   ok('… bez zrušených? (propojená tržba zrušená být nemůže — databáze zrušení s tržbou odmítne)', !ma(nikde.zaznamy, 'eq', 'stav_kontroly', 'zruseno'))
-  ok('… kontrola ke starší verzi záznamu (verze 5, záznam 6) se ve filtru neukáže — dořeší moznaNikde',
-    znacka(nikde.html ?? '', nikdeRadek.id) !== '' && znacka(nikde.html ?? '', staraVerze.id) === '')
+  ok('… celé pravidlo je v dotazu: řádky, které databáze vrátí, aplikace už nepřebírá (i kontrola ke starší verzi se ukáže)',
+    znacka(nikde.html ?? '', nikdeRadek.id).includes('Možná nezapočítáno') && znacka(nikde.html ?? '', staraVerze.id).includes('Možná nezapočítáno'))
   ok('filtr „Možná nezapočítáno" je v nabídce filtrů', zakladni.html.includes('stav=mozna_nikde') && zakladni.html.includes('Možná nezapočítáno'))
   const radekNikde = znacka(nikde.html ?? '', nikdeRadek.id)
   ok('řádek s propojenou tržbou, kterou pokladna nenašla: značka „Možná nezapočítáno" s ikonou varování (ft-i)',
     /<span class="ds-badge"[^>]*><svg class="ft-i"[^>]*>(?:<path[^>]*><\/path>)*<\/svg>Možná nezapočítáno<\/span>/.test(radekNikde))
-  const vse = await spustit({ radky: [nikdeRadek, staraVerze, dvakratRadek] })
-  ok('ve výchozím pohledu značku má jen řádek s kontrolou aktuální verze (ne stará verze, ne zapsaná tržba)',
-    znacka(vse.html ?? '', nikdeRadek.id).includes('Možná nezapočítáno') && !znacka(vse.html ?? '', staraVerze.id).includes('Možná nezapočítáno') &&
-      !znacka(vse.html ?? '', dvakratRadek.id).includes('Možná nezapočítáno') && znacka(vse.html ?? '', staraVerze.id) !== '')
+  const vse = await spustit({ radky: [nikdeRadek, staraVerze, bezProdeje, dvakratRadek] })
+  ok('ve výchozím pohledu značku má propojení s konkrétním prodejem (i s kontrolou ke starší verzi), ne zapsaná tržba',
+    znacka(vse.html ?? '', nikdeRadek.id).includes('Možná nezapočítáno') && znacka(vse.html ?? '', staraVerze.id).includes('Možná nezapočítáno') &&
+      !znacka(vse.html ?? '', dvakratRadek.id).includes('Možná nezapočítáno'))
+  ok('propojení BEZ konkrétního prodeje (pos_prodej_id null) značku nemá — falešný poplach po shodě částky (R1)',
+    znacka(vse.html ?? '', bezProdeje.id) !== '' && !znacka(vse.html ?? '', bezProdeje.id).includes('Možná nezapočítáno'))
+  {
+    // Filtr v databázi = moznaNikde: dotaz pustí řádek právě tehdy, když moznaNikde řekne ano (žádná dořešení v aplikaci).
+    const { moznaNikde } = await import('../lib/jine-platby-stav.ts')
+    const { zDbZaznam } = await import('../lib/jine-platby-db.ts')
+    const podminky = (nikde.zaznamy ?? []).filter((v) => ['eq', 'not', 'in', 'neq', 'is'].includes(v[0]) && v[1] !== 'tenant_id' && v[1] !== 'branch_id')
+    const projde = (r) => podminky.every(([op, sloupec, ...hodnoty]) => {
+      const cesta = sloupec.split('->>')
+      const h = cesta.length === 2 ? ((r[cesta[0]] ?? {})[cesta[1]] ?? null) : (r[sloupec] ?? null)
+      if (op === 'eq') return h !== null && String(h) === String(hodnoty[0])
+      if (op === 'neq') return h !== null && String(h) !== String(hodnoty[0])
+      if (op === 'in') return h !== null && hodnoty[0].map(String).includes(String(h))
+      if (op === 'not' && hodnoty[0] === 'is' && hodnoty[1] === null) return h !== null
+      return false
+    })
+    let shoda = true
+    let kombinaci = 0
+    for (const stav_trzby of ['nezapsano', 'zapsano', 'propojeno', 'stornovano'])
+      for (const pos_prodej_id of [null, 'ORDER-1'])
+        for (const zdroj of ['pos_api', 'rucni_prohlaseni'])
+          for (const vysledek of ['nalezeno', 'nenalezeno', 'pravdepodobne', 'nelze_overit', null])
+            for (const verze of [5, 6]) {
+              kombinaci++
+              const r = { ...radekZaznamu, stav_trzby, pos_prodej_id, verze: 5, kontrola_trzby: vysledek === null ? null : { vysledek, zdroj, verze, kdy: '2026-10-14T11:00:00Z', kdo: null, detail: {} } }
+              if (projde(r) !== moznaNikde(zDbZaznam(r))) shoda = false
+            }
+    ok('filtr v dotazu = moznaNikde na všech ' + kombinaci + ' kombinacích (stav tržby × prodej × zdroj × výsledek × verze; podmínek ' + podminky.length + ')', shoda && podminky.length === 4)
+  }
   const rucne = await spustit({ radky: [{ ...nikdeRadek, kontrola_trzby: { ...nikdeRadek.kontrola_trzby, zdroj: 'rucni_prohlaseni' } }] })
   ok('ruční prohlášení „nenalezeno" u propojené tržby značku nemá (propojení bez nálezu chtělo důvod)', znacka(rucne.html ?? '', nikdeRadek.id) !== '' && !znacka(rucne.html ?? '', nikdeRadek.id).includes('Možná nezapočítáno'))
 

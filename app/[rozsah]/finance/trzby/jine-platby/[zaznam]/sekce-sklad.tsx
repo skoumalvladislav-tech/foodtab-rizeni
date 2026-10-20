@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { mnozstviNaText } from '@/lib/jine-platby-castky'
+import { REZERVA_PO_PLATNOSTI_MS } from '@/lib/jine-platby-pos-operace'
 import { popisStavuSkladu, prohlaseniProtiPokladne, type AkceJinePlatby } from '@/lib/jine-platby-stav'
 import { PLATNOST_KONTROLY_SKLADU_MIN, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 
@@ -18,9 +19,10 @@ export type PolozkaVydeje = { poradi: number | null; posProduktId: string; nazev
 export type BlokaceVydeje = { poradi: number | null; nazev: string | null; duvod: string }
 /**
  * Náhled výdeje z `jine_platby_sestavit_vydej`. `blokace` s `poradi` =
- * nevyřešená POLOŽKA (schválit ani ručně doložit nejde), bez `poradi` =
- * věc celého výdeje (pokladna neobsluhuje pobočku…). `varovani` jen
- * upozorňují (výdej obsahuje pokrm i další zboží…) a nic neblokují.
+ * nevyřešená POLOŽKA nebo produkt, který v katalogu pokladny není (schválit
+ * nejde; ruční doložení blokuje jen nevyřešená položka — `nevyresenePolozky`),
+ * bez `poradi` = věc celého výdeje (pokladna neobsluhuje pobočku…).
+ * `varovani` (pokrm i kusové zboží) chtějí při schválení výslovné potvrzení.
  */
 export type NahledVydeje = { polozky: PolozkaVydeje[]; blokace: BlokaceVydeje[]; polozek: number; varovani: string[] }
 export type NavrhVydeje = {
@@ -50,6 +52,11 @@ export type OperaceVydeje = {
 /** Řádek dokladu → produkt pokladny (pro „položky, množství, mapování“). */
 export type PrevodPolozky = { poradi: number; nazev: string; mnozstvi: string | null; jednotka: string | null; posProduktId: string | null; posMnozstvi: string | null; mapovani: string }
 
+/** Stavy skladu se schváleným, ještě neuzavřeným výdejem — tam se ukazuje, co doložení brání. */
+const SKLAD_SCHVALENY_NEUZAVRENY: readonly string[] = ['schvaleno', 'nepodporovano', 'chyba', 'nejasny_vysledek', 'zpracovava_se']
+/** Operace na cestě: výsledek nejasný, jen se dohledává. */
+const OPERACE_NEJASNA: readonly string[] = ['odesila_se', 'nejasny_vysledek']
+
 const POPIS_OPERACE: Record<string, string> = {
   pripraveno: 'Připraveno k provedení',
   odesila_se: 'Odesílá se do pokladny — čeká se na ověření',
@@ -75,15 +82,23 @@ const POPIS_OPERACE: Record<string, string> = {
  *
  * „Ručně doloženo“ nese otisk živého schváleného návrhu (skryté pole);
  * „Zrušit schválení“ je jen pro případ, že v pokladně nic odepsáno nebylo.
+ * U požadavku s nejasným výsledkem obojí nabídne `dostupneAkce` až po
+ * vypršení jeho platnosti (+ 2 min) — panel pak řekne, že se to musí
+ * nejdřív ověřit v pokladně (C5); do té doby se jen dohledává.
  *
- * Ve stavu „schváleno“ i „předáno k ručnímu odpisu“ panel ukáže nevyřešené
- * položky náhledu (`blokace` s pořadím — produkt zrušený v katalogu…);
- * dokud nějaká je, „Ručně doloženo“ se nenabízí (databáze by doložení
- * odmítla). Varování náhledu (pokrm i další zboží) ukáže panel schválení
- * i panel ručního odpisu — neblokují.
+ * U schváleného, ještě neuzavřeného výdeje panel ukáže nevyřešené POLOŽKY
+ * (`nevyresenePolozky` — řádek ke kontrole, nezařazený, skladový bez
+ * ověřeného přiřazení nebo množství); dokud nějaká je, „Ručně doloženo“ se
+ * nenabízí (databáze by doložení odmítla). Blokace celého výdeje a katalog
+ * změněný po schválení jen upozorní — doložení nebrání (R4).
  *
- * Ruční prohlášení „neodečetla“ proti výsledku dotazu do pokladny k téže
- * verzi (`prohlaseniProtiPokladne`) se bez práva na opravy nenabízí.
+ * Varování náhledu (pokrm i kusové zboží) ukáže panel schválení i panel
+ * ručního odpisu. Schválení s varováním chce POVINNÉ zaškrtnutí „Zboží není
+ * surovina toho pokrmu“ (`bez_surovin` → `p_bez_surovin`, C6).
+ *
+ * Ruční prohlášení „neodečetla“ proti poslednímu výsledku pokladny „už
+ * odečetla“ (`prohlaseniProtiPokladne`, bez ohledu na verzi) jen s právem
+ * na opravy a s povinným zaškrtnutím `prepsat_pokladnu`.
  */
 export default function SekceSklad({
   zakl,
@@ -98,6 +113,7 @@ export default function SekceSklad({
   operace,
   prevody,
   originaly,
+  nevyresenePolozky = [],
   duplicity,
   jednotkyProduktu,
   muzeSchvalit,
@@ -120,6 +136,8 @@ export default function SekceSklad({
   operace: OperaceVydeje | null
   prevody: PrevodPolozky[]
   originaly: { id: string; poradi: number }[]
+  /** Položky, kvůli kterým databáze ruční doložení odmítne (`nevyresenePolozkyDolozeni` nad uloženými položkami). */
+  nevyresenePolozky?: { poradi: number; nazev: string; duvod: string }[]
   /** Možné duplicity (mozneDuplicity nad záznamy téže pobočky ± 7 dní) — ukážou se u schválení. */
   duplicity: { zaznamId: string; duvod: string; jista: boolean; odkaz: string }[]
   /** Jednotka prodeje pokladny podle produktu, česky (jednotkaCesky). Chybí = neuvedena. */
@@ -138,11 +156,18 @@ export default function SekceSklad({
   const plan = textPlanovaneOperace(pokladna?.skladovyVydej ?? 'rucne', pokladna?.nazevPoskytovatele ?? nazevPokladny, provozovna)
   const detailKontroly = (z.kontrolaSkladu?.detail ?? {}) as Record<string, unknown>
   const text = (v: unknown) => (typeof v === 'string' ? v : '')
-  const schvalenoNeboRucne = s === 'schvaleno' || s === 'nepodporovano'
-  /** Blokace náhledu ve schváleném / ručně zpracovávaném výdeji (s pořadím = nevyřešená položka). */
-  const blokaceSchvaleneho = schvalenoNeboRucne && nahled ? nahled.blokace : []
-  const nevyreseneSchvaleneho = blokaceSchvaleneho.filter((b) => b.poradi !== null)
-  const nabidnoutRucneDolozit = akce.has('rucne_dolozit') && nevyreseneSchvaleneho.length === 0
+  /** Výdej je schválený a ještě neuzavřený (i předaný k ručnímu odpisu, s chybou nebo s nejasnou operací). */
+  const schvalenyVydej = maPokladnu && SKLAD_SCHVALENY_NEUZAVRENY.includes(s)
+  /** Co ručnímu doložení brání (zrcadlo databáze: nevyřešená POLOŽKA, ne změna katalogu). */
+  const nevyreseneDolozeni = schvalenyVydej ? nevyresenePolozky : []
+  const poradiNevyresenych = new Set(nevyreseneDolozeni.map((b) => b.poradi))
+  /** Ostatní blokace náhledu u schváleného výdeje (celý výdej, katalog změněný po schválení) — jen upozorní. */
+  const pozorSchvaleneho = schvalenyVydej && nahled ? nahled.blokace.filter((b) => b.poradi === null || !poradiNevyresenych.has(b.poradi)) : []
+  const nabidnoutRucneDolozit = akce.has('rucne_dolozit') && nevyreseneDolozeni.length === 0
+  const nejasnaOperace = operace !== null && OPERACE_NEJASNA.includes(operace.stav)
+  /** Nejasná operace po vypršení platnosti: databáze pustí ruční doložení i zrušení schválení (C5) — `dostupneAkce` je nabídne. */
+  const nejasnaPoPlatnosti = nejasnaOperace && (akce.has('rucne_dolozit') || akce.has('zrusit_schvaleni'))
+  const konecDohledavani = operace?.platnostDo ? Date.parse(operace.platnostDo) + REZERVA_PO_PLATNOSTI_MS : NaN
 
   const seznamBlokaci = (blokace: BlokaceVydeje[]) => (
     <ul style={{ margin: 0, paddingLeft: '20px' }}>
@@ -328,6 +353,13 @@ export default function SekceSklad({
                     ano: 'Ano, potvrdit výdej',
                   }}
                 >
+                  {nahled && nahled.varovani.length > 0 ? (
+                    // Pokrm i kusové zboží: databáze schválí jen s výslovným potvrzením (p_bez_surovin).
+                    <label style={{ display: 'flex', gap: '8px', alignItems: 'center', minHeight: '44px', fontSize: '14px', fontWeight: 600 }}>
+                      <input type="checkbox" name="bez_surovin" value="ano" required />
+                      <span>Zboží není surovina toho pokrmu (povinné — suroviny pokrmu odečte pokladna podle receptury sama)</span>
+                    </label>
+                  ) : null}
                   <PoleDuvodu
                     nazev="duplicita_duvod"
                     popisek="Proč to není duplicita (nepovinné)"
@@ -392,6 +424,18 @@ export default function SekceSklad({
               <Vysvetleni>Nic se neposílá znovu — appka jen hledá v pokladně výdej s klíčem této operace.</Vysvetleni>
             </FormularAkce>
           ) : null}
+          {nejasnaPoPlatnosti ? (
+            <Vysvetleni dulezite>
+              Požadavek do pokladny má nejasný výsledek a jeho platnost vypršela{operace.platnostDo ? ` (${datumACasSRokemVPasmu(operace.platnostDo, zona)})` : ''}. Než
+              cokoli doložíte nebo zrušíte, ověřte v pokladně, jestli výdej s klíčem této operace proběhl: když ano, použijte „Ručně doloženo“ s číslem
+              dokladu z pokladny; když v pokladně nic odepsáno není, „Zrušit schválení“.
+            </Vysvetleni>
+          ) : nejasnaOperace && akce.has('obnovit_vydej') && Number.isFinite(konecDohledavani) ? (
+            <Vysvetleni>
+              Do {datumACasSRokemVPasmu(new Date(konecDohledavani).toISOString(), zona)} (platnost požadavku a 2 minuty rezerva) se výdej jen dohledává — pokladna ho může
+              ještě provést. Potom půjde po ověření v pokladně ručně doložit, nebo schválení zrušit.
+            </Vysvetleni>
+          ) : null}
           {akce.has('vydej_znovu') ? (
             <FormularAkce
               akce={vydejZnovu}
@@ -421,17 +465,29 @@ export default function SekceSklad({
       ) : null}
 
       {/* ---------- Schválený výdej s nevyřešenou položkou (databáze doložení odmítne) ---------- */}
-      {blokaceSchvaleneho.length > 0 ? (
+      {nevyreseneDolozeni.length > 0 ? (
         <div role="status" style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
           <strong style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <Ikona klic="varovani" velikost={16} />
-            {nevyreseneSchvaleneho.length > 0 ? ' Návrh výdeje má nevyřešené položky — ručně doložit ho teď nejde:' : ' Pozor u výdeje:'}
+            <Ikona klic="varovani" velikost={16} /> Návrh výdeje má nevyřešené položky — ručně doložit ho teď nejde:
           </strong>
-          {seznamBlokaci(blokaceSchvaleneho)}
-          {nevyreseneSchvaleneho.length > 0 ? (
+          {seznamBlokaci(nevyreseneDolozeni)}
+          <Vysvetleni>
+            Položky, které se týkají skladu, ve schváleném výdeji měnit nejde. Když jste v pokladně nic neodepsali, schvalovatel schválení zruší
+            („Zrušit schválení“), položky se opraví a výdej se pošle znovu.
+          </Vysvetleni>
+        </div>
+      ) : null}
+      {/* ---------- Schválený výdej: blokace celého výdeje nebo katalog změněný po schválení (doložení nebrání) ---------- */}
+      {pozorSchvaleneho.length > 0 ? (
+        <div role="status" style={{ display: 'grid', gap: '4px', fontSize: '14px' }}>
+          <strong style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <Ikona klic="varovani" velikost={16} /> Pozor u výdeje:
+          </strong>
+          {seznamBlokaci(pozorSchvaleneho)}
+          {pozorSchvaleneho.some((b) => b.poradi !== null) ? (
             <Vysvetleni>
-              Položky, které se týkají skladu, ve schváleném výdeji měnit nejde. Když jste v pokladně nic neodepsali, schvalovatel schválení zruší
-              („Zrušit schválení“), položky se opraví a výdej se pošle znovu.
+              Katalog pokladny se od schválení změnil (produkt v pokladně zrušili, nebo katalog není načtený). Ručně doložit jde dál — doloží se to, co
+              bylo schváleno a v pokladně odepsáno.
             </Vysvetleni>
           ) : null}
         </div>
@@ -448,7 +504,10 @@ export default function SekceSklad({
             vycistit
           >
             <Vysvetleni>
-              Použijte, až výdej provedete v pokladně sami. Stav bude „Ručně doloženo (neověřeno pokladnou)“ — není to automatické ověření.
+              {nejasnaPoPlatnosti
+                ? 'Jen když jste v pokladně ověřili, že výdej z tohoto návrhu proběhl (nebo jste ho tam provedli sami). '
+                : 'Použijte, až výdej provedete v pokladně sami. '}
+              Stav bude „Ručně doloženo (neověřeno pokladnou)“ — není to automatické ověření.
             </Vysvetleni>
             <label className="ds-field">
               <span className="ds-field-label">Číslo dokladu z pokladny (výdejka, odpis)</span>
@@ -524,12 +583,21 @@ export default function SekceSklad({
   )
 }
 
+/**
+ * Ruční prohlášení ke skladu. Proti poslednímu výsledku pokladny „už
+ * odečetla“ (`prohlaseniProtiPokladne`, bez ohledu na verzi) se
+ * „neodečetla“ nabízí jen s právem na opravy a s povinným zaškrtnutím
+ * `prepsat_pokladnu` (databáze bez nich odmítne, akce taky).
+ */
 function RucniProhlaseniSkladu({ zakl, z, smiOpravit }: { zakl: { zaznam: string; verze: number; rozsah: string }; z: ZaznamJinePlatby; smiOpravit: boolean }) {
   const proti = prohlaseniProtiPokladne(z, 'sklad')
-  const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_SKLADU as Record<string, string>)[proti] ?? proti)
+  const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_SKLADU as Record<string, string>)[proti.vysledek] ?? proti.vysledek)
+  const neniNelze = proti !== null && proti.chceOpravu && !smiOpravit
   const volby: [string, string][] = [
     ['je', 'už odečetla (prodej je v pokladně uzavřený, nebo výdej už proběhl)'],
-    ...(proti !== null && !smiOpravit ? [] : ([['neni', 'neodečetla (ověřeno v pokladně)']] as [string, string][])),
+    ...(neniNelze
+      ? []
+      : ([['neni', proti !== null ? 'neodečetla (prodej nebo výdej v pokladně je jiný — přepíše výsledek pokladny)' : 'neodečetla (ověřeno v pokladně)']] as [string, string][])),
     ['nevim', 'nevím — nic nezapisovat'],
   ]
   return (
@@ -537,11 +605,11 @@ function RucniProhlaseniSkladu({ zakl, z, smiOpravit }: { zakl: { zaznam: string
       <summary style={{ cursor: 'pointer', fontSize: '14px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>Ruční prohlášení s důvodem</summary>
       <div style={{ marginTop: '8px' }}>
         <FormularAkce akce={prohlasitSklad} {...zakl} tlacitko="Zapsat ruční prohlášení" vycistit>
-          {popisProti !== null ? (
+          {proti !== null ? (
             <Vysvetleni dulezite>
-              {smiOpravit
-                ? `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Prohlášením „neodečetla“ výsledek pokladny přepíšete — zapíše se to do historie s vaším jménem. Nejdřív radši kontrolu v pokladně zopakujte.`
-                : `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Ruční prohlášení „neodečetla“ to nepřepíše, proto se nenabízí — když si myslíte, že se pokladna mýlí, zopakujte kontrolu v pokladně, nebo to rozhodne člověk s právem na opravy.`}
+              {neniNelze
+                ? `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny). Konkrétní prodej nebo odpis ručním prohlášením „neodečetla“ přepsat smí jen člověk s právem na opravy, proto se tu nenabízí — když si myslíte, že se pokladna mýlí, zopakujte kontrolu v pokladně, nebo dejte vědět tomu, kdo opravy dělá.`
+                : `Pokladna při kontrole našla: ${popisProti} (ověřeno dotazem do pokladny).${proti.chceOpravu ? ' Konkrétní prodej nebo odpis přepisujete s právem na opravy.' : ''} Prohlášení „neodečetla“ výsledek pokladny přepíše jen se zaškrtnutím, že prodej nebo výdej v pokladně je jiný — zapíše se to do historie s vaším jménem. Nejdřív radši kontrolu v pokladně zopakujte.`}
             </Vysvetleni>
           ) : null}
           <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: '4px' }}>
@@ -555,6 +623,12 @@ function RucniProhlaseniSkladu({ zakl, z, smiOpravit }: { zakl: { zaznam: string
               </label>
             ))}
           </fieldset>
+          {proti !== null && !neniNelze ? (
+            <label style={{ display: 'flex', gap: '8px', alignItems: 'center', minHeight: '44px', fontSize: '14px', fontWeight: 600 }}>
+              <input type="checkbox" name="prepsat_pokladnu" value="ano" />
+              <span>Prodej nebo výdej v pokladně je jiný, ověřil(a) jsem to (povinné u „neodečetla“)</span>
+            </label>
+          ) : null}
           <PoleDuvodu />
           <Vysvetleni>Ruční prohlášení se ukáže jako ruční (pokladnou neověřené), s vaším jménem a důvodem. Platí 15 minut.</Vysvetleni>
         </FormularAkce>

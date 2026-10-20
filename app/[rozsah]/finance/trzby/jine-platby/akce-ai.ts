@@ -2,6 +2,7 @@
 
 import { rozpoznatDoklad, rozpoznavaniJeNastavene, type VysledekRozpoznani } from '@/lib/jine-platby-ai'
 import { poznatTypSouboru, VERZE_ZADANI, zkontrolovatPodklad } from '@/lib/jine-platby-ai-jadro'
+import { formatHaleru } from '@/lib/jine-platby-castky'
 import { doDbHlavicka, doDbPolozky } from '@/lib/jine-platby-db'
 import { MAX_UPOZORNENI_DOKLADU, zkontrolovatDoklad } from '@/lib/jine-platby-kontrola'
 import { navrhnoutMapovani, type AliasMapovani, type ProduktKatalogu } from '@/lib/jine-platby-mapovani'
@@ -23,9 +24,11 @@ import {
   doplnitNecitelneNazvy,
   HLASKA_BEZ_AI,
   HLASKA_OBECNA,
+  HLASKA_ROZPOZNANI_SKLAD,
   jeNahradniNazev,
   MAX_POLOZEK_NAVRHU,
   popisPreskocenych,
+  SKLAD_BRANI_ROZPOZNANI,
   verzeZFormulare,
   vybratSouboryProAi,
   type StavAkce,
@@ -44,8 +47,19 @@ import {
  * přečtený). Pokus se do denního stropu (200 za firmu) započítá PŘED
  * voláním AI (`jine_platby_zahajit_rozpoznani`) — ale až PO levných
  * kontrolách: verze formuláře proti záznamu (a databáze ji při zahájení
- * ověří znovu, `p_verze`), zapsaná tržba, kontrola podkladu
- * (`zkontrolovatPodklad`) a zbývající čas. Co neprojde, nic nestojí.
+ * ověří znovu, `p_verze`), schválený nebo provedený výdej
+ * (`SKLAD_BRANI_ROZPOZNANI` — uložení položek skladu by spadlo; databáze
+ * to při zahájení odmítne taky), kontrola podkladu (`zkontrolovatPodklad`)
+ * a zbývající čas. Co neprojde, nic nestojí.
+ *
+ * Zapsaná nebo propojená tržba čtení NEBRÁNÍ (položky pro sklad jdou doplnit
+ * i potom), ale `jine_platby_ulozit_navrh` po zápisu odmítne změnu částky,
+ * měny nebo data. Akce proto u ní pošle ULOŽENOU částku, měnu a datum
+ * (u propojené faktury uloženou částku) a rozdíl přečtených hodnot přidá do
+ * upozornění k dokladu — nic se tiše nepřepíše ani nezahodí.
+ *
+ * S návrhem se uloží i vazba na tohle rozpoznání (`rozpoznaniId` →
+ * `jine_platby.rozpoznani_id`); panel „Částky na dokladu“ čte podle ní.
  *
  * Soubory jdou PO POŘADÍ, dokud se vejdou do stropů (`vybratSouboryProAi`):
  * fotka nad 5 MB a PDF nad 8 MB se přeskočí, výběr končí, než by součet
@@ -67,7 +81,7 @@ import {
  * a pokus by zůstal „běží“.
  */
 
-/** `maxDuration` stránky detailu ([zaznam]/page.tsx) — akce běží v její funkci. */
+/** `maxDuration` stránky detailu ([zaznam]/page.tsx) — akce běží v její funkci. Shodu hlídá scripts/jine-platby-detail.test.mjs. */
 const MAX_DELKA_AKCE_MS = 120_000
 /** Po odpovědi modelu ještě: zápis výsledku, kalendář, katalog a aliasy po stránkách, uložení návrhu. */
 const REZERVA_NA_ULOZENI_MS = 20_000
@@ -83,9 +97,7 @@ export async function rozpoznat(_predchozi: StavAkce, formData: FormData): Promi
   if (verze === null) return chyba('Formulář je zastaralý — načtěte stránku znovu.')
   // Levné kontroly PŘED placeným čtením a před započtením do stropu (databáze je při zahájení zopakuje).
   if (verze !== p.z.verze) return chyba('Formulář je zastaralý — záznam mezitím upravil někdo jiný. Načtěte stránku znovu; nic se nečetlo ani nezapočítalo.')
-  if (p.z.stavTrzby === 'zapsano' || p.z.stavTrzby === 'propojeno') {
-    return chyba('Tržba je už zapsaná — nové rozpoznání by měnilo potvrzené údaje. Opravte je ručně.')
-  }
+  if (SKLAD_BRANI_ROZPOZNANI.includes(p.z.stavSkladu)) return chyba(HLASKA_ROZPOZNANI_SKLAD)
   // Bez klíče nic nestahujeme ani nezapočítáváme do stropu.
   if (!rozpoznavaniJeNastavene()) return chyba(HLASKA_BEZ_AI)
   if (!p.uzivatelId) return chyba('Nejste přihlášen(a).')
@@ -140,15 +152,17 @@ export async function rozpoznat(_predchozi: StavAkce, formData: FormData): Promi
 
   // Stažení souborů mohlo trvat: bez rozumného zbytku času se čtení nezahajuje ani nezapočítá.
   if (konec - Date.now() < MIN_CAS_NA_AI_MS) {
-    return chyba('Na přečtení dokladu už nezbývá dost času (stažení souborů trvalo dlouho) — nic se neposlalo ani nezapočítalo. Zkuste to znovu, případně s menším počtem souborů.')
+    return chyba('Na přečtení dokladu už nezbývá dost času (stažení souborů trvalo dlouho) — nic se neposlalo ani nezapočítalo. Zkuste to znovu.')
   }
 
-  const { data: rozpoznaniId, error: chybaZahajeni } = await uloha.rpc('jine_platby_zahajit_rozpoznani', {
+  const { data: zahajeno, error: chybaZahajeni } = await uloha.rpc('jine_platby_zahajit_rozpoznani', {
     p_zaznam: p.z.id,
     p_spustil: p.uzivatelId,
     p_verze: verze,
   })
   if (chybaZahajeni) return vysledekChyby(chybaZahajeni, 'zahájení rozpoznání')
+  // Id pokusu (uuid): k dokončení i jako vazba návrhu na tohle čtení (`rozpoznaniId`).
+  const rozpoznaniId = String(zahajeno)
 
   // Termín pro model (ms epoch) — rozpoznatDoklad z něj odečte rezervu na převod odpovědi.
   let vysledek: VysledekRozpoznani
@@ -210,30 +224,55 @@ export async function rozpoznat(_predchozi: StavAkce, formData: FormData): Promi
   const polozky = doplnitNecitelneNazvy(vsechny.slice(0, MAX_POLOZEK_NAVRHU))
 
   // Co AI přečetla, nahradí; co nepřečetla (null), zůstane, jak to člověk měl. Označení a odběratel jsou člověka.
-  // Výjimka: uložený provozní den se nepřepíše (člověk ho mohl opravit) — rozdíl jde do upozornění.
+  // Výjimky — uložené zůstane a rozdíl jde do upozornění (věty o zápisu a datu jsou první):
+  //   * zapsaná / propojená tržba: částka, měna a datum (ulozit_navrh by změnu odmítl až po zaplaceném čtení);
+  //   * propojená faktura: částka (totéž);
+  //   * uložený provozní den (člověk ho mohl opravit).
   const h = kontrola.hlavicka
   const upozorneni: string[] = []
+  const trzbaZapsana = p.z.stavTrzby === 'zapsano' || p.z.stavTrzby === 'propojeno'
+  const castkaZamcena = trzbaZapsana || p.z.stavFaktury === 'propojena'
+  const proc = trzbaZapsana ? 'tržba je už zapsaná — změnit jde jen opravou tržby' : 'k záznamu je propojená faktura'
+  let castkaHaleru = h.castkaHaleru ?? p.z.castkaHaleru
+  let castkaPuvod = h.castkaHaleru !== null ? h.castkaPuvod : p.z.castkaHaleru !== null ? p.z.castkaPuvod : null
+  if (castkaZamcena) {
+    castkaHaleru = p.z.castkaHaleru
+    castkaPuvod = p.z.castkaPuvod
+    if (h.castkaHaleru !== null && h.castkaHaleru !== p.z.castkaHaleru) {
+      upozorneni.push(
+        `AI na dokladu přečetla celkovou cenu ${formatHaleru(h.castkaHaleru, h.mena ?? p.z.mena)}, uložená je ${p.z.castkaHaleru === null ? 'neuvedená' : formatHaleru(p.z.castkaHaleru, p.z.mena)} — ponechána uložená (${proc}). Ověřte, která je správná.`,
+      )
+    }
+  }
+  let mena = h.mena ?? p.z.mena
+  if (trzbaZapsana) {
+    mena = p.z.mena
+    if (h.mena !== null && h.mena !== p.z.mena) upozorneni.push(`AI na dokladu přečetla měnu ${h.mena}, uložená je ${p.z.mena ?? 'neuvedená'} — ponechána uložená (${proc}).`)
+  }
+  // Datum: uložené (u zapsané tržby je vždy) má přednost před přečteným — stejné pravidlo pro tržbu i bez ní.
   let datumProdeje = h.datumProdeje ?? p.z.datumProdeje
   if (p.z.datumProdeje !== null && h.datumProdeje !== null && h.datumProdeje !== p.z.datumProdeje) {
     datumProdeje = p.z.datumProdeje
     upozorneni.push(
-      `AI na dokladu přečetla datum ${datumCesky(h.datumProdeje)}, uložený provozní den je ${datumCesky(p.z.datumProdeje)} — ponechán uložený. ` +
+      `AI na dokladu přečetla datum ${datumCesky(h.datumProdeje)}, uložený provozní den je ${datumCesky(p.z.datumProdeje)} — ponechán uložený${trzbaZapsana ? ` (${proc})` : ''}. ` +
         'Ověřte, který je správný (účet vytištěný po půlnoci patří do předchozího provozního dne).',
     )
   }
   upozorneni.push(...kontrola.upozorneniDokladu)
-  upozorneni.splice(MAX_UPOZORNENI_DOKLADU) // strop databáze (20); věta o datu je první
+  upozorneni.splice(MAX_UPOZORNENI_DOKLADU) // strop databáze (20); věty o zápisu a datu jsou první
   const hlavicka: HlavickaNavrhu = {
     datumProdeje,
     oznaceni: p.z.oznaceni,
-    mena: h.mena ?? p.z.mena,
-    castkaHaleru: h.castkaHaleru ?? p.z.castkaHaleru,
-    castkaPuvod: h.castkaHaleru !== null ? h.castkaPuvod : p.z.castkaHaleru !== null ? p.z.castkaPuvod : null,
+    mena,
+    castkaHaleru,
+    castkaPuvod,
     typDokladu: h.typDokladu !== 'nezjisteno' ? h.typDokladu : p.z.typDokladu,
     externiUcet: h.externiUcet ?? p.z.externiUcet,
     kontaktId: p.z.kontaktId,
     // I prázdné pole: nové čtení stará upozornění nahradí (bez klíče by databáze nechala stará).
     upozorneniDokladu: upozorneni,
+    // Vazba návrhu na tohle čtení — panel „Částky na dokladu“ (databáze ověří, že je úspěšné a téhož záznamu).
+    rozpoznaniId,
   }
 
   // Uložení návrhu UŽIVATELSKÝM klientem — právo upravit a verzi ověří databáze.

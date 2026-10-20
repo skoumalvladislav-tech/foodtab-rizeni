@@ -34,6 +34,13 @@ const T = await import('../lib/jine-platby-typy.ts')
 // originálu se nesahá). Bez proměnných se čtou skutečné soubory.
 const DB = await import(process.env.JP_TEST_DB ? new URL(`file:///${process.env.JP_TEST_DB.replace(/\\/g, '/')}`).href : '../lib/jine-platby-db.ts')
 const O = await import('../lib/jine-platby-pos-operace.ts')
+/**
+ * Text migrace pro zrcadlové kontroly (20. 10.). `JP_TEST_MIGRACE` = kopie
+ * pro schválné rozbití — do originálu (patří integrátorovi) se nesahá.
+ * Prázdný text, když migrace není (kontroly pak spadnou na „podařilo se najít").
+ */
+const MIGRACE_CESTA = process.env.JP_TEST_MIGRACE ?? new URL('../supabase/migrations/20261016100000_jine_platby.sql', import.meta.url)
+const textMigrace = () => (existsSync(MIGRACE_CESTA) ? readFileSync(MIGRACE_CESTA, 'utf8').replace(/\r\n/g, '\n') : '')
 
 let chyb = 0
 let proslo = 0
@@ -471,12 +478,28 @@ console.log('\n== Čas tisku → provozní den (N31) ==')
   ok('5:59 → posun, 6:00 (začátek dne) → bez posunu', kc({ datum: '2026-10-15', cas: '05:59' }).hlavicka.datumProdeje === '2026-10-14' && kc({ datum: '2026-10-15', cas: '06:00' }).hlavicka.datumProdeje === '2026-10-15')
   const vecer = kc({ datum: '2026-10-15', cas: '22:15' })
   ok('večerní účet (22:15) → beze změny, bez upozornění', vecer.hlavicka.datumProdeje === '2026-10-15' && vecer.upozorneniDokladu.length === 0)
+  // C10 (kontrola 20. 10.): bez času tisku se datum nedomýšlí, ale neprojde potichu — upozornění k dokladu.
+  const VETA_BEZ_CASU = 'Datum z dokladu je kalendářní den tisku — ověřte provozní den (provozní den pobočky začíná v 06:00).'
   const bezCasu = kc({ datum: '2026-10-15', cas: null })
-  ok('bez času → nic se neposouvá ani nedomýšlí', bezCasu.hlavicka.datumProdeje === '2026-10-15' && bezCasu.upozorneniDokladu.length === 0)
-  ok('starší rozpoznání bez klíče `cas` → beze změny', ((d) => { delete d.cas; return K.zkontrolovatDoklad(d, { ...DNES, denZacina: '06:00' }).hlavicka.datumProdeje === '2026-10-15' })(doklad({ datum: '2026-10-15' })))
+  ok('bez času (den začíná v 6:00) → datum se neposouvá ani nedomýšlí', bezCasu.hlavicka.datumProdeje === '2026-10-15')
+  ok(`… ale přibude upozornění k dokladu „${VETA_BEZ_CASU}" (i v duvody a v hlavičce) a záznam chce kontrolu`,
+    JSON.stringify(bezCasu.upozorneniDokladu) === JSON.stringify([VETA_BEZ_CASU]) && bezCasu.duvody.includes(VETA_BEZ_CASU) &&
+      JSON.stringify(bezCasu.hlavicka.upozorneniDokladu) === JSON.stringify([VETA_BEZ_CASU]) && bezCasu.vyzadujeKontrolu && K.upozorneniBezCasu('06:00') === VETA_BEZ_CASU)
+  ok('… scénář z kontroly: cas null, den začíná v 04:00 → datum zůstane a upozornění jmenuje 04:00',
+    ((r) => r.hlavicka.datumProdeje === '2026-10-15' && r.upozorneniDokladu.includes(K.upozorneniBezCasu('04:00')) && /začíná v 04:00\)\.$/.test(r.upozorneniDokladu[0] ?? ''))(kc({ datum: '2026-10-15', cas: null }, '04:00')))
+  ok('den začíná o půlnoci („00:00", i „00:00:00" z databáze) → bez upozornění (kalendářní = provozní den)',
+    kc({ datum: '2026-10-15', cas: null }, '00:00').upozorneniDokladu.length === 0 && kc({ datum: '2026-10-15', cas: null }, '00:00:00').upozorneniDokladu.length === 0)
+  ok('bez denZacina (pobočka ho nezná) → bez upozornění i bez času', K.zkontrolovatDoklad(doklad({ datum: '2026-10-15', cas: null }), DNES).upozorneniDokladu.length === 0)
+  ok('s časem po začátku dne (22:15) upozornění „bez času" není', !vecer.upozorneniDokladu.some((u) => u.startsWith('Datum z dokladu je kalendářní den tisku')))
+  ok('posunuté datum (1:30) nese jen větu o posunu, ne i „bez času"', noc.upozorneniDokladu.length === 1 && !noc.upozorneniDokladu[0].startsWith('Datum z dokladu je kalendářní'))
+  ok('bez data na dokladu → jen „Chybí datum", upozornění o čase ne (není o čem)',
+    ((r) => maDuvod(r, 'Chybí datum') && r.upozorneniDokladu.length === 0)(kc({ datum: null, cas: null })))
+  ok('starší rozpoznání bez klíče `cas` → datum beze změny, s upozorněním „bez času"',
+    ((d) => { delete d.cas; const r = K.zkontrolovatDoklad(d, { ...DNES, denZacina: '06:00' }); return r.hlavicka.datumProdeje === '2026-10-15' && r.upozorneniDokladu.includes(VETA_BEZ_CASU) })(doklad({ datum: '2026-10-15' })))
   ok('bez denZacina (pobočka ho nezná) → beze změny i s časem 1:30', K.zkontrolovatDoklad(doklad({ datum: '2026-10-15', cas: '01:30' }), DNES).hlavicka.datumProdeje === '2026-10-15')
   ok('denZacina z databáze „06:00:00" funguje stejně', kc({ datum: '2026-10-15', cas: '01:30' }, '06:00:00').hlavicka.datumProdeje === '2026-10-14')
-  ok('nečitelný čas „25:00" → beze změny', kc({ datum: '2026-10-15', cas: '25:00' }).hlavicka.datumProdeje === '2026-10-15')
+  ok('nečitelný čas „25:00" → datum beze změny, ale upozornění „bez času" (jako by čas nebyl)',
+    ((r) => r.hlavicka.datumProdeje === '2026-10-15' && r.upozorneniDokladu.includes(VETA_BEZ_CASU))(kc({ datum: '2026-10-15', cas: '25:00' })))
   const zitra = kc({ datum: '2026-10-17', cas: '00:30' })
   ok('účet z 0:30 kalendářně „zítra" (17. 10.) je provozně dnes (16. 10.) → projde, ne „v budoucnosti"',
     zitra.hlavicka.datumProdeje === '2026-10-16' && !maDuvod(zitra, 'budoucnosti'))
@@ -718,8 +741,19 @@ console.log('\n== Převod do jednotek pokladny (jen z dat pokladny) ==')
   const mapovaniZdroj = readFileSync(new URL('../lib/jine-platby-mapovani.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n').replace(/\n\s*\*\s*/g, ' ')
   ok('mapování neslibuje, že appka pokrm a jeho suroviny nikdy nevydá spolu (N21)',
     !/vydat pokrm i suroviny zároveň nesmí/.test(mapovaniZdroj) && !/suroviny pokrmu nikdy nevydává/.test(mapovaniZdroj))
-  ok('… a říká, že to databáze nevynucuje a schvalovatel dostane varování (`varovani`)',
-    /databáze to nevynucuje/.test(mapovaniZdroj) && /`varovani` z `jine_platby_sestavit_vydej`/.test(mapovaniZdroj))
+  // P2 (20. 10.): schválení výdeje s varováním chce výslovné potvrzení (p_bez_surovin) — komentář už netvrdí „nevynucuje".
+  ok('… a říká, že schvalovatel dostane varování (`varovani`) a schválení chce výslovné potvrzení (`p_bez_surovin`)',
+    /`varovani` z\s+`jine_platby_sestavit_vydej`/.test(mapovaniZdroj) && /VÝSLOVNÉ potvrzení schvalovatele/.test(mapovaniZdroj) &&
+      /`p_bez_surovin = true`/.test(mapovaniZdroj) && !/databáze to nevynucuje/.test(mapovaniZdroj) && !/databáze\s+nevynucují/.test(mapovaniZdroj))
+  {
+    const sqlS = textMigrace()
+    const od = sqlS.indexOf('create function public.jine_platby_rozhodnout_vydej(')
+    const telo = od >= 0 ? sqlS.slice(od, sqlS.indexOf('end $$;', od)) : ''
+    ok('… komentář sedí s migrací: rozhodnout_vydej má p_bez_surovin a bez něj varování schválení odmítne',
+      /p_bez_surovin boolean default false/.test(telo) && /'varovani'[\s\S]{0,80}and not coalesce\(p_bez_surovin, false\)/.test(telo))
+    ok('… a varování dává jen pokrm + KUSOVÉ zboží (rozlévaný nápoj ne), jak říká komentář',
+      /elsif v_p\.druh = 'kusove_zbozi' then v_ma_zbozi := true/.test(sqlS) && /kusové zboží\. Zkontrolujte/.test(sqlS) && /pivo ani jiný rozlévaný nápoj varování nedává/.test(mapovaniZdroj))
+  }
 }
 
 /* ================================================================== */
@@ -878,11 +912,16 @@ console.log('\n== Dostupné akce ==')
   ok('… ne bez dohledání účtů (ruční prohlášení po zápisu nic neověří)', !poZapisu({}, { dohledaniUctu: false }) && !poZapisu({}, { dohledaniUctu: undefined }))
   ok('… ne bez pokladny', !poZapisu({ pripojeniId: null }, { maPokladnu: false }))
   ok('… ne bez práva jine_platby.trzba', !poZapisu({}, {}, new Set([...VSE].filter((p) => p !== 'jine_platby.trzba'))) && poZapisu({}, {}, new Set(['jine_platby.trzba'])))
-  // Propojená tržba: kontrola ověří, že prodej v pokladně opravdu je (jinak moznaNikde).
-  ok('kontrola_trzby i u propojené tržby (pokladna umí dohledat účty)', poZapisu({ stavTrzby: 'propojeno' }))
-  ok('… u propojené ne bez dohledání účtů, bez pokladny ani bez práva trzba',
-    !poZapisu({ stavTrzby: 'propojeno' }, { dohledaniUctu: false }) && !poZapisu({ stavTrzby: 'propojeno', pripojeniId: null }, { maPokladnu: false }) &&
-      !poZapisu({ stavTrzby: 'propojeno' }, {}, new Set([...VSE].filter((p) => p !== 'jine_platby.trzba'))))
+  // Propojená tržba: kontrola ověří, že propojený KONKRÉTNÍ prodej v pokladně opravdu je (jinak moznaNikde).
+  // Propojení bez konkrétního prodeje (posProdejId null) dodatečná kontrola ověřit neumí (R1, 20. 10.).
+  const sProdejem = { stavTrzby: 'propojeno', posProdejId: 'ORDER-555' }
+  ok('kontrola_trzby u propojené tržby s konkrétním prodejem (posProdejId, pokladna umí dohledat účty)', poZapisu(sProdejem))
+  ok('… u propojené BEZ konkrétního prodeje ne (R1: shoda jen částky / otevřený účet — „nenalezeno" by byl falešný poplach)',
+    !poZapisu({ stavTrzby: 'propojeno', posProdejId: null }))
+  ok('… zapsaná tržba konkrétní prodej nepotřebuje (hledá se, jestli ho pokladna nemá)', poZapisu({ stavTrzby: 'zapsano', posProdejId: null }))
+  ok('… u propojené s prodejem ne bez dohledání účtů, bez pokladny ani bez práva trzba',
+    !poZapisu(sProdejem, { dohledaniUctu: false }) && !poZapisu({ ...sProdejem, pripojeniId: null }, { maPokladnu: false }) &&
+      !poZapisu(sProdejem, {}, new Set([...VSE].filter((p) => p !== 'jine_platby.trzba'))))
   ok('… u propojené se prohlášení ani potvrzení tržby nenabízí', ((a) => !a.has('prohlasit_trzbu') && !a.has('potvrdit_trzbu'))(S.dostupneAkce(zaznam({ stavTrzby: 'propojeno', kontrolaTrzby: kT() }), VSE, m({ dohledaniUctu: true }))))
   ok('po zápisu se prohlášení ani potvrzení tržby nenabízí', ((a) => !a.has('prohlasit_trzbu') && !a.has('potvrdit_trzbu'))(S.dostupneAkce(zaznam({ stavTrzby: 'zapsano', kontrolaTrzby: kT() }), VSE, m({ dohledaniUctu: true }))))
 
@@ -896,40 +935,119 @@ console.log('\n== Dostupné akce ==')
   ok('moznaDvakrat: „nalezeno" bez zapsané tržby (nezapsano, propojeno, stornovano) → ne',
     ['nezapsano', 'propojeno', 'stornovano'].every((st) => !S.moznaDvakrat(zaznam({ stavTrzby: st, kontrolaTrzby: kTv('nalezeno') }))))
 
-  // Možná nezapočítáno nikde: propojeno, ale pokladna (dotaz, ne ruční prohlášení) k AKTUÁLNÍ verzi prodej nenašla.
-  ok('moznaNikde: propojeno + pos_api „nenalezeno" téže verze → ano', S.moznaNikde(zaznam({ stavTrzby: 'propojeno', kontrolaTrzby: kTv('nenalezeno') })))
-  ok('moznaNikde: kontrola ke starší verzi → ne', !S.moznaNikde(zaznam({ stavTrzby: 'propojeno', kontrolaTrzby: kT({ vysledek: 'nenalezeno', verze: 2 }) })))
-  ok('moznaNikde: ruční prohlášení „nenalezeno" → ne (propojení bez nálezu chtělo důvod)', !S.moznaNikde(zaznam({ stavTrzby: 'propojeno', kontrolaTrzby: kT({ vysledek: 'nenalezeno', zdroj: 'rucni_prohlaseni' }) })))
+  // Možná nezapočítáno nikde: propojeno s KONKRÉTNÍM prodejem (posProdejId), ale pokladna (dotaz, ne
+  // ruční prohlášení) ho nenašla. Bez posProdejId nikdy (R1); verze se neporovnává (hledá se tentýž prodej).
+  const nikde = (o = {}) => S.moznaNikde(zaznam({ stavTrzby: 'propojeno', posProdejId: 'ORDER-555', kontrolaTrzby: kTv('nenalezeno'), ...o }))
+  ok('moznaNikde: propojeno s prodejem (posProdejId) + pos_api „nenalezeno" → ano', nikde())
+  ok('moznaNikde: propojení BEZ konkrétního prodeje (posProdejId null) → ne (R1: falešný poplach po shodě částky / dorostlém účtu)', !nikde({ posProdejId: null }))
+  ok('moznaNikde: kontrola ke starší verzi záznamu → pořád ano (prodej je tentýž, uložení návrhu verzi zvedne i bez změny)',
+    nikde({ kontrolaTrzby: kT({ vysledek: 'nenalezeno', verze: 2 }) }) && nikde({ verze: 9, kontrolaTrzby: kT({ vysledek: 'nenalezeno', verze: 1 }) }))
+  ok('moznaNikde: ruční prohlášení „nenalezeno" → ne (propojení bez nálezu chtělo důvod)', !nikde({ kontrolaTrzby: kT({ vysledek: 'nenalezeno', zdroj: 'rucni_prohlaseni' }) }))
   ok('moznaNikde: propojeno + „nalezeno" / „pravdepodobne" / „nelze_overit" / bez kontroly → ne',
-    ['nalezeno', 'pravdepodobne', 'nelze_overit'].every((v) => !S.moznaNikde(zaznam({ stavTrzby: 'propojeno', kontrolaTrzby: kTv(v) }))) &&
-      !S.moznaNikde(zaznam({ stavTrzby: 'propojeno', kontrolaTrzby: null })))
+    ['nalezeno', 'pravdepodobne', 'nelze_overit'].every((v) => !nikde({ kontrolaTrzby: kTv(v) })) && !nikde({ kontrolaTrzby: null }))
   ok('moznaNikde: „nenalezeno" u jiného stavu tržby (nezapsano, zapsano, stornovano) → ne',
-    ['nezapsano', 'zapsano', 'stornovano'].every((st) => !S.moznaNikde(zaznam({ stavTrzby: st, kontrolaTrzby: kTv('nenalezeno') }))))
+    ['nezapsano', 'zapsano', 'stornovano'].every((st) => !nikde({ stavTrzby: st })))
 
-  // Ruční prohlášení proti výsledku z pokladny (jine_platby_prohlasit, DB H).
+  // Ruční prohlášení proti výsledku z pokladny (jine_platby_prohlasit, P1 z 20. 10.): poslední kontrola
+  // dotazem do pokladny brání BEZ OHLEDU NA VERZI (C1/R2: uložení návrhu verzi zvedne i bez změny).
   const kSkl = (o = {}) => ({ vysledek: 'jiz_odecteno', zdroj: 'pos_api', verze: 3, kdy: pred(5), kdo: null, detail: {}, ...o })
-  ok('prohlaseniProtiPokladne trzba: pos_api „nalezeno" / „pravdepodobne" téže verze → ten výsledek',
-    S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nalezeno') }), 'trzba') === 'nalezeno' &&
-      S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('pravdepodobne') }), 'trzba') === 'pravdepodobne')
+  const pp = (z, druh) => JSON.stringify(S.prohlaseniProtiPokladne(z, druh))
+  ok('prohlaseniProtiPokladne trzba: pos_api „nalezeno" → { nalezeno, chceOpravu: true } (konkrétní prodej přepíše jen oprava)',
+    pp(zaznam({ kontrolaTrzby: kTv('nalezeno') }), 'trzba') === JSON.stringify({ vysledek: 'nalezeno', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne trzba: pos_api „pravdepodobne" → { pravdepodobne, chceOpravu: false } (stačí výslovné potvrzení)',
+    pp(zaznam({ kontrolaTrzby: kTv('pravdepodobne') }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: false }))
+  ok('prohlaseniProtiPokladne trzba: kontrola ke STARŠÍ verzi (návrh mezitím uložen) brání dál — obejití z C1 zavřené',
+    pp(zaznam({ verze: 4, kontrolaTrzby: kT({ vysledek: 'nalezeno', verze: 3 }) }), 'trzba') === JSON.stringify({ vysledek: 'nalezeno', chceOpravu: true }) &&
+      pp(zaznam({ verze: 9, kontrolaTrzby: kT({ vysledek: 'pravdepodobne', verze: 1 }) }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: false }))
   ok('prohlaseniProtiPokladne trzba: „nenalezeno" / „nelze_overit" / bez kontroly → null',
     S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nenalezeno') }), 'trzba') === null && S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nelze_overit') }), 'trzba') === null &&
       S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: null }), 'trzba') === null)
-  ok('prohlaseniProtiPokladne trzba: ruční prohlášení „nalezeno" nebo jiná verze → null (to přepsat jde)',
-    S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kT({ vysledek: 'nalezeno', zdroj: 'rucni_prohlaseni' }) }), 'trzba') === null &&
-      S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kT({ vysledek: 'nalezeno', verze: 2 }) }), 'trzba') === null)
-  ok('prohlaseniProtiPokladne sklad: pos_api „jiz_odecteno" téže verze → „jiz_odecteno"', S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl() }), 'sklad') === 'jiz_odecteno')
-  ok('prohlaseniProtiPokladne sklad: „neodecteno", ruční, jiná verze, bez kontroly → null',
+  ok('prohlaseniProtiPokladne trzba: poslední je ruční prohlášení „nalezeno" → null (to přepsat jde)',
+    S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kT({ vysledek: 'nalezeno', zdroj: 'rucni_prohlaseni' }) }), 'trzba') === null)
+  ok('prohlaseniProtiPokladne sklad: pos_api „jiz_odecteno" (i ke starší verzi) → { jiz_odecteno, chceOpravu: true }',
+    pp(zaznam({ kontrolaSkladu: kSkl() }), 'sklad') === JSON.stringify({ vysledek: 'jiz_odecteno', chceOpravu: true }) &&
+      pp(zaznam({ verze: 5, kontrolaSkladu: kSkl({ verze: 2 }) }), 'sklad') === JSON.stringify({ vysledek: 'jiz_odecteno', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne sklad: „neodecteno", „nelze_zjistit", ruční, bez kontroly → null',
     S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl({ vysledek: 'neodecteno' }) }), 'sklad') === null &&
+      S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl({ vysledek: 'nelze_zjistit' }) }), 'sklad') === null &&
       S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl({ zdroj: 'rucni_prohlaseni' }) }), 'sklad') === null &&
-      S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl({ verze: 2 }) }), 'sklad') === null &&
       S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: null }), 'sklad') === null)
   ok('prohlaseniProtiPokladne: druhy se nepletou (výsledek skladu nebrání prohlášení tržby a naopak)',
     S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl() }), 'trzba') === null && S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nalezeno') }), 'sklad') === null)
+  {
+    // Zrcadlo = databáze: pojistka v jine_platby_prohlasit nestojí na verzi a „pravděpodobně" nechce právo na opravy.
+    const sqlP = textMigrace()
+    const od = sqlP.indexOf('create function public.jine_platby_prohlasit(')
+    const telo = od >= 0 ? sqlP.slice(od, sqlP.indexOf('end $$;', od)) : ''
+    const prepis = /v_prepis := ([\s\S]*?);\n/.exec(telo)?.[1] ?? ''
+    ok('(migrace: podmínku v_prepis v jine_platby_prohlasit se podařilo najít)', prepis.length > 50)
+    ok('… v_prepis nestojí na verzi a brání týmiž výsledky jako zrcadlo (trzba nalezeno/pravdepodobne, sklad jiz_odecteno)',
+      !/verze/.test(prepis) && /'vysledek' in \('nalezeno', 'pravdepodobne'\)/.test(prepis) && /'vysledek' = 'jiz_odecteno'/.test(prepis) && /'zdroj' = 'pos_api'/.test(prepis))
+    ok('… právo na opravy chce jen výsledek jiný než „pravdepodobne" (chceOpravu)', /'vysledek' <> 'pravdepodobne' and not app\.has_access\(v_z\.tenant_id, 'jine_platby\.oprava'/.test(telo))
+  }
 
-  // Rozpoznání AI ne u zapsané ani propojené tržby (jine_platby_zahajit_rozpoznani odmítne, N30).
-  const rozp = (stavTrzby) => S.dostupneAkce(zaznam({ stavTrzby }), VSE, m()).has('rozpoznat')
-  ok('rozpoznat: u nezapsané a stornované tržby ano, u zapsané a propojené ne', rozp('nezapsano') && rozp('stornovano') && !rozp('zapsano') && !rozp('propojeno'))
+  // Rozpoznání AI (P5, C9/R3): zapsaná nebo propojená tržba čtení NEBRÁNÍ; schválený nebo provedený výdej ano.
+  const rozp = (o) => S.dostupneAkce(zaznam(o), VSE, m()).has('rozpoznat')
+  ok('rozpoznat: u každého stavu tržby (i zapsané a propojené — položky pro sklad) ano',
+    T.STAVY_TRZBY.every((stavTrzby) => rozp({ stavTrzby })) && rozp({ stavTrzby: 'zapsano' }) && rozp({ stavTrzby: 'propojeno' }))
+  const SKLAD_BEZ_CTENI = ['schvaleno', 'nepodporovano', 'zpracovava_se', 'nejasny_vysledek', 'odecteno_v_pos', 'jiz_odecteno', 'rucne_dolozeno', 'opraveno']
+  ok('rozpoznat: ne ve schváleném nebo provedeném výdeji (schvaleno, nepodporovano, zpracovava_se, nejasny_vysledek, odecteno_v_pos, jiz_odecteno, rucne_dolozeno, opraveno)',
+    SKLAD_BEZ_CTENI.every((stavSkladu) => !rozp({ stavSkladu }) && !rozp({ stavSkladu, stavTrzby: 'zapsano' })))
+  ok('rozpoznat: ve zbylých stavech skladu ano (bez_navrhu, nevyzaduje, ceka_na_schvaleni, zamitnuto, chyba, nutna_kontrola)',
+    T.STAVY_SKLADU.filter((st) => !SKLAD_BEZ_CTENI.includes(st)).every((stavSkladu) => rozp({ stavSkladu })) &&
+      T.STAVY_SKLADU.filter((st) => !SKLAD_BEZ_CTENI.includes(st)).length === 6)
+  {
+    const sqlR = textMigrace()
+    const od = sqlR.indexOf('create function public.jine_platby_zahajit_rozpoznani(')
+    const telo = od >= 0 ? sqlR.slice(od, sqlR.indexOf('end $$;', od)) : ''
+    const vMigraci = [...(/v_z\.stav_skladu in \(([^)]*)\)/.exec(telo)?.[1] ?? '').matchAll(/'(\w+)'/g)].map((x) => x[1]).sort()
+    const vZrcadle = T.STAVY_SKLADU.filter((stavSkladu) => !rozp({ stavSkladu })).sort()
+    ok(`rozpoznat: stavy bez čtení = jine_platby_zahajit_rozpoznani v migraci (${vMigraci.join(', ') || '?'})`,
+      vMigraci.length === 8 && JSON.stringify(vMigraci) === JSON.stringify(vZrcadle))
+    ok('… a zapsaná tržba v zahajit_rozpoznani nic neodmítá (žádné stav_trzby)', telo.length > 200 && !/stav_trzby/.test(telo))
+  }
   ok('… nahrát doklad jde i u zapsané tržby (pripojit_soubor hlídá jen zrušení)', S.dostupneAkce(zaznam({ stavTrzby: 'zapsano' }), VSE, m()).has('nahrat'))
+
+  // Ruční východ z operace na cestě po vypršení platnosti (P3, C5): rucne_dolozit a zrusit_schvaleni.
+  ok('platnostOperaceVyprsela: platnost + 2 min < teď → ano; přesně na hranici, dřív, z budoucnosti → ne',
+    S.platnostOperaceVyprsela(pred(3), TED) && S.platnostOperaceVyprsela(pred(2.01), TED) && !S.platnostOperaceVyprsela(pred(2), TED) &&
+      !S.platnostOperaceVyprsela(pred(1), TED) && !S.platnostOperaceVyprsela(pred(-5), TED))
+  ok('platnostOperaceVyprsela: bez platnosti (undefined, null) nebo nečitelná → ne (databáze při platnost_do null taky odmítne)',
+    !S.platnostOperaceVyprsela(undefined, TED) && !S.platnostOperaceVyprsela(null, TED) && !S.platnostOperaceVyprsela('včera', TED))
+  const vychod = (stavSkladu, stavOperace, platnostOperace, o = {}) =>
+    S.dostupneAkce(zaznam({ stavSkladu }), o.prava ?? VSE, m({ stavOperace, platnostOperace, maZiveNavrhSkladu: o.ziva ?? true }))
+  ok('nejasný výsledek, platnost + 2 min pryč → rucne_dolozit i zrusit_schvaleni (a obnovit_vydej dál)',
+    ((a) => a.has('rucne_dolozit') && a.has('zrusit_schvaleni') && a.has('obnovit_vydej'))(vychod('nejasny_vysledek', 'nejasny_vysledek', pred(3))))
+  ok('odesílání (zpracovava_se + odesila_se) po platnosti → rucne_dolozit i zrusit_schvaleni',
+    ((a) => a.has('rucne_dolozit') && a.has('zrusit_schvaleni'))(vychod('zpracovava_se', 'odesila_se', pred(10))))
+  ok('schváleno s operací odesila_se po platnosti → taky (databáze stav skladu u doložení nečte)',
+    ((a) => a.has('rucne_dolozit') && a.has('zrusit_schvaleni'))(vychod('schvaleno', 'odesila_se', pred(3))))
+  ok('PŘED vypršením (platnost za 3 min, přesně na hranici) → ani jedno, jen obnovit_vydej',
+    [pred(-3), pred(1), pred(2)].every((pl) => ((a) => !a.has('rucne_dolozit') && !a.has('zrusit_schvaleni') && a.has('obnovit_vydej'))(vychod('nejasny_vysledek', 'nejasny_vysledek', pl))))
+  ok('bez platnostOperace (nezadaná, null, nečitelná) → ani jedno', [undefined, null, 'nevím'].every((pl) => ((a) => !a.has('rucne_dolozit') && !a.has('zrusit_schvaleni'))(vychod('nejasny_vysledek', 'nejasny_vysledek', pl))))
+  ok('po platnosti: rucne_dolozit chce živý (schválený) návrh, zrusit_schvaleni ne (databáze ho tu nechce)',
+    ((a) => !a.has('rucne_dolozit') && a.has('zrusit_schvaleni'))(vychod('nejasny_vysledek', 'nejasny_vysledek', pred(3), { ziva: false })))
+  ok('po platnosti: jen s jine_platby.vydej_pos (s ním samotným ano, se všemi ostatními ne)',
+    ((a) => a.has('rucne_dolozit') && a.has('zrusit_schvaleni'))(vychod('nejasny_vysledek', 'nejasny_vysledek', pred(3), { prava: new Set(['jine_platby.vydej_pos']) })) &&
+      ((a) => !a.has('rucne_dolozit') && !a.has('zrusit_schvaleni'))(vychod('nejasny_vysledek', 'nejasny_vysledek', pred(3), { prava: new Set([...VSE].filter((p) => p !== 'jine_platby.vydej_pos')) })))
+  ok('po platnosti: propojit_vydej ani zrušení záznamu ne (ty databáze dál odmítá)',
+    ((a) => !a.has('propojit_vydej') && !a.has('zrusit'))(S.dostupneAkce(zaznam({ stavSkladu: 'nejasny_vysledek', kontrolaSkladu: kSk({ vysledek: 'jiz_odecteno' }) }), VSE, m({ stavOperace: 'nejasny_vysledek', platnostOperace: pred(3), maZiveNavrhSkladu: true }))))
+  ok('hotový výdej (uspech, rucne_dolozeno) ani s propadlou platností nic z toho nedostane',
+    ['uspech', 'rucne_dolozeno'].every((op) => ((a) => !a.has('rucne_dolozit') && !a.has('zrusit_schvaleni'))(vychod('schvaleno', op, pred(3)))))
+  ok('jiné stavy skladu s propadlou operací (odecteno_v_pos, bez_navrhu, nutna_kontrola) → ne',
+    ['odecteno_v_pos', 'bez_navrhu', 'nutna_kontrola', 'ceka_na_schvaleni'].every((st) => ((a) => !a.has('rucne_dolozit') && !a.has('zrusit_schvaleni'))(vychod(st, 'nejasny_vysledek', pred(3)))))
+  {
+    const sqlV = textMigrace()
+    const teloFce = (jmeno) => {
+      const od = sqlV.indexOf(`create function public.${jmeno}(`)
+      return od >= 0 ? sqlV.slice(od, sqlV.indexOf('end $$;', od)) : ''
+    }
+    const hranice = /v_op\.stav in \('odesila_se', 'nejasny_vysledek'\)\s+and \(v_op\.platnost_do is null or v_op\.platnost_do \+ interval '2 minutes' > now\(\)\)/
+    ok(`rezerva zrcadla (REZERVA_PO_PLATNOSTI_MS = ${O.REZERVA_PO_PLATNOSTI_MS} ms) = 2 min v jine_platby_rucne_dolozit_vydej i jine_platby_zrusit_schvaleni`,
+      O.REZERVA_PO_PLATNOSTI_MS === 120_000 && hranice.test(teloFce('jine_platby_rucne_dolozit_vydej')) && hranice.test(teloFce('jine_platby_zrusit_schvaleni')))
+    ok('… a zrušit schválení v databázi přijme i zpracovava_se / nejasny_vysledek',
+      /v_z\.stav_skladu not in \('schvaleno', 'nepodporovano', 'chyba', 'zpracovava_se', 'nejasny_vysledek'\)/.test(teloFce('jine_platby_zrusit_schvaleni')))
+  }
 
   // Úhrada u zrušeného záznamu ne (N4: evidovat_uhradu zrušený záznam odmítne) — ani s napárovanou úhradou.
   ok('uhrada ne u zrušeného záznamu (ani když má úhradu napárovanou)',
@@ -948,21 +1066,34 @@ console.log('\n== Dostupné akce ==')
     rucne_dolozit: ['jine_platby.vydej_pos'], faktura: ['jine_platby.faktura'], uhrada: ['jine_platby.faktura'], opravit_trzbu: ['jine_platby.oprava'],
     korekce_vydeje: ['jine_platby.oprava+jine_platby.vydej_pos'], zrusit: ['jine_platby.oprava'], zrusit_schvaleni: ['jine_platby.vydej_pos'],
   }
+  // Síť (20. 10.): přibyla operace `odesila_se`, platnost operace (nezadaná / propadlá / budoucí — P3)
+  // a konkrétní prodej u propojené tržby (posProdejId — R1). Platnost se mění jen u operace na cestě
+  // a posProdejId jen u propojené tržby — jinde by kombinace jen opakovaly totéž.
+  const NA_CESTE = ['odesila_se', 'nejasny_vysledek']
   const kombinace = []
   for (const stavKontroly of T.STAVY_KONTROLY)
     for (const stavTrzby of T.STAVY_TRZBY)
       for (const stavSkladu of T.STAVY_SKLADU)
         for (const maPokladnu of [true, false])
-          for (const stavOperace of [null, 'pripraveno', 'nejasny_vysledek', 'chyba', 'nepodporovano', 'uspech'])
-            for (const ziva of [true, false])
-              for (const vysledekSkladu of ['neodecteno', 'jiz_odecteno'])
-                for (const dohledaniUctu of [true, false])
-                  kombinace.push([zaznam({ stavKontroly, stavTrzby, stavSkladu, kontrolaTrzby: kT(), kontrolaSkladu: { ...kT(), vysledek: vysledekSkladu } }), m({ maPokladnu, stavOperace, maZiveNavrhSkladu: ziva, dohledaniUctu })])
+          for (const stavOperace of [null, 'pripraveno', 'odesila_se', 'nejasny_vysledek', 'chyba', 'nepodporovano', 'uspech'])
+            for (const platnostOperace of NA_CESTE.includes(stavOperace) ? [undefined, pred(3), pred(-3)] : [undefined])
+              for (const posProdejId of stavTrzby === 'propojeno' ? [null, 'ORDER-555'] : [null])
+                for (const ziva of [true, false])
+                  for (const vysledekSkladu of ['neodecteno', 'jiz_odecteno'])
+                    for (const dohledaniUctu of [true, false])
+                      kombinace.push([
+                        zaznam({ stavKontroly, stavTrzby, stavSkladu, posProdejId, kontrolaTrzby: kT(), kontrolaSkladu: { ...kT(), vysledek: vysledekSkladu } }),
+                        m({ maPokladnu, stavOperace, platnostOperace, maZiveNavrhSkladu: ziva, dohledaniUctu }),
+                      ])
   let jenTrzbaCisty = true
   let jenVydejCisty = true
   let bezPravaNic = true
   let pravoOdemyka = true
   let pravoNutne = true
+  let vychodJenPoPlatnosti = true
+  let vychodPoPlatnostiVidet = 0
+  let rozpoznatJenMimoVydej = true
+  let kontrolaPropojeneJenSProdejem = true
   const videno = new Set()
   for (const [z, mm] of kombinace) {
     const jenTrzba = S.dostupneAkce(z, new Set(['jine_platby.trzba']), mm)
@@ -971,6 +1102,16 @@ console.log('\n== Dostupné akce ==')
     if ([...jenVydej].some((x) => TRZBA_AKCE.includes(x))) jenVydejCisty = false
     if (S.dostupneAkce(z, new Set(['finance.read']), mm).size > 0) bezPravaNic = false
     const vse = S.dostupneAkce(z, VSE, mm)
+    // P3: ruční východ při operaci na cestě jen po vypršení platnosti (+ 2 min). Jen s pokladnou —
+    // bez ní operace nevzniká a doložení bez návrhu (`rucne_dolozit_vydej`, větev bez připojení) operace nečte.
+    if (mm.maPokladnu && NA_CESTE.includes(mm.stavOperace) && (vse.has('rucne_dolozit') || vse.has('zrusit_schvaleni'))) {
+      if (!S.platnostOperaceVyprsela(mm.platnostOperace, mm.tedMs)) vychodJenPoPlatnosti = false
+      else vychodPoPlatnostiVidet++
+    }
+    // P5: rozpoznání nikdy u schváleného nebo provedeného výdeje.
+    if (vse.has('rozpoznat') && SKLAD_BEZ_CTENI.includes(z.stavSkladu)) rozpoznatJenMimoVydej = false
+    // R1: dodatečná kontrola propojené tržby jen s konkrétním prodejem.
+    if (vse.has('kontrola_trzby') && z.stavTrzby === 'propojeno' && z.posProdejId === null) kontrolaPropojeneJenSProdejem = false
     for (const akce of vse) {
       videno.add(akce)
       const moznosti = PRAVO_AKCE[akce]
@@ -987,6 +1128,10 @@ console.log('\n== Dostupné akce ==')
   ok('každou akci odemkne její vlastní právo', pravoOdemyka)
   ok('bez vlastního práva akce nikdy není', pravoNutne)
   ok(`kombinace stavů prošly všech 22 akcí (kontrola měřila všechno; viděno ${videno.size})`, videno.size === 22)
+  ok(`síť: rucne_dolozit / zrusit_schvaleni při operaci na cestě nikdy před vypršením platnosti (po ní viděno ${vychodPoPlatnostiVidet}×)`,
+    vychodJenPoPlatnosti && vychodPoPlatnostiVidet > 0)
+  ok('síť: rozpoznat nikdy u schváleného nebo provedeného výdeje', rozpoznatJenMimoVydej)
+  ok('síť: kontrola_trzby u propojené tržby nikdy bez konkrétního prodeje (posProdejId)', kontrolaPropojeneJenSProdejem)
 
   const kS = (o = {}) => ({ vysledek: 'neodecteno', zdroj: 'pos_api', verze: 3, kdy: pred(5), kdo: null, detail: {}, ...o })
   ok('schválit výdej: čerstvá kontrola „neodečteno" → ano', S.muzeSchvalitVydej(zaznam({ stavSkladu: 'ceka_na_schvaleni', kontrolaSkladu: kS() }), TED))

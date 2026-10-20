@@ -47,9 +47,11 @@ export const dynamic = 'force-dynamic'
  *     v Ostatních tržbách a dodatečná kontrola proti pokladně prodej našla
  *     (`moznaDvakrat`) — filtruje databáze (`kontrola_trzby->>vysledek`),
  *     ať strop řádků neusekne právě tyhle. „Možná nezapočítáno" = tržba
- *     jen propojená s pokladnou, ale kontrola dotazem do pokladny k aktuální
- *     verzi prodej nenašla (`moznaNikde`) — filtruje taky databáze, shodu
- *     verze dořeší aplikace;
+ *     propojená s KONKRÉTNÍM prodejem v pokladně (`pos_prodej_id`), který
+ *     dodatečná kontrola dotazem do pokladny nenašla (`moznaNikde`) —
+ *     filtruje celé databáze (stejné pravidlo jako `moznaNikde`, nic se
+ *     nedořešuje v aplikaci); propojení bez konkrétního prodeje se
+ *     dodatečně neověřuje (R1, kontrola 20. 10.);
  *   * `pohled=schvaleni` — fronta „Čeká na schválení výdeje", jen
  *     s `jine_platby.vydej_pos` a jen z poboček, kde to právo má; bez
  *     ohledu na období (schvalovat se má i to, co přišlo minulý měsíc).
@@ -85,8 +87,8 @@ const VYSLEDKY_DVAKRAT = ['nalezeno', 'pravdepodobne']
 const ZNACKA_DVAKRAT: PopisStavu = { text: 'Možná zapsáno dvakrát', ton: 'danger', varovani: true }
 
 /**
- * Značka u řádku, kde je tržba jen propojená s pokladnou, ale kontrola
- * dotazem do pokladny k aktuální verzi prodej nenašla (`moznaNikde`) —
+ * Značka u řádku, kde je tržba propojená s konkrétním prodejem v pokladně,
+ * ale kontrola dotazem do pokladny ten prodej nenašla (`moznaNikde`) —
  * prodej nejspíš není započítaný nikde. Ikona varování, ne jen barva.
  */
 const ZNACKA_NIKDE: PopisStavu = { text: 'Možná nezapočítáno', ton: 'danger', varovani: true }
@@ -201,9 +203,16 @@ export default async function JinePlatby({
     else if (stav === 'ke_kontrole') dotaz = dotaz.in('stav_kontroly', ['rozpracovano', 'ke_kontrole'])
     else if (stav === 'trzba_nezapsana') dotaz = dotaz.eq('stav_trzby', 'nezapsano').neq('stav_kontroly', 'zruseno')
     else if (stav === 'mozna_dvakrat') dotaz = dotaz.eq('stav_trzby', 'zapsano').in('kontrola_trzby->>vysledek', VYSLEDKY_DVAKRAT)
-    // Možná nezapočítáno (`moznaNikde`): filtruje databáze, ať strop řádků neusekne právě tyhle.
-    // Shodu verze kontroly s verzí záznamu PostgREST neporovná (dva sloupce) — dořeší ji `moznaNikde` níž.
-    else if (stav === 'mozna_nikde') dotaz = dotaz.eq('stav_trzby', 'propojeno').eq('kontrola_trzby->>zdroj', 'pos_api').eq('kontrola_trzby->>vysledek', 'nenalezeno')
+    // Možná nezapočítáno (`moznaNikde`): celé pravidlo filtruje databáze, ať strop řádků neusekne
+    // právě tyhle — propojeno s konkrétním prodejem (pos_prodej_id), pos_api, „nenalezeno". Verze se
+    // neporovnává (hledá se tentýž prodej), takže aplikace nic nedořešuje.
+    else if (stav === 'mozna_nikde') {
+      dotaz = dotaz
+        .eq('stav_trzby', 'propojeno')
+        .not('pos_prodej_id', 'is', null)
+        .eq('kontrola_trzby->>zdroj', 'pos_api')
+        .eq('kontrola_trzby->>vysledek', 'nenalezeno')
+    }
     else if (stav === 'ceka_na_schvaleni') dotaz = dotaz.eq('stav_skladu', 'ceka_na_schvaleni').neq('stav_kontroly', 'zruseno')
     else if (stav === 'sklad_neuzavreny') dotaz = dotaz.in('stav_skladu', SKLAD_OTEVRENY).neq('stav_kontroly', 'zruseno')
     else if (stav === 'bez_faktury') dotaz = dotaz.eq('stav_faktury', 'bez_faktury').neq('stav_kontroly', 'zruseno')
@@ -223,9 +232,7 @@ export default async function JinePlatby({
     return { ...zDbZaznam(r), souboru: Number.isFinite(pocet) ? pocet : 0 }
   })
   const oriznuto = nactene.length > LIMIT
-  const prvni = oriznuto ? nactene.slice(0, LIMIT) : nactene
-  // Kontrola ke starší verzi záznamu (po úpravě návrhu) o „nezapočítáno" nic neříká.
-  const radky = !pohledSchvaleni && stav === 'mozna_nikde' ? prvni.filter(moznaNikde) : prvni
+  const radky = oriznuto ? nactene.slice(0, LIMIT) : nactene
 
   // Jména autorů přes existující RLS `profiles_select_colleagues` (jen
   // kolegové s aktivním členstvím). Autor, který už ve firmě není,

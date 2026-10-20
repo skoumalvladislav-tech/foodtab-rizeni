@@ -26,7 +26,7 @@ import Nadpis from '../../../../nadpis'
 import { aliasyPripojeni, kalendarPobocky, katalogPripojeni } from './akce-zaklad'
 import type { PolozkaEditoru } from './editor-navrhu'
 import Kroky from './kroky'
-import { coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
+import { coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, nevyresenePolozkyDolozeni, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
 import { metadataPokladny } from './nacteni'
 import Originaly from './originaly'
 import SekceKontrola from './sekce-kontrola'
@@ -39,7 +39,8 @@ export const dynamic = 'force-dynamic'
 /**
  * Rozpoznání dokladu přes AI (akce-ai.ts) běží ve funkci této stránky. Akce
  * počítá s touhle hodnotou (MAX_DELKA_AKCE_MS): model musí odpovědět do
- * 120 s − 20 s rezervy od začátku akce. Kdo hodnotu mění, změní i ji.
+ * 120 s − 20 s rezervy od začátku akce. Kdo hodnotu mění, změní i ji —
+ * shodu hlídá scripts/jine-platby-detail.test.mjs (C8).
  */
 export const maxDuration = 120
 
@@ -109,15 +110,19 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
   const tedMs = ted()
   const zakl = { zaznam: z.id, verze: z.verze, rozsah }
 
-  const [pravaPole, financeFirmy, uzivatel, kal, soubory, polozkyRadky, rozpoznaniRadek, navrhRadek, operaceRadek, historieRadky, trzbyRadky] = await Promise.all([
+  const [pravaPole, financeFirmy, uzivatel, kal, soubory, polozkyRadky, rozpoznaniRadek, ulozeneRozpoznani, navrhRadek, operaceRadek, historieRadky, trzbyRadky] = await Promise.all([
     Promise.all(PRAVA_CTENI_JINYCH_PLATEB.map(async (p) => [p, await hasAccess(tenantId, p, z.branchId)] as const)),
     hasAccess(tenantId, 'finance.read', null),
     getUser(),
     kalendarPobocky(supabase, tenantId, z.branchId),
     supabase.from('jine_platby_soubory').select('id, poradi, mime, velikost, otisk').eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('poradi'),
     supabase.from('jine_platby_polozky').select(SLOUPCE_POLOZKY).eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('poradi'),
-    // Posledních pár pokusů: panel „Částky na dokladu“ je z toho, ze kterého je uložený návrh (rozpoznaniNavrhu), ne z posledního.
-    supabase.from('jine_platby_rozpoznani').select('id, stav, vysledek, duvod, vytvoreno, verze_zaznamu').eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('vytvoreno', { ascending: false }).limit(10),
+    // Posledních pár pokusů (bez výsledku) — jen pro větu o novějším neúspěšném, běžícím nebo neuloženém čtení.
+    supabase.from('jine_platby_rozpoznani').select('id, stav, duvod, vytvoreno, verze_zaznamu').eq('zaznam_id', z.id).eq('tenant_id', tenantId).order('vytvoreno', { ascending: false }).limit(5),
+    // Panel „Částky na dokladu“: čtení, ze kterého je ULOŽENÝ návrh — podle vazby u záznamu, ne podle verzí (R5).
+    z.rozpoznaniId
+      ? supabase.from('jine_platby_rozpoznani').select('id, stav, vysledek, duvod, vytvoreno, verze_zaznamu').eq('id', z.rozpoznaniId).eq('tenant_id', tenantId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     supabase.from('jine_platby_skladove_navrhy').select('id, stav, otisk, obsah, odeslal, odeslano, schvalil, schvaleno, zamitl, zamitnuto, duvod_zamitnuti').eq('zaznam_id', z.id).eq('tenant_id', tenantId)
       .order('odeslano', { ascending: false })
       .limit(1)
@@ -136,6 +141,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
     ['soubory záznamu', soubory],
     ['položky záznamu', polozkyRadky],
     ['rozpoznání', rozpoznaniRadek],
+    ['rozpoznání návrhu', ulozeneRozpoznani],
     ['skladový návrh', navrhRadek],
     ['operace v pokladně', operaceRadek],
     ['historie záznamu', historieRadky],
@@ -173,6 +179,8 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
     maPokladnu,
     maZiveNavrhSkladu: zivyNavrh,
     stavOperace: typeof operaceRaw?.stav === 'string' ? operaceRaw.stav : null,
+    // Nejasná operace po platnosti (+ 2 min): ruční doložení a zrušení schválení (C5).
+    platnostOperace: typeof operaceRaw?.platnost_do === 'string' ? operaceRaw.platnost_do : null,
     tedMs,
     uzivatelId: uzivatel?.id ?? null,
     dohledaniUctu: pokladna?.dohledaniUctu === true,
@@ -180,15 +188,18 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
   const kroky = krokyPruvodce(z, { pocetSouboru: seznamSouboru.length, pocetPolozek: polozky.length, maPokladnu, maZiveNavrhSkladu: zivyNavrh })
 
   /* ---------- Kontrola dokladu ---------- */
-  const pokusy: PokusRozpoznani[] = ((rozpoznaniRadek.data ?? []) as Record<string, unknown>[]).map((x) => ({
+  const naPokus = (x: Record<string, unknown>): PokusRozpoznani => ({
+    id: String(x.id),
     stav: String(x.stav),
     vysledek: x.vysledek ?? null,
     duvod: typeof x.duvod === 'string' ? x.duvod : null,
     vytvoreno: String(x.vytvoreno),
     verzeZaznamu: typeof x.verze_zaznamu === 'number' ? x.verze_zaznamu : null,
-  }))
+  })
+  const pokusy = ((rozpoznaniRadek.data ?? []) as Record<string, unknown>[]).map(naPokus)
   const rozpoznani = pokusy[0] ?? null
-  const puvod = rozpoznaniNavrhu(pokusy, z.verze)
+  const ulozeneRaw = ulozeneRozpoznani.data as Record<string, unknown> | null
+  const puvod = rozpoznaniNavrhu(ulozeneRaw ? naPokus(ulozeneRaw) : null, pokusy, z.verze)
   let kontrolaRozpoznani: KontrolaDokladu | null = null
   if (puvod.zdroj) {
     try {
@@ -503,7 +514,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
               kontrolaRozpoznani={kontrolaRozpoznani}
               puvodCastek={
                 puvod.zdroj
-                  ? { vytvoreno: puvod.zdroj.vytvoreno, novejsi: puvod.novejsi.map((x) => ({ stav: x.stav, vytvoreno: x.vytvoreno })), upravenoPotom: puvod.upravenoPotom }
+                  ? { vytvoreno: puvod.zdroj.vytvoreno, novejsi: puvod.novejsi.map((x) => ({ stav: x.stav, vytvoreno: x.vytvoreno, duvod: x.duvod })), upravenoPotom: puvod.upravenoPotom }
                   : null
               }
               coZkontrolovat={kontrolaNavrhu.body}
@@ -546,6 +557,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
                 mapovani: p.mapovani,
               }))}
               originaly={seznamSouboru.map((s) => ({ id: s.id, poradi: s.poradi }))}
+              nevyresenePolozky={nevyresenePolozkyDolozeni(polozky)}
               duplicity={duplicity}
               jednotkyProduktu={jednotkyProduktu}
               muzeSchvalit={muzeSchvalitVydej(z, tedMs)}

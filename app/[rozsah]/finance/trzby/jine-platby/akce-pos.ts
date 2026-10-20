@@ -11,6 +11,7 @@ import {
   HLASKA_BEZ_DOHLEDANI,
   HLASKA_PROVOZOVNA_JINDE,
   HLASKA_VERZE,
+  jeHlaskaBezSurovin,
   jeHlaskaDuplicity,
   jeUuid,
   oknaKontroly,
@@ -106,7 +107,12 @@ async function kontrolaVPokladne(p: Pripraveno, druh: 'trzba' | 'sklad'): Promis
 
 type Zjisteno = { vysledek: string; detail: Record<string, unknown>; popis: string }
 
-/** Dotaz do pokladny a vyhodnocení (./[zaznam]/logika.ts). Nic nezapisuje. */
+/**
+ * Dotaz do pokladny a vyhodnocení (./[zaznam]/logika.ts). Nic nezapisuje.
+ * „Nenalezeno“ / „neodečteno“ vyjde jen u uzavřeného prodeje a ručního
+ * seznamu spotřeby (`TYP_PROKAZE_NEPRITOMNOST`) — jinak by ho
+ * `jine_platby_zapsat_kontrolu` odmítl (C4).
+ */
 async function zjistitVPokladne(p: Pripraveno, rel: RelaceOk, druh: 'trzba' | 'sklad'): Promise<Zjisteno | { chyba: string }> {
   const relace = rel.relace
   const ucty = relace.ucty?.bind(relace)
@@ -201,6 +207,11 @@ async function zapsatKontrolu(p: Pripraveno, druh: 'trzba' | 'sklad', v: Zjisten
  * zamítnutí → `duvod` (důvod zamítnutí, povinný); schválení →
  * `duplicita_duvod` (proč to není duplicita výdeje, nepovinné — databáze
  * ho chce, jen když najde podobný výdej téže pobočky).
+ *
+ * Výdej s pokrmem i kusovým zbožím (varování náhledu `jine_platby_sestavit_vydej`)
+ * databáze schválí jen s `p_bez_surovin = true` — zaškrtnutím „Zboží není
+ * surovina toho pokrmu“ (`bez_surovin`). Akce ho pošle jen se zaškrtnutím
+ * a jen když aktuální náhled varování opravdu má (C6).
  */
 export async function rozhodnoutVydej(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.vydej_pos')
@@ -228,16 +239,31 @@ export async function rozhodnoutVydej(_predchozi: StavAkce, formData: FormData):
     .maybeSingle()
   if (chybaNavrhu || !navrh) return chyba('Návrh výdeje se k tomuto záznamu nenašel.')
 
+  // Pokrm i kusové zboží ve výdeji (varování náhledu): schválení chce výslovné „zboží není surovina
+  // toho pokrmu“ (`p_bez_surovin`). Posílá se jen se zaškrtnutím A při varování v AKTUÁLNÍM náhledu
+  // z databáze — ne podle formuláře, který mohl vzniknout nad jiným obsahem.
+  let bezSurovin = false
+  if (rozhodnuti === 'schvalit' && pole(p.f, 'bez_surovin') === 'ano') {
+    const { data: nahled, error: chybaNahledu } = await p.supabase.rpc('jine_platby_sestavit_vydej', { p_zaznam: p.z.id })
+    if (chybaNahledu) return vysledekChyby(chybaNahledu, 'náhled výdeje')
+    const varovani = (nahled as { varovani?: unknown } | null)?.varovani
+    bezSurovin = Array.isArray(varovani) && varovani.length > 0
+  }
+
   const { error } = await p.supabase.rpc('jine_platby_rozhodnout_vydej', {
     p_navrh: navrhId,
     p_otisk: otisk,
     p_schvalit: rozhodnuti === 'schvalit',
     p_duvod: rozhodnuti === 'zamitnout' ? duvod.slice(0, 1000) : duplicita === '' ? null : duplicita.slice(0, 1000),
+    p_bez_surovin: bezSurovin,
   })
   if (error) {
     const stav = vysledekChyby(error, 'rozhodnutí o výdeji')
-    // „Možná duplicita výdeje…“ → k poli s důvodem (formulář ho zaměří, napsaný text zůstane).
-    return rozhodnuti === 'schvalit' && error.code === '23514' && jeHlaskaDuplicity(stav.text) ? { ...stav, chyby: { duplicita_duvod: stav.text } } : stav
+    if (rozhodnuti !== 'schvalit' || error.code !== '23514') return stav
+    // „Možná duplicita výdeje…“ → k poli s důvodem, „pokrm i kusové zboží“ → k zaškrtnutí (formulář ho zaměří, napsaný text zůstane).
+    if (jeHlaskaDuplicity(stav.text)) return { ...stav, chyby: { duplicita_duvod: stav.text } }
+    if (jeHlaskaBezSurovin(stav.text)) return { ...stav, chyby: { bez_surovin: stav.text } }
+    return stav
   }
   if (rozhodnuti === 'zamitnout') return hotovo(p, 'Výdej zamítnut s důvodem. Sklad se nemění.')
 

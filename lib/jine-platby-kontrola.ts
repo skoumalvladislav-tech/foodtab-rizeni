@@ -512,6 +512,15 @@ function predchoziDen(datum: string): string {
   return new Date(Date.UTC(r, m - 1, d) - 86_400_000).toISOString().slice(0, 10)
 }
 
+/**
+ * Upozornění k dokladu bez času tisku (C10): datum na dokladu je kalendářní
+ * den, provozní den pobočky začíná v `denZacina` („HH:MM"). Celý text je
+ * pevný — obrazovka i testy ho poznají podle začátku.
+ */
+export function upozorneniBezCasu(denZacina: string): string {
+  return `Datum z dokladu je kalendářní den tisku — ověřte provozní den (provozní den pobočky začíná v ${denZacina}).`
+}
+
 /** „2026-10-17" → „17. 10. 2026". */
 function datumCesky(datum: string): string {
   const [r, m, d] = datum.split('-').map(Number)
@@ -540,8 +549,16 @@ function doStropuUpozorneni(seznam: readonly string[]): string[] {
  * účet vytištěný ve 2:15 patří do včerejšího provozního dne (pravidlo 10
  * v CLAUDE.md). Když AI přečetla čas tisku (`cas`) a ten je dřív než
  * začátek provozního dne, datum se posune o den zpět a do upozornění
- * k dokladu přibude věta, ať to člověk zkontroluje (N31). Bez času nebo
- * bez `denZacina` se datum jen převezme — nic se nedomýšlí.
+ * k dokladu přibude věta, ať to člověk zkontroluje (N31). Bez `denZacina`
+ * (nebo když den začíná o půlnoci, „00:00") se datum jen převezme —
+ * kalendářní a provozní den jsou tam totéž.
+ *
+ * Bez času tisku (AI ho nevrátila nebo je nečitelný) se datum nedomýšlí,
+ * ale NEPROJDE potichu (C10, kontrola 20. 10.): účet z 1:30 by se zapsal
+ * do následujícího provozního dne. Když pobočka začíná den jinak než
+ * o půlnoci, přibude upozornění k dokladu „Datum z dokladu je kalendářní
+ * den tisku — ověřte provozní den …" — záznam pak bez potvrzení
+ * upozornění nejde označit jako zkontrolovaný.
  */
 export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string; denZacina?: string }): KontrolaDokladu {
   if (!platneDatum(moznosti.dnes)) throw new RangeError('moznosti.dnes musí být platné datum RRRR-MM-DD')
@@ -665,6 +682,8 @@ export function zkontrolovatDoklad(d: RozpoznanyDoklad, moznosti: { dnes: string
     if (cas !== null && denZacina !== null && cas < denZacina) {
       datum = predchoziDen(datum)
       kCelku(`Účet vytištěný v ${cas} patří do provozního dne ${datumCesky(datum)} — datum posunuto, zkontrolujte`)
+    } else if (cas === null && denZacina !== null && denZacina !== '00:00') {
+      kCelku(upozorneniBezCasu(denZacina))
     }
     if (datum > moznosti.dnes) duvody.push(`Datum z dokladu (${datum}) je v budoucnosti — ověřte`)
     else datumProdeje = datum

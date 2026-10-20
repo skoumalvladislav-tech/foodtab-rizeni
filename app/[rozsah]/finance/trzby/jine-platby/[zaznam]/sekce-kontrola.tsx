@@ -12,7 +12,7 @@ import { nacistKatalog } from '../akce-pos'
 import ZnackaStavu from '../znacka-stavu'
 import EditorNavrhu, { type HlavickaEditoru, type PolozkaEditoru, type ProduktEditoru } from './editor-navrhu'
 import FormularAkce from './formular-akce'
-import { datumCesky, HLASKA_BEZ_AI, popisPuvoduCastky, type BodKontroly } from './logika'
+import { datumCesky, HLASKA_BEZ_AI, HLASKA_ROZPOZNANI_SKLAD, popisPuvoduCastky, SKLAD_BRANI_ROZPOZNANI, type BodKontroly } from './logika'
 import { Oddil, PoleDuvodu, Udaj, Udaje, Vysvetleni } from './prvky'
 
 const ZNACKA_BODU: Record<BodKontroly['blokuje'], string> = {
@@ -35,9 +35,14 @@ const POPIS_NOVEJSIHO_POKUSU: Record<string, string> = {
  * jako zkontrolované". Nic z toho nezapisuje tržbu ani sklad.
  *
  * Panel „Částky na dokladu“ je z rozpoznání, ZE KTERÉHO JE ULOŽENÝ NÁVRH
- * (stránka ho vybere: poslední úspěšné, jehož verze záznamu je starší než
- * ta dnešní) — ne z posledního pokusu. Novější neúspěšný, běžící nebo
- * neuložený pokus a ruční úpravy od toho čtení řekne větou.
+ * (stránka ho čte podle vazby u záznamu `rozpoznani_id`, kterou ukládá jen
+ * akce rozpoznání spolu s návrhem) — ne z posledního pokusu. Novější
+ * neúspěšný, běžící nebo neuložený pokus a změny záznamu od toho čtení
+ * řekne větou.
+ *
+ * Rozpoznání se nenabízí u schváleného nebo provedeného výdeje (položky
+ * skladu by nešlo uložit); u zapsané tržby ano — částka, měna a datum
+ * zůstanou zapsané a rozdíl přečtených řekne upozornění AI.
  *
  * Upozornění AI k celému dokladu (`z.upozorneniDokladu`) jsou v „Co
  * zkontrolovat“ první („Blokuje bez potvrzení“) a formulář označení má
@@ -69,8 +74,8 @@ export default function SekceKontrola({
   rozpoznani: { stav: string; vytvoreno: string; duvod: string | null } | null
   /** Kontrola rozpoznání, ze kterého je uložený návrh (`null` = žádné takové). */
   kontrolaRozpoznani: KontrolaDokladu | null
-  /** Odkud jsou částky: čas toho čtení, novější pokusy po něm, ruční úpravy návrhu od něj. */
-  puvodCastek?: { vytvoreno: string; novejsi: { stav: string; vytvoreno: string }[]; upravenoPotom: boolean } | null
+  /** Odkud jsou částky: čas toho čtení, novější pokusy po něm (od nejnovějšího), změny záznamu od něj. */
+  puvodCastek?: { vytvoreno: string; novejsi: { stav: string; vytvoreno: string; duvod?: string | null }[]; upravenoPotom: boolean } | null
   /** Co v uloženém návrhu zkontrolovat a co z toho označení blokuje (coZkontrolovat nad daty z databáze). */
   coZkontrolovat: BodKontroly[]
   /** Součet položek nesedí s celkovou cenou → povinné „Proč rozdíl nevadí“ (popis rozdílu), jinak `null`. */
@@ -88,6 +93,8 @@ export default function SekceKontrola({
   // Schválený / ručně zpracovávaný výdej: položky pro sklad databáze nepustí změnit (jine_platby_ulozit_navrh).
   const zamekSkladu = z.stavSkladu === 'schvaleno' || z.stavSkladu === 'nepodporovano' ? z.stavSkladu : null
   const novejsi = puvodCastek?.novejsi[0] ?? null
+  const dalsichNovejsich = Math.max(0, (puvodCastek?.novejsi.length ?? 0) - 1)
+  const rozpoznaniBraniSklad = SKLAD_BRANI_ROZPOZNANI.includes(z.stavSkladu)
 
   return (
     <section className="ds-plocha" style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
@@ -126,7 +133,9 @@ export default function SekceKontrola({
               potvrzeni={
                 polozky.length > 0
                   ? {
-                      text: `Rozpoznání nahradí současné položky (${polozky.length}) a údaje, které na dokladu přečte. Co nepřečte, zůstane, jak je; uložený provozní den taky (když AI přečte jiné datum, upozorní na to). Pokračovat?`,
+                      text: `Rozpoznání nahradí současné položky (${polozky.length}) a údaje, které na dokladu přečte. Co nepřečte, zůstane, jak je; uložený provozní den taky (když AI přečte jiné datum, upozorní na to).${
+                        trzbaZapsana ? ' Tržba je zapsaná — zapsaná částka, měna a datum zůstanou; když AI přečte jiné, řekne to v upozornění.' : ''
+                      } Pokračovat?`,
                       ano: 'Ano, rozpoznat znovu',
                     }
                   : undefined
@@ -136,9 +145,12 @@ export default function SekceKontrola({
                 Snímky dokladu se pošlou ke čtení schválené AI službě Anthropic — nic jiného (žádná jména, ceník ani další údaje z appky). Výsledek je
                 jen návrh: nic se nezapíše do tržeb ani do skladu, dokud ho nezkontrolujete. Čtení trvá až dvě minuty.
               </Vysvetleni>
+              {trzbaZapsana ? (
+                <Vysvetleni>Tržba je už zapsaná nebo propojená: rozpoznání doplní položky (třeba pro výdej ze skladu), zapsanou částku, měnu ani datum nezmění.</Vysvetleni>
+              ) : null}
             </FormularAkce>
-          ) : trzbaZapsana ? (
-            <Vysvetleni>Tržba je už zapsaná nebo propojená — nové rozpoznání by měnilo potvrzené údaje. Případné chyby opravte ručně (oprava tržby).</Vysvetleni>
+          ) : rozpoznaniBraniSklad ? (
+            <Vysvetleni>{HLASKA_ROZPOZNANI_SKLAD}</Vysvetleni>
           ) : null}
           {rozpoznani ? (
             <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
@@ -158,12 +170,14 @@ export default function SekceKontrola({
           ) : null}
           {novejsi ? (
             <Vysvetleni dulezite>
-              Novější pokus o rozpoznání ({datumACasSRokemVPasmu(novejsi.vytvoreno, zona)}) {POPIS_NOVEJSIHO_POKUSU[novejsi.stav] ?? 'neskončil úspěchem'} — částky níž
+              Novější pokus o rozpoznání ({datumACasSRokemVPasmu(novejsi.vytvoreno, zona)}) {POPIS_NOVEJSIHO_POKUSU[novejsi.stav] ?? 'neskončil úspěchem'}
+              {novejsi.stav === 'chyba' && novejsi.duvod ? ` (${novejsi.duvod})` : ''}
+              {dalsichNovejsich > 0 ? `; po uloženém čtení ${dalsichNovejsich === 1 ? 'je ještě jeden další pokus' : `jsou ještě další pokusy: ${dalsichNovejsich}`}` : ''} — částky níž
               jsou z dřívějšího čtení, ze kterého je uložený návrh.
             </Vysvetleni>
           ) : null}
           {puvodCastek?.upravenoPotom ? (
-            <Vysvetleni dulezite>Návrh se od toho čtení ručně upravil — částky na dokladu nemusí sedět s uloženými údaji výš.</Vysvetleni>
+            <Vysvetleni dulezite>Návrh se od toho čtení ručně upravil (nebo se záznam jinak změnil) — částky na dokladu nemusí sedět s uloženými údaji výš.</Vysvetleni>
           ) : null}
           <Vysvetleni dulezite>
             Do tržby jde jen celková cena prodeje (zboží a služby po slevách, bez spropitného). „K úhradě“ ani přijatá hotovost tržba nejsou — host mohl
