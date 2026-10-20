@@ -8,6 +8,10 @@ PR.
 > databáze, peníze, pokladna, aplikace, AI; každý nález ověřil další agent)
 > našla 33 platných nálezů. Opravené jsou všechny, tři jen zčásti — viz
 > oddíl **Druhá kontrola (19. 10.)** níž. Čísla v hlášení jsou po opravách.
+>
+> **Doplněno 20. 10.:** nezávislé ověření oprav našlo 11 neúplných oprav a 6
+> nových chyb, které opravy způsobily. Opravené jsou všechny — viz oddíl
+> **Ověření oprav (20. 10.)**. Čísla níž jsou po těchto opravách.
 
 ## Nejdřív to podstatné
 
@@ -47,6 +51,8 @@ PR.
 | **Druhá kontrola:** databáze, scénář krok98 (oddíl 13) | `37e24d2` | **ano** |
 | Druhá kontrola: textová kontrola grantů, dokumentace | `424ba2b`, `f874178` | — |
 | Druhá kontrola: obrazovky, akce, knihovny, navigace Financí, testy | `5fd76d3` | — |
+| **Ověření oprav 20. 10.:** databáze, scénář krok98 (oddíl 14), kontrola grantů | `9244030` | **ano** |
+| Ověření oprav: obrazovky, akce, knihovny, testy; dokumentace | `1c9b755`, `e361e99` | — |
 
 Hlavní opravy z kontroly (podrobně v `docs/jine-platby-navrh.md` a v návodu):
 
@@ -78,35 +84,38 @@ telefon 375 px, telefon v tmavém režimu u panelu schválení).
 ## Čísla — a z čeho jsou
 
 - **Scénář krok98:**
-  - **181 kontrol**; celý řetěz scénářů ve stejném pořadí jako na CI **3 714 kontrol**, nic nespadlo;
+  - **209 kontrol**; celý řetěz scénářů ve stejném pořadí jako na CI **3 742 kontrol**, nic nespadlo;
+  - **složeně s PR #147** (main + #146 + #147, konflikty v `run.sh`, `databaze.yml`, `aplikace.yml` a `otazky.md` vyřešené ponecháním obou stran): **3 889 kontrol**, krok98 209 a krok99 147, nic nespadlo; nový hlídač pořadí migrací z main (#148) prošel;
   - běželo na **PGlite**, ne na PostgreSQL;
   - PGlite **neověří RLS ani sloupcové granty**. Rozhodne workflow „Migrace a scénáře“ na GitHubu, které běží po pushi a jehož výsledek je v PR.
 - **Node testy:** v seznamu CI je **89 sad, všech 89 prošlo**. Z toho Jiné platby:
 
   | sada | kontrol |
   |---|---|
-  | `jine-platby` | 507 |
-  | `jine-platby-detail` | 521 |
-  | `jine-platby-obrazovka` | 252 |
-  | `jine-platby-ai` | 181 |
+  | `jine-platby` | 545 (síť 49 280 kombinací stavů) |
+  | `jine-platby-detail` | 590 |
+  | `jine-platby-obrazovka` | 254 |
+  | `jine-platby-ai` | 199 |
   | `jine-platby-pos-operace` | 73 |
   | `pokladna-dotykacka-sklad` | 168 |
   | `nabidka` | 225 |
   | `finance-pobocky` | 189 |
-  | `provoz-granty` | + 31 nových (Jiné platby bez zápisu pro přihlášené) |
+  | `provoz-granty` | + 31 nových (Jiné platby bez zápisu pro přihlášené) a + 15 (funkce jen pro server bez authenticated) |
 
   - `vydelky` napoprvé spadl. Nabídka nově načítá seznam práv Jiných plateb a test výdělků ho neuměl podstrčit. Opraveno, test teď načítá skutečný soubor.
 - `tsc` a `eslint` nad změněnými soubory jsou čisté.
 - **Schválná rozbití:**
-  - **Databáze, 97 rozbití.** Každé shodilo kontrolu (96 přesně tu, na kterou mířilo).
+  - **Databáze, 121 rozbití.** Každé shodilo kontrolu (120 přesně tu, na kterou mířilo).
     - B48 (pokladna bez kontroly pobočky) spadlo na **dřívější a přísnější** kontrole „cizí firma nevidí katalog“. Stejné rozbití totiž otevře katalog i cizí firmě.
     - Pravidla, která jdou porušit dvěma způsoby, jsem rozbil oběma. Například rozdíl součtu: bez důvodu i s neomezenou tolerancí. Zrušení záznamu: zůstane ve frontě i drží doklad.
-  - **Aplikace:** po první kontrole 77 + 77 rozbití a 3 moje, po druhé 49 (detail) + 71 (knihovny a navigace). Všechna spadla. Před první kontrolou 90 rozbití aplikace a 21 databáze.
+  - **Aplikace:** po první kontrole 77 + 77 rozbití a 3 moje, po druhé 49 (detail) + 71 (knihovny a navigace), po ověření 70 (detail) + 38 (knihovny). Všechna spadla. Před první kontrolou 90 rozbití aplikace a 21 databáze.
+  - **Granty dvěma způsoby:** funkce jen pro server bez revoke od authenticated i s grantem authenticated — obě rozbití shodí kontrolu.
   - **Text migrace:** rozbití revoke u Ostatních tržeb (přihlášený by dostal zápis z výchozích práv Supabase) shodí 3 kontroly v `provoz-granty`; krok98 by tohle v čisté databázi nepoznal nikdy.
   - Rozbití odhalila tři slabé kontroly, které prošly i nad rozbitým kódem: dvakrát duplicity, kde shodu zakryla shoda „den + částka“, a jednu kontrolu, která spadla výjimkou místo výsledku. Všechny tři jsou opravené.
 - **Nezávislá kontrola:**
   - první (17. 10.): 49 nálezů, každý ověřil samostatný agent; 37 obstálo, 12 se vyvrátilo;
   - druhá (19. 10.): 34 nálezů, 33 platných (2 vysoké jako možné), 1 vyvrácený;
+  - ověření oprav (20. 10.): 22 z 33 opraveno, 11 zčásti, 6 nových chyb z oprav (2 střední, 4 nízké) — vše opravené 20. 10.;
   - 2 nálezy opravené v databázi neměly kontrolu ve scénáři (přepočet úhrady, verze při změně odběratele), proto jsem je doplnil.
 
 ## Druhá kontrola (19. 10.)
@@ -139,6 +148,27 @@ Co je opravené jen zčásti:
 - **Nejasný výsledek bez východu:** dohledání podle klíče jde teď i u pokladny bez zápisu přes API; když se pokladna nedá otevřít vůbec, záznam zůstane „nejasný“ a vyřeší ho jen ruční zásah. Dnes nenastane, zápis je vypnutý.
 - **Pokrm a jeho suroviny:** jen varování, ne zákaz — appka receptury nečte.
 
+## Ověření oprav (20. 10.)
+
+Nezávislé ověření (5 ověřovatelů se schválnými rozbitími a jeden hledač regresí) našlo, že část oprav z 19. 10. drží jen napůl. Co se dotáhlo:
+
+- **Ruční „není tam“ proti výsledku pokladny:** pojistka platila jen pro tutéž verzi záznamu a padla prvním uložením (i beze změny). Teď drží, dokud nepřijde novější kontrola z pokladny. U pouhé shody částky („pravděpodobně“) jde přepsat s výslovným potvrzením „prodej v pokladně je jiný“ — dřív to obsluhu zablokovalo. Konkrétní účet přepíše jen člověk s právem na opravy. Celý přepsaný výsledek (i číslo účtu) je v historii.
+- **Jedna platba na fakturu i na Jinou platbu:** opačný směr (nejdřív Jiná platba, pak faktura) teď hlídá spoušť nad párováním faktur. Tvrzení v hlášení z 19. 10. platilo jen pro jedno pořadí, teď platí pro obě.
+- **Sjetina a neurčený doklad:** „v pokladně není“ z dotazu do pokladny už nedostanou nikdy (dřív jen když v pokladně zrovna běžel otevřený účet). Hlídá to aplikace i databáze; zbývá ruční prohlášení s důvodem.
+- **„Možná nezapočítáno“** (nová chyba z 19. 10.): u propojení bez konkrétního účtu to byl falešný poplach a rada „zapište jako novou“ vedla ke dvojí tržbě. Teď jen u propojení s konkrétním účtem a s radou nejdřív ověřit v pokladně.
+- **Pokrm a jeho suroviny:** pokrm s kusovým zbožím chce při schválení výslovné potvrzení „zboží není surovina toho pokrmu“ (pivo už varování nedává). Zákaz to pořád není — appka receptury nečte.
+- **Nejasný výsledek z pokladny:** po vypršení platnosti požadavku jde výdej ručně doložit nebo schválení zrušit (po ověření v pokladně). Ruční doložení neblokuje změna katalogu po schválení (nová chyba z 19. 10.).
+- **Panel „Částky na dokladu“:** návrh si pamatuje čtení AI, ze kterého je (dřív se odhadovalo z verzí a mohlo ukázat čtení, které se nikdy neuložilo).
+- **Rozpoznání AI:** po zápisu tržby zase jde (položky pro sklad; částka, měna a datum zůstanou), se schváleným nebo provedeným výdejem ne. Strop odpovědi podle času, vypršení času je trvalá chyba s radou místo „zkuste znovu“. Bez času tisku na účtence přibude upozornění na provozní den. Test „už běží“ a test pořadí zámku před počítáním stropu.
+- **Druhá linie:** další spouště (alias, tržba se záznamem a pokladnou, soubory, historie, rozpoznání, návrhy, operace) i hláška funkce u odběratele cizí firmy mají kontroly; kontrola nahrávání padá na politice, ne na čemkoli.
+- **Granty:** textová kontrola, že funkce jen pro server odebírají právo i roli authenticated (výchozí práva Supabase) a nikde ho znovu nedostanou.
+
+Co zůstává jen zčásti:
+- **Zápis do Dotykačky (vypnutý):** provozovna u pokladny vázané na pobočku pořád chybí (před zapnutím).
+- **Pokrm a suroviny:** jen potvrzení, ne zákaz.
+- **Okno souběhu u čtení AI:** když kolega uloží úpravu během čtení, uložení čtení spadne až po zaplaceném volání (zbytkové riziko, kontrola ho přijala).
+- **Akce párování v modulu Faktury** (`platby/akce.ts`) směr platby nekontroluje; databáze dvojí úhradu zastaví, ale obrazovka to neřekne předem. Řeší PR #147.
+
 ## Co čeká na Šéfíka
 
 1. **Projít PR a rozhodnout o sloučení.** Po sloučení je potřeba `db push` (jedna migrace `20261016100000_jine_platby`), jinak stránka v produkci nenajde tabulky. Obojí jen na váš výslovný pokyn.
@@ -167,6 +197,7 @@ V `docs/hlaseni/otazky.md`:
   - Na CI ale běží všechny scénáře v jedné databázi a krok93–95 tam nechávají další pokladny Perly. PGlite u mě pouštěl jen etapa0 + krok98, proto to neviděl.
   - Kontrola teď počítá jen pokladny scénáře. Navíc přibyla kontrola, že seznam pokladen pro obsluhu vrací jen netajné sloupce (id, název, poskytovatel, stav, provozovna). Obě jsou schválně rozbité (B60, B61).
   - Práva jsem neměnil. Starou verzi jsem spadnout nechal i u sebe (krok93–95 + krok98), aby bylo jisté, že příčina je tahle.
+- **Pořadí sloučení:** doporučené #146 → #147 → #145 (podle razítek migrací; hlídač z #148 chce, aby nová migrace byla novější než všechny v main). Složený test #146 + #147 prošel.
 - **Kontrolní a opravný workflow se dvakrát přerušil s koncem procesu aplikace.** Obnovil jsem ho z uloženého stavu, žádná práce se neztratila.
 - **19. 10. oba implementátoři oprav po druhé kontrole spadli na výpadku sítě** (po hodině práce). Jejich změny zůstaly v pracovní kopii.
   - Jeden skončil uprostřed schválných rozbití a jedno rozbití nechal v souboru (`logika.ts`, odpisový účet bráný jako prodej). Našel jsem ho porovnáním se zálohou před rozbitím a soubor vrátil. Zbylých 42 rozbití jsem dopustil sám.
