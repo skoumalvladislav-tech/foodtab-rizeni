@@ -1,6 +1,6 @@
 # Jiné platby: co appka umí s pokladnou
 
-Stav k 19. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
+Stav k 20. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
 Technický návrh je v `docs/jine-platby-navrh.md`.
 
 **Tahle agenda zatím nic neprovedla v žádné skutečné pokladně.** Nic
@@ -45,6 +45,9 @@ Zdroj: oficiální dokumentace https://docs.api.dotypos.com/ (verze API
 4. V appce klikne **Ručně doloženo**, zadá číslo dokladu z pokladny a důvod. Doložení se váže na otisk návrhu, který měl otevřený; když se návrh mezitím vyměnil, appka ho odmítne.
 5. Stav je **„Ručně doloženo (neověřeno pokladnou)“**, nikdy „Odečteno v POS“.
 6. Mezi kroky 2 a 4 (stav „předáno k ručnímu odpisu“) nejde měnit produkty ani množství a záznam nejde zrušit. Když schvalovatel v pokladně nic neodepsal, klikne **Zrušit schválení** s důvodem.
+7. Když v návrhu je pokrm i kusové zboží, potvrzení chce zaškrtnutí „Zboží není surovina toho pokrmu“.
+
+Až bude zápis přes API zapnutý: požadavek s nejasným výsledkem appka jen dohledává. Po vypršení jeho platnosti (+ 2 minuty) panel skladu nabídne **Ručně doloženo** (v pokladně proběhl) a **Zrušit schválení** (neproběhl) — obojí po ověření v pokladně a s důvodem. Změna katalogu po schválení doložení nebrání.
 
 ## Co musí proběhnout, než se zápis do Dotykačky zapne
 
@@ -95,7 +98,9 @@ Nový konektor dodá svůj adaptér a obrazovka ani databáze se nemění.
 | Ruční doložení ne s nevyřešenou položkou (neodečetla by se nikdy) | `jine_platby_rucne_dolozit_vydej` |
 | Výdej jen s produkty z katalogu pokladny (id a název nejdou z prohlížeče) | blokace v `app.jp_sestavit_vydej`, `jine_platby_ulozit_mapovani` |
 | Kontrola ani výdej nepracují s provozovnou, kterou v Integracích přeřadili jiné pobočce | `app.jp_pokladna_obsluhuje` v sestavení výdeje a v `jine_platby_zapsat_kontrolu` |
-| Ruční prohlášení nepřepíše opačný výsledek z pokladny (kromě práva na opravy) | `jine_platby_prohlasit` |
-| Pokrm a další zboží v jednom výdeji: varování pro schvalovatele (receptury appka nezná) | `varovani` z `jine_platby_sestavit_vydej` |
+| Ruční prohlášení nepřepíše opačný výsledek z pokladny ani po novém uložení záznamu; „pravděpodobně“ s výslovným potvrzením, konkrétní prodej a „už odečteno“ jen s právem na opravy | `jine_platby_prohlasit` |
+| „V pokladně není“ z dotazu jen u uzavřeného prodeje a ruční spotřeby (sjetina, otevřený účet a neurčený doklad nepřítomnost neprokážou) | `jine_platby_zapsat_kontrolu`, `logika.ts` |
+| Nejasný výsledek má po platnosti požadavku východ: ruční doložení nebo zrušení schválení po ověření v pokladně | `jine_platby_rucne_dolozit_vydej`, `jine_platby_zrusit_schvaleni` |
+| Pokrm a kusové zboží v jednom výdeji: varování a schválení jen s výslovným potvrzením (receptury appka nezná) | `varovani` z `jine_platby_sestavit_vydej`, `p_bez_surovin` |
 | Kontrola „už odečteno?“ se opakuje těsně před schválením a před odesláním | platnost 15 minut, vázaná na verzi záznamu |
 | Klíče pokladny jen na serveru | `lib/pokladna-relace.ts` (`server-only`, service_role po ověření práva) |

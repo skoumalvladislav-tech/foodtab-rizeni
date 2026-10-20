@@ -1,6 +1,6 @@
 # Jiné platby: návod pro obsluhu a schvalovatele
 
-Finance → Tržby → Jiné platby. Stav k 19. 10. 2026.
+Finance → Tržby → Jiné platby. Stav k 20. 10. 2026.
 
 ## Nejdřív: co z toho už běží
 
@@ -60,6 +60,7 @@ Kdo má jen práva Jiných plateb a nemá finanční přehled, vidí v navigaci 
    - dlouhou sjetinu vyfoťte po částech, k jednomu záznamu jde až 10 fotek nebo stránek;
    - stejnou fotku podruhé appka nepřijme, ani k jinému záznamu.
 5. Klikněte **Rozpoznat z dokladu**. Fotky se pošlou schválené AI službě (Anthropic) a nic jiného s nimi. Když AI zapnutá není, zadejte položky ručně.
+   - Rozpoznat jde i po zápisu tržby (třeba kvůli položkám pro sklad); částku, měnu a datum appka ponechá a rozdíl napíše jako upozornění. Se schváleným nebo provedeným výdejem rozpoznat nejde.
 6. **Zkontrolujte, co appka přečetla.** Originál je vlevo, položky vpravo.
    - Žlutě označené řádky a důvody nahoře potřebují váš pohled.
    - Appka nic nedomýšlí: co nepřečetla, zůstane prázdné.
@@ -89,14 +90,17 @@ V části **Tržba (Ostatní tržby)**:
      - Přesná shoda čísla dokladu = „nalezeno“.
      - Shoda jen podle částky = „pravděpodobně“, nikdy „nalezeno“.
      - Otevřený účet = „nelze ověřit“. Až ho pokladna uzavře, zapíše ho do tržeb sama.
+     - U **sjetiny, otevřeného účtu nebo dokladu, u kterého není jasné, co je**, appka „v pokladně není“ z dotazu nikdy neřekne — může jít o tentýž účet pod jiným číslem a s dorostlou částkou. Když víte jistě, že v pokladně není, zapište to ručním prohlášením s důvodem.
    - **Zapsat ruční prohlášení**: když se pokladna zeptat nedá, napište, jestli prodej v pokladně je, nebo není, a proč. Na obrazovce i v historii zůstane, že jde o ruční prohlášení, ne o ověření z pokladny.
-   - Když pokladna prodej **našla**, ruční „není tam“ to nepřepíše. Zopakujte kontrolu; přepsat ji smí jen člověk s právem na opravy a v historii zůstane, co pokladna našla.
+   - Když pokladna prodej **našla**, ruční „není tam“ to nepřepíše — ani po úpravě a novém uložení záznamu. Zopakujte kontrolu v pokladně.
+     - Když pokladna našla jen **stejnou částku** („pravděpodobně“) a víte, že jde o jiný účet, zaškrtněte „Prodej v pokladně je jiný, ověřil(a) jsem to“.
+     - Konkrétní účet (a u skladu „už odečteno“) přepíše jen člověk s právem na opravy, taky s výslovným potvrzením. V historii zůstane celý výsledek z pokladny.
    - Kontrola platí 30 minut a jen pro tu podobu záznamu, kterou jste kontrolovali. Po úpravě ji zopakujte.
 2. Podle výsledku:
    - **Zapsat do Ostatních tržeb**: jen když je vyloučené, že prodej je v pokladně. Tržba se započítá.
    - **Jen propojit (do součtu se nepřičte)**: prodej už v pokladně je. Ukáže se, ale nezapočítá se znovu.
      - Když kontrola nenašla **konkrétní** účet (shoda jen podle částky, pokladna nejde ověřit), appka chce důvod do pole **Proč je prodej v pokladně**. Bez něj by tržba mimo pokladnu tiše zmizela ze všech součtů.
-     - Po propojení jde kontrolu zopakovat. Když pokladna prodej nenajde, záznam dostane varování **„Možná nezapočítáno nikde“** a nabídne opravu.
+     - Když bylo propojení s **konkrétním účtem**, jde kontrolu zopakovat. Když pokladna ten účet nenajde, záznam dostane varování **„Možná nezapočítáno nikde“**: ověřte účet v pokladně (mohl být zrušený nebo přečíslovaný) a teprve když tam opravdu není, tržbu opravte. U propojení bez konkrétního účtu pozdější kontrola nic ověřit neumí a appka ji nenabízí.
 3. Když appka hlásí **možnou duplicitu**, otevřete ten druhý záznam. Když to duplicita není, napište důvod do pole **Proč to není duplicita**. Za možnou duplicitu appka považuje:
    - stejnou provozovnu, den, částku a měnu, nebo
    - stejné číslo účtu (mezery a velká písmena nevadí) do 7 dnů u téže pokladny. Záznam bez pokladny jen na stejné provozovně, protože „stůl 5“ je na každé provozovně jiný. Na téže provozovně se porovná i záznam s pokladnou se záznamem bez ní.
@@ -127,7 +131,7 @@ Na kartě záznamu uvidíte:
    - **nelze zjistit** → ověřte v pokladně a doložte s důvodem.
 3. Nesouhlasíte? **Zamítnout** s povinným důvodem. Obsluha návrh opraví a pošle znovu.
 4. Schválit jde jen **zkontrolovaný** záznam, ve kterém nic nečeká na vyřešení (nejasná položka, produkt, který v katalogu pokladny není, pokladna nebo provozovna, která už tuhle pobočku neobsluhuje).
-   - Když výdej obsahuje **pokrm i další zboží**, appka upozorní: zkontrolujte, že zboží není surovina toho pokrmu. Suroviny pokrmu odečte pokladna podle receptury sama a appka receptury nezná.
+   - Když výdej obsahuje **pokrm i kusové zboží**, appka upozorní a potvrdit výdej jde až se zaškrtnutím „Zboží není surovina toho pokrmu“. Suroviny pokrmu odečte pokladna podle receptury sama a appka receptury nezná. Pivo a jiné rozlévané nápoje varování nedávají.
 5. **Možná duplicita výdeje:** když je podobný výdej (stejná provozovna, den a částka, nebo stejné číslo účtu) už odeslaný nebo provedený, appka chce důvod, proč to není tatáž sjetina. Jinak by se sklad odečetl dvakrát.
 6. **Změna po schválení:** schválený výdej (i když se provedení v pokladně nepovedlo) **nejde měnit**: obsluha nezmění produkt ani množství a nepřidá nejasnou položku, ani majitel záznam nezruší. Schvalovatel totiž může právě odepisovat v pokladně. Když se má něco změnit, schvalovatel nejdřív klikne **Zrušit schválení** s důvodem (v pokladně nic neodepsáno), pak obsluha opraví a pošle znovu. Přejmenování položky nebo jiné označení záznamu výdej nemění; záznam se ale musí znovu označit jako zkontrolovaný.
 
@@ -143,8 +147,8 @@ Dokud je výdej schválený nebo čeká na ruční odpis, **položky a množstv�
 - **Ručně doloženo** se váže na návrh, který máte otevřený. Když ho mezitím někdo vyměnil, appka doložení odmítne. Načtěte stránku a doložte to, co jste v pokladně opravdu odepsali.
 - Když jste v pokladně **nic neodepsali** (host odešel, chyba v návrhu), klikněte **Zrušit schválení** a napište důvod. Výdej se vrátí do stavu „bez návrhu“ a obsluha ho může opravit a poslat znovu. Zrušit schválení smí jen ten, kdo smí výdej potvrdit.
 
-Pokrm se vydává **jako pokrm**, nikdy jeho suroviny zvlášť. Suroviny
-odečte pokladna sama. Služby, spropitné a položky, které pokladna ze
+Pokrm se vydává **jako pokrm** a jeho suroviny se do výdeje nepřidávají —
+odečte je pokladna sama. Hlídá to schvalovatel (appka receptury nezná). Služby, spropitné a položky, které pokladna ze
 skladu neodečítá, se do výdeje nedávají.
 
 ### Záznam bez pokladny
@@ -156,6 +160,7 @@ vyřešila (např. papírová výdejka).
 ### Když se něco pokazí (až bude zápis do pokladny zapnutý)
 
 - **Nejasný výsledek** (pokladna neodpověděla): appka požadavek **neopakuje**. Klikněte **Dohledat v pokladně**. Teprve když pokladna prokazatelně nic neprovedla, jde **Zkusit výdej znovu**.
+  - Když dohledat nejde (pokladna odpojená, odpověď nečitelná), po vypršení platnosti požadavku jde výdej **ručně doložit** (v pokladně proběhl) nebo **zrušit schválení** (neproběhl). Obojí jen po ověření v pokladně a s důvodem.
 - **Korekce** provedeného výdeje (právo na opravy): **Zapsat korekci** s číslem dokladu z pokladny a důvodem. Původní výdej zůstává v historii.
 
 ---
@@ -184,6 +189,8 @@ vyřešila (např. papírová výdejka).
 | Na dokladu chybí celková částka | Appka nabídne součet položek jako **návrh** s poznámkou „vypočtený součet“. Potvrdíte ho, nebo opravíte. |
 | „K úhradě“ je jiné než celkem | Tržba je celková cena prodeje. „K úhradě“, přijatá hotovost a vrácené peníze tržba nejsou, appka je ukáže jen pro kontrolu. |
 | AI nečte nebo není zapnutá | Zadejte položky ručně, appka nic nevymýšlí. Za den jde nejvýš 200 rozpoznání na firmu. |
+| „Doklad je na jedno čtení moc dlouhý“ | AI to nestihla nebo odpověď nedokončila. Znovu to zkoušet nemá smysl (každý pokus se platí a počítá do stropu). Vyfoťte doklad po částech do samostatných záznamů, nebo zadejte položky ručně. |
+| Na účtence není čas tisku | Appka datum vezme jako den tisku a u pobočky, která nezačíná den o půlnoci, napíše upozornění „ověřte provozní den“. Prodej po půlnoci patří do předchozího provozního dne. |
 | Velká fotka | Fotku nad 5 MB (a fotku z iPhonu ve formátu HEIC) appka při nahrání sama zmenší. K rozpoznání jde fotka do 5 MB, PDF do 8 MB a nejvýš 20 stran, dohromady nejvýš 20 MB a 30 stran, po pořadí stránek. Co se nevejde, appka vyjmenuje dřív, než se pokus započítá. |
 | Účet vytištěný po půlnoci | Když je na účtence čitelný čas a je dřív než začátek provozního dne pobočky, appka datum posune na předchozí provozní den a napíše to jako upozornění. Bez času datum nechá, zkontrolujte ho. |
 | Položka bez čitelného názvu | Appka ji pojmenuje „Položka č. N (název nečitelný)“ a nechá ke kontrole. Doplňte název podle dokladu. |
