@@ -162,8 +162,10 @@ export function moznaNikde(z: ZaznamJinePlatby): boolean {
 export type ProhlaseniProtiPokladne = { vysledek: string; chceOpravu: boolean }
 
 /**
- * Poslední kontrola daného druhu je DOTAZ DO POKLADNY (`zdroj: 'pos_api'`)
- * s výsledkem, který ruční prohlášení opačného znění nepřepíše jen tak
+ * Poslední výsledek DOTAZU DO POKLADNY daného druhu (`pokladnaTrzby` /
+ * `pokladnaSkladu`, ne poslední kontrola — ruční prohlášení stejného znění
+ * ho nevypere, ověření 20. 10.) je výsledek, který ruční prohlášení opačného
+ * znění nepřepíše jen tak
  * (`jine_platby_prohlasit`, P1 z 20. 10.):
  *
  *   'trzba' — pokladna prodej našla (`nalezeno`) nebo pravděpodobně našla
@@ -178,18 +180,21 @@ export type ProhlaseniProtiPokladne = { vysledek: string; chceOpravu: boolean }
  *
  * Vrací `{ vysledek, chceOpravu }`, jinak `null` (prohlásit jde volně):
  *   `vysledek`   — text výčtu, ať ho obrazovka jmenuje u prohlášení;
- *   `chceOpravu` — `false` jen u `pravdepodobne` (shoda jen částky): přepsat
+ *   `chceOpravu` — `false` jen u `pravdepodobne` ze shody SAMOTNÉ ČÁSTKY
+ *                  (`detail.shoda = 'castka'`): přepsat
  *                  smí kdokoli s právem k prohlášení, s výslovným potvrzením
  *                  (`p_prepsat_pokladnu = true`, prodej v pokladně je jiný);
- *                  `true` u `nalezeno` a `jiz_odecteno` (konkrétní prodej nebo
+ *                  `true` u `nalezeno`, `pravdepodobne` ze shody čísla účtu
+ *                  (`cislo_vice`) a `jiz_odecteno` (konkrétní prodej nebo
  *                  odpis): navíc jen s právem `jine_platby.oprava`.
  * Platnost v čase se nehlídá — databáze ji taky nehlídá.
  */
 export function prohlaseniProtiPokladne(z: ZaznamJinePlatby, druh: 'trzba' | 'sklad'): ProhlaseniProtiPokladne | null {
-  const k = druh === 'trzba' ? z.kontrolaTrzby : z.kontrolaSkladu
+  const k = druh === 'trzba' ? z.pokladnaTrzby : z.pokladnaSkladu
   if (k === null || k.zdroj !== 'pos_api') return null
   const brani = druh === 'trzba' ? k.vysledek === 'nalezeno' || k.vysledek === 'pravdepodobne' : k.vysledek === 'jiz_odecteno'
-  return brani ? { vysledek: k.vysledek, chceOpravu: k.vysledek !== 'pravdepodobne' } : null
+  const jenCastka = k.vysledek === 'pravdepodobne' && (k.detail as Record<string, unknown> | null | undefined)?.shoda === 'castka'
+  return brani ? { vysledek: k.vysledek, chceOpravu: !jenCastka } : null
 }
 
 /** Název agendy „Jiné platby" neznamená zaplaceno — úhradu ověřuje jen napárovaná bankovní transakce. */

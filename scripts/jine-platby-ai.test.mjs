@@ -631,7 +631,10 @@ try {
   ok('… hláška radí rozdělit doklad nebo zadat položky ručně, nic o opakování',
     AI.HLASKA_MOC_DLOUHY === 'Doklad je na jedno čtení moc dlouhý — rozdělte ho, nebo zadejte položky ručně.' && !/znovu/.test(AI.HLASKA_MOC_DLOUHY))
   const tKonec = await sHazenim(preruseni, { konec: Date.now() + 40_000 })
-  ok('timeout při limitu z termínu `konec` (vypršení konce) → táž trvalá chyba', tKonec.v.stav === 'chyba' && tKonec.v.docasna === false && tKonec.v.duvod === AI.HLASKA_MOC_DLOUHY && tKonec.pozadavky.length === 1)
+  ok('timeout při limitu ZKRÁCENÉM termínem `konec` (35 s) → DOČASNÁ chyba „nestihlo se, zkuste znovu“ (další pokus dostane plný čas)',
+    tKonec.v.stav === 'chyba' && tKonec.v.docasna === true && tKonec.v.duvod === AI.HLASKA_NESTIHLO && /znovu/.test(AI.HLASKA_NESTIHLO) && tKonec.pozadavky.length === 1)
+  const tKonecDaleko = await sHazenim(preruseni, { konec: Date.now() + 600_000 })
+  ok('timeout při termínu `konec` daleko (limit zůstane plných 100 s) → trvalá „moc dlouhý“', tKonecDaleko.v.docasna === false && tKonecDaleko.v.duvod === AI.HLASKA_MOC_DLOUHY)
   const spojeni = await sHazenim(() => new TypeError('fetch failed'))
   ok(`přerušené spojení (ne timeout) zůstává dočasné „Nepodařilo se spojit" (${spojeni.v.duvod})`, spojeni.v.stav === 'chyba' && spojeni.v.docasna === true && /Nepodařilo se spojit/.test(spojeni.v.duvod))
 } catch (e) {
@@ -730,7 +733,7 @@ console.log('\n== Ze zdroje: volání modelu (lib/jine-platby-ai.ts) ==')
     (kod.match(/stav: 'ok'/g) ?? []).length === 2 /* typ + návrat */ && /stav: 'ok', doklad: naRozpoznanyDoklad\(vystup\.data\)/.test(kod) && /DokladSchema\.safeParse\(/.test(kod))
   ok('chyby jako faktury-prijem-ai: 401 trvalá, 429/5xx/408/spojení dočasné — ale timeout TRVALÝ „moc dlouhý" (C8)',
     /AuthenticationError\)[\s\S]{0,80}trvala/.test(zdroj) && /RateLimitError\)[\s\S]{0,80}docasna/.test(zdroj)
-    && /APIConnectionTimeoutError\) \{\n\s*return trvala\(HLASKA_MOC_DLOUHY\)/.test(zdroj) && /APIConnectionError\)[\s\S]{0,80}docasna/.test(zdroj)
+    && /APIConnectionTimeoutError\) \{\r?\n\s*return trvala\(HLASKA_MOC_DLOUHY\)/.test(zdroj) && /APIConnectionError\)[\s\S]{0,80}docasna/.test(zdroj)
     && zdroj.indexOf('APIConnectionTimeoutError)') < zdroj.indexOf('APIConnectionError)')
     && /status >= 500 \|\| status === 408/.test(zdroj))
 }

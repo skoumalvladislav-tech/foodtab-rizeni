@@ -51,9 +51,10 @@ export type RadekTrzby = {
  * odmítne (`propojeniChceDuvod`).
  *
  * Ruční prohlášení „není“ proti poslednímu výsledku dotazu do pokladny
- * (`prohlaseniProtiPokladne`, bez ohledu na verzi): u „pravděpodobně“ jen
- * s povinným zaškrtnutím „Prodej v pokladně je jiný, ověřil(a) jsem to“
- * (`prepsat_pokladnu`); u „nalezeno“ totéž a navíc jen s právem na opravy —
+ * (`prohlaseniProtiPokladne`, bez ohledu na verzi): u „pravděpodobně“ ze
+ * shody jen částky jen s povinným zaškrtnutím „Prodej v pokladně je jiný,
+ * ověřil(a) jsem to“ (`prepsat_pokladnu`); u „nalezeno“ a „pravděpodobně“
+ * ze shody čísla účtu totéž a navíc jen s právem na opravy —
  * bez něj se „není“ nenabízí a obrazovka řekne proč.
  *
  * Pole „Proč to není duplicita“ je u zápisu i propojení VŽDY: databáze
@@ -94,7 +95,7 @@ export default function SekceTrzba({
   const poPropojeni = z.stavTrzby === 'propojeno'
   const proti = prohlaseniProtiPokladne(z, 'trzba')
   const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_TRZBY as Record<string, string>)[proti.vysledek] ?? proti.vysledek)
-  /** „Není“ proti výsledku pokladny: u „nalezeno“ jen s právem na opravy (databáze jinak odmítne). */
+  /** „Není“ proti výsledku pokladny: u „nalezeno“ a shody čísla účtu jen s právem na opravy (databáze jinak odmítne). */
   const neniNelze = proti !== null && proti.chceOpravu && !smiOpravit
   const chceDuvodPropojeni = vysledek !== 'nenalezeno' && propojeniChceDuvod(z.kontrolaTrzby, maPokladnu)
   const volbyProhlaseni: [string, string][] = [

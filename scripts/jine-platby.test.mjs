@@ -762,7 +762,7 @@ const zaznam = (o = {}) => ({
   mena: 'CZK', castkaHaleru: 27900, castkaPuvod: 'doklad', typDokladu: 'uzavreny_prodej', externiUcet: '1234', posProdejId: null,
   stavKontroly: 'zkontrolovano', stavTrzby: 'nezapsano', stavSkladu: 'bez_navrhu', stavFaktury: 'bez_faktury', fakturaCislo: null, fakturaZdroj: null,
   fakturaCastkaHaleru: null, stavUhrady: 'neovereno', uhradaTransakceId: null, uhradaCastkaHaleru: null, kontrolaTrzby: null, kontrolaSkladu: null,
-  verze: 3, vytvoril: null, vytvoreno: '2026-10-15T10:00:00Z', zmeneno: '2026-10-15T10:00:00Z', ...o,
+  pokladnaTrzby: null, pokladnaSkladu: null, verze: 3, vytvoril: null, vytvoreno: '2026-10-15T10:00:00Z', zmeneno: '2026-10-15T10:00:00Z', ...o,
 })
 const TED = Date.parse('2026-10-16T12:00:00Z')
 const pred = (min) => new Date(TED - min * 60_000).toISOString()
@@ -948,32 +948,44 @@ console.log('\n== Dostupné akce ==')
   ok('moznaNikde: „nenalezeno" u jiného stavu tržby (nezapsano, zapsano, stornovano) → ne',
     ['nezapsano', 'zapsano', 'stornovano'].every((st) => !nikde({ stavTrzby: st })))
 
-  // Ruční prohlášení proti výsledku z pokladny (jine_platby_prohlasit, P1 z 20. 10.): poslední kontrola
-  // dotazem do pokladny brání BEZ OHLEDU NA VERZI (C1/R2: uložení návrhu verzi zvedne i bez změny).
+  // Ruční prohlášení proti výsledku z pokladny (jine_platby_prohlasit, P1 z 20. 10.): poslední výsledek
+  // DOTAZU DO POKLADNY (pokladnaTrzby / pokladnaSkladu — ruční prohlášení ho nepřepíše) brání BEZ OHLEDU
+  // NA VERZI (C1/R2: uložení návrhu verzi zvedne i bez změny).
   const kSkl = (o = {}) => ({ vysledek: 'jiz_odecteno', zdroj: 'pos_api', verze: 3, kdy: pred(5), kdo: null, detail: {}, ...o })
+  const kCastka = (o = {}) => kT({ vysledek: 'pravdepodobne', detail: { shoda: 'castka' }, ...o })
   const pp = (z, druh) => JSON.stringify(S.prohlaseniProtiPokladne(z, druh))
-  ok('prohlaseniProtiPokladne trzba: pos_api „nalezeno" → { nalezeno, chceOpravu: true } (konkrétní prodej přepíše jen oprava)',
-    pp(zaznam({ kontrolaTrzby: kTv('nalezeno') }), 'trzba') === JSON.stringify({ vysledek: 'nalezeno', chceOpravu: true }))
-  ok('prohlaseniProtiPokladne trzba: pos_api „pravdepodobne" → { pravdepodobne, chceOpravu: false } (stačí výslovné potvrzení)',
-    pp(zaznam({ kontrolaTrzby: kTv('pravdepodobne') }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: false }))
-  ok('prohlaseniProtiPokladne trzba: kontrola ke STARŠÍ verzi (návrh mezitím uložen) brání dál — obejití z C1 zavřené',
-    pp(zaznam({ verze: 4, kontrolaTrzby: kT({ vysledek: 'nalezeno', verze: 3 }) }), 'trzba') === JSON.stringify({ vysledek: 'nalezeno', chceOpravu: true }) &&
-      pp(zaznam({ verze: 9, kontrolaTrzby: kT({ vysledek: 'pravdepodobne', verze: 1 }) }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: false }))
-  ok('prohlaseniProtiPokladne trzba: „nenalezeno" / „nelze_overit" / bez kontroly → null',
-    S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nenalezeno') }), 'trzba') === null && S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nelze_overit') }), 'trzba') === null &&
-      S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: null }), 'trzba') === null)
-  ok('prohlaseniProtiPokladne trzba: poslední je ruční prohlášení „nalezeno" → null (to přepsat jde)',
-    S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kT({ vysledek: 'nalezeno', zdroj: 'rucni_prohlaseni' }) }), 'trzba') === null)
-  ok('prohlaseniProtiPokladne sklad: pos_api „jiz_odecteno" (i ke starší verzi) → { jiz_odecteno, chceOpravu: true }',
-    pp(zaznam({ kontrolaSkladu: kSkl() }), 'sklad') === JSON.stringify({ vysledek: 'jiz_odecteno', chceOpravu: true }) &&
-      pp(zaznam({ verze: 5, kontrolaSkladu: kSkl({ verze: 2 }) }), 'sklad') === JSON.stringify({ vysledek: 'jiz_odecteno', chceOpravu: true }))
-  ok('prohlaseniProtiPokladne sklad: „neodecteno", „nelze_zjistit", ruční, bez kontroly → null',
-    S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl({ vysledek: 'neodecteno' }) }), 'sklad') === null &&
-      S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl({ vysledek: 'nelze_zjistit' }) }), 'sklad') === null &&
+  ok('prohlaseniProtiPokladne trzba: pokladna „nalezeno" → { nalezeno, chceOpravu: true } (konkrétní prodej přepíše jen oprava)',
+    pp(zaznam({ pokladnaTrzby: kTv('nalezeno') }), 'trzba') === JSON.stringify({ vysledek: 'nalezeno', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne trzba: pokladna „pravdepodobne" ze shody JEN ČÁSTKY → { pravdepodobne, chceOpravu: false } (stačí výslovné potvrzení)',
+    pp(zaznam({ pokladnaTrzby: kCastka() }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: false }))
+  ok('prohlaseniProtiPokladne trzba: „pravdepodobne" ze shody ČÍSLA ÚČTU (cislo_vice) → chceOpravu: true (konkrétní stopa jako „nalezeno")',
+    pp(zaznam({ pokladnaTrzby: kT({ vysledek: 'pravdepodobne', detail: { shoda: 'cislo_vice' } }) }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne trzba: „pravdepodobne" bez uvedené shody → chceOpravu: true (bez dokladu o shodě jen částky přísněji)',
+    pp(zaznam({ pokladnaTrzby: kTv('pravdepodobne') }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne trzba: výsledek pokladny ke STARŠÍ verzi (návrh mezitím uložen) brání dál — obejití z C1 zavřené',
+    pp(zaznam({ verze: 4, pokladnaTrzby: kT({ vysledek: 'nalezeno', verze: 3 }) }), 'trzba') === JSON.stringify({ vysledek: 'nalezeno', chceOpravu: true }) &&
+      pp(zaznam({ verze: 9, pokladnaTrzby: kCastka({ verze: 1 }) }), 'trzba') === JSON.stringify({ vysledek: 'pravdepodobne', chceOpravu: false }))
+  ok('prohlaseniProtiPokladne trzba: pokladna „nenalezeno" / „nelze_overit" / bez dotazu do pokladny → null',
+    S.prohlaseniProtiPokladne(zaznam({ pokladnaTrzby: kTv('nenalezeno') }), 'trzba') === null && S.prohlaseniProtiPokladne(zaznam({ pokladnaTrzby: kTv('nelze_overit') }), 'trzba') === null &&
+      S.prohlaseniProtiPokladne(zaznam({ pokladnaTrzby: null }), 'trzba') === null)
+  ok('prohlaseniProtiPokladne trzba: jen ruční prohlášení „nalezeno", pokladna se neptala → null (to přepsat jde)',
+    S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kT({ vysledek: 'nalezeno', zdroj: 'rucni_prohlaseni' }), pokladnaTrzby: null }), 'trzba') === null)
+  ok('prohlaseniProtiPokladne trzba: pokladna „nalezeno" a POTOM ruční „je" (poslední kontrola je ruční) → brání dál (výsledek pokladny se nevypere)',
+    pp(zaznam({ kontrolaTrzby: kT({ vysledek: 'nalezeno', zdroj: 'rucni_prohlaseni' }), pokladnaTrzby: kTv('nalezeno') }), 'trzba') === JSON.stringify({ vysledek: 'nalezeno', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne trzba: poslední kontrola z pokladny bez sloupce pokladny → null (pojistka čte jen pokladnaTrzby)',
+    S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nalezeno'), pokladnaTrzby: null }), 'trzba') === null)
+  ok('prohlaseniProtiPokladne sklad: pokladna „jiz_odecteno" (i ke starší verzi) → { jiz_odecteno, chceOpravu: true }',
+    pp(zaznam({ pokladnaSkladu: kSkl() }), 'sklad') === JSON.stringify({ vysledek: 'jiz_odecteno', chceOpravu: true }) &&
+      pp(zaznam({ verze: 5, pokladnaSkladu: kSkl({ verze: 2 }) }), 'sklad') === JSON.stringify({ vysledek: 'jiz_odecteno', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne sklad: pokladna „už odečteno" a POTOM ruční „už odečteno" → brání dál',
+    pp(zaznam({ kontrolaSkladu: kSkl({ zdroj: 'rucni_prohlaseni' }), pokladnaSkladu: kSkl() }), 'sklad') === JSON.stringify({ vysledek: 'jiz_odecteno', chceOpravu: true }))
+  ok('prohlaseniProtiPokladne sklad: „neodecteno", „nelze_zjistit", jen ruční, bez dotazu do pokladny → null',
+    S.prohlaseniProtiPokladne(zaznam({ pokladnaSkladu: kSkl({ vysledek: 'neodecteno' }) }), 'sklad') === null &&
+      S.prohlaseniProtiPokladne(zaznam({ pokladnaSkladu: kSkl({ vysledek: 'nelze_zjistit' }) }), 'sklad') === null &&
       S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl({ zdroj: 'rucni_prohlaseni' }) }), 'sklad') === null &&
-      S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: null }), 'sklad') === null)
+      S.prohlaseniProtiPokladne(zaznam({ pokladnaSkladu: null }), 'sklad') === null)
   ok('prohlaseniProtiPokladne: druhy se nepletou (výsledek skladu nebrání prohlášení tržby a naopak)',
-    S.prohlaseniProtiPokladne(zaznam({ kontrolaSkladu: kSkl() }), 'trzba') === null && S.prohlaseniProtiPokladne(zaznam({ kontrolaTrzby: kTv('nalezeno') }), 'sklad') === null)
+    S.prohlaseniProtiPokladne(zaznam({ pokladnaSkladu: kSkl() }), 'trzba') === null && S.prohlaseniProtiPokladne(zaznam({ pokladnaTrzby: kTv('nalezeno') }), 'sklad') === null)
   {
     // Zrcadlo = databáze: pojistka v jine_platby_prohlasit nestojí na verzi a „pravděpodobně" nechce právo na opravy.
     const sqlP = textMigrace()
@@ -983,7 +995,15 @@ console.log('\n== Dostupné akce ==')
     ok('(migrace: podmínku v_prepis v jine_platby_prohlasit se podařilo najít)', prepis.length > 50)
     ok('… v_prepis nestojí na verzi a brání týmiž výsledky jako zrcadlo (trzba nalezeno/pravdepodobne, sklad jiz_odecteno)',
       !/verze/.test(prepis) && /'vysledek' in \('nalezeno', 'pravdepodobne'\)/.test(prepis) && /'vysledek' = 'jiz_odecteno'/.test(prepis) && /'zdroj' = 'pos_api'/.test(prepis))
-    ok('… právo na opravy chce jen výsledek jiný než „pravdepodobne" (chceOpravu)', /'vysledek' <> 'pravdepodobne' and not app\.has_access\(v_z\.tenant_id, 'jine_platby\.oprava'/.test(telo))
+    ok('… bez práva na opravy jen „pravdepodobne" ze shody samotné částky (chceOpravu)',
+      /not \(v_stara ->> 'vysledek' = 'pravdepodobne' and v_stara -> 'detail' ->> 'shoda' = 'castka'\)\s+and not app\.has_access\(v_z\.tenant_id, 'jine_platby\.oprava'/.test(telo))
+    ok('… pojistka čte poslední výsledek POKLADNY (pokladna_trzby / pokladna_skladu), ne poslední kontrolu',
+      /v_stara := case when p_druh = 'trzba' then v_z\.pokladna_trzby else v_z\.pokladna_skladu end;/.test(telo))
+    const odK = sqlP.indexOf('create function public.jine_platby_zapsat_kontrolu(')
+    const teloK = odK >= 0 ? sqlP.slice(odK, sqlP.indexOf('end $$;', odK)) : ''
+    ok('… sloupce pokladna_* píše jen jine_platby_zapsat_kontrolu (dotaz do pokladny), nikde jinde v migraci',
+      /kontrola_trzby = v_k, pokladna_trzby = v_k/.test(teloK) && /kontrola_skladu = v_k, pokladna_skladu = v_k/.test(teloK) &&
+        (sqlP.match(/pokladna_(trzby|skladu) = /g) ?? []).length === 2)
   }
 
   // Rozpoznání AI (P5, C9/R3): zapsaná nebo propojená tržba čtení NEBRÁNÍ; schválený nebo provedený výdej ano.

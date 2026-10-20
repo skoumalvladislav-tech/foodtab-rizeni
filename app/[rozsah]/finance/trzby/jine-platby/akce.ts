@@ -201,12 +201,14 @@ const NEVIM =
 /**
  * Prohlášení „není“ proti poslednímu výsledku dotazu do pokladny
  * (`prohlaseniProtiPokladne` — bez ohledu na verzi záznamu; výsledek
- * pokladny nahradí jen novější kontrola v pokladně):
+ * pokladny nahradí jen novější kontrola v pokladně, ruční prohlášení
+ * stejného znění ho nevypere):
  *
- *   * „pravděpodobně“ (shoda jen částky) — přepsat smí, kdo prohlašuje, ale
+ *   * „pravděpodobně“ ze shody jen částky — přepsat smí, kdo prohlašuje, ale
  *     jen se zaškrtnutým „Prodej v pokladně je jiný, ověřil(a) jsem to“
  *     (`prepsat_pokladnu` → `p_prepsat_pokladnu = true`);
- *   * „nalezeno“ (konkrétní účet) a „už odečteno“ — totéž, a navíc jen
+ *   * „nalezeno“, „pravděpodobně“ ze shody čísla účtu a „už odečteno“ —
+ *     totéž, a navíc jen
  *     s právem na opravy (`chceOpravu`).
  *
  * Jinak by ruční „není tam“ odemklo druhou tržbu nebo druhý odpis.

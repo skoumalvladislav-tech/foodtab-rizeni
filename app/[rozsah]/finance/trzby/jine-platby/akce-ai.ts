@@ -15,6 +15,7 @@ import {
   type HlavickaNavrhu,
   type TypSouboru,
 } from '@/lib/jine-platby-typy'
+import { popisTypuDokladu } from '@/lib/jine-platby-stav'
 import { provozniDen } from '@/lib/pokladna-cas'
 import { klientUlohy } from '@/lib/supabase/uloha'
 
@@ -225,7 +226,9 @@ export async function rozpoznat(_predchozi: StavAkce, formData: FormData): Promi
 
   // Co AI přečetla, nahradí; co nepřečetla (null), zůstane, jak to člověk měl. Označení a odběratel jsou člověka.
   // Výjimky — uložené zůstane a rozdíl jde do upozornění (věty o zápisu a datu jsou první):
-  //   * zapsaná / propojená tržba: částka, měna a datum (ulozit_navrh by změnu odmítl až po zaplaceném čtení);
+  //   * zapsaná / propojená tržba: částka, měna a datum (ulozit_navrh by změnu odmítl až po zaplaceném čtení),
+  //     a taky číslo účtu a typ dokladu — tržba je zapsaná podle nich (kontrola v pokladně, duplicita),
+  //     tiché přepsání by je změnilo bez opravy tržby (ověření 20. 10.);
   //   * propojená faktura: částka (totéž);
   //   * uložený provozní den (člověk ho mohl opravit).
   const h = kontrola.hlavicka
@@ -249,6 +252,18 @@ export async function rozpoznat(_predchozi: StavAkce, formData: FormData): Promi
     mena = p.z.mena
     if (h.mena !== null && h.mena !== p.z.mena) upozorneni.push(`AI na dokladu přečetla měnu ${h.mena}, uložená je ${p.z.mena ?? 'neuvedená'} — ponechána uložená (${proc}).`)
   }
+  let typDokladu = h.typDokladu !== 'nezjisteno' ? h.typDokladu : p.z.typDokladu
+  let externiUcet = h.externiUcet ?? p.z.externiUcet
+  if (trzbaZapsana) {
+    typDokladu = p.z.typDokladu
+    externiUcet = p.z.externiUcet
+    if (h.externiUcet !== null && h.externiUcet !== p.z.externiUcet) {
+      upozorneni.push(`AI na dokladu přečetla číslo účtu ${h.externiUcet}, uložené je ${p.z.externiUcet ?? 'neuvedené'} — ponecháno uložené (${proc}).`)
+    }
+    if (h.typDokladu !== 'nezjisteno' && h.typDokladu !== p.z.typDokladu) {
+      upozorneni.push(`AI doklad přečetla jako „${popisTypuDokladu(h.typDokladu)}“, uložený typ je „${popisTypuDokladu(p.z.typDokladu)}“ — ponechán uložený (${proc}).`)
+    }
+  }
   // Datum: uložené (u zapsané tržby je vždy) má přednost před přečteným — stejné pravidlo pro tržbu i bez ní.
   let datumProdeje = h.datumProdeje ?? p.z.datumProdeje
   if (p.z.datumProdeje !== null && h.datumProdeje !== null && h.datumProdeje !== p.z.datumProdeje) {
@@ -266,8 +281,8 @@ export async function rozpoznat(_predchozi: StavAkce, formData: FormData): Promi
     mena,
     castkaHaleru,
     castkaPuvod,
-    typDokladu: h.typDokladu !== 'nezjisteno' ? h.typDokladu : p.z.typDokladu,
-    externiUcet: h.externiUcet ?? p.z.externiUcet,
+    typDokladu,
+    externiUcet,
     kontaktId: p.z.kontaktId,
     // I prázdné pole: nové čtení stará upozornění nahradí (bez klíče by databáze nechala stará).
     upozorneniDokladu: upozorneni,

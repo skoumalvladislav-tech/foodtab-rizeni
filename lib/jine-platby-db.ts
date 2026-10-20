@@ -22,7 +22,7 @@ import type {
 
 /** Sloupce záznamu pro `select(...)` — jeden seznam pro obrazovku i testy. */
 export const SLOUPCE_ZAZNAMU =
-  'id, tenant_id, branch_id, pripojeni_id, pos_provozovna, datum_prodeje, oznaceni, kontakt_id, mena, castka_haleru, castka_puvod, typ_dokladu, externi_ucet, pos_prodej_id, stav_kontroly, stav_trzby, stav_skladu, stav_faktury, faktura_cislo, faktura_zdroj, faktura_castka_haleru, stav_uhrady, uhrada_transakce_id, uhrada_castka_haleru, kontrola_trzby, kontrola_skladu, upozorneni_dokladu, rozpoznani_id, verze, vytvoril, vytvoreno, zmeneno'
+  'id, tenant_id, branch_id, pripojeni_id, pos_provozovna, datum_prodeje, oznaceni, kontakt_id, mena, castka_haleru, castka_puvod, typ_dokladu, externi_ucet, pos_prodej_id, stav_kontroly, stav_trzby, stav_skladu, stav_faktury, faktura_cislo, faktura_zdroj, faktura_castka_haleru, stav_uhrady, uhrada_transakce_id, uhrada_castka_haleru, kontrola_trzby, kontrola_skladu, pokladna_trzby, pokladna_skladu, upozorneni_dokladu, rozpoznani_id, verze, vytvoril, vytvoreno, zmeneno'
 
 export const SLOUPCE_POLOZKY =
   'id, poradi, nazev_puvodni, nazev, mnozstvi, jednotka, cena_jednotkova_haleru, cena_celkem_haleru, sazba_dph, jistota, zdroj, druh, pos_produkt_id, pos_produkt_nazev, pos_mnozstvi, mapovani, vyzaduje_kontrolu, duvod_kontroly'
@@ -72,6 +72,8 @@ export function zDbZaznam(r: Radek): ZaznamJinePlatby {
     uhradaCastkaHaleru: cislo(r.uhrada_castka_haleru),
     kontrolaTrzby: (r.kontrola_trzby as KontrolaPos<VysledekKontrolyTrzby> | null) ?? null,
     kontrolaSkladu: (r.kontrola_skladu as KontrolaPos<VysledekKontrolySkladu> | null) ?? null,
+    pokladnaTrzby: (r.pokladna_trzby as KontrolaPos<VysledekKontrolyTrzby> | null) ?? null,
+    pokladnaSkladu: (r.pokladna_skladu as KontrolaPos<VysledekKontrolySkladu> | null) ?? null,
     upozorneniDokladu: Array.isArray(r.upozorneni_dokladu) ? r.upozorneni_dokladu.filter((u): u is string => typeof u === 'string') : [],
     rozpoznaniId: text(r.rozpoznani_id),
     verze: cislo(r.verze) ?? 0,

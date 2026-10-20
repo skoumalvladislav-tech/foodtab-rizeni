@@ -186,6 +186,13 @@ create table public.jine_platby (
   vydej_doklad          text check (vydej_doklad is null or char_length(vydej_doklad) between 1 and 100),
   kontrola_trzby        jsonb,
   kontrola_skladu       jsonb,
+  -- Poslední výsledek DOTAZU DO POKLADNY (zdroj pos_api) zvlášť od poslední
+  -- kontroly: píše ho jen jine_platby_zapsat_kontrolu, ruční prohlášení ho
+  -- nikdy nepřepíše. Pojistka „ruční prohlášení nepřepíše pokladnu“ stojí na
+  -- něm — jinak by šel výsledek „vyprat“ ručním „je“ a potom „není“
+  -- (ověření 20. 10.).
+  pokladna_trzby        jsonb,
+  pokladna_skladu       jsonb,
   duplicita             jsonb,
   -- Upozornění AI k CELÉMU dokladu (nízká jistota, víc dokladů v jednom,
   -- zachycený pokyn v textu dokladu…). Dokud nějaké je, záznam je „ke
@@ -1579,11 +1586,14 @@ begin
   -- nebo druhý odpis. Platí BEZ OHLEDU NA VERZI: uložení návrhu verzi zvedne
   -- i bez změny a pojistka by jinak padla prvním uložením (kontrola 20. 10.).
   -- Výsledek pokladny nahradí jen novější kontrola v pokladně.
-  --   * „pravděpodobně“ (shoda jen částky): přepsat smí ten, kdo prohlašuje,
+  --   * „pravděpodobně“ ze shody jen částky: přepsat smí ten, kdo prohlašuje,
   --     s výslovným potvrzením p_prepsat_pokladnu (prodej v pokladně je jiný);
-  --   * „nalezeno“ (konkrétní účet) a „už odečteno“: jen s právem na opravy
+  --   * „nalezeno“, „pravděpodobně“ ze shody čísla účtu a „už odečteno“:
+  --     jen s právem na opravy
   --     a s výslovným potvrzením.
-  v_stara := case when p_druh = 'trzba' then v_z.kontrola_trzby else v_z.kontrola_skladu end;
+  --   Pojistka čte pokladna_* (ne kontrola_*): ruční prohlášení stejného
+  --   znění („je“, „už odečteno“) výsledek pokladny nevymaže.
+  v_stara := case when p_druh = 'trzba' then v_z.pokladna_trzby else v_z.pokladna_skladu end;
   v_prepis := v_stara ->> 'zdroj' = 'pos_api'
      and ((p_druh = 'trzba' and v_stara ->> 'vysledek' in ('nalezeno', 'pravdepodobne') and p_vysledek = 'nenalezeno')
           or (p_druh = 'sklad' and v_stara ->> 'vysledek' = 'jiz_odecteno' and p_vysledek = 'neodecteno'));
@@ -1592,7 +1602,11 @@ begin
       raise exception 'Pokladna při kontrole tohle našla (výsledek: %). Ruční prohlášení opačného znění to bez výslovného potvrzení nepřepíše — zopakujte kontrolu v pokladně, nebo potvrďte, že prodej v pokladně je jiný.',
         v_stara ->> 'vysledek' using errcode = 'check_violation';
     end if;
-    if v_stara ->> 'vysledek' <> 'pravdepodobne' and not app.has_access(v_z.tenant_id, 'jine_platby.oprava', v_z.branch_id) then
+    -- Bez práva na opravy jen „pravděpodobně“ ze shody SAMOTNÉ ČÁSTKY;
+    -- „pravděpodobně“ ze shody čísla účtu (víc účtů s tím číslem) je
+    -- konkrétní stopa jako „nalezeno“ (ověření 20. 10.).
+    if not (v_stara ->> 'vysledek' = 'pravdepodobne' and v_stara -> 'detail' ->> 'shoda' = 'castka')
+       and not app.has_access(v_z.tenant_id, 'jine_platby.oprava', v_z.branch_id) then
       raise exception 'Pokladna při kontrole tohle našla (výsledek: %) — konkrétní prodej nebo odpis přepsat smí jen člověk s právem na opravy.',
         v_stara ->> 'vysledek' using errcode = 'check_violation';
     end if;
@@ -2134,7 +2148,11 @@ begin
    where zaznam_id = v_z.id and druh = 'vydej' and stav in ('pripraveno', 'nepodporovano', 'odesila_se', 'nejasny_vysledek');
   update public.jine_platby_skladove_navrhy set stav = 'nahrazeno'
    where zaznam_id = v_z.id and stav in ('ceka_na_schvaleni', 'schvaleno');
-  update public.jine_platby set stav_skladu = 'bez_navrhu', zmeneno = now() where id = v_z.id;
+  -- Kontrola skladu z doby před (třeba nejasným) požadavkem přestává platit:
+  -- nové schválení chce čerstvou kontrolu v pokladně, která dohledá i klíč
+  -- zrušené operace (ověření 20. 10. — jinak šel výdej hned znovu schválit
+  -- a odešel druhý požadavek bez dohledání prvního).
+  update public.jine_platby set stav_skladu = 'bez_navrhu', kontrola_skladu = null, zmeneno = now() where id = v_z.id;
   perform app.jp_historie(v_z, 'schvaleni_zruseno', jsonb_build_object('duvod', v_duvod, 'byl', v_z.stav_skladu));
 end $$;
 
@@ -2685,9 +2703,9 @@ begin
   v_k := jsonb_build_object('vysledek', p_vysledek, 'zdroj', 'pos_api', 'verze', v_z.verze, 'kdy', now(), 'kdo', p_kdo,
                             'detail', coalesce(p_detail, '{}'::jsonb));
   if p_druh = 'trzba' then
-    update public.jine_platby set kontrola_trzby = v_k, zmeneno = now() where id = v_z.id;
+    update public.jine_platby set kontrola_trzby = v_k, pokladna_trzby = v_k, zmeneno = now() where id = v_z.id;
   else
-    update public.jine_platby set kontrola_skladu = v_k, zmeneno = now() where id = v_z.id;
+    update public.jine_platby set kontrola_skladu = v_k, pokladna_skladu = v_k, zmeneno = now() where id = v_z.id;
   end if;
   insert into public.jine_platby_historie (tenant_id, branch_id, zaznam_id, kdo, udalost, detail)
   values (v_z.tenant_id, v_z.branch_id, v_z.id, p_kdo, 'kontrola_pos_' || p_druh, jsonb_build_object('vysledek', p_vysledek));

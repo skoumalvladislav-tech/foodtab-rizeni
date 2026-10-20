@@ -189,6 +189,14 @@ export type ZaznamJinePlatby = {
   uhradaCastkaHaleru: number | null
   kontrolaTrzby: KontrolaPos<VysledekKontrolyTrzby> | null
   kontrolaSkladu: KontrolaPos<VysledekKontrolySkladu> | null
+  /**
+   * Poslední výsledek DOTAZU DO POKLADNY (zdroj vždy 'pos_api') — zvlášť od
+   * poslední kontroly, ruční prohlášení ho nepřepíše. Na něm stojí pojistka
+   * `prohlaseniProtiPokladne` (jinak by šel výsledek „vyprat“ ručním „je“
+   * a potom „není“, ověření 20. 10.).
+   */
+  pokladnaTrzby: KontrolaPos<VysledekKontrolyTrzby> | null
+  pokladnaSkladu: KontrolaPos<VysledekKontrolySkladu> | null
   /** Upozornění AI k celému dokladu (viz HlavickaNavrhu.upozorneniDokladu). */
   upozorneniDokladu: string[]
   /** Rozpoznání, ze kterého je uložený návrh (viz HlavickaNavrhu.rozpoznaniId). */

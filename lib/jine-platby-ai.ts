@@ -44,6 +44,8 @@ export type VysledekRozpoznani =
 type ChybaRozpoznani = Extract<VysledekRozpoznani, { stav: 'chyba' }>
 
 export const HLASKA_NEZBYVA_CAS = 'Na čtení nezbývá čas — zkuste to znovu.'
+/** Vypršel čas zkrácený termínem `konec` — další pokus dostane plný čas (ověření 20. 10.). */
+export const HLASKA_NESTIHLO = 'Čtení se nestihlo v čase, který zbýval — zkuste to znovu.'
 /**
  * Useknutá odpověď (`max_tokens`) i vypršený čas (timeout) znamenají totéž:
  * doklad se do jednoho čtení nevejde. Opakování by dopadlo stejně a každé
@@ -67,9 +69,10 @@ export function rozpoznavaniJeNastavene(): boolean {
  * Strop odpovědi (`max_tokens`) se odvodí z téhož času (`maxTokenu`, C8):
  * model dostane jen tolik tokenů, kolik za `limit` stihne napsat. Dlouhý
  * doklad tak skončí včas na `max_tokens` → `HLASKA_MOC_DLOUHY`. Když
- * přesto vyprší čas (`APIConnectionTimeoutError` — stejně u stropu 100 s
- * jako u limitu z `konec`, obojí je timeout klienta), je to taky
- * TRVALÁ chyba `HLASKA_MOC_DLOUHY`, ne „zkuste znovu".
+ * přesto vyprší čas (`APIConnectionTimeoutError`) při PLNÉM limitu, je to
+ * taky TRVALÁ chyba `HLASKA_MOC_DLOUHY`, ne „zkuste znovu". Když limit
+ * zkrátil termín `konec` (akce už část času spotřebovala), timeout je
+ * DOČASNÝ `HLASKA_NESTIHLO`: další pokus dostane plný čas (ověření 20. 10.).
  *
  * Volání je `messages.create` se strukturovaným výstupem a odpověď se
  * převádí TADY (N33): `messages.parse` v SDK 0.125 parsuje JSON dřív, než
@@ -91,6 +94,7 @@ export async function rozpoznatDoklad(
 
   const limit = casNaCteni(moznosti, Date.now())
   if (limit === null) return docasna(HLASKA_NEZBYVA_CAS)
+  const zkracenoTerminem = limit < (casNaCteni({ casovyLimitMs: moznosti.casovyLimitMs }, 0) ?? 0)
 
   // Žádné opakování uvnitř SDK: `timeout` platí pro každý pokus zvlášť, opakování by běh
   // přetáhlo přes strop serverové akce. Další pokus spustí člověk (započítá se do denního stropu).
@@ -108,6 +112,7 @@ export async function rozpoznatDoklad(
       messages: [{ role: 'user', content: sestavitObsah(p) }],
     })
   } catch (e) {
+    if (zkracenoTerminem && e instanceof Anthropic.APIConnectionTimeoutError) return docasna(HLASKA_NESTIHLO)
     return chyba(e)
   }
 
@@ -159,7 +164,7 @@ function chyba(e: unknown): ChybaRozpoznani {
   if (e instanceof Anthropic.RateLimitError) {
     return docasna('AI je právě přetížená (limit požadavků). Zkuste to za chvíli.')
   }
-  // Timeout (strop 100 s i limit z termínu `konec`): max_tokens je sladěný s časem,
+  // Timeout při plném limitu (zkrácený termínem řeší rozpoznatDoklad): max_tokens je sladěný s časem,
   // takže čtení, které se nestihlo, je na jeden průchod moc dlouhé — trvalá chyba (C8).
   // Musí stát PŘED APIConnectionError (timeout je jeho podtřída).
   if (e instanceof Anthropic.APIConnectionTimeoutError) {

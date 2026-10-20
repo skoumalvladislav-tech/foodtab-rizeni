@@ -51,7 +51,10 @@
 --      s fakturou počítá Jiné platby, sjetina bez „nenalezeno“ z pokladny,
 --      pokrm + kusové zboží s potvrzením, východ z nejasného výsledku po
 --      platnosti (i po změně katalogu), vazba návrhu na rozpoznání, další
---      spouště druhé linie a hláška odběratele cizí firmy.
+--      spouště druhé linie a hláška odběratele cizí firmy;
+--  15. druhé ověření 20. 10.: výsledek pokladny nejde vyprat ručním „je“,
+--      „pravděpodobně“ ze shody čísla účtu jen s právem na opravy, po
+--      zrušení nejasné operace stará kontrola skladu neplatí.
 --
 -- Navazuje na etapa0_scenar.sql (firma „Foodtab s.r.o.", pobočky
 -- cerna-perla a bernard-bar, majitel@foodtab.cz).
@@ -1678,6 +1681,66 @@ select pg_temp.check('uložení návrhu s odběratelem cizí firmy: hláška fun
     jsonb_build_object('datum_prodeje', '2026-03-30', 'oznaceni', 'Catering 2', 'mena', 'CZK', 'castka_haleru', 45000,
       'castka_puvod', 'doklad', 'typ_dokladu', 'rucni_spotreba', 'externi_ucet', null, 'kontakt_id', :'kontakt_cizi'), '[]'),
     '23514', 'Odběratel nepatří této firmě'));
+reset role;
+select set_config('test.user_id', '', false);
+
+-- ---------------------------------------------------------------------
+-- 15. Druhé ověření oprav (20. 10.)
+-- ---------------------------------------------------------------------
+reset role;
+select set_config('test.user_id', '', false);
+\echo ''
+\echo '== 15. Druhé ověření 20. 10. ======================================'
+
+-- 15a. Výsledek pokladny nejde „vyprat“ ručním prohlášením stejného znění.
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — účet 777', '98980000-aaaa-0000-0000-000000000016') as z20 \gset
+select public.jine_platby_ulozit_navrh(:'z20', 1,
+  jsonb_build_object('datum_prodeje', '2026-04-01', 'oznaceni', 'Účet 777', 'mena', 'CZK', 'castka_haleru', 77700,
+    'castka_puvod', 'doklad', 'typ_dokladu', 'uzavreny_prodej', 'externi_ucet', 'Účet 777', 'kontakt_id', null), '[]') as v20 \gset
+select public.jine_platby_oznacit_zkontrolovano(:'z20', :'v20');
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'z20', :'v20', 'trzba', 'nalezeno', '{"pos_prodej_id": "ORDER-777"}'::jsonb, null);
+select public.jine_platby_zapsat_kontrolu(:'z20', :'v20', 'sklad', 'jiz_odecteno', '{"pos_prodej_id": "ORDER-777"}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select public.jine_platby_prohlasit(:'z20', :'v20', 'trzba', 'nalezeno', 'Ano, je to ORDER-777.');
+select pg_temp.check('pokladna našla → ruční „je“ → ruční „není“ pořád neprojde (výsledek pokladny se nevypere)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_prohlasit(%L, %s, %L, %L, %L)', :'z20', :'v20', 'trzba', 'nenalezeno', 'Není tam.'),
+    '23514', 'Pokladna při kontrole tohle našla'));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_prohlasit(:'z20', :'v20', 'sklad', 'jiz_odecteno', 'Ano, pokladna odečetla.');
+select pg_temp.check('pokladna „už odečteno“ → ruční „už odečteno“ → ruční „neodečteno“ pořád neprojde',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_prohlasit(%L, %s, %L, %L, %L)', :'z20', :'v20', 'sklad', 'neodecteno', 'Nic neodečteno.'),
+    '23514', 'Pokladna při kontrole tohle našla'));
+reset role;
+select pg_temp.check('ruční prohlášení výsledek pokladny (sloupce pokladna_*) nepřepíše',
+  (select pokladna_trzby ->> 'zdroj' = 'pos_api' and pokladna_trzby ->> 'vysledek' = 'nalezeno'
+          and kontrola_trzby ->> 'zdroj' = 'rucni_prohlaseni'
+          and pokladna_skladu ->> 'vysledek' = 'jiz_odecteno' and kontrola_skladu ->> 'zdroj' = 'rucni_prohlaseni'
+     from public.jine_platby where id = :'z20'));
+
+-- 15b. „Pravděpodobně“ ze shody čísla účtu je konkrétní stopa jako „nalezeno“.
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'z20', :'v20', 'trzba', 'pravdepodobne', '{"shoda": "cislo_vice"}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select pg_temp.check('„pravděpodobně“ ze shody čísla účtu: ani s potvrzením nepřepíše, kdo nemá právo na opravy',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_prohlasit(%L, %s, %L, %L, %L, null, true)', :'z20', :'v20', 'trzba', 'nenalezeno', 'Jiný účet.'),
+    '23514', 'konkrétní prodej nebo odpis'));
+reset role;
+
+-- 15c. Zrušení schválení po nejasném výsledku: stará kontrola skladu přestane platit.
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_odeslat_sklad(:'z16', :'v16') as navrh16b \gset
+select otisk as otisk16b from public.jine_platby_skladove_navrhy where id = :'navrh16b' \gset
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select pg_temp.check('po zrušení nejasné operace nejde výdej hned znovu schválit (stará kontrola „neodečteno“ neplatí)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true, null, true)', :'navrh16b', :'otisk16b'),
+    '23514', 'zkontrolujte výdej v pokladně'));
 reset role;
 select set_config('test.user_id', '', false);
 
