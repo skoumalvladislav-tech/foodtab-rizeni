@@ -12,6 +12,11 @@ PR.
 > **Doplněno 20. 10.:** nezávislé ověření oprav našlo 11 neúplných oprav a 6
 > nových chyb, které opravy způsobily. Opravené jsou všechny — viz oddíl
 > **Ověření oprav (20. 10.)**. Čísla níž jsou po těchto opravách.
+>
+> **Doplněno 20. 10. odpoledne:** druhé ověření našlo v migraci tři střední
+> chyby. Po `db push` by šly opravit jen novou migrací, proto jsou opravené
+> v téže migraci ještě před sloučením. K tomu tři nízké — viz oddíl
+> **Druhé ověření (20. 10. odpoledne)**.
 
 ## Nejdřív to podstatné
 
@@ -84,18 +89,18 @@ telefon 375 px, telefon v tmavém režimu u panelu schválení).
 ## Čísla — a z čeho jsou
 
 - **Scénář krok98:**
-  - **209 kontrol**; celý řetěz scénářů ve stejném pořadí jako na CI **3 742 kontrol**, nic nespadlo;
-  - **složeně s PR #147** (main + #146 + #147, konflikty v `run.sh`, `databaze.yml`, `aplikace.yml` a `otazky.md` vyřešené ponecháním obou stran): **3 889 kontrol**, krok98 209 a krok99 147, nic nespadlo; nový hlídač pořadí migrací z main (#148) prošel;
+  - **214 kontrol**; celý řetěz scénářů ve stejném pořadí jako na CI **3 747 kontrol**, nic nespadlo;
+  - **složeně s PR #147** (main + #146 + #147, konflikty v `run.sh`, `databaze.yml`, `aplikace.yml` a `otazky.md` vyřešené ponecháním obou stran): **3 894 kontrol**, krok98 214 a krok99 147, nic nespadlo; hlídač pořadí migrací z main (#148) i test čísel otázek prošly;
   - běželo na **PGlite**, ne na PostgreSQL;
   - PGlite **neověří RLS ani sloupcové granty**. Rozhodne workflow „Migrace a scénáře“ na GitHubu, které běží po pushi a jehož výsledek je v PR.
 - **Node testy:** v seznamu CI je **89 sad, všech 89 prošlo**. Z toho Jiné platby:
 
   | sada | kontrol |
   |---|---|
-  | `jine-platby` | 545 (síť 49 280 kombinací stavů) |
-  | `jine-platby-detail` | 590 |
+  | `jine-platby` | 552 (síť 49 280 kombinací stavů) |
+  | `jine-platby-detail` | 598 |
   | `jine-platby-obrazovka` | 254 |
-  | `jine-platby-ai` | 199 |
+  | `jine-platby-ai` | 200 |
   | `jine-platby-pos-operace` | 73 |
   | `pokladna-dotykacka-sklad` | 168 |
   | `nabidka` | 225 |
@@ -105,10 +110,11 @@ telefon 375 px, telefon v tmavém režimu u panelu schválení).
   - `vydelky` napoprvé spadl. Nabídka nově načítá seznam práv Jiných plateb a test výdělků ho neuměl podstrčit. Opraveno, test teď načítá skutečný soubor.
 - `tsc` a `eslint` nad změněnými soubory jsou čisté.
 - **Schválná rozbití:**
-  - **Databáze, 121 rozbití.** Každé shodilo kontrolu (120 přesně tu, na kterou mířilo).
+  - **Databáze, 128 rozbití.** Každé shodilo kontrolu (126 přesně tu, na kterou mířilo).
+    - B124 (kontrola v pokladně nezapíše výsledek pokladny) spadlo na starší kontrole „pokladní ručním ‚není‘ nepřepíše ‚nalezeno‘ z pokladny“. Pojistka bez výsledku pokladny nemá o co se opřít, takže tohle je správné místo.
     - B48 (pokladna bez kontroly pobočky) spadlo na **dřívější a přísnější** kontrole „cizí firma nevidí katalog“. Stejné rozbití totiž otevře katalog i cizí firmě.
     - Pravidla, která jdou porušit dvěma způsoby, jsem rozbil oběma. Například rozdíl součtu: bez důvodu i s neomezenou tolerancí. Zrušení záznamu: zůstane ve frontě i drží doklad.
-  - **Aplikace:** po první kontrole 77 + 77 rozbití a 3 moje, po druhé 49 (detail) + 71 (knihovny a navigace), po ověření 70 (detail) + 38 (knihovny). Všechna spadla. Před první kontrolou 90 rozbití aplikace a 21 databáze.
+  - **Aplikace:** po první kontrole 77 + 77 rozbití a 3 moje, po druhé 49 (detail) + 71 (knihovny a navigace), po ověření 70 (detail) + 38 (knihovny), po druhém ověření 11. Všechna spadla. Před první kontrolou 90 rozbití aplikace a 21 databáze.
   - **Granty dvěma způsoby:** funkce jen pro server bez revoke od authenticated i s grantem authenticated — obě rozbití shodí kontrolu.
   - **Text migrace:** rozbití revoke u Ostatních tržeb (přihlášený by dostal zápis z výchozích práv Supabase) shodí 3 kontroly v `provoz-granty`; krok98 by tohle v čisté databázi nepoznal nikdy.
   - Rozbití odhalila tři slabé kontroly, které prošly i nad rozbitým kódem: dvakrát duplicity, kde shodu zakryla shoda „den + částka“, a jednu kontrolu, která spadla výjimkou místo výsledku. Všechny tři jsou opravené.
@@ -116,6 +122,7 @@ telefon 375 px, telefon v tmavém režimu u panelu schválení).
   - první (17. 10.): 49 nálezů, každý ověřil samostatný agent; 37 obstálo, 12 se vyvrátilo;
   - druhá (19. 10.): 34 nálezů, 33 platných (2 vysoké jako možné), 1 vyvrácený;
   - ověření oprav (20. 10.): 22 z 33 opraveno, 11 zčásti, 6 nových chyb z oprav (2 střední, 4 nízké) — vše opravené 20. 10.;
+  - druhé ověření (20. 10. odpoledne): 3 střední chyby v migraci a 5 nízkých — střední opravené všechny, z nízkých 3 (zbylé 2 níž v „Co zůstává“);
   - 2 nálezy opravené v databázi neměly kontrolu ve scénáři (přepočet úhrady, verze při změně odběratele), proto jsem je doplnil.
 
 ## Druhá kontrola (19. 10.)
@@ -168,6 +175,26 @@ Co zůstává jen zčásti:
 - **Pokrm a suroviny:** jen potvrzení, ne zákaz.
 - **Okno souběhu u čtení AI:** když kolega uloží úpravu během čtení, uložení čtení spadne až po zaplaceném volání (zbytkové riziko, kontrola ho přijala).
 - **Akce párování v modulu Faktury** (`platby/akce.ts`) směr platby nekontroluje; databáze dvojí úhradu zastaví, ale obrazovka to neřekne předem. Řeší PR #147.
+- **Po stornu tržby zůstává `pos_prodej_id`** a dodatečná kontrola propojené tržby podle něj nehledá (nízké, z druhého ověření). Ničemu to nevadí, dokud se storno nezapisuje znovu jako propojení. Oprava by šla až novou migrací.
+- **Úhrada Jiné platby** (nízké, z druhého ověření): `jine_platby_evidovat_uhradu` bere i ručně zadanou platbu jako „ověřeno v bance“ a storno platby po napárování stav úhrady nezmění. Peníze se tím nepřičtou dvakrát (hlídá to spoušť nad párováním), jen štítek „ověřeno“ může lhát. Patří k úhradám a Faktur DB, ne k tržbám, proto zůstává na samostatnou opravu.
+
+## Druhé ověření (20. 10. odpoledne)
+
+Druhé nezávislé ověření potvrdilo, že většina oprav drží. V migraci ale našlo tři střední chyby. Po `db push` by šly opravit už jen novou migrací, proto jsou opravené teď, v téže migraci:
+
+- **„Praní“ výsledku pokladny.** Pokladna účet našla (třeba ORDER-777). Někdo pak zapsal ruční „je tam“ a tím výsledek pokladny přepsal. Následné ruční „není tam“ už pojistka nepoznala, takže šla zapsat druhá tržba. U skladu to samé s „už odečteno“, kde hrozil druhý odpis.
+  - Výsledek pokladny je teď uložený zvlášť (`pokladna_trzby`, `pokladna_skladu`). Píše ho jen kontrola v pokladně, ruční prohlášení nikdy.
+  - Pojistka v databázi i na obrazovce čte jen tenhle uložený výsledek.
+  - Test: pokladna našla → ruční „je“ → ruční „není“ spadne s „Pokladna při kontrole tohle našla“. Pro sklad totéž.
+- **„Pravděpodobně“ ze shody čísla účtu.** Výsledek „pravděpodobně“ vzniká i tehdy, když v pokladně sedí číslo účtu, jen je účtů s tím číslem víc. To je konkrétní stopa, stejně silná jako „nalezeno“. Bez práva na opravy teď jde přepsat jen „pravděpodobně“ ze shody samotné částky. Platí to v databázi, v akci i na obrazovce.
+- **Zrušení schválení po nejasném výsledku** nechávalo platit starou kontrolu „neodečteno“. Výdej šel hned znovu schválit a odejít podruhé, aniž by se dohledalo, jak dopadl ten první. Zrušení teď starou kontrolu skladu zahodí a nové schválení chce čerstvou kontrolu v pokladně. Test: po zrušení nejasné operace odeslat a schválit → „zkontrolujte výdej v pokladně“.
+
+Z nízkých nálezů jsou opravené tři:
+- AI po zápisu tržby už tiše nepřepíše číslo účtu a typ dokladu. Zůstanou uložené hodnoty a rozdíl jde do upozornění k dokladu, stejně jako u částky, měny a data.
+- Když čas na čtení zkrátil konec akce, vypršení času je teď dočasná chyba („nestihlo se, zkuste znovu“). Při plném limitu zůstává trvalá „doklad je moc dlouhý“.
+- Test, který kontroluje zdroj, už nespadne na koncích řádků CRLF.
+
+Ověření: krok98 má 214 kontrol (o 5 víc). Databáze dostala 7 nových rozbití, aplikace 11, všechna spadla. Dvěma způsoby jsou rozbitá pravidlo shody (každé „pravděpodobně“ / každá uvedená shoda), zrušení schválení (nechá kontrolu skladu / vynuluje tržbu místo skladu) a praní (pojistka čte poslední kontrolu / ruční prohlášení píše do sloupce pokladny).
 
 ## Co čeká na Šéfíka
 

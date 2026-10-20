@@ -94,7 +94,8 @@ V části **Tržba (Ostatní tržby)**:
    - **Zapsat ruční prohlášení**: když se pokladna zeptat nedá, napište, jestli prodej v pokladně je, nebo není, a proč. Na obrazovce i v historii zůstane, že jde o ruční prohlášení, ne o ověření z pokladny.
    - Když pokladna prodej **našla**, ruční „není tam“ to nepřepíše — ani po úpravě a novém uložení záznamu. Zopakujte kontrolu v pokladně.
      - Když pokladna našla jen **stejnou částku** („pravděpodobně“) a víte, že jde o jiný účet, zaškrtněte „Prodej v pokladně je jiný, ověřil(a) jsem to“.
-     - Konkrétní účet (a u skladu „už odečteno“) přepíše jen člověk s právem na opravy, taky s výslovným potvrzením. V historii zůstane celý výsledek z pokladny.
+     - Konkrétní účet, shodu **čísla účtu** (i když je v pokladně účtů s tím číslem víc) a u skladu „už odečteno“ přepíše jen člověk s právem na opravy, taky s výslovným potvrzením. V historii zůstane celý výsledek z pokladny.
+     - Výsledek pokladny si appka pamatuje zvlášť. Ruční „je tam“ ho nesmaže, takže následné „není tam“ narazí na stejnou pojistku.
    - Kontrola platí 30 minut a jen pro tu podobu záznamu, kterou jste kontrolovali. Po úpravě ji zopakujte.
 2. Podle výsledku:
    - **Zapsat do Ostatních tržeb**: jen když je vyloučené, že prodej je v pokladně. Tržba se započítá.
@@ -145,7 +146,7 @@ Appka zatím do Dotykačky nezapisuje. Po schválení ukáže podklad:
 Dokud je výdej schválený nebo čeká na ruční odpis, **položky a množství nejde měnit** ani záznam zrušit. Kdyby se to dalo, mohl by vzniknout druhý odpis.
 - **Ručně doloženo** nejde, když v návrhu zůstala nevyřešená položka — ta by se neodečetla nikdy.
 - **Ručně doloženo** se váže na návrh, který máte otevřený. Když ho mezitím někdo vyměnil, appka doložení odmítne. Načtěte stránku a doložte to, co jste v pokladně opravdu odepsali.
-- Když jste v pokladně **nic neodepsali** (host odešel, chyba v návrhu), klikněte **Zrušit schválení** a napište důvod. Výdej se vrátí do stavu „bez návrhu“ a obsluha ho může opravit a poslat znovu. Zrušit schválení smí jen ten, kdo smí výdej potvrdit.
+- Když jste v pokladně **nic neodepsali** (host odešel, chyba v návrhu), klikněte **Zrušit schválení** a napište důvod. Výdej se vrátí do stavu „bez návrhu“ a obsluha ho může opravit a poslat znovu. Zrušit schválení smí jen ten, kdo smí výdej potvrdit. Starší kontrola v pokladně tím přestane platit: před novým schválením je potřeba výdej v pokladně zkontrolovat znovu.
 
 Pokrm se vydává **jako pokrm** a jeho suroviny se do výdeje nepřidávají —
 odečte je pokladna sama. Hlídá to schvalovatel (appka receptury nezná). Služby, spropitné a položky, které pokladna ze

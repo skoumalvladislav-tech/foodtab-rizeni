@@ -98,7 +98,8 @@ Nový konektor dodá svůj adaptér a obrazovka ani databáze se nemění.
 | Ruční doložení ne s nevyřešenou položkou (neodečetla by se nikdy) | `jine_platby_rucne_dolozit_vydej` |
 | Výdej jen s produkty z katalogu pokladny (id a název nejdou z prohlížeče) | blokace v `app.jp_sestavit_vydej`, `jine_platby_ulozit_mapovani` |
 | Kontrola ani výdej nepracují s provozovnou, kterou v Integracích přeřadili jiné pobočce | `app.jp_pokladna_obsluhuje` v sestavení výdeje a v `jine_platby_zapsat_kontrolu` |
-| Ruční prohlášení nepřepíše opačný výsledek z pokladny ani po novém uložení záznamu; „pravděpodobně“ s výslovným potvrzením, konkrétní prodej a „už odečteno“ jen s právem na opravy | `jine_platby_prohlasit` |
+| Ruční prohlášení nepřepíše opačný výsledek z pokladny ani po novém uložení záznamu, ani po ručním prohlášení stejného znění (výsledek pokladny je zvlášť v `pokladna_trzby` / `pokladna_skladu`, píše ho jen kontrola v pokladně); „pravděpodobně“ ze shody jen částky s výslovným potvrzením, konkrétní prodej, shoda čísla účtu a „už odečteno“ jen s právem na opravy | `jine_platby_prohlasit` |
+| Zrušení schválení (i po nejasném výsledku) zahodí starou kontrolu skladu; nové schválení chce čerstvou kontrolu v pokladně | `jine_platby_zrusit_schvaleni` |
 | „V pokladně není“ z dotazu jen u uzavřeného prodeje a ruční spotřeby (sjetina, otevřený účet a neurčený doklad nepřítomnost neprokážou) | `jine_platby_zapsat_kontrolu`, `logika.ts` |
 | Nejasný výsledek má po platnosti požadavku východ: ruční doložení nebo zrušení schválení po ověření v pokladně | `jine_platby_rucne_dolozit_vydej`, `jine_platby_zrusit_schvaleni` |
 | Pokrm a kusové zboží v jednom výdeji: varování a schválení jen s výslovným potvrzením (receptury appka nezná) | `varovani` z `jine_platby_sestavit_vydej`, `p_bez_surovin` |
