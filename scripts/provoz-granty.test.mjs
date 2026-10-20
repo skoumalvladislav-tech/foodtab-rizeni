@@ -428,5 +428,23 @@ for (const t of tabulkyJinychPlateb) {
   }
 }
 
+/* Funkce jen pro server (service_role): výchozí práva Supabase dávají
+   EXECUTE i roli authenticated, takže každá taková funkce musí mít revoke
+   i od authenticated — a nikde jinde jí ho nesmí zase přidat (kontrola
+   20. 10.). V čisté databázi z run.sh to krok98 neověří. */
+console.log('\n== Jiné platby: funkce jen pro server bez authenticated ==\n')
+
+const normalizovat = (t) => t.replace(/\s+/g, ' ').trim().toLowerCase()
+const jenServer = [...kodJinychPlateb.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+service_role\s*;/gi)].map((m) => normalizovat(m[1]))
+ok('migrace Jiných plateb má aspoň 7 funkcí jen pro server (jinak kontrola pod tím nic nehlídá)', jenServer.length >= 7)
+for (const f of jenServer) {
+  const revoke = [...kodJinychPlateb.matchAll(/revoke\s+(?:all|execute)\s+on\s+function\s+([^;]+?)\s+from\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && m[2].split(',').map((x) => x.trim().toLowerCase()).includes('authenticated'))
+  ok(`${f}: revoke i od authenticated`, revoke)
+  const grantPrihlasenym = [...kodJinychPlateb.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && m[2].split(',').map((x) => x.trim().toLowerCase()).some((x) => x === 'authenticated' || x === 'anon' || x === 'public'))
+  ok(`${f}: grant jen service_role, ne přihlášeným`, !grantPrihlasenym)
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)
