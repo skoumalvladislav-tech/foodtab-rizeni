@@ -6,6 +6,7 @@ import {
   type ModuleKey,
   type Permission,
 } from '@/lib/authz'
+import { PRAVA_CTENI_JINYCH_PLATEB } from '@/lib/jine-platby-typy'
 
 /**
  * Nabídka obrazovek.
@@ -95,8 +96,11 @@ export type Polozka = {
    * `null` znamená „stačí být členem firmy“. Je to pro obrazovky, které
    * dělá každý sám za sebe — docházku si zapisuje i brigádník, který
    * nemá právo vidět docházku ostatních.
+   *
+   * Seznam práv = stačí KTERÉKOLI z nich (Jiné platby: každé právo agendy
+   * pouští dovnitř, ale nikdo nemá všechna). Prázdný seznam nepustí nikoho.
    */
-  pravo: Permission | null
+  pravo: Permission | readonly Permission[] | null
   /** Hotové obrazovky se odkazují, ostatní se kreslí zašedle se štítkem. */
   hotovo: boolean
   ikona: IkonaKlic
@@ -234,6 +238,16 @@ export const NABIDKA: Polozka[] = [
   // „připravujeme", ostatní tři jako funkční registr/CSV/živý Fio.
   { segment: 'finance/integrace', nazev: 'Integrace', kratky: 'Integrace', modul: 'finance', pravo: 'finance.read', hotovo: true, ikona: 'kolo', jenFirma: true },
   { segment: 'finance/faktury', nazev: 'Faktury', kratky: 'Faktury', modul: 'finance', pravo: 'faktury.read', hotovo: true, ikona: 'kniha', jenFirma: true },
+  // Jiné platby (16. 10. 2026, docs/jine-platby-navrh.md): vchod pro každého,
+  // koho agenda pustí dovnitř — kterékoli právo agendy nebo finance.read
+  // (PRAVA_CTENI_JINYCH_PLATEB, stejné pravidlo jako zkusPristupJinymPlatbam
+  // a RLS app.jine_platby_vidi). Obsluha jen s `jine_platby.zadat`,
+  // schvalovatel jen s `jine_platby.vydej_pos` ani pokladní jen
+  // s `jine_platby.trzba` Tržby nevidí (chtějí finance.read) — bez téhle
+  // položky by se do agendy dostali jen přímým odkazem.
+  // Stojí NA KONCI Financí schválně: spodní lišta bere první čtyři položky
+  // modulu a těm, kdo Finance vidí celé, se tím nic neposune.
+  { segment: 'finance/trzby/jine-platby', nazev: 'Jiné platby', kratky: 'Jiné platby', modul: 'finance', pravo: PRAVA_CTENI_JINYCH_PLATEB, hotovo: true, ikona: 'faktura' },
   // MARKETING MÁ VÍC OBRAZOVEK NEŽ JEDNU.
   //
   // Do 14. 9. 2026 tu stála jediná položka a v levém sloupci proto nebylo
@@ -350,7 +364,10 @@ export const NAZVY_MODULU: Record<ModuleKey, string> = {
  */
 function smiVidet(ctx: Context, p: Polozka): boolean {
   if (!p.hotovo && !jeVedeni(ctx)) return false
-  return p.pravo === null || canSee(ctx, p.pravo)
+  if (p.pravo === null) return true
+  // Seznam: stačí kterékoli z práv (prázdný = nikdo).
+  const prava: readonly Permission[] = typeof p.pravo === 'string' ? [p.pravo] : p.pravo
+  return prava.some((pravo) => canSee(ctx, pravo))
 }
 
 /**
