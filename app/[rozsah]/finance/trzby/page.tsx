@@ -8,14 +8,15 @@ import { ZONA_VYCHOZI } from '@/lib/cas'
 import { provozniDen } from '@/lib/pokladna-cas'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { DotazSelhal } from '@/lib/supabase/dotaz'
+import { DotazSelhal, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
 import { dalsiObdobi, jenPobocka, pokladnaPatriPobocce, popisObdobi, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-trzby'
 import Sdeleni from '@/app/sdeleni'
+import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
-import Obsah, { karta, NAZVY_CLENENI } from './obsah'
+import Obsah, { karta, NAZVY_CLENENI, type RadekOstatniTrzby } from './obsah'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,8 +35,16 @@ export const dynamic = 'force-dynamic'
  *   * platby po způsobu pokrývají jen dny, kdy je pokladna poslala —
  *     stránka to napíše („platby za 12 z 31 dní"), nepředstírá celek;
  *   * banka bez napojeného účtu je „–" s vysvětlením, ne 0 Kč;
- *   * „Ostatní platby" jsou modul, který zatím neexistuje — karta to
- *     říká, žádné číslo si nevymýšlí.
+ *   * „Ostatní tržby" (16. 10. 2026) jsou tržby mimo pokladnu z agendy
+ *     Jiné platby (`ostatni_trzby`, jen `zapocitat = true` a platné,
+ *     jen v korunách — jiné měny zvlášť větou). Mají VLASTNÍ kartu a do
+ *     tržeb z pokladny se NIKDY nepřičítají: prodej, který už v pokladně
+ *     je, má v `ostatni_trzby` `zapocitat = false` (docs/jine-platby-navrh.md,
+ *     oddíl 2). Načítají se uživatelským klientem — RLS
+ *     `app.jine_platby_vidi` pustí jen pobočky, kde člověk záznamy vidí —
+ *     a PO STRÁNKÁCH (PostgREST vrátí nejvýš ~1000 řádků najednou; bez
+ *     stránek by se rok tiše usekl). Nad strop stránek karta ukáže chybu,
+ *     ne useknutý součet.
  *
  * Na pobočce (Šéfík 13. 10. 2026: „mám otevřený Bernard Bar, budou vidět
  * finance, které se týkají jen Bernard Baru") je provozovna dána
@@ -46,6 +55,11 @@ export const dynamic = 'force-dynamic'
  */
 
 const LET_ZPET = 9
+
+/** Ostatní tržby se čtou po stránkách — PostgREST vrátí nejvýš ~1000 řádků na dotaz. */
+const STRANKA_OSTATNICH = 1000
+/** Strop stránek (50 000 řádků). Víc = chyba karty, ne tichý ořez: useknutý součet by vypadal jako celý. */
+const MAX_STRAN_OSTATNICH = 50
 
 /**
  * PROVOZNÍ den (začíná v 05:00), ne kalendářní: tak je zapsaná tržba.
@@ -114,6 +128,7 @@ export default async function FinanceTrzby({
 
   const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
+  if (pristup.stav === 'pobocka_bez_firmy') return <SdeleniPobockyBezFirmy rozsah={rozsah} />
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Tržby vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
@@ -167,6 +182,42 @@ export default async function FinanceTrzby({
   }
   // Na pobočce dojdou do kreslení jen její řádky (tržby, platby, způsoby, banka).
   if (prehled !== null && pobockaRozsahu !== null) prehled = jenPobocka(prehled, pobockaRozsahu)
+
+  // Ostatní tržby (Jiné platby) za totéž období a rozsah. Které řádky se
+  // sčítají (zapocitat, platna) a že se měny nesčítají, rozhoduje JEDINÉ
+  // místo — `souhrnOstatnichTrzeb` v obsah.tsx. `null` = tabulka zatím
+  // v databázi není (migrace Jiných plateb nenasazená).
+  //
+  // Po stránkách se stálým řazením (`order('id')`), dokud chodí plné
+  // stránky. Strop stránek = chyba karty (`ostatniTrzbyChyba`), ne tiše
+  // useknutý součet.
+  const radkyOstatnich: RadekOstatniTrzby[] = []
+  let tabulkaOstatnichChybi = false
+  let ostatniTrzbyChyba: string | null = null
+  for (let strana = 0; ; strana++) {
+    if (strana === MAX_STRAN_OSTATNICH) {
+      ostatniTrzbyChyba = `Nejde sečíst — za období je víc než ${(MAX_STRAN_OSTATNICH * STRANKA_OSTATNICH).toLocaleString('cs-CZ')} záznamů`
+      break
+    }
+    let dotazOstatnich = supabase
+      .from('ostatni_trzby')
+      .select('branch_id, datum, castka_haleru, mena, zapocitat, stav')
+      .eq('tenant_id', tenantId)
+      .gte('datum', rozsahObdobi.od)
+      .lte('datum', rozsahObdobi.doData)
+    if (vybranaPobocka) dotazOstatnich = dotazOstatnich.eq('branch_id', vybranaPobocka)
+    const odRadku = strana * STRANKA_OSTATNICH
+    const ostatniRes = await dotazOstatnich.order('id').range(odRadku, odRadku + STRANKA_OSTATNICH - 1)
+    if (ostatniRes.error) {
+      if (!tabulkaNeexistuje(ostatniRes.error)) throw new DotazSelhal('ostatní tržby', ostatniRes.error)
+      tabulkaOstatnichChybi = true
+      break
+    }
+    const cast = (ostatniRes.data ?? []) as RadekOstatniTrzby[]
+    radkyOstatnich.push(...cast)
+    if (cast.length < STRANKA_OSTATNICH) break
+  }
+  const ostatniTrzby: RadekOstatniTrzby[] | null = tabulkaOstatnichChybi ? null : radkyOstatnich
 
   const zaklad = `/${rozsah}/finance/trzby`
   // Integrace (pokladny, prodeje po produktech) patří celé firmě — z pobočky rovnou tam.
@@ -269,6 +320,9 @@ export default async function FinanceTrzby({
             zakladIntegraci={zakladIntegraci}
             odkazNaObdobi={(o) => (cleneni === 'rok' ? odkaz({ po: 'mesic', obdobi: o.slice(0, 4) }) : cleneni === 'mesic' ? odkaz({ po: 'den', obdobi: o.slice(0, 7) }) : null)}
             odkazNaPobocku={(id) => odkaz({ pobocka: id })}
+            ostatniTrzby={ostatniTrzby}
+            ostatniTrzbyChyba={ostatniTrzbyChyba}
+            zakladJinychPlateb={`/${rozsah}/finance/trzby/jine-platby`}
           />
         )}
       </div>

@@ -42,6 +42,13 @@
  *     a `total` je částka v hlavní měně (vedle je `rawTotal`). Ověří se
  *     prvním živým porovnáním s uzávěrkou (hotovost/karta).
  *
+ * JINÉ PLATBY (16. 10. 2026, dokumentace verze API 2026.38.2): relace
+ * navíc umí katalog produktů, účty provozovny a účet podle externího klíče
+ * — `lib/pokladna-dotykacka-sklad.ts` (`cteniDotykacky`), tam jsou i odkazy
+ * na stránky dokumentace. Napsané podle dokumentace, ŽIVĚ NEOVĚŘENÉ.
+ * Skladový výdej přes POS akci je napsaný, ale k relaci NEPŘIPOJENÝ
+ * (`skladovyVydej: 'rucne'`, viz schopnosti níž).
+ *
  * Bez `server-only` schválně: síťové volání jde podstrčit (`vytvoritDotykacku(fetchFn)`),
  * takže `scripts/pokladna-dotykacka.test.mjs` ověří tvar požadavků
  * i výklad odpovědí bez sítě. Žádné tajemství z prostředí tu není —
@@ -51,6 +58,7 @@
 import { createHmac } from 'node:crypto'
 
 import type { ChybaPos, DruhPlatby, PosProvider, ProvozovnaPos, RadekPlatby, RadekProdeje, RelacePos, UdajePos } from './pos-provider-contract.ts'
+import { cteniDotykacky, type KontextDotykacky } from './pokladna-dotykacka-sklad.ts'
 
 export const API_DOTYKACKA = 'https://api.dotykacka.cz/v2'
 export const CONNECTOR_DOTYKACKA = 'https://admin.dotykacka.cz/client/connect/v2'
@@ -276,10 +284,10 @@ function chybaZeStavu(status: number, coDelam: string, telo: unknown = null): Ch
 }
 
 /** Jedno volání: buď stav a rozparsované tělo (null, když to není JSON), nebo chyba sítě. Text odpovědi do hlášek nejde. */
-async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit): Promise<{ status: number; telo: unknown } | ChybaPos> {
+async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit, casovyLimitMs: number = CASOVY_LIMIT_MS): Promise<{ status: number; telo: unknown } | ChybaPos> {
   let odpoved: Response
   try {
-    odpoved = await fetchFn(url, { ...init, signal: AbortSignal.timeout(CASOVY_LIMIT_MS) })
+    odpoved = await fetchFn(url, { ...init, signal: AbortSignal.timeout(casovyLimitMs) })
   } catch (e) {
     const proc = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'vypršel čas' : 'spojení selhalo'
     return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka neodpověděla (${proc}) — appka to zkusí příště.` }
@@ -301,6 +309,21 @@ function jeChyba(x: { status: number; telo: unknown } | ChybaPos): x is ChybaPos
   return 'stav' in x
 }
 
+/**
+ * Přihlášená relace pro Jiné platby (`lib/pokladna-dotykacka-sklad.ts`) —
+ * stejné volání i výklad chyb jako u tržeb. Staví ho `otevrit()` níž;
+ * exportované jen kvůli testu nepřipojeného výdeje (`odeslatVydejDotykacka`).
+ */
+export function kontextDotykacky(fetchFn: Fetch, cloudId: string, accessToken: string): KontextDotykacky {
+  return {
+    api: API_DOTYKACKA,
+    cloudId,
+    hlavicky: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    pozadavek: (url, init, casovyLimitMs) => pozadavek(fetchFn, url, init, casovyLimitMs),
+    chybaZeStavu,
+  }
+}
+
 export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, init)): PosProvider {
   return {
     klic: 'dotykacka',
@@ -310,7 +333,16 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
       webhooky: false,
       historieDnu: null,
       platebniMetody: true,
+      // ČTENÍ skladových pohybů appka z Dotykačky nebere.
       poskytujeSkladovePohyby: false,
+      // Katalog a účty podle dokumentace (2026.38.2), ŽIVĚ NEOVĚŘENO — lib/pokladna-dotykacka-sklad.ts.
+      katalog: true,
+      dohledaniUctu: true,
+      // Výdej přes POS akci (`odeslatVydejDotykacka`) je napsaný, ale NEPŘIPOJENÝ:
+      // připojí se až po ověření na testovacím cloudu Dotykačky a výslovném
+      // pokynu Šéfíka. Co přesně ověřit a jak ho připojit, je v komentáři
+      // u `odeslatVydejDotykacka`. Do té doby výdej dělá člověk v pokladně.
+      skladovyVydej: 'rucne',
     },
 
     async otevrit(udaje: UdajePos) {
@@ -379,6 +411,9 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
           const { platby, necitelne } = naparsovatPlatby(odpoved.telo)
           return { stav: 'ok', ...report, platby, ...(necitelne ? { platbyNecitelne: true } : {}) }
         },
+
+        // Jiné platby: jen čtení (katalog, účty, účet podle klíče). Zápis do skladu tu schválně není.
+        ...cteniDotykacky(kontextDotykacky(fetchFn, cloudId, accessToken)),
       }
 
       return { stav: 'ok', relace }

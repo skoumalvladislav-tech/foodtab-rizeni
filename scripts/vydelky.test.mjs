@@ -710,7 +710,11 @@ const AUTHZ_NABIDKA = js(
     'export const isModuleActive = () => true\n' +
     'export const jeVedeni = () => true\n',
 )
-const nabidka = await nactiModul('app/[rozsah]/nabidka.ts', [['@/lib/authz', AUTHZ_NABIDKA]])
+// Seznam práv Jiných plateb je čistá konstanta bez importů — skutečný soubor.
+const nabidka = await nactiModul('app/[rozsah]/nabidka.ts', [
+  ['@/lib/authz', AUTHZ_NABIDKA],
+  ['@/lib/jine-platby-typy', new URL('lib/jine-platby-typy.ts', KOREN).href],
+])
 
 console.log('\n== Nabídka ==')
 ma('položka zalohy v nabídce NENÍ', nabidka.NABIDKA.some((p) => p.segment === 'zalohy' || p.segment.startsWith('zalohy/')), false)

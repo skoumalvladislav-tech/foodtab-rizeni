@@ -48,8 +48,12 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
 import { SEGMENT_FIRMY, aktivniKlic, sestavNavigaci } from '../lib/finance-navigace.ts'
 import { POZNAMKA_FIREMNI, pobockaFinanci } from '../lib/finance-rozsah.ts'
+import { PRAVA_CTENI_JINYCH_PLATEB } from '../lib/jine-platby-typy.ts'
 import { cilPrepnutiRozsahu, polozkaNaCeste, vychoziObrazovka } from '../lib/vychozi-obrazovka.ts'
 import { nactiModul } from './vykreslit.mjs'
 
@@ -83,12 +87,12 @@ const JEN_FIRMA_KLICE = ['faktury', 'integrace', 'kontakty']
   const klice = (n) => n.hlavni.map((p) => p.klic)
   const chybiNaPobocce = klice(firma).filter((k) => !klice(pobocka).includes(k)).sort()
 
-  ok('na firmě všech jedenáct položek, i Kontakty, Integrace a Faktury',
-    firma.hlavni.length === 11 && JEN_FIRMA_KLICE.every((k) => klice(firma).includes(k)))
+  ok('na firmě všech dvanáct položek, i Kontakty, Integrace, Faktury a Jiné platby',
+    firma.hlavni.length === 12 && JEN_FIRMA_KLICE.every((k) => klice(firma).includes(k)) && klice(firma).includes('jine_platby'))
   ok(`na pobočce chybí PŘESNĚ Kontakty, Integrace a Faktury (chybí: ${chybiNaPobocce.join(', ') || 'nic'})`,
     JSON.stringify(chybiNaPobocce) === JSON.stringify(JEN_FIRMA_KLICE))
-  ok('na pobočce zůstává Přehled, Tržby, Cashflow, Platby, Nákup, Zakázky, Rozpočty i Vybavení',
-    ['prehled', 'trzby', 'cashflow', 'platby', 'nakup', 'zakazky', 'rozpocty', 'vybaveni'].every((k) => klice(pobocka).includes(k)))
+  ok('na pobočce zůstává Přehled, Tržby, Jiné platby, Cashflow, Platby, Nákup, Zakázky, Rozpočty i Vybavení',
+    ['prehled', 'trzby', 'jine_platby', 'cashflow', 'platby', 'nakup', 'zakazky', 'rozpocty', 'vybaveni'].every((k) => klice(pobocka).includes(k)))
   ok('odkazy pobočky vedou do jejího rozsahu',
     pobocka.hlavni.every((p) => p.href === '/bernard-bar/finance' || p.href.startsWith('/bernard-bar/finance/')))
   ok('mobilní lišta = táž sada (na pobočce bez Faktur)',
@@ -97,6 +101,61 @@ const JEN_FIRMA_KLICE = ['faktury', 'integrace', 'kontakty']
     !klice(sestavNavigaci('firma-2')).includes('faktury'))
   ok('aktivní položka na pobočce: nejdelší shoda (Cashflow, ne Přehled)',
     aktivniKlic('/bernard-bar/finance/cashflow', pobocka.hlavni) === 'cashflow')
+}
+
+console.log('\n== Navigace Financí podle práv (N24): obsluha bez finance.read vidí jen, kam smí ==')
+
+{
+  const klice = (n) => n.hlavni.map((p) => p.klic)
+  const obsluha = sestavNavigaci('bernard-bar', ['jine_platby.zadat'])
+  ok(`jen jine_platby.zadat → jen Jiné platby (${klice(obsluha).join(', ')})`, JSON.stringify(klice(obsluha)) === '["jine_platby"]')
+  ok('… i na spodní liště telefonu', JSON.stringify(obsluha.mobil.map((p) => p.klic)) === '["jine_platby"]')
+  ok('… a odkaz vede do agendy pobočky', obsluha.hlavni[0]?.href === '/bernard-bar/finance/trzby/jine-platby')
+  ok('každé samotné právo agendy (i finance.read) ukáže Jiné platby',
+    PRAVA_CTENI_JINYCH_PLATEB.every((p) => klice(sestavNavigaci('bernard-bar', [p])).includes('jine_platby')))
+  ok('jine_platby.vydej_pos za celou firmu → jen Jiné platby (žádné Faktury, Kontakty ani Přehled)',
+    JSON.stringify(klice(sestavNavigaci('firma', ['jine_platby.vydej_pos']))) === '["jine_platby"]')
+  const prehled = sestavNavigaci('bernard-bar', ['finance.read'])
+  ok(`finance.read na pobočce → finanční obrazovky pobočky bez Nákupu (${klice(prehled).join(', ')})`,
+    JSON.stringify(klice(prehled)) === JSON.stringify(['prehled', 'trzby', 'jine_platby', 'cashflow', 'platby', 'zakazky', 'rozpocty', 'vybaveni']))
+  ok('Nákup jen s purchasing.read, Faktury jen s faktury.read (a jen na firmě)',
+    klice(sestavNavigaci('bernard-bar', ['purchasing.read'])).join() === 'nakup' &&
+      klice(sestavNavigaci('firma', ['faktury.read'])).join() === 'faktury' && klice(sestavNavigaci('bernard-bar', ['faktury.read'])).length === 0)
+  ok('vše na firmě = všech dvanáct jako bez práv', klice(sestavNavigaci('firma', ['finance.read', 'purchasing.read', 'faktury.read'])).join() === klice(sestavNavigaci('firma')).join())
+  ok('žádné právo → prázdná navigace (bez práv = null/undefined kreslí všechno)', sestavNavigaci('bernard-bar', []).hlavni.length === 0 && sestavNavigaci('bernard-bar', null).hlavni.length === 9)
+  const plna = sestavNavigaci('bernard-bar').hlavni
+  ok('na seznamu agendy svítí Jiné platby, ne Tržby', aktivniKlic('/bernard-bar/finance/trzby/jine-platby', plna) === 'jine_platby')
+  ok('… i na novém záznamu a detailu', aktivniKlic('/bernard-bar/finance/trzby/jine-platby/novy', plna) === 'jine_platby' && aktivniKlic('/bernard-bar/finance/trzby/jine-platby/abc', plna) === 'jine_platby')
+  ok('na Tržbách svítí Tržby', aktivniKlic('/bernard-bar/finance/trzby', plna) === 'trzby')
+  ok('obsluha (jen Jiné platby) na novém záznamu: aktivní Jiné platby', aktivniKlic('/bernard-bar/finance/trzby/jine-platby/novy', obsluha.hlavni) === 'jine_platby')
+
+  // Skutečná komponenta navigace (app/[rozsah]/finance/navigace.tsx) — co se opravdu vykreslí.
+  const ODKAZ = js(
+    `import { createElement } from ${JSON.stringify(import.meta.resolve('react'))}\n` +
+      'export default function Link({ href, children, ...z }) { return createElement("a", { href, ...z }, children) }\n',
+  )
+  const Navigace = (
+    await nactiModul('app/[rozsah]/finance/navigace.tsx', [
+      ['next/link', ODKAZ],
+      ['next/navigation', js('export function usePathname() { return globalThis.__navCesta }\n')],
+      ['@/components/shell/Odhlaseni', js('export default function Odhlaseni() { return null }\n')],
+    ])
+  ).default
+  const vykreslit = (cesta, prava) => {
+    globalThis.__navCesta = cesta
+    return renderToStaticMarkup(createElement(Navigace, { rozsah: 'bernard-bar', prava }, 'obsah'))
+  }
+  const odkazy = (html) => [...html.matchAll(/<a href="([^"]+)"([^>]*)>/g)].map((m) => ({ href: m[1], aktivni: /aria-current="page"/.test(m[2]) }))
+  const hObsluha = vykreslit('/bernard-bar/finance/trzby/jine-platby/novy', ['jine_platby.zadat'])
+  const oObsluha = odkazy(hObsluha)
+  ok(`vykreslená navigace obsluhy: jen odkazy na Jiné platby (sloupec + lišta), oba aktivní (${oObsluha.map((o) => o.href).join(', ')})`,
+    oObsluha.length === 2 && oObsluha.every((o) => o.href === '/bernard-bar/finance/trzby/jine-platby' && o.aktivni))
+  ok('… bez Tržeb, Přehledu a Plateb', !/Tržby|Přehled|Platby/.test(hObsluha) && hObsluha.includes('Jiné platby'))
+  ok('… ikona Jiných plateb ze sdílené sady (svg ft-i s mřížkou 20×20)', /<svg class="ft-i" viewBox="0 0 20 20"/.test(hObsluha))
+  const oPlna = odkazy(vykreslit('/bernard-bar/finance/trzby/jine-platby', undefined))
+  const aktivni = oPlna.filter((o) => o.aktivni).map((o) => o.href)
+  ok(`bez práv (ostatní obrazovky): všechny položky a aktivní jen Jiné platby (${aktivni.join(', ')})`,
+    oPlna.length === 18 && aktivni.length === 2 && aktivni.every((h) => h === '/bernard-bar/finance/trzby/jine-platby'))
 }
 
 console.log('\n== Segment firmy: navigace a authz říkají totéž ==')
@@ -306,6 +365,21 @@ function odmitaPobockuHned(s) {
   return Boolean(m) && (m[0].match(/await /g) ?? []).length === 1
 }
 
+/**
+ * Stránka Jiných plateb: vstupní kontrola `zkusPristupJinymPlatbam` stojí
+ * na začátku — před ní nic nesahá do databáze (žádné `getServerSupabase(`,
+ * `.from(`, `.rpc(`) a z `await` jsou tam jen parametry a firma. Stejný
+ * důvod jako u `odmitaPobockuHned`: Next stránku vyrenderuje i tam, kde ji
+ * layout nevloží.
+ */
+function jinePlatbyHned(s) {
+  const telo = s.match(/export default async function \w+\([\s\S]*?\n {2}const pristup = await zkusPristupJinymPlatbam\(tenantId, rozsah\)\n/)?.[0]
+  if (!telo) return false
+  const awaity = [...telo.matchAll(/await ([\w.]+)/g)].map((m) => m[1])
+  return awaity.every((a) => ['params', 'searchParams', 'getCurrentTenantId', 'zkusPristupJinymPlatbam'].includes(a)) &&
+    !/getServerSupabase\(|\.from\(|\.rpc\(/.test(telo)
+}
+
 const fakturyLayout = zdroj(`${KOREN_FINANCI}/faktury/layout.tsx`)
 const fakturyBrana = /if \(scope\.level !== 'tenant'\) \{\s*return \(\s*<Sdeleni nadpis="Faktury patří celé firmě">/.test(fakturyLayout)
 ok('Faktury: vlastní brána celé firmy ve faktury/layout.tsx', fakturyBrana)
@@ -313,7 +387,7 @@ ok('Faktury: vlastní brána celé firmy ve faktury/layout.tsx', fakturyBrana)
 const stranky = soubory(KOREN_FINANCI, /^page\.tsx$/)
 ok(`stránek Financí se našlo dost (${stranky.length})`, stranky.length >= 25)
 
-const tvary = { pobockova: 0, jenProFirmu: 0, faktury: 0 }
+const tvary = { pobockova: 0, jenProFirmu: 0, faktury: 0, jinePlatby: 0, branaFinanci: 0, branaNakupu: 0 }
 for (const soubor of stranky) {
   const s = zdroj(soubor)
   const kratce = soubor.slice(KOREN_FINANCI.length + 1)
@@ -326,19 +400,109 @@ for (const soubor of stranky) {
     tvary.faktury++
     // Brána Faktur je layout — stránku nezastaví (viz výš), proto ještě vlastní odmítnutí.
     ok(`${kratce}: pod bránou Faktur a pobočku odmítá prvním řádkem`, fakturyBrana && odmitaPobockuHned(s))
+  } else if (soubor.startsWith(`${KOREN_FINANCI}/trzby/jine-platby/`)) {
+    /*
+      VÝJIMKA S DŮVODEM — Jiné platby (docs/jine-platby-navrh.md, oddíl 6).
+      Agendu používá i OBSLUHA bez finance.read: vyfotí doklad a založí
+      záznam (jine_platby.zadat), finanční přehled vidět nemá a mít nemá.
+      zkusPristupFinanci by ji odmítl (chce finance.read, na pobočce dokonce
+      za celou firmu). Vstup je proto vlastní — lib/jine-platby-pristup.ts:
+      kterékoli právo agendy NA POBOČCE ROZSAHU, stejné pravidlo jako RLS
+      (app.jine_platby_vidi). Pobočka se bere z rozsahu jako všude jinde
+      a kontrola musí stát na začátku. Mimo tenhle adresář výjimka neplatí.
+    */
+    tvary.jinePlatby++
+    ok(`${kratce}: bere pobočku z rozsahu (pobockaFinanci)`, /pobockaFinanci\(/.test(s))
+    ok(`${kratce}: vstup přes zkusPristupJinymPlatbam (i obsluha bez finance.read), dřív než cokoli načte`, jinePlatbyHned(s))
+    ok(`${kratce}: nepřihlášený i odmítnutý se odbaví hned`,
+      /if \(pristup\.stav === 'neprihlasen'\) redirect\(/.test(s) && /if \(pristup\.stav === 'odepren'\)/.test(s))
+    ok(`${kratce}: a ne přes holý zkusPristup ani zkusPristupFinanci`, !/\bzkusPristup(?:Financi)?\(/.test(s))
+    // N23: agenda má vlastní vstup — hláška „jen s přehledem celé firmy" sem nepatří.
+    ok(`${kratce}: hlášku o celé firmě nedostane (žádné SdeleniPobockyBezFirmy ani pobocka_bez_firmy)`,
+      !/SdeleniPobockyBezFirmy|pobocka_bez_firmy|pobockaBezPrehleduFirmy/.test(s))
   } else {
     tvary.pobockova++
     ok(`${kratce}: bere pobočku z rozsahu (pobockaFinanci)`, /pobockaFinanci\(/.test(s))
     // Druhá podmínka pobočky (finance.read za celou firmu) jen přes zkusPristupFinanci —
-    // layout stránku nezastaví. Nákup má právo purchasing.* (modul Objednávky), ne finance.
+    // layout stránku nezastaví ani nerozhoduje (N23). Nákup má právo purchasing.* (modul Objednávky), ne finance.
     if (!soubor.startsWith(`${KOREN_FINANCI}/nakup/`)) {
+      tvary.branaFinanci++
       ok(`${kratce}: vstup přes zkusPristupFinanci, ne holý zkusPristup`,
         /zkusPristupFinanci\(tenantId, 'finance\.(read|manage)', rozsah\)/.test(s) && !/\bzkusPristup\(tenantId, 'finance\./.test(s))
+      // N23: případ „finance.read jen na pobočce" stránka vyřeší SAMA, hned za vstupem — ne layout.
+      ok(`${kratce}: hned za vstupem pobocka_bez_firmy → SdeleniPobockyBezFirmy (bez ohledu na to, odkud člověk přišel)`,
+        /const pristup = await zkusPristupFinanci\(tenantId, 'finance\.(?:read|manage)', rozsah\)\n\s*if \(pristup\.stav === 'neprihlasen'\) redirect\(await odkazNaPrihlaseni\(\)\)\n\s*if \(pristup\.stav === 'pobocka_bez_firmy'\) return <SdeleniPobockyBezFirmy rozsah=\{rozsah\} \/>\n/.test(s))
+    } else {
+      tvary.branaNakupu++
+      const iBrana = s.indexOf('if (await pobockaBezPrehleduFirmy(tenantId, pristup)) return <SdeleniPobockyBezFirmy rozsah={rozsah} />')
+      const iData = s.search(/getServerSupabase\(|\.from\(|\.rpc\(/)
+      ok(`${kratce}: Nákup — pobockaBezPrehleduFirmy hned za vstupem, dřív než cokoli načte`,
+        iBrana > s.indexOf("zkusPristup(tenantId, 'purchasing.read', rozsah)") && iBrana > 0 && (iData < 0 || iBrana < iData))
     }
   }
 }
-ok(`všechny tři tvary se opravdu vyskytly (pobočkové ${tvary.pobockova}, jen pro firmu ${tvary.jenProFirmu}, Faktury ${tvary.faktury})`,
-  tvary.pobockova >= 8 && tvary.jenProFirmu >= 9 && tvary.faktury >= 8)
+ok(`brána pobočky na každé pobočkové stránce Financí (zkusPristupFinanci ${tvary.branaFinanci}, Nákup ${tvary.branaNakupu})`,
+  tvary.branaFinanci >= 8 && tvary.branaNakupu === 2)
+
+console.log('\n== Rám Financí (finance/layout.tsx) nerozhoduje — ani podle adresy, ani podle práv (N23) ==')
+{
+  const l = zdroj(`${KOREN_FINANCI}/layout.tsx`)
+  ok('layout vrací vždy jen {children}',
+    /export default function FinanceLayout\(\{ children \}: \{ children: ReactNode \}\) \{\s*return <>\{children\}<\/>\s*\}/.test(l) && (l.match(/return /g) ?? []).length === 1)
+  ok('layout nečte adresu (headers, x-foodtab-adresa) ani práva (hasAccess, getContext, canSee)',
+    !/headers\(|x-foodtab-adresa|hasAccess|getContext|canSee|zkusPristup/.test(l))
+  ok('layout nekreslí hlášku (Sdeleni) ani nic jiného', !/Sdeleni|<div|<section/.test(l) && !/async /.test(l))
+  const h = zdroj(`${KOREN_FINANCI}/pobocka-bez-firmy.tsx`)
+  ok('hláška „Finance pobočky zatím jen s přehledem celé firmy" je jedna sdílená komponenta s odkazem na Jiné platby pobočky',
+    /nadpis="Finance pobočky zatím jen s přehledem celé firmy"/.test(h) && /href=\{`\/\$\{rozsah\}\/finance\/trzby\/jine-platby`\}/.test(h))
+  const vsude = stranky.filter((f) => /Finance pobočky zatím jen s přehledem celé firmy/.test(zdroj(f)))
+  ok(`žádná stránka si hlášku nepíše sama (jen přes komponentu)${vsude.length ? ' — ' + vsude.join(', ') : ''}`, vsude.length === 0)
+}
+
+console.log('\n== zkusPristupFinanci a pobockaBezPrehleduFirmy (lib/finance-pristup.ts) se SPOUŠTĚJÍ ==')
+{
+  const AUTHZ = js(
+    'export async function hasAccess(t, pravo, pobocka) { globalThis.__fpVolani.push([pravo, pobocka]); return globalThis.__fpPrava.some(([p, b]) => p === pravo && b === pobocka) }\n' +
+      'export function canSee(ctx, p) { return ctx.permissions.includes(p) }\n' +
+      'export function isModuleActive(ctx, m) { return ctx.modules.some((x) => x.key === m && x.active) }\n',
+  )
+  const FIRMA = js('export async function zkusPristup() { return globalThis.__fpPristup }\n')
+  const fp = await nactiModul('lib/finance-pristup.ts', [
+    ['server-only', js('')],
+    ['@/lib/authz', AUTHZ],
+    ['@/lib/firma', FIRMA],
+  ])
+  const ctx = (permissions, financeAktivni = true) => ({ permissions, modules: [{ key: 'finance', active: financeAktivni }] })
+  const POB = { level: 'branch', branchId: 'b1' }
+  const FIRMA_S = { level: 'tenant', branchId: null }
+  const zkus = async (pristup, prava) => {
+    globalThis.__fpPristup = pristup
+    globalThis.__fpPrava = prava
+    globalThis.__fpVolani = []
+    return { v: await fp.zkusPristupFinanci('t1', 'finance.read', 'bernard-bar'), volani: globalThis.__fpVolani }
+  }
+  const jenPobocka = await zkus({ stav: 'ok', ctx: ctx(['finance.read']), scope: POB }, [['finance.read', 'b1']])
+  ok('finance.read jen na pobočce, rozsah pobočky → pobocka_bez_firmy (ptá se za celou firmu)',
+    jenPobocka.v.stav === 'pobocka_bez_firmy' && jenPobocka.volani.some(([p, b]) => p === 'finance.read' && b === null))
+  ok('finance.read za celou firmu, rozsah pobočky → ok', (await zkus({ stav: 'ok', ctx: ctx(['finance.read']), scope: POB }, [['finance.read', null]])).v.stav === 'ok')
+  const naFirme = await zkus({ stav: 'ok', ctx: ctx(['finance.read']), scope: FIRMA_S }, [])
+  ok('rozsah firmy → ok, na pobočkové právo se neptá', naFirme.v.stav === 'ok' && naFirme.volani.length === 0)
+  ok('odepřeno a nepřihlášený projdou beze změny',
+    (await zkus({ stav: 'odepren' }, [])).v.stav === 'odepren' && (await zkus({ stav: 'neprihlasen' }, [])).v.stav === 'neprihlasen')
+
+  const pb = async (pristup, prava) => {
+    globalThis.__fpPrava = prava
+    globalThis.__fpVolani = []
+    return fp.pobockaBezPrehleduFirmy('t1', pristup)
+  }
+  ok('Nákup: finance.read jen na pobočce → hláška', (await pb({ ctx: ctx(['purchasing.read', 'finance.read']), scope: POB }, [['finance.read', 'b1']])) === true)
+  ok('Nákup: finance.read za celou firmu → bez hlášky', (await pb({ ctx: ctx(['purchasing.read', 'finance.read']), scope: POB }, [['finance.read', null]])) === false)
+  ok('Nákup: bez finance.read vůbec → bez hlášky (jako dřív rám)', (await pb({ ctx: ctx(['purchasing.read']), scope: POB }, [])) === false)
+  ok('Nákup: vypnuté Finance → bez hlášky', (await pb({ ctx: ctx(['purchasing.read', 'finance.read'], false), scope: POB }, [['finance.read', 'b1']])) === false)
+  ok('Nákup: rozsah firmy → bez hlášky', (await pb({ ctx: ctx(['purchasing.read', 'finance.read']), scope: FIRMA_S }, [])) === false)
+}
+ok(`všechny čtyři tvary se opravdu vyskytly (pobočkové ${tvary.pobockova}, jen pro firmu ${tvary.jenProFirmu}, Faktury ${tvary.faktury}, Jiné platby ${tvary.jinePlatby})`,
+  tvary.pobockova >= 8 && tvary.jenProFirmu >= 9 && tvary.faktury >= 8 && tvary.jinePlatby >= 2)
 
 console.log('\n== Layouty obrazovek jen pro firmu ==')
 
