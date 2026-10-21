@@ -18,6 +18,7 @@
 
 import type {
   DruhPolozky,
+  KontrolaPos,
   StavFaktury,
   StavKontroly,
   StavSkladu,
@@ -158,6 +159,24 @@ export function moznaNikde(z: ZaznamJinePlatby): boolean {
   return z.stavTrzby === 'propojeno' && z.posProdejId !== null && k !== null && k.zdroj === 'pos_api' && k.vysledek === 'nenalezeno'
 }
 
+/**
+ * Konkrétní nález pokladny — zrcadlo `app.jp_nalez_pokladny` (migrace
+ * 20261021100000):
+ *   'trzba' — „nalezeno“, nebo „pravděpodobně“ z jiné shody než samotné
+ *             částky (shoda čísla účtu, i bez uvedené shody);
+ *   'sklad' — „už odečteno“.
+ * Jen výsledek dotazu do pokladny bez značky přepisu (`prepsano`).
+ * Databáze ho drží i po nové, slabší kontrole nad upraveným návrhem
+ * („cesta B“, ověření 21. 10.): nová tržba, schválení ani opakování
+ * výdeje proti němu neprojdou, přepíše ho jen člověk s právem na opravy.
+ */
+export function nalezPokladny(k: KontrolaPos<string> | null, druh: 'trzba' | 'sklad'): boolean {
+  if (k === null || k.zdroj !== 'pos_api' || k.prepsano) return false
+  if (druh === 'sklad') return k.vysledek === 'jiz_odecteno'
+  const shoda = (k.detail as Record<string, unknown> | null | undefined)?.shoda
+  return k.vysledek === 'nalezeno' || (k.vysledek === 'pravdepodobne' && shoda !== 'castka')
+}
+
 /** Výsledek pokladny, proti kterému ruční prohlášení opačného znění neprojde bez potvrzení (viz `prohlaseniProtiPokladne`). */
 export type ProhlaseniProtiPokladne = { vysledek: string; chceOpravu: boolean }
 
@@ -187,14 +206,16 @@ export type ProhlaseniProtiPokladne = { vysledek: string; chceOpravu: boolean }
  *                  `true` u `nalezeno`, `pravdepodobne` ze shody čísla účtu
  *                  (`cislo_vice`) a `jiz_odecteno` (konkrétní prodej nebo
  *                  odpis): navíc jen s právem `jine_platby.oprava`.
+ * Výsledek se značkou přepisu (`prepsano`) nebrání: rozhodnutí člověka platí
+ * i po uložení návrhu (nová verze), dokud ho nepřebije nový nález jiného
+ * účtu (ověření 21. 10.).
  * Platnost v čase se nehlídá — databáze ji taky nehlídá.
  */
 export function prohlaseniProtiPokladne(z: ZaznamJinePlatby, druh: 'trzba' | 'sklad'): ProhlaseniProtiPokladne | null {
   const k = druh === 'trzba' ? z.pokladnaTrzby : z.pokladnaSkladu
-  if (k === null || k.zdroj !== 'pos_api') return null
+  if (k === null || k.zdroj !== 'pos_api' || k.prepsano) return null
   const brani = druh === 'trzba' ? k.vysledek === 'nalezeno' || k.vysledek === 'pravdepodobne' : k.vysledek === 'jiz_odecteno'
-  const jenCastka = k.vysledek === 'pravdepodobne' && (k.detail as Record<string, unknown> | null | undefined)?.shoda === 'castka'
-  return brani ? { vysledek: k.vysledek, chceOpravu: !jenCastka } : null
+  return brani ? { vysledek: k.vysledek, chceOpravu: nalezPokladny(k, druh) } : null
 }
 
 /** Název agendy „Jiné platby" neznamená zaplaceno — úhradu ověřuje jen napárovaná bankovní transakce. */
@@ -499,6 +520,8 @@ export function dostupneAkce(
   // Operace na cestě, která se do pokladny už nedostane (platnost + 2 min pryč) — P3.
   const naCeste = op !== null && OPERACE_NA_CESTE.includes(op)
   const naCestePropadla = naCeste && platnostOperaceVyprsela(m.platnostOperace, m.tedMs)
+  // Pokladna už spotřebu odečetla (konkrétní nález drží i po nové kontrole) — výdej se jen propojí.
+  const odectenoVPokladne = nalezPokladny(z.pokladnaSkladu, 'sklad')
 
   // Doklad a návrh (pripojit_soubor a ulozit_navrh hlídají zrušení; zapsanou tržbu
   // a rozjetý výdej chrání ulozit_navrh uvnitř — odmítne změnu částky, měny, data
@@ -519,7 +542,9 @@ export function dostupneAkce(
     if (m.maPokladnu) a.add('kontrola_trzby')
     a.add('prohlasit_trzbu')
     const udaje = z.castkaHaleru !== null && z.castkaHaleru > 0 && z.mena !== null && z.datumProdeje !== null
-    if (udaje && kontrolaPlati(z.kontrolaTrzby, z.verze, PLATNOST_KONTROLY_TRZBY_MIN, m.tedMs)) a.add('potvrdit_trzbu')
+    // „Nenalezeno“ proti konkrétnímu nálezu pokladny (cesta B): nová tržba ne, propojit není s čím.
+    const nalezBrani = z.kontrolaTrzby?.vysledek === 'nenalezeno' && nalezPokladny(z.pokladnaTrzby, 'trzba')
+    if (udaje && !nalezBrani && kontrolaPlati(z.kontrolaTrzby, z.verze, PLATNOST_KONTROLY_TRZBY_MIN, m.tedMs)) a.add('potvrdit_trzbu')
   }
   // Dodatečná kontrola po zápisu nebo propojení (`jine_platby_zapsat_kontrolu` jde
   // volat i po nich). Jen s dohledáním účtů:
@@ -543,11 +568,11 @@ export function dostupneAkce(
     // Schválit i zamítnout; schválení navíc chce čerstvou kontrolu „neodečteno" (muzeSchvalitVydej).
     if (s === 'ceka_na_schvaleni' && m.maZiveNavrhSkladu) a.add('rozhodnout_vydej')
     // pos_operace_zahajit: operace připravená a čerstvá kontrola „neodečteno".
-    if (m.maPokladnu && s === 'schvaleno' && m.maZiveNavrhSkladu && op === 'pripraveno' && kontrolaSkladu === 'neodecteno') a.add('provest_vydej')
+    if (m.maPokladnu && s === 'schvaleno' && m.maZiveNavrhSkladu && op === 'pripraveno' && kontrolaSkladu === 'neodecteno' && !odectenoVPokladne) a.add('provest_vydej')
     // Nejasný nebo zaseknutý požadavek se jen dohledává, nikdy neposílá znovu.
     if ((s === 'nejasny_vysledek' || s === 'zpracovava_se') && op !== null && OPERACE_NA_CESTE.includes(op)) a.add('obnovit_vydej')
     // Znovu jen po PROKÁZANÉ chybě a s čerstvou kontrolou „neodečteno".
-    if (s === 'chyba' && m.maZiveNavrhSkladu && (op === null || op === 'chyba') && kontrolaSkladu === 'neodecteno') a.add('vydej_znovu')
+    if (s === 'chyba' && m.maZiveNavrhSkladu && (op === null || op === 'chyba') && kontrolaSkladu === 'neodecteno' && !odectenoVPokladne) a.add('vydej_znovu')
     // Propojit jen s čerstvým doložením „pokladna už odečetla" a bez požadavku na cestě.
     if (SKLAD_K_DOLOZENI.includes(s) && kontrolaSkladu === 'jiz_odecteno') a.add('propojit_vydej')
     // Ručně doložit jde jen schválený (živý) návrh, jehož požadavek není hotový
@@ -604,10 +629,12 @@ export function dostupneAkce(
  * s čerstvou kontrolou skladu pro tutéž verzi, která říká „neodečteno".
  * Když pokladna už odečetla, patří se výdej propojit, ne provést znovu.
  * Blokace návrhu a možnou duplicitu výdeje hlídá databáze (duplicita
- * chce důvod).
+ * chce důvod). Konkrétní nález „už odečteno“ (`nalezPokladny`) schválení
+ * nepustí, ani když novější kontrola říká „neodečteno“ (ověření 21. 10.).
  */
 export function muzeSchvalitVydej(z: ZaznamJinePlatby, tedMs: number): boolean {
   return (
+    !nalezPokladny(z.pokladnaSkladu, 'sklad') &&
     z.stavSkladu === 'ceka_na_schvaleni' &&
     z.stavKontroly === 'zkontrolovano' &&
     z.kontrolaSkladu !== null &&

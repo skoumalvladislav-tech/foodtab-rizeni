@@ -16,7 +16,7 @@ import { zkontrolovatDoklad, type KontrolaDokladu } from '@/lib/jine-platby-kont
 import { navrhnoutMapovani } from '@/lib/jine-platby-mapovani'
 import { zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
 import { dostupneAkce, krokyPruvodce, muzeSchvalitVydej } from '@/lib/jine-platby-stav'
-import { DRUHY_BEZ_SKLADU, PRAVA_CTENI_JINYCH_PLATEB, type RozpoznanyDoklad, type StavKontroly } from '@/lib/jine-platby-typy'
+import { DRUHY_BEZ_SKLADU, PRAVA_CTENI_JINYCH_PLATEB, ZDROJE_UHRADY, type RozpoznanyDoklad, type StavKontroly } from '@/lib/jine-platby-typy'
 import { posunoutDen, provozniDen } from '@/lib/pokladna-cas'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
@@ -293,6 +293,8 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
         .eq('tenant_id', tenantId)
         .eq('smer', 'prijem')
         .eq('mena', z.mena)
+        // Jen platby z banky — ruční ani z pokladny úhradu neprokážou (databáze je odmítne).
+        .in('zdroj', [...ZDROJE_UHRADY])
         .gte('datum', posunoutDen(dnes, -60))
         .order('datum', { ascending: false })
         .limit(100)

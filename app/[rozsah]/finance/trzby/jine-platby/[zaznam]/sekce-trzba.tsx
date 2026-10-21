@@ -2,7 +2,7 @@ import Link from 'next/link'
 
 import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { formatHaleru } from '@/lib/jine-platby-castky'
-import { moznaDvakrat, moznaNikde, popisStavuTrzby, prohlaseniProtiPokladne, type AkceJinePlatby } from '@/lib/jine-platby-stav'
+import { moznaDvakrat, moznaNikde, nalezPokladny, popisStavuTrzby, prohlaseniProtiPokladne, type AkceJinePlatby } from '@/lib/jine-platby-stav'
 import { PLATNOST_KONTROLY_TRZBY_MIN, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 
 import { PanelHlava } from '../../../../dnes/prvky'
@@ -97,6 +97,9 @@ export default function SekceTrzba({
   const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_TRZBY as Record<string, string>)[proti.vysledek] ?? proti.vysledek)
   /** „Není“ proti výsledku pokladny: u „nalezeno“ a shody čísla účtu jen s právem na opravy (databáze jinak odmítne). */
   const neniNelze = proti !== null && proti.chceOpravu && !smiOpravit
+  /** Nová kontrola „nenalezeno“ proti dřívějšímu konkrétnímu nálezu pokladny (cesta B) — databáze novou tržbu nepustí. */
+  const nalezBrani = vysledek === 'nenalezeno' && nalezPokladny(z.pokladnaTrzby, 'trzba')
+  const ucetNalezu = String((z.pokladnaTrzby?.detail as Record<string, unknown> | undefined)?.pos_prodej_id ?? 'víc účtů s tím číslem')
   const chceDuvodPropojeni = vysledek !== 'nenalezeno' && propojeniChceDuvod(z.kontrolaTrzby, maPokladnu)
   const volbyProhlaseni: [string, string][] = [
     ['je', 'je (prodej je v pokladně — tržba se jen propojí)'],
@@ -273,6 +276,13 @@ export default function SekceTrzba({
       ) : null}
 
       {/* ---------- Zápis ---------- */}
+      {nalezBrani && akce.has('prohlasit_trzbu') ? (
+        <Oddil nadpis="Zapsat do Ostatních tržeb">
+          <Vysvetleni dulezite>
+            {`Pokladna při dřívější kontrole našla konkrétní prodej (účet ${ucetNalezu}). Nová kontrola ho nevylučuje — číslo účtu nebo částka se od té doby změnily. Novou tržbu proto zapsat nejde: vraťte správné číslo účtu a prodej jen propojte, nebo ať výsledek pokladny přepíše člověk s právem na opravy (ruční prohlášení „není“).`}
+          </Vysvetleni>
+        </Oddil>
+      ) : null}
       {akce.has('potvrdit_trzbu') ? (
         <Oddil nadpis={vysledek === 'nenalezeno' ? 'Zapsat do Ostatních tržeb' : 'Jen propojit s pokladnou'}>
           <FormularAkce

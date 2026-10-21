@@ -152,6 +152,12 @@ export type KontrolaPos<V extends string> = {
   kdy: string // ISO
   kdo: string | null
   detail: Record<string, unknown>
+  /**
+   * Jen u výsledku pokladny (`pokladnaTrzby` / `pokladnaSkladu`): výsledek už
+   * přepsal člověk ručním prohlášením s potvrzením (u konkrétního nálezu
+   * s právem na opravy). Pak nebrání — migrace 20261021100000.
+   */
+  prepsano?: { kdo: string | null; kdy: string; vysledek: string; duvod: string | null } | null
 }
 
 /** Jak dlouho kontrola platí (musí sedět s migrací). */
@@ -197,6 +203,13 @@ export type ZaznamJinePlatby = {
    */
   pokladnaTrzby: KontrolaPos<VysledekKontrolyTrzby> | null
   pokladnaSkladu: KontrolaPos<VysledekKontrolySkladu> | null
+  /**
+   * Zrušený požadavek výdeje do pokladny s NEJASNÝM výsledkem
+   * (`jine_platby_zrusit_schvaleni`, ověření 21. 10.). Dokud je vyplněný,
+   * ruční „neodečteno“ smí jen člověk s právem na opravy; vymaže ho
+   * kontrola skladu v pokladně s jasným výsledkem.
+   */
+  nedohledanaOperace: { operace: string | null; klic: string | null; stav: string | null; kdy: string | null } | null
   /** Upozornění AI k celému dokladu (viz HlavickaNavrhu.upozorneniDokladu). */
   upozorneniDokladu: string[]
   /** Rozpoznání, ze kterého je uložený návrh (viz HlavickaNavrhu.rozpoznaniId). */
@@ -230,6 +243,14 @@ export const PRAVA_CTENI_JINYCH_PLATEB = [...PRAVA_JINYCH_PLATEB, 'finance.read'
 /* ------------------------------------------------------------------ */
 
 export const KBELIK_JINYCH_PLATEB = 'jine-platby'
+
+/**
+ * Zdroje plateb, které prokazují úhradu (výpis banky, napojení banky) —
+ * stejné jako `jine_platby_evidovat_uhradu` (migrace 20261021100000)
+ * a automatické párování faktur. Ručně zapsaná platba ani platba
+ * z pokladny úhradu „ověřenou v bance“ neprokáže (ověření 21. 10.).
+ */
+export const ZDROJE_UHRADY = ['fio_api', 'bankovni_agregator', 'csv_banka'] as const
 export const TYPY_SOUBORU = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] as const
 export type TypSouboru = (typeof TYPY_SOUBORU)[number]
 export const MAX_BAJTU_SOUBORU = 10 * 1024 * 1024

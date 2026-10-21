@@ -722,7 +722,7 @@ export function vysledekBezHledaniPodleUzavreni(
   }
 }
 
-type ZaznamProKontrolu = { externiUcet: string | null; castkaHaleru: number | null; mena: string | null; typDokladu?: TypDokladu | null }
+type ZaznamProKontrolu = { externiUcet: string | null; castkaHaleru: number | null; mena: string | null; typDokladu?: TypDokladu | null; posProdejId?: string | null }
 
 /** Fotka OTEVŘENÉHO účtu: bez shody čísla dokladu se z pokladny nedá dokázat „není tam“. */
 const POPIS_OTEVRENY_DOKLAD =
@@ -871,6 +871,23 @@ export function vyhodnotitKontroluTrzby(z: ZaznamProKontrolu, dotazyVse: readonl
 
   if (dotazy.length === 0) {
     return { vysledek: 'nelze_overit', detail: zaklad, popis: 'Provozovna pokladny k pobočce není přiřazená — není kde hledat.' }
+  }
+
+  // 0. Propojený prodej: dodatečná kontrola propojené tržby hledá nejdřív
+  //    přímo uložený účet (`posProdejId`), ne podle čísla z návrhu — to se
+  //    od propojení mohlo změnit (ověření 21. 10.).
+  if (z.posProdejId) {
+    const propojeny = dotazy.flatMap((d) => d.ucty).find((u) => u.externiId === z.posProdejId && u.stav === 'uzavreny')
+    if (propojeny) {
+      const sedi = shodaCastky(propojeny, z)
+      return {
+        vysledek: 'nalezeno',
+        detail: { ...zaklad, shoda: 'propojeny_prodej', pos_prodej_id: propojeny.externiId, ucet: strucne(propojeny), castka_sedi: sedi },
+        popis:
+          `Propojený účet ${popisUctu(propojeny)} je v pokladně uzavřený — prodej je v jejích tržbách.` +
+          (sedi ? '' : ` Pozor: částka v pokladně (${castka(propojeny.celkemHaleru)}) se liší od dokladu (${castka(z.castkaHaleru)}).`),
+      }
+    }
   }
 
   // 1. Shoda čísla dokladu.

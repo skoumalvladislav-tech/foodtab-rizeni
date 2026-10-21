@@ -73,6 +73,8 @@ export function rozpoznavaniJeNastavene(): boolean {
  * taky TRVALÁ chyba `HLASKA_MOC_DLOUHY`, ne „zkuste znovu". Když limit
  * zkrátil termín `konec` (akce už část času spotřebovala), timeout je
  * DOČASNÝ `HLASKA_NESTIHLO`: další pokus dostane plný čas (ověření 20. 10.).
+ * „Zkrátil“ = limit je pod 80 % toho, co akce měla na začátku (`zacatek`,
+ * ověření 21. 10.).
  *
  * Volání je `messages.create` se strukturovaným výstupem a odpověď se
  * převádí TADY (N33): `messages.parse` v SDK 0.125 parsuje JSON dřív, než
@@ -83,7 +85,7 @@ export function rozpoznavaniJeNastavene(): boolean {
  */
 export async function rozpoznatDoklad(
   p: PodkladRozpoznani,
-  moznosti: { casovyLimitMs?: number; konec?: number } = {},
+  moznosti: { casovyLimitMs?: number; konec?: number; zacatek?: number } = {},
 ): Promise<VysledekRozpoznani> {
   // Kontrola podkladu PŘED klíčem: o vadném souboru se ven nic neposílá.
   const vada = zkontrolovatPodklad(p)
@@ -94,7 +96,12 @@ export async function rozpoznatDoklad(
 
   const limit = casNaCteni(moznosti, Date.now())
   if (limit === null) return docasna(HLASKA_NEZBYVA_CAS)
-  const zkracenoTerminem = limit < (casNaCteni({ casovyLimitMs: moznosti.casovyLimitMs }, 0) ?? 0)
+  // „Zkrácený“ limit = akce před voláním modelu spotřebovala víc než pětinu
+  // času, který měla na začátku (`zacatek`: zámek, stažení souborů). Limit
+  // z termínu `konec` je pod stropem 100 s vždycky, srovnání se stropem by
+  // dělalo každý timeout dočasným (ověření 21. 10.). Bez `zacatek` se
+  // nezkracuje nic — timeout je trvalý.
+  const zkracenoTerminem = typeof moznosti.zacatek === 'number' && limit < 0.8 * (casNaCteni(moznosti, moznosti.zacatek) ?? 0)
 
   // Žádné opakování uvnitř SDK: `timeout` platí pro každý pokus zvlášť, opakování by běh
   // přetáhlo přes strop serverové akce. Další pokus spustí člověk (započítá se do denního stropu).

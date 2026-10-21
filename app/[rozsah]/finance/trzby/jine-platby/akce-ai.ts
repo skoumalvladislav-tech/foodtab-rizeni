@@ -168,7 +168,7 @@ export async function rozpoznat(_predchozi: StavAkce, formData: FormData): Promi
   // Termín pro model (ms epoch) — rozpoznatDoklad z něj odečte rezervu na převod odpovědi.
   let vysledek: VysledekRozpoznani
   try {
-    vysledek = await rozpoznatDoklad({ soubory: podklad }, { konec })
+    vysledek = await rozpoznatDoklad({ soubory: podklad }, { konec, zacatek })
   } catch (e) {
     console.error('Jiné platby: rozpoznání spadlo:', e instanceof Error ? e.message : e)
     vysledek = { stav: 'chyba', duvod: 'Rozpoznání skončilo neočekávanou chybou — zkuste to znovu, nebo zadejte položky ručně.', docasna: true }
