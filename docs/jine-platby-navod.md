@@ -96,6 +96,7 @@ V části **Tržba (Ostatní tržby)**:
      - Když pokladna našla jen **stejnou částku** („pravděpodobně“) a víte, že jde o jiný účet, zaškrtněte „Prodej v pokladně je jiný, ověřil(a) jsem to“.
      - Konkrétní účet, shodu **čísla účtu** (i když je v pokladně účtů s tím číslem víc) a u skladu „už odečteno“ přepíše jen člověk s právem na opravy, taky s výslovným potvrzením. V historii zůstane celý výsledek z pokladny.
      - Výsledek pokladny si appka pamatuje zvlášť. Ruční „je tam“ ho nesmaže, takže následné „není tam“ narazí na stejnou pojistku.
+     - Konkrétní nález pokladny (účet, nebo že spotřebu už odečetla) nesmaže ani nová kontrola po úpravě záznamu, třeba po smazání nebo změně čísla účtu. Novou tržbu ani nový výdej pak appka nepustí. Přepsat ho smí jen člověk s právem na opravy a jeho rozhodnutí pak platí i po další úpravě záznamu.
    - Kontrola platí 30 minut a jen pro tu podobu záznamu, kterou jste kontrolovali. Po úpravě ji zopakujte.
 2. Podle výsledku:
    - **Zapsat do Ostatních tržeb**: jen když je vyloučené, že prodej je v pokladně. Tržba se započítá.
@@ -107,7 +108,7 @@ V části **Tržba (Ostatní tržby)**:
    - stejné číslo účtu (mezery a velká písmena nevadí) do 7 dnů u téže pokladny. Záznam bez pokladny jen na stejné provozovně, protože „stůl 5“ je na každé provozovně jiný. Na téže provozovně se porovná i záznam s pokladnou se záznamem bez ní.
    - Když je podobný záznam na provozovně, kterou nevidíte, appka neukáže, který to je. Rozhodne někdo s přístupem k oběma.
 4. **Po zápisu**: když hrozí, že pokladna prodej přinese později (otevřený účet se uzavře), klikněte znovu **Zkontrolovat v pokladně**. Když ho pokladna najde, záznam dostane varování **„Možná zapsáno dvakrát“** (v přehledu je na to filtr) a detail nabídne storno. Sama to appka nekontroluje ani nestornuje (otázka 58).
-5. **Opravit / stornovat** (právo na opravy): původní řádek zůstane v historii, oprava je nový řádek. Když je propojená faktura, je potřeba číslo opravného dokladu (dobropisu).
+5. **Opravit / stornovat** (právo na opravy): původní řádek zůstane v historii, oprava je nový řádek. Když je propojená faktura, je potřeba číslo opravného dokladu (dobropisu). Storno zruší i propojení s prodejem z pokladny.
 
 **Fotografie sjetiny nedokazuje, že host zaplatil.** Zápis tržby
 nepřidá ani korunu na účet ani do cashflow.
@@ -147,6 +148,7 @@ Dokud je výdej schválený nebo čeká na ruční odpis, **položky a množstv�
 - **Ručně doloženo** nejde, když v návrhu zůstala nevyřešená položka — ta by se neodečetla nikdy.
 - **Ručně doloženo** se váže na návrh, který máte otevřený. Když ho mezitím někdo vyměnil, appka doložení odmítne. Načtěte stránku a doložte to, co jste v pokladně opravdu odepsali.
 - Když jste v pokladně **nic neodepsali** (host odešel, chyba v návrhu), klikněte **Zrušit schválení** a napište důvod. Výdej se vrátí do stavu „bez návrhu“ a obsluha ho může opravit a poslat znovu. Zrušit schválení smí jen ten, kdo smí výdej potvrdit. Starší kontrola v pokladně tím přestane platit: před novým schválením je potřeba výdej v pokladně zkontrolovat znovu.
+- Když měl zrušený požadavek **nejasný výsledek** (mohl v pokladně proběhnout), appka si ho pamatuje. Ruční „neodečetla“ pak smí jen člověk s právem na opravy. Ostatní kliknou **Zkontrolovat v pokladně**, protože ta kontrola dohledá i zrušený požadavek.
 
 Pokrm se vydává **jako pokrm** a jeho suroviny se do výdeje nepřidávají —
 odečte je pokladna sama. Hlídá to schvalovatel (appka receptury nezná). Služby, spropitné a položky, které pokladna ze
@@ -173,6 +175,8 @@ vyřešila (např. papírová výdejka).
   - Faktura **z pokladny** znamená, že tržbu má pokladna. K tržbě zapsané do Ostatních tržeb ji proto propojit nejde: nejdřív Ostatní tržbu stornujte a prodej z pokladny propojte. Se zapsanou fakturou z pokladny zase nejde zapsat novou Ostatní tržbu.
 - **Napárovat platbu**: úhrada se eviduje jen podle **skutečné příchozí platby z banky** ve stejné měně. Napárovat jde jen platbu, kterou smíte vidět (finanční přehled): u účtu pobočky přehled té pobočky, u firemního účtu přehled za celou firmu. Do té doby platí **„Úhrada neověřena“**.
   - Napárovat nejde ke **zrušenému** záznamu, **stornovanou** platbu ani část platby, která už je spárovaná s fakturou v modulu Faktury.
+  - Appka nabídne jen platby **z banky** (výpis nebo napojení banky). Ručně zapsaná platba ani platba z pokladny úhradu neprokáže.
+  - Když banka napárovanou platbu později stornuje, úhrada se sama vrátí na „Úhrada neověřena“ a v historii zůstane proč.
 
 **Vystavení faktury ani výdej skladu neznamenají zaplacení.**
 
