@@ -746,6 +746,50 @@ select pg_temp.check('zrušení automatického párování: ano, podruhé ne',
 select pg_temp.check('automatika: člověkem zrušené párování znovu nezaloží', not public.automaticky_sparovat_fakturu(:'tenant', :'t2', :'fa', 77700));
 reset role;
 
+-- Jiné platby (#146, 20261016100000) a párování faktur sdílí bankovní
+-- platby. Součet obou hlídá spoušť z #146 (trg_platby_faktury_jine_platby)
+-- u KAŽDÉHO zápisu potvrzeného párování — i nové cesty Faktur — a obě strany
+-- berou stejný zámek platby (hashtextextended(transakce, 0)). Faktury berou
+-- jen odchozí platby, Jiné platby jen příchozí; data se tu proto připraví
+-- přímo (jako by je zapsal starý kód nebo budoucí změna pravidla).
+select pg_temp.check('spoušť součtu z Jiných plateb po všech migracích pořád hlídá párování',
+  exists (select 1 from pg_trigger g join pg_proc p on p.oid = g.tgfoid
+           where g.tgrelid = 'public.platby_faktury'::regclass and g.tgname = 'trg_platby_faktury_jine_platby'
+             and not g.tgisinternal and g.tgenabled <> 'D' and p.proname = 'jp_hlida_platbu_faktury'));
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj)
+values (:'tenant', :'ucet', 'vydaj', 10000, current_date - 1, 'Sdílená platba', '6', 'csv_banka') returning id as t6 \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj)
+values (:'tenant', :'ucet', 'prijem', 30000, current_date - 1, 'Sdílený příjem', '7', 'csv_banka') returning id as t7 \gset
+insert into public.jine_platby (tenant_id, branch_id, klient_id, mena, uhrada_transakce_id, uhrada_castka_haleru, stav_uhrady)
+values (:'tenant', :'perla', gen_random_uuid(), 'CZK', :'t6', 10000, 'uhrazeno') returning id as jp_cela \gset
+insert into public.jine_platby (tenant_id, branch_id, klient_id, mena)
+values (:'tenant', :'perla', gen_random_uuid(), 'CZK') returning id as jp_volna \gset
+set role service_role;
+insert into public.faktury (tenant_id, dodavatel, castka_haleru) values (:'tenant', 'Sdílený dodavatel', 10000) returning id as f_sdilena \gset
+select pg_temp.check('Jiná platba celá na platbě: automatika ji k faktuře nenapáruje (řekne ne, nespadne)',
+  not public.automaticky_sparovat_fakturu(:'tenant', :'t6', :'f_sdilena', 10000));
+reset role;
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('… ani ruční nová cesta (součet hlídá spoušť z Jiných plateb)',
+  pg_temp.spadne_hlaskou(format('select * from public.sparovat_platbu_s_fakturou(%L, %L, %L, 100, null)', :'tenant', :'t6', :'f_sdilena'),
+    '23514', 'Jiným platbám'));
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('… a k platbě nevzniklo žádné párování', not exists (select 1 from public.platby_faktury where transakce_id = :'t6'));
+-- Opačně: platba už zčásti zaplatila fakturu (potvrzené párování s uuid, jak
+-- ho píše nová cesta) — úhrada Jiné platby z ní dostane jen zbytek.
+insert into public.platby_faktury (tenant_id, transakce_id, faktura, castka_haleru, stav, potvrzeno_kdy)
+values (:'tenant', :'t7', :'f_sdilena', 25000, 'potvrzeno', now());
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('opačně: Jiná platba nedostane víc, než po párování s fakturou zbývá',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_evidovat_uhradu(%L, %L, 6000)', :'jp_volna', :'t7'), '23514', 'rozdělená'));
+select pg_temp.check('… zbytek (5 000 z 30 000) projde',
+  pg_temp.projde(format('select public.jine_platby_evidovat_uhradu(%L, %L, 5000)', :'jp_volna', :'t7')));
+reset role;
+select set_config('test.user_id', '', false);
+
 
 \echo ''
 \echo '== 8. Odkaz text ↔ uuid a složený cizí klíč ============================='
@@ -967,8 +1011,10 @@ select pg_temp.check('zrušení celé firmy s fakturami a kopií projde i po dok
 -- Stav probiha (výš): převodní mazání faktur a kopie je povolené.
 delete from storage.objects where bucket_id = 'faktury-prilohy' and name like :'tenant' || '/rucne/%';
 delete from public.faktury_prijem where pripojeni_id = :'schranka';
-delete from public.platby_faktury where transakce_id in (:'t1', :'t2', :'t3', :'t4', :'t5');
-delete from public.transakce where id in (:'t1', :'t2', :'t3', :'t4', :'t5');
+delete from public.jine_platby_historie where zaznam_id in (:'jp_cela', :'jp_volna');
+delete from public.jine_platby where id in (:'jp_cela', :'jp_volna');
+delete from public.platby_faktury where transakce_id in (:'t1', :'t2', :'t3', :'t4', :'t5', :'t6', :'t7');
+delete from public.transakce where id in (:'t1', :'t2', :'t3', :'t4', :'t5', :'t6', :'t7');
 delete from public.platebni_ucty where id = :'ucet';
 delete from public.integrace_pripojeni where id = :'schranka';
 delete from public.faktury where tenant_id in (:'tenant', :'tenant_b');

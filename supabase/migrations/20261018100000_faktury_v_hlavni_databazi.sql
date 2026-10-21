@@ -1275,6 +1275,13 @@ begin
     return false;
   end if;
 
+  -- Platbu už (i zčásti) spotřebovala úhrada Jiných plateb (20261016100000):
+  -- jednoznačná shoda to není. Vrátit „ne", ne spadnout na spoušti součtu
+  -- trg_platby_faktury_jine_platby — úloha banky by jinak skončila chybou.
+  if exists (select 1 from public.jine_platby z where z.uhrada_transakce_id = p_transakce) then
+    return false;
+  end if;
+
   insert into public.platby_faktury (tenant_id, transakce_id, faktura, castka_haleru, jistota, stav, potvrzeno_kdy, zpusob)
   values (p_tenant, p_transakce, p_faktura, p_castka_haleru, 1, 'potvrzeno', now(), 'automaticky');
 

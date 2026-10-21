@@ -176,6 +176,17 @@ console.log('\n6. Granty nových tabulek — z TEXTU migrace')
   ok('faktury_prevod: úloha mění jen seznam příloh (sloupcový grant), stav ne',
     /grant update \(prilohy\) on public\.faktury_prevod to service_role;/.test(sql)
     && !/grant [^;]*update(?! \()[^;]* on public\.faktury_prevod to service_role/.test(sql))
+  // Jiné platby (#146, 20261016100000) jsou v main dřív: tahle migrace
+  // jejich spouště a funkce nesmí přepsat (pozdější create or replace
+  // vyhrává) a párování musí brát TENTÝŽ zámek platby jako jejich úhrada.
+  const jine = readFileSync(join(KOREN, 'supabase/migrations/20261016100000_jine_platby.sql'), 'utf8')
+  ok('Faktury nepřepisují cizí funkce ani spouště (žádné create or replace / drop function / drop trigger)',
+    !/create or replace function|drop function|drop trigger/i.test(sql))
+  ok('Jiné platby evidují úhradu pod zámkem hashtextextended(transakce, 0)',
+    jine.includes('perform pg_advisory_xact_lock(hashtextextended(p_transakce::text, 0));'))
+  ok('ruční i automatické párování faktur bere tentýž zámek platby',
+    (sql.match(/v_hash_transakce\s+bigint := hashtextextended\(p_transakce::text, 0\);/g) ?? []).length === 2
+    && (sql.match(/perform pg_advisory_xact_lock\(v_hash_transakce\);/g) ?? []).length === 4)
   ok('platby_faktury: úloze odebrané mazání i TRUNCATE',
     /revoke delete, truncate on public\.platby_faktury from service_role;/.test(sql))
 }

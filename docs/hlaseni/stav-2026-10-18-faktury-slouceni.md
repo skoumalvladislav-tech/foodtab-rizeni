@@ -14,6 +14,11 @@
 > 2 částečně a 1 nová chyba, kterou zavedla oprava. Všechno dodělané, viz
 > oddíl „Ověření oprav (19. 10. večer)". Hlídač migrací je teď samostatná
 > malá PR **#148**, která se slučuje úplně první.
+>
+> **Doplněno 21. 10.:** #148 a Jiné platby (#146) jsou v main, migrace Jiných
+> plateb je nasazená. Main je do Faktur sloučený a ověřené je, že párování
+> faktur a Jiné platby si tutéž platbu nerozdělí dvakrát — viz oddíl „Po
+> sloučení Jiných plateb (21. 10.)". Zbývá #147 → #145.
 
 ## Nejdřív to podstatné
 
@@ -147,9 +152,30 @@ Dodělané:
 6. Doplněné kontroly mezer z ověření u eurových faktur (měna v dotazu,
    ruční párování, součet ke kontrole).
 
+## Po sloučení Jiných plateb (21. 10.)
+
+- **Sloučení main do Faktur:** střet byl jen v seznamech (testy v CI,
+  `run.sh`, kontrola hlášek, `otazky.md`) — ponechané obě strany:
+  scénáře krok98 i krok99, otázky 50–58 (Jiné platby) i 59–65 (Faktury).
+- **Jedna platba, dvě agendy:** Jiné platby přidaly na párování spoušť,
+  která ke každému potvrzenému párování přičte i úhrady Jiných plateb téže
+  platby. Ověřené, že hlídá i novou cestu Faktur (ruční párování spadne,
+  když platbu už spotřebovala Jiná platba) a že obě agendy berou stejný
+  zámek platby. Opačně: úhrada Jiné platby počítá i párování, které zapsaly
+  Faktury, a dostane jen zbytek.
+- **Automatické párování** z banky teď u platby, kterou už spotřebovala Jiná
+  platba, řekne „ne" — dřív by spadlo na té spoušti a úloha banky by
+  skončila chybou.
+- Migrace Faktur žádnou funkci ani spoušť Jiných plateb nepřepisuje (hlídá
+  test nad textem migrací) a spoušť Jiných plateb po všech migracích
+  pořád platí (hlídá scénář).
+- Skutečně se ty dvě cesty nepotkají: Faktury párují jen odchozí platby,
+  Jiné platby evidují jen příchozí. Pojistky výš platí pro starý kód
+  a budoucí změny.
+
 ## Co je otestované — a z čeho jsou čísla
 
-- **Databáze (scénář `krok99`):** po ověření oprav **147 kontrol**,
+- **Databáze (scénář `krok99`):** po sloučení Jiných plateb **153 kontrol**,
   všechny prošly v PGlite. PGlite **neověří** pravidla přístupu ani granty —
   o tom rozhoduje CI „Migrace a scénáře" proti skutečnému PostgreSQL 16:
   **zelená** na `c871998` — krok99 tam prošel taky se **147 kontrolami**,
