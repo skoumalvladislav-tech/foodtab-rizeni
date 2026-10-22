@@ -1116,9 +1116,14 @@ grant execute on function public.sparovat_platbu_s_fakturou(uuid, uuid, uuid, in
 -- na 'zamitnuto'; stav faktury se přepočítá ve stejné transakci.
 create function app.zrusit_parovani_faktury(p_tenant uuid, p_alokace uuid, p_duvod text)
 returns text
-language plpgsql security definer set search_path = '' set foodtab.faktury_cesta = 'nova'
+language plpgsql security definer set search_path = ''
 as $$
 declare
+  -- Značka „nová cesta“ pro spoušť app.platby_faktury_brana. Nastavuje se
+  -- v těle (set_config), ne klauzulí SET u funkce: Supabase vlastníkovi
+  -- migrací `set foodtab.…` v definici funkce nedovolí (42501, db push
+  -- 22. 10. 2026). Po změně párování se vrací předchozí hodnota.
+  v_cesta    text;
   v_branch   uuid;
   v_faktura  uuid;
   v_parovani text;
@@ -1166,7 +1171,10 @@ begin
       from public.faktury f where f.id = v_faktura for no key update;
   end if;
 
+  v_cesta := current_setting('foodtab.faktury_cesta', true);
+  perform set_config('foodtab.faktury_cesta', 'nova', true);
   update public.platby_faktury set stav = 'zamitnuto' where id = p_alokace;
+  perform set_config('foodtab.faktury_cesta', coalesce(v_cesta, ''), true);
 
   -- Bez faktury (párování na fakturu, která ve staré databázi zmizela) se
   -- jen zruší — stav není čemu přepočítat.
@@ -1318,19 +1326,26 @@ grant execute on function public.automaticky_sparovat_fakturu(uuid, uuid, uuid, 
 -- jen nová cesta (vrací uuid faktury, ne text).
 create function app.zrusit_automaticke_parovani_faktury(p_tenant uuid, p_alokace uuid, p_duvod text)
 returns boolean
-language plpgsql security definer set search_path = '' set foodtab.faktury_cesta = 'nova'
+language plpgsql security definer set search_path = ''
 as $$
 declare
   v_faktura uuid;
+  -- Značka „nová cesta“ v těle, ne klauzulí SET (viz app.zrusit_parovani_faktury).
+  v_cesta   text;
+  v_nic     text;
 begin
   if app.faktury_stav_prevodu(p_tenant) is distinct from 'dokonceno' then
     return false;
   end if;
 
+  v_cesta := current_setting('foodtab.faktury_cesta', true);
+  v_nic := set_config('foodtab.faktury_cesta', 'nova', true);
   update public.platby_faktury
      set stav = 'zamitnuto'
    where id = p_alokace and tenant_id = p_tenant and zpusob = 'automaticky' and stav = 'potvrzeno'
   returning faktura into v_faktura;
+  -- Přiřazení (ne perform), aby FOUND zůstal z update výš.
+  v_nic := set_config('foodtab.faktury_cesta', coalesce(v_cesta, ''), true);
 
   if not found then
     return false;
