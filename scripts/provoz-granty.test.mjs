@@ -446,5 +446,23 @@ for (const f of jenServer) {
   ok(`${f}: grant jen service_role, ne přihlášeným`, !grantPrihlasenym)
 }
 
+// Supabase nedovolí vlastníkovi migrací nastavit vlastní parametr
+// (`set foodtab.x = …`) v definici funkce — db push spadne na 42501
+// „permission denied to set parameter“ (22. 10. 2026, migrace Faktur).
+// CI i PGlite běží jako superuživatel, takže to nezachytí jinak než textem.
+// V těle funkce přes set_config(…, true) to jde.
+{
+  const vadne = []
+  for (const soubor of soubory) {
+    const text = fs.readFileSync(path.join(SLOZKA, soubor), 'utf8')
+    for (const m of text.matchAll(/^\s*(?:language\s+\w+\s+)?(?:security\s+definer\s+)?[^\n]*\bset\s+(?!search_path\b)([a-z_]+\.[a-z_]+)\s*(?:=|to)\s/gim)) {
+      if (/^\s*--/.test(m[0])) continue
+      if (!/\blanguage\b|\bsecurity\b|^\s*set\s/i.test(m[0])) continue
+      vadne.push(`${soubor}: ${m[1]}`)
+    }
+  }
+  ok(`žádná funkce nenastavuje vlastní parametr klauzulí SET (${vadne.join(', ') || 'žádná'})`, vadne.length === 0)
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

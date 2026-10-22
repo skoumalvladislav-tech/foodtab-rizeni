@@ -518,5 +518,31 @@ console.log('\n13. Stará databáze se čte i před db push a každé 2 dny (ná
   ok(`plán má vlastní skupinu souběhu (${skupina})`, !!jmena && jmena[1] !== jmena[2])
 }
 
+// Syntaxe bloku run: ve workflow převodu (bash -n). 22. 10. 2026 v něm
+// rovná uvozovka v „duvod" uzavřela řetězec a každý krok po vypsání
+// výsledku spadl na „unexpected EOF" — běh byl červený, i když krok prošel.
+{
+  const { spawnSync } = await import('node:child_process')
+  const { mkdtempSync, writeFileSync: zapis, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const yml = zdroj('.github/workflows/faktury-prevod.yml').replace(/\r\n/g, '\n')
+  const zacatek = '        run: |\n'
+  const radky = yml.slice(yml.indexOf(zacatek) + zacatek.length).split('\n')
+  const blok = []
+  for (const r of radky) {
+    if (r.trim() === '') { blok.push(''); continue }
+    if (!r.startsWith('          ')) break
+    blok.push(r.slice(10))
+  }
+  const slozka = mkdtempSync(join(tmpdir(), 'faktury-prevod-'))
+  const soubor = join(slozka, 'blok.sh')
+  zapis(soubor, blok.join('\n'))
+  const b = spawnSync('bash', ['-n', soubor], { encoding: 'utf8' })
+  rmSync(slozka, { recursive: true, force: true })
+  if (b.error) console.log('  (bash není k dispozici — kontrola syntaxe přeskočena)')
+  else ok(`blok run: ve workflow převodu je syntakticky v pořádku${b.stderr ? ' — ' + b.stderr.trim() : ''}`, b.status === 0 && blok.length > 20)
+}
+
 console.log(`\n${chyb === 0 ? 'Vše prošlo' : `SELHALO ${chyb}`} — ${kontrol} kontrol (scripts/faktury-prevod.test.mjs).`)
 process.exit(chyb === 0 ? 0 : 1)
