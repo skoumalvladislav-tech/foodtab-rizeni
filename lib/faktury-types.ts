@@ -1,8 +1,11 @@
 /**
  * Typy modulu Faktury — přeneseno ze samostatné appky faktury-app
- * (skoumalvladislav-tech/faktury-app, src/lib/types.ts), beze změny
- * tvaru řádku: data zůstávají v odděleném Supabase projektu
- * (`ctqtwahlzhyjerqulqyn`), tenhle typ jen popisuje, co odtamtud chodí.
+ * (skoumalvladislav-tech/faktury-app, src/lib/types.ts).
+ *
+ * Od sloučení (docs/faktury-slouceni-navrh.md) žijí faktury v hlavní
+ * databázi, tabulka `public.faktury` s českými sloupci. Tenhle typ
+ * zůstává se starými jmény polí, aby se obrazovky nemusely přepisovat:
+ * dotazy je dostávají jako aliasy (lib/faktury-sloupce.ts, SLOUPCE_FAKTURY).
  */
 export type Faktura = {
   id: string
@@ -13,6 +16,9 @@ export type Faktura = {
   supplier_ico: string | null
   invoice_number: string | null
   variable_symbol: string | null
+  /** Celá částka v nejmenší jednotce měny (u CZK haléře) — tohle se počítá. */
+  castka_haleru: number
+  /** castka_haleru / 100 — jen pro zobrazení (naFakturu v lib/faktury-sloupce.ts). */
   amount: number
   currency: string
   issue_date: string | null
@@ -23,6 +29,8 @@ export type Faktura = {
   needs_review: boolean
   onedrive_url: string | null
   pdf_url: string | null
+  /** Soubor v soukromém kbelíku faktury-prilohy (kopie nebo ruční nahrání). */
+  priloha_cesta: string | null
   is_archived: boolean
   is_duplicate: boolean
   review_note: string | null
@@ -36,6 +44,13 @@ export const STAV_NEUHRAZENO = 'Neuhrazeno'
 export const STAV_CASTECNE = 'Částečně uhrazeno'
 export const STAV_KE_KONTROLE = 'Ke kontrole úhrady'
 export const STAV_KE_SCHVALENI = 'Ke schválení'
+
+/**
+ * Stavy a měny, které smí mít RUČNĚ zadaná faktura (Faktury → Nová).
+ * Akce je ověřuje na serveru — formulář jde poslat i podvržený.
+ */
+export const STAVY_RUCNIHO_ZADANI: readonly string[] = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno', 'Uhrazeno']
+export const MENY_RUCNIHO_ZADANI: readonly string[] = ['CZK', 'EUR', 'USD']
 export const STAV_ODMITNUTO = 'Odmítnuto'
 
 /**
@@ -62,8 +77,8 @@ export function jeNezaplacena(faktura: Pick<Faktura, 'status'>): boolean {
  */
 export const PREDPONA_RUCNI_KONTROLY = 'Nutná ruční kontrola'
 
-/** Totéž jako `potrebujeKontrolu`, pro `.or(...)` v dotazu na databázi Faktur. */
-export const FILTR_KE_KONTROLE = `needs_review.is.true,status.like."${PREDPONA_RUCNI_KONTROLY}%"`
+/** Totéž jako `potrebujeKontrolu`, pro `.or(...)` v dotazu na `public.faktury` (česká jména sloupců). */
+export const FILTR_KE_KONTROLE = `ke_kontrole.is.true,stav.like."${PREDPONA_RUCNI_KONTROLY}%"`
 
 export function potrebujeKontrolu(faktura: Pick<Faktura, 'needs_review' | 'status'>): boolean {
   return faktura.needs_review === true || (faktura.status ?? '').startsWith(PREDPONA_RUCNI_KONTROLY)

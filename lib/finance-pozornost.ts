@@ -1,9 +1,11 @@
 import 'server-only'
 
 import { getServerSupabase } from '@/lib/supabase/server'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
-import { navrhnoutParovani, type KandidatFaktura } from '@/lib/finance-parovani'
+import { jeVKorunach, kandidatiProNavrhy, navrhnoutParovani } from '@/lib/finance-parovani'
+import { prazdnoPozornosti } from '@/lib/faktury-brana'
 import { koruny } from '@/lib/mzdy'
 
 /**
@@ -18,8 +20,9 @@ import { koruny } from '@/lib/mzdy'
  *   2. Faktury, které potřebují ruční kontrolu (`potrebujeKontrolu`).
  *
  * Když appka Fakturám nedosáhne (`pristupKFakturam()` není ok, nebo
- * dotaz na jejich databázi selže), vrátí prázdno — ne chybu, ne
- * vymyšlenou řádku.
+ * dotaz selže), vrátí prázdný seznam A VĚTU proč (`hlaska`) — ne
+ * „Nic nevyžaduje pozornost", když se nic zjistit nedalo (kontrola
+ * 19. 10.; Dnes a Platby to tak mají taky).
  *
  * Na pobočce (Finance po pobočkách, 13.–14. 10. 2026) prázdno: obě
  * položky stojí na fakturách, které pobočku nemají (oddělená databáze),
@@ -51,39 +54,34 @@ export async function nactiPolozkyKPozornosti(
   /** Pobočka rozsahu (`pobockaFinanci`), `null` = celá firma. Na pobočce se nic nenačítá. */
   pobocka: string | null = null,
   limitTransakci = 60,
-): Promise<PolozkaPozornosti[]> {
-  if (!vidiFaktury || pobocka !== null) return []
+): Promise<{ polozky: PolozkaPozornosti[]; hlaska: string | null }> {
+  if (!vidiFaktury || pobocka !== null) return { polozky: [], hlaska: null }
   const pristupFaktury = await pristupKFakturam(tenantId)
-  if (pristupFaktury.stav !== 'ok') return []
+  if (pristupFaktury.stav !== 'ok') return { polozky: [], hlaska: prazdnoPozornosti(pristupFaktury) }
+  const nenacteno = { polozky: [], hlaska: prazdnoPozornosti({ stav: 'chyba_dotazu' }) }
 
   const polozky: PolozkaPozornosti[] = []
 
   const faktury: Faktura[] = []
   try {
     for (let strana = 0; strana < MAX_STRANEK; strana++) {
-      const { data, error } = await pristupFaktury.faktury.from('invoices')
-        .select('id, supplier, invoice_number, variable_symbol, amount, due_date, issue_date, status, needs_review')
-        .eq('is_archived', false)
+      const { data, error } = await fakturyFirmy(pristupFaktury,
+        'id, supplier:dodavatel, invoice_number:cislo_faktury, variable_symbol:variabilni_symbol, castka_haleru, currency:mena, due_date:splatnost, issue_date:datum_vystaveni, status:stav, needs_review:ke_kontrole')
+        .eq('archivovano', false)
         .order('id', { ascending: true })
         .range(strana * STRANKA, strana * STRANKA + STRANKA - 1)
-      if (error) return []
-      faktury.push(...((data ?? []) as Faktura[]))
+      if (error) return nenacteno
+      faktury.push(...naFaktury(data as unknown as RadekFaktury[]))
       if (!data || data.length < STRANKA) break
     }
   } catch {
-    return []
+    return nenacteno
   }
 
-  // 1. Návrhy párování — nezaplacené faktury proti nedávným výdajovým transakcím.
-  const nezaplacene = faktury.filter(jeNezaplacena)
-  if (nezaplacene.length > 0) {
-    const kandidati: KandidatFaktura[] = nezaplacene.map((f) => ({
-      id: f.id,
-      vs: f.variable_symbol,
-      castkaHaleru: Math.round(f.amount * 100),
-      dodavatel: f.supplier,
-      datum: f.due_date ?? f.issue_date,
-    }))
+  // 1. Návrhy párování — nezaplacené faktury v Kč proti nedávným výdajovým
+  // transakcím (stejná sdílená funkce jako v Platbách).
+  const kandidati = kandidatiProNavrhy(faktury.filter(jeNezaplacena))
+  if (kandidati.length > 0) {
 
     const supabase = await getServerSupabase()
     const [transakceRes, sparovaneRes] = await Promise.all([
@@ -133,19 +131,22 @@ export async function nactiPolozkyKPozornosti(
   // ne stovky stejných (v provozu jich čeká přes 500).
   const keKontrole = faktury.filter(potrebujeKontrolu)
   if (keKontrole.length > 0) {
+    // Součet jen faktur v Kč (sloupec je v Kč) — cizí měnu jen vyjmenovat.
+    const vCiziMene = keKontrole.filter((f) => !jeVKorunach(f.currency)).length
     polozky.push({
       klic: 'faktury-ke-kontrole',
       typ: 'faktura_kontrola',
-      popis: keKontrole.length === 1
+      popis: (keKontrole.length === 1
         ? `Faktura ${keKontrole[0].supplier || '—'} (${keKontrole[0].invoice_number ?? 'bez čísla'}) vyžaduje ruční kontrolu`
-        : `${keKontrole.length} faktur vyžaduje ruční kontrolu`,
+        : `${keKontrole.length} faktur vyžaduje ruční kontrolu`)
+        + (vCiziMene > 0 ? ` (${vCiziMene} v cizí měně, částka bez nich)` : ''),
       stredisko: '—',
-      castkaHaleru: keKontrole.reduce((soucet, f) => soucet + Math.round((f.amount ?? 0) * 100), 0),
+      castkaHaleru: keKontrole.filter((f) => jeVKorunach(f.currency)).reduce((soucet, f) => soucet + (f.castka_haleru ?? 0), 0),
       stav: 'nutne',
       akceHref: `/${rozsah}/finance/faktury/seznam?kontrola=1`,
       akceText: 'Zkontrolovat',
     })
   }
 
-  return polozky
+  return { polozky, hlaska: null }
 }

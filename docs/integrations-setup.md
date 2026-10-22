@@ -15,7 +15,7 @@ nebo **čeká na připojení** — nikdy "připojeno", dokud není ověřeno.
 | MET Norsko (počasí) | `lib/pocasi.ts` | — (veřejné API) | Funkční, vlastní User-Agent dle ToS poskytovatele. |
 | Supabase Storage | všude přes `lib/supabase/*` | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Funkční, signed URL pro privátní přílohy. |
 | Web Push (VAPID) | `lib/komunikace/web-push.ts` | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (chybí v `.env.example` — ověř se Šéfíkem) | Standardní W3C Web Push, bez klíčů `nakonfigurovano: false`. |
-| Faktury (databáze) | `lib/supabase/faktury.ts` | `FAKTURY_SUPABASE_URL`, `FAKTURY_SUPABASE_ANON_KEY` | Funkční, ale samostatný Supabase projekt bez sdíleného přihlášení — viz `docs/tenant-isolation.md`. |
+| Faktury (stará databáze) | `lib/supabase/faktury.ts` | `FAKTURY_SUPABASE_URL`, `FAKTURY_SUPABASE_ANON_KEY`, `FAKTURY_DB_TENANT_ID` | Od sloučení (docs/faktury-slouceni-navrh.md) jen pro úlohu převodu; faktury jsou v hlavní databázi. Po úklidu proměnné smazat. |
 
 ## Čeká na připojení (adaptér/kód neexistuje)
 

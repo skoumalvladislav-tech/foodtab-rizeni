@@ -7,6 +7,7 @@ import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../../nadpis'
 import { zalozitFakturu } from '../akce'
+import { MENY_RUCNIHO_ZADANI, STAVY_RUCNIHO_ZADANI } from '@/lib/faktury-types'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,7 +40,6 @@ const pole = {
 
 const popisek = { display: 'block', fontSize: '13px', color: 'var(--muted)', marginBottom: '4px' } as const
 
-const STAVY_UHRADY = ['Ke kontrole úhrady', 'Neuhrazeno', 'Částečně uhrazeno', 'Uhrazeno']
 
 export default async function FakturyNova({
   params,
@@ -77,7 +77,7 @@ export default async function FakturyNova({
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '640px' }}>
         {chyba ? (
           <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--bad)' }}>
-            Fakturu se nepodařilo uložit: {chyba}. Zkontrolujte, že jsou vyplněny dodavatel a částka (číslo), a zkuste to znovu.
+            Fakturu se nepodařilo uložit: {chyba}
           </p>
         ) : null}
 
@@ -86,9 +86,9 @@ export default async function FakturyNova({
 
           <label>
             <span style={popisek}>Vyfotit / nahrát fakturu</span>
-            <input type="file" name="fotografie" accept="image/*" style={pole} />
+            <input type="file" name="fotografie" accept="image/jpeg,image/png,image/webp,application/pdf" style={pole} />
             <small style={{ display: 'block', marginTop: '6px', fontSize: '12px', color: 'var(--muted)' }}>
-              Volitelné — nahradí odkaz na PDF níže, pokud vyplníte obojí.
+              Volitelné — JPEG, PNG, WebP nebo PDF do 1 MB (větší fotku zmenšete). Uloží se k faktuře (neveřejně, otevře ho jen ten, kdo vidí Faktury).
             </small>
           </label>
 
@@ -121,15 +121,13 @@ export default async function FakturyNova({
             <label>
               <span style={popisek}>Měna</span>
               <select name="currency" defaultValue="CZK" style={pole}>
-                <option value="CZK">CZK</option>
-                <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
+                {MENY_RUCNIHO_ZADANI.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </label>
             <label>
               <span style={popisek}>Stav úhrady</span>
               <select name="status" defaultValue="Ke kontrole úhrady" style={pole}>
-                {STAVY_UHRADY.map((s) => <option key={s} value={s}>{s}</option>)}
+                {STAVY_RUCNIHO_ZADANI.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
             <label>

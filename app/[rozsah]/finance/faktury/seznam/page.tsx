@@ -4,10 +4,12 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { jeRozsahFirmy } from '../../jen-pro-firmu'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { hlaskaBrany } from '@/lib/faktury-brana'
+import { naFaktury, odkazNaPrilohu, SLOUPCE_FAKTURY, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { barvaDodavatele, inicialyDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
-import { STAV_ODMITNUTO, STAV_UHRAZENO, type Faktura } from '@/lib/faktury-types'
+import { STAV_ODMITNUTO, STAV_UHRAZENO } from '@/lib/faktury-types'
 import { smiOznacitUhrazenou } from '@/lib/finance-parovani'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
 import Sdeleni from '@/app/sdeleni'
@@ -95,37 +97,37 @@ export default async function FakturySeznam({
 
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') {
-    return <Sdeleni nadpis="Faktury pro tuto firmu nejsou napojené">Databáze faktur patří jiné firmě, nebo není nastavená.</Sdeleni>
+    const h = hlaskaBrany(pristupFaktury)
+    return <Sdeleni nadpis={h.nadpis}>{h.text}</Sdeleni>
   }
-  const supabase = pristupFaktury.faktury
   const od = (pozadovanaStrana - 1) * NA_STRANU
 
-  let dotazDat = supabase.from('invoices').select('*')
+  let dotazDat = fakturyFirmy(pristupFaktury, SLOUPCE_FAKTURY)
     .order('duzp', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
   dotazDat = pouzitFiltry(dotazDat, filtry)
 
-  let dotazPoctu = supabase.from('invoices').select('*', { count: 'exact', head: true })
+  let dotazPoctu = fakturyFirmy(pristupFaktury, 'id', { count: 'exact', head: true })
   dotazPoctu = pouzitFiltry(dotazPoctu, filtry)
 
   const [{ data, error }, { count }, { count: archivovanychCelkem }] = await Promise.all([
     dotazDat.range(od, od + NA_STRANU - 1),
     dotazPoctu,
-    supabase.from('invoices').select('*', { count: 'exact', head: true }).eq('is_archived', true),
+    fakturyFirmy(pristupFaktury, 'id', { count: 'exact', head: true }).eq('archivovano', true),
   ])
 
   if (error) console.error(error)
-  const radky = (data ?? []) as Faktura[]
+  const radky = naFaktury(data as unknown as RadekFaktury[] | null)
   const celkem = count ?? 0
   const celkemStran = Math.max(1, Math.ceil(celkem / NA_STRANU))
   const aktualniStrana = Math.min(pozadovanaStrana, celkemStran)
 
   // Měsíce DUZP pro chipy — nezávisle na ostatních filtrech, čte se jen sloupec duzp.
-  const mesicniDotaz = supabase.from('invoices').select('duzp').eq('is_archived', filtry.archiv)
+  const mesicniDotaz = fakturyFirmy(pristupFaktury, 'duzp').eq('archivovano', filtry.archiv)
   const { data: mesicniData } = filtry.archiv || filtry.stav === STAV_ODMITNUTO
     ? await mesicniDotaz
-    : await mesicniDotaz.neq('status', STAV_ODMITNUTO)
+    : await mesicniDotaz.neq('stav', STAV_ODMITNUTO)
   const mesice = Array.from(new Set(
-    ((mesicniData ?? []) as { duzp: string | null }[]).map((r) => r.duzp?.slice(0, 7)).filter((x): x is string => Boolean(x)),
+    ((mesicniData ?? []) as unknown as { duzp: string | null }[]).map((r) => r.duzp?.slice(0, 7)).filter((x): x is string => Boolean(x)),
   )).sort((a, b) => b.localeCompare(a))
 
   const zaklad = `/${rozsah}/finance/faktury/seznam`
@@ -256,10 +258,10 @@ export default async function FakturySeznam({
                       ) : null}
                     </td>
                     <td style={{ padding: '10px 12px' }}>
-                      {f.pdf_url ? <a href={f.pdf_url} target="_blank" rel="noreferrer">PDF</a> : null}
-                      {f.pdf_url && f.onedrive_url ? ' · ' : null}
+                      {odkazNaPrilohu(f) ? <a href={odkazNaPrilohu(f) ?? undefined} target="_blank" rel="noreferrer">PDF</a> : null}
+                      {odkazNaPrilohu(f) && f.onedrive_url ? ' · ' : null}
                       {f.onedrive_url ? <a href={f.onedrive_url} target="_blank" rel="noreferrer">OneDrive</a> : null}
-                      {!f.pdf_url && !f.onedrive_url ? '–' : null}
+                      {!odkazNaPrilohu(f) && !f.onedrive_url ? '–' : null}
                     </td>
                     {smiSpravovat ? (
                       <td style={{ padding: '10px 12px', textAlign: 'right' }}>
