@@ -1546,3 +1546,84 @@ transakci (dřív „best-effort" do druhé databáze).
   nedovolí Vercel). Je to jedno nastavení, ale platí pro všechny
   formuláře appky — proto jen na váš pokyn. Druhá možnost: zmenšovat
   fotku v prohlížeči před odesláním (samostatná práce).
+
+## 66. Kiosek Jiných plateb — kolik dokladů smí poslat jeden telefon
+
+**Vzniklo:** 22. 10. 2026, zadání „kiosek do telefonu jako je na docházku“
+(PR kiosku Jiných plateb). Telefon na baru nemá přihlášeného člověka
+ani PIN, takže jedinou brzdou proti omylu nebo zneužití je strop na
+zařízení.
+
+- **Teď:** z jednoho telefonu odejde nejvýš **20 dokladů za hodinu**
+  a **60 za 24 hodin**. Pak telefon napíše, ať se to zkusí za chvíli
+  nebo ať se dá vědět vedoucímu. Strop hlídá databáze.
+- **Proč:** běžná směna pošle pár dokladů; víc než 20 za hodinu je
+  spíš zaseknutý telefon nebo omyl. Každý doklad pak někdo ve Financích
+  kontroluje, takže stovka prázdných záznamů by zahltila jeho frontu.
+- **Když to má být jinak:** řekněte čísla (dvě konstanty v migraci,
+  `app.jp_kiosek_strop_hodina` a `app.jp_kiosek_strop_den`). Jde i strop
+  na pobočku místo na zařízení.
+
+## 67. Kiosek Jiných plateb — spouštět rozpoznání AI hned po odeslání?
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Zadání říká, že AI se
+„může spustit samo (v limitu AI)“.
+
+- **Teď:** z kiosku se **AI samo nespouští**. Doklad přijde do Finance →
+  Tržby → Jiné platby a rozpoznání spustí ten, kdo ho kontroluje
+  (tlačítko „Rozpoznat z dokladu“, stejný denní strop jako dnes).
+- **Proč:** každé čtení se platí a telefon na baru nemá nikoho, kdo by
+  hlídal, jestli neposílá rozmazané nebo zdvojené fotky. Rozpoznání
+  navíc ukládá návrh pod uživatelem s právem „upravit“ — kiosek žádného
+  nemá a muselo by se pro něj udělat zvláštní obejití.
+- **Když to má být jinak:** „spouštět samo“ — po odeslání by server
+  rozpoznání zahájil sám (v denním stropu AI firmy) a návrh uložil jako
+  „rozpoznáno z kiosku, ke kontrole“. Je to samostatná práce (asi den).
+
+## 68. Kiosek Jiných plateb — pokladna u dokladu z telefonu
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Ve Financích se pokladna
+vybírá při založení a později už změnit nejde; obsluha na telefonu ji
+vybírat nemá.
+
+- **Teď:** záznam z kiosku dostane pokladnu pobočky **sám, jen když ji
+  pobočku obsluhuje právě jedna** (i pokladna celé firmy s provozovnou
+  té pobočky). Když jich je víc (nebo žádná), záznam je bez pokladny
+  a kontrolu v pokladně ve Financích zapíší ručním prohlášením.
+- **Proč:** u víc pokladen by appka hádala — a špatná pokladna by
+  kontrolu „je prodej v pokladně?“ hledala jinde, než prodej proběhl.
+- **Když to má být jinak:** u zařízení v Nastavení → Zařízení vybrat,
+  do které pokladny jeho doklady patří (malá úprava), nebo dovolit
+  pokladnu u záznamu ve Financích dodatečně změnit (větší úprava —
+  kontroly a tržby jsou na ni navázané).
+
+## 69. Kiosek Jiných plateb — má telefon ukazovat dnešní odeslané doklady?
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Zadání dovoluje
+„nanejvýš doklady odeslané z téhož zařízení dnes se stavem“.
+
+- **Teď:** telefon **neukazuje nic** kromě potvrzení hned po odeslání
+  („Doklad (3 fotky) odešel v 14:05“). Seznam dnešních dokladů ani jejich
+  stav tam není.
+- **Proč:** nejopatrnější varianta — kdo vezme telefon do ruky, nedozví
+  se nic o tom, co poslali jiní (označení účtu může obsahovat jméno
+  hosta nebo firmy). Potvrzení stačí, aby obsluha věděla, že doklad
+  odešel.
+- **Když to má být jinak:** seznam dnešních dokladů z téhož telefonu
+  s časem, počtem fotek a stavem „přijato / zkontrolováno“ (bez částek).
+  Je to malá úprava, databáze by vracela jen tyhle tři údaje.
+
+## 70. Kiosek Jiných plateb — jedno zařízení pro Docházku i doklady?
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Telefon se páruje stejně
+jako tablet Docházky (zařízení pobočky v Nastavení → Zařízení).
+
+- **Teď:** spárování samo **doklady nepovolí**. U zařízení se musí zvlášť
+  zapnout **Kiosek Jiných plateb** (správce nastavení pobočky). Tablet
+  Docházky tedy novou schopnost nedostal potichu. Opačně to platí jako
+  dosud: každé spárované zařízení pobočky umí ukázat i kiosek Docházky
+  (píchnutí chce PIN).
+- **Proč:** zapnutí je výslovné a dohledatelné (audit) a vypnutí platí
+  hned. Kdo telefon ztratí, odvolá ho tamtéž jako tablet.
+- **Když to má být jinak:** „telefon jen na doklady“ — zařízení by mělo
+  vypínač i pro Docházku. Je to úprava kiosku Docházky, proto zvlášť.

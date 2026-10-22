@@ -12,6 +12,7 @@ Finance → Tržby → Jiné platby. Stav k 20. 10. 2026.
 | Kontrola „je prodej už v pokladně?“ u Dotykačky | **Testováno** na podvržených odpovědích podle oficiální dokumentace. Na skutečné Dotykačce neběželo. |
 | Výdej ze skladu přímo do Dotykačky | **Připraveno, ale vypnuté.** Dnes ho schvalovatel provede v Dotykačce sám a v appce ho doloží (viz níž). |
 | Vystavení faktury z appky | **Blokováno** (otázka 51). Jde propojit fakturu vystavenou v pokladně nebo v účetním programu. |
+| Kiosek na telefonu (vyfotit účet bez přihlášení) | **V PR, nenasazený** (migrace `20261022100000_jine_platby_kiosek`). Testováno testy appky a scénářem krok100. Na skutečném telefonu ani se skutečným úložištěm Supabase zatím neběželo. |
 
 Podrobnosti o pokladně jsou v `docs/jine-platby-pos-operace.md`.
 
@@ -48,6 +49,28 @@ Kdo má jen práva Jiných plateb a nemá finanční přehled, vidí v navigaci 
 - Majitel má všechno automaticky. Ostatním je potřeba práva přidělit, sama se nikomu nepřidala.
 
 ---
+
+## Obsluha na telefonu: kiosek Jiných plateb
+
+Obsluha nemusí mít přístup do Financí ani se přihlašovat. Na provozovně je **telefon pobočky** a funguje podobně jako tablet Docházky:
+
+1. **Jednou spárovat** (správce nastavení pobočky):
+   - V appce otevřete **Nastavení → Zařízení** a vystavte registrační kód (platí 15 minut, jde použít jednou).
+   - Na telefonu otevřete adresu **`/kiosek/doklady`**. Doporučujeme ji nejdřív přidat na plochu: Android, Chrome: ⋮ → *Přidat na plochu*; iPhone, Safari: Sdílet → *Přidat na plochu*. Pak ji otevřete ikonou **Doklady** a kód opište až tam.
+   - V **Nastavení → Zařízení** u telefonu klikněte **Zapnout** u „Kiosek Jiných plateb“. Samotné spárování doklady nepovolí.
+2. **Vyfotit a odeslat** (kdokoli u telefonu):
+   - **Vyfotit**, případně další fotky, nebo **Vybrat z galerie** (i PDF). Fotka se sama zmenší.
+   - Nepovinně připsat **označení účtu nebo poznámku**, třeba „stůl 4, firma Novák“.
+   - **Odeslat doklad.** Telefon ukáže jen „Doklad (3 fotky) odešel v 14:05“.
+3. **Ve Financích** se doklad objeví v Jiných platbách pobočky jako **rozpracovaný**. Jako autor je uvedené zařízení, ne člověk (třeba „kiosek Telefon u baru“). Rozpoznání AI, kontrolu, tržbu, sklad a fakturu dělají lidé s právy Jiných plateb jako u každého záznamu.
+
+Co telefon **neumí** a nevidí:
+- Žádná finanční data, žádné záznamy, nic dalšího ani po odeslání (otázka 69).
+- Přidat fotky jde jen k dokladu, který telefon právě odeslal, a jen do dvou hodin.
+- Z jednoho telefonu odejde nejvýš 20 dokladů za hodinu a 60 za den (otázka 66).
+- Pokladnu u dokladu doplní appka sama, jen když ji pobočka má jedinou (otázka 68). AI se samo nespouští (otázka 67).
+
+Ztracený telefon **odvolejte** v Nastavení → Zařízení. Kiosek u něj jde také jen **vypnout**. Obojí platí hned: další odeslání z telefonu neprojde.
 
 ## Obsluha: založit záznam a připravit návrh
 
