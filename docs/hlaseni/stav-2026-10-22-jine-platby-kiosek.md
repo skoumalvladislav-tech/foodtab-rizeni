@@ -5,7 +5,7 @@ telefonu jako je na docházku. účty je potřeba vyfotit přes telefon,
 a obsluha nemá přístup k modulu finance.“ Upřesnění: „nepotřebujeme se
 přihlásit pinem“.
 
-Větev `jine-platby-kiosek`, PR @@PR@@. Nová migrace
+Větev `jine-platby-kiosek`, PR #151. Nová migrace
 `20261022100000_jine_platby_kiosek` (novější než všechny v `main`).
 
 ## Nejdřív to podstatné
