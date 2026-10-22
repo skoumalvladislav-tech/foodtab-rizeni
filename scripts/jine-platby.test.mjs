@@ -40,7 +40,16 @@ const O = await import('../lib/jine-platby-pos-operace.ts')
  * Prázdný text, když migrace není (kontroly pak spadnou na „podařilo se najít").
  */
 const MIGRACE_CESTA = process.env.JP_TEST_MIGRACE ?? new URL('../supabase/migrations/20261016100000_jine_platby.sql', import.meta.url)
-const textMigrace = () => (existsSync(MIGRACE_CESTA) ? readFileSync(MIGRACE_CESTA, 'utf8').replace(/\r\n/g, '\n') : '')
+// Opravná migrace 20261021100000 (ověření 21. 10.) předefinuje část funkcí — zrcadla čtou POSLEDNÍ definici.
+const MIGRACE_OPRAVA_CESTA = process.env.JP_TEST_MIGRACE_OPRAVA ?? new URL('../supabase/migrations/20261021100000_jine_platby_pojistky_pokladny.sql', import.meta.url)
+const cist = (c) => (existsSync(c) ? readFileSync(c, 'utf8').replace(/\r\n/g, '\n') : '')
+const textOpravy = () => cist(MIGRACE_OPRAVA_CESTA)
+const textMigrace = () => cist(MIGRACE_CESTA) + '\n' + textOpravy()
+/** Tělo POSLEDNÍ definice funkce (create function / create or replace function). */
+const teloFunkce = (sql, jmeno) => {
+  const od = Math.max(sql.lastIndexOf(`create function ${jmeno}(`), sql.lastIndexOf(`create or replace function ${jmeno}(`))
+  return od >= 0 ? sql.slice(od, sql.indexOf('end $$;', od)) : ''
+}
 
 let chyb = 0
 let proslo = 0
@@ -747,8 +756,7 @@ console.log('\n== Převod do jednotek pokladny (jen z dat pokladny) ==')
       /`p_bez_surovin = true`/.test(mapovaniZdroj) && !/databáze to nevynucuje/.test(mapovaniZdroj) && !/databáze\s+nevynucují/.test(mapovaniZdroj))
   {
     const sqlS = textMigrace()
-    const od = sqlS.indexOf('create function public.jine_platby_rozhodnout_vydej(')
-    const telo = od >= 0 ? sqlS.slice(od, sqlS.indexOf('end $$;', od)) : ''
+    const telo = teloFunkce(sqlS, 'public.jine_platby_rozhodnout_vydej')
     ok('… komentář sedí s migrací: rozhodnout_vydej má p_bez_surovin a bez něj varování schválení odmítne',
       /p_bez_surovin boolean default false/.test(telo) && /'varovani'[\s\S]{0,80}and not coalesce\(p_bez_surovin, false\)/.test(telo))
     ok('… a varování dává jen pokrm + KUSOVÉ zboží (rozlévaný nápoj ne), jak říká komentář',
@@ -762,7 +770,7 @@ const zaznam = (o = {}) => ({
   mena: 'CZK', castkaHaleru: 27900, castkaPuvod: 'doklad', typDokladu: 'uzavreny_prodej', externiUcet: '1234', posProdejId: null,
   stavKontroly: 'zkontrolovano', stavTrzby: 'nezapsano', stavSkladu: 'bez_navrhu', stavFaktury: 'bez_faktury', fakturaCislo: null, fakturaZdroj: null,
   fakturaCastkaHaleru: null, stavUhrady: 'neovereno', uhradaTransakceId: null, uhradaCastkaHaleru: null, kontrolaTrzby: null, kontrolaSkladu: null,
-  pokladnaTrzby: null, pokladnaSkladu: null, verze: 3, vytvoril: null, vytvoreno: '2026-10-15T10:00:00Z', zmeneno: '2026-10-15T10:00:00Z', ...o,
+  pokladnaTrzby: null, pokladnaSkladu: null, nedohledanaOperace: null, verze: 3, vytvoril: null, vytvoreno: '2026-10-15T10:00:00Z', zmeneno: '2026-10-15T10:00:00Z', ...o,
 })
 const TED = Date.parse('2026-10-16T12:00:00Z')
 const pred = (min) => new Date(TED - min * 60_000).toISOString()
@@ -986,24 +994,100 @@ console.log('\n== Dostupné akce ==')
       S.prohlaseniProtiPokladne(zaznam({ pokladnaSkladu: null }), 'sklad') === null)
   ok('prohlaseniProtiPokladne: druhy se nepletou (výsledek skladu nebrání prohlášení tržby a naopak)',
     S.prohlaseniProtiPokladne(zaznam({ pokladnaSkladu: kSkl() }), 'trzba') === null && S.prohlaseniProtiPokladne(zaznam({ pokladnaTrzby: kTv('nalezeno') }), 'sklad') === null)
+
+  // Konkrétní nález pokladny (migrace 20261021100000, ověření 21. 10.).
+  const kPr = { kdo: 'U9', kdy: pred(1), vysledek: 'nenalezeno', duvod: 'Jiný host, ověřeno' }
+  ok('nalezPokladny tržba: „nalezeno", „pravdepodobne" se shodou čísla účtu i bez uvedené shody → ano; shoda jen částky → ne',
+    S.nalezPokladny(kTv('nalezeno'), 'trzba') && S.nalezPokladny(kT({ vysledek: 'pravdepodobne', detail: { shoda: 'cislo_vice' } }), 'trzba') &&
+      S.nalezPokladny(kTv('pravdepodobne'), 'trzba') && !S.nalezPokladny(kCastka(), 'trzba'))
+  ok('nalezPokladny: „nenalezeno", „nelze_overit", ruční prohlášení, se značkou přepisu, null → ne',
+    !S.nalezPokladny(kTv('nenalezeno'), 'trzba') && !S.nalezPokladny(kTv('nelze_overit'), 'trzba') &&
+      !S.nalezPokladny(kT({ vysledek: 'nalezeno', zdroj: 'rucni_prohlaseni' }), 'trzba') && !S.nalezPokladny(kT({ vysledek: 'nalezeno', prepsano: kPr }), 'trzba') &&
+      !S.nalezPokladny(null, 'trzba'))
+  ok('nalezPokladny sklad: jen „jiz_odecteno" z pokladny bez značky přepisu',
+    S.nalezPokladny(kSkl(), 'sklad') && !S.nalezPokladny(kSkl({ vysledek: 'neodecteno' }), 'sklad') && !S.nalezPokladny(kSkl({ prepsano: kPr }), 'sklad') &&
+      !S.nalezPokladny(kTv('nalezeno'), 'sklad'))
+  ok('prohlaseniProtiPokladne: výsledek se značkou přepisu (rozhodl člověk) nebrání — tržba i sklad (falešná blokace, ověření 21. 10.)',
+    S.prohlaseniProtiPokladne(zaznam({ pokladnaTrzby: kT({ vysledek: 'nalezeno', prepsano: kPr }) }), 'trzba') === null &&
+      S.prohlaseniProtiPokladne(zaznam({ pokladnaSkladu: kSkl({ prepsano: kPr }) }), 'sklad') === null)
+  const cestaB = zaznam({ kontrolaTrzby: kT({ vysledek: 'nenalezeno', kdy: pred(1) }), pokladnaTrzby: kT({ vysledek: 'nalezeno', detail: { pos_prodej_id: 'POS-B7' } }) })
+  ok('cesta B: čerstvá kontrola „nenalezeno" proti nálezu pokladny → bez potvrdit_trzbu (nová tržba ne, propojit není s čím)', !S.dostupneAkce(cestaB, VSE, m()).has('potvrdit_trzbu'))
+  ok('cesta B (protipříklad): nález se značkou přepisu, nebo žádný nález → potvrdit_trzbu je',
+    S.dostupneAkce({ ...cestaB, pokladnaTrzby: { ...cestaB.pokladnaTrzby, prepsano: kPr } }, VSE, m()).has('potvrdit_trzbu') &&
+      S.dostupneAkce({ ...cestaB, pokladnaTrzby: null }, VSE, m()).has('potvrdit_trzbu'))
+  ok('cesta B (protipříklad): „pravděpodobně" (jen propojit) proti nálezu → potvrdit_trzbu je',
+    S.dostupneAkce({ ...cestaB, kontrolaTrzby: kT({ vysledek: 'pravdepodobne', kdy: pred(1), detail: { shoda: 'castka' } }) }, VSE, m()).has('potvrdit_trzbu'))
+  const odecteno = { pokladnaSkladu: kSkl({ detail: { zdroj_shody: 'prodej', externi_id: 'POS-S8' } }) }
+  ok('cesta B sklad: „už odečteno" z pokladny + novější „neodečteno" → bez provest_vydej a vydej_znovu',
+    !schv(odecteno).has('provest_vydej') &&
+      !S.dostupneAkce(zaznam({ stavSkladu: 'chyba', kontrolaSkladu: kSk(), ...odecteno }), VSE, m({ stavOperace: 'chyba', maZiveNavrhSkladu: true })).has('vydej_znovu'))
+  ok('cesta B sklad (protipříklad): se značkou přepisu provest_vydej i vydej_znovu jsou',
+    schv({ pokladnaSkladu: kSkl({ prepsano: kPr }) }).has('provest_vydej') &&
+      S.dostupneAkce(zaznam({ stavSkladu: 'chyba', kontrolaSkladu: kSk(), pokladnaSkladu: kSkl({ prepsano: kPr }) }), VSE, m({ stavOperace: 'chyba', maZiveNavrhSkladu: true })).has('vydej_znovu'))
+  // Cesta C (čtvrté ověření 22. 10.): zrušení záznamu s nálezem nebo značkou jen s právem na opravy.
+  const NEDOH = { operace: 'OP1', klic: 'ftjp-op1', stav: 'nejasny_vysledek', kdy: pred(30) }
+  const bezOpravy = new Set([...VSE].filter((p) => p !== 'jine_platby.oprava'))
+  const jakoAutor = (o) => S.dostupneAkce(zaznam({ vytvoril: 'U1', ...o }), bezOpravy, m({ uzivatelId: 'U1' }))
+  ok('zruseniChceOpravu: nález tržby, nález skladu, nedohledaný požadavek → ano; slabý výsledek, se značkou přepisu, nic → ne',
+    S.zruseniChceOpravu(zaznam({ pokladnaTrzby: kTv('nalezeno') })) && S.zruseniChceOpravu(zaznam({ pokladnaSkladu: kSkl() })) &&
+      S.zruseniChceOpravu(zaznam({ nedohledanaOperace: NEDOH })) && !S.zruseniChceOpravu(zaznam({ pokladnaTrzby: kCastka() })) &&
+      !S.zruseniChceOpravu(zaznam({ pokladnaTrzby: kT({ vysledek: 'nalezeno', prepsano: kPr }) })) && !S.zruseniChceOpravu(zaznam({})))
+  ok('cesta C: autor bez práva na opravy — „Zrušit“ ne u nálezu tržby, nálezu skladu ani nedohledaného požadavku',
+    !jakoAutor({ pokladnaTrzby: kTv('nalezeno') }).has('zrusit') && !jakoAutor({ pokladnaSkladu: kSkl() }).has('zrusit') &&
+      !jakoAutor({ nedohledanaOperace: NEDOH }).has('zrusit'))
+  ok('cesta C (protipříklad): autor bez nálezu „Zrušit“ má; s právem na opravy i s nálezem',
+    jakoAutor({}).has('zrusit') && jakoAutor({ pokladnaTrzby: kCastka() }).has('zrusit') &&
+      S.dostupneAkce(zaznam({ pokladnaTrzby: kTv('nalezeno'), nedohledanaOperace: NEDOH }), VSE, m()).has('zrusit'))
+  const kSchvaleni = zaznam({ stavSkladu: 'ceka_na_schvaleni', kontrolaSkladu: kSk() })
+  ok('muzeSchvalitVydej: „neodečteno" ano, ale ne proti nálezu „už odečteno"; se značkou přepisu zase ano',
+    S.muzeSchvalitVydej(kSchvaleni, TED) && !S.muzeSchvalitVydej({ ...kSchvaleni, ...odecteno }, TED) &&
+      S.muzeSchvalitVydej({ ...kSchvaleni, pokladnaSkladu: kSkl({ prepsano: kPr }) }, TED))
   {
     // Zrcadlo = databáze: pojistka v jine_platby_prohlasit nestojí na verzi a „pravděpodobně" nechce právo na opravy.
     const sqlP = textMigrace()
-    const od = sqlP.indexOf('create function public.jine_platby_prohlasit(')
-    const telo = od >= 0 ? sqlP.slice(od, sqlP.indexOf('end $$;', od)) : ''
+    const telo = teloFunkce(sqlP, 'public.jine_platby_prohlasit')
     const prepis = /v_prepis := ([\s\S]*?);\n/.exec(telo)?.[1] ?? ''
     ok('(migrace: podmínku v_prepis v jine_platby_prohlasit se podařilo najít)', prepis.length > 50)
     ok('… v_prepis nestojí na verzi a brání týmiž výsledky jako zrcadlo (trzba nalezeno/pravdepodobne, sklad jiz_odecteno)',
       !/verze/.test(prepis) && /'vysledek' in \('nalezeno', 'pravdepodobne'\)/.test(prepis) && /'vysledek' = 'jiz_odecteno'/.test(prepis) && /'zdroj' = 'pos_api'/.test(prepis))
-    ok('… bez práva na opravy jen „pravdepodobne" ze shody samotné částky (chceOpravu)',
-      /not \(v_stara ->> 'vysledek' = 'pravdepodobne' and v_stara -> 'detail' ->> 'shoda' = 'castka'\)\s+and not app\.has_access\(v_z\.tenant_id, 'jine_platby\.oprava'/.test(telo))
+    ok('… bez práva na opravy jen „pravdepodobne" ze shody samotné částky (chceOpravu = app.jp_nalez_pokladny, bez NULL)',
+      /if app\.jp_nalez_pokladny\(v_stara, p_druh\)\s+and not app\.has_access\(v_z\.tenant_id, 'jine_platby\.oprava'/.test(telo))
+    ok('… výsledek se značkou přepisu nebrání (zrcadlo: `prepsano` → null)', /v_prepis := v_stara ->> 'zdroj' = 'pos_api' and not \(v_stara \? 'prepsano'\)/.test(telo))
+    const nalezSql = /create function app\.jp_nalez_pokladny\(p_k jsonb, p_druh text\)[\s\S]*?\$\$;/.exec(textOpravy())?.[0] ?? ''
+    ok('nalezPokladny = app.jp_nalez_pokladny: pos_api bez prepsano; tržba nalezeno, nebo pravdepodobne se shodou jinou než castka (i bez shody); sklad jiz_odecteno',
+      /p_k ->> 'zdroj' = 'pos_api' and not \(p_k \? 'prepsano'\)/.test(nalezSql) &&
+        /when 'trzba' then p_k ->> 'vysledek' = 'nalezeno'\s+or \(p_k ->> 'vysledek' = 'pravdepodobne' and coalesce\(p_k -> 'detail' ->> 'shoda', ''\) <> 'castka'\)/.test(nalezSql) &&
+        /when 'sklad' then p_k ->> 'vysledek' = 'jiz_odecteno'/.test(nalezSql) && /^\s*select coalesce\(/m.test(nalezSql))
     ok('… pojistka čte poslední výsledek POKLADNY (pokladna_trzby / pokladna_skladu), ne poslední kontrolu',
       /v_stara := case when p_druh = 'trzba' then v_z\.pokladna_trzby else v_z\.pokladna_skladu end;/.test(telo))
-    const odK = sqlP.indexOf('create function public.jine_platby_zapsat_kontrolu(')
-    const teloK = odK >= 0 ? sqlP.slice(odK, sqlP.indexOf('end $$;', odK)) : ''
-    ok('… sloupce pokladna_* píše jen jine_platby_zapsat_kontrolu (dotaz do pokladny), nikde jinde v migraci',
-      /kontrola_trzby = v_k, pokladna_trzby = v_k/.test(teloK) && /kontrola_skladu = v_k, pokladna_skladu = v_k/.test(teloK) &&
-        (sqlP.match(/pokladna_(trzby|skladu) = /g) ?? []).length === 2)
+    const teloK = teloFunkce(sqlP, 'public.jine_platby_zapsat_kontrolu')
+    const oprava = textOpravy()
+    ok('… sloupce pokladna_* píše kontrola v pokladně; ruční prohlášení jen značku přepisu (nikdy výsledek), nikde nic jiného',
+      /kontrola_trzby = v_k, pokladna_trzby = v_pokladna/.test(teloK) && /kontrola_skladu = v_k, pokladna_skladu = v_pokladna/.test(teloK) &&
+        /pokladna_trzby = case when v_znacka is null then pokladna_trzby else pokladna_trzby \|\| jsonb_build_object\('prepsano', v_znacka\) end/.test(telo) &&
+        /pokladna_skladu = case when v_znacka is null then pokladna_skladu else pokladna_skladu \|\| jsonb_build_object\('prepsano', v_znacka\) end/.test(telo) &&
+        (oprava.match(/pokladna_(trzby|skladu) = /g) ?? []).length === 4)
+    ok('… konkrétní nález slabší výsledek nepřepíše (zapsat_kontrolu: ponechat v_stara, když nový nález není)',
+      /if app\.jp_nalez_pokladny\(v_stara, p_druh\) and not app\.jp_nalez_pokladny\(v_k, p_druh\) then\s+v_pokladna := v_stara;/.test(teloK))
+    ok('… nová tržba, schválení, opakování i zahájení výdeje stojí na tomtéž nálezu (zrcadlo dostupneAkce / muzeSchvalitVydej)',
+      /if app\.jp_nalez_pokladny\(v_z\.pokladna_trzby, 'trzba'\) then/.test(teloFunkce(sqlP, 'public.jine_platby_potvrdit_trzbu')) &&
+        ['public.jine_platby_rozhodnout_vydej', 'public.jine_platby_vydej_znovu', 'public.pos_operace_zahajit'].every((f) =>
+          /if app\.jp_nalez_pokladny\(v_z\.pokladna_skladu, 'sklad'\) then/.test(teloFunkce(sqlP, f))))
+    const zdrojeSql = /v_t\.zdroj not in \(([^)]*)\)/.exec(teloFunkce(sqlP, 'public.jine_platby_evidovat_uhradu'))?.[1] ?? ''
+    ok(`ZDROJE_UHRADY = zdroje v jine_platby_evidovat_uhradu (${zdrojeSql || '?'})`,
+      JSON.stringify([...zdrojeSql.matchAll(/'(\w+)'/g)].map((x) => x[1])) === JSON.stringify([...T.ZDROJE_UHRADY]) && T.ZDROJE_UHRADY.length === 3)
+    ok('cesta C: nová tržba a schválení výdeje hlídají i jiné záznamy téhož dokladu nebo prodeje (app.jp_souvisejici: fotka, nebo pobočka + den + částka + měna)',
+      /if exists \(select 1 from app\.jp_souvisejici\(v_z\) s where app\.jp_nalez_pokladny\(s\.pokladna_trzby, 'trzba'\)\)/.test(teloFunkce(sqlP, 'public.jine_platby_potvrdit_trzbu')) &&
+        /where s\.nedohledana_operace is not null or app\.jp_nalez_pokladny\(s\.pokladna_skladu, 'sklad'\)/.test(teloFunkce(sqlP, 'public.jine_platby_rozhodnout_vydej')) &&
+        /s\.branch_id = p_z\.branch_id and s\.datum_prodeje = p_z\.datum_prodeje\s+and s\.castka_haleru = p_z\.castka_haleru and s\.mena = p_z\.mena/.test(textOpravy()) &&
+        /b\.otisk = a\.otisk/.test(textOpravy()))
+    ok('cesta C: zrušení = zruseniChceOpravu (nález tržby, nález skladu, nedohledaný požadavek) bez práva na opravy odmítne',
+      /if \(app\.jp_nalez_pokladny\(v_z\.pokladna_trzby, 'trzba'\) or app\.jp_nalez_pokladny\(v_z\.pokladna_skladu, 'sklad'\)\s+or v_z\.nedohledana_operace is not null\)\s+and not app\.has_access\(v_z\.tenant_id, 'jine_platby\.oprava'/.test(teloFunkce(sqlP, 'public.jine_platby_zrusit')))
+    ok('… zrušený požadavek s nejasným výsledkem: ruční „neodečteno“ jen s právem na opravy, stejná hláška jako akce',
+      /p_druh = 'sklad' and p_vysledek = 'neodecteno' and v_z\.nedohledana_operace is not null/.test(telo) &&
+        telo.includes('Zrušený požadavek do pokladny měl nejasný výsledek a nikdo ho nedohledal. Nejdřív zkontrolujte výdej v pokladně (dohledá i ten požadavek) — ručně „neodečteno“ smí doložit jen člověk s právem na opravy.') &&
+        cist(new URL('../app/[rozsah]/finance/trzby/jine-platby/akce.ts', import.meta.url)).includes(
+          "'Zrušený požadavek do pokladny měl nejasný výsledek a nikdo ho nedohledal. Nejdřív zkontrolujte výdej v pokladně (dohledá i ten požadavek) — ručně „neodečteno“ smí doložit jen člověk s právem na opravy.'"))
   }
 
   // Rozpoznání AI (P5, C9/R3): zapsaná nebo propojená tržba čtení NEBRÁNÍ; schválený nebo provedený výdej ano.
@@ -1018,8 +1102,7 @@ console.log('\n== Dostupné akce ==')
       T.STAVY_SKLADU.filter((st) => !SKLAD_BEZ_CTENI.includes(st)).length === 6)
   {
     const sqlR = textMigrace()
-    const od = sqlR.indexOf('create function public.jine_platby_zahajit_rozpoznani(')
-    const telo = od >= 0 ? sqlR.slice(od, sqlR.indexOf('end $$;', od)) : ''
+    const telo = teloFunkce(sqlR, 'public.jine_platby_zahajit_rozpoznani')
     const vMigraci = [...(/v_z\.stav_skladu in \(([^)]*)\)/.exec(telo)?.[1] ?? '').matchAll(/'(\w+)'/g)].map((x) => x[1]).sort()
     const vZrcadle = T.STAVY_SKLADU.filter((stavSkladu) => !rozp({ stavSkladu })).sort()
     ok(`rozpoznat: stavy bez čtení = jine_platby_zahajit_rozpoznani v migraci (${vMigraci.join(', ') || '?'})`,
@@ -1058,10 +1141,7 @@ console.log('\n== Dostupné akce ==')
     ['odecteno_v_pos', 'bez_navrhu', 'nutna_kontrola', 'ceka_na_schvaleni'].every((st) => ((a) => !a.has('rucne_dolozit') && !a.has('zrusit_schvaleni'))(vychod(st, 'nejasny_vysledek', pred(3)))))
   {
     const sqlV = textMigrace()
-    const teloFce = (jmeno) => {
-      const od = sqlV.indexOf(`create function public.${jmeno}(`)
-      return od >= 0 ? sqlV.slice(od, sqlV.indexOf('end $$;', od)) : ''
-    }
+    const teloFce = (jmeno) => teloFunkce(sqlV, `public.${jmeno}`)
     const hranice = /v_op\.stav in \('odesila_se', 'nejasny_vysledek'\)\s+and \(v_op\.platnost_do is null or v_op\.platnost_do \+ interval '2 minutes' > now\(\)\)/
     ok(`rezerva zrcadla (REZERVA_PO_PLATNOSTI_MS = ${O.REZERVA_PO_PLATNOSTI_MS} ms) = 2 min v jine_platby_rucne_dolozit_vydej i jine_platby_zrusit_schvaleni`,
       O.REZERVA_PO_PLATNOSTI_MS === 120_000 && hranice.test(teloFce('jine_platby_rucne_dolozit_vydej')) && hranice.test(teloFce('jine_platby_zrusit_schvaleni')))

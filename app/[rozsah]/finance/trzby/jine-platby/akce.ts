@@ -245,6 +245,10 @@ function chybaProhlaseni(error: { code?: string | null; message?: string | null 
   return druh === null ? stav : { ...stav, chyby: { [druh === 'pravo' ? 'vysledek' : 'prepsat_pokladnu']: stav.text } }
 }
 
+/** Stejné znění jako `jine_platby_prohlasit` (migrace 20261021100000). */
+const HLASKA_NEDOHLEDANA_OPERACE =
+  'Zrušený požadavek do pokladny měl nejasný výsledek a nikdo ho nedohledal. Nejdřív zkontrolujte výdej v pokladně (dohledá i ten požadavek) — ručně „neodečteno“ smí doložit jen člověk s právem na opravy.'
+
 /** Ruční prohlášení k TRŽBĚ: prodej v pokladně je / není. Právo `jine_platby.trzba`. */
 export async function prohlasitTrzbu(_predchozi: StavAkce, formData: FormData): Promise<StavAkce> {
   const p = await pripravit(formData, 'jine_platby.trzba')
@@ -285,6 +289,10 @@ export async function prohlasitSklad(_predchozi: StavAkce, formData: FormData): 
   const volba = pole(p.f, 'vysledek')
   if (volba === 'nevim') return chyba(NEVIM)
   if (volba !== 'je' && volba !== 'neni') return chybaPole('vysledek', 'Vyberte, jestli pokladna spotřebu odečetla, nebo ne.')
+  // Zrušený požadavek s nejasným výsledkem: „neodečteno“ jen s právem na opravy (databáze to hlídá taky).
+  if (volba === 'neni' && p.z.nedohledanaOperace !== null && !(await hasAccess(p.tenantId, 'jine_platby.oprava', p.z.branchId))) {
+    return chybaPole('vysledek', HLASKA_NEDOHLEDANA_OPERACE)
+  }
   const prepis = await prepsaniPokladny(p, 'sklad', volba)
   if ('chyba' in prepis) return prepis.chyba
   const duvod = duvodZ(p)

@@ -47,6 +47,22 @@ export function SekceHistorie({
 }
 
 /** Zrušení záznamu — jen dokud nic neproběhlo (databáze to hlídá); nevratné, proto dvoukrokové. */
+/**
+ * Autor bez práva na opravy záznam s nálezem pokladny nebo s nedohledaným
+ * požadavkem zrušit nesmí (`zruseniChceOpravu`) — místo tlačítka řekne proč.
+ */
+export function SekceZruseniJenOprava() {
+  return (
+    <section className="ds-plocha" style={{ display: 'grid', gap: '12px', minWidth: 0 }}>
+      <PanelHlava ikona="kos" nadpis="Zrušit záznam" />
+      <Vysvetleni dulezite>
+        Pokladna u záznamu našla konkrétní prodej nebo odpis, nebo k němu patří nedohledaný požadavek do pokladny. Zrušit ho smí jen člověk
+        s právem na opravy — jinak by šel týž doklad zapsat podruhé. Když je záznam navíc, dejte vědět tomu, kdo opravy dělá.
+      </Vysvetleni>
+    </section>
+  )
+}
+
 export function SekceZruseni({ zakl }: { zakl: { zaznam: string; verze: number; rozsah: string } }) {
   return (
     <section className="ds-plocha" style={{ display: 'grid', gap: '12px', minWidth: 0 }}>

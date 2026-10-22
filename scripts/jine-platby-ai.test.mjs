@@ -630,11 +630,18 @@ try {
     tVychozi.v.stav === 'chyba' && tVychozi.v.docasna === false && tVychozi.v.duvod === AI.HLASKA_MOC_DLOUHY && tVychozi.pozadavky.length === 1)
   ok('… hláška radí rozdělit doklad nebo zadat položky ručně, nic o opakování',
     AI.HLASKA_MOC_DLOUHY === 'Doklad je na jedno čtení moc dlouhý — rozdělte ho, nebo zadejte položky ručně.' && !/znovu/.test(AI.HLASKA_MOC_DLOUHY))
-  const tKonec = await sHazenim(preruseni, { konec: Date.now() + 40_000 })
+  // Akce začala před 60 s, termín za 40 s: limit 35 s z původních 95 s → zkrácený.
+  const tKonec = await sHazenim(preruseni, { konec: Date.now() + 40_000, zacatek: Date.now() - 60_000 })
   ok('timeout při limitu ZKRÁCENÉM termínem `konec` (35 s) → DOČASNÁ chyba „nestihlo se, zkuste znovu“ (další pokus dostane plný čas)',
     tKonec.v.stav === 'chyba' && tKonec.v.docasna === true && tKonec.v.duvod === AI.HLASKA_NESTIHLO && /znovu/.test(AI.HLASKA_NESTIHLO) && tKonec.pozadavky.length === 1)
-  const tKonecDaleko = await sHazenim(preruseni, { konec: Date.now() + 600_000 })
-  ok('timeout při termínu `konec` daleko (limit zůstane plných 100 s) → trvalá „moc dlouhý“', tKonecDaleko.v.docasna === false && tKonecDaleko.v.duvod === AI.HLASKA_MOC_DLOUHY)
+  // Jako v produkci (akce-ai.ts): hned na začátku akce, termín = začátek + 100 s → limit 95 s, nic se nezkrátilo.
+  const tProdukce = await sHazenim(preruseni, { konec: Date.now() + 100_000, zacatek: Date.now() })
+  ok('timeout hned na začátku akce (termín za 100 s jako v produkci, limit 95 s) → TRVALÁ „moc dlouhý“ (ověření 21. 10.: větev nesmí být mrtvá)',
+    tProdukce.v.stav === 'chyba' && tProdukce.v.docasna === false && tProdukce.v.duvod === AI.HLASKA_MOC_DLOUHY)
+  const tMalo = await sHazenim(preruseni, { konec: Date.now() + 85_000, zacatek: Date.now() - 15_000 })
+  ok('timeout po 15 s přípravy (limit 80 s z 95 s, nad 80 %) → pořád trvalá', tMalo.v.docasna === false && tMalo.v.duvod === AI.HLASKA_MOC_DLOUHY)
+  const tBezZacatku = await sHazenim(preruseni, { konec: Date.now() + 40_000 })
+  ok('timeout bez údaje o začátku akce → trvalá (nic se nepovažuje za zkrácené)', tBezZacatku.v.docasna === false && tBezZacatku.v.duvod === AI.HLASKA_MOC_DLOUHY)
   const spojeni = await sHazenim(() => new TypeError('fetch failed'))
   ok(`přerušené spojení (ne timeout) zůstává dočasné „Nepodařilo se spojit" (${spojeni.v.duvod})`, spojeni.v.stav === 'chyba' && spojeni.v.docasna === true && /Nepodařilo se spojit/.test(spojeni.v.duvod))
 } catch (e) {

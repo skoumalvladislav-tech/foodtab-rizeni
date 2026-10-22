@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { mnozstviNaText } from '@/lib/jine-platby-castky'
 import { REZERVA_PO_PLATNOSTI_MS } from '@/lib/jine-platby-pos-operace'
-import { popisStavuSkladu, prohlaseniProtiPokladne, type AkceJinePlatby } from '@/lib/jine-platby-stav'
+import { nalezPokladny, popisStavuSkladu, prohlaseniProtiPokladne, type AkceJinePlatby } from '@/lib/jine-platby-stav'
 import { PLATNOST_KONTROLY_SKLADU_MIN, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 
 import { PanelHlava } from '../../../../dnes/prvky'
@@ -369,6 +369,10 @@ export default function SekceSklad({
                 </FormularAkce>
               ) : z.stavKontroly !== 'zkontrolovano' ? (
                 <Vysvetleni>Záznam se od odeslání upravil a není označený jako zkontrolovaný. Potvrdit výdej jde, až ho někdo znovu zkontroluje (Kontrola dokladu → Označit jako zkontrolované).</Vysvetleni>
+              ) : nalezPokladny(z.pokladnaSkladu, 'sklad') ? (
+                <Vysvetleni dulezite>
+                  {`Pokladna při kontrole našla, že spotřebu už odečetla (účet ${String((z.pokladnaSkladu?.detail as Record<string, unknown> | undefined)?.externi_id ?? 'neuveden')}). Výdej nevytvářejte, jen ho propojte. Novější kontrola to nevyvrací — když se pokladna mýlí, výsledek přepíše jen člověk s právem na opravy.`}
+                </Vysvetleni>
               ) : (
                 <Vysvetleni>Potvrdit výdej jde jen s čerstvou kontrolou (do 15 minut), že pokladna spotřebu neodečetla — dotazem do pokladny nebo ručním prohlášením.</Vysvetleni>
               )}
@@ -592,7 +596,9 @@ export default function SekceSklad({
 function RucniProhlaseniSkladu({ zakl, z, smiOpravit }: { zakl: { zaznam: string; verze: number; rozsah: string }; z: ZaznamJinePlatby; smiOpravit: boolean }) {
   const proti = prohlaseniProtiPokladne(z, 'sklad')
   const popisProti = proti === null ? null : ((POPIS_VYSLEDKU_SKLADU as Record<string, string>)[proti.vysledek] ?? proti.vysledek)
-  const neniNelze = proti !== null && proti.chceOpravu && !smiOpravit
+  /** Zrušený požadavek s nejasným výsledkem (ověření 21. 10.): ruční „neodečetla“ jen s právem na opravy. */
+  const nedohledana = z.nedohledanaOperace !== null
+  const neniNelze = (proti !== null && proti.chceOpravu && !smiOpravit) || (nedohledana && !smiOpravit)
   const volby: [string, string][] = [
     ['je', 'už odečetla (prodej je v pokladně uzavřený, nebo výdej už proběhl)'],
     ...(neniNelze
@@ -605,6 +611,13 @@ function RucniProhlaseniSkladu({ zakl, z, smiOpravit }: { zakl: { zaznam: string
       <summary style={{ cursor: 'pointer', fontSize: '14px', minHeight: '44px', display: 'flex', alignItems: 'center' }}>Ruční prohlášení s důvodem</summary>
       <div style={{ marginTop: '8px' }}>
         <FormularAkce akce={prohlasitSklad} {...zakl} tlacitko="Zapsat ruční prohlášení" vycistit>
+          {nedohledana ? (
+            <Vysvetleni dulezite>
+              {smiOpravit
+                ? `Zrušený požadavek do pokladny (${z.nedohledanaOperace?.klic ?? 'bez klíče'}) měl nejasný výsledek a nikdo ho nedohledal. Prohlášením „neodečetla“ s právem na opravy potvrzujete, že v pokladně neproběhl — radši ho ale nechte dohledat kontrolou v pokladně.`
+                : `Zrušený požadavek do pokladny (${z.nedohledanaOperace?.klic ?? 'bez klíče'}) měl nejasný výsledek a nikdo ho nedohledal. „Neodečetla“ se tu proto nenabízí: nejdřív zkontrolujte výdej v pokladně (dohledá i tenhle požadavek), nebo ať to doloží člověk s právem na opravy.`}
+            </Vysvetleni>
+          ) : null}
           {proti !== null ? (
             <Vysvetleni dulezite>
               {neniNelze
