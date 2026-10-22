@@ -128,5 +128,5 @@ jobs:
           fi
 
           if ! grep -q '"ok":true' telo.json; then
-            echo "::warning::Krok neskončil úspěchem — viz „duvod" výš."
+            echo "::warning::Krok neskončil úspěchem — viz „duvod“ výš."
           fi
