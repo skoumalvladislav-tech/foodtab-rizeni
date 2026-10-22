@@ -6,7 +6,7 @@ import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { odvolatZarizeni } from './akce'
+import { odvolatZarizeni, prepnoutKiosekJinychPlateb } from './akce'
 import FormularKodu from './formular'
 
 export const dynamic = 'force-dynamic'
@@ -38,10 +38,10 @@ export default async function NastaveniZarizeni({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; odvolano?: string }>
+  searchParams: Promise<{ chyba?: string; odvolano?: string; kiosek?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, odvolano } = await searchParams
+  const { chyba, odvolano, kiosek } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
@@ -93,6 +93,12 @@ export default async function NastaveniZarizeni({
   if (error) throw error
 
   const zarizeni = (data ?? []) as Zarizeni[]
+
+  // Kiosek Jiných plateb (migrace 20261022100000). Před nasazením tabulka není — přepínač se pak neukáže.
+  const kiosky = await supabase.from('jine_platby_kiosky').select('zarizeni_id').eq('tenant_id', tenantId)
+  const kioskyNasazene = !kiosky.error
+  if (kiosky.error && !tabulkaNeexistuje(kiosky.error)) throw kiosky.error
+  const sKioskem = new Set(((kiosky.data ?? []) as { zarizeni_id: string }[]).map((k) => k.zarizeni_id))
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
 
   // Na pobočkové adrese se registruje na tu pobočku, na firemní se
@@ -112,6 +118,13 @@ export default async function NastaveniZarizeni({
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '760px' }}>
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
+        {kiosek ? (
+          <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--dobre)' }}>
+            {kiosek === 'zapnut'
+              ? 'Kiosek Jiných plateb zapnutý. Na zařízení otevřete adresu /kiosek/doklady.'
+              : 'Kiosek Jiných plateb vypnutý. Od téhle chvíle z něj doklad neodejde.'}
+          </p>
+        ) : null}
         {odvolano ? (
           <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--dobre)' }}>
             Zařízení odvoláno. Od téhle chvíle neukáže kód ani nepíchne.
@@ -160,6 +173,20 @@ export default async function NastaveniZarizeni({
                   </span>
                 </span>
 
+                {z.stav === 'active' && kioskyNasazene ? (
+                  <form action={prepnoutKiosekJinychPlateb} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="zarizeni" value={z.id} />
+                    <input type="hidden" name="zapnout" value={sKioskem.has(z.id) ? 'ne' : 'ano'} />
+                    <span style={{ fontSize: '13px', color: sKioskem.has(z.id) ? 'var(--dobre)' : 'var(--muted)' }}>
+                      Kiosek Jiných plateb: {sKioskem.has(z.id) ? 'zapnutý' : 'vypnutý'}
+                    </span>
+                    <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                      {sKioskem.has(z.id) ? 'Vypnout' : 'Zapnout'}
+                    </button>
+                  </form>
+                ) : null}
+
                 {z.stav === 'active' ? (
                   <form action={odvolatZarizeni}>
                     <input type="hidden" name="rozsah" value={rozsah} />
@@ -175,6 +202,11 @@ export default async function NastaveniZarizeni({
         )}
 
         <p style={{ margin: '20px 0 0', fontSize: '13px', color: 'var(--muted)', maxWidth: '62ch' }}>
+          Telefon na provozovně se páruje stejně jako tablet: vystavte kód, na telefonu otevřete{' '}
+          <code>/kiosek/doklady</code> a kód opište. Pak u něj zapněte <strong>Kiosek Jiných plateb</strong> — obsluha jím
+          vyfotí účet a doklad přijde do Finance → Tržby → Jiné platby. Nic jiného z telefonu vidět není.
+        </p>
+        <p style={{ margin: '12px 0 0', fontSize: '13px', color: 'var(--muted)', maxWidth: '62ch' }}>
           Odvolané zařízení se nemaže — ať je dohledatelné, co na
           provozovně kdy bylo. Ztracený tablet stačí odvolat tady;
           nikde jinde se nic měnit nemusí.

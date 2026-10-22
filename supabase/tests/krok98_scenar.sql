@@ -224,6 +224,7 @@ select pg_temp.check('všech 10 tabulek má RLS a authenticated jen SELECT',
 select pg_temp.check('funkce pro přihlášené: authenticated ano, anon ne, všechny SECURITY DEFINER se search_path=""',
   (select count(*) from pg_proc p
     where p.pronamespace = 'public'::regnamespace and p.proname like 'jine_platby\_%'
+      and p.proname not like 'jine\_platby\_kiosek\_%'  -- kiosek na telefonu hlídá krok100
       and p.proname not in ('jine_platby_zahajit_rozpoznani', 'jine_platby_dokoncit_rozpoznani', 'jine_platby_zapsat_kontrolu',
                             'jine_platby_pripojit_soubor')
       and has_function_privilege('authenticated', p.oid, 'execute')

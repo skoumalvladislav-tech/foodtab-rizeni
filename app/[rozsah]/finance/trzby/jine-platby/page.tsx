@@ -21,6 +21,7 @@ import { PanelHlava } from '../../../dnes/prvky'
 import Ikona from '../../../ikona'
 import Nadpis from '../../../nadpis'
 import Navigace from '../../navigace'
+import { autorZaznamu } from './[zaznam]/logika'
 import ZnackaStavu from './znacka-stavu'
 
 export const dynamic = 'force-dynamic'
@@ -426,7 +427,7 @@ export default async function JinePlatby({
                     {
                       klic: 'autor',
                       hlavicka: 'Založil(a)',
-                      vykresli: (r) => <span style={{ color: 'var(--muted)' }}>{(r.vytvoril && autori.get(r.vytvoril)) || '–'}</span>,
+                      vykresli: (r) => <span style={{ color: 'var(--muted)' }}>{autorZaznamu(r, autori) ?? '–'}</span>,
                     },
                     {
                       klic: 'kontrola',

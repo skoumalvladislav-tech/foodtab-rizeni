@@ -91,3 +91,35 @@ export async function odvolatZarizeni(formData: FormData): Promise<void> {
   revalidatePath(`/${rozsah}/nastaveni/zarizeni`)
   redirect(`/${rozsah}/nastaveni/zarizeni?odvolano=1`)
 }
+
+/**
+ * Kiosek Jiných plateb na zařízení — zapnout / vypnout.
+ *
+ * Telefon (nebo tablet) spárovaný jako zařízení pobočky smí fotit
+ * doklady do Jiných plateb (/kiosek/doklady) JEN se zapnutým kioskem —
+ * spárování samo nestačí, ať tablet Docházky nedostane novou schopnost
+ * potichu. Právo a Finance firmy ověřuje databáze
+ * (`jine_platby_kiosek_zapnout`: správce nastavení pobočky zařízení).
+ * Vypnutí platí hned — kiosek ověřuje zařízení při každém odeslání.
+ */
+export async function prepnoutKiosekJinychPlateb(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('zarizeni') ?? '')
+  const zapnout = formData.get('zapnout') === 'ano'
+  if (!id) return
+
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) redirect('/')
+
+  const pristup = await zkusPristup(tenantId, 'settings.manage', rozsah)
+  if (pristup.stav !== 'ok') redirect('/')
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('jine_platby_kiosek_zapnout', { p_tenant: tenantId, p_zarizeni: id, p_zapnout: zapnout })
+  if (error) {
+    redirect(`/${rozsah}/nastaveni/zarizeni?chyba=${encodeURIComponent(error.message)}`)
+  }
+
+  revalidatePath(`/${rozsah}/nastaveni/zarizeni`)
+  redirect(`/${rozsah}/nastaveni/zarizeni?kiosek=${zapnout ? 'zapnut' : 'vypnut'}`)
+}

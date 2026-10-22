@@ -26,7 +26,7 @@ import Nadpis from '../../../../nadpis'
 import { aliasyPripojeni, kalendarPobocky, katalogPripojeni } from './akce-zaklad'
 import type { PolozkaEditoru } from './editor-navrhu'
 import Kroky from './kroky'
-import { coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, nevyresenePolozkyDolozeni, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
+import { autorZaznamu, coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, nevyresenePolozkyDolozeni, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
 import { metadataPokladny } from './nacteni'
 import Originaly from './originaly'
 import SekceKontrola from './sekce-kontrola'
@@ -455,7 +455,7 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
     <>
       <Nadpis
         oci="Finance · Tržby · Jiné platby"
-        popis={`${nazevPobocky} · založeno ${datumACasSRokemVPasmu(z.vytvoreno, zona)}${z.vytvoril && jmena[z.vytvoril] ? ` · ${jmena[z.vytvoril]}` : ''}`}
+        popis={`${nazevPobocky} · založeno ${datumACasSRokemVPasmu(z.vytvoreno, zona)}${autorZaznamu(z, jmena) ? ` · ${autorZaznamu(z, jmena)}` : ''}`}
         vpravo={
           <Link href={`/${rozsah}/finance/trzby/jine-platby`} className="ft-tl ft-tl-vedlejsi">
             Zpět na Jiné platby
