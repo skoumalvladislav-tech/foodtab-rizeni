@@ -527,6 +527,8 @@ const SekceSklad = await nactiKomponentu(`${ZAZNAM}/sekce-sklad.tsx`, KRESLENI)
   const cestaBT = renderToStaticMarkup(createElement(SekceTrzba, trzbaProps(cestaBZ, ['prohlasit_trzbu'])))
   ok('Ověření 21. 10.: tržba — „nenalezeno“ proti dřívějšímu nálezu pokladny (POS-B7) → obrazovka řekne, proč novou tržbu zapsat nejde',
     textHtml(cestaBT).includes('Pokladna při dřívější kontrole našla konkrétní prodej (účet POS-B7)') && !tlacitka(cestaBT).includes('Zapsat do Ostatních tržeb'))
+  ok('Ověření 22. 10.: věta pamatuje i na špatně přečtené číslo (výsledek přepíše člověk s právem na opravy), ne jen „vraťte číslo“',
+    textHtml(cestaBT).includes('Když bylo číslo přečtené špatně a pokladna našla cizí účet, ať výsledek přepíše člověk s právem na opravy'))
   const bezNalezu = renderToStaticMarkup(createElement(SekceTrzba, trzbaProps({ ...cestaBZ, pokladnaTrzby: null }, ['prohlasit_trzbu', 'potvrdit_trzbu'])))
   ok('Ověření 21. 10. (protipříklad): bez nálezu se zápis nabízí a věta o dřívější kontrole chybí',
     tlacitka(bezNalezu).includes('Zapsat do Ostatních tržeb') && !textHtml(bezNalezu).includes('dřívější kontrole'))
@@ -2530,6 +2532,21 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
     /supabase\.from\('jine_platby_rozpoznani'\)\.select\('[^']*vysledek[^']*'\)\.eq\('id', z\.rozpoznaniId\)\.eq\('tenant_id', tenantId\)\.maybeSingle\(\)/.test(sp))
   ok('C7: posledních pár pokusů jen pro větu (bez výsledku) a rozpoznaniNavrhu dostane uložené čtení',
     /\.from\('jine_platby_rozpoznani'\)\.select\('id, stav, duvod, vytvoreno, verze_zaznamu'\)/.test(sp) && /rozpoznaniNavrhu\(ulozeneRaw \? naPokus\(ulozeneRaw\) : null, pokusy, z\.verze\)/.test(sp))
+
+  // Ověření 22. 10. (cesta C): autor bez práva na opravy u záznamu s nálezem pokladny — místo „Zrušit záznam“ vysvětlení.
+  const puvodniZaznamy = tabulky.jine_platby
+  globalThis.__jpStranka.prava = new Set(VSECHNA_PRAVA.filter((p) => p !== 'jine_platby.oprava'))
+  tabulky.jine_platby = [radekZaznamu({ stav_skladu: 'bez_navrhu', vytvoril: 'U1', zruseni_duvod: null,
+    pokladna_trzby: { vysledek: 'nalezeno', zdroj: 'pos_api', verze: 3, kdy: ted, kdo: null, detail: { pos_prodej_id: 'POS-1' } } })]
+  const sNalezem = await vykreslit()
+  ok('Ověření 22. 10.: autor bez práva na opravy, pokladna našla prodej → „Zrušit záznam“ ne, stránka řekne proč',
+    sNalezem.length > 1000 && !tlacitka(sNalezem).includes('Zrušit záznam') && textHtml(sNalezem).includes('Zrušit ho smí jen člověk s právem na opravy'))
+  tabulky.jine_platby = [radekZaznamu({ stav_skladu: 'bez_navrhu', vytvoril: 'U1', zruseni_duvod: null })]
+  const bezNalezuStr = await vykreslit()
+  ok('Ověření 22. 10. (protipříklad): bez nálezu má autor „Zrušit záznam“ a vysvětlení chybí',
+    tlacitka(bezNalezuStr).includes('Zrušit záznam') && !textHtml(bezNalezuStr).includes('Zrušit ho smí jen člověk s právem na opravy'))
+  tabulky.jine_platby = puvodniZaznamy
+  globalThis.__jpStranka.prava = new Set(VSECHNA_PRAVA)
 
   if (process.env.NAHLED) {
     const { writeFileSync } = await import('node:fs')

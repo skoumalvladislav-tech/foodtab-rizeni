@@ -97,6 +97,8 @@ V části **Tržba (Ostatní tržby)**:
      - Konkrétní účet, shodu **čísla účtu** (i když je v pokladně účtů s tím číslem víc) a u skladu „už odečteno“ přepíše jen člověk s právem na opravy, taky s výslovným potvrzením. V historii zůstane celý výsledek z pokladny.
      - Výsledek pokladny si appka pamatuje zvlášť. Ruční „je tam“ ho nesmaže, takže následné „není tam“ narazí na stejnou pojistku.
      - Konkrétní nález pokladny (účet, nebo že spotřebu už odečetla) nesmaže ani nová kontrola po úpravě záznamu, třeba po smazání nebo změně čísla účtu. Novou tržbu ani nový výdej pak appka nepustí. Přepsat ho smí jen člověk s právem na opravy a jeho rozhodnutí pak platí i po další úpravě záznamu.
+     - Nález platí i pro **jiný záznam téhož dokladu nebo prodeje**, tedy se stejnou fotkou, nebo se stejným dnem, částkou a pobočkou, a to i pro zrušený záznam. Novou tržbu ani výdej k takovému záznamu bez práva na opravy appka nezapíše.
+     - Když bylo číslo účtu přečtené špatně a pokladna našla cizí účet, opravte číslo a požádejte člověka s právem na opravy, ať výsledek pokladny přepíše.
    - Kontrola platí 30 minut a jen pro tu podobu záznamu, kterou jste kontrolovali. Po úpravě ji zopakujte.
 2. Podle výsledku:
    - **Zapsat do Ostatních tržeb**: jen když je vyloučené, že prodej je v pokladně. Tržba se započítá.
@@ -199,4 +201,4 @@ vyřešila (např. papírová výdejka).
 | Velká fotka | Fotku nad 5 MB (a fotku z iPhonu ve formátu HEIC) appka při nahrání sama zmenší. K rozpoznání jde fotka do 5 MB, PDF do 8 MB a nejvýš 20 stran, dohromady nejvýš 20 MB a 30 stran, po pořadí stránek. Co se nevejde, appka vyjmenuje dřív, než se pokus započítá. |
 | Účet vytištěný po půlnoci | Když je na účtence čitelný čas a je dřív než začátek provozního dne pobočky, appka datum posune na předchozí provozní den a napíše to jako upozornění. Bez času datum nechá, zkontrolujte ho. |
 | Položka bez čitelného názvu | Appka ji pojmenuje „Položka č. N (název nečitelný)“ a nechá ke kontrole. Doplňte název podle dokladu. |
-| Záznam omylem | **Zrušit záznam** jde, dokud nic neproběhlo. Autor smí zrušit svůj rozpracovaný záznam, jinak je potřeba právo na opravy. Nejdřív je potřeba odpojit fakturu a úhradu a stornovat zapsanou tržbu. Se schváleným výdejem a během ručního odpisu zrušit nejde (nejdřív Zrušit schválení, viz výš). Fotky zůstanou v historii zrušeného záznamu a stejný doklad jde nahrát ke správnému záznamu. |
+| Záznam omylem | **Zrušit záznam** jde, dokud nic neproběhlo. Autor smí zrušit svůj rozpracovaný záznam, jinak je potřeba právo na opravy. Nejdřív je potřeba odpojit fakturu a úhradu a stornovat zapsanou tržbu. Se schváleným výdejem a během ručního odpisu zrušit nejde (nejdřív Zrušit schválení, viz výš). Fotky zůstanou v historii zrušeného záznamu a stejný doklad jde nahrát ke správnému záznamu. Když pokladna u záznamu našla konkrétní prodej nebo odpis, nebo k němu patří nedohledaný požadavek, smí ho zrušit jen člověk s právem na opravy. |

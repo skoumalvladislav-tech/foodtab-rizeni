@@ -59,7 +59,12 @@
 --      pokladny drží i po nové kontrole nad upraveným návrhem (cesta B,
 --      tržba i sklad), značka přepisu, nedohledaný zrušený požadavek,
 --      „pravděpodobně“ bez shody, úhrada jen z banky, storno platby
---      a storno tržby.
+--      a storno tržby;
+--  17. čtvrté ověření 22. 10. („cesta C“): zrušení záznamu s nálezem nebo
+--      značkou jen s právem na opravy; nová tržba a schválení výdeje
+--      proti nálezu / značce jiného záznamu téhož dokladu nebo prodeje
+--      (stejná fotka, nebo den a částka) jen s právem na opravy; značka
+--      přepisu nepřejde na jiné číslo; značka i po „odesílá se“.
 --
 -- Navazuje na etapa0_scenar.sql (firma „Foodtab s.r.o.", pobočky
 -- cerna-perla a bernard-bar, majitel@foodtab.cz).
@@ -2001,6 +2006,259 @@ select public.jine_platby_opravit_trzbu(:'z26', :'v26', null, 'Propojení omylem
 reset role;
 select pg_temp.check('storno tržby smaže i id propojeného prodeje',
   (select stav_trzby = 'stornovano' and pos_prodej_id is null from public.jine_platby where id = :'z26'));
+select set_config('test.user_id', '', false);
+
+-- ---------------------------------------------------------------------
+-- 17. Čtvrté ověření (22. 10.) — „cesta C“ přes víc záznamů
+-- ---------------------------------------------------------------------
+reset role;
+select set_config('test.user_id', '', false);
+\echo ''
+\echo '== 17. Čtvrté ověření 22. 10. ====================================='
+
+-- 17a. Tržba: autor záznam s nálezem pokladny nezruší; týž doklad u nového
+--      záznamu (stejná fotka, jiná částka) novou tržbu bez práva na opravy nezapíše.
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — účet C1', '98980000-cccc-0000-0000-0000000000c1') as zc1a \gset
+reset role;
+select format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'zc1a', '98980000-cccc-0000-0000-0000000001a1') as cestac1a \gset
+insert into storage.objects (bucket_id, name, owner, metadata) values
+  ('jine-platby', :'cestac1a', '98980000-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg","size":2000}');
+set role service_role;
+select public.jine_platby_pripojit_soubor(:'zc1a', :'cestac1a', repeat('ce', 32), '98980000-0000-0000-0000-000000000001');
+reset role;
+select verze as vc1a from public.jine_platby where id = :'zc1a' \gset
+select jsonb_build_object('datum_prodeje', '2026-06-01', 'oznaceni', 'Perla — účet C1', 'mena', 'CZK', 'castka_haleru', 31100,
+  'castka_puvod', 'doklad', 'typ_dokladu', 'uzavreny_prodej', 'externi_ucet', 'POS-C1', 'kontakt_id', null)::text as hlc1 \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_ulozit_navrh(:'zc1a', :vc1a, :'hlc1'::jsonb, '[]') as vc1a \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc1a', :vc1a);
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zc1a', :vc1a, 'trzba', 'nalezeno', '{"shoda": "cislo_dokladu", "pos_prodej_id": "POS-C1"}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select pg_temp.check('cesta C: autor záznam s nálezem pokladny nezruší (uvolnil by doklad pro nový záznam)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zrusit(%L, %L)', :'zc1a', 'Špatně založeno, založím znovu.'),
+    '23514', 'Zrušit ho smí jen člověk s právem na opravy'));
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('… člověk s právem na opravy ho zrušit smí (kontrola rozezná oba stavy)',
+  pg_temp.projde(format('select public.jine_platby_zrusit(%L, %L)', :'zc1a', 'Založeno omylem, ověřeno.')));
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — účet C1 znovu', '98980000-cccc-0000-0000-0000000000c2') as zc1b \gset
+reset role;
+select format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'zc1b', '98980000-cccc-0000-0000-0000000001b1') as cestac1b \gset
+insert into storage.objects (bucket_id, name, owner, metadata) values
+  ('jine-platby', :'cestac1b', '98980000-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg","size":2000}');
+set role service_role;
+select public.jine_platby_pripojit_soubor(:'zc1b', :'cestac1b', repeat('ce', 32), '98980000-0000-0000-0000-000000000001');
+reset role;
+select verze as vc1b from public.jine_platby where id = :'zc1b' \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_ulozit_navrh(:'zc1b', :vc1b,
+  :'hlc1'::jsonb || '{"externi_ucet": null, "castka_haleru": 31000, "datum_prodeje": "2026-06-11"}'::jsonb, '[]') as vc1b \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc1b', :vc1b);
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zc1b', :vc1b, 'trzba', 'pravdepodobne', '{"shoda": "castka", "castka_presne": true, "kandidatu": 1}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select public.jine_platby_prohlasit(:'zc1b', :vc1b, 'trzba', 'nenalezeno', 'Jiný účet.', null, true);
+select pg_temp.check('cesta C: týž doklad (stejná fotka) u nového záznamu — nová tržba bez práva na opravy neprojde, ani s jinou částkou a dnem',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L)', :'zc1b', :vc1b, 'nova'),
+    '23514', 'u jiného záznamu téhož dokladu nebo prodeje'));
+reset role;
+
+-- 17b. Tržba bez zrušení: druhý záznam téhož dne a částky (jiná fotka).
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — účet CN', '98980000-cccc-0000-0000-0000000000c3') as zcna \gset
+select public.jine_platby_ulozit_navrh(:'zcna', 1, :'hlc1'::jsonb || '{"externi_ucet": "POS-CN", "castka_haleru": 31300, "datum_prodeje": "2026-06-03"}'::jsonb, '[]') as vcna \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zcna', :vcna);
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zcna', :vcna, 'trzba', 'nalezeno', '{"shoda": "cislo_dokladu", "pos_prodej_id": "POS-CN"}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — účet CN podruhé', '98980000-cccc-0000-0000-0000000000c4') as zcnb \gset
+select public.jine_platby_ulozit_navrh(:'zcnb', 1, :'hlc1'::jsonb || '{"externi_ucet": null, "castka_haleru": 31300, "datum_prodeje": "2026-06-03"}'::jsonb, '[]') as vcnb \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zcnb', :vcnb);
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zcnb', :vcnb, 'trzba', 'pravdepodobne', '{"shoda": "castka", "castka_presne": true, "kandidatu": 1}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select public.jine_platby_prohlasit(:'zcnb', :vcnb, 'trzba', 'nenalezeno', 'Jiný účet.', null, true);
+select pg_temp.check('cesta C: druhý záznam téhož dne a částky (jiná fotka) — nová tržba bez práva na opravy neprojde',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L, %L)', :'zcnb', :vcnb, 'nova', 'Není duplicita.'),
+    '23514', 'u jiného záznamu téhož dokladu nebo prodeje'));
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('… člověk s právem na opravy ji zapíše (kontrola rozezná oba stavy)',
+  pg_temp.projde(format('select public.jine_platby_potvrdit_trzbu(%L, %s, %L, %L)', :'zcnb', :vcnb, 'nova', 'Jiný host se stejnou útratou, ověřeno.')));
+reset role;
+
+-- 17c. Sklad: zrušený nejasný požadavek (značka) na záznamu A.
+select jsonb_build_object('datum_prodeje', '2026-06-02', 'oznaceni', 'Perla — výdej C2', 'mena', 'CZK', 'castka_haleru', 12300,
+  'castka_puvod', 'doklad', 'typ_dokladu', 'rucni_spotreba', 'externi_ucet', null, 'kontakt_id', null)::text as hlc2 \gset
+select jsonb_build_array(jsonb_build_object('nazev', 'Pivo 0,5 l', 'mnozstvi', '3', 'jednotka', 'ks', 'cena_jednotkova_haleru', 4100,
+    'cena_celkem_haleru', 12300, 'zdroj', 'rucne', 'druh', 'rozlevany_napoj', 'pos_produkt_id', 'P2', 'pos_mnozstvi', '3',
+    'mapovani', 'overeno', 'vyzaduje_kontrolu', false))::text as polc2 \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — výdej C2', '98980000-cccc-0000-0000-0000000000c5') as zc2a \gset
+reset role;
+select format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'zc2a', '98980000-cccc-0000-0000-0000000002a1') as cestac2a \gset
+insert into storage.objects (bucket_id, name, owner, metadata) values
+  ('jine-platby', :'cestac2a', '98980000-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg","size":2000}');
+set role service_role;
+select public.jine_platby_pripojit_soubor(:'zc2a', :'cestac2a', repeat('de', 32), '98980000-0000-0000-0000-000000000001');
+reset role;
+select verze as vc2a from public.jine_platby where id = :'zc2a' \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_ulozit_navrh(:'zc2a', :vc2a, :'hlc2'::jsonb, :'polc2'::jsonb) as vc2a \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc2a', :vc2a);
+select public.jine_platby_odeslat_sklad(:'zc2a', :vc2a) as navrhc2a \gset
+reset role;
+select otisk as otiskc2a from public.jine_platby_skladove_navrhy where id = :'navrhc2a' \gset
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zc2a', :vc2a, 'sklad', 'neodecteno', '{"uplne": true}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_rozhodnout_vydej(:'navrhc2a', :'otiskc2a', true) as opc2a \gset
+reset role;
+set role service_role;
+select public.pos_operace_zahajit(:'opc2a', now() + interval '5 minutes');
+select public.pos_operace_dokoncit(:'opc2a', 'nejasny_vysledek', null, null, null, 'Timeout.');
+reset role;
+update public.pos_operace set platnost_do = now() - interval '3 minutes' where id = :'opc2a';
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_zrusit_schvaleni(:'zc2a', 'Pokladna nejde otevřít.');
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select pg_temp.check('cesta C: autor záznam se zrušeným nedohledaným požadavkem nezruší',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_zrusit(%L, %L)', :'zc2a', 'Zaseklo se to, založím znovu.'),
+    '23514', 'Zrušit ho smí jen člověk s právem na opravy'));
+
+-- 17d. Sklad bez zrušení: nový záznam téhož dne a částky (bez fotky).
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — výdej C3', '98980000-cccc-0000-0000-0000000000c7') as zc3 \gset
+select public.jine_platby_ulozit_navrh(:'zc3', 1, :'hlc2'::jsonb, :'polc2'::jsonb) as vc3 \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc3', :vc3);
+select public.jine_platby_odeslat_sklad(:'zc3', :vc3) as navrhc3 \gset
+reset role;
+select otisk as otiskc3 from public.jine_platby_skladove_navrhy where id = :'navrhc3' \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_prohlasit(:'zc3', :vc3, 'sklad', 'neodecteno', 'Ověřeno.');
+select pg_temp.check('cesta C: nový záznam téhož dne a částky — výdej bez práva na opravy neschválí (jiný záznam má nedohledaný požadavek)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true, %L)', :'navrhc3', :'otiskc3', 'Není duplicita.'),
+    '23514', 'výdej schválí jen člověk s právem na opravy'));
+reset role;
+
+-- 17e. Sklad se zrušením: týž doklad (stejná fotka) u nového záznamu jiného dne.
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select public.jine_platby_zrusit(:'zc2a', 'Založím znovu, požadavek ověřím.');
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — výdej C2 znovu', '98980000-cccc-0000-0000-0000000000c6') as zc2b \gset
+reset role;
+select format('%s/%s/%s/%s.jpg', :'tenant', :'perla', :'zc2b', '98980000-cccc-0000-0000-0000000002b1') as cestac2b \gset
+insert into storage.objects (bucket_id, name, owner, metadata) values
+  ('jine-platby', :'cestac2b', '98980000-0000-0000-0000-000000000001', '{"mimetype":"image/jpeg","size":2000}');
+set role service_role;
+select public.jine_platby_pripojit_soubor(:'zc2b', :'cestac2b', repeat('de', 32), '98980000-0000-0000-0000-000000000001');
+reset role;
+select verze as vc2b from public.jine_platby where id = :'zc2b' \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_ulozit_navrh(:'zc2b', :vc2b, :'hlc2'::jsonb || '{"datum_prodeje": "2026-06-12"}'::jsonb, :'polc2'::jsonb) as vc2b \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc2b', :vc2b);
+select public.jine_platby_odeslat_sklad(:'zc2b', :vc2b) as navrhc2b \gset
+reset role;
+select otisk as otiskc2b from public.jine_platby_skladove_navrhy where id = :'navrhc2b' \gset
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zc2b', :vc2b, 'sklad', 'neodecteno', '{"uplne": true}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select pg_temp.check('cesta C: týž doklad (stejná fotka) u nového záznamu jiného dne — výdej bez práva na opravy neschválí',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true)', :'navrhc2b', :'otiskc2b'),
+    '23514', 'výdej schválí jen člověk s právem na opravy'));
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('… člověk s právem na opravy výdej schválí (kontrola rozezná oba stavy)',
+  pg_temp.projde(format('select public.jine_platby_rozhodnout_vydej(%L, %L, true)', :'navrhc2b', :'otiskc2b')));
+reset role;
+
+-- 17f. Značka přepisu nepřejde na „víc účtů“ JINÉHO čísla.
+select jsonb_build_object('datum_prodeje', '2026-06-04', 'oznaceni', 'Perla — účet 12', 'mena', 'CZK', 'castka_haleru', 14400,
+  'castka_puvod', 'doklad', 'typ_dokladu', 'uzavreny_prodej', 'externi_ucet', '12', 'kontakt_id', null)::text as hlc4 \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — účet 12', '98980000-cccc-0000-0000-0000000000c8') as zc4 \gset
+select public.jine_platby_ulozit_navrh(:'zc4', 1, :'hlc4'::jsonb, '[]') as vc4 \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc4', :vc4);
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zc4', :vc4, 'trzba', 'pravdepodobne',
+  '{"shoda": "cislo_vice", "hledane_cislo": "12", "ucty": [{"externi_id": "POS-12A"}, {"externi_id": "POS-12B"}]}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select public.jine_platby_prohlasit(:'zc4', :vc4, 'trzba', 'nenalezeno', 'Oba účty č. 12 jsou jiní hosté, ověřeno.', null, true);
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select public.jine_platby_ulozit_navrh(:'zc4', :vc4, :'hlc4'::jsonb || '{"externi_ucet": "47"}'::jsonb, '[]') as vc4 \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc4', :vc4);
+reset role;
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zc4', :vc4, 'trzba', 'pravdepodobne',
+  '{"shoda": "cislo_vice", "hledane_cislo": "47", "ucty": [{"externi_id": "POS-47A"}, {"externi_id": "POS-47B"}]}'::jsonb, null);
+reset role;
+select pg_temp.check('„víc účtů“ JINÉHO čísla značku přepisu nepřevezme',
+  (select not (pokladna_trzby ? 'prepsano') and pokladna_trzby -> 'detail' ->> 'hledane_cislo' = '47' from public.jine_platby where id = :'zc4'));
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000002', false);
+select pg_temp.check('… a pokladní „není“ proti němu bez potvrzení neprohlásí',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_prohlasit(%L, %s, %L, %L, %L)', :'zc4', :vc4, 'trzba', 'nenalezeno', 'Jiný účet.'),
+    '23514', 'Pokladna při kontrole tohle našla'));
+reset role;
+
+-- 17g. Značka i po zrušení zaseknutého požadavku („odesila_se“ po platnosti).
+select jsonb_build_object('datum_prodeje', '2026-06-07', 'oznaceni', 'Perla — výdej C7', 'mena', 'CZK', 'castka_haleru', 8200,
+  'castka_puvod', 'doklad', 'typ_dokladu', 'rucni_spotreba', 'externi_ucet', null, 'kontakt_id', null)::text as hlc7 \gset
+select jsonb_build_array(jsonb_build_object('nazev', 'Pivo 0,5 l', 'mnozstvi', '2', 'jednotka', 'ks', 'cena_jednotkova_haleru', 4100,
+    'cena_celkem_haleru', 8200, 'zdroj', 'rucne', 'druh', 'rozlevany_napoj', 'pos_produkt_id', 'P2', 'pos_mnozstvi', '2',
+    'mapovani', 'overeno', 'vyzaduje_kontrolu', false))::text as polc7 \gset
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000001', false);
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Perla — výdej C7', '98980000-cccc-0000-0000-0000000000cd') as zc7 \gset
+select public.jine_platby_ulozit_navrh(:'zc7', 1, :'hlc7'::jsonb, :'polc7'::jsonb) as vc7 \gset
+select public.jine_platby_oznacit_zkontrolovano(:'zc7', :vc7);
+select public.jine_platby_odeslat_sklad(:'zc7', :vc7) as navrhc7 \gset
+reset role;
+select otisk as otiskc7 from public.jine_platby_skladove_navrhy where id = :'navrhc7' \gset
+set role service_role;
+select public.jine_platby_zapsat_kontrolu(:'zc7', :vc7, 'sklad', 'neodecteno', '{"uplne": true}'::jsonb, null);
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_rozhodnout_vydej(:'navrhc7', :'otiskc7', true) as opc7 \gset
+reset role;
+set role service_role;
+select public.pos_operace_zahajit(:'opc7', now() + interval '5 minutes');
+reset role;
+update public.pos_operace set platnost_do = now() - interval '3 minutes' where id = :'opc7';
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select public.jine_platby_zrusit_schvaleni(:'zc7', 'Požadavek se zasekl.');
+reset role;
+select pg_temp.check('zrušení zaseknutého požadavku („odesílá se“ po platnosti) taky zanechá značku',
+  (select nedohledana_operace ->> 'operace' = :'opc7' and nedohledana_operace ->> 'stav' = 'odesila_se' from public.jine_platby where id = :'zc7'));
+set role authenticated;
+select set_config('test.user_id', '98980000-0000-0000-0000-000000000003', false);
+select pg_temp.check('… a skladník pak ručně „neodečteno“ neprohlásí',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_prohlasit(%L, %s, %L, %L, %L)', :'zc7', :vc7, 'sklad', 'neodecteno', 'Ověřeno.'),
+    '23514', 'nikdo ho nedohledal'));
+reset role;
 select set_config('test.user_id', '', false);
 
 -- Úklid: vlastní řádky pryč (zápisové granty nemá nikdo — maže superuživatel).

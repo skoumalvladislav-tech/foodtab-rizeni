@@ -177,6 +177,16 @@ export function nalezPokladny(k: KontrolaPos<string> | null, druh: 'trzba' | 'sk
   return k.vysledek === 'nalezeno' || (k.vysledek === 'pravdepodobne' && shoda !== 'castka')
 }
 
+/**
+ * Zrušit záznam jen s právem na opravy: pokladna u něj našla konkrétní
+ * prodej nebo odpis, nebo k němu patří nedohledaný požadavek do pokladny.
+ * Zrušení by uvolnilo doklad pro nový záznam a nález by zůstal u zrušeného
+ * („cesta C“, čtvrté ověření 22. 10.) — zrcadlo `jine_platby_zrusit`.
+ */
+export function zruseniChceOpravu(z: ZaznamJinePlatby): boolean {
+  return nalezPokladny(z.pokladnaTrzby, 'trzba') || nalezPokladny(z.pokladnaSkladu, 'sklad') || z.nedohledanaOperace !== null
+}
+
 /** Výsledek pokladny, proti kterému ruční prohlášení opačného znění neprojde bez potvrzení (viz `prohlaseniProtiPokladne`). */
 export type ProhlaseniProtiPokladne = { vysledek: string; chceOpravu: boolean }
 
@@ -609,8 +619,9 @@ export function dostupneAkce(
   if (oprava && vydej && (s === 'odecteno_v_pos' || s === 'rucne_dolozeno')) a.add('korekce_vydeje')
   const autor = zadat && !!m.uzivatelId && z.vytvoril === m.uzivatelId && SKLAD_AUTOR_ZRUSI.includes(s)
   // Napárovaná úhrada: `jine_platby_zrusit` chce nejdřív odpojit úhradu.
+  // Nález pokladny nebo nedohledaný požadavek: autor bez práva na opravy ne (`zruseniChceOpravu`).
   if (
-    (oprava || autor) &&
+    (oprava || (autor && !zruseniChceOpravu(z))) &&
     !trzbaZapsana &&
     z.stavFaktury !== 'propojena' &&
     z.uhradaTransakceId === null &&

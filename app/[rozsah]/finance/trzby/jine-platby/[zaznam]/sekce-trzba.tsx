@@ -279,7 +279,7 @@ export default function SekceTrzba({
       {nalezBrani && akce.has('prohlasit_trzbu') ? (
         <Oddil nadpis="Zapsat do Ostatních tržeb">
           <Vysvetleni dulezite>
-            {`Pokladna při dřívější kontrole našla konkrétní prodej (účet ${ucetNalezu}). Nová kontrola ho nevylučuje — číslo účtu nebo částka se od té doby změnily. Novou tržbu proto zapsat nejde: vraťte správné číslo účtu a prodej jen propojte, nebo ať výsledek pokladny přepíše člověk s právem na opravy (ruční prohlášení „není“).`}
+            {`Pokladna při dřívější kontrole našla konkrétní prodej (účet ${ucetNalezu}). Nová kontrola ho nevylučuje — číslo účtu nebo částka se od té doby změnily. Novou tržbu proto zapsat nejde. Když je ten účet opravdu tenhle prodej, vraťte číslo účtu a prodej jen propojte. Když bylo číslo přečtené špatně a pokladna našla cizí účet, ať výsledek přepíše člověk s právem na opravy (ruční prohlášení „není“).`}
           </Vysvetleni>
         </Oddil>
       ) : null}

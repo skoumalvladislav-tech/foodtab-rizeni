@@ -1024,6 +1024,20 @@ console.log('\n== Dostupné akce ==')
   ok('cesta B sklad (protipříklad): se značkou přepisu provest_vydej i vydej_znovu jsou',
     schv({ pokladnaSkladu: kSkl({ prepsano: kPr }) }).has('provest_vydej') &&
       S.dostupneAkce(zaznam({ stavSkladu: 'chyba', kontrolaSkladu: kSk(), pokladnaSkladu: kSkl({ prepsano: kPr }) }), VSE, m({ stavOperace: 'chyba', maZiveNavrhSkladu: true })).has('vydej_znovu'))
+  // Cesta C (čtvrté ověření 22. 10.): zrušení záznamu s nálezem nebo značkou jen s právem na opravy.
+  const NEDOH = { operace: 'OP1', klic: 'ftjp-op1', stav: 'nejasny_vysledek', kdy: pred(30) }
+  const bezOpravy = new Set([...VSE].filter((p) => p !== 'jine_platby.oprava'))
+  const jakoAutor = (o) => S.dostupneAkce(zaznam({ vytvoril: 'U1', ...o }), bezOpravy, m({ uzivatelId: 'U1' }))
+  ok('zruseniChceOpravu: nález tržby, nález skladu, nedohledaný požadavek → ano; slabý výsledek, se značkou přepisu, nic → ne',
+    S.zruseniChceOpravu(zaznam({ pokladnaTrzby: kTv('nalezeno') })) && S.zruseniChceOpravu(zaznam({ pokladnaSkladu: kSkl() })) &&
+      S.zruseniChceOpravu(zaznam({ nedohledanaOperace: NEDOH })) && !S.zruseniChceOpravu(zaznam({ pokladnaTrzby: kCastka() })) &&
+      !S.zruseniChceOpravu(zaznam({ pokladnaTrzby: kT({ vysledek: 'nalezeno', prepsano: kPr }) })) && !S.zruseniChceOpravu(zaznam({})))
+  ok('cesta C: autor bez práva na opravy — „Zrušit“ ne u nálezu tržby, nálezu skladu ani nedohledaného požadavku',
+    !jakoAutor({ pokladnaTrzby: kTv('nalezeno') }).has('zrusit') && !jakoAutor({ pokladnaSkladu: kSkl() }).has('zrusit') &&
+      !jakoAutor({ nedohledanaOperace: NEDOH }).has('zrusit'))
+  ok('cesta C (protipříklad): autor bez nálezu „Zrušit“ má; s právem na opravy i s nálezem',
+    jakoAutor({}).has('zrusit') && jakoAutor({ pokladnaTrzby: kCastka() }).has('zrusit') &&
+      S.dostupneAkce(zaznam({ pokladnaTrzby: kTv('nalezeno'), nedohledanaOperace: NEDOH }), VSE, m()).has('zrusit'))
   const kSchvaleni = zaznam({ stavSkladu: 'ceka_na_schvaleni', kontrolaSkladu: kSk() })
   ok('muzeSchvalitVydej: „neodečteno" ano, ale ne proti nálezu „už odečteno"; se značkou přepisu zase ano',
     S.muzeSchvalitVydej(kSchvaleni, TED) && !S.muzeSchvalitVydej({ ...kSchvaleni, ...odecteno }, TED) &&
@@ -1062,6 +1076,13 @@ console.log('\n== Dostupné akce ==')
     const zdrojeSql = /v_t\.zdroj not in \(([^)]*)\)/.exec(teloFunkce(sqlP, 'public.jine_platby_evidovat_uhradu'))?.[1] ?? ''
     ok(`ZDROJE_UHRADY = zdroje v jine_platby_evidovat_uhradu (${zdrojeSql || '?'})`,
       JSON.stringify([...zdrojeSql.matchAll(/'(\w+)'/g)].map((x) => x[1])) === JSON.stringify([...T.ZDROJE_UHRADY]) && T.ZDROJE_UHRADY.length === 3)
+    ok('cesta C: nová tržba a schválení výdeje hlídají i jiné záznamy téhož dokladu nebo prodeje (app.jp_souvisejici: fotka, nebo pobočka + den + částka + měna)',
+      /if exists \(select 1 from app\.jp_souvisejici\(v_z\) s where app\.jp_nalez_pokladny\(s\.pokladna_trzby, 'trzba'\)\)/.test(teloFunkce(sqlP, 'public.jine_platby_potvrdit_trzbu')) &&
+        /where s\.nedohledana_operace is not null or app\.jp_nalez_pokladny\(s\.pokladna_skladu, 'sklad'\)/.test(teloFunkce(sqlP, 'public.jine_platby_rozhodnout_vydej')) &&
+        /s\.branch_id = p_z\.branch_id and s\.datum_prodeje = p_z\.datum_prodeje\s+and s\.castka_haleru = p_z\.castka_haleru and s\.mena = p_z\.mena/.test(textOpravy()) &&
+        /b\.otisk = a\.otisk/.test(textOpravy()))
+    ok('cesta C: zrušení = zruseniChceOpravu (nález tržby, nález skladu, nedohledaný požadavek) bez práva na opravy odmítne',
+      /if \(app\.jp_nalez_pokladny\(v_z\.pokladna_trzby, 'trzba'\) or app\.jp_nalez_pokladny\(v_z\.pokladna_skladu, 'sklad'\)\s+or v_z\.nedohledana_operace is not null\)\s+and not app\.has_access\(v_z\.tenant_id, 'jine_platby\.oprava'/.test(teloFunkce(sqlP, 'public.jine_platby_zrusit')))
     ok('… zrušený požadavek s nejasným výsledkem: ruční „neodečteno“ jen s právem na opravy, stejná hláška jako akce',
       /p_druh = 'sklad' and p_vysledek = 'neodecteno' and v_z\.nedohledana_operace is not null/.test(telo) &&
         telo.includes('Zrušený požadavek do pokladny měl nejasný výsledek a nikdo ho nedohledal. Nejdřív zkontrolujte výdej v pokladně (dohledá i ten požadavek) — ručně „neodečteno“ smí doložit jen člověk s právem na opravy.') &&

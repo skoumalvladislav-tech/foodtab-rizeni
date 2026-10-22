@@ -15,7 +15,7 @@ import { sestavitPodklady, type KontaktFaktury } from '@/lib/jine-platby-faktura
 import { zkontrolovatDoklad, type KontrolaDokladu } from '@/lib/jine-platby-kontrola'
 import { navrhnoutMapovani } from '@/lib/jine-platby-mapovani'
 import { zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
-import { dostupneAkce, krokyPruvodce, muzeSchvalitVydej } from '@/lib/jine-platby-stav'
+import { dostupneAkce, krokyPruvodce, muzeSchvalitVydej, zruseniChceOpravu } from '@/lib/jine-platby-stav'
 import { DRUHY_BEZ_SKLADU, PRAVA_CTENI_JINYCH_PLATEB, ZDROJE_UHRADY, type RozpoznanyDoklad, type StavKontroly } from '@/lib/jine-platby-typy'
 import { posunoutDen, provozniDen } from '@/lib/pokladna-cas'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
@@ -31,7 +31,7 @@ import { metadataPokladny } from './nacteni'
 import Originaly from './originaly'
 import SekceKontrola from './sekce-kontrola'
 import { SekceFaktura, SekceUhrada, type PlatbaBanky } from './sekce-faktura'
-import { SekceHistorie, SekceZruseni, type UdalostHistorie } from './sekce-historie'
+import { SekceHistorie, SekceZruseni, SekceZruseniJenOprava, type UdalostHistorie } from './sekce-historie'
 import SekceSklad, { type NavrhVydeje, type OperaceVydeje, type PolozkaVydeje } from './sekce-sklad'
 import SekceTrzba, { type RadekTrzby } from './sekce-trzba'
 
@@ -574,7 +574,11 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
             <SekceFaktura zakl={zakl} z={z} akce={akce} podklady={podklady} kontakty={kontakty?.map((k) => ({ id: k.id, nazev: k.nazev, ico: k.ico })) ?? null} />
             <SekceUhrada zakl={zakl} z={z} akce={akce} platby={platby} naparovana={naparovana} />
             <SekceHistorie udalosti={historie} jmena={jmena} zona={zona} mena={z.mena} />
-            {akce.has('zrusit') ? <SekceZruseni zakl={zakl} /> : null}
+            {akce.has('zrusit') ? (
+              <SekceZruseni zakl={zakl} />
+            ) : z.stavKontroly !== 'zruseno' && prava.has('jine_platby.zadat') && zruseniChceOpravu(z) && z.vytvoril === (uzivatel?.id ?? null) ? (
+              <SekceZruseniJenOprava />
+            ) : null}
           </div>
         </div>
       </div>

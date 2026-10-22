@@ -21,6 +21,13 @@
 --   6. Úhradu prokazuje jen platba z banky; storno platby po napárování
 --      úhradu zruší.
 --   7. Storno tržby ruší i id propojeného prodeje.
+--   8. „Cesta C“ (čtvrté ověření 22. 10.): nález a značka platily jen na
+--      jednom záznamu. Zrušit záznam s nálezem nebo značkou smí jen člověk
+--      s právem na opravy (jinak se uvolní doklad pro nový záznam) a nová
+--      tržba ani schválení výdeje neprojdou bez práva na opravy, když nález
+--      nebo značku má jiný záznam téhož dokladu nebo prodeje
+--      (app.jp_souvisejici: stejná fotka, nebo stejná pobočka, den, částka
+--      a měna — i zrušený záznam).
 --
 -- Podpisy funkcí se nemění (create or replace), práva zůstávají; revoke
 -- a grant jsou zopakované jen pro čitelnost.
@@ -62,15 +69,45 @@ $$;
 revoke all on function app.jp_nalez_pokladny(jsonb, text) from public, anon, authenticated;
 
 -- Který účet (odpis) nález ukazuje — ať značka přepisu platí jen pro tentýž.
+-- Bez id účtu (shoda „víc účtů s tím číslem“) je identita hledané číslo
+-- a seřazený seznam účtů — jinak by značka přešla na nález JINÉHO čísla
+-- (čtvrté ověření 22. 10.).
 create function app.jp_identita_nalezu(p_k jsonb)
 returns text
 language sql immutable set search_path = ''
 as $$
-  select coalesce(p_k -> 'detail' ->> 'pos_prodej_id', p_k -> 'detail' ->> 'externi_id',
-                  p_k -> 'detail' ->> 'shoda', p_k -> 'detail' ->> 'zdroj_shody', '')
+  select coalesce(
+    p_k -> 'detail' ->> 'pos_prodej_id',
+    p_k -> 'detail' ->> 'externi_id',
+    concat_ws('|', p_k -> 'detail' ->> 'shoda', p_k -> 'detail' ->> 'zdroj_shody', p_k -> 'detail' ->> 'hledane_cislo',
+      (select string_agg(u ->> 'externi_id', ',' order by u ->> 'externi_id')
+         from jsonb_array_elements(case when jsonb_typeof(p_k -> 'detail' -> 'ucty') = 'array'
+                                        then p_k -> 'detail' -> 'ucty' else '[]'::jsonb end) u)))
 $$;
 
 revoke all on function app.jp_identita_nalezu(jsonb) from public, anon, authenticated;
+
+-- Jiné záznamy TÉHOŽ DOKLADU nebo PRODEJE (i zrušené): stejná fotka
+-- (otisk souboru, i neaktivního ze zrušeného záznamu), nebo stejná
+-- pobočka, den prodeje, částka a měna. Nález pokladny a značka
+-- nedohledaného požadavku na nich platí i pro tenhle záznam — jinak by
+-- stačilo záznam zrušit a doklad připojit k novému, nebo založit druhý
+-- („cesta C“, čtvrté ověření 22. 10.). Volá se jen z definer funkcí,
+-- firmu filtruje sama.
+create function app.jp_souvisejici(p_z public.jine_platby)
+returns setof public.jine_platby
+language sql stable set search_path = ''
+as $$
+  select s.* from public.jine_platby s
+   where s.tenant_id = p_z.tenant_id and s.id <> p_z.id
+     and ((s.branch_id = p_z.branch_id and s.datum_prodeje = p_z.datum_prodeje
+           and s.castka_haleru = p_z.castka_haleru and s.mena = p_z.mena)
+          or exists (select 1 from public.jine_platby_soubory a
+                       join public.jine_platby_soubory b on b.tenant_id = a.tenant_id and b.otisk = a.otisk
+                      where a.zaznam_id = p_z.id and a.tenant_id = p_z.tenant_id and b.zaznam_id = s.id))
+$$;
+
+revoke all on function app.jp_souvisejici(public.jine_platby) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
 -- 3. Funkce (create or replace, podpisy beze změny)
@@ -329,6 +366,12 @@ begin
       raise exception 'Pokladna při kontrole našla konkrétní prodej (výsledek: %, účet %) — novou tržbu nejde zapsat. Prodej jen propojte; když se pokladna mýlí, výsledek přepíše jen člověk s právem na opravy.',
         v_z.pokladna_trzby ->> 'vysledek', coalesce(v_z.pokladna_trzby -> 'detail' ->> 'pos_prodej_id', 'víc účtů s tím číslem') using errcode = 'check_violation';
     end if;
+    -- Totéž přes jiný záznam téhož dokladu nebo prodeje (cesta C, 22. 10.).
+    if exists (select 1 from app.jp_souvisejici(v_z) s where app.jp_nalez_pokladny(s.pokladna_trzby, 'trzba'))
+       and not app.has_access(v_z.tenant_id, 'jine_platby.oprava', v_z.branch_id) then
+      raise exception 'Pokladna u jiného záznamu téhož dokladu nebo prodeje (stejná fotka, nebo stejný den a částka) našla konkrétní prodej — novou tržbu zapíše jen člověk s právem na opravy. Prodej jen propojte.'
+        using errcode = 'check_violation';
+    end if;
     -- Faktura vystavená V POKLADNĚ = účet uzavřený v pokladně, tržbu má
     -- pokladna. Nová Ostatní tržba by byla druhá (kontrola 17. 10.).
     if v_z.faktura_zdroj = 'pos' then
@@ -471,6 +514,15 @@ begin
   if app.jp_nalez_pokladny(v_z.pokladna_skladu, 'sklad') then
     raise exception 'Pokladna při kontrole našla, že spotřebu už odečetla (účet %) — výdej nevytvářejte, jen ho propojte. Když se pokladna mýlí, výsledek přepíše jen člověk s právem na opravy.',
       coalesce(v_z.pokladna_skladu -> 'detail' ->> 'externi_id', 'neuveden') using errcode = 'check_violation';
+  end if;
+  -- Jiný záznam téhož dokladu nebo prodeje: pokladna u něj spotřebu už
+  -- odečetla, nebo k němu patří nedohledaný požadavek (cesta C, 22. 10.).
+  -- Kontrola v pokladně u TOHOTO záznamu klíče jeho operací nedohledá.
+  if exists (select 1 from app.jp_souvisejici(v_z) s
+              where s.nedohledana_operace is not null or app.jp_nalez_pokladny(s.pokladna_skladu, 'sklad'))
+     and not app.has_access(v_z.tenant_id, 'jine_platby.oprava', v_z.branch_id) then
+    raise exception 'U jiného záznamu téhož dokladu nebo prodeje (stejná fotka, nebo stejný den a částka) pokladna spotřebu už odečetla, nebo k němu patří nedohledaný požadavek do pokladny — výdej schválí jen člověk s právem na opravy.'
+      using errcode = 'check_violation';
   end if;
   -- Kontrola 17. 10.: schvaluje se jen čistý návrh nad zkontrolovaným
   -- záznamem (nejasná skladová položka by se jinak neodečetla nikdy a
@@ -834,6 +886,82 @@ end $$;
 
 revoke all on function public.jine_platby_opravit_trzbu(uuid, integer, integer, text, text) from public, anon;
 grant execute on function public.jine_platby_opravit_trzbu(uuid, integer, integer, text, text) to authenticated;
+
+create or replace function public.jine_platby_zrusit(p_zaznam uuid, p_duvod text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_z      public.jine_platby;
+  v_duvod  text;
+begin
+  v_z := app.jp_nacist(p_zaznam);
+  v_duvod := app.jp_duvod(p_duvod);
+  if not (app.has_access(v_z.tenant_id, 'jine_platby.oprava', v_z.branch_id)
+          or (v_z.vytvoril = auth.uid() and app.has_access(v_z.tenant_id, 'jine_platby.zadat', v_z.branch_id)
+              and v_z.stav_skladu in ('bez_navrhu', 'nevyzaduje', 'zamitnuto'))) then
+    raise exception 'Záznam smí zrušit jen jeho autor (dokud je rozpracovaný), nebo ten, kdo má právo na opravy.'
+      using errcode = 'insufficient_privilege';
+  end if;
+  if v_z.stav_kontroly = 'zruseno' then
+    raise exception 'Záznam už je zrušený.' using errcode = 'check_violation';
+  end if;
+  -- Konkrétní nález pokladny nebo nedohledaný požadavek: zrušení by uvolnilo
+  -- doklad pro nový záznam a nález i značka by zůstaly u zrušeného (cesta C,
+  -- čtvrté ověření 22. 10.). Jen s právem na opravy — a i pak je nová tržba
+  -- nebo výdej téhož dokladu chtějí (app.jp_souvisejici).
+  if (app.jp_nalez_pokladny(v_z.pokladna_trzby, 'trzba') or app.jp_nalez_pokladny(v_z.pokladna_skladu, 'sklad')
+      or v_z.nedohledana_operace is not null)
+     and not app.has_access(v_z.tenant_id, 'jine_platby.oprava', v_z.branch_id) then
+    raise exception 'Pokladna u záznamu našla konkrétní prodej nebo odpis, nebo k němu patří nedohledaný požadavek do pokladny. Zrušit ho smí jen člověk s právem na opravy — jinak by šel týž doklad zapsat podruhé.'
+      using errcode = 'check_violation';
+  end if;
+  if v_z.stav_trzby in ('zapsano', 'propojeno') then
+    raise exception 'Tržba je zapsaná — nejdřív ji stornujte.' using errcode = 'check_violation';
+  end if;
+  if v_z.stav_faktury = 'propojena' then
+    raise exception 'Nejdřív odpojte fakturu.' using errcode = 'check_violation';
+  end if;
+  -- Napárovaná úhrada by jinak blokovala bankovní platbu pro správný
+  -- záznam a ze zrušeného ji nejde odpojit (kontrola 17. 10.).
+  if v_z.uhrada_transakce_id is not null then
+    raise exception 'Nejdřív odpojte úhradu.' using errcode = 'check_violation';
+  end if;
+  -- Předáno k ručnímu odpisu = schvalovatel může právě odepisovat
+  -- v pokladně. Uvolnit to smí jen on (Zrušit schválení s důvodem).
+  if v_z.stav_skladu = 'nepodporovano' then
+    raise exception 'Výdej je předaný k ručnímu provedení v pokladně — nejdřív ho doložte (Ručně doloženo), nebo nechte schválení zrušit.'
+      using errcode = 'check_violation';
+  end if;
+  -- Schválený výdej může schvalovatel právě odepisovat v pokladně (i když
+  -- provedení přes API selhalo) — uvolní ho jen Zrušit schválení (kontrola 19. 10.).
+  if v_z.stav_skladu = 'schvaleno' then
+    raise exception 'Výdej je schválený — nejdřív ho doložte, nebo schválení zrušte (Zrušit schválení).' using errcode = 'check_violation';
+  end if;
+  if v_z.stav_skladu not in ('bez_navrhu', 'nevyzaduje', 'zamitnuto', 'ceka_na_schvaleni', 'chyba') then
+    raise exception 'Výdej proběhl nebo probíhá — záznam nejde zrušit, jen opravit.' using errcode = 'check_violation';
+  end if;
+  if exists (select 1 from public.pos_operace where zaznam_id = v_z.id and stav in ('odesila_se', 'nejasny_vysledek')) then
+    raise exception 'Požadavek do pokladny má nejasný výsledek — nejdřív ho dohledejte.' using errcode = 'check_violation';
+  end if;
+
+  update public.pos_operace set stav = 'zruseno', dokonceno = now(), duvod = 'Záznam zrušen.'
+   where zaznam_id = v_z.id and stav in ('pripraveno', 'nepodporovano');
+  update public.jine_platby_skladove_navrhy set stav = 'nahrazeno'
+   where zaznam_id = v_z.id and stav in ('ceka_na_schvaleni', 'schvaleno');
+  -- Soubory zůstávají jako historie, ale doklad jde připojit k novému záznamu.
+  update public.jine_platby_soubory set aktivni = false where zaznam_id = v_z.id;
+  update public.jine_platby
+     set stav_kontroly = 'zruseno', zruseni_duvod = v_duvod,
+         -- Ze zrušeného záznamu nic nečeká na schválení (fronta schvalovatele).
+         stav_skladu = case when stav_skladu in ('ceka_na_schvaleni', 'schvaleno', 'chyba') then 'bez_navrhu' else stav_skladu end,
+         zmeneno = now()
+   where id = v_z.id;
+  perform app.jp_historie(v_z, 'zruseno', jsonb_build_object('duvod', v_duvod));
+end $$;
+
+revoke all on function public.jine_platby_zrusit(uuid, text) from public, anon;
+grant execute on function public.jine_platby_zrusit(uuid, text) to authenticated;
 
 -- ---------------------------------------------------------------------
 -- 4. Storno platby po napárování úhrady
