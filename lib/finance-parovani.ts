@@ -23,9 +23,12 @@ export type KandidatTransakce = {
 export type KandidatFaktura = {
   id: string
   vs: string | null
+  /** V nejmenší jednotce MĚNY FAKTURY (u EUR centy, ne haléře). */
   castkaHaleru: number
   dodavatel: string | null
   datum: string | null
+  /** Měna faktury; chybí = Kč. Ruční párování podle ní píše částku. */
+  mena?: string | null
 }
 
 export type Navrh = {
@@ -188,6 +191,37 @@ export function normalizovatVs(vs: string | null | undefined): string | null {
 
 function mena(m: string | null | undefined): string {
   return (m ?? '').trim().toUpperCase() || 'CZK'
+}
+
+/** Je faktura v Kč (stejné pravidlo jako automatické párování)? */
+export function jeVKorunach(m: string | null | undefined): boolean {
+  return mena(m) === 'CZK'
+}
+
+/**
+ * Faktury pro NÁVRHY párování — jen v Kč. Platby jsou v Kč a částka
+ * faktury je v nejmenší jednotce JEJÍ měny: eurové centy by se porovnaly
+ * s haléři a faktura na 1 000 EUR by se „shodovala" s platbou 1 000 Kč
+ * (kontrola 19. 10.). Sdílí ji Platby i Finance → Přehled, ať se návrhy
+ * na obou místech neliší.
+ */
+export function kandidatiProNavrhy(faktury: readonly {
+  id: string
+  variable_symbol: string | null
+  castka_haleru: number
+  supplier: string | null
+  due_date: string | null
+  issue_date: string | null
+  currency?: string | null
+}[]): KandidatFaktura[] {
+  return faktury.filter((f) => jeVKorunach(f.currency)).map((f) => ({
+    id: f.id,
+    vs: f.variable_symbol,
+    castkaHaleru: f.castka_haleru,
+    dodavatel: f.supplier,
+    datum: f.due_date ?? f.issue_date,
+    mena: 'CZK',
+  }))
 }
 
 /** Kladně = `datum` PO `vychozi`. */

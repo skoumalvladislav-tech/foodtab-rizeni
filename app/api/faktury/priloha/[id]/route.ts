@@ -4,13 +4,17 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
+import { podepsatPrilohu } from '@/lib/faktury-priloha-odkaz'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Otevře přílohu faktury přijaté z e-mailu (`invoices.pdf_url` míří sem:
- * `/api/faktury/priloha/<id řádku faktury_prijem>`).
+ * Otevře přílohu faktury přijaté z e-mailu (`faktury.odkaz_pdf`, dřív
+ * `invoices.pdf_url` ve staré databázi, míří sem:
+ * `/api/faktury/priloha/<id řádku faktury_prijem>`). Adresa zůstává
+ * i po sloučení — vedou na ni odkazy z CSV, které už dostala účetní.
+ * Soubor podle id FAKTURY: /api/faktury/soubor/<id>.
  *
  * Kbelík `faktury-prilohy` je soukromý — na rozdíl od starého veřejného
  * `faktury-pdf` (otázka 46). Odkaz ve Fakturách proto není adresa souboru,
@@ -47,10 +51,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     .maybeSingle()
   if (!radek?.soubor_cesta) return odpoved('Příloha neexistuje.', 404)
 
-  const { data: podepsano } = await supabase.storage.from('faktury-prilohy').createSignedUrl(radek.soubor_cesta, PLATNOST_ODKAZU_S)
-  if (!podepsano?.signedUrl) return odpoved('Soubor přílohy se nepodařilo otevřít.', 404)
+  // PDF a obrázek se otevře, cokoli jiného (ISDOC/XML…) stáhne — lib/faktury-priloha-odkaz.ts.
+  const odkaz = await podepsatPrilohu(supabase.storage.from('faktury-prilohy'), radek.soubor_cesta, PLATNOST_ODKAZU_S)
+  if (!odkaz) return odpoved('Soubor přílohy se nepodařilo otevřít.', 404)
 
-  const presmerovani = NextResponse.redirect(podepsano.signedUrl, 302)
+  const presmerovani = NextResponse.redirect(odkaz, 302)
   presmerovani.headers.set('cache-control', 'no-store')
   presmerovani.headers.set('referrer-policy', 'no-referrer')
   return presmerovani

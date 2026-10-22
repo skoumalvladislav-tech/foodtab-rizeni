@@ -10,7 +10,8 @@
  * nabídla jako jistou a někdo by klikl potvrdit bez přečtení.
  */
 
-const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena } = await import('../lib/finance-parovani.ts')
+const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach } = await import('../lib/finance-parovani.ts')
+const { readFileSync } = await import('node:fs')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -215,6 +216,35 @@ console.log('\n== Ruční „Uhrazeno" a zpět ==')
   ok('vrátit bez plateb → Ke kontrole úhrady', stavPoVraceni(0, 1000) === 'Ke kontrole úhrady')
   ok('vrátit, když je část zaplacená z výpisu → Částečně uhrazeno', stavPoVraceni(400, 1000) === 'Částečně uhrazeno')
   ok('vrátit, když je podle plateb zaplacená celá → nejde (null)', stavPoVraceni(1000, 1000) === null && stavPoVraceni(1500, 1000) === null)
+}
+
+console.log('\n== Návrhy jen s fakturami v Kč (eurové centy ≠ haléře) ==')
+{
+  // Faktura na 1 000,00 EUR (100 000 centů) se stejným VS a datem jako
+  // platba 1 000 Kč (100 000 haléřů): čísla se „shodují", peníze ne.
+  const vydaj = { id: 't-eur', vs: '2026100', castkaHaleru: 100000, protistrana: 'Acme GmbH', datum: '2026-10-16' }
+  const faktura = (currency) => ({ id: 'f-' + currency, variable_symbol: '2026100', castka_haleru: 100000, supplier: 'Acme GmbH', due_date: '2026-10-15', issue_date: null, currency })
+  ok('eurová faktura se do návrhů nedostane', kandidatiProNavrhy([faktura('EUR')]).length === 0
+    && navrhnoutParovani(vydaj, kandidatiProNavrhy([faktura('EUR')])) === null)
+  // Kladná kontrola — jinak by první prošla i nad prázdným vstupem.
+  ok('táž faktura v Kč návrh dá', navrhnoutParovani(vydaj, kandidatiProNavrhy([faktura('CZK')]))?.fakturaId === 'f-CZK')
+  ok('„ czk " (mezery, malá) je taky Kč; bez měny = Kč (jako automatika)',
+    kandidatiProNavrhy([faktura(' czk ')]).length === 1 && jeVKorunach(null) && !jeVKorunach('EUR'))
+  // Obě obrazovky musí brát návrhy ze sdílené funkce — jednotkový test
+  // výš by zůstal zelený, i kdyby jedna z nich filtr obešla.
+  for (const cesta of ['app/[rozsah]/finance/platby/page.tsx', 'lib/finance-pozornost.ts']) {
+    const zdroj = readFileSync(cesta, 'utf8').split('\r\n').join('\n')
+    ok(`${cesta}: návrhy ze sdílené kandidatiProNavrhy`, /kandidatiProNavrhy\(/.test(zdroj) && !/castkaHaleru: f\.castka_haleru/.test(zdroj.replace(/const naKandidata[\s\S]*?\}\)\n/, '')))
+    // Bez měny ve výčtu sloupců by chybějící měna znamenala „Kč" a eurové
+    // faktury by se do návrhů potichu vrátily (jednotkový test výš to nevidí).
+    ok(`${cesta}: dotaz na faktury načítá měnu (currency:mena)`, /fakturyFirmy\([^)]*'[^']*currency:mena[^']*'/.test(zdroj))
+  }
+  const platby = readFileSync('app/[rozsah]/finance/platby/page.tsx', 'utf8')
+  ok('ruční párování píše částku cizí měny s její měnou, ne jako Kč',
+    /jeVKorunach\(f\.mena\) \? koruny\(f\.castkaHaleru\) : /.test(platby))
+  const pozornost = readFileSync('lib/finance-pozornost.ts', 'utf8')
+  ok('Přehled: součet faktur ke kontrole jen v Kč',
+    /keKontrole\.filter\(\(f\) => jeVKorunach\(f\.currency\)\)\.reduce/.test(pozornost))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

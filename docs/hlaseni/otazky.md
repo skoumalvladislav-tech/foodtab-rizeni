@@ -1393,3 +1393,156 @@ později přinést znovu (otevřený účet se uzavře).
 - **Teď:** po zápisu tržby jde na detailu kdykoli kliknout **Zkontrolovat v pokladně** (u pokladny, která umí dohledat účty, dnes Dotykačka). Když pokladna prodej najde, záznam dostane varování **„Možná zapsáno dvakrát“**, v přehledu je na to filtr a detail vede na storno. Appka nic nestornuje sama, rozhodne člověk. Databáze to ověřuje ve scénáři krok98.
 - **Co se neděje:** nic se nekontroluje **samo** po každé synchronizaci pokladny. Plánovač v databázi zatím neběží (zapnutí v Supabase je na vás) a automatické volání pokladny za uživatele by byla nová úloha s klíči pokladny.
 - **Když to má být jinak:** úloha v plánovači jednou denně projde zapsané tržby s pokladnou za posledních 7 dní a výsledek zapíše stejnou cestou jako tlačítko. Je to samostatná práce (úloha, strop volání pokladny, testy), bez změny tabulek.
+
+---
+
+> Otázky 50–58 jsou Jiné platby (PR #146, sloučená 20. 10.). Faktury
+> (PR #147) pokračují od 59, ať se čísla nesrazí. Dvojí číslo hlídá
+> `scripts/otazky-cisla.test.mjs`.
+
+## 59. Sloučení Faktur s Foodtabem — kdy přepnout a jak dlouho držet návrat zpět
+
+**Vzniklo:** 18. 10. 2026. Šéfík: „potřebuji sloučit apku faktury
+s apkou foodtab." Návrh a kroky: `docs/faktury-slouceni-navrh.md`,
+hlášení `docs/hlaseni/stav-2026-10-18-faktury-slouceni.md`. Na každý bod
+jsem vybral nejopatrnější variantu, appka podle ní funguje, dokud
+nerozhodnete jinak.
+
+1. **Kdo ještě zapisuje do staré databáze.**
+   - **Teď:** nová verze appky do staré databáze nezapisuje vůbec (jen
+     úloha převodu). Zapisovat tam ale pořád může: původní samostatná
+     appka `faktury-app` na Vercelu (nemá přihlášení, klíč je v ní
+     veřejný), náhledy jiných větví Foodtabu (když mají ve Vercelu
+     proměnné `FAKTURY_SUPABASE_*` i pro Preview) a n8n, kdyby ho někdo
+     zapnul. Převod to pozná (dokončení odmítne, když se stará databáze
+     mezitím změnila), ale nezastaví to.
+   - **Potřebuju od vás:** před přepnutím pozastavit projekt `faktury-app`
+     ve Vercelu a smazat `FAKTURY_SUPABASE_URL`, `FAKTURY_SUPABASE_ANON_KEY`
+     z prostředí **Preview** a **Development** (Production nechat — převod
+     je potřebuje). Udělám to i já, ale jen na váš výslovný pokyn.
+2. **Odstávka Faktur.**
+   - **Teď:** od sloučení PR do dokončení převodu jsou Faktury zavřené
+     (obrazovka řekne „Faktury se připravují / stěhují"), odhadem 30–60
+     minut. Příjem z e-mailu počká, e-maily zůstanou ve schránce.
+   - **Pořadí sloučení:** úplně první malá PR #148 (kontrola „Migrace
+     jen přibývají"), pak Jiné platby (#146, migrace se starším razítkem
+     20261016100000), pak Faktury (#147), hlídač plánovače (#145) až po
+     nich (je přerazítkovaný na 20261019120000). Jinak `db push`
+     starší migraci odmítne. Před každým `db push` `migration list`:
+     nenasazená smí být jen migrace toho PR.
+   - **Když to má být jinak:** jiný čas (třeba večer) — řekněte kdy.
+3. **Faktury, které nejde převést beze ztráty** (např. částka se třemi
+   desetinnými místy, chybějící dodavatel).
+   - **Teď:** převod v takovém případě **nezačne** a krok „nanečisto"
+     řekne, kolik jich je. Nic se nezaokrouhlí ani nezahodí potichu.
+     „Nanečisto" jde pustit hned po sloučení, ještě PŘED `db push` —
+     když ukáže anomálie, vrátí se kód a nic se nenasazuje.
+   - **Když to má být jinak:** pravidlo, třeba „zaokrouhlit na haléř
+     a do poznámky napsat původní částku". Rozhodnu s vámi, až uvidíme
+     skutečný počet (ukáže ho první krok „nanečisto").
+4. **Párování plateb s fakturou, která ve staré databázi zmizela.**
+   - **Teď:** převod je nezastaví, jen je spočítá. V Platbách zůstanou
+     a dají se zrušit. Úklid po zkušební době je pak bude chtít vyřešit.
+5. **Zkušební doba (dokdy jde vrátit zpět).**
+   - **Teď navrhuju 7 dní.** Stará databáze je nejspíš na tarifu Free
+     a po 7 dnech bez provozu se uspí — a vzbudit ji neumí nikdo, kdo
+     se tam nepřihlásí. Proto od SLOUČENÍ (ne až od dokončení) pouští
+     GitHub krok „nanečisto" sám každé 2 dny (jen čte; udrží ji vzhůru
+     a ukáže, jestli do ní někdo nepíše). Lhůta tedy neběží ani tehdy,
+     když se převod zdrží.
+   - **Když to má být jinak:** delší doba jen s jistotou, že se do
+     projektu Faktur dá přihlásit (nebo že není na Free tarifu).
+6. **Návrat zpět** se dělá vrácením KÓDU v `main`, ne tlačítkem
+   „Instant Rollback" ve Vercelu — po něm Vercel přestane sám nasazovat
+   další změny z `main` a dá se na to snadno zapomenout. Instant Rollback
+   jen v nouzi a hned po něm „Promote" správné verze.
+   - Po `db push` se vrací kód **bez souboru migrace** (postup v návrhu,
+     oddíl 7). Obyčejný revert PR by soubor nasazené migrace smazal a další
+     `db push` (i u jiných PR) by spadl na nesouladu historie.
+   - Když už převod začal a ještě není dokončený, nejdřív krok **„zrusit"**
+     (jinak by předchozí verze appky nemohla párovat platby). Do staré
+     databáze se pak nic nevrací — ta je jediná platná.
+   - Po dokončeném převodu: „vratit" → „zpet" (i při nulách — označí
+     návrat jako hotový) → vrácení kódu.
+
+## 60. Faktury a pobočky
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur (navazuje na otázku 48, bod 4).
+
+- **Teď:** faktury pobočku nemají, na pobočce jsou schované. Číst je
+  a měnit smí jen člověk s právem za **celou firmu** — nově to hlídá
+  i databáze. **Nově** to platí i pro přílohy (PDF) a evidenci příjmu
+  z e-mailu: dřív je přímým dotazem viděl i člen jedné pobočky s právem
+  na faktury (hlášení 8. 10., „zůstává vědomě").
+- **Když to má být jinak:** faktury přiřazovat pobočkám (podle schránky,
+  do které přišly, nebo ručně) a pustit k nim vedoucí pobočky. Potřebuje
+  sloupec pobočky a nová pravidla — samostatná práce.
+
+## 61. Faktury pro další firmy
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur.
+
+- **Teď:** Faktury jsou otevřené jen pro firmu, která je měla v samostatné
+  databázi (Foodtab s.r.o.), a to až po dokončení převodu. Ostatní firmy
+  vidí „Faktury pro tuto firmu zatím nejsou zapnuté". Důvod: při návratu
+  zpět by faktury ostatních firem zůstaly jen v nové databázi a předchozí
+  verze appky by je neviděla.
+- **Když to má být jinak:** po zkušební době (úklid) je otevřít všem
+  firmám se zapnutými Financemi — malá změna brány.
+
+## 62. Párování s fakturou v cizí měně nebo bez částky
+
+**Vzniklo:** 18. 10. 2026. Párování teď mění stav faktury ve stejné
+transakci (dřív „best-effort" do druhé databáze).
+
+1. **Faktura v EUR (nebo jiné cizí měně), nebo bez přečtené částky.**
+   - **Teď:** párování se zapíše, ale stav faktury se **nezmění**
+     a appka řekne „stav nastavte ručně". Dřív by taková faktura po
+     jakékoli platbě skončila jako „Uhrazeno" (platby jsou v Kč, faktura
+     v EUR — čísla se nedají porovnat) a vypadla by z upomínek.
+   - **Když to má být jinak:** (a) párování s takovou fakturou úplně
+     zakázat; (b) přepočítávat kurzem ČNB (samostatná práce).
+   - **Nově:** Platby takové faktury **nenavrhují** k párování (eurové
+     centy by se porovnávaly s haléři). Ručně spárovat je jde dál.
+2. **Kdo smí zrušit párování.**
+   - **Teď:** kromě práva na Platby (`finance.manage` za celou firmu)
+     nově i právo „Vidět přijaté faktury" — zrušení mění stav faktury
+     (stejně jako spárování, to ho chtělo i dřív).
+
+## 63. Odkaz na fakturu u příjemek, vybavení a cen surovin
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur.
+
+- **Teď:** zůstávají textem. U příjemky je to číslo faktury, které píše
+  člověk rukou (ne id), u vybavení a cen surovin to dnes nikdo nevyplňuje.
+  Skutečnou databázovou vazbu na fakturu mají jen párování plateb
+  a evidence příjmu z e-mailu.
+- **Když to má být jinak:** u příjemky vybírat fakturu ze seznamu — pak
+  jde vazba hlídat i porovnat množství s fakturou (samostatná práce).
+
+## 64. Co se starou databází Faktur po úklidu
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur (navazuje na otázku 46).
+
+- **Teď:** stará databáze zůstane netknutá jako záloha. Appka na její
+  veřejné PDF už nevede (má vlastní kopie v soukromém úložišti), ale
+  **kdo adresu zná, soubor pořád otevře** — dokud projekt existuje.
+- **Možnosti po zkušební době:** (a) nechat; (b) smazat soubory ze
+  starého veřejného úložiště (podle průzkumu ze září má úložiště
+  otevřená pravidla, takže by to mělo jít přes veřejný klíč — ověřím
+  nanečisto a připravím jako krok, spustí se jen na váš pokyn); (c) smazat celý projekt
+  (chce přihlášení do Supabase, které teď nemáte).
+- **Doporučuju (b)**, protože (a) nechává faktury veřejně dostupné.
+
+## 65. Velikost fotky u ručně zadané faktury
+
+**Vzniklo:** 19. 10. 2026, kontrola sloučení Faktur.
+
+- **Teď:** fotka nebo PDF u ručně zadané faktury smí mít nejvýš **1 MB**
+  (strop formulářů v appce; stejné jako dosud, jen to teď formulář
+  říká). Větší soubor appka odmítne obecnou chybou dřív, než se dostane
+  ke kontrole. Fotka z mobilu má často 2–5 MB.
+- **Když to má být jinak:** zvednout strop formulářů na 4 MB (víc
+  nedovolí Vercel). Je to jedno nastavení, ale platí pro všechny
+  formuláře appky — proto jen na váš pokyn. Druhá možnost: zmenšovat
+  fotku v prohlížeči před odesláním (samostatná práce).

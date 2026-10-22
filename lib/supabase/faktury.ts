@@ -5,6 +5,14 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { jeVlastnikFakturyDb } from '@/lib/faktury-vlastnik'
 
 /**
+ * OD 18. 10. 2026 JEN PRO PŘEVOD. Faktury jsou v hlavní databázi
+ * (public.faktury, lib/faktury-pristup.ts). Tohle spojení ke staré
+ * databázi smí použít jedině úloha převodu (lib/faktury-prevod-sync.ts —
+ * hlídá scripts/faktury-tenant-izolace.test.mjs) a s úklidem po převodu
+ * zmizí i s proměnnými FAKTURY_SUPABASE_URL / _ANON_KEY
+ * (docs/faktury-slouceni-navrh.md, oddíl 6, krok 7). Text níž popisuje,
+ * jak to fungovalo do 18. 10.
+ *
  * Připojení k databázi Faktur — SAMOSTATNÝ Supabase projekt.
  *
  * Zadání: docs/hlaseni/zadani-pro-ai-marketing-faktury.md, „PROJEKT 2:
@@ -38,6 +46,11 @@ import { jeVlastnikFakturyDb } from '@/lib/faktury-vlastnik'
  */
 
 export type FakturyKlient = SupabaseClient
+
+/** Adresa staré databáze (pro převod: odkud se smí stahovat soubory). */
+export function adresaStareDatabaze(): string {
+  return process.env.FAKTURY_SUPABASE_URL ?? ''
+}
 
 /** `true`, jen když jsou obě proměnné prostředí vyplněné. */
 export function fakturyJsouNastavene(): boolean {

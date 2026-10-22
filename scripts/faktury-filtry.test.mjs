@@ -43,8 +43,8 @@ console.log('\npouzitFiltry — výchozí (bez archivu)')
 {
   const { proxy, volani } = faloveVolani()
   pouzitFiltry(proxy, { ...zakladniFiltry })
-  ma('nastaví is_archived na false', volani[0], ['eq', 'is_archived', false])
-  ma('vyloučí odmítnuté, dokud nejsou explicitně vybrané', volani[1], ['neq', 'status', 'Odmítnuto'])
+  ma('nastaví archivovano na false', volani[0], ['eq', 'archivovano', false])
+  ma('vyloučí odmítnuté, dokud nejsou explicitně vybrané', volani[1], ['neq', 'stav', 'Odmítnuto'])
   ma('žádné další volání', volani.length, 2)
 }
 
@@ -52,7 +52,7 @@ console.log('\npouzitFiltry — archiv')
 {
   const { proxy, volani } = faloveVolani()
   pouzitFiltry(proxy, { ...zakladniFiltry, archiv: true })
-  ma('nastaví is_archived na true', volani[0], ['eq', 'is_archived', true])
+  ma('nastaví archivovano na true', volani[0], ['eq', 'archivovano', true])
   ok('v archivu se odmítnuté NEVYLUČUJÍ', !volani.some((v) => v[0] === 'neq'))
 }
 
@@ -60,8 +60,8 @@ console.log('\npouzitFiltry — stav "Odmítnuto" sám o sobě odmítnuté nevyl
 {
   const { proxy, volani } = faloveVolani()
   pouzitFiltry(proxy, { ...zakladniFiltry, stav: 'Odmítnuto' })
-  ok('žádné neq(status, Odmítnuto)', !volani.some((v) => v[0] === 'neq' && v[1] === 'status'))
-  ma('eq(status, Odmítnuto) místo toho', volani.find((v) => v[0] === 'eq' && v[1] === 'status'), ['eq', 'status', 'Odmítnuto'])
+  ok('žádné neq(stav, Odmítnuto)', !volani.some((v) => v[0] === 'neq' && v[1] === 'stav'))
+  ma('eq(stav, Odmítnuto) místo toho', volani.find((v) => v[0] === 'eq' && v[1] === 'stav'), ['eq', 'stav', 'Odmítnuto'])
 }
 
 console.log('\npouzitFiltry — kontrola vyhrává nad stav (vzájemně se vylučují)')
@@ -70,8 +70,8 @@ console.log('\npouzitFiltry — kontrola vyhrává nad stav (vzájemně se vylu�
   pouzitFiltry(proxy, { ...zakladniFiltry, kontrola: true, stav: 'Uhrazeno' })
   // needs_review je v živé DB vždy false — ke kontrole je i stav „Nutná ruční kontrola (…)".
   ma('or(needs_review | stav „Nutná ruční kontrola…")', volani.find((v) => v[0] === 'or'), ['or', FILTR_KE_KONTROLE])
-  ok('needs_review se nefiltruje samo (ukazovalo by vždycky nulu)', !volani.some((v) => v[0] === 'eq' && v[1] === 'needs_review'))
-  ok('stav se ignoruje', !volani.some((v) => v[1] === 'status' && v[0] === 'eq'))
+  ok('needs_review se nefiltruje samo (ukazovalo by vždycky nulu)', !volani.some((v) => v[0] === 'eq' && v[1] === 'ke_kontrole'))
+  ok('stav se ignoruje', !volani.some((v) => v[1] === 'stav' && v[0] === 'eq'))
 }
 
 console.log('\npouzitFiltry — měsíc (rozsah DUZP)')
@@ -91,7 +91,7 @@ console.log('\npouzitFiltry — dodavatel, hledat, duplicity')
 {
   const { proxy, volani } = faloveVolani()
   pouzitFiltry(proxy, { ...zakladniFiltry, dodavatel: 'Bidfood Czech Republic' })
-  ma('eq(supplier, ...)', volani.find((v) => v[0] === 'eq' && v[1] === 'supplier'), ['eq', 'supplier', 'Bidfood Czech Republic'])
+  ma('eq(dodavatel, ...)', volani.find((v) => v[0] === 'eq' && v[1] === 'dodavatel'), ['eq', 'dodavatel', 'Bidfood Czech Republic'])
 }
 {
   const { proxy, volani } = faloveVolani()
@@ -103,7 +103,35 @@ console.log('\npouzitFiltry — dodavatel, hledat, duplicity')
 {
   const { proxy, volani } = faloveVolani()
   pouzitFiltry(proxy, { ...zakladniFiltry, duplicity: true })
-  ma('eq(is_duplicate, true)', volani.find((v) => v[0] === 'eq' && v[1] === 'is_duplicate'), ['eq', 'is_duplicate', true])
+  ma('eq(duplicita, true)', volani.find((v) => v[0] === 'eq' && v[1] === 'duplicita'), ['eq', 'duplicita', true])
+}
+
+// Sloupce, na které filtry sahají, musí v public.faktury EXISTOVAT.
+// PostgREST na neexistující sloupec vrátí chybu a stránka ji zahodí do
+// prázdného seznamu (lib/supabase/dotaz.ts) — přesně tak 3.–8. 10. 2026
+// ukazovaly Faktury prázdno kvůli `tenant_id`, který ve staré databázi nebyl.
+console.log('\nsloupce filtrů existují v public.faktury (text migrace)')
+{
+  const { readFileSync, readdirSync } = await import('node:fs')
+  const migrace = readdirSync('supabase/migrations').filter((f) => f.endsWith('.sql')).sort()
+    .map((f) => readFileSync(`supabase/migrations/${f}`, 'utf8')).join('\n')
+  const tabulka = /create table public\.faktury \(([\s\S]*?)\n\);/.exec(migrace)?.[1] ?? ''
+  ok('definice public.faktury nalezena', tabulka.length > 0)
+  const sloupce = new Set([...tabulka.matchAll(/^\s{2}([a-z_]+)\s/gm)].map((m) => m[1]))
+  const pouzite = new Set()
+  for (const filtry of [
+    { ...zakladniFiltry }, { ...zakladniFiltry, archiv: true, stav: 'X' }, { ...zakladniFiltry, kontrola: true },
+    { ...zakladniFiltry, mesic: '2026-03', dodavatel: 'D', hledat: 'h', duplicity: true },
+  ]) {
+    const { proxy, volani } = faloveVolani()
+    pouzitFiltry(proxy, filtry)
+    for (const v of volani) {
+      if (v[0] === 'or') for (const cast of String(v[1]).split(',')) pouzite.add(cast.split('.')[0])
+      else pouzite.add(v[1])
+    }
+  }
+  const chybi = [...pouzite].filter((s) => !sloupce.has(s))
+  ok(`všech ${pouzite.size} sloupců existuje (${[...pouzite].join(', ')})${chybi.length ? ' — CHYBÍ: ' + chybi.join(', ') : ''}`, chybi.length === 0 && pouzite.size >= 6)
 }
 
 console.log(chyb ? `\n${chyb} chyb` : '\nVšechno sedí')

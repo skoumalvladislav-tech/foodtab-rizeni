@@ -16,6 +16,8 @@
  * (app/api/ucetni/export/route.ts), která si data načte ze Supabase.
  */
 
+import { csvBunka } from './csv-bunka.ts'
+
 export type SmerTransakce = 'prijem' | 'vydaj' | 'prevod_dovnitr' | 'prevod_ven'
 
 export type ZdrojovaTransakce = {
@@ -28,6 +30,14 @@ export type ZdrojovaTransakce = {
   kategorie: string | null
   zdroj: string
   branchId: string | null
+}
+
+/** Popis faktury do exportu: „číslo (dodavatel)", bez čísla jen dodavatel. */
+export function popisFaktury(cislo: string | null | undefined, dodavatel: string | null | undefined): string {
+  const c = (cislo ?? '').trim()
+  const d = (dodavatel ?? '').trim()
+  if (c && d) return `${c} (${d})`
+  return c || d || 'faktura bez čísla'
 }
 
 export type ZdrojovaPlatba = {
@@ -60,12 +70,20 @@ const NAZVY_SMERU: Record<SmerTransakce, string> = {
  * Jeden řádek na jednu transakci. `platby` se seskupí podle
  * `transakceId` a jen POTVRZENÉ párování se promítne do sloupce
  * Faktury — návrh bez lidského potvrzení není účetní fakt.
+ *
+ * `popisyFaktur` (id → „číslo faktury (dodavatel)") — od sloučení Faktur
+ * do hlavní databáze (18. 10. 2026) je appka zná; účetní s id faktury
+ * nic neudělá. Faktura bez popisu (ve staré databázi zmizela, nebo
+ * exportující nemá právo na Faktury) zůstane jako id.
  */
 export function sestavitRadkyExportu(
   transakce: readonly ZdrojovaTransakce[],
   platby: readonly ZdrojovaPlatba[],
   nazvyPobocek: Readonly<Record<string, string>>,
+  popisyFaktur: Readonly<Record<string, string>> = {},
 ): RadekExportu[] {
+  // Bez opakování podle ID faktury, ne podle popisu: dvě faktury Makra bez
+  // čísla mají stejný popis („Makro") a účetní musí vidět, že jsou dvě.
   const fakturyPodleTransakce = new Map<string, string[]>()
   for (const p of platby) {
     if (p.stav !== 'potvrzeno') continue
@@ -83,18 +101,13 @@ export function sestavitRadkyExportu(
     castkaHaleru: t.castkaHaleru,
     protistrana: t.protistrana,
     vs: t.vs,
-    faktury: (fakturyPodleTransakce.get(t.id) ?? []).join(', '),
+    faktury: (fakturyPodleTransakce.get(t.id) ?? []).map((id) => popisyFaktur[id] ?? id).join(', '),
     zdroj: t.zdroj,
   }))
 
   return radky.sort((a, b) => (a.datum === b.datum ? a.doklad.localeCompare(b.doklad) : a.datum < b.datum ? -1 : 1))
 }
 
-function csvBunka(hodnota: string | number | null | undefined): string {
-  const s = hodnota === null || hodnota === undefined ? '' : String(hodnota)
-  if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
 
 const SLOUPCE: { hlavicka: string; z: (r: RadekExportu) => string | number }[] = [
   { hlavicka: 'Doklad', z: (r) => r.doklad },

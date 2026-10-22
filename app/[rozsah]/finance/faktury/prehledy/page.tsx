@@ -4,7 +4,8 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { jeRozsahFirmy } from '../../jen-pro-firmu'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { naFaktury, SLOUPCE_FAKTURY, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { barvaDodavatele } from '@/lib/faktury-color'
 import { formatCastku } from '@/lib/faktury-format'
 import { STAV_KE_SCHVALENI, STAV_ODMITNUTO, type Faktura } from '@/lib/faktury-types'
@@ -32,18 +33,16 @@ const karta = {
 async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') return []
-  const supabase = pristupFaktury.faktury
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
-    const { data, error } = await supabase
-      .from('invoices').select('*').eq('is_archived', false)
+    const { data, error } = await fakturyFirmy(pristupFaktury, SLOUPCE_FAKTURY).eq('archivovano', false)
       .order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) { console.error(error); break }
     if (!data || data.length === 0) break
-    vse.push(...(data as Faktura[]))
+    vse.push(...naFaktury(data as unknown as RadekFaktury[]))
     if (data.length < velikostStranky) break
     od += velikostStranky
   }

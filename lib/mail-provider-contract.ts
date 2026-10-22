@@ -26,7 +26,8 @@
  * OTEVŘENÁ ARCHITEKTONICKÁ OTÁZKA (čeká na Šéfíka,
  * docs/integrace-modul-plan.md, oddíl "Otázky pro Šéfíka"): OCR čtení
  * e-mailových faktur dnes běží mimo tenhle repozitář, v n8n, a píše
- * do ODDĚLENÉ databáze Faktur (`lib/supabase/faktury.ts`). Appka by
+ * do ODDĚLENÉ databáze Faktur (`lib/supabase/faktury.ts`; od 18. 10. 2026
+ * public.faktury v hlavní databázi, lib/faktury-pristup.ts). Appka by
  * tímhle kontraktem mohla buď (a) postavit VLASTNÍ příjem e-mailu
  * (IMAP → Storage → OCR), nebo (b) zůstat na n8n pipeline a jen
  * rozšířit, co appka z Faktur-DB čte/zobrazuje. Tohle je rozhodnutí

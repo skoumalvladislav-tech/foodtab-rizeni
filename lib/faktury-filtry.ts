@@ -1,7 +1,8 @@
 import { FILTR_KE_KONTROLE, STAV_ODMITNUTO } from './faktury-types.ts'
 
 /**
- * Sdílené filtry nad tabulkou `invoices` — vytaženo ze Seznamu (Krok 1
+ * Sdílené filtry nad tabulkou `public.faktury` (česká jména sloupců; do
+ * 18. 10. 2026 `invoices` v samostatné databázi) — vytaženo ze Seznamu (Krok 1
  * sloučení faktur), aby je mohl použít i CSV export (`/api/faktury/export`)
  * beze změny chování: stejný filtr musí vracet stejné řádky na obrazovce
  * i v exportu.
@@ -24,15 +25,15 @@ export function escapovatHledani(hodnota: string): string {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function pouzitFiltry(dotaz: any, f: FakturyFiltry): any {
-  dotaz = dotaz.eq('is_archived', f.archiv)
+  dotaz = dotaz.eq('archivovano', f.archiv)
 
   if (!f.archiv && f.stav !== STAV_ODMITNUTO) {
-    dotaz = dotaz.neq('status', STAV_ODMITNUTO)
+    dotaz = dotaz.neq('stav', STAV_ODMITNUTO)
   }
   if (f.kontrola) {
     dotaz = dotaz.or(FILTR_KE_KONTROLE)
   } else if (f.stav) {
-    dotaz = dotaz.eq('status', f.stav)
+    dotaz = dotaz.eq('stav', f.stav)
   }
   if (f.mesic) {
     const [r, m] = f.mesic.split('-').map(Number)
@@ -40,12 +41,12 @@ export function pouzitFiltry(dotaz: any, f: FakturyFiltry): any {
     const do_ = m === 12 ? `${r + 1}-01-01` : `${r}-${String(m + 1).padStart(2, '0')}-01`
     dotaz = dotaz.gte('duzp', od).lt('duzp', do_)
   }
-  if (f.dodavatel) dotaz = dotaz.eq('supplier', f.dodavatel)
+  if (f.dodavatel) dotaz = dotaz.eq('dodavatel', f.dodavatel)
   if (f.hledat) {
     const vzor = `%${escapovatHledani(f.hledat)}%`
-    dotaz = dotaz.or(`supplier.ilike."${vzor}",invoice_number.ilike."${vzor}",variable_symbol.ilike."${vzor}",email_subject.ilike."${vzor}"`)
+    dotaz = dotaz.or(`dodavatel.ilike."${vzor}",cislo_faktury.ilike."${vzor}",variabilni_symbol.ilike."${vzor}",email_predmet.ilike."${vzor}"`)
   }
-  if (f.duplicity) dotaz = dotaz.eq('is_duplicate', true)
+  if (f.duplicity) dotaz = dotaz.eq('duplicita', true)
 
   return dotaz
 }

