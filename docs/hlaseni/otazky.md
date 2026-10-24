@@ -1602,6 +1602,26 @@ vybírat nemá.
 **Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Zadání dovoluje
 „nanejvýš doklady odeslané z téhož zařízení dnes se stavem“.
 
+> **ROZHODNUTÍ ŠÉFÍKA (24. 10. 2026):** „ok otázka 69, ukazovat přehled
+> odeslaných dokladů za dnešek - ano.“ Udělané v nejopatrnější podobě:
+> telefon ukazuje doklady odeslané **z tohoto telefonu** za **dnešní
+> provozní den** pobočky (hranice dne podle pobočky, jako jinde v appce),
+> od nejnovějšího. U každého jen **čas odeslání, počet fotek, poznámku**
+> (co obsluha sama napsala) a **stav**: „Přijato, čeká na kontrolu“,
+> „Zkontrolováno“, „Zpracováno“ (tržba zapsaná nebo propojená), „Zrušeno
+> ve Financích“ a „Bez fotky — pošlete znovu“. Žádné částky, položky ani
+> nic z Financí; nic z jiných telefonů ani z jiných dnů. Odvolaný nebo
+> vypnutý telefon nedostane nic.
+>
+> **Zbývá rozhodnout (varianty, appka teď jede podle první):**
+> - přehled jen z tohoto telefonu (teď), nebo **celé pobočky** (všech
+>   jejích telefonů) — malá úprava, ale u telefonu pak vidí každý, co
+>   poslali ostatní;
+> - u zrušeného dokladu ukazovat i **důvod zrušení** — teď ne, píše ho
+>   Finance a může obsahovat cokoli (jméno hosta, částku).
+
+Původní znění (do 24. 10.):
+
 - **Teď:** telefon **neukazuje nic** kromě potvrzení hned po odeslání
   („Doklad (3 fotky) odešel v 14:05“). Seznam dnešních dokladů ani jejich
   stav tam není.
@@ -1617,6 +1637,16 @@ vybírat nemá.
 
 **Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Telefon se páruje stejně
 jako tablet Docházky (zařízení pobočky v Nastavení → Zařízení).
+
+> **ROZHODNUTÍ ŠÉFÍKA (24. 10. 2026):** „zařízení může být několik“.
+> Pobočka smí mít **víc telefonů pro doklady naráz**. Každý se páruje
+> a zapíná zvlášť, strop z otázky 66 (20 za hodinu, 60 za den) platí na
+> **každý telefon zvlášť** a autorem dokladu je **konkrétní telefon**
+> (jeho název). Appka to tak měla už od začátku — žádné „jedno zařízení
+> na pobočku“ (ověřuje scénář krok100: dva telefony téže pobočky
+> posílají nezávisle a každý doklad nese svůj telefon). Otázka „jedno
+> zařízení pro Docházku i doklady“ tím zůstává, jak je popsaná níž:
+> kiosek se zapíná zvlášť a každé zařízení pobočky dál umí i Docházku.
 
 - **Teď:** spárování samo **doklady nepovolí**. U zařízení se musí zvlášť
   zapnout **Kiosek Jiných plateb** (správce nastavení pobočky). Tablet

@@ -61,14 +61,17 @@ Obsluha nemusí mít přístup do Financí ani se přihlašovat. Na provozovně 
 2. **Vyfotit a odeslat** (kdokoli u telefonu):
    - **Vyfotit**, případně další fotky, nebo **Vybrat z galerie** (i PDF). Fotka se sama zmenší.
    - Nepovinně připsat **označení účtu nebo poznámku**, třeba „stůl 4, firma Novák“.
-   - **Odeslat doklad.** Telefon ukáže jen „Doklad (3 fotky) odešel v 14:05“.
+   - **Odeslat doklad.** Telefon ukáže „Doklad (3 fotky) odešel v 14:05“.
+   - Pod tím je **přehled dokladů odeslaných z tohoto telefonu dnes**: čas, počet fotek, poznámka a stav. Stav je „Přijato, čeká na kontrolu“, „Zkontrolováno“, „Zpracováno“, „Zrušeno ve Financích“, nebo „Bez fotky — pošlete znovu“, když fotka nedošla.
 3. **Ve Financích** se doklad objeví v Jiných platbách pobočky jako **rozpracovaný**. Jako autor je uvedené zařízení, ne člověk (třeba „kiosek Telefon u baru“). Rozpoznání AI, kontrolu, tržbu, sklad a fakturu dělají lidé s právy Jiných plateb jako u každého záznamu.
 
 Co telefon **neumí** a nevidí:
-- Žádná finanční data, žádné záznamy, nic dalšího ani po odeslání (otázka 69).
+- Žádná finanční data ani cizí záznamy. Vidí jen přehled svých dnešních dokladů bez částek (otázka 69, rozhodnutí 24. 10.).
 - Přidat fotky jde jen k dokladu, který telefon právě odeslal, a jen do dvou hodin.
 - Z jednoho telefonu odejde nejvýš 20 dokladů za hodinu a 60 za den (otázka 66).
 - Pokladnu u dokladu doplní appka sama, jen když ji pobočka má jedinou (otázka 68). AI se samo nespouští (otázka 67).
+
+Telefonů pro doklady může mít pobočka **víc**. Každý se páruje a zapíná zvlášť a strop platí na každý zvlášť (rozhodnutí 24. 10.).
 
 Ztracený telefon **odvolejte** v Nastavení → Zařízení. Kiosek u něj jde také jen **vypnout**. Obojí platí hned: další odeslání z telefonu neprojde.
 

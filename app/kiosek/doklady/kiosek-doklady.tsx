@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react'
 
 import { datumACasVPasmu } from '@/lib/cas'
-import { HLASKA_KIOSEK_VYPNUTY, KLIC_ZARIZENI_ULOZISTE } from '@/lib/jine-platby-kiosek'
+import { HLASKA_KIOSEK_VYPNUTY, KLIC_ZARIZENI_ULOZISTE, type DokladDnes } from '@/lib/jine-platby-kiosek'
 import { zkontrolovatPoZmenseni, zkontrolovatVyber, zmensitDoklad } from '@/lib/jine-platby-soubory'
 import { KBELIK_JINYCH_PLATEB } from '@/lib/jine-platby-typy'
 import { hlaskaKiosku } from '@/lib/kiosek-spojeni'
 import { getKioskSupabase } from '@/lib/supabase/kiosek'
 
-import { dokoncitDoklad, nacistStavKiosku, pripravitDoklad } from './akce'
+import { dokoncitDoklad, nacistDnesniDoklady, nacistStavKiosku, pripravitDoklad } from './akce'
 import ObrazovkaKiosku, { type FotkaNaObrazovce, type StavObrazovky } from './obrazovka'
 
 /**
@@ -67,6 +67,9 @@ export default function KiosekDoklady() {
   const [postup, setPostup] = useState('')
   const [klientId, setKlientId] = useState<string>(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : ''))
   const [odeslano, setOdeslano] = useState<{ pocet: number; cas: string } | null>(null)
+  /** Přehled dnešních dokladů z tohoto telefonu; `null` = nenačteno (nebo zařízení nesmí). */
+  const [dnes, setDnes] = useState<DokladDnes[] | null>(null)
+  const [verzePrehledu, setVerzePrehledu] = useState(0)
 
   const ohlasit = () => window.dispatchEvent(new Event(UDALOST))
 
@@ -89,6 +92,26 @@ export default function KiosekDoklady() {
       zruseno = true
     }
   }, [klic, pokus])
+
+  // Přehled dnešních dokladů: po připojení a po každém odeslání. Odvolané
+  // nebo vypnuté zařízení dostane od serveru chybu — přehled zmizí.
+  useEffect(() => {
+    if (!klic || spojeni.druh !== 'ok') return
+    let zruseno = false
+    nacistDnesniDoklady(klic)
+      .then((p) => {
+        if (zruseno) return
+        setDnes(p.ok ? p.doklady : null)
+        if (!p.ok && p.stav === 'odpojeno') setSpojeni({ druh: 'odpojeno' })
+        else if (!p.ok && p.stav === 'vypnuto') setSpojeni({ druh: 'vypnuto' })
+      })
+      .catch(() => {
+        if (!zruseno) setDnes(null)
+      })
+    return () => {
+      zruseno = true
+    }
+  }, [klic, spojeni.druh, verzePrehledu])
 
   // Náhledy fotek se uvolní, když fotka zmizí ze seznamu.
   useEffect(() => () => fotky.forEach((f) => f.nahled && URL.revokeObjectURL(f.nahled)), [fotky])
@@ -184,6 +207,7 @@ export default function KiosekDoklady() {
         throw new Error(hotovo.chyba)
       }
 
+      setVerzePrehledu((v) => v + 1)
       const celkem = fotky.filter((f) => f.odeslana).length + hotovo.pripojeno
       setOdeslano({ pocet: celkem, cas: datumACasVPasmu(new Date().toISOString(), 'Europe/Prague').split(' ').pop() ?? '' })
     } catch (e) {
@@ -209,10 +233,10 @@ export default function KiosekDoklady() {
     if (spojeni.druh === 'odpojeno') return { druh: 'odpojeno' }
     if (spojeni.druh === 'vypnuto') return { druh: 'vypnuto', chyba: HLASKA_KIOSEK_VYPNUTY }
     if (spojeni.druh === 'vypadek') return { druh: 'vypadek', chyba: spojeni.chyba }
-    if (odeslano) return { druh: 'odeslano', pobocka: spojeni.pobocka, pocet: odeslano.pocet, cas: odeslano.cas }
+    if (odeslano) return { druh: 'odeslano', pobocka: spojeni.pobocka, pocet: odeslano.pocet, cas: odeslano.cas, dnes }
     const naObrazovce: FotkaNaObrazovce[] = fotky.map((f) => ({ id: f.id, nahled: f.nahled, nazev: f.soubor.name || 'fotka', pdf: f.soubor.type === 'application/pdf', odeslana: f.odeslana }))
-    return { druh: 'foceni', pobocka: spojeni.pobocka, zarizeni: spojeni.zarizeni, fotky: naObrazovce, oznaceni, chyba, odesilam, postup }
-  }, [klic, chybaParovani, jeZPlochy, spojeni, odeslano, fotky, oznaceni, chyba, odesilam, postup])
+    return { druh: 'foceni', pobocka: spojeni.pobocka, zarizeni: spojeni.zarizeni, fotky: naObrazovce, oznaceni, chyba, odesilam, postup, dnes }
+  }, [klic, chybaParovani, jeZPlochy, spojeni, odeslano, fotky, oznaceni, chyba, odesilam, postup, dnes])
 
   return (
     <ObrazovkaKiosku

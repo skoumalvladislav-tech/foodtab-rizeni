@@ -10,7 +10,9 @@
  * je zařízení (migrace 20261022100000_jine_platby_kiosek).
  *
  * Co telefon smí: založit záznam na SVÉ pobočce a nahrát k němu fotky.
- * Nic nečte — po odeslání ukáže jen potvrzení (otázka 69).
+ * Číst smí jen přehled dokladů odeslaných z TOHOTO telefonu za dnešní
+ * provozní den — čas, počet fotek, poznámku a stav (rozhodnutí Šéfíka
+ * 24. 10., otázka 69). Žádné částky ani nic dalšího z Financí.
  *
  * Tenhle soubor je sdílený s prohlížečem (konstanty, kontrola výběru,
  * hlášky). Serverová část je v lib/jine-platby-kiosek-server.ts.
@@ -40,6 +42,46 @@ export const KLIC_ZARIZENI_ULOZISTE = 'foodtab-kiosek-klic'
 
 /** Stejné znění jako `app.jp_kiosek_zarizeni` (migrace 20261022100000). */
 export const HLASKA_KIOSEK_VYPNUTY = 'Na tomhle zařízení není zapnutý kiosek Jiných plateb.'
+
+/** Stav dokladu v přehledu telefonu — kód z `jine_platby_kiosek_dnes`. */
+export type StavDokladuKiosku = 'prijato' | 'bez_fotky' | 'zkontrolovano' | 'zpracovano' | 'zruseno'
+
+/** Srozumitelně pro obsluhu; bez důvodů a čísel z Financí. */
+export const POPIS_STAVU_KIOSKU: Record<StavDokladuKiosku, string> = {
+  prijato: 'Přijato, čeká na kontrolu',
+  bez_fotky: 'Bez fotky — pošlete znovu',
+  zkontrolovano: 'Zkontrolováno',
+  zpracovano: 'Zpracováno',
+  zruseno: 'Zrušeno ve Financích',
+}
+
+/** Jeden řádek přehledu: nic víc, než co tu je. */
+export type DokladDnes = { cas: string; fotek: number; oznaceni: string; stav: StavDokladuKiosku }
+
+/**
+ * Odpověď databáze → řádky přehledu. Vezme JEN čtyři známé údaje (cokoli
+ * dalšího, co by databáze omylem poslala, se na telefon nedostane);
+ * neznámý stav se ukáže jako „přijato“, nejvýš 50 řádků.
+ */
+export function prevzitDnesniDoklady(data: unknown): DokladDnes[] {
+  if (!Array.isArray(data)) return []
+  return data.slice(0, 50).flatMap((r) => {
+    const o = (r ?? {}) as Record<string, unknown>
+    const cas = typeof o.cas === 'string' && !Number.isNaN(Date.parse(o.cas)) ? o.cas : null
+    if (!cas) return []
+    const fotek = Number.isFinite(Number(o.fotek)) ? Math.max(0, Math.trunc(Number(o.fotek))) : 0
+    const oznaceni = typeof o.oznaceni === 'string' ? o.oznaceni.slice(0, MAX_ZNAKU_OZNACENI) : ''
+    const stav = (typeof o.stav === 'string' && o.stav in POPIS_STAVU_KIOSKU ? o.stav : 'prijato') as StavDokladuKiosku
+    return [{ cas, fotek, oznaceni, stav }]
+  })
+}
+
+/** Čas odeslání HH:MM (pásmo pobočky není u telefonu známé — výchozí české jako jinde v appce). */
+export function casOdeslani(iso: string, zona = 'Europe/Prague'): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('cs-CZ', { hour: '2-digit', minute: '2-digit', timeZone: zona }).format(d)
+}
 
 /** Delší poznámka (označení účtu, jméno hosta) — databáze ořízne na 200 znaků. */
 export const MAX_ZNAKU_OZNACENI = 200

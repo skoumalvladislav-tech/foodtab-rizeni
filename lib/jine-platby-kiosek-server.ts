@@ -8,7 +8,16 @@ import { createHash } from 'node:crypto'
 
 import { poznatTypSouboru } from './jine-platby-ai-jadro.ts'
 import { HLASKA_NEZNAME_ZARIZENI } from './kiosek-spojeni.ts'
-import { hlaskaOdeslani, jeKlicZarizeni, MAX_ZNAKU_OZNACENI, overitVyber, stavPodleChyby, stropSouboru } from './jine-platby-kiosek.ts'
+import {
+  hlaskaOdeslani,
+  jeKlicZarizeni,
+  MAX_ZNAKU_OZNACENI,
+  overitVyber,
+  prevzitDnesniDoklady,
+  stavPodleChyby,
+  stropSouboru,
+  type DokladDnes,
+} from './jine-platby-kiosek.ts'
 import { cestaSouboru, overitCestu, PRIPONY_SOUBORU } from './jine-platby-soubory.ts'
 import { MAX_SOUBORU_NA_ZAZNAM, type TypSouboru } from './jine-platby-typy.ts'
 
@@ -40,6 +49,16 @@ export async function stavKiosku(z: ZavislostiKiosku, klic: unknown): Promise<St
   if (error) return { ok: false, stav: stavPodleChyby(error), chyba: hlaskaOdeslani(error, 'Nepodařilo se spojit se serverem.') }
   const d = (data ?? {}) as { pobocka?: unknown; zarizeni?: unknown }
   return { ok: true, pobocka: String(d.pobocka ?? ''), zarizeni: String(d.zarizeni ?? '') }
+}
+
+export type DnesniDoklady = { ok: true; doklady: DokladDnes[] } | { ok: false; stav: 'odpojeno' | 'vypnuto' | 'chyba'; chyba: string }
+
+/** Přehled dokladů z TOHOTO zařízení za dnešní provozní den (otázka 69). Databáze ověří klíč jako u ostatních funkcí. */
+export async function dnesniDoklady(z: ZavislostiKiosku, klic: unknown): Promise<DnesniDoklady> {
+  if (!jeKlicZarizeni(klic)) return { ok: false, stav: 'odpojeno', chyba: HLASKA_NEZNAME_ZARIZENI }
+  const { data, error } = await z.rpc('jine_platby_kiosek_dnes', { p_klic: klic })
+  if (error) return { ok: false, stav: stavPodleChyby(error), chyba: hlaskaOdeslani(error, 'Přehled se nepodařilo načíst.') }
+  return { ok: true, doklady: prevzitDnesniDoklady(data) }
 }
 
 export type Pripraveno =

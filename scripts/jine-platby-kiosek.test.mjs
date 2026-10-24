@@ -57,6 +57,13 @@ ok('stav podle chyby: neznámé zařízení → odpojeno, vypnutý kiosek → vy
   K.stavPodleChyby({ code: '42501', message: 'Zařízení není registrované nebo bylo odvolané.' }) === 'odpojeno' &&
     K.stavPodleChyby({ code: '42501', message: K.HLASKA_KIOSEK_VYPNUTY }) === 'vypnuto' &&
     K.stavPodleChyby({ code: '42501', message: 'permission denied for function x' }) === 'chyba' && K.stavPodleChyby({ code: '23514', message: 'strop' }) === 'chyba')
+ok('přehled dnes: převezme JEN čas, počet fotek, poznámku a stav (cokoli dalšího z databáze zahodí); neznámý stav → přijato',
+  ((p) => p.length === 2 && Object.keys(p[0]).sort().join() === 'cas,fotek,oznaceni,stav' && p[0].stav === 'zkontrolovano' && p[1].stav === 'prijato' && !('castka_haleru' in p[0]))(
+    K.prevzitDnesniDoklady([{ cas: '2026-10-24T12:05:00Z', fotek: 2, oznaceni: 'stůl 4', stav: 'zkontrolovano', castka_haleru: 45000, zaznam: 'x' }, { cas: '2026-10-24T11:00:00Z', fotek: '1', oznaceni: null, stav: 'nesmysl' }])))
+ok('přehled dnes: řádek bez platného času se vynechá, nejvýš 50 řádků, ne-pole → prázdno',
+  K.prevzitDnesniDoklady([{ cas: 'zitra', fotek: 1, stav: 'prijato' }]).length === 0 &&
+    K.prevzitDnesniDoklady(Array(60).fill({ cas: '2026-10-24T12:00:00Z', fotek: 1, oznaceni: '', stav: 'prijato' })).length === 50 && K.prevzitDnesniDoklady({}).length === 0)
+ok('čas odeslání v českém čase (14:05 z 12:05 UTC v létě)', K.casOdeslani('2026-10-24T12:05:00Z') === '14:05')
 ok('hláška: česká z databáze projde, technika serveru ne', K.hlaskaOdeslani({ message: 'Z tohohle zařízení odešlo za poslední hodinu 20 dokladů' }).startsWith('Z tohohle') &&
   !K.hlaskaOdeslani({ message: 'permission denied for table jine_platby' }).includes('permission'))
 
@@ -112,6 +119,17 @@ ok('stav: vypnutý kiosek → vypnuto (klíč zůstává)', !s3.ok && s3.stav ==
 svet({ bezSluzby: true })
 const s4 = await akce.nacistStavKiosku(KLIC)
 ok('bez klíče služby na serveru → srozumitelná chyba, nic se nevolá', !s4.ok && s4.stav === 'chyba' && /nastavení/.test(s4.chyba))
+
+svet()
+const pr0 = await akce.nacistDnesniDoklady('nesmysl')
+ok('přehled: neplatný klíč → odpojeno, databáze se nevolá', !pr0.ok && pr0.stav === 'odpojeno' && S().rpc.length === 0)
+svet({ odpovedi: { jine_platby_kiosek_dnes: () => ({ data: [{ cas: '2026-10-24T12:05:00Z', fotek: 2, oznaceni: 'stůl 4', stav: 'prijato', castka_haleru: 9900 }], error: null }) } })
+const pr1 = await akce.nacistDnesniDoklady(KLIC)
+ok('přehled: databáze se ptá s klíčem zařízení; na telefon jdou jen čtyři údaje (částka by se zahodila)',
+  pr1.ok && S().rpc.length === 1 && S().rpc[0][0] === 'jine_platby_kiosek_dnes' && S().rpc[0][1].p_klic === KLIC && pr1.doklady.length === 1 && !('castka_haleru' in pr1.doklady[0]))
+svet({ odpovedi: { jine_platby_kiosek_dnes: () => ({ data: null, error: { code: '42501', message: 'Zařízení není registrované nebo bylo odvolané.' } }) } })
+const pr2 = await akce.nacistDnesniDoklady(KLIC)
+ok('přehled: odvolané zařízení → nic (odpojeno)', !pr2.ok && pr2.stav === 'odpojeno' && !('doklady' in pr2))
 
 const VYBER = [{ typ: 'image/jpeg', velikost: 2000 }, { typ: 'application/pdf', velikost: 3000 }]
 svet()
@@ -191,6 +209,21 @@ ok('focení: fotoaparát (capture="environment", jen obrázky) a galerie (víc s
 ok('focení: tlačítko „Odeslat doklad (2 fotky)“, pobočka a zařízení v hlavičce, poznámka nepovinná (max 200)',
   text(foceni).includes('Odeslat doklad (2 fotky)') && text(foceni).includes('Černá Perla · Telefon u baru') && /<textarea[^>]*maxLength="200"/.test(foceni))
 ok('focení: žádná navigace ani odkazy (obsluha se odsud nikam nedostane) a žádné částky', !/<a\b/.test(foceni) && !/Kč|Finance →|Tržby/.test(text(foceni)))
+const DNES = [
+  { cas: '2026-10-24T12:05:00Z', fotek: 2, oznaceni: 'stůl 4, firma Novák', stav: 'prijato' },
+  { cas: '2026-10-24T09:30:00Z', fotek: 1, oznaceni: '', stav: 'zkontrolovano' },
+  { cas: '2026-10-24T08:10:00Z', fotek: 0, oznaceni: 'sjetina', stav: 'bez_fotky' },
+]
+const sPrehledem = html({ druh: 'foceni', pobocka: 'Černá Perla', zarizeni: 'Telefon u baru', fotky: [], oznaceni: '', chyba: '', odesilam: false, postup: '', dnes: DNES })
+ok('přehled dnes na telefonu: čas, počet fotek, poznámka a stav srozumitelně, od nejnovějšího',
+  text(sPrehledem).includes('Dnes odesláno z tohoto telefonu') && text(sPrehledem).includes('14:05 · 2 fotky · stůl 4, firma Novák') &&
+    text(sPrehledem).includes('Přijato, čeká na kontrolu') && text(sPrehledem).includes('11:30 · 1 fotka') && text(sPrehledem).includes('Zkontrolováno') &&
+    text(sPrehledem).includes('Bez fotky — pošlete znovu') && text(sPrehledem).indexOf('14:05') < text(sPrehledem).indexOf('11:30'))
+ok('přehled: žádné částky, odkazy ani nic z Financí', !/Kč|<a\b|Tržby|položk/i.test(sPrehledem.replace(/Odeslat doklad/g, '')))
+ok('přehled: prázdný den řekne „Dnes odsud zatím nic neodešlo“; nenačtený (nebo zakázaný) přehled se neukáže vůbec',
+  text(html({ druh: 'foceni', pobocka: 'P', zarizeni: 'Z', fotky: [], oznaceni: '', chyba: '', odesilam: false, postup: '', dnes: [] })).includes('Dnes odsud zatím nic neodešlo') &&
+    !text(html({ druh: 'foceni', pobocka: 'P', zarizeni: 'Z', fotky: [], oznaceni: '', chyba: '', odesilam: false, postup: '', dnes: null })).includes('Dnes odesláno'))
+ok('po odeslání se přehled ukáže hned pod potvrzením', text(html({ druh: 'odeslano', pobocka: 'Černá Perla', pocet: 2, cas: '14:05', dnes: DNES })).includes('Dnes odesláno z tohoto telefonu'))
 const odeslano = html({ druh: 'odeslano', pobocka: 'Černá Perla', pocet: 3, cas: '14:05' })
 ok('odesláno: jen potvrzení (počet fotek, čas, pobočka) a „Vyfotit další doklad“', text(odeslano).includes('Doklad (3 fotky) odešel v 14:05') && text(odeslano).includes('Vyfotit další doklad') && !/<a\b/.test(odeslano))
 ok('odpojeno: „Spárovat znovu“; vypnuto: kdo ho zapne; výpadek: „Zkusit znovu“',
@@ -209,6 +242,10 @@ ok('stránka kiosku je mimo /[rozsah] a mimo přihlášení a odkazuje svůj man
 const klient = zdroj('app/kiosek/doklady/kiosek-doklady.tsx')
 ok('telefon mluví s databází jen anon klientem bez sezení (getKioskSupabase), nikdy přihlašovací cookie', klient.includes('getKioskSupabase') && !klient.includes('getBrowserSupabase'))
 ok('klíč zařízení se maže na jediném místě (Spárovat znovu po výslovném „neznám“)', (klient.match(/localStorage\.removeItem/g) ?? []).length === 1 && /function sparovatZnovu\(\) \{\n[^}]*removeItem/.test(klient))
+ok('přehled dnes: telefon ho načte po připojení i po každém odeslání; při chybě ho schová a odvolané/vypnuté zařízení přepne obrazovku',
+  /nacistDnesniDoklady\(klic\)/.test(klient) && klient.includes('setDnes(p.ok ? p.doklady : null)') &&
+    klient.includes("if (!p.ok && p.stav === 'odpojeno') setSpojeni({ druh: 'odpojeno' })") && klient.includes("else if (!p.ok && p.stav === 'vypnuto') setSpojeni({ druh: 'vypnuto' })") &&
+    /setVerzePrehledu\(\(v\) => v \+ 1\)/.test(klient) && klient.includes('}, [klic, spojeni.druh, verzePrehledu])'))
 ok('fotky jdou na podepsané adresy (uploadToSignedUrl), ne přes serverovou akci', klient.includes('uploadToSignedUrl') && !/formData\.append\(/.test(klient))
 const akceZdroj = zdroj('app/kiosek/doklady/akce.ts')
 ok('serverové akce kiosku: jen klient služby a jádro kiosku — žádné akce ani sezení Financí',
@@ -220,8 +257,8 @@ const grantFunkce = (jmeno) => {
   const r = new RegExp(`(revoke|grant)[^;]*function public\\.${jmeno}\\([^)]*\\)[^;]*;`, 'g')
   return [...migrace.matchAll(r)].map((m) => m[0])
 }
-ok('migrace: funkce kiosku (stav, založení, připojení) jen service_role — revoke od public, anon, authenticated, grant nikomu jinému',
-  ['jine_platby_kiosek_stav', 'jine_platby_kiosek_zalozit', 'jine_platby_kiosek_pripojit_soubor'].every((f) => {
+ok('migrace: funkce kiosku (stav, přehled, založení, připojení) jen service_role — revoke od public, anon, authenticated, grant nikomu jinému',
+  ['jine_platby_kiosek_stav', 'jine_platby_kiosek_dnes', 'jine_platby_kiosek_zalozit', 'jine_platby_kiosek_pripojit_soubor'].every((f) => {
     const g = grantFunkce(f)
     return g.some((x) => /^revoke all on function[\s\S]*from public, anon, authenticated;$/.test(x)) && g.filter((x) => x.startsWith('grant')).every((x) => /to service_role;$/.test(x)) && g.some((x) => x.startsWith('grant'))
   }))
@@ -235,6 +272,15 @@ ok('migrace: kiosek je na zařízení nutné výslovně zapnout (jine_platby_kio
 
 const nastaveni = zdroj('app/[rozsah]/nastaveni/zarizeni/page.tsx')
 const nastaveniAkce = zdroj('app/[rozsah]/nastaveni/zarizeni/akce.ts')
+const dnesSql = /create function public\.jine_platby_kiosek_dnes\(p_klic text\)[\s\S]*?end \$\$;/.exec(migrace)?.[0] ?? ''
+ok('migrace: přehled jen pro zařízení z klíče (jp_kiosek_zarizeni), jen jeho záznamy a jen dnešní provozní den pobočky (app.business_date)',
+  /d := app\.jp_kiosek_zarizeni\(p_klic\);/.test(dnesSql) && /where z\.zarizeni_id = d\.id and z\.tenant_id = d\.tenant_id and z\.branch_id = d\.branch_id/.test(dnesSql) &&
+    /app\.business_date\(d\.branch_id, z\.vytvoreno\) = v_den/.test(dnesSql) && /v_den := app\.business_date\(d\.branch_id, now\(\)\);/.test(dnesSql))
+ok('migrace: přehled vrací jen čas, počet fotek, poznámku a stav (žádná částka, důvod zrušení ani id)',
+  [...dnesSql.matchAll(/'(\w+)', /g)].map((m) => m[1]).filter((k) => ['cas', 'fotek', 'oznaceni', 'stav'].includes(k)).length === 4 &&
+    !/castka|zruseni_duvod|'id'|'zaznam'/.test(dnesSql.replace(/--.*$/gm, '')))
+ok('víc zařízení na pobočce: tabulka kiosků má klíč jen zařízení (žádné „jedno na pobočku“)',
+  /zarizeni_id uuid primary key references public\.branch_devices/.test(migrace) && !/unique\s*\(\s*(tenant_id,\s*)?branch_id\s*\)/.test(migrace) && !/create unique index[^;]*jine_platby_kiosky/.test(migrace))
 ok('Nastavení → Zařízení: přepínač kiosku Jiných plateb u aktivního zařízení (jen po nasazení tabulky)',
   nastaveni.includes('action={prepnoutKiosekJinychPlateb}') && nastaveni.includes("z.stav === 'active' && kioskyNasazene"))
 ok('… akce: přístup settings.manage, pak funkce databáze (právo a Finance ověří ona)',

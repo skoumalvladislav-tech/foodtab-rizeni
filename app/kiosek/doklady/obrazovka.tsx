@@ -1,11 +1,12 @@
 import type { FormEvent } from 'react'
 
-import { MAX_ZNAKU_OZNACENI } from '@/lib/jine-platby-kiosek'
+import { casOdeslani, MAX_ZNAKU_OZNACENI, POPIS_STAVU_KIOSKU, type DokladDnes } from '@/lib/jine-platby-kiosek'
 
 /**
  * Obrazovka kiosku Jiných plateb na telefonu — jen zobrazení podle stavu
  * (logika je v ./kiosek-doklady.tsx). Žádná finanční data: telefon zná
- * jen název pobočky a zařízení a po odeslání počet fotek a čas.
+ * jen název pobočky a zařízení a přehled SVÝCH dnešních dokladů — čas,
+ * počet fotek, poznámku a stav (rozhodnutí Šéfíka 24. 10., otázka 69).
  */
 
 export type FotkaNaObrazovce = { id: string; nahled: string | null; nazev: string; pdf: boolean; odeslana: boolean }
@@ -16,8 +17,8 @@ export type StavObrazovky =
   | { druh: 'odpojeno' }
   | { druh: 'vypnuto'; chyba: string }
   | { druh: 'vypadek'; chyba: string }
-  | { druh: 'foceni'; pobocka: string; zarizeni: string; fotky: FotkaNaObrazovce[]; oznaceni: string; chyba: string; odesilam: boolean; postup: string }
-  | { druh: 'odeslano'; pobocka: string; pocet: number; cas: string }
+  | { druh: 'foceni'; pobocka: string; zarizeni: string; fotky: FotkaNaObrazovce[]; oznaceni: string; chyba: string; odesilam: boolean; postup: string; dnes: DokladDnes[] | null }
+  | { druh: 'odeslano'; pobocka: string; pocet: number; cas: string; dnes: DokladDnes[] | null }
 
 export type AkceObrazovky = {
   registrovat: (e: FormEvent<HTMLFormElement>) => void
@@ -119,6 +120,7 @@ export default function ObrazovkaKiosku({ stav, akce }: { stav: StavObrazovky; a
           <button type="button" className="ft-tl ft-tl-hlavni" style={tlacitko} onClick={akce.dalsiDoklad}>
             Vyfotit další doklad
           </button>
+          <PrehledDnes doklady={stav.dnes} />
         </div>
       </main>
     )
@@ -218,9 +220,38 @@ export default function ObrazovkaKiosku({ stav, akce }: { stav: StavObrazovky; a
         <button type="button" className="ft-tl ft-tl-hlavni" style={tlacitko} disabled={stav.odesilam || zbyva === 0} onClick={akce.odeslat}>
           {stav.odesilam ? 'Odesílám…' : zbyva > 0 ? `Odeslat doklad (${zbyva} ${zbyva === 1 ? 'fotka' : zbyva < 5 ? 'fotky' : 'fotek'})` : 'Odeslat doklad'}
         </button>
-        <p style={{ ...popis, margin: '12px 0 0' }}>Po odeslání tu nic dalšího vidět není — doklad zkontrolují ve Financích.</p>
+        <p style={{ ...popis, margin: '12px 0 0' }}>Doklad zkontrolují ve Financích. Tady je vidět jen to, co odešlo z tohoto telefonu dnes.</p>
+        <PrehledDnes doklady={stav.dnes} />
       </div>
     </main>
+  )
+}
+
+/** Doklady z TOHOTO telefonu za dnešní provozní den — bez částek, bez čehokoli z Financí. */
+function PrehledDnes({ doklady }: { doklady: DokladDnes[] | null | undefined }) {
+  // Nenačteno, nebo zařízení přehled nesmí (odvolané, vypnuté) → nic.
+  if (!doklady) return null
+  return (
+    <section aria-label="Dnes odesláno z tohoto telefonu" style={{ marginTop: '20px', borderTop: '1px solid var(--line)', paddingTop: '14px' }}>
+      <h2 style={{ ...popisek, margin: '0 0 8px' }}>Dnes odesláno z tohoto telefonu</h2>
+      {doklady.length === 0 ? (
+        <p style={{ ...popis, margin: 0 }}>Dnes odsud zatím nic neodešlo.</p>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
+          {doklady.map((d, i) => (
+            <li key={`${d.cas}-${i}`} style={{ ...polozka, alignItems: 'flex-start', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '14px', color: 'var(--ink)' }}>
+                <strong>{casOdeslani(d.cas)}</strong> · {d.fotek} {d.fotek === 1 ? 'fotka' : d.fotek > 1 && d.fotek < 5 ? 'fotky' : 'fotek'}
+                {d.oznaceni ? ` · ${d.oznaceni}` : ''}
+              </span>
+              <span style={{ fontSize: '13px', color: d.stav === 'bez_fotky' || d.stav === 'zruseno' ? 'var(--bad)' : d.stav === 'prijato' ? 'var(--muted)' : 'var(--dobre)' }}>
+                {POPIS_STAVU_KIOSKU[d.stav]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 

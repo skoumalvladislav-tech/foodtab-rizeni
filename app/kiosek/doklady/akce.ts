@@ -4,9 +4,11 @@ import { randomUUID } from 'node:crypto'
 
 import { KBELIK_JINYCH_PLATEB } from '@/lib/jine-platby-typy'
 import {
+  dnesniDoklady,
   dokoncitOdeslani,
   pripravitOdeslani,
   stavKiosku,
+  type DnesniDoklady,
   type Dokonceno,
   type Pripraveno,
   type StavKiosku,
@@ -25,9 +27,9 @@ import { klientUlohy } from '@/lib/supabase/uloha'
  *
  * SERVICE_ROLE: funkce kiosku (`jine_platby_kiosek_*`) mají grant jen
  * pro service_role — anon ani přihlášený je přes PostgREST nezavolají.
- * Klient služby nečte nic, co by šlo zpátky do prohlížeče: telefon
- * dostane jen název pobočky a zařízení, id nového záznamu, cesty
- * a jednorázové tokeny pro nahrání.
+ * Telefon dostane jen název pobočky a zařízení, id nového záznamu, cesty
+ * a jednorázové tokeny pro nahrání a přehled svých dnešních dokladů
+ * (čas, počet fotek, poznámka, stav — otázka 69).
  *
  * Akce Financí (app/[rozsah]/finance/...) chtějí přihlášeného člověka
  * s právy Jiných plateb; kiosek žádného nemá, takže na ně nedosáhne.
@@ -65,6 +67,13 @@ export async function nacistStavKiosku(klic: string): Promise<StavKiosku> {
   const z = zavislosti()
   if (!z) return { ok: false, stav: 'chyba', chyba: BEZ_SLUZBY }
   return stavKiosku(z, klic)
+}
+
+/** Doklady odeslané z TOHOTO telefonu za dnešní provozní den — čas, počet fotek, poznámka, stav (otázka 69). */
+export async function nacistDnesniDoklady(klic: string): Promise<DnesniDoklady> {
+  const z = zavislosti()
+  if (!z) return { ok: false, stav: 'chyba', chyba: BEZ_SLUZBY }
+  return dnesniDoklady(z, klic)
 }
 
 /** Krok 1: založit záznam na pobočce zařízení a vydat podepsané adresy pro nahrání fotek. */

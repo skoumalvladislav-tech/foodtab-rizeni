@@ -16,8 +16,12 @@
 --     (stav 'revoked') nebo vypnutí kiosku vezme přístup hned — každé
 --     volání znovu ověřuje klíč;
 --   * jen založit záznam na SVÉ pobočce a připojit k němu fotky (do dvou
---     hodin od založení); zařízení nic nečte — žádná finanční data,
---     žádné cizí záznamy;
+--     hodin od založení); ze čtení jen přehled dokladů odeslaných z TOHOTO
+--     zařízení za dnešní provozní den (čas, počet fotek, poznámka, stav —
+--     rozhodnutí Šéfíka 24. 10., otázka 69); žádná finanční data, žádné
+--     cizí záznamy;
+--   * zařízení na pobočce může být několik (rozhodnutí Šéfíka 24. 10.):
+--     každé se páruje a zapíná zvlášť, strop i autor jsou na zařízení;
 --   * strop odeslání na zařízení (za hodinu, za 24 hodin);
 --   * funkce smí volat jen server (service_role): nahrání jde přes
 --     podepsanou adresu, typ podle obsahu a otisk spočítá server.
@@ -135,6 +139,53 @@ end $$;
 
 revoke all on function public.jine_platby_kiosek_stav(text) from public, anon, authenticated;
 grant execute on function public.jine_platby_kiosek_stav(text) to service_role;
+
+-- ---------------------------------------------------------------------
+-- 5b. Dnes odesláno z tohoto zařízení (rozhodnutí Šéfíka 24. 10., otázka 69)
+-- ---------------------------------------------------------------------
+-- Jen záznamy TOHOTO zařízení za DNEŠNÍ provozní den pobočky
+-- (app.business_date — hranice dne podle pobočky, ne půlnoc). Od
+-- nejnovějšího, nejvýš 50. Každý jen: čas odeslání, počet fotek,
+-- poznámka (označení, které obsluha sama napsala) a stav jako kód —
+-- žádné částky, položky, výsledky kontrol ani důvod zrušení (to píše
+-- Finance a může obsahovat cokoli). Odvolané nebo vypnuté zařízení
+-- dostane chybu jako u ostatních funkcí kiosku, tedy nic.
+create function public.jine_platby_kiosek_dnes(p_klic text)
+returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare
+  d     public.branch_devices;
+  v_den date;
+begin
+  d := app.jp_kiosek_zarizeni(p_klic);
+  v_den := app.business_date(d.branch_id, now());
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+             'cas', x.vytvoreno,
+             'fotek', x.fotek,
+             'oznaceni', x.oznaceni,
+             'stav', case
+                       when x.stav_kontroly = 'zruseno' then 'zruseno'
+                       when x.stav_trzby in ('zapsano', 'propojeno') then 'zpracovano'
+                       when x.stav_kontroly = 'zkontrolovano' then 'zkontrolovano'
+                       when x.fotek = 0 then 'bez_fotky'
+                       else 'prijato'
+                     end)
+           order by x.vytvoreno desc)
+      from (select z.vytvoreno, z.oznaceni, z.stav_kontroly, z.stav_trzby,
+                   (select count(*) from public.jine_platby_soubory f where f.zaznam_id = z.id)::integer as fotek
+              from public.jine_platby z
+             where z.zarizeni_id = d.id and z.tenant_id = d.tenant_id and z.branch_id = d.branch_id
+               and z.vytvoreno > now() - interval '2 days'
+               and app.business_date(d.branch_id, z.vytvoreno) = v_den
+             order by z.vytvoreno desc
+             limit 50) x
+  ), '[]'::jsonb);
+end $$;
+
+revoke all on function public.jine_platby_kiosek_dnes(text) from public, anon, authenticated;
+grant execute on function public.jine_platby_kiosek_dnes(text) to service_role;
 
 -- ---------------------------------------------------------------------
 -- 6. Založení záznamu z kiosku

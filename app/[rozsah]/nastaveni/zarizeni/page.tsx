@@ -204,7 +204,8 @@ export default async function NastaveniZarizeni({
         <p style={{ margin: '20px 0 0', fontSize: '13px', color: 'var(--muted)', maxWidth: '62ch' }}>
           Telefon na provozovně se páruje stejně jako tablet: vystavte kód, na telefonu otevřete{' '}
           <code>/kiosek/doklady</code> a kód opište. Pak u něj zapněte <strong>Kiosek Jiných plateb</strong> — obsluha jím
-          vyfotí účet a doklad přijde do Finance → Tržby → Jiné platby. Nic jiného z telefonu vidět není.
+          vyfotí účet a doklad přijde do Finance → Tržby → Jiné platby. Z telefonu je vidět jen přehled dokladů,
+          které z něj odešly dnes. Telefonů pro doklady může mít pobočka víc — každý se páruje a zapíná zvlášť.
         </p>
         <p style={{ margin: '12px 0 0', fontSize: '13px', color: 'var(--muted)', maxWidth: '62ch' }}>
           Odvolané zařízení se nemaže — ať je dohledatelné, co na

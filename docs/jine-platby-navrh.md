@@ -435,6 +435,7 @@ Migrace `20261022100000_jine_platby_kiosek`, stránka `/kiosek/doklady`.
 | Funkce | Kdo | Co |
 |---|---|---|
 | `jine_platby_kiosek_stav(p_klic) → jsonb` | service_role | jen `{pobocka, zarizeni}` |
+| `jine_platby_kiosek_dnes(p_klic) → jsonb` | service_role | doklady TOHOTO zařízení za dnešní provozní den pobočky (`app.business_date`), od nejnovějšího, nejvýš 50; každý jen `{cas, fotek, oznaceni, stav}`, stav `prijato`/`bez_fotky`/`zkontrolovano`/`zpracovano`/`zruseno` (rozhodnutí 24. 10., otázka 69) |
 | `jine_platby_kiosek_zalozit(p_klic, p_oznaceni, p_klient_id) → jsonb` | service_role | záznam na pobočce zařízení; týž `klient_id` z téhož zařízení = týž záznam; strop 20/h a 60/24 h na zařízení (otázka 66); pokladna jen když je jediná (otázka 68); vrací `{zaznam, tenant, branch}` |
 | `jine_platby_kiosek_pripojit_soubor(p_klic, p_zaznam, p_cesta, p_otisk) → uuid` | service_role | jen záznam téhož zařízení, nejvýš 2 hodiny starý, `rozpracovano`; cesta záznamu; soubor bez vlastníka (podepsaná adresa od serveru); typ a velikost jako `jine_platby_pripojit_soubor`; stejný otisk neprojde a hláška neprozradí cizí záznam |
 | `jine_platby_kiosek_zapnout(p_tenant, p_zarizeni, p_zapnout)` | authenticated | `settings.manage` na pobočce zařízení; zapnout jen aktivní zařízení firmy s Financemi; vypnutí platí hned |
@@ -443,4 +444,5 @@ Migrace `20261022100000_jine_platby_kiosek`, stránka `/kiosek/doklady`.
   - `app/kiosek/doklady/akce.ts` jsou serverové akce bez přihlášení. Všechno rozhoduje klíč zařízení v databázi.
   - `lib/jine-platby-kiosek-server.ts` řídí odeslání: podepsané adresy pro cesty z firmy a pobočky od databáze; po nahrání stažení, magic bytes, velikost ze stažených bajtů, otisk sha256, a když něco selže, smazání souboru.
   - Telefon (`kiosek-doklady.tsx`) mluví jen anon klientem bez sezení (registrace, nahrání na podepsanou adresu).
-- **Co telefon nesmí:** číst cokoli z Jiných plateb nebo Financí (otázka 69). Spouštět AI nesmí taky (otázka 67).
+- **Co telefon nesmí:** číst cokoli z Jiných plateb nebo Financí, kromě přehledu svých dnešních dokladů bez částek (otázka 69, rozhodnutí 24. 10.). Spouštět AI nesmí taky (otázka 67).
+- **Víc telefonů na pobočce** (rozhodnutí 24. 10.): `jine_platby_kiosky` má klíč jen `zarizeni_id`, nic jako „jedno na pobočku“. Strop i autor jsou na zařízení.
