@@ -49,30 +49,32 @@ alter table public.branch_devices
 
 comment on column public.branch_devices.ucel is
   '''dochazka'' = tablet kiosku Docházky (/kiosek); ''doklady'' = telefon na fotky dokladů Jiných plateb '
-  '(/kiosek/doklady). Funkce Docházky berou jen dochazka, funkce dokladů jen doklady. Jde jen zúžit.';
+  '(/kiosek/doklady). Funkce Docházky berou jen dochazka, funkce dokladů jen doklady. Nastaví se při '
+  'spárování a pak se nemění.';
 
 grant select (ucel) on public.branch_devices to authenticated;
 
--- Účel jde jen zúžit: telefon na doklady se Docházkou nestane ani
--- přímým zápisem (sloupcové granty v produkci nemusí držet — výchozí
--- práva Supabase).
-create function app.zarizeni_ucel_jen_zuzit()
+-- Účel se nastaví při spárování (app.registrovat_zarizeni_s_ucelem)
+-- a potom se nemění vůbec — ani přímým zápisem. Sloupcové granty
+-- v produkci nemusí držet (výchozí práva Supabase dávají přihlášeným
+-- UPDATE na celou tabulku), proto to hlídá spoušť, ne grant.
+create function app.zarizeni_ucel_nemenny()
 returns trigger
 language plpgsql set search_path = ''
 as $$
 begin
-  if old.ucel = 'doklady' and new.ucel is distinct from 'doklady' then
-    raise exception 'Telefon na doklady nejde přepnout na Docházku — tablet Docházky se páruje zvlášť na /kiosek.'
+  if new.ucel is distinct from old.ucel then
+    raise exception 'Účel zařízení nejde změnit — tablet Docházky se páruje na /kiosek, telefon na doklady na /kiosek/doklady.'
       using errcode = 'check_violation';
   end if;
   return new;
 end $$;
 
-revoke all on function app.zarizeni_ucel_jen_zuzit() from public, anon, authenticated;
+revoke all on function app.zarizeni_ucel_nemenny() from public, anon, authenticated;
 
 create trigger trg_zarizeni_ucel
   before update of ucel on public.branch_devices
-  for each row execute function app.zarizeni_ucel_jen_zuzit();
+  for each row execute function app.zarizeni_ucel_nemenny();
 
 -- Funkce kiosku Docházky (kiosk_stav, kiosk_zalohy, pichnout_pinem,
 -- potvrdit_zalohu_pinem, kiosk_zpravy_*) hledají zařízení TADY — nově jen
@@ -111,20 +113,85 @@ $$;
 revoke all on function public.pobocka_ma_kiosek(uuid, uuid) from public, anon;
 grant execute on function public.pobocka_ma_kiosek(uuid, uuid) to authenticated;
 
--- Spárování telefonu na doklady (/kiosek/doklady): stejný jednorázový kód
--- jako u tabletu, zařízení ale dostane účel 'doklady' — Docházku neumí.
-create function public.registrovat_zarizeni_doklady(p_kod text)
+-- Spárování s účelem: tělo registrace z 20260901170000 beze změny, jen
+-- účel jde do zařízení rovnou při vložení (potom se nemění). Telefon na
+-- doklady musí mít na pobočce jedinečný název mezi aktivními telefony —
+-- Finance autora dokladu pozná jen podle názvu (ověření 59ec803).
+create function app.registrovat_zarizeni_s_ucelem(p_kod text, p_ucel text)
 returns table (device_id uuid, klic text, pobocka text, nazev text)
 language plpgsql volatile security definer set search_path = ''
 as $$
-#variable_conflict use_column
 declare
-  r record;
+  v_reg  record;
+  v_klic text;
+  v_id   uuid;
 begin
-  select * into r from public.registrovat_zarizeni(p_kod);
-  update public.branch_devices set ucel = 'doklady' where id = r.device_id;
-  return query select r.device_id, r.klic, r.pobocka, r.nazev;
-end $$;
+  if p_ucel is null or p_ucel not in ('dochazka', 'doklady') then
+    raise exception 'Neznámý účel zařízení.' using errcode = 'invalid_parameter_value';
+  end if;
+
+  select * into v_reg
+  from public.device_registrations r
+  where r.code_hash = encode(sha256(convert_to(upper(btrim(coalesce(p_kod, ''))), 'UTF8')), 'hex')
+  limit 1;
+
+  -- Jedna hláška pro „neexistuje“, „už použitý“ i „vypršel“. Kdo kód
+  -- hádá, se z odpovědi nedozví, jestli trefil.
+  if v_reg.id is null or v_reg.used_at is not null or v_reg.expires_at < now() then
+    raise exception 'Registrační kód neplatí. Nechte si vystavit nový.'
+      using errcode = 'invalid_parameter_value';
+  end if;
+
+  if p_ucel = 'doklady' and exists (
+       select 1 from public.branch_devices d
+        where d.branch_id = v_reg.branch_id and d.stav = 'active' and d.ucel = 'doklady'
+          and lower(btrim(d.nazev)) = lower(btrim(v_reg.nazev))) then
+    raise exception 'Na pobočce už je aktivní telefon „%“. V Nastavení → Zařízení ho odvolejte, nebo vystavte kód s jiným názvem.',
+      btrim(v_reg.nazev) using errcode = 'unique_violation';
+  end if;
+
+  v_klic := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+
+  insert into public.branch_devices
+    (tenant_id, branch_id, nazev, key_hash, created_by, ucel)
+  values (
+    v_reg.tenant_id, v_reg.branch_id, v_reg.nazev,
+    encode(sha256(convert_to(v_klic, 'UTF8')), 'hex'),
+    v_reg.created_by, p_ucel
+  )
+  returning id into v_id;
+
+  update public.device_registrations
+     set used_at = now(), device_id = v_id
+   where id = v_reg.id;
+
+  perform app.audit(v_reg.tenant_id, 'device.registrace', 'device', v_id::text,
+                    v_reg.branch_id, null, jsonb_build_object('nazev', v_reg.nazev, 'ucel', p_ucel));
+
+  return query
+    select v_id, v_klic, b.name, v_reg.nazev
+    from public.branches b where b.id = v_reg.branch_id;
+end;
+$$;
+
+revoke all on function app.registrovat_zarizeni_s_ucelem(text, text) from public, anon, authenticated;
+
+-- Tablet Docházky (/kiosek): beze změny navenek, účel 'dochazka'.
+create or replace function public.registrovat_zarizeni(p_kod text)
+returns table (device_id uuid, klic text, pobocka text, nazev text)
+language sql volatile security definer set search_path = ''
+as $$
+  select * from app.registrovat_zarizeni_s_ucelem(p_kod, 'dochazka');
+$$;
+
+-- Telefon na doklady (/kiosek/doklady): stejný jednorázový kód, účel
+-- 'doklady' — Docházku neumí.
+create function public.registrovat_zarizeni_doklady(p_kod text)
+returns table (device_id uuid, klic text, pobocka text, nazev text)
+language sql volatile security definer set search_path = ''
+as $$
+  select * from app.registrovat_zarizeni_s_ucelem(p_kod, 'doklady');
+$$;
 
 revoke all on function public.registrovat_zarizeni_doklady(text) from public;
 grant execute on function public.registrovat_zarizeni_doklady(text) to anon, authenticated;
@@ -162,13 +229,17 @@ alter table public.jine_platby
   add column zdroj text not null default 'aplikace' check (zdroj in ('aplikace', 'kiosek')),
   add column zarizeni_id uuid references public.branch_devices(id) on delete set null,
   add column zarizeni_nazev text check (zarizeni_nazev is null or char_length(zarizeni_nazev) <= 100),
-  add column kiosek_vydano smallint not null default 0 check (kiosek_vydano >= 0);
+  add column kiosek_vydano smallint not null default 0 check (kiosek_vydano >= 0),
+  add column kiosek_oznaceni text check (kiosek_oznaceni is null or char_length(kiosek_oznaceni) <= 200);
 
 comment on column public.jine_platby.zdroj is
   '''kiosek'' = doklad vyfocený na telefonu pobočky (zarizeni_id, zarizeni_nazev); vytvoril je pak prázdné — '
   'záznam nepřipisuje doklad žádnému člověku.';
 comment on column public.jine_platby.zarizeni_nazev is
   'Název zařízení v době odeslání (zařízení smí číst jen správce nastavení, Finance vidí tenhle opis).';
+comment on column public.jine_platby.kiosek_oznaceni is
+  'Poznámka, kterou obsluha napsala na telefonu. Zapíše ji jen jine_platby_kiosek_zalozit a nic ji nemění — '
+  'oznaceni přepisují Finance (návrh), a to telefon vidět nesmí (přehled dnes).';
 comment on column public.jine_platby.kiosek_vydano is
   'Kolik adres pro nahrání kiosek k záznamu dostal (i při opakovaném odeslání) — strop app.jp_kiosek_strop_adres().';
 
@@ -254,8 +325,9 @@ grant execute on function public.jine_platby_kiosek_stav(text) to service_role;
 -- ---------------------------------------------------------------------
 -- Jen záznamy TOHOTO zařízení za DNEŠNÍ provozní den pobočky
 -- (app.business_date — hranice dne podle pobočky, ne půlnoc). Od
--- nejnovějšího, nejvýš 50. Každý jen: čas odeslání, počet fotek,
--- poznámka (označení, které obsluha sama napsala) a stav jako kód —
+-- nejnovějšího, nejvýš 50. Každý jen: čas odeslání, počet fotek, které
+-- poslal TENHLE telefon (ne co přidaly Finance), poznámka, kterou obsluha
+-- sama napsala (kiosek_oznaceni — oznaceni přepisují Finance), a stav jako kód —
 -- žádné částky, položky, výsledky kontrol ani důvod zrušení (to píše
 -- Finance a může obsahovat cokoli). Odvolané nebo vypnuté zařízení
 -- dostane chybu jako u ostatních funkcí kiosku, tedy nic.
@@ -273,7 +345,7 @@ begin
     select jsonb_agg(jsonb_build_object(
              'cas', x.vytvoreno,
              'fotek', x.fotek,
-             'oznaceni', x.oznaceni,
+             'oznaceni', x.kiosek_oznaceni,
              'stav', case
                        when x.stav_kontroly = 'zruseno' then 'zruseno'
                        when x.stav_trzby in ('zapsano', 'propojeno') then 'zpracovano'
@@ -282,8 +354,9 @@ begin
                        else 'prijato'
                      end)
            order by x.vytvoreno desc)
-      from (select z.vytvoreno, z.oznaceni, z.stav_kontroly, z.stav_trzby,
-                   (select count(*) from public.jine_platby_soubory f where f.zaznam_id = z.id)::integer as fotek
+      from (select z.vytvoreno, z.kiosek_oznaceni, z.stav_kontroly, z.stav_trzby,
+                   (select count(*) from public.jine_platby_soubory f
+                     where f.zaznam_id = z.id and f.aktivni and f.zarizeni_id = d.id)::integer as fotek
               from public.jine_platby z
              where z.zarizeni_id = d.id and z.tenant_id = d.tenant_id and z.branch_id = d.branch_id
                and z.vytvoreno > now() - interval '2 days'
@@ -381,9 +454,9 @@ begin
   end if;
 
   insert into public.jine_platby (tenant_id, branch_id, pripojeni_id, pos_provozovna, klient_id, oznaceni, vytvoril,
-                                  zdroj, zarizeni_id, zarizeni_nazev, kiosek_vydano)
+                                  zdroj, zarizeni_id, zarizeni_nazev, kiosek_vydano, kiosek_oznaceni)
   values (d.tenant_id, d.branch_id, v_pripojeni, v_provozovna, p_klient_id, left(btrim(coalesce(p_oznaceni, '')), 200), null,
-          'kiosek', d.id, left(d.nazev, 100), p_souboru)
+          'kiosek', d.id, left(d.nazev, 100), p_souboru, left(btrim(coalesce(p_oznaceni, '')), 200))
   returning * into v_z;
 
   insert into public.jine_platby_historie (tenant_id, branch_id, zaznam_id, kdo, udalost, detail)
@@ -429,25 +502,47 @@ grant execute on function public.jine_platby_kiosek_overit_zaznam(text, uuid) to
 -- ---------------------------------------------------------------------
 -- 6c. Smí server soubor uklidit?
 -- ---------------------------------------------------------------------
+-- Náhrobky: cesty, které úklid povolil. Připojit už je nejde — souběžné
+-- dokončení téhož telefonu by jinak připojilo soubor, který se vzápětí
+-- smaže (ověření 59ec803: řádek bez souboru). Píše jen
+-- jine_platby_kiosek_muze_uklidit, čte jine_platby_kiosek_pripojit_soubor.
+create table public.jine_platby_kiosek_uklid (
+  cesta     text primary key,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  zaznam_id uuid not null references public.jine_platby(id) on delete cascade,
+  vytvoreno timestamptz not null default now()
+);
+
+comment on table public.jine_platby_kiosek_uklid is
+  'Cesty souborů z kiosku, které server smí smazat (nepřipojené) — připojit už je nejde. Jen pro funkce kiosku.';
+
+revoke all on public.jine_platby_kiosek_uklid from public, anon, authenticated;
+alter table public.jine_platby_kiosek_uklid enable row level security;
+
 -- Server (klient služby, mimo RLS úložiště) smaže soubor JEN když tahle
 -- funkce řekne ano: platný klíč telefonu se zapnutým kioskem, záznam
 -- založilo totéž zařízení, cesta patří k tomu záznamu, soubor nemá
 -- vlastníka (nahrál ho kiosek přes podepsanou adresu) a NIC na něj
--- neukazuje (není připojený k žádnému dokladu). Originál ve Financích,
+-- neukazuje (není připojený k žádnému dokladu). Rozhoduje pod zámkem
+-- záznamu jako připojení a „ano“ zapíše jako náhrobek cesty. Originál ve Financích,
 -- soubor přihlášeného ani cizí firmy tak smazat nejde; neplatný klíč
 -- dostane chybu a soubor zůstane (neškodný sirotek).
 create function public.jine_platby_kiosek_muze_uklidit(p_klic text, p_zaznam uuid, p_cesta text)
 returns boolean
-language plpgsql stable security definer set search_path = ''
+language plpgsql volatile security definer set search_path = ''
 as $$
 declare
   d   public.branch_devices;
+  v_z public.jine_platby;
   v_c record;
 begin
   d := app.jp_kiosek_zarizeni(p_klic);
-  if not exists (select 1 from public.jine_platby z
-                  where z.id = p_zaznam and z.tenant_id = d.tenant_id and z.branch_id = d.branch_id
-                    and z.zarizeni_id = d.id) then
+  -- Stejný zámek jako připojení: rozhodnutí a připojení jdou za sebou.
+  select * into v_z from public.jine_platby z
+   where z.id = p_zaznam and z.tenant_id = d.tenant_id and z.branch_id = d.branch_id
+     and z.zarizeni_id = d.id
+   for update;
+  if not found then
     return false;
   end if;
   select * into v_c from app.jine_platby_cesta(p_cesta);
@@ -455,9 +550,15 @@ begin
      or v_c.zaznam_id is distinct from p_zaznam then
     return false;
   end if;
-  return exists (select 1 from storage.objects o
+  if not exists (select 1 from storage.objects o
                   where o.bucket_id = 'jine-platby' and o.name = p_cesta and o.owner is null)
-     and not exists (select 1 from public.jine_platby_soubory s where s.cesta = p_cesta);
+     or exists (select 1 from public.jine_platby_soubory s where s.cesta = p_cesta) then
+    return false;
+  end if;
+  insert into public.jine_platby_kiosek_uklid (cesta, tenant_id, zaznam_id)
+  values (p_cesta, v_z.tenant_id, v_z.id)
+  on conflict (cesta) do nothing;
+  return true;
 end $$;
 
 revoke all on function public.jine_platby_kiosek_muze_uklidit(text, uuid, text) from public, anon, authenticated;
@@ -506,6 +607,10 @@ begin
   end if;
   if p_otisk is null or p_otisk !~ '^[0-9a-f]{64}$' then
     raise exception 'Chybí otisk souboru.' using errcode = 'check_violation';
+  end if;
+  -- Úklid tuhle cestu už povolil (soubor se maže) — připojit ji nejde.
+  if exists (select 1 from public.jine_platby_kiosek_uklid u where u.cesta = p_cesta) then
+    raise exception 'Fotka se mezitím uklidila — pošlete ji znovu.' using errcode = 'check_violation';
   end if;
 
   -- Tatáž fotka u téhož záznamu = opakované odeslání po ztracené odpovědi.

@@ -110,6 +110,8 @@ select kod as kod_a  from public.vytvorit_registracni_kod(:'tenant', :'pob_a', '
 select kod as kod_a2 from public.vytvorit_registracni_kod(:'tenant', :'pob_a', 'Krok100 telefon strop') \gset
 select kod as kod_b  from public.vytvorit_registracni_kod(:'tenant', :'pob_b', 'Krok100 telefon B') \gset
 select kod as kod_t  from public.vytvorit_registracni_kod(:'tenant', :'pob_a', 'Krok100 tablet Docházky') \gset
+select kod as kod_dup   from public.vytvorit_registracni_kod(:'tenant', :'pob_a', ' krok100 TELEFON a ') \gset
+select kod as kod_dup_b from public.vytvorit_registracni_kod(:'tenant', :'pob_b', 'Krok100 telefon A') \gset
 select set_config('test.user_id', '10010000-0000-0000-0000-000000000005', false);
 select kod as kod_c  from public.vytvorit_registracni_kod(:'tenant_b', :'pob_cizi', 'Krok100 cizí telefon') \gset
 reset role;
@@ -144,12 +146,28 @@ set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 select pg_temp.check('pobočka jen s telefonem na doklady „tablet nemá“ (Docházka poradí ruční zápis); s tabletem ano',
   public.pobocka_ma_kiosek(:'tenant', :'pob_b') = false and public.pobocka_ma_kiosek(:'tenant', :'pob_a') = true);
-select pg_temp.check('telefon na doklady nejde přepnout na Docházku ani přímým zápisem (správce nastavení)',
-  not pg_temp.projde(format('update public.branch_devices set ucel = %L where id = %L', 'dochazka', :'zar_a')));
+select pg_temp.check('účel zařízení nejde přímým zápisem změnit ani správci nastavení — ani rozšířit (telefon → Docházka), ani zúžit (tablet → doklady)',
+  not pg_temp.projde(format('update public.branch_devices set ucel = %L where id = %L', 'dochazka', :'zar_a'))
+  and not pg_temp.projde(format('update public.branch_devices set ucel = %L where id = %L', 'doklady', :'zar_t')));
 reset role;
-select pg_temp.check('… ani jako vlastník databáze (hlídá to spoušť, ne jen granty)',
-  pg_temp.spadne_hlaskou(format('update public.branch_devices set ucel = %L where id = %L', 'dochazka', :'zar_a'), '23514', 'nejde přepnout na Docházku')
-  and (select ucel = 'doklady' from public.branch_devices where id = :'zar_a'));
+-- V produkci mají přihlášení na tabulku zařízení UPDATE z výchozích práv
+-- Supabase — proto rozhoduje spoušť; tady ji zkouší vlastník databáze.
+select pg_temp.check('… ani vlastníkovi databáze: účel se nastaví jen při spárování a pak se nemění (spoušť, ne grant)',
+  pg_temp.spadne_hlaskou(format('update public.branch_devices set ucel = %L where id = %L', 'dochazka', :'zar_a'), '23514', 'Účel zařízení nejde změnit')
+  and pg_temp.spadne_hlaskou(format('update public.branch_devices set ucel = %L where id = %L', 'doklady', :'zar_t'), '23514', 'Účel zařízení nejde změnit')
+  and (select ucel = 'doklady' from public.branch_devices where id = :'zar_a')
+  and (select ucel = 'dochazka' from public.branch_devices where id = :'zar_t'));
+set role anon;
+select pg_temp.check('telefon na doklady má na pobočce jedinečný název (Finance autora pozná jen podle něj; velikost písmen a mezery nerozhodují)',
+  pg_temp.spadne_hlaskou(format('select * from public.registrovat_zarizeni_doklady(%L)', :'kod_dup'), '23505', 'už je aktivní telefon'));
+reset role;
+select pg_temp.check('… nepovedené spárování kód nespotřebuje',
+  (select used_at is null from public.device_registrations where code_hash = encode(sha256(convert_to(upper(btrim(:'kod_dup')), 'UTF8')), 'hex')));
+set role anon;
+select device_id as zar_dup_b from public.registrovat_zarizeni_doklady(:'kod_dup_b') \gset
+reset role;
+select pg_temp.check('… stejný název na jiné pobočce projde (kontrola rozezná oba stavy)',
+  (select ucel = 'doklady' and branch_id = :'pob_b' from public.branch_devices where id = :'zar_dup_b'));
 
 \echo ''
 \echo '-- 1. Granty --'
@@ -172,9 +190,10 @@ select pg_temp.check('spárování telefonu na doklady smí anon (jako registrac
 select pg_temp.check('pomocné funkce kiosku (zařízení podle klíče, stropy, spoušť účelu) nezavolá anon ani přihlášený',
   (select count(*) from pg_proc p
     where p.pronamespace = 'app'::regnamespace
-      and p.proname in ('jp_kiosek_zarizeni', 'jp_kiosek_strop_hodina', 'jp_kiosek_strop_den', 'jp_kiosek_strop_adres', 'zarizeni_ucel_jen_zuzit')
+      and p.proname in ('jp_kiosek_zarizeni', 'jp_kiosek_strop_hodina', 'jp_kiosek_strop_den', 'jp_kiosek_strop_adres', 'zarizeni_ucel_nemenny',
+                        'registrovat_zarizeni_s_ucelem')
       and not has_function_privilege('authenticated', p.oid, 'execute')
-      and not has_function_privilege('anon', p.oid, 'execute')) = 5);
+      and not has_function_privilege('anon', p.oid, 'execute')) = 6);
 select pg_temp.check('tabulka kiosků: přihlášený jen čte (RLS), zapisuje jen funkce; anon nic',
   has_table_privilege('authenticated', 'public.jine_platby_kiosky', 'select')
   and not has_table_privilege('authenticated', 'public.jine_platby_kiosky', 'insert')
@@ -183,9 +202,13 @@ select pg_temp.check('tabulka kiosků: přihlášený jen čte (RLS), zapisuje j
   and not has_table_privilege('authenticated', 'public.jine_platby_kiosky', 'truncate')
   and not has_table_privilege('anon', 'public.jine_platby_kiosky', 'select')
   and (select relrowsecurity from pg_class where oid = 'public.jine_platby_kiosky'::regclass));
-select pg_temp.check('účel zařízení přihlášený čte (seznam v Nastavení), měnit ho grantem nesmí',
-  has_column_privilege('authenticated', 'public.branch_devices', 'ucel', 'select')
-  and not has_column_privilege('authenticated', 'public.branch_devices', 'ucel', 'update'));
+select pg_temp.check('účel zařízení přihlášený čte (seznam v Nastavení); že ho nezmění, hlídá spoušť (oddíl 0)',
+  has_column_privilege('authenticated', 'public.branch_devices', 'ucel', 'select'));
+select pg_temp.check('náhrobky úklidu: anon ani přihlášený nic, RLS zapnuté (píše a čte jen funkce kiosku)',
+  not has_table_privilege('authenticated', 'public.jine_platby_kiosek_uklid', 'select')
+  and not has_table_privilege('authenticated', 'public.jine_platby_kiosek_uklid', 'insert')
+  and not has_table_privilege('anon', 'public.jine_platby_kiosek_uklid', 'select')
+  and (select relrowsecurity from pg_class where oid = 'public.jine_platby_kiosek_uklid'::regclass));
 
 \echo ''
 \echo '-- 2. Zapnutí kiosku --'
@@ -442,6 +465,9 @@ select pg_temp.check('cesta jiného záznamu k tomuhle záznamu nesedí',
 -- Úklid: server smí smazat jen to, co databáze potvrdí.
 select pg_temp.check('úklid: vlastní nepřipojený soubor bez vlastníka smazat smí',
   public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a', :'cesta_dupl') = true);
+select pg_temp.check('… a od té chvíle ho připojit nejde (náhrobek — souběžné dokončení nepřipojí soubor, který se maže)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_a', :'z_a', :'cesta_dupl', repeat('c9', 32)),
+    '23514', 'mezitím uklidila'));
 select pg_temp.check('úklid: připojený soubor (originál dokladu) ne',
   public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a', :'cesta1') = false);
 select pg_temp.check('úklid: soubor s vlastníkem (nahrál přihlášený) ne',
@@ -490,6 +516,25 @@ select pg_temp.check('každý řádek přehledu jen čas, počet fotek, poznámk
 select pg_temp.check('stav: s fotkou „přijato“, bez fotky „bez_fotky“; počet fotek sedí',
   (:'dnes_a')::jsonb -> 1 ->> 'stav' = 'prijato' and ((:'dnes_a')::jsonb -> 1 ->> 'fotek')::int = 1
   and (:'dnes_a')::jsonb -> 0 ->> 'stav' = 'bez_fotky' and ((:'dnes_a')::jsonb -> 0 ->> 'fotek')::int = 0);
+-- Finance přepíšou označení (návrh) a připojí vlastní soubor: telefon
+-- nesmí vidět ani jedno. Zařízení soubor deaktivovaný se nepočítá.
+update public.jine_platby set oznaceni = 'Novák — dluží 14 000 Kč, vymáhat přes právníka' where id = :'z_a';
+insert into public.jine_platby_soubory (tenant_id, branch_id, zaznam_id, poradi, cesta, mime, velikost, otisk, nahral)
+values (:'tenant', :'pob_a', :'z_a', 2, format('%s/%s/%s/%s.pdf', :'tenant', :'pob_a', :'z_a', '10010000-bbbb-0000-0000-0000000000f1'),
+        'application/pdf', 3000, repeat('f1', 32), :'majitel');
+set role service_role;
+select public.jine_platby_kiosek_dnes(:'klic_a')::text as dnes_a2 \gset
+reset role;
+select pg_temp.check('přehled ukazuje poznámku, kterou napsala obsluha — ne označení přepsané ve Financích (i s částkou)',
+  (:'dnes_a2')::jsonb -> 1 ->> 'oznaceni' = 'Stůl 4 — firma Novák' and (:'dnes_a2')::text not like '%14 000%');
+select pg_temp.check('… a počítá jen fotky z tohoto telefonu: soubor připojený ve Financích ne',
+  ((:'dnes_a2')::jsonb -> 1 ->> 'fotek')::int = 1);
+update public.jine_platby_soubory set aktivni = false where cesta = :'cesta1';
+set role service_role;
+select pg_temp.check('… ani odebranou (neaktivní) fotku',
+  ((public.jine_platby_kiosek_dnes(:'klic_a')) -> 1 ->> 'fotek')::int = 0);
+reset role;
+update public.jine_platby_soubory set aktivni = true where cesta = :'cesta1';
 select pg_temp.check('přehled telefonu B neobsahuje nic z telefonu A (ani ze stejné firmy)',
   jsonb_array_length((:'dnes_b')::jsonb) >= 1
   and not exists (select 1 from jsonb_array_elements((:'dnes_b')::jsonb) e where e ->> 'oznaceni' in ('Stůl 4 — firma Novák', 'druhý doklad A')));
@@ -572,12 +617,13 @@ reset role;
 
 -- Úklid: vlastní řádky pryč (cizí firma zůstává jako v krok98).
 delete from public.jine_platby_historie where zaznam_id in (select id from public.jine_platby where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c'));
-delete from public.jine_platby_soubory where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c');
+delete from public.jine_platby_soubory where zaznam_id in (select id from public.jine_platby where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c'));
 delete from public.jine_platby where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c');
 delete from storage.objects where bucket_id = 'jine-platby' and name in (:'cesta1', :'cesta_vlastnik', :'cesta_dupl', :'cesta_typ', :'cesta_b', :'cesta_a2');
-delete from public.jine_platby_kiosky where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c');
-delete from public.device_registrations where device_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c');
-delete from public.branch_devices where id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c');
+delete from public.jine_platby_kiosky where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c', :'zar_dup_b');
+delete from public.device_registrations where device_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c', :'zar_dup_b')
+   or code_hash = encode(sha256(convert_to(upper(btrim(:'kod_dup')), 'UTF8')), 'hex');
+delete from public.branch_devices where id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c', :'zar_dup_b');
 delete from public.integrace_pripojeni where id = :'pos_a';
 -- Pobočky se uklízí OZNAČENÍM jako v krok24 (audit na ně ukazuje a mazat se nemá).
 update public.branches set deleted_at = now(), active = false where id in (:'pob_a', :'pob_b', :'pob_cizi');

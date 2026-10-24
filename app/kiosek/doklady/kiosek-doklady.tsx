@@ -8,8 +8,10 @@ import {
   KLIC_ZARIZENI_ULOZISTE,
   LIMIT_AKCE_MS,
   LIMIT_NAHRANI_MS,
+  nahledyKUvolneni,
   novyKlicPoChybe,
   sLimitem,
+  zacinaNovyDoklad,
   type DokladDnes,
 } from '@/lib/jine-platby-kiosek'
 import { zkontrolovatPoZmenseni, zkontrolovatVyber, zmensitDoklad } from '@/lib/jine-platby-soubory'
@@ -35,9 +37,12 @@ import ObrazovkaKiosku, { type FotkaNaObrazovce, type StavObrazovky } from './ob
  *
  * Klíč ODESLÁNÍ (`klientId`) drží jeden doklad: opakování po výpadku sítě
  * vrátí týž záznam. Nový vznikne po „Vyfotit další doklad“, když databáze
- * řekne, že doklad je uzavřený (`novyKlicPoChybe`), nebo když se k už
- * odeslaným fotkám přidávají další.
+ * řekne, že doklad je uzavřený (`novyKlicPoChybe`), a když se fotky
+ * přidávají do prázdného seznamu nebo k už odeslaným (`zacinaNovyDoklad`).
  */
+
+/** Jak často obnovit přehled dnešních dokladů, když je obrazovka vidět. */
+const OBNOVA_PREHLEDU_MS = 60_000
 
 type Fotka = { id: string; soubor: File; nahled: string | null; odeslana: boolean }
 type Spojeni =
@@ -100,6 +105,7 @@ export default function KiosekDoklady() {
     nacistStavKiosku(klic)
       .then((s) => {
         if (zruseno) return
+        if (!s.ok) setDnes(null)
         if (s.ok) setSpojeni({ druh: 'ok', pobocka: s.pobocka, zarizeni: s.zarizeni })
         else if (s.stav === 'odpojeno') setSpojeni({ druh: 'odpojeno' })
         else if (s.stav === 'vypnuto') setSpojeni({ druh: 'vypnuto' })
@@ -133,17 +139,31 @@ export default function KiosekDoklady() {
     }
   }, [klic, spojeni.druh, verzePrehledu])
 
+  // Přehled se obnovuje i sám: když se obrazovka znovu ukáže a jednou za
+  // minutu. Odvolání nebo vypnutí tak přehled vyprázdní bez dalšího
+  // odeslání a ráno nezůstane ležet včerejší seznam.
+  useEffect(() => {
+    if (!klic || spojeni.druh !== 'ok') return
+    const obnovit = () => {
+      if (document.visibilityState === 'visible') setVerzePrehledu((v) => v + 1)
+    }
+    const casovac = window.setInterval(obnovit, OBNOVA_PREHLEDU_MS)
+    document.addEventListener('visibilitychange', obnovit)
+    return () => {
+      window.clearInterval(casovac)
+      document.removeEventListener('visibilitychange', obnovit)
+    }
+  }, [klic, spojeni.druh])
+
   // Náhledy: uvolnit jen adresy fotek, které ze seznamu opravdu zmizely
   // (ne všechny při každé změně — po návratu na obrazovku by byly rozbité),
   // zbytek až při odchodu z obrazovky.
   useEffect(() => {
     const drzene = nahledy.current
-    const ted = new Set(fotky.flatMap((f) => (f.nahled ? [f.nahled] : [])))
-    for (const adresa of drzene) {
-      if (!ted.has(adresa)) {
-        URL.revokeObjectURL(adresa)
-        drzene.delete(adresa)
-      }
+    const ted = fotky.flatMap((f) => (f.nahled ? [f.nahled] : []))
+    for (const adresa of nahledyKUvolneni(drzene, ted)) {
+      URL.revokeObjectURL(adresa)
+      drzene.delete(adresa)
     }
     for (const adresa of ted) drzene.add(adresa)
   }, [fotky])
@@ -187,11 +207,12 @@ export default function KiosekDoklady() {
       nahled: soubor.type.startsWith('image/') ? URL.createObjectURL(soubor) : null,
       odeslana: false,
     }))
-    // Všechno dosavadní už odešlo: další fotky jsou NOVÝ doklad (jinak by se
-    // přilepily k předchozímu záznamu, nebo by je ořízly odeslané fotky).
-    if (fotky.length > 0 && fotky.every((f) => f.odeslana)) {
+    // Prázdný seznam nebo všechno odeslané: další fotky jsou NOVÝ doklad
+    // (jinak by se přilepily ke starému záznamu se starým označením).
+    if (zacinaNovyDoklad(fotky)) {
       setKlientId(noveId())
-      setOznaceni('')
+      // Poznámka patřila odeslanému dokladu; do prázdného seznamu ji obsluha mohla napsat pro tenhle.
+      if (fotky.length > 0) setOznaceni('')
       setFotky(nove.slice(0, 10))
       return
     }
@@ -274,6 +295,8 @@ export default function KiosekDoklady() {
     } catch (e) {
       setChyba(e instanceof Error ? e.message : 'Doklad se nepodařilo odeslat. Zkuste to znovu.')
     } finally {
+      // Po limitu nebo chybě nahrávání opravdu zastavit (jinak by dojelo na starou cestu a soupeřilo s dalším pokusem).
+      tohleOdeslani.abort()
       if (zruseni.current === tohleOdeslani) zruseni.current = null
       setOdesilam(false)
       setPostup('')

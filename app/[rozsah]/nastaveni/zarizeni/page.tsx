@@ -209,7 +209,7 @@ export default async function NastaveniZarizeni({
           vyfotí účet a doklad přijde do Finance → Tržby → Jiné platby. Z telefonu je vidět jen přehled dokladů,
           které z něj odešly dnes; kiosek Docházky (kód k píchnutí, zálohy, směny) na něm nefunguje. Tablet Docházky
           se páruje na <code>/kiosek</code> a doklady z něj posílat nejde. Telefonů pro doklady může mít pobočka víc —
-          každý se páruje a zapíná zvlášť.
+          každý se páruje a zapíná zvlášť a potřebuje vlastní název (podle něj Finance poznají, odkud doklad přišel).
         </p>
         <p style={{ margin: '12px 0 0', fontSize: '13px', color: 'var(--muted)', maxWidth: '62ch' }}>
           Odvolané zařízení se nemaže — ať je dohledatelné, co na

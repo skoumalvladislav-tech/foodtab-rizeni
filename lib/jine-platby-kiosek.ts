@@ -103,6 +103,24 @@ export function novyKlicPoChybe(stav: string): boolean {
   return stav === 'uzavreno'
 }
 
+/**
+ * Přidávají se fotky: je to NOVÝ doklad (nový klíč odeslání)? Ano, když
+ * v seznamu nic není (i po odebrání neodeslaných fotek nebo po zrušeném
+ * odeslání), nebo když všechno už odešlo. Jinak by se další účet přilepil
+ * ke starému záznamu se starým označením (databáze opakování do dvou
+ * hodin vrátí týž záznam). Fotky, které v seznamu zůstaly neodeslané, jdou
+ * dál se stejným klíčem — opakování téhož účtu nezaloží druhý záznam.
+ */
+export function zacinaNovyDoklad(fotky: readonly { odeslana: boolean }[]): boolean {
+  return fotky.every((f) => f.odeslana)
+}
+
+/** Náhledy k uvolnění: jen adresy, které ze seznamu zmizely (zbytek se uvolní při odchodu z obrazovky). */
+export function nahledyKUvolneni(drzene: Iterable<string>, ted: Iterable<string>): string[] {
+  const zustava = new Set(ted)
+  return [...drzene].filter((adresa) => !zustava.has(adresa))
+}
+
 /** Stejné znění jako `app.jp_kiosek_zarizeni` (migrace 20261022100000). */
 export const HLASKA_KIOSEK_VYPNUTY = 'Na tomhle zařízení není zapnutý kiosek Jiných plateb.'
 

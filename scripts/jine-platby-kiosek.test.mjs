@@ -67,6 +67,13 @@ ok('stav podle chyby: neznámé zařízení → odpojeno, vypnutý kiosek → vy
     K.stavPodleChyby({ code: '42501', message: 'permission denied for function x' }) === 'chyba' && K.stavPodleChyby({ code: '23514', message: 'strop' }) === 'chyba')
 ok('nový klíč odeslání jen po uzavřeném dokladu — po výpadku sítě ne (opakování vrátí týž záznam)',
   K.novyKlicPoChybe('uzavreno') && !K.novyKlicPoChybe('chyba') && !K.novyKlicPoChybe('odpojeno') && !K.novyKlicPoChybe('vypnuto'))
+const O = { odeslana: true }
+const N = { odeslana: false }
+ok('nový doklad při přidání fotek: prázdný seznam (i po odebrání nebo zrušeném odeslání) a „všechno odešlo“ ano; zbylé neodeslané fotky ne (opakování téhož účtu)',
+  K.zacinaNovyDoklad([]) && K.zacinaNovyDoklad([O]) && K.zacinaNovyDoklad([O, O]) && !K.zacinaNovyDoklad([N]) && !K.zacinaNovyDoklad([O, N]))
+ok('náhledy: uvolní se jen adresy, které ze seznamu zmizely; zůstávající ne',
+  K.nahledyKUvolneni(['blob:a', 'blob:b', 'blob:c'], ['blob:a', 'blob:c']).join() === 'blob:b' && K.nahledyKUvolneni(new Set(['blob:a']), ['blob:a']).length === 0 &&
+    K.nahledyKUvolneni(['blob:a'], []).join() === 'blob:a')
 const nikdy = new Promise(() => {})
 const limit1 = await K.sLimitem(Promise.resolve('hotovo'), 1000).catch((e) => e.message)
 const zacatek = Date.now()
@@ -302,6 +309,9 @@ ok('přehled dnes na telefonu: čas, počet fotek, poznámka a stav srozumiteln�
   text(sPrehledem).includes('Dnes odesláno z tohoto telefonu') && text(sPrehledem).includes('14:05 · 2 fotky · stůl 4, firma Novák') &&
     text(sPrehledem).includes('Přijato, čeká na kontrolu') && text(sPrehledem).includes('11:30 · 1 fotka') && text(sPrehledem).includes('Zkontrolováno') &&
     text(sPrehledem).includes('Bez fotky — pošlete znovu') && text(sPrehledem).indexOf('14:05') < text(sPrehledem).indexOf('11:30'))
+const dlouhe = html({ druh: 'odeslano', pobocka: 'P', pocet: 1, cas: '14:05', dnes: [{ cas: '2026-10-24T12:05:00Z', fotek: 1, oznaceni: 'novak.velmi.dlouhy.email.bez.mezer@firma-s-dlouhym-nazvem.cz', stav: 'prijato' }] })
+ok('přehled na 375 px: dlouhé slovo v poznámce se zalomí (overflow-wrap: anywhere, min-width: 0), stránka se neroztáhne do šířky',
+  /<li[^>]*style="[^"]*min-width:0[^"]*"[^>]*><span style="[^"]*overflow-wrap:anywhere/.test(dlouhe.replace(/\s*;\s*/g, ';').replace(/:\s+/g, ':')))
 ok('přehled: žádné částky, odkazy ani nic z Financí', !/Kč|<a\b|Tržby|položk/i.test(sPrehledem.replace(/Odeslat doklad/g, '')))
 ok('přehled: prázdný den řekne „Dnes odsud zatím nic neodešlo“; nenačtený (nebo zakázaný) přehled se neukáže vůbec',
   text(html({ druh: 'foceni', pobocka: 'P', zarizeni: 'Z', fotky: [], oznaceni: '', chyba: '', odesilam: false, postup: '', dnes: [] })).includes('Dnes odsud zatím nic neodešlo') &&
@@ -330,18 +340,25 @@ ok('klíč zařízení se maže na jediném místě (Spárovat znovu po výslovn
 ok('přehled dnes: telefon ho načte po připojení i po každém odeslání; při chybě ho schová a odvolané/vypnuté zařízení přepne obrazovku',
   /nacistDnesniDoklady\(klic\)/.test(klient) && klient.includes('setDnes(p.ok ? p.doklady : null)') &&
     klient.includes("if (!p.ok && p.stav === 'odpojeno') setSpojeni({ druh: 'odpojeno' })") && klient.includes("else if (!p.ok && p.stav === 'vypnuto') setSpojeni({ druh: 'vypnuto' })") &&
-    /setVerzePrehledu\(\(v\) => v \+ 1\)/.test(klient) && klient.includes('}, [klic, spojeni.druh, verzePrehledu])'))
+    /\n\s*setVerzePrehledu\(\(v\) => v \+ 1\)\n\s*const celkem = /.test(klient) && klient.includes('}, [klic, spojeni.druh, verzePrehledu])'))
 ok('fotky jdou na podepsané adresy (uploadToSignedUrl), ne přes serverovou akci', klient.includes('uploadToSignedUrl') && !/formData\.append\(/.test(klient))
-ok('klíč odeslání: po uzavřeném dokladu (příprava i dokončení) nový; k už odeslaným fotkám se další přidávají jako nový doklad',
+ok('klíč odeslání: po uzavřeném dokladu (příprava i dokončení) nový; při přidání do prázdného seznamu nebo k už odeslaným fotkám rozhoduje zacinaNovyDoklad',
   (klient.match(/else if \(novyKlicPoChybe\((?:pripraveno|hotovo)\.stav\)\) zacitNovyDokladPoUzavreni\(\)/g) ?? []).length === 2 &&
     /function zacitNovyDokladPoUzavreni\(\) \{\n\s*setKlientId\(noveId\(\)\)\n\s*setFotky\(\(f\) => f\.filter\(\(x\) => !x\.odeslana\)\)/.test(klient) &&
-    /if \(fotky\.length > 0 && fotky\.every\(\(f\) => f\.odeslana\)\) \{\n\s*setKlientId\(noveId\(\)\)/.test(klient))
+    /if \(zacinaNovyDoklad\(fotky\)\) \{\n\s*setKlientId\(noveId\(\)\)/.test(klient) && !/fotky\.length > 0 && fotky\.every/.test(klient))
+ok('přehled se obnovuje sám (jednou za minutu a po návratu na obrazovku); odvolané/vypnuté zařízení ho vyprázdní hned při ověření stavu',
+  /window\.setInterval\(obnovit, OBNOVA_PREHLEDU_MS\)/.test(klient) && /document\.addEventListener\('visibilitychange', obnovit\)/.test(klient) &&
+    /if \(document\.visibilityState === 'visible'\) setVerzePrehledu\(\(v\) => v \+ 1\)/.test(klient) && klient.includes('if (!s.ok) setDnes(null)') &&
+    /window\.clearInterval\(casovac\)/.test(klient))
+ok('po limitu nebo chybě se nahrávání opravdu přeruší (abort ve finally), ne jen přestane čekat',
+  /\} finally \{\n(?:\s*\/\/[^\n]*\n)*\s*tohleOdeslani\.abort\(\)/.test(klient))
 ok('odesílání nikdy nevisí: příprava, každé nahrání i dokončení mají časový limit a jdou zrušit (nahrávání přes klienta se signálem)',
   /sLimitem\(\s*pripravitDoklad\([\s\S]*?LIMIT_AKCE_MS,\s*signal,?\s*\)/.test(klient) && /sLimitem\(kbelik\.uploadToSignedUrl\([^\n]*LIMIT_NAHRANI_MS, signal\)/.test(klient) &&
     /sLimitem\(dokoncitDoklad\([^\n]*LIMIT_AKCE_MS, signal\)/.test(klient) && klient.includes('getKioskSupabaseNahravani(signal)') && klient.includes('zrusitOdeslani: () => zruseni.current?.abort()') &&
     zdroj('lib/supabase/kiosek.ts').includes('global: { fetch: (vstup, init) => fetch(vstup, { ...init, signal }) }'))
-ok('náhledy: uvolní se jen adresy fotek, které ze seznamu zmizely (zbytek až při odchodu), ne všechny při každé změně',
-  !/useEffect\(\(\) => \(\) => fotky\.forEach/.test(klient) && /if \(!ted\.has\(adresa\)\) \{\n\s*URL\.revokeObjectURL\(adresa\)\n\s*drzene\.delete\(adresa\)/.test(klient) &&
+const efektNahledu = /useEffect\(\(\) => \{\n\s*const drzene = nahledy\.current\n[\s\S]*?\n {2}\}, \[fotky\]\)/.exec(klient)?.[0] ?? ''
+ok('náhledy: efekt seznamu uvolní jen to, co vrátí nahledyKUvolneni, a NEMÁ úklidovou funkci (ta by při každé změně zrušila všechny); zbytek až při odchodu',
+  efektNahledu.includes('for (const adresa of nahledyKUvolneni(drzene, ted))') && !/return\b/.test(efektNahledu) && !/fotky\.forEach/.test(efektNahledu) &&
     /return \(\) => drzene\.forEach\(\(adresa\) => URL\.revokeObjectURL\(adresa\)\)\n\s*\}, \[\]\)/.test(klient))
 const akceZdroj = zdroj('app/kiosek/doklady/akce.ts')
 ok('serverové akce kiosku: jen klient služby a jádro kiosku — žádné akce ani sezení Financí',
@@ -371,16 +388,26 @@ ok('migrace: kiosek dokladů jen telefon s účelem „doklady“, aktivní a s 
     /from public\.jine_platby_kiosky k\s+where k\.zarizeni_id = d\.id/.test(funkce('app.jp_kiosek_zarizeni')))
 ok('migrace: funkce kiosku Docházky (přes app.zarizeni_podle_klice) a „má pobočka tablet“ berou jen účel „dochazka“',
   /and d\.stav = 'active'\s+and d\.ucel = 'dochazka'/.test(funkce('app.zarizeni_podle_klice')) && /and d\.ucel = 'dochazka'/.test(funkce('public.pobocka_ma_kiosek')))
-ok('migrace: spárování telefonu na doklady (anon) dá účel „doklady“; účel jde jen zúžit (spoušť), přihlášený ho jen čte',
-  /update public\.branch_devices set ucel = 'doklady' where id = r\.device_id;/.test(funkce('public.registrovat_zarizeni_doklady')) &&
+const registraceSql = funkce('app.registrovat_zarizeni_s_ucelem')
+ok('migrace: účel jde do zařízení rovnou při spárování (doklady / Docházka podle adresy) a potom se nemění vůbec (spoušť), přihlášený ho jen čte',
+  /app\.registrovat_zarizeni_s_ucelem\(p_kod, 'doklady'\)/.test(funkce('public.registrovat_zarizeni_doklady')) &&
+    /app\.registrovat_zarizeni_s_ucelem\(p_kod, 'dochazka'\)/.test(funkce('public.registrovat_zarizeni')) &&
+    /\(tenant_id, branch_id, nazev, key_hash, created_by, ucel\)[\s\S]*v_reg\.created_by, p_ucel/.test(registraceSql) && !/update public\.branch_devices set ucel/.test(migrace) &&
     grantFunkce('registrovat_zarizeni_doklady').some((x) => /to anon, authenticated;$/.test(x)) &&
-    /if old\.ucel = 'doklady' and new\.ucel is distinct from 'doklady' then/.test(funkce('app.zarizeni_ucel_jen_zuzit')) &&
+    /if new\.ucel is distinct from old\.ucel then/.test(funkce('app.zarizeni_ucel_nemenny')) &&
     /grant select \(ucel\) on public\.branch_devices to authenticated;/.test(migrace) && !/grant update[^;]*ucel/.test(migrace))
+ok('migrace: telefon na doklady má na pobočce jedinečný název (bez ohledu na velikost písmen a mezery)',
+  /p_ucel = 'doklady' and exists \([\s\S]*d\.ucel = 'doklady'[\s\S]*lower\(btrim\(d\.nazev\)\) = lower\(btrim\(v_reg\.nazev\)\)/.test(registraceSql))
 ok('migrace: zapnout kiosek jde jen na telefonu na doklady', /if d\.ucel <> 'doklady' then/.test(funkce('public.jine_platby_kiosek_zapnout')))
 const uklidSql = funkce('public.jine_platby_kiosek_muze_uklidit')
 ok('migrace: úklid smí jen soubor záznamu TOHOTO zařízení, na jeho cestě, bez vlastníka a nepřipojený',
   /d := app\.jp_kiosek_zarizeni\(p_klic\);/.test(uklidSql) && /z\.zarizeni_id = d\.id/.test(uklidSql) && /v_c\.zaznam_id is distinct from p_zaznam/.test(uklidSql) &&
-    /o\.owner is null/.test(uklidSql) && /not exists \(select 1 from public\.jine_platby_soubory s where s\.cesta = p_cesta\)/.test(uklidSql))
+    /o\.owner is null/.test(uklidSql) && /or exists \(select 1 from public\.jine_platby_soubory s where s\.cesta = p_cesta\)/.test(uklidSql))
+ok('migrace: úklid a připojení se nepředběhnou — úklid rozhoduje pod zámkem záznamu (volatile, for update) a zapíše náhrobek; připojení náhrobek odmítne',
+  /language plpgsql volatile security definer/.test(uklidSql) && /z\.zarizeni_id = d\.id\s+for update;/.test(uklidSql) &&
+    /insert into public\.jine_platby_kiosek_uklid \(cesta, tenant_id, zaznam_id\)/.test(uklidSql) &&
+    /exists \(select 1 from public\.jine_platby_kiosek_uklid u where u\.cesta = p_cesta\)/.test(funkce('public.jine_platby_kiosek_pripojit_soubor')) &&
+    /for update;/.test(funkce('public.jine_platby_kiosek_pripojit_soubor')))
 const zalozitSql = funkce('public.jine_platby_kiosek_zalozit')
 ok('migrace: opakované odeslání vrátí záznam jen otevřený, do dvou hodin a pod stropem adres (zámek dřív než opakování)',
   zalozitSql.indexOf('pg_advisory_xact_lock') > 0 && zalozitSql.indexOf('pg_advisory_xact_lock') < zalozitSql.indexOf('klient_id = p_klient_id and zarizeni_id = d.id') &&
@@ -393,6 +420,9 @@ const dnesSql = /create function public\.jine_platby_kiosek_dnes\(p_klic text\)[
 ok('migrace: přehled jen pro zařízení z klíče (jp_kiosek_zarizeni), jen jeho záznamy a jen dnešní provozní den pobočky (app.business_date)',
   /d := app\.jp_kiosek_zarizeni\(p_klic\);/.test(dnesSql) && /where z\.zarizeni_id = d\.id and z\.tenant_id = d\.tenant_id and z\.branch_id = d\.branch_id/.test(dnesSql) &&
     /app\.business_date\(d\.branch_id, z\.vytvoreno\) = v_den/.test(dnesSql) && /v_den := app\.business_date\(d\.branch_id, now\(\)\);/.test(dnesSql))
+ok('migrace: přehled ukazuje poznámku z telefonu (kiosek_oznaceni, píše ji jen založení) a fotky jen z tohoto telefonu — ne co přepsaly nebo přidaly Finance',
+  /'oznaceni', x\.kiosek_oznaceni,/.test(dnesSql) && !/x\.oznaceni\b/.test(dnesSql) && /f\.zaznam_id = z\.id and f\.aktivni and f\.zarizeni_id = d\.id/.test(dnesSql) &&
+    !/set\s+kiosek_oznaceni/.test(migrace) && /zarizeni_nazev, kiosek_vydano, kiosek_oznaceni\)/.test(funkce('public.jine_platby_kiosek_zalozit')))
 ok('migrace: přehled vrací jen čas, počet fotek, poznámku a stav (žádná částka, důvod zrušení ani id)',
   [...dnesSql.matchAll(/'(\w+)', /g)].map((m) => m[1]).filter((k) => ['cas', 'fotek', 'oznaceni', 'stav'].includes(k)).length === 4 &&
     !/castka|zruseni_duvod|'id'|'zaznam'/.test(dnesSql.replace(/--.*$/gm, '')))

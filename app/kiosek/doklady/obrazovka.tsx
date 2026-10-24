@@ -255,8 +255,8 @@ function PrehledDnes({ doklady }: { doklady: DokladDnes[] | null | undefined }) 
       ) : (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '8px' }}>
           {doklady.map((d, i) => (
-            <li key={`${d.cas}-${i}`} style={{ ...polozka, alignItems: 'flex-start', flexDirection: 'column', gap: '2px' }}>
-              <span style={{ fontSize: '14px', color: 'var(--ink)' }}>
+            <li key={`${d.cas}-${i}`} style={{ ...polozka, alignItems: 'flex-start', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+              <span style={{ fontSize: '14px', color: 'var(--ink)', overflowWrap: 'anywhere', maxWidth: '100%' }}>
                 <strong>{casOdeslani(d.cas)}</strong> · {d.fotek} {d.fotek === 1 ? 'fotka' : d.fotek > 1 && d.fotek < 5 ? 'fotky' : 'fotek'}
                 {d.oznaceni ? ` · ${d.oznaceni}` : ''}
               </span>

@@ -71,9 +71,11 @@ Co telefon **neumí** a nevidí:
 - Z jednoho telefonu odejde nejvýš 20 dokladů za hodinu a 60 za den (otázka 66).
 - Pokladnu u dokladu doplní appka sama, jen když ji pobočka má jedinou (otázka 68). AI se samo nespouští (otázka 67).
 
-Telefonů pro doklady může mít pobočka **víc**. Každý se páruje a zapíná zvlášť a strop platí na každý zvlášť (rozhodnutí 24. 10.).
+Telefonů pro doklady může mít pobočka **víc**. Každý se páruje a zapíná zvlášť a strop platí na každý zvlášť (rozhodnutí 24. 10.). Každý potřebuje **vlastní název**: druhý aktivní telefon téže pobočky se stejným názvem spárovat nejde, protože podle názvu Finance poznají, odkud doklad přišel.
 
 Telefon spárovaný na `/kiosek/doklady` slouží **jen na doklady**. Kiosek Docházky (kód k píchnutí, zálohy, směny) na něm nefunguje. Tablet Docházky se páruje na `/kiosek` a doklady z něj posílat nejde. Kdo chce obojí na jednom zařízení, spáruje ho dvakrát, jednou na každé adrese.
+
+Přehled na telefonu ukazuje poznámku, kterou napsala obsluha, a jen fotky z tohoto telefonu. Co ve Financích přepíšete nebo přidáte, na telefonu vidět není. Přehled se sám obnovuje každou minutu a po návratu do aplikace.
 
 Když odesílání trvá dlouho, telefon po chvíli napíše „Spojení je pomalé — zkuste odeslat znovu“. Během odesílání jde stisknout **Zrušit odesílání**. Fotky zůstanou na obrazovce a opakované odeslání půjde do téhož dokladu. Když mezitím doklad ve Financích zkontrolovali, zrušili, nebo uplynuly dvě hodiny, telefon zbylé fotky pošle jako nový doklad.
 
