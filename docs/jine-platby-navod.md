@@ -12,6 +12,7 @@ Finance → Tržby → Jiné platby. Stav k 20. 10. 2026.
 | Kontrola „je prodej už v pokladně?“ u Dotykačky | **Testováno** na podvržených odpovědích podle oficiální dokumentace. Na skutečné Dotykačce neběželo. |
 | Výdej ze skladu přímo do Dotykačky | **Připraveno, ale vypnuté.** Dnes ho schvalovatel provede v Dotykačce sám a v appce ho doloží (viz níž). |
 | Vystavení faktury z appky | **Blokováno** (otázka 51). Jde propojit fakturu vystavenou v pokladně nebo v účetním programu. |
+| Kiosek na telefonu (vyfotit účet bez přihlášení) | **V PR, nenasazený** (migrace `20261022100000_jine_platby_kiosek`). Testováno testy appky a scénářem krok100. Na skutečném telefonu ani se skutečným úložištěm Supabase zatím neběželo. |
 
 Podrobnosti o pokladně jsou v `docs/jine-platby-pos-operace.md`.
 
@@ -48,6 +49,37 @@ Kdo má jen práva Jiných plateb a nemá finanční přehled, vidí v navigaci 
 - Majitel má všechno automaticky. Ostatním je potřeba práva přidělit, sama se nikomu nepřidala.
 
 ---
+
+## Obsluha na telefonu: kiosek Jiných plateb
+
+Obsluha nemusí mít přístup do Financí ani se přihlašovat. Na provozovně je **telefon pobočky** a funguje podobně jako tablet Docházky:
+
+1. **Jednou spárovat** (správce nastavení pobočky):
+   - V appce otevřete **Nastavení → Zařízení** a vystavte registrační kód (platí 15 minut, jde použít jednou).
+   - Na telefonu otevřete adresu **`/kiosek/doklady`**. Doporučujeme ji nejdřív přidat na plochu: Android, Chrome: ⋮ → *Přidat na plochu*; iPhone, Safari: Sdílet → *Přidat na plochu*. Pak ji otevřete ikonou **Doklady** a kód opište až tam.
+   - V **Nastavení → Zařízení** u telefonu klikněte **Zapnout** u „Kiosek Jiných plateb“. Samotné spárování doklady nepovolí.
+2. **Vyfotit a odeslat** (kdokoli u telefonu):
+   - **Vyfotit**, případně další fotky, nebo **Vybrat z galerie** (i PDF). Fotka se sama zmenší.
+   - Nepovinně připsat **označení účtu nebo poznámku**, třeba „stůl 4, firma Novák“.
+   - **Odeslat doklad.** Telefon ukáže „Doklad (3 fotky) odešel v 14:05“.
+   - Pod tím je **přehled dokladů odeslaných z tohoto telefonu dnes**: čas, počet fotek, poznámka a stav. Stav je „Přijato, čeká na kontrolu“, „Zkontrolováno“, „Zpracováno“, „Zrušeno ve Financích“, nebo „Bez fotky — pošlete znovu“, když fotka nedošla.
+3. **Ve Financích** se doklad objeví v Jiných platbách pobočky jako **rozpracovaný**. Jako autor je uvedené zařízení, ne člověk (třeba „kiosek Telefon u baru“). Rozpoznání AI, kontrolu, tržbu, sklad a fakturu dělají lidé s právy Jiných plateb jako u každého záznamu.
+
+Co telefon **neumí** a nevidí:
+- Žádná finanční data ani cizí záznamy. Vidí jen přehled svých dnešních dokladů bez částek (otázka 69, rozhodnutí 24. 10.).
+- Přidat fotky jde jen k dokladu, který telefon právě odeslal, a jen do dvou hodin.
+- Z jednoho telefonu odejde nejvýš 20 dokladů za hodinu a 60 za den (otázka 66).
+- Pokladnu u dokladu doplní appka sama, jen když ji pobočka má jedinou (otázka 68). AI se samo nespouští (otázka 67).
+
+Telefonů pro doklady může mít pobočka **víc**. Každý se páruje a zapíná zvlášť a strop platí na každý zvlášť (rozhodnutí 24. 10.). Každý potřebuje **vlastní název**: druhý aktivní telefon téže pobočky se stejným názvem spárovat nejde, protože podle názvu Finance poznají, odkud doklad přišel.
+
+Telefon spárovaný na `/kiosek/doklady` slouží **jen na doklady**. Kiosek Docházky (kód k píchnutí, zálohy, směny) na něm nefunguje. Tablet Docházky se páruje na `/kiosek` a doklady z něj posílat nejde. Kdo chce obojí na jednom zařízení, spáruje ho dvakrát, jednou na každé adrese.
+
+Přehled na telefonu ukazuje poznámku, kterou napsala obsluha, a jen fotky z tohoto telefonu. Co ve Financích přepíšete nebo přidáte, na telefonu vidět není. Přehled se sám obnovuje každou minutu a po návratu do aplikace.
+
+Když odesílání trvá dlouho, telefon po chvíli napíše „Spojení je pomalé — zkuste odeslat znovu“. Během odesílání jde stisknout **Zrušit odesílání**. Fotky zůstanou na obrazovce a opakované odeslání půjde do téhož dokladu. Když mezitím doklad ve Financích zkontrolovali, zrušili, nebo uplynuly dvě hodiny, telefon zbylé fotky pošle jako nový doklad.
+
+Ztracený telefon **odvolejte** v Nastavení → Zařízení. Kiosek u něj jde také jen **vypnout**. Obojí platí hned: další odeslání z telefonu neprojde.
 
 ## Obsluha: založit záznam a připravit návrh
 

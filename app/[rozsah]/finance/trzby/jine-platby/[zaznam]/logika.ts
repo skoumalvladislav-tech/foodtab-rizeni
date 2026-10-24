@@ -1290,6 +1290,27 @@ const UDALOSTI: Record<string, string> = {
   zruseno: 'Záznam zrušen',
 }
 
+/**
+ * Kdo událost udělal: člověk podle jména; bez člověka kiosek pobočky
+ * (doklad z telefonu, `detail.zdroj = 'kiosek'`), jinak systém.
+ * Kiosek se nikdy nevydává za člověka (zadání 22. 10.).
+ */
+export function autorUdalosti(kdo: string | null, detail: Record<string, unknown> | null | undefined, jmena: Record<string, string>): string {
+  if (kdo) return jmena[kdo] ?? 'kolega'
+  if (detail && detail.zdroj === 'kiosek') {
+    const nazev = typeof detail.zarizeni_nazev === 'string' ? detail.zarizeni_nazev.trim() : ''
+    return nazev ? `kiosek ${nazev}` : 'kiosek pobočky'
+  }
+  return 'systém'
+}
+
+/** Kdo záznam založil: člověk, nebo kiosek pobočky (doklad z telefonu). */
+export function autorZaznamu(z: { zdroj?: string | null; zarizeniNazev?: string | null; vytvoril: string | null }, jmena: ReadonlyMap<string, string> | Record<string, string>): string | null {
+  if (z.zdroj === 'kiosek') return z.zarizeniNazev ? `kiosek ${z.zarizeniNazev}` : 'kiosek pobočky'
+  if (!z.vytvoril) return null
+  return (jmena instanceof Map ? jmena.get(z.vytvoril) : (jmena as Record<string, string>)[z.vytvoril]) ?? null
+}
+
 export function popisUdalosti(u: string): string {
   return UDALOSTI[u] ?? u
 }

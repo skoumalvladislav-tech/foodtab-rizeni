@@ -2,11 +2,11 @@ import { redirect } from 'next/navigation'
 import { datumACasVPasmu, ZONA_VYCHOZI } from '@/lib/cas'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
-import { seznam, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
+import { sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../../nadpis'
-import { odvolatZarizeni } from './akce'
+import { odvolatZarizeni, prepnoutKiosekJinychPlateb } from './akce'
 import FormularKodu from './formular'
 
 export const dynamic = 'force-dynamic'
@@ -31,17 +31,21 @@ type Zarizeni = {
   revoked_at: string | null
   posledni_kdy: string | null
   created_at: string
+  /** 'dochazka' (tablet, /kiosek) nebo 'doklady' (telefon, /kiosek/doklady); před nasazením migrace chybí. */
+  ucel?: string
 }
+
+const SLOUPCE_ZARIZENI = 'id, branch_id, nazev, stav, revoked_at, posledni_kdy, created_at'
 
 export default async function NastaveniZarizeni({
   params,
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ chyba?: string; odvolano?: string }>
+  searchParams: Promise<{ chyba?: string; odvolano?: string; kiosek?: string }>
 }) {
   const { rozsah } = await params
-  const { chyba, odvolano } = await searchParams
+  const { chyba, odvolano, kiosek } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
@@ -65,15 +69,13 @@ export default async function NastaveniZarizeni({
   const { ctx, scope } = pristup
   const supabase = await getServerSupabase()
 
-  const dotaz = supabase
-    .from('branch_devices')
-    .select('id, branch_id, nazev, stav, revoked_at, posledni_kdy, created_at')
-    .eq('tenant_id', tenantId)
-    .order('created_at', { ascending: false })
-
-  const { data, error } = scope.branchId
-    ? await dotaz.eq('branch_id', scope.branchId)
-    : await dotaz
+  const nacist = (sloupce: string) => {
+    const dotaz = supabase.from('branch_devices').select(sloupce).eq('tenant_id', tenantId).order('created_at', { ascending: false })
+    return scope.branchId ? dotaz.eq('branch_id', scope.branchId) : dotaz
+  }
+  let { data, error } = await nacist(`${SLOUPCE_ZARIZENI}, ucel`)
+  // Účel přibyl migrací 20261022100000 — do db push se čte bez něj (všechno je tablet Docházky).
+  if (sloupecNeexistuje(error)) ({ data, error } = await nacist(SLOUPCE_ZARIZENI))
 
   if (tabulkaNeexistuje(error)) {
     return (
@@ -92,7 +94,13 @@ export default async function NastaveniZarizeni({
   }
   if (error) throw error
 
-  const zarizeni = (data ?? []) as Zarizeni[]
+  const zarizeni = (data ?? []) as unknown as Zarizeni[]
+
+  // Kiosek Jiných plateb (migrace 20261022100000). Před nasazením tabulka není — přepínač se pak neukáže.
+  const kiosky = await supabase.from('jine_platby_kiosky').select('zarizeni_id').eq('tenant_id', tenantId)
+  const kioskyNasazene = !kiosky.error
+  if (kiosky.error && !tabulkaNeexistuje(kiosky.error)) throw kiosky.error
+  const sKioskem = new Set(((kiosky.data ?? []) as { zarizeni_id: string }[]).map((k) => k.zarizeni_id))
   const nazvyPobocek = new Map(ctx.branches.map((b) => [b.id, b.name]))
 
   // Na pobočkové adrese se registruje na tu pobočku, na firemní se
@@ -112,9 +120,16 @@ export default async function NastaveniZarizeni({
 
       <div style={{ padding: '16px', paddingBottom: '32px', maxWidth: '760px' }}>
         {chyba ? <p className="hlaska-chyba">{chyba}</p> : null}
+        {kiosek ? (
+          <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--dobre)' }}>
+            {kiosek === 'zapnut'
+              ? 'Kiosek Jiných plateb zapnutý. Na zařízení otevřete adresu /kiosek/doklady.'
+              : 'Kiosek Jiných plateb vypnutý. Od téhle chvíle z něj doklad neodejde.'}
+          </p>
+        ) : null}
         {odvolano ? (
           <p style={{ margin: '0 0 16px', fontSize: '14px', color: 'var(--dobre)' }}>
-            Zařízení odvoláno. Od téhle chvíle neukáže kód ani nepíchne.
+            Zařízení odvoláno. Od téhle chvíle s ním nejde píchnout ani poslat doklad.
           </p>
         ) : null}
 
@@ -151,7 +166,7 @@ export default async function NastaveniZarizeni({
                 <span style={{ minWidth: 0, flex: '1 1 240px' }}>
                   <strong style={{ fontSize: '15px' }}>{z.nazev}</strong>
                   <span style={{ display: 'block', fontSize: '13px', color: 'var(--muted)' }}>
-                    {nazvyPobocek.get(z.branch_id) ?? '—'}
+                    {z.ucel === 'doklady' ? 'Telefon na doklady' : 'Tablet Docházky'} · {nazvyPobocek.get(z.branch_id) ?? '—'}
                     {z.stav === 'active'
                       ? z.posledni_kdy
                         ? ` · naposled ${kdy(z.posledni_kdy)}`
@@ -159,6 +174,20 @@ export default async function NastaveniZarizeni({
                       : ` · odvoláno ${kdy(z.revoked_at)}`}
                   </span>
                 </span>
+
+                {z.stav === 'active' && kioskyNasazene && z.ucel === 'doklady' ? (
+                  <form action={prepnoutKiosekJinychPlateb} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input type="hidden" name="rozsah" value={rozsah} />
+                    <input type="hidden" name="zarizeni" value={z.id} />
+                    <input type="hidden" name="zapnout" value={sKioskem.has(z.id) ? 'ne' : 'ano'} />
+                    <span style={{ fontSize: '13px', color: sKioskem.has(z.id) ? 'var(--dobre)' : 'var(--muted)' }}>
+                      Kiosek Jiných plateb: {sKioskem.has(z.id) ? 'zapnutý' : 'vypnutý'}
+                    </span>
+                    <button type="submit" className="ft-tl ft-tl-vedlejsi ft-tl-male">
+                      {sKioskem.has(z.id) ? 'Vypnout' : 'Zapnout'}
+                    </button>
+                  </form>
+                ) : null}
 
                 {z.stav === 'active' ? (
                   <form action={odvolatZarizeni}>
@@ -175,6 +204,14 @@ export default async function NastaveniZarizeni({
         )}
 
         <p style={{ margin: '20px 0 0', fontSize: '13px', color: 'var(--muted)', maxWidth: '62ch' }}>
+          Telefon na doklady se páruje stejným kódem jako tablet, jen na telefonu otevřete{' '}
+          <code>/kiosek/doklady</code> a kód opište tam. Pak u něj zapněte <strong>Kiosek Jiných plateb</strong> — obsluha jím
+          vyfotí účet a doklad přijde do Finance → Tržby → Jiné platby. Z telefonu je vidět jen přehled dokladů,
+          které z něj odešly dnes; kiosek Docházky (kód k píchnutí, zálohy, směny) na něm nefunguje. Tablet Docházky
+          se páruje na <code>/kiosek</code> a doklady z něj posílat nejde. Telefonů pro doklady může mít pobočka víc —
+          každý se páruje a zapíná zvlášť a potřebuje vlastní název (podle něj Finance poznají, odkud doklad přišel).
+        </p>
+        <p style={{ margin: '12px 0 0', fontSize: '13px', color: 'var(--muted)', maxWidth: '62ch' }}>
           Odvolané zařízení se nemaže — ať je dohledatelné, co na
           provozovně kdy bylo. Ztracený tablet stačí odvolat tady;
           nikde jinde se nic měnit nemusí.
