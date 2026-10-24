@@ -5,9 +5,10 @@
  * přihlásit pinem").
  *
  * Telefon je ZAŘÍZENÍ POBOČKY jako tablet Docházky: spáruje se kódem
- * z Nastavení → Zařízení a klíč nosí v prohlížeči (stejné místo jako
- * kiosek Docházky). Žádný přihlášený člověk, žádný PIN. Autorem záznamu
- * je zařízení (migrace 20261022100000_jine_platby_kiosek).
+ * z Nastavení → Zařízení (`registrovat_zarizeni_doklady` — účel
+ * „doklady“, kiosek Docházky na něm nefunguje) a klíč nosí v prohlížeči
+ * pod VLASTNÍM jménem. Žádný přihlášený člověk, žádný PIN. Autorem
+ * záznamu je zařízení (migrace 20261022100000_jine_platby_kiosek).
  *
  * Co telefon smí: založit záznam na SVÉ pobočce a nahrát k němu fotky.
  * Číst smí jen přehled dokladů odeslaných z TOHOTO telefonu za dnešní
@@ -26,19 +27,81 @@
  *      strop těla serverové akce).
  *   2. Prohlížeč nahraje soubory na podepsané adresy (anon klient bez
  *      sezení, lib/supabase/kiosek.ts).
- *   3. `dokoncitOdeslani` — server cestu přísně zkontroluje
- *      (`overitCestu`), soubor STÁHNE, typ pozná z obsahu (magic bytes),
- *      velikost ze stažených bajtů, otisk sha256 spočítá sám a teprve pak
- *      databáze soubor připojí (`jine_platby_kiosek_pripojit_soubor`:
- *      záznam téhož zařízení, nejvýš dvě hodiny starý, soubor bez
- *      vlastníka). Cokoli selže → soubor se z úložiště smaže.
+ *   3. `dokoncitOdeslani` — NEJDŘÍV databáze ověří klíč a záznam
+ *      (`jine_platby_kiosek_overit_zaznam`: záznam téhož zařízení,
+ *      otevřený, nejvýš dvě hodiny starý) a vrátí firmu a pobočku; teprve
+ *      pak server cestu přísně zkontroluje (`overitCestu`), soubor STÁHNE,
+ *      typ pozná z obsahu (magic bytes), velikost ze stažených bajtů,
+ *      otisk sha256 spočítá sám a databáze soubor připojí
+ *      (`jine_platby_kiosek_pripojit_soubor`). Když něco selže, server
+ *      smaže JEN soubor, o kterém databáze řekne, že je to nepřipojený
+ *      soubor téhož zařízení (`jine_platby_kiosek_muze_uklidit`) — nikdy
+ *      originál ve Financích ani cizí soubor (kontrola 24. 10.).
  */
 import { HLASKA_NEZNAME_ZARIZENI, hlaskaKiosku } from './kiosek-spojeni.ts'
 import { jeTypSouboru } from './jine-platby-soubory.ts'
 import { MAX_BAJTU_OBRAZKU_PRO_AI, MAX_BAJTU_SOUBORU, MAX_SOUBORU_NA_ZAZNAM, type TypSouboru } from './jine-platby-typy.ts'
 
-/** Klíč zařízení v prohlížeči — STEJNÝ jako u kiosku Docházky (app/kiosek/kiosek.tsx), jedno spárování platí pro obojí. */
-export const KLIC_ZARIZENI_ULOZISTE = 'foodtab-kiosek-klic'
+/**
+ * Klíč telefonu na doklady v prohlížeči — JINÝ než u kiosku Docházky
+ * (app/kiosek/kiosek.tsx, 'foodtab-kiosek-klic'). Telefon na doklady
+ * Docházku neumí; kdyby sdílel klíč, kiosek Docházky by ho na „zařízení
+ * neznám“ smazal a odpároval i doklady.
+ */
+export const KLIC_ZARIZENI_ULOZISTE = 'foodtab-kiosek-doklady-klic'
+
+/** Stejné znění jako `jine_platby_kiosek_zalozit`: opakované odeslání k uzavřenému dokladu. */
+export const HLASKA_ODESLANI_UZAVRENO = 'Tohle odeslání už je uzavřené — fotky pošlete jako nový doklad.'
+/** Stejné znění jako `jine_platby_kiosek_overit_zaznam` a `_pripojit_soubor`. */
+export const HLASKA_FOTKY_UZ_NE = 'K tomuhle dokladu už fotky přidat nejde — vyfoťte ho jako nový.'
+
+/** Jak dlouho čekat na serverovou akci a na nahrání jedné fotky, než telefon řekne „pomalé spojení“. */
+export const LIMIT_AKCE_MS = 45_000
+export const LIMIT_NAHRANI_MS = 90_000
+export const HLASKA_POMALE_SPOJENI = 'Spojení je pomalé — zkuste odeslat znovu.'
+export const HLASKA_ZRUSENO = 'Odesílání jste zrušili. Fotky zůstaly — můžete je odeslat znovu.'
+
+/**
+ * Počká na `slib` nejvýš `ms`, nebo do zrušení (`signal`). Pak odmítne
+ * s českou hláškou — telefon tak nikdy nevisí na „Nahrávám…“ bez konce.
+ * (Serverová akce na serveru doběhne; opakování se stejným klíčem odeslání
+ * vrátí týž záznam.)
+ */
+export function sLimitem<T>(slib: Promise<T>, ms: number, signal?: AbortSignal): Promise<T> {
+  return new Promise<T>((hotovo, chyba) => {
+    if (signal?.aborted) {
+      chyba(new Error(HLASKA_ZRUSENO))
+      return
+    }
+    const casovac = setTimeout(() => chyba(new Error(HLASKA_POMALE_SPOJENI)), ms)
+    const zrusit = () => {
+      clearTimeout(casovac)
+      chyba(new Error(HLASKA_ZRUSENO))
+    }
+    signal?.addEventListener('abort', zrusit, { once: true })
+    slib.then(
+      (v) => {
+        clearTimeout(casovac)
+        signal?.removeEventListener('abort', zrusit)
+        hotovo(v)
+      },
+      (e: unknown) => {
+        clearTimeout(casovac)
+        signal?.removeEventListener('abort', zrusit)
+        chyba(e)
+      },
+    )
+  })
+}
+
+/**
+ * Po chybě odeslání: začít nový doklad (nový klíč odeslání)? Jen když
+ * databáze řekla, že tenhle doklad je uzavřený — po výpadku sítě ne,
+ * opakování se stejným klíčem pak vrátí týž záznam.
+ */
+export function novyKlicPoChybe(stav: string): boolean {
+  return stav === 'uzavreno'
+}
 
 /** Stejné znění jako `app.jp_kiosek_zarizeni` (migrace 20261022100000). */
 export const HLASKA_KIOSEK_VYPNUTY = 'Na tomhle zařízení není zapnutý kiosek Jiných plateb.'
@@ -122,11 +185,14 @@ export function hlaskaOdeslani(chyba: { message?: string | null } | null | undef
   return hlaskaKiosku(chyba?.message ?? '', vychozi)
 }
 
-/** Stav telefonu podle chyby databáze: odvolané/neznámé zařízení, vypnutý kiosek, nebo jiná chyba. */
-export function stavPodleChyby(chyba: { code?: string | null; message?: string | null } | null | undefined): 'odpojeno' | 'vypnuto' | 'chyba' {
+export type StavChybyKiosku = 'odpojeno' | 'vypnuto' | 'uzavreno' | 'chyba'
+
+/** Stav telefonu podle chyby databáze: odvolané/neznámé zařízení, vypnutý kiosek, uzavřený doklad, nebo jiná chyba. */
+export function stavPodleChyby(chyba: { code?: string | null; message?: string | null } | null | undefined): StavChybyKiosku {
   const zprava = chyba?.message ?? ''
   if (chyba?.code === '42501' && zprava.includes(HLASKA_NEZNAME_ZARIZENI)) return 'odpojeno'
   if (chyba?.code === '42501' && zprava.includes(HLASKA_KIOSEK_VYPNUTY)) return 'vypnuto'
+  if (chyba?.code === '23514' && (zprava.includes(HLASKA_ODESLANI_UZAVRENO) || zprava.includes(HLASKA_FOTKY_UZ_NE))) return 'uzavreno'
   return 'chyba'
 }
 

@@ -33,6 +33,11 @@ import { klientUlohy } from '@/lib/supabase/uloha'
  *
  * Akce Financí (app/[rozsah]/finance/...) chtějí přihlášeného člověka
  * s právy Jiných plateb; kiosek žádného nemá, takže na ně nedosáhne.
+ *
+ * MAZÁNÍ: klient služby obchází RLS úložiště. Proto se nic nestahuje,
+ * dokud databáze neověří klíč a záznam, a smaže se jen soubor, o kterém
+ * databáze řekne, že je to nepřipojený soubor téhož zařízení
+ * (lib/jine-platby-kiosek-server.ts, `uklidit`; kontrola 24. 10.).
  */
 
 const BEZ_SLUZBY = 'Kiosek teď nejde použít — na serveru chybí nastavení. Dejte vědět vedoucímu.'

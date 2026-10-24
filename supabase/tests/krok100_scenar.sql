@@ -4,18 +4,24 @@
 --
 -- Telefon je zařízení pobočky (branch_devices, spárované kódem jako
 -- tablet Docházky), bez přihlášeného člověka a bez PINu. Kontroluje se:
+--   0. účel zařízení (kontrola 24. 10.): telefon na doklady neotevře
+--      funkce kiosku Docházky a nepočítá se jako tablet; tablet Docházky
+--      zase nepošle doklad;
 --   1. granty: funkce kiosku jen pro service_role, zapínání jen pro
 --      přihlášené, tabulka kiosků bez zápisu;
 --   2. zapnutí kiosku: jen správce nastavení pobočky, ne cizí firma,
---      ne odvolané zařízení, ne firma bez Financí;
+--      ne odvolané zařízení, ne firma bez Financí, ne tablet Docházky;
+--      čtení tabulky kiosků přes RLS;
 --   3. stav: jen pobočka a název; zařízení bez zapnutého kiosku
 --      a vymyšlený klíč nic nedostanou;
 --   4. založení: na pobočce zařízení, autorem zařízení (vytvoril
---      prázdné), opakované odeslání = týž záznam, pokladna jen když je
---      jediná;
+--      prázdné), opakované odeslání = týž záznam jen otevřený a pod
+--      stropem adres, pokladna jen když je jediná;
 --   5. strop odeslání za hodinu a za 24 hodin;
 --   6. připojení fotky: jen záznam téhož zařízení, do dvou hodin,
---      rozpracovaný, soubor bez vlastníka, stejná fotka podruhé ne;
+--      rozpracovaný, soubor bez vlastníka, stejná fotka podruhé ne (u
+--      téhož záznamu vrátí tutéž); ověření záznamu před stažením a úklid
+--      jen vlastního nepřipojeného souboru;
 --   7. odvolání zařízení a vypnutí kiosku platí hned; neaktivní pobočka
 --      a firma bez Financí nic nepošlou;
 --   8. rozhodnutí Šéfíka 24. 10.: přehled dokladů odeslaných z TOHOTO
@@ -48,6 +54,19 @@ begin
   return true;
 exception when others then
   return false;
+end $$;
+
+-- Výsledek funkce jako jsonb; chyba se vrátí jako {"chyba": …}, ať
+-- kontrola spadne svým popisem, ne holou výjimkou.
+create or replace function pg_temp.vysledek_json(p_sql text)
+returns jsonb language plpgsql as $$
+declare
+  v jsonb;
+begin
+  execute p_sql into v;
+  return v;
+exception when others then
+  return jsonb_build_object('chyba', sqlerrm);
 end $$;
 
 reset role;
@@ -83,7 +102,8 @@ reset role;
 insert into public.branches (tenant_id, name, slug, active) values (:'tenant_b', 'Krok100 cizí pobočka', 'krok100-cizi', true)
 returning id as pob_cizi \gset
 
--- Zařízení: majitel vystaví kódy, telefon (anon) se spáruje.
+-- Zařízení: majitel vystaví kódy; telefony (anon) se spárují na
+-- /kiosek/doklady (registrovat_zarizeni_doklady), tablet na /kiosek.
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 select kod as kod_a  from public.vytvorit_registracni_kod(:'tenant', :'pob_a', 'Krok100 telefon A') \gset
@@ -95,33 +115,66 @@ select kod as kod_c  from public.vytvorit_registracni_kod(:'tenant_b', :'pob_ciz
 reset role;
 select set_config('test.user_id', '', false);
 set role anon;
-select device_id as zar_a,  klic as klic_a  from public.registrovat_zarizeni(:'kod_a') \gset
-select device_id as zar_a2, klic as klic_a2 from public.registrovat_zarizeni(:'kod_a2') \gset
-select device_id as zar_b,  klic as klic_b  from public.registrovat_zarizeni(:'kod_b') \gset
+select device_id as zar_a,  klic as klic_a  from public.registrovat_zarizeni_doklady(:'kod_a') \gset
+select device_id as zar_a2, klic as klic_a2 from public.registrovat_zarizeni_doklady(:'kod_a2') \gset
+select device_id as zar_b,  klic as klic_b  from public.registrovat_zarizeni_doklady(:'kod_b') \gset
 select device_id as zar_t,  klic as klic_t  from public.registrovat_zarizeni(:'kod_t') \gset
-select device_id as zar_c,  klic as klic_c  from public.registrovat_zarizeni(:'kod_c') \gset
+select device_id as zar_c,  klic as klic_c  from public.registrovat_zarizeni_doklady(:'kod_c') \gset
 reset role;
 
 \echo ''
+\echo '-- 0. Účel zařízení: telefon na doklady není kiosek Docházky --'
+select pg_temp.check('spárování na /kiosek/doklady dá účel „doklady“, tablet na /kiosek zůstane Docházkou',
+  (select count(*) from public.branch_devices where id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c') and ucel = 'doklady') = 4
+  and (select ucel = 'dochazka' from public.branch_devices where id = :'zar_t'));
+set role anon;
+select pg_temp.check('telefon na doklady neotevře kiosek Docházky: kód k píchnutí a rozpis směn (kiosk_stav)',
+  pg_temp.spadne_hlaskou(format('select public.kiosk_stav(%L)', :'klic_a'), '42501', 'Zařízení není registrované nebo bylo odvolané.'));
+select pg_temp.check('… ani dnešní zálohy se jmény a částkami (kiosk_zalohy)',
+  pg_temp.spadne_hlaskou(format('select public.kiosk_zalohy(%L)', :'klic_a'), '42501', 'Zařízení není registrované nebo bylo odvolané.'));
+select pg_temp.check('… ani píchnutí PINem, potvrzení zálohy a zprávy',
+  pg_temp.spadne_hlaskou(format('select * from public.pichnout_pinem(%L, %L, %L)', :'klic_a', '1234', 'in'), '42501', 'Zařízení není registrované')
+  and pg_temp.spadne_hlaskou(format('select * from public.potvrdit_zalohu_pinem(%L, %L, %L)', :'klic_a', '1234', gen_random_uuid()), '42501', 'Zařízení není registrované')
+  and pg_temp.spadne_hlaskou(format('select public.kiosk_zpravy_pocet(%L)', :'klic_a'), '42501', 'Zařízení není registrované')
+  and pg_temp.spadne_hlaskou(format('select * from public.kiosk_zpravy_pinem(%L, %L)', :'klic_a', '1234'), '42501', 'Zařízení není registrované'));
+select pg_temp.check('tablet Docházky kiosk Docházky dál otevře (kontrola rozezná oba stavy)',
+  (select public.kiosk_stav(:'klic_t') ? 'kod'));
+reset role;
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('pobočka jen s telefonem na doklady „tablet nemá“ (Docházka poradí ruční zápis); s tabletem ano',
+  public.pobocka_ma_kiosek(:'tenant', :'pob_b') = false and public.pobocka_ma_kiosek(:'tenant', :'pob_a') = true);
+select pg_temp.check('telefon na doklady nejde přepnout na Docházku ani přímým zápisem (správce nastavení)',
+  not pg_temp.projde(format('update public.branch_devices set ucel = %L where id = %L', 'dochazka', :'zar_a')));
+reset role;
+select pg_temp.check('… ani jako vlastník databáze (hlídá to spoušť, ne jen granty)',
+  pg_temp.spadne_hlaskou(format('update public.branch_devices set ucel = %L where id = %L', 'dochazka', :'zar_a'), '23514', 'nejde přepnout na Docházku')
+  and (select ucel = 'doklady' from public.branch_devices where id = :'zar_a'));
+
+\echo ''
 \echo '-- 1. Granty --'
-select pg_temp.check('funkce kiosku (stav, založení, připojení fotky, dnešní přehled) jen service_role: anon ani přihlášený ne',
+select pg_temp.check('funkce kiosku (stav, přehled, založení, ověření záznamu, úklid, připojení fotky) jen service_role: anon ani přihlášený ne',
   (select count(*) from pg_proc p
     where p.pronamespace = 'public'::regnamespace
-      and p.proname in ('jine_platby_kiosek_stav', 'jine_platby_kiosek_zalozit', 'jine_platby_kiosek_pripojit_soubor', 'jine_platby_kiosek_dnes')
+      and p.proname in ('jine_platby_kiosek_stav', 'jine_platby_kiosek_zalozit', 'jine_platby_kiosek_pripojit_soubor', 'jine_platby_kiosek_dnes',
+                        'jine_platby_kiosek_overit_zaznam', 'jine_platby_kiosek_muze_uklidit')
       and has_function_privilege('service_role', p.oid, 'execute')
       and not has_function_privilege('authenticated', p.oid, 'execute')
       and not has_function_privilege('anon', p.oid, 'execute')
-      and p.prosecdef and p.proconfig @> array['search_path=""']) = 4);
+      and p.prosecdef and p.proconfig @> array['search_path=""']) = 6);
 select pg_temp.check('zapnutí kiosku jen pro přihlášené (anon ne), SECURITY DEFINER se search_path=""',
   (select has_function_privilege('authenticated', p.oid, 'execute') and not has_function_privilege('anon', p.oid, 'execute')
           and p.prosecdef and p.proconfig @> array['search_path=""']
      from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'jine_platby_kiosek_zapnout'));
-select pg_temp.check('pomocné funkce kiosku (zařízení podle klíče, strop) nezavolá anon ani přihlášený',
+select pg_temp.check('spárování telefonu na doklady smí anon (jako registrace tabletu), SECURITY DEFINER se search_path=""',
+  (select has_function_privilege('anon', p.oid, 'execute') and p.prosecdef and p.proconfig @> array['search_path=""']
+     from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'registrovat_zarizeni_doklady'));
+select pg_temp.check('pomocné funkce kiosku (zařízení podle klíče, stropy, spoušť účelu) nezavolá anon ani přihlášený',
   (select count(*) from pg_proc p
     where p.pronamespace = 'app'::regnamespace
-      and p.proname in ('jp_kiosek_zarizeni', 'jp_kiosek_strop_hodina', 'jp_kiosek_strop_den')
+      and p.proname in ('jp_kiosek_zarizeni', 'jp_kiosek_strop_hodina', 'jp_kiosek_strop_den', 'jp_kiosek_strop_adres', 'zarizeni_ucel_jen_zuzit')
       and not has_function_privilege('authenticated', p.oid, 'execute')
-      and not has_function_privilege('anon', p.oid, 'execute')) = 3);
+      and not has_function_privilege('anon', p.oid, 'execute')) = 5);
 select pg_temp.check('tabulka kiosků: přihlášený jen čte (RLS), zapisuje jen funkce; anon nic',
   has_table_privilege('authenticated', 'public.jine_platby_kiosky', 'select')
   and not has_table_privilege('authenticated', 'public.jine_platby_kiosky', 'insert')
@@ -130,6 +183,9 @@ select pg_temp.check('tabulka kiosků: přihlášený jen čte (RLS), zapisuje j
   and not has_table_privilege('authenticated', 'public.jine_platby_kiosky', 'truncate')
   and not has_table_privilege('anon', 'public.jine_platby_kiosky', 'select')
   and (select relrowsecurity from pg_class where oid = 'public.jine_platby_kiosky'::regclass));
+select pg_temp.check('účel zařízení přihlášený čte (seznam v Nastavení), měnit ho grantem nesmí',
+  has_column_privilege('authenticated', 'public.branch_devices', 'ucel', 'select')
+  and not has_column_privilege('authenticated', 'public.branch_devices', 'ucel', 'update'));
 
 \echo ''
 \echo '-- 2. Zapnutí kiosku --'
@@ -140,6 +196,9 @@ select public.jine_platby_kiosek_zapnout(:'tenant', :'zar_a2', true);
 select public.jine_platby_kiosek_zapnout(:'tenant', :'zar_b', true);
 select pg_temp.check('správce nastavení zapne kiosek (opakované zapnutí nevadí)',
   pg_temp.projde(format('select public.jine_platby_kiosek_zapnout(%L, %L, true)', :'tenant', :'zar_a')));
+select pg_temp.check('tablet Docházky kiosek Jiných plateb nedostane (jen telefon spárovaný na doklady)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zapnout(%L, %L, true)', :'tenant', :'zar_t'),
+    '23514', 'jen na telefonu spárovaném na /kiosek/doklady'));
 select set_config('test.user_id', :'vedouci', false);
 select pg_temp.check('člověk bez správy nastavení kiosek nezapne',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zapnout(%L, %L, true)', :'tenant', :'zar_t'),
@@ -156,6 +215,36 @@ select pg_temp.check('zapnutí kiosku je v auditu',
   exists (select 1 from public.audit_log where tenant_id = :'tenant' and action = 'jine_platby.kiosek_zapnut' and entity_id = :'zar_a'));
 
 \echo ''
+\echo '-- 2b. Čtení tabulky kiosků přes RLS --'
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('majitel vidí zapnuté kiosky svých tří telefonů',
+  (select count(*) from public.jine_platby_kiosky where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b')) = 3);
+select set_config('test.user_id', '10010000-0000-0000-0000-000000000005', false);
+select pg_temp.check('cizí firma kiosky Foodtabu nevidí',
+  (select count(*) from public.jine_platby_kiosky where tenant_id = :'tenant') = 0);
+reset role;
+-- Vedoucí Perly dostane settings.manage (právo je firemní), vidí ale jen
+-- Perlu. Původní stav výjimky se po kontrole vrátí (sdílená DB na CI).
+select coalesce((select p.granted::text from public.employee_permissions p join public.employees e on e.id = p.employee_id
+                  where e.user_id = :'vedouci' and e.tenant_id = :'tenant' and p.permission_key = 'settings.manage'), 'zadny') as puvodni_pravo \gset
+insert into public.employee_permissions (tenant_id, employee_id, permission_key, granted)
+select :'tenant', e.id, 'settings.manage', true from public.employees e
+ where e.user_id = :'vedouci' and e.tenant_id = :'tenant'
+on conflict (employee_id, permission_key) do update set granted = true;
+set role authenticated;
+select set_config('test.user_id', :'vedouci', false);
+select pg_temp.check('správce nastavení jen Perly nevidí kiosky poboček A a B',
+  (select count(*) from public.jine_platby_kiosky where tenant_id = :'tenant') = 0);
+reset role;
+delete from public.employee_permissions
+ where :'puvodni_pravo' = 'zadny' and tenant_id = :'tenant' and permission_key = 'settings.manage'
+   and employee_id in (select id from public.employees where user_id = :'vedouci' and tenant_id = :'tenant');
+update public.employee_permissions set granted = (:'puvodni_pravo' = 'true')
+ where :'puvodni_pravo' <> 'zadny' and tenant_id = :'tenant' and permission_key = 'settings.manage'
+   and employee_id in (select id from public.employees where user_id = :'vedouci' and tenant_id = :'tenant');
+
+\echo ''
 \echo '-- 3. Stav: jen pobočka a název --'
 set role service_role;
 select public.jine_platby_kiosek_stav(:'klic_a')::text as stav_a \gset
@@ -164,8 +253,8 @@ select pg_temp.check('stav zapnutého telefonu: pobočka a název zařízení, n
   (:'stav_a')::jsonb ->> 'pobocka' = 'Krok100 Kiosek A' and (:'stav_a')::jsonb ->> 'zarizeni' = 'Krok100 telefon A'
   and (select count(*) from jsonb_object_keys((:'stav_a')::jsonb)) = 2);
 set role service_role;
-select pg_temp.check('tablet Docházky bez zapnutého kiosku Jiných plateb nedostane nic',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_stav(%L)', :'klic_t'), '42501', 'není zapnutý kiosek Jiných plateb'));
+select pg_temp.check('tablet Docházky nedostane nic ani tady (klíč tabletu kiosek dokladů nezná)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_stav(%L)', :'klic_t'), '42501', 'Zařízení není registrované nebo bylo odvolané.'));
 select pg_temp.check('vymyšlený klíč nedostane nic (stejná hláška jako kiosek Docházky)',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_stav(%L)', repeat('ab', 32)), '42501', 'Zařízení není registrované nebo bylo odvolané.'));
 reset role;
@@ -173,8 +262,8 @@ reset role;
 \echo ''
 \echo '-- 4. Založení záznamu --'
 set role service_role;
-select public.jine_platby_kiosek_zalozit(:'klic_a', '  Stůl 4 — firma Novák  ', '10010000-aaaa-0000-0000-000000000001')::text as zal_a \gset
-select public.jine_platby_kiosek_zalozit(:'klic_b', null, '10010000-aaaa-0000-0000-000000000002')::text as zal_b \gset
+select public.jine_platby_kiosek_zalozit(:'klic_a', '  Stůl 4 — firma Novák  ', '10010000-aaaa-0000-0000-000000000001', 1)::text as zal_a \gset
+select public.jine_platby_kiosek_zalozit(:'klic_b', null, '10010000-aaaa-0000-0000-000000000002', 1)::text as zal_b \gset
 reset role;
 select (:'zal_a')::jsonb ->> 'zaznam' as z_a \gset
 select (:'zal_b')::jsonb ->> 'zaznam' as z_b \gset
@@ -194,10 +283,42 @@ select pg_temp.check('historie: založeno kioskem (bez člověka, s názvem zař
              and detail ->> 'zdroj' = 'kiosek' and detail ->> 'zarizeni' = :'zar_a' and detail ->> 'zarizeni_nazev' = 'Krok100 telefon A'));
 set role service_role;
 select pg_temp.check('opakované odeslání se stejným klíčem = týž záznam',
-  (select public.jine_platby_kiosek_zalozit(:'klic_a', 'jinak', '10010000-aaaa-0000-0000-000000000001') ->> 'zaznam') = :'z_a');
+  (select public.jine_platby_kiosek_zalozit(:'klic_a', 'jinak', '10010000-aaaa-0000-0000-000000000001', 1) ->> 'zaznam') = :'z_a');
 select pg_temp.check('klíč odeslání jiného zařízení nový záznam nezaloží ani ten cizí nevrátí',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_a2', null, '10010000-aaaa-0000-0000-000000000001'),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_a2', null, '10010000-aaaa-0000-0000-000000000001'),
     '23514', 'Klíč odeslání už patří jinému záznamu'));
+select pg_temp.check('počet fotek musí být 1 až 10',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 0)', :'klic_b', null, gen_random_uuid()), '23514', '1 až 10 fotek')
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 11)', :'klic_b', null, gen_random_uuid()), '23514', '1 až 10 fotek')
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, null)', :'klic_b', null, gen_random_uuid()), '23514', '1 až 10 fotek'));
+-- Strop adres: deset fotek a jedno celé opakování; třetí pokus je uzavřený.
+select pg_temp.check('opakování se stejným klíčem vydá adresy jen do stropu (10 + 10 projde, další ne)',
+  pg_temp.projde(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 10)', :'klic_b', 'adresy', '10010000-aaaa-0000-0000-000000000010'))
+  and pg_temp.projde(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 10)', :'klic_b', 'adresy', '10010000-aaaa-0000-0000-000000000010'))
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_b', 'adresy', '10010000-aaaa-0000-0000-000000000010'),
+    '23514', 'odeslání už je uzavřené'));
+reset role;
+select pg_temp.check('… databáze vydané adresy počítá a záznam je pořád jeden',
+  (select count(*) = 1 and min(kiosek_vydano) = 20 from public.jine_platby where klient_id = '10010000-aaaa-0000-0000-000000000010'));
+set role service_role;
+select public.jine_platby_kiosek_zalozit(:'klic_b', 'uzavření', '10010000-aaaa-0000-0000-000000000011', 1) ->> 'zaznam' as z_uz \gset
+reset role;
+update public.jine_platby set stav_kontroly = 'zkontrolovano' where id = :'z_uz';
+set role service_role;
+select pg_temp.check('opakování ke zkontrolovanému záznamu nevrátí nic — odeslání je uzavřené',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_b', null, '10010000-aaaa-0000-0000-000000000011'),
+    '23514', 'odeslání už je uzavřené'));
+reset role;
+update public.jine_platby set stav_kontroly = 'rozpracovano', vytvoreno = now() - interval '3 hours' where id = :'z_uz';
+set role service_role;
+select pg_temp.check('… ani k záznamu staršímu než dvě hodiny',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_b', null, '10010000-aaaa-0000-0000-000000000011'),
+    '23514', 'odeslání už je uzavřené'));
+reset role;
+update public.jine_platby set vytvoreno = now() where id = :'z_uz';
+set role service_role;
+select pg_temp.check('… čerstvý rozpracovaný záznam opakování přijme (kontrola rozezná oba stavy)',
+  (select public.jine_platby_kiosek_zalozit(:'klic_b', null, '10010000-aaaa-0000-0000-000000000011', 1) ->> 'zaznam') = :'z_uz');
 reset role;
 select pg_temp.check('poslední použití zařízení se zapsalo',
   (select posledni_kdy is not null from public.branch_devices where id = :'zar_a'));
@@ -209,7 +330,7 @@ set role service_role;
 do $$
 begin
   for i in 1..20 loop
-    perform public.jine_platby_kiosek_zalozit(current_setting('test.klic_strop'), null, gen_random_uuid());
+    perform public.jine_platby_kiosek_zalozit(current_setting('test.klic_strop'), null, gen_random_uuid(), 1);
   end loop;
 exception when others then
   raise exception 'SELHALO: víc zařízení na jedné pobočce — telefon „strop“ narazil dřív, než sám poslal 60 dokladů (strop se počítá jinak než na zařízení): %', sqlerrm;
@@ -218,7 +339,7 @@ reset role;
 \echo 'strop: 20 odeslání prošlo'
 set role service_role;
 select pg_temp.check('21. doklad za hodinu z jednoho zařízení neprojde',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_a2', null, gen_random_uuid()),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_a2', null, gen_random_uuid()),
     '23514', 'za poslední hodinu'));
 reset role;
 update public.jine_platby set vytvoreno = now() - interval '2 hours' where zarizeni_id = :'zar_a2';
@@ -226,7 +347,7 @@ set role service_role;
 do $$
 begin
   for i in 1..20 loop
-    perform public.jine_platby_kiosek_zalozit(current_setting('test.klic_strop'), null, gen_random_uuid());
+    perform public.jine_platby_kiosek_zalozit(current_setting('test.klic_strop'), null, gen_random_uuid(), 1);
   end loop;
 exception when others then
   raise exception 'SELHALO: víc zařízení na jedné pobočce — telefon „strop“ narazil dřív, než sám poslal 60 dokladů (strop se počítá jinak než na zařízení): %', sqlerrm;
@@ -237,7 +358,7 @@ set role service_role;
 do $$
 begin
   for i in 1..20 loop
-    perform public.jine_platby_kiosek_zalozit(current_setting('test.klic_strop'), null, gen_random_uuid());
+    perform public.jine_platby_kiosek_zalozit(current_setting('test.klic_strop'), null, gen_random_uuid(), 1);
   end loop;
 exception when others then
   raise exception 'SELHALO: víc zařízení na jedné pobočce — telefon „strop“ narazil dřív, než sám poslal 60 dokladů (strop se počítá jinak než na zařízení): %', sqlerrm;
@@ -247,10 +368,10 @@ reset role;
 update public.jine_platby set vytvoreno = now() - interval '2 hours' where zarizeni_id = :'zar_a2';
 set role service_role;
 select pg_temp.check('61. doklad za 24 hodin z jednoho zařízení neprojde (ani mimo hodinový strop)',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_a2', null, gen_random_uuid()),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_a2', null, gen_random_uuid()),
     '23514', 'za posledních 24 hodin'));
 select pg_temp.check('víc zařízení na jedné pobočce: strop telefonu „strop“ nebrání druhému telefonu TÉŽE pobočky',
-  pg_temp.projde(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_a', 'druhý doklad A', '10010000-aaaa-0000-0000-000000000003')));
+  pg_temp.projde(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_a', 'druhý doklad A', '10010000-aaaa-0000-0000-000000000003')));
 reset role;
 select pg_temp.check('… a každý doklad nese SVOJE zařízení (dva telefony téže pobočky se nepletou)',
   (select count(distinct zarizeni_nazev) = 2 and bool_and(branch_id = :'pob_a')
@@ -259,36 +380,55 @@ select pg_temp.check('… a každý doklad nese SVOJE zařízení (dva telefony 
   and not exists (select 1 from public.jine_platby where zarizeni_id = :'zar_a' and zarizeni_nazev <> 'Krok100 telefon A'));
 set role service_role;
 select pg_temp.check('strop jednoho zařízení nebrání jinému zařízení (kontrola rozezná oba stavy)',
-  pg_temp.projde(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_b', null, gen_random_uuid())));
+  pg_temp.projde(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_b', null, gen_random_uuid())));
 reset role;
 
 \echo ''
 \echo '-- 6. Připojení fotky --'
+select id as z_a2 from public.jine_platby where zarizeni_id = :'zar_a2' order by vytvoreno desc limit 1 \gset
 select format('%s/%s/%s/%s.jpg', :'tenant', :'pob_a', :'z_a', '10010000-bbbb-0000-0000-000000000001') as cesta1 \gset
 select format('%s/%s/%s/%s.jpg', :'tenant', :'pob_a', :'z_a', '10010000-bbbb-0000-0000-000000000002') as cesta_vlastnik \gset
 select format('%s/%s/%s/%s.jpg', :'tenant', :'pob_a', :'z_a', '10010000-bbbb-0000-0000-000000000003') as cesta_dupl \gset
 select format('%s/%s/%s/%s.png', :'tenant', :'pob_a', :'z_a', '10010000-bbbb-0000-0000-000000000004') as cesta_typ \gset
 select format('%s/%s/%s/%s.jpg', :'tenant', :'pob_b', :'z_b', '10010000-bbbb-0000-0000-000000000005') as cesta_b \gset
+select format('%s/%s/%s/%s.jpg', :'tenant', :'pob_a', :'z_a2', '10010000-bbbb-0000-0000-000000000006') as cesta_a2 \gset
+select format('%s/%s/%s/%s.jpg', :'tenant', :'pob_a', :'z_a', '10010000-bbbb-0000-0000-000000000007') as cesta_neni \gset
 insert into storage.objects (bucket_id, name, owner, metadata) values
   ('jine-platby', :'cesta1', null, '{"mimetype":"image/jpeg","size":2000}'),
   ('jine-platby', :'cesta_vlastnik', :'majitel', '{"mimetype":"image/jpeg","size":2000}'),
   ('jine-platby', :'cesta_dupl', null, '{"mimetype":"image/jpeg","size":2000}'),
   ('jine-platby', :'cesta_typ', null, '{"mimetype":"image/jpeg","size":2000}'),
-  ('jine-platby', :'cesta_b', null, '{"mimetype":"image/jpeg","size":2000}');
+  ('jine-platby', :'cesta_b', null, '{"mimetype":"image/jpeg","size":2000}'),
+  ('jine-platby', :'cesta_a2', null, '{"mimetype":"image/jpeg","size":2000}');
 set role service_role;
+select pg_temp.check('než server cokoli stáhne, databáze ověří záznam: vrátí jen záznam, firmu a pobočku zařízení',
+  (select (select count(*) from jsonb_object_keys(o)) = 3 and o ->> 'zaznam' = :'z_a' and o ->> 'tenant' = :'tenant' and o ->> 'branch' = :'pob_a'
+     from (select public.jine_platby_kiosek_overit_zaznam(:'klic_a', :'z_a') as o) x));
+select pg_temp.check('… záznam jiného zařízení (i téže pobočky) neověří',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_overit_zaznam(%L, %L)', :'klic_a', :'z_a2'), '42501', 'Záznam z tohohle zařízení není')
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_overit_zaznam(%L, %L)', :'klic_a', :'z_b'), '42501', 'Záznam z tohohle zařízení není'));
+select pg_temp.check('… vymyšlený klíč (třeba samé nuly) neověří nic',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_overit_zaznam(%L, %L)', repeat('0', 64), :'z_a'), '42501', 'Zařízení není registrované'));
 select pg_temp.check('fotku k záznamu téhož zařízení server připojí',
-  pg_temp.projde(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_a', :'z_a', :'cesta1', repeat('c1', 32))));
+  (select public.jine_platby_kiosek_pripojit_soubor(:'klic_a', :'z_a', :'cesta1', repeat('c1', 32)) ->> 'uz_pripojen') = 'false');
 reset role;
 select pg_temp.check('soubor z kiosku: nahrál ho kiosek (nahral prázdné), historie bez člověka',
   (select nahral is null and zarizeni_id = :'zar_a' and poradi = 1 from public.jine_platby_soubory where cesta = :'cesta1')
   and exists (select 1 from public.jine_platby_historie
                where zaznam_id = :'z_a' and udalost = 'soubor_pripojen' and kdo is null and detail ->> 'zdroj' = 'kiosek'));
 set role service_role;
+select pg_temp.vysledek_json(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_a', :'z_a', :'cesta_dupl', repeat('c1', 32)))::text as znovu \gset
+reset role;
+select pg_temp.check('tatáž fotka u téhož záznamu (ztracená odpověď) vrátí tentýž soubor, nic nepřibude',
+  (:'znovu')::jsonb ->> 'uz_pripojen' = 'true'
+  and (:'znovu')::jsonb ->> 'soubor' = (select id::text from public.jine_platby_soubory where cesta = :'cesta1')
+  and (select count(*) from public.jine_platby_soubory where zaznam_id = :'z_a') = 1);
+set role service_role;
 select pg_temp.check('soubor nahraný přihlášeným (s vlastníkem) kiosek nepřipojí',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_a', :'z_a', :'cesta_vlastnik', repeat('c2', 32)),
     '23514', 'Soubor nahrál někdo jiný'));
-select pg_temp.check('stejná fotka podruhé neprojde a hláška nic neprozradí o cizím záznamu',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_a', :'z_a', :'cesta_dupl', repeat('c1', 32)),
+select pg_temp.check('stejná fotka k jinému záznamu neprojde a hláška nic neprozradí o cizím záznamu',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_b', :'z_b', :'cesta_b', repeat('c1', 32)),
     '23505', 'Tahle fotka už v Jiných platbách je.'));
 select pg_temp.check('typ souboru musí sedět s příponou',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_a', :'z_a', :'cesta_typ', repeat('c4', 32)),
@@ -299,23 +439,40 @@ select pg_temp.check('k záznamu jiného zařízení fotku nepřipojí',
 select pg_temp.check('cesta jiného záznamu k tomuhle záznamu nesedí',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_b', :'z_b', :'cesta1', repeat('c6', 32)),
     '23514', 'Cesta k souboru nesedí'));
+-- Úklid: server smí smazat jen to, co databáze potvrdí.
+select pg_temp.check('úklid: vlastní nepřipojený soubor bez vlastníka smazat smí',
+  public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a', :'cesta_dupl') = true);
+select pg_temp.check('úklid: připojený soubor (originál dokladu) ne',
+  public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a', :'cesta1') = false);
+select pg_temp.check('úklid: soubor s vlastníkem (nahrál přihlášený) ne',
+  public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a', :'cesta_vlastnik') = false);
+select pg_temp.check('úklid: soubor záznamu jiného zařízení téže pobočky ne',
+  public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a2', :'cesta_a2') = false);
+select pg_temp.check('úklid: cesta jiného záznamu pod vlastním záznamem ne; neexistující soubor ne',
+  public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a', :'cesta_b') = false
+  and public.jine_platby_kiosek_muze_uklidit(:'klic_a', :'z_a', :'cesta_neni') = false);
+select pg_temp.check('úklid: vymyšlený klíč dostane chybu (nic se nesmaže)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_muze_uklidit(%L, %L, %L)', repeat('0', 64), :'z_a', :'cesta_dupl'), '42501', 'Zařízení není registrované'));
 reset role;
 update public.jine_platby set stav_kontroly = 'zkontrolovano' where id = :'z_b';
 set role service_role;
-select pg_temp.check('ke zkontrolovanému záznamu kiosek fotku nepřidá',
+select pg_temp.check('ke zkontrolovanému záznamu kiosek fotku nepřidá (ani ověření záznamu neprojde)',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_b', :'z_b', :'cesta_b', repeat('c7', 32)),
-    '23514', 'už fotky přidat nejde'));
+    '23514', 'už fotky přidat nejde')
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_overit_zaznam(%L, %L)', :'klic_b', :'z_b'), '23514', 'už fotky přidat nejde'));
 reset role;
 update public.jine_platby set stav_kontroly = 'rozpracovano', vytvoreno = now() - interval '3 hours' where id = :'z_b';
 set role service_role;
 select pg_temp.check('k záznamu staršímu než dvě hodiny kiosek fotku nepřidá',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_b', :'z_b', :'cesta_b', repeat('c7', 32)),
-    '23514', 'už fotky přidat nejde'));
+    '23514', 'už fotky přidat nejde')
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_overit_zaznam(%L, %L)', :'klic_b', :'z_b'), '23514', 'už fotky přidat nejde'));
 reset role;
 update public.jine_platby set vytvoreno = now() where id = :'z_b';
 set role service_role;
 select pg_temp.check('… čerstvý rozpracovaný záznam téhož zařízení fotku přijme (kontrola rozezná oba stavy)',
-  pg_temp.projde(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_b', :'z_b', :'cesta_b', repeat('c7', 32))));
+  pg_temp.projde(format('select public.jine_platby_kiosek_overit_zaznam(%L, %L)', :'klic_b', :'z_b'))
+  and pg_temp.projde(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_b', :'z_b', :'cesta_b', repeat('c7', 32))));
 reset role;
 
 \echo ''
@@ -368,7 +525,7 @@ set role service_role;
 select pg_temp.check('vypnutý kiosek hned nic neukáže ani v přehledu',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_dnes(%L)', :'klic_b'), '42501', 'není zapnutý kiosek Jiných plateb'));
 select pg_temp.check('vypnutý kiosek hned nic nepošle (klíč přitom platí dál)',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_b', null, gen_random_uuid()),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_b', null, gen_random_uuid()),
     '42501', 'není zapnutý kiosek Jiných plateb'));
 reset role;
 set role authenticated;
@@ -377,13 +534,16 @@ update public.branch_devices set stav = 'revoked', revoked_at = now() where id =
 reset role;
 set role service_role;
 select pg_temp.check('odvolané zařízení hned nic nezaloží',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_a', null, gen_random_uuid()),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_a', null, gen_random_uuid()),
     '42501', 'Zařízení není registrované nebo bylo odvolané.'));
 select pg_temp.check('… ani neukáže přehled svých dnešních dokladů',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_dnes(%L)', :'klic_a'), '42501', 'Zařízení není registrované nebo bylo odvolané.'));
 select pg_temp.check('… ani nepřipojí fotku k záznamu, který samo založilo',
   pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_pripojit_soubor(%L, %L, %L, %L)', :'klic_a', :'z_a', :'cesta_dupl', repeat('c8', 32)),
     '42501', 'Zařízení není registrované nebo bylo odvolané.'));
+select pg_temp.check('… ani neověří záznam a nic neuklidí (server pak nic nestáhne ani nesmaže)',
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_overit_zaznam(%L, %L)', :'klic_a', :'z_a'), '42501', 'Zařízení není registrované')
+  and pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_muze_uklidit(%L, %L, %L)', :'klic_a', :'z_a', :'cesta_dupl'), '42501', 'Zařízení není registrované'));
 reset role;
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
@@ -400,20 +560,21 @@ update public.branches set active = true where id = :'pob_a';
 insert into public.jine_platby_kiosky (zarizeni_id, tenant_id, branch_id) values (:'zar_c', :'tenant_b', :'pob_cizi');
 set role service_role;
 select pg_temp.check('firma bez Financí z kiosku nic nepošle',
-  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L)', :'klic_c', null, gen_random_uuid()),
+  pg_temp.spadne_hlaskou(format('select public.jine_platby_kiosek_zalozit(%L, %L, %L, 1)', :'klic_c', null, gen_random_uuid()),
     '42501', 'Firma nemá zapnuté Finance'));
 reset role;
 set role anon;
 select pg_temp.check('anon záznamy Jiných plateb nečte ani funkci kiosku nezavolá',
   not pg_temp.projde('select 1 from public.jine_platby limit 1')
-  and not pg_temp.projde(format('select public.jine_platby_kiosek_stav(%L)', :'klic_a2')));
+  and not pg_temp.projde(format('select public.jine_platby_kiosek_stav(%L)', :'klic_a2'))
+  and not pg_temp.projde(format('select public.jine_platby_kiosek_muze_uklidit(%L, %L, %L)', :'klic_a2', :'z_a2', :'cesta_a2')));
 reset role;
 
 -- Úklid: vlastní řádky pryč (cizí firma zůstává jako v krok98).
 delete from public.jine_platby_historie where zaznam_id in (select id from public.jine_platby where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c'));
 delete from public.jine_platby_soubory where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c');
 delete from public.jine_platby where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_c');
-delete from storage.objects where bucket_id = 'jine-platby' and name in (:'cesta1', :'cesta_vlastnik', :'cesta_dupl', :'cesta_typ', :'cesta_b');
+delete from storage.objects where bucket_id = 'jine-platby' and name in (:'cesta1', :'cesta_vlastnik', :'cesta_dupl', :'cesta_typ', :'cesta_b', :'cesta_a2');
 delete from public.jine_platby_kiosky where zarizeni_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c');
 delete from public.device_registrations where device_id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c');
 delete from public.branch_devices where id in (:'zar_a', :'zar_a2', :'zar_b', :'zar_t', :'zar_c');

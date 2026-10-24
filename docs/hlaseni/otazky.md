@@ -1644,16 +1644,28 @@ jako tablet Docházky (zařízení pobočky v Nastavení → Zařízení).
 > **každý telefon zvlášť** a autorem dokladu je **konkrétní telefon**
 > (jeho název). Appka to tak měla už od začátku — žádné „jedno zařízení
 > na pobočku“ (ověřuje scénář krok100: dva telefony téže pobočky
-> posílají nezávisle a každý doklad nese svůj telefon). Otázka „jedno
-> zařízení pro Docházku i doklady“ tím zůstává, jak je popsaná níž:
-> kiosek se zapíná zvlášť a každé zařízení pobočky dál umí i Docházku.
+> posílají nezávisle a každý doklad nese svůj telefon).
+>
+> **Doplněno po nezávislé kontrole (24. 10.):** původní text níž tvrdil,
+> že na telefonu jde jen píchnout PINem. Ve skutečnosti klíč telefonu
+> otevíral celý kiosek Docházky: **dnešní zálohy se jmény a částkami,
+> rozpis směn a živý kód k píchnutí — bez PINu**, a telefon se na rozdíl
+> od tabletu dá odnést. Proto teď **telefon spárovaný na /kiosek/doklady
+> slouží jen na doklady** (zařízení má účel „doklady“). Kiosek Docházky na
+> něm nefunguje, do „má pobočka tablet“ se nepočítá a klíč nosí
+> v prohlížeči zvlášť. Tablet Docházky (spárovaný na /kiosek) zase doklady
+> neposílá. Kdo chce na jednom zařízení obojí, spáruje ho dvakrát, jednou
+> na každé adrese, a v Nastavení → Zařízení budou dva řádky.
 
-- **Teď:** spárování samo **doklady nepovolí**. U zařízení se musí zvlášť
-  zapnout **Kiosek Jiných plateb** (správce nastavení pobočky). Tablet
-  Docházky tedy novou schopnost nedostal potichu. Opačně to platí jako
-  dosud: každé spárované zařízení pobočky umí ukázat i kiosek Docházky
-  (píchnutí chce PIN).
+- **Teď (po kontrole 24. 10.):** telefon na doklady se páruje stejným kódem
+  z Nastavení, ale na adrese /kiosek/doklady — dostane účel „doklady“.
+  Spárování samo **doklady nepovolí**: u telefonu se musí zvlášť zapnout
+  **Kiosek Jiných plateb** (správce nastavení pobočky). Kiosek Docházky na
+  telefonu na doklady **nefunguje** a tablet Docházky doklady neposílá.
+- **Původní znění (do 24. 10.):** „spárování samo doklady nepovolí …
+  každé spárované zařízení pobočky umí ukázat i kiosek Docházky (píchnutí
+  chce PIN)“ — neplatí, viz doplnění výš.
 - **Proč:** zapnutí je výslovné a dohledatelné (audit) a vypnutí platí
   hned. Kdo telefon ztratí, odvolá ho tamtéž jako tablet.
-- **Když to má být jinak:** „telefon jen na doklady“ — zařízení by mělo
-  vypínač i pro Docházku. Je to úprava kiosku Docházky, proto zvlášť.
+- **Když to má být jinak:** jedno zařízení pro obojí s jedním spárováním
+  (vypínač Docházky u zařízení). Dnes jde obojí jen dvojím spárováním.

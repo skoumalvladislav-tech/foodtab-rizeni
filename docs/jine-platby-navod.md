@@ -73,6 +73,10 @@ Co telefon **neumí** a nevidí:
 
 Telefonů pro doklady může mít pobočka **víc**. Každý se páruje a zapíná zvlášť a strop platí na každý zvlášť (rozhodnutí 24. 10.).
 
+Telefon spárovaný na `/kiosek/doklady` slouží **jen na doklady**. Kiosek Docházky (kód k píchnutí, zálohy, směny) na něm nefunguje. Tablet Docházky se páruje na `/kiosek` a doklady z něj posílat nejde. Kdo chce obojí na jednom zařízení, spáruje ho dvakrát, jednou na každé adrese.
+
+Když odesílání trvá dlouho, telefon po chvíli napíše „Spojení je pomalé — zkuste odeslat znovu“. Během odesílání jde stisknout **Zrušit odesílání**. Fotky zůstanou na obrazovce a opakované odeslání půjde do téhož dokladu. Když mezitím doklad ve Financích zkontrolovali, zrušili, nebo uplynuly dvě hodiny, telefon zbylé fotky pošle jako nový doklad.
+
 Ztracený telefon **odvolejte** v Nastavení → Zařízení. Kiosek u něj jde také jen **vypnout**. Obojí platí hned: další odeslání z telefonu neprojde.
 
 ## Obsluha: založit záznam a připravit návrh

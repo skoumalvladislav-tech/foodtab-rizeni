@@ -9,7 +9,7 @@ import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { getCurrentTenantId } from '@/lib/firma'
 import { rozpoznavaniJeNastavene } from '@/lib/jine-platby-ai'
 import { haleruNaText } from '@/lib/jine-platby-castky'
-import { hlavickaZeZaznamu, numericNaText, SLOUPCE_POLOZKY, SLOUPCE_ZAZNAMU, zDbPolozka, zDbZaznam } from '@/lib/jine-platby-db'
+import { cistSeZalohou, hlavickaZeZaznamu, numericNaText, SLOUPCE_POLOZKY, zDbPolozka, zDbZaznam } from '@/lib/jine-platby-db'
 import { mozneDuplicity, type IdentitaZaznamu } from '@/lib/jine-platby-duplicity'
 import { sestavitPodklady, type KontaktFaktury } from '@/lib/jine-platby-faktura'
 import { zkontrolovatDoklad, type KontrolaDokladu } from '@/lib/jine-platby-kontrola'
@@ -96,12 +96,14 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
   if (!jeUuid(zaznamId)) notFound()
 
   const supabase = await getServerSupabase()
-  const { data: radek, error: chybaZaznamu } = await supabase
-    .from('jine_platby')
-    .select(`${SLOUPCE_ZAZNAMU}, faktura_podklady, vydej_externi_id, vydej_doklad, zruseni_duvod`)
-    .eq('id', zaznamId)
-    .eq('tenant_id', tenantId)
-    .maybeSingle()
+  const { data: radek, error: chybaZaznamu } = await cistSeZalohou((sloupce) =>
+    supabase
+      .from('jine_platby')
+      .select(`${sloupce}, faktura_podklady, vydej_externi_id, vydej_doklad, zruseni_duvod`)
+      .eq('id', zaznamId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle(),
+  )
   if (chybaZaznamu) throw new DotazSelhal('záznam Jiných plateb', chybaZaznamu)
   const r = radek as Record<string, unknown> | null
   if (!r || !zaznamPatriRozsahu(pobocka, r as { branch_id: string | null })) notFound()

@@ -17,6 +17,7 @@ import {
   stavPodleChyby,
   stropSouboru,
   type DokladDnes,
+  type StavChybyKiosku,
 } from './jine-platby-kiosek.ts'
 import { cestaSouboru, overitCestu, PRIPONY_SOUBORU } from './jine-platby-soubory.ts'
 import { MAX_SOUBORU_NA_ZAZNAM, type TypSouboru } from './jine-platby-typy.ts'
@@ -35,13 +36,14 @@ export type ZavislostiKiosku = {
   /** Podepsaná adresa pro nahrání jednoho souboru do kbelíku Jiných plateb. */
   podepsatNahrani(cesta: string): Promise<{ token: string | null; error: ChybaDb }>
   stahnout(cesta: string): Promise<{ bajty: Uint8Array | null; error: ChybaDb }>
+  /** Klient služby (mimo RLS úložiště) — volat JEN přes `uklidit` níž. */
   smazat(cesty: string[]): Promise<void>
   noveId(): string
 }
 
 export type StavKiosku =
   | { ok: true; pobocka: string; zarizeni: string }
-  | { ok: false; stav: 'odpojeno' | 'vypnuto' | 'chyba'; chyba: string }
+  | { ok: false; stav: StavChybyKiosku; chyba: string }
 
 export async function stavKiosku(z: ZavislostiKiosku, klic: unknown): Promise<StavKiosku> {
   if (!jeKlicZarizeni(klic)) return { ok: false, stav: 'odpojeno', chyba: HLASKA_NEZNAME_ZARIZENI }
@@ -51,7 +53,7 @@ export async function stavKiosku(z: ZavislostiKiosku, klic: unknown): Promise<St
   return { ok: true, pobocka: String(d.pobocka ?? ''), zarizeni: String(d.zarizeni ?? '') }
 }
 
-export type DnesniDoklady = { ok: true; doklady: DokladDnes[] } | { ok: false; stav: 'odpojeno' | 'vypnuto' | 'chyba'; chyba: string }
+export type DnesniDoklady = { ok: true; doklady: DokladDnes[] } | { ok: false; stav: StavChybyKiosku; chyba: string }
 
 /** Přehled dokladů z TOHOTO zařízení za dnešní provozní den (otázka 69). Databáze ověří klíč jako u ostatních funkcí. */
 export async function dnesniDoklady(z: ZavislostiKiosku, klic: unknown): Promise<DnesniDoklady> {
@@ -63,7 +65,7 @@ export async function dnesniDoklady(z: ZavislostiKiosku, klic: unknown): Promise
 
 export type Pripraveno =
   | { ok: true; zaznam: string; nahrani: { cesta: string; token: string; typ: TypSouboru }[] }
-  | { ok: false; stav: 'odpojeno' | 'vypnuto' | 'chyba'; chyba: string }
+  | { ok: false; stav: StavChybyKiosku; chyba: string }
 
 export async function pripravitOdeslani(
   z: ZavislostiKiosku,
@@ -75,7 +77,14 @@ export async function pripravitOdeslani(
   if (!vyber.ok) return { ok: false, stav: 'chyba', chyba: vyber.chyba }
   const oznaceni = typeof vstup.oznaceni === 'string' ? vstup.oznaceni.trim().slice(0, MAX_ZNAKU_OZNACENI) : ''
 
-  const { data, error } = await z.rpc('jine_platby_kiosek_zalozit', { p_klic: vstup.klic, p_oznaceni: oznaceni, p_klient_id: vstup.klientId })
+  // Počet fotek jde do databáze: ta adresy pro nahrání k záznamu počítá a opakované
+  // odeslání k uzavřenému dokladu (nebo nad strop adres) odmítne.
+  const { data, error } = await z.rpc('jine_platby_kiosek_zalozit', {
+    p_klic: vstup.klic,
+    p_oznaceni: oznaceni,
+    p_klient_id: vstup.klientId,
+    p_souboru: vyber.soubory.length,
+  })
   if (error) return { ok: false, stav: stavPodleChyby(error), chyba: hlaskaOdeslani(error) }
   const d = (data ?? {}) as { zaznam?: unknown; tenant?: unknown; branch?: unknown }
   const zaznam = String(d.zaznam ?? '')
@@ -94,37 +103,67 @@ export async function pripravitOdeslani(
   return { ok: true, zaznam, nahrani }
 }
 
-export type Dokonceno = { ok: true; pripojeno: number } | { ok: false; stav: 'odpojeno' | 'vypnuto' | 'chyba'; chyba: string; pripojeno: number }
+export type Dokonceno = { ok: true; pripojeno: number } | { ok: false; stav: StavChybyKiosku; chyba: string; pripojeno: number }
+
+/**
+ * Úklid nahraných souborů, které se nepřipojily. Klient služby obchází RLS
+ * úložiště, proto o KAŽDÉM souboru rozhodne databáze
+ * (`jine_platby_kiosek_muze_uklidit`: platný klíč, záznam téhož zařízení,
+ * cesta toho záznamu, soubor bez vlastníka a nepřipojený). Chyba nebo
+ * „ne“ = soubor zůstane (neškodný sirotek), nikdy nesmazat naslepo.
+ */
+async function uklidit(z: ZavislostiKiosku, klic: string, zaznam: string, cesty: string[]): Promise<void> {
+  const smi: string[] = []
+  for (const cesta of cesty) {
+    const { data, error } = await z.rpc('jine_platby_kiosek_muze_uklidit', { p_klic: klic, p_zaznam: zaznam, p_cesta: cesta }).catch(() => ({ data: null, error: { message: 'síť' } }))
+    if (!error && data === true) smi.push(cesta)
+  }
+  if (smi.length > 0) await z.smazat(smi).catch(() => undefined)
+}
 
 export async function dokoncitOdeslani(z: ZavislostiKiosku, vstup: { klic: unknown; zaznam: unknown; cesty: unknown }): Promise<Dokonceno> {
   if (!jeKlicZarizeni(vstup.klic)) return { ok: false, stav: 'odpojeno', chyba: HLASKA_NEZNAME_ZARIZENI, pripojeno: 0 }
+  const klic = vstup.klic
   if (typeof vstup.zaznam !== 'string' || !UUID.test(vstup.zaznam)) return { ok: false, stav: 'chyba', chyba: 'Chybí doklad.', pripojeno: 0 }
   const cesty = Array.isArray(vstup.cesty) ? vstup.cesty : []
   if (cesty.length === 0 || cesty.length > MAX_SOUBORU_NA_ZAZNAM) return { ok: false, stav: 'chyba', chyba: 'Chybí fotky dokladu.', pripojeno: 0 }
 
-  let pripojeno = 0
+  // 1. Databáze NEJDŘÍV ověří klíč, zařízení a záznam (téhož zařízení, otevřený,
+  //    do dvou hodin). Dřív se nic nestahuje ani nemaže — kontrola 24. 10.
+  const { data: overeni, error: chybaOvereni } = await z.rpc('jine_platby_kiosek_overit_zaznam', { p_klic: klic, p_zaznam: vstup.zaznam })
+  if (chybaOvereni) return { ok: false, stav: stavPodleChyby(chybaOvereni), chyba: hlaskaOdeslani(chybaOvereni), pripojeno: 0 }
+  const o = (overeni ?? {}) as { zaznam?: unknown; tenant?: unknown; branch?: unknown }
+  const zaznam = String(o.zaznam ?? '')
+  if (zaznam.toLowerCase() !== vstup.zaznam.toLowerCase()) return { ok: false, stav: 'chyba', chyba: 'Server nevrátil doklad.', pripojeno: 0 }
+
+  // 2. Každá cesta musí být PŘESNĚ cesta tohoto záznamu — firmu a pobočku dala databáze, ne cesta.
+  const overene: { cesta: string; mime: TypSouboru }[] = []
   for (const surova of cesty) {
-    // Přísná cesta TOHOTO záznamu (firma/pobočka z cesty ověří databáze proti zařízení).
-    const casti = typeof surova === 'string' ? surova.split('/') : []
-    const overena = casti.length === 4 ? overitCestu(String(surova), casti[0], casti[1], vstup.zaznam) : null
-    if (!overena) return { ok: false, stav: 'chyba', chyba: 'Fotka má neplatnou cestu.', pripojeno }
+    const overena = overitCestu(String(surova), String(o.tenant ?? ''), String(o.branch ?? ''), zaznam)
+    if (!overena || overene.some((x) => x.cesta === overena.cesta)) return { ok: false, stav: 'chyba', chyba: 'Fotka má neplatnou cestu.', pripojeno: 0 }
+    overene.push(overena)
+  }
+
+  let pripojeno = 0
+  for (let i = 0; i < overene.length; i++) {
+    const overena = overene[i]
+    // Zbytek (tahle a další fotky) se při chybě uklidí — jen co databáze dovolí.
+    const skoncit = async (stav: StavChybyKiosku, chyba: string): Promise<Dokonceno> => {
+      await uklidit(z, klic, zaznam, overene.slice(i).map((x) => x.cesta))
+      return { ok: false, stav, chyba, pripojeno }
+    }
 
     const { bajty, error: chybaStazeni } = await z.stahnout(overena.cesta)
-    if (chybaStazeni || !bajty) return { ok: false, stav: 'chyba', chyba: 'Fotka se nenahrála — zkuste odeslat znovu.', pripojeno }
-    const zahodit = async (chyba: string): Promise<Dokonceno> => {
-      await z.smazat([overena.cesta]).catch(() => undefined)
-      return { ok: false, stav: 'chyba', chyba, pripojeno }
-    }
-    if (bajty.length === 0 || bajty.length > stropSouboru(overena.mime)) return zahodit('Fotka je prázdná nebo moc velká.')
+    if (chybaStazeni || !bajty) return skoncit('chyba', 'Fotka se nenahrála — zkuste odeslat znovu.')
+    if (bajty.length === 0 || bajty.length > stropSouboru(overena.mime)) return skoncit('chyba', 'Fotka je prázdná nebo moc velká.')
     const typ = poznatTypSouboru(bajty)
-    if (!typ || PRIPONY_SOUBORU[typ] !== PRIPONY_SOUBORU[overena.mime]) return zahodit('Soubor není fotka ani PDF, za které se vydává.')
+    if (!typ || PRIPONY_SOUBORU[typ] !== PRIPONY_SOUBORU[overena.mime]) return skoncit('chyba', 'Soubor není fotka ani PDF, za které se vydává.')
     const otisk = createHash('sha256').update(bajty).digest('hex')
 
-    const { error } = await z.rpc('jine_platby_kiosek_pripojit_soubor', { p_klic: vstup.klic, p_zaznam: vstup.zaznam, p_cesta: overena.cesta, p_otisk: otisk })
-    if (error) {
-      await z.smazat([overena.cesta]).catch(() => undefined)
-      return { ok: false, stav: stavPodleChyby(error), chyba: hlaskaOdeslani(error), pripojeno }
-    }
+    const { data, error } = await z.rpc('jine_platby_kiosek_pripojit_soubor', { p_klic: klic, p_zaznam: zaznam, p_cesta: overena.cesta, p_otisk: otisk })
+    if (error) return skoncit(stavPodleChyby(error), hlaskaOdeslani(error))
+    // Tatáž fotka už u záznamu je (minulá odpověď se ztratila): počítá se, nová kopie se uklidí.
+    if ((data as { uz_pripojen?: unknown } | null)?.uz_pripojen === true) await uklidit(z, klic, zaznam, [overena.cesta])
     pripojeno++
   }
   return { ok: true, pripojeno }

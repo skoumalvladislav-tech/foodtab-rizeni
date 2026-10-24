@@ -20,9 +20,34 @@ import type {
   ZaznamJinePlatby,
 } from './jine-platby-typy.ts'
 
+/**
+ * Sloupce záznamu bez kiosku — záložní čtení, dokud migrace
+ * 20261022100000_jine_platby_kiosek není v databázi (po sloučení do main
+ * se aplikace nasadí dřív než db push; bez zálohy by Finance → Jiné
+ * platby spadly na 42703).
+ */
+export const SLOUPCE_ZAZNAMU_ZAKLAD =
+  'id, tenant_id, branch_id, pripojeni_id, pos_provozovna, datum_prodeje, oznaceni, kontakt_id, mena, castka_haleru, castka_puvod, typ_dokladu, externi_ucet, pos_prodej_id, stav_kontroly, stav_trzby, stav_skladu, stav_faktury, faktura_cislo, faktura_zdroj, faktura_castka_haleru, stav_uhrady, uhrada_transakce_id, uhrada_castka_haleru, kontrola_trzby, kontrola_skladu, pokladna_trzby, pokladna_skladu, nedohledana_operace, upozorneni_dokladu, rozpoznani_id, verze, vytvoril, vytvoreno, zmeneno'
+
+/** Sloupce, které přidal kiosek (zdroj záznamu, opis názvu zařízení). */
+export const SLOUPCE_KIOSKU = 'zdroj, zarizeni_nazev'
+
 /** Sloupce záznamu pro `select(...)` — jeden seznam pro obrazovku i testy. */
-export const SLOUPCE_ZAZNAMU =
-  'id, tenant_id, branch_id, pripojeni_id, pos_provozovna, datum_prodeje, oznaceni, kontakt_id, mena, castka_haleru, castka_puvod, typ_dokladu, externi_ucet, pos_prodej_id, stav_kontroly, stav_trzby, stav_skladu, stav_faktury, faktura_cislo, faktura_zdroj, faktura_castka_haleru, stav_uhrady, uhrada_transakce_id, uhrada_castka_haleru, kontrola_trzby, kontrola_skladu, pokladna_trzby, pokladna_skladu, nedohledana_operace, upozorneni_dokladu, rozpoznani_id, zdroj, zarizeni_nazev, verze, vytvoril, vytvoreno, zmeneno'
+export const SLOUPCE_ZAZNAMU = `${SLOUPCE_ZAZNAMU_ZAKLAD}, ${SLOUPCE_KIOSKU}`
+
+/**
+ * Přečte záznam(y) se všemi sloupci; když databáze sloupce kiosku ještě
+ * nezná (42703 / PGRST204 — migrace není nasazená), zopakuje dotaz bez
+ * nich. Záznam pak vyjde jako z aplikace (`zDbZaznam`: zdroj „aplikace“).
+ * Jiná chyba se vrací beze změny (hlásí se nahlas jako dřív).
+ */
+export async function cistSeZalohou<T, E extends { code?: string | null } | null>(
+  dotaz: (sloupce: string) => PromiseLike<{ data: T; error: E }>,
+): Promise<{ data: T; error: E }> {
+  const prvni = await dotaz(SLOUPCE_ZAZNAMU)
+  if (prvni.error?.code === '42703' || prvni.error?.code === 'PGRST204') return dotaz(SLOUPCE_ZAZNAMU_ZAKLAD)
+  return prvni
+}
 
 export const SLOUPCE_POLOZKY =
   'id, poradi, nazev_puvodni, nazev, mnozstvi, jednotka, cena_jednotkova_haleru, cena_celkem_haleru, sazba_dph, jistota, zdroj, druh, pos_produkt_id, pos_produkt_nazev, pos_mnozstvi, mapovani, vyzaduje_kontrolu, duvod_kontroly'

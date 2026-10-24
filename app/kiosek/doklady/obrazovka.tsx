@@ -28,6 +28,8 @@ export type AkceObrazovky = {
   odebratFotku: (id: string) => void
   zmenitOznaceni: (text: string) => void
   odeslat: () => void
+  /** Přeruší nahrávání a čekání na server; fotky zůstanou k novému pokusu. */
+  zrusitOdeslani: () => void
   dalsiDoklad: () => void
 }
 
@@ -49,7 +51,8 @@ export default function ObrazovkaKiosku({ stav, akce }: { stav: StavObrazovky; a
           <h1 style={nadpis}>Spárovat telefon</h1>
           <p style={popis}>
             V aplikaci na <strong>Nastavení → Zařízení</strong> si nechte vystavit registrační kód a opište ho sem. Platí pár
-            minut a jde použít jednou. Pak tam u telefonu zapněte <strong>Kiosek Jiných plateb</strong>.
+            minut a jde použít jednou. Pak tam u telefonu zapněte <strong>Kiosek Jiných plateb</strong>. Telefon spárovaný
+            tady slouží jen na doklady — kiosek Docházky na něm nefunguje.
           </p>
           {!stav.zPlochy ? (
             <p role="note" style={upozorneni}>
@@ -127,6 +130,8 @@ export default function ObrazovkaKiosku({ stav, akce }: { stav: StavObrazovky; a
   }
 
   const zbyva = stav.fotky.filter((f) => !f.odeslana).length
+  // Všechny fotky už odešly (zbytek se třeba odebral po chybě): doklad je hotový.
+  const hotovo = stav.fotky.length > 0 && zbyva === 0 && !stav.odesilam
   return (
     <main style={obal}>
       <div style={karta}>
@@ -217,9 +222,20 @@ export default function ObrazovkaKiosku({ stav, akce }: { stav: StavObrazovky; a
           </p>
         ) : null}
 
-        <button type="button" className="ft-tl ft-tl-hlavni" style={tlacitko} disabled={stav.odesilam || zbyva === 0} onClick={akce.odeslat}>
-          {stav.odesilam ? 'Odesílám…' : zbyva > 0 ? `Odeslat doklad (${zbyva} ${zbyva === 1 ? 'fotka' : zbyva < 5 ? 'fotky' : 'fotek'})` : 'Odeslat doklad'}
-        </button>
+        {hotovo ? (
+          <button type="button" className="ft-tl ft-tl-hlavni" style={tlacitko} onClick={akce.dalsiDoklad}>
+            Hotovo — vyfotit další doklad
+          </button>
+        ) : (
+          <button type="button" className="ft-tl ft-tl-hlavni" style={tlacitko} disabled={stav.odesilam || zbyva === 0} onClick={akce.odeslat}>
+            {stav.odesilam ? 'Odesílám…' : zbyva > 0 ? `Odeslat doklad (${zbyva} ${zbyva === 1 ? 'fotka' : zbyva < 5 ? 'fotky' : 'fotek'})` : 'Odeslat doklad'}
+          </button>
+        )}
+        {stav.odesilam ? (
+          <button type="button" className="ft-tl ft-tl-vedlejsi" style={tlacitko} onClick={akce.zrusitOdeslani}>
+            Zrušit odesílání
+          </button>
+        ) : null}
         <p style={{ ...popis, margin: '12px 0 0' }}>Doklad zkontrolují ve Financích. Tady je vidět jen to, co odešlo z tohoto telefonu dnes.</p>
         <PrehledDnes doklady={stav.dnes} />
       </div>

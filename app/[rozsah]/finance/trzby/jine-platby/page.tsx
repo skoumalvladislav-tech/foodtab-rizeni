@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId } from '@/lib/firma'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { pobockySPravem, pravaNavigaceFinanci, zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
-import { SLOUPCE_ZAZNAMU, zDbZaznam } from '@/lib/jine-platby-db'
+import { cistSeZalohou, zDbZaznam } from '@/lib/jine-platby-db'
 import { STAVY_SKLADU, type StavSkladu, type ZaznamJinePlatby } from '@/lib/jine-platby-typy'
 import { formatHaleru } from '@/lib/jine-platby-castky'
 import { moznaDvakrat, moznaNikde, popisStavuFaktury, popisStavuKontroly, popisStavuSkladu, popisStavuTrzby, popisStavuUhrady, type PopisStavu } from '@/lib/jine-platby-stav'
@@ -190,9 +190,11 @@ export default async function JinePlatby({
       ? new Set([pobockaRozsahu])
       : await pobockySPravem(tenantId, [...viditelne], ['jine_platby.vydej_pos'])
 
+  // Sloupce dosadí cistSeZalohou (před db push kiosku bez jeho sloupců).
+  const { data: zaznamyData, error: chybaZaznamu } = await cistSeZalohou((sloupce) => {
   let dotaz = supabase
     .from('jine_platby')
-    .select(`${SLOUPCE_ZAZNAMU}, jine_platby_soubory(count)`)
+    .select(`${sloupce}, jine_platby_soubory(count)`)
     .eq('tenant_id', tenantId)
   if (pohledSchvaleni) {
     dotaz = dotaz.eq('stav_skladu', 'ceka_na_schvaleni').neq('stav_kontroly', 'zruseno').in('branch_id', [...pobockySchvaleni])
@@ -219,16 +221,17 @@ export default async function JinePlatby({
     else if (stav === 'bez_faktury') dotaz = dotaz.eq('stav_faktury', 'bez_faktury').neq('stav_kontroly', 'zruseno')
     else if (stav === 'zrusene') dotaz = dotaz.eq('stav_kontroly', 'zruseno')
   }
-  const { data: zaznamyData, error: chybaZaznamu } = await dotaz
+  return dotaz
     .order('datum_prodeje', { ascending: false, nullsFirst: true })
     .order('vytvoreno', { ascending: false })
     .limit(LIMIT + 1)
+  })
 
   // Migrace ještě nenasazená: karta místo pádu. Jiná chyba = porucha, nahlas.
   const cekaNaDatabazi = chybaZaznamu !== null && tabulkaNeexistuje(chybaZaznamu)
   if (chybaZaznamu && !cekaNaDatabazi) throw new DotazSelhal('záznamy Jiných plateb', chybaZaznamu)
 
-  const nactene = ((zaznamyData ?? []) as Record<string, unknown>[]).map((r): Radek => {
+  const nactene = ((zaznamyData ?? []) as unknown as Record<string, unknown>[]).map((r): Radek => {
     const pocet = Array.isArray(r.jine_platby_soubory) ? Number((r.jine_platby_soubory[0] as { count?: unknown } | undefined)?.count ?? 0) : 0
     return { ...zDbZaznam(r), souboru: Number.isFinite(pocet) ? pocet : 0 }
   })
