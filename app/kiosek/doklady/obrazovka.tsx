@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 
-import { casOdeslani, MAX_ZNAKU_OZNACENI, POPIS_STAVU_KIOSKU, type DokladDnes } from '@/lib/jine-platby-kiosek'
+import { casOdeslani, MAX_ZNAKU_OZNACENI, POPIS_STAVU_KIOSKU, popisFotek, type DokladDnes } from '@/lib/jine-platby-kiosek'
 
 /**
  * Obrazovka kiosku Jiných plateb na telefonu — jen zobrazení podle stavu
@@ -257,7 +257,7 @@ function PrehledDnes({ doklady }: { doklady: DokladDnes[] | null | undefined }) 
           {doklady.map((d, i) => (
             <li key={`${d.cas}-${i}`} style={{ ...polozka, alignItems: 'flex-start', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
               <span style={{ fontSize: '14px', color: 'var(--ink)', overflowWrap: 'anywhere', maxWidth: '100%' }}>
-                <strong>{casOdeslani(d.cas)}</strong> · {d.fotek} {d.fotek === 1 ? 'fotka' : d.fotek > 1 && d.fotek < 5 ? 'fotky' : 'fotek'}
+                <strong>{casOdeslani(d.cas)}</strong> · {popisFotek(d.fotek)}
                 {d.oznaceni ? ` · ${d.oznaceni}` : ''}
               </span>
               <span style={{ fontSize: '13px', color: d.stav === 'bez_fotky' || d.stav === 'zruseno' ? 'var(--bad)' : d.stav === 'prijato' ? 'var(--muted)' : 'var(--dobre)' }}>

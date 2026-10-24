@@ -1,0 +1,87 @@
+name: Kiosek – úklid nepřipojených fotek
+
+# Naplánovaná úloha: smaže soubory, které telefon na doklady nahrál, ale
+# k žádnému záznamu Jiných plateb se nepřipojily (telefon vypadl dřív,
+# než došlo na dokončení). Které to jsou, rozhoduje databáze
+# (`public.jine_platby_kiosek_sirotci`): bez vlastníka, pod záznamem
+# z kiosku, starší než 3 hodiny a bez řádku v `jine_platby_soubory`.
+#
+# Na pg_cron nic nestojí — v databázi zatím neběží. Plán je stejný jako
+# v `app.planovac_ulohy` (scripts/planovac.test.mjs hlídá shodu), zámek
+# proti dvojímu spuštění drží adresa sama.
+#
+# Krok skončí nenulově při čemkoli jiném než HTTP 200 — červený křížek
+# u běhu pošle e-mail sám.
+
+on:
+  schedule:
+    # Jednou denně ve 03:35 UTC (v noci, mimo provoz a mimo celou hodinu).
+    - cron: '35 3 * * *'
+  # Ať jde spustit ručně (Run workflow), třeba hned po nasazení.
+  workflow_dispatch:
+
+concurrency:
+  group: kiosek-uklid
+  cancel-in-progress: false
+
+jobs:
+  uklidit:
+    name: Uklidit nepřipojené fotky z kiosku
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci, např. https://foodtab.vercel.app"
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu"
+            exit 1
+          fi
+
+          CELKEM=0
+          # Dávky po 500; dokud adresa říká „pokracovat", jede další kolo (nejvýš 10).
+          for KOLO in $(seq 1 10); do
+            KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+              --max-time 90 \
+              -H "Authorization: Bearer ${TAJEMSTVI}" \
+              "${ADRESA}/api/uloha/kiosek-uklid")
+
+            echo "Kolo ${KOLO}: HTTP ${KOD}"
+            cat telo.json || true
+            echo
+
+            case "$KOD" in
+              200) ;;
+              401)
+                echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+                exit 1 ;;
+              503)
+                echo "::error::503 — na Vercelu chybí SUPABASE_SERVICE_ROLE_KEY."
+                exit 1 ;;
+              *)
+                echo "::error::Úloha vrátila HTTP ${KOD}."
+                exit 1 ;;
+            esac
+
+            if grep -q '"bezi_jinde":[[:space:]]*true' telo.json; then
+              echo "Úloha už běží jinde — končím."
+              break
+            fi
+
+            SMAZANO=$(sed -n 's/.*"smazano":[[:space:]]*\([0-9]*\).*/\1/p' telo.json)
+            CELKEM=$((CELKEM + ${SMAZANO:-0}))
+            if ! grep -q '"pokracovat":[[:space:]]*true' telo.json; then
+              break
+            fi
+          done
+
+          echo "Smazáno nepřipojených fotek z kiosku: ${CELKEM}" >> "$GITHUB_STEP_SUMMARY"

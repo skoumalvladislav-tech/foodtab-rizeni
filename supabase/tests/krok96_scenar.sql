@@ -14,7 +14,7 @@
 --   3. zavolání: přesně jeden požadavek na https://…/api/uloha/<úloha>
 --      s Bearer tajemstvím a timeoutem = limit; neznámá úloha a jméno
 --      s lomítkem odmítnuty bez požadavku;
---   4. naplánování: 9 úloh + úklid, plán z tabulky, text úlohy v cronu
+--   4. naplánování: 10 úloh (od 20261024100000 i kiosek-uklid) + úklid, plán z tabulky, text úlohy v cronu
 --      tajemství NEOBSAHUJE, opakované naplánování nic nezdvojí,
 --      úloha vyřazená z tabulky z cronu zmizí, zrušení smaže vše;
 --   5. zámek `uloha_zabrat`: první true, druhý false, po vypršení zase
@@ -74,8 +74,8 @@ select pg_temp.check('planovac_cil bez Vaultu → „Chybí Supabase Vault"',
 select pg_temp.check('zrusit_planovac bez pg_cron nic nedělá (0)',
   app.zrusit_planovac() = 0);
 
-select pg_temp.check('stav bez pg_cron: 9 úloh, nic v cronu, hláška „není zapnutý"',
-  (select count(*) = 9 and bool_and(not v_cronu) and bool_and(posledni_chyba like '%není zapnutý%')
+select pg_temp.check('stav bez pg_cron: 10 úloh, nic v cronu, hláška „není zapnutý"',
+  (select count(*) = 10 and bool_and(not v_cronu) and bool_and(posledni_chyba like '%není zapnutý%')
      from app.planovac_stav()));
 
 -- ---------------------------------------------------------------------
@@ -209,10 +209,10 @@ select pg_temp.check('tabulka nepřijme jméno, které by rozbilo adresu',
 
 select count(*) as pred from net.odeslane \gset
 
-select pg_temp.check('naplanovat_ulohy vrátí 9 úloh',
-  (select count(*) = 9 from app.naplanovat_ulohy()));
-select pg_temp.check('v cronu 9 úloh + úklid',
-  (select count(*) = 10 from cron.job where jobname like 'foodtab-%'));
+select pg_temp.check('naplanovat_ulohy vrátí 10 úloh',
+  (select count(*) = 10 from app.naplanovat_ulohy()));
+select pg_temp.check('v cronu 10 úloh + úklid',
+  (select count(*) = 11 from cron.job where jobname like 'foodtab-%'));
 select pg_temp.check('plán každé úlohy = tabulka',
   not exists (select 1 from app.planovac_ulohy u
                where not exists (select 1 from cron.job j
@@ -228,7 +228,7 @@ select pg_temp.check('naplánování samo nic neodeslalo',
 
 select count(*) from app.naplanovat_ulohy();
 select pg_temp.check('opakované naplánování nic nezdvojí',
-  (select count(*) = 10 from cron.job where jobname like 'foodtab-%'));
+  (select count(*) = 11 from cron.job where jobname like 'foodtab-%'));
 
 insert into app.planovac_ulohy (uloha, plan_utc, limit_sekund) values ('zkusebni-uloha', '1 * * * *', 60);
 select count(*) from app.naplanovat_ulohy();
@@ -238,7 +238,7 @@ delete from app.planovac_ulohy where uloha = 'zkusebni-uloha';
 select count(*) from app.naplanovat_ulohy();
 select pg_temp.check('úloha vyřazená z tabulky z cronu zmizí',
   not exists (select 1 from cron.job where jobname = 'foodtab-uloha-zkusebni-uloha')
-  and (select count(*) = 10 from cron.job where jobname like 'foodtab-%'));
+  and (select count(*) = 11 from cron.job where jobname like 'foodtab-%'));
 
 -- Cizí úloha v cronu (jiný prefix) zůstane netknutá.
 select cron.schedule('jina-uloha', '0 0 * * *', 'select 1');
@@ -247,7 +247,7 @@ delete from vault.secrets where name = 'foodtab_cron_secret';
 select pg_temp.check('naplánování bez tajemství → odmítnuto…',
   pg_temp.spadne_hlaskou('select * from app.naplanovat_ulohy()', '55000', 'foodtab_cron_secret'));
 select pg_temp.check('… a cron zůstal, jak byl',
-  (select count(*) = 10 from cron.job where jobname like 'foodtab-%'));
+  (select count(*) = 11 from cron.job where jobname like 'foodtab-%'));
 insert into vault.secrets values ('foodtab_cron_secret', 'tajne-ABC-123');
 
 \echo '-- 5. zámek uloha_zabrat'
@@ -313,8 +313,8 @@ select pg_temp.check('úklid smazal starou historii našich úloh, cizí nechal'
 
 \echo '-- 4b. zrušení'
 
-select pg_temp.check('zrusit_planovac odebere 10 úloh',
-  app.zrusit_planovac() = 10);
+select pg_temp.check('zrusit_planovac odebere 11 úloh',
+  app.zrusit_planovac() = 11);
 select pg_temp.check('… a cizí úlohu v cronu nechá',
   (select count(*) = 1 from cron.job) and exists (select 1 from cron.job where jobname = 'jina-uloha'));
 
