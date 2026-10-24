@@ -780,7 +780,8 @@ console.log('\n== Přehled: každý parametr adresy přes seznam povolených hod
     /parametr && \/\^\\d\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$\/\.test\(parametr\) && parametr >= '2000-01' && parametr <= aktualni \? parametr : aktualni/.test(s) &&
       /urcitMesic\(obdobiParam, provozniMesic\(\)\)/.test(s) && vyskyty('obdobiParam') === 2)
   ok('provozní měsíc z provozniDen (05:00), ne z kalendáře serveru', /provozniDen\(Date\.now\(\), '05:00', ZONA_VYCHOZI\)\.slice\(0, 7\)/.test(s))
-  ok('data uživatelským klientem a .eq(tenant_id)', /\.from\('jine_platby'\)\s*\.select\(`\$\{SLOUPCE_ZAZNAMU\}, jine_platby_soubory\(count\)`\)\s*\.eq\('tenant_id', tenantId\)/.test(s))
+  ok('data uživatelským klientem a .eq(tenant_id); sloupce dosadí cistSeZalohou (před db push kiosku bez jeho sloupců)',
+    /cistSeZalohou\(\(sloupce\) => \{\s*let dotaz = supabase\s*\.from\('jine_platby'\)\s*\.select\(`\$\{sloupce\}, jine_platby_soubory\(count\)`\)\s*\.eq\('tenant_id', tenantId\)/.test(s))
   ok('nenasazená migrace → karta „čekají na aktualizaci databáze", jiná chyba nahlas',
     /const cekaNaDatabazi = chybaZaznamu !== null && tabulkaNeexistuje\(chybaZaznamu\)/.test(s) &&
       /if \(chybaZaznamu && !cekaNaDatabazi\) throw new DotazSelhal/.test(s) && s.includes('Jiné platby čekají na aktualizaci databáze'))

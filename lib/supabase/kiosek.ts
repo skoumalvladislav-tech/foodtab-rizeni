@@ -59,3 +59,25 @@ export function getKioskSupabase(moznosti: { bezLimitu?: boolean } = {}): Supaba
   })
   return klient
 }
+
+/**
+ * Nahrání fotek dokladů z telefonu (app/kiosek/doklady): bez sezení jako
+ * výš, ale každé odeslání má vlastní klienta, jehož požadavky `signal`
+ * přeruší — tlačítko „Zrušit odesílání“ tak opravdu zastaví nahrávání.
+ * (Úložiště `db.timeout` nedostane; strop času hlídá `sLimitem`
+ * v lib/jine-platby-kiosek.ts.)
+ */
+export function getKioskSupabaseNahravani(signal: AbortSignal): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anonKey) {
+    throw new Error(
+      'Chybí nastavení Supabase. Doplňte NEXT_PUBLIC_SUPABASE_URL ' +
+        'a NEXT_PUBLIC_SUPABASE_ANON_KEY do .env.local.',
+    )
+  }
+  return createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: (vstup, init) => fetch(vstup, { ...init, signal }) },
+  })
+}

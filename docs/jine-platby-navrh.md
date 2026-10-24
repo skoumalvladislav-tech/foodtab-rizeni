@@ -421,3 +421,34 @@ Pravidla operace (`lib/jine-platby-pos-operace.ts`):
 - Žádný fiktivní hotovostní nebo karetní prodej v pokladně kvůli výdeji.
 - Foodcost se nemění, dokud se neověří, jestli odpis v pokladně neleze do jejích prodejů (otázka 53). Potvrzená spotřeba je zatím dohledatelná přes `jine_platby_spotreba`.
 - AI nikdy nezapisuje tržbu ani výdej a nic nedomýšlí. Chybějící údaj = prázdno + příznak ke kontrole.
+
+## 9. Kiosek na telefonu pobočky (22. 10. 2026)
+
+Zadání: „kiosek do telefonu jako je na docházku… obsluha nemá přístup
+k modulu finance“, upřesnění „nepotřebujeme se přihlásit pinem“.
+Migrace `20261022100000_jine_platby_kiosek`, stránka `/kiosek/doklady`.
+
+- **Zařízení:** telefon je `branch_devices` s účelem `doklady` (párování kódem přes `registrovat_zarizeni_doklady`, klíč v `localStorage` pod `foodtab-kiosek-doklady-klic`). Kiosek Jiných plateb se zapíná zvlášť: řádek v `jine_platby_kiosky`, píše ho jen `jine_platby_kiosek_zapnout` (správce nastavení pobočky, firma s Financemi, audit).
+- **Ověření při každém volání** (`app.jp_kiosek_zarizeni`): zařízení podle otisku klíče (aktivní, neodvolané, účel `doklady`), zapnutý kiosek, aktivní pobočka, modul `finance` firmy. Neznámé nebo odvolané zařízení dostane stejnou hlášku jako kiosek Docházky (`42501`). Vypnutý kiosek, neaktivní pobočka a firma bez Financí mají vlastní hlášky.
+- **Záznam z kiosku:** `zdroj = 'kiosek'`, `zarizeni_id`, `zarizeni_nazev` (opis názvu, Finance zařízení číst nesmí), `vytvoril` prázdné. Soubor: `jine_platby_soubory.zarizeni_id`, `nahral` prázdné. Historie: `kdo` prázdné, `detail.zdroj = 'kiosek'` a název zařízení.
+
+| Funkce | Kdo | Co |
+|---|---|---|
+| `jine_platby_kiosek_stav(p_klic) → jsonb` | service_role | jen `{pobocka, zarizeni}` |
+| `jine_platby_kiosek_overit_zaznam(p_klic, p_zaznam) → jsonb` | service_role | před JAKÝMKOLI stažením: klíč, záznam téhož zařízení, rozpracovaný, do 2 h; vrací `{zaznam, tenant, branch}` pro kontrolu cesty (kontrola 24. 10.) |
+| `jine_platby_kiosek_muze_uklidit(p_klic, p_zaznam, p_cesta) → boolean` | service_role | server smaže soubor JEN při `true`: záznam téhož zařízení, cesta toho záznamu, `owner is null`, žádný řádek v `jine_platby_soubory`. Rozhoduje pod zámkem řádku záznamu (jako připojení) a „ano“ zapíše do `jine_platby_kiosek_uklid` — tu cestu už `pripojit_soubor` nepřipojí |
+| `registrovat_zarizeni_doklady(p_kod)` | anon, authenticated | spárování telefonu na doklady: `registrovat_zarizeni` + účel `doklady` |
+| `jine_platby_kiosek_dnes(p_klic) → jsonb` | service_role | doklady TOHOTO zařízení za dnešní provozní den pobočky (`app.business_date`), od nejnovějšího, nejvýš 50; každý jen `{cas, fotek, oznaceni, stav}` — `oznaceni` je `kiosek_oznaceni` (co napsala obsluha; `oznaceni` přepisují Finance), `fotek` jen aktivní soubory tohoto zařízení; stav `prijato`/`bez_fotky`/`zkontrolovano`/`zpracovano`/`zruseno` (rozhodnutí 24. 10., otázka 69) |
+| `jine_platby_kiosek_zalozit(p_klic, p_oznaceni, p_klient_id) → jsonb` | service_role | záznam na pobočce zařízení; týž `klient_id` z téhož zařízení = týž záznam; strop 20/h a 60/24 h na zařízení (otázka 66); pokladna jen když je jediná (otázka 68); vrací `{zaznam, tenant, branch}` |
+| `jine_platby_kiosek_pripojit_soubor(p_klic, p_zaznam, p_cesta, p_otisk) → uuid` | service_role | jen záznam téhož zařízení, nejvýš 2 hodiny starý, `rozpracovano`; cesta záznamu; soubor bez vlastníka (podepsaná adresa od serveru); typ a velikost jako `jine_platby_pripojit_soubor`; stejný otisk neprojde a hláška neprozradí cizí záznam |
+| `jine_platby_kiosek_zapnout(p_tenant, p_zarizeni, p_zapnout)` | authenticated | `settings.manage` na pobočce zařízení; zapnout jen aktivní zařízení firmy s Financemi; vypnutí platí hned |
+
+- **Aplikace:**
+  - `app/kiosek/doklady/akce.ts` jsou serverové akce bez přihlášení. Všechno rozhoduje klíč zařízení v databázi.
+  - `lib/jine-platby-kiosek-server.ts` řídí odeslání: podepsané adresy pro cesty z firmy a pobočky od databáze; po nahrání stažení, magic bytes, velikost ze stažených bajtů, otisk sha256, a když něco selže, smazání souboru.
+  - Telefon (`kiosek-doklady.tsx`) mluví jen anon klientem bez sezení (registrace, nahrání na podepsanou adresu).
+- **Co telefon nesmí:** číst cokoli z Jiných plateb nebo Financí, kromě přehledu svých dnešních dokladů bez částek (otázka 69, rozhodnutí 24. 10.). Spouštět AI nesmí taky (otázka 67).
+- **Víc telefonů na pobočce** (rozhodnutí 24. 10.): `jine_platby_kiosky` má klíč jen `zarizeni_id`, nic jako „jedno na pobočku“. Strop i autor jsou na zařízení.
+- **Účel zařízení** (kontrola 24. 10.): `branch_devices.ucel` je `dochazka` (výchozí, tablety) nebo `doklady` (telefon z `registrovat_zarizeni_doklady`). `app.zarizeni_podle_klice` (všechny funkce kiosku Docházky) a `pobocka_ma_kiosek` berou jen `dochazka`, `app.jp_kiosek_zarizeni` jen `doklady`. Účel se nastaví při spárování (`app.registrovat_zarizeni_s_ucelem`, tělo registrace beze změny) a potom se nemění vůbec (spoušť; sloupcové granty v produkci nedrží). Telefon na doklady má na pobočce jedinečný název mezi aktivními telefony. Klíč telefonu je v prohlížeči pod `foodtab-kiosek-doklady-klic`, ne pod klíčem Docházky.
+- **Opakované odeslání** (kontrola 24. 10.): `zalozit(…, p_souboru)` vrátí týž záznam jen rozpracovaný, do 2 h a pod stropem 20 vydaných adres (`kiosek_vydano`); jinak „odeslání je uzavřené“ a telefon začne nový doklad. Zámek je před opakováním.
+- **Mazání** (kontrola 24. 10.): server dřív stáhl soubor z cesty od prohlížeče a po chybě ho smazal klientem služby, ještě než databáze ověřila klíč. Kdokoli tak mohl smazat i originál ve Financích. Teď nejdřív `overit_zaznam` a mazání jen přes `muze_uklidit`.

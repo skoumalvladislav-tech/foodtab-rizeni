@@ -214,6 +214,12 @@ export type ZaznamJinePlatby = {
   upozorneniDokladu: string[]
   /** Rozpoznání, ze kterého je uložený návrh (viz HlavickaNavrhu.rozpoznaniId). */
   rozpoznaniId: string | null
+  /**
+   * 'kiosek' = doklad vyfocený na telefonu pobočky (migrace 20261022100000);
+   * autorem je zařízení (`zarizeniNazev`), `vytvoril` je prázdné.
+   */
+  zdroj: 'aplikace' | 'kiosek'
+  zarizeniNazev: string | null
   verze: number
   vytvoril: string | null
   vytvoreno: string

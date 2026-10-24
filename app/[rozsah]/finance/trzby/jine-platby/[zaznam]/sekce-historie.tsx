@@ -3,7 +3,7 @@ import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { PanelHlava } from '../../../../dnes/prvky'
 import { zrusit } from '../akce'
 import FormularAkce from './formular-akce'
-import { popisUdalosti, shrnutiUdalosti } from './logika'
+import { autorUdalosti, popisUdalosti, shrnutiUdalosti } from './logika'
 import { PoleDuvodu, Vysvetleni } from './prvky'
 
 export type UdalostHistorie = { id: string; kdy: string; kdo: string | null; udalost: string; detail: Record<string, unknown> | null }
@@ -34,7 +34,7 @@ export function SekceHistorie({
                 <strong>{popisUdalosti(u.udalost)}</strong>
                 {shrnuti ? <span> — {shrnuti}</span> : null}
                 <span style={{ display: 'block', fontSize: '12.5px', color: 'var(--muted)' }}>
-                  {datumACasSRokemVPasmu(u.kdy, zona)} · {u.kdo ? (jmena[u.kdo] ?? 'kolega') : 'systém'}
+                  {datumACasSRokemVPasmu(u.kdy, zona)} · {autorUdalosti(u.kdo, u.detail, jmena)}
                 </span>
               </li>
             )

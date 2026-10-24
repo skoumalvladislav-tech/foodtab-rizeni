@@ -7,7 +7,7 @@ import { ZONA_VYCHOZI } from '@/lib/cas'
 import { zaznamPatriRozsahu } from '@/lib/finance-evidence-pobocka'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { getCurrentTenantId } from '@/lib/firma'
-import { SLOUPCE_ZAZNAMU, zDbZaznam } from '@/lib/jine-platby-db'
+import { cistSeZalohou, zDbZaznam } from '@/lib/jine-platby-db'
 import type { AliasMapovani, ProduktKatalogu } from '@/lib/jine-platby-mapovani'
 import { zkusPristupJinymPlatbam } from '@/lib/jine-platby-pristup'
 import type { PravoJinychPlateb, ZaznamJinePlatby } from '@/lib/jine-platby-typy'
@@ -82,14 +82,9 @@ export async function pripravit(
   if (pristup.stav !== 'ok') return ne('Nejste přihlášen(a), nebo k Jiným platbám nemáte přístup.')
 
   const supabase = await getServerSupabase()
-  const { data, error } = await supabase
-    .from('jine_platby')
-    .select(SLOUPCE_ZAZNAMU)
-    .eq('id', zaznamId)
-    .eq('tenant_id', tenantId)
-    .maybeSingle()
+  const { data, error } = await cistSeZalohou((sloupce) => supabase.from('jine_platby').select(sloupce).eq('id', zaznamId).eq('tenant_id', tenantId).maybeSingle())
   if (error) {
-    console.error('Jiné platby: záznam se nepodařilo načíst:', error.code, error.message)
+    console.error('Jiné platby: záznam se nepodařilo načíst:', error.code, (error as { message?: string }).message)
     return ne(HLASKA_OBECNA)
   }
   const radek = data as Record<string, unknown> | null
