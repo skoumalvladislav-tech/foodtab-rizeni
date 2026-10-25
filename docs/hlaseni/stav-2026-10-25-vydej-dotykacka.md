@@ -16,7 +16,7 @@
   z katalogu pokladny. Každý návrh jde ke kontrole a potvrzuje ho člověk.
   Do AI nejdou ceny ani jména.
 - **Návrh:** `docs/jine-platby-vydej-dotykacka.md` (s odkazy do
-  dokumentace Dotykačky). **PR:** viz níž. Migrace
+  dokumentace Dotykačky). **PR #157** (větev `jine-platby-vydej-dotykacka`). Migrace
   `20261025230000_jine_platby_vydej_dotykacka.sql` **bez db push**.
 
 ## Co je hotové
