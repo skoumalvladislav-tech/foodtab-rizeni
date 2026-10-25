@@ -507,7 +507,7 @@ declare
   v_telefon text;
   v_email   text;
   v_klic    uuid;
-  v_klic_b  uuid;
+
 begin
   if p_udaje is null or jsonb_typeof(p_udaje) <> 'object' then
     raise exception 'Chybí údaje rezervace.' using errcode = 'check_violation';
@@ -521,22 +521,16 @@ begin
     v_tenant := p_tenant;
     v_branch := p_branch;
 
-    -- Totéž odeslání podruhé vrátí rezervaci z prvního (právo se ptá
-    -- PRVNÍ, takže kdo ho nemá, se nedozví, že číslo existuje).
+    -- Číslo odeslání. Totéž odeslání podruhé vrátí rezervaci z prvního —
+    -- řeší to `on conflict` u zápisu níž, JEDINÉ místo (i pro dvě
+    -- odeslání naráz). Právo se ptá PRVNÍ (výš), takže kdo ho nemá, se
+    -- nedozví, že číslo existuje.
     if nullif(btrim(p_udaje ->> 'klic'), '') is not null then
       begin
         v_klic := btrim(p_udaje ->> 'klic')::uuid;
       exception when invalid_text_representation then
         raise exception 'Číslo odeslání nemá správný tvar.' using errcode = 'check_violation';
       end;
-      select r.id, r.branch_id into v_id, v_klic_b
-        from public.rezervace r where r.tenant_id = v_tenant and r.klic_odeslani = v_klic;
-      if v_id is not null then
-        if v_klic_b <> v_branch then
-          raise exception 'Číslo odeslání patří jiné rezervaci.' using errcode = 'check_violation';
-        end if;
-        return v_id;
-      end if;
     end if;
   else
     select * into v_r from public.rezervace
@@ -600,7 +594,9 @@ begin
     on conflict (tenant_id, klic_odeslani) where klic_odeslani is not null do nothing
     returning id into v_id;
 
-    -- Dvě odeslání se stejným číslem NARÁZ: druhé narazí na první.
+    -- Totéž číslo už je zapsané (dvojí ťuknutí, opakování po výpadku,
+    -- nebo dvě odeslání naráz): vrátí se ta první rezervace. Číslo jiné
+    -- pobočky se nevrací — to je chyba, ne opakování.
     if v_id is null then
       select r.id into v_id from public.rezervace r
        where r.tenant_id = v_tenant and r.klic_odeslani = v_klic and r.branch_id = v_branch;
