@@ -22,8 +22,10 @@
  */
 
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
-import { adresaModulu } from './vykreslit.mjs'
+import { adresaModulu, nactiKomponentu } from './vykreslit.mjs'
 
 const J = await import('../lib/jine-platby-ai-parovani-jadro.ts')
 const M = await import('../lib/jine-platby-mapovani.ts')
@@ -384,6 +386,55 @@ const rpc = (s, nazev) => s.log.filter((x) => x[0] === 'rpc' && x[2] === nazev)
   const v = await spustit(formular())
   const p = rpc(s, 'jine_platby_ulozit_navrh')[0]?.[3].p_polozky ?? []
   ok('ověřený alias vyřeší položku pravidlem (overeno) a AI se vůbec nevolá', v.stav === 'ok' && !s.log.some((x) => x[0] === 'ai') && p[0]?.mapovani === 'overeno' && p[0].pos_produkt_id === '101')
+}
+
+/* ===================================================================== */
+console.log('\n== Panel Sklad: tlačítko „Najít produkty v pokladně (AI)" (vykreslená komponenta) ==')
+{
+  const stub = (jmena) => js(jmena.map((x) => `export async function ${x}() { return { stav: 'nic', text: '' } }`).join('\n'))
+  const SekceSklad = await nactiKomponentu(`${KOREN}/[zaznam]/sekce-sklad.tsx`, [
+    ['next/link', js(`import { createElement } from ${JSON.stringify(import.meta.resolve('react'))}\nexport default function Link({ href, children, prefetch, scroll, ...p }) { return createElement('a', { href, ...p }, children) }`)],
+    ['../akce', stub(['korekceVydeje', 'odeslatSklad', 'prohlasitSklad', 'propojitVydej', 'rucneDolozit', 'zrusitSchvaleni'])],
+    ['../akce-pos', stub(['obnovitVydej', 'provestVydej', 'rozhodnoutVydej', 'vydejZnovu', 'zkontrolovatSklad'])],
+    ['../akce-parovani', stub(['najitVPokladne'])],
+  ])
+  const z = {
+    id: ZAZNAM_ID, tenantId: 'T1', branchId: 'B1', pripojeniId: 'P1', posProvozovna: 'PROV1', datumProdeje: '2026-10-15', oznaceni: 'Stůl 4', kontaktId: null,
+    mena: 'CZK', castkaHaleru: 45000, castkaPuvod: 'doklad', typDokladu: 'uzavreny_prodej', externiUcet: '1234', posProdejId: null, stavKontroly: 'ke_kontrole',
+    stavTrzby: 'nezapsano', stavSkladu: 'bez_navrhu', stavFaktury: 'bez_faktury', fakturaCislo: null, fakturaZdroj: null, fakturaCastkaHaleru: null, stavUhrady: 'neovereno',
+    uhradaTransakceId: null, uhradaCastkaHaleru: null, kontrolaTrzby: null, kontrolaSkladu: null, pokladnaTrzby: null, pokladnaSkladu: null, nedohledanaOperace: null,
+    upozorneniDokladu: [], rozpoznaniId: null, verze: 3, vytvoril: 'U1', vytvoreno: '2026-10-15T10:00:00Z', zmeneno: '2026-10-15T10:00:00Z', zdroj: 'aplikace', zarizeniNazev: null,
+  }
+  const BLOKACE = { poradi: 1, nazev: 'Svíčková', duvod: 'Položka nemá ověřené přiřazení k produktu v pokladně.' }
+  const props = (akce, prepis = {}) => ({
+    zakl: { zaznam: ZAZNAM_ID, verze: 3, rozsah: 'firma' }, z, akce: new Set(akce), smiOpravit: false, maPokladnu: true,
+    pokladna: { nazev: 'Dotykačka Perla', nazevPoskytovatele: 'Dotykačka', dohledaniUctu: true, skladovyVydej: 'rucne' }, provozovna: 'Perla',
+    nahled: { polozky: [], blokace: [BLOKACE], polozek: 0, varovani: [] }, navrh: null, operace: null,
+    prevody: [{ poradi: 1, nazev: 'Svíčková', mnozstvi: '2', jednotka: 'ks', posProduktId: null, posMnozstvi: null, mapovani: 'nenamapovano' }],
+    originaly: [], duplicity: [], jednotkyProduktu: {}, muzeSchvalit: false, vydej: { externiId: null, doklad: null }, tedMs: Date.parse('2026-10-16T12:00:00Z'), jmena: {}, zona: 'Europe/Prague',
+    ...prepis,
+  })
+  const tlacitka = (html) => [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+  const TLACITKO = 'Najít produkty v pokladně (AI)'
+  const puvodniKlic = process.env.ANTHROPIC_API_KEY
+  process.env.ANTHROPIC_API_KEY = 'testovaci-klic'
+  try {
+    const s = renderToStaticMarkup(createElement(SekceSklad, props(['upravit'])))
+    ok('nepřiřazená skladová položka + právo upravit + AI zapnutá → tlačítko je na obrazovce', tlacitka(s).includes(TLACITKO))
+    const form = [...s.matchAll(/<form\b[\s\S]*?<\/form>/g)].map((m) => m[0]).find((f) => f.includes(TLACITKO)) ?? ''
+    ok('… formulář nese záznam a verzi (akce porovná verzi s databází)', form.includes(`name="zaznam" value="${ZAZNAM_ID}"`) && form.includes('name="verze" value="3"'))
+    ok('… a vysvětlení: jen návrh ke kontrole, do AI nejdou ceny ani jména', /Návrh je jen ke kontrole/.test(s) && /žádné ceny ani jména/.test(s))
+    ok('bez práva upravit tlačítko není', !tlacitka(renderToStaticMarkup(createElement(SekceSklad, props([])))).includes(TLACITKO))
+    const prirazene = props(['upravit'], { prevody: [{ poradi: 1, nazev: 'Svíčková', mnozstvi: '2', jednotka: 'ks', posProduktId: '101', posMnozstvi: '2', mapovani: 'navrh' }] })
+    ok('položka už s návrhem (jen nepotvrzená) → tlačítko není (potvrzuje se v editoru)', !tlacitka(renderToStaticMarkup(createElement(SekceSklad, prirazene))).includes(TLACITKO))
+    const bezBlokace = props(['upravit'], { nahled: { polozky: [], blokace: [], polozek: 0, varovani: [] } })
+    ok('návrh bez blokace přiřazení → tlačítko není', !tlacitka(renderToStaticMarkup(createElement(SekceSklad, bezBlokace))).includes(TLACITKO))
+    delete process.env.ANTHROPIC_API_KEY
+    ok('AI bez klíče → tlačítko není (nic se nevymýšlí)', !tlacitka(renderToStaticMarkup(createElement(SekceSklad, props(['upravit'])))).includes(TLACITKO))
+  } finally {
+    if (puvodniKlic === undefined) delete process.env.ANTHROPIC_API_KEY
+    else process.env.ANTHROPIC_API_KEY = puvodniKlic
+  }
 }
 
 console.log(chyb ? `\n${chyb} z ${kontrol} kontrol SELHALO` : `\nVšech ${kontrol} kontrol prošlo`)

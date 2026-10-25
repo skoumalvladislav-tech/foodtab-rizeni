@@ -71,7 +71,8 @@ export async function najitVPokladne(_predchozi: StavAkce, formData: FormData): 
 
   // 1. Pravidla jen nad položkami bez přiřazení.
   const poPravidlech = puvodni.map((pol) => (pol.mapovani === 'nenamapovano' ? navrhnoutMapovani(pol, katalog, aliasy).polozka : pol))
-  const pravidlaPrirazeni = poPravidlech.filter((pol, i) => puvodni[i].mapovani === 'nenamapovano' && pol.mapovani !== 'nenamapovano').length
+  // Počítají se jen řádky, které pravidla opravdu přiřadila k produktu (ne ty, které jen označila jako neskladové).
+  const pravidlaPrirazeni = poPravidlech.filter((pol, i) => puvodni[i].mapovani === 'nenamapovano' && pol.posProduktId !== null).length
 
   // 2. Zbytek do AI.
   const { podklad, mapa, bezKandidatu, vynechano } = sestavitPodklad(poPravidlech, katalog)
