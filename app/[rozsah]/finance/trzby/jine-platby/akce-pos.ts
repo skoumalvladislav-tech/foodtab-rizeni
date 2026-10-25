@@ -3,6 +3,7 @@
 import { obnovitOperaci, provestOperaci, type OperacePos, type PosProOperaci, type RepoOperaci, type VysledekOdeslani, type ZaverOperace } from '@/lib/jine-platby-pos-operace'
 import { otevritRelaciPokladny, type RelacePokladny } from '@/lib/pokladna-relace'
 import type { RelacePos } from '@/lib/pos-provider-contract'
+import { pocet } from '@/lib/sklonovani'
 import { klientUlohy } from '@/lib/supabase/uloha'
 
 import { chyba, hotovo, kalendarPobocky, obnovit, pripravit, vysledekChyby, type Pripraveno } from './[zaznam]/akce-zaklad'
@@ -495,5 +496,6 @@ export async function nacistKatalog(_predchozi: StavAkce, formData: FormData): P
     })),
   })
   if (error) return vysledekChyby(error, 'uložení katalogu')
-  return hotovo(p, `Katalog načten: ${Number(data ?? r.produkty.length)} produktů. Co v pokladně už není, je označené jako smazané.`)
+  const nacteno = Number(data ?? r.produkty.length)
+  return hotovo(p, `Z pokladny načteno: ${pocet(nacteno, 'položka', 'položky', 'položek')} katalogu (produkty i suroviny). Co v pokladně už není, je označené jako smazané.`)
 }

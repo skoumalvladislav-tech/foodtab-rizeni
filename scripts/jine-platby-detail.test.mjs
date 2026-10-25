@@ -2548,12 +2548,157 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
   tabulky.jine_platby = puvodniZaznamy
   globalThis.__jpStranka.prava = new Set(VSECHNA_PRAVA)
 
+  // 25. 10.: stáří katalogu počítá stránka (katalogJeStary nad časem aktualizace) — starý editor nabídne obnovit, čerstvý ne.
+  const puvodniKatalog = tabulky.pos_katalog
+  tabulky.pos_katalog = puvodniKatalog.map((k) => ({ ...k, aktualizovano: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() }))
+  const sKatStarym = textHtml((await vykreslit()).replace(/<!-- -->/g, ''))
+  tabulky.pos_katalog = puvodniKatalog
+  const sKatCerstvym = textHtml((await vykreslit()).replace(/<!-- -->/g, ''))
+  ok('25. 10.: stránka s katalogem načteným před 10 dny → editor řekne „obnovte ho“; s dnešním ne',
+    sKatStarym.includes('Co v pokladně přibylo potom, v něm chybí — obnovte ho.') &&
+      sKatCerstvym.includes('Katalog pokladny: 2 položky (produkty i suroviny), načteno') && !sKatCerstvym.includes('obnovte ho'))
+
   if (process.env.NAHLED) {
     const { writeFileSync } = await import('node:fs')
     const css = new URL('../app/globals.css', import.meta.url).href
     writeFileSync(process.env.NAHLED, `<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="${css}"><style>.jp-original img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--line);background:var(--sunken);min-height:120px}</style></head><body style="background:var(--paper);color:var(--ink);margin:0"><main class="ft-main">${html}</main></body></html>`)
     console.log(`    náhled zapsán: ${process.env.NAHLED}`)
   }
+}
+
+/* =====================================================================
+ * 12. KATALOG POKLADNY V EDITORU (25. 10. 2026)
+ *
+ * Majitel na záznamu bez načteného katalogu nenašel, jak položku
+ * přiřadit: tlačítko „Načíst katalog z pokladny“ stálo až pod celým
+ * editorem. Teď je načtení nahoře v editoru i u každé položky, prázdný
+ * katalog se načte sám (nejvýš jednou za hodinu z prohlížeče), starý se
+ * nabídne obnovit a text říká „produkty a suroviny z pokladny“.
+ * ===================================================================== */
+
+console.log('\n== 12. Katalog pokladny v editoru návrhu ==')
+{
+  const L = await import(`../${ZAZNAM}/logika.ts`)
+  const DEN = 24 * 60 * 60 * 1000
+  const ted = Date.parse('2026-10-25T12:00:00Z')
+
+  // Stáří katalogu.
+  ok('katalogJeStary: bez času aktualizace (nikdy nenačtený) → ne', L.katalogJeStary(null, ted) === false)
+  ok('katalogJeStary: nečitelný čas → ne (nic se nedomýšlí)', L.katalogJeStary('včera', ted) === false)
+  ok(`katalogJeStary: načtený před 6 dny → ne, před 8 dny → ano (hranice ${L.KATALOG_STARY_PO_DNECH} dní)`,
+    L.KATALOG_STARY_PO_DNECH === 7 && L.katalogJeStary(new Date(ted - 6 * DEN).toISOString(), ted) === false && L.katalogJeStary(new Date(ted - 8 * DEN).toISOString(), ted) === true)
+
+  // Samočinné načtení prázdného katalogu: jen když dává smysl a ne při každém zobrazení.
+  const sam = (prepis = {}) => L.nacistKatalogSam({ umi: true, chybaCteni: false, pocet: 0, polozekProSklad: 1, posledniPokusMs: null, tedMs: ted, ...prepis })
+  ok('nacistKatalogSam: prázdný katalog, pokladna ho umí, položka pro sklad, ještě nezkoušeno → ano', sam() === true)
+  ok('nacistKatalogSam: katalog už něco má → ne (starý se jen nabídne)', sam({ pocet: 1 }) === false)
+  ok('nacistKatalogSam: pokladna katalog neposílá → ne', sam({ umi: false }) === false)
+  ok('nacistKatalogSam: katalog nejde přečíst z databáze → ne (načtení z pokladny by to nespravilo)', sam({ chybaCteni: true }) === false)
+  ok('nacistKatalogSam: žádná položka se skladu netýká → ne (pokladna se zbytečně neptá)', sam({ polozekProSklad: 0 }) === false)
+  ok('nacistKatalogSam: pokus si nejde zapamatovat (úložiště prohlížeče vypnuté) → ne', sam({ posledniPokusMs: 'nelze' }) === false)
+  ok('nacistKatalogSam: zkoušeno před 10 min → ne; před 61 min → ano (odstup 1 h)',
+    L.KATALOG_SAM_NEJDRIV_ZA_MS === 60 * 60 * 1000 && sam({ posledniPokusMs: ted - 10 * 60 * 1000 }) === false && sam({ posledniPokusMs: ted - 61 * 60 * 1000 }) === true)
+  ok('nacistKatalogSam: nečitelný zapamatovaný čas → ano (přepíše se platným)', sam({ posledniPokusMs: Number('x') }) === true)
+
+  // Suroviny: Dotykačka posílá prodávané produkty i suroviny v jednom /products — nic se cestou nevyřadí.
+  const { naparsovatProdukty } = await import('../lib/pokladna-dotykacka-sklad.ts')
+  const zDotykacky = naparsovatProdukty({
+    data: [
+      { id: '101', name: 'Pivo Bernard 0,5', unit: 'Piece', stockDeduct: true, deleted: false },
+      { id: '202', name: 'Mouka hladká', unit: 'Kilogram', stockDeduct: true, deleted: false },
+      { id: '303', name: 'Svíčková na smetaně', unit: 'Piece', stockDeduct: false, deleted: false },
+    ],
+  })
+  ok('suroviny: stránka katalogu Dotykačky → produkty i surovina (Mouka hladká, stockDeduct) bez vyřazení',
+    Array.isArray(zDotykacky) && zDotykacky.map((p) => p.externiId).join(',') === '101,202,303')
+  const katalog = (zDotykacky ?? []).map((p) => ({ externiId: p.externiId, nazev: p.nazev, jednotka: L.jednotkaCesky(p.jednotka) || null, mira: p.mira }))
+  ok('hledání: „mouka“ najde surovinu', L.hledatVKatalogu(katalog, 'mouka').map((k) => k.externiId).join() === '202')
+  ok('hledání: bez diakritiky a velkými („HLADKA“, „SVICKOVA“) najde „Mouka hladká“ i „Svíčková na smetaně“',
+    L.hledatVKatalogu(katalog, '  HLADKA ').map((k) => k.externiId).join() === '202' && L.hledatVKatalogu(katalog, 'SVICKOVA').map((k) => k.externiId).join() === '303')
+  ok('hledání: „svíčk“ najde prodávaný pokrm, „piv“ pivo; prázdné hledání = celý katalog (produkty i suroviny)',
+    L.hledatVKatalogu(katalog, 'svíčk').map((k) => k.externiId).join() === '303' && L.hledatVKatalogu(katalog, 'piv').map((k) => k.externiId).join() === '101' && L.hledatVKatalogu(katalog, '').length === 3)
+
+  // Vykreslení editoru.
+  const Editor = await nactiKomponentu(`${ZAZNAM}/editor-navrhu.tsx`, KRESLENI)
+  const pol = (prepis = {}) => ({
+    id: 'PL1', nazevPuvodni: 'Pivo 0,5', nazev: 'Pivo 0,5', mnozstvi: '2', jednotka: 'ks', cenaJ: '45', cenaC: '90', dph: '21', druh: 'rozlevany_napoj',
+    produkt: '', posProduktNazev: null, posMnozstvi: null, mapovani: 'nenamapovano', zdroj: 'ai', jistota: 0.9, vyzadujeKontrolu: false, duvodKontroly: '', kandidati: [], ...prepis,
+  })
+  const hl = { datum: '2026-10-25', oznaceni: '', mena: 'CZK', castka: '90', castkaPuvod: 'doklad', typ: 'uzavreny_prodej', externi: '', kontaktId: '' }
+  const nacist = async () => ({ stav: 'nic', text: '' })
+  const kp = (prepis = {}) => ({ pripojeni: 'P1', umi: true, aktualizovano: null, stary: false, chyba: null, nacist, ...prepis })
+  // Bez značek <!-- --> mezi sousedními texty JSX — věty se pak dají hledat celé.
+  const bezZnacek = (h) => h.replace(/<!-- -->/g, '')
+  const editor = (props) =>
+    bezZnacek(renderToStaticMarkup(createElement(Editor, { akce: nacist, ...zakl, hlavicka: hl, polozky: [pol()], katalog: [], kontakty: null, mena: 'CZK', ...props })))
+  const NACIST = 'Načíst produkty a suroviny z pokladny'
+  const tlacitkoHtml = (html, text) => [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].filter((m) => textHtml(m[1]).trim() === text).map((m) => m[0])
+
+  const prazdny = editor({ polozky: [pol(), pol({ id: 'PL2', nazev: 'Obsluha', druh: 'sluzba' }), pol({ id: 'PL3', nazev: 'Rum', produkt: 'X9' })], katalogPokladny: kp() })
+  const tp = textHtml(prazdny)
+  ok('bez katalogu: nahoře v editoru věta „Produkty a suroviny z pokladny ještě nejsou načtené“ a tlačítko — PŘED údaji dokladu',
+    tp.includes('Produkty a suroviny z pokladny ještě nejsou načtené') && tp.indexOf(NACIST) > -1 && tp.indexOf(NACIST) < tp.indexOf('Údaje dokladu'))
+  ok('bez katalogu: tlačítko je nahoře + u každé položky pro sklad (2), u služby ne → 3', tlacitkoHtml(prazdny, NACIST).length === 3)
+  ok('bez katalogu: všechna tlačítka načtení jsou type="button" — nikdy neodešlou formulář návrhu (rozepsané položky zůstanou)',
+    tlacitkoHtml(prazdny, NACIST).every((b) => /\btype="button"/.test(b) && !/type="submit"/.test(b)))
+  ok('bez katalogu: u položky věta „přiřazení zatím nejde“ s tlačítkem, stará věta „Katalog pokladny není načtený“ zmizela',
+    tp.includes('Produkty a suroviny z pokladny ještě nejsou načtené — přiřazení zatím nejde, a proto ani skladový výdej.') && !tp.includes('Katalog pokladny není načtený'))
+  ok('bez katalogu: už přiřazený produkt položky se při uložení neztratí (skryté pole)', /<input type="hidden" name="p_r2_produkt" value="X9"\/>/.test(prazdny))
+
+  const sKatalogem = editor({ katalog, katalogPokladny: kp({ aktualizovano: { iso: '2026-10-25T10:00:00Z', text: '25. 10. 2026 12:00' } }) })
+  const tk = textHtml(sKatalogem)
+  ok('s katalogem: popisky „Hledat v produktech a surovinách pokladny“ a „Produkt nebo surovina v pokladně“',
+    tk.includes('Hledat v produktech a surovinách pokladny') && tk.includes('Produkt nebo surovina v pokladně'))
+  ok('s katalogem: v nabídce je i surovina (Mouka hladká) vedle produktů', /<option value="202">Mouka hladká \(kg\)<\/option>/.test(sKatalogem) && /<option value="101">/.test(sKatalogem))
+  ok('s katalogem: nahoře „Katalog pokladny: 3 položky (produkty i suroviny), načteno …“ a „Obnovit katalog z pokladny“, žádné „Načíst“',
+    tk.includes('Katalog pokladny: 3 položky (produkty i suroviny), načteno 25. 10. 2026 12:00.') && tlacitkoHtml(sKatalogem, 'Obnovit katalog z pokladny').length === 1 && !tk.includes(NACIST))
+  ok('s katalogem (čerstvým): bez výzvy k obnovení', !tk.includes('obnovte ho'))
+  ok('s katalogem: hledání má id pro fokus po načtení u položky', new RegExp(`id="${ZAZNAM_ID}-r0-hledat"`).test(sKatalogem))
+
+  const stary = textHtml(editor({ katalog, katalogPokladny: kp({ stary: true, aktualizovano: { iso: '2026-10-01T10:00:00Z', text: '1. 10. 2026 12:00' } }) }))
+  ok('starý katalog: výzva „Co v pokladně přibylo potom, v něm chybí — obnovte ho.“ s tlačítkem obnovení',
+    stary.includes('načteno 1. 10. 2026 12:00. Co v pokladně přibylo potom, v něm chybí — obnovte ho.') && stary.includes('Obnovit katalog z pokladny'))
+
+  const chybaCteni = editor({ katalogPokladny: kp({ chyba: 'Katalog pokladny má víc než 20 stránek.' }) })
+  ok('katalog nejde přečíst: hláška role=alert nahoře v editoru, žádné tlačítko načtení (nespravilo by to)',
+    /role="alert"[^>]*>Katalog pokladny má víc než 20 stránek\. Přiřazení k produktům a surovinám pokladny teď nejde/.test(chybaCteni) &&
+      tlacitkoHtml(chybaCteni, NACIST).length === 0 && textHtml(chybaCteni).includes('Katalog pokladny se teď nepodařilo přečíst (viz nahoře)'))
+
+  const neumi = textHtml(editor({ katalogPokladny: kp({ umi: false }) }))
+  ok('pokladna katalog neposílá: vysvětlení nahoře i u položky, žádné tlačítko',
+    neumi.includes('Tahle pokladna katalog neposílá — položky přiřazujte') && neumi.includes('Tahle pokladna katalog neposílá — k produktu ani surovině') && !neumi.includes(NACIST) && !neumi.includes('Obnovit katalog'))
+
+  const bezPokladny = textHtml(editor({ katalogPokladny: null }))
+  ok('záznam bez pokladny: u položky „Záznam nemá pokladnu“, žádný blok katalogu ani tlačítko',
+    bezPokladny.includes('Záznam nemá pokladnu — k produktu ani surovině pokladny se položka nepřiřazuje.') && !bezPokladny.includes(NACIST) && !bezPokladny.includes('Katalog pokladny:'))
+
+  // Stav editoru při načtení katalogu: verze záznamu se nemění, z nové stránky se převezmou jen kandidáti.
+  const se = zdroj(`${ZAZNAM}/editor-navrhu.tsx`)
+  ok('editor: nový katalog při stejné verzi převezme u uložených položek JEN kandidáty (rozepsané hodnoty zůstanou)',
+    /\} else if \(katalogKlic !== katalogDat\) \{\n\s*setKatalogDat\(katalogKlic\)\n\s*setRadky\(\(rs\) =>\n\s*rs\.map\(\(r\) => \{\n\s*const p = r\.id \? polozky\.find\(\(x\) => x\.id === r\.id\) : undefined\n\s*return p \? \{ \.\.\.r, kandidati: p\.kandidati \} : r\n/.test(se))
+  ok('editor: celé položky se ze stránky načtou znovu jen při nové verzi záznamu', (se.match(/setRadky\(polozky\.map\(doRadku\)\)/g) ?? []).length === 1 && /if \(verze !== verzeDat\) \{[^}]*setRadky\(polozky\.map\(doRadku\)\)/.test(se))
+  ok('editor: samočinné načtení si pokus zapíše DŘÍV, než se do pokladny zeptá, a bez zápisu nenačítá',
+    /window\.localStorage\.setItem\(klic, String\(tedMs\)\)\n\s*\} catch \{\n\s*return\n\s*\}\n\s*autoKatalog\.current = true\n\s*startTransition\(\(\) => nacistKatalogAkce\(dataKatalogu\(zaznam, verze, rozsah, 'sam'\)\)\)/.test(se))
+  const pos = funkce(zdroj(`${KOREN}/akce-pos.ts`)).find((f) => f.jmeno === 'nacistKatalog')
+  const mig = readFileSync('supabase/migrations/20261016100000_jine_platby.sql', 'utf8')
+  const nahradit = mig.slice(mig.indexOf('create function public.pos_katalog_nahradit'), mig.indexOf('end $$;', mig.indexOf('create function public.pos_katalog_nahradit')))
+  ok('načtení katalogu verzi záznamu nemění: akce volá jen pos_katalog_nahradit a ta na jine_platby nesahá (editor se proto nevyresetuje)',
+    pos !== undefined && rpcV(pos.telo).join() === 'pos_katalog_nahradit' && nahradit.length > 500 && !/jine_platby/.test(nahradit))
+
+  // Sekce Kontrola: s editorem je katalog jen nahoře v editoru (žádné druhé tlačítko pod ním).
+  const STUB_AKCE_AI = js("export async function rozpoznat() { return { stav: 'nic', text: '' } }")
+  const SekceKontrola12 = await nactiKomponentu(`${ZAZNAM}/sekce-kontrola.tsx`, [...KRESLENI, ['../akce-ai', STUB_AKCE_AI]])
+  const sekce = (akce, katalogSekce) =>
+    bezZnacek(renderToStaticMarkup(createElement(SekceKontrola12, {
+      zakl, z: zaznam({ stavKontroly: 'ke_kontrole' }), akce: new Set(akce), smiUpravit: true, editor: { hlavicka: hl, polozky: [pol()], katalog: [], kontakty: null },
+      polozky: [], rozpoznani: null, kontrolaRozpoznani: null, coZkontrolovat: [], nesoulad: null, ai: { zapnuto: false, pocetSouboru: 0 }, katalog: katalogSekce, zona: 'Europe/Prague',
+    })))
+  const sEd = sekce(['upravit'], { umi: true, pocet: 0, aktualizovano: null, stary: false, chyba: null })
+  ok('Kontrola s editorem: načtení katalogu nahoře + u položky (2×), staré „Načíst katalog z pokladny“ pod editorem není',
+    tlacitkoHtml(sEd, NACIST).length === 2 && !tlacitka(sEd).includes('Načíst katalog z pokladny') && !textHtml(sEd).includes('zatím nenačtený'))
+  const bezEd = textHtml(sekce([], { umi: true, pocet: 1234, aktualizovano: '2026-10-25T10:00:00Z', stary: false, chyba: null }))
+  ok('Kontrola bez editoru: jen přehled „Katalog pokladny (produkty a suroviny): 1234 položek“, bez tlačítka',
+    bezEd.includes('Katalog pokladny (produkty a suroviny): 1234 položek, aktualizováno') && !bezEd.includes(NACIST))
 }
 
 console.log(chyb ? `\n${chyb} z ${kontrol} kontrol SELHALO` : `\nVšech ${kontrol} kontrol prošlo`)
