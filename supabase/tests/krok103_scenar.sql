@@ -330,16 +330,20 @@ select pg_temp.check('nový pokus s provozovnou 31, přiřazení teď dává 33 
   (select externi_provozovna = '31' from public.pos_operace where id = :'op_e2')
   and :'zah_e3'::jsonb ->> 'stav' = 'nelze' and (:'zah_e3'::jsonb ->> 'duvod') like '%se od schválení výdeje změnila%');
 
--- Filtry app.jp_provozovna_vydeje: firma a odpojení (každý zvlášť).
+-- Filtry app.jp_provozovna_vydeje: firma, pobočka pokladny a odpojení (každý zvlášť).
+-- Pokladna POBOČKY Perla má v přiřazení navíc provozovnu 36 pro Bar — kdyby
+-- funkce nehlídala pobočku pokladny, záznam Baru by ji dostal.
 update public.integrace_pripojeni
-   set externi_ucet = jsonb_build_object('provozovny', jsonb_build_array(jsonb_build_object('id', '31', 'nazev', 'Perla výčep', 'branch_id', :'perla')))
+   set externi_ucet = jsonb_build_object('provozovny', jsonb_build_array(
+     jsonb_build_object('id', '31', 'nazev', 'Perla výčep', 'branch_id', :'perla'),
+     jsonb_build_object('id', '36', 'nazev', 'Bar omylem', 'branch_id', :'bar')))
  where id = :'pos_pob';
 select pg_temp.check('provozovna záznamu E (kontrola, že funkce vrací hodnotu): 31',
   (select app.jp_provozovna_vydeje(z) = '31' from public.jine_platby z where id = :'ze'));
 select pg_temp.check('záznam s firmou, které pokladna nepatří → žádná provozovna (filtr firmy)',
   (select app.jp_provozovna_vydeje(jsonb_populate_record(z, jsonb_build_object('tenant_id', :'tenant_b'))) is null
      from public.jine_platby z where id = :'ze'));
-select pg_temp.check('záznam jiné pobočky u pokladny Perly → žádná (pokladna pobočky obsluhuje jen svou pobočku)',
+select pg_temp.check('záznam Baru u pokladny pobočky Perla → žádná, i když přiřazení provozovnu 36 Baru dává (pokladna pobočky obsluhuje jen svou pobočku)',
   (select app.jp_provozovna_vydeje(jsonb_populate_record(z, jsonb_build_object('branch_id', :'bar'))) is null
      from public.jine_platby z where id = :'ze'));
 update public.integrace_pripojeni set odpojeno_kdy = now() where id = :'pos_pob';

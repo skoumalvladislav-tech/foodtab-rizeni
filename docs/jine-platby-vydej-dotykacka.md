@@ -2,7 +2,7 @@
 
 Stav k 25. 10. 2026. Navazuje na `docs/jine-platby-navrh.md` (oddíly 3.5,
 3.6 a 7) a `docs/jine-platby-pos-operace.md`. Otázky jsou
-v `docs/hlaseni/otazky.md` (54 a 71–74).
+v `docs/hlaseni/otazky.md` (54 a 71–75).
 
 **Zadání Šéfíka:** „AI najde v pokladně odpovídající položky a ty odečte ze
 skladu, respektive množství uvedené na účtence či papíře. Je potřeba si projít
@@ -24,9 +24,9 @@ dokumentaci k Dotykačce, jak by toto mohlo jít udělat.“
    „5 kg mouky“ → 5 kg u suroviny vedené v kilogramech. Co převést nejde,
    jde ke kontrole.
 4. **Pokrm s recepturou** se odepíše jako pokrm a suroviny odečte pokladna
-   podle své receptury. Nově si appka receptury z katalogu přečte, takže
-   ukáže, co se odečte, a upozorní, když je stejná surovina na dokladu
-   ještě jednou zvlášť.
+   podle své receptury. Nově si appka receptury z katalogu přečte a jménem
+   upozorní, když je surovina pokrmu na dokladu ještě jednou zvlášť
+   (smetana ke svíčkové) — jinak by se odečetla dvakrát.
 5. **Do ostré Dotykačky se zatím nic nezapisuje.** Zápis je v kódu vypnutý
    seznamem provozoven, který je prázdný. Zapnout ho jde jen změnou kódu
    po ověření na testovacím cloudu a po výslovném pokynu (otázka 54).
@@ -185,14 +185,20 @@ katalogu jde do zprávy označený jako data, ne pokyn.
 
 ### 3.3 Co AI vrací (strukturovaný výstup, bez unií a nepovinných polí — PR #154)
 
-`{ prirazeni: [{ polozka: číslo, kod: "K3" | "", jistota: "vysoka" | "stredni" | "nizka", duvod: text }] }`
-— 0 parametrů s unií, 0 nepovinných (strop 16 / 24 na požadavek). Prázdný
-kód = AI nic vhodného nenašla, položka zůstane nepřiřazená.
+`{ prirazeni: [{ polozka: číslo, kod: "K3" nebo "", jistota: text, duvod: text }] }`
+— 0 parametrů s unií, 0 nepovinných (strop 16 / 24 na požadavek; hlídá
+`scripts/jine-platby-ai-parovani.test.mjs` nad hotovým JSON schématem).
+Prázdný kód = AI nic vhodného nenašla, položka zůstane nepřiřazená.
+`jistota` je v schématu prostý text, protože pomocník SDK výčet do schématu
+pro API nepřenese. Appka ho převede na vysoká / střední / nízká, neznámé
+slovo bere jako nízkou.
 
-Výsledek je vždy jen **`navrh`** s důvodem „Návrh AI (jistota …): …“ v
-poznámce ke kontrole. Při nízké jistotě se položka navíc označí „ke
-kontrole“, takže ji výdej nepustí, dokud ji člověk neprojde. AI nikdy
-nenastaví `overeno`, nemění množství, název ani druh.
+Výsledek je vždy jen **`navrh`**. Řádek navíc dostane důvod ke kontrole
+„Přiřazení navrhla AI: „Svíčková na smetaně“ (jistota vysoká) — …. Ověřte
+ho“. Výdej ho nepustí, dokud člověk řádek neověří („Řádek jsem ověřil(a)“)
+a přiřazení nepotvrdí („Přiřazení je správné“). AI nikdy nenastaví
+`overeno`, nemění množství, název, cenu ani druh. Položky, které už mají
+návrh nebo ověřené přiřazení (třeba je vybral člověk), akce nemění.
 
 ### 3.4 Receptury v katalogu
 
@@ -200,13 +206,18 @@ nenastaví `overeno`, nemění množství, název ani druh.
 aplikace nemá právo (403), načte katalog znovu bez receptur
 (`ma_recepturu` = null jako dnes) a řekne to. S recepturami:
 
-- `ma_recepturu` je ano/ne místo „neví“;
+- `ma_recepturu` je ano/ne místo „neví“ (odvozuje ho databáze z `suroviny`,
+  jeden zdroj pravdy). „Bez receptury“ vznikne jen z prázdného pole
+  `ingredients`. Chybějící klíč nebo nečitelná surovina = „neví se“,
+  protože pokrm se `stockDeduct: false` a bez receptury by jinak z výdeje
+  vypadl;
 - `pos_katalog.suroviny` = `[{produkt, mnozstvi, jednotka}]` (nový sloupec);
-- náhled výdeje (`jine_platby_sestavit_vydej`) nově pozná, když kusové zboží
-  ve výdeji je **surovinou pokrmu ze stejného výdeje** (smetana ke svíčkové),
-  a varování to řekne konkrétně. Schválení pak dál chce výslovné potvrzení
-  `p_bez_surovin`. Když receptury všech pokrmů ve výdeji známe a žádná
-  surovina se neopakuje, obecné varování odpadne.
+- náhled výdeje (`jine_platby_sestavit_vydej`) nově pozná, když položka
+  výdeje (zboží i rozlévaný nápoj) je **surovinou jiné položky téhož výdeje**
+  (smetana ke svíčkové, rum ke koktejlu), a varování to řekne jménem.
+  Schválení pak dál chce výslovné potvrzení `p_bez_surovin`. Obecné
+  varování „pokrm i kusové zboží“ zůstává jen u pokrmu, jehož recepturu
+  appka nezná. Otisk výdeje se nemění (receptury do něj nepatří).
 
 ### 3.5 Převod množství (beze změny, `prevestNaJednotkyPos`)
 
@@ -245,14 +256,18 @@ hlídá, že seznam je prázdný. Kdo ho naplní, musí vědomě změnit i test.
 
 Co tahle PR přidává (všechno pod vypínačem, do pokladny nic neodejde):
 
-| Část | Kde |
-|---|---|
-| Přiřazení položek přes AI (tlačítko „Najít v pokladně (AI)“ u výdeje), denní strop 100 na firmu a 10 na záznam | `lib/jine-platby-ai-parovani*.ts`, `akce-parovani.ts`, `sekce-sklad.tsx`, migrace |
-| Receptury z katalogu, konkrétní varování „surovina pokrmu ve stejném výdeji“ | `cteniDotykacky().katalog`, `pos_katalog.suroviny`, `app.jp_sestavit_vydej` |
-| Provozovna u pokladny připojené k pobočce: doplní ji databáze při zabrání z aktuálního přiřazení, nula nebo víc provozoven = neodešle se | `pos_operace_zahajit`, `app.jp_provozovna_vydeje` |
-| Kontrola manifestu před odesláním (licence `posAction`, `stockDeductionMode` ≠ `disabled`) | `odeslatVydejDotykacka` |
-| Porovnání položek účtu s výdejem po zápisu | `porovnatPolozkyVydeje` |
-| Vypínač v kódu | `lib/pokladna-dotykacka-zapis.ts` |
+| Část | Kde | Ověřeno |
+|---|---|---|
+| Přiřazení položek přes AI (tlačítko „Najít produkty v pokladně (AI)“ v panelu Sklad, když návrh výdeje blokuje nepřiřazená položka), denní strop 10 na záznam a 100 na firmu | `lib/jine-platby-ai-parovani*.ts`, `akce-parovani.ts`, `sekce-sklad.tsx`, tabulka `jine_platby_ai_parovani` | `scripts/jine-platby-ai-parovani.test.mjs` (51), scénář krok103 (oddíl 5) |
+| Receptury z katalogu, konkrétní varování „surovina pokrmu ve stejném výdeji“ | `cteniDotykacky().katalog`, `pos_katalog.suroviny`, `app.jp_sestavit_vydej` | `scripts/pokladna-dotykacka-sklad.test.mjs`, krok103 (oddíly 2–3) |
+| Provozovna u pokladny připojené k pobočce: doplní ji databáze při zabrání z aktuálního přiřazení, nula nebo víc provozoven = neodešle se; přeřazená provozovna = neodešle se | `pos_operace_zahajit`, `app.jp_provozovna_vydeje` | krok103 (oddíl 4) |
+| Kontrola manifestu před odesláním (licence `posAction`, `stockDeductionMode` ≠ `disabled`) | `odeslatVydejDotykacka` | `scripts/pokladna-dotykacka-sklad.test.mjs` |
+| Porovnání položek účtu s výdejem po zápisu | `porovnatPolozkyVydeje` | `scripts/jine-platby-pos-operace.test.mjs` |
+| Vypínač v kódu (zápis jen pro provozovnu ze seznamu, i schopnost „api“ jen pro ni) | `lib/pokladna-dotykacka-zapis.ts`, `schopnostVydeje` | `scripts/pokladna-dotykacka-sklad.test.mjs`, `scripts/jine-platby-detail.test.mjs` |
+
+Migrace `20261025230000_jine_platby_vydej_dotykacka.sql` (bez `db push`).
+Živě nic z toho neběželo — testy jedou na podvržených odpovědích podle
+dokumentace a nad PGlite.
 
 ## 6. Než se zápis zapne (testovací cloud, pak pokyn)
 
