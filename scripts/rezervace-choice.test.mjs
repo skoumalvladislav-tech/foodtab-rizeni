@@ -892,5 +892,94 @@ console.log('\n== 8. Do Choice se nezapisuje; nastavení ==\n')
     /zkusPristupRezervacim\(/.test(cti('app/[rozsah]/rezervace/napojeni/page.tsx')) && /export const maxDuration = 60/.test(cti('app/[rozsah]/rezervace/napojeni/page.tsx')))
 }
 
+/* ===================================================================== */
+console.log('\n== 9. Karta Choice (vykreslená komponenta) ==\n')
+{
+  const { createElement } = await import('react')
+  const { renderToStaticMarkup } = await import('react-dom/server')
+  const REACT = JSON.stringify(import.meta.resolve('react'))
+  const Karta = (await nactiModul('app/[rozsah]/rezervace/napojeni/choice-karta.tsx', [
+    ['next/link', js(`import { createElement } from ${REACT}\nexport default function Link({ href, children, ...z }) { return createElement("a", { href, ...z }, children) }`)],
+    ['../akce', js('export async function nacistChoiceTed() {}\nexport async function odpojitNapojeni() {}\nexport async function overitChoice() {}\nexport async function pripojitChoice() {}')],
+    ['../../vzkazy/tlacitko-odeslat', js(`import { createElement } from ${REACT}\nexport default function T({ children, className }) { return createElement("button", { type: "submit", className }, children) }`)],
+  ])).ChoiceKarta
+
+  const P1 = { id: POBOCKA, nazev: 'Černá Perla', slug: 'cerna-perla', zona: 'Europe/Prague', zapis: true }
+  const P2 = { id: 'bbbbbbbb-0000-0000-0000-000000000077', nazev: 'Bernard', slug: 'bernard', zona: 'Europe/Prague', zapis: false }
+  const napojeni = (x) => ({ id: ID_PRIPOJENI, branch_id: POBOCKA, poskytovatel: 'choice', stav: 'pripojeno', nazev: 'Choice — cerna-perla.choiceqr.com',
+    posledni_test_kdy: '2026-10-25T19:00:00Z', posledni_sync_kdy: '2026-10-25T19:30:00Z', posledni_sync_pocet_radku: 37, posledni_chyba: null, ...x })
+  const vykreslit = (props) => renderToStaticMarkup(createElement(Karta, { rozsah: 'cerna-perla', pobocky: [P1, P2], napojeni: [], nastaveno: true, spravaPobocek: [POBOCKA, P2.id], ...props }))
+  const text = (html) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+
+  const nenastaveno = vykreslit({ nastaveno: false })
+  ok('bez klíčů na serveru: „Čeká na nastavení“ s názvy proměnných, žádné připojení',
+    text(nenastaveno).includes('Čeká na nastavení') && nenastaveno.includes('CHOICE_CLIENT_ID') && !nenastaveno.includes('name="podnik"') && !text(nenastaveno).includes('Připojit podnik'))
+  ok('… a nikde „Připojeno“', !text(nenastaveno).includes('Připojeno'))
+
+  const formular = vykreslit({})
+  ok('správce: formulář s adresou podniku, výběrem pobočky a tlačítkem „Připojit podnik v Choice“',
+    formular.includes('name="podnik"') && formular.includes('name="pobocka"') && formular.includes('name="rozsah" value="cerna-perla"')
+    && text(formular).includes('Připojit podnik v Choice') && text(formular).includes('api@choiceqr.com'))
+
+  const pripojeno = vykreslit({ napojeni: [napojeni({})] })
+  ok('připojený Choice: „Připojeno“, čas a počet posledního načtení, Načíst teď, Ověřit znovu, Odpojit',
+    text(pripojeno).includes('Připojeno') && text(pripojeno).includes('naposledy načteno') && text(pripojeno).includes('37 rezervací')
+    && text(pripojeno).includes('Načíst teď') && text(pripojeno).includes('Ověřit znovu') && text(pripojeno).includes('Odpojit'))
+  ok('… pobočku s připojeným Choice formulář znovu nenabízí (zbyde Bernard)',
+    (pripojeno.match(/<option /g) ?? []).length === 0 && pripojeno.includes(`name="pobocka" value="${P2.id}"`))
+
+  const chyba = vykreslit({ napojeni: [napojeni({ stav: 'vyzaduje_pozornost', posledni_chyba: 'Choice odmítl přístup (401). Připojte podnik znovu.' })] })
+  ok('chyba u napojení se ukáže a „Načíst teď“ ne (neověřené)', text(chyba).includes('Choice odmítl přístup (401)') && !text(chyba).includes('Načíst teď')
+    && !text(chyba).includes('Připojeno') && text(chyba).includes('Vyžaduje pozornost'))
+
+  const ceka = vykreslit({ napojeni: [napojeni({ stav: 'pripojuje_se', posledni_sync_kdy: null, posledni_test_kdy: null })] })
+  ok('rozjeté připojení: „Čeká na povolení v Choice“, bez Ověřit znovu', text(ceka).includes('Čeká na povolení v Choice') && !text(ceka).includes('Ověřit znovu'))
+
+  const obsluha = vykreslit({ napojeni: [napojeni({})], spravaPobocek: [] })
+  ok('kdo jen zapisuje rezervace: Načíst teď ano, Ověřit/Odpojit/připojit ne',
+    text(obsluha).includes('Načíst teď') && !text(obsluha).includes('Ověřit znovu') && !text(obsluha).includes('Odpojit') && !obsluha.includes('name="podnik"'))
+  const ctenar = vykreslit({ napojeni: [napojeni({})], spravaPobocek: [], pobocky: [{ ...P1, zapis: false }] })
+  ok('kdo jen čte: žádné tlačítko', !text(ctenar).includes('Načíst teď') && !ctenar.includes('<form'))
+
+  // Celá obrazovka Napojení: karta Choice je v ní a obecné „Připravit
+  // napojení“ Choice nenabízí (vlastní karta, jinak by vznikla druhá,
+  // nikdy neověřitelná karta téhož systému).
+  const AKCE_NAPOJENI = js([
+    'nacistChoiceTed', 'odpojitNapojeni', 'overitChoice', 'pripojitChoice', 'pripravitNapojeni', 'vydatKlicPrijmuRezervaci', 'importovatSoubor',
+  ].map((f) => `export async function ${f}() {}`).join('\n'))
+  const NapojeniObsah = (await nactiModul('app/[rozsah]/rezervace/napojeni/obsah.tsx', [
+    ['next/link', js(`import { createElement } from ${REACT}\nexport default function Link({ href, children, ...z }) { return createElement("a", { href, ...z }, children) }`)],
+    ['../akce', AKCE_NAPOJENI],
+    ['../prvky', js('export function HlaskaAkce() { return null }\nexport function ZalozkyRezervaci() { return null }')],
+    ['../../vzkazy/tlacitko-odeslat', js(`import { createElement } from ${REACT}\nexport default function T({ children, className }) { return createElement("button", { type: "submit", className }, children) }`)],
+  ])).NapojeniObsah
+  const obrazovka = renderToStaticMarkup(createElement(NapojeniObsah, {
+    rozsah: 'cerna-perla', pobocky: [P1], napojeni: [napojeni({})], smiSpravovat: true, spravaPobocek: [POBOCKA], choiceNastaveno: true,
+    adresaPrijmu: 'https://foodtab-rizeni.vercel.app/api/rezervace/prijem',
+  }))
+  const vyber = obrazovka.slice(obrazovka.indexOf('name="system"'), obrazovka.indexOf('</select>', obrazovka.indexOf('name="system"')))
+  ok('obrazovka Napojení má kartu Choice s připojeným podnikem', text(obrazovka).includes('Choice — rezervace načítané přímo') && text(obrazovka).includes('Choice — cerna-perla.choiceqr.com'))
+  ok('„Připravit napojení“ Choice nenabízí (jiné systémy ano)', vyber.length > 0 && !vyber.includes('value="choice"') && vyber.includes('value="thefork"'))
+  ok('v přehledu systémů má Choice „napojení hotové“', /Choice<\/h3>[\s\S]{0,400}napojení hotové/.test(obrazovka))
+  const prime = obrazovka.slice(obrazovka.indexOf('Přímé napojení na rezervační systém'), obrazovka.indexOf('Které systémy jde napojit'))
+  ok('připojený Choice se v „Přímém napojení“ neukazuje podruhé',
+    prime.includes('Zatím žádné napojení') && !prime.includes('<strong>Choice</strong>') && (text(obrazovka).match(/Choice — cerna-perla\.choiceqr\.com/g) ?? []).length === 1)
+}
+
+/* ===================================================================== */
+console.log('\n== 10. Každý kód hlášky má text ==\n')
+{
+  const prvky = cti('app/[rozsah]/rezervace/prvky.tsx')
+  const hlasky = prvky.slice(prvky.indexOf('export function HlaskaAkce'))
+  const kody = new Set()
+  for (const f of ['app/[rozsah]/rezervace/akce.ts', 'app/api/rezervace/choice/callback/route.ts']) {
+    for (const m of cti(f).matchAll(/'(choice-[a-z-]+)'/g)) kody.add(m[1])
+    for (const m of cti(f).matchAll(/\?\s*'(choice-[a-z-]+)'\s*:\s*'(choice-[a-z-]+)'/g)) { kody.add(m[1]); kody.add(m[2]) }
+  }
+  ok(`našly se kódy hlášek Choice (${kody.size})`, kody.size >= 15)
+  const bezTextu = [...kody].filter((k) => !hlasky.includes(`'${k}':`))
+  ok(`každý kód z akcí a callbacku má v HlaskaAkce text${bezTextu.length ? ' — chybí: ' + bezTextu.join(', ') : ''}`, bezTextu.length === 0)
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)
