@@ -1,5 +1,11 @@
 # Stav k 25. 10. 2026 — zdvojené zálohy: jedna záloha se teď nezapíše dvakrát
 
+> **DOPLNĚNO 25. 10. večer: NASAZENO.** PR #156 sloučený do `main`
+> (`a2ae143`), Šéfík spustil `db push` u sebe („db push hotový“).
+> Výpis `db push` ani `migration list` jsem neviděl a ostrou databázi
+> nečtu, takže nasazení mám jen z jeho zprávy, ne ověřené. Tvrzení
+> „nic není nasazené“ a „čeká na db push“ níž platila v době psaní.
+
 Hlášení Šéfíka 25. 10.: „některým zaměstnancům nefungovalo přihlášení,
 respektive zapnutí apky, potom odečítání záloh se zdvojovalo". Upřesnění
 týž den: „problém s přihlášením vyřešen, nešel internet".
@@ -21,7 +27,7 @@ Větev `claude/keen-bardeen-f7ttd3`. Nová migrace
 
 | co | commit | čeká na db push |
 |---|---|---|
-| migrace: sloupec `advances.klic_odeslani`, jedinečný ve firmě; `vyplatit_zalohu` s `p_klic` a výstupem `opakovane` | `c2f6ed5` | **ano** |
+| migrace: sloupec `advances.klic_odeslani`, jedinečný ve firmě; `vyplatit_zalohu` s `p_klic` a výstupem `opakovane` | `c2f6ed5` | nasazeno 25. 10. |
 | formulář a serverová akce: posílají číslo, mění ho jen po úspěchu, druhé upozornění příjemci neposílají | `c2f6ed5` | ne (bez migrace jede postaru) |
 | scénář `krok101`, úprava `krok57` na novou podobu funkce, kontroly v `scripts/zalohy.test.mjs` | `c2f6ed5` | — |
 
@@ -50,7 +56,7 @@ Větev `claude/keen-bardeen-f7ttd3`. Nová migrace
 
 ## Co čeká na Šéfíka
 
-1. **Sloučit do `main` a pak `db push`** (jedna migrace).
+1. ~~Sloučit do `main` a pak `db push`~~ — hotovo 25. 10. (viz začátek).
 2. **Najít a stornovat zálohy, které už jsou zdvojené.** Dotaz pro Supabase → SQL Editor (jen čte):
 
    ```sql
