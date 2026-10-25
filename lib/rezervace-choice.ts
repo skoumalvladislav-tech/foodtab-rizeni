@@ -643,6 +643,7 @@ export async function probehnoutChoice(v: {
   }
 
   type Pruchod = { podle: DotazSeznamu['podle']; od: string; do: string }
+  const preskoceneId = new Set<string>()
 
   const projit = async (p: Pruchod, odStranky: number, poStrance?: (dalsi: number) => void): Promise<KonecBehu> => {
     for (let stranka = odStranky; ; stranka++) {
@@ -670,6 +671,9 @@ export async function probehnoutChoice(v: {
           }
           continue
         }
+        // Blízko a okno se překrývají — tatáž vadná rezervace se počítá jednou.
+        if (x.id && preskoceneId.has(x.id)) continue
+        if (x.id) preskoceneId.add(x.id)
         vysledek.preskocene.pocet += 1
         vysledek.preskocene.duvody[x.duvod] = (vysledek.preskocene.duvody[x.duvod] ?? 0) + 1
         if (!vysledek.preskocene.priklad && x.id) vysledek.preskocene.priklad = x.id

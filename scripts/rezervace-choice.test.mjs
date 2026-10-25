@@ -439,6 +439,9 @@ const zapisDoPameti = () => {
   ok('… česky správně (2 rezervace, 1 rezervace, 5 rezervací)', hlaska.startsWith('Nezapsaly se 2 rezervace z Choice')
     && chybaBehu({ ...v, preskocene: { pocet: 1, priklad: null, duvody: { 'bez-id': 1 } } }).startsWith('Nezapsala se 1 rezervace')
     && chybaBehu({ ...v, preskocene: { pocet: 5, priklad: null, duvody: { 'bez-id': 5 } } }).startsWith('Nezapsalo se 5 rezervací'))
+  const vsude = await probehnoutChoice({ api: { nacistStranku: async () => ({ stav: 'ok', rezervace: [rezervace(2, { dateTime: '2026-11-20T19:00:00' })] }) },
+    token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: async () => true, zapsat: zapisDoPameti().fn })
+  ok('tatáž vadná rezervace v blízku, nových i okně se ohlásí jednou', vsude.dotazu === 3 && vsude.preskocene.pocet === 1)
 
   const spatnyZapis = async () => ({ stav: 'chyba', duvod: 'Zápis rezervací do Foodtabu selhal (XX000) — zkusí se příště.' })
   const v2 = await probehnoutChoice({ api: { nacistStranku: async () => ({ stav: 'ok', rezervace: [rezervace(1)] }) }, token: TOKEN, varSymbol: '1',
