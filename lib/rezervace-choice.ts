@@ -49,6 +49,7 @@ import { createHash } from 'node:crypto'
 
 import type { RadekRezervace, StavRezervace } from './reservation-provider-contract.ts'
 import { zRadkuZdroje, type RadekImportu } from './rezervace-import.ts'
+import { pocet, sklonovat } from './sklonovani.ts'
 
 export const API_CHOICE = 'https://open-api.choiceqr.com'
 /** `integrace_pripojeni.poskytovatel` i `rezervace.poskytovatel`. */
@@ -753,10 +754,11 @@ export function chybaBehu(v: VysledekBehuChoice): string | null {
     const duvody = (Object.entries(v.preskocene.duvody) as [DuvodPreskoceni, number][])
       .map(([d, n]) => `${POPIS_PRESKOCENI[d]} ${n}×`)
       .join(', ')
-    casti.push(`Nezapsalo se ${v.preskocene.pocet} rezervací z Choice (${duvody})${v.preskocene.priklad ? `, např. id ${v.preskocene.priklad}` : ''}.`)
+    const n = v.preskocene.pocet
+    casti.push(`${sklonovat(n, 'Nezapsala se', 'Nezapsaly se', 'Nezapsalo se')} ${pocet(n, 'rezervace', 'rezervace', 'rezervací')} z Choice (${duvody})${v.preskocene.priklad ? `, např. id ${v.preskocene.priklad}` : ''}.`)
   }
   if (v.odmitnute.pocet > 0) {
-    casti.push(`Databáze odmítla ${v.odmitnute.pocet} rezervací z Choice${v.odmitnute.priklad ? `, např. id ${v.odmitnute.priklad}` : ''}.`)
+    casti.push(`Databáze odmítla ${pocet(v.odmitnute.pocet, 'rezervaci', 'rezervace', 'rezervací')} z Choice${v.odmitnute.priklad ? `, např. id ${v.odmitnute.priklad}` : ''}.`)
   }
   return casti.length > 0 ? casti.join(' ').slice(0, 1000) : null
 }

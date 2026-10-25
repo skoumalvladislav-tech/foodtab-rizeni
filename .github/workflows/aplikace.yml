@@ -101,7 +101,7 @@ jobs:
             marketing-publikovane marketing-rozcestnik marketing-sablony
             marketing-schvalovani marketing-tvorba nabidka nahrani-lidi
             osloveni otazky-cisla penize planovac prava-osob prideleni prihlaseni provoz-granty
-            qr ranni-prehled rezervace rozpis-desktop rozpis-export rozpis-mobil
+            qr ranni-prehled rezervace rezervace-choice rozpis-desktop rozpis-export rozpis-mobil
             scenare sklonovani smeny-formular smeny-potvrzeni smeny-ruseni tabulka ucet ui-okna upozorneni vydelky
             web-push xlsx zalohy ziva-aktualizace
           )

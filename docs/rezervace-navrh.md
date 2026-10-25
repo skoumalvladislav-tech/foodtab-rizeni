@@ -189,6 +189,26 @@ Jméno systému ve zprávě (`"system": "choice"`) se ukládá jako
 `rezervace.poskytovatel`, takže se tytéž rezervace spárují i s CSV exportem
 Choice načteným pod stejným jménem.
 
+### 4.3 Choice přímo přes Open API (25. 10. 2026 noc)
+
+> **Šéfík (25. 10.):** „v chromu jsem přihlášený na nastavení api od
+> choice, projdi dokumentaci a vše připrav automaticky“.
+
+Dokumentace Choice Open API (open-api.choiceqr.com/docs) rezervace
+číst UMÍ — oddíl 4.1 („veřejné API pro rezervace nemá“) platil pro
+veřejnou dokumentaci, ne pro Open API za účtem vývojáře. Webhooky pro
+rezervace Choice ale nemá, takže se tahají. Napojení:
+
+| Kousek | Kde |
+|---|---|
+| OAuth: odkaz `https://<podnik>.choiceqr.com/admin/open-api/connect`, podepsaný jednorázový pokus v `customAttribute`, výměna kódu za token (5 let) | `lib/rezervace-choice.ts`, akce `pripojitChoice`, `app/api/rezervace/choice/callback` |
+| „Připojeno“ až po živém testu `GET /bookings/list?perPage=1` | `zapsatVysledekTestu` v `lib/rezervace-choice-sync.ts` |
+| Tahání každých 15 min + „Načíst teď“; limit 1 dotaz / 5 s drží fronta v databázi | `app/api/uloha/rezervace-choice`, `.github/workflows/rezervace-choice.yml`, `20261031100000_rezervace_choice.sql` |
+| Zápis stávající cestou (`rezervace_importovat_zdroj`), systém `choice`, číslo = `_id` | `radekZChoice` → `zRadkuZdroje` |
+| Návod pro Šéfíka | `docs/rezervace-choice.md` |
+
+Příjmové API (4.1) zůstává pro ostatní systémy.
+
 ### 4.2 Dokumenty už při založení
 
 Formulář nové rezervace nebo akce má „Přidat dokument“ (fotky, PDF).
@@ -275,9 +295,11 @@ vedoucí směny čtení.
 
 ## 9. Další kroky (návrh)
 
-1. ~~Který rezervační systém~~ — Choice (Perla), napojení přes příjmové API
-   (oddíl 4.1). Zbývá vědět, co používá Bernard.
+1. ~~Který rezervační systém~~ — Choice (Perla), napojení přímo přes
+   Choice Open API (oddíl 4.3). Zbývá vědět, co používá Bernard.
 2. Přidat práva rezervací lidem v Nastavení → Zařazení.
-3. Vydat klíč pro Perlu a nastavit v Choice (webhook) nebo v n8n/Make
-   posílání rezervací — podle `docs/rezervace-api.md`.
+3. Choice pro Perlu: CHOICE_CLIENT_ID/SECRET do Vercelu, ChoiceQR token
+   od api@choiceqr.com, připojit podnik v Napojení — podle
+   `docs/rezervace-choice.md` (migrace 20261031100000 před tím do
+   databáze).
 4. Karta rezervací na obrazovce Dnes.
