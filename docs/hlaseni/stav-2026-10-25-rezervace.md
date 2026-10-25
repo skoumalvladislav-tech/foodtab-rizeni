@@ -11,8 +11,10 @@
   čísla ze zdroje bez zdvojení a s jasným pravidlem, čí je který údaj.
   **Živé napojení zatím žádné není** — připojení je „čeká na připojení“
   a rezervace jdou zapsat ručně nebo načíst ze souboru CSV.
-- **Nic jsem nesloučil a nenasazoval** (žádný `db push`). PR čeká na
-  „sluč N“.
+- **Sloučeno a nasazeno 25. 10. 2026 večer** na Šéfíkův pokyn „sluč 158“:
+  PR #158 → `main` (`0e25daf`), `db push` pustil `20261025100000` ze záloh
+  (PR #156, nenasazená, Šéfík: „nasadit obě“) a `20261027100000`
+  Rezervací. Ověřeno v ostré databázi — oddíl „Nasazení“ na konci.
 - **Po nasazení vidí Rezervace jen majitel**, dokud práva nepřidáte
   v Nastavení → Zařazení (otázka 76).
 
@@ -20,12 +22,13 @@ Průzkum podobných aplikací a celý návrh: `docs/rezervace-navrh.md`.
 
 ## Co je hotové
 
-| Co | Commit | Čeká na db push |
+| Co | Commit | Nasazeno |
 |---|---|---|
-| Migrace `20261027100000_rezervace_akce.sql` (4 tabulky, kbelík `rezervace`, 2 práva, oblast `rezervace` v registru, funkce zápisu a importu) + scénář `krok103` + čisté knihovny | `8c35357`, `d701302` | **ano** |
-| Obrazovky, serverové akce, přílohy, import CSV, Napojení a import, `scripts/rezervace.test.mjs` | `e61ea42` | potřebují migraci |
+| Migrace `20261027100000_rezervace_akce.sql` (4 tabulky, kbelík `rezervace`, 2 práva, oblast `rezervace` v registru, funkce zápisu a importu) + scénář `krok103` + čisté knihovny | `8c35357`, `d701302` | **ano**, `db push` 25. 10. |
+| Obrazovky, serverové akce, přílohy, import CSV, Napojení a import, `scripts/rezervace.test.mjs` | `e61ea42` | ano (Vercel z `main`) |
 | Kreslení oddělené od dat, průzkum a návrh, otázky 76–80 | `74c2ee6` | — |
-| Drobné úpravy vzhledu po snímcích, toto hlášení | poslední commit větve | — |
+| Drobné úpravy vzhledu po snímcích, toto hlášení | `cd18544` | — |
+| Sloučení PR #158 | `0e25daf` | — |
 
 Finance → Integrace: karta „Rezervace a objednávky — připravujeme“ je teď
 odkaz „Rezervace“ do Napojení a importu.
@@ -74,11 +77,18 @@ kdo zapisuje — proto druhé rozbití „vedle zápisu“, které spadlo na
 
 ## Co čeká na Šéfíka
 
-1. **„sluč N“** a pak `db push` (migrace je jedna, `20261027100000`).
+1. ~~„sluč N“ a pak `db push`~~ — hotovo 25. 10. (oddíl „Nasazení“).
 2. **Práva**: v Nastavení → Zařazení zaškrtnout „Vidět rezervace…“
    a „Zapisovat rezervace…“ tam, kde mají být (otázka 76).
 3. **Který rezervační systém používáte** (otázka 78) — podle toho první
    adaptér; doporučuji Dotykačku.
+4. **Zálohy (PR #156):** ochrana proti dvojímu zápisu je nasazená; zbývá
+   stornovat zálohy, které už zdvojené jsou (dotaz v
+   `docs/hlaseni/stav-2026-10-25-zalohy-dvakrat.md`).
+5. **Otevřené PR s migrací starší než `20261027100000`** — #153
+   (`20261024100000`), #157 (`20261025230000`) a #145 (`20261019120000`) —
+   potřebují před svým `db push` nové razítko (novější než
+   `20261027100000`); CLI starší migraci za novější nepustí (jako #145 už dřív).
 
 ## Otázky
 
@@ -110,6 +120,30 @@ Hotový celý první krok. Další (návrh, oddíl 9): odpověď na otázku 78 �
 první adaptér; karta rezervací na Dnes; po adaptéru webhook a pravidelná
 synchronizace.
 
-## Nenasazoval jsem
+## Nasazení (25. 10. 2026 večer)
 
-Žádný `db push`, žádné sloučení, žádný zásah do ostrých dat.
+Na pokyn „sluč 158“ a „nasadit obě“. Z pracovní kopie `foodtab-nasazeni` (main `0e25daf`).
+
+1. **Napojený projekt:** `supabase/.temp/linked-project.json` → `spekntcsuroqhehmjssv` / `foodtab-test` ✓.
+2. **`migration list --linked` před:** nenasazené dvě — `20261025100000` (zálohy, PR #156) a `20261027100000` (Rezervace). Pořadí na sobě nezávisí.
+3. **`db push --yes`** (doslova):
+
+   ```
+   Applying migration 20261025100000_zalohy_jedno_odeslani.sql...
+   Applying migration 20261027100000_rezervace_akce.sql...
+   {"upToDate":false,"dryRun":false,"migrations":["20261025100000_zalohy_jedno_odeslani.sql","20261027100000_rezervace_akce.sql"],"seeds":[],"roles":[],"message":"Finished supabase db push."}
+   ```
+
+4. **Ověření v ostré databázi** (jen čtení, `supabase db query --linked`):
+   - obě verze v `supabase_migrations.schema_migrations`;
+   - RLS zapnuté na `rezervace`, `rezervace_kontakty`, `rezervace_poznamky`, `rezervace_prilohy`;
+   - **`authenticated` má jen `select`** (insert a truncate ne), `anon` nic — `revoke` tedy zabral i proti výchozím právům Supabase, která lokální testy nemají;
+   - práva `rezervace.read` (provoz, necitlivé) a `rezervace.manage` (provoz, citlivé);
+   - kbelík `rezervace` soukromý, 10 MB, fotky a PDF; 3 politiky úložiště, 4 politiky tabulek;
+   - v registru `integrace_pripojeni` nová kontrola oblasti a dvě pojistky rezervací;
+   - 9 funkcí pro přihlášené (anonym ne), `rezervace_importovat_zdroj` přihlášený volat nesmí;
+   - **pod rolí `authenticated`** jdou přečíst všechny sloupce, které obrazovky čtou, bez `42501` (0 řádků — bez přihlášeného člověka nic nevidí);
+   - zálohy: `advances.klic_odeslani` existuje, `vyplatit_zalohu` má `p_klic`.
+5. **Aplikace:** Vercel nasadil `0e25daf` („Deployment has completed“); na `main` prošly workflow Migrace a scénáře (PostgreSQL 16, včetně `krok103`), Testy aplikace a Migrace jen přibývají. Ostré `/firma/rezervace` a `/firma/rezervace/napojeni` bez přihlášení přesměrují na přihlášení, `/api/rezervace/soubor/…` vrátí 404 bez detailu.
+
+Rezervací je v databázi 0 — první zapíše ten, komu se přidá právo (otázka 76).
