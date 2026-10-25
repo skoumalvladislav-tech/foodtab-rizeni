@@ -647,6 +647,74 @@ export function jednotkaCesky(j: string | null | undefined): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Katalog pokladny v editoru návrhu                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Katalog načtený před víc dny, než je tohle, editor nabídne obnovit:
+ * produkty a suroviny, které v pokladně mezitím přibyly, v něm chybí.
+ */
+export const KATALOG_STARY_PO_DNECH = 7
+
+/**
+ * Prázdný katalog se v editoru načte sám (bez kliknutí) nejvýš jednou za
+ * tuhle dobu z jednoho prohlížeče — ne při každém zobrazení stránky. Když
+ * pokladna katalog nevydá (chyba, prázdný cloud), další zobrazení se do
+ * ní hned znovu neptá; ruční tlačítko zůstává.
+ */
+export const KATALOG_SAM_NEJDRIV_ZA_MS = 60 * 60 * 1000
+
+const bezDiakritiky = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+
+/**
+ * Hledání v katalogu pokladny podle názvu (bez ohledu na velikost písmen
+ * a diakritiku). Prodávané produkty i suroviny jsou v katalogu stejně
+ * (Dotykačka je posílá v jednom `/products`) a hledá se ve všech — nic se
+ * nevyřazuje podle `stockDeduct` ani jinak. Prázdné hledání = celý katalog.
+ */
+export function hledatVKatalogu<T extends { nazev: string }>(katalog: readonly T[], hledat: string): T[] {
+  const h = bezDiakritiky(hledat.trim())
+  return h === '' ? [...katalog] : katalog.filter((k) => bezDiakritiky(k.nazev).includes(h))
+}
+
+/** Je katalog starší než KATALOG_STARY_PO_DNECH? Bez času aktualizace (nebo s nečitelným) ne — nic se nedomýšlí. */
+export function katalogJeStary(aktualizovano: string | null, tedMs: number): boolean {
+  if (!aktualizovano) return false
+  const kdy = Date.parse(aktualizovano)
+  if (!Number.isFinite(kdy)) return false
+  return tedMs - kdy > KATALOG_STARY_PO_DNECH * 24 * 60 * 60 * 1000
+}
+
+/**
+ * Má editor prázdný katalog načíst sám? Jen když ho pokladna umí,
+ * katalog se dal přečíst (žádná chyba čtení), je prázdný, aspoň jedna
+ * položka se skladu týká a z tohohle prohlížeče se o to nikdo nepokusil
+ * v posledních KATALOG_SAM_NEJDRIV_ZA_MS.
+ *
+ * `posledniPokusMs`: kdy se o to tenhle prohlížeč pokusil naposledy
+ * (`null` = nikdy), `'nelze'` = pokus si nejde zapamatovat (úložiště
+ * prohlížeče vypnuté) — pak NE: bez zapamatování by se pokladna ptala
+ * při každém zobrazení.
+ */
+export function nacistKatalogSam(v: {
+  umi: boolean
+  chybaCteni: boolean
+  pocet: number
+  polozekProSklad: number
+  posledniPokusMs: number | null | 'nelze'
+  tedMs: number
+}): boolean {
+  if (!v.umi || v.chybaCteni || v.pocet > 0 || v.polozekProSklad === 0) return false
+  if (v.posledniPokusMs === 'nelze') return false
+  if (v.posledniPokusMs === null || !Number.isFinite(v.posledniPokusMs)) return true
+  return v.tedMs - v.posledniPokusMs >= KATALOG_SAM_NEJDRIV_ZA_MS
+}
+
+/* ------------------------------------------------------------------ */
 /* Kontrola proti pokladně                                              */
 /* ------------------------------------------------------------------ */
 

@@ -26,7 +26,7 @@ import Nadpis from '../../../../nadpis'
 import { aliasyPripojeni, kalendarPobocky, katalogPripojeni } from './akce-zaklad'
 import type { PolozkaEditoru } from './editor-navrhu'
 import Kroky from './kroky'
-import { autorZaznamu, coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, nevyresenePolozkyDolozeni, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
+import { autorZaznamu, coZkontrolovat, datumCesky, jednotkaCesky, jeUuid, katalogJeStary, nevyresenePolozkyDolozeni, rozpoznaniNavrhu, type PokusRozpoznani } from './logika'
 import { metadataPokladny } from './nacteni'
 import Originaly from './originaly'
 import SekceKontrola from './sekce-kontrola'
@@ -524,7 +524,11 @@ export default async function DetailJinePlatby({ params }: { params: Promise<{ r
               coZkontrolovat={kontrolaNavrhu.body}
               nesoulad={kontrolaNavrhu.nesoulad?.popis ?? null}
               ai={{ zapnuto: rozpoznavaniJeNastavene(), pocetSouboru: seznamSouboru.length }}
-              katalog={maPokladnu ? { umi: pokladna?.katalog === true, pocet: katalogZivy.length, aktualizovano: katalogAktualizovan, chyba: chybaKatalogu } : null}
+              katalog={
+                maPokladnu
+                  ? { umi: pokladna?.katalog === true, pocet: katalogZivy.length, aktualizovano: katalogAktualizovan, stary: katalogJeStary(katalogAktualizovan, tedMs), chyba: chybaKatalogu }
+                  : null
+              }
               zona={zona}
             />
             <SekceTrzba

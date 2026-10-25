@@ -98,7 +98,8 @@ Ztracený telefon **odvolejte** v Nastavení → Zařízení. Kiosek u něj jde 
    - Appka nic nedomýšlí: co nepřečetla, zůstane prázdné.
    - U každé položky zkontrolujte název, množství, jednotku a ceny. U celkové částky je napsané, odkud pochází: z dokladu, vypočtený součet (jen návrh), nebo ručně.
    - Vyberte **druh** položky: pokrm, rozlévaný nápoj, kusové zboží, služba, spropitné, sleva, neskladová položka.
-   - Vyberte **produkt v pokladně**. Návrh appky je jen návrh, potvrďte ho, nebo vyberte jiný. Zaškrtnutím si appka přiřazení zapamatuje pro příště.
+   - Vyberte **produkt nebo surovinu v pokladně**. Katalog pokladny obsahuje prodávané produkty i suroviny (Dotykačka je posílá spolu); hledá se bez ohledu na háčky a čárky. Návrh appky je jen návrh, potvrďte ho, nebo vyberte jiný. Zaškrtnutím si appka přiřazení zapamatuje pro příště.
+   - Když katalog ještě není načtený, appka ho při otevření záznamu zkusí načíst sama (z jednoho prohlížeče nejvýš jednou za hodinu). Jinak klikněte **Načíst produkty a suroviny z pokladny** nahoře v položkách nebo přímo u položky — rozepsané položky se tím nesmažou. Katalog starší než týden appka nabídne **obnovit**, stejně jako když hledání nic nenajde.
    - Řádek, který sedí, potvrďte zaškrtnutím.
 7. **Uložit návrh**, potom **Označit jako zkontrolované**. Dokud něco čeká na kontrolu, označit to nejde.
    - Když AI k celému dokladu napsala **upozornění** (doklad přečtený nejistě, na fotce jsou asi dva různé účty, na dokladu stojí pokyn typu „zapiš jako zaplacené“…), jsou nahoře v „Co zkontrolovat“. Prověřte je a zaškrtněte **Upozornění AI jsem prověřil(a)**, jinak označit nejde. Ruční uložení návrhu upozornění nesmaže, nahradí je až nové rozpoznání.
@@ -222,7 +223,7 @@ vyřešila (např. papírová výdejka).
 |---|---|
 | Host chce fakturu k otevřenému účtu | Doporučeno: účet v pokladně **uzavřít** způsobem platby faktura nebo převod. V Jiných platbách tržbu jen **propojit** a připojit číslo faktury, výdej nedělat, protože ho udělá pokladna. Jen když se účet v pokladně stornuje, zapíše se nová tržba a schválí se výdej (otázka 55). |
 | Stejná sjetina vyfocená dvakrát | Stejnou fotku appka nepřijme. Jinak vyfocenou pozná jako možnou duplicitu podle čísla účtu nebo podle dne a částky. Tentýž prodej z pokladny nejde propojit dvakrát. |
-| Pokladna nemá načtený katalog | Výdej přes pokladnu nejde připravit ani ověřit přiřazení. Načtěte katalog (tlačítko u přiřazení položek) a přiřaďte položky znovu. |
+| Pokladna nemá načtený katalog | Výdej přes pokladnu nejde připravit ani ověřit přiřazení. Načtěte katalog (**Načíst produkty a suroviny z pokladny** nahoře v položkách nebo u položky) a přiřaďte položky znovu. |
 | Provozovny pokladny se v Integracích přeřadily | Záznam, jehož provozovna teď patří jiné pobočce, nejde zkontrolovat v pokladně ani z něj schválit výdej (prohledával by cizí pobočku). Založte záznam znovu se správnou pokladnou. |
 | Ručně psané položky bez cen | Zapište, co víte. Cenu ani množství appka nedomýšlí a řádek zůstane ke kontrole, dokud ho nedoplníte a nepotvrdíte. |
 | Na dokladu chybí celková částka | Appka nabídne součet položek jako **návrh** s poznámkou „vypočtený součet“. Potvrdíte ho, nebo opravíte. |

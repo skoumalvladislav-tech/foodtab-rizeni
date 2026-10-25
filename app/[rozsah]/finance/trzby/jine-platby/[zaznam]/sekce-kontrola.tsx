@@ -3,6 +3,7 @@ import { formatHaleru, mnozstviNaText } from '@/lib/jine-platby-castky'
 import type { KontrolaDokladu } from '@/lib/jine-platby-kontrola'
 import { popisDruhu, popisStavuKontroly, popisTypuDokladu, type AkceJinePlatby } from '@/lib/jine-platby-stav'
 import type { PolozkaNavrhu, ZaznamJinePlatby } from '@/lib/jine-platby-typy'
+import { pocet } from '@/lib/sklonovani'
 
 import { PanelHlava } from '../../../../dnes/prvky'
 import Ikona from '../../../../ikona'
@@ -10,7 +11,7 @@ import { oznacitZkontrolovano, ulozitNavrh } from '../akce'
 import { rozpoznat } from '../akce-ai'
 import { nacistKatalog } from '../akce-pos'
 import ZnackaStavu from '../znacka-stavu'
-import EditorNavrhu, { type HlavickaEditoru, type PolozkaEditoru, type ProduktEditoru } from './editor-navrhu'
+import EditorNavrhu, { type HlavickaEditoru, type KatalogPokladnyEditoru, type PolozkaEditoru, type ProduktEditoru } from './editor-navrhu'
 import FormularAkce from './formular-akce'
 import { datumCesky, HLASKA_BEZ_AI, HLASKA_ROZPOZNANI_SKLAD, popisPuvoduCastky, SKLAD_BRANI_ROZPOZNANI, type BodKontroly } from './logika'
 import { Oddil, PoleDuvodu, Udaj, Udaje, Vysvetleni } from './prvky'
@@ -81,8 +82,11 @@ export default function SekceKontrola({
   /** Součet položek nesedí s celkovou cenou → povinné „Proč rozdíl nevadí“ (popis rozdílu), jinak `null`. */
   nesoulad: string | null
   ai: { zapnuto: boolean; pocetSouboru: number }
-  /** `chyba` = katalog nebo ověřená přiřazení nejdou načíst celé (chyba dotazu, strop stránek) — žádný tichý ořez. */
-  katalog: { umi: boolean; pocet: number; aktualizovano: string | null; chyba: string | null } | null
+  /**
+   * `chyba` = katalog nebo ověřená přiřazení nejdou načíst celé (chyba dotazu, strop stránek) — žádný tichý ořez.
+   * `stary` = načtený před víc než KATALOG_STARY_PO_DNECH (katalogJeStary) — editor nabídne obnovení.
+   */
+  katalog: { umi: boolean; pocet: number; aktualizovano: string | null; stary?: boolean; chyba: string | null } | null
   zona: string
 }) {
   const castka = (h: number | null) => (h === null ? 'neuvedeno' : formatHaleru(h, z.mena))
@@ -95,6 +99,19 @@ export default function SekceKontrola({
   const novejsi = puvodCastek?.novejsi[0] ?? null
   const dalsichNovejsich = Math.max(0, (puvodCastek?.novejsi.length ?? 0) - 1)
   const rozpoznaniBraniSklad = SKLAD_BRANI_ROZPOZNANI.includes(z.stavSkladu)
+  const sEditorem = smiUpravit && akce.has('upravit')
+  // Katalog v editoru: načtení přímo u položek a nahoře v editoru (`nacistKatalog`, právo upravit — stejné jako editor).
+  const katalogPokladny: KatalogPokladnyEditoru | null =
+    katalog && z.pripojeniId
+      ? {
+          pripojeni: z.pripojeniId,
+          umi: katalog.umi,
+          aktualizovano: katalog.aktualizovano ? { iso: katalog.aktualizovano, text: datumACasSRokemVPasmu(katalog.aktualizovano, zona) } : null,
+          stary: katalog.stary === true,
+          chyba: katalog.chyba,
+          nacist: nacistKatalog,
+        }
+      : null
 
   return (
     <section className="ds-plocha" style={{ display: 'grid', gap: '14px', minWidth: 0 }}>
@@ -216,8 +233,8 @@ export default function SekceKontrola({
 
       {/* ---------- Položky ---------- */}
       <Oddil nadpis="Položky a přiřazení k pokladně">
-        {smiUpravit && akce.has('upravit') ? (
-          <EditorNavrhu akce={ulozitNavrh} {...zakl} mena={z.mena} zamekSkladu={zamekSkladu} {...editor} />
+        {sEditorem ? (
+          <EditorNavrhu akce={ulozitNavrh} {...zakl} mena={z.mena} zamekSkladu={zamekSkladu} katalogPokladny={katalogPokladny} {...editor} />
         ) : polozky.length === 0 ? (
           <Vysvetleni>Záznam zatím nemá položky.</Vysvetleni>
         ) : (
@@ -237,19 +254,19 @@ export default function SekceKontrola({
           </ol>
         )}
 
-        {katalog?.chyba ? (
+        {/* S editorem je katalog (stav, chyba, načtení) nahoře v editoru; tady jen bez něj. */}
+        {katalog?.chyba && !sEditorem ? (
           <p role="alert" className="hlaska-chyba" style={{ margin: 0 }}>
-            {katalog.chyba} Přiřazení k produktům pokladny teď nejde; zkuste stránku načíst znovu.
+            {katalog.chyba} Přiřazení k produktům a surovinám pokladny teď nejde; zkuste stránku načíst znovu.
           </p>
         ) : null}
-        {katalog && smiUpravit && !zruseno ? (
+        {katalog && smiUpravit && !zruseno && !sEditorem ? (
           <div style={{ display: 'grid', gap: '8px' }}>
             <Vysvetleni>
-              Katalog pokladny: {katalog.pocet > 0 ? `${katalog.pocet} produktů` : 'zatím nenačtený'}
+              Katalog pokladny (produkty a suroviny): {katalog.pocet > 0 ? pocet(katalog.pocet, 'položka', 'položky', 'položek') : 'zatím nenačtený'}
               {katalog.aktualizovano ? `, aktualizováno ${datumACasSRokemVPasmu(katalog.aktualizovano, zona)}` : ''}. Přiřazení podle podobnosti názvu je jen návrh;
               ověřené přiřazení dělá člověk.
             </Vysvetleni>
-            {katalog.umi && akce.has('upravit') ? <FormularAkce akce={nacistKatalog} {...zakl} tlacitko="Načíst katalog z pokladny" /> : null}
             {!katalog.umi ? <Vysvetleni>Tahle pokladna katalog neposílá — položky přiřazujte podle názvů z prodeje; výdej pak jen ručně.</Vysvetleni> : null}
           </div>
         ) : null}

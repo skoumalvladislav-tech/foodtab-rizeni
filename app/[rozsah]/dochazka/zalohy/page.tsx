@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { redirect } from 'next/navigation'
 
 import { getContext, hasAccess } from '@/lib/authz'
@@ -446,6 +448,7 @@ export default async function Zalohy({
                 <FormularZalohy
                   rozsah={rozsah}
                   lide={lideKVyplaceni.map((l) => ({ id: l.id, jmeno: jmenoDoNabidky(l) }))}
+                  klic={randomUUID()}
                 />
                 {/*
                   Bez téhle věty by člověk u okénka hledal někoho, kdo
