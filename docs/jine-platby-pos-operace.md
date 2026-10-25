@@ -59,7 +59,7 @@ do `ZAPIS_VYDEJE_DOTYKACKA` v `lib/pokladna-dotykacka-zapis.ts` a vědomá
 Adaptér pak připojí zápis jen pro ten cloud a schopnost „api“ platí jen pro
 tu provozovnu; ostatní zůstávají ruční. Provozovnu u pokladny připojené
 k pobočce doplní databáze při zabrání z aktuálního přiřazení (nula nebo víc
-= neodešle se; migrace 20261029100000). Smí se zapnout **jen** když:
+= neodešle se; migrace 20261031100000). Smí se zapnout **jen** když:
 
 1. Na **testovacím cloudu** Dotykačky (licence z 12. 10. 2026) projde
    postup z `docs/jine-platby-vydej-dotykacka.md`, oddíl 6, hlavně:
