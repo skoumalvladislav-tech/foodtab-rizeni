@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import Sdeleni from '@/app/sdeleni'
 import { canSee } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
+import { zakladniAdresaAplikace } from '@/lib/integrace-adresa'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -60,6 +61,7 @@ export default async function RezervaceNapojeni({
       pobocky={pobocky}
       napojeni={napojeni}
       smiSpravovat={canSee(ctx, 'integrace.manage')}
+      adresaPrijmu={`${await zakladniAdresaAplikace()}/api/rezervace/prijem`}
       stav={stav}
       chyba={chyba}
     />

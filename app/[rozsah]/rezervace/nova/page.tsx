@@ -58,6 +58,7 @@ export default async function NovaRezervace({
             pobocka={kZapisu[0].id}
             jenFoodtab={false}
             klic={randomUUID()}
+            tenantId={tenantId}
             hodnoty={{
               druh: jeAkce ? 'akce' : 'rezervace',
               stav: jeAkce ? 'ceka' : 'potvrzeno',

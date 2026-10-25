@@ -3,22 +3,13 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
-import { noveId, zmensitObrazek, NEMENIT_DO_BAJTU } from '@/lib/obrazky'
-import {
-  KBELIK_REZERVACI,
-  MAX_PRILOH_REZERVACE,
-  cestaPrilohy,
-  jeObrazek,
-  jeTypPriloh,
-  ocistitNazev,
-  typSouboru,
-  zkontrolovatVyber,
-} from '@/lib/rezervace-prilohy'
+import { noveId } from '@/lib/obrazky'
+import { KBELIK_REZERVACI, MAX_PRILOH_REZERVACE, cestaPrilohy, zkontrolovatVyber } from '@/lib/rezervace-prilohy'
 import { getBrowserSupabase } from '@/lib/supabase/client'
-import { zkontrolujPoZmenseni } from '@/lib/komunikace/prilohy'
 
 import Ikona from '../ikona'
 import { pripojitPrilohu } from './akce'
+import { pripravitSoubor } from './priprava-souboru'
 import type { CilZapisu } from './prvky'
 
 /**
@@ -75,26 +66,12 @@ export default function NahratPrilohy({
       const supabase = getBrowserSupabase()
 
       for (const i of kontrola.platne) {
-        const s = soubory[i]
-        const typ = typSouboru(s)
-        let blob: Blob = s
-        let mime = typ
-        if (jeObrazek(typ) && (s.size > NEMENIT_DO_BAJTU || !jeTypPriloh(typ))) {
-          const zmenseny = await zmensitObrazek(s)
-          if (zmenseny) {
-            blob = zmenseny
-            mime = 'image/jpeg'
-          }
-        }
-        const problem = zkontrolujPoZmenseni(s.name, mime, blob.size)
-        if (problem) {
-          nove.push(problem)
+        const pripraveny = await pripravitSoubor(soubory[i])
+        if (pripraveny.stav === 'chyba') {
+          nove.push(pripraveny.duvod)
           continue
         }
-        if (!jeTypPriloh(mime)) continue
-
-        const nazev =
-          mime === 'image/jpeg' && typ !== 'image/jpeg' ? `${ocistitNazev(s.name).replace(/\.[^.]*$/, '')}.jpg` : ocistitNazev(s.name)
+        const { blob, mime, nazev } = pripraveny
         const cesta = cestaPrilohy(tenantId, branchId, noveId(), mime)
 
         const { error } = await supabase.storage.from(KBELIK_REZERVACI).upload(cesta, blob, { contentType: mime, upsert: false })

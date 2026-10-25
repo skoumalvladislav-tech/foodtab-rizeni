@@ -1,13 +1,18 @@
 'use server'
 
+import { randomBytes, randomUUID } from 'node:crypto'
+
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { canSee } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
+import { zakladniAdresaAplikace } from '@/lib/integrace-adresa'
+import { sifrovaniJeNastavene, zasifrovat } from '@/lib/integrace-klice'
 import { MAX_RADKU_IMPORTU, naparsovatCsvRezervaci } from '@/lib/rezervace-import'
+import { POSKYTOVATEL_PRIJMU, slozitKlicRezervaci } from '@/lib/rezervace-prijem-api'
 import { najitSystem, poskytovatelSouboru } from '@/lib/rezervace-poskytovatele'
-import { KBELIK_REZERVACI, MAX_BAJTU, jeTypPriloh } from '@/lib/rezervace-prilohy'
+import { KBELIK_REZERVACI, MAX_BAJTU, MAX_PRILOH_REZERVACE, jeTypPriloh } from '@/lib/rezervace-prilohy'
 import { STAVY, bezpecnaZpatky, hlaskaZDatabaze, jePlatneDatum, precistFormular, zkontrolovatPoznamku } from '@/lib/rezervace-typy'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -83,6 +88,11 @@ export async function ulozitRezervaci(_predchozi: StavFormulare, formData: FormD
   const formular = precistFormular((k) => formData.get(k) as string | null, { jenFoodtab })
   if (formular.stav === 'chyba') return { stav: 'chyba', chyby: formular.chyby }
 
+  // Dokumenty nahrané z formuláře nové rezervace (jen cesty — soubory už
+  // jsou v úložišti). Nesmysl se zahodí tady; o pravdě rozhodne databáze.
+  const prilohy = id ? [] : precistPrilohyFormulare(text(formData, 'prilohy'), `${tenantId}/${pobocka}/`)
+  if (prilohy === null) return { stav: 'chyba', chyby: ['Seznam dokumentů nemá správný tvar — vyberte je znovu.'] }
+
   const klic = text(formData, 'klic')
   const { data: vysledneId, error } = await supabase.rpc('rezervace_ulozit', {
     p_tenant: tenantId,
@@ -94,8 +104,49 @@ export async function ulozitRezervaci(_predchozi: StavFormulare, formData: FormD
   })
   if (error || !vysledneId) return { stav: 'chyba', chyby: [hlaskaZDatabaze(error)] }
 
+  let nepripojeno = 0
+  for (const p of prilohy) {
+    const { error: chybaPrilohy } = await supabase.rpc('rezervace_pripojit_prilohu', {
+      p_tenant: tenantId,
+      p_branch: null,
+      p_rezervace: String(vysledneId),
+      p_den: null,
+      p_cesta: p.cesta,
+      p_nazev: p.nazev,
+      p_mime: p.mime,
+      p_velikost: p.velikost,
+    })
+    // 23505 = ta cesta už připojená je (opakované odeslání téhož formuláře).
+    if (chybaPrilohy && chybaPrilohy.code !== '23505') nepripojeno += 1
+  }
+
   revalidatePath(`/${rozsah}/rezervace`, 'layout')
-  redirect(`/${rozsah}/rezervace/${String(vysledneId)}?stav=ulozeno`)
+  redirect(`/${rozsah}/rezervace/${String(vysledneId)}?stav=${nepripojeno > 0 ? 'ulozeno-bez-priloh' : 'ulozeno'}`)
+}
+
+type PrilohaFormulare = { cesta: string; nazev: string; mime: string; velikost: number }
+
+/**
+ * Seznam nahraných dokumentů z formuláře. Prázdné = žádné. `null` =
+ * nesmysl (jiný tvar, jiná firma či pobočka v cestě, nepovolený typ).
+ */
+function precistPrilohyFormulare(json: string, predponaCesty: string): PrilohaFormulare[] | null {
+  if (json === '') return []
+  let data: unknown
+  try {
+    data = JSON.parse(json)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(data) || data.length > MAX_PRILOH_REZERVACE) return null
+  const vysledek: PrilohaFormulare[] = []
+  for (const x of data) {
+    const p = x as Partial<PrilohaFormulare> | null
+    if (!p || typeof p.cesta !== 'string' || typeof p.nazev !== 'string' || typeof p.mime !== 'string' || typeof p.velikost !== 'number') return null
+    if (!p.cesta.startsWith(predponaCesty) || !jeTypPriloh(p.mime) || !(p.velikost > 0 && p.velikost <= MAX_BAJTU)) return null
+    vysledek.push({ cesta: p.cesta, nazev: p.nazev.slice(0, 120), mime: p.mime, velikost: Math.trunc(p.velikost) })
+  }
+  return vysledek
 }
 
 /** Rychlá změna stavu z detailu (Proběhla, Nedorazili, Zrušit…). */
@@ -331,7 +382,11 @@ export async function pripravitNapojeni(formData: FormData): Promise<void> {
 
   const pobocka = v.pristup.pobocky.find((b) => b.id === text(formData, 'pobocka'))
   const system = najitSystem(text(formData, 'system'))
-  if (!pobocka || !system || system.klic === 'jiny') redirect(sParametrem(zpet, 'chyba', 'nepovedlo'))
+  // Jen systémy, ke kterým jednou může být adaptér (API veřejné nebo
+  // partnerské). Choice, Tablein a „jiný“ jdou přes příjmové API nebo CSV.
+  if (!pobocka || !system || (system.api !== 'verejne' && system.api !== 'partnerske')) {
+    redirect(sParametrem(zpet, 'chyba', 'nepovedlo'))
+  }
 
   const supabase = await getServerSupabase()
   const { data: stavajici } = await supabase.rpc('rezervace_napojeni', { p_tenant: v.tenantId })
@@ -373,6 +428,78 @@ export async function odpojitNapojeni(formData: FormData): Promise<void> {
   // se počítá, jestli se něco změnilo.
   if (error || !data || data.length === 0) redirect(sParametrem(zpet, 'chyba', error?.code === '42501' || !error ? 'pravo' : 'nepovedlo'))
 
+  // Klíč příjmového API smazat (adresa odpojené připojení stejně odmítne;
+  // tohle je úklid, ať zašifrovaný klíč neleží zbytečně).
+  await supabase.rpc('integrace_smaz_tajemstvi', { p_pripojeni: text(formData, 'id') })
+
   revalidatePath(zpet)
   redirect(sParametrem(zpet, 'stav', 'odpojeno'))
+}
+
+/* ---------------------------------------------------------------------
+ * Univerzální příjmové API (Šéfík 25. 10. 2026: „mám Choice, ale
+ * připravil bych univerzální možnost“)
+ *
+ * Klíč patří jedné pobočce. Appka ho ukáže jen jednou (proto
+ * useActionState, ne adresa); v databázi je jen zašifrovaný. Vyměnit ho
+ * jde kdykoli — starý tím přestane platit. „Připojeno“ se z tohohle
+ * nestane: to nastaví databáze až po první úspěšně přijaté dávce.
+ * ------------------------------------------------------------------ */
+
+export type StavKliceRezervaci = null | { stav: 'chyba'; duvod: string } | { stav: 'ok'; klic: string; adresa: string }
+
+export async function vydatKlicPrijmuRezervaci(_predchozi: StavKliceRezervaci, formData: FormData): Promise<StavKliceRezervaci> {
+  const rozsah = text(formData, 'rozsah')
+  const v = await vstup(rozsah)
+  if (!v || !canSee(v.pristup.ctx, 'integrace.manage')) {
+    return { stav: 'chyba', duvod: 'Klíč vydává ten, kdo má právo „Správa napojení na externí systémy“.' }
+  }
+  if (!sifrovaniJeNastavene()) {
+    return { stav: 'chyba', duvod: 'Na serveru není nastavené šifrování přístupových údajů — klíč by nešlo bezpečně uložit.' }
+  }
+
+  const supabase = await getServerSupabase()
+  const { data: stavajici } = await supabase.rpc('rezervace_napojeni', { p_tenant: v.tenantId })
+  const prijmy = ((stavajici ?? []) as { id: string; branch_id: string; poskytovatel: string }[]).filter(
+    (s) => s.poskytovatel === POSKYTOVATEL_PRIJMU,
+  )
+
+  let pripojeniId: string
+  const id = text(formData, 'id')
+  if (id) {
+    // Výměna: jen připojení příjmového API, které člověk v tomhle rozsahu vidí.
+    const najite = prijmy.find((s) => s.id === id && v.pristup.pobocky.some((p) => p.id === s.branch_id))
+    if (!najite) return { stav: 'chyba', duvod: 'Tohle napojení tu není.' }
+    pripojeniId = najite.id
+  } else {
+    const pobocka = v.pristup.pobocky.find((p) => p.id === text(formData, 'pobocka'))
+    if (!pobocka) return { stav: 'chyba', duvod: 'Vyberte pobočku.' }
+    if (prijmy.some((s) => s.branch_id === pobocka.id)) {
+      return { stav: 'chyba', duvod: `Pobočka ${pobocka.nazev} už klíč má — u napojení výš ho můžete vyměnit.` }
+    }
+    // Id se vylosuje tady: zápis pak nepotřebuje číst řádek zpátky (to by
+    // chtělo právo na Finance, které správce napojení mít nemusí).
+    pripojeniId = randomUUID()
+    const { error } = await supabase.from('integrace_pripojeni').insert({
+      id: pripojeniId,
+      tenant_id: v.tenantId,
+      branch_id: pobocka.id,
+      oblast: 'rezervace',
+      poskytovatel: POSKYTOVATEL_PRIJMU,
+      rezim: 'zakaznicky',
+      // „Čeká na první data“, dokud nepřijde první úspěšně zapsaná dávka.
+      stav: 'nepripojeno',
+      nazev: `Příjmové API — ${pobocka.nazev}`,
+      capabilities: { prijem: true },
+    })
+    if (error) return { stav: 'chyba', duvod: error.code === '42501' ? 'Na téhle pobočce napojení zakládat nemůžete.' : 'Napojení se nepodařilo založit.' }
+  }
+
+  const klic = slozitKlicRezervaci(pripojeniId, randomBytes(32).toString('base64url'))
+  const { sifra, otisk } = zasifrovat({ klic })
+  const { error: chybaKlice } = await supabase.rpc('integrace_uloz_tajemstvi', { p_pripojeni: pripojeniId, p_sifra: sifra, p_otisk: otisk })
+  if (chybaKlice) return { stav: 'chyba', duvod: 'Klíč se nepodařilo uložit — zkuste to znovu.' }
+
+  revalidatePath(`/${rozsah}/rezervace/napojeni`)
+  return { stav: 'ok', klic, adresa: `${await zakladniAdresaAplikace()}/api/rezervace/prijem` }
 }
