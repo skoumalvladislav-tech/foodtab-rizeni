@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
 import { datumACasSRokemVPasmu } from '@/lib/cas'
+import { parovaniJeNastavene } from '@/lib/jine-platby-ai-parovani-jadro'
 import { mnozstviNaText } from '@/lib/jine-platby-castky'
 import { REZERVA_PO_PLATNOSTI_MS } from '@/lib/jine-platby-pos-operace'
 import { nalezPokladny, popisStavuSkladu, prohlaseniProtiPokladne, type AkceJinePlatby } from '@/lib/jine-platby-stav'
@@ -9,6 +10,7 @@ import { PLATNOST_KONTROLY_SKLADU_MIN, type ZaznamJinePlatby } from '@/lib/jine-
 import { PanelHlava } from '../../../../dnes/prvky'
 import Ikona from '../../../../ikona'
 import { korekceVydeje, odeslatSklad, prohlasitSklad, propojitVydej, rucneDolozit, zrusitSchvaleni } from '../akce'
+import { najitVPokladne } from '../akce-parovani'
 import { obnovitVydej, provestVydej, rozhodnoutVydej, vydejZnovu, zkontrolovatSklad } from '../akce-pos'
 import ZnackaStavu from '../znacka-stavu'
 import FormularAkce from './formular-akce'
@@ -168,6 +170,16 @@ export default function SekceSklad({
   /** Nejasná operace po vypršení platnosti: databáze pustí ruční doložení i zrušení schválení (C5) — `dostupneAkce` je nabídne. */
   const nejasnaPoPlatnosti = nejasnaOperace && (akce.has('rucne_dolozit') || akce.has('zrusit_schvaleni'))
   const konecDohledavani = operace?.platnostDo ? Date.parse(operace.platnostDo) + REZERVA_PO_PLATNOSTI_MS : NaN
+  /**
+   * „Najít produkty v pokladně (AI)“: jen u návrhu, který ještě nejde
+   * odeslat, protože některá skladová položka nemá přiřazení (řádky
+   * „nenamapovano“ v `prevody`), s právem upravit a se zapnutou AI.
+   */
+  const nabidnoutParovani =
+    akce.has('upravit') &&
+    parovaniJeNastavene() &&
+    prevody.some((r) => r.mapovani === 'nenamapovano') &&
+    (nahled?.blokace ?? []).some((b) => b.duvod.startsWith('Položka nemá ověřené přiřazení'))
 
   const seznamBlokaci = (blokace: BlokaceVydeje[]) => (
     <ul style={{ margin: 0, paddingLeft: '20px' }}>
@@ -238,7 +250,16 @@ export default function SekceSklad({
               </strong>
               {seznamBlokaci(nahled.blokace)}
             </div>
-          ) : akce.has('odeslat_sklad') ? (
+          ) : null}
+          {nabidnoutParovani ? (
+            <FormularAkce akce={najitVPokladne} {...zakl} tlacitko="Najít produkty v pokladně (AI)">
+              <Vysvetleni>
+                AI porovná položky bez přiřazení s katalogem pokladny a navrhne produkt. Návrh je jen ke kontrole — u položky ho ověřte a potvrďte, teprve
+                pak jde výdej odeslat. Do AI jde jen název, množství a jednotka z dokladu a názvy produktů z katalogu (žádné ceny ani jména).
+              </Vysvetleni>
+            </FormularAkce>
+          ) : null}
+          {nahled.blokace.length > 0 ? null : akce.has('odeslat_sklad') ? (
             <FormularAkce akce={odeslatSklad} {...zakl} tlacitko="Odeslat ke schválení" vzhled="hlavni">
               <Vysvetleni>Návrh půjde ke schválení („Potvrdit výdej do POS“). Sklad se tím nemění.</Vysvetleni>
             </FormularAkce>
@@ -357,7 +378,10 @@ export default function SekceSklad({
                     // Pokrm i kusové zboží: databáze schválí jen s výslovným potvrzením (p_bez_surovin).
                     <label style={{ display: 'flex', gap: '8px', alignItems: 'center', minHeight: '44px', fontSize: '14px', fontWeight: 600 }}>
                       <input type="checkbox" name="bez_surovin" value="ano" required />
-                      <span>Zboží není surovina toho pokrmu (povinné — suroviny pokrmu odečte pokladna podle receptury sama)</span>
+                      <span>
+                        Zboží není surovina toho pokrmu, nebo se má odepsat navíc k receptuře — upozornění výše jsem zkontroloval(a) (povinné —
+                        suroviny pokrmu odečte pokladna podle receptury sama)
+                      </span>
                     </label>
                   ) : null}
                   <PoleDuvodu

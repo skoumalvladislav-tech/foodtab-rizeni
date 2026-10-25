@@ -97,7 +97,7 @@ const ok = (popis, podminka) => {
 
 const KOREN = 'app/[rozsah]/finance/trzby/jine-platby'
 const ZAZNAM = `${KOREN}/[zaznam]`
-const AKCE_SOUBORY = ['akce.ts', 'akce-pos.ts', 'akce-ai.ts'].map((f) => `${KOREN}/${f}`)
+const AKCE_SOUBORY = ['akce.ts', 'akce-pos.ts', 'akce-ai.ts', 'akce-parovani.ts'].map((f) => `${KOREN}/${f}`)
 const MOJE = [...AKCE_SOUBORY, ...readdirSync(ZAZNAM).filter((f) => /\.(tsx?|css)$/.test(f)).map((f) => `${ZAZNAM}/${f}`)]
 
 /** Zdroj bez komentářů (JSX, blokových i řádkových) a s LF konci řádků. */
@@ -196,6 +196,8 @@ const PRAVO_RPC = {
   jine_platby_ulozit_mapovani: ['jine_platby.upravit'],
   jine_platby_zahajit_rozpoznani: ['jine_platby.upravit'],
   jine_platby_dokoncit_rozpoznani: ['jine_platby.upravit'],
+  jine_platby_zahajit_parovani: ['jine_platby.upravit'],
+  jine_platby_dokoncit_parovani: ['jine_platby.upravit'],
   // Čtení náhledu výdeje (vidí ho každý, kdo vidí záznam); schválení ho čte kvůli varování (C6).
   jine_platby_sestavit_vydej: ['jine_platby.vydej_pos', 'jine_platby.sklad_odeslat'],
   jine_platby_zapsat_kontrolu: ['jine_platby.trzba', 'jine_platby.vydej_pos'],
@@ -245,6 +247,7 @@ const OCEKAVANA_PRAVA = {
   obnovitVydej: ['jine_platby.vydej_pos'],
   nacistKatalog: ['jine_platby.upravit'],
   rozpoznat: ['jine_platby.upravit'],
+  najitVPokladne: ['jine_platby.upravit'],
 }
 
 const exportovane = {}
@@ -282,7 +285,7 @@ for (const soubor of AKCE_SOUBORY) {
     ok(`${kratce} › ${f.jmeno}: začíná pripravit(formData, ${m ? m[1] : '?'}) a vrací se při odmítnutí`, Boolean(m) && prava.length > 0)
     ok(`${kratce} › ${f.jmeno}: právo je přesně ${(OCEKAVANA_PRAVA[f.jmeno] ?? ['?']).join(' + ')}`, JSON.stringify(prava) === JSON.stringify(OCEKAVANA_PRAVA[f.jmeno] ?? null))
     const iPrip = f.telo.indexOf('await pripravit(')
-    const poradi = ['.rpc(', 'klientUlohy(', 'otevritRelaciPokladny(', 'rozpoznatDoklad(', '.download(']
+    const poradi = ['.rpc(', 'klientUlohy(', 'otevritRelaciPokladny(', 'rozpoznatDoklad(', 'naparovatPolozky(', '.download(']
       .map((x) => f.telo.indexOf(x))
       .filter((i) => i >= 0)
     ok(`${kratce} › ${f.jmeno}: RPC, služba, pokladna i AI až po pripravit`, iPrip > 0 && poradi.every((i) => i > iPrip))
@@ -344,7 +347,8 @@ console.log('\n== 4. Pokladna: zápis jen přes provestOperaci ==')
   const zapisy = [...s.matchAll(/(?<!schopnosti)\.skladovyVydej\b/g)].map((m) => m.index)
   const iPos = s.indexOf(pos)
   ok(`metoda zápisu relace (.skladovyVydej) jen uvnitř posProOperaci (${zapisy.length}×)`, zapisy.length > 0 && zapisy.every((i) => i > iPos && i < iPos + pos.length))
-  ok('posProOperaci zápis jen předá (odeslat: …), nevolá ho', /odeslat: typeof zapis === 'function' \? \(op\) => zapis\.call\(relace, op\) : undefined/.test(pos) && !/await zapis/.test(pos))
+  ok('posProOperaci zápis jen předá (odeslat: …) a jen se schopností api (povolená provozovna), nevolá ho',
+    /odeslat: schopnost === 'api' && zapis \? \(op: OperacePos\) => zapis\(op\) : undefined/.test(pos) && !/await zapis/.test(pos))
   ok('nikde přímé .odeslat( ani skladovyVydej(', !/\.odeslat\(/.test(s) && !/skladovyVydej\(/.test(s))
   const volani = [...s.matchAll(/posProOperaci\(rel\.relace/g)].length
   const vOrchestratoru = [...s.matchAll(/(?:provestOperaci|obnovitOperaci)\(op, repoOperaci\(uloha\), posProOperaci\(rel\.relace/g)].length
@@ -393,10 +397,12 @@ const STUB_AKCE_POS = js(
     .map((n) => `export async function ${n}() { return { stav: 'nic', text: '' } }`)
     .join('\n'),
 )
+const STUB_AKCE_PAROVANI = js(`export async function najitVPokladne() { return { stav: 'nic', text: '' } }`)
 const KRESLENI = [
   ['next/link', STUB_LINK],
   ['../akce', STUB_AKCE],
   ['../akce-pos', STUB_AKCE_POS],
+  ['../akce-parovani', STUB_AKCE_PAROVANI],
 ]
 
 const textHtml = (html) =>
@@ -1082,9 +1088,11 @@ console.log('\n-- výdej do pokladny přes orchestrátor --')
   ok("pokladna 'rucne': zápisová metoda relace se NEZAVOLÁ a operace se uzavře jako nepodporováno",
     zaznamy(s, 'ZAPIS_DO_POKLADNY').length === 0 && rpc.some((x) => x[2] === 'pos_operace_dokoncit' && x[3].p_stav === 'nepodporovano') && !rpc.some((x) => x[2] === 'pos_operace_zahajit'))
 
+  // Účet v pokladně s položkami výdeje (radekOperace: 2× X1) — úspěch je jen se shodou položek (25. 10.).
+  const polozkyVydeje = [{ produktId: 'X1', nazev: 'Pivo', mnozstvi: '2', odecitaSklad: true, zrusena: false }]
   const api = svet()
   api.relace.schopnosti.skladovyVydej = 'api'
-  api.relace.relace.ucetPodleKlice = async (klic) => ({ stav: 'ok', ucet: ucet({ externiId: 'POS-77', externiKlic: klic, odpis: true }) })
+  api.relace.relace.zapisVydejePovolen = (provozovna) => provozovna === 'PROV1'
   // Před zabráním čerstvá kontrola: pokladna podle klíče zatím nic nemá (první dotaz), po odeslání ano.
   let poOdeslani = false
   api.relace.relace.skladovyVydej = async () => {
@@ -1092,7 +1100,7 @@ console.log('\n-- výdej do pokladny přes orchestrátor --')
     poOdeslani = true
     return { stav: 'odeslano' }
   }
-  api.relace.relace.ucetPodleKlice = async (klic) => ({ stav: 'ok', ucet: poOdeslani ? ucet({ externiId: 'POS-77', externiKlic: klic, odpis: true }) : null })
+  api.relace.relace.ucetPodleKlice = async (klic) => ({ stav: 'ok', ucet: poOdeslani ? ucet({ externiId: 'POS-77', externiKlic: klic, odpis: true, polozky: polozkyVydeje }) : null })
   api.tabulky.pos_operace = (filtry) => (filtry.some(([, k]) => k === 'druh') ? [radekOperace()] : [])
   await spustit(akcePos.provestVydej, KLID, formular({}))
   const r2 = zaznamy(api, 'rpc')
@@ -1102,9 +1110,24 @@ console.log('\n-- výdej do pokladny přes orchestrátor --')
   ok("pokladna 'api': těsně před výdejem kontrola (neodečteno) → zabrání → JEDEN zápis → ověřený úspěch",
     iKontrola >= 0 && r2[iKontrola][3].p_vysledek === 'neodecteno' && iZah > iKontrola && iDok > iZah && zaznamy(api, 'ZAPIS_DO_POKLADNY').length === 1 && r2[iDok][3].p_stav === 'uspech' && r2[iDok][3].p_externi_id === 'POS-77')
 
+  // Adaptér hlásí 'api', ale TAHLE provozovna zápis povolený nemá (ZAPIS_VYDEJE_DOTYKACKA jen pro jinou):
+  // metoda zápisu se nezavolá a výdej jde ručně (25. 10.).
+  const jina = svet()
+  jina.relace.schopnosti.skladovyVydej = 'api'
+  jina.relace.relace.zapisVydejePovolen = (provozovna) => provozovna === 'PROV9'
+  jina.relace.relace.skladovyVydej = async () => {
+    jina.log.push(['ZAPIS_DO_POKLADNY'])
+    return { stav: 'odeslano' }
+  }
+  jina.tabulky.pos_operace = (filtry) => (filtry.some(([, k]) => k === 'druh') ? [radekOperace()] : [])
+  await spustit(akcePos.provestVydej, KLID, formular({}))
+  const rj = zaznamy(jina, 'rpc')
+  ok("pokladna 'api', ale provozovna záznamu zápis povolený nemá: zápis se NEZAVOLÁ, nic se nezabere, výdej nepodporovaný (ručně)",
+    zaznamy(jina, 'ZAPIS_DO_POKLADNY').length === 0 && !rj.some((x) => x[2] === 'pos_operace_zahajit') && rj.some((x) => x[2] === 'pos_operace_dokoncit' && x[3].p_stav === 'nepodporovano'))
+
   const obn = svet({ operace: { stav: 'nejasny_vysledek', platnost_do: '2026-10-16T10:05:00Z' } })
   obn.relace.schopnosti.skladovyVydej = 'api'
-  obn.relace.relace.ucetPodleKlice = async (klic) => ({ stav: 'ok', ucet: ucet({ externiId: 'POS-88', externiKlic: klic, odpis: true }) })
+  obn.relace.relace.ucetPodleKlice = async (klic) => ({ stav: 'ok', ucet: ucet({ externiId: 'POS-88', externiKlic: klic, odpis: true, polozky: polozkyVydeje }) })
   await spustit(akcePos.obnovitVydej, KLID, formular({}))
   ok('obnova nejasného výdeje: nic se neodešle znovu, jen se dohledá a uloží úspěch',
     zaznamy(obn, 'ZAPIS_DO_POKLADNY').length === 0 && zaznamy(obn, 'rpc').some((x) => x[2] === 'pos_operace_dokoncit' && x[3].p_stav === 'uspech'))
@@ -2347,6 +2370,7 @@ console.log('\n== 9. Celá stránka detailu (podvržená data) ==')
     ['../akce', STUB_AKCE],
     ['../akce-pos', STUB_AKCE_POS],
     ['../akce-ai', js("export async function rozpoznat() { return { stav: 'nic', text: '' } }")],
+    ['../akce-parovani', STUB_AKCE_PAROVANI],
   ]
   const ZAKLAD_STRANKY = adresaModulu(`${ZAZNAM}/akce-zaklad.ts`, STRANKA)
   const Stranka = await nactiKomponentu(`${ZAZNAM}/page.tsx`, [...STRANKA, ['./akce-zaklad', ZAKLAD_STRANKY]])

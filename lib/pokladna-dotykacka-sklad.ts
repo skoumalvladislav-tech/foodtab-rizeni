@@ -1,8 +1,10 @@
 /**
- * Dotykačka (Dotypos) API v2 — katalog produktů, dohledání účtů a
- * (VYPNUTÝ) skladový výdej pro Jiné platby (docs/jine-platby-navrh.md,
- * oddíl 7). Čtení se připojuje do relace v `lib/pokladna-dotykacka.ts`
- * (`cteniDotykacky`), zápis NE (viz `odeslatVydejDotykacka`).
+ * Dotykačka (Dotypos) API v2 — katalog produktů (i s recepturami),
+ * dohledání účtů a skladový výdej pro Jiné platby (docs/jine-platby-navrh.md,
+ * oddíl 7; docs/jine-platby-vydej-dotykacka.md). Čtení se připojuje do
+ * relace v `lib/pokladna-dotykacka.ts` (`cteniDotykacky`), zápis jen pro
+ * provozovny z `ZAPIS_VYDEJE_DOTYKACKA` — a ten seznam je prázdný (viz
+ * `odeslatVydejDotykacka`).
  *
  * Všechno podle oficiální dokumentace docs.api.dotypos.com, čteno
  * 16. 10. 2026 (verze API 2026.38.2). ŽIVĚ NEOVĚŘENO — testy jedou
@@ -13,10 +15,21 @@
  *     odpověď `data[]` s `id`, `name`, `unit` (výčet api-reference/enums/units,
  *     např. "Piece", "Liter"), `packaging` („Number of items in a package"),
  *     `stockDeduct` („Product is deducted from Warehouse"), `plu[]`, `ean[]`,
- *     `deleted`. Suroviny (receptura) jdou jen přes `include=ingredients`
- *     a „Including an entity requires read permission … otherwise 403" —
- *     appka je nečte, `maRecepturu` je proto vždy `null`. Pole `recipe`
- *     je jen text postupu přípravy, o surovinách nic neříká.
+ *     `deleted`. Suroviny (receptura) jdou přes `include=ingredients`
+ *     (každý produkt pak nese `ingredients[]`, entity/product-ingredient:
+ *     `_productId` suroviny, `quantity`, `unit`, `deleted`) a „the client
+ *     must have the proper permissions to read the included entity … 403
+ *     Forbidden otherwise" — při 403 se katalog načte znovu BEZ receptur
+ *     (`maRecepturu` pak null, `bezReceptur: true`). Čteno 25. 10. 2026
+ *     (verze API 2026.39.0). Pole `recipe` je jen text postupu přípravy,
+ *     o surovinách nic neříká.
+ *   * GET /v2/clouds/:cloudId/manifest (entity/cloud-manifest), čteno
+ *     25. 10. 2026: `branches[]` s `branchId`, `isLicensed`, `features`
+ *     („Contains posAction when the branch has an active premium (or
+ *     higher) license") a `stockDeductionMode` („One of disabled,
+ *     orderPark, documentIssue"). Čte se těsně před POS akcí
+ *     (`odeslatVydejDotykacka`): s `disabled` by účet vznikl, ale sklad
+ *     by se neodečetl.
  *   * GET /v2/clouds/:cloudId/orders (entity/order): `filter`, `include`
  *     (`orderItems`, `moneyLogs`), `namedFilter` (`openOrders` = „returns
  *     open orders only"), `sort`, `page`, `limit`. Pole účtu: `id`,
@@ -48,7 +61,10 @@
  *     (api-reference/general/data-types) — všechno se čte obranně.
  *
  * CO SE Z DOKUMENTACE NEDALO ZJISTIT, a proto se to NEDOMÝŠLÍ:
- *   * receptura produktu bez `include=ingredients` → `maRecepturu: null`;
+ *   * receptura produktu bez `include=ingredients` (nebo bez klíče
+ *     `ingredients` v odpovědi, nebo s nečitelnou surovinou) → `maRecepturu:
+ *     null`. Jen pole `ingredients` dá „bez receptury" (`[]`) — chybějící
+ *     klíč by jinak vyřadil pokrm z výdeje (app.jp_sestavit_vydej);
  *   * jestli odpis = platba 900000012 („Write-off", api-reference/enums/payment-methods):
  *     platby účtu by byly jen v `include=moneyLogs` (403 bez práva).
  *     `odpis` se bere z příznaku účtu WRITEOFF (bit 11, entity/order),
@@ -66,8 +82,7 @@
  * typy), aby mezi soubory nevznikl kruh.
  */
 
-import type { OperacePos, PosProOperaci } from './jine-platby-pos-operace.ts'
-import type { ChybaPos, PolozkaUctuPos, ProduktPos, RelacePos, UcetPos } from './pos-provider-contract.ts'
+import type { ChybaPos, PolozkaUctuPos, ProduktPos, RelacePos, SurovinaPos, UcetPos, VydejPos } from './pos-provider-contract.ts'
 
 /** Jedno volání API: stav a rozparsované tělo (null, když to není JSON), nebo chyba sítě. */
 export type OdpovedDotykacky = { status: number; telo: unknown }
@@ -216,12 +231,50 @@ function chybaTvaru(co: string): ChybaPos {
 /* Výklad odpovědí                                                     */
 /* ------------------------------------------------------------------ */
 
+/** Nejvýš tolik surovin jedné receptury appka uloží (`pos_katalog.suroviny`). */
+const MAX_SUROVIN = 200
+
+/**
+ * Důvody 403 (api-reference/general/common-error-responses), které se
+ * netýkají jen čtení receptur: s nimi by katalog bez receptur spadl stejně,
+ * takže se neopakuje a hlásí se rovnou.
+ */
+const NE_KVULI_RECEPTURAM: ReadonlySet<string> = new Set(['INVALID_ACCESS_TOKEN', 'ACCESS_TOKEN_EXPIRED', 'CLOUD_FORBIDDEN', 'LICENSE_UPGRADE_REQUIRED'])
+
+function duvod403(telo: unknown): string {
+  const r = telo && typeof telo === 'object' && !Array.isArray(telo) ? (telo as Record<string, unknown>).reason : null
+  return typeof r === 'string' ? r.trim().toUpperCase() : ''
+}
+
+/**
+ * Receptura produktu z `ingredients[]` (include=ingredients,
+ * entity/product-ingredient). `null` = neví se: klíč chybí (bez include),
+ * není to pole, nebo je některá surovina nečitelná — neúplná receptura by
+ * vypadala jako celá a varování o dvojím odečtu by mlčelo. Smazané
+ * suroviny (`deleted`) se vynechají.
+ */
+export function naparsovatSuroviny(hodnota: unknown): SurovinaPos[] | null {
+  if (!Array.isArray(hodnota) || hodnota.length > MAX_SUROVIN) return null
+  const suroviny: SurovinaPos[] = []
+  for (const s of hodnota) {
+    if (!s || typeof s !== 'object') return null
+    const r = s as Record<string, unknown>
+    if (ano(r.deleted) === true) continue
+    const produkt = idText(r._productId)
+    if (!produkt) return null
+    const mnozstvi = mnozstviNaText(r.quantity)
+    suroviny.push({ produkt, mnozstvi: mnozstvi !== null && Number(mnozstvi) > 0 ? mnozstvi : null, jednotka: text(r.unit, 40) })
+  }
+  return suroviny
+}
+
 /** Jeden produkt (entity/product). `null` = bez id, appka mu nerozumí. */
 export function naparsovatProdukt(p: unknown): ProduktPos | null {
   if (!p || typeof p !== 'object') return null
   const r = p as Record<string, unknown>
   const id = idText(r.id)
   if (!id) return null
+  const suroviny = 'ingredients' in r ? naparsovatSuroviny(r.ingredients) : null
   return {
     externiId: id,
     nazev: text(r.name) ?? `Produkt ${id}`,
@@ -229,7 +282,8 @@ export function naparsovatProdukt(p: unknown): ProduktPos | null {
     // Viz hlavička: `packaging` je počet kusů v balení, ne objem kusu.
     mira: null,
     odecitaSklad: ano(r.stockDeduct),
-    maRecepturu: null,
+    maRecepturu: suroviny === null ? null : suroviny.length > 0,
+    suroviny,
     plu: seznamTextu(r.plu),
     ean: seznamTextu(r.ean),
     smazano: ano(r.deleted) === true,
@@ -346,31 +400,51 @@ function provozovnaUctu(o: unknown): string | null {
 export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'katalog' | 'ucty' | 'ucetPodleKlice'>> {
   const zakladUctu = `${k.api}/clouds/${k.cloudId}/orders`
 
+  /**
+   * Celý katalog po stránkách. S `sRecepturami` se ptá i na receptury
+   * (`include=ingredients`); 403 pak vrací jako `'bez_prava'`, aby
+   * `katalog()` mohl začít znovu bez nich.
+   */
+  async function katalogPoStrankach(sRecepturami: boolean): Promise<{ stav: 'ok'; produkty: ProduktPos[] } | ChybaPos | 'bez_prava'> {
+    const produkty: ProduktPos[] = []
+    for (let strana = 1; strana <= MAX_STRAN_KATALOGU; strana++) {
+      const parametry = new URLSearchParams({ page: String(strana), limit: String(LIMIT_STRANKY) })
+      if (sRecepturami) parametry.set('include', 'ingredients')
+      const odpoved = await k.pozadavek(`${k.api}/clouds/${k.cloudId}/products?${parametry}`, { headers: k.hlavicky })
+      if (jeChyba(odpoved)) return odpoved
+      // „Note that the client must have the proper permissions to read the included entity … 403" (entity/product).
+      // 403 kvůli tokenu, cloudu nebo licenci (common-error-responses) neplatí jen pro receptury — ta je chyba hned.
+      if (sRecepturami && odpoved.status === 403 && !NE_KVULI_RECEPTURAM.has(duvod403(odpoved.telo))) return 'bez_prava'
+      // „lastPage … pro prázdná data API zatím vrací 404" (api-reference/general/paging)
+      if (odpoved.status === 404) return { stav: 'ok', produkty }
+      if (odpoved.status !== 200) return k.chybaZeStavu(odpoved.status, 'čtení katalogu produktů', odpoved.telo)
+
+      const cast = naparsovatProdukty(odpoved.telo)
+      if (!cast) return chybaTvaru('Katalog produktů')
+      // Bez include receptura neznámá, i kdyby odpověď nějaké `ingredients` nesla.
+      produkty.push(...(sRecepturami ? cast : cast.map((p) => ({ ...p, maRecepturu: null, suroviny: null }))))
+
+      // Kratší stránka je poslední. U produktů API počty zná, takže výslovné `nextPage: null` je taky konec.
+      const telo = odpoved.telo as { nextPage?: unknown } | null
+      const bezDalsi = telo !== null && typeof telo === 'object' && !Array.isArray(telo) && 'nextPage' in telo && telo.nextPage === null
+      if (cast.length < LIMIT_STRANKY || bezDalsi) return { stav: 'ok', produkty }
+    }
+    return {
+      stav: 'chyba',
+      druh: 'jina',
+      duvod: `Katalog v Dotykačce je větší, než appka zatím načte (víc než ${MAX_STRAN_KATALOGU * LIMIT_STRANKY} produktů). Nic se neuložilo — strop je potřeba zvednout v appce.`,
+    }
+  }
+
   return {
     async katalog() {
-      const produkty: ProduktPos[] = []
-      for (let strana = 1; strana <= MAX_STRAN_KATALOGU; strana++) {
-        const parametry = new URLSearchParams({ page: String(strana), limit: String(LIMIT_STRANKY) })
-        const odpoved = await k.pozadavek(`${k.api}/clouds/${k.cloudId}/products?${parametry}`, { headers: k.hlavicky })
-        if (jeChyba(odpoved)) return odpoved
-        // „lastPage … pro prázdná data API zatím vrací 404" (api-reference/general/paging)
-        if (odpoved.status === 404) return { stav: 'ok', produkty }
-        if (odpoved.status !== 200) return k.chybaZeStavu(odpoved.status, 'čtení katalogu produktů', odpoved.telo)
-
-        const cast = naparsovatProdukty(odpoved.telo)
-        if (!cast) return chybaTvaru('Katalog produktů')
-        produkty.push(...cast)
-
-        // Kratší stránka je poslední. U produktů API počty zná, takže výslovné `nextPage: null` je taky konec.
-        const telo = odpoved.telo as { nextPage?: unknown } | null
-        const bezDalsi = telo !== null && typeof telo === 'object' && !Array.isArray(telo) && 'nextPage' in telo && telo.nextPage === null
-        if (cast.length < LIMIT_STRANKY || bezDalsi) return { stav: 'ok', produkty }
-      }
-      return {
-        stav: 'chyba',
-        druh: 'jina',
-        duvod: `Katalog v Dotykačce je větší, než appka zatím načte (víc než ${MAX_STRAN_KATALOGU * LIMIT_STRANKY} produktů). Nic se neuložilo — strop je potřeba zvednout v appce.`,
-      }
+      // Nejdřív s recepturami. Bez práva je číst (403) celý katalog znovu bez nich
+      // — ne napůl: stránky s recepturou a bez ní by se nedaly rozlišit.
+      const s = await katalogPoStrankach(true)
+      if (s !== 'bez_prava') return s
+      const bez = await katalogPoStrankach(false)
+      if (bez === 'bez_prava') return k.chybaZeStavu(403, 'čtení katalogu produktů')
+      return bez.stav === 'ok' ? { ...bez, bezReceptur: true } : bez
     },
 
     async ucty(
@@ -459,8 +533,70 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
 }
 
 /* ------------------------------------------------------------------ */
-/* Skladový výdej přes POS akci — NEPŘIPOJENO K ADAPTÉRU                */
+/* Skladový výdej přes POS akci — připojí se jen pro provozovny         */
+/* z ZAPIS_VYDEJE_DOTYKACKA (lib/pokladna-dotykacka-zapis.ts, prázdné)  */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Nastavení provozovny z manifestu cloudu (entity/cloud-manifest), které
+ * rozhoduje, jestli má smysl POS akci posílat.
+ */
+export type ManifestProvozovny = {
+  /** `isLicensed` — aktivní licence. */
+  licence: boolean | null
+  /** `features` obsahuje `posAction` (licence premium a vyšší). */
+  posAkce: boolean
+  /** `stockDeductionMode`: 'disabled' | 'orderPark' | 'documentIssue', jinak text, jak přišel; `null` = chybí. */
+  rezimOdectu: string | null
+}
+
+/** Odpověď manifestu → nastavení jedné provozovny. `'nenalezeno'` = provozovna v manifestu není, `null` = tvar, kterému appka nerozumí. */
+export function naparsovatManifest(telo: unknown, provozovna: string): ManifestProvozovny | 'nenalezeno' | null {
+  const pobocky = telo && typeof telo === 'object' && !Array.isArray(telo) ? (telo as Record<string, unknown>).branches : undefined
+  if (!Array.isArray(pobocky)) return null
+  for (const b of pobocky) {
+    if (!b || typeof b !== 'object') continue
+    const r = b as Record<string, unknown>
+    if (idText(r.branchId) !== provozovna) continue
+    const funkce = Array.isArray(r.features) ? r.features : []
+    return {
+      licence: ano(r.isLicensed),
+      posAkce: funkce.some((f) => f === 'posAction'),
+      rezimOdectu: text(r.stockDeductionMode, 40),
+    }
+  }
+  return 'nenalezeno'
+}
+
+/** Režimy, ve kterých odpis přes POS akci opravdu odečte sklad (entity/cloud-manifest). */
+const REZIMY_S_ODECTEM = ['documentIssue', 'orderPark']
+
+/**
+ * Smí se do provozovny POS akce vůbec poslat? `null` = ano, jinak důvod
+ * (a jestli pomůže zkusit to později). Nic z toho se neposílá — odmítnutí
+ * před odesláním je vždycky „nic se neprovedlo".
+ */
+export async function overitProvozovnuProVydej(
+  k: KontextDotykacky,
+  provozovna: string,
+): Promise<null | { duvod: string; docasna: boolean }> {
+  const odpoved = await k.pozadavek(`${k.api}/clouds/${k.cloudId}/manifest`, { headers: k.hlavicky })
+  if (jeChyba(odpoved)) return { duvod: `Nastavení provozovny v Dotykačce se nepodařilo přečíst (${odpoved.duvod}) — nic se neodeslalo.`, docasna: true }
+  if (odpoved.status !== 200) {
+    const chyba = k.chybaZeStavu(odpoved.status, 'čtení nastavení provozovny', odpoved.telo)
+    return { duvod: `${chyba.duvod} Nic se neodeslalo.`, docasna: chyba.druh === 'docasna' }
+  }
+  const m = naparsovatManifest(odpoved.telo, provozovna)
+  if (m === null) return { duvod: 'Nastavení provozovny z Dotykačky má neočekávaný tvar — nic se neodeslalo.', docasna: false }
+  if (m === 'nenalezeno') return { duvod: 'Provozovna v nastavení cloudu Dotykačky není — nic se neodeslalo.', docasna: false }
+  if (m.licence !== true) return { duvod: 'Provozovna nemá v Dotykačce aktivní licenci — nic se neodeslalo.', docasna: false }
+  if (!m.posAkce) return { duvod: 'Licence provozovny neumí POS akce (chybí posAction, potřeba premium) — výdej zpracujte ručně. Nic se neodeslalo.', docasna: false }
+  if (m.rezimOdectu === 'disabled') return { duvod: 'Provozovna má v Dotykačce vypnutý odečet ze skladu — odpis by sklad neodečetl. Nic se neodeslalo.', docasna: false }
+  if (m.rezimOdectu === null || !REZIMY_S_ODECTEM.includes(m.rezimOdectu)) {
+    return { duvod: 'Režim odečtu skladu provozovny appka nezná — nejde ověřit, že odpis sklad odečte. Nic se neodeslalo.', docasna: false }
+  }
+  return null
+}
 
 export type PolozkaVydeje = {
   /** `_productId` produktu v Dotykačce (z `pos_katalog.externi_id`). */
@@ -597,44 +733,29 @@ export function vysledekPosAkce(status: number, telo: unknown, k: Pick<KontextDo
  * Skladový výdej přes POS akci `order/create-issue-pay` zaplacenou
  * způsobem Odpis (900000012), `external-id` = idempotenční klíč operace.
  *
- * NENÍ PŘIPOJENO K ADAPTÉRU. Schopnosti Dotykačky hlásí
- * `skladovyVydej: 'rucne'` a relace žádnou metodu zápisu nemá (hlídá
- * `scripts/pokladna-dotykacka-sklad.test.mjs`). Pravidlo projektu:
- * „bezpečné, protože to nikdo nezapnul" není pojistka — proto je schopnost
- * odebraná v kódu.
+ * K RELACI SE PŘIPOJÍ JEN PRO POVOLENÉ PROVOZOVNY. Adaptér
+ * (`vytvoritDotykacku().otevrit()`) připojí `zapisVydejeDotykacka` jen
+ * cloudu, který má provozovnu v `ZAPIS_VYDEJE_DOTYKACKA`
+ * (lib/pokladna-dotykacka-zapis.ts) — a ten seznam je PRÁZDNÝ. Pravidlo
+ * projektu: „bezpečné, protože to nikdo nezapnul" není pojistka — proto je
+ * schopnost odebraná v kódu (hlídá `scripts/pokladna-dotykacka-sklad.test.mjs`).
  *
- * PŘED PŘIPOJENÍM (na testovacím cloudu Dotykačky, ne na Černé Perle):
- *   1. `GET /v2/clouds/:cloudId/manifest` (entity/cloud-manifest): provozovna
- *      má ve `features` `posAction` a `stockDeductionMode` je `documentIssue`.
- *   2. Odeslat výdej jednoho kusového zboží a jednoho pokrmu s recepturou.
- *      Ověřit: účet vznikl s `externalId` = klíč, je zaplacený, má příznak
- *      WRITEOFF a `ucetPodleKlice` ho najde.
- *   3. Sklad: kusové zboží ubylo, u pokrmu ubyly SUROVINY podle receptury.
- *   4. Tržby: odpis se NEOBJEVÍ v `sales-report` v `productSales` (jinak by ho
- *      synchronizace zapsala do `pokladna_prodeje_denni` jako tržbu) a v
- *      `revenue.paymentTypeInfo` jen jako 900000012 (druh `odpis`) — pak ho
- *      přehled tržeb nesmí sčítat do tržby (otázka 53).
- *   5. `validity` v ms: platnost za 10 min projde, minulá vrátí kód 1007.
- *   6. Tvar těla HTTP 200 bez webhooku (obálka `code` / účet) a co přijde,
- *      když pokladna neodpoví do 21 s (404?); `print-type: none` projde;
- *      bez `user-id` nevrátí 1008.
- *   7. Opakované odeslání téhož klíče: vytvoří druhý účet? (Dokumentace
- *      unikátnost `external-id` neslibuje — appka proto nikdy neposílá
- *      znovu naslepo, jen po prokázané chybě.)
+ * Pořadí: kontrola tvaru (nic neodejde) → manifest provozovny (licence
+ * `posAction`, `stockDeductionMode` ≠ `disabled`; nic neodejde, když
+ * nesedí) → POS akce. Co ověřit na testovacím cloudu, než se řádek do
+ * seznamu přidá: docs/jine-platby-vydej-dotykacka.md, oddíl 6.
  *
- * KDO DÁ POKYN: Šéfík, výslovně (docs/jine-platby-pos-operace.md). Do té
- * doby výdej dělá člověk v pokladně a appka eviduje „ručně doloženo".
- *
- * JAK PŘIPOJIT: v `vytvoritDotykacku().otevrit()` přidat do relace
- * `skladovyVydej: zapisVydejeDotykacka(kontext)` (bere `OperacePos`
- * orchestrátoru a převede ji přes `vydejZOperace`, N20 — NE přímo
- * `odeslatVydejDotykacka`, ta čeká jiný tvar), schopnost přepnout na
- * `skladovyVydej: 'api'` a vědomě upravit kontrolu „relace NEMÁ metodu
- * pro zápis skladu" v testu. Co ještě chybí: viz `vydejZOperace`.
+ * KDO DÁ POKYN: Šéfík, výslovně (otázka 54). Do té doby výdej dělá člověk
+ * v pokladně a appka eviduje „ručně doloženo".
  */
 export async function odeslatVydejDotykacka(k: KontextDotykacky, v: VydejDotykacka, tedMs: number = Date.now()): Promise<VysledekOdeslani> {
   const sestaveno = sestavitTeloVydeje(v, tedMs)
   if ('chyba' in sestaveno) return { stav: 'odmitnuto', duvod: sestaveno.chyba, kod: null, docasna: false }
+
+  // Manifest PŘED odesláním: s vypnutým odečtem nebo bez licence POS akcí by
+  // účet vznikl (nebo požadavek padl), ale sklad by se neodečetl.
+  const nelze = await overitProvozovnuProVydej(k, v.provozovna)
+  if (nelze) return { stav: 'odmitnuto', duvod: nelze.duvod, kod: null, docasna: nelze.docasna }
 
   const odpoved = await k.pozadavek(
     `${k.api}/clouds/${k.cloudId}/branches/${v.provozovna}/pos-actions`,
@@ -649,13 +770,14 @@ export async function odeslatVydejDotykacka(k: KontextDotykacky, v: VydejDotykac
 }
 
 /* ------------------------------------------------------------------ */
-/* Napojení na orchestrátor operací (N20) — NEPŘIPOJENO K ADAPTÉRU      */
+/* Napojení na orchestrátor operací (N20)                               */
 /* ------------------------------------------------------------------ */
 
 /**
- * Operace orchestrátoru (`OperacePos` z lib/jine-platby-pos-operace.ts,
- * jak ji předá `provestOperaci` po zabrání) → tvar zápisu Dotykačky
- * (`VydejDotykacka`). Tvary se liší jménem i jednotkou:
+ * Výdej orchestrátoru (`VydejPos` z kontraktu, nadmnožina je `OperacePos`
+ * z lib/jine-platby-pos-operace.ts, jak ji předá `provestOperaci` po
+ * zabrání) → tvar zápisu Dotykačky (`VydejDotykacka`). Tvary se liší
+ * jménem i jednotkou:
  *   externiProvozovna  → provozovna
  *   platnostDo (ISO)   → platnostDoMs (epoch ms; Dotykačka bere ms)
  * Bez převodu by připojení `(v) => odeslatVydejDotykacka(k, v)` odmítlo
@@ -663,15 +785,11 @@ export async function odeslatVydejDotykacka(k: KontextDotykacky, v: VydejDotykac
  * zkoušel znovu dokola (kontrola 19. 10.).
  *
  * `{ chyba }` = nic se neodešle (chybí platnost nebo provozovna).
- *
- * CO JEŠTĚ CHYBÍ PŘED ZAPNUTÍM: u pokladny připojené k POBOČCE (ne ke
- * konkrétní provozovně) má záznam `pos_provozovna` NULL
- * (`jine_platby_zalozit`) a `rozhodnout_vydej` z ní plní
- * `pos_operace.externi_provozovna` — operace pak provozovnu nemá a tady
- * skončí chybou. Databáze musí provozovnu doplnit z aktuálního přiřazení
- * provozoven k pobočce (a odmítnout, když jich je víc nebo žádná).
+ * Provozovnu u pokladny připojené k pobočce doplní databáze při zabrání
+ * (`pos_operace_zahajit` → `app.jp_provozovna_vydeje`, migrace
+ * 20261025230000); bez ní zabrání neprojde a sem se nic nedostane.
  */
-export function vydejZOperace(op: OperacePos): VydejDotykacka | { chyba: string } {
+export function vydejZOperace(op: VydejPos): VydejDotykacka | { chyba: string } {
   const platnostDoMs = op.platnostDo === null ? Number.NaN : Date.parse(op.platnostDo)
   if (!Number.isFinite(platnostDoMs)) return { chyba: 'Operace nemá platnost požadavku — výdej se do pokladny neodešle.' }
   if (typeof op.externiProvozovna !== 'string' || op.externiProvozovna.trim() === '') {
@@ -687,16 +805,25 @@ export function vydejZOperace(op: OperacePos): VydejDotykacka | { chyba: string 
 }
 
 /**
- * Metoda zápisu pro relaci pokladny: přesně typ, který čeká orchestrátor
- * (`PosProOperaci['odeslat']` — v akce-pos.ts `relace.skladovyVydej`).
- * Zapnutí zápisu je pak opravdu jen připojení téhle funkce k relaci
- * (viz `odeslatVydejDotykacka`, oddíl JAK PŘIPOJIT). Typ hlídá `tsc`:
- * kdyby se tvar operace nebo výsledku rozešel, překlad spadne.
+ * Metoda zápisu pro relaci pokladny (`RelacePos.skladovyVydej`, kterou
+ * orchestrátor dostane v akce-pos.ts jako `odeslat`). `povolene` =
+ * provozovny z `ZAPIS_VYDEJE_DOTYKACKA` pro tenhle cloud: provozovna mimo
+ * ně se odmítne DŘÍV, než cokoli odejde — i kdyby se relace s metodou
+ * zápisu dostala k operaci jiné provozovny. Typ hlídá `tsc`: kdyby se tvar
+ * operace nebo výsledku rozešel s kontraktem, překlad spadne.
  */
-export function zapisVydejeDotykacka(k: KontextDotykacky): NonNullable<PosProOperaci['odeslat']> {
+export function zapisVydejeDotykacka(k: KontextDotykacky, povolene: ReadonlySet<string>): NonNullable<RelacePos['skladovyVydej']> {
   return async (op) => {
     const v = vydejZOperace(op)
     if ('chyba' in v) return { stav: 'odmitnuto', duvod: v.chyba, kod: null, docasna: false }
+    if (!povolene.has(v.provozovna)) {
+      return {
+        stav: 'odmitnuto',
+        duvod: 'Zápis do Dotykačky není pro tuhle provozovnu povolený — výdej zpracujte v pokladně ručně a doložte. Nic se neodeslalo.',
+        kod: null,
+        docasna: false,
+      }
+    }
     return odeslatVydejDotykacka(k, v)
   }
 }

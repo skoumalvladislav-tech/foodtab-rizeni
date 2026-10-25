@@ -6,7 +6,8 @@
  * Síť je podstrčená (`vytvoritDotykacku(fetchFn)`, `kontextDotykacky(fetchFn, …)`),
  * takže test ověří PŘESNÉ požadavky podle docs.api.dotypos.com (16. 10. 2026,
  * API 2026.38.2):
- *   GET  …/v2/clouds/:cloudId/products?page=&limit=100
+ *   GET  …/v2/clouds/:cloudId/products?page=&limit=100&include=ingredients  (při 403 znovu bez include)
+ *   GET  …/v2/clouds/:cloudId/manifest  (před každou POS akcí, 25. 10. 2026, API 2026.39.0)
  *   GET  …/v2/clouds/:cloudId/orders?filter=_branchId|eq|…;created|gteq|…;created|lt|…&include=orderItems&sort=created&page=&limit=100[&namedFilter=openOrders]
  *   GET  …/v2/clouds/:cloudId/orders?filter=_branchId|eq|…;completed|gteq|…;completed|lt|…&include=orderItems&sort=completed&page=&limit=100  (podle uzavření)
  *   GET  …/v2/clouds/:cloudId/orders?filter=externalId|eq|<klíč>&include=orderItems&page=1&limit=100
@@ -22,6 +23,7 @@
 import { readFileSync } from 'node:fs'
 
 const { API_DOTYKACKA, vytvoritDotykacku, kontextDotykacky } = await import('../lib/pokladna-dotykacka.ts')
+const { ZAPIS_VYDEJE_DOTYKACKA } = await import('../lib/pokladna-dotykacka-zapis.ts')
 const {
   CASOVY_LIMIT_POS_AKCE_MS,
   LIMIT_STRANKY,
@@ -69,6 +71,18 @@ async function relaceS(odpovedi) {
 }
 
 const produkt = (id, jine = {}) => ({ id: String(id), name: `Produkt ${id}`, unit: 'Piece', stockDeduct: 'true', deleted: 'false', ...jine })
+/** Manifest cloudu (entity/cloud-manifest), ve kterém provozovna 456 POS akce i odečet skladu umí. */
+const manifest = (pobocka = {}) => ({
+  status: 200,
+  telo: {
+    cloud: { name: 'Test', countryCode: 'CZ', currency: 'CZK' },
+    branches: [
+      { branchId: 999, name: 'Jiná', isLicensed: true, features: [], stockDeductionMode: 'disabled' },
+      { branchId: 456, name: 'Perla', isLicensed: true, features: ['posAction'], stockDeductionMode: 'documentIssue', ...pobocka },
+    ],
+  },
+})
+const MANIFEST_OK = manifest()
 const plnaStrana = (od, dalsi = 'x') => ({ currentPage: '1', nextPage: dalsi, data: Array.from({ length: LIMIT_STRANKY }, (_, i) => produkt(od + i)) })
 
 console.log('\n== Katalog: výklad produktu ==')
@@ -103,9 +117,9 @@ console.log('\n== Katalog: stránkování a konec ==')
   ])
   const k = await relace.katalog()
   ok('dvě stránky (100 + 3) → 103 produktů', k.stav === 'ok' && k.produkty.length === 103 && k.produkty.at(-1).externiId === '103')
-  ok('GET /v2/clouds/123/products?page=1&limit=100', pozadavky[0]?.url === `${API_DOTYKACKA}/clouds/123/products?page=1&limit=100`)
-  ok('druhá stránka page=2, s Bearer z přihlášení', pozadavky[1]?.url === `${API_DOTYKACKA}/clouds/123/products?page=2&limit=100` && pozadavky[1].init.headers.Authorization === 'Bearer AT-S')
-  ok('bez include (suroviny by mohly vrátit 403)', !pozadavky[0]?.url.includes('include'))
+  ok('GET /v2/clouds/123/products?page=1&limit=100&include=ingredients', pozadavky[0]?.url === `${API_DOTYKACKA}/clouds/123/products?page=1&limit=100&include=ingredients`)
+  ok('druhá stránka page=2, s Bearer z přihlášení', pozadavky[1]?.url === `${API_DOTYKACKA}/clouds/123/products?page=2&limit=100&include=ingredients` && pozadavky[1].init.headers.Authorization === 'Bearer AT-S')
+  ok('s recepturami bez příznaku bezReceptur', k.stav === 'ok' && k.bezReceptur === undefined)
   ok('po kratší stránce se dál neptá', pozadavky.length === 2)
 
   const s404 = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, { status: 404 }])
@@ -139,6 +153,60 @@ console.log('\n== Katalog: stránkování a konec ==')
   ok('produkt bez id → chyba jina (tvaru appka nerozumí, neúplný katalog nevrací)', kBezId.stav === 'chyba' && kBezId.druh === 'jina')
   const sTvar = await relaceS([{ status: 200, telo: { nic: 1 } }])
   ok('odpověď bez data → chyba jina', (await sTvar.relace.katalog()).stav === 'chyba')
+}
+
+console.log('\n== Katalog: receptury (include=ingredients, 25. 10.) ==')
+{
+  const svickova = naparsovatProdukt(produkt(10, {
+    stockDeduct: 'false',
+    ingredients: [
+      { id: '1', _parentProductId: '10', _productId: '501', quantity: '0.150', unit: 'Kilogram', deleted: 'false' },
+      { id: '2', _parentProductId: '10', _productId: 502, quantity: 0.1, unit: 'Liter' },
+      { id: '3', _parentProductId: '10', _productId: '503', quantity: '1', unit: 'Piece', deleted: 'true' },
+    ],
+  }))
+  ok('pokrm s recepturou: maRecepturu true, suroviny podle id suroviny, smazaná vynechaná',
+    svickova.maRecepturu === true && svickova.suroviny.length === 2 && svickova.suroviny[0].produkt === '501' && svickova.suroviny[1].produkt === '502')
+  ok('… množství jako text s tečkou bez koncových nul, jednotka beze změny',
+    svickova.suroviny[0].mnozstvi === '0.15' && svickova.suroviny[0].jednotka === 'Kilogram' && svickova.suroviny[1].mnozstvi === '0.1')
+  const pivo = naparsovatProdukt(produkt(11, { ingredients: [] }))
+  ok('prázdné ingredients → bez receptury (maRecepturu false, suroviny [])', pivo.maRecepturu === false && Array.isArray(pivo.suroviny) && pivo.suroviny.length === 0)
+  const bezKlice = naparsovatProdukt(produkt(12))
+  ok('bez klíče ingredients → neví se (null), NE „bez receptury" — pokrm by vypadl z výdeje', bezKlice.maRecepturu === null && bezKlice.suroviny === null)
+  const necitelna = naparsovatProdukt(produkt(13, { ingredients: [{ _productId: '501', quantity: '1' }, { quantity: '2' }] }))
+  ok('surovina bez id → celá receptura neznámá (null), ne neúplná', necitelna.maRecepturu === null && necitelna.suroviny === null)
+  const neniPole = naparsovatProdukt(produkt(14, { ingredients: 'x' }))
+  ok('ingredients, které nejsou pole → neví se', neniPole.maRecepturu === null)
+  const nula = naparsovatProdukt(produkt(15, { ingredients: [{ _productId: '501', quantity: '0' }, { _productId: '502', quantity: 'hodně' }] }))
+  ok('nulové nebo nečitelné množství suroviny → null (nic se nedomýšlí), surovina zůstává', nula.maRecepturu === true && nula.suroviny[0].mnozstvi === null && nula.suroviny[1].mnozstvi === null)
+
+  // 403 jen kvůli receptuře → celý katalog znovu BEZ include, s příznakem.
+  const s403 = await relaceS([
+    { status: 403, telo: { reason: 'ACCESS_DENIED' } },
+    { status: 200, telo: { nextPage: null, data: [produkt(1, { ingredients: [{ _productId: '9', quantity: '1' }] }), produkt(2)] } },
+  ])
+  const k403 = await s403.relace.katalog()
+  ok('403 (bez práva na receptury) → katalog znovu bez include, bezReceptur: true', k403.stav === 'ok' && k403.bezReceptur === true && k403.produkty.length === 2)
+  ok('… druhý dotaz už bez include=ingredients', s403.pozadavky.length === 2 && s403.pozadavky[0].url.includes('include=ingredients') && !s403.pozadavky[1].url.includes('include'))
+  ok('… bez include je receptura neznámá u všech (i kdyby odpověď ingredients nesla)', k403.produkty.every((p) => p.maRecepturu === null && p.suroviny === null))
+
+  const sDvakrat = await relaceS([{ status: 403, telo: {} }, { status: 403, telo: { reason: 'DOMAIN_FORBIDDEN' } }])
+  const kDvakrat = await sDvakrat.relace.katalog()
+  ok('403 i bez receptur → chyba (ne prázdný katalog)', kDvakrat.stav === 'chyba' && sDvakrat.pozadavky.length === 2)
+
+  const sToken = await relaceS([{ status: 403, telo: { reason: 'ACCESS_TOKEN_EXPIRED' } }])
+  const kToken = await sToken.relace.katalog()
+  ok('403 kvůli tokenu se neopakuje bez receptur (týká se celého volání) → chyba po jednom dotazu', kToken.stav === 'chyba' && sToken.pozadavky.length === 1)
+
+  const sDruha = await relaceS([
+    { status: 200, telo: plnaStrana(1, '2') },
+    { status: 403, telo: {} },
+    { status: 200, telo: plnaStrana(1, '2') },
+    { status: 200, telo: { nextPage: null, data: [produkt(101)] } },
+  ])
+  const kDruha = await sDruha.relace.katalog()
+  ok('403 až na druhé stránce → celý katalog znovu od první stránky bez receptur (ne napůl)',
+    kDruha.stav === 'ok' && kDruha.bezReceptur === true && kDruha.produkty.length === 101 && sDruha.pozadavky[2].url.includes('page=1') && !sDruha.pozadavky[2].url.includes('include'))
 }
 
 console.log('\n== Katalog: chyby jako u tržeb ==')
@@ -374,14 +442,16 @@ console.log('\n== Skladový výdej (POS akce) — tvar a výsledek odeslání ==
     platnostDoMs: PLATNOST,
     ...jine,
   })
+  // Před každou POS akcí se čte manifest (licence, režim odečtu) — tady vyhovující.
   const poslat = async (odpoved, v = vydej()) => {
-    const s = sit(odpoved === null ? [] : [odpoved])
+    const s = sit(odpoved === null ? [MANIFEST_OK] : [MANIFEST_OK, odpoved])
     const vysledek = await odeslatVydejDotykacka(kontextDotykacky(s.fetchFn, '123', 'AT-V'), v, TED)
     return { vysledek, pozadavky: s.pozadavky }
   }
 
   const { vysledek, pozadavky } = await poslat({ status: 200 })
-  const p = pozadavky[0]
+  ok('nejdřív GET /v2/clouds/123/manifest, pak POS akce (dva požadavky)', pozadavky.length === 2 && pozadavky[0].url === `${API_DOTYKACKA}/clouds/123/manifest` && (pozadavky[0].init.method ?? 'GET') === 'GET')
+  const p = pozadavky[1]
   ok('POST na /v2/clouds/123/branches/456/pos-actions', p?.url === `${API_DOTYKACKA}/clouds/123/branches/456/pos-actions` && p.init.method === 'POST')
   ok('Bearer a Content-Type JSON', p?.init.headers.Authorization === 'Bearer AT-V' && p.init.headers['Content-Type'] === 'application/json')
   const telo = JSON.parse(p?.init.body ?? '{}')
@@ -478,6 +548,32 @@ console.log('\n== Skladový výdej — co se vůbec neodešle ==')
   }
 }
 
+console.log('\n== Skladový výdej — manifest provozovny před POS akcí (25. 10.) ==')
+{
+  const TED = Date.UTC(2026, 9, 16, 10, 0)
+  const v = { provozovna: '456', klic: 'op-1', polozky: [{ produktId: '501', mnozstvi: '1' }], poznamka: '', platnostDoMs: TED + 60_000 }
+  const pripady = [
+    ['sit-spadla', (x) => x.docasna === true && /nepodařilo přečíst/.test(x.duvod), 'manifest nejde přečíst (síť) → odmítnuto dočasně'],
+    [{ status: 403, telo: { reason: 'DOMAIN_FORBIDDEN' } }, (x) => x.docasna === false, 'manifest 403 (aplikace ho nesmí číst) → odmítnuto'],
+    [{ status: 503 }, (x) => x.docasna === true, 'manifest 503 → odmítnuto dočasně'],
+    [{ status: 200, telo: { nic: 1 } }, (x) => /neočekávaný tvar/.test(x.duvod), 'manifest bez branches → odmítnuto (tvar)'],
+    [{ status: 200, telo: { branches: [{ branchId: 999, isLicensed: true, features: ['posAction'], stockDeductionMode: 'documentIssue' }] } }, (x) => /není/.test(x.duvod), 'provozovna v manifestu není → odmítnuto'],
+    [manifest({ isLicensed: false }), (x) => /licenci/.test(x.duvod), 'bez aktivní licence → odmítnuto'],
+    [manifest({ features: [] }), (x) => /posAction/.test(x.duvod), 'licence bez posAction → odmítnuto'],
+    [manifest({ stockDeductionMode: 'disabled' }), (x) => /vypnutý odečet/.test(x.duvod), 'odečet skladu vypnutý → odmítnuto (sklad by se neodečetl)'],
+    [manifest({ stockDeductionMode: 'neco' }), (x) => /nezná/.test(x.duvod), 'neznámý režim odečtu → odmítnuto'],
+    [manifest({ stockDeductionMode: undefined }), (x) => /nezná/.test(x.duvod), 'režim odečtu chybí → odmítnuto (nejde ověřit)'],
+  ]
+  for (const [odpoved, podminka, popis] of pripady) {
+    const s = sit([odpoved])
+    const x = await odeslatVydejDotykacka(kontextDotykacky(s.fetchFn, '123', 'AT'), v, TED)
+    ok(`${popis}, POS akce se NEPOŠLE`, x.stav === 'odmitnuto' && podminka(x) && /Nic se neodeslalo|nic se neodeslalo/.test(x.duvod) && s.pozadavky.length === 1 && !s.pozadavky.some((p) => p.url.includes('pos-actions')))
+  }
+  const park = sit([manifest({ stockDeductionMode: 'orderPark', branchId: '456' }), { status: 200 }])
+  const xp = await odeslatVydejDotykacka(kontextDotykacky(park.fetchFn, '123', 'AT'), v, TED)
+  ok('režim orderPark (odečet při zaparkování) a branchId jako text → POS akce odejde', xp.stav === 'odeslano' && park.pozadavky.length === 2 && park.pozadavky[1].url.endsWith('/branches/456/pos-actions'))
+}
+
 console.log('\n== Napojení na orchestrátor: OperacePos → VydejDotykacka (N20) ==')
 {
   const TED = Date.UTC(2026, 9, 16, 10, 0)
@@ -498,16 +594,23 @@ console.log('\n== Napojení na orchestrátor: OperacePos → VydejDotykacka (N20
   // Celá cesta jako po zapnutí: metoda zápisu dostane OperacePos a do Dotykačky odejde správné tělo.
   // zapisVydejeDotykacka bere čas z hodin (jako po zapnutí) — platnost proto od teď.
   const platnostZiva = Date.now() + 5 * 60_000
-  const s = sit([{ status: 200 }])
-  const zapis = zapisVydejeDotykacka(kontextDotykacky(s.fetchFn, '123', 'AT-Z'))
+  const POVOLENA = new Set(['456'])
+  const s = sit([MANIFEST_OK, { status: 200 }])
+  const zapis = zapisVydejeDotykacka(kontextDotykacky(s.fetchFn, '123', 'AT-Z'), POVOLENA)
   const vysledek = await zapis(op({ platnostDo: new Date(platnostZiva).toISOString() }))
-  const telo = JSON.parse(s.pozadavky[0]?.init.body ?? '{}')
-  ok('zápis s OperacePos: POST na provozovnu 456, external-id = klíč, validity v ms', s.pozadavky[0]?.url === `${API_DOTYKACKA}/clouds/123/branches/456/pos-actions` &&
+  const telo = JSON.parse(s.pozadavky[1]?.init.body ?? '{}')
+  ok('zápis s OperacePos: manifest, pak POST na provozovnu 456, external-id = klíč, validity v ms', s.pozadavky[1]?.url === `${API_DOTYKACKA}/clouds/123/branches/456/pos-actions` &&
     telo['external-id'] === 'op-3f2a1b4c-0001' && telo.validity === platnostZiva)
   ok('… a výsledek odeslání pro orchestrátor (odeslano, ne úspěch)', vysledek.stav === 'odeslano')
   const s2 = sit([])
-  const bez = await zapisVydejeDotykacka(kontextDotykacky(s2.fetchFn, '123', 'AT-Z'))(op({ externiProvozovna: '' }))
+  const bez = await zapisVydejeDotykacka(kontextDotykacky(s2.fetchFn, '123', 'AT-Z'), POVOLENA)(op({ externiProvozovna: '' }))
   ok('zápis bez provozovny → odmitnuto bez jediného volání', bez.stav === 'odmitnuto' && s2.pozadavky.length === 0)
+  const sJina = sit([])
+  const jina = await zapisVydejeDotykacka(kontextDotykacky(sJina.fetchFn, '123', 'AT-Z'), POVOLENA)(op({ externiProvozovna: '457', platnostDo: new Date(platnostZiva).toISOString() }))
+  ok('zápis do provozovny mimo povolené → odmitnuto bez jediného volání (ani manifest)', jina.stav === 'odmitnuto' && /není pro tuhle provozovnu povolený/.test(jina.duvod) && sJina.pozadavky.length === 0)
+  const sNic = sit([])
+  const nic = await zapisVydejeDotykacka(kontextDotykacky(sNic.fetchFn, '123', 'AT-Z'), new Set())(op({ platnostDo: new Date(platnostZiva).toISOString() }))
+  ok('prázdný seznam povolených → odmitnuto bez jediného volání', nic.stav === 'odmitnuto' && sNic.pozadavky.length === 0)
   const s3 = sit([])
   const surove = await odeslatVydejDotykacka(kontextDotykacky(s3.fetchFn, '123', 'AT-Z'), op(), TED)
   ok('(pro srovnání: OperacePos poslaná napřímo do odeslatVydejDotykacka se odmítne — proto převod)', surove.stav === 'odmitnuto' && s3.pozadavky.length === 0)
@@ -515,6 +618,9 @@ console.log('\n== Napojení na orchestrátor: OperacePos → VydejDotykacka (N20
 
 console.log('\n== Schopnosti a relace: výdej NENÍ připojený ==')
 {
+  // Zápis do Dotykačky smí zapnout jen Šéfík výslovným pokynem po ověření na testovacím
+  // cloudu (lib/pokladna-dotykacka-zapis.ts). Kdo seznam naplní, mění vědomě i tuhle kontrolu.
+  ok('seznam povolených provozoven (ZAPIS_VYDEJE_DOTYKACKA) je prázdný', Array.isArray(ZAPIS_VYDEJE_DOTYKACKA) && ZAPIS_VYDEJE_DOTYKACKA.length === 0)
   const adapter = vytvoritDotykacku(sit([]).fetchFn)
   ok("schopnosti: skladovyVydej 'rucne'", adapter.schopnosti.skladovyVydej === 'rucne')
   ok('schopnosti: katalog a dohledání účtů ano, čtení skladových pohybů ne',
@@ -527,9 +633,44 @@ console.log('\n== Schopnosti a relace: výdej NENÍ připojený ==')
 
   const zdroj = readFileSync(new URL('../lib/pokladna-dotykacka.ts', import.meta.url), 'utf8')
   const importy = zdroj.split('\n').filter((r) => r.includes("from './pokladna-dotykacka-sklad.ts'"))
-  ok('adaptér ze skladového modulu importuje jen čtení (cteniDotykacky) a typ kontextu',
-    importy.length === 1 && /^import \{ cteniDotykacky, type KontextDotykacky \} from/.test(importy[0]))
+  ok('adaptér ze skladového modulu importuje čtení, připojovací funkci zápisu a typ kontextu — nic jiného',
+    importy.length === 1 && /^import \{ cteniDotykacky, zapisVydejeDotykacka, type KontextDotykacky \} from/.test(importy[0]))
   ok('odeslatVydejDotykacka se v adaptéru nevolá', !/odeslatVydejDotykacka\(/.test(zdroj))
+  const pripojeni = [...zdroj.matchAll(/zapisVydejeDotykacka\(/g)].map((m) => m.index)
+  const iPodminka = zdroj.indexOf('if (povolene.size > 0) {')
+  ok('zapisVydejeDotykacka se v adaptéru volá jednou a jen uvnitř „if (povolene.size > 0)"',
+    pripojeni.length === 1 && iPodminka > 0 && pripojeni[0] > iPodminka && pripojeni[0] < zdroj.indexOf('}', iPodminka))
+  const adaptery = readFileSync(new URL('../lib/pokladna-adaptery.ts', import.meta.url), 'utf8')
+  ok('appka vytváří Dotykačku bez podstrčeného seznamu povolených (jen výchozí ZAPIS_VYDEJE_DOTYKACKA)',
+    /vytvoritDotykacku\(\)/.test(adaptery) && !/vytvoritDotykacku\([^)]/.test(adaptery))
+}
+
+console.log('\n== Zapnutý zápis — jen v testu podstrčeným seznamem (25. 10.) ==')
+{
+  const POKYN = 'Test 25. 10. 2026: „zapni zápis do Dotykačky pro provozovnu 456“ (jen v testu)'
+  const TED = Date.now()
+  const op = (jine = {}) => ({ klic: 'op-3f2a1b4c-0009', externiProvozovna: '456', polozky: [{ produktId: '501', mnozstvi: '1' }], poznamka: 'x', platnostDo: new Date(TED + 5 * 60_000).toISOString(), ...jine })
+  const otevrit = async (seznam, odpovedi = []) => {
+    const s = sit([PRIHLASENI, ...odpovedi])
+    const a = vytvoritDotykacku(s.fetchFn, seznam)
+    const o = await a.otevrit(UDAJE)
+    s.pozadavky.length = 0
+    return { a, relace: o.relace, pozadavky: s.pozadavky }
+  }
+  const z = await otevrit([{ cloudId: '123', provozovna: '456', pokyn: POKYN }], [MANIFEST_OK, { status: 200 }])
+  ok("povolená provozovna: schopnosti 'api', relace má skladovyVydej a zapisVydejePovolen",
+    z.a.schopnosti.skladovyVydej === 'api' && typeof z.relace.skladovyVydej === 'function' && z.relace.zapisVydejePovolen('456') === true && z.relace.zapisVydejePovolen('457') === false)
+  const odmitnuto = await z.relace.skladovyVydej(op({ externiProvozovna: '457' }))
+  ok('… jiná provozovna téhož cloudu → odmítnuto bez volání', odmitnuto.stav === 'odmitnuto' && z.pozadavky.length === 0)
+  const odeslano = await z.relace.skladovyVydej(op())
+  ok('… povolená provozovna → manifest + POS akce, odeslano', odeslano.stav === 'odeslano' && z.pozadavky.length === 2 && z.pozadavky[1].url.endsWith('/clouds/123/branches/456/pos-actions'))
+
+  const cizi = await otevrit([{ cloudId: '999', provozovna: '456', pokyn: POKYN }])
+  ok('povolená provozovna JINÉHO cloudu → relace tohohle cloudu zápis nemá', !('skladovyVydej' in cizi.relace) && !('zapisVydejePovolen' in cizi.relace))
+  const bezPokynu = await otevrit([{ cloudId: '123', provozovna: '456', pokyn: '' }])
+  ok('řádek bez pokynu Šéfíka se nepočítá → relace zápis nemá', !('skladovyVydej' in bezPokynu.relace))
+  const spatneId = await otevrit([{ cloudId: '123', provozovna: '45a', pokyn: POKYN }])
+  ok('řádek s provozovnou mimo tvar se nepočítá → relace zápis nemá', !('skladovyVydej' in spatneId.relace))
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO` : '\nVšechny kontroly prošly')

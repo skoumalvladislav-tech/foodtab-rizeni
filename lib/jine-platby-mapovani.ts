@@ -31,7 +31,7 @@
 import type { PolozkaNavrhu } from './jine-platby-typy.ts'
 import { DRUHY_BEZ_SKLADU } from './jine-platby-typy.ts'
 import { MAX_MNOZSTVI_TISICIN, mnozstviNaTisiciny, mnozstviNaText, tisicinyNaMnozstvi } from './jine-platby-castky.ts'
-import { PREDPONA_PREVODU, upravitDuvody } from './jine-platby-kontrola.ts'
+import { PREDPONA_PREVODU, rozdelitDuvody, upravitDuvody } from './jine-platby-kontrola.ts'
 
 export type ProduktKatalogu = {
   externiId: string
@@ -110,7 +110,8 @@ function dice(a: string, b: string): number {
 
 const cisla = (s: string) => new Set(s.split(' ').filter((t) => /^\d+(\.\d+)?$/.test(t)))
 
-function ohodnotit(nazevDokladu: string, produkt: ProduktKatalogu): { skore: number; proc: string } {
+/** Podobnost názvu z dokladu a produktu (0–1) s vysvětlením. Exportované kvůli výběru kandidátů pro AI (lib/jine-platby-ai-parovani-jadro.ts). */
+export function ohodnotit(nazevDokladu: string, produkt: ProduktKatalogu): { skore: number; proc: string } {
   const a = normalizovatNazev(nazevDokladu)
   const b = normalizovatNazev(produkt.nazev)
   const tokenyA = new Set(a.split(' '))
@@ -331,6 +332,33 @@ function sProduktem(p: PolozkaNavrhu, produkt: ProduktKatalogu, mapovani: 'overe
 
 function bezProduktu(p: PolozkaNavrhu, mapovani: 'nenamapovano' | 'neskladova'): PolozkaNavrhu {
   return upravitDuvody({ ...p, mapovani, posProduktId: null, posProduktNazev: null, posMnozstvi: null }, jePrevod, [])
+}
+
+/**
+ * Začátek důvodu ke kontrole u přiřazení, které navrhla AI. Je to důvod
+ * „ze čtení dokladu" (lib/jine-platby-kontrola.ts, druh 3): uložení ho
+ * nechá a zmizí, až člověk řádek ověří („Řádek jsem ověřil(a)").
+ */
+export const PREDPONA_AI = 'Přiřazení navrhla AI: '
+const jeDuvodAI = (d: string) => d.startsWith(PREDPONA_AI)
+
+/**
+ * Přiřazení, které navrhla AI (lib/jine-platby-ai-parovani-jadro.ts): stejně
+ * jako návrh podle podobnosti je to jen `navrh` (nikdy `overeno`), množství
+ * pro pokladnu převede `prevestNaJednotkyPos` (AI ho nepočítá) a řádek
+ * navíc dostane důvod ke kontrole s produktem a zdůvodněním AI — výdej ho
+ * nepustí, dokud člověk řádek neověří a přiřazení nepotvrdí
+ * (`app.jp_sestavit_vydej`: „Položka čeká na kontrolu" a „nemá ověřené
+ * přiřazení"). Starší důvod AI se nahradí.
+ */
+export function prirazenoAI(polozka: PolozkaNavrhu, produkt: ProduktKatalogu, duvodAI: string): PolozkaNavrhu {
+  const text = duvodAI.startsWith(PREDPONA_AI) ? duvodAI : `${PREDPONA_AI}${duvodAI}`
+  return upravitDuvody(sProduktem(polozka, produkt, 'navrh'), jeDuvodAI, [text])
+}
+
+/** Odebere důvod AI (AI u položky nic nenašla — starý návrh AI by tam lhal). Přiřazení nemění. */
+export function bezDuvoduAI(polozka: PolozkaNavrhu): PolozkaNavrhu {
+  return rozdelitDuvody(polozka.duvodKontroly).some(jeDuvodAI) ? upravitDuvody(polozka, jeDuvodAI, []) : polozka
 }
 
 /**

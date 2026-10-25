@@ -56,6 +56,9 @@ const operace = (o = {}) => ({
   ...o,
 })
 
+/** Položky účtu v pokladně, které sedí s výdejem `operace()` (2× p-pivo05) — úspěch to chce (25. 10.). */
+const UCET_POLOZKY = [{ produktId: 'p-pivo05', mnozstvi: '2', zrusena: false }]
+
 /** Databáze jako pos_operace_zahajit/dokoncit: stav operace se mění jen přes ni. */
 function novaDatabaze(op, { zahajit = null, dokoncitHodi = false } = {}) {
   const stav = { op: { ...op }, volani: [] }
@@ -95,7 +98,7 @@ function novaPokladna({ schopnost = 'api', odeslat = [], dohledat = [], bezOdesl
     return typeof dalsi === 'function' ? dalsi(arg) : dalsi
   }
   const odeslatF = fronta(odeslat, { stav: 'odeslano' })
-  const dohledatF = fronta(dohledat, (klic) => (p.provedeno.has(klic) ? { stav: 'nalezeno', externiId: `POS-${klic}`, doklad: 'D-1', detail: { klic, stav: 'uzavreny', zaplaceno: true, odpis: true } } : { stav: 'nenalezeno' }))
+  const dohledatF = fronta(dohledat, (klic) => (p.provedeno.has(klic) ? { stav: 'nalezeno', externiId: `POS-${klic}`, doklad: 'D-1', detail: { klic, stav: 'uzavreny', zaplaceno: true, odpis: true, polozky: UCET_POLOZKY } } : { stav: 'nenalezeno' }))
   p.pos = { schopnost }
   if (!bezOdeslat) {
     p.pos.odeslat = async (op) => {
@@ -342,7 +345,7 @@ console.log('\n== Úspěch jen u uzavřeného, zaplaceného odpisu (N17) ==')
       r.stav === 'nejasny_vysledek' && r.duvod === lib.HLASKA_UCET_NEDOKONCENY && db.op.stav === 'nejasny_vysledek')
   }
   const dbOk = novaDatabaze(operace())
-  const poklOk = novaPokladna({ dohledat: [ucet({ stav: 'uzavreny', zaplaceno: true, odpis: true })] })
+  const poklOk = novaPokladna({ dohledat: [ucet({ stav: 'uzavreny', zaplaceno: true, odpis: true, polozky: UCET_POLOZKY })] })
   const rOk = await provestOperaci(operace(), dbOk.repo, poklOk.pos, TED)
   ok('provedení: uzavřený, zaplacený odpis → úspěch (s detailem)', rOk.stav === 'uspech' && rOk.externiId === 'POS-555' && rOk.vysledek.odpis === true && dbOk.op.stav === 'uspech')
 
@@ -356,6 +359,78 @@ console.log('\n== Úspěch jen u uzavřeného, zaplaceného odpisu (N17) ==')
       r.stav === 'beze_zmeny' && r.duvod === lib.HLASKA_UCET_NEDOKONCENY && db.pocet('dokoncit') === 0 && db.op.stav === 'nejasny_vysledek')
   }
   ok('věta říká, co ověřit', /není uzavřený a zaplacený Odpisem/.test(lib.HLASKA_UCET_NEDOKONCENY) && /ověřte ho v pokladně/.test(lib.HLASKA_UCET_NEDOKONCENY))
+}
+
+console.log('\n== Položky účtu proti výdeji (25. 10.) ==')
+{
+  const ucet = (polozky) => ({ stav: 'nalezeno', externiId: 'POS-556', doklad: '2026-000556', detail: { stav: 'uzavreny', zaplaceno: true, odpis: true, ...(polozky === undefined ? {} : { polozky }) } })
+  const vydej2 = operace({ polozky: [{ produktId: 'p-pivo05', mnozstvi: '2' }, { produktId: 'p-svickova', mnozstvi: '1.5' }] })
+  const PRIPADY = [
+    ['pokladna položky účtu neposlala', undefined, /neposlala/],
+    ['méně kusů (1 místo 2)', [{ produktId: 'p-pivo05', mnozstvi: '1' }, { produktId: 'p-svickova', mnozstvi: '1.5' }], /p-pivo05: výdej 2, na účtu 1/],
+    ['chybí celý produkt', [{ produktId: 'p-pivo05', mnozstvi: '2' }], /p-svickova: výdej 1\.5, na účtu 0/],
+    ['víc kusů (3 místo 2)', [{ produktId: 'p-pivo05', mnozstvi: '3' }, { produktId: 'p-svickova', mnozstvi: '1.5' }], /výdej 2, na účtu 3/],
+    ['zrušený řádek se nepočítá', [{ produktId: 'p-pivo05', mnozstvi: '2', zrusena: true }, { produktId: 'p-svickova', mnozstvi: '1.5' }], /p-pivo05: výdej 2, na účtu 0/],
+    ['nečitelné množství na účtu', [{ produktId: 'p-pivo05', mnozstvi: '2.5555' }, { produktId: 'p-svickova', mnozstvi: '1.5' }], /p-pivo05/],
+    ['položky nejsou pole', 'rozbite', /neposlala/],
+  ]
+  for (const [popis, polozky, hlaska] of PRIPADY) {
+    const db = novaDatabaze(vydej2)
+    const pokl = novaPokladna({ dohledat: [ucet(polozky)] })
+    const r = await provestOperaci(vydej2, db.repo, pokl.pos, TED)
+    ok(`provedení: ${popis} → nejasný výsledek (ne úspěch), věta říká co nesedí`,
+      r.stav === 'nejasny_vysledek' && r.duvod.startsWith(lib.HLASKA_POLOZKY_NESEDI) && hlaska.test(r.duvod) && db.op.stav === 'nejasny_vysledek')
+  }
+
+  const dbSoucet = novaDatabaze(vydej2)
+  const poklSoucet = novaPokladna({ dohledat: [ucet([
+    { produktId: 'p-pivo05', mnozstvi: '1' }, { produktId: 'p-pivo05', mnozstvi: '1.000' }, { produktId: 'p-svickova', mnozstvi: '1.5' },
+  ])] })
+  const rSoucet = await provestOperaci(vydej2, dbSoucet.repo, poklSoucet.pos, TED)
+  ok('dva řádky téhož produktu se sečtou (1 + 1.000 = 2) → úspěch', rSoucet.stav === 'uspech' && dbSoucet.op.stav === 'uspech')
+
+  const dbObal = novaDatabaze(vydej2)
+  const poklObal = novaPokladna({ dohledat: [ucet([
+    { produktId: 'p-pivo05', mnozstvi: '2' }, { produktId: 'p-svickova', mnozstvi: '1.5' }, { produktId: 'p-lahev', mnozstvi: '2' },
+  ])] })
+  const rObal = await provestOperaci(vydej2, dbObal.repo, poklObal.pos, TED)
+  ok('produkt navíc (zálohovaný obal) → úspěch, navíc odečtené je ve výsledku',
+    rObal.stav === 'uspech' && Array.isArray(rObal.vysledek.navic) && rObal.vysledek.navic.length === 1 && rObal.vysledek.navic[0].produktId === 'p-lahev' && rObal.vysledek.navic[0].mnozstvi === '2')
+  ok('… bez produktu navíc výsledek žádné „navic" nemá', rSoucet.stav === 'uspech' && !('navic' in rSoucet.vysledek))
+
+  // Obnova: nesedící účet zůstane nejasný i dlouho po platnosti — „chyba" by pustila druhý výdej.
+  const platnostDo = new Date(TED).toISOString()
+  const nejasna = operace({ stav: 'nejasny_vysledek', platnostDo, pokusu: 1, polozky: vydej2.polozky })
+  const dbOb = novaDatabaze(nejasna)
+  const poklOb = novaPokladna({ dohledat: [ucet([{ produktId: 'p-pivo05', mnozstvi: '2' }])] })
+  const rOb = await obnovitOperaci(nejasna, dbOb.repo, poklOb.pos, TED + REZERVA_PO_PLATNOSTI_MS + 60 * 60_000)
+  ok('obnova (dlouho po platnosti): položky nesedí → beze změny, nic neuloženo', rOb.stav === 'beze_zmeny' && rOb.duvod.startsWith(lib.HLASKA_POLOZKY_NESEDI) && dbOb.pocet('dokoncit') === 0)
+
+  const { porovnatPolozkyVydeje } = lib
+  ok('porovnání: prázdný výdej nikdy není shoda', porovnatPolozkyVydeje([], [{ produktId: 'x', mnozstvi: '1' }]).stav === 'nesedi')
+  ok('porovnání: řádek účtu bez produktu se přeskočí', porovnatPolozkyVydeje([{ produktId: 'x', mnozstvi: '1' }], [{ produktId: null, mnozstvi: '5' }, { produktId: 'x', mnozstvi: '1' }]).stav === 'shoda')
+}
+
+console.log('\n== Provozovna a schopnost zápisu pro výdej (25. 10.) ==')
+{
+  const { provozovnaProVydej, schopnostVydeje } = lib
+  const prov = [{ id: '11', branch_id: 'perla' }, { id: '12', branch_id: 'bar' }, { id: '13', branch_id: 'bar' }, { id: '14', branch_id: null }]
+  ok('uložená provozovna přiřazená pobočce → ta', provozovnaProVydej('11', 'perla', prov) === '11')
+  ok('uložená provozovna přeřazená jinam → null (neposílá se)', provozovnaProVydej('11', 'bar', prov) === null)
+  ok('bez uložené: jediná provozovna pobočky → ta', provozovnaProVydej(null, 'perla', prov) === '11')
+  ok('bez uložené: dvě provozovny pobočky → null', provozovnaProVydej(null, 'bar', prov) === null)
+  ok('bez uložené: žádná provozovna pobočky → null', provozovnaProVydej(null, 'jinde', prov) === null)
+  ok('uložená z dvou provozoven téže pobočky → ta uložená', provozovnaProVydej('13', 'bar', prov) === '13')
+
+  const zapis = async () => ({ stav: 'odeslano' })
+  const relace = { skladovyVydej: zapis, zapisVydejePovolen: (p) => p === '11' }
+  ok("adaptér 'api' + relace povolí provozovnu → 'api'", schopnostVydeje('api', relace, '11') === 'api')
+  ok("adaptér 'api', provozovna mimo povolené → 'rucne' (nic se neodešle)", schopnostVydeje('api', relace, '12') === 'rucne')
+  ok("adaptér 'api', provozovna neznámá → 'rucne'", schopnostVydeje('api', relace, null) === 'rucne')
+  ok("adaptér 'api', relace bez metody zápisu → 'rucne'", schopnostVydeje('api', { zapisVydejePovolen: () => true }, '11') === 'rucne')
+  ok("adaptér 'api', relace bez zapisVydejePovolen → 'rucne'", schopnostVydeje('api', { skladovyVydej: zapis }, '11') === 'rucne')
+  ok("adaptér 'rucne' i s metodou zápisu → 'rucne'", schopnostVydeje('rucne', relace, '11') === 'rucne')
+  ok("bez schopnosti → 'nepodporovano'", schopnostVydeje(undefined, relace, '11') === 'nepodporovano')
 }
 
 console.log(chyb ? `\n${chyb} kontrol SELHALO (prošlo ${proslo} z ${proslo + chyb})` : `\nVšechny kontroly prošly: ${proslo} z ${proslo}`)
