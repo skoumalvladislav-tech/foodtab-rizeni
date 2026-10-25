@@ -3,20 +3,13 @@ import { redirect } from 'next/navigation'
 import Sdeleni from '@/app/sdeleni'
 import { getCurrentTenantId } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import {
-  denZAdresy,
-  dnyTydne,
-  mrizkaMesice,
-  pohledZAdresy,
-  podleDne,
-  rozsahPohledu,
-} from '@/lib/rezervace-kalendar'
+import { denZAdresy, pohledZAdresy, rozsahPohledu } from '@/lib/rezervace-kalendar'
 import { zkratkyPobocek } from '@/lib/rozpis-desktop'
 
-import Nadpis from '../nadpis'
 import { dnesPobocky, nacistRezervace, nacistZnackyDnu } from './data'
+import { KalendarObsah } from './obsah'
 import { zkusPristupRezervacim } from './pristup'
-import { MesicKalendar, NastrojePohledu, TydenKalendar, ZalozkyRezervaci, adresaPohledu } from './prvky'
+import { adresaPohledu } from './prvky'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,6 +20,7 @@ export const dynamic = 'force-dynamic'
  * Zadání Šéfíka 25. 10. 2026, návrh docs/rezervace-navrh.md.
  *
  * Přístup se ověřuje TADY, prvním řádkem (layout stránku nechrání).
+ * Kreslí obsah.tsx.
  */
 export default async function RezervaceKalendar({
   params,
@@ -59,15 +53,6 @@ export default async function RezervaceKalendar({
     nacistRezervace(tenantId, pobocky, od, doDne),
     nacistZnackyDnu(tenantId, pobocky, od, doDne),
   ])
-  const poDnech = podleDne(rezervace)
-  const znackyDne = (den: string) =>
-    pobocky.reduce(
-      (s, p) => {
-        const z = znacky.get(`${p.id}|${den}`)
-        return { poznamek: s.poznamek + (z?.poznamek ?? 0), priloh: s.priloh + (z?.priloh ?? 0) }
-      },
-      { poznamek: 0, priloh: 0 },
-    )
 
   // Víc poboček najednou (firemní rozsah): karta nese zkratku pobočky.
   const zkratky = new Map<string, string>()
@@ -75,41 +60,17 @@ export default async function RezervaceKalendar({
     const podleNazvu = zkratkyPobocek(pobocky.map((p) => p.nazev))
     for (const p of pobocky) zkratky.set(p.id, podleNazvu.get(p.nazev) ?? p.nazev)
   }
-  const smiZapisovat = pobocky.some((p) => p.zapis)
 
   return (
-    <>
-      <Nadpis
-        oci="Provoz"
-        popis={
-          pobocky.length > 1
-            ? `Rezervace hostů a akce všech poboček (${pobocky.map((p) => p.nazev).join(', ')}).`
-            : 'Rezervace hostů a akce — uzavřené společnosti, catering, oslavy.'
-        }
-      >
-        Rezervace a akce
-      </Nadpis>
-      <div className="ds-rez" style={{ padding: '0 16px 32px' }}>
-        <ZalozkyRezervaci rozsah={rozsah} aktivni="kalendar" />
-        <NastrojePohledu rozsah={rozsah} pohled={pohled} datum={datum} dnes={dnes} smiZapisovat={smiZapisovat} />
-        {pohled === 'tyden' ? (
-          <TydenKalendar
-            rozsah={rozsah}
-            dnes={dnes}
-            smiZapisovat={smiZapisovat}
-            zkratkyPobocek={zkratky}
-            dny={dnyTydne(datum).map((den) => ({ den, rezervace: poDnech.get(den) ?? [], ...znackyDne(den) }))}
-          />
-        ) : (
-          <MesicKalendar
-            rozsah={rozsah}
-            dnes={dnes}
-            tydny={mrizkaMesice(datum).map((tyden) =>
-              tyden.map((d) => ({ ...d, rezervace: poDnech.get(d.den) ?? [], poznamek: znackyDne(d.den).poznamek })),
-            )}
-          />
-        )}
-      </div>
-    </>
+    <KalendarObsah
+      rozsah={rozsah}
+      pohled={pohled}
+      datum={datum}
+      dnes={dnes}
+      pobocky={pobocky}
+      rezervace={rezervace}
+      znacky={znacky}
+      zkratky={zkratky}
+    />
   )
 }

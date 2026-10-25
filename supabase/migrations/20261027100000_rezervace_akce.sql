@@ -75,10 +75,10 @@
 --     v lib/rezervace-*.ts a tahle migrace už umí, co adaptér potřebuje.
 --   * Zápis zpátky do rezervačního systému ne (kontrakt: nejdřív jen čtení).
 --   * Rezervace se nemaže, ruší se (`stav`). Kontakt jde vymazat úpravou.
---   * Kontakty se neaudituje (audit_log čte víc lidí než rezervace.manage
+--   * Kontakty se neauditují (audit_log čte víc lidí než rezervace.manage
 --     a telefony by se tam rozkopírovaly). Ostatní tabulky ano.
 --   * Přílohy jen fotky a PDF — stejná sada jako Komunikace a Jiné platby.
---     Word/Excel by byly dva řádky (kbelík + check), otázka 59.
+--     Word/Excel by byly dva řádky (kbelík + check), otázka 79.
 --   * Zálohy od hostů jsou jen evidence (částka a stav). Žádné platby
 --     (banka je jen pro čtení) a nic společného s `advances` (zálohy
 --     zaměstnancům) — proto `zaloha_hosta_*`, ne `zaloha_*`.

@@ -72,7 +72,7 @@ export async function nacistRezervaci(tenantId: string, id: string, pobocky: Pob
   }
 }
 
-/** Telefon a e-mail. Čte jen `rezervace.manage` (RLS) — ostatním vrátí null. */
+/** Telefon a e-mail. Volá se jen pro `rezervace.manage` (ostatním RLS řádek nevydá). */
 export async function nacistKontakt(id: string): Promise<{ telefon: string; email: string } | null> {
   const supabase = await getServerSupabase()
   const { data, error } = await supabase.from('rezervace_kontakty').select('telefon, email').eq('rezervace_id', id).maybeSingle()

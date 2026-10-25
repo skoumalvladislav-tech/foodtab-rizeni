@@ -1669,3 +1669,87 @@ jako tablet Docházky (zařízení pobočky v Nastavení → Zařízení).
   hned. Kdo telefon ztratí, odvolá ho tamtéž jako tablet.
 - **Když to má být jinak:** jedno zařízení pro obojí s jedním spárováním
   (vypínač Docházky u zařízení). Dnes jde obojí jen dvojím spárováním.
+
+## 76. Rezervace a akce — kdo co vidí a kdo to dostane
+
+**Vzniklo:** 25. 10. 2026, nová sekce Provoz → Rezervace a akce
+(docs/rezervace-navrh.md, oddíl 6). Čísla 71–75 si bere souběžná práce
+na výdeji ze skladu, proto tady začínám od 76.
+
+- **Teď:** dvě nová práva v Provozu. „Vidět rezervace a kalendář akcí“
+  (kalendář, rezervace, poznámky, dokumenty) a „Zapisovat rezervace
+  a akce, poznámky a přílohy; vidět kontakty hostů“ (citlivé).
+  **Telefon a e-mail hosta vidí jen ten, kdo zapisuje.** Stávajícím
+  zaměstnancům jsem práva **nikomu nepřidal** — vidí je jen majitel.
+  Nové firmy: provozní obě, vedoucí směny čtení.
+- **Proč:** do zařazení u zákazníků se bez pokynu nesahá
+  (20260831010000) a kontakt hosta je osobní údaj — číšník potřebuje
+  vědět, kdo přijde a kolik jich bude, ne jeho číslo.
+- **Co udělat:** v Nastavení → Zařazení zaškrtnout práva tam, kde mají být
+  (návrh: Provozní obě, Vedoucí směny čtení, Servis čtení).
+- **Když to má být jinak:** řekněte, která zařazení mají co dostat
+  automaticky — je to jedna migrace.
+
+## 77. Rezervace z rezervačního systému — čí je pravda
+
+**Vzniklo:** 25. 10. 2026, Rezervace a akce, import ze souboru a kostra
+napojení (docs/rezervace-navrh.md, oddíl 3).
+
+- **Teď:** u rezervace, která přišla ze souboru nebo ze systému, patří
+  **čas, počet osob, stav, jméno, telefon, e-mail a poznámka hosta
+  zdroji** — při každém novějším načtení se přepíšou a ve Foodtabu je
+  měnit nejde. **Druh (rezervace/akce), název, typ akce, menu, záloha,
+  poznámky a dokumenty patří Foodtabu** a import je nikdy nepřepíše.
+  Stůl/prostor import jen doplní, když je prázdný. Zrušení ve zdroji =
+  „zrušená“, nic se nemaže; rezervace, která v souboru chybí, zůstává.
+- **Proč:** jinak by se oprava ve Foodtabu při dalším načtení tiše
+  vrátila, nebo by import smazal poznámky obsluhy. Zápis zpět do
+  rezervačního systému zatím neumíme (a kontrakt ho v první verzi
+  nechce), takže pravda o čase a počtu musí zůstat tam.
+- **Když to má být jinak:** např. „stav nedorazili zapisujeme ve
+  Foodtabu“ — šel by udělat výjimkou pro jeden údaj, ale dokud ho appka
+  neumí poslat zpátky, rozejde se s rezervačním systémem.
+
+## 78. Rezervace — který rezervační systém napojit jako první?
+
+**Vzniklo:** 25. 10. 2026. Zadání chce sekci „propojit na externí
+rezervační systém“, ale neříká na který. Průzkum je v
+docs/rezervace-navrh.md, oddíl 1.
+
+- **Teď:** napojení jde **připravit** (Rezervace → Napojení a import),
+  ale zůstane „čeká na připojení“ — adaptér žádného systému není
+  a databáze „připojeno“ bez ověřeného přístupu nedovolí. Rezervace jdou
+  zapsat ručně nebo načíst ze souboru CSV.
+- **Proč:** tvar dat se bez dokumentace a přístupu nevymýšlí (stejné
+  pravidlo jako u pokladen).
+- **Potřebuji vědět:** jaký rezervační systém používá Černá Perla a jaký
+  Bernard (nebo jestli rezervace vedete v sešitě / v Dotykačce).
+  **Doporučení: Dotykačka** — má rezervace v API i webhooky a pokladnu už
+  máme napojenou; stačí ověřit, že stávající přístup rezervace smí číst.
+  Druhá nejlépe popsaná je TheFork (přístup ale vydává TheFork).
+
+## 79. Rezervace — jaké dokumenty jde přikládat
+
+**Vzniklo:** 25. 10. 2026, přílohy k rezervacím a ke dnům.
+
+- **Teď:** **fotky (JPEG, PNG, WebP) a PDF**, každý do 10 MB, nejvýš 20 na
+  rezervaci nebo na den pobočky. Velké fotky z telefonu se před nahráním
+  zmenší. Word a Excel ne.
+- **Proč:** stejná sada jako přílohy ve Vzkazech a doklady Jiných plateb
+  — vyzkoušená, a smlouva nebo menu jde vždycky uložit jako PDF.
+  Nejopatrnější varianta.
+- **Když to má být jinak:** „povolit Word a Excel“ — dva řádky
+  (kbelík a kontrola v databázi), bez maker (.docm/.xlsm ne).
+
+## 80. Rezervace — záloha od hosta
+
+**Vzniklo:** 25. 10. 2026, akce a uzavřené společnosti.
+
+- **Teď:** u rezervace i akce jde zapsat **částku zálohy a její stav**
+  (bez zálohy, požadovaná, zaplacená, vrácená). Je to **jen evidence**:
+  appka nic neplatí, nepáruje s bankou a neposílá výzvy.
+- **Proč:** banka je ve Foodtabu jen pro čtení a platby záloh za akce
+  zatím nikdo nezadal. Pozor na slovo: **„záloha od hosta“** nemá nic
+  společného se zálohami zaměstnancům (Docházka → Zálohy).
+- **Když to má být jinak:** napárovat zaplacenou zálohu s příchozí
+  platbou ve Financích (podobně jako úhrady faktur) — samostatná práce.
