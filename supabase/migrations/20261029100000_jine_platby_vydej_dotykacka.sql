@@ -52,7 +52,7 @@
 --   * pokusy o přiřazení nemají audit: jsou samy záznamem (jako
 --     jine_platby_rozpoznani) a zapisuje je jen server.
 --
--- Scénář: supabase/tests/krok103_scenar.sql.
+-- Scénář: supabase/tests/krok102_scenar.sql.
 
 -- ---------------------------------------------------------------------
 -- 1. Receptury v katalogu

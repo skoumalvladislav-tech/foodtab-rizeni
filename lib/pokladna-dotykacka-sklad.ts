@@ -795,7 +795,7 @@ export async function odeslatVydejDotykacka(k: KontextDotykacky, v: VydejDotykac
  * `{ chyba }` = nic se neodešle (chybí platnost nebo provozovna).
  * Provozovnu u pokladny připojené k pobočce doplní databáze při zabrání
  * (`pos_operace_zahajit` → `app.jp_provozovna_vydeje`, migrace
- * 20261025230000); bez ní zabrání neprojde a sem se nic nedostane.
+ * 20261029100000); bez ní zabrání neprojde a sem se nic nedostane.
  */
 export function vydejZOperace(op: VydejPos): VydejDotykacka | { chyba: string } {
   const platnostDoMs = op.platnostDo === null ? Number.NaN : Date.parse(op.platnostDo)

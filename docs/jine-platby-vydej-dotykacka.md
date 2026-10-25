@@ -264,14 +264,14 @@ Co tahle PR přidává (všechno pod vypínačem, do pokladny nic neodejde):
 
 | Část | Kde | Ověřeno |
 |---|---|---|
-| Přiřazení položek přes AI (tlačítko „Najít produkty v pokladně (AI)“ v panelu Sklad, když návrh výdeje blokuje nepřiřazená položka), denní strop 10 na záznam a 100 na firmu | `lib/jine-platby-ai-parovani*.ts`, `akce-parovani.ts`, `sekce-sklad.tsx`, tabulka `jine_platby_ai_parovani` | `scripts/jine-platby-ai-parovani.test.mjs` (51), scénář krok103 (oddíl 5) |
-| Receptury z katalogu, konkrétní varování „surovina pokrmu ve stejném výdeji“ | `cteniDotykacky().katalog`, `pos_katalog.suroviny`, `app.jp_sestavit_vydej` | `scripts/pokladna-dotykacka-sklad.test.mjs`, krok103 (oddíly 2–3) |
-| Provozovna u pokladny připojené k pobočce: doplní ji databáze při zabrání z aktuálního přiřazení, nula nebo víc provozoven = neodešle se; přeřazená provozovna = neodešle se | `pos_operace_zahajit`, `app.jp_provozovna_vydeje` | krok103 (oddíl 4) |
+| Přiřazení položek přes AI (tlačítko „Najít produkty v pokladně (AI)“ v panelu Sklad, když návrh výdeje blokuje nepřiřazená položka), denní strop 10 na záznam a 100 na firmu | `lib/jine-platby-ai-parovani*.ts`, `akce-parovani.ts`, `sekce-sklad.tsx`, tabulka `jine_platby_ai_parovani` | `scripts/jine-platby-ai-parovani.test.mjs` (51), scénář krok102 (oddíl 5) |
+| Receptury z katalogu, konkrétní varování „surovina pokrmu ve stejném výdeji“ | `cteniDotykacky().katalog`, `pos_katalog.suroviny`, `app.jp_sestavit_vydej` | `scripts/pokladna-dotykacka-sklad.test.mjs`, krok102 (oddíly 2–3) |
+| Provozovna u pokladny připojené k pobočce: doplní ji databáze při zabrání z aktuálního přiřazení, nula nebo víc provozoven = neodešle se; přeřazená provozovna = neodešle se | `pos_operace_zahajit`, `app.jp_provozovna_vydeje` | krok102 (oddíl 4) |
 | Kontrola manifestu před odesláním (licence `posAction`, `stockDeductionMode` ≠ `disabled`) | `odeslatVydejDotykacka` | `scripts/pokladna-dotykacka-sklad.test.mjs` |
 | Porovnání položek účtu s výdejem po zápisu | `porovnatPolozkyVydeje` | `scripts/jine-platby-pos-operace.test.mjs` |
 | Vypínač v kódu (zápis jen pro provozovnu ze seznamu, i schopnost „api“ jen pro ni) | `lib/pokladna-dotykacka-zapis.ts`, `schopnostVydeje` | `scripts/pokladna-dotykacka-sklad.test.mjs`, `scripts/jine-platby-detail.test.mjs` |
 
-Migrace `20261025230000_jine_platby_vydej_dotykacka.sql` (bez `db push`).
+Migrace `20261029100000_jine_platby_vydej_dotykacka.sql` (bez `db push`).
 Živě nic z toho neběželo — testy jedou na podvržených odpovědích podle
 dokumentace a nad PGlite.
 

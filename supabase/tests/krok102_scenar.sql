@@ -1,5 +1,5 @@
--- Scénář pro krok 103 — Jiné platby: výdej ze skladu v Dotykačce, příprava
--- zápisu (migrace 20261025230000_jine_platby_vydej_dotykacka.sql, návrh
+-- Scénář pro krok 102 — Jiné platby: výdej ze skladu v Dotykačce, příprava
+-- zápisu (migrace 20261029100000_jine_platby_vydej_dotykacka.sql, návrh
 -- docs/jine-platby-vydej-dotykacka.md).
 --
 -- Pokrývá:
@@ -58,23 +58,23 @@ on conflict (tenant_id, module_key) do nothing;
 
 -- Cizí firma (jen kvůli filtru firmy v app.jp_provozovna_vydeje).
 insert into auth.users (id, email, raw_user_meta_data) values
-  ('10310000-0000-0000-0000-000000000009', 'cizi103@jinafirma.cz', '{"full_name":"Cizí Stotři"}');
+  ('10210000-0000-0000-0000-000000000009', 'cizi102@jinafirma.cz', '{"full_name":"Cizí Stodva"}');
 set role authenticated;
-select set_config('test.user_id', '10310000-0000-0000-0000-000000000009', false);
-select app.create_tenant('Krok103 Cizí s.r.o.', 'Cizí Stotři') as tenant_b \gset
+select set_config('test.user_id', '10210000-0000-0000-0000-000000000009', false);
+select app.create_tenant('Krok102 Cizí s.r.o.', 'Cizí Stodva') as tenant_b \gset
 reset role;
 select set_config('test.user_id', '', false);
 
 -- Pokladna celé firmy: provozovna 11 = Perla, 12 = Bar.
 insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, stav, externi_ucet)
-values (:'tenant', 'pokladna', 'krok103firma', 'zakaznicky', 'pripojeno',
+values (:'tenant', 'pokladna', 'krok102firma', 'zakaznicky', 'pripojeno',
   jsonb_build_object('provozovny', jsonb_build_array(
     jsonb_build_object('id', '11', 'nazev', 'Perla', 'branch_id', :'perla'),
     jsonb_build_object('id', '12', 'nazev', 'Bar',   'branch_id', :'bar'))))
 returning id as pos \gset
 -- Pokladna připojená k POBOČCE Perla (záznam pak provozovnu nenese).
 insert into public.integrace_pripojeni (tenant_id, branch_id, oblast, poskytovatel, rezim, stav, externi_ucet)
-values (:'tenant', :'perla', 'pokladna', 'krok103pobocka', 'zakaznicky', 'pripojeno',
+values (:'tenant', :'perla', 'pokladna', 'krok102pobocka', 'zakaznicky', 'pripojeno',
   jsonb_build_object('provozovny', jsonb_build_array(jsonb_build_object('id', '31', 'nazev', 'Perla výčep', 'branch_id', :'perla'))))
 returning id as pos_pob \gset
 
@@ -153,11 +153,11 @@ set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
 -- Hlavička: provozní den 2026-02-03, každý záznam jiná částka (ať se nehlásí duplicity).
-select jsonb_build_object('datum_prodeje', '2026-02-03', 'oznaceni', 'Krok103', 'mena', 'CZK',
+select jsonb_build_object('datum_prodeje', '2026-02-03', 'oznaceni', 'Krok102', 'mena', 'CZK',
   'castka_puvod', 'doklad', 'typ_dokladu', 'uzavreny_prodej', 'externi_ucet', null, 'kontakt_id', null)::text as hlavicka \gset
 
 -- zA: svíčková + smetana (surovina svíčkové) → konkrétní varování.
-select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok103 A', '10310000-aaaa-0000-0000-00000000000a') as za \gset
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok102 A', '10210000-aaaa-0000-0000-00000000000a') as za \gset
 select public.jine_platby_ulozit_navrh(:'za', 1, jsonb_set(:'hlavicka'::jsonb, '{castka_haleru}', '63100'), jsonb_build_array(
   jsonb_build_object('nazev', 'Svíčková', 'mnozstvi', '2', 'jednotka', 'ks', 'cena_jednotkova_haleru', 29000, 'cena_celkem_haleru', 58000,
     'zdroj', 'rucne', 'druh', 'pokrm', 'pos_produkt_id', 'P1', 'pos_mnozstvi', '2', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false),
@@ -171,7 +171,7 @@ select pg_temp.check('zA: smetana je surovinou svíčkové ve stejném výdeji �
   and jsonb_array_length(:'vydej_a'::jsonb -> 'blokace') = 0);
 
 -- zB: svíčková + hranolky (známá receptura, hranolky v ní nejsou) → jen obecné varování.
-select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok103 B', '10310000-aaaa-0000-0000-00000000000b') as zb \gset
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok102 B', '10210000-aaaa-0000-0000-00000000000b') as zb \gset
 select public.jine_platby_ulozit_navrh(:'zb', 1, jsonb_set(:'hlavicka'::jsonb, '{castka_haleru}', '64200'), jsonb_build_array(
   jsonb_build_object('nazev', 'Svíčková', 'mnozstvi', '2', 'jednotka', 'ks', 'cena_jednotkova_haleru', 29000, 'cena_celkem_haleru', 58000,
     'zdroj', 'rucne', 'druh', 'pokrm', 'pos_produkt_id', 'P1', 'pos_mnozstvi', '2', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false),
@@ -184,7 +184,7 @@ select pg_temp.check('zB: pokrm i kusové zboží, receptura známá a zboží v
   and jsonb_array_length(:'vydej_b'::jsonb -> 'obsah' -> 'polozky') = 2);
 
 -- zC: polévka (receptura neznámá) + hranolky → obecné varování jako dřív.
-select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok103 C', '10310000-aaaa-0000-0000-00000000000c') as zc \gset
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok102 C', '10210000-aaaa-0000-0000-00000000000c') as zc \gset
 select public.jine_platby_ulozit_navrh(:'zc', 1, jsonb_set(:'hlavicka'::jsonb, '{castka_haleru}', '10300'), jsonb_build_array(
   jsonb_build_object('nazev', 'Polévka', 'mnozstvi', '1', 'jednotka', 'ks', 'cena_jednotkova_haleru', 4100, 'cena_celkem_haleru', 4100,
     'zdroj', 'rucne', 'druh', 'pokrm', 'pos_produkt_id', 'P9', 'pos_mnozstvi', '1', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false),
@@ -196,7 +196,7 @@ select pg_temp.check('zC: receptura pokrmu neznámá → obecné varování „p
   and (:'vydej_c'::jsonb -> 'varovani' ->> 0) like 'Výdej obsahuje pokrm i kusové zboží.%');
 
 -- zD: koktejl + rum (rozlévaný nápoj je surovinou koktejlu) → konkrétní varování i bez kusového zboží.
-select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok103 D', '10310000-aaaa-0000-0000-00000000000d') as zd \gset
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok102 D', '10210000-aaaa-0000-0000-00000000000d') as zd \gset
 select public.jine_platby_ulozit_navrh(:'zd', 1, jsonb_set(:'hlavicka'::jsonb, '{castka_haleru}', '30400'), jsonb_build_array(
   jsonb_build_object('nazev', 'Koktejl', 'mnozstvi', '2', 'jednotka', 'ks', 'cena_jednotkova_haleru', 12000, 'cena_celkem_haleru', 24000,
     'zdroj', 'rucne', 'druh', 'pokrm', 'pos_produkt_id', 'P2', 'pos_mnozstvi', '2', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false),
@@ -266,7 +266,7 @@ select pg_temp.check('po vrácení přiřazení zabrání projde: odesílá se d
 -- zE (pokladna POBOČKY): záznam provozovnu nenese, doplní ji zabrání.
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
-select public.jine_platby_zalozit(:'tenant', :'perla', :'pos_pob', 'Krok103 E', '10310000-aaaa-0000-0000-00000000000e') as ze \gset
+select public.jine_platby_zalozit(:'tenant', :'perla', :'pos_pob', 'Krok102 E', '10210000-aaaa-0000-0000-00000000000e') as ze \gset
 select public.jine_platby_ulozit_navrh(:'ze', 1, jsonb_set(:'hlavicka'::jsonb, '{castka_haleru}', '13500'), jsonb_build_array(
   jsonb_build_object('nazev', 'Pivo', 'mnozstvi', '3', 'jednotka', 'ks', 'cena_jednotkova_haleru', 4500, 'cena_celkem_haleru', 13500,
     'zdroj', 'rucne', 'druh', 'rozlevany_napoj', 'pos_produkt_id', 'X1', 'pos_mnozstvi', '3', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false))) as verze_ze \gset
@@ -429,4 +429,4 @@ select pg_temp.check('po úklidu (pod stropem) se pokus zahájí',
   (select stav = 'bezi' from public.jine_platby_ai_parovani where id = :'pokus_c'));
 
 \echo ''
-\echo '== KROK 103 HOTOV =============================================='
+\echo '== KROK 102 HOTOV =============================================='
