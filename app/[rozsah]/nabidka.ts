@@ -73,6 +73,9 @@ export type IkonaKlic =
   | 'trend'
   // Beverage cost karta (Finance → Přehled), vedle vidlicka (Foodcost).
   | 'napoj'
+  // Rezervace a akce — kalendář s fajfkou, ať se v nabídce nepletou
+  // s Rozpisem směn (prostý kalendář).
+  | 'rezervace'
 
 export type Polozka = {
   /** Segment za rozsahem: /<rozsah>/<segment> */
@@ -188,6 +191,11 @@ export const NABIDKA: Polozka[] = [
   // záložka Docházky, viditelná podle práva (dochazka/zalozky-prava.ts).
   // Starou adresu /:rozsah/zalohy drží přesměrování v next.config.ts.
   { segment: 'receptury', nazev: 'Receptury', kratky: 'Recepty', modul: 'provoz', pravo: 'recipes.read', hotovo: true, ikona: 'kniha' },
+  // Rezervace a kalendář akcí (Šéfík 25. 10. 2026, docs/rezervace-navrh.md).
+  // Až ZA Vzkazy a úkoly schválně: spodní lišta bere první čtyři položky
+  // a ty mají zůstat Dnes / Směny / Docházka / Vzkazy. Číst stačí, zapisovat
+  // chce `rezervace.manage` — o to se stará obrazovka, ne tahle řádka.
+  { segment: 'rezervace', nazev: 'Rezervace a akce', kratky: 'Rezervace', modul: 'provoz', pravo: ['rezervace.read', 'rezervace.manage'], hotovo: true, ikona: 'rezervace' },
   { segment: 'listky', nazev: 'Jídelní lístky', kratky: 'Lístky', modul: 'provoz', pravo: 'menus.read', hotovo: false, ikona: 'kniha' },
   { segment: 'motivace', nazev: 'Motivace', kratky: 'Motivace', modul: 'provoz', pravo: 'motivation.read', hotovo: false, ikona: 'clovek' },
   // Obrazovka zatím jen říká, že se modul připravuje — ale existuje,

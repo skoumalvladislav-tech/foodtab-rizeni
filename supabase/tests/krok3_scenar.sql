@@ -42,7 +42,8 @@ select pg_temp.check('seznam oprávnění odpovídá lib/authz.ts',
     'motivation.manage','motivation.read',
     'payroll.export','payroll.manage','payroll.read',
     'people.manage','purchasing.manage',
-    'purchasing.read','recipes.manage','recipes.read','settings.manage',
+    'purchasing.read','recipes.manage','recipes.read',
+    'rezervace.manage','rezervace.read','settings.manage',
     'shifts.manage','shifts.read','tasks.manage','tasks.read'
   ]::text[]);
 

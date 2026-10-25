@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./_tokeny.css";
 @import "./_komponenty.css";
+@import "./_rezervace.css";
 
 /* =====================================================================
    Rám rozhraní — odstupy, poloměry a velikosti podle

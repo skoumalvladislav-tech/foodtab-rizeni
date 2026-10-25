@@ -214,6 +214,14 @@ const TVARY: Record<IkonaKlic, React.ReactNode> = {
       <path d="M6.6 7h6.8" />
     </>
   ),
+  // Rezervace a akce — kalendář s fajfkou (prostý kalendář je Rozpis směn).
+  rezervace: (
+    <>
+      <rect x="3" y="4.5" width="14" height="13" rx="2" />
+      <path d="M3 8.5h14M7 2.5v4M13 2.5v4" />
+      <path d="M7.3 12.9l1.9 1.8 3.6-3.7" />
+    </>
+  ),
 };
 
 export default function Ikona({ klic, velikost }: { klic: IkonaKlic; velikost?: number }) {

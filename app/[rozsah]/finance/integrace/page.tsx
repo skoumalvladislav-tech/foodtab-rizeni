@@ -62,6 +62,7 @@ const NAZVY_OBLASTI: Record<string, string> = {
   banka: 'Banka',
   ucetnictvi: 'Účetnictví',
   email_dokladu: 'E-mail dokladů',
+  rezervace: 'Rezervace',
 }
 
 const NAZVY_STAVU: Record<string, { text: string; barva: string; bg: string }> = {
@@ -130,11 +131,11 @@ export default async function FinanceIntegrace({
 
         {/*
           Čtyři kategorie zadání (Foodtab_Integrace_Claude_Code.md,
-          oddíl 2). Rezervace/objednávky nemají žádný adaptér ani
-          registrovatelnou oblast (Choice/Choice QR nemá veřejnou
-          dokumentaci, appka sama nenavazuje obchodní kontakt) — kreslí
-          se jako „připravujeme", NE jako klikatelný odkaz, ať appka
-          nepředstírá funkčnost, která neexistuje (zadání §1, §2).
+          oddíl 2). Rezervace mají od 25. 10. 2026 vlastní obrazovku
+          v Provozu (Rezervace a akce → Napojení a import): oblast
+          `rezervace` v registru, import ze souboru, napojení „čeká na
+          připojení". Živý adaptér žádného systému zatím není, karta proto
+          neslibuje „připojeno" — jen vede tam, kde se to spravuje.
         */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))', gap: '10px' }}>
           <Link href={`/${rozsah}/finance/integrace/pokladna`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
@@ -145,10 +146,10 @@ export default async function FinanceIntegrace({
             <strong>Bankovní účty</strong>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Fio, Enable Banking →</div>
           </Link>
-          <div style={{ ...karta, opacity: 0.6 }}>
-            <strong>Rezervace a objednávky</strong>
-            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Připravujeme — každý klient může mít jiného poskytovatele</div>
-          </div>
+          <Link href={`/${rozsah}/rezervace/napojeni`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
+            <strong>Rezervace</strong>
+            <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>Import ze souboru, napojení čeká na připojení →</div>
+          </Link>
           <Link href={`/${rozsah}/finance/integrace/email`} className="ft-tl" style={{ ...karta, display: 'block', whiteSpace: 'normal' }}>
             <strong>E-mailové schránky</strong>
             <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '4px' }}>IMAP — appka ověří přístup, stažení dokladů čeká na rozhodnutí →</div>

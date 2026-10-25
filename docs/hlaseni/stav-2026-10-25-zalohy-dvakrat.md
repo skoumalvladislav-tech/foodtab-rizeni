@@ -7,9 +7,19 @@ týž den: „problém s přihlášením vyřešen, nešel internet".
 Větev `claude/keen-bardeen-f7ttd3`. Nová migrace
 `20261025100000_zalohy_jedno_odeslani` (novější než všechny v `main`).
 
+> **Doplněno 25. 10. 2026 večer (relace Rezervace a akce):** PR #156 je
+> sloučená a migrace `20261025100000_zalohy_jedno_odeslani` je
+> **nasazená** — `db push` ji pustil spolu s Rezervacemi (`20261027100000`),
+> na Šéfíkův výslovný pokyn „nasadit obě“. Ověřeno v ostré databázi:
+> `advances.klic_odeslani` existuje a `vyplatit_zalohu` má parametr
+> `p_klic`. Ochrana proti dvojímu zápisu tedy platí. **Zbývá bod 2
+> v „Co čeká na Šéfíka“:** stornovat zálohy, které už zdvojené jsou.
+> Výpis a ověření: `docs/hlaseni/stav-2026-10-25-rezervace.md`, oddíl
+> „Nasazení“. Původní text níž je ze chvíle před sloučením.
+
 ## Nejdřív to podstatné
 
-- **Nic není nasazené.** Nic jsem nesloučil do `main` a `db push` jsem nespustil.
+- **Nic není nasazené.** Nic jsem nesloučil do `main` a `db push` jsem nespustil. *(Neplatí od večera 25. 10. — viz doplnění výš.)*
 - **Výpočty záloh jsou v pořádku.** Prošel jsem Můj účet, dlaždici na Docházce, Výdělky i Po dnech. Nikde se jedna záloha nezapočítá dvakrát.
 - **Zdvojení vznikalo při ZÁPISU.** Výplata zapsala novou zálohu při každém odeslání. Při výpadku internetu se záloha zapsala, odpověď do telefonu nedošla, obsluha viděla chybu a vyplatila znovu. Stejně dopadlo i dvojí ťuknutí na pomalém telefonu.
 - **Oprava:** každé vyplnění formuláře „Vyplatit zálohu“ nese **číslo odeslání**. Když přijde totéž číslo podruhé, databáze novou zálohu nezapíše a vrátí tu první. Obsluha uvidí „Tahle záloha už zapsaná byla… Podruhé se nezapsala — vyplacená je jednou.“
