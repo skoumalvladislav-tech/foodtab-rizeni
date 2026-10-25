@@ -44,10 +44,13 @@
 - `jine-platby`, `jine-platby-ai`, `jine-platby-obrazovka`,
   `jine-platby-kiosek`, `pokladna-dotykacka`, `pokladna-napojeni`,
   `pokladna-trzby`: prošly. `tsc` a `eslint` čisté.
-- Scénář **krok102** nad PGlite: **39 kontrol**. Celý řetěz PGlite:
-  **4073 kontrol**, krok98 (Jiné platby) 255. **Spadl krok101** (zálohy
-  z main, PR #156) — padá stejně i na čistém main `d58f1e0`, s touhle prací
-  nesouvisí.
+- Scénář **krok102** nad PGlite: **39 kontrol**. Celý řetěz PGlite po
+  převzetí main s Rezervacemi (`56f73ff`): **4204 kontrol**, krok98 (Jiné
+  platby) 255, krok103 (Rezervace) 131. **Spadl krok101** (zálohy, PR #156)
+  — padá stejně i na čistém main. Spouštěč PGlite nesundá uvozovky
+  u `\set`, na CI s PostgreSQL se to neděje. S touhle prací nesouvisí.
+- Hlídač pořadí migrací (`node scripts/migrace-poradi.mjs origin/main`):
+  nová migrace je novější než všechny v main.
 - PGlite **neověří RLS ani sloupcové granty** (běží jako superuživatel).
   Rozhoduje workflow Databáze proti PostgreSQL na PR.
 - **Schválná rozbití:** 17 v TypeScriptu, 3 podmínky tlačítka a 16 v SQL
