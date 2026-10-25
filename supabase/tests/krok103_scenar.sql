@@ -196,8 +196,24 @@ select public.rezervace_ulozit(:'tenant', null, :'perla',
 select public.rezervace_ulozit(:'tenant', null, :'perla',
   '{"jmeno_hosta":"Noc Krok103","datum":"2026-11-21","od":"01:30","pocet_osob":"2"}'::jsonb) as r_noc \gset
 
+-- Dvojí ťuknutí / opakování po výpadku: totéž číslo odeslání.
+select public.rezervace_ulozit(:'tenant', null, :'perla',
+  '{"jmeno_hosta":"Klíč Krok103","datum":"2026-11-23","od":"18:00","pocet_osob":"2","klic":"10310000-aaaa-0000-0000-000000000001"}'::jsonb) as r_klic \gset
+select public.rezervace_ulozit(:'tenant', null, :'perla',
+  '{"jmeno_hosta":"Klíč Krok103","datum":"2026-11-23","od":"18:00","pocet_osob":"2","klic":"10310000-aaaa-0000-0000-000000000001"}'::jsonb) as r_klic2 \gset
+
+select set_config('test.user_id', :'majitel', false);
+select pg_temp.check('číslo odeslání jedné pobočky nejde použít pro druhou',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_ulozit(%L, null, %L, %L::jsonb)', :'tenant', :'bar',
+    '{"jmeno_hosta":"Klíč Krok103","datum":"2026-11-23","od":"18:00","klic":"10310000-aaaa-0000-0000-000000000001"}'),
+    '23514', 'patří jiné rezervaci'));
+
 reset role;
 select set_config('test.user_id', '', false);
+
+select pg_temp.check('totéž odeslání podruhé = tatáž rezervace, jen jedna',
+  :'r_klic' = :'r_klic2'
+  and (select count(*) from public.rezervace where jmeno_hosta = 'Klíč Krok103') = 1);
 
 select pg_temp.check('zimní rezervace v 19:00 je 19:00 pražského času (UTC+1)',
   (select zacatek from public.rezervace where id = :'r1') = timestamptz '2026-11-20 19:00:00+01'

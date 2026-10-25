@@ -181,6 +181,11 @@ create table public.rezervace (
   externi_zmeneno_kdy timestamptz,
   importovano_kdy     timestamptz,
 
+  -- Číslo odeslání formuláře nové rezervace. Dvojí ťuknutí nebo opakování
+  -- po výpadku spojení (25. 10. 2026 se tak zdvojovaly zálohy) založí
+  -- rezervaci jen jednou.
+  klic_odeslani       uuid,
+
   vytvoril            uuid references public.employees(id) on delete set null,
   vytvoreno_kdy       timestamptz not null default now(),
   zmeneno_kdy         timestamptz not null default now(),
@@ -195,6 +200,10 @@ create unique index rezervace_externi
   where externi_id is not null;
 
 create index rezervace_den on public.rezervace (tenant_id, branch_id, den);
+
+create unique index rezervace_klic_odeslani
+  on public.rezervace (tenant_id, klic_odeslani)
+  where klic_odeslani is not null;
 
 comment on table public.rezervace is
   'Rezervace hostů a akce (uzavřené společnosti, catering). Zápis jen přes '
@@ -497,6 +506,8 @@ declare
   v_id      uuid;
   v_telefon text;
   v_email   text;
+  v_klic    uuid;
+  v_klic_b  uuid;
 begin
   if p_udaje is null or jsonb_typeof(p_udaje) <> 'object' then
     raise exception 'Chybí údaje rezervace.' using errcode = 'check_violation';
@@ -509,6 +520,24 @@ begin
     end if;
     v_tenant := p_tenant;
     v_branch := p_branch;
+
+    -- Totéž odeslání podruhé vrátí rezervaci z prvního (právo se ptá
+    -- PRVNÍ, takže kdo ho nemá, se nedozví, že číslo existuje).
+    if nullif(btrim(p_udaje ->> 'klic'), '') is not null then
+      begin
+        v_klic := btrim(p_udaje ->> 'klic')::uuid;
+      exception when invalid_text_representation then
+        raise exception 'Číslo odeslání nemá správný tvar.' using errcode = 'check_violation';
+      end;
+      select r.id, r.branch_id into v_id, v_klic_b
+        from public.rezervace r where r.tenant_id = v_tenant and r.klic_odeslani = v_klic;
+      if v_id is not null then
+        if v_klic_b <> v_branch then
+          raise exception 'Číslo odeslání patří jiné rezervaci.' using errcode = 'check_violation';
+        end if;
+        return v_id;
+      end if;
+    end if;
   else
     select * into v_r from public.rezervace
      where id = p_rezervace and tenant_id = p_tenant
@@ -548,7 +577,7 @@ begin
     insert into public.rezervace (
       tenant_id, branch_id, druh, stav, nazev, jmeno_hosta, zacatek, konec, den,
       pocet_osob, prostor, typ_akce, menu, zaloha_hosta_haleru, zaloha_hosta_stav,
-      zdroj, vytvoril
+      zdroj, klic_odeslani, vytvoril
     ) values (
       v_tenant, v_branch,
       coalesce(nullif(btrim(p_udaje ->> 'druh'), ''), 'rezervace'),
@@ -565,9 +594,21 @@ begin
       app.rezervace_cele_cislo(p_udaje ->> 'zaloha_hosta_haleru', 'záloha'),
       coalesce(nullif(btrim(p_udaje ->> 'zaloha_hosta_stav'), ''), 'zadna'),
       'rucne',
+      v_klic,
       app.muj_employee(v_tenant)
     )
+    on conflict (tenant_id, klic_odeslani) where klic_odeslani is not null do nothing
     returning id into v_id;
+
+    -- Dvě odeslání se stejným číslem NARÁZ: druhé narazí na první.
+    if v_id is null then
+      select r.id into v_id from public.rezervace r
+       where r.tenant_id = v_tenant and r.klic_odeslani = v_klic and r.branch_id = v_branch;
+      if v_id is null then
+        raise exception 'Číslo odeslání patří jiné rezervaci.' using errcode = 'check_violation';
+      end if;
+      return v_id;
+    end if;
   else
     update public.rezervace r set
       branch_id           = v_branch,

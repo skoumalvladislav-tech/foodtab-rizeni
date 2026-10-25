@@ -213,3 +213,31 @@ export function zkontrolovatPoznamku(nadpis: string, obsah: string): string | nu
   if (nadpis.length > MAX_NADPIS_POZNAMKY) return `Nadpis je delší než ${MAX_NADPIS_POZNAMKY} znaků.`
   return null
 }
+
+/* ---------------------------------------------------------------------
+ * Pomůcky serverových akcí (tady, ať jdou vyzkoušet Nodem)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Adresa, kam se akce vrací. Jen uvnitř Rezervací téhož rozsahu — jinak
+ * by šlo poslat formulář s `zpet=https://…` a nechat se přesměrovat ven.
+ */
+export function bezpecnaZpatky(rozsah: string, zpet: string | null | undefined): string {
+  const zaklad = `/${rozsah}/rezervace`
+  const z = String(zpet ?? '')
+  if (z === zaklad || (z.startsWith(`${zaklad}/`) || z.startsWith(`${zaklad}?`))) {
+    if (!z.includes('//') && !z.includes('\\')) return z
+  }
+  return zaklad
+}
+
+/** Česká hláška z chyby databáze. Naše funkce mluví česky; cokoli jiného je obecná věta. */
+export function hlaskaZDatabaze(chyba: { code?: string; message?: string } | null): string {
+  if (!chyba) return 'Uložení se nepovedlo.'
+  const zprava = chyba.message ?? ''
+  if (chyba.code === '42501' && !zprava.includes('permission denied')) return zprava
+  if ((chyba.code === '23514' || chyba.code === 'P0002') && !zprava.includes('violates')) return zprava
+  if (chyba.code === '23514') return 'Některý údaj je mimo povolený rozsah (moc dlouhý text, nesmyslné číslo).'
+  if (chyba.code === '42501') return 'Na tohle nemáte oprávnění.'
+  return 'Uložení se nepovedlo. Zkuste to znovu.'
+}

@@ -1,0 +1,378 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+
+import { canSee } from '@/lib/authz'
+import { getCurrentTenantId } from '@/lib/firma'
+import { MAX_RADKU_IMPORTU, naparsovatCsvRezervaci } from '@/lib/rezervace-import'
+import { najitSystem, poskytovatelSouboru } from '@/lib/rezervace-poskytovatele'
+import { KBELIK_REZERVACI, MAX_BAJTU, jeTypPriloh } from '@/lib/rezervace-prilohy'
+import { STAVY, bezpecnaZpatky, hlaskaZDatabaze, jePlatneDatum, precistFormular, zkontrolovatPoznamku } from '@/lib/rezervace-typy'
+import { getServerSupabase } from '@/lib/supabase/server'
+
+import { pobockaKZapisu, zkusPristupRezervacim } from './pristup'
+
+/**
+ * Serverové akce Rezervací a akcí.
+ *
+ * Každá začíná tím, že si sama ověří přístup (layout ani stránka akci
+ * nechrání) a pobočku z formuláře porovná s pobočkami, na které člověk
+ * v tomhle rozsahu zapisuje. O zápisu pak rozhodují funkce
+ * `rezervace_*` v databázi — znovu, na pobočce řádku.
+ *
+ * Do adresy po akci jde jen kód výsledku (`?stav=ulozeno`, `?chyba=pravo`),
+ * nikdy text z formuláře ani jméno hosta.
+ */
+
+export type StavFormulare = { stav: 'klid' } | { stav: 'chyba'; chyby: string[] }
+
+export type StavImportu =
+  | { stav: 'klid' }
+  | { stav: 'chyba'; chyby: string[] }
+  | { stav: 'hotovo'; nove: number; zmenene: number; bezeZmeny: number; zastarale: number; bezCisla: boolean }
+
+const text = (formData: FormData, klic: string) => String(formData.get(klic) ?? '').trim()
+
+function sParametrem(adresa: string, klic: string, hodnota: string): string {
+  return `${adresa}${adresa.includes('?') ? '&' : '?'}${klic}=${encodeURIComponent(hodnota)}`
+}
+
+async function vstup(rozsah: string) {
+  const tenantId = await getCurrentTenantId()
+  if (!tenantId) return null
+  const pristup = await zkusPristupRezervacim(tenantId, rozsah)
+  if (pristup.stav !== 'ok') return null
+  return { tenantId, pristup }
+}
+
+/* ---------------------------------------------------------------------
+ * Rezervace a akce
+ * ------------------------------------------------------------------ */
+
+/** Založení nebo úprava. Volá ji formulář přes useActionState. */
+export async function ulozitRezervaci(_predchozi: StavFormulare, formData: FormData): Promise<StavFormulare> {
+  const rozsah = text(formData, 'rozsah')
+  const id = text(formData, 'id') || null
+  const v = await vstup(rozsah)
+  if (!v) return { stav: 'chyba', chyby: ['Na tohle nemáte oprávnění.'] }
+  const { tenantId, pristup } = v
+
+  const supabase = await getServerSupabase()
+  let jenFoodtab = false
+  let pobocka: string
+
+  if (id) {
+    const { data } = await supabase
+      .from('rezervace')
+      .select('id, branch_id, zdroj')
+      .eq('id', id)
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    if (!data || !pobockaKZapisu(pristup, String(data.branch_id))) {
+      return { stav: 'chyba', chyby: ['Tuhle rezervaci upravit nemůžete.'] }
+    }
+    jenFoodtab = data.zdroj !== 'rucne'
+    pobocka = String(data.branch_id)
+  } else {
+    const p = pobockaKZapisu(pristup, text(formData, 'pobocka'))
+    if (!p) return { stav: 'chyba', chyby: ['Na téhle pobočce rezervace zapisovat nemůžete.'] }
+    pobocka = p.id
+  }
+
+  const formular = precistFormular((k) => formData.get(k) as string | null, { jenFoodtab })
+  if (formular.stav === 'chyba') return { stav: 'chyba', chyby: formular.chyby }
+
+  const klic = text(formData, 'klic')
+  const { data: vysledneId, error } = await supabase.rpc('rezervace_ulozit', {
+    p_tenant: tenantId,
+    p_rezervace: id,
+    // U úpravy pobočku neposílat: rezervace se nestěhuje a databáze
+    // by jinou pobočku odmítla.
+    p_branch: id ? null : pobocka,
+    p_udaje: id ? formular.udaje : { ...formular.udaje, klic },
+  })
+  if (error || !vysledneId) return { stav: 'chyba', chyby: [hlaskaZDatabaze(error)] }
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  redirect(`/${rozsah}/rezervace/${String(vysledneId)}?stav=ulozeno`)
+}
+
+/** Rychlá změna stavu z detailu (Proběhla, Nedorazili, Zrušit…). */
+export async function zmenitStav(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const id = text(formData, 'id')
+  const stav = text(formData, 'stav')
+  const zpet = `/${rozsah}/rezervace/${id}`
+  const v = await vstup(rozsah)
+  if (!v || !/^[0-9a-f-]{36}$/i.test(id)) redirect(`/${rozsah}/rezervace`)
+  if (!(STAVY as readonly string[]).includes(stav)) redirect(sParametrem(zpet, 'chyba', 'nepovedlo'))
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('rezervace_zmenit_stav', { p_rezervace: id, p_stav: stav })
+  if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : error.code === '23514' ? 'zdroj' : 'nepovedlo'))
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  redirect(sParametrem(zpet, 'stav', 'stav-zmenen'))
+}
+
+/* ---------------------------------------------------------------------
+ * Poznámky a další informace
+ * ------------------------------------------------------------------ */
+
+export async function pridatPoznamku(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = bezpecnaZpatky(rozsah, text(formData, 'zpet'))
+  const v = await vstup(rozsah)
+  if (!v) redirect(`/${rozsah}/rezervace`)
+
+  const nadpis = text(formData, 'nadpis')
+  const obsah = text(formData, 'obsah')
+  if (zkontrolovatPoznamku(nadpis, obsah)) redirect(sParametrem(zpet, 'chyba', 'poznamka'))
+
+  const rezervace = text(formData, 'rezervace') || null
+  const den = text(formData, 'den') || null
+  let pobocka: string | null = null
+  if (!rezervace) {
+    const p = pobockaKZapisu(v.pristup, text(formData, 'pobocka'))
+    if (!p || !den || !jePlatneDatum(den)) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+    pobocka = p.id
+  }
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('rezervace_pridat_poznamku', {
+    p_tenant: v.tenantId,
+    p_branch: pobocka,
+    p_rezervace: rezervace,
+    p_den: rezervace ? null : den,
+    p_nadpis: nadpis,
+    p_obsah: obsah,
+  })
+  if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : 'nepovedlo'))
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  redirect(sParametrem(zpet, 'stav', 'poznamka'))
+}
+
+export async function upravitPoznamku(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = bezpecnaZpatky(rozsah, text(formData, 'zpet'))
+  const v = await vstup(rozsah)
+  if (!v) redirect(`/${rozsah}/rezervace`)
+
+  const nadpis = text(formData, 'nadpis')
+  const obsah = text(formData, 'obsah')
+  if (zkontrolovatPoznamku(nadpis, obsah)) redirect(sParametrem(zpet, 'chyba', 'poznamka'))
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('rezervace_upravit_poznamku', {
+    p_poznamka: text(formData, 'id'),
+    p_nadpis: nadpis,
+    p_obsah: obsah,
+  })
+  if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : 'nepovedlo'))
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  redirect(sParametrem(zpet, 'stav', 'poznamka'))
+}
+
+export async function smazatPoznamku(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = bezpecnaZpatky(rozsah, text(formData, 'zpet'))
+  const v = await vstup(rozsah)
+  if (!v) redirect(`/${rozsah}/rezervace`)
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('rezervace_smazat_poznamku', { p_poznamka: text(formData, 'id') })
+  if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : 'nepovedlo'))
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  redirect(sParametrem(zpet, 'stav', 'poznamka-smazana'))
+}
+
+/* ---------------------------------------------------------------------
+ * Přílohy
+ *
+ * Soubor nahrává prohlížeč rovnou do úložiště (serverová akce má strop
+ * 1 MB, fotka z telefonu je větší). Sem chodí jen jeho cesta, a funkce
+ * v databázi ověří, že soubor v úložišti je, patří téhle firmě
+ * a pobočce a má ten typ a velikost, jaké tvrdí prohlížeč.
+ * ------------------------------------------------------------------ */
+
+export type VstupPrilohy = {
+  rozsah: string
+  rezervace: string | null
+  den: string | null
+  pobocka: string | null
+  cesta: string
+  nazev: string
+  mime: string
+  velikost: number
+}
+
+export async function pripojitPrilohu(vstupPrilohy: VstupPrilohy): Promise<{ ok: true } | { ok: false; chyba: string }> {
+  const v = await vstup(vstupPrilohy.rozsah)
+  if (!v) return { ok: false, chyba: 'Na tohle nemáte oprávnění.' }
+  if (!jeTypPriloh(vstupPrilohy.mime)) return { ok: false, chyba: 'Tenhle typ souboru nejde připojit.' }
+  if (!(vstupPrilohy.velikost > 0 && vstupPrilohy.velikost <= MAX_BAJTU)) return { ok: false, chyba: 'Soubor je prázdný nebo moc velký.' }
+  if (!vstupPrilohy.rezervace) {
+    const p = pobockaKZapisu(v.pristup, vstupPrilohy.pobocka ?? '')
+    if (!p || !vstupPrilohy.den || !jePlatneDatum(vstupPrilohy.den)) return { ok: false, chyba: 'Sem přílohu přidat nemůžete.' }
+  }
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('rezervace_pripojit_prilohu', {
+    p_tenant: v.tenantId,
+    p_branch: vstupPrilohy.rezervace ? null : vstupPrilohy.pobocka,
+    p_rezervace: vstupPrilohy.rezervace,
+    p_den: vstupPrilohy.rezervace ? null : vstupPrilohy.den,
+    p_cesta: vstupPrilohy.cesta,
+    p_nazev: vstupPrilohy.nazev,
+    p_mime: vstupPrilohy.mime,
+    p_velikost: vstupPrilohy.velikost,
+  })
+  if (error) return { ok: false, chyba: hlaskaZDatabaze(error) }
+
+  revalidatePath(`/${vstupPrilohy.rozsah}/rezervace`, 'layout')
+  return { ok: true }
+}
+
+export async function odebratPrilohu(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = bezpecnaZpatky(rozsah, text(formData, 'zpet'))
+  const v = await vstup(rozsah)
+  if (!v) redirect(`/${rozsah}/rezervace`)
+
+  const supabase = await getServerSupabase()
+  const { data: cesta, error } = await supabase.rpc('rezervace_odebrat_prilohu', { p_priloha: text(formData, 'id') })
+  if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : 'nepovedlo'))
+
+  // Soubor bez přílohy smí smazat jen ten, kdo na pobočce zapisuje
+  // (politika rezervace_soubory_smazat). Nepovede-li se, zůstane sirotek.
+  if (cesta) await supabase.storage.from(KBELIK_REZERVACI).remove([String(cesta)])
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  redirect(sParametrem(zpet, 'stav', 'priloha-odebrana'))
+}
+
+/* ---------------------------------------------------------------------
+ * Import ze souboru
+ * ------------------------------------------------------------------ */
+
+/** Strop souboru: serverová akce bere nejvýš 1 MB i s ostatními poli. */
+const MAX_BAJTU_SOUBORU = 900 * 1024
+
+/** UTF-8, a když to nejde, windows-1250 (české Excely ukládají CSV takhle). */
+function precistText(bajty: ArrayBuffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bajty)
+  } catch {
+    return new TextDecoder('windows-1250').decode(bajty)
+  }
+}
+
+export async function importovatSoubor(_predchozi: StavImportu, formData: FormData): Promise<StavImportu> {
+  const rozsah = text(formData, 'rozsah')
+  const v = await vstup(rozsah)
+  if (!v) return { stav: 'chyba', chyby: ['Na tohle nemáte oprávnění.'] }
+
+  const p = pobockaKZapisu(v.pristup, text(formData, 'pobocka'))
+  if (!p) return { stav: 'chyba', chyby: ['Na téhle pobočce rezervace importovat nemůžete.'] }
+
+  const soubor = formData.get('soubor')
+  if (!(soubor instanceof File) || soubor.size === 0) return { stav: 'chyba', chyby: ['Vyberte soubor CSV.'] }
+  if (soubor.size > MAX_BAJTU_SOUBORU) {
+    return { stav: 'chyba', chyby: [`Soubor je větší než 900 kB. Rozdělte ho (najednou jde nejvýš ${MAX_RADKU_IMPORTU} rezervací).`] }
+  }
+
+  const vysledek = naparsovatCsvRezervaci(precistText(await soubor.arrayBuffer()))
+  if (vysledek.chyby.length > 0) {
+    const ukazat = vysledek.chyby.slice(0, 12).map((c) => (c.radek > 0 ? `Řádek ${c.radek}: ${c.zprava}` : c.zprava))
+    if (vysledek.chyby.length > 12) ukazat.push(`… a dalších ${vysledek.chyby.length - 12} chyb.`)
+    ukazat.push('Nenačetlo se nic — opravte soubor a nahrajte ho znovu.')
+    return { stav: 'chyba', chyby: ukazat }
+  }
+  if (vysledek.radky.length === 0) return { stav: 'chyba', chyby: ['V souboru není žádná rezervace.'] }
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.rpc('rezervace_importovat_csv', {
+    p_tenant: v.tenantId,
+    p_branch: p.id,
+    p_poskytovatel: poskytovatelSouboru(text(formData, 'system')),
+    p_radky: vysledek.radky,
+  })
+  if (error || !data) return { stav: 'chyba', chyby: [hlaskaZDatabaze(error), 'Nenačetlo se nic.'] }
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  const souhrn = data as Record<string, number>
+  return {
+    stav: 'hotovo',
+    nove: Number(souhrn.nove ?? 0),
+    zmenene: Number(souhrn.zmenene ?? 0),
+    bezeZmeny: Number(souhrn.beze_zmeny ?? 0),
+    zastarale: Number(souhrn.zastarale ?? 0),
+    bezCisla: vysledek.bezCisla,
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * Napojení na rezervační systém (registr integrace_pripojeni)
+ *
+ * Jen `integrace.manage`. Připojení vznikne jako „čeká na připojení“ —
+ * žádný adaptér zatím není, takže „připojeno“ nemá kdo ověřit (a databáze
+ * ho bez ověření nedovolí).
+ * ------------------------------------------------------------------ */
+
+export async function pripravitNapojeni(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = `/${rozsah}/rezervace/napojeni`
+  const v = await vstup(rozsah)
+  if (!v || !canSee(v.pristup.ctx, 'integrace.manage')) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const pobocka = v.pristup.pobocky.find((b) => b.id === text(formData, 'pobocka'))
+  const system = najitSystem(text(formData, 'system'))
+  if (!pobocka || !system || system.klic === 'jiny') redirect(sParametrem(zpet, 'chyba', 'nepovedlo'))
+
+  const supabase = await getServerSupabase()
+  const { data: stavajici } = await supabase.rpc('rezervace_napojeni', { p_tenant: v.tenantId })
+  const uzJe = ((stavajici ?? []) as { branch_id: string; poskytovatel: string }[]).some(
+    (s) => s.branch_id === pobocka.id && s.poskytovatel === system.klic,
+  )
+  if (uzJe) redirect(sParametrem(zpet, 'chyba', 'uz-je'))
+
+  const { error } = await supabase.from('integrace_pripojeni').insert({
+    tenant_id: v.tenantId,
+    branch_id: pobocka.id,
+    oblast: 'rezervace',
+    poskytovatel: system.klic,
+    rezim: 'zakaznicky',
+    nazev: `${system.nazev} — ${pobocka.nazev}`,
+  })
+  if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : 'nepovedlo'))
+
+  revalidatePath(zpet)
+  redirect(sParametrem(zpet, 'stav', 'pripraveno'))
+}
+
+export async function odpojitNapojeni(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = `/${rozsah}/rezervace/napojeni`
+  const v = await vstup(rozsah)
+  if (!v || !canSee(v.pristup.ctx, 'integrace.manage')) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase
+    .from('integrace_pripojeni')
+    .update({ odpojeno_kdy: new Date().toISOString(), stav: 'odpojeno' })
+    .eq('id', text(formData, 'id'))
+    .eq('tenant_id', v.tenantId)
+    .eq('oblast', 'rezervace')
+    .is('odpojeno_kdy', null)
+    .select('id')
+  // Politika řádek, na který člověk nemá právo, tiše přeskočí — proto
+  // se počítá, jestli se něco změnilo.
+  if (error || !data || data.length === 0) redirect(sParametrem(zpet, 'chyba', error?.code === '42501' || !error ? 'pravo' : 'nepovedlo'))
+
+  revalidatePath(zpet)
+  redirect(sParametrem(zpet, 'stav', 'odpojeno'))
+}

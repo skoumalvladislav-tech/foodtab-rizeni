@@ -1405,8 +1405,21 @@ console.log('\n== Jiné platby: položku pustí kterékoli právo agendy ==')
 
   const polozka = nabidka.NABIDKA.find((p) => p.segment === SEG)
   ok('položka Jiné platby má právě PRAVA_CTENI_JINYCH_PLATEB', JSON.stringify(polozka?.pravo) === JSON.stringify(PRAVA_CTENI_JINYCH_PLATEB))
+  // Seznam práv mají jen Jiné platby a Rezervace (čtení NEBO zápis);
+  // každá další položka se seznamem sem musí přibýt vědomě.
   ok('ostatní položky beze změny: jedno právo nebo null',
-    [...nabidka.NABIDKA, ...nabidka.NASTAVENI].filter((p) => p.segment !== SEG).every((p) => p.pravo === null || typeof p.pravo === 'string'))
+    [...nabidka.NABIDKA, ...nabidka.NASTAVENI].filter((p) => p.segment !== SEG && p.segment !== 'rezervace').every((p) => p.pravo === null || typeof p.pravo === 'string'))
+
+  // Rezervace a akce (25. 10. 2026): vidí je, kdo čte, i kdo jen zapisuje.
+  const REZ = 'rezervace'
+  ok('jen rezervace.read → Rezervace v nabídce', (await nabidkaS(['rezervace.read'])).includes(REZ))
+  ok('jen rezervace.manage → Rezervace v nabídce', (await nabidkaS(['rezervace.manage'])).includes(REZ))
+  ok('bez práva rezervací (jen směny a zprávy) položku nevidí', !(await nabidkaS(['shifts.read', 'communication.read'])).includes(REZ))
+  ok('položka Rezervace má právě obě práva rezervací',
+    JSON.stringify(nabidka.NABIDKA.find((p) => p.segment === REZ)?.pravo) === JSON.stringify(['rezervace.read', 'rezervace.manage']))
+  const sRezervacemi = await nabidkaS(['shifts.read', 'communication.read', 'tasks.read', 'rezervace.read'])
+  ok('Rezervace nevytlačí Vzkazy z první čtyřky (spodní lišta)',
+    sRezervacemi.slice(0, 4).includes('vzkazy-a-ukoly') && !sRezervacemi.slice(0, 4).includes(REZ))
 
   // Prázdný seznam práv nesmí pustit nikoho — ani majitele se všemi právy.
   nabidka.NABIDKA.push({ segment: 'zkouska-prazdna-prava', nazev: 'Zkouška', kratky: 'Zkouška', modul: 'finance', pravo: [], hotovo: true, ikona: 'mince' })
