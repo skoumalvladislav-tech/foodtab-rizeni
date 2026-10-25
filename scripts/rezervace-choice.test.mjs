@@ -1123,7 +1123,7 @@ export async function hasAccess(t, p, b) { globalThis.__akce.pravo.push([t, p, b
   ['@/lib/rezervace-choice-sync', js(`
 export async function otestovatToken(token, firma, konecMs) { globalThis.__akce.testy.push({ token, firma, konecMs }); return { stav: 'ok' } }
 export async function zapsatVysledekTestu() { return true }
-export async function synchronizovatChoice(id, m) { globalThis.__akce.synchronizace.push({ id, m }); return { stav: 'ok', pokracovani: false } }`)],
+export async function synchronizovatChoice(id, m) { globalThis.__akce.synchronizace.push({ id, m }); return globalThis.__akce.vysledekSync }`)],
   ['@/lib/rezervace-import', js('export const MAX_RADKU_IMPORTU = 1\nexport function naparsovatCsvRezervaci() {}')],
   ['@/lib/rezervace-prijem-api', js("export const POSKYTOVATEL_PRIJMU = 'prijem-api'\nexport function slozitKlicRezervaci() {}")],
   ['@/lib/rezervace-poskytovatele', js('export function poskytovatelSouboru() {}\nexport function systemyKPriprave() { return [] }')],
@@ -1135,13 +1135,13 @@ export async function synchronizovatChoice(id, m) { globalThis.__akce.synchroniz
 
 const { zasifrovat: zasifrovatKlicem } = await import(KLICE)
 
-async function akce(fn, pole, { spravce = false, zapis = false, stav = 'pripojeno', napojeni = true } = {}) {
+async function akce(fn, pole, { spravce = false, zapis = false, stav = 'pripojeno', napojeni = true, vysledekSync = { stav: 'ok', pokracovani: false, dotazu: 3 } } = {}) {
   const db = databaze({ integrace_pripojeni: napojeni ? [pripojeni(ID_PRIPOJENI, { stav })] : [] })
   db.rpc.rezervace_napojeni = () => ({ data: db.tabulky.integrace_pripojeni.map((p) => ({ id: p.id, branch_id: p.branch_id, poskytovatel: p.poskytovatel, stav: p.stav })), error: null })
   db.rpc.integrace_precti_tajemstvi = () => ({ data: zasifrovatKlicem({ token: TOKEN }).sifra, error: null })
   db.klient.auth = { getUser: async () => ({ data: { user: { id: UZIVATEL } }, error: null }) }
   globalThis.__akce = {
-    firma: FIRMA, spravce, klient: db.klient, pravo: [], testy: [], synchronizace: [],
+    firma: FIRMA, spravce, klient: db.klient, pravo: [], testy: [], synchronizace: [], vysledekSync,
     pristup: { stav: 'ok', ctx: {}, scope: {}, pobocky: [{ id: POBOCKA, nazev: 'Černá Perla', slug: 'cerna-perla', zona: 'Europe/Prague', zapis }] },
   }
   const fd = new FormData()
@@ -1166,6 +1166,10 @@ async function akce(fn, pole, { spravce = false, zapis = false, stav = 'pripojen
     && obsluha.a.synchronizace[0].id === ID_PRIPOJENI && obsluha.a.synchronizace[0].m.nejmeneOdMinulehoMs === 60_000)
   const spravce = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI }, { spravce: true })
   ok('… správce napojení taky', spravce.a.synchronizace.length === 1)
+  const obsazeno = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI }, { zapis: true, vysledekSync: { stav: 'ok', pokracovani: true, dotazu: 0 } })
+  ok('… fronta firmy zabraná jiným během (0 dotazů) → „zkuste za minutu“, ne „část načtená“', obsazeno.kam?.endsWith('chyba=choice-chvili'))
+  const cast = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI }, { zapis: true, vysledekSync: { stav: 'ok', pokracovani: true, dotazu: 4 } })
+  ok('… načtená část (došel čas) → „část načtená“', cast.kam?.endsWith('stav=choice-nacteno-cast'))
   const neovereny = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI }, { zapis: true, stav: 'chyba' })
   ok('… neověřené připojení se nenačítá', neovereny.kam?.endsWith('chyba=choice-neovereno') && neovereny.a.synchronizace.length === 0)
 }

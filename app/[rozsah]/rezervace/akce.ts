@@ -671,7 +671,9 @@ export async function nacistChoiceTed(formData: FormData): Promise<void> {
   const vysledek = await synchronizovatChoice(pripojeni.id, { konecMs: zacatek + 50_000, nejmeneOdMinulehoMs: 60_000 })
 
   revalidatePath(`/${rozsah}/rezervace`, 'layout')
-  if (vysledek.stav === 'preskoceno') redirect(sParametrem(zpet, 'chyba', 'choice-chvili'))
+  // Bez jediného dotazu (fronta firmy byla zabraná jiným během, třeba
+  // naplánovanou úlohou) se nic nenačetlo — ne „část je načtená“.
+  if (vysledek.stav === 'preskoceno' || (vysledek.pokracovani && vysledek.dotazu === 0)) redirect(sParametrem(zpet, 'chyba', 'choice-chvili'))
   if (vysledek.stav === 'chyba') redirect(sParametrem(zpet, 'chyba', 'choice-nacteni'))
   redirect(sParametrem(zpet, 'stav', vysledek.pokracovani ? 'choice-nacteno-cast' : 'choice-nacteno'))
 }
