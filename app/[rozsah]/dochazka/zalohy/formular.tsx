@@ -1,8 +1,53 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 
 import { vyplatitZalohu, type StavVyplaceni } from './akce'
+
+/**
+ * Když se odpověď ze serveru ztratí, nevíme, jestli se záloha zapsala.
+ * Číslo odeslání zůstává stejné, takže opakování ji podruhé nezapíše —
+ * a přesně to se obsluze říká.
+ */
+const SPOJENI_VYPADLO =
+  'Spojení vypadlo a nevíme, jestli se záloha zapsala. Stiskněte Vyplatit znovu — když už zapsaná je, podruhé se nezapíše.'
+
+/** Nové číslo pro další vyplnění. Bez crypto.randomUUID (starý prohlížeč) prázdné = bez ochrany, jako dřív. */
+function noveCislo(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : ''
+}
+
+/**
+ * Jeden pokus o výplatu. Vrací stav formuláře a jestli se má pro další
+ * vyplnění vylosovat NOVÉ číslo odeslání — jen po úspěchu. Po chybě
+ * i po výpadku spojení zůstává staré, aby opakování zálohu podruhé
+ * nezapsalo. Zvlášť od komponenty, aby se to dalo vyzkoušet
+ * (scripts/zalohy.test.mjs).
+ */
+export async function odeslatZalohu(
+  akce: (predchozi: StavVyplaceni, formData: FormData) => Promise<StavVyplaceni>,
+  predchozi: StavVyplaceni,
+  formData: FormData,
+): Promise<{ stav: StavVyplaceni; noveCislo: boolean }> {
+  try {
+    const stav = await akce(predchozi, formData)
+    return { stav, noveCislo: stav.stav === 'hotovo' }
+  } catch {
+    // Odpověď se nevrátila (výpadek sítě). Číslo se NEMĚNÍ.
+    return {
+      stav: {
+        stav: 'chyba',
+        text: SPOJENI_VYPADLO,
+        hodnoty: {
+          zamestnanec: String(formData.get('zamestnanec') ?? ''),
+          castka: String(formData.get('castka') ?? ''),
+          poznamka: String(formData.get('poznamka') ?? ''),
+        },
+      },
+      noveCislo: false,
+    }
+  }
+}
 
 /**
  * Vyplacení zálohy.
@@ -11,17 +56,39 @@ import { vyplatitZalohu, type StavVyplaceni } from './akce'
  * 10 000 Kč“ se musí ukázat PO zápisu, u toho řádku, ne jako parametr
  * v adrese. Rozhodnutí ze 1. 9. (oddíl 11 bod 3): aplikace vyšší zálohu
  * nikdy neodmítne, jen ji ohlásí — o penězích rozhoduje majitel.
+ *
+ * JEDNA ZÁLOHA = JEDNO ZAPSÁNÍ (25. 10. 2026). „Odečítání záloh se
+ * zdvojovalo": na provozovně nešel internet, záloha se zapsala, odpověď
+ * nedošla a obsluha vyplatila znovu. Proto každé vyplnění nese číslo
+ * odeslání (`klic`, první vylosuje server). Mění se AŽ po úspěchu — po
+ * chybě nebo výpadku se opakuje se stejným číslem a databáze druhou
+ * zálohu nezapíše. Totéž dvojí ťuknutí: React druhé odeslání zařadí do
+ * fronty, ale s číslem z chvíle ťuknutí, tedy stejným.
  */
 export default function FormularZalohy({
   rozsah,
   lide,
+  klic: prvniKlic,
 }: {
   rozsah: string
   lide: { id: string; jmeno: string }[]
+  /** Číslo prvního vyplnění, vylosované serverem (bez rozdílu při hydrataci). */
+  klic: string
 }) {
-  const [stav, akce, ceka] = useActionState<StavVyplaceni, FormData>(vyplatitZalohu, {
-    stav: 'nic',
-  })
+  const [klic, setKlic] = useState(prvniKlic)
+
+  const [stav, akce, ceka] = useActionState<StavVyplaceni, FormData>(
+    async (predchozi, formData) => {
+      const { stav, noveCislo: nove } = await odeslatZalohu(vyplatitZalohu, predchozi, formData)
+      if (nove) setKlic(noveCislo())
+      return stav
+    },
+    { stav: 'nic' },
+  )
+
+  // Po chybě se pole vyplní tím, co v nich bylo — ať se opakuje TOTÉŽ
+  // odeslání a nepíše se znovu (a s překlepem jinak).
+  const hodnoty = stav.stav === 'chyba' ? stav.hodnoty : undefined
 
   return (
     <section style={karta}>
@@ -36,10 +103,11 @@ export default function FormularZalohy({
 
       <form action={akce} style={mrizka}>
         <input type="hidden" name="rozsah" value={rozsah} />
+        <input type="hidden" name="klic" value={klic} />
 
         <label style={poleLabel}>
           <span>Komu</span>
-          <select name="zamestnanec" required style={pole}>
+          <select name="zamestnanec" required style={pole} defaultValue={hodnoty?.zamestnanec ?? ''}>
             <option value="">— Vyberte —</option>
             {lide.map((l) => (
               <option key={l.id} value={l.id}>
@@ -53,6 +121,7 @@ export default function FormularZalohy({
           <span>Částka v Kč</span>
           <input
             name="castka"
+            defaultValue={hodnoty?.castka ?? ''}
             required
             inputMode="decimal"
             placeholder="2000"
@@ -64,6 +133,7 @@ export default function FormularZalohy({
           <span>Poznámka (nepovinná)</span>
           <input
             name="poznamka"
+            defaultValue={hodnoty?.poznamka ?? ''}
             maxLength={200}
             placeholder="hotově u baru"
             style={pole}
@@ -81,10 +151,17 @@ export default function FormularZalohy({
 
       {stav.stav === 'hotovo' ? (
         <div style={{ marginTop: '14px', display: 'grid', gap: '10px' }}>
-          <p style={{ margin: 0, fontSize: '14px', color: 'var(--dobre)' }}>
-            Zapsáno: <strong>{stav.castka} Kč</strong> pro {stav.komu}. Čeká,
-            až ji potvrdí — v telefonu, nebo PINem na tabletu.
-          </p>
+          {stav.opakovane ? (
+            <p style={{ margin: 0, fontSize: '14px', color: 'var(--dobre)' }}>
+              Tahle záloha už zapsaná byla: <strong>{stav.castka} Kč</strong> pro{' '}
+              {stav.komu}. Podruhé se nezapsala — vyplacená je jednou.
+            </p>
+          ) : (
+            <p style={{ margin: 0, fontSize: '14px', color: 'var(--dobre)' }}>
+              Zapsáno: <strong>{stav.castka} Kč</strong> pro {stav.komu}. Čeká,
+              až ji potvrdí — v telefonu, nebo PINem na tabletu.
+            </p>
+          )}
 
           {/*
             Varování, ne odmítnutí. Záloha už je zapsaná — tohle je

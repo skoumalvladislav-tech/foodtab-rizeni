@@ -613,11 +613,12 @@ select pg_temp.check('výplata existuje JEDNOU — PostgREST nemá dva kandidát
   (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname = 'vyplatit_zalohu') = 1);
 
+-- Od 20261025100000 má výplata šestý parametr (číslo odeslání, krok101).
 select pg_temp.check('výplatu smí volat přihlášený, anonym ne',
   has_function_privilege('authenticated',
-    'public.vyplatit_zalohu(uuid, uuid, integer, text, uuid)', 'execute')
+    'public.vyplatit_zalohu(uuid, uuid, integer, text, uuid, uuid)', 'execute')
   and not has_function_privilege('anon',
-    'public.vyplatit_zalohu(uuid, uuid, integer, text, uuid)', 'execute'));
+    'public.vyplatit_zalohu(uuid, uuid, integer, text, uuid, uuid)', 'execute'));
 
 select pg_temp.check('nabídku smí volat přihlášený, anonym ne',
   has_function_privilege('authenticated',
