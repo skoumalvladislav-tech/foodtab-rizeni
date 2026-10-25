@@ -618,6 +618,15 @@ export function HlaskaAkce({ stav, chyba }: { stav?: string; chyba?: string }) {
     zdroj: 'Stav rezervace z rezervačního systému se mění tam, ne ve Foodtabu.',
     'uz-je': 'Tenhle systém už je u pobočky připravený.',
   }
+  // Rezervace se zapsala, ale některý dokument z formuláře se nepřipojil —
+  // není to úspěch bez výhrad, proto vzhled chyby.
+  if (stav === 'ulozeno-bez-priloh') {
+    return (
+      <p className="hlaska-chyba" role="alert" style={{ margin: 0 }}>
+        Rezervace je uložená, ale některé dokumenty se nepřipojily — přidejte je znovu v panelu Dokumenty a přílohy.
+      </p>
+    )
+  }
   if (chyba && CHYBY[chyba]) {
     return (
       <p className="hlaska-chyba" role="alert" style={{ margin: 0 }}>

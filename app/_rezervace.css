@@ -186,3 +186,17 @@ details[open] .ds-rez-otevrit { display: none; }
 .ds-rez-system h3 { margin: 0; font-size: 17px; }
 .ds-rez-system p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; }
 .ds-rez-system-stitky { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* --- příjmové API: klíč ukázaný jednou --------------------------------- */
+
+.ds-rez-klic {
+  display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px;
+  background: var(--pozor-bg); color: var(--ink);
+}
+.ds-rez-klic strong { font-size: 13.5px; }
+.ds-rez-pismo-kodu { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.ds-rez-kod {
+  margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
+  line-height: 1.5; overflow-x: auto; white-space: pre;
+}
