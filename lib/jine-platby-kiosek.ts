@@ -115,6 +115,27 @@ export function zacinaNovyDoklad(fotky: readonly { odeslana: boolean }[]): boole
   return fotky.every((f) => f.odeslana)
 }
 
+/**
+ * Obsluha po neúspěšném (nebo zrušeném) pokusu o odeslání MĚNÍ obsah —
+ * poznámku, přidá nebo odebere fotku. Opakování se stejným klíčem by
+ * databáze vrátila STARÝ záznam (poznámku ani dřív připojené fotky
+ * nemění), takže by se změna ztratila, nebo by se nová fotka přilepila
+ * k původnímu dokladu. Po pokusu je proto každá změna NOVÝ doklad: nový
+ * klíč a jen fotky, které ještě neodešly (odeslané patří starému
+ * záznamu). Opakování BEZ změny jde dál se stejným klíčem — týž záznam,
+ * žádný druhý.
+ */
+export function poZmeneObsahu<T extends { odeslana: boolean }>(pokusOdeslan: boolean, fotky: readonly T[]): { novyKlic: boolean; fotky: T[] } {
+  if (!pokusOdeslan) return { novyKlic: false, fotky: [...fotky] }
+  return { novyKlic: true, fotky: fotky.filter((f) => !f.odeslana) }
+}
+
+/** Počet fotek v přehledu telefonu; nula = nic neodešlo (zrušené odeslání, výpadek), ne „0 fotek“. */
+export function popisFotek(fotek: number): string {
+  if (fotek <= 0) return 'fotka neodešla'
+  return `${fotek} ${fotek === 1 ? 'fotka' : fotek < 5 ? 'fotky' : 'fotek'}`
+}
+
 /** Náhledy k uvolnění: jen adresy, které ze seznamu zmizely (zbytek se uvolní při odchodu z obrazovky). */
 export function nahledyKUvolneni(drzene: Iterable<string>, ted: Iterable<string>): string[] {
   const zustava = new Set(ted)
@@ -130,7 +151,7 @@ export type StavDokladuKiosku = 'prijato' | 'bez_fotky' | 'zkontrolovano' | 'zpr
 /** Srozumitelně pro obsluhu; bez důvodů a čísel z Financí. */
 export const POPIS_STAVU_KIOSKU: Record<StavDokladuKiosku, string> = {
   prijato: 'Přijato, čeká na kontrolu',
-  bez_fotky: 'Bez fotky — pošlete znovu',
+  bez_fotky: 'Doklad bez fotky — pošlete ho znovu',
   zkontrolovano: 'Zkontrolováno',
   zpracovano: 'Zpracováno',
   zruseno: 'Zrušeno ve Financích',

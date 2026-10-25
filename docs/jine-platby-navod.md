@@ -75,9 +75,11 @@ Telefonů pro doklady může mít pobočka **víc**. Každý se páruje a zapín
 
 Telefon spárovaný na `/kiosek/doklady` slouží **jen na doklady**. Kiosek Docházky (kód k píchnutí, zálohy, směny) na něm nefunguje. Tablet Docházky se páruje na `/kiosek` a doklady z něj posílat nejde. Kdo chce obojí na jednom zařízení, spáruje ho dvakrát, jednou na každé adrese.
 
-Přehled na telefonu ukazuje poznámku, kterou napsala obsluha, a jen fotky z tohoto telefonu. Co ve Financích přepíšete nebo přidáte, na telefonu vidět není. Přehled se sám obnovuje každou minutu a po návratu do aplikace.
+Přehled na telefonu ukazuje poznámku, kterou napsala obsluha, a jen fotky z tohoto telefonu. Co ve Financích přepíšete nebo přidáte, na telefonu vidět není. Přehled se sám obnovuje každou minutu a po návratu do aplikace. U dokladu, ke kterému žádná fotka nedošla, napíše „fotka neodešla“. Zrušený doklad ukazuje fotky, které telefon poslal, a „Zrušeno ve Financích“.
 
-Když odesílání trvá dlouho, telefon po chvíli napíše „Spojení je pomalé — zkuste odeslat znovu“. Během odesílání jde stisknout **Zrušit odesílání**. Fotky zůstanou na obrazovce a opakované odeslání půjde do téhož dokladu. Když mezitím doklad ve Financích zkontrolovali, zrušili, nebo uplynuly dvě hodiny, telefon zbylé fotky pošle jako nový doklad.
+Když odesílání trvá dlouho, telefon po chvíli napíše „Spojení je pomalé — zkuste odeslat znovu“. Během odesílání jde stisknout **Zrušit odesílání**. Fotky zůstanou na obrazovce a opakované odeslání **beze změny** půjde do téhož dokladu. Když po neúspěšném pokusu změníte poznámku nebo fotky, telefon je pošle jako **nový doklad**. Fotky, které už odešly, zůstanou u předchozího. Když mezitím doklad ve Financích zkontrolovali, zrušili, nebo uplynuly dvě hodiny, telefon zbylé fotky pošle jako nový doklad.
+
+Fotky, které telefon nahrál, ale k dokladu je už nepřipojil (třeba vypadl signál), se **jednou denně smažou** samy. Úloha je v GitHub Actions jako „Kiosek – úklid nepřipojených fotek“ a jde spustit i ručně (Run workflow). Smaže jen fotky z kiosku, ke kterým nic nevede a které jsou starší než 3 hodiny. Fotky ve Financích ani fotky připojené k dokladům nikdy.
 
 Ztracený telefon **odvolejte** v Nastavení → Zařízení. Kiosek u něj jde také jen **vypnout**. Obojí platí hned: další odeslání z telefonu neprojde.
 

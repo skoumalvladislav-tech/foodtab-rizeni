@@ -71,6 +71,11 @@ const O = { odeslana: true }
 const N = { odeslana: false }
 ok('nový doklad při přidání fotek: prázdný seznam (i po odebrání nebo zrušeném odeslání) a „všechno odešlo“ ano; zbylé neodeslané fotky ne (opakování téhož účtu)',
   K.zacinaNovyDoklad([]) && K.zacinaNovyDoklad([O]) && K.zacinaNovyDoklad([O, O]) && !K.zacinaNovyDoklad([N]) && !K.zacinaNovyDoklad([O, N]))
+ok('změna obsahu PO pokusu o odeslání (poznámka, fotka přidaná nebo odebraná) = nový doklad: nový klíč a jen neodeslané fotky; před pokusem nic',
+  ((a, b, c) => !a.novyKlic && a.fotky.length === 2 && b.novyKlic && b.fotky.length === 1 && b.fotky[0] === N && c.novyKlic && c.fotky.length === 0)(
+    K.poZmeneObsahu(false, [O, N]), K.poZmeneObsahu(true, [O, N]), K.poZmeneObsahu(true, [])))
+ok('počet fotek v přehledu: nula = „fotka neodešla“, ne „0 fotek“; jinak česky skloňovaný počet',
+  K.popisFotek(0) === 'fotka neodešla' && K.popisFotek(1) === '1 fotka' && K.popisFotek(3) === '3 fotky' && K.popisFotek(7) === '7 fotek')
 ok('náhledy: uvolní se jen adresy, které ze seznamu zmizely; zůstávající ne',
   K.nahledyKUvolneni(['blob:a', 'blob:b', 'blob:c'], ['blob:a', 'blob:c']).join() === 'blob:b' && K.nahledyKUvolneni(new Set(['blob:a']), ['blob:a']).length === 0 &&
     K.nahledyKUvolneni(['blob:a'], []).join() === 'blob:a')
@@ -308,7 +313,15 @@ const sPrehledem = html({ druh: 'foceni', pobocka: 'Černá Perla', zarizeni: 'T
 ok('přehled dnes na telefonu: čas, počet fotek, poznámka a stav srozumitelně, od nejnovějšího',
   text(sPrehledem).includes('Dnes odesláno z tohoto telefonu') && text(sPrehledem).includes('14:05 · 2 fotky · stůl 4, firma Novák') &&
     text(sPrehledem).includes('Přijato, čeká na kontrolu') && text(sPrehledem).includes('11:30 · 1 fotka') && text(sPrehledem).includes('Zkontrolováno') &&
-    text(sPrehledem).includes('Bez fotky — pošlete znovu') && text(sPrehledem).indexOf('14:05') < text(sPrehledem).indexOf('11:30'))
+    text(sPrehledem).includes('Doklad bez fotky — pošlete ho znovu') && text(sPrehledem).indexOf('14:05') < text(sPrehledem).indexOf('11:30'))
+const zruseny = html({ druh: 'odeslano', pobocka: 'P', pocet: 1, cas: '14:05', dnes: [
+  { cas: '2026-10-24T12:05:00Z', fotek: 2, oznaceni: 'stůl 3', stav: 'zruseno' },
+  { cas: '2026-10-24T11:05:00Z', fotek: 0, oznaceni: 'stůl 8', stav: 'zruseno' },
+  { cas: '2026-10-24T10:05:00Z', fotek: 0, oznaceni: 'výpadek', stav: 'bez_fotky' },
+] })
+ok('přehled: nikde „0 fotek“ — doklad bez fotky řekne „fotka neodešla“; zrušený řekne „Zrušeno ve Financích“ (s fotkami, které telefon poslal)',
+  !/\b0 fotek\b/.test(text(zruseny)) && text(zruseny).includes('14:05 · 2 fotky · stůl 3') && text(zruseny).includes('13:05 · fotka neodešla · stůl 8') &&
+    text(zruseny).includes('12:05 · fotka neodešla · výpadek') && (text(zruseny).match(/Zrušeno ve Financích/g) ?? []).length === 2)
 const dlouhe = html({ druh: 'odeslano', pobocka: 'P', pocet: 1, cas: '14:05', dnes: [{ cas: '2026-10-24T12:05:00Z', fotek: 1, oznaceni: 'novak.velmi.dlouhy.email.bez.mezer@firma-s-dlouhym-nazvem.cz', stav: 'prijato' }] })
 ok('přehled na 375 px: dlouhé slovo v poznámce se zalomí (overflow-wrap: anywhere, min-width: 0), stránka se neroztáhne do šířky',
   /<li[^>]*style="[^"]*min-width:0[^"]*"[^>]*><span style="[^"]*overflow-wrap:anywhere/.test(dlouhe.replace(/\s*;\s*/g, ';').replace(/:\s+/g, ':')))
@@ -344,8 +357,16 @@ ok('přehled dnes: telefon ho načte po připojení i po každém odeslání; p�
 ok('fotky jdou na podepsané adresy (uploadToSignedUrl), ne přes serverovou akci', klient.includes('uploadToSignedUrl') && !/formData\.append\(/.test(klient))
 ok('klíč odeslání: po uzavřeném dokladu (příprava i dokončení) nový; při přidání do prázdného seznamu nebo k už odeslaným fotkám rozhoduje zacinaNovyDoklad',
   (klient.match(/else if \(novyKlicPoChybe\((?:pripraveno|hotovo)\.stav\)\) zacitNovyDokladPoUzavreni\(\)/g) ?? []).length === 2 &&
-    /function zacitNovyDokladPoUzavreni\(\) \{\n\s*setKlientId\(noveId\(\)\)\n\s*setFotky\(\(f\) => f\.filter\(\(x\) => !x\.odeslana\)\)/.test(klient) &&
-    /if \(zacinaNovyDoklad\(fotky\)\) \{\n\s*setKlientId\(noveId\(\)\)/.test(klient) && !/fotky\.length > 0 && fotky\.every/.test(klient))
+    /function zacitNovyDokladPoUzavreni\(\) \{\n\s*novyKlic\(\)\n\s*setFotky\(\(f\) => f\.filter\(\(x\) => !x\.odeslana\)\)/.test(klient) &&
+    /if \(zacinaNovyDoklad\(fotky\)\) \{\n\s*novyKlic\(\)/.test(klient) && !/fotky\.length > 0 && fotky\.every/.test(klient))
+ok('změna obsahu po pokusu: poznámka, přidání i odebrání fotky volá zmenaObsahu (poZmeneObsahu); pokus se zapíše těsně před založením; nový klíč jen přes novyKlic (vynuluje pokus)',
+  /function zmenaObsahu\(\) \{\n\s*const z = poZmeneObsahu\(pokusOdeslan, fotky\)\n\s*if \(!z\.novyKlic\) return\n\s*novyKlic\(\)\n\s*setFotky\(z\.fotky\)/.test(klient) &&
+    /zmenitOznaceni: \(text\) => \{\n\s*zmenaObsahu\(\)\n\s*setOznaceni\(text\)/.test(klient) &&
+    /odebratFotku: \(id\) => \{\n\s*zmenaObsahu\(\)\n\s*setFotky/.test(klient) &&
+    /\n\s*zmenaObsahu\(\)\n\s*setFotky\(\(f\) => \[\.\.\.f, \.\.\.nove\]\.slice\(0, 10\)\)/.test(klient) &&
+    /setPokusOdeslan\(true\)\n\s*const pripraveno = await sLimitem\(/.test(klient) &&
+    /function novyKlic\(\) \{\n\s*setKlientId\(noveId\(\)\)\n\s*setPokusOdeslan\(false\)/.test(klient) &&
+    (klient.match(/setKlientId\(noveId\(\)\)/g) ?? []).length === 1)
 ok('přehled se obnovuje sám (jednou za minutu a po návratu na obrazovku); odvolané/vypnuté zařízení ho vyprázdní hned při ověření stavu',
   /window\.setInterval\(obnovit, OBNOVA_PREHLEDU_MS\)/.test(klient) && /document\.addEventListener\('visibilitychange', obnovit\)/.test(klient) &&
     /if \(document\.visibilityState === 'visible'\) setVerzePrehledu\(\(v\) => v \+ 1\)/.test(klient) && klient.includes('if (!s.ok) setDnes(null)') &&
@@ -455,6 +476,68 @@ ok('… výpis, detail i akce nad záznamem čtou přes cistSeZalohou (žádné 
   [vypis, detail, akceZaklad].every((s) => /cistSeZalohou\(\(sloupce\) =>/.test(s) && !s.includes('SLOUPCE_ZAZNAMU')) &&
     vypis.includes('.select(`${sloupce}, jine_platby_soubory(count)`)') && detail.includes('.select(`${sloupce}, faktura_podklady, vydej_externi_id, vydej_doklad, zruseni_duvod`)') &&
     akceZaklad.includes(".from('jine_platby').select(sloupce)"))
+
+console.log('\n== 5. Drobnosti po nasazení: migrace 20261024100000, úloha kiosek-uklid ==')
+const drobnosti = zdroj('supabase/migrations/20261024100000_jine_platby_kiosek_drobnosti.sql')
+ok('migrace: jedinečný název aktivního telefonu na doklady hlídá index (tablety Docházky ne); pojistka na duplicity v datech je PŘED indexem',
+  /create unique index branch_devices_telefon_nazev\s+on public\.branch_devices \(tenant_id, branch_id, lower\(btrim\(nazev\)\)\)\s+where stav = 'active' and ucel = 'doklady';/.test(drobnosti) &&
+    drobnosti.indexOf('having count(*) > 1') > 0 && drobnosti.indexOf('having count(*) > 1') < drobnosti.indexOf('create unique index'))
+ok('migrace: přehled u zrušeného dokladu počítá i fotky, které zrušení deaktivovalo (jinak jen aktivní fotky tohoto telefonu)',
+  /f\.zaznam_id = z\.id and f\.zarizeni_id = d\.id\s+and \(f\.aktivni or z\.stav_kontroly = 'zruseno'\)/.test(drobnosti) &&
+    /'oznaceni', x\.kiosek_oznaceni,/.test(drobnosti))
+const sirotciSql = /create function public\.jine_platby_kiosek_sirotci[\s\S]*?end \$\$;/.exec(drobnosti)?.[0] ?? ''
+ok('migrace: sirotek = bez vlastníka, pod záznamem z kiosku, soubor i záznam starší než 3 h, bez řádku v jine_platby_soubory; jen service_role',
+  /o\.owner is null/.test(sirotciSql) && /o\.created_at < now\(\) - interval '3 hours'/.test(sirotciSql) && /z\.zdroj = 'kiosek'/.test(sirotciSql) &&
+    /z\.vytvoreno < now\(\) - interval '3 hours'/.test(sirotciSql) && /not exists \(select 1 from public\.jine_platby_soubory s where s\.cesta = o\.name\)/.test(sirotciSql) &&
+    /revoke all on function public\.jine_platby_kiosek_sirotci\(integer\) from public, anon, authenticated;/.test(drobnosti) &&
+    /grant execute on function public\.jine_platby_kiosek_sirotci\(integer\) to service_role;/.test(drobnosti) && !/set\s+[a-z_]+\.[a-z_]+\s*(=|to)/i.test(drobnosti))
+
+globalThis.__uklid = null
+const U = () => globalThis.__uklid
+const ULOHA_UKLID = js(`
+export function tajemstviSedi(a, b) { return !!a && !!b && a === b }
+export async function uzBezi(u) { globalThis.__uklid.zamek.push(u); return null }
+export async function uvolnitUlohu(u) { globalThis.__uklid.uvolneno.push(u) }
+export function klientUlohy() {
+  const S = globalThis.__uklid
+  return {
+    rpc: async (n, a) => { S.rpc.push([n, a]); return S.odpoved },
+    storage: { from: (k) => ({ remove: async (c) => { S.smazane.push([k, c]); return { data: [], error: S.chybaMazani } } }) },
+  }
+}
+`)
+const NEXT = js(`export class NextResponse extends Response {
+  static json(telo, init) { return new Response(JSON.stringify(telo), { status: init?.status ?? 200, headers: { 'content-type': 'application/json' } }) }
+}`)
+const uklid = await import(adresaModulu('app/api/uloha/kiosek-uklid/route.ts', [['next/server', NEXT], ['@/lib/supabase/uloha', ULOHA_UKLID]]))
+process.env.CRON_SECRET = 'tajne-kiosek-uklid'
+const zavolat = async (o, hlavicka = 'Bearer tajne-kiosek-uklid') => {
+  globalThis.__uklid = { rpc: [], smazane: [], zamek: [], uvolneno: [], chybaMazani: null, odpoved: { data: [], error: null }, ...o }
+  const puvodni = console.error
+  console.error = () => {}
+  try {
+    const odp = await uklid.GET(new Request('https://foodtab.test/api/uloha/kiosek-uklid', { headers: { authorization: hlavicka } }))
+    return { stav: odp.status, telo: await odp.json() }
+  } finally {
+    console.error = puvodni
+  }
+}
+const C = (i) => `${TENANT}/${BRANCH}/${ZAZNAM}/55555555-5555-4555-8555-55555555555${i}.jpg`
+const uk1 = await zavolat({ odpoved: { data: [C(1), C(2), null, 7, '', C(3)], error: null } })
+ok('úklid: smaže PŘESNĚ cesty, které vrátila databáze (jen neprázdné řetězce), v kbelíku jine-platby, a uvolní zámek',
+  uk1.stav === 200 && uk1.telo.smazano === 3 && uk1.telo.pokracovat === false && U().rpc.length === 1 && U().rpc[0][0] === 'jine_platby_kiosek_sirotci' &&
+    U().rpc[0][1].p_limit === 500 && U().smazane.length === 1 && U().smazane[0][0] === 'jine-platby' && U().smazane[0][1].join() === [C(1), C(2), C(3)].join() &&
+    U().zamek.join() === 'kiosek-uklid' && U().uvolneno.join() === 'kiosek-uklid')
+const uk2 = await zavolat({ odpoved: { data: [], error: null } })
+ok('úklid: nic ke smazání → úložiště se nevolá, smazano 0', uk2.stav === 200 && uk2.telo.smazano === 0 && U().smazane.length === 0)
+const uk3 = await zavolat({ odpoved: { data: null, error: { code: 'XX000', message: 'tajny-detail-db' } } })
+ok('úklid: chyba databáze → 500 bez detailu, NIC se nesmaže', uk3.stav === 500 && !JSON.stringify(uk3.telo).includes('tajny-detail-db') && U().smazane.length === 0)
+const uk4 = await zavolat({ odpoved: { data: [C(1)], error: null }, chybaMazani: { message: 'storage' } })
+ok('úklid: chyba úložiště → 500', uk4.stav === 500 && U().smazane.length === 1)
+const uk5 = await zavolat({ odpoved: { data: Array.from({ length: 500 }, (_, i) => `${TENANT}/${BRANCH}/${ZAZNAM}/${String(i).padStart(12, '0')}.jpg`), error: null } })
+ok('úklid: plná dávka (500) → pokracovat (workflow pustí další kolo)', uk5.stav === 200 && uk5.telo.smazano === 500 && uk5.telo.pokracovat === true)
+const uk6 = await zavolat({ odpoved: { data: [C(1)], error: null } }, 'Bearer spatne')
+ok('úklid: špatné tajemství → 401 a na nic nesáhne', uk6.stav === 401 && U().rpc.length === 0 && U().smazane.length === 0 && U().zamek.length === 0)
 
 console.log(chyb ? `\n${chyb} z ${kontrol} kontrol SELHALO` : `\nVšech ${kontrol} kontrol prošlo`)
 process.exit(chyb ? 1 : 0)

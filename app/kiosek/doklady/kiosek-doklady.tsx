@@ -10,6 +10,7 @@ import {
   LIMIT_NAHRANI_MS,
   nahledyKUvolneni,
   novyKlicPoChybe,
+  poZmeneObsahu,
   sLimitem,
   zacinaNovyDoklad,
   type DokladDnes,
@@ -87,6 +88,8 @@ export default function KiosekDoklady() {
   const [odesilam, setOdesilam] = useState(false)
   const [postup, setPostup] = useState('')
   const [klientId, setKlientId] = useState<string>(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : ''))
+  /** S tímhle klíčem odeslání už se zkoušelo odeslat (databáze může mít záznam). */
+  const [pokusOdeslan, setPokusOdeslan] = useState(false)
   const [odeslano, setOdeslano] = useState<{ pocet: number; cas: string } | null>(null)
   /** Přehled dnešních dokladů z tohoto telefonu; `null` = nenačteno (nebo zařízení nesmí). */
   const [dnes, setDnes] = useState<DokladDnes[] | null>(null)
@@ -198,6 +201,20 @@ export default function KiosekDoklady() {
     ohlasit()
   }
 
+  /** Nový doklad: nový klíč odeslání, s ním se ještě nic neodesílalo. */
+  function novyKlic() {
+    setKlientId(noveId())
+    setPokusOdeslan(false)
+  }
+
+  /** Obsluha mění obsah: po pokusu o odeslání je to nový doklad (`poZmeneObsahu`). */
+  function zmenaObsahu() {
+    const z = poZmeneObsahu(pokusOdeslan, fotky)
+    if (!z.novyKlic) return
+    novyKlic()
+    setFotky(z.fotky)
+  }
+
   function pridatFotky(seznam: FileList | null) {
     if (!seznam || seznam.length === 0) return
     setChyba('')
@@ -210,18 +227,19 @@ export default function KiosekDoklady() {
     // Prázdný seznam nebo všechno odeslané: další fotky jsou NOVÝ doklad
     // (jinak by se přilepily ke starému záznamu se starým označením).
     if (zacinaNovyDoklad(fotky)) {
-      setKlientId(noveId())
+      novyKlic()
       // Poznámka patřila odeslanému dokladu; do prázdného seznamu ji obsluha mohla napsat pro tenhle.
       if (fotky.length > 0) setOznaceni('')
       setFotky(nove.slice(0, 10))
       return
     }
+    zmenaObsahu()
     setFotky((f) => [...f, ...nove].slice(0, 10))
   }
 
   /** Databáze řekla, že doklad je uzavřený: zbylé fotky půjdou jako nový doklad. */
   function zacitNovyDokladPoUzavreni() {
-    setKlientId(noveId())
+    novyKlic()
     setFotky((f) => f.filter((x) => !x.odeslana))
   }
 
@@ -256,6 +274,7 @@ export default function KiosekDoklady() {
 
       // 2. Založit záznam a dostat podepsané adresy (server ověří klíč zařízení).
       setPostup('Zakládám doklad…')
+      setPokusOdeslan(true)
       const pripraveno = await sLimitem(
         pripravitDoklad({ klic, oznaceni, klientId, soubory: pripravene.map((p) => ({ typ: p.typ, velikost: p.blob.size })) }),
         LIMIT_AKCE_MS,
@@ -308,7 +327,7 @@ export default function KiosekDoklady() {
     setOznaceni('')
     setChyba('')
     setOdeslano(null)
-    setKlientId(noveId())
+    novyKlic()
   }
 
   const stav: StavObrazovky = useMemo(() => {
@@ -334,8 +353,14 @@ export default function KiosekDoklady() {
           setPokus((p) => p + 1)
         },
         pridatFotky,
-        odebratFotku: (id) => setFotky((f) => f.filter((x) => x.id !== id || x.odeslana)),
-        zmenitOznaceni: setOznaceni,
+        odebratFotku: (id) => {
+          zmenaObsahu()
+          setFotky((f) => f.filter((x) => x.id !== id || x.odeslana))
+        },
+        zmenitOznaceni: (text) => {
+          zmenaObsahu()
+          setOznaceni(text)
+        },
         odeslat: () => void odeslat(),
         zrusitOdeslani: () => zruseni.current?.abort(),
         dalsiDoklad,
