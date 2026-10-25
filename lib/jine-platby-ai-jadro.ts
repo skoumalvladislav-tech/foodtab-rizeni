@@ -12,7 +12,8 @@
  *     to někdy bylo potřeba, musí se do typu dopsat pole a je to vidět v diffu;
  *   - obsah fotky/PDF jsou DATA, ne pokyny;
  *   - AI nedomýšlí cenu, množství, měnu ani DPH: co na dokladu není nebo
- *     nejde přečíst, je `null` + upozornění;
+ *     nejde přečíst, vrátí model jako prázdný text + upozornění a appka
+ *     z něj udělá `null` (`naRozpoznanyDoklad`);
  *   - částky a množství chodí jako TEXT přesně jak stojí na dokladu, převod
  *     na haléře dělá `lib/jine-platby-castky.ts` bez plovoucí čárky.
  */
@@ -53,8 +54,11 @@ export const NAMAHA = 'high'
  * v3 (20. 10. 2026): zpřesněné typy dokladu (C4) — vytištěný nezaplacený
  *     účet stolu je `otevreny_ucet`, i když vypadá jako sjetina;
  *     `informativni_sjetina` jen report z pokladny, který není účtem stolu.
+ * v4 (25. 10. 2026): nezjištěný údaj model vrací jako prázdný text "",
+ *     ne null — schéma v3 mělo 18 polí `string | null` a API ho odmítlo
+ *     (strop 16 parametrů s unií, viz `DokladSchema`).
  */
-export const VERZE_ZADANI = 'jine-platby-v3'
+export const VERZE_ZADANI = 'jine-platby-v4'
 
 /* ------------------------------------------------------------------ */
 /* Časový rozpočet volání (N29)                                         */
@@ -131,36 +135,46 @@ export type BlokObsahu =
   | { type: 'text'; text: string }
 
 /* ------------------------------------------------------------------ */
-/* Schéma výstupu = přesně tvar RozpoznanyDoklad                        */
+/* Schéma výstupu = tvar RozpoznanyDoklad, jen bez null                 */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Strukturovaný výstup Anthropic povolí v jednom požadavku nejvýš 16
+ * parametrů s unií — `anyOf` nebo pole typů, tedy i každé
+ * `.nullable()` (`["string", "null"]`). Schéma v3 jich mělo 18 a API
+ * ho 25. 10. 2026 odmítlo chybou 400 („Schemas contains too many
+ * parameters with union types"); CI to nechytilo, se skutečným API
+ * nemluví. Proto tu žádná unie není: nezjištěný údaj je prázdný text
+ * a `naRozpoznanyDoklad` z něj udělá `null`. Hlídá
+ * scripts/jine-platby-ai.test.mjs (počet unií v hotovém schématu = 0).
+ */
 const PolozkaSchema = z.object({
   nazev: z.string(),
-  mnozstvi: z.string().nullable(),
-  jednotka: z.string().nullable(),
-  cenaJednotkova: z.string().nullable(),
-  cenaCelkem: z.string().nullable(),
-  sazbaDph: z.string().nullable(),
+  mnozstvi: z.string(),
+  jednotka: z.string(),
+  cenaJednotkova: z.string(),
+  cenaCelkem: z.string(),
+  sazbaDph: z.string(),
   druhNavrh: z.enum(DRUHY_POLOZEK),
   // Bez min/max: model, který napíše 1.2, nemá shodit celé rozpoznání — sevře se v naRozpoznanyDoklad.
   jistota: z.number(),
-  poznamka: z.string().nullable(),
+  poznamka: z.string(),
 })
 
 export const DokladSchema = z.object({
   polozky: z.array(PolozkaSchema),
-  celkem: z.string().nullable(),
-  kUhrade: z.string().nullable(),
-  zaplaceno: z.string().nullable(),
-  prijatoHotove: z.string().nullable(),
-  vraceno: z.string().nullable(),
-  zbyva: z.string().nullable(),
-  sleva: z.string().nullable(),
-  spropitne: z.string().nullable(),
-  mena: z.string().nullable(),
-  datum: z.string().nullable(),
-  cas: z.string().nullable(),
-  externiId: z.string().nullable(),
+  celkem: z.string(),
+  kUhrade: z.string(),
+  zaplaceno: z.string(),
+  prijatoHotove: z.string(),
+  vraceno: z.string(),
+  zbyva: z.string(),
+  sleva: z.string(),
+  spropitne: z.string(),
+  mena: z.string(),
+  datum: z.string(),
+  cas: z.string(),
+  externiId: z.string(),
   typDokladu: z.enum(TYPY_DOKLADU),
   textDokladu: z.string(),
   jistota: z.number(),
@@ -169,8 +183,10 @@ export const DokladSchema = z.object({
 
 /** Rozejde-li se schéma s `RozpoznanyDoklad` (lib/jine-platby-typy.ts), spadne `tsc`. */
 type Stejne<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
-const tvarSedi: Stejne<z.infer<typeof DokladSchema>, RozpoznanyDoklad> = true
-const tvarPolozkySedi: Stejne<z.infer<typeof PolozkaSchema>, RozpoznanaPolozka> = true
+/** Tvar od modelu: kde appka drží `string | null`, model píše text („nezjištěno" = ""). */
+type BezNull<T> = { [K in keyof T]: T[K] extends readonly (infer P)[] ? BezNull<P>[] : Exclude<T[K], null> }
+const tvarSedi: Stejne<z.infer<typeof DokladSchema>, BezNull<RozpoznanyDoklad>> = true
+const tvarPolozkySedi: Stejne<z.infer<typeof PolozkaSchema>, BezNull<RozpoznanaPolozka>> = true
 void tvarSedi
 void tvarPolozkySedi
 
@@ -189,21 +205,23 @@ export const ZADANI = [
   'Kdyby soubory vypadaly jako různé doklady, napiš to do `upozorneni`.',
   '',
   'NEJDŮLEŽITĚJŠÍ PRAVIDLO — NIKDY NEHÁDEJ:',
-  'Co na dokladu nevidíš jistě, vrať jako null a do `upozorneni` napiš proč.',
+  'Co na dokladu nevidíš jistě, vrať jako prázdný text "" a do `upozorneni` napiš proč.',
   'Nečitelný, useknutý, přeškrtnutý nebo nejasný údaj není 0, není odhad a není',
-  'dopočet — je to null s důvodem. Nedopočítávej cenu z množství ani množství',
+  'dopočet — je to prázdný text s důvodem. Nedopočítávej cenu z množství ani množství',
   'z ceny, nedoplňuj měnu, DPH ani rok podle zvyklostí. Položku, kterou vidíš,',
-  'ale nepřečteš, uveď s tím, co přečíst jde, a zbytek nech null.',
+  'ale nepřečteš, uveď s tím, co přečíst jde, a zbytek nech prázdný ("").',
+  'Prázdný text "" je jediný způsob, jak říct „nezjištěno" — nepiš místo něj',
+  'null, „—", „?", „neuvedeno" ani nulu.',
   '',
   'POLOŽKY (`polozky`) — každý řádek dokladu zvlášť, v pořadí, jak jdou:',
   '- `nazev`: název přesně tak, jak je napsaný (zkratky nerozepisuj).',
   '- `mnozstvi`: množství jako TEXT přesně jak stojí („2", „0,5", „1,250").',
-  '  Když u řádku žádné není, dej null — nedomýšlej 1.',
-  '- `jednotka`: jednotka, jen když je napsaná („ks", „l", „0,5 l", „kg"), jinak null.',
+  '  Když u řádku žádné není, dej "" — nedomýšlej 1.',
+  '- `jednotka`: jednotka, jen když je napsaná („ks", „l", „0,5 l", „kg"), jinak "".',
   '- `cenaJednotkova`, `cenaCelkem`: ceny jako TEXT přesně jak stojí na dokladu',
-  '  („1 234,50", „45,-", „89"), bez dopočtu. Co na řádku není, je null.',
+  '  („1 234,50", „45,-", „89"), bez dopočtu. Co na řádku není, je "".',
   '- `sazbaDph`: sazba v procentech jako text („21", „12"), jen když je u řádku',
-  '  nebo v rekapitulaci jednoznačně přiřazená; jinak null.',
+  '  nebo v rekapitulaci jednoznačně přiřazená; jinak "".',
   '- `druhNavrh`: návrh druhu podle názvu (jen návrh, člověk ho potvrdí):',
   '  - pokrm: jídlo z kuchyně (polévka, hlavní jídlo, dezert, pizza…).',
   '  - rozlevany_napoj: nápoj točený nebo nalévaný z větší nádoby (pivo z tanku',
@@ -216,7 +234,7 @@ export const ZADANI = [
   '  - neskladova: jiná položka bez zboží (záloha na obal, poplatek).',
   '  - nezarazeno: nevíš.',
   '- `jistota`: 0–1, jak jistě jsi řádek přečetl.',
-  '- `poznamka`: krátká poznámka k řádku (přeškrtnuto, dopsáno rukou…), jinak null.',
+  '- `poznamka`: krátká poznámka k řádku (přeškrtnuto, dopsáno rukou…), jinak "".',
   '',
   'SOUČTY — každý údaj zvlášť, NEZAMĚŇUJ je a nedopočítávej je:',
   '- `celkem`: celková cena prodeje za zboží a služby (po slevách), jak je na',
@@ -228,18 +246,19 @@ export const ZADANI = [
   '- `vraceno`: vráceno zákazníkovi („Vráceno", „Zpět").',
   '- `zbyva`: zbývá doplatit, jen když to doklad výslovně uvádí.',
   '- `sleva`: celková sleva, `spropitne`: spropitné — jen když jsou uvedené.',
-  'Všechny jako TEXT přesně jak stojí na dokladu, chybějící = null.',
+  'Všechny jako TEXT přesně jak stojí na dokladu, chybějící = "".',
   '',
   'DALŠÍ ÚDAJE:',
   '- `mena`: třípísmenný kód jen podle toho, co je na dokladu napsané',
-  '  („Kč" → CZK, „€" → EUR). Když měna na dokladu není, dej null.',
+  '  („Kč" → CZK, „€" → EUR). Když měna na dokladu není, dej "".',
   '- `datum`: datum prodeje ve tvaru RRRR-MM-DD. Rok, který na dokladu není,',
-  '  si nedomýšlej — pak null a důvod do `upozorneni`.',
+  '  si nedomýšlej — pak "" a důvod do `upozorneni`.',
   '- `cas`: čas, kdy byl doklad vytištěn nebo účet uzavřen, ve tvaru HH:MM',
   '  (24 h, „01:30"), jen když je na dokladu čitelný. Když tam žádný čas není',
-  '  nebo ho nepřečteš jistě, dej null — čas si nedomýšlej ani neodhaduj.',
+  '  nebo ho nepřečteš jistě, dej "" — čas si nedomýšlej ani neodhaduj.',
   '- `externiId`: číslo účtu, stolu s účtem nebo dokladu z pokladny přesně',
   '  jak stojí (např. „Účet 1234", „Doklad č. 2026/0042" → „1234", „2026/0042").',
+  '  Když na dokladu žádné není, dej "".',
   '- `typDokladu`:',
   '  - otevreny_ucet: vytištěný NEZAPLACENÝ účet konkrétního stolu nebo zákazníka',
   '    (předúčet, mezisoučet stolu) — i když vypadá jako sjetina nebo přehled',
@@ -431,6 +450,16 @@ export function sestavitObsah(p: PodkladRozpoznani): BlokObsahu[] {
 /* Převod odpovědi                                                     */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Údaj, který smí být nezjištěný: prázdný text → null jako u `oriznout`,
+ * a slovo „null" taky — model ho mohl napsat ze zvyku, i když zadání
+ * od v4 chce "" (schéma null nepřipouští, viz `DokladSchema`).
+ */
+function udaj(hodnota: string, nejvys = MAX_DELKA_POLE): string | null {
+  const t = oriznout(hodnota, nejvys)
+  return t !== null && t.toLowerCase() === 'null' ? null : t
+}
+
 /** Ořez a úklid textu z modelu: řídicí znaky pryč, u jednořádkových polí i konce řádků. Prázdné = null. */
 function oriznout(hodnota: string | null, nejvys = MAX_DELKA_POLE, viceRadku = false): string | null {
   if (hodnota === null) return null
@@ -471,48 +500,48 @@ export function naRozpoznanyDoklad(vystup: unknown): RozpoznanyDoklad {
     if (!nazev) odvozena.push(`Položka č. ${i + 1} nemá čitelný název.`)
     return {
       nazev,
-      mnozstvi: oriznout(p.mnozstvi, 40),
-      jednotka: oriznout(p.jednotka, 40),
-      cenaJednotkova: oriznout(p.cenaJednotkova, 40),
-      cenaCelkem: oriznout(p.cenaCelkem, 40),
-      sazbaDph: oriznout(p.sazbaDph, 10),
+      mnozstvi: udaj(p.mnozstvi, 40),
+      jednotka: udaj(p.jednotka, 40),
+      cenaJednotkova: udaj(p.cenaJednotkova, 40),
+      cenaCelkem: udaj(p.cenaCelkem, 40),
+      sazbaDph: udaj(p.sazbaDph, 10),
       druhNavrh: p.druhNavrh,
       jistota: sevrit(p.jistota),
-      poznamka: oriznout(p.poznamka),
+      poznamka: udaj(p.poznamka),
     }
   })
 
-  let mena = oriznout(v.mena, 10)?.toUpperCase() ?? null
+  let mena = udaj(v.mena, 10)?.toUpperCase() ?? null
   if (mena !== null && !/^[A-Z]{3}$/.test(mena)) {
     odvozena.push(`Měna „${mena}" není třípísmenný kód — doplňte ji ručně.`)
     mena = null
   }
-  let datum = oriznout(v.datum, 20)
+  let datum = udaj(v.datum, 20)
   if (datum !== null && !jeDatum(datum)) {
     odvozena.push(`Datum „${datum}" není ve tvaru RRRR-MM-DD nebo neexistuje — doplňte ho ručně.`)
     datum = null
   }
   // Čas tisku „H:MM"/„HH:MM" → „HH:MM". Nečitelný tvar se nezahodí potichu:
   // null + upozornění (datum se pak podle času neposouvá).
-  const casText = oriznout(v.cas, 20)
+  const casText = udaj(v.cas, 20)
   const cas = normalizovatCas(casText)
   if (casText !== null && cas === null) odvozena.push(`Čas „${casText}" není ve tvaru HH:MM — datum se podle něj neposune na provozní den, ověřte ho.`)
   const odModelu = v.upozorneni.map((u) => oriznout(u, MAX_DELKA_UPOZORNENI)).filter((u): u is string => u !== null)
 
   return {
     polozky,
-    celkem: oriznout(v.celkem, 40),
-    kUhrade: oriznout(v.kUhrade, 40),
-    zaplaceno: oriznout(v.zaplaceno, 40),
-    prijatoHotove: oriznout(v.prijatoHotove, 40),
-    vraceno: oriznout(v.vraceno, 40),
-    zbyva: oriznout(v.zbyva, 40),
-    sleva: oriznout(v.sleva, 40),
-    spropitne: oriznout(v.spropitne, 40),
+    celkem: udaj(v.celkem, 40),
+    kUhrade: udaj(v.kUhrade, 40),
+    zaplaceno: udaj(v.zaplaceno, 40),
+    prijatoHotove: udaj(v.prijatoHotove, 40),
+    vraceno: udaj(v.vraceno, 40),
+    zbyva: udaj(v.zbyva, 40),
+    sleva: udaj(v.sleva, 40),
+    spropitne: udaj(v.spropitne, 40),
     mena,
     datum,
     cas,
-    externiId: oriznout(v.externiId, 100),
+    externiId: udaj(v.externiId, 100),
     typDokladu: v.typDokladu,
     textDokladu: oriznout(v.textDokladu, MAX_DELKA_TEXTU_DOKLADU, true) ?? '',
     jistota: sevrit(v.jistota),
