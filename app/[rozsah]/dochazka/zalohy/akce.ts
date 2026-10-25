@@ -37,10 +37,36 @@ import { getServerSupabase } from '@/lib/supabase/server'
  */
 const adresaZaloh = (rozsah: string) => `/${rozsah}/dochazka/zalohy`
 
+/** Co bylo ve formuláři — po chybě se vrátí do polí, ať se nepíše znovu. */
+export type HodnotyZalohy = { zamestnanec: string; castka: string; poznamka: string }
+
 export type StavVyplaceni =
   | { stav: 'nic' }
-  | { stav: 'chyba'; text: string }
-  | { stav: 'hotovo'; komu: string; castka: string; varovani: string | null }
+  | { stav: 'chyba'; text: string; hodnoty?: HodnotyZalohy }
+  | {
+      stav: 'hotovo'
+      komu: string
+      castka: string
+      varovani: string | null
+      /** Totéž odeslání podruhé — databáze novou zálohu nezapsala. */
+      opakovane: boolean
+    }
+
+/**
+ * Číslo jednoho vyplnění formuláře (25. 10. 2026, migrace
+ * 20261025100000). Formulář ho posílá s každým pokusem; když první
+ * pokus zálohu zapsal a odpověď se ztratila (výpadek internetu), druhý
+ * s týmž číslem novou zálohu nezapíše — databáze vrátí tu první.
+ *
+ * Co nevypadá jako uuid, se nepošle vůbec: výplata pak proběhne jako
+ * dřív, bez ochrany, ale nespadne na chybném vstupu.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function klicOdeslani(formData: FormData): string | null {
+  const klic = String(formData.get('klic') ?? '').trim()
+  return UUID.test(klic) ? klic : null
+}
 
 export async function vyplatitZalohu(
   _predchozi: StavVyplaceni,
@@ -50,19 +76,22 @@ export async function vyplatitZalohu(
   const zamestnanec = String(formData.get('zamestnanec') ?? '')
   const castkaText = String(formData.get('castka') ?? '')
   const poznamka = String(formData.get('poznamka') ?? '').trim()
+  const klic = klicOdeslani(formData)
+  const hodnoty: HodnotyZalohy = { zamestnanec, castka: castkaText, poznamka }
 
-  if (!zamestnanec) return { stav: 'chyba', text: 'Vyberte, komu se záloha vyplácí.' }
+  if (!zamestnanec) return { stav: 'chyba', text: 'Vyberte, komu se záloha vyplácí.', hodnoty }
 
   const halere = naHalere(castkaText)
   if (halere === null || halere <= 0) {
     return {
       stav: 'chyba',
       text: 'Částka musí být kladné číslo v korunách, nejvýš na dvě desetinná místa.',
+      hodnoty,
     }
   }
 
   const tenantId = await getCurrentTenantId()
-  if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.' }
+  if (!tenantId) return { stav: 'chyba', text: 'Firmu se nepodařilo načíst.', hodnoty }
 
   const pristup = await zkusPristup(tenantId, 'advances.manage', rozsah)
   if (pristup.stav !== 'ok') {
@@ -82,6 +111,7 @@ export async function vyplatitZalohu(
     return {
       stav: 'chyba',
       text: 'Zálohu vydáváte na konkrétní pobočce — přepněte se nahoře na ni.',
+      hodnoty,
     }
   }
 
@@ -92,7 +122,19 @@ export async function vyplatitZalohu(
     p_castka: halere,
     p_poznamka: poznamka,
     p_branch: pobocka,
+    p_klic: klic,
   })
+  // Do nasazení migrace 20261025100000 databáze číslo odeslání nezná —
+  // pak bez něj, tedy bez ochrany proti dvojímu zápisu, jako dřív.
+  if (error && funkceNeexistuje(error)) {
+    ;({ data, error } = await supabase.rpc('vyplatit_zalohu', {
+      p_tenant: tenantId,
+      p_employee: zamestnanec,
+      p_castka: halere,
+      p_poznamka: poznamka,
+      p_branch: pobocka,
+    }))
+  }
   // Do nasazení migrace 20260924120000 databáze pobočku výdeje nezná —
   // pak jako dřív (domovská pobočka).
   if (error && funkceNeexistuje(error)) {
@@ -106,13 +148,16 @@ export async function vyplatitZalohu(
 
   // Hlášku psala databáze a je pro člověka — projde se dál, ať se
   // nevymýšlí druhá.
-  if (error) return { stav: 'chyba', text: error.message }
+  if (error) return { stav: 'chyba', text: error.message, hodnoty }
 
-  const r = (data as { zaloha: string; varovani: string | null }[])?.[0]
-  if (!r?.zaloha) return { stav: 'chyba', text: 'Záloha se nezapsala.' }
+  const r = (data as { zaloha: string; varovani: string | null; opakovane?: boolean }[])?.[0]
+  if (!r?.zaloha) return { stav: 'chyba', text: 'Záloha se nezapsala.', hodnoty }
 
-  // Příjemci na telefon hned — „máte zálohu k potvrzení".
-  naplanovatPushKeZdroji({ typ: 'zaloha', id: r.zaloha }, tenantId)
+  // Příjemci na telefon hned — „máte zálohu k potvrzení". U opakování
+  // ne: upozornění odešlo s prvním zápisem a databáze ho podruhé
+  // nezaložila.
+  const opakovane = r.opakovane === true
+  if (!opakovane) naplanovatPushKeZdroji({ typ: 'zaloha', id: r.zaloha }, tenantId)
 
   const { data: kdo } = await supabase
     .from('employees')
@@ -127,6 +172,7 @@ export async function vyplatitZalohu(
     komu: kdo?.full_name ?? 'zaměstnanci',
     castka: castkaText.trim(),
     varovani: r.varovani,
+    opakovane,
   }
 }
 
