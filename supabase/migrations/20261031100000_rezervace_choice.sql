@@ -39,6 +39,18 @@
 --      Choice potvrdil „na token", jde frontu rozdělit po připojeních
 --      (klíč řádku) — dnes by to bylo domýšlení.
 --
+--      KAŽDÁ FIRMA NEJVÝŠ JEDEN ZABRANÝ DOTAZ NAJEDNOU. Fronta je
+--      společná všem firmám, takže kdo by si mohl zabrat víc dotazů
+--      dopředu, zastavil by načítání ostatním. Přihlášený na frontu
+--      nesáhne přímo (funkce je jen pro service_role), ale server ji
+--      volá i z jeho tlačítek („Ověřit znovu", „Načíst teď") — a ta jde
+--      zmáčknout mnohokrát naráz (prověrka 25. 10.: osm souběžných
+--      „Ověřit znovu" zabralo frontu na 30 s dopředu a úloha ostatních
+--      firem nedostala nic). Proto si funkce u firmy pamatuje, kdy
+--      odejde její zabraný dotaz, a dokud neodešel, další jí nedá
+--      (NULL). Běh firmy jde dotaz po dotazu, takže ho to nebrzdí;
+--      souběžné kliky téže firmy dostanou „zkuste za chvíli".
+--
 -- ---------------------------------------------------------------------
 -- CO SE SCHVÁLNĚ NEDĚLÁ
 --
@@ -47,9 +59,9 @@
 --   * Žádná nová tabulka rezervací ani sloupec v registru. Kurzor
 --     načítání je v `integrace_pripojeni.externi_ucet` (stejně jako
 --     kurzory pokladen), token v `integrace_tajemstvi` zašifrovaný.
---   * Fronta nemá `tenant_id`: firmy se netýká (stejně jako
---     `app.planovac_ulohy`) a je ve schématu `app`, kam nikdo kromě
---     funkce nesahá. Řádek v ní neříká nic o žádné firmě.
+--   * Fronta a její firemní řádky jsou ve schématu `app` a nesahá na ně
+--     nikdo kromě funkce (ani service_role). Firemní řádek nese jen
+--     `tenant_id` a čas zabraného dotazu — nic o rezervacích.
 --   * Funkce fronty jen pro service_role. Přihlášený by si jinak mohl
 --     zabírat čas dopředu a zastavit načítání všem ostatním.
 -- =====================================================================
@@ -85,21 +97,49 @@ alter table app.rezervace_choice_fronta enable row level security;
 revoke all on app.rezervace_choice_fronta from public, anon, authenticated, service_role;
 
 
--- Zabere čas na jeden dotaz. Vrací, za kolik milisekund smí volající
--- dotaz poslat (0 = hned). NULL = do `p_nejdele_cekat_ms` se nevejde
--- a NIC SE NEZABRALO — volající končí a zkusí to příští běh.
+-- Kdy odejde dotaz, který má firma zabraný. Dokud neodešel, další jí
+-- funkce nedá (viz hlavička: „každá firma nejvýš jeden zabraný dotaz").
+create table app.rezervace_choice_fronta_firmy (
+  tenant_id   uuid primary key references public.tenants(id) on delete cascade,
+  zabrano_do  timestamptz not null default '-infinity'
+);
+
+comment on table app.rezervace_choice_fronta_firmy is
+  'Fronta dotazů na Choice po firmách: kdy odejde dotaz, který má firma zabraný. '
+  'Píše do ní jen public.rezervace_choice_zabrat_dotaz.';
+
+alter table app.rezervace_choice_fronta_firmy enable row level security;
+revoke all on app.rezervace_choice_fronta_firmy from public, anon, authenticated, service_role;
+
+
+-- Zabere pro firmu čas na jeden dotaz. Vrací, za kolik milisekund smí
+-- volající dotaz poslat (0 = hned). NULL = NIC SE NEZABRALO, protože
+--   * do `p_nejdele_cekat_ms` se dotaz nevejde, nebo
+--   * firma už má zabraný dotaz, který ještě neodešel.
+-- Volající pak končí a zkusí to příště.
+--
+-- Chybějící řádek fronty NENÍ „nevejde se": funkce spadne (P0002), aby
+-- se to ukázalo u napojení — tiché NULL by vypadalo jako „pokračuje se
+-- příště" a nenačítalo by se nic.
 --
 -- `clock_timestamp()`, ne `now()`: čeká se na skutečný čas, ne na začátek
--- transakce. Čekání počítá databáze, takže rozdíl hodin mezi serverem
--- appky a databází rozestup nezkrátí.
-create function public.rezervace_choice_zabrat_dotaz(p_rozestup_ms integer, p_nejdele_cekat_ms integer)
+-- transakce, a měří se AŽ PO zámcích (souběžný volající mezitím mohl
+-- frontu posunout). Čekání počítá databáze, takže rozdíl hodin mezi
+-- serverem appky a databází rozestup nezkrátí. Zámky vždy ve stejném
+-- pořadí (firma, pak fronta), takže se dva volající nezablokují navzájem.
+create function public.rezervace_choice_zabrat_dotaz(p_tenant uuid, p_rozestup_ms integer, p_nejdele_cekat_ms integer)
 returns integer
 language plpgsql volatile security definer set search_path = ''
 as $$
 declare
-  v_ted  timestamptz := clock_timestamp();
-  v_slot timestamptz;
+  v_ted     timestamptz;
+  v_volny   timestamptz;
+  v_firma   timestamptz;
+  v_slot    timestamptz;
 begin
+  if p_tenant is null then
+    raise exception 'Dotaz na Choice musí patřit firmě.' using errcode = '22023';
+  end if;
   if p_rozestup_ms is null or p_rozestup_ms < 5000 or p_rozestup_ms > 60000 then
     raise exception 'Rozestup dotazů na Choice musí být 5 až 60 sekund (Choice: 1 dotaz za 5 s).'
       using errcode = '22023';
@@ -109,21 +149,48 @@ begin
       using errcode = '22023';
   end if;
 
-  update app.rezervace_choice_fronta f
-     set dalsi_volny = greatest(v_ted, f.dalsi_volny) + p_rozestup_ms * interval '1 millisecond'
-   where f.jediny
-     and greatest(v_ted, f.dalsi_volny) <= v_ted + p_nejdele_cekat_ms * interval '1 millisecond'
-  returning f.dalsi_volny - p_rozestup_ms * interval '1 millisecond' into v_slot;
+  insert into app.rezervace_choice_fronta_firmy (tenant_id) values (p_tenant)
+  on conflict (tenant_id) do nothing;
 
-  if v_slot is null then
+  select f.zabrano_do into v_firma
+    from app.rezervace_choice_fronta_firmy f
+   where f.tenant_id = p_tenant
+     for update;
+
+  select q.dalsi_volny into v_volny
+    from app.rezervace_choice_fronta q
+   where q.jediny
+     for update;
+  if not found then
+    raise exception 'Fronta dotazů na Choice nemá svůj řádek (migrace 20261031100000).'
+      using errcode = 'P0002';
+  end if;
+
+  v_ted := clock_timestamp();
+
+  -- Firma má zabraný dotaz, který ještě neodešel — druhý jí nedáme.
+  if v_firma > v_ted then
     return null;
   end if;
+
+  v_slot := greatest(v_ted, v_volny);
+  if v_slot > v_ted + p_nejdele_cekat_ms * interval '1 millisecond' then
+    return null;
+  end if;
+
+  update app.rezervace_choice_fronta
+     set dalsi_volny = v_slot + p_rozestup_ms * interval '1 millisecond'
+   where jediny;
+  update app.rezervace_choice_fronta_firmy
+     set zabrano_do = v_slot
+   where tenant_id = p_tenant;
+
   return greatest(0, ceil(extract(epoch from (v_slot - v_ted)) * 1000))::integer;
 end $$;
 
-comment on function public.rezervace_choice_zabrat_dotaz(integer, integer) is
-  'Fronta dotazů na Choice: zabere čas na jeden dotaz a vrátí, za kolik ms smí odejít. '
-  'NULL = nevejde se do zadané doby, nic se nezabralo. Jen service_role.';
+comment on function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) is
+  'Fronta dotazů na Choice: zabere firmě čas na jeden dotaz a vrátí, za kolik ms smí odejít. '
+  'NULL = nevejde se do zadané doby, nebo firma už má zabraný dotaz; nic se nezabralo. Jen service_role.';
 
-revoke all on function public.rezervace_choice_zabrat_dotaz(integer, integer) from public, anon, authenticated;
-grant execute on function public.rezervace_choice_zabrat_dotaz(integer, integer) to service_role;
+revoke all on function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) from public, anon, authenticated;
+grant execute on function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) to service_role;

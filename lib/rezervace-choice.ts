@@ -38,8 +38,10 @@
  *   * Jednotka `deposit.amount` (koruny? haléře?) — do poznámky jde jen
  *     stav zálohy, ne částka. Záloha OD HOSTA ve Foodtabu patří Foodtabu
  *     a Choice ji nepřepisuje.
- *   * Význam `digit` v odkazu na připojení. Když majitel vloží celý odkaz
- *     vygenerovaný v Choice, `digit` z něj se pošle dál beze změny.
+ *   * Význam `digit` v odkazu na připojení. Víme jen to, že ho přiděluje
+ *     Choice při vygenerování odkazu u aplikace (dashboard 25. 10. 2026)
+ *     a bez něj odkaz nefunguje. Proto se připojuje JEN odkazem z Choice
+ *     (`rozebratPodnik`) a `digit` z něj se pošle dál beze změny.
  *
  * Čistý modul: síť a čekání se podstrkují (`vytvoritChoice(fetchFn)`,
  * `probehnoutChoice({ … })`) — testuje ho scripts/rezervace-choice.test.mjs.
@@ -99,54 +101,77 @@ export function nastaveniChoice(env: Record<string, string | undefined>): Nastav
 const RE_SUBDOMENA = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const DOMENA_CHOICE = '.choiceqr.com'
 
-export type Podnik = { subdomena: string; digit: string | null }
+export type Podnik = { subdomena: string; digit: string }
+
+/** Proč odkaz neprošel — appka podle toho ukáže hlášku. */
+export type ChybaOdkazu = 'bez-odkazu' | 'aplikace' | 'callback' | 'jine'
 
 /**
- * Co majitel vloží: jméno podniku („mojerestaurace“), adresu
- * („mojerestaurace.choiceqr.com“, i s https://) nebo celý odkaz na
- * připojení vygenerovaný v Choice. Odkaz jinam než na podnik na
- * choiceqr.com se odmítne — appka na něj pak přesměrovává.
+ * Co majitel vloží: CELÝ ODKAZ NA PŘIPOJENÍ, který vygeneruje Choice
+ * u aplikace Foodtab (vývojářský účet Choice → aplikace Foodtab →
+ * „Connected company list“ → adresa podniku → Connect).
+ *
+ * Jen adresa podniku NESTAČÍ: odkaz nese parametr `digit` (4 číslice),
+ * který přiděluje Choice při vygenerování odkazu. Foodtab ho nezná a
+ * nevymyslí (zjištěno v dashboardu Choice 25. 10. 2026) — z pouhé
+ * adresy by vznikl odkaz, se kterým se připojení nedokončí.
+ *
+ * Odkaz se ověří: podnik na choiceqr.com, stránka připojení, `digit`
+ * číslicemi, `clientId` = aplikace Foodtab, `redirectUrl` (když je
+ * v odkazu) = callback Foodtabu, `response_type` = code. Jinam se
+ * nepřesměruje — appka na odkaz posílá prohlížeč.
  */
-export function rozebratPodnik(vstup: string, clientId: string | null = null): { stav: 'ok'; podnik: Podnik } | { stav: 'chyba'; duvod: string } {
-  const chyba = (duvod: string) => ({ stav: 'chyba' as const, duvod })
+export function rozebratPodnik(
+  vstup: string,
+  clientId: string | null = null,
+  callback: string | null = null,
+): { stav: 'ok'; podnik: Podnik } | { stav: 'chyba'; duvod: string; kod: ChybaOdkazu } {
+  const chyba = (duvod: string, kod: ChybaOdkazu = 'jine') => ({ stav: 'chyba' as const, duvod, kod })
+  const BEZ_ODKAZU = 'Vložte celý odkaz na připojení z Choice (u aplikace Foodtab: Connected company list → adresa podniku → Connect). Jen adresa podniku nestačí — chybí v ní kód „digit“, který přiděluje Choice.'
+  const JEN_CHOICE = 'Odkaz musí vést na podnik na choiceqr.com (např. https://mojerestaurace.choiceqr.com/admin/open-api/connect?…).'
   let t = vstup.trim()
-  if (!t) return chyba('Vyplňte adresu podniku v Choice, např. mojerestaurace.choiceqr.com.')
-  if (t.length > 2000) return chyba('Adresa podniku je moc dlouhá.')
-
-  if (RE_SUBDOMENA.test(t.toLowerCase())) return { stav: 'ok', podnik: { subdomena: t.toLowerCase(), digit: null } }
+  if (!t) return chyba(BEZ_ODKAZU, 'bez-odkazu')
+  if (t.length > 2000) return chyba('Odkaz je moc dlouhý.')
+  // Jen jméno podniku („mojerestaurace“).
+  if (RE_SUBDOMENA.test(t.toLowerCase())) return chyba(BEZ_ODKAZU, 'bez-odkazu')
 
   if (!/^https?:\/\//i.test(t)) t = `https://${t}`
   let adresa: URL
   try {
     adresa = new URL(t)
   } catch {
-    return chyba('Tohle není adresa podniku v Choice (např. mojerestaurace.choiceqr.com).')
+    return chyba(BEZ_ODKAZU, 'bez-odkazu')
   }
   const host = adresa.hostname.toLowerCase()
-  if (!host.endsWith(DOMENA_CHOICE) || adresa.username || adresa.password || adresa.port) {
-    return chyba('Adresa musí být podnik na choiceqr.com, např. mojerestaurace.choiceqr.com.')
-  }
+  if (!host.endsWith(DOMENA_CHOICE) || adresa.username || adresa.password || adresa.port) return chyba(JEN_CHOICE)
   const subdomena = host.slice(0, -DOMENA_CHOICE.length)
-  if (!RE_SUBDOMENA.test(subdomena) || subdomena === 'open-api' || subdomena === 'www') {
-    return chyba('Adresa musí být podnik na choiceqr.com, např. mojerestaurace.choiceqr.com.')
-  }
+  if (!RE_SUBDOMENA.test(subdomena) || subdomena === 'open-api' || subdomena === 'www') return chyba(JEN_CHOICE)
+  if (adresa.pathname.replace(/\/+$/, '') !== '/admin/open-api/connect') return chyba(BEZ_ODKAZU, 'bez-odkazu')
 
-  let digit: string | null = null
-  if (adresa.pathname.replace(/\/+$/, '') === '/admin/open-api/connect') {
-    const d = adresa.searchParams.get('digit')
-    if (d !== null && d !== '') {
-      if (!/^\d{1,12}$/.test(d)) return chyba('Odkaz z Choice má neobvyklý parametr „digit“ — vložte ho znovu, nebo jen adresu podniku.')
-      digit = d
-    }
-    const odkazovanyKlient = adresa.searchParams.get('clientId')
-    if (clientId && odkazovanyKlient && odkazovanyKlient !== clientId) {
-      return chyba('Odkaz je vygenerovaný pro jinou aplikaci než Foodtab — v Choice ho vytvořte u aplikace „Foodtab“.')
-    }
+  const digit = adresa.searchParams.get('digit') ?? ''
+  if (!digit) return chyba(BEZ_ODKAZU, 'bez-odkazu')
+  if (!/^\d{1,12}$/.test(digit)) return chyba('Odkaz z Choice má neobvyklý parametr „digit“ — zkopírujte ho z Choice znovu, celý.')
+
+  const odkazovanyKlient = adresa.searchParams.get('clientId') ?? ''
+  if (!odkazovanyKlient) return chyba('V odkazu chybí clientId aplikace — zkopírujte ho z Choice znovu, celý.')
+  if (clientId && odkazovanyKlient !== clientId) {
+    return chyba('Odkaz je vygenerovaný pro jinou aplikaci než Foodtab — v Choice ho vytvořte u aplikace „Foodtab“.', 'aplikace')
   }
+  const odkazovanyNavrat = adresa.searchParams.get('redirectUrl')
+  if (callback && odkazovanyNavrat && odkazovanyNavrat !== callback) {
+    return chyba(`Odkaz z Choice vrací jinam než do Foodtabu. U aplikace Foodtab v Choice musí být Authorization callback URL ${callback}.`, 'callback')
+  }
+  const typ = adresa.searchParams.get('response_type')
+  if (typ !== null && typ !== 'code') return chyba('Odkaz z Choice má neobvyklý response_type — zkopírujte ho z Choice znovu, celý.')
+
   return { stav: 'ok', podnik: { subdomena, digit } }
 }
 
-/** Odkaz, na který se majitel přesměruje. `redirectUrl` musí přesně sedět s callbackem aplikace v Choice. */
+/**
+ * Odkaz, na který se majitel přesměruje: odkaz z Choice s naším
+ * podepsaným `customAttribute`. `redirectUrl` musí přesně sedět
+ * s callbackem aplikace v Choice, `digit` je ten, který přidělil Choice.
+ */
 export function odkazPripojeni(v: { podnik: Podnik; clientId: string; redirectUrl: string; pokus: string }): string {
   const q = new URLSearchParams({
     clientId: v.clientId,
@@ -154,8 +179,8 @@ export function odkazPripojeni(v: { podnik: Podnik; clientId: string; redirectUr
     customAttribute: v.pokus,
     scope: 'all',
     response_type: 'code',
+    digit: v.podnik.digit,
   })
-  if (v.podnik.digit) q.set('digit', v.podnik.digit)
   return `https://${v.podnik.subdomena}${DOMENA_CHOICE}/admin/open-api/connect?${q.toString()}`
 }
 
@@ -728,6 +753,89 @@ export async function probehnoutChoice(v: {
     vysledek.oknoDokonceno = true
   }
   return konec(k)
+}
+
+/* ---------------------------------------------------------------------
+ * Naplánovaná úloha: komu dát čas
+ * ------------------------------------------------------------------ */
+
+/**
+ * Nejmenší díl času, který úloha připojení dá: tři dotazy (blízko, nové
+ * a aspoň jedna stránka okna). Míň by znamenalo, že se připojení
+ * „obslouží“, ale okno ani nové rezervace nikdy nedostane — a protože
+ * obsloužené jde příště na konec, nedostalo by je ani pak.
+ */
+export const NEJMENE_NA_PRIPOJENI_MS = 3 * ROZESTUP_DOTAZU_MS
+
+export type KandidatChoice = {
+  id: string
+  tenantId: string
+  /** Podnik v Choice (`externi_ucet.var_symbol`); prázdný = token chybí, běh to ohlásí. */
+  varSymbol: string
+  zalozeno: string | null
+  /** Začátek posledního běhu (`synchronizace_behy.zahajeno_kdy`) — píše jen server. */
+  posledniBeh: string | null
+}
+
+const casNebo = (x: string | null, jinak: number) => {
+  const ms = x ? Date.parse(x) : NaN
+  return Number.isNaN(ms) ? jinak : ms
+}
+
+/**
+ * Pořadí připojení pro naplánovanou úlohu. Úloha jich za běh stihne
+ * jen pár (Choice: 1 dotaz za 5 s pro celou instalaci), takže pořadí
+ * rozhoduje, kdo se kdy načte:
+ *
+ *   1. Tentýž podnik (`varSymbol`) u jedné firmy jen jednou — nejstarší
+ *      připojení. Callback druhé nepustí, ale přímým zápisem do registru
+ *      by šlo založit kolik chce kopií a každá by brala čas.
+ *   2. Firmy se střídají: napřed firma, která se načítala nejdávněji
+ *      (podle NEJNOVĚJŠÍHO běhu kteréhokoli jejího připojení), pak další;
+ *      druhé připojení firmy přijde na řadu až po prvních připojeních
+ *      všech firem. Víc připojení jedné firmy tak ostatním čas nevezme.
+ *   3. Uvnitř firmy nejdéle nenačtené první.
+ *
+ * Všechno podle `synchronizace_behy` — ten píše jen server, takže si
+ * nikdo pořadí nepřepíše (`posledni_sync_kdy` v registru může upravit
+ * i správce napojení). Kdo se v běhu nedostal na řadu, nemá nový běh,
+ * a příště jde první — připojení se tak střídají, i když se všechna do
+ * jednoho běhu nevejdou.
+ */
+export function poradiSynchronizace(kandidati: KandidatChoice[]): string[] {
+  const podleStari = (a: KandidatChoice, b: KandidatChoice) =>
+    casNebo(a.posledniBeh, -Infinity) - casNebo(b.posledniBeh, -Infinity) || a.id.localeCompare(b.id)
+
+  const firmy = new Map<string, KandidatChoice[]>()
+  const videnePodniky = new Set<string>()
+  const podleZalozeni = [...kandidati].sort((a, b) => casNebo(a.zalozeno, Infinity) - casNebo(b.zalozeno, Infinity) || a.id.localeCompare(b.id))
+  for (const k of podleZalozeni) {
+    if (k.varSymbol) {
+      const klic = `${k.tenantId}|${k.varSymbol}`
+      if (videnePodniky.has(klic)) continue
+      videnePodniky.add(klic)
+    }
+    const seznam = firmy.get(k.tenantId) ?? []
+    seznam.push(k)
+    firmy.set(k.tenantId, seznam)
+  }
+
+  const poradiFirem = [...firmy.entries()]
+    .map(([tenantId, seznam]) => ({
+      tenantId,
+      seznam: seznam.sort(podleStari),
+      naposledy: Math.max(...seznam.map((k) => casNebo(k.posledniBeh, -Infinity))),
+    }))
+    .sort((a, b) => a.naposledy - b.naposledy || a.tenantId.localeCompare(b.tenantId))
+
+  const vysledek: string[] = []
+  const nejvic = Math.max(0, ...poradiFirem.map((f) => f.seznam.length))
+  for (let kolo = 0; kolo < nejvic; kolo++) {
+    for (const f of poradiFirem) {
+      if (f.seznam[kolo]) vysledek.push(f.seznam[kolo].id)
+    }
+  }
+  return vysledek
 }
 
 /* ---------------------------------------------------------------------

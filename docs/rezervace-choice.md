@@ -45,12 +45,22 @@ Při připojení se Choice zeptá na **ChoiceQR token**. Ten posílá Choice
 
 ### 3. Připojit podnik ve Foodtabu
 
-**Provoz → Rezervace a akce → Napojení a import → karta Choice**:
+Nejdřív si v Choice nechte vygenerovat **odkaz na připojení**: na
+<https://open-api.choiceqr.com/auth/client> → aplikace **Foodtab** →
+**Connected company list** zadejte adresu podniku (např.
+`https://cernaperlatabor.choiceqr.com`) a klikněte na **Connect**.
+Objeví se odkaz, který začíná
+`https://…choiceqr.com/admin/open-api/connect?clientId=…` a končí
+`&digit=` a čtyřmi číslicemi. Ten zkopírujte **celý**.
+
+Jen adresa podniku nestačí: číslo `digit` v odkazu přiděluje Choice
+a bez něj se připojení nedokončí.
+
+Pak ve Foodtabu **Provoz → Rezervace a akce → Napojení a import →
+karta Choice**:
 
 1. vyberte pobočku (když jich máte víc),
-2. vyplňte adresu podniku v Choice, např. `cerna-perla.choiceqr.com`
-   (jde vložit i celý odkaz na připojení, který Choice vygeneruje
-   u aplikace Foodtab v části „Connected company list“),
+2. do pole **Odkaz na připojení z Choice** vložte zkopírovaný odkaz,
 3. **Připojit podnik v Choice** → Choice se zeptá na ChoiceQR token
    a na povolení → po povolení vás vrátí do Foodtabu.
 
@@ -93,6 +103,12 @@ vytvořené rezervace, pak pokračuje v procházení dalších 180 dní tam,
 kde minule skončil. Velký podnik se tak celý načte během několika
 běhů; nové a dnešní rezervace vždy hned.
 
+Jeden běh (čtvrthodinu) stihne zhruba sedm dotazů. S jednou nebo
+dvěma pobočkami na Choice se tak každá načte při každém běhu. Při víc
+pobočkách se střídají (dvě za běh): žádná se nepřeskočí natrvalo
+a každá, když přijde na řadu, dostane čas i na procházení 180 dní.
+Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
+
 ---
 
 ## Pro vývojáře
@@ -104,13 +120,20 @@ běhů; nové a dnešní rezervace vždy hned.
   `app/api/uloha/rezervace-choice/route.ts` +
   `.github/workflows/rezervace-choice.yml`.
 - Migrace `20261031100000_rezervace_choice.sql`: úloha v plánovači
-  a fronta dotazů `rezervace_choice_zabrat_dotaz` (jen service_role,
-  rozestup 5,5 s pro celou instalaci). Scénář `krok105`.
+  a fronta dotazů `rezervace_choice_zabrat_dotaz(p_tenant, …)` (jen
+  service_role, rozestup 5,5 s pro celou instalaci, každá firma nejvýš
+  jeden zabraný dotaz, který ještě neodešel — souběžné kliky jedné
+  firmy nezaberou frontu ostatním). Scénář `krok105`.
+- Úloha dělí čas: rezerva 20 s se odečte jednou za úlohu, zbytek po
+  dílech nejméně na tři dotazy; pořadí `poradiSynchronizace` (firmy se
+  střídají, podle `synchronizace_behy`, tentýž podnik u firmy jednou).
 - Zápis stávající cestou `rezervace_importovat_zdroj` (poskytovatel
   `choice`, číslo = `_id`). Token zašifrovaný v `integrace_tajemstvi`,
   kurzor v `integrace_pripojeni.externi_ucet.kurzor`.
 - Co dokumentace Choice neříká a Foodtab nedomýšlí: tvar `dateTime`
   (bere se jen okamžik s pásmem), jednotka `visitDuration` (konec se
   nevyplňuje), jednotka `deposit.amount` (jen stav zálohy), význam
-  `digit` v odkazu (předá se, jak přišel), jestli limit 1 dotaz / 5 s
-  platí na token, nebo na aplikaci (fronta je proto společná).
+  `digit` v odkazu (přiděluje ho Choice, proto se připojuje jen celým
+  odkazem z Choice a `digit` se předá, jak přišel), jestli limit
+  1 dotaz / 5 s platí na token, nebo na aplikaci (fronta je proto
+  společná).

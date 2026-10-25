@@ -522,10 +522,11 @@ const RE_ROZSAH = /^[a-z0-9-]{1,80}$/
  * aplikaci Foodtab povolí. Choice ho pak vrátí na
  * /api/rezervace/choice/callback.
  *
- * Odkaz nese podepsaný jednorázový pokus (customAttribute) svázaný
- * s firmou, pobočkou a PŘIHLÁŠENÝM uživatelem, platí 10 minut. U připojení
- * se uloží jen otisk jednorázového čísla — nové kliknutí starý odkaz
- * zneplatní.
+ * Majitel vloží odkaz na připojení, který vygeneroval Choice (s `digit`
+ * od Choice); Foodtab k němu přidá podepsaný jednorázový pokus
+ * (customAttribute) svázaný s firmou, pobočkou a PŘIHLÁŠENÝM uživatelem,
+ * platí 10 minut. U připojení se uloží jen otisk jednorázového čísla —
+ * nové kliknutí starý odkaz zneplatní.
  */
 export async function pripojitChoice(formData: FormData): Promise<void> {
   const rozsah = text(formData, 'rozsah')
@@ -539,8 +540,14 @@ export async function pripojitChoice(formData: FormData): Promise<void> {
   const nastaveni = nastaveniChoice(process.env)
   if (!nastaveni || !sifrovaniJeNastavene()) redirect(sParametrem(zpet, 'chyba', 'choice-nenastaveno'))
 
-  const podnik = rozebratPodnik(text(formData, 'podnik'), nastaveni.clientId)
-  if (podnik.stav === 'chyba') redirect(sParametrem(zpet, 'chyba', /jinou aplikaci/.test(podnik.duvod) ? 'choice-odkaz-aplikace' : 'choice-podnik'))
+  // Jen celý odkaz z Choice (nese `digit`, který přiděluje Choice) — z
+  // adresy podniku by vznikl odkaz, se kterým se připojení nedokončí.
+  const callback = `${await zakladniAdresaAplikace()}/api/rezervace/choice/callback`
+  const podnik = rozebratPodnik(text(formData, 'podnik'), nastaveni.clientId, callback)
+  if (podnik.stav === 'chyba') {
+    const kod = { 'bez-odkazu': 'choice-odkaz-chybi', aplikace: 'choice-odkaz-aplikace', callback: 'choice-odkaz-callback', jine: 'choice-podnik' }[podnik.kod]
+    redirect(sParametrem(zpet, 'chyba', kod))
+  }
 
   const supabase = await getServerSupabase()
   const { data: prihlaseni } = await supabase.auth.getUser()
@@ -592,14 +599,7 @@ export async function pripojitChoice(formData: FormData): Promise<void> {
     { tenantId: v.tenantId, branchId: pobocka.id, userId: prihlaseni.user.id },
     podepsatText,
   )
-  redirect(
-    odkazPripojeni({
-      podnik: podnik.podnik,
-      clientId: nastaveni.clientId,
-      redirectUrl: `${await zakladniAdresaAplikace()}/api/rezervace/choice/callback`,
-      pokus,
-    }),
-  )
+  redirect(odkazPripojeni({ podnik: podnik.podnik, clientId: nastaveni.clientId, redirectUrl: callback, pokus }))
 }
 
 /** Připojení Choice z formuláře — jen takové, které člověk v tomhle rozsahu vidí, i s jeho pobočkou. */
@@ -640,7 +640,9 @@ export async function overitChoice(formData: FormData): Promise<void> {
   }
   if (!token) redirect(sParametrem(zpet, 'chyba', 'choice-bez-tokenu'))
 
-  const test = await otestovatToken(token, zacatek + 50_000)
+  // Za firmu připojení: souběžné „Ověřit znovu“ téže firmy si frontu
+  // nezaberou (nejvýš jeden zabraný dotaz na firmu, migrace 20261031100000).
+  const test = await otestovatToken(token, v.tenantId, zacatek + 50_000)
   await zapsatVysledekTestu(supabase, pripojeni.id, test)
 
   revalidatePath(zpet)

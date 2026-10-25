@@ -149,13 +149,21 @@ export function ChoiceKarta({
               <input type="hidden" name="pobocka" value={kPripojeni[0].id} />
             )}
             <label className="ds-field">
-              <span className="ds-field-label">Adresa podniku v Choice</span>
-              <input className="ds-input" name="podnik" required maxLength={2000} placeholder="mojerestaurace.choiceqr.com" autoComplete="off" />
+              <span className="ds-field-label">Odkaz na připojení z Choice</span>
+              <input
+                className="ds-input"
+                name="podnik"
+                required
+                maxLength={2000}
+                placeholder="https://mojerestaurace.choiceqr.com/admin/open-api/connect?…&digit=…"
+                autoComplete="off"
+              />
             </label>
           </div>
           <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)', lineHeight: 1.5 }}>
-            Stačí adresa podniku. Můžete vložit i celý odkaz na připojení, který vygeneruje Choice u aplikace Foodtab. Choice se
-            pak zeptá na ChoiceQR token — ten posílá api@choiceqr.com. Odkaz platí 10 minut.
+            Odkaz vygeneruje Choice: u aplikace Foodtab v části Connected company list zadejte adresu podniku a klikněte na
+            Connect. Zkopírujte sem celý odkaz — jen adresa podniku nestačí (chybí v ní kód, který přiděluje Choice). Choice se
+            pak zeptá na ChoiceQR token — ten posílá api@choiceqr.com. Po kliknutí na Připojit platí 10 minut.
           </p>
           <div className="ds-rez-tlacitka">
             <button type="submit" className="ft-tl ft-tl-hlavni">

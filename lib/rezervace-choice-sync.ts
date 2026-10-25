@@ -6,6 +6,7 @@ import { rozsifrovat } from './integrace-klice.ts'
 import {
   chybaBehu,
   KLIC_CHOICE,
+  poradiSynchronizace,
   precistKurzor,
   probehnoutChoice,
   ROZESTUP_DOTAZU_MS,
@@ -45,6 +46,8 @@ import { klientUlohy } from './supabase/uloha.ts'
 /**
  * Rezerva před tvrdým koncem (`konecMs`): dotaz na Choice (časový limit
  * 15 s) a zápis jeho stránky. Nový dotaz se po `konecMs - REZERVA` nezačne.
+ * Odečítá se JEDNOU za celý běh (úloha: jednou za celou úlohu), ne
+ * z každého dílu času — jinak by díly připojení skoro celé snědla.
  */
 export const REZERVA_DOTAZU_MS = 20_000
 
@@ -73,15 +76,19 @@ export class ChybaFronty extends Error {
 }
 
 /**
- * Zabere v databázi čas na jeden dotaz a počká na něj. `false` = do konce
- * běhu se nevejde (nic se nezabralo). Bez fronty se NEPOSÍLÁ nic —
- * výjimka, ne „pošli to bez ní“.
+ * Zabere v databázi firmě čas na jeden dotaz a počká na něj.
+ * `posledniDotazMs` = nejpozdější okamžik, kdy smí dotaz ODEJÍT (rezervu
+ * na odpověď a zápis už odečetl volající — tady se neodečítá podruhé).
+ * `false` = nevejde se, nebo firma už má zabraný jiný dotaz (souběžné
+ * „Ověřit znovu“ / „Načíst teď“); nic se nezabralo. Bez fronty se
+ * NEPOSÍLÁ nic — výjimka, ne „pošli to bez ní“.
  */
-export function cekatNaFrontu(sluzba: SupabaseClient, konecMs: number, p: ProstrediChoice = SKUTECNE): () => Promise<boolean> {
+export function cekatNaFrontu(sluzba: SupabaseClient, tenantId: string, posledniDotazMs: number, p: ProstrediChoice = SKUTECNE): () => Promise<boolean> {
   return async () => {
-    const nejdele = Math.floor(konecMs - REZERVA_DOTAZU_MS - p.ted())
+    const nejdele = Math.floor(posledniDotazMs - p.ted())
     if (nejdele < 0) return false
     const { data, error } = await sluzba.rpc('rezervace_choice_zabrat_dotaz', {
+      p_tenant: tenantId,
       p_rozestup_ms: ROZESTUP_DOTAZU_MS,
       p_nejdele_cekat_ms: Math.min(nejdele, 120_000),
     })
@@ -144,14 +151,17 @@ export type VysledekTestu =
 
 /**
  * Živý test tokenu: `GET /bookings/list?page=1&perPage=1` — přes frontu,
- * jako každý jiný dotaz. Volá ho callback po výměně kódu a „Ověřit
+ * jako každý jiný dotaz, za firmu připojení (`tenantId` z připojení
+ * ověřeného volajícím). Volá ho callback po výměně kódu a „Ověřit
  * znovu“; oba až po přihlášení a právu `integrace.manage` na pobočce.
+ * Souběžné testy jedné firmy si frontu nezaberou: firma má nejvýš
+ * jeden zabraný dotaz, další dostanou „klikněte za minutu“.
  */
-export async function otestovatToken(token: string, konecMs: number, p: ProstrediChoice = SKUTECNE): Promise<VysledekTestu> {
+export async function otestovatToken(token: string, tenantId: string, konecMs: number, p: ProstrediChoice = SKUTECNE): Promise<VysledekTestu> {
   const sluzba = klientUlohy()
   if (!sluzba) return { stav: 'chyba', druh: 'fronta', duvod: 'Server nemá nastavený přístup k databázi pro úlohy (SUPABASE_SERVICE_ROLE_KEY).' }
   try {
-    if (!(await cekatNaFrontu(sluzba, konecMs, p)())) {
+    if (!(await cekatNaFrontu(sluzba, tenantId, konecMs - REZERVA_DOTAZU_MS, p)())) {
       return { stav: 'chyba', druh: 'cas', duvod: 'Na volný dotaz na Choice se teď čeká déle — klikněte za minutu na „Ověřit znovu“.' }
     }
   } catch (e) {
@@ -271,13 +281,14 @@ async function nacistToken(sluzba: SupabaseClient, pripojeniId: string): Promise
 
 /**
  * Jeden běh načítání jednoho připojení Choice. `konecMs` = TVRDÝ konec
- * (kdy musí být všechno uložené); rezervu na rozběhnutý dotaz si bere
- * fronta sama (`REZERVA_DOTAZU_MS`).
+ * (kdy musí být všechno uložené); poslední dotaz smí odejít nejpozději
+ * `konecMs - REZERVA_DOTAZU_MS`. Úloha s víc připojeními dá každému díl
+ * času přes `posledniDotazMs` (rezervu odečetla jednou za celou úlohu).
  * `nejmeneOdMinulehoMs`: „Načíst teď“ nepustí nový běh hned po předchozím.
  */
 export async function synchronizovatChoice(
   pripojeniId: string,
-  moznosti: { konecMs: number; nejmeneOdMinulehoMs?: number; prostredi?: ProstrediChoice },
+  moznosti: { konecMs: number; posledniDotazMs?: number; nejmeneOdMinulehoMs?: number; prostredi?: ProstrediChoice },
 ): Promise<VysledekSynchronizaceChoice> {
   const p = moznosti.prostredi ?? SKUTECNE
   const vysledek = (stav: VysledekSynchronizaceChoice['stav'], duvod: string | null, x: Partial<VysledekSynchronizaceChoice> = {}): VysledekSynchronizaceChoice =>
@@ -328,7 +339,12 @@ export async function synchronizovatChoice(
       varSymbol,
       kurzor: precistKurzor(ucet.kurzor),
       tedMs: p.ted(),
-      pockatNaDotaz: cekatNaFrontu(sluzba, moznosti.konecMs, p),
+      pockatNaDotaz: cekatNaFrontu(
+        sluzba,
+        pripojeni.tenant_id,
+        Math.min(moznosti.konecMs - REZERVA_DOTAZU_MS, moznosti.posledniDotazMs ?? Infinity),
+        p,
+      ),
       zapsat: zapisDoFoodtabu(sluzba, pripojeni.id),
     })
   } catch (e) {
@@ -373,18 +389,43 @@ export async function synchronizovatChoice(
   })
 }
 
-/** Ověřená připojení Choice k načtení — nejdéle nenačtené první. */
+/**
+ * Ověřená připojení Choice k načtení v pořadí pro úlohu
+ * (`poradiSynchronizace`: firmy se střídají, nejdéle nenačtené první,
+ * tentýž podnik u firmy jen jednou). Poslední běh se bere ze
+ * `synchronizace_behy` (píše jen server), ne z `posledni_sync_kdy`
+ * v registru, který může přepsat i správce napojení.
+ */
 export async function choiceKSynchronizaci(): Promise<string[]> {
   const sluzba = klientUlohy()
   if (!sluzba) return []
   const { data } = await sluzba
     .from('integrace_pripojeni')
-    .select('id, posledni_sync_kdy')
+    .select('id, tenant_id, externi_ucet, vytvoreno_kdy')
     .eq('oblast', 'rezervace')
     .eq('poskytovatel', KLIC_CHOICE)
     .eq('stav', 'pripojeno')
     .is('odpojeno_kdy', null)
-  return ((data ?? []) as { id: string; posledni_sync_kdy: string | null }[])
-    .sort((a, b) => (a.posledni_sync_kdy ?? '').localeCompare(b.posledni_sync_kdy ?? ''))
-    .map((x) => x.id)
+  const radky = (data ?? []) as { id: string; tenant_id: string; externi_ucet: Record<string, unknown> | null; vytvoreno_kdy: string | null }[]
+
+  // Po jednom dotazu na připojení (index synchronizace_behy_pripojeni);
+  // připojení Choice je v instalaci pár.
+  const kandidati = await Promise.all(radky.map(async (r) => {
+    const { data: beh } = await sluzba
+      .from('synchronizace_behy')
+      .select('zahajeno_kdy')
+      .eq('integrace_pripojeni_id', r.id)
+      .order('zahajeno_kdy', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const vs = r.externi_ucet?.var_symbol
+    return {
+      id: r.id,
+      tenantId: r.tenant_id,
+      varSymbol: typeof vs === 'string' ? vs : '',
+      zalozeno: r.vytvoreno_kdy,
+      posledniBeh: (beh?.zahajeno_kdy as string | undefined) ?? null,
+    }
+  }))
+  return poradiSynchronizace(kandidati)
 }

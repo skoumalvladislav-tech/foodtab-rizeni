@@ -14,9 +14,13 @@
 --   1. úloha je v plánovači s plánem z GitHub workflow a jde zabrat;
 --   2. fronta dotazů drží rozestup 5,5 s mezi po sobě jdoucími dotazy,
 --      dotaz, který se nevejde, NIC nezabere, nesmysl se odmítne;
+--      firma má nejvýš jeden zabraný dotaz, který ještě neodešel —
+--      souběžné kliky jedné firmy nezaberou frontu ostatním; chybějící
+--      řádek fronty je chyba, ne tiché NULL;
 --   3. frontu volá jen service_role (přihlášený ani anonym ne) a funguje
 --      i s vlastníkem, který NENÍ superuživatel (na Supabase jím migrace
---      nejsou) — vyzkoušené přeneseným vlastnictvím, ne úvahou;
+--      nejsou) — vyzkoušené přeneseným vlastnictvím, ne úvahou. Text
+--      grantů hlídá navíc scripts/provoz-granty.test.mjs;
 --   4. z Choice se zapisuje jen přes OVĚŘENÉ připojení („připojeno" jen
 --      s úspěšným testem); _id = číslo ze zdroje, totéž podruhé nic
 --      nezdvojí, zrušení = stav, rezervace zůstává; Foodtabu patří
@@ -87,89 +91,145 @@ update app.planovac_ulohy set zamceno_do = null, posledni_zacatek = null where u
 \echo ''
 \echo '== 2. Fronta dotazů na Choice ==========================='
 
+-- Druhá firma: fronta je společná všem firmám a právě mezi nimi se tu
+-- hlídá, že jedna nezabere čas ostatním.
+insert into public.tenants (name, legal_name, currency, timezone)
+values ('Krok105 Cizí s.r.o.', 'Krok105 Cizí s.r.o.', 'CZK', 'Europe/Prague')
+returning id as cizi \gset
+
 update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id in (:'tenant', :'cizi');
 
 set role service_role;
 -- coalesce: \gset nad NULL proměnnou nezaloží a další řádek by spadl na
 -- „syntax error“ místo srozumitelné kontroly (CLAUDE.md).
-select coalesce(public.rezervace_choice_zabrat_dotaz(5500, 60000), -1) as cekat1 \gset
-select coalesce(public.rezervace_choice_zabrat_dotaz(5500, 60000), -1) as cekat2 \gset
--- Třetí dotaz by musel čekat ~11 s; povolená doba je 1 s → nevejde se.
-select coalesce(public.rezervace_choice_zabrat_dotaz(5500, 1000)::text, 'nic') as cekat3 \gset
-select coalesce(public.rezervace_choice_zabrat_dotaz(5500, 60000), -1) as cekat4 \gset
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat1 \gset
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat2 \gset
+-- Cizí firma by musela čekat ~11 s; povolená doba je 1 s → nevejde se.
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'cizi', 5500, 1000)::text, 'nic') as cekat3 \gset
+-- Šest souběžných „Ověřit znovu“ téže firmy (prověrka 25. 10.: dřív si
+-- zabraly frontu na 30 s dopředu). Funkce je volatile, v agregaci se
+-- zavolá pro každý řádek zvlášť.
+select count(*) filter (where public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 30000) is null) as firma_nic,
+       count(*) as firma_vse
+  from generate_series(1, 6) \gset
+-- Naplánovaná úloha cizí firmy hned potom.
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'cizi', 5500, 37000), -1) as cekat_cizi \gset
 reset role;
 
 select pg_temp.check('první dotaz smí hned',
   :cekat1 between 0 and 100);
 select pg_temp.check('druhý hned po něm čeká 5,5 s (Choice: 1 dotaz za 5 s)',
   :cekat2 between 4500 and 5500);
-select pg_temp.check('dotaz, který se do povolené doby nevejde, dostane NULL…',
+select pg_temp.check('dotaz, který se do povolené doby nevejde, dostane NULL',
   :'cekat3' = 'nic');
-select pg_temp.check('… a nic nezabral: další čeká 11 s, ne 16,5 s',
-  :cekat4 between 9500 and 11000);
-select pg_temp.check('fronta drží další volný čas za posledním zabraným',
+select pg_temp.check('firma, jejíž zabraný dotaz ještě neodešel, další nedostane (6× NULL, nic nezabráno)',
+  :firma_vse = 6 and :firma_nic = 6);
+select pg_temp.check('cizí firma tak dostane dotaz hned za tím zabraným (≤ 11 s), ne až za 30 s',
+  :cekat_cizi between 9500 and 11000);
+select pg_temp.check('fronta drží další volný čas za posledním zabraným (nevejde-li se, nic se nezabralo)',
   (select dalsi_volny > clock_timestamp() + interval '14 seconds'
           and dalsi_volny < clock_timestamp() + interval '17 seconds'
      from app.rezervace_choice_fronta));
 
+-- Zabraný dotaz firmy odešel (čas uplynul) → další dostane, za frontou.
+update app.rezervace_choice_fronta_firmy set zabrano_do = clock_timestamp() - interval '1 second' where tenant_id = :'tenant';
 set role service_role;
-select pg_temp.check('rozestup pod 5 s se odmítne',
-  pg_temp.spadne_hlaskou('select public.rezervace_choice_zabrat_dotaz(4999, 60000)', '22023', '5 až 60 sekund'));
-select pg_temp.check('záporná nebo dlouhá doba čekání se odmítne',
-  pg_temp.spadne_hlaskou('select public.rezervace_choice_zabrat_dotaz(5500, -1)', '22023', 'nejvýš 120 sekund')
-  and pg_temp.spadne_hlaskou('select public.rezervace_choice_zabrat_dotaz(5500, 120001)', '22023', 'nejvýš 120 sekund'));
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat_po \gset
 reset role;
+select pg_temp.check('po odchodu zabraného dotazu firma další dostane (běh jde dotaz po dotazu, pravidlo ho nebrzdí)',
+  :cekat_po between 15000 and 17000);
+
+set role service_role;
+select pg_temp.check('dotaz bez firmy se odmítne',
+  pg_temp.spadne_hlaskou('select public.rezervace_choice_zabrat_dotaz(null, 5500, 60000)', '22023', 'musí patřit firmě'));
+select pg_temp.check('rozestup pod 5 s se odmítne',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_dotaz(%L, 4999, 60000)', :'tenant'), '22023', '5 až 60 sekund'));
+select pg_temp.check('záporná nebo dlouhá doba čekání se odmítne',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_dotaz(%L, 5500, -1)', :'tenant'), '22023', 'nejvýš 120 sekund')
+  and pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_dotaz(%L, 5500, 120001)', :'tenant'), '22023', 'nejvýš 120 sekund'));
+reset role;
+
+-- Chybějící řádek fronty není „nevejde se“ — tiché NULL by u napojení
+-- vypadalo jako „pokračuje se příště“ a nenačítalo by se nic.
+delete from app.rezervace_choice_fronta;
+set role service_role;
+select pg_temp.check('chybí-li řádek fronty, funkce spadne (P0002), ne tiché NULL',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_dotaz(%L, 5500, 60000)', :'cizi'), 'P0002', 'nemá svůj řádek'));
+reset role;
+insert into app.rezervace_choice_fronta (jediny) values (true);
 
 
 \echo ''
 \echo '== 3. Práva a vlastník, který není superuživatel ========'
 
+-- Granty hlídá i TEXT migrace (scripts/provoz-granty.test.mjs): v čisté
+-- databázi tady chybí výchozí práva Supabase, takže revoke bez
+-- `authenticated` by tahle kontrola nepoznala.
 select pg_temp.check('frontu volá jen service_role, přihlášený ani anonym ne',
-  has_function_privilege('service_role', 'public.rezervace_choice_zabrat_dotaz(integer, integer)', 'execute')
-  and not has_function_privilege('authenticated', 'public.rezervace_choice_zabrat_dotaz(integer, integer)', 'execute')
-  and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_dotaz(integer, integer)', 'execute'));
+  has_function_privilege('service_role', 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)', 'execute')
+  and not has_function_privilege('authenticated', 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)', 'execute')
+  and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)', 'execute'));
 
 set role authenticated;
 select pg_temp.check('přihlášený frontu nezavolá (42501)',
-  pg_temp.spadne_hlaskou('select public.rezervace_choice_zabrat_dotaz(5500, 60000)', '42501', 'permission denied'));
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_dotaz(%L, 5500, 60000)', :'tenant'), '42501', 'permission denied'));
 reset role;
 
-select pg_temp.check('do tabulky fronty nesahá nikdo kromě funkce (ani service_role)',
+select pg_temp.check('do tabulek fronty nesahá nikdo kromě funkce (ani service_role)',
   not has_table_privilege('service_role', 'app.rezervace_choice_fronta', 'select')
   and not has_table_privilege('service_role', 'app.rezervace_choice_fronta', 'update')
   and not has_table_privilege('authenticated', 'app.rezervace_choice_fronta', 'select')
-  and not has_table_privilege('anon', 'app.rezervace_choice_fronta', 'select'));
+  and not has_table_privilege('anon', 'app.rezervace_choice_fronta', 'select')
+  and not has_table_privilege('service_role', 'app.rezervace_choice_fronta_firmy', 'select')
+  and not has_table_privilege('service_role', 'app.rezervace_choice_fronta_firmy', 'update')
+  and not has_table_privilege('authenticated', 'app.rezervace_choice_fronta_firmy', 'select')
+  and not has_table_privilege('anon', 'app.rezervace_choice_fronta_firmy', 'select'));
 
--- Na Supabase vlastní migrace (tabulku i funkci) role `postgres`, která
--- NENÍ superuživatel. Tady se vlastnictví obojího přenese na obyčejnou
+-- Na Supabase vlastní migrace (tabulky i funkci) role `postgres`, která
+-- NENÍ superuživatel. Tady se vlastnictví všeho přenese na obyčejnou
 -- roli a zavolá se pod service_role — funkce musí projít. (Vlastník
 -- tabulky RLS bez politiky obchází. Role, která tabulku nevlastní, by
--- řádek fronty neviděla a funkce by tiše vracela NULL — na to se při
--- psaní tohohle scénáře přišlo.)
+-- řádek fronty neviděla — dřív by funkce tiše vracela NULL, dnes spadne
+-- na P0002, viz výš.)
 create role vlastnik105 nologin;
 grant usage on schema app to vlastnik105;
 alter table app.rezervace_choice_fronta owner to vlastnik105;
-alter function public.rezervace_choice_zabrat_dotaz(integer, integer) owner to vlastnik105;
+alter table app.rezervace_choice_fronta_firmy owner to vlastnik105;
+alter function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) owner to vlastnik105;
 select pg_temp.check('zkušební vlastník není superuživatel',
   not (select rolsuper from pg_roles where rolname = 'vlastnik105'));
 
 update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id in (:'tenant', :'cizi');
 set role service_role;
-select coalesce(public.rezervace_choice_zabrat_dotaz(5500, 60000), -1) as cekat_v1 \gset
-select coalesce(public.rezervace_choice_zabrat_dotaz(5500, 60000), -1) as cekat_v2 \gset
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat_v1 \gset
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat_v2 \gset
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000)::text, 'nic') as cekat_v3 \gset
 reset role;
-select pg_temp.check('s vlastníkem bez superuživatele fronta funguje stejně',
-  :cekat_v1 between 0 and 100 and :cekat_v2 between 4500 and 5500);
+select pg_temp.check('s vlastníkem bez superuživatele fronta funguje stejně (i pravidlo jednoho zabraného dotazu)',
+  :cekat_v1 between 0 and 100 and :cekat_v2 between 4500 and 5500 and :'cekat_v3' = 'nic');
 
-alter function public.rezervace_choice_zabrat_dotaz(integer, integer) owner to current_user;
+alter function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) owner to current_user;
 alter table app.rezervace_choice_fronta owner to current_user;
-select pg_temp.check('vlastník funkce i tabulky je zase ten, kdo pouští migrace',
+alter table app.rezervace_choice_fronta_firmy owner to current_user;
+select pg_temp.check('vlastník funkce i tabulek je zase ten, kdo pouští migrace',
   (select pg_get_userbyid(proowner) = current_user from pg_proc
-    where oid = 'public.rezervace_choice_zabrat_dotaz(integer, integer)'::regprocedure)
-  and (select pg_get_userbyid(relowner) = current_user from pg_class
-        where oid = 'app.rezervace_choice_fronta'::regclass));
+    where oid = 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)'::regprocedure)
+  and (select bool_and(pg_get_userbyid(relowner) = current_user) from pg_class
+        where oid in ('app.rezervace_choice_fronta'::regclass, 'app.rezervace_choice_fronta_firmy'::regclass)));
 revoke usage on schema app from vlastnik105;
 drop role vlastnik105;
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
+set role service_role;
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'cizi', 5500, 60000), -1) as cekat_cizi2 \gset
+reset role;
+select pg_temp.check('cizí firma má ve frontě svůj řádek',
+  :cekat_cizi2 >= 0 and exists (select 1 from app.rezervace_choice_fronta_firmy where tenant_id = :'cizi'));
+delete from public.tenants where id = :'cizi';
+select pg_temp.check('… a ten zmizí s firmou (on delete cascade)',
+  not exists (select 1 from app.rezervace_choice_fronta_firmy where tenant_id = :'cizi'));
 update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
 
 
@@ -272,6 +332,8 @@ update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
 select pg_temp.check('úklid: po scénáři nezůstalo nic z kroku 105',
   not exists (select 1 from public.rezervace where jmeno_hosta like '%Krok105')
   and not exists (select 1 from public.integrace_pripojeni where nazev like '%krok105%')
+  and not exists (select 1 from public.tenants where name = 'Krok105 Cizí s.r.o.')
+  and not exists (select 1 from app.rezervace_choice_fronta_firmy)
   and not exists (select 1 from pg_roles where rolname = 'vlastnik105'));
 
 \echo ''

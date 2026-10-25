@@ -45,6 +45,7 @@ import {
   odkazPripojeni,
   otiskPokusu,
   overitPokus,
+  poradiSynchronizace,
   precistKurzor,
   probehnoutChoice,
   prostorZChoice,
@@ -110,24 +111,38 @@ console.log('\n== 1. Nastavení, adresa podniku a odkaz na připojení ==\n')
   const n = nastaveniChoice({ CHOICE_CLIENT_ID: ' klient ', CHOICE_CLIENT_SECRET: ' tajne ' })
   ok('s oběma se vrátí oříznuté', n?.clientId === 'klient' && n?.secret === 'tajne')
 
-  const dobre = (vstup, sub, digit = null) => {
-    const r = rozebratPodnik(vstup, 'klient')
+  // Odkaz přesně v tvaru, jaký 25. 10. vygeneroval dashboard Choice
+  // (choice-docs/ZJISTENO-pripojeni-podniku.md) — bez customAttribute.
+  const Z_CHOICE = `https://cernaperlatabor.choiceqr.com/admin/open-api/connect?clientId=klient&redirectUrl=${encodeURIComponent(CALLBACK)}&scope=all&response_type=code&digit=8378`
+  const rozebrat = (vstup) => rozebratPodnik(vstup, 'klient', CALLBACK)
+  const dobre = (vstup, sub, digit) => {
+    const r = rozebrat(vstup)
     return r.stav === 'ok' && r.podnik.subdomena === sub && r.podnik.digit === digit
   }
-  ok('jméno podniku', dobre('MojeRestaurace', 'mojerestaurace'))
-  ok('adresa bez https', dobre('mojerestaurace.choiceqr.com', 'mojerestaurace'))
-  ok('adresa s cestou', dobre('https://mojerestaurace.choiceqr.com/menu', 'mojerestaurace'))
-  ok('odkaz na připojení z Choice → vezme se digit',
-    dobre('https://cerna-perla.choiceqr.com/admin/open-api/connect?clientId=klient&redirectUrl=x&customAttribute=1&scope=all&response_type=code&digit=9202', 'cerna-perla', '9202'))
-  const spatne = (vstup) => rozebratPodnik(vstup, 'klient').stav === 'chyba'
-  ok('cizí doména se odmítne', spatne('https://evil.example.com') && spatne('mojerestaurace.choiceqr.com.evil.com'))
+  ok('odkaz z dashboardu Choice → podnik a digit', dobre(Z_CHOICE, 'cernaperlatabor', '8378'))
+  ok('… i bez https:// a s customAttribute z dokumentace',
+    dobre(Z_CHOICE.replace('https://', ''), 'cernaperlatabor', '8378')
+    && dobre('https://cerna-perla.choiceqr.com/admin/open-api/connect?clientId=klient&redirectUrl=x&customAttribute=1&scope=all&response_type=code&digit=9202'.replace('redirectUrl=x', `redirectUrl=${encodeURIComponent(CALLBACK)}`), 'cerna-perla', '9202'))
+  const bezOdkazu = (vstup) => { const r = rozebrat(vstup); return r.stav === 'chyba' && r.kod === 'bez-odkazu' }
+  ok('JEN ADRESA PODNIKU NESTAČÍ (digit přiděluje Choice) → „vložte celý odkaz“',
+    bezOdkazu('cernaperlatabor') && bezOdkazu('cernaperlatabor.choiceqr.com') && bezOdkazu('https://cernaperlatabor.choiceqr.com')
+    && bezOdkazu('https://mojerestaurace.choiceqr.com/menu') && bezOdkazu('  '))
+  ok('… ani odkaz na připojení bez digit', bezOdkazu(Z_CHOICE.replace('&digit=8378', '')) && bezOdkazu(Z_CHOICE.replace('digit=8378', 'digit=')))
+  ok('… a hláška říká proč a kde odkaz vzít', /celý odkaz/.test(rozebrat('cernaperlatabor').duvod) && /Connect/.test(rozebrat('cernaperlatabor').duvod))
+  const spatne = (vstup) => rozebrat(vstup).stav === 'chyba'
+  ok('cizí doména se odmítne', spatne(Z_CHOICE.replace('cernaperlatabor.choiceqr.com', 'evil.example.com'))
+    && spatne(Z_CHOICE.replace('cernaperlatabor.choiceqr.com', 'cernaperlatabor.choiceqr.com.evil.com')))
   ok('vnořená subdoména, jméno a heslo v adrese, port se odmítnou',
-    spatne('a.b.choiceqr.com') && spatne('https://jmeno:heslo@x.choiceqr.com') && spatne('https://x.choiceqr.com:8443'))
-  ok('open-api a www nejsou podniky', spatne('open-api.choiceqr.com') && spatne('www.choiceqr.com'))
-  ok('prázdné se odmítne', spatne('  '))
-  const jinaAplikace = rozebratPodnik('https://x.choiceqr.com/admin/open-api/connect?clientId=jiny&digit=1', 'klient')
-  ok('odkaz pro jinou aplikaci se odmítne s důvodem', jinaAplikace.stav === 'chyba' && /jinou aplikaci/.test(jinaAplikace.duvod))
-  ok('digit, který není číslo, se odmítne', spatne('https://x.choiceqr.com/admin/open-api/connect?digit=1;drop'))
+    spatne(Z_CHOICE.replace('cernaperlatabor.', 'a.b.')) && spatne(Z_CHOICE.replace('https://', 'https://jmeno:heslo@'))
+    && spatne(Z_CHOICE.replace('choiceqr.com/', 'choiceqr.com:8443/')))
+  ok('open-api a www nejsou podniky', spatne(Z_CHOICE.replace('cernaperlatabor.', 'open-api.')) && spatne(Z_CHOICE.replace('cernaperlatabor.', 'www.')))
+  const jinaAplikace = rozebrat(Z_CHOICE.replace('clientId=klient', 'clientId=jiny'))
+  ok('odkaz pro jinou aplikaci se odmítne s důvodem', jinaAplikace.stav === 'chyba' && jinaAplikace.kod === 'aplikace' && /jinou aplikaci/.test(jinaAplikace.duvod))
+  ok('odkaz bez clientId se odmítne', spatne(Z_CHOICE.replace('clientId=klient&', '')))
+  const jinyNavrat = rozebrat(Z_CHOICE.replace(encodeURIComponent(CALLBACK), encodeURIComponent('https://evil.example.com/cb')))
+  ok('odkaz, který vrací jinam než na callback Foodtabu, se odmítne', jinyNavrat.stav === 'chyba' && jinyNavrat.kod === 'callback')
+  ok('digit, který není číslo, se odmítne', spatne(Z_CHOICE.replace('digit=8378', 'digit=1;drop')))
+  ok('response_type jiný než code se odmítne', spatne(Z_CHOICE.replace('response_type=code', 'response_type=token')))
 
   const odkaz = new URL(odkazPripojeni({ podnik: { subdomena: 'cerna-perla', digit: '9202' }, clientId: 'klient', redirectUrl: CALLBACK, pokus: 'POKUS' }))
   ok('odkaz míří na stránku připojení podniku v Choice',
@@ -136,8 +151,6 @@ console.log('\n== 1. Nastavení, adresa podniku a odkaz na připojení ==\n')
     odkaz.searchParams.get('clientId') === 'klient' && odkaz.searchParams.get('redirectUrl') === CALLBACK
     && odkaz.searchParams.get('customAttribute') === 'POKUS' && odkaz.searchParams.get('scope') === 'all'
     && odkaz.searchParams.get('response_type') === 'code' && odkaz.searchParams.get('digit') === '9202')
-  const bezDigit = new URL(odkazPripojeni({ podnik: { subdomena: 'x', digit: null }, clientId: 'k', redirectUrl: CALLBACK, pokus: 'P' }))
-  ok('bez známého digit se digit nevymýšlí', !bezDigit.searchParams.has('digit'))
   ok('secret v odkazu není', !odkaz.href.includes('tajne'))
 }
 
@@ -286,13 +299,19 @@ console.log('\n== 5. Průchod: stránky, kurzor, rozestup, 429 ==\n')
 
 const REZERVA_MS = 20_000
 
-/** Virtuální hodiny + fronta se stejnou aritmetikou jako rezervace_choice_zabrat_dotaz. */
+/**
+ * Virtuální hodiny + fronta se stejnou aritmetikou jako
+ * rezervace_choice_zabrat_dotaz: rozestup pro celou instalaci a s firmou
+ * navíc „nejvýš jeden zabraný dotaz, který ještě neodešel“.
+ */
 function hodinyAFronta(start) {
-  const h = { ted: start, dalsi: -Infinity }
-  h.zabrat = (rozestup, nejdele) => {
+  const h = { ted: start, dalsi: -Infinity, firmy: new Map() }
+  h.zabrat = (rozestup, nejdele, firma) => {
+    if (firma !== undefined && (h.firmy.get(firma) ?? -Infinity) > h.ted) return null
     const slot = Math.max(h.ted, h.dalsi)
     if (slot > h.ted + nejdele) return null
     h.dalsi = slot + rozestup
+    if (firma !== undefined) h.firmy.set(firma, slot)
     return slot - h.ted
   }
   return h
@@ -544,7 +563,10 @@ function svetSynchronizace({ pripojeniRadky, sifry = { [ID_PRIPOJENI]: 'sifra-ok
     synchronizace_behy: [],
   }, () => h.ted)
   if (fronta) {
-    db.rpc.rezervace_choice_zabrat_dotaz = ({ p_rozestup_ms, p_nejdele_cekat_ms }) => ({ data: h.zabrat(p_rozestup_ms, p_nejdele_cekat_ms), error: null })
+    // Jako SQL: bez firmy 22023 (funkce dotaz bez firmy odmítne).
+    db.rpc.rezervace_choice_zabrat_dotaz = ({ p_tenant, p_rozestup_ms, p_nejdele_cekat_ms }) => (typeof p_tenant !== 'string' || !p_tenant
+      ? { data: null, error: { code: '22023', message: 'Dotaz na Choice musí patřit firmě.' } }
+      : { data: h.zabrat(p_rozestup_ms, p_nejdele_cekat_ms, p_tenant), error: null })
   }
   db.rpc.rezervace_importovat_zdroj = zapis ?? (({ p_radky }) => ({ data: { nove: p_radky.length, zmenene: 0, beze_zmeny: 0, zastarale: 0 }, error: null }))
   const dotazy = []
@@ -589,7 +611,8 @@ async function sVypisy(fn) {
     s.dotazy.every((d, i) => d.frontaPred === i + 1))
   const rozestupy = s.dotazy.slice(1).map((d, i) => d.cas - s.dotazy[i].cas)
   ok(`rozestup mezi dotazy ≥ 5 s (${rozestupy.join(', ')} ms)`, rozestupy.every((r) => r >= 5000))
-  ok('rozestup chce fronta 5,5 s (nikdy pod 5 s)', s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace_choice_zabrat_dotaz').every((r) => r.args.p_rozestup_ms === 5500))
+  ok('rozestup chce fronta 5,5 s (nikdy pod 5 s) a za firmu připojení', s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace_choice_zabrat_dotaz')
+    .every((r) => r.args.p_rozestup_ms === 5500 && r.args.p_tenant === FIRMA))
   ok('dotazy jen GET na /bookings/list s Bearer tokenem', s.dotazy.every((d) => d.init.method === 'GET' && d.url.startsWith(`${API_CHOICE}/bookings/list?`) && d.init.headers.authorization === `Bearer ${TOKEN}`))
   const zapisy = s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace_importovat_zdroj')
   ok('zápis přes rezervace_importovat_zdroj s id připojení (stejná cesta jako příjmové API a CSV)',
@@ -702,14 +725,218 @@ async function sVypisy(fn) {
 {
   // Živý test jde frontou a jen na GET /bookings/list?page=1&perPage=1.
   const s = svetSynchronizace({ choice: () => odpoved(200, []) })
-  const t = await SYNC.otestovatToken(TOKEN, s.START + 57_000, s.prostredi)
+  const t = await SYNC.otestovatToken(TOKEN, FIRMA, s.START + 57_000, s.prostredi)
   ok('živý test: fronta, pak GET ?page=1&perPage=1', t.stav === 'ok' && s.dotazy.length === 1 && s.dotazy[0].frontaPred === 1 && s.dotazy[0].url === ADRESA_TESTU)
   const bez = svetSynchronizace({ fronta: false })
-  const t2 = await SYNC.otestovatToken(TOKEN, bez.START + 57_000, bez.prostredi)
+  const t2 = await SYNC.otestovatToken(TOKEN, FIRMA, bez.START + 57_000, bez.prostredi)
   ok('… bez fronty v databázi se netestuje vůbec (žádný dotaz)', t2.stav === 'chyba' && t2.druh === 'fronta' && bez.dotazy.length === 0)
   const s3 = svetSynchronizace({ choice: () => odpoved(401, {}) })
-  const t3 = await SYNC.otestovatToken(TOKEN, s3.START + 57_000, s3.prostredi)
+  const t3 = await SYNC.otestovatToken(TOKEN, FIRMA, s3.START + 57_000, s3.prostredi)
   ok('… 401 → přístup', t3.stav === 'chyba' && t3.druh === 'pristup')
+}
+
+const CIZI_FIRMA = 'eeeeeeee-0000-0000-0000-000000000009'
+
+{
+  // Prověrka 25. 10.: osm souběžných „Ověřit znovu“ jedné firmy zabralo
+  // frontu na 30 s dopředu a ostatní firmy nenačetly nic. Firma má teď
+  // nejvýš jeden zabraný dotaz — ostatní testy skončí hned, bez dotazu.
+  const s = svetSynchronizace({ choice: () => odpoved(200, []) })
+  const testy = await Promise.all(Array.from({ length: 8 }, () => SYNC.otestovatToken(TOKEN, FIRMA, s.START + 50_000, s.prostredi)))
+  const prosly = testy.filter((t) => t.stav === 'ok').length
+  const hned = testy.filter((t) => t.stav === 'chyba' && t.druh === 'cas').length
+  ok(`8 souběžných „Ověřit znovu“ jedné firmy: ${prosly} došly na Choice, ${hned} hned „klikněte za minutu“`,
+    prosly === 2 && hned === 6 && s.dotazy.length === 2)
+  const cekani = s.h.zabrat(ROZESTUP_DOTAZU_MS, 37_000, CIZI_FIRMA)
+  ok(`úloha cizí firmy pak čeká ${cekani} ms (≤ 11 s), ne 30 s`, cekani !== null && cekani <= 11_000)
+}
+
+{
+  // „Tentýž podnik jinde“ se ptá pod service_role (bez RLS) — firmu musí
+  // odfiltrovat sám dotaz. Spuštěním, ne čtením textu.
+  const DRUHE = '99999999-2222-3333-4444-555555555555'
+  const TRETI = '88888888-2222-3333-4444-555555555555'
+  const s = svetSynchronizace({ pripojeniRadky: [
+    pripojeni(ID_PRIPOJENI),
+    pripojeni(DRUHE, { tenant_id: CIZI_FIRMA, branch_id: 'bbbbbbbb-0000-0000-0000-000000000098', externi_ucet: { var_symbol: '777' } }),
+  ] })
+  ok('tentýž podnik Choice u JINÉ firmy → ne (o cizí firmě se nic nedozví a připojit jde)',
+    (await SYNC.jinePripojeniTehozPodniku(FIRMA, ID_PRIPOJENI, '777')) === false)
+  s.db.tabulky.integrace_pripojeni.push(pripojeni(TRETI, { branch_id: 'bbbbbbbb-0000-0000-0000-000000000097', externi_ucet: { var_symbol: '777' } }))
+  ok('… u jiné pobočky TÉŽE firmy → ano', (await SYNC.jinePripojeniTehozPodniku(FIRMA, ID_PRIPOJENI, '777')) === true)
+  s.db.tabulky.integrace_pripojeni.at(-1).odpojeno_kdy = '2026-10-25T10:00:00Z'
+  ok('… odpojené se nepočítá', (await SYNC.jinePripojeniTehozPodniku(FIRMA, ID_PRIPOJENI, '777')) === false)
+}
+
+{
+  // Zaseknutý běh (Vercel funkci ukončil uprostřed) nesmí připojení zamknout navždy.
+  const s = svetSynchronizace({ choice: () => odpoved(200, []) })
+  const stary = { id: 'stary', tenant_id: FIRMA, integrace_pripojeni_id: ID_PRIPOJENI, stav: 'bezi', zahajeno_kdy: new Date(s.START - 11 * 60_000).toISOString() }
+  s.db.tabulky.synchronizace_behy.push(stary)
+  const v = await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, prostredi: s.prostredi })
+  ok('běh „běží“ starší než 10 minut se uzavře jako chyba (timeout) a načítání proběhne',
+    v.stav === 'ok' && s.dotazy.length > 0 && stary.stav === 'chyba' && /timeout/.test(stary.chyba ?? ''))
+  const s2 = svetSynchronizace({ choice: () => odpoved(200, []) })
+  s2.db.tabulky.synchronizace_behy.push({ id: 'cerstvy', tenant_id: FIRMA, integrace_pripojeni_id: ID_PRIPOJENI, stav: 'bezi', zahajeno_kdy: new Date(s2.START - 5 * 60_000).toISOString() })
+  const v2 = await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s2.START + 57_000, prostredi: s2.prostredi })
+  ok('… běh starý 5 minut ještě běží → přeskočeno, žádný dotaz', v2.stav === 'preskoceno' && s2.dotazy.length === 0)
+}
+
+{
+  // Rezerva na poslední dotaz a zápis: velký podnik (okno pořád plné)
+  // se v jednom běhu nenačte celý — běh musí skončit včas.
+  const plneOkno = (url) => {
+    const u = new URL(url)
+    const okno = u.searchParams.get('periodField') === 'bookingDt' && u.searchParams.get('till') > '2027'
+    return odpoved(200, okno ? Array.from({ length: 100 }, (_, i) => rezervace(Number(u.searchParams.get('page')) * 1000 + i)) : [])
+  }
+  const s = svetSynchronizace({ choice: plneOkno })
+  const v = await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, prostredi: s.prostredi })
+  ok(`velké okno: běh skončí „pokračuje příště“ a poslední dotaz odešel nejpozději 20 s před koncem (${(s.dotazy.at(-1).cas - s.START) / 1000} s)`,
+    v.stav === 'ok' && v.pokracovani && s.dotazy.length >= 6 && s.dotazy.at(-1).cas <= s.START + 37_000)
+  const s2 = svetSynchronizace({ choice: plneOkno })
+  await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s2.START + 57_000, posledniDotazMs: s2.START + 12_000, prostredi: s2.prostredi })
+  ok(`díl času od úlohy (poslední dotaz do 12 s): ${s2.dotazy.length} dotazy, žádný po něm`,
+    s2.dotazy.length === 3 && s2.dotazy.every((d) => d.cas <= s2.START + 12_000))
+}
+
+/* ===================================================================== */
+console.log('\n== 6b. Naplánovaná úloha: dělení času mezi připojení ==\n')
+
+/**
+ * SKUTEČNÁ úloha (app/api/uloha/rezervace-choice/route.ts) nad SKUTEČNÝM
+ * lib/rezervace-choice-sync.ts; podstrčená je jen databáze, síť a hodiny
+ * (Date.now i prostředí sync). Choice má u každého podniku 3 rezervace
+ * v blízku, 3 nové a 250 v okně (3 stránky). Běh každých 15 minut.
+ */
+globalThis.__uloha = { SYNC }
+const ROUTE_ULOHY = await nactiModul('app/api/uloha/rezervace-choice/route.ts', [
+  ['next/server', js('export class NextResponse { static json(telo, i) { return { telo, status: (i && i.status) || 200 } } }')],
+  ['@/lib/supabase/uloha', js('export function tajemstviSedi() { return true }\nexport async function uzBezi() { return null }')],
+  ['@/lib/rezervace-choice-sync', js(`
+export const REZERVA_DOTAZU_MS = globalThis.__uloha.SYNC.REZERVA_DOTAZU_MS
+export function choiceKSynchronizaci() { return globalThis.__uloha.SYNC.choiceKSynchronizaci() }
+export function synchronizovatChoice(id, m) { return globalThis.__uloha.SYNC.synchronizovatChoice(id, { ...m, prostredi: globalThis.__uloha.prostredi }) }`)],
+])
+
+async function simulovatUlohu({ pripojeniRadky, behu, pred = () => {}, choice429 = null }) {
+  const s = svetSynchronizace({
+    pripojeniRadky,
+    sifry: Object.fromEntries(pripojeniRadky.map((p) => [p.id, `tok-${p.id}`])),
+  })
+  const puvodniRozsifrovat = globalThis.__choiceTest.rozsifrovat
+  globalThis.__choiceTest.rozsifrovat = (sifra) => ({ token: sifra })
+  const zaznam = []
+  s.prostredi.fetch = async (url, init) => {
+    const u = new URL(url)
+    const kdo = init.headers.authorization.slice('Bearer tok-'.length)
+    const okno = u.searchParams.get('periodField') === 'bookingDt' && Date.parse(u.searchParams.get('till')) - s.h.ted > 100 * 86_400_000
+    const druh = u.searchParams.get('periodField') === 'createdDt' ? 'nove' : okno ? 'okno' : 'blizko'
+    const stranka = Number(u.searchParams.get('page'))
+    zaznam.push({ cas: s.h.ted, kdo, druh, stranka })
+    s.h.ted += 400
+    if (choice429 && choice429(zaznam.length)) return odpoved(429, {})
+    const celkem = druh === 'okno' ? 250 : 3
+    const n = Math.max(0, Math.min(100, celkem - (stranka - 1) * 100))
+    return odpoved(200, Array.from({ length: n }, (_, i) => rezervace(`${kdo.slice(0, 2)}${stranka}${i}`)))
+  }
+  globalThis.__uloha = { SYNC, prostredi: s.prostredi }
+  const puvodniNow = Date.now
+  Date.now = () => s.h.ted
+  const behy = []
+  try {
+    for (let b = 0; b < behu; b++) {
+      s.h.ted = s.START + b * 15 * 60_000
+      pred(s, b)
+      const zacatek = s.h.ted
+      const odZaznamu = zaznam.length
+      const r = await ROUTE_ULOHY.GET(new Request('https://x/api/uloha/rezervace-choice', { headers: { authorization: 'Bearer x' } }))
+      const tento = zaznam.slice(odZaznamu)
+      behy.push({
+        zacatek, trval: s.h.ted - zacatek, telo: r.telo, dotazy: tento,
+        po: Object.fromEntries(pripojeniRadky.map((p) => [p.id, tento.filter((d) => d.kdo === p.id).map((d) => d.druh)])),
+      })
+    }
+  } finally {
+    Date.now = puvodniNow
+    globalThis.__choiceTest.rozsifrovat = puvodniRozsifrovat
+  }
+  const rozestupy = zaznam.slice(1).map((d, i) => d.cas - zaznam[i].cas).filter((x) => x < 60_000)
+  return { s, behy, zaznam, nejmensiRozestup: Math.min(...rozestupy) }
+}
+
+const idPripojeni = (i) => `${String(i + 1).repeat(8)}-2222-3333-4444-555555555555`
+const pripojeniUlohy = (n, x = () => ({})) => Array.from({ length: n }, (_, i) => pripojeni(idPripojeni(i), {
+  branch_id: `bbbbbbbb-0000-0000-0000-0000000001${String(i).padStart(2, '0')}`,
+  externi_ucet: { var_symbol: String(500 + i) }, vytvoreno_kdy: `2026-10-0${1 + (i % 9)}T10:00:00Z`, ...x(i),
+}))
+const plnyPruchod = (druhy) => druhy.includes('blizko') && druhy.includes('nove') && druhy.includes('okno')
+const oknoHotovo = (s, id) => Boolean(s.db.tabulky.integrace_pripojeni.find((p) => p.id === id)?.externi_ucet?.kurzor?.okno_hotovo_kdy)
+const vCase = (b) => b.trval <= 57_000 && b.dotazy.every((d) => d.cas <= b.zacatek + 37_000)
+
+{
+  // Dvě pobočky: dřív první v každém běhu jen „blízko, nové“ a okno nikdy.
+  const { s, behy, nejmensiRozestup } = await simulovatUlohu({ pripojeniRadky: pripojeniUlohy(2), behu: 4 })
+  const popis = behy.map((b, i) => `běh ${i + 1}: ${Object.values(b.po).map((d) => d.join(',')).join(' | ')}`).join('; ')
+  ok(`2 pobočky: v KAŽDÉM běhu obě blízko, nové i okno (${popis})`, behy.every((b) => Object.values(b.po).every(plnyPruchod)))
+  ok('… obě prošly celé okno 180 dní do 3 běhů', [0, 1].every((i) => oknoHotovo(s, idPripojeni(i))))
+  ok(`… každý běh do 57 s a žádný dotaz po 37. s (${behy.map((b) => (b.trval / 1000).toFixed(1)).join(', ')} s)`, behy.every(vCase))
+  ok(`… rozestup mezi všemi dotazy ≥ 5 s (nejmenší ${nejmensiRozestup} ms)`, nejmensiRozestup >= 5000)
+}
+
+for (const [n, behu, nejdelePauza] of [[3, 6, 2], [5, 10, 3]]) {
+  // Víc poboček, než se vejde do jednoho běhu: střídají se, nikdo natrvalo nehladoví.
+  const { s, behy } = await simulovatUlohu({ pripojeniRadky: pripojeniUlohy(n), behu })
+  const ids = Array.from({ length: n }, (_, i) => idPripojeni(i))
+  const obslouzeno = (id) => behy.map((b) => b.po[id].length > 0)
+  const pauza = (id) => Math.max(...obslouzeno(id).join('').split('true').map((x) => x.split('false').length - 1))
+  ok(`${n} poboček: kdo v běhu přijde na řadu, dostane blízko, nové i okno`,
+    behy.every((b) => Object.values(b.po).every((d) => d.length === 0 || plnyPruchod(d))))
+  ok(`… každá přijde na řadu nejpozději po ${nejdelePauza} bězích (${ids.map((id) => obslouzeno(id).map((x) => (x ? '■' : '·')).join('')).join(' ')})`,
+    ids.every((id) => pauza(id) < nejdelePauza))
+  ok(`… každá do ${behu} běhů prošla celé okno 180 dní`, ids.every((id) => oknoHotovo(s, id)))
+  ok('… každý běh do 57 s a žádný dotaz po 37. s', behy.every(vCase))
+}
+
+{
+  // Firmy se střídají: firma se 4 pobočkami (a kopií téhož podniku
+  // založenou přímým zápisem) nevezme čas firmě s jednou pobočkou — ani
+  // když si v registru maže posledni_sync_kdy, aby šla první.
+  const A = pripojeniUlohy(4, () => ({ tenant_id: CIZI_FIRMA }))
+  const kopie = pripojeni('77777777-2222-3333-4444-555555555555', {
+    tenant_id: CIZI_FIRMA, branch_id: A[0].branch_id, externi_ucet: { var_symbol: A[0].externi_ucet.var_symbol }, vytvoreno_kdy: '2026-10-20T10:00:00Z',
+  })
+  const B = pripojeni('66666666-2222-3333-4444-555555555555', { externi_ucet: { var_symbol: '900' }, vytvoreno_kdy: '2026-10-09T10:00:00Z' })
+  const { behy } = await simulovatUlohu({
+    pripojeniRadky: [...A, kopie, B], behu: 6,
+    pred: (s) => { for (const p of s.db.tabulky.integrace_pripojeni) if (p.tenant_id === CIZI_FIRMA) p.posledni_sync_kdy = null },
+  })
+  ok(`firma s 1 pobočkou se načte v KAŽDÉM běhu, i když jiná firma má 4 (${behy.map((b) => (plnyPruchod(b.po[B.id]) ? '■' : '·')).join('')})`,
+    behy.every((b) => plnyPruchod(b.po[B.id])))
+  ok('… kopie téhož podniku u firmy se nenačítá nikdy (bere se nejstarší připojení)', behy.every((b) => b.po[kopie.id].length === 0))
+  ok('… pobočky velké firmy se mezi sebou střídají', A.every((p) => behy.some((b) => b.po[p.id].length > 0)))
+}
+
+{
+  // 429 → úloha skončí a další připojení v tomhle běhu nezkouší.
+  const { behy } = await simulovatUlohu({ pripojeniRadky: pripojeniUlohy(2), behu: 1, choice429: (n) => n === 1 })
+  const [b] = behy
+  ok('429 u prvního připojení → úloha skončí („omezeno“), druhé se v tomhle běhu nezkouší',
+    b.telo.omezeno === true && b.dotazy.length === 1 && b.telo.zpracovano === 1)
+  ok('… v odpovědi úlohy (veřejný log GitHubu) nejsou id připojení', !JSON.stringify(b.telo).includes(idPripojeni(0)))
+}
+
+{
+  // Pořadí čistě: firmy se střídají, nejdéle nenačtené první, kopie podniku pryč.
+  const k = (id, tenantId, varSymbol, posledniBeh, zalozeno = '2026-10-01T00:00:00Z') => ({ id, tenantId, varSymbol, posledniBeh, zalozeno })
+  const poradi = poradiSynchronizace([
+    k('a1', 'A', '1', '2026-10-25T10:00:00Z'), k('a2', 'A', '2', null), k('a3', 'A', '3', '2026-10-25T09:00:00Z'),
+    k('a1-kopie', 'A', '1', null, '2026-10-02T00:00:00Z'),
+    k('b1', 'B', '9', '2026-10-25T09:30:00Z'),
+  ])
+  ok(`pořadí: firma B (naposledy dřív) první, pak střídavě; uvnitř firmy nenačtené první; kopie podniku vynechaná (${poradi.join(' ')})`,
+    poradi.join(' ') === 'b1 a2 a3 a1')
+  ok('prázdný seznam → prázdné pořadí', poradiSynchronizace([]).length === 0)
 }
 
 /* ===================================================================== */
@@ -734,7 +961,7 @@ const CALLBACK_ROUTE = await nactiModul('app/api/rezervace/choice/callback/route
   ['@/lib/authz', js('export async function hasAccess(t, p, b) { globalThis.__callback.pravo.push([t, p, b]); return globalThis.__callback.smi }')],
   ['@/lib/supabase/server', js('export async function getServerSupabase() { return globalThis.__callback.klient }')],
   ['@/lib/rezervace-choice-sync', js(`
-export async function otestovatToken(token) { globalThis.__callback.testy.push(token); return globalThis.__callback.test }
+export async function otestovatToken(token, firma) { globalThis.__callback.testy.push(token); globalThis.__callback.firmyTestu.push(firma); return globalThis.__callback.test }
 export async function zapsatVysledekTestu(_k, id, test) { globalThis.__callback.zapsaneTesty.push([id, test]); return true }
 export async function jinePripojeniTehozPodniku(t, id, vs) { return globalThis.__callback.jinde }
 export async function synchronizovatChoice(id) { globalThis.__callback.synchronizace.push(id) }`)],
@@ -752,7 +979,7 @@ function svetCallbacku({ uzivatel = UZIVATEL, smi = true, test = { stav: 'ok' },
     sit.push({ url: String(url), init })
     return choice ? choice(String(url), init) : odpoved(200, { varSymbol: '12345', domain: 'cerna-perla.choiceqr.com', token: TOKEN })
   }
-  Object.assign(globalThis.__callback, { klient: db.klient, smi, test, jinde, pravo: [], testy: [], zapsaneTesty: [], synchronizace: [], after: [] })
+  Object.assign(globalThis.__callback, { klient: db.klient, smi, test, jinde, pravo: [], testy: [], firmyTestu: [], zapsaneTesty: [], synchronizace: [], after: [] })
   return { db, sit }
 }
 
@@ -782,7 +1009,7 @@ async function zavolat(adresa) {
     p.externi_ucet.var_symbol === '12345' && p.externi_ucet.domena === 'cerna-perla.choiceqr.com' && !p.externi_ucet.pokus && !JSON.stringify(p).includes(TOKEN))
   const pravo = globalThis.__callback.pravo
   ok('právo integrace.manage se ověřilo ZNOVU na pobočce připojení', pravo.length === 1 && pravo[0][1] === 'integrace.manage' && pravo[0][2] === POBOCKA)
-  ok('„připojeno“ až z výsledku živého testu', globalThis.__callback.testy[0] === TOKEN && globalThis.__callback.zapsaneTesty[0]?.[1]?.stav === 'ok'
+  ok('„připojeno“ až z výsledku živého testu (fronta za firmu připojení)', globalThis.__callback.testy[0] === TOKEN && globalThis.__callback.firmyTestu[0] === FIRMA && globalThis.__callback.zapsaneTesty[0]?.[1]?.stav === 'ok'
     && !s.db.zmeny.some((z) => z.data?.stav === 'pripojeno'))
   ok('první načtení až po odpovědi (after)', globalThis.__callback.after.length === 1 && globalThis.__callback.synchronizace.length === 0)
 
@@ -872,6 +1099,104 @@ async function zavolat(adresa) {
   const r = await zavolat(adresaNavratu({ navic: '&error=access_denied' }))
   ok('majitel v Choice nepovolil → choice-zamitnuto, Choice se neptá', r.cesta.endsWith('chyba=choice-zamitnuto') && s.sit.length === 0
     && s.db.tabulky.integrace_pripojeni[0].stav === 'chyba')
+}
+
+/* ===================================================================== */
+console.log('\n== 7b. Serverové akce Choice (app/[rozsah]/rezervace/akce.ts) ==\n')
+
+/**
+ * SKUTEČNÉ akce „Připojit podnik“, „Ověřit znovu“ a „Načíst teď“.
+ * Podstrčené je jen to pod nimi: přístup (kdo co smí), databáze a server
+ * (lib/rezervace-choice-sync — ten má vlastní testy výš). Kontrola práva
+ * v akci je jediná linie před prací pod service_role, proto se zkouší
+ * spuštěním.
+ */
+globalThis.__akce = {}
+const AKCE = await nactiModul('app/[rozsah]/rezervace/akce.ts', [
+  ['next/cache', js('export function revalidatePath() {}')],
+  ['next/navigation', js('export function redirect(kam) { const e = new Error("NEXT_REDIRECT"); e.kam = kam; throw e }')],
+  ['@/lib/authz', js(`export function canSee() { return globalThis.__akce.spravce }
+export async function hasAccess(t, p, b) { globalThis.__akce.pravo.push([t, p, b]); return p === 'integrace.manage' ? globalThis.__akce.spravce : false }`)],
+  ['@/lib/firma', js('export async function getCurrentTenantId() { return globalThis.__akce.firma }')],
+  ['@/lib/integrace-adresa', js("export async function zakladniAdresaAplikace() { return 'https://foodtab-rizeni.vercel.app' }")],
+  ['@/lib/integrace-klice', KLICE],
+  ['@/lib/rezervace-choice-sync', js(`
+export async function otestovatToken(token, firma, konecMs) { globalThis.__akce.testy.push({ token, firma, konecMs }); return { stav: 'ok' } }
+export async function zapsatVysledekTestu() { return true }
+export async function synchronizovatChoice(id, m) { globalThis.__akce.synchronizace.push({ id, m }); return { stav: 'ok', pokracovani: false } }`)],
+  ['@/lib/rezervace-import', js('export const MAX_RADKU_IMPORTU = 1\nexport function naparsovatCsvRezervaci() {}')],
+  ['@/lib/rezervace-prijem-api', js("export const POSKYTOVATEL_PRIJMU = 'prijem-api'\nexport function slozitKlicRezervaci() {}")],
+  ['@/lib/rezervace-poskytovatele', js('export function poskytovatelSouboru() {}\nexport function systemyKPriprave() { return [] }')],
+  ['@/lib/rezervace-prilohy', js("export const KBELIK_REZERVACI = 'x'\nexport const MAX_BAJTU = 1\nexport const MAX_PRILOH_REZERVACE = 1\nexport function jeTypPriloh() { return false }")],
+  ['@/lib/rezervace-typy', js('export const STAVY = []\n' + ['bezpecnaZpatky', 'hlaskaZDatabaze', 'jePlatneDatum', 'precistFormular', 'zkontrolovatPoznamku'].map((f) => `export function ${f}() {}`).join('\n'))],
+  ['@/lib/supabase/server', js('export async function getServerSupabase() { return globalThis.__akce.klient }')],
+  ['./pristup', js('export function pobockaKZapisu() { return null }\nexport async function zkusPristupRezervacim() { return globalThis.__akce.pristup }')],
+])
+
+const { zasifrovat: zasifrovatKlicem } = await import(KLICE)
+
+async function akce(fn, pole, { spravce = false, zapis = false, stav = 'pripojeno', napojeni = true } = {}) {
+  const db = databaze({ integrace_pripojeni: napojeni ? [pripojeni(ID_PRIPOJENI, { stav })] : [] })
+  db.rpc.rezervace_napojeni = () => ({ data: db.tabulky.integrace_pripojeni.map((p) => ({ id: p.id, branch_id: p.branch_id, poskytovatel: p.poskytovatel, stav: p.stav })), error: null })
+  db.rpc.integrace_precti_tajemstvi = () => ({ data: zasifrovatKlicem({ token: TOKEN }).sifra, error: null })
+  db.klient.auth = { getUser: async () => ({ data: { user: { id: UZIVATEL } }, error: null }) }
+  globalThis.__akce = {
+    firma: FIRMA, spravce, klient: db.klient, pravo: [], testy: [], synchronizace: [],
+    pristup: { stav: 'ok', ctx: {}, scope: {}, pobocky: [{ id: POBOCKA, nazev: 'Černá Perla', slug: 'cerna-perla', zona: 'Europe/Prague', zapis }] },
+  }
+  const fd = new FormData()
+  for (const [k, v] of Object.entries({ rozsah: 'cerna-perla', ...pole })) fd.append(k, v)
+  let kam = null
+  try {
+    await fn(fd)
+  } catch (e) {
+    if (!e.kam) throw e
+    kam = e.kam
+  }
+  return { kam, db, a: globalThis.__akce }
+}
+
+{
+  const ctenar = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI })
+  ok('„Načíst teď“ od toho, kdo jen čte → pravo a ŽÁDNÉ načítání pod service_role',
+    ctenar.kam?.endsWith('chyba=pravo') && ctenar.a.synchronizace.length === 0)
+  const obsluha = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI }, { zapis: true })
+  ok('… kdo na pobočce zapisuje rezervace → načte (s minutovým odstupem od minulého běhu)',
+    obsluha.kam?.endsWith('stav=choice-nacteno') && obsluha.a.synchronizace.length === 1
+    && obsluha.a.synchronizace[0].id === ID_PRIPOJENI && obsluha.a.synchronizace[0].m.nejmeneOdMinulehoMs === 60_000)
+  const spravce = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI }, { spravce: true })
+  ok('… správce napojení taky', spravce.a.synchronizace.length === 1)
+  const neovereny = await akce(AKCE.nacistChoiceTed, { id: ID_PRIPOJENI }, { zapis: true, stav: 'chyba' })
+  ok('… neověřené připojení se nenačítá', neovereny.kam?.endsWith('chyba=choice-neovereno') && neovereny.a.synchronizace.length === 0)
+}
+
+{
+  const bez = await akce(AKCE.overitChoice, { id: ID_PRIPOJENI }, { zapis: true })
+  ok('„Ověřit znovu“ bez správy napojení → pravo, žádný test', bez.kam?.endsWith('chyba=pravo') && bez.a.testy.length === 0)
+  const s = await akce(AKCE.overitChoice, { id: ID_PRIPOJENI }, { spravce: true })
+  ok('… správce: test uloženým tokenem, ve frontě ZA FIRMU (souběžné kliky si frontu nezaberou)',
+    s.kam?.endsWith('stav=choice-overeno') && s.a.testy.length === 1 && s.a.testy[0].token === TOKEN && s.a.testy[0].firma === FIRMA)
+}
+
+{
+  const ODKAZ = `https://cernaperlatabor.choiceqr.com/admin/open-api/connect?clientId=klient-foodtab&redirectUrl=${encodeURIComponent(CALLBACK)}&scope=all&response_type=code&digit=8378`
+  const adresa = await akce(AKCE.pripojitChoice, { pobocka: POBOCKA, podnik: 'cernaperlatabor.choiceqr.com' }, { spravce: true, napojeni: false })
+  ok('„Připojit podnik“ jen s adresou podniku → „vložte celý odkaz“, na Choice se NEPŘESMĚRUJE a nic se nezaloží',
+    adresa.kam?.endsWith('chyba=choice-odkaz-chybi') && adresa.db.zmeny.length === 0)
+  const s = await akce(AKCE.pripojitChoice, { pobocka: POBOCKA, podnik: ODKAZ }, { spravce: true, napojeni: false })
+  const kam = s.kam ? new URL(s.kam) : null
+  ok('s odkazem z Choice → na stránku připojení podniku s digit od Choice, naším callbackem a podepsaným pokusem',
+    kam?.origin === 'https://cernaperlatabor.choiceqr.com' && kam.pathname === '/admin/open-api/connect'
+    && kam.searchParams.get('digit') === '8378' && kam.searchParams.get('redirectUrl') === CALLBACK
+    && kam.searchParams.get('clientId') === 'klient-foodtab' && rozebratPokus(kam.searchParams.get('customAttribute')) !== null)
+  ok('… připojení založené jako „připojuje se“ (ne připojeno)',
+    s.db.tabulky.integrace_pripojeni.length === 1 && s.db.tabulky.integrace_pripojeni[0].stav === 'pripojuje_se')
+  const jinam = await akce(AKCE.pripojitChoice, { pobocka: POBOCKA, podnik: ODKAZ.replace(encodeURIComponent(CALLBACK), encodeURIComponent('https://jinde.example.com/cb')) }, { spravce: true, napojeni: false })
+  ok('odkaz z Choice s jiným callbackem → choice-odkaz-callback', jinam.kam?.endsWith('chyba=choice-odkaz-callback') && jinam.db.zmeny.length === 0)
+  const cizi = await akce(AKCE.pripojitChoice, { pobocka: POBOCKA, podnik: ODKAZ.replace('clientId=klient-foodtab', 'clientId=jina') }, { spravce: true, napojeni: false })
+  ok('odkaz jiné aplikace → choice-odkaz-aplikace', cizi.kam?.endsWith('chyba=choice-odkaz-aplikace'))
+  const bezPrava = await akce(AKCE.pripojitChoice, { pobocka: POBOCKA, podnik: ODKAZ }, { zapis: true, napojeni: false })
+  ok('bez správy napojení → pravo, nic se nezaloží', bezPrava.kam?.endsWith('chyba=pravo') && bezPrava.db.zmeny.length === 0)
 }
 
 /* ===================================================================== */

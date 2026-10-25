@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
+import { NEJMENE_NA_PRIPOJENI_MS } from '@/lib/rezervace-choice'
 import { choiceKSynchronizaci, REZERVA_DOTAZU_MS, synchronizovatChoice } from '@/lib/rezervace-choice-sync'
 
 /**
@@ -12,11 +13,18 @@ import { choiceKSynchronizaci, REZERVA_DOTAZU_MS, synchronizovatChoice } from '@
  * Foodtab ptá. Do Choice nic nezapisuje.
  *
  * Stejný vzor jako `pokladna-synchronizace`: Bearer CRON_SECRET,
- * `service_role`, žádný přihlášený. Připojení jdou JEDNO PO DRUHÉM,
- * nejdéle nenačtené první, a každé zbývající dostane stejný díl času.
- * Mezi všemi dotazy na Choice drží rozestup 5,5 s databázová fronta
- * (`rezervace_choice_zabrat_dotaz`) — i mezi pobočkami a souběžnými
- * běhy. Když Choice vrátí 429, úloha skončí a zkusí to příště.
+ * `service_role`, žádný přihlášený. Mezi všemi dotazy na Choice drží
+ * rozestup 5,5 s databázová fronta (`rezervace_choice_zabrat_dotaz`) —
+ * i mezi pobočkami a souběžnými běhy. Když Choice vrátí 429, úloha
+ * skončí a zkusí to příště.
+ *
+ * DĚLENÍ ČASU (prověrka 25. 10.): rezerva na poslední dotaz a zápis se
+ * odečte JEDNOU za celou úlohu a zbytek se dělí mezi připojení — každé
+ * dostane stejný díl, nejméně `NEJMENE_NA_PRIPOJENI_MS` (blízko, nové
+ * a aspoň stránka okna). Na koho už takový díl nezbude, ten se v tomhle
+ * běhu nezačne; nemá nový běh, a proto jde příště první
+ * (`poradiSynchronizace`). Připojení se tak střídají a každé projde
+ * celé okno — při víc připojeních jen méně často.
  */
 
 export const dynamic = 'force-dynamic'
@@ -37,9 +45,10 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (bezi) return bezi
 
   const konecUlohy = Date.now() + KONEC_PO_MS
-  // Méně času než na jeden dotaz a zápis nemá smysl dávat dalšímu připojení.
-  // (Až tady, ne nahoře v modulu: import se nesmí číst při načtení adresy.)
-  const nejmeneNaPripojeni = REZERVA_DOTAZU_MS + 6_000
+  // Poslední dotaz celé úlohy smí odejít nejpozději tady — po něm zbývá
+  // rezerva na odpověď a zápis. (Až tady, ne nahoře v modulu: import se
+  // nesmí číst při načtení adresy.)
+  const posledniDotazUlohy = konecUlohy - REZERVA_DOTAZU_MS
   const pripojeni = await choiceKSynchronizaci()
 
   // Bez id připojení a bez textů chyb: odpověď končí ve veřejném logu
@@ -47,11 +56,15 @@ export async function GET(request: Request): Promise<NextResponse> {
   const vysledky: { stav: string; dotazu: number; nacteno: number; pokracovani: boolean }[] = []
   let omezeno = false
   for (const [i, id] of pripojeni.entries()) {
-    const zbyva = konecUlohy - Date.now()
-    if (zbyva < nejmeneNaPripojeni) break
-    // Stejný díl zbývajícího času každému zbývajícímu připojení.
-    const dil = Math.max(nejmeneNaPripojeni, Math.floor(zbyva / (pripojeni.length - i)))
-    const v = await synchronizovatChoice(id, { konecMs: Math.min(konecUlohy, Date.now() + dil) })
+    const zbyva = posledniDotazUlohy - Date.now()
+    if (zbyva < NEJMENE_NA_PRIPOJENI_MS) break
+    // Stejný díl zbývajícího času každému zbývajícímu připojení, ale ne
+    // méně než na tři dotazy.
+    const dil = Math.max(NEJMENE_NA_PRIPOJENI_MS, Math.floor(zbyva / (pripojeni.length - i)))
+    const v = await synchronizovatChoice(id, {
+      konecMs: konecUlohy,
+      posledniDotazMs: Math.min(posledniDotazUlohy, Date.now() + dil),
+    })
     vysledky.push({ stav: v.stav, dotazu: v.dotazu, nacteno: v.nacteno, pokracovani: v.pokracovani })
     if (v.omezeno) {
       omezeno = true

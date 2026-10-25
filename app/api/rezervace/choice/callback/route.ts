@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     })
     .eq('id', pripojeniId)
 
-  const test = await otestovatToken(vymena.token, zacatek + 57_000)
+  const test = await otestovatToken(vymena.token, tenantId, zacatek + 57_000)
   await zapsatVysledekTestu(supabase, pripojeniId, test)
   if (test.stav !== 'ok') return zpet('chyba', test.druh === 'pristup' || test.druh === 'data' ? 'choice-test' : 'choice-test-pozdeji')
 
