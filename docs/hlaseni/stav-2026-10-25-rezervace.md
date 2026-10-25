@@ -85,10 +85,11 @@ kdo zapisuje — proto druhé rozbití „vedle zápisu“, které spadlo na
 4. **Zálohy (PR #156):** ochrana proti dvojímu zápisu je nasazená; zbývá
    stornovat zálohy, které už zdvojené jsou (dotaz v
    `docs/hlaseni/stav-2026-10-25-zalohy-dvakrat.md`).
-5. **Otevřené PR s migrací starší než `20261027100000`** — #153
-   (`20261024100000`), #157 (`20261025230000`) a #145 (`20261019120000`) —
-   potřebují před svým `db push` nové razítko (novější než
-   `20261027100000`); CLI starší migraci za novější nepustí (jako #145 už dřív).
+5. **Otevřené PR s migrací starší než nasazená** — po nasazení #160 je
+   nejnovější nasazená `20261030100000`. #153 (`20261024100000`),
+   #157 (`20261029100000`) a #145 (`20261019120000`) potřebují před svým
+   `db push` nové razítko, novější než `20261030100000`. CLI starší migraci
+   za novější nepustí (jako #145 už dřív).
 
 ## Otázky
 
@@ -148,22 +149,42 @@ Na pokyn „sluč 158“ a „nasadit obě“. Z pracovní kopie `foodtab-nasaze
 
 Rezervací je v databázi 0 — první zapíše ten, komu se přidá právo (otázka 76).
 
-## Večer: univerzální příjmové API a dokumenty ve formuláři (nová PR, NENASAZENO)
+## Večer: univerzální příjmové API a dokumenty ve formuláři (PR #160, sloučeno a nasazeno)
 
 > **ROZHODNUTÍ ŠÉFÍKA (25. 10.):** „mám Choice, ale připravil bych
 > univerzální možnost, dále do položky na přidání rezervace přidej
 > možnost přidání souboru pdf, jpg atd.“
 
-| Co | Commit | Čeká na db push |
+| Co | Commit | db push |
 |---|---|---|
-| Migrace `20261030100000_rezervace_prijem.sql`: `rezervace_prijmout` (jen server; „připojeno“ až po úspěšné dávce, v téže transakci) a `rezervace_napojeni` s časem, počtem a poslední chybou (jen pro správce napojení) + scénář `krok104` | `4e42316` | **ano** |
-| Adresa `POST /api/rezervace/prijem` s klíčem `ftrez_…`, vydání a výměna klíče v Napojení a importu, Choice v seznamu systémů, návod `docs/rezervace-api.md` | `4e42316`, `6db8d66` | potřebuje migraci |
+| Migrace `20261030100000_rezervace_prijem.sql`: `rezervace_prijmout` (jen server; „připojeno“ až po úspěšné dávce, v téže transakci) a `rezervace_napojeni` s časem, počtem a poslední chybou (jen pro správce napojení) + scénář `krok104` | `4e42316`, `37bca8e` | hotovo 25. 10. |
+| Adresa `POST /api/rezervace/prijem` s klíčem `ftrez_…`, vydání a výměna klíče v Napojení a importu, Choice v seznamu systémů, návod `docs/rezervace-api.md` | `4e42316`, `6db8d66` | stojí na migraci výše |
 | Formulář nové rezervace/akce: „Přidat dokument“ (fotky, PDF) — nahrají se do úložiště a po založení se připojí | `4e42316` | ne (stávající tabulky) |
 
 **Čísla:** `krok104` 22 kontrol, `krok103` dál 131 (PGlite); `scripts/rezervace.test.mjs` 122 kontrol. Obě migrace (`20261027…` i nová) prošly i pod vlastníkem, který není superuživatel. **15 schválných rozbití** (7 databáze, 8 aplikace), všechna spadla na své kontrole — mimo jiné: spolknutá chyba zápisu by nastavila „připojeno“ bez dat; příjem přes připojení adaptéru nebo pokladny; chybu napojení by viděl každý; adresa bez porovnání klíče; čas bez pásma; soubory přes serverovou akci; cizí cesta k dokumentu; klíč vydá kdokoli; „připojeno“ nastavené adresou.
 
 Při plánování rozbití jsem vyhodil dvě slabá místa: dvojí kontrolu pásma (jedna by nešla shodit) a textovou kontrolu pořadí v migraci (pořadí uvnitř jedné transakce nic neznamená; že spadlá dávka nic nepřepne, hlídá `krok104` spuštěním).
 
-**Co čeká na Šéfíka:** „sluč N“ a `db push` (migrace `20261030100000`); pak vydat klíč pro Perlu a v Choice (webhook) nebo v n8n/Make nastavit posílání podle `docs/rezervace-api.md`.
+**Co čeká na Šéfíka:** vydat klíč pro Perlu (Rezervace → Napojení a import → Univerzální příjmové API) a v Choice (webhook) nebo v n8n/Make nastavit posílání podle `docs/rezervace-api.md`. Klíč smí vydat jen ten, kdo má `integrace.manage`.
 
-**PR #157** (výdej ze skladu) se mezitím přečíslovala na `krok102` a migraci `20261029100000`. Moje původní razítko `20261028100000` tím bylo starší než otevřená PR, proto je nové `20261030100000` (obsah beze změny; `krok103` 131 a `krok104` 22 kontrol znovu prošly). Obě PR mění stejný řádek v `run.sh` a sousední řádky v `databaze.yml` — kdo se slučuje druhý, doplní do řádku i ten druhý krok.
+**PR #157** (výdej ze skladu) se mezitím přečíslovala na `krok102` a migraci `20261029100000`. Moje původní razítko `20261028100000` tím bylo starší než otevřená PR, proto je nové `20261030100000` (obsah beze změny; `krok103` 131 a `krok104` 22 kontrol znovu prošly). #160 šla do `main` první, takže #157 teď potřebuje razítko novější než `20261030100000` a do řádku v `run.sh` a do `databaze.yml` doplnit `krok102` (GitHub ji hlásí jako kolidující). Relaci, která ji má, jsem dal vědět.
+
+### Nasazení #160 (25. 10. 2026 večer)
+
+Na pokyn „sluč 160“. PR sloučená do `main` (`a1f1a5d`), všechny kontroly na PR zelené. Z pracovní kopie `foodtab-nasazeni` (main `a1f1a5d`).
+
+1. **Napojený projekt:** `spekntcsuroqhehmjssv` / `foodtab-test` ✓.
+2. **`migration list --linked` před:** nenasazená jediná, `20261030100000`.
+3. **`db push --yes`** (doslova):
+
+   ```
+   Applying migration 20261030100000_rezervace_prijem.sql...
+   {"upToDate":false,"dryRun":false,"migrations":["20261030100000_rezervace_prijem.sql"],"seeds":[],"roles":[],"message":"Finished supabase db push."}
+   ```
+
+4. **Ověření v ostré databázi** (jen čtení, `supabase db query --linked`):
+   - verze `20261030100000` (`rezervace_prijem`) v `supabase_migrations.schema_migrations`;
+   - `rezervace_prijmout(uuid, text, jsonb)`: SECURITY DEFINER, `search_path=""`, **spustit smí jen `service_role`** (`anon`, `authenticated` ani `public` ne);
+   - `rezervace_napojeni(uuid)`: vrací nově `posledni_sync_kdy`, `posledni_sync_pocet_radku` a `posledni_chyba`; smí `authenticated` (a `service_role`), `anon` ne;
+   - napojení rezervací v registru zatím žádné — první vznikne vydáním klíče.
+5. **Aplikace:** Vercel nasadil `a1f1a5d` („Deployment has completed“); na `main` prošly Migrace a scénáře (PostgreSQL 16, včetně `krok104`), Testy aplikace a Migrace jen přibývají. Ostrá `POST /api/rezervace/prijem` bez klíče i s vymyšleným klíčem `ftrez_…` vrátí stejně **401** bez důvodu, proč klíč neplatí; `GET` vrátí 405; `/firma/rezervace/napojeni` bez přihlášení přesměruje na přihlášení.
