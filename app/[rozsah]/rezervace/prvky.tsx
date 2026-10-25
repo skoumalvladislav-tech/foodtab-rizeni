@@ -610,6 +610,11 @@ export function HlaskaAkce({ stav, chyba }: { stav?: string; chyba?: string }) {
     'priloha-odebrana': 'Příloha je odebraná.',
     pripraveno: 'Napojení je připravené a čeká na připojení.',
     odpojeno: 'Napojení je odpojené.',
+    // Choice — jen kódy, důvod chyby je u napojení (adresa nikdy nenese text).
+    'choice-pripojeno': 'Choice je připojený a přístup ověřený. První rezervace se právě načítají — za minutu obnovte stránku.',
+    'choice-overeno': 'Přístup do Choice je ověřený.',
+    'choice-nacteno': 'Rezervace z Choice jsou načtené.',
+    'choice-nacteno-cast': 'Část rezervací z Choice je načtená, zbytek se načte při dalším běhu (Choice pustí jen 1 dotaz za 5 sekund).',
   }
   const CHYBY: Record<string, string> = {
     pravo: 'Na tohle nemáte oprávnění.',
@@ -617,6 +622,22 @@ export function HlaskaAkce({ stav, chyba }: { stav?: string; chyba?: string }) {
     poznamka: 'Poznámka je prázdná nebo moc dlouhá.',
     zdroj: 'Stav rezervace z rezervačního systému se mění tam, ne ve Foodtabu.',
     'uz-je': 'Tenhle systém už je u pobočky připravený.',
+    'choice-nenastaveno': 'Napojení Choice čeká na nastavení — na serveru chybí CHOICE_CLIENT_ID a CHOICE_CLIENT_SECRET.',
+    'choice-podnik': 'Adresa podniku v Choice nesedí. Vložte např. mojerestaurace.choiceqr.com, nebo odkaz na připojení z Choice.',
+    'choice-odkaz-aplikace': 'Odkaz z Choice je vygenerovaný pro jinou aplikaci než Foodtab — v Choice ho vytvořte u aplikace „Foodtab“.',
+    'choice-uz-pripojeno': 'Pobočka už má Choice připojený. Jiný podnik jde připojit až po odpojení.',
+    'choice-pokus': 'Tenhle odkaz na připojení už neplatí nebo nepatří vašemu účtu. Připojte podnik znovu.',
+    'choice-propadly': 'Odkaz na připojení vypršel (platí 10 minut). Připojte podnik znovu.',
+    'choice-prihlaseni': 'Pro dokončení připojení musíte být přihlášení. Přihlaste se a připojte podnik znovu.',
+    'choice-zamitnuto': 'V Choice se připojení nepovolilo.',
+    'choice-kod': 'Choice připojení nedokončil — důvod je u napojení. Připojte podnik znovu.',
+    'choice-jinde': 'Tenhle podnik Choice je už připojený u jiné pobočky.',
+    'choice-test': 'Choice přístup neověřil — důvod je u napojení.',
+    'choice-test-pozdeji': 'Token od Choice je uložený, ale ověřit se teď nepodařilo (Choice neodpovídá nebo omezuje dotazy). Za chvíli klikněte na „Ověřit znovu“.',
+    'choice-bez-tokenu': 'U napojení chybí token. Připojte podnik znovu.',
+    'choice-neovereno': 'Choice ještě není ověřený — načítat půjde po ověření.',
+    'choice-chvili': 'Z Choice se právě načítá, nebo se načítalo před chvílí. Zkuste to za minutu.',
+    'choice-nacteni': 'Načtení z Choice se nepovedlo — důvod je u napojení.',
   }
   // Rezervace se zapsala, ale některý dokument z formuláře se nepřipojil —
   // není to úspěch bez výhrad, proto vzhled chyby.

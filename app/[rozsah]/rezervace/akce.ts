@@ -5,13 +5,15 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
-import { canSee } from '@/lib/authz'
+import { canSee, hasAccess } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import { zakladniAdresaAplikace } from '@/lib/integrace-adresa'
-import { sifrovaniJeNastavene, zasifrovat } from '@/lib/integrace-klice'
+import { podepsatText, rozsifrovat, sifrovaniJeNastavene, zasifrovat } from '@/lib/integrace-klice'
+import { KLIC_CHOICE, nastaveniChoice, odkazPripojeni, otiskPokusu, PLATNOST_POKUSU_S, rozebratPodnik, slozitPokus } from '@/lib/rezervace-choice'
+import { otestovatToken, synchronizovatChoice, zapsatVysledekTestu } from '@/lib/rezervace-choice-sync'
 import { MAX_RADKU_IMPORTU, naparsovatCsvRezervaci } from '@/lib/rezervace-import'
 import { POSKYTOVATEL_PRIJMU, slozitKlicRezervaci } from '@/lib/rezervace-prijem-api'
-import { najitSystem, poskytovatelSouboru } from '@/lib/rezervace-poskytovatele'
+import { poskytovatelSouboru, systemyKPriprave } from '@/lib/rezervace-poskytovatele'
 import { KBELIK_REZERVACI, MAX_BAJTU, MAX_PRILOH_REZERVACE, jeTypPriloh } from '@/lib/rezervace-prilohy'
 import { STAVY, bezpecnaZpatky, hlaskaZDatabaze, jePlatneDatum, precistFormular, zkontrolovatPoznamku } from '@/lib/rezervace-typy'
 import { getServerSupabase } from '@/lib/supabase/server'
@@ -370,8 +372,8 @@ export async function importovatSoubor(_predchozi: StavImportu, formData: FormDa
  * Napojení na rezervační systém (registr integrace_pripojeni)
  *
  * Jen `integrace.manage`. Připojení vznikne jako „čeká na připojení“ —
- * žádný adaptér zatím není, takže „připojeno“ nemá kdo ověřit (a databáze
- * ho bez ověření nedovolí).
+ * u systémů bez adaptéru nemá „připojeno“ kdo ověřit (a databáze ho bez
+ * ověření nedovolí). Choice má adaptér a vlastní připojení (pripojitChoice).
  * ------------------------------------------------------------------ */
 
 export async function pripravitNapojeni(formData: FormData): Promise<void> {
@@ -381,10 +383,11 @@ export async function pripravitNapojeni(formData: FormData): Promise<void> {
   if (!v || !canSee(v.pristup.ctx, 'integrace.manage')) redirect(sParametrem(zpet, 'chyba', 'pravo'))
 
   const pobocka = v.pristup.pobocky.find((b) => b.id === text(formData, 'pobocka'))
-  const system = najitSystem(text(formData, 'system'))
   // Jen systémy, ke kterým jednou může být adaptér (API veřejné nebo
-  // partnerské). Choice, Tablein a „jiný“ jdou přes příjmové API nebo CSV.
-  if (!pobocka || !system || (system.api !== 'verejne' && system.api !== 'partnerske')) {
+  // partnerské) a ještě není. Tablein a „jiný“ jdou přes příjmové API
+  // nebo CSV; Choice má adaptér a vlastní připojení (pripojitChoice).
+  const system = systemyKPriprave().find((s) => s.klic === text(formData, 'system'))
+  if (!pobocka || !system) {
     redirect(sParametrem(zpet, 'chyba', 'nepovedlo'))
   }
 
@@ -502,4 +505,171 @@ export async function vydatKlicPrijmuRezervaci(_predchozi: StavKliceRezervaci, f
 
   revalidatePath(`/${rozsah}/rezervace/napojeni`)
   return { stav: 'ok', klic, adresa: `${await zakladniAdresaAplikace()}/api/rezervace/prijem` }
+}
+
+/* ---------------------------------------------------------------------
+ * Choice (choiceqr.com) — připojení podniku, ověření, načtení teď
+ *
+ * Adaptér: lib/rezervace-choice.ts a lib/rezervace-choice-sync.ts, návod
+ * docs/rezervace-choice.md. Do Choice se nic nezapisuje.
+ * ------------------------------------------------------------------ */
+
+const RE_ROZSAH = /^[a-z0-9-]{1,80}$/
+
+/**
+ * „Připojit podnik v Choice“: založí (nebo znovu použije) připojení ve
+ * stavu „připojuje se“ a přesměruje majitele na stránku Choice, kde
+ * aplikaci Foodtab povolí. Choice ho pak vrátí na
+ * /api/rezervace/choice/callback.
+ *
+ * Odkaz nese podepsaný jednorázový pokus (customAttribute) svázaný
+ * s firmou, pobočkou a PŘIHLÁŠENÝM uživatelem, platí 10 minut. U připojení
+ * se uloží jen otisk jednorázového čísla — nové kliknutí starý odkaz
+ * zneplatní.
+ */
+export async function pripojitChoice(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = `/${rozsah}/rezervace/napojeni`
+  const v = await vstup(rozsah)
+  if (!v || !RE_ROZSAH.test(rozsah)) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const pobocka = v.pristup.pobocky.find((b) => b.id === text(formData, 'pobocka'))
+  if (!pobocka || !(await hasAccess(v.tenantId, 'integrace.manage', pobocka.id))) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const nastaveni = nastaveniChoice(process.env)
+  if (!nastaveni || !sifrovaniJeNastavene()) redirect(sParametrem(zpet, 'chyba', 'choice-nenastaveno'))
+
+  const podnik = rozebratPodnik(text(formData, 'podnik'), nastaveni.clientId)
+  if (podnik.stav === 'chyba') redirect(sParametrem(zpet, 'chyba', /jinou aplikaci/.test(podnik.duvod) ? 'choice-odkaz-aplikace' : 'choice-podnik'))
+
+  const supabase = await getServerSupabase()
+  const { data: prihlaseni } = await supabase.auth.getUser()
+  if (!prihlaseni.user) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const { data: stavajici } = await supabase.rpc('rezervace_napojeni', { p_tenant: v.tenantId })
+  const choice = ((stavajici ?? []) as { id: string; branch_id: string; poskytovatel: string; stav: string }[]).find(
+    (s) => s.branch_id === pobocka.id && s.poskytovatel === KLIC_CHOICE,
+  )
+  if (choice?.stav === 'pripojeno') redirect(sParametrem(zpet, 'chyba', 'choice-uz-pripojeno'))
+
+  const nonce = randomBytes(16).toString('base64url')
+  const ucet = { domena_zadana: `${podnik.podnik.subdomena}.choiceqr.com`, pokus: otiskPokusu(nonce) }
+
+  let pripojeniId: string
+  if (choice) {
+    // Nedokončený nebo neplatný pokus téže pobočky se použije znovu —
+    // opakované klikání nemá plodit další karty.
+    const { data } = await supabase
+      .from('integrace_pripojeni')
+      .update({ stav: 'pripojuje_se', posledni_chyba: null, externi_ucet: ucet })
+      .eq('id', choice.id)
+      .eq('tenant_id', v.tenantId)
+      .neq('stav', 'pripojeno')
+      .is('odpojeno_kdy', null)
+      .select('id')
+    if (!data || data.length !== 1) redirect(sParametrem(zpet, 'chyba', 'nepovedlo'))
+    pripojeniId = choice.id
+  } else {
+    // Id se vylosuje tady — zápis pak nemusí číst řádek zpátky.
+    pripojeniId = randomUUID()
+    const { error } = await supabase.from('integrace_pripojeni').insert({
+      id: pripojeniId,
+      tenant_id: v.tenantId,
+      branch_id: pobocka.id,
+      oblast: 'rezervace',
+      poskytovatel: KLIC_CHOICE,
+      rezim: 'zakaznicky',
+      stav: 'pripojuje_se',
+      nazev: 'Choice',
+      externi_ucet: ucet,
+      capabilities: { cteni: true, zapis: false, webhooky: false, stahovani: true, limit_dotazu: '1 za 5 s' },
+    })
+    if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : error.code === '23505' ? 'uz-je' : 'nepovedlo'))
+  }
+
+  const pokus = slozitPokus(
+    { pripojeniId, platnostDo: Math.floor(Date.now() / 1000) + PLATNOST_POKUSU_S, nonce, rozsah },
+    { tenantId: v.tenantId, branchId: pobocka.id, userId: prihlaseni.user.id },
+    podepsatText,
+  )
+  redirect(
+    odkazPripojeni({
+      podnik: podnik.podnik,
+      clientId: nastaveni.clientId,
+      redirectUrl: `${await zakladniAdresaAplikace()}/api/rezervace/choice/callback`,
+      pokus,
+    }),
+  )
+}
+
+/** Připojení Choice z formuláře — jen takové, které člověk v tomhle rozsahu vidí, i s jeho pobočkou. */
+async function pripojeniChoice(v: { tenantId: string; pristup: Extract<Awaited<ReturnType<typeof zkusPristupRezervacim>>, { stav: 'ok' }> }, id: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null
+  const supabase = await getServerSupabase()
+  const { data } = await supabase.rpc('rezervace_napojeni', { p_tenant: v.tenantId })
+  const najite = ((data ?? []) as { id: string; branch_id: string; poskytovatel: string; stav: string }[]).find(
+    (s) => s.id === id && s.poskytovatel === KLIC_CHOICE,
+  )
+  const pobocka = najite ? v.pristup.pobocky.find((p) => p.id === najite.branch_id) : undefined
+  return najite && pobocka ? { ...najite, pobocka } : null
+}
+
+/**
+ * „Ověřit znovu“: živý test uloženého tokenu (GET /bookings/list?perPage=1).
+ * „Připojeno“ jen po úspěchu (zapsatVysledekTestu). Jen správce napojení.
+ */
+export async function overitChoice(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = `/${rozsah}/rezervace/napojeni`
+  const zacatek = Date.now()
+  const v = await vstup(rozsah)
+  if (!v) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const pripojeni = await pripojeniChoice(v, text(formData, 'id'))
+  if (!pripojeni || !(await hasAccess(v.tenantId, 'integrace.manage', pripojeni.branch_id))) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+  if (pripojeni.stav === 'pripojuje_se') redirect(sParametrem(zpet, 'chyba', 'choice-pokus'))
+
+  // Šifru vydá databáze jen správci napojení té pobočky (integrace_precti_tajemstvi).
+  const supabase = await getServerSupabase()
+  const { data: sifra, error } = await supabase.rpc('integrace_precti_tajemstvi', { p_pripojeni: pripojeni.id })
+  let token = ''
+  try {
+    token = !error && typeof sifra === 'string' ? (rozsifrovat(sifra).token ?? '') : ''
+  } catch {
+    token = ''
+  }
+  if (!token) redirect(sParametrem(zpet, 'chyba', 'choice-bez-tokenu'))
+
+  const test = await otestovatToken(token, zacatek + 50_000)
+  await zapsatVysledekTestu(supabase, pripojeni.id, test)
+
+  revalidatePath(zpet)
+  if (test.stav === 'ok') redirect(sParametrem(zpet, 'stav', 'choice-overeno'))
+  redirect(sParametrem(zpet, 'chyba', test.druh === 'pristup' || test.druh === 'data' ? 'choice-test' : 'choice-test-pozdeji'))
+}
+
+/**
+ * „Načíst teď“: jeden běh načítání hned (stejný jako naplánovaná úloha).
+ * Smí správce napojení i ten, kdo na pobočce zapisuje rezervace. Hned po
+ * předchozím běhu se nepustí (minuta) — limit Choice je společný.
+ */
+export async function nacistChoiceTed(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = `/${rozsah}/rezervace/napojeni`
+  const zacatek = Date.now()
+  const v = await vstup(rozsah)
+  if (!v) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const pripojeni = await pripojeniChoice(v, text(formData, 'id'))
+  if (!pripojeni) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+  const smi = pripojeni.pobocka.zapis || (await hasAccess(v.tenantId, 'integrace.manage', pripojeni.branch_id))
+  if (!smi) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+  if (pripojeni.stav !== 'pripojeno') redirect(sParametrem(zpet, 'chyba', 'choice-neovereno'))
+
+  const vysledek = await synchronizovatChoice(pripojeni.id, { konecMs: zacatek + 50_000, nejmeneOdMinulehoMs: 60_000 })
+
+  revalidatePath(`/${rozsah}/rezervace`, 'layout')
+  if (vysledek.stav === 'preskoceno') redirect(sParametrem(zpet, 'chyba', 'choice-chvili'))
+  if (vysledek.stav === 'chyba') redirect(sParametrem(zpet, 'chyba', 'choice-nacteni'))
+  redirect(sParametrem(zpet, 'stav', vysledek.pokracovani ? 'choice-nacteno-cast' : 'choice-nacteno'))
 }
