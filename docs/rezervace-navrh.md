@@ -167,6 +167,36 @@ import ani databáze se nemění.
 **Do té doby:** ruční zápis a načtení CSV exportu (Tablein, Reservio
 s exportem, cokoli jiného).
 
+### 4.1 Univerzální příjmové API (25. 10. 2026 večer)
+
+> **ROZHODNUTÍ ŠÉFÍKA (25. 10.):** „mám Choice, ale připravil bych
+> univerzální možnost.“ Odpověď na otázku 78: Perla používá **Choice**.
+
+Choice veřejné API pro rezervace nemá, adaptér se tedy psát nedá. Místo
+toho má Foodtab vlastní adresu, na kterou rezervace pošle **kdokoli** —
+rezervační systém webhookem, nebo prostředník n8n/Make/Zapier. Stejný
+vzor jako „Jiná pokladna“ u pokladen.
+
+| Kousek | Kde |
+|---|---|
+| Adresa `POST /api/rezervace/prijem`, klíč `ftrez_<id připojení>_<náhoda>` v hlavičce | `app/api/rezervace/prijem/route.ts` |
+| Klíč jen zašifrovaný (`integrace_tajemstvi`), ukázaný jednou, porovnání v konstantním čase; vydává a vyměňuje `integrace.manage` | Rezervace → Napojení a import, `vydatKlicPrijmuRezervaci` |
+| Kontrola zprávy (pole i jedna rezervace, čas s pásmem nebo datum + hodina na pobočce, neznámý stav = předběžná se zachovaným slovem) | `lib/rezervace-prijem-api.ts` |
+| Zápis: `public.rezervace_prijmout` (jen `service_role`) → stejná pravidla jako import; **„připojeno“ až po úspěšně zapsané dávce, v téže transakci** | `20261028100000_rezervace_prijem.sql` |
+| Popis pro integrátora | `docs/rezervace-api.md` |
+
+Jméno systému ve zprávě (`"system": "choice"`) se ukládá jako
+`rezervace.poskytovatel`, takže se tytéž rezervace spárují i s CSV exportem
+Choice načteným pod stejným jménem.
+
+### 4.2 Dokumenty už při založení
+
+Formulář nové rezervace nebo akce má „Přidat dokument“ (fotky, PDF).
+Soubory jdou z prohlížeče rovnou do úložiště pod zvolenou pobočku, akce
+pak rezervaci založí a připojí je (`rezervace_pripojit_prilohu` u každého
+ověří úložiště, typ a velikost). Když se některý nepřipojí, rezervace
+zůstane a obrazovka to řekne.
+
 ---
 
 ## 5. Obrazovky
@@ -245,8 +275,9 @@ vedoucí směny čtení.
 
 ## 9. Další kroky (návrh)
 
-1. Šéfík řekne, který rezervační systém Perla a Bernard používají
-   (otázka 78) → první adaptér (pravděpodobně Dotykačka).
+1. ~~Který rezervační systém~~ — Choice (Perla), napojení přes příjmové API
+   (oddíl 4.1). Zbývá vědět, co používá Bernard.
 2. Přidat práva rezervací lidem v Nastavení → Zařazení.
-3. Karta rezervací na obrazovce Dnes.
-4. Po prvním adaptéru: příjem webhooku a pravidelná synchronizace.
+3. Vydat klíč pro Perlu a nastavit v Choice (webhook) nebo v n8n/Make
+   posílání rezervací — podle `docs/rezervace-api.md`.
+4. Karta rezervací na obrazovce Dnes.
