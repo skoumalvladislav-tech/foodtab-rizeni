@@ -339,10 +339,8 @@ console.log('\n== 9. Univerzální příjmové API ==\n')
     overeniKlice !== -1 && overeniKlice < adresa.indexOf("rpc('rezervace_prijmout'") && overeniKlice < adresa.indexOf('posledni_chyba:'))
   ok('adresa bere jen připojení příjmového API (oblast rezervace, obecne, nepojené)',
     /\.eq\('oblast', 'rezervace'\)\s*\.eq\('poskytovatel', POSKYTOVATEL_PRIJMU\)\s*\.is\('odpojeno_kdy', null\)/.test(adresa))
-  const migrace = cti('supabase/migrations/20261028100000_rezervace_prijem.sql')
-  const zapis = migrace.indexOf('app.rezervace_zapsat_radky(v_c.tenant_id')
-  const prepnuti = migrace.indexOf("set stav = 'pripojeno'")
-  ok('databáze přepne na „připojeno“ až PO zápisu dávky (v téže funkci)', zapis !== -1 && prepnuti !== -1 && zapis < prepnuti)
+  // Že spadlá dávka „připojeno“ nenastaví, hlídá krok104 spuštěním, ne
+  // textem (pořadí řádků uvnitř jedné transakce nic neznamená).
 
   const formular = cti('app/[rozsah]/rezervace/formular.tsx')
   ok('formulář: výběr souborů nemá name (soubor nejde přes serverovou akci, ale do úložiště)',

@@ -34,7 +34,7 @@ export const MAX_REZERVACI_V_DAVCE = 500
 export const POSKYTOVATEL_PRIJMU = 'obecne'
 
 const RE_KLIC = /^ftrez_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_([A-Za-z0-9_-]{43})$/
-const RE_PASMO = /(Z|z|[+-]\d{2}(:?\d{2})?)$/
+/** Okamžik ISO 8601 — pásmo (Z nebo ±HH:MM) je POVINNÁ část vzoru, ne volitelná. */
 const RE_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|z|[+-]\d{2}(:?\d{2})?)$/
 const RE_SYSTEM = /^[a-z0-9_-]{1,40}$/
 
@@ -64,7 +64,7 @@ function text(hodnota: unknown, max: number): string {
 function okamzik(hodnota: unknown): string | null {
   if (typeof hodnota !== 'string') return null
   const t = hodnota.trim()
-  if (!RE_ISO.test(t) || !RE_PASMO.test(t)) return null
+  if (!RE_ISO.test(t)) return null
   return Number.isNaN(new Date(t).getTime()) ? null : t
 }
 
