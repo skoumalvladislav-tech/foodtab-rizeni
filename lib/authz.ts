@@ -61,6 +61,11 @@ export const PERMISSIONS = [
   'recipes.manage',
   'menus.read',
   'menus.manage',
+  // Rezervace a kalendář akcí (25. 10. 2026, docs/rezervace-navrh.md).
+  // Jen `manage` vidí telefon a e-mail hosta — číšník potřebuje vědět,
+  // kdo přijde a kolik jich bude, ne jeho číslo.
+  'rezervace.read',
+  'rezervace.manage',
   'ai.use',
   'motivation.read',
   'motivation.manage',
