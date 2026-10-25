@@ -568,8 +568,16 @@ export function naparsovatManifest(telo: unknown, provozovna: string): ManifestP
   return 'nenalezeno'
 }
 
-/** Režimy, ve kterých odpis přes POS akci opravdu odečte sklad (entity/cloud-manifest). */
-const REZIMY_S_ODECTEM = ['documentIssue', 'orderPark']
+/**
+ * Režimy, ve kterých odpis přes POS akci opravdu odečte sklad
+ * (entity/cloud-manifest). Jen `documentIssue` (odečet při vystavení
+ * dokladu): `order/create-issue-pay` účet vystaví a zaplatí, ale nikdy
+ * nezaparkuje, takže u `orderPark` (odečet při zaparkování) by účet
+ * vypadal jako hotový odpis a sklad by mohl zůstat beze změny — a appka by
+ * hlásila „Odečteno v POS“. Přidat `orderPark` jen po ověření na
+ * testovacím cloudu (docs/jine-platby-vydej-dotykacka.md, oddíl 6).
+ */
+const REZIMY_S_ODECTEM = ['documentIssue']
 
 /**
  * Smí se do provozovny POS akce vůbec poslat? `null` = ano, jinak důvod

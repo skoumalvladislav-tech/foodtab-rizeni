@@ -373,6 +373,8 @@ console.log('\n== Položky účtu proti výdeji (25. 10.) ==')
     ['zrušený řádek se nepočítá', [{ produktId: 'p-pivo05', mnozstvi: '2', zrusena: true }, { produktId: 'p-svickova', mnozstvi: '1.5' }], /p-pivo05: výdej 2, na účtu 0/],
     ['nečitelné množství na účtu', [{ produktId: 'p-pivo05', mnozstvi: '2.5555' }, { produktId: 'p-svickova', mnozstvi: '1.5' }], /p-pivo05/],
     ['položky nejsou pole', 'rozbite', /neposlala/],
+    ['produkt NAVÍC s nečitelným množstvím (nejde říct, co odečetl)',
+      [{ produktId: 'p-pivo05', mnozstvi: '2' }, { produktId: 'p-svickova', mnozstvi: '1.5' }, { produktId: 'p-lahev', mnozstvi: '1.5555' }], /p-lahev: výdej 0, na účtu nečitelné/],
   ]
   for (const [popis, polozky, hlaska] of PRIPADY) {
     const db = novaDatabaze(vydej2)

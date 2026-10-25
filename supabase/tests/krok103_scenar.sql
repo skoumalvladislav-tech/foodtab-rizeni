@@ -10,9 +10,9 @@
 --      jak řekl adaptér); nečitelná surovina se vynechá, množství mimo tvar
 --      zůstane prázdné;
 --   3. náhled výdeje: položka, která je surovinou pokrmu ze STEJNÉHO výdeje,
---      dá konkrétní varování (i rozlévaný nápoj); známá receptura bez
---      překryvu varování nedá; neznámá receptura dá obecné varování jako
---      dřív; otisk na recepturách nezávisí; schválení s varováním chce
+--      dá konkrétní varování (i rozlévaný nápoj) NAVÍC k obecnému „pokrm
+--      i kusové zboží“, které zůstává jako dřív (opis receptury může být
+--      starý); otisk na recepturách nezávisí; schválení s varováním chce
 --      p_bez_surovin;
 --   4. provozovna požadavku při zabrání: u pokladny pobočky ji doplní
 --      z přiřazení (právě jedna), dvě nebo žádná = neodešle se, přeřazení
@@ -164,12 +164,13 @@ select public.jine_platby_ulozit_navrh(:'za', 1, jsonb_set(:'hlavicka'::jsonb, '
   jsonb_build_object('nazev', 'Smetana navíc', 'mnozstvi', '1', 'jednotka', 'l', 'cena_jednotkova_haleru', 5100, 'cena_celkem_haleru', 5100,
     'zdroj', 'rucne', 'druh', 'kusove_zbozi', 'pos_produkt_id', 'S1', 'pos_mnozstvi', '1', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false))) as verze_za \gset
 select public.jine_platby_sestavit_vydej(:'za')::text as vydej_a \gset
-select pg_temp.check('zA: smetana je surovinou svíčkové ve stejném výdeji → JEDNO konkrétní varování se jmény, obecné ne',
-  jsonb_array_length(:'vydej_a'::jsonb -> 'varovani') = 1
+select pg_temp.check('zA: smetana je surovinou svíčkové ve stejném výdeji → konkrétní varování se jmény NAVÍC k obecnému (obecné zůstává)',
+  jsonb_array_length(:'vydej_a'::jsonb -> 'varovani') = 2
   and (:'vydej_a'::jsonb -> 'varovani' ->> 0) like '„Smetana 33 %“ je surovinou „Svíčková“ ve stejném výdeji%'
+  and (:'vydej_a'::jsonb -> 'varovani' ->> 1) like 'Výdej obsahuje pokrm i kusové zboží.%'
   and jsonb_array_length(:'vydej_a'::jsonb -> 'blokace') = 0);
 
--- zB: svíčková + hranolky (známá receptura, hranolky v ní nejsou) → bez varování.
+-- zB: svíčková + hranolky (známá receptura, hranolky v ní nejsou) → jen obecné varování.
 select public.jine_platby_zalozit(:'tenant', :'perla', :'pos', 'Krok103 B', '10310000-aaaa-0000-0000-00000000000b') as zb \gset
 select public.jine_platby_ulozit_navrh(:'zb', 1, jsonb_set(:'hlavicka'::jsonb, '{castka_haleru}', '64200'), jsonb_build_array(
   jsonb_build_object('nazev', 'Svíčková', 'mnozstvi', '2', 'jednotka', 'ks', 'cena_jednotkova_haleru', 29000, 'cena_celkem_haleru', 58000,
@@ -177,8 +178,9 @@ select public.jine_platby_ulozit_navrh(:'zb', 1, jsonb_set(:'hlavicka'::jsonb, '
   jsonb_build_object('nazev', 'Hranolky', 'mnozstvi', '1', 'jednotka', 'ks', 'cena_jednotkova_haleru', 6200, 'cena_celkem_haleru', 6200,
     'zdroj', 'rucne', 'druh', 'kusove_zbozi', 'pos_produkt_id', 'H1', 'pos_mnozstvi', '1', 'mapovani', 'overeno', 'vyzaduje_kontrolu', false))) as verze_zb \gset
 select public.jine_platby_sestavit_vydej(:'zb')::text as vydej_b \gset
-select pg_temp.check('zB: pokrm i kusové zboží, ale receptura známá a zboží v ní není → žádné varování',
-  jsonb_array_length(:'vydej_b'::jsonb -> 'varovani') = 0
+select pg_temp.check('zB: pokrm i kusové zboží, receptura známá a zboží v ní není → jen obecné varování (opis receptury může být starý), konkrétní ne',
+  jsonb_array_length(:'vydej_b'::jsonb -> 'varovani') = 1
+  and (:'vydej_b'::jsonb -> 'varovani' ->> 0) like 'Výdej obsahuje pokrm i kusové zboží.%'
   and jsonb_array_length(:'vydej_b'::jsonb -> 'obsah' -> 'polozky') = 2);
 
 -- zC: polévka (receptura neznámá) + hranolky → obecné varování jako dřív.
@@ -212,9 +214,10 @@ select set_config('test.user_id', '', false);
 update public.pos_katalog set suroviny = jsonb_build_array(jsonb_build_object('produkt', 'M1', 'mnozstvi', null, 'jednotka', 'Kilogram'))
  where pripojeni_id = :'pos' and externi_id = 'P1';
 select app.jp_sestavit_vydej(:'za') ->> 'otisk' as otisk_a_bez \gset
-select pg_temp.check('otisk výdeje na recepturách nezávisí (receptura svíčkové bez smetany: stejný otisk, varování zmizí)',
+select pg_temp.check('otisk výdeje na recepturách nezávisí (receptura svíčkové bez smetany: stejný otisk, konkrétní varování zmizí, obecné zůstane)',
   :'otisk_a_bez' = :'vydej_a'::jsonb ->> 'otisk'
-  and jsonb_array_length(app.jp_sestavit_vydej(:'za') -> 'varovani') = 0);
+  and jsonb_array_length(app.jp_sestavit_vydej(:'za') -> 'varovani') = 1
+  and (app.jp_sestavit_vydej(:'za') -> 'varovani' ->> 0) like 'Výdej obsahuje pokrm i kusové zboží.%');
 update public.pos_katalog set suroviny = jsonb_build_array(jsonb_build_object('produkt', 'S1', 'mnozstvi', '0.1', 'jednotka', 'Liter')), ma_recepturu = true
  where pripojeni_id = :'pos' and externi_id = 'P1';
 

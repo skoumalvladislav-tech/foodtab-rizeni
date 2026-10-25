@@ -563,15 +563,17 @@ console.log('\n== Skladový výdej — manifest provozovny před POS akcí (25. 
     [manifest({ stockDeductionMode: 'disabled' }), (x) => /vypnutý odečet/.test(x.duvod), 'odečet skladu vypnutý → odmítnuto (sklad by se neodečetl)'],
     [manifest({ stockDeductionMode: 'neco' }), (x) => /nezná/.test(x.duvod), 'neznámý režim odečtu → odmítnuto'],
     [manifest({ stockDeductionMode: undefined }), (x) => /nezná/.test(x.duvod), 'režim odečtu chybí → odmítnuto (nejde ověřit)'],
+    // create-issue-pay účet nezaparkuje — u odečtu při zaparkování by „hotový odpis“ nemusel nic odečíst (kontrola 25. 10.).
+    [manifest({ stockDeductionMode: 'orderPark' }), (x) => /nezná/.test(x.duvod), 'režim orderPark (odečet při zaparkování, neověřený) → odmítnuto'],
   ]
   for (const [odpoved, podminka, popis] of pripady) {
     const s = sit([odpoved])
     const x = await odeslatVydejDotykacka(kontextDotykacky(s.fetchFn, '123', 'AT'), v, TED)
     ok(`${popis}, POS akce se NEPOŠLE`, x.stav === 'odmitnuto' && podminka(x) && /Nic se neodeslalo|nic se neodeslalo/.test(x.duvod) && s.pozadavky.length === 1 && !s.pozadavky.some((p) => p.url.includes('pos-actions')))
   }
-  const park = sit([manifest({ stockDeductionMode: 'orderPark', branchId: '456' }), { status: 200 }])
-  const xp = await odeslatVydejDotykacka(kontextDotykacky(park.fetchFn, '123', 'AT'), v, TED)
-  ok('režim orderPark (odečet při zaparkování) a branchId jako text → POS akce odejde', xp.stav === 'odeslano' && park.pozadavky.length === 2 && park.pozadavky[1].url.endsWith('/branches/456/pos-actions'))
+  const textem = sit([manifest({ stockDeductionMode: 'documentIssue', branchId: '456' }), { status: 200 }])
+  const xt = await odeslatVydejDotykacka(kontextDotykacky(textem.fetchFn, '123', 'AT'), v, TED)
+  ok('režim documentIssue a branchId jako text → POS akce odejde', xt.stav === 'odeslano' && textem.pozadavky.length === 2 && textem.pozadavky[1].url.endsWith('/branches/456/pos-actions'))
 }
 
 console.log('\n== Napojení na orchestrátor: OperacePos → VydejDotykacka (N20) ==')

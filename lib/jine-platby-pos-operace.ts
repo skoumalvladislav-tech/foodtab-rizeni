@@ -121,10 +121,14 @@ export function porovnatPolozkyVydeje(
   }
   const chceme = secist(vydej)
   const mame = secist(naUctu.filter((r) => r && r.zrusena !== true))
-  const text = (t: number | undefined) => (t === undefined || !Number.isFinite(t) ? '0' : tisicinyNaMnozstvi(t))
+  const text = (t: number | undefined) => (t === undefined ? '0' : Number.isFinite(t) ? tisicinyNaMnozstvi(t) : 'nečitelné')
   const rozdily: { produktId: string; vydej: string; naUctu: string }[] = []
   for (const [produktId, t] of chceme) {
     if (!Number.isFinite(t) || mame.get(produktId) !== t) rozdily.push({ produktId, vydej: text(t), naUctu: text(mame.get(produktId)) })
+  }
+  // Řádek navíc s nečitelným množstvím mohl odečíst cokoli — to se nedá vydávat za „navíc 0“ (kontrola 25. 10.).
+  for (const [produktId, t] of mame) {
+    if (!chceme.has(produktId) && !Number.isFinite(t)) rozdily.push({ produktId, vydej: '0', naUctu: 'nečitelné' })
   }
   if (rozdily.length > 0 || chceme.size === 0) return { stav: 'nesedi', rozdily }
   const navic = [...mame].filter(([id]) => !chceme.has(id)).map(([produktId, t]) => ({ produktId, mnozstvi: text(t) }))

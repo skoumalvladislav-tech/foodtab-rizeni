@@ -19,11 +19,14 @@
 --   2. KONKRÉTNÍ VAROVÁNÍ „SUROVINA POKRMU VE STEJNÉM VÝDEJI“
 --      (`app.jp_sestavit_vydej`). Když jsou receptury pokrmů ve výdeji
 --      známé, náhled pozná, že položka výdeje je surovinou jiné položky
---      téhož výdeje (smetana ke svíčkové), a řekne to jménem. Obecné
---      varování „pokrm i kusové zboží“ zůstává jen tam, kde receptura
---      pokrmu známá NENÍ. Schválení s varováním dál chce p_bez_surovin
---      (beze změny v jine_platby_rozhodnout_vydej). OTISK ani `zmena` se
---      nemění — varování do nich nikdy nepatřilo.
+--      téhož výdeje (smetana ke svíčkové, rum ke koktejlu), a řekne to
+--      jménem. Obecné varování „pokrm i kusové zboží“ zůstává BEZE ZMĚNY
+--      vedle něj: receptura v katalogu je jen opis z posledního načtení
+--      (v pokladně ji mezitím mohli změnit) a vnořené receptury se
+--      nerozbalují — konkrétní varování přidává, nic nenahrazuje
+--      (nezávislá kontrola 25. 10.). Schválení s varováním dál chce
+--      p_bez_surovin (beze změny v jine_platby_rozhodnout_vydej). OTISK
+--      ani `zmena` se nemění — varování do nich nikdy nepatřilo.
 --
 --   3. PROVOZOVNA POŽADAVKU (`app.jp_provozovna_vydeje`,
 --      `pos_operace_zahajit`). U pokladny připojené k POBOČCE záznam
@@ -148,9 +151,9 @@ declare
   v_podstata jsonb;
   v_otisk    text;
   v_varovani jsonb := '[]'::jsonb;
+  v_ma_pokrm boolean := false;
   v_ma_zbozi boolean := false;
   v_receptury jsonb := '[]'::jsonb;
-  v_pokrm_bez_receptury boolean := false;
 begin
   select * into v_z from public.jine_platby where id = p_zaznam;
   if not found then
@@ -201,8 +204,7 @@ begin
         -- skladu" vypnuté a suroviny odečte až podle receptury.
         null;
       else
-        if v_p.druh = 'kusove_zbozi' then v_ma_zbozi := true; end if;
-        if v_p.druh = 'pokrm' and v_p.k_suroviny is null then v_pokrm_bez_receptury := true; end if;
+        if v_p.druh = 'pokrm' then v_ma_pokrm := true; elsif v_p.druh = 'kusove_zbozi' then v_ma_zbozi := true; end if;
         if v_p.k_suroviny is not null and jsonb_array_length(v_p.k_suroviny) > 0 then
           v_receptury := v_receptury || jsonb_build_object('pos_produkt_id', v_p.pos_produkt_id,
             'nazev', coalesce(v_p.k_nazev, v_p.pos_produkt_nazev, v_p.nazev), 'suroviny', v_p.k_suroviny);
@@ -233,9 +235,9 @@ begin
             from jsonb_array_elements(v_polozky) a
             join jsonb_array_elements(v_receptury) b on b ->> 'pos_produkt_id' <> a ->> 'pos_produkt_id'
            where exists (select 1 from jsonb_array_elements(b -> 'suroviny') s where s ->> 'produkt' = a ->> 'pos_produkt_id')) x;
-  -- Recepturu pokrmu appka nezná (pokladna ji neprozradila): nepozná, jestli
-  -- kusové zboží ve výdeji není jeho surovina — obecné varování (kontrola 20. 10.).
-  if v_pokrm_bez_receptury and v_ma_zbozi then
+  -- Obecné varování jako od 20. 10., i když recepturu známe: opis receptury
+  -- v katalogu může být starý a vnořené receptury se nerozbalují.
+  if v_ma_pokrm and v_ma_zbozi then
     v_varovani := v_varovani || to_jsonb('Výdej obsahuje pokrm i kusové zboží. Zkontrolujte, že zboží není surovina toho pokrmu — suroviny pokrmu odečte pokladna podle receptury sama.'::text);
   end if;
 
