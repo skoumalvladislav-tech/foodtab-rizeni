@@ -509,5 +509,9 @@ export async function nacistKatalog(_predchozi: StavAkce, formData: FormData): P
   })
   if (error) return vysledekChyby(error, 'uložení katalogu')
   const nacteno = Number(data ?? r.produkty.length)
-  return hotovo(p, `Z pokladny načteno: ${pocet(nacteno, 'položka', 'položky', 'položek')} katalogu (produkty i suroviny). Co v pokladně už není, je označené jako smazané.`)
+  // Bez práva na receptury (403) se katalog načetl bez nich a uložené receptury se vymazaly — člověk to má vědět.
+  const bezReceptur = r.bezReceptur
+    ? ' Receptury pokrmů pokladna appce nevydala (chybí právo na jejich čtení) — upozornění na suroviny pokrmu ve výdeji budou jen obecná.'
+    : ''
+  return hotovo(p, `Z pokladny načteno: ${pocet(nacteno, 'položka', 'položky', 'položek')} katalogu (produkty i suroviny). Co v pokladně už není, je označené jako smazané.${bezReceptur}`)
 }

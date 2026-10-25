@@ -37,7 +37,7 @@
 - `scripts/jine-platby-ai-parovani.test.mjs` (nový): **58 kontrol** — jádro
   přiřazení, serverová akce s podvrženou databází i AI, vykreslený panel
   Sklad.
-- `scripts/jine-platby-pos-operace.test.mjs`: **99** (bylo 73).
+- `scripts/jine-platby-pos-operace.test.mjs`: **100** (bylo 73).
 - `scripts/jine-platby-detail.test.mjs`: **663** (po převzetí main).
 - `scripts/pokladna-dotykacka-sklad.test.mjs`: prošel celý (receptury,
   manifest, povolené provozovny, zapnutý zápis jen v testu).
@@ -50,8 +50,27 @@
   nesouvisí.
 - PGlite **neověří RLS ani sloupcové granty** (běží jako superuživatel).
   Rozhoduje workflow Databáze proti PostgreSQL na PR.
-- **Schválná rozbití:** 17 v TypeScriptu a 3 podmínky tlačítka — každé
-  spadlo na své kontrole. SQL rozbití: viz níž.
+- **Schválná rozbití:** 17 v TypeScriptu, 3 podmínky tlačítka a 16 v SQL
+  (filtry firmy, odpojení a pobočky pokladny, „právě jedna provozovna“,
+  změna provozovny, odvození receptury, obě varování, otisk, oba stropy,
+  zamčený výdej…). Každé spadlo na své kontrole. Varování jsem rozbil třemi
+  způsoby, protože jedno z nich chytila dřívější kontrola zA, která hlídá
+  i obecné varování. Kontrolu „záznam jiné pobočky u pokladny pobočky“ jsem
+  musel nejdřív opravit — v první podobě by prošla i bez filtru.
+
+## Nezávislá kontrola (25. 10.)
+
+Jeden kontrolor nad celým diffem: **0 kritických, 0 vysokých**, cestu
+k zápisu ani k dvojímu odečtu nenašel. 2 střední a 3 nízké nálezy, všechny
+platné:
+
+| Nález | Co jsem udělal |
+|---|---|
+| Režim odečtu `orderPark` by prošel, ale POS akce účet nezaparkuje → „Odečteno v POS“ bez odečtu | opraveno: jen `documentIssue` |
+| Konkrétní varování nahrazovalo obecné „pokrm i kusové zboží“ — při starém opisu receptury by se surovina odečetla dvakrát bez potvrzení | opraveno: obecné zůstává vždy, konkrétní přibývá |
+| Řádek účtu navíc s nečitelným množstvím se hlásil jako „navíc 0“ | opraveno: nejasný výsledek |
+| Načtení katalogu bez receptur (403) bylo tiché | opraveno: hláška to řekne |
+| Obrazovka bere schopnost zápisu z adaptéru, ne z provozovny | dnes se neprojeví (seznam je prázdný); zapsáno jako povinná součást zapnutí (`lib/pokladna-dotykacka-zapis.ts`, návrh oddíl 6) |
 
 ## Co čeká na Šéfíka
 

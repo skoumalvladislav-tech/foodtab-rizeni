@@ -21,6 +21,15 @@
  * Dokud to neplatí, zůstává výdej ruční (Odpis v Dotykačce + „Ručně
  * doloženo") a appka do skladu Dotykačky nezapisuje nic.
  *
+ * CO UPRAVIT SPOLU S PRVNÍM ŘÁDKEM (nezávislá kontrola 25. 10.):
+ * obrazovka (`[zaznam]/nacteni.ts` → `sekce-sklad.tsx`, text potvrzení
+ * a plán operace) bere schopnost výdeje z ADAPTÉRU (`schopnosti.skladovyVydej`,
+ * s řádkem v seznamu 'api' pro všechna připojení Dotykačky), kdežto
+ * akce (`schopnostVydeje`) ji správně zúží na povolenou provozovnu.
+ * U neuvedené provozovny by panel sliboval „appka ho hned odešle“, a výdej
+ * by přitom skončil jako ruční. Před zapnutím ať obrazovka bere schopnost
+ * stejně jako akce (podle provozovny záznamu).
+ *
  * Kdo seznam naplní, musí vědomě změnit i kontrolu v
  * `scripts/pokladna-dotykacka-sklad.test.mjs` („seznam povolených
  * provozoven je prázdný“).

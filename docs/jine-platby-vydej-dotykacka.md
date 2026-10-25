@@ -56,8 +56,11 @@ Zdroj: https://docs.api.dotypos.com/ — u každého řádku je stránka.
   `features`, které obsahují `posAction` jen s licencí premium a vyšší,
   a `stockDeductionMode` (`disabled` / `orderPark` / `documentIssue`, výchozí
   `documentIssue`). Při `disabled` by účet vznikl, ale **sklad by se
-  neodečetl** — appka proto manifest přečte před odesláním a v takovém
-  případě nic neodešle (implementováno, viz oddíl 5).
+  neodečetl**. Appka proto manifest přečte před odesláním a pustí jen
+  `documentIssue` (odečet při vystavení dokladu). `orderPark` (odečet při
+  zaparkování) zatím ne: `order/create-issue-pay` účet nezaparkuje, takže
+  by vznikl „hotový odpis“ bez odečtu. Ověří se na testovacím cloudu
+  (oddíl 6, krok 9).
 - **Výsledek:** bez vlastního webhooku přijde v těle odpovědi (výchozí
   webhook). Když pokladna nezpracuje požadavek do 21 s, vrátí se **404**,
   ale pokladna ho může provést později, dokud platí `validity`. Úvodní
@@ -216,8 +219,11 @@ aplikace nemá právo (403), načte katalog znovu bez receptur
   výdeje (zboží i rozlévaný nápoj) je **surovinou jiné položky téhož výdeje**
   (smetana ke svíčkové, rum ke koktejlu), a varování to řekne jménem.
   Schválení pak dál chce výslovné potvrzení `p_bez_surovin`. Obecné
-  varování „pokrm i kusové zboží“ zůstává jen u pokrmu, jehož recepturu
-  appka nezná. Otisk výdeje se nemění (receptury do něj nepatří).
+  varování „pokrm i kusové zboží“ zůstává **vždy** jako dřív. Receptura
+  v katalogu je jen opis z posledního načtení (v pokladně ji mohli změnit)
+  a vnořené receptury appka nerozbaluje, takže konkrétní varování přidává
+  a nic nenahrazuje (nezávislá kontrola 25. 10.). Otisk výdeje se nemění,
+  receptury do něj nepatří.
 
 ### 3.5 Převod množství (beze změny, `prevestNaJednotkyPos`)
 
@@ -292,9 +298,19 @@ Na **testovacím cloudu** (ne na Perle ani Bernardovi), po jedné provozovně:
 7. Stejný klíč podruhé: vznikne druhý účet? Appka ho nikdy neposílá znovu
    naslepo, ale je dobré to vědět.
 8. Jestli `packagingMeasurement` / `unitMeasurement` nesou objem kusu (oddíl 1.4).
+9. Jestli se v režimu `orderPark` (odečet při zaparkování) odpis přes
+   `order/create-issue-pay` vůbec odečte. Do té doby appka do takové
+   provozovny nic neposílá (přijímá jen `documentIssue`).
+10. Jestli Dotykačka umí vnořené receptury (polotovar s vlastní recepturou).
+    Appka je nerozbaluje. Proto obecné varování „pokrm i kusové zboží“ zůstává
+    vždy a konkrétní varování jménem jen přibývá.
 
 Pak **Šéfík výslovně napíše**, pro kterou provozovnu zápis zapnout, a do
 `ZAPIS_VYDEJE_DOTYKACKA` se přidá jeden řádek s tím pokynem (otázka 54).
+**Ve stejné změně** musí obrazovka brát schopnost zápisu podle provozovny
+záznamu, ne podle adaptéru. Jinak by u neuvedené provozovny panel sliboval
+„appka ho hned odešle“ a výdej by skončil jako ruční (nezávislá kontrola
+25. 10., poznámka v `lib/pokladna-dotykacka-zapis.ts`).
 
 ## 7. Co se schválně nedělá
 
