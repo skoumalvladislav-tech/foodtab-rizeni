@@ -213,9 +213,11 @@ export default function FormularRezervace({
         <textarea className="ds-input ds-rez-text" name="menu" defaultValue={hodnoty.menu} maxLength={4000} />
       </label>
 
-      <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
-        Poznámky (alergie, dort, kontakt na DJ…) a dokumenty se přidávají v detailu po uložení.
-      </p>
+      {id ? null : (
+        <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--muted)' }}>
+          Poznámky (alergie, dort, kontakt na DJ…) a dokumenty se přidávají v detailu po uložení.
+        </p>
+      )}
 
       <div className="ds-rez-tlacitka">
         <button type="submit" className="ft-tl ft-tl-hlavni" disabled={ceka}>

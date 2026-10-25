@@ -316,7 +316,11 @@ export function DetailObsah({
               <section className="ds-plocha">
                 <details>
                   <summary style={{ cursor: 'pointer', listStyle: 'none' }}>
-                    <PanelHlava ikona="tuzka" nadpis="Upravit údaje" />
+                    <div className="ds-plocha-hlava" style={{ marginBottom: 0 }}>
+                      <Ikona klic="tuzka" />
+                      <h2>Upravit údaje</h2>
+                      <span className="ds-plocha-odkaz ds-rez-otevrit">Otevřít formulář →</span>
+                    </div>
                   </summary>
                   <FormularRezervace
                     rozsah={rozsah}

@@ -156,7 +156,8 @@ export function NastrojePohledu({
           ›
         </Link>
       </div>
-      <h2 className="ds-rez-obdobi">{nazevPohledu(pohled, datum)}</h2>
+      {/* U dne nese datum už nadpis stránky — druhý by byl jen opakování. */}
+      {pohled === 'den' ? null : <h2 className="ds-rez-obdobi">{nazevPohledu(pohled, datum)}</h2>}
       {smiZapisovat ? (
         <div className="ds-rez-vpravo">
           <Link href={`/${rozsah}/rezervace/nova?datum=${datum}`} className="ft-tl ft-tl-hlavni">
@@ -300,7 +301,7 @@ export function MesicKalendar({ rozsah, tydny, dnes }: { rozsah: string; tydny: 
             >
               <span className="ds-rez-bunka-cislo ds-cislo">{den}.</span>
               <span className="ds-rez-bunka-den-nazev">{denKratce(d.den)}</span>
-              {s.rezervaci + s.akci > 0 ? <span className="ds-rez-bunka-souhrn">{s.rezervaci + s.akci} · {hosteText(s)}</span> : null}
+              {s.rezervaci + s.akci > 0 ? <span className="ds-rez-bunka-souhrn">{s.rezervaci ? `${s.rezervaci} rez. · ` : ''}{hosteText(s)}</span> : null}
               {akce.slice(0, 2).map((r) => (
                 <span key={r.id} className="ds-rez-bunka-akce" title={titulek(r)}>
                   {titulek(r)}

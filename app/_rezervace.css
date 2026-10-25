@@ -43,6 +43,7 @@
 .ds-rez-den-cislo { font-size: 24px; line-height: 1; }
 .ds-rez-den-souhrn { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
 .ds-rez-den-znacky { display: flex; gap: 6px; color: var(--muted); font-size: 12px; align-items: center; }
+.ds-rez-den-znacky span { display: inline-flex; align-items: center; gap: 3px; }
 .ds-rez-den-znacky .ft-i { width: 14px; height: 14px; }
 .ds-rez-den-pridat { margin-top: auto; font-size: 12.5px; color: var(--muted); text-decoration: none; }
 .ds-rez-den-pridat:hover, .ds-rez-den-pridat:focus-visible { color: var(--ink); text-decoration: underline; }
@@ -54,7 +55,11 @@
 }
 .ds-rez-polozka:hover { border-color: var(--line-2); box-shadow: var(--shadow-sm); }
 .ds-rez-polozka:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
-.ds-rez-polozka strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Jméno na dva řádky, pak tři tečky — v sedmi sloupcích by na jeden nebylo poznat, kdo to je. */
+.ds-rez-polozka strong {
+  font-weight: 600; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
 .ds-rez-polozka small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ds-rez-polozka[data-druh="akce"] {
   border-color: color-mix(in srgb, var(--vino) 45%, var(--line));
@@ -145,6 +150,7 @@
 .ds-rez-poznamka p { margin: 2px 0 0; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ds-rez-poznamka-pata { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; font-size: 12px; color: var(--muted); }
 .ds-rez-poznamka-pata form { display: inline; }
+.ds-rez-poznamka-pata .ft-tl { min-height: 28px; padding: 0 10px; font-size: 12px; }
 .ds-rez-poznamka details > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 .ds-rez-poznamka details[open] > summary { margin-bottom: 8px; }
 
@@ -167,6 +173,8 @@
   .ds-rez-udaje { grid-template-columns: 1fr; gap: 2px; }
   .ds-rez-udaje dd { margin-bottom: 8px; }
 }
+
+details[open] .ds-rez-otevrit { display: none; }
 
 .ds-rez-hlaska { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; background: var(--dobre-bg); color: var(--dobre); }
 .ds-rez-zdroj { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; background: var(--info-bg); color: var(--ink); }
