@@ -14,7 +14,8 @@
  * Čistý modul (žádné IO) — testuje ho scripts/rezervace.test.mjs.
  */
 
-export type PristupKApi = 'verejne' | 'partnerske' | 'zadne'
+/** `neovereno` = v dokumentaci jsme ho nenašli, ale nevíme jistě, že není. */
+export type PristupKApi = 'verejne' | 'partnerske' | 'neovereno' | 'zadne'
 
 export type PopisSystemu = {
   /** Totéž jako `integrace_pripojeni.poskytovatel` i `rezervace.poskytovatel`. */
@@ -38,6 +39,17 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     webhooky: true,
     exportSouboru: false,
     popis: 'Rezervace stolů v Dotykačce má veřejné API i webhooky. Pokladna už je napojená, takže je to nejbližší první adaptér — čeká na ověření, že stávající přístup rezervace smí číst.',
+  },
+  {
+    // Šéfík 25. 10. 2026: „mám Choice“. Veřejné API pro rezervace jsme
+    // v dokumentaci nenašli, proto se napojuje přes univerzální příjmové
+    // API Foodtabu (Choice nebo n8n/Make posílá rezervace sem) nebo CSV.
+    klic: 'choice',
+    nazev: 'Choice',
+    api: 'neovereno',
+    webhooky: null,
+    exportSouboru: false,
+    popis: 'Veřejné API pro rezervace jsme nenašli. Napojí se přes univerzální příjmové API Foodtabu — Choice nebo prostředník (n8n, Make, Zapier) posílá rezervace na adresu Foodtabu s klíčem.',
   },
   {
     klic: 'thefork',

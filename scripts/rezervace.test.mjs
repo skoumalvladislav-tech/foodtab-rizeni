@@ -49,6 +49,7 @@ import {
 } from '../lib/rezervace-kalendar.ts'
 import { SYSTEMY, popisStavuPripojeni, poskytovatelSouboru } from '../lib/rezervace-poskytovatele.ts'
 import { MAX_PRILOH_REZERVACE, cestaPrilohy, zkontrolovatVyber } from '../lib/rezervace-prilohy.ts'
+import { MAX_REZERVACI_V_DAVCE, overitDavkuRezervaci, rozebratKlicRezervaci, slozitKlicRezervaci } from '../lib/rezervace-prijem-api.ts'
 
 const KOREN = path.join(import.meta.dirname, '..')
 const cti = (p) => fs.readFileSync(path.join(KOREN, p), 'utf8')
@@ -224,13 +225,18 @@ console.log('\n== 6. Napojení: „připojeno“ jen po ověření ==\n')
   // Strukturální pojistka: kód modulu stav `pripojeno` nikde nenastavuje.
   // Smí ho nastavit jen budoucí adaptér po ověření — a databáze ho bez
   // posledni_test_ok = true nepustí (integrace_pripojeni_rezervace_overeno).
+  // U příjmového API ho nastavuje databáze (`rezervace_prijmout`) až po
+  // úspěšně zapsané dávce — adresa /api/rezervace/prijem ne.
+  const vSlozce = (slozka) =>
+    fs.readdirSync(path.join(KOREN, slozka), { recursive: true })
+      .filter((f) => /\.(ts|tsx)$/.test(String(f)))
+      .map((f) => `${slozka}/${String(f).replace(/\\/g, '/')}`)
   const soubory = [
     ...fs.readdirSync(path.join(KOREN, 'lib')).filter((f) => f.startsWith('rezervace-')).map((f) => `lib/${f}`),
-    ...(fs.readdirSync(path.join(KOREN, 'app/[rozsah]/rezervace'), { recursive: true }))
-      .filter((f) => /\.(ts|tsx)$/.test(String(f)))
-      .map((f) => `app/[rozsah]/rezervace/${String(f).replace(/\\/g, '/')}`),
+    ...vSlozce('app/[rozsah]/rezervace'),
+    ...vSlozce('app/api/rezervace'),
   ]
-  ok(`prošlo se dost souborů modulu (${soubory.length})`, soubory.length >= 12)
+  ok(`prošlo se dost souborů modulu (${soubory.length})`, soubory.length >= 15 && soubory.includes('app/api/rezervace/prijem/route.ts'))
   const natvrdo = soubory.filter((f) => /stav\s*[:=]\s*['"]pripojeno['"]/.test(cti(f)))
   ok(`nikde v modulu se stav 'pripojeno' nezapisuje natvrdo${natvrdo.length ? ' — ' + natvrdo.join(', ') : ''}`, natvrdo.length === 0)
 }
@@ -289,6 +295,62 @@ console.log('\n== 8. Přístup napřed, data potom ==\n')
   const soubor = cti('app/api/rezervace/soubor/[id]/route.ts')
   ok('soubor: právo na pobočku se ověří dřív, než vznikne podepsaný odkaz',
     soubor.indexOf("hasAccess(tenantId, 'rezervace.read'") !== -1 && soubor.indexOf("hasAccess(tenantId, 'rezervace.read'") < soubor.indexOf('createSignedUrl('))
+}
+
+console.log('\n== 9. Univerzální příjmové API ==\n')
+{
+  const ID = '11111111-2222-3333-4444-555555555555'
+  const NAHODNE = 'A'.repeat(43)
+  const klic = slozitKlicRezervaci(ID, NAHODNE)
+  ok('klíč nese id připojení a dá se rozebrat zpátky', klic.startsWith('ftrez_') && rozebratKlicRezervaci(klic)?.pripojeniId === ID)
+  ok('klíč pokladny (ftpos_) ani zkrácený klíč neprojdou',
+    rozebratKlicRezervaci(`ftpos_${ID}_${NAHODNE}`) === null && rozebratKlicRezervaci(`ftrez_${ID}_${'A'.repeat(42)}`) === null)
+
+  const zaklad = { id: 'R-1', zacatek: '2026-11-20T19:00:00+01:00', osob: 4, stav: 'confirmed', jmeno: 'Jan\u0000 Novák', stul: '12' }
+  const v = overitDavkuRezervaci({ system: 'choice', rezervace: [zaklad] })
+  ok('platná dávka: systém, číslo, okamžik s pásmem, počet', v.stav === 'ok' && v.system === 'choice'
+    && v.radky[0].externi_id === 'R-1' && v.radky[0].zacatek === '2026-11-20T19:00:00+01:00' && v.radky[0].pocet_osob === '4')
+  ok('stav ze zdroje převedený, původní slovo zůstalo, řídicí znak ze jména pryč',
+    v.stav === 'ok' && v.radky[0].stav === 'potvrzeno' && v.radky[0].stav_zdroje === 'confirmed' && v.radky[0].jmeno_hosta === 'Jan Novák')
+  ok('stůl → prostor', v.stav === 'ok' && v.radky[0].prostor === '12')
+  ok('jedna rezervace místo pole (webhook) projde', (() => { const r = overitDavkuRezervaci({ rezervace: zaklad }); return r.stav === 'ok' && r.radky.length === 1 })())
+  ok('bez „system“ = obecne', (() => { const r = overitDavkuRezervaci({ rezervace: [zaklad] }); return r.stav === 'ok' && r.system === 'obecne' })())
+  ok('neznámý stav = předběžná (nezahodí se) a slovo zůstane',
+    (() => { const r = overitDavkuRezervaci({ rezervace: [{ ...zaklad, stav: 'usazeno u baru' }] }); return r.stav === 'ok' && r.radky[0].stav === 'ceka' && r.radky[0].stav_zdroje === 'usazeno u baru' })())
+  ok('stav Foodtabu („zrusena“) projde rovnou', (() => { const r = overitDavkuRezervaci({ rezervace: [{ ...zaklad, stav: 'zrusena' }] }); return r.stav === 'ok' && r.radky[0].stav === 'zrusena' })())
+  ok('datum + od = čas na pobočce (bez okamžiku)',
+    (() => { const r = overitDavkuRezervaci({ rezervace: [{ id: 'R-2', datum: '2026-11-20', od: '7:30', do: '01:00' }] }); return r.stav === 'ok' && r.radky[0].datum === '2026-11-20' && r.radky[0].od === '07:30' && !('zacatek' in r.radky[0]) })())
+  const chybna = (popis, telo, kus) => ok(popis, (() => { const r = overitDavkuRezervaci(telo); return r.stav === 'chyba' && r.duvod.includes(kus) })())
+  chybna('začátek bez pásma se odmítne', { rezervace: [{ ...zaklad, zacatek: '2026-11-20T19:00:00' }] }, 'pásmem')
+  chybna('konec před začátkem se odmítne', { rezervace: [{ ...zaklad, konec: '2026-11-20T18:00:00+01:00' }] }, 'po začátku')
+  chybna('bez id se odmítne', { rezervace: [{ ...zaklad, id: '' }] }, '„id“')
+  chybna('totéž id dvakrát v dávce se odmítne', { rezervace: [zaklad, zaklad] }, 'dvakrát')
+  chybna('osob 0 se odmítne', { rezervace: [{ ...zaklad, osob: 0 }] }, 'osob')
+  chybna('bez času se odmítne', { rezervace: [{ id: 'R-3' }] }, 'chybí čas')
+  chybna('změněno bez pásma se odmítne', { rezervace: [{ ...zaklad, zmeneno: '2026-11-01 10:00' }] }, 'zmeneno')
+  chybna('dlouhé nebo divné jméno systému se odmítne', { system: 'Choice!', rezervace: [zaklad] }, 'system')
+  chybna('pole místo objektu se odmítne', [zaklad], 'objekt')
+  chybna('prázdné pole se odmítne', { rezervace: [] }, 'prázdné')
+  chybna(`víc než ${MAX_REZERVACI_V_DAVCE} rezervací se odmítne`, { rezervace: Array.from({ length: MAX_REZERVACI_V_DAVCE + 1 }, (_, i) => ({ ...zaklad, id: `R-${i}` })) }, 'po částech')
+
+  const adresa = cti('app/api/rezervace/prijem/route.ts')
+  const overeniKlice = adresa.indexOf('tajemstviSedi(klic, ulozenyKlic)')
+  ok('adresa: klíč se porovná dřív, než se cokoli zapíše',
+    overeniKlice !== -1 && overeniKlice < adresa.indexOf("rpc('rezervace_prijmout'") && overeniKlice < adresa.indexOf('posledni_chyba:'))
+  ok('adresa bere jen připojení příjmového API (oblast rezervace, obecne, nepojené)',
+    /\.eq\('oblast', 'rezervace'\)\s*\.eq\('poskytovatel', POSKYTOVATEL_PRIJMU\)\s*\.is\('odpojeno_kdy', null\)/.test(adresa))
+  // Že spadlá dávka „připojeno“ nenastaví, hlídá krok104 spuštěním, ne
+  // textem (pořadí řádků uvnitř jedné transakce nic neznamená).
+
+  const formular = cti('app/[rozsah]/rezervace/formular.tsx')
+  ok('formulář: výběr souborů nemá name (soubor nejde přes serverovou akci, ale do úložiště)',
+    /<input ref=\{vstupRef\} type="file"(?![^>]*\sname=)[^>]*>/.test(formular))
+  const akce = cti('app/[rozsah]/rezervace/akce.ts')
+  ok('akce: dokumenty z formuláře jen s cestou téže firmy a pobočky', /precistPrilohyFormulare\(text\(formData, 'prilohy'\), `\$\{tenantId\}\/\$\{pobocka\}\/`\)/.test(akce) && /!p\.cesta\.startsWith\(predponaCesty\)/.test(akce))
+  ok('akce: klíč vydá jen správce napojení', (() => {
+    const telo = akce.slice(akce.indexOf('export async function vydatKlicPrijmuRezervaci'))
+    return telo.indexOf("canSee(v.pristup.ctx, 'integrace.manage')") !== -1 && telo.indexOf("canSee(v.pristup.ctx, 'integrace.manage')") < telo.indexOf('randomBytes(32)')
+  })())
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

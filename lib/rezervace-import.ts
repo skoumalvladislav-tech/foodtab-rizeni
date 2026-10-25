@@ -36,7 +36,12 @@ export type RadekImportu = {
   email: string
   poznamka: string
   prostor: string
-} & ({ datum: string; od: string; do: string } | { zacatek: string; konec: string; zmeneno_kdy: string })
+} & (
+  // `zmeneno_kdy` (s pásmem) nepovinně i tady: příjmové API ho u data
+  // a hodiny na zdi může poslat, CSV ne.
+  | { datum: string; od: string; do: string; zmeneno_kdy?: string }
+  | { zacatek: string; konec: string; zmeneno_kdy: string }
+)
 
 export type ChybaRadku = { radek: number; zprava: string }
 
