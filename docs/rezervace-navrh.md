@@ -182,7 +182,7 @@ vzor jako „Jiná pokladna“ u pokladen.
 | Adresa `POST /api/rezervace/prijem`, klíč `ftrez_<id připojení>_<náhoda>` v hlavičce | `app/api/rezervace/prijem/route.ts` |
 | Klíč jen zašifrovaný (`integrace_tajemstvi`), ukázaný jednou, porovnání v konstantním čase; vydává a vyměňuje `integrace.manage` | Rezervace → Napojení a import, `vydatKlicPrijmuRezervaci` |
 | Kontrola zprávy (pole i jedna rezervace, čas s pásmem nebo datum + hodina na pobočce, neznámý stav = předběžná se zachovaným slovem) | `lib/rezervace-prijem-api.ts` |
-| Zápis: `public.rezervace_prijmout` (jen `service_role`) → stejná pravidla jako import; **„připojeno“ až po úspěšně zapsané dávce, v téže transakci** | `20261028100000_rezervace_prijem.sql` |
+| Zápis: `public.rezervace_prijmout` (jen `service_role`) → stejná pravidla jako import; **„připojeno“ až po úspěšně zapsané dávce, v téže transakci** | `20261030100000_rezervace_prijem.sql` |
 | Popis pro integrátora | `docs/rezervace-api.md` |
 
 Jméno systému ve zprávě (`"system": "choice"`) se ukládá jako

@@ -1,6 +1,6 @@
 -- Scénář pro krok 104 — Rezervace: univerzální příjmové API.
 --
--- Pokrývá migraci 20261028100000_rezervace_prijem.sql
+-- Pokrývá migraci 20261030100000_rezervace_prijem.sql
 -- (`rezervace_prijmout`, rozšířené `rezervace_napojeni`).
 --
 -- Navazuje na etapa0_scenar.sql až krok103_scenar.sql.

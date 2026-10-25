@@ -156,14 +156,14 @@ Rezervací je v databázi 0 — první zapíše ten, komu se přidá právo (ot�
 
 | Co | Commit | Čeká na db push |
 |---|---|---|
-| Migrace `20261028100000_rezervace_prijem.sql`: `rezervace_prijmout` (jen server; „připojeno“ až po úspěšné dávce, v téže transakci) a `rezervace_napojeni` s časem, počtem a poslední chybou (jen pro správce napojení) + scénář `krok104` | `4e42316` | **ano** |
+| Migrace `20261030100000_rezervace_prijem.sql`: `rezervace_prijmout` (jen server; „připojeno“ až po úspěšné dávce, v téže transakci) a `rezervace_napojeni` s časem, počtem a poslední chybou (jen pro správce napojení) + scénář `krok104` | `4e42316` | **ano** |
 | Adresa `POST /api/rezervace/prijem` s klíčem `ftrez_…`, vydání a výměna klíče v Napojení a importu, Choice v seznamu systémů, návod `docs/rezervace-api.md` | `4e42316`, `6db8d66` | potřebuje migraci |
 | Formulář nové rezervace/akce: „Přidat dokument“ (fotky, PDF) — nahrají se do úložiště a po založení se připojí | `4e42316` | ne (stávající tabulky) |
 
-**Čísla:** `krok104` 22 kontrol, `krok103` dál 131 (PGlite); `scripts/rezervace.test.mjs` 122 kontrol. Obě migrace (`20261027…` i `20261028…`) prošly i pod vlastníkem, který není superuživatel. **15 schválných rozbití** (7 databáze, 8 aplikace), všechna spadla na své kontrole — mimo jiné: spolknutá chyba zápisu by nastavila „připojeno“ bez dat; příjem přes připojení adaptéru nebo pokladny; chybu napojení by viděl každý; adresa bez porovnání klíče; čas bez pásma; soubory přes serverovou akci; cizí cesta k dokumentu; klíč vydá kdokoli; „připojeno“ nastavené adresou.
+**Čísla:** `krok104` 22 kontrol, `krok103` dál 131 (PGlite); `scripts/rezervace.test.mjs` 122 kontrol. Obě migrace (`20261027…` i nová) prošly i pod vlastníkem, který není superuživatel. **15 schválných rozbití** (7 databáze, 8 aplikace), všechna spadla na své kontrole — mimo jiné: spolknutá chyba zápisu by nastavila „připojeno“ bez dat; příjem přes připojení adaptéru nebo pokladny; chybu napojení by viděl každý; adresa bez porovnání klíče; čas bez pásma; soubory přes serverovou akci; cizí cesta k dokumentu; klíč vydá kdokoli; „připojeno“ nastavené adresou.
 
 Při plánování rozbití jsem vyhodil dvě slabá místa: dvojí kontrolu pásma (jedna by nešla shodit) a textovou kontrolu pořadí v migraci (pořadí uvnitř jedné transakce nic neznamená; že spadlá dávka nic nepřepne, hlídá `krok104` spuštěním).
 
-**Co čeká na Šéfíka:** „sluč N“ a `db push` (migrace `20261028100000`); pak vydat klíč pro Perlu a v Choice (webhook) nebo v n8n/Make nastavit posílání podle `docs/rezervace-api.md`.
+**Co čeká na Šéfíka:** „sluč N“ a `db push` (migrace `20261030100000`); pak vydat klíč pro Perlu a v Choice (webhook) nebo v n8n/Make nastavit posílání podle `docs/rezervace-api.md`.
 
-**Pozor na PR #157** (výdej ze skladu): má taky `krok103_scenar.sql` a migraci `20261025230000`, starší než nasazená — potřebuje přečíslovat a nové razítko. Relaci, která ji má, jsem dal vědět.
+**PR #157** (výdej ze skladu) se mezitím přečíslovala na `krok102` a migraci `20261029100000`. Moje původní razítko `20261028100000` tím bylo starší než otevřená PR, proto je nové `20261030100000` (obsah beze změny; `krok103` 131 a `krok104` 22 kontrol znovu prošly). Obě PR mění stejný řádek v `run.sh` a sousední řádky v `databaze.yml` — kdo se slučuje druhý, doplní do řádku i ten druhý krok.
