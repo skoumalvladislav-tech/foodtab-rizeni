@@ -69,13 +69,15 @@ export async function GET(request: NextRequest) {
 
   if (!(await hasAccess(tenantId, 'integrace.manage', branchId))) return zpet('chyba', 'pravo')
 
-  // Jednorázově: jen připojení, které na TENHLE pokus čeká.
+  // Jednorázově: jen připojení, které na TENHLE pokus čeká. Otisk pokusu
+  // zapisuje jen „Připojit podnik v Choice“ (spolu se stavem „připojuje
+  // se“) a tenhle zápis ho maže — podmínka na otisk je jediná, která
+  // tu drží, proto se nepíše „pro jistotu“ ještě podmínka na stav.
   const zadana = (radek.externi_ucet as Record<string, unknown> | null)?.domena_zadana
   const { data: spotrebovano } = await supabase
     .from('integrace_pripojeni')
     .update({ stav: 'nepripojeno', posledni_chyba: null, externi_ucet: { domena_zadana: typeof zadana === 'string' ? zadana : null } })
     .eq('id', String(radek.id))
-    .eq('stav', 'pripojuje_se')
     .eq('externi_ucet->>pokus', otiskPokusu(pokus.nonce))
     .is('odpojeno_kdy', null)
     .select('id')
