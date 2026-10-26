@@ -912,8 +912,11 @@ select pg_temp.check('odstup ověření volá jen service_role, přihlášený a
 -- public a krok31 hlídá search_path jen ve schématu app — jejich ztrátu
 -- by jinak nepoznalo nic. Všechny tři běží s právy vlastníka (do tabulek
 -- fronty nesmí nikdo jiný), takže prázdná search_path je povinná.
+-- `coalesce`: funkce BEZ `set search_path` má proconfig NULL, porovnání
+-- dá NULL a bool_and NULL přeskočí — bez něj kontrola ztrátu search_path
+-- jedné funkce nepozná (schválné rozbití to ukázalo).
 select pg_temp.check('všechny tři funkce fronty běží s právy vlastníka a s prázdnou search_path',
-  (select count(*) = 3 and bool_and(p.prosecdef and p.proconfig = array['search_path=""'])
+  (select count(*) = 3 and bool_and(coalesce(p.prosecdef and p.proconfig = array['search_path=""'], false))
      from pg_proc p
     where p.oid in ('public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)'::regprocedure,
                     'public.rezervace_choice_zabrat_dotaz_ulohy(integer, integer)'::regprocedure,
