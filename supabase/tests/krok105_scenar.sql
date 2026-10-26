@@ -879,6 +879,7 @@ begin
   end if;
   drop function test105.zabrat_bez_zamku(uuid, integer, integer);
   drop function test105.overit_bez_zamku(uuid, uuid, integer, integer, integer);
+  drop function test105.ulohy_bez_zamku(integer, integer);
   drop extension dblink;
   drop schema test105;
 end $$;
