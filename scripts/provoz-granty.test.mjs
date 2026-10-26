@@ -446,6 +446,43 @@ for (const f of jenServer) {
   ok(`${f}: grant jen service_role, ne přihlášeným`, !grantPrihlasenym)
 }
 
+/* Totéž pravidlo pro VŠECHNY migrace od Choice (20261031100000) dál —
+   jmenovaný seznam by u příští migrace selhal stejně jako člověk.
+   Prověrka 25. 10.: `revoke … from public, anon` bez `authenticated` na
+   frontě dotazů Choice krok105 v čisté databázi nepozná (výchozí práva
+   Supabase tam nejsou) a na Supabase by si pak kdokoli přihlášený mohl
+   zabírat frontu celé instalace. */
+const OD_CHOICE = '20261031100000'
+const migraceOdChoice = soubory.filter((s) => s >= OD_CHOICE)
+console.log(`\n== Od ${OD_CHOICE} (${migraceOdChoice.length} migrací): funkce jen pro server bez authenticated ==\n`)
+
+const kodOdChoice = migraceOdChoice.map((s) => bezKomentaru(fs.readFileSync(path.join(SLOZKA, s), 'utf8'))).join('\n')
+const jenServerOdChoice = [...kodOdChoice.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+service_role\s*;/gi)].map((m) => normalizovat(m[1]))
+ok(`migrace od ${OD_CHOICE} mají aspoň 1 funkci jen pro server (jinak kontrola pod tím nic nehlídá)`, jenServerOdChoice.length >= 1)
+for (const f of jenServerOdChoice) {
+  const revoke = [...kodOdChoice.matchAll(/revoke\s+(?:all|execute)\s+on\s+function\s+([^;]+?)\s+from\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && ['public', 'anon', 'authenticated'].every((r) => m[2].split(',').map((x) => x.trim().toLowerCase()).includes(r)))
+  ok(`${f}: revoke od public, anon i authenticated`, revoke)
+  const grantPrihlasenym = [...kodOdChoice.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && m[2].split(',').map((x) => x.trim().toLowerCase()).some((x) => x === 'authenticated' || x === 'anon' || x === 'public'))
+  ok(`${f}: grant jen service_role, ne přihlášeným`, !grantPrihlasenym)
+}
+
+/* Tabulky ve schématu `app` od Choice dál: sahá na ně jen funkce
+   (security definer). RLS zapnuté a žádná práva nikomu — ani
+   service_role. V čisté databázi to krok105 taky nerozezná (nikdo tam
+   práva nemá, ať revoke je, nebo není). */
+console.log(`\n== Od ${OD_CHOICE}: tabulky v app jen pro funkce ==\n`)
+const tabulkyAppOdChoice = [...kodOdChoice.matchAll(/create\s+table\s+app\.(\w+)/gi)].map((m) => m[1])
+ok(`migrace od ${OD_CHOICE} zakládají aspoň 2 tabulky v app (jinak kontrola pod tím nic nehlídá)`, tabulkyAppOdChoice.length >= 2)
+for (const t of tabulkyAppOdChoice) {
+  ok(`app.${t}: enable row level security`, new RegExp(`alter\\s+table\\s+app\\.${t}\\s+enable\\s+row\\s+level\\s+security`, 'i').test(kodOdChoice))
+  const odebrano = [...kodOdChoice.matchAll(new RegExp(`revoke\\s+all\\s+on\\s+(?:table\\s+)?app\\.${t}\\s+from\\s+([^;]+);`, 'gi'))]
+    .some((m) => ['public', 'anon', 'authenticated', 'service_role'].every((r) => m[1].split(',').map((x) => x.trim().toLowerCase()).includes(r)))
+  ok(`app.${t}: revoke all od public, anon, authenticated i service_role`, odebrano)
+  ok(`app.${t}: nikde žádný grant`, !new RegExp(`grant\\s+[^;]*\\s+on\\s+(?:table\\s+)?app\\.${t}\\b`, 'i').test(kodOdChoice))
+}
+
 // Supabase nedovolí vlastníkovi migrací nastavit vlastní parametr
 // (`set foodtab.x = …`) v definici funkce — db push spadne na 42501
 // „permission denied to set parameter“ (22. 10. 2026, migrace Faktur).
