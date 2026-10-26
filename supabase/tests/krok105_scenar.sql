@@ -16,13 +16,16 @@
 --      dotaz, který se nevejde, NIC nezabere, nesmysl se odmítne;
 --      firma má nejvýš jeden zabraný dotaz, který ještě neodešel —
 --      souběžné kliky jedné firmy nezaberou frontu ostatním; šest firem
---      s tlačítkem (čekat nejvýš jeden rozestup) posune frontu nejvýš
---      o dva rozestupy; chybějící řádek fronty je chyba, ne tiché NULL;
+--      s tlačítkem (čekat nejvýš dva rozestupy) posune frontu nejvýš
+--      o tři rozestupy; chybějící řádek fronty je chyba, ne tiché NULL;
 --   2b. souběh DVOU SPOJENÍ (dblink, jen PostgreSQL): druhé volání téže
 --      firmy stojí na zámku řádku firmy a dotaz nedostane — a kopie
 --      funkce bez toho zámku ho v témž souběhu dostane (kontrola umí
 --      spadnout, ukázané při každém běhu);
---   2c. odstup „Ověřit znovu" na připojení: nejvýš jednou za minutu;
+--   2c. odstup „Ověřit znovu" na připojení: nejvýš jednou za minutu
+--      (délka proti skutečné funkci: 30 s a 59 s ještě ne, 61 s ano),
+--      odstup a dotaz ve frontě naráz — v odstupu se fronty nedotkne,
+--      a když se dotaz do fronty nevejde, odstup se nespotřebuje;
 --   3. frontu i odstup volá jen service_role (přihlášený ani anonym ne) a funguje
 --      i s vlastníkem, který NENÍ superuživatel (na Supabase jím migrace
 --      nejsou) — vyzkoušené přeneseným vlastnictvím, ne úvahou. Text
@@ -169,10 +172,10 @@ insert into app.rezervace_choice_fronta (jediny) values (true);
 -- (app.create_tenant), takže pravidlo „firma nejvýš jeden zabraný
 -- dotaz" samo nestačí — šest firem by si „Ověřit znovu" (čekat až 30 s)
 -- zabralo frontu ~33 s dopředu. Tlačítkům proto server dává
--- p_nejdele_cekat_ms = jeden rozestup (lib/rezervace-choice-sync.ts,
+-- p_nejdele_cekat_ms = dva rozestupy (lib/rezervace-choice-sync.ts,
 -- NEJDELE_CEKA_TLACITKO_MS; že to server opravdu posílá, hlídá
--- scripts/rezervace-choice.test.mjs). Tady: s tímhle stropem šest firem
--- naráz posune frontu nejvýš o dva rozestupy.
+-- scripts/rezervace-choice.test.mjs — i to, proč ne jeden). Tady:
+-- s tímhle stropem šest firem naráz posune frontu nejvýš o tři rozestupy.
 insert into public.tenants (name, legal_name, currency, timezone)
 select 'Krok105 Tlačítko ' || i || ' s.r.o.', 'Krok105 Tlačítko ' || i || ' s.r.o.', 'CZK', 'Europe/Prague'
   from generate_series(1, 6) i;
@@ -181,17 +184,17 @@ update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
 delete from app.rezervace_choice_fronta_firmy where tenant_id in (:'tenant', :'cizi');
 
 set role service_role;
-select count(*) filter (where public.rezervace_choice_zabrat_dotaz(f, 5500, 5500) is not null) as tlacitka_zabrala,
+select count(*) filter (where public.rezervace_choice_zabrat_dotaz(f, 5500, 11000) is not null) as tlacitka_zabrala,
        count(*) as tlacitka_vse
   from unnest(:'tlacitka'::uuid[]) f \gset
 -- Naplánovaná úloha cizí firmy hned potom (smí čekat celý svůj díl).
 select coalesce(public.rezervace_choice_zabrat_dotaz(:'cizi', 5500, 37000), -1) as uloha_po_tlacitkach \gset
 reset role;
 
-select pg_temp.check('šest firem naráz jako tlačítko (čekat nejvýš jeden rozestup): dotaz zaberou jen dvě, ostatní hned nic',
-  :tlacitka_vse = 6 and :tlacitka_zabrala = 2);
-select pg_temp.check('úloha cizí firmy pak čeká nejvýš dva rozestupy (≤ 11 s), ať je firem kolik chce',
-  :uloha_po_tlacitkach between 9500 and 11000);
+select pg_temp.check('šest firem naráz jako tlačítko (čekat nejvýš dva rozestupy): dotaz zaberou jen tři, ostatní hned nic',
+  :tlacitka_vse = 6 and :tlacitka_zabrala = 3);
+select pg_temp.check('úloha cizí firmy pak čeká nejvýš tři rozestupy (≤ 16,5 s), ať je firem kolik chce',
+  :uloha_po_tlacitkach between 15000 and 16500);
 
 delete from public.tenants where name like 'Krok105 Tlačítko %';
 update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
@@ -371,19 +374,89 @@ delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
 
 -- Každé „Ověřit znovu" je dotaz ve společné frontě — na připojení nejvýš
 -- jednou za minutu. Čas drží databáze; `posledni_test_kdy` v registru
--- si správce napojení přepíše.
-delete from app.rezervace_choice_overeni where pripojeni_id = :'choice';
-set role service_role;
-select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni1 \gset
-select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni2 \gset
-reset role;
-select pg_temp.check('první „Ověřit znovu" u připojení smí', :'overeni1'::boolean);
-select pg_temp.check('druhé hned po něm ne (nejvýš jednou za minutu na připojení)', not :'overeni2'::boolean);
+-- si správce napojení přepíše. Odstup a dotaz ve frontě rozhoduje funkce
+-- NARÁZ (nezávislé ověření 26. 10.): v odstupu se fronty nedotkne, a když
+-- se dotaz do fronty nevejde, odstup nespotřebuje.
 
+-- Jedno „Ověřit znovu" přesně jako server (lib/rezervace-choice-sync.ts:
+-- odstup minuta, rozestup 5,5 s, tlačítko čeká nejvýš 11 s). Výsledek
+-- jako text: počet ms, '-1' = ověřovalo se před chvílí, 'nic' = NULL.
+create or replace function pg_temp.overit(p_pripojeni uuid, p_tenant uuid) returns text
+language sql volatile as $$
+  select coalesce(public.rezervace_choice_zabrat_overeni(p_pripojeni, p_tenant, 60000, 5500, 11000)::text, 'nic')
+$$;
+create or replace function pg_temp.cislo(p text) returns integer
+language sql immutable as $$ select case when p ~ '^-?[0-9]+$' then p::integer end $$;
+
+delete from app.rezervace_choice_overeni where pripojeni_id = :'choice';
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
+set role service_role;
+select pg_temp.overit(:'choice', :'tenant') as overeni1 \gset
+select pg_temp.overit(:'choice', :'tenant') as overeni2 \gset
+reset role;
+select pg_temp.check(format('první „Ověřit znovu" u připojení smí: dotaz ve frontě hned (%s ms)', :'overeni1'),
+  coalesce(pg_temp.cislo(:'overeni1') between 0 and 100, false));
+select pg_temp.check('… zabral se za firmu připojení (pravidlo „firma nejvýš jeden zabraný dotaz" platí i tady)',
+  exists (select 1 from app.rezervace_choice_fronta_firmy
+           where tenant_id = :'tenant' and zabrano_do > clock_timestamp() - interval '5 seconds'));
+select pg_temp.check(format('druhé hned po něm: -1, ověřovalo se před chvílí (%s)', :'overeni2'),
+  :'overeni2' = '-1');
+select pg_temp.check('… a fronty se nedotklo (další volný čas jen za tím prvním dotazem)',
+  (select dalsi_volny between clock_timestamp() + interval '4 seconds' and clock_timestamp() + interval '5.5 seconds'
+     from app.rezervace_choice_fronta));
+
+-- Délka odstupu proti SKUTEČNÉ funkci (nezávislé ověření 26. 10.:
+-- jednotka „1 millisecond" → „1 microsecond" dřív prošla, odstup by byl
+-- 60 ms). Fronta volná a firma bez zabraného dotazu: rozhoduje jen odstup.
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
+update app.rezervace_choice_overeni set naposledy = clock_timestamp() - interval '30 seconds' where pripojeni_id = :'choice';
+set role service_role;
+select pg_temp.overit(:'choice', :'tenant') as odstup30 \gset
+reset role;
+update app.rezervace_choice_overeni set naposledy = clock_timestamp() - interval '59 seconds' where pripojeni_id = :'choice';
+set role service_role;
+select pg_temp.overit(:'choice', :'tenant') as odstup59 \gset
+reset role;
 update app.rezervace_choice_overeni set naposledy = clock_timestamp() - interval '61 seconds' where pripojeni_id = :'choice';
 set role service_role;
+select pg_temp.overit(:'choice', :'tenant') as odstup61 \gset
+reset role;
+select pg_temp.check(format('odstup trvá minutu: ověřovalo se před 30 s → pořád ne (%s)', :'odstup30'), :'odstup30' = '-1');
+select pg_temp.check(format('… před 59 s → pořád ne (%s)', :'odstup59'), :'odstup59' = '-1');
+select pg_temp.check(format('… před 61 s → už ano (%s ms)', :'odstup61'), coalesce(pg_temp.cislo(:'odstup61') between 0 and 100, false));
+
+-- Fronta plná (víc běhů naráz, volná až za 20 s; tlačítko čeká nejvýš
+-- 11 s): dotaz se nevejde → NULL, nic se nezabere a odstup se NESPOTŘEBUJE.
+-- Dřív tu minuta propadla bez jediného dotazu.
+update app.rezervace_choice_fronta set dalsi_volny = clock_timestamp() + interval '20 seconds';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
+update app.rezervace_choice_overeni set naposledy = clock_timestamp() - interval '61 seconds' where pripojeni_id = :'choice';
+select naposledy::text as naposledy_pred from app.rezervace_choice_overeni where pripojeni_id = :'choice' \gset
+select dalsi_volny::text as fronta_pred from app.rezervace_choice_fronta \gset
+set role service_role;
+select pg_temp.overit(:'choice', :'tenant') as plna \gset
+reset role;
+select pg_temp.check(format('fronta plná: NULL, dotaz se nezabral (%s)', :'plna'),
+  :'plna' = 'nic'
+  and (select dalsi_volny = :'fronta_pred'::timestamptz from app.rezervace_choice_fronta)
+  and (select zabrano_do = '-infinity' from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant'));
+select pg_temp.check('… a odstup se NESPOTŘEBOVAL (čas posledního ověření beze změny)',
+  (select naposledy = :'naposledy_pred'::timestamptz from app.rezervace_choice_overeni where pripojeni_id = :'choice'));
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+set role service_role;
+select pg_temp.overit(:'choice', :'tenant') as po_uvolneni \gset
+reset role;
+select pg_temp.check(format('fronta se uvolnila → ověření projde hned, bez čekání na minutu (%s ms)', :'po_uvolneni'),
+  coalesce(pg_temp.cislo(:'po_uvolneni') between 0 and 100, false));
+
+update app.rezervace_choice_overeni set naposledy = clock_timestamp() - interval '61 seconds' where pripojeni_id = :'choice';
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
+set role service_role;
 -- Funkce je volatile, v agregaci se zavolá pro každý řádek zvlášť.
-select count(*) filter (where public.rezervace_choice_zabrat_overeni(:'choice', 60000)) as overeni_smi,
+select count(*) filter (where pg_temp.cislo(pg_temp.overit(:'choice', :'tenant')) >= 0) as overeni_smi,
        count(*) as overeni_vse
   from generate_series(1, 5) \gset
 reset role;
@@ -395,13 +468,23 @@ select pg_temp.check('čas ověření zapsala funkce (teď)',
 
 set role service_role;
 select pg_temp.check('ověření bez připojení se odmítne',
-  pg_temp.spadne_hlaskou('select public.rezervace_choice_zabrat_overeni(null, 60000)', '22023', 'musí patřit připojení'));
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(null, %L, 60000, 5500, 11000)', :'tenant'), '22023', 'musí patřit připojení'));
+select pg_temp.check('… bez firmy taky (dotaz ve frontě patří firmě)',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, null, 60000, 5500, 11000)', :'choice'), '22023', 'musí patřit firmě'));
 select pg_temp.check('odstup pod 30 s nebo nad hodinu se odmítne',
-  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 29999)', :'choice'), '22023', '30 sekund až 1 hodina')
-  and pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 3600001)', :'choice'), '22023', '30 sekund až 1 hodina'));
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, %L, 29999, 5500, 11000)', :'choice', :'tenant'), '22023', '30 sekund až 1 hodina')
+  and pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, %L, 3600001, 5500, 11000)', :'choice', :'tenant'), '22023', '30 sekund až 1 hodina'));
 select pg_temp.check('neexistující připojení se odmítne (cizí klíč)',
-  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 60000)', gen_random_uuid()), '23503', 'rezervace_choice_overeni'));
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, %L, 60000, 5500, 11000)', gen_random_uuid(), :'tenant'), '23503', 'rezervace_choice_overeni'));
 reset role;
+-- Rozestup a čekání ověřuje fronta — dojde se k ní, jen když odstup pustí.
+update app.rezervace_choice_overeni set naposledy = '-infinity' where pripojeni_id = :'choice';
+set role service_role;
+select pg_temp.check('rozestup pod 5 s se odmítne i tady (ověří ho fronta)',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, %L, 60000, 4999, 11000)', :'choice', :'tenant'), '22023', '5 až 60 sekund'));
+reset role;
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
 
 
 \echo ''
@@ -416,15 +499,15 @@ select pg_temp.check('frontu volá jen service_role, přihlášený ani anonym n
   and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)', 'execute'));
 
 select pg_temp.check('odstup ověření volá jen service_role, přihlášený ani anonym ne',
-  has_function_privilege('service_role', 'public.rezervace_choice_zabrat_overeni(uuid, integer)', 'execute')
-  and not has_function_privilege('authenticated', 'public.rezervace_choice_zabrat_overeni(uuid, integer)', 'execute')
-  and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_overeni(uuid, integer)', 'execute'));
+  has_function_privilege('service_role', 'public.rezervace_choice_zabrat_overeni(uuid, uuid, integer, integer, integer)', 'execute')
+  and not has_function_privilege('authenticated', 'public.rezervace_choice_zabrat_overeni(uuid, uuid, integer, integer, integer)', 'execute')
+  and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_overeni(uuid, uuid, integer, integer, integer)', 'execute'));
 
 set role authenticated;
 select pg_temp.check('přihlášený frontu nezavolá (42501)',
   pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_dotaz(%L, 5500, 60000)', :'tenant'), '42501', 'permission denied'));
 select pg_temp.check('… ani odstup ověření (42501) — jinak by si ho mohl sám vynulovat',
-  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 60000)', :'choice'), '42501', 'permission denied'));
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, %L, 60000, 5500, 11000)', :'choice', :'tenant'), '42501', 'permission denied'));
 reset role;
 
 select pg_temp.check('do tabulek fronty nesahá nikdo kromě funkce (ani service_role)',
@@ -454,7 +537,7 @@ alter table app.rezervace_choice_fronta owner to vlastnik105;
 alter table app.rezervace_choice_fronta_firmy owner to vlastnik105;
 alter table app.rezervace_choice_overeni owner to vlastnik105;
 alter function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) owner to vlastnik105;
-alter function public.rezervace_choice_zabrat_overeni(uuid, integer) owner to vlastnik105;
+alter function public.rezervace_choice_zabrat_overeni(uuid, uuid, integer, integer, integer) owner to vlastnik105;
 select pg_temp.check('zkušební vlastník není superuživatel',
   not (select rolsuper from pg_roles where rolname = 'vlastnik105'));
 
@@ -465,23 +548,28 @@ set role service_role;
 select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat_v1 \gset
 select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat_v2 \gset
 select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000)::text, 'nic') as cekat_v3 \gset
-select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni_v1 \gset
-select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni_v2 \gset
+reset role;
+-- „Ověřit znovu" zabírá dotaz frontou (vlastník je tentýž) — fronta volná.
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
+set role service_role;
+select pg_temp.overit(:'choice', :'tenant') as overeni_v1 \gset
+select pg_temp.overit(:'choice', :'tenant') as overeni_v2 \gset
 reset role;
 select pg_temp.check('s vlastníkem bez superuživatele fronta funguje stejně (i pravidlo jednoho zabraného dotazu)',
   :cekat_v1 between 0 and 100 and :cekat_v2 between 4500 and 5500 and :'cekat_v3' = 'nic');
-select pg_temp.check('… i odstup ověření (první smí, druhé hned ne)',
-  :'overeni_v1'::boolean and not :'overeni_v2'::boolean);
+select pg_temp.check(format('… i odstup ověření s frontou (první dotaz zabere: %s ms, druhé hned -1: %s)', :'overeni_v1', :'overeni_v2'),
+  coalesce(pg_temp.cislo(:'overeni_v1') between 0 and 100, false) and :'overeni_v2' = '-1');
 
 alter function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) owner to current_user;
-alter function public.rezervace_choice_zabrat_overeni(uuid, integer) owner to current_user;
+alter function public.rezervace_choice_zabrat_overeni(uuid, uuid, integer, integer, integer) owner to current_user;
 alter table app.rezervace_choice_fronta owner to current_user;
 alter table app.rezervace_choice_fronta_firmy owner to current_user;
 alter table app.rezervace_choice_overeni owner to current_user;
 select pg_temp.check('vlastník funkcí i tabulek je zase ten, kdo pouští migrace',
   (select bool_and(pg_get_userbyid(proowner) = current_user) from pg_proc
     where oid in ('public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)'::regprocedure,
-                  'public.rezervace_choice_zabrat_overeni(uuid, integer)'::regprocedure))
+                  'public.rezervace_choice_zabrat_overeni(uuid, uuid, integer, integer, integer)'::regprocedure))
   and (select bool_and(pg_get_userbyid(relowner) = current_user) from pg_class
         where oid in ('app.rezervace_choice_fronta'::regclass, 'app.rezervace_choice_fronta_firmy'::regclass,
                       'app.rezervace_choice_overeni'::regclass)));

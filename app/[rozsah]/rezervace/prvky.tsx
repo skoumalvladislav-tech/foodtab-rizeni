@@ -635,7 +635,7 @@ export function HlaskaAkce({ stav, chyba }: { stav?: string; chyba?: string }) {
     'choice-kod': 'Choice připojení nedokončil — důvod je u napojení. Připojte podnik znovu.',
     'choice-jinde': 'Tenhle podnik Choice je už připojený u jiné pobočky.',
     'choice-test': 'Choice přístup neověřil — důvod je u napojení.',
-    'choice-test-pozdeji': 'Token od Choice je uložený, ale ověřit se teď nepodařilo (Choice neodpovídá nebo omezuje dotazy). Za chvíli klikněte na „Ověřit znovu“.',
+    'choice-test-pozdeji': 'Token od Choice je uložený, ale ověřit se teď nepodařilo — Choice neodpovídá nebo omezuje dotazy, nebo Foodtab z Choice zrovna načítá a na volný dotaz by se čekalo déle (dotazy na Choice jdou jeden po druhém). Důvod je u napojení. Za chvíli klikněte na „Ověřit znovu“.',
     'choice-bez-tokenu': 'U napojení chybí token. Připojte podnik znovu.',
     'choice-neovereno': 'Choice ještě není ověřený — načítat půjde po ověření.',
     'choice-chvili': 'Z Choice se právě načítá, nebo se načítalo před chvílí (Choice pustí jen 1 dotaz za 5 sekund). Zkuste to za minutu.',

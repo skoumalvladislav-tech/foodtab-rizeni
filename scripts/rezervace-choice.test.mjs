@@ -489,8 +489,10 @@ function databaze(tabulky = {}, ted = () => Date.now()) {
     const v = radek[s]
     return k === undefined ? v : v && typeof v === 'object' ? (v[k] === undefined || v[k] === null ? null : String(v[k])) : null
   }
+  // Chybějící sloupec je v databázi NULL (`not … is null` ho nepustí).
   const sedi = (radek, filtry) => filtry.every(([op, s, v]) =>
-    op === 'eq' ? hodnota(radek, s) === v : op === 'neq' ? hodnota(radek, s) !== v : op === 'is' ? hodnota(radek, s) === v : true)
+    op === 'eq' ? hodnota(radek, s) === v : op === 'neq' ? hodnota(radek, s) !== v : op === 'is' ? hodnota(radek, s) === v
+      : op === 'not-is' ? (hodnota(radek, s) ?? null) !== v : (() => { throw new Error(`podstrčená databáze neumí filtr ${op}`) })())
   const zpracovat = (q) => {
     const t = (svet.tabulky[q.tabulka] ??= [])
     if (q.op === 'insert') {
@@ -522,6 +524,7 @@ function databaze(tabulky = {}, ted = () => Date.now()) {
       eq: (s, v) => (q.filtry.push(['eq', s, v]), b),
       neq: (s, v) => (q.filtry.push(['neq', s, v]), b),
       is: (s, v) => (q.filtry.push(['is', s, v]), b),
+      not: (s, op, v) => (q.filtry.push([`not-${op}`, s, v]), b),
       order: (s) => ((q.razeni = s), b),
       limit: (n) => ((q.limit = n), b),
       maybeSingle: () => ((q.jeden = true), b),
@@ -555,7 +558,7 @@ function pripojeni(id, x = {}) {
 }
 
 /** Svět pro synchronizaci: databáze, fronta se stejnou aritmetikou jako SQL, Choice s rezervacemi, virtuální hodiny. */
-function svetSynchronizace({ pripojeniRadky, sifry = { [ID_PRIPOJENI]: 'sifra-ok' }, choice = () => odpoved(200, []), fronta = true, zapis } = {}) {
+function svetSynchronizace({ pripojeniRadky, sifry = { [ID_PRIPOJENI]: 'sifra-ok' }, choice = () => odpoved(200, []), fronta = true, overeni = fronta ? 'ano' : 'ne', zapis } = {}) {
   const START = Date.UTC(2026, 9, 25, 18, 0, 0)
   const h = hodinyAFronta(START)
   const db = databaze({
@@ -568,14 +571,23 @@ function svetSynchronizace({ pripojeniRadky, sifry = { [ID_PRIPOJENI]: 'sifra-ok
     db.rpc.rezervace_choice_zabrat_dotaz = ({ p_tenant, p_rozestup_ms, p_nejdele_cekat_ms }) => (typeof p_tenant !== 'string' || !p_tenant
       ? { data: null, error: { code: '22023', message: 'Dotaz na Choice musí patřit firmě.' } }
       : { data: h.zabrat(p_rozestup_ms, p_nejdele_cekat_ms, p_tenant), error: null })
-    // Jako SQL: true = smí (čas se zapsal), false = před méně než odstupem.
-    db.rpc.rezervace_choice_zabrat_overeni = ({ p_pripojeni, p_odstup_ms }) => {
+  }
+  if (overeni === 'ano') {
+    // Jako SQL: odstup a dotaz ve frontě NARÁZ. -1 = v odstupu (fronty se
+    // nedotkne), null = do fronty se nevešel (odstup se nespotřeboval),
+    // jinak ms do odchodu testu.
+    db.rpc.rezervace_choice_zabrat_overeni = ({ p_pripojeni, p_tenant, p_odstup_ms, p_rozestup_ms, p_nejdele_cekat_ms }) => {
       if (typeof p_pripojeni !== 'string' || !p_pripojeni) return { data: null, error: { code: '22023', message: 'Ověření Choice musí patřit připojení.' } }
+      if (typeof p_tenant !== 'string' || !p_tenant) return { data: null, error: { code: '22023', message: 'Dotaz na Choice musí patřit firmě.' } }
       const naposledy = h.overeni.get(p_pripojeni)
-      if (naposledy !== undefined && naposledy > h.ted - p_odstup_ms) return { data: false, error: null }
+      if (naposledy !== undefined && naposledy > h.ted - p_odstup_ms) return { data: -1, error: null }
+      const cekat = h.zabrat(p_rozestup_ms, p_nejdele_cekat_ms, p_tenant)
+      if (cekat === null) return { data: null, error: null }
       h.overeni.set(p_pripojeni, h.ted)
-      return { data: true, error: null }
+      return { data: cekat, error: null }
     }
+  } else if (overeni === 'chyba') {
+    db.rpc.rezervace_choice_zabrat_overeni = () => ({ data: null, error: { code: 'XX000', message: 'odstup spadl' } })
   }
   db.rpc.rezervace_importovat_zdroj = zapis ?? (({ p_radky }) => ({ data: { nove: p_radky.length, zmenene: 0, beze_zmeny: 0, zastarale: 0 }, error: null }))
   const dotazy = []
@@ -754,7 +766,7 @@ const CIZI_FIRMA = 'eeeeeeee-0000-0000-0000-000000000009'
   const testy = await Promise.all(Array.from({ length: 8 }, () => SYNC.otestovatToken(TOKEN, FIRMA, s.START + 50_000, s.prostredi)))
   const prosly = testy.filter((t) => t.stav === 'ok').length
   const hned = testy.filter((t) => t.stav === 'chyba' && t.druh === 'cas').length
-  ok(`8 souběžných „Ověřit znovu“ jedné firmy: ${prosly} došly na Choice, ${hned} hned „klikněte za minutu“`,
+  ok(`8 souběžných „Ověřit znovu“ jedné firmy: ${prosly} došly na Choice, ${hned} hned „zkuste za chvíli“`,
     prosly === 2 && hned === 6 && s.dotazy.length === 2)
   const cekani = s.h.zabrat(ROZESTUP_DOTAZU_MS, 37_000, CIZI_FIRMA)
   ok(`úloha cizí firmy pak čeká ${cekani} ms (≤ 11 s), ne 30 s`, cekani !== null && cekani <= 11_000)
@@ -763,10 +775,13 @@ const CIZI_FIRMA = 'eeeeeeee-0000-0000-0000-000000000009'
 /* Prověrka 26. 10.: firmu si může založit kdokoli přihlášený, takže
    „firma nejvýš jeden zabraný dotaz“ samo nestačí — šest firem naráz by
    si zabralo frontu ~33 s dopředu. Tlačítko smí ve frontě čekat nejvýš
-   jeden rozestup. Souběžná čekání se ve virtuálních hodinách nesčítají
-   (`spat` čas neposune): fronta se měří v okamžiku kliků. */
+   dva rozestupy (proč ne jeden, ukazuje oddíl „vedle běžícího načítání“
+   níž). Souběžná čekání se ve virtuálních hodinách nesčítají (`spat` čas
+   neposune): fronta se měří v okamžiku kliků. */
 const firmaKliku = (i) => `f${i}ffffff-0000-0000-0000-000000000000`
 const zabraniFronty = (s) => s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace_choice_zabrat_dotaz')
+const zabraniOvereni = (s) => s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace_choice_zabrat_overeni')
+const TRI_ROZESTUPY = 3 * ROZESTUP_DOTAZU_MS
 
 {
   const s = svetSynchronizace({ choice: () => odpoved(200, []) })
@@ -775,13 +790,13 @@ const zabraniFronty = (s) => s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace
     SYNC.overitZnovu(TOKEN, firmaKliku(i), `${i}1111111-2222-3333-4444-555555555555`, s.START + 50_000, prostredi)))
   const prosly = testy.filter((t) => t !== 'brzy' && t.stav === 'ok').length
   const hned = testy.filter((t) => t !== 'brzy' && t.stav === 'chyba' && t.druh === 'cas').length
-  ok(`6 FIREM naráz „Ověřit znovu“: ${prosly} došly na Choice, ${hned} hned „klikněte za minutu“ (bez dotazu)`,
-    prosly === 2 && hned === 4 && s.dotazy.length === 2)
+  ok(`6 FIREM naráz „Ověřit znovu“: ${prosly} došly na Choice, ${hned} hned „zkuste za chvíli“ (bez dotazu)`,
+    prosly === 3 && hned === 3 && s.dotazy.length === 3)
   const cekani = s.h.zabrat(ROZESTUP_DOTAZU_MS, 37_000, CIZI_FIRMA)
-  ok(`… úloha cizí firmy pak čeká ${cekani} ms (≤ 11 s, ne ~33 s): tlačítka posunou frontu nejvýš o dva rozestupy`,
-    cekani !== null && cekani <= 11_000)
-  ok('… tlačítko chce ve frontě čekat nejvýš jeden rozestup (5,5 s)',
-    zabraniFronty(s).length === 6 && zabraniFronty(s).every((r) => r.args.p_nejdele_cekat_ms <= ROZESTUP_DOTAZU_MS))
+  ok(`… úloha cizí firmy pak čeká ${cekani} ms (≤ 16,5 s, ne ~33 s): tlačítka posunou frontu nejvýš o tři rozestupy`,
+    cekani !== null && cekani <= TRI_ROZESTUPY)
+  ok('… tlačítko chce ve frontě čekat nejvýš dva rozestupy (11 s)',
+    zabraniOvereni(s).length === 6 && zabraniOvereni(s).every((r) => r.args.p_nejdele_cekat_ms <= 2 * ROZESTUP_DOTAZU_MS))
 }
 
 {
@@ -794,9 +809,59 @@ const zabraniFronty = (s) => s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace
   const behy = await Promise.all(radky.map((r) => SYNC.synchronizovatChoice(r.id, { konecMs: s.START + 50_000, nejmeneOdMinulehoMs: 60_000, prostredi })))
   const sDotazem = behy.filter((v) => v.dotazu > 0).length
   const bezDotazu = behy.filter((v) => v.dotazu === 0 && v.pokracovani).length
-  ok(`6 FIREM naráz „Načíst teď“: ${sDotazem} se zeptaly, ${bezDotazu} hned „zkuste za minutu“`, sDotazem === 2 && bezDotazu === 4)
+  ok(`6 FIREM naráz „Načíst teď“: ${sDotazem} se zeptaly, ${bezDotazu} hned „zkuste za minutu“`, sDotazem === 3 && bezDotazu === 3)
   const cekani = s.h.zabrat(ROZESTUP_DOTAZU_MS, 37_000, CIZI_FIRMA)
-  ok(`… úloha cizí firmy pak čeká ${cekani} ms (≤ 11 s)`, cekani !== null && cekani <= 11_000)
+  ok(`… úloha cizí firmy pak čeká ${cekani} ms (≤ 16,5 s)`, cekani !== null && cekani <= TRI_ROZESTUPY)
+  ok('… „Načíst teď“ chce ve frontě čekat nejvýš dva rozestupy',
+    zabraniFronty(s).length > 0 && zabraniFronty(s).every((r) => r.args.p_nejdele_cekat_ms <= 2 * ROZESTUP_DOTAZU_MS))
+}
+
+{
+  /* Nezávislé ověření 26. 10.: se stropem JEDEN rozestup se tlačítko
+     nevešlo do fronty ani vedle JEDINÉHO běžícího načítání jiné firmy.
+     Běh (úloha) si další dotaz zabírá hned po odpovědi na předchozí, tedy
+     o rozestup dopředu — fronta je pak volná až za ~11 s minus doba
+     odpovědi. Prošlo jen 9–36 % okamžiků: callback po připojení skončil
+     „ověřit později“ (připojení zůstalo neověřené), „Ověřit znovu“ i
+     „Načíst teď“ hlásily „zkuste za chvíli“. Tady se každé tlačítko
+     pustí v KAŽDÉ fázi cyklu takového běhu (krok 100 ms přes celý
+     rozestup, různé doby odpovědi) a musí projít vždy. */
+  const ROZ = ROZESTUP_DOTAZU_MS
+  const neproslo = { 'callback (test tokenu)': [], 'Ověřit znovu': [], 'Načíst teď': [] }
+  let pokusu = 0
+  for (const odpovedMs of [250, 1_000, 2_500, 5_000]) {
+    for (let faze = 0; faze < ROZ; faze += 100) {
+      for (const druh of Object.keys(neproslo)) {
+        const s = svetSynchronizace({ choice: () => odpoved(200, []) })
+        // Běh cizí firmy: dotaz v START, odpověď a zápis za `odpovedMs`,
+        // hned další zabrání (slot START + ROZ, fronta volná až START + 2·ROZ).
+        // Fáze `faze` ms po jeho dotazu; další zabírá až v START + ROZ + odpovedMs.
+        s.h.zabrat(ROZ, 120_000, CIZI_FIRMA)
+        if (faze >= odpovedMs) {
+          s.h.ted = s.START + odpovedMs
+          s.h.zabrat(ROZ, 120_000, CIZI_FIRMA)
+        }
+        s.h.ted = s.START + faze
+        let proslo
+        if (druh === 'callback (test tokenu)') {
+          const t = await SYNC.otestovatToken(TOKEN, FIRMA, s.h.ted + 57_000, s.prostredi)
+          proslo = t.stav === 'ok'
+        } else if (druh === 'Ověřit znovu') {
+          const t = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s.h.ted + 50_000, s.prostredi)
+          proslo = t !== 'brzy' && t.stav === 'ok'
+        } else {
+          const v = await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.h.ted + 50_000, nejmeneOdMinulehoMs: 60_000, prostredi: s.prostredi })
+          proslo = v.dotazu > 0
+        }
+        pokusu++
+        if (!proslo || s.dotazy.length === 0) neproslo[druh].push(`${odpovedMs}/${faze}`)
+      }
+    }
+  }
+  for (const [druh, kde] of Object.entries(neproslo)) {
+    ok(`vedle JEDNOHO běžícího načítání jiné firmy projde ${druh} ve VŠECH fázích jeho cyklu (${pokusu / 3} okamžiků; neprošlo ${kde.length}${kde.length ? ', např. odpověď/fáze ' + kde.slice(0, 3).join(', ') + ' ms' : ''})`,
+      kde.length === 0)
+  }
 }
 
 {
@@ -818,25 +883,89 @@ const zabraniFronty = (s) => s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace
 
 {
   // „Ověřit znovu“ na připojení nejvýš jednou za minutu — odstup drží
-  // databáze (rezervace_choice_zabrat_overeni), ne registr.
+  // databáze (rezervace_choice_zabrat_overeni), ne registr; odstup
+  // a dotaz ve frontě rozhoduje JEDNÍM voláním.
   const s = svetSynchronizace({ choice: () => odpoved(200, []) })
   const t1 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s.START + 50_000, s.prostredi)
-  const frontaPo1 = zabraniFronty(s).length
+  const frontaPo1 = { dalsi: s.h.dalsi, firmy: JSON.stringify([...s.h.firmy]) }
   const t2 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s.h.ted + 50_000, s.prostredi)
   ok('„Ověřit znovu“: první test proběhne', t1 !== 'brzy' && t1.stav === 'ok' && s.dotazy.length === 1)
-  ok('… druhé hned po něm → „brzy“: fronta ani Choice se nedotkly', t2 === 'brzy' && s.dotazy.length === 1 && zabraniFronty(s).length === frontaPo1)
+  ok('… druhé hned po něm → „brzy“: fronta ani Choice se nedotkly',
+    t2 === 'brzy' && s.dotazy.length === 1 && s.h.dalsi === frontaPo1.dalsi && JSON.stringify([...s.h.firmy]) === frontaPo1.firmy)
   s.h.ted += 61_000
   const t3 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s.h.ted + 50_000, s.prostredi)
   ok('… po minutě zase proběhne', t3 !== 'brzy' && t3.stav === 'ok' && s.dotazy.length === 2)
-  const odstupy = s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace_choice_zabrat_overeni')
-  ok('odstup se zabírá v databázi za připojení, na minutu',
-    odstupy.length === 3 && odstupy.every((r) => r.args.p_pripojeni === ID_PRIPOJENI && r.args.p_odstup_ms === 60_000))
-  ok('… a PŘED frontou (zahozený klik frontu neposune)',
-    s.db.rpcVolani.findIndex((r) => r.jmeno === 'rezervace_choice_zabrat_overeni') < s.db.rpcVolani.findIndex((r) => r.jmeno === 'rezervace_choice_zabrat_dotaz'))
+  ok('odstup i dotaz jedním voláním databáze: za připojení a jeho firmu, na minutu, tlačítko čeká nejvýš 11 s',
+    zabraniOvereni(s).length === 3 && zabraniOvereni(s).every((r) => r.args.p_pripojeni === ID_PRIPOJENI && r.args.p_tenant === FIRMA
+      && r.args.p_odstup_ms === 60_000 && r.args.p_rozestup_ms === ROZESTUP_DOTAZU_MS && r.args.p_nejdele_cekat_ms <= 2 * ROZESTUP_DOTAZU_MS))
+  ok('… a fronta zvlášť se nezabírá (nic mimo odstup)', zabraniFronty(s).length === 0)
   const bez = svetSynchronizace({ fronta: false })
   const t4 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, bez.START + 50_000, bez.prostredi)
-  ok('bez funkce odstupu v databázi (před migrací) se netestuje: „čeká na migraci“, žádný dotaz',
+  ok('bez funkcí v databázi (před migrací) se netestuje: „čeká na migraci“, žádný dotaz',
     t4 !== 'brzy' && t4.stav === 'chyba' && t4.druh === 'fronta' && /20261031100000/.test(t4.duvod) && bez.dotazy.length === 0)
+}
+
+{
+  /* Nezávislé ověření 26. 10.: dosavadní kontrola „bez funkce odstupu se
+     netestuje“ brala svět BEZ fronty i bez odstupu — „při chybě odstupu
+     otestuj stejně“ (fail-open) pak prošlo, protože selhala i fronta.
+     Tady fronta JE, chybí (nebo padá) jen odstup: nesmí se zabrat nic
+     ve frontě a na Choice nesmí odejít nic. */
+  for (const [overeni, popis, hlaska] of [['ne', 'chybí (před migrací)', /20261031100000/], ['chyba', 'padá (500)', /selhala/]]) {
+    const s = svetSynchronizace({ choice: () => odpoved(200, []), overeni })
+    const t = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s.START + 50_000, s.prostredi)
+    ok(`fronta v databázi je, funkce odstupu ${popis} → chyba fronty, ŽÁDNÉ zabrání fronty ani dotaz na Choice`,
+      t !== 'brzy' && t.stav === 'chyba' && t.druh === 'fronta' && hlaska.test(t.duvod)
+      && zabraniOvereni(s).length === 1 && zabraniFronty(s).length === 0 && s.h.dalsi === -Infinity && s.dotazy.length === 0)
+  }
+}
+
+{
+  /* Nezávislé ověření 26. 10.: odstup se dřív zabíral PŘED frontou a zvlášť.
+     Když se dotaz do fronty nevešel, minuta propadla bez jediného dotazu
+     a další klik dostal „ověřovalo se před chvílí“. */
+  const s = svetSynchronizace({ choice: () => odpoved(200, []) })
+  s.h.dalsi = s.START + 30_000 // fronta zabraná na 30 s dopředu (víc běhů naráz)
+  const t1 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s.START + 50_000, s.prostredi)
+  ok('„Ověřit znovu“ při plné frontě → „zkuste za chvíli“, žádný dotaz', t1 !== 'brzy' && t1.stav === 'chyba' && t1.druh === 'cas' && s.dotazy.length === 0)
+  s.h.dalsi = -Infinity
+  s.h.ted += 2_000
+  const t2 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s.h.ted + 50_000, s.prostredi)
+  ok(`… o 2 s později s volnou frontou proběhne — odstup se nespotřeboval (${t2 === 'brzy' ? '„brzy“' : t2.stav})`,
+    t2 !== 'brzy' && t2.stav === 'ok' && s.dotazy.length === 1)
+  const pozde = svetSynchronizace({ choice: () => odpoved(200, []) })
+  const t3 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, pozde.START + 19_000, pozde.prostredi)
+  ok('… a když už dotaz odejít nesmí (méně než 20 s do konce), do databáze se vůbec nejde',
+    t3 !== 'brzy' && t3.stav === 'chyba' && t3.druh === 'cas' && zabraniOvereni(pozde).length === 0 && pozde.dotazy.length === 0)
+}
+
+{
+  /* Nezávislé ověření 26. 10.: „Načíst teď“, které se do fronty nevešlo
+     (0 dotazů), zapsalo běh — a podle něj pořadí úlohy
+     (`choiceKSynchronizaci`) připojení odsunulo na konec, jako by se
+     právě načetlo. Běh bez dotazu teď pořadí nepočítá. */
+  const DRUHE = '99999999-2222-3333-4444-555555555555'
+  const s = svetSynchronizace({
+    pripojeniRadky: [pripojeni(ID_PRIPOJENI), pripojeni(DRUHE, { tenant_id: CIZI_FIRMA, branch_id: 'bbbbbbbb-0000-0000-0000-000000000098', externi_ucet: { var_symbol: '777' } })],
+    sifry: { [ID_PRIPOJENI]: 'sifra-ok', [DRUHE]: 'sifra-ok-2' },
+  })
+  await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, prostredi: s.prostredi })
+  s.h.ted += 120_000
+  await SYNC.synchronizovatChoice(DRUHE, { konecMs: s.h.ted + 57_000, prostredi: s.prostredi })
+  ok('výchozí pořadí: dřív načtené připojení první', JSON.stringify(await SYNC.choiceKSynchronizaci()) === JSON.stringify([ID_PRIPOJENI, DRUHE]))
+  s.h.ted += 120_000
+  s.h.dalsi = s.h.ted + 60_000 // fronta plná
+  const dotazuPred = s.dotazy.length
+  const v = await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.h.ted + 50_000, nejmeneOdMinulehoMs: 60_000, prostredi: s.prostredi })
+  ok('„Načíst teď“ při plné frontě: 0 dotazů, „pokračuje“', v.dotazu === 0 && v.pokracovani && s.dotazy.length === dotazuPred)
+  const poradi = await SYNC.choiceKSynchronizaci()
+  ok(`… a připojení v pořadí úlohy NEODSUNULO — pořád první (${poradi.map((id) => (id === ID_PRIPOJENI ? 'tohle' : 'druhé')).join(', ')})`,
+    JSON.stringify(poradi) === JSON.stringify([ID_PRIPOJENI, DRUHE]))
+  const behy = s.db.tabulky.synchronizace_behy.filter((b) => b.integrace_pripojeni_id === ID_PRIPOJENI)
+  ok('… běh bez dotazu je dokončený (zámek uvolněný) s prázdným počtem nových řádků; běh s dotazy má počet',
+    behy.length === 2 && behy[1].stav === 'hotovo' && behy[1].pocet_novych_radku === null && typeof behy[0].pocet_novych_radku === 'number')
+  const hned = await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.h.ted + 50_000, nejmeneOdMinulehoMs: 60_000, prostredi: s.prostredi })
+  ok('… minutový odstup „Načíst teď“ ho počítá dál (hned znovu → přeskočeno)', hned.stav === 'preskoceno')
 }
 
 {
@@ -1006,18 +1135,18 @@ for (const [n, behu, nejdelePauza] of [[3, 6, 2], [5, 10, 3]]) {
 }
 
 {
-  // Úloha má přednost: kliky jiných firem posunuly frontu o dva rozestupy
-  // (~11 s, víc tlačítka nesmí) těsně před během. Úloha (`uloha: true`)
+  // Úloha má přednost: kliky jiných firem posunuly frontu o tři rozestupy
+  // (~16,5 s, víc tlačítka nesmí) těsně před během. Úloha (`uloha: true`)
   // na volný dotaz počká a načte celý průchod — tlačítko by v téže chvíli
   // dostalo „zkuste za chvíli“.
   const { s, behy } = await simulovatUlohu({
     pripojeniRadky: pripojeniUlohy(1), behu: 1,
-    pred: (svet) => { svet.h.dalsi = svet.h.ted + 2 * ROZESTUP_DOTAZU_MS },
+    pred: (svet) => { svet.h.dalsi = svet.h.ted + TRI_ROZESTUPY },
   })
   const druhy = Object.values(behy[0].po)[0]
-  ok(`úloha po klikách jiných firem (fronta o 11 s dál) načte blízko, nové i okno (${druhy.join(',')})`, plnyPruchod(druhy))
+  ok(`úloha po klikách jiných firem (fronta o 16,5 s dál) načte blízko, nové i okno (${druhy.join(',')})`, plnyPruchod(druhy))
   ok('… smí čekat déle než tlačítko (route předává uloha: true)',
-    zabraniFronty(s).some((r) => r.args.p_nejdele_cekat_ms > ROZESTUP_DOTAZU_MS))
+    zabraniFronty(s).some((r) => r.args.p_nejdele_cekat_ms > 2 * ROZESTUP_DOTAZU_MS))
 }
 
 {
@@ -1451,6 +1580,13 @@ console.log('\n== 10. Každý kód hlášky má text ==\n')
   ok(`našly se kódy hlášek Choice (${kody.size})`, kody.size >= 15)
   const bezTextu = [...kody].filter((k) => !hlasky.includes(`'${k}':`))
   ok(`každý kód z akcí a callbacku má v HlaskaAkce text${bezTextu.length ? ' — chybí: ' + bezTextu.join(', ') : ''}`, bezTextu.length === 0)
+  // „choice-test-pozdeji“ dostane test, který nedoběhl z KTERÉHOKOLI
+  // dočasného důvodu — i plná fronta (Foodtab zrovna načítá jinde).
+  // Nezávislé ověření 26. 10.: text uváděl jen „Choice neodpovídá nebo
+  // omezuje dotazy“, takže člověk hledal chybu u Choice.
+  const pozdeji = /'choice-test-pozdeji':\s*'([^']+)'/.exec(hlasky)?.[1] ?? ''
+  ok(`„choice-test-pozdeji“ uvádí i plnou frontu, nejen výpadek Choice: „${pozdeji.slice(0, 90)}…“`,
+    /neodpovídá/.test(pozdeji) && /omezuje/.test(pozdeji) && /Foodtab z Choice zrovna načítá/.test(pozdeji) && /Ověřit znovu/.test(pozdeji))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

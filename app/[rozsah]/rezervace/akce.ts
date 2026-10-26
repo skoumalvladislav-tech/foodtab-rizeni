@@ -640,9 +640,10 @@ export async function overitChoice(formData: FormData): Promise<void> {
   }
   if (!token) redirect(sParametrem(zpet, 'chyba', 'choice-bez-tokenu'))
 
-  // Nejvýš jednou za minutu na připojení, pak test za firmu připojení
-  // a ve frontě jako tlačítko (nejvýš jeden rozestup): souběžné kliky
-  // téže firmy ani kliky mnoha firem nezaberou frontu ostatním
+  // Nejvýš jednou za minutu na připojení a ve frontě za firmu připojení
+  // jako tlačítko (nejvýš dva rozestupy) — obojí jedním voláním
+  // databáze: souběžné kliky téže firmy ani kliky mnoha firem nezaberou
+  // frontu ostatním a klik, který se do fronty nevejde, minutu nespálí
   // (migrace 20261031100000, lib/rezervace-choice-sync.ts).
   const test = await overitZnovu(token, v.tenantId, pripojeni.id, zacatek + 50_000)
   if (test === 'brzy') redirect(sParametrem(zpet, 'chyba', 'choice-overeno-chvili'))
@@ -671,8 +672,9 @@ export async function nacistChoiceTed(formData: FormData): Promise<void> {
   if (!smi) redirect(sParametrem(zpet, 'chyba', 'pravo'))
   if (pripojeni.stav !== 'pripojeno') redirect(sParametrem(zpet, 'chyba', 'choice-neovereno'))
 
-  // Bez `uloha: true`: ve frontě se čeká jako tlačítko (nejvýš jeden
-  // rozestup), naplánovaná úloha má přednost.
+  // Bez `uloha: true`: ve frontě se čeká jako tlačítko (nejvýš dva
+  // rozestupy), naplánovaná úloha má přednost. Běh bez jediného dotazu
+  // připojení v pořadí úlohy neodsune (synchronizovatChoice).
   const vysledek = await synchronizovatChoice(pripojeni.id, { konecMs: zacatek + 50_000, nejmeneOdMinulehoMs: 60_000 })
 
   revalidatePath(`/${rozsah}/rezervace`, 'layout')

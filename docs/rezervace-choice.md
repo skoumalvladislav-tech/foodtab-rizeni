@@ -125,15 +125,21 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   service_role, rozestup 5,5 s pro celou instalaci, každá firma nejvýš
   jeden zabraný dotaz, který ještě neodešel — souběžné kliky jedné
   firmy nezaberou frontu ostatním). Tlačítka (Ověřit znovu, Načíst teď,
-  callback) čekají ve frontě nejvýš jeden rozestup
-  (`NEJDELE_CEKA_TLACITKO_MS`), takže ani mnoho firem nezdrží úlohu
-  ostatních o víc než ~11 s; celý svůj díl čeká jen naplánovaná úloha
-  (`uloha: true`). „Ověřit znovu“ nejvýš jednou za minutu na připojení
-  (`rezervace_choice_zabrat_overeni`). Scénář `krok105` (oddíl 2b zkouší
+  callback) čekají ve frontě nejvýš dva rozestupy
+  (`NEJDELE_CEKA_TLACITKO_MS`, 11 s): vedle jednoho běžícího načítání
+  jiné firmy se vejdou vždy (s jedním rozestupem skoro nikdy) a ani
+  mnoho firem nezdrží úlohu ostatních o víc než ~16,5 s; celý svůj díl
+  čeká jen naplánovaná úloha (`uloha: true`). „Ověřit znovu“ nejvýš
+  jednou za minutu na připojení — odstup a dotaz ve frontě rozhoduje
+  `rezervace_choice_zabrat_overeni` naráz, takže klik, který se do
+  fronty nevejde, minutu nespálí. Scénář `krok105` (oddíl 2b zkouší
   zámek řádku firmy dvěma spojeními přes dblink — jen proti PostgreSQL).
 - Úloha dělí čas: rezerva 20 s se odečte jednou za úlohu, zbytek po
   dílech nejméně na tři dotazy; pořadí `poradiSynchronizace` (firmy se
   střídají, podle `synchronizace_behy`, tentýž podnik u firmy jednou).
+  Běh, který se na Choice ani jednou nezeptal (fronta plná), zapíše
+  prázdný `pocet_novych_radku` a pořadí ho nepočítá — „Načíst teď“, které
+  nic nenačetlo, připojení neodsune.
 - Zápis stávající cestou `rezervace_importovat_zdroj` (poskytovatel
   `choice`, číslo = `_id`). Token zašifrovaný v `integrace_tajemstvi`,
   kurzor v `integrace_pripojeni.externi_ucet.kurzor`.
