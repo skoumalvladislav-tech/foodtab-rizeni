@@ -242,9 +242,9 @@ begin
   -- Kopie funkce fronty, které chybí jen zámek řádku firmy.
   v_def := pg_get_functiondef('public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)'::regprocedure);
   v_kopie := regexp_replace(v_def, '(where f\.tenant_id = p_tenant)\s+for update;', '\1;');
-  v_kopie := replace(v_kopie, 'FUNCTION public.rezervace_choice_zabrat_dotaz(', 'FUNCTION test105.zabrat_bez_zamku(');
+  v_kopie := replace(v_kopie, 'FUNCTION public.rezervace_choice_zabrat_dotaz', 'FUNCTION test105.zabrat_bez_zamku');
   perform pg_temp.check('kopie funkce fronty se liší jen chybějícím zámkem řádku firmy (zámek fronty zůstal)',
-    v_kopie like '%FUNCTION test105.zabrat_bez_zamku(%'
+    v_kopie like '%FUNCTION test105.zabrat_bez_zamku%'
     and (length(v_def) - length(replace(v_def, 'for update', ''))) / length('for update') = 2
     and (length(v_kopie) - length(replace(v_kopie, 'for update', ''))) / length('for update') = 1
     and v_kopie like '%from app.rezervace_choice_fronta q%where q.jediny%for update%');
@@ -259,7 +259,8 @@ create or replace function pg_temp.soubeh(p_funkce text) returns jsonb
 language plpgsql as $$
 declare
   v_firma   text := current_setting('test.tenant105');
-  v_spojeni text := format('dbname=%s user=%s port=%s', current_database(), current_user, current_setting('port'));
+  v_spojeni text := format('dbname=%s user=%s port=%s', current_database(), current_user,
+                           (select setting from pg_settings where name = 'port'));
   v_pid_a   integer;
   v_pid_b   integer;
   v_a       integer;
