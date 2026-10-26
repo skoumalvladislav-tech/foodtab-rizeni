@@ -39,8 +39,11 @@ import { klientUlohy } from './supabase/uloha.ts'
  * (`rezervace_importovat_zdroj` je jen pro service_role).
  *
  * Tlačítka (a callback) čekají ve frontě nejvýš dva rozestupy, delší
- * čekání má jen naplánovaná úloha (`NEJDELE_CEKA_TLACITKO_MS`); „Ověřit
- * znovu“ jde na připojení nejvýš jednou za minutu (`overitZnovu`).
+ * čekání má jen naplánovaná úloha (`NEJDELE_CEKA_TLACITKO_MS`); když se
+ * tlačítko nevejde, jednou počká (nejvýš jeden rozestup) a zkusí to
+ * znovu (`NEJDELE_PRED_OPAKOVANIM_MS`). Úloha jde do fronty vlastním
+ * vstupem, bez pravidla firmy (migrace 20261102100000). „Ověřit znovu“
+ * jde na připojení nejvýš jednou za minutu (`overitZnovu`).
  *
  * „PŘIPOJENO“ zapisuje v celém modulu JEDINÁ funkce, `zapsatVysledekTestu`,
  * a jen po úspěšném živém testu (`GET /bookings/list?perPage=1`). Databáze
@@ -85,6 +88,40 @@ export const REZERVA_DOTAZU_MS = 20_000
  */
 export const NEJDELE_CEKA_TLACITKO_MS = 2 * ROZESTUP_DOTAZU_MS
 
+/**
+ * Když se tlačítko do fronty nevejde, databáze řekne, za kolik ms to má
+ * smysl zkusit znovu (migrace 20261102100000: až odejde dotaz, který
+ * má firma zabraný, a až se fronta posune). Tlačítko pak JEDNOU počká
+ * — nejvýš tohle, jeden rozestup — a zkusí to znovu.
+ *
+ * Proč (nezávislé ověření po sloučení #162): vedle běžícího načítání
+ * TÉŽE firmy (první načtení pobočky 1 a callback pobočky 2) a vedle
+ * DVOU běhů jiných firem se tlačítko vešlo jen v okně mezi odchodem
+ * dotazu běhu a jeho odpovědí (4–52 % okamžiků). Chvíle, kterou vrátí
+ * databáze, padne přesně do toho okna. Běh tlačítka (první načtení,
+ * „Načíst teď“) opakuje stejně, takže se dva běhy téže firmy střídají
+ * a tlačítko běh neusekne. Opakování nic nezabírá — strop dvou
+ * rozestupů ve frontě (a tři rozestupy pro všechna tlačítka dohromady)
+ * platí dál.
+ */
+export const NEJDELE_PRED_OPAKOVANIM_MS = ROZESTUP_DOTAZU_MS
+
+/**
+ * „Načíst teď“ má na celý běh (od kliku po uložení) tolik — stránka
+ * Napojení má strop 60 s (`maxDuration`), 5 s zbývá na vykreslení po
+ * přesměrování. Poslední dotaz smí odejít `REZERVA_DOTAZU_MS` před
+ * koncem, tedy 35 s po kliku.
+ *
+ * Proč ne 50 s jako „Ověřit znovu“ (nezávislé ověření po sloučení #162):
+ * vedle běžícího načítání jdou dotazy „Načíst teď“ po dvou rozestupech
+ * (střídají se s ním). První může čekat až dva rozestupy, tři dotazy
+ * (blízko, nové, stránka okna) tak potřebují až 33 s — s posledním
+ * dotazem do 30 s skončilo v půlce okamžiků jen dvěma („načtena
+ * část“). scripts/rezervace-choice.test.mjs to zkouší v každé fázi
+ * běžícího načítání.
+ */
+export const KONEC_NACIST_TED_MS = 55_000
+
 /** Nejdelší čekání ve frontě vůbec (i pro úlohu; databáze víc nepustí). */
 const NEJDELE_CEKA_ULOHA_MS = 120_000
 
@@ -128,14 +165,21 @@ export class ChybaFronty extends Error {
 }
 
 /**
- * Zabere v databázi firmě čas na jeden dotaz a počká na něj.
+ * Zabere v databázi čas na jeden dotaz a počká na něj.
  * `posledniDotazMs` = nejpozdější okamžik, kdy smí dotaz ODEJÍT (rezervu
  * na odpověď a zápis už odečetl volající — tady se neodečítá podruhé).
- * `kdo`: tlačítko čeká nejvýš `NEJDELE_CEKA_TLACITKO_MS`, úloha až do
- * `posledniDotazMs`.
- * `false` = nevejde se, nebo firma už má zabraný jiný dotaz (souběžné
- * „Ověřit znovu“ / „Načíst teď“); nic se nezabralo. Bez fronty se
- * NEPOSÍLÁ nic — výjimka, ne „pošli to bez ní“.
+ *
+ * `kdo`:
+ *   * `'tlacitko'` — fronta za firmu (`rezervace_choice_zabrat_dotaz`,
+ *     firma nejvýš jeden zabraný dotaz), čeká nejvýš
+ *     `NEJDELE_CEKA_TLACITKO_MS`; když se nevejde, jednou počká (nejvýš
+ *     `NEJDELE_PRED_OPAKOVANIM_MS`) a zkusí to znovu,
+ *   * `'uloha'` — vlastní vstup úlohy (`rezervace_choice_zabrat_dotaz_ulohy`,
+ *     bez pravidla firmy), čeká až do `posledniDotazMs`, neopakuje.
+ *
+ * `false` = nevejde se (ani po opakování), nebo firma už má zabraný jiný
+ * dotaz; nic se nezabralo. Bez fronty se NEPOSÍLÁ nic — výjimka, ne
+ * „pošli to bez ní“.
  */
 export function cekatNaFrontu(
   sluzba: SupabaseClient,
@@ -145,18 +189,52 @@ export function cekatNaFrontu(
   p: ProstrediChoice = SKUTECNE,
 ): () => Promise<boolean> {
   return async () => {
-    const nejdele = nejdeleCekat(posledniDotazMs, kdo, p)
-    if (nejdele === null) return false
-    const { data, error } = await sluzba.rpc('rezervace_choice_zabrat_dotaz', {
+    if (kdo === 'uloha') return zabratUlohou(sluzba, tenantId, posledniDotazMs, p)
+    for (let pokus = 1; ; pokus++) {
+      const nejdele = nejdeleCekat(posledniDotazMs, 'tlacitko', p)
+      if (nejdele === null) return false
+      const { data, error } = await sluzba.rpc('rezervace_choice_zabrat_dotaz', {
+        p_tenant: tenantId,
+        p_rozestup_ms: ROZESTUP_DOTAZU_MS,
+        p_nejdele_cekat_ms: nejdele,
+      })
+      if (error) throw new ChybaFronty(funkceNeexistuje(error))
+      const z = vylozitFrontu(data)
+      if (z.stav === 'zabrano') {
+        await pockat(z.cekatMs, p)
+        return true
+      }
+      if (!zkusitZnovu(z, pokus)) return false
+      await p.spat(z.zaMs)
+    }
+  }
+}
+
+/**
+ * Úloha: vlastní vstup do společné fronty, bez pravidla firmy (úloha je
+ * v instalaci jediná, migrace 20261102100000). Databáze před tou
+ * migrací funkci nemá (PGRST202) — pak úloha čeká jako dřív, frontou
+ * za firmu, a místo „zkuste znovu“ (záporné číslo) prostě končí.
+ */
+async function zabratUlohou(sluzba: SupabaseClient, tenantId: string, posledniDotazMs: number, p: ProstrediChoice): Promise<boolean> {
+  const nejdele = nejdeleCekat(posledniDotazMs, 'uloha', p)
+  if (nejdele === null) return false
+  let odpoved = await sluzba.rpc('rezervace_choice_zabrat_dotaz_ulohy', {
+    p_rozestup_ms: ROZESTUP_DOTAZU_MS,
+    p_nejdele_cekat_ms: nejdele,
+  })
+  if (odpoved.error && funkceNeexistuje(odpoved.error)) {
+    odpoved = await sluzba.rpc('rezervace_choice_zabrat_dotaz', {
       p_tenant: tenantId,
       p_rozestup_ms: ROZESTUP_DOTAZU_MS,
       p_nejdele_cekat_ms: nejdele,
     })
-    if (error) throw new ChybaFronty(funkceNeexistuje(error))
-    if (data === null || data === undefined) return false
-    await pockat(data, p)
-    return true
   }
+  if (odpoved.error) throw new ChybaFronty(funkceNeexistuje(odpoved.error))
+  const z = vylozitFrontu(odpoved.data)
+  if (z.stav !== 'zabrano') return false
+  await pockat(z.cekatMs, p)
+  return true
 }
 
 /** Kolik ms smí volající ve frontě čekat (strop podle toho, kdo se ptá); `null` = dotaz už odejít nesmí. */
@@ -166,11 +244,33 @@ function nejdeleCekat(posledniDotazMs: number, kdo: KdoSePta, p: ProstrediChoice
   return Math.min(nejdele, kdo === 'uloha' ? NEJDELE_CEKA_ULOHA_MS : NEJDELE_CEKA_TLACITKO_MS)
 }
 
-/** Počká, za kolik ms smí dotaz podle fronty odejít. Nesmysl z databáze = chyba fronty, ne „pošli hned“. */
-async function pockat(data: unknown, p: ProstrediChoice): Promise<void> {
-  const cekat = Number(data)
-  if (!Number.isFinite(cekat) || cekat < 0) throw new ChybaFronty(false)
-  if (cekat > 0) await p.spat(cekat)
+type OdpovedFronty =
+  | { stav: 'zabrano'; cekatMs: number }
+  | { stav: 'znovu'; zaMs: number }
+  | { stav: 'nic' }
+
+/**
+ * Odpověď fronty (migrace 20261102100000, „TVAR ODPOVĚDI“): `>= 0` =
+ * zabráno, za kolik ms smí dotaz odejít; `<= -2` = nic, zkusit znovu za
+ * |n| ms; `NULL` = nic, nezkoušet (databáze před tou migrací, úloha).
+ * `-1` je u fronty nesmysl (patří jen odstupu „Ověřit znovu“, ten ho
+ * vyřídí sám) — nesmysl z databáze = chyba fronty, ne „pošli hned“.
+ */
+function vylozitFrontu(data: unknown): OdpovedFronty {
+  if (data === null || data === undefined) return { stav: 'nic' }
+  const n = typeof data === 'number' ? data : NaN
+  if (!Number.isInteger(n) || n === -1) throw new ChybaFronty(false)
+  return n >= 0 ? { stav: 'zabrano', cekatMs: n } : { stav: 'znovu', zaMs: -n }
+}
+
+/** Tlačítko zkusí frontu podruhé jen jednou a jen když čekání na to nepřesáhne jeden rozestup. */
+function zkusitZnovu(z: OdpovedFronty, pokus: number): z is { stav: 'znovu'; zaMs: number } {
+  return z.stav === 'znovu' && pokus === 1 && z.zaMs <= NEJDELE_PRED_OPAKOVANIM_MS
+}
+
+/** Počká, za kolik ms smí dotaz podle fronty odejít. */
+async function pockat(cekatMs: number, p: ProstrediChoice): Promise<void> {
+  if (cekatMs > 0) await p.spat(cekatMs)
 }
 
 /** Chyby v datech: opakování nepomůže, dávka se zkusí po jedné a vadné rezervace se ohlásí. */
@@ -247,10 +347,11 @@ async function poslatTest(token: string, p: ProstrediChoice): Promise<VysledekTe
  * ověřeného volajícím). Volá ho callback po výměně kódu, až po
  * přihlášení a právu `integrace.manage` na pobočce („Ověřit znovu“ jde
  * přes `overitZnovu`). Ve frontě čeká JAKO TLAČÍTKO (nejvýš
- * `NEJDELE_CEKA_TLACITKO_MS`) a dotaz odejde nejpozději
- * `REZERVA_DOTAZU_MS` před tvrdým koncem `konecMs`. Souběžné testy
- * jedné firmy si frontu nezaberou: firma má nejvýš jeden zabraný dotaz,
- * další dostanou „zkuste za chvíli“.
+ * `NEJDELE_CEKA_TLACITKO_MS`, jednou zkusí znovu) a dotaz odejde
+ * nejpozději `REZERVA_DOTAZU_MS` před tvrdým koncem `konecMs`. Souběžné
+ * testy jedné firmy si frontu nezaberou: firma má nejvýš jeden zabraný
+ * dotaz tlačítka, další počkají na jeho odchod, nebo dostanou „zkuste
+ * za chvíli“.
  */
 export async function otestovatToken(token: string, tenantId: string, konecMs: number, p: ProstrediChoice = SKUTECNE): Promise<VysledekTestu> {
   const sluzba = klientUlohy()
@@ -276,6 +377,10 @@ export async function otestovatToken(token: string, tenantId: string, konecMs: n
  * je v odstupu, nic nezabere; kdo se nevejde do fronty, odstup
  * nespotřebuje.
  *
+ * Když se dotaz do fronty nevejde, odstup se nespotřebuje a tlačítko
+ * jednou počká (nejvýš `NEJDELE_PRED_OPAKOVANIM_MS`) a zavolá databázi
+ * znovu — i s odstupem, takže souběžný klik mezitím vyhraje poctivě.
+ *
  * `'brzy'` = ověřovalo se před chvílí — na frontu ani na Choice se
  * nesáhlo a u napojení se nic nezapisuje. Chyba databáze = žádný dotaz
  * na Choice (ne „otestovat bez odstupu“). `pripojeniId` a `tenantId`
@@ -290,24 +395,31 @@ export async function overitZnovu(
 ): Promise<VysledekTestu | 'brzy'> {
   const sluzba = klientUlohy()
   if (!sluzba) return BEZ_KLICE
-  const nejdele = nejdeleCekat(konecMs - REZERVA_DOTAZU_MS, 'tlacitko', p)
-  if (nejdele === null) return FRONTA_PLNA
-  const { data, error } = await sluzba.rpc('rezervace_choice_zabrat_overeni', {
-    p_pripojeni: pripojeniId,
-    p_tenant: tenantId,
-    p_odstup_ms: ODSTUP_OVERENI_MS,
-    p_rozestup_ms: ROZESTUP_DOTAZU_MS,
-    p_nejdele_cekat_ms: nejdele,
-  })
-  if (error) return chybaFronty(funkceNeexistuje(error))
-  if (data === -1) return 'brzy'
-  if (data === null || data === undefined) return FRONTA_PLNA
-  try {
-    await pockat(data, p)
-  } catch {
-    return chybaFronty(false)
+  for (let pokus = 1; ; pokus++) {
+    const nejdele = nejdeleCekat(konecMs - REZERVA_DOTAZU_MS, 'tlacitko', p)
+    if (nejdele === null) return FRONTA_PLNA
+    const { data, error } = await sluzba.rpc('rezervace_choice_zabrat_overeni', {
+      p_pripojeni: pripojeniId,
+      p_tenant: tenantId,
+      p_odstup_ms: ODSTUP_OVERENI_MS,
+      p_rozestup_ms: ROZESTUP_DOTAZU_MS,
+      p_nejdele_cekat_ms: nejdele,
+    })
+    if (error) return chybaFronty(funkceNeexistuje(error))
+    if (data === -1) return 'brzy'
+    let z: OdpovedFronty
+    try {
+      z = vylozitFrontu(data)
+    } catch {
+      return chybaFronty(false)
+    }
+    if (z.stav === 'zabrano') {
+      await pockat(z.cekatMs, p)
+      return poslatTest(token, p)
+    }
+    if (!zkusitZnovu(z, pokus)) return FRONTA_PLNA
+    await p.spat(z.zaMs)
   }
-  return poslatTest(token, p)
 }
 
 /**
@@ -424,9 +536,11 @@ async function nacistToken(sluzba: SupabaseClient, pripojeniId: string): Promise
  * `konecMs - REZERVA_DOTAZU_MS`. Úloha s víc připojeními dá každému díl
  * času přes `posledniDotazMs` (rezervu odečetla jednou za celou úlohu).
  * `nejmeneOdMinulehoMs`: „Načíst teď“ nepustí nový běh hned po předchozím.
- * `uloha: true` předává JEN naplánovaná úloha — smí čekat ve frontě celý
- * svůj díl času. Bez něj (Načíst teď, první načtení po připojení) se
- * čeká jako tlačítko, nejvýš dva rozestupy (`NEJDELE_CEKA_TLACITKO_MS`).
+ * `uloha: true` předává JEN naplánovaná úloha — jde do fronty vlastním
+ * vstupem bez pravidla firmy a smí čekat celý svůj díl času. Bez něj
+ * (Načíst teď, první načtení po připojení) se čeká jako tlačítko: nejvýš
+ * dva rozestupy (`NEJDELE_CEKA_TLACITKO_MS`) a jednou znovu, takže se
+ * běh střídá s jiným během téže firmy, místo aby skončil.
  */
 export async function synchronizovatChoice(
   pripojeniId: string,

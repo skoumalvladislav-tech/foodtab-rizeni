@@ -118,7 +118,8 @@ export async function GET(request: NextRequest) {
   if (test.stav !== 'ok') return zpet('chyba', test.druh === 'pristup' || test.druh === 'data' ? 'choice-test' : 'choice-test-pozdeji')
 
   // První načtení jako tlačítko (bez `uloha: true`): ve frontě nejvýš
-  // dva rozestupy, zbytek dočte naplánovaná úloha.
+  // dva rozestupy a jednou znovu (střídá se s načítáním jiné pobočky
+  // téže firmy), zbytek dočte naplánovaná úloha.
   after(async () => {
     await synchronizovatChoice(pripojeniId, { konecMs: zacatek + 57_000 })
   })

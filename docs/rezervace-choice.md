@@ -132,8 +132,24 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   čeká jen naplánovaná úloha (`uloha: true`). „Ověřit znovu“ nejvýš
   jednou za minutu na připojení — odstup a dotaz ve frontě rozhoduje
   `rezervace_choice_zabrat_overeni` naráz, takže klik, který se do
-  fronty nevejde, minutu nespálí. Scénář `krok105` (oddíl 2b zkouší
-  zámek řádku firmy dvěma spojeními přes dblink — jen proti PostgreSQL).
+  fronty nevejde, minutu nespálí. Scénář `krok105` (oddíly 2b a 2d
+  zkoušejí zámek řádku firmy a zámek odstupu dvěma spojeními přes
+  dblink — jen proti PostgreSQL).
+- Migrace `20261102100000_rezervace_choice_fronta_tlacitka.sql`
+  (nezávislé ověření po sloučení #162): úloha jde do fronty vlastním
+  vstupem `rezervace_choice_zabrat_dotaz_ulohy` bez pravidla firmy
+  (úloha je v instalaci jediná) — tlačítko její firmy ji neusekne a ona
+  tlačítko nezablokuje. Tlačítka, když se nevejdou, dostanou záporně
+  „zkusit znovu za n ms“ (až odejde dotaz, který má firma zabraný, a až
+  se fronta posune) a server jednou počká, nejvýš jeden rozestup
+  (`NEJDELE_PRED_OPAKOVANIM_MS`). Tak projde callback pobočky 2 během
+  prvního načtení pobočky 1 téže firmy i třetí tlačítko vedle dvou běhů
+  jiných firem a dva běhy téže firmy se střídají. „Načíst teď“ má na
+  běh 55 s (`KONEC_NACIST_TED_MS`), aby i vedle běžícího načítání
+  stihlo všechny tři dotazy. `db push` až po nasazení kódu (starý kód
+  bere záporné číslo jako chybu fronty); nový kód se starou databází
+  jede jako dřív. Souběh ve virtuálním čase: `scripts/rezervace-choice.test.mjs`,
+  oddíl 6a.
 - Úloha dělí čas: rezerva 20 s se odečte jednou za úlohu, zbytek po
   dílech nejméně na tři dotazy; pořadí `poradiSynchronizace` (firmy se
   střídají, podle `synchronizace_behy`, tentýž podnik u firmy jednou).

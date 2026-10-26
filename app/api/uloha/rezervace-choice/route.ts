@@ -61,8 +61,10 @@ export async function GET(request: Request): Promise<NextResponse> {
     // Stejný díl zbývajícího času každému zbývajícímu připojení, ale ne
     // méně než na tři dotazy.
     const dil = Math.max(NEJMENE_NA_PRIPOJENI_MS, Math.floor(zbyva / (pripojeni.length - i)))
-    // `uloha: true` — jen úloha smí ve frontě čekat celý svůj díl; tlačítka
-    // nejvýš dva rozestupy, takže úlohu ostatních firem zdrží nejvýš o ~16,5 s.
+    // `uloha: true` — jen úloha jde do fronty vlastním vstupem bez pravidla
+    // firmy a smí čekat celý svůj díl; tlačítka nejvýš dva rozestupy, takže
+    // úlohu zdrží nejvýš o ~16,5 s a její dotaz jí nevezmou (migrace
+    // 20261102100000).
     const v = await synchronizovatChoice(id, {
       konecMs: konecUlohy,
       posledniDotazMs: Math.min(posledniDotazUlohy, Date.now() + dil),
