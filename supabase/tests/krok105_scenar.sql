@@ -162,6 +162,17 @@ select pg_temp.check('fronta drží další volný čas za posledním zabraným 
           and dalsi_volny < clock_timestamp() + interval '17 seconds'
      from app.rezervace_choice_fronta));
 
+-- Úloha, která se do svého dílu nevejde, dostane NULL a nic nezabere
+-- (opakování by jí nepomohlo: díl se zkracuje stejně rychle, jak se
+-- fronta blíží — hlavička migrace 20261102100000).
+select dalsi_volny::text as fronta_pred_ulohou from app.rezervace_choice_fronta \gset
+set role service_role;
+select coalesce(public.rezervace_choice_zabrat_dotaz_ulohy(5500, 1000)::text, 'nic') as uloha_nevejde \gset
+reset role;
+select pg_temp.check(format('úloha, která se do svého dílu (1 s) nevejde: NULL, ne „zkusit znovu" (%s), a nic se nezabralo', :'uloha_nevejde'),
+  :'uloha_nevejde' = 'nic'
+  and (select dalsi_volny = :'fronta_pred_ulohou'::timestamptz from app.rezervace_choice_fronta));
+
 -- Zabraný dotaz firmy odešel (čas uplynul) → další dostane, za frontou.
 update app.rezervace_choice_fronta_firmy set zabrano_do = clock_timestamp() - interval '1 second' where tenant_id = :'tenant';
 set role service_role;
