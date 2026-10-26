@@ -10,7 +10,7 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { zakladniAdresaAplikace } from '@/lib/integrace-adresa'
 import { podepsatText, rozsifrovat, sifrovaniJeNastavene, zasifrovat } from '@/lib/integrace-klice'
 import { KLIC_CHOICE, nastaveniChoice, odkazPripojeni, otiskPokusu, PLATNOST_POKUSU_S, rozebratPodnik, slozitPokus } from '@/lib/rezervace-choice'
-import { otestovatToken, synchronizovatChoice, zapsatVysledekTestu } from '@/lib/rezervace-choice-sync'
+import { overitZnovu, synchronizovatChoice, zapsatVysledekTestu } from '@/lib/rezervace-choice-sync'
 import { MAX_RADKU_IMPORTU, naparsovatCsvRezervaci } from '@/lib/rezervace-import'
 import { POSKYTOVATEL_PRIJMU, slozitKlicRezervaci } from '@/lib/rezervace-prijem-api'
 import { poskytovatelSouboru, systemyKPriprave } from '@/lib/rezervace-poskytovatele'
@@ -640,9 +640,12 @@ export async function overitChoice(formData: FormData): Promise<void> {
   }
   if (!token) redirect(sParametrem(zpet, 'chyba', 'choice-bez-tokenu'))
 
-  // Za firmu připojení: souběžné „Ověřit znovu“ téže firmy si frontu
-  // nezaberou (nejvýš jeden zabraný dotaz na firmu, migrace 20261031100000).
-  const test = await otestovatToken(token, v.tenantId, zacatek + 50_000)
+  // Nejvýš jednou za minutu na připojení, pak test za firmu připojení
+  // a ve frontě jako tlačítko (nejvýš jeden rozestup): souběžné kliky
+  // téže firmy ani kliky mnoha firem nezaberou frontu ostatním
+  // (migrace 20261031100000, lib/rezervace-choice-sync.ts).
+  const test = await overitZnovu(token, v.tenantId, pripojeni.id, zacatek + 50_000)
+  if (test === 'brzy') redirect(sParametrem(zpet, 'chyba', 'choice-overeno-chvili'))
   await zapsatVysledekTestu(supabase, pripojeni.id, test)
 
   revalidatePath(zpet)
@@ -668,6 +671,8 @@ export async function nacistChoiceTed(formData: FormData): Promise<void> {
   if (!smi) redirect(sParametrem(zpet, 'chyba', 'pravo'))
   if (pripojeni.stav !== 'pripojeno') redirect(sParametrem(zpet, 'chyba', 'choice-neovereno'))
 
+  // Bez `uloha: true`: ve frontě se čeká jako tlačítko (nejvýš jeden
+  // rozestup), naplánovaná úloha má přednost.
   const vysledek = await synchronizovatChoice(pripojeni.id, { konecMs: zacatek + 50_000, nejmeneOdMinulehoMs: 60_000 })
 
   revalidatePath(`/${rozsah}/rezervace`, 'layout')

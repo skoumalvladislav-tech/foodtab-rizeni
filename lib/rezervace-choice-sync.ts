@@ -38,6 +38,10 @@ import { klientUlohy } from './supabase/uloha.ts'
  * tokenu (rozšifruje ho jen server) a zápisu rezervací ze zdroje
  * (`rezervace_importovat_zdroj` je jen pro service_role).
  *
+ * Tlačítka (a callback) čekají ve frontě nejvýš jeden rozestup, delší
+ * čekání má jen naplánovaná úloha (`NEJDELE_CEKA_TLACITKO_MS`); „Ověřit
+ * znovu“ jde na připojení nejvýš jednou za minutu (`overitZnovu`).
+ *
  * „PŘIPOJENO“ zapisuje v celém modulu JEDINÁ funkce, `zapsatVysledekTestu`,
  * a jen po úspěšném živém testu (`GET /bookings/list?perPage=1`). Databáze
  * to hlídá podruhé (`integrace_pripojeni_rezervace_overeno`).
@@ -50,6 +54,43 @@ import { klientUlohy } from './supabase/uloha.ts'
  * z každého dílu času — jinak by díly připojení skoro celé snědla.
  */
 export const REZERVA_DOTAZU_MS = 20_000
+
+/**
+ * Kolik smí ve frontě dotazů na Choice čekat TLAČÍTKO („Ověřit znovu“,
+ * „Načíst teď“, test a první načtení po připojení v callbacku): nejvýš
+ * jeden rozestup. Jinak hned „zkuste za chvíli“.
+ *
+ * Prověrka 26. 10.: fronta je společná celé instalaci a pravidlo „firma
+ * nejvýš jeden zabraný dotaz“ (migrace 20261031100000) platí na firmu —
+ * jenže firmu si může založit kdokoli přihlášený (`app.create_tenant`).
+ * Kdyby tlačítko smělo čekat 30 s, kdo ovládá šest firem, zabral by
+ * frontu ~33 s dopředu a naplánovaná úloha ostatních by čekala skoro
+ * celý svůj čas. Takhle tlačítka dohromady posunou frontu nejvýš o dva
+ * rozestupy (~11 s), ať je firem kolik chce: dotaz si tlačítko zabere,
+ * jen když je fronta volná nejpozději za jeden rozestup.
+ *
+ * Delší čekání (celý svůj díl času) má jen naplánovaná úloha
+ * (`synchronizovatChoice(…, { uloha: true })`). Databáze neví, kdo se
+ * ptá — rozhoduje tenhle server, jediný, kdo frontu volá (service_role).
+ */
+export const NEJDELE_CEKA_TLACITKO_MS = ROZESTUP_DOTAZU_MS
+
+/** Nejdelší čekání ve frontě vůbec (i pro úlohu; databáze víc nepustí). */
+const NEJDELE_CEKA_ULOHA_MS = 120_000
+
+/**
+ * Kdo se ptá — rozhoduje, jak dlouho smí čekat ve frontě. Cokoli jiného
+ * než `'uloha'` čeká jako tlačítko (bezpečná výchozí).
+ */
+export type KdoSePta = 'tlacitko' | 'uloha'
+
+/**
+ * „Ověřit znovu“ na jednom připojení nejvýš jednou za tuhle dobu (jako
+ * minutový odstup „Načíst teď“). Drží ho databáze
+ * (`rezervace_choice_zabrat_overeni`), ne `posledni_test_kdy` v registru
+ * — ten si správce napojení může přepsat.
+ */
+export const ODSTUP_OVERENI_MS = 60_000
 
 const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
 
@@ -79,18 +120,27 @@ export class ChybaFronty extends Error {
  * Zabere v databázi firmě čas na jeden dotaz a počká na něj.
  * `posledniDotazMs` = nejpozdější okamžik, kdy smí dotaz ODEJÍT (rezervu
  * na odpověď a zápis už odečetl volající — tady se neodečítá podruhé).
+ * `kdo`: tlačítko čeká nejvýš `NEJDELE_CEKA_TLACITKO_MS`, úloha až do
+ * `posledniDotazMs`.
  * `false` = nevejde se, nebo firma už má zabraný jiný dotaz (souběžné
  * „Ověřit znovu“ / „Načíst teď“); nic se nezabralo. Bez fronty se
  * NEPOSÍLÁ nic — výjimka, ne „pošli to bez ní“.
  */
-export function cekatNaFrontu(sluzba: SupabaseClient, tenantId: string, posledniDotazMs: number, p: ProstrediChoice = SKUTECNE): () => Promise<boolean> {
+export function cekatNaFrontu(
+  sluzba: SupabaseClient,
+  tenantId: string,
+  posledniDotazMs: number,
+  kdo: KdoSePta,
+  p: ProstrediChoice = SKUTECNE,
+): () => Promise<boolean> {
+  const strop = kdo === 'uloha' ? NEJDELE_CEKA_ULOHA_MS : NEJDELE_CEKA_TLACITKO_MS
   return async () => {
     const nejdele = Math.floor(posledniDotazMs - p.ted())
     if (nejdele < 0) return false
     const { data, error } = await sluzba.rpc('rezervace_choice_zabrat_dotaz', {
       p_tenant: tenantId,
       p_rozestup_ms: ROZESTUP_DOTAZU_MS,
-      p_nejdele_cekat_ms: Math.min(nejdele, 120_000),
+      p_nejdele_cekat_ms: Math.min(nejdele, strop),
     })
     if (error) throw new ChybaFronty(funkceNeexistuje(error))
     if (data === null || data === undefined) return false
@@ -153,15 +203,18 @@ export type VysledekTestu =
  * Živý test tokenu: `GET /bookings/list?page=1&perPage=1` — přes frontu,
  * jako každý jiný dotaz, za firmu připojení (`tenantId` z připojení
  * ověřeného volajícím). Volá ho callback po výměně kódu a „Ověřit
- * znovu“; oba až po přihlášení a právu `integrace.manage` na pobočce.
- * Souběžné testy jedné firmy si frontu nezaberou: firma má nejvýš
- * jeden zabraný dotaz, další dostanou „klikněte za minutu“.
+ * znovu“ (`overitZnovu`); oba až po přihlášení a právu
+ * `integrace.manage` na pobočce. Ve frontě čeká JAKO TLAČÍTKO (nejvýš
+ * jeden rozestup) a dotaz odejde nejpozději `REZERVA_DOTAZU_MS` před
+ * tvrdým koncem `konecMs`. Souběžné testy jedné firmy si frontu
+ * nezaberou: firma má nejvýš jeden zabraný dotaz, další dostanou
+ * „klikněte za minutu“.
  */
 export async function otestovatToken(token: string, tenantId: string, konecMs: number, p: ProstrediChoice = SKUTECNE): Promise<VysledekTestu> {
   const sluzba = klientUlohy()
   if (!sluzba) return { stav: 'chyba', druh: 'fronta', duvod: 'Server nemá nastavený přístup k databázi pro úlohy (SUPABASE_SERVICE_ROLE_KEY).' }
   try {
-    if (!(await cekatNaFrontu(sluzba, tenantId, konecMs - REZERVA_DOTAZU_MS, p)())) {
+    if (!(await cekatNaFrontu(sluzba, tenantId, konecMs - REZERVA_DOTAZU_MS, 'tlacitko', p)())) {
       return { stav: 'chyba', druh: 'cas', duvod: 'Na volný dotaz na Choice se teď čeká déle — klikněte za minutu na „Ověřit znovu“.' }
     }
   } catch (e) {
@@ -169,6 +222,35 @@ export async function otestovatToken(token: string, tenantId: string, konecMs: n
   }
   const r = await vytvoritChoice(p.fetch).nacistStranku(token, null)
   return r.stav === 'ok' ? { stav: 'ok' } : { stav: 'chyba', druh: r.druh, duvod: r.duvod }
+}
+
+/**
+ * „Ověřit znovu“: nejdřív odstup na připojení (nejvýš jednou za
+ * `ODSTUP_OVERENI_MS`, drží databáze), teprve pak živý test přes frontu.
+ * `'brzy'` = ověřovalo se před chvílí — na frontu ani na Choice se
+ * nesáhlo a u napojení se nic nezapisuje. Odstup se zabírá PŘED frontou:
+ * zabraný dotaz, který by odstup pak zahodil, by frontu posunul zbytečně.
+ * `pripojeniId` je z připojení ověřeného volajícím (RLS a právo).
+ */
+export async function overitZnovu(
+  token: string,
+  tenantId: string,
+  pripojeniId: string,
+  konecMs: number,
+  p: ProstrediChoice = SKUTECNE,
+): Promise<VysledekTestu | 'brzy'> {
+  const sluzba = klientUlohy()
+  if (!sluzba) return { stav: 'chyba', druh: 'fronta', duvod: 'Server nemá nastavený přístup k databázi pro úlohy (SUPABASE_SERVICE_ROLE_KEY).' }
+  const { data, error } = await sluzba.rpc('rezervace_choice_zabrat_overeni', { p_pripojeni: pripojeniId, p_odstup_ms: ODSTUP_OVERENI_MS })
+  if (error) {
+    return {
+      stav: 'chyba',
+      druh: 'fronta',
+      duvod: funkceNeexistuje(error) ? 'Napojení Choice čeká na aktualizaci databáze (migrace 20261031100000).' : 'Fronta dotazů na Choice selhala — zkuste to znovu.',
+    }
+  }
+  if (data !== true) return 'brzy'
+  return otestovatToken(token, tenantId, konecMs, p)
 }
 
 /**
@@ -285,10 +367,13 @@ async function nacistToken(sluzba: SupabaseClient, pripojeniId: string): Promise
  * `konecMs - REZERVA_DOTAZU_MS`. Úloha s víc připojeními dá každému díl
  * času přes `posledniDotazMs` (rezervu odečetla jednou za celou úlohu).
  * `nejmeneOdMinulehoMs`: „Načíst teď“ nepustí nový běh hned po předchozím.
+ * `uloha: true` předává JEN naplánovaná úloha — smí čekat ve frontě celý
+ * svůj díl času. Bez něj (Načíst teď, první načtení po připojení) se
+ * čeká jako tlačítko, nejvýš jeden rozestup (`NEJDELE_CEKA_TLACITKO_MS`).
  */
 export async function synchronizovatChoice(
   pripojeniId: string,
-  moznosti: { konecMs: number; posledniDotazMs?: number; nejmeneOdMinulehoMs?: number; prostredi?: ProstrediChoice },
+  moznosti: { konecMs: number; posledniDotazMs?: number; nejmeneOdMinulehoMs?: number; uloha?: boolean; prostredi?: ProstrediChoice },
 ): Promise<VysledekSynchronizaceChoice> {
   const p = moznosti.prostredi ?? SKUTECNE
   const vysledek = (stav: VysledekSynchronizaceChoice['stav'], duvod: string | null, x: Partial<VysledekSynchronizaceChoice> = {}): VysledekSynchronizaceChoice =>
@@ -343,6 +428,7 @@ export async function synchronizovatChoice(
         sluzba,
         pripojeni.tenant_id,
         Math.min(moznosti.konecMs - REZERVA_DOTAZU_MS, moznosti.posledniDotazMs ?? Infinity),
+        moznosti.uloha === true ? 'uloha' : 'tlacitko',
         p,
       ),
       zapsat: zapisDoFoodtabu(sluzba, pripojeni.id),

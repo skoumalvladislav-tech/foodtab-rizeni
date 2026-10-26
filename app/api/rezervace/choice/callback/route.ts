@@ -117,6 +117,8 @@ export async function GET(request: NextRequest) {
   await zapsatVysledekTestu(supabase, pripojeniId, test)
   if (test.stav !== 'ok') return zpet('chyba', test.druh === 'pristup' || test.druh === 'data' ? 'choice-test' : 'choice-test-pozdeji')
 
+  // První načtení jako tlačítko (bez `uloha: true`): ve frontě nejvýš
+  // jeden rozestup, zbytek dočte naplánovaná úloha.
   after(async () => {
     await synchronizovatChoice(pripojeniId, { konecMs: zacatek + 57_000 })
   })

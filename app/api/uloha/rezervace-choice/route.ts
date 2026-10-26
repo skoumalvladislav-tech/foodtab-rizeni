@@ -61,9 +61,12 @@ export async function GET(request: Request): Promise<NextResponse> {
     // Stejný díl zbývajícího času každému zbývajícímu připojení, ale ne
     // méně než na tři dotazy.
     const dil = Math.max(NEJMENE_NA_PRIPOJENI_MS, Math.floor(zbyva / (pripojeni.length - i)))
+    // `uloha: true` — jen úloha smí ve frontě čekat celý svůj díl; tlačítka
+    // nejvýš jeden rozestup, takže úlohu ostatních firem zdrží nejvýš o ~11 s.
     const v = await synchronizovatChoice(id, {
       konecMs: konecUlohy,
       posledniDotazMs: Math.min(posledniDotazUlohy, Date.now() + dil),
+      uloha: true,
     })
     vysledky.push({ stav: v.stav, dotazu: v.dotazu, nacteno: v.nacteno, pokracovani: v.pokracovani })
     if (v.omezeno) {

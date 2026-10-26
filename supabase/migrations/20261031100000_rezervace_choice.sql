@@ -16,7 +16,7 @@
 -- 20261027100000) — stejná pravidla „čí je pravda" jako CSV a příjmové
 -- API, žádná nová tabulka rezervací. Připojení, token a kurzor jsou
 -- v registru (`integrace_pripojeni`, `integrace_tajemstvi`,
--- `externi_ucet.kurzor`). Migrace přidává jen dvě věci, které jinak
+-- `externi_ucet.kurzor`). Migrace přidává jen tři věci, které jinak
 -- udělat nejde:
 --
 --   1. ÚLOHU `rezervace-choice` v `app.planovac_ulohy`. Bez řádku tam
@@ -49,7 +49,29 @@
 --      firem nedostala nic). Proto si funkce u firmy pamatuje, kdy
 --      odejde její zabraný dotaz, a dokud neodešel, další jí nedá
 --      (NULL). Běh firmy jde dotaz po dotazu, takže ho to nebrzdí;
---      souběžné kliky téže firmy dostanou „zkuste za chvíli".
+--      souběžné kliky téže firmy dostanou „zkuste za chvíli". Souběh
+--      dvou volání téže firmy rozhoduje zámek řádku firmy (`for update`
+--      hned ve čtení `zabrano_do`) — krok105 ho zkouší dvěma spojeními.
+--
+--      TLAČÍTKA ČEKAJÍ NEJVÝŠ JEDEN ROZESTUP (prověrka 26. 10.).
+--      Pravidlo výš platí na firmu — a firmu si může založit kdokoli
+--      přihlášený (`app.create_tenant`). Kdo ovládá šest firem a každá
+--      by si „Ověřit znovu" zabrala dotaz až 30 s dopředu, posunul by
+--      frontu o ~33 s a naplánovaná úloha ostatních by čekala skoro celý
+--      svůj čas. Server proto tlačítkům (Ověřit znovu, Načíst teď,
+--      callback) dává `p_nejdele_cekat_ms` nejvýš jeden rozestup
+--      (lib/rezervace-choice-sync.ts, NEJDELE_CEKA_TLACITKO_MS) —
+--      dohromady posunou frontu nejvýš o dva rozestupy (~11 s), ať je
+--      firem kolik chce. Celý svůj díl čeká jen naplánovaná úloha.
+--      Databáze neví, kdo se ptá; rozhoduje server, jediný, kdo frontu
+--      volá (service_role).
+--
+--   3. ODSTUP „OVĚŘIT ZNOVU" NA PŘIPOJENÍ —
+--      `public.rezervace_choice_zabrat_overeni`. Každé „Ověřit znovu"
+--      je dotaz ve společné frontě; nejvýš jednou za minutu na připojení
+--      (jako „Načíst teď" podle `synchronizace_behy`). Čas posledního
+--      testu v registru (`integrace_pripojeni.posledni_test_kdy`) na to
+--      nestačí — přepíše si ho každý správce napojení.
 --
 -- ---------------------------------------------------------------------
 -- CO SE SCHVÁLNĚ NEDĚLÁ
@@ -59,11 +81,12 @@
 --   * Žádná nová tabulka rezervací ani sloupec v registru. Kurzor
 --     načítání je v `integrace_pripojeni.externi_ucet` (stejně jako
 --     kurzory pokladen), token v `integrace_tajemstvi` zašifrovaný.
---   * Fronta a její firemní řádky jsou ve schématu `app` a nesahá na ně
---     nikdo kromě funkce (ani service_role). Firemní řádek nese jen
---     `tenant_id` a čas zabraného dotazu — nic o rezervacích.
---   * Funkce fronty jen pro service_role. Přihlášený by si jinak mohl
---     zabírat čas dopředu a zastavit načítání všem ostatním.
+--   * Fronta, její firemní řádky a odstupy ověření jsou ve schématu
+--     `app` a nesahá na ně nikdo kromě funkcí (ani service_role).
+--     Firemní řádek nese jen `tenant_id` a čas zabraného dotazu, řádek
+--     odstupu jen id připojení a čas — nic o rezervacích.
+--   * Funkce fronty i odstupu jen pro service_role. Přihlášený by si
+--     jinak mohl zabírat čas dopředu a zastavit načítání všem ostatním.
 -- =====================================================================
 
 
@@ -194,3 +217,56 @@ comment on function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)
 
 revoke all on function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) from public, anon, authenticated;
 grant execute on function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) to service_role;
+
+
+-- ---------------------------------------------------------------------
+-- 3. ODSTUP „OVĚŘIT ZNOVU" NA PŘIPOJENÍ
+-- ---------------------------------------------------------------------
+
+-- Kdy se připojení naposledy ověřovalo („Ověřit znovu"). Píše jen
+-- funkce níž; registr (`posledni_test_kdy`) si přepíše správce napojení.
+create table app.rezervace_choice_overeni (
+  pripojeni_id  uuid primary key references public.integrace_pripojeni(id) on delete cascade,
+  naposledy     timestamptz not null
+);
+
+comment on table app.rezervace_choice_overeni is
+  'Odstup „Ověřit znovu" u připojení Choice: kdy se naposledy ověřovalo. '
+  'Píše do ní jen public.rezervace_choice_zabrat_overeni.';
+
+alter table app.rezervace_choice_overeni enable row level security;
+revoke all on app.rezervace_choice_overeni from public, anon, authenticated, service_role;
+
+
+-- true = smí se ověřit (a čas se zapsal), false = ověřovalo se před
+-- méně než `p_odstup_ms`. Jedním příkazem (`insert … on conflict …
+-- where`): ze dvou souběžných volání téhož připojení druhé počká na
+-- zámek řádku a podmínku vyhodnotí nad zapsaným časem — true dostane
+-- jen jedno. `clock_timestamp()` jako u fronty: skutečný čas, ne
+-- začátek transakce.
+create function public.rezervace_choice_zabrat_overeni(p_pripojeni uuid, p_odstup_ms integer)
+returns boolean
+language plpgsql volatile security definer set search_path = ''
+as $$
+begin
+  if p_pripojeni is null then
+    raise exception 'Ověření Choice musí patřit připojení.' using errcode = '22023';
+  end if;
+  if p_odstup_ms is null or p_odstup_ms < 30000 or p_odstup_ms > 3600000 then
+    raise exception 'Odstup ověření Choice musí být 30 sekund až 1 hodina.' using errcode = '22023';
+  end if;
+
+  insert into app.rezervace_choice_overeni as o (pripojeni_id, naposledy)
+  values (p_pripojeni, clock_timestamp())
+  on conflict (pripojeni_id) do update
+     set naposledy = excluded.naposledy
+   where o.naposledy <= excluded.naposledy - p_odstup_ms * interval '1 millisecond';
+
+  return found;
+end $$;
+
+comment on function public.rezervace_choice_zabrat_overeni(uuid, integer) is
+  'Odstup „Ověřit znovu" u připojení Choice: true = smí (čas zapsán), false = ověřovalo se před chvílí. Jen service_role.';
+
+revoke all on function public.rezervace_choice_zabrat_overeni(uuid, integer) from public, anon, authenticated;
+grant execute on function public.rezervace_choice_zabrat_overeni(uuid, integer) to service_role;

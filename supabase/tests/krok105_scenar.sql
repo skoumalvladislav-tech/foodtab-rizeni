@@ -15,9 +15,15 @@
 --   2. fronta dotazů drží rozestup 5,5 s mezi po sobě jdoucími dotazy,
 --      dotaz, který se nevejde, NIC nezabere, nesmysl se odmítne;
 --      firma má nejvýš jeden zabraný dotaz, který ještě neodešel —
---      souběžné kliky jedné firmy nezaberou frontu ostatním; chybějící
---      řádek fronty je chyba, ne tiché NULL;
---   3. frontu volá jen service_role (přihlášený ani anonym ne) a funguje
+--      souběžné kliky jedné firmy nezaberou frontu ostatním; šest firem
+--      s tlačítkem (čekat nejvýš jeden rozestup) posune frontu nejvýš
+--      o dva rozestupy; chybějící řádek fronty je chyba, ne tiché NULL;
+--   2b. souběh DVOU SPOJENÍ (dblink, jen PostgreSQL): druhé volání téže
+--      firmy stojí na zámku řádku firmy a dotaz nedostane — a kopie
+--      funkce bez toho zámku ho v témž souběhu dostane (kontrola umí
+--      spadnout, ukázané při každém běhu);
+--   2c. odstup „Ověřit znovu" na připojení: nejvýš jednou za minutu;
+--   3. frontu i odstup volá jen service_role (přihlášený ani anonym ne) a funguje
 --      i s vlastníkem, který NENÍ superuživatel (na Supabase jím migrace
 --      nejsou) — vyzkoušené přeneseným vlastnictvím, ne úvahou. Text
 --      grantů hlídá navíc scripts/provoz-granty.test.mjs;
@@ -159,6 +165,243 @@ select pg_temp.check('chybí-li řádek fronty, funkce spadne (P0002), ne tiché
 reset role;
 insert into app.rezervace_choice_fronta (jediny) values (true);
 
+-- Prověrka 26. 10.: firmu si může založit kdokoli přihlášený
+-- (app.create_tenant), takže pravidlo „firma nejvýš jeden zabraný
+-- dotaz" samo nestačí — šest firem by si „Ověřit znovu" (čekat až 30 s)
+-- zabralo frontu ~33 s dopředu. Tlačítkům proto server dává
+-- p_nejdele_cekat_ms = jeden rozestup (lib/rezervace-choice-sync.ts,
+-- NEJDELE_CEKA_TLACITKO_MS; že to server opravdu posílá, hlídá
+-- scripts/rezervace-choice.test.mjs). Tady: s tímhle stropem šest firem
+-- naráz posune frontu nejvýš o dva rozestupy.
+insert into public.tenants (name, legal_name, currency, timezone)
+select 'Krok105 Tlačítko ' || i || ' s.r.o.', 'Krok105 Tlačítko ' || i || ' s.r.o.', 'CZK', 'Europe/Prague'
+  from generate_series(1, 6) i;
+select array_agg(id)::text as tlacitka from public.tenants where name like 'Krok105 Tlačítko %' \gset
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id in (:'tenant', :'cizi');
+
+set role service_role;
+select count(*) filter (where public.rezervace_choice_zabrat_dotaz(f, 5500, 5500) is not null) as tlacitka_zabrala,
+       count(*) as tlacitka_vse
+  from unnest(:'tlacitka'::uuid[]) f \gset
+-- Naplánovaná úloha cizí firmy hned potom (smí čekat celý svůj díl).
+select coalesce(public.rezervace_choice_zabrat_dotaz(:'cizi', 5500, 37000), -1) as uloha_po_tlacitkach \gset
+reset role;
+
+select pg_temp.check('šest firem naráz jako tlačítko (čekat nejvýš jeden rozestup): dotaz zaberou jen dvě, ostatní hned nic',
+  :tlacitka_vse = 6 and :tlacitka_zabrala = 2);
+select pg_temp.check('úloha cizí firmy pak čeká nejvýš dva rozestupy (≤ 11 s), ať je firem kolik chce',
+  :uloha_po_tlacitkach between 9500 and 11000);
+
+delete from public.tenants where name like 'Krok105 Tlačítko %';
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id in (:'tenant', :'cizi');
+
+
+\echo ''
+\echo '== 2b. Souběh dvou spojení (jen PostgreSQL) ============='
+
+-- Zámek řádku firmy (`for update` ve čtení `zabrano_do`) má zařídit, že
+-- ze dvou SOUBĚŽNÝCH volání téže firmy dostane dotaz jen jedno. V jednom
+-- sezení to vyzkoušet nejde — volání jdou po sobě. Tady jsou dvě další
+-- spojení (dblink): A vezme zámky jako funkce na začátku (firma, pak
+-- fronta) a zastaví se; B zavolá funkci za tutéž firmu a musí stát na
+-- zámku, který drží A; pak A dokončí, zabere dotaz a zapíše.
+--
+-- Že kontrola umí spadnout, se ukazuje při každém běhu: tentýž souběh
+-- nad kopií funkce, které chybí JEN `for update` u řádku firmy, musí dát
+-- dotaz i B (přečte `zabrano_do` dřív, než A zapíše). Kdyby nedal, souběh
+-- se nevyrobil a kontrola nic neměří.
+--
+-- PGlite (scripts/scenare-pglite.mjs) má jediné spojení a dblink nemá —
+-- tam se oddíl přeskočí a řekne to. Proti PostgreSQL se přeskočit nesmí:
+-- dblink je v obrazu postgres:16 a jeho chybění tu spadne; workflow
+-- Databáze navíc hledá hlášky obou kontrol souběhu.
+--
+-- CO TU OVĚŘENÉ NENÍ: jen tohle jedno proložení (B čte, když A drží
+-- zámky a ještě nezapsal). B úplně před A, nebo až po zápisu A, jsou
+-- obyčejná po sobě jdoucí volání z oddílu 2.
+
+select set_config('test.tenant105', :'tenant', false);
+
+create or replace function pg_temp.je_pglite() returns boolean
+language sql as $$ select version() like '%PGlite%' $$;
+
+do $$
+declare
+  v_def   text;
+  v_kopie text;
+begin
+  if pg_temp.je_pglite() then
+    raise notice '  (PGlite: souběh dvou spojení se přeskakuje — ověřuje ho běh proti PostgreSQL)';
+    return;
+  end if;
+  create schema test105;
+  create extension dblink schema test105;
+
+  -- Kopie funkce fronty, které chybí jen zámek řádku firmy.
+  v_def := pg_get_functiondef('public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)'::regprocedure);
+  v_kopie := regexp_replace(v_def, '(where f\.tenant_id = p_tenant)\s+for update;', '\1;');
+  v_kopie := replace(v_kopie, 'FUNCTION public.rezervace_choice_zabrat_dotaz(', 'FUNCTION test105.zabrat_bez_zamku(');
+  perform pg_temp.check('kopie funkce fronty se liší jen chybějícím zámkem řádku firmy (zámek fronty zůstal)',
+    v_kopie like '%FUNCTION test105.zabrat_bez_zamku(%'
+    and (length(v_def) - length(replace(v_def, 'for update', ''))) / length('for update') = 2
+    and (length(v_kopie) - length(replace(v_kopie, 'for update', ''))) / length('for update') = 1
+    and v_kopie like '%from app.rezervace_choice_fronta q%where q.jediny%for update%');
+  execute v_kopie;
+  grant usage on schema test105 to service_role;
+  grant execute on function test105.zabrat_bez_zamku(uuid, integer, integer) to service_role;
+end $$;
+
+-- Souběh nad funkcí `p_funkce`: vrátí, jestli B stál na zámku A, kolik
+-- ms čeká dotaz A a co dostalo B ('nic' = NULL).
+create or replace function pg_temp.soubeh(p_funkce text) returns jsonb
+language plpgsql as $$
+declare
+  v_firma   text := current_setting('test.tenant105');
+  v_spojeni text := format('dbname=%s user=%s port=%s', current_database(), current_user, current_setting('port'));
+  v_pid_a   integer;
+  v_pid_b   integer;
+  v_a       integer;
+  v_b       text;
+  v_ceka    boolean := false;
+begin
+  perform test105.dblink_connect('a105', v_spojeni);
+  perform test105.dblink_connect('b105', v_spojeni);
+  begin
+    select x into v_pid_a from test105.dblink('a105', 'select pg_backend_pid()') as t(x integer);
+    select x into v_pid_b from test105.dblink('b105', 'select pg_backend_pid()') as t(x integer);
+    -- Nic nesmí viset: zaseknutý zámek by zastavil celý běh scénářů.
+    perform test105.dblink_exec('a105', 'set lock_timeout = ''20s''');
+    perform test105.dblink_exec('b105', 'set lock_timeout = ''20s''');
+
+    -- Výchozí stav, zapsaný (A je zatím mimo transakci): fronta volná až
+    -- za 30 s, firma nemá nic zabraného.
+    perform test105.dblink_exec('a105', 'update app.rezervace_choice_fronta set dalsi_volny = clock_timestamp() + interval ''30 seconds''');
+    perform test105.dblink_exec('a105', format(
+      'insert into app.rezervace_choice_fronta_firmy (tenant_id) values (%L) '
+      'on conflict (tenant_id) do update set zabrano_do = ''-infinity''', v_firma));
+
+    -- A: zámky jako funkce na začátku (firma, pak fronta), nic nezapsáno.
+    perform test105.dblink_exec('a105', 'begin');
+    perform x from test105.dblink('a105', format(
+      'select 1 from app.rezervace_choice_fronta_firmy where tenant_id = %L for update', v_firma)) as t(x integer);
+    perform x from test105.dblink('a105', 'select 1 from app.rezervace_choice_fronta where jediny for update') as t(x integer);
+
+    -- B: totéž volání za tutéž firmu jako service_role, asynchronně.
+    perform test105.dblink_exec('b105', 'set role service_role');
+    perform test105.dblink_send_query('b105', format(
+      'select coalesce(%s(%L, 5500, 60000)::text, ''nic'')', p_funkce, v_firma));
+
+    -- Počkat (nejvýš 10 s), až B stojí na zámku, který drží A.
+    for i in 1..200 loop
+      if v_pid_a = any(pg_blocking_pids(v_pid_b)) then
+        v_ceka := true;
+        exit;
+      end if;
+      perform pg_sleep(0.05);
+    end loop;
+
+    -- A dokončí: zabere dotaz (fronta volná za 30 s) a zapíše.
+    select x into v_a from test105.dblink('a105', format(
+      'select public.rezervace_choice_zabrat_dotaz(%L, 5500, 60000)', v_firma)) as t(x integer);
+    perform test105.dblink_exec('a105', 'commit');
+
+    select x into v_b from test105.dblink_get_result('b105') as t(x text);
+    perform x from test105.dblink_get_result('b105') as t(x text);
+  exception when others then
+    perform test105.dblink_disconnect('a105');
+    perform test105.dblink_disconnect('b105');
+    raise;
+  end;
+  perform test105.dblink_disconnect('a105');
+  perform test105.dblink_disconnect('b105');
+  return jsonb_build_object('ceka', v_ceka, 'a', v_a, 'b', v_b);
+end $$;
+
+set statement_timeout = '120s';
+
+do $$
+declare
+  r jsonb;
+begin
+  if pg_temp.je_pglite() then
+    return;
+  end if;
+  r := pg_temp.soubeh('public.rezervace_choice_zabrat_dotaz');
+  perform pg_temp.check('souběh dvou spojení: druhé volání téže firmy stálo na zámku, který drží první',
+    (r->>'ceka')::boolean);
+  perform pg_temp.check(format('… první zabralo dotaz, fronta volná za ~30 s (%s ms)', r->>'a'),
+    (r->>'a')::integer between 20000 and 30000);
+  perform pg_temp.check(format('souběh dvou spojení: druhé volání téže firmy po zámku NEDOSTANE dotaz (%s) — jeden zabraný dotaz na firmu platí i v souběhu', r->>'b'),
+    r->>'b' = 'nic');
+end $$;
+
+do $$
+declare
+  r jsonb;
+begin
+  if pg_temp.je_pglite() then
+    return;
+  end if;
+  r := pg_temp.soubeh('test105.zabrat_bez_zamku');
+  perform pg_temp.check(format('kontrola souběhu umí spadnout: kopie funkce BEZ zámku řádku firmy dá v témž souběhu dotaz i druhému volání (%s ms)', r->>'b'),
+    (r->>'ceka')::boolean
+    and case when r->>'b' ~ '^[0-9]+$' then (r->>'b')::integer between 20000 and 36000 else false end);
+end $$;
+
+reset statement_timeout;
+
+do $$
+begin
+  if pg_temp.je_pglite() then
+    return;
+  end if;
+  drop function test105.zabrat_bez_zamku(uuid, integer, integer);
+  drop extension dblink;
+  drop schema test105;
+end $$;
+update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
+delete from app.rezervace_choice_fronta_firmy where tenant_id = :'tenant';
+
+
+\echo ''
+\echo '== 2c. Odstup „Ověřit znovu" na připojení =============='
+
+-- Každé „Ověřit znovu" je dotaz ve společné frontě — na připojení nejvýš
+-- jednou za minutu. Čas drží databáze; `posledni_test_kdy` v registru
+-- si správce napojení přepíše.
+delete from app.rezervace_choice_overeni where pripojeni_id = :'choice';
+set role service_role;
+select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni1 \gset
+select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni2 \gset
+reset role;
+select pg_temp.check('první „Ověřit znovu" u připojení smí', :'overeni1'::boolean);
+select pg_temp.check('druhé hned po něm ne (nejvýš jednou za minutu na připojení)', not :'overeni2'::boolean);
+
+update app.rezervace_choice_overeni set naposledy = clock_timestamp() - interval '61 seconds' where pripojeni_id = :'choice';
+set role service_role;
+-- Funkce je volatile, v agregaci se zavolá pro každý řádek zvlášť.
+select count(*) filter (where public.rezervace_choice_zabrat_overeni(:'choice', 60000)) as overeni_smi,
+       count(*) as overeni_vse
+  from generate_series(1, 5) \gset
+reset role;
+select pg_temp.check('po minutě zase smí — a z pěti volání po sobě jen první',
+  :overeni_vse = 5 and :overeni_smi = 1);
+select pg_temp.check('čas ověření zapsala funkce (teď)',
+  (select naposledy > clock_timestamp() - interval '5 seconds'
+     from app.rezervace_choice_overeni where pripojeni_id = :'choice'));
+
+set role service_role;
+select pg_temp.check('ověření bez připojení se odmítne',
+  pg_temp.spadne_hlaskou('select public.rezervace_choice_zabrat_overeni(null, 60000)', '22023', 'musí patřit připojení'));
+select pg_temp.check('odstup pod 30 s nebo nad hodinu se odmítne',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 29999)', :'choice'), '22023', '30 sekund až 1 hodina')
+  and pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 3600001)', :'choice'), '22023', '30 sekund až 1 hodina'));
+select pg_temp.check('neexistující připojení se odmítne (cizí klíč)',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 60000)', gen_random_uuid()), '23503', 'rezervace_choice_overeni'));
+reset role;
+
 
 \echo ''
 \echo '== 3. Práva a vlastník, který není superuživatel ========'
@@ -171,9 +414,16 @@ select pg_temp.check('frontu volá jen service_role, přihlášený ani anonym n
   and not has_function_privilege('authenticated', 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)', 'execute')
   and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)', 'execute'));
 
+select pg_temp.check('odstup ověření volá jen service_role, přihlášený ani anonym ne',
+  has_function_privilege('service_role', 'public.rezervace_choice_zabrat_overeni(uuid, integer)', 'execute')
+  and not has_function_privilege('authenticated', 'public.rezervace_choice_zabrat_overeni(uuid, integer)', 'execute')
+  and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_overeni(uuid, integer)', 'execute'));
+
 set role authenticated;
 select pg_temp.check('přihlášený frontu nezavolá (42501)',
   pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_dotaz(%L, 5500, 60000)', :'tenant'), '42501', 'permission denied'));
+select pg_temp.check('… ani odstup ověření (42501) — jinak by si ho mohl sám vynulovat',
+  pg_temp.spadne_hlaskou(format('select public.rezervace_choice_zabrat_overeni(%L, 60000)', :'choice'), '42501', 'permission denied'));
 reset role;
 
 select pg_temp.check('do tabulek fronty nesahá nikdo kromě funkce (ani service_role)',
@@ -184,7 +434,12 @@ select pg_temp.check('do tabulek fronty nesahá nikdo kromě funkce (ani service
   and not has_table_privilege('service_role', 'app.rezervace_choice_fronta_firmy', 'select')
   and not has_table_privilege('service_role', 'app.rezervace_choice_fronta_firmy', 'update')
   and not has_table_privilege('authenticated', 'app.rezervace_choice_fronta_firmy', 'select')
-  and not has_table_privilege('anon', 'app.rezervace_choice_fronta_firmy', 'select'));
+  and not has_table_privilege('anon', 'app.rezervace_choice_fronta_firmy', 'select')
+  and not has_table_privilege('service_role', 'app.rezervace_choice_overeni', 'select')
+  and not has_table_privilege('service_role', 'app.rezervace_choice_overeni', 'update')
+  and not has_table_privilege('authenticated', 'app.rezervace_choice_overeni', 'select')
+  and not has_table_privilege('authenticated', 'app.rezervace_choice_overeni', 'update')
+  and not has_table_privilege('anon', 'app.rezervace_choice_overeni', 'select'));
 
 -- Na Supabase vlastní migrace (tabulky i funkci) role `postgres`, která
 -- NENÍ superuživatel. Tady se vlastnictví všeho přenese na obyčejnou
@@ -196,28 +451,39 @@ create role vlastnik105 nologin;
 grant usage on schema app to vlastnik105;
 alter table app.rezervace_choice_fronta owner to vlastnik105;
 alter table app.rezervace_choice_fronta_firmy owner to vlastnik105;
+alter table app.rezervace_choice_overeni owner to vlastnik105;
 alter function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) owner to vlastnik105;
+alter function public.rezervace_choice_zabrat_overeni(uuid, integer) owner to vlastnik105;
 select pg_temp.check('zkušební vlastník není superuživatel',
   not (select rolsuper from pg_roles where rolname = 'vlastnik105'));
 
 update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
 delete from app.rezervace_choice_fronta_firmy where tenant_id in (:'tenant', :'cizi');
+delete from app.rezervace_choice_overeni where pripojeni_id = :'choice';
 set role service_role;
 select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat_v1 \gset
 select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000), -1) as cekat_v2 \gset
 select coalesce(public.rezervace_choice_zabrat_dotaz(:'tenant', 5500, 60000)::text, 'nic') as cekat_v3 \gset
+select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni_v1 \gset
+select public.rezervace_choice_zabrat_overeni(:'choice', 60000) as overeni_v2 \gset
 reset role;
 select pg_temp.check('s vlastníkem bez superuživatele fronta funguje stejně (i pravidlo jednoho zabraného dotazu)',
   :cekat_v1 between 0 and 100 and :cekat_v2 between 4500 and 5500 and :'cekat_v3' = 'nic');
+select pg_temp.check('… i odstup ověření (první smí, druhé hned ne)',
+  :'overeni_v1'::boolean and not :'overeni_v2'::boolean);
 
 alter function public.rezervace_choice_zabrat_dotaz(uuid, integer, integer) owner to current_user;
+alter function public.rezervace_choice_zabrat_overeni(uuid, integer) owner to current_user;
 alter table app.rezervace_choice_fronta owner to current_user;
 alter table app.rezervace_choice_fronta_firmy owner to current_user;
-select pg_temp.check('vlastník funkce i tabulek je zase ten, kdo pouští migrace',
-  (select pg_get_userbyid(proowner) = current_user from pg_proc
-    where oid = 'public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)'::regprocedure)
+alter table app.rezervace_choice_overeni owner to current_user;
+select pg_temp.check('vlastník funkcí i tabulek je zase ten, kdo pouští migrace',
+  (select bool_and(pg_get_userbyid(proowner) = current_user) from pg_proc
+    where oid in ('public.rezervace_choice_zabrat_dotaz(uuid, integer, integer)'::regprocedure,
+                  'public.rezervace_choice_zabrat_overeni(uuid, integer)'::regprocedure))
   and (select bool_and(pg_get_userbyid(relowner) = current_user) from pg_class
-        where oid in ('app.rezervace_choice_fronta'::regclass, 'app.rezervace_choice_fronta_firmy'::regclass)));
+        where oid in ('app.rezervace_choice_fronta'::regclass, 'app.rezervace_choice_fronta_firmy'::regclass,
+                      'app.rezervace_choice_overeni'::regclass)));
 revoke usage on schema app from vlastnik105;
 drop role vlastnik105;
 update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
@@ -332,8 +598,10 @@ update app.rezervace_choice_fronta set dalsi_volny = '-infinity';
 select pg_temp.check('úklid: po scénáři nezůstalo nic z kroku 105',
   not exists (select 1 from public.rezervace where jmeno_hosta like '%Krok105')
   and not exists (select 1 from public.integrace_pripojeni where nazev like '%krok105%')
-  and not exists (select 1 from public.tenants where name = 'Krok105 Cizí s.r.o.')
+  and not exists (select 1 from public.tenants where name like 'Krok105 %')
   and not exists (select 1 from app.rezervace_choice_fronta_firmy)
+  and not exists (select 1 from app.rezervace_choice_overeni)
+  and not exists (select 1 from pg_namespace where nspname = 'test105')
   and not exists (select 1 from pg_roles where rolname = 'vlastnik105'));
 
 \echo ''

@@ -95,7 +95,8 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     `app/[rozsah]/rezervace/akce.ts` („Načíst teď“, „Ověřit znovu“)
  *     a z `app/api/rezervace/choice/callback` (ověření tokenu, kontrola,
  *     že tentýž podnik není u jiné pobočky téže firmy, první načtení).
- *     Fronta dotazů na Choice (`rezervace_choice_zabrat_dotaz`) a zápis
+ *     Fronta dotazů na Choice (`rezervace_choice_zabrat_dotaz`), odstup
+ *     „Ověřit znovu“ (`rezervace_choice_zabrat_overeni`) a zápis
  *     ze zdroje (`rezervace_importovat_zdroj`) jsou jen pro service_role
  *     schválně: přihlášený by si jinak zabíral frontu dopředu a zapisoval
  *     „rezervace z Choice“ sám. Vždy až po přihlášení, právu na pobočce

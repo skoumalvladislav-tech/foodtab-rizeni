@@ -638,7 +638,8 @@ export function HlaskaAkce({ stav, chyba }: { stav?: string; chyba?: string }) {
     'choice-test-pozdeji': 'Token od Choice je uložený, ale ověřit se teď nepodařilo (Choice neodpovídá nebo omezuje dotazy). Za chvíli klikněte na „Ověřit znovu“.',
     'choice-bez-tokenu': 'U napojení chybí token. Připojte podnik znovu.',
     'choice-neovereno': 'Choice ještě není ověřený — načítat půjde po ověření.',
-    'choice-chvili': 'Z Choice se právě načítá, nebo se načítalo před chvílí. Zkuste to za minutu.',
+    'choice-chvili': 'Z Choice se právě načítá, nebo se načítalo před chvílí (Choice pustí jen 1 dotaz za 5 sekund). Zkuste to za minutu.',
+    'choice-overeno-chvili': 'Přístup do Choice se ověřoval před chvílí. Znovu to jde za minutu.',
     'choice-nacteni': 'Načtení z Choice se nepovedlo — důvod je u napojení.',
   }
   // Rezervace se zapsala, ale některý dokument z formuláře se nepřipojil —

@@ -78,7 +78,8 @@ U pobočky na kartě Choice:
 - **Připojeno** + „naposledy načteno … · N rezervací“ — vše běží,
 - **Načíst teď** — načte hned, nečeká na čtvrthodinu (smí i ten, kdo
   na pobočce zapisuje rezervace),
-- **Ověřit znovu** — znovu vyzkouší přístup,
+- **Ověřit znovu** — znovu vyzkouší přístup (u pobočky nejvýš jednou
+  za minutu),
 - **Odpojit** — Foodtab se přestane ptát a smaže uložený token.
   Už načtené rezervace zůstanou. Přístup aplikace můžete zrušit i
   v Choice.
@@ -123,7 +124,13 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   a fronta dotazů `rezervace_choice_zabrat_dotaz(p_tenant, …)` (jen
   service_role, rozestup 5,5 s pro celou instalaci, každá firma nejvýš
   jeden zabraný dotaz, který ještě neodešel — souběžné kliky jedné
-  firmy nezaberou frontu ostatním). Scénář `krok105`.
+  firmy nezaberou frontu ostatním). Tlačítka (Ověřit znovu, Načíst teď,
+  callback) čekají ve frontě nejvýš jeden rozestup
+  (`NEJDELE_CEKA_TLACITKO_MS`), takže ani mnoho firem nezdrží úlohu
+  ostatních o víc než ~11 s; celý svůj díl čeká jen naplánovaná úloha
+  (`uloha: true`). „Ověřit znovu“ nejvýš jednou za minutu na připojení
+  (`rezervace_choice_zabrat_overeni`). Scénář `krok105` (oddíl 2b zkouší
+  zámek řádku firmy dvěma spojeními přes dblink — jen proti PostgreSQL).
 - Úloha dělí čas: rezerva 20 s se odečte jednou za úlohu, zbytek po
   dílech nejméně na tři dotazy; pořadí `poradiSynchronizace` (firmy se
   střídají, podle `synchronizace_behy`, tentýž podnik u firmy jednou).
