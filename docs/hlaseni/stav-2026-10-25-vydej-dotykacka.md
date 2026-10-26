@@ -17,7 +17,7 @@
   Do AI nejdou ceny ani jména.
 - **Návrh:** `docs/jine-platby-vydej-dotykacka.md` (s odkazy do
   dokumentace Dotykačky). **PR #157** (větev `jine-platby-vydej-dotykacka`). Migrace
-  `20261031100000_jine_platby_vydej_dotykacka.sql` **bez db push**.
+  `20261101100000_jine_platby_vydej_dotykacka.sql` **bez db push**.
 
 ## Co je hotové
 
@@ -109,17 +109,19 @@ jakým uživatelem pokladny se odpis zapíše, 75 kdy a kolik přiřazení přes
   ze skladu z výdeje vypadne (tak to databáze má od 16. 10.). S recepturami
   z katalogu to začne platit doopravdy. Proto „bez receptury“ appka
   zapíše jen z prázdného seznamu surovin, nikdy z chybějícího údaje.
-- **Razítko migrace a číslo scénáře se měnily třikrát**, protože se mezitím
+- **Razítko migrace a číslo scénáře se měnily čtyřikrát**, protože se mezitím
   slučovala a nasazovala jiná práce:
   - původně 20261025100000 — stejné razítko dostala migrace záloh (#156);
   - pak 20261025230000 a krok103 — v main přibyly Rezervace (#158) se
     scénářem krok103 a migrací 20261027100000, kterou db push 25. 10. večer
     nasadil;
   - pak 20261029100000 a krok102 — i to předběhla příjmová část Rezervací
-    (#160, migrace 20261030100000, nasazená, scénář krok104).
+    (#160, migrace 20261030100000, nasazená, scénář krok104);
+  - pak 20261031100000 — stejné razítko má otevřená PR #162 (Choice).
 
-  Starší razítko než nasazené CLI nepustí. Teď je **20261031100000**
-  a scénář **krok102**.
+  Starší razítko než nasazené CLI nepustí a dvě stejná v main by db push
+  shodila. Teď je **20261101100000** (novější než main i všechny otevřené
+  PR) a scénář **krok102**.
 - **Obrazovku jsem neviděl v prohlížeči.** Panel Sklad je ověřený
   vykreslením komponenty do HTML (tlačítko, formulář, kdy se nezobrazí),
   ne snímkem obrazovky.

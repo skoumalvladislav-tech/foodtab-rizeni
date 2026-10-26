@@ -1,5 +1,5 @@
 -- Scénář pro krok 102 — Jiné platby: výdej ze skladu v Dotykačce, příprava
--- zápisu (migrace 20261031100000_jine_platby_vydej_dotykacka.sql, návrh
+-- zápisu (migrace 20261101100000_jine_platby_vydej_dotykacka.sql, návrh
 -- docs/jine-platby-vydej-dotykacka.md).
 --
 -- Pokrývá:

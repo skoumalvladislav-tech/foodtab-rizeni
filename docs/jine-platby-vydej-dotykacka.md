@@ -271,7 +271,7 @@ Co tahle PR přidává (všechno pod vypínačem, do pokladny nic neodejde):
 | Porovnání položek účtu s výdejem po zápisu | `porovnatPolozkyVydeje` | `scripts/jine-platby-pos-operace.test.mjs` |
 | Vypínač v kódu (zápis jen pro provozovnu ze seznamu, i schopnost „api“ jen pro ni) | `lib/pokladna-dotykacka-zapis.ts`, `schopnostVydeje` | `scripts/pokladna-dotykacka-sklad.test.mjs`, `scripts/jine-platby-detail.test.mjs` |
 
-Migrace `20261031100000_jine_platby_vydej_dotykacka.sql` (bez `db push`).
+Migrace `20261101100000_jine_platby_vydej_dotykacka.sql` (bez `db push`).
 Živě nic z toho neběželo — testy jedou na podvržených odpovědích podle
 dokumentace a nad PGlite.
 

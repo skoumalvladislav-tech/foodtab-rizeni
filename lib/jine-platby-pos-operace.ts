@@ -137,7 +137,7 @@ export function porovnatPolozkyVydeje(
 
 /**
  * Provozovna pokladny pro výdej záznamu — zrcadlo `app.jp_provozovna_vydeje`
- * (migrace 20261031100000), aby akce věděla, jestli pro ni smí zápis přes
+ * (migrace 20261101100000), aby akce věděla, jestli pro ni smí zápis přes
  * API: uložená u záznamu, jen když ji přiřazení pořád dává pobočce
  * záznamu; jinak jediná provozovna přiřazená pobočce; nula nebo víc = `null`.
  * Rozhoduje databáze při zabrání — tohle jen vybírá cestu (API / ručně).
