@@ -222,9 +222,12 @@ console.log('\n== 6. Napojení: „připojeno“ jen po ověření ==\n')
   ok('soubor z „jiného“ systému má zdroj csv, ze známého jeho klíč',
     poskytovatelSouboru('jiny') === 'csv' && poskytovatelSouboru('neznamy') === 'csv' && poskytovatelSouboru('tablein') === 'tablein')
 
-  // Strukturální pojistka: kód modulu stav `pripojeno` nikde nenastavuje.
-  // Smí ho nastavit jen budoucí adaptér po ověření — a databáze ho bez
-  // posledni_test_ok = true nepustí (integrace_pripojeni_rezervace_overeno).
+  // Strukturální pojistka: kód modulu stav `pripojeno` nastavuje na
+  // JEDINÉM místě — adaptér Choice po úspěšném živém testu
+  // (`zapsatVysledekTestu` v lib/rezervace-choice-sync.ts; že tam opravdu
+  // neprojde nic jiného než úspěšný test, ověřuje spuštěním
+  // scripts/rezervace-choice.test.mjs). Databáze ho bez posledni_test_ok =
+  // true nepustí (integrace_pripojeni_rezervace_overeno).
   // U příjmového API ho nastavuje databáze (`rezervace_prijmout`) až po
   // úspěšně zapsané dávce — adresa /api/rezervace/prijem ne.
   const vSlozce = (slozka) =>
@@ -237,8 +240,16 @@ console.log('\n== 6. Napojení: „připojeno“ jen po ověření ==\n')
     ...vSlozce('app/api/rezervace'),
   ]
   ok(`prošlo se dost souborů modulu (${soubory.length})`, soubory.length >= 15 && soubory.includes('app/api/rezervace/prijem/route.ts'))
-  const natvrdo = soubory.filter((f) => /stav\s*[:=]\s*['"]pripojeno['"]/.test(cti(f)))
-  ok(`nikde v modulu se stav 'pripojeno' nezapisuje natvrdo${natvrdo.length ? ' — ' + natvrdo.join(', ') : ''}`, natvrdo.length === 0)
+  const RE_PRIPOJENO = /stav\s*[:=]\s*['"]pripojeno['"]/g
+  const natvrdo = soubory.filter((f) => cti(f).match(RE_PRIPOJENO))
+  ok(`stav 'pripojeno' se v modulu zapisuje jen v lib/rezervace-choice-sync.ts${natvrdo.length ? ' — ' + natvrdo.join(', ') : ''}`,
+    natvrdo.length === 1 && natvrdo[0] === 'lib/rezervace-choice-sync.ts')
+  const sync = cti('lib/rezervace-choice-sync.ts')
+  const telo = sync.slice(sync.indexOf('export async function zapsatVysledekTestu'), sync.indexOf('export async function jinePripojeniTehozPodniku'))
+  ok('… jednou, uvnitř zapsatVysledekTestu, jen ve větvi úspěšného testu a spolu s posledni_test_ok: true',
+    (sync.match(RE_PRIPOJENO) ?? []).length === 1
+    && telo.length > 0
+    && /if \(test\.stav === 'ok'\) \{\s*zmena = \{ stav: 'pripojeno', posledni_test_ok: true,/.test(telo))
 }
 
 console.log('\n== 7. Přílohy ==\n')

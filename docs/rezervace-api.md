@@ -1,9 +1,11 @@
 # Příjmové API Foodtabu pro rezervace
 
-Pro rezervační systém, na který se Foodtab neumí napojit sám — třeba
-**Choice**, nebo cokoli jiného. Systém sám (webhookem), nebo prostředník
-jako **n8n, Make či Zapier**, posílá rezervace do Foodtabu. Ve Foodtabu
-k nim obsluha přidává poznámky, další informace a dokumenty.
+Pro rezervační systém, na který se Foodtab neumí napojit sám.
+**Choice** se od 25. 10. 2026 napojuje přímo (Foodtab se ptá sám, viz
+[rezervace-choice.md](rezervace-choice.md)) — tohle API je pro ostatní.
+Systém sám (webhookem), nebo prostředník jako **n8n, Make či Zapier**,
+posílá rezervace do Foodtabu. Ve Foodtabu k nim obsluha přidává
+poznámky, další informace a dokumenty.
 
 Stejný princip jako příjmové API pokladen (`docs/pokladna-api.md`).
 
@@ -110,16 +112,24 @@ Rezervace se ve Foodtabu nemaže — zůstanou k ní poznámky i dokumenty.
 
 ## Choice a prostředníci
 
-Choice veřejné API pro rezervace v dokumentaci nemá (stav k 25. 10. 2026).
-Možnosti:
+**Choice má vlastní napojení** (stav k 25. 10. 2026): Choice Open API
+rezervace číst umí (`GET /bookings/list`, 1 dotaz za 5 s), webhooky
+pro rezervace ale nemá. Foodtab se proto ptá sám každých 15 minut —
+Rezervace → Napojení a import → karta **Choice** → Připojit podnik
+v Choice. Postup a co je potřeba nastavit: [rezervace-choice.md](rezervace-choice.md).
+Rezervace z Choice mají systém `choice` a číslo = `_id` z Choice,
+takže se párují i s tím, co by přišlo sem s `"system": "choice"`
+a stejným `id`.
 
-1. **Webhook z Choice** (pokud ho váš tarif nabízí) → n8n/Make přemapuje
+Tohle příjmové API zůstává pro ostatní systémy. Možnosti:
+
+1. **Webhook ze systému** (pokud ho nabízí) → n8n/Make přemapuje
    údaje na tvar výš a pošle je sem.
 2. **E-mail s rezervací** → n8n/Make z e-mailu vytáhne údaje a pošle je
    sem.
-3. **Export z Choice do CSV** → Rezervace → Napojení a import → Načíst ze
-   souboru (zdroj „Choice“). Spáruje se se stejnými rezervacemi z API,
-   pokud nesou stejné číslo.
+3. **Export do CSV** → Rezervace → Napojení a import → Načíst ze
+   souboru. Spáruje se se stejnými rezervacemi z API, pokud nesou
+   stejné číslo.
 
 Ukázka pro n8n (uzel HTTP Request): metoda POST, adresa z appky, hlavička
 `Authorization` = `Bearer <klíč>`, tělo JSON s polem `rezervace`.

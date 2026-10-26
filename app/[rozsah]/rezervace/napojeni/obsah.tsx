@@ -1,13 +1,15 @@
 import Badge from '@/components/ui/Badge'
 import { datumACasSRokemVPasmu } from '@/lib/cas'
 import { POSKYTOVATEL_PRIJMU } from '@/lib/rezervace-prijem-api'
-import { SYSTEMY, najitSystem, popisStavuPripojeni, type PristupKApi } from '@/lib/rezervace-poskytovatele'
+import { KLIC_CHOICE } from '@/lib/rezervace-choice'
+import { SYSTEMY, najitSystem, popisStavuPripojeni, systemyKPriprave, type PristupKApi } from '@/lib/rezervace-poskytovatele'
 
 import { PanelHlava } from '../../dnes/prvky'
 import Nadpis from '../../nadpis'
 import { odpojitNapojeni, pripravitNapojeni } from '../akce'
 import type { PobockaRezervaci } from '../pristup'
 import { HlaskaAkce, ZalozkyRezervaci } from '../prvky'
+import { ChoiceKarta } from './choice-karta'
 import ImportFormular from './import-formular'
 import KlicPrijmuRezervaci from './klic-prijmu'
 
@@ -42,14 +44,16 @@ function stavPrijmu(stav: string): { text: string; ton: keyof typeof TONY } {
 
 /**
  * Obsah obrazovky Napojení a import — ČISTĚ KRESLICÍ. Přístup, napojení
- * z databáze, právo `integrace.manage` a adresu příjmového API dodala
- * stránka (page.tsx).
+ * z databáze, právo `integrace.manage`, nastavení Choice a adresu
+ * příjmového API dodala stránka (page.tsx).
  */
 export function NapojeniObsah({
   rozsah,
   pobocky,
   napojeni,
   smiSpravovat,
+  spravaPobocek,
+  choiceNastaveno,
   adresaPrijmu,
   stav,
   chyba,
@@ -58,6 +62,10 @@ export function NapojeniObsah({
   pobocky: PobockaRezervaci[]
   napojeni: Napojeni[]
   smiSpravovat: boolean
+  /** Pobočky, kde člověk spravuje napojení (`integrace.manage` na té pobočce). */
+  spravaPobocek: string[]
+  /** Na serveru jsou klíče aplikace Foodtab z Choice (a šifrování). */
+  choiceNastaveno: boolean
   /** `https://…/api/rezervace/prijem` */
   adresaPrijmu: string
   stav?: string
@@ -67,9 +75,10 @@ export function NapojeniObsah({
   const zona = pobocky[0].zona
   const kImportu = pobocky.filter((p) => p.zapis)
   const prijmy = napojeni.filter((n) => n.poskytovatel === POSKYTOVATEL_PRIJMU)
-  const adaptery = napojeni.filter((n) => n.poskytovatel !== POSKYTOVATEL_PRIJMU)
+  // Choice má vlastní kartu (adaptér je hotový), tady jen ostatní systémy.
+  const adaptery = napojeni.filter((n) => n.poskytovatel !== POSKYTOVATEL_PRIJMU && n.poskytovatel !== KLIC_CHOICE)
   const bezKlice = pobocky.filter((p) => !prijmy.some((n) => n.branch_id === p.id))
-  const sAdapterem = SYSTEMY.filter((s) => s.api === 'verejne' || s.api === 'partnerske')
+  const sAdapterem = systemyKPriprave()
 
   return (
     <>
@@ -80,11 +89,19 @@ export function NapojeniObsah({
         <ZalozkyRezervaci rozsah={rozsah} aktivni="napojeni" />
         <HlaskaAkce stav={stav} chyba={chyba} />
 
+        <ChoiceKarta
+          rozsah={rozsah}
+          pobocky={pobocky}
+          napojeni={napojeni}
+          nastaveno={choiceNastaveno}
+          spravaPobocek={spravaPobocek}
+        />
+
         <section className="ds-plocha">
           <PanelHlava ikona="schranka" nadpis="Univerzální příjmové API" />
           <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--muted)', lineHeight: 1.5 }}>
-            Napojení pro jakýkoli rezervační systém — i Choice. Systém sám (webhookem), nebo prostředník n8n, Make či Zapier
-            posílá rezervace na adresu Foodtabu s klíčem. Klíč patří jedné pobočce. Čas, počet osob, stav a kontakt pak
+            Napojení pro rezervační systém, na který se Foodtab neumí napojit sám. Systém sám (webhookem), nebo prostředník
+            n8n, Make či Zapier posílá rezervace na adresu Foodtabu s klíčem. Klíč patří jedné pobočce. Čas, počet osob, stav a kontakt pak
             patří rezervačnímu systému; poznámky, dokumenty, prostor, menu a záloha zůstávají ve Foodtabu.
           </p>
           {prijmy.length === 0 ? (
@@ -173,7 +190,7 @@ Content-Type: application/json
           <PanelHlava ikona="kolo" nadpis="Přímé napojení na rezervační systém" />
           <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--muted)', lineHeight: 1.5 }}>
             Systémy s vlastním API, u kterých se Foodtab jednou bude ptát sám. Dokud pro systém není hotové ověření, je
-            napojení „čeká na připojení“ — pro Choice a ostatní použijte příjmové API výš nebo soubor.
+            napojení „čeká na připojení“ — do té doby použijte příjmové API výš nebo soubor. Choice má vlastní kartu nahoře.
           </p>
           {adaptery.length === 0 ? (
             <p style={{ margin: 0, fontSize: '14px' }}>Zatím žádné napojení.</p>
@@ -258,6 +275,7 @@ Content-Type: application/json
                   <Badge tone={STITEK_API[s.api].ton}>{STITEK_API[s.api].text}</Badge>
                   {s.webhooky ? <Badge tone="accent">hlásí změny</Badge> : null}
                   {s.exportSouboru ? <Badge>export do souboru</Badge> : null}
+                  {s.adapter ? <Badge tone="success">napojení hotové</Badge> : null}
                 </div>
                 <p>{s.popis}</p>
               </article>

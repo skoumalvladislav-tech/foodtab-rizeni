@@ -91,6 +91,17 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     pobočce záznamu uživatelským klientem, jen s id toho záznamu, cestou
  *     v jeho složce kbelíku a `p_nahral` = id přihlášeného (vlastník
  *     objektu v úložišti musí sedět).
+ *   * Rezervace z Choice — `lib/rezervace-choice-sync.ts` z akcí
+ *     `app/[rozsah]/rezervace/akce.ts` („Načíst teď“, „Ověřit znovu“)
+ *     a z `app/api/rezervace/choice/callback` (ověření tokenu, kontrola,
+ *     že tentýž podnik není u jiné pobočky téže firmy, první načtení).
+ *     Fronta dotazů na Choice (`rezervace_choice_zabrat_dotaz`), odstup
+ *     „Ověřit znovu“ (`rezervace_choice_zabrat_overeni`) a zápis
+ *     ze zdroje (`rezervace_importovat_zdroj`) jsou jen pro service_role
+ *     schválně: přihlášený by si jinak zabíral frontu dopředu a zapisoval
+ *     „rezervace z Choice“ sám. Vždy až po přihlášení, právu na pobočce
+ *     připojení (`integrace.manage`, u „Načíst teď“ i `rezervace.manage`)
+ *     a dohledání připojení uživatelským klientem; jen s id toho připojení.
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ

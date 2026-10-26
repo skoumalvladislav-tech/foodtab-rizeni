@@ -3,8 +3,9 @@
  * Napojení i pro kontrolu, co se smí založit.
  *
  * Co o kterém víme, je z průzkumu 25. 10. 2026 (docs/rezervace-navrh.md,
- * oddíl 1). Žádný tu nemá adaptér: bez přístupu k dokumentaci a účtu
- * konkrétního systému se tvar dat nevymýšlí. Připojení proto vznikne jako
+ * oddíl 1). Adaptér má zatím jen Choice (`adapter: true`, dokumentace
+ * Choice Open API, lib/rezervace-choice.ts) — u ostatních se bez přístupu
+ * k dokumentaci a účtu tvar dat nevymýšlí. Jejich připojení vznikne jako
  * „čeká na připojení“ a „připojeno“ ukáže teprve adaptér, který přístup
  * ověří (databáze jinak `pripojeno` nedovolí, viz
  * `integrace_pripojeni_rezervace_overeno`).
@@ -27,6 +28,12 @@ export type PopisSystemu = {
   webhooky: boolean | null
   /** Jde z něj vyexportovat soubor, který appka umí načíst? */
   exportSouboru: boolean
+  /**
+   * Má Foodtab hotový adaptér — umí se systému ptát sám? Takový systém má
+   * na obrazovce Napojení vlastní kartu s připojením, ne obecné „Připravit
+   * napojení“.
+   */
+  adapter: boolean
   /** Jedna věta pro majitele: co to znamená pro napojení. */
   popis: string
 }
@@ -38,18 +45,22 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'verejne',
     webhooky: true,
     exportSouboru: false,
+    adapter: false,
     popis: 'Rezervace stolů v Dotykačce má veřejné API i webhooky. Pokladna už je napojená, takže je to nejbližší první adaptér — čeká na ověření, že stávající přístup rezervace smí číst.',
   },
   {
-    // Šéfík 25. 10. 2026: „mám Choice“. Veřejné API pro rezervace jsme
-    // v dokumentaci nenašli, proto se napojuje přes univerzální příjmové
-    // API Foodtabu (Choice nebo n8n/Make posílá rezervace sem) nebo CSV.
+    // Šéfík 25. 10. 2026: „mám Choice“. Choice Open API (dokumentace
+    // open-api.choiceqr.com/docs): rezervace jde číst (GET /bookings/list,
+    // 1 dotaz za 5 s), přístup přes OAuth aplikace „Foodtab“ a ChoiceQR
+    // token od api@choiceqr.com. Webhooky má jen pro menu, objednávky
+    // a místo — rezervace se proto tahají. Adaptér: lib/rezervace-choice.ts.
     klic: 'choice',
     nazev: 'Choice',
-    api: 'neovereno',
-    webhooky: null,
+    api: 'partnerske',
+    webhooky: false,
     exportSouboru: false,
-    popis: 'Veřejné API pro rezervace jsme nenašli. Napojí se přes univerzální příjmové API Foodtabu — Choice nebo prostředník (n8n, Make, Zapier) posílá rezervace na adresu Foodtabu s klíčem.',
+    adapter: true,
+    popis: 'Choice Open API: Foodtab se sám ptá na rezervace každých 15 minut (Choice je neumí poslat sám) a do Choice nic nezapisuje. Podnik se připojí v kartě Choice výš; Choice k tomu chce ChoiceQR token od api@choiceqr.com.',
   },
   {
     klic: 'thefork',
@@ -57,6 +68,7 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'partnerske',
     webhooky: true,
     exportSouboru: false,
+    adapter: false,
     popis: 'Dobře popsané API, přístup vydává TheFork a musí ho schválit restaurace. Webhook posílá jen číslo rezervace, zbytek se dotáhne.',
   },
   {
@@ -65,6 +77,7 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'verejne',
     webhooky: false,
     exportSouboru: false,
+    adapter: false,
     popis: 'Veřejné API (tarif Pro), bez webhooků — appka by se ptala jednou za čas. Je stavěné spíš na termíny služeb než na stoly.',
   },
   {
@@ -73,6 +86,7 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'partnerske',
     webhooky: null,
     exportSouboru: false,
+    adapter: false,
     popis: 'API jen pro partnery, dokumentace za přihlášením.',
   },
   {
@@ -81,6 +95,7 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'partnerske',
     webhooky: null,
     exportSouboru: false,
+    adapter: false,
     popis: 'API po schválení a smlouvě s OpenTable.',
   },
   {
@@ -89,6 +104,7 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'partnerske',
     webhooky: true,
     exportSouboru: false,
+    adapter: false,
     popis: 'API na žádost přes podporu ResDiary.',
   },
   {
@@ -97,6 +113,7 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'zadne',
     webhooky: false,
     exportSouboru: true,
+    adapter: false,
     popis: 'Veřejné API nemá. Rezervace jde vyexportovat do CSV a načíst sem souborem.',
   },
   {
@@ -105,6 +122,7 @@ export const SYSTEMY: readonly PopisSystemu[] = [
     api: 'zadne',
     webhooky: null,
     exportSouboru: true,
+    adapter: false,
     popis: 'Cokoli jiného: export do CSV a načtení souborem, nebo ruční zápis.',
   },
 ]
@@ -136,6 +154,11 @@ export function popisStavuPripojeni(stav: string): { text: string; ton: 'dobre' 
     default:
       return { text: 'Neznámý stav', ton: 'pozor' }
   }
+}
+
+/** Systémy bez hotového adaptéru, ke kterým jde jen připravit napojení (čeká na připojení). */
+export function systemyKPriprave(): PopisSystemu[] {
+  return SYSTEMY.filter((s) => !s.adapter && (s.api === 'verejne' || s.api === 'partnerske'))
 }
 
 /**
