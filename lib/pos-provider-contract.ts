@@ -113,10 +113,43 @@ export type ProduktPos = {
   odecitaSklad: boolean | null
   /** Má produkt v pokladně recepturu (suroviny)? `null` = neví se. */
   maRecepturu: boolean | null
+  /**
+   * NEPOVINNÉ. Receptura, když ji pokladna poslala: suroviny podle id
+   * U POSKYTOVATELE. `[]` = produkt recepturu nemá, `null`/chybí = neví se
+   * (pak platí jen `maRecepturu`).
+   */
+  suroviny?: SurovinaPos[] | null
   plu: string[]
   ean: string[]
   smazano: boolean
 }
+
+/** Jedna surovina receptury. Množství jako TEXT s tečkou, `null` = pokladna ho neuvedla čitelně. */
+export type SurovinaPos = { produkt: string; mnozstvi: string | null; jednotka: string | null }
+
+/**
+ * Skladový výdej, jak ho zápis pokladny dostane od orchestrátoru Jiných
+ * plateb (`OperacePos` z lib/jine-platby-pos-operace.ts je jeho nadmnožina).
+ * `klic` = idempotenční klíč appky (jde do pokladny jako externí ID).
+ */
+export type VydejPos = {
+  klic: string
+  externiProvozovna: string
+  polozky: { produktId: string; mnozstvi: string }[]
+  poznamka: string
+  /** Do kdy smí pokladna požadavek provést (ISO). */
+  platnostDo: string | null
+}
+
+/**
+ * Výsledek ODESLÁNÍ výdeje — ne provedení. „odeslano" není úspěch: úspěch
+ * je jen to, co jde v pokladně dohledat podle klíče (`ucetPodleKlice`).
+ * „odmitnuto" = prokazatelně se nic neprovedlo; „nejasne" = nevíme.
+ */
+export type VysledekOdeslaniPos =
+  | { stav: 'odeslano' }
+  | { stav: 'odmitnuto'; duvod: string }
+  | { stav: 'nejasne'; duvod: string }
 
 /** Řádek účtu (položka objednávky) v pokladně. */
 export type PolozkaUctuPos = {
@@ -168,7 +201,7 @@ export type RelacePos = {
    * načíst, je CHYBA — ne tichý ořez (chybějící produkt by vypadal, že
    * v pokladně není).
    */
-  katalog?(): Promise<{ stav: 'ok'; produkty: ProduktPos[] } | ChybaPos>
+  katalog?(): Promise<{ stav: 'ok'; produkty: ProduktPos[]; bezReceptur?: boolean } | ChybaPos>
   /**
    * NEPOVINNÉ. Účty provozovny v okně `[odMs, doMs)` — podle data
    * VYTVOŘENÍ (výchozí, `podle: 'vytvoreni'`), nebo podle data UZAVŘENÍ
@@ -187,6 +220,16 @@ export type RelacePos = {
   ): Promise<{ stav: 'ok'; ucty: UcetPos[]; uplne: boolean } | ChybaPos>
   /** NEPOVINNÉ. Účet podle externího klíče operace (idempotence). `null` = pokladna takový nemá. */
   ucetPodleKlice?(klic: string): Promise<{ stav: 'ok'; ucet: UcetPos | null } | ChybaPos>
+  /**
+   * NEPOVINNÉ. Zápis skladového výdeje (Jiné platby). Adaptér ho k relaci
+   * připojí, jen když zápis pro některou provozovnu cloudu povolil v KÓDU
+   * (u Dotykačky `ZAPIS_VYDEJE_DOTYKACKA`), a i pak odmítne provozovnu
+   * mimo povolené bez jediného volání. Volá ho JEN orchestrátor
+   * (`provestOperaci`), nikdy agenda přímo.
+   */
+  skladovyVydej?(vydej: VydejPos): Promise<VysledekOdeslaniPos>
+  /** NEPOVINNÉ. Smí `skladovyVydej` zapisovat do téhle provozovny? Chybí = ne. */
+  zapisVydejePovolen?(externiProvozovna: string): boolean
 }
 
 export type SchopnostiPosProvidera = {

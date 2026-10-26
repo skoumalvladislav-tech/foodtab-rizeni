@@ -18,9 +18,17 @@
  *      výsledek uzavře, až když platnost požadavku prokazatelně vypršela
  *      a pokladna ho pořád nezná — po platnosti už ho neprovede.
  *
+ *   5. Úspěch je jen účet, na kterém jsou VŠECHNY odepisované produkty
+ *      v plném množství (`porovnatPolozkyVydeje`, 25. 10.). Pokladna mohla
+ *      položku vynechat nebo změnit — „uzavřený a zaplacený odpis" sám
+ *      o sobě neříká, CO se odečetlo.
+ *
  * Čisté funkce bez sítě a databáze — testuje
  * scripts/jine-platby-pos-operace.test.mjs s podvrženým repo i pokladnou.
  */
+
+import { mnozstviNaTisiciny, tisicinyNaMnozstvi } from './jine-platby-castky.ts'
+import type { VysledekOdeslaniPos } from './pos-provider-contract.ts'
 
 /** Stavy operace — musí sedět s CHECK `pos_operace.stav` v migraci (hlídá scripts/jine-platby.test.mjs). */
 export const STAVY_OPERACE = [
@@ -59,7 +67,8 @@ export type RepoOperaci = {
   dokoncit(opId: string, zaver: ZaverOperace): Promise<void>
 }
 
-export type VysledekOdeslani = { stav: 'odeslano' } | { stav: 'odmitnuto'; duvod: string } | { stav: 'nejasne'; duvod: string }
+/** Tvar z kontraktu pokladny (`RelacePos.skladovyVydej`) — jeden pro orchestrátor i adaptér. */
+export type VysledekOdeslani = VysledekOdeslaniPos
 
 export type VysledekDohledani =
   | { stav: 'nalezeno'; externiId: string; doklad: string | null; detail: Record<string, unknown> }
@@ -81,6 +90,84 @@ const hlaska = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /** Účet s klíčem operace v pokladně je, ale výdej z něj (zatím) neplyne — nejasný výsledek s touhle větou. */
 export const HLASKA_UCET_NEDOKONCENY = 'Účet v pokladně existuje, ale není uzavřený a zaplacený Odpisem — ověřte ho v pokladně'
+/** Účet je uzavřený odpis, ale položky nesedí s výdejem (nebo je pokladna neposlala) — nejasný výsledek. */
+export const HLASKA_POLOZKY_NESEDI = 'Účet v pokladně je uzavřený odpis, ale jeho položky nesedí s výdejem — ověřte v pokladně, co se odečetlo'
+
+type PolozkaNaUctu = { produktId: string | null; mnozstvi: string; zrusena?: boolean }
+
+/**
+ * Sedí účet z pokladny s výdejem? Pro každý odepisovaný produkt součet
+ * NEZRUŠENÝCH řádků účtu = součet výdeje (v tisícinách, bez plovoucí
+ * chyby). Produkt na účtu navíc (pokladna 2.19+ sama přidá zálohovaný obal
+ * jako další položku, pos-actions/actions „Returnable containers") výdej
+ * nezpochybní, jen se vrátí v `navic` — odečetl se taky a člověk to má vidět.
+ *
+ * `null` místo položek účtu = pokladna je neposlala → nesedí (nejde ověřit).
+ */
+export function porovnatPolozkyVydeje(
+  vydej: readonly { produktId: string; mnozstvi: string }[],
+  naUctu: readonly PolozkaNaUctu[] | null,
+): { stav: 'shoda'; navic: { produktId: string; mnozstvi: string }[] } | { stav: 'nesedi'; rozdily: { produktId: string; vydej: string; naUctu: string }[] } {
+  if (!Array.isArray(naUctu)) return { stav: 'nesedi', rozdily: [] }
+  const secist = (radky: readonly { produktId: string | null; mnozstvi: string }[]) => {
+    const m = new Map<string, number>()
+    for (const r of radky) {
+      if (typeof r.produktId !== 'string' || r.produktId === '') continue
+      const t = typeof r.mnozstvi === 'string' ? mnozstviNaTisiciny(r.mnozstvi) : null
+      // Nečitelné množství = nejde ověřit (NaN shodí každé porovnání).
+      m.set(r.produktId, (m.get(r.produktId) ?? 0) + (t === null ? Number.NaN : t))
+    }
+    return m
+  }
+  const chceme = secist(vydej)
+  const mame = secist(naUctu.filter((r) => r && r.zrusena !== true))
+  const text = (t: number | undefined) => (t === undefined ? '0' : Number.isFinite(t) ? tisicinyNaMnozstvi(t) : 'nečitelné')
+  const rozdily: { produktId: string; vydej: string; naUctu: string }[] = []
+  for (const [produktId, t] of chceme) {
+    if (!Number.isFinite(t) || mame.get(produktId) !== t) rozdily.push({ produktId, vydej: text(t), naUctu: text(mame.get(produktId)) })
+  }
+  // Řádek navíc s nečitelným množstvím mohl odečíst cokoli — to se nedá vydávat za „navíc 0“ (kontrola 25. 10.).
+  for (const [produktId, t] of mame) {
+    if (!chceme.has(produktId) && !Number.isFinite(t)) rozdily.push({ produktId, vydej: '0', naUctu: 'nečitelné' })
+  }
+  if (rozdily.length > 0 || chceme.size === 0) return { stav: 'nesedi', rozdily }
+  const navic = [...mame].filter(([id]) => !chceme.has(id)).map(([produktId, t]) => ({ produktId, mnozstvi: text(t) }))
+  return { stav: 'shoda', navic }
+}
+
+/**
+ * Provozovna pokladny pro výdej záznamu — zrcadlo `app.jp_provozovna_vydeje`
+ * (migrace 20261101100000), aby akce věděla, jestli pro ni smí zápis přes
+ * API: uložená u záznamu, jen když ji přiřazení pořád dává pobočce
+ * záznamu; jinak jediná provozovna přiřazená pobočce; nula nebo víc = `null`.
+ * Rozhoduje databáze při zabrání — tohle jen vybírá cestu (API / ručně).
+ */
+export function provozovnaProVydej(
+  posProvozovna: string | null,
+  branchId: string,
+  provozovny: readonly { id: string; branch_id: string | null }[],
+): string | null {
+  const pobocky = [...new Set(provozovny.filter((o) => o.branch_id === branchId && typeof o.id === 'string' && o.id !== '').map((o) => o.id))]
+  if (posProvozovna) return pobocky.includes(posProvozovna) ? posProvozovna : null
+  return pobocky.length === 1 ? pobocky[0] : null
+}
+
+/**
+ * Schopnost výdeje pro JEDNU provozovnu: 'api' jen tehdy, když ji adaptér
+ * hlásí, relace má metodu zápisu a zápis do TÉHLE provozovny povoluje
+ * (`zapisVydejePovolen`). Pokladna, která API zápis umí jen pro jinou
+ * provozovnu, je tady 'rucne' — výdej se zpracuje ručně, nic se neodešle.
+ */
+export function schopnostVydeje(
+  adapter: 'api' | 'rucne' | 'nepodporovano' | undefined,
+  relace: { skladovyVydej?: unknown; zapisVydejePovolen?: (provozovna: string) => boolean },
+  provozovna: string | null,
+): 'api' | 'rucne' | 'nepodporovano' {
+  const s = adapter ?? 'nepodporovano'
+  if (s !== 'api') return s
+  const povoleno = provozovna !== null && typeof relace.skladovyVydej === 'function' && relace.zapisVydejePovolen?.(provozovna) === true
+  return povoleno ? 'api' : 'rucne'
+}
 
 /**
  * Výdej z dohledaného účtu proběhl, jen když je účet UZAVŘENÝ, ZAPLACENÝ
@@ -92,17 +179,29 @@ export const HLASKA_UCET_NEDOKONCENY = 'Účet v pokladně existuje, ale není u
  * `stockDeductionMode = documentIssue` neodečetl a v pokladně visí
  * otevřený účet. Takový nález NENÍ úspěch.
  *
- *   'uspech'      — účet uzavřený, zaplacený a odpis, s neprázdným ID;
+ * A navíc (25. 10.) položky účtu (`detail.polozky`) sedí s výdejem
+ * operace (`porovnatPolozkyVydeje`) — jinak 'nesedi'.
+ *
+ *   'uspech'      — účet uzavřený, zaplacený a odpis, s neprázdným ID a se všemi položkami výdeje;
  *   'nedokonceny' — účet je, ale něco z toho chybí (i chybějící údaj);
+ *   'nesedi'      — uzavřený odpis, ale položky nesedí nebo je pokladna neposlala;
  *   null          — nic nenalezeno (nebo „nalezeno" bez ID — nic nedokazuje).
  */
-function uspechZDohledani(d: VysledekDohledani): { stav: 'uspech'; zaver: ZaverOperace } | { stav: 'nedokonceny' } | null {
+function uspechZDohledani(
+  d: VysledekDohledani,
+  op: Pick<OperacePos, 'polozky'>,
+): { stav: 'uspech'; zaver: ZaverOperace } | { stav: 'nedokonceny' } | { stav: 'nesedi'; duvod: string } | null {
   if (!d || d.stav !== 'nalezeno' || typeof d.externiId !== 'string' || d.externiId.trim() === '') return null
   const detail = d.detail ?? {}
-  if (detail.stav === 'uzavreny' && detail.zaplaceno === true && detail.odpis === true) {
-    return { stav: 'uspech', zaver: { stav: 'uspech', externiId: d.externiId, doklad: d.doklad ?? null, vysledek: detail } }
+  if (!(detail.stav === 'uzavreny' && detail.zaplaceno === true && detail.odpis === true)) return { stav: 'nedokonceny' }
+  const naUctu = Array.isArray(detail.polozky) ? (detail.polozky as PolozkaNaUctu[]) : null
+  const p = porovnatPolozkyVydeje(op.polozky, naUctu)
+  if (p.stav === 'nesedi') {
+    const rozpis = p.rozdily.slice(0, 5).map((r) => `produkt ${r.produktId}: výdej ${r.vydej}, na účtu ${r.naUctu}`).join('; ')
+    return { stav: 'nesedi', duvod: naUctu === null ? `${HLASKA_POLOZKY_NESEDI} (pokladna položky účtu neposlala)` : `${HLASKA_POLOZKY_NESEDI}${rozpis ? ` (${rozpis})` : ''}` }
   }
-  return { stav: 'nedokonceny' }
+  const vysledek = p.navic.length > 0 ? { ...detail, navic: p.navic } : detail
+  return { stav: 'uspech', zaver: { stav: 'uspech', externiId: d.externiId, doklad: d.doklad ?? null, vysledek } }
 }
 
 /**
@@ -161,7 +260,7 @@ export async function provestOperaci(
       // 3. Ověřit: „přijato" nestačí, úspěch je jen to, co pokladna zná.
       try {
         const d = await pos.dohledat(zabrana.klic)
-        const posudek = uspechZDohledani(d)
+        const posudek = uspechZDohledani(d, zabrana)
         zaver =
           posudek?.stav === 'uspech'
             ? posudek.zaver
@@ -170,7 +269,9 @@ export async function provestOperaci(
                 duvod:
                   posudek?.stav === 'nedokonceny'
                     ? HLASKA_UCET_NEDOKONCENY
-                    : d && d.stav === 'chyba'
+                    : posudek?.stav === 'nesedi'
+                      ? posudek.duvod
+                      : d && d.stav === 'chyba'
                       ? `Pokladna požadavek přijala, ale dohledání selhalo (${d.duvod}) — dohledá se znovu`
                       : 'Pokladna požadavek přijala, ale zatím ho nejde dohledat — může ho ještě zpracovávat',
               }
@@ -193,6 +294,8 @@ export async function provestOperaci(
  *   nalezeno (uzavřený, zaplacený odpis)  → úspěch
  *   nalezeno, ale nedokončený účet        → beze změny (HLASKA_UCET_NEDOKONCENY;
  *                                           účet je — chybou ho uzavřít nejde)
+ *   nalezeno, ale položky nesedí          → beze změny (HLASKA_POLOZKY_NESEDI;
+ *                                           ověří člověk v pokladně)
  *   nenalezeno po platnosti + rezervě     → chyba (pokladna už požadavek neprovede;
  *                                           smí se zkusit znovu novou operací)
  *   nenalezeno dřív / chyba dohledání     → beze změny (pokladna ho ještě může provést)
@@ -222,14 +325,15 @@ export async function obnovitOperaci(
     return { stav: 'beze_zmeny', duvod: `Dohledání selhalo (${hlaska(e)}) — zkuste to znovu` }
   }
 
-  const posudek = uspechZDohledani(d)
+  const posudek = uspechZDohledani(d, op)
   if (posudek?.stav === 'uspech') {
     await repo.dokoncit(op.id, posudek.zaver)
     return posudek.zaver
   }
-  // Účet s klíčem je, ale výdej z něj neplyne: ani úspěch, ani chyba (po platnosti
-  // by „chyba" pustila nový pokus a z otevřeného účtu by mohl vzniknout druhý výdej).
+  // Účet s klíčem je, ale výdej z něj neplyne (nebo jeho položky nesedí): ani úspěch,
+  // ani chyba (po platnosti by „chyba" pustila nový pokus a vznikl by druhý výdej).
   if (posudek?.stav === 'nedokonceny') return { stav: 'beze_zmeny', duvod: HLASKA_UCET_NEDOKONCENY }
+  if (posudek?.stav === 'nesedi') return { stav: 'beze_zmeny', duvod: posudek.duvod }
   if (!d || d.stav !== 'nenalezeno') {
     return { stav: 'beze_zmeny', duvod: `Dohledání selhalo${d && d.stav === 'chyba' ? ` (${d.duvod})` : ''} — zkuste to znovu` }
   }

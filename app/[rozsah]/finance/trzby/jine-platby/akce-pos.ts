@@ -1,6 +1,15 @@
 'use server'
 
-import { obnovitOperaci, provestOperaci, type OperacePos, type PosProOperaci, type RepoOperaci, type VysledekOdeslani, type ZaverOperace } from '@/lib/jine-platby-pos-operace'
+import {
+  obnovitOperaci,
+  provestOperaci,
+  provozovnaProVydej,
+  schopnostVydeje,
+  type OperacePos,
+  type PosProOperaci,
+  type RepoOperaci,
+  type ZaverOperace,
+} from '@/lib/jine-platby-pos-operace'
 import { otevritRelaciPokladny, type RelacePokladny } from '@/lib/pokladna-relace'
 import type { RelacePos } from '@/lib/pos-provider-contract'
 import { pocet } from '@/lib/sklonovani'
@@ -362,7 +371,9 @@ async function provestPripravenou(p: Pripraveno): Promise<StavAkce> {
     obnovit(p)
     return chyba(`Pokladnu se nepodařilo otevřít: ${rel.duvod} Výdej zůstává připravený.`)
   }
-  const schopnost = rel.schopnosti.skladovyVydej ?? 'nepodporovano'
+  // 'api' jen pro provozovnu, do které relace zápis povoluje (ZAPIS_VYDEJE_DOTYKACKA,
+  // dnes žádná); jinak ručně. Kam požadavek opravdu půjde, rozhodne databáze při zabrání.
+  const schopnost = schopnostVydeje(rel.schopnosti.skladovyVydej, rel.relace, provozovnaProVydej(p.z.posProvozovna, p.z.branchId, rel.provozovny))
 
   if (schopnost === 'api') {
     const v = await zjistitVPokladne(p, rel, 'sklad')
@@ -437,23 +448,22 @@ function repoOperaci(uloha: Uloha): RepoOperaci {
   }
 }
 
-/** Metoda zápisu, kterou by adaptér s `skladovyVydej: 'api'` přidal k relaci. Kontrakt ji zatím nemá. */
-type ZapisVydeje = (op: OperacePos) => Promise<VysledekOdeslani>
-
 /**
  * Pokladna pro orchestrátor. JEDINÉ místo, kde se sahá na zápis do
  * pokladny — a i tady se jen předá orchestrátoru, nevolá se.
  *
- * `RelacePos` dnes metodu zápisu nemá (Dotykačka ji schválně nepřipojila,
- * `skladovyVydej: 'rucne'`). Bez ní `odeslat` chybí a orchestrátor sám
- * uzavře operaci jako „nepodporováno“ — nic neodejde.
+ * Metodu zápisu (`RelacePos.skladovyVydej`) má relace jen pro cloud
+ * s provozovnou v `ZAPIS_VYDEJE_DOTYKACKA` (lib/pokladna-dotykacka-zapis.ts)
+ * — dnes žádný. Bez ní `odeslat` chybí a orchestrátor sám uzavře operaci
+ * jako „nepodporováno“ — nic neodejde. `odeslat` se předá jen se
+ * schopností 'api' (`schopnostVydeje` — provozovna záznamu povolená).
  */
 function posProOperaci(relace: RelacePos, schopnost: 'api' | 'rucne' | 'nepodporovano'): PosProOperaci {
-  const zapis = (relace as RelacePos & { skladovyVydej?: ZapisVydeje }).skladovyVydej
+  const zapis = relace.skladovyVydej?.bind(relace)
   const podleKlice = relace.ucetPodleKlice?.bind(relace)
   return {
     schopnost,
-    odeslat: typeof zapis === 'function' ? (op) => zapis.call(relace, op) : undefined,
+    odeslat: schopnost === 'api' && zapis ? (op: OperacePos) => zapis(op) : undefined,
     dohledat: podleKlice ? async (klic) => dohledaniZUctu(await podleKlice(klic)) : undefined,
   }
 }
@@ -490,6 +500,8 @@ export async function nacistKatalog(_predchozi: StavAkce, formData: FormData): P
       mira: x.mira,
       odecita_sklad: x.odecitaSklad,
       ma_recepturu: x.maRecepturu,
+      // Receptura (pole surovin, nebo null = neví se); databáze z ní odvodí ma_recepturu.
+      suroviny: x.suroviny ?? null,
       plu: x.plu,
       ean: x.ean,
       smazano: x.smazano,
@@ -497,5 +509,9 @@ export async function nacistKatalog(_predchozi: StavAkce, formData: FormData): P
   })
   if (error) return vysledekChyby(error, 'uložení katalogu')
   const nacteno = Number(data ?? r.produkty.length)
-  return hotovo(p, `Z pokladny načteno: ${pocet(nacteno, 'položka', 'položky', 'položek')} katalogu (produkty i suroviny). Co v pokladně už není, je označené jako smazané.`)
+  // Bez práva na receptury (403) se katalog načetl bez nich a uložené receptury se vymazaly — člověk to má vědět.
+  const bezReceptur = r.bezReceptur
+    ? ' Receptury pokrmů pokladna appce nevydala (chybí právo na jejich čtení) — upozornění na suroviny pokrmu ve výdeji budou jen obecná.'
+    : ''
+  return hotovo(p, `Z pokladny načteno: ${pocet(nacteno, 'položka', 'položky', 'položek')} katalogu (produkty i suroviny). Co v pokladně už není, je označené jako smazané.${bezReceptur}`)
 }

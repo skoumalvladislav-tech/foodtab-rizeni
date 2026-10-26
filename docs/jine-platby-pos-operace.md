@@ -1,6 +1,6 @@
 # Jiné platby: co appka umí s pokladnou
 
-Stav k 20. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
+Stav k 25. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
 Technický návrh je v `docs/jine-platby-navrh.md`.
 
 **Tahle agenda zatím nic neprovedla v žádné skutečné pokladně.** Nic
@@ -26,12 +26,14 @@ Zdroj: oficiální dokumentace https://docs.api.dotypos.com/ (verze API
 | Operace | Stav | Poznámka |
 |---|---|---|
 | Přihlášení, seznam provozoven, denní tržby a platby po způsobu | **Produkčně ověřeno** | Hotové od #132, beze změny. Data jsou jen denní součty, ne jednotlivé účty. |
-| Katalog produktů (`GET /products`) | **Testováno** | Načte se do appky kvůli přiřazení položek (přesné ID produktu, jednotka, „odečítat ze skladu“). Receptury se z katalogu nepoznají vždy, kde to nejde, appka napíše „neví“. |
+| Katalog produktů (`GET /products`) | **Testováno** | Načte se do appky kvůli přiřazení položek (přesné ID produktu, jednotka, „odečítat ze skladu“). Od 25. 10. i s recepturami (`include=ingredients`): appka ví, co je pokrm se surovinami, a jménem upozorní, když je surovina pokrmu ve výdeji ještě zvlášť. Bez práva na receptury (403) se katalog načte bez nich a receptura je „neví“. |
+| Přiřazení položek ke katalogu přes AI | **Testováno** | Tlačítko „Najít produkty v pokladně (AI)“ v panelu Sklad. AI vybírá jen z kandidátů, které jí appka nabídne, a jen navrhuje — řádek jde ke kontrole a přiřazení potvrzuje člověk. Do AI nejdou ceny ani id produktů. Návrh: `docs/jine-platby-vydej-dotykacka.md`, oddíl 3. |
 | Dohledání účtů (`GET /orders`, filtr provozovny a času) | **Testováno** | Kontrola „je tenhle prodej už v pokladně?“ podle čísla dokladu. Uzavřené účty se hledají podle **data uzavření** (den před až dva dny po dni prodeje), takže se najde i účet založený dřív. Samotná shoda částky dá jen „pravděpodobně“, nikdy „nalezeno“; u korun s tolerancí zaokrouhlení 50 haléřů (pokladna vrací zaokrouhlený součet). Účty zaplacené *Odpisem* se u tržby neberou jako prodej. Fotka sjetiny nebo dokladu neurčeného typu s otevřeným účtem v pokladně dá „nelze ověřit“, ne „nenalezeno“. Když pokladna hledání podle uzavření odmítne, výsledek je „nelze ověřit“. Filtr `completed` je ověřený jen podle dokumentace. |
 | Otevřené účty (`namedFilter=openOrders`) | **Testováno** | Otevřené účty se hledají zvlášť podle data založení (až 60 dní zpátky). Otevřený účet appka pozná a fotka otevřeného účtu nikdy nedá „nenalezeno“. Až ho pokladna uzavře, zapíše ho sama do tržeb, appka ho proto nezapočítá znovu. Po zápisu tržby jde kontrolu zopakovat (varování „Možná zapsáno dvakrát“). |
 | Dohledání vlastního požadavku podle externího ID (`externalId`) | **Testováno** | Slouží k obnově po výpadku: appka se nejdřív podívá, jestli pokladna požadavek provedla, a teprve pak by smělo vzniknout cokoli dalšího. „Odečteno v POS“ jen pro účet uzavřený, zaplacený a označený jako odpis; jiný nalezený účet nechá výsledek nejasný. Dohledání jde i u pokladny bez zápisu přes API (je to jen čtení). |
 | Odpovědi pokladny 4xx | **Testováno** | „Nic se neprovedlo“ jen u kódů, o kterých to dokumentace říká. Jiný kód, 4xx bez těla, 408 a 429 jsou nejasný výsledek — appka nic neopakuje a dohledává. |
-| **Skladový výdej** přes „POS akci“ (účet zaplacený způsobem *Odpis*) | **Připraveno, vypnuto** | Funkce existuje a je otestovaná na podvržených odpovědích, ale **není připojená**: Dotykačka má v appce nastaveno „výdej jen ručně“. Postup zapnutí je níž. |
+| **Skladový výdej** přes „POS akci“ (účet zaplacený způsobem *Odpis*) | **Připraveno, vypnuto** | Funkce existuje a je otestovaná na podvržených odpovědích, ale **není připojená**: seznam provozoven se zápisem (`ZAPIS_VYDEJE_DOTYKACKA`) je prázdný. Před odesláním čte nastavení provozovny (licence POS akcí, režim odečtu skladu) a po zápisu porovná položky účtu s výdejem. Postup zapnutí je níž. |
+| Přímý výdej ze skladu (`warehouses/…/sales`) | **Schválně ne** | Nejde dohledat (bez externího klíče, pohyby skladu jen webhookem) — po výpadku spojení by appka nevěděla, jestli odečetla. Viz `docs/jine-platby-vydej-dotykacka.md`, oddíl 1.1. |
 | Korekce provedeného výdeje přes API | **Blokováno** | Dokumentace neříká, jak stornovat vystavený doklad. Korekce je proto vždy ručně doložená oprávněnou osobou. Původní operace v historii zůstává. |
 | Čtení skladových pohybů | **Blokováno** | Dotykačka je přes REST nedává (jen webhook). Appka proto výdej ověřuje dohledáním účtu, ne pohybu. |
 | Vystavení faktury | **Blokováno** | Appka vydané faktury neumí (otázka 51). Jde jen propojit fakturu vystavenou jinde: v pokladně nebo v účetním programu. |
@@ -45,28 +47,28 @@ Zdroj: oficiální dokumentace https://docs.api.dotypos.com/ (verze API
 4. V appce klikne **Ručně doloženo**, zadá číslo dokladu z pokladny a důvod. Doložení se váže na otisk návrhu, který měl otevřený; když se návrh mezitím vyměnil, appka ho odmítne.
 5. Stav je **„Ručně doloženo (neověřeno pokladnou)“**, nikdy „Odečteno v POS“.
 6. Mezi kroky 2 a 4 (stav „předáno k ručnímu odpisu“) nejde měnit produkty ani množství a záznam nejde zrušit. Když schvalovatel v pokladně nic neodepsal, klikne **Zrušit schválení** s důvodem.
-7. Když v návrhu je pokrm i kusové zboží, potvrzení chce zaškrtnutí „Zboží není surovina toho pokrmu“.
+7. Když v návrhu je pokrm i kusové zboží (a appka nezná recepturu pokrmu), nebo když je položka surovinou jiné položky téhož výdeje, potvrzení chce zaškrtnutí „Zboží není surovina toho pokrmu, nebo se má odepsat navíc k receptuře“.
 
 Až bude zápis přes API zapnutý: požadavek s nejasným výsledkem appka jen dohledává. Po vypršení jeho platnosti (+ 2 minuty) panel skladu nabídne **Ručně doloženo** (v pokladně proběhl) a **Zrušit schválení** (neproběhl) — obojí po ověření v pokladně a s důvodem. Změna katalogu po schválení doložení nebrání.
 
 ## Co musí proběhnout, než se zápis do Dotykačky zapne
 
-Zapnutí v kódu: `skladovyVydej: 'api'` v `lib/pokladna-dotykacka.ts` a
-k relaci připojit `zapisVydejeDotykacka(kontext)` (převádí operaci appky na
-tvar, který čeká zápis Dotykačky — dřív se tvary nesešly a každý výdej by
-skončil chybou, kontrola 19. 10.). **Ještě chybí**: u pokladny připojené
-k jedné pobočce (`branch_id` u připojení) appka provozovnu u záznamu
-neukládá, takže operace by neměla cílovou provozovnu a zápis ji odmítne.
-Databáze ji musí doplnit z aktuálního přiřazení provozoven a odmítnout,
-když je jich nula nebo víc. Smí se zapnout **jen** když:
+Zapnutí v kódu (od 25. 10. 2026): jeden řádek `{ cloudId, provozovna, pokyn }`
+do `ZAPIS_VYDEJE_DOTYKACKA` v `lib/pokladna-dotykacka-zapis.ts` a vědomá
+úprava kontroly „seznam je prázdný“ v `scripts/pokladna-dotykacka-sklad.test.mjs`.
+Adaptér pak připojí zápis jen pro ten cloud a schopnost „api“ platí jen pro
+tu provozovnu; ostatní zůstávají ruční. Provozovnu u pokladny připojené
+k pobočce doplní databáze při zabrání z aktuálního přiřazení (nula nebo víc
+= neodešle se; migrace 20261101100000). Smí se zapnout **jen** když:
 
-1. Na **testovacím cloudu** Dotykačky (licence z 12. 10. 2026) se ověří:
+1. Na **testovacím cloudu** Dotykačky (licence z 12. 10. 2026) projde
+   postup z `docs/jine-platby-vydej-dotykacka.md`, oddíl 6, hlavně:
    - že účet zaplacený *Odpisem* odečte suroviny podle receptury;
    - že se **neobjeví** v denních tržbách (`productSales`) ani v platbách, které appka stahuje. Jinak by se tržba nebo spotřeba započítaly dvakrát;
-   - že dohledání podle `externalId` vrátí právě ten účet;
-   - že licence provozovny má funkci `posAction`;
+   - že dohledání podle `externalId` vrátí právě ten účet s položkami výdeje;
+   - že licence provozovny má funkci `posAction` a režim odečtu není vypnutý;
    - co udělá pokladna, když je zařízení vypnuté (požadavek musí po vypršení platnosti propadnout).
-2. **Šéfík dá výslovný pokyn** „zapni zápis do Dotykačky“ pro konkrétní provozovnu.
+2. **Šéfík dá výslovný pokyn** „zapni zápis do Dotykačky“ pro konkrétní provozovnu (otázka 54).
 
 Do té doby appka do skladu Dotykačky **nezapisuje nic**.
 

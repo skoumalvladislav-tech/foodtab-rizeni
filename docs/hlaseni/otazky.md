@@ -1358,6 +1358,19 @@ a Beverage cost. Pozdější synchronizace nesmí vytvořit další spotřebu.�
 - **Co je potřeba:** ověření na testovacím cloudu Dotykačky (seznam v `docs/jine-platby-pos-operace.md`) a pak výslovný pokyn „zapni zápis do Dotykačky“.
 - **Když to má být jinak:** jediná změna v `lib/pokladna-dotykacka.ts` a jeden řádek testu.
 
+> **Doplněno 25. 10. 2026** (docs/jine-platby-vydej-dotykacka.md):
+> zápis je teď připravený celý a pořád vypnutý. Zapíná se **pro jednu
+> provozovnu** jedním řádkem v `ZAPIS_VYDEJE_DOTYKACKA`
+> (`lib/pokladna-dotykacka-zapis.ts`) s vaším pokynem; ostatní provozovny
+> zůstanou ruční. Před každým odesláním appka přečte nastavení provozovny
+> v Dotykačce (licence POS akcí, odečet skladu zapnutý) a po zápisu
+> porovná položky účtu s výdejem. Doplnila se i provozovna u pokladny
+> připojené k pobočce (dřív by výdej neměl kam jít).
+>
+> **Co od vás potřebuju:** (1) založit testovací cloud s licencí z 12. 10.
+> (otázka 73), (2) až test projde, napsat „zapni zápis do Dotykačky pro
+> provozovnu …“. Do té doby se do skladu Dotykačky nezapisuje nic.
+
 ## 55. Jiné platby — jak se má řešit otevřený účet, ke kterému chce host fakturu
 
 **Vzniklo:** 16. 10. 2026. Appka umí obě cesty, návod pro obsluhu ale
@@ -1669,6 +1682,89 @@ jako tablet Docházky (zařízení pobočky v Nastavení → Zařízení).
   hned. Kdo telefon ztratí, odvolá ho tamtéž jako tablet.
 - **Když to má být jinak:** jedno zařízení pro obojí s jedním spárováním
   (vypínač Docházky u zařízení). Dnes jde obojí jen dvojím spárováním.
+
+## 71. Jiné platby — jak zapisovat výdej do Dotykačky
+
+**Vzniklo:** 25. 10. 2026, výdej ze skladu u Jiných plateb
+(docs/jine-platby-vydej-dotykacka.md, oddíl 1.1).
+
+Dotykačka má dvě cesty, jak sklad odečíst zvenku:
+
+| Cesta | Plus | Minus |
+|---|---|---|
+| **POS akce: účet zaplacený Odpisem** (totéž, co dnes děláte ručně) | appka výdej dohledá podle svého klíče, takže pozná, jestli proběhl, a nikdy neodečte dvakrát; suroviny odečte pokladna podle receptury | pokladna na provozovně musí být zapnutá, připojená a otevřená; licence premium (POS akce) |
+| **Přímý výdej ze skladu** (`warehouses/…/sales`) | pokladna nemusí být zapnutá | výdej nejde dohledat — po výpadku spojení appka neví, jestli odečetla; u pokrmu s recepturou dokumentace neříká, co se odečte |
+
+- **Co jsem vybral:** **POS akci s Odpisem.** Bezpečnost proti dvojímu
+  odečtu je důležitější než pohodlí, že pokladna nemusí běžet.
+- **Když to má být jinak:** přímý výdej by šel jen pro suroviny a jen
+  s ručním potvrzením po každém nejasném výsledku (nebo s webhookem
+  skladových pohybů, který chce veřejnou adresu). Napište, jestli o to
+  stojíte.
+
+## 72. Jiné platby — převod množství podle názvu produktu
+
+**Vzniklo:** 25. 10. 2026.
+
+Dotykačka u produktu neříká, kolik litrů nebo kilogramů je v jednom kusu
+(`packaging` je počet kusů v balení). Když je na papíře „2 l smetany“
+a v pokladně je „Smetana 1 l“ vedená v kusech, appka to dnes **nepřevede**
+a položku dá ke kontrole — člověk napíše „2 ks“.
+
+- **Teď:** převádí se jen to, co plyne z dat pokladny (kusy na kusy,
+  kilogramy na kilogramy u suroviny vedené v kilogramech). AI množství
+  nepočítá.
+- **Varianta:** appka by „1 l“ vyčetla z názvu produktu a navrhla 2 ks se
+  značkou „ke kontrole“. Ověří se i to, jestli Dotykačka objem nenese
+  v polích `packagingMeasurement` / `unitMeasurement` (testovací cloud);
+  pak by to šlo bez odhadu.
+- **Otázka:** chcete návrh z názvu (vždy ke kontrole), nebo raději ručně?
+
+## 73. Jiné platby — testovací cloud Dotykačky a práva aplikace
+
+**Vzniklo:** 25. 10. 2026.
+
+Zápis se smí zapnout až po zkoušce na testovacím cloudu (otázka 54).
+
+- **Co je potřeba od vás:** založit účet Dotypos s testovacím licenčním
+  klíčem z 12. 10. (tím vznikne testovací cloud), dát do něj pár produktů
+  (pivo, svíčková s recepturou, smetana jako surovina) a připojit ho ve
+  Foodtabu jako další pokladnu. Účty nezakládám já.
+- **Práva aplikace:** Dotykačka umí klientské aplikaci zakázat konkrétní
+  adresy API (odpověď 403 `DOMAIN_FORBIDDEN`). Z dokumentace nejde zjistit,
+  jestli Foodtab smí `pos-actions` (zápis), `manifest` (nastavení
+  provozovny) a čtení receptur. Na testovacím cloudu se to pozná; případně
+  stačí dotaz na podporu Dotykačky s naším Client ID.
+- **Teď:** nic se nezapisuje. Receptury se zkusí číst; když na ně appka
+  právo nemá, katalog se načte bez nich jako dřív.
+
+## 74. Jiné platby — pod jakým uživatelem pokladny se odpis zapíše
+
+**Vzniklo:** 25. 10. 2026.
+
+POS akce se v pokladně provede pod uživatelem. Když ho appka nepošle,
+použije pokladna „uživatele integrace“, kterého Dotykačka vytvořila pro
+Foodtab.
+
+- **Teď (až se zápis zapne):** uživatel integrace. V Dotykačce pak u odpisu
+  bude jeho jméno, ne jméno schvalovatele; kdo výdej schválil, je
+  v historii záznamu ve Foodtabu.
+- **Pozor:** uživatel integrace musí mít v pokladně právo na odpis (jinak
+  pokladna vrátí chybu a nic se neodečte) — ověří se na testovacím cloudu.
+- **Varianta:** u každého schvalovatele uložit jeho id zaměstnance
+  z Dotykačky a odpis zapisovat pod ním.
+
+## 75. Jiné platby — přiřazení položek přes AI: kdy a kolik
+
+**Vzniklo:** 25. 10. 2026.
+
+- **Teď:** AI přiřazuje jen na kliknutí „Najít produkty v pokladně (AI)“
+  v panelu Sklad, a jen u položek, které appka nepřiřadila sama (podle
+  dřív potvrzeného názvu, čárového kódu nebo podobného názvu). Strop je
+  10 hledání na doklad a 100 na firmu denně. Každý návrh AI jde ke
+  kontrole a potvrzuje ho člověk.
+- **Varianty:** spouštět hledání samo hned po rozpoznání dokladu (jedno
+  kliknutí méně, ale platí se i tam, kde to nikdo nepotřebuje); jiný strop.
 
 ## 76. Rezervace a akce — kdo co vidí a kdo to dostane
 

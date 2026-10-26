@@ -46,8 +46,10 @@
  * navíc umí katalog produktů, účty provozovny a účet podle externího klíče
  * — `lib/pokladna-dotykacka-sklad.ts` (`cteniDotykacky`), tam jsou i odkazy
  * na stránky dokumentace. Napsané podle dokumentace, ŽIVĚ NEOVĚŘENÉ.
- * Skladový výdej přes POS akci je napsaný, ale k relaci NEPŘIPOJENÝ
- * (`skladovyVydej: 'rucne'`, viz schopnosti níž).
+ * Skladový výdej přes POS akci je napsaný a k relaci se připojí jen pro
+ * provozovny z `ZAPIS_VYDEJE_DOTYKACKA` (lib/pokladna-dotykacka-zapis.ts).
+ * Ten seznam je prázdný, takže `skladovyVydej: 'rucne'` a relace žádnou
+ * metodu zápisu nemá (viz schopnosti níž).
  *
  * Bez `server-only` schválně: síťové volání jde podstrčit (`vytvoritDotykacku(fetchFn)`),
  * takže `scripts/pokladna-dotykacka.test.mjs` ověří tvar požadavků
@@ -58,7 +60,8 @@
 import { createHmac } from 'node:crypto'
 
 import type { ChybaPos, DruhPlatby, PosProvider, ProvozovnaPos, RadekPlatby, RadekProdeje, RelacePos, UdajePos } from './pos-provider-contract.ts'
-import { cteniDotykacky, type KontextDotykacky } from './pokladna-dotykacka-sklad.ts'
+import { cteniDotykacky, zapisVydejeDotykacka, type KontextDotykacky } from './pokladna-dotykacka-sklad.ts'
+import { povoleneProvozovny, ZAPIS_VYDEJE_DOTYKACKA, type PovolenyZapis } from './pokladna-dotykacka-zapis.ts'
 
 export const API_DOTYKACKA = 'https://api.dotykacka.cz/v2'
 export const CONNECTOR_DOTYKACKA = 'https://admin.dotykacka.cz/client/connect/v2'
@@ -324,7 +327,13 @@ export function kontextDotykacky(fetchFn: Fetch, cloudId: string, accessToken: s
   }
 }
 
-export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, init)): PosProvider {
+/**
+ * `povoleno` jde podstrčit jen kvůli testu zapnutého zápisu
+ * (`scripts/pokladna-dotykacka-sklad.test.mjs`); appka volá
+ * `vytvoritDotykacku()` vždy s výchozím `ZAPIS_VYDEJE_DOTYKACKA`
+ * (lib/pokladna-adaptery.ts).
+ */
+export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, init), povoleno: readonly PovolenyZapis[] = ZAPIS_VYDEJE_DOTYKACKA): PosProvider {
   return {
     klic: 'dotykacka',
     schopnosti: {
@@ -338,11 +347,13 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
       // Katalog a účty podle dokumentace (2026.38.2), ŽIVĚ NEOVĚŘENO — lib/pokladna-dotykacka-sklad.ts.
       katalog: true,
       dohledaniUctu: true,
-      // Výdej přes POS akci (`odeslatVydejDotykacka`) je napsaný, ale NEPŘIPOJENÝ:
-      // připojí se až po ověření na testovacím cloudu Dotykačky a výslovném
-      // pokynu Šéfíka. Co přesně ověřit a jak ho připojit, je v komentáři
-      // u `odeslatVydejDotykacka`. Do té doby výdej dělá člověk v pokladně.
-      skladovyVydej: 'rucne',
+      // Výdej přes POS akci (`odeslatVydejDotykacka`) se připojí jen pro
+      // provozovny ze seznamu `povoleno` (ZAPIS_VYDEJE_DOTYKACKA — prázdný):
+      // až po ověření na testovacím cloudu Dotykačky a výslovném pokynu
+      // Šéfíka (lib/pokladna-dotykacka-zapis.ts). Do té doby výdej dělá
+      // člověk v pokladně. 'api' tu znamená jen „některý cloud ho smí";
+      // jestli smí TAHLE provozovna, říká relace (`zapisVydejePovolen`).
+      skladovyVydej: povoleno.length > 0 ? 'api' : 'rucne',
     },
 
     async otevrit(udaje: UdajePos) {
@@ -412,8 +423,15 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
           return { stav: 'ok', ...report, platby, ...(necitelne ? { platbyNecitelne: true } : {}) }
         },
 
-        // Jiné platby: jen čtení (katalog, účty, účet podle klíče). Zápis do skladu tu schválně není.
+        // Jiné platby: čtení (katalog, účty, účet podle klíče).
         ...cteniDotykacky(kontextDotykacky(fetchFn, cloudId, accessToken)),
+      }
+
+      // Zápis do skladu jen pro cloud s povolenou provozovnou (dnes žádný).
+      const povolene = povoleneProvozovny(cloudId, povoleno)
+      if (povolene.size > 0) {
+        relace.skladovyVydej = zapisVydejeDotykacka(kontextDotykacky(fetchFn, cloudId, accessToken), povolene)
+        relace.zapisVydejePovolen = (provozovna) => povolene.has(provozovna)
       }
 
       return { stav: 'ok', relace }

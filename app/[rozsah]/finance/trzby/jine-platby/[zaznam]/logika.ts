@@ -1209,8 +1209,9 @@ export function zahajeniZDb(
  * „Nalezeno“ (podklad pro „Odečteno v POS“) JEN pro účet, který je
  * v pokladně uzavřený, zaplacený a označený jako odpis — teprve takový
  * výdej pokladna se skladem opravdu odečetla (vlastní plán ověření
- * v lib/pokladna-dotykacka-sklad.ts). Detail nese `stav`, `zaplaceno`
- * a `odpis` — orchestrátor (`uspechZDohledani`) je ověřuje znovu.
+ * v lib/pokladna-dotykacka-sklad.ts). Detail nese `stav`, `zaplaceno`,
+ * `odpis` a `polozky` účtu — orchestrátor (`uspechZDohledani`) je ověřuje
+ * znovu a položky porovná s výdejem (`porovnatPolozkyVydeje`, 25. 10.).
  *
  * Účet s klíčem, který tomu nevyhovuje (otevřený, nezaplacený, bez
  * příznaku odpisu, neznámý stav), ani zrušený účet NENÍ úspěch, ale ani
@@ -1234,7 +1235,18 @@ export function dohledaniZUctu(
         'sklad nemusí být odečtený; ověřte výdej v pokladně ručně',
     }
   }
-  return { stav: 'nalezeno', externiId: u.externiId, doklad: u.cisloDokladu, detail: { stav: u.stav, zaplaceno: u.zaplaceno, odpis: u.odpis, typ_dokladu: u.typDokladu } }
+  return {
+    stav: 'nalezeno',
+    externiId: u.externiId,
+    doklad: u.cisloDokladu,
+    detail: {
+      stav: u.stav,
+      zaplaceno: u.zaplaceno,
+      odpis: u.odpis,
+      typ_dokladu: u.typDokladu,
+      polozky: u.polozky.map((p) => ({ produktId: p.produktId, mnozstvi: p.mnozstvi, zrusena: p.zrusena })),
+    },
+  }
 }
 
 const DRUHY_DO_SKLADU: readonly DruhPolozky[] = ['pokrm', 'rozlevany_napoj', 'kusove_zbozi']
