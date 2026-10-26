@@ -888,6 +888,27 @@ const jakoTlacitko = (s, firma = FIRMA) => [...zabraniFronty(s), ...zabraniOvere
   const t2 = await SYNC.otestovatToken(TOKEN, FIRMA, s2.START + 22_000, s2.prostredi)
   ok(`… volná 21 s před koncem → test proběhne (dotaz v ${s2.dotazy[0] ? (s2.dotazy[0].cas - s2.START) / 1000 : '—'} s, konec ve 22 s)`,
     t2.stav === 'ok' && s2.dotazy.length === 1 && s2.dotazy[0].cas <= s2.START + 22_000 - 20_000)
+
+  /* Nezávislé ověření PR #163 (nález 5): totéž u „Ověřit znovu“, a to po
+     OPAKOVÁNÍ. overitZnovu má vlastní smyčku opakování; kdyby strop
+     čekání spočítala jen jednou před ní, druhé volání by databázi poslalo
+     starý strop (2 s) a test by odešel až po čekání — za hranicí 20 s
+     před koncem. Kontrola výš to u overitZnovu nevidí (jde přes
+     otestovatToken). Tady: fronta volná až 18 s před koncem → databáze
+     řekne „znovu za 2 s“, server počká a podruhé smí čekat už jen 0 ms →
+     na Choice nejde. */
+  const s3 = svetSynchronizace({ choice: () => odpoved(200, []) })
+  s3.h.dalsi = s3.START + 4_000
+  const t3 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s3.START + 22_000, s3.prostredi)
+  const stropy = zabraniOvereni(s3).map((r) => r.args.p_nejdele_cekat_ms)
+  ok(`„Ověřit znovu“ dostane „zkusit znovu“, počká a po čekání už na Choice NEJDE (strop při 1. a 2. volání: ${stropy.join(' a ')} ms; dotazů ${s3.dotazy.length})`,
+    t3 !== 'brzy' && t3.stav === 'chyba' && t3.druh === 'cas' && s3.dotazy.length === 0
+    && stropy.length === 2 && stropy[0] === 2_000 && stropy[1] === 0)
+  const s4 = svetSynchronizace({ choice: () => odpoved(200, []) })
+  s4.h.dalsi = s4.START + 1_000
+  const t4 = await SYNC.overitZnovu(TOKEN, FIRMA, ID_PRIPOJENI, s4.START + 22_000, s4.prostredi)
+  ok(`… volná 21 s před koncem → „Ověřit znovu“ proběhne (dotaz v ${s4.dotazy[0] ? (s4.dotazy[0].cas - s4.START) / 1000 : '—'} s)`,
+    t4 !== 'brzy' && t4.stav === 'ok' && s4.dotazy.length === 1 && s4.dotazy[0].cas <= s4.START + 22_000 - 20_000)
 }
 
 {
@@ -1406,6 +1427,161 @@ for (const [n, behu, nejdelePauza] of [[3, 6, 2], [5, 10, 3]]) {
     zabraniFronty(s).length === 0 && zabraniUlohy(s).length >= 3)
 }
 
+/**
+ * SKUTEČNÁ úloha (route.ts) v plánovači virtuálního času z oddílu 6a,
+ * vedle ní tlačítka (`{ p, druh, za }`: připojení, druh jako
+ * `zmacknout`, kolik ms po začátku). Pořadí připojení úlohy je dané
+ * (`choiceKSynchronizaci` vrací `ulohaP` popořadě) — o pořadí tu nejde
+ * a „tlačítko téže firmy jako 1. připojení“ musí být opravdu první.
+ * `obsazenoMs`: fronta je na začátku obsazená do tolika ms po začátku
+ * (jiní si ji zabrali těsně předtím).
+ */
+async function ulohaSTlacitky(ulohaP, odpovedMs, tlacitka, ulohaZa = 0, obsazenoMs = 0) {
+  const s = svetSoubehu([...ulohaP, ...tlacitka.map((t) => t.p)], odpovedMs)
+  if (obsazenoMs > 0) s.h.dalsi = s.START + obsazenoMs
+  const puvodniRozsifrovat = globalThis.__choiceTest.rozsifrovat
+  globalThis.__choiceTest.rozsifrovat = (sifra) => ({ token: sifra })
+  // Kdy route začala které připojení (ms po začátku světa).
+  const zacatky = []
+  globalThis.__uloha = {
+    SYNC: {
+      ...SYNC,
+      choiceKSynchronizaci: async () => ulohaP.map((p) => p.id),
+      synchronizovatChoice: (id, m) => { zacatky.push(s.h.ted - s.START); return SYNC.synchronizovatChoice(id, m) },
+    },
+    prostredi: s.prostredi,
+  }
+  const puvodniNow = Date.now
+  Date.now = () => s.h.ted
+  try {
+    const [r, ...t] = await dobehnout(s, [
+      s.spat(ulohaZa).then(() => ROUTE_ULOHY.GET(new Request('https://x/api/uloha/rezervace-choice', { headers: { authorization: 'Bearer x' } }))),
+      ...tlacitka.map(({ p, druh, za }) => s.spat(za).then(() => zmacknout(s, druh, p))),
+    ])
+    const tokenyUlohy = new Set(ulohaP.map((p) => p.token))
+    return {
+      telo: r.telo,
+      tlacitka: t,
+      ulohaDotazu: s.dotazy.filter((d) => tokenyUlohy.has(d.token)).length,
+      tlacitkaDotazu: s.dotazy.filter((d) => !tokenyUlohy.has(d.token)).length,
+      rozpis: r.telo.vysledky.map((v) => v.dotazu).join('+'),
+      nejmensiRozestup: Math.min(...s.dotazy.slice(1).map((d, i) => d.cas - s.dotazy[i].cas)),
+      zacatky,
+    }
+  } finally {
+    Date.now = puvodniNow
+    globalThis.__choiceTest.rozsifrovat = puvodniRozsifrovat
+  }
+}
+
+{
+  /* Nezávislé ověření PR #163 (nález 1): oddíl 6a zkouší úlohu s JEDNÍM
+     připojením a dílem 80 s. Skutečná úloha dělí 37 s mezi připojení
+     (každému nejméně 16,5 s) a díl dalšího připojení se počítal od
+     chvíle, kdy předchozí SKONČILO — ne od místa, které mu fronta dala.
+     Tlačítko, které vzalo poslední místo dílu 1. připojení, tak nechalo
+     2. připojení čekat na frontu ~11 s z jeho dílu: místo 3 dotazů 2,
+     a na 3. připojení už díl nezbyl. Úloha přišla o dotaz VÍC, než
+     kolik jich tlačítko samo udělalo (se 3 připojeními ~15 % okamžiků,
+     u 1 a 2 připojení nikdy). Tady skutečná úloha se 2 až 4 připojeními
+     a jedno tlačítko v každém okamžiku jejího běhu. */
+  const firmaUlohy = (i) => `e${i}eeeeee-0000-0000-0000-000000000000`
+  const ulohaN = (n) => Array.from({ length: n }, (_, i) => ({ id: idPripojeni(i), firma: firmaUlohy(i), pobocka: pobocka(30 + i), token: `tok-u${i}`, vs: String(700 + i), okno: 100_000 }))
+  const jina = { id: 'f2000000-0000-0000-0000-0000000000f2', firma: FF, pobocka: pobocka(40), token: 'tok-tj', vs: '790', okno: 20 }
+  const tataz = { id: 'f3000000-0000-0000-0000-0000000000f3', firma: firmaUlohy(0), pobocka: pobocka(41), token: 'tok-tt', vs: '791', okno: 20 }
+  for (const n of [2, 3, 4]) {
+    const neproslo = []
+    const prisla = []
+    let pokusu = 0
+    let rozestup = Infinity
+    let sama = ''
+    for (const odpovedMs of [250, 2_500]) {
+      const bez = await ulohaSTlacitky(ulohaN(n), odpovedMs, [])
+      sama += `${sama ? ', ' : ''}${bez.rozpis}`
+      for (const [ci, tl] of [['jiná', jina], ['tatáž', tataz]]) {
+        for (const druh of ['callback', 'overit']) {
+          for (let za = 0; za < 37_000; za += 500) {
+            const r = await ulohaSTlacitky(ulohaN(n), odpovedMs, [{ p: tl, druh, za }])
+            pokusu++
+            rozestup = Math.min(rozestup, r.nejmensiRozestup)
+            const kde = `${odpovedMs}/${ci}/${druh}/${za / 1000} s`
+            if (!r.tlacitka[0].proslo) neproslo.push(kde)
+            if (bez.ulohaDotazu - r.ulohaDotazu > r.tlacitkaDotazu) prisla.push(`${kde}: ${r.rozpis} (sama ${bez.rozpis})`)
+          }
+        }
+      }
+    }
+    ok(`úloha s ${n} připojeními (sama ${sama} dotazů) a tlačítko jiné i téže firmy v kterémkoli okamžiku: úloha přijde nejvýš o dotazy, které tlačítko samo udělalo (${pokusu} okamžiků; víc ${prisla.length}×${priklady(prisla)})`,
+      prisla.length === 0)
+    ok(`… tlačítko vedle ní prošlo vždy (neprošlo ${neproslo.length}×${priklady(neproslo)}) a rozestup dotazů na Choice nikdy pod 5 s (nejmenší ${rozestup} ms)`,
+      neproslo.length === 0 && rozestup >= 5_000)
+  }
+
+  /* Totéž bez tlačítka v simulaci: fronta je obsazená do X ms po začátku
+     úlohy (jiné firmy si ji zabraly těsně před ní), X po 250 ms přes
+     čtyři rozestupy. Jiní tak vzali nejvýš ⌈X / rozestup⌉ míst a úloha
+     nesmí přijít o víc. Hlídá hlavně škvíru mezi koncem dílu a koncem
+     připojení: kdyby route počítala zbývající čas od chvíle, kdy
+     připojení doběhlo (o odpověď na poslední dotaz později), a ne od
+     konce jeho dílu, propadne zbytek úlohy — se 3 připojeními a frontou
+     do ~4 s 4 dotazy místo 7. Tlačítka výš (krok 500 ms) se do té
+     škvíry netrefí. */
+  for (const n of [1, 2, 3, 4]) {
+    const vic = []
+    let pokusu = 0
+    let sama = ''
+    for (const odpovedMs of [250, 2_500, 5_000]) {
+      const bez = await ulohaSTlacitky(ulohaN(n), odpovedMs, [])
+      sama += `${sama ? ', ' : ''}${bez.rozpis}`
+      for (let X = 250; X <= 4 * ROZESTUP_DOTAZU_MS; X += 250) {
+        const r = await ulohaSTlacitky(ulohaN(n), odpovedMs, [], 0, X)
+        pokusu++
+        if (bez.ulohaDotazu - r.ulohaDotazu > Math.ceil(X / ROZESTUP_DOTAZU_MS)) vic.push(`${odpovedMs}/${X / 1000} s: ${r.rozpis} (sama ${bez.rozpis})`)
+      }
+    }
+    ok(`úloha s ${n} ${n === 1 ? 'připojením' : 'připojeními'} (sama ${sama}) a fronta obsazená do 0,25–22 s: přijde nejvýš o místa, která vzali jiní (${pokusu} okamžiků; víc ${vic.length}×${priklady(vic)})`,
+      vic.length === 0)
+  }
+
+  /* Pomalé odpovědi Choice (8 s, víc než rozestup): připojení pak může
+     doběhnout dlouho po konci svého dílu. Route počítá zbývající čas od
+     konce dílu, takže by další připojení začala i ve chvíli, kdy se do
+     konce úlohy nevejdou ani tři místa ve frontě — a běh bez okna by
+     připojení odsunul v pořadí. Proto druhá podmínka v route: od teď
+     aspoň dva rozestupy (první dotaz hned). U odpovědí do 5,5 s nezabere
+     nikdy, tady ano (3 připojení, fronta do 2,5 s: 2. připojení by
+     začalo 26,5 s po začátku, 10,5 s před posledním dotazem úlohy). */
+  const pozde = []
+  let zacatych = 0
+  for (const n of [2, 3, 4]) {
+    for (let X = 0; X <= 4 * ROZESTUP_DOTAZU_MS; X += 250) {
+      const r = await ulohaSTlacitky(ulohaN(n), 8_000, [], 0, X)
+      zacatych += r.zacatky.length
+      for (const z of r.zacatky) if (z > 37_000 - 2 * ROZESTUP_DOTAZU_MS) pozde.push(`${n} připojení, fronta do ${X / 1000} s: začalo v ${z / 1000} s`)
+    }
+  }
+  ok(`odpovědi Choice po 8 s: žádné připojení úlohy nezačne později než dva rozestupy před jejím posledním dotazem (${zacatych} začatých; pozdě ${pozde.length}×${priklady(pozde)})`,
+    pozde.length === 0 && zacatych > 0)
+
+  /* Dávka kliků: opakování z #163 vrací tlačítko přesně na konec dílu
+     připojení, takže tenhle stav dřív vyvolalo pokaždé (8× „Ověřit
+     znovu“ jedné firmy, úloha se 3 připojeními: úloha 1+2 místo 4+3,
+     kliky přitom udělaly 3 dotazy). */
+  const kliky = Array.from({ length: 8 }, (_, i) => ({ p: { id: `c${i}000000-0000-0000-0000-0000000000c${i}`, firma: FF, pobocka: pobocka(50 + i), token: `tok-k${i}`, vs: String(800 + i), okno: 20 }, druh: 'overit', za: 0 }))
+  const davka = []
+  let davek = 0
+  for (const odpovedMs of [250, 2_500]) {
+    const bez = await ulohaSTlacitky(ulohaN(3), odpovedMs, [])
+    for (let ulohaZa = 0; ulohaZa <= 11_000; ulohaZa += 500) {
+      const r = await ulohaSTlacitky(ulohaN(3), odpovedMs, kliky, ulohaZa)
+      davek++
+      if (bez.ulohaDotazu - r.ulohaDotazu > r.tlacitkaDotazu) davka.push(`${odpovedMs}/úloha za ${ulohaZa / 1000} s: ${r.rozpis} (sama ${bez.rozpis}), kliky ${r.tlacitkaDotazu}`)
+    }
+  }
+  ok(`dávka 8 kliků jedné firmy a úloha se 3 připojeními (začne 0–11 s po nich): úloha přijde nejvýš o dotazy kliků (${davek} okamžiků; víc ${davka.length}×${priklady(davka)})`,
+    davka.length === 0)
+}
+
 {
   // Databáze PŘED migrací 20261102100000 (kód se nasazuje dřív než db
   // push): funkce úlohy chybí (PGRST202) → úloha čeká jako dřív, frontou
@@ -1751,7 +1927,7 @@ console.log('\n== 8. Do Choice se nezapisuje; nastavení ==\n')
 }
 
 /* ===================================================================== */
-console.log('\n== 8b. Fronta v migraci: zámek řádku firmy ==\n')
+console.log('\n== 8b. Fronta v migraci: zámky řádků firmy a fronty ==\n')
 {
   // Souběh dvou spojení zkouší krok105 (oddíl 2b, dblink) — jen proti
   // PostgreSQL v CI, PGlite má jediné spojení. Tady aspoň text funkce:
@@ -1763,7 +1939,7 @@ console.log('\n== 8b. Fronta v migraci: zámek řádku firmy ==\n')
   const zacatek = sql.indexOf('create or replace function public.rezervace_choice_zabrat_dotaz(')
   const telo = zacatek < 0 ? '' : sql.slice(zacatek, sql.indexOf('end $$;', zacatek))
   const pozdejsi = fs.readdirSync(path.join(KOREN, 'supabase/migrations'))
-    .filter((f) => f.slice(0, 14) > '20261102100000' && /function public\.rezervace_choice_zabrat_dotaz\(/.test(cti(`supabase/migrations/${f}`)))
+    .filter((f) => f.slice(0, 14) > '20261102100000' && /function public\.rezervace_choice_zabrat_dotaz(_ulohy)?\(/.test(cti(`supabase/migrations/${f}`)))
   ok(`žádná pozdější migrace funkci fronty znovu nedefinuje (jinak čte tahle kontrola starou verzi)${pozdejsi.length ? ': ' + pozdejsi.join(', ') : ''}`,
     pozdejsi.length === 0)
   ok('vyříznutí funkce fronty z migrace něco našlo (kontrola nečte prázdno)',
@@ -1777,6 +1953,21 @@ console.log('\n== 8b. Fronta v migraci: zámek řádku firmy ==\n')
   const iPorovnani = telo.indexOf('if v_firma > v_ted')
   ok('pořadí: zámek firmy, zámek fronty, teprve pak čas a porovnání (zámky vždy ve stejném pořadí)',
     iFirma > 0 && iFirma < iFronta && iFronta < iTed && iTed < iPorovnani)
+
+  // Vstup úlohy (nezávislé ověření PR #163, nález 3): firmu nebere, takže
+  // zámek řádku fronty je JEDINÉ, co ji řadí za souběžné tlačítko — bez
+  // něj by obě dostaly tentýž čas. Souběh zkouší krok105 (2b, jen CI),
+  // tady text, který jde pustit všude.
+  const zUlohy = sql.indexOf('create function public.rezervace_choice_zabrat_dotaz_ulohy(')
+  const teloUlohy = zUlohy < 0 ? '' : sql.slice(zUlohy, sql.indexOf('end $$;', zUlohy))
+  ok('vyříznutí vstupu úlohy z migrace něco našlo (kontrola nečte prázdno)',
+    teloUlohy.length > 300 && teloUlohy.includes('dalsi_volny') && teloUlohy.includes('v_ted := clock_timestamp()'))
+  const cteniFronty = teloUlohy.split(';').map((p) => p.replace(/\s+/g, ' ').trim()).filter((p) => /^select\b/i.test(p) && /\bdalsi_volny\b/.test(p))
+  ok(`vstup úlohy čte dalsi_volny jediným příkazem a ten zamyká řádek fronty: „${cteniFronty[0] ?? '—'}“`,
+    cteniFronty.length === 1 && /^select q\.dalsi_volny into v_volny from app\.rezervace_choice_fronta q where q\.jediny for update$/i.test(cteniFronty[0]))
+  ok('… a čas měří až po tom zámku',
+    teloUlohy.indexOf('from app.rezervace_choice_fronta q') > 0
+    && teloUlohy.indexOf('from app.rezervace_choice_fronta q') < teloUlohy.indexOf('v_ted := clock_timestamp()'))
 }
 
 /* ===================================================================== */

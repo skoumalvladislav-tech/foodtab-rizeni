@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
-import { NEJMENE_NA_PRIPOJENI_MS } from '@/lib/rezervace-choice'
+import { NEJMENE_NA_PRIPOJENI_MS, ROZESTUP_DOTAZU_MS } from '@/lib/rezervace-choice'
 import { choiceKSynchronizaci, REZERVA_DOTAZU_MS, synchronizovatChoice } from '@/lib/rezervace-choice-sync'
 
 /**
@@ -25,6 +25,12 @@ import { choiceKSynchronizaci, REZERVA_DOTAZU_MS, synchronizovatChoice } from '@
  * běhu nezačne; nemá nový běh, a proto jde příště první
  * (`poradiSynchronizace`). Připojení se tak střídají a každé projde
  * celé okno — při víc připojeních jen méně často.
+ *
+ * Díl se počítá od odchodu PRVNÍHO dotazu připojení (čekání na frontu
+ * ho neukusuje) a připojení, po jehož dílu by na další nezbyl celý
+ * nejmenší díl, dočte zbytek úlohy (`konecDiluUlohy`, nezávislé ověření
+ * PR #163). Tlačítka vedle úlohy ji tak stojí nejvýš místa ve frontě,
+ * která sama zabrala.
  */
 
 export const dynamic = 'force-dynamic'
@@ -55,19 +61,35 @@ export async function GET(request: Request): Promise<NextResponse> {
   // GitHub Actions. Důvod je u napojení v Rezervace → Napojení a import.
   const vysledky: { stav: string; dotazu: number; nacteno: number; pokracovani: boolean }[] = []
   let omezeno = false
+  // Konec dílu předchozího připojení (`konecDiluMs`), nebo nic.
+  let konecDilu: number | null = null
   for (const [i, id] of pripojeni.entries()) {
-    const zbyva = posledniDotazUlohy - Date.now()
+    // Zbývající čas se počítá od konce dílu předchozího připojení, když
+    // ho vyčerpalo — ne od chvíle, kdy doběhla odpověď na jeho poslední
+    // dotaz. Připojení samo dočte zbytek úlohy, když po jeho dílu nezbude
+    // celý nejmenší díl (`konecDiluUlohy`); tady se musí rozhodnout
+    // podle téhož okamžiku, jinak by čas mezi nimi propadl (nezávislé
+    // ověření PR #163).
+    const zbyva = posledniDotazUlohy - Math.min(Date.now(), konecDilu ?? Infinity)
     if (zbyva < NEJMENE_NA_PRIPOJENI_MS) break
+    // A tři dotazy se musí vejít i od teď (první hned, pak dva rozestupy)
+    // — to padne jen při pomalých odpovědích Choice.
+    if (posledniDotazUlohy - Date.now() < NEJMENE_NA_PRIPOJENI_MS - ROZESTUP_DOTAZU_MS) break
     // Stejný díl zbývajícího času každému zbývajícímu připojení, ale ne
     // méně než na tři dotazy.
     const dil = Math.max(NEJMENE_NA_PRIPOJENI_MS, Math.floor(zbyva / (pripojeni.length - i)))
     // `uloha: true` — jen úloha jde do fronty vlastním vstupem bez pravidla
-    // firmy a smí čekat celý svůj díl; tlačítka nejvýš dva rozestupy, takže
-    // úlohu zdrží nejvýš o ~16,5 s a její dotaz jí nevezmou (migrace
-    // 20261102100000).
+    // firmy (migrace 20261102100000); tlačítka čekají nejvýš dva rozestupy.
+    // Díl (`dilMs`) se počítá od odchodu PRVNÍHO dotazu připojení, ne od
+    // teď: když tlačítko vzalo poslední místo dílu předchozího připojení,
+    // čekání tohohle na frontu mu díl neukousne (nezávislé ověření PR #163
+    // — se třemi připojeními úloha přišla o dotaz víc, než kolik jich
+    // tlačítko udělalo). Tlačítko tak úlohu stojí nejvýš místa, která samo
+    // zabralo. Konec celé úlohy (`posledniDotazUlohy`) platí pro všechny.
     const v = await synchronizovatChoice(id, {
       konecMs: konecUlohy,
-      posledniDotazMs: Math.min(posledniDotazUlohy, Date.now() + dil),
+      posledniDotazMs: posledniDotazUlohy,
+      dilMs: dil,
       uloha: true,
     })
     vysledky.push({ stav: v.stav, dotazu: v.dotazu, nacteno: v.nacteno, pokracovani: v.pokracovani })
@@ -75,6 +97,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       omezeno = true
       break
     }
+    konecDilu = v.konecDiluMs
   }
 
   return NextResponse.json({

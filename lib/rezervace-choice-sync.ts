@@ -6,6 +6,7 @@ import { rozsifrovat } from './integrace-klice.ts'
 import {
   chybaBehu,
   KLIC_CHOICE,
+  NEJMENE_NA_PRIPOJENI_MS,
   poradiSynchronizace,
   precistKurzor,
   probehnoutChoice,
@@ -176,6 +177,10 @@ export class ChybaFronty extends Error {
  *     `NEJDELE_PRED_OPAKOVANIM_MS`) a zkusí to znovu,
  *   * `'uloha'` — vlastní vstup úlohy (`rezervace_choice_zabrat_dotaz_ulohy`,
  *     bez pravidla firmy), čeká až do `posledniDotazMs`, neopakuje.
+ *     S `dil` (díl času jednoho připojení, `DilUlohy`) smí PRVNÍ dotaz
+ *     čekat až do `posledniDotazMs` a díl se počítá až od chvíle, kdy
+ *     první dotaz odešel; do `dil.konecMs` se zapíše, do kdy smějí odejít
+ *     další.
  *
  * `false` = nevejde se (ani po opakování), nebo firma už má zabraný jiný
  * dotaz; nic se nezabralo. Bez fronty se NEPOSÍLÁ nic — výjimka, ne
@@ -187,9 +192,23 @@ export function cekatNaFrontu(
   posledniDotazMs: number,
   kdo: KdoSePta,
   p: ProstrediChoice = SKUTECNE,
+  dil?: DilUlohy,
 ): () => Promise<boolean> {
+  if (kdo === 'uloha') {
+    let konec = posledniDotazMs
+    let prvni = true
+    return async () => {
+      const zabrano = await zabratUlohou(sluzba, tenantId, konec, p)
+      if (zabrano && prvni && dil) {
+        // Teď odchází první dotaz (`zabratUlohou` počkala na jeho čas).
+        konec = konecDiluUlohy(p.ted(), dil.ms, posledniDotazMs)
+        dil.konecMs = konec
+      }
+      prvni = false
+      return zabrano
+    }
+  }
   return async () => {
-    if (kdo === 'uloha') return zabratUlohou(sluzba, tenantId, posledniDotazMs, p)
     for (let pokus = 1; ; pokus++) {
       const nejdele = nejdeleCekat(posledniDotazMs, 'tlacitko', p)
       if (nejdele === null) return false
@@ -208,6 +227,40 @@ export function cekatNaFrontu(
       await p.spat(z.zaMs)
     }
   }
+}
+
+/**
+ * Díl času jednoho připojení naplánované úlohy (app/api/uloha/
+ * rezervace-choice). `ms` = délka dílu od route; `konecMs` doplní
+ * `cekatNaFrontu`, až odejde první dotaz připojení: do kdy smějí odcházet
+ * další. Route podle něj počítá, kolik času zbývá dalším připojením
+ * (`synchronizovatChoice` ho vrací jako `konecDiluMs`).
+ */
+export type DilUlohy = { ms: number; konecMs: number | null }
+
+/**
+ * Do kdy smějí odcházet dotazy připojení úlohy, když jeho první dotaz
+ * odešel v `prvniMs`.
+ *
+ * Proč díl až od prvního dotazu (nezávislé ověření PR #163): díl dalšího
+ * připojení se dřív počítal od chvíle, kdy předchozí skončilo. Když
+ * tlačítko vzalo poslední místo dílu předchozího připojení, další
+ * připojení čekalo na frontu (až dva rozestupy) UVNITŘ svého dílu —
+ * místo 3 dotazů 2 a na třetí připojení díl nezbyl. Úloha tak přišla
+ * o dotaz víc, než kolik jich tlačítko samo udělalo. Čekání na první
+ * místo ve frontě proto díl neukusuje.
+ *
+ * Když po dílu nezbude celý nejmenší díl (`NEJMENE_NA_PRIPOJENI_MS`) na
+ * další připojení, dočte zbytek úlohy tohle připojení — jinak by ten čas
+ * propadl, protože další připojení by route nezačala. Route se rozhoduje
+ * podle TÉHOŽ konce dílu (`konecDiluMs` ve výsledku), ne podle chvíle,
+ * kdy připojení doběhlo: to je o odpověď na poslední dotaz později a ve
+ * škvíře mezi oběma okamžiky by čas propadl taky (úloha se 3 připojeními
+ * a frontou obsazenou do ~4 s by udělala 4 dotazy místo 7).
+ */
+export function konecDiluUlohy(prvniMs: number, dilMs: number, posledniDotazMs: number): number {
+  const konecDilu = prvniMs + dilMs
+  return posledniDotazMs - konecDilu < NEJMENE_NA_PRIPOJENI_MS ? posledniDotazMs : konecDilu
 }
 
 /**
@@ -486,6 +539,11 @@ export type VysledekSynchronizaceChoice = {
   dotazu: number
   nacteno: number
   duvod: string | null
+  /**
+   * Jen úloha s dílem (`dilMs`): do kdy smějí odcházet dotazy tohohle
+   * připojení (`DilUlohy.konecMs`); `null`, když žádný dotaz neodešel.
+   */
+  konecDiluMs: number | null
 }
 
 type Pripojeni = { id: string; tenant_id: string; stav: string; externi_ucet: Record<string, unknown> | null }
@@ -541,14 +599,19 @@ async function nacistToken(sluzba: SupabaseClient, pripojeniId: string): Promise
  * (Načíst teď, první načtení po připojení) se čeká jako tlačítko: nejvýš
  * dva rozestupy (`NEJDELE_CEKA_TLACITKO_MS`) a jednou znovu, takže se
  * běh střídá s jiným během téže firmy, místo aby skončil.
+ * `dilMs` (jen s `uloha: true`): díl času připojení, který se počítá až
+ * od odchodu jeho prvního dotazu (`DilUlohy`, `konecDiluUlohy`);
+ * `posledniDotazMs` je pak konec celé úlohy. Do kdy díl doopravdy sahá,
+ * vrací `konecDiluMs`.
  */
 export async function synchronizovatChoice(
   pripojeniId: string,
-  moznosti: { konecMs: number; posledniDotazMs?: number; nejmeneOdMinulehoMs?: number; uloha?: boolean; prostredi?: ProstrediChoice },
+  moznosti: { konecMs: number; posledniDotazMs?: number; dilMs?: number; nejmeneOdMinulehoMs?: number; uloha?: boolean; prostredi?: ProstrediChoice },
 ): Promise<VysledekSynchronizaceChoice> {
   const p = moznosti.prostredi ?? SKUTECNE
+  const dil: DilUlohy | undefined = moznosti.uloha === true && moznosti.dilMs !== undefined ? { ms: moznosti.dilMs, konecMs: null } : undefined
   const vysledek = (stav: VysledekSynchronizaceChoice['stav'], duvod: string | null, x: Partial<VysledekSynchronizaceChoice> = {}): VysledekSynchronizaceChoice =>
-    ({ stav, duvod, omezeno: false, pokracovani: false, dotazu: 0, nacteno: 0, ...x })
+    ({ stav, duvod, omezeno: false, pokracovani: false, dotazu: 0, nacteno: 0, konecDiluMs: dil?.konecMs ?? null, ...x })
 
   const sluzba = klientUlohy()
   if (!sluzba) return vysledek('chyba', 'Úloha není nastavená — chybí SUPABASE_SERVICE_ROLE_KEY.')
@@ -601,6 +664,7 @@ export async function synchronizovatChoice(
         Math.min(moznosti.konecMs - REZERVA_DOTAZU_MS, moznosti.posledniDotazMs ?? Infinity),
         moznosti.uloha === true ? 'uloha' : 'tlacitko',
         p,
+        dil,
       ),
       zapsat: zapisDoFoodtabu(sluzba, pripojeni.id),
     })

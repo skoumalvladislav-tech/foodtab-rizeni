@@ -47,6 +47,21 @@
 --      o rozestup déle, smí čekat celý svůj díl). A úloha tlačítku
 --      nezabírá firmu: vedle úlohy vlastní firmy projde tlačítko stejně
 --      jako vedle úlohy cizí.
+--      To „nejvýš místo, které samo zabralo" drží i u úlohy s víc
+--      připojeními díky tomu, jak úloha dělí čas (app/api/uloha/
+--      rezervace-choice, lib/rezervace-choice-sync.ts `konecDiluUlohy`):
+--      díl připojení se počítá od odchodu jeho PRVNÍHO dotazu, ne od
+--      konce předchozího připojení; připojení, po jehož dílu by na další
+--      nezbyl celý nejmenší díl, dočte zbytek úlohy; a čas pro další
+--      připojení se počítá od konce dílu předchozího, ne od chvíle, kdy
+--      doběhla jeho poslední odpověď (jinak by čas mezi tím propadl).
+--      Nezávislé ověření PR #163: dřív se třemi a víc připojeními úloha
+--      v ~15 % okamžiků přišla o dotaz víc, než kolik jich tlačítko
+--      udělalo (tlačítko vzalo poslední místo dílu 1. připojení
+--      a 2. připojení pak ~11 s svého dílu čekalo na frontu). Hlídá to
+--      scripts/rezervace-choice.test.mjs (oddíl 6b: skutečná úloha se
+--      2–4 připojeními a tlačítko v každém okamžiku, fronta obsazená
+--      do 0,25–22 s po 250 ms a dávka kliků).
 --
 --   2. TLAČÍTKO JEDNOU POČKÁ A ZKUSÍ TO ZNOVU —
 --      `public.rezervace_choice_zabrat_dotaz` (tlačítka, první načtení,
@@ -99,11 +114,22 @@
 --   NULL   už se nevrací. Kód ho bere jako „nic se nezabralo, nezkoušet"
 --          — tak odpovídá databáze PŘED touhle migrací.
 --
--- POŘADÍ NASAZENÍ: `db push` AŽ PO nasazení kódu z main (Vercel). Starý
--- kód (do PR s touto migrací) záporné číslo bere jako chybu fronty
--- („Fronta dotazů na Choice selhala"). Nový kód se starou databází
--- funguje jako dřív: NULL = bez opakování, a když chybí funkce úlohy
--- (PGRST202), čeká úloha přes `rezervace_choice_zabrat_dotaz` za firmu.
+-- POŘADÍ NASAZENÍ: `db push` AŽ PO nasazení kódu z main (Vercel), a pak
+-- HNED. Starý kód (do PR s touto migrací) záporné číslo bere jako chybu
+-- fronty („Fronta dotazů na Choice selhala"), proto ne dřív. Nový kód
+-- se starou databází jede, ale NE úplně jako dřív:
+--   * tlačítka neopakují (NULL = nic, bez opakování) a když chybí
+--     funkce úlohy (PGRST202), čeká úloha přes
+--     `rezervace_choice_zabrat_dotaz` za firmu — to je jako dřív;
+--   * „Načíst teď" má ale na běh 55 s místo 50 s (`KONEC_NACIST_TED_MS`,
+--     s opakováním z téhle migrace díky tomu načte celé). Bez opakování
+--     drží frontu vedle běžícího načítání o 5 s déle, takže TŘETÍ
+--     tlačítko vedle úlohy a „Načíst teď" jiné firmy projde méně často
+--     než dnes: nezávislé ověření PR #163 naměřilo 13–21 z 37 okamžiků
+--     proti 30 z 37 (po db push 110 ze 110).
+-- Mezi nasazením kódu a db push je tedy tlačítko vedle dvou běhů horší
+-- než dnes. Nic se nerozbije a nic se nezapíše špatně, ale okno má být
+-- krátké.
 --
 -- ---------------------------------------------------------------------
 -- CO SE SCHVÁLNĚ NEDĚLÁ
@@ -119,7 +145,10 @@
 --     na tomtéž připojení; krok105 ho nově zkouší dvěma spojeními
 --     (oddíl 2d) i s kopií bez zámku, která musí spadnout.
 --   * Žádné `set vlastni.parametr` v definici funkcí (na Supabase by
---     migrace nebyla superuživatel a spadla by na 42501).
+--     migrace nebyla superuživatel a spadla by na 42501). Všechny tři
+--     funkce jsou `security definer set search_path = ''` — krok105
+--     (oddíl 3) to u nich hlídá jmenovitě; krok31 kontroluje jen
+--     schéma app a tyhle jsou v public.
 -- =====================================================================
 
 
@@ -137,6 +166,11 @@
 --
 -- Zamyká jen řádek fronty (tlačítka zamykají firmu, pak frontu — pořadí
 -- se nekříží). `clock_timestamp()` až po zámku, jako u tlačítek.
+-- Firmu úloha nebere, takže `for update` u řádku fronty je JEDINÉ, co ji
+-- řadí za souběžné tlačítko: bez něj by přečetla `dalsi_volny` dřív, než
+-- tlačítko zapíše, a obě by dostaly TENTÝŽ čas (na Choice dva dotazy
+-- naráz, 429). krok105 oddíl 2b to zkouší dvěma spojeními i s kopií
+-- funkce bez zámku, která musí spadnout (nezávislé ověření PR #163).
 create function public.rezervace_choice_zabrat_dotaz_ulohy(p_rozestup_ms integer, p_nejdele_cekat_ms integer)
 returns integer
 language plpgsql volatile security definer set search_path = ''
