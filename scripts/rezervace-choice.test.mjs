@@ -210,7 +210,15 @@ function sit(odpovedi) {
 
   const echo = sit([odpoved(400, { error: true, name: 'ValidationError', message: 'code KOD-TAJNY is invalid', statusCode: 400 })])
   const e1 = await vytvoritChoice(echo.fetchFn).vymenitKod({ code: 'KOD-TAJNY', clientId: 'k', secret: 's' })
-  ok('400 → chyba v datech a text od Choice (mohl by nést kód) se NEPŘEBÍRÁ', e1.stav === 'chyba' && e1.druh === 'data' && !e1.duvod.includes('KOD-TAJNY'))
+  ok('400 → chyba v datech a kód z textu od Choice zmizí', e1.stav === 'chyba' && e1.druh === 'data' && !e1.duvod.includes('KOD-TAJNY') && !JSON.stringify(e1).includes('KOD-TAJNY'))
+  ok('… ale co Choice napsal, se ukáže (kód nahrazený „…“)', e1.duvod.includes('code … is invalid'))
+  // 26. 10. 2026 v produkci: Choice na výměnu odpověděl 400 „Invalid credentials“ a obecná hláška to schovala.
+  const neplatne = await vytvoritChoice(sit([odpoved(400, { error: true, name: 'ApplicationError', message: 'Invalid credentials', statusCode: 400 })]).fetchFn).vymenitKod({ code: 'K-9', clientId: 'k', secret: 's' })
+  ok('400 Invalid credentials → text od Choice a rada: CHOICE_CLIENT_SECRET, Redeploy, nový odkaz', neplatne.stav === 'chyba' && neplatne.druh === 'data' && neplatne.duvod.includes('Invalid credentials') && /CHOICE_CLIENT_SECRET/.test(neplatne.duvod) && /Redeploy/.test(neplatne.duvod) && /novým odkazem/.test(neplatne.duvod))
+  const prazdny = await vytvoritChoice(sit([odpoved(400, { error: true, message: 'Invalid credentials' })]).fetchFn).vymenitKod({ code: '', clientId: 'k', secret: 's' })
+  ok('prázdný kód text od Choice nerozseká', prazdny.stav === 'chyba' && prazdny.duvod.includes('(400: Invalid credentials)'))
+  const propadly = await vytvoritChoice(sit([odpoved(400, { error: true, message: 'expired' })]).fetchFn).vymenitKod({ code: 'K-1', clientId: 'k', secret: 's' })
+  ok('jiný důvod (expired) → rada „kód platí jen jednou“, ne secret', propadly.stav === 'chyba' && propadly.duvod.includes('expired') && /jen jednou/.test(propadly.duvod) && !/CHOICE_CLIENT_SECRET/.test(propadly.duvod))
   const e2 = await vytvoritChoice(sit([odpoved(401, {})]).fetchFn).vymenitKod({ code: 'k', clientId: 'k', secret: 's' })
   ok('401 → přístup (klíč aplikace)', e2.stav === 'chyba' && e2.druh === 'pristup' && /CHOICE_CLIENT_ID/.test(e2.duvod))
   const e3 = await vytvoritChoice(sit([odpoved(503, 'down')]).fetchFn).vymenitKod({ code: 'k', clientId: 'k', secret: 's' })
