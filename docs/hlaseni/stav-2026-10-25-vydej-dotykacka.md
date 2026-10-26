@@ -122,6 +122,11 @@ jakým uživatelem pokladny se odpis zapíše, 75 kdy a kolik přiřazení přes
   Starší razítko než nasazené CLI nepustí a dvě stejná v main by db push
   shodila. Teď je **20261101100000** (novější než main i všechny otevřené
   PR) a scénář **krok102**.
+- **Workflow Aplikace na PR padal a já si toho nevšiml.** Nový test
+  `jine-platby-ai-parovani` nebyl v seznamu testů ve
+  `.github/workflows/aplikace.yml` a workflow takový test schválně shodí.
+  Lokálně všechno procházelo, protože jsem testy pouštěl přímo, ne přes
+  seznam. Opraveno 26. 10. (`afa3c15`). Test prochází v pásmu UTC i Praha.
 - **Obrazovku jsem neviděl v prohlížeči.** Panel Sklad je ověřený
   vykreslením komponenty do HTML (tlačítko, formulář, kdy se nezobrazí),
   ne snímkem obrazovky.
