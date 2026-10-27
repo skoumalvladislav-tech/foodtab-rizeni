@@ -104,8 +104,11 @@
   border: 1px solid color-mix(in srgb, var(--branch) 35%, var(--line));
   border-left: 4px solid var(--branch);
 }
-.ds-rez-skupina-hlava { margin: 0; display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; font-weight: 600; color: var(--branch); }
-.ds-rez-skupina-hlava > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* Souhrn se v úzkém sloupci zalomí pod štítek — useknutý počet hostů by nic neřekl. */
+.ds-rez-skupina-hlava {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0;
+  font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--branch);
+}
 
 @container (max-width: 900px) {
   .ds-rez-tyden { grid-template-columns: 1fr; }
