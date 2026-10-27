@@ -60,7 +60,7 @@
 import { createHmac } from 'node:crypto'
 
 import type { ChybaPos, DruhPlatby, PosProvider, ProvozovnaPos, RadekPlatby, RadekProdeje, RelacePos, UdajePos } from './pos-provider-contract.ts'
-import { cteniDotykacky, zapisVydejeDotykacka, type KontextDotykacky } from './pokladna-dotykacka-sklad.ts'
+import { cteniDotykacky, zapisVydejeDotykacka, type KontextDotykacky, type OdpovedDotykacky } from './pokladna-dotykacka-sklad.ts'
 import { povoleneProvozovny, ZAPIS_VYDEJE_DOTYKACKA, type PovolenyZapis } from './pokladna-dotykacka-zapis.ts'
 
 export const API_DOTYKACKA = 'https://api.dotykacka.cz/v2'
@@ -286,8 +286,141 @@ function chybaZeStavu(status: number, coDelam: string, telo: unknown = null): Ch
   return { stav: 'chyba', druh: 'jina', duvod: `Dotykačka odpověděla HTTP ${status} při ${coDelam}.` }
 }
 
-/** Jedno volání: buď stav a rozparsované tělo (null, když to není JSON), nebo chyba sítě. Text odpovědi do hlášek nejde. */
-async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit, casovyLimitMs: number = CASOVY_LIMIT_MS): Promise<{ status: number; telo: unknown } | ChybaPos> {
+const jeCislice = (c: number) => c >= 0x30 && c <= 0x39
+
+/**
+ * Celá čísla o 16 a víc číslicích MIMO řetězce → text v uvozovkách.
+ * Jeden průchod znak po znaku (bez regulárního výrazu — ten u obřích
+ * řetězců přetekl zásobník a u neuzavřených se zpomaloval kvadraticky):
+ * řetězce se přeskočí celé i s escapy, číslo se přečte celé jako token
+ * (`-?číslice[.číslice][e±číslice]`), takže kus desetinného čísla ani
+ * exponent se nikdy nebere zvlášť. Desetinná čísla a exponenty zůstávají.
+ */
+export function chranitDlouhaCisla(text: string): string {
+  const n = text.length
+  let vysledek = ''
+  let od = 0
+  let i = 0
+  while (i < n) {
+    const c = text.charCodeAt(i)
+    if (c === 0x22) {
+      // Řetězec až po neescapovanou uvozovku (neuzavřený do konce textu).
+      i++
+      while (i < n) {
+        const d = text.charCodeAt(i)
+        if (d === 0x5c) i += 2
+        else if (d === 0x22) {
+          i++
+          break
+        } else i++
+      }
+      continue
+    }
+    if (c === 0x2d || jeCislice(c)) {
+      const zacatek = i
+      if (c === 0x2d) i++
+      const prvniCislice = i
+      while (i < n && jeCislice(text.charCodeAt(i))) i++
+      const cislic = i - prvniCislice
+      let cele = true
+      if (i < n && text.charCodeAt(i) === 0x2e) {
+        cele = false
+        i++
+        while (i < n && jeCislice(text.charCodeAt(i))) i++
+      }
+      if (i < n && (text.charCodeAt(i) | 0x20) === 0x65) {
+        cele = false
+        i++
+        if (i < n && (text.charCodeAt(i) === 0x2b || text.charCodeAt(i) === 0x2d)) i++
+        while (i < n && jeCislice(text.charCodeAt(i))) i++
+      }
+      if (cele && cislic >= 16) {
+        vysledek += `${text.slice(od, zacatek)}"${text.slice(zacatek, i)}"`
+        od = i
+      }
+      continue
+    }
+    i++
+  }
+  return od === 0 ? text : vysledek + text.slice(od)
+}
+
+/**
+ * Tělo odpovědi → JSON. `undefined` = JSON to není ani po opravách.
+ *
+ * Dokumentace slibuje čísla jako řetězce (api-reference/general/data-types),
+ * ale id jsou typu `long` (entity/product). Kdyby přišlo jako číslo nad
+ * 2^53, `JSON.parse` by ho tiše zaokrouhlil a produkt by dostal cizí id —
+ * proto se dlouhá celá čísla před čtením převedou na text. Druhý pokus
+ * (jen když první selže) nahradí řídicí znaky mezerou: v textu produktu
+ * (popis, `recipe` až 8 192 znaků) by syrový tabulátor nebo konec řádku
+ * shodil celou stránku katalogu. Mimo řetězce je mezera jen jiná mezera.
+ * Úvodní BOM se zahodí. Výjimku nevyhodí nikdy.
+ */
+export function naparsovatJson(text: string): unknown {
+  const bezBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+  let chranene = bezBom
+  try {
+    chranene = chranitDlouhaCisla(bezBom)
+  } catch {
+    // (jen pro jistotu — průchod sám nevyhazuje) čte se bez ochrany
+  }
+  try {
+    return JSON.parse(chranene)
+  } catch {
+    // zkusí se ještě s opravou řídicích znaků
+  }
+  try {
+    return JSON.parse(chranene.replace(/[\u0000-\u001f]/g, ' '))
+  } catch {
+    return undefined
+  }
+}
+
+/** Druh znaku do hlášky — jen druh, ne znak sám. */
+function druhZnaku(z: string): string {
+  if (z === '') return 'konec'
+  const c = z.charCodeAt(0)
+  if (c < 0x20 || c === 0x7f) return 'řídicí znak'
+  if (z === '\\') return 'zpětné lomítko'
+  if (z === '"') return 'uvozovka'
+  if (/\p{L}/u.test(z)) return 'písmeno'
+  if (/\d/.test(z)) return 'číslice'
+  return 'jiný znak'
+}
+
+/**
+ * Kde `JSON.parse` nad tělem skončil: pozice z jeho hlášky (jen číslo —
+ * hláška V8 nese i úryvek textu, ten do hlášky appky nesmí) a druh znaku
+ * na ní. „Unexpected end of JSON input" = až na konci (uříznuté tělo).
+ */
+function chybaJson(text: string): { pozice: number | null; znakNaPozici: string | null } {
+  const bezBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+  try {
+    JSON.parse(bezBom.replace(/[\u0000-\u001f]/g, ' '))
+    return { pozice: null, znakNaPozici: null }
+  } catch (e) {
+    const zprava = e instanceof Error ? e.message : ''
+    if (/end of JSON input/i.test(zprava)) return { pozice: bezBom.length, znakNaPozici: 'konec' }
+    const m = /position (\d+)/.exec(zprava)
+    if (!m) return { pozice: null, znakNaPozici: null }
+    const pozice = Number(m[1])
+    return { pozice, znakNaPozici: druhZnaku(bezBom.charAt(pozice)) }
+  }
+}
+
+/** První viditelný znak těla pro hlášku — jeden znak nic neprozradí, a „<" znamená HTML místo JSON. */
+function prvniZnak(text: string): string {
+  const z = text.trimStart().charAt(0)
+  return /^[\p{L}\p{N}<>{}[\]"]$/u.test(z) ? z : 'jiný znak'
+}
+
+/**
+ * Jedno volání: buď stav a rozparsované tělo (null, když přišlo prázdné —
+ * `prazdne` — nebo to není JSON — pak `nejson` řekne délku, první znak
+ * a kde čtení skončilo), nebo chyba sítě. Text odpovědi do hlášek nejde.
+ */
+async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit, casovyLimitMs: number = CASOVY_LIMIT_MS): Promise<OdpovedDotykacky | ChybaPos> {
   let odpoved: Response
   try {
     odpoved = await fetchFn(url, { ...init, signal: AbortSignal.timeout(casovyLimitMs) })
@@ -296,19 +429,25 @@ async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit, casovyL
     return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka neodpověděla (${proc}) — appka to zkusí příště.` }
   }
 
-  const text = await odpoved.text().catch(() => '')
-  let telo: unknown = null
-  if (text) {
-    try {
-      telo = JSON.parse(text)
-    } catch {
-      telo = null
-    }
+  // Přerušené čtení těla (spojení spadlo, vypršel čas) u ÚSPĚCHU (2xx) NENÍ prázdná
+  // odpověď — dřív z něj byl „neočekávaný tvar" a dočasná chyba vypadala jako trvalá.
+  // U jiného stavu rozhoduje stav sám jako dřív (POS akce: 401/403 = k pokladně
+  // nedošlo; z „neodpověděla" by se stalo nejasné).
+  let text: string
+  try {
+    text = await odpoved.text()
+  } catch (e) {
+    if (odpoved.status < 200 || odpoved.status > 299) return { status: odpoved.status, telo: null }
+    const proc = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'vypršel čas' : 'spojení se přerušilo'
+    return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka neposlala celou odpověď (${proc}) — appka to zkusí příště.` }
   }
+  if (!text) return { status: odpoved.status, telo: null, prazdne: true }
+  const telo = naparsovatJson(text)
+  if (telo === undefined) return { status: odpoved.status, telo: null, nejson: { znaku: text.length, zacina: prvniZnak(text), ...chybaJson(text) } }
   return { status: odpoved.status, telo }
 }
 
-function jeChyba(x: { status: number; telo: unknown } | ChybaPos): x is ChybaPos {
+function jeChyba(x: OdpovedDotykacky | ChybaPos): x is ChybaPos {
   return 'stav' in x
 }
 
