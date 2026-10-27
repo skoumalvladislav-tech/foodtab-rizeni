@@ -24,6 +24,8 @@ import {
   type Osoba,
   type RadekDne,
 } from "@/lib/rozpis-mobil";
+import type { HosteDnu } from "@/lib/rezervace-pobocky";
+import { HosteDneRadek } from "../hoste-dne";
 import {
   AvatarM,
   CasKratce,
@@ -86,6 +88,10 @@ export type DenProps = {
   onFiltry: () => void;
   onZrusitFiltr: (druh: "pobocka" | "usek" | "stav", hodnota: string) => void;
   onZobrazitNeobsazene: () => void;
+  /** Hosté z rezervací vybraného dne; `null` = člověk rezervace nevidí. */
+  hoste: HosteDnu | null;
+  /** Adresní segment rozsahu — odkaz na den v Rezervacích. */
+  rozsah: string;
 };
 
 export function DenPrehled(p: DenProps) {
@@ -128,6 +134,9 @@ export function DenPrehled(p: DenProps) {
           <TlacitkoFiltru pocet={pocetFiltru} onKlik={p.onFiltry} />
         </div>
       </header>
+
+      {/* Hosté vybraného dne v toku stránky — plovoucí okénko by na telefonu zakrylo rozpis. */}
+      <HosteDneRadek den={den} hoste={p.hoste} rozsah={p.rozsah} />
 
       {prehled.poUsecich.length > 0 ? (
         <ul className="ds-sm-cipy" aria-label="Lidé podle úseku">

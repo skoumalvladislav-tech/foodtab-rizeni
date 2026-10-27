@@ -101,6 +101,9 @@ export function barvyPobocek(pobocky: readonly { id: string; color?: string | nu
 
 export type VzhledPobocky = { zkratka: string; barva: BarvaKalendare }
 
+/** Co o pobočce potřebuje štítek, legenda a okénko hostů: zkratku a barvu spočítal přístup Rezervací. */
+export type PobockaKalendare = { id: string; nazev: string } & VzhledPobocky
+
 /** Zkratka a barva každé pobočky. `pobocky` = všechny, které člověk vidí (`ctx.branches`). */
 export function vzhledPobocek(pobocky: readonly { id: string; name: string; color?: string | null }[]): Map<string, VzhledPobocky> {
   const zkratky = zkratkyPobocek(pobocky.map((p) => p.name))
@@ -156,4 +159,75 @@ export function souhrnText(s: SouhrnDne): string {
  */
 export function poPobockach<T extends { branch_id: string }>(rezervace: readonly T[], poradi: readonly string[]): { id: string; rezervace: T[] }[] {
   return poradi.map((id) => ({ id, rezervace: rezervace.filter((r) => r.branch_id === id) })).filter((s) => s.rezervace.length > 0)
+}
+
+/* ---------- hosté v Rozpisu směn ---------------------------------------- */
+
+/**
+ * Hosté z rezervací pro Rozpis směn (Šéfík 27. 10. 2026: „když najedu myší
+ * na konkrétní den, aby se ukazoval počet hostů na jednotlivých pobočkách
+ * — podle toho budu vědět, kolik dát zaměstnanců“).
+ *
+ * `null` místo celého objektu = člověk rezervace nevidí (nemá právo nebo
+ * rozsah) a okénko se mu nekreslí vůbec. `chyba` = rezervace se načíst
+ * nepovedlo: okénko to řekne, NEUKÁŽE NULY — prázdný den by vypadal jako
+ * „nikdo nepřijde“ a vedoucí by naplánoval málo lidí.
+ */
+export type HosteDnu = {
+  /** Pobočky rozsahu, na kterých člověk rezervace vidí, v pořadí kontextu. */
+  pobocky: PobockaKalendare[]
+  /** Provozní den → pobočka → souhrn. Den nebo pobočka, která chybí, nemá nic. */
+  dny: Record<string, Record<string, SouhrnDne>>
+  chyba: boolean
+}
+
+/**
+ * Souhrn po provozních dnech a pobočkách. Den je `rezervace.den` — PROVOZNÍ
+ * den, který počítá databáze z pásma a začátku dne pobočky (rezervace
+ * v 1:30 patří k večeru předtím), stejně jako `shifts.shift_date`.
+ * Zrušené a nedorazivší se do hostů nepočítají (souhrnDne).
+ */
+type RadekHostu = Pick<RezervaceVKalendari, 'den' | 'druh' | 'stav' | 'pocet_osob'> & { branch_id: string }
+
+export function souhrnyPoDnech(rezervace: readonly RadekHostu[]): HosteDnu['dny'] {
+  const skupiny = new Map<string, RadekHostu[]>()
+  for (const r of rezervace) {
+    const klic = `${r.den}|${r.branch_id}`
+    const seznam = skupiny.get(klic)
+    if (seznam) seznam.push(r)
+    else skupiny.set(klic, [r])
+  }
+  const dny: HosteDnu['dny'] = {}
+  for (const [klic, seznam] of skupiny) {
+    const [den, pobocka] = klic.split('|')
+    dny[den] = { ...dny[den], [pobocka]: souhrnDne(seznam) }
+  }
+  return dny
+}
+
+/**
+ * Jen vybrané pobočky (filtr „Zobrazit“ v Rozpisu). Prázdný výběr = všechny.
+ * Když ve výběru nezbude žádná pobočka s právem na rezervace, okénko nemá
+ * co ukázat → `null`.
+ */
+export function hostePobocek(hoste: HosteDnu | null, vybrane: readonly string[]): HosteDnu | null {
+  if (!hoste || vybrane.length === 0) return hoste && hoste.pobocky.length > 0 ? hoste : null
+  const pobocky = hoste.pobocky.filter((p) => vybrane.includes(p.id))
+  return pobocky.length > 0 ? { ...hoste, pobocky } : null
+}
+
+/** Součet poboček za den (do spouštěče okénka a řádku „Celkem“). */
+export function celkemDne(hoste: Pick<HosteDnu, 'pobocky' | 'dny'>, den: string): SouhrnDne {
+  const prazdny = souhrnDne([])
+  return hoste.pobocky.reduce((s, p) => {
+    const x = hoste.dny[den]?.[p.id]
+    if (!x) return s
+    return {
+      rezervaci: s.rezervaci + x.rezervaci,
+      akci: s.akci + x.akci,
+      hostu: s.hostu + x.hostu,
+      bezPoctu: s.bezPoctu + x.bezPoctu,
+      zrusenych: s.zrusenych + x.zrusenych,
+    }
+  }, prazdny)
 }

@@ -47,6 +47,7 @@ import {
   type OsobaD,
   type PotvrzeniRozpisu,
 } from "@/lib/rozpis-desktop";
+import { hostePobocek, type HosteDnu } from "@/lib/rezervace-pobocky";
 import { nazevMesice } from "@/lib/rozpis-export";
 import { BEZ_USEKU, denVTydnu, dnyTydne, mesicniMrizka, minutSmeny } from "@/lib/rozpis-mobil";
 import Nadpis from "../nadpis";
@@ -190,7 +191,10 @@ export default function RozpisView({
   potvrzeni,
   vydani,
   vysledekVydani,
+  hoste,
 }: Props & {
+  /** Hosté z rezervací do okénka u dne; `null` = člověk rezervace nevidí (app/[rozsah]/rezervace/hoste.ts). */
+  hoste: HosteDnu | null;
   planovani: Planovani | null;
   mobil: MobilVstup;
   /** employees.position_id — štítek pod jménem v mřížce na počítači. */
@@ -522,6 +526,7 @@ export default function RozpisView({
           onUpravit={(s) => setOtevrene({ den: s.shift_date, smena: s })}
           onPoznamka={(s) => setOtevrene({ den: s.shift_date, smena: s, zamerit: "poznamka" })}
           onDuplikovat={duplikovat}
+          hoste={hoste}
         />
       </div>
 
@@ -639,6 +644,9 @@ export default function RozpisView({
             filtrAktivni={!jeFiltrPrazdny(filtr)}
             onZrusitFiltry={() => setFiltr(FILTR_DESKTOP_PRAZDNY)}
             maSmeny={smeny.length > 0}
+            // Vybraná pobočka v „Zobrazit“ platí i pro hosty: vedoucí plánuje ji.
+            hoste={hostePobocek(hoste, filtr.pobocky)}
+            rozsahAdresa={mobil.rozsah}
           />
         )}
 

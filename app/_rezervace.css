@@ -229,6 +229,50 @@ details[open] .ds-rez-otevrit { display: none; }
 .ds-rez-hlaska { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; background: var(--dobre-bg); color: var(--dobre); }
 .ds-rez-zdroj { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; background: var(--info-bg); color: var(--ink); }
 
+/* --- hosté z rezervací v Rozpisu směn (27. 10. 2026) --------------------
+   app/[rozsah]/smeny/hoste-dne.tsx. Na počítači okénko u záhlaví dne
+   (záhlaví je sticky, takže okénko se k němu vztahuje a vyjede dolů přes
+   mřížku); na telefonu řádek v toku stránky, nic nepřekrývá. */
+
+.ds-hoste-spoustec {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; justify-self: center;
+  margin-top: 1px; padding: 1px 7px; border: 1px solid transparent; border-radius: 999px;
+  background: none; color: var(--muted); font: inherit; font-size: 11.5px; line-height: 1.4;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.ds-hoste-spoustec .ft-i { width: 12px; height: 12px; }
+.ds-hoste-spoustec:hover, .ds-hoste-spoustec[aria-expanded="true"] { border-color: var(--line-2); background: var(--card); color: var(--ink); }
+.ds-hoste-spoustec:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
+
+.ds-hoste-okno {
+  position: absolute; top: calc(100% + 4px); left: 4px; z-index: 30;
+  display: grid; gap: 10px; width: max-content; min-width: 250px; max-width: min(330px, 80vw);
+  padding: 12px 14px; text-align: left; font-size: 13px; line-height: 1.4;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow-lg);
+}
+.ds-hoste-okno[data-vpravo] { left: auto; right: 4px; }
+.ds-hoste-titul {
+  margin: 0; display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+}
+.ds-hoste-titul .ft-i { width: 14px; height: 14px; flex: none; }
+.ds-hoste-seznam { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ds-hoste-radek {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 8px;
+  padding-left: 8px; border-left: 3px solid var(--branch);
+}
+.ds-hoste-nazev { font-weight: 600; overflow-wrap: anywhere; }
+.ds-hoste-cisla { grid-column: 1 / -1; font-weight: 600; color: var(--branch); }
+.ds-hoste-celkem { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-weight: 600; }
+.ds-hoste-pata { margin: 0; font-size: 12px; color: var(--muted); }
+.ds-hoste-pata a { color: var(--mosaz); white-space: nowrap; }
+.ds-hoste-chyba { margin: 0; color: var(--bad); }
+
+.ds-hoste-mobil {
+  display: grid; gap: 8px; padding: 10px 12px; font-size: 13.5px; line-height: 1.4;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+}
+
 /* --- napojení ------------------------------------------------------------ */
 
 .ds-rez-systemy { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 12px; }
