@@ -3,6 +3,7 @@ import 'server-only'
 import { hasAccess, type Context, type Scope } from '@/lib/authz'
 import { ZONA_VYCHOZI } from '@/lib/cas'
 import { zkusPristup } from '@/lib/firma'
+import { BARVY_KALENDARE, vzhledPobocek, type BarvaKalendare } from '@/lib/rezervace-pobocky'
 
 /**
  * Vstup do Rezervací — jedna otázka pro všechny stránky i akce modulu.
@@ -24,6 +25,10 @@ export type PobockaRezervaci = {
   zona: string
   /** Smí tady zapisovat (`rezervace.manage`). */
   zapis: boolean
+  /** Zkratka do kalendáře („RČP“) — z názvu, lib/rezervace-pobocky.ts. */
+  zkratka: string
+  /** Barva rámečku a štítku v kalendáři — z nastavení, když se nepoplete se stavy. */
+  barva: BarvaKalendare
 }
 
 export type PristupRezervace =
@@ -44,6 +49,9 @@ export async function zkusPristupRezervacim(tenantId: string, rozsah: string): P
 
   const { ctx, scope } = pristup
   const kandidati = scope.branchId ? ctx.branches.filter((b) => b.id === scope.branchId) : ctx.branches
+  // Ze všech poboček kontextu, ne z kandidátů: táž pobočka má na
+  // pobočkovém kalendáři tutéž zkratku i barvu jako na firemním.
+  const vzhled = vzhledPobocek(ctx.branches)
 
   const pobocky = (
     await Promise.all(
@@ -52,8 +60,17 @@ export async function zkusPristupRezervacim(tenantId: string, rozsah: string): P
           hasAccess(tenantId, 'rezervace.read', b.id),
           hasAccess(tenantId, 'rezervace.manage', b.id),
         ])
+        const v = vzhled.get(b.id)
         return cte || pise
-          ? { id: b.id, nazev: b.name, slug: b.slug, zona: b.timezone ?? ZONA_VYCHOZI, zapis: pise }
+          ? {
+              id: b.id,
+              nazev: b.name,
+              slug: b.slug,
+              zona: b.timezone ?? ZONA_VYCHOZI,
+              zapis: pise,
+              zkratka: v?.zkratka ?? b.name,
+              barva: v?.barva ?? BARVY_KALENDARE[0],
+            }
           : null
       }),
     )

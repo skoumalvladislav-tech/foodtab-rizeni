@@ -4,7 +4,6 @@ import Sdeleni from '@/app/sdeleni'
 import { getCurrentTenantId } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { denZAdresy, pohledZAdresy, rozsahPohledu } from '@/lib/rezervace-kalendar'
-import { zkratkyPobocek } from '@/lib/rozpis-desktop'
 
 import { dnesPobocky, nacistRezervace, nacistZnackyDnu } from './data'
 import { KalendarObsah } from './obsah'
@@ -54,23 +53,7 @@ export default async function RezervaceKalendar({
     nacistZnackyDnu(tenantId, pobocky, od, doDne),
   ])
 
-  // Víc poboček najednou (firemní rozsah): karta nese zkratku pobočky.
-  const zkratky = new Map<string, string>()
-  if (pobocky.length > 1) {
-    const podleNazvu = zkratkyPobocek(pobocky.map((p) => p.nazev))
-    for (const p of pobocky) zkratky.set(p.id, podleNazvu.get(p.nazev) ?? p.nazev)
-  }
-
-  return (
-    <KalendarObsah
-      rozsah={rozsah}
-      pohled={pohled}
-      datum={datum}
-      dnes={dnes}
-      pobocky={pobocky}
-      rezervace={rezervace}
-      znacky={znacky}
-      zkratky={zkratky}
-    />
-  )
+  // Zkratku a barvu pobočky (rámeček, štítek, legenda) nese už
+  // `pobocky` — spočítal je zkusPristupRezervacim ze všech poboček.
+  return <KalendarObsah rozsah={rozsah} pohled={pohled} datum={datum} dnes={dnes} pobocky={pobocky} rezervace={rezervace} znacky={znacky} />
 }
