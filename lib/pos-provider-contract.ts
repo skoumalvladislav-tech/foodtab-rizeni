@@ -199,9 +199,15 @@ export type RelacePos = {
   /**
    * NEPOVINNÉ. Celý katalog produktů. Katalog větší, než adaptér umí
    * načíst, je CHYBA — ne tichý ořez (chybějící produkt by vypadal, že
-   * v pokladně není).
+   * v pokladně není). `bezReceptur` = receptury se nenačetly
+   * (`bezRecepturProc`: pokladna je nevydala — chybí právo, nebo jim
+   * appka nerozuměla); `vynechanoBezId` = kolik položek pokladna poslala
+   * bez id (nejde je přiřadit ani odepsat) — volající to musí ukázat.
    */
-  katalog?(): Promise<{ stav: 'ok'; produkty: ProduktPos[]; bezReceptur?: boolean } | ChybaPos>
+  katalog?(): Promise<
+    | { stav: 'ok'; produkty: ProduktPos[]; bezReceptur?: boolean; bezRecepturProc?: 'pravo' | 'tvar'; vynechanoBezId?: number }
+    | ChybaPos
+  >
   /**
    * NEPOVINNÉ. Účty provozovny v okně `[odMs, doMs)` — podle data
    * VYTVOŘENÍ (výchozí, `podle: 'vytvoreni'`), nebo podle data UZAVŘENÍ

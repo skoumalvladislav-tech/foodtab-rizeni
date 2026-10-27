@@ -84,8 +84,12 @@
 
 import type { ChybaPos, PolozkaUctuPos, ProduktPos, RelacePos, SurovinaPos, UcetPos, VydejPos } from './pos-provider-contract.ts'
 
-/** Jedno volání API: stav a rozparsované tělo (null, když to není JSON), nebo chyba sítě. */
-export type OdpovedDotykacky = { status: number; telo: unknown }
+/**
+ * Jedno volání API: stav a rozparsované tělo (null, když přišlo prázdné
+ * nebo to není JSON), nebo chyba sítě. `nejson` = tělo přišlo, ale JSON
+ * to není: délka a první znak (do hlášky, text odpovědi ne).
+ */
+export type OdpovedDotykacky = { status: number; telo: unknown; nejson?: { znaku: number; zacina: string } }
 
 /**
  * Otevřená relace Dotykačky pro čtení a zápis mimo tržby. Staví ji
@@ -223,8 +227,49 @@ function jeChyba(x: OdpovedDotykacky | ChybaPos): x is ChybaPos {
   return 'stav' in x
 }
 
-function chybaTvaru(co: string): ChybaPos {
-  return { stav: 'chyba', druh: 'jina', duvod: `${co} z Dotykačky má neočekávaný tvar.` }
+function chybaTvaru(co: string, popis?: string): ChybaPos {
+  return { stav: 'chyba', druh: 'jina', duvod: `${co} z Dotykačky má neočekávaný tvar${popis ? ` (${popis})` : ''}.` }
+}
+
+/** Názvy klíčů objektu do hlášky (jen názvy, žádné hodnoty), nejvýš 12. */
+function klice(o: object): string {
+  const k = Object.keys(o)
+  return k.length === 0 ? 'žádné' : k.slice(0, 12).join(', ') + (k.length > 12 ? ` … (+${k.length - 12})` : '')
+}
+
+function typHodnoty(h: unknown): string {
+  if (h === null) return 'null'
+  if (Array.isArray(h)) return 'seznam'
+  return typeof h
+}
+
+/**
+ * Proč appka id nepřečetla — do hlášky jen druh a délka, ne hodnota:
+ * „chybí", „null", „číslo s 19 číslicemi (nad 2^53)", „text s 5 znaky, ne číslice"…
+ */
+function popisId(id: unknown): string {
+  if (id === undefined) return 'chybí'
+  if (id === null) return 'null'
+  if (typeof id === 'number') return !Number.isInteger(id) ? 'desetinné číslo' : id < 0 ? 'záporné číslo' : 'číslo nad 2^53'
+  if (typeof id === 'string') return `text s ${id.length} znaky${/^\s*\d+\s*$/.test(id) ? ' (číslice, víc než 20)' : ', ne jen číslice'}`
+  return typHodnoty(id)
+}
+
+/**
+ * Tvar odpovědi, které appka nerozuměla, slovy — jen struktura (typy,
+ * názvy klíčů, délky), žádné hodnoty. Bez něj hláška „neočekávaný tvar"
+ * nedá nic, podle čeho by šlo appku opravit (26.–27. 10. 2026: katalog
+ * Perly takhle padal a nebylo vidět proč).
+ */
+export function popisTvaru(odpoved: OdpovedDotykacky): string {
+  if (odpoved.nejson) return `odpověď není JSON: ${odpoved.nejson.znaku} znaků, začíná „${odpoved.nejson.zacina}“`
+  const telo = odpoved.telo
+  if (telo === null) return 'odpověď přišla prázdná'
+  if (typeof telo !== 'object') return `odpověď je ${typHodnoty(telo)}, ne objekt`
+  if (Array.isArray(telo)) return `odpověď je seznam s ${telo.length} položkami`
+  const data = (telo as { data?: unknown }).data
+  if (data === undefined) return `odpověď nemá seznam „data“ (klíče: ${klice(telo)})`
+  return Array.isArray(data) ? `„data“ má ${data.length} položek` : `„data“ je ${typHodnoty(data)}, ne seznam (klíče odpovědi: ${klice(telo)})`
 }
 
 /* ------------------------------------------------------------------ */
@@ -291,20 +336,36 @@ export function naparsovatProdukt(p: unknown): ProduktPos | null {
 }
 
 /**
- * Stránka katalogu → produkty. Jediný produkt bez id = `null` (celá
- * stránka „nerozumím"): id je primární klíč, jeho chybění znamená, že
- * appka tvar odpovědi nezná — a neúplný katalog by vypadal jako celý.
+ * Stránka katalogu → produkty, nebo popis, proč jí appka nerozumí.
+ *
+ * Produkt BEZ čitelného id (entity/product: `id` je `long?` — smí být
+ * null) se přeskočí a započítá do `bezId`: bez id ho nejde přiřadit
+ * ani odepsat, a kvůli jednomu takovému dřív padal celý katalog
+ * (Perla 26. 10. 2026). Volající počet ukáže, takže katalog nevypadá
+ * jako celý. Když id nemá ŽÁDNÝ produkt stránky nebo položka není
+ * objekt, appka tvaru nerozumí vůbec → chyba s popisem (jen typy,
+ * názvy klíčů a délky, žádné hodnoty).
  */
-export function naparsovatProdukty(telo: unknown): ProduktPos[] | null {
+export function naparsovatProdukty(telo: unknown): { produkty: ProduktPos[]; bezId: number } | { chyba: string } {
   const data = polozkyStranky(telo)
-  if (!data) return null
+  if (!data) return { chyba: popisTvaru({ status: 200, telo }) }
   const produkty: ProduktPos[] = []
-  for (const p of data) {
+  let bezId = 0
+  let prvniBezId: Record<string, unknown> | null = null
+  for (const [i, p] of data.entries()) {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return { chyba: `položka ${i + 1} z ${data.length} je ${typHodnoty(p)}, ne objekt` }
     const produkt = naparsovatProdukt(p)
-    if (!produkt) return null
-    produkty.push(produkt)
+    if (produkt) {
+      produkty.push(produkt)
+    } else {
+      bezId++
+      prvniBezId ??= p as Record<string, unknown>
+    }
   }
-  return produkty
+  if (data.length > 0 && produkty.length === 0 && prvniBezId) {
+    return { chyba: `žádná z ${data.length} položek nemá čitelné id — id: ${popisId(prvniBezId.id)}; klíče položky: ${klice(prvniBezId)}` }
+  }
+  return { produkty, bezId }
 }
 
 function naparsovatPolozku(i: unknown): PolozkaUctuPos | null {
@@ -400,13 +461,17 @@ function provozovnaUctu(o: unknown): string | null {
 export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'katalog' | 'ucty' | 'ucetPodleKlice'>> {
   const zakladUctu = `${k.api}/clouds/${k.cloudId}/orders`
 
+  type KatalogOk = { stav: 'ok'; produkty: ProduktPos[]; bezId: number }
+
   /**
    * Celý katalog po stránkách. S `sRecepturami` se ptá i na receptury
-   * (`include=ingredients`); 403 pak vrací jako `'bez_prava'`, aby
-   * `katalog()` mohl začít znovu bez nich.
+   * (`include=ingredients`); 403 pak vrací jako `'bez_prava'` a odpověď,
+   * které appka nerozumí, jako `{ tvar }` — `katalog()` pak může začít
+   * znovu bez receptur.
    */
-  async function katalogPoStrankach(sRecepturami: boolean): Promise<{ stav: 'ok'; produkty: ProduktPos[] } | ChybaPos | 'bez_prava'> {
+  async function katalogPoStrankach(sRecepturami: boolean): Promise<KatalogOk | ChybaPos | 'bez_prava' | { tvar: string }> {
     const produkty: ProduktPos[] = []
+    let bezId = 0
     for (let strana = 1; strana <= MAX_STRAN_KATALOGU; strana++) {
       const parametry = new URLSearchParams({ page: String(strana), limit: String(LIMIT_STRANKY) })
       if (sRecepturami) parametry.set('include', 'ingredients')
@@ -416,18 +481,20 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
       // 403 kvůli tokenu, cloudu nebo licenci (common-error-responses) neplatí jen pro receptury — ta je chyba hned.
       if (sRecepturami && odpoved.status === 403 && !NE_KVULI_RECEPTURAM.has(duvod403(odpoved.telo))) return 'bez_prava'
       // „lastPage … pro prázdná data API zatím vrací 404" (api-reference/general/paging)
-      if (odpoved.status === 404) return { stav: 'ok', produkty }
+      if (odpoved.status === 404) return { stav: 'ok', produkty, bezId }
       if (odpoved.status !== 200) return k.chybaZeStavu(odpoved.status, 'čtení katalogu produktů', odpoved.telo)
 
-      const cast = naparsovatProdukty(odpoved.telo)
-      if (!cast) return chybaTvaru('Katalog produktů')
+      const cast = odpoved.telo === null ? { chyba: popisTvaru(odpoved) } : naparsovatProdukty(odpoved.telo)
+      if ('chyba' in cast) return { tvar: `stránka ${strana}${sRecepturami ? ' s recepturami' : ''}: ${cast.chyba}` }
       // Bez include receptura neznámá, i kdyby odpověď nějaké `ingredients` nesla.
-      produkty.push(...(sRecepturami ? cast : cast.map((p) => ({ ...p, maRecepturu: null, suroviny: null }))))
+      produkty.push(...(sRecepturami ? cast.produkty : cast.produkty.map((p) => ({ ...p, maRecepturu: null, suroviny: null }))))
+      bezId += cast.bezId
 
-      // Kratší stránka je poslední. U produktů API počty zná, takže výslovné `nextPage: null` je taky konec.
+      // Kratší stránka je poslední (počítají se i přeskočené položky bez id — stránka byla plná).
+      // U produktů API počty zná, takže výslovné `nextPage: null` je taky konec.
       const telo = odpoved.telo as { nextPage?: unknown } | null
       const bezDalsi = telo !== null && typeof telo === 'object' && !Array.isArray(telo) && 'nextPage' in telo && telo.nextPage === null
-      if (cast.length < LIMIT_STRANKY || bezDalsi) return { stav: 'ok', produkty }
+      if (cast.produkty.length + cast.bezId < LIMIT_STRANKY || bezDalsi) return { stav: 'ok', produkty, bezId }
     }
     return {
       stav: 'chyba',
@@ -436,15 +503,28 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
     }
   }
 
+  function vysledek(r: KatalogOk, bezReceptur?: 'pravo' | 'tvar') {
+    return {
+      stav: 'ok' as const,
+      produkty: r.produkty,
+      ...(bezReceptur ? { bezReceptur: true, bezRecepturProc: bezReceptur } : {}),
+      ...(r.bezId > 0 ? { vynechanoBezId: r.bezId } : {}),
+    }
+  }
+
   return {
     async katalog() {
-      // Nejdřív s recepturami. Bez práva je číst (403) celý katalog znovu bez nich
-      // — ne napůl: stránky s recepturou a bez ní by se nedaly rozlišit.
+      // Nejdřív s recepturami. Bez práva je číst (403), nebo když odpovědi s nimi appka
+      // nerozumí, celý katalog znovu bez nich — ne napůl: stránky s recepturou a bez ní
+      // by se nedaly rozlišit. Receptury (`include=ingredients`) jsou jediná část dotazu,
+      // kterou appka v Dotykačce nemá ověřenou ničím jiným.
       const s = await katalogPoStrankach(true)
-      if (s !== 'bez_prava') return s
+      if (s !== 'bez_prava' && !('tvar' in s)) return s.stav === 'ok' ? vysledek(s) : s
+      const tvarSRecepturami = s === 'bez_prava' ? null : s.tvar
       const bez = await katalogPoStrankach(false)
       if (bez === 'bez_prava') return k.chybaZeStavu(403, 'čtení katalogu produktů')
-      return bez.stav === 'ok' ? { ...bez, bezReceptur: true } : bez
+      if ('tvar' in bez) return chybaTvaru('Katalog produktů', tvarSRecepturami ? `${tvarSRecepturami}; znovu bez receptur — ${bez.tvar}` : bez.tvar)
+      return bez.stav === 'ok' ? vysledek(bez, tvarSRecepturami ? 'tvar' : 'pravo') : bez
     },
 
     async ucty(
