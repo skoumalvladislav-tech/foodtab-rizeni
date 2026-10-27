@@ -347,13 +347,14 @@ export function vytvoritChoice(fetchFn: FetchFn): ApiChoice {
       })
       // Text chyby od Choice se ukáže, ale kód z něj zmizí („…“) — jinak by
       // skončil v posledni_chyba u napojení. 26. 10. 2026 Choice odpověděl
-      // `400 Invalid credentials` a obecná věta „kód nepřijal“ schovala, že
-      // nesedí údaje aplikace (CHOICE_CLIENT_SECRET), ne kód.
+      // `400 Invalid credentials` a obecná věta „kód nepřijal“ schovala
+      // příčinu: při povolení byl zadán ChoiceQR token jiného podniku (token
+      // Bernard Baru u odkazu Černé Perly). Se správným tokenem prošlo.
       if (r.stav === 'chyba') {
         if (r.druh === 'data') {
           const odChoice = r.zprava ? (code ? r.zprava.split(code).join('…') : r.zprava) : ''
           const rada = /invalid credentials/i.test(odChoice)
-            ? 'Choice nepřijal údaje aplikace nebo kód — zkontrolujte ve Vercelu CHOICE_CLIENT_SECRET (celý z dashboardu Choice, bez mezer a uvozovek; po změně Redeploy) a připojte podnik znovu novým odkazem.'
+            ? 'Choice nepřijal povolení — nejčastěji byl při povolení zadán ChoiceQR token JINÉHO podniku (token od api@choiceqr.com platí pro jeden podnik), méně často nesedí CHOICE_CLIENT_SECRET ve Vercelu (po změně Redeploy). Připojte podnik znovu novým odkazem.'
             : 'Kód platí krátce a jen jednou — připojte podnik znovu.'
           const { zprava: _zprava, ...bezZpravy } = r
           void _zprava

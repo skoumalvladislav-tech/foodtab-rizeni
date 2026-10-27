@@ -214,7 +214,7 @@ function sit(odpovedi) {
   ok('… ale co Choice napsal, se ukáže (kód nahrazený „…“)', e1.duvod.includes('code … is invalid'))
   // 26. 10. 2026 v produkci: Choice na výměnu odpověděl 400 „Invalid credentials“ a obecná hláška to schovala.
   const neplatne = await vytvoritChoice(sit([odpoved(400, { error: true, name: 'ApplicationError', message: 'Invalid credentials', statusCode: 400 })]).fetchFn).vymenitKod({ code: 'K-9', clientId: 'k', secret: 's' })
-  ok('400 Invalid credentials → text od Choice a rada: CHOICE_CLIENT_SECRET, Redeploy, nový odkaz', neplatne.stav === 'chyba' && neplatne.druh === 'data' && neplatne.duvod.includes('Invalid credentials') && /CHOICE_CLIENT_SECRET/.test(neplatne.duvod) && /Redeploy/.test(neplatne.duvod) && /novým odkazem/.test(neplatne.duvod))
+  ok('400 Invalid credentials → text od Choice a rada: token jiného podniku (hlavní příčina 26. 10.), pak CHOICE_CLIENT_SECRET, nový odkaz', neplatne.stav === 'chyba' && neplatne.druh === 'data' && neplatne.duvod.includes('Invalid credentials') && /token JINÉHO podniku/.test(neplatne.duvod) && /CHOICE_CLIENT_SECRET/.test(neplatne.duvod) && /novým odkazem/.test(neplatne.duvod))
   const prazdny = await vytvoritChoice(sit([odpoved(400, { error: true, message: 'Invalid credentials' })]).fetchFn).vymenitKod({ code: '', clientId: 'k', secret: 's' })
   ok('prázdný kód text od Choice nerozseká', prazdny.stav === 'chyba' && prazdny.duvod.includes('(400: Invalid credentials)'))
   const propadly = await vytvoritChoice(sit([odpoved(400, { error: true, message: 'expired' })]).fetchFn).vymenitKod({ code: 'K-1', clientId: 'k', secret: 's' })
