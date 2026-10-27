@@ -41,8 +41,10 @@ import {
   prioritaUpozorneni,
   slovoPodleCisla,
   souhrnCekajicich,
+  popisSouhrnuDne,
 } from '../lib/upozorneni-text.ts'
 import { odkazUpozorneni } from '../lib/upozorneni-odkaz.ts'
+import { slozitPush } from '../lib/komunikace/push-zprava.ts'
 
 let chyb = 0
 const ma = (popis, sk, ce) => {
@@ -539,6 +541,84 @@ ma('podvržený rozsah → kořen, ne cizí adresa', odkazUpozorneni('//zly.exam
 ma('žádný cíl nevede mimo aplikaci',
   [cil('ukol.pridelen', { ukol: 'https://x' }), cil('marketing.x', { prispevek: '//x' }), cil('checklist.x', { beh: 'x' })]
     .every((c) => c.startsWith('/') && !c.startsWith('//')), true)
+
+/* =====================================================================
+   RANNÍ SOUHRN REZERVACÍ (rezervace.souhrn_dne, 27. 10. 2026)
+
+   Tělo skládá app.rezervace_souhrn_dne (migrace 20261103100000), tvar
+   hlídá scénář krok106. Tady věta: nadpis jde i do PUSH (přes cizí
+   službu na zamčenou obrazovku), proto v něm nesmí být název akce —
+   ten je jen ve výpisu pod nadpisem v aplikaci.
+   ===================================================================== */
+console.log('\n== Ranní souhrn rezervací ==')
+
+const PERLA = {
+  pobocka: 'Restaurace Černá Perla', slug: 'cerna-perla', den: '2031-03-12',
+  rezervaci: 4, hostu: 15, bez_poctu: 0, akci: 0, akce: [],
+}
+const BAR = {
+  pobocka: 'Bernard Bar Tábor', slug: 'bernard-bar', den: '2031-03-12',
+  rezervaci: 12, hostu: 46, bez_poctu: 2, akci: 1,
+  akce: [{ cas: '18:00', nazev: 'Svatba Novákových', osob: 30, prostor: 'Salonek' }],
+}
+const souhrn = (...p) => ({ den: '2031-03-12', souhrn: p })
+
+ma('víc poboček: zkratky BBT/RČP (zkratkyPobocek), počty, akce časem a osobami',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn(BAR, PERLA), obdobi),
+  'Dnes BBT: 12 rezervací, 46 hostů; akce 18:00 (30 os.) · RČP: 4 rezervace, 15 hostů')
+ma('jedna pobočka: bez zkratky',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn(PERLA), obdobi), 'Dnes: 4 rezervace, 15 hostů')
+ma('prázdná pobočka vedle plné: „nic v plánu“',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn(BAR, { ...PERLA, rezervaci: 0, hostu: 0 }), obdobi),
+  'Dnes BBT: 12 rezervací, 46 hostů; akce 18:00 (30 os.) · RČP: nic v plánu')
+ma('skloňování: 1 rezervace, 1 host; 2 akce s časy',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn({
+    ...PERLA, rezervaci: 1, hostu: 1, akci: 2,
+    akce: [{ cas: '12:00', nazev: 'Oběd', osob: 20 }, { cas: '18:00', nazev: 'Večírek' }],
+  }), obdobi),
+  'Dnes: 1 rezervace, 1 host; 2 akce 12:00 (20 os.), 18:00')
+ma('jen akce, žádná rezervace',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn({ ...PERLA, rezervaci: 0, hostu: 0, akci: 1, akce: [{ cas: '19:30', nazev: 'X', osob: 8 }] }), obdobi),
+  'Dnes: akce 19:30 (8 os.)')
+ma('víc než tři akce se jen spočítají (nadpis se vejde na displej)',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn({
+    ...PERLA, akci: 5, akce: ['10:00', '12:00', '14:00', '16:00', '18:00'].map((cas) => ({ cas, nazev: 'A' })),
+  }), obdobi),
+  'Dnes: 4 rezervace, 15 hostů; 5 akcí')
+ma('rezervace bez počtu hostů: hosté se nevymýšlejí',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn({ ...PERLA, rezervaci: 2, hostu: 0, bez_poctu: 2 }), obdobi), 'Dnes: 2 rezervace')
+ma('NÁZEV AKCE v nadpisu (a tedy v push) není',
+  nadpisUpozorneni('rezervace.souhrn_dne', souhrn(BAR, PERLA), obdobi).includes('Novák'), false)
+ma('poškozené tělo nespadne a nic nevymyslí',
+  nadpisUpozorneni('rezervace.souhrn_dne', { souhrn: 'x' }, obdobi), 'Dnešní rezervace')
+
+const popisBar = popisSouhrnuDne(souhrn(BAR, PERLA))
+ma('výpis v aplikaci: celý název pobočky, počty a kolika rezervacím chybí počet',
+  `${popisBar[0].pobocka} — ${popisBar[0].pocty}`,
+  'Bernard Bar Tábor — 12 rezervací, 46 hostů (u 2 rezervací počet hostů chybí)')
+ma('výpis v aplikaci: akce i s názvem a prostorem', popisBar[0].akce.join(' | '), '18:00 Svatba Novákových · 30 os. · Salonek')
+ma('výpis: pobočka bez akcí nemá seznam', popisBar[1].akce.length, 0)
+ma('výpis: prázdná pobočka „Nic v plánu“, jen akce „Bez rezervací“',
+  [popisSouhrnuDne(souhrn({ ...PERLA, rezervaci: 0 }))[0].pocty,
+   popisSouhrnuDne(souhrn({ ...PERLA, rezervaci: 0, akci: 1, akce: [{ cas: '18:00' }] }))[0].pocty].join(' | '),
+  'Nic v plánu | Bez rezervací')
+ma('výpis: akce nad 20 v těle nejsou — řekne se, kolik jich zbývá',
+  popisSouhrnuDne(souhrn({ ...PERLA, akci: 23, akce: Array.from({ length: 20 }, () => ({ cas: '18:00' })) }))[0].akce.at(-1),
+  '… a 3 další v kalendáři')
+
+ma('push nese nadpis, ne název akce',
+  slozitPush({ typ: 'jedna', pocet: 1, druh: 'rezervace.souhrn_dne', telo: souhrn(BAR, PERLA), priorita: 'normal' }).body,
+  'Dnes BBT: 12 rezervací, 46 hostů; akce 18:00 (30 os.) · RČP: 4 rezervace, 15 hostů')
+
+ma('klepnutí, jedna pobočka → den v kalendáři TÉ pobočky',
+  cil('rezervace.souhrn_dne', souhrn(BAR)), '/bernard-bar/rezervace/den/2031-03-12')
+ma('klepnutí, víc poboček → den v rozsahu, kde člověk je',
+  cil('rezervace.souhrn_dne', souhrn(BAR, PERLA)), '/perla/rezervace/den/2031-03-12')
+ma('podvržený slug a den → kalendář v rozsahu, nikam ven',
+  cil('rezervace.souhrn_dne', { den: '../x', souhrn: [{ ...BAR, slug: '//zly.example' }] }), '/perla/rezervace')
+
+ma('stránka Upozornění kreslí výpis souhrnu a odkaz z odkazUpozorneni',
+  stranka.includes('popisSouhrnuDne(z.telo)') && stranka.includes('odkazUpozorneni(rozsah, { druh: z.druh, telo: z.telo })'), true)
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

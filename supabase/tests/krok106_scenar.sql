@@ -412,20 +412,24 @@ delete from public.rezervace_souhrn_dne where den between date '2031-03-11' and 
 delete from public.rezervace where jmeno_hosta like '%Krok106';
 delete from public.push_odbery where endpoint like 'https://fcm.googleapis.com/fcm/send/krok106-%';
 delete from public.notification_preferences where user_id = :'vypnul';
+-- Cizí firma s Danou jako majitelkou zůstává (jako v kroku 103): poslední
+-- majitelku firmy pojistka smazat nedovolí. Z Foodtabu pryč všechno.
 delete from public.membership_branches
  where membership_id in (select id from public.memberships
-                          where user_id in (:'petra', :'bruno', :'nikdo', :'vypnul', :'dvojf'));
-delete from public.memberships where user_id in (:'petra', :'bruno', :'nikdo', :'vypnul', :'dvojf');
-delete from public.employees where id in (:'e_petra', :'e_bruno', :'e_nikdo', :'e_vypnul', :'e_dvojf', :'e_dvojf_cizi');
+                          where tenant_id = :'tenant'
+                            and user_id in (:'petra', :'bruno', :'nikdo', :'vypnul', :'dvojf'));
+delete from public.memberships
+ where tenant_id = :'tenant' and user_id in (:'petra', :'bruno', :'nikdo', :'vypnul', :'dvojf');
+delete from public.employees where id in (:'e_petra', :'e_bruno', :'e_nikdo', :'e_vypnul', :'e_dvojf');
 delete from public.position_permissions where position_id in (:'z_cteni', :'z_zapis');
 delete from public.positions where id in (:'z_cteni', :'z_zapis');
 
-select pg_temp.check('úklid: po scénáři nezůstal souhrn, rezervace ani člověk z kroku 106',
+select pg_temp.check('úklid: po scénáři nezůstal souhrn, rezervace ani člověk z kroku 106 ve Foodtabu',
   not exists (select 1 from public.notifications
                where druh = 'rezervace.souhrn_dne' and telo ->> 'den' between '2031-03-11' and '2031-03-14')
   and not exists (select 1 from public.rezervace_souhrn_dne where den between date '2031-03-11' and date '2031-03-14')
   and not exists (select 1 from public.rezervace where jmeno_hosta like '%Krok106')
-  and not exists (select 1 from public.employees where full_name like '%Stošestka')
+  and not exists (select 1 from public.employees where tenant_id = :'tenant' and full_name like '%Stošestka')
   and not exists (select 1 from public.push_odbery where endpoint like '%krok106-%'));
 
 \echo ''

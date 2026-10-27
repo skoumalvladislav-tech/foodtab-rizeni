@@ -424,8 +424,8 @@ export default async function Upozorneni({
 
                 {/*
                   RANNÍ SOUHRN REZERVACÍ. Nadpis nese jen čísla a časy (jde
-                  i do push); tady pod ním je výpis po pobočkách i s názvy
-                  akcí a prostorem — ten vidí jen přihlášený.
+                  i na zamčenou obrazovku telefonu); tady pod ním je výpis po
+                  pobočkách i s názvy akcí a prostorem — ten vidí jen přihlášený.
                 */}
                 {z.druh === 'rezervace.souhrn_dne' ? (
                   <>
