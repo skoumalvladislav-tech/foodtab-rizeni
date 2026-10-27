@@ -2,11 +2,12 @@ import Link from 'next/link'
 
 import Badge from '@/components/ui/Badge'
 import { datetimeLocalVPasmu, datumACasSRokemVPasmu } from '@/lib/cas'
-import { denDlouze, dnyTydne, hosteText, mrizkaMesice, podleDne, souhrnDne, type Pohled } from '@/lib/rezervace-kalendar'
+import { denDlouze, dnyTydne, hosteText, mrizkaMesice, nazevMesice, nazevTydne, podleDne, souhrnDne, type Pohled } from '@/lib/rezervace-kalendar'
+import { obdobiPohledu, souhrnText, souhrnyPobocek } from '@/lib/rezervace-pobocky'
 import { najitSystem } from '@/lib/rezervace-poskytovatele'
 import { NAZVY_DRUHU, NAZVY_STAVU, STAVY, type StavRezervace } from '@/lib/rezervace-typy'
 
-import { KpiKarta, PanelHlava } from '../dnes/prvky'
+import { KpiKarta } from '../dnes/prvky'
 import Ikona from '../ikona'
 import Nadpis from '../nadpis'
 import { zmenitStav } from './akce'
@@ -18,11 +19,13 @@ import {
   NastrojePohledu,
   PanelPoznamek,
   PanelPriloh,
+  PobockyKalendare,
   SeznamRezervaci,
   StitekStavu,
   TydenKalendar,
   UdajeRezervace,
   ZalozkyRezervaci,
+  ZnackaPobocky,
   casRezervace,
   titulek,
   type Poznamka,
@@ -48,7 +51,6 @@ export function KalendarObsah({
   pobocky,
   rezervace,
   znacky,
-  zkratky,
 }: {
   rozsah: string
   pohled: Exclude<Pohled, 'den'>
@@ -58,9 +60,16 @@ export function KalendarObsah({
   rezervace: RezervaceRadek[]
   /** Klíč `pobočka|den` → počty poznámek a příloh ke dni. */
   znacky: Map<string, { poznamek: number; priloh: number }>
-  zkratky: Map<string, string>
 }) {
   const poDnech = podleDne(rezervace)
+  // Souhrn pobočky jen za zobrazené období — u měsíce bez dnů sousedních
+  // měsíců, které mřížka ukazuje do celých týdnů (a načítá).
+  const souhrny = souhrnyPobocek(
+    rezervace,
+    pobocky.map((p) => p.id),
+    obdobiPohledu(pohled, datum),
+  )
+  const obdobi = pohled === 'tyden' ? `za týden ${nazevTydne(datum)}` : `za ${nazevMesice(datum).toLowerCase()}`
   const znackyDne = (den: string) =>
     pobocky.reduce(
       (s, p) => {
@@ -86,18 +95,20 @@ export function KalendarObsah({
       <div className="ds-rez" style={{ padding: '0 16px 32px' }}>
         <ZalozkyRezervaci rozsah={rozsah} aktivni="kalendar" />
         <NastrojePohledu rozsah={rozsah} pohled={pohled} datum={datum} dnes={dnes} smiZapisovat={smiZapisovat} />
+        <PobockyKalendare pobocky={pobocky} souhrny={souhrny} obdobi={obdobi} />
         {pohled === 'tyden' ? (
           <TydenKalendar
             rozsah={rozsah}
             dnes={dnes}
             smiZapisovat={smiZapisovat}
-            zkratkyPobocek={zkratky}
+            pobocky={pobocky}
             dny={dnyTydne(datum).map((den) => ({ den, rezervace: poDnech.get(den) ?? [], ...znackyDne(den) }))}
           />
         ) : (
           <MesicKalendar
             rozsah={rozsah}
             dnes={dnes}
+            pobocky={pobocky}
             tydny={mrizkaMesice(datum).map((tyden) =>
               tyden.map((d) => ({ ...d, rezervace: poDnech.get(d.den) ?? [], poznamek: znackyDne(d.den).poznamek })),
             )}
@@ -168,9 +179,15 @@ export function DenObsah({
 
         <div className="ds-dnes">
           <div className="ds-dnes-hlavni">
+            {/* Každá pobočka ve svém rámečku a barvě, se souhrnem dne v hlavičce. */}
             {kDnu.map((k) => (
-              <section key={k.pobocka.id} className="ds-plocha">
-                <PanelHlava ikona="rezervace" nadpis={vic ? `Rezervace — ${k.pobocka.nazev}` : 'Rezervace a akce dne'} />
+              <section key={k.pobocka.id} className="ds-plocha ds-rez-oddil" data-branch={k.pobocka.barva} data-pobocka={k.pobocka.id}>
+                <div className="ds-plocha-hlava ds-rez-oddil-hlava">
+                  <Ikona klic="rezervace" />
+                  <h2>{vic ? k.pobocka.nazev : 'Rezervace a akce dne'}</h2>
+                  <ZnackaPobocky pobocka={k.pobocka} vedleNazvu={vic} />
+                  <span className="ds-rez-oddil-souhrn">{souhrnText(souhrnDne(k.rezervace))}</span>
+                </div>
                 <SeznamRezervaci rozsah={rozsah} rezervace={k.rezervace} />
               </section>
             ))}
@@ -178,7 +195,11 @@ export function DenObsah({
           <div className="ds-dnes-bok">
             {kDnu.map((k) => (
               <div key={k.pobocka.id} style={{ display: 'grid', gap: '16px' }}>
-                {vic ? <p className="ds-rez-pobocka">{k.pobocka.nazev}</p> : null}
+                {vic ? (
+                  <p className="ds-rez-pobocka">
+                    <ZnackaPobocky pobocka={k.pobocka} vedleNazvu /> {k.pobocka.nazev}
+                  </p>
+                ) : null}
                 <PanelPoznamek
                   rozsah={rozsah}
                   cil={{ den: datum, pobocka: k.pobocka.id }}

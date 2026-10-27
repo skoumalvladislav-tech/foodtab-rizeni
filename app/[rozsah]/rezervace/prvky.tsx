@@ -14,7 +14,9 @@ import {
   souhrnDne,
   type DenMrizky,
   type Pohled,
+  type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
+import { poPobockach, souhrnText } from '@/lib/rezervace-pobocky'
 import { velikostText, jeObrazek } from '@/lib/rezervace-prilohy'
 import {
   NAZVY_DRUHU,
@@ -27,10 +29,12 @@ import {
   type StavRezervace,
   type ZdrojRezervace,
 } from '@/lib/rezervace-typy'
+import { pocet, sklonovat } from '@/lib/sklonovani'
 
 import Ikona from '../ikona'
 import { odebratPrilohu, pridatPoznamku, smazatPoznamku, upravitPoznamku } from './akce'
 import NahratPrilohy from './prilohy-nahrat'
+import type { PobockaRezervaci } from './pristup'
 
 /**
  * Kreslicí kousky Rezervací a akcí.
@@ -97,6 +101,81 @@ export function casRezervace(r: Pick<RezervaceRadek, 'zacatek' | 'konec'>, zona:
 function osobyText(n: number | null): string {
   if (n === null) return 'počet neuveden'
   return `${n} ${n === 1 ? 'osoba' : n >= 2 && n <= 4 ? 'osoby' : 'osob'}`
+}
+
+/** „3 rez. · 1 akce · 12 hostů“ do úzkého sloupce; bez zrušených. */
+function souhrnKratce(s: SouhrnDne): string {
+  if (s.rezervaci + s.akci === 0) return s.zrusenych ? 'jen zrušené nebo nedorazili' : 'Nic zapsaného'
+  return [s.rezervaci ? `${s.rezervaci} rez.` : null, s.akci ? pocet(s.akci, 'akce', 'akce', 'akcí') : null, hosteText(s)]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/* ---------- pobočky: štítek se zkratkou a legenda se souhrnem ---------- */
+
+/** Co kalendář o pobočce potřebuje: zkratku a barvu spočítal zkusPristupRezervacim. */
+export type PobockaKalendare = Pick<PobockaRezervaci, 'id' | 'nazev' | 'zkratka' | 'barva'>
+
+/**
+ * Štítek se zkratkou pobočky („RČP“) v její barvě — plný obdélník, ať se
+ * nesplete s bledými pilulkami stavů. Barva nikdy sama: zkratka je
+ * napsaná, celý název je v `title` a pro odečítač. Kde celý název stojí
+ * hned vedle (legenda, hlavička oddílu), odečítač štítek přeskočí.
+ */
+export function ZnackaPobocky({ pobocka, vedleNazvu = false }: { pobocka: PobockaKalendare; vedleNazvu?: boolean }) {
+  return (
+    <span className="ds-rez-znacka" data-branch={pobocka.barva} title={pobocka.nazev} aria-hidden={vedleNazvu ? true : undefined}>
+      <span aria-hidden="true">{pobocka.zkratka}</span>
+      {vedleNazvu ? null : <span className="sr-only">{pobocka.nazev}</span>}
+    </span>
+  )
+}
+
+/**
+ * Legenda poboček nad kalendářem: každá pobočka ve svém rámečku a barvě,
+ * se zkratkou, celým názvem a souhrnem za zobrazené období (rezervace,
+ * hosté, akce — bez zrušených). Ukazuje se i pobočka, kde nic není.
+ */
+export function PobockyKalendare({
+  pobocky,
+  souhrny,
+  obdobi,
+}: {
+  pobocky: PobockaKalendare[]
+  souhrny: Map<string, SouhrnDne>
+  /** „za říjen 2026“, „za týden 26. 10. – 1. 11. 2026“ */
+  obdobi: string
+}) {
+  return (
+    <ul className="ds-rez-pobocky" aria-label={`Pobočky a souhrn ${obdobi}`}>
+      {pobocky.map((p) => {
+        const s = souhrny.get(p.id) ?? souhrnDne([])
+        return (
+          <li key={p.id} className="ds-rez-pobocka-karta" data-branch={p.barva} data-pobocka={p.id}>
+            <div className="ds-rez-pobocka-hlava">
+              <ZnackaPobocky pobocka={p} vedleNazvu />
+              <h3>{p.nazev}</h3>
+            </div>
+            <p className="ds-rez-pobocka-cisla" title={souhrnText(s)}>
+              <span>
+                <strong className="ds-cislo">{s.rezervaci}</strong> {sklonovat(s.rezervaci, 'rezervace', 'rezervace', 'rezervací')}
+              </span>
+              <span>
+                <strong className="ds-cislo">{s.hostu}</strong> {sklonovat(s.hostu, 'host', 'hosté', 'hostů')}
+                {s.bezPoctu ? ` + ${s.bezPoctu} bez počtu` : ''}
+              </span>
+              {s.akci ? (
+                <span>
+                  <strong className="ds-cislo">{s.akci}</strong> {sklonovat(s.akci, 'akce', 'akce', 'akcí')}
+                </span>
+              ) : null}
+            </p>
+            <p className="ds-rez-pobocka-obdobi">{obdobi}, bez zrušených</p>
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 /* ---------- záložky modulu ------------------------------------------ */
@@ -181,20 +260,46 @@ export type DenTydne = {
   priloh: number
 }
 
+function PolozkaTydne({ rozsah, r }: { rozsah: string; r: RezervaceRadek }) {
+  return (
+    <Link
+      href={`/${rozsah}/rezervace/${r.id}`}
+      className="ds-rez-polozka"
+      data-druh={r.druh}
+      data-neplati={pocitaSeDoHostu(r.stav) ? undefined : ''}
+    >
+      <strong>
+        {hodinaVPasmu(r.zacatek, r.zona)} {titulek(r)}
+      </strong>
+      <small>
+        {[
+          r.druh === 'akce' ? r.typ_akce || 'Akce' : null,
+          r.pocet_osob !== null ? `${r.pocet_osob} os.` : null,
+          pocitaSeDoHostu(r.stav) ? (r.stav === 'ceka' ? 'předběžná' : null) : NAZVY_STAVU[r.stav].toLowerCase(),
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      </small>
+    </Link>
+  )
+}
+
 export function TydenKalendar({
   rozsah,
   dny,
   dnes,
   smiZapisovat,
-  zkratkyPobocek,
+  pobocky,
 }: {
   rozsah: string
   dny: DenTydne[]
   dnes: string
   smiZapisovat: boolean
-  /** Na firemním rozsahu s víc pobočkami: id → zkratka. Jinak prázdné. */
-  zkratkyPobocek: Map<string, string>
+  /** Pobočky rozsahu v pořadí legendy. Je-li jich víc, má každá v dni svůj rámeček. */
+  pobocky: PobockaKalendare[]
 }) {
+  const vic = pobocky.length > 1
+  const podleId = new Map(pobocky.map((p) => [p.id, p]))
   return (
     <div className="ds-rez-tyden">
       {dny.map((d) => {
@@ -215,11 +320,7 @@ export function TydenKalendar({
               </span>
               <span className="ds-rez-den-cislo ds-cislo">{den}.</span>
             </Link>
-            <p className="ds-rez-den-souhrn">
-              {s.rezervaci + s.akci === 0
-                ? 'Nic zapsaného'
-                : `${s.rezervaci} rez.${s.akci ? ` · ${s.akci} ${s.akci === 1 ? 'akce' : 'akcí'}` : ''} · ${hosteText(s)}`}
-            </p>
+            <p className="ds-rez-den-souhrn">{s.rezervaci + s.akci === 0 ? 'Nic zapsaného' : souhrnKratce(s)}</p>
             {d.poznamek + d.priloh > 0 ? (
               <div className="ds-rez-den-znacky">
                 {d.poznamek > 0 ? (
@@ -234,29 +335,26 @@ export function TydenKalendar({
                 ) : null}
               </div>
             ) : null}
-            {d.rezervace.map((r) => (
-              <Link
-                key={r.id}
-                href={`/${rozsah}/rezervace/${r.id}`}
-                className="ds-rez-polozka"
-                data-druh={r.druh}
-                data-neplati={pocitaSeDoHostu(r.stav) ? undefined : ''}
-              >
-                <strong>
-                  {hodinaVPasmu(r.zacatek, r.zona)} {titulek(r)}
-                </strong>
-                <small>
-                  {[
-                    r.druh === 'akce' ? r.typ_akce || 'Akce' : null,
-                    r.pocet_osob !== null ? `${r.pocet_osob} os.` : null,
-                    pocitaSeDoHostu(r.stav) ? (r.stav === 'ceka' ? 'předběžná' : null) : NAZVY_STAVU[r.stav].toLowerCase(),
-                    zkratkyPobocek.get(r.branch_id) ?? null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </small>
-              </Link>
-            ))}
+            {vic
+              ? poPobockach(
+                  d.rezervace,
+                  pobocky.map((p) => p.id),
+                ).map((sk) => {
+                  const p = podleId.get(sk.id)
+                  if (!p) return null
+                  return (
+                    <div key={sk.id} className="ds-rez-skupina" data-branch={p.barva} data-pobocka={p.id} role="group" aria-label={p.nazev}>
+                      <p className="ds-rez-skupina-hlava">
+                        <ZnackaPobocky pobocka={p} vedleNazvu />
+                        <span>{souhrnKratce(souhrnDne(sk.rezervace))}</span>
+                      </p>
+                      {sk.rezervace.map((r) => (
+                        <PolozkaTydne key={r.id} rozsah={rozsah} r={r} />
+                      ))}
+                    </div>
+                  )
+                })
+              : d.rezervace.map((r) => <PolozkaTydne key={r.id} rozsah={rozsah} r={r} />)}
             {smiZapisovat ? (
               <Link href={`/${rozsah}/rezervace/nova?datum=${d.den}`} className="ds-rez-den-pridat">
                 + Přidat
@@ -273,8 +371,24 @@ export function TydenKalendar({
 
 export type DenMesice = DenMrizky & { rezervace: RezervaceRadek[]; poznamek: number }
 
-export function MesicKalendar({ rozsah, tydny, dnes }: { rozsah: string; tydny: DenMesice[][]; dnes: string }) {
+/** Kolik rezervací jedné pobočky se do buňky měsíce vypíše; zbytek je „+ N další“ (celý seznam je v dni). */
+const RADKU_V_BUNCE = 3
+
+export function MesicKalendar({
+  rozsah,
+  tydny,
+  dnes,
+  pobocky,
+}: {
+  rozsah: string
+  tydny: DenMesice[][]
+  dnes: string
+  /** Pobočky rozsahu v pořadí legendy — každá rezervace v buňce nese zkratku své pobočky. */
+  pobocky: PobockaKalendare[]
+}) {
   const nic = tydny.every((t) => t.every((d) => !d.vMesici || (d.rezervace.length === 0 && d.poznamek === 0)))
+  const poradi = pobocky.map((p) => p.id)
+  const podleId = new Map(pobocky.map((p) => [p.id, p]))
   return (
     <div>
       <div className="ds-rez-mesic">
@@ -285,9 +399,19 @@ export function MesicKalendar({ rozsah, tydny, dnes }: { rozsah: string; tydny: 
         ))}
         {tydny.flat().map((d) => {
           const s = souhrnDne(d.rezervace)
-          const akce = d.rezervace.filter((r) => r.druh === 'akce' && pocitaSeDoHostu(r.stav))
           const [, , den] = d.den.split('-').map(Number)
           const prazdny = d.rezervace.length === 0 && d.poznamek === 0
+          // Zrušené a nedorazivší se do buňky nevypisují (jsou v dni) —
+          // buňka říká, kdo přijde.
+          const skupiny = poPobockach(
+            d.rezervace.filter((r) => pocitaSeDoHostu(r.stav)),
+            poradi,
+          )
+          const popis = prazdny
+            ? 'nic zapsaného'
+            : pobocky.length > 1
+              ? pobocky.map((p) => `${p.nazev}: ${souhrnText(souhrnDne(d.rezervace.filter((r) => r.branch_id === p.id)))}`).join('; ')
+              : souhrnText(s)
           return (
             <Link
               key={d.den}
@@ -297,17 +421,38 @@ export function MesicKalendar({ rozsah, tydny, dnes }: { rozsah: string; tydny: 
               data-dnes={d.den === dnes ? '' : undefined}
               data-vikend={jeVikend(d.den) && d.vMesici ? '' : undefined}
               data-prazdny={prazdny ? '' : undefined}
-              aria-label={`${denKratce(d.den)}: ${prazdny ? 'nic zapsaného' : `${s.rezervaci} rezervací, ${s.akci} akcí, ${hosteText(s)}`}`}
+              aria-label={`${denKratce(d.den)}: ${popis}${d.poznamek > 0 ? `, ${pocet(d.poznamek, 'poznámka', 'poznámky', 'poznámek')}` : ''}`}
             >
               <span className="ds-rez-bunka-cislo ds-cislo">{den}.</span>
               <span className="ds-rez-bunka-den-nazev">{denKratce(d.den)}</span>
-              {s.rezervaci + s.akci > 0 ? <span className="ds-rez-bunka-souhrn">{s.rezervaci ? `${s.rezervaci} rez. · ` : ''}{hosteText(s)}</span> : null}
-              {akce.slice(0, 2).map((r) => (
-                <span key={r.id} className="ds-rez-bunka-akce" title={titulek(r)}>
-                  {titulek(r)}
-                </span>
-              ))}
-              {akce.length > 2 ? <span className="ds-rez-bunka-souhrn">+ {akce.length - 2} další</span> : null}
+              {s.rezervaci + s.akci > 0 ? <span className="ds-rez-bunka-souhrn">{souhrnKratce(s)}</span> : null}
+              {skupiny.map((sk) => {
+                const p = podleId.get(sk.id)
+                if (!p) return null
+                return (
+                  <span key={sk.id} className="ds-rez-bunka-pobocka" data-branch={p.barva} data-pobocka={p.id}>
+                    {sk.rezervace.slice(0, RADKU_V_BUNCE).map((r) => (
+                      <span
+                        key={r.id}
+                        className="ds-rez-bunka-radek"
+                        data-druh={r.druh}
+                        title={`${p.nazev} · ${hodinaVPasmu(r.zacatek, r.zona)} ${titulek(r)}${r.pocet_osob !== null ? ` · ${osobyText(r.pocet_osob)}` : ''}`}
+                      >
+                        <ZnackaPobocky pobocka={p} />
+                        {r.druh === 'akce' ? <Ikona klic="praporek" /> : null}
+                        <span className="ds-rez-bunka-text">
+                          {hodinaVPasmu(r.zacatek, r.zona)} {titulek(r)}
+                        </span>
+                      </span>
+                    ))}
+                    {sk.rezervace.length > RADKU_V_BUNCE ? (
+                      <span className="ds-rez-bunka-dalsi">
+                        + {sk.rezervace.length - RADKU_V_BUNCE} {sklonovat(sk.rezervace.length - RADKU_V_BUNCE, 'další', 'další', 'dalších')} ({p.zkratka})
+                      </span>
+                    ) : null}
+                  </span>
+                )
+              })}
               {d.poznamek > 0 ? <span className="ds-rez-bunka-souhrn">poznámky: {d.poznamek}</span> : null}
             </Link>
           )
