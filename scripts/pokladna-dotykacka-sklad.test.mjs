@@ -242,8 +242,8 @@ console.log('\n== JSON odpovědi: dlouhá čísla, řídicí znaky, BOM (naparso
   ok('desetinné číslo (i s 16 číslicemi před tečkou, i za ní) a exponent zůstávají čísly',
     typeof v.data[0].cena === 'number' && typeof v.data[0].x === 'number' && v.data[0].e === Infinity && v.data[0].m === -12)
   ok('escapovaná uvozovka v řetězci nerozhodí hledání čísel', naparsovatJson('{"a":"x\\"1234567890123456789","b":1234567890123456789}').b === '1234567890123456789')
-  ok('syrový tabulátor a konec řádku uvnitř řetězce → přečteno (nahrazeno mezerou)', naparsovatJson('{"data":[{"id":"1","recipe":"a\tb\nc"}]}').data[0].recipe === 'a b c')
-  ok('BOM na začátku → přečteno', naparsovatJson('﻿{"a":1}').a === 1)
+  ok('syrový tabulátor a konec řádku uvnitř řetězce → přečteno (nahrazeno mezerou)', naparsovatJson('{"data":[{"id":"1","recipe":"a\tb\nc"}]}')?.data?.[0]?.recipe === 'a b c')
+  ok('BOM na začátku → přečteno', naparsovatJson(String.fromCharCode(0xfeff) + '{"a":1}')?.a === 1)
   ok('ani po opravách to JSON není → undefined', naparsovatJson('<html>') === undefined && naparsovatJson('{"a":') === undefined)
   const sDlouhe = await relaceS([{ status: 200, text: `{"nextPage":null,"data":[{"id":${id},"name":"Kofola"}]}` }])
   const kDlouhe = await sDlouhe.relace.katalog()

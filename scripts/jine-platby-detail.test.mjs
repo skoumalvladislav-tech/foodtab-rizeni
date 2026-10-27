@@ -2634,8 +2634,8 @@ console.log('\n== 12. Katalog pokladny v editoru návrhu ==')
     ],
   })
   ok('suroviny: stránka katalogu Dotykačky → produkty i surovina (Mouka hladká, stockDeduct) bez vyřazení',
-    Array.isArray(zDotykacky) && zDotykacky.map((p) => p.externiId).join(',') === '101,202,303')
-  const katalog = (zDotykacky ?? []).map((p) => ({ externiId: p.externiId, nazev: p.nazev, jednotka: L.jednotkaCesky(p.jednotka) || null, mira: p.mira }))
+    Array.isArray(zDotykacky.produkty) && zDotykacky.produkty.map((p) => p.externiId).join(',') === '101,202,303' && zDotykacky.bezId === 0)
+  const katalog = (zDotykacky.produkty ?? []).map((p) => ({ externiId: p.externiId, nazev: p.nazev, jednotka: L.jednotkaCesky(p.jednotka) || null, mira: p.mira }))
   ok('hledání: „mouka“ najde surovinu', L.hledatVKatalogu(katalog, 'mouka').map((k) => k.externiId).join() === '202')
   ok('hledání: bez diakritiky a velkými („HLADKA“, „SVICKOVA“) najde „Mouka hladká“ i „Svíčková na smetaně“',
     L.hledatVKatalogu(katalog, '  HLADKA ').map((k) => k.externiId).join() === '202' && L.hledatVKatalogu(katalog, 'SVICKOVA').map((k) => k.externiId).join() === '303')
