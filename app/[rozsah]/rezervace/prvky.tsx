@@ -16,7 +16,7 @@ import {
   type Pohled,
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
-import { poPobockach, souhrnText } from '@/lib/rezervace-pobocky'
+import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
 import { velikostText, jeObrazek } from '@/lib/rezervace-prilohy'
 import {
   NAZVY_DRUHU,
@@ -34,7 +34,7 @@ import { pocet, sklonovat } from '@/lib/sklonovani'
 import Ikona from '../ikona'
 import { odebratPrilohu, pridatPoznamku, smazatPoznamku, upravitPoznamku } from './akce'
 import NahratPrilohy from './prilohy-nahrat'
-import type { PobockaRezervaci } from './pristup'
+import { ZnackaPobocky } from './znacka-pobocky'
 
 /**
  * Kreslicí kousky Rezervací a akcí.
@@ -113,23 +113,7 @@ function souhrnKratce(s: SouhrnDne): string {
 
 /* ---------- pobočky: štítek se zkratkou a legenda se souhrnem ---------- */
 
-/** Co kalendář o pobočce potřebuje: zkratku a barvu spočítal zkusPristupRezervacim. */
-export type PobockaKalendare = Pick<PobockaRezervaci, 'id' | 'nazev' | 'zkratka' | 'barva'>
-
-/**
- * Štítek se zkratkou pobočky („RČP“) v její barvě — plný obdélník, ať se
- * nesplete s bledými pilulkami stavů. Barva nikdy sama: zkratka je
- * napsaná, celý název je v `title` a pro odečítač. Kde celý název stojí
- * hned vedle (legenda, hlavička oddílu), odečítač štítek přeskočí.
- */
-export function ZnackaPobocky({ pobocka, vedleNazvu = false }: { pobocka: PobockaKalendare; vedleNazvu?: boolean }) {
-  return (
-    <span className="ds-rez-znacka" data-branch={pobocka.barva} title={pobocka.nazev} aria-hidden={vedleNazvu ? true : undefined}>
-      <span aria-hidden="true">{pobocka.zkratka}</span>
-      {vedleNazvu ? null : <span className="sr-only">{pobocka.nazev}</span>}
-    </span>
-  )
-}
+export { ZnackaPobocky }
 
 /**
  * Legenda poboček nad kalendářem: každá pobočka ve svém rámečku a barvě,

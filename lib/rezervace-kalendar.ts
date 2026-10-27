@@ -183,7 +183,7 @@ export type SouhrnDne = {
   zrusenych: number
 }
 
-export function souhrnDne(rezervace: readonly RezervaceVKalendari[]): SouhrnDne {
+export function souhrnDne(rezervace: readonly Pick<RezervaceVKalendari, 'druh' | 'stav' | 'pocet_osob'>[]): SouhrnDne {
   const s: SouhrnDne = { rezervaci: 0, akci: 0, hostu: 0, bezPoctu: 0, zrusenych: 0 }
   for (const r of rezervace) {
     if (!pocitaSeDoHostu(r.stav)) {

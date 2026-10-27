@@ -26,9 +26,11 @@ import {
   stitekDne,
   ZKRATKY_DNU,
 } from "@/lib/rozpis-mobil";
+import type { HosteDnu } from "@/lib/rezervace-pobocky";
 import { pocet } from "@/lib/sklonovani";
 
 import type { SmenaKUprave } from "../formular-smeny";
+import { DenSHosty } from "../hoste-dne";
 import type { Otevrene, Planovani, Smena } from "../rozpis";
 
 /**
@@ -108,7 +110,13 @@ export default function MrizkaTydne({
   filtrAktivni,
   onZrusitFiltry,
   maSmeny,
+  hoste,
+  rozsahAdresa,
 }: {
+  /** Hosté z rezervací do okénka u záhlaví dne; `null` = člověk rezervace nevidí. */
+  hoste: HosteDnu | null;
+  /** Adresní segment rozsahu (`firma`, `cerna-perla`) — odkaz z okénka na den v Rezervacích. */
+  rozsahAdresa: string;
   mrizka: Mrizka;
   dny: string[];
   dnesni: string;
@@ -153,18 +161,25 @@ export default function MrizkaTydne({
                 {pocet(mrizka.pocetLidi, "člověk", "lidé", "lidí")}
               </span>
             </div>
-            {dny.map((den) => {
+            {dny.map((den, i) => {
               const souhrn = mrizka.poDnech.get(den);
               const stitek = stitekDne(den, dnesni);
               const cislo = Number(den.slice(8, 10));
+              const popisDne = `${ZKRATKY_DNU[denVTydnu(den)]} ${cislo}. ${Number(den.slice(5, 7))}.`;
               return (
-                <div
+                <DenSHosty
                   key={den}
+                  den={den}
+                  // „út 27. 10.“ malými — velké „ÚT“ by odečítač hláskoval.
+                  popisDne={popisDne.toLowerCase()}
+                  hoste={hoste}
+                  rozsah={rozsahAdresa}
+                  vpravo={i >= dny.length - 2}
                   role="columnheader"
                   className="ds-smd-den"
                   data-dnes={den === dnesni ? "" : undefined}
                   data-vikend={jeVikend(den) ? "" : undefined}
-                  aria-label={`${ZKRATKY_DNU[denVTydnu(den)]} ${cislo}. ${Number(den.slice(5, 7))}.`}
+                  aria-label={popisDne}
                 >
                   <span className="ds-smd-den-hlava">
                     <span className="ds-smd-den-nazev">{stitek ?? ZKRATKY_DNU[denVTydnu(den)]}</span>
@@ -183,7 +198,7 @@ export default function MrizkaTydne({
                       <span aria-label="nikdo nepracuje">—</span>
                     )}
                   </span>
-                </div>
+                </DenSHosty>
               );
             })}
           </div>
