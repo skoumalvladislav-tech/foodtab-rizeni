@@ -1,0 +1,68 @@
+name: Rezervace — ranní souhrn
+
+# Naplánovaná úloha: ranní souhrn rezervací a akcí do upozornění
+# (kolik rezervací a hostů, jaké akce) po pobočkách.
+#
+# GitHub Actions je záloha plánovače v databázi (app.planovac_ulohy,
+# migrace 20261103100000; plán musí sedět, hlídá scripts/planovac.test.mjs).
+#
+# O HODINĚ ROZHODUJE DATABÁZE. Tenhle soubor jen každou hodinu zaklepe;
+# souhrn odejde při prvním běhu od 8:00 do 16:00 místního času pobočky
+# a za provozní den jen jednou (primární klíč v `rezervace_souhrn_dne`).
+# Zmeškané ranní spuštění tak dožene kterýkoli pozdější běh do 16:00.
+
+on:
+  schedule:
+    - cron: '1 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: rezervace-souhrn-dne
+  cancel-in-progress: false
+
+jobs:
+  poslat:
+    name: Poslat ranní souhrn rezervací
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Zavolat naplánovanou úlohu
+        env:
+          ADRESA: ${{ secrets.APP_URL }}
+          TAJEMSTVI: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ADRESA:-}" ]; then
+            echo "::error::Chybí secret APP_URL — adresa nasazené aplikace bez lomítka na konci."
+            exit 1
+          fi
+          if [ -z "${TAJEMSTVI:-}" ]; then
+            echo "::error::Chybí secret CRON_SECRET — musí být TÁŽ hodnota jako proměnná CRON_SECRET na Vercelu."
+            exit 1
+          fi
+
+          KOD=$(curl -sS -o telo.json -w '%{http_code}' \
+            --max-time 60 \
+            -H "Authorization: Bearer ${TAJEMSTVI}" \
+            "${ADRESA}/api/uloha/rezervace-souhrn-dne")
+
+          # Jen počty — repozitář je veřejný, log vidí kdokoli.
+          SOUHRN=$(jq -c '{pobocek, upozorneni, chyb, bezi_jinde}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+          echo "HTTP ${KOD} ${SOUHRN}"
+
+          case "$KOD" in
+            200) ;;
+            401)
+              echo "::error::401 — tajemství nesedí. CRON_SECRET v GitHub Secrets a na Vercelu musí být stejné."
+              exit 1 ;;
+            503)
+              echo "::error::503 — na Vercelu chybí SUPABASE_SERVICE_ROLE_KEY."
+              exit 1 ;;
+            *)
+              echo "::error::Úloha vrátila HTTP ${KOD}."
+              exit 1 ;;
+          esac
+
+          echo "${SOUHRN}" >> "$GITHUB_STEP_SUMMARY" || true

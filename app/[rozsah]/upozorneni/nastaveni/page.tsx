@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation'
 
-import { getContext, getUser } from '@/lib/authz'
+import { getContext, getUser, hasAccess } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
-import ObsahNastaveniUpozorneni, { type Kategorie } from './obsah'
+import ObsahNastaveniUpozorneni, { ZAKLADNI_KATEGORIE, type Kategorie } from './obsah'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,17 +57,29 @@ export default async function NastaveniUpozorneni({
   // Chybějící řádek = zapnuto (stejná výchozí hodnota jako v databázi,
   // app.upozorneni_povoleno) — obrazovka nesmí ukázat jiný stav, než
   // jaký doopravdy platí.
-  const povoleno: Record<Kategorie, boolean> = { vzkazy: true, nastenka: true }
+  const povoleno: Record<Kategorie, boolean> = { vzkazy: true, nastenka: true, rezervace_souhrn: true }
   for (const radek of (data ?? []) as { kategorie: string; povoleno: boolean }[]) {
-    if (radek.kategorie === 'vzkazy' || radek.kategorie === 'nastenka') {
+    if (radek.kategorie === 'vzkazy' || radek.kategorie === 'nastenka' || radek.kategorie === 'rezervace_souhrn') {
       povoleno[radek.kategorie] = radek.povoleno
     }
   }
+
+  // Ranní přehled rezervací chodí jen tomu, kdo rezervace na některé
+  // pobočce vidí (stejná otázka jako stránka Rezervace, pristup.ts).
+  const vidiRezervace = (
+    await Promise.all(
+      (ctx?.branches ?? []).map(async (b) =>
+        (await hasAccess(tenantId, 'rezervace.read', b.id)) || (await hasAccess(tenantId, 'rezervace.manage', b.id)),
+      ),
+    )
+  ).some(Boolean)
+  const nabidnout: Kategorie[] = vidiRezervace ? [...ZAKLADNI_KATEGORIE, 'rezervace_souhrn'] : ZAKLADNI_KATEGORIE
 
   return (
     <ObsahNastaveniUpozorneni
       rozsah={rozsah}
       povoleno={povoleno}
+      nabidnout={nabidnout}
       chyba={chyba ?? null}
       ulozeno={Boolean(ulozeno)}
       jeMajitel={ctx?.jeMajitel ?? false}
