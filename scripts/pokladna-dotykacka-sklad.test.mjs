@@ -22,7 +22,7 @@
 
 import { readFileSync } from 'node:fs'
 
-const { API_DOTYKACKA, vytvoritDotykacku, kontextDotykacky, naparsovatJson, chranitDlouhaCisla } = await import('../lib/pokladna-dotykacka.ts')
+const { API_DOTYKACKA, vytvoritDotykacku, kontextDotykacky, naparsovatJson, chranitDlouhaCisla, chybaJson } = await import('../lib/pokladna-dotykacka.ts')
 const { ZAPIS_VYDEJE_DOTYKACKA } = await import('../lib/pokladna-dotykacka-zapis.ts')
 const {
   CASOVY_LIMIT_POS_AKCE_MS,
@@ -178,7 +178,7 @@ console.log('\n== Katalog: produkty bez čitelného id (entity/product: id je lo
   const sDira = await relaceS([{ status: 200, telo: plnaSDirou }, { status: 200, telo: { nextPage: null, data: [produkt(101)] } }])
   const kDira = await sDira.relace.katalog()
   ok('plná stránka s produktem bez id → ptá se na další stránku (99 + 1 produktů, 1 vynechaný)',
-    kDira.stav === 'ok' && sDira.pozadavky.length === 2 && kDira.produkty.length === 100 && kDira.vynechanoBezId === 1)
+    kDira.stav === 'ok' && sDira.pozadavky.length === 2 && kDira.produkty.length === 100 && kDira.vynechanoBezId === 1 && kDira.vynechanoPopis === 'id: chybí; klíče položky: name')
 
   // Produkt s null id SÁM na krátké poslední stránce nesmí shodit katalog, který by mezi ostatními jen přeskočil.
   const sPosledni = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, { status: 200, telo: { nextPage: null, data: [{ id: null, name: 'Produkt null' }] } }])
@@ -199,76 +199,147 @@ console.log('\n== Katalog: produkty bez čitelného id (entity/product: id je lo
   ok('… skloňování „žádná z 1 položky"', (await sJedna.relace.katalog()).duvod.includes('žádná z 1 položky katalogu'))
 }
 
-console.log('\n== Katalog: receptury — kdy znovu bez nich a kdy ne ==')
+console.log('\n== Katalog: receptury — kdy znovu bez nich a kdy ne (rozhoduje druh chyby, ne stránka) ==')
 {
-  // PRVNÍ stránce s recepturami appka nerozumí, bez nich ano → katalog BEZ receptur s popisem, čemu nerozuměla.
+  const HTML = { status: 200, text: '<html>x</html>' }
+  const sKoncem = (od = 101) => ({ status: 200, telo: { nextPage: null, data: [produkt(od)] } })
+
+  // Platný JSON, kterému appka nerozumí, se neopakuje — rovnou katalog bez receptur s popisem.
   const sRec = await relaceS([{ status: 200, telo: { vysledek: [] } }, { status: 200, telo: { nextPage: null, data: [produkt(1), produkt(2)] } }])
   const kRec = await sRec.relace.katalog()
-  ok('1. stránka s recepturami bez „data", bez nich OK → produkty, bezRecepturProc „tvar" a bezRecepturPopis se strukturou',
-    kRec.stav === 'ok' && kRec.produkty.length === 2 && kRec.bezReceptur === true && kRec.bezRecepturProc === 'tvar' &&
+  ok('1. stránka s recepturami bez „data" → hned bez receptur (2 dotazy), bezRecepturProc „tvar" a popis struktury',
+    kRec.stav === 'ok' && kRec.produkty.length === 2 && kRec.bezReceptur === true && kRec.bezRecepturProc === 'tvar' && sRec.pozadavky.length === 2 &&
       kRec.bezRecepturPopis === 'stránka 1 s recepturami: odpověď nemá seznam „data“ (klíče: vysledek)' && kRec.produkty.every((p) => p.suroviny === null))
-  const sRecHtml = await relaceS([{ status: 200, text: '<html>x</html>' }, { status: 200, telo: { nextPage: null, data: [produkt(1)] } }])
-  const kRecHtml = await sRecHtml.relace.katalog()
-  ok('1. stránka s recepturami není JSON, bez nich OK → katalog bez receptur, popis „odpověď není JSON"',
-    kRecHtml.stav === 'ok' && kRecHtml.bezRecepturProc === 'tvar' && kRecHtml.bezRecepturPopis?.startsWith('stránka 1 s recepturami: odpověď není JSON: 14 znaků'))
-  const s403 = await relaceS([{ status: 403, telo: { reason: 'ACCESS_DENIED' } }, { status: 200, telo: { nextPage: null, data: [produkt(1)] } }])
-  const k403 = await s403.relace.katalog()
-  ok('… u 403 je důvod „pravo" a popis tvaru žádný', k403.stav === 'ok' && k403.bezRecepturProc === 'pravo' && !('bezRecepturPopis' in k403))
 
-  // DALŠÍ stránka s recepturami nečitelná: první stránce s recepturami appka rozuměla → nejde o receptury.
-  // Znovu bez nich by jen vymazalo uložené receptury — nic se neuloží, chyba (u nečitelného těla dočasná).
-  const necitelne = [
+  // Nečitelná stránka se JEDNOU zopakuje — jednorázový výpadek receptury nesmaže.
+  const sJednou = await relaceS([HTML, { status: 200, telo: { nextPage: null, data: [produkt(1, { ingredients: [] })] } }])
+  const kJednou = await sJednou.relace.katalog()
+  ok('1. stránka s recepturami nečitelná jen jednou → zopakuje se stejný dotaz a katalog má receptury (bez bezReceptur)',
+    kJednou.stav === 'ok' && kJednou.bezReceptur === undefined && kJednou.produkty[0]?.maRecepturu === false && sJednou.pozadavky.length === 2 &&
+      sJednou.pozadavky[0].url === sJednou.pozadavky[1].url && sJednou.pozadavky[1].url.includes('include=ingredients'))
+  const sDvakrat = await relaceS([HTML, HTML, { status: 200, telo: { nextPage: null, data: [produkt(1)] } }])
+  const kDvakrat = await sDvakrat.relace.katalog()
+  ok('1. stránka s recepturami nečitelná i napodruhé → katalog bez receptur, popis „odpověď není JSON … (i napodruhé)" (3 dotazy)',
+    kDvakrat.stav === 'ok' && kDvakrat.bezRecepturProc === 'tvar' && sDvakrat.pozadavky.length === 3 && !sDvakrat.pozadavky[2].url.includes('include') &&
+      kDvakrat.bezRecepturPopis === 'stránka 1 s recepturami: odpověď není JSON: 14 znaků, začíná „<“ (i napodruhé)')
+
+  const prechodne = [
     ['HTML místo JSON', { status: 200, text: '<html>Bad gateway</html>' }],
     ['prázdné tělo', { status: 200 }],
     ['uříznutý JSON', { status: 200, text: '{"nextPage":null,"data":[{"id":"101","name":"Kof' }],
   ]
-  for (const [popis, odpoved] of necitelne) {
-    const s = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, odpoved])
+  for (const [popis, odpoved] of prechodne) {
+    const s = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, odpoved, sKoncem()])
     const k = await s.relace.katalog()
-    ok(`2. stránka s recepturami: ${popis} → dočasná chyba „nepřišel celý", NIC se neopakuje bez receptur (2 dotazy)`,
-      k.stav === 'chyba' && k.druh === 'docasna' && /Katalog z Dotykačky nepřišel celý \(stránka 2 s recepturami: /.test(k.duvod) && /Nic se neuložilo/.test(k.duvod) && s.pozadavky.length === 2)
+    ok(`2. stránka s recepturami: ${popis} jen jednou → zopakuje se a katalog je celý S recepturami (3 dotazy)`,
+      k.stav === 'ok' && k.produkty.length === 101 && k.bezReceptur === undefined && s.pozadavky.length === 3 && s.pozadavky[2].url === s.pozadavky[1].url)
   }
-  const sStruktura = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, { status: 200, telo: { nextPage: null, data: [produkt(101), 'x'] } }])
+
+  // Trvalá chyba, kterou dělá jen include=ingredients, na DALŠÍ stránce: dřív „zkuste znovu" dokola, teď katalog bez receptur.
+  const sNaN = { status: 200, text: '{"nextPage":null,"data":[{"id":"101","name":"Kofola","ingredients":[{"_productId":"5","quantity":NaN}]}]}' }
+  const sTrvala = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, sNaN, sNaN, { status: 200, telo: plnaStrana(1, '2') }, sKoncem()])
+  const kTrvala = await sTrvala.relace.katalog()
+  ok('2. stránka s recepturami pokaždé nečitelná (NaN v surovině) → katalog BEZ receptur od 1. stránky, 101 produktů (5 dotazů)',
+    kTrvala.stav === 'ok' && kTrvala.produkty.length === 101 && kTrvala.bezRecepturProc === 'tvar' && sTrvala.pozadavky.length === 5 &&
+      sTrvala.pozadavky[3].url.includes('page=1') && !sTrvala.pozadavky[3].url.includes('include') &&
+      kTrvala.bezRecepturPopis.startsWith('stránka 2 s recepturami: odpověď není JSON: ') && kTrvala.bezRecepturPopis.endsWith(' (i napodruhé)') && !kTrvala.bezRecepturPopis.includes('Kofola'))
+  const sStruktura = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, { status: 200, telo: { nextPage: null, data: [produkt(101), 'x'] } }, { status: 200, telo: plnaStrana(1, '2') }, sKoncem()])
   const kStruktura = await sStruktura.relace.katalog()
-  ok('2. stránka s položkou, která není objekt → chyba jina s popisem, bez opakování (2 dotazy)',
-    kStruktura.stav === 'chyba' && kStruktura.druh === 'jina' && kStruktura.duvod.includes('stránka 2 s recepturami: položka 2 z 2 je string, ne objekt') && sStruktura.pozadavky.length === 2)
+  ok('2. stránka s položkou, která není objekt → bez opakování rovnou katalog bez receptur (4 dotazy) s popisem',
+    kStruktura.stav === 'ok' && kStruktura.produkty.length === 101 && sStruktura.pozadavky.length === 4 && kStruktura.bezRecepturPopis === 'stránka 2 s recepturami: položka 2 z 2 je text, ne objekt')
+  const sNull2 = await relaceS([{ status: 200, telo: plnaStrana(1, '2') }, { status: 200, text: 'null' }, { status: 200, telo: plnaStrana(1, '2') }, sKoncem()])
+  const kNull2 = await sNull2.relace.katalog()
+  ok('2. stránka JSON null (platná odpověď, nečekaný tvar) → bez opakování, katalog bez receptur (4 dotazy)',
+    kNull2.stav === 'ok' && sNull2.pozadavky.length === 4 && kNull2.bezRecepturPopis === 'stránka 2 s recepturami: odpověď je JSON null')
+
+  // Nečitelné všude a pokaždé → dočasná chyba, nic se neuloží; popis druhého průchodu bez „s recepturami".
+  const sVsude = await relaceS([HTML, HTML, HTML, HTML])
+  const kVsude = await sVsude.relace.katalog()
+  ok('nečitelné s recepturami i bez nich, pokaždé napodruhé → docasna „nepřišel celý … zkuste ho načíst znovu později" (4 dotazy)',
+    kVsude.stav === 'chyba' && kVsude.druh === 'docasna' && sVsude.pozadavky.length === 4 &&
+      kVsude.duvod === 'Katalog z Dotykačky nepřišel celý (stránka 1 s recepturami: odpověď není JSON: 14 znaků, začíná „<“ (i napodruhé); znovu bez receptur — stránka 1: odpověď není JSON: 14 znaků, začíná „<“ (i napodruhé)). Nic se neuložilo — zkuste ho načíst znovu později.')
+
+  // 403 jen kvůli recepturám a bez nich nesrozumitelné: popis jen druhého průchodu, žádné „null".
+  const s403t = await relaceS([{ status: 403, telo: { reason: 'ACCESS_DENIED' } }, { status: 200, telo: { vysledek: [] } }])
+  const k403t = await s403t.relace.katalog()
+  ok('403 na receptury a bez nich nesrozumitelné → chyba jina jen s popisem druhého průchodu („stránka 1: …"), bez „null"',
+    k403t.stav === 'chyba' && k403t.druh === 'jina' && k403t.duvod === 'Katalog produktů z Dotykačky má neočekávaný tvar (stránka 1: odpověď nemá seznam „data“ (klíče: vysledek)).')
+  const s403 = await relaceS([{ status: 403, telo: { reason: 'ACCESS_DENIED' } }, { status: 200, telo: { nextPage: null, data: [produkt(1)] } }])
+  const k403 = await s403.relace.katalog()
+  ok('… u 403 a čitelného katalogu je důvod „pravo" a popis tvaru žádný', k403.stav === 'ok' && k403.bezRecepturProc === 'pravo' && !('bezRecepturPopis' in k403))
 }
 
 console.log('\n== Katalog: popis tvaru — jen struktura, žádné hodnoty ==')
 {
-  const sHtml = await relaceS([{ status: 200, text: '  <html>chyba</html>' }, { status: 200, text: '  <html>chyba</html>' }])
+  const ctyrikrat = (odpoved) => [odpoved, odpoved, odpoved, odpoved]
+  const sHtml = await relaceS(ctyrikrat({ status: 200, text: '  <html>chyba</html>' }))
   const kHtml = await sHtml.relace.katalog()
   ok('HTML místo JSON → „odpověď není JSON: 20 znaků, začíná „<““ (text odpovědi v hlášce není)',
     kHtml.stav === 'chyba' && kHtml.duvod.includes('odpověď není JSON: 20 znaků, začíná „<“') && !kHtml.duvod.includes('html>'))
-  const sPrazdne = await relaceS([{ status: 200 }, { status: 200 }])
-  ok('prázdné tělo se stavem 200 → „odpověď přišla prázdná"', /stránka 1 s recepturami: odpověď přišla prázdná/.test((await sPrazdne.relace.katalog()).duvod))
+  const sPrazdne = await relaceS(ctyrikrat({ status: 200 }))
+  ok('prázdné tělo se stavem 200 → „odpověď přišla prázdná (i napodruhé)"', (await sPrazdne.relace.katalog()).duvod.includes('stránka 1 s recepturami: odpověď přišla prázdná (i napodruhé)'))
+  const sBile = await relaceS(ctyrikrat({ status: 200, text: '  \n\t ' }))
+  ok('tělo jen z bílých znaků → taky „odpověď přišla prázdná" (ne „uříznutá")', /odpověď přišla prázdná/.test((await sBile.relace.katalog()).duvod))
   const sNull = await relaceS([{ status: 200, text: 'null' }, { status: 200, text: 'null' }])
-  ok('tělo JSON null → „odpověď je JSON null" (ne „prázdná")', /odpověď je JSON null/.test((await sNull.relace.katalog()).duvod))
-  const sUriznute = await relaceS([{ status: 200, text: '{"nextPage":null,"data":[{"id":"1","name":"Kof' }, { status: 200, text: '{"data":[{"id":"1"},' }])
+  const kNull = await sNull.relace.katalog()
+  ok('tělo JSON null → „odpověď je JSON null" (ne „prázdná"), jina, bez opakování (2 dotazy)', /odpověď je JSON null/.test(kNull.duvod) && kNull.druh === 'jina' && sNull.pozadavky.length === 2)
+  const u1 = { status: 200, text: '{"nextPage":null,"data":[{"id":"1","name":"Kof' }
+  const u2 = { status: 200, text: '{"data":[{"id":"1"},' }
+  const sUriznute = await relaceS([u1, u1, u2, u2])
   const kUriznute = await sUriznute.relace.katalog()
   ok('uříznutý JSON (neuzavřený řetězec i konec vstupu) → „chyba až na konci — odpověď je nejspíš uříznutá"',
     (kUriznute.duvod.match(/chyba až na konci — odpověď je nejspíš uříznutá/g) ?? []).length === 2 && !kUriznute.duvod.includes('Kof'))
+  const sNavic = await relaceS(ctyrikrat({ status: 200, text: '{"data":[]}}' }))
+  const kNavic = await sNavic.relace.katalog()
+  ok('nadbytečný znak za koncem JSON (`{"data":[]}}`) → „chyba na znaku 12 (jiný znak)", NE „uříznutá"',
+    kNavic.duvod.includes('odpověď není JSON: 12 znaků, začíná „{“, chyba na znaku 12 (jiný znak)') && !kNavic.duvod.includes('uříznutá'))
   const vadnyEscape = '{"data":[{"id":"1","name":"a\\x"}]}'
-  const sEscape = await relaceS([{ status: 200, text: vadnyEscape }, { status: 200, text: vadnyEscape }])
+  const sEscape = await relaceS(ctyrikrat({ status: 200, text: vadnyEscape }))
   const kEscape = await sEscape.relace.katalog()
   ok('vadný escape uprostřed → pozice a druh znaku („chyba na znaku 30 (písmeno)"), ne znak sám',
     kEscape.duvod.includes('odpověď není JSON: 34 znaků, začíná „{“, chyba na znaku 30 (písmeno)') && !kEscape.duvod.includes('a\\x'))
-  const sZnak = await relaceS([{ status: 200, text: '%%%' }, { status: 200, text: String.fromCharCode(1) + 'abc' }])
+  const tabAEscape = '{"a":"x\ty","b":"a\\x"}'
+  const sTab = await relaceS(ctyrikrat({ status: 200, text: tabAEscape }))
+  ok('syrový tabulátor a dál vadný escape → pozice ESCAPE, ne tabulátoru', (await sTab.relace.katalog()).duvod.includes(`chyba na znaku ${tabAEscape.indexOf('\\x') + 2} (písmeno)`))
+  // Hláška V8 bez pozice nese úryvek TĚLA — číslo ani „end of JSON input" z něj se za pozici vydávat nesmí.
+  const sPozice = await relaceS(ctyrikrat({ status: 200, text: 'xposition 7' }))
+  const kPozice = await sPozice.relace.katalog()
+  ok('tělo „xposition 7" → žádná „chyba na znaku" (číslo z těla se nebere)', kPozice.duvod.includes('odpověď není JSON: 11 znaků, začíná „x“') && !kPozice.duvod.includes('chyba na znaku'))
+  const sKonecText = await relaceS(ctyrikrat({ status: 200, text: 'end of JSON input!' }))
+  ok('tělo „end of JSON input!" → NE „uříznutá"', !(await sKonecText.relace.katalog()).duvod.includes('uříznutá'))
+  const sZnak = await relaceS([{ status: 200, text: '%%%' }, { status: 200, text: '%%%' }, { status: 200, text: String.fromCharCode(1) + 'abc' }, { status: 200, text: String.fromCharCode(1) + 'abc' }])
   const kZnak = await sZnak.relace.katalog()
-  ok('první znak mimo bezpečnou sadu (%, řídicí) → „jiný znak"', (kZnak.duvod.match(/začíná „jiný znak“/g) ?? []).length === 2)
+  ok('první znak mimo bezpečnou sadu (%, řídicí) → „začíná jiným znakem" (bez uvozovek)', (kZnak.duvod.match(/začíná jiným znakem/g) ?? []).length === 2 && !kZnak.duvod.includes('„jiný znak“'))
 
-  ok('popisTvaru: data jako objekt → klíče UVNITŘ data i klíče odpovědi',
-    popisTvaru({ status: 200, telo: { currentPage: '1', data: { items: [], total: '1' } } }) === '„data“ je object, ne seznam (klíče v „data“: items, total; klíče odpovědi: currentPage, data)')
-  ok('popisTvaru: data jako text → typ a klíče odpovědi', popisTvaru({ status: 200, telo: { data: 'x' } }) === '„data“ je string, ne seznam (klíče odpovědi: data)')
+  // chybaJson přímo: souřadnice původního textu i s BOM (pozadavek BOM dostane jen dvojitý — Response.text() jeden odřízne).
+  const BOM = String.fromCharCode(0xfeff)
+  const bomUriznute = chybaJson(BOM + '{"data":[{"id":"1"')
+  ok('chybaJson: BOM + uříznuté tělo → uriznuto, pozice = délka', bomUriznute.uriznuto === true && bomUriznute.pozice === BOM.length + 18)
+  const bomUprostred = BOM + '{"a":1,}'
+  const cBom = chybaJson(bomUprostred)
+  ok('chybaJson: BOM + chyba uprostřed → pozice v původním textu (i s BOM), druh znaku', cBom.uriznuto === false && cBom.pozice === bomUprostred.indexOf('}') && cBom.znakNaPozici === 'jiný znak')
+  ok('chybaJson: nadbytečný znak na konci → ne uříznuté', chybaJson('{"a":1}}').uriznuto === false && chybaJson('{"a":1}}').pozice === 7)
+  ok('chybaJson: hláška bez pozice (úryvek těla) → pozice null', chybaJson('xposition 7').pozice === null && chybaJson('xposition 7').uriznuto === false)
+
+  ok('popisTvaru: data jako objekt → klíče UVNITŘ data i klíče odpovědi (česky „objekt")',
+    popisTvaru({ status: 200, telo: { currentPage: '1', data: { items: [], total: '1' } } }) === '„data“ je objekt, ne seznam (klíče v „data“: items, total; klíče odpovědi: currentPage, data)')
+  ok('popisTvaru: data jako text → „je text, ne seznam"', popisTvaru({ status: 200, telo: { data: 'x' } }) === '„data“ je text, ne seznam (klíče odpovědi: data)')
   ok('popisTvaru: bez data → klíče odpovědi', popisTvaru({ status: 200, telo: { produkty: [] } }) === 'odpověď nemá seznam „data“ (klíče: produkty)')
-  ok('popisTvaru: text místo objektu', popisTvaru({ status: 200, telo: 'ahoj' }) === 'odpověď je string, ne objekt')
+  ok('popisTvaru: text místo objektu', popisTvaru({ status: 200, telo: 'ahoj' }) === 'odpověď je text, ne objekt')
   ok('popisTvaru: seznam se skloňováním', popisTvaru({ status: 200, telo: [1, 2] }) === 'odpověď je seznam s 2 položkami' && popisTvaru({ status: 200, telo: [1] }) === 'odpověď je seznam s 1 položkou')
   const mnohoKlicu = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`k${i}`, i]))
   ok('popisTvaru: nejvýš 12 klíčů, zbytek jako počet', popisTvaru({ status: 200, telo: mnohoKlicu }).endsWith('k11 … (+3))'))
-  ok('popisTvaru: dlouhý název klíče zkrácený na 40 znaků', popisTvaru({ status: 200, telo: { ['k'.repeat(100)]: 1 } }) === `odpověď nemá seznam „data“ (klíče: ${'k'.repeat(40)})`)
+  ok('popisTvaru: klíč delší než 40 znaků se nevypíše, jen započítá', popisTvaru({ status: 200, telo: { ['k'.repeat(100)]: 1 } }) === 'odpověď nemá seznam „data“ (klíče: 1 klíč jiného tvaru (nevypsáno))')
+  const mapa = popisTvaru({ status: 200, telo: { data: { 'Svíčková na smetaně': { id: '1' }, 8594001234567: {}, items: [] } } })
+  ok('popisTvaru: mapa podle názvů a EAN → vypíše jen klíče ve tvaru pole, ostatní počtem (hodnoty v hlášce nejsou)',
+    mapa === '„data“ je objekt, ne seznam (klíče v „data“: items; 2 klíče jiného tvaru (nevypsáno); klíče odpovědi: data)' && !mapa.includes('Svíčková') && !mapa.includes('8594'))
+  const sEan = await relaceS([{ status: 200, telo: { nextPage: null, data: [produkt(1), { 8594001234567: 'Pivo', name: 'x' }] } }])
+  const kEan = await sEan.relace.katalog()
+  ok('vynechaná položka s klíčem jako EAN → vynechanoPopis bez EAN („klíče položky: name; 1 klíč jiného tvaru")',
+    kEan.stav === 'ok' && kEan.vynechanoPopis === 'id: chybí; klíče položky: name; 1 klíč jiného tvaru (nevypsáno)')
 
   const nObj = naparsovatProdukty({ data: [produkt(1), 'x'] })
-  ok('naparsovatProdukty: položka, která není objekt → „položka 2 z 2 je string, ne objekt"', nObj.chyba === 'položka 2 z 2 je string, ne objekt')
+  ok('naparsovatProdukty: položka, která není objekt → „položka 2 z 2 je text, ne objekt"', nObj.chyba === 'položka 2 z 2 je text, ne objekt')
   const nSeznam = naparsovatProdukty({ data: [[1, 2]] })
   ok('naparsovatProdukty: položka, která je seznam → „položka 1 z 1 je seznam, ne objekt"', nSeznam.chyba === 'položka 1 z 1 je seznam, ne objekt')
   const nBez = naparsovatProdukty({ data: [{ id: 12.5 }, { id: -3 }] })
@@ -282,14 +353,16 @@ console.log('\n== Katalog: popis tvaru — jen struktura, žádné hodnoty ==')
     [12.5, 'desetinné číslo'],
     [-3, 'záporné číslo'],
     [1e20, 'číslo nad 2^53'],
+    [Infinity, 'číslo mimo rozsah'],
     ['1'.repeat(21), 'číslo jako text, 21 číslic (víc než 20)'],
     ['-7136048451797860123', 'záporné číslo jako text (19 číslic)'],
+    ['-1234', 'záporné číslo jako text (4 číslice)'],
     ['-5', 'záporné číslo jako text (1 číslice)'],
     ['ABC-1', 'text s 5 znaky, ne jen číslice'],
     ['A', 'text s 1 znakem, ne jen číslice'],
     ['  ', 'prázdný text'],
-    [{ a: 1 }, 'object'],
-    [true, 'boolean'],
+    [{ a: 1 }, 'objekt'],
+    [true, 'logická hodnota'],
   ]
   for (const [id, cekam] of pripady) {
     const p = popisId(id)
@@ -305,7 +378,7 @@ console.log('\n== Přerušené tělo odpovědi (pozadavek) ==')
   const sPreruseno = await relaceS(['telo-prerusene'])
   const kPreruseno = await sPreruseno.relace.katalog()
   ok('katalog: tělo 200 přerušené při čtení → docasna „neposlala celou odpověď", jediný dotaz',
-    kPreruseno.stav === 'chyba' && kPreruseno.druh === 'docasna' && /neposlala celou odpověď/.test(kPreruseno.duvod) && sPreruseno.pozadavky.length === 1)
+    kPreruseno.stav === 'chyba' && kPreruseno.druh === 'docasna' && /neposlala celou odpověď \(spojení se přerušilo\)/.test(kPreruseno.duvod) && sPreruseno.pozadavky.length === 1)
 
   // POS akce: u 401/403 rozhoduje stav jako dřív (k pokladně nedošlo = odmítnuto), přerušené tělo to nesmí změnit na „nejasné".
   const TED = Date.UTC(2026, 9, 16, 10, 0)

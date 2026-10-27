@@ -514,12 +514,15 @@ export async function nacistKatalog(_predchozi: StavAkce, formData: FormData): P
   const bezReceptur = !r.bezReceptur
     ? ''
     : r.bezRecepturProc === 'tvar'
-      ? ` Odpovědi s recepturami pokrmů appka nerozuměla${r.bezRecepturPopis ? ` (${r.bezRecepturPopis})` : ''}, proto se načetly jen produkty — upozornění na suroviny pokrmu ve výdeji budou jen obecná.`
+      ? ` Odpovědi s recepturami pokrmů appka nerozuměla${r.bezRecepturPopis ? ` (${r.bezRecepturPopis})` : ''}, proto se katalog načetl bez receptur — upozornění na suroviny pokrmu ve výdeji budou jen obecná.`
       : ' Receptury pokrmů pokladna appce nevydala (chybí právo na jejich čtení) — upozornění na suroviny pokrmu ve výdeji budou jen obecná.'
   // Položky bez čitelného id nejde přiřadit ani odepsat — katalog bez nich nesmí vypadat jako celý,
   // a kdyby dřív id měly, uložený záznam se tím označí jako smazaný.
-  const bezId = r.vynechanoBezId
-    ? ` Bez čitelného id pokladna poslala ${pocet(r.vynechanoBezId, 'položku', 'položky', 'položek')}${r.vynechanoPopis ? ` (první: ${r.vynechanoPopis})` : ''} — appka je vynechala, přiřadit ani odepsat je nejde.`
-    : ''
+  const vynechano = r.vynechanoBezId ?? 0
+  const ji = vynechano === 1 ? 'ji' : 'je'
+  const bezId =
+    vynechano > 0
+      ? ` Bez čitelného id pokladna poslala ${pocet(vynechano, 'položku', 'položky', 'položek')}${r.vynechanoPopis ? ` (${vynechano === 1 ? '' : 'první: '}${r.vynechanoPopis})` : ''} — appka ${ji} vynechala, přiřadit ani odepsat ${ji} nejde.`
+      : ''
   return hotovo(p, `Z pokladny načteno: ${pocet(nacteno, 'položka', 'položky', 'položek')} katalogu (produkty i suroviny). Co v pokladně už není, je označené jako smazané.${bezReceptur}${bezId}`)
 }

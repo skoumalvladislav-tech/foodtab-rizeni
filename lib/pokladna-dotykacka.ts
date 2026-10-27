@@ -390,29 +390,44 @@ function druhZnaku(z: string): string {
 }
 
 /**
- * Kde `JSON.parse` nad tělem skončil: pozice z jeho hlášky (jen číslo —
- * hláška V8 nese i úryvek textu, ten do hlášky appky nesmí) a druh znaku
- * na ní. „Unexpected end of JSON input" = až na konci (uříznuté tělo).
+ * Vlastní text V8 s pozicí — „… in JSON at position N (line L column C)",
+ * u nadbytečného znaku za koncem „… after JSON at position N (…)" —
+ * ukotvený na konec hlášky.
  */
-function chybaJson(text: string): { pozice: number | null; znakNaPozici: string | null } {
-  const bezBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+const POZICE_V8 = / (?:in|after) JSON at position (\d+)(?: \(line \d+ column \d+\))?$/
+const KONEC_V8 = /^Unexpected end of JSON input$/
+
+/**
+ * Kde `JSON.parse` nad tělem skončil: pozice z hlášky V8 (jen číslo)
+ * a druh znaku na ní, v souřadnicích PŮVODNÍHO textu (i s BOM).
+ * `uriznuto` = čtení skončilo až za posledním znakem (uříznuté tělo) —
+ * ne „na posledním znaku", tam je nadbytečný znak za koncem JSON.
+ *
+ * Hlášky V8 bez pozice („Unexpected token …, "<úryvek těla>" is not valid
+ * JSON") nesou úryvek TĚLA — z nich se nebere nic: číslo nebo „end of JSON
+ * input" uvnitř úryvku by byla hodnota z odpovědi vydávaná za pozici.
+ */
+export function chybaJson(text: string): { pozice: number | null; znakNaPozici: string | null; uriznuto: boolean } {
+  const posun = text.charCodeAt(0) === 0xfeff ? 1 : 0
+  const bezBom = text.slice(posun)
   try {
     JSON.parse(bezBom.replace(/[\u0000-\u001f]/g, ' '))
-    return { pozice: null, znakNaPozici: null }
+    return { pozice: null, znakNaPozici: null, uriznuto: false }
   } catch (e) {
     const zprava = e instanceof Error ? e.message : ''
-    if (/end of JSON input/i.test(zprava)) return { pozice: bezBom.length, znakNaPozici: 'konec' }
-    const m = /position (\d+)/.exec(zprava)
-    if (!m) return { pozice: null, znakNaPozici: null }
+    if (KONEC_V8.test(zprava)) return { pozice: text.length, znakNaPozici: 'konec', uriznuto: true }
+    const m = POZICE_V8.exec(zprava)
+    if (!m) return { pozice: null, znakNaPozici: null, uriznuto: false }
     const pozice = Number(m[1])
-    return { pozice, znakNaPozici: druhZnaku(bezBom.charAt(pozice)) }
+    if (pozice >= bezBom.length) return { pozice: text.length, znakNaPozici: 'konec', uriznuto: true }
+    return { pozice: pozice + posun, znakNaPozici: druhZnaku(bezBom.charAt(pozice)), uriznuto: false }
   }
 }
 
-/** První viditelný znak těla pro hlášku — jeden znak nic neprozradí, a „<" znamená HTML místo JSON. */
-function prvniZnak(text: string): string {
+/** První viditelný znak těla pro hlášku — jeden znak nic neprozradí, a „<" znamená HTML místo JSON. `null` = jiný znak. */
+function prvniZnak(text: string): string | null {
   const z = text.trimStart().charAt(0)
-  return /^[\p{L}\p{N}<>{}[\]"]$/u.test(z) ? z : 'jiný znak'
+  return /^[\p{L}\p{N}<>{}[\]"]$/u.test(z) ? z : null
 }
 
 /**
@@ -441,7 +456,7 @@ async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit, casovyL
     const proc = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'vypršel čas' : 'spojení se přerušilo'
     return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka neposlala celou odpověď (${proc}) — appka to zkusí příště.` }
   }
-  if (!text) return { status: odpoved.status, telo: null, prazdne: true }
+  if (!text.trim()) return { status: odpoved.status, telo: null, prazdne: true }
   const telo = naparsovatJson(text)
   if (telo === undefined) return { status: odpoved.status, telo: null, nejson: { znaku: text.length, zacina: prvniZnak(text), ...chybaJson(text) } }
   return { status: odpoved.status, telo }
