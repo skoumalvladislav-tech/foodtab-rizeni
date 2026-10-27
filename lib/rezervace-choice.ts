@@ -253,7 +253,14 @@ export function otiskPokusu(nonce: string): string {
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>
 
 /** `pristup` = token/klíč neplatí; `limit` = 429; `docasna` = síť, 5xx; `data` = 4xx a nečekaná odpověď. */
-export type ChybaChoice = { stav: 'chyba'; druh: 'pristup' | 'limit' | 'docasna' | 'data'; duvod: string; http: number | null }
+export type ChybaChoice = {
+  stav: 'chyba'
+  druh: 'pristup' | 'limit' | 'docasna' | 'data'
+  duvod: string
+  http: number | null
+  /** Co Choice napsal do `message` (očištěné, nejvýš 200 znaků). Jen u odmítnutí 4xx s JSON tělem. */
+  zprava?: string
+}
 
 export type DotazSeznamu = {
   od: string
@@ -316,7 +323,7 @@ async function zavolat(fetchFn: FetchFn, url: string, init: RequestInit): Promis
     const zprava = data && typeof data === 'object' && typeof (data as { message?: unknown }).message === 'string'
       ? cistyText((data as { message: string }).message, 200)
       : ''
-    return { stav: 'chyba', druh: 'data', duvod: `Choice dotaz odmítl (${http})${zprava ? `: ${zprava}` : ''}.`, http }
+    return { stav: 'chyba', druh: 'data', duvod: `Choice dotaz odmítl (${http})${zprava ? `: ${zprava}` : ''}.`, http, ...(zprava ? { zprava } : {}) }
   }
   return { stav: 'ok', data }
 }
@@ -338,9 +345,21 @@ export function vytvoritChoice(fetchFn: FetchFn): ApiChoice {
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ code, clientId, secret }),
       })
-      // Text chyby od Choice se u výměny NEPŘEBÍRÁ — mohl by v něm být kód.
+      // Text chyby od Choice se ukáže, ale kód z něj zmizí („…“) — jinak by
+      // skončil v posledni_chyba u napojení. 26. 10. 2026 Choice odpověděl
+      // `400 Invalid credentials` a obecná věta „kód nepřijal“ schovala
+      // příčinu: při povolení byl zadán ChoiceQR token jiného podniku (token
+      // Bernard Baru u odkazu Černé Perly). Se správným tokenem prošlo.
       if (r.stav === 'chyba') {
-        if (r.druh === 'data') return { ...r, duvod: `Choice kód nepřijal (${r.http ?? '?'}). Kód platí krátce a jen jednou — připojte podnik znovu.` }
+        if (r.druh === 'data') {
+          const odChoice = r.zprava ? (code ? r.zprava.split(code).join('…') : r.zprava) : ''
+          const rada = /invalid credentials/i.test(odChoice)
+            ? 'Choice nepřijal povolení — nejčastěji byl při povolení zadán ChoiceQR token JINÉHO podniku (token od api@choiceqr.com platí pro jeden podnik), méně často nesedí CHOICE_CLIENT_SECRET ve Vercelu (po změně Redeploy). Připojte podnik znovu novým odkazem.'
+            : 'Kód platí krátce a jen jednou — připojte podnik znovu.'
+          const { zprava: _zprava, ...bezZpravy } = r
+          void _zprava
+          return { ...bezZpravy, duvod: `Choice výměnu kódu odmítl (${r.http ?? '?'}${odChoice ? `: ${odChoice}` : ''}). ${rada}` }
+        }
         if (r.druh === 'pristup') return { ...r, duvod: `Choice nepřijal klíč aplikace (${r.http}) — zkontrolujte CHOICE_CLIENT_ID a CHOICE_CLIENT_SECRET.` }
         return r
       }

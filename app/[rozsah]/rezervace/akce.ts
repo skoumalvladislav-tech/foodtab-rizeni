@@ -10,7 +10,7 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { zakladniAdresaAplikace } from '@/lib/integrace-adresa'
 import { podepsatText, rozsifrovat, sifrovaniJeNastavene, zasifrovat } from '@/lib/integrace-klice'
 import { KLIC_CHOICE, nastaveniChoice, odkazPripojeni, otiskPokusu, PLATNOST_POKUSU_S, rozebratPodnik, slozitPokus } from '@/lib/rezervace-choice'
-import { overitZnovu, synchronizovatChoice, zapsatVysledekTestu } from '@/lib/rezervace-choice-sync'
+import { KONEC_NACIST_TED_MS, overitZnovu, synchronizovatChoice, zapsatVysledekTestu } from '@/lib/rezervace-choice-sync'
 import { MAX_RADKU_IMPORTU, naparsovatCsvRezervaci } from '@/lib/rezervace-import'
 import { POSKYTOVATEL_PRIJMU, slozitKlicRezervaci } from '@/lib/rezervace-prijem-api'
 import { poskytovatelSouboru, systemyKPriprave } from '@/lib/rezervace-poskytovatele'
@@ -641,10 +641,11 @@ export async function overitChoice(formData: FormData): Promise<void> {
   if (!token) redirect(sParametrem(zpet, 'chyba', 'choice-bez-tokenu'))
 
   // Nejvýš jednou za minutu na připojení a ve frontě za firmu připojení
-  // jako tlačítko (nejvýš dva rozestupy) — obojí jedním voláním
-  // databáze: souběžné kliky téže firmy ani kliky mnoha firem nezaberou
-  // frontu ostatním a klik, který se do fronty nevejde, minutu nespálí
-  // (migrace 20261031100000, lib/rezervace-choice-sync.ts).
+  // jako tlačítko (nejvýš dva rozestupy, jednou zkusí znovu) — obojí
+  // jedním voláním databáze: souběžné kliky téže firmy ani kliky mnoha
+  // firem nezaberou frontu ostatním a klik, který se do fronty nevejde,
+  // minutu nespálí (migrace 20261031100000 a 20261102100000,
+  // lib/rezervace-choice-sync.ts).
   const test = await overitZnovu(token, v.tenantId, pripojeni.id, zacatek + 50_000)
   if (test === 'brzy') redirect(sParametrem(zpet, 'chyba', 'choice-overeno-chvili'))
   await zapsatVysledekTestu(supabase, pripojeni.id, test)
@@ -673,9 +674,11 @@ export async function nacistChoiceTed(formData: FormData): Promise<void> {
   if (pripojeni.stav !== 'pripojeno') redirect(sParametrem(zpet, 'chyba', 'choice-neovereno'))
 
   // Bez `uloha: true`: ve frontě se čeká jako tlačítko (nejvýš dva
-  // rozestupy), naplánovaná úloha má přednost. Běh bez jediného dotazu
+  // rozestupy, jednou znovu); naplánovaná úloha má vlastní vstup do
+  // fronty a tlačítko jí dotaz nevezme. Čas na tři dotazy i vedle
+  // běžícího načítání (KONEC_NACIST_TED_MS). Běh bez jediného dotazu
   // připojení v pořadí úlohy neodsune (synchronizovatChoice).
-  const vysledek = await synchronizovatChoice(pripojeni.id, { konecMs: zacatek + 50_000, nejmeneOdMinulehoMs: 60_000 })
+  const vysledek = await synchronizovatChoice(pripojeni.id, { konecMs: zacatek + KONEC_NACIST_TED_MS, nejmeneOdMinulehoMs: 60_000 })
 
   revalidatePath(`/${rozsah}/rezervace`, 'layout')
   // Bez jediného dotazu (fronta firmy byla zabraná jiným během, třeba
