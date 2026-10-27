@@ -88,15 +88,17 @@ import { pocet } from './sklonovani.ts'
 /**
  * Jedno volání API: stav a rozparsované tělo (null, když přišlo prázdné
  * nebo to není JSON), nebo chyba sítě. `prazdne` = tělo nepřišlo vůbec
- * (na rozdíl od JSON `null`). `nejson` = tělo přišlo, ale JSON to není:
- * délka, první znak a kde `JSON.parse` skončil — pozice a DRUH znaku,
- * ne znak sám (do hlášky jde struktura, text odpovědi ne).
+ * nebo jen bílé znaky (na rozdíl od JSON `null`). `nejson` = tělo přišlo,
+ * ale JSON to není: délka, první znak (`null` = jiný než písmeno, číslice
+ * nebo závorka), kde `JSON.parse` skončil — pozice a DRUH znaku, ne znak
+ * sám — a `uriznuto` = čtení skončilo až na konci těla (do hlášky jde
+ * struktura, text odpovědi ne).
  */
 export type OdpovedDotykacky = {
   status: number
   telo: unknown
   prazdne?: true
-  nejson?: { znaku: number; zacina: string; pozice: number | null; znakNaPozici: string | null }
+  nejson?: { znaku: number; zacina: string | null; pozice: number | null; znakNaPozici: string | null; uriznuto: boolean }
 }
 
 /**
@@ -239,16 +241,40 @@ function chybaTvaru(co: string, popis?: string): ChybaPos {
   return { stav: 'chyba', druh: 'jina', duvod: `${co} z Dotykačky má neočekávaný tvar${popis ? ` (${popis})` : ''}.` }
 }
 
-/** Názvy klíčů objektu do hlášky (jen názvy, žádné hodnoty), nejvýš 12, každý nejvýš 40 znaků. */
+/** Název klíče, který vypadá jako název pole (ne jako hodnota — název produktu, EAN, heslo…). */
+const NAZEV_POLE = /^[A-Za-z_$][A-Za-z0-9_$]{0,39}$/
+
+/**
+ * Názvy klíčů objektu do hlášky: jen ty ve tvaru názvu pole (nejvýš 12),
+ * ostatní jen počtem. Kdyby odpověď byla mapa podle názvů nebo kódů
+ * (`{"Svíčková": {…}}`), klíče by byly hodnoty — a ty do hlášky nesmí.
+ */
 function klice(o: object): string {
-  const k = Object.keys(o)
-  return k.length === 0 ? 'žádné' : k.slice(0, 12).map((x) => x.slice(0, 40)).join(', ') + (k.length > 12 ? ` … (+${k.length - 12})` : '')
+  const vsechny = Object.keys(o)
+  if (vsechny.length === 0) return 'žádné'
+  const nazvy = vsechny.filter((x) => NAZEV_POLE.test(x))
+  const jine = vsechny.length - nazvy.length
+  const vypsane = nazvy.slice(0, 12).join(', ') + (nazvy.length > 12 ? ` … (+${nazvy.length - 12})` : '')
+  const nevypsane = jine > 0 ? `${pocet(jine, 'klíč', 'klíče', 'klíčů')} jiného tvaru (nevypsáno)` : ''
+  return [vypsane, nevypsane].filter(Boolean).join('; ')
 }
 
+/** Typ hodnoty z JSON česky. */
 function typHodnoty(h: unknown): string {
   if (h === null) return 'null'
   if (Array.isArray(h)) return 'seznam'
-  return typeof h
+  switch (typeof h) {
+    case 'object':
+      return 'objekt'
+    case 'string':
+      return 'text'
+    case 'number':
+      return 'číslo'
+    case 'boolean':
+      return 'logická hodnota'
+    default:
+      return 'jiný typ'
+  }
 }
 
 /**
@@ -261,7 +287,7 @@ function typHodnoty(h: unknown): string {
 export function popisId(id: unknown): string {
   if (id === undefined) return 'chybí'
   if (id === null) return 'null'
-  if (typeof id === 'number') return !Number.isInteger(id) ? 'desetinné číslo' : id < 0 ? 'záporné číslo' : 'číslo nad 2^53'
+  if (typeof id === 'number') return !Number.isFinite(id) ? 'číslo mimo rozsah' : !Number.isInteger(id) ? 'desetinné číslo' : id < 0 ? 'záporné číslo' : 'číslo nad 2^53'
   if (typeof id === 'string') {
     const t = id.trim()
     if (t === '') return 'prázdný text'
@@ -281,13 +307,12 @@ export function popisId(id: unknown): string {
 export function popisTvaru(odpoved: OdpovedDotykacky): string {
   const n = odpoved.nejson
   if (n) {
-    const kde =
-      n.pozice === null
+    const kde = n.uriznuto
+      ? ', chyba až na konci — odpověď je nejspíš uříznutá'
+      : n.pozice === null
         ? ''
-        : n.pozice >= n.znaku - 1
-          ? ', chyba až na konci — odpověď je nejspíš uříznutá'
-          : `, chyba na znaku ${n.pozice + 1} (${n.znakNaPozici ?? 'neznámý'})`
-    return `odpověď není JSON: ${pocet(n.znaku, 'znak', 'znaky', 'znaků')}, začíná „${n.zacina}“${kde}`
+        : `, chyba na znaku ${n.pozice + 1} (${n.znakNaPozici ?? 'neznámý'})`
+    return `odpověď není JSON: ${pocet(n.znaku, 'znak', 'znaky', 'znaků')}, začíná ${n.zacina === null ? 'jiným znakem' : `„${n.zacina}“`}${kde}`
   }
   const telo = odpoved.telo
   if (odpoved.prazdne) return 'odpověď přišla prázdná'
@@ -495,17 +520,28 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
 
   type KatalogOk = { stav: 'ok'; produkty: ProduktPos[]; bezId: number; bezIdPopis: string | null }
   /**
-   * Odpověď, které appka nerozuměla. `strana` = kde; `necitelne` = tělo
-   * vůbec nebylo JSON (nebo nepřišlo) — to bývá přechodné (brána, uříznutí),
-   * na rozdíl od JSON, kterému appka nerozumí.
+   * Odpověď, které appka nerozuměla. `necitelne` = tělo nebylo JSON (nebo
+   * nepřišlo) ani při zopakovaném dotazu; jinak platný JSON, kterému appka
+   * nerozumí. Obojí se opakuje pokaždé stejně — to už není výpadek.
    */
-  type Tvar = { tvar: string; strana: number; necitelne: boolean }
+  type Tvar = { tvar: string; necitelne: boolean }
+
+  /** Tělo nebylo JSON nebo nepřišlo vůbec (ne JSON `null` — to je platná odpověď nečekaného tvaru). */
+  const jeNecitelne = (o: OdpovedDotykacky) => o.telo === null && (o.prazdne === true || o.nejson !== undefined)
 
   /**
    * Celý katalog po stránkách. S `sRecepturami` se ptá i na receptury
    * (`include=ingredients`); 403 pak vrací jako `'bez_prava'` a odpověď,
-   * které appka nerozumí, jako `Tvar` — `katalog()` rozhodne, jestli začít
-   * znovu bez receptur.
+   * které appka nerozumí, jako `Tvar` — `katalog()` pak začne znovu bez
+   * receptur.
+   *
+   * Nečitelná stránka (není JSON, nepřišla) se JEDNOU zopakuje: bývá
+   * přechodná (brána, uříznutí) a bez opakování by jednorázový výpadek
+   * buď vymazal uložené receptury (katalog bez nich), nebo — kdyby se na
+   * další stránce jen hlásil „zkuste znovu" — trvalá chyba, kterou dělá jen
+   * `include=ingredients`, by člověka posílala zkoušet dokola (kontrola
+   * kola 2 PR #164). O tom, jestli zkusit katalog bez receptur, tak
+   * rozhoduje druh chyby, ne číslo stránky.
    */
   async function katalogPoStrankach(sRecepturami: boolean): Promise<KatalogOk | ChybaPos | 'bez_prava' | Tvar> {
     const produkty: ProduktPos[] = []
@@ -516,13 +552,15 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
     // po VŠECH stránkách, ne po jedné — viz `naparsovatProdukty`).
     const konec = (): KatalogOk | Tvar =>
       produkty.length === 0 && bezId > 0
-        ? { tvar: `${sRecepturami ? 's recepturami: ' : ''}žádná z ${pocet(bezId, 'položky', 'položek', 'položek')} katalogu nemá čitelné id — ${bezIdPopis}`, strana: 1, necitelne: false }
+        ? { tvar: `${sRecepturami ? 's recepturami: ' : ''}žádná z ${pocet(bezId, 'položky', 'položek', 'položek')} katalogu nemá čitelné id — ${bezIdPopis}`, necitelne: false }
         : { stav: 'ok', produkty, bezId, bezIdPopis }
 
     for (let strana = 1; strana <= MAX_STRAN_KATALOGU; strana++) {
       const parametry = new URLSearchParams({ page: String(strana), limit: String(LIMIT_STRANKY) })
       if (sRecepturami) parametry.set('include', 'ingredients')
-      const odpoved = await k.pozadavek(`${k.api}/clouds/${k.cloudId}/products?${parametry}`, { headers: k.hlavicky })
+      const url = `${k.api}/clouds/${k.cloudId}/products?${parametry}`
+      let odpoved = await k.pozadavek(url, { headers: k.hlavicky })
+      if (!jeChyba(odpoved) && odpoved.status === 200 && jeNecitelne(odpoved)) odpoved = await k.pozadavek(url, { headers: k.hlavicky })
       if (jeChyba(odpoved)) return odpoved
       // „Note that the client must have the proper permissions to read the included entity … 403" (entity/product).
       // 403 kvůli tokenu, cloudu nebo licenci (common-error-responses) neplatí jen pro receptury — ta je chyba hned.
@@ -531,9 +569,12 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
       if (odpoved.status === 404) return konec()
       if (odpoved.status !== 200) return k.chybaZeStavu(odpoved.status, 'čtení katalogu produktů', odpoved.telo)
 
-      if (odpoved.telo === null) return { tvar: `${popisStrany(strana)}: ${popisTvaru(odpoved)}`, strana, necitelne: odpoved.prazdne === true || odpoved.nejson !== undefined }
+      if (odpoved.telo === null) {
+        const necitelne = jeNecitelne(odpoved)
+        return { tvar: `${popisStrany(strana)}: ${popisTvaru(odpoved)}${necitelne ? ' (i napodruhé)' : ''}`, necitelne }
+      }
       const cast = naparsovatProdukty(odpoved.telo)
-      if ('chyba' in cast) return { tvar: `${popisStrany(strana)}: ${cast.chyba}`, strana, necitelne: false }
+      if ('chyba' in cast) return { tvar: `${popisStrany(strana)}: ${cast.chyba}`, necitelne: false }
       // Bez include receptura neznámá, i kdyby odpověď nějaké `ingredients` nesla.
       produkty.push(...(sRecepturami ? cast.produkty : cast.produkty.map((p) => ({ ...p, maRecepturu: null, suroviny: null }))))
       bezId += cast.bezId
@@ -569,22 +610,19 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
       const s = await katalogPoStrankach(true)
       if (s !== 'bez_prava' && !('tvar' in s)) return s.stav === 'ok' ? vysledek(s) : s
 
-      if (s !== 'bez_prava' && s.strana > 1) {
-        // První stránka S recepturami appka přečetla — receptury jí rozumí. Nečitelná další
-        // stránka je tedy jiná potíž (přechodná odpověď brány, uříznutí) a znovu bez receptur
-        // by jen zbytečně vymazala uložené receptury. Nic se neuloží, zkusí se znovu.
-        return s.necitelne
-          ? { stav: 'chyba', druh: 'docasna', duvod: `Katalog z Dotykačky nepřišel celý (${s.tvar}). Nic se neuložilo — zkuste ho načíst znovu.` }
-          : chybaTvaru('Katalog produktů', s.tvar)
-      }
-
-      // 403 jen kvůli recepturám, nebo už PRVNÍ stránce s recepturami appka nerozumí:
-      // receptury (`include=ingredients`) jsou jediná část dotazu, kterou appka v Dotykačce
-      // nemá ověřenou ničím jiným — celý katalog znovu bez nich.
+      // 403 jen kvůli recepturám, nebo odpovědi s recepturami appka nerozumí ani napodruhé
+      // (na kterékoli stránce): receptury (`include=ingredients`) jsou jediná část dotazu,
+      // kterou appka v Dotykačce nemá ověřenou ničím jiným — celý katalog znovu bez nich.
       const tvarSRecepturami = s === 'bez_prava' ? null : s.tvar
       const bez = await katalogPoStrankach(false)
       if (bez === 'bez_prava') return k.chybaZeStavu(403, 'čtení katalogu produktů')
-      if ('tvar' in bez) return chybaTvaru('Katalog produktů', tvarSRecepturami ? `${tvarSRecepturami}; znovu bez receptur — ${bez.tvar}` : bez.tvar)
+      if ('tvar' in bez) {
+        const popis = tvarSRecepturami ? `${tvarSRecepturami}; znovu bez receptur — ${bez.tvar}` : bez.tvar
+        // Nečitelné i bez receptur, pokaždé napodruhé: spíš výpadek na straně Dotykačky než tvar.
+        return bez.necitelne
+          ? { stav: 'chyba', druh: 'docasna', duvod: `Katalog z Dotykačky nepřišel celý (${popis}). Nic se neuložilo — zkuste ho načíst znovu později.` }
+          : chybaTvaru('Katalog produktů', popis)
+      }
       if (bez.stav !== 'ok') return bez
       return vysledek(bez, tvarSRecepturami ? { proc: 'tvar', popis: tvarSRecepturami } : { proc: 'pravo' })
     },

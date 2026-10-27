@@ -1157,9 +1157,19 @@ console.log('\n-- výdej do pokladny přes orchestrátor --')
   })
   const vk1 = await spustit(akcePos.nacistKatalog, KLID, formular({}))
   ok('načtení katalogu bez receptur („tvar"): hláška řekne, čemu appka nerozuměla, a že suroviny pokrmu budou jen obecné',
-    vk1.stav === 'ok' && vk1.text.includes('Odpovědi s recepturami pokrmů appka nerozuměla (stránka 1 s recepturami: odpověď nemá seznam „data“ (klíče: vysledek))') && vk1.text.includes('jen obecná'))
+    vk1.stav === 'ok' && vk1.text.includes('Odpovědi s recepturami pokrmů appka nerozuměla (stránka 1 s recepturami: odpověď nemá seznam „data“ (klíče: vysledek)), proto se katalog načetl bez receptur') && vk1.text.includes('jen obecná'))
   ok('… a kolik položek přišlo bez čitelného id i s popisem první („Bez čitelného id pokladna poslala 2 položky (první: id: null; …) — appka je vynechala")',
-    vk1.text.includes('Bez čitelného id pokladna poslala 2 položky (první: id: null; klíče položky: name, id) — appka je vynechala'))
+    vk1.text.includes('Bez čitelného id pokladna poslala 2 položky (první: id: null; klíče položky: name, id) — appka je vynechala, přiřadit ani odepsat je nejde.'))
+  // Skloňování podle počtu: 1 položku … ji (bez „první:"), 5 položek … je.
+  for (const [pocetVyn, cekam] of [
+    [1, 'Bez čitelného id pokladna poslala 1 položku (id: záporné číslo jako text (4 číslice); klíče položky: id, name) — appka ji vynechala, přiřadit ani odepsat ji nejde.'],
+    [5, 'Bez čitelného id pokladna poslala 5 položek (první: id: záporné číslo jako text (4 číslice); klíče položky: id, name) — appka je vynechala, přiřadit ani odepsat je nejde.'],
+  ]) {
+    const kv = svet()
+    kv.relace.relace.katalog = async () => ({ stav: 'ok', produkty: [produktKat], vynechanoBezId: pocetVyn, vynechanoPopis: 'id: záporné číslo jako text (4 číslice); klíče položky: id, name' })
+    const vv = await spustit(akcePos.nacistKatalog, KLID, formular({}))
+    ok(`hláška při ${pocetVyn} vynechaných: správný tvar („${pocetVyn === 1 ? '1 položku … ji' : '5 položek … je'}")`, vv.stav === 'ok' && vv.text.includes(cekam))
+  }
   const katPravo = svet()
   katPravo.relace.relace.katalog = async () => ({ stav: 'ok', produkty: [produktKat], bezReceptur: true, bezRecepturProc: 'pravo' })
   const vk2 = await spustit(akcePos.nacistKatalog, KLID, formular({}))
