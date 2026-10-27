@@ -43,6 +43,7 @@ export function SeznamHostu({ hoste, den, rozsah }: { hoste: HosteDnu; den: stri
     );
   }
   const vic = hoste.pobocky.length > 1;
+  const celkem = celkemDne(hoste, den);
   return (
     <>
       <ul className="ds-hoste-seznam">
@@ -57,7 +58,7 @@ export function SeznamHostu({ hoste, den, rozsah }: { hoste: HosteDnu; den: stri
           );
         })}
       </ul>
-      {vic ? <p className="ds-hoste-celkem">Celkem: {souhrnText(celkemDne(hoste, den))}</p> : null}
+      {vic && celkem.rezervaci + celkem.akci > 0 ? <p className="ds-hoste-celkem">Celkem: {souhrnText(celkem)}</p> : null}
       <p className="ds-hoste-pata">
         Bez zrušených a nedorazivších. <Link href={`/${rozsah}/rezervace/den/${den}`}>Rezervace dne →</Link>
       </p>
@@ -106,6 +107,26 @@ export function DenSHosty({
     return () => document.removeEventListener("pointerdown", mimo);
   }, [pripnuto]);
 
+  /*
+    Esc zavře otevřené okénko odkudkoli — i to otevřené jen najetím myší,
+    kdy zaměření zůstalo jinde a klávesa by do záhlaví nedošla. Bylo-li
+    zaměření uvnitř okénka (odkaz), vrátí se na spouštěč.
+  */
+  useEffect(() => {
+    if (!otevreno) return;
+    const klavesa = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setSkryto(true);
+      setPripnuto(false);
+      // I najetí: zmizí-li okénko pod myší, prohlížeč odjetí z něj neohlásí
+      // a „najeto“ by zůstalo viset. Nové najetí ho zase nastaví.
+      setNajeto(false);
+      if (obal.current?.contains(document.activeElement)) spoustec.current?.focus();
+    };
+    document.addEventListener("keydown", klavesa);
+    return () => document.removeEventListener("keydown", klavesa);
+  }, [otevreno]);
+
   if (!hoste) return <div {...atributy}>{children}</div>;
 
   const celkem = celkemDne(hoste, den);
@@ -114,8 +135,11 @@ export function DenSHosty({
       {...atributy}
       ref={obal}
       data-hoste={den}
+      // Nové najetí nebo zaměření zvenku je nový úmysl — zavření Esc už neplatí.
       onPointerEnter={(e) => {
-        if (e.pointerType === "mouse") setNajeto(true);
+        if (e.pointerType !== "mouse") return;
+        setNajeto(true);
+        setSkryto(false);
       }}
       onPointerLeave={(e) => {
         if (e.pointerType !== "mouse") return;
@@ -124,19 +148,15 @@ export function DenSHosty({
       }}
       onFocus={(e) => {
         // Jen klávesnice. Zaměření klepnutím řeší onClick, jinak by se okénko otevřelo a hned zavřelo.
-        if (e.target instanceof HTMLElement && e.target.matches(":focus-visible")) setZamereno(true);
+        if (!(e.target instanceof HTMLElement) || !e.target.matches(":focus-visible")) return;
+        setZamereno(true);
+        // Esc vrací zaměření z odkazu na spouštěč — to je uvnitř a okénko má zůstat zavřené.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSkryto(false);
       }}
       onBlur={(e) => {
         if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
         setZamereno(false);
         setSkryto(false);
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape" || !otevreno) return;
-        e.stopPropagation();
-        setSkryto(true);
-        setPripnuto(false);
-        spoustec.current?.focus();
       }}
     >
       {children}
