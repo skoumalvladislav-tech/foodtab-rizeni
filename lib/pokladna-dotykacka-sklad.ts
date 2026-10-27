@@ -83,13 +83,21 @@
  */
 
 import type { ChybaPos, PolozkaUctuPos, ProduktPos, RelacePos, SurovinaPos, UcetPos, VydejPos } from './pos-provider-contract.ts'
+import { pocet } from './sklonovani.ts'
 
 /**
  * Jedno volání API: stav a rozparsované tělo (null, když přišlo prázdné
- * nebo to není JSON), nebo chyba sítě. `nejson` = tělo přišlo, ale JSON
- * to není: délka a první znak (do hlášky, text odpovědi ne).
+ * nebo to není JSON), nebo chyba sítě. `prazdne` = tělo nepřišlo vůbec
+ * (na rozdíl od JSON `null`). `nejson` = tělo přišlo, ale JSON to není:
+ * délka, první znak a kde `JSON.parse` skončil — pozice a DRUH znaku,
+ * ne znak sám (do hlášky jde struktura, text odpovědi ne).
  */
-export type OdpovedDotykacky = { status: number; telo: unknown; nejson?: { znaku: number; zacina: string } }
+export type OdpovedDotykacky = {
+  status: number
+  telo: unknown
+  prazdne?: true
+  nejson?: { znaku: number; zacina: string; pozice: number | null; znakNaPozici: string | null }
+}
 
 /**
  * Otevřená relace Dotykačky pro čtení a zápis mimo tržby. Staví ji
@@ -231,10 +239,10 @@ function chybaTvaru(co: string, popis?: string): ChybaPos {
   return { stav: 'chyba', druh: 'jina', duvod: `${co} z Dotykačky má neočekávaný tvar${popis ? ` (${popis})` : ''}.` }
 }
 
-/** Názvy klíčů objektu do hlášky (jen názvy, žádné hodnoty), nejvýš 12. */
+/** Názvy klíčů objektu do hlášky (jen názvy, žádné hodnoty), nejvýš 12, každý nejvýš 40 znaků. */
 function klice(o: object): string {
   const k = Object.keys(o)
-  return k.length === 0 ? 'žádné' : k.slice(0, 12).join(', ') + (k.length > 12 ? ` … (+${k.length - 12})` : '')
+  return k.length === 0 ? 'žádné' : k.slice(0, 12).map((x) => x.slice(0, 40)).join(', ') + (k.length > 12 ? ` … (+${k.length - 12})` : '')
 }
 
 function typHodnoty(h: unknown): string {
@@ -245,31 +253,52 @@ function typHodnoty(h: unknown): string {
 
 /**
  * Proč appka id nepřečetla — do hlášky jen druh a délka, ne hodnota:
- * „chybí", „null", „číslo s 19 číslicemi (nad 2^53)", „text s 5 znaky, ne číslice"…
+ * „chybí", „null", „číslo nad 2^53", „záporné číslo jako text (19 číslic)",
+ * „text s 5 znaky, ne jen číslice"… (`idText` bere jen nezáporné celé číslo
+ * nejvýš o 20 číslicích; `long` je se znaménkem, záporné id ale dokumentace
+ * nikde neukazuje, takže se dál nebere — jen se pravdivě popíše.)
  */
-function popisId(id: unknown): string {
+export function popisId(id: unknown): string {
   if (id === undefined) return 'chybí'
   if (id === null) return 'null'
   if (typeof id === 'number') return !Number.isInteger(id) ? 'desetinné číslo' : id < 0 ? 'záporné číslo' : 'číslo nad 2^53'
-  if (typeof id === 'string') return `text s ${id.length} znaky${/^\s*\d+\s*$/.test(id) ? ' (číslice, víc než 20)' : ', ne jen číslice'}`
+  if (typeof id === 'string') {
+    const t = id.trim()
+    if (t === '') return 'prázdný text'
+    if (/^-\d+$/.test(t)) return `záporné číslo jako text (${pocet(t.length - 1, 'číslice', 'číslice', 'číslic')})`
+    if (/^\d+$/.test(t)) return `číslo jako text, ${pocet(t.length, 'číslice', 'číslice', 'číslic')} (víc než 20)`
+    return `text s ${pocet(id.length, 'znakem', 'znaky', 'znaky')}, ne jen číslice`
+  }
   return typHodnoty(id)
 }
 
 /**
  * Tvar odpovědi, které appka nerozuměla, slovy — jen struktura (typy,
- * názvy klíčů, délky), žádné hodnoty. Bez něj hláška „neočekávaný tvar"
- * nedá nic, podle čeho by šlo appku opravit (26.–27. 10. 2026: katalog
- * Perly takhle padal a nebylo vidět proč).
+ * názvy klíčů, délky, pozice chyby), žádné hodnoty. Bez něj hláška
+ * „neočekávaný tvar" nedá nic, podle čeho by šlo appku opravit
+ * (26.–27. 10. 2026: katalog Perly takhle padal a nebylo vidět proč).
  */
 export function popisTvaru(odpoved: OdpovedDotykacky): string {
-  if (odpoved.nejson) return `odpověď není JSON: ${odpoved.nejson.znaku} znaků, začíná „${odpoved.nejson.zacina}“`
+  const n = odpoved.nejson
+  if (n) {
+    const kde =
+      n.pozice === null
+        ? ''
+        : n.pozice >= n.znaku - 1
+          ? ', chyba až na konci — odpověď je nejspíš uříznutá'
+          : `, chyba na znaku ${n.pozice + 1} (${n.znakNaPozici ?? 'neznámý'})`
+    return `odpověď není JSON: ${pocet(n.znaku, 'znak', 'znaky', 'znaků')}, začíná „${n.zacina}“${kde}`
+  }
   const telo = odpoved.telo
-  if (telo === null) return 'odpověď přišla prázdná'
+  if (odpoved.prazdne) return 'odpověď přišla prázdná'
+  if (telo === null) return 'odpověď je JSON null'
   if (typeof telo !== 'object') return `odpověď je ${typHodnoty(telo)}, ne objekt`
-  if (Array.isArray(telo)) return `odpověď je seznam s ${telo.length} položkami`
+  if (Array.isArray(telo)) return `odpověď je seznam s ${pocet(telo.length, 'položkou', 'položkami', 'položkami')}`
   const data = (telo as { data?: unknown }).data
   if (data === undefined) return `odpověď nemá seznam „data“ (klíče: ${klice(telo)})`
-  return Array.isArray(data) ? `„data“ má ${data.length} položek` : `„data“ je ${typHodnoty(data)}, ne seznam (klíče odpovědi: ${klice(telo)})`
+  if (Array.isArray(data)) return `„data“ má ${pocet(data.length, 'položku', 'položky', 'položek')}`
+  const uvnitr = data !== null && typeof data === 'object' ? `klíče v „data“: ${klice(data)}; ` : ''
+  return `„data“ je ${typHodnoty(data)}, ne seznam (${uvnitr}klíče odpovědi: ${klice(telo)})`
 }
 
 /* ------------------------------------------------------------------ */
@@ -335,23 +364,29 @@ export function naparsovatProdukt(p: unknown): ProduktPos | null {
   }
 }
 
+/** Proč první vynechaná položka katalogu neprošla: druh id a názvy klíčů — žádné hodnoty. */
+function popisBezId(p: Record<string, unknown>): string {
+  return `id: ${popisId(p.id)}; klíče položky: ${klice(p)}`
+}
+
 /**
  * Stránka katalogu → produkty, nebo popis, proč jí appka nerozumí.
  *
  * Produkt BEZ čitelného id (entity/product: `id` je `long?` — smí být
- * null) se přeskočí a započítá do `bezId`: bez id ho nejde přiřadit
- * ani odepsat, a kvůli jednomu takovému dřív padal celý katalog
- * (Perla 26. 10. 2026). Volající počet ukáže, takže katalog nevypadá
- * jako celý. Když id nemá ŽÁDNÝ produkt stránky nebo položka není
- * objekt, appka tvaru nerozumí vůbec → chyba s popisem (jen typy,
- * názvy klíčů a délky, žádné hodnoty).
+ * null) se přeskočí a započítá do `bezId` (a první z nich se popíše
+ * v `bezIdPopis`): bez id ho nejde přiřadit ani odepsat, a kvůli jednomu
+ * takovému dřív padal celý katalog (Perla 26. 10. 2026). Jestli id nemá
+ * VŮBEC ŽÁDNÝ produkt, rozhoduje volající až po všech stránkách — produkt
+ * s null id sám na krátké poslední stránce nesmí shodit katalog, který
+ * by mezi ostatními jen přeskočil. Položka, která není objekt = appka
+ * tvaru nerozumí → chyba s popisem (jen typy, žádné hodnoty).
  */
-export function naparsovatProdukty(telo: unknown): { produkty: ProduktPos[]; bezId: number } | { chyba: string } {
+export function naparsovatProdukty(telo: unknown): { produkty: ProduktPos[]; bezId: number; bezIdPopis: string | null } | { chyba: string } {
   const data = polozkyStranky(telo)
   if (!data) return { chyba: popisTvaru({ status: 200, telo }) }
   const produkty: ProduktPos[] = []
   let bezId = 0
-  let prvniBezId: Record<string, unknown> | null = null
+  let bezIdPopis: string | null = null
   for (const [i, p] of data.entries()) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return { chyba: `položka ${i + 1} z ${data.length} je ${typHodnoty(p)}, ne objekt` }
     const produkt = naparsovatProdukt(p)
@@ -359,13 +394,10 @@ export function naparsovatProdukty(telo: unknown): { produkty: ProduktPos[]; bez
       produkty.push(produkt)
     } else {
       bezId++
-      prvniBezId ??= p as Record<string, unknown>
+      bezIdPopis ??= popisBezId(p as Record<string, unknown>)
     }
   }
-  if (data.length > 0 && produkty.length === 0 && prvniBezId) {
-    return { chyba: `žádná z ${data.length} položek nemá čitelné id — id: ${popisId(prvniBezId.id)}; klíče položky: ${klice(prvniBezId)}` }
-  }
-  return { produkty, bezId }
+  return { produkty, bezId, bezIdPopis }
 }
 
 function naparsovatPolozku(i: unknown): PolozkaUctuPos | null {
@@ -461,17 +493,32 @@ function provozovnaUctu(o: unknown): string | null {
 export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'katalog' | 'ucty' | 'ucetPodleKlice'>> {
   const zakladUctu = `${k.api}/clouds/${k.cloudId}/orders`
 
-  type KatalogOk = { stav: 'ok'; produkty: ProduktPos[]; bezId: number }
+  type KatalogOk = { stav: 'ok'; produkty: ProduktPos[]; bezId: number; bezIdPopis: string | null }
+  /**
+   * Odpověď, které appka nerozuměla. `strana` = kde; `necitelne` = tělo
+   * vůbec nebylo JSON (nebo nepřišlo) — to bývá přechodné (brána, uříznutí),
+   * na rozdíl od JSON, kterému appka nerozumí.
+   */
+  type Tvar = { tvar: string; strana: number; necitelne: boolean }
 
   /**
    * Celý katalog po stránkách. S `sRecepturami` se ptá i na receptury
    * (`include=ingredients`); 403 pak vrací jako `'bez_prava'` a odpověď,
-   * které appka nerozumí, jako `{ tvar }` — `katalog()` pak může začít
+   * které appka nerozumí, jako `Tvar` — `katalog()` rozhodne, jestli začít
    * znovu bez receptur.
    */
-  async function katalogPoStrankach(sRecepturami: boolean): Promise<KatalogOk | ChybaPos | 'bez_prava' | { tvar: string }> {
+  async function katalogPoStrankach(sRecepturami: boolean): Promise<KatalogOk | ChybaPos | 'bez_prava' | Tvar> {
     const produkty: ProduktPos[] = []
     let bezId = 0
+    let bezIdPopis: string | null = null
+    const popisStrany = (strana: number) => `stránka ${strana}${sRecepturami ? ' s recepturami' : ''}`
+    // Konec katalogu. Ani jeden produkt s id = appka tvaru nerozumí (rozhoduje se až
+    // po VŠECH stránkách, ne po jedné — viz `naparsovatProdukty`).
+    const konec = (): KatalogOk | Tvar =>
+      produkty.length === 0 && bezId > 0
+        ? { tvar: `${sRecepturami ? 's recepturami: ' : ''}žádná z ${pocet(bezId, 'položky', 'položek', 'položek')} katalogu nemá čitelné id — ${bezIdPopis}`, strana: 1, necitelne: false }
+        : { stav: 'ok', produkty, bezId, bezIdPopis }
+
     for (let strana = 1; strana <= MAX_STRAN_KATALOGU; strana++) {
       const parametry = new URLSearchParams({ page: String(strana), limit: String(LIMIT_STRANKY) })
       if (sRecepturami) parametry.set('include', 'ingredients')
@@ -481,20 +528,22 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
       // 403 kvůli tokenu, cloudu nebo licenci (common-error-responses) neplatí jen pro receptury — ta je chyba hned.
       if (sRecepturami && odpoved.status === 403 && !NE_KVULI_RECEPTURAM.has(duvod403(odpoved.telo))) return 'bez_prava'
       // „lastPage … pro prázdná data API zatím vrací 404" (api-reference/general/paging)
-      if (odpoved.status === 404) return { stav: 'ok', produkty, bezId }
+      if (odpoved.status === 404) return konec()
       if (odpoved.status !== 200) return k.chybaZeStavu(odpoved.status, 'čtení katalogu produktů', odpoved.telo)
 
-      const cast = odpoved.telo === null ? { chyba: popisTvaru(odpoved) } : naparsovatProdukty(odpoved.telo)
-      if ('chyba' in cast) return { tvar: `stránka ${strana}${sRecepturami ? ' s recepturami' : ''}: ${cast.chyba}` }
+      if (odpoved.telo === null) return { tvar: `${popisStrany(strana)}: ${popisTvaru(odpoved)}`, strana, necitelne: odpoved.prazdne === true || odpoved.nejson !== undefined }
+      const cast = naparsovatProdukty(odpoved.telo)
+      if ('chyba' in cast) return { tvar: `${popisStrany(strana)}: ${cast.chyba}`, strana, necitelne: false }
       // Bez include receptura neznámá, i kdyby odpověď nějaké `ingredients` nesla.
       produkty.push(...(sRecepturami ? cast.produkty : cast.produkty.map((p) => ({ ...p, maRecepturu: null, suroviny: null }))))
       bezId += cast.bezId
+      bezIdPopis ??= cast.bezIdPopis
 
       // Kratší stránka je poslední (počítají se i přeskočené položky bez id — stránka byla plná).
       // U produktů API počty zná, takže výslovné `nextPage: null` je taky konec.
       const telo = odpoved.telo as { nextPage?: unknown } | null
       const bezDalsi = telo !== null && typeof telo === 'object' && !Array.isArray(telo) && 'nextPage' in telo && telo.nextPage === null
-      if (cast.produkty.length + cast.bezId < LIMIT_STRANKY || bezDalsi) return { stav: 'ok', produkty, bezId }
+      if (cast.produkty.length + cast.bezId < LIMIT_STRANKY || bezDalsi) return konec()
     }
     return {
       stav: 'chyba',
@@ -503,28 +552,41 @@ export function cteniDotykacky(k: KontextDotykacky): Required<Pick<RelacePos, 'k
     }
   }
 
-  function vysledek(r: KatalogOk, bezReceptur?: 'pravo' | 'tvar') {
+  function vysledek(r: KatalogOk, bez?: { proc: 'pravo' } | { proc: 'tvar'; popis: string }) {
     return {
       stav: 'ok' as const,
       produkty: r.produkty,
-      ...(bezReceptur ? { bezReceptur: true, bezRecepturProc: bezReceptur } : {}),
-      ...(r.bezId > 0 ? { vynechanoBezId: r.bezId } : {}),
+      ...(bez ? { bezReceptur: true, bezRecepturProc: bez.proc } : {}),
+      ...(bez?.proc === 'tvar' ? { bezRecepturPopis: bez.popis } : {}),
+      ...(r.bezId > 0 ? { vynechanoBezId: r.bezId, ...(r.bezIdPopis ? { vynechanoPopis: r.bezIdPopis } : {}) } : {}),
     }
   }
 
   return {
     async katalog() {
-      // Nejdřív s recepturami. Bez práva je číst (403), nebo když odpovědi s nimi appka
-      // nerozumí, celý katalog znovu bez nich — ne napůl: stránky s recepturou a bez ní
-      // by se nedaly rozlišit. Receptury (`include=ingredients`) jsou jediná část dotazu,
-      // kterou appka v Dotykačce nemá ověřenou ničím jiným.
+      // Nejdřív s recepturami. Bez práva je číst (403) celý katalog znovu bez nich — ne napůl:
+      // stránky s recepturou a bez ní by se nedaly rozlišit.
       const s = await katalogPoStrankach(true)
       if (s !== 'bez_prava' && !('tvar' in s)) return s.stav === 'ok' ? vysledek(s) : s
+
+      if (s !== 'bez_prava' && s.strana > 1) {
+        // První stránka S recepturami appka přečetla — receptury jí rozumí. Nečitelná další
+        // stránka je tedy jiná potíž (přechodná odpověď brány, uříznutí) a znovu bez receptur
+        // by jen zbytečně vymazala uložené receptury. Nic se neuloží, zkusí se znovu.
+        return s.necitelne
+          ? { stav: 'chyba', druh: 'docasna', duvod: `Katalog z Dotykačky nepřišel celý (${s.tvar}). Nic se neuložilo — zkuste ho načíst znovu.` }
+          : chybaTvaru('Katalog produktů', s.tvar)
+      }
+
+      // 403 jen kvůli recepturám, nebo už PRVNÍ stránce s recepturami appka nerozumí:
+      // receptury (`include=ingredients`) jsou jediná část dotazu, kterou appka v Dotykačce
+      // nemá ověřenou ničím jiným — celý katalog znovu bez nich.
       const tvarSRecepturami = s === 'bez_prava' ? null : s.tvar
       const bez = await katalogPoStrankach(false)
       if (bez === 'bez_prava') return k.chybaZeStavu(403, 'čtení katalogu produktů')
       if ('tvar' in bez) return chybaTvaru('Katalog produktů', tvarSRecepturami ? `${tvarSRecepturami}; znovu bez receptur — ${bez.tvar}` : bez.tvar)
-      return bez.stav === 'ok' ? vysledek(bez, tvarSRecepturami ? 'tvar' : 'pravo') : bez
+      if (bez.stav !== 'ok') return bez
+      return vysledek(bez, tvarSRecepturami ? { proc: 'tvar', popis: tvarSRecepturami } : { proc: 'pravo' })
     },
 
     async ucty(

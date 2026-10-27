@@ -510,14 +510,16 @@ export async function nacistKatalog(_predchozi: StavAkce, formData: FormData): P
   if (error) return vysledekChyby(error, 'uložení katalogu')
   const nacteno = Number(data ?? r.produkty.length)
   // Bez receptur (403, nebo jim appka nerozuměla) se katalog načetl bez nich a uložené receptury se vymazaly — člověk to má vědět.
+  // U „tvar" se připojí i popis (jen struktura odpovědi) — podle něj jde čtení receptur opravit.
   const bezReceptur = !r.bezReceptur
     ? ''
     : r.bezRecepturProc === 'tvar'
-      ? ' Receptury pokrmů pokladna poslala v podobě, které appka nerozumí, proto se načetly jen produkty — upozornění na suroviny pokrmu ve výdeji budou jen obecná.'
+      ? ` Odpovědi s recepturami pokrmů appka nerozuměla${r.bezRecepturPopis ? ` (${r.bezRecepturPopis})` : ''}, proto se načetly jen produkty — upozornění na suroviny pokrmu ve výdeji budou jen obecná.`
       : ' Receptury pokrmů pokladna appce nevydala (chybí právo na jejich čtení) — upozornění na suroviny pokrmu ve výdeji budou jen obecná.'
-  // Položky bez id nejde přiřadit ani odepsat — katalog bez nich nesmí vypadat jako celý.
+  // Položky bez čitelného id nejde přiřadit ani odepsat — katalog bez nich nesmí vypadat jako celý,
+  // a kdyby dřív id měly, uložený záznam se tím označí jako smazaný.
   const bezId = r.vynechanoBezId
-    ? ` Bez id pokladna poslala ${pocet(r.vynechanoBezId, 'položku', 'položky', 'položek')} — appka je vynechala, přiřadit ani odepsat je nejde.`
+    ? ` Bez čitelného id pokladna poslala ${pocet(r.vynechanoBezId, 'položku', 'položky', 'položek')}${r.vynechanoPopis ? ` (první: ${r.vynechanoPopis})` : ''} — appka je vynechala, přiřadit ani odepsat je nejde.`
     : ''
   return hotovo(p, `Z pokladny načteno: ${pocet(nacteno, 'položka', 'položky', 'položek')} katalogu (produkty i suroviny). Co v pokladně už není, je označené jako smazané.${bezReceptur}${bezId}`)
 }

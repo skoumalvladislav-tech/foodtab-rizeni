@@ -1148,6 +1148,27 @@ console.log('\n-- výdej do pokladny přes orchestrátor --')
   const v5 = await spustit(akcePos.zkontrolovatSklad, KLID, formular({}))
   ok('pokladna neodpověděla: kontrola se NEZAPÍŠE (stará zůstane) a člověk dostane důvod', zaznamy(chybaPos, 'rpc').length === 0 && v5.stav === 'chyba' && v5.text.includes('Dotykačka neodpověděla'))
 
+  // Katalog načtený jen zčásti (bez receptur, s vynechanými položkami) nesmí vypadat jako celý (PR #164).
+  const produktKat = { externiId: 'X1', nazev: 'Pivo', jednotka: 'Piece', mira: null, odecitaSklad: true, maRecepturu: null, suroviny: null, plu: [], ean: [], smazano: false }
+  const katTvar = svet()
+  katTvar.relace.relace.katalog = async () => ({
+    stav: 'ok', produkty: [produktKat], bezReceptur: true, bezRecepturProc: 'tvar', bezRecepturPopis: 'stránka 1 s recepturami: odpověď nemá seznam „data“ (klíče: vysledek)',
+    vynechanoBezId: 2, vynechanoPopis: 'id: null; klíče položky: name, id',
+  })
+  const vk1 = await spustit(akcePos.nacistKatalog, KLID, formular({}))
+  ok('načtení katalogu bez receptur („tvar"): hláška řekne, čemu appka nerozuměla, a že suroviny pokrmu budou jen obecné',
+    vk1.stav === 'ok' && vk1.text.includes('Odpovědi s recepturami pokrmů appka nerozuměla (stránka 1 s recepturami: odpověď nemá seznam „data“ (klíče: vysledek))') && vk1.text.includes('jen obecná'))
+  ok('… a kolik položek přišlo bez čitelného id i s popisem první („Bez čitelného id pokladna poslala 2 položky (první: id: null; …) — appka je vynechala")',
+    vk1.text.includes('Bez čitelného id pokladna poslala 2 položky (první: id: null; klíče položky: name, id) — appka je vynechala'))
+  const katPravo = svet()
+  katPravo.relace.relace.katalog = async () => ({ stav: 'ok', produkty: [produktKat], bezReceptur: true, bezRecepturProc: 'pravo' })
+  const vk2 = await spustit(akcePos.nacistKatalog, KLID, formular({}))
+  ok('načtení katalogu bez receptur (403): „pokladna appce nevydala (chybí právo…)", nic o vynechaných',
+    vk2.stav === 'ok' && vk2.text.includes('Receptury pokrmů pokladna appce nevydala (chybí právo na jejich čtení)') && !vk2.text.includes('nerozuměla') && !vk2.text.includes('Bez čitelného id'))
+  const katCely = svet()
+  const vk3 = await spustit(akcePos.nacistKatalog, KLID, formular({}))
+  ok('celý katalog: žádná věta o recepturách ani vynechaných', vk3.stav === 'ok' && !vk3.text.includes('Receptury') && !vk3.text.includes('nerozuměla') && !vk3.text.includes('Bez čitelného id') && zaznamy(katCely, 'rpc').some((x) => x[2] === 'pos_katalog_nahradit'))
+
   const verze = svet()
   const v6 = await spustit(akcePos.zkontrolovatTrzbu, KLID, formular({ verze: '2' }))
   ok('kontrola nad starou verzí formuláře se nespustí (HLASKA_VERZE)', v6.text === L.HLASKA_VERZE && zaznamy(verze, 'relace').length === 0)

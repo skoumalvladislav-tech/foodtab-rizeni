@@ -201,11 +201,21 @@ export type RelacePos = {
    * načíst, je CHYBA — ne tichý ořez (chybějící produkt by vypadal, že
    * v pokladně není). `bezReceptur` = receptury se nenačetly
    * (`bezRecepturProc`: pokladna je nevydala — chybí právo, nebo jim
-   * appka nerozuměla); `vynechanoBezId` = kolik položek pokladna poslala
-   * bez id (nejde je přiřadit ani odepsat) — volající to musí ukázat.
+   * appka nerozuměla; pak `bezRecepturPopis` říká čemu, jen strukturou);
+   * `vynechanoBezId` = kolik položek pokladna poslala bez čitelného id
+   * (nejde je přiřadit ani odepsat; `vynechanoPopis` = proč u první z nich)
+   * — volající to musí ukázat.
    */
   katalog?(): Promise<
-    | { stav: 'ok'; produkty: ProduktPos[]; bezReceptur?: boolean; bezRecepturProc?: 'pravo' | 'tvar'; vynechanoBezId?: number }
+    | {
+        stav: 'ok'
+        produkty: ProduktPos[]
+        bezReceptur?: boolean
+        bezRecepturProc?: 'pravo' | 'tvar'
+        bezRecepturPopis?: string
+        vynechanoBezId?: number
+        vynechanoPopis?: string
+      }
     | ChybaPos
   >
   /**
