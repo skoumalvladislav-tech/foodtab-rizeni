@@ -4,6 +4,8 @@ import Sdeleni from '@/app/sdeleni'
 import { getCurrentTenantId } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { jePlatneDatum } from '@/lib/rezervace-typy'
+import { svatekDne } from '@/lib/svatky'
+import { zemeSvatkuFirmy } from '@/lib/svatky-firmy'
 
 import { dnesPobocky, nacistPoznamky, nacistPrilohy, nacistRezervace } from '../../data'
 import { DenObsah } from '../../obsah'
@@ -44,7 +46,7 @@ export default async function RezervaceDen({
 
   const { pobocky } = pristup
   const dnes = await dnesPobocky(pobocky[0])
-  const rezervace = await nacistRezervace(tenantId, pobocky, datum, datum)
+  const [rezervace, zemeSvatku] = await Promise.all([nacistRezervace(tenantId, pobocky, datum, datum), zemeSvatkuFirmy(tenantId)])
   const kDnu = await Promise.all(
     pobocky.map(async (p) => {
       const filtr = { tenantId, pobocka: p.id, den: datum }
@@ -53,5 +55,17 @@ export default async function RezervaceDen({
     }),
   )
 
-  return <DenObsah rozsah={rozsah} datum={datum} dnes={dnes} tenantId={tenantId} kDnu={kDnu} stav={stav} chyba={chyba} />
+  // Svátek patří kalendářnímu datu z adresy; provozní den se jmenuje stejně (lib/svatky.ts).
+  return (
+    <DenObsah
+      rozsah={rozsah}
+      datum={datum}
+      dnes={dnes}
+      tenantId={tenantId}
+      kDnu={kDnu}
+      svatek={svatekDne(datum, zemeSvatku)}
+      stav={stav}
+      chyba={chyba}
+    />
+  )
 }

@@ -12,6 +12,7 @@ import {
   zacatekOkna,
 } from "@/lib/rozpis-konstanty";
 import { dnyTydne, mesicniMrizka } from "@/lib/rozpis-mobil";
+import { zemeSvatkuFirmy } from "@/lib/svatky-firmy";
 import { DotazSelhal, sloupecNeexistuje } from "@/lib/supabase/dotaz";
 import { getServerSupabase } from "@/lib/supabase/server";
 import Sdeleni from "@/app/sdeleni";
@@ -315,7 +316,7 @@ export default async function Rozpis({
     )
   ).filter((b): b is { id: string; nazev: string } => b !== null);
 
-  const [smeny, mojeSmeny, zrusene, hoste] = await Promise.all([
+  const [smeny, mojeSmeny, zrusene, hoste, zemeSvatku] = await Promise.all([
     nactiSmeny(nacistOd, nacistDo),
     jaId ? nactiSmeny(mojeOd, mojeDo, jaId) : Promise.resolve([] as Smena[]),
     // Zrušené po vydání zajímají jen toho, kdo rozpis vydává.
@@ -328,6 +329,12 @@ export default async function Rozpis({
       `null` a okénko se nekreslí. Za stejné provozní dny jako směny.
     */
     hosteProRozpis(tenantId, rozsah, nacistOd, nacistDo),
+    /*
+      Země firmy pro svátky v kalendáři (Šéfík 28. 10. 2026). Svátek
+      každého dne si obrazovka spočítá z jeho data sama (lib/svatky.ts),
+      i pro den vybraný na telefonu bez nového načtení.
+    */
+    zemeSvatkuFirmy(tenantId),
   ]);
 
   // Jména lidí a názvy pozic. Neobsazená směna nemá employee_id — ta se
@@ -667,6 +674,7 @@ export default async function Rozpis({
         vydani={vydani}
         vysledekVydani={vysledekVydani}
         hoste={hoste}
+        zemeSvatku={zemeSvatku}
       />
     </div>
   );
