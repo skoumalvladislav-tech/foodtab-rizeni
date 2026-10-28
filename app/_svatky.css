@@ -6,11 +6,15 @@
    _rezervace.css: na konci _komponenty.css píše víc souběžných relací.
 
    JAK SE SVÁTEK POZNÁ (barva nikdy sama):
-     - ŠRAFA: šikmé proužky v mosazi přes celý den. Mosaz je rodina
+     - ŠRAFA: šikmé proužky v mosazi — výrazný pásek nahoře (tam žádné
+       písmo není) a slabé proužky přes celý den. Mosaz je rodina
        víkendu a dneška (plné plochy), svátek se od nich liší TVAREM,
        ne odstínem. Do barev poboček (Blankytná, Fialová, Indigová)
        ani stavů (zelená, oranžová, červená, modrá, vínová) šrafa
-       nevstupuje — změřeno ve scripts/svatky.test.mjs;
+       nevstupuje — změřeno ve scripts/svatky.test.mjs.
+       Slabá vrstva leží pod písmem buňky, proto jen 12 %: šedé písmo
+       (--muted) na kartě pak drží 4,5 : 1 v obou režimech. Při 34 %
+       (první verze) vycházelo ve dlaždicích týdne na telefonu kolem 3 : 1;
      - NÁZEV textem v barvě písma (--ink) na vlastním podkladu karty.
        Přímo na proužcích by v tmavém režimu u dneška vyšlo 3,96 : 1
        a mosazné písmo by nedalo 4,5 : 1 nikde (scripts/svatky.test.mjs);
@@ -34,27 +38,34 @@
     .ds-smd-den, .ds-smd-bunka, .ds-smd-ml-bunka, .ds-sm-den)[data-svatek] {
   isolation: isolate;
   --svatek-srafa-barva: var(--mosaz-sv);
-  --svatek-srafa-sila: 34%;
+  --svatek-srafa-sila: 12%;
+  --svatek-pasek-sila: 60%;
+  --svatek-pasek-vyska: 4px;
 }
 :is(.ds-rez-den, .ds-rez-bunka, .ds-sm-dl, .ds-sm-mesic-den, .ds-smd-mesic-den, .ds-svatek-pruh, .ds-svatky-vzorek,
     .ds-smd-den, .ds-smd-bunka, .ds-smd-ml-bunka, .ds-sm-den)[data-svatek]::before {
   content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
-  background-image: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--svatek-srafa-barva) var(--svatek-srafa-sila), transparent) 0 2px,
-    transparent 2px 8px
-  );
+  background-image:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--svatek-srafa-barva) var(--svatek-pasek-sila), transparent) 0 2px, transparent 2px 6px),
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--svatek-srafa-barva) var(--svatek-srafa-sila), transparent) 0 2px, transparent 2px 8px);
+  background-size: 100% var(--svatek-pasek-vyska), 100% 100%;
+  background-repeat: no-repeat, repeat;
 }
 
-/* Tělo mřížky Rozpisu: celý sloupec svátku, ale slaběji než záhlaví —
-   proužky nesmí přehlušit karty směn. */
-:is(.ds-smd-bunka, .ds-smd-ml-bunka)[data-svatek] { --svatek-srafa-sila: 20%; }
+/* Tělo mřížky Rozpisu: celý sloupec svátku slabě, pásek jen v záhlaví —
+   v každém řádku by rušil. */
+:is(.ds-smd-bunka, .ds-smd-ml-bunka)[data-svatek] { --svatek-pasek-vyska: 0px; }
+
+/* Pruh nad dnem a vzorek ve vysvětlivce: písmo je jen tmavé (--ink),
+   proužky můžou být výrazné. */
+:is(.ds-svatek-pruh, .ds-svatky-vzorek)[data-svatek] { --svatek-srafa-sila: 34%; --svatek-pasek-vyska: 0px; }
 
 /* Vybraný den na telefonu má plnou mosaz — světlé proužky by v ní
    zmizely, proto tmavé. */
 :is(.ds-sm-den, .ds-sm-mesic-den)[data-svatek][data-vybrany="true"] {
   --svatek-srafa-barva: var(--mosaz-ink);
   --svatek-srafa-sila: 16%;
+  --svatek-pasek-sila: 45%;
 }
 
 /* --- název a vozík ----------------------------------------------------- */
@@ -69,15 +80,18 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--mosaz-sv) 50%, transparent);
   font-weight: 600; overflow-wrap: anywhere;
 }
-/* Krátký název do úzké buňky: jeden řádek, celý je v `title`. */
+/* Krátký název do úzké buňky: nejvýš dva řádky, láme se jen mezi slovy;
+   celý název je v `title` a ve vysvětlivce pod kalendářem. */
 .ds-svatek[data-kratce] .ds-svatek-nazev {
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  max-width: 100%; overflow: hidden; overflow-wrap: normal;
 }
+/* V úzké kartě dne („obchody od 12:00 zavřené“) se zalomí, nepřeteče přes okraj. */
 .ds-svatek-obchody {
-  display: inline-flex; align-items: center; gap: 3px; flex: none;
-  padding: 0 6px 0 4px; border: 1px solid var(--line-2); border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 3px; max-width: 100%;
+  padding: 0 6px 0 4px; border: 1px solid var(--line-2); border-radius: 9px;
   background: var(--card); color: var(--muted);
-  font-size: 11px; font-weight: 500; line-height: 1.45; white-space: nowrap;
+  font-size: 11px; font-weight: 500; line-height: 1.45;
 }
 .ds-svatek-obchody .ft-i { width: 12px; height: 12px; flex: none; }
 

@@ -223,8 +223,18 @@ console.log('\n== 5. Barvy změřené z app/_tokeny.css ==\n')
   samokontrola()
   const tokeny = cti('app/_tokeny.css')
   const svatkyCss = cti('app/_svatky.css')
-  const sila = Number(svatkyCss.match(/--svatek-srafa-sila:\s*(\d+)%/)?.[1])
-  ok(`síla šrafy načtená z app/_svatky.css (${sila} %)`, sila > 0 && sila < 100)
+  const pravidla = [...svatkyCss.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^}]*)\}/g)].map((m) => ({ sel: m[1].trim(), telo: m[2] }))
+  /** Síla šrafy v % z posledního pravidla (to v kaskádě vyhraje), jehož selektor obsahuje `kde` a které ji nastavuje. */
+  const silaV = (kde) => Number(pravidla.findLast((p) => p.sel.includes(kde) && /--svatek-srafa-sila/.test(p.telo))?.telo.match(/--svatek-srafa-sila:\s*(\d+)%/)?.[1])
+  // Výchozí síla je v pravidle, které šrafě dává barvu; pruh nad dnem má vlastní.
+  const vychozi = pravidla.find((p) => /--svatek-srafa-barva:\s*var\(--mosaz-sv\)/.test(p.telo))
+  const silaBunky = Number(vychozi?.telo.match(/--svatek-srafa-sila:\s*(\d+)%/)?.[1])
+  const silaPruhu = silaV('.ds-svatek-pruh')
+  ok(`síla šrafy načtená z app/_svatky.css (pod písmem buňky ${silaBunky} %, pruh nad dnem ${silaPruhu} %)`, silaBunky > 0 && silaBunky < 100 && silaPruhu > 0 && silaPruhu < 100)
+  ok(
+    'žádná buňka si šrafu pod písmem nezesílí (jen pruh a vzorek, kde je písmo tmavé)',
+    pravidla.filter((p) => /--svatek-srafa-sila/.test(p.telo) && p !== vychozi && !/ds-svatek-pruh|data-vybrany/.test(p.sel)).length === 0,
+  )
   ok('šrafa je v barvě --mosaz-sv (rodina víkendu a dneška), ne v barvě pobočky ani stavu', /--svatek-srafa-barva:\s*var\(--mosaz-sv\)/.test(svatkyCss))
   const bloky = {
     svetlo: vyrez(tokeny, ':root {', '@media (prefers-color-scheme: dark)'),
@@ -244,13 +254,19 @@ console.log('\n== 5. Barvy změřené z app/_tokeny.css ==\n')
     ok(`${rezim}: šrafa (--mosaz-sv) je od barev poboček i stavů aspoň ΔE ${mez}`, !!srafa && blizko.length === 0)
     for (const [k, d] of blizko) console.log(`        --${k}: ΔE ${d.toFixed(1)}`)
 
-    const proužek = mix(srafa, sila / 100, t('card'))
+    // Nejhorší bod pod písmem je proužek (ne mezera mezi proužky).
+    const proužekBunky = mix(srafa, silaBunky / 100, t('card'))
+    const proužekPruhu = mix(srafa, silaPruhu / 100, t('card'))
     const kontrast = [
       ['název svátku (písmo na podkladu karty)', t('ink'), t('card')],
       ['značka obchodů (šedé písmo na kartě)', t('muted'), t('card')],
-      ['pruh svátku nad dnem (písmo přímo na proužku)', t('ink'), proužek],
+      ['šedé písmo buňky (souhrn, „Volno“) na proužku', t('muted'), proužekBunky],
+      ['tmavé písmo buňky na proužku', t('ink'), proužekBunky],
+      ['pruh svátku nad dnem (písmo přímo na proužku)', t('ink'), proužekPruhu],
+      // Vybraný den na telefonu: plná mosaz, tmavé proužky, tmavé písmo.
+      ['vybraný den na telefonu (tmavé písmo na tmavém proužku v mosazi)', t('mosaz-ink'), mix(t('mosaz-ink'), silaV('data-vybrany') / 100, srafa)],
     ].filter(([, a, b]) => !(pomer(a, b) >= 4.5))
-    ok(`${rezim}: písmo svátku i vozíku drží 4,5 : 1`, kontrast.length === 0)
+    ok(`${rezim}: písmo svátku, vozíku i buňky se šrafou drží 4,5 : 1`, kontrast.length === 0)
     for (const [co, a, b] of kontrast) console.log(`        ${co}: ${pomer(a, b).toFixed(2)}`)
   }
   ok(
