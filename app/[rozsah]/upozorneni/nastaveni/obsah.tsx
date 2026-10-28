@@ -20,9 +20,17 @@ import PushPrepinac from './push-prepinac'
  * (úkoly, checklisty, zálohy, zapomenutý odchod, e-mail) čekají na
  * rozhodnutí Šéfíka (otázka 27) — do té doby se pravdivě píše, že
  * vypnout nejdou.
+ *
+ * Ranní přehled rezervací (27. 10. 2026) se nabízí jen tomu, kdo
+ * rezervace na některé pobočce vidí — nikomu jinému nepřijde, takže by
+ * mu zaškrtávátko jen překáželo. Které kategorie formulář nabídl, nese
+ * skryté pole `nabidnuto`: co se nenabídlo, akce nepřepíše na „vypnuto“.
  */
 
-export type Kategorie = 'vzkazy' | 'nastenka'
+export type Kategorie = 'vzkazy' | 'nastenka' | 'rezervace_souhrn'
+
+/** Co se nabízí každému. */
+export const ZAKLADNI_KATEGORIE: Kategorie[] = ['vzkazy', 'nastenka']
 
 const POPIS: Record<Kategorie, { nazev: string; vysvetleni: string }> = {
   vzkazy: {
@@ -34,18 +42,26 @@ const POPIS: Record<Kategorie, { nazev: string; vysvetleni: string }> = {
     nazev: 'Nástěnka',
     vysvetleni: 'Upozornění na nové oznámení na Nástěnce.',
   },
+  rezervace_souhrn: {
+    nazev: 'Ranní přehled rezervací',
+    vysvetleni:
+      'Každé ráno kolik je dnes rezervací a hostů a jaké akce jsou v plánu — za pobočky, kde rezervace vidíte. Když není nic v plánu, nepřijde nic.',
+  },
 }
 
 export default function ObsahNastaveniUpozorneni({
   rozsah,
   povoleno,
+  nabidnout = ZAKLADNI_KATEGORIE,
   chyba,
   ulozeno,
   jeMajitel,
   verejnyKlic,
 }: {
   rozsah: string
-  povoleno: Record<Kategorie, boolean>
+  povoleno: Partial<Record<Kategorie, boolean>>
+  /** Které kategorie se tomuhle člověku nabízejí (výchozí: vzkazy a nástěnka). */
+  nabidnout?: Kategorie[]
   chyba: string | null
   ulozeno: boolean
   jeMajitel: boolean
@@ -83,11 +99,13 @@ export default function ObsahNastaveniUpozorneni({
             <h2>Co chci dostávat</h2>
           </div>
           <input type="hidden" name="rozsah" value={rozsah} />
+          <input type="hidden" name="nabidnuto" value={nabidnout.join(',')} />
 
           <div className="ds-nu-seznam">
-            {(Object.keys(POPIS) as Kategorie[]).map((kat) => (
+            {nabidnout.map((kat) => (
               <label key={kat} className="ds-nu-radek">
-                <input type="checkbox" name={kat} value="ano" defaultChecked={povoleno[kat]} />
+                {/* Chybějící řádek v databázi = zapnuto (app.upozorneni_povoleno). */}
+                <input type="checkbox" name={kat} value="ano" defaultChecked={povoleno[kat] ?? true} />
                 <span>
                   <strong>{POPIS[kat].nazev}</strong>
                   <span>{POPIS[kat].vysvetleni}</span>

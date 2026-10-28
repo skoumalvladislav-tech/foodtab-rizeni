@@ -910,6 +910,65 @@ async function nactKomponentuNU() {
     policko('vzkazy').includes('checked=""') && policko('nastenka') !== '' && !policko('nastenka').includes('checked'))
   ok('stránka kreslí tuto komponentu',
     bezKomentaru(readFileSync('app/[rozsah]/upozorneni/nastaveni/page.tsx', 'utf8')).includes('<ObsahNastaveniUpozorneni'))
+  ok('kdo rezervace nevidí, ranní přehled rezervací se mu nenabízí',
+    !html.includes('Ranní přehled rezervací') && policko('rezervace_souhrn') === ''
+    && (policko('nabidnuto').match(/value="([^"]*)"/)?.[1] ?? '') === 'vzkazy,nastenka')
+}
+{
+  // Ranní přehled rezervací (27. 10. 2026): nabízí se jen tomu, kdo
+  // rezervace vidí, a skryté pole nese, co formulář nabídl.
+  const html = renderToStaticMarkup(createElement(ObsahNU, {
+    rozsah: 'perla', povoleno: { vzkazy: true, nastenka: true, rezervace_souhrn: false },
+    nabidnout: ['vzkazy', 'nastenka', 'rezervace_souhrn'], chyba: null, ulozeno: false, jeMajitel: false, verejnyKlic: null,
+  }))
+  const policko = (jmeno) => html.match(new RegExp(`<input[^>]*name="${jmeno}"[^>]*>`))?.[0] ?? ''
+  ok('kdo rezervace vidí: „Ranní přehled rezervací“ se stavem z databáze (vypnutý)',
+    html.includes('Ranní přehled rezervací') && policko('rezervace_souhrn') !== '' && !policko('rezervace_souhrn').includes('checked'))
+  ok('… a skryté pole nese všechny tři nabídnuté kategorie',
+    (policko('nabidnuto').match(/value="([^"]*)"/)?.[1] ?? '') === 'vzkazy,nastenka,rezervace_souhrn')
+  const bezRadku = renderToStaticMarkup(createElement(ObsahNU, {
+    rozsah: 'perla', povoleno: { vzkazy: true, nastenka: true }, nabidnout: ['vzkazy', 'nastenka', 'rezervace_souhrn'],
+    chyba: null, ulozeno: false, jeMajitel: false, verejnyKlic: null,
+  }))
+  ok('chybějící řádek v databázi = zapnuto (jako app.upozorneni_povoleno)',
+    (bezRadku.match(/<input[^>]*name="rezervace_souhrn"[^>]*>/)?.[0] ?? '').includes('checked=""'))
+  const stranka = bezKomentaru(readFileSync('app/[rozsah]/upozorneni/nastaveni/page.tsx', 'utf8'))
+  ok('stránka se ptá na rezervace.read i rezervace.manage pobočku po pobočce a předává nabidnout',
+    stranka.includes("hasAccess(tenantId, 'rezervace.read', b.id)") && stranka.includes("hasAccess(tenantId, 'rezervace.manage', b.id)")
+    && stranka.includes('nabidnout={nabidnout}'))
+}
+{
+  // Uložení: co formulář nenabídl, se NEpřepíše na „vypnuto“, a nová
+  // kategorie před db push nezablokuje uložení vzkazů a nástěnky.
+  const FIRMA = js('export async function getCurrentTenantId() { return "t1" }')
+  const akceNU = await nactiModul('app/[rozsah]/upozorneni/nastaveni/akce.ts', [...SPOLECNE, ['@/lib/firma', FIRMA]])
+  const kategorieZapisu = (db) => zapisy(db, 'notification_preferences', 'upsert')
+    .flatMap((q) => q.data.map((r) => `${r.kategorie}=${r.povoleno}`)).join(' ')
+
+  let db = svet()
+  let r = await zavolat(akceNU.ulozitNastaveni, fd({ rozsah: 'perla', vzkazy: 'ano' }))
+  ok('formulář bez nabídnutého přehledu (starší stránka): zapíše jen vzkazy a nástěnku',
+    kategorieZapisu(db) === 'vzkazy=true nastenka=false' && r.kam === '/perla/upozorneni/nastaveni?ulozeno=1')
+
+  db = svet()
+  r = await zavolat(akceNU.ulozitNastaveni, fd({ rozsah: 'perla', vzkazy: 'ano', nastenka: 'ano', nabidnuto: 'vzkazy,nastenka,rezervace_souhrn' }))
+  ok('nabídnutý a nezaškrtnutý přehled se uloží jako vypnutý, vlastní řádek (tenant a user)',
+    kategorieZapisu(db) === 'vzkazy=true nastenka=true rezervace_souhrn=false'
+    && zapisy(db, 'notification_preferences', 'upsert').every((q) => q.data.every((x) => x.tenant_id === 't1' && x.user_id === UZ))
+    && r.kam === '/perla/upozorneni/nastaveni?ulozeno=1')
+
+  db = svet({
+    tabulka(q) {
+      return q.data?.some((x) => x.kategorie === 'rezervace_souhrn')
+        ? { data: null, error: { code: '23514', message: 'violates check constraint' } }
+        : { data: null, error: null }
+    },
+  })
+  r = await zavolat(akceNU.ulozitNastaveni, fd({ rozsah: 'perla', vzkazy: 'ano', rezervace_souhrn: 'ano', nabidnuto: 'vzkazy,nastenka,rezervace_souhrn' }))
+  ok('před db push (check 23514): vzkazy a nástěnka uložené, srozumitelná hláška místo chyby databáze',
+    kategorieZapisu(db).startsWith('vzkazy=true nastenka=false')
+    && decodeURIComponent(r.kam ?? '').includes('Zprávy a nástěnka jsou uložené')
+    && !decodeURIComponent(r.kam ?? '').includes('violates'))
 }
 
 console.log('\n== T10: Úkoly a drobnosti ==')
