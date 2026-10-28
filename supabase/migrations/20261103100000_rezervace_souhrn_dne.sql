@@ -10,11 +10,16 @@
 -- ---------------------------------------------------------------------
 -- CO TO DĚLÁ
 --
--- Každé ráno po pobočkách: kolik je rezervací (bez zrušených) a hostů
--- (součet `pocet_osob`) a jaké akce jsou v plánu (čas, název, počet
--- osob, prostor). Den je PROVOZNÍ den pobočky (`rezervace.den` počítá
--- spoušť přes app.business_date), ne kalendářní — rezervace v 1:30
--- patří k večeru předtím, stejně jako v kalendáři.
+-- Každé ráno po pobočkách: kolik je rezervací, kolik hostů (součet
+-- `pocet_osob` rezervací i akcí) a jaké akce jsou v plánu (čas, název,
+-- počet osob, prostor). Zrušené a nedorazivší se nepočítají. Čísla jsou
+-- STEJNÁ jako v kalendáři a v okénku hostů v Rozpisu směn
+-- (souhrnDne / pocitaSeDoHostu v lib/rezervace-*.ts) — dvě různá čísla
+-- hostů na dvou obrazovkách by nikdo nevysvětlil.
+--
+-- Den je PROVOZNÍ den pobočky (`rezervace.den` počítá spoušť přes
+-- app.business_date), ne kalendářní — rezervace v 1:30 patří k večeru
+-- předtím, stejně jako v kalendáři.
 --
 -- Jedno upozornění na člověka, ne na pobočku: kdo vidí obě pobočky
 -- (majitel), dostane jedno „Dnes BBT: … · RČP: …“, ne dvě pípnutí.
@@ -322,10 +327,12 @@ begin
                  'pobocka',   v_b.name,
                  'slug',      v_b.slug,
                  'den',       v_den,
+                 -- Stejně jako souhrnDne (lib/rezervace-kalendar.ts) v kalendáři
+                 -- a okénko hostů v Rozpisu: hosté rezervací I akcí.
                  'rezervaci', count(*) filter (where r.druh = 'rezervace'),
-                 'hostu',     coalesce(sum(r.pocet_osob) filter (where r.druh = 'rezervace'), 0),
-                 'bez_poctu', count(*) filter (where r.druh = 'rezervace' and r.pocet_osob is null),
                  'akci',      count(*) filter (where r.druh = 'akce'),
+                 'hostu',     coalesce(sum(r.pocet_osob), 0),
+                 'bez_poctu', count(*) filter (where r.pocet_osob is null),
                  'akce',      coalesce((
                     select jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
                              'cas',     to_char(a.zacatek at time zone v_zona, 'HH24:MI'),
@@ -339,7 +346,7 @@ begin
                          where x.branch_id = v_b.id
                            and x.den       = v_den
                            and x.druh      = 'akce'
-                           and x.stav     <> 'zrusena'
+                           and x.stav not in ('zrusena', 'nedostavil_se')
                          order by x.zacatek, x.id
                          limit c_akci_max
                       ) a
@@ -349,7 +356,9 @@ begin
           from public.rezervace r
          where r.branch_id = v_b.id
            and r.den       = v_den
-           and r.stav     <> 'zrusena';
+           -- pocitaSeDoHostu (lib/rezervace-typy.ts): zrušení a nedorazivší
+           -- nepřijdou. Shodu hlídá scripts/upozorneni.test.mjs.
+           and r.stav not in ('zrusena', 'nedostavil_se');
 
         insert into public.rezervace_souhrn_dne (tenant_id, branch_id, den, rezervaci, hostu, akci)
         values (v_t.id, v_b.id, v_den,

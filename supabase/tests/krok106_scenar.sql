@@ -11,7 +11,8 @@
 --
 --   1. okno 8:00–16:00 v hodině na zdi pobočky; ve 2:00 po půlnoci je
 --      provozní den ještě včerejší;
---   2. čísla: rezervace a hosté bez zrušených, akce s časem, názvem,
+--   2. čísla: rezervace a hosté (i z akcí) bez zrušených a nedorazivších
+--      — jako kalendář a Rozpis; akce s časem, názvem,
 --      počtem a prostorem, zrušená akce ne; jména hostů v těle nejsou;
 --   3. provozní den kolem půlnoci: rezervace v 1:30 patří k večeru
 --      předtím, rezervace ve 3:00 ráno k dni předtím;
@@ -143,28 +144,37 @@ insert into public.push_odbery (user_id, endpoint, p256dh, auth_secret) values
   (:'petra',   'https://fcm.googleapis.com/fcm/send/krok106-petra',   'p256dh-krok106-petra',   'auth-krok106');
 
 /*
-  Rezervace. Čísla osob jsou schválně různá, ať každá chyba vyjde jinak:
+  Rezervace. Čísla osob jsou schválně různá, ať každá chyba vyjde jinak.
+  Hosté = rezervace I akce, bez zrušených a nedorazivších — stejně jako
+  kalendář a okénko hostů v Rozpisu (souhrnDne, pocitaSeDoHostu).
+
     Perla, provozní den 12. 3. 2031 (den začíná v 5:00, Praha, zima +01):
       R1  19:00            4 os.            počítá se
       R2  13. 3. 1:30      2 os.            PO PŮLNOCI → patří ke 12. 3.
-      R3  20:00           10 os. ZRUŠENÁ    nepočítá se
       R4  12. 3. 3:00     20 os.            PŘED 5:00 → patří k 11. 3.
       R5  12:00            bez počtu        počítá se, hosté ne
-      A1  18:00 akce      30 os. Salonek    v seznamu
-      A2  17:00 akce      50 os. ZRUŠENÁ    v seznamu není
-    Perla 13. 3.: R6 19:00 3 os.  ·  Bar 12. 3.: B1 20:00 5 os.  ·  Bar 13. 3.: nic
+      A1  18:00 akce      30 os. Salonek    v seznamu a v hostech
+      A2  17:00 akce      50 os. ZRUŠENÁ    ani v seznamu, ani v hostech
+      → 3 rezervace, 1 akce, 36 hostů (4 + 2 + 30), 1 bez počtu
+    Bar 12. 3.:
+      B1  20:00            5 os.            počítá se
+      B2  21:00           10 os. ZRUŠENÁ    nepočítá se
+      B3  18:00          100 os. NEDOSTAVIL SE  nepočítá se
+      → 1 rezervace, 5 hostů
+    Perla 13. 3.: R6 19:00 3 os.  ·  Bar 13. 3.: nic
     Cizí firma 12. 3.: X1 19:00 7 os.
 */
 insert into public.rezervace (tenant_id, branch_id, druh, stav, nazev, jmeno_hosta, zacatek, pocet_osob, prostor) values
   (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'R1 Krok106', '2031-03-12 19:00+01', 4,    ''),
   (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'R2 Krok106', '2031-03-13 01:30+01', 2,    ''),
-  (:'tenant', :'perla', 'rezervace', 'zrusena',   '', 'R3 Krok106', '2031-03-12 20:00+01', 10,   ''),
   (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'R4 Krok106', '2031-03-12 03:00+01', 20,   ''),
   (:'tenant', :'perla', 'rezervace', 'ceka',      '', 'R5 Krok106', '2031-03-12 12:00+01', null, ''),
   (:'tenant', :'perla', 'akce',      'potvrzeno', 'Firemní večírek Krok106', 'A1 Krok106', '2031-03-12 18:00+01', 30, 'Salonek'),
   (:'tenant', :'perla', 'akce',      'zrusena',   'Zrušená akce Krok106',    'A2 Krok106', '2031-03-12 17:00+01', 50, 'Sál'),
   (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'R6 Krok106', '2031-03-13 19:00+01', 3,    ''),
-  (:'tenant', :'bar',   'rezervace', 'potvrzeno', '', 'B1 Krok106', '2031-03-12 20:00+01', 5,    ''),
+  (:'tenant', :'bar',   'rezervace', 'potvrzeno',     '', 'B1 Krok106', '2031-03-12 20:00+01', 5,   ''),
+  (:'tenant', :'bar',   'rezervace', 'zrusena',       '', 'B2 Krok106', '2031-03-12 21:00+01', 10,  ''),
+  (:'tenant', :'bar',   'rezervace', 'nedostavil_se', '', 'B3 Krok106', '2031-03-12 18:00+01', 100, ''),
   (:'cizi_firma', :'cizi_pobocka', 'rezervace', 'potvrzeno', '', 'X1 Krok106', '2031-03-12 19:00+01', 7, '');
 
 
@@ -222,15 +232,18 @@ select pg_temp.check('majitel: JEDNO upozornění s oběma pobočkami, den 12. 3
   and :'m1_perla' <> '{}' and :'m1_bar' <> '{}');
 -- Konkrétní kontroly napřed, souhrnná až za nimi: první SELHALO zastaví
 -- scénář, a má jmenovat příčinu, ne jen „čísla nesedí“.
-select pg_temp.check('zrušená rezervace (10 os.) se nepočítá',
-  (:'m1_perla'::jsonb ->> 'hostu')::int <> 16 and (:'m1_perla'::jsonb ->> 'rezervaci')::int <> 4);
+select pg_temp.check('zrušená rezervace (Bar, 10 os.) se nepočítá',
+  (:'m1_bar'::jsonb ->> 'hostu')::int not in (15, 115));
+select pg_temp.check('rezervace „nedostavil se“ (Bar, 100 os.) se nepočítá — jako pocitaSeDoHostu',
+  (:'m1_bar'::jsonb ->> 'hostu')::int not in (105, 115));
 select pg_temp.check('provozní den: rezervace v 1:30 po půlnoci patří k večeru 12. 3.',
-  (:'m1_perla'::jsonb ->> 'hostu')::int not in (4, 24));
+  (:'m1_perla'::jsonb ->> 'hostu')::int not in (34, 54));
 select pg_temp.check('provozní den: rezervace ve 3:00 ráno 12. 3. patří k 11. 3. (20 os. tu nejsou)',
-  (:'m1_perla'::jsonb ->> 'hostu')::int not in (24, 26));
-select pg_temp.check('Perla: 3 rezervace (R1, R2, R5) a 6 hostů (4 + 2), u jedné počet chybí',
+  (:'m1_perla'::jsonb ->> 'hostu')::int not in (54, 56));
+select pg_temp.check('Perla: 3 rezervace (R1, R2, R5), 1 akce, 36 hostů rezervací i akcí (4 + 2 + 30), 1 bez počtu',
   (:'m1_perla'::jsonb ->> 'rezervaci')::int = 3
-  and (:'m1_perla'::jsonb ->> 'hostu')::int = 6
+  and (:'m1_perla'::jsonb ->> 'akci')::int = 1
+  and (:'m1_perla'::jsonb ->> 'hostu')::int = 36
   and (:'m1_perla'::jsonb ->> 'bez_poctu')::int = 1);
 select pg_temp.check('akce: jedna (zrušená ne) — 18:00, název, 30 os., Salonek',
   (:'m1_perla'::jsonb ->> 'akci')::int = 1
@@ -272,8 +285,8 @@ select pg_temp.check('Dana v cizí firmě: jen cizí pobočka (1 rezervace, 7 ho
   and pg_temp.souhrn(:'cizi_firma', :'dvojf')::text not like '%Perla%'
   and pg_temp.souhrn(:'cizi_firma', :'dvojf')::text not like '%Bernard%');
 
-select pg_temp.check('záznam „vyhodnoceno“: Perla 3/6/1, Bar 1/5/0, cizí 1/7/0',
-  (select rezervaci = 3 and hostu = 6 and akci = 1 and tenant_id = :'tenant'
+select pg_temp.check('záznam „vyhodnoceno“: Perla 3/36/1, Bar 1/5/0, cizí 1/7/0',
+  (select rezervaci = 3 and hostu = 36 and akci = 1 and tenant_id = :'tenant'
      from public.rezervace_souhrn_dne where branch_id = :'perla' and den = date '2031-03-12')
   and (select rezervaci = 1 and hostu = 5 and akci = 0
      from public.rezervace_souhrn_dne where branch_id = :'bar' and den = date '2031-03-12')

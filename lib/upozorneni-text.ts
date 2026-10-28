@@ -27,6 +27,7 @@
  */
 
 import { koruny } from './mzdy.ts'
+import { souhrnText } from './rezervace-pobocky.ts'
 import { zkratkyPobocek } from './rozpis-desktop.ts'
 
 /** Akce v ranním souhrnu (rezervace.souhrn_dne, migrace 20261103100000). */
@@ -43,8 +44,9 @@ export type PobockaSouhrnu = {
   slug?: string
   den?: string
   rezervaci?: number
+  /** Hosté rezervací I akcí (jako okénko hostů v Rozpisu směn). */
   hostu?: number
-  /** Rezervace bez počtu osob — v `hostu` nejsou. */
+  /** Rezervace a akce bez počtu osob — v `hostu` nejsou. */
   bez_poctu?: number
   /** Všechny akce dne; `akce` nese nejvýš prvních 20. */
   akci?: number
@@ -302,25 +304,27 @@ function pocetZTela(x: unknown): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
 }
 
-/** „12 rezervací, 46 hostů“ — bez akcí; prázdné, když rezervace nejsou. */
-function poctyRezervaci(p: PobockaSouhrnu): string {
-  const rez = pocetZTela(p.rezervaci)
-  if (rez === 0) return ''
-  const hoste = pocetZTela(p.hostu)
-  const kusy = [`${rez} ${slovoPodleCisla(rez, 'rezervace', 'rezervace', 'rezervací')}`]
-  if (hoste > 0) kusy.push(`${hoste} ${slovoPodleCisla(hoste, 'host', 'hosté', 'hostů')}`)
-  return kusy.join(', ')
-}
-
 /**
- * Jedna pobočka do nadpisu: „12 rezervací, 46 hostů; akce 18:00 (30 os.)“.
- * Akce jen časem a počtem osob (nadpis jde do push). Víc než tři akce
- * se jen spočítají, ať se nadpis vejde na displej telefonu.
+ * Jedna pobočka do nadpisu. Hosté jsou CELKEM (rezervace i akce) — stejné
+ * číslo jako okénko hostů v Rozpisu směn; u akce se proto řekne „celkem“,
+ * ať se 76 neplete s 12 rezervacemi:
+ *
+ *   „4 rezervace, 15 hostů“
+ *   „12 rezervací + akce 18:00 (30 os.), celkem 76 hostů“
+ *   „akce 19:30 (8 os.)“
+ *
+ * Akce jen časem a počtem osob (nadpis jde do push). Víc než tři akce se
+ * jen spočítají, ať se nadpis vejde na displej telefonu.
  */
 function vetaPobockySouhrnu(p: PobockaSouhrnu): string {
-  const rezervace = poctyRezervaci(p)
+  const rez = pocetZTela(p.rezervaci)
   const akci = pocetZTela(p.akci)
-  if (akci === 0) return rezervace || 'nic v plánu'
+  const hoste = pocetZTela(p.hostu)
+  if (rez === 0 && akci === 0) return 'nic v plánu'
+
+  const rezervace = rez > 0 ? `${rez} ${slovoPodleCisla(rez, 'rezervace', 'rezervace', 'rezervací')}` : ''
+  const hosteText = hoste > 0 ? `${hoste} ${slovoPodleCisla(hoste, 'host', 'hosté', 'hostů')}` : ''
+  if (akci === 0) return [rezervace, hosteText].filter(Boolean).join(', ')
 
   const casy = (p.akce ?? [])
     .filter((a) => typeof a.cas === 'string' && a.cas !== '')
@@ -329,13 +333,14 @@ function vetaPobockySouhrnu(p: PobockaSouhrnu): string {
     akci <= 3 && casy.length === akci
       ? `${akci === 1 ? 'akce' : `${akci} akce`} ${casy.join(', ')}`
       : `${akci} ${slovoPodleCisla(akci, 'akce', 'akce', 'akcí')}`
-  return rezervace ? `${rezervace}; ${akce}` : akce
+  if (!rezervace) return akce
+  return hosteText ? `${rezervace} + ${akce}, celkem ${hosteText}` : `${rezervace} + ${akce}`
 }
 
 /**
  * Nadpis ranního souhrnu:
  *
- *   jedna pobočka   „Dnes: 12 rezervací, 46 hostů; akce 18:00 (30 os.)“
+ *   jedna pobočka   „Dnes: 12 rezervací + akce 18:00 (30 os.), celkem 76 hostů“
  *   víc poboček     „Dnes BBT: 12 rezervací, 46 hostů · RČP: nic v plánu“
  *
  * Zkratky ze stejné funkce jako Rozpis směn a kalendář rezervací
@@ -357,7 +362,7 @@ export function nadpisSouhrnuDne(telo: TeloUpozorneni): string {
 export type RadekSouhrnuDne = {
   /** Celý název pobočky. */
   pobocka: string
-  /** „12 rezervací, 46 hostů (u 2 rezervací počet hostů chybí)“ */
+  /** „12 rezervací · 1 akce · 76 hostů + 2 bez počtu“ — souhrnText z kalendáře. */
   pocty: string
   /** „18:00 Firemní večírek · 30 os. · Salonek“ */
   akce: string[]
@@ -366,17 +371,19 @@ export type RadekSouhrnuDne = {
 /**
  * Výpis pod nadpisem (jen v aplikaci — vidí ho přihlášený, který má na
  * té pobočce rezervace): po pobočkách počty a akce i s názvem a prostorem.
+ * Počty říká stejná věta jako kalendář rezervací (souhrnText).
  */
 export function popisSouhrnuDne(telo: TeloUpozorneni): RadekSouhrnuDne[] {
   const pobocky = Array.isArray(telo.souhrn) ? telo.souhrn : []
   return pobocky.map((p) => {
-    const rez = poctyRezervaci(p)
-    const bezPoctu = pocetZTela(p.bez_poctu)
     const akci = pocetZTela(p.akci)
-    const doplnek =
-      rez && bezPoctu > 0
-        ? ` (u ${bezPoctu} ${slovoPodleCisla(bezPoctu, 'rezervace', 'rezervací', 'rezervací')} počet hostů chybí)`
-        : ''
+    const pocty = souhrnText({
+      rezervaci: pocetZTela(p.rezervaci),
+      akci,
+      hostu: pocetZTela(p.hostu),
+      bezPoctu: pocetZTela(p.bez_poctu),
+      zrusenych: 0,
+    })
 
     const akce = (p.akce ?? []).map((a) =>
       [
@@ -390,11 +397,7 @@ export function popisSouhrnuDne(telo: TeloUpozorneni): RadekSouhrnuDne[] {
     const zbyva = akci - akce.length
     if (zbyva > 0) akce.push(`… a ${zbyva} ${slovoPodleCisla(zbyva, 'další', 'další', 'dalších')} v kalendáři`)
 
-    return {
-      pobocka: p.pobocka?.trim() || 'Pobočka',
-      pocty: rez ? `${rez}${doplnek}` : akci > 0 ? 'Bez rezervací' : 'Nic v plánu',
-      akce,
-    }
+    return { pobocka: p.pobocka?.trim() || 'Pobočka', pocty, akce }
   })
 }
 
