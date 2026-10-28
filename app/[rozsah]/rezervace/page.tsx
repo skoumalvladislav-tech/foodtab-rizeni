@@ -4,6 +4,7 @@ import Sdeleni from '@/app/sdeleni'
 import { getCurrentTenantId } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { denZAdresy, pohledZAdresy, rozsahPohledu } from '@/lib/rezervace-kalendar'
+import { zemeSvatkuFirmy } from '@/lib/svatky-firmy'
 
 import { dnesPobocky, nacistRezervace, nacistZnackyDnu } from './data'
 import { KalendarObsah } from './obsah'
@@ -48,12 +49,24 @@ export default async function RezervaceKalendar({
   if (pohled === 'den') redirect(adresaPohledu(rozsah, 'den', datum))
 
   const { od, do: doDne } = rozsahPohledu(pohled, datum)
-  const [rezervace, znacky] = await Promise.all([
+  const [rezervace, znacky, zemeSvatku] = await Promise.all([
     nacistRezervace(tenantId, pobocky, od, doDne),
     nacistZnackyDnu(tenantId, pobocky, od, doDne),
+    zemeSvatkuFirmy(tenantId),
   ])
 
   // Zkratku a barvu pobočky (rámeček, štítek, legenda) nese už
   // `pobocky` — spočítal je zkusPristupRezervacim ze všech poboček.
-  return <KalendarObsah rozsah={rozsah} pohled={pohled} datum={datum} dnes={dnes} pobocky={pobocky} rezervace={rezervace} znacky={znacky} />
+  return (
+    <KalendarObsah
+      rozsah={rozsah}
+      pohled={pohled}
+      datum={datum}
+      dnes={dnes}
+      pobocky={pobocky}
+      rezervace={rezervace}
+      znacky={znacky}
+      zemeSvatku={zemeSvatku}
+    />
+  )
 }

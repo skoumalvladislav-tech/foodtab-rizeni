@@ -1,4 +1,5 @@
 import type { Osoba, SmenaZaklad } from '@/lib/rozpis-mobil'
+import type { ZemeSvatku } from '@/lib/svatky'
 
 /**
  * Směna tak, jak ji vidí mobilní obrazovky.
@@ -43,4 +44,6 @@ export type KontextM = {
   tvurci: Map<string, string>
   /** Jsou v načtených datech směny z víc poboček? Pak se pobočka připisuje. */
   vicePobocek: boolean
+  /** Země firmy pro svátky (lib/svatky.ts); `null` = svátky té země neznáme, nekreslí se. */
+  zemeSvatku: ZemeSvatku | null
 }

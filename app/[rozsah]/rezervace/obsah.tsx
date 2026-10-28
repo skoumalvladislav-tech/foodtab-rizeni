@@ -6,10 +6,12 @@ import { denDlouze, dnyTydne, hosteText, mrizkaMesice, nazevMesice, nazevTydne, 
 import { obdobiPohledu, souhrnText, souhrnyPobocek } from '@/lib/rezervace-pobocky'
 import { najitSystem } from '@/lib/rezervace-poskytovatele'
 import { NAZVY_DRUHU, NAZVY_STAVU, STAVY, type StavRezervace } from '@/lib/rezervace-typy'
+import { svatekDne, svatkyObdobi, type Svatek, type ZemeSvatku } from '@/lib/svatky'
 
 import { KpiKarta } from '../dnes/prvky'
 import Ikona from '../ikona'
 import Nadpis from '../nadpis'
+import { PruhSvatku, SvatkyObdobi } from '../svatek'
 import { zmenitStav } from './akce'
 import FormularRezervace from './formular'
 import type { PobockaRezervaci } from './pristup'
@@ -51,6 +53,7 @@ export function KalendarObsah({
   pobocky,
   rezervace,
   znacky,
+  zemeSvatku,
 }: {
   rozsah: string
   pohled: Exclude<Pohled, 'den'>
@@ -60,14 +63,17 @@ export function KalendarObsah({
   rezervace: RezervaceRadek[]
   /** Klíč `pobočka|den` → počty poznámek a příloh ke dni. */
   znacky: Map<string, { poznamek: number; priloh: number }>
+  /** Země firmy pro svátky (lib/svatky-firmy.ts); `null` = svátky té země neznáme. */
+  zemeSvatku: ZemeSvatku | null
 }) {
   const poDnech = podleDne(rezervace)
   // Souhrn pobočky jen za zobrazené období — u měsíce bez dnů sousedních
-  // měsíců, které mřížka ukazuje do celých týdnů (a načítá).
+  // měsíců, které mřížka ukazuje do celých týdnů (a načítá). Totéž období má i seznam svátků.
+  const obdobiKalendare = obdobiPohledu(pohled, datum)
   const souhrny = souhrnyPobocek(
     rezervace,
     pobocky.map((p) => p.id),
-    obdobiPohledu(pohled, datum),
+    obdobiKalendare,
   )
   const obdobi = pohled === 'tyden' ? `za týden ${nazevTydne(datum)}` : `za ${nazevMesice(datum).toLowerCase()}`
   const znackyDne = (den: string) =>
@@ -79,6 +85,8 @@ export function KalendarObsah({
       { poznamek: 0, priloh: 0 },
     )
   const smiZapisovat = pobocky.some((p) => p.zapis)
+  // Svátek k buňce se stejným datem — den kalendáře je provozní den toho data (lib/svatky.ts).
+  const svatek = (den: string): Svatek | null => svatekDne(den, zemeSvatku)
 
   return (
     <>
@@ -102,7 +110,7 @@ export function KalendarObsah({
             dnes={dnes}
             smiZapisovat={smiZapisovat}
             pobocky={pobocky}
-            dny={dnyTydne(datum).map((den) => ({ den, rezervace: poDnech.get(den) ?? [], ...znackyDne(den) }))}
+            dny={dnyTydne(datum).map((den) => ({ den, rezervace: poDnech.get(den) ?? [], ...znackyDne(den), svatek: svatek(den) }))}
           />
         ) : (
           <MesicKalendar
@@ -110,10 +118,17 @@ export function KalendarObsah({
             dnes={dnes}
             pobocky={pobocky}
             tydny={mrizkaMesice(datum).map((tyden) =>
-              tyden.map((d) => ({ ...d, rezervace: poDnech.get(d.den) ?? [], poznamek: znackyDne(d.den).poznamek })),
+              tyden.map((d) => ({
+                ...d,
+                rezervace: poDnech.get(d.den) ?? [],
+                poznamek: znackyDne(d.den).poznamek,
+                // Den sousedního měsíce svátek neukazuje — v seznamu pod mřížkou by chyběl a zmátl by.
+                svatek: d.vMesici ? svatek(d.den) : null,
+              })),
             )}
           />
         )}
+        <SvatkyObdobi svatky={svatkyObdobi(obdobiKalendare.od, obdobiKalendare.do, zemeSvatku)} />
       </div>
     </>
   )
@@ -134,6 +149,7 @@ export function DenObsah({
   dnes,
   tenantId,
   kDnu,
+  svatek,
   stav,
   chyba,
 }: {
@@ -142,6 +158,8 @@ export function DenObsah({
   dnes: string
   tenantId: string
   kDnu: DenPobocky[]
+  /** Svátek kalendářního data dne (lib/svatky.ts), nebo `null`. */
+  svatek: Svatek | null
   stav?: string
   chyba?: string
 }) {
@@ -157,6 +175,7 @@ export function DenObsah({
       <div className="ds-rez" style={{ padding: '0 16px 32px' }}>
         <ZalozkyRezervaci rozsah={rozsah} aktivni="kalendar" />
         <NastrojePohledu rozsah={rozsah} pohled="den" datum={datum} dnes={dnes} smiZapisovat={kDnu.some((k) => k.pobocka.zapis)} />
+        <PruhSvatku svatek={svatek} />
         <HlaskaAkce stav={stav} chyba={chyba} />
 
         <div className="ds-rez-kpi">

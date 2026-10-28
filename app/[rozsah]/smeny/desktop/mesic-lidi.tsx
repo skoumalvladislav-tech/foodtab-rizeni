@@ -5,7 +5,9 @@ import ZnackaOsoby from "@/app/znacka-osoby";
 import { hodinyStruc, puntikSmeny, sestavitMesicOsoby, type PotvrzeniRozpisu, type SmenaD } from "@/lib/rozpis-desktop";
 import { cisloDne, inicialy, jeVikend } from "@/lib/rozpis-mobil";
 import { pocet } from "@/lib/sklonovani";
+import { svatekDne, type ZemeSvatku } from "@/lib/svatky";
 
+import { ZnackaSvatku } from "../../svatek";
 import type { Otevrene, Planovani, Smena } from "../rozpis";
 import { KartaSmeny, novaSmenaProOsobu } from "./mrizka";
 
@@ -45,6 +47,7 @@ export default function MesicLidi({
   pobockaProNovou,
   vybranaId,
   onOtevrit,
+  zemeSvatku,
 }: {
   lide: OsobaMesice[];
   /** `RRRR-MM` */
@@ -67,6 +70,8 @@ export default function MesicLidi({
   pobockaProNovou: string | null;
   vybranaId: string | null;
   onOtevrit: (co: Otevrene) => void;
+  /** Země firmy pro svátky (šrafa a název u dne); `null` = nekreslí se. */
+  zemeSvatku: ZemeSvatku | null;
 }) {
   // Kdo pracuje na víc pobočkách, vidí na kartě, kde je která směna.
   const vicePobocek = new Set(smeny.map((s) => s.branch_id)).size > 1;
@@ -91,6 +96,7 @@ export default function MesicLidi({
           pobockaProNovou={pobockaProNovou}
           vybranaId={vybranaId}
           onOtevrit={onOtevrit}
+          zemeSvatku={zemeSvatku}
         />
       ))}
     </div>
@@ -113,6 +119,7 @@ function KartaMesice({
   pobockaProNovou,
   vybranaId,
   onOtevrit,
+  zemeSvatku,
 }: {
   osoba: OsobaMesice;
   mesic: string;
@@ -130,6 +137,8 @@ function KartaMesice({
   pobockaProNovou: string | null;
   vybranaId: string | null;
   onOtevrit: (co: Otevrene) => void;
+  /** Země firmy pro svátky (šrafa a název u dne); `null` = nekreslí se. */
+  zemeSvatku: ZemeSvatku | null;
 }) {
   const kalendar = sestavitMesicOsoby({
     smeny: smeny as SmenaD[],
@@ -184,6 +193,8 @@ function KartaMesice({
             {tyden.dny.map((d) => {
               const obsazeno = d.smeny.length > 0;
               const cislo = cisloDne(d.den);
+              // Den okolního měsíce je ztlumený a svátek u něj nekreslí — patří k jinému měsíci.
+              const svatek = d.vMesici ? svatekDne(d.den, zemeSvatku) : null;
               return (
                 <div
                   key={d.den}
@@ -192,6 +203,7 @@ function KartaMesice({
                   data-dnes={d.den === dnesni ? "" : undefined}
                   data-vikend={jeVikend(d.den) ? "" : undefined}
                   data-mimo={d.vMesici ? undefined : ""}
+                  data-svatek={svatek ? "" : undefined}
                 >
                   <span
                     className="ds-smd-ml-cislo"
@@ -199,6 +211,7 @@ function KartaMesice({
                   >
                     {d.vMesici ? cislo : `${cislo}. ${Number(d.den.slice(5, 7))}.`}
                   </span>
+                  {svatek ? <ZnackaSvatku svatek={svatek} kratce /> : null}
 
                   {d.smeny.map((s) => (
                     <div key={s.id} className="ds-smd-ml-smena">

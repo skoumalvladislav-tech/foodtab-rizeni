@@ -30,8 +30,10 @@ import {
   type ZdrojRezervace,
 } from '@/lib/rezervace-typy'
 import { pocet, sklonovat } from '@/lib/sklonovani'
+import { popisSvatku, type Svatek } from '@/lib/svatky'
 
 import Ikona from '../ikona'
+import { ZnackaSvatku } from '../svatek'
 import { odebratPrilohu, pridatPoznamku, smazatPoznamku, upravitPoznamku } from './akce'
 import NahratPrilohy from './prilohy-nahrat'
 import { ZnackaPobocky } from './znacka-pobocky'
@@ -242,6 +244,8 @@ export type DenTydne = {
   rezervace: RezervaceRadek[]
   poznamek: number
   priloh: number
+  /** Svátek toho data (lib/svatky.ts), nebo `null`. */
+  svatek: Svatek | null
 }
 
 function PolozkaTydne({ rozsah, r }: { rozsah: string; r: RezervaceRadek }) {
@@ -295,7 +299,8 @@ export function TydenKalendar({
             className="ds-plocha ds-rez-den"
             data-dnes={d.den === dnes ? '' : undefined}
             data-vikend={jeVikend(d.den) ? '' : undefined}
-            aria-label={denKratce(d.den)}
+            data-svatek={d.svatek ? '' : undefined}
+            aria-label={d.svatek ? `${denKratce(d.den)}, ${popisSvatku(d.svatek)}` : denKratce(d.den)}
           >
             <Link href={`/${rozsah}/rezervace/den/${d.den}`} className="ds-rez-den-hlava">
               <span className="ds-rez-den-nazev">
@@ -304,6 +309,7 @@ export function TydenKalendar({
               </span>
               <span className="ds-rez-den-cislo ds-cislo">{den}.</span>
             </Link>
+            {d.svatek ? <ZnackaSvatku svatek={d.svatek} /> : null}
             <p className="ds-rez-den-souhrn">{s.rezervaci + s.akci === 0 ? 'Nic zapsaného' : souhrnKratce(s)}</p>
             {d.poznamek + d.priloh > 0 ? (
               <div className="ds-rez-den-znacky">
@@ -353,7 +359,12 @@ export function TydenKalendar({
 
 /* ---------- měsíc ------------------------------------------------------ */
 
-export type DenMesice = DenMrizky & { rezervace: RezervaceRadek[]; poznamek: number }
+export type DenMesice = DenMrizky & {
+  rezervace: RezervaceRadek[]
+  poznamek: number
+  /** Svátek toho data (lib/svatky.ts), nebo `null`. */
+  svatek: Svatek | null
+}
 
 /** Kolik rezervací jedné pobočky se do buňky měsíce vypíše; zbytek je „+ N další“ (celý seznam je v dni). */
 const RADKU_V_BUNCE = 3
@@ -384,14 +395,17 @@ export function MesicKalendar({
         {tydny.flat().map((d) => {
           const s = souhrnDne(d.rezervace)
           const [, , den] = d.den.split('-').map(Number)
-          const prazdny = d.rezervace.length === 0 && d.poznamek === 0
+          const nicZapsaneho = d.rezervace.length === 0 && d.poznamek === 0
+          // Prázdný den se na telefonu ze seznamu dnů schová — svátek ne:
+          // podle něj se plánují lidé i rezervace.
+          const prazdny = nicZapsaneho && !d.svatek
           // Zrušené a nedorazivší se do buňky nevypisují (jsou v dni) —
           // buňka říká, kdo přijde.
           const skupiny = poPobockach(
             d.rezervace.filter((r) => pocitaSeDoHostu(r.stav)),
             poradi,
           )
-          const popis = prazdny
+          const popis = nicZapsaneho
             ? 'nic zapsaného'
             : pobocky.length > 1
               ? pobocky.map((p) => `${p.nazev}: ${souhrnText(souhrnDne(d.rezervace.filter((r) => r.branch_id === p.id)))}`).join('; ')
@@ -404,11 +418,13 @@ export function MesicKalendar({
               data-mimo={d.vMesici ? undefined : ''}
               data-dnes={d.den === dnes ? '' : undefined}
               data-vikend={jeVikend(d.den) && d.vMesici ? '' : undefined}
+              data-svatek={d.svatek ? '' : undefined}
               data-prazdny={prazdny ? '' : undefined}
-              aria-label={`${denKratce(d.den)}: ${popis}${d.poznamek > 0 ? `, ${pocet(d.poznamek, 'poznámka', 'poznámky', 'poznámek')}` : ''}`}
+              aria-label={`${denKratce(d.den)}${d.svatek ? `, ${popisSvatku(d.svatek)}` : ''}: ${popis}${d.poznamek > 0 ? `, ${pocet(d.poznamek, 'poznámka', 'poznámky', 'poznámek')}` : ''}`}
             >
               <span className="ds-rez-bunka-cislo ds-cislo">{den}.</span>
               <span className="ds-rez-bunka-den-nazev">{denKratce(d.den)}</span>
+              {d.svatek ? <ZnackaSvatku svatek={d.svatek} kratce /> : null}
               {s.rezervaci + s.akci > 0 ? <span className="ds-rez-bunka-souhrn">{souhrnKratce(s)}</span> : null}
               {skupiny.map((sk) => {
                 const p = podleId.get(sk.id)

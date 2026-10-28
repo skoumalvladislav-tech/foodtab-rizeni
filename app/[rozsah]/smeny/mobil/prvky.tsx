@@ -12,6 +12,7 @@ import {
   type Osoba,
   type SmenaZaklad,
 } from "@/lib/rozpis-mobil";
+import { popisSvatku, svatekDne, type ZemeSvatku } from "@/lib/svatky";
 
 /**
  * Stavební kameny mobilních Směn — jen kreslí, nic nenačítají.
@@ -129,11 +130,14 @@ export function PruhDnu({
   poplach,
   onVyber,
   onTyden,
+  zemeSvatku,
 }: {
   den: string;
   dnes: string;
   /** Dny, ve kterých je aspoň jedna neobsazená směna. */
   poplach: ReadonlySet<string>;
+  /** Země firmy pro svátky — svátek má v pruhu šrafu a je v popisku. */
+  zemeSvatku: ZemeSvatku | null;
   onVyber: (d: string) => void;
   onTyden: (smer: -1 | 1) => void;
 }) {
@@ -145,8 +149,12 @@ export function PruhDnu({
 
       <div className="ds-sm-dny">
         {dnyTydne(den).map((d, i) => {
+          const svatek = svatekDne(d, zemeSvatku);
           const popisek =
-            popisDne(d) + (d === dnes ? ", dnes" : "") + (poplach.has(d) ? ", je tu neobsazená směna" : "");
+            popisDne(d) +
+            (d === dnes ? ", dnes" : "") +
+            (svatek ? `, ${popisSvatku(svatek)}` : "") +
+            (poplach.has(d) ? ", je tu neobsazená směna" : "");
           return (
             <button
               key={d}
@@ -155,6 +163,7 @@ export function PruhDnu({
               data-vybrany={d === den ? "true" : undefined}
               data-dnes={d === dnes ? "true" : undefined}
               data-vikend={jeVikend(d) ? "true" : undefined}
+              data-svatek={svatek ? "" : undefined}
               aria-pressed={d === den}
               aria-label={popisek}
               onClick={() => onVyber(d)}

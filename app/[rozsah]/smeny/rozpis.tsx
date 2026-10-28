@@ -50,7 +50,9 @@ import {
 import { hostePobocek, type HosteDnu } from "@/lib/rezervace-pobocky";
 import { nazevMesice } from "@/lib/rozpis-export";
 import { BEZ_USEKU, denVTydnu, dnyTydne, mesicniMrizka, minutSmeny } from "@/lib/rozpis-mobil";
+import { svatekDne, svatkyObdobi, type ZemeSvatku } from "@/lib/svatky";
 import Nadpis from "../nadpis";
+import { PruhSvatku, SvatkyObdobi, ZnackaSvatku } from "../svatek";
 import FormularSmeny, { type DalsiSmena, type PredvyplneniSmeny, type SmenaKUprave } from "./formular-smeny";
 // `import type`, ne `import { type … }`: tenhle soubor z ./sablony nic
 // nespouští a serverová akce by se sem tahat neměla vůbec.
@@ -192,9 +194,12 @@ export default function RozpisView({
   vydani,
   vysledekVydani,
   hoste,
+  zemeSvatku,
 }: Props & {
   /** Hosté z rezervací do okénka u dne; `null` = člověk rezervace nevidí (app/[rozsah]/rezervace/hoste.ts). */
   hoste: HosteDnu | null;
+  /** Země firmy pro svátky (lib/svatky-firmy.ts); `null` = svátky té země neznáme, nekreslí se. */
+  zemeSvatku: ZemeSvatku | null;
   planovani: Planovani | null;
   mobil: MobilVstup;
   /** employees.position_id — štítek pod jménem v mřížce na počítači. */
@@ -279,6 +284,7 @@ export default function RozpisView({
     pozice,
     tvurci: mobil.tvurci,
     vicePobocek: new Set(nactene.map((s) => s.branch_id)).size > 1,
+    zemeSvatku,
   };
 
   const updateUrl = (newPohled: Pohled, newDay: string) => {
@@ -647,6 +653,7 @@ export default function RozpisView({
             // Vybraná pobočka v „Zobrazit“ platí i pro hosty: vedoucí plánuje ji.
             hoste={hostePobocek(hoste, filtr.pobocky)}
             rozsahAdresa={mobil.rozsah}
+            zemeSvatku={zemeSvatku}
           />
         )}
 
@@ -669,7 +676,9 @@ export default function RozpisView({
               pobockaProNovou={pobockaProNovou}
               vybranaId={okno?.smena?.id || null}
               onOtevrit={setOtevrene}
+              zemeSvatku={zemeSvatku}
             />
+            <SvatkyObdobi svatky={svatkyMesice(den, zemeSvatku)} />
           </div>
         )}
 
@@ -679,12 +688,14 @@ export default function RozpisView({
               smeny={nactenoFiltrovane}
               den={den}
               onSelectDay={(newDay) => updateUrl("den", newDay)}
+              zemeSvatku={zemeSvatku}
             />
           </div>
         )}
 
         {pohled === "den" && (
           <div className="ds-smd-pohled">
+            <PruhSvatku svatek={svatekDne(den, zemeSvatku)} />
             <DenView
               smeny={smenyFiltrovane}
               den={den}
@@ -1135,14 +1146,25 @@ function useNaTelefonu(): boolean {
   );
 }
 
+/**
+ * Svátky měsíce, do kterého patří `den` — do seznamu pod měsícem. Konec
+ * je vždycky 31.: v kratším měsíci leží za posledním dnem a data se
+ * porovnávají jako text, takže to nevadí.
+ */
+function svatkyMesice(den: string, zeme: ZemeSvatku | null) {
+  return svatkyObdobi(`${den.slice(0, 7)}-01`, `${den.slice(0, 7)}-31`, zeme);
+}
+
 function MesicView({
   smeny,
   den,
   onSelectDay,
+  zemeSvatku,
 }: {
   smeny: Smena[];
   den: string;
   onSelectDay: (day: string) => void;
+  zemeSvatku: ZemeSvatku | null;
 }) {
   // Rozložit datum na rok a měsíc
   const [rok, mesic] = den.split("-");
@@ -1248,11 +1270,14 @@ function MesicView({
             const pocetChybejicich = chybejiciPoDnech.get(denNum) ?? 0;
             // Sloupce jdou Po–Ne (viz záhlaví výš): 5 = sobota, 6 = neděle.
             const vikend = sloupecIdx >= 5;
+            const svatek = denNum ? svatekDne(datumStr, zemeSvatku) : null;
 
             return (
               <button
                 key={sloupecIdx}
                 onClick={() => denNum && onSelectDay(datumStr)}
+                className="ds-smd-mesic-den"
+                data-svatek={svatek ? "" : undefined}
                 style={{
                   padding: "12px 8px",
                   borderRadius: "var(--radius-md)",
@@ -1289,6 +1314,7 @@ function MesicView({
                 {denNum && (
                   <>
                     <strong>{denNum}</strong>
+                    {svatek ? <ZnackaSvatku svatek={svatek} kratce /> : null}
                     {pocetSmeny > 0 && (
                       <span style={{ fontSize: "12px", color: "var(--muted)" }}>
                         {pocet(pocetSmeny, "směna", "směny", "směn")}
@@ -1306,6 +1332,7 @@ function MesicView({
           })}
         </div>
       ))}
+      <SvatkyObdobi svatky={svatkyMesice(den, zemeSvatku)} />
     </div>
   );
 }
