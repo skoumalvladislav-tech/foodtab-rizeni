@@ -5,6 +5,7 @@ import {
   BEZ_USEKU,
   ZKRATKY_DNU,
   cisloDne,
+  dnyTydne,
   hodinyKratce,
   jeVikend,
   lidiPopis,
@@ -24,6 +25,10 @@ import {
   type Osoba,
   type RadekDne,
 } from "@/lib/rozpis-mobil";
+import type { HosteDnu } from "@/lib/rezervace-pobocky";
+import { popisSvatku, svatekDne, svatkyObdobi, type Svatek } from "@/lib/svatky";
+import { PruhSvatku, SvatkyObdobi, ZnackaSvatku } from "../../svatek";
+import { HosteDneRadek } from "../hoste-dne";
 import {
   AvatarM,
   CasKratce,
@@ -86,6 +91,10 @@ export type DenProps = {
   onFiltry: () => void;
   onZrusitFiltr: (druh: "pobocka" | "usek" | "stav", hodnota: string) => void;
   onZobrazitNeobsazene: () => void;
+  /** Hosté z rezervací vybraného dne; `null` = člověk rezervace nevidí. */
+  hoste: HosteDnu | null;
+  /** Adresní segment rozsahu — odkaz na den v Rezervacích. */
+  rozsah: string;
 };
 
 export function DenPrehled(p: DenProps) {
@@ -110,7 +119,14 @@ export function DenPrehled(p: DenProps) {
 
   return (
     <section className="ds-sm-den-pohled" aria-label={popisDne(den)}>
-      <PruhDnu den={den} dnes={dnes} poplach={poplach} onVyber={p.onVybratDen} onTyden={p.onTyden} />
+      <PruhDnu
+        den={den}
+        dnes={dnes}
+        poplach={poplach}
+        onVyber={p.onVybratDen}
+        onTyden={p.onTyden}
+        zemeSvatku={ctx.zemeSvatku}
+      />
 
       <header className="ds-sm-hlava">
         <div className="ds-sm-hlava-text">
@@ -128,6 +144,12 @@ export function DenPrehled(p: DenProps) {
           <TlacitkoFiltru pocet={pocetFiltru} onKlik={p.onFiltry} />
         </div>
       </header>
+
+      {/* Svátek vybraného dne celým názvem — v pruhu dnů je jen šrafa. */}
+      <PruhSvatku svatek={svatekDne(den, ctx.zemeSvatku)} />
+
+      {/* Hosté vybraného dne v toku stránky — plovoucí okénko by na telefonu zakrylo rozpis. */}
+      <HosteDneRadek den={den} hoste={p.hoste} rozsah={p.rozsah} />
 
       {prehled.poUsecich.length > 0 ? (
         <ul className="ds-sm-cipy" aria-label="Lidé podle úseku">
@@ -353,6 +375,7 @@ export function TydenPrehled(p: TydenProps) {
   const jeTentoTyden = popisTydne(den) === popisTydne(dnes);
   const pocetFiltru = filtr.pobocky.length + filtr.useky.length + (filtr.stav !== "vse" ? 1 : 0);
   const stav = stavProFiltr(filtr);
+  const dnyT = dnyTydne(den);
 
   return (
     <section className="ds-sm-tyden-pohled" aria-label={`Týden ${popisTydne(den)}`}>
@@ -366,6 +389,9 @@ export function TydenPrehled(p: TydenProps) {
         </button>
         <TlacitkoFiltru pocet={pocetFiltru} onKlik={p.onFiltry} kompaktni />
       </div>
+
+      {/* Svátky týdne celým názvem; v dlaždicích dnů je šrafa. */}
+      <SvatkyObdobi svatky={svatkyObdobi(dnyT[0], dnyT[6], ctx.zemeSvatku)} />
 
       {!jeTentoTyden ? (
         <div className="ds-sm-hlava-akce ds-sm-hlava-akce-radek">
@@ -420,6 +446,7 @@ export function TydenPrehled(p: TydenProps) {
                       index={i}
                       smeny={d.smeny}
                       dnes={dnes}
+                      svatek={svatekDne(d.den, ctx.zemeSvatku)}
                       jmeno={jmeno}
                       osobaId={osoba?.id ?? null}
                       jeVedouci={jeVedouci}
@@ -442,6 +469,7 @@ function DlazdiceDne({
   index,
   smeny,
   dnes,
+  svatek,
   jmeno,
   osobaId,
   jeVedouci,
@@ -452,6 +480,7 @@ function DlazdiceDne({
   index: number;
   smeny: SmenaM[];
   dnes: string;
+  svatek: Svatek | null;
   jmeno: string;
   osobaId: string | null;
   jeVedouci: boolean;
@@ -459,9 +488,10 @@ function DlazdiceDne({
   onPridat: (pro: { osobaId: string | null; den: string }) => void;
 }) {
   const [prvni] = smeny;
+  const kdy = svatek ? `${popisDne(den)}, ${popisSvatku(svatek)}` : popisDne(den);
   const popisek = prvni
-    ? `${jmeno}, ${popisDne(den)}, ${smeny.map(smenaProOdecitac).join(", ")}`
-    : `${jmeno}, ${popisDne(den)}, volno${jeVedouci ? ", přidat směnu" : ""}`;
+    ? `${jmeno}, ${kdy}, ${smeny.map(smenaProOdecitac).join(", ")}`
+    : `${jmeno}, ${kdy}, volno${jeVedouci ? ", přidat směnu" : ""}`;
   const klikaci = Boolean(prvni) || jeVedouci;
 
   const obsah = (
@@ -489,6 +519,7 @@ function DlazdiceDne({
     "data-stav": prvni ? "smena" : "volno",
     "data-dnes": den === dnes ? "true" : undefined,
     "data-vikend": jeVikend(den) ? "true" : undefined,
+    "data-svatek": svatek ? "" : undefined,
   } as const;
 
   if (!klikaci) {
@@ -620,6 +651,7 @@ function KartaDne({
 }) {
   const kratce = popisDneKratce(den);
   const [zkratka, ...zbytek] = kratce.split(" ");
+  const svatek = svatekDne(den, ctx.zemeSvatku);
 
   const levy = (
     <span className="ds-sm-karta-den">
@@ -633,6 +665,7 @@ function KartaDne({
           <b>{zkratka}</b> {zbytek.join(" ")}
         </span>
       )}
+      {svatek ? <ZnackaSvatku svatek={svatek} kratce /> : null}
     </span>
   );
 
@@ -714,6 +747,8 @@ function Kalendar(p: MojeProps) {
         {tydny.flat().map((d) => {
           const smeny = podleDne.get(d) ?? [];
           const [prvni] = smeny;
+          // Den sousedního měsíce je ztlumený a svátek u něj nekreslí — jako v kalendáři na počítači.
+          const svatek = d.slice(0, 7) === mesic ? svatekDne(d, ctx.zemeSvatku) : null;
           return (
             <button
               key={d}
@@ -723,8 +758,9 @@ function Kalendar(p: MojeProps) {
               data-dnes={d === dnes ? "true" : undefined}
               data-vybrany={d === vybranyDen ? "true" : undefined}
               data-vikend={jeVikend(d) ? "true" : undefined}
+              data-svatek={svatek ? "" : undefined}
               aria-pressed={d === vybranyDen}
-              aria-label={`${popisDne(d)}${d === dnes ? ", dnes" : ""}, ${prvni ? smeny.map(smenaProOdecitac).join(", ") : "volno"}`}
+              aria-label={`${popisDne(d)}${d === dnes ? ", dnes" : ""}${svatek ? `, ${popisSvatku(svatek)}` : ""}, ${prvni ? smeny.map(smenaProOdecitac).join(", ") : "volno"}`}
               onClick={() => p.onVybratDen(d)}
             >
               <span className="ds-sm-mesic-cislo">{cisloDne(d)}</span>

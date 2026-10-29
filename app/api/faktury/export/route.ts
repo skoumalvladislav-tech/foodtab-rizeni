@@ -3,9 +3,11 @@ import { redirect } from 'next/navigation'
 import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { naFaktury, odkazNaPrilohu, SLOUPCE_FAKTURY, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { potrebujeKontrolu, type Faktura } from '@/lib/faktury-types'
 import { pouzitFiltry, type FakturyFiltry } from '@/lib/faktury-filtry'
+import { csvBunka } from '@/lib/csv-bunka'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,23 +17,27 @@ export const dynamic = 'force-dynamic'
  * (`lib/faktury-filtry.ts`, sdílené), aby export vrátil přesně to, co
  * uživatel zrovna vidí na obrazovce.
  *
+ * Odkaz na PDF: má-li faktura vlastní kopii v soukromém úložišti, vede
+ * export na appku (`/api/faktury/soubor/<id>`, chce přihlášení) — ne na
+ * veřejný soubor staré databáze (otázka 46).
+ *
  * Rozsah se z adresy (`?rozsah=`) NEBERE: faktury pobočku nemají, takže
  * `?rozsah=<pobočka>` pustilo vedoucího jedné pobočky k CSV všech faktur
  * firmy (kontrola 13. 10. 2026). Právo se ověřuje vždy za celou firmu.
  */
 
-function csvBunka(hodnota: string | number | null | undefined): string {
-  const s = hodnota === null || hodnota === undefined ? '' : String(hodnota)
-  if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
+
+/** Původ adresy appky pro absolutní odkazy v CSV (relativní by v Excelu nikam nevedl). */
+function zakladOdkazu(request: Request): string {
+  return new URL(request.url).origin
 }
 
-const SLOUPCE: { hlavicka: string; z: (f: Faktura) => string | number | null }[] = [
+const SLOUPCE: { hlavicka: string; z: (f: Faktura, zaklad: string) => string | number | null }[] = [
   { hlavicka: 'Dodavatel', z: (f) => f.supplier },
   { hlavicka: 'IČO dodavatele', z: (f) => f.supplier_ico },
   { hlavicka: 'Číslo faktury', z: (f) => f.invoice_number },
   { hlavicka: 'Variabilní symbol', z: (f) => f.variable_symbol },
-  { hlavicka: 'Částka', z: (f) => f.amount },
+  { hlavicka: 'Částka', z: (f) => (f.castka_haleru / 100).toFixed(2) },
   { hlavicka: 'Měna', z: (f) => f.currency },
   { hlavicka: 'Datum vystavení', z: (f) => f.issue_date },
   { hlavicka: 'DUZP', z: (f) => f.duzp },
@@ -43,7 +49,7 @@ const SLOUPCE: { hlavicka: string; z: (f: Faktura) => string | number | null }[]
   { hlavicka: 'Datum přijetí', z: (f) => f.received_at },
   { hlavicka: 'E-mail odesílatel', z: (f) => f.email_sender },
   { hlavicka: 'Předmět e-mailu', z: (f) => f.email_subject },
-  { hlavicka: 'Odkaz PDF', z: (f) => f.pdf_url },
+  { hlavicka: 'Odkaz PDF', z: (f, zaklad) => odkazNaPrilohu(f, zaklad) },
   { hlavicka: 'Odkaz OneDrive', z: (f) => f.onedrive_url },
   { hlavicka: 'Archivováno', z: (f) => (f.is_archived ? 'ano' : 'ne') },
 ]
@@ -69,26 +75,26 @@ export async function GET(request: Request) {
   }
 
   const pristupFaktury = await pristupKFakturam(tenantId)
-  if (pristupFaktury.stav !== 'ok') return new Response('Faktury pro tuto firmu nejsou napojené.', { status: 404 })
-  const supabase = pristupFaktury.faktury
+  if (pristupFaktury.stav !== 'ok') return new Response('Faktury pro tuto firmu nejsou otevřené.', { status: 404 })
+  const zaklad = zakladOdkazu(request)
   const velikostStranky = 1000
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
-    let dotaz = supabase.from('invoices').select('*')
+    let dotaz = fakturyFirmy(pristupFaktury, SLOUPCE_FAKTURY)
       .order('duzp', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
     dotaz = pouzitFiltry(dotaz, filtry)
     const { data, error } = await dotaz.range(od, od + velikostStranky - 1)
     if (error) return new Response('Nepodařilo se načíst faktury.', { status: 500 })
     if (!data || data.length === 0) break
-    vse.push(...(data as Faktura[]))
+    vse.push(...naFaktury(data as unknown as RadekFaktury[]))
     if (data.length < velikostStranky) break
     od += velikostStranky
   }
 
   const radky = [
     SLOUPCE.map((s) => csvBunka(s.hlavicka)).join(';'),
-    ...vse.map((f) => SLOUPCE.map((s) => csvBunka(s.z(f))).join(';')),
+    ...vse.map((f) => SLOUPCE.map((s) => csvBunka(s.z(f, zaklad))).join(';')),
   ]
   // BOM na začátku, aby Excel správně rozpoznal UTF-8 a diakritiku.
   const csv = '﻿' + radky.join('\r\n') + '\r\n'

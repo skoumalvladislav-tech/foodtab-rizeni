@@ -1,0 +1,111 @@
+# Jiné platby: co appka umí s pokladnou
+
+Stav k 25. 10. 2026. Platí pro agendu Finance → Tržby → Jiné platby.
+Technický návrh je v `docs/jine-platby-navrh.md`.
+
+**Tahle agenda zatím nic neprovedla v žádné skutečné pokladně.** Nic
+z níže uvedeného neběželo proti ostré ani testovací Dotykačce. Všechno
+„testované“ je ověřené na podvržených odpovědích podle oficiální
+dokumentace.
+
+## Jak tabulku číst
+
+| Značka | Co znamená |
+|---|---|
+| **Produkčně ověřeno** | Běží v ostré appce a viděli jsme výsledek na skutečných datech. |
+| **Testováno** | Kód existuje a testy ho spouštějí na podvržených odpovědích pokladny nebo nad čistou databází. Na skutečné pokladně neběžel. |
+| **Připraveno** | Kód existuje, ale je **schválně vypnutý**, než se ověří na testovacím cloudu a Šéfík dá pokyn. |
+| **Blokováno** | Nejde udělat, chybí přístup, rozhodnutí nebo to pokladna neumí. |
+
+## Dotykačka (první konektor)
+
+Zdroj: oficiální dokumentace https://docs.api.dotypos.com/ (verze API
+2026.38.1), ke každé použité adrese odkaz v kódu
+(`lib/pokladna-dotykacka-sklad.ts`).
+
+| Operace | Stav | Poznámka |
+|---|---|---|
+| Přihlášení, seznam provozoven, denní tržby a platby po způsobu | **Produkčně ověřeno** | Hotové od #132, beze změny. Data jsou jen denní součty, ne jednotlivé účty. |
+| Katalog produktů (`GET /products`) | **Testováno** | Načte se do appky kvůli přiřazení položek (přesné ID produktu, jednotka, „odečítat ze skladu“). Od 25. 10. i s recepturami (`include=ingredients`): appka ví, co je pokrm se surovinami, a jménem upozorní, když je surovina pokrmu ve výdeji ještě zvlášť. Bez práva na receptury (403) se katalog načte bez nich a receptura je „neví“. |
+| Přiřazení položek ke katalogu přes AI | **Testováno** | Tlačítko „Najít produkty v pokladně (AI)“ v panelu Sklad. AI vybírá jen z kandidátů, které jí appka nabídne, a jen navrhuje — řádek jde ke kontrole a přiřazení potvrzuje člověk. Do AI nejdou ceny ani id produktů. Návrh: `docs/jine-platby-vydej-dotykacka.md`, oddíl 3. |
+| Dohledání účtů (`GET /orders`, filtr provozovny a času) | **Testováno** | Kontrola „je tenhle prodej už v pokladně?“ podle čísla dokladu. Uzavřené účty se hledají podle **data uzavření** (den před až dva dny po dni prodeje), takže se najde i účet založený dřív. Samotná shoda částky dá jen „pravděpodobně“, nikdy „nalezeno“; u korun s tolerancí zaokrouhlení 50 haléřů (pokladna vrací zaokrouhlený součet). Účty zaplacené *Odpisem* se u tržby neberou jako prodej. Fotka sjetiny nebo dokladu neurčeného typu s otevřeným účtem v pokladně dá „nelze ověřit“, ne „nenalezeno“. Když pokladna hledání podle uzavření odmítne, výsledek je „nelze ověřit“. Filtr `completed` je ověřený jen podle dokumentace. |
+| Otevřené účty (`namedFilter=openOrders`) | **Testováno** | Otevřené účty se hledají zvlášť podle data založení (až 60 dní zpátky). Otevřený účet appka pozná a fotka otevřeného účtu nikdy nedá „nenalezeno“. Až ho pokladna uzavře, zapíše ho sama do tržeb, appka ho proto nezapočítá znovu. Po zápisu tržby jde kontrolu zopakovat (varování „Možná zapsáno dvakrát“). |
+| Dohledání vlastního požadavku podle externího ID (`externalId`) | **Testováno** | Slouží k obnově po výpadku: appka se nejdřív podívá, jestli pokladna požadavek provedla, a teprve pak by smělo vzniknout cokoli dalšího. „Odečteno v POS“ jen pro účet uzavřený, zaplacený a označený jako odpis; jiný nalezený účet nechá výsledek nejasný. Dohledání jde i u pokladny bez zápisu přes API (je to jen čtení). |
+| Odpovědi pokladny 4xx | **Testováno** | „Nic se neprovedlo“ jen u kódů, o kterých to dokumentace říká. Jiný kód, 4xx bez těla, 408 a 429 jsou nejasný výsledek — appka nic neopakuje a dohledává. |
+| **Skladový výdej** přes „POS akci“ (účet zaplacený způsobem *Odpis*) | **Připraveno, vypnuto** | Funkce existuje a je otestovaná na podvržených odpovědích, ale **není připojená**: seznam provozoven se zápisem (`ZAPIS_VYDEJE_DOTYKACKA`) je prázdný. Před odesláním čte nastavení provozovny (licence POS akcí, režim odečtu skladu) a po zápisu porovná položky účtu s výdejem. Postup zapnutí je níž. |
+| Přímý výdej ze skladu (`warehouses/…/sales`) | **Schválně ne** | Nejde dohledat (bez externího klíče, pohyby skladu jen webhookem) — po výpadku spojení by appka nevěděla, jestli odečetla. Viz `docs/jine-platby-vydej-dotykacka.md`, oddíl 1.1. |
+| Korekce provedeného výdeje přes API | **Blokováno** | Dokumentace neříká, jak stornovat vystavený doklad. Korekce je proto vždy ručně doložená oprávněnou osobou. Původní operace v historii zůstává. |
+| Čtení skladových pohybů | **Blokováno** | Dotykačka je přes REST nedává (jen webhook). Appka proto výdej ověřuje dohledáním účtu, ne pohybu. |
+| Vystavení faktury | **Blokováno** | Appka vydané faktury neumí (otázka 51). Jde jen propojit fakturu vystavenou jinde: v pokladně nebo v účetním programu. |
+| Webhooky | **Neimplementováno** | Výsledek se dohledává přímým dotazem, žádná nová veřejná adresa nevzniká. |
+
+## Jak dnes probíhá výdej u Dotykačky (ručně)
+
+1. Obsluha připraví návrh. Schvalovatel ho zkontroluje v appce: originál, položky, množství, přiřazení k produktům a výsledek kontroly „už odečteno?“.
+2. Schvalovatel klikne **Potvrdit výdej do POS**. Appka zaznamená schválení konkrétní verze návrhu a ukáže **podklad pro ruční zpracování**.
+3. Schvalovatel provede odpis v Dotykačce sám: účet s těmito položkami zaplatí způsobem *Odpis*. Pokladna odečte suroviny podle **své** receptury.
+4. V appce klikne **Ručně doloženo**, zadá číslo dokladu z pokladny a důvod. Doložení se váže na otisk návrhu, který měl otevřený; když se návrh mezitím vyměnil, appka ho odmítne.
+5. Stav je **„Ručně doloženo (neověřeno pokladnou)“**, nikdy „Odečteno v POS“.
+6. Mezi kroky 2 a 4 (stav „předáno k ručnímu odpisu“) nejde měnit produkty ani množství a záznam nejde zrušit. Když schvalovatel v pokladně nic neodepsal, klikne **Zrušit schválení** s důvodem.
+7. Když v návrhu je pokrm i kusové zboží (a appka nezná recepturu pokrmu), nebo když je položka surovinou jiné položky téhož výdeje, potvrzení chce zaškrtnutí „Zboží není surovina toho pokrmu, nebo se má odepsat navíc k receptuře“.
+
+Až bude zápis přes API zapnutý: požadavek s nejasným výsledkem appka jen dohledává. Po vypršení jeho platnosti (+ 2 minuty) panel skladu nabídne **Ručně doloženo** (v pokladně proběhl) a **Zrušit schválení** (neproběhl) — obojí po ověření v pokladně a s důvodem. Změna katalogu po schválení doložení nebrání.
+
+## Co musí proběhnout, než se zápis do Dotykačky zapne
+
+Zapnutí v kódu (od 25. 10. 2026): jeden řádek `{ cloudId, provozovna, pokyn }`
+do `ZAPIS_VYDEJE_DOTYKACKA` v `lib/pokladna-dotykacka-zapis.ts` a vědomá
+úprava kontroly „seznam je prázdný“ v `scripts/pokladna-dotykacka-sklad.test.mjs`.
+Adaptér pak připojí zápis jen pro ten cloud a schopnost „api“ platí jen pro
+tu provozovnu; ostatní zůstávají ruční. Provozovnu u pokladny připojené
+k pobočce doplní databáze při zabrání z aktuálního přiřazení (nula nebo víc
+= neodešle se; migrace 20261101100000). Smí se zapnout **jen** když:
+
+1. Na **testovacím cloudu** Dotykačky (licence z 12. 10. 2026) projde
+   postup z `docs/jine-platby-vydej-dotykacka.md`, oddíl 6, hlavně:
+   - že účet zaplacený *Odpisem* odečte suroviny podle receptury;
+   - že se **neobjeví** v denních tržbách (`productSales`) ani v platbách, které appka stahuje. Jinak by se tržba nebo spotřeba započítaly dvakrát;
+   - že dohledání podle `externalId` vrátí právě ten účet s položkami výdeje;
+   - že licence provozovny má funkci `posAction` a režim odečtu není vypnutý;
+   - co udělá pokladna, když je zařízení vypnuté (požadavek musí po vypršení platnosti propadnout).
+2. **Šéfík dá výslovný pokyn** „zapni zápis do Dotykačky“ pro konkrétní provozovnu (otázka 54).
+
+Do té doby appka do skladu Dotykačky **nezapisuje nic**.
+
+## Jiné pokladny
+
+Agenda se ptá jen obecného kontraktu (`lib/pos-provider-contract.ts`).
+Pokladna bez katalogu a bez dohledání účtů (dnes příjmové API pro
+„ostatní pokladny“) funguje takto:
+- přiřazení položek jde jen podle názvů, které pokladna prodala;
+- kontrola „je prodej v pokladně?“ je jen **ruční doložení s důvodem**;
+- výdej je jen ruční.
+
+Nový konektor dodá svůj adaptér a obrazovka ani databáze se nemění.
+
+## Ochrany, které platí pro každou pokladnu
+
+| Ochrana | Kde |
+|---|---|
+| Jeden prodej v pokladně = nejvýš jeden záznam a jedna tržba | unikátní indexy `jine_platby_pos_prodej`, `ostatni_trzby_jedna_na_prodej` |
+| Prodej známý v pokladně se nezapočítá podruhé | `check (not (zapocitat and pos_prodej_id is not null))` |
+| Nejvýš jedna živá operace výdeje na návrh | `pos_operace_jedna_ziva` |
+| Souběžné kliknutí nic neodešle dvakrát | `pos_operace_zahajit` (zámek bez čekání) |
+| Timeout se neopakuje naslepo | `lib/jine-platby-pos-operace.ts`: stav „nejasný výsledek“ a jen dohledání |
+| „Odečteno v POS“ jen s ID operace z pokladny | check `stav <> 'uspech' or externi_id is not null` |
+| Schválení platí jen pro tu verzi návrhu, kterou schvalovatel viděl | otisk obsahu v `jine_platby_skladove_navrhy` (produkt + množství + pokladna); nová nejasná položka návrh zneplatní (`zmena`) |
+| Schválit jde jen zkontrolovaný záznam bez nevyřešených položek | `jine_platby_rozhodnout_vydej` |
+| Druhý výdej téže sjetiny (jinak vyfocené) chce důvod | `app.jp_mozne_duplicity` (stejná pobočka + den + částka, nebo číslo účtu ±7 dní) |
+| Schválený výdej (i když provedení selhalo) a výdej čekající na ruční odpis se nezmění ani nezruší; uvolní ho jen oprávněná osoba | `jine_platby_ulozit_navrh`, `jine_platby_zrusit`, `jine_platby_zrusit_schvaleni` |
+| Ruční doložení ne s nevyřešenou položkou (neodečetla by se nikdy) | `jine_platby_rucne_dolozit_vydej` |
+| Výdej jen s produkty z katalogu pokladny (id a název nejdou z prohlížeče) | blokace v `app.jp_sestavit_vydej`, `jine_platby_ulozit_mapovani` |
+| Kontrola ani výdej nepracují s provozovnou, kterou v Integracích přeřadili jiné pobočce | `app.jp_pokladna_obsluhuje` v sestavení výdeje a v `jine_platby_zapsat_kontrolu` |
+| Ruční prohlášení nepřepíše opačný výsledek z pokladny ani po novém uložení záznamu, ani po ručním prohlášení stejného znění (výsledek pokladny je zvlášť v `pokladna_trzby` / `pokladna_skladu`, píše ho jen kontrola v pokladně); „pravděpodobně“ ze shody jen částky s výslovným potvrzením, konkrétní prodej, shoda čísla účtu a „už odečteno“ jen s právem na opravy. Přepis člověkem nese značku „prepsano“ a dál nebrání (migrace 20261021100000) | `jine_platby_prohlasit` |
+| Konkrétní nález pokladny (`app.jp_nalez_pokladny`) nepřepíše slabší výsledek nové kontroly nad upraveným záznamem; nová tržba, schválení, opakování ani zahájení výdeje proti němu neprojdou | `jine_platby_zapsat_kontrolu`, `jine_platby_potvrdit_trzbu`, `jine_platby_rozhodnout_vydej`, `jine_platby_vydej_znovu`, `pos_operace_zahajit` |
+| Nález pokladny a nedohledaný požadavek platí i přes jiné záznamy téhož dokladu nebo prodeje (stejná fotka, nebo pobočka + den + částka + měna, i zrušené): nová tržba a schválení výdeje jen s právem na opravy, zrušení takového záznamu taky | `app.jp_souvisejici`, `jine_platby_potvrdit_trzbu`, `jine_platby_rozhodnout_vydej`, `jine_platby_zrusit` |
+| Zrušení schválení (i po nejasném výsledku) zahodí starou kontrolu skladu; nové schválení chce čerstvou kontrolu v pokladně. Po zrušení požadavku s nejasným výsledkem zůstane značka `nedohledana_operace`: ruční „neodečteno“ jen s právem na opravy, vymaže ji kontrola skladu v pokladně s jasným výsledkem | `jine_platby_zrusit_schvaleni`, `jine_platby_prohlasit`, `jine_platby_zapsat_kontrolu` |
+| „V pokladně není“ z dotazu jen u uzavřeného prodeje a ruční spotřeby (sjetina, otevřený účet a neurčený doklad nepřítomnost neprokážou) | `jine_platby_zapsat_kontrolu`, `logika.ts` |
+| Nejasný výsledek má po platnosti požadavku východ: ruční doložení nebo zrušení schválení po ověření v pokladně | `jine_platby_rucne_dolozit_vydej`, `jine_platby_zrusit_schvaleni` |
+| Pokrm a kusové zboží v jednom výdeji: varování a schválení jen s výslovným potvrzením (receptury appka nezná) | `varovani` z `jine_platby_sestavit_vydej`, `p_bez_surovin` |
+| Kontrola „už odečteno?“ se opakuje těsně před schválením a před odesláním | platnost 15 minut, vázaná na verzi záznamu |
+| Klíče pokladny jen na serveru | `lib/pokladna-relace.ts` (`server-only`, service_role po ověření práva) |

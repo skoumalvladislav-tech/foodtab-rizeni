@@ -6,18 +6,24 @@ import 'server-only'
  *
  * Sdílí ho naplánovaná úloha i tlačítko „Spustit teď". Obojí běží jako
  * service_role (klientUlohy) — firma se proto bere VÝHRADNĚ z řádku
- * připojení, nikdy z požadavku, a do databáze Faktur se zapisuje jen
- * přes bránu pristupKFakturamUlohy (databáze patří jedné firmě).
+ * připojení, nikdy z požadavku, a do Faktur (od 18. 10. 2026
+ * public.faktury v hlavní databázi) se zapisuje jen přes bránu
+ * pristupKFakturamUlohy (Faktury firmy otevřené) a vždy s tenant_id firmy.
+ *
+ * Jádro (lib/faktury-prijem-jadro.ts) pracuje dál s tvarem řádku staré
+ * databáze (RadekFaktury: supplier, amount v Kč…) — převod na české
+ * sloupce a haléře je jen tady, na hranici s databází.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { klientUlohy } from './supabase/uloha.ts'
-import { pristupKFakturamUlohy } from './supabase/faktury.ts'
+import { fakturyFirmy, pristupKFakturamUlohy, type PristupKFakturam } from './faktury-pristup.ts'
+import { castkaNaHalere } from './faktury-prevod.ts'
 import { rozsifrovat } from './integrace-klice.ts'
 import { nactiDavkuZprav } from './faktury-prijem-imap.ts'
 import { cteniAiJeNastavene, vytezitDokladAI } from './faktury-prijem-ai.ts'
-import { MAX_POKUSU, nacistNastaveni, type StavPrijmu } from './faktury-prijem-typy.ts'
+import { MAX_POKUSU, nacistNastaveni, type RadekFaktury, type StavPrijmu } from './faktury-prijem-typy.ts'
 import { STAV_CASTECNE, STAV_KE_KONTROLE, STAV_NEUHRAZENO, STAV_UHRAZENO } from './faktury-types.ts'
 import {
   zapsatNavrhyJadro,
@@ -86,39 +92,82 @@ export function vzorCisla(cislo: string): string | null {
 
 const VZOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function fakturyDb(klient: SupabaseClient): FakturyDb {
+/**
+ * Kč z vytěžení (číslo) → celé haléře. Přesně, když to jde; jinak se
+ * zaokrouhlí na haléř — stejně jako dřív sloupec numeric(12,2) ve staré
+ * databázi (AI občas vrátí víc desetinných míst). Mimo rozsah → chyba.
+ */
+export function castkaPrijmuNaHalere(castka: number): number {
+  const presne = castkaNaHalere(castka)
+  if (presne !== null) return presne
+  const zaokrouhlene = Math.round(castka * 100)
+  if (!Number.isSafeInteger(zaokrouhlene) || Math.abs(zaokrouhlene) > 2147483647) {
+    throw new Error('Faktury (zápis): částka mimo rozsah')
+  }
+  return zaokrouhlene
+}
+
+/** RadekFaktury (tvar jádra, staré názvy) → řádek public.faktury. */
+export function naRadekFaktur(radek: RadekFaktury, tenantId: string): Record<string, unknown> {
+  return {
+    tenant_id: tenantId,
+    prijato_kdy: radek.received_at,
+    email_odesilatel: radek.email_sender,
+    email_predmet: radek.email_subject,
+    dodavatel: radek.supplier,
+    dodavatel_ico: radek.supplier_ico,
+    cislo_faktury: radek.invoice_number,
+    variabilni_symbol: radek.variable_symbol,
+    castka_haleru: castkaPrijmuNaHalere(radek.amount),
+    mena: radek.currency,
+    datum_vystaveni: radek.issue_date,
+    duzp: radek.duzp,
+    splatnost: radek.due_date,
+    ucet_dodavatele: radek.supplier_account,
+    stav: radek.status,
+    ke_kontrole: radek.needs_review,
+    odkaz_pdf: radek.pdf_url,
+    poznamka_kontroly: radek.review_note,
+    vytah_textu: radek.document_text_excerpt,
+    archivovano: radek.is_archived,
+  }
+}
+
+function fakturyDb(p: Extract<PristupKFakturam, { stav: 'ok' }>): FakturyDb {
   return {
     async vOkne(odIso, doIso) {
-      const { data, error } = await klient.from('invoices').select('id, email_sender, received_at, email_subject')
-        .gte('received_at', odIso).lte('received_at', doIso).limit(200)
+      const { data, error } = await fakturyFirmy(p, 'id, email_sender:email_odesilatel, received_at:prijato_kdy, email_subject:email_predmet')
+        .gte('prijato_kdy', odIso).lte('prijato_kdy', doIso).limit(200)
       hodit(error, 'Faktury (kontrola n8n)')
-      return (data ?? []) as { id: string; email_sender: string | null; received_at: string; email_subject: string | null }[]
+      return (data ?? []) as unknown as { id: string; email_sender: string | null; received_at: string; email_subject: string | null }[]
     },
     async podleCisla(cislo) {
       const vzor = vzorCisla(cislo)
       if (!vzor) return []
-      const { data, error } = await klient.from('invoices').select('id, invoice_number, supplier_ico, supplier, amount')
-        .filter('invoice_number', 'imatch', vzor).limit(50)
+      const { data, error } = await fakturyFirmy(p, 'id, invoice_number:cislo_faktury, supplier_ico:dodavatel_ico, supplier:dodavatel, castka_haleru')
+        .filter('cislo_faktury', 'imatch', vzor).limit(50)
       hodit(error, 'Faktury (kontrola duplicity)')
-      return (data ?? []) as { id: string; invoice_number: string | null; supplier_ico: string | null; supplier: string | null; amount: number | null }[]
+      // Jádro porovnává v Kč (porovnatSFakturou, tolerance 0,01).
+      return ((data ?? []) as unknown as { id: string; invoice_number: string | null; supplier_ico: string | null; supplier: string | null; castka_haleru: number | null }[])
+        .map(({ castka_haleru, ...r }) => ({ ...r, amount: typeof castka_haleru === 'number' ? castka_haleru / 100 : null }))
     },
     async uctyDodavatele(ico) {
-      const { data, error } = await klient.from('invoices').select('supplier_account')
-        .eq('supplier_ico', ico).in('status', [STAV_KE_KONTROLE, STAV_UHRAZENO, STAV_CASTECNE, STAV_NEUHRAZENO])
-        .not('is_duplicate', 'is', true).not('supplier_account', 'is', null).limit(1000)
+      const { data, error } = await fakturyFirmy(p, 'ucet_dodavatele')
+        .eq('dodavatel_ico', ico).in('stav', [STAV_KE_KONTROLE, STAV_UHRAZENO, STAV_CASTECNE, STAV_NEUHRAZENO])
+        .not('duplicita', 'is', true).not('ucet_dodavatele', 'is', null).limit(1000)
       hodit(error, 'Faktury (účty dodavatele)')
-      return ((data ?? []) as { supplier_account: string | null }[]).map((r) => r.supplier_account).filter((u): u is string => !!u)
+      return ((data ?? []) as unknown as { ucet_dodavatele: string | null }[]).map((r) => r.ucet_dodavatele).filter((u): u is string => !!u)
     },
     async podleOdkazu(zaznamId) {
       if (!VZOR_UUID.test(zaznamId)) return null
-      const { data, error } = await klient.from('invoices').select('id')
-        .like('pdf_url', `%/api/faktury/priloha/${zaznamId}`).limit(1)
+      const { data, error } = await fakturyFirmy(p, 'id')
+        .like('odkaz_pdf', `%/api/faktury/priloha/${zaznamId}`).limit(1)
       hodit(error, 'Faktury (kontrola dvojího zápisu)')
-      const radek = (data ?? [])[0] as { id: string | number } | undefined
+      const radek = (data ?? [])[0] as unknown as { id: string } | undefined
       return radek ? String(radek.id) : null
     },
     async vlozit(radek) {
-      const { data, error } = await klient.from('invoices').insert(radek).select('id').single()
+      const { data, error } = await p.supabase.from('faktury').insert(naRadekFaktur(radek, p.tenantId)).select('id').single()
       hodit(error, 'Faktury (zápis)')
       return String((data as { id: string }).id)
     },
@@ -155,9 +204,9 @@ function repozitar(supabase: SupabaseClient): Repozitar {
       return (data?.ico as string | null | undefined) ?? null
     },
 
-    fakturyProFirmu(tenantId) {
-      const pristup = pristupKFakturamUlohy(tenantId)
-      return pristup.stav === 'ok' ? fakturyDb(pristup.faktury) : null
+    async fakturyProFirmu(tenantId) {
+      const pristup = await pristupKFakturamUlohy(tenantId)
+      return pristup.stav === 'ok' ? fakturyDb(pristup) : null
     },
 
     async oznacitPripojeni(id, zmena) {

@@ -5,15 +5,18 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { zkusPristupFinanci } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { hlaskaBrany } from '@/lib/faktury-brana'
+import { naFaktury, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { jeNezaplacena, type Faktura } from '@/lib/faktury-types'
 import { canSee } from '@/lib/authz'
 import { koruny } from '@/lib/mzdy'
-import { jeVracena, navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type Navrh } from '@/lib/finance-parovani'
+import { jeVKorunach, jeVracena, kandidatiProNavrhy, navrhnoutParovani, type KandidatFaktura, type KandidatTransakce, type Navrh } from '@/lib/finance-parovani'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { CELA_FIRMA, nazevPobockyUctu, volbyPobockyUctu, type PobockaFirmy } from '@/lib/finance-platby-pobocka'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import Sdeleni from '@/app/sdeleni'
+import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import { zalozitPlatebniUcet, zapsatTransakci, potvrditParovani, zrusitAlokaci, zmenitPobockuUctu } from './akce'
@@ -102,12 +105,14 @@ async function nactiPotvrzeneAlokace(
   // pak se načte jen to, co šlo dřív.
   const zaklad = () => supabase
     .from('platby_faktury')
-    .select('id, transakce_id, faktura_id, castka_haleru, potvrzeno_kdy, zpusob')
+    .select('id, transakce_id, faktura, faktura_id, castka_haleru, potvrzeno_kdy, zpusob')
     .eq('tenant_id', tenantId)
     .eq('stav', 'potvrzeno')
     .order('potvrzeno_kdy', { ascending: false })
+  // Filtr z adresy jen jako uuid — jinak by dotaz spadl na přetypování.
+  const fakturaUuid = fakturaId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fakturaId) ? fakturaId : null
   const [rucni, automaticka] = fakturaId
-    ? [await zaklad().eq('faktura_id', fakturaId).limit(200), { data: [], error: null }]
+    ? [fakturaUuid ? await zaklad().eq('faktura', fakturaUuid).limit(200) : { data: [], error: null }, { data: [], error: null }]
     : await Promise.all([zaklad().eq('zpusob', 'rucne').limit(20), zaklad().eq('zpusob', 'automaticky').limit(50)])
   const zalozni = () => {
     const dotaz = supabase
@@ -122,14 +127,15 @@ async function nactiPotvrzeneAlokace(
     ? await zalozni()
     : { data: [...(rucni.data ?? []), ...(automaticka.data ?? [])] }
 
-  const alokace = (data ?? []) as {
+  const alokace = ((data ?? []) as {
     id: string
     transakce_id: string
+    faktura?: string | null
     faktura_id: string
     castka_haleru: number
     potvrzeno_kdy: string | null
     zpusob?: string | null
-  }[]
+  }[]).map((a) => ({ ...a, faktura_id: a.faktura ?? a.faktura_id }))
   if (alokace.length === 0) return []
 
   const transakceIds = [...new Set(alokace.map((a) => a.transakce_id))]
@@ -160,20 +166,16 @@ async function nactiPotvrzeneAlokace(
     if (jeVracena({ vs: t.vs ?? '', castkaHaleru: t.castka_haleru, datum: t.datum, protistrana: t.protistrana ?? '' }, prijmy)) vracene.add(a.id)
   }))
 
-  // Jméno dodavatele je jen pro zobrazení — appka tu znovu NEČTE
-  // `invoices.status` jako zdroj pravdy (ten zůstal v Fakturách jen
-  // jako best-effort kopie), pouze dodavatele k číslu faktury.
+  // Jméno dodavatele jen pro zobrazení. Párování bez faktury (ve staré
+  // databázi zmizela) zůstane jen s číslem — jde zrušit.
   let dodavateleMapa = new Map<string, string>()
   const pristupFaktury = vidiFaktury ? await pristupKFakturam(tenantId) : null
   if (pristupFaktury?.stav === 'ok') {
     try {
       const fakturyIds = [...new Set(alokace.map((a) => a.faktura_id))]
-      const { data: fakturyData } = await pristupFaktury.faktury
-        .from('invoices')
-        .select('id, supplier')
-        .in('id', fakturyIds)
+      const { data: fakturyData } = await fakturyFirmy(pristupFaktury, 'id, dodavatel').in('id', fakturyIds)
       dodavateleMapa = new Map(
-        ((fakturyData ?? []) as { id: string; supplier: string | null }[]).map((f) => [f.id, f.supplier ?? '']),
+        ((fakturyData ?? []) as unknown as { id: string; dodavatel: string | null }[]).map((f) => [f.id, f.dodavatel ?? '']),
       )
     } catch {
       // Best-effort — bez dodavatele appka ukáže jen číslo faktury.
@@ -201,37 +203,46 @@ async function nactiNavrhyParovani(
   transakce: readonly Transakce[],
   alokovanoMapa: ReadonlyMap<string, number>,
   vidiFaktury: boolean,
-): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[] }> {
-  if (!vidiFaktury) return { navrhy: [], faktury: [] }
+): Promise<{ navrhy: { navrh: Navrh; faktura: KandidatFaktura }[]; faktury: KandidatFaktura[]; zavreno: string | null }> {
+  if (!vidiFaktury) return { navrhy: [], faktury: [], zavreno: null }
   const pristupFaktury = await pristupKFakturam(tenantId)
-  if (pristupFaktury.stav !== 'ok') return { navrhy: [], faktury: [] }
+  // Zavřené Faktury (stěhují se, vrácené, chyba) — říct proč, ne mlčet.
+  if (pristupFaktury.stav !== 'ok') {
+    return { navrhy: [], faktury: [], zavreno: `${hlaskaBrany(pristupFaktury).text} Párování s fakturami teď nejde.` }
+  }
+  const nenacteno = { navrhy: [], faktury: [], zavreno: 'Faktury pro párování se nepodařilo načíst — zkuste stránku obnovit.' }
 
   const faktury: Faktura[] = []
   try {
     for (let strana = 0; strana < 10; strana++) {
-      const { data, error } = await pristupFaktury.faktury
-        .from('invoices')
-        .select('id, supplier, variable_symbol, amount, due_date, issue_date, status')
-        .eq('is_archived', false)
+      const { data, error } = await fakturyFirmy(pristupFaktury,
+        'id, supplier:dodavatel, variable_symbol:variabilni_symbol, castka_haleru, currency:mena, due_date:splatnost, issue_date:datum_vystaveni, status:stav')
+        .eq('archivovano', false)
         .order('id', { ascending: true })
         .range(strana * STRANKA_FAKTUR, strana * STRANKA_FAKTUR + STRANKA_FAKTUR - 1)
-      if (error) return { navrhy: [], faktury: [] }
-      faktury.push(...((data ?? []) as Faktura[]).filter(jeNezaplacena))
+      if (error) return nenacteno
+      faktury.push(...naFaktury(data as unknown as RadekFaktury[]).filter(jeNezaplacena))
       if (!data || data.length < STRANKA_FAKTUR) break
     }
   } catch {
-    return { navrhy: [], faktury: [] }
+    return nenacteno
   }
 
-  if (faktury.length === 0) return { navrhy: [], faktury: [] }
+  if (faktury.length === 0) return { navrhy: [], faktury: [], zavreno: null }
 
-  const kandidati: KandidatFaktura[] = faktury.map((f) => ({
+  const naKandidata = (f: Faktura): KandidatFaktura => ({
     id: f.id,
     vs: f.variable_symbol,
-    castkaHaleru: Math.round(f.amount * 100),
+    castkaHaleru: f.castka_haleru,
     dodavatel: f.supplier,
     datum: f.due_date ?? f.issue_date,
-  }))
+    mena: f.currency,
+  })
+  // Ruční párování nabízí všechny; NÁVRHY jen faktury v Kč — platby jsou
+  // v Kč a centy eurové faktury by se porovnaly s haléři (stejně jako
+  // automatické párování, vybratAutomatickaParovani).
+  const kandidati: KandidatFaktura[] = faktury.map(naKandidata)
+  const kandidatiNavrhu: KandidatFaktura[] = kandidatiProNavrhy(faktury)
 
   const vysledky: { navrh: Navrh; faktura: KandidatFaktura }[] = []
   for (const t of transakce) {
@@ -247,12 +258,12 @@ async function nactiNavrhyParovani(
       protistrana: t.protistrana,
       datum: t.datum,
     }
-    const navrh = navrhnoutParovani(kandidatTransakce, kandidati)
+    const navrh = navrhnoutParovani(kandidatTransakce, kandidatiNavrhu)
     if (!navrh) continue
-    const faktura = kandidati.find((k) => k.id === navrh.fakturaId)
+    const faktura = kandidatiNavrhu.find((k) => k.id === navrh.fakturaId)
     if (faktura) vysledky.push({ navrh, faktura })
   }
-  return { navrhy: vysledky, faktury: kandidati }
+  return { navrhy: vysledky, faktury: kandidati, zavreno: null }
 }
 
 export default async function FinancePlatby({
@@ -270,6 +281,7 @@ export default async function FinancePlatby({
 
   const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
+  if (pristup.stav === 'pobocka_bez_firmy') return <SdeleniPobockyBezFirmy rozsah={rozsah} />
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Platby vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
@@ -343,7 +355,7 @@ export default async function FinancePlatby({
   // Párování (návrhy, ruční, potvrzená) jen za celou firmu — na pobočce
   // se nenačítá ani databáze Faktur.
   const parovani: Awaited<ReturnType<typeof nactiNavrhyParovani>> = pobocka
-    ? { navrhy: [], faktury: [] }
+    ? { navrhy: [], faktury: [], zavreno: null }
     : await nactiNavrhyParovani(tenantId, transakce, alokovanoMapa, vidiFaktury)
   const { navrhy, faktury: fakturyKandidati } = parovani
   const potvrzeneAlokace: PotvrzenaAlokace[] = pobocka
@@ -419,6 +431,8 @@ export default async function FinancePlatby({
           <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
             Párování plateb s fakturami vidí ten, kdo má právo „Vidět přijaté faktury“.
           </p>
+        ) : parovani.zavreno ? (
+          <p role="status" style={{ margin: 0, fontSize: '13px', color: 'var(--pozor)' }}>{parovani.zavreno}</p>
         ) : null}
 
         {navrhy.length > 0 ? (
@@ -488,7 +502,7 @@ export default async function FinancePlatby({
                   <option value="" disabled>— vyberte —</option>
                   {fakturyKandidati.map((f) => (
                     <option key={f.id} value={f.id}>
-                      {f.dodavatel ?? '—'} · {koruny(f.castkaHaleru)}{f.vs ? ` · VS ${f.vs}` : ''}
+                      {f.dodavatel ?? '—'} · {jeVKorunach(f.mena) ? koruny(f.castkaHaleru) : `${(f.castkaHaleru / 100).toFixed(2).replace('.', ',')} ${f.mena}`}{f.vs ? ` · VS ${f.vs}` : ''}
                     </option>
                   ))}
                 </select>

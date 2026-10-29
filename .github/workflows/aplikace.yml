@@ -35,6 +35,7 @@ on:
       - 'next.config.ts'
       - 'proxy.ts'
       - '.github/workflows/aplikace.yml'
+      - 'docs/hlaseni/otazky.md'
   pull_request:
     paths:
       - 'app/**'
@@ -50,6 +51,7 @@ on:
       - 'next.config.ts'
       - 'proxy.ts'
       - '.github/workflows/aplikace.yml'
+      - 'docs/hlaseni/otazky.md'
 
 permissions:
   contents: read
@@ -89,8 +91,8 @@ jobs:
           # SEZNAM. Každý z nich na main (0a38fb6) prošel, v pásmu Praha
           # i UTC. Nový test sem připiš, jakmile prochází.
           TESTY=(
-            adresa cas ceka-na-opravneni dochazka-cloveka dochazka-dnes dochazka-stav faktury-filtry
-            faktury-navigace faktury-prijem faktury-prijem-jadro faktury-tenant-izolace integrace-mail-imap-moznosti finance-csv-import finance-plan finance-parovani finance-rolling-vyhled finance-pobocky finance-platby-pobocka finance-evidence-pobocka banka-synchronizace kb-adaa pokladna-csv-import pokladna-dotykacka pokladna-napojeni pokladna-trzby finance-obdobi finance-telefon ucetni-export firma-prepnuti fronta-push kiosek komunikace komunikace-akce manifest
+            adresa cas ceka-na-opravneni css-prepinani dochazka-cloveka dochazka-dnes dochazka-stav faktury-filtry
+            faktury-navigace faktury-prevod faktury-sloupce faktury-prijem faktury-prijem-jadro faktury-tenant-izolace integrace-mail-imap-moznosti finance-csv-import finance-plan finance-parovani finance-rolling-vyhled finance-pobocky finance-platby-pobocka finance-evidence-pobocka banka-synchronizace kb-adaa pokladna-csv-import pokladna-dotykacka pokladna-napojeni pokladna-trzby finance-obdobi finance-telefon jine-platby jine-platby-pos-operace jine-platby-ai jine-platby-ai-parovani jine-platby-obrazovka jine-platby-detail jine-platby-kiosek pokladna-dotykacka-sklad ucetni-export firma-prepnuti fronta-push kiosek komunikace komunikace-akce manifest
             marketing marketing-audit marketing-granty marketing-kalendar
             marketing-kampane marketing-kanaly marketing-media
             marketing-media-pouziti marketing-menu marketing-menu-tabulka
@@ -98,9 +100,9 @@ jobs:
             marketing-odkazy marketing-prihlaseni marketing-pruvodce
             marketing-publikovane marketing-rozcestnik marketing-sablony
             marketing-schvalovani marketing-tvorba nabidka nahrani-lidi
-            osloveni penize planovac prava-osob prideleni prihlaseni provoz-granty
-            qr ranni-prehled rozpis-desktop rozpis-export rozpis-mobil
-            scenare sklonovani smeny-formular smeny-potvrzeni smeny-ruseni tabulka ucet ui-okna upozorneni vydelky
+            osloveni otazky-cisla penize planovac prava-osob prideleni prihlaseni provoz-granty
+            qr ranni-prehled rezervace rezervace-choice rezervace-pobocky rozpis-desktop rozpis-export rozpis-mobil
+            scenare sklonovani smeny-formular smeny-hoste smeny-potvrzeni smeny-ruseni svatky tabulka ucet ui-okna upozorneni vydelky
             web-push xlsx zalohy ziva-aktualizace
           )
 

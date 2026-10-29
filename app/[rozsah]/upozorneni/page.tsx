@@ -14,6 +14,7 @@ import {
   popisOpravneni,
   popisPinu,
   popisSmenaOdmitnuta,
+  popisSouhrnuDne,
   popisZalohy,
   popisZapomenuteho,
   odkazNaZalohu,
@@ -24,6 +25,7 @@ import {
   zmenaSmeny,
   type TeloUpozorneni,
 } from '@/lib/upozorneni-text'
+import { odkazUpozorneni } from '@/lib/upozorneni-odkaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 import Sdeleni from '@/app/sdeleni'
 import Nadpis from '../nadpis'
@@ -415,6 +417,36 @@ export default async function Upozorneni({
                         {z.druh === 'marketing.zadost' ? 'Otevřít frontu ke schválení'
                           : z.druh === 'marketing.publikace_selhala' ? 'Otevřít příspěvek'
                             : 'Otevřít příspěvek'}
+                      </Link>
+                    </p>
+                  </>
+                ) : null}
+
+                {/*
+                  RANNÍ SOUHRN REZERVACÍ. Nadpis nese jen čísla a časy (jde
+                  i na zamčenou obrazovku telefonu); tady pod ním je výpis po
+                  pobočkách i s názvy akcí a prostorem — ten vidí jen přihlášený.
+                */}
+                {z.druh === 'rezervace.souhrn_dne' ? (
+                  <>
+                    {popisSouhrnuDne(z.telo).map((p, i) => (
+                      <div key={i} style={{ margin: '8px 0 0', fontSize: '14px' }}>
+                        <strong>{p.pobocka}</strong> — {p.pocty}
+                        {p.akce.length > 0 ? (
+                          <ul style={{ margin: '4px 0 0', paddingLeft: '18px' }}>
+                            {p.akce.map((a, j) => (
+                              <li key={j}>{a}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ))}
+                    <p style={{ margin: '10px 0 0' }}>
+                      <Link
+                        href={odkazUpozorneni(rozsah, { druh: z.druh, telo: z.telo })}
+                        className="ft-tl ft-tl-hlavni ft-tl-male"
+                      >
+                        Otevřít rezervace
                       </Link>
                     </p>
                   </>

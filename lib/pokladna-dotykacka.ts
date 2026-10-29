@@ -42,6 +42,15 @@
  *     a `total` je částka v hlavní měně (vedle je `rawTotal`). Ověří se
  *     prvním živým porovnáním s uzávěrkou (hotovost/karta).
  *
+ * JINÉ PLATBY (16. 10. 2026, dokumentace verze API 2026.38.2): relace
+ * navíc umí katalog produktů, účty provozovny a účet podle externího klíče
+ * — `lib/pokladna-dotykacka-sklad.ts` (`cteniDotykacky`), tam jsou i odkazy
+ * na stránky dokumentace. Napsané podle dokumentace, ŽIVĚ NEOVĚŘENÉ.
+ * Skladový výdej přes POS akci je napsaný a k relaci se připojí jen pro
+ * provozovny z `ZAPIS_VYDEJE_DOTYKACKA` (lib/pokladna-dotykacka-zapis.ts).
+ * Ten seznam je prázdný, takže `skladovyVydej: 'rucne'` a relace žádnou
+ * metodu zápisu nemá (viz schopnosti níž).
+ *
  * Bez `server-only` schválně: síťové volání jde podstrčit (`vytvoritDotykacku(fetchFn)`),
  * takže `scripts/pokladna-dotykacka.test.mjs` ověří tvar požadavků
  * i výklad odpovědí bez sítě. Žádné tajemství z prostředí tu není —
@@ -51,6 +60,8 @@
 import { createHmac } from 'node:crypto'
 
 import type { ChybaPos, DruhPlatby, PosProvider, ProvozovnaPos, RadekPlatby, RadekProdeje, RelacePos, UdajePos } from './pos-provider-contract.ts'
+import { cteniDotykacky, zapisVydejeDotykacka, type KontextDotykacky, type OdpovedDotykacky } from './pokladna-dotykacka-sklad.ts'
+import { povoleneProvozovny, ZAPIS_VYDEJE_DOTYKACKA, type PovolenyZapis } from './pokladna-dotykacka-zapis.ts'
 
 export const API_DOTYKACKA = 'https://api.dotykacka.cz/v2'
 export const CONNECTOR_DOTYKACKA = 'https://admin.dotykacka.cz/client/connect/v2'
@@ -275,33 +286,208 @@ function chybaZeStavu(status: number, coDelam: string, telo: unknown = null): Ch
   return { stav: 'chyba', druh: 'jina', duvod: `Dotykačka odpověděla HTTP ${status} při ${coDelam}.` }
 }
 
-/** Jedno volání: buď stav a rozparsované tělo (null, když to není JSON), nebo chyba sítě. Text odpovědi do hlášek nejde. */
-async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit): Promise<{ status: number; telo: unknown } | ChybaPos> {
+const jeCislice = (c: number) => c >= 0x30 && c <= 0x39
+
+/**
+ * Celá čísla o 16 a víc číslicích MIMO řetězce → text v uvozovkách.
+ * Jeden průchod znak po znaku (bez regulárního výrazu — ten u obřích
+ * řetězců přetekl zásobník a u neuzavřených se zpomaloval kvadraticky):
+ * řetězce se přeskočí celé i s escapy, číslo se přečte celé jako token
+ * (`-?číslice[.číslice][e±číslice]`), takže kus desetinného čísla ani
+ * exponent se nikdy nebere zvlášť. Desetinná čísla a exponenty zůstávají.
+ */
+export function chranitDlouhaCisla(text: string): string {
+  const n = text.length
+  let vysledek = ''
+  let od = 0
+  let i = 0
+  while (i < n) {
+    const c = text.charCodeAt(i)
+    if (c === 0x22) {
+      // Řetězec až po neescapovanou uvozovku (neuzavřený do konce textu).
+      i++
+      while (i < n) {
+        const d = text.charCodeAt(i)
+        if (d === 0x5c) i += 2
+        else if (d === 0x22) {
+          i++
+          break
+        } else i++
+      }
+      continue
+    }
+    if (c === 0x2d || jeCislice(c)) {
+      const zacatek = i
+      if (c === 0x2d) i++
+      const prvniCislice = i
+      while (i < n && jeCislice(text.charCodeAt(i))) i++
+      const cislic = i - prvniCislice
+      let cele = true
+      if (i < n && text.charCodeAt(i) === 0x2e) {
+        cele = false
+        i++
+        while (i < n && jeCislice(text.charCodeAt(i))) i++
+      }
+      if (i < n && (text.charCodeAt(i) | 0x20) === 0x65) {
+        cele = false
+        i++
+        if (i < n && (text.charCodeAt(i) === 0x2b || text.charCodeAt(i) === 0x2d)) i++
+        while (i < n && jeCislice(text.charCodeAt(i))) i++
+      }
+      if (cele && cislic >= 16) {
+        vysledek += `${text.slice(od, zacatek)}"${text.slice(zacatek, i)}"`
+        od = i
+      }
+      continue
+    }
+    i++
+  }
+  return od === 0 ? text : vysledek + text.slice(od)
+}
+
+/**
+ * Tělo odpovědi → JSON. `undefined` = JSON to není ani po opravách.
+ *
+ * Dokumentace slibuje čísla jako řetězce (api-reference/general/data-types),
+ * ale id jsou typu `long` (entity/product). Kdyby přišlo jako číslo nad
+ * 2^53, `JSON.parse` by ho tiše zaokrouhlil a produkt by dostal cizí id —
+ * proto se dlouhá celá čísla před čtením převedou na text. Druhý pokus
+ * (jen když první selže) nahradí řídicí znaky mezerou: v textu produktu
+ * (popis, `recipe` až 8 192 znaků) by syrový tabulátor nebo konec řádku
+ * shodil celou stránku katalogu. Mimo řetězce je mezera jen jiná mezera.
+ * Úvodní BOM se zahodí. Výjimku nevyhodí nikdy.
+ */
+export function naparsovatJson(text: string): unknown {
+  const bezBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+  let chranene = bezBom
+  try {
+    chranene = chranitDlouhaCisla(bezBom)
+  } catch {
+    // (jen pro jistotu — průchod sám nevyhazuje) čte se bez ochrany
+  }
+  try {
+    return JSON.parse(chranene)
+  } catch {
+    // zkusí se ještě s opravou řídicích znaků
+  }
+  try {
+    return JSON.parse(chranene.replace(/[\u0000-\u001f]/g, ' '))
+  } catch {
+    return undefined
+  }
+}
+
+/** Druh znaku do hlášky — jen druh, ne znak sám. */
+function druhZnaku(z: string): string {
+  if (z === '') return 'konec'
+  const c = z.charCodeAt(0)
+  if (c < 0x20 || c === 0x7f) return 'řídicí znak'
+  if (z === '\\') return 'zpětné lomítko'
+  if (z === '"') return 'uvozovka'
+  if (/\p{L}/u.test(z)) return 'písmeno'
+  if (/\d/.test(z)) return 'číslice'
+  return 'jiný znak'
+}
+
+/**
+ * Vlastní text V8 s pozicí — „… in JSON at position N (line L column C)",
+ * u nadbytečného znaku za koncem „… after JSON at position N (…)" —
+ * ukotvený na konec hlášky.
+ */
+const POZICE_V8 = / (?:in|after) JSON at position (\d+)(?: \(line \d+ column \d+\))?$/
+const KONEC_V8 = /^Unexpected end of JSON input$/
+
+/**
+ * Kde `JSON.parse` nad tělem skončil: pozice z hlášky V8 (jen číslo)
+ * a druh znaku na ní, v souřadnicích PŮVODNÍHO textu (i s BOM).
+ * `uriznuto` = čtení skončilo až za posledním znakem (uříznuté tělo) —
+ * ne „na posledním znaku", tam je nadbytečný znak za koncem JSON.
+ *
+ * Hlášky V8 bez pozice („Unexpected token …, "<úryvek těla>" is not valid
+ * JSON") nesou úryvek TĚLA — z nich se nebere nic: číslo nebo „end of JSON
+ * input" uvnitř úryvku by byla hodnota z odpovědi vydávaná za pozici.
+ */
+export function chybaJson(text: string): { pozice: number | null; znakNaPozici: string | null; uriznuto: boolean } {
+  const posun = text.charCodeAt(0) === 0xfeff ? 1 : 0
+  const bezBom = text.slice(posun)
+  try {
+    JSON.parse(bezBom.replace(/[\u0000-\u001f]/g, ' '))
+    return { pozice: null, znakNaPozici: null, uriznuto: false }
+  } catch (e) {
+    const zprava = e instanceof Error ? e.message : ''
+    if (KONEC_V8.test(zprava)) return { pozice: text.length, znakNaPozici: 'konec', uriznuto: true }
+    const m = POZICE_V8.exec(zprava)
+    if (!m) return { pozice: null, znakNaPozici: null, uriznuto: false }
+    const pozice = Number(m[1])
+    if (pozice >= bezBom.length) return { pozice: text.length, znakNaPozici: 'konec', uriznuto: true }
+    return { pozice: pozice + posun, znakNaPozici: druhZnaku(bezBom.charAt(pozice)), uriznuto: false }
+  }
+}
+
+/** První viditelný znak těla pro hlášku — jeden znak nic neprozradí, a „<" znamená HTML místo JSON. `null` = jiný znak. */
+function prvniZnak(text: string): string | null {
+  const z = text.trimStart().charAt(0)
+  return /^[\p{L}\p{N}<>{}[\]"]$/u.test(z) ? z : null
+}
+
+/**
+ * Jedno volání: buď stav a rozparsované tělo (null, když přišlo prázdné —
+ * `prazdne` — nebo to není JSON — pak `nejson` řekne délku, první znak
+ * a kde čtení skončilo), nebo chyba sítě. Text odpovědi do hlášek nejde.
+ */
+async function pozadavek(fetchFn: Fetch, url: string, init: RequestInit, casovyLimitMs: number = CASOVY_LIMIT_MS): Promise<OdpovedDotykacky | ChybaPos> {
   let odpoved: Response
   try {
-    odpoved = await fetchFn(url, { ...init, signal: AbortSignal.timeout(CASOVY_LIMIT_MS) })
+    odpoved = await fetchFn(url, { ...init, signal: AbortSignal.timeout(casovyLimitMs) })
   } catch (e) {
     const proc = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'vypršel čas' : 'spojení selhalo'
     return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka neodpověděla (${proc}) — appka to zkusí příště.` }
   }
 
-  const text = await odpoved.text().catch(() => '')
-  let telo: unknown = null
-  if (text) {
-    try {
-      telo = JSON.parse(text)
-    } catch {
-      telo = null
-    }
+  // Přerušené čtení těla (spojení spadlo, vypršel čas) u ÚSPĚCHU (2xx) NENÍ prázdná
+  // odpověď — dřív z něj byl „neočekávaný tvar" a dočasná chyba vypadala jako trvalá.
+  // U jiného stavu rozhoduje stav sám jako dřív (POS akce: 401/403 = k pokladně
+  // nedošlo; z „neodpověděla" by se stalo nejasné).
+  let text: string
+  try {
+    text = await odpoved.text()
+  } catch (e) {
+    if (odpoved.status < 200 || odpoved.status > 299) return { status: odpoved.status, telo: null }
+    const proc = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError') ? 'vypršel čas' : 'spojení se přerušilo'
+    return { stav: 'chyba', druh: 'docasna', duvod: `Dotykačka neposlala celou odpověď (${proc}) — appka to zkusí příště.` }
   }
+  if (!text.trim()) return { status: odpoved.status, telo: null, prazdne: true }
+  const telo = naparsovatJson(text)
+  if (telo === undefined) return { status: odpoved.status, telo: null, nejson: { znaku: text.length, zacina: prvniZnak(text), ...chybaJson(text) } }
   return { status: odpoved.status, telo }
 }
 
-function jeChyba(x: { status: number; telo: unknown } | ChybaPos): x is ChybaPos {
+function jeChyba(x: OdpovedDotykacky | ChybaPos): x is ChybaPos {
   return 'stav' in x
 }
 
-export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, init)): PosProvider {
+/**
+ * Přihlášená relace pro Jiné platby (`lib/pokladna-dotykacka-sklad.ts`) —
+ * stejné volání i výklad chyb jako u tržeb. Staví ho `otevrit()` níž;
+ * exportované jen kvůli testu nepřipojeného výdeje (`odeslatVydejDotykacka`).
+ */
+export function kontextDotykacky(fetchFn: Fetch, cloudId: string, accessToken: string): KontextDotykacky {
+  return {
+    api: API_DOTYKACKA,
+    cloudId,
+    hlavicky: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    pozadavek: (url, init, casovyLimitMs) => pozadavek(fetchFn, url, init, casovyLimitMs),
+    chybaZeStavu,
+  }
+}
+
+/**
+ * `povoleno` jde podstrčit jen kvůli testu zapnutého zápisu
+ * (`scripts/pokladna-dotykacka-sklad.test.mjs`); appka volá
+ * `vytvoritDotykacku()` vždy s výchozím `ZAPIS_VYDEJE_DOTYKACKA`
+ * (lib/pokladna-adaptery.ts).
+ */
+export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, init), povoleno: readonly PovolenyZapis[] = ZAPIS_VYDEJE_DOTYKACKA): PosProvider {
   return {
     klic: 'dotykacka',
     schopnosti: {
@@ -310,7 +496,18 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
       webhooky: false,
       historieDnu: null,
       platebniMetody: true,
+      // ČTENÍ skladových pohybů appka z Dotykačky nebere.
       poskytujeSkladovePohyby: false,
+      // Katalog a účty podle dokumentace (2026.38.2), ŽIVĚ NEOVĚŘENO — lib/pokladna-dotykacka-sklad.ts.
+      katalog: true,
+      dohledaniUctu: true,
+      // Výdej přes POS akci (`odeslatVydejDotykacka`) se připojí jen pro
+      // provozovny ze seznamu `povoleno` (ZAPIS_VYDEJE_DOTYKACKA — prázdný):
+      // až po ověření na testovacím cloudu Dotykačky a výslovném pokynu
+      // Šéfíka (lib/pokladna-dotykacka-zapis.ts). Do té doby výdej dělá
+      // člověk v pokladně. 'api' tu znamená jen „některý cloud ho smí";
+      // jestli smí TAHLE provozovna, říká relace (`zapisVydejePovolen`).
+      skladovyVydej: povoleno.length > 0 ? 'api' : 'rucne',
     },
 
     async otevrit(udaje: UdajePos) {
@@ -379,6 +576,16 @@ export function vytvoritDotykacku(fetchFn: Fetch = (url, init) => fetch(url, ini
           const { platby, necitelne } = naparsovatPlatby(odpoved.telo)
           return { stav: 'ok', ...report, platby, ...(necitelne ? { platbyNecitelne: true } : {}) }
         },
+
+        // Jiné platby: čtení (katalog, účty, účet podle klíče).
+        ...cteniDotykacky(kontextDotykacky(fetchFn, cloudId, accessToken)),
+      }
+
+      // Zápis do skladu jen pro cloud s povolenou provozovnou (dnes žádný).
+      const povolene = povoleneProvozovny(cloudId, povoleno)
+      if (povolene.size > 0) {
+        relace.skladovyVydej = zapisVydejeDotykacka(kontextDotykacky(fetchFn, cloudId, accessToken), povolene)
+        relace.zapisVydejePovolen = (provozovna) => povolene.has(provozovna)
       }
 
       return { stav: 'ok', relace }

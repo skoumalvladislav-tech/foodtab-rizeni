@@ -251,10 +251,16 @@ export const zpracovatPrijem = globalThis.__kanarek('zpracovatPrijem')`)],
 console.log('\nJména a plány')
 
 const migrace = readFileSync('supabase/migrations/20261014120000_planovac_pg_cron.sql', 'utf8')
-const vlozeni = migrace.match(/insert into app\.planovac_ulohy \(uloha, plan_utc, limit_sekund\) values([\s\S]*?);/)
-ok('migrace vkládá seznam úloh', !!vlozeni)
+// Úlohy přibývají i pozdějšími migracemi (20261031100000: rezervace-choice) —
+// plán je sjednocení všech `insert into app.planovac_ulohy` v pořadí migrací.
+const VLOZENI = /insert into app\.planovac_ulohy \(uloha, plan_utc, limit_sekund\) values([\s\S]*?);/g
+const vlozeni = readdirSync('supabase/migrations')
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .flatMap((f) => [...readFileSync(`supabase/migrations/${f}`, 'utf8').matchAll(VLOZENI)].map((m) => m[1]))
+ok('migrace vkládá seznam úloh', vlozeni.length > 0 && VLOZENI.test(migrace))
 const plan = new Map(
-  [...(vlozeni?.[1] ?? '').matchAll(/\('([^']+)',\s*'([^']+)',\s*(\d+)\)/g)].map((m) => [m[1], { cron: m[2], limit: Number(m[3]) }]),
+  vlozeni.flatMap((v) => [...v.matchAll(/\('([^']+)',\s*'([^']+)',\s*(\d+)\)/g)]).map((m) => [m[1], { cron: m[2], limit: Number(m[3]) }]),
 )
 
 ok(`úlohy v migraci = složky app/api/uloha (${plan.size} × ${ULOHY.length})`,

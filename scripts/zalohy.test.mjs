@@ -801,5 +801,101 @@ ma('moje_nepotvrzene_zalohy vrací právě sloupce, které karta čte',
 ma('zalohy_pobocky vrací potvrzeno_jak (podle něj se kreslí tlačítko)',
   /create function public\.zalohy_pobocky[\s\S]*?returns table \([\s\S]*?potvrzeno_jak text\s*\)/.test(migrace60), true)
 
+/* ======================================================================
+   JEDNA ZÁLOHA = JEDNO ZAPSÁNÍ (25. 10. 2026)
+   ======================================================================
+
+   „Odečítání záloh se zdvojovalo" — na provozovně nešel internet,
+   záloha se zapsala, odpověď nedošla a obsluha vyplatila znovu.
+   Databázovou stranu (totéž číslo = táž záloha, souběh, cizí číslo)
+   hlídá scénář krok101. Tady jde o to, že aplikace číslo opravdu POŠLE,
+   po chybě ho NEZMĚNÍ a u opakování nepošle druhý push.
+*/
+console.log('\n== Jedna záloha = jedno zapsání (číslo odeslání) ==')
+
+const KLIC = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b'
+const POLE_VYPLATY = { zamestnanec: 'e1', castka: '300', poznamka: 'u baru', klic: KLIC }
+const vyplatitJen = (pole, odpoved) => spustit((fd) => akce.vyplatitZalohu({ stav: 'nic' }, fd), pole, { odpoved })
+const vyplatitStav = async (pole, odpoved) => {
+  globalThis.__akce = { ctx: {}, odpoved, rpc: [], push: [], cesty: [] }
+  const fd = new FormData()
+  for (const [k, v] of Object.entries({ rozsah: 'cerna-perla', ...pole })) fd.set(k, v)
+  return { stav: await akce.vyplatitZalohu({ stav: 'nic' }, fd), ...globalThis.__akce }
+}
+const NOVA = () => ({ data: [{ zaloha: 'z-nova', varovani: null, opakovane: false }], error: null })
+const OPAKOVANA = () => ({ data: [{ zaloha: 'z-prvni', varovani: null, opakovane: true }], error: null })
+
+const prvni = await vyplatitStav(POLE_VYPLATY, NOVA)
+ma('výplata posílá číslo odeslání z formuláře (p_klic)', prvni.rpc[0]?.[1]?.p_klic, KLIC)
+ma('… nová záloha: push příjemci jednou', prvni.push.length, 1)
+ma('… a hotovo bez příznaku opakování', prvni.stav.stav === 'hotovo' && prvni.stav.opakovane === false, true)
+
+const opak = await vyplatitStav(POLE_VYPLATY, OPAKOVANA)
+ma('opakování (databáze řekla opakovane): ŽÁDNÝ druhý push', opak.push.length, 0)
+ma('… hotovo S příznakem opakování (obrazovka řekne „podruhé se nezapsala")',
+  opak.stav.stav === 'hotovo' && opak.stav.opakovane === true, true)
+
+const spatnyKlic = await vyplatitJen({ ...POLE_VYPLATY, klic: "x'; drop table" }, NOVA)
+ma('číslo, které není uuid, se nepošle (p_klic null) a výplata proběhne',
+  spatnyKlic.rpc[0]?.[1]?.p_klic === null && spatnyKlic.rpc.length === 1, true)
+
+// Do nasazení migrace: nejdřív bez p_klic, a když chybí i p_branch, postaru.
+const NENASAZENO = (n) => {
+  let i = 0
+  return () => (i++ < n ? { data: null, error: { code: 'PGRST202', message: 'nenasazeno' } } : NOVA())
+}
+const bezMigrace = await vyplatitJen(POLE_VYPLATY, NENASAZENO(1))
+ma('bez migrace 20261025100000: druhé volání bez p_klic, s pobočkou',
+  JSON.stringify(bezMigrace.rpc.map(([, a]) => Object.keys(a).join(','))),
+  JSON.stringify(['p_tenant,p_employee,p_castka,p_poznamka,p_branch,p_klic',
+    'p_tenant,p_employee,p_castka,p_poznamka,p_branch']))
+const bezObou = await vyplatitJen(POLE_VYPLATY, NENASAZENO(2))
+ma('bez obou migrací: třetí volání se čtyřmi parametry', bezObou.rpc.length === 3 &&
+  Object.keys(bezObou.rpc[2][1]).join(',') === 'p_tenant,p_employee,p_castka,p_poznamka', true)
+
+const chybaVyplaty = await vyplatitStav(POLE_VYPLATY, () => ({ data: null, error: { code: '23514', message: 'Tohle odeslání už patří jiné záloze.' } }))
+ma('chyba databáze vrátí hodnoty formuláře (opakuje se totéž, nepíše se znovu)',
+  JSON.stringify(chybaVyplaty.stav.hodnoty), JSON.stringify({ zamestnanec: 'e1', castka: '300', poznamka: 'u baru' }))
+ma('… a žádný push', chybaVyplaty.push.length, 0)
+
+// Formulář: číslo nese skryté pole, mění se jen po úspěchu.
+const formularModul = await nactiModul('app/[rozsah]/dochazka/zalohy/formular.tsx', [['./akce', STUB_AKCE]])
+const htmlFormulare = renderToStaticMarkup(
+  createElement(formularModul.default, { rozsah: 'cerna-perla', lide: [], klic: KLIC }),
+)
+ma('formulář posílá číslo odeslání ve skrytém poli „klic"',
+  new RegExp(`<input[^>]*name="klic"[^>]*value="${KLIC}"|<input[^>]*value="${KLIC}"[^>]*name="klic"`).test(htmlFormulare), true)
+
+const fdKlic = new FormData()
+for (const [k, v] of Object.entries(POLE_VYPLATY)) fdKlic.set(k, v)
+const poUspechu = await formularModul.odeslatZalohu(async () => ({ stav: 'hotovo', komu: 'X', castka: '300', varovani: null, opakovane: false }), { stav: 'nic' }, fdKlic)
+ma('po úspěchu: nové číslo pro další zálohu', poUspechu.noveCislo, true)
+const poChybe = await formularModul.odeslatZalohu(async () => ({ stav: 'chyba', text: 'x' }), { stav: 'nic' }, fdKlic)
+ma('po chybě: číslo ZŮSTÁVÁ (opakování se nezapíše podruhé)', poChybe.noveCislo, false)
+const poVypadku = await formularModul.odeslatZalohu(async () => { throw new TypeError('Failed to fetch') }, { stav: 'nic' }, fdKlic)
+ma('výpadek spojení: obrazovka nespadne, ukáže chybu', poVypadku.stav.stav, 'chyba')
+ma('… číslo ZŮSTÁVÁ', poVypadku.noveCislo, false)
+ma('… hláška říká, že opakování podruhé nezapíše', /podruhé se nezapíše/.test(poVypadku.stav.text ?? ''), true)
+ma('… a pole se vyplní tím, co v nich bylo', poVypadku.stav.hodnoty?.castka, '300')
+
+const strankaVyplaty = fs.readFileSync(new URL("app/[rozsah]/dochazka/zalohy/page.tsx", KOREN), "utf8")
+ma('stránka dává formuláři číslo vylosované na serveru', /<FormularZalohy[\s\S]*?klic=\{randomUUID\(\)\}/.test(strankaVyplaty), true)
+
+console.log('\n== Kontrakt s migrací 20261025100000 ==')
+const migrace101 = fs.readFileSync(
+  new URL('supabase/migrations/20261025100000_zalohy_jedno_odeslani.sql', KOREN), 'utf8')
+const hlavickaVyplaty = migrace101.match(/create function public\.vyplatit_zalohu\(([^)]*)\)/)
+ma('vyplatit_zalohu: parametry = to, co aplikace posílá',
+  JSON.stringify(jmena(hlavickaVyplaty?.[1] ?? '')), JSON.stringify(Object.keys(prvni.rpc[0]?.[1] ?? {})))
+ma('vyplatit_zalohu vrací opakovane (podle něj se nepošle druhý push)',
+  /create function public\.vyplatit_zalohu[\s\S]*?returns table \([\s\S]*?opakovane\s+boolean\s*\)/.test(migrace101), true)
+/*
+  Souběh dvou požadavků se stejným číslem scénář v jednom spojení
+  nenapodobí — drží ho `on conflict`. Ověřeno dvěma spojeními při vývoji
+  (bez něj druhé spadlo na unikátním indexu); tady se hlídá, že nezmizí.
+*/
+ma('zápis má on conflict na číslo odeslání (souběh dvou ťuknutí)',
+  /insert into public\.advances[\s\S]*?on conflict \(tenant_id, klic_odeslani\) where klic_odeslani is not null\s+do nothing/.test(migrace101), true)
+
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)
 process.exit(chyb === 0 ? 0 : 1)

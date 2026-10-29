@@ -34,26 +34,30 @@ export async function GET(request: Request): Promise<NextResponse> {
   const konecMs = Date.now() + ROZPOCET_MS
   const pripojeni = await vsechnaPripojeniSPrijmem()
 
-  const vysledky: (VysledekPrijmu & { id: string })[] = []
+  const vysledky: (VysledekPrijmu & { id: string; tenantId: string })[] = []
   for (const p of pripojeni) {
     if (Date.now() >= konecMs - 5_000) break
     try {
-      vysledky.push({ id: p.id, ...(await zpracovatPrijem(p.id, { konecMs })) })
+      vysledky.push({ id: p.id, tenantId: p.tenantId, ...(await zpracovatPrijem(p.id, { konecMs })) })
     } catch (e) {
       vysledky.push({
-        id: p.id, stav: 'chyba', duvod: e instanceof Error ? e.message : String(e),
+        id: p.id, tenantId: p.tenantId, stav: 'chyba', duvod: e instanceof Error ? e.message : String(e),
         nalezeno: 0, zapsano: 0, existuje: 0, kontrola: 0, zbyva: 0, schrankaDoctena: false,
       })
     }
   }
 
   // Nová faktura může přijít až po platbě — zkusit ji hned spárovat (jen
-  // jednoznačná shoda; viz lib/finance-automaticke-parovani.ts).
-  const vlastnikFaktur = process.env.FAKTURY_DB_TENANT_ID?.trim()
+  // jednoznačná shoda; viz lib/finance-automaticke-parovani.ts). Firma
+  // z řádku schránky, která právě něco zapsala (dřív jediná firma
+  // z FAKTURY_DB_TENANT_ID); Faktury firmy otevřené ověří párování samo.
   // Jen když zbývá aspoň 15 s z rozpočtu — načtení dat trvá pár sekund.
-  const parovani = vlastnikFaktur && vysledky.some((v) => v.zapsano > 0) && Date.now() < konecMs - 15_000
-    ? await automatickyParovatPlatby(vlastnikFaktur, { konecMs: konecMs + 5_000 })
-    : null
+  let parovani = null as { sparovano: number } | null
+  for (const tenantId of new Set(vysledky.filter((v) => v.zapsano > 0).map((v) => v.tenantId))) {
+    if (Date.now() >= konecMs - 15_000) break
+    const r = await automatickyParovatPlatby(tenantId, { konecMs: konecMs + 5_000 })
+    parovani = { sparovano: (parovani?.sparovano ?? 0) + r.sparovano }
+  }
 
   const neprobehla = pripojeni.length - vysledky.length
   const pokrok = vysledky.some((v) => v.nalezeno + v.zapsano + v.existuje + v.kontrola > 0)

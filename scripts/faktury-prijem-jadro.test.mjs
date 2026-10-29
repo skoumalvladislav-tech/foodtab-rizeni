@@ -280,8 +280,8 @@ console.log('\n== Brány před během: vypnuto, cizí databáze, zámek, heslo =
 
   const w2 = svet({ vlastni: false, zpravy: [zprava(1, [pdf('a.pdf', 'A')])] })
   const v2 = await beh(w2)
-  ok('databáze Faktur patří jiné firmě → chyba, schránka se nečte, zámek se nebere', v2.stav === 'chyba' && w2.s.schranka.volani.length === 0 && w2.s.zamky.length === 0)
-  ok('…a schránka dostane srozumitelnou chybu', w2.s.pripojeniZmeny.some((z) => /jiné firmě/.test(z.posledni_chyba ?? '')))
+  ok('Faktury firmy zavřené (stěhují se / nezapnuté) → chyba, schránka se nečte, zámek se nebere', v2.stav === 'chyba' && w2.s.schranka.volani.length === 0 && w2.s.zamky.length === 0)
+  ok('…a schránka dostane srozumitelnou chybu (e-maily počkají)', w2.s.pripojeniZmeny.some((z) => /zavřené/.test(z.posledni_chyba ?? '') && /počká/.test(z.posledni_chyba ?? '')))
 
   const w3 = svet({ zamekObsazen: true, zpravy: [zprava(1, [pdf('a.pdf', 'A')])] })
   const v3 = await beh(w3)

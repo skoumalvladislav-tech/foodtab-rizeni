@@ -19,10 +19,15 @@
  * Proč má tmavý režim nižší hranici, je v docs/vzhled-oprava-1.md.
  *
  * Konec: 0 když všechno projde, 1 když ne. Dá se pověsit do CI.
+ *
+ * Měření (ΔE, kontrast, čtení tokenů) si berou i jiné kontroly —
+ * scripts/rezervace-pobocky.test.mjs —, ať se vzorec nepíše dvakrát.
+ * Kontrola sama se pustí, jen když se soubor spustí jako příkaz.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const TOKENY = path.join(import.meta.dirname, '..', 'app', '_tokeny.css');
 const GLOBALS = path.join(import.meta.dirname, '..', 'app', 'globals.css');
@@ -444,4 +449,9 @@ function main() {
   console.log('Ověřeno ' + overeno + ' kontrastních dvojic a dvě matice ΔE. Všechno projde.');
 }
 
-main();
+export { MEZ_DE, ctiToken, de, lab, pomer, samokontrola, vyrez };
+
+// `node scripts/barvy.js` → kontrola. Import z jiného testu → jen funkce.
+const spustenoPrimo =
+  !!process.argv[1] && path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+if (spustenoPrimo) main();

@@ -26,9 +26,13 @@ import {
   stitekDne,
   ZKRATKY_DNU,
 } from "@/lib/rozpis-mobil";
+import type { HosteDnu } from "@/lib/rezervace-pobocky";
 import { pocet } from "@/lib/sklonovani";
+import { popisSvatku, svatekDne, svatekSDatem, type ZemeSvatku } from "@/lib/svatky";
 
+import { ObchodyZavreno, ZnackaSvatku } from "../../svatek";
 import type { SmenaKUprave } from "../formular-smeny";
+import { DenSHosty } from "../hoste-dne";
 import type { Otevrene, Planovani, Smena } from "../rozpis";
 
 /**
@@ -108,7 +112,16 @@ export default function MrizkaTydne({
   filtrAktivni,
   onZrusitFiltry,
   maSmeny,
+  hoste,
+  rozsahAdresa,
+  zemeSvatku,
 }: {
+  /** Hosté z rezervací do okénka u záhlaví dne; `null` = člověk rezervace nevidí. */
+  hoste: HosteDnu | null;
+  /** Země firmy pro svátky (šrafa sloupce, název v záhlaví); `null` = nekreslí se. */
+  zemeSvatku: ZemeSvatku | null;
+  /** Adresní segment rozsahu (`firma`, `cerna-perla`) — odkaz z okénka na den v Rezervacích. */
+  rozsahAdresa: string;
   mrizka: Mrizka;
   dny: string[];
   dnesni: string;
@@ -136,6 +149,10 @@ export default function MrizkaTydne({
   maSmeny: boolean;
 }) {
   const sablona = `${ODSTUP_SLOUPCE} repeat(${dny.length}, minmax(112px, 1fr))`;
+  // Svátek podle kalendářního data sloupce (lib/svatky.ts) — záhlaví i buňky pod ním.
+  const svatky = new Map(dny.map((den) => [den, svatekDne(den, zemeSvatku)]));
+  const svatkyOkna = dny.map((den) => svatky.get(den)).filter((s) => s != null);
+  const dnySvatku = new Set(svatkyOkna.map((s) => s.den));
 
   return (
     <>
@@ -153,23 +170,34 @@ export default function MrizkaTydne({
                 {pocet(mrizka.pocetLidi, "člověk", "lidé", "lidí")}
               </span>
             </div>
-            {dny.map((den) => {
+            {dny.map((den, i) => {
               const souhrn = mrizka.poDnech.get(den);
               const stitek = stitekDne(den, dnesni);
               const cislo = Number(den.slice(8, 10));
+              const popisDne = `${ZKRATKY_DNU[denVTydnu(den)]} ${cislo}. ${Number(den.slice(5, 7))}.`;
+              const svatek = svatky.get(den) ?? null;
               return (
-                <div
+                <DenSHosty
                   key={den}
+                  den={den}
+                  // „út 27. 10.“ malými — velké „ÚT“ by odečítač hláskoval.
+                  popisDne={popisDne.toLowerCase()}
+                  hoste={hoste}
+                  rozsah={rozsahAdresa}
+                  vpravo={i >= dny.length - 2}
                   role="columnheader"
                   className="ds-smd-den"
                   data-dnes={den === dnesni ? "" : undefined}
                   data-vikend={jeVikend(den) ? "" : undefined}
-                  aria-label={`${ZKRATKY_DNU[denVTydnu(den)]} ${cislo}. ${Number(den.slice(5, 7))}.`}
+                  data-svatek={svatek ? "" : undefined}
+                  // Popisek přebije obsah záhlaví — svátek do něj musí taky.
+                  aria-label={svatek ? `${popisDne}, ${popisSvatku(svatek)}` : popisDne}
                 >
                   <span className="ds-smd-den-hlava">
                     <span className="ds-smd-den-nazev">{stitek ?? ZKRATKY_DNU[denVTydnu(den)]}</span>
                     <span className="ds-smd-den-cislo">{cislo}.</span>
                   </span>
+                  {svatek ? <ZnackaSvatku svatek={svatek} kratce /> : null}
                   <span
                     className="ds-smd-den-soucet"
                     title="Kolik lidí ten den pracuje a kolik hodin je naplánováno (bez neobsazených směn)"
@@ -183,7 +211,7 @@ export default function MrizkaTydne({
                       <span aria-label="nikdo nepracuje">—</span>
                     )}
                   </span>
-                </div>
+                </DenSHosty>
               );
             })}
           </div>
@@ -237,6 +265,7 @@ export default function MrizkaTydne({
                   psatPobocku={!pobocka.jePobocka}
                   dny={dny}
                   dnesni={dnesni}
+                  dnySvatku={dnySvatku}
                   planovani={planovani}
                   potvrzeni={potvrzeni}
                   poziceOsob={poziceOsob}
@@ -261,6 +290,7 @@ export default function MrizkaTydne({
               psatPobocku={false}
               dny={dny}
               dnesni={dnesni}
+              dnySvatku={dnySvatku}
               planovani={planovani}
               potvrzeni={potvrzeni}
               poziceOsob={poziceOsob}
@@ -315,6 +345,14 @@ export default function MrizkaTydne({
             <span className="ds-smd-vzorek" data-stav="zmenena" aria-hidden="true" />
             Změněná po vydání
           </li>
+          {/* Šrafa sloupce a celé názvy svátků, které jsou v záhlaví jen krátce. */}
+          {svatkyOkna.map((s) => (
+            <li key={s.den}>
+              <span className="ds-svatky-vzorek" data-svatek="" aria-hidden="true" />
+              {svatekSDatem(s)}
+              <ObchodyZavreno svatek={s} />
+            </li>
+          ))}
         </ul>
         <p className="ds-smd-celkem" title="Plánované hodiny lidí v tom, co je vidět. Neobsazené směny a automatická přestávka pobočky se nepočítají.">
           Celkem: <strong>{hodinyKratce(mrizka.celkemMinut)}</strong>
@@ -334,6 +372,7 @@ function SkupinaMrizkyView({
   psatPobocku,
   dny,
   dnesni,
+  dnySvatku,
   planovani,
   potvrzeni,
   poziceOsob,
@@ -351,6 +390,8 @@ function SkupinaMrizkyView({
   psatPobocku: boolean;
   dny: string[];
   dnesni: string;
+  /** Dny okna, které jsou svátek — buňky pod nimi dostanou šrafu jako záhlaví. */
+  dnySvatku: ReadonlySet<string>;
   planovani: Planovani | null;
   potvrzeni: PotvrzeniRozpisu | null;
   poziceOsob: (osobaId: string) => string | null;
@@ -416,6 +457,7 @@ function SkupinaMrizkyView({
               psatPobocku={psatPobocku}
               dny={dny}
               dnesni={dnesni}
+              dnySvatku={dnySvatku}
               planovani={planovani}
               potvrzeni={potvrzeni}
               role={radek.osoba ? poziceOsob(radek.osoba.id) : souhrn}
@@ -439,6 +481,7 @@ function RadekMrizkyView({
   psatPobocku,
   dny,
   dnesni,
+  dnySvatku,
   planovani,
   potvrzeni,
   role,
@@ -456,6 +499,7 @@ function RadekMrizkyView({
   psatPobocku: boolean;
   dny: string[];
   dnesni: string;
+  dnySvatku: ReadonlySet<string>;
   planovani: Planovani | null;
   potvrzeni: PotvrzeniRozpisu | null;
   role: string | null;
@@ -526,6 +570,7 @@ function RadekMrizkyView({
             className="ds-smd-bunka"
             data-dnes={den === dnesni ? "" : undefined}
             data-vikend={jeVikend(den) ? "" : undefined}
+            data-svatek={dnySvatku.has(den) ? "" : undefined}
           >
             {smeny.map((s) => (
               <KartaSmeny

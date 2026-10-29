@@ -35,12 +35,15 @@ select pg_temp.check('seznam oprávnění odpovídá lib/authz.ts',
     'communication.read','communication.urgent',
     'faktury.manage','faktury.read','finance.manage','finance.read',
     'integrace.manage',
+    'jine_platby.faktura','jine_platby.oprava','jine_platby.sklad_odeslat',
+    'jine_platby.trzba','jine_platby.upravit','jine_platby.vydej_pos','jine_platby.zadat',
     'marketing.manage','marketing.publish','marketing.read',
     'menu_ai.manage','menu_ai.use','menus.manage','menus.read',
     'motivation.manage','motivation.read',
     'payroll.export','payroll.manage','payroll.read',
     'people.manage','purchasing.manage',
-    'purchasing.read','recipes.manage','recipes.read','settings.manage',
+    'purchasing.read','recipes.manage','recipes.read',
+    'rezervace.manage','rezervace.read','settings.manage',
     'shifts.manage','shifts.read','tasks.manage','tasks.read'
   ]::text[]);
 

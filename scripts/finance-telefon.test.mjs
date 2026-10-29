@@ -78,8 +78,9 @@ console.log('\n== Konkrétní místa z měření 15. 10. ==')
   const cashflow = zdroj('app/[rozsah]/finance/cashflow/page.tsx')
   ok('Cashflow: přepínač scénářů se zalomí', /<div style=\{\{ display: 'flex', gap: '8px', flexWrap: 'wrap' \}\}>\s*\{\(Object\.keys\(NAZVY_SCENARU\)/.test(cashflow))
   const integrace = zdroj('app/[rozsah]/finance/integrace/page.tsx')
-  ok('Integrace: všechny tři karty-odkazy zalamují text (ft-tl je nowrap)',
-    (integrace.match(/className="ft-tl" style=\{\{ \.\.\.karta, display: 'block', whiteSpace: 'normal' \}\}/g) ?? []).length === 3
+  // Čtyři od 25. 10. 2026: přibyla karta Rezervace (vede do Provozu).
+  ok('Integrace: všechny čtyři karty-odkazy zalamují text (ft-tl je nowrap)',
+    (integrace.match(/className="ft-tl" style=\{\{ \.\.\.karta, display: 'block', whiteSpace: 'normal' \}\}/g) ?? []).length === 4
     && !/className="ft-tl" style=\{\{ \.\.\.karta, display: 'block' \}\}/.test(integrace))
   const pokladna = zdroj('app/[rozsah]/finance/integrace/pokladna/obsah.tsx')
   ok('Pokladna: přiřazení provozovny — popisek a výběr pod sebou, když se nevejdou',

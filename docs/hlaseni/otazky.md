@@ -1300,3 +1300,552 @@ tato místa označená `ROZHODNOUT:`.
 > Body 1–4 zůstávají, jak jsou popsané výš. Mřížka dnů při rušení nově
 > označí tečkou dny, kdy taková směna je (stejné pravidlo jako náhled),
 > a v popisku dne je její čas. Otázka je tím uzavřená.
+
+## 50. Jiné platby — kde a jak se počítají Ostatní tržby
+
+**Vzniklo:** 16. 10. 2026, zadání „Finance → Tržby → Jiné platby“ (15. 10.).
+Zadání mluví o „existující agendě Ostatní tržby“. Ta ale neexistovala, na
+Tržbách byla jen prázdná karta „Ostatní platby — modul se připravuje“.
+Vznikla proto jediná nová evidence `ostatni_trzby`. Do tržeb z pokladny ani
+do bankovních plateb appka nepíše nic.
+
+1. **Kde se Ostatní tržby ukazují.**
+   - **Teď:** na Tržbách vlastní karta „Ostatní tržby“ (jen CZK, jiné měny zvlášť větou). Do „Tržby z pokladen“, do tabulky po dnech ani do karty Tržby na Přehledu Financí se **nepřičítají**.
+   - **Proč:** nejopatrnější varianta. Přehled a trend na Přehledu zůstávají přesně jako dnes.
+   - **Když to má být jinak:** přidat sloupec „Ostatní“ do tabulky Tržeb a součet „Tržby celkem“ na Přehled. Je to úprava přehledu tržeb a jeho testů, bez zásahu do dat.
+2. **Prodej, který už v pokladně je.**
+   - **Teď:** jen se propojí (`zapocitat = false`), ukáže se v Jiných platbách a do součtu se nepřičte. Rozhoduje kontrola v pokladně, nebo ruční doložení s důvodem.
+   - **Když to má být jinak:** nic se nemění v datech, jen v tom, co se kde ukazuje.
+
+## 51. Jiné platby — vydané faktury appka zatím nevystavuje
+
+**Vzniklo:** 16. 10. 2026. Zadání chce „vytvořit návrh vydané faktury nebo
+propojit existující, použij současné zákazníky, číselné řady a fakturační
+logiku“. Vydané faktury ale v appce neexistují vůbec. Modul Faktury umí jen
+přijaté faktury v oddělené databázi bez rozlišení firem (otázka 45) a tam
+psát nesmím.
+
+- **Teď:** záznam umí **podklady** (odběratel z Kontaktů, položky, ceny a měna jen z ověřených údajů, seznam toho, co chybí) a **propojit existující fakturu** podle čísla a zdroje (pokladna, nebo jiný systém). Faktura není tržba a úhrada je zvlášť.
+- **Co chybí k vystavení:** tabulka vydaných faktur v naší databázi, číselná řada (např. `FV-2026-0001`), informace, jestli je firma plátce DPH, adresa sídla (v appce není), vzhled PDF, storno a opravný doklad (dobropis).
+- **Když to má být jinak:** řekněte, kde se mají faktury vystavovat:
+  - (a) v Foodtabu, samostatná práce zhruba na noc;
+  - (b) v Dotykačce (doklad typu faktura) a appka je jen propojí;
+  - (c) v účetním programu.
+
+## 52. Jiné platby — „Potvrdit výdej do POS“ pro konkrétní provozovny
+
+**Vzniklo:** 16. 10. 2026. Zadání: „přiřazuj uživatelům pro konkrétní
+provozovny“.
+
+- **Teď:** je to běžné oprávnění (`jine_platby.vydej_pos`) a platí na pobočkách, kde má člověk členství. Vedoucí Bernard Baru schvaluje jen výdeje Bernard Baru. Člověk s rozsahem celé firmy (vy, provozní ředitel) schvaluje všude. Ověřuje to scénář krok98.
+- **Proč:** o přístupu rozhoduje jediné místo (`app.has_access`). Vlastní seznam „schvalovatelů po pobočkách“ by byl druhý model oprávnění vedle něj (pravidlo 2 v CLAUDE.md).
+- **Když to má být jinak:** jemnější přidělení, kdy jeden člověk má právo X jen na pobočce A, ale jiná práva i jinde, chce úpravu modelu oprávnění pro celou appku, ne jen pro Jiné platby.
+
+## 53. Jiné platby — potvrzená spotřeba a Foodcost
+
+**Vzniklo:** 16. 10. 2026. Zadání: „Potvrzenou spotřebu propoj s Foodcost
+a Beverage cost. Pozdější synchronizace nesmí vytvořit další spotřebu.“
+
+- **Teď:** spotřeba z provedeného výdeje je dohledatelná (funkce `jine_platby_spotreba`), ale do procent Foodcost a Beverage cost se **nepřičítá**.
+- **Proč:** foodcost se počítá z prodejů pokladny. Nevíme, jestli Dotykačka odpis (*Odpis*) ve svém denním reportu prodejů neukazuje. Kdyby ano, přičtením by se spotřeba započítala dvakrát.
+- **Když to má být jinak:** po ověření na testovacím cloudu (viz `docs/jine-platby-pos-operace.md`) přidat potvrzenou spotřebu do výpočtu foodcostu. Je to migrace funkce `foodcost_beverage_prehled` a jejích testů.
+
+## 54. Jiné platby — zapnout zápis výdeje do Dotykačky?
+
+**Vzniklo:** 16. 10. 2026.
+
+- **Teď:** výdej v Dotykačce dělá schvalovatel ručně (účet zaplacený *Odpisem*) a v appce ho doloží číslem dokladu. Stav je „Ručně doloženo“, ne „Odečteno v POS“. Funkce pro automatický zápis přes POS akci je napsaná a otestovaná na podvržených odpovědích, ale **vypnutá v kódu**.
+- **Co je potřeba:** ověření na testovacím cloudu Dotykačky (seznam v `docs/jine-platby-pos-operace.md`) a pak výslovný pokyn „zapni zápis do Dotykačky“.
+- **Když to má být jinak:** jediná změna v `lib/pokladna-dotykacka.ts` a jeden řádek testu.
+
+> **Doplněno 25. 10. 2026** (docs/jine-platby-vydej-dotykacka.md):
+> zápis je teď připravený celý a pořád vypnutý. Zapíná se **pro jednu
+> provozovnu** jedním řádkem v `ZAPIS_VYDEJE_DOTYKACKA`
+> (`lib/pokladna-dotykacka-zapis.ts`) s vaším pokynem; ostatní provozovny
+> zůstanou ruční. Před každým odesláním appka přečte nastavení provozovny
+> v Dotykačce (licence POS akcí, odečet skladu zapnutý) a po zápisu
+> porovná položky účtu s výdejem. Doplnila se i provozovna u pokladny
+> připojené k pobočce (dřív by výdej neměl kam jít).
+>
+> **Co od vás potřebuju:** (1) založit testovací cloud s licencí z 12. 10.
+> (otázka 73), (2) až test projde, napsat „zapni zápis do Dotykačky pro
+> provozovnu …“. Do té doby se do skladu Dotykačky nezapisuje nic.
+
+## 55. Jiné platby — jak se má řešit otevřený účet, ke kterému chce host fakturu
+
+**Vzniklo:** 16. 10. 2026. Appka umí obě cesty, návod pro obsluhu ale
+potřebuje jednu doporučenou.
+
+- (a) **Účet se v pokladně uzavře** způsobem platby „faktura / převodem“. Tržbu i sklad pak má pokladna. V Jiných platbách se prodej jen propojí a připojí se číslo faktury. Žádný výdej se nedělá.
+- (b) **Účet se v pokladně stornuje** a prodej se eviduje mimo pokladnu. V Jiných platbách se zapíše nová tržba a výdej se schválí a provede (dnes ručně).
+- **Teď:** návod popisuje obě a doporučuje (a), protože tam nic nemůže zůstat napůl.
+- **Když to má být jinak:** jen změna návodu.
+
+## 56. Jiné platby — souhlas s posíláním fotek dokladů AI
+
+**Vzniklo:** 16. 10. 2026. Zadání: „Citlivé údaje neposílej neschválené
+AI službě.“
+
+- **Teď:** fotka se pošle k rozpoznání jen po kliknutí na „Rozpoznat z dokladu“, a to stejné službě (Anthropic, klíč Foodtabu) jako u faktur z e-mailu. Pošle se jen obrázek nebo PDF, žádné jméno obsluhy ani nic dalšího. Strop 200 rozpoznání za den na firmu. Bez klíče appka nic nevymýšlí a nabídne ruční zadání.
+- **Když to má být jinak:** vypínač „AI pro Jiné platby“ v nastavení firmy, nebo vlastní klíč zákazníka (zákaznický režim). Obojí je malá práce.
+
+## 57. Jiné platby — obsluha bez finančních práv
+
+**Vzniklo:** 16. 10. 2026.
+
+- **Teď:** kdo má jen práva Jiných plateb (založit, upravit, odeslat ke schválení), dostane se do Finance → Tržby → Jiné platby a uvidí záznamy své pobočky. Položka v menu se mu ukáže, když má kterékoli právo agendy. Zbytek Financí dál vyžaduje finanční přehled (otázka 48).
+- **Co neuvidí (doplněno 18. 10.):** bankovní platby a Kontakty firmy. Na detailu je dostane jen ten, kdo má finanční přehled za **celou firmu**; ostatní zadají číslo faktury ručně a úhradu nenapárují. Katalog pokladny a zapamatovaná přiřazení vidí jen u pokladny, která obsluhuje jeho pobočku.
+- **Když to má být jinak:** například vstup přes Dnes místo Financí. Je to jen úprava navigace.
+
+## 58. Jiné platby — kontrola tržby po pozdějším importu z pokladny
+
+**Vzniklo:** 18. 10. 2026 z nezávislé kontroly. Zadání chce deduplikaci „i při
+pozdějším importu z POS“: tržbu zapsanou do Ostatních tržeb může pokladna
+později přinést znovu (otevřený účet se uzavře).
+
+- **Teď:** po zápisu tržby jde na detailu kdykoli kliknout **Zkontrolovat v pokladně** (u pokladny, která umí dohledat účty, dnes Dotykačka). Když pokladna prodej najde, záznam dostane varování **„Možná zapsáno dvakrát“**, v přehledu je na to filtr a detail vede na storno. Appka nic nestornuje sama, rozhodne člověk. Databáze to ověřuje ve scénáři krok98.
+- **Co se neděje:** nic se nekontroluje **samo** po každé synchronizaci pokladny. Plánovač v databázi zatím neběží (zapnutí v Supabase je na vás) a automatické volání pokladny za uživatele by byla nová úloha s klíči pokladny.
+- **Když to má být jinak:** úloha v plánovači jednou denně projde zapsané tržby s pokladnou za posledních 7 dní a výsledek zapíše stejnou cestou jako tlačítko. Je to samostatná práce (úloha, strop volání pokladny, testy), bez změny tabulek.
+
+---
+
+> Otázky 50–58 jsou Jiné platby (PR #146, sloučená 20. 10.). Faktury
+> (PR #147) pokračují od 59, ať se čísla nesrazí. Dvojí číslo hlídá
+> `scripts/otazky-cisla.test.mjs`.
+
+## 59. Sloučení Faktur s Foodtabem — kdy přepnout a jak dlouho držet návrat zpět
+
+**Vzniklo:** 18. 10. 2026. Šéfík: „potřebuji sloučit apku faktury
+s apkou foodtab." Návrh a kroky: `docs/faktury-slouceni-navrh.md`,
+hlášení `docs/hlaseni/stav-2026-10-18-faktury-slouceni.md`. Na každý bod
+jsem vybral nejopatrnější variantu, appka podle ní funguje, dokud
+nerozhodnete jinak.
+
+1. **Kdo ještě zapisuje do staré databáze.**
+   - **Teď:** nová verze appky do staré databáze nezapisuje vůbec (jen
+     úloha převodu). Zapisovat tam ale pořád může: původní samostatná
+     appka `faktury-app` na Vercelu (nemá přihlášení, klíč je v ní
+     veřejný), náhledy jiných větví Foodtabu (když mají ve Vercelu
+     proměnné `FAKTURY_SUPABASE_*` i pro Preview) a n8n, kdyby ho někdo
+     zapnul. Převod to pozná (dokončení odmítne, když se stará databáze
+     mezitím změnila), ale nezastaví to.
+   - **Potřebuju od vás:** před přepnutím pozastavit projekt `faktury-app`
+     ve Vercelu a smazat `FAKTURY_SUPABASE_URL`, `FAKTURY_SUPABASE_ANON_KEY`
+     z prostředí **Preview** a **Development** (Production nechat — převod
+     je potřebuje). Udělám to i já, ale jen na váš výslovný pokyn.
+2. **Odstávka Faktur.**
+   - **Teď:** od sloučení PR do dokončení převodu jsou Faktury zavřené
+     (obrazovka řekne „Faktury se připravují / stěhují"), odhadem 30–60
+     minut. Příjem z e-mailu počká, e-maily zůstanou ve schránce.
+   - **Pořadí sloučení:** úplně první malá PR #148 (kontrola „Migrace
+     jen přibývají"), pak Jiné platby (#146, migrace se starším razítkem
+     20261016100000), pak Faktury (#147), hlídač plánovače (#145) až po
+     nich (je přerazítkovaný na 20261019120000). Jinak `db push`
+     starší migraci odmítne. Před každým `db push` `migration list`:
+     nenasazená smí být jen migrace toho PR.
+   - **Když to má být jinak:** jiný čas (třeba večer) — řekněte kdy.
+3. **Faktury, které nejde převést beze ztráty** (např. částka se třemi
+   desetinnými místy, chybějící dodavatel).
+   - **Teď:** převod v takovém případě **nezačne** a krok „nanečisto"
+     řekne, kolik jich je. Nic se nezaokrouhlí ani nezahodí potichu.
+     „Nanečisto" jde pustit hned po sloučení, ještě PŘED `db push` —
+     když ukáže anomálie, vrátí se kód a nic se nenasazuje.
+   - **Když to má být jinak:** pravidlo, třeba „zaokrouhlit na haléř
+     a do poznámky napsat původní částku". Rozhodnu s vámi, až uvidíme
+     skutečný počet (ukáže ho první krok „nanečisto").
+4. **Párování plateb s fakturou, která ve staré databázi zmizela.**
+   - **Teď:** převod je nezastaví, jen je spočítá. V Platbách zůstanou
+     a dají se zrušit. Úklid po zkušební době je pak bude chtít vyřešit.
+5. **Zkušební doba (dokdy jde vrátit zpět).**
+   - **Teď navrhuju 7 dní.** Stará databáze je nejspíš na tarifu Free
+     a po 7 dnech bez provozu se uspí — a vzbudit ji neumí nikdo, kdo
+     se tam nepřihlásí. Proto od SLOUČENÍ (ne až od dokončení) pouští
+     GitHub krok „nanečisto" sám každé 2 dny (jen čte; udrží ji vzhůru
+     a ukáže, jestli do ní někdo nepíše). Lhůta tedy neběží ani tehdy,
+     když se převod zdrží.
+   - **Když to má být jinak:** delší doba jen s jistotou, že se do
+     projektu Faktur dá přihlásit (nebo že není na Free tarifu).
+6. **Návrat zpět** se dělá vrácením KÓDU v `main`, ne tlačítkem
+   „Instant Rollback" ve Vercelu — po něm Vercel přestane sám nasazovat
+   další změny z `main` a dá se na to snadno zapomenout. Instant Rollback
+   jen v nouzi a hned po něm „Promote" správné verze.
+   - Po `db push` se vrací kód **bez souboru migrace** (postup v návrhu,
+     oddíl 7). Obyčejný revert PR by soubor nasazené migrace smazal a další
+     `db push` (i u jiných PR) by spadl na nesouladu historie.
+   - Když už převod začal a ještě není dokončený, nejdřív krok **„zrusit"**
+     (jinak by předchozí verze appky nemohla párovat platby). Do staré
+     databáze se pak nic nevrací — ta je jediná platná.
+   - Po dokončeném převodu: „vratit" → „zpet" (i při nulách — označí
+     návrat jako hotový) → vrácení kódu.
+
+## 60. Faktury a pobočky
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur (navazuje na otázku 48, bod 4).
+
+- **Teď:** faktury pobočku nemají, na pobočce jsou schované. Číst je
+  a měnit smí jen člověk s právem za **celou firmu** — nově to hlídá
+  i databáze. **Nově** to platí i pro přílohy (PDF) a evidenci příjmu
+  z e-mailu: dřív je přímým dotazem viděl i člen jedné pobočky s právem
+  na faktury (hlášení 8. 10., „zůstává vědomě").
+- **Když to má být jinak:** faktury přiřazovat pobočkám (podle schránky,
+  do které přišly, nebo ručně) a pustit k nim vedoucí pobočky. Potřebuje
+  sloupec pobočky a nová pravidla — samostatná práce.
+
+## 61. Faktury pro další firmy
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur.
+
+- **Teď:** Faktury jsou otevřené jen pro firmu, která je měla v samostatné
+  databázi (Foodtab s.r.o.), a to až po dokončení převodu. Ostatní firmy
+  vidí „Faktury pro tuto firmu zatím nejsou zapnuté". Důvod: při návratu
+  zpět by faktury ostatních firem zůstaly jen v nové databázi a předchozí
+  verze appky by je neviděla.
+- **Když to má být jinak:** po zkušební době (úklid) je otevřít všem
+  firmám se zapnutými Financemi — malá změna brány.
+
+## 62. Párování s fakturou v cizí měně nebo bez částky
+
+**Vzniklo:** 18. 10. 2026. Párování teď mění stav faktury ve stejné
+transakci (dřív „best-effort" do druhé databáze).
+
+1. **Faktura v EUR (nebo jiné cizí měně), nebo bez přečtené částky.**
+   - **Teď:** párování se zapíše, ale stav faktury se **nezmění**
+     a appka řekne „stav nastavte ručně". Dřív by taková faktura po
+     jakékoli platbě skončila jako „Uhrazeno" (platby jsou v Kč, faktura
+     v EUR — čísla se nedají porovnat) a vypadla by z upomínek.
+   - **Když to má být jinak:** (a) párování s takovou fakturou úplně
+     zakázat; (b) přepočítávat kurzem ČNB (samostatná práce).
+   - **Nově:** Platby takové faktury **nenavrhují** k párování (eurové
+     centy by se porovnávaly s haléři). Ručně spárovat je jde dál.
+2. **Kdo smí zrušit párování.**
+   - **Teď:** kromě práva na Platby (`finance.manage` za celou firmu)
+     nově i právo „Vidět přijaté faktury" — zrušení mění stav faktury
+     (stejně jako spárování, to ho chtělo i dřív).
+
+## 63. Odkaz na fakturu u příjemek, vybavení a cen surovin
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur.
+
+- **Teď:** zůstávají textem. U příjemky je to číslo faktury, které píše
+  člověk rukou (ne id), u vybavení a cen surovin to dnes nikdo nevyplňuje.
+  Skutečnou databázovou vazbu na fakturu mají jen párování plateb
+  a evidence příjmu z e-mailu.
+- **Když to má být jinak:** u příjemky vybírat fakturu ze seznamu — pak
+  jde vazba hlídat i porovnat množství s fakturou (samostatná práce).
+
+## 64. Co se starou databází Faktur po úklidu
+
+**Vzniklo:** 18. 10. 2026, sloučení Faktur (navazuje na otázku 46).
+
+- **Teď:** stará databáze zůstane netknutá jako záloha. Appka na její
+  veřejné PDF už nevede (má vlastní kopie v soukromém úložišti), ale
+  **kdo adresu zná, soubor pořád otevře** — dokud projekt existuje.
+- **Možnosti po zkušební době:** (a) nechat; (b) smazat soubory ze
+  starého veřejného úložiště (podle průzkumu ze září má úložiště
+  otevřená pravidla, takže by to mělo jít přes veřejný klíč — ověřím
+  nanečisto a připravím jako krok, spustí se jen na váš pokyn); (c) smazat celý projekt
+  (chce přihlášení do Supabase, které teď nemáte).
+- **Doporučuju (b)**, protože (a) nechává faktury veřejně dostupné.
+
+## 65. Velikost fotky u ručně zadané faktury
+
+**Vzniklo:** 19. 10. 2026, kontrola sloučení Faktur.
+
+- **Teď:** fotka nebo PDF u ručně zadané faktury smí mít nejvýš **1 MB**
+  (strop formulářů v appce; stejné jako dosud, jen to teď formulář
+  říká). Větší soubor appka odmítne obecnou chybou dřív, než se dostane
+  ke kontrole. Fotka z mobilu má často 2–5 MB.
+- **Když to má být jinak:** zvednout strop formulářů na 4 MB (víc
+  nedovolí Vercel). Je to jedno nastavení, ale platí pro všechny
+  formuláře appky — proto jen na váš pokyn. Druhá možnost: zmenšovat
+  fotku v prohlížeči před odesláním (samostatná práce).
+
+## 66. Kiosek Jiných plateb — kolik dokladů smí poslat jeden telefon
+
+**Vzniklo:** 22. 10. 2026, zadání „kiosek do telefonu jako je na docházku“
+(PR kiosku Jiných plateb). Telefon na baru nemá přihlášeného člověka
+ani PIN, takže jedinou brzdou proti omylu nebo zneužití je strop na
+zařízení.
+
+- **Teď:** z jednoho telefonu odejde nejvýš **20 dokladů za hodinu**
+  a **60 za 24 hodin**. Pak telefon napíše, ať se to zkusí za chvíli
+  nebo ať se dá vědět vedoucímu. Strop hlídá databáze.
+- **Proč:** běžná směna pošle pár dokladů; víc než 20 za hodinu je
+  spíš zaseknutý telefon nebo omyl. Každý doklad pak někdo ve Financích
+  kontroluje, takže stovka prázdných záznamů by zahltila jeho frontu.
+- **Když to má být jinak:** řekněte čísla (dvě konstanty v migraci,
+  `app.jp_kiosek_strop_hodina` a `app.jp_kiosek_strop_den`). Jde i strop
+  na pobočku místo na zařízení.
+
+## 67. Kiosek Jiných plateb — spouštět rozpoznání AI hned po odeslání?
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Zadání říká, že AI se
+„může spustit samo (v limitu AI)“.
+
+- **Teď:** z kiosku se **AI samo nespouští**. Doklad přijde do Finance →
+  Tržby → Jiné platby a rozpoznání spustí ten, kdo ho kontroluje
+  (tlačítko „Rozpoznat z dokladu“, stejný denní strop jako dnes).
+- **Proč:** každé čtení se platí a telefon na baru nemá nikoho, kdo by
+  hlídal, jestli neposílá rozmazané nebo zdvojené fotky. Rozpoznání
+  navíc ukládá návrh pod uživatelem s právem „upravit“ — kiosek žádného
+  nemá a muselo by se pro něj udělat zvláštní obejití.
+- **Když to má být jinak:** „spouštět samo“ — po odeslání by server
+  rozpoznání zahájil sám (v denním stropu AI firmy) a návrh uložil jako
+  „rozpoznáno z kiosku, ke kontrole“. Je to samostatná práce (asi den).
+
+## 68. Kiosek Jiných plateb — pokladna u dokladu z telefonu
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Ve Financích se pokladna
+vybírá při založení a později už změnit nejde; obsluha na telefonu ji
+vybírat nemá.
+
+- **Teď:** záznam z kiosku dostane pokladnu pobočky **sám, jen když ji
+  pobočku obsluhuje právě jedna** (i pokladna celé firmy s provozovnou
+  té pobočky). Když jich je víc (nebo žádná), záznam je bez pokladny
+  a kontrolu v pokladně ve Financích zapíší ručním prohlášením.
+- **Proč:** u víc pokladen by appka hádala — a špatná pokladna by
+  kontrolu „je prodej v pokladně?“ hledala jinde, než prodej proběhl.
+- **Když to má být jinak:** u zařízení v Nastavení → Zařízení vybrat,
+  do které pokladny jeho doklady patří (malá úprava), nebo dovolit
+  pokladnu u záznamu ve Financích dodatečně změnit (větší úprava —
+  kontroly a tržby jsou na ni navázané).
+
+## 69. Kiosek Jiných plateb — má telefon ukazovat dnešní odeslané doklady?
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Zadání dovoluje
+„nanejvýš doklady odeslané z téhož zařízení dnes se stavem“.
+
+> **ROZHODNUTÍ ŠÉFÍKA (24. 10. 2026):** „ok otázka 69, ukazovat přehled
+> odeslaných dokladů za dnešek - ano.“ Udělané v nejopatrnější podobě:
+> telefon ukazuje doklady odeslané **z tohoto telefonu** za **dnešní
+> provozní den** pobočky (hranice dne podle pobočky, jako jinde v appce),
+> od nejnovějšího. U každého jen **čas odeslání, počet fotek, poznámku**
+> (co obsluha sama napsala) a **stav**: „Přijato, čeká na kontrolu“,
+> „Zkontrolováno“, „Zpracováno“ (tržba zapsaná nebo propojená), „Zrušeno
+> ve Financích“ a „Bez fotky — pošlete znovu“. Žádné částky, položky ani
+> nic z Financí; nic z jiných telefonů ani z jiných dnů. Odvolaný nebo
+> vypnutý telefon nedostane nic.
+>
+> **Zbývá rozhodnout (varianty, appka teď jede podle první):**
+> - přehled jen z tohoto telefonu (teď), nebo **celé pobočky** (všech
+>   jejích telefonů) — malá úprava, ale u telefonu pak vidí každý, co
+>   poslali ostatní;
+> - u zrušeného dokladu ukazovat i **důvod zrušení** — teď ne, píše ho
+>   Finance a může obsahovat cokoli (jméno hosta, částku).
+
+Původní znění (do 24. 10.):
+
+- **Teď:** telefon **neukazuje nic** kromě potvrzení hned po odeslání
+  („Doklad (3 fotky) odešel v 14:05“). Seznam dnešních dokladů ani jejich
+  stav tam není.
+- **Proč:** nejopatrnější varianta — kdo vezme telefon do ruky, nedozví
+  se nic o tom, co poslali jiní (označení účtu může obsahovat jméno
+  hosta nebo firmy). Potvrzení stačí, aby obsluha věděla, že doklad
+  odešel.
+- **Když to má být jinak:** seznam dnešních dokladů z téhož telefonu
+  s časem, počtem fotek a stavem „přijato / zkontrolováno“ (bez částek).
+  Je to malá úprava, databáze by vracela jen tyhle tři údaje.
+
+## 70. Kiosek Jiných plateb — jedno zařízení pro Docházku i doklady?
+
+**Vzniklo:** 22. 10. 2026, kiosek Jiných plateb. Telefon se páruje stejně
+jako tablet Docházky (zařízení pobočky v Nastavení → Zařízení).
+
+> **ROZHODNUTÍ ŠÉFÍKA (24. 10. 2026):** „zařízení může být několik“.
+> Pobočka smí mít **víc telefonů pro doklady naráz**. Každý se páruje
+> a zapíná zvlášť, strop z otázky 66 (20 za hodinu, 60 za den) platí na
+> **každý telefon zvlášť** a autorem dokladu je **konkrétní telefon**
+> (jeho název). Appka to tak měla už od začátku — žádné „jedno zařízení
+> na pobočku“ (ověřuje scénář krok100: dva telefony téže pobočky
+> posílají nezávisle a každý doklad nese svůj telefon).
+>
+> **Doplněno po nezávislé kontrole (24. 10.):** původní text níž tvrdil,
+> že na telefonu jde jen píchnout PINem. Ve skutečnosti klíč telefonu
+> otevíral celý kiosek Docházky: **dnešní zálohy se jmény a částkami,
+> rozpis směn a živý kód k píchnutí — bez PINu**, a telefon se na rozdíl
+> od tabletu dá odnést. Proto teď **telefon spárovaný na /kiosek/doklady
+> slouží jen na doklady** (zařízení má účel „doklady“). Kiosek Docházky na
+> něm nefunguje, do „má pobočka tablet“ se nepočítá a klíč nosí
+> v prohlížeči zvlášť. Tablet Docházky (spárovaný na /kiosek) zase doklady
+> neposílá. Kdo chce na jednom zařízení obojí, spáruje ho dvakrát, jednou
+> na každé adrese, a v Nastavení → Zařízení budou dva řádky.
+
+- **Teď (po kontrole 24. 10.):** telefon na doklady se páruje stejným kódem
+  z Nastavení, ale na adrese /kiosek/doklady — dostane účel „doklady“.
+  Spárování samo **doklady nepovolí**: u telefonu se musí zvlášť zapnout
+  **Kiosek Jiných plateb** (správce nastavení pobočky). Kiosek Docházky na
+  telefonu na doklady **nefunguje** a tablet Docházky doklady neposílá.
+- **Původní znění (do 24. 10.):** „spárování samo doklady nepovolí …
+  každé spárované zařízení pobočky umí ukázat i kiosek Docházky (píchnutí
+  chce PIN)“ — neplatí, viz doplnění výš.
+- **Proč:** zapnutí je výslovné a dohledatelné (audit) a vypnutí platí
+  hned. Kdo telefon ztratí, odvolá ho tamtéž jako tablet.
+- **Když to má být jinak:** jedno zařízení pro obojí s jedním spárováním
+  (vypínač Docházky u zařízení). Dnes jde obojí jen dvojím spárováním.
+
+## 71. Jiné platby — jak zapisovat výdej do Dotykačky
+
+**Vzniklo:** 25. 10. 2026, výdej ze skladu u Jiných plateb
+(docs/jine-platby-vydej-dotykacka.md, oddíl 1.1).
+
+Dotykačka má dvě cesty, jak sklad odečíst zvenku:
+
+| Cesta | Plus | Minus |
+|---|---|---|
+| **POS akce: účet zaplacený Odpisem** (totéž, co dnes děláte ručně) | appka výdej dohledá podle svého klíče, takže pozná, jestli proběhl, a nikdy neodečte dvakrát; suroviny odečte pokladna podle receptury | pokladna na provozovně musí být zapnutá, připojená a otevřená; licence premium (POS akce) |
+| **Přímý výdej ze skladu** (`warehouses/…/sales`) | pokladna nemusí být zapnutá | výdej nejde dohledat — po výpadku spojení appka neví, jestli odečetla; u pokrmu s recepturou dokumentace neříká, co se odečte |
+
+- **Co jsem vybral:** **POS akci s Odpisem.** Bezpečnost proti dvojímu
+  odečtu je důležitější než pohodlí, že pokladna nemusí běžet.
+- **Když to má být jinak:** přímý výdej by šel jen pro suroviny a jen
+  s ručním potvrzením po každém nejasném výsledku (nebo s webhookem
+  skladových pohybů, který chce veřejnou adresu). Napište, jestli o to
+  stojíte.
+
+## 72. Jiné platby — převod množství podle názvu produktu
+
+**Vzniklo:** 25. 10. 2026.
+
+Dotykačka u produktu neříká, kolik litrů nebo kilogramů je v jednom kusu
+(`packaging` je počet kusů v balení). Když je na papíře „2 l smetany“
+a v pokladně je „Smetana 1 l“ vedená v kusech, appka to dnes **nepřevede**
+a položku dá ke kontrole — člověk napíše „2 ks“.
+
+- **Teď:** převádí se jen to, co plyne z dat pokladny (kusy na kusy,
+  kilogramy na kilogramy u suroviny vedené v kilogramech). AI množství
+  nepočítá.
+- **Varianta:** appka by „1 l“ vyčetla z názvu produktu a navrhla 2 ks se
+  značkou „ke kontrole“. Ověří se i to, jestli Dotykačka objem nenese
+  v polích `packagingMeasurement` / `unitMeasurement` (testovací cloud);
+  pak by to šlo bez odhadu.
+- **Otázka:** chcete návrh z názvu (vždy ke kontrole), nebo raději ručně?
+
+## 73. Jiné platby — testovací cloud Dotykačky a práva aplikace
+
+**Vzniklo:** 25. 10. 2026.
+
+Zápis se smí zapnout až po zkoušce na testovacím cloudu (otázka 54).
+
+- **Co je potřeba od vás:** založit účet Dotypos s testovacím licenčním
+  klíčem z 12. 10. (tím vznikne testovací cloud), dát do něj pár produktů
+  (pivo, svíčková s recepturou, smetana jako surovina) a připojit ho ve
+  Foodtabu jako další pokladnu. Účty nezakládám já.
+- **Práva aplikace:** Dotykačka umí klientské aplikaci zakázat konkrétní
+  adresy API (odpověď 403 `DOMAIN_FORBIDDEN`). Z dokumentace nejde zjistit,
+  jestli Foodtab smí `pos-actions` (zápis), `manifest` (nastavení
+  provozovny) a čtení receptur. Na testovacím cloudu se to pozná; případně
+  stačí dotaz na podporu Dotykačky s naším Client ID.
+- **Teď:** nic se nezapisuje. Receptury se zkusí číst; když na ně appka
+  právo nemá, katalog se načte bez nich jako dřív.
+
+## 74. Jiné platby — pod jakým uživatelem pokladny se odpis zapíše
+
+**Vzniklo:** 25. 10. 2026.
+
+POS akce se v pokladně provede pod uživatelem. Když ho appka nepošle,
+použije pokladna „uživatele integrace“, kterého Dotykačka vytvořila pro
+Foodtab.
+
+- **Teď (až se zápis zapne):** uživatel integrace. V Dotykačce pak u odpisu
+  bude jeho jméno, ne jméno schvalovatele; kdo výdej schválil, je
+  v historii záznamu ve Foodtabu.
+- **Pozor:** uživatel integrace musí mít v pokladně právo na odpis (jinak
+  pokladna vrátí chybu a nic se neodečte) — ověří se na testovacím cloudu.
+- **Varianta:** u každého schvalovatele uložit jeho id zaměstnance
+  z Dotykačky a odpis zapisovat pod ním.
+
+## 75. Jiné platby — přiřazení položek přes AI: kdy a kolik
+
+**Vzniklo:** 25. 10. 2026.
+
+- **Teď:** AI přiřazuje jen na kliknutí „Najít produkty v pokladně (AI)“
+  v panelu Sklad, a jen u položek, které appka nepřiřadila sama (podle
+  dřív potvrzeného názvu, čárového kódu nebo podobného názvu). Strop je
+  10 hledání na doklad a 100 na firmu denně. Každý návrh AI jde ke
+  kontrole a potvrzuje ho člověk.
+- **Varianty:** spouštět hledání samo hned po rozpoznání dokladu (jedno
+  kliknutí méně, ale platí se i tam, kde to nikdo nepotřebuje); jiný strop.
+
+## 76. Rezervace a akce — kdo co vidí a kdo to dostane
+
+**Vzniklo:** 25. 10. 2026, nová sekce Provoz → Rezervace a akce
+(docs/rezervace-navrh.md, oddíl 6). Čísla 71–75 si bere souběžná práce
+na výdeji ze skladu, proto tady začínám od 76.
+
+- **Teď:** dvě nová práva v Provozu. „Vidět rezervace a kalendář akcí“
+  (kalendář, rezervace, poznámky, dokumenty) a „Zapisovat rezervace
+  a akce, poznámky a přílohy; vidět kontakty hostů“ (citlivé).
+  **Telefon a e-mail hosta vidí jen ten, kdo zapisuje.** Stávajícím
+  zaměstnancům jsem práva **nikomu nepřidal** — vidí je jen majitel.
+  Nové firmy: provozní obě, vedoucí směny čtení.
+- **Proč:** do zařazení u zákazníků se bez pokynu nesahá
+  (20260831010000) a kontakt hosta je osobní údaj — číšník potřebuje
+  vědět, kdo přijde a kolik jich bude, ne jeho číslo.
+- **Co udělat:** v Nastavení → Zařazení zaškrtnout práva tam, kde mají být
+  (návrh: Provozní obě, Vedoucí směny čtení, Servis čtení).
+- **Když to má být jinak:** řekněte, která zařazení mají co dostat
+  automaticky — je to jedna migrace.
+
+## 77. Rezervace z rezervačního systému — čí je pravda
+
+**Vzniklo:** 25. 10. 2026, Rezervace a akce, import ze souboru a kostra
+napojení (docs/rezervace-navrh.md, oddíl 3).
+
+- **Teď:** u rezervace, která přišla ze souboru nebo ze systému, patří
+  **čas, počet osob, stav, jméno, telefon, e-mail a poznámka hosta
+  zdroji** — při každém novějším načtení se přepíšou a ve Foodtabu je
+  měnit nejde. **Druh (rezervace/akce), název, typ akce, menu, záloha,
+  poznámky a dokumenty patří Foodtabu** a import je nikdy nepřepíše.
+  Stůl/prostor import jen doplní, když je prázdný. Zrušení ve zdroji =
+  „zrušená“, nic se nemaže; rezervace, která v souboru chybí, zůstává.
+- **Proč:** jinak by se oprava ve Foodtabu při dalším načtení tiše
+  vrátila, nebo by import smazal poznámky obsluhy. Zápis zpět do
+  rezervačního systému zatím neumíme (a kontrakt ho v první verzi
+  nechce), takže pravda o čase a počtu musí zůstat tam.
+- **Když to má být jinak:** např. „stav nedorazili zapisujeme ve
+  Foodtabu“ — šel by udělat výjimkou pro jeden údaj, ale dokud ho appka
+  neumí poslat zpátky, rozejde se s rezervačním systémem.
+
+## 78. Rezervace — který rezervační systém napojit jako první?
+
+**Vzniklo:** 25. 10. 2026. Zadání chce sekci „propojit na externí
+rezervační systém“, ale neříká na který. Průzkum je v
+docs/rezervace-navrh.md, oddíl 1.
+
+- **Teď:** napojení jde **připravit** (Rezervace → Napojení a import),
+  ale zůstane „čeká na připojení“ — adaptér žádného systému není
+  a databáze „připojeno“ bez ověřeného přístupu nedovolí. Rezervace jdou
+  zapsat ručně nebo načíst ze souboru CSV.
+- **Proč:** tvar dat se bez dokumentace a přístupu nevymýšlí (stejné
+  pravidlo jako u pokladen).
+- **Potřebuji vědět:** jaký rezervační systém používá Černá Perla a jaký
+  Bernard (nebo jestli rezervace vedete v sešitě / v Dotykačce).
+  **Doporučení: Dotykačka** — má rezervace v API i webhooky a pokladnu už
+  máme napojenou; stačí ověřit, že stávající přístup rezervace smí číst.
+  Druhá nejlépe popsaná je TheFork (přístup ale vydává TheFork).
+
+## 79. Rezervace — jaké dokumenty jde přikládat
+
+**Vzniklo:** 25. 10. 2026, přílohy k rezervacím a ke dnům.
+
+- **Teď:** **fotky (JPEG, PNG, WebP) a PDF**, každý do 10 MB, nejvýš 20 na
+  rezervaci nebo na den pobočky. Velké fotky z telefonu se před nahráním
+  zmenší. Word a Excel ne.
+- **Proč:** stejná sada jako přílohy ve Vzkazech a doklady Jiných plateb
+  — vyzkoušená, a smlouva nebo menu jde vždycky uložit jako PDF.
+  Nejopatrnější varianta.
+- **Když to má být jinak:** „povolit Word a Excel“ — dva řádky
+  (kbelík a kontrola v databázi), bez maker (.docm/.xlsm ne).
+
+## 80. Rezervace — záloha od hosta
+
+**Vzniklo:** 25. 10. 2026, akce a uzavřené společnosti.
+
+- **Teď:** u rezervace i akce jde zapsat **částku zálohy a její stav**
+  (bez zálohy, požadovaná, zaplacená, vrácená). Je to **jen evidence**:
+  appka nic neplatí, nepáruje s bankou a neposílá výzvy.
+- **Proč:** banka je ve Foodtabu jen pro čtení a platby záloh za akce
+  zatím nikdo nezadal. Pozor na slovo: **„záloha od hosta“** nemá nic
+  společného se zálohami zaměstnancům (Docházka → Zálohy).
+- **Když to má být jinak:** napárovat zaplacenou zálohu s příchozí
+  platbou ve Financích (podobně jako úhrady faktur) — samostatná práce.

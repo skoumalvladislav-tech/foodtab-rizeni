@@ -61,6 +61,11 @@ export const PERMISSIONS = [
   'recipes.manage',
   'menus.read',
   'menus.manage',
+  // Rezervace a kalendář akcí (25. 10. 2026, docs/rezervace-navrh.md).
+  // Jen `manage` vidí telefon a e-mail hosta — číšník potřebuje vědět,
+  // kdo přijde a kolik jich bude, ne jeho číslo.
+  'rezervace.read',
+  'rezervace.manage',
   'ai.use',
   'motivation.read',
   'motivation.manage',
@@ -99,6 +104,16 @@ export const PERMISSIONS = [
   // nesmí tím automaticky získat právo mazat/opravovat faktury a
   // platby, a naopak. Čtení registru zůstává na finance.read.
   'integrace.manage',
+  // Jiné platby (Šéfík 15. 10. 2026, docs/jine-platby-navrh.md oddíl 4).
+  // Každá část zvlášť: kdo potvrzuje tržbu, nesmí tím odečíst sklad
+  // a naopak. „Potvrdit výdej do POS“ platí na pobočkách členství.
+  'jine_platby.zadat',
+  'jine_platby.upravit',
+  'jine_platby.sklad_odeslat',
+  'jine_platby.trzba',
+  'jine_platby.vydej_pos',
+  'jine_platby.faktura',
+  'jine_platby.oprava',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]

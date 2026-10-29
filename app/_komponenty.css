@@ -526,11 +526,20 @@ li:first-child > .ds-vzkaz { border-top: 0; padding-top: 0; }
    (docs/vzhled-zadani.md, oddíl 11); jinde v aplikaci se nic nemění.
    ===================================================================== */
 
-.ds-sm-jen-mobil { display: none; }
+/* Přepínač telefon / počítač. Schovává se s `!important`: prvek nese
+   i vlastní rozvržení a pravidlo pro ně, které v souboru stojí později
+   (`.ds-smd { display: flex }` níž) nebo má vyšší specifičnost
+   (`.neco > div`), by schování jinak přebilo. Přesně tak se od 19. 9.
+   do 27. 10. 2026 kreslila na telefonu pod mobilním rozpisem i celá
+   týdenní mřížka. `not all and (max-width: 640px)` je přesný doplněk
+   telefonu: žádná šířka (ani 640,5 px při zvětšení stránky) neukáže
+   obojí ani nic. Hlídá scripts/css-prepinani.test.mjs. */
+@media not all and (max-width: 640px) {
+  .ds-sm-jen-mobil { display: none !important; }
+}
 
 @media (max-width: 640px) {
-  .ds-sm-jen-mobil { display: block; }
-  .ds-sm-jen-desktop { display: none; }
+  .ds-sm-jen-desktop { display: none !important; }
 
   /* Vydání rozpisu zůstává (je to hlavní práce vedoucího), ale na
      telefonu až pod seznamem a bez dvojího odsazení. `!important`: panel

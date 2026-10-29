@@ -2,12 +2,14 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
+import { pobockaBezPrehleduFirmy } from '@/lib/finance-pristup'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { getServerSupabase } from '@/lib/supabase/server'
 import { canSee, isModuleActive, TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
 import { POZNAMKA_OBJEDNAVKY_FIRMY } from '@/lib/finance-evidence-pobocka'
 import Sdeleni from '@/app/sdeleni'
+import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
 import Nadpis from '../../nadpis'
 import Navigace from '../navigace'
 import { zalozitObjednavku } from './akce'
@@ -94,6 +96,8 @@ export default async function FinanceNakup({
   if (!isModuleActive(pristup.ctx, 'objednavky')) {
     return <Sdeleni nadpis="Modul Objednávky není zapnutý">Nákup potřebuje aktivní modul „Objednávky“, ne jen „Finance“.</Sdeleni>
   }
+  // Finanční přehled jen na pobočce → dodavatelé z Kontaktů by byli celé firmy (lib/finance-pristup.ts, N23).
+  if (await pobockaBezPrehleduFirmy(tenantId, pristup)) return <SdeleniPobockyBezFirmy rozsah={rozsah} />
 
   const smiPsat = canSee(pristup.ctx, 'purchasing.manage')
   const supabase = await getServerSupabase()

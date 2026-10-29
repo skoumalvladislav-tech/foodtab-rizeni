@@ -45,6 +45,14 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *   * `app/[rozsah]/finance/faktury/akce.ts` (`vratitNeuhrazenou`) — jen
  *     součet párování JEDNÉ faktury vlastní firmy, po `faktury.manage`
  *     (uživatelský klient by bez práva na Platby viděl nulu).
+ *   * `app/api/prevod-faktur` (`lib/faktury-prevod-sync.ts`) — převod
+ *     faktur ze staré databáze do hlavní; za CRON_SECRET, krok vždy
+ *     výslovně a zapisující s potvrzením, firma VÝHRADNĚ z
+ *     FAKTURY_DB_TENANT_ID. Není pod /api/uloha, protože ji nikdy nespouští
+ *     plánovač — jen Šéfík ručně. Zmizí s úklidem po převodu.
+ *   * `lib/faktury-pristup.ts` (`pristupKFakturamUlohy`,
+ *     `firmySOtevrenymiFakturami`) — brána Faktur pro úlohy výš; čte jen
+ *     stav převodu firmy.
  *   * `app/api/pokladna/prodeje` — příjmové API pro pokladny: klíč
  *     nahrazuje přihlášení, určuje připojení a tím firmu i pobočku;
  *     z těla se bere jen obsah prodeje (zápis přes
@@ -63,6 +71,37 @@ import { funkceNeexistuje } from '@/lib/supabase/dotaz'
  *     `lib/finance-automaticke-parovani.ts`) — automatické párování po
  *     importu výpisu, jen když importující má `finance.manage`
  *     i `faktury.manage`, jen vlastní firma a z CSV jen právě nahraná dávka.
+ *   * Jiné platby — `app/[rozsah]/finance/trzby/jine-platby/akce-pos.ts`
+ *     a `akce-ai.ts` (a přes ně `lib/pokladna-relace.ts`): otevření relace
+ *     pokladny (rozšifrování tokenu), výsledek dohledání v pokladně
+ *     (`jine_platby_zapsat_kontrolu`), zabrání a ukončení výdeje
+ *     (`pos_operace_zahajit` / `_dokoncit`), katalog (`pos_katalog_nahradit`),
+ *     pokus a výsledek rozpoznání AI (`jine_platby_zahajit_rozpoznani` /
+ *     `_dokoncit_rozpoznani`). Vždy až po `pripravit()`: firma z členství,
+ *     záznam načtený uživatelským klientem (RLS) a právo agendy na pobočce
+ *     záznamu (`hasAccess`), a jen s id toho záznamu a jeho připojení.
+ *     Tyhle funkce jsou v databázi jen pro service_role schválně: „ověřeno
+ *     v pokladně" a „rozpoznala AI" se nesmí dát zapsat z prohlížeče.
+ *   * Jiné platby — `app/[rozsah]/finance/trzby/jine-platby/akce-soubory.ts`:
+ *     připojení nahraného dokladu (`jine_platby_pripojit_soubor`, jen pro
+ *     service_role — kontrola 19. 10., N1). Otisk sha256 a typ podle obsahu
+ *     počítá server ze stažených bajtů; kdyby RPC smělo volat authenticated,
+ *     poslal by si otisk kdokoli sám a pojistka „stejná fotka podruhé
+ *     neprojde" by nic nehlídala. Až po ověření práva zadat/upravit na
+ *     pobočce záznamu uživatelským klientem, jen s id toho záznamu, cestou
+ *     v jeho složce kbelíku a `p_nahral` = id přihlášeného (vlastník
+ *     objektu v úložišti musí sedět).
+ *   * Rezervace z Choice — `lib/rezervace-choice-sync.ts` z akcí
+ *     `app/[rozsah]/rezervace/akce.ts` („Načíst teď“, „Ověřit znovu“)
+ *     a z `app/api/rezervace/choice/callback` (ověření tokenu, kontrola,
+ *     že tentýž podnik není u jiné pobočky téže firmy, první načtení).
+ *     Fronta dotazů na Choice (`rezervace_choice_zabrat_dotaz`), odstup
+ *     „Ověřit znovu“ (`rezervace_choice_zabrat_overeni`) a zápis
+ *     ze zdroje (`rezervace_importovat_zdroj`) jsou jen pro service_role
+ *     schválně: přihlášený by si jinak zabíral frontu dopředu a zapisoval
+ *     „rezervace z Choice“ sám. Vždy až po přihlášení, právu na pobočce
+ *     připojení (`integrace.manage`, u „Načíst teď“ i `rezervace.manage`)
+ *     a dohledání připojení uživatelským klientem; jen s id toho připojení.
  *
  * ---------------------------------------------------------------------
  * KDYŽ KLÍČ CHYBÍ

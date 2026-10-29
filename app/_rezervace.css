@@ -1,0 +1,296 @@
+/* =====================================================================
+   REZERVACE A AKCE (Provoz, 25. 10. 2026) — app/[rozsah]/rezervace/
+   =====================================================================
+   Vlastní soubor, ne další blok na konci _komponenty.css: na tom konci
+   píše víc souběžných relací a srážka by byla jistá. Pravidla jsou
+   stejná jako jinde (docs/vzhled-zadani.md, oddíl 11): karty
+   `.ds-plocha`, čísla patková (`.ds-cislo`), přízvuk mosaz přes
+   `color-mix` (vybraný den 22 %, víkend 11 %), barva nikdy sama —
+   zrušená rezervace má i slovo, akce i štítek.
+
+   Rozvržení uvnitř obsahu se řídí šířkou OBSAHU (container query),
+   ne okna — levý sloupec aplikace bere různě místa.
+   ===================================================================== */
+
+.ds-rez { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
+
+/* --- nástroje: pohled, šipky, období, nová rezervace ------------------- */
+
+.ds-rez-nastroje { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ds-rez-prepinac { display: inline-flex; gap: 4px; }
+.ds-rez-sipky { display: inline-flex; gap: 4px; align-items: center; }
+.ds-rez-sipky .ft-tl { min-width: 40px; padding: 0 10px; }
+.ds-rez-obdobi { margin: 0 4px; font-size: 19px; font-weight: 600; line-height: 1.2; }
+.ds-rez-vpravo { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
+@container (max-width: 640px) {
+  .ds-rez-vpravo { margin-left: 0; width: 100%; }
+  .ds-rez-vpravo .ft-tl { flex: 1 1 auto; }
+  .ds-rez-obdobi { width: 100%; margin: 4px 0 0; order: 5; }
+}
+
+/* --- pobočky: štítek, legenda, rámečky (27. 10. 2026) -------------------
+   Barva pobočky přes data-branch (app/_tokeny.css), ale jen klíče, které
+   pustí lib/rezervace-pobocky.ts — ty se nepletou s barvami stavů.
+   Pobočka se liší i TVAREM: plný štítek se zkratkou a rámeček s tlustou
+   levou hranou; stav je bledá pilulka se slovem, akce vínová s praporkem. */
+
+.ds-rez-znacka {
+  display: inline-flex; align-items: center; flex: none;
+  padding: 1px 5px; border-radius: 5px;
+  background: var(--branch-fill); color: var(--branch-ink);
+  font-size: 11px; font-weight: 700; line-height: 1.35; letter-spacing: .03em; white-space: nowrap;
+}
+
+.ds-rez-pobocky {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 12px;
+}
+.ds-rez-pobocka-karta {
+  display: grid; gap: 6px; min-width: 0; padding: 12px 16px; border-radius: 16px;
+  background: var(--card); box-shadow: var(--shadow-sm);
+  border: 1px solid color-mix(in srgb, var(--branch) 35%, var(--line));
+  border-left: 5px solid var(--branch);
+}
+.ds-rez-pobocka-hlava { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ds-rez-pobocka-hlava h3 { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.ds-rez-pobocka-cisla { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; font-size: 13.5px; color: var(--muted); }
+.ds-rez-pobocka-cisla strong { font-size: 22px; font-weight: 500; line-height: 1.1; color: var(--branch); }
+.ds-rez-pobocka-obdobi { margin: 0; font-size: 12px; color: var(--muted); }
+
+/* --- týden ------------------------------------------------------------- */
+
+.ds-rez-tyden { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+.ds-rez-den { display: flex; flex-direction: column; gap: 8px; padding: 12px; min-height: 180px; }
+.ds-rez-den[data-vikend] { background: color-mix(in srgb, var(--mosaz-sv) 11%, var(--card)); }
+.ds-rez-den[data-dnes] { background: color-mix(in srgb, var(--mosaz-sv) 22%, var(--card)); border-color: var(--mosaz-sv); }
+.ds-rez-den-hlava {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+  color: var(--ink); text-decoration: none;
+}
+.ds-rez-den-hlava:hover .ds-rez-den-nazev { text-decoration: underline; text-underline-offset: 3px; }
+.ds-rez-den-nazev { font-size: 13px; font-weight: 600; text-transform: capitalize; }
+.ds-rez-den-cislo { font-size: 24px; line-height: 1; }
+.ds-rez-den-souhrn { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+.ds-rez-den-znacky { display: flex; gap: 6px; color: var(--muted); font-size: 12px; align-items: center; }
+.ds-rez-den-znacky span { display: inline-flex; align-items: center; gap: 3px; }
+.ds-rez-den-znacky .ft-i { width: 14px; height: 14px; }
+.ds-rez-den-pridat { margin-top: auto; font-size: 12.5px; color: var(--muted); text-decoration: none; }
+.ds-rez-den-pridat:hover, .ds-rez-den-pridat:focus-visible { color: var(--ink); text-decoration: underline; }
+
+.ds-rez-polozka {
+  display: grid; gap: 1px; padding: 6px 8px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--paper);
+  color: var(--ink); text-decoration: none; font-size: 13px; line-height: 1.35; min-width: 0;
+}
+.ds-rez-polozka:hover { border-color: var(--line-2); box-shadow: var(--shadow-sm); }
+.ds-rez-polozka:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
+/* Jméno na dva řádky, pak tři tečky — v sedmi sloupcích by na jeden nebylo poznat, kdo to je. */
+.ds-rez-polozka strong {
+  font-weight: 600; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+.ds-rez-polozka small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-rez-polozka[data-druh="akce"] {
+  border-color: color-mix(in srgb, var(--vino) 45%, var(--line));
+  background: color-mix(in srgb, var(--vino) 8%, var(--card));
+}
+.ds-rez-polozka[data-neplati] { opacity: .65; }
+.ds-rez-polozka[data-neplati] strong { text-decoration: line-through; }
+
+/* Víc poboček: každá má v dni svůj rámeček se zkratkou a souhrnem. */
+.ds-rez-skupina {
+  display: grid; gap: 6px; padding: 6px; border-radius: 12px; min-width: 0;
+  background: var(--branch-soft);
+  border: 1px solid color-mix(in srgb, var(--branch) 35%, var(--line));
+  border-left: 4px solid var(--branch);
+}
+/* Souhrn se v úzkém sloupci zalomí pod štítek — useknutý počet hostů by nic neřekl. */
+.ds-rez-skupina-hlava {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0;
+  font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--branch);
+}
+
+@container (max-width: 900px) {
+  .ds-rez-tyden { grid-template-columns: 1fr; }
+  .ds-rez-den { min-height: 0; }
+  .ds-rez-den-pridat { margin-top: 0; }
+}
+
+/* --- měsíc ------------------------------------------------------------- */
+
+.ds-rez-mesic {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.ds-rez-mesic-hlava {
+  padding: 8px; text-align: center; font-size: 12px; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1px solid var(--line);
+}
+.ds-rez-bunka {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0; min-height: 104px;
+  padding: 6px 8px; color: var(--ink); text-decoration: none;
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+}
+.ds-rez-bunka:nth-child(7n) { border-right: 0; }
+.ds-rez-bunka:hover { background: var(--sunken); }
+.ds-rez-bunka:focus-visible { outline: 2px solid var(--mosaz); outline-offset: -2px; }
+.ds-rez-bunka[data-vikend] { background: color-mix(in srgb, var(--mosaz-sv) 11%, var(--card)); }
+.ds-rez-bunka[data-dnes] { background: color-mix(in srgb, var(--mosaz-sv) 26%, var(--card)); }
+.ds-rez-bunka[data-mimo] { color: var(--faint); background: color-mix(in srgb, var(--sunken) 60%, var(--card)); }
+.ds-rez-bunka-cislo { font-size: 16px; line-height: 1.1; }
+.ds-rez-bunka-souhrn { font-size: 12px; color: var(--muted); line-height: 1.3; }
+/* Rezervace v buňce: po pobočkách, každá řádka se štítkem zkratky. */
+.ds-rez-bunka-pobocka { display: grid; gap: 2px; min-width: 0; padding: 1px 0 1px 5px; border-left: 3px solid var(--branch); }
+.ds-rez-bunka-radek { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; line-height: 1.3; }
+.ds-rez-bunka-radek .ds-rez-znacka { font-size: 10px; padding: 0 4px; }
+.ds-rez-bunka-radek .ft-i { width: 12px; height: 12px; flex: none; color: var(--vino); }
+.ds-rez-bunka-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ds-rez-bunka-radek[data-druh="akce"] .ds-rez-bunka-text { color: var(--vino); font-weight: 600; }
+.ds-rez-bunka-dalsi { font-size: 11.5px; color: var(--muted); }
+.ds-rez-bunka-den-nazev { display: none; }
+
+/* Telefon: místo mřížky seznam dnů, na kterých něco je. */
+@container (max-width: 640px) {
+  .ds-rez-mesic { grid-template-columns: 1fr; }
+  .ds-rez-mesic-hlava, .ds-rez-bunka[data-prazdny], .ds-rez-bunka[data-mimo] { display: none; }
+  .ds-rez-bunka { min-height: 0; border-right: 0; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px; }
+  .ds-rez-bunka-den-nazev { display: inline; font-size: 13px; color: var(--muted); }
+  .ds-rez-bunka-souhrn { margin-left: auto; }
+  .ds-rez-bunka-pobocka { flex-basis: 100%; }
+}
+.ds-rez-mesic-prazdny { margin: 0; padding: 14px; font-size: 14px; color: var(--muted); display: none; }
+@container (max-width: 640px) { .ds-rez-mesic-prazdny { display: block; } }
+
+/* --- seznam rezervací dne --------------------------------------------- */
+
+.ds-rez-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 12px; }
+.ds-rez-seznam { list-style: none; margin: 0; padding: 0; display: grid; }
+.ds-rez-radek {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 4px 14px; align-items: start;
+  padding: 12px 0; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none;
+}
+.ds-rez-seznam > li:first-child .ds-rez-radek { border-top: 0; padding-top: 0; }
+.ds-rez-radek:hover .ds-rez-jmeno { text-decoration: underline; text-underline-offset: 3px; }
+.ds-rez-radek:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 2px; border-radius: 8px; }
+.ds-rez-cas { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ds-rez-cas small { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); }
+.ds-rez-jmeno { font-size: 15.5px; font-weight: 600; overflow-wrap: anywhere; }
+.ds-rez-meta { margin: 2px 0 0; font-size: 13px; color: var(--muted); line-height: 1.45; }
+.ds-rez-stitky { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.ds-rez-radek[data-neplati] .ds-rez-jmeno { text-decoration: line-through; color: var(--muted); }
+@container (max-width: 560px) {
+  .ds-rez-radek { grid-template-columns: 64px minmax(0, 1fr); }
+  .ds-rez-stitky { grid-column: 2; justify-content: flex-start; }
+}
+
+.ds-rez-pobocka { margin: 0 0 6px; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+/* Den: oddíl pobočky v jejím rámečku, souhrn dne v hlavičce. */
+.ds-rez-oddil { border-color: color-mix(in srgb, var(--branch) 35%, var(--line)); border-left: 5px solid var(--branch); }
+.ds-rez-oddil-hlava { flex-wrap: wrap; }
+.ds-rez-oddil-souhrn { margin-left: auto; font-size: 13.5px; font-weight: 600; color: var(--branch); }
+
+/* --- poznámky, přílohy, údaje ----------------------------------------- */
+
+.ds-rez-poznamky { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.ds-rez-poznamka { padding: 10px 12px; border-radius: 12px; background: var(--paper); border: 1px solid var(--line); min-width: 0; }
+.ds-rez-poznamka strong { display: block; font-size: 13.5px; }
+.ds-rez-poznamka p { margin: 2px 0 0; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ds-rez-poznamka-pata { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.ds-rez-poznamka-pata form { display: inline; }
+.ds-rez-poznamka-pata .ft-tl { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.ds-rez-poznamka details > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.ds-rez-poznamka details[open] > summary { margin-bottom: 8px; }
+
+.ds-rez-prilohy { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ds-rez-priloha { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
+.ds-rez-priloha > .ft-i { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.ds-rez-priloha a { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ds-rez-priloha small { color: var(--muted); flex: none; }
+.ds-rez-priloha form { margin-left: auto; flex: none; }
+
+.ds-rez-formular { display: grid; gap: 12px; }
+.ds-rez-mrizka { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); gap: 12px; }
+.ds-rez-text { min-height: 84px; padding: 10px 12px; line-height: 1.45; resize: vertical; }
+.ds-rez-tlacitka { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.ds-rez-udaje { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 0; font-size: 14px; }
+.ds-rez-udaje dt { color: var(--muted); }
+.ds-rez-udaje dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+@container (max-width: 420px) {
+  .ds-rez-udaje { grid-template-columns: 1fr; gap: 2px; }
+  .ds-rez-udaje dd { margin-bottom: 8px; }
+}
+
+details[open] .ds-rez-otevrit { display: none; }
+
+.ds-rez-hlaska { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; background: var(--dobre-bg); color: var(--dobre); }
+.ds-rez-zdroj { margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; background: var(--info-bg); color: var(--ink); }
+
+/* --- hosté z rezervací v Rozpisu směn (27. 10. 2026) --------------------
+   app/[rozsah]/smeny/hoste-dne.tsx. Na počítači okénko u záhlaví dne
+   (záhlaví je sticky, takže okénko se k němu vztahuje a vyjede dolů přes
+   mřížku); na telefonu řádek v toku stránky, nic nepřekrývá. */
+
+.ds-hoste-spoustec {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; justify-self: center;
+  margin-top: 1px; padding: 1px 7px; border: 1px solid transparent; border-radius: 999px;
+  background: none; color: var(--muted); font: inherit; font-size: 11.5px; line-height: 1.4;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.ds-hoste-spoustec .ft-i { width: 12px; height: 12px; }
+.ds-hoste-spoustec:hover, .ds-hoste-spoustec[aria-expanded="true"] { border-color: var(--line-2); background: var(--card); color: var(--ink); }
+.ds-hoste-spoustec:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
+
+.ds-hoste-okno {
+  position: absolute; top: calc(100% + 4px); left: 4px; z-index: 30;
+  display: grid; gap: 10px; width: max-content; min-width: 250px; max-width: min(330px, 80vw);
+  padding: 12px 14px; text-align: left; font-size: 13px; line-height: 1.4;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow-lg);
+}
+.ds-hoste-okno[data-vpravo] { left: auto; right: 4px; }
+.ds-hoste-titul {
+  margin: 0; display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+}
+.ds-hoste-titul .ft-i { width: 14px; height: 14px; flex: none; }
+.ds-hoste-seznam { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ds-hoste-radek {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 8px;
+  padding-left: 8px; border-left: 3px solid var(--branch);
+}
+.ds-hoste-nazev { font-weight: 600; overflow-wrap: anywhere; }
+.ds-hoste-cisla { grid-column: 1 / -1; font-weight: 600; color: var(--branch); }
+.ds-hoste-celkem { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-weight: 600; }
+.ds-hoste-pata { margin: 0; font-size: 12px; color: var(--muted); }
+.ds-hoste-pata a { color: var(--mosaz); white-space: nowrap; }
+.ds-hoste-chyba { margin: 0; color: var(--bad); }
+
+.ds-hoste-mobil {
+  display: grid; gap: 8px; padding: 10px 12px; font-size: 13.5px; line-height: 1.4;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+}
+
+/* --- napojení ------------------------------------------------------------ */
+
+.ds-rez-systemy { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 12px; }
+.ds-rez-system { display: grid; gap: 6px; align-content: start; }
+.ds-rez-system h3 { margin: 0; font-size: 17px; }
+.ds-rez-system p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; }
+.ds-rez-system-stitky { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* --- příjmové API: klíč ukázaný jednou --------------------------------- */
+
+.ds-rez-klic {
+  display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px;
+  background: var(--pozor-bg); color: var(--ink);
+}
+.ds-rez-klic strong { font-size: 13.5px; }
+.ds-rez-pismo-kodu { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.ds-rez-kod {
+  margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
+  line-height: 1.5; overflow-x: auto; white-space: pre;
+}

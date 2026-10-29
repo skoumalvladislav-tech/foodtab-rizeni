@@ -170,7 +170,7 @@ export function PrijemFakturPanel({
 
       {!databazeFakturOk ? (
         <p style={drobne}>
-          Příjem faktur zapisuje do databáze Faktur — ta zatím pro tuhle firmu není napojená (viz modul Faktury).
+          Faktury jsou pro tuhle firmu zatím zavřené (stěhují se, nebo nejsou zapnuté — viz modul Faktury). Příjem do té doby nic nezapíše; e-maily počkají ve schránce.
         </p>
       ) : null}
 

@@ -1,5 +1,10 @@
 # Stav k 14. 10. 2026 — plánovač úloh: GitHub úlohy vynechává, připravený náhradník v databázi
 
+> Doplněno 17. 10. 2026: otázka 47 je rozhodnutá („47 ano podle tebe“),
+> PR #135 sloučený 15. 10. (`888b193`) a migrace nasazená `db push` týž den.
+> Zapnutí v Supabase (rozšíření, Vault, `naplanovat_ulohy`) čeká na Šéfíka;
+> k 17. 10. 10:24 plánovač ještě neběží. Viz `stav-2026-10-15.md`.
+
 ## Nejdřív to podstatné
 
 - **GitHub naplánované úlohy skoro nespouští.** Za posledních 7 dní
@@ -11,7 +16,8 @@
   Vaultu). Zdarma, bez nového dodavatele, na minutu přesně, plán v repu.
   Vyžaduje tvoje „ano" k výjimce z pravidla o rozšířeních Postgresu —
   [otázka 47](otazky.md).
-- **PR je připravený, nic není zapnuté ani nasazené.** Migrace sama nic
+- **PR je připravený, nic není zapnuté ani nasazené.** *(Platilo 14. 10.;
+  15. 10. sloučeno a nasazeno, zapnuté zatím není.)* Migrace sama nic
   nenaplánuje; zapnutí je 6 ručních kroků v `docs/planovac-pg-cron.md`.
   GitHub zůstává jako záloha.
 - **Nově zámek proti dvojímu spuštění ve všech 9 úlohách.** Při souběžném
@@ -21,11 +27,11 @@
 
 ## Co je hotové
 
-| Co | Commit | Čeká na db push |
+| Co | Commit | Čeká na db push (k 17. 10.: nasazeno 15. 10.) |
 |---|---|---|
 | Měření plán × skutečnost pro 9 workflow (`gh run list`, 7 dní) | — (čísla v `docs/planovac-pg-cron.md`) | — |
 | Srovnání variant a doporučení | `ac29a80` (`docs/planovac-pg-cron.md`) | — |
-| Migrace plánovače: tabulka úloh, `app.naplanovat_ulohy`, `app.zrusit_planovac`, `app.planovac_stav`, `app.spustit_ulohu`, úklid | `ac29a80` | ano — a pak ruční zapnutí |
+| Migrace plánovače: tabulka úloh, `app.naplanovat_ulohy`, `app.zrusit_planovac`, `app.planovac_stav`, `app.spustit_ulohu`, úklid | `ac29a80` | ~~ano~~ nasazeno 15. 10. — čeká ruční zapnutí |
 | Zámek `public.uloha_zabrat` + `uzBezi` ve všech `app/api/uloha/*` | `ac29a80` | zámek ano; kód do té doby běží bez něj jako dnes |
 | Uvolnění zámku `public.uloha_uvolnit` u faktur (smyčka v GitHub workflow) | `3157668` | ano |
 | Kontrola `scripts/planovac.test.mjs` (zapsaná v workflow Aplikace) | `ac29a80`, `3157668` | — |
@@ -106,10 +112,9 @@ přísnější kontrola prošla a musela spadnout ta správná.
 
 ## Co čeká na Šéfíka
 
-1. **Rozhodnout otázku 47** — výjimka pro pg_cron a pg_net.
-2. Review a **sloučení PR** (na pokyn). Po sloučení úlohy běží jako dnes
-   (zámek ve Vercel logu hlásí „čeká na migraci").
-3. **db push** (skill `nasazeni`) — vznikne zámek a funkce plánovače.
+1. ~~**Rozhodnout otázku 47**~~ — rozhodnuto 15. 10.: „47 ano podle tebe“.
+2. ~~Review a **sloučení PR**~~ — sloučeno 15. 10. (`888b193`).
+3. ~~**db push**~~ — nasazeno 15. 10., jen `20261014120000_planovac_pg_cron`.
 4. Když „ano": kroky 3–7 v `docs/planovac-pg-cron.md` — zapnout dvě
    rozšíření, zkontrolovat, že `net` a `vault` nejsou vystavené v API,
    dvě tajemství do Vaultu (přes Vault, **ne přes SQL Editor**), jeden

@@ -4,7 +4,8 @@ import { redirect } from 'next/navigation'
 import { getCurrentTenantId, zkusPristup } from '@/lib/firma'
 import { jeRozsahFirmy } from '../jen-pro-firmu'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
-import { pristupKFakturam } from '@/lib/supabase/faktury'
+import { fakturyFirmy, pristupKFakturam } from '@/lib/faktury-pristup'
+import { naFaktury, SLOUPCE_FAKTURY, type RadekFaktury } from '@/lib/faktury-sloupce'
 import { barvaDodavatele } from '@/lib/faktury-color'
 import { formatCastku, formatDatum } from '@/lib/faktury-format'
 import {
@@ -39,7 +40,6 @@ const karta = {
 async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
   const pristupFaktury = await pristupKFakturam(tenantId)
   if (pristupFaktury.stav !== 'ok') return []
-  const supabase = pristupFaktury.faktury
   // Supabase/PostgREST má strop 1000 řádků na odpověď (db.max_rows) — stránkuje
   // se přes .range() přes stejný filtrovaný/seřazený dotaz, dokud stránka
   // nepřijde kratší, a spojí se do jednoho pole. Stejný postup jako
@@ -48,12 +48,9 @@ async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
   const vse: Faktura[] = []
   let od = 0
   for (;;) {
-    const { data, error } = await supabase
-      .from('invoices')
-      .select('*')
-      
-      .eq('is_archived', false)
-      .order('received_at', { ascending: false })
+    const { data, error } = await fakturyFirmy(pristupFaktury, SLOUPCE_FAKTURY)
+      .eq('archivovano', false)
+      .order('prijato_kdy', { ascending: false })
       .order('id', { ascending: true })
       .range(od, od + velikostStranky - 1)
     if (error) {
@@ -61,7 +58,7 @@ async function nactiFaktury(tenantId: string): Promise<Faktura[]> {
       break
     }
     if (!data || data.length === 0) break
-    vse.push(...(data as Faktura[]))
+    vse.push(...naFaktury(data as unknown as RadekFaktury[]))
     if (data.length < velikostStranky) break
     od += velikostStranky
   }

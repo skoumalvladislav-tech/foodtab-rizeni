@@ -109,6 +109,19 @@ export function odkazUpozorneni(rozsah: string, z: RadekUpozorneni, konverzace?:
     return jeUuid(telo.prispevek) ? `/${rozsah}/marketing/${telo.prispevek}` : vychozi
   }
 
+  /*
+    Ranní souhrn rezervací: na den v kalendáři. Jedna pobočka → rozsah TÉ
+    pobočky (člověk ho čte třeba z jiné, kde rezervace nevidí). Víc poboček
+    → rozsah, ve kterém člověk je: na firemním uvidí všechny, na pobočce
+    tu svou.
+  */
+  if (z.druh === 'rezervace.souhrn_dne') {
+    const pobocky = Array.isArray(telo.souhrn) ? telo.souhrn : []
+    const jedna = pobocky.length === 1 ? pobocky[0]?.slug : undefined
+    const kde = jeSlug(jedna) ? jedna : rozsah
+    return jeDen(telo.den) ? `/${kde}/rezervace/den/${telo.den}` : `/${kde}/rezervace`
+  }
+
   if (z.druh === 'oznameni.nova') return `/${rozsah}/vzkazy?zalozka=nastenka`
 
   if (z.druh === 'vzkaz.novy') {

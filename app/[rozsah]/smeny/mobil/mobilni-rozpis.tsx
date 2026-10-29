@@ -12,6 +12,7 @@ import {
   vyberDetailu,
   type FiltrSmen,
 } from "@/lib/rozpis-mobil";
+import { hostePobocek, type HosteDnu } from "@/lib/rezervace-pobocky";
 import DetailSmeny from "./detail";
 import FiltrySheet from "./filtry";
 import { DenPrehled, MojeSmeny, TydenPrehled } from "./pohledy";
@@ -64,6 +65,8 @@ export type MobilProps = {
   onUpravit: (s: SmenaM) => void;
   onPoznamka: (s: SmenaM) => void;
   onDuplikovat: (s: SmenaM) => void;
+  /** Hosté z rezervací pro denní přehled; `null` = člověk rezervace nevidí. */
+  hoste: HosteDnu | null;
 };
 
 type Pohled = "den" | "tyden" | "moje" | "tym";
@@ -262,6 +265,8 @@ export default function MobilniRozpis(p: MobilProps) {
           onVybratDen={vybratDen}
           onTyden={oTyden}
           onZobrazitNeobsazene={() => setFiltr({ ...filtr, stav: "neobsazene" })}
+          hoste={hostePobocek(p.hoste, filtrPlatny.pobocky)}
+          rozsah={p.rozsah}
         />
       ) : null}
 

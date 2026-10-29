@@ -10,6 +10,7 @@ import { nactiFinanceKpi, type DvojiceTrendu, type FinanceKpi } from '@/lib/fina
 import { popisZdrojeTrzeb, zmenaTrendu } from '@/lib/finance-kpi-vypocet'
 import { nactiKombinovanyCashflowGraf } from '@/lib/finance-rolling-prehled'
 import { nactiPolozkyKPozornosti, type PolozkaPozornosti } from '@/lib/finance-pozornost'
+import { prazdnoPozornosti } from '@/lib/faktury-brana'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { hraniceMesice, popisRozsahu, predchoziMesic, srovnaniMesice } from '@/lib/finance-obdobi'
 import { ZONA_VYCHOZI } from '@/lib/cas'
@@ -17,6 +18,7 @@ import { provozniDen } from '@/lib/pokladna-cas'
 import { pokladnaPatriPobocce } from '@/lib/pokladna-trzby'
 import { koruny } from '@/lib/mzdy'
 import Sdeleni from '@/app/sdeleni'
+import SdeleniPobockyBezFirmy from './pobocka-bez-firmy'
 import DataTable from '@/components/ui/DataTable'
 import StatusIndicator from '@/components/ui/StatusIndicator'
 import Badge from '@/components/ui/Badge'
@@ -132,6 +134,7 @@ export default async function FinancePrehled({
 
   const pristup = await zkusPristupFinanci(tenantId, 'finance.read', rozsah)
   if (pristup.stav === 'neprihlasen') redirect(await odkazNaPrihlaseni())
+  if (pristup.stav === 'pobocka_bez_firmy') return <SdeleniPobockyBezFirmy rozsah={rozsah} />
   if (pristup.stav === 'odepren') {
     return <Sdeleni nadpis="Na tohle nemáte oprávnění">Finance vidí ten, kdo má právo „Vidět finanční přehled“.</Sdeleni>
   }
@@ -168,7 +171,8 @@ export default async function FinancePrehled({
   const [kpi, bodyGrafu, pozornost, integraceRes] = await Promise.all([
     nactiFinanceKpi(tenantId, pristup.ctx, branches, hraniceMesice(mesic), hraniceMesice(mesicPredchozi), srovnani, pobocka).catch((): FinanceKpi | null => null),
     nactiKombinovanyCashflowGraf(tenantId, 'zakladni', pobocka).catch(() => []),
-    nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka).catch((): PolozkaPozornosti[] => []),
+    nactiPolozkyKPozornosti(tenantId, rozsah, canSee(pristup.ctx, 'faktury.read'), pobocka)
+      .catch(() => ({ polozky: [] as PolozkaPozornosti[], hlaska: prazdnoPozornosti({ stav: 'chyba_dotazu' }) })),
     supabase.from('integrace_pripojeni').select('id, oblast, poskytovatel, nazev, stav, branch_id, externi_ucet').eq('tenant_id', tenantId).is('odpojeno_kdy', null).order('oblast'),
   ])
 
@@ -295,7 +299,8 @@ export default async function FinancePrehled({
               zebra
               klicRadku={(r) => r.klic}
               // Na pobočce se seznam nenačítá (faktury pobočku nemají) — neříkat „nic", když se nehledalo.
-              prazdno={naPobocce ? 'Párování plateb s fakturami a kontrola faktur jsou v pohledu Celá firma.' : 'Nic nevyžaduje pozornost.'}
+              // Zavřené Faktury nebo chyba dotazu: říct proč, ne „nic" (kontrola 19. 10.).
+              prazdno={naPobocce ? 'Párování plateb s fakturami a kontrola faktur jsou v pohledu Celá firma.' : (pozornost.hlaska ?? 'Nic nevyžaduje pozornost.')}
               sloupce={[
                 { klic: 'popis', hlavicka: 'Popis', vykresli: (r) => r.popis },
                 { klic: 'stredisko', hlavicka: 'Středisko', vykresli: (r) => r.stredisko },
@@ -303,7 +308,7 @@ export default async function FinancePrehled({
                 { klic: 'stav', hlavicka: 'Stav', vykresli: (r) => <Badge tone={r.stav === 'nutne' ? 'danger' : 'warning'}>{r.stav === 'nutne' ? 'Nutné' : 'Ke zpracování'}</Badge> },
                 { klic: 'akce', hlavicka: '', vykresli: (r) => <Link href={r.akceHref} className="ft-tl ft-tl-male">{r.akceText}</Link> },
               ]}
-              radky={pozornost}
+              radky={pozornost.polozky}
             />
           </div>
 

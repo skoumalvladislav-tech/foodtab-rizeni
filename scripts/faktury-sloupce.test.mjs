@@ -1,0 +1,133 @@
+#!/usr/bin/env node
+/**
+ * Faktury v hlavní databázi → tvar pro obrazovky (lib/faktury-sloupce.ts).
+ *
+ * Obrazovky Faktur pracují se starými jmény polí (typ Faktura) a dotazy je
+ * dostávají jako aliasy (`supplier:dodavatel`). Kdyby alias ukazoval na
+ * sloupec, který v public.faktury není, PostgREST vrátí chybu a stránka ji
+ * zahodí do prázdného seznamu — přesně tak 3.–8. 10. 2026 ukazovaly
+ * Faktury prázdno. Proto se aliasy kontrolují proti TEXTU migrace.
+ *
+ * Pusť: node scripts/faktury-sloupce.test.mjs
+ */
+
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { halereZFormulare, naFakturu, odkazNaPrilohu, SLOUPCE_FAKTURY } from '../lib/faktury-sloupce.ts'
+import { podepsatPrilohu } from '../lib/faktury-priloha-odkaz.ts'
+
+let chyb = 0
+const ok = (popis, podminka) => {
+  if (!podminka) chyb++
+  console.log(`  ${podminka ? 'OK   ' : 'CHYBA'} ${popis}`)
+}
+
+console.log('\n1. Aliasy ukazují na skutečné sloupce public.faktury')
+const migrace = readdirSync('supabase/migrations').filter((f) => f.endsWith('.sql')).sort()
+  .map((f) => readFileSync(`supabase/migrations/${f}`, 'utf8')).join('\n')
+const tabulka = /create table public\.faktury \(([\s\S]*?)\n\);/.exec(migrace)?.[1] ?? ''
+const sloupce = new Set([...tabulka.matchAll(/^\s{2}([a-z_]+)\s/gm)].map((m) => m[1]))
+ok(`definice tabulky nalezena (${sloupce.size} sloupců)`, sloupce.size >= 25)
+const casti = SLOUPCE_FAKTURY.split(',').map((c) => c.trim())
+const cil = casti.map((c) => (c.includes(':') ? c.split(':')[1] : c))
+const chybi = cil.filter((c) => !sloupce.has(c))
+ok(`všech ${cil.length} sloupců existuje${chybi.length ? ' — CHYBÍ: ' + chybi.join(', ') : ''}`, chybi.length === 0)
+
+const typy = readFileSync('lib/faktury-types.ts', 'utf8')
+const typFaktura = /export type Faktura = \{([\s\S]*?)\n\}/.exec(typy)?.[1] ?? ''
+const pole = [...typFaktura.matchAll(/^\s{2}([a-z_]+):/gm)].map((m) => m[1])
+const vracene = new Set(casti.map((c) => c.split(':')[0]))
+const nevraci = pole.filter((p) => p !== 'amount' && !vracene.has(p))
+ok(`každé pole typu Faktura (kromě amount) dotaz vrací${nevraci.length ? ' — CHYBÍ: ' + nevraci.join(', ') : ''}`, pole.length >= 20 && nevraci.length === 0)
+ok('úryvek textu dokladu se do seznamů netahá (jen u odmítnutí)', !cil.includes('vytah_textu'))
+
+console.log('\n1b. Každý dotaz fakturyFirmy(…) v app/ a lib/ — i ty s vlastním výčtem sloupců')
+{
+  // Typ výsledku je `unknown` přetypovaný na tvar řádku: alias na neexistující
+  // sloupec by prošel překladem i tsc a spadl až v ostré (prázdná stránka).
+  const soubory = []
+  const projit = (adresar) => {
+    for (const jmeno of readdirSync(adresar)) {
+      const cesta = join(adresar, jmeno)
+      if (statSync(cesta).isDirectory()) projit(cesta)
+      else if (/\.(ts|tsx)$/.test(jmeno)) soubory.push(cesta)
+    }
+  }
+  projit('app')
+  projit('lib')
+  let volani = 0
+  let sVyctem = 0
+  const nezname = []
+  const spatne = []
+  for (const cesta of soubory) {
+    const zdroj = readFileSync(cesta, 'utf8')
+    for (const m of zdroj.matchAll(/fakturyFirmy\(\s*[\w.]+\s*,\s*(?:(['"])([^'"]*)\1|([\w.]+)|(\S))/g)) {
+      volani++
+      if (m[3] === 'SLOUPCE_FAKTURY') continue // oddíl 1
+      if (m[2] === undefined) { nezname.push(`${cesta}: ${m[3] ?? m[4]}`); continue }
+      const lit = [m[0], m[1], m[2]]
+      sVyctem++
+      for (const cast of lit[2].split(',').map((c) => c.trim()).filter(Boolean)) {
+        const sloupec = cast.includes(':') ? cast.split(':')[1].trim() : cast
+        if (!sloupce.has(sloupec)) spatne.push(`${cesta}: ${cast}`)
+      }
+    }
+  }
+  ok(`nalezeno ${volani} volání, z toho ${sVyctem} s vlastním výčtem`, volani >= 20 && sVyctem >= 10)
+  ok(`každé volání má výčet jako text nebo SLOUPCE_FAKTURY${nezname.length ? ' — NEZNÁMÉ: ' + nezname.join('; ') : ''}`, nezname.length === 0)
+  ok(`každý sloupec ve výčtech existuje${spatne.length ? ' — CHYBÍ: ' + spatne.join('; ') : ''}`, spatne.length === 0)
+}
+
+console.log('\n2. Částka: haléře se počítají, koruny jen ukazují')
+{
+  const f = naFakturu({ id: 'x', castka_haleru: 121050 })
+  ok('121050 haléřů → amount 1210.5', f.amount === 1210.5 && f.castka_haleru === 121050)
+  ok('chybějící částka → 0, ne NaN', naFakturu({ id: 'x', castka_haleru: null }).amount === 0)
+  ok('„1 234,50" → 123450', halereZFormulare('1 234,50') === 123450)
+  ok('„1234.5" → 123450', halereZFormulare('1234.5') === 123450)
+  ok('„0,07" → 7 (ne 7,000…1)', halereZFormulare('0,07') === 7)
+  ok('tři desetinná místa → odmítnuto (nezaokrouhlí se potichu)', halereZFormulare('1,234') === null)
+  ok('text → odmítnuto', halereZFormulare('abc') === null && halereZFormulare('') === null)
+  ok('nad strop integer → odmítnuto', halereZFormulare('21474836.48') === null)
+}
+
+console.log('\n3. Odkaz na soubor faktury')
+{
+  const id = '0a000000-0000-4000-8000-000000000001'
+  ok('vlastní kopie → přes appku (ověří právo)', odkazNaPrilohu({ id, priloha_cesta: 't/x.pdf', pdf_url: 'https://stara/x.pdf' }) === `/api/faktury/soubor/${id}`)
+  ok('…a v CSV absolutně', odkazNaPrilohu({ id, priloha_cesta: 't/x.pdf', pdf_url: null }, 'https://app.cz') === `https://app.cz/api/faktury/soubor/${id}`)
+  ok('bez kopie → původní odkaz', odkazNaPrilohu({ id, priloha_cesta: null, pdf_url: 'https://stara/x.pdf' }) === 'https://stara/x.pdf')
+  ok('relativní odkaz příjmu → v CSV absolutní', odkazNaPrilohu({ id, priloha_cesta: null, pdf_url: '/api/faktury/priloha/abc' }, 'https://app.cz') === 'https://app.cz/api/faktury/priloha/abc')
+  ok('nic → null', odkazNaPrilohu({ id, priloha_cesta: null, pdf_url: null }) === null)
+}
+
+console.log('\n4. Příloha: PDF a obrázek se otevře, XML a cokoli jiného stáhne')
+{
+  // Podvržený kbelík: zapamatuje si volby podepsaného odkazu.
+  const kbelik = (contentType, chybaInfo = false) => {
+    const k = {
+      volby: 'nezavoláno',
+      info: async () => (chybaInfo ? { data: null, error: new Error('nedostupné') } : { data: { contentType }, error: null }),
+      createSignedUrl: async (_cesta, _s, volby) => { k.volby = volby; return { data: { signedUrl: 'https://x/podepsano' }, error: null } },
+    }
+    return k
+  }
+  const stahne = async (k, cesta) => { await podepsatPrilohu(k, cesta, 120); return k.volby?.download === true }
+  const xml = kbelik('application/xml')
+  ok('XML se stáhne (download)', await stahne(xml, 't/abc.xml'))
+  ok('XML schované za příponou .pdf se taky stáhne (rozhoduje uložený typ)', await stahne(kbelik('application/xml'), 't/rucne/x.pdf'))
+  ok('SVG a text/html se stáhnou', await stahne(kbelik('image/svg+xml'), 't/a.svg') && await stahne(kbelik('text/html'), 't/a.html'))
+  ok('když se typ nedá zjistit, stáhne se', await stahne(kbelik(null, true), 't/a.pdf'))
+  // Kladná kontrola: jinak by výš prošla i funkce, která stahuje vždycky.
+  const pdf = kbelik('application/pdf; charset=binary')
+  ok('PDF se otevře v prohlížeči (bez download)', !(await stahne(pdf, 't/a.pdf')) && pdf.volby === undefined)
+  ok('JPEG, PNG a WebP se otevřou', !(await stahne(kbelik('image/jpeg'), 'a')) && !(await stahne(kbelik('image/png'), 'a')) && !(await stahne(kbelik('image/webp'), 'a')))
+  for (const cesta of ['app/api/faktury/soubor/[id]/route.ts', 'app/api/faktury/priloha/[id]/route.ts']) {
+    const zdroj = readFileSync(cesta, 'utf8')
+    ok(`${cesta}: odkaz jen přes podepsatPrilohu`, zdroj.includes('podepsatPrilohu(') && !zdroj.includes('createSignedUrl('))
+  }
+}
+
+console.log(chyb ? `\n${chyb} chyb` : '\nVšechno sedí')
+process.exit(chyb ? 1 : 0)

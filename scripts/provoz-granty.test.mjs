@@ -444,5 +444,97 @@ for (const [s, p] of VYJIMKY_FUNKCI) {
     funkce.nedostatky.some((n) => n.jmeno === s && n.podpis === p))
 }
 
+/* =====================================================================
+   JINÉ PLATBY — zápis jen funkcemi, takže authenticated nemá ani
+   insert/update/delete (druhá linie vedle RLS bez zápisových politik).
+   V čisté databázi z run.sh to krok98 neověří: bez výchozích práv
+   Supabase dá `create table` roli authenticated nic, ať revoke je, nebo
+   není (kontrola 19. 10.). Hlídá se proto text migrace.
+   ===================================================================== */
+console.log('\n== Jiné platby: authenticated bez insert/update/delete ==\n')
+
+const MIGRACE_JINE_PLATBY = soubory.find((s) => s.endsWith('_jine_platby.sql'))
+const kodJinychPlateb = MIGRACE_JINE_PLATBY ? bezKomentaru(fs.readFileSync(path.join(SLOZKA, MIGRACE_JINE_PLATBY), 'utf8')) : ''
+const tabulkyJinychPlateb = [...kodJinychPlateb.matchAll(/create\s+table\s+public\.(\w+)/gi)].map((m) => m[1])
+ok('migrace Jiných plateb zakládá 10 tabulek (jinak kontrola pod tím nic nehlídá)', tabulkyJinychPlateb.length === 10)
+for (const t of tabulkyJinychPlateb) {
+  for (const pravo of ['insert', 'update', 'delete']) {
+    ok(`${t} odebírá ${pravo} roli authenticated`, odebranoPravo(t, pravo, 'authenticated'))
+  }
+}
+
+/* Funkce jen pro server (service_role): výchozí práva Supabase dávají
+   EXECUTE i roli authenticated, takže každá taková funkce musí mít revoke
+   i od authenticated — a nikde jinde jí ho nesmí zase přidat (kontrola
+   20. 10.). V čisté databázi z run.sh to krok98 neověří. */
+console.log('\n== Jiné platby: funkce jen pro server bez authenticated ==\n')
+
+const normalizovat = (t) => t.replace(/\s+/g, ' ').trim().toLowerCase()
+const jenServer = [...kodJinychPlateb.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+service_role\s*;/gi)].map((m) => normalizovat(m[1]))
+ok('migrace Jiných plateb má aspoň 7 funkcí jen pro server (jinak kontrola pod tím nic nehlídá)', jenServer.length >= 7)
+for (const f of jenServer) {
+  const revoke = [...kodJinychPlateb.matchAll(/revoke\s+(?:all|execute)\s+on\s+function\s+([^;]+?)\s+from\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && m[2].split(',').map((x) => x.trim().toLowerCase()).includes('authenticated'))
+  ok(`${f}: revoke i od authenticated`, revoke)
+  const grantPrihlasenym = [...kodJinychPlateb.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && m[2].split(',').map((x) => x.trim().toLowerCase()).some((x) => x === 'authenticated' || x === 'anon' || x === 'public'))
+  ok(`${f}: grant jen service_role, ne přihlášeným`, !grantPrihlasenym)
+}
+
+/* Totéž pravidlo pro VŠECHNY migrace od Choice (20261031100000) dál —
+   jmenovaný seznam by u příští migrace selhal stejně jako člověk.
+   Prověrka 25. 10.: `revoke … from public, anon` bez `authenticated` na
+   frontě dotazů Choice krok105 v čisté databázi nepozná (výchozí práva
+   Supabase tam nejsou) a na Supabase by si pak kdokoli přihlášený mohl
+   zabírat frontu celé instalace. */
+const OD_CHOICE = '20261031100000'
+const migraceOdChoice = soubory.filter((s) => s >= OD_CHOICE)
+console.log(`\n== Od ${OD_CHOICE} (${migraceOdChoice.length} migrací): funkce jen pro server bez authenticated ==\n`)
+
+const kodOdChoice = migraceOdChoice.map((s) => bezKomentaru(fs.readFileSync(path.join(SLOZKA, s), 'utf8'))).join('\n')
+const jenServerOdChoice = [...kodOdChoice.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+service_role\s*;/gi)].map((m) => normalizovat(m[1]))
+ok(`migrace od ${OD_CHOICE} mají aspoň 1 funkci jen pro server (jinak kontrola pod tím nic nehlídá)`, jenServerOdChoice.length >= 1)
+for (const f of jenServerOdChoice) {
+  const revoke = [...kodOdChoice.matchAll(/revoke\s+(?:all|execute)\s+on\s+function\s+([^;]+?)\s+from\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && ['public', 'anon', 'authenticated'].every((r) => m[2].split(',').map((x) => x.trim().toLowerCase()).includes(r)))
+  ok(`${f}: revoke od public, anon i authenticated`, revoke)
+  const grantPrihlasenym = [...kodOdChoice.matchAll(/grant\s+execute\s+on\s+function\s+([^;]+?)\s+to\s+([^;]+);/gi)]
+    .some((m) => normalizovat(m[1]) === f && m[2].split(',').map((x) => x.trim().toLowerCase()).some((x) => x === 'authenticated' || x === 'anon' || x === 'public'))
+  ok(`${f}: grant jen service_role, ne přihlášeným`, !grantPrihlasenym)
+}
+
+/* Tabulky ve schématu `app` od Choice dál: sahá na ně jen funkce
+   (security definer). RLS zapnuté a žádná práva nikomu — ani
+   service_role. V čisté databázi to krok105 taky nerozezná (nikdo tam
+   práva nemá, ať revoke je, nebo není). */
+console.log(`\n== Od ${OD_CHOICE}: tabulky v app jen pro funkce ==\n`)
+const tabulkyAppOdChoice = [...kodOdChoice.matchAll(/create\s+table\s+app\.(\w+)/gi)].map((m) => m[1])
+ok(`migrace od ${OD_CHOICE} zakládají aspoň 2 tabulky v app (jinak kontrola pod tím nic nehlídá)`, tabulkyAppOdChoice.length >= 2)
+for (const t of tabulkyAppOdChoice) {
+  ok(`app.${t}: enable row level security`, new RegExp(`alter\\s+table\\s+app\\.${t}\\s+enable\\s+row\\s+level\\s+security`, 'i').test(kodOdChoice))
+  const odebrano = [...kodOdChoice.matchAll(new RegExp(`revoke\\s+all\\s+on\\s+(?:table\\s+)?app\\.${t}\\s+from\\s+([^;]+);`, 'gi'))]
+    .some((m) => ['public', 'anon', 'authenticated', 'service_role'].every((r) => m[1].split(',').map((x) => x.trim().toLowerCase()).includes(r)))
+  ok(`app.${t}: revoke all od public, anon, authenticated i service_role`, odebrano)
+  ok(`app.${t}: nikde žádný grant`, !new RegExp(`grant\\s+[^;]*\\s+on\\s+(?:table\\s+)?app\\.${t}\\b`, 'i').test(kodOdChoice))
+}
+
+// Supabase nedovolí vlastníkovi migrací nastavit vlastní parametr
+// (`set foodtab.x = …`) v definici funkce — db push spadne na 42501
+// „permission denied to set parameter“ (22. 10. 2026, migrace Faktur).
+// CI i PGlite běží jako superuživatel, takže to nezachytí jinak než textem.
+// V těle funkce přes set_config(…, true) to jde.
+{
+  const vadne = []
+  for (const soubor of soubory) {
+    const text = fs.readFileSync(path.join(SLOZKA, soubor), 'utf8')
+    for (const m of text.matchAll(/^\s*(?:language\s+\w+\s+)?(?:security\s+definer\s+)?[^\n]*\bset\s+(?!search_path\b)([a-z_]+\.[a-z_]+)\s*(?:=|to)\s/gim)) {
+      if (/^\s*--/.test(m[0])) continue
+      if (!/\blanguage\b|\bsecurity\b|^\s*set\s/i.test(m[0])) continue
+      vadne.push(`${soubor}: ${m[1]}`)
+    }
+  }
+  ok(`žádná funkce nenastavuje vlastní parametr klauzulí SET (${vadne.join(', ') || 'žádná'})`, vadne.length === 0)
+}
+
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
 process.exit(chyb === 0 ? 0 : 1)

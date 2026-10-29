@@ -1,0 +1,133 @@
+/* =====================================================================
+   SVÁTKY V KALENDÁŘÍCH (Provoz, 28. 10. 2026)
+   =====================================================================
+   Rozpis směn i Rezervace a akce. Výpočet lib/svatky.ts, kreslení
+   app/[rozsah]/svatek.tsx. Vlastní soubor ze stejného důvodu jako
+   _rezervace.css: na konci _komponenty.css píše víc souběžných relací.
+
+   JAK SE SVÁTEK POZNÁ (barva nikdy sama):
+     - ŠRAFA: šikmé proužky v mosazi — výrazný pásek nahoře (tam žádné
+       písmo není) a slabé proužky přes celý den. Mosaz je rodina
+       víkendu a dneška (plné plochy), svátek se od nich liší TVAREM,
+       ne odstínem. Do barev poboček (Blankytná, Fialová, Indigová)
+       ani stavů (zelená, oranžová, červená, modrá, vínová) šrafa
+       nevstupuje — změřeno ve scripts/svatky.test.mjs.
+       Slabá vrstva leží pod písmem buňky, proto jen 12 %: šedé písmo
+       (--muted) na kartě pak drží 4,5 : 1 v obou režimech. Při 34 %
+       (první verze) vycházelo ve dlaždicích týdne na telefonu kolem 3 : 1;
+     - NÁZEV textem v barvě písma (--ink) na vlastním podkladu karty.
+       Přímo na proužcích by v tmavém režimu u dneška vyšlo 3,96 : 1
+       a mosazné písmo by nedalo 4,5 : 1 nikde (scripts/svatky.test.mjs);
+     - VOZÍK se slovem „zavřeno“ / „od 12“ u dnů zavřených obchodů,
+       neutrální (šedý), ať se neplete se stavy.
+
+   Šrafa je pseudoprvek POD obsahem (`z-index: -1` uvnitř `isolation`),
+   ne `background-image`: buňky si pozadí nastavují zkratkou
+   `background` (víkend, dnes, vybraný den, inline styl měsíce), a ta by
+   šrafu smazala podle toho, které pravidlo je v kaskádě později.
+
+   POZICE: pseudoprvek potřebuje, aby buňka byla „positioned“. Přidává
+   se jen buňkám, které ji nemají; záhlaví mřížky je `sticky` a to se
+   přepsat NESMÍ (přestalo by se lepit) — proto výčet, ne `[data-svatek]`.
+   ===================================================================== */
+
+:is(.ds-rez-den, .ds-rez-bunka, .ds-sm-dl, .ds-sm-mesic-den, .ds-smd-mesic-den, .ds-svatek-pruh, .ds-svatky-vzorek)[data-svatek] {
+  position: relative;
+}
+:is(.ds-rez-den, .ds-rez-bunka, .ds-sm-dl, .ds-sm-mesic-den, .ds-smd-mesic-den, .ds-svatek-pruh, .ds-svatky-vzorek,
+    .ds-smd-den, .ds-smd-bunka, .ds-smd-ml-bunka, .ds-sm-den)[data-svatek] {
+  isolation: isolate;
+  --svatek-srafa-barva: var(--mosaz-sv);
+  --svatek-srafa-sila: 12%;
+  --svatek-pasek-sila: 60%;
+  --svatek-pasek-vyska: 4px;
+}
+:is(.ds-rez-den, .ds-rez-bunka, .ds-sm-dl, .ds-sm-mesic-den, .ds-smd-mesic-den, .ds-svatek-pruh, .ds-svatky-vzorek,
+    .ds-smd-den, .ds-smd-bunka, .ds-smd-ml-bunka, .ds-sm-den)[data-svatek]::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: inherit;
+  background-image:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--svatek-srafa-barva) var(--svatek-pasek-sila), transparent) 0 2px, transparent 2px 6px),
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--svatek-srafa-barva) var(--svatek-srafa-sila), transparent) 0 2px, transparent 2px 8px);
+  background-size: 100% var(--svatek-pasek-vyska), 100% 100%;
+  background-repeat: no-repeat, repeat;
+}
+
+/* Tělo mřížky Rozpisu: celý sloupec svátku slabě, pásek jen v záhlaví —
+   v každém řádku by rušil. */
+:is(.ds-smd-bunka, .ds-smd-ml-bunka)[data-svatek] { --svatek-pasek-vyska: 0px; }
+
+/* Pruh nad dnem a vzorek ve vysvětlivce: písmo je jen tmavé (--ink),
+   proužky můžou být výrazné. */
+:is(.ds-svatek-pruh, .ds-svatky-vzorek)[data-svatek] { --svatek-srafa-sila: 34%; --svatek-pasek-vyska: 0px; }
+
+/* Vybraný den na telefonu má plnou mosaz — světlé proužky by v ní
+   zmizely, proto tmavé. */
+:is(.ds-sm-den, .ds-sm-mesic-den)[data-svatek][data-vybrany="true"] {
+  --svatek-srafa-barva: var(--mosaz-ink);
+  --svatek-srafa-sila: 16%;
+  --svatek-pasek-sila: 45%;
+}
+
+/* --- název a vozík ----------------------------------------------------- */
+
+.ds-svatek {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0;
+  font-size: 12px; line-height: 1.3; color: var(--ink);
+}
+/* Podklad karty pod písmem: text nestojí na proužcích ani na tónu dneška. */
+.ds-svatek-nazev {
+  min-width: 0; padding: 0 5px; border-radius: 6px; background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mosaz-sv) 50%, transparent);
+  font-weight: 600; overflow-wrap: anywhere;
+}
+/* Krátký název do úzké buňky: nejvýš dva řádky, láme se jen mezi slovy;
+   celý název je v `title` a ve vysvětlivce pod kalendářem. */
+.ds-svatek[data-kratce] .ds-svatek-nazev {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  max-width: 100%; overflow: hidden; overflow-wrap: normal;
+}
+/* V úzké kartě dne („obchody od 12:00 zavřené“) se zalomí, nepřeteče přes okraj. */
+.ds-svatek-obchody {
+  display: inline-flex; align-items: center; gap: 3px; max-width: 100%;
+  padding: 0 6px 0 4px; border: 1px solid var(--line-2); border-radius: 9px;
+  background: var(--card); color: var(--muted);
+  font-size: 11px; font-weight: 500; line-height: 1.45;
+}
+.ds-svatek-obchody .ft-i { width: 12px; height: 12px; flex: none; }
+
+/* --- pruh nad dnem ----------------------------------------------------- */
+
+.ds-svatek-pruh {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  padding: 9px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--mosaz-sv) 55%, var(--line));
+  background: var(--card); color: var(--ink); font-size: 14px; line-height: 1.4;
+}
+.ds-svatek-pruh-druh { font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.ds-svatek-pruh-nazev { font-weight: 600; overflow-wrap: anywhere; }
+
+/* --- svátky období (pod kalendářem) a vysvětlivka --------------------- */
+
+.ds-svatky-obdobi { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.45; color: var(--ink); }
+.ds-svatky-obdobi ul { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.ds-svatky-obdobi li { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
+.ds-svatky-datum { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ds-svatky-vzorek {
+  flex: none; display: inline-block; width: 16px; height: 16px; margin-top: 2px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--mosaz-sv) 55%, var(--line)); background: var(--card);
+}
+.ds-smd-legenda .ds-svatky-vzorek { width: 14px; height: 14px; margin-top: 0; }
+
+/* --- místa v kalendářích ----------------------------------------------- */
+
+/* Rozpis, záhlaví týdenní mřížky: název pod číslem dne, uprostřed. */
+.ds-smd-den .ds-svatek { justify-content: center; font-size: 11px; }
+/* Rozpis, měsíc (přehled) a celý měsíc lidí. */
+.ds-smd-mesic-den .ds-svatek { justify-content: center; font-size: 11px; max-width: 100%; }
+.ds-smd-ml-bunka .ds-svatek { font-size: 11px; padding: 0 2px; }
+.ds-smd-pohled > .ds-svatek-pruh { margin-bottom: 12px; }
+/* Rezervace, měsíc: na telefonu (seznam dnů) přes celou šířku řádku. */
+@container (max-width: 640px) {
+  .ds-rez-bunka .ds-svatek { flex-basis: 100%; }
+}
+/* Telefon, karta dne v Mých směnách. */
+.ds-sm-karta-den .ds-svatek { font-size: 11.5px; }
