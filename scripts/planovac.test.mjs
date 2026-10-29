@@ -297,7 +297,7 @@ for (const [uloha, p] of plan) {
 
 /* --- hlídač plánovače ---------------------------------------------------- */
 
-// Migrace 20261019120000_planovac_hlidac, adresa app/api/planovac/hlidac,
+// Migrace 20261104100000_planovac_hlidac, adresa app/api/planovac/hlidac,
 // workflow planovac-hlidac.yml. pg_cron sám nikomu nenapíše, když
 // přestane volat — tohle je jediné místo, které to pozná.
 console.log('\nHlídač plánovače')
@@ -319,6 +319,8 @@ const OCEKAVANA_MEZERA = {
   'marketing-fronta': 15,
   'notifikace-push': 15,
   'pokladna-synchronizace': 60,
+  'rezervace-choice': 15,
+  'rezervace-souhrn-dne': 60,
   'zapomenuty-odchod': 60,
 }
 for (const [uloha, p] of plan) {
@@ -407,15 +409,18 @@ ok('prázdný seznam úloh → problém', problemyPlanovace([], TED).length === 
     return { ...r, telo, surove: r.telo }
   }
 
+  // Počet z migrací, ne napevno: s každou novou úlohou by se jinak musel
+  // přepisovat. Že žádná úloha nevypadla, hlídá OCEKAVANA_MEZERA výš.
+  const N = zdrave.length
   const v = await dotaz({ data: zdrave, error: null })
-  ok('hlídač: 9 zdravých úloh → 200, v pořádku 9, bez problémů',
-    v.stav === 200 && v.telo?.v_poradku === 9 && v.telo?.problemy.length === 0
+  ok(`hlídač: ${N} zdravých úloh → 200, v pořádku ${N}, bez problémů`,
+    N > 0 && v.stav === 200 && v.telo?.v_poradku === N && v.telo?.problemy.length === 0
     && v.log.includes('rpc:planovac_zdravi:{}'))
 
   const stara = zdrave.map((u) => (u.uloha === 'zapomenuty-odchod' ? { ...u, posledni_volani: new Date(Date.now() - 3 * 3600_000).toISOString() } : u))
   const s = await dotaz({ data: stara, error: null })
   ok('hlídač: jedna úloha nevolaná 3 h → 503 a jmenuje ji',
-    s.stav === 503 && s.telo?.v_poradku === 8 && s.telo?.problemy.length === 1 && s.telo.problemy[0].uloha === 'zapomenuty-odchod')
+    s.stav === 503 && s.telo?.v_poradku === N - 1 && s.telo?.problemy.length === 1 && s.telo.problemy[0].uloha === 'zapomenuty-odchod')
 
   // Zaseknutý pg_net: pg_cron dál zapisuje volání (čerstvá), odpověď nepřijde
   // a úloha v aplikaci naposledy začala před 3 h (z GitHubu). Dřív 200.
@@ -425,8 +430,8 @@ ok('prázdný seznam úloh → problém', problemyPlanovace([], TED).length === 
     posledni_kod: null, posledni_chyba: 'zatím bez odpovědi', posledni_zacatek: predMin(180),
   }))
   const z = await dotaz({ data: zaseknuty, error: null })
-  ok('hlídač: zaseknutý pg_net (volání chodí, odpovědi ne) → 503 u všech 9 úloh',
-    z.stav === 503 && z.telo?.v_poradku === 0 && z.telo?.problemy.length === 9)
+  ok(`hlídač: zaseknutý pg_net (volání chodí, odpovědi ne) → 503 u všech ${N} úloh`,
+    z.stav === 503 && z.telo?.v_poradku === 0 && z.telo?.problemy.length === N)
 
   const chybujici = zdrave.map((u) => (u.uloha === 'notifikace-push' ? { ...u, chyb_6h: 23, volani_6h: 24 } : u))
   const c = await dotaz({ data: chybujici, error: null })
@@ -526,7 +531,7 @@ ok('prázdný seznam úloh → problém', problemyPlanovace([], TED).length === 
       b.status === 1 && b.vystup.includes('::error::pokladna-synchronizace: poslední odpověď HTTP 500'))
 
     const c = spustit(503, { stav: 'ceka_na_migraci' })
-    ok('workflow: 503 čeká na migraci → červený a řekne to', c.status === 1 && c.vystup.includes('::error::Migrace 20261019120000'))
+    ok('workflow: 503 čeká na migraci → červený a řekne to', c.status === 1 && c.vystup.includes('::error::Migrace 20261104100000'))
 
     const d = spustit(503, { chyba: 'Hlídač není nastavený — chybí SUPABASE_SERVICE_ROLE_KEY.' })
     ok('workflow: 503 s polem chyba → červený a důvod jako ::error::',

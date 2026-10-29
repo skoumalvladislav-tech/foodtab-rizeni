@@ -41,7 +41,7 @@ banka dopadla stejně jako patnáctiminutový push.
 |---|---|---|---|
 | **Spolehlivost** | Spouští databáze, na minutu přesně. Běží, dokud běží databáze — a bez ní nefunguje ani aplikace. | Dobrá. cron-job.org: po minutách, ale požadavek utne po **30 s** (pokladny, banky a faktury běží až 60 s → hlásilo by to chyby). Upstash QStash: opakuje neúspěšná volání, ale zdarma jen **1 000 zpráv denně** (my potřebujeme ~440 + opakování). | **Nefunguje** — viz měření, ~4 běhy denně bez ohledu na plán. |
 | **Tajemství** | Ve Vaultu Supabase (šifrované), čte se až při volání. Nikde v repu ani v textu úlohy. Vidí ho jen ten, kdo se umí přihlásit přímo do databáze — a ten má stejně víc. | U **třetí firmy** — klíč, který otevírá úlohy běžící s plnými právy k databázi. | GitHub Secrets (dobré). |
-| **Co nastavit ručně** | Zapnout 2 rozšíření, uložit 2 tajemství do Vaultu, jeden příkaz v SQL Editoru (návod níž). Plán je v repu, v migraci. | Založit účet, ručně naklikat 9 úloh s hlavičkou. Plán **mimo repo** — nikdo neuvidí, co se změnilo. | Nic. |
+| **Co nastavit ručně** | Zapnout 2 rozšíření, uložit 2 tajemství do Vaultu, jeden příkaz v SQL Editoru (návod níž). Plán je v repu, v migraci. | Založit účet, ručně naklikat každou úlohu s hlavičkou. Plán **mimo repo** — nikdo neuvidí, co se změnilo. | Nic. |
 | **Cena** | Zdarma (součást Supabase i na Free). | cron-job.org zdarma; QStash zdarma do limitu. | Zdarma. |
 | **Upozornění na chybu** | Samo nepošle nic. Stav ukáže `app.planovac_stav()`; GitHub zůstává zatím jako záloha a ten při chybě e-mail posílá. | cron-job.org posílá e-mail. | E-mail při chybě. |
 
@@ -76,7 +76,7 @@ zkoušky volají dvě místa, proto je v každé úloze zámek (oddíl 4).
   v každé z 9 adres `app/api/uloha/*`, hned za ověřením tajemství.
   Dokud migrace není nasazená, úlohy běží přesně jako dnes.
 - **Kontroly**: `scripts/planovac.test.mjs` (neplatné tajemství → 401 a na
-  nic se nesáhne, ve všech 9 úlohách; zámek; shoda jmen a plánů mezi
+  nic se nesáhne, ve všech úlohách; zámek; shoda jmen a plánů mezi
   migrací, úlohami a GitHubem) a scénář `krok96` (Vault, pg_net, pg_cron,
   práva, zámek).
 - GitHub workflow **beze změny** — zůstávají jako záloha.
@@ -155,7 +155,7 @@ nové.
 
    | Sloupec | Co má být |
    |---|---|
-   | `v_cronu` | `true` u všech 9 |
+   | `v_cronu` | `true` u všech (29. 10. jich je 11) |
    | `posledni_volani` | čas posledního volání z databáze — za 20 minut ho mají jen úlohy, které už přišly na řadu (po 15 a 30 minutách); hodinové do hodiny, **banka až do 4 hodin** |
    | `posledni_kod` | `200`. **`401` = tajemství ve Vaultu nesedí s Vercelem.** |
    | `posledni_chyba` | prázdné |
@@ -167,7 +167,7 @@ nové.
    s textem „databáze ji za posledních 6 h nezavolala — hned po zapnutí
    plánovače je to normální…": to není porucha, ani e-mail od plánovaného
    běhu hlídače z téhle doby. Potom: GitHub → Actions → **Plánovač —
-   hlídač** → *Run workflow*. Zelená = všech 9 úloh volaných včas,
+   hlídač** → *Run workflow*. Zelená = všechny úlohy volané včas,
    s odpovědí 200, nejvýš jednou chybou za 6 h a úloha v aplikaci opravdu
    začíná.
 
@@ -208,7 +208,7 @@ select app.zrusit_planovac();
 
 ## 7. Hlídač plánovače
 
-Migrace `20261019120000_planovac_hlidac.sql`, adresa `/api/planovac/hlidac`,
+Migrace `20261104100000_planovac_hlidac.sql`, adresa `/api/planovac/hlidac`,
 workflow `.github/workflows/planovac-hlidac.yml`, rozhodování
 v `lib/planovac-hlidac.ts`, scénář `krok97`.
 
@@ -246,7 +246,7 @@ s jménem úlohy a důvodem (jen jména, kódy, počty a minuty — repozitář 
 veřejný). Podrobnosti pak `select * from app.planovac_stav();`.
 
 **Dokud plánovač v Supabase nezapneš, bude hlídač červený** („není
-naplánovaná v pg_cronu" u všech 9 úloh). To je správně — říká přesně to,
+naplánovaná v pg_cronu" u všech úloh). To je správně — říká přesně to,
 co chybí. Kdyby se zapnutí mělo odložit, jde workflow dočasně vypnout:
 Actions → Plánovač — hlídač → ⋯ → *Disable workflow*.
 

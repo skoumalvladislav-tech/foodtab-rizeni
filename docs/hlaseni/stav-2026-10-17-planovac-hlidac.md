@@ -74,7 +74,7 @@ ji jen nerovnoměrné plány, které jsem kvůli tomu přidal.
    Nejrychlejší odpověď: `select * from app.planovac_stav();` v SQL Editoru
    — `v_cronu` true a `posledni_kod` 200 u všech 9.
 2. Review a sloučení PR hlídače, pak **db push** migrace
-   `20261019120000_planovac_hlidac`.
+   `20261104100000_planovac_hlidac` (přerazítkovaná 29. 10., viz níž).
 3. **Zhruba 4,5 h po `naplanovat_ulohy()`** (dřív nemá banka, která jede
    jednou za 4 h, za sebou ani první volání): Actions → **Plánovač —
    hlídač** → *Run workflow*. Zelená = plánovač běží. Červená vypíše, co
@@ -179,6 +179,25 @@ workflow, adrese hlídače a testu.
 Kdyby se #145 slučovala až po dalších PR s pozdějšími migracemi, je
 potřeba přerazítkovat znovu — razítko musí být novější než poslední
 nasazená migrace.
+
+## Doplněno 29. 10. — plánovač zapnutý, migrace přerazítkovaná podruhé
+
+Plánovač v Supabase běží od 29. 10. večer: `foodtab_cron_secret` ve
+Vaultu (ověřeno otiskem), `naplanovat_ulohy()` vrátil 11 úloh, první
+kontrola `app.planovac_stav()` ukázala 10× `posledni_kod` 200
+a `chyb_6h` 0 všude (banka jede jednou za 4 h, ta ještě nebyla na řadě).
+Tím padla podmínka, na kterou #145 čekala.
+
+Od 19. 10. se do produkce dostaly migrace až po `20261103100000`, takže
+razítko `20261019120000` by db push odmítl. Migrace hlídače se teď
+jmenuje **`20261104100000_planovac_hlidac.sql`** (obsah beze změny),
+odkazy v krok97, návodu, workflow, adrese hlídače a testu přejmenované.
+Do větve je sloučený `main` (`87ba132`); střety byly jen v seznamech
+scénářů (`run.sh`, `databaze.yml`) — krok97 je zařazený mezi 96 a 98,
+které `main` pro #145 vynechal.
+
+PR #153 má migraci `20261024100000` a před svým sloučením potřebuje
+razítko novější než tahle (`20261105100000` a dál).
 
 ## Nenasazoval jsem
 

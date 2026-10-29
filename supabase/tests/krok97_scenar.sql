@@ -1,12 +1,12 @@
 -- Scénář pro krok 97 — hlídač plánovače úloh: `public.planovac_zdravi()`.
 --
--- Migrace: 20261019120000_planovac_hlidac.sql (navazuje na krok96).
+-- Migrace: 20261104100000_planovac_hlidac.sql (navazuje na krok96).
 -- Rozhodování hlídače (co je problém) a adresu `/api/planovac/hlidac`
 -- hlídá scripts/planovac.test.mjs.
 --
 -- Pokrývá:
---   1. bez pg_cronu vrátí tentýž stav jako app.planovac_stav() — 9 úloh,
---      nic v cronu;
+--   1. bez pg_cronu vrátí tentýž stav jako app.planovac_stav() — všechny
+--      úlohy z app.planovac_ulohy (29. 10. jich je 11), nic v cronu;
 --   2. s napodobeninami `cron` a `net`: stále PŘESNĚ app.planovac_stav()
 --      (žádná vlastní logika, která by se rozešla) — úloha v cronu,
 --      poslední volání a kód odpovědi; volání bez odpovědi (zaseknutý
@@ -38,8 +38,12 @@ select set_config('test.user_id', '', false);
 
 \echo '-- 1. bez pg_cronu'
 
-select pg_temp.check('planovac_zdravi bez pg_cronu: 9 úloh, nic v cronu',
-  (select count(*) = 9 and bool_and(not v_cronu) from public.planovac_zdravi()));
+-- Počet z tabulky úloh, ne napevno: každá nová úloha by tu jinak spadla.
+-- Poznamenaný pro krok 3 — service_role tabulku úloh nečte.
+select set_config('test.pocet_uloh', (select count(*)::text from app.planovac_ulohy), false);
+select pg_temp.check('planovac_zdravi bez pg_cronu: všechny úlohy, nic v cronu',
+  (select count(*) = current_setting('test.pocet_uloh')::int and count(*) > 0 and bool_and(not v_cronu)
+     from public.planovac_zdravi()));
 select pg_temp.check('… a je to přesně app.planovac_stav()',
   (select jsonb_agg(to_jsonb(t) order by t.uloha) from public.planovac_zdravi() t)
   = (select jsonb_agg(to_jsonb(t) order by t.uloha) from app.planovac_stav() t));
@@ -86,7 +90,7 @@ select pg_temp.check('volání před 20 min bez odpovědi → „zatím bez odpo
      from public.planovac_zdravi() where uloha = 'zapomenuty-odchod'));
 
 select pg_temp.check('ostatní úlohy v cronu nejsou',
-  (select count(*) = 7 from public.planovac_zdravi() where not v_cronu));
+  (select count(*) = current_setting('test.pocet_uloh')::int - 2 from public.planovac_zdravi() where not v_cronu));
 select pg_temp.check('pořád přesně app.planovac_stav()',
   (select jsonb_agg(to_jsonb(t) order by t.uloha) from public.planovac_zdravi() t)
   = (select jsonb_agg(to_jsonb(t) order by t.uloha) from app.planovac_stav() t));
@@ -95,7 +99,7 @@ select pg_temp.check('pořád přesně app.planovac_stav()',
 
 set role service_role;
 select pg_temp.check('service_role stav přečte přes planovac_zdravi',
-  (select count(*) = 9 from public.planovac_zdravi()));
+  (select count(*) = current_setting('test.pocet_uloh')::int from public.planovac_zdravi()));
 select pg_temp.check('… ale app.planovac_stav napřímo ne',
   pg_temp.spadne_hlaskou('select * from app.planovac_stav()', '42501', 'permission denied'));
 reset role;
