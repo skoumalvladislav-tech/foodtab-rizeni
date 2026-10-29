@@ -35,6 +35,9 @@ on:
       - 'next.config.ts'
       - 'proxy.ts'
       - '.github/workflows/aplikace.yml'
+      # planovac.test.mjs pouští blok run: hlídače — úprava jen workflow
+      # by se jinak neověřila.
+      - '.github/workflows/planovac-hlidac.yml'
       - 'docs/hlaseni/otazky.md'
   pull_request:
     paths:
@@ -51,6 +54,7 @@ on:
       - 'next.config.ts'
       - 'proxy.ts'
       - '.github/workflows/aplikace.yml'
+      - '.github/workflows/planovac-hlidac.yml'
       - 'docs/hlaseni/otazky.md'
 
 permissions:

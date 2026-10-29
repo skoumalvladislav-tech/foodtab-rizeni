@@ -316,6 +316,8 @@ jobs:
           grep -qE '^[[:space:]]*== KROK 96 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 96"; chybi=1; }
 
+          grep -qE '^[[:space:]]*== KROK 97 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 97"; chybi=1; }
           grep -qE '^[[:space:]]*== KROK 98 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 98"; chybi=1; }
           grep -qE '^[[:space:]]*== KROK 99 HOTOV[[:space:]=]*$' vystup.txt \

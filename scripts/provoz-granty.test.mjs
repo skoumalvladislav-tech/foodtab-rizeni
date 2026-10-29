@@ -65,6 +65,11 @@
  *
  * Pravidlo: ke KAŽDÉMU `grant execute on function <podpis>` musí existovat
  * `revoke … on function <týž podpis>`, který odebírá `public` a `anon`.
+ * Ve schématu public navíc i `authenticated`, pokud mu žádný grant právo
+ * nedává schválně: výchozí práva Supabase ho tam dávají taky, a definer
+ * funkce jen pro service_role (`public.uloha_zabrat`, `planovac_zdravi`)
+ * by jinak zavolal každý přihlášený přes /rest/v1/rpc. Scénář to nechytí
+ * — harness výchozí práva nemá (nález z kontroly PR #145, 18. 10. 2026).
  * Anon se nežádá jen tam, kde mu grant právo dává schválně (kiosek —
  * hlídá ho scripts/kiosek.test.mjs). Revoke smí být i v dřívější migraci
  * (dodatečný grant pro service_role nemusí revoke opakovat), ale jen
@@ -287,6 +292,7 @@ function rozborFunkci(migrace) {
   })
 
   const nedostatky = []
+  const zivy = (h) => !dropy.some((d) => d.podpis === h.podpis && drive(h, d))
   for (const g of granty) {
     const dropySig = dropy.filter((d) => d.podpis === g.podpis)
     if (dropySig.some((d) => drive(g, d))) continue
@@ -297,6 +303,13 @@ function rozborFunkci(migrace) {
     const chybi = []
     if (!odebrano.has('public')) chybi.push('public')
     if (!g.role.includes('anon') && !odebrano.has('anon')) chybi.push('anon')
+    // Ve schématu public dávají výchozí práva Supabase EXECUTE i roli
+    // authenticated (hlavička, „A FUNKCE"). Funkci, kterou authenticated
+    // žádným grantem nedostal, mu proto musí výslovně odebrat revoke.
+    if (g.podpis.startsWith('public.') && !odebrano.has('authenticated') &&
+      !granty.some((h) => h.podpis === g.podpis && h.role.includes('authenticated') && zivy(h))) {
+      chybi.push('authenticated')
+    }
     if (chybi.length) nedostatky.push({ ...g, chybi })
   }
   return { granty, nedostatky, nerozebrane: [...nerozebrane] }
@@ -384,6 +397,25 @@ ok('grant, kterému rozbor nerozumí, se nahlásí (nepřeskočí se tiše)',
 ok('drop bez podpisu se nahlásí (jinak by starý revoke dál tiše platil)',
   zkus('drop function app.f;').nerozebrane.length === 1)
 
+// Výchozí práva Supabase ve schématu public (authenticated). Čistá
+// databáze z run.sh je nemá, takže scénář tohle nechytí (krok97 a 18. 10.).
+ok('public funkce jen pro service_role bez revoke od authenticated → chybí authenticated',
+  chybi(zkus('revoke all on function public.f(text) from public, anon;\ngrant execute on function public.f(text) to service_role;')) === 'authenticated')
+ok('… s revoke od public, anon, authenticated → v pořádku',
+  chybi(zkus('revoke all on function public.f(text) from public, anon, authenticated;\ngrant execute on function public.f(text) to service_role;')) === '')
+ok('… bez schématu v názvu je to taky public',
+  chybi(zkus('revoke all on function f(text) from public, anon;\ngrant execute on function f(text) to service_role;')) === 'authenticated')
+ok('funkce ve schématu app revoke od authenticated nepotřebuje (výchozí práva jsou jen v public)',
+  chybi(zkus('revoke all on function app.f(text) from public, anon;\ngrant execute on function app.f(text) to service_role;')) === '')
+ok('public funkce s grantem pro authenticated revoke od něj nepotřebuje (vzor importovat_transakce)',
+  chybi(zkus('revoke all on function public.f(text) from public, anon;\ngrant execute on function public.f(text) to authenticated;')) === '')
+ok('… ani když authenticated dostal grant až další migrací',
+  chybi(zkus('revoke all on function public.f(text) from public, anon;\ngrant execute on function public.f(text) to service_role;',
+    'grant execute on function public.f(text) to authenticated;')) === '')
+ok('… ale grant pro authenticated na funkci, kterou pak někdo zahodil, se nepočítá',
+  chybi(zkus('revoke all on function public.f(text) from public, anon;\ngrant execute on function public.f(text) to authenticated;',
+    'drop function public.f(text);\ncreate function public.f(text) returns int language sql as $$ select 1 $$;\nrevoke all on function public.f(text) from public, anon;\ngrant execute on function public.f(text) to service_role;')) === 'authenticated')
+
 console.log('\n== Funkce: grant execute má revoke od public a anon ==\n')
 
 const funkce = rozborFunkci(soubory.map((jmeno) => ({ jmeno, text: fs.readFileSync(path.join(SLOZKA, jmeno), 'utf8') })))
@@ -394,6 +426,9 @@ ok(`každý grant na funkci šel rozebrat${funkce.nerozebrane.length ? ` — ne 
 ok('kontrola míří i na app.faktury_priloha_firma(text) z 20261008100000',
   funkce.granty.some((g) => g.jmeno === '20261008100000_faktury_prijem_z_emailu.sql' &&
     g.podpis === 'app.faktury_priloha_firma(text)'))
+ok('… a na public funkce plánovače jen pro service_role (uloha_zabrat, uloha_uvolnit, planovac_zdravi)',
+  ['public.uloha_zabrat(text)', 'public.uloha_uvolnit(text)', 'public.planovac_zdravi()']
+    .every((p) => funkce.granty.some((g) => g.podpis === p && g.role.join() === 'service_role')))
 
 const poruseni = funkce.nedostatky.filter((n) => !jeVyjimka(n))
 for (const n of poruseni) {
