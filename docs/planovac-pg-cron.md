@@ -229,7 +229,9 @@ ale nového dodavatele a CRON_SECRET u něj, proto zatím ne.
 - není naplánovaná v pg_cronu (nikdo nespustil `app.naplanovat_ulohy()`),
 - databáze ji nezavolala déle, než je nejdelší mezera v jejím plánu
   + 10 minut (třeba hodinová úloha víc než 70 minut), nebo za 6 h vůbec
-  (hned po zapnutí normální, viz krok 7),
+  (hned po zapnutí normální, viz krok 7). U úlohy, která podle plánu smí
+  stát déle než 6 h (denní), se volání za 6 h nečeká — stav plánovače
+  starší volání nevidí; rozhodne, kdy úloha v aplikaci naposledy začala,
 - poslední odpověď nebyla 200 — **401 znamená, že tajemství ve Vaultu
   nesedí s `CRON_SECRET` na Vercelu**,
 - poslední volání vypršelo nebo spadlo na síti, **nebo je bez odpovědi

@@ -375,6 +375,22 @@ ok('úloha v aplikaci nikdy nezačala → problém', duvody({ posledni_zacatek: 
 const sit = duvody({ posledni_kod: null, posledni_chyba: 'Could not connect: Bearer tajne-ABC' })
 ok('síťová chyba → problém BEZ textu z pg_net (log je veřejný)', sit.length === 1 && !sit[0].includes('tajne'))
 ok('neznámý plán → problém', duvody({ plan_utc: '0 0 1 * *' })[0]?.includes('neznámý tvar'))
+
+// Plán s mezerou delší než okno stavu (6 h): poslední volání v něm být
+// nemusí (posledni_volani NULL), rozhodne začátek v aplikaci. Denní úloha
+// by jinak byla červená ~18 h denně (nález kontroly #145, kiosek-uklid z #153).
+const denni = (zmena) => duvody({ plan_utc: '35 3 * * *', posledni_volani: null, posledni_kod: null, volani_6h: 0, ...zmena })
+ok('denní úloha: volání mimo okno 6 h, začala před 20 h → v pořádku', denni({ posledni_zacatek: pred(20 * 60) }).length === 0)
+ok(`denní úloha: začala před 1440 + ${REZERVA_MINUT} min → ještě v pořádku`, denni({ posledni_zacatek: pred(1440 + REZERVA_MINUT) }).length === 0)
+ok('denní úloha: začala o minutu později → problém s minutami',
+  denni({ posledni_zacatek: pred(1441 + REZERVA_MINUT) })[0]?.includes(`naposledy začala před ${1441 + REZERVA_MINUT} min`))
+ok('denní úloha: nikdy nezačala → problém', denni({ posledni_zacatek: null })[0]?.includes('nikdy nezačala'))
+// Hranice: */5 → mezera 300 + 10 se do okna vejde, volání tam být MUSÍ;
+// */6 → 360 + 10 už ne.
+ok('mezera 300 min (v okně) a žádné volání za 6 h → problém, i když úloha nedávno začala',
+  duvody({ plan_utc: '0 */5 * * *', posledni_volani: null, posledni_zacatek: pred(30) })[0]?.includes('nezavolala'))
+ok('mezera 360 min (za oknem) a žádné volání za 6 h, začala před 30 min → v pořádku',
+  duvody({ plan_utc: '0 */6 * * *', posledni_volani: null, posledni_zacatek: pred(30) }).length === 0)
 ok('prázdný seznam úloh → problém', problemyPlanovace([], TED).length === 1)
 
 // Adresa: skutečný route.ts, podstrčená databáze.

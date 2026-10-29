@@ -21,7 +21,9 @@
  *      nebo ji někdo odebral),
  *   2. databáze úlohu nezavolala déle, než je nejdelší mezera v jejím
  *      plánu + rezerva — nebo za 6 h vůbec (hned po zapnutí normální,
- *      dokud úloha nepřijde na řadu; text to říká),
+ *      dokud úloha nepřijde na řadu; text to říká). Úloha, které plán
+ *      dovolí delší mezeru než 6 h (denní), poslední volání v okně stavu
+ *      mít nemusí — u ní rozhodne začátek v aplikaci jako v bodě 6,
  *   3. poslední odpověď nebyla 2xx (401 = tajemství ve Vaultu nesedí),
  *   4. poslední volání vypršelo / spadlo na síti — nebo je BEZ ODPOVĚDI
  *      déle, než smí trvat jakékoli volání. pg_net musí odpovědět nebo
@@ -65,9 +67,19 @@ export const REZERVA_MINUT = 10
 export const NEJDELSI_LIMIT_VOLANI_MINUT = 5
 
 /**
- * Od kolika chybných odpovědí za 6 h je to problém. Jedna chyba projde —
- * výpadek pokladny nebo banky na jedno volání není porucha plánovače;
- * dvě a víc už ano.
+ * Jak daleko do minulosti vidí `app.planovac_stav()` volání
+ * (`interval '6 hours'`, migrace 20261014120000). Starší volání v něm
+ * není — `posledni_volani` je pak NULL, i když úloha běží podle plánu.
+ */
+export const OKNO_STAVU_MINUT = 6 * 60
+
+/**
+ * Od kolika chybných odpovědí za 6 h je to problém, když POSLEDNÍ volání
+ * už zase vyšlo. Jedna starší chyba projde — výpadek pokladny nebo banky
+ * na jedno volání není porucha plánovače; dvě a víc už ano. Nevyšlé
+ * poslední volání je problém hned (bod 3 a 4): podle jednoho volání nejde
+ * poznat jednorázový výpadek od trvalé poruchy (401 = nesedící tajemství),
+ * a planý poplach je menší škoda než přehlédnutá porucha.
  */
 export const CHYB_6H_PRAH = 2
 
@@ -134,6 +146,21 @@ export function problemyPlanovace(stav: StavUlohy[], ted: Date): Problem[] {
 
     // 2.
     if (!u.posledni_volani) {
+      if (smiMinut > OKNO_STAVU_MINUT) {
+        // Poslední volání smí být starší než okno stavu. Že úloha běží,
+        // pozná hlídač jen podle začátku v aplikaci (jako bod 6).
+        if (!u.posledni_zacatek) {
+          problem(u, `databáze ji za posledních 6 h nezavolala a úloha v aplikaci ještě nikdy nezačala — ` +
+            `hned po zapnutí plánovače je to normální, dokud nepřijde na řadu (nejdéle ${mezera} min)`)
+          continue
+        }
+        const zacatekPred = minutOd(u.posledni_zacatek, ted)
+        if (zacatekPred > smiMinut) {
+          problem(u, `úloha v aplikaci naposledy začala před ${zacatekPred} min (plán nejdéle po ${mezera} min) ` +
+            `a databáze ji za posledních 6 h nezavolala`)
+        }
+        continue
+      }
       problem(u, `databáze ji za posledních 6 h nezavolala — hned po zapnutí plánovače je to normální, ` +
         `dokud nepřijde na řadu (nejdéle ${mezera} min); později je to porucha`)
       continue
