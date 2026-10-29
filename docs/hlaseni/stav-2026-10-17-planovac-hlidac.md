@@ -197,7 +197,54 @@ scénářů (`run.sh`, `databaze.yml`) — krok97 je zařazený mezi 96 a 98,
 které `main` pro #145 vynechal.
 
 PR #153 má migraci `20261024100000` a před svým sloučením potřebuje
-razítko novější než tahle (`20261105100000` a dál).
+razítko novější než tahle (`20261105100000` a dál). Kromě toho jí po
+sloučení #145 bude v `OCEKAVANA_MEZERA` chybět řádek `'kiosek-uklid': 1440`.
+
+### Main přidal 2 úlohy — kontroly počítaly s 9
+
+`rezervace-choice` a `rezervace-souhrn-dne` (11 úloh místo 9). Hlídač sám
+s počtem nepočítá, kontroly ano: `planovac.test.mjs` má obě v tabulce
+mezer a kontroly adresy berou počet z migrací; krok97 bere počet
+z `app.planovac_ulohy`. Rozbití (commit `e80d423`): `planovac_zdravi`
+bez banky → spadla kontrola „všechny úlohy"; bez banky jen pro
+`service_role` (podle `current_setting('role')`) → spadla kontrola
+service_role. První pokus přes `current_user` neprošel rozbitím, ne
+kontrolou: v SECURITY DEFINER je `current_user` vždy vlastník.
+
+### Nález nezávislé kontroly: denní úloha by hlídač držela červený
+
+Kontrola ve 4 oblastech (databáze, logika, workflow, dopady sloučení),
+každý střední nález s pokusem o vyvrácení. Databáze nic. **Potvrzený
+střední nález:** `app.planovac_stav()` vidí volání jen za 6 h. Úloha,
+která podle plánu smí stát déle (denní `kiosek-uklid` z #153), by měla
+`posledni_volani` prázdné ~18 h denně a hlídač by hlásil „nezavolala" —
+pořád červený, skutečná porucha by v tom zapadla. Dnešních 11 úloh to
+netrápí (nejdelší banka 240 + 10 min).
+
+Oprava (`0f8777a`): když mezera + rezerva přesáhne 6 h, chybějící volání
+v okně samo o sobě problém není; rozhodne, kdy úloha v aplikaci naposledy
+začala (jako bod 6). 6 nových kontrol včetně hranice `*/5` (v okně) a
+`*/6` (za oknem). Tři rozbití, každé spadlo na své kontrole: bez nové
+větve (4 denní kontroly), bez kontroly stáří začátku („o minutu
+později"), hranice podle mezery místo mezera + rezerva („360 za oknem").
+
+Drobné nálezy: komentář u `CHYB_6H_PRAH` tvrdil, že jedna chyba projde —
+nevyšlé **poslední** volání je ale problém hned. Chování jsem nechal
+(planý e-mail po jednom 504 u banky je menší škoda než přehlédnutá 401),
+komentář to teď říká. A `aplikace.yml` se spouští i při změně jen
+`planovac-hlidac.yml`, jehož blok `run:` test pouští.
+
+### Čísla — a z čeho jsou
+
+- `scripts/planovac.test.mjs`: 242 kontrol, prošly; `provoz-granty`
+  prošel; všech 100 testů ze seznamu `aplikace.yml` prošlo (před opravou
+  denní úlohy; oprava mění jen hlídač a jeho test); `tsc` čisté.
+- PGlite celý řetěz: 4359 kontrol, krok97 10. Spadl jen krok101 — známá
+  vada runneru PGlite (`\set` s uvozovkami), na PostgreSQL v CI prochází.
+  **PGlite neověří RLS ani granty** — rozhoduje workflow Databáze.
+- Hlídač nanečisto nad živým stavem z produkce (29. 10. 18:31 UTC):
+  11 úloh, jediný problém banka (první volání z databáze až 20:15 UTC).
+  Po něm by byl zelený.
 
 ## Nenasazoval jsem
 
