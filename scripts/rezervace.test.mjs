@@ -578,9 +578,10 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
   const text = (x) => (x?.druh === 'odstavec' ? x.useky.map((u) => u.text).join('') : '')
 
   // Česky pojmenované styly: id „Nadpis1“, jméno „heading 1“ (to je v každém jazyku stejné).
+  // Nadpis1 schválně BEZ úrovně osnovy — rozhodnout musí jméno, ne outlineLvl.
   const styly = `<w:styles ${W}>
     <w:style w:type="paragraph" w:styleId="Normln"><w:name w:val="Normal"/></w:style>
-    <w:style w:type="paragraph" w:styleId="Nadpis1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Nadpis1"><w:name w:val="heading 1"/></w:style>
     <w:style w:type="paragraph" w:styleId="MujNadpis"><w:name w:val="Můj nadpis"/><w:basedOn w:val="Nadpis1"/></w:style>
     <w:style w:type="paragraph" w:styleId="Odstavecseseznamem"><w:name w:val="List Paragraph"/><w:pPr><w:numPr><w:numId w:val="4"/></w:numPr></w:pPr></w:style>
     <w:style w:type="paragraph" w:styleId="Smycka1"><w:name w:val="Smyčka"/><w:basedOn w:val="Smycka2"/></w:style>
@@ -610,9 +611,8 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
       <w:tbl><w:tr><w:tc><w:p><w:r><w:t>vnořená</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc></w:tr>
       <w:tr><w:tc><w:p><w:r><w:t>18:00</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Přípitek</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
     <w:p><w:r><w:t xml:space="preserve">Plán sálu: </w:t></w:r><w:r><w:drawing><wp:inline><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>
-    <w:p><w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent><w:p><w:r><w:t>V textovém poli</w:t></w:r></w:p></w:txbxContent></wps:txbx></w:drawing></mc:Choice>
-      <mc:Fallback><w:pict><v:shape><v:imagedata r:id="x"/><v:textbox><w:txbxContent><w:p><w:r><w:t>V textovém poli</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent></w:r>
-      <w:r><w:t>Za polem</w:t></w:r></w:p>
+    <w:p><w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent><w:p><w:pPr><w:rPr><w:b/></w:rPr></w:pPr><w:r><w:t>V textovém poli</w:t></w:r></w:p></w:txbxContent></wps:txbx></w:drawing></mc:Choice>
+      <mc:Fallback><w:pict><v:shape><v:imagedata r:id="x"/><v:textbox><w:txbxContent><w:p><w:r><w:t>V textovém poli</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent><w:t>Za polem</w:t></w:r></w:p>
     <w:p><w:r><w:t xml:space="preserve">Pole: </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>HYPERLINK "javascript:alert(1)"</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>odkaz</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
     <w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>`)
   const n = precistDocx(zabal({ '[Content_Types].xml': '<Types/>', 'word/document.xml': dokument, 'word/styles.xml': styly }))
@@ -648,7 +648,8 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
   ok('obrázek: spočítaný a v textu značka', obrazek?.useky.some((u) => u.zastupny && u.text === 'obrázek') === true)
   ok('textové pole: text jednou (náhradní kopie mc:Fallback se přeskočí) a nepočítá se jako obrázek',
     odst.filter((x) => text(x) === 'V textovém poli').length === 1 && n.obrazku === 1)
-  ok('text za textovým polem zůstane ve svém odstavci', !!najdi('Za polem'))
+  ok('text za textovým polem zůstane ve svém odstavci a formát konce odstavce z pole ho neztuční',
+    najdi('Za polem')?.useky.every((u) => !u.tucne) === true)
   ok('pole: ukáže se výsledek, ne příkaz (adresa z cizího souboru nikam nevede)',
     text(najdi('Pole')) === 'Pole: odkaz' && !JSON.stringify(n).includes('javascript'))
   ok('dokument není zkrácený', n.zkraceno === false)
@@ -672,6 +673,8 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
   const bzip = zabal({ 'word/document.xml': telo('') }, 0)
   new DataView(bzip.buffer).setUint16(bzip.length - 22 - (46 + 'word/document.xml'.length) + 10, 12, true)
   ok('neznámá komprese (bzip2) → srozumitelná věta', chybaCteni(bzip) === 'Dokument je zabalený způsobem, který náhled nezná.')
+  const zbloudila = precistDocx(zabal({ 'word/document.xml': telo('<w:p><w:r><w:t>před</w:t></w:r></w:p></w:tc></w:tr><w:p><w:r><w:t>po</w:t></w:r></w:p>') }))
+  ok('zbloudilé </w:tc> mimo tabulku nic neztratí', zbloudila.bloky.map(text).join('|') === 'před|po')
   ok('nesmyslná entita (&#99999999;) → „poškozený“, ne pád stránky',
     chybaCteni(zabal({ 'word/document.xml': telo('<w:p><w:r><w:t>&#99999999;</w:t></w:r></w:p>') })) === 'Dokument je poškozený.')
 
