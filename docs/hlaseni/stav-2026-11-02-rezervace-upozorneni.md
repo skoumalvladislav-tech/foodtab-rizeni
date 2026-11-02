@@ -9,18 +9,19 @@
   zrušená, zrušení, „z rezervace je akce“) a **ranní souhrn**.
 - K rezervacím a akcím jde přiložit i **dokument Word (.docx)** — ve
   formuláři nové rezervace i v detailu. Starý `.doc` a `.docm` s makry ne.
-- **Nic není nasazené.** PR #171 čeká na „sluč 171 a db push“.
-  V PR jsou dvě migrace: `20261106100000`
-  (upozornění) a `20261106110000` (Word).
-- **Po nasazení nechodí na akce a rezervace nic nikomu, dokud u pobočky
-  nikoho nevyberete** (otázka 81). Ranní souhrn chodí dál jako dosud.
+- **NASAZENO 2. 11. 2026** na „sluč 171 a db push“: PR #171 sloučen
+  (`f7dbea7`), Vercel nasadil produkci, `db push` obou migrací
+  (`20261106100000` upozornění, `20261106110000` Word) a výsledek ověřený
+  čtecím dotazem — viz oddíl „Nasazení“ na konci.
+- **Na akce a rezervace teď nechodí nic nikomu, dokud u pobočky nikoho
+  nevyberete** (otázka 81). Ranní souhrn chodí dál jako dosud.
 
 ## Co je hotové
 
-| Co | Commit | Čeká na `db push` |
+| Co | Commit | `db push` |
 |---|---|---|
-| Upozornění: tabulka výběru, obrazovka Upozornění, spoušť na rezervacích, ranní souhrn podle výběru, scénář `krok107` | `ae1f394` + opravy `6355b3f` | ano, `20261106100000` |
-| Word `.docx` v přílohách (kbelík, kontrola typu, cesta; stažení pod názvem bez diakritiky), scénář `krok108` | `ae1f394` | ano, `20261106110000` |
+| Upozornění: tabulka výběru, obrazovka Upozornění, spoušť na rezervacích, ranní souhrn podle výběru, scénář `krok107` | `ae1f394` + opravy `6355b3f` | nasazeno 2. 11., `20261106100000` |
+| Word `.docx` v přílohách (kbelík, kontrola typu, cesta; stažení pod názvem bez diakritiky), scénář `krok108` | `ae1f394` | nasazeno 2. 11., `20261106110000` |
 | Opravy po kontrole kódu (níž) | `6355b3f` | součást `20261106100000` |
 | CI: řádku `KROK 107` v `databaze.yml` chybělo pokračování, přidán `KROK 108` | `ae1f394` | — |
 
@@ -188,10 +189,9 @@ testem (`chybaNahrani`), ne snímkem.
 
 ## Co čeká na Šéfíka
 
-1. **„sluč 171 a db push“** — obě migrace najednou, na pořadí uvnitř
-   nezáleží (Word nesahá na upozornění).
-2. Po nasazení: **Rezervace → Upozornění** — u každé pobočky zaškrtnout
-   lidi (otázka 81). Kdo v seznamu chybí, nemá právo rezervace vidět:
+1. ~~„sluč 171 a db push“~~ — hotovo 2. 11.
+2. **Rezervace → Upozornění** — u každé pobočky zaškrtnout lidi
+   (otázka 81). Kdo v seznamu chybí, nemá právo rezervace vidět:
    Nastavení → Zařazení (otázka 76).
 
 ## Otázky
@@ -219,8 +219,37 @@ je zvolená nejopatrnější varianta, nic nečeká.
 ## Kde jsem skončil a co zbývá
 
 Hotové obě zadání (tlačítko Upozornění s výběrem lidí a Word v přílohách)
-včetně oprav po revizi. Zbývá jen nasazení.
+včetně oprav po revizi, sloučené a nasazené. Zbývá jen výběr lidí
+u poboček (Šéfík) a ověřit první skutečné upozornění, až někdo
+vybraný bude a přijde nová rezervace nebo akce.
 
-## Nenasazoval jsem
+## Nasazení (2. 11. 2026, na „sluč 171 a db push“)
 
-Nic — ani `db push`, ani sloučení. Obě migrace čekají.
+- CI na PR #171: 5 kontrol zelených (vč. workflow Databáze proti
+  PostgreSQL 16), sloučeno jako `f7dbea7`. Vercel: produkce nasazená
+  („Deployment has completed“).
+- `supabase/.temp/linked-project.json`: `spekntcsuroqhehmjssv` /
+  `foodtab-test`. `migration list --linked` před nasazením: chyběly
+  přesně dvě, `20261106100000` a `20261106110000`, nic jiného.
+- `db push --yes`:
+
+  ```
+  Applying migration 20261106100000_rezervace_upozorneni.sql...
+  Applying migration 20261106110000_rezervace_prilohy_word.sql...
+  Finished supabase db push.
+  ```
+
+- Ověřeno čtecím dotazem (`db query --linked`):
+  - `rezervace_upozorneni`: RLS zapnuté, jediný grant
+    `authenticated: SELECT`, jediná politika (čtení), 0 řádků (nikdo
+    zatím vybraný není — tak má být).
+  - Spouště na `rezervace`: `trg_rezervace_upozornit_vlozeni`, `_zmena`
+    a `_davka` (odložená do potvrzení dávky).
+  - Vnitřní funkce (`kdo_vidi`, `prijemci`, `upozornit`,
+    `upozornit_davku`, `upozorneni_telo`, `upozorneni_hlida`,
+    `souhrn_dne`) nesmí volat `anon`, `authenticated` ani
+    `service_role`; všechny se `search_path=""`. Obrazovka smí jen
+    `rezervace_upozorneni_lide` a `_ulozit` (`authenticated`, ne `anon`).
+  - Kbelík `rezervace`: soukromý, 10 MB, typy fotky + PDF + Word `.docx`;
+    CHECK na `rezervace_prilohy.mime` totéž. Cesta `….docx` projde,
+    `….doc` ne.
