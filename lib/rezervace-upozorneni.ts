@@ -4,7 +4,7 @@
  *
  * Pravidla posílání jsou v databázi (migrace 20261106100000,
  * app.rezervace_prijemci); tady jsou jen jejich slova. Čisté funkce,
- * test: scripts/rezervace-upozorneni.test.mjs.
+ * test: scripts/rezervace.test.mjs.
  *
  * Jediné pravidlo, které obrazovka musí vědět dopředu: RANNÍ SOUHRN
  * bez jediného vybraného chodí všem, kdo rezervace pobočky vidí (jako
@@ -28,7 +28,7 @@ export type ClovekUpozorneni = {
 
 export const DRUHY_UPOZORNENI_REZERVACI: { klic: DruhUpozorneniRezervaci; nazev: string; popis: string }[] = [
   { klic: 'akce', nazev: 'Akce', popis: 'nová, změněná a zrušená akce' },
-  { klic: 'rezervace', nazev: 'Rezervace', popis: 'nová a zrušená rezervace' },
+  { klic: 'rezervace', nazev: 'Rezervace', popis: 'nová a zrušená rezervace, změna na akci' },
   { klic: 'souhrn', nazev: 'Ranní souhrn', popis: 'ráno přehled dne' },
 ]
 

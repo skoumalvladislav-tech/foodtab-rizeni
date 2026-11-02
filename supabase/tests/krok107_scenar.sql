@@ -17,18 +17,34 @@
 --      firma;
 --   3. koho jde vybrat: jen toho, kdo rezervace pobočky vidí; uložení je
 --      celý výběr naráz, beze změny se řádek nepřepisuje;
---   4. akce: nová, změna (co se změnilo), druhá změna nahradí nepřečtenou,
---      změna jména hosta nic, zrušení; „proběhla“ nic; autor nic, kdo
---      vybraný není nic; v těle není jméno hosta ani kontakt;
---   5. rezervace: nová, změna nic, zrušení; zápis majitele dostane i
---      Věra (sama sobě nic jen jako autorka); minulý den nic;
---   6. import: první dávka připojení nic, pak nové sloučené do jednoho
---      („2 nové rezervace“), zrušení ze zdroje ano, změna ze zdroje nic;
+--   4. akce: nová, změna (co se změnilo — každé pole zvlášť), druhá změna
+--      nahradí nepřečtenou, změna jména hosta nic, zrušení; „proběhla“
+--      nic a po ní ani úprava či změna na rezervaci; autor nic, kdo
+--      vybraný není nic; v těle není jméno hosta ani kontakt; z akce
+--      rezervace (kuchyni „z akce je rezervace“, na rezervace „nová“),
+--      zrušení zároveň se změnou druhu jde podle druhu PŘED uložením;
+--   5. rezervace: nová, změna nic, zrušení, obnovená zrušená = nová;
+--      zápis majitele dostane i Věra (sama sobě nic jen jako autorka);
+--      z rezervace akce (na rezervace „z rezervace je akce“, kuchyni
+--      „nová akce“, zrušení pak jen kuchyni); minulý den nic, ale
+--      přesunutá z minulého dne do budoucna je nová;
+--   6. import: první den připojení nic, pak jedna dávka = jedno
+--      upozornění s počtem („2 nové rezervace“), poslané až při potvrzení
+--      dávky; zrušení ze zdroje ano, změna ze zdroje nic; první den se
+--      počítá od načítání, které kalendář prošlo (ne od nepovedeného
+--      pokusu), nebo od založení připojení — ne od první rezervace;
 --      CSV nic, ruční „udělat z ní akci“ u řádku z CSV ano;
---   7. komu mezitím vzali právo nebo ukončili pracovní poměr, tomu nic,
---      i když ve výběru zůstal — a znovu vybrat nejde;
---   8. ranní souhrn: nikdo vybraný = všem, kdo vidí (jako dosud); někdo
---      vybraný = jen jemu; pobočka bez výběru dál všem.
+--   7. komu mezitím vzali právo, ukončili pracovní poměr nebo pozastavili
+--      členství, tomu nic, i když ve výběru zůstal — a znovu vybrat nejde;
+--   8. druhá pobočka: výběr platí jen pro svou pobočku (vybraný na Perle
+--      o akci v Baru nic), kde nikdo vybraný není, tam akce ani rezervace
+--      nikomu; uložení výběru Perly výběr Baru nesmaže;
+--   9. ranní souhrn: nikdo vybraný = všem, kdo vidí (jako dosud), kromě
+--      ukončených; někdo vybraný = jen jemu; pobočka bez výběru dál všem;
+--      když všichni vybraní mezitím skončili, zase všem, kdo vidí.
+--
+-- Data rezervací jsou v roce 2099: spoušť porovnává se skutečným dneškem
+-- a minulý den se nehlásí — s bližším rokem by scénář jednou sám spadl.
 --
 -- POZOR, SDÍLENÁ DATABÁZE: kontroly se ptají jen na lidi a rezervace
 -- tohohle scénáře, nikdy na celkové počty.
@@ -71,6 +87,17 @@ returns integer language sql as $$
   select count(*)::integer from public.notifications n
    where n.user_id = p_user and n.druh = p_druh
      and n.zdroj_typ = 'rezervace' and n.zdroj_id = p_rez
+$$;
+
+-- Id posledního upozornění (jako text, '' když žádné). Změna, která nic
+-- nepošle, nechá poslední to staré — a to může mít stejný seznam změn.
+create or replace function pg_temp.posledni(p_user uuid, p_druh text, p_rez uuid)
+returns text language sql as $$
+  select coalesce((select n.id::text from public.notifications n
+    where n.user_id = p_user and n.druh = p_druh
+      and n.zdroj_typ = 'rezervace' and n.zdroj_id = p_rez
+    order by n.created_at desc, n.id
+    limit 1), '')
 $$;
 
 -- Kolik upozornění (jakéhokoli druhu) má člověk k rezervaci.
@@ -206,6 +233,12 @@ select pg_temp.check('příprava: výběr Perly i Baru je prázdný',
 \echo ''
 \echo '== 1. Granty, politika, druhá linie ======================'
 
+-- Čistá databáze testů nemá výchozí práva Supabase (grant all všem na
+-- každou novou tabulku), takže tahle kontrola nepozná, že v migraci chybí
+-- `revoke all … from public, anon, authenticated` — prošla by i bez něj.
+-- Ten řádek hlídá text migrace: scripts/provoz-granty.test.mjs (vyzkoušeno
+-- smazáním: „rezervace_upozorneni odebírá grant roli anon“). Tady se
+-- hlídá, že grant select zůstal a nic navíc se nepřidalo.
 select pg_temp.check('tabulku výběru klient jen čte (zápis jen funkcí), anon vůbec',
   has_table_privilege('authenticated', 'public.rezervace_upozorneni', 'select')
   and not has_table_privilege('authenticated', 'public.rezervace_upozorneni', 'insert')
@@ -256,8 +289,8 @@ select pg_temp.check('Karel (jen čte) seznam lidí nedostane',
 select pg_temp.check('… ani výběr neuloží (třeba sebe)',
   pg_temp.spadne_hlaskou(format('select public.rezervace_upozorneni_ulozit(%L, %L, %L::uuid[], null, null)',
     :'tenant', :'perla', '{' || :'e_karel' || '}'), '42501', 'nastavovat nemůžete'));
-select pg_temp.check('Karel tabulku výběru nečte (politika jen pro zápis rezervací)',
-  (select count(*) from public.rezervace_upozorneni where branch_id = :'perla') = 0);
+-- Že Karel tabulku výběru nečte, se ptá oddíl 3 — až když v ní řádky jsou
+-- (tady je prázdná, kontrola by prošla s jakoukoli politikou).
 
 select set_config('test.user_id', :'bara', false);
 select pg_temp.check('Bára (zapisuje v Baru) výběr Perly nedostane',
@@ -327,6 +360,12 @@ select pg_temp.check('nabídka ukazuje jméno, zařazení a co komu chodí',
      from public.rezervace_upozorneni_lide(:'tenant', :'perla') where employee_id = :'e_cyril')
   and (select not akce and not rezervace and not souhrn
      from public.rezervace_upozorneni_lide(:'tenant', :'perla') where employee_id = :'e_majitel'));
+select set_config('test.user_id', :'karel', false);
+select count(*) as karel_cte from public.rezervace_upozorneni where branch_id = :'perla' \gset
+select set_config('test.user_id', :'bara', false);
+select count(*) as bara_cte from public.rezervace_upozorneni where branch_id = :'perla' \gset
+select pg_temp.check('… Karel (jen čte) ani Bára (zapisuje v Baru) ho nečtou ani teď, když řádky jsou',
+  :'karel_cte'::int = 0 and :'bara_cte'::int = 0);
 reset role;
 select set_config('test.user_id', '', false);
 
@@ -363,7 +402,7 @@ select pg_temp.check('stejný výběr podruhé: žádný řádek se nepřepsal (
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
 select public.rezervace_ulozit(:'tenant', null, :'perla',
-  '{"druh":"akce","nazev":"Svatba Krok107","jmeno_hosta":"Host Krok107","telefon":"+420 777 107 107","datum":"2031-04-10","od":"18:00","pocet_osob":"30"}'::jsonb) as a1 \gset
+  '{"druh":"akce","nazev":"Svatba Krok107","jmeno_hosta":"Host Krok107","telefon":"+420 777 107 107","datum":"2099-04-10","od":"18:00","pocet_osob":"30"}'::jsonb) as a1 \gset
 reset role;
 select set_config('test.user_id', '', false);
 
@@ -376,7 +415,7 @@ select pg_temp.check('… Cyril (jen rezervace), majitel a Nina (nevybraní) ne'
   and pg_temp.k_rezervaci(:'nina', :'a1') = 0);
 select pg_temp.check('tělo: den, čas na zdi pobočky, osoby, název a pobočka — nic víc',
   pg_temp.telo(:'karel', 'akce.nova', :'a1') = jsonb_build_object(
-    'rezervace_id', :'a1', 'den', '2031-04-10', 'cas', '18:00', 'osob', 30,
+    'rezervace_id', :'a1', 'den', '2099-04-10', 'cas', '18:00', 'osob', 30,
     'nazev', 'Svatba Krok107', 'pobocka', 'Restaurace Černá Perla', 'pobocka_slug', 'cerna-perla'));
 select pg_temp.check('jméno hosta ani telefon v upozornění nejsou',
   pg_temp.telo(:'karel', 'akce.nova', :'a1')::text not like '%Host Krok107%'
@@ -398,13 +437,13 @@ select pg_temp.check('změna akce: Karel dostal „změnil se počet osob a pros
 
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
-select public.rezervace_ulozit(:'tenant', :'a1', null, '{"datum":"2031-04-11","od":"19:00"}'::jsonb) as a1_z2 \gset
+select public.rezervace_ulozit(:'tenant', :'a1', null, '{"datum":"2099-04-11","od":"19:00"}'::jsonb) as a1_z2 \gset
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.check('druhá změna nahradila nepřečtenou první: jen „den“ (čas se při změně dne nehlásí zvlášť)',
   pg_temp.ma(:'karel', 'akce.zmenena', :'a1') = 1
   and pg_temp.telo(:'karel', 'akce.zmenena', :'a1') -> 'co_se_zmenilo' = '["den"]'::jsonb
-  and pg_temp.telo(:'karel', 'akce.zmenena', :'a1') ->> 'den' = '2031-04-11'
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a1') ->> 'den' = '2099-04-11'
   and pg_temp.telo(:'karel', 'akce.zmenena', :'a1') ->> 'cas' = '19:00');
 select pg_temp.check('… „nová akce“ zůstala vedle (jiný klíč)',
   pg_temp.ma(:'karel', 'akce.nova', :'a1') = 1);
@@ -431,12 +470,111 @@ select pg_temp.check('zrušená akce: Karel a Otto dostali „Zrušená akce“,
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
 select public.rezervace_ulozit(:'tenant', null, :'perla',
-  '{"druh":"akce","nazev":"Raut Krok107","datum":"2031-04-10","od":"12:00","pocet_osob":"20"}'::jsonb) as a3 \gset
+  '{"druh":"akce","nazev":"Raut Krok107","datum":"2099-04-10","od":"12:00","pocet_osob":"20"}'::jsonb) as a3 \gset
 select public.rezervace_zmenit_stav(:'a3', 'dokonceno');
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.check('„proběhla“ se po akci nikomu nehlásí (Karel má jen novou akci)',
   pg_temp.ma(:'karel', 'akce.nova', :'a3') = 1 and pg_temp.k_rezervaci(:'karel', :'a3') = 1);
+
+-- Po proběhlé akci ani doplněný počet hostů, ani změna na rezervaci.
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', :'a3', null, '{"pocet_osob":"22"}'::jsonb) as a3_z1 \gset
+select public.rezervace_ulozit(:'tenant', :'a3', null, '{"druh":"rezervace"}'::jsonb) as a3_z2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('po proběhlé akci: doplněný počet hostů ani změna na rezervaci nikomu nic (ani Cyrilovi)',
+  (select stav = 'dokonceno' and druh = 'rezervace' and pocet_osob = 22 from public.rezervace where id = :'a3')
+  and pg_temp.komukoli(:'a3') = 2 and pg_temp.k_rezervaci(:'cyril', :'a3') = 0);
+
+-- Další změny akce, každá zvlášť. Další změna nahradí nepřečtenou, takže
+-- se po každém uložení ptá, jestli přišlo NOVÉ upozornění a co v něm je
+-- (bez toho by „konec“ prošel se seznamem z předchozí změny začátku).
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', null, :'perla',
+  '{"druh":"akce","nazev":"Změny Krok107","stav":"ceka","datum":"2099-04-10","od":"16:00","do":"18:00","pocet_osob":"10"}'::jsonb) as a5 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') as pred \gset
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', :'a5', null, '{"datum":"2099-04-10","od":"16:30","do":"18:00"}'::jsonb) as a5_z1 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select coalesce(pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') <> :'pred'
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a5') -> 'co_se_zmenilo' = '["cas"]'::jsonb, false) as zm_od \gset
+select pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') as pred \gset
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', :'a5', null, '{"datum":"2099-04-10","od":"16:30","do":"19:00"}'::jsonb) as a5_z2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select coalesce(pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') <> :'pred'
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a5') -> 'co_se_zmenilo' = '["cas"]'::jsonb, false) as zm_do \gset
+select (select konec from public.rezervace where id = :'a5') = '2099-04-10 19:00+02'::timestamptz as zm_do_ulozeno \gset
+select pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') as pred \gset
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', :'a5', null, '{"menu":"Polévka, svíčková"}'::jsonb) as a5_z3 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select coalesce(pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') <> :'pred'
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a5') -> 'co_se_zmenilo' = '["menu"]'::jsonb, false) as zm_menu \gset
+select pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') as pred \gset
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', :'a5', null, '{"typ_akce":"Raut"}'::jsonb) as a5_z4 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select coalesce(pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') <> :'pred'
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a5') -> 'co_se_zmenilo' = '["nazev"]'::jsonb, false) as zm_typ \gset
+select pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') as pred \gset
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_zmenit_stav(:'a5', 'potvrzeno');
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('změna akce jen začátku: „čas“',  :'zm_od'::boolean);
+select pg_temp.check('… jen konce: „čas“',             :'zm_do'::boolean and :'zm_do_ulozeno'::boolean);
+select pg_temp.check('… menu: „menu“',                 :'zm_menu'::boolean);
+select pg_temp.check('… typu akce: „název“',           :'zm_typ'::boolean);
+select pg_temp.check('… potvrzení předběžné: „stav“; pořád jedno nepřečtené',
+  pg_temp.posledni(:'karel', 'akce.zmenena', :'a5') <> :'pred'
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a5') -> 'co_se_zmenilo' = '["stav"]'::jsonb
+  and pg_temp.ma(:'karel', 'akce.zmenena', :'a5') = 1);
+
+-- Z akce rezervace: kuchyně (vybraní na akce) to musí vědět, pod názvem
+-- akce; vybraným na rezervace je to nová rezervace.
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', null, :'perla',
+  '{"druh":"akce","nazev":"Degustace Krok107","jmeno_hosta":"Host degustace Krok107","datum":"2099-04-10","od":"17:00","pocet_osob":"12"}'::jsonb) as a4 \gset
+select public.rezervace_ulozit(:'tenant', :'a4', null, '{"druh":"rezervace","nazev":""}'::jsonb) as a4_z \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('z akce rezervace: Karel dostal „Změna: z akce je rezervace“ pod názvem akce',
+  pg_temp.ma(:'karel', 'akce.zmenena', :'a4') = 1
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a4') -> 'co_se_zmenilo' = '["druh"]'::jsonb
+  and pg_temp.telo(:'karel', 'akce.zmenena', :'a4') ->> 'nazev' = 'Degustace Krok107');
+select pg_temp.check('… Cyril (jen rezervace) ji dostal jako „Nová rezervace“, bez názvu; Věra (zapsala) nic',
+  pg_temp.ma(:'cyril', 'rezervace.nova', :'a4') = 1
+  and not pg_temp.telo(:'cyril', 'rezervace.nova', :'a4') ? 'nazev'
+  and pg_temp.k_rezervaci(:'cyril', :'a4') = 1
+  and pg_temp.k_rezervaci(:'vera', :'a4') = 0);
+
+-- Zpátky na akci a zároveň zrušit: zrušení jde těm, kdo o ní věděli jako
+-- o rezervaci — podle druhu PŘED uložením.
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', :'a4', null, '{"druh":"akce","stav":"zrusena"}'::jsonb) as a4_z2 \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('rezervace změněná na akci a zároveň zrušená: Cyril „Zrušená rezervace“, Karel žádnou „Zrušenou akci“',
+  pg_temp.ma(:'cyril', 'rezervace.zrusena', :'a4') = 1
+  and pg_temp.ma(:'karel', 'akce.zrusena', :'a4') = 0
+  and pg_temp.ma(:'karel', 'akce.nova', :'a4') = 1);
 
 
 \echo ''
@@ -445,21 +583,21 @@ select pg_temp.check('„proběhla“ se po akci nikomu nehlásí (Karel má jen
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
 select public.rezervace_ulozit(:'tenant', null, :'perla',
-  '{"jmeno_hosta":"Novák Krok107","email":"novak107@example.cz","datum":"2031-04-10","od":"19:30","pocet_osob":"4"}'::jsonb) as r1 \gset
+  '{"jmeno_hosta":"Novák Krok107","email":"novak107@example.cz","datum":"2099-04-10","od":"19:30","pocet_osob":"4"}'::jsonb) as r1 \gset
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.check('nová rezervace: Cyril (vybraný na rezervace) ji dostal',
   pg_temp.ma(:'cyril', 'rezervace.nova', :'r1') = 1);
 select pg_temp.check('… tělo bez názvu, jména, e-mailu a počtu sloučených',
   pg_temp.telo(:'cyril', 'rezervace.nova', :'r1') = jsonb_build_object(
-    'rezervace_id', :'r1', 'den', '2031-04-10', 'cas', '19:30', 'osob', 4,
+    'rezervace_id', :'r1', 'den', '2099-04-10', 'cas', '19:30', 'osob', 4,
     'pobocka', 'Restaurace Černá Perla', 'pobocka_slug', 'cerna-perla'));
 select pg_temp.check('… Karel (jen akce) ne, Věra (zapsala) ne',
   pg_temp.k_rezervaci(:'karel', :'r1') = 0 and pg_temp.k_rezervaci(:'vera', :'r1') = 0);
 
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
-select public.rezervace_ulozit(:'tenant', :'r1', null, '{"pocet_osob":"6","datum":"2031-04-10","od":"20:00"}'::jsonb) as r1_z \gset
+select public.rezervace_ulozit(:'tenant', :'r1', null, '{"pocet_osob":"6","datum":"2099-04-10","od":"20:00"}'::jsonb) as r1_z \gset
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.check('změna rezervace (čas, osoby) se nehlásí',
@@ -473,15 +611,55 @@ select set_config('test.user_id', '', false);
 select pg_temp.check('zrušená rezervace: Cyril dostal „Zrušená rezervace“',
   pg_temp.ma(:'cyril', 'rezervace.zrusena', :'r1') = 1 and pg_temp.k_rezervaci(:'vera', :'r1') = 0);
 
+-- Obnovená zrušená: Cyril „Nová rezervace“ přečetl, pak dostal
+-- „Zrušená“ — bez nového upozornění by s ní nepočítal.
+update public.notifications set read_at = now()
+ where user_id = :'cyril' and druh = 'rezervace.nova' and zdroj_id = :'r1';
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_zmenit_stav(:'r1', 'potvrzeno');
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('obnovená zrušená rezervace: Cyril má novou nepřečtenou „Nová rezervace“, Věra nic',
+  (select count(*) from public.notifications
+    where user_id = :'cyril' and druh = 'rezervace.nova' and zdroj_id = :'r1' and read_at is null) = 1
+  and pg_temp.k_rezervaci(:'vera', :'r1') = 0);
+
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 select public.rezervace_ulozit(:'tenant', null, :'perla',
-  '{"jmeno_hosta":"Majitelův Krok107","datum":"2031-04-10","od":"21:00","pocet_osob":"2"}'::jsonb) as r2 \gset
+  '{"jmeno_hosta":"Majitelův Krok107","datum":"2099-04-10","od":"21:00","pocet_osob":"2"}'::jsonb) as r2 \gset
 reset role;
 select set_config('test.user_id', '', false);
 select pg_temp.check('rezervaci zapsal majitel: dostala ji Věra i Cyril, majitel ne',
   pg_temp.ma(:'vera', 'rezervace.nova', :'r2') = 1 and pg_temp.ma(:'cyril', 'rezervace.nova', :'r2') = 1
   and pg_temp.k_rezervaci(:'majitel', :'r2') = 0);
+
+-- Z rezervace akce: kuchyni nová akce, vybraným na rezervace „z rezervace
+-- je akce“. Zrušení pak už jde jen kuchyni.
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', null, :'perla',
+  '{"jmeno_hosta":"Na akci Krok107","datum":"2099-04-10","od":"20:30","pocet_osob":"8"}'::jsonb) as r_na_akci \gset
+select public.rezervace_ulozit(:'tenant', :'r_na_akci', null, '{"druh":"akce","nazev":"Narozeniny Krok107"}'::jsonb) as r_na_akci_z \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('z rezervace akce: Karel „Nová akce“, Cyril „Změna rezervace“ s „druh“ a bez názvu, Věra nic',
+  pg_temp.ma(:'karel', 'akce.nova', :'r_na_akci') = 1
+  and pg_temp.ma(:'cyril', 'rezervace.zmenena', :'r_na_akci') = 1
+  and pg_temp.telo(:'cyril', 'rezervace.zmenena', :'r_na_akci') -> 'co_se_zmenilo' = '["druh"]'::jsonb
+  and not pg_temp.telo(:'cyril', 'rezervace.zmenena', :'r_na_akci') ? 'nazev'
+  and (select dedupe_key = 'rezervace.zmenena:' || :'r_na_akci' from public.notifications
+        where user_id = :'cyril' and druh = 'rezervace.zmenena' and zdroj_id = :'r_na_akci')
+  and pg_temp.k_rezervaci(:'vera', :'r_na_akci') = 0);
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_zmenit_stav(:'r_na_akci', 'zrusena');
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('… její zrušení jde už jen kuchyni (Karel ano, Cyril ne)',
+  pg_temp.ma(:'karel', 'akce.zrusena', :'r_na_akci') = 1
+  and pg_temp.k_rezervaci(:'cyril', :'r_na_akci') = 2);
 
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
@@ -495,6 +673,21 @@ select set_config('test.user_id', '', false);
 select pg_temp.check('minulý den: dopsaná rezervace, akce ani zrušení se nehlásí',
   pg_temp.komukoli(:'r_minula') = 0 and pg_temp.komukoli(:'a_minula') = 0);
 
+-- Překlep v datu: zapsané na minulý den a opravené na skutečný den jsou
+-- nové — vybraní o nich jinak nevědí.
+set role authenticated;
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_ulozit(:'tenant', null, :'perla',
+  '{"jmeno_hosta":"Překlep Krok107","datum":"2020-04-12","od":"19:00","pocet_osob":"5"}'::jsonb) as r_preklep \gset
+select public.rezervace_ulozit(:'tenant', :'r_preklep', null, '{"datum":"2099-04-12","od":"19:00"}'::jsonb) as r_preklep_z \gset
+select public.rezervace_ulozit(:'tenant', :'a_minula', null, '{"datum":"2099-04-12","od":"18:00"}'::jsonb) as a_minula_z \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('přesunuté z minulého dne do budoucna: Cyril „Nová rezervace“, Karel „Nová akce“ (ne „Změna“)',
+  pg_temp.ma(:'cyril', 'rezervace.nova', :'r_preklep') = 1
+  and pg_temp.ma(:'karel', 'akce.nova', :'a_minula') = 1
+  and pg_temp.ma(:'karel', 'akce.zmenena', :'a_minula') = 0);
+
 
 \echo ''
 \echo '== 6. Import =============================================='
@@ -502,7 +695,7 @@ select pg_temp.check('minulý den: dopsaná rezervace, akce ani zrušení se neh
 insert into public.integrace_pripojeni (tenant_id, branch_id, oblast, poskytovatel, rezim, nazev)
 values (:'tenant', :'perla', 'rezervace', 'krok107', 'zakaznicky', 'Rezervační systém Krok107') returning id as pripojeni \gset
 
-select '[{"externi_id":"I1-107","stav":"potvrzeno","zacatek":"2031-04-12T19:00:00+02:00","jmeno_hosta":"I1 Krok107","pocet_osob":"4"},{"externi_id":"I2-107","stav":"potvrzeno","zacatek":"2031-04-12T18:00:00+02:00","jmeno_hosta":"I2 Krok107","pocet_osob":"2"}]' as davka1 \gset
+select '[{"externi_id":"I1-107","stav":"potvrzeno","zacatek":"2099-04-12T19:00:00+02:00","jmeno_hosta":"I1 Krok107","pocet_osob":"4"},{"externi_id":"I2-107","stav":"potvrzeno","zacatek":"2099-04-12T18:00:00+02:00","jmeno_hosta":"I2 Krok107","pocet_osob":"2"}]' as davka1 \gset
 select app.rezervace_zapsat_radky(:'tenant', :'perla', 'externi', 'krok107', :'pripojeni', :'davka1'::jsonb)::text as imp1 \gset
 select pg_temp.check('první načtení nového připojení (2 rezervace): nikomu nic',
   (:'imp1'::jsonb ->> 'nove')::int = 2
@@ -510,12 +703,20 @@ select pg_temp.check('první načtení nového připojení (2 rezervace): nikomu
                    where n.zdroj_typ = 'rezervace'
                      and n.zdroj_id in (select id from public.rezervace where pripojeni_id = :'pripojeni')));
 
--- Připojení je „staré“: jeho první rezervace je ze předevčírka.
-update public.rezervace set vytvoreno_kdy = now() - interval '2 days'
- where pripojeni_id = :'pripojeni' and externi_id = 'I1-107';
+-- Připojení je „staré“: založené předevčírem (načítání se u něj nezapisuje
+-- — jako u příjmového API, počítá se od založení).
+update public.integrace_pripojeni set vytvoreno_kdy = now() - interval '2 days' where id = :'pripojeni';
 
-select '[{"externi_id":"I3-107","stav":"potvrzeno","zacatek":"2031-04-12T20:00:00+02:00","jmeno_hosta":"I3 Krok107","pocet_osob":"3","telefon":"+420 603 107 003"},{"externi_id":"I4-107","stav":"potvrzeno","zacatek":"2031-04-12T20:30:00+02:00","jmeno_hosta":"I4 Krok107","pocet_osob":"5"}]' as davka2 \gset
+-- Dávka v jedné transakci: dokud běží, upozornění není; vznikne jedno
+-- za dávku až při potvrzení.
+select '[{"externi_id":"I3-107","stav":"potvrzeno","zacatek":"2099-04-12T20:00:00+02:00","jmeno_hosta":"I3 Krok107","pocet_osob":"3","telefon":"+420 603 107 003"},{"externi_id":"I4-107","stav":"potvrzeno","zacatek":"2099-04-12T20:30:00+02:00","jmeno_hosta":"I4 Krok107","pocet_osob":"5"}]' as davka2 \gset
+begin;
 select app.rezervace_zapsat_radky(:'tenant', :'perla', 'externi', 'krok107', :'pripojeni', :'davka2'::jsonb)::text as imp2 \gset
+select count(*) as pred_potvrzenim from public.notifications
+ where dedupe_key = 'rezervace.nova:pobocka:' || :'perla' and user_id in (:'cyril', :'vera') \gset
+commit;
+select pg_temp.check('dávka z rezervačního systému: dokud se nepotvrdí, nikdo nic nemá',
+  :'pred_potvrzenim'::int = 0);
 select id as i2 from public.rezervace where pripojeni_id = :'pripojeni' and externi_id = 'I2-107' \gset
 select id as i3 from public.rezervace where pripojeni_id = :'pripojeni' and externi_id = 'I3-107' \gset
 select id as i4 from public.rezervace where pripojeni_id = :'pripojeni' and externi_id = 'I4-107' \gset
@@ -536,7 +737,7 @@ select pg_temp.check('… jméno hosta ani telefon ze zdroje v upozornění nejs
                where user_id = :'cyril' and dedupe_key = 'rezervace.nova:pobocka:' || :'perla'
                  and (telo::text like '%Krok107%' or telo::text like '%107 003%')));
 
-select '[{"externi_id":"I2-107","stav":"zrusena","zacatek":"2031-04-12T18:00:00+02:00","jmeno_hosta":"I2 Krok107","pocet_osob":"2"},{"externi_id":"I3-107","stav":"potvrzeno","zacatek":"2031-04-12T20:00:00+02:00","jmeno_hosta":"I3 Krok107","pocet_osob":"6","telefon":"+420 603 107 003"}]' as davka3 \gset
+select '[{"externi_id":"I2-107","stav":"zrusena","zacatek":"2099-04-12T18:00:00+02:00","jmeno_hosta":"I2 Krok107","pocet_osob":"2"},{"externi_id":"I3-107","stav":"potvrzeno","zacatek":"2099-04-12T20:00:00+02:00","jmeno_hosta":"I3 Krok107","pocet_osob":"6","telefon":"+420 603 107 003"}]' as davka3 \gset
 select app.rezervace_zapsat_radky(:'tenant', :'perla', 'externi', 'krok107', :'pripojeni', :'davka3'::jsonb)::text as imp3 \gset
 select pg_temp.check('zrušení ze zdroje: Cyril a Věra dostali „Zrušená rezervace“ I2',
   (:'imp3'::jsonb ->> 'zmenene')::int = 2
@@ -544,11 +745,67 @@ select pg_temp.check('zrušení ze zdroje: Cyril a Věra dostali „Zrušená re
 select pg_temp.check('změna počtu osob ze zdroje (I3) nic neposlala',
   pg_temp.komukoli(:'i3') = 0);
 
-select '[{"externi_id":"C1-107","stav":"potvrzeno","datum":"2031-04-12","od":"21:00","jmeno_hosta":"C1 Krok107","pocet_osob":"2"},{"externi_id":"C2-107","stav":"potvrzeno","datum":"2031-04-12","od":"21:30","jmeno_hosta":"C2 Krok107","pocet_osob":"12"}]' as csv1 \gset
+-- Příjmové API založené před týdnem: systém posílá jen nové, první přišla
+-- až teď — je skutečně nová (první den se nepočítá od první rezervace).
+insert into public.integrace_pripojeni (tenant_id, branch_id, oblast, poskytovatel, rezim, nazev, vytvoreno_kdy)
+values (:'tenant', :'perla', 'rezervace', 'krok107-api', 'zakaznicky', 'Příjmové API Krok107', now() - interval '7 days')
+returning id as pripojeni_api \gset
+select '[{"externi_id":"A1-107","stav":"potvrzeno","zacatek":"2099-04-12T21:00:00+02:00","jmeno_hosta":"A1 Krok107","pocet_osob":"2"}]' as davka_api \gset
+select app.rezervace_zapsat_radky(:'tenant', :'perla', 'externi', 'krok107-api', :'pripojeni_api', :'davka_api'::jsonb)::text as imp_api \gset
+select id as a1_api from public.rezervace where pripojeni_id = :'pripojeni_api' and externi_id = 'A1-107' \gset
+select pg_temp.check('připojení starší než den, jeho první rezervace přišla až teď: Cyril ji má (přičtená k nepřečteným: 3)',
+  (:'imp_api'::jsonb ->> 'nove')::int = 1
+  and (select (telo ->> 'pocet')::int = 3 and telo ->> 'rezervace_id' = :'a1_api'
+         from public.notifications
+        where user_id = :'cyril' and dedupe_key = 'rezervace.nova:pobocka:' || :'perla'));
+
+-- Choice založené před týdnem. Dva pokusy o načtení kalendář neprošly:
+-- před 7 dny neplatný klíč (chyba), před 6 dny plná fronta (doběhl bez
+-- dotazu na zdroj, počet prázdný). První skutečné načítání běží teď —
+-- první den se počítá od něj: nová ani zrušená nic.
+insert into public.integrace_pripojeni (tenant_id, branch_id, oblast, poskytovatel, rezim, nazev, vytvoreno_kdy)
+values (:'tenant', :'perla', 'rezervace', 'krok107-choice', 'zakaznicky', 'Choice Krok107', now() - interval '7 days')
+returning id as pripojeni_ch \gset
+insert into public.synchronizace_behy (tenant_id, integrace_pripojeni_id, zahajeno_kdy, dokonceno_kdy, stav, pocet_novych_radku, chyba) values
+  (:'tenant', :'pripojeni_ch', now() - interval '7 days', now() - interval '7 days', 'chyba', 0, 'Neplatný klíč (Krok107)'),
+  (:'tenant', :'pripojeni_ch', now() - interval '6 days', now() - interval '6 days', 'hotovo', null, null),
+  (:'tenant', :'pripojeni_ch', now() - interval '1 minute', null, 'bezi', null, null);
+select '[{"externi_id":"CH1-107","stav":"potvrzeno","zacatek":"2099-04-12T21:30:00+02:00","jmeno_hosta":"CH1 Krok107","pocet_osob":"2"}]' as davka_ch1 \gset
+select app.rezervace_zapsat_radky(:'tenant', :'perla', 'externi', 'krok107-choice', :'pripojeni_ch', :'davka_ch1'::jsonb)::text as imp_ch1 \gset
+-- To načítání doběhlo; další (zrušení CH1) je pořád v prvním dni.
+update public.synchronizace_behy set stav = 'hotovo', dokonceno_kdy = now(), pocet_novych_radku = 1
+ where integrace_pripojeni_id = :'pripojeni_ch' and stav = 'bezi';
+select '[{"externi_id":"CH1-107","stav":"zrusena","zacatek":"2099-04-12T21:30:00+02:00","jmeno_hosta":"CH1 Krok107","pocet_osob":"2"}]' as davka_ch2 \gset
+select app.rezervace_zapsat_radky(:'tenant', :'perla', 'externi', 'krok107-choice', :'pripojeni_ch', :'davka_ch2'::jsonb)::text as imp_ch2 \gset
+select id as ch1 from public.rezervace where pripojeni_id = :'pripojeni_ch' and externi_id = 'CH1-107' \gset
+select pg_temp.check('Choice: první den od prvního načítání, které kalendář prošlo (nepovedené pokusy před týdnem se nepočítají): nová ani zrušená nic, počet u Cyrila dál 3',
+  (:'imp_ch1'::jsonb ->> 'nove')::int = 1 and (:'imp_ch2'::jsonb ->> 'zmenene')::int = 1
+  and pg_temp.komukoli(:'ch1') = 0
+  and (select (telo ->> 'pocet')::int from public.notifications
+        where user_id = :'cyril' and dedupe_key = 'rezervace.nova:pobocka:' || :'perla') = 3);
+
+-- Choice, které kalendář prošlo před třemi dny; teď běží další načítání.
+-- Nová rezervace z něj je skutečně nová.
+insert into public.integrace_pripojeni (tenant_id, branch_id, oblast, poskytovatel, rezim, nazev, vytvoreno_kdy)
+values (:'tenant', :'perla', 'rezervace', 'krok107-choice2', 'zakaznicky', 'Choice 2 Krok107', now() - interval '3 days')
+returning id as pripojeni_ch2 \gset
+insert into public.synchronizace_behy (tenant_id, integrace_pripojeni_id, zahajeno_kdy, dokonceno_kdy, stav, pocet_novych_radku) values
+  (:'tenant', :'pripojeni_ch2', now() - interval '3 days', now() - interval '3 days', 'hotovo', 5),
+  (:'tenant', :'pripojeni_ch2', now() - interval '1 minute', null, 'bezi', null);
+select '[{"externi_id":"CH2-107","stav":"potvrzeno","zacatek":"2099-04-12T22:00:00+02:00","jmeno_hosta":"CH2 Krok107","pocet_osob":"2"}]' as davka_ch3 \gset
+select app.rezervace_zapsat_radky(:'tenant', :'perla', 'externi', 'krok107-choice2', :'pripojeni_ch2', :'davka_ch3'::jsonb)::text as imp_ch3 \gset
+select id as ch2 from public.rezervace where pripojeni_id = :'pripojeni_ch2' and externi_id = 'CH2-107' \gset
+select pg_temp.check('Choice, které kalendář prošlo před 3 dny, při dalším načítání: nová došla Cyrilovi (počet 4)',
+  (:'imp_ch3'::jsonb ->> 'nove')::int = 1
+  and (select (telo ->> 'pocet')::int = 4 and telo ->> 'rezervace_id' = :'ch2'
+         from public.notifications
+        where user_id = :'cyril' and dedupe_key = 'rezervace.nova:pobocka:' || :'perla'));
+
+select '[{"externi_id":"C1-107","stav":"potvrzeno","datum":"2099-04-12","od":"21:00","jmeno_hosta":"C1 Krok107","pocet_osob":"2"},{"externi_id":"C2-107","stav":"potvrzeno","datum":"2099-04-12","od":"21:30","jmeno_hosta":"C2 Krok107","pocet_osob":"12"}]' as csv1 \gset
 select app.rezervace_zapsat_radky(:'tenant', :'perla', 'csv', 'krok107-csv', null, :'csv1'::jsonb)::text as imp_csv \gset
 select id as c1 from public.rezervace where poskytovatel = 'krok107-csv' and externi_id = 'C1-107' \gset
 select id as c2 from public.rezervace where poskytovatel = 'krok107-csv' and externi_id = 'C2-107' \gset
-select '[{"externi_id":"C1-107","stav":"zrusena","datum":"2031-04-12","od":"21:00","jmeno_hosta":"C1 Krok107","pocet_osob":"2"}]' as csv2 \gset
+select '[{"externi_id":"C1-107","stav":"zrusena","datum":"2099-04-12","od":"21:00","jmeno_hosta":"C1 Krok107","pocet_osob":"2"}]' as csv2 \gset
 select app.rezervace_zapsat_radky(:'tenant', :'perla', 'csv', 'krok107-csv', null, :'csv2'::jsonb)::text as imp_csv2 \gset
 select pg_temp.check('import ze souboru: nové ani zrušené se nehlásí',
   (:'imp_csv'::jsonb ->> 'nove')::int = 2 and (:'imp_csv2'::jsonb ->> 'zmenene')::int = 1
@@ -584,7 +841,7 @@ update public.employees set active = false where id = :'e_otto';
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
 select public.rezervace_ulozit(:'tenant', null, :'perla',
-  '{"druh":"akce","nazev":"Oslava Krok107","datum":"2031-04-13","od":"18:00","pocet_osob":"15"}'::jsonb) as a2 \gset
+  '{"druh":"akce","nazev":"Oslava Krok107","datum":"2099-04-13","od":"18:00","pocet_osob":"15"}'::jsonb) as a2 \gset
 reset role;
 select set_config('test.user_id', '', false);
 
@@ -596,6 +853,26 @@ select pg_temp.check('… Karlovi (vzali mu právo) ne, i když ve výběru zůs
 select pg_temp.check('… Ottovi (ukončený pracovní poměr) ne, i když ve výběru zůstal',
   pg_temp.k_rezervaci(:'otto', :'a2') = 0
   and exists (select 1 from public.rezervace_upozorneni where employee_id = :'e_otto' and akce));
+
+-- Cyrilovi pozastavili členství (zaměstnanec dál aktivní, ve výběru zůstal).
+update public.memberships set status = 'suspended' where tenant_id = :'tenant' and user_id = :'cyril';
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
+select public.rezervace_ulozit(:'tenant', null, :'perla',
+  '{"jmeno_hosta":"Pozastavený Krok107","datum":"2099-04-13","od":"19:00","pocet_osob":"2"}'::jsonb) as r3 \gset
+reset role;
+select set_config('test.user_id', '', false);
+-- Pozastaveného by zastavilo i app.notifikovat; seznam příjemců (a s ním
+-- nabídka na obrazovce) ho ale nesmí obsahovat sám — ptá se na něj zvlášť.
+select exists (select 1 from app.rezervace_prijemci(:'tenant', :'perla', 'rezervace') p
+                where p.user_id = :'cyril') as cyril_pozastaveny_prijemce \gset
+update public.memberships set status = 'active' where tenant_id = :'tenant' and user_id = :'cyril';
+select pg_temp.check('… Cyrilovi (pozastavené členství) nová rezervace ne a mezi příjemci není (po obnovení zase je), Věře ano',
+  pg_temp.k_rezervaci(:'cyril', :'r3') = 0 and pg_temp.ma(:'vera', 'rezervace.nova', :'r3') = 1
+  and not :'cyril_pozastaveny_prijemce'::boolean
+  and exists (select 1 from app.rezervace_prijemci(:'tenant', :'perla', 'rezervace') p
+               where p.user_id = :'cyril')
+  and exists (select 1 from public.rezervace_upozorneni where employee_id = :'e_cyril' and rezervace));
 
 set role authenticated;
 select set_config('test.user_id', :'vera', false);
@@ -615,22 +892,64 @@ update public.employees set active = true where id = :'e_otto';
 
 
 \echo ''
-\echo '== 8. Ranní souhrn ======================================='
+\echo '== 8. Druhá pobočka (Bar) ================================'
+
+-- Bára si v Baru vybrala sebe na akce; na rezervace v Baru nikdo.
+-- Majitel je od oddílu 7 vybraný na akce na Perle.
+set role authenticated;
+select set_config('test.user_id', :'bara', false);
+select public.rezervace_upozorneni_ulozit(:'tenant', :'bar',
+  array[:'e_bara']::uuid[], '{}'::uuid[], '{}'::uuid[]) as ulozeno_bar \gset
+-- Věra potom uloží výběr Perly (stejný jako v oddílu 7).
+select set_config('test.user_id', :'vera', false);
+select public.rezervace_upozorneni_ulozit(:'tenant', :'perla',
+  array[:'e_karel', :'e_vera', :'e_otto', :'e_majitel']::uuid[],
+  array[:'e_cyril', :'e_vera']::uuid[],
+  '{}'::uuid[]) as ulozeno_perla \gset
+reset role;
+select set_config('test.user_id', '', false);
+select pg_temp.check('uložení výběru Perly výběr Baru nesmaže (Bára dál na akce v Baru)',
+  :'ulozeno_bar'::int = 1
+  and exists (select 1 from public.rezervace_upozorneni
+               where branch_id = :'bar' and employee_id = :'e_bara' and akce and not rezervace and not souhrn));
+
+-- Akce a rezervace v Baru zapsané bez autora (jako z přípravy).
+insert into public.rezervace (tenant_id, branch_id, druh, stav, nazev, jmeno_hosta, zacatek, pocet_osob)
+values (:'tenant', :'bar', 'akce', 'potvrzeno', 'Barová akce Krok107', 'Host baru Krok107', '2099-04-14 18:00+02', 20)
+returning id as a_bar \gset
+insert into public.rezervace (tenant_id, branch_id, druh, stav, nazev, jmeno_hosta, zacatek, pocet_osob)
+values (:'tenant', :'bar', 'rezervace', 'potvrzeno', '', 'Barová Krok107', '2099-04-14 19:00+02', 3)
+returning id as r_bar \gset
+select pg_temp.check('akce v Baru: Bára (vybraná v Baru) ji dostala',
+  pg_temp.ma(:'bara', 'akce.nova', :'a_bar') = 1);
+select pg_temp.check('… majitel ne: na akce je vybraný jen na Perle (výběr platí pro svou pobočku)',
+  pg_temp.k_rezervaci(:'majitel', :'a_bar') = 0 and pg_temp.komukoli(:'a_bar') = 1);
+select pg_temp.check('rezervace v Baru, kde na rezervace nikdo vybraný není: nikomu nic (ani majiteli, ani Báře)',
+  pg_temp.komukoli(:'r_bar') = 0);
+
+
+\echo ''
+\echo '== 9. Ranní souhrn ======================================='
 
 -- Perla 15. 4. a 16. 4., Bar 16. 4. (zápis bez autora, z přípravy).
 insert into public.rezervace (tenant_id, branch_id, druh, stav, nazev, jmeno_hosta, zacatek, pocet_osob) values
-  (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'S1 Krok107', '2031-04-15 19:00+02', 4),
-  (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'S2 Krok107', '2031-04-16 19:00+02', 6),
-  (:'tenant', :'bar',   'rezervace', 'potvrzeno', '', 'S3 Krok107', '2031-04-16 20:00+02', 8);
+  (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'S1 Krok107', '2099-04-15 19:00+02', 4),
+  (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'S2 Krok107', '2099-04-16 19:00+02', 6),
+  (:'tenant', :'bar',   'rezervace', 'potvrzeno', '', 'S3 Krok107', '2099-04-16 20:00+02', 8);
 
-select app.rezervace_souhrn_dne('2031-04-15 09:00+02', :'tenant')::text as souhrn1 \gset
+-- Otto skončil (Perlu jinak vidí): souhrn bez výběru mu nepatří.
+update public.employees set active = false where id = :'e_otto';
+select app.rezervace_souhrn_dne('2099-04-15 09:00+02', :'tenant')::text as souhrn1 \gset
+update public.employees set active = true where id = :'e_otto';
 select pg_temp.check('nikdo vybraný na souhrn: 15. 4. ho mají všichni, kdo Perlu vidí (Karel, Cyril, Věra, majitel)',
   (:'souhrn1'::jsonb ->> 'chyb')::int = 0
-  and pg_temp.souhrn(:'karel', '2031-04-15') is not null
-  and pg_temp.souhrn(:'cyril', '2031-04-15') is not null
-  and pg_temp.souhrn(:'vera', '2031-04-15') is not null
-  and pg_temp.souhrn(:'majitel', '2031-04-15') is not null
-  and pg_temp.souhrn(:'nina', '2031-04-15') is null);
+  and pg_temp.souhrn(:'karel', '2099-04-15') is not null
+  and pg_temp.souhrn(:'cyril', '2099-04-15') is not null
+  and pg_temp.souhrn(:'vera', '2099-04-15') is not null
+  and pg_temp.souhrn(:'majitel', '2099-04-15') is not null
+  and pg_temp.souhrn(:'nina', '2099-04-15') is null);
+select pg_temp.check('… Otto (ukončený pracovní poměr) ne',
+  pg_temp.souhrn(:'otto', '2099-04-15') is null);
 
 -- Na souhrn jen Cyril. Otto ve výběru není → jeho řádek zmizí.
 set role authenticated;
@@ -645,18 +964,34 @@ select pg_temp.check('kdo z výběru vypadl (Otto), jeho řádek zmizel; Cyril m
   not exists (select 1 from public.rezervace_upozorneni where employee_id = :'e_otto')
   and (select souhrn and rezervace and not akce from public.rezervace_upozorneni where employee_id = :'e_cyril'));
 
-select app.rezervace_souhrn_dne('2031-04-16 09:00+02', :'tenant')::text as souhrn2 \gset
+select app.rezervace_souhrn_dne('2099-04-16 09:00+02', :'tenant')::text as souhrn2 \gset
 select pg_temp.check('vybraný jen Cyril: souhrn Perly 16. 4. dostal on',
   (:'souhrn2'::jsonb ->> 'chyb')::int = 0
-  and pg_temp.souhrn(:'cyril', '2031-04-16') ->> 'den' = '2031-04-16'
-  and pg_temp.souhrn(:'cyril', '2031-04-16') -> 'souhrn' -> 0 ->> 'pobocka' = 'Restaurace Černá Perla');
+  and pg_temp.souhrn(:'cyril', '2099-04-16') ->> 'den' = '2099-04-16'
+  and pg_temp.souhrn(:'cyril', '2099-04-16') -> 'souhrn' -> 0 ->> 'pobocka' = 'Restaurace Černá Perla');
 select pg_temp.check('… Karel a Věra (vidí, ale vybraní nejsou) ne',
-  pg_temp.souhrn(:'karel', '2031-04-16') is null and pg_temp.souhrn(:'vera', '2031-04-16') is null);
-select pg_temp.check('majitel: v souhrnu 16. 4. jen Bar (tam nikdo vybraný není), Perla ne',
-  jsonb_array_length(pg_temp.souhrn(:'majitel', '2031-04-16') -> 'souhrn') = 1
-  and pg_temp.souhrn(:'majitel', '2031-04-16') -> 'souhrn' -> 0 ->> 'pobocka' = 'Bernard Bar Tábor');
-select pg_temp.check('Bára (Bar bez výběru) souhrn Baru dostala jako dosud',
-  pg_temp.souhrn(:'bara', '2031-04-16') -> 'souhrn' -> 0 ->> 'pobocka' = 'Bernard Bar Tábor');
+  pg_temp.souhrn(:'karel', '2099-04-16') is null and pg_temp.souhrn(:'vera', '2099-04-16') is null);
+select pg_temp.check('majitel: v souhrnu 16. 4. Bar (tam na souhrn nikdo vybraný není), Perla ne',
+  exists (select 1 from jsonb_array_elements(pg_temp.souhrn(:'majitel', '2099-04-16') -> 'souhrn') s
+           where s ->> 'pobocka' = 'Bernard Bar Tábor')
+  and not exists (select 1 from jsonb_array_elements(pg_temp.souhrn(:'majitel', '2099-04-16') -> 'souhrn') s
+                   where s ->> 'pobocka' = 'Restaurace Černá Perla'));
+select pg_temp.check('Bára (v Baru na souhrn nikdo vybraný) souhrn Baru dostala jako dosud',
+  pg_temp.souhrn(:'bara', '2099-04-16') -> 'souhrn' -> 0 ->> 'pobocka' = 'Bernard Bar Tábor');
+
+-- Jediný vybraný na souhrn (Cyril) skončil: souhrn nesmí potichu přestat
+-- chodit — dostanou ho zase všichni, kdo Perlu vidí.
+insert into public.rezervace (tenant_id, branch_id, druh, stav, nazev, jmeno_hosta, zacatek, pocet_osob)
+values (:'tenant', :'perla', 'rezervace', 'potvrzeno', '', 'S4 Krok107', '2099-04-17 19:00+02', 2);
+update public.employees set active = false where id = :'e_cyril';
+select app.rezervace_souhrn_dne('2099-04-17 09:00+02', :'tenant')::text as souhrn3 \gset
+update public.employees set active = true where id = :'e_cyril';
+select pg_temp.check('jediný vybraný na souhrn (Cyril) skončil: souhrn Perly 17. 4. mají zase Karel a Věra, Cyril ne',
+  (:'souhrn3'::jsonb ->> 'chyb')::int = 0
+  and exists (select 1 from public.rezervace_upozorneni where employee_id = :'e_cyril' and souhrn)
+  and pg_temp.souhrn(:'karel', '2099-04-17') -> 'souhrn' -> 0 ->> 'pobocka' = 'Restaurace Černá Perla'
+  and pg_temp.souhrn(:'vera', '2099-04-17') is not null
+  and pg_temp.souhrn(:'cyril', '2099-04-17') is null);
 
 
 \echo ''
@@ -671,13 +1006,13 @@ delete from public.notifikace_doruceni
     where (n.zdroj_typ = 'rezervace'
            and n.zdroj_id in (select r.id from public.rezervace r
                                where r.jmeno_hosta like '%Krok107' or r.nazev like '%Krok107'))
-       or (n.druh = 'rezervace.souhrn_dne' and n.telo ->> 'den' between '2031-04-15' and '2031-04-16'));
+       or (n.druh = 'rezervace.souhrn_dne' and n.telo ->> 'den' between '2099-04-15' and '2099-04-17'));
 delete from public.notifications n
  where (n.zdroj_typ = 'rezervace'
         and n.zdroj_id in (select r.id from public.rezervace r
                             where r.jmeno_hosta like '%Krok107' or r.nazev like '%Krok107'))
-    or (n.druh = 'rezervace.souhrn_dne' and n.telo ->> 'den' between '2031-04-15' and '2031-04-16');
-delete from public.rezervace_souhrn_dne where den between date '2031-04-15' and date '2031-04-16';
+    or (n.druh = 'rezervace.souhrn_dne' and n.telo ->> 'den' between '2099-04-15' and '2099-04-17');
+delete from public.rezervace_souhrn_dne where den between date '2099-04-15' and date '2099-04-17';
 -- Lidé scénáře mohli dostat i jiná upozornění (třeba ke změně zařazení).
 delete from public.notifikace_doruceni
  where notification_id in (
@@ -689,7 +1024,7 @@ delete from public.notifications
 delete from public.rezervace_kontakty
  where rezervace_id in (select id from public.rezervace where jmeno_hosta like '%Krok107' or nazev like '%Krok107');
 delete from public.rezervace where jmeno_hosta like '%Krok107' or nazev like '%Krok107';
-delete from public.integrace_pripojeni where id = :'pripojeni';
+delete from public.integrace_pripojeni where id in (:'pripojeni', :'pripojeni_api', :'pripojeni_ch', :'pripojeni_ch2');
 delete from public.rezervace_upozorneni
  where employee_id in (:'e_vera', :'e_karel', :'e_cyril', :'e_nina', :'e_bara', :'e_otto', :'e_majitel');
 -- Cizí firma s Cecílií jako majitelkou zůstává (jako v krocích 103 a 106):
@@ -707,9 +1042,9 @@ delete from public.positions where id in (:'z_cteni', :'z_zapis');
 select pg_temp.check('úklid: rezervace a připojení z kroku 107 pryč',
   not exists (select 1 from public.rezervace where jmeno_hosta like '%Krok107' or nazev like '%Krok107')
   and not exists (select 1 from public.integrace_pripojeni where nazev like '%Krok107'));
-select pg_temp.check('úklid: upozornění k nim a souhrny 15.–16. 4. 2031 pryč',
+select pg_temp.check('úklid: upozornění k nim a souhrny 15.–17. 4. 2099 pryč',
   not exists (select 1 from public.notifications
-               where druh = 'rezervace.souhrn_dne' and telo ->> 'den' between '2031-04-15' and '2031-04-16')
+               where druh = 'rezervace.souhrn_dne' and telo ->> 'den' between '2099-04-15' and '2099-04-17')
   and not exists (select 1 from public.notifications
                    where user_id in (:'vera', :'karel', :'cyril', :'nina', :'bara', :'otto')
                      and tenant_id = :'tenant'));

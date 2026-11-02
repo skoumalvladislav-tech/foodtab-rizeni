@@ -228,13 +228,39 @@ Word se stáhne pod názvem bez diakritiky (`nazevKeStazeni`).
 
 Tlačítko **Upozornění** se zvonečkem v kalendáři (jen pro toho, kdo
 zapisuje) → `rezervace/upozorneni`. U pobočky se vyberou lidé a u každého
-co mu chodí: **akce** (nová, změna, zrušená), **rezervace** (nová,
-zrušená) a **ranní souhrn**. Vybrat jde jen toho, kdo rezervace té
-pobočky vidí; při odeslání se to ptá znovu. Nikdo vybraný = u akcí
-a rezervací nikomu nic, u souhrnu všem, kdo vidí (jako dosud). Nové
-rezervace z rezervačního systému se slučují do jednoho „N nových
-rezervací“; import ze souboru nic nehlásí. Migrace 20261106100000,
-scénář krok107.
+co mu chodí: **akce** (nová, změna, zrušená), **rezervace** (nová
+i obnovená zrušená, zrušená, „z rezervace je akce“) a **ranní souhrn**.
+Vybrat jde jen toho, kdo rezervace té pobočky vidí; při odeslání se to
+ptá znovu. Nikdo vybraný = u akcí a rezervací nikomu nic, u souhrnu všem,
+kdo vidí (jako dosud; i když všichni vybraní mezitím skončili). Výběr
+platí jen pro svou pobočku. Nové rezervace z rezervačního systému se
+slučují do jednoho „N nových rezervací“ za dávku — upozornění vznikne až
+při potvrzení dávky a přičte se k nepřečtenému. Import ze souboru nic
+nehlásí. Migrace 20261106100000, scénář krok107.
+
+Kdy se neposílá a proč:
+
+- **První den připojení.** Choice při prvním načtení stáhne všechny
+  budoucí rezervace najednou — nejsou nové, jen je Foodtab poprvé vidí.
+  Den se počítá od prvního načítání, které kalendář opravdu prošlo
+  (`synchronizace_behy`: běží, nebo doběhlo s dotazem na zdroj —
+  nepovedený pokus s neplatným klíčem se nepočítá, jinak by první
+  skutečné načtení po opravě ohlásilo celý kalendář), u příjmového API
+  (načítání nezapisuje) od založení připojení. Ne od první rezervace: API
+  založené před týdnem, které první rezervaci pošle až dnes, je skutečně
+  nová rezervace.
+- **Minulý den.** Dopsaná nebo zrušená rezervace ze včerejška nikoho
+  nezajímá. Přesunutá z minulého dne do budoucna (překlep v datu) je
+  ale nová — vybraní o ní jinak nevědí.
+- **Změna rezervace** (čas, počet osob) se nehlásí, změna akce ano.
+  Obnovená zrušená rezervace je nová (vybraní dostali „zrušená“).
+- **Po proběhlé akci** (a „nedorazili“) nic — ani úprava, ani změna druhu.
+- **Druh se mění.** Z akce rezervace: kuchyně dostane „změna: z akce je
+  rezervace“ pod názvem akce, vybraní na rezervace „nová rezervace“.
+  Z rezervace akce: vybraní na rezervace „změna rezervace: z rezervace je
+  akce“, kuchyně „nová akce“. Další změny a zrušení jdou už jen podle
+  nového druhu. Zrušení zároveň se změnou druhu se posílá podle druhu
+  před uložením — kdo věděl o rezervaci, dostane „zrušená rezervace“.
 
 ---
 

@@ -43,17 +43,18 @@ export function UpozorneniObsah({
 
         <ul className="ds-rez-upoz-pravidla">
           <li>
-            <strong>Akce</strong> — nová akce, každá změna (den, čas, počet osob, prostor, menu, název, potvrzení) a zrušení.
+            <strong>Akce</strong> — nová akce, každá změna (den, čas, počet osob, prostor, menu, název, potvrzení, „z akce je
+            rezervace“) a zrušení. Po proběhlé akci už nic.
           </li>
           <li>
-            <strong>Rezervace</strong> — nová a zrušená rezervace. Nové z rezervačního systému se sčítají do jednoho
-            upozornění („3 nové rezervace“), dokud ho člověk nepřečte.
+            <strong>Rezervace</strong> — nová (i obnovená zrušená) a zrušená rezervace a „z rezervace je akce“. Nové
+            z rezervačního systému se sčítají do jednoho upozornění („3 nové rezervace“), dokud ho člověk nepřečte.
           </li>
           <li>
             <strong>Ranní souhrn</strong> — přehled dne. Když u pobočky nikoho nezaškrtnete, chodí jako dosud všem v seznamu;
             jakmile zaškrtnete aspoň jednoho, chodí jen zaškrtnutým.
           </li>
-          <li>Kdo rezervaci zapíše nebo změní, tomu se o ní nic nepošle.</li>
+          <li>Kdo změnu udělá (zapíše, upraví nebo zruší), tomu se o té své změně nic nepošle — o změnách od ostatních ano.</li>
           <li>
             Chybí tu někdo? V seznamu je jen ten, kdo má účet ve Foodtabu a u svého zařazení právo „Vidět rezervace a kalendář
             akcí“ (<Link href={`/${rozsah}/nastaveni/role`}>Nastavení → Zařazení</Link>). Upozornění chodí do aplikace a na

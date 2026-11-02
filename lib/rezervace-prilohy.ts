@@ -137,6 +137,29 @@ export function zkontrolovatVyber(soubory: SouborVyberu[], uzMa: number): Vysled
   return { platne, chyby }
 }
 
+/**
+ * Věta, když úložiště nahrání odmítne. Word .docx úložiště a databáze
+ * přijmou až po nasazení migrace 20261106110000 — appka se z `main` nasadí
+ * dřív než `db push`. Do té doby by kbelík Word odmítl anglickou hláškou
+ * o typu souboru, a když by prošel, odmítla by cestu politika úložiště.
+ * Jen tyhle dvě odpovědi u Wordu se přeloží; ostatní chyby (síť) zůstanou.
+ *
+ * Typ Wordu odmítá jen kbelík před `db push`, takže ta věta smí být jistá.
+ * Politika úložiště ale odmítne i po něm (třeba komu mezitím vzali právo
+ * přílohy přidávat) — její věta proto příčinu jen nabízí.
+ */
+export function chybaNahrani(nazev: string, mime: string, hlaska: string): string {
+  if (mime === MIME_DOCX) {
+    if (/mime type/i.test(hlaska)) {
+      return `„${nazev}“: Word půjde přiložit až po aktualizaci databáze — zatím ho uložte jako PDF.`
+    }
+    if (/row-level security/i.test(hlaska)) {
+      return `„${nazev}“ úložiště odmítlo. Jestli databáze ještě nebyla aktualizovaná, Word půjde přiložit až potom — zatím ho uložte jako PDF.`
+    }
+  }
+  return `„${nazev}“ se nepodařilo nahrát: ${hlaska}`
+}
+
 /** Po zmenšení fotky: jde soubor nahrát, nebo proč ne? */
 export function zkontrolujPoZmenseni(nazev: string, mime: string, velikost: number): string | null {
   if (!jeTypPriloh(mime)) return `„${ocistitNazev(nazev)}“: ${NEJDE}`

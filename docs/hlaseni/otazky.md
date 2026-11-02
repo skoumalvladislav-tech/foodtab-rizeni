@@ -1870,9 +1870,15 @@ docs/rezervace-navrh.md, oddíl 1.
 - **Teď:** dokud u pobočky **nikoho nevyberete**, na akce a rezervace
   **nechodí nic nikomu**. Ranní souhrn chodí dál jako dosud všem, kdo
   rezervace vidí. Výběr je **stálý seznam za pobočku** (ne volba u každé
-  akce zvlášť) a mění ho ten, kdo rezervace zapisuje — sám si upozornění
-  vypnout nikdo nemůže (to v appce nejde u žádného druhu upozornění).
-  Kdo akci zapsal, tomu o ní nic nepřijde.
+  akce zvlášť) a mění ho ten, kdo rezervace zapisuje — upozornění na
+  akce a rezervace si sám vypnout nikdo nemůže. **Ranní souhrn ano**
+  (Nastavení upozornění, beze změny proti dnešku), a to vyhrává i nad
+  výběrem: kdo je vybraný na souhrn a sám si ho vypnul, tomu nepřijde.
+  Když jsou takoví všichni vybraní, nepřijde souhrn té pobočky nikomu —
+  „všem, kdo vidí“ platí, jen když nikdo vybraný není (nebo když všichni
+  vybraní mezitím skončili či přišli o právo rezervace vidět).
+  Kdo změnu udělá (zapíše, upraví, zruší), tomu se o **té své** změně
+  nic nepošle; o změnách, které udělá někdo jiný, ano.
 - **Proč:** nejopatrnější varianta. Upozornění na každou rezervaci všem
   by lidi naučilo zvoneček přeskakovat; a kdo práva na rezervace dnes
   má, je skoro jen majitel (otázka 76).

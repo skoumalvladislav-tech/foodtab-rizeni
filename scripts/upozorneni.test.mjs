@@ -43,6 +43,7 @@ import {
   souhrnCekajicich,
   popisSouhrnuDne,
   popisRezervace,
+  jeUpozorneniKRezervaci,
 } from '../lib/upozorneni-text.ts'
 import { odkazUpozorneni } from '../lib/upozorneni-odkaz.ts'
 import { slozitPush } from '../lib/komunikace/push-zprava.ts'
@@ -671,6 +672,7 @@ console.log('\n== Akce a rezervace ==')
   ma('změna akce', nadpisUpozorneni('akce.zmenena', AKCE, obdobi), `Změna akce ${kdy('18:00')} (30 os.) — Bernard Bar Tábor`)
   ma('zrušená akce', nadpisUpozorneni('akce.zrusena', AKCE, obdobi), `Zrušená akce ${kdy('18:00')} (30 os.) — Bernard Bar Tábor`)
   ma('nová rezervace', nadpisUpozorneni('rezervace.nova', REZ, obdobi), `Nová rezervace ${kdy('19:30')} (4 os.) — Restaurace Černá Perla`)
+  ma('změna rezervace (z rezervace je akce)', nadpisUpozorneni('rezervace.zmenena', REZ, obdobi), `Změna rezervace ${kdy('19:30')} (4 os.) — Restaurace Černá Perla`)
   ma('zrušená rezervace', nadpisUpozorneni('rezervace.zrusena', REZ, obdobi), `Zrušená rezervace ${kdy('19:30')} (4 os.) — Restaurace Černá Perla`)
   ma('sloučené z rezervačního systému: 3 → „nové“', nadpisUpozorneni('rezervace.nova', { ...REZ, pocet: 3 }, obdobi), '3 nové rezervace — Restaurace Černá Perla')
   ma('sloučené: 5 → „nových“', nadpisUpozorneni('rezervace.nova', { ...REZ, pocet: 5 }, obdobi), '5 nových rezervací — Restaurace Černá Perla')
@@ -690,13 +692,20 @@ console.log('\n== Akce a rezervace ==')
     popisRezervace('akce.zmenena', { ...AKCE, co_se_zmenilo: ['cas', 'prostor', 'menu'] }), 'Svatba Novákových. Změna: čas, prostor a menu.')
   ma('… jedna změna (i „menu“ bez chyby v rodě)',
     popisRezervace('akce.zmenena', { ...AKCE, co_se_zmenilo: ['menu'] }), 'Svatba Novákových. Změna: menu.')
+  ma('… z akce se stala rezervace',
+    popisRezervace('akce.zmenena', { ...AKCE, co_se_zmenilo: ['druh'] }), 'Svatba Novákových. Změna: z akce je rezervace.')
   ma('… neznámá změna se nevymýšlí', popisRezervace('akce.zmenena', { ...AKCE, co_se_zmenilo: ['xyz'] }), 'Svatba Novákových.')
+  ma('vybraným na rezervace: z rezervace se stala akce',
+    popisRezervace('rezervace.zmenena', { ...REZ, co_se_zmenilo: ['druh'] }), 'Změna: z rezervace je akce.')
+  ma('… název akce ani tam, kdyby ho tělo neslo (tělo rezervace ho nemá)',
+    popisRezervace('rezervace.zmenena', { ...REZ, nazev: 'Svatba Novákových', co_se_zmenilo: ['druh'] }), 'Změna: z rezervace je akce.')
   ma('pod sloučenými: poslední rezervace', popisRezervace('rezervace.nova', { ...REZ, pocet: 3 }),
     `Z rezervačního systému. Poslední: ${kdy('19:30')} (4 os.)`)
   ma('u jedné rezervace nic pod nadpisem', popisRezervace('rezervace.nova', REZ), '')
 
   ma('klepnutí na akci → detail v rozsahu POBOČKY akce', cil('akce.nova', AKCE), `/bernard-bar/rezervace/${ID}`)
   ma('klepnutí na zrušenou rezervaci → detail', cil('rezervace.zrusena', REZ), `/cerna-perla/rezervace/${ID}`)
+  ma('klepnutí na změnu rezervace → detail', cil('rezervace.zmenena', REZ), `/cerna-perla/rezervace/${ID}`)
   ma('sloučené nové → kalendář pobočky (id nese jen poslední)', cil('rezervace.nova', { ...REZ, pocet: 3 }), '/cerna-perla/rezervace')
   ma('podvržený slug → rozsah, kde člověk je', cil('akce.nova', { ...AKCE, pobocka_slug: '//zly.example' }), `/perla/rezervace/${ID}`)
   ma('podvržené id → kalendář, ne cizí adresa', cil('akce.zmenena', { ...AKCE, rezervace_id: 'https://x' }), '/bernard-bar/rezervace')
@@ -704,18 +713,24 @@ console.log('\n== Akce a rezervace ==')
   const migrace = fs.readFileSync('supabase/migrations/20261106100000_rezervace_upozorneni.sql', 'utf8')
   const spoust = migrace.slice(migrace.indexOf('create function app.rezervace_upozornit()'), migrace.indexOf('revoke all on function app.rezervace_upozornit()'))
   const druhy = [...new Set([...spoust.matchAll(/'((?:akce|rezervace)\.[a-z_]+)'/g)].map((m) => m[1]))].sort()
-  ma(`spoušť posílá pět druhů (${druhy.join(', ')})`, druhy.length, 5)
+  ma(`spoušť posílá šest druhů (${druhy.join(', ')})`, druhy.length, 6)
   ma('… a každý má vlastní nadpis (ne obecné „Upozornění“)',
     druhy.every((d) => nadpisUpozorneni(d, AKCE, obdobi) !== 'Upozornění'), true)
   ma('… a každý vede na rezervace, ne na obecnou stránku',
     druhy.every((d) => cil(d, AKCE).startsWith('/bernard-bar/rezervace')), true)
-  ma('sám sobě se nepíše: příjemci bez auth.uid()',
-    /v_ja\s+uuid := auth\.uid\(\)/.test(spoust) && /where p\.user_id is distinct from v_ja/.test(spoust), true)
-  ma('tělo nenese jméno hosta ani kontakt',
-    /jmeno_hosta|telefon|email/.test(spoust.slice(spoust.indexOf('jsonb_build_object'))), false)
+  ma('… a u každého stránka Upozornění kreslí větu a odkaz na detail',
+    druhy.every((d) => jeUpozorneniKRezervaci(d)) && !jeUpozorneniKRezervaci('rezervace.souhrn_dne'), true)
+  ma('sám sobě se nepíše: příjemci bez auth.uid() (v obou smyčkách)',
+    /v_ja\s+uuid := auth\.uid\(\)/.test(spoust) && (spoust.match(/where p\.user_id is distinct from v_ja/g) ?? []).length === 2, true)
+  // Tělo skládá jediná funkce app.rezervace_upozorneni_telo (pro obě
+  // spouště) — kontrola čte jen ji, od hlavičky po revoke.
+  const telo = migrace.slice(migrace.indexOf('create function app.rezervace_upozorneni_telo('),
+    migrace.indexOf('revoke all on function app.rezervace_upozorneni_telo('))
+  ma('tělo skládá app.rezervace_upozorneni_telo (jsonb_build_object)', telo.includes('jsonb_build_object('), true)
+  ma('… a nenese jméno hosta ani kontakt', /jmeno_hosta|telefon|email/.test(telo), false)
 
-  ma('stránka Upozornění kreslí větu pod nadpisem z popisRezervace',
-    stranka.includes('popisRezervace(z.druh, z.telo)'), true)
+  ma('stránka Upozornění kreslí větu pod nadpisem z popisRezervace (podle jeUpozorneniKRezervaci)',
+    stranka.includes('popisRezervace(z.druh, z.telo)') && stranka.includes('jeUpozorneniKRezervaci(z.druh)'), true)
 }
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)

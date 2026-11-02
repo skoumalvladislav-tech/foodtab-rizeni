@@ -14,9 +14,10 @@
 -- u každé pobočky lidi a u každého zaškrtne, co mu má chodit:
 --
 --   * AKCE      — nová akce, změna akce (den, čas, počet osob, prostor,
---                 menu, název, potvrzení) a zrušená akce,
---   * REZERVACE — nová rezervace (ručně zapsaná i z rezervačního systému)
---                 a zrušená rezervace,
+--                 menu, název, potvrzení, z akce rezervace) a zrušená akce,
+--   * REZERVACE — nová rezervace (ručně zapsaná i z rezervačního systému,
+--                 i obnovená zrušená), zrušená rezervace a to, že se
+--                 z rezervace stala akce,
 --   * SOUHRN    — ranní souhrn dne (20261103100000). Když u pobočky nikoho
 --                 nevyberou, dostanou ho jako dosud všichni, kdo rezervace
 --                 té pobočky vidí — souhrn nesmí potichu přestat chodit.
@@ -48,20 +49,30 @@
 --   * Import ze souboru (CSV): hromadné načtení stovek řádků není „nová
 --     rezervace“. Spoušť na takových řádcích vůbec neběží (WHEN).
 --   * Rezervační systém v prvních 24 hodinách připojení: první načtení
---     projde půl roku dopředu a všechno by bylo „nové“. Pozná se podle
---     toho, že od toho připojení ještě není žádná rezervace starší 24 h.
---     Kdyby v tu dobu přišla skutečně nová rezervace, ukáže ji kalendář
---     a ranní souhrn; upozornění se nedožene.
+--     projde půl roku dopředu a všechno by bylo „nové“ (nebo „zrušené“).
+--     Počítá se od prvního načítání připojení, které kalendář opravdu
+--     prošlo (Choice; nepovedený pokus se nepočítá), u příjmového API od
+--     založení připojení — NE od první rezervace, ta může přijít až za
+--     týden. Kdyby v tu dobu přišla skutečně nová rezervace, ukáže ji
+--     kalendář a ranní souhrn; upozornění se nedožene.
+--   * Proběhlá akce či rezervace a „nedorazili“: o hotové věci ani o její
+--     pozdější úpravě (doplněný počet hostů) nikdo upozornění nepotřebuje.
 --   * Minulé dny (provozní den pobočky): dopisování historie nikoho
---     nezajímá.
+--     nezajímá. Rezervace přesunutá z minulého dne na dnešek či dál
+--     (opravený překlep v datu) se ohlásí jako nová.
 --   * Změny rezervací (ne akcí) kromě zrušení: posun o půl hodiny nebo
 --     host navíc u stolu pro dva by chodily desetkrát denně. U akcí se
---     každá změna hlásí — kuchyně podle nich plánuje.
+--     každá změna hlásí — kuchyně podle nich plánuje. Změna druhu jde
+--     oběma stranám: z akce rezervace = kuchyni „z akce je rezervace“,
+--     vybraným na rezervace nová rezervace; z rezervace akce = vybraným
+--     na rezervace „z rezervace je akce“, kuchyni nová akce. Další změny
+--     a zrušení pak jdou už jen podle nového druhu. Zrušení zároveň se
+--     změnou druhu jde těm, kdo o řádku věděli: podle druhu před uložením.
 --
--- Nové rezervace z rezervačního systému se slučují: dokud člověk
--- upozornění nepřečte, další nová rezervace téže pobočky ho nahradí
--- s počtem („3 nové rezervace“) — app.notifikovat, telo.pocet. Ruční
--- rezervace a všechny akce chodí každá zvlášť.
+-- Nové rezervace z rezervačního systému se slučují: jedna dávka = jedno
+-- upozornění s počtem (oddíl 4b), a dokud ho člověk nepřečte, další
+-- dávka téže pobočky počet přičte („3 nové rezervace“) — app.notifikovat,
+-- telo.pocet. Ruční rezervace a všechny akce chodí každá zvlášť.
 --
 -- ---------------------------------------------------------------------
 -- PROČ SPOUŠŤ, NE VOLÁNÍ Z FUNKCÍ
@@ -196,8 +207,16 @@ create function app.rezervace_prijemci(p_tenant uuid, p_branch uuid, p_co text)
 returns table (user_id uuid)
 language sql stable security definer set search_path = ''
 as $$
+  -- Kdo vidí a je aktivní zaměstnanec firmy — jediné místo té podmínky,
+  -- platí pro vybrané i pro souhrn bez výběru (ukončený nedostane nic).
   with vidi as (
-    select k.user_id from app.rezervace_kdo_vidi(p_tenant, p_branch) k
+    select e.id as employee_id, e.user_id
+      from app.rezervace_kdo_vidi(p_tenant, p_branch) k
+      join public.employees e
+        on e.user_id = k.user_id
+       and e.tenant_id = p_tenant
+       and e.deleted_at is null
+       and e.active
   ),
   vybrani as (
     select v.user_id
@@ -205,12 +224,8 @@ as $$
      where exists (
        select 1
          from public.rezervace_upozorneni u
-         join public.employees e on e.id = u.employee_id
-        where u.tenant_id = p_tenant
-          and e.deleted_at is null
-          and e.active
-          and u.branch_id = p_branch
-          and e.user_id   = v.user_id
+        where u.branch_id   = p_branch
+          and u.employee_id = v.employee_id
           and case p_co
                 when 'akce'      then u.akce
                 when 'rezervace' then u.rezervace
@@ -379,22 +394,42 @@ comment on function public.rezervace_upozorneni_ulozit(uuid, uuid, uuid[], uuid[
   'jen toho, kdo rezervace pobočky vidí.';
 
 
--- Spoušť se u každé importované nové rezervace ptá, jestli už je od toho
--- připojení nějaká starší než 24 hodin. Bez indexu by to v prvním dni
--- připojení (stovky řádků z Choice) byl průchod celou tabulkou na řádek.
-create index rezervace_pripojeni_vytvoreno
-  on public.rezervace (pripojeni_id, vytvoreno_kdy)
-  where pripojeni_id is not null;
-
 -- ---------------------------------------------------------------------
 -- 4. UPOZORNĚNÍ PŘI ZÁPISU REZERVACE NEBO AKCE
 --
 -- Druhy (věty skládá lib/upozorneni-text.ts):
---   akce.nova, akce.zmenena, akce.zrusena, rezervace.nova, rezervace.zrusena
+--   akce.nova, akce.zmenena, akce.zrusena, rezervace.nova,
+--   rezervace.zmenena (jen „z rezervace je akce“), rezervace.zrusena
 -- Tělo: rezervace_id, den, cas (hodina na zdi pobočky), osob, nazev (jen
--- akce), pobocka, pobocka_slug, co_se_zmenilo (jen akce.zmenena), pocet (jen sloučené
--- nové rezervace z rezervačního systému).
+-- akce), pobocka, pobocka_slug, co_se_zmenilo (jen *.zmenena), pocet (jen
+-- sloučené nové rezervace z rezervačního systému).
 -- ---------------------------------------------------------------------
+
+-- Tělo upozornění z řádku rezervace. Pro obě spouště níž (po řádcích
+-- i za dávku), ať se nerozejdou.
+create function app.rezervace_upozorneni_telo(
+  p_r     public.rezervace,
+  p_nazev text,
+  p_zmeny text[]
+)
+returns jsonb
+language sql stable set search_path = ''
+as $$
+  select jsonb_strip_nulls(jsonb_build_object(
+    'rezervace_id',  p_r.id,
+    'den',           p_r.den,
+    'cas',           to_char(p_r.zacatek at time zone app.zona_pobocky(p_r.branch_id), 'HH24:MI'),
+    'osob',          p_r.pocet_osob,
+    'nazev',         nullif(btrim(p_nazev), ''),
+    'pobocka',       b.name,
+    'pobocka_slug',  b.slug,
+    'co_se_zmenilo', case when cardinality(p_zmeny) > 0 then to_jsonb(p_zmeny) end
+  ))
+    from public.branches b
+   where b.id = p_r.branch_id
+$$;
+
+revoke all on function app.rezervace_upozorneni_telo(public.rezervace, text, text[]) from public, anon, authenticated;
 
 create function app.rezervace_upozornit()
 returns trigger
@@ -406,12 +441,14 @@ declare
   v_druh   text;
   v_komu   text;
   v_zmeny  text[] := '{}';
-  v_zona   text;
-  v_b      record;
+  v_nazev  text;
+  v_klic   text;
   v_telo   jsonb;
-  v_dedupe text;
   v_ja     uuid := auth.uid();
   v_u      record;
+  -- Změna druhu: druhé upozornění vybraným na rezervace.
+  v_druh2  text;
+  v_zmeny2 text[] := '{}';
 begin
   -- Zápis ze synchronizace nebo importu: nový importovaný řádek, nebo
   -- úprava, při které import přepsal razítko `importovano_kdy`.
@@ -424,93 +461,128 @@ begin
     return null;
   end if;
 
-  if tg_op = 'INSERT' then
-    if new.stav in ('zrusena', 'nedostavil_se') then
+  -- Proběhlá a „nedorazili“: o hotové věci se nic nehlásí — ani to, že
+  -- proběhla, ani pozdější úprava (doplněný počet hostů), ani změna druhu.
+  if new.stav in ('dokonceno', 'nedostavil_se') then
+    return null;
+  end if;
+
+  -- První den připojení rezervačního systému: první načtení projde celé
+  -- okno dopředu a nic z toho není novinka — nová, zrušená ani změněná.
+  -- Počítá se od prvního načítání připojení (Choice zapisuje každé do
+  -- synchronizace_behy), a kde se nenačítá, protože data posílá systém
+  -- sám (příjmové API), od založení připojení. NE od první rezervace
+  -- připojení: ta může přijít až za týden a byla by skutečně nová.
+  --
+  -- Načítání se počítá, jen když právě běží, nebo když doběhlo a na zdroj
+  -- se opravdu zeptalo (vyplněný počet nových — lib/rezervace-choice-sync.ts,
+  -- `dokoncit`). Nepovedený pokus (neplatný klíč, plná fronta) kalendář
+  -- neprošel: kdyby první den posunul, první skutečné načtení po opravě
+  -- by ohlásilo celý kalendář jako nový.
+  if v_import and new.pripojeni_id is not null and coalesce(
+       (select min(s.zahajeno_kdy) from public.synchronizace_behy s
+         where s.integrace_pripojeni_id = new.pripojeni_id
+           and (s.stav = 'bezi' or (s.stav = 'hotovo' and s.pocet_novych_radku is not null))),
+       (select p.vytvoreno_kdy from public.integrace_pripojeni p
+         where p.id = new.pripojeni_id)
+     ) > now() - interval '24 hours' then
+    return null;
+  end if;
+
+  -- Nová = zapsaná teď, nebo posunutá z minulého dne na dnešek či dál
+  -- (překlep v datu opravený na skutečný den o ní nikomu neřekl).
+  if tg_op = 'INSERT' or old.den < v_dnes then
+    if new.stav = 'zrusena' then
       return null;
     end if;
-    if new.druh = 'akce' then
-      v_druh := 'akce.nova';
-      v_komu := 'akce';
-    else
-      -- První dny připojení rezervačního systému: načítá se celé okno
-      -- dopředu, nic z toho není „nová rezervace“. Jen u připojení —
-      -- import ze souboru (bez připojení) zastaví podmínka spouště níž,
-      -- a jen ta, ať se dá každá z nich zkontrolovat zvlášť.
-      if v_import and new.pripojeni_id is not null and not exists (
-        select 1 from public.rezervace x
-         where x.pripojeni_id = new.pripojeni_id
-           and x.vytvoreno_kdy < now() - interval '24 hours'
-      ) then
-        return null;
-      end if;
-      v_druh := 'rezervace.nova';
-      v_komu := 'rezervace';
+    v_druh := case when new.druh = 'akce' then 'akce.nova' else 'rezervace.nova' end;
+    v_komu := case when new.druh = 'akce' then 'akce' else 'rezervace' end;
+  elsif new.stav = 'zrusena' then
+    -- Změny už zrušené nikoho nezajímají.
+    if old.stav = 'zrusena' then
+      return null;
     end if;
+    -- Zrušení jde těm, kdo o ní věděli — podle druhu PŘED uložením, i když
+    -- se druh změnil zároveň.
+    v_druh := case when old.druh = 'akce' then 'akce.zrusena' else 'rezervace.zrusena' end;
+    v_komu := case when old.druh = 'akce' then 'akce' else 'rezervace' end;
+  elsif new.druh = 'akce' and old.druh <> 'akce' then
+    -- Z rezervace je akce: kuchyni nová akce. Vybraní na rezervace s ní
+    -- počítali jako s rezervací — dostanou „z rezervace je akce“ (níž);
+    -- další změny a zrušení už jdou jen kuchyni.
+    v_druh := 'akce.nova';
+    v_komu := 'akce';
+    v_druh2 := 'rezervace.zmenena';
+    v_zmeny2 := array['druh'];
+  elsif old.druh = 'akce' and new.druh <> 'akce' then
+    -- Z akce je rezervace: kuchyně s akcí počítala, musí to vědět. Pod
+    -- názvem, který měla jako akce. Vybraným na rezervace přijde jako
+    -- nová rezervace (níž) — o akci nevěděli a zrušení pak dostanou oni.
+    v_druh2 := 'rezervace.nova';
+    v_zmeny := array['druh'];
+    v_nazev := coalesce(nullif(btrim(old.nazev), ''), nullif(btrim(old.typ_akce), ''));
+    v_druh := 'akce.zmenena';
+    v_komu := 'akce';
+  elsif new.druh = 'akce' then
+    if new.den <> old.den then
+      v_zmeny := v_zmeny || 'den'::text;
+    elsif new.zacatek <> old.zacatek or new.konec is distinct from old.konec then
+      v_zmeny := v_zmeny || 'cas'::text;
+    end if;
+    if new.pocet_osob is distinct from old.pocet_osob then
+      v_zmeny := v_zmeny || 'osob'::text;
+    end if;
+    if new.prostor <> old.prostor then
+      v_zmeny := v_zmeny || 'prostor'::text;
+    end if;
+    if new.menu <> old.menu then
+      v_zmeny := v_zmeny || 'menu'::text;
+    end if;
+    if new.nazev <> old.nazev or new.typ_akce <> old.typ_akce then
+      v_zmeny := v_zmeny || 'nazev'::text;
+    end if;
+    -- Potvrzení předběžné nebo obnovení zrušené. (Zrušení má větev výš,
+    -- „proběhla“ a „nedorazili“ zastavila podmínka nahoře.)
+    if new.stav <> old.stav then
+      v_zmeny := v_zmeny || 'stav'::text;
+    end if;
+    if cardinality(v_zmeny) = 0 then
+      return null;
+    end if;
+    v_druh := 'akce.zmenena';
+    v_komu := 'akce';
+  elsif old.stav = 'zrusena' then
+    -- Obnovená zrušená rezervace (teď čeká nebo potvrzená — zrušení
+    -- i hotové zastavily větve výš): vybraní dostali „zrušená“ a bez
+    -- upozornění by s ní nepočítali.
+    v_druh := 'rezervace.nova';
+    v_komu := 'rezervace';
   else
-    if new.stav = 'zrusena' and old.stav <> 'zrusena' then
-      v_druh := case when new.druh = 'akce' then 'akce.zrusena' else 'rezervace.zrusena' end;
-      v_komu := case when new.druh = 'akce' then 'akce' else 'rezervace' end;
-    elsif new.druh = 'akce' and old.druh <> 'akce' then
-      if new.stav in ('zrusena', 'nedostavil_se') then
-        return null;
-      end if;
-      v_druh := 'akce.nova';
-      v_komu := 'akce';
-    elsif new.druh = 'akce' and new.stav <> 'zrusena' then
-      if new.den <> old.den then
-        v_zmeny := v_zmeny || 'den'::text;
-      elsif new.zacatek <> old.zacatek or new.konec is distinct from old.konec then
-        v_zmeny := v_zmeny || 'cas'::text;
-      end if;
-      if new.pocet_osob is distinct from old.pocet_osob then
-        v_zmeny := v_zmeny || 'osob'::text;
-      end if;
-      if new.prostor <> old.prostor then
-        v_zmeny := v_zmeny || 'prostor'::text;
-      end if;
-      if new.menu <> old.menu then
-        v_zmeny := v_zmeny || 'menu'::text;
-      end if;
-      if new.nazev <> old.nazev or new.typ_akce <> old.typ_akce then
-        v_zmeny := v_zmeny || 'nazev'::text;
-      end if;
-      -- Potvrzení předběžné nebo obnovení zrušené. „Proběhla“ a
-      -- „nedorazili“ se po akci nikomu nehlásí.
-      if new.stav <> old.stav and new.stav in ('ceka', 'potvrzeno') then
-        v_zmeny := v_zmeny || 'stav'::text;
-      end if;
-      if cardinality(v_zmeny) = 0 then
-        return null;
-      end if;
-      v_druh := 'akce.zmenena';
-      v_komu := 'akce';
-    else
-      return null;
-    end if;
+    return null;
+  end if;
+
+  -- Nová z rezervačního systému se jen započítá; upozornění pošle jednou
+  -- za pobočku a dávku odložená spoušť níž (app.rezervace_upozornit_davku).
+  -- Jen `externi`: nový řádek ze souboru (csv) sem nedojde, zastaví ho
+  -- jediná podmínka u spouště při vložení (`when (new.zdroj <> 'csv')`).
+  -- Kdyby ho tu jistil i tenhle řádek, kontrola „import ze souboru nic“
+  -- by nešla shodit. Data zdroje ručně měnit nejde, takže `externi` tu
+  -- znamená načtení ze zdroje.
+  if v_druh = 'rezervace.nova' and new.zdroj = 'externi' then
+    v_klic := 'foodtab_rezervace.nove_' || replace(new.branch_id::text, '-', '');
+    perform set_config(v_klic, jsonb_build_object(
+      'pocet', coalesce((nullif(current_setting(v_klic, true), '')::jsonb ->> 'pocet')::integer, 0) + 1,
+      'id',    new.id
+    )::text, true);
+    return null;
+  end if;
+
+  if v_komu = 'akce' and v_nazev is null then
+    v_nazev := coalesce(nullif(btrim(new.nazev), ''), nullif(btrim(new.typ_akce), ''));
   end if;
 
   begin
-    select b.name, b.slug into v_b from public.branches b where b.id = new.branch_id;
-    v_zona := app.zona_pobocky(new.branch_id);
-
-    v_telo := jsonb_strip_nulls(jsonb_build_object(
-      'rezervace_id', new.id,
-      'den',          new.den,
-      'cas',          to_char(new.zacatek at time zone v_zona, 'HH24:MI'),
-      'osob',         new.pocet_osob,
-      'nazev',        case when new.druh = 'akce'
-                           then coalesce(nullif(btrim(new.nazev), ''), nullif(btrim(new.typ_akce), '')) end,
-      'pobocka',      v_b.name,
-      'pobocka_slug', v_b.slug,
-      'co_se_zmenilo', case when cardinality(v_zmeny) > 0 then to_jsonb(v_zmeny) end
-    ));
-
-    if v_druh = 'rezervace.nova' and v_import then
-      v_telo := v_telo || jsonb_build_object('pocet', 1);
-      v_dedupe := 'rezervace.nova:pobocka:' || new.branch_id;
-    else
-      v_dedupe := v_druh || ':' || new.id;
-    end if;
+    v_telo := app.rezervace_upozorneni_telo(new, v_nazev, v_zmeny);
 
     for v_u in
       select p.user_id
@@ -519,9 +591,23 @@ begin
     loop
       perform app.notifikovat(
         new.tenant_id, v_u.user_id, v_druh, v_telo, 'normal',
-        new.branch_id, null, 'rezervace', new.id, v_dedupe
+        new.branch_id, null, 'rezervace', new.id, v_druh || ':' || new.id
       );
     end loop;
+
+    if v_druh2 is not null then
+      v_telo := app.rezervace_upozorneni_telo(new, null, v_zmeny2);
+      for v_u in
+        select p.user_id
+          from app.rezervace_prijemci(new.tenant_id, new.branch_id, 'rezervace') p
+         where p.user_id is distinct from v_ja
+      loop
+        perform app.notifikovat(
+          new.tenant_id, v_u.user_id, v_druh2, v_telo, 'normal',
+          new.branch_id, null, 'rezervace', new.id, v_druh2 || ':' || new.id
+        );
+      end loop;
+    end if;
   exception when others then
     raise warning 'Upozornění k rezervaci % se nepodařilo poslat: % %', new.id, sqlstate, sqlerrm;
   end;
@@ -555,6 +641,79 @@ create trigger trg_rezervace_upozornit_zmena
     and not (new.zdroj = 'csv' and new.importovano_kdy is distinct from old.importovano_kdy)
   )
   execute function app.rezervace_upozornit();
+
+
+-- ---------------------------------------------------------------------
+-- 4b. NOVÉ REZERVACE Z REZERVAČNÍHO SYSTÉMU — JEDNO UPOZORNĚNÍ ZA DÁVKU
+--
+-- Dávka ze synchronizace má až 2000 řádků v jedné transakci. Upozorňovat
+-- po řádcích by znamenalo u každého nového řádku znovu spočítat příjemce,
+-- každému přepsat sloučené upozornění (smazat, vložit, zařadit do fronty)
+-- a otevřít podtransakci bloku s výjimkou — dávka by se protáhla, mohla
+-- narazit na časový limit a spadnout celá, i s rezervacemi.
+--
+-- Spoušť výš proto nové řádky dávky jen počítá (nastavení platné do konce
+-- transakce, po pobočkách: počet a poslední řádek). Tahle spoušť je
+-- odložená na potvrzení transakce: první řádek pobočky počet vybere,
+-- vynuluje a pošle jedno upozornění s počtem; ostatní řádky nenajdou nic.
+-- app.notifikovat počet přičte k nepřečtenému z minulých dávek.
+-- ---------------------------------------------------------------------
+
+create function app.rezervace_upozornit_davku()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+declare
+  v_klic  text := 'foodtab_rezervace.nove_' || replace(new.branch_id::text, '-', '');
+  v_davka jsonb;
+  v_r     public.rezervace;
+  v_telo  jsonb;
+  v_ja    uuid := auth.uid();
+  v_u     record;
+begin
+  v_davka := nullif(current_setting(v_klic, true), '')::jsonb;
+  if v_davka is null then
+    return null;
+  end if;
+  perform set_config(v_klic, '', true);
+
+  begin
+    select r.* into v_r from public.rezervace r where r.id = (v_davka ->> 'id')::uuid;
+    v_telo := app.rezervace_upozorneni_telo(v_r, null, '{}')
+           || jsonb_build_object('pocet', (v_davka ->> 'pocet')::integer);
+
+    for v_u in
+      select p.user_id
+        from app.rezervace_prijemci(v_r.tenant_id, v_r.branch_id, 'rezervace') p
+       where p.user_id is distinct from v_ja
+    loop
+      perform app.notifikovat(
+        v_r.tenant_id, v_u.user_id, 'rezervace.nova', v_telo, 'normal',
+        v_r.branch_id, null, 'rezervace', v_r.id, 'rezervace.nova:pobocka:' || v_r.branch_id
+      );
+    end loop;
+  exception when others then
+    raise warning 'Upozornění na nové rezervace pobočky % se nepodařilo poslat: % %', new.branch_id, sqlstate, sqlerrm;
+  end;
+
+  return null;
+end $$;
+
+revoke all on function app.rezervace_upozornit_davku() from public, anon, authenticated;
+
+comment on function app.rezervace_upozornit_davku() is
+  'Odložená spoušť: jedno upozornění na nové rezervace z rezervačního '
+  'systému za pobočku a dávku. Viz 20261106100000, oddíl 4b.';
+
+-- Jen řádky z připojení (zdroj externi): jen ty spoušť výš počítá.
+-- Podmínka jen šetří práci (ruční a CSV řádky nic nezapočítaly, tak by
+-- funkce nic nenašla) — nehlídá nic, proto na ni nemíří žádné rozbití.
+create constraint trigger trg_rezervace_upozornit_davka
+  after insert or update on public.rezervace
+  deferrable initially deferred
+  for each row
+  when (new.zdroj = 'externi')
+  execute function app.rezervace_upozornit_davku();
 
 
 -- ---------------------------------------------------------------------

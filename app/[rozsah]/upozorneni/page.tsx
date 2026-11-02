@@ -8,6 +8,7 @@ import { sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
   denZkraceny,
   kartaZmenySmeny,
+  jeUpozorneniKRezervaci,
   nadpisUpozorneni,
   obdobiRozpisu,
   popisMarketingu,
@@ -459,7 +460,7 @@ export default async function Upozorneni({
                   počet osob a pobočku (jde i na zamčenou obrazovku); název akce a co se
                   změnilo je až tady.
                 */}
-                {z.druh.startsWith('akce.') || z.druh === 'rezervace.nova' || z.druh === 'rezervace.zrusena' ? (
+                {jeUpozorneniKRezervaci(z.druh) ? (
                   <>
                     {popisRezervace(z.druh, z.telo) ? (
                       <p style={{ margin: '6px 0 0' }}>{popisRezervace(z.druh, z.telo)}</p>

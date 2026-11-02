@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { noveId } from '@/lib/obrazky'
-import { KBELIK_REZERVACI, MAX_PRILOH_REZERVACE, PRIJIMANE_SOUBORY, cestaPrilohy, zkontrolovatVyber } from '@/lib/rezervace-prilohy'
+import { KBELIK_REZERVACI, MAX_PRILOH_REZERVACE, PRIJIMANE_SOUBORY, cestaPrilohy, chybaNahrani, zkontrolovatVyber } from '@/lib/rezervace-prilohy'
 import { getBrowserSupabase } from '@/lib/supabase/client'
 
 import Ikona from '../ikona'
@@ -76,7 +76,7 @@ export default function NahratPrilohy({
 
         const { error } = await supabase.storage.from(KBELIK_REZERVACI).upload(cesta, blob, { contentType: mime, upsert: false })
         if (error) {
-          nove.push(`„${nazev}“ se nepodařilo nahrát: ${error.message}`)
+          nove.push(chybaNahrani(nazev, mime, error.message))
           continue
         }
 

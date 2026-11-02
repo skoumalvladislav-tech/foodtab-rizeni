@@ -8,6 +8,7 @@ import {
   MAX_PRILOH_REZERVACE,
   PRIJIMANE_SOUBORY,
   cestaPrilohy,
+  chybaNahrani,
   jeObrazek,
   velikostText,
   zkontrolovatVyber,
@@ -145,7 +146,7 @@ export default function FormularRezervace({
       const cesta = cestaPrilohy(tenantId, proPobocku, noveId(), pripraveny.mime)
       const { error } = await supabase.storage.from(KBELIK_REZERVACI).upload(cesta, pripraveny.blob, { contentType: pripraveny.mime, upsert: false })
       if (error) {
-        chyby.push(`„${pripraveny.nazev}“ se nepodařilo nahrát: ${error.message}`)
+        chyby.push(chybaNahrani(pripraveny.nazev, pripraveny.mime, error.message))
         continue
       }
       nastavDokumenty(

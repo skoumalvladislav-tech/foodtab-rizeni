@@ -57,6 +57,7 @@ import {
   MIME_DOCX,
   PRIJIMANE_SOUBORY,
   cestaPrilohy,
+  chybaNahrani,
   jeZip,
   nazevKeStazeni,
   otevritVProhlizeci,
@@ -340,6 +341,22 @@ console.log('\n== 7. Přílohy ==\n')
   for (const s of ['app/[rozsah]/rezervace/prilohy-nahrat.tsx', 'app/[rozsah]/rezervace/formular.tsx']) {
     const k = cti(s)
     ok(`${s}: výběr souboru bere seznam z jednoho místa`, k.includes('accept={PRIJIMANE_SOUBORY}') && !/accept="/.test(k))
+    ok(`${s}: odmítnuté nahrání hlásí přes chybaNahrani (Word před db push česky)`,
+      /chybaNahrani\([^)]*error\.message\)/.test(k) && !/se nepodařilo nahrát: \$\{error\.message\}/.test(k))
+  }
+  {
+    const PRED_PUSH = 'Word půjde přiložit až po aktualizaci databáze'
+    ok('Word odmítnutý kbelíkem (typ) → česká věta',
+      chybaNahrani('Smlouva.docx', MIME_DOCX, 'mime type application/vnd.openxmlformats-officedocument.wordprocessingml.document is not supported').includes(PRED_PUSH))
+    // Politika odmítne i po db push (jiná příčina) — věta příčinu jen nabízí.
+    const politika = chybaNahrani('Smlouva.docx', MIME_DOCX, 'new row violates row-level security policy')
+    ok('Word odmítnutý politikou úložiště → česká věta, příčinu jen nabízí („Jestli…“)',
+      politika.includes('Jestli databáze ještě nebyla aktualizovaná') && !politika.includes(PRED_PUSH)
+      && !politika.includes('row-level'))
+    ok('Word a výpadek sítě → původní hláška, ne „po aktualizaci“',
+      chybaNahrani('Smlouva.docx', MIME_DOCX, 'Failed to fetch') === '„Smlouva.docx“ se nepodařilo nahrát: Failed to fetch')
+    ok('PDF odmítnuté kvůli typu → původní hláška (věta je jen pro Word)',
+      chybaNahrani('Menu.pdf', 'application/pdf', 'mime type application/pdf is not supported') === '„Menu.pdf“ se nepodařilo nahrát: mime type application/pdf is not supported')
   }
   const priprava = cti('app/[rozsah]/rezervace/priprava-souboru.ts')
   ok('příprava: .docx bez zip podpisu se nenahraje; typ se vtiskne do souboru (úložiště čte typ ze souboru)',
