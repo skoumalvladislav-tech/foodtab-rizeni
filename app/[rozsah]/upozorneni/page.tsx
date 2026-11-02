@@ -8,16 +8,19 @@ import { sloupecNeexistuje, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import {
   denZkraceny,
   kartaZmenySmeny,
+  jeUpozorneniKRezervaci,
   nadpisUpozorneni,
   obdobiRozpisu,
   popisMarketingu,
   popisOpravneni,
   popisPinu,
+  popisRezervace,
   popisSmenaOdmitnuta,
   popisSouhrnuDne,
   popisZalohy,
   popisZapomenuteho,
   odkazNaZalohu,
+  pocetUpozorneni,
   prioritaUpozorneni,
   vyzadujePotvrzeni,
   odkazNaChecklist,
@@ -447,6 +450,29 @@ export default async function Upozorneni({
                         className="ft-tl ft-tl-hlavni ft-tl-male"
                       >
                         Otevřít rezervace
+                      </Link>
+                    </p>
+                  </>
+                ) : null}
+
+                {/*
+                  AKCE A REZERVACE (2. 11. 2026). Nadpis nese jen den, čas,
+                  počet osob a pobočku (jde i na zamčenou obrazovku); název akce a co se
+                  změnilo je až tady.
+                */}
+                {jeUpozorneniKRezervaci(z.druh) ? (
+                  <>
+                    {popisRezervace(z.druh, z.telo) ? (
+                      <p style={{ margin: '6px 0 0' }}>{popisRezervace(z.druh, z.telo)}</p>
+                    ) : null}
+                    <p style={{ margin: '10px 0 0' }}>
+                      <Link
+                        href={odkazUpozorneni(rozsah, { druh: z.druh, telo: z.telo })}
+                        className="ft-tl ft-tl-hlavni ft-tl-male"
+                      >
+                        {z.druh === 'rezervace.nova' && pocetUpozorneni(z.telo) > 1
+                          ? 'Otevřít rezervace'
+                          : z.druh.startsWith('akce.') ? 'Otevřít akci' : 'Otevřít rezervaci'}
                       </Link>
                     </p>
                   </>

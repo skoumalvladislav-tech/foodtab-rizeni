@@ -551,9 +551,10 @@ select pg_temp.check('politiky kbelíku: čtení i zápis jen přes pobočku z c
      and policyname like 'rezervace_soubory_%') = 3
   and not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects'
                    and policyname like 'rezervace_%' and cmd = 'UPDATE'));
-select pg_temp.check('kbelík je soukromý, 10 MB, jen fotky a PDF',
+select pg_temp.check('kbelík je soukromý, 10 MB, jen fotky, PDF a Word .docx (20261106110000)',
   (select not public and file_size_limit = 10485760
-          and allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+          and allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'application/pdf',
+                                         'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
      from storage.buckets where id = 'rezervace'));
 
 

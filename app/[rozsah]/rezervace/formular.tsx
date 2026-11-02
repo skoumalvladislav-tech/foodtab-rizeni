@@ -3,7 +3,16 @@
 import { startTransition, useActionState, useRef, useState } from 'react'
 
 import { noveId } from '@/lib/obrazky'
-import { KBELIK_REZERVACI, MAX_PRILOH_REZERVACE, cestaPrilohy, jeObrazek, velikostText, zkontrolovatVyber } from '@/lib/rezervace-prilohy'
+import {
+  KBELIK_REZERVACI,
+  MAX_PRILOH_REZERVACE,
+  PRIJIMANE_SOUBORY,
+  cestaPrilohy,
+  chybaNahrani,
+  jeObrazek,
+  velikostText,
+  zkontrolovatVyber,
+} from '@/lib/rezervace-prilohy'
 import {
   DRUHY,
   NAZVY_DRUHU,
@@ -137,7 +146,7 @@ export default function FormularRezervace({
       const cesta = cestaPrilohy(tenantId, proPobocku, noveId(), pripraveny.mime)
       const { error } = await supabase.storage.from(KBELIK_REZERVACI).upload(cesta, pripraveny.blob, { contentType: pripraveny.mime, upsert: false })
       if (error) {
-        chyby.push(`„${pripraveny.nazev}“ se nepodařilo nahrát: ${error.message}`)
+        chyby.push(chybaNahrani(pripraveny.nazev, pripraveny.mime, error.message))
         continue
       }
       nastavDokumenty(
@@ -325,7 +334,7 @@ export default function FormularRezervace({
         <div className="ds-field">
           <span className="ds-field-label">Dokumenty (nepovinné)</span>
           {/* Bez `name`: soubor nejde přes serverovou akci (strop 1 MB), ale rovnou do úložiště. */}
-          <input ref={vstupRef} type="file" hidden multiple accept="image/*,application/pdf" onChange={(e) => vybrat(e.target.files)} />
+          <input ref={vstupRef} type="file" hidden multiple accept={PRIJIMANE_SOUBORY} onChange={(e) => vybrat(e.target.files)} />
           {dokumenty.length > 0 ? (
             <ul className="ds-rez-prilohy">
               {dokumenty.map((d) => (
@@ -358,7 +367,7 @@ export default function FormularRezervace({
             >
               <Ikona klic="sponka" /> Přidat dokument
             </button>
-            <span className="ds-field-hint">Fotka nebo PDF — smlouva, menu, plán sálu… Každý soubor do 10 MB, nejvýš {MAX_PRILOH_REZERVACE}.</span>
+            <span className="ds-field-hint">Fotka, PDF nebo Word (.docx) — smlouva, menu, plán sálu… Každý soubor do 10 MB, nejvýš {MAX_PRILOH_REZERVACE}.</span>
           </div>
           <div aria-live="polite">
             {chybyDokumentu.map((c, i) => (

@@ -1837,6 +1837,18 @@ docs/rezervace-navrh.md, oddíl 1.
 - **Když to má být jinak:** „povolit Word a Excel“ — dva řádky
   (kbelík a kontrola v databázi), bez maker (.docm/.xlsm ne).
 
+> **ROZHODNUTÍ ŠÉFÍKA (2. 11.): „přidej ještě možnost přidat dokument word
+> do rezervací a akcí“.** Word **.docx** jde přikládat (migrace
+> 20261106110000, scénář krok108). Starý .doc a .docm s makry dál ne,
+> Excel nikdo nechtěl — zůstává zavřený. Word se z detailu **stáhne**
+> (prohlížeč ho neotevře), fotka a PDF se dál otevírají v nové záložce.
+> Ve Vzkazech se nic nemění.
+>
+> Oprava k řádku výš: nebyly to „dva řádky“, ale **tři místa** —
+> kbelík, kontrola typu v řádku přílohy a pravidlo cesty v úložišti
+> (`app.rezervace_cesta`, které hlídá příponu souboru). Bez třetího by
+> úložiště .docx odmítlo, i když by ho kbelík pustil.
+
 ## 80. Rezervace — záloha od hosta
 
 **Vzniklo:** 25. 10. 2026, akce a uzavřené společnosti.
@@ -1849,3 +1861,57 @@ docs/rezervace-navrh.md, oddíl 1.
   společného se zálohami zaměstnancům (Docházka → Zálohy).
 - **Když to má být jinak:** napárovat zaplacenou zálohu s příchozí
   platbou ve Financích (podobně jako úhrady faktur) — samostatná práce.
+
+## 81. Upozornění na akce a rezervace — komu chodí hned po nasazení
+
+**Vzniklo:** 2. 11. 2026, tlačítko Upozornění v kalendáři akcí
+(20261106100000).
+
+- **Teď:** dokud u pobočky **nikoho nevyberete**, na akce a rezervace
+  **nechodí nic nikomu**. Ranní souhrn chodí dál jako dosud všem, kdo
+  rezervace vidí. Výběr je **stálý seznam za pobočku** (ne volba u každé
+  akce zvlášť) a mění ho ten, kdo rezervace zapisuje — upozornění na
+  akce a rezervace si sám vypnout nikdo nemůže. **Ranní souhrn ano**
+  (Nastavení upozornění, beze změny proti dnešku), a to vyhrává i nad
+  výběrem: kdo je vybraný na souhrn a sám si ho vypnul, tomu nepřijde.
+  Když jsou takoví všichni vybraní, nepřijde souhrn té pobočky nikomu —
+  „všem, kdo vidí“ platí, jen když nikdo vybraný není (nebo když všichni
+  vybraní mezitím skončili či přišli o právo rezervace vidět).
+  Kdo změnu udělá (zapíše, upraví, zruší), tomu se o **té své** změně
+  nic nepošle; o změnách, které udělá někdo jiný, ano.
+- **Proč:** nejopatrnější varianta. Upozornění na každou rezervaci všem
+  by lidi naučilo zvoneček přeskakovat; a kdo práva na rezervace dnes
+  má, je skoro jen majitel (otázka 76).
+- **Co udělat:** Provoz → Rezervace a akce → **Upozornění** — u každé
+  pobočky zaškrtnout lidi. Kdo v seznamu chybí, nemá právo rezervace
+  vidět: nejdřív Nastavení → Zařazení (otázka 76).
+- **Když to má být jinak:** „posílat všem, kdo rezervace zapisují, dokud
+  nikoho nevyberu“ — změna jedné funkce (`app.rezervace_prijemci`).
+  Volba lidí u jednotlivé akce je větší práce (nová tabulka a políčko ve
+  formuláři akce).
+
+## 82. Upozornění na akce — změna na dnešek obyčejně, nebo naléhavě?
+
+**Vzniklo:** 2. 11. 2026.
+
+- **Teď:** všechna upozornění na akce a rezervace mají **běžnou
+  prioritu** — i změna počtu osob u akce, která je dnes večer.
+- **Proč:** nejopatrnější varianta — kdyby bylo důležité všechno, nebude
+  nic. Ve většině případů se změna akce dá vyřídit i za hodinu.
+- **Když to má být jinak:** „změna nebo zrušení akce na dnešek
+  a zítřek jako důležité“ (nebo naléhavé) — jeden řádek ve spoušti
+  (`app.rezervace_upozornit`).
+
+## 83. Nová a hned zrušená rezervace — dvě upozornění
+
+**Vzniklo:** 2. 11. 2026.
+
+- **Teď:** když host rezervaci zruší dřív, než si upozornění na novou
+  někdo přečetl, zůstanou v seznamu **obě** („Nová rezervace…“
+  i „Zrušená rezervace…“). U akcí stejně (nová i zrušená). Dvě změny
+  akce za sebou se naopak slučují — platí ta poslední.
+- **Proč:** zrušení je informace sama o sobě (stůl je zase volný)
+  a smazané nepřečtené upozornění by mohlo zmást toho, kdo ho už viděl
+  na zamčené obrazovce telefonu.
+- **Když to má být jinak:** „při zrušení nepřečtené upozornění na novou
+  smazat“ — malá úprava spouště.

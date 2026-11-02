@@ -1814,6 +1814,7 @@ export async function hasAccess(t, p, b) { globalThis.__akce.pravo.push([t, p, b
   ['@/lib/firma', js('export async function getCurrentTenantId() { return globalThis.__akce.firma }')],
   ['@/lib/integrace-adresa', js("export async function zakladniAdresaAplikace() { return 'https://foodtab-rizeni.vercel.app' }")],
   ['@/lib/integrace-klice', KLICE],
+  ['@/lib/komunikace/push-hned', js('export function naplanovatPushKeZdroji() {}')],
   ['@/lib/rezervace-choice-sync', js(`
 export async function otestovatToken(token, firma, konecMs) { globalThis.__akce.testyBezOdstupu.push({ token, firma, konecMs }); return { stav: 'ok' } }
 export async function overitZnovu(token, firma, pripojeniId, konecMs) { globalThis.__akce.testy.push({ token, firma, pripojeniId, konecMs }); return globalThis.__akce.overeni }

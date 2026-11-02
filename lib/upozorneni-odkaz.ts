@@ -30,6 +30,7 @@
  */
 
 import {
+  jeUpozorneniKRezervaci,
   odkazNaChecklist,
   odkazNaSmenu,
   odkazNaZalohu,
@@ -120,6 +121,17 @@ export function odkazUpozorneni(rozsah: string, z: RadekUpozorneni, konverzace?:
     const jedna = pobocky.length === 1 ? pobocky[0]?.slug : undefined
     const kde = jeSlug(jedna) ? jedna : rozsah
     return jeDen(telo.den) ? `/${kde}/rezervace/den/${telo.den}` : `/${kde}/rezervace`
+  }
+
+  /*
+    Akce a rezervace (2. 11. 2026): na detail v rozsahu POBOČKY té
+    rezervace (stejný důvod jako u souhrnu). Sloučené „3 nové rezervace“
+    nesou id jen té poslední — vedou proto na kalendář, ne do detailu.
+  */
+  if (jeUpozorneniKRezervaci(z.druh)) {
+    const kde = jeSlug(telo.pobocka_slug) ? telo.pobocka_slug : rozsah
+    if (z.druh === 'rezervace.nova' && pocetUpozorneni(telo) > 1) return `/${kde}/rezervace`
+    return jeUuid(telo.rezervace_id) ? `/${kde}/rezervace/${telo.rezervace_id}` : `/${kde}/rezervace`
   }
 
   if (z.druh === 'oznameni.nova') return `/${rozsah}/vzkazy?zalozka=nastenka`

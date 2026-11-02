@@ -112,6 +112,15 @@ export type TeloUpozorneni = {
   smena?: string
   // rezervace.souhrn_dne — pobočky, které ten člověk vidí (den výš).
   souhrn?: PobockaSouhrnu[]
+  // akce.* a rezervace.nova/zmenena/zrusena (20261106100000) — id rezervace,
+  // čas začátku na zdi pobočky (HH:MM), počet osob; den, nazev (jen akce),
+  // pobocka, pobocka_slug a pocet sdílí pole výš. U akce.zmenena navíc,
+  // co se změnilo (den, cas, osob, prostor, menu, nazev, stav, druh) — ne `zmeny`, to má rozpis;
+  // u rezervace.zmenena jen druh (z rezervace je akce).
+  rezervace_id?: string
+  cas?: string
+  osob?: number
+  co_se_zmenilo?: string[]
 }
 
 /**
@@ -293,9 +302,105 @@ export function nadpisUpozorneni(
     */
     case 'rezervace.souhrn_dne':
       return nadpisSouhrnuDne(telo)
+    /*
+      AKCE A REZERVACE (2. 11. 2026). Stejně jako u souhrnu: nadpis jde do
+      push, takže nese jen den, čas, počet osob a pobočku. Název akce ani
+      jméno hosta ne — název je až ve větě pod nadpisem (popisRezervace).
+    */
+    case 'akce.nova':
+      return `Nová akce${kdeAKdyRezervace(telo)}`
+    case 'akce.zmenena':
+      return `Změna akce${kdeAKdyRezervace(telo)}`
+    case 'akce.zrusena':
+      return `Zrušená akce${kdeAKdyRezervace(telo)}`
+    case 'rezervace.nova': {
+      const n = pocetUpozorneni(telo)
+      if (n > 1) {
+        const kde = telo.pobocka?.trim() ? ` — ${telo.pobocka.trim()}` : ''
+        return `${n} ${slovoPodleCisla(n, 'nová rezervace', 'nové rezervace', 'nových rezervací')}${kde}`
+      }
+      return `Nová rezervace${kdeAKdyRezervace(telo)}`
+    }
+    case 'rezervace.zmenena':
+      return `Změna rezervace${kdeAKdyRezervace(telo)}`
+    case 'rezervace.zrusena':
+      return `Zrušená rezervace${kdeAKdyRezervace(telo)}`
     default:
       return 'Upozornění'
   }
+}
+
+/**
+ * „ so 14. 11. 18:00 (30 os.) — Bernard Bar Tábor“ — za druh do nadpisu
+ * u akce a rezervace. Co v těle chybí nebo nemá tvar, se vynechá.
+ */
+function kdeAKdyRezervace(telo: TeloUpozorneni): string {
+  const den = typeof telo.den === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(telo.den) ? denZkraceny(telo.den) : ''
+  const cas = typeof telo.cas === 'string' && /^\d{2}:\d{2}$/.test(telo.cas) ? telo.cas : ''
+  const osob = pocetZTela(telo.osob)
+  const kdy = [den, cas].filter(Boolean).join(' ')
+  const kolik = osob > 0 ? `(${osob} os.)` : ''
+  const kde = telo.pobocka?.trim() ? `— ${telo.pobocka.trim()}` : ''
+  const cele = [kdy, kolik, kde].filter(Boolean).join(' ')
+  return cele ? ` ${cele}` : ''
+}
+
+const CO_SE_ZMENILO: Record<string, string> = {
+  den: 'den',
+  cas: 'čas',
+  osob: 'počet osob',
+  prostor: 'prostor',
+  menu: 'menu',
+  nazev: 'název',
+  stav: 'stav',
+}
+
+// Změna druhu (spoušť ji posílá jako jedinou změnu) — věta podle toho,
+// komu jde: kuchyni (akce) „z akce je rezervace“, vybraným na rezervace
+// „z rezervace je akce“.
+const ZMENA_DRUHU: Record<string, string> = {
+  'akce.zmenena': 'z akce je rezervace',
+  'rezervace.zmenena': 'z rezervace je akce',
+}
+
+/**
+ * Věta pod nadpisem u akce a rezervace — jen v aplikaci, takže smí nést
+ * název akce. Jméno hosta nenese ani tady (tělo ho nemá); kdo chce víc,
+ * klepne na detail.
+ *
+ *   akce               „Firemní večírek“
+ *   akce.zmenena       „Firemní večírek. Změna: den a počet osob.“
+ *                      (ne „Změnil se …“ — „změnil se menu“ by byla chyba)
+ *   rezervace.zmenena  „Změna: z rezervace je akce.“
+ *   sloučené nové      „Z rezervačního systému. Poslední: so 14. 11. 19:00 (4 os.)“
+ */
+export function popisRezervace(druh: string, telo: TeloUpozorneni): string {
+  if (druh === 'rezervace.nova' && pocetUpozorneni(telo) > 1) {
+    const posledni = kdeAKdyRezervace({ den: telo.den, cas: telo.cas, osob: telo.osob }).trim()
+    return posledni ? `Z rezervačního systému. Poslední: ${posledni}` : 'Z rezervačního systému.'
+  }
+  if (druh === 'rezervace.zmenena') return coSeZmenilo(druh, telo)
+  if (!druh.startsWith('akce.')) return ''
+
+  const nazev = telo.nazev?.trim() ? telo.nazev.trim() : ''
+  if (druh !== 'akce.zmenena') return nazev
+
+  return [nazev ? `${nazev}.` : '', coSeZmenilo(druh, telo)].filter(Boolean).join(' ')
+}
+
+/** „Změna: den a počet osob.“ — neznámá změna se vynechá, nic se nevymýšlí. */
+function coSeZmenilo(druh: string, telo: TeloUpozorneni): string {
+  const zmeny = (Array.isArray(telo.co_se_zmenilo) ? telo.co_se_zmenilo : [])
+    .map((z) => (z === 'druh' ? ZMENA_DRUHU[druh] : CO_SE_ZMENILO[z]))
+    .filter(Boolean)
+  if (zmeny.length === 0) return ''
+  if (zmeny.length === 1) return `Změna: ${zmeny[0]}.`
+  return `Změna: ${zmeny.slice(0, -1).join(', ')} a ${zmeny[zmeny.length - 1]}.`
+}
+
+/** Upozornění k jedné akci či rezervaci (ne ranní souhrn): věta a odkaz na detail. */
+export function jeUpozorneniKRezervaci(druh: string): boolean {
+  return druh.startsWith('akce.') || druh === 'rezervace.nova' || druh === 'rezervace.zmenena' || druh === 'rezervace.zrusena'
 }
 
 /** Nezáporné celé číslo z těla; cokoli jiného je 0. */
