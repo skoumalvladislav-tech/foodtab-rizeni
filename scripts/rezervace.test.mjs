@@ -673,8 +673,13 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
   const bzip = zabal({ 'word/document.xml': telo('') }, 0)
   new DataView(bzip.buffer).setUint16(bzip.length - 22 - (46 + 'word/document.xml'.length) + 10, 12, true)
   ok('neznámá komprese (bzip2) → srozumitelná věta', chybaCteni(bzip) === 'Dokument je zabalený způsobem, který náhled nezná.')
-  const zbloudila = precistDocx(zabal({ 'word/document.xml': telo('<w:p><w:r><w:t>před</w:t></w:r></w:p></w:tc></w:tr><w:p><w:r><w:t>po</w:t></w:r></w:p>') }))
-  ok('zbloudilé </w:tc> mimo tabulku nic neztratí', zbloudila.bloky.map(text).join('|') === 'před|po')
+  let zbloudila = null
+  try {
+    zbloudila = precistDocx(zabal({ 'word/document.xml': telo('<w:p><w:r><w:t>před</w:t></w:r></w:p></w:tc></w:tr><w:p><w:r><w:t>po</w:t></w:r></w:p>') }))
+  } catch {
+    // spadne na kontrole níž
+  }
+  ok('zbloudilé </w:tc> mimo tabulku nic neztratí', zbloudila?.bloky.map(text).join('|') === 'před|po')
   ok('nesmyslná entita (&#99999999;) → „poškozený“, ne pád stránky',
     chybaCteni(zabal({ 'word/document.xml': telo('<w:p><w:r><w:t>&#99999999;</w:t></w:r></w:p>') })) === 'Dokument je poškozený.')
 
@@ -701,7 +706,11 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
   const stahnout = data.slice(data.indexOf('export async function stahnoutPrilohu'))
   ok('soubor se čte uživatelským klientem (politika kbelíku je druhá linie), ne klíčem služby',
     stahnout.includes('await getServerSupabase()') && !/service_role|SERVICE_ROLE|getAdmin|supabaseAdmin/i.test(data))
-  ok('příloha jen z poboček rozsahu', data.includes('!pobocky.some((p) => p.id === data.branch_id)) return null'))
+  // Jen tělo nacistPrilohu — stejná podmínka je i v nacistRezervaci.
+  const nacist = data.slice(data.indexOf('export async function nacistPrilohu'), data.indexOf('export async function stahnoutPrilohu'))
+  ok('příloha jen z poboček rozsahu (nacistPrilohu)', nacist.includes('!pobocky.some((p) => p.id === data.branch_id)) return null'))
+  ok('stránka: pobočka přílohy musí být v rozsahu i podle stránky',
+    stranka.includes('pristup.pobocky.find((p) => p.id === priloha.branch_id)') && stranka.includes('if (!priloha || !pobocka) {'))
   const kresleni = cti('app/[rozsah]/rezervace/dokument/obsah.tsx')
   ok('náhled nevkládá HTML ze souboru', !kresleni.includes('dangerouslySetInnerHTML'))
   ok('originál jde stáhnout tlačítkem', /href=\{`\/api\/rezervace\/soubor\/\$\{priloha\.id\}`\}[^>]*>\s*Stáhnout originál/.test(kresleni))
