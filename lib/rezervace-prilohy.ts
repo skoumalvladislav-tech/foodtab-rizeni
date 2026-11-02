@@ -1,38 +1,95 @@
 /**
  * Přílohy k rezervaci nebo ke dni — kontrola výběru a cesta v úložišti.
  *
- * Typy a 10 MB jsou stejné jako u příloh ke zprávám (lib/komunikace/
- * prilohy.ts), proto se odtamtud berou pomocné funkce. Liší se jen strop
- * počtu (20 na rezervaci nebo den) a kbelík. Drží je databáze: kbelík
- * `rezervace` a `rezervace_pripojit_prilohu`. Tady jsou jen kvůli tomu,
- * aby se nesmysl odmítl dřív, než se začne nahrávat.
+ * Fotky, PDF a 10 MB jsou stejné jako u příloh ke zprávám (lib/komunikace/
+ * prilohy.ts), proto se odtamtud berou pomocné funkce. Navíc jde dokument
+ * Word .docx (zadání 2. 11. 2026, otázka 79) — jen tady, ne ve zprávách.
+ * Starý .doc ani .docm s makry ne. Liší se i strop počtu (20 na rezervaci
+ * nebo den) a kbelík. Drží je databáze: kbelík `rezervace`, CHECK na
+ * `rezervace_prilohy.mime` a `app.rezervace_cesta` (20261106110000). Tady
+ * jsou jen kvůli tomu, aby se nesmysl odmítl dřív, než se začne nahrávat.
  *
  * Čistý modul — testuje ho scripts/rezervace.test.mjs.
  */
 
 import {
   MAX_BAJTU,
+  TYPY_PRILOH,
   jeObrazek,
-  jeTypPriloh,
   ocistitNazev,
-  typSouboru,
+  typSouboru as typSouboruZpravy,
   velikostText,
   type SouborVyberu,
-  type TypPriloh,
 } from './komunikace/prilohy.ts'
 
-export { MAX_BAJTU, jeObrazek, jeTypPriloh, ocistitNazev, typSouboru, velikostText, type TypPriloh }
+export { MAX_BAJTU, jeObrazek, ocistitNazev, velikostText }
 
 export const KBELIK_REZERVACI = 'rezervace'
 
 /** Kolik příloh unese jedna rezervace nebo jeden den pobočky. */
 export const MAX_PRILOH_REZERVACE = 20
 
-const PRIPONY: Record<TypPriloh, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-  'application/pdf': 'pdf',
+/** Dokument Word (.docx). */
+export const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+/** Povolené typy a přípona v cestě v úložišti. */
+const TYPY = { ...TYPY_PRILOH, [MIME_DOCX]: 'docx' } as const
+
+export type TypPriloh = keyof typeof TYPY
+
+export function jeTypPriloh(mime: string): mime is TypPriloh {
+  return Object.prototype.hasOwnProperty.call(TYPY, mime)
+}
+
+/**
+ * Pro `accept` u výběru souboru. Typ i přípona: iPhone se řídí typem,
+ * Android někdy příponou. Je to jen nápověda — rozhoduje kontrola níž
+ * a databáze.
+ */
+export const PRIJIMANE_SOUBORY = `image/*,application/pdf,.docx,${MIME_DOCX}`
+
+/**
+ * Typ souboru jako u zpráv, a navíc .docx: některé telefony a Windows bez
+ * Office u něj dají prázdný typ nebo „application/octet-stream“. Pak
+ * rozhodne přípona — ale jen .docx; .doc a .docm se neuhodnou nikdy.
+ */
+export function typSouboru(soubor: { name: string; type: string }): string {
+  const typ = typSouboruZpravy(soubor)
+  if ((typ === '' || typ === 'application/octet-stream') && /\.docx$/i.test(soubor.name.trim())) return MIME_DOCX
+  return typ
+}
+
+/** .docx je zip: začíná „PK\x03\x04“. Starý .doc přejmenovaný na .docx ne. */
+export function jeZip(zacatek: Uint8Array): boolean {
+  return zacatek.length >= 4 && zacatek[0] === 0x50 && zacatek[1] === 0x4b && zacatek[2] === 0x03 && zacatek[3] === 0x04
+}
+
+/**
+ * V prohlížeči se otevře jen PDF a fotka (jako přílohy faktur,
+ * lib/faktury-priloha-odkaz.ts). Word se stáhne.
+ */
+const OTEVRIT_V_PROHLIZECI: ReadonlySet<string> = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
+
+export function otevritVProhlizeci(mime: string): boolean {
+  return OTEVRIT_V_PROHLIZECI.has(mime)
+}
+
+/**
+ * Název souboru ke stažení. Odkaz z úložiště ho kóduje dvakrát, takže
+ * diakritika by dorazila rozbitá — proto bez ní a bez zvláštních znaků,
+ * s příponou podle typu.
+ */
+export function nazevKeStazeni(nazev: string, mime: string): string {
+  const pripona = jeTypPriloh(mime) ? TYPY[mime] : ''
+  const zaklad = nazev
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/^[._]+|[._]+$/g, '')
+    .slice(0, 100)
+  const bezPripony = pripona && zaklad.toLowerCase().endsWith(`.${pripona}`) ? zaklad.slice(0, -(pripona.length + 1)) : zaklad
+  const jmeno = bezPripony || 'priloha'
+  return pripona ? `${jmeno}.${pripona}` : jmeno
 }
 
 /**
@@ -40,8 +97,10 @@ const PRIPONY: Record<TypPriloh, string> = {
  * `app.rezervace_cesta` (dvě složky, jméno souboru uuid a přípona).
  */
 export function cestaPrilohy(tenantId: string, branchId: string, id: string, mime: TypPriloh): string {
-  return `${tenantId}/${branchId}/${id}.${PRIPONY[mime]}`
+  return `${tenantId}/${branchId}/${id}.${TYPY[mime]}`
 }
+
+const NEJDE = 'tenhle typ souboru nejde nahrát (jen fotky, PDF a Word .docx).'
 
 export type VysledekVyberu = { platne: number[]; chyby: string[] }
 
@@ -55,7 +114,7 @@ export function zkontrolovatVyber(soubory: SouborVyberu[], uzMa: number): Vysled
     const nazev = ocistitNazev(s.name)
     const typ = typSouboru(s)
     if (typ === '' || (!jeTypPriloh(typ) && !jeObrazek(typ))) {
-      chyby.push(`„${nazev}“: tenhle typ souboru nejde nahrát (jen fotky a PDF).`)
+      chyby.push(`„${nazev}“: ${NEJDE}`)
       return
     }
     if (s.size <= 0) {
@@ -76,4 +135,12 @@ export function zkontrolovatVyber(soubory: SouborVyberu[], uzMa: number): Vysled
   })
 
   return { platne, chyby }
+}
+
+/** Po zmenšení fotky: jde soubor nahrát, nebo proč ne? */
+export function zkontrolujPoZmenseni(nazev: string, mime: string, velikost: number): string | null {
+  if (!jeTypPriloh(mime)) return `„${ocistitNazev(nazev)}“: ${NEJDE}`
+  if (velikost <= 0) return `„${ocistitNazev(nazev)}“: soubor je prázdný.`
+  if (velikost > MAX_BAJTU) return `„${ocistitNazev(nazev)}“: je větší než ${velikostText(MAX_BAJTU)}.`
+  return null
 }

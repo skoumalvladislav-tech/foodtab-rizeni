@@ -92,7 +92,8 @@ Restu [konec služby](https://www.lupa.cz/aktuality/sluzba-na-rezervace-v-restau
 | `rezervace` | rezervace i akce (`druh`), čas, provozní den, počet osob, stav (+ stav zdroje), prostor, typ akce, menu, záloha od hosta, odkud přišla | `rezervace.read` nebo `rezervace.manage` na pobočce |
 | `rezervace_kontakty` | telefon a e-mail hosta (1 : 1) | **jen `rezervace.manage`** |
 | `rezervace_poznamky` | poznámka nebo „další informace“ (nadpis + text: „Alergie: lepek“) — k rezervaci **nebo** ke dni pobočky | jako rezervace |
-| `rezervace_prilohy` | dokumenty (fotky, PDF) — k rezervaci **nebo** ke dni pobočky; soubory v soukromém kbelíku `rezervace` | jako rezervace |
+| `rezervace_prilohy` | dokumenty (fotky, PDF, Word .docx) — k rezervaci **nebo** ke dni pobočky; soubory v soukromém kbelíku `rezervace` | jako rezervace |
+| `rezervace_upozorneni` | kdo u pobočky dostává upozornění na akce, na rezervace a ranní souhrn (20261106100000) | čte `rezervace.manage` pobočky, zapisuje jen funkce |
 | `integrace_pripojeni` (stávající) | nová oblast `rezervace`: který systém je u pobočky napojený a v jakém stavu | registr `finance.read`, obrazovka Rezervací přes `rezervace_napojeni` |
 
 Proč takhle:
@@ -211,11 +212,29 @@ Příjmové API (4.1) zůstává pro ostatní systémy.
 
 ### 4.2 Dokumenty už při založení
 
-Formulář nové rezervace nebo akce má „Přidat dokument“ (fotky, PDF).
-Soubory jdou z prohlížeče rovnou do úložiště pod zvolenou pobočku, akce
-pak rezervaci založí a připojí je (`rezervace_pripojit_prilohu` u každého
-ověří úložiště, typ a velikost). Když se některý nepřipojí, rezervace
-zůstane a obrazovka to řekne.
+Formulář nové rezervace nebo akce má „Přidat dokument“ (fotky, PDF,
+Word .docx). Soubory jdou z prohlížeče rovnou do úložiště pod zvolenou
+pobočku, akce pak rezervaci založí a připojí je (`rezervace_pripojit_prilohu`
+u každého ověří úložiště, typ a velikost). Když se některý nepřipojí,
+rezervace zůstane a obrazovka to řekne.
+
+Word (2. 11. 2026, 20261106110000, scénář krok108): jen **.docx** — starý
+.doc a .docm s makry ne. Typ drží tři místa v databázi (kbelík, kontrola
+typu v `rezervace_prilohy`, přípona v `app.rezervace_cesta`); appka navíc
+odmítne „.docx“, který není zip. Fotka a PDF se otevřou v nové záložce,
+Word se stáhne pod názvem bez diakritiky (`nazevKeStazeni`).
+
+### 4.3 Upozornění na akce a rezervace
+
+Tlačítko **Upozornění** se zvonečkem v kalendáři (jen pro toho, kdo
+zapisuje) → `rezervace/upozorneni`. U pobočky se vyberou lidé a u každého
+co mu chodí: **akce** (nová, změna, zrušená), **rezervace** (nová,
+zrušená) a **ranní souhrn**. Vybrat jde jen toho, kdo rezervace té
+pobočky vidí; při odeslání se to ptá znovu. Nikdo vybraný = u akcí
+a rezervací nikomu nic, u souhrnu všem, kdo vidí (jako dosud). Nové
+rezervace z rezervačního systému se slučují do jednoho „N nových
+rezervací“; import ze souboru nic nehlásí. Migrace 20261106100000,
+scénář krok107.
 
 ---
 
@@ -269,8 +288,8 @@ vedoucí směny čtení.
 - **Zápis zpět do rezervačního systému.**
 - **Platby záloh** — záloha od hosta je jen evidence (částka a stav). Nemá
   nic společného s `advances` (zálohy zaměstnancům).
-- **Word a Excel jako přílohy** — jen fotky a PDF jako jinde v appce
-  (otázka 79).
+- **Excel jako příloha** a starý Word .doc — jen fotky, PDF a Word .docx
+  (otázka 79; .docx od 2. 11. 2026).
 - **Rezervace na obrazovce Dnes** — samostatný další krok (počet dnešních
   rezervací a hostů na kartě).
 

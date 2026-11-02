@@ -4,7 +4,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { noveId } from '@/lib/obrazky'
-import { KBELIK_REZERVACI, MAX_PRILOH_REZERVACE, cestaPrilohy, zkontrolovatVyber } from '@/lib/rezervace-prilohy'
+import { KBELIK_REZERVACI, MAX_PRILOH_REZERVACE, PRIJIMANE_SOUBORY, cestaPrilohy, zkontrolovatVyber } from '@/lib/rezervace-prilohy'
 import { getBrowserSupabase } from '@/lib/supabase/client'
 
 import Ikona from '../ikona'
@@ -122,7 +122,7 @@ export default function NahratPrilohy({
         type="file"
         hidden
         multiple
-        accept="image/*,application/pdf"
+        accept={PRIJIMANE_SOUBORY}
         onChange={(e) => void nahrat(e.target.files)}
       />
       <div className="ds-rez-tlacitka" style={{ alignItems: 'center' }}>
@@ -134,7 +134,7 @@ export default function NahratPrilohy({
         >
           <Ikona klic="sponka" /> {stav === 'nahrava' ? 'Nahrává se…' : 'Přidat dokument'}
         </button>
-        <small style={{ color: 'var(--muted)', fontSize: '12.5px' }}>Fotka nebo PDF, každý soubor do 10 MB.</small>
+        <small style={{ color: 'var(--muted)', fontSize: '12.5px' }}>Fotka, PDF nebo Word (.docx), každý soubor do 10 MB.</small>
       </div>
       <div aria-live="polite">
         {hotovo ? <small>{hotovo}</small> : null}

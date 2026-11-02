@@ -18,12 +18,16 @@
  *   6. napojení: „připojeno“ jen ze stavu `pripojeno`, a nikde v kódu
  *      modulu se `pripojeno` nenastavuje natvrdo;
  *   7. přílohy: cesta sedí s parserem v databázi, strop 20 souborů;
+ *      Word .docx ano (i s prázdným typem z telefonu), .doc, .docm
+ *      a Excel ne; Word se stahuje pod názvem bez diakritiky;
  *   8. každá stránka i akce modulu se nejdřív ptá na přístup, teprve pak
  *      sahá na data (layout stránku nechrání).
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
+
+import { DRUHY_UPOZORNENI_REZERVACI, souhrnVyberu } from '../lib/rezervace-upozorneni.ts'
 
 import { mapovatStav, naHodinu, naparsovatCsvRezervaci, rozdelitDatumACas, zRadkuZdroje, MAX_RADKU_IMPORTU } from '../lib/rezervace-import.ts'
 import {
@@ -48,7 +52,16 @@ import {
   denDlouze,
 } from '../lib/rezervace-kalendar.ts'
 import { SYSTEMY, popisStavuPripojeni, poskytovatelSouboru } from '../lib/rezervace-poskytovatele.ts'
-import { MAX_PRILOH_REZERVACE, cestaPrilohy, zkontrolovatVyber } from '../lib/rezervace-prilohy.ts'
+import {
+  MAX_PRILOH_REZERVACE,
+  MIME_DOCX,
+  PRIJIMANE_SOUBORY,
+  cestaPrilohy,
+  jeZip,
+  nazevKeStazeni,
+  otevritVProhlizeci,
+  zkontrolovatVyber,
+} from '../lib/rezervace-prilohy.ts'
 import { MAX_REZERVACI_V_DAVCE, overitDavkuRezervaci, rozebratKlicRezervaci, slozitKlicRezervaci } from '../lib/rezervace-prijem-api.ts'
 
 const KOREN = path.join(import.meta.dirname, '..')
@@ -257,9 +270,25 @@ console.log('\n== 7. Přílohy ==\n')
   const cesta = cestaPrilohy('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333', 'application/pdf')
   const casti = cesta.split('/')
   ok('cesta má dvě složky a jméno souboru ve tvaru, který čte app.rezervace_cesta',
-    casti.length === 3 && /^[0-9a-f-]{36}\.(jpg|png|webp|pdf)$/.test(casti[2]))
+    casti.length === 3 && /^[0-9a-f-]{36}\.(jpg|png|webp|pdf|docx)$/.test(casti[2]))
   const migrace = cti('supabase/migrations/20261027100000_rezervace_akce.sql')
-  ok('… a databáze opravdu chce dvě složky', /array_length\(v_slozky, 1\) is distinct from 2/.test(migrace))
+  // Word: 20261106110000. Komentáře pryč — v hlavičce se .doc a .docm
+  // jmenují právě proto, že povolené NEJSOU.
+  const word = cti('supabase/migrations/20261106110000_rezervace_prilohy_word.sql')
+  const wordBezKomentaru = word.split('\n').filter((r) => !r.trimStart().startsWith('--')).join('\n')
+  const TYPY = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf', MIME_DOCX]
+  const priponyAplikace = TYPY.map((m) => cestaPrilohy('a', 'b', 'c', m).split('.').pop()).sort()
+  const priponyDatabaze = (wordBezKomentaru.match(/\\\.\(([a-z|]+)\)\$/)?.[1] ?? '').split('|').sort()
+  ok('Word dostane v cestě příponu .docx', cestaPrilohy('a', 'b', 'c', MIME_DOCX) === 'a/b/c.docx')
+  ok('přípony v aplikaci = přípony v app.rezervace_cesta (20261106110000)',
+    JSON.stringify(priponyAplikace) === JSON.stringify(priponyDatabaze))
+  ok('kbelík i CHECK v migraci nesou .docx, ne .doc ani .docm',
+    wordBezKomentaru.split("'" + MIME_DOCX + "'").length - 1 === 2
+    && !/msword|macroEnabled/i.test(wordBezKomentaru))
+  ok('Komunikace (zprávy) Word dál nepřijímá — platí jen pro rezervace',
+    !cti('lib/komunikace/prilohy.ts').includes('wordprocessingml'))
+  ok('databáze opravdu chce dvě složky (původní i přepsaná app.rezervace_cesta)',
+    /array_length\(v_slozky, 1\) is distinct from 2/.test(migrace) && /array_length\(v_slozky, 1\) is distinct from 2/.test(wordBezKomentaru))
   const vyber = zkontrolovatVyber(
     [
       { name: 'smlouva.pdf', type: 'application/pdf', size: 1000 },
@@ -271,13 +300,57 @@ console.log('\n== 7. Přílohy ==\n')
     0,
   )
   ok('PDF a fotka projdou; exe, prázdný a velký PDF ne', JSON.stringify(vyber.platne) === JSON.stringify([0, 4]) && vyber.chyby.length === 3)
+  const vyberWord = zkontrolovatVyber(
+    [
+      { name: 'Smlouva.docx', type: MIME_DOCX, size: 1000 },
+      { name: 'Menu.DOCX', type: '', size: 1000 },
+      { name: 'plan.docx', type: 'application/octet-stream', size: 1000 },
+      { name: 'stary.doc', type: 'application/msword', size: 1000 },
+      { name: 'stary.doc', type: '', size: 1000 },
+      { name: 'makra.docm', type: 'application/vnd.ms-word.document.macroEnabled.12', size: 1000 },
+      { name: 'makra.docm', type: 'application/octet-stream', size: 1000 },
+      { name: 'tabulka.xlsx', type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: 1000 },
+      { name: 'velky.docx', type: MIME_DOCX, size: 11 * 1024 * 1024 },
+      { name: 'virus.docx.exe', type: 'application/octet-stream', size: 1000 },
+    ],
+    0,
+  )
+  ok('Word .docx projde i s prázdným typem nebo octet-stream (telefon, Windows bez Office)',
+    [0, 1, 2].every((i) => vyberWord.platne.includes(i)))
+  ok('… starý .doc, .docm s makry, Excel, velký .docx ani .docx.exe ne',
+    vyberWord.platne.length === 3 && vyberWord.chyby.length === 7)
+  ok('.docx je zip (PK\\x03\\x04); starý .doc (OLE) ani dva bajty ne',
+    jeZip(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14])) && !jeZip(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0])) && !jeZip(new Uint8Array([0x50, 0x4b])))
+  ok('v prohlížeči se otevře PDF a fotka, Word ne', otevritVProhlizeci('application/pdf') && otevritVProhlizeci('image/jpeg')
+    && !otevritVProhlizeci(MIME_DOCX) && !otevritVProhlizeci(''))
+  ok('název ke stažení bez diakritiky a mezer, s jednou příponou',
+    nazevKeStazeni('Smlouva – Novák.docx', MIME_DOCX) === 'Smlouva_Novak.docx'
+    && nazevKeStazeni('plan.DOCX', MIME_DOCX) === 'plan.docx'
+    && nazevKeStazeni('menu', MIME_DOCX) === 'menu.docx')
+  ok('… bez lomítek a teček na začátku; prázdný název = priloha.docx',
+    nazevKeStazeni('../../etc.docx', MIME_DOCX) === 'etc.docx' && nazevKeStazeni('', MIME_DOCX) === 'priloha.docx'
+    && nazevKeStazeni('„uvozovky“; a/b.docx', MIME_DOCX) === 'uvozovky_a_b.docx')
+  {
+    const dlouhy = nazevKeStazeni('ř'.repeat(300) + '.docx', MIME_DOCX)
+    ok('… dlouhý název zkrácený, jen bezpečné znaky', dlouhy.length <= 105 && /^[A-Za-z0-9._-]+$/.test(dlouhy) && dlouhy.endsWith('.docx'))
+  }
+  ok('výběr souboru nabízí .docx, ne .doc ani .docm',
+    PRIJIMANE_SOUBORY.split(',').includes('.docx') && PRIJIMANE_SOUBORY.split(',').includes(MIME_DOCX)
+    && !/msword|macroEnabled|\.doc(,|$)|\.docm/.test(PRIJIMANE_SOUBORY))
+  for (const s of ['app/[rozsah]/rezervace/prilohy-nahrat.tsx', 'app/[rozsah]/rezervace/formular.tsx']) {
+    const k = cti(s)
+    ok(`${s}: výběr souboru bere seznam z jednoho místa`, k.includes('accept={PRIJIMANE_SOUBORY}') && !/accept="/.test(k))
+  }
+  const priprava = cti('app/[rozsah]/rezervace/priprava-souboru.ts')
+  ok('příprava: .docx bez zip podpisu se nenahraje; typ se vtiskne do souboru (úložiště čte typ ze souboru)',
+    /mime === MIME_DOCX && !jeZip\(/.test(priprava) && /if \(blob\.type !== mime\) blob = new Blob\(\[blob\], \{ type: mime \}\)/.test(priprava))
   ok(`strop ${MAX_PRILOH_REZERVACE} souborů`, zkontrolovatVyber([{ name: 'a.pdf', type: 'application/pdf', size: 1 }], MAX_PRILOH_REZERVACE).platne.length === 0)
   ok('strop v aplikaci = strop v databázi', new RegExp(`>= ${MAX_PRILOH_REZERVACE} then`).test(migrace))
 }
 
 console.log('\n== 8. Přístup napřed, data potom ==\n')
 {
-  const stranky = ['page.tsx', 'den/[datum]/page.tsx', '[id]/page.tsx', 'nova/page.tsx', 'napojeni/page.tsx'].map((s) => `app/[rozsah]/rezervace/${s}`)
+  const stranky = ['page.tsx', 'den/[datum]/page.tsx', '[id]/page.tsx', 'nova/page.tsx', 'napojeni/page.tsx', 'upozorneni/page.tsx'].map((s) => `app/[rozsah]/rezervace/${s}`)
   for (const s of stranky) {
     // Jen tělo stránky — importy nahoře by „data“ našly vždycky první.
     const t = cti(s)
@@ -306,6 +379,13 @@ console.log('\n== 8. Přístup napřed, data potom ==\n')
   const soubor = cti('app/api/rezervace/soubor/[id]/route.ts')
   ok('soubor: právo na pobočku se ověří dřív, než vznikne podepsaný odkaz',
     soubor.indexOf("hasAccess(tenantId, 'rezervace.read'") !== -1 && soubor.indexOf("hasAccess(tenantId, 'rezervace.read'") < soubor.indexOf('createSignedUrl('))
+  ok('soubor: Word se podepíše ke stažení pod bezpečným názvem, PDF a fotka ne',
+    /\.select\('cesta, branch_id, mime, nazev'\)/.test(soubor)
+    && /otevritVProhlizeci\(mime\) \? undefined : \{ download: nazevKeStazeni\(/.test(soubor))
+  const prvkyPrilohy = cti('app/[rozsah]/rezervace/prvky.tsx')
+  const panel = prvkyPrilohy.slice(prvkyPrilohy.indexOf('export function PanelPriloh'), prvkyPrilohy.indexOf('export function HlaskaAkce'))
+  ok('detail: novou záložku otevře jen PDF a fotka (Word se stáhne)',
+    /otevritVProhlizeci\(p\.mime\) \? \{ target: '_blank', rel: 'noopener noreferrer' \}/.test(panel) && !panel.includes('target="_blank"'))
 }
 
 console.log('\n== 9. Univerzální příjmové API ==\n')
@@ -362,6 +442,49 @@ console.log('\n== 9. Univerzální příjmové API ==\n')
     const telo = akce.slice(akce.indexOf('export async function vydatKlicPrijmuRezervaci'))
     return telo.indexOf("canSee(v.pristup.ctx, 'integrace.manage')") !== -1 && telo.indexOf("canSee(v.pristup.ctx, 'integrace.manage')") < telo.indexOf('randomBytes(32)')
   })())
+}
+
+console.log('\n== 10. Komu chodí upozornění (2. 11. 2026) ==\n')
+{
+  /*
+    Pravidla posílání jsou v databázi (krok107). Tady: obrazovka nabídne
+    jen pobočky, kde člověk zapisuje, uloží je akce, která si přístup
+    ověří sama, a věta nad tabulkou řekne pravdu o ranním souhrnu
+    (nikdo vybraný = všichni, u akcí a rezervací = nikdo).
+  */
+  const clovek = (akce, rezervace, souhrn) => ({ employee_id: 'x', jmeno: 'X', zarazeni: '', akce, rezervace, souhrn })
+  ok('nikdo nevybraný: akce a rezervace „nikdo“, souhrn „všichni v seznamu“',
+    souhrnVyberu([clovek(false, false, false)]) === 'Akce: nikdo · Rezervace: nikdo · Ranní souhrn: všichni v seznamu')
+  ok('počty se skloňují (1 člověk, 2 lidé, 5 lidí)',
+    souhrnVyberu([clovek(true, true, true), clovek(true, true, false), ...Array.from({ length: 3 }, () => clovek(false, true, false))]) ===
+      'Akce: 2 lidé · Rezervace: 5 lidí · Ranní souhrn: 1 člověk')
+  ok('tři druhy a jména polí sedí s databází (akce, rezervace, souhrn)',
+    DRUHY_UPOZORNENI_REZERVACI.map((d) => d.klic).join(',') === 'akce,rezervace,souhrn')
+
+  const stranka = cti('app/[rozsah]/rezervace/upozorneni/page.tsx')
+  ok('stránka: lidi jen u poboček, kde člověk zapisuje', /pristup\.pobocky\.filter\(\(p\) => p\.zapis\)/.test(stranka) &&
+    stranka.indexOf('.filter((p) => p.zapis)') < stranka.indexOf("rpc('rezervace_upozorneni_lide'"))
+  const obsah = cti('app/[rozsah]/rezervace/upozorneni/obsah.tsx')
+  ok('obsah: formulář posílá rozsah, pobočku a tři skupiny zaškrtávátek s id zaměstnance',
+    obsah.includes('action={ulozitUpozorneni}') && obsah.includes('name="pobocka" value={pobocka.id}') &&
+    obsah.includes('name={d.klic}') && obsah.includes('value={c.employee_id}'))
+  ok('obsah: u souhrnu řekne, že po zaškrtnutí chodí jen zaškrtnutým', obsah.includes('chodí jen zaškrtnutým'))
+
+  const akce = cti('app/[rozsah]/rezervace/akce.ts')
+  const ulozit = akce.slice(akce.indexOf('export async function ulozitUpozorneni'))
+  ok('akce: pobočka jen ta, kde člověk zapisuje (pobockaKZapisu), dřív než databáze',
+    ulozit.indexOf('pobockaKZapisu(v.pristup') !== -1 && ulozit.indexOf('pobockaKZapisu(v.pristup') < ulozit.indexOf('getServerSupabase('))
+  ok('akce: id z formuláře jen ve tvaru uuid', /hodnoty\.some\(\(x\) => !RE_ID\.test\(x\)\)/.test(akce))
+  ok('akce: do adresy jen kód výsledku', /redirect\(sParametrem\(zpet, 'stav', 'upozorneni-ulozeno'\)\)/.test(ulozit))
+
+  const prvky = cti('app/[rozsah]/rezervace/prvky.tsx')
+  const nastroje = prvky.slice(prvky.indexOf('export function NastrojePohledu'), prvky.indexOf('/* ---------- týden'))
+  ok('kalendář: tlačítko Upozornění se zvonečkem jen pro toho, kdo zapisuje',
+    nastroje.indexOf('{smiZapisovat ? (') !== -1 && nastroje.indexOf('<Ikona klic="zvonek" /> Upozornění') > nastroje.indexOf('{smiZapisovat ? ('))
+  ok('hlášky: uloženo i chyba výběru mají větu', prvky.includes("'upozorneni-ulozeno':") && prvky.includes("'upozorneni-vyber':"))
+
+  ok('ruční zápis a změna stavu pošlou push hned (ne až s plánovačem)',
+    (akce.match(/naplanovatPushKeZdroji\(\{ typ: 'rezervace', id/g) ?? []).length === 2)
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

@@ -294,3 +294,21 @@ details[open] .ds-rez-otevrit { display: none; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
   line-height: 1.5; overflow-x: auto; white-space: pre;
 }
+
+/* --- Upozornění: komu chodí (rezervace/upozorneni, 2. 11. 2026) --------
+   Tabulka člověk × druh. Zaškrtávátka 20 px v mosazi jako jinde
+   (.ds-sm-volba); celá buňka je štítek, ať se na telefonu trefí prstem.
+   Na úzkém obsahu se tabulka posouvá do strany, stránka ne. */
+
+.ds-rez-upoz-pravidla { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.ds-rez-upoz-pravidla strong { color: var(--ink); }
+.ds-rez-upoz { display: grid; gap: 12px; }
+.ds-rez-upoz-stav { margin: 0; font-size: 13.5px; color: var(--muted); }
+.ds-rez-upoz-obal { overflow-x: auto; }
+.ds-rez-upoz-tabulka { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ds-rez-upoz-tabulka th, .ds-rez-upoz-tabulka td { padding: 0 4px; border-bottom: 1px solid var(--line); text-align: center; vertical-align: middle; }
+.ds-rez-upoz-tabulka thead th { padding: 6px 4px; font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.ds-rez-upoz-tabulka th[scope="row"], .ds-rez-upoz-tabulka thead th:first-child { padding: 8px 8px 8px 0; text-align: left; font-weight: 600; }
+.ds-rez-upoz-tabulka th[scope="row"] small { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); }
+.ds-rez-upoz-tabulka label { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; cursor: pointer; }
+.ds-rez-upoz-tabulka input { width: 20px; height: 20px; margin: 0; accent-color: var(--mosaz); }

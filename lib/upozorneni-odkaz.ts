@@ -122,6 +122,17 @@ export function odkazUpozorneni(rozsah: string, z: RadekUpozorneni, konverzace?:
     return jeDen(telo.den) ? `/${kde}/rezervace/den/${telo.den}` : `/${kde}/rezervace`
   }
 
+  /*
+    Akce a rezervace (2. 11. 2026): na detail v rozsahu POBOČKY té
+    rezervace (stejný důvod jako u souhrnu). Sloučené „3 nové rezervace“
+    nesou id jen té poslední — vedou proto na kalendář, ne do detailu.
+  */
+  if (z.druh.startsWith('akce.') || z.druh === 'rezervace.nova' || z.druh === 'rezervace.zrusena') {
+    const kde = jeSlug(telo.pobocka_slug) ? telo.pobocka_slug : rozsah
+    if (z.druh === 'rezervace.nova' && pocetUpozorneni(telo) > 1) return `/${kde}/rezervace`
+    return jeUuid(telo.rezervace_id) ? `/${kde}/rezervace/${telo.rezervace_id}` : `/${kde}/rezervace`
+  }
+
   if (z.druh === 'oznameni.nova') return `/${rozsah}/vzkazy?zalozka=nastenka`
 
   if (z.druh === 'vzkaz.novy') {

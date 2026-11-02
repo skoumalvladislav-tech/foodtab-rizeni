@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { getUser, hasAccess } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
-import { KBELIK_REZERVACI } from '@/lib/rezervace-prilohy'
+import { KBELIK_REZERVACI, nazevKeStazeni, otevritVProhlizeci } from '@/lib/rezervace-prilohy'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +16,10 @@ export const dynamic = 'force-dynamic'
  *      a `.eq('tenant_id')`;
  *   3. právo v aplikaci — vidí člověk rezervace pobočky souboru (první
  *      linie, stejná otázka jako RLS);
- *   4. podepsaný odkaz platný 120 s a přesměrování.
+ *   4. podepsaný odkaz platný 120 s a přesměrování. PDF a fotka se
+ *      otevřou v prohlížeči, Word (.docx) se stáhne pod svým názvem.
+ *      Rozhoduje typ v řádku přílohy — ten zapsala databáze podle
+ *      úložiště a soubor pod ním se změnit nedá (bez UPDATE politiky).
  *
  * Cokoli, co neprojde, je 404 BEZ DETAILU — z odpovědi se nesmí dát
  * poznat, jestli soubor existuje u jiné firmy nebo pobočky. `no-store`
@@ -45,7 +48,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const supabase = await getServerSupabase()
   const { data: radek, error } = await supabase
     .from('rezervace_prilohy')
-    .select('cesta, branch_id')
+    .select('cesta, branch_id, mime, nazev')
     .eq('id', id)
     .eq('tenant_id', tenantId)
     .maybeSingle()
@@ -58,7 +61,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   ])
   if (!cte && !pise) return nenalezeno()
 
-  const { data: podepsano } = await supabase.storage.from(KBELIK_REZERVACI).createSignedUrl(String(radek.cesta), PLATNOST_ODKAZU_S)
+  const mime = String(radek.mime ?? '')
+  const { data: podepsano } = await supabase.storage
+    .from(KBELIK_REZERVACI)
+    .createSignedUrl(
+      String(radek.cesta),
+      PLATNOST_ODKAZU_S,
+      otevritVProhlizeci(mime) ? undefined : { download: nazevKeStazeni(String(radek.nazev ?? ''), mime) },
+    )
   if (!podepsano?.signedUrl) return nenalezeno()
 
   const presmerovani = NextResponse.redirect(podepsano.signedUrl, 302)

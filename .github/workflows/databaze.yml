@@ -358,6 +358,10 @@ jobs:
             || { echo "CHYBÍ hláška: KROK 105 kontrola souběhu úlohy umí spadnout"; chybi=1; }
           grep -qE '^[[:space:]]*== KROK 106 HOTOV[[:space:]=]*$' vystup.txt \
             || { echo "CHYBÍ hláška: KROK 106"; chybi=1; }
+          grep -qE '^[[:space:]]*== KROK 107 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 107"; chybi=1; }
+          grep -qE '^[[:space:]]*== KROK 108 HOTOV[[:space:]=]*$' vystup.txt \
+            || { echo "CHYBÍ hláška: KROK 108"; chybi=1; }
 
           # Marketing má vlastní číselnou řadu. Bez téhle kontroly by
           # marketing1_scenar mohl přestat běžet a nikdo by si nevšiml —

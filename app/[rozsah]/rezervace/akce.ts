@@ -8,6 +8,7 @@ import { redirect } from 'next/navigation'
 import { canSee, hasAccess } from '@/lib/authz'
 import { getCurrentTenantId } from '@/lib/firma'
 import { zakladniAdresaAplikace } from '@/lib/integrace-adresa'
+import { naplanovatPushKeZdroji } from '@/lib/komunikace/push-hned'
 import { podepsatText, rozsifrovat, sifrovaniJeNastavene, zasifrovat } from '@/lib/integrace-klice'
 import { KLIC_CHOICE, nastaveniChoice, odkazPripojeni, otiskPokusu, PLATNOST_POKUSU_S, rozebratPodnik, slozitPokus } from '@/lib/rezervace-choice'
 import { KONEC_NACIST_TED_MS, overitZnovu, synchronizovatChoice, zapsatVysledekTestu } from '@/lib/rezervace-choice-sync'
@@ -122,6 +123,10 @@ export async function ulozitRezervaci(_predchozi: StavFormulare, formData: FormD
     if (chybaPrilohy && chybaPrilohy.code !== '23505') nepripojeno += 1
   }
 
+  // Upozornění vybraným lidem založila spoušť v databázi (20261106100000);
+  // tady se jen pošle push hned, ne až s plánovačem.
+  naplanovatPushKeZdroji({ typ: 'rezervace', id: String(vysledneId) }, tenantId)
+
   revalidatePath(`/${rozsah}/rezervace`, 'layout')
   redirect(`/${rozsah}/rezervace/${String(vysledneId)}?stav=${nepripojeno > 0 ? 'ulozeno-bez-priloh' : 'ulozeno'}`)
 }
@@ -165,8 +170,58 @@ export async function zmenitStav(formData: FormData): Promise<void> {
   const { error } = await supabase.rpc('rezervace_zmenit_stav', { p_rezervace: id, p_stav: stav })
   if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : error.code === '23514' ? 'zdroj' : 'nepovedlo'))
 
+  naplanovatPushKeZdroji({ typ: 'rezervace', id }, v.tenantId)
+
   revalidatePath(`/${rozsah}/rezervace`, 'layout')
   redirect(sParametrem(zpet, 'stav', 'stav-zmenen'))
+}
+
+/* ---------------------------------------------------------------------
+ * Komu chodí upozornění (rezervace_upozorneni, 20261106100000)
+ *
+ * Celý výběr jedné pobočky naráz: tři skupiny zaškrtávátek (akce,
+ * rezervace, souhrn), hodnota je id zaměstnance. Pobočka jen taková, na
+ * které člověk v tomhle rozsahu zapisuje; koho smí vybrat, rozhodne
+ * databáze (rezervace_upozorneni_ulozit) — jen ty, kdo rezervace té
+ * pobočky vidí.
+ * ------------------------------------------------------------------ */
+
+const RE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Id zaměstnanců z jedné skupiny zaškrtávátek; `null` = nesmysl. */
+function vybraniZFormulare(formData: FormData, klic: string): string[] | null {
+  const hodnoty = formData.getAll(klic).map((x) => String(x))
+  if (hodnoty.length > 500 || hodnoty.some((x) => !RE_ID.test(x))) return null
+  return [...new Set(hodnoty)]
+}
+
+export async function ulozitUpozorneni(formData: FormData): Promise<void> {
+  const rozsah = text(formData, 'rozsah')
+  const zpet = `/${rozsah}/rezervace/upozorneni`
+  const v = await vstup(rozsah)
+  if (!v) redirect(`/${rozsah}/rezervace`)
+
+  const pobocka = pobockaKZapisu(v.pristup, text(formData, 'pobocka'))
+  if (!pobocka) redirect(sParametrem(zpet, 'chyba', 'pravo'))
+
+  const akce = vybraniZFormulare(formData, 'akce')
+  const rezervace = vybraniZFormulare(formData, 'rezervace')
+  const souhrn = vybraniZFormulare(formData, 'souhrn')
+  if (!akce || !rezervace || !souhrn) redirect(sParametrem(zpet, 'chyba', 'nepovedlo'))
+
+  const supabase = await getServerSupabase()
+  const { error } = await supabase.rpc('rezervace_upozorneni_ulozit', {
+    p_tenant: v.tenantId,
+    p_branch: pobocka.id,
+    p_akce: akce,
+    p_rezervace: rezervace,
+    p_souhrn: souhrn,
+  })
+  // 23514 = někdo z vybraných rezervace té pobočky nevidí (nebo jich je přes 500).
+  if (error) redirect(sParametrem(zpet, 'chyba', error.code === '42501' ? 'pravo' : error.code === '23514' ? 'upozorneni-vyber' : 'nepovedlo'))
+
+  revalidatePath(zpet)
+  redirect(sParametrem(zpet, 'stav', 'upozorneni-ulozeno'))
 }
 
 /* ---------------------------------------------------------------------

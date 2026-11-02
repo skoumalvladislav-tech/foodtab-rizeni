@@ -17,7 +17,7 @@ import {
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
-import { velikostText, jeObrazek } from '@/lib/rezervace-prilohy'
+import { velikostText, jeObrazek, otevritVProhlizeci } from '@/lib/rezervace-prilohy'
 import {
   NAZVY_DRUHU,
   NAZVY_STAVU,
@@ -166,7 +166,12 @@ export function PobockyKalendare({
 
 /* ---------- záložky modulu ------------------------------------------ */
 
-export function ZalozkyRezervaci({ rozsah, aktivni }: { rozsah: string; aktivni: 'kalendar' | 'napojeni' }) {
+/**
+ * Záložka Upozornění je jen na své stránce — do ní se vchází tlačítkem
+ * se zvonečkem v kalendáři (NastrojePohledu), které vidí jen ten, kdo
+ * rezervace zapisuje.
+ */
+export function ZalozkyRezervaci({ rozsah, aktivni }: { rozsah: string; aktivni: 'kalendar' | 'napojeni' | 'upozorneni' }) {
   return (
     <nav className="ds-zalozky" aria-label="Rezervace a akce">
       <Link href={`/${rozsah}/rezervace`} aria-current={aktivni === 'kalendar' ? 'page' : undefined}>
@@ -177,6 +182,12 @@ export function ZalozkyRezervaci({ rozsah, aktivni }: { rozsah: string; aktivni:
         <Ikona klic="kolo" />
         Napojení a import
       </Link>
+      {aktivni === 'upozorneni' ? (
+        <Link href={`/${rozsah}/rezervace/upozorneni`} aria-current="page">
+          <Ikona klic="zvonek" />
+          Upozornění
+        </Link>
+      ) : null}
     </nav>
   )
 }
@@ -230,6 +241,10 @@ export function NastrojePohledu({
           </Link>
           <Link href={`/${rozsah}/rezervace/nova?datum=${datum}&druh=akce`} className="ft-tl ft-tl-vedlejsi">
             <Ikona klic="praporek" /> Nová akce
+          </Link>
+          {/* Komu chodí upozornění k akcím a rezervacím — stránka upozorneni/. */}
+          <Link href={`/${rozsah}/rezervace/upozorneni`} className="ft-tl ft-tl-vedlejsi">
+            <Ikona klic="zvonek" /> Upozornění
           </Link>
         </div>
       ) : null}
@@ -718,7 +733,12 @@ export function PanelPriloh({
           {prilohy.map((p) => (
             <li key={p.id} className="ds-rez-priloha">
               <Ikona klic={jeObrazek(p.mime) ? 'fotka' : 'faktura'} />
-              <a href={`/api/rezervace/soubor/${p.id}`} target="_blank" rel="noopener noreferrer" title={p.nazev}>
+              {/* PDF a fotka v nové záložce; Word se stáhne (odkaz vrátí soubor ke stažení). */}
+              <a
+                href={`/api/rezervace/soubor/${p.id}`}
+                {...(otevritVProhlizeci(p.mime) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                title={p.nazev}
+              >
                 {p.nazev}
               </a>
               <small>
@@ -760,6 +780,7 @@ export function HlaskaAkce({ stav, chyba }: { stav?: string; chyba?: string }) {
     'choice-overeno': 'Přístup do Choice je ověřený.',
     'choice-nacteno': 'Rezervace z Choice jsou načtené.',
     'choice-nacteno-cast': 'Část rezervací z Choice je načtená, zbytek se načte při dalším běhu (Choice pustí jen 1 dotaz za 5 sekund).',
+    'upozorneni-ulozeno': 'Výběr je uložený. Platí od příští rezervace nebo změny.',
   }
   const CHYBY: Record<string, string> = {
     pravo: 'Na tohle nemáte oprávnění.',
@@ -786,6 +807,7 @@ export function HlaskaAkce({ stav, chyba }: { stav?: string; chyba?: string }) {
     'choice-chvili': 'Z Choice se právě načítá, nebo se načítalo před chvílí (Choice pustí jen 1 dotaz za 5 sekund). Zkuste to za minutu.',
     'choice-overeno-chvili': 'Přístup do Choice se ověřoval před chvílí. Znovu to jde za minutu.',
     'choice-nacteni': 'Načtení z Choice se nepovedlo — důvod je u napojení.',
+    'upozorneni-vyber': 'Někdo z vybraných rezervace na téhle pobočce nevidí (mezitím mu vzali oprávnění). Obnovte stránku a vyberte znovu.',
   }
   // Rezervace se zapsala, ale některý dokument z formuláře se nepřipojil —
   // není to úspěch bez výhrad, proto vzhled chyby.
