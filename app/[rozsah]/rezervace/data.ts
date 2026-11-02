@@ -2,6 +2,7 @@ import 'server-only'
 
 import { denVPasmu } from '@/lib/cas'
 import { provozniDen } from '@/lib/provozni-den'
+import { KBELIK_REZERVACI } from '@/lib/rezervace-prilohy'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
@@ -139,4 +140,40 @@ export async function nacistPrilohy(filtr: Filtr): Promise<Priloha[]> {
   const { data, error } = await dotaz.order('nahrano')
   if (error) throw new DotazSelhal('přílohy', error)
   return (data ?? []) as Priloha[]
+}
+
+export type PrilohaNahledu = Priloha & {
+  cesta: string
+  branch_id: string
+  rezervace_id: string | null
+  den: string | null
+}
+
+/**
+ * Jedna příloha pro náhled dokumentu. Pobočku v rozsahu adresy ověří
+ * stránka (`pobocky`); RLS `rezervace_prilohy_cist` je druhá linie.
+ */
+export async function nacistPrilohu(tenantId: string, id: string, pobocky: PobockaRezervaci[]): Promise<PrilohaNahledu | null> {
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase
+    .from('rezervace_prilohy')
+    .select('id, nazev, mime, velikost, nahrano, cesta, branch_id, rezervace_id, den')
+    .eq('tenant_id', tenantId)
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw new DotazSelhal('příloha', error)
+  if (!data || !pobocky.some((p) => p.id === data.branch_id)) return null
+  return data as PrilohaNahledu
+}
+
+/**
+ * Obsah souboru z úložiště — UŽIVATELSKÝM klientem, takže čtení hlídá
+ * i politika kbelíku `rezervace_soubory_cist`. `null` = nejde načíst
+ * (chybí, nebo ho úložiště nevydalo); stránka nabídne stažení.
+ */
+export async function stahnoutPrilohu(cesta: string): Promise<Uint8Array | null> {
+  const supabase = await getServerSupabase()
+  const { data, error } = await supabase.storage.from(KBELIK_REZERVACI).download(cesta)
+  if (error || !data) return null
+  return new Uint8Array(await data.arrayBuffer())
 }

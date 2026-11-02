@@ -17,7 +17,7 @@ import {
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
-import { velikostText, jeObrazek, otevritVProhlizeci } from '@/lib/rezervace-prilohy'
+import { adresaPrilohy, velikostText, jeObrazek } from '@/lib/rezervace-prilohy'
 import {
   NAZVY_DRUHU,
   NAZVY_STAVU,
@@ -733,12 +733,8 @@ export function PanelPriloh({
           {prilohy.map((p) => (
             <li key={p.id} className="ds-rez-priloha">
               <Ikona klic={jeObrazek(p.mime) ? 'fotka' : 'faktura'} />
-              {/* PDF a fotka v nové záložce; Word se stáhne (odkaz vrátí soubor ke stažení). */}
-              <a
-                href={`/api/rezervace/soubor/${p.id}`}
-                {...(otevritVProhlizeci(p.mime) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-                title={p.nazev}
-              >
+              {/* Vždy v nové záložce: PDF a fotka ze souboru, Word jako náhled ve Foodtabu. */}
+              <a href={adresaPrilohy(rozsah, p.id, p.mime)} target="_blank" rel="noopener noreferrer" title={p.nazev}>
                 {p.nazev}
               </a>
               <small>

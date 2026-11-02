@@ -17,7 +17,7 @@
  */
 
 /** Jeden soubor uvnitř ZIP archivu, ještě zabalený. */
-type Polozka = {
+export type Polozka = {
   nazev: string
   metoda: number
   offset: number
@@ -37,7 +37,7 @@ const dv = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength)
  * Z místní hlavičky se čte jen délka jména a extra pole, aby se našel
  * začátek dat.
  */
-function ctiZip(bajty: Uint8Array): Map<string, Polozka> {
+export function ctiZip(bajty: Uint8Array): Map<string, Polozka> {
   const d = dv(bajty)
 
   // Konec ústředního adresáře. Hledá se od konce, protože za ním smí
@@ -119,13 +119,13 @@ export function odkodovat(s: string): string {
 }
 
 /** Hodnota atributu ze značky. Respektuje uvozovky obojího druhu. */
-function atribut(znacka: string, jmeno: string): string | null {
+export function atribut(znacka: string, jmeno: string): string | null {
   const m = znacka.match(new RegExp(`\\b${jmeno}\\s*=\\s*("([^"]*)"|'([^']*)')`))
   return m ? odkodovat(m[2] ?? m[3] ?? '') : null
 }
 
 /** Postupně vrací značky a text mezi nimi. */
-function* kousky(xml: string): Generator<{ znacka: boolean; text: string }> {
+export function* kousky(xml: string): Generator<{ znacka: boolean; text: string }> {
   let i = 0
   while (i < xml.length) {
     const zac = xml.indexOf('<', i)

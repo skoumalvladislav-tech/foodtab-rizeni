@@ -66,12 +66,22 @@ export function jeZip(zacatek: Uint8Array): boolean {
 
 /**
  * V prohlížeči se otevře jen PDF a fotka (jako přílohy faktur,
- * lib/faktury-priloha-odkaz.ts). Word se stáhne.
+ * lib/faktury-priloha-odkaz.ts). Word se ze souboru stáhne.
  */
 const OTEVRIT_V_PROHLIZECI: ReadonlySet<string> = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])
 
 export function otevritVProhlizeci(mime: string): boolean {
   return OTEVRIT_V_PROHLIZECI.has(mime)
+}
+
+/**
+ * Kam vede odkaz „otevřít“ u přílohy. PDF a fotka rovnou ze souboru;
+ * Word na náhled ve Foodtabu (dokument/[id]) — prohlížeč ho neotevře,
+ * jen stáhne, a na počítači to vypadá, že se po kliknutí nic nestalo
+ * (2. 11. 2026). Originál se stahuje z náhledu.
+ */
+export function adresaPrilohy(rozsah: string, id: string, mime: string): string {
+  return otevritVProhlizeci(mime) ? `/api/rezervace/soubor/${id}` : `/${rozsah}/rezervace/dokument/${id}`
 }
 
 /**
