@@ -9,8 +9,8 @@
   zrušená, zrušení, „z rezervace je akce“) a **ranní souhrn**.
 - K rezervacím a akcím jde přiložit i **dokument Word (.docx)** — ve
   formuláři nové rezervace i v detailu. Starý `.doc` a `.docm` s makry ne.
-- **Nic není nasazené.** PR čeká na „sluč N a db push“ (číslo PR je
-  v odpovědi v chatu). V PR jsou dvě migrace: `20261106100000`
+- **Nic není nasazené.** PR #171 čeká na „sluč 171 a db push“.
+  V PR jsou dvě migrace: `20261106100000`
   (upozornění) a `20261106110000` (Word).
 - **Po nasazení nechodí na akce a rezervace nic nikomu, dokud u pobočky
   nikoho nevyberete** (otázka 81). Ranní souhrn chodí dál jako dosud.
@@ -188,7 +188,7 @@ testem (`chybaNahrani`), ne snímkem.
 
 ## Co čeká na Šéfíka
 
-1. **„sluč N a db push“** — obě migrace najednou, na pořadí uvnitř
+1. **„sluč 171 a db push“** — obě migrace najednou, na pořadí uvnitř
    nezáleží (Word nesahá na upozornění).
 2. Po nasazení: **Rezervace → Upozornění** — u každé pobočky zaškrtnout
    lidi (otázka 81). Kdo v seznamu chybí, nemá právo rezervace vidět:
