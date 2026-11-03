@@ -12,7 +12,7 @@
    ne okna — levý sloupec aplikace bere různě místa.
    ===================================================================== */
 
-.ds-rez { display: grid; gap: 16px; min-width: 0; container-type: inline-size; }
+.ds-rez { display: grid; gap: 16px; min-width: 0; container: rez / inline-size; }
 
 /* --- nástroje: pohled, šipky, období, nová rezervace ------------------- */
 
@@ -22,7 +22,7 @@
 .ds-rez-sipky .ft-tl { min-width: 40px; padding: 0 10px; }
 .ds-rez-obdobi { margin: 0 4px; font-size: 19px; font-weight: 600; line-height: 1.2; }
 .ds-rez-vpravo { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
-@container (max-width: 640px) {
+@container rez (max-width: 640px) {
   .ds-rez-vpravo { margin-left: 0; width: 100%; }
   .ds-rez-vpravo .ft-tl { flex: 1 1 auto; }
   .ds-rez-obdobi { width: 100%; margin: 4px 0 0; order: 5; }
@@ -139,6 +139,16 @@
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
 }
 .ds-rez-polozka .ds-rez-dokument-pripona { align-self: flex-end; }
+/* V úzkém sloupci (notebook, víc poboček) by vedle ikony a přípony zbylo
+   na název pár pixelů, tedy jedno dvě písmena. Ikona s příponou proto
+   jdou nahoru a název pod ně přes celou šířku štítku. */
+.ds-rez-polozka .ds-rez-dokumenty { container: rez-dokumenty / inline-size; }
+@container rez-dokumenty (max-width: 200px) {
+  .ds-rez-polozka .ds-rez-dokument { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 1px 4px; }
+  .ds-rez-polozka .ds-rez-dokument .ft-i { grid-area: 1 / 1; margin-top: 0; }
+  .ds-rez-polozka .ds-rez-dokument-pripona { grid-area: 1 / 2; align-self: center; }
+  .ds-rez-polozka .ds-rez-dokument-nazev { grid-area: 2 / 1 / 3 / 3; margin-left: 0; }
+}
 
 /* Víc poboček: každá má v dni svůj rámeček se zkratkou a souhrnem. */
 .ds-rez-skupina {
@@ -153,7 +163,7 @@
   font-size: 12px; font-weight: 600; line-height: 1.3; color: var(--branch);
 }
 
-@container (max-width: 900px) {
+@container rez (max-width: 900px) {
   .ds-rez-tyden { grid-template-columns: 1fr; }
   .ds-rez-den { min-height: 0; }
   .ds-rez-den-pridat { margin-top: 0; }
@@ -205,7 +215,7 @@
 .ds-rez-bunka-den-nazev { display: none; }
 
 /* Telefon: místo mřížky seznam dnů, na kterých něco je. */
-@container (max-width: 640px) {
+@container rez (max-width: 640px) {
   .ds-rez-mesic { grid-template-columns: 1fr; }
   .ds-rez-mesic-hlava, .ds-rez-bunka[data-prazdny], .ds-rez-bunka[data-mimo] { display: none; }
   .ds-rez-bunka { min-height: 0; border-right: 0; flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 10px 12px; }
@@ -214,7 +224,7 @@
   .ds-rez-bunka-pobocka { flex-basis: 100%; }
 }
 .ds-rez-mesic-prazdny { margin: 0; padding: 14px; font-size: 14px; color: var(--muted); display: none; }
-@container (max-width: 640px) { .ds-rez-mesic-prazdny { display: block; } }
+@container rez (max-width: 640px) { .ds-rez-mesic-prazdny { display: block; } }
 
 /* --- seznam rezervací dne --------------------------------------------- */
 
@@ -236,7 +246,7 @@
 /* Dokumenty pod řádkem rezervace, zarovnané se jménem (96 px čas + 14 px mezera). */
 .ds-rez-seznam > li > .ds-rez-dokumenty { margin: -4px 0 12px; padding-left: 110px; }
 .ds-rez-seznam > li > .ds-rez-dokumenty .ds-rez-dokument { min-height: 28px; font-size: 13px; padding: 3px 10px; }
-@container (max-width: 560px) {
+@container rez (max-width: 560px) {
   .ds-rez-radek { grid-template-columns: 64px minmax(0, 1fr); }
   .ds-rez-stitky { grid-column: 2; justify-content: flex-start; }
   .ds-rez-seznam > li > .ds-rez-dokumenty { padding-left: 78px; }
@@ -277,7 +287,7 @@
 .ds-rez-udaje { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 0; font-size: 14px; }
 .ds-rez-udaje dt { color: var(--muted); }
 .ds-rez-udaje dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-@container (max-width: 420px) {
+@container rez (max-width: 420px) {
   .ds-rez-udaje { grid-template-columns: 1fr; gap: 2px; }
   .ds-rez-udaje dd { margin-bottom: 8px; }
 }
@@ -410,7 +420,7 @@ details[open] .ds-rez-otevrit { display: none; }
 /* Odsazení řádku (w:gridBefore) není buňka — bez rámečku. */
 .ds-dokument-tabulka td.ds-dokument-mimo { min-width: 0; padding: 0; border: 0; }
 .ds-dokument-tabulka td h2, .ds-dokument-tabulka td h3, .ds-dokument-tabulka td h4 { margin-top: 0; font-size: 15px; }
-@container (max-width: 560px) {
+@container rez (max-width: 560px) {
   .ds-plocha.ds-dokument { padding: 18px 16px; font-size: 14.5px; }
 }
 

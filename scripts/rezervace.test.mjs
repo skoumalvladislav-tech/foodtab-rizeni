@@ -1667,6 +1667,23 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
     (detail.match(/kotva="dokumenty"/g) ?? []).length === 1
     && prvky12.includes("<section className={kotva ? 'ds-plocha ds-rez-kotva' : 'ds-plocha'} id={kotva}>")
     && /\.ds-rez-kotva \{ scroll-margin-top: [1-9]\d*px; \}/.test(css))
+  // Seznam dokumentů v kartě týdne je sám kontejner. Dotaz bez jména by se
+  // pak ptal na něj (úzký), ne na kalendář, a štítky by na počítači dostaly
+  // mobilní rozvržení. Proto každý dotaz v Rezervacích jmenuje svůj kontejner.
+  const dotazy = [...css.matchAll(/@container\s+([^({\s]*)\s*\(/g)].map((m) => m[1])
+  ok(`vzhled: každý dotaz na šířku míří na pojmenovaný kontejner (${dotazy.length} dotazů, bez jména ${dotazy.filter((d) => !d).length})`,
+    dotazy.length >= 8 && dotazy.every((d) => d === 'rez' || d === 'rez-dokumenty')
+    && /\.ds-rez \{[^}]*container: rez \/ inline-size;/.test(css))
+  // Úzký sloupec (notebook, víc poboček): vedle ikony a přípony by na název
+  // zbylo pár pixelů. Ikona s příponou nahoře, název pod nimi přes celý štítek.
+  const uzky = css.match(/@container rez-dokumenty \(max-width: (\d+)px\) \{([^@]*?)\r?\n\}/)
+  ok('vzhled: v úzkém sloupci týdne má název dokumentu celou šířku štítku, ikona s příponou nad ním',
+    css.includes('.ds-rez-polozka .ds-rez-dokumenty { container: rez-dokumenty / inline-size; }')
+    && !!uzky && Number(uzky[1]) >= 160
+    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument { display: grid; grid-template-columns: auto minmax(0, 1fr);')
+    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument .ft-i { grid-area: 1 / 1;')
+    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument-pripona { grid-area: 1 / 2;')
+    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument-nazev { grid-area: 2 / 1 / 3 / 3; margin-left: 0; }'))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
