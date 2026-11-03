@@ -518,7 +518,7 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     ok(`týden: žádný odkaz v odkazu (nejhlubší zanoření ${hloubkaOdkazu(html)})`, hloubkaOdkazu(html) === 1)
     // Karta = odkaz na rezervaci a hned za ním (ne v něm) její dokumenty.
     const karty = new Map(
-      [...html.matchAll(/<div class="ds-rez-polozka"[^>]*><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-polozka-odkaz">[\s\S]*?<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/div>/g)].map((m) => [m[1], m[2] ?? '']),
+      [...html.matchAll(/<div class="ds-rez-polozka"[^>]*><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-polozka-odkaz">(?:(?!<\/a>)[\s\S])*<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/div>/g)].map((m) => [m[1], m[2] ?? '']),
     )
     ok(`týden: každá rezervace má kartu s odkazem a dokumenty za ním, ne v něm (${karty.size} z ${VSE.length})`, karty.size === VSE.length && VSE.every((r) => karty.has(r.id)))
     const tri = karty.get(S.tri.id) ?? ''
@@ -538,7 +538,7 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     ok(`týden: každý dokument jen u své rezervace (${vsechny.length} štítků, ${cizi.length} cizích)`, vsechny.length === 7 && cizi.length === 0)
     ok('týden: seznam dokumentů je pro čtečku seznam se jménem rezervace', tri.startsWith('<ul class="ds-rez-dokumenty" role="list" aria-label="Dokumenty: Svatba Novákovi">'))
     const zTydne = zpatkyZOdkazu('firma', stitky(tri)[0]?.href ?? '')
-    ok(`týden → náhled Wordu → „${zTydne?.text}“ na ${zTydne?.href} (adresa z vykresleného odkazu, jak ji přečte stránka náhledu)`, stejne(zTydne, { href: zpet, text: 'Zpět na kalendář' }))
+    ok(`týden → náhled Wordu → „Zpět na kalendář“ na tenhle týden (adresa z vykresleného odkazu, jak ji přečte stránka náhledu; je „${zTydne?.text}“ na ${zTydne?.href})`, stejne(zTydne, { href: zpet, text: 'Zpět na kalendář' }))
 
     const jedna = kal('tyden', [PB])
     const zJedne = stitky(jedna)
@@ -603,7 +603,7 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     const zpet = '/firma/rezervace/den/2026-10-30'
     ok(`den: žádný odkaz v odkazu (nejhlubší zanoření ${hloubkaOdkazu(html)})`, hloubkaOdkazu(html) === 1)
     const radky = new Map(
-      [...html.matchAll(/<li><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-radek"[^>]*>[\s\S]*?<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/li>/g)].map((m) => [m[1], m[2] ?? '']),
+      [...html.matchAll(/<li><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-radek"[^>]*>(?:(?!<\/a>)[\s\S])*<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/li>/g)].map((m) => [m[1], m[2] ?? '']),
     )
     const dne = VSE.filter((r) => r.den === '2026-10-30')
     ok(`den: každá rezervace dne má řádek a dokumenty za odkazem (${radky.size} z ${dne.length})`, radky.size === dne.length && dne.every((r) => radky.has(r.id)))
@@ -614,7 +614,7 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     ok('den: zrušená i s dokumentem, Perla s Wordem i fotkou', stejne(stitky(radky.get(S.zrusena.id) ?? ''), [ocekavany(D.storno, zpet)]) && stejne(stitky(radky.get(S.perla.id) ?? ''), [ocekavany(D.rozpis, zpet), ocekavany(D.dort, zpet)]))
     ok('den: bez dokumentu bez seznamu', radky.get(S.bez.id) === '' && radky.get(S.treti.id) === '')
     const zDne = zpatkyZOdkazu('firma', stitky(radky.get(S.tri.id) ?? '')[0]?.href ?? '')
-    ok(`den → náhled Wordu → „${zDne?.text}“ na ${zDne?.href}`, stejne(zDne, { href: zpet, text: 'Zpět na den' }))
+    ok(`den → náhled Wordu → „Zpět na den“ na tenhle den (je „${zDne?.text}“ na ${zDne?.href})`, stejne(zDne, { href: zpet, text: 'Zpět na den' }))
   } catch (e) {
     ok(`den s dokumenty se vykreslí — výjimka: ${e.message}`, false)
   }
