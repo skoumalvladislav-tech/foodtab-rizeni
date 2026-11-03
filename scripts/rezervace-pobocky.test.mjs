@@ -518,7 +518,7 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     ok(`týden: žádný odkaz v odkazu (nejhlubší zanoření ${hloubkaOdkazu(html)})`, hloubkaOdkazu(html) === 1)
     // Karta = odkaz na rezervaci a hned za ním (ne v něm) její dokumenty.
     const karty = new Map(
-      [...html.matchAll(/<div class="ds-rez-polozka"[^>]*><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-polozka-odkaz">(?:(?!<\/a>)[\s\S])*<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/div>/g)].map((m) => [m[1], m[2] ?? '']),
+      [...html.matchAll(/<div class="ds-rez-polozka"[^>]*><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-polozka-odkaz">(?:(?!<\/?a[\s>])[\s\S])*<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/div>/g)].map((m) => [m[1], m[2] ?? '']),
     )
     ok(`týden: každá rezervace má kartu s odkazem a dokumenty za ním, ne v něm (${karty.size} z ${VSE.length})`, karty.size === VSE.length && VSE.every((r) => karty.has(r.id)))
     const tri = karty.get(S.tri.id) ?? ''
@@ -603,7 +603,7 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     const zpet = '/firma/rezervace/den/2026-10-30'
     ok(`den: žádný odkaz v odkazu (nejhlubší zanoření ${hloubkaOdkazu(html)})`, hloubkaOdkazu(html) === 1)
     const radky = new Map(
-      [...html.matchAll(/<li><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-radek"[^>]*>(?:(?!<\/a>)[\s\S])*<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/li>/g)].map((m) => [m[1], m[2] ?? '']),
+      [...html.matchAll(/<li><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-radek"[^>]*>(?:(?!<\/?a[\s>])[\s\S])*<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/li>/g)].map((m) => [m[1], m[2] ?? '']),
     )
     const dne = VSE.filter((r) => r.den === '2026-10-30')
     ok(`den: každá rezervace dne má řádek a dokumenty za odkazem (${radky.size} z ${dne.length})`, radky.size === dne.length && dne.every((r) => radky.has(r.id)))
