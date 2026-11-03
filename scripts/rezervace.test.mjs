@@ -627,15 +627,17 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
       return e instanceof DokumentNecitelny ? e.message : `JINÁ VÝJIMKA: ${e?.constructor?.name} ${e?.message}`
     }
   }
-  const nahledNeboChyba = (bajty) => {
+  // Výjimka z čtečky nesmí shodit celý test — další kontroly by se pak
+  // vůbec neprovedly. Místo náhledu prázdný náhled s větou chyby.
+  const nahled = (bajty) => {
     try {
       return precistDocx(bajty)
     } catch (e) {
-      return { chyba: e?.message }
+      return { bloky: [], obrazku: -1, zkraceno: false, chyba: e?.message }
     }
   }
   const text = (x) => (x?.druh === 'odstavec' ? x.useky.map((u) => u.text).join('') : '')
-  const precist = (xml, dalsi = {}) => precistDocx(zabal({ 'word/document.xml': telo(xml), ...dalsi }))
+  const precist = (xml, dalsi = {}) => nahled(zabal({ 'word/document.xml': telo(xml), ...dalsi }))
   // Všechny odstavce, i z buněk (do hloubky).
   const odstavceVsude = (bloky) =>
     bloky.flatMap((x) => (x.druh === 'tabulka' ? x.radky.flatMap((r) => r.flatMap((c) => odstavceVsude(c.bloky))) : [x]))
@@ -704,19 +706,19 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     'word/hlavni.xml': dokument,
     'word/styles.xml': styly,
   }
-  const n = precistDocx(zabal(balik))
+  const n = nahled(zabal(balik))
   const b = n.bloky
   const odst = b.filter((x) => x.druh === 'odstavec')
   const najdi = (t) => odst.find((x) => text(x).startsWith(t))
 
   ok('hlavní část podle druhu vazby (officeDocument), ne první vazba ani word/document.xml',
     !!najdi('Svatba') && !JSON.stringify(n).includes('NÁVNADA'))
-  const jakoWord = nahledNeboChyba(zabal(balik, 8, {
+  const jakoWord = nahled(zabal(balik, 8, {
     '[Content_Types].xml': { extra: 520 }, '_rels/.rels': { extra: 520 }, 'docProps/app.xml': { extra: 264 },
     'word/hlavni.xml': { extra: 264 }, 'word/styles.xml': { extra: 264 },
   }))
   ok('ZIP jako z Wordu (extra pole v místní hlavičce): stejný náhled', JSON.stringify(jakoWord) === JSON.stringify(n))
-  const sPopisovacem = nahledNeboChyba(zabal(balik, 8, { 'word/hlavni.xml': { popisovac: true }, 'word/styles.xml': { popisovac: true } }))
+  const sPopisovacem = nahled(zabal(balik, 8, { 'word/hlavni.xml': { popisovac: true }, 'word/styles.xml': { popisovac: true } }))
   ok('ZIP s popisovačem dat (bit 3, v místní hlavičce nuly): stejný náhled', JSON.stringify(sPopisovacem) === JSON.stringify(n))
 
   ok('nadpis podle JMÉNA stylu („heading 1“), ne podle českého id „Nadpis1“', najdi('Svatba')?.nadpis === 1)
@@ -761,13 +763,13 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
 
   // Hlavní část podle _rels/.rels s cestou od kořene, ZIP bez komprese; bez vazeb word/document.xml.
   const rels = `<Relationships xmlns="${VAZBY}/package/2006/relationships"><Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/officeDocument" Target="/word/document2.xml"/></Relationships>`
-  const jinde = precistDocx(zabal({ '_rels/.rels': rels, 'word/document2.xml': telo('<w:p><w:r><w:t>Z document2</w:t></w:r></w:p>') }, 0))
+  const jinde = nahled(zabal({ '_rels/.rels': rels, 'word/document2.xml': telo('<w:p><w:r><w:t>Z document2</w:t></w:r></w:p>') }, 0))
   ok('hlavní část podle _rels/.rels (cesta od kořene), ZIP bez komprese', jinde.bloky.map(text).join('') === 'Z document2')
-  const chybiCil = precistDocx(zabal({ '_rels/.rels': relsWord('word/neni.xml'), 'word/document.xml': telo(`<w:p>${wt('výchozí')}</w:p>`) }))
+  const chybiCil = nahled(zabal({ '_rels/.rels': relsWord('word/neni.xml'), 'word/document.xml': telo(`<w:p>${wt('výchozí')}</w:p>`) }))
   ok('vazba na chybějící část → word/document.xml', text(chybiCil.bloky[0]) === 'výchozí')
   // Styly podle vazeb hlavní části, ne natvrdo word/styles.xml.
   const stylyJinde = `<w:styles ${W}><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>`
-  const sJinde = (cil, cesta) => precistDocx(zabal({
+  const sJinde = (cil, cesta) => nahled(zabal({
     '_rels/.rels': relsWord('/word/document2.xml'),
     'word/document2.xml': telo(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>${wt('Nadpis')}</w:p>`),
     'word/_rels/document2.xml.rels': `<Relationships xmlns="${VAZBY}/package/2006/relationships"><Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/styles" Target="${cil}"/></Relationships>`,
@@ -809,6 +811,10 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const js = jinaSirka.bloky[0]?.radky
   ok('pokračování (w:vMerge) pod buňkou jiné šířky se nesloučí — tabulka by se rozsypala',
     js?.[0][0].vyska === 1 && js[1][0].sloucena === false && js[1][0].bloky.map(text).join('') === 'Úzká')
+  const znovu = precist(`<w:tbl><w:tr>${tc('Nahoře')}</w:tr><w:tr>${tc('Začátek', '<w:vMerge w:val="restart"/>')}</w:tr><w:tr>${tc('', '<w:vMerge/>')}</w:tr></w:tbl>`)
+  const zn = znovu.bloky[0]?.radky
+  ok('w:vMerge="restart" pod buňkou stejné šířky začne nové sloučení, nepřilepí se k buňce nad ní',
+    zn?.[0][0].vyska === 1 && zn[1][0].sloucena === false && zn[1][0].vyska === 2 && zn[2][0].sloucena === true)
   const vnorenaSloucena = precist(`<w:tbl><w:tr><w:tc><w:tbl><w:tr>${tc('uvnitř', '<w:gridSpan w:val="2"/>')}</w:tr></w:tbl><w:p/></w:tc>${tc('vedle')}</w:tr></w:tbl>`)
   const vnejsi = vnorenaSloucena.bloky[0]?.radky[0]
   ok('w:gridSpan ve vnořené tabulce patří vnitřní buňce', vnejsi?.[0].sirka === 1 && vnejsi[0].bloky[0]?.radky[0][0].sirka === 2)
@@ -844,11 +850,12 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     `<w:p>${wt('Vážen')}${fc('begin')}${it(' IF ')}${fc('begin')}${it(' MERGEFIELD Pohlavi ')}${fc('separate')}${wt('«Pohlavi»')}${fc('end')}`,
     `${it(' = "M" "ý pane" "á paní" ')}${fc('separate')}${wt('ý pane')}${fc('end')}${wt(',')}</w:p>`,
     `<w:p>${fc('end')}${wt('Zbloudilý konec pole nic neschová')}</w:p>`,
+    `<w:p>${fc('begin')}${it(' FORMTEXT ')}${fc('end')}${wt('Za polem bez výsledku')}</w:p>`,
     `<w:p>${fc('begin')}${it(' TOC ')}${fc('separate')}${wt('Obsah 1')}</w:p><w:p>${wt('Obsah 2')}${fc('end')}</w:p>`,
   ].join(''))
   ok('vnořené pole: výsledek vnitřního pole v příkazu se neukáže („Vážený pane“)', text(pole.bloky[0]) === 'Vážený pane,')
-  ok('zbloudilý konec pole nic neschová, výsledek pole přes víc odstavců zůstane',
-    pole.bloky.slice(1).map(text).join('|') === 'Zbloudilý konec pole nic neschová|Obsah 1|Obsah 2')
+  ok('zbloudilý konec pole nic neschová, pole bez oddělovače neschová text za sebou, výsledek přes víc odstavců zůstane',
+    pole.bloky.slice(1).map(text).join('|') === 'Zbloudilý konec pole nic neschová|Za polem bez výsledku|Obsah 1|Obsah 2')
 
   // Skrytý text Word neukáže ani nevytiskne.
   const skryte = precist(
@@ -916,7 +923,7 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     const bajty = Buffer.from(`﻿${xml}`, 'utf16le')
     return be ? bajty.swap16() : bajty
   }
-  const zUtf16 = (be) => text(nahledNeboChyba(zabal({ 'word/document.xml': utf16(telo(`<w:p>${wt('Příliš žluťoučký')}</w:p>`), be) })).bloky?.[0])
+  const zUtf16 = (be) => text(nahled(zabal({ 'word/document.xml': utf16(telo(`<w:p>${wt('Příliš žluťoučký')}</w:p>`), be) })).bloky?.[0])
   ok('dokument v UTF-16 (LE i BE) se přečte', zUtf16(false) === 'Příliš žluťoučký' && zUtf16(true) === 'Příliš žluťoučký')
   ok('sešit Excelu (vazba na xl/workbook.xml) → „není text dokumentu Word“',
     chybaCteni(zabal({ '_rels/.rels': relsWord('xl/workbook.xml'), 'xl/workbook.xml': '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>' })) === 'V souboru není text dokumentu Word.')
@@ -975,12 +982,12 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const zaplavaZnacek = precist(`${'<a/>'.repeat(MAX_ZNACEK)}<w:p>${wt('za stropem')}</w:p>`)
   ok(`záplava značek bez textu: po ${MAX_ZNACEK} značkách konec (zkrácený), ne vteřiny práce`,
     zaplavaZnacek.zkraceno && !JSON.stringify(zaplavaZnacek).includes('za stropem'))
-  const pozdniStyl = precistDocx(zabal({
+  const pozdniStyl = nahled(zabal({
     'word/document.xml': telo(`<w:p><w:pPr><w:pStyle w:val="Pozde"/></w:pPr>${wt('Pozdní styl')}</w:p>`),
     'word/styles.xml': `<w:styles ${W}>${'<a/>'.repeat(MAX_ZNACEK_STYLU)}<w:style w:type="paragraph" w:styleId="Pozde"><w:name w:val="heading 1"/></w:style></w:styles>`,
   }))
   ok(`styly: za ${MAX_ZNACEK_STYLU} značkami se nečtou`, pozdniStyl.bloky[0]?.nadpis === 0)
-  const pozdniVazba = precistDocx(zabal({
+  const pozdniVazba = nahled(zabal({
     '_rels/.rels': `<Relationships xmlns="${VAZBY}/package/2006/relationships">${'<a/>'.repeat(MAX_ZNACEK_VAZEB)}<Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/officeDocument" Target="word/jinde.xml"/></Relationships>`,
     'word/jinde.xml': telo(`<w:p>${wt('jinde')}</w:p>`),
     'word/document.xml': telo(`<w:p>${wt('výchozí')}</w:p>`),
@@ -1001,6 +1008,19 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const uzavrena = precist(`${'<w:tbl><w:tr><w:tc>'.repeat(20)}<w:p>${wt('hluboko')}</w:p>${'</w:tc></w:tr></w:tbl>'.repeat(20)}<w:p>${wt('za tabulkou')}</w:p>`)
   ok('přeskočené hluboké tabulky nezavřou cizí buňku: text za tabulkou je v těle dokumentu',
     uzavrena.bloky.length === 2 && text(uzavrena.bloky[1]) === 'za tabulkou' && odstavceVsude(uzavrena.bloky).some((x) => text(x) === 'hluboko'))
+
+  // Devět pater: deváté se přeskočí. Po jeho zavření dostane osmé patro
+  // druhý řádek — musí přibýt v osmém, ne o patro výš.
+  const pater = MAX_VNORENI_TABULEK + 1
+  const poPreskocene = precist(
+    `${'<w:tbl><w:tr><w:tc>'.repeat(pater)}<w:p>${wt('dno')}</w:p></w:tc></w:tr></w:tbl>` +
+      `</w:tc></w:tr><w:tr>${tc('druhý řádek')}</w:tr></w:tbl>${'</w:tc></w:tr></w:tbl>'.repeat(pater - 2)}<w:p>${wt('konec')}</w:p>`,
+  )
+  let osme = poPreskocene.bloky[0]
+  for (let i = 1; i < MAX_VNORENI_TABULEK; i++) osme = osme?.radky[0]?.[0]?.bloky.find((x) => x.druh === 'tabulka')
+  ok('zavření přeskočené tabulky nezavře tu o patro výš: další řádek patří do ní',
+    osme?.radky.length === 2 && osme.radky[1][0]?.bloky.map(text).join('') === 'druhý řádek' && osme.radky[0][0].bloky.map(text).join('') === 'dno'
+      && text(poPreskocene.bloky[poPreskocene.bloky.length - 1]) === 'konec')
 
   // Věta nad náhledem: sloveso před číslem, „po něm“ u jednoho.
   const vetaNad = (obrazku, zkraceno = false) => poznamkaNahledu({ bloky: [], obrazku, zkraceno })
