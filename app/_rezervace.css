@@ -333,7 +333,8 @@ details[open] .ds-rez-otevrit { display: none; }
 .ds-dokument h3 { font-size: 18px; }
 .ds-dokument h4 { font-size: 16px; }
 .ds-dokument > :first-child { margin-top: 0; }
-.ds-dokument ul { margin: 0 0 10px; padding-left: 22px; }
+.ds-dokument ul { margin: 0 0 10px; padding-left: 22px; list-style: disc; }
+.ds-dokument li::marker { color: var(--muted); }
 .ds-dokument li { margin: 0 0 4px; }
 .ds-dokument-mezera { min-height: 10px; margin: 0; }
 .ds-dokument-nic { color: var(--muted); }
