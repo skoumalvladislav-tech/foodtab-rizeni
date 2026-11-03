@@ -38,6 +38,7 @@ import { syncBuiltinESMExports } from 'node:module'
 import zlib, { deflateRawSync } from 'node:zlib'
 
 import {
+  DELKA_ENTITY,
   DokumentNecitelny,
   MAX_BLOKU,
   MAX_SLOUPCU,
@@ -50,6 +51,7 @@ import {
   MAX_ZNACEK_STYLU,
   MAX_ZNACEK_VAZEB,
   MAX_ZNAKU,
+  odkodovatDo,
   poznamkaNahledu,
   prazdnyNahled,
   precistDocx,
@@ -646,7 +648,7 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     try {
       n = precistDocx(bajty)
     } catch (e) {
-      return { bloky: [], obrazku: -1, zkraceno: false, chyba: e?.message }
+      return { bloky: [], obrazku: -1, zkraceno: false, oriznutaTabulka: false, chyba: e?.message }
     }
     for (const x of odstavceVsude(n.bloky)) if (![0, 1, 2, 3].includes(x.nadpis)) spatneNadpisy.push(`${x.nadpis}: ${x.useky.map((u) => u.text).join('')}`)
     return n
@@ -725,6 +727,17 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
 
   ok('hlavní část podle druhu vazby (officeDocument), ne první vazba ani word/document.xml',
     !!najdi('Svatba') && !JSON.stringify(n).includes('NÁVNADA'))
+  // Vazba na adresu mimo balík PŘED skutečnou: v balíku nic nenajde,
+  // a kdyby se nepřeskočila, náhled by vzal výchozí word/document.xml.
+  const sExterni = nahled(zabal({
+    '_rels/.rels': `<Relationships xmlns="${VAZBY}/package/2006/relationships">` +
+      `<Relationship Id="rId9" Type="${VAZBY}/officeDocument/2006/relationships/officeDocument" Target="https://example.com/x.docx" TargetMode="External"/>` +
+      `<Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/officeDocument" Target="word/hlavni.xml"/></Relationships>`,
+    'word/hlavni.xml': telo(`<w:p>${wt('obsah')}</w:p>`),
+    'word/document.xml': telo(`<w:p>${wt('výchozí')}</w:p>`),
+  }))
+  ok('vazba na adresu mimo balík (TargetMode="External") se přeskočí, hlavní část je ta za ní',
+    !sExterni.chyba && sExterni.bloky.map(text).join('|') === 'obsah')
   const jakoWord = nahled(zabal(balik, 8, {
     '[Content_Types].xml': { extra: 520 }, '_rels/.rels': { extra: 520 }, 'docProps/app.xml': { extra: 264 },
     'word/hlavni.xml': { extra: 264 }, 'word/styles.xml': { extra: 264 },
@@ -893,18 +906,36 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const siroky = (n, span) => `<w:tbl><w:tr>${`<w:tc><w:tcPr><w:gridSpan w:val="${span}"/></w:tcPr><w:p/></w:tc>`.repeat(n)}</w:tr></w:tbl><w:p>${wt('za tabulkou')}</w:p>`
   const sirka = (radek) => radek?.reduce((s, c) => s + c.sirka, 0)
   const priliSiroka = precist(siroky(500, 63))
-  ok(`500 buněk po 63 sloupcích: řádek nejvýš ${MAX_SLOUPCU} sloupců, zkrácený`,
-    priliSiroka.zkraceno && sirka(priliSiroka.bloky[0]?.radky[0]) === MAX_SLOUPCU && priliSiroka.bloky[0].radky[0].length === 1)
+  ok(`500 buněk po 63 sloupcích: řádek nejvýš ${MAX_SLOUPCU} sloupců, oříznutá — ne zkrácený dokument, text za tabulkou zůstane`,
+    priliSiroka.oriznutaTabulka && !priliSiroka.zkraceno && sirka(priliSiroka.bloky[0]?.radky[0]) === MAX_SLOUPCU && priliSiroka.bloky[0].radky[0].length === 1
+      && text(priliSiroka.bloky[1]) === 'za tabulkou')
   const plna = precist(siroky(63, 1))
   ok('63 obyčejných buněk: celý řádek, nic zkráceného, text za tabulkou zůstane',
-    !plna.zkraceno && plna.bloky[0]?.radky[0].length === 63 && text(plna.bloky[1]) === 'za tabulkou')
+    !plna.zkraceno && !plna.oriznutaTabulka && plna.bloky[0]?.radky[0].length === 63 && text(plna.bloky[1]) === 'za tabulkou')
   const presah = precist(`<w:tbl><w:tr>${'<w:tc><w:p/></w:tc>'.repeat(60)}${tc('poslední', '<w:gridSpan w:val="10"/>')}</w:tr></w:tbl>`)
   const pr = presah.bloky[0]?.radky[0]
   ok('poslední buňka přes okraj se zúží na zbytek (60 + 3), text zůstane, nic se neuřízne',
-    !presah.zkraceno && sirka(pr) === MAX_SLOUPCU && pr[60].sirka === 3 && pr[60].bloky.map(text).join('') === 'poslední')
-  const odsazenaSiroka = precist(`<w:tbl><w:tr><w:trPr><w:gridBefore w:val="100"/></w:trPr>${tc('za odsazením')}</w:tr></w:tbl>`)
-  ok('odsazení přes celý řádek: buňka za ním se uřízne, zkrácený',
-    odsazenaSiroka.zkraceno && sirka(odsazenaSiroka.bloky[0]?.radky[0]) === MAX_SLOUPCU && odsazenaSiroka.bloky[0].radky[0].length === 1)
+    !presah.zkraceno && !presah.oriznutaTabulka && sirka(pr) === MAX_SLOUPCU && pr[60].sirka === 3 && pr[60].bloky.map(text).join('') === 'poslední')
+  const odsazenaSiroka = precist(`<w:tbl><w:tr><w:trPr><w:gridBefore w:val="100"/></w:trPr>${tc('za odsazením')}</w:tr></w:tbl><w:p>${wt('za tabulkou')}</w:p>`)
+  ok('odsazení přes celý řádek: buňka za ním se uřízne, oříznutá, text za tabulkou zůstane',
+    odsazenaSiroka.oriznutaTabulka && !odsazenaSiroka.zkraceno && sirka(odsazenaSiroka.bloky[0]?.radky[0]) === MAX_SLOUPCU
+      && odsazenaSiroka.bloky[0].radky[0].length === 1 && text(odsazenaSiroka.bloky[1]) === 'za tabulkou')
+  // Mřížka je sjednocení hranic všech řádků: 33 buněk na řádek s hranicemi
+  // posunutými proti sobě dá 65 sloupců, i když buněk je pod 63 (3. 11.:
+  // uříznutí tehdy zastavilo čtení a všechno za tabulkou zmizelo).
+  const bunka = (span, t) => tc(t, `<w:gridSpan w:val="${span}"/>`)
+  const posunute = precist(`<w:p>${wt('Rozpis směn')}</w:p><w:tbl><w:tr>${bunka(2, 'a').repeat(32)}${bunka(1, 'z')}</w:tr>` +
+    `<w:tr>${bunka(1, 'z')}${bunka(2, 'b').repeat(32)}</w:tr></w:tbl><w:p>${wt('Poznámka: sraz v 17:00')}</w:p>`)
+  ok('posunuté hranice (65 sloupců mřížky, 33 buněk): oba řádky na 63 sloupců, text za tabulkou zůstane',
+    posunute.oriznutaTabulka && !posunute.zkraceno && posunute.bloky[1]?.radky.every((r) => sirka(r) === MAX_SLOUPCU && r.length === 32)
+      && posunute.bloky.map(text).join('|') === 'Rozpis směn||Poznámka: sraz v 17:00')
+  const vnorenaSiroka = precist(`<w:tbl><w:tr><w:tc><w:tbl><w:tr>${tc('x').repeat(64)}</w:tr></w:tbl><w:p/></w:tc>${tc('vedle')}</w:tr>` +
+    `<w:tr>${tc('druhý řádek')}</w:tr></w:tbl><w:p>${wt('Za tabulkou')}</w:p>`)
+  const vs = vnorenaSiroka.bloky[0]
+  ok('široká tabulka v buňce: oříznutá, zbytek vnější tabulky i text za ní zůstanou',
+    vnorenaSiroka.oriznutaTabulka && !vnorenaSiroka.zkraceno && vs?.radky.length === 2 && vs.radky[0][0].bloky[0]?.radky[0].length === MAX_SLOUPCU
+      && vs.radky[0][1]?.bloky.map(text).join('') === 'vedle' && vs.radky[1][0]?.bloky.map(text).join('') === 'druhý řádek'
+      && text(vnorenaSiroka.bloky[1]) === 'Za tabulkou')
 
   // Zaškrtávací políčka a znaky: bez nich nejde poznat, co zákazník zaškrtl.
   const policko = (stav) =>
@@ -957,6 +988,13 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     `<w:p>${wt('Menu: ')}${seznam(`<w:result w:val="1"/>${polozky}`, wt('B – hovězí'))}</w:p>`,
     `<w:p>${policko('<w:default w:val="1"/>').replace(fc('end'), `${fc('separate')}${wt('ANO')}${fc('end')}`)}</w:p>`,
     `<w:p>${policko('').replace('<w:checkBox><w:sizeAuto/></w:checkBox>', '<w:checkBox/>')}${wt(' prázdné')}</w:p>`,
+    // Totéž se samostatnou zavírací značkou (jiné programy než Word):
+    // zavírací značka nemá w:val a nesmí nic přepsat.
+    `<w:p>${policko('<w:default w:val="0"></w:default>')}${wt(' bezlep')}</w:p>`,
+    `<w:p>${policko('<w:default w:val="1"/><w:checked w:val="0"></w:checked>')}${wt(' přepsané')}</w:p>`,
+    `<w:p>${wt('Menu: ')}${seznam(`<w:result w:val="1"></w:result>${polozky}`)}</w:p>`,
+    `<w:p>${wt('Menu: ')}${seznam(`<w:default w:val="2"></w:default>${polozky}`)}</w:p>`,
+    `<w:p>${wt('Menu: ')}${seznam('<w:listEntry w:val="A"></w:listEntry><w:listEntry w:val="B"></w:listEntry><w:result w:val="1"/>')}</w:p>`,
   ].join(''))
   const sz = seznamy.bloky.map(text)
   ok('rozbalovací seznam: vybraná položka (w:result 2 → třetí), entita dekódovaná', sz[0] === 'Menu: C – ryba & zelenina')
@@ -964,6 +1002,8 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('rozbalovací seznam: pořadí mimo seznam nic nevymyslí', sz[3] === 'Menu: ')
   ok('pole, které výsledek ukázalo samo, ho nemá dvakrát (seznam i políčko)', sz[4] === 'Menu: B – hovězí' && sz[5] === 'ANO')
   ok('políčko bez vlastností (<w:checkBox/>) → ☐', sz[6] === '☐ prázdné')
+  ok('pole formuláře se samostatnou zavírací značkou: w:default, w:checked, w:result i w:listEntry jako s prázdnou značkou',
+    JSON.stringify(sz.slice(7)) === JSON.stringify(['☐ bezlep', '☐ přepsané', 'Menu: B – hovězí', 'Menu: C – ryba & zelenina', 'Menu: B']))
 
   // Pole v poli (hromadná korespondence): výsledek vnitřního pole je v příkazu vnějšího.
   const pole = precist([
@@ -1008,6 +1048,16 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('obyčejný obrázek jen jednou (a:graphicData i pic:pic v něm)', znacky[3] === 'obrázek')
   ok('spočítané jsou všechny 4 (věta nad náhledem sedí)', grafika.obrazku === 4)
   ok('vzorec: značka místo zmizení', znacky[4] === 'vzorec' && text(grafika.bloky[4]) === 'Plocha: vzorec')
+  // Převodníky píšou do vzorce `w:t` (smí to). Za značkou by pak stál
+  // text vzorce bez smyslu — zlomek ½ jako „12“.
+  const vzorce = precist([
+    `<w:p>${wt('Plocha ')}<m:oMath><m:r><w:t>πr²</w:t></m:r></m:oMath>${wt(' m²')}</w:p>`,
+    `<w:p><m:oMathPara><m:oMath><m:f><m:num><m:r><w:t>1</w:t></m:r></m:num><m:den><m:r><w:t>2</w:t></m:r></m:den></m:f></m:oMath></m:oMathPara>${wt(' litru')}</w:p>`,
+    '<w:p><m:oMath><m:r><w:rPr><w:b/></w:rPr><w:t>a</w:t><w:br/><w:t>b</w:t></m:r></m:oMath></w:p>',
+    `<w:p></m:oMath>${wt('zbloudilý konec vzorce nic neschová')}</w:p>`,
+  ].join(''))
+  ok('vzorec s w:t (převodníky): jen značka, text kolem zůstane',
+    JSON.stringify(vzorce.bloky.map(text)) === JSON.stringify(['Plocha vzorec m²', 'vzorec litru', 'vzorec', 'zbloudilý konec vzorce nic neschová']))
   ok('tvar s textovým polem bez obrázku: text ano, značka obrázku ne',
     grafika.bloky.some((x) => text(x) === 'Text v tvaru') && grafika.bloky.slice(5).every((x) => !x.useky.some((u) => u.zastupny)))
 
@@ -1160,7 +1210,9 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const entityJinde = precist([
     `<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>${'&amp;'.repeat(1000)}${SPATNA}</w:t></w:r>${wt('viditelné')}</w:p>`,
     `<w:r><w:t>${SPATNA}</w:t></w:r>`,
-    `<w:p><w:pPr><w:pStyle w:val="${SPATNA}"/></w:pPr>${fc('begin')}${it(` MERGEFIELD ${SPATNA} `)}${fc('separate')}${wt('výsledek')}${fc('end')}</w:p>`,
+    // Výsledek vnořeného pole je v příkazu vnějšího jako opravdové w:t.
+    `<w:p><w:pPr><w:pStyle w:val="${SPATNA}"/></w:pPr>${fc('begin')}${it(' IF ')}${fc('begin')}${it(` MERGEFIELD ${SPATNA} `)}${fc('separate')}${wt(SPATNA)}${fc('end')}` +
+      `${it(' = "a" "výsledek" ')}${fc('separate')}${wt('výsledek')}${fc('end')}</w:p>`,
     `<w:p>${sym(SPATNA, 'F0FE')}<w:r><w:fldChar w:fldCharType="${SPATNA}"/></w:r>${wt('dál')}</w:p>`,
   ].join(''))
   ok('entity ve skrytém textu, mimo odstavec, v příkazu pole a v atributech se nedekódují',
@@ -1168,6 +1220,35 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const mnohoEntit = precist(`<w:p><w:r><w:t>${'&amp;'.repeat(MAX_ZNAKU * 3)}${SPATNA}</w:t></w:r></w:p>`)
   ok(`viditelné entity: dekóduje se, co se vejde (přesně ${MAX_ZNAKU} znaků), nesmyslná za stropem nic neshodí`,
     !mnohoEntit.chyba && mnohoEntit.zkraceno && text(mnohoEntit.bloky[0]) === '&'.repeat(MAX_ZNAKU))
+  // Nejdelší entita bez nul navíc má DELKA_ENTITY znaků — i z nich se
+  // musí vejít celý strop. S nulami navíc (11 znaků) dojde dřív strop na
+  // znaky ze souboru: náhled se zkrátí, ale useknutá entita (`&#x`) se
+  // neukáže.
+  const DESET = '&#x0000E9;'
+  const desetZnaku = precist(`<w:p><w:r><w:t>${DESET.repeat(MAX_ZNAKU + 1)}</w:t></w:r></w:p>`)
+  const jedenactZnaku = precist(`<w:p><w:r><w:t>${'&#x00000E9;'.repeat(MAX_ZNAKU)}</w:t></w:r></w:p>`)
+  ok(`entity po ${DELKA_ENTITY} znacích: celý strop (${MAX_ZNAKU} znaků); s nulami navíc zkrácený bez useknuté entity`,
+    DESET.length === DELKA_ENTITY && !desetZnaku.chyba && desetZnaku.zkraceno && text(desetZnaku.bloky[0]) === 'é'.repeat(MAX_ZNAKU)
+      && !jedenactZnaku.chyba && jedenactZnaku.zkraceno && text(jedenactZnaku.bloky[0]) === 'é'.repeat(Math.floor((MAX_ZNAKU * DELKA_ENTITY) / 11)))
+  // Dekóduje se po kusech; kus nesmí useknout entitu (6 znaků na hranici
+  // kusu nesedí), dlouhou entitu ani osamělé `&` v rozbitém souboru.
+  const odk = (s, n) => {
+    try {
+      return odkodovatDo(s, n)
+    } catch (e) {
+      return { text: `výjimka: ${e.message}`, zbylo: null }
+    }
+  }
+  const pres = odk('&quot;'.repeat(100_000), 1_000_000)
+  const osamele = odk(`x&${'y'.repeat(200_000)}&amp;`, 1_000_000)
+  const dlouha = odk(`&#${'0'.repeat(70_000)}65;b`, 1_000_000)
+  ok('odkodovatDo: entity přes hranici kusu celé, osamělé & zůstane, entita delší než kus se dekóduje',
+    pres.text === '"'.repeat(100_000) && pres.zbylo === false
+      && osamele.text === `x&${'y'.repeat(200_000)}&` && osamele.zbylo === false && dlouha.text === 'Ab' && dlouha.zbylo === false)
+  ok('odkodovatDo: nejvýš daný počet znaků a „zbylo“ přesně, když něco zbylo',
+    JSON.stringify(odk('&amp;'.repeat(10), 10)) === JSON.stringify({ text: '&'.repeat(10), zbylo: false })
+      && JSON.stringify(odk('&amp;'.repeat(11), 10)) === JSON.stringify({ text: '&'.repeat(10), zbylo: true })
+      && JSON.stringify(odk(`&#${'0'.repeat(70_000)}65;`, 10)) === JSON.stringify({ text: '', zbylo: true }))
   // Posunutí části z ústředního adresáře musí ukazovat na místní hlavičku.
   const dveCasti = () => zabal({ '[Content_Types].xml': '<Types/>', 'word/document.xml': telo(`<w:p>${wt('x')}</w:p>`) }, 0)
   const bezPodpisu = dveCasti()
@@ -1275,13 +1356,24 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const zbloudileZa = precist(`${'<w:tbl><w:tr><w:tc></w:tbl></w:tc>'.repeat(300)}<w:p>${wt('dno')}</w:p>`)
   ok(`300 tabulek s neuzavřenou buňkou: nejvýš ${MAX_VNORENI_TABULEK} pater, text za nimi v těle dokumentu`,
     [neuzavreneBunky, neuzavreneRadky, zbloudileZa].every((n) => !n.chyba && hloubka(n.bloky) <= MAX_VNORENI_TABULEK && n.bloky.some((x) => text(x) === 'dno')))
+  // Opačně: buněk je při zavření tabulky MÍŇ, než když začala (vnitřní
+  // tabulka bez </w:tbl>, zbloudilé </w:tc> ve vnořené). Zásobník se
+  // nesmí prodloužit — díra v něm shodila čtení („poškozený“).
+  const vnitrniBezKonce = precist(`<w:tbl><w:tr><w:tc><w:tbl><w:tr>${tc('vnitřní')}</w:tr><w:p/></w:tc></w:tr></w:tbl><w:p>${wt('Text za tabulkou')}</w:p>`)
+  const zbloudileVeVnorene = precist(`<w:tbl><w:tr><w:tc><w:tbl><w:tr>${tc('vnitřní')}</w:tc></w:tr></w:tbl><w:p>${wt('vedle')}</w:p></w:tc></w:tr></w:tbl><w:p>${wt('Za')}</w:p>`)
+  ok('vnitřní tabulka bez </w:tbl> a zbloudilé </w:tc> ve vnořené: dokument se přečte, text za tabulkou zůstane',
+    !vnitrniBezKonce.chyba && odstavceVsude(vnitrniBezKonce.bloky).some((x) => text(x) === 'vnitřní') && text(vnitrniBezKonce.bloky.at(-1)) === 'Text za tabulkou'
+      && !zbloudileVeVnorene.chyba && zbloudileVeVnorene.bloky.slice(-2).map(text).join('|') === 'vedle|Za')
 
   // Věta nad náhledem: sloveso před číslem, „po něm“ u jednoho.
-  const vetaNad = (obrazku, zkraceno = false) => poznamkaNahledu({ bloky: [], obrazku, zkraceno })
+  const vetaNad = (obrazku, zkraceno = false, oriznutaTabulka = false) => poznamkaNahledu({ bloky: [], obrazku, zkraceno, oriznutaTabulka })
   ok('věta: 1 obrázek', vetaNad(1) === 'V dokumentu je 1 obrázek — v náhledu je po něm jen značka.')
   ok('věta: 2 obrázky', vetaNad(2) === 'V dokumentu jsou 2 obrázky — v náhledu jsou po nich jen značky.')
   ok('věta: 5 obrázků', vetaNad(5) === 'V dokumentu je 5 obrázků — v náhledu jsou po nich jen značky.')
   ok('věta: zkrácený; bez ničeho žádná věta', vetaNad(0, true) === 'Dokument je dlouhý, náhled ukazuje jen začátek.' && vetaNad(0) === null)
+  ok('věta: oříznutá tabulka je jiná věta než zkrácený dokument (a obojí najednou)',
+    vetaNad(0, false, true) === `Tabulka je moc široká — náhled ukazuje jen prvních ${MAX_SLOUPCU} sloupců.`
+      && vetaNad(0, true, true) === `Tabulka je moc široká — náhled ukazuje jen prvních ${MAX_SLOUPCU} sloupců. Dokument je dlouhý, náhled ukazuje jen začátek.`)
 
   // Kam vede odkaz u přílohy.
   ok('odkaz: PDF a fotka rovnou ze souboru, Word na náhled ve Foodtabu',

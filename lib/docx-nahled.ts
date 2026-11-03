@@ -33,7 +33,8 @@
  * který se ukáže), znaky, úseky textu, odstavce a buňky tabulek
  * (velikost stránky), sloupce v řádku (rozvržení tabulky v prohlížeči)
  * a hloubka vnořených tabulek (stránka se kreslí rekurzí). Delší
- * dokument se ukáže zkrácený.
+ * dokument se ukáže zkrácený; příliš široká tabulka oříznutá, ale
+ * text za ní zůstane.
  *
  * Čistý modul (jen node:zlib) — testuje ho scripts/rezervace.test.mjs.
  */
@@ -73,8 +74,19 @@ export const MAX_ZNACEK_STYLU = 100_000
 export const MAX_ZNACEK_VAZEB = 10_000
 /** Kolik znaků textu náhled ukáže; celé je to v originálu. */
 export const MAX_ZNAKU = 300_000
-/** Nejdelší entita (`&#x10FFFF;`) — kolik znaků v souboru dá jeden znak textu. */
-const DELKA_ENTITY = 10
+/**
+ * Nejdelší entita bez nul navíc (`&#x10FFFF;`) — kolik znaků v souboru
+ * nanejvýš dá jeden znak textu. Strop na to, kolik ze souboru se
+ * dekóduje; entity s nulami navíc (`&#x0041;`) jsou delší a za ním se
+ * náhled zkrátí.
+ */
+export const DELKA_ENTITY = 10
+/**
+ * Kolik znaků ze souboru se dekóduje najednou. Jedním `replace` přes
+ * megabajty `&amp;` by se naráz sebralo statisíce shod — 100 MB paměti
+ * serveru při každém otevření.
+ */
+const KUS_ENTIT = 65_536
 /**
  * Kolik úseků textu (kus se stejným formátem) náhled ukáže. Každý je na
  * stránce prvek; střídáním tučného písma po znaku by z pár kB souboru
@@ -129,7 +141,14 @@ export type Bunka = {
 }
 export type Tabulka = { druh: 'tabulka'; radky: Bunka[][] }
 export type Blok = Odstavec | Tabulka
-export type NahledDocx = { bloky: Blok[]; obrazku: number; zkraceno: boolean }
+export type NahledDocx = {
+  bloky: Blok[]
+  obrazku: number
+  /** Za stropem se přestalo číst — náhled je jen začátek. */
+  zkraceno: boolean
+  /** Řádek tabulky širší než MAX_SLOUPCU se uřízl; čte se dál. */
+  oriznutaTabulka: boolean
+}
 
 type Styl = { nadpis: 0 | 1 | 2 | 3; odrazka: boolean }
 type Beh = { tucne: boolean; kurziva: boolean; podtrzeno: boolean; skryto: boolean }
@@ -143,6 +162,7 @@ export function poznamkaNahledu(n: NahledDocx): string | null {
       `V dokumentu ${prisudek(n.obrazku, 'je', 'jsou', 'je')} ${pocet(n.obrazku, 'obrázek', 'obrázky', 'obrázků')} — v náhledu jsou po nich jen značky.`,
     )
   }
+  if (n.oriznutaTabulka) vety.push(`Tabulka je moc široká — náhled ukazuje jen prvních ${MAX_SLOUPCU} sloupců.`)
   if (n.zkraceno) vety.push('Dokument je dlouhý, náhled ukazuje jen začátek.')
   return vety.length ? vety.join(' ') : null
 }
@@ -379,6 +399,36 @@ function spojit(pred: Usek[], za: Usek[]): Usek[] {
 }
 
 /**
+ * Dekóduje entity (`&amp;`) po kusech a skončí, jakmile má `nejvic`
+ * znaků, nebo po `nejvic × DELKA_ENTITY` znacích ze souboru. Kus
+ * nekončí uprostřed entity — useknutá by se ukázala jako `&quo`.
+ * Vrátí nejvýš `nejvic` znaků a jestli něco zbylo.
+ */
+export function odkodovatDo(s: string, nejvic: number): { text: string; zbylo: boolean } {
+  const strop = Math.min(s.length, nejvic * DELKA_ENTITY)
+  let text = ''
+  let i = 0
+  while (i < strop && text.length < nejvic) {
+    let konec = Math.min(strop, i + KUS_ENTIT)
+    const amp = konec < s.length ? s.lastIndexOf('&', konec - 1) : -1
+    if (amp >= i) {
+      const strednik = s.indexOf(';', amp)
+      if (strednik === -1 || strednik >= konec) {
+        // Poslední `&` v kusu nemá v kusu konec.
+        if (amp > i) konec = amp
+        // Entita delší než kus: celá, když se vejde pod strop.
+        else if (strednik !== -1 && strednik < strop) konec = strednik + 1
+        // Na stropu by z ní zbyl jen začátek.
+        else if (konec === strop) break
+      }
+    }
+    text += odkodovat(s.slice(i, konec))
+    i = konec
+  }
+  return { text: text.slice(0, nejvic), zbylo: i < s.length || text.length > nejvic }
+}
+
+/**
  * Dokončí tabulku. Řádek má nanejvýš MAX_SLOUPCU sloupců mřížky; co je
  * za nimi, se uřízne. Svisle sloučené buňky (`w:vMerge`): pokračování
  * se schová a buňka, kde sloučení začíná, se o řádek protáhne. Sloupec
@@ -455,6 +505,9 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
   // uvnitř, se už nepočítá znovu.
   const grafiky: boolean[] = []
   let vGrafice = 0
+  // Vzorec (`m:oMath`) má v náhledu jen značku. Text v něm — i `w:t`
+  // v `m:r`, jak ho píšou převodníky — by za ní stál bez smyslu (½ jako „12“).
+  let vMatematice = 0
   let vT = false
   let telo = false
   let preskocit = 0
@@ -464,6 +517,7 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
   let bloku = 0
   let znacek = 0
   let zkraceno = false
+  let oriznutaTabulka = false
 
   const dalsiBlok = (): boolean => {
     if (bloku >= MAX_BLOKU) {
@@ -511,24 +565,21 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
     }
   }
 
-  const viditelny = () => !vPrikazu && !behy[behy.length - 1]?.skryto
+  const viditelny = () => !vPrikazu && !vMatematice && !behy[behy.length - 1]?.skryto
 
   /**
    * Přidá text do otevřeného odstavce. `surovy` = text ze souboru, ještě
    * s entitami (`&amp;`): dekóduje se až tady — jen to, co se ukáže,
-   * a jen tolik, kolik se ho ještě vejde. Megabajty entit ve skrytém
-   * textu by jinak zabraly server na vteřiny.
+   * a jen tolik, kolik se ho ještě vejde (odkodovatDo). Megabajty entit
+   * ve skrytém textu by jinak zabraly server na vteřiny.
    */
   const pridatText = (text: string, zastupny = false, surovy = false) => {
     const p = odstavce[odstavce.length - 1]
     if (!p || !viditelny()) return
     if (surovy) {
-      const nejvic = (MAX_ZNAKU - znaku) * DELKA_ENTITY
-      if (text.length > nejvic) {
-        text = text.slice(0, nejvic)
-        zkraceno = true
-      }
-      text = odkodovat(text)
+      const d = odkodovatDo(text, MAX_ZNAKU - znaku)
+      text = d.text
+      if (d.zbylo) zkraceno = true
     }
     if (znaku + text.length > MAX_ZNAKU) {
       text = text.slice(0, MAX_ZNAKU - znaku)
@@ -764,7 +815,12 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
         if (!z.konec && !vGrafice) obrazek()
         break
       case 'm:oMath':
-        if (!z.konec && !z.prazdna) pridatText('vzorec', true)
+        if (z.konec) {
+          if (vMatematice) vMatematice--
+        } else if (!z.prazdna) {
+          pridatText('vzorec', true)
+          vMatematice++
+        }
         break
 
       case 'w:tbl':
@@ -777,9 +833,15 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
               // Buňky, které tabulka nechala otevřené (rozbitý soubor),
               // se zavřou s ní — jinak by další tabulka vlezla do jedné
               // z nich, o patro hlouběji, a strop na vnoření by neplatil.
-              bunky.length = o.bunek
-              kontejnery.length = o.bunek + 1
-              if (dokoncitTabulku(o.tabulka, pokracuji)) zkraceno = true
+              // Jen zkrátit: když už je buňek míň (vnitřní tabulka bez
+              // `</w:tbl>`, zbloudilé `</w:tc>`), prodloužení by do
+              // zásobníku dalo díry a další odstavec by shodil čtení.
+              if (bunky.length > o.bunek) {
+                bunky.length = o.bunek
+                kontejnery.length = o.bunek + 1
+              }
+              // Uříznutý řádek čtení nezastaví — text za tabulkou zůstane.
+              if (dokoncitTabulku(o.tabulka, pokracuji)) oriznutaTabulka = true
             }
           }
         } else if (!z.prazdna) {
@@ -848,21 +910,21 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
     if (p.useky.length) uzavritOdstavec(p)
   }
   vypustitInicialu()
-  for (const o of tabulky) if (dokoncitTabulku(o.tabulka, pokracuji)) zkraceno = true
+  for (const o of tabulky) if (dokoncitTabulku(o.tabulka, pokracuji)) oriznutaTabulka = true
 
   // Bez `w:body` náhled v souboru nic nepoznal (jiná předpona než `w:`,
   // jiný zápis) — „v dokumentu není žádný text“ by byla nepravda.
   if (!telo && !zkraceno) throw new DokumentNecitelny(NEZNAMY)
 
-  return { bloky: koren, obrazku, zkraceno }
+  return { bloky: koren, obrazku, zkraceno, oriznutaTabulka }
 }
 
 /**
  * Část, na kterou ukazuje vazba daného druhu (`Type` končí na `druh`).
  * Cesta v `Target` je vůči složce části, které seznam vazeb patří
- * (`zaklad`), nebo od kořene balíku, když začíná lomítkem. (Adresa
- * mimo balík — `TargetMode="External"` — v balíku žádnou část nenajde
- * a náhled vezme výchozí cestu.)
+ * (`zaklad`), nebo od kořene balíku, když začíná lomítkem. Vazba na
+ * adresu mimo balík (`TargetMode="External"`) se přeskočí — jinak by
+ * schovala skutečnou část za ní.
  */
 function cilVazby(rels: string, druh: string, zaklad: string): string | null {
   let znacek = 0
@@ -871,6 +933,7 @@ function cilVazby(rels: string, druh: string, zaklad: string): string | null {
     if (++znacek > MAX_ZNACEK_VAZEB) return null
     if (!/^<Relationship[\s/]/.test(k.text)) continue
     if (!(hodnota(k.text, 'Type') ?? '').endsWith(`/${druh}`)) continue
+    if (hodnota(k.text, 'TargetMode') === 'External') continue
     const cil = hodnota(k.text, 'Target')
     if (!cil) continue
     if (cil.startsWith('/')) return cil.slice(1)
