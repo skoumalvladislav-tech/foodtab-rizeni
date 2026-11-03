@@ -1659,6 +1659,14 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
     /\.ds-rez-dokumenty \{ list-style: none;/.test(css)
     && css.includes('.ds-rez-polozka[data-neplati] > .ds-rez-polozka-odkaz { opacity: .65; }')
     && !/\.ds-rez-polozka\[data-neplati\] \{[^}]*opacity/.test(css))
+  // „+ N dalších dokumentů“ v týdnu vede na #dokumenty v detailu. Detail
+  // se tu nevykresluje (potřebuje přihlášení a data), proto zdroj.
+  const detail = cti('app/[rozsah]/rezervace/obsah.tsx')
+  const prvky12 = cti('app/[rozsah]/rezervace/prvky.tsx')
+  ok('detail: panel dokumentů má kotvu #dokumenty (vede na ni „+ další“ z týdne) a horní lišta ji nepřekryje',
+    (detail.match(/kotva="dokumenty"/g) ?? []).length === 1
+    && prvky12.includes("<section className={kotva ? 'ds-plocha ds-rez-kotva' : 'ds-plocha'} id={kotva}>")
+    && /\.ds-rez-kotva \{ scroll-margin-top: [1-9]\d*px; \}/.test(css))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
