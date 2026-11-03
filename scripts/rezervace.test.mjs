@@ -767,14 +767,14 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('vazba na chybějící část → word/document.xml', text(chybiCil.bloky[0]) === 'výchozí')
   // Styly podle vazeb hlavní části, ne natvrdo word/styles.xml.
   const stylyJinde = `<w:styles ${W}><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>`
-  const vazbyHlavni = `<Relationships xmlns="${VAZBY}/package/2006/relationships"><Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/styles" Target="styles2.xml"/></Relationships>`
-  const sJinde = precistDocx(zabal({
+  const sJinde = (cil, cesta) => precistDocx(zabal({
     '_rels/.rels': relsWord('/word/document2.xml'),
     'word/document2.xml': telo(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>${wt('Nadpis')}</w:p>`),
-    'word/_rels/document2.xml.rels': vazbyHlavni,
-    'word/styles2.xml': stylyJinde,
-  }))
-  ok('styly podle vazeb hlavní části (word/styles2.xml)', sJinde.bloky[0]?.nadpis === 1)
+    'word/_rels/document2.xml.rels': `<Relationships xmlns="${VAZBY}/package/2006/relationships"><Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/styles" Target="${cil}"/></Relationships>`,
+    [cesta]: stylyJinde,
+  })).bloky[0]?.nadpis
+  ok('styly podle vazeb hlavní části: cesta vůči složce části (styles2.xml → word/styles2.xml)', sJinde('styles2.xml', 'word/styles2.xml') === 1)
+  ok('styly podle vazeb hlavní části: cesta od kořene (/word/styles3.xml)', sJinde('/word/styles3.xml', 'word/styles3.xml') === 1)
 
   // Sloučené buňky: bez nich je hodnota pod cizím sloupcem.
   const sloucena = precist(`<w:tbl>
@@ -805,6 +805,10 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     st?.radky[3][0].vyska === 3 && st.radky[4][0].sloucena && st.radky[5][0].sloucena && !st.radky[3][0].sloucena
       && st.radky[3][0].bloky.map(text).join('') === 'Den 1')
   ok('šířka z cizího souboru v mezích: 99999 → 63, „abc“ → 1', st?.radky[6][0].sirka === 63 && st.radky[7][0].sirka === 1)
+  const jinaSirka = precist(`<w:tbl><w:tr>${tc('Široká', '<w:gridSpan w:val="2"/>')}</w:tr><w:tr>${tc('Úzká', '<w:vMerge/>')}${tc('vedle')}</w:tr></w:tbl>`)
+  const js = jinaSirka.bloky[0]?.radky
+  ok('pokračování (w:vMerge) pod buňkou jiné šířky se nesloučí — tabulka by se rozsypala',
+    js?.[0][0].vyska === 1 && js[1][0].sloucena === false && js[1][0].bloky.map(text).join('') === 'Úzká')
   const vnorenaSloucena = precist(`<w:tbl><w:tr><w:tc><w:tbl><w:tr>${tc('uvnitř', '<w:gridSpan w:val="2"/>')}</w:tr></w:tbl><w:p/></w:tc>${tc('vedle')}</w:tr></w:tbl>`)
   const vnejsi = vnorenaSloucena.bloky[0]?.radky[0]
   ok('w:gridSpan ve vnořené tabulce patří vnitřní buňce', vnejsi?.[0].sirka === 1 && vnejsi[0].bloky[0]?.radky[0][0].sirka === 2)
@@ -822,7 +826,7 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     `<w:p>${policko('<w:default w:val="1"/><w:checked w:val="0"/>')}${wt(' přepsané')}</w:p>`,
     `<w:p>${policko('<w:checked/>')}${wt(' zaškrtnuté')}</w:p>`,
     `<w:p>${sym('Wingdings', 'F0FE')}${sym('Wingdings', 'F0A8')}${sym('Wingdings 2', 'F052')}${sym('Wingdings 2', 'F0A3')}${sym('Symbol', 'F0B0')}${sym('Segoe UI Symbol', '2611')}</w:p>`,
-    `<w:p>${sym('Wingdings', 'F04A')}${wt('X')}</w:p>`,
+    `<w:p>${sym('Wingdings', 'F04A')}${sym('Wingdings', '004A')}${wt('X')}</w:p>`,
   ].join(''))
   const zt = zaskrt.bloky.map(text)
   ok('políčko formuláře: výchozí zaškrtnuté → ☒', zt[0] === '☒ vegetariánské')
@@ -830,7 +834,8 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('políčko formuláře: w:checked w:val="0" přebije výchozí', zt[2] === '☐ přepsané')
   ok('políčko formuláře: <w:checked/> → ☒', zt[3] === '☒ zaškrtnuté')
   ok('znaky z Wingdings, Wingdings 2, Symbol a běžného písma (w:sym)', zt[4] === '☑☐☑☐°☑')
-  ok('neznámý znak z Wingdings je značka „symbol“, ne písmeno', zaskrt.bloky[5]?.useky[0]?.zastupny === true && zt[5] === 'symbolX')
+  ok('neznámý znak z Wingdings (F04A i 004A) je značka „symbol“, ne písmeno „J“',
+    zaskrt.bloky[5]?.useky.slice(0, 2).every((u) => u.zastupny) === true && zt[5] === 'symbolsymbolX')
 
   // Pole v poli (hromadná korespondence): výsledek vnitřního pole je v příkazu vnějšího.
   const fc = (typ) => `<w:r><w:fldChar w:fldCharType="${typ}"/></w:r>`
@@ -867,6 +872,7 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     `<w:p>${kresba(`${MS}/word/2010/wordprocessingGroup`, '<wpg:wgp><pic:pic><pic:blipFill><a:blip r:embed="rId4"/></pic:blipFill></pic:pic></wpg:wgp>')}</w:p>`,
     `<w:p>${kresba(`${G}/picture`, '<pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic>')}</w:p>`,
     `<w:p>${wt('Plocha: ')}<m:oMathPara><m:oMath><m:r><m:t>πr²</m:t></m:r></m:oMath></m:oMathPara></w:p>`,
+    `<w:p>${kresba(`${MS}/word/2010/wordprocessingShape`, `<wps:wsp><wps:txbx><w:txbxContent><w:p>${wt('Text v tvaru')}</w:p></w:txbxContent></wps:txbx></wps:wsp>`)}</w:p>`,
   ].join(''))
   const znacky = grafika.bloky.map((x) => x.useky.filter((u) => u.zastupny).map((u) => u.text).join(','))
   ok('graf nového druhu (cx:chart) má značku', znacky[0] === 'obrázek')
@@ -875,6 +881,8 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('obyčejný obrázek jen jednou (a:graphicData i pic:pic v něm)', znacky[3] === 'obrázek')
   ok('spočítané jsou všechny 4 (věta nad náhledem sedí)', grafika.obrazku === 4)
   ok('vzorec: značka místo zmizení', znacky[4] === 'vzorec' && text(grafika.bloky[4]) === 'Plocha: vzorec')
+  ok('tvar s textovým polem bez obrázku: text ano, značka obrázku ne',
+    grafika.bloky.some((x) => text(x) === 'Text v tvaru') && grafika.bloky.slice(5).every((x) => !x.useky.some((u) => u.zastupny)))
 
   // Iniciála je ve Wordu samostatný odstavec s jedním písmenem.
   const iniciala = precist([
@@ -981,9 +989,15 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   // Tabulky v sobě: stránka se kreslí rekurzí, stovky pater ji shodily.
   const hloubka = (bloky) =>
     bloky.reduce((h, x) => (x.druh === 'tabulka' ? Math.max(h, 1 + x.radky.flat().reduce((v, c) => Math.max(v, hloubka(c.bloky)), 0)) : h), 0)
-  const hluboka = precist(`${'<w:tbl><w:tr><w:tc>'.repeat(1000)}<w:p>${wt('na dně')}</w:p>`)
+  // Patro i: odsazení o 1 a buňka široká i (1, 2, 3 …).
+  const patro = (i) => `<w:tbl><w:tr><w:trPr><w:gridBefore w:val="1"/></w:trPr><w:tc><w:tcPr><w:gridSpan w:val="${i}"/></w:tcPr>`
+  const hluboka = precist(`${Array.from({ length: 1000 }, (_, i) => patro(i + 1)).join('')}<w:p>${wt('na dně')}</w:p>`)
+  let nejhlubsi = hluboka.bloky[0]
+  while (nejhlubsi?.radky[0]?.[1]?.bloky[0]?.druh === 'tabulka') nejhlubsi = nejhlubsi.radky[0][1].bloky[0]
   ok(`1000 tabulek v sobě: nejvýš ${MAX_VNORENI_TABULEK} pater, text se neztratí`,
     hloubka(hluboka.bloky) === MAX_VNORENI_TABULEK && odstavceVsude(hluboka.bloky).some((x) => text(x) === 'na dně'))
+  ok('přeskočená patra nepřidají řádky, buňky, odsazení ani šířku do tabulky o patro výš',
+    nejhlubsi?.radky.length === 1 && nejhlubsi.radky[0].length === 2 && nejhlubsi.radky[0][0].odsazeni && nejhlubsi.radky[0][1].sirka === MAX_VNORENI_TABULEK)
   const uzavrena = precist(`${'<w:tbl><w:tr><w:tc>'.repeat(20)}<w:p>${wt('hluboko')}</w:p>${'</w:tc></w:tr></w:tbl>'.repeat(20)}<w:p>${wt('za tabulkou')}</w:p>`)
   ok('přeskočené hluboké tabulky nezavřou cizí buňku: text za tabulkou je v těle dokumentu',
     uzavrena.bloky.length === 2 && text(uzavrena.bloky[1]) === 'za tabulkou' && odstavceVsude(uzavrena.bloky).some((x) => text(x) === 'hluboko'))

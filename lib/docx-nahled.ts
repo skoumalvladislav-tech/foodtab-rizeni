@@ -73,8 +73,6 @@ export const MAX_BLOKU = 10_000
 export const MAX_VNORENI_TABULEK = 8
 /** Nejširší sloučená buňka (Word má nanejvýš 63 sloupců). */
 const MAX_SIRKA = 63
-/** Kolik polí v sobě se hlídá; hlubší se berou jako příkaz (neukážou se). */
-const MAX_POLI = 32
 
 const NEZNAMY = 'Dokument je uložený způsobem, který náhled nezná.'
 
@@ -391,20 +389,17 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
   const inicialy = new Set<Odstavec>()
   let iniciala: { odstavec: Odstavec; kontejner: Blok[] } | null = null
   // Pole (`w:fldChar`): mezi začátkem a oddělovačem je příkaz, za ním
-  // výsledek. Text ve příkazu (výsledek vnořeného pole) se neukáže.
+  // výsledek. Text v příkazu (výsledek vnořeného pole) se neukáže.
+  // Zásobník hlídá strop na značky — víc polí, než je značek, být nemůže.
   const pole: { prikaz: boolean; znak: string | null }[] = []
   let vPrikazu = 0
-  let poliNavic = 0
   let policko: { zaskrtnuto: boolean | null; vychozi: boolean } | null = null
   // Grafika (`a:graphicData`), která se počítá jako obrázek — co je
   // uvnitř, se už nepočítá znovu.
   const grafiky: boolean[] = []
   let vGrafice = 0
   let vPPr = false
-  let vRPr = false
   let vT = false
-  let vTcPr = false
-  let vTrPr = false
   let telo = false
   let preskocit = 0
   let obrazku = 0
@@ -444,7 +439,7 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
     else pridatBlok(p)
   }
 
-  const viditelny = () => !vPrikazu && !poliNavic && !behy[behy.length - 1]?.skryto
+  const viditelny = () => !vPrikazu && !behy[behy.length - 1]?.skryto
 
   const pridatText = (text: string, zastupny = false) => {
     const p = odstavce[odstavce.length - 1]
@@ -559,24 +554,20 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
           behy.push({ tucne: false, kurziva: false, podtrzeno: false, skryto: false })
         }
         break
-      // Formát značky konce odstavce (`w:rPr` ve `w:pPr`) na text
-      // nepatří — `w:pPr` je před prvním během, `beh` je tam zarážka
-      // `null`. Totéž `w:rPr` ve `w:sdtPr` nebo ve vzorci.
-      case 'w:rPr':
-        if (z.konec) vRPr = false
-        else if (beh && !z.prazdna) vRPr = true
-        break
+      // Formát patří běhu jen z jeho `w:rPr`. Formát značky konce
+      // odstavce (`w:rPr` ve `w:pPr`) ani `w:rPr` ve `w:sdtPr` na text
+      // nepatří — tam není otevřený běh, `beh` je zarážka `null`.
       case 'w:b':
-        if (vRPr && beh && !z.konec) beh.tucne = zapnuto(z.text)
+        if (beh && !z.konec) beh.tucne = zapnuto(z.text)
         break
       case 'w:i':
-        if (vRPr && beh && !z.konec) beh.kurziva = zapnuto(z.text)
+        if (beh && !z.konec) beh.kurziva = zapnuto(z.text)
         break
       case 'w:u':
-        if (vRPr && beh && !z.konec) beh.podtrzeno = zapnuto(z.text)
+        if (beh && !z.konec) beh.podtrzeno = zapnuto(z.text)
         break
       case 'w:vanish':
-        if (vRPr && beh && !z.konec) beh.skryto = zapnuto(z.text)
+        if (beh && !z.konec) beh.skryto = zapnuto(z.text)
         break
 
       case 'w:t':
@@ -607,23 +598,15 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
         if (z.konec) break
         const typ = atribut(z.text, 'w:fldCharType')
         if (typ === 'begin') {
-          if (poliNavic || pole.length >= MAX_POLI) {
-            poliNavic++
-          } else {
-            pole.push({ prikaz: true, znak: null })
-            vPrikazu++
-          }
+          pole.push({ prikaz: true, znak: null })
+          vPrikazu++
         } else if (typ === 'separate') {
           const p = pole[pole.length - 1]
-          if (!poliNavic && p?.prikaz) {
+          if (p?.prikaz) {
             p.prikaz = false
             vPrikazu--
           }
         } else if (typ === 'end') {
-          if (poliNavic) {
-            poliNavic--
-            break
-          }
           const p = pole.pop()
           if (p?.prikaz) vPrikazu--
           if (p?.znak) pridatText(p.znak)
@@ -636,7 +619,7 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
         if (z.konec || z.prazdna) {
           const p = pole[pole.length - 1]
           const s = z.prazdna ? { zaskrtnuto: null, vychozi: false } : policko
-          if (p && s && !poliNavic) p.znak = (s.zaskrtnuto ?? s.vychozi) ? '☒' : '☐'
+          if (p && s) p.znak = (s.zaskrtnuto ?? s.vychozi) ? '☒' : '☐'
           policko = null
         } else {
           policko = { zaskrtnuto: null, vychozi: false }
@@ -699,16 +682,16 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
         if (!prehlizenychTabulek && !z.konec && !z.prazdna && t && dalsiBlok()) t.radky.push([])
         break
       }
-      case 'w:trPr':
-        if (!z.prazdna && !prehlizenychTabulek) vTrPr = !z.konec
-        break
       // Řádek začíná o sloupce dál — bez prázdného místa by se buňky
-      // posunuly doleva pod cizí záhlaví.
+      // posunuly doleva pod cizí záhlaví. (`w:gridBefore` je jen ve
+      // `w:trPr`, `w:gridSpan` a `w:vMerge` jen ve `w:tcPr`; verze před
+      // změnou se přeskočí celá.) V přeskočené hluboké tabulce nepatří
+      // řádku ani buňce o patro výš.
       case 'w:gridBefore': {
         const t = tabulky[tabulky.length - 1]
         const radek = t?.radky[t.radky.length - 1]
         const n = sloupcu(z.text, 0)
-        if (vTrPr && !z.konec && radek && radek.length === 0 && n > 0 && dalsiBlok()) {
+        if (!prehlizenychTabulek && !z.konec && radek && n > 0 && dalsiBlok()) {
           radek.push({ bloky: [], sirka: n, vyska: 1, sloucena: false, odsazeni: true })
         }
         break
@@ -731,15 +714,14 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
           kontejnery.push(bunka.bloky)
         }
         break
-      case 'w:tcPr':
-        if (!z.prazdna && !prehlizenychTabulek) vTcPr = !z.konec
-        break
       case 'w:gridSpan':
-        if (vTcPr && !z.konec && bunky.length) bunky[bunky.length - 1].sirka = sloupcu(z.text, 1)
+      case 'w:vMerge': {
+        const bunka = prehlizenychTabulek || z.konec ? undefined : bunky[bunky.length - 1]
+        if (!bunka) break
+        if (z.jmeno === 'w:gridSpan') bunka.sirka = sloupcu(z.text, 1)
+        else if (atribut(z.text, 'w:val') !== 'restart') pokracuji.add(bunka)
         break
-      case 'w:vMerge':
-        if (vTcPr && !z.konec && bunky.length && atribut(z.text, 'w:val') !== 'restart') pokracuji.add(bunky[bunky.length - 1])
-        break
+      }
     }
   }
 
