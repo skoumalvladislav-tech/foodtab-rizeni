@@ -1534,7 +1534,14 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
   ok('dokumenty v pořadí nahrání jako v detailu (okamžik, ne text), stejný okamžik podle id',
     dok.map((x) => x.id).join('') === 'dcab')
   ok('do kalendáře jen id, název a typ', JSON.stringify(dok[0]) === JSON.stringify({ id: 'd', nazev: 'Objednávka.pdf', mime: PDF }))
-  ok('bez dokumentů prázdný seznam', [null, undefined, []].every((x) => Array.isArray(dokumentyRezervace(x)) && dokumentyRezervace(x).length === 0))
+  // Výjimka by shodila celý běh i se zbylými kontrolami — tady je to jen CHYBA.
+  ok('bez dokumentů prázdný seznam', (() => {
+    try {
+      return [null, undefined, []].every((x) => Array.isArray(dokumentyRezervace(x)) && dokumentyRezervace(x).length === 0)
+    } catch {
+      return false
+    }
+  })())
 
   const tyden = '/perla/rezervace?pohled=tyden&datum=2026-11-03'
   const den = '/perla/rezervace/den/2026-11-03'
