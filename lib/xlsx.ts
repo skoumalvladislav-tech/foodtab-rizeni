@@ -118,10 +118,27 @@ export function odkodovat(s: string): string {
   })
 }
 
+const vzoryAtributu = new Map<string, RegExp>()
+
+/**
+ * Hodnota atributu, jak stojí v souboru — entity (`&amp;`) zůstanou.
+ * Pro hodnoty, které se jen porovnávají (`w:val="0"`): dekódování
+ * megabajtové hodnoty z cizího souboru by zabralo server na vteřiny.
+ */
+export function surovyAtribut(znacka: string, jmeno: string): string | null {
+  let vzor = vzoryAtributu.get(jmeno)
+  if (!vzor) {
+    vzor = new RegExp(`\\b${jmeno}\\s*=\\s*("([^"]*)"|'([^']*)')`)
+    vzoryAtributu.set(jmeno, vzor)
+  }
+  const m = znacka.match(vzor)
+  return m ? (m[2] ?? m[3] ?? '') : null
+}
+
 /** Hodnota atributu ze značky. Respektuje uvozovky obojího druhu. */
 export function atribut(znacka: string, jmeno: string): string | null {
-  const m = znacka.match(new RegExp(`\\b${jmeno}\\s*=\\s*("([^"]*)"|'([^']*)')`))
-  return m ? odkodovat(m[2] ?? m[3] ?? '') : null
+  const v = surovyAtribut(znacka, jmeno)
+  return v === null ? null : odkodovat(v)
 }
 
 /** Postupně vrací značky a text mezi nimi. */

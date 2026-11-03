@@ -2,7 +2,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 import { datumACasSRokemVPasmu } from '@/lib/cas'
-import { poznamkaNahledu, type Blok, type NahledDocx, type Odstavec, type Usek } from '@/lib/docx-nahled'
+import { poznamkaNahledu, prazdnyNahled, type Blok, type NahledDocx, type Odstavec, type Usek } from '@/lib/docx-nahled'
 import { velikostText } from '@/lib/rezervace-prilohy'
 
 import Ikona from '../../ikona'
@@ -133,7 +133,7 @@ export function DokumentObsah({
   /** Proč náhled není (věta pro člověka). */
   chyba: string | null
 }) {
-  const prazdny = nahled !== null && !nahled.bloky.some((b) => b.druh === 'tabulka' || b.useky.length > 0)
+  const prazdny = nahled ? prazdnyNahled(nahled) : null
   const poznamka = nahled ? poznamkaNahledu(nahled) : null
   return (
     <>
@@ -180,7 +180,7 @@ export function DokumentObsah({
               </p>
             ) : null}
             <article className="ds-plocha ds-dokument" aria-label={`Obsah dokumentu ${priloha.nazev}`}>
-              {prazdny ? <p className="ds-dokument-nic">V dokumentu není žádný text.</p> : <ObsahDokumentu bloky={nahled.bloky} />}
+              {prazdny ? <p className="ds-dokument-nic">{prazdny}</p> : <ObsahDokumentu bloky={nahled.bloky} />}
             </article>
           </>
         ) : null}

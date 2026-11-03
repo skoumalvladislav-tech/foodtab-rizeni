@@ -1,6 +1,7 @@
 'use client'
 
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
+import { startTransition } from 'react'
 
 import ErrorState from '@/components/ui/ErrorState'
 
@@ -15,9 +16,19 @@ import ErrorState from '@/components/ui/ErrorState'
  *
  * Kód chyby (`digest`) se ukazuje drobně — kdo se ozve podpoře, má co
  * říct; technický text zprávy se člověku neukazuje.
+ *
+ * „Zkusit znovu“: stránka je serverová, takže samotné `reset()` by
+ * vykreslilo tutéž uloženou chybu znovu. `router.refresh()` si stránku
+ * vyžádá ze serveru a `reset()` ve stejném přechodu ji pak ukáže.
  */
 export default function ChybaDokumentu({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   const { id } = useParams<{ id: string }>()
+  const router = useRouter()
+  const znovu = () =>
+    startTransition(() => {
+      router.refresh()
+      reset()
+    })
   return (
     <ErrorState
       nadpis="Náhled dokumentu se nepodařilo ukázat."
@@ -26,7 +37,7 @@ export default function ChybaDokumentu({ error, reset }: { error: Error & { dige
           <a href={`/api/rezervace/soubor/${encodeURIComponent(id ?? '')}`} className="ft-tl ft-tl-hlavni">
             Stáhnout originál
           </a>
-          <button type="button" className="ft-tl" onClick={reset}>
+          <button type="button" className="ft-tl" onClick={znovu}>
             Zkusit znovu
           </button>
         </div>
