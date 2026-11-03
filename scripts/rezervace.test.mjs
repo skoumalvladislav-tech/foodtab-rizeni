@@ -29,7 +29,10 @@
  *      pole, zaškrtávací políčka, pole, skrytý text, iniciála), hlavní
  *      část a styly podle vazeb; rozbitý soubor, ZIP bomba a soubor
  *      stavěný na zahlcení serveru dají větu pro člověka nebo zkrácený
- *      náhled — každé rozbalení má strop; odkaz u Wordu vede na náhled.
+ *      náhled — každé rozbalení má strop; odkaz u Wordu vede na náhled;
+ *  12. dokumenty u rezervací v kalendáři: v týdnu a v dni odkaz vedle
+ *      odkazu na rezervaci (ne v něm), v měsíci jen sponka; z náhledu
+ *      Wordu „Zpět“ do kalendáře, jen uvnitř Rezervací.
  */
 
 import fs from 'node:fs'
@@ -91,6 +94,7 @@ import {
   adresaPrilohy,
   cestaPrilohy,
   chybaNahrani,
+  dokumentyRezervace,
   jeZip,
   nazevKeStazeni,
   otevritVProhlizeci,
@@ -434,17 +438,21 @@ console.log('\n== 8. Přístup napřed, data potom ==\n')
     && /otevritVProhlizeci\(mime\) \? undefined : \{ download: nazevKeStazeni\(/.test(soubor))
   const prvkyPrilohy = cti('app/[rozsah]/rezervace/prvky.tsx')
   const panel = prvkyPrilohy.slice(prvkyPrilohy.indexOf('export function PanelPriloh'), prvkyPrilohy.indexOf('export function HlaskaAkce'))
+  const odkazPrilohy = prvkyPrilohy.slice(prvkyPrilohy.indexOf('function OdkazPrilohy('), prvkyPrilohy.indexOf('const DOKUMENTU_V_KARTE'))
   // 2. 11.: Word se po kliknutí tiše stáhl a vypadalo to, že se nic
   // nestalo. Teď vede na náhled ve stejném okně (má odkaz zpátky); nová
   // záložka jen u PDF a fotky — z aplikace na ploše iPhonu by otevřela
   // Safari bez přihlášení.
-  // `target` v souboru právě jednou — ve větvi pro PDF a fotku. Jakýkoli
-  // další zápis (target={'_blank'}, {...{ target }}) by Word poslal zpátky
-  // do nové záložky.
-  ok('detail: odkaz u přílohy z adresaPrilohy (Word → náhled), nová záložka jen pro PDF a fotku',
-    /<a\s+href=\{adresaPrilohy\(rozsah, p\.id, p\.mime\)\}\s+\{\.\.\.\(otevritVProhlizeci\(p\.mime\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/.test(panel)
+  // 3. 11.: odkaz je jedna komponenta (OdkazPrilohy) pro detail, týden
+  // i den. `target` i `adresaPrilohy(` v souboru právě jednou — v ní.
+  // Jakýkoli další zápis (target={'_blank'}, {...{ target }}, vlastní
+  // <a href={adresaPrilohy(…)}>) by Word někde poslal do nové záložky.
+  ok('odkaz u přílohy z adresaPrilohy (Word → náhled), nová záložka jen pro PDF a fotku — jen v OdkazPrilohy',
+    /<a\s+href=\{adresaPrilohy\(rozsah, p\.id, p\.mime, zpet\)\}\s+\{\.\.\.\(otevritVProhlizeci\(p\.mime\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/.test(odkazPrilohy)
     && (prvkyPrilohy.match(/\btarget\b/g) ?? []).length === 1
-    && !panel.includes('/api/rezervace/soubor/'))
+    && (prvkyPrilohy.match(/adresaPrilohy\(/g) ?? []).length === 1
+    && !prvkyPrilohy.includes('/api/rezervace/soubor/'))
+  ok('detail: příloha přes OdkazPrilohy', /<OdkazPrilohy rozsah=\{rozsah\} p=\{p\}>\s*\{p\.nazev\}\s*<\/OdkazPrilohy>/.test(panel))
 }
 
 console.log('\n== 9. Univerzální příjmové API ==\n')
@@ -1509,6 +1517,95 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     rozbaleni.length > 20 && rozbaleni.every((m) => typeof m === 'number' && m > 0 && m <= MAX_XML_BAJTU))
   zlib.inflateRawSync = puvodniInflate
   syncBuiltinESMExports()
+}
+
+console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
+{
+  // Zadání Šéfíka: „aby v kalendáři akcí bylo vidět, že je u jednotlivé
+  // rezervace dokument, a možnost ho otevřít“.
+  const PDF = 'application/pdf'
+  const dok = dokumentyRezervace([
+    { id: 'b', nazev: 'Menu.docx', mime: MIME_DOCX, nahrano: '2026-11-03T10:00:00.5+00:00' },
+    { id: 'c', nazev: 'Plán sálu.pdf', mime: PDF, nahrano: '2026-11-03T09:00:00+00:00' },
+    { id: 'a', nazev: 'Dort.jpg', mime: 'image/jpeg', nahrano: '2026-11-03T10:00:00.5+00:00' },
+    // 09:30 v +01:00 = 08:30 UTC — první, i když jako text vypadá později.
+    { id: 'd', nazev: 'Objednávka.pdf', mime: PDF, nahrano: '2026-11-03T09:30:00+01:00' },
+  ])
+  ok('dokumenty v pořadí nahrání jako v detailu (okamžik, ne text), stejný okamžik podle id',
+    dok.map((x) => x.id).join('') === 'dcab')
+  ok('do kalendáře jen id, název a typ', JSON.stringify(dok[0]) === JSON.stringify({ id: 'd', nazev: 'Objednávka.pdf', mime: PDF }))
+  ok('bez dokumentů prázdný seznam', [null, undefined, []].every((x) => Array.isArray(dokumentyRezervace(x)) && dokumentyRezervace(x).length === 0))
+
+  const tyden = '/perla/rezervace?pohled=tyden&datum=2026-11-03'
+  const den = '/perla/rezervace/den/2026-11-03'
+  ok('Word z kalendáře: náhled s adresou zpátky, zakódovanou (& v ní nerozdělí adresu náhledu)',
+    adresaPrilohy('perla', 'abc', MIME_DOCX, tyden) === '/perla/rezervace/dokument/abc?zpet=%2Fperla%2Frezervace%3Fpohled%3Dtyden%26datum%3D2026-11-03')
+  ok('adresa zpátky dorazí do náhledu celá a bezpecnaZpatky ji pustí (týden i den)',
+    [tyden, den].every((z) => {
+      const zDotazu = new URL(adresaPrilohy('perla', 'abc', MIME_DOCX, z), 'https://foodtab.test').searchParams.get('zpet')
+      return zDotazu === z && bezpecnaZpatky('perla', zDotazu) === z
+    }))
+  ok('PDF a fotka z kalendáře rovnou ze souboru (nová záložka, zpátky nepotřebují)',
+    adresaPrilohy('perla', 'abc', PDF, tyden) === '/api/rezervace/soubor/abc' && adresaPrilohy('perla', 'abc', 'image/png', tyden) === '/api/rezervace/soubor/abc')
+  ok('bez adresy zpátky (detail, příloha ke dni) beze změny',
+    adresaPrilohy('perla', 'abc', MIME_DOCX) === '/perla/rezervace/dokument/abc' && adresaPrilohy('perla', 'abc', MIME_DOCX, '') === '/perla/rezervace/dokument/abc')
+
+  const data = cti('app/[rozsah]/rezervace/data.ts')
+  const nacist = data.slice(data.indexOf('export async function nacistRezervace('), data.indexOf('export async function nacistRezervaci('))
+  // Vnořeně = stejný dotaz uživatelským klientem, takže dokumenty hlídá
+  // i RLS `rezervace_prilohy_cist`; přílohy ke dni mají rezervace_id null
+  // a do vnoření se nedostanou.
+  ok('kalendář: dokumenty vnořeně v dotazu na rezervace, uživatelským klientem',
+    nacist.includes('const supabase = await getServerSupabase()')
+    && nacist.includes('.select(`${SLOUPCE_REZERVACE}, rezervace_prilohy(id, nazev, mime, nahrano)`)')
+    && nacist.includes('dokumenty: dokumentyRezervace(rezervace_prilohy)'))
+
+  const prvky = cti('app/[rozsah]/rezervace/prvky.tsx')
+  const kus = (od, po) => {
+    const i = prvky.indexOf(od)
+    const j = prvky.indexOf(po, i + 1)
+    return i === -1 || j === -1 ? '' : prvky.slice(i, j)
+  }
+  const seznamDok = kus('function DokumentyRezervace(', 'export function StitekStavu')
+  const polozka = kus('function PolozkaTydne(', 'export function TydenKalendar')
+  const tydenK = kus('export function TydenKalendar(', '/* ---------- měsíc')
+  const mesic = kus('export function MesicKalendar(', '/* ---------- seznam rezervací dne')
+  const seznam = kus('export function SeznamRezervaci(', '/* ---------- údaje rezervace')
+  ok('seznam dokumentů: odkaz přes OdkazPrilohy s adresou zpátky; „+ N další“ do detailu jen při useknutí',
+    seznamDok.includes('<OdkazPrilohy rozsah={rozsah} p={p} zpet={zpet} className="ds-rez-dokument">')
+    && /zbyva > 0 \? \(\s*<li>\s*<Link href=\{`\/\$\{rozsah\}\/rezervace\/\$\{r\.id\}`\}/.test(seznamDok)
+    && seznamDok.includes('if (r.dokumenty.length === 0) return null'))
+  // Odkaz v odkazu: prohlížeč vnitřní <a> vytáhne ven a karta se rozpadne.
+  ok('týden: dokumenty za odkazem na rezervaci, ne v něm; v kartě nejvýš DOKUMENTU_V_KARTE',
+    polozka.includes('<div className="ds-rez-polozka"')
+    && polozka.indexOf('</Link>') !== -1
+    && polozka.indexOf('<DokumentyRezervace') > polozka.indexOf('</Link>')
+    && polozka.includes('nejvic={DOKUMENTU_V_KARTE}'))
+  ok('týden: obě cesty (jedna i víc poboček) předají adresu zpátky',
+    (tydenK.match(/<PolozkaTydne key=\{r\.id\} rozsah=\{rozsah\} r=\{r\} zpet=\{zpet\} \/>/g) ?? []).length === 2
+    && !/<PolozkaTydne(?![^>]*zpet=)/.test(tydenK))
+  ok('den: všechny dokumenty za odkazem na rezervaci',
+    seznam.indexOf('<DokumentyRezervace rozsah={rozsah} r={r} zpet={zpet} />') > seznam.indexOf('</Link>') && seznam.indexOf('</Link>') !== -1)
+  ok('měsíc: u rezervace s dokumentem sponka, ale žádný odkaz (celá buňka je odkaz na den)',
+    /r\.dokumenty\.length > 0 \? \(\s*<span className="ds-rez-bunka-dokumenty">\s*<Ikona klic="sponka" \/>/.test(mesic)
+    && !/<a\b|<OdkazPrilohy|<DokumentyRezervace/.test(mesic)
+    && (mesic.match(/<Link\b/g) ?? []).length === 1)
+  ok('měsíc: o dokumentech řekne i popis buňky pro čtečku (sponka je jen obrázek)',
+    mesic.includes("s dokumentem` : ''}") && mesic.includes('sk.rezervace.filter((r) => r.dokumenty.length > 0)'))
+
+  const obsah = cti('app/[rozsah]/rezervace/obsah.tsx')
+  ok('týden vrací z náhledu na tenhle týden, den na tenhle den',
+    obsah.includes('zpet={adresaPohledu(rozsah, pohled, datum)}')
+    && obsah.includes('const zpet = `/${rozsah}/rezervace/den/${datum}`')
+    && obsah.includes('<SeznamRezervaci rozsah={rozsah} rezervace={k.rezervace} zpet={zpet} />'))
+
+  const stranka = cti('app/[rozsah]/rezervace/dokument/[id]/page.tsx')
+  ok('náhled: adresa zpátky z kalendáře jen přes bezpecnaZpatky (ven nevede), jinak k rezervaci nebo ke dni',
+    stranka.includes("const zKalendare = typeof zpetText === 'string' && zpetText !== '' ? bezpecnaZpatky(rozsah, zpetText) : null")
+    && /const zpet = zKalendare\s+\? \{ href: zKalendare,/.test(stranka)
+    && stranka.includes("{ href: `/${rozsah}/rezervace/${r.id}`, text: 'Zpět na rezervaci' }"))
+  ok('bezpecnaZpatky: cizí adresa i jiný rozsah skončí v kalendáři rozsahu',
+    ['https://zly.example', '//zly.example', '/jina/rezervace?pohled=tyden', '/perla/rezervace//zly.example'].every((z) => bezpecnaZpatky('perla', z) === '/perla/rezervace'))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

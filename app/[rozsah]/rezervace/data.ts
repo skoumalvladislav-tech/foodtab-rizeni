@@ -2,12 +2,12 @@ import 'server-only'
 
 import { denVPasmu } from '@/lib/cas'
 import { provozniDen } from '@/lib/provozni-den'
-import { KBELIK_REZERVACI } from '@/lib/rezervace-prilohy'
+import { KBELIK_REZERVACI, dokumentyRezervace, type DokumentRezervace } from '@/lib/rezervace-prilohy'
 import { DotazSelhal } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 import type { PobockaRezervaci } from './pristup'
-import type { Poznamka, Priloha, RezervaceRadek } from './prvky'
+import type { Poznamka, Priloha, RezervaceRadek, RezervaceSDokumenty } from './prvky'
 
 /**
  * Dotazy Rezervací a akcí. Vždycky uživatelským klientem — RLS
@@ -23,7 +23,7 @@ const SLOUPCE_REZERVACE =
 
 type RadekDb = Omit<RezervaceRadek, 'zona'>
 
-function sZonou(radky: RadekDb[], pobocky: PobockaRezervaci[]): RezervaceRadek[] {
+function sZonou<T extends RadekDb>(radky: T[], pobocky: PobockaRezervaci[]): (T & { zona: string })[] {
   const zony = new Map(pobocky.map((p) => [p.id, p.zona]))
   return radky.map((r) => ({ ...r, zona: zony.get(r.branch_id) ?? 'Europe/Prague' }))
 }
@@ -33,11 +33,16 @@ export async function dnesPobocky(pobocka: PobockaRezervaci): Promise<string> {
   return (await provozniDen(pobocka.id)) ?? denVPasmu(new Date(), pobocka.zona)
 }
 
-export async function nacistRezervace(tenantId: string, pobocky: PobockaRezervaci[], od: string, doDne: string): Promise<RezervaceRadek[]> {
+/**
+ * Rezervace v kalendáři i s dokumenty, které k nim kdo připojil (přílohy
+ * ke dni ne — ty mají značku dne). Dokumenty jdou vnořeně stejným
+ * dotazem, takže je hlídá i RLS `rezervace_prilohy_cist`.
+ */
+export async function nacistRezervace(tenantId: string, pobocky: PobockaRezervaci[], od: string, doDne: string): Promise<RezervaceSDokumenty[]> {
   const supabase = await getServerSupabase()
   const { data, error } = await supabase
     .from('rezervace')
-    .select(SLOUPCE_REZERVACE)
+    .select(`${SLOUPCE_REZERVACE}, rezervace_prilohy(id, nazev, mime, nahrano)`)
     .eq('tenant_id', tenantId)
     .in('branch_id', pobocky.map((p) => p.id))
     .gte('den', od)
@@ -45,7 +50,11 @@ export async function nacistRezervace(tenantId: string, pobocky: PobockaRezervac
     .order('zacatek')
     .limit(3000)
   if (error) throw new DotazSelhal('rezervace v kalendáři', error)
-  return sZonou((data ?? []) as RadekDb[], pobocky)
+  const radky = (data ?? []) as (RadekDb & { rezervace_prilohy: (DokumentRezervace & { nahrano: string })[] | null })[]
+  return sZonou(
+    radky.map(({ rezervace_prilohy, ...r }) => ({ ...r, dokumenty: dokumentyRezervace(rezervace_prilohy) })),
+    pobocky,
+  )
 }
 
 export async function nacistRezervaci(tenantId: string, id: string, pobocky: PobockaRezervaci[]) {

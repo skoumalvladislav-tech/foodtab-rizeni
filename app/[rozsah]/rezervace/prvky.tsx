@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import type { ReactNode } from 'react'
 
 import Badge from '@/components/ui/Badge'
 import { datumACasSRokemVPasmu, hodinaVPasmu } from '@/lib/cas'
@@ -17,7 +18,7 @@ import {
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
-import { adresaPrilohy, otevritVProhlizeci, velikostText, jeObrazek } from '@/lib/rezervace-prilohy'
+import { adresaPrilohy, otevritVProhlizeci, velikostText, jeObrazek, type DokumentRezervace } from '@/lib/rezervace-prilohy'
 import {
   NAZVY_DRUHU,
   NAZVY_STAVU,
@@ -66,6 +67,9 @@ export type RezervaceRadek = {
   zona: string
 }
 
+/** Rezervace v kalendáři (týden, měsíc, den): i s dokumenty, které k ní kdo připojil. */
+export type RezervaceSDokumenty = RezervaceRadek & { dokumenty: DokumentRezervace[] }
+
 export type Poznamka = {
   id: string
   nadpis: string
@@ -84,6 +88,75 @@ export type Priloha = {
 }
 
 const TONY_BADGE = { dobre: 'success', info: 'accent', pozor: 'warning', bad: 'danger', neutral: 'neutral' } as const
+
+/* ---------- odkaz na přílohu ------------------------------------------ */
+
+const ikonaPrilohy = (mime: string) => (jeObrazek(mime) ? 'fotka' : 'faktura')
+
+/**
+ * Odkaz, který přílohu otevře — v detailu, v týdnu i v dni ten samý.
+ * PDF a fotka v nové záložce ze souboru. Word jako náhled ve Foodtabu ve
+ * stejném okně (má odkaz zpátky) — nová záložka by z aplikace na ploše
+ * iPhonu otevřela Safari bez přihlášení.
+ */
+function OdkazPrilohy({
+  rozsah,
+  p,
+  zpet,
+  className,
+  children,
+}: {
+  rozsah: string
+  p: DokumentRezervace
+  /** Kam z náhledu Wordu „Zpět“ (lib/rezervace-prilohy.ts, `adresaPrilohy`). */
+  zpet?: string
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <a
+      href={adresaPrilohy(rozsah, p.id, p.mime, zpet)}
+      {...(otevritVProhlizeci(p.mime) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+      className={className}
+      title={p.nazev}
+    >
+      {children}
+    </a>
+  )
+}
+
+/** Kolik dokumentů rezervace se vypíše v kartě týdne; zbytek je „+ N další“ do detailu, kde jsou všechny. */
+const DOKUMENTU_V_KARTE = 2
+
+/**
+ * Dokumenty u rezervace v týdnu a v dni. Kreslí se VEDLE odkazu na
+ * rezervaci, ne v něm — odkaz v odkazu HTML nedovolí a prohlížeč by ho
+ * rozbil.
+ */
+function DokumentyRezervace({ rozsah, r, zpet, nejvic }: { rozsah: string; r: RezervaceSDokumenty; zpet: string; nejvic?: number }) {
+  if (r.dokumenty.length === 0) return null
+  const ukazat = nejvic === undefined ? r.dokumenty : r.dokumenty.slice(0, nejvic)
+  const zbyva = r.dokumenty.length - ukazat.length
+  return (
+    <ul className="ds-rez-dokumenty" aria-label={`Dokumenty: ${titulek(r)}`}>
+      {ukazat.map((p) => (
+        <li key={p.id}>
+          <OdkazPrilohy rozsah={rozsah} p={p} zpet={zpet} className="ds-rez-dokument">
+            <Ikona klic={ikonaPrilohy(p.mime)} />
+            <span>{p.nazev}</span>
+          </OdkazPrilohy>
+        </li>
+      ))}
+      {zbyva > 0 ? (
+        <li>
+          <Link href={`/${rozsah}/rezervace/${r.id}`} className="ds-rez-dokument-dalsi">
+            + {zbyva} {sklonovat(zbyva, 'další', 'další', 'dalších')}
+          </Link>
+        </li>
+      ) : null}
+    </ul>
+  )
+}
 
 export function StitekStavu({ stav }: { stav: StavRezervace }) {
   return <Badge tone={TONY_BADGE[TON_STAVU[stav]]}>{NAZVY_STAVU[stav]}</Badge>
@@ -256,34 +329,32 @@ export function NastrojePohledu({
 
 export type DenTydne = {
   den: string
-  rezervace: RezervaceRadek[]
+  rezervace: RezervaceSDokumenty[]
   poznamek: number
   priloh: number
   /** Svátek toho data (lib/svatky.ts), nebo `null`. */
   svatek: Svatek | null
 }
 
-function PolozkaTydne({ rozsah, r }: { rozsah: string; r: RezervaceRadek }) {
+function PolozkaTydne({ rozsah, r, zpet }: { rozsah: string; r: RezervaceSDokumenty; zpet: string }) {
   return (
-    <Link
-      href={`/${rozsah}/rezervace/${r.id}`}
-      className="ds-rez-polozka"
-      data-druh={r.druh}
-      data-neplati={pocitaSeDoHostu(r.stav) ? undefined : ''}
-    >
-      <strong>
-        {hodinaVPasmu(r.zacatek, r.zona)} {titulek(r)}
-      </strong>
-      <small>
-        {[
-          r.druh === 'akce' ? r.typ_akce || 'Akce' : null,
-          r.pocet_osob !== null ? `${r.pocet_osob} os.` : null,
-          pocitaSeDoHostu(r.stav) ? (r.stav === 'ceka' ? 'předběžná' : null) : NAZVY_STAVU[r.stav].toLowerCase(),
-        ]
-          .filter(Boolean)
-          .join(' · ')}
-      </small>
-    </Link>
+    <div className="ds-rez-polozka" data-druh={r.druh} data-neplati={pocitaSeDoHostu(r.stav) ? undefined : ''}>
+      <Link href={`/${rozsah}/rezervace/${r.id}`} className="ds-rez-polozka-odkaz">
+        <strong>
+          {hodinaVPasmu(r.zacatek, r.zona)} {titulek(r)}
+        </strong>
+        <small>
+          {[
+            r.druh === 'akce' ? r.typ_akce || 'Akce' : null,
+            r.pocet_osob !== null ? `${r.pocet_osob} os.` : null,
+            pocitaSeDoHostu(r.stav) ? (r.stav === 'ceka' ? 'předběžná' : null) : NAZVY_STAVU[r.stav].toLowerCase(),
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </small>
+      </Link>
+      <DokumentyRezervace rozsah={rozsah} r={r} zpet={zpet} nejvic={DOKUMENTU_V_KARTE} />
+    </div>
   )
 }
 
@@ -293,6 +364,7 @@ export function TydenKalendar({
   dnes,
   smiZapisovat,
   pobocky,
+  zpet,
 }: {
   rozsah: string
   dny: DenTydne[]
@@ -300,6 +372,8 @@ export function TydenKalendar({
   smiZapisovat: boolean
   /** Pobočky rozsahu v pořadí legendy. Je-li jich víc, má každá v dni svůj rámeček. */
   pobocky: PobockaKalendare[]
+  /** Adresa tohohle týdne — sem vede „Zpět“ z náhledu dokumentu. */
+  zpet: string
 }) {
   const vic = pobocky.length > 1
   const podleId = new Map(pobocky.map((p) => [p.id, p]))
@@ -354,12 +428,12 @@ export function TydenKalendar({
                         <span>{souhrnKratce(souhrnDne(sk.rezervace))}</span>
                       </p>
                       {sk.rezervace.map((r) => (
-                        <PolozkaTydne key={r.id} rozsah={rozsah} r={r} />
+                        <PolozkaTydne key={r.id} rozsah={rozsah} r={r} zpet={zpet} />
                       ))}
                     </div>
                   )
                 })
-              : d.rezervace.map((r) => <PolozkaTydne key={r.id} rozsah={rozsah} r={r} />)}
+              : d.rezervace.map((r) => <PolozkaTydne key={r.id} rozsah={rozsah} r={r} zpet={zpet} />)}
             {smiZapisovat ? (
               <Link href={`/${rozsah}/rezervace/nova?datum=${d.den}`} className="ds-rez-den-pridat">
                 + Přidat
@@ -375,7 +449,7 @@ export function TydenKalendar({
 /* ---------- měsíc ------------------------------------------------------ */
 
 export type DenMesice = DenMrizky & {
-  rezervace: RezervaceRadek[]
+  rezervace: RezervaceSDokumenty[]
   poznamek: number
   /** Svátek toho data (lib/svatky.ts), nebo `null`. */
   svatek: Svatek | null
@@ -425,6 +499,8 @@ export function MesicKalendar({
             : pobocky.length > 1
               ? pobocky.map((p) => `${p.nazev}: ${souhrnText(souhrnDne(d.rezervace.filter((r) => r.branch_id === p.id)))}`).join('; ')
               : souhrnText(s)
+          // Sponka u rezervace je jen obrázek — čtečka ji z popisu buňky nepozná.
+          const sDokumentem = skupiny.reduce((n, sk) => n + sk.rezervace.filter((r) => r.dokumenty.length > 0).length, 0)
           return (
             <Link
               key={d.den}
@@ -435,7 +511,7 @@ export function MesicKalendar({
               data-vikend={jeVikend(d.den) && d.vMesici ? '' : undefined}
               data-svatek={d.svatek ? '' : undefined}
               data-prazdny={prazdny ? '' : undefined}
-              aria-label={`${denKratce(d.den)}${d.svatek ? `, ${popisSvatku(d.svatek)}` : ''}: ${popis}${d.poznamek > 0 ? `, ${pocet(d.poznamek, 'poznámka', 'poznámky', 'poznámek')}` : ''}`}
+              aria-label={`${denKratce(d.den)}${d.svatek ? `, ${popisSvatku(d.svatek)}` : ''}: ${popis}${sDokumentem > 0 ? `, ${pocet(sDokumentem, 'rezervace', 'rezervace', 'rezervací')} s dokumentem` : ''}${d.poznamek > 0 ? `, ${pocet(d.poznamek, 'poznámka', 'poznámky', 'poznámek')}` : ''}`}
             >
               <span className="ds-rez-bunka-cislo ds-cislo">{den}.</span>
               <span className="ds-rez-bunka-den-nazev">{denKratce(d.den)}</span>
@@ -451,13 +527,21 @@ export function MesicKalendar({
                         key={r.id}
                         className="ds-rez-bunka-radek"
                         data-druh={r.druh}
-                        title={`${p.nazev} · ${hodinaVPasmu(r.zacatek, r.zona)} ${titulek(r)}${r.pocet_osob !== null ? ` · ${osobyText(r.pocet_osob)}` : ''}`}
+                        title={`${p.nazev} · ${hodinaVPasmu(r.zacatek, r.zona)} ${titulek(r)}${r.pocet_osob !== null ? ` · ${osobyText(r.pocet_osob)}` : ''}${r.dokumenty.length > 0 ? ` · ${pocet(r.dokumenty.length, 'dokument', 'dokumenty', 'dokumentů')}` : ''}`}
                       >
                         <ZnackaPobocky pobocka={p} />
                         {r.druh === 'akce' ? <Ikona klic="praporek" /> : null}
                         <span className="ds-rez-bunka-text">
                           {hodinaVPasmu(r.zacatek, r.zona)} {titulek(r)}
                         </span>
+                        {/* Jen značka: celá buňka je odkaz na den a odkaz v odkazu
+                            HTML nedovolí. Dokument se otevře v dni nebo v týdnu. */}
+                        {r.dokumenty.length > 0 ? (
+                          <span className="ds-rez-bunka-dokumenty">
+                            <Ikona klic="sponka" />
+                            {r.dokumenty.length > 1 ? r.dokumenty.length : null}
+                          </span>
+                        ) : null}
                       </span>
                     ))}
                     {sk.rezervace.length > RADKU_V_BUNCE ? (
@@ -480,7 +564,16 @@ export function MesicKalendar({
 
 /* ---------- seznam rezervací dne ------------------------------------- */
 
-export function SeznamRezervaci({ rozsah, rezervace }: { rozsah: string; rezervace: RezervaceRadek[] }) {
+export function SeznamRezervaci({
+  rozsah,
+  rezervace,
+  zpet,
+}: {
+  rozsah: string
+  rezervace: RezervaceSDokumenty[]
+  /** Adresa dne — sem vede „Zpět“ z náhledu dokumentu. */
+  zpet: string
+}) {
   if (rezervace.length === 0) return <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>Na tenhle den nic zapsaného.</p>
   return (
     <ul className="ds-rez-seznam">
@@ -510,6 +603,7 @@ export function SeznamRezervaci({ rozsah, rezervace }: { rozsah: string; rezerva
               {r.zdroj !== 'rucne' ? <Badge>{r.zdroj === 'csv' ? 'ze souboru' : 'ze systému'}</Badge> : null}
             </span>
           </Link>
+          <DokumentyRezervace rozsah={rozsah} r={r} zpet={zpet} />
         </li>
       ))}
     </ul>
@@ -732,17 +826,10 @@ export function PanelPriloh({
         <ul className="ds-rez-prilohy" style={{ marginBottom: smiZapisovat ? '14px' : 0 }}>
           {prilohy.map((p) => (
             <li key={p.id} className="ds-rez-priloha">
-              <Ikona klic={jeObrazek(p.mime) ? 'fotka' : 'faktura'} />
-              {/* PDF a fotka v nové záložce ze souboru. Word jako náhled ve
-                  Foodtabu ve stejném okně (má odkaz zpátky) — nová záložka
-                  by z aplikace na ploše iPhonu otevřela Safari bez přihlášení. */}
-              <a
-                href={adresaPrilohy(rozsah, p.id, p.mime)}
-                {...(otevritVProhlizeci(p.mime) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-                title={p.nazev}
-              >
+              <Ikona klic={ikonaPrilohy(p.mime)} />
+              <OdkazPrilohy rozsah={rozsah} p={p}>
                 {p.nazev}
-              </a>
+              </OdkazPrilohy>
               <small>
                 {velikostText(p.velikost)} · {datumACasSRokemVPasmu(p.nahrano, zona)}
               </small>
