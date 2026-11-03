@@ -936,6 +936,9 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     vnorenaSiroka.oriznutaTabulka && !vnorenaSiroka.zkraceno && vs?.radky.length === 2 && vs.radky[0][0].bloky[0]?.radky[0].length === MAX_SLOUPCU
       && vs.radky[0][1]?.bloky.map(text).join('') === 'vedle' && vs.radky[1][0]?.bloky.map(text).join('') === 'druhý řádek'
       && text(vnorenaSiroka.bloky[1]) === 'Za tabulkou')
+  const neuzavrenaSiroka = precist(`<w:tbl><w:tr>${tc('x').repeat(64)}`)
+  ok('neuzavřená široká tabulka (useknutý soubor): oříznutá, ne zkrácená',
+    neuzavrenaSiroka.oriznutaTabulka && !neuzavrenaSiroka.zkraceno && neuzavrenaSiroka.bloky[0]?.radky[0].length === MAX_SLOUPCU)
 
   // Zaškrtávací políčka a znaky: bez nich nejde poznat, co zákazník zaškrtl.
   const policko = (stav) =>
