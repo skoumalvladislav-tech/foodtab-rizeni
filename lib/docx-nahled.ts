@@ -445,7 +445,8 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
   // výsledek. Text v příkazu (výsledek vnořeného pole) se neukáže.
   // Políčko a rozbalovací seznam formuláře mají hodnotu v `w:ffData`
   // na začátku pole; ukáže se na konci, když pole samo žádný výsledek
-  // neukázalo (`znaku` = kolik textu bylo před výsledkem).
+  // neukázalo (`znaku` = kolik textu bylo na začátku pole; příkaz se
+  // neukazuje, takže je to i stav před výsledkem).
   const pole: { prikaz: boolean; hodnota: string | null; znaku: number }[] = []
   let vPrikazu = 0
   let policko: { zaskrtnuto: boolean | null; vychozi: boolean } | null = null
@@ -520,7 +521,7 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
    */
   const pridatText = (text: string, zastupny = false, surovy = false) => {
     const p = odstavce[odstavce.length - 1]
-    if (!p || text === '' || !viditelny()) return
+    if (!p || !viditelny()) return
     if (surovy) {
       const nejvic = (MAX_ZNAKU - znaku) * DELKA_ENTITY
       if (text.length > nejvic) {
@@ -533,6 +534,8 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
       text = text.slice(0, MAX_ZNAKU - znaku)
       zkraceno = true
     }
+    // Na stropu nezbude nic — prázdný úsek by z odstavce udělal neprázdný.
+    if (!text) return
     const beh = (!zastupny && behy[behy.length - 1]) || { tucne: false, kurziva: false, podtrzeno: false }
     const posledni = p.useky[p.useky.length - 1]
     if (
@@ -693,7 +696,6 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
           const p = pole[pole.length - 1]
           if (p?.prikaz) {
             p.prikaz = false
-            p.znaku = znaku
             vPrikazu--
           }
         } else if (typ === 'end') {
@@ -716,7 +718,6 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
         }
         break
       case 'w:ddList':
-        if (z.prazdna) break
         if (z.konec) {
           const p = pole[pole.length - 1]
           if (p && seznam) p.hodnota = seznam.polozky[seznam.vybrano ?? seznam.vychozi] ?? null

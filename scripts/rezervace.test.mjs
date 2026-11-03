@@ -812,14 +812,14 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     <w:style w:type="paragraph" w:styleId="Pulka"><w:name w:val="Půlka"/><w:pPr><w:outlineLvl w:val="0.5"/></w:pPr></w:style>
     <w:style w:type="paragraph" w:styleId="Patra"><w:name w:val="Pět"/><w:pPr><w:outlineLvl w:val="5"/></w:pPr></w:style>
     <w:style w:type="paragraph" w:styleId="Devet"><w:name w:val="Devět"/><w:pPr><w:outlineLvl w:val="9"/></w:pPr></w:style>
-    <w:style w:type="paragraph" w:styleId="Zaporna"><w:name w:val="Záporná"/><w:pPr><w:outlineLvl w:val="-1"/></w:pPr></w:style>
+    <w:style w:type="paragraph" w:styleId="Zaporna"><w:name w:val="Záporná"/><w:basedOn w:val="Nadpis4"/><w:pPr><w:outlineLvl w:val="-1"/></w:pPr></w:style>
   </w:styles>`
   const sp = (styl, t) => `<w:p><w:pPr><w:pStyle w:val="${styl}"/></w:pPr>${wt(t)}</w:p>`
   const op = (uroven, t) => `<w:p><w:pPr><w:outlineLvl w:val="${uroven}"/></w:pPr>${wt(t)}</w:p>`
   const urovne = precist(
     sp('Nzev', 'Název') + sp('Podtitul', 'Podtitul') + sp('Nadpis4', 'Nadpis 4') + sp('Menu', 'Svíčková') +
       sp('Pulka', 'Půlka') + sp('Patra', 'Pět') + sp('Devet', 'Devět') + sp('Zaporna', 'Záporná') +
-      op('0.5', 'p Půlka') + op('5', 'p Pět') + op('9', 'p Devět') + op('-1', 'p Záporná') +
+      op('0.5', 'p Půlka') + op('5', 'p Pět') + op('9', 'p Devět') + `<w:p><w:pPr><w:pStyle w:val="Nzev"/><w:outlineLvl w:val="-1"/></w:pPr>${wt('p Záporná')}</w:p>` +
       '<w:p><w:pPr><w:pStyle w:val="Odrazky"/><w:numPr><w:numId w:val="0"></w:numId></w:numPr></w:pPr><w:r><w:t>bez odrážky</w:t></w:r></w:p>',
     { 'word/styles.xml': stylyUrovni },
   )
@@ -828,8 +828,9 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('„heading 4“ a úroveň osnovy 5 (ve stylu i v odstavci) = nadpis 3, ne 4 a víc',
     ur['Nadpis 4']?.nadpis === 3 && ur['Pět']?.nadpis === 3 && ur['p Pět']?.nadpis === 3)
   ok('úroveň osnovy 0.5 (ve stylu i v odstavci) není nadpis „1.5“', ur['Půlka']?.nadpis === 0 && ur['p Půlka']?.nadpis === 0)
-  ok('úroveň osnovy 9 (= běžný text) a -1 nadpis nejsou',
-    ur['Devět']?.nadpis === 0 && ur['p Devět']?.nadpis === 0 && ur['Záporná']?.nadpis === 0 && ur['p Záporná']?.nadpis === 0)
+  ok('úroveň osnovy 9 (= běžný text) nadpis není', ur['Devět']?.nadpis === 0 && ur['p Devět']?.nadpis === 0)
+  ok('úroveň osnovy -1 se nepočítá: nadpis ze stylu zůstane (zděděný 4 → 3, Title → 1)',
+    ur['Záporná']?.nadpis === 3 && ur['p Záporná']?.nadpis === 1)
   ok('odrážka zděděná přes w:basedOn (styl „Menu“ na „List Bullet“)', ur['Svíčková']?.odrazka === true)
   ok('<w:numId w:val="0"></w:numId> (se zavírací značkou) odrážku vypne', ur['bez odrážky']?.odrazka === false)
 
@@ -953,12 +954,14 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     `<w:p>${wt('Menu: ')}${seznam(`<w:result w:val="7"/>${polozky}`)}</w:p>`,
     `<w:p>${wt('Menu: ')}${seznam(`<w:result w:val="1"/>${polozky}`, wt('B – hovězí'))}</w:p>`,
     `<w:p>${policko('<w:default w:val="1"/>').replace(fc('end'), `${fc('separate')}${wt('ANO')}${fc('end')}`)}</w:p>`,
+    `<w:p>${policko('').replace('<w:checkBox><w:sizeAuto/></w:checkBox>', '<w:checkBox/>')}${wt(' prázdné')}</w:p>`,
   ].join(''))
   const sz = seznamy.bloky.map(text)
   ok('rozbalovací seznam: vybraná položka (w:result 2 → třetí), entita dekódovaná', sz[0] === 'Menu: C – ryba & zelenina')
   ok('rozbalovací seznam: bez výběru výchozí (w:default), bez obojího první', sz[1] === 'Menu: B – hovězí' && sz[2] === 'Menu: A – kuře')
   ok('rozbalovací seznam: pořadí mimo seznam nic nevymyslí', sz[3] === 'Menu: ')
   ok('pole, které výsledek ukázalo samo, ho nemá dvakrát (seznam i políčko)', sz[4] === 'Menu: B – hovězí' && sz[5] === 'ANO')
+  ok('políčko bez vlastností (<w:checkBox/>) → ☐', sz[6] === '☐ prázdné')
 
   // Pole v poli (hromadná korespondence): výsledek vnitřního pole je v příkazu vnějšího.
   const pole = precist([
@@ -1081,6 +1084,13 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const ac = zbloudilyBeh.bloky.find((x) => text(x) === 'AC')
   ok('zbloudilé </w:r> v textovém poli nezavře běh venku: „AC“ tučně v jednom kuse',
     ac?.useky.length === 1 && ac.useky[0].tucne && zbloudilyBeh.bloky.some((x) => text(x) === 'B'))
+  const neuzavrenyBeh = precist(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>A</w:t>${poleVBehu('<w:p><w:r><w:rPr><w:i/></w:rPr><w:t>B</w:t></w:p>')}<w:t>C</w:t></w:r></w:p>`)
+  const ac2 = neuzavrenyBeh.bloky.find((x) => text(x) === 'AC')
+  ok('neuzavřený běh v textovém poli se zavře s polem: „AC“ venku tučně v jednom kuse, ne kurzívou',
+    ac2?.useky.length === 1 && ac2.useky[0].tucne && !ac2.useky[0].kurziva)
+  const prazdnePole = precist(`<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>A</w:t>${poleVBehu('').replace('<w:txbxContent></w:txbxContent>', '<w:txbxContent/>')}<w:t>C</w:t></w:r></w:p>`)
+  ok('prázdné textové pole (<w:txbxContent/>) nezmění formát běhu venku',
+    prazdnePole.bloky.length === 1 && prazdnePole.bloky[0].useky.length === 1 && prazdnePole.bloky[0].useky[0].tucne && text(prazdnePole.bloky[0]) === 'AC')
   const sdtVPoli = precist(
     `<w:p><w:r><w:t xml:space="preserve">Před </w:t>${poleVBehu(`<w:sdt><w:sdtPr><w:rPr><w:b/><w:vanish/></w:rPr></w:sdtPr><w:sdtContent><w:p>${wt('V poli')}</w:p></w:sdtContent></w:sdt>`)}<w:t>Za polem</w:t></w:r></w:p>`,
   )
@@ -1169,6 +1179,8 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const dlouhy = precist(`<w:p><w:r><w:t>${'a'.repeat(MAX_ZNAKU - 5)}</w:t></w:r></w:p><w:p><w:r><w:t>bbbbbbbbbb</w:t></w:r></w:p><w:p><w:r><w:t>c</w:t></w:r></w:p>`)
   ok(`dlouhý text: zkrácený přesně na ${MAX_ZNAKU} znaků, další odstavce nepřibudou`,
     dlouhy.zkraceno && dlouhy.bloky.map(text).join('').length === MAX_ZNAKU && dlouhy.bloky.length === 2)
+  const presneNaStrop = precist(`<w:p>${wt('a'.repeat(MAX_ZNAKU))}</w:p><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>x</w:t></w:r></w:p>`)
+  ok('text přesně na strop: další odstavec nepřibude ani prázdný', presneNaStrop.zkraceno && presneNaStrop.bloky.length === 1)
   const mnoho = precist('<w:p/>'.repeat(MAX_BLOKU + 5))
   ok(`moc odstavců: nejvýš ${MAX_BLOKU}, zkrácený`, mnoho.zkraceno && mnoho.bloky.length === MAX_BLOKU)
   // 40 kB soubor s milionem prázdných buněk kreslil server desítky vteřin.
@@ -1249,8 +1261,10 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   // další tabulka vlezla do ní a strop pater by neplatil.
   const neuzavreneBunky = precist(`${'<w:tbl><w:tr><w:tc></w:tbl>'.repeat(300)}<w:p>${wt('dno')}</w:p>`)
   const neuzavreneRadky = precist(`${'<w:tbl><w:tr><w:tc><w:p/></w:tr></w:tbl>'.repeat(300)}<w:p>${wt('dno')}</w:p>`)
+  // Zbloudilé </w:tc> za takovou tabulkou nesmí zavřít tělo dokumentu.
+  const zbloudileZa = precist(`${'<w:tbl><w:tr><w:tc></w:tbl></w:tc>'.repeat(300)}<w:p>${wt('dno')}</w:p>`)
   ok(`300 tabulek s neuzavřenou buňkou: nejvýš ${MAX_VNORENI_TABULEK} pater, text za nimi v těle dokumentu`,
-    [neuzavreneBunky, neuzavreneRadky].every((n) => !n.chyba && hloubka(n.bloky) <= MAX_VNORENI_TABULEK && n.bloky.some((x) => text(x) === 'dno')))
+    [neuzavreneBunky, neuzavreneRadky, zbloudileZa].every((n) => !n.chyba && hloubka(n.bloky) <= MAX_VNORENI_TABULEK && n.bloky.some((x) => text(x) === 'dno')))
 
   // Věta nad náhledem: sloveso před číslem, „po něm“ u jednoho.
   const vetaNad = (obrazku, zkraceno = false) => poznamkaNahledu({ bloky: [], obrazku, zkraceno })
