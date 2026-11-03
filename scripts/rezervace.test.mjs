@@ -934,9 +934,11 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const wingdings = precist(WINGDINGS_ZNAKY.map(([kod]) => `<w:p>${sym('Wingdings', kod)}</w:p>`).join(''))
   const spatneZnaky = WINGDINGS_ZNAKY.filter(([, znak], i) => text(wingdings.bloky[i]) !== znak).map(([kod]) => kod)
   ok('šipky, smajlíky, čtverečky a kolečka z Wingdings se převedou', spatneZnaky.length === 0 ? true : (console.log('   ', spatneZnaky), false))
-  const neznamy = precist(`<w:p>${sym('Wingdings', 'F021')}${sym('Arial', '110000')}${wt('X')}</w:p>`)
-  ok('neznámý znak z Wingdings a kód mimo Unicode (110000) jsou značka „symbol“, dokument se přečte',
-    neznamy.bloky[0]?.useky.slice(0, 2).every((u) => u.zastupny) === true && text(neznamy.bloky[0]) === 'symbolsymbolX')
+  // 0021 bez předpony F0: kód pod 0xF000, ale ve Wingdings to není „!“,
+  // je to tužka — symbolové písmo se Unicodem číst nesmí.
+  const neznamy = precist(`<w:p>${sym('Wingdings', 'F021')}${sym('Wingdings', '0021')}${sym('Arial', '110000')}${wt('X')}</w:p>`)
+  ok('neznámý znak z Wingdings (F021 i 0021) a kód mimo Unicode (110000) jsou značka „symbol“, dokument se přečte',
+    neznamy.bloky[0]?.useky.slice(0, 3).every((u) => u.zastupny) === true && text(neznamy.bloky[0]) === 'symbolsymbolsymbolX')
 
   // Pole: začátek, oddělovač výsledku, konec.
   const fc = (typ) => `<w:r><w:fldChar w:fldCharType="${typ}"/></w:r>`
@@ -1234,13 +1236,21 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     bloky.reduce((h, x) => (x.druh === 'tabulka' ? Math.max(h, 1 + x.radky.flat().reduce((v, c) => Math.max(v, hloubka(c.bloky)), 0)) : h), 0)
   // Patro i: odsazení o 1 a buňka široká i (1, 2, 3 …).
   const patro = (i) => `<w:tbl><w:tr><w:trPr><w:gridBefore w:val="1"/></w:trPr><w:tc><w:tcPr><w:gridSpan w:val="${i}"/></w:tcPr>`
-  const hluboka = precist(`${Array.from({ length: 1000 }, (_, i) => patro(i + 1)).join('')}<w:p>${wt('na dně')}</w:p>`)
-  let nejhlubsi = hluboka.bloky[0]
-  while (nejhlubsi?.radky[0]?.[1]?.bloky[0]?.druh === 'tabulka') nejhlubsi = nejhlubsi.radky[0][1].bloky[0]
-  ok(`1000 tabulek v sobě: nejvýš ${MAX_VNORENI_TABULEK} pater, text se neztratí`,
-    hloubka(hluboka.bloky) === MAX_VNORENI_TABULEK && odstavceVsude(hluboka.bloky).some((x) => text(x) === 'na dně'))
-  ok('přeskočená patra nepřidají řádky, buňky, odsazení ani šířku do tabulky o patro výš',
-    nejhlubsi?.radky.length === 1 && nejhlubsi.radky[0].length === 2 && nejhlubsi.radky[0][0].odsazeni && nejhlubsi.radky[0][1].sirka === MAX_VNORENI_TABULEK)
+  // Bez stropu tisíc pater neunese ani rekurze tady v testu (odstavceVsude
+  // přeteče zásobník) — to je CHYBA téhle kontroly, ne pád celého běhu.
+  let hloubkaSedi = false
+  let patraSedi = false
+  try {
+    const hluboka = precist(`${Array.from({ length: 1000 }, (_, i) => patro(i + 1)).join('')}<w:p>${wt('na dně')}</w:p>`)
+    let nejhlubsi = hluboka.bloky[0]
+    while (nejhlubsi?.radky[0]?.[1]?.bloky[0]?.druh === 'tabulka') nejhlubsi = nejhlubsi.radky[0][1].bloky[0]
+    hloubkaSedi = hloubka(hluboka.bloky) === MAX_VNORENI_TABULEK && odstavceVsude(hluboka.bloky).some((x) => text(x) === 'na dně')
+    patraSedi = nejhlubsi?.radky.length === 1 && nejhlubsi.radky[0].length === 2 && nejhlubsi.radky[0][0].odsazeni && nejhlubsi.radky[0][1].sirka === MAX_VNORENI_TABULEK
+  } catch (e) {
+    console.log('    výjimka:', e.message)
+  }
+  ok(`1000 tabulek v sobě: nejvýš ${MAX_VNORENI_TABULEK} pater, text se neztratí`, hloubkaSedi)
+  ok('přeskočená patra nepřidají řádky, buňky, odsazení ani šířku do tabulky o patro výš', patraSedi)
   const uzavrena = precist(`${'<w:tbl><w:tr><w:tc>'.repeat(20)}<w:p>${wt('hluboko')}</w:p>${'</w:tc></w:tr></w:tbl>'.repeat(20)}<w:p>${wt('za tabulkou')}</w:p>`)
   ok('přeskočené hluboké tabulky nezavřou cizí buňku: text za tabulkou je v těle dokumentu',
     uzavrena.bloky.length === 2 && text(uzavrena.bloky[1]) === 'za tabulkou' && odstavceVsude(uzavrena.bloky).some((x) => text(x) === 'hluboko'))
