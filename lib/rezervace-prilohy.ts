@@ -90,6 +90,17 @@ export function adresaPrilohy(rozsah: string, id: string, mime: string, zpet?: s
   return zpet ? `${nahled}?zpet=${encodeURIComponent(zpet)}` : nahled
 }
 
+/**
+ * Název na kmen a příponu, ať v úzkém sloupci kalendáře zůstane vidět
+ * „.pdf“ / „.docx“, i když se kmen usekne — PDF se otevře v nové
+ * záložce, Word jako náhled místo kalendáře. Přípona je krátká koncovka
+ * za poslední tečkou s aspoň jedním písmenem („verze 2.0“ žádnou nemá).
+ */
+export function rozdelitNazev(nazev: string): [kmen: string, pripona: string] {
+  const m = nazev.match(/^(.+?)(\.(?=[0-9]*[A-Za-z])[A-Za-z0-9]{1,5})$/)
+  return m ? [m[1], m[2]] : [nazev, '']
+}
+
 /** Dokument u rezervace, jak ho kalendář potřebuje na odkaz. */
 export type DokumentRezervace = { id: string; nazev: string; mime: string }
 

@@ -78,9 +78,11 @@
 .ds-rez-den-pridat:hover, .ds-rez-den-pridat:focus-visible { color: var(--ink); text-decoration: underline; }
 
 /* Karta je rámeček; odkaz na rezervaci a dokumenty jsou v ní vedle sebe
-   (odkaz v odkazu HTML nedovolí). Odkaz má výplň karty, ať je klikací celá. */
+   (odkaz v odkazu HTML nedovolí). Odkaz se roztáhne přes celou kartu
+   (::after), ať je klikací celá; štítky dokumentů leží nad ním a mezera
+   mezi nimi patří zase kartě. */
 .ds-rez-polozka {
-  display: grid; border-radius: 10px; min-width: 0;
+  position: relative; display: grid; border-radius: 10px; min-width: 0;
   border: 1px solid var(--line); background: var(--paper);
   font-size: 13px; line-height: 1.35;
 }
@@ -89,7 +91,10 @@
   display: grid; gap: 1px; padding: 6px 8px; min-width: 0; border-radius: 9px;
   color: var(--ink); text-decoration: none;
 }
+.ds-rez-polozka-odkaz::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
 .ds-rez-polozka-odkaz:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
+.ds-rez-polozka .ds-rez-dokumenty { position: relative; z-index: 1; pointer-events: none; }
+.ds-rez-polozka .ds-rez-dokumenty a { pointer-events: auto; }
 /* Jméno na dva řádky, pak tři tečky — v sedmi sloupcích by na jeden nebylo poznat, kdo to je. */
 .ds-rez-polozka strong {
   font-weight: 600; overflow: hidden; overflow-wrap: anywhere;
@@ -100,28 +105,40 @@
   border-color: color-mix(in srgb, var(--vino) 45%, var(--line));
   background: color-mix(in srgb, var(--vino) 8%, var(--card));
 }
-.ds-rez-polozka[data-neplati] { opacity: .65; }
+/* Zrušená bledne jen sama; dokumenty u ní jsou dál živé odkazy a musí být čitelné. */
+.ds-rez-polozka[data-neplati] > .ds-rez-polozka-odkaz { opacity: .65; }
 .ds-rez-polozka[data-neplati] strong { text-decoration: line-through; }
 
-/* Dokumenty u rezervace (týden, den): každý jako štítek s ikonou, název
-   se v úzkém sloupci useknutý třemi tečkami — celý je v `title`. */
+/* Dokumenty u rezervace (týden, den): každý jako štítek s ikonou. Kmen
+   názvu se v úzkém sloupci usekne třemi tečkami (celý je v `title`),
+   přípona zůstane — podle ní je vidět, že PDF se otevře v nové záložce
+   a Word jako náhled. */
 .ds-rez-dokumenty { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; min-width: 0; }
 .ds-rez-dokumenty > li { display: flex; min-width: 0; max-width: 100%; }
 .ds-rez-dokument {
-  display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; min-height: 24px;
+  display: inline-flex; align-items: center; min-width: 0; max-width: 100%; min-height: 24px;
   padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
   color: var(--ink); text-decoration: none; font-size: 12.5px; line-height: 1.3;
 }
-.ds-rez-dokument span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ds-rez-dokument-nazev { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; margin-left: 4px; }
+.ds-rez-dokument-pripona { flex: none; color: var(--muted); }
 .ds-rez-dokument .ft-i { width: 14px; height: 14px; flex: none; color: var(--muted); }
 .ds-rez-dokument:hover { border-color: var(--line-2); }
-.ds-rez-dokument:hover span { text-decoration: underline; text-underline-offset: 2px; }
-.ds-rez-dokument-dalsi { display: inline-flex; align-items: center; min-height: 24px; font-size: 12px; color: var(--muted); }
-.ds-rez-dokument-dalsi:hover { color: var(--ink); }
+.ds-rez-dokument:hover .ds-rez-dokument-nazev { text-decoration: underline; text-underline-offset: 2px; }
+/* Barvou textu, ne šedí: šedá má na vínové kartě akce a na dnešní buňce pod 4,5 : 1. */
+.ds-rez-dokument-dalsi { display: inline-flex; align-items: center; min-height: 24px; font-size: 12px; color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.ds-rez-dokument-dalsi:hover { text-decoration-thickness: 2px; }
 .ds-rez-dokument:focus-visible, .ds-rez-dokument-dalsi:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 1px; }
-/* V kartě týdne pod sebou, odsazené jako text karty. */
-.ds-rez-polozka .ds-rez-dokumenty { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 3px; padding: 0 6px 6px; margin-top: -2px; }
-.ds-rez-polozka .ds-rez-dokument { font-size: 12px; padding: 1px 7px; }
+/* V kartě týdne pod sebou přes celou šířku karty a název na dva řádky —
+   v sedmi sloupcích by z něj na jeden zbylo „Smlouva…“. */
+.ds-rez-polozka .ds-rez-dokumenty { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 3px; padding: 0 6px 6px; margin-top: -2px; }
+.ds-rez-polozka .ds-rez-dokument { align-self: stretch; width: 100%; align-items: flex-start; border-radius: 8px; padding: 2px 6px; font-size: 12px; }
+.ds-rez-polozka .ds-rez-dokument .ft-i { margin-top: 1px; }
+.ds-rez-polozka .ds-rez-dokument-nazev {
+  white-space: normal; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+.ds-rez-polozka .ds-rez-dokument-pripona { align-self: flex-end; }
 
 /* Víc poboček: každá má v dni svůj rámeček se zkratkou a souhrnem. */
 .ds-rez-skupina {
@@ -142,7 +159,9 @@
   .ds-rez-den-pridat { margin-top: 0; }
   /* Jeden sloupec přes celou šířku: dokumenty vedle sebe a větší pod prst. */
   .ds-rez-polozka .ds-rez-dokumenty { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; }
-  .ds-rez-polozka .ds-rez-dokument { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+  .ds-rez-polozka .ds-rez-dokument { width: auto; align-self: auto; align-items: center; min-height: 32px; padding: 4px 10px; font-size: 13px; }
+  .ds-rez-polozka .ds-rez-dokument-nazev { display: block; white-space: nowrap; }
+  .ds-rez-polozka .ds-rez-dokument-pripona { align-self: auto; }
 }
 
 /* --- měsíc ------------------------------------------------------------- */
@@ -178,8 +197,10 @@
 .ds-rez-bunka-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ds-rez-bunka-radek[data-druh="akce"] .ds-rez-bunka-text { color: var(--vino); font-weight: 600; }
 /* Sponka = u rezervace je dokument (otevře se v dni nebo v týdnu). */
-.ds-rez-bunka-dokumenty { display: inline-flex; align-items: center; gap: 1px; flex: none; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.ds-rez-bunka-radek .ds-rez-bunka-dokumenty .ft-i { color: inherit; }
+/* Barvou textu: šedé číslo by na dnešní buňce mělo pod 4,5 : 1. */
+.ds-rez-bunka-dokumenty { display: inline-flex; align-items: center; gap: 1px; flex: none; font-size: 11px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ds-rez-bunka-dokumenty .ft-i { color: inherit; }
+.ds-rez-bunka-dalsi .ds-rez-bunka-dokumenty { margin-left: 4px; vertical-align: -2px; }
 .ds-rez-bunka-dalsi { font-size: 11.5px; color: var(--muted); }
 .ds-rez-bunka-den-nazev { display: none; }
 
@@ -392,3 +413,6 @@ details[open] .ds-rez-otevrit { display: none; }
 @container (max-width: 560px) {
   .ds-plocha.ds-dokument { padding: 18px 16px; font-size: 14.5px; }
 }
+
+/* Panel, na který vede odkaz z kalendáře (`#dokumenty`) — ať ho nepřekryje horní lišta. */
+.ds-rez-kotva { scroll-margin-top: 80px; }

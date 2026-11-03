@@ -7,7 +7,7 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { denKratce } from '@/lib/rezervace-kalendar'
 import { otevritVProhlizeci } from '@/lib/rezervace-prilohy'
-import { bezpecnaZpatky } from '@/lib/rezervace-typy'
+import { zpatkyZKalendare } from '@/lib/rezervace-typy'
 
 import { nacistPrilohu, nacistRezervaci, stahnoutPrilohu } from '../../data'
 import { zkusPristupRezervacim } from '../../pristup'
@@ -75,15 +75,14 @@ export default async function RezervaceDokument({
       : null
   // Otevřený z kalendáře (týden, den) se vrací do kalendáře — z aplikace
   // na ploše iPhonu jiná cesta zpátky než tenhle odkaz není. Jen adresa
-  // uvnitř Rezervací téhož rozsahu (bezpecnaZpatky), jinak by vedl kamkoli.
-  const zKalendare = typeof zpetText === 'string' && zpetText !== '' ? bezpecnaZpatky(rozsah, zpetText) : null
-  const zpet = zKalendare
-    ? { href: zKalendare, text: zKalendare.startsWith(`/${rozsah}/rezervace/den/`) ? 'Zpět na den' : 'Zpět na kalendář' }
-    : r
+  // uvnitř Rezervací téhož rozsahu (zpatkyZKalendare → bezpecnaZpatky), jinak by vedl kamkoli.
+  const zpet =
+    zpatkyZKalendare(rozsah, zpetText) ??
+    (r
       ? { href: `/${rozsah}/rezervace/${r.id}`, text: 'Zpět na rezervaci' }
       : priloha.den
         ? { href: `/${rozsah}/rezervace/den/${priloha.den}`, text: 'Zpět na den' }
-        : { href: `/${rozsah}/rezervace`, text: 'Zpět na kalendář' }
+        : { href: `/${rozsah}/rezervace`, text: 'Zpět na kalendář' })
 
   let nahled: NahledDocx | null = null
   let chyba: string | null = null

@@ -16,7 +16,10 @@
  *      zrušených, akce zvlášť, pobočka bez rezervací má nuly;
  *   5. VYKRESLENÝ kalendář (scripts/vykreslit.mjs, skutečné obsah.tsx
  *      a prvky.tsx): legenda, rámečky po pobočkách v týdnu i dni, štítek
- *      zkratky u každé rezervace v měsíci, jedna barva na pobočku všude.
+ *      zkratky u každé rezervace v měsíci, jedna barva na pobočku všude;
+ *   6. dokumenty u rezervací (3. 11. 2026), taky VYKRESLENÉ: v týdnu
+ *      a dni štítky za odkazem na rezervaci (ne v něm), kam vedou a jak
+ *      se otevřou, „Zpět“ z náhledu Wordu; v měsíci jen sponka.
  */
 
 import fs from 'node:fs'
@@ -36,6 +39,7 @@ import {
   souhrnyPobocek,
   vzhledPobocek,
 } from '../lib/rezervace-pobocky.ts'
+import { zpatkyZKalendare } from '../lib/rezervace-typy.ts'
 import { nactiModul } from './vykreslit.mjs'
 
 const KOREN = path.join(import.meta.dirname, '..')
@@ -223,6 +227,7 @@ function rez(pobocka, den, od, o = {}) {
     typ_akce: '',
     zdroj: 'rucne',
     zona: 'Europe/Prague',
+    dokumenty: [],
     ...o,
   }
 }
@@ -369,14 +374,21 @@ const jednaBarva = (html, pobocky) => {
 
 {
   const html = kalendar('tyden', POBOCKY)
-  const skupiny = [...html.matchAll(/<div class="ds-rez-skupina" data-branch="([a-z]+)" data-pobocka="([^"]+)" role="group" aria-label="([^"]+)">([\s\S]*?)<\/div>/g)]
+  // Konec skupiny: začátek další nebo konec dne — karty uvnitř jsou taky
+  // <div>, líné `</div>` by vzalo jen první z nich.
+  const skupiny = [...html.matchAll(/<div class="ds-rez-skupina" data-branch="([a-z]+)" data-pobocka="([^"]+)" role="group" aria-label="([^"]+)">/g)].map((m) => {
+    const od = m.index + m[0].length
+    const konec = Math.min(...[html.indexOf('<div class="ds-rez-skupina"', od), html.indexOf('</section>', od)].filter((i) => i !== -1))
+    return [m[0], m[1], m[2], m[3], html.slice(od, konec)]
+  })
   ok(`týden za firmu: rezervace jsou po pobočkách v rámečcích (${skupiny.length} skupin)`, skupiny.length === 5)
   const spatne = skupiny.filter(([, barva, id, nazev, vnitrek]) => {
     const p = POBOCKY.find((x) => x.id === id)
-    const odkazy = [...vnitrek.matchAll(/href="\/firma\/rezervace\/([^"]+)"/g)].map((m) => m[1])
+    const odkazy = [...vnitrek.matchAll(/href="\/firma\/rezervace\/([0-9a-f-]{36})"/g)].map((m) => m[1])
     return !p || p.barva !== barva || p.nazev !== nazev || odkazy.length === 0 || odkazy.some((r) => VSECHNY.find((x) => x.id === r)?.branch_id !== id)
   })
-  ok('týden: v rámečku pobočky jsou jen její rezervace, rámeček v její barvě', spatne.length === 0)
+  const karet = skupiny.reduce((n, s) => n + (s[4].match(/class="ds-rez-polozka"/g) ?? []).length, 0)
+  ok(`týden: v rámečku pobočky jsou jen její rezervace (všech ${karet} karet), rámeček v její barvě`, spatne.length === 0 && karet === VSECHNY.filter((r) => r.den >= '2026-10-26' && r.den <= '2026-11-01').length)
   const patek = html.slice(html.indexOf('aria-label="pá 30. 10."'), html.indexOf('aria-label="so 31. 10."'))
   const vPatek = [...patek.matchAll(/class="ds-rez-skupina" data-branch="[a-z]+" data-pobocka="([^"]+)"/g)].map((m) => m[1])
   ok('týden: v pátek 30. 10. nejdřív rámeček Bernardu, pak Perly (pořadí legendy)', vPatek.join() === [PB.id, PP.id].join())
@@ -416,6 +428,196 @@ const jednaBarva = (html, pobocky) => {
   ok('den: jedna pobočka = jedna barva všude (i u poznámek v boku)', jednaBarva(html, POBOCKY))
   const jedna = den([PP])
   ok('den za pobočku: oddíl v barvě pobočky, štítek s celým názvem pro odečítač', /ds-rez-oddil" data-branch="[a-z]+" data-pobocka/.test(jedna) && jedna.includes('<span class="sr-only">Restaurace Černá Perla</span>') && jednaBarva(jedna, [PP]))
+}
+
+console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
+
+{
+  // Zadání Šéfíka 2. 11.: „aby v kalendáři akcí bylo vidět, že je
+  // u jednotlivé rezervace dokument, a možnost ho otevřít“. Tady se
+  // kontroluje vykreslené HTML skutečných obsah.tsx a prvky.tsx, ne
+  // zdroják: kam odkaz vede, jak se otevře, u které rezervace je.
+  const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  let k = 0
+  const dok = (nazev, mime) => ({ id: `eeeeeeee-eeee-4eee-8eee-${String((k += 1)).padStart(12, '0')}`, nazev, mime })
+  const D = {
+    smlouva: dok('Smlouva Novákovi.docx', MIME_DOCX),
+    menu: dok('Menu svatba.pdf', 'application/pdf'),
+    plan: dok('Plán sálu.jpg', 'image/jpeg'),
+    storno: dok('Storno.pdf', 'application/pdf'),
+    pozde: dok('Pozdní objednávka.pdf', 'application/pdf'),
+    rozpis: dok('Rozpis.docx', MIME_DOCX),
+    dort: dok('Dort.png', 'image/png'),
+    jenZrusena: dok('Zrušeno.pdf', 'application/pdf'),
+  }
+  // Pátek 30. 10.: Bernard má čtyři platné (do buňky měsíce se vejdou
+  // tři, čtvrtá s dokumentem je až v „+ 1 další“) a jednu zrušenou
+  // s dokumentem; Perla jednu se dvěma. Čtvrtek 29. 10. jen zrušená
+  // s dokumentem, středa 28. 10. jen rezervace bez dokumentu.
+  const S = {
+    tri: rez(BERNARD, '2026-10-30', '17:00', { druh: 'akce', nazev: 'Svatba Novákovi', dokumenty: [D.smlouva, D.menu, D.plan] }),
+    bez: rez(BERNARD, '2026-10-30', '18:00', { jmeno_hosta: 'Host Bez Přílohy' }),
+    zrusena: rez(BERNARD, '2026-10-30', '18:30', { jmeno_hosta: 'Zrušená S Přílohou', stav: 'zrusena', dokumenty: [D.storno] }),
+    treti: rez(BERNARD, '2026-10-30', '19:00', { jmeno_hosta: 'Třetí Host' }),
+    pozde: rez(BERNARD, '2026-10-30', '21:00', { jmeno_hosta: 'Čtvrtá Pozdě', dokumenty: [D.pozde] }),
+    perla: rez(PERLA, '2026-10-30', '20:00', { jmeno_hosta: 'Perla Dva', dokumenty: [D.rozpis, D.dort] }),
+    ctvrtek: rez(PERLA, '2026-10-29', '12:00', { jmeno_hosta: 'Jen Zrušená', stav: 'zrusena', dokumenty: [D.jenZrusena] }),
+    streda: rez(PERLA, '2026-10-28', '12:00', { jmeno_hosta: 'Středa Bez' }),
+  }
+  const VSE = Object.values(S).sort((x, y) => x.zacatek.localeCompare(y.zacatek))
+  const kal = (pohled, pobocky = POBOCKY) =>
+    renderToStaticMarkup(
+      createElement(obsah.KalendarObsah, {
+        rozsah: pobocky.length > 1 ? 'firma' : pobocky[0].slug,
+        pohled,
+        datum: '2026-10-30',
+        dnes: '2026-10-30',
+        pobocky,
+        rezervace: VSE.filter((r) => pobocky.some((p) => p.id === r.branch_id)),
+        znacky: new Map(),
+      }),
+    )
+  const odEntit = (s) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+  const atributy = (znacka) => Object.fromEntries([...znacka.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1], odEntit(m[2])]))
+  /** Nejhlubší zanoření <a> — 2 a víc = odkaz v odkazu, ten prohlížeč rozbije. */
+  const hloubkaOdkazu = (html) => {
+    let h = 0
+    let nejvic = 0
+    for (const m of html.matchAll(/<a[\s>]|<\/a>/g)) {
+      h += m[0] === '</a>' ? -1 : 1
+      nejvic = Math.max(nejvic, h)
+    }
+    return nejvic
+  }
+  /** Odkazy na dokumenty v kusu HTML: název (title), kam, jak se otevře, viditelná přípona, nápověda pro čtečku. */
+  const stitky = (html) =>
+    [...html.matchAll(/<a ([^>]*class="ds-rez-dokument"[^>]*)>([\s\S]*?)<\/a>/g)].map((m) => {
+      const a = atributy(m[1])
+      return {
+        nazev: a.title,
+        href: a.href,
+        target: a.target ?? null,
+        rel: a.rel ?? null,
+        pripona: odEntit(m[2].match(/<span class="ds-rez-dokument-pripona">([^<]*)<\/span>/)?.[1] ?? ''),
+        napoveda: odEntit(m[2].match(/<span class="sr-only">([^<]*)<\/span>/)?.[1] ?? ''),
+      }
+    })
+  /** Jak má vypadat odkaz na dokument `d` z kalendáře, který se vrací na `zpet`. */
+  const ocekavany = (d, zpet, rozsah = 'firma') =>
+    d.mime === MIME_DOCX
+      ? { nazev: d.nazev, href: `/${rozsah}/rezervace/dokument/${d.id}?zpet=${encodeURIComponent(zpet)}`, target: null, rel: null, pripona: '.docx', napoveda: ' (náhled dokumentu)' }
+      : { nazev: d.nazev, href: `/api/rezervace/soubor/${d.id}`, target: '_blank', rel: 'noopener noreferrer', pripona: d.nazev.slice(d.nazev.lastIndexOf('.')), napoveda: ' (otevře se v nové záložce)' }
+  const stejne = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  /** Odkud se náhled Wordu vrátí: `?zpet=` z vykresleného odkazu, jak ho přečte stránka náhledu. */
+  const zpatkyZOdkazu = (rozsah, href) => zpatkyZKalendare(rozsah, new URL(href, 'https://foodtab.test').searchParams.get('zpet') ?? undefined)
+
+  // --- týden -------------------------------------------------------------
+  try {
+    const html = kal('tyden')
+    const zpet = '/firma/rezervace?pohled=tyden&datum=2026-10-30'
+    ok(`týden: žádný odkaz v odkazu (nejhlubší zanoření ${hloubkaOdkazu(html)})`, hloubkaOdkazu(html) === 1)
+    // Karta = odkaz na rezervaci a hned za ním (ne v něm) její dokumenty.
+    const karty = new Map(
+      [...html.matchAll(/<div class="ds-rez-polozka"[^>]*><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-polozka-odkaz">[\s\S]*?<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/div>/g)].map((m) => [m[1], m[2] ?? '']),
+    )
+    ok(`týden: každá rezervace má kartu s odkazem a dokumenty za ním, ne v něm (${karty.size} z ${VSE.length})`, karty.size === VSE.length && VSE.every((r) => karty.has(r.id)))
+    const tri = karty.get(S.tri.id) ?? ''
+    const dalsi = tri.match(/<a href="([^"]*)" class="ds-rez-dokument-dalsi">([\s\S]*?)<\/a>/)
+    ok(
+      `týden: akce se třemi dokumenty ukáže první dva v pořadí a „+ 1 další dokument“ rovnou k dokumentům v detailu (${dalsi ? `„${text(dalsi[2])}“ → ${dalsi[1]}` : 'chybí'})`,
+      stejne(stitky(tri), [ocekavany(D.smlouva, zpet), ocekavany(D.menu, zpet)]) && !!dalsi && dalsi[1] === `/firma/rezervace/${S.tri.id}#dokumenty` && text(dalsi[2]) === '+ 1 další dokument',
+    )
+    ok(
+      'týden: Word se vrací na tenhle týden a PDF/fotka jdou do nové záložky — u každého štítku přípona a nápověda pro čtečku',
+      stejne(stitky(karty.get(S.perla.id) ?? ''), [ocekavany(D.rozpis, zpet), ocekavany(D.dort, zpet)]) && !(karty.get(S.perla.id) ?? '').includes('ds-rez-dokument-dalsi'),
+    )
+    ok('týden: zrušená rezervace dokument ukáže taky', stejne(stitky(karty.get(S.zrusena.id) ?? ''), [ocekavany(D.storno, zpet)]))
+    ok('týden: rezervace bez dokumentu nemá seznam dokumentů', karty.get(S.bez.id) === '' && karty.get(S.streda.id) === '' && karty.get(S.treti.id) === '')
+    const vsechny = stitky(html)
+    const cizi = [...karty].filter(([id, ul]) => !stitky(ul).every((s) => VSE.find((r) => r.id === id)?.dokumenty.some((d) => d.nazev === s.nazev)))
+    ok(`týden: každý dokument jen u své rezervace (${vsechny.length} štítků, ${cizi.length} cizích)`, vsechny.length === 7 && cizi.length === 0)
+    ok('týden: seznam dokumentů je pro čtečku seznam se jménem rezervace', tri.startsWith('<ul class="ds-rez-dokumenty" role="list" aria-label="Dokumenty: Svatba Novákovi">'))
+    const zTydne = zpatkyZOdkazu('firma', stitky(tri)[0]?.href ?? '')
+    ok(`týden → náhled Wordu → „${zTydne?.text}“ na ${zTydne?.href} (adresa z vykresleného odkazu, jak ji přečte stránka náhledu)`, stejne(zTydne, { href: zpet, text: 'Zpět na kalendář' }))
+
+    const jedna = kal('tyden', [PB])
+    const zJedne = stitky(jedna)
+    ok(
+      `týden za pobočku (bez rámečků): stejné dokumenty, Word se vrací na týden pobočky (${zJedne.length} štítků)`,
+      zJedne.length === 4 && hloubkaOdkazu(jedna) === 1 && stejne(zJedne[0], ocekavany(D.smlouva, '/bernard-bar/rezervace?pohled=tyden&datum=2026-10-30', 'bernard-bar')),
+    )
+  } catch (e) {
+    ok(`týden s dokumenty se vykreslí — výjimka: ${e.message}`, false)
+  }
+
+  // --- měsíc -------------------------------------------------------------
+  try {
+    const html = kal('mesic')
+    ok(`měsíc: žádný odkaz v odkazu (nejhlubší zanoření ${hloubkaOdkazu(html)})`, hloubkaOdkazu(html) === 1)
+    ok('měsíc: v buňkách žádný odkaz na dokument (buňka je celá odkaz na den)', stitky(html).length === 0 && !html.includes('/rezervace/dokument/') && !html.includes('/api/rezervace/soubor/'))
+    const bunka = (den) => {
+      const m = html.match(new RegExp(`<a href="/firma/rezervace/den/${den}" class="ds-rez-bunka"[^>]*aria-label="([^"]*)"[^>]*>([\\s\\S]*?)</a>`))
+      return m ? { popis: odEntit(m[1]), vnitrek: m[2] } : { popis: '', vnitrek: '' }
+    }
+    /** Řádky buňky (rezervace a „+ N další“) a sponka u každého: null = žádná, '1' = jeden dokument, jinak číslo. */
+    const radky = (vnitrek) =>
+      vnitrek
+        .split(/(?=<span class="ds-rez-bunka-(?:radek|dalsi)")/)
+        .slice(1)
+        .map((kus) => {
+          const sponka = kus.match(/<span class="ds-rez-bunka-dokumenty"[^>]*>[\s\S]*?<\/svg>(\d*)<\/span>/)
+          return { dalsi: kus.startsWith('<span class="ds-rez-bunka-dalsi"'), title: odEntit(kus.match(/^<span [^>]*title="([^"]*)"/)?.[1] ?? ''), sponka: sponka ? sponka[1] || '1' : null }
+        })
+    const patek = bunka('2026-10-30')
+    const r = radky(patek.vnitrek)
+    const popis = r.map((x) => `${x.dalsi ? 'další' : x.title.split(' · ')[1]}: ${x.sponka ?? '-'}`).join(', ')
+    ok(
+      `měsíc 30. 10.: sponka s počtem jen u rezervací s dokumentem, zrušená vynechaná, schovaná čtvrtá dá sponku k „+ 1 další“ (${popis})`,
+      r.length === 5 &&
+        r[0].title.includes('Svatba Novákovi') && r[0].title.endsWith(' · 3 dokumenty') && r[0].sponka === '3' &&
+        r[1].title.includes('Host Bez Přílohy') && r[1].sponka === null && !r[1].title.includes('dokument') &&
+        r[2].title.includes('Třetí Host') && r[2].sponka === null &&
+        r[3].dalsi && r[3].sponka === '1' &&
+        r[4].title.includes('Perla Dva') && r[4].title.endsWith(' · 2 dokumenty') && r[4].sponka === '2',
+    )
+    ok(`měsíc 30. 10.: popis buňky pro čtečku počítá i schovanou („${patek.popis}“)`, patek.popis.endsWith(', 3 rezervace s dokumentem'))
+    const ctvrtek = bunka('2026-10-29')
+    ok(`měsíc 29. 10.: jen zrušená s dokumentem = žádná sponka ani zmínka („${ctvrtek.popis}“)`, ctvrtek.popis.startsWith('čt 29. 10.') && !ctvrtek.vnitrek.includes('ds-rez-bunka-dokumenty') && !ctvrtek.popis.includes('dokument'))
+    const streda = bunka('2026-10-28')
+    ok(`měsíc 28. 10.: bez dokumentu = žádná sponka ani zmínka („${streda.popis}“)`, streda.vnitrek.includes('Středa Bez') && !streda.vnitrek.includes('ds-rez-bunka-dokumenty') && !streda.popis.includes('dokument'))
+  } catch (e) {
+    ok(`měsíc s dokumenty se vykreslí — výjimka: ${e.message}`, false)
+  }
+
+  // --- den ---------------------------------------------------------------
+  try {
+    const html = renderToStaticMarkup(
+      createElement(obsah.DenObsah, {
+        rozsah: 'firma',
+        datum: '2026-10-30',
+        dnes: '2026-10-30',
+        tenantId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        kDnu: POBOCKY.map((p) => ({ pobocka: p, rezervace: VSE.filter((r) => r.den === '2026-10-30' && r.branch_id === p.id), poznamky: [], prilohy: [] })),
+      }),
+    )
+    const zpet = '/firma/rezervace/den/2026-10-30'
+    ok(`den: žádný odkaz v odkazu (nejhlubší zanoření ${hloubkaOdkazu(html)})`, hloubkaOdkazu(html) === 1)
+    const radky = new Map(
+      [...html.matchAll(/<li><a href="\/firma\/rezervace\/([0-9a-f-]{36})" class="ds-rez-radek"[^>]*>[\s\S]*?<\/a>(<ul class="ds-rez-dokumenty"[\s\S]*?<\/ul>)?<\/li>/g)].map((m) => [m[1], m[2] ?? '']),
+    )
+    const dne = VSE.filter((r) => r.den === '2026-10-30')
+    ok(`den: každá rezervace dne má řádek a dokumenty za odkazem (${radky.size} z ${dne.length})`, radky.size === dne.length && dne.every((r) => radky.has(r.id)))
+    ok(
+      'den: všechny tři dokumenty akce v pořadí (bez „další“), Word s návratem na den',
+      stejne(stitky(radky.get(S.tri.id) ?? ''), [ocekavany(D.smlouva, zpet), ocekavany(D.menu, zpet), ocekavany(D.plan, zpet)]) && !(radky.get(S.tri.id) ?? '').includes('ds-rez-dokument-dalsi'),
+    )
+    ok('den: zrušená i s dokumentem, Perla s Wordem i fotkou', stejne(stitky(radky.get(S.zrusena.id) ?? ''), [ocekavany(D.storno, zpet)]) && stejne(stitky(radky.get(S.perla.id) ?? ''), [ocekavany(D.rozpis, zpet), ocekavany(D.dort, zpet)]))
+    ok('den: bez dokumentu bez seznamu', radky.get(S.bez.id) === '' && radky.get(S.treti.id) === '')
+    const zDne = zpatkyZOdkazu('firma', stitky(radky.get(S.tri.id) ?? '')[0]?.href ?? '')
+    ok(`den → náhled Wordu → „${zDne?.text}“ na ${zDne?.href}`, stejne(zDne, { href: zpet, text: 'Zpět na den' }))
+  } catch (e) {
+    ok(`den s dokumenty se vykreslí — výjimka: ${e.message}`, false)
+  }
 }
 
 console.log(chyb ? `\n${chyb} kontrol NEPROŠLO\n` : '\nVšechny kontroly prošly.\n')

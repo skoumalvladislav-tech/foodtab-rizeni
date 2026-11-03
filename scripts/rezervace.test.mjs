@@ -74,6 +74,7 @@ import {
   korunyNaHalere,
   precistFormular,
   halereNaKoruny,
+  zpatkyZKalendare,
 } from '../lib/rezervace-typy.ts'
 import {
   dnyTydne,
@@ -98,6 +99,7 @@ import {
   jeZip,
   nazevKeStazeni,
   otevritVProhlizeci,
+  rozdelitNazev,
   zkontrolovatVyber,
 } from '../lib/rezervace-prilohy.ts'
 import { MAX_REZERVACI_V_DAVCE, overitDavkuRezervaci, rozebratKlicRezervaci, slozitKlicRezervaci } from '../lib/rezervace-prijem-api.ts'
@@ -444,13 +446,22 @@ console.log('\n== 8. Přístup napřed, data potom ==\n')
   // záložka jen u PDF a fotky — z aplikace na ploše iPhonu by otevřela
   // Safari bez přihlášení.
   // 3. 11.: odkaz je jedna komponenta (OdkazPrilohy) pro detail, týden
-  // i den. `target` i `adresaPrilohy(` v souboru právě jednou — v ní.
-  // Jakýkoli další zápis (target={'_blank'}, {...{ target }}, vlastní
-  // <a href={adresaPrilohy(…)}>) by Word někde poslal do nové záložky.
-  ok('odkaz u přílohy z adresaPrilohy (Word → náhled), nová záložka jen pro PDF a fotku — jen v OdkazPrilohy',
+  // i den. `target` i `adresaPrilohy(` v CELÉ složce Rezervací právě
+  // jednou — v ní. Jakýkoli další zápis (target={'_blank'}, {...{ target }},
+  // rozprostřená konstanta z lib, vlastní <a href={adresaPrilohy(…)}>
+  // v jiném souboru) by Word někde poslal do nové záložky.
+  const souboryVe = (slozka) =>
+    fs.readdirSync(path.join(KOREN, slozka), { withFileTypes: true })
+      .flatMap((e) => (e.isDirectory() ? souboryVe(`${slozka}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${slozka}/${e.name}`] : []))
+  const rezervacni = souboryVe('app/[rozsah]/rezervace').map((p) => [p, cti(p)])
+  const kdeVsude = (vzor) => rezervacni.flatMap(([p, obsah]) => (obsah.match(vzor) ?? []).map(() => p))
+  const jenVPrvcich = JSON.stringify(['app/[rozsah]/rezervace/prvky.tsx'])
+  ok(`odkaz u přílohy z adresaPrilohy (Word → náhled), nová záložka jen pro PDF a fotku — jen v OdkazPrilohy, v celé složce Rezervací (${rezervacni.length} souborů)`,
     /<a\s+href=\{adresaPrilohy\(rozsah, p\.id, p\.mime, zpet\)\}\s+\{\.\.\.\(otevritVProhlizeci\(p\.mime\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/.test(odkazPrilohy)
-    && (prvkyPrilohy.match(/\btarget\b/g) ?? []).length === 1
-    && (prvkyPrilohy.match(/adresaPrilohy\(/g) ?? []).length === 1
+    && rezervacni.length > 10
+    && JSON.stringify(kdeVsude(/\btarget\s*[:=]/g)) === jenVPrvcich
+    && JSON.stringify(kdeVsude(/adresaPrilohy\(/g)) === jenVPrvcich
+    && JSON.stringify(kdeVsude(/<a\b[^>]*\{\.\.\./g)) === jenVPrvcich
     && !prvkyPrilohy.includes('/api/rezervace/soubor/'))
   ok('detail: příloha přes OdkazPrilohy', /<OdkazPrilohy rozsah=\{rozsah\} p=\{p\}>\s*\{p\.nazev\}\s*<\/OdkazPrilohy>/.test(panel))
 }
@@ -1522,33 +1533,41 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
 console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
 {
   // Zadání Šéfíka: „aby v kalendáři akcí bylo vidět, že je u jednotlivé
-  // rezervace dokument, a možnost ho otevřít“.
+  // rezervace dokument, a možnost ho otevřít“. Co se z toho opravdu
+  // vykreslí (týden, měsíc, den), ověřuje scripts/rezervace-pobocky.test.mjs,
+  // oddíl 6 — tady čisté funkce a to, co se vykreslením ověřit nedá.
   const PDF = 'application/pdf'
-  const dok = dokumentyRezervace([
-    { id: 'b', nazev: 'Menu.docx', mime: MIME_DOCX, nahrano: '2026-11-03T10:00:00.5+00:00' },
-    { id: 'c', nazev: 'Plán sálu.pdf', mime: PDF, nahrano: '2026-11-03T09:00:00+00:00' },
-    { id: 'a', nazev: 'Dort.jpg', mime: 'image/jpeg', nahrano: '2026-11-03T10:00:00.5+00:00' },
-    // 09:30 v +01:00 = 08:30 UTC — první, i když jako text vypadá později.
-    { id: 'd', nazev: 'Objednávka.pdf', mime: PDF, nahrano: '2026-11-03T09:30:00+01:00' },
-  ])
-  ok('dokumenty v pořadí nahrání jako v detailu (okamžik, ne text), stejný okamžik podle id',
-    dok.map((x) => x.id).join('') === 'dcab')
-  ok('do kalendáře jen id, název a typ', JSON.stringify(dok[0]) === JSON.stringify({ id: 'd', nazev: 'Objednávka.pdf', mime: PDF }))
-  // Výjimka by shodila celý běh i se zbylými kontrolami — tady je to jen CHYBA.
-  ok('bez dokumentů prázdný seznam', (() => {
+  // Výjimka v testované funkci by shodila celý běh i se zbylými
+  // kontrolami — tady je to jen CHYBA u té, které se týká.
+  const zkus = (f) => {
     try {
-      return [null, undefined, []].every((x) => Array.isArray(dokumentyRezervace(x)) && dokumentyRezervace(x).length === 0)
+      return f()
     } catch {
-      return false
+      return undefined
     }
-  })())
+  }
+  const dok = zkus(() =>
+    dokumentyRezervace([
+      { id: 'b', nazev: 'Menu.docx', mime: MIME_DOCX, nahrano: '2026-11-03T10:00:00.5+00:00' },
+      { id: 'c', nazev: 'Plán sálu.pdf', mime: PDF, nahrano: '2026-11-03T09:00:00+00:00' },
+      { id: 'a', nazev: 'Dort.jpg', mime: 'image/jpeg', nahrano: '2026-11-03T10:00:00.5+00:00' },
+      // 09:30 v +01:00 = 08:30 UTC — první, i když jako text vypadá později.
+      { id: 'd', nazev: 'Objednávka.pdf', mime: PDF, nahrano: '2026-11-03T09:30:00+01:00' },
+    ]),
+  )
+  ok('dokumenty v pořadí nahrání jako v detailu (okamžik, ne text), stejný okamžik podle id',
+    Array.isArray(dok) && dok.map((x) => x.id).join('') === 'dcab')
+  ok('do kalendáře jen id, název a typ', Array.isArray(dok) && JSON.stringify(dok[0]) === JSON.stringify({ id: 'd', nazev: 'Objednávka.pdf', mime: PDF }))
+  ok('bez dokumentů prázdný seznam',
+    zkus(() => [null, undefined, []].every((x) => Array.isArray(dokumentyRezervace(x)) && dokumentyRezervace(x).length === 0)) === true)
 
   const tyden = '/perla/rezervace?pohled=tyden&datum=2026-11-03'
+  const mesic = '/perla/rezervace?pohled=mesic&datum=2026-11-03'
   const den = '/perla/rezervace/den/2026-11-03'
   ok('Word z kalendáře: náhled s adresou zpátky, zakódovanou (& v ní nerozdělí adresu náhledu)',
     adresaPrilohy('perla', 'abc', MIME_DOCX, tyden) === '/perla/rezervace/dokument/abc?zpet=%2Fperla%2Frezervace%3Fpohled%3Dtyden%26datum%3D2026-11-03')
-  ok('adresa zpátky dorazí do náhledu celá a bezpecnaZpatky ji pustí (týden i den)',
-    [tyden, den].every((z) => {
+  ok('adresa zpátky dorazí do náhledu celá a bezpecnaZpatky ji pustí (týden, měsíc, den)',
+    [tyden, mesic, den].every((z) => {
       const zDotazu = new URL(adresaPrilohy('perla', 'abc', MIME_DOCX, z), 'https://foodtab.test').searchParams.get('zpet')
       return zDotazu === z && bezpecnaZpatky('perla', zDotazu) === z
     }))
@@ -1556,6 +1575,56 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
     adresaPrilohy('perla', 'abc', PDF, tyden) === '/api/rezervace/soubor/abc' && adresaPrilohy('perla', 'abc', 'image/png', tyden) === '/api/rezervace/soubor/abc')
   ok('bez adresy zpátky (detail, příloha ke dni) beze změny',
     adresaPrilohy('perla', 'abc', MIME_DOCX) === '/perla/rezervace/dokument/abc' && adresaPrilohy('perla', 'abc', MIME_DOCX, '') === '/perla/rezervace/dokument/abc')
+
+  // Adresa zpátky přijde z odkazu, který může poslat kdokoli. Rozhoduje,
+  // kam ji pak POŠLE PROHLÍŽEČ — proto se kontroluje vyřešená adresa,
+  // ne text (3. 11.: `..` i jako %2e%2e vede o složku výš, tabulátor
+  // prohlížeč vypustí; `/perla/rezervace/../../k/…` by skončila na
+  // veřejném přesměrování ven).
+  const kamVede = (z) => new URL(bezpecnaZpatky('perla', z), 'https://foodtab.test')
+  const zle = [
+    'https://zly.example', '//zly.example', '/jina/rezervace?pohled=tyden', '/perla/rezervace//zly.example', '/perla/rezervacex',
+    '/perla/rezervace/../../k/abc', '/perla/rezervace/..', '/perla/rezervace/%2e%2e/%2e%2e/k/abc', '/perla/rezervace/%2E%2E/x',
+    '/perla/rezervace/.%2e/x', '/perla/rezervace/.\t./.\t./k/abc', '/perla/rezervace/\n/../../x', '/perla/rezervace/./../x',
+    '/perla/rezervace\\..\\k', '/perla/rezervace/den/2026-11-03#../../x', '/perla/rezervace/den/2026-11-03/..',
+  ]
+  const spatne = zle.filter((z) => {
+    const u = kamVede(z)
+    return u.origin !== 'https://foodtab.test' || u.pathname !== '/perla/rezervace' || u.search !== ''
+  })
+  ok(`bezpecnaZpatky: cizí adresa, jiný rozsah i \`..\` (i zakódované, s tabulátorem) skončí v kalendáři rozsahu — prohlížeč nikam jinam nevede (${spatne.length ? spatne.map((z) => JSON.stringify(z)).join(', ') : 'vše OK'})`,
+    spatne.length === 0)
+  const dobre = [
+    '/perla/rezervace', den, tyden, mesic, '/perla/rezervace/11111111-2222-4333-8444-555555555555',
+    '/perla/rezervace/nova?datum=2026-11-03', '/perla/rezervace/upozorneni',
+  ]
+  ok('bezpecnaZpatky: adresy, které posílá kalendář a formuláře, projdou beze změny',
+    dobre.every((z) => bezpecnaZpatky('perla', z) === z && kamVede(z).pathname + kamVede(z).search === z))
+
+  const zp = (z) => zkus(() => zpatkyZKalendare('perla', z))
+  ok('„Zpět“ z náhledu: z dne na den, z týdne a měsíce na kalendář (tam, odkud se otevíral)',
+    JSON.stringify(zp(den)) === JSON.stringify({ href: den, text: 'Zpět na den' })
+    && JSON.stringify(zp(tyden)) === JSON.stringify({ href: tyden, text: 'Zpět na kalendář' })
+    && JSON.stringify(zp(mesic)) === JSON.stringify({ href: mesic, text: 'Zpět na kalendář' }))
+  ok('„Zpět“ z náhledu: podvržená adresa vede do kalendáře rozsahu, ne na „den“ ani ven',
+    JSON.stringify(zp('/perla/rezervace/den/../../k/abc')) === JSON.stringify({ href: '/perla/rezervace', text: 'Zpět na kalendář' })
+    && JSON.stringify(zp('https://zly.example/perla/rezervace/den/x')) === JSON.stringify({ href: '/perla/rezervace', text: 'Zpět na kalendář' }))
+  ok('„Zpět“ z náhledu: bez parametru, prázdný nebo dvakrát v adrese = neotevíral se z kalendáře (k rezervaci nebo ke dni)',
+    [undefined, '', [den, tyden]].every((z) => zp(z) === null))
+  const stranka = cti('app/[rozsah]/rezervace/dokument/[id]/page.tsx')
+  ok('náhled: „Zpět“ z kalendáře jen přes zpatkyZKalendare, jinak k rezervaci nebo ke dni',
+    /const zpet =\s+zpatkyZKalendare\(rozsah, zpetText\) \?\?/.test(stranka)
+    && stranka.includes("{ href: `/${rozsah}/rezervace/${r.id}`, text: 'Zpět na rezervaci' }")
+    && !stranka.includes('bezpecnaZpatky('))
+
+  const rn = (n) => JSON.stringify(zkus(() => rozdelitNazev(n)))
+  ok('název štítku: přípona zvlášť, ať zůstane vidět (.pdf / .docx, i velkými, i s tečkou v názvu)',
+    rn('Menu svatba.pdf') === '["Menu svatba",".pdf"]'
+    && rn('Smlouva o akci – Novákovi.docx') === '["Smlouva o akci – Novákovi",".docx"]'
+    && rn('a.b.PDF') === '["a.b",".PDF"]' && rn('archiv.tar.gz') === '["archiv.tar",".gz"]')
+  ok('název štítku: bez přípony celý (verze 2.0, .htaccess, dlouhá koncovka, žádná tečka)',
+    rn('verze 2.0') === '["verze 2.0",""]' && rn('.htaccess') === '[".htaccess",""]'
+    && rn('soubor.dlouhakoncovka') === '["soubor.dlouhakoncovka",""]' && rn('bez tečky') === '["bez tečky",""]')
 
   const data = cti('app/[rozsah]/rezervace/data.ts')
   const nacist = data.slice(data.indexOf('export async function nacistRezervace('), data.indexOf('export async function nacistRezervaci('))
@@ -1566,53 +1635,30 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
     nacist.includes('const supabase = await getServerSupabase()')
     && nacist.includes('.select(`${SLOUPCE_REZERVACE}, rezervace_prilohy(id, nazev, mime, nahrano)`)')
     && nacist.includes('dokumenty: dokumentyRezervace(rezervace_prilohy)'))
+  // Vnoření bez jména vazby funguje, jen dokud mezi tabulkami vede
+  // jediný cizí klíč. Druhý (třeba „přesunuto z rezervace“) a PostgREST
+  // vnoření odmítne (PGRST201) — spadne celý kalendář, ne jen dokumenty,
+  // a PGlite v CI PostgREST nespouští, tak by to nikdo neviděl.
+  const prikazy = fs.readdirSync(path.join(KOREN, 'supabase/migrations'))
+    .filter((f) => f.endsWith('.sql'))
+    .flatMap((f) => cti(`supabase/migrations/${f}`).replace(/--[^\n]*/g, '').split(';'))
+  const vazeb = prikazy
+    .filter((p) => /\b(create|alter)\s+table\s+(if\s+not\s+exists\s+)?(only\s+)?(public\.)?rezervace_prilohy\b/i.test(p))
+    .reduce((n, p) => n + (p.match(/references\s+(public\.)?rezervace\s*\(/gi) ?? []).length, 0)
+  const opacnych = prikazy.filter((p) => /references\s+(public\.)?rezervace_prilohy\b/i.test(p)).length
+  ok(`kalendář: mezi rezervace a rezervace_prilohy vede jediný cizí klíč (${vazeb} tam, ${opacnych} zpátky) — jinak vnoření potřebuje jméno vazby`,
+    vazeb === 1 && opacnych === 0)
 
-  const prvky = cti('app/[rozsah]/rezervace/prvky.tsx')
-  const kus = (od, po) => {
-    const i = prvky.indexOf(od)
-    const j = prvky.indexOf(po, i + 1)
-    return i === -1 || j === -1 ? '' : prvky.slice(i, j)
-  }
-  const seznamDok = kus('function DokumentyRezervace(', 'export function StitekStavu')
-  const polozka = kus('function PolozkaTydne(', 'export function TydenKalendar')
-  const tydenK = kus('export function TydenKalendar(', '/* ---------- měsíc')
-  const mesic = kus('export function MesicKalendar(', '/* ---------- seznam rezervací dne')
-  const seznam = kus('export function SeznamRezervaci(', '/* ---------- údaje rezervace')
-  ok('seznam dokumentů: odkaz přes OdkazPrilohy s adresou zpátky; „+ N další“ do detailu jen při useknutí',
-    seznamDok.includes('<OdkazPrilohy rozsah={rozsah} p={p} zpet={zpet} className="ds-rez-dokument">')
-    && /zbyva > 0 \? \(\s*<li>\s*<Link href=\{`\/\$\{rozsah\}\/rezervace\/\$\{r\.id\}`\}/.test(seznamDok)
-    && seznamDok.includes('if (r.dokumenty.length === 0) return null'))
-  // Odkaz v odkazu: prohlížeč vnitřní <a> vytáhne ven a karta se rozpadne.
-  ok('týden: dokumenty za odkazem na rezervaci, ne v něm; v kartě nejvýš DOKUMENTU_V_KARTE',
-    polozka.includes('<div className="ds-rez-polozka"')
-    && polozka.indexOf('</Link>') !== -1
-    && polozka.indexOf('<DokumentyRezervace') > polozka.indexOf('</Link>')
-    && polozka.includes('nejvic={DOKUMENTU_V_KARTE}'))
-  ok('týden: obě cesty (jedna i víc poboček) předají adresu zpátky',
-    (tydenK.match(/<PolozkaTydne key=\{r\.id\} rozsah=\{rozsah\} r=\{r\} zpet=\{zpet\} \/>/g) ?? []).length === 2
-    && !/<PolozkaTydne(?![^>]*zpet=)/.test(tydenK))
-  ok('den: všechny dokumenty za odkazem na rezervaci',
-    seznam.indexOf('<DokumentyRezervace rozsah={rozsah} r={r} zpet={zpet} />') > seznam.indexOf('</Link>') && seznam.indexOf('</Link>') !== -1)
-  ok('měsíc: u rezervace s dokumentem sponka, ale žádný odkaz (celá buňka je odkaz na den)',
-    /r\.dokumenty\.length > 0 \? \(\s*<span className="ds-rez-bunka-dokumenty">\s*<Ikona klic="sponka" \/>/.test(mesic)
-    && !/<a\b|<OdkazPrilohy|<DokumentyRezervace/.test(mesic)
-    && (mesic.match(/<Link\b/g) ?? []).length === 1)
-  ok('měsíc: o dokumentech řekne i popis buňky pro čtečku (sponka je jen obrázek)',
-    mesic.includes("s dokumentem` : ''}") && mesic.includes('sk.rezervace.filter((r) => r.dokumenty.length > 0)'))
-
-  const obsah = cti('app/[rozsah]/rezervace/obsah.tsx')
-  ok('týden vrací z náhledu na tenhle týden, den na tenhle den',
-    obsah.includes('zpet={adresaPohledu(rozsah, pohled, datum)}')
-    && obsah.includes('const zpet = `/${rozsah}/rezervace/den/${datum}`')
-    && obsah.includes('<SeznamRezervaci rozsah={rozsah} rezervace={k.rezervace} zpet={zpet} />'))
-
-  const stranka = cti('app/[rozsah]/rezervace/dokument/[id]/page.tsx')
-  ok('náhled: adresa zpátky z kalendáře jen přes bezpecnaZpatky (ven nevede), jinak k rezervaci nebo ke dni',
-    stranka.includes("const zKalendare = typeof zpetText === 'string' && zpetText !== '' ? bezpecnaZpatky(rozsah, zpetText) : null")
-    && /const zpet = zKalendare\s+\? \{ href: zKalendare,/.test(stranka)
-    && stranka.includes("{ href: `/${rozsah}/rezervace/${r.id}`, text: 'Zpět na rezervaci' }"))
-  ok('bezpecnaZpatky: cizí adresa i jiný rozsah skončí v kalendáři rozsahu',
-    ['https://zly.example', '//zly.example', '/jina/rezervace?pohled=tyden', '/perla/rezervace//zly.example'].every((z) => bezpecnaZpatky('perla', z) === '/perla/rezervace'))
+  const css = cti('app/_rezervace.css')
+  ok('vzhled: karta týdne celá klikací (odkaz roztažený přes kartu), štítky nad ním',
+    /\.ds-rez-polozka \{[^}]*position: relative/.test(css)
+    && /\.ds-rez-polozka-odkaz::after \{[^}]*position: absolute; inset: 0/.test(css)
+    && /\.ds-rez-polozka \.ds-rez-dokumenty \{[^}]*z-index: 1; pointer-events: none/.test(css)
+    && css.includes('.ds-rez-polozka .ds-rez-dokumenty a { pointer-events: auto; }'))
+  ok('vzhled: seznam dokumentů bez odrážek, zrušená bledne bez svých dokumentů',
+    /\.ds-rez-dokumenty \{ list-style: none;/.test(css)
+    && css.includes('.ds-rez-polozka[data-neplati] > .ds-rez-polozka-odkaz { opacity: .65; }')
+    && !/\.ds-rez-polozka\[data-neplati\] \{[^}]*opacity/.test(css))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

@@ -18,7 +18,7 @@ import {
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
-import { adresaPrilohy, otevritVProhlizeci, velikostText, jeObrazek, type DokumentRezervace } from '@/lib/rezervace-prilohy'
+import { adresaPrilohy, otevritVProhlizeci, rozdelitNazev, velikostText, jeObrazek, type DokumentRezervace } from '@/lib/rezervace-prilohy'
 import {
   NAZVY_DRUHU,
   NAZVY_STAVU,
@@ -97,7 +97,8 @@ const ikonaPrilohy = (mime: string) => (jeObrazek(mime) ? 'fotka' : 'faktura')
  * Odkaz, který přílohu otevře — v detailu, v týdnu i v dni ten samý.
  * PDF a fotka v nové záložce ze souboru. Word jako náhled ve Foodtabu ve
  * stejném okně (má odkaz zpátky) — nová záložka by z aplikace na ploše
- * iPhonu otevřela Safari bez přihlášení.
+ * iPhonu otevřela Safari bez přihlášení. Čtečce obrazovky odkaz řekne,
+ * co z toho nastane; očima to poznat není.
  */
 function OdkazPrilohy({
   rozsah,
@@ -121,36 +122,42 @@ function OdkazPrilohy({
       title={p.nazev}
     >
       {children}
+      <span className="sr-only">{otevritVProhlizeci(p.mime) ? ' (otevře se v nové záložce)' : ' (náhled dokumentu)'}</span>
     </a>
   )
 }
 
-/** Kolik dokumentů rezervace se vypíše v kartě týdne; zbytek je „+ N další“ do detailu, kde jsou všechny. */
+/** Kolik dokumentů rezervace se vypíše v kartě týdne; zbytek je „+ N dalších dokumentů“ do detailu, kde jsou všechny. */
 const DOKUMENTU_V_KARTE = 2
 
 /**
  * Dokumenty u rezervace v týdnu a v dni. Kreslí se VEDLE odkazu na
  * rezervaci, ne v něm — odkaz v odkazu HTML nedovolí a prohlížeč by ho
- * rozbil.
+ * rozbil. `role="list"`: Safari seznam bez odrážek čtečce jako seznam
+ * neohlásí, a s ním ani to, ke které rezervaci dokumenty patří.
  */
 function DokumentyRezervace({ rozsah, r, zpet, nejvic }: { rozsah: string; r: RezervaceSDokumenty; zpet: string; nejvic?: number }) {
   if (r.dokumenty.length === 0) return null
   const ukazat = nejvic === undefined ? r.dokumenty : r.dokumenty.slice(0, nejvic)
   const zbyva = r.dokumenty.length - ukazat.length
   return (
-    <ul className="ds-rez-dokumenty" aria-label={`Dokumenty: ${titulek(r)}`}>
-      {ukazat.map((p) => (
-        <li key={p.id}>
-          <OdkazPrilohy rozsah={rozsah} p={p} zpet={zpet} className="ds-rez-dokument">
-            <Ikona klic={ikonaPrilohy(p.mime)} />
-            <span>{p.nazev}</span>
-          </OdkazPrilohy>
-        </li>
-      ))}
+    <ul className="ds-rez-dokumenty" role="list" aria-label={`Dokumenty: ${titulek(r)}`}>
+      {ukazat.map((p) => {
+        const [kmen, pripona] = rozdelitNazev(p.nazev)
+        return (
+          <li key={p.id}>
+            <OdkazPrilohy rozsah={rozsah} p={p} zpet={zpet} className="ds-rez-dokument">
+              <Ikona klic={ikonaPrilohy(p.mime)} />
+              <span className="ds-rez-dokument-nazev">{kmen}</span>
+              {pripona ? <span className="ds-rez-dokument-pripona">{pripona}</span> : null}
+            </OdkazPrilohy>
+          </li>
+        )
+      })}
       {zbyva > 0 ? (
         <li>
-          <Link href={`/${rozsah}/rezervace/${r.id}`} className="ds-rez-dokument-dalsi">
-            + {zbyva} {sklonovat(zbyva, 'další', 'další', 'dalších')}
+          <Link href={`/${rozsah}/rezervace/${r.id}#dokumenty`} className="ds-rez-dokument-dalsi">
+            + {zbyva} {sklonovat(zbyva, 'další dokument', 'další dokumenty', 'dalších dokumentů')}
           </Link>
         </li>
       ) : null}
@@ -547,6 +554,13 @@ export function MesicKalendar({
                     {sk.rezervace.length > RADKU_V_BUNCE ? (
                       <span className="ds-rez-bunka-dalsi">
                         + {sk.rezervace.length - RADKU_V_BUNCE} {sklonovat(sk.rezervace.length - RADKU_V_BUNCE, 'další', 'další', 'dalších')} ({p.zkratka})
+                        {/* Dokument u schované rezervace: sponka aspoň tady, ať ho buňka
+                            nezamlčí (popis buňky ho počítá, celý seznam je v dni). */}
+                        {sk.rezervace.slice(RADKU_V_BUNCE).some((r) => r.dokumenty.length > 0) ? (
+                          <span className="ds-rez-bunka-dokumenty" title="Některá z dalších má dokument">
+                            <Ikona klic="sponka" />
+                          </span>
+                        ) : null}
                       </span>
                     ) : null}
                   </span>
@@ -804,6 +818,7 @@ export function PanelPriloh({
   smiZapisovat,
   tenantId,
   branchId,
+  kotva,
 }: {
   rozsah: string
   cil: CilZapisu
@@ -813,9 +828,11 @@ export function PanelPriloh({
   smiZapisovat: boolean
   tenantId: string
   branchId: string
+  /** `id` panelu, ať na něj vede „+ N dalších dokumentů“ z týdne (jen v detailu — v dni je panelů víc). */
+  kotva?: string
 }) {
   return (
-    <section className="ds-plocha">
+    <section className={kotva ? 'ds-plocha ds-rez-kotva' : 'ds-plocha'} id={kotva}>
       <div className="ds-plocha-hlava">
         <Ikona klic="sponka" />
         <h2>Dokumenty a přílohy</h2>

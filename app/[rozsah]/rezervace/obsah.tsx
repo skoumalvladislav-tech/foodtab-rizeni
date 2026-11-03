@@ -405,6 +405,7 @@ export function DetailObsah({
               smiZapisovat={smiZapisovat}
               tenantId={tenantId}
               branchId={r.branch_id}
+              kotva="dokumenty"
             />
           </div>
         </div>
