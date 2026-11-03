@@ -2,9 +2,8 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 import { datumACasSRokemVPasmu } from '@/lib/cas'
-import type { Blok, NahledDocx, Odstavec, Usek } from '@/lib/docx-nahled'
+import { poznamkaNahledu, type Blok, type NahledDocx, type Odstavec, type Usek } from '@/lib/docx-nahled'
 import { velikostText } from '@/lib/rezervace-prilohy'
-import { pocet } from '@/lib/sklonovani'
 
 import Ikona from '../../ikona'
 import Nadpis from '../../nadpis'
@@ -46,11 +45,22 @@ export function ObsahDokumentu({ bloky }: { bloky: Blok[] }) {
             <tbody>
               {b.radky.map((radek, r) => (
                 <tr key={r}>
-                  {radek.map((bunka, c) => (
-                    <td key={c}>
-                      <ObsahDokumentu bloky={bunka} />
-                    </td>
-                  ))}
+                  {/* Sloučené buňky přes colSpan/rowSpan — jinak by hodnota
+                      skončila pod cizím sloupcem. Pokračování svisle
+                      sloučené buňky se nekreslí. */}
+                  {radek.map((bunka, c) =>
+                    bunka.sloucena ? null : bunka.odsazeni ? (
+                      <td key={c} colSpan={bunka.sirka > 1 ? bunka.sirka : undefined} className="ds-dokument-mimo" aria-hidden="true" />
+                    ) : (
+                      <td
+                        key={c}
+                        colSpan={bunka.sirka > 1 ? bunka.sirka : undefined}
+                        rowSpan={bunka.vyska > 1 ? bunka.vyska : undefined}
+                      >
+                        <ObsahDokumentu bloky={bunka.bloky} />
+                      </td>
+                    ),
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -58,11 +68,17 @@ export function ObsahDokumentu({ bloky }: { bloky: Blok[] }) {
         </div>,
       )
     } else if (b.nadpis) {
+      // Prázdný nadpis (smazaný text, značka před tabulkou) je jen mezera —
+      // prázdné <h2> by čtečka obrazovky hlásila jako nadpis.
       const H = NADPISY[b.nadpis]
       vysledek.push(
-        <H key={i}>
-          <Texty p={b} />
-        </H>,
+        b.useky.length ? (
+          <H key={i}>
+            <Texty p={b} />
+          </H>
+        ) : (
+          <p key={i} className="ds-dokument-mezera" aria-hidden="true" />
+        ),
       )
     } else if (b.odrazka) {
       // Odrážky za sebou jsou jeden seznam.
@@ -118,6 +134,7 @@ export function DokumentObsah({
   chyba: string | null
 }) {
   const prazdny = nahled !== null && !nahled.bloky.some((b) => b.druh === 'tabulka' || b.useky.length > 0)
+  const poznamka = nahled ? poznamkaNahledu(nahled) : null
   return (
     <>
       <Nadpis
@@ -136,7 +153,9 @@ export function DokumentObsah({
           </a>
         }
       >
-        {priloha.nazev}
+        {/* Název souboru bývá bez mezer (Objednavka_rautu_15-11.docx) —
+            bez zalomení kdekoli by na telefonu roztáhl stránku do šířky. */}
+        <span className="ds-dokument-nazev">{priloha.nazev}</span>
       </Nadpis>
       <div className="ds-rez" style={{ padding: '0 16px 32px' }}>
         <ZalozkyRezervaci rozsah={rozsah} aktivni="kalendar" />
@@ -155,14 +174,9 @@ export function DokumentObsah({
           </p>
         ) : nahled ? (
           <>
-            {nahled.obrazku > 0 || nahled.zkraceno ? (
+            {poznamka ? (
               <p className="ds-rez-zdroj" role="status">
-                {[
-                  nahled.obrazku > 0 ? `V dokumentu ${pocet(nahled.obrazku, 'je obrázek', 'jsou obrázky', 'je obrázků')} — v náhledu je po nich jen značka.` : null,
-                  nahled.zkraceno ? 'Dokument je dlouhý, náhled ukazuje jen začátek.' : null,
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
+                {poznamka}
               </p>
             ) : null}
             <article className="ds-plocha ds-dokument" aria-label={`Obsah dokumentu ${priloha.nazev}`}>

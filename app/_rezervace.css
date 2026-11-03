@@ -336,8 +336,11 @@ details[open] .ds-rez-otevrit { display: none; }
 .ds-dokument ul { margin: 0 0 10px; padding-left: 22px; list-style: disc; }
 .ds-dokument li::marker { color: var(--muted); }
 .ds-dokument li { margin: 0 0 4px; }
-.ds-dokument-mezera { min-height: 10px; margin: 0; }
+/* Prázdný odstavec = mezera; `.ds-dokument p` by jinak přebil okraj. */
+.ds-dokument .ds-dokument-mezera { min-height: 10px; margin: 0 0 10px; }
 .ds-dokument-nic { color: var(--muted); }
+/* Název souboru v nadpisu stránky se smí zalomit kdekoli (bývá bez mezer). */
+.ds-dokument-nazev { overflow-wrap: anywhere; }
 .ds-dokument-obrazek {
   display: inline-block; padding: 0 8px; border: 1px dashed var(--line-2); border-radius: 6px;
   font-size: 12.5px; line-height: 1.6; color: var(--muted); white-space: nowrap;
@@ -346,6 +349,8 @@ details[open] .ds-rez-otevrit { display: none; }
 .ds-dokument-tabulka table { border-collapse: collapse; font-size: 14px; }
 .ds-dokument-tabulka td { min-width: 80px; padding: 6px 10px; border: 1px solid var(--line-2); vertical-align: top; }
 .ds-dokument-tabulka td > :last-child { margin-bottom: 0; }
+/* Odsazení řádku (w:gridBefore) není buňka — bez rámečku. */
+.ds-dokument-tabulka td.ds-dokument-mimo { min-width: 0; padding: 0; border: 0; }
 .ds-dokument-tabulka td h2, .ds-dokument-tabulka td h3, .ds-dokument-tabulka td h4 { margin-top: 0; font-size: 15px; }
 @container (max-width: 560px) {
   .ds-plocha.ds-dokument { padding: 18px 16px; font-size: 14.5px; }

@@ -17,7 +17,7 @@ import {
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
-import { adresaPrilohy, velikostText, jeObrazek } from '@/lib/rezervace-prilohy'
+import { adresaPrilohy, otevritVProhlizeci, velikostText, jeObrazek } from '@/lib/rezervace-prilohy'
 import {
   NAZVY_DRUHU,
   NAZVY_STAVU,
@@ -733,8 +733,14 @@ export function PanelPriloh({
           {prilohy.map((p) => (
             <li key={p.id} className="ds-rez-priloha">
               <Ikona klic={jeObrazek(p.mime) ? 'fotka' : 'faktura'} />
-              {/* Vždy v nové záložce: PDF a fotka ze souboru, Word jako náhled ve Foodtabu. */}
-              <a href={adresaPrilohy(rozsah, p.id, p.mime)} target="_blank" rel="noopener noreferrer" title={p.nazev}>
+              {/* PDF a fotka v nové záložce ze souboru. Word jako náhled ve
+                  Foodtabu ve stejném okně (má odkaz zpátky) — nová záložka
+                  by z aplikace na ploše iPhonu otevřela Safari bez přihlášení. */}
+              <a
+                href={adresaPrilohy(rozsah, p.id, p.mime)}
+                {...(otevritVProhlizeci(p.mime) ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                title={p.nazev}
+              >
                 {p.nazev}
               </a>
               <small>

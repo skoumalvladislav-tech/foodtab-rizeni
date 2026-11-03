@@ -25,15 +25,32 @@
  *   9. univerzální příjmové API;
  *  10. komu chodí upozornění;
  *  11. náhled Wordu: čtení .docx (formát, nadpisy podle jména stylu,
- *      odrážky, tabulky, sledování změn, textová pole), rozbitý soubor
- *      a ZIP bomba dají větu pro člověka, odkaz u Wordu vede na náhled.
+ *      odrážky, tabulky se sloučenými buňkami, sledování změn, textová
+ *      pole, zaškrtávací políčka, pole, skrytý text, iniciála), hlavní
+ *      část a styly podle vazeb; rozbitý soubor, ZIP bomba a soubor
+ *      stavěný na zahlcení serveru dají větu pro člověka nebo zkrácený
+ *      náhled — každé rozbalení má strop; odkaz u Wordu vede na náhled.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { deflateRawSync } from 'node:zlib'
+import { syncBuiltinESMExports } from 'node:module'
+import zlib, { deflateRawSync } from 'node:zlib'
 
-import { DokumentNecitelny, MAX_BLOKU, MAX_XML_BAJTU, MAX_ZNAKU, precistDocx } from '../lib/docx-nahled.ts'
+import {
+  DokumentNecitelny,
+  MAX_BLOKU,
+  MAX_STYLU_BAJTU,
+  MAX_VAZEB_BAJTU,
+  MAX_VNORENI_TABULEK,
+  MAX_XML_BAJTU,
+  MAX_ZNACEK,
+  MAX_ZNACEK_STYLU,
+  MAX_ZNACEK_VAZEB,
+  MAX_ZNAKU,
+  poznamkaNahledu,
+  precistDocx,
+} from '../lib/docx-nahled.ts'
 import { crc32 } from '../lib/xlsx-zapis.ts'
 
 import { DRUHY_UPOZORNENI_REZERVACI, souhrnVyberu } from '../lib/rezervace-upozorneni.ts'
@@ -412,9 +429,12 @@ console.log('\n== 8. Přístup napřed, data potom ==\n')
   const prvkyPrilohy = cti('app/[rozsah]/rezervace/prvky.tsx')
   const panel = prvkyPrilohy.slice(prvkyPrilohy.indexOf('export function PanelPriloh'), prvkyPrilohy.indexOf('export function HlaskaAkce'))
   // 2. 11.: Word se po kliknutí tiše stáhl a vypadalo to, že se nic
-  // nestalo. Teď vede na náhled — a každá příloha do nové záložky.
-  ok('detail: odkaz u přílohy z adresaPrilohy (Word → náhled), vždy nová záložka',
-    /<a href=\{adresaPrilohy\(rozsah, p\.id, p\.mime\)\} target="_blank" rel="noopener noreferrer"/.test(panel)
+  // nestalo. Teď vede na náhled ve stejném okně (má odkaz zpátky); nová
+  // záložka jen u PDF a fotky — z aplikace na ploše iPhonu by otevřela
+  // Safari bez přihlášení.
+  ok('detail: odkaz u přílohy z adresaPrilohy (Word → náhled), nová záložka jen pro PDF a fotku',
+    /<a\s+href=\{adresaPrilohy\(rozsah, p\.id, p\.mime\)\}\s+\{\.\.\.\(otevritVProhlizeci\(p\.mime\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/.test(panel)
+    && !panel.includes('target="_blank"')
     && !panel.includes('/api/rezervace/soubor/'))
 }
 
@@ -517,46 +537,78 @@ console.log('\n== 10. Komu chodí upozornění (2. 11. 2026) ==\n')
     (akce.match(/naplanovatPushKeZdroji\(\{ typ: 'rezervace', id/g) ?? []).length === 2)
 }
 
-console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
+console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
 {
   /*
     Prohlížeč .docx neotevře, jen stáhne — a na počítači to vypadalo, že
     se po kliknutí nic nestalo. Word se proto čte na serveru
     (lib/docx-nahled.ts) a ukáže jako stránka. Je to cizí soubor: musí
-    vydržet rozbitý ZIP i ZIP bombu a projde z něj jen text.
+    vydržet rozbitý ZIP, ZIP bombu i soubor stavěný na zahlcení serveru
+    a projde z něj jen text.
   */
+
+  // Špeh na rozbalování: každé volání musí mít strop (`maxOutputLength`).
+  // Výsledek sám to neprozradí — kontrola délky PO rozbalení dá stejnou
+  // větu, jen až po nafouknutí paměti (3. 11.: test bomby prošel i bez
+  // stropu). Pojmenovaný import v lib/docx-nahled.ts je živá vazba,
+  // syncBuiltinESMExports ji přepojí na špeha.
+  const rozbaleni = []
+  const puvodniInflate = zlib.inflateRawSync
+  zlib.inflateRawSync = (data, volby) => {
+    rozbaleni.push(volby?.maxOutputLength)
+    return puvodniInflate(data, volby)
+  }
+  syncBuiltinESMExports()
+
+  const NEZNAMY = 'Dokument je uložený způsobem, který náhled nezná.'
   const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
   const telo = (xml) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W}><w:body>${xml}</w:body></w:document>`
   // ZIP s ústředním adresářem; metoda 8 = deflate (tak ukládá Word), 0 = bez komprese.
-  const zabal = (soubory, metoda = 8) => {
+  // `volby[nazev]`: `extra` = výplň v místní hlavičce (Word dává 520 B, v adresáři 0),
+  // `popisovac` = bit 3: v místní hlavičce nuly, velikosti až v popisovači za daty.
+  const zabal = (soubory, metoda = 8, volby = {}) => {
     const casti = []
     const adresar = []
     let offset = 0
     for (const [nazev, obsah] of Object.entries(soubory)) {
+      const { extra = 0, popisovac = false } = volby[nazev] ?? {}
       const jmeno = Buffer.from(nazev)
       const data = typeof obsah === 'string' ? Buffer.from(obsah) : obsah
       const ulozeno = metoda === 8 ? deflateRawSync(data) : data
+      const crc = crc32(data)
       const l = Buffer.alloc(30)
       l.writeUInt32LE(0x04034b50, 0)
       l.writeUInt16LE(20, 4)
+      l.writeUInt16LE(popisovac ? 0x0008 : 0, 6)
       l.writeUInt16LE(metoda, 8)
-      l.writeUInt32LE(crc32(data), 14)
-      l.writeUInt32LE(ulozeno.length, 18)
-      l.writeUInt32LE(data.length, 22)
+      if (!popisovac) {
+        l.writeUInt32LE(crc, 14)
+        l.writeUInt32LE(ulozeno.length, 18)
+        l.writeUInt32LE(data.length, 22)
+      }
       l.writeUInt16LE(jmeno.length, 26)
+      l.writeUInt16LE(extra, 28)
       const u = Buffer.alloc(46)
       u.writeUInt32LE(0x02014b50, 0)
       u.writeUInt16LE(20, 4)
       u.writeUInt16LE(20, 6)
+      u.writeUInt16LE(popisovac ? 0x0008 : 0, 8)
       u.writeUInt16LE(metoda, 10)
-      u.writeUInt32LE(crc32(data), 16)
+      u.writeUInt32LE(crc, 16)
       u.writeUInt32LE(ulozeno.length, 20)
       u.writeUInt32LE(data.length, 24)
       u.writeUInt16LE(jmeno.length, 28)
       u.writeUInt32LE(offset, 42)
-      casti.push(l, jmeno, ulozeno)
+      const popis = Buffer.alloc(popisovac ? 16 : 0)
+      if (popisovac) {
+        popis.writeUInt32LE(0x08074b50, 0)
+        popis.writeUInt32LE(crc, 4)
+        popis.writeUInt32LE(ulozeno.length, 8)
+        popis.writeUInt32LE(data.length, 12)
+      }
+      casti.push(l, jmeno, Buffer.alloc(extra), ulozeno, popis)
       adresar.push(u, jmeno)
-      offset += 30 + jmeno.length + ulozeno.length
+      offset += 30 + jmeno.length + extra + ulozeno.length + popis.length
     }
     const velikost = adresar.reduce((n, x) => n + x.length, 0)
     const k = Buffer.alloc(22)
@@ -575,7 +627,29 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
       return e instanceof DokumentNecitelny ? e.message : `JINÁ VÝJIMKA: ${e?.constructor?.name} ${e?.message}`
     }
   }
+  const nahledNeboChyba = (bajty) => {
+    try {
+      return precistDocx(bajty)
+    } catch (e) {
+      return { chyba: e?.message }
+    }
+  }
   const text = (x) => (x?.druh === 'odstavec' ? x.useky.map((u) => u.text).join('') : '')
+  const precist = (xml, dalsi = {}) => precistDocx(zabal({ 'word/document.xml': telo(xml), ...dalsi }))
+  // Všechny odstavce, i z buněk (do hloubky).
+  const odstavceVsude = (bloky) =>
+    bloky.flatMap((x) => (x.druh === 'tabulka' ? x.radky.flatMap((r) => r.flatMap((c) => odstavceVsude(c.bloky))) : [x]))
+  const wt = (t) => `<w:r><w:t xml:space="preserve">${t}</w:t></w:r>`
+  const tc = (t, pr = '') => `<w:tc>${pr ? `<w:tcPr>${pr}</w:tcPr>` : ''}<w:p>${wt(t)}</w:p></w:tc>`
+  const VAZBY = 'http://schemas.openxmlformats.org'
+  // Seznam vazeb jako z Wordu: vlastnosti dokumentu PŘED hlavní částí.
+  const relsWord = (cil) =>
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${VAZBY}/package/2006/relationships">` +
+    `<Relationship Id="rId3" Type="${VAZBY}/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>` +
+    `<Relationship Id="rId2" Type="${VAZBY}/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>` +
+    `<Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/officeDocument" Target="${cil}"/></Relationships>`
+  const APP = '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Microsoft Office Word</Application><Pages>1</Pages></Properties>'
+  const CORE = '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Nabídka</dc:title></cp:coreProperties>'
 
   // Česky pojmenované styly: id „Nadpis1“, jméno „heading 1“ (to je v každém jazyku stejné).
   // Nadpis1 schválně BEZ úrovně osnovy — rozhodnout musí jméno, ne outlineLvl.
@@ -589,8 +663,11 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
     <w:style w:type="paragraph" w:styleId="Osnova"><w:name w:val="Osnova"/><w:pPr><w:outlineLvl w:val="1"/></w:pPr></w:style>
     <w:style w:type="paragraph" w:styleId="BezUrovne"><w:name w:val="Bez úrovně"/><w:pPr><w:outlineLvl/></w:pPr></w:style>
   </w:styles>`
+  const ZMENA = 'w:author="A" w:date="2026-01-01T00:00:00Z"'
   const dokument = telo(`
     <w:p><w:pPr><w:pStyle w:val="Nadpis1"/><w:rPr><w:b/></w:rPr></w:pPr><w:r><w:t>Svatba Novákovi</w:t></w:r></w:p>
+    <w:p><w:pPr><w:rPr><w:del w:id="9" ${ZMENA}/></w:rPr></w:pPr><w:r><w:t>Smazaná značka odstavce</w:t></w:r></w:p>
+    <w:p><w:pPr><w:pPrChange w:id="10" ${ZMENA}><w:pPr><w:pStyle w:val="Nadpis1"/></w:pPr></w:pPrChange></w:pPr><w:r><w:t>Dřív nadpis</w:t></w:r></w:p>
     <w:p><w:pPr><w:pStyle w:val="MujNadpis"/></w:pPr><w:r><w:t>Zděděný nadpis</w:t></w:r></w:p>
     <w:p><w:pPr><w:pStyle w:val="Smycka1"/></w:pPr><w:r><w:t>Zacyklený styl</w:t></w:r></w:p>
     <w:p><w:pPr><w:pStyle w:val="Osnova"/></w:pPr><w:r><w:t>Osnova 2</w:t></w:r></w:p>
@@ -603,6 +680,7 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
     </w:p>
     <w:p><w:r><w:t>A&amp;B &lt;c&gt; &#x10D;&#269;</w:t><w:tab/><w:t>za tabulátorem</w:t><w:br/><w:t>nový řádek</w:t></w:r></w:p>
     <w:p><w:r><w:t xml:space="preserve">Zůstává </w:t></w:r><w:del w:id="2"><w:r><w:delText>smazané</w:delText><w:t>staré</w:t></w:r></w:del><w:ins w:id="3"><w:r><w:t>vložené</w:t></w:r></w:ins></w:p>
+    <w:p><w:r><w:t xml:space="preserve">Přesun: </w:t></w:r><w:moveFrom w:id="11" ${ZMENA}><w:r><w:t>odtud</w:t></w:r></w:moveFrom><w:moveTo w:id="12" ${ZMENA}><w:r><w:t>sem</w:t></w:r></w:moveTo></w:p>
     <w:p><w:pPr><w:pStyle w:val="Odstavecseseznamem"/></w:pPr><w:r><w:t>Předkrm</w:t></w:r></w:p>
     <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:t>Hlavní chod</w:t></w:r></w:p>
     <w:p><w:pPr><w:pStyle w:val="Odstavecseseznamem"/><w:numPr><w:numId w:val="0"/></w:numPr></w:pPr><w:r><w:t>Bez odrážky</w:t></w:r></w:p>
@@ -611,53 +689,229 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
       <w:tbl><w:tr><w:tc><w:p><w:r><w:t>vnořená</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:tc></w:tr>
       <w:tr><w:tc><w:p><w:r><w:t>18:00</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Přípitek</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
     <w:p><w:r><w:t xml:space="preserve">Plán sálu: </w:t></w:r><w:r><w:drawing><wp:inline><a:graphic><a:graphicData><pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>
-    <w:p><w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent><w:p><w:pPr><w:rPr><w:b/></w:rPr></w:pPr><w:r><w:t>V textovém poli</w:t></w:r></w:p></w:txbxContent></wps:txbx></w:drawing></mc:Choice>
+    <w:p><w:r><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wps:txbx><w:txbxContent><w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/></w:tabs><w:rPr><w:b/></w:rPr></w:pPr><w:sdt><w:sdtPr><w:rPr><w:b/><w:i/></w:rPr></w:sdtPr><w:sdtContent><w:r><w:t>V textovém poli</w:t></w:r></w:sdtContent></w:sdt></w:p></w:txbxContent></wps:txbx></w:drawing></mc:Choice>
       <mc:Fallback><w:pict><v:shape><v:imagedata r:id="x"/><v:textbox><w:txbxContent><w:p><w:r><w:t>V textovém poli</w:t></w:r></w:p></w:txbxContent></v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent><w:t>Za polem</w:t></w:r></w:p>
     <w:p><w:r><w:t xml:space="preserve">Pole: </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>HYPERLINK "javascript:alert(1)"</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>odkaz</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>
     <w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>`)
-  const n = precistDocx(zabal({ '[Content_Types].xml': '<Types/>', 'word/document.xml': dokument, 'word/styles.xml': styly }))
+  // Hlavní část jinde než word/document.xml a návnada na tom obvyklém místě:
+  // náhled ji musí najít podle druhu vazby, ne podle pořadí ani jména.
+  const balik = {
+    '[Content_Types].xml': '<Types/>',
+    '_rels/.rels': relsWord('word/hlavni.xml'),
+    'docProps/app.xml': APP,
+    'docProps/core.xml': CORE,
+    'word/document.xml': telo('<w:p><w:r><w:t>NÁVNADA</w:t></w:r></w:p>'),
+    'word/hlavni.xml': dokument,
+    'word/styles.xml': styly,
+  }
+  const n = precistDocx(zabal(balik))
   const b = n.bloky
   const odst = b.filter((x) => x.druh === 'odstavec')
   const najdi = (t) => odst.find((x) => text(x).startsWith(t))
 
+  ok('hlavní část podle druhu vazby (officeDocument), ne první vazba ani word/document.xml',
+    !!najdi('Svatba') && !JSON.stringify(n).includes('NÁVNADA'))
+  const jakoWord = nahledNeboChyba(zabal(balik, 8, {
+    '[Content_Types].xml': { extra: 520 }, '_rels/.rels': { extra: 520 }, 'docProps/app.xml': { extra: 264 },
+    'word/hlavni.xml': { extra: 264 }, 'word/styles.xml': { extra: 264 },
+  }))
+  ok('ZIP jako z Wordu (extra pole v místní hlavičce): stejný náhled', JSON.stringify(jakoWord) === JSON.stringify(n))
+  const sPopisovacem = nahledNeboChyba(zabal(balik, 8, { 'word/hlavni.xml': { popisovac: true }, 'word/styles.xml': { popisovac: true } }))
+  ok('ZIP s popisovačem dat (bit 3, v místní hlavičce nuly): stejný náhled', JSON.stringify(sPopisovacem) === JSON.stringify(n))
+
   ok('nadpis podle JMÉNA stylu („heading 1“), ne podle českého id „Nadpis1“', najdi('Svatba')?.nadpis === 1)
   ok('formát značky konce odstavce (w:rPr ve w:pPr) text neztuční', najdi('Svatba')?.useky.every((u) => !u.tucne))
+  ok('smazaná značka odstavce (<w:del/> v w:rPr) neschová zbytek dokumentu',
+    text(najdi('Smazaná značka')) === 'Smazaná značka odstavce' && !!najdi('Za polem') && !!najdi('Pole'))
+  ok('styl PŘED změnou (w:pPrChange) se nepoužije', najdi('Dřív nadpis')?.nadpis === 0)
   ok('vlastní styl postavený na nadpisu je nadpis (w:basedOn)', najdi('Zděděný')?.nadpis === 1)
   ok('zacyklené w:basedOn nezamrzne, je to běžný text', najdi('Zacyklený')?.nadpis === 0)
   ok('úroveň osnovy ze stylu (outlineLvl 1 → nadpis 2)', najdi('Osnova 2')?.nadpis === 2)
   ok('outlineLvl bez hodnoty není nadpis (Number(null) by dalo nadpis 1)', najdi('Bez úrovně')?.nadpis === 0)
   const formaty = najdi('Obyčejný')
   ok('úroveň osnovy přímo v odstavci (outlineLvl 2 → nadpis 3)', formaty?.nadpis === 3)
-  ok('zarážka tabulátoru ve w:pPr není tabulátor v textu', !!formaty && !text(formaty).includes('\t'))
   const usek = (t) => formaty?.useky.find((u) => u.text === t)
   ok('tučně a kurzíva', usek('tučně')?.tucne === true && usek('tučně')?.kurziva === true && usek('Obyčejný ')?.tucne === false)
   ok('w:b w:val="0" vypne tučné, podtržení se čte', usek('podtrženo')?.tucne === false && usek('podtrženo')?.podtrzeno === true)
   ok('formát PŘED změnou (w:rPrChange) se nepoužije', usek('dřív tučné')?.tucne === false)
   ok('entity, tabulátor a zalomení řádku', text(najdi('A&B')) === 'A&B <c> čč\tza tabulátorem\nnový řádek')
   ok('sledování změn: smazané pryč, vložené zůstane', text(najdi('Zůstává')) === 'Zůstává vložené')
+  ok('sledování změn: přesunuté odtud (w:moveFrom) pryč, sem zůstane', text(najdi('Přesun')) === 'Přesun: sem')
   ok('odrážka ze stylu i z w:numPr', najdi('Předkrm')?.odrazka === true && najdi('Hlavní chod')?.odrazka === true)
   ok('w:numId 0 odrážku vypne', najdi('Bez odrážky')?.odrazka === false)
   ok('prázdný odstavec <w:p/> zůstane jako mezera', odst.some((x) => x.useky.length === 0))
   const tab = b.find((x) => x.druh === 'tabulka')
   ok('tabulka: 2 řádky po 2 buňkách', tab?.radky.length === 2 && tab.radky.every((r) => r.length === 2))
-  const vnorena = tab?.radky[0][1].find((x) => x.druh === 'tabulka')
+  const vnorena = tab?.radky[0][1].bloky.find((x) => x.druh === 'tabulka')
   ok('vnořená tabulka zůstane v buňce, ne za tabulkou',
-    vnorena?.radky[0][0].map(text).join('') === 'vnořená' && !b.some((x) => text(x) === 'vnořená') && b.filter((x) => x.druh === 'tabulka').length === 1)
+    vnorena?.radky[0][0].bloky.map(text).join('') === 'vnořená' && !b.some((x) => text(x) === 'vnořená') && b.filter((x) => x.druh === 'tabulka').length === 1)
   ok('text z buňky není v těle dokumentu', !odst.some((x) => ['Čas', 'Přípitek', '18:00'].includes(text(x))))
   const obrazek = najdi('Plán sálu')
   ok('obrázek: spočítaný a v textu značka', obrazek?.useky.some((u) => u.zastupny && u.text === 'obrázek') === true)
   ok('textové pole: text jednou (náhradní kopie mc:Fallback se přeskočí) a nepočítá se jako obrázek',
     odst.filter((x) => text(x) === 'V textovém poli').length === 1 && n.obrazku === 1)
-  ok('text za textovým polem zůstane ve svém odstavci a formát konce odstavce z pole ho neztuční',
-    najdi('Za polem')?.useky.every((u) => !u.tucne) === true)
+  // Odstavec textového pole leží UVNITŘ běhu okolního odstavce. Jeho zarážka
+  // tabulátoru, formát konce odstavce ani formát z w:sdtPr nesmí do toho běhu.
+  ok('zarážka tabulátoru v textovém poli není tabulátor v textu', odst.some((x) => text(x) === 'V textovém poli'))
+  ok('text za textovým polem zůstane ve svém odstavci, formát z pole (w:pPr, w:sdtPr) ho neztuční ani nenakloní',
+    najdi('Za polem')?.useky.every((u) => !u.tucne && !u.kurziva) === true)
   ok('pole: ukáže se výsledek, ne příkaz (adresa z cizího souboru nikam nevede)',
     text(najdi('Pole')) === 'Pole: odkaz' && !JSON.stringify(n).includes('javascript'))
   ok('dokument není zkrácený', n.zkraceno === false)
 
-  // Hlavní část podle _rels/.rels, a ZIP bez komprese.
-  const rels = '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="/word/document2.xml"/></Relationships>'
+  // Hlavní část podle _rels/.rels s cestou od kořene, ZIP bez komprese; bez vazeb word/document.xml.
+  const rels = `<Relationships xmlns="${VAZBY}/package/2006/relationships"><Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/officeDocument" Target="/word/document2.xml"/></Relationships>`
   const jinde = precistDocx(zabal({ '_rels/.rels': rels, 'word/document2.xml': telo('<w:p><w:r><w:t>Z document2</w:t></w:r></w:p>') }, 0))
-  ok('hlavní část podle _rels/.rels, ZIP bez komprese', jinde.bloky.map(text).join('') === 'Z document2')
+  ok('hlavní část podle _rels/.rels (cesta od kořene), ZIP bez komprese', jinde.bloky.map(text).join('') === 'Z document2')
+  const chybiCil = precistDocx(zabal({ '_rels/.rels': relsWord('word/neni.xml'), 'word/document.xml': telo(`<w:p>${wt('výchozí')}</w:p>`) }))
+  ok('vazba na chybějící část → word/document.xml', text(chybiCil.bloky[0]) === 'výchozí')
+  // Styly podle vazeb hlavní části, ne natvrdo word/styles.xml.
+  const stylyJinde = `<w:styles ${W}><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style></w:styles>`
+  const vazbyHlavni = `<Relationships xmlns="${VAZBY}/package/2006/relationships"><Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/styles" Target="styles2.xml"/></Relationships>`
+  const sJinde = precistDocx(zabal({
+    '_rels/.rels': relsWord('/word/document2.xml'),
+    'word/document2.xml': telo(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>${wt('Nadpis')}</w:p>`),
+    'word/_rels/document2.xml.rels': vazbyHlavni,
+    'word/styles2.xml': stylyJinde,
+  }))
+  ok('styly podle vazeb hlavní části (word/styles2.xml)', sJinde.bloky[0]?.nadpis === 1)
+
+  // Sloučené buňky: bez nich je hodnota pod cizím sloupcem.
+  const sloucena = precist(`<w:tbl>
+    <w:tr>${tc('Čas')}${tc('Program')}${tc('Osob')}</w:tr>
+    <w:tr>${tc('Příchod hostů', '<w:gridSpan w:val="2"/>')}${tc('40')}</w:tr>
+    <w:tr><w:trPr><w:gridBefore w:val="1"/></w:trPr>${tc('Večeře')}${tc('38')}</w:tr>
+    <w:tr>${tc('Den 1', '<w:vMerge w:val="restart"/>')}${tc('Raut')}${tc('50')}</w:tr>
+    <w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc>${tc('Tanec')}${tc('60')}</w:tr>
+    <w:tr><w:tc><w:tcPr><w:vMerge w:val="continue"/></w:tcPr><w:p/></w:tc>${tc('Konec')}${tc('—')}</w:tr>
+    <w:tr>${tc('Obří', '<w:gridSpan w:val="99999"/>')}</w:tr>
+    <w:tr>${tc('Nesmysl', '<w:gridSpan w:val="abc"/>')}${tc('x')}</w:tr>
+  </w:tbl>`)
+  const st = sloucena.bloky[0]
+  // Sloupec mřížky, kde buňka s daným textem začíná.
+  const sloupecTextu = (radek, hledany) => {
+    let s = 0
+    for (const c of radek ?? []) {
+      if (c.bloky.map(text).join('') === hledany) return s
+      s += c.sirka
+    }
+    return -1
+  }
+  ok('sloučené buňky (w:gridSpan): „40“ je pod „Osob“, ne pod „Program“',
+    st?.radky[1][0].sirka === 2 && sloupecTextu(st.radky[1], '40') === sloupecTextu(st.radky[0], 'Osob'))
+  ok('odsazení řádku (w:gridBefore): „Večeře“ pod „Program“, „38“ pod „Osob“',
+    st?.radky[2][0].odsazeni === true && sloupecTextu(st.radky[2], 'Večeře') === 1 && sloupecTextu(st.radky[2], '38') === 2)
+  ok('svisle sloučené (w:vMerge): „Den 1“ přes 3 řádky, pokračování se nekreslí',
+    st?.radky[3][0].vyska === 3 && st.radky[4][0].sloucena && st.radky[5][0].sloucena && !st.radky[3][0].sloucena
+      && st.radky[3][0].bloky.map(text).join('') === 'Den 1')
+  ok('šířka z cizího souboru v mezích: 99999 → 63, „abc“ → 1', st?.radky[6][0].sirka === 63 && st.radky[7][0].sirka === 1)
+  const vnorenaSloucena = precist(`<w:tbl><w:tr><w:tc><w:tbl><w:tr>${tc('uvnitř', '<w:gridSpan w:val="2"/>')}</w:tr></w:tbl><w:p/></w:tc>${tc('vedle')}</w:tr></w:tbl>`)
+  const vnejsi = vnorenaSloucena.bloky[0]?.radky[0]
+  ok('w:gridSpan ve vnořené tabulce patří vnitřní buňce', vnejsi?.[0].sirka === 1 && vnejsi[0].bloky[0]?.radky[0][0].sirka === 2)
+  const predZmenou = precist(`<w:tbl><w:tr>${tc('a', `<w:tcPrChange w:id="5" ${ZMENA}><w:tcPr><w:gridSpan w:val="3"/></w:tcPr></w:tcPrChange>`)}${tc('b')}</w:tr></w:tbl>`)
+  ok('sloučení PŘED změnou (w:tcPrChange) se nepoužije', predZmenou.bloky[0]?.radky[0][0].sirka === 1)
+
+  // Zaškrtávací políčka a znaky: bez nich nejde poznat, co zákazník zaškrtl.
+  const policko = (stav) =>
+    `<w:r><w:fldChar w:fldCharType="begin"><w:ffData><w:name w:val="Z"/><w:enabled/><w:checkBox><w:sizeAuto/>${stav}</w:checkBox></w:ffData></w:fldChar></w:r>` +
+    '<w:r><w:instrText xml:space="preserve"> FORMCHECKBOX </w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>'
+  const sym = (pismo, kod) => `<w:r><w:sym w:font="${pismo}" w:char="${kod}"/></w:r>`
+  const zaskrt = precist([
+    `<w:p>${policko('<w:default w:val="1"/>')}${wt(' vegetariánské')}</w:p>`,
+    `<w:p>${policko('<w:default w:val="0"/>')}${wt(' bezlepkové')}</w:p>`,
+    `<w:p>${policko('<w:default w:val="1"/><w:checked w:val="0"/>')}${wt(' přepsané')}</w:p>`,
+    `<w:p>${policko('<w:checked/>')}${wt(' zaškrtnuté')}</w:p>`,
+    `<w:p>${sym('Wingdings', 'F0FE')}${sym('Wingdings', 'F0A8')}${sym('Wingdings 2', 'F052')}${sym('Wingdings 2', 'F0A3')}${sym('Symbol', 'F0B0')}${sym('Segoe UI Symbol', '2611')}</w:p>`,
+    `<w:p>${sym('Wingdings', 'F04A')}${wt('X')}</w:p>`,
+  ].join(''))
+  const zt = zaskrt.bloky.map(text)
+  ok('políčko formuláře: výchozí zaškrtnuté → ☒', zt[0] === '☒ vegetariánské')
+  ok('políčko formuláře: výchozí prázdné → ☐', zt[1] === '☐ bezlepkové')
+  ok('políčko formuláře: w:checked w:val="0" přebije výchozí', zt[2] === '☐ přepsané')
+  ok('políčko formuláře: <w:checked/> → ☒', zt[3] === '☒ zaškrtnuté')
+  ok('znaky z Wingdings, Wingdings 2, Symbol a běžného písma (w:sym)', zt[4] === '☑☐☑☐°☑')
+  ok('neznámý znak z Wingdings je značka „symbol“, ne písmeno', zaskrt.bloky[5]?.useky[0]?.zastupny === true && zt[5] === 'symbolX')
+
+  // Pole v poli (hromadná korespondence): výsledek vnitřního pole je v příkazu vnějšího.
+  const fc = (typ) => `<w:r><w:fldChar w:fldCharType="${typ}"/></w:r>`
+  const it = (t) => `<w:r><w:instrText xml:space="preserve">${t}</w:instrText></w:r>`
+  const pole = precist([
+    `<w:p>${wt('Vážen')}${fc('begin')}${it(' IF ')}${fc('begin')}${it(' MERGEFIELD Pohlavi ')}${fc('separate')}${wt('«Pohlavi»')}${fc('end')}`,
+    `${it(' = "M" "ý pane" "á paní" ')}${fc('separate')}${wt('ý pane')}${fc('end')}${wt(',')}</w:p>`,
+    `<w:p>${fc('end')}${wt('Zbloudilý konec pole nic neschová')}</w:p>`,
+    `<w:p>${fc('begin')}${it(' TOC ')}${fc('separate')}${wt('Obsah 1')}</w:p><w:p>${wt('Obsah 2')}${fc('end')}</w:p>`,
+  ].join(''))
+  ok('vnořené pole: výsledek vnitřního pole v příkazu se neukáže („Vážený pane“)', text(pole.bloky[0]) === 'Vážený pane,')
+  ok('zbloudilý konec pole nic neschová, výsledek pole přes víc odstavců zůstane',
+    pole.bloky.slice(1).map(text).join('|') === 'Zbloudilý konec pole nic neschová|Obsah 1|Obsah 2')
+
+  // Skrytý text Word neukáže ani nevytiskne.
+  const skryte = precist(
+    `<w:p>${wt('Cena: ')}<w:r><w:rPr><w:vanish/></w:rPr><w:t>INTERNÍ marže 40 %</w:t></w:r>${wt('500 Kč')}</w:p>` +
+      '<w:p><w:r><w:rPr><w:vanish w:val="0"/></w:rPr><w:t>Viditelné</w:t></w:r></w:p>' +
+      '<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:drawing><wp:inline><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic/></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>',
+  )
+  ok('skrytý text (w:vanish) se neukáže', text(skryte.bloky[0]) === 'Cena: 500 Kč')
+  ok('w:vanish w:val="0" je vidět', text(skryte.bloky[1]) === 'Viditelné')
+  ok('skrytý obrázek se nepočítá a nemá značku', skryte.obrazku === 0 && text(skryte.bloky[2]) === '')
+
+  // Grafika podle obalu (a:graphicData), ne podle výčtu vnitřních jmen.
+  const G = 'http://schemas.openxmlformats.org/drawingml/2006'
+  const MS = 'http://schemas.microsoft.com/office'
+  const kresba = (uri, vnitrek) => `<w:r><w:drawing><wp:anchor><a:graphic><a:graphicData uri="${uri}">${vnitrek}</a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>`
+  const grafika = precist([
+    // Graf nového druhu (vodopád) — náhradní obrázek je v přeskočeném mc:Fallback.
+    `<w:p><w:r><mc:AlternateContent><mc:Choice Requires="cx1">${kresba(`${MS}/drawing/2014/chartex`, '<cx:chart r:id="rId9"/>').slice(5, -6)}</mc:Choice>`,
+    `<mc:Fallback>${kresba(`${G}/picture`, '<pic:pic/>').slice(5, -6)}</mc:Fallback></mc:AlternateContent></w:r></w:p>`,
+    `<w:p>${kresba(`${MS}/word/2010/wordprocessingShape`, '<wps:wsp><wps:spPr><a:blipFill><a:blip r:embed="rId3"/></a:blipFill></wps:spPr></wps:wsp>')}</w:p>`,
+    `<w:p>${kresba(`${MS}/word/2010/wordprocessingGroup`, '<wpg:wgp><pic:pic><pic:blipFill><a:blip r:embed="rId4"/></pic:blipFill></pic:pic></wpg:wgp>')}</w:p>`,
+    `<w:p>${kresba(`${G}/picture`, '<pic:pic><pic:blipFill><a:blip r:embed="rId5"/></pic:blipFill></pic:pic>')}</w:p>`,
+    `<w:p>${wt('Plocha: ')}<m:oMathPara><m:oMath><m:r><m:t>πr²</m:t></m:r></m:oMath></m:oMathPara></w:p>`,
+  ].join(''))
+  const znacky = grafika.bloky.map((x) => x.useky.filter((u) => u.zastupny).map((u) => u.text).join(','))
+  ok('graf nového druhu (cx:chart) má značku', znacky[0] === 'obrázek')
+  ok('obrázek jako výplň tvaru (a:blipFill) má značku', znacky[1] === 'obrázek')
+  ok('obrázek ve skupině tvarů má značku', znacky[2] === 'obrázek')
+  ok('obyčejný obrázek jen jednou (a:graphicData i pic:pic v něm)', znacky[3] === 'obrázek')
+  ok('spočítané jsou všechny 4 (věta nad náhledem sedí)', grafika.obrazku === 4)
+  ok('vzorec: značka místo zmizení', znacky[4] === 'vzorec' && text(grafika.bloky[4]) === 'Plocha: vzorec')
+
+  // Iniciála je ve Wordu samostatný odstavec s jedním písmenem.
+  const iniciala = precist([
+    `<w:p><w:pPr><w:framePr w:dropCap="drop" w:lines="3" w:wrap="around" w:vAnchor="text" w:hAnchor="text"/></w:pPr>${wt('V')}</w:p>`,
+    `<w:p>${wt('ítáme vás')}</w:p>`,
+    `<w:p><w:pPr><w:framePr w:dropCap="margin"/></w:pPr>${wt('P')}</w:p>`,
+    `<w:tbl><w:tr>${tc('buňka')}</w:tr></w:tbl>`,
+    `<w:p><w:pPr><w:framePr w:w="2000" w:h="400" w:wrap="around"/></w:pPr>${wt('Rámeček')}</w:p>`,
+    `<w:p>${wt('Za rámečkem')}</w:p>`,
+    `<w:p><w:pPr><w:framePr w:dropCap="drop"/></w:pPr>${wt('K')}</w:p>`,
+  ].join(''))
+  const ini = iniciala.bloky.map((x) => (x.druh === 'tabulka' ? '[tabulka]' : text(x)))
+  ok('iniciála patří do odstavce za ní („Vítáme vás“), ne jako samostatný řádek',
+    ini[0] === 'Vítáme vás' && iniciala.bloky[0].useky.length === 1)
+  ok('iniciála před tabulkou se neztratí a tabulka zůstane za ní', ini[1] === 'P' && ini[2] === '[tabulka]')
+  ok('rámeček bez iniciály zůstane samostatný odstavec', ini[3] === 'Rámeček' && ini[4] === 'Za rámečkem')
+  ok('iniciála na konci dokumentu se neztratí', ini[5] === 'K' && ini.length === 6)
+
+  const ptab = precist(`<w:p>${wt('Svíčková')}<w:r><w:ptab w:relativeTo="margin" w:alignment="right" w:leader="dot"/></w:r>${wt('250 Kč')}</w:p>`)
+  ok('tabulátor k okraji (w:ptab) oddělí jídlo a cenu', text(ptab.bloky[0]) === 'Svíčková\t250 Kč')
+
+  // Co náhled nepozná, nesmí vydávat za prázdný dokument.
+  ok('vložený HTML (w:altChunk, „export do Wordu“) → věta, ne „žádný text“',
+    chybaCteni(zabal({ 'word/document.xml': telo('<w:altChunk r:id="htmlChunk"/><w:sectPr/>') })) === NEZNAMY)
+  const NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+  ok('jiná předpona než w: (ns0:) → věta, ne „žádný text“',
+    chybaCteni(zabal({ 'word/document.xml': `<ns0:document xmlns:ns0="${NS}"><ns0:body><ns0:p><ns0:r><ns0:t>Ahoj</ns0:t></ns0:r></ns0:p></ns0:body></ns0:document>` })) === NEZNAMY)
+  ok('výchozí jmenný prostor bez předpony → věta',
+    chybaCteni(zabal({ 'word/document.xml': `<document xmlns="${NS}"><body><p><r><t>Ahoj</t></r></p></body></document>` })) === NEZNAMY)
+  const utf16 = (xml, be) => {
+    const bajty = Buffer.from(`﻿${xml}`, 'utf16le')
+    return be ? bajty.swap16() : bajty
+  }
+  const zUtf16 = (be) => text(nahledNeboChyba(zabal({ 'word/document.xml': utf16(telo(`<w:p>${wt('Příliš žluťoučký')}</w:p>`), be) })).bloky?.[0])
+  ok('dokument v UTF-16 (LE i BE) se přečte', zUtf16(false) === 'Příliš žluťoučký' && zUtf16(true) === 'Příliš žluťoučký')
+  ok('sešit Excelu (vazba na xl/workbook.xml) → „není text dokumentu Word“',
+    chybaCteni(zabal({ '_rels/.rels': relsWord('xl/workbook.xml'), 'xl/workbook.xml': '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>' })) === 'V souboru není text dokumentu Word.')
 
   // Rozbité a nebezpečné soubory: vždy věta pro člověka, nikdy jiná výjimka.
   ok('není ZIP → „není dokument Word“', chybaCteni(new TextEncoder().encode('{\\rtf1 tohle je RTF}')) === 'Soubor není dokument Word (.docx).')
@@ -667,6 +921,19 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
     chybaCteni(bomba) === 'Dokument je na náhled příliš velký.')
   ok('velká část bez komprese → taky „příliš velký“',
     chybaCteni(zabal({ 'word/document.xml': Buffer.alloc(MAX_XML_BAJTU + 1, 0x20) }, 0)) === 'Dokument je na náhled příliš velký.')
+  ok(`styly přes ${MAX_STYLU_BAJTU / 1024 / 1024} MB a vazby přes ${MAX_VAZEB_BAJTU / 1024 / 1024} MB → „příliš velký“`,
+    chybaCteni(zabal({ 'word/document.xml': telo(''), 'word/styles.xml': Buffer.alloc(MAX_STYLU_BAJTU + 1, 0x20) })) === 'Dokument je na náhled příliš velký.' &&
+      chybaCteni(zabal({ '_rels/.rels': Buffer.alloc(MAX_VAZEB_BAJTU + 1, 0x20), 'word/document.xml': telo('') })) === 'Dokument je na náhled příliš velký.')
+  // Velká bomba: bez stropu na rozbalení by paměť narostla o celých 200 MB.
+  // Zdroj bomby se drží do konce měření — kdyby ho úklid paměti uvolnil
+  // uprostřed, nárůst by vyšel malý i bez stropu.
+  const zdrojBomby = Buffer.alloc(200 * 1024 * 1024, 0x20)
+  const velkaBomba = zabal({ 'word/document.xml': zdrojBomby })
+  const predBombou = process.memoryUsage().arrayBuffers
+  const chybaVelke = chybaCteni(velkaBomba)
+  const narust = process.memoryUsage().arrayBuffers - predBombou
+  ok(`ZIP bomba ${Math.round(velkaBomba.length / 1024)} kB → 200 MB: „příliš velký“ a paměť naroste nejvýš o 64 MB (naměřeno ${Math.round(narust / 1048576)} MB)`,
+    chybaVelke === 'Dokument je na náhled příliš velký.' && narust < 64 * 1048576 && zdrojBomby.length > 0)
   const rozbity = zabal({ 'word/document.xml': telo('<w:p><w:r><w:t>x</w:t></w:r></w:p>') })
   rozbity.fill(0xff, 47, 70)
   ok('rozbitá komprese → „poškozený“', chybaCteni(rozbity) === 'Dokument je poškozený.')
@@ -683,11 +950,50 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
   ok('nesmyslná entita (&#99999999;) → „poškozený“, ne pád stránky',
     chybaCteni(zabal({ 'word/document.xml': telo('<w:p><w:r><w:t>&#99999999;</w:t></w:r></w:p>') })) === 'Dokument je poškozený.')
 
-  const dlouhy = precistDocx(zabal({ 'word/document.xml': telo(`<w:p><w:r><w:t>${'a'.repeat(MAX_ZNAKU - 5)}</w:t></w:r></w:p><w:p><w:r><w:t>bbbbbbbbbb</w:t></w:r></w:p><w:p><w:r><w:t>c</w:t></w:r></w:p>`) }))
+  // Stropy na velikost náhledu a čas serveru.
+  const dlouhy = precist(`<w:p><w:r><w:t>${'a'.repeat(MAX_ZNAKU - 5)}</w:t></w:r></w:p><w:p><w:r><w:t>bbbbbbbbbb</w:t></w:r></w:p><w:p><w:r><w:t>c</w:t></w:r></w:p>`)
   ok(`dlouhý text: zkrácený přesně na ${MAX_ZNAKU} znaků, další odstavce nepřibudou`,
     dlouhy.zkraceno && dlouhy.bloky.map(text).join('').length === MAX_ZNAKU && dlouhy.bloky.length === 2)
-  const mnoho = precistDocx(zabal({ 'word/document.xml': telo('<w:p/>'.repeat(MAX_BLOKU + 5)) }))
+  const mnoho = precist('<w:p/>'.repeat(MAX_BLOKU + 5))
   ok(`moc odstavců: nejvýš ${MAX_BLOKU}, zkrácený`, mnoho.zkraceno && mnoho.bloky.length === MAX_BLOKU)
+  // 40 kB soubor s milionem prázdných buněk kreslil server desítky vteřin.
+  const zaplavaBunek = precist(`<w:tbl><w:tr>${'<w:tc></w:tc>'.repeat(MAX_BLOKU + 5)}</w:tr></w:tbl>`)
+  const zb = zaplavaBunek.bloky[0]
+  ok(`záplava prázdných buněk: zkrácená, tabulka + řádky + buňky nejvýš ${MAX_BLOKU}`,
+    zaplavaBunek.zkraceno && 1 + zb.radky.length + zb.radky[0].length <= MAX_BLOKU && zb.radky[0].length > MAX_BLOKU - 10)
+  const zaplavaRadku = precist(`<w:tbl>${'<w:tr></w:tr>'.repeat(MAX_BLOKU + 5)}</w:tbl>`)
+  ok(`záplava prázdných řádků: zkrácená, nejvýš ${MAX_BLOKU}`,
+    zaplavaRadku.zkraceno && 1 + zaplavaRadku.bloky[0].radky.length <= MAX_BLOKU)
+  const zaplavaZnacek = precist(`${'<a/>'.repeat(MAX_ZNACEK)}<w:p>${wt('za stropem')}</w:p>`)
+  ok(`záplava značek bez textu: po ${MAX_ZNACEK} značkách konec (zkrácený), ne vteřiny práce`,
+    zaplavaZnacek.zkraceno && !JSON.stringify(zaplavaZnacek).includes('za stropem'))
+  const pozdniStyl = precistDocx(zabal({
+    'word/document.xml': telo(`<w:p><w:pPr><w:pStyle w:val="Pozde"/></w:pPr>${wt('Pozdní styl')}</w:p>`),
+    'word/styles.xml': `<w:styles ${W}>${'<a/>'.repeat(MAX_ZNACEK_STYLU)}<w:style w:type="paragraph" w:styleId="Pozde"><w:name w:val="heading 1"/></w:style></w:styles>`,
+  }))
+  ok(`styly: za ${MAX_ZNACEK_STYLU} značkami se nečtou`, pozdniStyl.bloky[0]?.nadpis === 0)
+  const pozdniVazba = precistDocx(zabal({
+    '_rels/.rels': `<Relationships xmlns="${VAZBY}/package/2006/relationships">${'<a/>'.repeat(MAX_ZNACEK_VAZEB)}<Relationship Id="rId1" Type="${VAZBY}/officeDocument/2006/relationships/officeDocument" Target="word/jinde.xml"/></Relationships>`,
+    'word/jinde.xml': telo(`<w:p>${wt('jinde')}</w:p>`),
+    'word/document.xml': telo(`<w:p>${wt('výchozí')}</w:p>`),
+  }))
+  ok(`vazby: za ${MAX_ZNACEK_VAZEB} značkami se nečtou, vezme se word/document.xml`, text(pozdniVazba.bloky[0]) === 'výchozí')
+  // Tabulky v sobě: stránka se kreslí rekurzí, stovky pater ji shodily.
+  const hloubka = (bloky) =>
+    bloky.reduce((h, x) => (x.druh === 'tabulka' ? Math.max(h, 1 + x.radky.flat().reduce((v, c) => Math.max(v, hloubka(c.bloky)), 0)) : h), 0)
+  const hluboka = precist(`${'<w:tbl><w:tr><w:tc>'.repeat(1000)}<w:p>${wt('na dně')}</w:p>`)
+  ok(`1000 tabulek v sobě: nejvýš ${MAX_VNORENI_TABULEK} pater, text se neztratí`,
+    hloubka(hluboka.bloky) === MAX_VNORENI_TABULEK && odstavceVsude(hluboka.bloky).some((x) => text(x) === 'na dně'))
+  const uzavrena = precist(`${'<w:tbl><w:tr><w:tc>'.repeat(20)}<w:p>${wt('hluboko')}</w:p>${'</w:tc></w:tr></w:tbl>'.repeat(20)}<w:p>${wt('za tabulkou')}</w:p>`)
+  ok('přeskočené hluboké tabulky nezavřou cizí buňku: text za tabulkou je v těle dokumentu',
+    uzavrena.bloky.length === 2 && text(uzavrena.bloky[1]) === 'za tabulkou' && odstavceVsude(uzavrena.bloky).some((x) => text(x) === 'hluboko'))
+
+  // Věta nad náhledem: sloveso před číslem, „po něm“ u jednoho.
+  const vetaNad = (obrazku, zkraceno = false) => poznamkaNahledu({ bloky: [], obrazku, zkraceno })
+  ok('věta: 1 obrázek', vetaNad(1) === 'V dokumentu je 1 obrázek — v náhledu je po něm jen značka.')
+  ok('věta: 2 obrázky', vetaNad(2) === 'V dokumentu jsou 2 obrázky — v náhledu jsou po nich jen značky.')
+  ok('věta: 5 obrázků', vetaNad(5) === 'V dokumentu je 5 obrázků — v náhledu jsou po nich jen značky.')
+  ok('věta: zkrácený; bez ničeho žádná věta', vetaNad(0, true) === 'Dokument je dlouhý, náhled ukazuje jen začátek.' && vetaNad(0) === null)
 
   // Kam vede odkaz u přílohy.
   ok('odkaz: PDF a fotka rovnou ze souboru, Word na náhled ve Foodtabu',
@@ -702,10 +1008,17 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
       stranka.indexOf('otevritVProhlizeci(priloha.mime)') < stranka.indexOf('stahnoutPrilohu('))
   ok('stránka: jen nečitelný dokument je věta, jiná chyba se nespolkne', stranka.includes('if (!(e instanceof DokumentNecitelny)) throw e'))
   ok('stránka: id jen ve tvaru uuid', stranka.includes('VZOR_ID.test(id) ? await nacistPrilohu('))
+  // Klíč služby obchází politiky kbelíku. V tomhle repozitáři je to
+  // klientUlohy() z lib/supabase/uloha — hledá se i ten, ne jen „service_role“.
+  const bezKomentaru = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const klicSluzby = /klientUlohy|supabase\/uloha|SERVICE_ROLE|service_role|createClient\(/
   const data = cti('app/[rozsah]/rezervace/data.ts')
-  const stahnout = data.slice(data.indexOf('export async function stahnoutPrilohu'))
+  const odStahnout = data.indexOf('export async function stahnoutPrilohu')
+  const zaStahnout = data.indexOf('\nexport ', odStahnout + 1)
+  const stahnout = data.slice(odStahnout, zaStahnout === -1 ? data.length : zaStahnout)
   ok('soubor se čte uživatelským klientem (politika kbelíku je druhá linie), ne klíčem služby',
-    stahnout.includes('await getServerSupabase()') && !/service_role|SERVICE_ROLE|getAdmin|supabaseAdmin/i.test(data))
+    /const supabase = await getServerSupabase\(\)\s+const \{ data, error \} = await supabase\.storage\.from\(KBELIK_REZERVACI\)\.download\(cesta\)/.test(stahnout) &&
+      !klicSluzby.test(bezKomentaru(data)) && !klicSluzby.test(bezKomentaru(stranka)))
   // Jen tělo nacistPrilohu — stejná podmínka je i v nacistRezervaci.
   const nacist = data.slice(data.indexOf('export async function nacistPrilohu'), data.indexOf('export async function stahnoutPrilohu'))
   ok('příloha jen z poboček rozsahu (nacistPrilohu)', nacist.includes('!pobocky.some((p) => p.id === data.branch_id)) return null'))
@@ -714,6 +1027,22 @@ console.log('\n== 11. Náhled Wordu (2. 11. 2026) ==\n')
   const kresleni = cti('app/[rozsah]/rezervace/dokument/obsah.tsx')
   ok('náhled nevkládá HTML ze souboru', !kresleni.includes('dangerouslySetInnerHTML'))
   ok('originál jde stáhnout tlačítkem', /href=\{`\/api\/rezervace\/soubor\/\$\{priloha\.id\}`\}[^>]*>\s*Stáhnout originál/.test(kresleni))
+  ok('věta nad náhledem z poznamkaNahledu', kresleni.includes('poznamkaNahledu(nahled)'))
+  ok('tabulka: sloučené buňky přes colSpan/rowSpan, pokračování se nekreslí',
+    kresleni.includes('bunka.sloucena ? null') && kresleni.includes('colSpan={bunka.sirka > 1 ? bunka.sirka : undefined}') &&
+      kresleni.includes('rowSpan={bunka.vyska > 1 ? bunka.vyska : undefined}'))
+  ok('prázdný nadpis je mezera, ne prázdné <h2>', /b\.useky\.length \? \(\s*<H key=\{i\}>/.test(kresleni))
+  ok('název souboru se v nadpisu smí zalomit kdekoli (telefon nejede do šířky)',
+    kresleni.includes('<span className="ds-dokument-nazev">{priloha.nazev}</span>') && cti('app/_rezervace.css').includes('.ds-dokument-nazev { overflow-wrap: anywhere; }'))
+  const zachrana = cti('app/[rozsah]/rezervace/dokument/[id]/error.tsx')
+  ok('spadlý náhled: záchranná obrazovka s tlačítkem na originál',
+    zachrana.startsWith("'use client'") && /href=\{`\/api\/rezervace\/soubor\/\$\{encodeURIComponent\(id \?\? ''\)\}`\}[^>]*>\s*Stáhnout originál/.test(zachrana))
+
+  // Až na konci: všechna rozbalení v tomhle oddílu měla strop.
+  ok(`každé rozbalení mělo strop nejvýš ${MAX_XML_BAJTU / 1024 / 1024} MB (${rozbaleni.length} rozbalení)`,
+    rozbaleni.length > 20 && rozbaleni.every((m) => typeof m === 'number' && m > 0 && m <= MAX_XML_BAJTU))
+  zlib.inflateRawSync = puvodniInflate
+  syncBuiltinESMExports()
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
