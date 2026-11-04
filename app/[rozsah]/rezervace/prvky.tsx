@@ -63,6 +63,8 @@ export type RezervaceRadek = {
   prostor: string
   typ_akce: string
   zdroj: ZdrojRezervace
+  /** Stoly přidělené v rezervačním systému („Patro: S1–S12“); `''` = žádné nebo neznámé. Patří zdroji. */
+  misto_zdroje: string
   /** Pásmo pobočky rezervace — časy se ukazují v něm (lib/cas.ts). */
   zona: string
 }
@@ -183,6 +185,20 @@ export function casRezervace(r: Pick<RezervaceRadek, 'zacatek' | 'konec'>, zona:
 function osobyText(n: number | null): string {
   if (n === null) return 'počet neuveden'
   return `${n} ${n === 1 ? 'osoba' : n >= 2 && n <= 4 ? 'osoby' : 'osob'}`
+}
+
+/**
+ * Kde host sedí, do krátkého řádku: „Stůl nebo prostor“ od obsluhy
+ * a stoly z rezervačního systému („Patro: S1–S12“). Prostor, který už
+ * ve stolech je (Choice ho doplní z přání hosta — „Patro“), se podruhé
+ * nepíše.
+ */
+export function mistoKratce(r: Pick<RezervaceRadek, 'prostor'> & { misto_zdroje?: string }): string[] {
+  const stoly = (r.misto_zdroje ?? '').trim()
+  const prostor = (r.prostor ?? '').trim()
+  if (!stoly) return prostor ? [prostor] : []
+  if (!prostor || stoly.toLocaleLowerCase('cs').includes(prostor.toLocaleLowerCase('cs'))) return [stoly]
+  return [prostor, stoly]
 }
 
 /** „3 rez. · 1 akce · 12 hostů“ do úzkého sloupce; bez zrušených. */
@@ -344,6 +360,7 @@ export type DenTydne = {
 }
 
 function PolozkaTydne({ rozsah, r, zpet }: { rozsah: string; r: RezervaceSDokumenty; zpet: string }) {
+  const misto = mistoKratce(r).join(' · ')
   return (
     <div className="ds-rez-polozka" data-druh={r.druh} data-neplati={pocitaSeDoHostu(r.stav) ? undefined : ''}>
       <Link href={`/${rozsah}/rezervace/${r.id}`} className="ds-rez-polozka-odkaz">
@@ -359,6 +376,12 @@ function PolozkaTydne({ rozsah, r, zpet }: { rozsah: string; r: RezervaceSDokume
             .filter(Boolean)
             .join(' · ')}
         </small>
+        {/* Stoly vlastním řádkem — v úzkém sloupci by jinak odsunuly stav za okraj. Celé v title. */}
+        {misto ? (
+          <small className="ds-rez-polozka-misto" title={misto}>
+            {misto}
+          </small>
+        ) : null}
       </Link>
       <DokumentyRezervace rozsah={rozsah} r={r} zpet={zpet} nejvic={DOKUMENTU_V_KARTE} />
     </div>
@@ -603,7 +626,7 @@ export function SeznamRezervaci({
               <p className="ds-rez-meta">
                 {[
                   osobyText(r.pocet_osob),
-                  r.prostor || null,
+                  ...mistoKratce(r),
                   r.druh === 'akce' ? r.typ_akce || 'Akce' : null,
                   r.druh === 'akce' && r.jmeno_hosta && r.nazev ? `objednal ${r.jmeno_hosta}` : null,
                 ]
@@ -633,6 +656,7 @@ export function UdajeRezervace({
   menu,
   poznamkaZdroje,
   kontakt,
+  nazevSystemu = null,
 }: {
   r: RezervaceRadek
   nazevPobocky: string
@@ -641,7 +665,10 @@ export function UdajeRezervace({
   poznamkaZdroje: string
   /** `null` = člověk kontakt vidět nesmí (nemá `rezervace.manage`). */
   kontakt: { telefon: string; email: string } | null
+  /** Jméno rezervačního systému („Choice“) k řádku se stoly; `null` = obecně. */
+  nazevSystemu?: string | null
 }) {
+  const stoly = (r.misto_zdroje ?? '').trim()
   const zalohaText =
     zaloha.stav === 'zadna' && !zaloha.haleru
       ? 'bez zálohy'
@@ -666,6 +693,12 @@ export function UdajeRezervace({
       ) : null}
       <dt>Stůl / prostor</dt>
       <dd>{r.prostor || '—'}</dd>
+      {stoly ? (
+        <>
+          <dt>{nazevSystemu ? `Stoly v ${nazevSystemu}` : 'Stoly v rezervačním systému'}</dt>
+          <dd>{stoly}</dd>
+        </>
+      ) : null}
       <dt>Pobočka</dt>
       <dd>{nazevPobocky}</dd>
       <dt>Záloha od hosta</dt>

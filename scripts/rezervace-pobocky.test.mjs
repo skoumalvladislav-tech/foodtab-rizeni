@@ -40,7 +40,7 @@ import {
   vzhledPobocek,
 } from '../lib/rezervace-pobocky.ts'
 import { zpatkyZKalendare } from '../lib/rezervace-typy.ts'
-import { nactiModul } from './vykreslit.mjs'
+import { adresaModulu, nactiModul } from './vykreslit.mjs'
 
 const KOREN = path.join(import.meta.dirname, '..')
 const cti = (p) => fs.readFileSync(path.join(KOREN, p), 'utf8')
@@ -629,6 +629,191 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     ok(`den → náhled Wordu → „Zpět na den“ na tenhle den (je „${zDne?.text}“ na ${zDne?.href})`, stejne(zDne, { href: zpet, text: 'Zpět na den' }))
   } catch (e) {
     ok(`den s dokumenty se vykreslí — výjimka: ${e.message}`, false)
+  }
+}
+
+console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené (4. 11. 2026) ==\n')
+
+{
+  // Zadání Šéfíka 4. 11.: z Choice se nenačítá „umístění a obsazení
+  // stolů“ (Booking #105: Patro, S1–S12). Stoly patří zdroji
+  // (`misto_zdroje`), „Stůl / prostor“ dál obsluze — tady se kontroluje,
+  // že se obojí ukáže tam, kde se na rezervaci kouká, a nic se nezdvojí.
+  const stejneObj = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  const T = {
+    choice: rez(BERNARD, '2026-10-30', '17:30', { jmeno_hosta: 'Choice Patro', pocet_osob: 2, zdroj: 'api', prostor: 'Patro', misto_zdroje: 'Patro: S1–S12' }),
+    obsluha: rez(BERNARD, '2026-10-30', '18:15', { jmeno_hosta: 'Obsluha Okno', zdroj: 'api', prostor: 'u okna', misto_zdroje: 'Terasa: L7' }),
+    jenProstor: rez(BERNARD, '2026-10-30', '19:15', { jmeno_hosta: 'Jen Prostor', prostor: 'Salonek' }),
+    nic: rez(PERLA, '2026-10-30', '20:30', { jmeno_hosta: 'Bez Místa' }),
+    // Řádek ze staré databáze (před 20261107100000) klíč vůbec nemá.
+    stary: rez(PERLA, '2026-10-30', '21:30', { jmeno_hosta: 'Starý Řádek', prostor: 'Bar' }),
+  }
+  const VSE = Object.values(T).sort((x, y) => x.zacatek.localeCompare(y.zacatek))
+  const prvky = await nactiModul('app/[rozsah]/rezervace/prvky.tsx', [
+    ['next/link', ODKAZ],
+    ['./akce', AKCE],
+    ['./formular', NIC],
+    ['./prilohy-nahrat', NIC],
+  ])
+  const mk = (prostor, misto_zdroje) => JSON.stringify(prvky.mistoKratce({ prostor, misto_zdroje }))
+  ok('místo krátce: prostor obsažený ve stolech se nezdvojí (i jinou velikostí písmen)', mk('Patro', 'Patro: S1–S12') === '["Patro: S1–S12"]' && mk('patro', 'Patro: S1–S12') === '["Patro: S1–S12"]')
+  ok('místo krátce: jiný prostor od obsluhy zůstane před stoly', mk('u okna', 'Terasa: L7') === '["u okna","Terasa: L7"]')
+  ok('místo krátce: jen jedno z nich, nic, chybějící klíč, mezery', mk('Salonek', '') === '["Salonek"]' && mk('', 'Bar: 1–7') === '["Bar: 1–7"]' && mk('', '') === '[]' && mk('Bar', undefined) === '["Bar"]' && mk('  ', '  ') === '[]')
+
+  // --- týden ---
+  try {
+    const html = renderToStaticMarkup(
+      createElement(obsah.KalendarObsah, { rozsah: 'firma', pohled: 'tyden', datum: '2026-10-30', dnes: '2026-10-30', pobocky: POBOCKY, rezervace: VSE, znacky: new Map() }),
+    )
+    const karta = (r) => html.match(new RegExp(`<a href="/firma/rezervace/${r.id}" class="ds-rez-polozka-odkaz">([\\s\\S]*?)</a>`))?.[1] ?? ''
+    const misto = (r) => {
+      const m = karta(r).match(/<small class="ds-rez-polozka-misto" title="([^"]*)">([^<]*)<\/small>/)
+      return m ? { title: m[1], text: m[2] } : null
+    }
+    ok(`týden: karta z Choice má druhý řádek „Patro: S1–S12“, prostor podruhé ne (${JSON.stringify(misto(T.choice))})`,
+      stejneObj(misto(T.choice), { title: 'Patro: S1–S12', text: 'Patro: S1–S12' }) && !karta(T.choice).includes('Patro · Patro'))
+    ok(`týden: prostor od obsluhy i stoly (${JSON.stringify(misto(T.obsluha))})`, stejneObj(misto(T.obsluha), { title: 'u okna · Terasa: L7', text: 'u okna · Terasa: L7' }))
+    ok('týden: jen prostor obsluhy → řádek s prostorem; bez místa → žádný řádek; starý řádek bez klíče → prostor',
+      misto(T.jenProstor)?.text === 'Salonek' && misto(T.nic) === null && karta(T.nic) !== '' && misto(T.stary)?.text === 'Bar')
+    ok('týden: řádek místa je uvnitř odkazu karty (klik na stoly otevře rezervaci)', karta(T.choice).includes('ds-rez-polozka-misto'))
+  } catch (e) {
+    ok(`týden se stoly se vykreslí — výjimka: ${e.message}`, false)
+  }
+
+  // --- den ---
+  try {
+    const html = renderToStaticMarkup(
+      createElement(obsah.DenObsah, {
+        rozsah: 'firma',
+        datum: '2026-10-30',
+        dnes: '2026-10-30',
+        tenantId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        kDnu: POBOCKY.map((p) => ({ pobocka: p, rezervace: VSE.filter((r) => r.branch_id === p.id), poznamky: [], prilohy: [] })),
+      }),
+    )
+    const meta = (r) => html.match(new RegExp(`<a href="/firma/rezervace/${r.id}" class="ds-rez-radek"[\\s\\S]*?<p class="ds-rez-meta">([^<]*)</p>`))?.[1] ?? null
+    ok(`den: Choice „2 osoby · Patro: S1–S12“ (je „${meta(T.choice)}“)`, meta(T.choice) === '2 osoby · Patro: S1–S12')
+    ok(`den: obsluha a stoly „2 osoby · u okna · Terasa: L7“ (je „${meta(T.obsluha)}“)`, meta(T.obsluha) === '2 osoby · u okna · Terasa: L7')
+    ok(`den: jen prostor, bez místa, starý řádek (${[T.jenProstor, T.nic, T.stary].map((r) => `„${meta(r)}“`).join(', ')})`,
+      meta(T.jenProstor) === '2 osoby · Salonek' && meta(T.nic) === '2 osoby' && meta(T.stary) === '2 osoby · Bar')
+  } catch (e) {
+    ok(`den se stoly se vykreslí — výjimka: ${e.message}`, false)
+  }
+
+  // --- detail ---
+  const detail = (radek, o = {}) =>
+    renderToStaticMarkup(
+      createElement(obsah.DetailObsah, {
+        rozsah: 'bernard-bar',
+        tenantId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        detail: { radek, menu: '', zaloha: { haleru: null, stav: 'zadna' }, poznamkaZdroje: '', stavZdroje: '', poskytovatel: 'choice', importovanoKdy: null, cisloZdroje: '', ...o },
+        pobocka: PB,
+        poznamky: [],
+        prilohy: [],
+        kontakt: null,
+      }),
+    )
+  const udaje = (html) => Object.fromEntries([...html.matchAll(/<dt>([^<]*)<\/dt><dd>([^<]*)<\/dd>/g)].map((m) => [m[1], m[2]]))
+  try {
+    const html = detail(T.choice, { cisloZdroje: '105' })
+    const u = udaje(html)
+    ok(`detail: „Stoly v Choice: Patro: S1–S12“ a „Stůl / prostor: Patro“ zvlášť (${JSON.stringify({ stoly: u['Stoly v Choice'], prostor: u['Stůl / prostor'] })})`,
+      u['Stoly v Choice'] === 'Patro: S1–S12' && u['Stůl / prostor'] === 'Patro')
+    const zdroj = html.match(/<p class="ds-rez-zdroj"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? ''
+    ok(`detail: původ s číslem rezervace „(Choice, č. 105)“ a stoly ve výčtu převzatého (${text(zdroj).slice(0, 120)}…)`,
+      text(zdroj).startsWith('Převzato z rezervačního systému (Choice, č. 105)') && text(zdroj).includes('kontakt a stoly se mění tam'))
+    const bez = detail(T.jenProstor, { poskytovatel: null })
+    const ub = udaje(bez)
+    ok('detail ručně zapsané: bez řádku stolů, bez čísla', !('Stoly v Choice' in ub) && !('Stoly v rezervačním systému' in ub) && ub['Stůl / prostor'] === 'Salonek' && !bez.includes('č. '))
+    const stary = udaje(detail(T.stary, { poskytovatel: 'choice' }))
+    ok('detail starého řádku (bez klíče misto_zdroje): vykreslí se, bez řádku stolů', !('Stoly v Choice' in stary) && stary['Stůl / prostor'] === 'Bar')
+    const neznamy = udaje(detail(T.obsluha, { poskytovatel: 'neznamy-system' }))
+    ok(`detail z neznámého systému: obecný nadpis „Stoly v rezervačním systému“ (${JSON.stringify(Object.keys(neznamy))})`, neznamy['Stoly v rezervačním systému'] === 'Terasa: L7')
+  } catch (e) {
+    ok(`detail se stoly se vykreslí — výjimka: ${e.message}`, false)
+  }
+
+  // --- načtení: nová i stará databáze (data.ts naostro, databáze podstrčená) ---
+  // Vercel nasadí kód dřív než db push: do té doby sloupce nejsou a kalendář
+  // nesmí spadnout. Podstrčená je jen odpověď databáze, rozhoduje skutečné
+  // data.ts a skutečné `sloupecNeexistuje` z lib/supabase/dotaz.ts.
+  const PRAZDNY = js('')
+  const DOTAZ = adresaModulu('lib/supabase/dotaz.ts', [['server-only', PRAZDNY]])
+  const data = await nactiModul('app/[rozsah]/rezervace/data.ts', [
+    ['server-only', PRAZDNY],
+    ['@/lib/supabase/dotaz', DOTAZ],
+    ['@/lib/supabase/server', js('export async function getServerSupabase() { return globalThis.__rezDb }')],
+    ['@/lib/provozni-den', js('export async function provozniDen() { return null }')],
+  ])
+  /** Databáze, která na každý dotaz odpoví `odpoved(dotaz)` a zapamatuje si ho. */
+  const falesna = (odpoved) => {
+    const dotazy = []
+    return {
+      dotazy,
+      from(tabulka) {
+        const d = { tabulka, select: '', filtry: [] }
+        dotazy.push(d)
+        const b = {
+          select: (s) => ((d.select = s), b),
+          maybeSingle: () => ((d.jeden = true), b),
+          then: (a, c) => Promise.resolve(odpoved(d)).then(a, c),
+        }
+        for (const f of ['eq', 'in', 'gte', 'lte', 'order', 'limit']) b[f] = (...x) => (d.filtry.push([f, ...x]), b)
+        return b
+      },
+    }
+  }
+  const TEN = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+  const PBR = { id: BERNARD.id, nazev: BERNARD.name, slug: 'bernard-bar', zona: 'Europe/Prague', zapis: true }
+  const radekDb = (o = {}) => ({ id: T.choice.id, branch_id: BERNARD.id, den: '2026-10-30', druh: 'rezervace', stav: 'potvrzeno', nazev: '', jmeno_hosta: 'Choice Patro', zacatek: T.choice.zacatek, konec: null, pocet_osob: 2, prostor: 'Patro', typ_akce: '', zdroj: 'api', ...o })
+  const filtry = (d) => JSON.stringify(d.filtry)
+  const nemaSloupec = (kod) => (d) =>
+    d.select.includes('misto_zdroje') || d.select.includes('cislo_zdroje')
+      ? { data: null, error: { code: kod, message: 'column rezervace.misto_zdroje does not exist' } }
+      : { data: d.jeden ? radekDb({ menu: '', zaloha_hosta_haleru: null, zaloha_hosta_stav: 'zadna', poznamka_zdroje: '', stav_zdroje: '', poskytovatel: 'choice', importovano_kdy: null, externi_zmeneno_kdy: null }) : [{ ...radekDb(), rezervace_prilohy: [] }], error: null }
+
+  try {
+    globalThis.__rezDb = falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: 'Patro: S1–S12' }), rezervace_prilohy: [] }], error: null }))
+    const nove = await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
+    const [d1] = globalThis.__rezDb.dotazy
+    ok(`načtení kalendáře (nová DB): jeden dotaz se stoly a vnořenými dokumenty, stoly v řádku (${globalThis.__rezDb.dotazy.length} dotaz, „${nove[0]?.misto_zdroje}“)`,
+      globalThis.__rezDb.dotazy.length === 1 && d1.select.endsWith(', misto_zdroje, rezervace_prilohy(id, nazev, mime, nahrano)') && nove[0]?.misto_zdroje === 'Patro: S1–S12' && stejneObj(nove[0]?.dokumenty, []))
+
+    for (const kod of ['42703', 'PGRST204']) {
+      globalThis.__rezDb = falesna(nemaSloupec(kod))
+      const stare = await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
+      const [a, b] = globalThis.__rezDb.dotazy
+      ok(`načtení kalendáře (stará DB, ${kod}): druhý dotaz bez stolů, se stejnými filtry a dokumenty; řádek má stoly '' (${globalThis.__rezDb.dotazy.length} dotazy)`,
+        globalThis.__rezDb.dotazy.length === 2 && !b.select.includes('misto_zdroje') && b.select.endsWith(', zdroj, rezervace_prilohy(id, nazev, mime, nahrano)') && filtry(a) === filtry(b) && filtry(b).includes(TEN) && stare[0]?.misto_zdroje === '' && stare[0]?.prostor === 'Patro')
+    }
+
+    globalThis.__rezDb = falesna(() => ({ data: null, error: { code: '42501', message: 'permission denied for table rezervace' } }))
+    let vyhozeno = null
+    try {
+      await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
+    } catch (e) {
+      vyhozeno = e
+    }
+    ok(`načtení kalendáře: jiná chyba se neopakuje a vyhodí se (${globalThis.__rezDb.dotazy.length} dotaz, ${vyhozeno?.name})`,
+      globalThis.__rezDb.dotazy.length === 1 && vyhozeno?.name === 'DotazSelhal' && vyhozeno.message.includes('42501'))
+
+    globalThis.__rezDb = falesna(() => ({ data: radekDb({ menu: '', zaloha_hosta_haleru: null, zaloha_hosta_stav: 'zadna', poznamka_zdroje: '', stav_zdroje: '', poskytovatel: 'choice', importovano_kdy: null, externi_zmeneno_kdy: null, misto_zdroje: 'Patro: S1–S12', cislo_zdroje: '105' }), error: null }))
+    const det = await data.nacistRezervaci(TEN, T.choice.id, [PBR])
+    ok(`načtení detailu (nová DB): stoly i číslo (${det?.radek.misto_zdroje}, č. ${det?.cisloZdroje})`,
+      globalThis.__rezDb.dotazy.length === 1 && globalThis.__rezDb.dotazy[0].select.endsWith('externi_zmeneno_kdy, misto_zdroje, cislo_zdroje') && det?.radek.misto_zdroje === 'Patro: S1–S12' && det?.cisloZdroje === '105')
+
+    globalThis.__rezDb = falesna(nemaSloupec('42703'))
+    const detStary = await data.nacistRezervaci(TEN, T.choice.id, [PBR])
+    ok(`načtení detailu (stará DB): druhý dotaz bez sloupců zdroje, stoly '' a číslo '' (${globalThis.__rezDb.dotazy.length} dotazy)`,
+      globalThis.__rezDb.dotazy.length === 2 && globalThis.__rezDb.dotazy[1].select.endsWith('externi_zmeneno_kdy') && detStary?.radek.misto_zdroje === '' && detStary?.cisloZdroje === '')
+
+    globalThis.__rezDb = falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: null }), rezervace_prilohy: null }], error: null }))
+    const divne = await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
+    ok('načtení kalendáře: stoly null → \'\' (do vykreslení nejde nic jiného než text)', divne[0]?.misto_zdroje === '')
+  } catch (e) {
+    ok(`načtení rezervací se stoly — výjimka: ${e.message}`, false)
+  } finally {
+    delete globalThis.__rezDb
   }
 }
 

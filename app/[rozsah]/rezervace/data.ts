@@ -3,7 +3,7 @@ import 'server-only'
 import { denVPasmu } from '@/lib/cas'
 import { provozniDen } from '@/lib/provozni-den'
 import { KBELIK_REZERVACI, dokumentyRezervace, type DokumentRezervace } from '@/lib/rezervace-prilohy'
-import { DotazSelhal } from '@/lib/supabase/dotaz'
+import { DotazSelhal, sloupecNeexistuje } from '@/lib/supabase/dotaz'
 import { getServerSupabase } from '@/lib/supabase/server'
 
 import type { PobockaRezervaci } from './pristup'
@@ -21,11 +21,32 @@ import type { Poznamka, Priloha, RezervaceRadek, RezervaceSDokumenty } from './p
 const SLOUPCE_REZERVACE =
   'id, branch_id, den, druh, stav, nazev, jmeno_hosta, zacatek, konec, pocet_osob, prostor, typ_akce, zdroj'
 
-type RadekDb = Omit<RezervaceRadek, 'zona'>
+/**
+ * Stoly a číslo rezervace ze zdroje (migrace 20261107100000). Vercel
+ * nasadí kód dřív, než proběhne db push — do té doby sloupce nejsou
+ * a dotaz se zopakuje bez nich (`sloupecNeexistuje`): rezervace se
+ * ukážou bez stolů, ne chybou.
+ */
+const SLOUPCE_ZDROJE = { kalendar: ', misto_zdroje', detail: ', misto_zdroje, cislo_zdroje' } as const
 
-function sZonou<T extends RadekDb>(radky: T[], pobocky: PobockaRezervaci[]): (T & { zona: string })[] {
+type RadekDb = Omit<RezervaceRadek, 'zona' | 'misto_zdroje'> & { misto_zdroje?: unknown }
+
+function sZonou<T extends RadekDb>(radky: T[], pobocky: PobockaRezervaci[]): (T & { zona: string; misto_zdroje: string })[] {
   const zony = new Map(pobocky.map((p) => [p.id, p.zona]))
-  return radky.map((r) => ({ ...r, zona: zony.get(r.branch_id) ?? 'Europe/Prague' }))
+  return radky.map((r) => ({
+    ...r,
+    misto_zdroje: typeof r.misto_zdroje === 'string' ? r.misto_zdroje : '',
+    zona: zony.get(r.branch_id) ?? 'Europe/Prague',
+  }))
+}
+
+/** Dotaz se sloupci zdroje; nezná-li je databáze ještě, znovu bez nich. Jiná chyba se vrátí beze změny. */
+async function sloupciZdroje<T, E extends { message: string; code?: string } | null>(
+  navic: string,
+  dotaz: (navic: string) => PromiseLike<{ data: T; error: E }>,
+): Promise<{ data: T; error: E }> {
+  const prvni = await dotaz(navic)
+  return sloupecNeexistuje(prvni.error) ? dotaz('') : prvni
 }
 
 /** Dnešní provozní den první pobočky; když ho databáze nedá, kalendářní den v jejím pásmu. */
@@ -40,17 +61,19 @@ export async function dnesPobocky(pobocka: PobockaRezervaci): Promise<string> {
  */
 export async function nacistRezervace(tenantId: string, pobocky: PobockaRezervaci[], od: string, doDne: string): Promise<RezervaceSDokumenty[]> {
   const supabase = await getServerSupabase()
-  const { data, error } = await supabase
-    .from('rezervace')
-    .select(`${SLOUPCE_REZERVACE}, rezervace_prilohy(id, nazev, mime, nahrano)`)
-    .eq('tenant_id', tenantId)
-    .in('branch_id', pobocky.map((p) => p.id))
-    .gte('den', od)
-    .lte('den', doDne)
-    .order('zacatek')
-    .limit(3000)
+  const { data, error } = await sloupciZdroje(SLOUPCE_ZDROJE.kalendar, (navic) =>
+    supabase
+      .from('rezervace')
+      .select(`${SLOUPCE_REZERVACE}${navic}, rezervace_prilohy(id, nazev, mime, nahrano)`)
+      .eq('tenant_id', tenantId)
+      .in('branch_id', pobocky.map((p) => p.id))
+      .gte('den', od)
+      .lte('den', doDne)
+      .order('zacatek')
+      .limit(3000),
+  )
   if (error) throw new DotazSelhal('rezervace v kalendáři', error)
-  const radky = (data ?? []) as (RadekDb & { rezervace_prilohy: (DokumentRezervace & { nahrano: string })[] | null })[]
+  const radky = (data ?? []) as unknown as (RadekDb & { rezervace_prilohy: (DokumentRezervace & { nahrano: string })[] | null })[]
   return sZonou(
     radky.map(({ rezervace_prilohy, ...r }) => ({ ...r, dokumenty: dokumentyRezervace(rezervace_prilohy) })),
     pobocky,
@@ -59,18 +82,21 @@ export async function nacistRezervace(tenantId: string, pobocky: PobockaRezervac
 
 export async function nacistRezervaci(tenantId: string, id: string, pobocky: PobockaRezervaci[]) {
   const supabase = await getServerSupabase()
-  const { data, error } = await supabase
-    .from('rezervace')
-    .select(`${SLOUPCE_REZERVACE}, menu, zaloha_hosta_haleru, zaloha_hosta_stav, poznamka_zdroje, stav_zdroje, poskytovatel, importovano_kdy, externi_zmeneno_kdy`)
-    .eq('tenant_id', tenantId)
-    .eq('id', id)
-    .maybeSingle()
+  const { data: nalezeno, error } = await sloupciZdroje(SLOUPCE_ZDROJE.detail, (navic) =>
+    supabase
+      .from('rezervace')
+      .select(`${SLOUPCE_REZERVACE}, menu, zaloha_hosta_haleru, zaloha_hosta_stav, poznamka_zdroje, stav_zdroje, poskytovatel, importovano_kdy, externi_zmeneno_kdy${navic}`)
+      .eq('tenant_id', tenantId)
+      .eq('id', id)
+      .maybeSingle(),
+  )
   if (error) throw new DotazSelhal('rezervace', error)
+  const data = nalezeno as unknown as (RadekDb & Record<string, unknown>) | null
   if (!data) return null
   // Rezervace jiné pobočky, než je v adrese, se tady neukáže, i když ji
   // člověk smí vidět jinde — rozsah z adresy platí.
   if (!pobocky.some((p) => p.id === data.branch_id)) return null
-  const [radek] = sZonou([data as unknown as RadekDb], pobocky)
+  const [radek] = sZonou([data], pobocky)
   return {
     radek,
     menu: String(data.menu ?? ''),
@@ -79,6 +105,7 @@ export async function nacistRezervaci(tenantId: string, id: string, pobocky: Pob
     stavZdroje: String(data.stav_zdroje ?? ''),
     poskytovatel: (data.poskytovatel as string | null) ?? null,
     importovanoKdy: (data.importovano_kdy as string | null) ?? null,
+    cisloZdroje: typeof data.cislo_zdroje === 'string' ? data.cislo_zdroje : '',
   }
 }
 

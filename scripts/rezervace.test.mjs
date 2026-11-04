@@ -1631,9 +1631,12 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
   // Vnořeně = stejný dotaz uživatelským klientem, takže dokumenty hlídá
   // i RLS `rezervace_prilohy_cist`; přílohy ke dni mají rezervace_id null
   // a do vnoření se nedostanou.
+  // `${navic}` jsou sloupce stolů (20261107100000); bez nich se dotaz
+  // zopakuje, vnoření dokumentů zůstává v obou podobách — chování
+  // ověřuje scripts/rezervace-pobocky.test.mjs, oddíl 7.
   ok('kalendář: dokumenty vnořeně v dotazu na rezervace, uživatelským klientem',
     nacist.includes('const supabase = await getServerSupabase()')
-    && nacist.includes('.select(`${SLOUPCE_REZERVACE}, rezervace_prilohy(id, nazev, mime, nahrano)`)')
+    && nacist.includes('.select(`${SLOUPCE_REZERVACE}${navic}, rezervace_prilohy(id, nazev, mime, nahrano)`)')
     && nacist.includes('dokumenty: dokumentyRezervace(rezervace_prilohy)'))
   // Vnoření bez jména vazby funguje, jen dokud mezi tabulkami vede
   // jediný cizí klíč. Druhý (třeba „přesunuto z rezervace“) a PostgREST

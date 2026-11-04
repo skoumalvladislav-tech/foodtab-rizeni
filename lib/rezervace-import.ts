@@ -36,6 +36,10 @@ export type RadekImportu = {
   email: string
   poznamka: string
   prostor: string
+  /** Stoly ze zdroje (migrace 20261107100000). Klíč chybí = zdroj je nezná, uložené zůstane. */
+  misto_zdroje?: string
+  /** Číslo rezervace ve zdroji. Klíč chybí = uložené zůstane. */
+  cislo_zdroje?: string
 } & (
   // `zmeneno_kdy` (s pásmem) nepovinně i tady: příjmové API ho u data
   // a hodiny na zdi může poslat, CSV ne.
@@ -261,6 +265,9 @@ export function zRadkuZdroje(r: RadekRezervace): { stav: 'ok'; radek: RadekImpor
       email: (r.emailHosta ?? '').slice(0, 254),
       poznamka: r.poznamka.slice(0, 4000),
       prostor: (r.prostor ?? '').slice(0, 120),
+      // Jen když je adaptér zná — chybějící klíč databáze čte jako „nech uložené“.
+      ...(r.misto !== undefined ? { misto_zdroje: r.misto.trim().slice(0, 300) } : {}),
+      ...(r.cisloZdroje !== undefined ? { cislo_zdroje: r.cisloZdroje.trim().slice(0, 40) } : {}),
     },
   }
 }
