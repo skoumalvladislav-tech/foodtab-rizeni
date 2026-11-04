@@ -231,6 +231,19 @@ await zkus('karta', async () => {
   })())
   ok('nestejné provozovny: věta + jména v tabulce',text(jine).includes('Leden 2026: srovnání v něm zahrnuje jiné provozovny') && text(jine).includes('nesrovnává stejné provozovny: Perla test, Bar test proti Perla test'))
 
+  // Bar má každé pondělí zavřeno → po dnech 4 dny s jinou sadou provozoven; výčet se zkrátí.
+  const pondeli = ['2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26']
+  const aktDny = [], srovDny = []
+  for (let d = 1; d <= 31; d++) {
+    const o = `2026-10-${String(d).padStart(2, '0')}`
+    aktDny.push(radek(o, A, 9_000))
+    if (!pondeli.includes(o)) aktDny.push(radek(o, B, 4_000))
+    if (d <= 30) srovDny.push(radek(`2026-09-${String(d).padStart(2, '0')}`, A, 8_000), radek(`2026-09-${String(d).padStart(2, '0')}`, B, 4_000))
+  }
+  const tDny = text(vykreslit(sestavitGraf({ cleneni: 'den', druh: 'obdobi', od: '2026-10-01', dnes: '2026-11-04', aktualni: prehled(aktDny), srovnavaci: prehled(srovDny), branchId: null })))
+  ok(`mnoho slotů s jinými provozovnami: zkrácená věta „U 4 dnů (… a další)" (${tDny.match(/U \d+ dnů \([^)]*\)/)?.[0]})`,
+    tDny.includes('U 4 dnů (po 5. 10., po 12. 10., po 19. 10. a další) zahrnuje srovnání jiné provozovny') && !tDny.includes('po 26. 10., po') && tDny.includes('některá měla zavřeno'))
+
   const dny = vykreslit(sestavitGraf({ cleneni: 'den', druh: 'rok', od: '2026-10-01', dnes: '2026-11-04', aktualni: prehled([radek('2026-10-02', A, 9_000)]), srovnavaci: prehled([radek('2025-10-02', A, 8_000)]), branchId: null }))
   ok('po dnech přepínač: Předchozí měsíc / Stejný měsíc loni, vybraný má aria-current',
     /href="\/firma\/finance\/trzby\?srovnani=obdobi"[^>]*>Předchozí měsíc</.test(dny) && /href="\/firma\/finance\/trzby\?srovnani=rok"[^>]*aria-current="true"[^>]*>Stejný měsíc loni</.test(dny))

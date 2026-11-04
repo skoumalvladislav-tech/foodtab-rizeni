@@ -103,9 +103,16 @@ export function vetyOSrovnani(graf: GrafSrovnani): { varovani: string[]; poznamk
       `Srovnávací období má v appce tržby jen za ${popisUseku(graf.cleneni, graf.pokryti.od, graf.pokryti.do)}. Kde čára chybí, data nejsou — není to nula.`,
     )
   }
-  if (graf.slotySJinymiPobockami.length > 0) {
+  const jine = graf.slotySJinymiPobockami
+  if (jine.length > 0) {
+    // Po dnech jich bývá hodně (provozovna, která má jeden den v týdnu zavřeno,
+    // vychází jinak než ve srovnávacím měsíci) — dlouhý výčet by větu utopil.
+    const kde =
+      jine.length <= 3
+        ? `${jine.join(', ')}: srovnání v ${jine.length === 1 ? 'něm' : 'nich'} zahrnuje`
+        : `U ${jine.length} ${graf.cleneni === 'den' ? 'dnů' : 'měsíců'} (${jine.slice(0, 3).join(', ')} a další) zahrnuje srovnání`
     varovani.push(
-      `${graf.slotySJinymiPobockami.join(', ')}: srovnání v ${graf.slotySJinymiPobockami.length === 1 ? 'něm' : 'nich'} zahrnuje jiné provozovny než zobrazené období, rozdíl v procentech proto appka neukazuje. Které to jsou, ukáže bublina nad sloupcem i tabulka.`,
+      `${kde} jiné provozovny než zobrazené období — některá měla zavřeno nebo ještě nebyla napojená. Rozdíl v procentech proto appka neukazuje; které to jsou, ukáže bublina nad sloupcem i tabulka.`,
     )
   }
   if (graf.bezi !== null) {
