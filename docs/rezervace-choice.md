@@ -113,9 +113,9 @@ poznámky (hosta, restaurace, důvod zrušení), záloha (jen stav),
 
 - **Stoly** se ukážou v kalendáři (týden: druhý řádek karty, den:
   u počtu osob) a v detailu rezervace jako „Stoly v Choice: Patro:
-  S1–S12“. Rozsahem (S1–S12) se píšou jen tři a víc stolů, které jdou
-  v Choice za sebou a mají stejné jméno s číslem o jedna vyšším
-  (S1, S2, S3). „A1, B2, C3“ nebo „S1, S2, S4“ zůstanou vypsané, ať
+  S1–S12“. Stoly se řadí podle čísla (S2 před S10). Rozsahem
+  (S1–S12) se píšou jen tři a víc stolů se stejným jménem, jejichž
+  čísla jdou bez mezery po jedné (S1, S2, S3). „A1, B2, C3“ nebo „S1, S2, S4“ zůstanou vypsané, ať
   rozsah nikdy nezahrne stůl, který host nemá. Víc částí podniku se
   oddělí tečkou („Patro: S1, S2 · Terasa: L7“). Hodně dlouhý seznam se
   zkrátí za celým stolem (nejvýš 300 znaků), nikdy uprostřed jména.
