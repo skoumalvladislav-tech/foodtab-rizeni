@@ -659,6 +659,15 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
   ok('místo krátce: prostor obsažený ve stolech se nezdvojí (i jinou velikostí písmen)', mk('Patro', 'Patro: S1–S12') === '["Patro: S1–S12"]' && mk('patro', 'Patro: S1–S12') === '["Patro: S1–S12"]')
   ok('místo krátce: jiný prostor od obsluhy zůstane před stoly', mk('u okna', 'Terasa: L7') === '["u okna","Terasa: L7"]')
   ok('místo krátce: jen jedno z nich, nic, chybějící klíč, mezery', mk('Salonek', '') === '["Salonek"]' && mk('', 'Bar: 1–7') === '["Bar: 1–7"]' && mk('', '') === '[]' && mk('Bar', undefined) === '["Bar"]' && mk('  ', '  ') === '[]')
+  // Kontrola kódu 4. 11.: prostor, který je jen KUSEM textu stolů, se
+  // schovával — „S1“ od obsluhy vedle stolu „S12“ zmizel, a obsluha by
+  // si myslela, že host sedí u S12 jen proto, že tam Choice přesadil.
+  // Schová se jen celý text stolů nebo celé jméno oblasti.
+  ok('místo krátce: prostor „S1“ od obsluhy vedle stolu „Patro: S12“ zůstane (není to tentýž stůl)', mk('S1', 'Patro: S12') === '["S1","Patro: S12"]')
+  ok('místo krátce: „1“ vedle „Patro: S10, S11“ zůstane, „Pat“ vedle „Patro: S1“ taky', mk('1', 'Patro: S10, S11') === '["1","Patro: S10, S11"]' && mk('Pat', 'Patro: S1') === '["Pat","Patro: S1"]')
+  ok('místo krátce: jméno druhé oblasti („Terasa“ v „Patro: S1 · Terasa: L7“) se nezdvojí, celý text stolů taky ne',
+    mk('Terasa', 'Patro: S1 · Terasa: L7') === '["Patro: S1 · Terasa: L7"]' && mk('patro: s1–s12', 'Patro: S1–S12') === '["Patro: S1–S12"]' && mk(' Patro ', 'Patro: S1–S12') === '["Patro: S1–S12"]')
+  ok('místo krátce: stoly bez jména oblasti („3 stoly bez názvu“) a prostor „stoly“ — oba zůstanou', mk('stoly', '3 stoly bez názvu') === '["stoly","3 stoly bez názvu"]')
 
   // --- týden ---
   try {
