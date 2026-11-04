@@ -76,9 +76,10 @@
 .ds-rez-den-znacky .ft-i { width: 14px; height: 14px; }
 .ds-rez-den-pridat { margin-top: auto; font-size: 12.5px; color: var(--muted); text-decoration: none; }
 .ds-rez-den-pridat:hover, .ds-rez-den-pridat:focus-visible { color: var(--ink); text-decoration: underline; }
-/* Na mosazném podkladu dneška má šedé písmo kontrast 4,2 : 1 (v tmavém
-   režimu 4,0 : 1), drobné písmo potřebuje 4,5 : 1. Karty mají vlastní podklad. */
-.ds-rez-den[data-dnes] :is(.ds-rez-den-souhrn, .ds-rez-den-znacky, .ds-rez-den-pridat) { color: var(--ink); }
+/* Šedé písmo přímo na mosazném podkladu: na dnešku 4,2 : 1 (v tmavém režimu
+   4,0 : 1, se šrafou svátku až 3,1 : 1), na víkendu se svátkem 4,2 : 1 (v tmavém
+   4,0 : 1). Drobné písmo potřebuje 4,5 : 1. Karty mají vlastní podklad. */
+.ds-rez-den:is([data-dnes], [data-vikend][data-svatek]) :is(.ds-rez-den-souhrn, .ds-rez-den-znacky, .ds-rez-den-pridat) { color: var(--ink); }
 
 /* Karta je rámeček; odkaz na rezervaci a dokumenty jsou v ní vedle sebe
    (odkaz v odkazu HTML nedovolí). Odkaz se roztáhne přes celou kartu
@@ -108,6 +109,8 @@
   border-color: color-mix(in srgb, var(--vino) 45%, var(--line));
   background: color-mix(in srgb, var(--vino) 8%, var(--card));
 }
+/* Na vínovém podkladu karty akce má šedé písmo 4,3 : 1. */
+.ds-rez-polozka[data-druh="akce"] small { color: var(--ink); }
 /* Zrušená bledne jen sama; dokumenty u ní jsou dál živé odkazy a musí být čitelné. */
 .ds-rez-polozka[data-neplati] > .ds-rez-polozka-odkaz { opacity: .65; }
 .ds-rez-polozka[data-neplati] strong { text-decoration: line-through; }
@@ -215,9 +218,15 @@
 .ds-rez-bunka-dokumenty .ft-i { color: inherit; }
 .ds-rez-bunka-dalsi .ds-rez-bunka-dokumenty { margin-left: 4px; vertical-align: -2px; }
 .ds-rez-bunka-dalsi { font-size: 11.5px; color: var(--muted); }
-/* Na mosazném podkladu dneška má šedé písmo kontrast 4,1 : 1 (v tmavém
-   režimu 3,6 : 1), drobné písmo potřebuje 4,5 : 1. */
-.ds-rez-bunka[data-dnes] :is(.ds-rez-bunka-souhrn, .ds-rez-bunka-dalsi, .ds-rez-bunka-den-nazev) { color: var(--ink); }
+/* Šedé písmo na buňce: na dnešku 4,1 : 1 (v tmavém režimu 3,6 : 1, se šrafou
+   svátku až 2,8 : 1), na víkendu se svátkem 4,2 : 1 (v tmavém 4,0 : 1), pod myší
+   4,1 : 1 (se svátkem 3,9 : 1). Drobné písmo potřebuje 4,5 : 1. */
+.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek], :hover) :is(.ds-rez-bunka-souhrn, .ds-rez-bunka-dalsi, .ds-rez-bunka-den-nazev) { color: var(--ink); }
+/* Vínový název akce má v tmavém režimu na dnešku 3,6 : 1 (se svátkem 2,8 : 1),
+   na víkendu se svátkem 4,1 : 1; praporek (ikona, stačí 3 : 1) se svátkem 2,8 : 1.
+   Akci dál pozná praporek a tučné písmo. */
+.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek]) .ds-rez-bunka-radek[data-druh="akce"] .ds-rez-bunka-text,
+.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek]) .ds-rez-bunka-radek > .ft-i { color: var(--ink); }
 .ds-rez-bunka-den-nazev { display: none; }
 
 /* Telefon: místo mřížky seznam dnů, na kterých něco je. */

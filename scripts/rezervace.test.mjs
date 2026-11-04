@@ -1725,40 +1725,103 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
     && uzky.includes('.ds-rez-polozka .ds-rez-dokument .ft-i { grid-area: 1 / 1;')
     && uzky.includes('.ds-rez-polozka .ds-rez-dokument-pripona { grid-area: 1 / 2;')
     && uzky.includes('.ds-rez-polozka .ds-rez-dokument-nazev { grid-area: 2 / 1 / 3 / 3; margin-left: 0; }'))
-  // Dnešek: mosaz do karty (sloupec týdne 22 %, buňka měsíce 26 %). Drobné
-  // písmo na něm (souhrn, značky, „+ Přidat“, „+ N další“, název dne na
-  // telefonu) potřebuje 4,5 : 1 ve světlém i tmavém režimu — šedé (--muted)
-  // tam má jen 4,0 až 4,2, v měsíci 3,6 až 4,1. Karty týdne mají vlastní podklad.
+  // Drobné písmo přímo na podkladu kalendáře (souhrn, značky, „+ Přidat“,
+  // „+ N další“, název dne na telefonu, název akce v měsíci, řádek pod
+  // názvem karty) potřebuje 4,5 : 1, praporek jako ikona 3 : 1. Podklady:
+  // mosaz víkendu a dneška v kartě, šrafa svátku (_svatky.css) ještě nad
+  // nimi, buňka pod myší, karty týdne. Měří se nejhorší místo (pod proužkem
+  // šrafy) ve všech třech blocích tokenů. Pravidlo, které písmo přebarvuje,
+  // musí sedět na každý podklad, kde výchozí barva nestačí — a výchozí barva
+  // musí stačit všude jinde, ať silnější víkend nebo šrafa neprojde potichu.
   const tokeny = cti('app/_tokeny.css')
-  const rezim = (od, po) => tokeny.slice(tokeny.indexOf(od), po ? tokeny.indexOf(po, tokeny.indexOf(od)) : undefined)
-  const REZIMY = { světlý: rezim(':root {', '@media'), tmavý: rezim(':root[data-theme="dark"] {', '}') }
-  const barva = (blok, jmeno) => blok.match(new RegExp(`--${jmeno}:\\s*#([0-9a-f]{6});`, 'i'))?.[1].match(/../g).map((h) => parseInt(h, 16))
+  const blok = (od, po) => {
+    const i = tokeny.indexOf(od)
+    return i < 0 ? '' : tokeny.slice(i, tokeny.indexOf(po, i))
+  }
+  const REZIMY = {
+    světlý: blok(':root {', '@media'),
+    'tmavý přepínačem': blok(':root[data-theme="dark"] {', '}'),
+    'tmavý podle systému': blok(':root:not([data-theme="light"]) {', '}'),
+  }
+  const barva = (b, jmeno) => b.match(new RegExp(`--${jmeno}:\\s*#([0-9a-f]{6});`, 'i'))?.[1].match(/../g).map((h) => parseInt(h, 16)) ?? null
   const jas = (rgb) => {
     const [r, g, b] = rgb.map((c) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4))
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
   }
-  const pomer = (a, b) => (Math.max(jas(a), jas(b)) + 0.05) / (Math.min(jas(a), jas(b)) + 0.05)
-  const dnesek = (prvek, potreba) => {
-    const podklad = css.match(new RegExp(`\\.${prvek}\\[data-dnes\\] \\{ background: color-mix\\(in srgb, var\\(--mosaz-sv\\) (\\d+)%, var\\(--card\\)\\);`))
-    const pismo = css.match(new RegExp(`\\.${prvek}\\[data-dnes\\] :is\\(([^)]*)\\) \\{ color: var\\(--([a-z-]+)\\); \\}`))
-    const tridy = (pismo?.[1] ?? '').split(',').map((s) => s.trim())
-    const pomery = Object.entries(REZIMY).map(([n, blok]) => {
-      const p = Number(podklad?.[1]) / 100
-      const mosaz = barva(blok, 'mosaz-sv')
-      const karta = barva(blok, 'card')
-      const pod = mosaz && karta ? mosaz.map((c, i) => Math.round(c * p + karta[i] * (1 - p))) : null
-      const barvaPisma = pismo ? barva(blok, pismo[2]) : null
-      return [n, pod && barvaPisma ? pomer(pod, barvaPisma) : 0]
+  const pomer = (a, b) => (a && b ? (Math.max(jas(a), jas(b)) + 0.05) / (Math.min(jas(a), jas(b)) + 0.05) : 0)
+  const smichat = (a, p, b) => (a && b && Number.isFinite(p) ? a.map((c, i) => Math.round(c * p + b[i] * (1 - p))) : null)
+  const svatkyCss = cti('app/_svatky.css').replace(/\/\*[\s\S]*?\*\//g, '')
+  const srafa = svatkyCss.match(/\.ds-rez-den, \.ds-rez-bunka,[^{]*\)\[data-svatek\] \{([^}]*--svatek-srafa-sila[^}]*)\}/)?.[1] ?? ''
+  const srafaBarva = srafa.match(/--svatek-srafa-barva: var\(--([a-z-]+)\);/)?.[1]
+  const srafaSila = Number(srafa.match(/--svatek-srafa-sila: (\d+)%;/)?.[1]) / 100
+  const mosaz = (prvek, znak) => Number(bezKomentaru.match(new RegExp(`\\.${prvek}\\[data-${znak}\\] \\{ background: color-mix\\(in srgb, var\\(--mosaz-sv\\) (\\d+)%, var\\(--card\\)\\);`))?.[1]) / 100
+  const vinoAkce = Number(bezKomentaru.match(/\.ds-rez-polozka\[data-druh="akce"\] \{[^}]*background: color-mix\(in srgb, var\(--vino\) (\d+)%, var\(--card\)\);/)?.[1]) / 100
+  const podMysi = bezKomentaru.match(/\.ds-rez-bunka:hover \{ background: var\(--([a-z-]+)\); \}/)?.[1]
+  const kartaRezervace = bezKomentaru.match(/\.ds-rez-polozka \{[^}]*background: var\(--([a-z-]+)\);/)?.[1]
+  const podklady = (b) => {
+    const karta = barva(b, 'card')
+    const mos = (p) => smichat(barva(b, 'mosaz-sv'), p, karta)
+    const zaklad = {
+      'týden obyčejný': karta, 'týden víkend': mos(mosaz('ds-rez-den', 'vikend')), 'týden dnes': mos(mosaz('ds-rez-den', 'dnes')),
+      'měsíc obyčejný': karta, 'měsíc víkend': mos(mosaz('ds-rez-bunka', 'vikend')), 'měsíc dnes': mos(mosaz('ds-rez-bunka', 'dnes')),
+      'měsíc pod myší': podMysi ? barva(b, podMysi) : null,
+    }
+    const vse = {}
+    for (const [k, v] of Object.entries(zaklad)) {
+      vse[k] = v
+      vse[`${k} + svátek`] = srafaBarva ? smichat(barva(b, srafaBarva), srafaSila, v) : null
+    }
+    vse['karta akce'] = smichat(barva(b, 'vino'), vinoAkce, karta)
+    vse['karta rezervace'] = kartaRezervace ? barva(b, kartaRezervace) : null
+    return vse
+  }
+  // Barva z pravidla s PŘESNĚ tímhle výčtem selektorů (první, které barvu nastavuje).
+  const bezpecne = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const barvaPravidla = (...selektory) => {
+    const vzor = new RegExp(`(?:^|[\\n{}])\\s*${selektory.map(bezpecne).join(',\\s*')} \\{([^}]*)\\}`, 'g')
+    for (const m of bezKomentaru.matchAll(vzor)) {
+      const b = m[1].match(/(?:^|[\s;])color:\s*var\(--([a-z-]+)\)/)?.[1]
+      if (b) return b
+    }
+    return null
+  }
+  const zmerit = (pismo, kde, potreba) => {
+    const vysledky = Object.entries(REZIMY).flatMap(([rezim, b]) => {
+      const pod = podklady(b)
+      return kde.map((n) => ({ kde: `${n}, ${rezim}`, x: pismo ? pomer(barva(b, pismo), pod[n]) : 0 }))
     })
+    const spatne = vysledky.filter((v) => !(v.x >= potreba))
+    const nejhur = vysledky.reduce((a, v) => (v.x < a.x ? v : a), { kde: 'nic', x: Infinity })
     return {
-      popis: `${pomery.map(([n, x]) => `${n} ${x.toFixed(2)}`).join(', ')}; třídy ${tridy.join(', ') || 'žádné'}`,
-      dobre: !!podklad && pomery.every(([, x]) => x >= 4.5) && potreba.every((c) => tridy.includes(c)),
+      dobre: vysledky.length === kde.length * 3 && spatne.length === 0,
+      popis: `barva ${pismo ?? 'žádná'}; nejhůř ${nejhur.x.toFixed(2)} (${nejhur.kde})${spatne.length ? `; pod ${potreba}: ${spatne.map((v) => `${v.kde} ${v.x.toFixed(2)}`).join(', ')}` : ''}`,
     }
   }
-  const dnesTyden = dnesek('ds-rez-den', ['.ds-rez-den-souhrn', '.ds-rez-den-znacky', '.ds-rez-den-pridat'])
-  ok(`vzhled: drobné písmo v dnešním sloupci týdne má kontrast aspoň 4,5 : 1 v obou režimech (${dnesTyden.popis})`, dnesTyden.dobre)
-  const dnesMesic = dnesek('ds-rez-bunka', ['.ds-rez-bunka-souhrn', '.ds-rez-bunka-dalsi', '.ds-rez-bunka-den-nazev'])
-  ok(`vzhled: drobné písmo na dnešní buňce měsíce má kontrast aspoň 4,5 : 1 v obou režimech (${dnesMesic.popis})`, dnesMesic.dobre)
+  const TYDEN_PREBARVENY = ['týden dnes', 'týden dnes + svátek', 'týden víkend + svátek']
+  const TYDEN_JINDE = ['týden obyčejný', 'týden obyčejný + svátek', 'týden víkend']
+  const MESIC_PREBARVENY = ['měsíc dnes', 'měsíc dnes + svátek', 'měsíc víkend + svátek']
+  const MESIC_JINDE = ['měsíc obyčejný', 'měsíc obyčejný + svátek', 'měsíc víkend']
+  const MYS = ['měsíc pod myší', 'měsíc pod myší + svátek']
+  const naTydnu = zmerit(barvaPravidla('.ds-rez-den:is([data-dnes], [data-vikend][data-svatek]) :is(.ds-rez-den-souhrn, .ds-rez-den-znacky, .ds-rez-den-pridat)'), TYDEN_PREBARVENY, 4.5)
+  ok(`vzhled: drobné písmo v dnešním sloupci týdne i na víkendu se svátkem (souhrn, značky, „+ Přidat“) má kontrast aspoň 4,5 : 1 ve všech třech režimech (${naTydnu.popis})`, naTydnu.dobre)
+  const naMesici = zmerit(barvaPravidla('.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek], :hover) :is(.ds-rez-bunka-souhrn, .ds-rez-bunka-dalsi, .ds-rez-bunka-den-nazev)'), [...MESIC_PREBARVENY, ...MYS], 4.5)
+  ok(`vzhled: drobné písmo na dnešní buňce měsíce, na víkendu se svátkem a pod myší (souhrn, „+ N další“, název dne) má kontrast aspoň 4,5 : 1 ve všech třech režimech (${naMesici.popis})`, naMesici.dobre)
+  const akceMesic = zmerit(barvaPravidla(
+    '.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek]) .ds-rez-bunka-radek[data-druh="akce"] .ds-rez-bunka-text',
+    '.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek]) .ds-rez-bunka-radek > .ft-i',
+  ), MESIC_PREBARVENY, 4.5)
+  ok(`vzhled: název akce i praporek na dnešní buňce měsíce a na víkendu se svátkem mají kontrast aspoň 4,5 : 1 ve všech třech režimech (${akceMesic.popis})`, akceMesic.dobre)
+  const akceKarta = zmerit(barvaPravidla('.ds-rez-polozka[data-druh="akce"] small'), ['karta akce'], 4.5)
+  ok(`vzhled: řádek pod názvem na kartě akce v týdnu má kontrast aspoň 4,5 : 1 ve všech třech režimech (${akceKarta.popis})`, akceKarta.dobre)
+  const VYCHOZI = [
+    ['.ds-rez-den-souhrn', TYDEN_JINDE, 4.5], ['.ds-rez-den-znacky', TYDEN_JINDE, 4.5], ['.ds-rez-den-pridat', TYDEN_JINDE, 4.5],
+    ['.ds-rez-bunka-souhrn', MESIC_JINDE, 4.5], ['.ds-rez-bunka-dalsi', MESIC_JINDE, 4.5], ['.ds-rez-bunka-den-nazev', MESIC_JINDE, 4.5],
+    ['.ds-rez-bunka-radek[data-druh="akce"] .ds-rez-bunka-text', [...MESIC_JINDE, ...MYS], 4.5],
+    ['.ds-rez-bunka-radek .ft-i', [...MESIC_JINDE, ...MYS], 3],
+    ['.ds-rez-polozka small', ['karta rezervace'], 4.5],
+  ].map(([sel, kde, potreba]) => ({ sel, ...zmerit(barvaPravidla(sel), kde, potreba) }))
+  ok(`vzhled: výchozí barvy drobného písma (šedá, vínový název akce) drží 4,5 : 1 a praporek 3 : 1 na všech podkladech, které pravidla výše nepřebarvují (${VYCHOZI.filter((v) => !v.dobre).map((v) => `${v.sel}: ${v.popis}`).join(' | ') || `${VYCHOZI.length} pravidel v pořádku`})`,
+    VYCHOZI.every((v) => v.dobre))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
