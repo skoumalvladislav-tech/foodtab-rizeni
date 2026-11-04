@@ -448,7 +448,7 @@ const zapisDoPameti = () => {
     h.ted += c
     return true
   }
-  const v = await probehnoutChoice({ api: ch.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: pockat, zapsat: z.fn })
+  const v = await probehnoutChoice({ api: ch.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: pockat, smiMimoFrontu: () => true, zapsat: z.fn })
   const druhy = ch.zaznam.map((d) => `${d.podle}:${d.stranka}`)
   ok(`pořadí dotazů: blízko, nové, okno po stránkách (${druhy.join(' ')})`,
     druhy.join(' ') === 'bookingDt:1 createdDt:1 bookingDt:1 bookingDt:2 bookingDt:3')
@@ -484,7 +484,7 @@ const zapisDoPameti = () => {
     h.ted += c
     return true
   }
-  const v1 = await probehnoutChoice({ api: ch.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: pockat, zapsat: z.fn })
+  const v1 = await probehnoutChoice({ api: ch.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: pockat, smiMimoFrontu: () => true, zapsat: z.fn })
   ok('došel čas → konec „cas“ (není chyba) a kurzor ukazuje na další stránku okna',
     v1.konec === 'cas' && ch.zaznam.length === 4 && v1.kurzor.okno?.stranka === 3 && chybaBehu(v1) === null)
 
@@ -493,7 +493,7 @@ const zapisDoPameti = () => {
   h.ted = DALSI
   const pocetPred = ch.zaznam.length
   const v2 = await probehnoutChoice({ api: ch.api, token: TOKEN, varSymbol: '1', kurzor: precistKurzor(JSON.parse(JSON.stringify(v1.kurzor))), tedMs: DALSI,
-    pockatNaDotaz: async () => { const c = h.zabratUlohou(ROZESTUP_DOTAZU_MS, 120_000); h.ted += c ?? 0; return c !== null }, zapsat: z.fn })
+    pockatNaDotaz: async () => { const c = h.zabratUlohou(ROZESTUP_DOTAZU_MS, 120_000); h.ted += c ?? 0; return c !== null }, smiMimoFrontu: () => true, zapsat: z.fn })
   const okno2 = ch.zaznam.slice(pocetPred).filter((d) => d.podle === 'bookingDt' && d.od === h.oknoOd)
   ok('příští běh pokračuje stejným oknem od stránky 3 až do konce', okno2.map((d) => d.stranka).join(',') === '3,4,5,6,7' && v2.konec === 'hotovo')
   ok('… a „nové“ hledá od minulého běhu (s 15min překryvem)',
@@ -504,7 +504,7 @@ const zapisDoPameti = () => {
   h3.oknoOd = new Date(START - OKNO_ZPET_MS).toISOString()
   const ch3 = choiceSRezervacemi({ okno: 50 }, h3)
   await probehnoutChoice({ api: ch3.api, token: TOKEN, varSymbol: '1', kurzor: stary, tedMs: START,
-    pockatNaDotaz: async () => { const c = h3.zabratUlohou(ROZESTUP_DOTAZU_MS, 120_000); h3.ted += c ?? 0; return c !== null }, zapsat: zapisDoPameti().fn })
+    pockatNaDotaz: async () => { const c = h3.zabratUlohou(ROZESTUP_DOTAZU_MS, 120_000); h3.ted += c ?? 0; return c !== null }, smiMimoFrontu: () => true, zapsat: zapisDoPameti().fn })
   ok('okno rozjeté před víc než 12 h se začne znovu od stránky 1', ch3.zaznam.at(-1).stranka === 1 && ch3.zaznam.at(-1).od === h3.oknoOd)
   ok('nečitelný kurzor se zahodí', JSON.stringify(precistKurzor({ okno: { stranka: 'x' }, nove_od: 'včera' })) === '{}')
 }
@@ -516,7 +516,7 @@ const zapisDoPameti = () => {
   h.oknoOd = new Date(START - OKNO_ZPET_MS).toISOString()
   const ch = choiceSRezervacemi({ okno: 300, chyby: { 4: { stav: 'chyba', druh: 'limit', duvod: 'Choice omezil počet dotazů (429).', http: 429 } } }, h)
   const pockat = async () => { const c = h.zabratUlohou(ROZESTUP_DOTAZU_MS, 120_000); h.ted += c ?? 0; return c !== null }
-  const v = await probehnoutChoice({ api: ch.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: pockat, zapsat: zapisDoPameti().fn })
+  const v = await probehnoutChoice({ api: ch.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: pockat, smiMimoFrontu: () => true, zapsat: zapisDoPameti().fn })
   ok('429 → konec „limit“ hned, další dotaz už nešel', v.konec === 'limit' && ch.zaznam.length === 4)
   ok('… kurzor stojí na stránce, která neprošla', v.kurzor.okno?.stranka === 2)
   ok('… a u napojení je důvod (zkusí se příště)', /429/.test(chybaBehu(v) ?? '') && /dalším běhu/.test(chybaBehu(v)))
@@ -524,7 +524,7 @@ const zapisDoPameti = () => {
   const h2 = hodinyAFronta(START)
   const ch2 = choiceSRezervacemi({ chyby: { 1: { stav: 'chyba', druh: 'pristup', duvod: 'Choice odmítl přístup (401).', http: 401 } } }, h2)
   const v2 = await probehnoutChoice({ api: ch2.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START,
-    pockatNaDotaz: async () => true, zapsat: zapisDoPameti().fn })
+    pockatNaDotaz: async () => true, smiMimoFrontu: () => true, zapsat: zapisDoPameti().fn })
   ok('401 → konec „pristup“ a výzva připojit znovu', v2.konec === 'pristup' && /Připojte podnik znovu/.test(chybaBehu(v2)))
 }
 
@@ -538,7 +538,7 @@ const zapisDoPameti = () => {
       return { stav: 'ok', rezervace: [rezervace(1), rezervace(2, { dateTime: '2026-11-20T19:00:00' }), rezervace(1), rezervace(3, { dateTime: { date: '2026-11-20', time: '19:00' } })] }
     },
   }
-  const v = await probehnoutChoice({ api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: async () => true, zapsat: z.fn })
+  const v = await probehnoutChoice({ api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: async () => true, smiMimoFrontu: () => true, zapsat: z.fn })
   ok('bez pásma: NEZAPSÁNO (2 ze 4), zapsaná jen platná a jednou', z.zapsane.length === 1 && z.zapsane[0].externi_id === rezervace(1)._id)
   const hlaska = chybaBehu(v) ?? ''
   ok(`… a OHLÁŠENO u napojení: „${hlaska}“`, v.preskocene.pocet === 2 && /čas bez časového pásma 2×/.test(hlaska) && hlaska.includes(rezervace(2)._id))
@@ -547,18 +547,18 @@ const zapisDoPameti = () => {
     && chybaBehu({ ...v, preskocene: { pocet: 1, priklad: null, duvody: { 'bez-id': 1 } } }).startsWith('Nezapsala se 1 rezervace')
     && chybaBehu({ ...v, preskocene: { pocet: 5, priklad: null, duvody: { 'bez-id': 5 } } }).startsWith('Nezapsalo se 5 rezervací'))
   const vsude = await probehnoutChoice({ api: { nacistStranku: async () => ({ stav: 'ok', rezervace: [rezervace(2, { dateTime: '2026-11-20T19:00:00' })] }) },
-    token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: async () => true, zapsat: zapisDoPameti().fn })
+    token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START, pockatNaDotaz: async () => true, smiMimoFrontu: () => true, zapsat: zapisDoPameti().fn })
   ok('tatáž vadná rezervace v blízku, nových i okně se ohlásí jednou', vsude.dotazu === 3 && vsude.preskocene.pocet === 1)
 
   const spatnyZapis = async () => ({ stav: 'chyba', duvod: 'Zápis rezervací do Foodtabu selhal (XX000) — zkusí se příště.' })
   const v2 = await probehnoutChoice({ api: { nacistStranku: async () => ({ stav: 'ok', rezervace: [rezervace(1)] }) }, token: TOKEN, varSymbol: '1',
-    kurzor: {}, tedMs: START, pockatNaDotaz: async () => true, zapsat: spatnyZapis })
+    kurzor: {}, tedMs: START, pockatNaDotaz: async () => true, smiMimoFrontu: () => true, zapsat: spatnyZapis })
   ok('nepovedený zápis → chyba a kurzor se neposune', v2.konec === 'chyba' && !v2.kurzor.nove_od && v2.uspesnych === 0)
 
   const plna = { nacistStranku: async (_t, d) => ({ stav: 'ok', rezervace: d.podle === 'bookingDt' && d.stranka >= 1000 ? Array.from({ length: 100 }, (_, i) => rezervace(i)) : [] }) }
   const v3 = await probehnoutChoice({ api: plna, token: TOKEN, varSymbol: '1',
     kurzor: precistKurzor({ okno: { od: '2026-10-24T06:00:00.000Z', do: '2027-04-23T18:00:00.000Z', stranka: 1000, zahajeno: new Date(START).toISOString() } }),
-    tedMs: START, pockatNaDotaz: async () => true, zapsat: zapisDoPameti().fn })
+    tedMs: START, pockatNaDotaz: async () => true, smiMimoFrontu: () => true, zapsat: zapisDoPameti().fn })
   ok('za stránkou 1000 (strop Choice) se nepokračuje, ohlásí se', v3.konec === 'chyba' && /víc než 100000/.test(v3.duvod))
 }
 
@@ -2734,6 +2734,27 @@ for (const [posledniPo, smi] of [[100, false], [300, true]]) {
       return [ok1 && v.stav === 'ok', `${mist.length} dotazů na místa, ${radky.length} řádků, ${v.stav}`]
     }],
     ['server: došlý čas na seznam míst chyba u napojení není', () => [s.db.tabulky.integrace_pripojeni[0].posledni_chyba === null, String(s.db.tabulky.integrace_pripojeni[0].posledni_chyba)]],
+  ])
+}
+
+for (const [dilMs, smi] of [[100, false], [300, true]]) {
+  // Úloha: seznam míst smí začít jen do konce DÍLU připojení (dil.konecMs),
+  // i když poslední dotaz běhu je až ve 30 s — jinak by vzal čas dalším
+  // připojením. První dotaz odejde v 0 ms a odpoví ve 250 ms; seznam míst
+  // je hned po něm. (Díl 100 ms: do posledního dotazu zbývá víc než
+  // NEJMENE_NA_PRIPOJENI_MS, takže konec dílu opravdu platí.)
+  const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
+  await beh(`úloha, díl ${dilMs} ms`, () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, posledniDotazMs: s.START + 30_000, dilMs, uloha: true, prostredi: s.prostredi }), [
+    [`úloha: díl připojení končí ${dilMs} ms po prvním dotazu (poslední dotaz běhu až ve 30 s), seznam míst by začal ve 250 ms → ${smi ? 'ještě SMÍ (načte se)' : 'už NESMÍ (nenačte se, stoly zůstanou z minula)'}`, (v) => {
+      const radky = s.db.rpcVolani.filter((x) => x.jmeno === 'rezervace_importovat_zdroj').flatMap((x) => x.args.p_radky)
+      const mist = s.dotazy.filter((d) => jeSeznamMist(d.url))
+      const ok1 = smi
+        ? mist.length === 5 && radky.length > 0 && radky.every((x) => x.misto_zdroje === 'Patro: S1–S12')
+        : mist.length === 0 && radky.length > 0 && radky.every((x) => !('misto_zdroje' in x))
+      const konecDilu = v.konecDiluMs === null ? null : v.konecDiluMs - s.START
+      return [ok1 && v.stav !== 'chyba' && konecDilu === dilMs, `${mist.length} dotazů na místa, ${radky.length} řádků, ${v.stav}, konec dílu ${konecDilu} ms`]
+    }],
+    ['úloha: došlý díl na seznam míst chyba u napojení není', () => [s.db.tabulky.integrace_pripojeni[0].posledni_chyba === null, String(s.db.tabulky.integrace_pripojeni[0].posledni_chyba)]],
   ])
 }
 
