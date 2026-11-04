@@ -613,6 +613,18 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     )
     ok('den: zrušená i s dokumentem, Perla s Wordem i fotkou', stejne(stitky(radky.get(S.zrusena.id) ?? ''), [ocekavany(D.storno, zpet)]) && stejne(stitky(radky.get(S.perla.id) ?? ''), [ocekavany(D.rozpis, zpet), ocekavany(D.dort, zpet)]))
     ok('den: bez dokumentu bez seznamu', radky.get(S.bez.id) === '' && radky.get(S.treti.id) === '')
+    // Úzké rozvržení řádku se řídí šířkou hlavního sloupce (`rez-hlavni`
+    // v app/_rezervace.css): řádky musí ležet v něm, v kalendáři.
+    const predci = []
+    const otevrene = []
+    for (const m of html.matchAll(/<(\/?)div\b([^>]*)>|class="ds-rez-radek"/g)) {
+      if (m[0].startsWith('class=')) predci.push(otevrene.map((c) => c.split(' ')))
+      else if (m[1]) otevrene.pop()
+      else otevrene.push(m[2].match(/class="([^"]*)"/)?.[1] ?? '')
+    }
+    const vHlavnim = predci.filter((p) => p.findIndex((c) => c.includes('ds-rez')) >= 0 && p.findIndex((c) => c.includes('ds-rez')) < p.findIndex((c) => c.includes('ds-dnes-hlavni'))).length
+    ok(`den: každý řádek rezervace leží v hlavním sloupci (.ds-dnes-hlavni) uvnitř kalendáře (.ds-rez) (${vHlavnim} z ${dne.length})`,
+      predci.length === dne.length && vHlavnim === dne.length)
     const zDne = zpatkyZOdkazu('firma', stitky(radky.get(S.tri.id) ?? '')[0]?.href ?? '')
     ok(`den → náhled Wordu → „Zpět na den“ na tenhle den (je „${zDne?.text}“ na ${zDne?.href})`, stejne(zDne, { href: zpet, text: 'Zpět na den' }))
   } catch (e) {

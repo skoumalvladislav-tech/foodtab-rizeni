@@ -1667,23 +1667,98 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
     (detail.match(/kotva="dokumenty"/g) ?? []).length === 1
     && prvky12.includes("<section className={kotva ? 'ds-plocha ds-rez-kotva' : 'ds-plocha'} id={kotva}>")
     && /\.ds-rez-kotva \{ scroll-margin-top: [1-9]\d*px; \}/.test(css))
-  // Seznam dokumentů v kartě týdne je sám kontejner. Dotaz bez jména by se
-  // pak ptal na něj (úzký), ne na kalendář, a štítky by na počítači dostaly
-  // mobilní rozvržení. Proto každý dotaz v Rezervacích jmenuje svůj kontejner.
-  const dotazy = [...css.matchAll(/@container\s+([^({\s]*)\s*\(/g)].map((m) => m[1])
-  ok(`vzhled: každý dotaz na šířku míří na pojmenovaný kontejner (${dotazy.length} dotazů, bez jména ${dotazy.filter((d) => !d).length})`,
-    dotazy.length >= 8 && dotazy.every((d) => d === 'rez' || d === 'rez-dokumenty')
-    && /\.ds-rez \{[^}]*container: rez \/ inline-size;/.test(css))
+  // Kontejnery: kalendář (`rez`), hlavní sloupec dne a detailu vedle bočního
+  // panelu (`rez-hlavni`) a seznam dokumentů v kartě týdne (`rez-dokumenty`).
+  // Dotaz bez jména se ptá NEJBLIŽŠÍHO kontejneru — po přidání seznamu by
+  // štítky na počítači dostaly mobilní rozvržení. Proto každý dotaz jmenuje
+  // ten svůj a kontrola ho pozná podle toho, co je v něm.
+  const bezKomentaru = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const dotazy = []
+  for (const m of bezKomentaru.matchAll(/@container\b\s*([^({\s]*)\s*\(([^)]*)\)\s*\{/g)) {
+    let hloubka = 1
+    let j = m.index + m[0].length
+    for (; j < bezKomentaru.length && hloubka; j++) {
+      if (bezKomentaru[j] === '{') hloubka++
+      else if (bezKomentaru[j] === '}') hloubka--
+    }
+    dotazy.push({ jmeno: m[1], podminka: m[2].trim(), telo: bezKomentaru.slice(m.index + m[0].length, j - 1) })
+  }
+  const SVUJ = [
+    { znak: '.ds-rez-vpravo {', jmeno: 'rez', sirka: (px) => px === 640 },
+    { znak: '.ds-rez-tyden {', jmeno: 'rez', sirka: (px) => px === 900 },
+    { znak: '.ds-rez-mesic {', jmeno: 'rez', sirka: (px) => px === 640 },
+    { znak: '.ds-rez-mesic-prazdny {', jmeno: 'rez', sirka: (px) => px === 640 },
+    { znak: '.ds-rez-radek {', jmeno: 'rez-hlavni', sirka: (px) => px === 560 },
+    { znak: '.ds-rez-udaje {', jmeno: 'rez-hlavni', sirka: (px) => px === 420 },
+    { znak: '.ds-plocha.ds-dokument {', jmeno: 'rez', sirka: (px) => px === 560 },
+    // Práh úzkého štítku: pod ním se název vedle ikony a přípony nevejde,
+    // nad ním by štítek s místem dostal rozvržení na dva řádky zbytečně.
+    { znak: '.ds-rez-polozka .ds-rez-dokument-nazev { grid-area:', jmeno: 'rez-dokumenty', sirka: (px) => px >= 160 && px <= 240 },
+  ]
+  const mimoKontejner = []
+  for (const o of SVUJ) {
+    const b = dotazy.filter((x) => x.telo.includes(o.znak))
+    const px = Number(b[0]?.podminka.match(/^max-width: (\d+)px$/)?.[1])
+    if (b.length !== 1 || b[0].jmeno !== o.jmeno || !o.sirka(px)) {
+      mimoKontejner.push(`${o.znak} → ${b.map((x) => `${x.jmeno || 'bez jména'} (${x.podminka})`).join(' + ') || 'nikde'}`)
+    }
+  }
+  for (const x of dotazy) if (!SVUJ.some((o) => x.telo.includes(o.znak))) mimoKontejner.push(`neznámý dotaz ${x.jmeno || 'bez jména'} (${x.podminka})`)
+  ok(`vzhled: každý dotaz na šířku míří na svůj kontejner — kalendář, hlavní sloupec dne, seznam dokumentů v kartě (${dotazy.length} dotazů; špatně: ${mimoKontejner.join('; ') || 'nic'})`,
+    mimoKontejner.length === 0 && dotazy.length === SVUJ.length)
+  // Kontejnery samy: tři, a žádné pozdější pravidlo je nezruší. Hlavní
+  // sloupec má typ z _komponenty.css — tady jen jméno (zkratka by typ
+  // přepsala na „normal“).
+  const kontejnery = [...bezKomentaru.matchAll(/([^{}]+)\{[^}]*?\b(container(?:-type|-name)?)\s*:\s*([^;}]+)/g)].map((m) => `${m[1].trim()} → ${m[2]}: ${m[3].trim()}`)
+  ok(`vzhled: kontejnery kalendář (rez), hlavní sloupec (rez-hlavni) a seznam dokumentů v kartě (rez-dokumenty), nic je nepřepisuje (${kontejnery.join('; ')})`,
+    JSON.stringify(kontejnery) === JSON.stringify([
+      '.ds-rez → container: rez / inline-size',
+      '.ds-rez-polozka .ds-rez-dokumenty → container: rez-dokumenty / inline-size',
+      '.ds-rez .ds-dnes-hlavni → container-name: rez-hlavni',
+    ])
+    && /\.ds-dnes-hlavni \{[^}]*container-type: inline-size;/.test(cti('app/_komponenty.css')))
   // Úzký sloupec (notebook, víc poboček): vedle ikony a přípony by na název
   // zbylo pár pixelů. Ikona s příponou nahoře, název pod nimi přes celý štítek.
-  const uzky = css.match(/@container rez-dokumenty \(max-width: (\d+)px\) \{([^@]*?)\r?\n\}/)
+  const uzky = dotazy.find((x) => x.jmeno === 'rez-dokumenty')?.telo ?? ''
   ok('vzhled: v úzkém sloupci týdne má název dokumentu celou šířku štítku, ikona s příponou nad ním',
-    css.includes('.ds-rez-polozka .ds-rez-dokumenty { container: rez-dokumenty / inline-size; }')
-    && !!uzky && Number(uzky[1]) >= 160
-    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument { display: grid; grid-template-columns: auto minmax(0, 1fr);')
-    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument .ft-i { grid-area: 1 / 1;')
-    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument-pripona { grid-area: 1 / 2;')
-    && uzky[2].includes('.ds-rez-polozka .ds-rez-dokument-nazev { grid-area: 2 / 1 / 3 / 3; margin-left: 0; }'))
+    uzky.includes('.ds-rez-polozka .ds-rez-dokument { display: grid; grid-template-columns: auto minmax(0, 1fr);')
+    && uzky.includes('.ds-rez-polozka .ds-rez-dokument .ft-i { grid-area: 1 / 1;')
+    && uzky.includes('.ds-rez-polozka .ds-rez-dokument-pripona { grid-area: 1 / 2;')
+    && uzky.includes('.ds-rez-polozka .ds-rez-dokument-nazev { grid-area: 2 / 1 / 3 / 3; margin-left: 0; }'))
+  // Dnešek: mosaz do karty (sloupec týdne 22 %, buňka měsíce 26 %). Drobné
+  // písmo na něm (souhrn, značky, „+ Přidat“, „+ N další“, název dne na
+  // telefonu) potřebuje 4,5 : 1 ve světlém i tmavém režimu — šedé (--muted)
+  // tam má jen 4,0 až 4,2, v měsíci 3,6 až 4,1. Karty týdne mají vlastní podklad.
+  const tokeny = cti('app/_tokeny.css')
+  const rezim = (od, po) => tokeny.slice(tokeny.indexOf(od), po ? tokeny.indexOf(po, tokeny.indexOf(od)) : undefined)
+  const REZIMY = { světlý: rezim(':root {', '@media'), tmavý: rezim(':root[data-theme="dark"] {', '}') }
+  const barva = (blok, jmeno) => blok.match(new RegExp(`--${jmeno}:\\s*#([0-9a-f]{6});`, 'i'))?.[1].match(/../g).map((h) => parseInt(h, 16))
+  const jas = (rgb) => {
+    const [r, g, b] = rgb.map((c) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const pomer = (a, b) => (Math.max(jas(a), jas(b)) + 0.05) / (Math.min(jas(a), jas(b)) + 0.05)
+  const dnesek = (prvek, potreba) => {
+    const podklad = css.match(new RegExp(`\\.${prvek}\\[data-dnes\\] \\{ background: color-mix\\(in srgb, var\\(--mosaz-sv\\) (\\d+)%, var\\(--card\\)\\);`))
+    const pismo = css.match(new RegExp(`\\.${prvek}\\[data-dnes\\] :is\\(([^)]*)\\) \\{ color: var\\(--([a-z-]+)\\); \\}`))
+    const tridy = (pismo?.[1] ?? '').split(',').map((s) => s.trim())
+    const pomery = Object.entries(REZIMY).map(([n, blok]) => {
+      const p = Number(podklad?.[1]) / 100
+      const mosaz = barva(blok, 'mosaz-sv')
+      const karta = barva(blok, 'card')
+      const pod = mosaz && karta ? mosaz.map((c, i) => Math.round(c * p + karta[i] * (1 - p))) : null
+      const barvaPisma = pismo ? barva(blok, pismo[2]) : null
+      return [n, pod && barvaPisma ? pomer(pod, barvaPisma) : 0]
+    })
+    return {
+      popis: `${pomery.map(([n, x]) => `${n} ${x.toFixed(2)}`).join(', ')}; třídy ${tridy.join(', ') || 'žádné'}`,
+      dobre: !!podklad && pomery.every(([, x]) => x >= 4.5) && potreba.every((c) => tridy.includes(c)),
+    }
+  }
+  const dnesTyden = dnesek('ds-rez-den', ['.ds-rez-den-souhrn', '.ds-rez-den-znacky', '.ds-rez-den-pridat'])
+  ok(`vzhled: drobné písmo v dnešním sloupci týdne má kontrast aspoň 4,5 : 1 v obou režimech (${dnesTyden.popis})`, dnesTyden.dobre)
+  const dnesMesic = dnesek('ds-rez-bunka', ['.ds-rez-bunka-souhrn', '.ds-rez-bunka-dalsi', '.ds-rez-bunka-den-nazev'])
+  ok(`vzhled: drobné písmo na dnešní buňce měsíce má kontrast aspoň 4,5 : 1 v obou režimech (${dnesMesic.popis})`, dnesMesic.dobre)
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)
