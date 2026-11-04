@@ -69,6 +69,18 @@
      dřív v paletě nebyla. Přesná hodnota ze zadání prochází rovnou. */
   --info: #3e73a8;  --info-bg: #f1f5f9;
 
+  /* GRAF — dvě řady grafu srovnání tržeb (Finance → Tržby, 4. 11. 2026):
+     --graf-obdobi = sloupce zobrazeného období (rodina mosazi),
+     --graf-srovnani = čára srovnávacího období (modrá, záměrně jiná
+     než --info, ať se řada nezaměňuje se stavem „probíhá“).
+     Ověřené validátorem dataviz (scripts/validate_palette.js) na kartě:
+     světle na #ffffff — světlost i sytost v pásmu, ΔE barvoslepost 25,8,
+     běžné vidění 28,8, kontrast ≥ 3:1; tmavě na #141d19 — v pásmu,
+     ΔE 23,8 / 24,0, kontrast ≥ 3:1. Na text se nepoužívají (text nese
+     --ink/--muted), jen na značky grafu. */
+  --graf-obdobi:   #a8751d;
+  --graf-srovnani: #31509d;
+
   --branch-ink:  #fffdf7;
   --accent-soft: #fff3d7;
   --accent-ink:  #fffdf7;
@@ -180,6 +192,8 @@
     --pozor: #f0855a;  --pozor-bg: #33170c;
     --bad:   #f4837c;  --bad-bg:   #331313;
     --info:  #7aa8d4;  --info-bg:  #0f1d29;
+    --graf-obdobi:   #b98329;
+    --graf-srovnani: #6b8dd8;
 
     --branch-ink:  #17251e;
     --accent-soft: #2b2313;
@@ -224,6 +238,8 @@
   --pozor: #f0855a;  --pozor-bg: #33170c;
   --bad:   #f4837c;  --bad-bg:   #331313;
   --info:  #7aa8d4;  --info-bg:  #0f1d29;
+  --graf-obdobi:   #b98329;
+  --graf-srovnani: #6b8dd8;
 
   --branch-ink:  #17251e;
   --accent-soft: #2b2313;

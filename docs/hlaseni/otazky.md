@@ -1915,3 +1915,48 @@ docs/rezervace-navrh.md, oddíl 1.
   na zamčené obrazovce telefonu.
 - **Když to má být jinak:** „při zrušení nepřečtené upozornění na novou
   smazat“ — malá úprava spouště.
+
+## 84. Graf srovnání tržeb po dnech — párovat podle čísla dne, nebo dne v týdnu?
+
+**Vzniklo:** 4. 11. 2026.
+
+- **Teď:** den se srovnává s **týmž číslem dne** — 17. 10. se 17. 9.
+  (nebo se 17. 10. loni), i když je jeden sobota a druhý čtvrtek.
+  31. den, který srovnávací měsíc nemá, je bez čáry.
+- **Proč:** tak to čte každý („17. proti 17.“), sedí to s tabulkou pod
+  grafem a nic se neposouvá přes konec měsíce. Den v týdnu by byl přesnější na tvar týdne (pátky proti
+  pátkům), ale čára by pak u začátku a konce měsíce brala dny z jiného
+  měsíce.
+- **Když to má být jinak:** „po dnech srovnávat stejný den v týdnu“ —
+  změna párování v `lib/trzby-srovnani.ts` (`sestavitGraf`) a popisků
+  bubliny, bez migrace.
+
+## 85. Graf srovnání tržeb po měsících — jen proti loňsku, bez přepínače
+
+**Vzniklo:** 4. 11. 2026.
+
+- **Teď:** po měsících (celý rok) se srovnává **vždy s předchozím
+  rokem** a přepínač „Předchozí období / Předchozí rok“ jako
+  v Dotykačce tam není. Po dnech je: **Předchozí měsíc / Stejný měsíc
+  loni**.
+- **Proč:** u celého roku je „předchozí období“ a „předchozí rok“
+  totéž. Dvě tlačítka, která dělají stejnou věc, by mátla.
+- **Když to má být jinak:** např. „po měsících srovnávat jen do
+  dneška“ (leden–říjen proti lednu–říjnu loni) — nový druh srovnání
+  v `srovnavaciObdobi`, bez migrace.
+
+## 86. Graf srovnání tržeb — kdy je počet prodejních dní „nesrovnatelný“
+
+**Vzniklo:** 4. 11. 2026 (nález z kontroly kódu).
+
+- **Teď:** když má kterákoli provozovna v měsíci na jedné straně méně
+  než **2/3** prodejních dní druhé strany (např. 12 dní proti 31 —
+  pokladna napojená v půlce měsíce), graf rozdíl v procentech
+  **neukáže** a řekne proč. Týden zavřeno (24–27 dní z 31) ještě
+  projde a rozdíl se ukáže.
+- **Proč:** z dat nejde poznat „zavřeno“ od „ještě nenapojeno“. Falešný
+  růst o 150 % je horší než chybějící procento — čísla v bublině
+  i tabulce zůstanou.
+- **Když to má být jinak:** jiná hranice (třeba „jen když je to méně
+  než polovina“) — jedna konstanta `NEJMENE_DNI_PROTI`
+  v `lib/trzby-srovnani.ts`.
