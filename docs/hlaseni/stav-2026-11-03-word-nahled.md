@@ -16,8 +16,10 @@
 - Kód prošel **pěti nezávislými kontrolami** (25 + 24 + 7 + 8 + 4 nálezy,
   opravené všechny kromě jednoho, níž). Po každé opravě jsem kód
   schválně rozbíjel, abych ověřil, že ho kontroly chytí.
-- **Bez migrace.** Stačí „**sluč N**“, `db push` není potřeba.
-  **Nic jsem nenasazoval ani neslučoval.**
+- **Bez migrace**, `db push` není potřeba. **Sloučeno 4. 11.** na
+  pokyn „sluč 173“ (PR #173, `0dd9db5`). Aplikaci nasadil Vercel sám
+  z `main`, nasazení do produkce skončilo úspěšně. Do databáze jsem
+  nic nenasazoval.
 
 ## Co je hotové
 
@@ -263,9 +265,9 @@ větvi není (přibude s druhým PR, teď je to u odkazu napsané).
 
 ## Co čeká na Šéfíka
 
-- **„sluč N“**, bez `db push`. Slučovat **jako první**, před PR
-  s dokumenty v kalendáři (ten na tomhle staví).
-- Po sloučení vyzkoušet na počítači: detail rezervace s Wordem → klik →
+- Sloučeno (PR #173, 4. 11.). PR s dokumenty v kalendáři (#174), který
+  na tomhle staví, čeká na „sluč 174“.
+- Vyzkoušet na počítači: detail rezervace s Wordem → klik →
   má se otevřít náhled. Pak **Stáhnout originál** → soubor je ve
   Stažených.
 
@@ -341,4 +343,5 @@ větvi není (přibude s druhým PR, teď je to u odkazu napsané).
 
 ## Nenasazoval jsem
 
-Nic. PR čeká na „sluč N“. Bez migrace, `db push` není potřeba.
+Do databáze nic, migrace tu není. PR #173 jsem sloučil 4. 11. na pokyn
+„sluč 173“ (`0dd9db5`), aplikaci nasadil Vercel sám z `main`.

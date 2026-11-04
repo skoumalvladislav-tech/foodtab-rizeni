@@ -20,9 +20,9 @@
 - Dokumenty se načítají **stejným dotazem a stejným přihlášením** jako
   rezervace, takže je vidí jen ten, kdo vidí rezervaci (hlídá to
   i databáze). Žádný klíč služby.
-- **Bez migrace.** Stačí „**sluč N**“, `db push` není potřeba. Slučovat
-  **až po PR s náhledem Wordu**, tenhle na něm staví.
-  **Nic jsem nenasazoval ani neslučoval.**
+- **Bez migrace.** Stačí „**sluč 174**“, `db push` není potřeba. PR
+  s náhledem Wordu, na kterém tenhle staví, je už sloučený (#173,
+  4. 11., `0dd9db5`). **Tenhle PR jsem neslučoval a nic nenasazoval.**
 
 ## Co je hotové
 
@@ -37,7 +37,8 @@
 | Opravy ze 2. kontroly kódu, 6 nálezů (níž) | `97228fd` |
 | Opravy ze 3. kontroly kódu: drobné písmo čitelné na všech podkladech kalendáře (níž) | `15408ce` |
 
-Commity stojí na PR s náhledem Wordu (`2d05ea8`).
+Commity stojí na PR s náhledem Wordu (`2d05ea8`), sloučeném 4. 11.
+(#173, `0dd9db5`).
 
 ## Čísla — a z čeho jsou
 
@@ -210,7 +211,8 @@ Vyvrácené: dvě čísla v hlášení, která v té době už byla opravená.
 
 ## Co čeká na Šéfíka
 
-- **„sluč N“** (bez `db push`), až po PR s náhledem Wordu.
+- **„sluč 174“** (bez `db push`). PR s náhledem Wordu (#173) je už
+  sloučený.
 - Po sloučení: Rezervace → týden s akcí, ke které je dokument → klik na
   štítek. Word se otevře jako náhled, „Zpět na kalendář“ vrátí na ten
   týden. PDF se otevře v nové záložce.
@@ -337,4 +339,4 @@ Vyvrácené: dvě čísla v hlášení, která v té době už byla opravená.
 
 ## Nenasazoval jsem
 
-Nic. PR čeká na „sluč N“. Bez migrace.
+Nic. PR čeká na „sluč 174“. Bez migrace.
