@@ -772,48 +772,51 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
       ? { data: null, error: { code: kod, message: 'column rezervace.misto_zdroje does not exist' } }
       : { data: d.jeden ? radekDb({ menu: '', zaloha_hosta_haleru: null, zaloha_hosta_stav: 'zadna', poznamka_zdroje: '', stav_zdroje: '', poskytovatel: 'choice', importovano_kdy: null, externi_zmeneno_kdy: null }) : [{ ...radekDb(), rezervace_prilohy: [] }], error: null }
 
-  try {
-    globalThis.__rezDb = falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: 'Patro: S1–S12' }), rezervace_prilohy: [] }], error: null }))
-    const nove = await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
-    const [d1] = globalThis.__rezDb.dotazy
-    ok(`načtení kalendáře (nová DB): jeden dotaz se stoly a vnořenými dokumenty, stoly v řádku (${globalThis.__rezDb.dotazy.length} dotaz, „${nove[0]?.misto_zdroje}“)`,
-      globalThis.__rezDb.dotazy.length === 1 && d1.select.endsWith(', misto_zdroje, rezervace_prilohy(id, nazev, mime, nahrano)') && nove[0]?.misto_zdroje === 'Patro: S1–S12' && stejneObj(nove[0]?.dokumenty, []))
-
-    for (const kod of ['42703', 'PGRST204']) {
-      globalThis.__rezDb = falesna(nemaSloupec(kod))
-      const stare = await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
-      const [a, b] = globalThis.__rezDb.dotazy
-      ok(`načtení kalendáře (stará DB, ${kod}): druhý dotaz bez stolů, se stejnými filtry a dokumenty; řádek má stoly '' (${globalThis.__rezDb.dotazy.length} dotazy)`,
-        globalThis.__rezDb.dotazy.length === 2 && !b.select.includes('misto_zdroje') && b.select.endsWith(', zdroj, rezervace_prilohy(id, nazev, mime, nahrano)') && filtry(a) === filtry(b) && filtry(b).includes(TEN) && stare[0]?.misto_zdroje === '' && stare[0]?.prostor === 'Patro')
-    }
-
-    globalThis.__rezDb = falesna(() => ({ data: null, error: { code: '42501', message: 'permission denied for table rezervace' } }))
-    let vyhozeno = null
+  /** Načtení nad podstrčenou databází; výjimka se vrátí, ať shodí svou kontrolu, ne všechny další. */
+  const nacti = async (db, fn) => {
+    globalThis.__rezDb = db
     try {
-      await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
+      return { v: await fn(), dotazy: db.dotazy, e: null }
     } catch (e) {
-      vyhozeno = e
+      return { v: null, dotazy: db.dotazy, e }
+    } finally {
+      delete globalThis.__rezDb
     }
-    ok(`načtení kalendáře: jiná chyba se neopakuje a vyhodí se (${globalThis.__rezDb.dotazy.length} dotaz, ${vyhozeno?.name})`,
-      globalThis.__rezDb.dotazy.length === 1 && vyhozeno?.name === 'DotazSelhal' && vyhozeno.message.includes('42501'))
+  }
+  const kalendar = (db) => nacti(db, () => data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01'))
+  const detailDb = (db) => nacti(db, () => data.nacistRezervaci(TEN, T.choice.id, [PBR]))
+  const proc = (r) => (r.e ? `, výjimka: ${r.e.message}` : '')
+  const detailRadek = (o = {}) => radekDb({ menu: '', zaloha_hosta_haleru: null, zaloha_hosta_stav: 'zadna', poznamka_zdroje: '', stav_zdroje: '', poskytovatel: 'choice', importovano_kdy: null, externi_zmeneno_kdy: null, ...o })
 
-    globalThis.__rezDb = falesna(() => ({ data: radekDb({ menu: '', zaloha_hosta_haleru: null, zaloha_hosta_stav: 'zadna', poznamka_zdroje: '', stav_zdroje: '', poskytovatel: 'choice', importovano_kdy: null, externi_zmeneno_kdy: null, misto_zdroje: 'Patro: S1–S12', cislo_zdroje: '105' }), error: null }))
-    const det = await data.nacistRezervaci(TEN, T.choice.id, [PBR])
-    ok(`načtení detailu (nová DB): stoly i číslo (${det?.radek.misto_zdroje}, č. ${det?.cisloZdroje})`,
-      globalThis.__rezDb.dotazy.length === 1 && globalThis.__rezDb.dotazy[0].select.endsWith('externi_zmeneno_kdy, misto_zdroje, cislo_zdroje') && det?.radek.misto_zdroje === 'Patro: S1–S12' && det?.cisloZdroje === '105')
-
-    globalThis.__rezDb = falesna(nemaSloupec('42703'))
-    const detStary = await data.nacistRezervaci(TEN, T.choice.id, [PBR])
-    ok(`načtení detailu (stará DB): druhý dotaz bez sloupců zdroje, stoly '' a číslo '' (${globalThis.__rezDb.dotazy.length} dotazy)`,
-      globalThis.__rezDb.dotazy.length === 2 && globalThis.__rezDb.dotazy[1].select.endsWith('externi_zmeneno_kdy') && detStary?.radek.misto_zdroje === '' && detStary?.cisloZdroje === '')
-
-    globalThis.__rezDb = falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: null }), rezervace_prilohy: null }], error: null }))
-    const divne = await data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01')
-    ok('načtení kalendáře: stoly null → \'\' (do vykreslení nejde nic jiného než text)', divne[0]?.misto_zdroje === '')
-  } catch (e) {
-    ok(`načtení rezervací se stoly — výjimka: ${e.message}`, false)
-  } finally {
-    delete globalThis.__rezDb
+  {
+    const r = await kalendar(falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: 'Patro: S1–S12' }), rezervace_prilohy: [] }], error: null })))
+    ok(`načtení kalendáře (nová DB): jeden dotaz se stoly a vnořenými dokumenty, stoly v řádku (${r.dotazy.length} dotaz, „${r.v?.[0]?.misto_zdroje}“${proc(r)})`,
+      !r.e && r.dotazy.length === 1 && r.dotazy[0].select.endsWith(', misto_zdroje, rezervace_prilohy(id, nazev, mime, nahrano)') && r.v[0]?.misto_zdroje === 'Patro: S1–S12' && stejneObj(r.v[0]?.dokumenty, []))
+  }
+  for (const kod of ['42703', 'PGRST204']) {
+    const r = await kalendar(falesna(nemaSloupec(kod)))
+    const [a, b] = r.dotazy
+    ok(`načtení kalendáře (stará DB, ${kod}): druhý dotaz bez stolů, se stejnými filtry a dokumenty; řádek má stoly '' (${r.dotazy.length} dotazy${proc(r)})`,
+      !r.e && r.dotazy.length === 2 && !b.select.includes('misto_zdroje') && b.select.endsWith(', zdroj, rezervace_prilohy(id, nazev, mime, nahrano)') && filtry(a) === filtry(b) && filtry(b).includes(TEN) && r.v[0]?.misto_zdroje === '' && r.v[0]?.prostor === 'Patro')
+  }
+  {
+    const r = await kalendar(falesna(() => ({ data: null, error: { code: '42501', message: 'permission denied for table rezervace' } })))
+    ok(`načtení kalendáře: jiná chyba se neopakuje a vyhodí se (${r.dotazy.length} dotaz, ${r.e?.name})`,
+      r.dotazy.length === 1 && r.e?.name === 'DotazSelhal' && r.e.message.includes('42501'))
+  }
+  {
+    const r = await detailDb(falesna(() => ({ data: detailRadek({ misto_zdroje: 'Patro: S1–S12', cislo_zdroje: '105' }), error: null })))
+    ok(`načtení detailu (nová DB): stoly i číslo (${r.v?.radek.misto_zdroje}, č. ${r.v?.cisloZdroje}${proc(r)})`,
+      !r.e && r.dotazy.length === 1 && r.dotazy[0].select.endsWith('externi_zmeneno_kdy, misto_zdroje, cislo_zdroje') && r.v?.radek.misto_zdroje === 'Patro: S1–S12' && r.v?.cisloZdroje === '105')
+  }
+  {
+    const r = await detailDb(falesna(nemaSloupec('42703')))
+    ok(`načtení detailu (stará DB): druhý dotaz bez sloupců zdroje, stoly '' a číslo '' (${r.dotazy.length} dotazy${proc(r)})`,
+      !r.e && r.dotazy.length === 2 && r.dotazy[1].select.endsWith('externi_zmeneno_kdy') && r.v?.radek.misto_zdroje === '' && r.v?.cisloZdroje === '')
+  }
+  {
+    const r = await kalendar(falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: null }), rezervace_prilohy: null }], error: null })))
+    ok(`načtení kalendáře: stoly null → '' (do vykreslení nejde nic jiného než text)${proc(r)}`, !r.e && r.v[0]?.misto_zdroje === '')
   }
 }
 

@@ -93,7 +93,34 @@ U pobočky na kartě Choice:
 - *Nezapsaly se 2 rezervace z Choice (čas bez časového pásma)* — Choice
   poslal čas, ze kterého nejde poznat, kdy rezervace je. Foodtab si ho
   nedomýšlí (posunula by se o hodinu či dvě). Pošlete prosím tu hlášku
-  vývojáři.
+  vývojáři;
+- *Stoly z Choice se nenačetly (…) — u N rezervací zůstávají naposledy
+  načtené* — seznam stolů z Choice se tentokrát nepřečetl. Rezervace se
+  načítají dál, jen stoly se neobnovily; příští běh to zkusí znovu;
+- *U N rezervací poslal Choice stůl, který v seznamu míst v Choice
+  není* — ve Foodtabu je u nich „1 stůl bez názvu“. Zkontrolujte
+  v Choice nastavení míst (stůl mohl být smazaný nebo přejmenovaný).
+
+## Co se z Choice načítá
+
+U každé rezervace: čas, počet osob, stav, jméno a kontakt hosta,
+poznámky (hosta, restaurace, důvod zrušení), záloha (jen stav),
+**přidělené stoly** a **číslo rezervace v Choice** (#105).
+
+- **Stoly** se ukážou v kalendáři (týden: druhý řádek karty, den:
+  u počtu osob) a v detailu rezervace jako „Stoly v Choice: Patro:
+  S1–S12“. Tři a víc stolů po sobě se píšou rozsahem (S1–S12), víc
+  částí podniku se oddělí tečkou („Patro: S1, S2 · Terasa: L7“). Stoly
+  patří Choice: když hosta v Choice přesadíte, Foodtab to při dalším
+  načtení přepíše.
+- **„Stůl / prostor“** ve Foodtabu patří dál obsluze. Choice ho jen
+  doplní přáním hosta (část podniku), když je prázdný; co do něj napíše
+  obsluha, načtení z Choice nepřepíše.
+- **Číslo rezervace** je v detailu („Převzato z rezervačního systému
+  (Choice, č. 105)“), ať se dá rezervace v Choice dohledat.
+- **Délka návštěvy** (v Choice třeba „2h“) se zatím nenačítá: Choice
+  v dokumentaci neříká, v jakých jednotkách ji posílá, a odhadnutý konec
+  by mohl být špatně. Konec rezervace tedy ve Foodtabu zůstává prázdný.
 
 ## Proč to chvíli trvá
 
@@ -159,6 +186,30 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
 - Zápis stávající cestou `rezervace_importovat_zdroj` (poskytovatel
   `choice`, číslo = `_id`). Token zašifrovaný v `integrace_tajemstvi`,
   kurzor v `integrace_pripojeni.externi_ucet.kurzor`.
+- Stoly (migrace `20261107100000_rezervace_misto_zdroje.sql`, 4. 11.):
+  `locationPoints` rezervace (id stolů) se převedou na text podle
+  seznamu míst (`GET /location/cs/areas/list`, pak
+  `/location/cs/points/list/:areaId` pro každou oblast se stoly, nejvýš
+  20). Seznam se načte nejvýš jednou za běh, jen když nějaká rezervace
+  stoly má, a zabere si místo ve frontě dotazů (limit 1 / 5 s
+  dokumentace u míst neuvádí, fronta je pojistka). Časový limit 6 s na
+  dotaz (`CASOVY_LIMIT_MIST_MS`), oblasti, pak stoly souběžně — vejde
+  se do rezervy běhu. Výsledek jde do `rezervace.misto_zdroje` (patří
+  zdroji, přepisuje se), `num` do `rezervace.cislo_zdroje`,
+  `cancelReason` do poznámky ze zdroje. Nepovedený seznam = klíč
+  `misto_zdroje` v řádku chybí a databáze nechá uložené
+  (`app.rezervace_zapsat_radky`); prázdné `locationPoints` = `''`
+  (stoly smazat). Klíče se čtou jen u `p_zdroj = 'externi'` — import
+  ze souboru je posílá z prohlížeče a nesmí si vydávat stoly za Choice.
+  Kód čte nové sloupce s náhradou (`sloupciZdroje` v
+  `app/[rozsah]/rezervace/data.ts`): do `db push` kalendář ukazuje
+  rezervace bez stolů, ne chybu. Testy: `rezervace-choice` oddíl 11,
+  `rezervace-pobocky` oddíl 7, scénář `krok109`.
+- NEOVĚŘENO proti živému Choice: že id v `locationPoints` rezervace
+  jsou tatáž id jako `_id` míst z `/location` (dokumentace to neříká
+  výslovně). Kdyby nebyla, u rezervací bude „N stolů bez názvu“
+  a u napojení hláška „poslal Choice stůl, který v seznamu míst není“ —
+  podle ní se to pozná hned po prvním načtení.
 - Co dokumentace Choice neříká a Foodtab nedomýšlí: tvar `dateTime`
   (bere se jen okamžik s pásmem), jednotka `visitDuration` (konec se
   nevyplňuje), jednotka `deposit.amount` (jen stav zálohy), význam
