@@ -109,6 +109,17 @@ await zkus('rok', () => {
   ok('listopad (rozběhnutý) = „bezi", bez rozdílu v procentech', g.sloty[10].stav === 'bezi' && g.sloty[10].rozdilProcent === null && g.bezi?.obdobi === '2026-11-01')
   ok('prosinec = „budouci", sloupec žádný, srovnání loňského prosince ano', g.sloty[11].stav === 'budouci' && g.sloty[11].aktualni === null && g.sloty[11].srovnani?.haleru === 11_000_000)
   ok('září = „uzavrene"', g.sloty[8].stav === 'uzavrene')
+  // Loňský listopad v SROV_ROK chybí, takže kontrola nahoře projde i bez podmínky na stav —
+  // tady srovnání data MÁ a rozdíl musí zmizet jen proto, že listopad ještě běží.
+  const sListopadem = grafRoku(prehled([
+    radek('2025-03-01', A, 80_000, 31),
+    radek('2025-10-01', A, 100_000, 31),
+    radek('2025-11-01', A, 95_000, 30),
+    radek('2025-12-01', A, 110_000, 31),
+  ]))
+  const l = sListopadem.sloty[10]
+  ok(`rozběhnutý listopad bez rozdílu, i když loňský listopad data má (${l.stav}/${l.aktualni?.haleru}/${l.srovnani?.haleru}/${l.rozdilProcent})`,
+    l.stav === 'bezi' && l.aktualni?.haleru === 1_000_000 && l.srovnani?.haleru === 9_500_000 && l.rozdilProcent === null)
   ok(`pokrytí: částečné březen–prosinec 2025 (${JSON.stringify(g.pokryti)})`, g.pokryti.druh === 'castecne' && g.pokryti.od === '2025-03-01' && g.pokryti.do === '2025-12-01')
   ok('úsek slovy: „březen – prosinec 2025"', popisUseku('mesic', '2025-03-01', '2025-12-01') === 'březen – prosinec 2025')
   ok('u roku se druh „rok" sloučí na „obdobi" (jedna adresa pro totéž)', grafRoku(SROV_ROK, { druh: 'rok' }).druh === 'obdobi')
