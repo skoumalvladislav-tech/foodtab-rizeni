@@ -105,6 +105,13 @@
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
 }
 .ds-rez-polozka small { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Stoly ze zdroje stejně jako jméno: dva řádky, pak tři tečky. Na jednom
+   řádku by „Patro: S1–S12“ v úzkém sloupci vyšlo jako „Patro: S1…“
+   a vypadalo by to jako jeden stůl. Celé jsou v title a v detailu. */
+.ds-rez-polozka small.ds-rez-polozka-misto {
+  white-space: normal; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
 .ds-rez-polozka[data-druh="akce"] {
   border-color: color-mix(in srgb, var(--vino) 45%, var(--line));
   background: color-mix(in srgb, var(--vino) 8%, var(--card));
