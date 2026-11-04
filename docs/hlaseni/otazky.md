@@ -1960,3 +1960,37 @@ docs/rezervace-navrh.md, oddíl 1.
 - **Když to má být jinak:** jiná hranice (třeba „jen když je to méně
   než polovina“) — jedna konstanta `NEJMENE_DNI_PROTI`
   v `lib/trzby-srovnani.ts`.
+
+## 87. Přesazení v Choice u akce — poslat upozornění?
+
+**Vzniklo:** 4. 11. 2026 (nález z kontroly kódu u stolů z Choice).
+
+- **Teď:** když se v Choice změní stoly u rezervace, Foodtab je při
+  dalším načtení přepíše, ale **upozornění nepošle**, ani když je
+  rezervace akce. Upozornění na změnu dál hlídá jen „Stůl / prostor“,
+  který píše obsluha.
+- **Proč:** stoly se v Choice přeskupují často (spojí se dva stoly,
+  host se přesadí k oknu). Každé přeskupení by poslalo upozornění
+  vybraným lidem a u akcí by upozornění přestala znamenat „něco se
+  změnilo, podívej se“.
+- **Když to má být jinak:** „u akcí posílat i změnu stolů z Choice“ —
+  spoušť `trg_rezervace_upozornit_zmena` začne hlídat i `misto_zdroje`
+  (jen u akcí). Je to nová migrace a `db push`.
+
+## 88. Délka návštěvy z Choice — v jakých jednotkách?
+
+**Vzniklo:** 4. 11. 2026.
+
+- **Teď:** Choice posílá délku návštěvy (`visitDuration`, u #105 „2h“),
+  ale dokumentace neříká, jestli v minutách, nebo v milisekundách.
+  Foodtab ji proto nepřevádí a konec rezervace nechá prázdný. Každé
+  načtení si ale uloží až 5 ukázek (délka a číslo rezervace) do
+  `externi_ucet.ukazka_delky` u napojení.
+- **Proč:** odhadnutý konec by mohl být špatně o celé řády (120 minut
+  proti 120 milisekundám) a z konce by se počítala obsazenost. Prázdný
+  konec je poznat, špatný ne.
+- **Co je potřeba:** po nasazení uložené ukázky přečtu (jen čtení)
+  a porovnám je s Choice. Když u #105 vyjde 120, jsou to minuty. Pak
+  stačí převod v `radekZChoice` (`lib/rezervace-choice.ts`) a konec se
+  začne vyplňovat, bez migrace. S koncem by šla i obsazenost stolů
+  v čase.
