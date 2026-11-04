@@ -213,6 +213,7 @@ await zkus('karta', async () => {
   ok('po měsících se přepínač srovnání nekreslí', !html.includes('Předchozí měsíc') && !html.includes('Stejný měsíc loni'))
   ok('SVG není roztažené (preserveAspectRatio="none" by smrsklo písmo)', !html.includes('preserveAspectRatio'))
   ok('graf jde z klávesnice (tabindex) a má přístupný název', /class="ds-graf-plocha" tabindex="0" role="group" aria-label="Graf srovnání tržeb/.test(html))
+  ok('pruh pod grafem (telefon) je už ze serveru, s návodem „Klepněte na sloupec"', /class="ds-graf-odecet ds-graf-odecet-prazdny"[^>]*>Klepněte na sloupec/.test(html))
 
   const bez = vykreslit(grafRoku(prehled([])))
   ok('bez dat ve srovnání: věta nahlas „nemá appka z pokladny žádné tržby"', text(bez).includes('Za 2025 nemá appka z pokladny žádné tržby'))
@@ -288,6 +289,14 @@ await zkus('barvy', () => {
     const zdroj = bezKomentaru(readFileSync(new URL(`../${soubor}`, import.meta.url), 'utf8'))
     ok(`${soubor}: žádná barva napevno (#hex, rgb)`, !/#[0-9a-f]{3,8}\b/i.test(zdroj) && !/rgba?\(/.test(zdroj))
   }
+  // Telefon: plovoucí bublina by zakryla sloupec, na který se kleplo → pruh pod grafem.
+  // Hranici drží kód (UZKY_GRAF) i CSS (@container) — musí být stejná, jinak ukáže obojí nebo nic.
+  const kresba = readFileSync(new URL('../app/[rozsah]/finance/trzby/graf-srovnani.tsx', import.meta.url), 'utf8')
+  const uzky = Number(/const UZKY_GRAF = (\d+)/.exec(kresba)?.[1])
+  const css = new RegExp(`@container graf \\(max-width: ${uzky - 1}\\.98px\\) \\{\\s*\\.ds-graf-odecet \\{\\s*display: grid`)
+  ok(`telefon: pruh pod grafem jen v úzkém grafu, hranice v CSS = UZKY_GRAF (${uzky})`,
+    uzky > 0 && /\.ds-graf-odecet \{ display: none; \}/.test(komponenty) && css.test(komponenty) && /\.ds-graf \{[^}]*container: graf \/ inline-size/.test(komponenty))
+  ok('telefon: plovoucí bublina se v úzkém grafu nekreslí', /\{a && sirka >= UZKY_GRAF \? \(\s*<div className="ds-graf-bublina"/.test(kresba))
 })
 
 // ---------------------------------------------------------------------

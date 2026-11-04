@@ -45,6 +45,38 @@ const NAHORE = 10
 const DOLE = 26
 const VYCHOZI_SIRKA = 720
 const SIRKA_BUBLINY = 232
+/**
+ * Pod touhle šířkou (telefon) by plovoucí bublina zakryla skoro celý graf
+ * i sloupec, na který se kleplo — čísla se pak ukážou v pruhu POD grafem.
+ * Stejná hranice je v CSS (`@container graf`), ať server i prohlížeč kreslí totéž.
+ */
+const UZKY_GRAF = 480
+
+function ObsahBubliny({ a, nazevAktualniho, nazevSrovnani }: { a: SlotKresby; nazevAktualniho: string; nazevSrovnani: string }) {
+  return (
+    <>
+      <div className="ds-graf-bublina-hlava">{a.popis}</div>
+      <div className="ds-graf-bublina-radek">
+        <span className="ds-graf-klic ds-graf-klic-sloupec" />
+        <strong>{a.textAktualni}</strong>
+        <span>{nazevAktualniho}</span>
+      </div>
+      <div className="ds-graf-bublina-radek">
+        <span className="ds-graf-klic ds-graf-klic-cara" />
+        <strong>{a.textSrovnani}</strong>
+        <span>{a.popisSrovnani ?? nazevSrovnani}</span>
+      </div>
+      {a.rozdil ? (
+        <div className="ds-graf-bublina-radek">
+          <span className="ds-graf-klic" />
+          <strong>{a.rozdil}</strong>
+          <span>proti srovnání</span>
+        </div>
+      ) : null}
+      {a.poznamka ? <div className="ds-graf-bublina-pozn">{a.poznamka}</div> : null}
+    </>
+  )
+}
 
 /** Horní hrana sloupce zaoblená (4 px), u základny rovná. */
 function cestaSloupce(x: number, vrch: number, sirka: number, dno: number): string | null {
@@ -258,32 +290,23 @@ export default function GrafSrovnaniKresba({
           )}
         </svg>
 
-        {a ? (
+        {a && sirka >= UZKY_GRAF ? (
           <div className="ds-graf-bublina" style={{ left: `${leva}px`, width: `${SIRKA_BUBLINY}px` }} aria-hidden="true">
-            <div className="ds-graf-bublina-hlava">{a.popis}</div>
-            <div className="ds-graf-bublina-radek">
-              <span className="ds-graf-klic ds-graf-klic-sloupec" />
-              <strong>{a.textAktualni}</strong>
-              <span>{nazevAktualniho}</span>
-            </div>
-            <div className="ds-graf-bublina-radek">
-              <span className="ds-graf-klic ds-graf-klic-cara" />
-              <strong>{a.textSrovnani}</strong>
-              <span>{a.popisSrovnani ?? nazevSrovnani}</span>
-            </div>
-            {a.rozdil ? (
-              <div className="ds-graf-bublina-radek">
-                <span className="ds-graf-klic" />
-                <strong>{a.rozdil}</strong>
-                <span>proti srovnání</span>
-              </div>
-            ) : null}
-            {a.poznamka ? <div className="ds-graf-bublina-pozn">{a.poznamka}</div> : null}
+            <ObsahBubliny a={a} nazevAktualniho={nazevAktualniho} nazevSrovnani={nazevSrovnani} />
           </div>
         ) : null}
       </div>
 
       <p className="ds-graf-osa-x" aria-hidden="true">{osaX}</p>
+
+      {/* Na telefonu (CSS ho jinde schová): čísla vybraného sloupce pod grafem, nic nezakrývají. */}
+      <div className={`ds-graf-odecet${a ? '' : ' ds-graf-odecet-prazdny'}`} aria-hidden="true">
+        {a ? (
+          <ObsahBubliny a={a} nazevAktualniho={nazevAktualniho} nazevSrovnani={nazevSrovnani} />
+        ) : (
+          'Klepněte na sloupec a ukážou se jeho čísla.'
+        )}
+      </div>
       <p id={idNavodu} className="ds-graf-skryte">
         Šipkami vlevo a vpravo projdete jednotlivé sloupce. Všechna čísla jsou i v tabulce srovnání pod grafem.
       </p>
