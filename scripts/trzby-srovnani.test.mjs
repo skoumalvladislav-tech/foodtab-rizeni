@@ -209,7 +209,7 @@ await zkus('karta', async () => {
   ok('věta nahlas: srovnání má data jen za březen – prosinec 2025', text(html).includes('Srovnávací období má v appce tržby jen za březen – prosinec 2025'))
   ok('věta o rozběhnutém listopadu (rozdíl se neukazuje)', text(html).includes('Listopad 2026 ještě běží'))
   ok('tabulka srovnání: 120 000 Kč (31 dní) a +20,0 %', text(html).includes('120 000 Kč (31 dní)') && text(html).includes('+20,0 %'))
-  ok('podnadpis: „2026 proti 2025 · porovnání vůči 1. 1. – 31. 12. 2025"', text(html).includes('2026 proti 2025 · porovnání vůči 1. 1. – 31. 12. 2025'))
+  ok('podnadpis: „2026 · porovnání vůči 1. 1. – 31. 12. 2025"', text(html).includes('2026 · porovnání vůči 1. 1. – 31. 12. 2025'))
   ok('po měsících se přepínač srovnání nekreslí', !html.includes('Předchozí měsíc') && !html.includes('Stejný měsíc loni'))
   ok('SVG není roztažené (preserveAspectRatio="none" by smrsklo písmo)', !html.includes('preserveAspectRatio'))
   ok('graf jde z klávesnice (tabindex) a má přístupný název', /class="ds-graf-plocha" tabindex="0" role="group" aria-label="Graf srovnání tržeb/.test(html))
@@ -248,7 +248,7 @@ await zkus('karta', async () => {
   const dny = vykreslit(sestavitGraf({ cleneni: 'den', druh: 'rok', od: '2026-10-01', dnes: '2026-11-04', aktualni: prehled([radek('2026-10-02', A, 9_000)]), srovnavaci: prehled([radek('2025-10-02', A, 8_000)]), branchId: null }))
   ok('po dnech přepínač: Předchozí měsíc / Stejný měsíc loni, vybraný má aria-current',
     /href="\/firma\/finance\/trzby\?srovnani=obdobi"[^>]*>Předchozí měsíc</.test(dny) && /href="\/firma\/finance\/trzby\?srovnani=rok"[^>]*aria-current="true"[^>]*>Stejný měsíc loni</.test(dny))
-  ok('po dnech: podnadpis „Říjen 2026 proti říjen 2025"', text(dny).includes('Říjen 2026 proti říjen 2025 · porovnání vůči 1. 10. – 31. 10. 2025'))
+  ok('po dnech: podnadpis „Říjen 2026 · porovnání vůči 1. 10. – 31. 10. 2025" (bez „proti říjen", to je špatný pád)', text(dny).includes('Říjen 2026 · porovnání vůči 1. 10. – 31. 10. 2025') && !text(dny).includes('proti říjen'))
 })
 
 // ---------------------------------------------------------------------

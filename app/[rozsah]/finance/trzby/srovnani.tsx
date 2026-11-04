@@ -148,7 +148,7 @@ export default function KartaSrovnani({
         <div style={{ minWidth: 0 }}>
           <PanelHlava ikona="trend" nadpis="Srovnání tržeb" />
           <p className="ds-graf-podnadpis">
-            {akt} proti {srov} · porovnání vůči {popisRozsahu(graf.rozsahSrovnani)}
+            {akt} · porovnání vůči {popisRozsahu(graf.rozsahSrovnani)}
           </p>
         </div>
         {graf.cleneni === 'den' ? (
