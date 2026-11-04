@@ -27,7 +27,9 @@
  *     „padala", viz lib/finance-obdobi.ts);
  *   * za celou firmu se hlídá i sada provozoven: když v témž slotu mají
  *     data jiné provozovny než ve srovnání (Bernard Bar připojený až od
- *     28. 2.), je to `jinePobocky` — jinak by graf ukázal falešný růst.
+ *     28. 2.), je to `jinePobocky` — jinak by graf ukázal falešný růst;
+ *   * a počet prodejních dní: měsíc, kdy byla pokladna napojená až v půlce
+ *     (12 dní proti 31), by dal stejně falešný rozdíl — to je `maloDni`.
  *
  * Testy: scripts/trzby-srovnani.test.mjs.
  */
@@ -113,7 +115,18 @@ export type HodnotaSlotu = {
   dnuNejmene: number
   /** Provozovny, které v tom slotu mají prodeje (seřazené). */
   pobocky: string[]
+  /** Dní s prodeji po provozovnách (id → dní). */
+  dnyPobocek: Readonly<Record<string, number>>
 }
+
+/**
+ * Kolik prodejních dní musí mít kratší strana srovnání proti delší (u každé
+ * provozovny), aby rozdíl v procentech ještě dával smysl. Pod tím je to
+ * skoro jistě pokladna napojená v půlce měsíce (nebo dlouho zavřeno)
+ * a rozdíl by lhal. Týden dovolené (24 z 31) ještě projde.
+ * ROZHODNOUT: hranice 2/3 — viz docs/hlaseni/otazky.md, otázka 86.
+ */
+export const NEJMENE_DNI_PROTI = 2 / 3
 
 export type StavSlotu = 'uzavrene' | 'bezi' | 'budouci'
 
@@ -139,8 +152,15 @@ export type SlotGrafu = {
    */
   jinePobocky: boolean
   /**
+   * Uzavřený slot, stejné provozovny, ale jedna z nich má na jedné straně
+   * výrazně méně prodejních dní (pod `NEJMENE_DNI_PROTI` druhé strany) —
+   * ta nejhorší. Jinak `null`.
+   */
+  maloDni: { branchId: string; dnu: number; dnuSrovnani: number } | null
+  /**
    * Rozdíl proti srovnání v procentech, jen když se dá říct poctivě:
-   * uzavřený slot, obě období s daty, stejné provozovny, srovnání > 0.
+   * uzavřený slot, obě období s daty, stejné provozovny se srovnatelným
+   * počtem prodejních dní, srovnání > 0.
    */
   rozdilProcent: number | null
 }
@@ -172,6 +192,8 @@ export type GrafSrovnani = {
   pokryti: Pokryti
   /** Popisy slotů s `jinePobocky` (pro větu pod grafem). */
   slotySJinymiPobockami: string[]
+  /** Popisy slotů s `maloDni` (pro větu pod grafem). */
+  slotySMaloDny: string[]
   /** Rozběhnutý slot s daty (sloupec je zatím jen část) — nebo `null`. */
   bezi: SlotGrafu | null
   /** Do kdy má rozběhnutý slot data (dnešní provozní den). */
@@ -188,7 +210,29 @@ function hodnota(p: PrehledTrzeb, obdobi: string, branchId: string | null): Hodn
   }
   if (dnyPobocek.size === 0) return null
   const dny = [...dnyPobocek.values()]
-  return { haleru, dnu: Math.max(...dny), dnuNejmene: Math.min(...dny), pobocky: [...dnyPobocek.keys()].sort() }
+  return {
+    haleru,
+    dnu: Math.max(...dny),
+    dnuNejmene: Math.min(...dny),
+    pobocky: [...dnyPobocek.keys()].sort(),
+    dnyPobocek: Object.fromEntries(dnyPobocek),
+  }
+}
+
+/** Provozovna, u které se počty prodejních dní liší nejvíc — pod hranicí, jinak `null`. */
+function nejmeneDni(a: HodnotaSlotu, s: HodnotaSlotu): SlotGrafu['maloDni'] {
+  let nejhorsi: SlotGrafu['maloDni'] = null
+  let nejhorsiPomer = NEJMENE_DNI_PROTI
+  for (const b of a.pobocky) {
+    const da = a.dnyPobocek[b] ?? 0
+    const ds = s.dnyPobocek[b] ?? 0
+    const pomer = Math.min(da, ds) / Math.max(da, ds)
+    if (pomer < nejhorsiPomer) {
+      nejhorsiPomer = pomer
+      nejhorsi = { branchId: b, dnu: da, dnuSrovnani: ds }
+    }
+  }
+  return nejhorsi
 }
 
 function stejne(a: readonly string[], b: readonly string[]): boolean {
@@ -227,6 +271,7 @@ export function sestavitGraf(vstup: {
 }): GrafSrovnani {
   const { cleneni, od, dnes, aktualni, srovnavaci, branchId } = vstup
   // U roku je „předchozí období" = „loni" — jeden druh, ať odkazy nemají dvě adresy pro totéž.
+  // ROZHODNOUT: po měsících bez přepínače, jen proti loňsku — otázka 85 v docs/hlaseni/otazky.md.
   const druh: DruhSrovnani = cleneni === 'mesic' ? 'obdobi' : vstup.druh
   const cele = celeObdobi(cleneni, od)
   const rozsahSrovnani = srovnavaciObdobi(cleneni, od, druh)
@@ -235,13 +280,18 @@ export function sestavitGraf(vstup: {
   const bezici = cleneni === 'mesic' ? `${dnes.slice(0, 7)}-01` : dnes
 
   const sloty: SlotGrafu[] = slotyAkt.map((o, i) => {
+    // Párování podle pořadí: 1. s 1., březen s březnem (ne den v týdnu s týmž dnem v týdnu).
+    // ROZHODNOUT: po dnech podle čísla dne — otázka 84 v docs/hlaseni/otazky.md.
     const os = slotySrov[i] ?? null
     const a = hodnota(aktualni, o, branchId)
     const s = os !== null && srovnavaci !== null ? hodnota(srovnavaci, os, branchId) : null
     const stav: StavSlotu = o < bezici ? 'uzavrene' : o === bezici ? 'bezi' : 'budouci'
     const jinePobocky = a !== null && s !== null && !stejne(a.pobocky, s.pobocky)
+    const maloDni = stav === 'uzavrene' && a !== null && s !== null && !jinePobocky ? nejmeneDni(a, s) : null
     const rozdilProcent =
-      stav === 'uzavrene' && a !== null && s !== null && !jinePobocky && s.haleru > 0 ? ((a.haleru - s.haleru) / s.haleru) * 100 : null
+      stav === 'uzavrene' && a !== null && s !== null && !jinePobocky && maloDni === null && s.haleru > 0
+        ? ((a.haleru - s.haleru) / s.haleru) * 100
+        : null
     const cislo = cleneni === 'mesic' ? Number(o.slice(5, 7)) : Number(o.slice(8, 10))
     return {
       obdobi: o,
@@ -254,6 +304,7 @@ export function sestavitGraf(vstup: {
       srovnani: s,
       stav,
       jinePobocky,
+      maloDni,
       rozdilProcent,
     }
   })
@@ -283,6 +334,7 @@ export function sestavitGraf(vstup: {
     rozsahSrovnani,
     pokryti,
     slotySJinymiPobockami: sloty.filter((s) => s.jinePobocky).map((s) => s.popis),
+    slotySMaloDny: sloty.filter((s) => s.maloDni !== null).map((s) => s.popis),
     bezi: sloty.find((s) => s.stav === 'bezi' && s.aktualni !== null) ?? null,
     dnes,
   }

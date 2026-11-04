@@ -63,6 +63,12 @@ export function slotyKresby(graf: GrafSrovnani, nazvyPobocek: ReadonlyMap<string
     if (s.jinePobocky && s.aktualni !== null && s.srovnani !== null) {
       poznamky.push(`nesrovnává stejné provozovny: ${nazvy(s.aktualni, nazvyPobocek)} proti ${nazvy(s.srovnani, nazvyPobocek)}`)
     }
+    if (s.maloDni !== null) {
+      const m = s.maloDni
+      poznamky.push(
+        `jiný počet prodejních dní: ${nazvyPobocek.get(m.branchId) ?? 'provozovna'} ${pocet(m.dnu, 'den', 'dny', 'dní')} proti ${m.dnuSrovnani} ve srovnání, rozdíl se neukazuje`,
+      )
+    }
     return {
       osa: s.osa,
       osaSlovem: s.osaSlovem,
@@ -113,6 +119,16 @@ export function vetyOSrovnani(graf: GrafSrovnani): { varovani: string[]; poznamk
         : `U ${jine.length} ${graf.cleneni === 'den' ? 'dnů' : 'měsíců'} (${jine.slice(0, 3).join(', ')} a další) zahrnuje srovnání`
     varovani.push(
       `${kde} jiné provozovny než zobrazené období — některá měla zavřeno nebo ještě nebyla napojená. Rozdíl v procentech proto appka neukazuje; které to jsou, ukáže bublina nad sloupcem i tabulka.`,
+    )
+  }
+  const malo = graf.slotySMaloDny
+  if (malo.length > 0) {
+    const kde =
+      malo.length <= 3
+        ? `${malo.join(', ')}: jedna strana srovnání má v ${malo.length === 1 ? 'něm' : 'nich'}`
+        : `U ${malo.length} ${graf.cleneni === 'den' ? 'dnů' : 'měsíců'} (${malo.slice(0, 3).join(', ')} a další) má jedna strana srovnání`
+    varovani.push(
+      `${kde} výrazně méně prodejních dní než druhá — pokladna byla nejspíš napojená až v průběhu měsíce, nebo bylo dlouho zavřeno. Rozdíl v procentech proto appka neukazuje; počty dní ukáže bublina nad sloupcem i tabulka.`,
     )
   }
   if (graf.bezi !== null) {

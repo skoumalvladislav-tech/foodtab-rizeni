@@ -170,6 +170,36 @@ await zkus('provozovny', () => {
 })
 
 // ---------------------------------------------------------------------
+console.log('\n== Počet prodejních dní (pokladna napojená v půlce měsíce) ==')
+// Srovnávací rok: pokladna napojená až 20. 3. 2025 → březen 2025 má jen 12 dní.
+// Sada provozoven je stejná, takže `jinePobocky` to nechytí — rozdíl by ukázal falešný růst.
+const DNY_GRAF = sestavitGraf({
+  cleneni: 'mesic', druh: 'obdobi', od: '2026-01-01', dnes: '2026-11-04', branchId: null,
+  aktualni: prehled([radek('2026-03-01', A, 300_000, 31), radek('2026-04-01', A, 290_000, 30), radek('2026-05-01', A, 240_000, 27)]),
+  srovnavaci: prehled([radek('2025-03-01', A, 120_000, 12), radek('2025-04-01', A, 280_000, 30), radek('2025-05-01', A, 250_000, 31)]),
+})
+await zkus('dny', () => {
+  const b = DNY_GRAF.sloty[2]
+  ok(`březen 31 dní proti 12 → bez rozdílu, „maloDni" (${JSON.stringify(b.maloDni)}/${b.rozdilProcent})`,
+    b.rozdilProcent === null && b.maloDni?.branchId === A && b.maloDni.dnu === 31 && b.maloDni.dnuSrovnani === 12)
+  ok('… věta pod grafem ho vyjmenuje', stejne(DNY_GRAF.slotySMaloDny, ['Březen 2026']))
+  ok(`duben 30 proti 30: rozdíl ukáže (${DNY_GRAF.sloty[3].rozdilProcent})`,
+    DNY_GRAF.sloty[3].maloDni === null && Math.abs(DNY_GRAF.sloty[3].rozdilProcent - (10 / 280) * 100) < 1e-9)
+  ok(`květen 27 proti 31 (týden zavřeno) je pořád srovnatelný, rozdíl ukáže (${DNY_GRAF.sloty[4].rozdilProcent})`,
+    DNY_GRAF.sloty[4].maloDni === null && DNY_GRAF.sloty[4].rozdilProcent !== null)
+  // Za firmu: Perla celý únor, Bar ve srovnání jen 1 den (napojený 28. 2.) → součet firmy by lhal.
+  const dve = sestavitGraf({
+    cleneni: 'mesic', druh: 'obdobi', od: '2027-01-01', dnes: '2027-11-04', branchId: null,
+    aktualni: prehled([radek('2027-02-01', A, 300_000, 28), radek('2027-02-01', B, 150_000, 28)]),
+    srovnavaci: prehled([radek('2026-02-01', A, 280_000, 28), radek('2026-02-01', B, 6_000, 1)]),
+  })
+  ok(`za firmu: Bar ve srovnání jen 1 den z 28 → bez rozdílu, viník Bar (${JSON.stringify(dve.sloty[1].maloDni)})`,
+    dve.sloty[1].rozdilProcent === null && dve.sloty[1].maloDni?.branchId === B && dve.sloty[1].maloDni.dnuSrovnani === 1)
+  const g = grafRoku(prehled([radek('2025-11-01', A, 95_000, 30)]))
+  ok('rozběhnutý listopad (3 dny proti 30) nemá „maloDni" — stačí poznámka „ještě běží"', g.sloty[10].stav === 'bezi' && g.sloty[10].maloDni === null)
+})
+
+// ---------------------------------------------------------------------
 console.log('\n== Osa ==')
 await zkus('osa', () => {
   ok('812 000 Kč → 0, 200 tis., … 1 mil. (v haléřích)', stejne(dilkyOsy(81_200_000), [0, 20_000_000, 40_000_000, 60_000_000, 80_000_000, 100_000_000]))
@@ -230,6 +260,9 @@ await zkus('karta', async () => {
     const t = text(vykreslit(sestavitGraf({ cleneni: 'mesic', druh: 'obdobi', od: '2026-01-01', dnes: '2026-11-04', aktualni: prehled([radek('2026-03-01', A, 1_000, 31), radek('2026-03-01', B, 1_000, 4)]), srovnavaci: prehled([]), branchId: null })))
     return t.includes('2 000 Kč (4–31 dní podle provozovny)') && !t.includes('35 dní')
   })())
+  const tMalo = text(vykreslit(DNY_GRAF))
+  ok('jiný počet prodejních dní: věta nahlas a poznámka s počty v tabulce',
+    tMalo.includes('Březen 2026: jedna strana srovnání má v něm výrazně méně prodejních dní') && tMalo.includes('jiný počet prodejních dní: Perla test 31 dní proti 12 ve srovnání'))
   ok('nestejné provozovny: věta + jména v tabulce',text(jine).includes('Leden 2026: srovnání v něm zahrnuje jiné provozovny') && text(jine).includes('nesrovnává stejné provozovny: Perla test, Bar test proti Perla test'))
 
   // Bar má každé pondělí zavřeno → po dnech 4 dny s jinou sadou provozoven; výčet se zkrátí.
