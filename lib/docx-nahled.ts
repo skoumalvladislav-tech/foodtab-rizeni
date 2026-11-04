@@ -440,12 +440,14 @@ export function odkodovatDo(s: string, nejvic: number): { text: string; zbylo: b
 /**
  * Prvních `n` jednotek UTF-16 bez useknuté poloviny znaku na konci.
  * Emoji je v řetězci dvojice; samotná první půlka by se na stránce
- * ukázala jako „�“.
+ * ukázala jako „�“. Půlka zůstane i v kratším textu, když dekódování
+ * skončilo mezi půlkami (strop na znaky ze souboru, hranice kusu) —
+ * proto se hlídá konec vždycky, ne jen při zkrácení.
  */
 function zacatek(s: string, n: number): string {
-  if (s.length <= n) return s
-  const c = s.charCodeAt(n - 1)
-  return s.slice(0, c >= 0xd800 && c <= 0xdbff ? n - 1 : n)
+  const t = s.length > n ? s.slice(0, n) : s
+  const c = t.charCodeAt(t.length - 1)
+  return c >= 0xd800 && c <= 0xdbff ? t.slice(0, -1) : t
 }
 
 /**

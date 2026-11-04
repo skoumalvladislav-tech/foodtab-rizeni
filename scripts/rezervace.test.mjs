@@ -1267,6 +1267,17 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     JSON.stringify(odk('&amp;'.repeat(10), 10)) === JSON.stringify({ text: '&'.repeat(10), zbylo: false })
       && JSON.stringify(odk('&amp;'.repeat(11), 10)) === JSON.stringify({ text: '&'.repeat(10), zbylo: true })
       && JSON.stringify(odk(`&#${'0'.repeat(70_000)}65;`, 10)) === JSON.stringify({ text: '', zbylo: true }))
+  // Dekódování skončí mezi půlkami emoji, i když textu je pod strop:
+  // strop na znaky ze souboru (100 × DELKA_ENTITY) padne za první půlku
+  // (83 entit po 12 znacích dá jen 83 znaků), nebo hranice kusu (65 536)
+  // padne na ni přesně tehdy, když text právě dosáhl stropu.
+  const DVANACT = '&#x000000E9;'
+  const naStropuZeSouboru = odk(`${DVANACT.repeat(83)}aaa😀z`, 100)
+  ok('odkodovatDo: strop na znaky ze souboru nerozpůlí emoji (text kratší než strop, bez půlky na konci)',
+    DVANACT.length === 12 && JSON.stringify(naStropuZeSouboru) === JSON.stringify({ text: `${'é'.repeat(83)}aaa`, zbylo: true }))
+  const naHraniciKusu = odk(`${'a'.repeat(65_535)}😀b`, 65_536)
+  ok('odkodovatDo: hranice kusu nerozpůlí emoji, ani když text skončí přesně na stropu',
+    naHraniciKusu.text === 'a'.repeat(65_535) && naHraniciKusu.zbylo === true)
   // Entita delší než kus, jejíž konec je až za stropem: nic z ní — ne
   // statisíce znaků „&#x000…“ jako text (kus tu nekončí na stropu).
   const zaStropem = `&#x${'0'.repeat(MAX_ZNAKU * DELKA_ENTITY + 100_000)}41;`
