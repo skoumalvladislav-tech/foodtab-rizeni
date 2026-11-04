@@ -4,7 +4,7 @@
 
 - **Šéfík:** „Ve financích potřebuju u tržeb udělat podobný graf srovnání
   tržeb“ (se snímkem karty *Měsíční tržby* z Dotykačky).
-- **Hotovo v PR do `main`, nesloučené.** Finance → Tržby má místo
+- **Hotovo v PR #175 do `main`, nesloučené.** Finance → Tržby má místo
   dosavadní čáry kartu **Srovnání tržeb**:
   - **sloupce** = zobrazené období (po měsících: měsíce roku; po dnech:
     dny měsíce),
@@ -28,7 +28,7 @@
   žádné tržby, takže čára srovnání chybí. Neznamená to nulové tržby —
   pokladna tehdy nejspíš ještě nebyla napojená.“* Po dnech (říjen proti
   září) srovnání data má.
-- **Bez migrace**, `db push` není potřeba. Stačí „sluč N“.
+- **Bez migrace**, `db push` není potřeba. Stačí „sluč 175“.
 
 ## Co je hotové
 
@@ -129,7 +129,7 @@ začíná březnem s 12 dny.
 
 ## Co čeká na Šéfíka
 
-1. Projít PR a snímky. Když sedí, napsat **„sluč N“** (číslo PR).
+1. Projít PR #175 a snímky. Když sedí, napsat **„sluč 175“**.
    Migrace není, `db push` netřeba.
 2. Odpovědět na otázky 84–86 v `otazky.md`. Graf funguje i bez
    odpovědi, zvolil jsem opatrnější variantu.
@@ -183,7 +183,7 @@ Všechny s důvodem a co se změní v `docs/hlaseni/otazky.md`.
 
 ## Kde jsem skončil a co zbývá
 
-- Práce je hotová a v PR. Zbývá jen sloučení na pokyn.
+- Práce je hotová a v PR #175. Zbývá jen sloučení na pokyn.
 - Po sloučení stojí za to otevřít Tržby po dnech za říjen (srovnání se
   zářím, data tam mají obě provozovny) a pár dní porovnat s tabulkou
   pod grafem.
