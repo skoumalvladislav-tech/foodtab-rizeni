@@ -3227,3 +3227,95 @@ span.ck-box { cursor: default; }
 .ds-pot-karta-pobocka { margin: 0; font-size: 13px; color: var(--muted); }
 .ds-pot-karta-stav { font-size: 13px; }
 .ds-pot-karta-akce { margin-top: 2px; }
+
+/* =====================================================================
+   GRAF SROVNÁNÍ TRŽEB (Finance → Tržby, 4. 11. 2026)
+   ---------------------------------------------------------------------
+   Sloupce = zobrazené období (--graf-obdobi), čára = srovnávací období
+   (--graf-srovnani). Pravidla podle skillu dataviz: tenké sloupce
+   (≤ 24 px, zaoblené nahoře 4 px, rovné u základny), čára 2 px s lemem
+   barvy karty (překříží-li sloupec, zůstane čitelná), body ≥ 8 px,
+   mřížka vlasová a plná (žádné čárkování), písmo os v --muted — text
+   NIKDY v barvě řady. Kreslí app/[rozsah]/finance/trzby/graf-srovnani.tsx.
+   ===================================================================== */
+
+.ds-graf-karta { display: grid; gap: 12px; }
+.ds-graf-hlava { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+.ds-graf-hlava .ds-plocha-hlava { margin-bottom: 4px; }
+.ds-graf-podnadpis { margin: 0; font-size: 13px; color: var(--muted); }
+.ds-graf-prepinac { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.ds-graf { display: grid; gap: 6px; min-width: 0; }
+.ds-graf-legenda { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink); }
+.ds-graf-legenda li { display: inline-flex; align-items: center; gap: 8px; }
+.ds-graf-legenda-bez { margin-left: 2px; font-weight: 600; color: var(--muted); }
+.ds-graf-vzorek { display: inline-block; flex: none; }
+.ds-graf-vzorek-sloupec { width: 10px; height: 14px; border-radius: 3px 3px 0 0; background: var(--graf-obdobi); }
+.ds-graf-vzorek-bezi { opacity: .45; }
+/* Čára s bodem uprostřed — legenda zrcadlí značku (čára pro čáru). */
+.ds-graf-vzorek-cara {
+  width: 20px; height: 8px;
+  background:
+    radial-gradient(circle at center, var(--graf-srovnani) 0 3.5px, transparent 4px),
+    linear-gradient(var(--graf-srovnani), var(--graf-srovnani)) center / 100% 2px no-repeat;
+}
+
+.ds-graf-plocha { position: relative; min-width: 0; border-radius: 8px; touch-action: pan-y; }
+.ds-graf-plocha:focus { outline: none; }
+.ds-graf-plocha:focus-visible { outline: 2px solid var(--mosaz); outline-offset: 3px; }
+.ds-graf-plocha svg { display: block; overflow: visible; }
+.ds-graf-jednotka { position: absolute; top: -4px; left: 0; font-size: 11px; color: var(--muted); }
+
+.ds-graf-mrizka { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
+.ds-graf-zakladna { stroke: var(--line-2); stroke-width: 1; shape-rendering: crispEdges; }
+.ds-graf-popisek { font-size: 12px; fill: var(--muted); font-family: inherit; }
+.ds-graf-popisek-y { font-variant-numeric: tabular-nums; }
+.ds-graf-pas { fill: color-mix(in srgb, var(--ink) 6%, transparent); }
+
+.ds-graf-sloupec { fill: var(--graf-obdobi); transition: opacity .12s ease; }
+.ds-graf-sloupec-bezi { opacity: .45; }
+.ds-graf-plocha:hover .ds-graf-sloupec:not(.ds-graf-aktivni),
+.ds-graf-plocha:focus-visible .ds-graf-sloupec:not(.ds-graf-aktivni) { opacity: .7; }
+.ds-graf-plocha:hover .ds-graf-sloupec-bezi:not(.ds-graf-aktivni),
+.ds-graf-plocha:focus-visible .ds-graf-sloupec-bezi:not(.ds-graf-aktivni) { opacity: .35; }
+
+.ds-graf-cara-lem { fill: none; stroke: var(--card); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
+.ds-graf-cara { fill: none; stroke: var(--graf-srovnani); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ds-graf-bod { fill: var(--graf-srovnani); stroke: var(--card); stroke-width: 2; }
+
+.ds-graf-bublina {
+  position: absolute; top: 4px; z-index: 2; pointer-events: none;
+  max-width: calc(100% - 4px); box-sizing: border-box;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line-2); border-radius: var(--radius-md);
+  box-shadow: var(--shadow); padding: 10px 12px; font-size: 13px;
+  display: grid; gap: 4px;
+}
+.ds-graf-bublina-hlava { font-size: 12px; color: var(--muted); font-weight: 600; }
+.ds-graf-bublina-radek { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ds-graf-bublina-radek strong { font-weight: 700; white-space: nowrap; }
+.ds-graf-bublina-radek span:last-child { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.ds-graf-bublina-pozn { font-size: 12px; color: var(--muted); }
+/* Klíč řady v bublině je krátká čára, ne čtvereček (dataviz). */
+.ds-graf-klic { flex: none; width: 12px; height: 3px; border-radius: 2px; align-self: center; }
+.ds-graf-klic-sloupec { background: var(--graf-obdobi); }
+.ds-graf-klic-cara { background: var(--graf-srovnani); }
+
+.ds-graf-osa-x { margin: 0; text-align: center; font-size: 12px; color: var(--muted); }
+.ds-graf-poznamka { margin: 0; font-size: 13px; color: var(--muted); }
+.ds-graf-cislo { font-family: ui-monospace, monospace; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ds-graf-tabulka-den { font-family: inherit; color: var(--muted); font-size: 12px; }
+.ds-graf-tabulka { min-width: 0; }
+.ds-graf-tabulka > summary { cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--ink); width: max-content; max-width: 100%; }
+.ds-graf-tabulka[open] > summary { margin-bottom: 8px; }
+
+.ds-graf-skryte {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+@media (forced-colors: active) {
+  .ds-graf-sloupec, .ds-graf-vzorek-sloupec, .ds-graf-klic-sloupec { fill: CanvasText; background: CanvasText; }
+  .ds-graf-cara, .ds-graf-klic-cara { stroke: Highlight; background: Highlight; }
+  .ds-graf-bod { fill: Highlight; }
+}

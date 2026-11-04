@@ -18,10 +18,12 @@ import {
 } from '@/lib/pokladna-trzby'
 import type { DruhPlatby } from '@/lib/pos-provider-contract'
 import { formatHaleru } from '@/lib/jine-platby-castky'
+import { sestavitGraf, type DruhSrovnani } from '@/lib/trzby-srovnani'
 import DataTable, { type SloupecTabulky } from '@/components/ui/DataTable'
 import LineChart from '@/components/ui/LineChart'
 import { PanelHlava } from '../../dnes/prvky'
 import FinanceKpiKarta from '../kpi-karta'
+import KartaSrovnani from './srovnani'
 
 /**
  * Obsah stránky Finance → Tržby — čistě kreslicí: data a odkazy dostane
@@ -132,6 +134,7 @@ export default function Obsah({
   ostatniTrzby,
   ostatniTrzbyChyba = null,
   zakladJinychPlateb,
+  srovnani = null,
 }: {
   prehled: PrehledTrzeb
   cleneni: Cleneni
@@ -166,6 +169,20 @@ export default function Obsah({
   ostatniTrzbyChyba?: string | null
   /** Adresa agendy, např. `/firma/finance/trzby/jine-platby`. */
   zakladJinychPlateb: string
+  /**
+   * Graf srovnání (po dnech a po měsících). `prehled` je srovnávací
+   * období načtené TÝMŽ dotazem a přihlášením jako `prehled` výš
+   * (`nactiPrehledTrzeb`), na pobočce zúžené `jenPobocka`; `null` =
+   * načtení selhalo (graf to řekne, sloupce kreslí dál). Bez `srovnani`
+   * (nebo po rocích) zůstává původní čárový graf.
+   */
+  srovnani?: {
+    druh: DruhSrovnani
+    prehled: PrehledTrzeb | null
+    /** Dnešní PROVOZNÍ den (rozběhnutý den/měsíc se kreslí jinak). */
+    dnes: string
+    odkazNaDruh: (druh: DruhSrovnani) => string
+  } | null
 }) {
   const vsechnaObdobi = obdobiVRozsahu(od, doData, cleneni)
   const radkyVse = radkyPoObdobich(prehled, vsechnaObdobi, { branchId: vybranaPobocka, bankaVidi })
@@ -182,6 +199,12 @@ export default function Obsah({
   const prvniSProdeji = radky.findIndex((r) => r.dnu > 0)
   const posledniSProdeji = radky.findLastIndex((r) => r.dnu > 0)
   const grafRadky = prvniSProdeji < 0 ? [] : radky.slice(prvniSProdeji, posledniSProdeji + 1)
+  // Srovnání: tytéž řádky přehledu (`prehled`) jako tabulka níž, jen
+  // rozložené po slotech celého období a vedle srovnávacího období.
+  const graf =
+    srovnani !== null && cleneni !== 'rok'
+      ? sestavitGraf({ cleneni, druh: srovnani.druh, od, dnes: srovnani.dnes, aktualni: prehled, srovnavaci: srovnani.prehled, branchId: vybranaPobocka })
+      : null
 
   // Neúplná data se nesčítají vůbec — useknutý součet by vypadal jako celý.
   const ostatni = ostatniTrzbyChyba || ostatniTrzby === null ? null : souhrnOstatnichTrzeb(ostatniTrzby)
@@ -298,7 +321,9 @@ export default function Obsah({
         </p>
       ) : null}
 
-      {grafRadky.length >= 2 ? (
+      {graf !== null && srovnani !== null ? (
+        <KartaSrovnani graf={graf} nazvyPobocek={nazvyPobocek} odkazNaDruh={srovnani.odkazNaDruh} />
+      ) : grafRadky.length >= 2 ? (
         <div style={{ ...karta, minWidth: 0 }}>
           <h2 style={{ margin: '0 0 12px', fontSize: '15px' }}>Tržby z pokladen — {NAZVY_CLENENI[cleneni].toLowerCase()}</h2>
           <LineChart
