@@ -41,7 +41,8 @@ import {
   DELKA_ENTITY,
   DokumentNecitelny,
   MAX_BLOKU,
-  MAX_SLOUPCU,
+  MAX_BUNEK,
+  MAX_MRIZKY,
   MAX_STYLU_BAJTU,
   MAX_USEKU,
   MAX_VAZEB_BAJTU,
@@ -875,7 +876,7 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('svisle sloučené (w:vMerge): „Den 1“ přes 3 řádky, pokračování se nekreslí',
     st?.radky[3][0].vyska === 3 && st.radky[4][0].sloucena && st.radky[5][0].sloucena && !st.radky[3][0].sloucena
       && st.radky[3][0].bloky.map(text).join('') === 'Den 1')
-  ok('šířka z cizího souboru v mezích: 99999 → 63, „abc“ → 1', st?.radky[6][0].sirka === 63 && st.radky[7][0].sirka === 1)
+  ok('šířka z cizího souboru v mezích: 99999 → 255 (strop mřížky), „abc“ → 1', st?.radky[6][0].sirka === MAX_MRIZKY && MAX_MRIZKY === 255 && st.radky[7][0].sirka === 1)
   const jinaSirka = precist(`<w:tbl><w:tr>${tc('Široká', '<w:gridSpan w:val="2"/>')}</w:tr><w:tr>${tc('Úzká', '<w:vMerge/>')}${tc('vedle')}</w:tr></w:tbl>`)
   const js = jinaSirka.bloky[0]?.radky
   ok('pokračování (w:vMerge) pod buňkou jiné šířky se nesloučí — tabulka by se rozsypala',
@@ -901,44 +902,58 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const neuzavrena = precist(`<w:tbl><w:tr>${tc('Horní', '<w:vMerge w:val="restart"/>')}</w:tr><w:tr>${tc('', '<w:vMerge/>')}`)
   ok('neuzavřená tabulka: svislé sloučení platí', neuzavrena.bloky[0]?.radky[0][0].vyska === 2 && neuzavrena.bloky[0].radky[1][0].sloucena)
 
-  // Sloupce v řádku: Word jich má nanejvýš 63. Tisíce buněk po 63
-  // sloupcích (2 kB soubor) zamrazily prohlížeč na minuty.
+  // Řádek tabulky: nanejvýš 63 buněk (víc Word nedovolí) a 255 sloupců
+  // mřížky. Tisíce buněk po 63 sloupcích (2 kB soubor) zamrazily prohlížeč
+  // na minuty.
   const siroky = (n, span) => `<w:tbl><w:tr>${`<w:tc><w:tcPr><w:gridSpan w:val="${span}"/></w:tcPr><w:p/></w:tc>`.repeat(n)}</w:tr></w:tbl><w:p>${wt('za tabulkou')}</w:p>`
   const sirka = (radek) => radek?.reduce((s, c) => s + c.sirka, 0)
   const priliSiroka = precist(siroky(500, 63))
-  ok(`500 buněk po 63 sloupcích: řádek nejvýš ${MAX_SLOUPCU} sloupců, oříznutá — ne zkrácený dokument, text za tabulkou zůstane`,
-    priliSiroka.oriznutaTabulka && !priliSiroka.zkraceno && sirka(priliSiroka.bloky[0]?.radky[0]) === MAX_SLOUPCU && priliSiroka.bloky[0].radky[0].length === 1
+  const ps = priliSiroka.bloky[0]?.radky[0]
+  ok(`500 buněk po 63 sloupcích: řádek nejvýš ${MAX_MRIZKY} sloupců mřížky (4 × 63 + zbytek), oříznutá — ne zkrácený dokument, text za tabulkou zůstane`,
+    priliSiroka.oriznutaTabulka && !priliSiroka.zkraceno && sirka(ps) === MAX_MRIZKY && ps.length === 5 && ps[4].sirka === MAX_MRIZKY - 4 * 63
       && text(priliSiroka.bloky[1]) === 'za tabulkou')
   const plna = precist(siroky(63, 1))
   ok('63 obyčejných buněk: celý řádek, nic zkráceného, text za tabulkou zůstane',
     !plna.zkraceno && !plna.oriznutaTabulka && plna.bloky[0]?.radky[0].length === 63 && text(plna.bloky[1]) === 'za tabulkou')
-  const presah = precist(`<w:tbl><w:tr>${'<w:tc><w:p/></w:tc>'.repeat(60)}${tc('poslední', '<w:gridSpan w:val="10"/>')}</w:tr></w:tbl>`)
+  const pres63 = precist(siroky(64, 1))
+  ok(`64 obyčejných buněk: nejvýš ${MAX_BUNEK} buněk, oříznutá — ne zkrácený dokument, text za tabulkou zůstane`,
+    pres63.oriznutaTabulka && !pres63.zkraceno && pres63.bloky[0]?.radky[0].length === MAX_BUNEK && text(pres63.bloky[1]) === 'za tabulkou')
+  const siroka10 = precist(`<w:tbl><w:tr>${'<w:tc><w:p/></w:tc>'.repeat(60)}${tc('poslední', '<w:gridSpan w:val="10"/>')}</w:tr></w:tbl>`)
+  const s10 = siroka10.bloky[0]?.radky[0]
+  ok('buňka přes 10 sloupců za 60 dalšími zůstane přes 10 (mřížka 70), nic se neuřízne',
+    !siroka10.zkraceno && !siroka10.oriznutaTabulka && sirka(s10) === 70 && s10[60].sirka === 10 && s10[60].bloky.map(text).join('') === 'poslední')
+  const presah = precist(`<w:tbl><w:tr>${tc('x', '<w:gridSpan w:val="5"/>').repeat(50)}${tc('poslední', '<w:gridSpan w:val="10"/>')}</w:tr></w:tbl>`)
   const pr = presah.bloky[0]?.radky[0]
-  ok('poslední buňka přes okraj se zúží na zbytek (60 + 3), text zůstane, nic se neuřízne',
-    !presah.zkraceno && !presah.oriznutaTabulka && sirka(pr) === MAX_SLOUPCU && pr[60].sirka === 3 && pr[60].bloky.map(text).join('') === 'poslední')
-  const odsazenaSiroka = precist(`<w:tbl><w:tr><w:trPr><w:gridBefore w:val="100"/></w:trPr>${tc('za odsazením')}</w:tr></w:tbl><w:p>${wt('za tabulkou')}</w:p>`)
-  ok('odsazení přes celý řádek: buňka za ním se uřízne, oříznutá, text za tabulkou zůstane',
-    odsazenaSiroka.oriznutaTabulka && !odsazenaSiroka.zkraceno && sirka(odsazenaSiroka.bloky[0]?.radky[0]) === MAX_SLOUPCU
+  ok('poslední buňka přes okraj mřížky se zúží na zbytek (250 + 5), text zůstane, nic se neuřízne',
+    !presah.zkraceno && !presah.oriznutaTabulka && sirka(pr) === MAX_MRIZKY && pr[50].sirka === 5 && pr[50].bloky.map(text).join('') === 'poslední')
+  const odsazenaSiroka = precist(`<w:tbl><w:tr><w:trPr><w:gridBefore w:val="300"/></w:trPr>${tc('za odsazením')}</w:tr></w:tbl><w:p>${wt('za tabulkou')}</w:p>`)
+  ok('odsazení přes celou mřížku: buňka za ním se uřízne, oříznutá, text za tabulkou zůstane',
+    odsazenaSiroka.oriznutaTabulka && !odsazenaSiroka.zkraceno && sirka(odsazenaSiroka.bloky[0]?.radky[0]) === MAX_MRIZKY
       && odsazenaSiroka.bloky[0].radky[0].length === 1 && text(odsazenaSiroka.bloky[1]) === 'za tabulkou')
+  const odsazenaPlna = precist(`<w:tbl><w:tr><w:trPr><w:gridBefore w:val="2"/></w:trPr>${tc('x').repeat(63)}</w:tr></w:tbl>`)
+  ok('odsazení a 63 buněk za ním: celý řádek, odsazení se do buněk nepočítá',
+    !odsazenaPlna.oriznutaTabulka && odsazenaPlna.bloky[0]?.radky[0].length === 64 && odsazenaPlna.bloky[0].radky[0][0].odsazeni === true)
   // Mřížka je sjednocení hranic všech řádků: 33 buněk na řádek s hranicemi
-  // posunutými proti sobě dá 65 sloupců, i když buněk je pod 63 (3. 11.:
-  // uříznutí tehdy zastavilo čtení a všechno za tabulkou zmizelo).
+  // posunutými proti sobě dá 65 sloupců, i když buněk je pod 63. Rozpis
+  // směn (jméno, 31 dní, celkem) se ukáže celý, i se součtem vpravo.
   const bunka = (span, t) => tc(t, `<w:gridSpan w:val="${span}"/>`)
-  const posunute = precist(`<w:p>${wt('Rozpis směn')}</w:p><w:tbl><w:tr>${bunka(2, 'a').repeat(32)}${bunka(1, 'z')}</w:tr>` +
-    `<w:tr>${bunka(1, 'z')}${bunka(2, 'b').repeat(32)}</w:tr></w:tbl><w:p>${wt('Poznámka: sraz v 17:00')}</w:p>`)
-  ok('posunuté hranice (65 sloupců mřížky, 33 buněk): oba řádky na 63 sloupců, text za tabulkou zůstane',
-    posunute.oriznutaTabulka && !posunute.zkraceno && posunute.bloky[1]?.radky.every((r) => sirka(r) === MAX_SLOUPCU && r.length === 32)
+  const posunute = precist(`<w:p>${wt('Rozpis směn')}</w:p><w:tbl><w:tr>${bunka(2, 'a').repeat(32)}${bunka(1, 'Celkem')}</w:tr>` +
+    `<w:tr>${bunka(1, 'z')}${bunka(2, 'b').repeat(31)}${bunka(2, '248 h')}</w:tr></w:tbl><w:p>${wt('Poznámka: sraz v 17:00')}</w:p>`)
+  const posR = posunute.bloky[1]?.radky
+  ok('posunuté hranice (65 sloupců mřížky, 33 buněk): oba řádky celé i se součtem vpravo, nic oříznutého',
+    !posunute.oriznutaTabulka && !posunute.zkraceno && posR?.length === 2 && posR.every((r) => sirka(r) === 65 && r.length === 33)
+      && posR[0][32].bloky.map(text).join('') === 'Celkem' && posR[1][32].bloky.map(text).join('') === '248 h'
       && posunute.bloky.map(text).join('|') === 'Rozpis směn||Poznámka: sraz v 17:00')
   const vnorenaSiroka = precist(`<w:tbl><w:tr><w:tc><w:tbl><w:tr>${tc('x').repeat(64)}</w:tr></w:tbl><w:p/></w:tc>${tc('vedle')}</w:tr>` +
     `<w:tr>${tc('druhý řádek')}</w:tr></w:tbl><w:p>${wt('Za tabulkou')}</w:p>`)
   const vs = vnorenaSiroka.bloky[0]
   ok('široká tabulka v buňce: oříznutá, zbytek vnější tabulky i text za ní zůstanou',
-    vnorenaSiroka.oriznutaTabulka && !vnorenaSiroka.zkraceno && vs?.radky.length === 2 && vs.radky[0][0].bloky[0]?.radky[0].length === MAX_SLOUPCU
+    vnorenaSiroka.oriznutaTabulka && !vnorenaSiroka.zkraceno && vs?.radky.length === 2 && vs.radky[0][0].bloky[0]?.radky[0].length === MAX_BUNEK
       && vs.radky[0][1]?.bloky.map(text).join('') === 'vedle' && vs.radky[1][0]?.bloky.map(text).join('') === 'druhý řádek'
       && text(vnorenaSiroka.bloky[1]) === 'Za tabulkou')
   const neuzavrenaSiroka = precist(`<w:tbl><w:tr>${tc('x').repeat(64)}`)
   ok('neuzavřená široká tabulka (useknutý soubor): oříznutá, ne zkrácená',
-    neuzavrenaSiroka.oriznutaTabulka && !neuzavrenaSiroka.zkraceno && neuzavrenaSiroka.bloky[0]?.radky[0].length === MAX_SLOUPCU)
+    neuzavrenaSiroka.oriznutaTabulka && !neuzavrenaSiroka.zkraceno && neuzavrenaSiroka.bloky[0]?.radky[0].length === MAX_BUNEK)
 
   // Zaškrtávací políčka a znaky: bez nich nejde poznat, co zákazník zaškrtl.
   const policko = (stav) =>
@@ -1252,6 +1267,14 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     JSON.stringify(odk('&amp;'.repeat(10), 10)) === JSON.stringify({ text: '&'.repeat(10), zbylo: false })
       && JSON.stringify(odk('&amp;'.repeat(11), 10)) === JSON.stringify({ text: '&'.repeat(10), zbylo: true })
       && JSON.stringify(odk(`&#${'0'.repeat(70_000)}65;`, 10)) === JSON.stringify({ text: '', zbylo: true }))
+  // Entita delší než kus, jejíž konec je až za stropem: nic z ní — ne
+  // statisíce znaků „&#x000…“ jako text (kus tu nekončí na stropu).
+  const zaStropem = `&#x${'0'.repeat(MAX_ZNAKU * DELKA_ENTITY + 100_000)}41;`
+  const zaStropemVDokumentu = precist(`<w:p><w:r><w:t>Ahoj ${zaStropem}</w:t></w:r></w:p>`)
+  ok('entita delší než kus s koncem za stropem: neukáže se ani kousek, zkrácený (funkce i náhled)',
+    JSON.stringify(odk(zaStropem, MAX_ZNAKU)) === JSON.stringify({ text: '', zbylo: true })
+      && JSON.stringify(odk(`Ahoj ${zaStropem}`, MAX_ZNAKU)) === JSON.stringify({ text: 'Ahoj ', zbylo: true })
+      && !zaStropemVDokumentu.chyba && zaStropemVDokumentu.zkraceno && text(zaStropemVDokumentu.bloky[0]) === 'Ahoj ')
   // Posunutí části z ústředního adresáře musí ukazovat na místní hlavičku.
   const dveCasti = () => zabal({ '[Content_Types].xml': '<Types/>', 'word/document.xml': telo(`<w:p>${wt('x')}</w:p>`) }, 0)
   const bezPodpisu = dveCasti()
@@ -1265,12 +1288,19 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   const dlouhy = precist(`<w:p><w:r><w:t>${'a'.repeat(MAX_ZNAKU - 5)}</w:t></w:r></w:p><w:p><w:r><w:t>bbbbbbbbbb</w:t></w:r></w:p><w:p><w:r><w:t>c</w:t></w:r></w:p>`)
   ok(`dlouhý text: zkrácený přesně na ${MAX_ZNAKU} znaků, další odstavce nepřibudou`,
     dlouhy.zkraceno && dlouhy.bloky.map(text).join('').length === MAX_ZNAKU && dlouhy.bloky.length === 2)
+  // Strop nesmí rozpůlit emoji (v UTF-16 dvojice): půlka je na stránce „�“.
+  const emojiPrimo = precist(`<w:p>${wt('a'.repeat(MAX_ZNAKU - 1) + '😀 dál')}</w:p>`)
+  const emojiEntitou = precist(`<w:p>${wt('a'.repeat(MAX_ZNAKU - 1) + '&#x1F600; dál')}</w:p>`)
+  const emojiSymbolem = precist(`<w:p>${wt('a'.repeat(MAX_ZNAKU - 1))}${sym('Wingdings', 'F04B')}</w:p>`)
+  const bezPulky = (n) => !n.chyba && n.zkraceno && n.bloky.map(text).join('') === 'a'.repeat(MAX_ZNAKU - 1)
+  ok('strop na znaky nerozpůlí emoji: přímo i entitou (dekódování) bez půlky znaku na konci', bezPulky(emojiPrimo) && bezPulky(emojiEntitou))
+  ok('strop na znaky nerozpůlí emoji: symbol z Wingdings (už dekódovaný text) bez půlky znaku na konci', bezPulky(emojiSymbolem))
   const presneNaStrop = precist(`<w:p>${wt('a'.repeat(MAX_ZNAKU))}</w:p><w:p><w:r><w:rPr><w:b/></w:rPr><w:t>x</w:t></w:r></w:p>`)
   ok('text přesně na strop: další odstavec nepřibude ani prázdný', presneNaStrop.zkraceno && presneNaStrop.bloky.length === 1)
   const mnoho = precist('<w:p/>'.repeat(MAX_BLOKU + 5))
   ok(`moc odstavců: nejvýš ${MAX_BLOKU}, zkrácený`, mnoho.zkraceno && mnoho.bloky.length === MAX_BLOKU)
   // 40 kB soubor s milionem prázdných buněk kreslil server desítky vteřin.
-  // Řádky po 50 buňkách — širší by se uřízl na 63 sloupců (taky „zkrácený“)
+  // Řádky po 50 buňkách — širší by se uřízl na 63 buněk (oříznutá tabulka)
   // a test by nic neřekl o stropu na bloky.
   const zaplavaBunek = precist(`<w:tbl>${`<w:tr>${'<w:tc></w:tc>'.repeat(50)}</w:tr>`.repeat(250)}</w:tbl>`)
   const zb = zaplavaBunek.bloky[0]
@@ -1291,12 +1321,29 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok(`moc úseků textu: nejvýš ${MAX_USEKU} v celém dokumentu, zkrácený (je ${usekuCelkem})`, mnohoUseku.zkraceno && usekuCelkem === MAX_USEKU)
   // Stropy samy: kdyby je někdo zvedl, kontroly výš projdou dál, jen
   // server bude nad cizím souborem pracovat déle.
-  ok('stropy nejsou vyšší než dnes (značky 300 000, bloky 10 000, úseky 20 000, znaky 300 000, sloupce 63, patra 8)',
-    MAX_ZNACEK <= 300_000 && MAX_BLOKU <= 10_000 && MAX_USEKU <= 20_000 && MAX_ZNAKU <= 300_000 && MAX_SLOUPCU <= 63 && MAX_VNORENI_TABULEK <= 8)
+  ok('stropy nejsou vyšší než dnes (značky 300 000, bloky 10 000, úseky 20 000, znaky 300 000, buňky v řádku 63, mřížka 255, patra 8)',
+    MAX_ZNACEK <= 300_000 && MAX_BLOKU <= 10_000 && MAX_USEKU <= 20_000 && MAX_ZNAKU <= 300_000 && MAX_BUNEK <= 63 && MAX_MRIZKY <= 255
+      && MAX_VNORENI_TABULEK <= 8)
   // Strop značek dřív, než začne tělo (obří pozadí dokumentu).
   const ZACATEK = 'V začátku dokumentu, který se do náhledu vešel, žádný text není. Celý dokument je v originálu.'
   const pozadi = nahled(zabal({ 'word/document.xml': `<w:document ${W}><w:background>${'<a/>'.repeat(MAX_ZNACEK)}</w:background><w:body><w:p>${wt('text')}</w:p></w:body></w:document>` }))
   ok('strop značek před tělem: zkrácený s větou o začátku, ne „náhled nezná“', !pozadi.chyba && pozadi.zkraceno && prazdnyNahled(pozadi) === ZACATEK)
+  // Komentář a instrukce s apostrofem a CDATA jsou platné XML (píšou je
+  // generátory, ne Word). Apostrof nesmí spolknout zbytek dokumentu a text
+  // z CDATA se ukáže doslova (`&amp;` v něm je pět znaků).
+  const sKomentarem = precist(`<!-- generated by the guest's app --><w:p>${wt('Raut pro 40 osob')}</w:p><?pi it's?><w:p>${wt('Cena 250 Kč')}</w:p>`)
+  ok('komentář a instrukce s apostrofem v těle nespolknou dokument',
+    !sKomentarem.chyba && sKomentarem.bloky.map(text).join('|') === 'Raut pro 40 osob|Cena 250 Kč')
+  const sCdata = precist(`<w:p><w:r><w:t><![CDATA[Objednávka <rautu> & &amp; 'víno']]></w:t></w:r></w:p><w:p>${wt('Konec')}</w:p>`)
+  ok('text v CDATA se ukáže doslova a dokument pokračuje',
+    !sCdata.chyba && sCdata.bloky.map(text).join('|') === "Objednávka <rautu> & &amp; 'víno'|Konec")
+  // Neuzavřený komentář: konec se hledá jednou, ne u každého znovu
+  // (50 000 × celý zbytek souboru by byly vteřiny práce serveru).
+  const predKomentari = performance.now()
+  const neuzavreneKomentare = precist(`<w:p>${wt('před')}</w:p>${'<!--x>'.repeat(50_000)}`)
+  const msKomentaru = Math.round(performance.now() - predKomentari)
+  ok(`neuzavřené komentáře (50 000): přečte se do 1 s (trvalo ${msKomentaru} ms)`,
+    !neuzavreneKomentare.chyba && text(neuzavreneKomentare.bloky[0]) === 'před' && msKomentaru < 1000)
   // Věta místo prázdné plochy.
   const PRAZDNY = 'V dokumentu není žádný text.'
   ok('prázdný dokument, prázdné odstavce, tabulka bez řádků → „není žádný text“',
@@ -1375,8 +1422,8 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('věta: 5 obrázků', vetaNad(5) === 'V dokumentu je 5 obrázků — v náhledu jsou po nich jen značky.')
   ok('věta: zkrácený; bez ničeho žádná věta', vetaNad(0, true) === 'Dokument je dlouhý, náhled ukazuje jen začátek.' && vetaNad(0) === null)
   ok('věta: oříznutá tabulka je jiná věta než zkrácený dokument (a obojí najednou)',
-    vetaNad(0, false, true) === `Tabulka je moc široká — náhled ukazuje jen prvních ${MAX_SLOUPCU} sloupců.`
-      && vetaNad(0, true, true) === `Tabulka je moc široká — náhled ukazuje jen prvních ${MAX_SLOUPCU} sloupců. Dokument je dlouhý, náhled ukazuje jen začátek.`)
+    vetaNad(0, false, true) === 'Tabulka je moc široká — část vpravo v náhledu chybí.'
+      && vetaNad(0, true, true) === 'Tabulka je moc široká — část vpravo v náhledu chybí. Dokument je dlouhý, náhled ukazuje jen začátek.')
 
   // Kam vede odkaz u přílohy.
   ok('odkaz: PDF a fotka rovnou ze souboru, Word na náhled ve Foodtabu',

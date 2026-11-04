@@ -103,12 +103,20 @@ export const MAX_BLOKU = 10_000
  */
 export const MAX_VNORENI_TABULEK = 8
 /**
- * Kolik sloupců má řádek tabulky nanejvýš — Word víc nedovolí. Tisíce
- * sloučených buněk v řádku z cizího souboru by prohlížeči toho, kdo
- * dokument otevře, zamrazily stránku na minuty (rozvržení tabulky roste
+ * Kolik buněk má řádek tabulky nanejvýš — Word víc nedovolí. Tisíce
+ * buněk v řádku z cizího souboru by prohlížeči toho, kdo dokument
+ * otevře, zamrazily stránku na minuty (rozvržení tabulky roste
  * s druhou mocninou sloupců).
  */
-export const MAX_SLOUPCU = 63
+export const MAX_BUNEK = 63
+/**
+ * Kolik sloupců mřížky (součet `w:gridSpan` a `w:gridBefore`) má řádek
+ * nanejvýš. Mřížka je sjednocení hranic všech řádků: 33 buněk s hranicemi
+ * posunutými proti sobě dá 65 sloupců, i když buněk je pod limitem Wordu.
+ * Strop hlídá stejné zamrznutí jako MAX_BUNEK, jen pro pár buněk přes
+ * tisíce sloupců.
+ */
+export const MAX_MRIZKY = 255
 
 const NEZNAMY = 'Dokument je uložený způsobem, který náhled nezná.'
 
@@ -146,7 +154,7 @@ export type NahledDocx = {
   obrazku: number
   /** Za stropem se přestalo číst — náhled je jen začátek. */
   zkraceno: boolean
-  /** Řádek tabulky širší než MAX_SLOUPCU se uřízl; čte se dál. */
+  /** Řádek tabulky přes MAX_BUNEK nebo MAX_MRIZKY se uřízl; čte se dál. */
   oriznutaTabulka: boolean
 }
 
@@ -162,7 +170,7 @@ export function poznamkaNahledu(n: NahledDocx): string | null {
       `V dokumentu ${prisudek(n.obrazku, 'je', 'jsou', 'je')} ${pocet(n.obrazku, 'obrázek', 'obrázky', 'obrázků')} — v náhledu jsou po nich jen značky.`,
     )
   }
-  if (n.oriznutaTabulka) vety.push(`Tabulka je moc široká — náhled ukazuje jen prvních ${MAX_SLOUPCU} sloupců.`)
+  if (n.oriznutaTabulka) vety.push('Tabulka je moc široká — část vpravo v náhledu chybí.')
   if (n.zkraceno) vety.push('Dokument je dlouhý, náhled ukazuje jen začátek.')
   return vety.length ? vety.join(' ') : null
 }
@@ -418,20 +426,33 @@ export function odkodovatDo(s: string, nejvic: number): { text: string; zbylo: b
         if (amp > i) konec = amp
         // Entita delší než kus: celá, když se vejde pod strop.
         else if (strednik !== -1 && strednik < strop) konec = strednik + 1
-        // Na stropu by z ní zbyl jen začátek.
-        else if (konec === strop) break
+        // Konec entity je za stropem (nebo kus končí na stropu): pod strop
+        // se nevejde a ukázal by se z ní jen začátek.
+        else if (strednik !== -1 || konec === strop) break
       }
     }
     text += odkodovat(s.slice(i, konec))
     i = konec
   }
-  return { text: text.slice(0, nejvic), zbylo: i < s.length || text.length > nejvic }
+  return { text: zacatek(text, nejvic), zbylo: i < s.length || text.length > nejvic }
 }
 
 /**
- * Dokončí tabulku. Řádek má nanejvýš MAX_SLOUPCU sloupců mřížky; co je
- * za nimi, se uřízne. Svisle sloučené buňky (`w:vMerge`): pokračování
- * se schová a buňka, kde sloučení začíná, se o řádek protáhne. Sloupec
+ * Prvních `n` jednotek UTF-16 bez useknuté poloviny znaku na konci.
+ * Emoji je v řetězci dvojice; samotná první půlka by se na stránce
+ * ukázala jako „�“.
+ */
+function zacatek(s: string, n: number): string {
+  if (s.length <= n) return s
+  const c = s.charCodeAt(n - 1)
+  return s.slice(0, c >= 0xd800 && c <= 0xdbff ? n - 1 : n)
+}
+
+/**
+ * Dokončí tabulku. Řádek má nanejvýš MAX_BUNEK buněk a MAX_MRIZKY
+ * sloupců mřížky; co je za nimi, se uřízne. Svisle sloučené buňky
+ * (`w:vMerge`): pokračování se schová a buňka, kde sloučení začíná, se
+ * o řádek protáhne. Sloupec
  * se počítá podle mřížky (šířky buněk), ne podle pořadí buňky v řádku.
  * Vrátí, jestli se něco uřízlo.
  */
@@ -441,14 +462,16 @@ function dokoncitTabulku(t: Tabulka, pokracuji: Set<Bunka>): boolean {
   for (const radek of t.radky) {
     const tady = new Map<number, Bunka>()
     let sloupec = 0
+    let bunek = 0
     for (let i = 0; i < radek.length; i++) {
-      if (sloupec >= MAX_SLOUPCU) {
+      const b = radek[i]
+      if (sloupec >= MAX_MRIZKY || (!b.odsazeni && bunek >= MAX_BUNEK)) {
         radek.length = i
         orezano = true
         break
       }
-      const b = radek[i]
-      b.sirka = Math.min(b.sirka, MAX_SLOUPCU - sloupec)
+      if (!b.odsazeni) bunek++
+      b.sirka = Math.min(b.sirka, MAX_MRIZKY - sloupec)
       const puvod = pokracuji.has(b) ? nad.get(sloupec) : undefined
       if (puvod && puvod.sirka === b.sirka) {
         puvod.vyska++
@@ -582,7 +605,7 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
       if (d.zbylo) zkraceno = true
     }
     if (znaku + text.length > MAX_ZNAKU) {
-      text = text.slice(0, MAX_ZNAKU - znaku)
+      text = zacatek(text, MAX_ZNAKU - znaku)
       zkraceno = true
     }
     // Na stropu nezbude nic — prázdný úsek by z odstavce udělal neprázdný.
@@ -617,7 +640,7 @@ export function ctiDokument(xml: string, styly: Map<string, Styl> = new Map()): 
   for (const k of kousky(xml)) {
     if (zkraceno) break
     if (!k.znacka) {
-      if (vT && !preskocit) pridatText(k.text, false, true)
+      if (vT && !preskocit) pridatText(k.text, false, !k.doslova)
       continue
     }
     if (++znacek > MAX_ZNACEK) {

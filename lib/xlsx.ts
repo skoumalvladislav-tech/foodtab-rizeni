@@ -142,7 +142,10 @@ export function atribut(znacka: string, jmeno: string): string | null {
 }
 
 /** Postupně vrací značky a text mezi nimi. */
-export function* kousky(xml: string): Generator<{ znacka: boolean; text: string }> {
+export function* kousky(xml: string): Generator<{ znacka: boolean; text: string; doslova?: boolean }> {
+  // Konec, který v souboru dál není, se znovu nehledá — tisíce
+  // neuzavřených komentářů by jinak soubor prošly tisíckrát.
+  const chybi = new Set<string>()
   let i = 0
   while (i < xml.length) {
     const zac = xml.indexOf('<', i)
@@ -151,6 +154,23 @@ export function* kousky(xml: string): Generator<{ znacka: boolean; text: string 
       return
     }
     if (zac > i) yield { znacka: false, text: xml.slice(i, zac) }
+
+    // Komentář, CDATA a instrukce mají vlastní konec a uvozovky v nich nic
+    // neznamenají — apostrof v komentáři by jinak spolkl zbytek souboru.
+    // Obsah CDATA je text bez entit (`doslova`): `&amp;` v něm je pět znaků.
+    const zvlastni = xml.startsWith('<!--', zac) ? '-->' : xml.startsWith('<![CDATA[', zac) ? ']]>' : xml.startsWith('<?', zac) ? '?>' : ''
+    if (zvlastni && !chybi.has(zvlastni)) {
+      const obsah = zac + (zvlastni === '-->' ? 4 : zvlastni === ']]>' ? 9 : 2)
+      const konec = xml.indexOf(zvlastni, obsah)
+      if (konec === -1) {
+        chybi.add(zvlastni)
+      } else {
+        if (zvlastni !== ']]>') yield { znacka: true, text: xml.slice(zac, konec + zvlastni.length) }
+        else if (konec > obsah) yield { znacka: false, text: xml.slice(obsah, konec), doslova: true }
+        i = konec + zvlastni.length
+        continue
+      }
+    }
 
     // Konec značky hledáme mimo uvozovky — atribut smí obsahovat '>'.
     let j = zac + 1
@@ -179,7 +199,7 @@ export function ctiSdileneTexty(xml: string): string[] {
 
   for (const k of kousky(xml)) {
     if (!k.znacka) {
-      if (vSi && vT && !vRph) sbirka += odkodovat(k.text)
+      if (vSi && vT && !vRph) sbirka += k.doslova ? k.text : odkodovat(k.text)
       continue
     }
     const z = k.text
@@ -251,7 +271,7 @@ export function ctiList(
 
   for (const k of kousky(xml)) {
     if (!k.znacka) {
-      if (vHodnote) hodnota += odkodovat(k.text)
+      if (vHodnote) hodnota += k.doslova ? k.text : odkodovat(k.text)
       continue
     }
     const z = k.text
