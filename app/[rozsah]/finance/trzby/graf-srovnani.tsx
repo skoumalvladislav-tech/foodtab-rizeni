@@ -190,7 +190,14 @@ export default function GrafSrovnaniKresba({
         aria-label={popisGrafu}
         aria-describedby={idNavodu}
         onKeyDown={klavesa}
-        onFocus={() => { if (aktivni === null) { setZKlavesnice(true); setAktivni(vychoziSlot()) } }}
+        // Jen zaměření z klávesnice (Tab) vybere výchozí sloupec. Klepnutí
+        // prstem/myší zaměří taky, ale sloupec už vybral pointerdown —
+        // přepsat ho výchozím by bublina skočila jinam, než se klepalo.
+        onFocus={(e) => {
+          if (!e.currentTarget.matches(':focus-visible')) return
+          setZKlavesnice(true)
+          setAktivni((a) => a ?? vychoziSlot())
+        }}
         onBlur={() => { setAktivni(null); setZKlavesnice(false) }}
       >
         <span className="ds-graf-jednotka" aria-hidden="true">Kč</span>
@@ -201,7 +208,8 @@ export default function GrafSrovnaniKresba({
           aria-hidden="true"
           onPointerMove={vyberZUdalosti}
           onPointerDown={vyberZUdalosti}
-          onPointerLeave={() => { if (!zKlavesnice) setAktivni(null) }}
+          // Prst „odjede" při každém zvednutí — bublina po klepnutí zůstane, zmizí klepnutím jinam (blur).
+          onPointerLeave={(e) => { if (e.pointerType === 'mouse' && !zKlavesnice) setAktivni(null) }}
         >
           {aktivni !== null ? (
             <rect className="ds-graf-pas" x={vlevo + pas * aktivni} y={NAHORE} width={pas} height={VYSKA_PLOCHY} rx={4} />
