@@ -29,7 +29,10 @@
  *      pole, zaškrtávací políčka, pole, skrytý text, iniciála), hlavní
  *      část a styly podle vazeb; rozbitý soubor, ZIP bomba a soubor
  *      stavěný na zahlcení serveru dají větu pro člověka nebo zkrácený
- *      náhled — každé rozbalení má strop; odkaz u Wordu vede na náhled.
+ *      náhled — každé rozbalení má strop; odkaz u Wordu vede na náhled;
+ *  12. dokumenty u rezervací v kalendáři: v týdnu a v dni odkaz vedle
+ *      odkazu na rezervaci (ne v něm), v měsíci jen sponka; z náhledu
+ *      Wordu „Zpět“ do kalendáře, jen uvnitř Rezervací.
  */
 
 import fs from 'node:fs'
@@ -71,6 +74,7 @@ import {
   korunyNaHalere,
   precistFormular,
   halereNaKoruny,
+  zpatkyZKalendare,
 } from '../lib/rezervace-typy.ts'
 import {
   dnyTydne,
@@ -91,9 +95,11 @@ import {
   adresaPrilohy,
   cestaPrilohy,
   chybaNahrani,
+  dokumentyRezervace,
   jeZip,
   nazevKeStazeni,
   otevritVProhlizeci,
+  rozdelitNazev,
   zkontrolovatVyber,
 } from '../lib/rezervace-prilohy.ts'
 import { MAX_REZERVACI_V_DAVCE, overitDavkuRezervaci, rozebratKlicRezervaci, slozitKlicRezervaci } from '../lib/rezervace-prijem-api.ts'
@@ -434,17 +440,30 @@ console.log('\n== 8. Přístup napřed, data potom ==\n')
     && /otevritVProhlizeci\(mime\) \? undefined : \{ download: nazevKeStazeni\(/.test(soubor))
   const prvkyPrilohy = cti('app/[rozsah]/rezervace/prvky.tsx')
   const panel = prvkyPrilohy.slice(prvkyPrilohy.indexOf('export function PanelPriloh'), prvkyPrilohy.indexOf('export function HlaskaAkce'))
+  const odkazPrilohy = prvkyPrilohy.slice(prvkyPrilohy.indexOf('function OdkazPrilohy('), prvkyPrilohy.indexOf('const DOKUMENTU_V_KARTE'))
   // 2. 11.: Word se po kliknutí tiše stáhl a vypadalo to, že se nic
   // nestalo. Teď vede na náhled ve stejném okně (má odkaz zpátky); nová
   // záložka jen u PDF a fotky — z aplikace na ploše iPhonu by otevřela
   // Safari bez přihlášení.
-  // `target` v souboru právě jednou — ve větvi pro PDF a fotku. Jakýkoli
-  // další zápis (target={'_blank'}, {...{ target }}) by Word poslal zpátky
-  // do nové záložky.
-  ok('detail: odkaz u přílohy z adresaPrilohy (Word → náhled), nová záložka jen pro PDF a fotku',
-    /<a\s+href=\{adresaPrilohy\(rozsah, p\.id, p\.mime\)\}\s+\{\.\.\.\(otevritVProhlizeci\(p\.mime\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/.test(panel)
-    && (prvkyPrilohy.match(/\btarget\b/g) ?? []).length === 1
-    && !panel.includes('/api/rezervace/soubor/'))
+  // 3. 11.: odkaz je jedna komponenta (OdkazPrilohy) pro detail, týden
+  // i den. `target` i `adresaPrilohy(` v CELÉ složce Rezervací právě
+  // jednou — v ní. Jakýkoli další zápis (target={'_blank'}, {...{ target }},
+  // rozprostřená konstanta z lib, vlastní <a href={adresaPrilohy(…)}>
+  // v jiném souboru) by Word někde poslal do nové záložky.
+  const souboryVe = (slozka) =>
+    fs.readdirSync(path.join(KOREN, slozka), { withFileTypes: true })
+      .flatMap((e) => (e.isDirectory() ? souboryVe(`${slozka}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${slozka}/${e.name}`] : []))
+  const rezervacni = souboryVe('app/[rozsah]/rezervace').map((p) => [p, cti(p)])
+  const kdeVsude = (vzor) => rezervacni.flatMap(([p, obsah]) => (obsah.match(vzor) ?? []).map(() => p))
+  const jenVPrvcich = JSON.stringify(['app/[rozsah]/rezervace/prvky.tsx'])
+  ok(`odkaz u přílohy z adresaPrilohy (Word → náhled), nová záložka jen pro PDF a fotku — jen v OdkazPrilohy, v celé složce Rezervací (${rezervacni.length} souborů)`,
+    /<a\s+href=\{adresaPrilohy\(rozsah, p\.id, p\.mime, zpet\)\}\s+\{\.\.\.\(otevritVProhlizeci\(p\.mime\) \? \{ target: '_blank', rel: 'noopener noreferrer' \} : \{\}\)\}/.test(odkazPrilohy)
+    && rezervacni.length > 10
+    && JSON.stringify(kdeVsude(/\btarget\s*[:=]/g)) === jenVPrvcich
+    && JSON.stringify(kdeVsude(/adresaPrilohy\(/g)) === jenVPrvcich
+    && JSON.stringify(kdeVsude(/<a\b[^>]*\{\.\.\./g)) === jenVPrvcich
+    && !prvkyPrilohy.includes('/api/rezervace/soubor/'))
+  ok('detail: příloha přes OdkazPrilohy', /<OdkazPrilohy rozsah=\{rozsah\} p=\{p\}>\s*\{p\.nazev\}\s*<\/OdkazPrilohy>/.test(panel))
 }
 
 console.log('\n== 9. Univerzální příjmové API ==\n')
@@ -1509,6 +1528,300 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
     rozbaleni.length > 20 && rozbaleni.every((m) => typeof m === 'number' && m > 0 && m <= MAX_XML_BAJTU))
   zlib.inflateRawSync = puvodniInflate
   syncBuiltinESMExports()
+}
+
+console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
+{
+  // Zadání Šéfíka: „aby v kalendáři akcí bylo vidět, že je u jednotlivé
+  // rezervace dokument, a možnost ho otevřít“. Co se z toho opravdu
+  // vykreslí (týden, měsíc, den), ověřuje scripts/rezervace-pobocky.test.mjs,
+  // oddíl 6 — tady čisté funkce a to, co se vykreslením ověřit nedá.
+  const PDF = 'application/pdf'
+  // Výjimka v testované funkci by shodila celý běh i se zbylými
+  // kontrolami — tady je to jen CHYBA u té, které se týká.
+  const zkus = (f) => {
+    try {
+      return f()
+    } catch {
+      return undefined
+    }
+  }
+  const dok = zkus(() =>
+    dokumentyRezervace([
+      { id: 'b', nazev: 'Menu.docx', mime: MIME_DOCX, nahrano: '2026-11-03T10:00:00.5+00:00' },
+      { id: 'c', nazev: 'Plán sálu.pdf', mime: PDF, nahrano: '2026-11-03T09:00:00+00:00' },
+      { id: 'a', nazev: 'Dort.jpg', mime: 'image/jpeg', nahrano: '2026-11-03T10:00:00.5+00:00' },
+      // 09:30 v +01:00 = 08:30 UTC — první, i když jako text vypadá později.
+      { id: 'd', nazev: 'Objednávka.pdf', mime: PDF, nahrano: '2026-11-03T09:30:00+01:00' },
+    ]),
+  )
+  ok('dokumenty v pořadí nahrání jako v detailu (okamžik, ne text), stejný okamžik podle id',
+    Array.isArray(dok) && dok.map((x) => x.id).join('') === 'dcab')
+  ok('do kalendáře jen id, název a typ', Array.isArray(dok) && JSON.stringify(dok[0]) === JSON.stringify({ id: 'd', nazev: 'Objednávka.pdf', mime: PDF }))
+  ok('bez dokumentů prázdný seznam',
+    zkus(() => [null, undefined, []].every((x) => Array.isArray(dokumentyRezervace(x)) && dokumentyRezervace(x).length === 0)) === true)
+
+  const tyden = '/perla/rezervace?pohled=tyden&datum=2026-11-03'
+  const mesic = '/perla/rezervace?pohled=mesic&datum=2026-11-03'
+  const den = '/perla/rezervace/den/2026-11-03'
+  ok('Word z kalendáře: náhled s adresou zpátky, zakódovanou (& v ní nerozdělí adresu náhledu)',
+    adresaPrilohy('perla', 'abc', MIME_DOCX, tyden) === '/perla/rezervace/dokument/abc?zpet=%2Fperla%2Frezervace%3Fpohled%3Dtyden%26datum%3D2026-11-03')
+  ok('adresa zpátky dorazí do náhledu celá a bezpecnaZpatky ji pustí (týden, měsíc, den)',
+    [tyden, mesic, den].every((z) => {
+      const zDotazu = new URL(adresaPrilohy('perla', 'abc', MIME_DOCX, z), 'https://foodtab.test').searchParams.get('zpet')
+      return zDotazu === z && bezpecnaZpatky('perla', zDotazu) === z
+    }))
+  ok('PDF a fotka z kalendáře rovnou ze souboru (nová záložka, zpátky nepotřebují)',
+    adresaPrilohy('perla', 'abc', PDF, tyden) === '/api/rezervace/soubor/abc' && adresaPrilohy('perla', 'abc', 'image/png', tyden) === '/api/rezervace/soubor/abc')
+  ok('bez adresy zpátky (detail, příloha ke dni) beze změny',
+    adresaPrilohy('perla', 'abc', MIME_DOCX) === '/perla/rezervace/dokument/abc' && adresaPrilohy('perla', 'abc', MIME_DOCX, '') === '/perla/rezervace/dokument/abc')
+
+  // Adresa zpátky přijde z odkazu, který může poslat kdokoli. Rozhoduje,
+  // kam ji pak POŠLE PROHLÍŽEČ — proto se kontroluje vyřešená adresa,
+  // ne text (3. 11.: `..` i jako %2e%2e vede o složku výš, tabulátor
+  // prohlížeč vypustí; `/perla/rezervace/../../k/…` by skončila na
+  // veřejném přesměrování ven).
+  const kamVede = (z) => new URL(bezpecnaZpatky('perla', z), 'https://foodtab.test')
+  const zle = [
+    'https://zly.example', '//zly.example', '/jina/rezervace?pohled=tyden', '/perla/rezervace//zly.example', '/perla/rezervacex',
+    '/perla/rezervace/../../k/abc', '/perla/rezervace/..', '/perla/rezervace/%2e%2e/%2e%2e/k/abc', '/perla/rezervace/%2E%2E/x',
+    '/perla/rezervace/.%2e/x', '/perla/rezervace/.\t./.\t./k/abc', '/perla/rezervace/\n/../../x', '/perla/rezervace/./../x',
+    '/perla/rezervace\\..\\k', '/perla/rezervace/den/2026-11-03#../../x', '/perla/rezervace/den/2026-11-03/..',
+  ]
+  const spatne = zle.filter((z) => {
+    const u = kamVede(z)
+    return u.origin !== 'https://foodtab.test' || u.pathname !== '/perla/rezervace' || u.search !== ''
+  })
+  ok(`bezpecnaZpatky: cizí adresa, jiný rozsah i \`..\` (i zakódované, s tabulátorem) skončí v kalendáři rozsahu — prohlížeč nikam jinam nevede (${spatne.length ? spatne.map((z) => JSON.stringify(z)).join(', ') : 'vše OK'})`,
+    spatne.length === 0)
+  const dobre = [
+    '/perla/rezervace', den, tyden, mesic, '/perla/rezervace/11111111-2222-4333-8444-555555555555',
+    '/perla/rezervace/nova?datum=2026-11-03', '/perla/rezervace/upozorneni',
+  ]
+  ok('bezpecnaZpatky: adresy, které posílá kalendář a formuláře, projdou beze změny',
+    dobre.every((z) => bezpecnaZpatky('perla', z) === z && kamVede(z).pathname + kamVede(z).search === z))
+
+  const zp = (z) => zkus(() => zpatkyZKalendare('perla', z))
+  ok('„Zpět“ z náhledu: z dne na den, z týdne a měsíce na kalendář (tam, odkud se otevíral)',
+    JSON.stringify(zp(den)) === JSON.stringify({ href: den, text: 'Zpět na den' })
+    && JSON.stringify(zp(tyden)) === JSON.stringify({ href: tyden, text: 'Zpět na kalendář' })
+    && JSON.stringify(zp(mesic)) === JSON.stringify({ href: mesic, text: 'Zpět na kalendář' }))
+  ok('„Zpět“ z náhledu: podvržená adresa vede do kalendáře rozsahu, ne na „den“ ani ven',
+    JSON.stringify(zp('/perla/rezervace/den/../../k/abc')) === JSON.stringify({ href: '/perla/rezervace', text: 'Zpět na kalendář' })
+    && JSON.stringify(zp('https://zly.example/perla/rezervace/den/x')) === JSON.stringify({ href: '/perla/rezervace', text: 'Zpět na kalendář' }))
+  ok('„Zpět“ z náhledu: bez parametru, prázdný nebo dvakrát v adrese = neotevíral se z kalendáře (k rezervaci nebo ke dni)',
+    [undefined, '', [den, tyden]].every((z) => zp(z) === null))
+  const stranka = cti('app/[rozsah]/rezervace/dokument/[id]/page.tsx')
+  ok('náhled: „Zpět“ z kalendáře jen přes zpatkyZKalendare, jinak k rezervaci nebo ke dni',
+    /const zpet =\s+zpatkyZKalendare\(rozsah, zpetText\) \?\?/.test(stranka)
+    && stranka.includes("{ href: `/${rozsah}/rezervace/${r.id}`, text: 'Zpět na rezervaci' }")
+    && !stranka.includes('bezpecnaZpatky('))
+
+  const rn = (n) => JSON.stringify(zkus(() => rozdelitNazev(n)))
+  ok('název štítku: přípona zvlášť, ať zůstane vidět (.pdf / .docx, i velkými, i s tečkou v názvu)',
+    rn('Menu svatba.pdf') === '["Menu svatba",".pdf"]'
+    && rn('Smlouva o akci – Novákovi.docx') === '["Smlouva o akci – Novákovi",".docx"]'
+    && rn('a.b.PDF') === '["a.b",".PDF"]' && rn('archiv.tar.gz') === '["archiv.tar",".gz"]')
+  ok('název štítku: bez přípony celý (verze 2.0, .htaccess, dlouhá koncovka, žádná tečka)',
+    rn('verze 2.0') === '["verze 2.0",""]' && rn('.htaccess') === '[".htaccess",""]'
+    && rn('soubor.dlouhakoncovka') === '["soubor.dlouhakoncovka",""]' && rn('bez tečky') === '["bez tečky",""]')
+
+  const data = cti('app/[rozsah]/rezervace/data.ts')
+  const nacist = data.slice(data.indexOf('export async function nacistRezervace('), data.indexOf('export async function nacistRezervaci('))
+  // Vnořeně = stejný dotaz uživatelským klientem, takže dokumenty hlídá
+  // i RLS `rezervace_prilohy_cist`; přílohy ke dni mají rezervace_id null
+  // a do vnoření se nedostanou.
+  ok('kalendář: dokumenty vnořeně v dotazu na rezervace, uživatelským klientem',
+    nacist.includes('const supabase = await getServerSupabase()')
+    && nacist.includes('.select(`${SLOUPCE_REZERVACE}, rezervace_prilohy(id, nazev, mime, nahrano)`)')
+    && nacist.includes('dokumenty: dokumentyRezervace(rezervace_prilohy)'))
+  // Vnoření bez jména vazby funguje, jen dokud mezi tabulkami vede
+  // jediný cizí klíč. Druhý (třeba „přesunuto z rezervace“) a PostgREST
+  // vnoření odmítne (PGRST201) — spadne celý kalendář, ne jen dokumenty,
+  // a PGlite v CI PostgREST nespouští, tak by to nikdo neviděl.
+  const prikazy = fs.readdirSync(path.join(KOREN, 'supabase/migrations'))
+    .filter((f) => f.endsWith('.sql'))
+    .flatMap((f) => cti(`supabase/migrations/${f}`).replace(/--[^\n]*/g, '').split(';'))
+  const vazeb = prikazy
+    .filter((p) => /\b(create|alter)\s+table\s+(if\s+not\s+exists\s+)?(only\s+)?(public\.)?rezervace_prilohy\b/i.test(p))
+    .reduce((n, p) => n + (p.match(/references\s+(public\.)?rezervace\s*\(/gi) ?? []).length, 0)
+  const opacnych = prikazy.filter((p) => /references\s+(public\.)?rezervace_prilohy\b/i.test(p)).length
+  ok(`kalendář: mezi rezervace a rezervace_prilohy vede jediný cizí klíč (${vazeb} tam, ${opacnych} zpátky) — jinak vnoření potřebuje jméno vazby`,
+    vazeb === 1 && opacnych === 0)
+
+  const css = cti('app/_rezervace.css')
+  ok('vzhled: karta týdne celá klikací (odkaz roztažený přes kartu), štítky nad ním',
+    /\.ds-rez-polozka \{[^}]*position: relative/.test(css)
+    && /\.ds-rez-polozka-odkaz::after \{[^}]*position: absolute; inset: 0/.test(css)
+    && /\.ds-rez-polozka \.ds-rez-dokumenty \{[^}]*z-index: 1; pointer-events: none/.test(css)
+    && css.includes('.ds-rez-polozka .ds-rez-dokumenty a { pointer-events: auto; }'))
+  ok('vzhled: seznam dokumentů bez odrážek, zrušená bledne bez svých dokumentů',
+    /\.ds-rez-dokumenty \{ list-style: none;/.test(css)
+    && css.includes('.ds-rez-polozka[data-neplati] > .ds-rez-polozka-odkaz { opacity: .65; }')
+    && !/\.ds-rez-polozka\[data-neplati\] \{[^}]*opacity/.test(css))
+  // „+ N dalších dokumentů“ v týdnu vede na #dokumenty v detailu. Detail
+  // se tu nevykresluje (potřebuje přihlášení a data), proto zdroj.
+  const detail = cti('app/[rozsah]/rezervace/obsah.tsx')
+  const prvky12 = cti('app/[rozsah]/rezervace/prvky.tsx')
+  ok('detail: panel dokumentů má kotvu #dokumenty (vede na ni „+ další“ z týdne) a horní lišta ji nepřekryje',
+    (detail.match(/kotva="dokumenty"/g) ?? []).length === 1
+    && prvky12.includes("<section className={kotva ? 'ds-plocha ds-rez-kotva' : 'ds-plocha'} id={kotva}>")
+    && /\.ds-rez-kotva \{ scroll-margin-top: [1-9]\d*px; \}/.test(css))
+  // Kontejnery: kalendář (`rez`), hlavní sloupec dne a detailu vedle bočního
+  // panelu (`rez-hlavni`) a seznam dokumentů v kartě týdne (`rez-dokumenty`).
+  // Dotaz bez jména se ptá NEJBLIŽŠÍHO kontejneru — po přidání seznamu by
+  // štítky na počítači dostaly mobilní rozvržení. Proto každý dotaz jmenuje
+  // ten svůj a kontrola ho pozná podle toho, co je v něm.
+  const bezKomentaru = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const dotazy = []
+  for (const m of bezKomentaru.matchAll(/@container\b\s*([^({\s]*)\s*\(([^)]*)\)\s*\{/g)) {
+    let hloubka = 1
+    let j = m.index + m[0].length
+    for (; j < bezKomentaru.length && hloubka; j++) {
+      if (bezKomentaru[j] === '{') hloubka++
+      else if (bezKomentaru[j] === '}') hloubka--
+    }
+    dotazy.push({ jmeno: m[1], podminka: m[2].trim(), telo: bezKomentaru.slice(m.index + m[0].length, j - 1) })
+  }
+  const SVUJ = [
+    { znak: '.ds-rez-vpravo {', jmeno: 'rez', sirka: (px) => px === 640 },
+    { znak: '.ds-rez-tyden {', jmeno: 'rez', sirka: (px) => px === 900 },
+    { znak: '.ds-rez-mesic {', jmeno: 'rez', sirka: (px) => px === 640 },
+    { znak: '.ds-rez-mesic-prazdny {', jmeno: 'rez', sirka: (px) => px === 640 },
+    { znak: '.ds-rez-radek {', jmeno: 'rez-hlavni', sirka: (px) => px === 560 },
+    { znak: '.ds-rez-udaje {', jmeno: 'rez-hlavni', sirka: (px) => px === 420 },
+    { znak: '.ds-plocha.ds-dokument {', jmeno: 'rez', sirka: (px) => px === 560 },
+    // Práh úzkého štítku: pod ním se název vedle ikony a přípony nevejde,
+    // nad ním by štítek s místem dostal rozvržení na dva řádky zbytečně.
+    { znak: '.ds-rez-polozka .ds-rez-dokument-nazev { grid-area:', jmeno: 'rez-dokumenty', sirka: (px) => px >= 160 && px <= 240 },
+  ]
+  const mimoKontejner = []
+  for (const o of SVUJ) {
+    const b = dotazy.filter((x) => x.telo.includes(o.znak))
+    const px = Number(b[0]?.podminka.match(/^max-width: (\d+)px$/)?.[1])
+    if (b.length !== 1 || b[0].jmeno !== o.jmeno || !o.sirka(px)) {
+      mimoKontejner.push(`${o.znak} → ${b.map((x) => `${x.jmeno || 'bez jména'} (${x.podminka})`).join(' + ') || 'nikde'}`)
+    }
+  }
+  for (const x of dotazy) if (!SVUJ.some((o) => x.telo.includes(o.znak))) mimoKontejner.push(`neznámý dotaz ${x.jmeno || 'bez jména'} (${x.podminka})`)
+  ok(`vzhled: každý dotaz na šířku míří na svůj kontejner — kalendář, hlavní sloupec dne, seznam dokumentů v kartě (${dotazy.length} dotazů; špatně: ${mimoKontejner.join('; ') || 'nic'})`,
+    mimoKontejner.length === 0 && dotazy.length === SVUJ.length)
+  // Kontejnery samy: tři, a žádné pozdější pravidlo je nezruší. Hlavní
+  // sloupec má typ z _komponenty.css — tady jen jméno (zkratka by typ
+  // přepsala na „normal“).
+  const kontejnery = [...bezKomentaru.matchAll(/([^{}]+)\{[^}]*?\b(container(?:-type|-name)?)\s*:\s*([^;}]+)/g)].map((m) => `${m[1].trim()} → ${m[2]}: ${m[3].trim()}`)
+  ok(`vzhled: kontejnery kalendář (rez), hlavní sloupec (rez-hlavni) a seznam dokumentů v kartě (rez-dokumenty), nic je nepřepisuje (${kontejnery.join('; ')})`,
+    JSON.stringify(kontejnery) === JSON.stringify([
+      '.ds-rez → container: rez / inline-size',
+      '.ds-rez-polozka .ds-rez-dokumenty → container: rez-dokumenty / inline-size',
+      '.ds-rez .ds-dnes-hlavni → container-name: rez-hlavni',
+    ])
+    && /\.ds-dnes-hlavni \{[^}]*container-type: inline-size;/.test(cti('app/_komponenty.css')))
+  // Úzký sloupec (notebook, víc poboček): vedle ikony a přípony by na název
+  // zbylo pár pixelů. Ikona s příponou nahoře, název pod nimi přes celý štítek.
+  const uzky = dotazy.find((x) => x.jmeno === 'rez-dokumenty')?.telo ?? ''
+  ok('vzhled: v úzkém sloupci týdne má název dokumentu celou šířku štítku, ikona s příponou nad ním',
+    uzky.includes('.ds-rez-polozka .ds-rez-dokument { display: grid; grid-template-columns: auto minmax(0, 1fr);')
+    && uzky.includes('.ds-rez-polozka .ds-rez-dokument .ft-i { grid-area: 1 / 1;')
+    && uzky.includes('.ds-rez-polozka .ds-rez-dokument-pripona { grid-area: 1 / 2;')
+    && uzky.includes('.ds-rez-polozka .ds-rez-dokument-nazev { grid-area: 2 / 1 / 3 / 3; margin-left: 0; }'))
+  // Drobné písmo přímo na podkladu kalendáře (souhrn, značky, „+ Přidat“,
+  // „+ N další“, název dne na telefonu, název akce v měsíci, řádek pod
+  // názvem karty) potřebuje 4,5 : 1, praporek jako ikona 3 : 1. Podklady:
+  // mosaz víkendu a dneška v kartě, šrafa svátku (_svatky.css) ještě nad
+  // nimi, buňka pod myší, karty týdne. Měří se nejhorší místo (pod proužkem
+  // šrafy) ve všech třech blocích tokenů. Pravidlo, které písmo přebarvuje,
+  // musí sedět na každý podklad, kde výchozí barva nestačí — a výchozí barva
+  // musí stačit všude jinde, ať silnější víkend nebo šrafa neprojde potichu.
+  const tokeny = cti('app/_tokeny.css')
+  const blok = (od, po) => {
+    const i = tokeny.indexOf(od)
+    return i < 0 ? '' : tokeny.slice(i, tokeny.indexOf(po, i))
+  }
+  const REZIMY = {
+    světlý: blok(':root {', '@media'),
+    'tmavý přepínačem': blok(':root[data-theme="dark"] {', '}'),
+    'tmavý podle systému': blok(':root:not([data-theme="light"]) {', '}'),
+  }
+  const barva = (b, jmeno) => b.match(new RegExp(`--${jmeno}:\\s*#([0-9a-f]{6});`, 'i'))?.[1].match(/../g).map((h) => parseInt(h, 16)) ?? null
+  const jas = (rgb) => {
+    const [r, g, b] = rgb.map((c) => (c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const pomer = (a, b) => (a && b ? (Math.max(jas(a), jas(b)) + 0.05) / (Math.min(jas(a), jas(b)) + 0.05) : 0)
+  const smichat = (a, p, b) => (a && b && Number.isFinite(p) ? a.map((c, i) => Math.round(c * p + b[i] * (1 - p))) : null)
+  const svatkyCss = cti('app/_svatky.css').replace(/\/\*[\s\S]*?\*\//g, '')
+  const srafa = svatkyCss.match(/\.ds-rez-den, \.ds-rez-bunka,[^{]*\)\[data-svatek\] \{([^}]*--svatek-srafa-sila[^}]*)\}/)?.[1] ?? ''
+  const srafaBarva = srafa.match(/--svatek-srafa-barva: var\(--([a-z-]+)\);/)?.[1]
+  const srafaSila = Number(srafa.match(/--svatek-srafa-sila: (\d+)%;/)?.[1]) / 100
+  const mosaz = (prvek, znak) => Number(bezKomentaru.match(new RegExp(`\\.${prvek}\\[data-${znak}\\] \\{ background: color-mix\\(in srgb, var\\(--mosaz-sv\\) (\\d+)%, var\\(--card\\)\\);`))?.[1]) / 100
+  const vinoAkce = Number(bezKomentaru.match(/\.ds-rez-polozka\[data-druh="akce"\] \{[^}]*background: color-mix\(in srgb, var\(--vino\) (\d+)%, var\(--card\)\);/)?.[1]) / 100
+  const podMysi = bezKomentaru.match(/\.ds-rez-bunka:hover \{ background: var\(--([a-z-]+)\); \}/)?.[1]
+  const kartaRezervace = bezKomentaru.match(/\.ds-rez-polozka \{[^}]*background: var\(--([a-z-]+)\);/)?.[1]
+  const podklady = (b) => {
+    const karta = barva(b, 'card')
+    const mos = (p) => smichat(barva(b, 'mosaz-sv'), p, karta)
+    const zaklad = {
+      'týden obyčejný': karta, 'týden víkend': mos(mosaz('ds-rez-den', 'vikend')), 'týden dnes': mos(mosaz('ds-rez-den', 'dnes')),
+      'měsíc obyčejný': karta, 'měsíc víkend': mos(mosaz('ds-rez-bunka', 'vikend')), 'měsíc dnes': mos(mosaz('ds-rez-bunka', 'dnes')),
+      'měsíc pod myší': podMysi ? barva(b, podMysi) : null,
+    }
+    const vse = {}
+    for (const [k, v] of Object.entries(zaklad)) {
+      vse[k] = v
+      vse[`${k} + svátek`] = srafaBarva ? smichat(barva(b, srafaBarva), srafaSila, v) : null
+    }
+    vse['karta akce'] = smichat(barva(b, 'vino'), vinoAkce, karta)
+    vse['karta rezervace'] = kartaRezervace ? barva(b, kartaRezervace) : null
+    return vse
+  }
+  // Barva z pravidla s PŘESNĚ tímhle výčtem selektorů (první, které barvu nastavuje).
+  const bezpecne = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const barvaPravidla = (...selektory) => {
+    const vzor = new RegExp(`(?:^|[\\n{}])\\s*${selektory.map(bezpecne).join(',\\s*')} \\{([^}]*)\\}`, 'g')
+    for (const m of bezKomentaru.matchAll(vzor)) {
+      const b = m[1].match(/(?:^|[\s;])color:\s*var\(--([a-z-]+)\)/)?.[1]
+      if (b) return b
+    }
+    return null
+  }
+  const zmerit = (pismo, kde, potreba) => {
+    const vysledky = Object.entries(REZIMY).flatMap(([rezim, b]) => {
+      const pod = podklady(b)
+      return kde.map((n) => ({ kde: `${n}, ${rezim}`, x: pismo ? pomer(barva(b, pismo), pod[n]) : 0 }))
+    })
+    const spatne = vysledky.filter((v) => !(v.x >= potreba))
+    const nejhur = vysledky.reduce((a, v) => (v.x < a.x ? v : a), { kde: 'nic', x: Infinity })
+    return {
+      dobre: vysledky.length === kde.length * 3 && spatne.length === 0,
+      popis: `barva ${pismo ?? 'žádná'}; nejhůř ${nejhur.x.toFixed(2)} (${nejhur.kde})${spatne.length ? `; pod ${potreba}: ${spatne.map((v) => `${v.kde} ${v.x.toFixed(2)}`).join(', ')}` : ''}`,
+    }
+  }
+  const TYDEN_PREBARVENY = ['týden dnes', 'týden dnes + svátek', 'týden víkend + svátek']
+  const TYDEN_JINDE = ['týden obyčejný', 'týden obyčejný + svátek', 'týden víkend']
+  const MESIC_PREBARVENY = ['měsíc dnes', 'měsíc dnes + svátek', 'měsíc víkend + svátek']
+  const MESIC_JINDE = ['měsíc obyčejný', 'měsíc obyčejný + svátek', 'měsíc víkend']
+  const MYS = ['měsíc pod myší', 'měsíc pod myší + svátek']
+  const naTydnu = zmerit(barvaPravidla('.ds-rez-den:is([data-dnes], [data-vikend][data-svatek]) :is(.ds-rez-den-souhrn, .ds-rez-den-znacky, .ds-rez-den-pridat)'), TYDEN_PREBARVENY, 4.5)
+  ok(`vzhled: drobné písmo v dnešním sloupci týdne i na víkendu se svátkem (souhrn, značky, „+ Přidat“) má kontrast aspoň 4,5 : 1 ve všech třech režimech (${naTydnu.popis})`, naTydnu.dobre)
+  const naMesici = zmerit(barvaPravidla('.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek], :hover) :is(.ds-rez-bunka-souhrn, .ds-rez-bunka-dalsi, .ds-rez-bunka-den-nazev)'), [...MESIC_PREBARVENY, ...MYS], 4.5)
+  ok(`vzhled: drobné písmo na dnešní buňce měsíce, na víkendu se svátkem a pod myší (souhrn, „+ N další“, název dne) má kontrast aspoň 4,5 : 1 ve všech třech režimech (${naMesici.popis})`, naMesici.dobre)
+  const akceMesic = zmerit(barvaPravidla(
+    '.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek]) .ds-rez-bunka-radek[data-druh="akce"] .ds-rez-bunka-text',
+    '.ds-rez-bunka:is([data-dnes], [data-vikend][data-svatek]) .ds-rez-bunka-radek > .ft-i',
+  ), MESIC_PREBARVENY, 4.5)
+  ok(`vzhled: název akce i praporek na dnešní buňce měsíce a na víkendu se svátkem mají kontrast aspoň 4,5 : 1 ve všech třech režimech (${akceMesic.popis})`, akceMesic.dobre)
+  const akceKarta = zmerit(barvaPravidla('.ds-rez-polozka[data-druh="akce"] small'), ['karta akce'], 4.5)
+  ok(`vzhled: řádek pod názvem na kartě akce v týdnu má kontrast aspoň 4,5 : 1 ve všech třech režimech (${akceKarta.popis})`, akceKarta.dobre)
+  const VYCHOZI = [
+    ['.ds-rez-den-souhrn', TYDEN_JINDE, 4.5], ['.ds-rez-den-znacky', TYDEN_JINDE, 4.5], ['.ds-rez-den-pridat', TYDEN_JINDE, 4.5],
+    ['.ds-rez-bunka-souhrn', MESIC_JINDE, 4.5], ['.ds-rez-bunka-dalsi', MESIC_JINDE, 4.5], ['.ds-rez-bunka-den-nazev', MESIC_JINDE, 4.5],
+    ['.ds-rez-bunka-radek[data-druh="akce"] .ds-rez-bunka-text', [...MESIC_JINDE, ...MYS], 4.5],
+    ['.ds-rez-bunka-radek .ft-i', [...MESIC_JINDE, ...MYS], 3],
+    ['.ds-rez-polozka small', ['karta rezervace'], 4.5],
+  ].map(([sel, kde, potreba]) => ({ sel, ...zmerit(barvaPravidla(sel), kde, potreba) }))
+  ok(`vzhled: výchozí barvy drobného písma (šedá, vínový název akce) drží 4,5 : 1 a praporek 3 : 1 na všech podkladech, které pravidla výše nepřebarvují (${VYCHOZI.filter((v) => !v.dobre).map((v) => `${v.sel}: ${v.popis}`).join(' | ') || `${VYCHOZI.length} pravidel v pořádku`})`,
+    VYCHOZI.every((v) => v.dobre))
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

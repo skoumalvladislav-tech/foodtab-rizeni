@@ -221,14 +221,30 @@ export function zkontrolovatPoznamku(nadpis: string, obsah: string): string | nu
 /**
  * Adresa, kam se akce vrací. Jen uvnitř Rezervací téhož rozsahu — jinak
  * by šlo poslat formulář s `zpet=https://…` a nechat se přesměrovat ven.
+ *
+ * Začátek adresy nestačí: prohlížeč ji ještě sám upraví — `..` (i jako
+ * `%2e%2e`) vyleze o složku výš a tabulátor vypustí, takže
+ * `/perla/rezervace/../../k/…` by vedla na veřejné přesměrování ven
+ * (3. 11. 2026). Projde jen adresa, kterou prohlížeč nezmění.
  */
 export function bezpecnaZpatky(rozsah: string, zpet: string | null | undefined): string {
   const zaklad = `/${rozsah}/rezervace`
   const z = String(zpet ?? '')
-  if (z === zaklad || (z.startsWith(`${zaklad}/`) || z.startsWith(`${zaklad}?`))) {
-    if (!z.includes('//') && !z.includes('\\')) return z
-  }
-  return zaklad
+  if (z !== zaklad && !z.startsWith(`${zaklad}/`) && !z.startsWith(`${zaklad}?`)) return zaklad
+  if (z.includes('//') || z.includes('\\')) return zaklad
+  const u = new URL(z, 'http://foodtab.invalid')
+  return u.pathname + u.search === z ? z : zaklad
+}
+
+/**
+ * Odkaz „Zpět“ z náhledu dokumentu otevřeného z kalendáře (`?zpet=`
+ * z týdne, měsíce nebo dne). `null` = neotevíral se z kalendáře; to
+ * platí i pro parametr v adrese dvakrát (Next pak dá pole).
+ */
+export function zpatkyZKalendare(rozsah: string, zpet: string | string[] | undefined): { href: string; text: string } | null {
+  if (typeof zpet !== 'string' || zpet === '') return null
+  const href = bezpecnaZpatky(rozsah, zpet)
+  return { href, text: href.startsWith(`/${rozsah}/rezervace/den/`) ? 'Zpět na den' : 'Zpět na kalendář' }
 }
 
 /** Česká hláška z chyby databáze. Naše funkce mluví česky; cokoli jiného je obecná věta. */

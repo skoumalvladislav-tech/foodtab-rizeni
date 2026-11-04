@@ -7,6 +7,7 @@ import { getCurrentTenantId } from '@/lib/firma'
 import { odkazNaPrihlaseni } from '@/lib/prihlaseni-adresa'
 import { denKratce } from '@/lib/rezervace-kalendar'
 import { otevritVProhlizeci } from '@/lib/rezervace-prilohy'
+import { zpatkyZKalendare } from '@/lib/rezervace-typy'
 
 import { nacistPrilohu, nacistRezervaci, stahnoutPrilohu } from '../../data'
 import { zkusPristupRezervacim } from '../../pristup'
@@ -32,8 +33,15 @@ const VZOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * sem nepatří — ty prohlížeč otevře sám, tak se přesměrují na soubor.
  * Kreslí ../obsah.tsx.
  */
-export default async function RezervaceDokument({ params }: { params: Promise<{ rozsah: string; id: string }> }) {
+export default async function RezervaceDokument({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ rozsah: string; id: string }>
+  searchParams: Promise<{ zpet?: string | string[] }>
+}) {
   const { rozsah, id } = await params
+  const { zpet: zpetText } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) {
@@ -65,11 +73,16 @@ export default async function RezervaceDokument({ params }: { params: Promise<{ 
     : priloha.den
       ? `ke dni ${denKratce(priloha.den)}`
       : null
-  const zpet = r
-    ? { href: `/${rozsah}/rezervace/${r.id}`, text: 'Zpět na rezervaci' }
-    : priloha.den
-      ? { href: `/${rozsah}/rezervace/den/${priloha.den}`, text: 'Zpět na den' }
-      : { href: `/${rozsah}/rezervace`, text: 'Zpět na kalendář' }
+  // Otevřený z kalendáře (týden, den) se vrací do kalendáře — z aplikace
+  // na ploše iPhonu jiná cesta zpátky než tenhle odkaz není. Jen adresa
+  // uvnitř Rezervací téhož rozsahu (zpatkyZKalendare → bezpecnaZpatky), jinak by vedl kamkoli.
+  const zpet =
+    zpatkyZKalendare(rozsah, zpetText) ??
+    (r
+      ? { href: `/${rozsah}/rezervace/${r.id}`, text: 'Zpět na rezervaci' }
+      : priloha.den
+        ? { href: `/${rozsah}/rezervace/den/${priloha.den}`, text: 'Zpět na den' }
+        : { href: `/${rozsah}/rezervace`, text: 'Zpět na kalendář' })
 
   let nahled: NahledDocx | null = null
   let chyba: string | null = null

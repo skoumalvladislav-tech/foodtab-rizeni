@@ -30,9 +30,11 @@ import {
   ZnackaPobocky,
   casRezervace,
   titulek,
+  adresaPohledu,
   type Poznamka,
   type Priloha,
   type RezervaceRadek,
+  type RezervaceSDokumenty,
 } from './prvky'
 
 /**
@@ -60,7 +62,7 @@ export function KalendarObsah({
   datum: string
   dnes: string
   pobocky: PobockaRezervaci[]
-  rezervace: RezervaceRadek[]
+  rezervace: RezervaceSDokumenty[]
   /** Klíč `pobočka|den` → počty poznámek a příloh ke dni. */
   znacky: Map<string, { poznamek: number; priloh: number }>
   /** Země firmy pro svátky (lib/svatky-firmy.ts); `null` = svátky té země neznáme. */
@@ -110,6 +112,7 @@ export function KalendarObsah({
             dnes={dnes}
             smiZapisovat={smiZapisovat}
             pobocky={pobocky}
+            zpet={adresaPohledu(rozsah, pohled, datum)}
             dny={dnyTydne(datum).map((den) => ({ den, rezervace: poDnech.get(den) ?? [], ...znackyDne(den), svatek: svatek(den) }))}
           />
         ) : (
@@ -138,7 +141,7 @@ export function KalendarObsah({
 
 export type DenPobocky = {
   pobocka: PobockaRezervaci
-  rezervace: RezervaceRadek[]
+  rezervace: RezervaceSDokumenty[]
   poznamky: Poznamka[]
   prilohy: Priloha[]
 }
@@ -207,7 +210,7 @@ export function DenObsah({
                   <ZnackaPobocky pobocka={k.pobocka} vedleNazvu={vic} />
                   <span className="ds-rez-oddil-souhrn">{souhrnText(souhrnDne(k.rezervace))}</span>
                 </div>
-                <SeznamRezervaci rozsah={rozsah} rezervace={k.rezervace} />
+                <SeznamRezervaci rozsah={rozsah} rezervace={k.rezervace} zpet={zpet} />
               </section>
             ))}
           </div>
@@ -402,6 +405,7 @@ export function DetailObsah({
               smiZapisovat={smiZapisovat}
               tenantId={tenantId}
               branchId={r.branch_id}
+              kotva="dokumenty"
             />
           </div>
         </div>

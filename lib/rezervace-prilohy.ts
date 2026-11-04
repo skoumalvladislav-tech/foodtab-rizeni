@@ -79,9 +79,42 @@ export function otevritVProhlizeci(mime: string): boolean {
  * Word na náhled ve Foodtabu (dokument/[id]) — prohlížeč ho neotevře,
  * jen stáhne, a na počítači to vypadá, že se po kliknutí nic nestalo
  * (2. 11. 2026). Originál se stahuje z náhledu.
+ *
+ * `zpet` = kam má z náhledu vést „Zpět“ (kalendář, ze kterého se
+ * otevíral). Bez něj náhled vrací k rezervaci nebo ke dni. PDF a fotka
+ * se otevírají v nové záložce, tak ho nepotřebují.
  */
-export function adresaPrilohy(rozsah: string, id: string, mime: string): string {
-  return otevritVProhlizeci(mime) ? `/api/rezervace/soubor/${id}` : `/${rozsah}/rezervace/dokument/${id}`
+export function adresaPrilohy(rozsah: string, id: string, mime: string, zpet?: string): string {
+  if (otevritVProhlizeci(mime)) return `/api/rezervace/soubor/${id}`
+  const nahled = `/${rozsah}/rezervace/dokument/${id}`
+  return zpet ? `${nahled}?zpet=${encodeURIComponent(zpet)}` : nahled
+}
+
+/**
+ * Název na kmen a příponu, ať v úzkém sloupci kalendáře zůstane vidět
+ * „.pdf“ / „.docx“, i když se kmen usekne — PDF se otevře v nové
+ * záložce, Word jako náhled místo kalendáře. Přípona je krátká koncovka
+ * za poslední tečkou s aspoň jedním písmenem („verze 2.0“ žádnou nemá).
+ */
+export function rozdelitNazev(nazev: string): [kmen: string, pripona: string] {
+  const m = nazev.match(/^(.+?)(\.(?=[0-9]*[A-Za-z])[A-Za-z0-9]{1,5})$/)
+  return m ? [m[1], m[2]] : [nazev, '']
+}
+
+/** Dokument u rezervace, jak ho kalendář potřebuje na odkaz. */
+export type DokumentRezervace = { id: string; nazev: string; mime: string }
+
+/**
+ * Dokumenty rezervace z vnořeného výběru `rezervace_prilohy(…)` v pořadí
+ * nahrání, stejně jako v detailu. Stejný okamžik rozhodne id, ať se pořadí
+ * mezi načteními nehází. `null` = žádné.
+ */
+export function dokumentyRezervace(
+  radky: readonly (DokumentRezervace & { nahrano: string })[] | null | undefined,
+): DokumentRezervace[] {
+  return [...(radky ?? [])]
+    .sort((a, b) => Date.parse(a.nahrano) - Date.parse(b.nahrano) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map(({ id, nazev, mime }) => ({ id, nazev, mime }))
 }
 
 /**
