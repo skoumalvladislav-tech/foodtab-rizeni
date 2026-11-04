@@ -312,3 +312,46 @@ details[open] .ds-rez-otevrit { display: none; }
 .ds-rez-upoz-tabulka th[scope="row"] small { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); }
 .ds-rez-upoz-tabulka label { display: flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; cursor: pointer; }
 .ds-rez-upoz-tabulka input { width: 20px; height: 20px; margin: 0; accent-color: var(--mosaz); }
+
+/* --- náhled dokumentu Word (2. 11. 2026) --------------------------------
+   app/[rozsah]/rezervace/dokument/. Text z .docx jako čitelná stránka:
+   řádek do 70 znaků, tabulky se posouvají vodorovně uvnitř karty, ne
+   celá stránka. Tabulátor a zalomení řádku z Wordu zůstávají (pre-wrap). */
+
+.ds-dokument-pozn { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.ds-dokument-pozn a { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); font-weight: 600; white-space: nowrap; }
+.ds-dokument-pozn a .ft-i { width: 16px; height: 16px; }
+.ds-dokument-pozn span { flex: 1 1 320px; }
+
+.ds-plocha.ds-dokument { padding: 28px 32px; font-size: 15px; line-height: 1.55; overflow-wrap: anywhere; }
+.ds-dokument > * { max-width: 70ch; }
+.ds-dokument > .ds-dokument-tabulka { max-width: none; }
+.ds-dokument p, .ds-dokument li, .ds-dokument h2, .ds-dokument h3, .ds-dokument h4 { white-space: pre-wrap; tab-size: 4; }
+.ds-dokument p { margin: 0 0 10px; }
+.ds-dokument h2, .ds-dokument h3, .ds-dokument h4 { margin: 20px 0 8px; line-height: 1.25; }
+.ds-dokument h2 { font-size: 22px; }
+.ds-dokument h3 { font-size: 18px; }
+.ds-dokument h4 { font-size: 16px; }
+.ds-dokument > :first-child { margin-top: 0; }
+.ds-dokument ul { margin: 0 0 10px; padding-left: 22px; list-style: disc; }
+.ds-dokument li::marker { color: var(--muted); }
+.ds-dokument li { margin: 0 0 4px; }
+/* Prázdný odstavec = mezera; `.ds-dokument p` by jinak přebil okraj. */
+.ds-dokument .ds-dokument-mezera { min-height: 10px; margin: 0 0 10px; }
+.ds-dokument-nic { color: var(--muted); }
+/* Název souboru v nadpisu stránky se smí zalomit kdekoli (bývá bez mezer). */
+.ds-dokument-nazev { overflow-wrap: anywhere; }
+.ds-dokument-obrazek {
+  display: inline-block; padding: 0 8px; border: 1px dashed var(--line-2); border-radius: 6px;
+  font-size: 12.5px; line-height: 1.6; color: var(--muted); white-space: nowrap;
+}
+.ds-dokument-tabulka { overflow-x: auto; margin: 0 0 14px; }
+.ds-dokument-tabulka table { border-collapse: collapse; font-size: 14px; }
+.ds-dokument-tabulka td { min-width: 80px; padding: 6px 10px; border: 1px solid var(--line-2); vertical-align: top; }
+.ds-dokument-tabulka td > :last-child { margin-bottom: 0; }
+/* Odsazení řádku (w:gridBefore) není buňka — bez rámečku. */
+.ds-dokument-tabulka td.ds-dokument-mimo { min-width: 0; padding: 0; border: 0; }
+.ds-dokument-tabulka td h2, .ds-dokument-tabulka td h3, .ds-dokument-tabulka td h4 { margin-top: 0; font-size: 15px; }
+@container (max-width: 560px) {
+  .ds-plocha.ds-dokument { padding: 18px 16px; font-size: 14.5px; }
+}

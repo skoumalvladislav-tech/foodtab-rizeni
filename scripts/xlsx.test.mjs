@@ -9,6 +9,7 @@
  *
  *   * první záložka není sheet1.xml (pořadí souborů v archivu neplatí),
  *   * sdílený text složený z několika běhů a s entitami,
+ *   * CDATA doslova a apostrof v komentáři nebo instrukci (nic nespolkne),
  *   * vynechané buňky uprostřed řádku (`r="C2"` po `r="A2"`),
  *   * buňka se vzorcem — bere se spočítaná hodnota, vzorec se nečte,
  *   * obě komprese, kterou tabulkové editory používají: 0 i deflate.
@@ -18,6 +19,7 @@ import { deflateRawSync, crc32 } from 'node:zlib'
 import {
   precistXlsx,
   ctiSdileneTexty,
+  ctiList,
   ctiStyly,
   datumZCisla,
   formatJeDatum,
@@ -162,6 +164,16 @@ ma('počet', sd.length, 7)
 ma('text složený z běhů', sd[3], 'Novák & syn')
 ma('fonetický přepis se nepřilepí', sd[4], 'Černá Perla')
 ma('entity', sd[6], 'Kuchař <vedoucí>')
+// CDATA je text bez entit: `&amp;` v ní zůstane pěti znaky, `<b>` není
+// značka. Apostrof v komentáři ani v instrukci nesmí spolknout zbytek.
+ma('sdílený text: CDATA doslova (entity v ní se nedekódují), komentář a instrukce s apostrofem nic nespolknou',
+  ctiSdileneTexty(`<sst><!-- guest's --><si><t>a&amp;<![CDATA[&amp;<b>]]>c</t></si><?x it's?><si><t>d</t></si></sst>`),
+  ['a&&amp;<b>c', 'd'])
+
+console.log('\n== List ==')
+ma('list: hodnota v CDATA doslova, komentář s apostrofem před řádkem nic nespolkne',
+  ctiList(`<worksheet><sheetData><!-- it's --><row r="1"><c r="A1" t="inlineStr"><is><t><![CDATA[x&amp;y]]></t></is></c><c r="B1" t="str"><v><![CDATA[q]]></v></c></row></sheetData></worksheet>`, []),
+  [['x&amp;y', 'q']])
 
 for (const deflate of [false, true]) {
   console.log(`\n== Sešit (${deflate ? 'deflate' : 'bez komprese'}) ==`)

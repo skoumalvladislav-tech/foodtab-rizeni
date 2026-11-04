@@ -17,7 +17,7 @@
  */
 
 /** Jeden soubor uvnitř ZIP archivu, ještě zabalený. */
-type Polozka = {
+export type Polozka = {
   nazev: string
   metoda: number
   offset: number
@@ -37,7 +37,7 @@ const dv = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength)
  * Z místní hlavičky se čte jen délka jména a extra pole, aby se našel
  * začátek dat.
  */
-function ctiZip(bajty: Uint8Array): Map<string, Polozka> {
+export function ctiZip(bajty: Uint8Array): Map<string, Polozka> {
   const d = dv(bajty)
 
   // Konec ústředního adresáře. Hledá se od konce, protože za ním smí
@@ -118,14 +118,34 @@ export function odkodovat(s: string): string {
   })
 }
 
+const vzoryAtributu = new Map<string, RegExp>()
+
+/**
+ * Hodnota atributu, jak stojí v souboru — entity (`&amp;`) zůstanou.
+ * Pro hodnoty, které se jen porovnávají (`w:val="0"`): dekódování
+ * megabajtové hodnoty z cizího souboru by zabralo server na vteřiny.
+ */
+export function surovyAtribut(znacka: string, jmeno: string): string | null {
+  let vzor = vzoryAtributu.get(jmeno)
+  if (!vzor) {
+    vzor = new RegExp(`\\b${jmeno}\\s*=\\s*("([^"]*)"|'([^']*)')`)
+    vzoryAtributu.set(jmeno, vzor)
+  }
+  const m = znacka.match(vzor)
+  return m ? (m[2] ?? m[3] ?? '') : null
+}
+
 /** Hodnota atributu ze značky. Respektuje uvozovky obojího druhu. */
-function atribut(znacka: string, jmeno: string): string | null {
-  const m = znacka.match(new RegExp(`\\b${jmeno}\\s*=\\s*("([^"]*)"|'([^']*)')`))
-  return m ? odkodovat(m[2] ?? m[3] ?? '') : null
+export function atribut(znacka: string, jmeno: string): string | null {
+  const v = surovyAtribut(znacka, jmeno)
+  return v === null ? null : odkodovat(v)
 }
 
 /** Postupně vrací značky a text mezi nimi. */
-function* kousky(xml: string): Generator<{ znacka: boolean; text: string }> {
+export function* kousky(xml: string): Generator<{ znacka: boolean; text: string; doslova?: boolean }> {
+  // Konec, který v souboru dál není, se znovu nehledá — tisíce
+  // neuzavřených komentářů by jinak soubor prošly tisíckrát.
+  const chybi = new Set<string>()
   let i = 0
   while (i < xml.length) {
     const zac = xml.indexOf('<', i)
@@ -134,6 +154,23 @@ function* kousky(xml: string): Generator<{ znacka: boolean; text: string }> {
       return
     }
     if (zac > i) yield { znacka: false, text: xml.slice(i, zac) }
+
+    // Komentář, CDATA a instrukce mají vlastní konec a uvozovky v nich nic
+    // neznamenají — apostrof v komentáři by jinak spolkl zbytek souboru.
+    // Obsah CDATA je text bez entit (`doslova`): `&amp;` v něm je pět znaků.
+    const zvlastni = xml.startsWith('<!--', zac) ? '-->' : xml.startsWith('<![CDATA[', zac) ? ']]>' : xml.startsWith('<?', zac) ? '?>' : ''
+    if (zvlastni && !chybi.has(zvlastni)) {
+      const obsah = zac + (zvlastni === '-->' ? 4 : zvlastni === ']]>' ? 9 : 2)
+      const konec = xml.indexOf(zvlastni, obsah)
+      if (konec === -1) {
+        chybi.add(zvlastni)
+      } else {
+        if (zvlastni !== ']]>') yield { znacka: true, text: xml.slice(zac, konec + zvlastni.length) }
+        else if (konec > obsah) yield { znacka: false, text: xml.slice(obsah, konec), doslova: true }
+        i = konec + zvlastni.length
+        continue
+      }
+    }
 
     // Konec značky hledáme mimo uvozovky — atribut smí obsahovat '>'.
     let j = zac + 1
@@ -162,7 +199,7 @@ export function ctiSdileneTexty(xml: string): string[] {
 
   for (const k of kousky(xml)) {
     if (!k.znacka) {
-      if (vSi && vT && !vRph) sbirka += odkodovat(k.text)
+      if (vSi && vT && !vRph) sbirka += k.doslova ? k.text : odkodovat(k.text)
       continue
     }
     const z = k.text
@@ -234,7 +271,7 @@ export function ctiList(
 
   for (const k of kousky(xml)) {
     if (!k.znacka) {
-      if (vHodnote) hodnota += odkodovat(k.text)
+      if (vHodnote) hodnota += k.doslova ? k.text : odkodovat(k.text)
       continue
     }
     const z = k.text
