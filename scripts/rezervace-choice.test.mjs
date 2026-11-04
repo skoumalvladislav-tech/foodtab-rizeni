@@ -77,7 +77,7 @@ import {
   stavZChoice,
   vytvoritChoice,
 } from '../lib/rezervace-choice.ts'
-import { zkratit } from '../lib/rezervace-import.ts'
+import { naparsovatCsvRezervaci, zkratit, zRadkuZdroje } from '../lib/rezervace-import.ts'
 import { adresaModulu, nactiModul } from './vykreslit.mjs'
 
 const KOREN = path.join(import.meta.dirname, '..')
@@ -2284,6 +2284,11 @@ async function beh(popis, spustit, kontroly) {
     const x = mistoZChoice(vsechnyZ(jmena), oblastJmen('Sál', jmena))
     return [x === 'Sál: S3, S10, Salonek', x]
   })
+  kontrola('číslo navazuje, písmeno ne: A1, B2, C3 → „Sál: A1, B2, C3“ (ne „A1–C3“)', () => {
+    const jmena = ['A1', 'B2', 'C3']
+    const x = mistoZChoice(vsechnyZ(jmena), oblastJmen('Sál', jmena))
+    return [x === 'Sál: A1, B2, C3', x]
+  })
   kontrola('číslo vynechané v oblasti (S3 v Choice není): S1, S2, S4 → „Sál: S1, S2, S4“ (ne „S1–S4“)', () => {
     const jmena = ['S1', 'S2', 'S4']
     const x = mistoZChoice(vsechnyZ(jmena), oblastJmen('Sál', jmena))
@@ -2345,18 +2350,37 @@ async function beh(popis, spustit, kontroly) {
     const x = mistoZChoice(['m1'], mapaMist([{ id: 'o1', nazev: 'Patro' }], [[{ _id: 'm1', name: `${'A'.repeat(39)}😀` }]]))
     return [x === `Patro: ${'A'.repeat(39)}` && !LICHA_POLOVINA.test(x), x]
   })
-  kontrola('osamělá půlka znaku ve jméně z Choice → náhradní znak �', () => {
+  kontrola('osamělá půlka znaku ve jméně z Choice → náhradní znak U+FFFD', () => {
     const x = mistoZChoice(['m1'], mapaMist([{ id: 'o1', nazev: 'Patro' }], [[{ _id: 'm1', name: 'S1\uD800' }]]))
-    return [x === 'Patro: S1�', JSON.stringify(x)]
+    return [x === 'Patro: S1\uFFFD', JSON.stringify(x)]
   })
   kontrola('zkratit: emoji na hranici se nerozpůlí, osamělé půlky se nahradí', () => {
     const a = zkratit('ab😀', 3)
     const b = zkratit('a\uDC00b\uD83D', 10)
-    return [a === 'ab' && b === 'a�b�', `${JSON.stringify(a)} ${JSON.stringify(b)}`]
+    return [a === 'ab' && b === 'a\uFFFDb\uFFFD', `${JSON.stringify(a)} ${JSON.stringify(b)}`]
   })
   kontrola('poznámka hosta s emoji přes hranici 2000 znaků nemá půlznak', () => {
     const x = poznamkaZChoice({ comment: `${'x'.repeat(1999)}😀 konec` })
     return [x === 'x'.repeat(1999) && !LICHA_POLOVINA.test(x), `${x.length} znaků`]
+  })
+  // Totéž ve společné cestě všech zdrojů a v souboru (CSV) — každé
+  // zkrácené pole má emoji přesně přes svou hranici.
+  const naHranici = (n) => `${'x'.repeat(n - 1)}😀`
+  kontrola('řádek ze zdroje (zRadkuZdroje): žádné z 8 zkrácených polí nemá půlznak', () => {
+    const s = zRadkuZdroje({
+      externiId: 'z1', stav: 'potvrzeno', stavZdroje: naHranici(60), pocetHostu: 2, cas: '2026-11-20T18:00:00.000Z', konec: null, zmenenoKdy: null,
+      externiProvozovna: '1', jmenoHosta: naHranici(120), telefonHosta: naHranici(40), emailHosta: naHranici(254), poznamka: naHranici(4000),
+      prostor: naHranici(120), misto: naHranici(300), cisloZdroje: naHranici(40),
+    })
+    const spatne = ['stav_zdroje', 'jmeno_hosta', 'telefon', 'email', 'poznamka', 'prostor', 'misto_zdroje', 'cislo_zdroje']
+      .filter((k) => typeof s.radek?.[k] !== 'string' || s.radek[k].length === 0 || LICHA_POLOVINA.test(s.radek[k]))
+    return [s.stav === 'ok' && spatne.length === 0, spatne.join(', ') || 'všech 8 bez půlznaku']
+  })
+  kontrola('soubor (CSV): jméno, telefon, e-mail, poznámka a prostor bez půlznaku', () => {
+    const v = naparsovatCsvRezervaci(`id;datum;čas;jméno;telefon;email;poznámka;prostor\n1;30.10.2026;19:00;${naHranici(120)};${naHranici(40)};${naHranici(254)};${naHranici(4000)};${naHranici(120)}\n`)
+    const r = v.radky[0]
+    const spatne = ['jmeno_hosta', 'telefon', 'email', 'poznamka', 'prostor'].filter((k) => typeof r?.[k] !== 'string' || r[k].length === 0 || LICHA_POLOVINA.test(r[k]))
+    return [v.chyby.length === 0 && v.radky.length === 1 && spatne.length === 0, spatne.join(', ') || `${v.radky.length} řádek, ${v.chyby.length} chyb`]
   })
 }
 

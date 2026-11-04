@@ -66,7 +66,7 @@ const RE_LICHA_POLOVINA = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF
  * zvenku, se nahradí znakem �.
  */
 export function zkratit(text: string, max: number): string {
-  const s = text.replace(RE_LICHA_POLOVINA, '�')
+  const s = text.replace(RE_LICHA_POLOVINA, '\uFFFD')
   if (s.length <= max) return s
   const kus = s.slice(0, max)
   return /[\uD800-\uDBFF]$/.test(kus) ? kus.slice(0, -1) : kus
