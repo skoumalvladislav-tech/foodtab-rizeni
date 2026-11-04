@@ -1070,6 +1070,42 @@ const jakoTlacitko = (s, firma = FIRMA) => [...zabraniFronty(s), ...zabraniOvere
     s2.dotazy.length === 3 && s2.dotazy.every((d) => d.cas <= s2.START + 12_000))
 }
 
+/**
+ * Seznam míst podniku (oddíl 11 a souběhy v 6a/6b) jako na snímku Šéfíka
+ * 4. 11. 2026 (rezervace #105): Patro S1–S12, Terasa L7–L10 a P1–P6,
+ * Bar/Restaurace 1–7, „S sebou“ s itemCount 0 (Choice ho počítá sám —
+ * načte se i tak, viz oblastiZOdpovedi). Odpověď s místy schválně
+ * v jiném pořadí, než jak jdou jména — řadí se podle jména (S2 před S10).
+ */
+const OBLASTI_CHOICE = [
+  { _id: 'a00000000000000000000001', name: 'Patro', active: true, type: 'simple', default: false, itemCount: 12 },
+  { _id: 'a00000000000000000000002', name: 'Terasa', active: true, type: 'simple', default: false, itemCount: 10 },
+  { _id: 'a00000000000000000000003', name: 'Bar/Restaurace', active: true, type: 'simple', default: true, itemCount: 7 },
+  { _id: 'a00000000000000000000004', name: 'S sebou', active: true, type: 'takeaway', default: false, itemCount: 0 },
+]
+const stul = (kod) => `b${kod.toLowerCase().replace(/[^a-z0-9]/g, '').padStart(23, '0')}`
+const mistaOblasti = (oblast, nazvy) => nazvy.map((name, i) => ({ _id: stul(`${oblast}${name}`), name, active: true, posID: null, position: nazvy.length - i, area: oblast }))
+const S = Array.from({ length: 12 }, (_, i) => `S${i + 1}`)
+const MISTA_CHOICE = {
+  a00000000000000000000001: mistaOblasti('a00000000000000000000001', [...S].reverse()),
+  a00000000000000000000002: mistaOblasti('a00000000000000000000002', ['L7', 'L8', 'L9', 'L10', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6']),
+  a00000000000000000000003: mistaOblasti('a00000000000000000000003', ['1', '2', '3', '4', '5', '6', '7']),
+  a00000000000000000000004: [],
+}
+const idS = (oblast, name) => stul(`${oblast}${name}`)
+const PATRO = 'a00000000000000000000001'
+const TERASA = 'a00000000000000000000002'
+const BAR = 'a00000000000000000000003'
+const S_SEBOU = 'a00000000000000000000004'
+const stolyPatra = (...n) => n.map((i) => idS(PATRO, `S${i}`))
+/** Odpověď Choice na dotaz seznamu míst; `null` = adresa seznamu míst to není. */
+const odpovedMist = (url) => {
+  if (url === adresaOblasti()) return odpoved(200, OBLASTI_CHOICE)
+  const m = /\/location\/cs\/points\/list\/([^/?]+)$/.exec(url)
+  return m ? odpoved(200, MISTA_CHOICE[m[1]] ?? []) : null
+}
+const jeSeznamMist = (url) => String(url).startsWith(`${API_CHOICE}/location/`)
+
 /* ===================================================================== */
 console.log('\n== 6a. Souběh ve virtuálním čase: tlačítka vedle běžícího načítání ==\n')
 
@@ -2093,31 +2129,7 @@ console.log('\n== 10. Každý kód hlášky má text ==\n')
 /* ===================================================================== */
 console.log('\n== 11. Stoly z Choice (locationPoints → „Patro: S1–S12“) ==\n')
 
-/**
- * Podnik jako na snímku Šéfíka 4. 11. 2026 (rezervace #105): Patro S1–S12,
- * Terasa L7–L10 a P1–P6, Bar/Restaurace 1–7. Odpověď s místy schválně
- * v jiném pořadí, než jak jdou jména — řadí se podle jména (S2 před S10).
- */
-const OBLASTI_CHOICE = [
-  { _id: 'a00000000000000000000001', name: 'Patro', active: true, type: 'simple', default: false, itemCount: 12 },
-  { _id: 'a00000000000000000000002', name: 'Terasa', active: true, type: 'simple', default: false, itemCount: 10 },
-  { _id: 'a00000000000000000000003', name: 'Bar/Restaurace', active: true, type: 'simple', default: true, itemCount: 7 },
-  { _id: 'a00000000000000000000004', name: 'S sebou', active: true, type: 'takeaway', default: false, itemCount: 0 },
-]
-const stul = (kod) => `b${kod.toLowerCase().replace(/[^a-z0-9]/g, '').padStart(23, '0')}`
-const mistaOblasti = (oblast, nazvy) => nazvy.map((name, i) => ({ _id: stul(`${oblast}${name}`), name, active: true, posID: null, position: nazvy.length - i, area: oblast }))
-const S = Array.from({ length: 12 }, (_, i) => `S${i + 1}`)
-const MISTA_CHOICE = {
-  a00000000000000000000001: mistaOblasti('a00000000000000000000001', [...S].reverse()),
-  a00000000000000000000002: mistaOblasti('a00000000000000000000002', ['L7', 'L8', 'L9', 'L10', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6']),
-  a00000000000000000000003: mistaOblasti('a00000000000000000000003', ['1', '2', '3', '4', '5', '6', '7']),
-}
-const idS = (oblast, name) => stul(`${oblast}${name}`)
-const PATRO = 'a00000000000000000000001'
-const TERASA = 'a00000000000000000000002'
-const BAR = 'a00000000000000000000003'
-const MAPA = mapaMist(oblastiZOdpovedi(OBLASTI_CHOICE), [MISTA_CHOICE[PATRO], MISTA_CHOICE[TERASA], MISTA_CHOICE[BAR]])
-const stolyPatra = (...n) => n.map((i) => idS(PATRO, `S${i}`))
+const MAPA = mapaMist(oblastiZOdpovedi(OBLASTI_CHOICE), [MISTA_CHOICE[PATRO], MISTA_CHOICE[TERASA], MISTA_CHOICE[BAR], MISTA_CHOICE[S_SEBOU]])
 
 /** Podstrčené Choice API: rezervace po průchodech, oblasti a místa; počítá volání. */
 function apiSeStoly({ rezervace: seznam, oblasti = () => ({ stav: 'ok', oblasti: OBLASTI_CHOICE }), mista = (id) => ({ stav: 'ok', mista: MISTA_CHOICE[id] ?? [] }) }) {

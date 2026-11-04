@@ -54,6 +54,24 @@ export const MAX_RADKU_IMPORTU = 2000
 /** Okamžik s časovým pásmem — stejný vzor jako `app.rezervace_okamzik_zdroje`. */
 const VZOR_PASMA = /(Z|z|[+-]\d{2}(:?\d{2})?)$/
 
+/** Půlka dvojice UTF-16 bez druhé půlky (rozříznuté emoji). */
+const RE_LICHA_POLOVINA = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
+/**
+ * Text nejvýš `max` jednotek UTF-16 (tedy i nejvýš `max` znaků pro
+ * databázi) a NIKDY s rozříznutým emoji. Obyčejné `.slice` umí useknout
+ * emoji v půlce; JSON s takovou půlkou odmítne PostgREST celý (PGRST102)
+ * — u Choice by se nezapsala celá stránka rezervací a načítání by na ní
+ * uvázlo (kontrola kódu 4. 11. 2026). Osamělá půlka, která přišla už
+ * zvenku, se nahradí znakem �.
+ */
+export function zkratit(text: string, max: number): string {
+  const s = text.replace(RE_LICHA_POLOVINA, '�')
+  if (s.length <= max) return s
+  const kus = s.slice(0, max)
+  return /[\uD800-\uDBFF]$/.test(kus) ? kus.slice(0, -1) : kus
+}
+
 /**
  * Stav z cizího systému → stav ve Foodtabu. Klíče jsou v porovnávacím
  * tvaru (`normalizovat`: malá písmena, bez diakritiky). Hodnoty ze
@@ -204,7 +222,7 @@ export function naparsovatCsvRezervaci(obsah: string): VysledekCsv {
     if (pocet !== '' && !/^\d{1,5}$/.test(pocet)) return chyba(`Počet osob „${pocet}“ není celé číslo.`)
     if (pocet !== '' && Number(pocet) < 1) return chyba('Počet osob musí být aspoň 1.')
 
-    const jmeno = bunka(r, 'jmeno_hosta').slice(0, 120)
+    const jmeno = zkratit(bunka(r, 'jmeno_hosta'), 120)
     let externi = bunka(r, 'externi_id')
     if (bezCisla) {
       if (jmeno === '') return chyba('Bez čísla rezervace a bez jména nejde řádek spárovat.')
@@ -219,16 +237,16 @@ export function naparsovatCsvRezervaci(obsah: string): VysledekCsv {
     radky.push({
       externi_id: externi,
       stav,
-      stav_zdroje: stavText.slice(0, 60),
+      stav_zdroje: zkratit(stavText, 60),
       datum,
       od,
       do: doCas,
       jmeno_hosta: jmeno,
       pocet_osob: pocet,
-      telefon: bunka(r, 'telefon').slice(0, 40),
-      email: bunka(r, 'email').slice(0, 254),
-      poznamka: bunka(r, 'poznamka').slice(0, 4000),
-      prostor: bunka(r, 'prostor').slice(0, 120),
+      telefon: zkratit(bunka(r, 'telefon'), 40),
+      email: zkratit(bunka(r, 'email'), 254),
+      poznamka: zkratit(bunka(r, 'poznamka'), 4000),
+      prostor: zkratit(bunka(r, 'prostor'), 120),
     })
   })
 
@@ -255,19 +273,19 @@ export function zRadkuZdroje(r: RadekRezervace): { stav: 'ok'; radek: RadekImpor
     radek: {
       externi_id: r.externiId.trim(),
       stav: r.stav,
-      stav_zdroje: r.stavZdroje.slice(0, 60),
+      stav_zdroje: zkratit(r.stavZdroje, 60),
       zacatek: r.cas.trim(),
       konec: r.konec?.trim() ?? '',
       zmeneno_kdy: r.zmenenoKdy?.trim() ?? '',
-      jmeno_hosta: (r.jmenoHosta ?? '').slice(0, 120),
+      jmeno_hosta: zkratit(r.jmenoHosta ?? '', 120),
       pocet_osob: r.pocetHostu === null ? '' : String(r.pocetHostu),
-      telefon: (r.telefonHosta ?? '').slice(0, 40),
-      email: (r.emailHosta ?? '').slice(0, 254),
-      poznamka: r.poznamka.slice(0, 4000),
-      prostor: (r.prostor ?? '').slice(0, 120),
+      telefon: zkratit(r.telefonHosta ?? '', 40),
+      email: zkratit(r.emailHosta ?? '', 254),
+      poznamka: zkratit(r.poznamka, 4000),
+      prostor: zkratit(r.prostor ?? '', 120),
       // Jen když je adaptér zná — chybějící klíč databáze čte jako „nech uložené“.
-      ...(r.misto !== undefined ? { misto_zdroje: r.misto.trim().slice(0, 300) } : {}),
-      ...(r.cisloZdroje !== undefined ? { cislo_zdroje: r.cisloZdroje.trim().slice(0, 40) } : {}),
+      ...(r.misto !== undefined ? { misto_zdroje: zkratit(r.misto.trim(), 300) } : {}),
+      ...(r.cisloZdroje !== undefined ? { cislo_zdroje: zkratit(r.cisloZdroje.trim(), 40) } : {}),
     },
   }
 }

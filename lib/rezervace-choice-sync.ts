@@ -650,6 +650,7 @@ export async function synchronizovatChoice(
     return vysledek('chyba', duvod)
   }
 
+  const posledniDotazMs = Math.min(moznosti.konecMs - REZERVA_DOTAZU_MS, moznosti.posledniDotazMs ?? Infinity)
   let beh
   try {
     beh = await probehnoutChoice({
@@ -661,11 +662,17 @@ export async function synchronizovatChoice(
       pockatNaDotaz: cekatNaFrontu(
         sluzba,
         pripojeni.tenant_id,
-        Math.min(moznosti.konecMs - REZERVA_DOTAZU_MS, moznosti.posledniDotazMs ?? Infinity),
+        posledniDotazMs,
         moznosti.uloha === true ? 'uloha' : 'tlacitko',
         p,
         dil,
       ),
+      // Seznam míst jde mimo frontu (limit 1 za 5 s má Choice jen
+      // u /bookings/list), ale odejít smí jen do chvíle, do které smí
+      // odejít dotaz z fronty: do konce dílu úlohy (`dil.konecMs`, zná
+      // se po prvním dotazu), jinak do `posledniDotazMs`. Po ní zbývá
+      // rezerva na odpověď a zápis.
+      smiMimoFrontu: () => p.ted() <= Math.min(posledniDotazMs, dil?.konecMs ?? Infinity),
       zapsat: zapisDoFoodtabu(sluzba, pripojeni.id),
     })
   } catch (e) {
@@ -680,7 +687,9 @@ export async function synchronizovatChoice(
 
   const chyba = chybaBehu(beh)
   const zmena: Record<string, unknown> = {
-    externi_ucet: { ...ucet, kurzor: beh.kurzor },
+    // `ukazka_delky`: visitDuration s číslem rezervace, jak ho Choice
+    // poslal — podle něj se pozná jednotka délky (lib/rezervace-choice.ts).
+    externi_ucet: { ...ucet, kurzor: beh.kurzor, ...(beh.ukazkaDelky.length > 0 ? { ukazka_delky: beh.ukazkaDelky } : {}) },
     posledni_chyba: chyba,
   }
   if (beh.uspesnych > 0) {

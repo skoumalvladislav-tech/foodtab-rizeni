@@ -210,6 +210,18 @@ select pg_temp.check(format('číslo jako JSON číslo se uloží jako text; nul
   (:'imp7'::jsonb ->> 'zmenene')::int = 1 and (:'imp8'::jsonb ->> 'zmenene')::int = 1
   and pg_temp.udaje('krok109-choice', 'krok109-106') = '|106|');
 
+-- Rezervace načtená před db push (bez klíčů, bez stolů); po něm přijde
+-- totéž, jen s číslem a prázdnými stoly. Změnilo se JEN číslo — i to je
+-- změna, jinak by se „(Choice, č. 108)“ u ní neukázalo nikdy.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  '[{"externi_id":"krok109-108","zacatek":"2099-11-27T21:00:00.000Z","jmeno_hosta":"Jen číslo Krok109","pocet_osob":"2"}]'::jsonb)::text as imp_c1 \gset
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  '[{"externi_id":"krok109-108","zacatek":"2099-11-27T21:00:00.000Z","jmeno_hosta":"Jen číslo Krok109","pocet_osob":"2","misto_zdroje":"","cislo_zdroje":"108"}]'::jsonb)::text as imp_c2 \gset
+select pg_temp.check(format('změní-li se JEN číslo rezervace (stoly prázdné jako dřív), je to „změněná“ a číslo se zapíše (%s → %s)', :'imp_c2', pg_temp.udaje('krok109-choice', 'krok109-108')),
+  (:'imp_c1'::jsonb ->> 'nove')::int = 1
+  and (:'imp_c2'::jsonb ->> 'zmenene')::int = 1 and (:'imp_c2'::jsonb ->> 'beze_zmeny')::int = 0
+  and pg_temp.udaje('krok109-choice', 'krok109-108') = '|108|');
+
 
 \echo ''
 \echo '== 4. Prostor patří Foodtabu ============================='

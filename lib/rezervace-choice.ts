@@ -33,11 +33,18 @@
  *     (stoly v oblasti). Načte se nejvýš jednou za běh a jen když nějaká
  *     rezervace stoly má (`nacistMapuMist`); do rezervace jde text
  *     „Patro: S1–S12“ (`mistoZChoice`). Limit 1 dotaz za 5 s je jen
- *     u `/bookings/list`, přesto jde seznam míst přes frontu dotazů
- *     (jedno místo ve frontě) — fronta hlídá i rezervu času běhu.
- *     Když se seznam nenačte, stoly u rezervací zůstanou z minula a
- *     rezervace se načítají dál.
+ *     u `/bookings/list` (ostatní metody 60 za sekundu, api.md), proto
+ *     seznam míst jde MIMO frontu dotazů. Místo ve frontě by vzalo čas
+ *     dotazu na rezervace: úloha dává připojení tři (blízko, nové, okno)
+ *     a druhé pobočce by se přestalo načítat okno (kontrola kódu 4. 11.).
+ *     Hlídá se jen, aby se vešel do času běhu (`smiMimoFrontu`: odejít
+ *     smí do stejné chvíle jako dotaz z fronty). Když se seznam nenačte,
+ *     stoly u rezervací zůstanou z minula a rezervace se načítají dál.
  *   * `num` je číslo rezervace, jak ho ukazuje Choice („#105“).
+ *   * `visitDuration` se nepřevádí (jednotka viz níž), ale běh si uloží
+ *     pár ukázek s číslem rezervace (`ukazkaDelky` →
+ *     `externi_ucet.ukazka_delky`). Choice u #105 ukazuje „2h“ — podle
+ *     čísla u ní se jednotka pozná jistě, bez hádání.
  *
  * CO DOKUMENTACE NEŘÍKÁ — A TADY SE TO NEDOMÝŠLÍ
  *
@@ -62,7 +69,7 @@
 import { createHash } from 'node:crypto'
 
 import type { RadekRezervace, StavRezervace } from './reservation-provider-contract.ts'
-import { zRadkuZdroje, type RadekImportu } from './rezervace-import.ts'
+import { zkratit, zRadkuZdroje, type RadekImportu } from './rezervace-import.ts'
 import { pocet, sklonovat } from './sklonovani.ts'
 
 export const API_CHOICE = 'https://open-api.choiceqr.com'
@@ -393,29 +400,45 @@ function idChoice(x: unknown): string | null {
 const RAZENI_MIST = new Intl.Collator('cs', { numeric: true, sensitivity: 'base' })
 
 export type OblastChoice = { id: string; nazev: string }
-/** `oblast` = index do `MapaMist.oblasti`, `poradi` = pořadí stolu v oblasti podle jména (S1, S2 … S12). */
+/**
+ * `oblast` = index do `MapaMist.oblasti`, `poradi` = pořadí stolu v oblasti
+ * podle jména (S1, S2 … S12). Stůl, který v Choice jméno nemá, je v mapě
+ * s `nazev` '' a `poradi` -1: Choice ho zná, jen se nedá napsat.
+ */
 export type MistoChoice = { oblast: number; poradi: number; nazev: string }
-export type MapaMist = { oblasti: string[]; mista: Map<string, MistoChoice> }
+/**
+ * `uplna` = načetly se VŠECHNY oblasti podniku. Když ne (víc než
+ * `MAX_OBLASTI`), stůl, který v mapě není, může být v nenačtené oblasti —
+ * pak se o něm neříká „bez názvu“ a stoly rezervace zůstanou z minula.
+ */
+export type MapaMist = { oblasti: string[]; mista: Map<string, MistoChoice>; uplna: boolean }
 
-/** Oblasti ze seznamu v pořadí Choice; bez id a prázdné (`itemCount` 0) pryč, nejvýš `MAX_OBLASTI`. */
+/**
+ * Oblasti ze seznamu v pořadí Choice, bez id a opakované pryč. VŠECHNY,
+ * i s `itemCount` 0: ten počet Choice počítá sám a může být starý —
+ * přeskočená oblast by udělala ze skutečného stolu „bez názvu“. Kolik
+ * se jich opravdu načte, řeší `nacistMapuMist` (`MAX_OBLASTI`).
+ */
 export function oblastiZOdpovedi(seznam: unknown[]): OblastChoice[] {
   const oblasti: OblastChoice[] = []
   const videne = new Set<string>()
-  for (const x of seznam) {
+  for (const x of seznam.slice(0, 1000)) {
     if (!x || typeof x !== 'object' || Array.isArray(x)) continue
     const o = x as Record<string, unknown>
     const id = idChoice(o._id)
     if (!id || videne.has(id)) continue
-    if (typeof o.itemCount === 'number' && o.itemCount <= 0) continue
     videne.add(id)
     oblasti.push({ id, nazev: cistyText(o.name, 60) })
-    if (oblasti.length >= MAX_OBLASTI) break
   }
   return oblasti
 }
 
-/** Mapa id stolu → oblast a jméno. `mistaPodleOblasti[i]` patří `oblasti[i]`. Stůl bez jména se nezná. */
-export function mapaMist(oblasti: OblastChoice[], mistaPodleOblasti: unknown[][]): MapaMist {
+/**
+ * Mapa id stolu → oblast a jméno. `mistaPodleOblasti[i]` patří `oblasti[i]`.
+ * Stůl bez jména v mapě JE (s `nazev` ''): Choice ho zná, takže to není
+ * „stůl mimo seznam míst“.
+ */
+export function mapaMist(oblasti: OblastChoice[], mistaPodleOblasti: unknown[][], uplna = true): MapaMist {
   const mista = new Map<string, MistoChoice>()
   oblasti.forEach((_, i) => {
     const stoly: { id: string; nazev: string; pozice: number }[] = []
@@ -423,33 +446,37 @@ export function mapaMist(oblasti: OblastChoice[], mistaPodleOblasti: unknown[][]
       if (!x || typeof x !== 'object' || Array.isArray(x)) continue
       const m = x as Record<string, unknown>
       const id = idChoice(m._id)
-      const nazev = cistyText(m.name, 40)
-      if (!id || !nazev || mista.has(id) || stoly.some((s) => s.id === id)) continue
-      stoly.push({ id, nazev, pozice: typeof m.position === 'number' ? m.position : Infinity })
+      if (!id || mista.has(id) || stoly.some((s) => s.id === id)) continue
+      stoly.push({ id, nazev: cistyText(m.name, 40), pozice: typeof m.position === 'number' ? m.position : Infinity })
     }
-    stoly.sort((a, b) => RAZENI_MIST.compare(a.nazev, b.nazev) || a.pozice - b.pozice)
-    stoly.forEach((s, poradi) => mista.set(s.id, { oblast: i, poradi, nazev: s.nazev }))
+    const sJmenem = stoly.filter((s) => s.nazev)
+    sJmenem.sort((a, b) => RAZENI_MIST.compare(a.nazev, b.nazev) || a.pozice - b.pozice)
+    sJmenem.forEach((s, poradi) => mista.set(s.id, { oblast: i, poradi, nazev: s.nazev }))
+    for (const s of stoly) if (!s.nazev) mista.set(s.id, { oblast: i, poradi: -1, nazev: '' })
   })
-  return { oblasti: oblasti.map((o) => o.nazev), mista }
+  return { oblasti: oblasti.map((o) => o.nazev), mista, uplna }
 }
 
 export type VysledekMapy = { stav: 'ok'; mapa: MapaMist; dotazu: number } | { stav: 'chyba'; duvod: string; dotazu: number }
 
 /**
- * Seznam míst celého podniku: oblasti, pak stoly všech oblastí souběžně
- * (Choice u téhle metody limit 1 za 5 s nemá). Selže-li kterákoli část,
- * selže celá mapa — s půlkou mapy by se stoly z nenačtené oblasti
- * ukázaly jako „bez názvu“ a přepsaly by správné jméno z minula.
+ * Seznam míst celého podniku: oblasti, pak stoly oblastí souběžně
+ * (Choice u téhle metody limit 1 za 5 s nemá), nejvýš `MAX_OBLASTI`
+ * oblastí. Selže-li kterákoli část, selže celá mapa — s půlkou mapy by
+ * se stoly z nenačtené oblasti ukázaly jako „bez názvu“ a přepsaly by
+ * správné jméno z minula. Ze stejného důvodu mapa nad `MAX_OBLASTI`
+ * oblastí není `uplna` (`mistoZChoice`).
  */
 export async function nacistMapuMist(api: ApiChoice, token: string): Promise<VysledekMapy> {
   const o = await api.nacistOblasti(token)
   if (o.stav === 'chyba') return { stav: 'chyba', duvod: o.duvod, dotazu: 1 }
-  const oblasti = oblastiZOdpovedi(o.oblasti)
+  const vsechny = oblastiZOdpovedi(o.oblasti)
+  const oblasti = vsechny.slice(0, MAX_OBLASTI)
   const mista = await Promise.all(oblasti.map((x) => api.nacistMistaOblasti(token, x.id)))
   const dotazu = 1 + oblasti.length
   const chyba = mista.find((m) => m.stav === 'chyba')
   if (chyba && chyba.stav === 'chyba') return { stav: 'chyba', duvod: chyba.duvod, dotazu }
-  return { stav: 'ok', mapa: mapaMist(oblasti, mista.map((m) => (m.stav === 'ok' ? m.mista : []))), dotazu }
+  return { stav: 'ok', mapa: mapaMist(oblasti, mista.map((m) => (m.stav === 'ok' ? m.mista : [])), vsechny.length <= MAX_OBLASTI), dotazu }
 }
 
 /** Id stolů rezervace bez opakování; `null` = rezervace stoly neuvádí (pole chybí nebo je nečitelné). */
@@ -472,21 +499,35 @@ export function neznameStoly(locationPoints: unknown, mapa: MapaMist): number {
   return (idStolu(locationPoints) ?? []).filter((id) => !mapa.mista.has(id)).length
 }
 
-/** „S1–S12“, „Stůl 1–12“, „Bar–Okno“. */
-function rozsah(prvni: string, posledni: string): string {
-  const a = /^(.*?)(\d+)$/.exec(prvni)
-  const b = /^(.*?)(\d+)$/.exec(posledni)
-  // Společné slovo („Stůl “) se podruhé nepíše; krátké označení („S“) ano.
-  if (a && b && a[1] === b[1] && /\s$/.test(a[1])) return `${prvni}–${b[2]}`
-  return `${prvni}–${posledni}`
+const RE_CISLO_NA_KONCI = /^(.*?)(\d+)$/
+
+/** Navazuje `b` na `a` jménem: stejná písmena před číslem a číslo o jedna vyšší (S9 → S10, „Stůl 2“ → „Stůl 3“). */
+function navazuje(a: string, b: string): boolean {
+  const x = RE_CISLO_NA_KONCI.exec(a)
+  const y = RE_CISLO_NA_KONCI.exec(b)
+  return x !== null && y !== null && x[1] === y[1] && Number(y[2]) === Number(x[2]) + 1
 }
 
-/** Stoly jedné oblasti seřazené podle pořadí; tři a víc po sobě jdoucích → rozsah. */
+/** „S1–S12“, „Stůl 1–12“, „1–7“ — jen pro stoly, které `navazuje`. */
+function rozsah(prvni: string, posledni: string): string {
+  const b = RE_CISLO_NA_KONCI.exec(posledni)
+  // Společné slovo („Stůl “) se podruhé nepíše; krátké označení („S“) ano.
+  const predCislem = RE_CISLO_NA_KONCI.exec(prvni)?.[1] ?? ''
+  return b && /\s$/.test(predCislem) ? `${prvni}–${b[2]}` : `${prvni}–${posledni}`
+}
+
+/**
+ * Stoly jedné oblasti seřazené podle pořadí. Rozsahem („S1–S12“) se
+ * píšou jen tři a víc stolů, které jdou po sobě V OBLASTI a zároveň
+ * jménem (stejná písmena, čísla o jedna). Jinak by „L10, P1, P2“ vyšlo
+ * jako „L10–P2“ a „S3, S10, Salonek“ jako „S3–Salonek“ — z toho obsluha
+ * nepozná, které stoly to jsou (kontrola kódu 4. 11.).
+ */
 function stolyOblasti(stoly: MistoChoice[]): string {
   const casti: string[] = []
   for (let i = 0; i < stoly.length;) {
     let j = i
-    while (j + 1 < stoly.length && stoly[j + 1].poradi === stoly[j].poradi + 1) j++
+    while (j + 1 < stoly.length && stoly[j + 1].poradi === stoly[j].poradi + 1 && navazuje(stoly[j].nazev, stoly[j + 1].nazev)) j++
     if (j - i >= 2) casti.push(rozsah(stoly[i].nazev, stoly[j].nazev))
     else for (let k = i; k <= j; k++) casti.push(stoly[k].nazev)
     i = j + 1
@@ -495,12 +536,24 @@ function stolyOblasti(stoly: MistoChoice[]): string {
 }
 
 /**
+ * Text nejvýš `MAX_MISTO` znaků, useknutý ZA celým stolem („…, S7 …“),
+ * ne uprostřed jména: z „Stůl 117“ by zbylo „Stůl 11“, a to je jiný stůl.
+ */
+function zkratitStoly(text: string): string {
+  if (text.length <= MAX_MISTO) return text
+  const kus = text.slice(0, MAX_MISTO - 2)
+  const kde = Math.max(kus.lastIndexOf(', '), kus.lastIndexOf(' · '))
+  return kde > 0 ? `${kus.slice(0, kde)} …` : `${zkratit(text, MAX_MISTO - 1)}…`
+}
+
+/**
  * `locationPoints` rezervace → text stolů („Patro: S1–S12 · Terasa: L7“).
- *   * `undefined` = NEVÍ SE (pole chybí, nebo seznam míst není) — řádek
- *     klíč nedostane a ve Foodtabu zůstane uložené,
+ *   * `undefined` = NEVÍ SE (pole chybí, seznam míst není, nebo stůl
+ *     není v seznamu, který se nenačetl celý) — řádek klíč nedostane
+ *     a ve Foodtabu zůstane uložené,
  *   * `''` = rezervace žádné stoly nemá (prázdné pole),
- *   * stůl, který v seznamu míst není, se započítá („2 stoly bez názvu“) —
- *     jméno se nevymýšlí.
+ *   * stůl, který v (celém) seznamu míst není, nebo v něm nemá jméno, se
+ *     započítá („2 stoly bez názvu“) — jméno se nevymýšlí.
  */
 export function mistoZChoice(locationPoints: unknown, mapa: MapaMist | null): string | undefined {
   const id = idStolu(locationPoints)
@@ -508,11 +561,16 @@ export function mistoZChoice(locationPoints: unknown, mapa: MapaMist | null): st
   if (id.length === 0) return ''
   if (!mapa) return undefined
   const podleOblasti = new Map<number, MistoChoice[]>()
-  let neznamych = 0
+  let bezNazvu = 0
   for (const x of id) {
     const m = mapa.mista.get(x)
     if (!m) {
-      neznamych += 1
+      if (!mapa.uplna) return undefined
+      bezNazvu += 1
+      continue
+    }
+    if (!m.nazev) {
+      bezNazvu += 1
       continue
     }
     podleOblasti.set(m.oblast, [...(podleOblasti.get(m.oblast) ?? []), m])
@@ -523,9 +581,8 @@ export function mistoZChoice(locationPoints: unknown, mapa: MapaMist | null): st
       const text = stolyOblasti(stoly.sort((a, b) => a.poradi - b.poradi))
       return mapa.oblasti[oblast] ? `${mapa.oblasti[oblast]}: ${text}` : text
     })
-  if (neznamych > 0) casti.push(`${pocet(neznamych, 'stůl', 'stoly', 'stolů')} bez názvu`)
-  const text = casti.join(' · ')
-  return text.length > MAX_MISTO ? `${text.slice(0, MAX_MISTO - 1)}…` : text
+  if (bezNazvu > 0) casti.push(`${pocet(bezNazvu, 'stůl', 'stoly', 'stolů')} bez názvu`)
+  return zkratitStoly(casti.join(' · '))
 }
 
 /** `num` → číslo rezervace v Choice („105“). Cokoli jiného než kladné celé číslo `undefined`. */
@@ -613,14 +670,21 @@ export function vytvoritChoice(fetchFn: FetchFn): ApiChoice {
  * Rezervace z Choice → řádek pro databázi
  * ------------------------------------------------------------------ */
 
-/** Řídicí znaky pryč (i \u0000, který databáze v JSONu odmítne celou dávkou); konce řádků zůstávají. */
+/**
+ * Řídicí znaky pryč (i \u0000, který databáze v JSONu odmítne celou
+ * dávkou); konce řádků zůstávají. Zkrácení přes `zkratit`: obyčejné
+ * `.slice` umí rozříznout emoji a takový JSON odmítne PostgREST CELÝ
+ * (PGRST102) — stránka by se nezapsala a načítání by na ní uvázlo.
+ */
 function cistyText(hodnota: unknown, max: number): string {
   if (typeof hodnota !== 'string' && typeof hodnota !== 'number') return ''
-  return String(hodnota)
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, ' ')
-    .replace(/ {2,}/g, ' ')
-    .trim()
-    .slice(0, max)
+  return zkratit(
+    String(hodnota)
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, ' ')
+      .replace(/ {2,}/g, ' ')
+      .trim(),
+    max,
+  )
 }
 
 /**
@@ -732,9 +796,13 @@ function popisZalohy(zaloha: unknown): string {
 
 /**
  * Text, který se ukáže jako „poznámka hosta“: co napsal host (`comment`),
- * poznámka restaurace v Choice (`note`), důvod zrušení (`cancelReason`)
- * a stav zálohy. Patří Choice —
- * každé načtení ho přepíše. Poznámky obsluhy ve Foodtabu jsou zvlášť.
+ * poznámka restaurace v Choice (`note`), důvod zrušení (`cancelReason`),
+ * stav zálohy, rezervace přes Google (`source.type`) a jazyk rezervace,
+ * když není čeština (`langCode`). Patří Choice — každé načtení ho
+ * přepíše. Poznámky obsluhy ve Foodtabu jsou zvlášť.
+ *
+ * Ze `source.type` se píše jen PARTNER_GOOGLE: INTERNAL a OPEN_API
+ * dokumentace nevysvětluje a domýšlet se nemají.
  */
 export function poznamkaZChoice(b: Record<string, unknown>): string {
   const casti: string[] = []
@@ -746,7 +814,11 @@ export function poznamkaZChoice(b: Record<string, unknown>): string {
   if (zruseni) casti.push(`Důvod zrušení v Choice: ${zruseni}`)
   const zaloha = popisZalohy(b.deposit)
   if (zaloha) casti.push(zaloha)
-  return casti.join('\n\n').slice(0, 4000)
+  const zdroj = b.source && typeof b.source === 'object' ? (b.source as { type?: unknown }).type : null
+  if (zdroj === 'PARTNER_GOOGLE') casti.push('Rezervace přišla přes Google.')
+  const jazyk = typeof b.langCode === 'string' ? b.langCode.trim().toLowerCase() : ''
+  if (/^[a-z]{2}$/.test(jazyk) && jazyk !== 'cs' && jazyk !== 'cz') casti.push(`Jazyk rezervace: ${jazyk.toUpperCase()}.`)
+  return zkratit(casti.join('\n\n'), 4000)
 }
 
 export type DuvodPreskoceni = 'bez-id' | 'bez-casu' | 'bez-pasma' | 'neznamy-cas' | 'neplatny-cas' | 'jine'
@@ -802,8 +874,10 @@ export function radekZChoice(rezervace: unknown, varSymbol: string, mapa: MapaMi
     emailHosta: cistyText(host.email, 254) || null,
     poznamka: poznamkaZChoice(b),
     // Oblast, kterou si host přál — Foodtabu ji jen doplní do prázdného
-    // „Stůl nebo prostor“. Přidělené stoly jsou zvlášť (`misto`).
-    prostor: prostorZChoice(b.preferArea) || null,
+    // „Stůl nebo prostor“. Přidělené stoly jsou zvlášť (`misto`). Když
+    // rezervace stoly má, přání se nedoplní: „Patro“ vedle stolů „Terasa:
+    // L7“ by se četlo, jako by host měl obojí (kontrola kódu 4. 11.).
+    prostor: misto ? null : prostorZChoice(b.preferArea) || null,
     // Choice neposílá „změněno“. Tahá se vždy aktuální stav, takže pořadí
     // doručení tu nehraje roli (na rozdíl od webhooků).
     zmenenoKdy: null,
@@ -877,13 +951,25 @@ export type VysledekBehuChoice = {
    * Seznam míst (stolů) pro tenhle běh.
    *   * `stav`: `nezkouseno` = žádná rezervace stoly neměla, `ok`,
    *     `chyba` (Choice ho nedal, `duvod`), `cas` (nevešel se do běhu),
+   *   * `neuplny`: seznam se načetl, ale ne celý (víc než `MAX_OBLASTI`
+   *     oblastí),
    *   * `bezStolu`: rezervace se stoly, u kterých se stoly nezapsaly
-   *     (zůstaly z minula), protože seznam míst není,
-   *   * `nezname`: rezervace se stolem, který v seznamu míst není,
+   *     (zůstaly z minula), protože seznam míst není (nebo není celý
+   *     a stůl v něm chybí),
+   *   * `nezname`: rezervace se stolem, který v (celém) seznamu míst není,
    *   * `dotazu`: dotazů na seznam míst (mimo `dotazu` rezervací).
    */
-  mista: { stav: 'nezkouseno' | 'ok' | 'chyba' | 'cas'; duvod: string | null; bezStolu: number; nezname: number; dotazu: number }
+  mista: { stav: 'nezkouseno' | 'ok' | 'chyba' | 'cas'; duvod: string | null; neuplny: boolean; bezStolu: number; nezname: number; dotazu: number }
+  /**
+   * Pár rezervací s číslem a `visitDuration`, jak ho Choice poslal (nejvýš
+   * `UKAZEK_DELKY`). Jednotka délky v dokumentaci není — podle rezervace,
+   * u které je v Choice vidět „2h“, se pozná. Nic se z toho nepočítá.
+   */
+  ukazkaDelky: { cislo: string; hodnota: number }[]
 }
+
+/** Kolik ukázek `visitDuration` si běh uloží (`externi_ucet.ukazka_delky`). */
+export const UKAZEK_DELKY = 5
 
 /**
  * Jeden běh: tři průchody, každý po stránkách, dokud nepřijde neplná
@@ -900,6 +986,10 @@ export type VysledekBehuChoice = {
  * nevejde a běh končí (`cas`) — kurzor řekne příštímu, kde pokračovat.
  * 429 = konec běhu (`limit`), zkusí se příště. Stránka, kterou se
  * nepodařilo zapsat, kurzor neposune.
+ *
+ * `smiMimoFrontu`: smí ještě odejít dotaz, který frontou nejde (seznam
+ * míst)? Volající ho dává se STEJNÝM koncem jako frontu — po něm zbývá
+ * rezerva na odpověď a zápis (`CASOVY_LIMIT_MIST_MS`).
  */
 export async function probehnoutChoice(v: {
   api: ApiChoice
@@ -908,6 +998,7 @@ export async function probehnoutChoice(v: {
   kurzor: KurzorChoice
   tedMs: number
   pockatNaDotaz: () => Promise<boolean>
+  smiMimoFrontu: () => boolean
   zapsat: ZapisChoice
 }): Promise<VysledekBehuChoice> {
   const iso = (ms: number) => new Date(ms).toISOString()
@@ -925,7 +1016,8 @@ export async function probehnoutChoice(v: {
     preskocene: { pocet: 0, priklad: null, duvody: {} },
     odmitnute: { pocet: 0, priklad: null },
     oknoDokonceno: false,
-    mista: { stav: 'nezkouseno', duvod: null, bezStolu: 0, nezname: 0, dotazu: 0 },
+    mista: { stav: 'nezkouseno', duvod: null, neuplny: false, bezStolu: 0, nezname: 0, dotazu: 0 },
+    ukazkaDelky: [],
   }
 
   type Pruchod = { podle: DotazSeznamu['podle']; od: string; do: string }
@@ -936,16 +1028,17 @@ export async function probehnoutChoice(v: {
 
   /**
    * Seznam míst nejvýš jednou za běh, a jen když ho nějaká rezervace
-   * potřebuje. Jde přes frontu (`pockatNaDotaz`): ta pustí dotaz jen
-   * s rezervou času do konce běhu, do které se oblasti i stoly vejdou
-   * (`CASOVY_LIMIT_MIST_MS`). Selhání nic dalšího nezastaví.
+   * potřebuje. MIMO frontu (hlavička modulu: místo ve frontě by vzalo
+   * dotaz průchodu „okno“), ale jen dokud `smiMimoFrontu` — se stejným
+   * koncem jako fronta, takže se oblasti i stoly (`CASOVY_LIMIT_MIST_MS`)
+   * vejdou do rezervy běhu. Selhání nic dalšího nezastaví.
    */
   let mapa: MapaMist | null | undefined
   const mapaProStranku = async (rezervace: unknown[]): Promise<MapaMist | null> => {
     if (mapa !== undefined) return mapa
     if (!rezervace.some(maStoly)) return null
     mapa = null
-    if (!(await v.pockatNaDotaz())) {
+    if (!v.smiMimoFrontu()) {
       vysledek.mista.stav = 'cas'
       return null
     }
@@ -958,12 +1051,21 @@ export async function probehnoutChoice(v: {
     vysledek.mista.dotazu += m.dotazu
     if (m.stav === 'ok') {
       vysledek.mista.stav = 'ok'
+      vysledek.mista.neuplny = !m.mapa.uplna
       mapa = m.mapa
     } else {
       vysledek.mista.stav = 'chyba'
       vysledek.mista.duvod = m.duvod
     }
     return mapa
+  }
+
+  /** `visitDuration` tak, jak přišel, s číslem rezervace — jen na ukázku (`ukazkaDelky`). */
+  const zapamatovatDelku = (b: unknown, cislo: string | undefined) => {
+    const hodnota = (b as { visitDuration?: unknown }).visitDuration
+    if (!cislo || typeof hodnota !== 'number' || !Number.isFinite(hodnota)) return
+    if (vysledek.ukazkaDelky.length >= UKAZEK_DELKY || vysledek.ukazkaDelky.some((u) => u.cislo === cislo)) return
+    vysledek.ukazkaDelky.push({ cislo, hodnota })
   }
 
   const projit = async (p: Pruchod, odStranky: number, poStrance?: (dalsi: number) => void): Promise<KonecBehu> => {
@@ -996,6 +1098,7 @@ export async function probehnoutChoice(v: {
             if (x.radek.misto_zdroje === undefined) bezStoluId.add(id)
             else if (mapaStranky && neznameStoly((b as { locationPoints?: unknown }).locationPoints, mapaStranky) > 0) neznameId.add(id)
           }
+          zapamatovatDelku(b, x.radek.cislo_zdroje)
           continue
         }
         // Blízko a okno se překrývají — tatáž vadná rezervace se počítá jednou.
@@ -1181,8 +1284,11 @@ export function chybaBehu(v: VysledekBehuChoice): string | null {
   if (v.mista.stav === 'chyba' && v.mista.bezStolu > 0) {
     casti.push(`Stoly z Choice se nenačetly (${v.mista.duvod ?? 'neznámý důvod'}) — u ${pocet(v.mista.bezStolu, 'rezervace', 'rezervací', 'rezervací')} zůstávají naposledy načtené, rezervace se načítají dál.`)
   }
+  if (v.mista.stav === 'ok' && v.mista.neuplny && v.mista.bezStolu > 0) {
+    casti.push(`Stoly z Choice se nenačetly celé (podnik má v Choice víc než ${MAX_OBLASTI} částí, Foodtab jich načítá ${MAX_OBLASTI}) — u ${pocet(v.mista.bezStolu, 'rezervace', 'rezervací', 'rezervací')} zůstávají naposledy načtené. Pošlete prosím tu hlášku vývojáři.`)
+  }
   if (v.mista.nezname > 0) {
     casti.push(`U ${pocet(v.mista.nezname, 'rezervace', 'rezervací', 'rezervací')} poslal Choice stůl, který v seznamu míst v Choice není — ve Foodtabu je „bez názvu“.`)
   }
-  return casti.length > 0 ? casti.join(' ').slice(0, 1000) : null
+  return casti.length > 0 ? zkratit(casti.join(' '), 1000) : null
 }

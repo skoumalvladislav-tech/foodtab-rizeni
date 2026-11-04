@@ -189,15 +189,23 @@ function osobyText(n: number | null): string {
 
 /**
  * Kde host sedí, do krátkého řádku: „Stůl nebo prostor“ od obsluhy
- * a stoly z rezervačního systému („Patro: S1–S12“). Prostor, který už
- * ve stolech je (Choice ho doplní z přání hosta — „Patro“), se podruhé
- * nepíše.
+ * a stoly z rezervačního systému („Patro: S1–S12“). Prostor se podruhé
+ * nepíše, jen když je to PŘESNĚ jméno části podniku ze stolů („Patro“ —
+ * starší rezervace, kde ho Choice doplnil z přání hosta) nebo celý text
+ * stolů. Kus jména nestačí: „S1“ od obsluhy vedle „Patro: S12“ je jiný
+ * stůl a musí být vidět (kontrola kódu 4. 11.).
  */
 export function mistoKratce(r: Pick<RezervaceRadek, 'prostor'> & { misto_zdroje?: string }): string[] {
   const stoly = (r.misto_zdroje ?? '').trim()
   const prostor = (r.prostor ?? '').trim()
   if (!stoly) return prostor ? [prostor] : []
-  if (!prostor || stoly.toLocaleLowerCase('cs').includes(prostor.toLocaleLowerCase('cs'))) return [stoly]
+  if (!prostor) return [stoly]
+  const male = (s: string) => s.trim().toLocaleLowerCase('cs')
+  const oblasti = stoly.split(' · ').map((cast) => {
+    const dvojtecka = cast.indexOf(': ')
+    return dvojtecka > 0 ? male(cast.slice(0, dvojtecka)) : null
+  })
+  if (male(prostor) === male(stoly) || oblasti.includes(male(prostor))) return [stoly]
   return [prostor, stoly]
 }
 

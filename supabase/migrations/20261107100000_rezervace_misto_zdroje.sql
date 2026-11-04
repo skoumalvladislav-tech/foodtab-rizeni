@@ -34,6 +34,13 @@
 -- (`rezervace_ulozit`) bere jen vyjmenované klíče, nové sloupce
 -- nezmění. Stoly ani číslo nejsou osobní údaj hosta.
 --
+-- Upozornění: změna stolů ze zdroje upozornění NEPOŠLE, ani u akce.
+-- Spoušť `trg_rezervace_upozornit_zmena` (20261106100000) hlídá `prostor`
+-- (co zapíše obsluha), ne `misto_zdroje`, a tahle migrace ji schválně
+-- nemění: přesazení v Choice by jinak poslalo upozornění vybraným lidem
+-- při každém přeskupení stolů. Jestli to u akcí chtít, je otázka 87
+-- (docs/hlaseni/otazky.md).
+--
 -- Pořadí s kódem: Vercel nasadí kód dřív, než proběhne db push. Appka
 -- proto sloupce čte s náhradou (chybí-li, ukáže se bez stolů) a do
 -- staré funkce posílané klíče navíc nevadí (jsonb, nečtou se).
