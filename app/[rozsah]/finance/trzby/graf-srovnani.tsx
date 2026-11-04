@@ -44,7 +44,7 @@ const VYSKA_PLOCHY = 220
 const NAHORE = 10
 const DOLE = 26
 const VYCHOZI_SIRKA = 720
-const SIRKA_BUBLINY = 232
+const SIRKA_BUBLINY = 264
 /**
  * Pod touhle šířkou (telefon) by plovoucí bublina zakryla skoro celý graf
  * i sloupec, na který se kleplo — čísla se pak ukážou v pruhu POD grafem.
