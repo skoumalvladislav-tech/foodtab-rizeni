@@ -11,7 +11,8 @@ import { getServerSupabase } from '@/lib/supabase/server'
 import { DotazSelhal, tabulkaNeexistuje } from '@/lib/supabase/dotaz'
 import { pobockaFinanci, POZNAMKA_FIREMNI } from '@/lib/finance-rozsah'
 import { nactiPrehledTrzeb } from '@/lib/pokladna-trzby-nacteni'
-import { dalsiObdobi, jenPobocka, pokladnaPatriPobocce, popisObdobi, type Cleneni, type PrehledTrzeb } from '@/lib/pokladna-trzby'
+import { dalsiObdobi, jenPobocka, pokladnaPatriPobocce, popisObdobi, type Cleneni } from '@/lib/pokladna-trzby'
+import { jeDruhSrovnani, srovnavaciObdobi, type DruhSrovnani } from '@/lib/trzby-srovnani'
 import Sdeleni from '@/app/sdeleni'
 import SdeleniPobockyBezFirmy from '../pobocka-bez-firmy'
 import Nadpis from '../../nadpis'
@@ -52,6 +53,14 @@ export const dynamic = 'force-dynamic'
  * `?pobocka=` se nečte a přehled se zúží na pobočku dřív, než dojde do
  * kreslení (`jenPobocka`). Banka = jen účty té pobočky, firemní účet ne.
  * Za celou firmu beze změny, i s přepínačem.
+ *
+ * Graf srovnání (Šéfík 4. 11. 2026, podle „Měsíčních tržeb" Dotykačky):
+ * po měsících rok proti předchozímu roku, po dnech měsíc proti
+ * předchozímu měsíci nebo témuž měsíci loni (`?srovnani=rok`).
+ * Srovnávací období se načte TOUŽ funkcí a týmž přihlášením jako přehled
+ * (`nactiPrehledTrzeb`, souběžně) a na pobočce se zúží stejně
+ * (`jenPobocka`) — graf tak nikdy neukáže víc, než tabulka pod ním smí.
+ * Skládání v `lib/trzby-srovnani.ts`, kresba v `srovnani.tsx`.
  */
 
 const LET_ZPET = 9
@@ -118,10 +127,10 @@ export default async function FinanceTrzby({
   searchParams,
 }: {
   params: Promise<{ rozsah: string }>
-  searchParams: Promise<{ po?: string; obdobi?: string; pobocka?: string }>
+  searchParams: Promise<{ po?: string; obdobi?: string; pobocka?: string; srovnani?: string }>
 }) {
   const { rozsah } = await params
-  const { po, obdobi: obdobiParam, pobocka: pobockaParam } = await searchParams
+  const { po, obdobi: obdobiParam, pobocka: pobockaParam, srovnani: srovnaniParam } = await searchParams
 
   const tenantId = await getCurrentTenantId()
   if (!tenantId) return <Sdeleni nadpis="Účet zatím nepatří k žádné firmě">Požádejte o pozvánku.</Sdeleni>
@@ -145,6 +154,8 @@ export default async function FinanceTrzby({
   const cleneni: Cleneni = jeCleneni(po) ? po : 'den'
   const dnes = provozniDnes()
   const rozsahObdobi = urcitObdobi(cleneni, obdobiParam, dnes)
+  // Po dnech: předchozí měsíc (výchozí), nebo týž měsíc loni. Po měsících je srovnání jen jedno (předchozí rok).
+  const druhSrovnani: DruhSrovnani = cleneni === 'den' && jeDruhSrovnani(srovnaniParam) ? srovnaniParam : 'obdobi'
 
   const supabase = await getServerSupabase()
   const [pobockyRes, uctyRes, pokladnyRes] = await Promise.all([
@@ -173,15 +184,19 @@ export default async function FinanceTrzby({
   const pokladny = (pokladnyRes.data ?? []) as { branch_id: string | null; externi_ucet: unknown }[]
   const maPokladnu = pobockaRozsahu ? pokladny.some((p) => pokladnaPatriPobocce(p, pobockaRozsahu)) : pokladny.length > 0
 
-  let prehled: PrehledTrzeb | null = null
-  let chybaNacteni = false
-  try {
-    prehled = await nactiPrehledTrzeb(tenantId, rozsahObdobi.od, rozsahObdobi.doData, cleneni)
-  } catch {
-    chybaNacteni = true
-  }
-  // Na pobočce dojdou do kreslení jen její řádky (tržby, platby, způsoby, banka).
+  // Přehled a srovnávací období grafu souběžně, TÝMŽ dotazem a přihlášením.
+  // Selhání srovnání stránku neshodí — graf řekne, že srovnání nenačetl.
+  const rozsahSrovnani = cleneni === 'rok' ? null : srovnavaciObdobi(cleneni, rozsahObdobi.od, druhSrovnani)
+  const [vysledekPrehledu, vysledekSrovnani] = await Promise.allSettled([
+    nactiPrehledTrzeb(tenantId, rozsahObdobi.od, rozsahObdobi.doData, cleneni),
+    rozsahSrovnani === null ? Promise.resolve(null) : nactiPrehledTrzeb(tenantId, rozsahSrovnani.od, rozsahSrovnani.doData, cleneni),
+  ])
+  let prehled = vysledekPrehledu.status === 'fulfilled' ? vysledekPrehledu.value : null
+  const chybaNacteni = vysledekPrehledu.status === 'rejected'
+  let prehledSrovnani = vysledekSrovnani.status === 'fulfilled' ? vysledekSrovnani.value : null
+  // Na pobočce dojdou do kreslení jen její řádky (tržby, platby, způsoby, banka) — i ve srovnání.
   if (prehled !== null && pobockaRozsahu !== null) prehled = jenPobocka(prehled, pobockaRozsahu)
+  if (prehledSrovnani !== null && pobockaRozsahu !== null) prehledSrovnani = jenPobocka(prehledSrovnani, pobockaRozsahu)
 
   // Ostatní tržby (Jiné platby) za totéž období a rozsah. Které řádky se
   // sčítají (zapocitat, platna) a že se měny nesčítají, rozhoduje JEDINÉ
@@ -222,7 +237,7 @@ export default async function FinanceTrzby({
   const zaklad = `/${rozsah}/finance/trzby`
   // Integrace (pokladny, prodeje po produktech) patří celé firmě — z pobočky rovnou tam.
   const zakladIntegraci = `/${pobockaRozsahu ? TENANT_SCOPE_SEGMENT : rozsah}/finance/integrace`
-  const odkaz = (zmena: { po?: Cleneni; obdobi?: string | null; pobocka?: string | null }) => {
+  const odkaz = (zmena: { po?: Cleneni; obdobi?: string | null; pobocka?: string | null; srovnani?: DruhSrovnani }) => {
     const p = new URLSearchParams()
     const c = zmena.po ?? cleneni
     if (c !== 'den') p.set('po', c)
@@ -235,6 +250,8 @@ export default async function FinanceTrzby({
     // Na pobočce ji nese adresa, ne parametr.
     const b = pobockaRozsahu ? null : zmena.pobocka === undefined ? vybranaPobocka : zmena.pobocka
     if (b) p.set('pobocka', b)
+    // Volba srovnání se drží při listování měsíci; má smysl jen po dnech.
+    if (c === 'den' && (zmena.srovnani ?? druhSrovnani) === 'rok') p.set('srovnani', 'rok')
     const q = p.toString()
     return q ? `${zaklad}?${q}` : zaklad
   }
@@ -323,6 +340,7 @@ export default async function FinanceTrzby({
             ostatniTrzby={ostatniTrzby}
             ostatniTrzbyChyba={ostatniTrzbyChyba}
             zakladJinychPlateb={`/${rozsah}/finance/trzby/jine-platby`}
+            srovnani={cleneni === 'rok' ? null : { druh: druhSrovnani, prehled: prehledSrovnani, dnes, odkazNaDruh: (d) => odkaz({ srovnani: d }) }}
           />
         )}
       </div>
