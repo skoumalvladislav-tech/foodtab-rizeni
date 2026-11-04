@@ -164,8 +164,8 @@ export function DokumentObsah({
             <Ikona klic="sipkaVlevo" /> {zpet.text}
           </Link>
           <span>
-            Náhled ukazuje text a tabulky. Obrázky, záhlaví a přesné rozvržení má jen originál — tlačítko Stáhnout originál ho
-            uloží do Stažených souborů, otevře se ve Wordu.
+            Náhled ukazuje text a tabulky. Obrázky, záhlaví a zápatí, poznámky pod čarou, komentáře a přesné rozvržení má jen
+            originál — tlačítko Stáhnout originál ho uloží do Stažených souborů, otevře se ve Wordu.
           </span>
         </p>
         {chyba ? (

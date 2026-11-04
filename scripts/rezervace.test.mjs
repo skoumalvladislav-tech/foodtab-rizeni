@@ -1458,6 +1458,12 @@ console.log('\n== 11. Náhled Wordu (2.–3. 11. 2026) ==\n')
   ok('náhled nevkládá HTML ze souboru', !kresleni.includes('dangerouslySetInnerHTML'))
   ok('originál jde stáhnout tlačítkem', /href=\{`\/api\/rezervace\/soubor\/\$\{priloha\.id\}`\}[^>]*>\s*Stáhnout originál/.test(kresleni))
   ok('věta nad náhledem z poznamkaNahledu', kresleni.includes('poznamkaNahledu(nahled)'))
+  // Záhlaví, zápatí, poznámky pod čarou a komentáře leží v jiných částech
+  // balíčku a čtečka je nečte vůbec — po poznámce ani komentáři nezůstane
+  // v textu značka. Bez věty by náhled vypadal jako celý dokument.
+  const coChybi = kresleni.match(/Náhled ukazuje text a tabulky\.([^—]*)má jen\s+originál/)?.[1].replace(/\s+/g, ' ').trim() ?? ''
+  ok(`věta nad náhledem jmenuje, co v něm není: obrázky, záhlaví a zápatí, poznámky pod čarou, komentáře (je „${coChybi}“)`,
+    ['Obrázky', 'záhlaví', 'zápatí', 'poznámky pod čarou', 'komentáře'].every((s) => coChybi.includes(s)))
   ok('tabulka: sloučené buňky přes colSpan/rowSpan, pokračování se nekreslí',
     kresleni.includes('bunka.sloucena ? null') && kresleni.includes('colSpan={bunka.sirka > 1 ? bunka.sirka : undefined}') &&
       kresleni.includes('rowSpan={bunka.vyska > 1 ? bunka.vyska : undefined}'))
