@@ -25,7 +25,7 @@
  * Čistý modul (žádné IO) — testuje ho scripts/rezervace.test.mjs.
  */
 
-import { mapovatStav, naHodinu, type RadekImportu } from './rezervace-import.ts'
+import { mapovatStav, naHodinu, zkratit, type RadekImportu } from './rezervace-import.ts'
 import { jePlatneDatum, STAVY, type StavRezervace } from './rezervace-typy.ts'
 
 export const PREDPONA_KLICE_REZERVACI = 'ftrez'
@@ -53,11 +53,16 @@ function text(hodnota: unknown, max: number): string {
   if (hodnota === null || hodnota === undefined) return ''
   if (typeof hodnota !== 'string' && typeof hodnota !== 'number') return ''
   // Konce řádků (poznámka hosta) zůstávají; zdvojené mezery po vyhozeném znaku se slijí.
-  return String(hodnota)
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, ' ')
-    .replace(/ {2,}/g, ' ')
-    .trim()
-    .slice(0, max)
+  // Zkrácení přes `zkratit`, ne `.slice`: emoji na hranici by se rozpůlilo
+  // a PostgREST takový JSON odmítne CELÝ (PGRST102) — i s ostatními
+  // rezervacemi dávky (kontrola kódu 4. 11., 2. kolo).
+  return zkratit(
+    String(hodnota)
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, ' ')
+      .replace(/ {2,}/g, ' ')
+      .trim(),
+    max,
+  )
 }
 
 /** Okamžik s pásmem a platným datem, nebo `null`. */

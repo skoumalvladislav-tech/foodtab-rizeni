@@ -38,8 +38,13 @@
  *     dotazu na rezervace: úloha dává připojení tři (blízko, nové, okno)
  *     a druhé pobočce by se přestalo načítat okno (kontrola kódu 4. 11.).
  *     Hlídá se jen, aby se vešel do času běhu (`smiMimoFrontu`: odejít
- *     smí do stejné chvíle jako dotaz z fronty). Když se seznam nenačte,
- *     stoly u rezervací zůstanou z minula a rezervace se načítají dál.
+ *     smí do stejné chvíle jako dotaz z fronty). Načítá se SOUBĚŽNĚ
+ *     s dalšími dotazy — na seznam čeká jen zápis stránky, ne další
+ *     dotaz (jinak pomalý Choice vzal čas oknu, 2. kolo kontroly).
+ *     Když se seznam nenačte, stoly u rezervací zůstanou z minula
+ *     a rezervace se načítají dál.
+ *   * Přání hosta (`preferArea`) jde zvlášť do `prani_zdroje` a do
+ *     „Stůl nebo prostor“ jen u rezervace BEZ stolů.
  *   * `num` je číslo rezervace, jak ho ukazuje Choice („#105“).
  *   * `visitDuration` se nepřevádí (jednotka viz níž), ale běh si uloží
  *     pár ukázek s číslem rezervace (`ukazkaDelky` →
@@ -428,9 +433,24 @@ export function oblastiZOdpovedi(seznam: unknown[]): OblastChoice[] {
     const id = idChoice(o._id)
     if (!id || videne.has(id)) continue
     videne.add(id)
-    oblasti.push({ id, nazev: cistyText(o.name, 60) })
+    oblasti.push({ id, nazev: jmenoMista(o.name, MAX_JMENO_OBLASTI) })
   }
   return oblasti
+}
+
+/** Nejdelší jméno oblasti a stolu v textu stolů (delší se zkrátí a dostane „…“). */
+export const MAX_JMENO_OBLASTI = 60
+export const MAX_JMENO_STOLU = 40
+
+/**
+ * Jméno oblasti nebo stolu. Delší se zkrátí a dostane „…“: useknuté
+ * „stolek 123“ → „stolek 12“ by byl JINÝ stůl (kontrola kódu 4. 11.,
+ * 2. kolo). Tři tečky na konci zároveň jméno vyřadí z rozsahů
+ * (`navazuje` chce číslo na konci).
+ */
+function jmenoMista(hodnota: unknown, max: number): string {
+  const cele = cistyText(hodnota, 1000)
+  return cele.length <= max ? cele : `${zkratit(cele, max - 1).trimEnd()}…`
 }
 
 /**
@@ -447,7 +467,7 @@ export function mapaMist(oblasti: OblastChoice[], mistaPodleOblasti: unknown[][]
       const m = x as Record<string, unknown>
       const id = idChoice(m._id)
       if (!id || mista.has(id) || stoly.some((s) => s.id === id)) continue
-      stoly.push({ id, nazev: cistyText(m.name, 40), pozice: typeof m.position === 'number' ? m.position : Infinity })
+      stoly.push({ id, nazev: jmenoMista(m.name, MAX_JMENO_STOLU), pozice: typeof m.position === 'number' ? m.position : Infinity })
     }
     const sJmenem = stoly.filter((s) => s.nazev)
     sJmenem.sort((a, b) => RAZENI_MIST.compare(a.nazev, b.nazev) || a.pozice - b.pozice)
@@ -523,7 +543,7 @@ function rozsah(prvni: string, posledni: string): string {
  * jako „L10–P2“ a „S3, S10, Salonek“ jako „S3–Salonek“ — z toho obsluha
  * nepozná, které stoly to jsou (kontrola kódu 4. 11.).
  */
-function stolyOblasti(stoly: MistoChoice[]): string {
+function stolyOblasti(stoly: MistoChoice[]): string[] {
   const casti: string[] = []
   for (let i = 0; i < stoly.length;) {
     let j = i
@@ -532,18 +552,36 @@ function stolyOblasti(stoly: MistoChoice[]): string {
     else for (let k = i; k <= j; k++) casti.push(stoly[k].nazev)
     i = j + 1
   }
-  return casti.join(', ')
+  return casti
 }
 
 /**
- * Text nejvýš `MAX_MISTO` znaků, useknutý ZA celým stolem („…, S7 …“),
- * ne uprostřed jména: z „Stůl 117“ by zbylo „Stůl 11“, a to je jiný stůl.
+ * Text stolů z kousků (`[oblast, stoly][]`, pak „N stolů bez názvu“),
+ * nejvýš `MAX_MISTO` znaků. Když se nevejde, končí „ …“ ZA celým stolem
+ * nebo rozsahem — skládá se po kouscích, ne hledáním čárky v hotovém
+ * textu: čárka nebo „ · “ může být i ve jménu stolu („Stůl 1, u okna“)
+ * a řez by pak vzal půl jména (kontrola kódu 4. 11., 2. kolo). Z „Stůl
+ * 117“ by zbylo „Stůl 11“, a to je jiný stůl.
  */
-function zkratitStoly(text: string): string {
-  if (text.length <= MAX_MISTO) return text
-  const kus = text.slice(0, MAX_MISTO - 2)
-  const kde = Math.max(kus.lastIndexOf(', '), kus.lastIndexOf(' · '))
-  return kde > 0 ? `${kus.slice(0, kde)} …` : `${zkratit(text, MAX_MISTO - 1)}…`
+function slozitStoly(oblasti: [string, string[]][], navic: string[]): string {
+  const cast = (oblast: string, stoly: string[]) => (oblast ? `${oblast}: ${stoly.join(', ')}` : stoly.join(', '))
+  const cele = [...oblasti.map(([o, s]) => cast(o, s)), ...navic].join(' · ')
+  if (cele.length <= MAX_MISTO) return cele
+  const mez = MAX_MISTO - 2
+  let text = ''
+  for (const [oblast, stoly] of oblasti) {
+    for (let i = 0; i < stoly.length; i++) {
+      const kus = i === 0 ? `${text ? ' · ' : ''}${oblast ? `${oblast}: ` : ''}${stoly[0]}` : `, ${stoly[i]}`
+      if (text.length + kus.length > mez) return `${text} …`
+      text += kus
+    }
+  }
+  for (const n of navic) {
+    const kus = `${text ? ' · ' : ''}${n}`
+    if (text.length + kus.length > mez) return `${text} …`
+    text += kus
+  }
+  return text
 }
 
 /**
@@ -575,14 +613,10 @@ export function mistoZChoice(locationPoints: unknown, mapa: MapaMist | null): st
     }
     podleOblasti.set(m.oblast, [...(podleOblasti.get(m.oblast) ?? []), m])
   }
-  const casti = [...podleOblasti.entries()]
+  const oblasti = [...podleOblasti.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([oblast, stoly]) => {
-      const text = stolyOblasti(stoly.sort((a, b) => a.poradi - b.poradi))
-      return mapa.oblasti[oblast] ? `${mapa.oblasti[oblast]}: ${text}` : text
-    })
-  if (bezNazvu > 0) casti.push(`${pocet(bezNazvu, 'stůl', 'stoly', 'stolů')} bez názvu`)
-  return zkratitStoly(casti.join(' · '))
+    .map(([oblast, stoly]): [string, string[]] => [mapa.oblasti[oblast] ?? '', stolyOblasti(stoly.sort((a, b) => a.poradi - b.poradi))])
+  return slozitStoly(oblasti, bezNazvu > 0 ? [`${pocet(bezNazvu, 'stůl', 'stoly', 'stolů')} bez názvu`] : [])
 }
 
 /** `num` → číslo rezervace v Choice („105“). Cokoli jiného než kladné celé číslo `undefined`. */
@@ -816,9 +850,30 @@ export function poznamkaZChoice(b: Record<string, unknown>): string {
   if (zaloha) casti.push(zaloha)
   const zdroj = b.source && typeof b.source === 'object' ? (b.source as { type?: unknown }).type : null
   if (zdroj === 'PARTNER_GOOGLE') casti.push('Rezervace přišla přes Google.')
-  const jazyk = typeof b.langCode === 'string' ? b.langCode.trim().toLowerCase() : ''
-  if (/^[a-z]{2}$/.test(jazyk) && jazyk !== 'cs' && jazyk !== 'cz') casti.push(`Jazyk rezervace: ${jazyk.toUpperCase()}.`)
+  const jazyk = jazykRezervace(b.langCode)
+  if (jazyk) casti.push(`Jazyk rezervace: ${jazyk}.`)
   return zkratit(casti.join('\n\n'), 4000)
+}
+
+const NAZVY_JAZYKU = new Intl.DisplayNames(['cs'], { type: 'language', fallback: 'none' })
+
+/**
+ * `langCode` → jméno jazyka česky („angličtina“), když to není čeština.
+ * Kód samotný byl matoucí: „UK“ je ukrajinština, ne Británie (kontrola
+ * kódu 4. 11., 2. kolo). Bere i kód se zemí („en-GB“ → angličtina).
+ * Neznámý kód zůstane kódem; cokoli jiného `''`.
+ */
+export function jazykRezervace(langCode: unknown): string {
+  const kod = typeof langCode === 'string' ? langCode.trim().toLowerCase() : ''
+  const m = /^([a-z]{2})(?:[-_][a-z]{2})?$/.exec(kod)
+  if (!m || m[1] === 'cs' || m[1] === 'cz') return ''
+  let nazev: string | undefined
+  try {
+    nazev = NAZVY_JAZYKU.of(m[1])
+  } catch {
+    nazev = undefined
+  }
+  return nazev && nazev.toLowerCase() !== m[1] ? nazev : `kód ${m[1].toUpperCase()}`
 }
 
 export type DuvodPreskoceni = 'bez-id' | 'bez-casu' | 'bez-pasma' | 'neznamy-cas' | 'neplatny-cas' | 'jine'
@@ -860,6 +915,7 @@ export function radekZChoice(rezervace: unknown, varSymbol: string, mapa: MapaMi
   const host = (b.customer && typeof b.customer === 'object' ? b.customer : {}) as Record<string, unknown>
   const misto = mistoZChoice(b.locationPoints, mapa)
   const cislo = cisloZChoice(b.num)
+  const prani = prostorZChoice(b.preferArea)
   const radek: RadekRezervace = {
     externiId: id,
     stav,
@@ -875,14 +931,19 @@ export function radekZChoice(rezervace: unknown, varSymbol: string, mapa: MapaMi
     poznamka: poznamkaZChoice(b),
     // Oblast, kterou si host přál — Foodtabu ji jen doplní do prázdného
     // „Stůl nebo prostor“. Přidělené stoly jsou zvlášť (`misto`). Když
-    // rezervace stoly má, přání se nedoplní: „Patro“ vedle stolů „Terasa:
-    // L7“ by se četlo, jako by host měl obojí (kontrola kódu 4. 11.).
-    prostor: misto ? null : prostorZChoice(b.preferArea) || null,
+    // rezervace stoly MÁ, přání se nedoplní, ani když se seznam míst
+    // tentokrát nenačetl: „Patro“ vedle stolů „Terasa: L7“ z dalšího
+    // běhu by se četlo, jako by host měl obojí (kontrola kódu 4. 11.).
+    prostor: maStoly(b) ? null : prani || null,
     // Choice neposílá „změněno“. Tahá se vždy aktuální stav, takže pořadí
     // doručení tu nehraje roli (na rozdíl od webhooků).
     zmenenoKdy: null,
     ...(misto !== undefined ? { misto } : {}),
     ...(cislo !== undefined ? { cisloZdroje: cislo } : {}),
+    // Přání zvlášť a pokaždé: rezervace načtené dřív mají přání
+    // v „Stůl nebo prostor“ (doplnilo se, dokud stoly nebyly) — podle
+    // tohohle sloupce je kalendář vedle stolů neukáže.
+    praniZdroje: prani,
   }
   const prevod = zRadkuZdroje(radek)
   if (prevod.stav === 'chyba') return { stav: 'chyba', id, duvod: 'jine' }
@@ -1032,32 +1093,66 @@ export async function probehnoutChoice(v: {
    * dotaz průchodu „okno“), ale jen dokud `smiMimoFrontu` — se stejným
    * koncem jako fronta, takže se oblasti i stoly (`CASOVY_LIMIT_MIST_MS`)
    * vejdou do rezervy běhu. Selhání nic dalšího nezastaví.
+   *
+   * Načítá se SOUBĚŽNĚ s dalšími dotazy na rezervace: na seznam čeká
+   * zápis stránky (`zaradit`), ne další dotaz. Kontrola kódu 4. 11.
+   * (2. kolo): dokud na něj čekal další dotaz, pomalý Choice (od ~3,7 s
+   * na dotaz, nebo seznam, který visí do `CASOVY_LIMIT_MIST_MS`) vzal
+   * dotazům místo ve frontě a druhé pobočce úlohy se nenačetlo okno.
    */
-  let mapa: MapaMist | null | undefined
-  const mapaProStranku = async (rezervace: unknown[]): Promise<MapaMist | null> => {
-    if (mapa !== undefined) return mapa
-    if (!rezervace.some(maStoly)) return null
-    mapa = null
+  let mapa: Promise<MapaMist | null> | undefined
+  let mapaSeNacita = false
+  const mapaPro = (rezervace: unknown[]): Promise<MapaMist | null> => {
+    if (mapa) return mapa
+    if (!rezervace.some(maStoly)) return Promise.resolve(null)
     if (!v.smiMimoFrontu()) {
       vysledek.mista.stav = 'cas'
-      return null
+      mapa = Promise.resolve(null)
+      return mapa
     }
-    let m: VysledekMapy
-    try {
-      m = await nacistMapuMist(v.api, v.token)
-    } catch {
-      m = { stav: 'chyba', duvod: 'Seznam stolů z Choice se nepodařilo přečíst.', dotazu: 1 }
-    }
-    vysledek.mista.dotazu += m.dotazu
-    if (m.stav === 'ok') {
-      vysledek.mista.stav = 'ok'
-      vysledek.mista.neuplny = !m.mapa.uplna
-      mapa = m.mapa
-    } else {
+    mapaSeNacita = true
+    mapa = (async () => {
+      let m: VysledekMapy
+      try {
+        m = await nacistMapuMist(v.api, v.token)
+      } catch {
+        m = { stav: 'chyba', duvod: 'Seznam stolů z Choice se nepodařilo přečíst.', dotazu: 1 }
+      } finally {
+        mapaSeNacita = false
+      }
+      vysledek.mista.dotazu += m.dotazu
+      if (m.stav === 'ok') {
+        vysledek.mista.stav = 'ok'
+        vysledek.mista.neuplny = !m.mapa.uplna
+        return m.mapa
+      }
       vysledek.mista.stav = 'chyba'
       vysledek.mista.duvod = m.duvod
-    }
+      return null
+    })()
     return mapa
+  }
+
+  /**
+   * Zápisy stránek (a posun kurzoru po nich) jdou popořadě v řadě
+   * `zapisy`. Stránka, jejíž zápis selže, i všechno za ní se nezapíše
+   * a kurzor dál neposune — jako dřív, kdy se zapisovalo hned. Další
+   * dotaz na zápis čeká, jen dokud se načítá seznam míst
+   * (`mapaSeNacita`); jinak se nejdřív dopíše, takže chyba zápisu
+   * zastaví běh před dalším dotazem.
+   */
+  let zapisy: Promise<void> = Promise.resolve()
+  let chybaZapisu: string | null = null
+  let vyjimka: { e: unknown } | null = null
+  const zaradit = (prace: () => Promise<void>) => {
+    zapisy = zapisy.then(async () => {
+      if (chybaZapisu !== null || vyjimka) return
+      try {
+        await prace()
+      } catch (e) {
+        vyjimka = { e }
+      }
+    })
   }
 
   /** `visitDuration` tak, jak přišel, s číslem rezervace — jen na ukázku (`ukazkaDelky`). */
@@ -1074,6 +1169,9 @@ export async function probehnoutChoice(v: {
         vysledek.duvod = `V Choice je v jednom okně víc než ${MAX_STRANKA * NA_STRANKU} rezervací — načítání se zastavilo.`
         return 'chyba'
       }
+      // Dopsat, co je v řadě — kromě chvíle, kdy zápis čeká na seznam míst.
+      if (!mapaSeNacita) await zapisy
+      if (chybaZapisu !== null || vyjimka) return 'chyba'
       if (!(await v.pockatNaDotaz())) return 'cas'
       const r = await v.api.nacistStranku(v.token, { od: p.od, do: p.do, podle: p.podle, stranka, naStranku: NA_STRANKU })
       vysledek.dotazu += 1
@@ -1083,52 +1181,68 @@ export async function probehnoutChoice(v: {
       }
       vysledek.nacteno += r.rezervace.length
 
-      const mapaStranky = await mapaProStranku(r.rezervace)
-      const radky: RadekImportu[] = []
-      const videna = new Set<string>()
-      for (const b of r.rezervace) {
-        const x = radekZChoice(b, v.varSymbol, mapaStranky)
-        if (x.stav === 'ok') {
-          const id = x.radek.externi_id
-          if (!videna.has(id)) {
-            videna.add(id)
-            radky.push(x.radek)
+      const mapaStranky = mapaPro(r.rezervace)
+      const dalsi = stranka + 1
+      zaradit(async () => {
+        const m = await mapaStranky
+        const radky: RadekImportu[] = []
+        const videna = new Set<string>()
+        for (const b of r.rezervace) {
+          const x = radekZChoice(b, v.varSymbol, m)
+          if (x.stav === 'ok') {
+            const id = x.radek.externi_id
+            if (!videna.has(id)) {
+              videna.add(id)
+              radky.push(x.radek)
+            }
+            if (maStoly(b)) {
+              if (x.radek.misto_zdroje === undefined) bezStoluId.add(id)
+              else if (m && neznameStoly((b as { locationPoints?: unknown }).locationPoints, m) > 0) neznameId.add(id)
+            }
+            zapamatovatDelku(b, x.radek.cislo_zdroje)
+            continue
           }
-          if (maStoly(b)) {
-            if (x.radek.misto_zdroje === undefined) bezStoluId.add(id)
-            else if (mapaStranky && neznameStoly((b as { locationPoints?: unknown }).locationPoints, mapaStranky) > 0) neznameId.add(id)
+          // Blízko a okno se překrývají — tatáž vadná rezervace se počítá jednou.
+          if (x.id && preskoceneId.has(x.id)) continue
+          if (x.id) preskoceneId.add(x.id)
+          vysledek.preskocene.pocet += 1
+          vysledek.preskocene.duvody[x.duvod] = (vysledek.preskocene.duvody[x.duvod] ?? 0) + 1
+          if (!vysledek.preskocene.priklad && x.id) vysledek.preskocene.priklad = x.id
+        }
+
+        if (radky.length > 0) {
+          const z = await v.zapsat(radky)
+          if (z.stav === 'chyba') {
+            chybaZapisu = z.duvod
+            return
           }
-          zapamatovatDelku(b, x.radek.cislo_zdroje)
-          continue
+          vysledek.nove += z.souhrn.nove
+          vysledek.zmenene += z.souhrn.zmenene
+          vysledek.bezeZmeny += z.souhrn.bezeZmeny
+          vysledek.odmitnute.pocet += z.souhrn.odmitnute.length
+          if (!vysledek.odmitnute.priklad && z.souhrn.odmitnute[0]) vysledek.odmitnute.priklad = z.souhrn.odmitnute[0].id
         }
-        // Blízko a okno se překrývají — tatáž vadná rezervace se počítá jednou.
-        if (x.id && preskoceneId.has(x.id)) continue
-        if (x.id) preskoceneId.add(x.id)
-        vysledek.preskocene.pocet += 1
-        vysledek.preskocene.duvody[x.duvod] = (vysledek.preskocene.duvody[x.duvod] ?? 0) + 1
-        if (!vysledek.preskocene.priklad && x.id) vysledek.preskocene.priklad = x.id
-      }
 
-      if (radky.length > 0) {
-        const z = await v.zapsat(radky)
-        if (z.stav === 'chyba') {
-          vysledek.duvod = z.duvod
-          return 'chyba'
-        }
-        vysledek.nove += z.souhrn.nove
-        vysledek.zmenene += z.souhrn.zmenene
-        vysledek.bezeZmeny += z.souhrn.bezeZmeny
-        vysledek.odmitnute.pocet += z.souhrn.odmitnute.length
-        if (!vysledek.odmitnute.priklad && z.souhrn.odmitnute[0]) vysledek.odmitnute.priklad = z.souhrn.odmitnute[0].id
-      }
-
-      vysledek.uspesnych += 1
-      poStrance?.(stranka + 1)
+        vysledek.uspesnych += 1
+        poStrance?.(dalsi)
+      })
       if (r.rezervace.length < NA_STRANKU) return 'hotovo'
     }
   }
 
-  const konec = (k: KonecBehu): VysledekBehuChoice => {
+  /**
+   * Konec běhu: nejdřív se dopíšou všechny stránky v řadě. Chyba zápisu
+   * má přednost před tím, jak skončily dotazy — stránka, která se
+   * nezapsala, byla dřív než dotazy po ní (dřív by se k nim běh ani
+   * nedostal). Výjimka ze zápisu letí ven jako dřív.
+   */
+  const konec = async (k: KonecBehu): Promise<VysledekBehuChoice> => {
+    await zapisy
+    if (vyjimka) throw (vyjimka as { e: unknown }).e
+    if (chybaZapisu !== null) {
+      k = 'chyba'
+      vysledek.duvod = chybaZapisu
+    }
     vysledek.konec = k
     vysledek.kurzor = kurzor
     vysledek.mista.bezStolu = bezStoluId.size
@@ -1144,7 +1258,10 @@ export async function probehnoutChoice(v: {
   const noveOd = Math.max(kurzor.nove_od ? Date.parse(kurzor.nove_od) - NOVE_PREKRYV_MS : v.tedMs - DEN_MS, v.tedMs - NOVE_NEJDAL_MS)
   k = await projit({ podle: 'createdDt', od: iso(noveOd), do: iso(v.tedMs) }, 1)
   if (k !== 'hotovo') return konec(k)
-  kurzor.nove_od = iso(v.tedMs)
+  // Až po zápisu všech stránek blízka a nových (řada `zapisy`).
+  zaradit(async () => {
+    kurzor.nove_od = iso(v.tedMs)
+  })
 
   // 3. Okno
   if (!kurzor.okno || v.tedMs - Date.parse(kurzor.okno.zahajeno) > OKNO_ZASTARA_MS) {
@@ -1155,9 +1272,11 @@ export async function probehnoutChoice(v: {
     kurzor.okno = { ...okno, stranka: dalsi }
   })
   if (k === 'hotovo') {
-    delete kurzor.okno
-    kurzor.okno_hotovo_kdy = iso(v.tedMs)
-    vysledek.oknoDokonceno = true
+    zaradit(async () => {
+      delete kurzor.okno
+      kurzor.okno_hotovo_kdy = iso(v.tedMs)
+      vysledek.oknoDokonceno = true
+    })
   }
   return konec(k)
 }

@@ -91,6 +91,13 @@ export type RadekRezervace = {
   misto?: string
   /** Číslo rezervace, jak ho ukazuje poskytovatel (Choice „#105“). `undefined` = neposílá. */
   cisloZdroje?: string
+  /**
+   * Část podniku, kterou si přál HOST (Choice `preferArea`). Patří zdroji
+   * jako `misto`; `''` = žádné přání. Podle ní appka pozná, že „Stůl nebo
+   * prostor“ doplnil zdroj z přání, a vedle přidělených stolů ho neukáže
+   * (migrace 20261107100000). `undefined` = poskytovatel přání nezná.
+   */
+  praniZdroje?: string
 }
 
 export type VysledekRezervaci = { stav: 'ok'; radky: RadekRezervace[] } | { stav: 'chyba'; duvod: string }

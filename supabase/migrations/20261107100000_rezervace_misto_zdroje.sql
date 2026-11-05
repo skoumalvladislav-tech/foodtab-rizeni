@@ -19,9 +19,16 @@
 --     nikdy neukázal.
 --   * `rezervace.cislo_zdroje` — číslo rezervace, jak ho ukazuje zdroj
 --     („#105"), ať se obsluha domluví s Choice. Patří zdroji.
+--   * `rezervace.prani_zdroje` — část podniku, kterou si přál HOST
+--     (Choice `preferArea`). Patří zdroji. Dokud rezervace z Choice
+--     stoly neměly, přání se doplnilo do prázdného `prostor` — a tam
+--     zůstane (patří Foodtabu, zdroj ho nepřepíše). Podle tohohle
+--     sloupce appka pozná, že „Patro" v prostoru je přání, a vedle
+--     přidělených stolů („Terasa: L7") ho neukáže (kontrola kódu 4. 11.,
+--     2. kolo). Nic se tím v `prostor` nemaže.
 --   * `app.rezervace_zapsat_radky` znovu (kopie z 20261027100000 se
---     záplatami, nic jiného se nemění): nové klíče řádku `misto_zdroje`
---     a `cislo_zdroje`. Klíč CHYBÍ = zdroj údaj tentokrát nezná a uložená
+--     záplatami, nic jiného se nemění): nové klíče řádku `misto_zdroje`,
+--     `cislo_zdroje` a `prani_zdroje`. Klíč CHYBÍ = zdroj údaj tentokrát nezná a uložená
 --     hodnota zůstane (příjmové API, Choice, když se seznam stolů
 --     nenačetl). Prázdný text = „žádné stoly" a uložené se smaže. Klíče
 --     se berou JEN od napojeného systému (`p_zdroj = 'externi'`) — import
@@ -48,13 +55,17 @@
 
 alter table public.rezervace
   add column misto_zdroje text not null default '' check (char_length(misto_zdroje) <= 300),
-  add column cislo_zdroje text not null default '' check (char_length(cislo_zdroje) <= 40);
+  add column cislo_zdroje text not null default '' check (char_length(cislo_zdroje) <= 40),
+  add column prani_zdroje text not null default '' check (char_length(prani_zdroje) <= 120);
 
 comment on column public.rezervace.misto_zdroje is
   'Stoly přidělené v rezervačním systému („Patro: S1–S12"). Patří zdroji — '
   'každé načtení, které je nese, je přepíše. Stůl od obsluhy je v prostor.';
 comment on column public.rezervace.cislo_zdroje is
   'Číslo rezervace, jak ho ukazuje rezervační systém (Choice „#105"). Patří zdroji.';
+comment on column public.rezervace.prani_zdroje is
+  'Část podniku, kterou si host přál v rezervačním systému (Choice preferArea). '
+  'Patří zdroji. Stejný text v prostor appka vedle přidělených stolů neukazuje.';
 
 
 create or replace function app.rezervace_zapsat_radky(
@@ -90,6 +101,8 @@ declare
   v_misto      text;
   v_ma_cislo   boolean;
   v_cislo      text;
+  v_ma_prani   boolean;
+  v_prani      text;
   v_zmeneno    timestamptz;
   v_id         uuid;
   v_nove       integer := 0;
@@ -148,6 +161,8 @@ begin
     v_misto    := case when v_ma_misto then left(coalesce(btrim(v_radek ->> 'misto_zdroje'), ''), 300) else '' end;
     v_ma_cislo := p_zdroj = 'externi' and v_radek ? 'cislo_zdroje';
     v_cislo    := case when v_ma_cislo then left(coalesce(btrim(v_radek ->> 'cislo_zdroje'), ''), 40) else '' end;
+    v_ma_prani := p_zdroj = 'externi' and v_radek ? 'prani_zdroje';
+    v_prani    := case when v_ma_prani then left(coalesce(btrim(v_radek ->> 'prani_zdroje'), ''), 120) else '' end;
     v_zmeneno  := app.rezervace_okamzik_zdroje(v_radek ->> 'zmeneno_kdy', 'změněno');
 
     select * into v_r from public.rezervace
@@ -159,12 +174,12 @@ begin
       insert into public.rezervace (
         tenant_id, branch_id, druh, stav, stav_zdroje, jmeno_hosta, zacatek, konec, den, pocet_osob,
         prostor, poznamka_zdroje, zdroj, poskytovatel, pripojeni_id, externi_id,
-        externi_zmeneno_kdy, importovano_kdy, misto_zdroje, cislo_zdroje
+        externi_zmeneno_kdy, importovano_kdy, misto_zdroje, cislo_zdroje, prani_zdroje
       ) values (
         p_tenant, p_branch, 'rezervace', v_stav, v_stav_zdr, v_jmeno, v_zacatek, v_konec,
         app.business_date(p_branch, v_zacatek), v_pocet,
         v_prostor, v_poznamka, p_zdroj, p_poskytovatel, p_pripojeni, v_ext,
-        v_zmeneno, now(), v_misto, v_cislo
+        v_zmeneno, now(), v_misto, v_cislo, v_prani
       )
       returning id into v_id;
 
@@ -191,6 +206,7 @@ begin
        and not (v_r.prostor = '' and v_prostor <> '')
        and (not v_ma_misto or v_r.misto_zdroje = v_misto)
        and (not v_ma_cislo or v_r.cislo_zdroje = v_cislo)
+       and (not v_ma_prani or v_r.prani_zdroje = v_prani)
        and v_r.zdroj = p_zdroj then
       v_beze_zmeny := v_beze_zmeny + 1;
       continue;
@@ -211,6 +227,7 @@ begin
       prostor             = case when prostor = '' then v_prostor else prostor end,
       misto_zdroje        = case when v_ma_misto then v_misto else misto_zdroje end,
       cislo_zdroje        = case when v_ma_cislo then v_cislo else cislo_zdroje end,
+      prani_zdroje        = case when v_ma_prani then v_prani else prani_zdroje end,
       zdroj               = p_zdroj,
       pripojeni_id        = coalesce(p_pripojeni, pripojeni_id),
       externi_zmeneno_kdy = coalesce(v_zmeneno, externi_zmeneno_kdy),

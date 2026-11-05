@@ -42,6 +42,8 @@ import {
   API_CHOICE,
   CASOVY_LIMIT_MIST_MS,
   CASOVY_LIMIT_MS,
+  MAX_JMENO_OBLASTI,
+  MAX_JMENO_STOLU,
   MAX_MISTO,
   MAX_OBLASTI,
   NA_STRANKU,
@@ -1129,7 +1131,7 @@ console.log('\n== 6a. Souběh ve virtuálním čase: tlačítka vedle běžící
  */
 const tik = () => new Promise((hotovo) => setImmediate(hotovo))
 
-function svetSoubehu(seznam, odpovedMs) {
+function svetSoubehu(seznam, odpovedMs, mistaMs = odpovedMs) {
   const START = Date.UTC(2026, 9, 26, 10, 0, 0)
   const h = hodinyAFronta(START)
   h.casovace = []
@@ -1158,7 +1160,12 @@ function svetSoubehu(seznam, odpovedMs) {
       const token = String(init.headers.authorization).slice('Bearer '.length)
       if (jeSeznamMist(url)) {
         mistni.push({ cas: h.ted, token, url: String(url) })
-        await spat(odpovedMs)
+        // 'visi' = seznam míst neodpoví a skončí časovým limitem dotazu.
+        if (mistaMs === 'visi') {
+          await spat(CASOVY_LIMIT_MIST_MS)
+          throw new DOMException('Časový limit', 'TimeoutError')
+        }
+        await spat(mistaMs)
         return odpovedMist(String(url)) ?? odpoved(404, {})
       }
       dotazy.push({ cas: h.ted, token })
@@ -1480,10 +1487,11 @@ const pripojeniUlohy = (n, x = () => ({})) => Array.from({ length: n }, (_, i) =
 }))
 const plnyPruchod = (druhy) => druhy.includes('blizko') && druhy.includes('nove') && druhy.includes('okno')
 const oknoHotovo = (s, id) => Boolean(s.db.tabulky.integrace_pripojeni.find((p) => p.id === id)?.externi_ucet?.kurzor?.okno_hotovo_kdy)
-// Seznam míst (mimo frontu) smí ZAČÍT jen do posledního dotazu (37 s)
-// a skončí nejpozději o časový limit dotazu na místa později.
+// Do kdy smí ZAČÍT seznam míst (mimo frontu), tady zkoušet nejde: začne
+// hned po první stránce, vždy dlouho před koncem — kontrola na to spadnout
+// nemohla (2. kolo kontroly kódu), je pryč. Zkouší to oddíl 11 („úloha:
+// díl připojení končí …“, „server: poslední dotaz běhu …“).
 const vCase = (b) => b.trval <= 57_000 && b.dotazy.every((d) => d.cas <= b.zacatek + 37_000)
-  && b.mistni.every((d) => d.cas <= b.zacatek + 37_000 + CASOVY_LIMIT_MIST_MS)
 /** Každé připojení, které v běhu něco zapsalo, načetlo seznam míst a má stoly u všech řádků (a aspoň jedno zapsalo). */
 const stolyVsude = (b) => Object.values(b.stoly).every((x) => x !== false) && Object.values(b.stoly).some((x) => x === true)
 
@@ -1560,8 +1568,8 @@ for (const [n, behu, nejdelePauza] of [[3, 6, 2], [5, 10, 3]]) {
  * `obsazenoMs`: fronta je na začátku obsazená do tolika ms po začátku
  * (jiní si ji zabrali těsně předtím).
  */
-async function ulohaSTlacitky(ulohaP, odpovedMs, tlacitka, ulohaZa = 0, obsazenoMs = 0) {
-  const s = svetSoubehu([...ulohaP, ...tlacitka.map((t) => t.p)], odpovedMs)
+async function ulohaSTlacitky(ulohaP, odpovedMs, tlacitka, ulohaZa = 0, obsazenoMs = 0, mistaMs = odpovedMs) {
+  const s = svetSoubehu([...ulohaP, ...tlacitka.map((t) => t.p)], odpovedMs, mistaMs)
   if (obsazenoMs > 0) s.h.dalsi = s.START + obsazenoMs
   const puvodniRozsifrovat = globalThis.__choiceTest.rozsifrovat
   globalThis.__choiceTest.rozsifrovat = (sifra) => ({ token: sifra })
@@ -1591,6 +1599,13 @@ async function ulohaSTlacitky(ulohaP, odpovedMs, tlacitka, ulohaZa = 0, obsazeno
       rozpis: r.telo.vysledky.map((v) => v.dotazu).join('+'),
       nejmensiRozestup: Math.min(...s.dotazy.slice(1).map((d, i) => d.cas - s.dotazy[i].cas)),
       zacatky,
+      /**
+       * Načetlo každé připojení úlohy, které v běhu něco zapsalo, seznam
+       * míst a má stoly u všech řádků (a zapsalo aspoň jedno)? Se třemi
+       * a víc připojeními se na poslední v běhu nedostane.
+       */
+      stolyVsude: ulohaP.some((p) => s.radkyPripojeni(p.id).length > 0)
+        && ulohaP.every((p) => s.radkyPripojeni(p.id).length === 0 || maStolyVsude(s, p)),
     }
   } finally {
     Date.now = puvodniNow
@@ -1704,6 +1719,38 @@ async function ulohaSTlacitky(ulohaP, odpovedMs, tlacitka, ulohaZa = 0, obsazeno
   }
   ok(`dávka 8 kliků jedné firmy a úloha se 3 připojeními (začne 0–11 s po nich): úloha přijde nejvýš o dotazy kliků (${davek} okamžiků; víc ${davka.length}×${priklady(davka)})`,
     davka.length === 0)
+}
+
+{
+  /* Pomalý seznam míst (kontrola kódu 4. 11., 2. kolo). Dokud na něj
+     čekal další dotaz na rezervace, vzal pomalý Choice (od ~3,7 s na
+     dotaz) nebo seznam, který visí do časového limitu, úloze místa ve
+     frontě — druhé pobočce se nenačetlo okno. Teď se seznam načítá
+     souběžně a čeká na něj jen zápis: každé připojení udělá STEJNĚ
+     dotazů jako s rychlým seznamem (a aspoň tři: blízko, nové, okno). */
+  const firmaUlohy = (i) => `e${i}eeeeee-0000-0000-0000-000000000000`
+  const ulohaN = (n) => Array.from({ length: n }, (_, i) => ({ id: idPripojeni(i), firma: firmaUlohy(i), pobocka: pobocka(30 + i), token: `tok-u${i}`, vs: String(700 + i), okno: 100_000 }))
+  for (const n of [2, 3]) {
+    const horsi = []
+    const bezStolu = []
+    let pokusu = 0
+    let rychle = ''
+    for (const odpovedMs of [250, 2_500]) {
+      const r0 = await ulohaSTlacitky(ulohaN(n), odpovedMs, [], 0, 0, 250)
+      rychle += `${rychle ? ', ' : ''}${r0.rozpis}`
+      for (const mistaMs of [4_000, 5_000, 'visi']) {
+        const r = await ulohaSTlacitky(ulohaN(n), odpovedMs, [], 0, 0, mistaMs)
+        pokusu++
+        const kde = `odpověď ${odpovedMs} ms, seznam míst ${mistaMs}`
+        if (r.rozpis !== r0.rozpis || r.rozpis.split('+').some((x) => Number(x) < 3)) horsi.push(`${kde}: ${r.rozpis} (s rychlým seznamem ${r0.rozpis})`)
+        if (mistaMs !== 'visi' && !r.stolyVsude) bezStolu.push(kde)
+      }
+    }
+    ok(`úloha s ${n} připojeními a pomalým seznamem míst (4 s, 5 s, visí ${CASOVY_LIMIT_MIST_MS / 1000} s): kdo přijde na řadu, udělá stejně dotazů jako s rychlým seznamem (${rychle}) a aspoň 3 (${pokusu} běhů; jinak ${horsi.length}×${priklady(horsi)})`,
+      horsi.length === 0)
+    ok(`… se seznamem, který odpoví (4 s, 5 s), má každé připojení, které zapisovalo, stoly u všech řádků (bez stolů ${bezStolu.length}×${priklady(bezStolu)})`,
+      bezStolu.length === 0)
+  }
 }
 
 {
@@ -2194,7 +2241,12 @@ console.log('\n== 10. Každý kód hlášky má text ==\n')
 /* ===================================================================== */
 console.log('\n== 11. Stoly z Choice (locationPoints → „Patro: S1–S12“) ==\n')
 
-const MAPA = mapaMist(oblastiZOdpovedi(OBLASTI_CHOICE), [MISTA_CHOICE[PATRO], MISTA_CHOICE[TERASA], MISTA_CHOICE[BAR], MISTA_CHOICE[S_SEBOU]])
+/** Hodnota pro oddíl. Výjimka shodí jednu jmenovanou kontrolu, ne celý soubor (2. kolo kontroly kódu). */
+const nebo = (popis, fn, nahrada) => {
+  try { return fn() } catch (e) { ok(`${popis} (výjimka: ${e?.message})`, false); return nahrada }
+}
+const PRAZDNA_MAPA = { oblasti: [], mista: new Map(), uplna: true }
+const MAPA = nebo('mapa míst z oblastí a stolů Choice se postaví', () => mapaMist(oblastiZOdpovedi(OBLASTI_CHOICE), [MISTA_CHOICE[PATRO], MISTA_CHOICE[TERASA], MISTA_CHOICE[BAR], MISTA_CHOICE[S_SEBOU]]), PRAZDNA_MAPA)
 
 /** Podstrčené Choice API: rezervace po průchodech, oblasti a místa; počítá volání. */
 function apiSeStoly({ rezervace: seznam, oblasti = () => ({ stav: 'ok', oblasti: OBLASTI_CHOICE }), mista = (id) => ({ stav: 'ok', mista: MISTA_CHOICE[id] ?? [] }) }) {
@@ -2335,20 +2387,50 @@ async function beh(popis, spustit, kontroly) {
 
   // Dlouhý text: useknutý ZA celým stolem, ne uprostřed jména.
   const dlouhaJmena = Array.from({ length: 20 }, (_, i) => ({ id: `o${i}`, nazev: `Oblast s dlouhým jménem ${i}` }))
-  const mnoho = mapaMist(dlouhaJmena, Array.from({ length: 20 }, (_, i) => [{ _id: `m${i}a`, name: `Stůl A${i}` }, { _id: `m${i}b`, name: `Stůl C${i}` }]))
+  const mnoho = nebo('mapa s dlouhými jmény oblastí se postaví', () => mapaMist(dlouhaJmena, Array.from({ length: 20 }, (_, i) => [{ _id: `m${i}a`, name: `Stůl A${i}` }, { _id: `m${i}b`, name: `Stůl C${i}` }])), PRAZDNA_MAPA)
   const cely = dlouhaJmena.map((o, i) => `${o.nazev}: Stůl A${i}, Stůl C${i}`).join(' · ')
-  kontrola(`text stolů nejvýš ${MAX_MISTO} znaků, useknutí je vidět („ …“) a je ZA celým stolem (dál v celém textu jde „, “ nebo „ · “)`, () => {
+  kontrola(`text stolů nejvýš ${MAX_MISTO} znaků, useknutí je vidět („ …“) a je ZA celým stolem — přesně tolik celých stolů, kolik se s „ …“ vejde`, () => {
     const x = mistoZChoice(Array.from({ length: 20 }, (_, i) => [`m${i}a`, `m${i}b`]).flat(), mnoho)
-    const zaklad = x.slice(0, -2)
-    const dal = cely.slice(zaklad.length, zaklad.length + 3)
-    return [cely.length > MAX_MISTO && x.length <= MAX_MISTO && x.endsWith(' …') && cely.startsWith(zaklad) && (dal.startsWith(', ') || dal === ' · '),
-      `${x.length} znaků, končí „${x.slice(-12)}“, dál „${dal}“`]
+    // Nezávisle: kousky textu po celých stolech, dokud se s „ …“ vejdou.
+    const kousky = dlouhaJmena.flatMap((o, i) => [`${i ? ' · ' : ''}${o.nazev}: Stůl A${i}`, `, Stůl C${i}`])
+    let cekam = ''
+    for (const k of kousky) {
+      if ((cekam + k).length + 2 > MAX_MISTO) break
+      cekam += k
+    }
+    cekam += ' …'
+    return [cely.length > MAX_MISTO && x === cekam, `${x.length} znaků, končí „${x.slice(-14)}“ (čekám ${cekam.length}, „${cekam.slice(-14)}“)`]
+  })
+  // Čárka může být i VE JMÉNU stolu: řez hledající poslední „, “ v hotovém
+  // textu by vzal půl jména (2. kolo kontroly kódu, nález A4).
+  kontrola('čárka ve jménu stolu („Stůl 17, u velkého okna do zahrady“): useknutí je za CELÝM jménem, ne za „Stůl 17“', () => {
+    const jmena = Array.from({ length: 30 }, (_, i) => `Stůl ${i + 1}, u velkého okna do zahrady`)
+    const x = mistoZChoice(jmena.map((_, i) => `w${i}`), mapaMist([{ id: 'o1', nazev: 'Sál' }], [jmena.map((name, i) => ({ _id: `w${i}`, name }))]))
+    return [typeof x === 'string' && x.length <= MAX_MISTO && x.endsWith(', u velkého okna do zahrady …'), `${x?.length} znaků, končí „${x?.slice(-20)}“`]
   })
 
   // Půlznaky (lone surrogates): PostgREST takové tělo odmítne celé (PGRST102).
-  kontrola('jméno stolu s emoji přes hranici 40 znaků se zkrátí PŘED emoji, ne na půl', () => {
-    const x = mistoZChoice(['m1'], mapaMist([{ id: 'o1', nazev: 'Patro' }], [[{ _id: 'm1', name: `${'A'.repeat(39)}😀` }]]))
-    return [x === `Patro: ${'A'.repeat(39)}` && !LICHA_POLOVINA.test(x), x]
+  kontrola('jméno stolu s emoji přes hranici 40 znaků se zkrátí PŘED emoji, ne na půl, a dostane „…“', () => {
+    const x = mistoZChoice(['m1'], mapaMist([{ id: 'o1', nazev: 'Patro' }], [[{ _id: 'm1', name: `${'A'.repeat(38)}😀B` }]]))
+    return [x === `Patro: ${'A'.repeat(38)}…` && !LICHA_POLOVINA.test(x), x]
+  })
+  // Dlouhé jméno se zkrátí VIDITELNĚ (2. kolo kontroly kódu): useknuté
+  // „stolek 123“ → „stolek 12“ by byl jiný stůl.
+  kontrola(`jméno stolu delší než ${MAX_JMENO_STOLU} znaků končí „…“, ne useknutým číslem (…123 ≠ …12)`, () => {
+    const jmeno = `${'Stolek u okna s výhledem na řeku '.padEnd(MAX_JMENO_STOLU - 2, 'x')}123`
+    const x = mistoZChoice(['m1'], mapaMist([{ id: 'o1', nazev: 'Sál' }], [[{ _id: 'm1', name: jmeno }]]))
+    return [x === `Sál: ${jmeno.slice(0, MAX_JMENO_STOLU - 1)}…` && x.endsWith('1…'), x]
+  })
+  kontrola(`jméno oblasti delší než ${MAX_JMENO_OBLASTI} znaků končí „…“`, () => {
+    const oblast = `Zahrádka${' za domem'.repeat(8)}`
+    const x = mistoZChoice(['m1'], mapaMist(oblastiZOdpovedi([{ _id: 'o1', name: oblast }]), [[{ _id: 'm1', name: 'S1' }]]))
+    return [x === `${oblast.slice(0, MAX_JMENO_OBLASTI - 1).trimEnd()}…: S1`, x]
+  })
+  kontrola('jména zkrácená uprostřed čísla se do rozsahu NESPOJÍ (…121, …131, …141 nejsou „…12–14“)', () => {
+    const jmena = ['121', '131', '141'].map((n) => `${'X'.repeat(MAX_JMENO_STOLU - 2)}${n}`)
+    const x = mistoZChoice(['c0', 'c1', 'c2'], mapaMist([{ id: 'o1', nazev: 'Sál' }], [jmena.map((name, i) => ({ _id: `c${i}`, name }))]))
+    const jedno = `${'X'.repeat(MAX_JMENO_STOLU - 2)}1…`
+    return [x === `Sál: ${jedno}, ${jedno}, ${jedno}`, x]
   })
   kontrola('osamělá půlka znaku ve jméně z Choice → náhradní znak U+FFFD', () => {
     const x = mistoZChoice(['m1'], mapaMist([{ id: 'o1', nazev: 'Patro' }], [[{ _id: 'm1', name: 'S1\uD800' }]]))
@@ -2366,15 +2448,15 @@ async function beh(popis, spustit, kontroly) {
   // Totéž ve společné cestě všech zdrojů a v souboru (CSV) — každé
   // zkrácené pole má emoji přesně přes svou hranici.
   const naHranici = (n) => `${'x'.repeat(n - 1)}😀`
-  kontrola('řádek ze zdroje (zRadkuZdroje): žádné z 8 zkrácených polí nemá půlznak', () => {
+  kontrola('řádek ze zdroje (zRadkuZdroje): žádné z 9 zkrácených polí nemá půlznak', () => {
     const s = zRadkuZdroje({
       externiId: 'z1', stav: 'potvrzeno', stavZdroje: naHranici(60), pocetHostu: 2, cas: '2026-11-20T18:00:00.000Z', konec: null, zmenenoKdy: null,
       externiProvozovna: '1', jmenoHosta: naHranici(120), telefonHosta: naHranici(40), emailHosta: naHranici(254), poznamka: naHranici(4000),
-      prostor: naHranici(120), misto: naHranici(300), cisloZdroje: naHranici(40),
+      prostor: naHranici(120), misto: naHranici(300), cisloZdroje: naHranici(40), praniZdroje: naHranici(120),
     })
-    const spatne = ['stav_zdroje', 'jmeno_hosta', 'telefon', 'email', 'poznamka', 'prostor', 'misto_zdroje', 'cislo_zdroje']
+    const spatne = ['stav_zdroje', 'jmeno_hosta', 'telefon', 'email', 'poznamka', 'prostor', 'misto_zdroje', 'cislo_zdroje', 'prani_zdroje']
       .filter((k) => typeof s.radek?.[k] !== 'string' || s.radek[k].length === 0 || LICHA_POLOVINA.test(s.radek[k]))
-    return [s.stav === 'ok' && spatne.length === 0, spatne.join(', ') || 'všech 8 bez půlznaku']
+    return [s.stav === 'ok' && spatne.length === 0, spatne.join(', ') || 'všech 9 bez půlznaku']
   })
   kontrola('soubor (CSV): jméno, telefon, e-mail, poznámka a prostor bez půlznaku', () => {
     const v = naparsovatCsvRezervaci(`id;datum;čas;jméno;telefon;email;poznámka;prostor\n1;30.10.2026;19:00;${naHranici(120)};${naHranici(40)};${naHranici(254)};${naHranici(4000)};${naHranici(120)}\n`)
@@ -2395,7 +2477,10 @@ async function beh(popis, spustit, kontroly) {
     const o = oblastiZOdpovedi(Array.from({ length: MAX_OBLASTI + 5 }, (_, i) => ({ _id: `o${i}`, name: `O${i}`, itemCount: 0 })))
     return [o.length === MAX_OBLASTI + 5, o.length]
   })
-  kontrola('mapa postavená ze všech oblastí je „celá“ (uplna)', () => MAPA.uplna === true)
+  await beh('mapa z odpovědí Choice', () => nacistMapuMist(apiSeStoly({ rezervace: [] }).api, TOKEN), [
+    ['mapa načtená ze všech oblastí podniku (nacistMapuMist) je „celá“ (uplna) a zná všech 29 stolů', (m) =>
+      [m.stav === 'ok' && m.mapa.uplna === true && m.mapa.mista.size === 29, `${m.stav}, celá ${m.mapa?.uplna}, stolů ${m.mapa?.mista.size}`]],
+  ])
 
   const casti = (n) => Array.from({ length: n }, (_, i) => ({ _id: `d${String(i).padStart(23, '0')}`, name: `Část ${i + 1}`, itemCount: 1 }))
   const apiCasti = (oblasti) => {
@@ -2438,12 +2523,17 @@ async function beh(popis, spustit, kontroly) {
   })
   kontrola('jiný zdroj (INTERNAL, OPEN_API, nic) se nepíše — dokumentace ho nevysvětluje',
     () => ['INTERNAL', 'OPEN_API', undefined, 5].every((type) => poznamkaZChoice({ source: { type } }) === '') && poznamkaZChoice({ source: 'PARTNER_GOOGLE' }) === '')
-  kontrola('jazyk rezervace jiný než čeština → „Jazyk rezervace: EN.“', () => {
+  kontrola('jazyk rezervace jiný než čeština → jméno jazyka česky („Jazyk rezervace: angličtina.“)', () => {
     const x = poznamkaZChoice({ langCode: ' en ' })
-    return [x === 'Jazyk rezervace: EN.', x]
+    return [x === 'Jazyk rezervace: angličtina.', x]
   })
-  kontrola('čeština (cs, CZ) a nesmysl (eng, e1, prázdné, číslo) se nepíše',
-    () => ['cs', 'CZ', 'eng', 'e1', '', 5, null].every((langCode) => poznamkaZChoice({ langCode }) === ''))
+  // „UK“ se četlo jako Británie (2. kolo kontroly kódu).
+  kontrola('„uk“ je ukrajinština, „en-GB“ a „de_AT“ podle jazyka, neznámý kód zůstane kódem', () => {
+    const x = ['uk', 'en-GB', 'de_AT', 'xx'].map((langCode) => poznamkaZChoice({ langCode })).join('|')
+    return [x === 'Jazyk rezervace: ukrajinština.|Jazyk rezervace: angličtina.|Jazyk rezervace: němčina.|Jazyk rezervace: kód XX.', x]
+  })
+  kontrola('čeština (cs, CZ, cs-CZ) a nesmysl (eng, e1, en-GBR, prázdné, číslo) se nepíše',
+    () => ['cs', 'CZ', 'cs-CZ', 'eng', 'e1', 'en-GBR', '', 5, null].every((langCode) => poznamkaZChoice({ langCode }) === ''))
 
   const preferPatro = { _id: PATRO, i18n: { cs: { name: 'Patro' } } }
   kontrola('řádek nese stoly a číslo rezervace (misto_zdroje „Patro: S1–S12“, cislo_zdroje „105“)', () => {
@@ -2454,10 +2544,23 @@ async function beh(popis, spustit, kontroly) {
     const s = radekZChoice(rezervace(106, { locationPoints: [idS(TERASA, 'L7')], preferArea: preferPatro }), '12345', MAPA)
     return [s.stav === 'ok' && s.radek.prostor === '' && s.radek.misto_zdroje === 'Terasa: L7', `prostor „${s.radek?.prostor}“`]
   })
-  kontrola('rezervace BEZ stolů (žádné i prázdné pole) a stoly bez seznamu míst: přání hosta jde do „prostor“', () => {
+  kontrola('rezervace BEZ stolů (žádné i prázdné pole): přání hosta jde do „prostor“', () => {
     const p = [{}, { locationPoints: [] }].map((x) => radekZChoice(rezervace(107, { ...x, preferArea: preferPatro }), '12345', MAPA).radek?.prostor)
-    p.push(radekZChoice(rezervace(108, { locationPoints: stolyPatra(1), preferArea: preferPatro }), '12345', null).radek?.prostor)
     return [p.every((x) => x === 'Patro'), p.join(', ')]
+  })
+  // Stoly přijdou dalším během — „Patro“ by v prostoru zůstalo vedle nich (2. kolo kontroly kódu).
+  kontrola('stoly BEZ seznamu míst (nenačetl se): přání do „prostor“ taky NEjde a misto_zdroje klíč nemá', () => {
+    const s = radekZChoice(rezervace(108, { locationPoints: stolyPatra(1), preferArea: preferPatro }), '12345', null)
+    return [s.stav === 'ok' && s.radek.prostor === '' && !('misto_zdroje' in s.radek), `prostor „${s.radek?.prostor}“`]
+  })
+  kontrola('přání hosta jde VŽDY do prani_zdroje (se stoly, bez nich, bez seznamu míst); bez přání \'\'', () => {
+    const p = [
+      radekZChoice(rezervace(106, { locationPoints: [idS(TERASA, 'L7')], preferArea: preferPatro }), '12345', MAPA),
+      radekZChoice(rezervace(107, { preferArea: preferPatro }), '12345', MAPA),
+      radekZChoice(rezervace(108, { locationPoints: stolyPatra(1), preferArea: preferPatro }), '12345', null),
+      radekZChoice(rezervace(109), '12345', MAPA),
+    ].map((s) => s.radek?.prani_zdroje)
+    return [p.join('|') === 'Patro|Patro|Patro|', p.join('|')]
   })
   kontrola('bez seznamu míst řádek KLÍČ misto_zdroje NEMÁ (databáze nechá uložené), ostatní údaje ano', () => {
     const s = radekZChoice(rezervace(105, { locationPoints: stolyPatra(1) }), '12345')
@@ -2672,8 +2775,9 @@ for (const [popis, nastaveni] of [
   }
   kontrola(`oblasti a po nich stoly (dva dotazy za sebou, každý nejvýš ${CASOVY_LIMIT_MIST_MS} ms) se vejdou do rezervy běhu (${SYNC.REZERVA_DOTAZU_MS} ms po posledním dotazu)`,
     () => [2 * CASOVY_LIMIT_MIST_MS < SYNC.REZERVA_DOTAZU_MS, `${2 * CASOVY_LIMIT_MIST_MS} < ${SYNC.REZERVA_DOTAZU_MS}`])
-  await beh('zlé id oblasti', () => vytvoritChoice(sit(() => odpoved(200, [])).fetchFn).nacistMistaOblasti(TOKEN, '../bookings/x/cancel'), [
-    ['id oblasti s lomítkem se do adresy nedostane (bez dotazu, chyba)', (x) => x.stav === 'chyba'],
+  const zleId = sit(() => odpoved(200, []))
+  await beh('zlé id oblasti', () => vytvoritChoice(zleId.fetchFn).nacistMistaOblasti(TOKEN, '../bookings/x/cancel'), [
+    ['id oblasti s lomítkem se do adresy nedostane (bez dotazu, chyba)', (x) => [x.stav === 'chyba' && zleId.pozadavky.length === 0, `${x.stav}, ${zleId.pozadavky.length} dotazů`]],
   ])
   await beh('nečekaný tvar', () => vytvoritChoice(sit(() => odpoved(200, { neco: 1 })).fetchFn).nacistOblasti(TOKEN), [
     ['nečekaný tvar odpovědi → chyba, ne prázdný seznam', (x) => x.stav === 'chyba' && x.druh === 'data'],
@@ -2684,6 +2788,96 @@ for (const [popis, nastaveni] of [
 }
 
 {
+  // --- seznam míst až na DRUHÉ stránce (první je bez stolů): načte se tam, jednou
+  const stranky = [[r107], [r105], [r105, r106]]
+  const volani = { stranky: 0, oblasti: 0 }
+  const api = {
+    async nacistStranku() { volani.stranky += 1; return { stav: 'ok', rezervace: stranky[volani.stranky - 1] ?? [] } },
+    async nacistOblasti() { volani.oblasti += 1; return { stav: 'ok', oblasti: OBLASTI_CHOICE } },
+    async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
+  }
+  const z = zapisDoPameti()
+  await beh('seznam míst na druhé stránce', () => probehnoutChoice(behStoly({ api }, { zapsat: z.fn })), [
+    ['první stránka bez stolů seznam míst nenačte, druhá ano — jednou za běh, celý', (v) =>
+      [volani.oblasti === 1 && v.mista.stav === 'ok' && v.mista.dotazu === 5 && v.konec === 'hotovo', `oblasti ${volani.oblasti}×, ${v.mista.stav}, ${v.mista.dotazu} dotazů, ${v.konec}`]],
+    ['#107 bez stolů klíč misto_zdroje nemá; #105 ze 2. a 3. stránky „Patro: S1–S12“; #106 „Terasa: L7 · 1 stůl bez názvu“', () => {
+      const a = zapsaneId(z, r107._id)
+      const b = zapsaneId(z, r105._id)
+      const c = zapsaneId(z, r106._id)
+      return [a.length === 1 && !('misto_zdroje' in a[0]) && b.length === 2 && b.every((x) => x.misto_zdroje === 'Patro: S1–S12') && c.length === 1 && c[0].misto_zdroje === 'Terasa: L7 · 1 stůl bez názvu',
+        `${a.length}/${b.length}/${c.length}, ${b.map((x) => x.misto_zdroje).join(' | ')} | ${c[0]?.misto_zdroje}`]
+    }],
+  ])
+}
+
+{
+  // --- seznam míst se načítá SOUBĚŽNĚ: další dotazy na rezervace na něj
+  //     nečekají, zápisy ano (2. kolo kontroly kódu: čekal-li na něj další
+  //     dotaz, pomalý Choice vzal úloze okno druhé pobočky)
+  const deje = []
+  let pustit
+  const brana = new Promise((hotovo) => { pustit = hotovo })
+  // Pojistka: kdyby běh na seznam čekal (chyba), pustí ho čas, ať test neuvázne.
+  const pojistka = setTimeout(() => pustit(), 300)
+  let stranek = 0
+  const api = {
+    async nacistStranku() {
+      stranek += 1
+      deje.push(`stránka ${stranek}`)
+      if (stranek === 3) pustit()
+      return { stav: 'ok', rezervace: [r105] }
+    },
+    async nacistOblasti() {
+      deje.push('oblasti')
+      await brana
+      deje.push('oblasti hotové')
+      return { stav: 'ok', oblasti: OBLASTI_CHOICE }
+    },
+    async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
+  }
+  const zapsat = async (radky) => {
+    deje.push(`zápis ${radky.map((r) => r.misto_zdroje).join(',')}`)
+    return { stav: 'ok', souhrn: { nove: radky.length, zmenene: 0, bezeZmeny: 0, zastarale: 0, odmitnute: [] } }
+  }
+  await beh('seznam míst souběžně', () => probehnoutChoice(behStoly({ api }, { zapsat })), [
+    ['další dotazy na rezervace (stránka 2 a 3) odešly, ZATÍMCO se seznam míst načítal', () =>
+      [deje.indexOf('oblasti') >= 0 && deje.indexOf('oblasti') < deje.indexOf('stránka 2') && deje.indexOf('stránka 3') < deje.indexOf('oblasti hotové'), deje.join(' → ')]],
+    ['zápisy až po seznamu míst, všechny tři popořadě a se stoly „Patro: S1–S12“', () => {
+      const zapisy = deje.map((d, i) => [d, i]).filter(([d]) => d.startsWith('zápis'))
+      return [zapisy.length === 3 && zapisy.every(([d, i]) => d === 'zápis Patro: S1–S12' && i > deje.indexOf('oblasti hotové')), deje.join(' → ')]
+    }],
+    ['běh „hotovo“: 3 stránky zapsané, kurzor nových posunutý, okno dokončené', (v) =>
+      [v.konec === 'hotovo' && v.uspesnych === 3 && v.kurzor.nove_od === new Date(TED_STOLY).toISOString() && v.oknoDokonceno === true,
+        `${v.konec}, ${v.uspesnych} stránky, nové od ${v.kurzor.nove_od}, okno ${v.oknoDokonceno}`]],
+  ])
+  clearTimeout(pojistka)
+}
+
+{
+  // --- zápis 1. stránky selže, zatímco se seznam míst načítal a další
+  //     stránky už odešly: nic za ní se nezapíše, kurzor stojí, běh „chyba“
+  let pustit
+  const brana = new Promise((hotovo) => { pustit = hotovo })
+  const pojistka = setTimeout(() => pustit(), 300)
+  let stranek = 0
+  const api = {
+    async nacistStranku() { stranek += 1; if (stranek === 3) pustit(); return { stav: 'ok', rezervace: [r105] } },
+    async nacistOblasti() { await brana; return { stav: 'ok', oblasti: OBLASTI_CHOICE } },
+    async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
+  }
+  let zapisu = 0
+  const zapsat = async () => { zapisu += 1; return { stav: 'chyba', duvod: 'Databáze řádky nepřijala.' } }
+  const PRED = '2026-11-04T10:00:00.000Z'
+  await beh('zápis selže při souběžném seznamu míst', () => probehnoutChoice(behStoly({ api }, { zapsat, kurzor: { nove_od: PRED } })), [
+    ['běh „chyba“ s důvodem zápisu (ne „hotovo“), zapisovalo se jen jednou, žádná stránka zapsaná', (v) =>
+      [v.konec === 'chyba' && v.duvod === 'Databáze řádky nepřijala.' && zapisu === 1 && v.uspesnych === 0, `${v.konec}, „${v.duvod}“, zápisů ${zapisu}, zapsaných stránek ${v.uspesnych}`]],
+    ['kurzor nových zůstal, okno nedokončené a neposunuté', (v) =>
+      [v.kurzor.nove_od === PRED && v.oknoDokonceno === false && !v.kurzor.okno_hotovo_kdy && (v.kurzor.okno?.stranka ?? 1) === 1, JSON.stringify(v.kurzor)]],
+  ])
+  clearTimeout(pojistka)
+}
+
+{
   // --- server se skutečným kódem: seznam míst MIMO frontu, stoly do zápisu, ukázka délky k napojení
   const r = rezervace(105, { locationPoints: stolyPatra(...VSE12), visitDuration: 120 })
   const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r, rezervace(2)]) })
@@ -2691,10 +2885,10 @@ for (const [popis, nastaveni] of [
   const mistni = () => s.dotazy.filter((d) => jeSeznamMist(d.url))
   await beh('server se stoly', () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, prostredi: s.prostredi }), [
     ['server: běh doběhl „ok“, 3 dotazy na rezervace a 5 na seznam míst', (v) => [v.stav === 'ok' && rezervacni().length === 3 && mistni().length === 5, `${v.stav}, ${rezervacni().length} + ${mistni().length}`]],
-    ['server: seznam míst šel MIMO frontu — frontu si zabraly jen dotazy na rezervace a před seznamem míst se neposunula', () => {
+    ['server: seznam míst šel MIMO frontu — frontu si zabraly jen dotazy na rezervace a seznam míst odešel hned po prvním z nich, bez místa ve frontě', () => {
       const prvni = s.dotazy.indexOf(mistni()[0])
       const zabrano = zabraniFronty(s).length
-      return [zabrano === rezervacni().length && prvni > 0 && mistni().every((d) => d.frontaPred === s.dotazy[prvni - 1].frontaPred), `zabráno ${zabrano}, seznam míst jako ${prvni + 1}. dotaz`]
+      return [zabrano === rezervacni().length && prvni === 1 && mistni()[0].frontaPred === s.dotazy[0].frontaPred, `zabráno ${zabrano}, seznam míst jako ${prvni + 1}. dotaz`]
     }],
     ['server: dotazy na rezervace drží rozestup 5 s i se seznamem míst mezi nimi', () => rezervacni().every((d, i, a) => i === 0 || d.cas - a[i - 1].cas >= 5000)],
     ['server: do rezervace_importovat_zdroj jde #105 se stoly „Patro: S1–S12“ a číslem 105', () =>

@@ -1,7 +1,7 @@
 -- Scénář pro krok 109 — Rezervace: stoly a číslo rezervace ze zdroje.
 --
 -- Pokrývá migraci 20261107100000_rezervace_misto_zdroje.sql (sloupce
--- rezervace.misto_zdroje a cislo_zdroje, nové klíče řádku
+-- rezervace.misto_zdroje, cislo_zdroje a prani_zdroje, nové klíče řádku
 -- v app.rezervace_zapsat_radky).
 --
 -- Zadání Šéfíka 4. 11. 2026: z Choice se nenačítá „umístění a obsazení
@@ -27,7 +27,12 @@
 --      doplní, stoly ze zdroje ho nepřepíšou a naopak;
 --   5. soubor (CSV) — klíče se od něj NEČTOU: nová rezervace bez stolů,
 --      už načtená z Choice si stoly nechá;
---   6. ruční uložení (rezervace_ulozit) stoly ani číslo nezmění.
+--   6. ruční uložení (rezervace_ulozit) stoly ani číslo nezmění;
+--   7. přání hosta (prani_zdroje, Choice preferArea): u rezervace se
+--      stoly appka posílá prostor prázdný a přání zvlášť; přání se uloží,
+--      jeho změna je „změněná“, chybějící klíč nechá uložené, prázdné
+--      a null smažou, délku hlídá funkce i databáze (120); soubor ani
+--      ruční uložení ho nemění.
 --
 -- Data rezervací jsou v roce 2099 (spoušť upozornění minulý den nehlásí).
 --
@@ -80,6 +85,13 @@ returns text language sql as $$
                     where r.poskytovatel = p_posk and r.externi_id = p_ext), 'chybí')
 $$;
 
+-- Přání hosta ('chybí', když rezervace není).
+create or replace function pg_temp.prani(p_posk text, p_ext text)
+returns text language sql as $$
+  select coalesce((select r.prani_zdroje from public.rezervace r
+                    where r.poskytovatel = p_posk and r.externi_id = p_ext), 'chybí')
+$$;
+
 reset role;
 select set_config('test.user_id', '', false);
 
@@ -103,19 +115,23 @@ update public.integrace_pripojeni
 \echo ''
 \echo '== 1. Sloupce a práva ===================================='
 
-select pg_temp.check('sloupce misto_zdroje a cislo_zdroje: text, povinné, výchozí prázdné',
+select pg_temp.check('sloupce misto_zdroje, cislo_zdroje a prani_zdroje: text, povinné, výchozí prázdné',
   (select count(*) from information_schema.columns
     where table_schema = 'public' and table_name = 'rezervace'
-      and column_name in ('misto_zdroje', 'cislo_zdroje')
-      and data_type = 'text' and is_nullable = 'NO' and column_default = '''''::text') = 2);
+      and column_name in ('misto_zdroje', 'cislo_zdroje', 'prani_zdroje')
+      and data_type = 'text' and is_nullable = 'NO' and column_default = '''''::text') = 3);
 
-select pg_temp.check('authenticated stoly a číslo ČTE (kalendář je ukazuje), zapsat ani vložit je nesmí',
+select pg_temp.check('authenticated stoly, číslo a přání ČTE (kalendář je ukazuje), zapsat ani vložit je nesmí',
   has_column_privilege('authenticated', 'public.rezervace', 'misto_zdroje', 'SELECT')
   and has_column_privilege('authenticated', 'public.rezervace', 'cislo_zdroje', 'SELECT')
+  and has_column_privilege('authenticated', 'public.rezervace', 'prani_zdroje', 'SELECT')
   and not has_column_privilege('authenticated', 'public.rezervace', 'misto_zdroje', 'UPDATE')
   and not has_column_privilege('authenticated', 'public.rezervace', 'cislo_zdroje', 'UPDATE')
+  and not has_column_privilege('authenticated', 'public.rezervace', 'prani_zdroje', 'UPDATE')
   and not has_column_privilege('authenticated', 'public.rezervace', 'misto_zdroje', 'INSERT')
-  and not has_column_privilege('anon', 'public.rezervace', 'misto_zdroje', 'SELECT'));
+  and not has_column_privilege('authenticated', 'public.rezervace', 'prani_zdroje', 'INSERT')
+  and not has_column_privilege('anon', 'public.rezervace', 'misto_zdroje', 'SELECT')
+  and not has_column_privilege('anon', 'public.rezervace', 'prani_zdroje', 'SELECT'));
 
 select pg_temp.check('app.rezervace_zapsat_radky nevolá nikdo zvenku (anon, authenticated, public); jen přes obalové funkce',
   not has_function_privilege('authenticated', 'app.rezervace_zapsat_radky(uuid, uuid, text, text, uuid, jsonb)', 'execute')
@@ -135,18 +151,22 @@ select pg_temp.check('zápis ze zdroje dál jen service_role, soubor jen přihl�
 \echo '== 2. Nová rezervace ze zdroje ==========================='
 
 -- Tvar řádku přesně podle radekZChoice (lib/rezervace-choice.ts):
--- #105 ze snímku Šéfíka — Patro, S1–S12, 2 osoby.
-select '[{"externi_id":"krok109-105","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T18:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Patro Krok109","pocet_osob":"2","telefon":"","email":"","poznamka":"","prostor":"Patro","misto_zdroje":"Patro: S1–S12","cislo_zdroje":"105"},{"externi_id":"krok109-106","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T19:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Bez stolů Krok109","pocet_osob":"4","telefon":"","email":"","poznamka":"","prostor":""}]' as davka1 \gset
+-- #105 ze snímku Šéfíka — Patro, S1–S12, 2 osoby. Host si přál „Patro“
+-- (preferArea); rezervace má stoly, takže prostor appka posílá prázdný
+-- a přání jde zvlášť (prani_zdroje). #106 bez stolů a bez přání.
+select '[{"externi_id":"krok109-105","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T18:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Patro Krok109","pocet_osob":"2","telefon":"","email":"","poznamka":"","prostor":"","prani_zdroje":"Patro","misto_zdroje":"Patro: S1–S12","cislo_zdroje":"105"},{"externi_id":"krok109-106","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T19:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Bez stolů Krok109","pocet_osob":"4","telefon":"","email":"","poznamka":"","prostor":"","prani_zdroje":""}]' as davka1 \gset
 
 set role service_role;
 select public.rezervace_importovat_zdroj(:'choice', :'davka1'::jsonb)::text as imp1 \gset
 reset role;
 
-select pg_temp.check(format('stejnou cestou jako server (rezervace_importovat_zdroj): #105 má stoly i číslo, prostor z přání hosta (%s)', pg_temp.udaje('krok109-choice', 'krok109-105')),
+select pg_temp.check(format('stejnou cestou jako server (rezervace_importovat_zdroj): #105 má stoly, číslo i přání hosta „Patro“, prostor Foodtabu zůstal prázdný (%s, přání %s)', pg_temp.udaje('krok109-choice', 'krok109-105'), pg_temp.prani('krok109-choice', 'krok109-105')),
   (:'imp1'::jsonb ->> 'nove')::int = 2
-  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Patro: S1–S12|105|Patro');
-select pg_temp.check('rezervace bez klíčů (zdroj stoly nepřidělil) má prázdné stoly i číslo',
-  pg_temp.udaje('krok109-choice', 'krok109-106') = '||');
+  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Patro: S1–S12|105|'
+  and pg_temp.prani('krok109-choice', 'krok109-105') = 'Patro');
+select pg_temp.check('rezervace bez klíčů (zdroj stoly nepřidělil) má prázdné stoly, číslo i přání',
+  pg_temp.udaje('krok109-choice', 'krok109-106') = '||'
+  and pg_temp.prani('krok109-choice', 'krok109-106') = '');
 
 -- Dlouhý text a mezery okolo: zkrátí se, dávka nespadne.
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
@@ -170,22 +190,24 @@ select pg_temp.check('… a 41 znaků čísla taky ne',
 \echo '== 3. Další načtení ======================================'
 
 -- V Choice přesadili hosta: Terasa, L7 a L8.
-select '[{"externi_id":"krok109-105","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T18:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Patro Krok109","pocet_osob":"2","telefon":"","email":"","poznamka":"","prostor":"Patro","misto_zdroje":"Terasa: L7, L8","cislo_zdroje":"105"}]' as presazeni \gset
+select '[{"externi_id":"krok109-105","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T18:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Patro Krok109","pocet_osob":"2","telefon":"","email":"","poznamka":"","prostor":"","prani_zdroje":"Patro","misto_zdroje":"Terasa: L7, L8","cislo_zdroje":"105"}]' as presazeni \gset
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice', :'presazeni'::jsonb)::text as imp2 \gset
-select pg_temp.check(format('změna stolů v Choice: „změněná“, nové stoly, prostor Foodtabu zůstal (%s)', pg_temp.udaje('krok109-choice', 'krok109-105')),
+select pg_temp.check(format('změna stolů v Choice: „změněná“, nové stoly, přání i prázdný prostor beze změny (%s, přání %s)', pg_temp.udaje('krok109-choice', 'krok109-105'), pg_temp.prani('krok109-choice', 'krok109-105')),
   (:'imp2'::jsonb ->> 'zmenene')::int = 1 and (:'imp2'::jsonb ->> 'beze_zmeny')::int = 0
-  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L7, L8|105|Patro');
+  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L7, L8|105|'
+  and pg_temp.prani('krok109-choice', 'krok109-105') = 'Patro');
 
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice', :'presazeni'::jsonb)::text as imp3 \gset
 select pg_temp.check('totéž podruhé: „beze změny“ (čas načtení ani nic jiného se nepřepisuje)',
   (:'imp3'::jsonb ->> 'beze_zmeny')::int = 1 and (:'imp3'::jsonb ->> 'zmenene')::int = 0);
 
--- Seznam stolů se v Choice nenačetl: appka klíče nepošle.
-select '[{"externi_id":"krok109-105","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T18:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Patro Krok109","pocet_osob":"2","telefon":"","email":"","poznamka":"","prostor":"Patro"}]' as bez_klicu \gset
+-- Seznam stolů se v Choice nenačetl: appka klíče stolů a čísla nepošle
+-- (přání hosta je v rezervaci samé, to pošle vždycky).
+select '[{"externi_id":"krok109-105","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T18:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Patro Krok109","pocet_osob":"2","telefon":"","email":"","poznamka":"","prostor":"","prani_zdroje":"Patro"}]' as bez_klicu \gset
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice', :'bez_klicu'::jsonb)::text as imp4 \gset
 select pg_temp.check(format('klíč chybí (stoly se nenačetly): uložené stoly i číslo zůstanou a není to změna (%s, %s)', :'imp4', pg_temp.udaje('krok109-choice', 'krok109-105')),
   (:'imp4'::jsonb ->> 'beze_zmeny')::int = 1
-  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L7, L8|105|Patro');
+  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L7, L8|105|');
 
 -- Bez klíčů, ale se změnou počtu osob: změna se zapíše, stoly zůstanou.
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
@@ -193,14 +215,14 @@ select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice
 select pg_temp.check(format('klíč chybí a změnil se počet osob: změna projde, stoly zůstanou (%s)', pg_temp.udaje('krok109-choice', 'krok109-105')),
   (:'imp5'::jsonb ->> 'zmenene')::int = 1
   and (select pocet_osob from public.rezervace where poskytovatel = 'krok109-choice' and externi_id = 'krok109-105') = 3
-  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L7, L8|105|Patro');
+  and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L7, L8|105|');
 
 -- V Choice host stoly ztratil (prázdný seznam) — appka pošle ''.
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
   jsonb_set(jsonb_set(:'bez_klicu'::jsonb, '{0,pocet_osob}', '"3"'), '{0,misto_zdroje}', '""'))::text as imp6 \gset
 select pg_temp.check(format('prázdný text = žádné stoly: uložené se smažou, číslo (klíč chybí) zůstane (%s)', pg_temp.udaje('krok109-choice', 'krok109-105')),
   (:'imp6'::jsonb ->> 'zmenene')::int = 1
-  and pg_temp.udaje('krok109-choice', 'krok109-105') = '|105|Patro');
+  and pg_temp.udaje('krok109-choice', 'krok109-105') = '|105|');
 
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
   '[{"externi_id":"krok109-106","zacatek":"2099-11-27T19:00:00.000Z","jmeno_hosta":"Bez stolů Krok109","pocet_osob":"4","misto_zdroje":"Bar: 1","cislo_zdroje":106}]'::jsonb)::text as imp7 \gset
@@ -221,6 +243,65 @@ select pg_temp.check(format('změní-li se JEN číslo rezervace (stoly prázdn�
   (:'imp_c1'::jsonb ->> 'nove')::int = 1
   and (:'imp_c2'::jsonb ->> 'zmenene')::int = 1 and (:'imp_c2'::jsonb ->> 'beze_zmeny')::int = 0
   and pg_temp.udaje('krok109-choice', 'krok109-108') = '|108|');
+
+
+\echo ''
+\echo '== 3b. Přání hosta (prani_zdroje) ========================'
+
+-- Vlastní rezervace, ať se nepletou kontroly výše. Tvar jako radekZChoice:
+-- stoly přidělené → prostor prázdný, přání zvlášť.
+select '[{"externi_id":"krok109-p1","stav":"potvrzeno","stav_zdroje":"CONFIRMED","zacatek":"2099-11-27T17:00:00.000Z","konec":"","zmeneno_kdy":"","jmeno_hosta":"Přání Krok109","pocet_osob":"2","telefon":"","email":"","poznamka":"","prostor":"","prani_zdroje":"Patro","misto_zdroje":"Patro: S3","cislo_zdroje":"110"}]' as prani1 \gset
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice', :'prani1'::jsonb)::text as imp_p1 \gset
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice', :'prani1'::jsonb)::text as imp_p2 \gset
+select pg_temp.check(format('nová rezervace: přání „Patro“ uložené, prostor prázdný; totéž podruhé „beze změny“ (%s, %s, přání %s)', :'imp_p1', :'imp_p2', pg_temp.prani('krok109-choice', 'krok109-p1')),
+  (:'imp_p1'::jsonb ->> 'nove')::int = 1
+  and (:'imp_p2'::jsonb ->> 'beze_zmeny')::int = 1 and (:'imp_p2'::jsonb ->> 'zmenene')::int = 0
+  and pg_temp.prani('krok109-choice', 'krok109-p1') = 'Patro'
+  and pg_temp.udaje('krok109-choice', 'krok109-p1') = 'Patro: S3|110|');
+
+-- Host v Choice změnil JEN přání (stoly stejné): i to je změna.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  jsonb_set(:'prani1'::jsonb, '{0,prani_zdroje}', '"Terasa"'))::text as imp_p3 \gset
+select pg_temp.check(format('změní-li se JEN přání hosta, je to „změněná“ a přání se přepíše (%s, přání %s)', :'imp_p3', pg_temp.prani('krok109-choice', 'krok109-p1')),
+  (:'imp_p3'::jsonb ->> 'zmenene')::int = 1 and (:'imp_p3'::jsonb ->> 'beze_zmeny')::int = 0
+  and pg_temp.prani('krok109-choice', 'krok109-p1') = 'Terasa');
+
+-- Klíč přání chybí (starší appka, jiný zdroj): uložené zůstane, není to změna.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  (:'prani1'::jsonb #- '{0,prani_zdroje}'))::text as imp_p4 \gset
+select pg_temp.check(format('klíč přání chybí: uložené „Terasa“ zůstane a je to „beze změny“ (%s, přání %s)', :'imp_p4', pg_temp.prani('krok109-choice', 'krok109-p1')),
+  (:'imp_p4'::jsonb ->> 'beze_zmeny')::int = 1 and (:'imp_p4'::jsonb ->> 'zmenene')::int = 0
+  and pg_temp.prani('krok109-choice', 'krok109-p1') = 'Terasa');
+
+-- Dlouhé přání s mezerami okolo: zkrátí se na 120, dávka nespadne.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  jsonb_set(:'prani1'::jsonb, '{0,prani_zdroje}', to_jsonb('  ' || repeat('P', 200) || '  ')))::text as imp_p5 \gset
+select pg_temp.check(format('dlouhé přání (200 znaků) se zkrátí na 120 a ořežou se mezery (%s, délka %s)', :'imp_p5', char_length(pg_temp.prani('krok109-choice', 'krok109-p1'))),
+  (:'imp_p5'::jsonb ->> 'zmenene')::int = 1
+  and pg_temp.prani('krok109-choice', 'krok109-p1') = repeat('P', 120));
+select pg_temp.check('délku přání hlídá i databáze: 121 znaků přímým zápisem neprojde',
+  pg_temp.spadne_hlaskou(format($q$update public.rezervace set prani_zdroje = repeat('x', 121) where poskytovatel = 'krok109-choice' and externi_id = %L$q$, 'krok109-p1'),
+    '23514', 'rezervace_prani_zdroje_check'));
+
+-- Host přání v Choice zrušil: prázdné smaže; null taky.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  jsonb_set(:'prani1'::jsonb, '{0,prani_zdroje}', '""'))::text as imp_p6 \gset
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice', :'prani1'::jsonb)::text as imp_p7 \gset
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  jsonb_set(:'prani1'::jsonb, '{0,prani_zdroje}', 'null'))::text as imp_p8 \gset
+select pg_temp.check(format('prázdné přání smaže uložené, null taky; obojí je „změněná“ (%s, %s, %s, přání „%s“)', :'imp_p6', :'imp_p7', :'imp_p8', pg_temp.prani('krok109-choice', 'krok109-p1')),
+  (:'imp_p6'::jsonb ->> 'zmenene')::int = 1 and (:'imp_p7'::jsonb ->> 'zmenene')::int = 1
+  and (:'imp_p8'::jsonb ->> 'zmenene')::int = 1
+  and pg_temp.prani('krok109-choice', 'krok109-p1') = '');
+
+-- Rezervace BEZ stolů s přáním: appka pošle přání i do prostoru (tam ho
+-- obsluha vidí jako dosud) — obojí se uloží.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  '[{"externi_id":"krok109-p2","zacatek":"2099-11-27T16:00:00.000Z","jmeno_hosta":"Přání bez stolů Krok109","pocet_osob":"2","prostor":"Salonek","prani_zdroje":"Salonek","misto_zdroje":""}]'::jsonb)::text as imp_p9 \gset
+select pg_temp.check(format('rezervace bez stolů: přání v prostoru i ve vlastním sloupci (%s, přání %s)', pg_temp.udaje('krok109-choice', 'krok109-p2'), pg_temp.prani('krok109-choice', 'krok109-p2')),
+  (:'imp_p9'::jsonb ->> 'nove')::int = 1
+  and pg_temp.udaje('krok109-choice', 'krok109-p2') = '||Salonek'
+  and pg_temp.prani('krok109-choice', 'krok109-p2') = 'Salonek');
 
 
 \echo ''
@@ -246,19 +327,21 @@ set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 -- Nová rezervace ze souboru se „stoly“ a číslem: klíče se nečtou.
 select public.rezervace_importovat_csv(:'tenant', :'perla', 'krok109-csv',
-  '[{"externi_id":"krok109-csv1","zacatek":"2099-11-28T18:00:00+01:00","jmeno_hosta":"Soubor Krok109","pocet_osob":"2","prostor":"Salonek","misto_zdroje":"Patro: S1–S12","cislo_zdroje":"666"}]'::jsonb)::text as csv1 \gset
+  '[{"externi_id":"krok109-csv1","zacatek":"2099-11-28T18:00:00+01:00","jmeno_hosta":"Soubor Krok109","pocet_osob":"2","prostor":"Salonek","misto_zdroje":"Patro: S1–S12","cislo_zdroje":"666","prani_zdroje":"Patro"}]'::jsonb)::text as csv1 \gset
 -- Soubor se stejným poskytovatelem jako Choice (páruje se na rezervaci
 -- z Choice): stoly z Choice soubor nesmaže ani nepřepíše.
 select public.rezervace_importovat_csv(:'tenant', :'perla', 'krok109-choice',
-  '[{"externi_id":"krok109-105","zacatek":"2099-11-27T18:00:00.000Z","jmeno_hosta":"Patro Krok109","pocet_osob":"3","misto_zdroje":"","cislo_zdroje":"666"}]'::jsonb)::text as csv2 \gset
+  '[{"externi_id":"krok109-105","zacatek":"2099-11-27T18:00:00.000Z","jmeno_hosta":"Patro Krok109","pocet_osob":"3","misto_zdroje":"","cislo_zdroje":"666","prani_zdroje":""}]'::jsonb)::text as csv2 \gset
 reset role;
 select set_config('test.user_id', '', false);
 
-select pg_temp.check(format('soubor: nová rezervace bez stolů a čísla, i když je soubor posílal (%s)', pg_temp.udaje('krok109-csv', 'krok109-csv1')),
+select pg_temp.check(format('soubor: nová rezervace bez stolů, čísla i přání, i když je soubor posílal (%s, přání „%s“)', pg_temp.udaje('krok109-csv', 'krok109-csv1'), pg_temp.prani('krok109-csv', 'krok109-csv1')),
   (:'csv1'::jsonb ->> 'nove')::int = 1
-  and pg_temp.udaje('krok109-csv', 'krok109-csv1') = '||Salonek');
-select pg_temp.check(format('soubor nad rezervací z Choice: stoly a číslo z Choice zůstanou (%s)', pg_temp.udaje('krok109-choice', 'krok109-105')),
-  pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L9|105|u okna');
+  and pg_temp.udaje('krok109-csv', 'krok109-csv1') = '||Salonek'
+  and pg_temp.prani('krok109-csv', 'krok109-csv1') = '');
+select pg_temp.check(format('soubor nad rezervací z Choice: stoly, číslo i přání z Choice zůstanou (%s, přání %s)', pg_temp.udaje('krok109-choice', 'krok109-105'), pg_temp.prani('krok109-choice', 'krok109-105')),
+  pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L9|105|u okna'
+  and pg_temp.prani('krok109-choice', 'krok109-105') = 'Patro');
 
 
 \echo ''
@@ -273,13 +356,14 @@ select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 select public.rezervace_ulozit(:'tenant', :'r105', :'perla',
-  '{"prostor":"zahrádka","menu":"Krok109 menu","misto_zdroje":"Ručně: X","cislo_zdroje":"1"}'::jsonb) as ulozeno \gset
+  '{"prostor":"zahrádka","menu":"Krok109 menu","misto_zdroje":"Ručně: X","cislo_zdroje":"1","prani_zdroje":"Ručně"}'::jsonb) as ulozeno \gset
 reset role;
 select set_config('test.user_id', '', false);
 
-select pg_temp.check(format('ruční uložení změní prostor a menu, stoly ani číslo ze zdroje ne (%s)', pg_temp.udaje('krok109-choice', 'krok109-105')),
+select pg_temp.check(format('ruční uložení změní prostor a menu, stoly, číslo ani přání ze zdroje ne (%s, přání %s)', pg_temp.udaje('krok109-choice', 'krok109-105'), pg_temp.prani('krok109-choice', 'krok109-105')),
   :'ulozeno' = :'r105'
   and pg_temp.udaje('krok109-choice', 'krok109-105') = 'Terasa: L9|105|zahrádka'
+  and pg_temp.prani('krok109-choice', 'krok109-105') = 'Patro'
   and (select menu from public.rezervace where id = :'r105') = 'Krok109 menu');
 
 

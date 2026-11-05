@@ -65,6 +65,8 @@ export type RezervaceRadek = {
   zdroj: ZdrojRezervace
   /** Stoly přidělené v rezervačním systému („Patro: S1–S12“); `''` = žádné nebo neznámé. Patří zdroji. */
   misto_zdroje: string
+  /** Část podniku, kterou si přál host v rezervačním systému („Patro“); `''` = žádné přání. Patří zdroji. */
+  prani_zdroje?: string
   /** Pásmo pobočky rezervace — časy se ukazují v něm (lib/cas.ts). */
   zona: string
 }
@@ -189,23 +191,26 @@ function osobyText(n: number | null): string {
 
 /**
  * Kde host sedí, do krátkého řádku: „Stůl nebo prostor“ od obsluhy
- * a stoly z rezervačního systému („Patro: S1–S12“). Prostor se podruhé
- * nepíše, jen když je to PŘESNĚ jméno části podniku ze stolů („Patro“ —
- * starší rezervace, kde ho Choice doplnil z přání hosta) nebo celý text
- * stolů. Kus jména nestačí: „S1“ od obsluhy vedle „Patro: S12“ je jiný
- * stůl a musí být vidět (kontrola kódu 4. 11.).
+ * a stoly z rezervačního systému („Patro: S1–S12“). Vedle stolů se
+ * prostor nepíše, když:
+ *   * je to přání hosta ze zdroje (`prani_zdroje`) — dokud rezervace
+ *     stoly neměla, zdroj ho do prázdného prostoru doplnil, a „Patro“
+ *     vedle „Terasa: L7“ by se četlo, jako by host měl obojí (kontrola
+ *     kódu 4. 11., 2. kolo),
+ *   * je to PŘESNĚ jméno části podniku ze stolů („Patro“) nebo celý
+ *     text stolů. Kus jména nestačí: „S1“ od obsluhy vedle „Patro: S12“
+ *     je jiný stůl a musí být vidět (kontrola kódu 4. 11.). Jméno
+ *     oblasti se hledá jako „ · Patro: “ v celém textu, ne rozdělením
+ *     textu — jméno oblasti může mít „: “ i „ · “ v sobě.
  */
-export function mistoKratce(r: Pick<RezervaceRadek, 'prostor'> & { misto_zdroje?: string }): string[] {
+export function mistoKratce(r: Pick<RezervaceRadek, 'prostor'> & { misto_zdroje?: string; prani_zdroje?: string }): string[] {
   const stoly = (r.misto_zdroje ?? '').trim()
   const prostor = (r.prostor ?? '').trim()
   if (!stoly) return prostor ? [prostor] : []
   if (!prostor) return [stoly]
   const male = (s: string) => s.trim().toLocaleLowerCase('cs')
-  const oblasti = stoly.split(' · ').map((cast) => {
-    const dvojtecka = cast.indexOf(': ')
-    return dvojtecka > 0 ? male(cast.slice(0, dvojtecka)) : null
-  })
-  if (male(prostor) === male(stoly) || oblasti.includes(male(prostor))) return [stoly]
+  if (male(prostor) === male(r.prani_zdroje ?? '')) return [stoly]
+  if (male(prostor) === male(stoly) || ` · ${male(stoly)}`.includes(` · ${male(prostor)}: `)) return [stoly]
   return [prostor, stoly]
 }
 
@@ -677,6 +682,11 @@ export function UdajeRezervace({
   nazevSystemu?: string | null
 }) {
   const stoly = (r.misto_zdroje ?? '').trim()
+  // Přání hosta ze zdroje: u „Stůl / prostor“, když je to totéž (zdroj ho
+  // tam doplnil, dokud stoly nebyly), jinak samostatný řádek.
+  const prani = (r.prani_zdroje ?? '').trim()
+  const praniJeProstor = prani !== '' && prani.toLocaleLowerCase('cs') === (r.prostor ?? '').trim().toLocaleLowerCase('cs')
+  const praniKde = nazevSystemu ? `přání hosta v ${nazevSystemu}` : 'přání hosta v rezervačním systému'
   const zalohaText =
     zaloha.stav === 'zadna' && !zaloha.haleru
       ? 'bez zálohy'
@@ -700,7 +710,13 @@ export function UdajeRezervace({
         </>
       ) : null}
       <dt>Stůl / prostor</dt>
-      <dd>{r.prostor || '—'}</dd>
+      <dd>{praniJeProstor ? `${r.prostor} (${praniKde})` : r.prostor || '—'}</dd>
+      {prani && !praniJeProstor ? (
+        <>
+          <dt>{praniKde.charAt(0).toUpperCase() + praniKde.slice(1)}</dt>
+          <dd>{prani}</dd>
+        </>
+      ) : null}
       {stoly ? (
         <>
           <dt>{nazevSystemu ? `Stoly v ${nazevSystemu}` : 'Stoly v rezervačním systému'}</dt>

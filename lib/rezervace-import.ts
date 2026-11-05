@@ -40,6 +40,8 @@ export type RadekImportu = {
   misto_zdroje?: string
   /** Číslo rezervace ve zdroji. Klíč chybí = uložené zůstane. */
   cislo_zdroje?: string
+  /** Část podniku, kterou si přál host (zdroj). Klíč chybí = uložené zůstane. */
+  prani_zdroje?: string
 } & (
   // `zmeneno_kdy` (s pásmem) nepovinně i tady: příjmové API ho u data
   // a hodiny na zdi může poslat, CSV ne.
@@ -286,6 +288,7 @@ export function zRadkuZdroje(r: RadekRezervace): { stav: 'ok'; radek: RadekImpor
       // Jen když je adaptér zná — chybějící klíč databáze čte jako „nech uložené“.
       ...(r.misto !== undefined ? { misto_zdroje: zkratit(r.misto.trim(), 300) } : {}),
       ...(r.cisloZdroje !== undefined ? { cislo_zdroje: zkratit(r.cisloZdroje.trim(), 40) } : {}),
+      ...(r.praniZdroje !== undefined ? { prani_zdroje: zkratit(r.praniZdroje.trim(), 120) } : {}),
     },
   }
 }

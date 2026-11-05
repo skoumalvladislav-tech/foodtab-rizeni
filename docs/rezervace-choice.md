@@ -118,7 +118,10 @@ poznámky (hosta, restaurace, důvod zrušení), záloha (jen stav),
   čísla jdou bez mezery po jedné (S1, S2, S3). „A1, B2, C3“ nebo „S1, S2, S4“ zůstanou vypsané, ať
   rozsah nikdy nezahrne stůl, který host nemá. Víc částí podniku se
   oddělí tečkou („Patro: S1, S2 · Terasa: L7“). Hodně dlouhý seznam se
-  zkrátí za celým stolem (nejvýš 300 znaků), nikdy uprostřed jména.
+  zkrátí za celým stolem (nejvýš 300 znaků) a končí „ …“, nikdy
+  uprostřed jména — ani když je ve jménu stolu čárka („Stůl 17, u okna“).
+  Jméno stolu delší než 40 znaků (část podniku 60) se zkrátí a dostane
+  „…“: z „Stolek 123“ nesmí zbýt „Stolek 12“, to by byl jiný stůl.
   Stoly patří Choice: když hosta v Choice přesadíte, Foodtab to při
   dalším načtení přepíše.
 - **Přesazení v Choice upozornění nepošle**, ani u akce. Upozornění
@@ -126,18 +129,26 @@ poznámky (hosta, restaurace, důvod zrušení), záloha (jen stav),
   by každé přeskupení stolů v Choice rozeslalo upozornění vybraným
   lidem. Jestli to u akcí chcete, je to otázka 87.
 - **„Stůl / prostor“** ve Foodtabu patří dál obsluze. Má-li rezervace
-  v Choice stoly, Choice do něj nepíše nic (stoly jsou vidět samy).
+  v Choice stoly, Choice do něj nepíše nic (stoly jsou vidět samy) —
+  ani když se tentokrát seznam stolů nenačetl.
   Bez stolů ho doplní přáním hosta (část podniku), když je prázdný.
   Co do něj napíše obsluha, načtení z Choice nepřepíše. Když obsluha
   napíše něco jiného než stoly z Choice (třeba „u okna“), ukáže se
   obojí.
+- **Přání hosta** (část podniku, kterou si host v Choice vybral) se
+  ukládá zvlášť. Rezervace načtené dřív, než měla stoly, mají přání
+  ve „Stůl / prostor“; kalendář ho vedle stolů z Choice neukáže (host
+  „Patro“ přesazený na „Terasa: L7“ by se jinak četl, jako by měl
+  obojí). V detailu je u něj „(přání hosta v Choice)“; když je ve
+  „Stůl / prostor“ něco jiného, má přání vlastní řádek.
 - **Číslo rezervace** je v detailu („Převzato z rezervačního systému
   (Choice, č. 105)“), ať se dá rezervace v Choice dohledat. Když se
   v Choice změní jen číslo, rezervace se počítá jako změněná a číslo se
   přepíše.
 - **Poznámka ze zdroje** navíc řekne, když rezervace přišla přes
   Google („Rezervace přišla přes Google.“), a jazyk rezervace, když
-  není čeština („Jazyk rezervace: EN.“).
+  není čeština („Jazyk rezervace: angličtina.“; kód, který Foodtab
+  nezná, zůstane kódem: „kód XX“).
 - **Délka návštěvy** (v Choice třeba „2h“) se zatím nenačítá: Choice
   v dokumentaci neříká, v jakých jednotkách ji posílá, a odhadnutý konec
   by mohl být špatně. Konec rezervace tedy ve Foodtabu zůstává prázdný.
@@ -222,7 +233,13 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   chvíle jako dotaz z fronty (`smiMimoFrontu` = nejpozději poslední
   dotaz běhu a konec dílu úlohy). Časový limit 6 s na dotaz
   (`CASOVY_LIMIT_MIST_MS`), oblasti, pak stoly souběžně — dva limity se
-  vejdou do rezervy úlohy (20 s). Výsledek jde do
+  vejdou do rezervy úlohy (20 s). Seznam se načítá SOUBĚŽNĚ s dalšími
+  dotazy na rezervace: na něj čeká jen zápis stránky (řada `zapisy`
+  v `probehnoutChoice`), ne další dotaz. Kontrola kódu 4. 11. (2. kolo):
+  dokud na něj čekal další dotaz, pomalý Choice (od ~3,7 s na dotaz)
+  vzal dotazům místo ve frontě a druhé pobočce úlohy se nenačetlo okno.
+  Zápisy jdou popořadě; chyba zápisu zastaví další zápisy i posun
+  kurzoru a konec běhu ji ohlásí přednostně (`konec`). Výsledek jde do
   `rezervace.misto_zdroje` (patří zdroji, přepisuje se), `num` do
   `rezervace.cislo_zdroje`, `cancelReason` do poznámky ze zdroje.
   Nepovedený seznam = klíč `misto_zdroje` v řádku chybí a databáze
@@ -233,9 +250,20 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   i oblasti s `itemCount` 0 a stoly bez jména. Zkracování
   (`zkratit` v `lib/rezervace-import.ts`) nerozpůlí znak mimo BMP
   (emoji) a osamělou půlku nahradí U+FFFD, takže text projde
-  PostgreSQL. `prostor` z `preferArea` jen u rezervace bez stolů (nebo když se stoly nenačetly).
+  PostgreSQL. Text stolů se skládá po kouscích (`slozitStoly`), ne
+  řezem hotového textu u čárky — čárka může být i ve jménu stolu.
+  Jména míst nad `MAX_JMENO_STOLU` (40) / `MAX_JMENO_OBLASTI` (60)
+  končí „…“ (`jmenoMista`), takže se zkrácené jméno nespojí do rozsahu.
+  `prostor` z `preferArea` jen u rezervace, která stoly NEMÁ
+  (`maStoly`) — když se seznam míst nenačetl, prostor se nedoplní.
+  `preferArea` jde vždy do `rezervace.prani_zdroje` (120 znaků);
+  `mistoKratce` v `prvky.tsx` podle něj schová starší přání ve
+  „Stůl / prostor“ vedle stolů. Jazyk (`langCode`) přes
+  `Intl.DisplayNames` česky (`jazykRezervace`), cs/cz se nepíše.
   Klíče se čtou jen u `p_zdroj = 'externi'` — import ze souboru je
-  posílá z prohlížeče a nesmí si vydávat stoly za Choice.
+  posílá z prohlížeče a nesmí si vydávat stoly za Choice. Příjmové API
+  zkracuje přes `zkratit`, ne `.slice` (emoji na hranici by PostgREST
+  odmítl celou dávkou, PGRST102).
 - Ukázka délky: běh uloží do `externi_ucet.ukazka_delky` nejvýš
   `UKAZEK_DELKY` (5) dvojic `visitDuration` + číslo rezervace. Běh bez
   nich uloženou ukázku nechá. Po nasazení se dá přečíst a porovnat
