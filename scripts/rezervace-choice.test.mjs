@@ -2448,15 +2448,18 @@ async function beh(popis, spustit, kontroly) {
   // Totéž ve společné cestě všech zdrojů a v souboru (CSV) — každé
   // zkrácené pole má emoji přesně přes svou hranici.
   const naHranici = (n) => `${'x'.repeat(n - 1)}😀`
-  kontrola('řádek ze zdroje (zRadkuZdroje): žádné z 9 zkrácených polí nemá půlznak', () => {
+  kontrola('řádek ze zdroje (zRadkuZdroje): žádné z 9 zkrácených polí nemá půlznak ani není delší než jeho hranice', () => {
     const s = zRadkuZdroje({
       externiId: 'z1', stav: 'potvrzeno', stavZdroje: naHranici(60), pocetHostu: 2, cas: '2026-11-20T18:00:00.000Z', konec: null, zmenenoKdy: null,
       externiProvozovna: '1', jmenoHosta: naHranici(120), telefonHosta: naHranici(40), emailHosta: naHranici(254), poznamka: naHranici(4000),
       prostor: naHranici(120), misto: naHranici(300), cisloZdroje: naHranici(40), praniZdroje: naHranici(120),
     })
-    const spatne = ['stav_zdroje', 'jmeno_hosta', 'telefon', 'email', 'poznamka', 'prostor', 'misto_zdroje', 'cislo_zdroje', 'prani_zdroje']
-      .filter((k) => typeof s.radek?.[k] !== 'string' || s.radek[k].length === 0 || LICHA_POLOVINA.test(s.radek[k]))
-    return [s.stav === 'ok' && spatne.length === 0, spatne.join(', ') || 'všech 9 bez půlznaku']
+    // naHranici(n) má n + 1 jednotek UTF-16: bez zkrácení je pole o jednu delší.
+    const HRANICE = { stav_zdroje: 60, jmeno_hosta: 120, telefon: 40, email: 254, poznamka: 4000, prostor: 120, misto_zdroje: 300, cislo_zdroje: 40, prani_zdroje: 120 }
+    const spatne = Object.entries(HRANICE)
+      .filter(([k, max]) => typeof s.radek?.[k] !== 'string' || s.radek[k].length === 0 || s.radek[k].length > max || LICHA_POLOVINA.test(s.radek[k]))
+      .map(([k]) => `${k} (${s.radek?.[k]?.length})`)
+    return [s.stav === 'ok' && spatne.length === 0, spatne.join(', ') || 'všech 9 bez půlznaku a v hranici']
   })
   kontrola('soubor (CSV): jméno, telefon, e-mail, poznámka a prostor bez půlznaku', () => {
     const v = naparsovatCsvRezervaci(`id;datum;čas;jméno;telefon;email;poznámka;prostor\n1;30.10.2026;19:00;${naHranici(120)};${naHranici(40)};${naHranici(254)};${naHranici(4000)};${naHranici(120)}\n`)
@@ -2553,14 +2556,16 @@ async function beh(popis, spustit, kontroly) {
     const s = radekZChoice(rezervace(108, { locationPoints: stolyPatra(1), preferArea: preferPatro }), '12345', null)
     return [s.stav === 'ok' && s.radek.prostor === '' && !('misto_zdroje' in s.radek), `prostor „${s.radek?.prostor}“`]
   })
-  kontrola('přání hosta jde VŽDY do prani_zdroje (se stoly, bez nich, bez seznamu míst); bez přání \'\'', () => {
+  // Klíč i bez přání: chybějící klíč by v databázi nechal staré přání
+  // (host ho v Choice zrušil, ve Foodtabu by viselo dál).
+  kontrola('přání hosta jde VŽDY do prani_zdroje (se stoly, bez nich, bez seznamu míst); bez přání \'\' a klíč tam JE', () => {
     const p = [
       radekZChoice(rezervace(106, { locationPoints: [idS(TERASA, 'L7')], preferArea: preferPatro }), '12345', MAPA),
       radekZChoice(rezervace(107, { preferArea: preferPatro }), '12345', MAPA),
       radekZChoice(rezervace(108, { locationPoints: stolyPatra(1), preferArea: preferPatro }), '12345', null),
       radekZChoice(rezervace(109), '12345', MAPA),
-    ].map((s) => s.radek?.prani_zdroje)
-    return [p.join('|') === 'Patro|Patro|Patro|', p.join('|')]
+    ].map((s) => (s.radek && 'prani_zdroje' in s.radek ? `„${s.radek.prani_zdroje}“` : 'CHYBÍ'))
+    return [p.join('|') === '„Patro“|„Patro“|„Patro“|„“', p.join('|')]
   })
   kontrola('bez seznamu míst řádek KLÍČ misto_zdroje NEMÁ (databáze nechá uložené), ostatní údaje ano', () => {
     const s = radekZChoice(rezervace(105, { locationPoints: stolyPatra(1) }), '12345')
@@ -2875,6 +2880,23 @@ for (const [popis, nastaveni] of [
       [v.kurzor.nove_od === PRED && v.oknoDokonceno === false && !v.kurzor.okno_hotovo_kdy && (v.kurzor.okno?.stranka ?? 1) === 1, JSON.stringify(v.kurzor)]],
   ])
   clearTimeout(pojistka)
+}
+
+{
+  // --- zápis 1. stránky selže a seznam míst se NEnačítá (rezervace bez
+  //     stolů): další dotaz na rezervace už neodejde — chyba zápisu
+  //     zastaví běh dřív, než vezme z fronty další dotaz
+  let stranek = 0
+  const api = {
+    async nacistStranku() { stranek += 1; return { stav: 'ok', rezervace: [r107] } },
+    async nacistOblasti() { return { stav: 'ok', oblasti: OBLASTI_CHOICE } },
+    async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
+  }
+  const zapsat = async () => ({ stav: 'chyba', duvod: 'Databáze řádky nepřijala.' })
+  await beh('zápis selže bez seznamu míst', () => probehnoutChoice(behStoly({ api }, { zapsat })), [
+    ['chyba zápisu bez seznamu míst: po 1. stránce už žádný další dotaz na rezervace, běh „chyba“', (v) =>
+      [stranek === 1 && v.konec === 'chyba' && v.dotazu === 1, `${stranek} dotazů na stránky, ${v.konec}, dotazu ${v.dotazu}`]],
+  ])
 }
 
 {

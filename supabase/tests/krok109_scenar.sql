@@ -273,6 +273,14 @@ select pg_temp.check(format('klíč přání chybí: uložené „Terasa“ zůs
   (:'imp_p4'::jsonb ->> 'beze_zmeny')::int = 1 and (:'imp_p4'::jsonb ->> 'zmenene')::int = 0
   and pg_temp.prani('krok109-choice', 'krok109-p1') = 'Terasa');
 
+-- Klíč přání chybí a změnil se počet osob: změna se zapíše, přání zůstane.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  jsonb_set((:'prani1'::jsonb #- '{0,prani_zdroje}'), '{0,pocet_osob}', '"5"'))::text as imp_p4b \gset
+select pg_temp.check(format('klíč přání chybí a změnil se počet osob: změna projde, přání „Terasa“ zůstane (%s, přání %s)', :'imp_p4b', pg_temp.prani('krok109-choice', 'krok109-p1')),
+  (:'imp_p4b'::jsonb ->> 'zmenene')::int = 1
+  and (select pocet_osob from public.rezervace where poskytovatel = 'krok109-choice' and externi_id = 'krok109-p1') = 5
+  and pg_temp.prani('krok109-choice', 'krok109-p1') = 'Terasa');
+
 -- Dlouhé přání s mezerami okolo: zkrátí se na 120, dávka nespadne.
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
   jsonb_set(:'prani1'::jsonb, '{0,prani_zdroje}', to_jsonb('  ' || repeat('P', 200) || '  ')))::text as imp_p5 \gset
