@@ -1042,9 +1042,13 @@ export type VysledekBehuChoice = {
    *     (zůstaly z minula), protože seznam míst není (nebo není celý
    *     a stůl v něm chybí),
    *   * `nezname`: rezervace se stolem, který v (celém) seznamu míst není,
-   *   * `dotazu`: dotazů na seznam míst (mimo `dotazu` rezervací).
+   *   * `dotazu`: dotazů na seznam míst (mimo `dotazu` rezervací),
+   *   * `videnyStoly`: aspoň jedna načtená rezervace měla stoly — ať se
+   *     seznam načetl, nebo ne. Server si to u napojení zapamatuje
+   *     (`externi_ucet.ma_stoly`) a příští běh pak seznam načte hned na
+   *     začátku (`mapaHned`).
    */
-  mista: { stav: 'nezkouseno' | 'ok' | 'chyba' | 'cas'; duvod: string | null; neuplny: boolean; bezStolu: number; nezname: number; dotazu: number }
+  mista: { stav: 'nezkouseno' | 'ok' | 'chyba' | 'cas'; duvod: string | null; neuplny: boolean; bezStolu: number; nezname: number; dotazu: number; videnyStoly: boolean }
   /**
    * Pár rezervací s číslem a `visitDuration`, jak ho Choice poslal (nejvýš
    * `UKAZEK_DELKY`). Jednotka délky v dokumentaci není — podle rezervace,
@@ -1082,6 +1086,13 @@ export const UKAZEK_DELKY = 5
  * míst), která potrvá nejvýš `trvaniMs`? Volající ji pustí nejpozději
  * se stejným koncem jako frontu (po něm zbývá rezerva na odpověď
  * a zápis) a v úloze jen tehdy, když se celá vejde do dílu připojení.
+ *
+ * `mapaHned`: napojení stoly používá (minulý běh je viděl) — seznam míst
+ * se začne načítat hned na začátku běhu, souběžně s prvním dotazem, ne
+ * až u první stránky se stoly. Kontrola kódu 4. 11. (4. kolo): v úloze
+ * se dvěma pobočkami jde první pořád první, a seznam, který se smí
+ * načíst jen do konce jejího dílu, by se jí u stránek „nové“ a „okno“
+ * nevešel nikdy — stoly rezervací dál než 48 h by nedostala.
  */
 export async function probehnoutChoice(v: {
   api: ApiChoice
@@ -1092,6 +1103,7 @@ export async function probehnoutChoice(v: {
   pockatNaDotaz: () => Promise<boolean>
   smiMimoFrontu: (trvaniMs: number) => boolean
   zapsat: ZapisChoice
+  mapaHned?: boolean
 }): Promise<VysledekBehuChoice> {
   const iso = (ms: number) => new Date(ms).toISOString()
   const kurzor: KurzorChoice = { ...v.kurzor }
@@ -1108,7 +1120,7 @@ export async function probehnoutChoice(v: {
     preskocene: { pocet: 0, priklad: null, duvody: {} },
     odmitnute: { pocet: 0, priklad: null },
     oknoDokonceno: false,
-    mista: { stav: 'nezkouseno', duvod: null, neuplny: false, bezStolu: 0, nezname: 0, dotazu: 0 },
+    mista: { stav: 'nezkouseno', duvod: null, neuplny: false, bezStolu: 0, nezname: 0, dotazu: 0, videnyStoly: false },
     ukazkaDelky: [],
   }
 
@@ -1133,10 +1145,13 @@ export async function probehnoutChoice(v: {
    */
   let mapa: Promise<MapaMist | null> | undefined
   let mapaSeNacita = false
-  const mapaPro = (rezervace: unknown[]): Promise<MapaMist | null> => {
+  const mapaPro = (rezervace: unknown[] | 'hned'): Promise<MapaMist | null> => {
     if (mapa) return mapa
-    if (!rezervace.some(maStoly)) return Promise.resolve(null)
+    const hned = rezervace === 'hned'
+    if (!hned && !rezervace.some(maStoly)) return Promise.resolve(null)
     if (!v.smiMimoFrontu(NEJDELE_MAPA_MS)) {
+      // Na začátku běhu se nevešel — zkusí to první stránka se stoly.
+      if (hned) return Promise.resolve(null)
       vysledek.mista.stav = 'cas'
       mapa = Promise.resolve(null)
       return mapa
@@ -1204,6 +1219,10 @@ export async function probehnoutChoice(v: {
       if (!mapaSeNacita) await zapisy
       if (chybaZapisu !== null || vyjimka) return 'chyba'
       if (!(await v.pockatNaDotaz())) return 'cas'
+      // Zápis mohl selhat, zatímco se čekalo na frontu (seznam míst se
+      // mezitím dočetl a zápis po něm doběhl) — dotaz pak už neodejde
+      // (kontrola kódu 4. 11., 4. kolo).
+      if (chybaZapisu !== null || vyjimka) return 'chyba'
       const r = await v.api.nacistStranku(v.token, { od: p.od, do: p.do, podle: p.podle, stranka, naStranku: NA_STRANKU })
       vysledek.dotazu += 1
       if (r.stav === 'chyba') {
@@ -1211,6 +1230,7 @@ export async function probehnoutChoice(v: {
         return r.druh === 'limit' ? 'limit' : r.druh === 'pristup' ? 'pristup' : 'chyba'
       }
       vysledek.nacteno += r.rezervace.length
+      if (r.rezervace.some(maStoly)) vysledek.mista.videnyStoly = true
 
       const mapaStranky = mapaPro(r.rezervace)
       const dalsi = stranka + 1
@@ -1298,6 +1318,9 @@ export async function probehnoutChoice(v: {
    * o čem záznam běhu neví (kontrola kódu 4. 11., 3. kolo).
    */
   const projitVse = async (): Promise<VysledekBehuChoice> => {
+    // Napojení stoly používá: seznam míst hned, souběžně s prvním dotazem.
+    if (v.mapaHned) void mapaPro('hned')
+
     // 1. Blízko
     let k = await projit({ podle: 'bookingDt', od: iso(v.tedMs - BLIZKO_ZPET_MS), do: iso(v.tedMs + BLIZKO_DOPREDU_MS) }, 1)
     if (k !== 'hotovo') return konec(k)

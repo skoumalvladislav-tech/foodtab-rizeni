@@ -48,6 +48,7 @@ import {
   MAX_MISTO,
   MAX_OBLASTI,
   NA_STRANKU,
+  NEJMENE_NA_PRIPOJENI_MS,
   OKNO_DOPREDU_MS,
   OKNO_ZPET_MS,
   PLATNOST_POKUSU_S,
@@ -2805,6 +2806,8 @@ for (const [popis, nastaveni] of [
     ['na seznam míst nezbyl čas → nenačítá se, rezervace se zapíšou bez klíče misto_zdroje a běh doběhne', (v) =>
       [ch.volani.oblasti === 0 && v.mista.stav === 'cas' && v.konec === 'hotovo' && z.zapsane.length === 3 && z.zapsane.every((r) => !('misto_zdroje' in r)), `oblasti ${ch.volani.oblasti}×, ${v.mista.stav}, ${v.konec}`]],
     ['došlý čas u stolů chyba není (příští běh je načte)', (v) => [chybaBehu(v) === null, String(chybaBehu(v))]],
+    // 4. kolo: server si podle toho u napojení zapamatuje, že stoly používá.
+    ['… stoly v rezervacích běh viděl (videnyStoly), i když se seznam míst nenačetl', (v) => [v.mista.videnyStoly === true, String(v.mista.videnyStoly)]],
   ])
 }
 
@@ -3090,6 +3093,133 @@ for (const druh of ['limit', 'pristup']) {
   ])
 }
 
+// --- 4. kolo kontroly kódu (4. 11.) ----------------------------------
+
+/** Choice ze `apiSeStoly`, který si zapisuje pořadí dotazů do `deje`. */
+const apiSDeji = (ch, deje) => ({
+  async nacistStranku(...a) { deje.push('stránka'); return ch.api.nacistStranku(...a) },
+  async nacistOblasti() { deje.push('oblasti'); return ch.api.nacistOblasti() },
+  nacistMistaOblasti: (...a) => ch.api.nacistMistaOblasti(...a),
+})
+
+{
+  // (B) Napojení, které stoly používá (`mapaHned`): seznam míst se začne
+  // načítat hned na začátku běhu, ne až u první stránky se stoly. Úloha
+  // se dvěma pobočkami dává první pobočce pořád díl, do kterého se seznam
+  // u stránek „nové“ a „okno“ nevešel nikdy — stoly dál než 48 h by
+  // nedostala.
+  const deje = []
+  const ch = apiSeStoly({ rezervace: [r107] })
+  await beh('seznam míst hned', () => probehnoutChoice(behStoly({ api: apiSDeji(ch, deje) }, { mapaHned: true })), [
+    ['mapaHned: seznam míst se začne načítat dřív než první dotaz na rezervace — i když žádná rezervace stoly nemá', (v) =>
+      [deje[0] === 'oblasti' && ch.volani.oblasti === 1 && v.mista.stav === 'ok' && v.konec === 'hotovo', `${deje.join(' → ')}; ${v.mista.stav}, ${v.konec}`]],
+    ['… běh bez rezervací se stoly hlásí, že stoly neviděl (videnyStoly ne)', (v) => [v.mista.videnyStoly === false, String(v.mista.videnyStoly)]],
+  ])
+}
+
+{
+  // (B) Bez `mapaHned` se seznam míst nenačítá dopředu (rezervace bez stolů).
+  const deje = []
+  const ch = apiSeStoly({ rezervace: [r107] })
+  await beh('seznam míst ne hned', () => probehnoutChoice(behStoly({ api: apiSDeji(ch, deje) })), [
+    ['bez mapaHned a bez stolů se seznam míst nenačte vůbec', () => [ch.volani.oblasti === 0 && !deje.includes('oblasti'), deje.join(' → ')]],
+  ])
+}
+
+{
+  // (B) Na začátku běhu se seznam míst nevešel (smiMimoFrontu ne) — zkusí
+  // ho první stránka se stoly; „cas“ se z pokusu na začátku nehlásí.
+  const deje = []
+  const ch = apiSeStoly({ rezervace: [r105] })
+  const z = zapisDoPameti()
+  let ptalSe = 0
+  await beh('seznam míst hned se nevešel', () => probehnoutChoice(behStoly({ api: apiSDeji(ch, deje) }, { mapaHned: true, zapsat: z.fn, smiMimoFrontu: () => { ptalSe += 1; return ptalSe > 1 } })), [
+    ['mapaHned bez času na začátku: seznam míst se načte u první stránky se stoly, stoly se zapíšou a „cas“ se nehlásí', (v) =>
+      [deje[0] === 'stránka' && deje[1] === 'oblasti' && ch.volani.oblasti === 1 && v.mista.stav === 'ok'
+        && z.zapsane.length === 3 && z.zapsane.every((r) => r.misto_zdroje === 'Patro: S1–S12'), `${deje.join(' → ')}; ${v.mista.stav}, ${z.zapsane.length} řádků`]],
+    ['… stoly v rezervacích běh viděl (videnyStoly)', (v) => [v.mista.videnyStoly === true, String(v.mista.videnyStoly)]],
+  ])
+}
+
+{
+  // (C) Zápis selže, ZATÍMCO se čeká na frontu: seznam míst se dočte během
+  // čekání na 2. dotaz a zápis 1. stránky po něm selže. Kontrola chyby
+  // zápisu PŘED čekáním ji ještě neviděla — dotaz, na který se čekalo,
+  // pak nesmí odejít.
+  let pustit
+  const brana = new Promise((hotovo) => { pustit = hotovo })
+  const pojistka = setTimeout(() => pustit(), 300)
+  let stranek = 0
+  let zapisu = 0
+  let cekani = 0
+  const api = {
+    async nacistStranku() { stranek += 1; return { stav: 'ok', rezervace: [r105] } },
+    async nacistOblasti() { await brana; return { stav: 'ok', oblasti: OBLASTI_CHOICE } },
+    async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
+  }
+  const pockatNaDotaz = async () => {
+    cekani += 1
+    if (cekani === 2) {
+      pustit()
+      // Seznam míst se dočte a zápis 1. stránky po něm selže — fronta
+      // pustí dotaz až potom.
+      for (let i = 0; i < 60 && zapisu === 0; i++) await new Promise((hotovo) => setTimeout(hotovo, 5))
+      await new Promise((hotovo) => setTimeout(hotovo, 5))
+    }
+    return true
+  }
+  const zapsat = async () => { zapisu += 1; return { stav: 'chyba', duvod: 'Databáze řádky nepřijala.' } }
+  await beh('zápis selže během čekání na frontu', () => probehnoutChoice(behStoly({ api }, { zapsat, pockatNaDotaz })), [
+    ['chyba zápisu, která přišla během čekání na frontu, zastaví dotaz, na který se čekalo: jen 1 dotaz na rezervace, běh „chyba“', (v) =>
+      [stranek === 1 && v.dotazu === 1 && zapisu === 1 && v.konec === 'chyba' && v.duvod === 'Databáze řádky nepřijala.', `${stranek} dotazů, ${zapisu} zápisů, ${v.konec}, „${v.duvod}“`]],
+  ])
+  clearTimeout(pojistka)
+}
+
+{
+  // (J) Výjimka z fronty, zatímco BĚŽÍ zápis stránky (ne jen čeká na
+  // seznam míst): běh spadne až po tom, co ten zápis doběhne. Dřívější
+  // test měl zápis rychlý — čekání na seznam místo na zápisy prošlo.
+  const deje = []
+  let pustit
+  const brana = new Promise((hotovo) => { pustit = hotovo })
+  const pojistka = setTimeout(() => pustit(), 300)
+  let zapisBezi
+  const zapisZacal = new Promise((hotovo) => { zapisBezi = hotovo })
+  let cekani = 0
+  const api = {
+    async nacistStranku() { return { stav: 'ok', rezervace: [r105] } },
+    async nacistOblasti() { await brana; return { stav: 'ok', oblasti: OBLASTI_CHOICE } },
+    async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
+  }
+  const pockatNaDotaz = async () => {
+    cekani += 1
+    if (cekani === 2) {
+      pustit()
+      await zapisZacal
+      throw new Error('Fronta dotazů spadla.')
+    }
+    return true
+  }
+  const zapsat = async (radky) => {
+    deje.push('zápis začal')
+    zapisBezi()
+    await new Promise((hotovo) => setTimeout(hotovo, 50))
+    deje.push('zápis doběhl')
+    return { stav: 'ok', souhrn: { nove: radky.length, zmenene: 0, bezeZmeny: 0, zastarale: 0, odmitnute: [] } }
+  }
+  let chyba = null
+  await probehnoutChoice(behStoly({ api }, { zapsat, pockatNaDotaz })).then(
+    () => deje.push('běh doběhl'),
+    (e) => { chyba = e; deje.push('běh spadl') },
+  )
+  // Kdyby něco běželo dál, mělo by teď čas se ozvat.
+  await new Promise((hotovo) => setTimeout(hotovo, 100))
+  clearTimeout(pojistka)
+  kontrola('výjimka z fronty, zatímco běží zápis stránky: běh spadne s ní až po tom, co ten zápis doběhne, a další zápis nezačne', () =>
+    [chyba?.message === 'Fronta dotazů spadla.' && deje.join(' → ') === 'zápis začal → zápis doběhl → běh spadl', deje.join(' → ')])
+}
+
 {
   // --- server se skutečným kódem: seznam míst MIMO frontu, stoly do zápisu, ukázka délky k napojení
   const r = rezervace(105, { locationPoints: stolyPatra(...VSE12), visitDuration: 120 })
@@ -3112,6 +3242,11 @@ for (const druh of ['limit', 'pristup']) {
     }],
     ['server: u napojení žádná chyba', () => [s.db.tabulky.integrace_pripojeni[0].posledni_chyba === null, String(s.db.tabulky.integrace_pripojeni[0].posledni_chyba)]],
     ['server: všechno, co šlo do Choice, bylo GET', () => s.dotazy.every((d) => d.init.method === 'GET')],
+    // 4. kolo: příští běh pak načte seznam míst hned na začátku (mapaHned).
+    ['server: rezervace se stoly → u napojení externi_ucet.ma_stoly', () => {
+      const u = s.db.tabulky.integrace_pripojeni[0].externi_ucet
+      return [u.ma_stoly === true, JSON.stringify(u.ma_stoly)]
+    }],
   ])
 }
 
@@ -3186,6 +3321,93 @@ for (const [dilMs, smi] of [[250 + CASOVY_LIMIT_MIST_MS + 1, false], [250 + NEJD
       const mist = s.dotazy.filter((d) => jeSeznamMist(d.url))
       const konecDilu = v.konecDiluMs === null ? null : v.konecDiluMs - s.START
       return [konecDilu === 5_000 && mist.length === 5 && radky.length > 0 && radky.every((x) => x.misto_zdroje === 'Patro: S1–S12'), `konec dílu ${konecDilu} ms, ${mist.length} dotazů na místa, ${radky.length} řádků`]
+    }],
+  ])
+}
+
+// --- 4. kolo kontroly kódu (4. 11.) ----------------------------------
+
+// Zápis stránek, které na seznam míst čekaly — rezerva, kterou si seznam
+// míst nechává před hranicí dalšího připojení. Hranice se tu počítají
+// z očekávaných čísel, ne z konstant v kódu (3. kolo: test, který bral
+// hranici z testované konstanty, se s ní posunul a prošel).
+const ZAPIS_PO_SEZNAMU_OCEKAVANO_MS = 3_000
+
+{
+  // smiSeznamMist po větvích. P = poslední dotaz úlohy, T = nejdelší
+  // seznam míst, Z = zápis po něm, N = nejmenší díl připojení.
+  const P = 100_000
+  const T = NEJDELE_MAPA_OCEKAVANO_MS
+  const Z = ZAPIS_PO_SEZNAMU_OCEKAVANO_MS
+  const prah = P - NEJMENE_NA_PRIPOJENI_MS
+  const smi = SYNC.smiSeznamMist
+  const dalsi = { ms: 1, konecMs: P }
+  kontrola('smiSeznamMist: po posledním dotazu úlohy nikdy (ani tlačítko, ani poslední připojení), přesně v něm ještě ano', () =>
+    smi(P + 1, 0, P, undefined) === false && smi(P + 1, 0, P, { ms: 1, konecMs: P, posledni: true }) === false && smi(P, 0, P, undefined) === true)
+  kontrola('smiSeznamMist: bez dílu (tlačítko) a před prvním dotazem úlohy (konec dílu neznámý) ano, i dlouhý', () =>
+    smi(0, 10 * T, P, undefined) === true && smi(0, 10 * T, P, { ms: 1, konecMs: null }) === true)
+  kontrola('smiSeznamMist: díl končí před koncem úlohy — jen když se seznam celý vejde do dílu', () =>
+    smi(1000, T, P, { ms: 1, konecMs: 1000 + T }) === true && smi(1001, T, P, { ms: 1, konecMs: 1000 + T }) === false)
+  kontrola('smiSeznamMist: díl dočítá konec úlohy a je to poslední připojení — ano i těsně před posledním dotazem', () =>
+    smi(P - 1, T, P, { ms: 1, konecMs: P, posledni: true }) === true)
+  kontrola('smiSeznamMist: díl dočítá konec úlohy a za ním je další připojení — ano, jen když se seznam i se zápisem (3 s) vejde před poslední dotaz − nejmenší díl', () =>
+    smi(prah - T - Z, T, P, dalsi) === true && smi(prah - T - Z + 1, T, P, dalsi) === false && smi(prah - T - Z + 1, T, P, { ...dalsi, posledni: false }) === false)
+  kontrola('smiSeznamMist: … a ano, když už je za tou hranicí (další připojení by nezačalo tak jako tak), těsně před ní ne', () =>
+    smi(prah, T, P, dalsi) === true && smi(prah - 1, T, P, dalsi) === false)
+}
+
+// (A) Díl dočítá zbytek úlohy (`konecDiluUlohy` ho natáhl do posledního
+// dotazu), ale za připojením je ještě další. Route další připojení začne,
+// když tohle doběhne brzy — pozdě začatý seznam míst by konec běhu
+// posunul tak, že by na další připojení nezbylo a v úloze by nebylo vůbec.
+const HRANICE_A = 250 + NEJDELE_MAPA_OCEKAVANO_MS + ZAPIS_PO_SEZNAMU_OCEKAVANO_MS + NEJMENE_NA_PRIPOJENI_MS
+for (const [posledniMs, posledniPripojeni, smi] of [[HRANICE_A - 1, false, false], [HRANICE_A, false, true], [HRANICE_A - 1, true, true]]) {
+  const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
+  const nazev = posledniPripojeni
+    ? `úloha: díl dočítá do posledního dotazu (${posledniMs - HRANICE_A} ms od hranice) a je to POSLEDNÍ připojení → seznam míst SMÍ`
+    : `úloha: díl dočítá do posledního dotazu (${posledniMs - HRANICE_A} ms od hranice), za ním další připojení → seznam míst ve 250 ms ${smi ? 'se i se zápisem vejde před poslední dotaz − nejmenší díl, SMÍ' : 'by konec běhu posunul za poslední dotaz − nejmenší díl, NESMÍ'}`
+  await beh(nazev, () => SYNC.synchronizovatChoice(ID_PRIPOJENI, {
+    konecMs: s.START + 57_000, posledniDotazMs: s.START + posledniMs, dilMs: posledniMs, posledniPripojeni, uloha: true, prostredi: s.prostredi,
+  }), [
+    [nazev, (v) => {
+      const radky = s.db.rpcVolani.filter((x) => x.jmeno === 'rezervace_importovat_zdroj').flatMap((x) => x.args.p_radky)
+      const mist = s.dotazy.filter((d) => jeSeznamMist(d.url))
+      const ok1 = smi
+        ? mist.length === 5 && radky.every((x) => x.misto_zdroje === 'Patro: S1–S12')
+        : mist.length === 0 && radky.every((x) => !('misto_zdroje' in x))
+      const konecDilu = v.konecDiluMs === null ? null : v.konecDiluMs - s.START
+      return [ok1 && radky.length > 0 && konecDilu === posledniMs && v.stav !== 'chyba', `${mist.length} dotazů na místa, ${radky.length} řádků, ${v.stav}, konec dílu ${konecDilu} ms`]
+    }],
+  ])
+}
+
+{
+  // (B) Napojení, které stoly používá (`externi_ucet.ma_stoly`): seznam
+  // míst se načte hned na začátku běhu — jako první dotaz na Choice, i když
+  // tentokrát žádná rezervace stoly nemá.
+  const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [rezervace(3)]) })
+  const p0 = s.db.tabulky.integrace_pripojeni[0]
+  p0.externi_ucet = { ...p0.externi_ucet, ma_stoly: true }
+  await beh('server, napojení se stoly', () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, prostredi: s.prostredi }), [
+    ['server: napojení má ma_stoly → seznam míst jde jako první dotaz na Choice (před rezervacemi), i bez rezervací se stoly', (v) => {
+      const prvni = s.dotazy.findIndex((d) => jeSeznamMist(d.url))
+      const mist = s.dotazy.filter((d) => jeSeznamMist(d.url)).length
+      return [v.stav === 'ok' && prvni === 0 && mist === 5, `seznam míst jako ${prvni + 1}. dotaz, ${mist}×, ${v.stav}`]
+    }],
+    ['server: ma_stoly u napojení zůstane, i když běh žádné stoly nepotkal', () => {
+      const u = s.db.tabulky.integrace_pripojeni[0].externi_ucet
+      return [u.ma_stoly === true, JSON.stringify(u.ma_stoly)]
+    }],
+  ])
+}
+
+{
+  // … bez ma_stoly a bez stolů se seznam míst nenačte a ma_stoly se nezapíše.
+  const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [rezervace(3)]) })
+  await beh('server, napojení bez stolů', () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, prostredi: s.prostredi }), [
+    ['server: bez ma_stoly a bez rezervací se stoly — seznam míst ne, ma_stoly se nezapíše', (v) => {
+      const u = s.db.tabulky.integrace_pripojeni[0].externi_ucet
+      return [v.stav === 'ok' && !s.dotazy.some((d) => jeSeznamMist(d.url)) && !('ma_stoly' in u), `${v.stav}, ma_stoly ${JSON.stringify(u.ma_stoly)}`]
     }],
   ])
 }

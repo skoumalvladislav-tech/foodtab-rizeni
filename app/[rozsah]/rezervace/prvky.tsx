@@ -17,6 +17,7 @@ import {
   type Pohled,
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
+import { mistoKratce, prostorZeZdroje } from '@/lib/rezervace-misto'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
 import { adresaPrilohy, otevritVProhlizeci, rozdelitNazev, velikostText, jeObrazek, type DokumentRezervace } from '@/lib/rezervace-prilohy'
 import {
@@ -196,62 +197,6 @@ function osobyText(n: number | null): string {
 }
 
 const male = (s: string) => s.trim().toLocaleLowerCase('cs')
-
-type MistoRadku = Pick<RezervaceRadek, 'prostor'> & { misto_zdroje?: string; prani_zdroje?: string; prostor_ze_zdroje?: boolean | null }
-
-/**
- * Napsal „Stůl nebo prostor“ zdroj (přání hosta doplněné při načtení),
- * ne obsluha? Podle příznaku z databáze (`prostor_ze_zdroje`, migrace
- * 20261107100000). U řádku z doby před ním (`null`) podle shody
- * s přáním hosta — tak to dělalo 2. kolo pro všechny řádky, jenže text
- * od obsluhy, který zněl stejně jako přání, se pak schoval, a přání,
- * které se v Choice změnilo, se zase ukázalo (kontrola kódu 4. 11.,
- * 3. kolo). Bez příznaku i bez přání (databáze před db push) `false`:
- * prostor se ukáže jako dřív.
- */
-export function prostorZeZdroje(r: MistoRadku): boolean {
-  const prostor = (r.prostor ?? '').trim()
-  if (!prostor) return false
-  if (typeof r.prostor_ze_zdroje === 'boolean') return r.prostor_ze_zdroje
-  const prani = (r.prani_zdroje ?? '').trim()
-  return prani !== '' && male(prostor) === male(prani)
-}
-
-/**
- * Text stolů bez jediné části podniku: jen stoly, které v seznamu míst
- * zdroje nejsou (lib/rezervace-choice.ts, `mistoZChoice`). Vedle něj se
- * přání hosta ukáže — řekne aspoň, kde host sedí.
- */
-const RE_JEN_BEZ_NAZVU = /^\d+ (?:stůl|stoly|stolů) bez názvu$/
-
-/**
- * Kde host sedí, do krátkého řádku: „Stůl nebo prostor“ od obsluhy
- * a stoly z rezervačního systému („Patro: S1–S12“).
- *   * Prostor, který doplnil zdroj (přání hosta, `prostorZeZdroje`), se
- *     vedle stolů nepíše: „Patro“ vedle „Terasa: L7“ by se četlo, jako
- *     by host měl obojí (kontrola kódu 4. 11., 2. kolo). Bez stolů se
- *     místo něj ukáže AKTUÁLNÍ přání (`prani_zdroje`), ne to, které se
- *     do prostoru doplnilo kdysi.
- *   * Prostor od obsluhy se ukáže vždy, kromě případu, kdy je to PŘESNĚ
- *     jméno části podniku ze stolů („Patro“) nebo celý text stolů. Kus
- *     jména nestačí: „S1“ od obsluhy vedle „Patro: S12“ je jiný stůl
- *     a musí být vidět (kontrola kódu 4. 11.). Jméno oblasti se hledá
- *     jako „ · Patro: “ v celém textu, ne rozdělením textu — jméno
- *     oblasti může mít „: “ i „ · “ v sobě.
- */
-export function mistoKratce(r: MistoRadku): string[] {
-  const stoly = (r.misto_zdroje ?? '').trim()
-  const prostor = (r.prostor ?? '').trim()
-  const zeZdroje = prostorZeZdroje(r)
-  const odObsluhy = zeZdroje ? '' : prostor
-  const prani = (r.prani_zdroje ?? '').trim() || (zeZdroje ? prostor : '')
-  if (!stoly) return odObsluhy ? [odObsluhy] : prani ? [prani] : []
-  if (odObsluhy) {
-    if (male(odObsluhy) === male(stoly) || ` · ${male(stoly)}`.includes(` · ${male(odObsluhy)}: `)) return [stoly]
-    return [odObsluhy, stoly]
-  }
-  return prani && RE_JEN_BEZ_NAZVU.test(stoly) ? [prani, stoly] : [stoly]
-}
 
 /** „3 rez. · 1 akce · 12 hostů“ do úzkého sloupce; bez zrušených. */
 function souhrnKratce(s: SouhrnDne): string {

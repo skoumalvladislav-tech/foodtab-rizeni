@@ -39,6 +39,7 @@ import {
   souhrnyPobocek,
   vzhledPobocek,
 } from '../lib/rezervace-pobocky.ts'
+import { mistoKratce, prostorZeZdroje } from '../lib/rezervace-misto.ts'
 import { zpatkyZKalendare } from '../lib/rezervace-typy.ts'
 import { adresaModulu, nactiModul } from './vykreslit.mjs'
 
@@ -654,16 +655,13 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
     obsluhaJakoPrani: rez(BERNARD, '2026-10-30', '20:15', { jmeno_hosta: 'Obsluha Jako Prani', zdroj: 'api', prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: false, misto_zdroje: 'Terasa: L7' }),
   }
   const VSE = Object.values(T).sort((x, y) => x.zacatek.localeCompare(y.zacatek))
-  const prvky = await nactiModul('app/[rozsah]/rezervace/prvky.tsx', [
-    ['next/link', ODKAZ],
-    ['./akce', AKCE],
-    ['./formular', NIC],
-    ['./prilohy-nahrat', NIC],
-  ])
+  // mistoKratce a prostorZeZdroje jsou od 4. kola v lib/rezervace-misto.ts
+  // (sdílí je ranní souhrn); kalendář je bere odtamtud — vykreslení níž
+  // (týden, den, detail) jde přes skutečný prvky.tsx.
   // Čtvrtý argument je příznak `prostor_ze_zdroje`; vynechaný = klíč chybí
   // (řádek z doby před migrací), rozhodne shoda s přáním.
   const mk = (prostor, misto_zdroje, prani_zdroje, ...priznak) =>
-    JSON.stringify(prvky.mistoKratce({ prostor, misto_zdroje, prani_zdroje, ...(priznak.length ? { prostor_ze_zdroje: priznak[0] } : {}) }))
+    JSON.stringify(mistoKratce({ prostor, misto_zdroje, prani_zdroje, ...(priznak.length ? { prostor_ze_zdroje: priznak[0] } : {}) }))
   // Každá kontrola zvlášť: výjimka shodí jen ji, ne zbytek oddílu (2. kolo kontroly kódu).
   const okMk = (popis, fn) => {
     let x
@@ -697,7 +695,12 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
   // textu, ale příznak `prostor_ze_zdroje` z databáze. Shoda textu platí
   // jen pro řádek bez příznaku (null / chybějící klíč).
   okMk('místo krátce: příznak „ze zdroje“ a přání se v Choice změnilo — vedle stolů jen stoly, bez stolů AKTUÁLNÍ přání (ne staré „Patro“)',
-    () => mk('Patro', 'Terasa: L7', 'Zahrada', true) === '["Terasa: L7"]' && mk('Patro', '', 'Zahrada', true) === '["Zahrada"]' && mk('Patro', '', '', true) === '["Patro"]')
+    () => mk('Patro', 'Terasa: L7', 'Zahrada', true) === '["Terasa: L7"]' && mk('Patro', '', 'Zahrada', true) === '["Zahrada"]')
+  // 4. kolo (#12): host přání v Choice smazal. Staré „Patro“ v prostoru
+  // je přání, ne text obsluhy — v krátkém řádku se neukáže (detail ho
+  // ukáže s poznámkou „doplněno z Choice“).
+  okMk('místo krátce: zdroj doplnil přání a host ho v Choice smazal — staré přání se neukáže (bez stolů nic, se stoly jen stoly)',
+    () => mk('Patro', '', '', true) === '[]' && mk('Patro', 'Terasa: L7', '', true) === '["Terasa: L7"]')
   okMk('místo krátce: příznak „obsluha“ a text stejný jako přání — prostor se ukáže vedle stolů (nepřebije ho shoda s přáním)',
     () => mk('Patro', 'Terasa: L7', 'Patro', false) === '["Patro","Terasa: L7"]' && mk('patro', 'Terasa: L7', 'Patro', false) === '["patro","Terasa: L7"]' && mk('Patro', '', 'Patro', false) === '["Patro"]')
   okMk('místo krátce: obsluha bez stolů — její text, ne přání hosta (s příznakem i bez něj)',
@@ -719,12 +722,12 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
   okMk('místo krátce: obsluha vedle „2 stoly bez názvu“ — její text, ne přání',
     () => mk('u okna', '2 stoly bez názvu', 'Patro', false) === '["u okna","2 stoly bez názvu"]')
   okMk('prostor ze zdroje: příznak rozhoduje, bez něj shoda s přáním (i jinou velikostí písmen a s mezerami), prázdný prostor nikdy',
-    () => prvky.prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Zahrada', prostor_ze_zdroje: true }) === true
-      && prvky.prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: false }) === false
-      && prvky.prostorZeZdroje({ prostor: ' patro ', prani_zdroje: 'Patro' }) === true
-      && prvky.prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: null }) === true
-      && prvky.prostorZeZdroje({ prostor: 'Patro', prani_zdroje: '' }) === false
-      && prvky.prostorZeZdroje({ prostor: '', prani_zdroje: '', prostor_ze_zdroje: true }) === false)
+    () => prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Zahrada', prostor_ze_zdroje: true }) === true
+      && prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: false }) === false
+      && prostorZeZdroje({ prostor: ' patro ', prani_zdroje: 'Patro' }) === true
+      && prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: null }) === true
+      && prostorZeZdroje({ prostor: 'Patro', prani_zdroje: '' }) === false
+      && prostorZeZdroje({ prostor: '', prani_zdroje: '', prostor_ze_zdroje: true }) === false)
 
   // --- týden ---
   try {

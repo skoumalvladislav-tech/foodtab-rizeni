@@ -86,10 +86,13 @@ export async function GET(request: Request): Promise<NextResponse> {
     // — se třemi připojeními úloha přišla o dotaz víc, než kolik jich
     // tlačítko udělalo). Tlačítko tak úlohu stojí nejvýš místa, která samo
     // zabralo. Konec celé úlohy (`posledniDotazUlohy`) platí pro všechny.
+    // `posledniPripojeni`: za ním už žádné další není — seznam míst smí
+    // začít i pozdě, nikoho nezdrží (`smiSeznamMist`).
     const v = await synchronizovatChoice(id, {
       konecMs: konecUlohy,
       posledniDotazMs: posledniDotazUlohy,
       dilMs: dil,
+      posledniPripojeni: i === pripojeni.length - 1,
       uloha: true,
     })
     vysledky.push({ stav: v.stav, dotazu: v.dotazu, nacteno: v.nacteno, pokracovani: v.pokracovani })
