@@ -700,6 +700,8 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
     () => mk('Patro', 'Terasa: L7', 'Zahrada', true) === '["Terasa: L7"]' && mk('Patro', '', 'Zahrada', true) === '["Zahrada"]' && mk('Patro', '', '', true) === '["Patro"]')
   okMk('místo krátce: příznak „obsluha“ a text stejný jako přání — prostor se ukáže vedle stolů (nepřebije ho shoda s přáním)',
     () => mk('Patro', 'Terasa: L7', 'Patro', false) === '["Patro","Terasa: L7"]' && mk('patro', 'Terasa: L7', 'Patro', false) === '["patro","Terasa: L7"]' && mk('Patro', '', 'Patro', false) === '["Patro"]')
+  okMk('místo krátce: obsluha bez stolů — její text, ne přání hosta (s příznakem i bez něj)',
+    () => mk('u okna', '', 'Patro', false) === '["u okna"]' && mk('u okna', '', 'Patro') === '["u okna"]' && mk('u okna', '', 'Patro', null) === '["u okna"]')
   okMk('místo krátce: příznak „obsluha“ = jméno oblasti ve stolech se dál nezdvojí',
     () => mk('Patro', 'Patro: S1', 'Patro', false) === '["Patro: S1"]' && mk('Patro', 'Patro: S1', '', false) === '["Patro: S1"]')
   okMk('místo krátce: příznak null = jako bez klíče (shoda s přáním)',
