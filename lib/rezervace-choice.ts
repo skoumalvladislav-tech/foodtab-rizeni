@@ -31,9 +31,11 @@
  *     Jména dává seznam míst: `GET /location/:language/areas/list`
  *     (oblasti: Patro, Terasa…) a `GET /location/:language/points/list/:areaId`
  *     (stoly v oblasti). Načte se nejvýš jednou za běh (`nacistMapuMist`):
- *     u první stránky, kde nějaká rezervace stoly má, nebo — u napojení,
- *     kde běh stoly už jednou viděl (`externi_ucet.ma_stoly`, `mapaHned`)
- *     — hned na začátku běhu, souběžně s prvním dotazem. Do rezervace jde text
+ *     u napojení, kde běh stoly už jednou viděl (`externi_ucet.ma_stoly`,
+ *     `mapaHned`), hned na začátku běhu, souběžně s prvním dotazem; jinak
+ *     u první stránky se stoly, u které to `smiMimoFrontu` dovolí.
+ *     Odmítnutí nic nezamyká — zkusí to každá další stránka se stoly;
+ *     stránky zapsané do té doby mají stoly z minula. Do rezervace jde text
  *     „Patro: S1–S12“ (`mistoZChoice`). Limit 1 dotaz za 5 s je jen
  *     u `/bookings/list` (ostatní metody 60 za sekundu, api.md), proto
  *     seznam míst jde MIMO frontu dotazů. Místo ve frontě by vzalo čas
@@ -44,7 +46,8 @@
  *     jen když nezdrží další připojení — `smiSeznamMist`
  *     v lib/rezervace-choice-sync.ts: celý, `NEJDELE_MAPA_MS`, se vejde
  *     do dílu, nebo u dílu, který dočítá úlohu, i se zápisem před
- *     hranici dalšího připojení; poslední připojení smí vždy). Načítá se SOUBĚŽNĚ
+ *     hranici dalšího připojení, nebo když už je za ní; poslední
+ *     připojení smí vždy). Načítá se SOUBĚŽNĚ
  *     s dalšími dotazy — na seznam čeká jen zápis stránky, ne další
  *     dotaz (jinak pomalý Choice vzal čas oknu, 2. kolo kontroly).
  *     Když se seznam nenačte, stoly u rezervací zůstanou z minula
@@ -1038,13 +1041,20 @@ export type VysledekBehuChoice = {
   oknoDokonceno: boolean
   /**
    * Seznam míst (stolů) pro tenhle běh.
-   *   * `stav`: `nezkouseno` = žádná rezervace stoly neměla, `ok`,
-   *     `chyba` (Choice ho nedal, `duvod`), `cas` (nevešel se do běhu),
+   *   * `stav`: `nezkouseno` = žádná stránka se stoly se o seznam
+   *     nepokusila (pokus hned na začátku, `mapaHned`, se nepočítá),
+   *     `ok`, `chyba` (Choice ho nedal, `duvod`), `cas` (u stránky se
+   *     stoly se nevešel do běhu a později se nenačetl),
    *   * `neuplny`: seznam se načetl, ale ne celý (víc než `MAX_OBLASTI`
    *     oblastí),
-   *   * `bezStolu`: rezervace se stoly, u kterých se stoly nezapsaly
-   *     (zůstaly z minula), protože seznam míst není (nebo není celý
-   *     a stůl v něm chybí),
+   *   * `bezStolu`: rezervace se stoly, jejichž POSLEDNÍ zápis v běhu
+   *     stoly nenesl (zůstaly z minula) — seznam míst ještě nebyl (došlý
+   *     čas, chyba), nebo nebyl celý a stůl v něm chybí. Blízko, nové a okno
+   *     se překrývají: když tatáž rezervace stoly dostane na pozdější
+   *     stránce, nepočítá se (kontrola kódu 6. 11., 7. kolo),
+   *   * `chybiVSeznamu`: z `bezStolu` jen ty, u kterých seznam byl, ale
+   *     necelý a stůl v něm chybí — jen na ně míří hláška „nenačetly
+   *     celé“; došlý čas chyba není,
    *   * `nezname`: rezervace se stolem, který v (celém) seznamu míst není,
    *   * `dotazu`: dotazů na seznam míst (mimo `dotazu` rezervací),
    *   * `videnyStoly`: aspoň jedna načtená rezervace měla stoly — ať se
@@ -1052,7 +1062,7 @@ export type VysledekBehuChoice = {
    *     (`externi_ucet.ma_stoly`) a příští běh pak seznam načte hned na
    *     začátku (`mapaHned`).
    */
-  mista: { stav: 'nezkouseno' | 'ok' | 'chyba' | 'cas'; duvod: string | null; neuplny: boolean; bezStolu: number; nezname: number; dotazu: number; videnyStoly: boolean }
+  mista: { stav: 'nezkouseno' | 'ok' | 'chyba' | 'cas'; duvod: string | null; neuplny: boolean; bezStolu: number; chybiVSeznamu: number; nezname: number; dotazu: number; videnyStoly: boolean }
   /**
    * Pár rezervací s číslem a `visitDuration`, jak ho Choice poslal (nejvýš
    * `UKAZEK_DELKY`). Jednotka délky v dokumentaci není — podle rezervace,
@@ -1125,14 +1135,19 @@ export async function probehnoutChoice(v: {
     preskocene: { pocet: 0, priklad: null, duvody: {} },
     odmitnute: { pocet: 0, priklad: null },
     oknoDokonceno: false,
-    mista: { stav: 'nezkouseno', duvod: null, neuplny: false, bezStolu: 0, nezname: 0, dotazu: 0, videnyStoly: false },
+    mista: { stav: 'nezkouseno', duvod: null, neuplny: false, bezStolu: 0, chybiVSeznamu: 0, nezname: 0, dotazu: 0, videnyStoly: false },
     ukazkaDelky: [],
   }
 
   type Pruchod = { podle: DotazSeznamu['podle']; od: string; do: string }
   const preskoceneId = new Set<string>()
-  // Blízko a okno se překrývají — tatáž rezervace se ve stolech počítá jednou.
-  const bezStoluId = new Set<string>()
+  // Blízko a okno se překrývají — tatáž rezervace se ve stolech počítá
+  // jednou, a podle POSLEDNÍHO zápisu: seznam míst se smí načíst až
+  // u pozdější stránky a tatáž rezervace pak stoly dostane (kontrola kódu
+  // 6. 11., 7. kolo). Zápisy jdou popořadě (`zapisy`) a seznam se po
+  // načtení nemění, takže poslední zápis je ten, který v databázi zůstane.
+  const bezSeznamuId = new Set<string>()
+  const chybiVSeznamuId = new Set<string>()
   const neznameId = new Set<string>()
 
   /**
@@ -1144,7 +1159,8 @@ export async function probehnoutChoice(v: {
    * hranicí dalšího připojení. Kontrola kódu 4. 11. (6. kolo): zámek po
    * prvním odmítnutí nechal prostřední připojení úlohy bez stolů celý
    * běh, i když by je pozdější stránka smět načíst. Rezervace stránek,
-   * které se zapsaly bez seznamu, mají stoly z minula (`bezStolu`).
+   * které se zapsaly bez seznamu, mají stoly z minula (`bezStolu`,
+   * podle posledního zápisu — pozdější stránka je může opravit).
    * MIMO frontu (hlavička modulu: místo ve frontě by vzalo
    * dotaz průchodu „okno“), ale jen dokud `smiMimoFrontu` — se stejným
    * koncem jako fronta, takže se oblasti i stoly (`CASOVY_LIMIT_MIST_MS`)
@@ -1165,8 +1181,9 @@ export async function probehnoutChoice(v: {
     if (!v.smiMimoFrontu(NEJDELE_MAPA_MS)) {
       // Teď se nevejde — tahle stránka se zapíše bez stolů (na začátku
       // běhu žádná) a zkusí to další stránka se stoly. Když se seznam
-      // načte později, stav přepíše na „ok“.
-      vysledek.mista.stav = 'cas'
+      // načte později, stav přepíše na „ok“. Pokus na začátku stav
+      // nemění: žádná rezervace stoly zatím nepotřebovala (7. kolo).
+      if (!hned) vysledek.mista.stav = 'cas'
       return Promise.resolve(null)
     }
     mapaSeNacita = true
@@ -1261,9 +1278,16 @@ export async function probehnoutChoice(v: {
               videna.add(id)
               radky.push(x.radek)
             }
-            if (maStoly(b)) {
-              if (x.radek.misto_zdroje === undefined) bezStoluId.add(id)
-              else if (m && neznameStoly((b as { locationPoints?: unknown }).locationPoints, m) > 0) neznameId.add(id)
+            if (x.radek.misto_zdroje !== undefined) {
+              bezSeznamuId.delete(id)
+              chybiVSeznamuId.delete(id)
+              neznameId.delete(id)
+              if (m && maStoly(b) && neznameStoly((b as { locationPoints?: unknown }).locationPoints, m) > 0) neznameId.add(id)
+            } else if (maStoly(b)) {
+              if (m) {
+                bezSeznamuId.delete(id)
+                chybiVSeznamuId.add(id)
+              } else bezSeznamuId.add(id)
             }
             zapamatovatDelku(b, x.radek.cislo_zdroje)
             continue
@@ -1318,7 +1342,8 @@ export async function probehnoutChoice(v: {
     }
     vysledek.konec = k
     vysledek.kurzor = kurzor
-    vysledek.mista.bezStolu = bezStoluId.size
+    vysledek.mista.bezStolu = bezSeznamuId.size + chybiVSeznamuId.size
+    vysledek.mista.chybiVSeznamu = chybiVSeznamuId.size
     vysledek.mista.nezname = neznameId.size
     return vysledek
   }
@@ -1497,8 +1522,8 @@ export function chybaBehu(v: VysledekBehuChoice): string | null {
   if (v.mista.stav === 'chyba' && v.mista.bezStolu > 0) {
     casti.push(`Stoly z Choice se nenačetly (${v.mista.duvod ?? 'neznámý důvod'}) — u ${pocet(v.mista.bezStolu, 'rezervace', 'rezervací', 'rezervací')} zůstávají naposledy načtené, rezervace se načítají dál.`)
   }
-  if (v.mista.stav === 'ok' && v.mista.neuplny && v.mista.bezStolu > 0) {
-    casti.push(`Stoly z Choice se nenačetly celé (podnik má v Choice víc než ${MAX_OBLASTI} částí, Foodtab jich načítá ${MAX_OBLASTI}) — u ${pocet(v.mista.bezStolu, 'rezervace', 'rezervací', 'rezervací')} zůstávají naposledy načtené. Pošlete prosím tu hlášku vývojáři.`)
+  if (v.mista.stav === 'ok' && v.mista.neuplny && v.mista.chybiVSeznamu > 0) {
+    casti.push(`Stoly z Choice se nenačetly celé (podnik má v Choice víc než ${MAX_OBLASTI} částí, Foodtab jich načítá ${MAX_OBLASTI}) — u ${pocet(v.mista.chybiVSeznamu, 'rezervace', 'rezervací', 'rezervací')} zůstávají naposledy načtené. Pošlete prosím tu hlášku vývojáři.`)
   }
   if (v.mista.nezname > 0) {
     casti.push(`U ${pocet(v.mista.nezname, 'rezervace', 'rezervací', 'rezervací')} poslal Choice stůl, který v seznamu míst v Choice není — ve Foodtabu je „bez názvu“.`)

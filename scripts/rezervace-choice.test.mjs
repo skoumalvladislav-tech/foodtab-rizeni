@@ -3161,16 +3161,30 @@ const apiSDeji = (ch, deje) => ({
 
 {
   // (B) Na začátku běhu se seznam míst nevešel (smiMimoFrontu ne) — zkusí
-  // ho první stránka se stoly; „cas“ se z pokusu na začátku nehlásí.
+  // ho první stránka se stoly. Že se „cas“ z pokusu na začátku nehlásí,
+  // hlídá až další blok: tady by stav stejně přepsalo „ok“.
   const deje = []
   const ch = apiSeStoly({ rezervace: [r105] })
   const z = zapisDoPameti()
   let ptalSe = 0
   await beh('seznam míst hned se nevešel', () => probehnoutChoice(behStoly({ api: apiSDeji(ch, deje) }, { mapaHned: true, zapsat: z.fn, smiMimoFrontu: () => { ptalSe += 1; return ptalSe > 1 } })), [
-    ['mapaHned bez času na začátku: seznam míst se načte u první stránky se stoly, stoly se zapíšou a „cas“ se nehlásí', (v) =>
+    ['mapaHned bez času na začátku: seznam míst se načte u první stránky se stoly, stoly se zapíšou, stav „ok“', (v) =>
       [deje[0] === 'stránka' && deje[1] === 'oblasti' && ch.volani.oblasti === 1 && v.mista.stav === 'ok'
         && z.zapsane.length === 3 && z.zapsane.every((r) => r.misto_zdroje === 'Patro: S1–S12'), `${deje.join(' → ')}; ${v.mista.stav}, ${z.zapsane.length} řádků`]],
     ['… stoly v rezervacích běh viděl (videnyStoly)', (v) => [v.mista.videnyStoly === true, String(v.mista.videnyStoly)]],
+  ])
+}
+
+{
+  // (7. kolo) Pokus na začátku (mapaHned) se nevešel a žádná rezervace
+  // stoly nemá: stav zůstane „nezkouseno“ — „cas“ by tvrdilo, že stoly
+  // nějaká stránka potřebovala. Dřív (6. kolo) se „cas“ nastavilo
+  // i tady a kontrola výš to nepoznala, protože stav přepsalo „ok“.
+  const deje = []
+  const ch = apiSeStoly({ rezervace: [r107] })
+  await beh('seznam míst hned se nevešel, stoly nikde', () => probehnoutChoice(behStoly({ api: apiSDeji(ch, deje) }, { mapaHned: true, smiMimoFrontu: () => false })), [
+    ['mapaHned bez času a rezervace bez stolů: stav „nezkouseno“, ne „cas“, a seznam míst se nenačte', (v) =>
+      [v.mista.stav === 'nezkouseno' && ch.volani.oblasti === 0 && v.mista.bezStolu === 0 && chybaBehu(v) === null, `${v.mista.stav}, oblasti ${ch.volani.oblasti}×, bez stolů ${v.mista.bezStolu}`]],
   ])
 }
 
@@ -3187,7 +3201,73 @@ const apiSDeji = (ch, deje) => ({
       [ptalSe === 3 && ch.volani.oblasti === 1 && v.mista.stav === 'ok' && z.zapsane.length === 3
         && !('misto_zdroje' in z.zapsane[0]) && !('misto_zdroje' in z.zapsane[1]) && z.zapsane[2].misto_zdroje === 'Patro: S1–S12',
       `smiMimoFrontu ${ptalSe}×, oblasti ${ch.volani.oblasti}×, ${v.mista.stav}, stoly ${z.zapsane.map((r) => r.misto_zdroje ?? '—').join(' | ')}`]],
-    ['… rezervace zapsaná bez seznamu se počítá do „bez stolů“ (zůstaly z minula)', (v) => [v.mista.bezStolu === 1, String(v.mista.bezStolu)]],
+    ['… rezervace, která stoly dostala na pozdější stránce, se do „bez stolů“ nepočítá (rozhoduje poslední zápis)', (v) =>
+      [v.mista.bezStolu === 0 && v.mista.chybiVSeznamu === 0 && chybaBehu(v) === null, `bez stolů ${v.mista.bezStolu}, chybí v seznamu ${v.mista.chybiVSeznamu}, hláška „${chybaBehu(v)}“`]],
+  ])
+}
+
+{
+  // (7. kolo) „Stůl mimo seznam míst“ se taky řídí posledním zápisem:
+  // #501 má na 2. stránce stůl, který v (celém) seznamu není, na 3. už
+  // stůl, který tam je — v databázi zůstane ten známý, hláška nesmí nic
+  // počítat. #502 má neznámý stůl v obou, ten se počítá (jednou).
+  const r501a = rezervace(501, { locationPoints: ['f00000000000000000000077'] })
+  const r501b = rezervace(501, { locationPoints: stolyPatra(1) })
+  const r502 = rezervace(502, { locationPoints: ['f00000000000000000000078'] })
+  const poStrankach = [[r107], [r501a, r502], [r501b, r502]]
+  let dotaz = 0
+  const ch = apiSeStoly({ rezervace: [] })
+  const api = { ...ch.api, async nacistStranku() { dotaz += 1; return { stav: 'ok', rezervace: poStrankach[dotaz - 1] ?? [] } } }
+  const z = zapisDoPameti()
+  await beh('neznámý stůl jen v dřívějším zápisu', () => probehnoutChoice(behStoly({ api }, { zapsat: z.fn })), [
+    ['stůl mimo seznam míst podle posledního zápisu: #501 (naposledy známý stůl) se nepočítá, #502 ano — „U 1 rezervace poslal Choice stůl…“', (v) => {
+      const c = chybaBehu(v) ?? ''
+      const posledni501 = zapsaneId(z, r501a._id).at(-1)?.misto_zdroje
+      return [dotaz === 3 && posledni501 === 'Patro: S1' && v.mista.nezname === 1 && /^U 1 rezervace poslal Choice stůl/.test(c),
+        `${dotaz} dotazů, #501 naposledy „${posledni501}“, neznámé ${v.mista.nezname}, „${c}“`]
+    }],
+  ])
+}
+
+{
+  // (7. kolo) Necelý seznam míst (víc než MAX_OBLASTI částí) a 1. stránka
+  // odmítnutá kvůli času. Blízko, nové a okno vracejí různé rezervace:
+  //   * #401 je ve všech třech — 1. zápis bez stolů, další se stoly,
+  //   * #402 jen na odmítnuté 1. stránce — stoly z minula kvůli ČASU,
+  //   * #403 jen na 3. stránce, stůl v nenačtené části — chybí v SEZNAMU.
+  // Hláška „nenačetly celé“ smí počítat jen #403. Dřív (6. kolo) počítala
+  // #401 i #402 a svedla je na víc než MAX_OBLASTI částí.
+  const N = MAX_OBLASTI + 1
+  const oblasti = Array.from({ length: N }, (_, i) => ({ _id: `d${String(i).padStart(23, '0')}`, name: `Část ${i + 1}`, itemCount: 1 }))
+  const stulCasti = (i) => `e${String(i).padStart(23, '0')}`
+  const r401 = rezervace(401, { locationPoints: [stulCasti(0)] })
+  const r402 = rezervace(402, { locationPoints: [stulCasti(1)] })
+  const r403 = rezervace(403, { locationPoints: [stulCasti(N - 1)] })
+  const poStrankach = [[r401, r402], [r401], [r401, r403]]
+  let dotaz = 0
+  const ch = apiSeStoly({
+    rezervace: [],
+    oblasti: () => ({ stav: 'ok', oblasti }),
+    mista: (id) => {
+      const i = oblasti.findIndex((o) => o._id === id)
+      return { stav: 'ok', mista: i < 0 ? [] : [{ _id: stulCasti(i), name: `T${i + 1}` }] }
+    },
+  })
+  const api = { ...ch.api, async nacistStranku() { dotaz += 1; return { stav: 'ok', rezervace: poStrankach[dotaz - 1] ?? [] } } }
+  const z = zapisDoPameti()
+  let ptalSe = 0
+  await beh('necelý seznam míst načtený až u 2. stránky', () => probehnoutChoice(behStoly({ api }, { zapsat: z.fn, smiMimoFrontu: () => { ptalSe += 1; return ptalSe > 1 } })), [
+    ['necelý seznam až u 2. stránky: #401 má v posledním zápisu stoly, #402 (jen odmítnutá stránka) a #403 (stůl mimo načtené části) ne', () => {
+      const posledni = (r) => zapsaneId(z, r._id).at(-1)
+      return [dotaz === 3 && ch.volani.oblasti === 1 && posledni(r401)?.misto_zdroje === 'Část 1: T1' && !('misto_zdroje' in (posledni(r402) ?? { misto_zdroje: 'nezapsáno' })) && !('misto_zdroje' in (posledni(r403) ?? { misto_zdroje: 'nezapsáno' })),
+        `${dotaz} dotazů, oblasti ${ch.volani.oblasti}×, #401 ${zapsaneId(z, r401._id).map((r) => r.misto_zdroje ?? '—').join(' | ')}, #402 ${posledni(r402)?.misto_zdroje ?? '—'}, #403 ${posledni(r403)?.misto_zdroje ?? '—'}`]
+    }],
+    ['… „bez stolů“ jsou dvě (#402 čas, #403 seznam), #401 ne; v necelém seznamu chybí jen #403', (v) =>
+      [v.mista.stav === 'ok' && v.mista.neuplny === true && v.mista.bezStolu === 2 && v.mista.chybiVSeznamu === 1, `${v.mista.stav}, neúplný ${v.mista.neuplny}, bez stolů ${v.mista.bezStolu}, chybí v seznamu ${v.mista.chybiVSeznamu}`]],
+    [`… hláška „nenačetly celé“ počítá jen rezervaci, které stůl chyběl v seznamu: „u 1 rezervace“`, (v) => {
+      const c = chybaBehu(v) ?? ''
+      return [c.startsWith(`Stoly z Choice se nenačetly celé (podnik má v Choice víc než ${MAX_OBLASTI} částí`) && /u 1 rezervace zůstávají naposledy načtené/.test(c), `„${c}“`]
+    }],
   ])
 }
 
@@ -3440,36 +3520,44 @@ const ZAPIS_PO_SEZNAMU_OCEKAVANO_MS = 3_000
   // nerovnost díl ≥ NEJMENE_NA_PRIPOJENI_MS ≥ seznam + zápis — tahle
   // kontrola ji hlídá s konstantami z KÓDU, ne s očekávanými (kdyby někdo
   // časový limit seznamu zvedl, musí spadnout tady).
-  const smi = SYNC.smiSeznamMist
-  const N = NEJMENE_NA_PRIPOJENI_MS
-  const T = NEJDELE_MAPA_MS
-  let protipriklad = null
-  let zkouseno = 0
-  for (const P of [37_000, 60_000]) {
-    for (let ms = N; ms <= P && !protipriklad; ms += 500) {
-      // Mřížka po 500 ms by nejhorší chvíli minula: větev „končí dřív“
-      // platí do `ted = P − N − díl`; přesně tam (a o 1 ms vedle) je
-      // rezerva nejmenší. A první dotaz o 1 ms později už díl přepne.
-      const kraj = P - N - ms
-      const casy = [...Array.from({ length: Math.floor(P / 500) + 1 }, (_, i) => i * 500), kraj - 1, kraj, kraj + 1].filter((t) => t >= 0 && t <= P)
-      for (const ted of casy) {
-        if (protipriklad) break
-        if (!smi(ted, T, P, { ms, konecMs: null })) continue
-        const prvniCasy = [ted, ted + 1, ...Array.from({ length: Math.floor((P - ted) / 500) + 1 }, (_, i) => ted + i * 500)].filter((t) => t <= P)
-        for (const prvni of prvniCasy) {
-          zkouseno += 1
-          const konecMs = SYNC.konecDiluUlohy(prvni, ms, P)
-          if (!smi(ted, T, P, { ms, konecMs })) {
-            protipriklad = `P ${P}, teď ${ted}, díl ${ms}, první dotaz ${prvni}, skutečný konec ${konecMs}`
-            break
+  // Celé hledání je uvnitř `kontrola`: výjimka (přejmenovaná funkce,
+  // null tam, kde se čeká číslo) shodí jen tuhle kontrolu, ne dalších 13
+  // za ní (kontrola kódu 6. 11., 7. kolo). Název je pevný, konstanty jdou
+  // do naměřeného — rozbití konstanty kontrolu nepřejmenuje.
+  kontrola('smiSeznamMist: odhad konce dílu před prvním dotazem nepustí nic, co by skutečný (stejný nebo pozdější) konec zakázal — díl ≥ nejmenší díl ≥ seznam + zápis', () => {
+    const smi = SYNC.smiSeznamMist
+    const N = NEJMENE_NA_PRIPOJENI_MS
+    const T = NEJDELE_MAPA_MS
+    let protipriklad = null
+    let zkouseno = 0
+    for (const P of [37_000, 60_000]) {
+      for (let ms = N; ms <= P && !protipriklad; ms += 500) {
+        // Větev „končí dřív“ platí do `ted = P − N − díl`; tam je rezerva
+        // nejmenší a okno, kde porušená nerovnost pustí víc, je široké jen
+        // o tolik, o kolik je porušená. S dnešními konstantami leží ten
+        // kraj na násobku 500 ms a mřížka ho trefí sama; krajní body jsou
+        // tu pro případ, že se nejmenší díl nebo konec úlohy změní na
+        // číslo mimo mřížku. První dotaz o 1 ms později už díl přepne.
+        const kraj = P - N - ms
+        const casy = [...Array.from({ length: Math.floor(P / 500) + 1 }, (_, i) => i * 500), kraj - 1, kraj].filter((t) => t >= 0 && t <= P)
+        for (const ted of casy) {
+          if (protipriklad) break
+          if (!smi(ted, T, P, { ms, konecMs: null })) continue
+          const prvniCasy = [ted, ted + 1, ...Array.from({ length: Math.floor((P - ted) / 500) + 1 }, (_, i) => ted + i * 500)].filter((t) => t <= P)
+          for (const prvni of prvniCasy) {
+            zkouseno += 1
+            const konecMs = SYNC.konecDiluUlohy(prvni, ms, P)
+            if (!smi(ted, T, P, { ms, konecMs })) {
+              protipriklad = `P ${P}, teď ${ted}, díl ${ms}, první dotaz ${prvni}, skutečný konec ${konecMs}`
+              break
+            }
           }
         }
       }
     }
-  }
-  kontrola(`smiSeznamMist: odhad konce dílu před prvním dotazem nepustí nic, co by skutečný (stejný nebo pozdější) konec zakázal — díl ≥ nejmenší díl ≥ seznam + zápis (${NEJMENE_NA_PRIPOJENI_MS} ≥ ${NEJDELE_MAPA_MS} + ${SYNC.ZAPIS_PO_SEZNAMU_MS})`, () =>
-    protipriklad === null && zkouseno > 1000 && NEJMENE_NA_PRIPOJENI_MS >= NEJDELE_MAPA_MS + SYNC.ZAPIS_PO_SEZNAMU_MS)
-  if (protipriklad) console.log(`    protipříklad: ${protipriklad}`)
+    return [protipriklad === null && zkouseno > 1000 && N >= T + SYNC.ZAPIS_PO_SEZNAMU_MS,
+      `${protipriklad ?? 'bez protipříkladu'}, zkoušeno ${zkouseno}, ${N} ≥ ${T} + ${SYNC.ZAPIS_PO_SEZNAMU_MS}`]
+  })
 }
 
 // (A) Díl dočítá zbytek úlohy (`konecDiluUlohy` ho natáhl do posledního

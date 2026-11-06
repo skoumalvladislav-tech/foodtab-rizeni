@@ -239,9 +239,9 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   `locationPoints` rezervace (id stolů) se převedou na text podle
   seznamu míst (`GET /location/cs/areas/list`, pak
   `/location/cs/points/list/:areaId` pro každou oblast se stoly, nejvýš
-  20). Seznam se načte nejvýš jednou za běh — u první stránky, kde
-  nějaká rezervace stoly má, nebo hned na začátku (`mapaHned`, níž) —
-  a jde MIMO frontu dotazů: limit 1 / 5 s platí jen pro
+  20). Seznam se načte nejvýš jednou za běh — hned na začátku
+  (`mapaHned`, níž), nebo u první stránky se stoly, u které se smí
+  (pravidlo níž; odmítnutí nic nezamyká) — a jde MIMO frontu dotazů: limit 1 / 5 s platí jen pro
   `/bookings/list` (ostatní metody 60 za sekundu, api.md). Místo ve
   frontě by vzalo jeden ze tří dotazů, které úloha dává připojení
   (blízko, nové, okno), a druhé pobočce by se přestalo načítat okno
@@ -260,9 +260,12 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   `posledniDotazMs - NEJMENE_NA_PRIPOJENI_MS`, nebo když už je za tou
   hranicí (další připojení by nezačalo tak jako tak). Route totiž
   další připojení začne, když tohle doběhne brzy, a pozdní seznam by ho
-  připravil o celý běh. Cena: připojení, které není poslední, stoly
-  pozdě v dílu nenačte; zůstanou z minula a příští běh to zkusí znovu.
-  Aby se to nestalo pořád stejné pobočce (v úloze jde první vždy
+  připravil o celý běh. Cena: stránka, u které se seznam nevejde (díl
+  končí dřív a seznam by přesáhl jeho konec, nebo díl dočítá úlohu
+  a seznam by se se zápisem nevešel před hranici, které ještě
+  nedosáhl), se zapíše bez stolů — její rezervace mají stoly z minula,
+  dokud je nedostanou na pozdější stránce téhož běhu nebo v příštím
+  běhu. Aby se to nestalo pořád stejné pobočce (v úloze jde první vždy
   první a do jejího dílu by se u stránek „nové“ a „okno“ seznam nevešel
   nikdy), načte napojení, u kterého běh stoly jednou viděl
   (`externi_ucet.ma_stoly`, zapíše ho běh s `mista.videnyStoly`, nikdy
@@ -278,7 +281,13 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   povoluje — díl, který dočítá úlohu, smí, jakmile je za hranicí
   dalšího připojení. Dřív první odmítnutá stránka seznam zamkla na celý
   běh a prostřední připojení úlohy nemělo stoly vůbec (6. kolo).
-  Rezervace stránek zapsaných bez seznamu mají stoly z minula. Časový limit 6 s na dotaz
+  Rezervace stránek zapsaných bez seznamu mají stoly z minula; počet
+  `mista.bezStolu` se řídí posledním zápisem — blízko, nové a okno se
+  překrývají, a když tatáž rezervace stoly dostane na pozdější stránce,
+  nepočítá se. Hláška „Stoly z Choice se nenačetly celé“ počítá jen
+  rezervace, kterým stůl chyběl v necelém seznamu
+  (`mista.chybiVSeznamu`), ne ty, kterým došel čas (7. kolo: dřív se
+  i ty sváděly na víc než 20 částí podniku). Časový limit 6 s na dotaz
   (`CASOVY_LIMIT_MIST_MS`), oblasti, pak stoly souběžně — dva limity se
   vejdou do rezervy úlohy (20 s). Seznam se načítá SOUBĚŽNĚ s dalšími
   dotazy na rezervace: na něj čeká jen zápis stránky (řada `zapisy`
