@@ -45,8 +45,10 @@
 --     se berou JEN od napojeného systému (`p_zdroj = 'externi'`) — import
 --     ze souboru (`rezervace_importovat_csv`) volá člověk z prohlížeče
 --     a jeho klíče se nečtou, ať soubor nevydává stoly za Choice.
---     Prázdný prostor AKCE už načtení nedoplní (4. kolo): prostor akce
---     patří obsluze a doplnění by poslalo „změnil se prostor".
+--     Prázdný prostor AKCE už načtení od zdroje s přáním hosta (Choice)
+--     nedoplní (4. kolo): prostor akce patří obsluze a doplnění by
+--     poslalo „změnil se prostor". Zdroj bez přání (příjmové API se
+--     skutečným stolem, soubor) ho doplní jako dřív (5. kolo).
 --   * `app.rezervace_souhrn_dne` znovu (kopie z 20261106100000): u akce
 --     v ranním souhrnu i stoly a přání ze zdroje, ať souhrn ukazuje totéž
 --     co kalendář (oddíl na konci souboru).
@@ -79,7 +81,7 @@
 -- doplní do prostoru jako dřív, takže kalendář ukáže aspoň část podniku.
 -- Appka nové sloupce čte s náhradou (chybí-li, ukáže se jako dřív).
 -- Rezervace, které v té mezeře odejdou z okna načítání (36 h zpátky),
--- stoly už nedostanou — db push proto brzy po nasazení.
+-- stoly už nedostanou — db push proto hned, jak je nasazení „Ready".
 -- =====================================================================
 
 alter table public.rezervace
@@ -96,9 +98,10 @@ comment on column public.rezervace.prani_zdroje is
   'Část podniku, kterou si host přál v rezervačním systému (Choice preferArea). '
   'Patří zdroji — každé načtení, které ho nese, ho přepíše.';
 
--- Kdo napsal `prostor`. Řádky z doby před sloupcem zůstanou `null`
--- (neví se — appka je posoudí podle shody s přáním jako 2. kolo), nové
--- dostanou `false`, pokud je nevyplní zdroj.
+-- Kdo napsal `prostor`. Řádky z doby před sloupcem dostanou `null` (neví
+-- se); první načtení, které pošle přání, ho vyřeší (`v_vyresit_priznak`
+-- níž) a do té doby je appka posoudí podle shody s přáním jako 2. kolo.
+-- Nové dostanou `false`, pokud je nevyplní zdroj.
 alter table public.rezervace
   add column prostor_ze_zdroje boolean,
   add constraint rezervace_prostor_ze_zdroje_neprazdny check (prostor_ze_zdroje is not true or prostor <> '');
@@ -270,13 +273,16 @@ begin
 
     select * into v_k from public.rezervace_kontakty where rezervace_id = v_r.id;
 
-    -- Prázdný prostor zdroj doplní — u akce ne: akce má prostor od
-    -- obsluhy a doplnění přání, které host v Choice přidal až později
-    -- (nebo po tom, co obsluha prostor smazala), by poslalo upozornění
-    -- „změnil se prostor" (spoušť `trg_rezervace_upozornit_zmena`,
-    -- 20261106100000; kontrola kódu 4. 11., 4. kolo). Přání zůstane
-    -- v `prani_zdroje` a kalendář ho u akce bez prostoru ukáže.
-    v_doplnit_prostor := v_r.prostor = '' and v_prostor <> '' and v_r.druh <> 'akce';
+    -- Prázdný prostor zdroj doplní — u akce ne, když zdroj posílá přání
+    -- hosta (Choice): akce má prostor od obsluhy a doplnění přání, které
+    -- host v Choice přidal až později (nebo po tom, co obsluha prostor
+    -- smazala), by poslalo upozornění „změnil se prostor" (spoušť
+    -- `trg_rezervace_upozornit_zmena`, 20261106100000; kontrola kódu
+    -- 4. 11., 4. kolo). Přání zůstane v `prani_zdroje` a kalendář ho
+    -- u akce bez prostoru ukáže. Zdroj bez přání (příjmové API posílá
+    -- v prostoru skutečný stůl, soubor CSV) doplní prázdný prostor i akci
+    -- jako dřív — jinak by se stůl nikam neuložil (5. kolo).
+    v_doplnit_prostor := v_r.prostor = '' and v_prostor <> '' and not (v_r.druh = 'akce' and v_ma_prani);
     -- Řádek z doby před příznakem (`null`), jehož prostor je stejný jako
     -- přání, které zdroj právě posílá: ten prostor doplnil zdroj (do téhle
     -- migrace doplňoval přání do prázdného prostoru i Choice). Poznamená se

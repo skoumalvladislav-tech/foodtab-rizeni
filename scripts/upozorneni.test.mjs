@@ -626,6 +626,10 @@ ma('výpis: akce z Choice — stoly, ne přání hosta doplněné do prostoru (p
   akceSouhrnu({ prostor: 'Patro', stoly: 'Terasa: L7', prani: 'Zahrada', prostor_ze_zdroje: true }), '18:00 Raut · Terasa: L7')
 ma('výpis: přání se v Choice změnilo a stoly nejsou — aktuální přání, ne staré',
   akceSouhrnu({ prostor: 'Patro', prani: 'Zahrada', prostor_ze_zdroje: true }), '18:00 Raut · Zahrada')
+// 5. kolo: host přání smazal, akce bez stolů — prostor z formuláře akce
+// (na main ho souhrn ukazoval; kuchyně by o místo akce přišla).
+ma('výpis: akce, host přání v Choice smazal a stoly nejsou — prostor z formuláře akce',
+  akceSouhrnu({ prostor: 'Salonek', prani: '', prostor_ze_zdroje: true }), '18:00 Raut · Salonek')
 ma('výpis: prostor od obsluhy se ukáže vedle stolů',
   akceSouhrnu({ prostor: 'u okna', stoly: 'Terasa: L7', prani: 'Patro', prostor_ze_zdroje: false }), '18:00 Raut · u okna · Terasa: L7')
 ma('výpis: bez příznaku (null se z těla vypustí) rozhodne shoda s přáním jako v kalendáři',

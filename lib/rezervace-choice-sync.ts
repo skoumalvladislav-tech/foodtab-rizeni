@@ -249,8 +249,14 @@ export const ZAPIS_PO_SEZNAMU_MS = 3_000
  * Smí seznam míst (práce mimo frontu, nejvýš `trvaniMs`) začít v `ted`?
  *   * Nikdy po `posledniDotazMs` — po něm zbývá jen rezerva na odpověď
  *     a zápis.
- *   * Bez dílu (tlačítko, callback, úloha před prvním dotazem připojení):
- *     ano, rezerva `REZERVA_DOTAZU_MS` ho pojme.
+ *   * Bez dílu (tlačítko, callback): ano, rezerva `REZERVA_DOTAZU_MS` ho
+ *     pojme.
+ *   * Úloha před prvním dotazem připojení (`mapaHned`, `dil.konecMs` ještě
+ *     není): konec dílu se odhadne, jako by první dotaz odcházel teď —
+ *     skutečný konec je stejný nebo pozdější. Dřív tu platilo „ano“,
+ *     a seznam načtený hned na začátku tak obešel obě pravidla níž
+ *     (kontrola kódu 4. 11., 5. kolo). Když se nevejde, zkusí to první
+ *     stránka se stoly (lib/rezervace-choice.ts, `mapaPro`).
  *   * Díl končí dřív než úloha: jen když se CELÝ vejde do dílu — na jeho
  *     konec čeká zápis stránek a konec běhu, a route by další připojení
  *     začala pozdě (kontrola kódu 4. 11., 3. kolo).
@@ -265,10 +271,10 @@ export const ZAPIS_PO_SEZNAMU_MS = 3_000
  */
 export function smiSeznamMist(ted: number, trvaniMs: number, posledniDotazMs: number, dil: DilUlohy | undefined): boolean {
   if (ted > posledniDotazMs) return false
-  const konecDilu = dil?.konecMs ?? null
-  if (konecDilu === null) return true
+  if (!dil) return true
+  const konecDilu = dil.konecMs ?? konecDiluUlohy(ted, dil.ms, posledniDotazMs)
   if (konecDilu < posledniDotazMs) return ted + trvaniMs <= konecDilu
-  if (dil?.posledni === true) return true
+  if (dil.posledni === true) return true
   const prah = posledniDotazMs - NEJMENE_NA_PRIPOJENI_MS
   return ted >= prah || ted + trvaniMs + ZAPIS_PO_SEZNAMU_MS <= prah
 }

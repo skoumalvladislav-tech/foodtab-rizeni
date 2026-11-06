@@ -509,6 +509,7 @@ export function popisSouhrnuDne(telo: TeloUpozorneni): RadekSouhrnuDne[] {
           misto_zdroje: typeof a.stoly === 'string' ? a.stoly : '',
           prani_zdroje: typeof a.prani === 'string' ? a.prani : '',
           prostor_ze_zdroje: typeof a.prostor_ze_zdroje === 'boolean' ? a.prostor_ze_zdroje : null,
+          druh: 'akce',
         }).join(' · ') || null,
       ]
         .filter(Boolean)

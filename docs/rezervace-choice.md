@@ -139,14 +139,22 @@ poznámky (hosta, restaurace, důvod zrušení), záloha (jen stav),
   „Patro“ přesazený na „Terasa: L7“ by se jinak četl, jako by měl
   obojí). Co do něj napíše obsluha, načtení z Choice nepřepíše a ukáže
   se vždycky — i když zní stejně jako přání hosta. Stejný text uložený
-  znovu poznámku „napsal Choice“ nechá, jiný ji zruší.
+  znovu poznámku „napsal Choice“ nechá, jiný ji zruší. **U akce Choice
+  „Stůl / prostor“ nedoplní nikdy** (doplnění by poslalo upozornění
+  „změnil se prostor“); přání hosta se u akce ukáže samo. Když ho host
+  v Choice smaže, ukáže se u akce to, co je v jejím „Stůl / prostor“.
 - **Přání hosta** se ukládá zvlášť a při každém načtení se obnoví.
   V detailu je u „Stůl / prostor“ od Choice „(přání hosta v Choice)“,
   když je to pořád aktuální přání, nebo „(doplněno z Choice)“, když si
   host přání mezitím změnil — to aktuální má pak vlastní řádek. Bez
-  stolů ukazuje kalendář aktuální přání, ne to, které se doplnilo
-  kdysi. Rezervace načtené před touhle změnou poznámku „napsal Choice“
-  nemají; u nich Foodtab pozná přání podle shody s textem jako dřív.
+  stolů ukazuje kalendář (i ranní souhrn) aktuální přání, ne to, které
+  se doplnilo kdysi; když ho host smazal, nic (u akce „Stůl / prostor“,
+  viz výš). Rezervace načtené před
+  touhle změnou poznámku „napsal Choice“ dostanou při nejbližším
+  načtení, když „Stůl / prostor“ zní stejně jako přání, které Choice
+  posílá (obsluhu, která napsala přesně přání hosta, od Choice
+  rozeznat nejde). Do té doby Foodtab pozná přání podle shody s textem
+  jako dřív.
 - **Číslo rezervace** je v detailu („Převzato z rezervačního systému
   (Choice, č. 105)“), ať se dá rezervace v Choice dohledat. Když se
   v Choice změní jen číslo, rezervace se počítá jako změněná a číslo se
@@ -231,20 +239,39 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   `locationPoints` rezervace (id stolů) se převedou na text podle
   seznamu míst (`GET /location/cs/areas/list`, pak
   `/location/cs/points/list/:areaId` pro každou oblast se stoly, nejvýš
-  20). Seznam se načte nejvýš jednou za běh, jen když nějaká rezervace
-  stoly má, a jde MIMO frontu dotazů: limit 1 / 5 s platí jen pro
+  20). Seznam se načte nejvýš jednou za běh — u první stránky, kde
+  nějaká rezervace stoly má, nebo hned na začátku (`mapaHned`, níž) —
+  a jde MIMO frontu dotazů: limit 1 / 5 s platí jen pro
   `/bookings/list` (ostatní metody 60 za sekundu, api.md). Místo ve
   frontě by vzalo jeden ze tří dotazů, které úloha dává připojení
   (blízko, nové, okno), a druhé pobočce by se přestalo načítat okno
   (kontrola kódu 4. 11.). Hlídá se jen čas: seznam smí odejít
-  nejpozději s posledním dotazem běhu, a v úloze jen tehdy, když se
-  CELÝ (`NEJDELE_MAPA_MS` = dva časové limity, 12 s) vejde do dílu
-  připojení (`smiMimoFrontu(trvaniMs)` v `rezervace-choice-sync.ts`).
-  Na jeho konec čeká zápis stránky, a tím i další dotaz — začal-li by
-  pozdě v dílu, další připojení by čekalo (3. kolo kontroly). Poslední
-  připojení (díl končí s posledním dotazem běhu) smí vždy. Cena:
-  připojení, které není poslední, stoly pozdě v dílu nenačte; zůstanou
-  z minula a příští běh to zkusí znovu. Časový limit 6 s na dotaz
+  nejpozději s posledním dotazem běhu, a v úloze jen tehdy, když
+  nezdrží další připojení (`smiMimoFrontu(trvaniMs)` →
+  `smiSeznamMist` v `rezervace-choice-sync.ts`; trvání
+  `NEJDELE_MAPA_MS` = dva časové limity, 12 s). Na jeho konec čeká
+  zápis stránky, a tím i konec běhu — začal-li by pozdě v dílu, další
+  připojení by čekalo (3. kolo kontroly). Pravidlo (4. kolo): díl,
+  který končí před koncem úlohy — seznam se musí celý vejít do dílu;
+  díl, který dočítá zbytek úlohy
+  (`konecDiluUlohy` ho natáhl do posledního dotazu) — opravdu poslední
+  připojení (`posledniPripojeni` z route) smí vždy, jinak jen když se
+  seznam i se zápisem po něm (`ZAPIS_PO_SEZNAMU_MS`, 3 s) vejde před
+  `posledniDotazMs - NEJMENE_NA_PRIPOJENI_MS`, nebo když už je za tou
+  hranicí (další připojení by nezačalo tak jako tak). Route totiž
+  další připojení začne, když tohle doběhne brzy, a pozdní seznam by ho
+  připravil o celý běh. Cena: připojení, které není poslední, stoly
+  pozdě v dílu nenačte; zůstanou z minula a příští běh to zkusí znovu.
+  Aby se to nestalo pořád stejné pobočce (v úloze jde první vždy
+  první a do jejího dílu by se u stránek „nové“ a „okno“ seznam nevešel
+  nikdy), načte napojení, u kterého běh stoly jednou viděl
+  (`externi_ucet.ma_stoly`, zapíše ho běh s `mista.videnyStoly`, nikdy
+  ho nesmaže), seznam HNED na začátku běhu souběžně s prvním dotazem
+  (`mapaHned`). I tehdy platí pravidlo výš: před prvním dotazem
+  připojení konec dílu ještě není (`dil.konecMs`), tak se odhadne, jako
+  by první dotaz odcházel hned (5. kolo — dřív tu platilo „smí“ a seznam
+  načtený hned pravidlo obešel). Nevejde-li se, nic se nezamyká a zkusí
+  to první stránka se stoly jako dřív. Časový limit 6 s na dotaz
   (`CASOVY_LIMIT_MIST_MS`), oblasti, pak stoly souběžně — dva limity se
   vejdou do rezervy úlohy (20 s). Seznam se načítá SOUBĚŽNĚ s dalšími
   dotazy na rezervace: na něj čeká jen zápis stránky (řada `zapisy`
@@ -256,7 +283,9 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   a „pristup“ z dotazu, který opravdu odešel: ty zůstanou (napojení se
   podle nich označí k opravě) a chyba zápisu jde do `chybaZapisu`
   a hlášky. Výjimka mimo zápis (fronta) běh ukončí až po rozběhnutém
-  zápisu a další stránky se už nezapíšou (3. kolo). Výsledek jde do
+  zápisu a další stránky se už nezapíšou (3. kolo). Chyba zápisu se
+  kontroluje i po čekání na frontu — mohla přijít mezitím (4. kolo).
+  Výsledek jde do
   `rezervace.misto_zdroje` (patří zdroji, přepisuje se), `num` do
   `rezervace.cislo_zdroje`, `cancelReason` do poznámky ze zdroje.
   Nepovedený seznam = klíč `misto_zdroje` v řádku chybí a databáze
@@ -280,11 +309,25 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   `trg_rezervace_prostor_od_obsluhy` příznak shodí, kdykoli prostor
   změní kdokoli jiný než import (`rezervace_ulozit` se neměnila);
   `true` bez prostoru nepustí kontrola. Řádky před migrací mají
-  `null`. `prostorZeZdroje` / `mistoKratce` v `prvky.tsx` rozhodují
-  podle příznaku, u `null` podle shody s přáním. Proč hned a ne až bez
-  stolů: doplnění ve chvíli, kdy Choice stoly odebere, by u akce
-  poslalo upozornění „změna prostoru“ (spoušť z 20261106100000 hlídá
-  `prostor`). Jazyk (`langCode`) přes `Intl.DisplayNames` česky
+  `null` (výchozí `false` se nastaví až po přidání sloupce). Import
+  `null` vyřeší (`v_vyresit_priznak`): je-li prostor stejný jako
+  přání, které zdroj posílá, zapíše `true` — i když se jinak nic
+  nezměnilo (4. kolo). `prostorZeZdroje` / `mistoKratce`
+  v `lib/rezervace-misto.ts` (kalendář i ranní souhrn) rozhodují podle
+  příznaku, u `null` podle shody s přáním; přání, které host smazal, se
+  neukáže. Proč hned a ne až bez stolů: doplnění ve chvíli, kdy Choice
+  stoly odebere, by u akce poslalo upozornění „změna prostoru“ (spoušť
+  z 20261106100000 hlídá `prostor`). Ze stejného důvodu import od
+  zdroje, který posílá přání (klíč `prani_zdroje`, Choice), prostor AKCE
+  nedoplní nikdy (`v_doplnit_prostor`, 4. kolo): host může přání přidat
+  později, nebo obsluha prostor smaže. Zdroj bez přání (příjmové API
+  posílá v `prostor` skutečný stůl, starý kód Choice) ho u akce doplní
+  jako dřív — jinak by se stůl nikam neuložil (5. kolo). U akce bez stolů
+  a bez přání ukáže `mistoKratce` prostor i od zdroje: import ho u akce
+  nemění a kuchyně by o místo přišla (5. kolo). Ranní souhrn
+  (`app.rezervace_souhrn_dne`, předefinovaný v téže migraci) nese
+  u akce `stoly`, `prani` a `prostor_ze_zdroje`; `popisSouhrnuDne`
+  skládá místo přes `mistoKratce`. Jazyk (`langCode`) přes `Intl.DisplayNames` česky
   (`jazykRezervace`): první kousek značky BCP 47 (2–3 písmena,
   další kousky do 8 znaků), cs/cz/ces/cze se nepíše.
   Klíče se čtou jen u `p_zdroj = 'externi'` — import ze souboru je
@@ -299,10 +342,13 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   `app/[rozsah]/rezervace/data.ts`): do `db push` kalendář ukazuje
   rezervace bez stolů, ne chybu. Do `db push` ale stará funkce zápisu
   nové klíče nečte — rezervace, které mezitím odejdou z okna načítání
-  (36 h zpátky), stoly už nedostanou. `db push` proto brzy po sloučení.
+  (36 h zpátky), stoly už nedostanou. `db push` proto brzy po sloučení
+  — ale **až po „Ready“ na Vercelu**, nikdy dřív: starý kód nad novou
+  databází (bez klíče `prani_zdroje`) by u doplněného prostoru zapsal
+  `prostor_ze_zdroje = false` napořád (4. kolo, nález 18).
   Testy: `rezervace-choice` oddíl 11, `rezervace-pobocky` oddíl 7,
-  scénář `krok109` (příznak, spoušť, kontrola a upozornění u akce
-  v oddílech 6–8).
+  `upozorneni` (místo akce v ranním souhrnu), scénář `krok109`
+  (příznak, spoušť, kontrola a upozornění u akce v oddílech 6–8).
 - NEOVĚŘENO proti živému Choice: že id v `locationPoints` rezervace
   jsou tatáž id jako `_id` míst z `/location` (dokumentace to neříká
   výslovně). Kdyby nebyla, u rezervací bude „N stolů bez názvu“

@@ -3348,11 +3348,14 @@ for (const [dilMs, smi] of [[250 + CASOVY_LIMIT_MIST_MS + 1, false], [250 + NEJD
 }
 
 {
-  // Poslední připojení úlohy dočítá do posledního dotazu (`konecDiluUlohy`):
-  // za ním žádné další není a po posledním dotazu je rezerva
-  // REZERVA_DOTAZU_MS — seznam míst smí začít, i když se do zbytku dílu
-  // celý nevejde. Kdyby pravidlo platilo i tady, poslední připojení by
-  // stoly z pozdějších stránek nedostalo nikdy.
+  // Díl, který dočítá do posledního dotazu (`konecDiluUlohy`), nemá
+  // pravidlo „celý se vejde do dílu“ (3. kolo): po posledním dotazu je
+  // rezerva REZERVA_DOTAZU_MS — seznam míst smí začít, i když se do zbytku
+  // dílu celý nevejde. Kdyby pravidlo platilo i tady, připojení, které
+  // dočítá, by stoly z pozdějších stránek nedostalo nikdy. Tady je úloha
+  // tak krátká, že je už za hranicí dalšího připojení (5 s − nejmenší díl
+  // < 0) — smí i bez „posledního připojení“; tu větev hlídá (A) níž
+  // (5. kolo: komentář dřív tvrdil, že tady jde o poslední připojení).
   const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
   await beh('úloha, poslední připojení', () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, posledniDotazMs: s.START + 5_000, dilMs: 4_000, uloha: true, prostredi: s.prostredi }), [
     [`úloha: poslední připojení (díl do posledního dotazu v 5 s) — seznam míst ve 250 ms SMÍ, i když ${NEJDELE_MAPA_MS} ms do 5 s nevejde`, (v) => {
@@ -3383,12 +3386,23 @@ const ZAPIS_PO_SEZNAMU_OCEKAVANO_MS = 3_000
   const dalsi = { ms: 1, konecMs: P }
   kontrola('smiSeznamMist: po posledním dotazu úlohy nikdy (ani tlačítko, ani poslední připojení), přesně v něm ještě ano', () =>
     smi(P + 1, 0, P, undefined) === false && smi(P + 1, 0, P, { ms: 1, konecMs: P, posledni: true }) === false && smi(P, 0, P, undefined) === true)
-  kontrola('smiSeznamMist: bez dílu (tlačítko) a před prvním dotazem úlohy (konec dílu neznámý) ano, i dlouhý', () =>
-    smi(0, 10 * T, P, undefined) === true && smi(0, 10 * T, P, { ms: 1, konecMs: null }) === true)
+  kontrola('smiSeznamMist: bez dílu (tlačítko) ano, i dlouhý', () =>
+    smi(0, 10 * T, P, undefined) === true)
+  // 5. kolo: před prvním dotazem úlohy (`mapaHned`, konec dílu ještě není)
+  // dřív „ano“ vždy — i desetkrát delší seznam s dílem 1 ms. Teď se konec
+  // dílu odhadne od `ted` a platí tatáž pravidla jako potom.
+  kontrola('smiSeznamMist: před prvním dotazem úlohy (konec dílu ještě není) — díl končí před koncem úlohy: jen když se seznam celý vejde do dílu od teď', () =>
+    smi(1000, T, P, { ms: T, konecMs: null }) === true && smi(1000, T, P, { ms: T - 1, konecMs: null }) === false && smi(0, 10 * T, P, { ms: 1, konecMs: null }) === false)
+  kontrola('smiSeznamMist: před prvním dotazem úlohy — díl dočte konec úlohy: hranice dalšího připojení jako potom, poslední připojení smí', () =>
+    smi(prah - T - Z, T, P, { ms: P, konecMs: null }) === true && smi(prah - T - Z + 1, T, P, { ms: P, konecMs: null }) === false
+    && smi(prah - T - Z + 1, T, P, { ms: P, konecMs: null, posledni: true }) === true)
   kontrola('smiSeznamMist: díl končí před koncem úlohy — jen když se seznam celý vejde do dílu', () =>
     smi(1000, T, P, { ms: 1, konecMs: 1000 + T }) === true && smi(1001, T, P, { ms: 1, konecMs: 1000 + T }) === false)
-  kontrola('smiSeznamMist: díl dočítá konec úlohy a je to poslední připojení — ano i těsně před posledním dotazem', () =>
-    smi(P - 1, T, P, { ms: 1, konecMs: P, posledni: true }) === true)
+  // 5. kolo: těsně před posledním dotazem je i jiné připojení za hranicí
+  // a smí — větev „poslední“ hlídá jen čas PŘED hranicí.
+  kontrola('smiSeznamMist: díl dočítá konec úlohy a je to poslední připojení — ano i před hranicí dalšího připojení, kde jiné nesmí, a těsně před posledním dotazem', () =>
+    smi(prah - T - Z + 1, T, P, { ms: 1, konecMs: P, posledni: true }) === true && smi(prah - T - Z + 1, T, P, dalsi) === false
+    && smi(P - 1, T, P, { ms: 1, konecMs: P, posledni: true }) === true)
   kontrola('smiSeznamMist: díl dočítá konec úlohy a za ním je další připojení — ano, jen když se seznam i se zápisem (3 s) vejde před poslední dotaz − nejmenší díl', () =>
     smi(prah - T - Z, T, P, dalsi) === true && smi(prah - T - Z + 1, T, P, dalsi) === false && smi(prah - T - Z + 1, T, P, { ...dalsi, posledni: false }) === false)
   kontrola('smiSeznamMist: … a ano, když už je za tou hranicí (další připojení by nezačalo tak jako tak), těsně před ní ne', () =>
@@ -3416,6 +3430,35 @@ for (const [posledniMs, posledniPripojeni, smi] of [[HRANICE_A - 1, false, false
         : mist.length === 0 && radky.every((x) => !('misto_zdroje' in x))
       const konecDilu = v.konecDiluMs === null ? null : v.konecDiluMs - s.START
       return [ok1 && radky.length > 0 && konecDilu === posledniMs && v.stav !== 'chyba', `${mist.length} dotazů na místa, ${radky.length} řádků, ${v.stav}, konec dílu ${konecDilu} ms`]
+    }],
+  ])
+}
+
+// (5. kolo) Totéž se seznamem míst hned na začátku běhu (`mapaHned`,
+// napojení s `externi_ucet.ma_stoly`). Před prvním dotazem připojení konec
+// dílu ještě není a dřív to stačilo na „smí“ — seznam načtený hned obešel
+// pravidlo (A) a posunul konec běhu za hranici dalšího připojení. Teď se
+// konec dílu odhadne od chvíle, kdy se ptá (0 ms): hranice je o 250 ms
+// dřív než u stránky. Když se hned nevejde, nevejde se ani u stránky.
+const HRANICE_HNED = NEJDELE_MAPA_OCEKAVANO_MS + ZAPIS_PO_SEZNAMU_OCEKAVANO_MS + NEJMENE_NA_PRIPOJENI_MS
+for (const [posledniMs, posledniPripojeni, smi] of [[HRANICE_HNED - 1, false, false], [HRANICE_HNED, false, true], [HRANICE_HNED - 1, true, true]]) {
+  const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
+  const p0 = s.db.tabulky.integrace_pripojeni[0]
+  p0.externi_ucet = { ...p0.externi_ucet, ma_stoly: true }
+  const nazev = posledniPripojeni
+    ? `úloha, mapaHned: díl dočte do posledního dotazu (${posledniMs - HRANICE_HNED} ms od hranice) a je to POSLEDNÍ připojení → seznam míst hned na začátku SMÍ`
+    : `úloha, mapaHned: díl dočte do posledního dotazu (${posledniMs - HRANICE_HNED} ms od hranice), za ním další připojení → seznam míst hned na začátku ${smi ? 'se i se zápisem vejde, SMÍ' : 'by konec běhu posunul za hranici, NESMÍ (ani u stránky)'}`
+  await beh(nazev, () => SYNC.synchronizovatChoice(ID_PRIPOJENI, {
+    konecMs: s.START + 57_000, posledniDotazMs: s.START + posledniMs, dilMs: posledniMs, posledniPripojeni, uloha: true, prostredi: s.prostredi,
+  }), [
+    [nazev, (v) => {
+      const radky = s.db.rpcVolani.filter((x) => x.jmeno === 'rezervace_importovat_zdroj').flatMap((x) => x.args.p_radky)
+      const prvni = s.dotazy.findIndex((d) => jeSeznamMist(d.url))
+      const mist = s.dotazy.filter((d) => jeSeznamMist(d.url)).length
+      const ok1 = smi
+        ? prvni === 0 && mist === 5 && radky.every((x) => x.misto_zdroje === 'Patro: S1–S12')
+        : mist === 0 && radky.every((x) => !('misto_zdroje' in x))
+      return [ok1 && radky.length > 0 && v.stav !== 'chyba', `seznam míst jako ${prvni + 1}. dotaz, ${mist}×, ${radky.length} řádků, ${v.stav}`]
     }],
   ])
 }

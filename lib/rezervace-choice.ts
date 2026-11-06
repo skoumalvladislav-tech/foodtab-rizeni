@@ -30,8 +30,10 @@
  *     stolů“): rezervace nese `locationPoints` — id přidělených stolů.
  *     Jména dává seznam míst: `GET /location/:language/areas/list`
  *     (oblasti: Patro, Terasa…) a `GET /location/:language/points/list/:areaId`
- *     (stoly v oblasti). Načte se nejvýš jednou za běh a jen když nějaká
- *     rezervace stoly má (`nacistMapuMist`); do rezervace jde text
+ *     (stoly v oblasti). Načte se nejvýš jednou za běh (`nacistMapuMist`):
+ *     u první stránky, kde nějaká rezervace stoly má, nebo — u napojení,
+ *     kde běh stoly už jednou viděl (`externi_ucet.ma_stoly`, `mapaHned`)
+ *     — hned na začátku běhu, souběžně s prvním dotazem. Do rezervace jde text
  *     „Patro: S1–S12“ (`mistoZChoice`). Limit 1 dotaz za 5 s je jen
  *     u `/bookings/list` (ostatní metody 60 za sekundu, api.md), proto
  *     seznam míst jde MIMO frontu dotazů. Místo ve frontě by vzalo čas
@@ -39,8 +41,10 @@
  *     a druhé pobočce by se přestalo načítat okno (kontrola kódu 4. 11.).
  *     Hlídá se jen, aby se vešel do času běhu (`smiMimoFrontu`: odejít
  *     smí nejpozději se stejným koncem jako dotaz z fronty, a v úloze
- *     jen když se celý — `NEJDELE_MAPA_MS` — vejde do dílu připojení,
- *     ať pomalý seznam neukousne čas dalšímu). Načítá se SOUBĚŽNĚ
+ *     jen když nezdrží další připojení — `smiSeznamMist`
+ *     v lib/rezervace-choice-sync.ts: celý, `NEJDELE_MAPA_MS`, se vejde
+ *     do dílu, nebo u dílu, který dočítá úlohu, i se zápisem před
+ *     hranici dalšího připojení; poslední připojení smí vždy). Načítá se SOUBĚŽNĚ
  *     s dalšími dotazy — na seznam čeká jen zápis stránky, ne další
  *     dotaz (jinak pomalý Choice vzal čas oknu, 2. kolo kontroly).
  *     Když se seznam nenačte, stoly u rezervací zůstanou z minula
@@ -384,10 +388,10 @@ export const CASOVY_LIMIT_MIST_MS = 6_000
 /**
  * Nejdéle, co trvá celý seznam míst: oblasti, pak stoly všech oblastí
  * souběžně — dva dotazy po sobě, každý se svým `CASOVY_LIMIT_MIST_MS`.
- * Seznam se v úloze začne načítat, jen když se celý vejde do dílu
- * připojení (`smiMimoFrontu`): na jeho konec čeká zápis stránek, a tím
- * i konec běhu — pozdě začatý pomalý seznam ukousl čas dalšímu
- * připojení úlohy (kontrola kódu 4. 11., 3. kolo).
+ * S touhle délkou počítá `smiMimoFrontu` (v úloze `smiSeznamMist`,
+ * lib/rezervace-choice-sync.ts): na konec seznamu čeká zápis stránek,
+ * a tím i konec běhu — pozdě začatý pomalý seznam ukousl čas dalšímu
+ * připojení úlohy (kontrola kódu 4. 11., 3.–5. kolo).
  */
 export const NEJDELE_MAPA_MS = 2 * CASOVY_LIMIT_MIST_MS
 /** Nejvýš tolik oblastí se načte (každá = jeden dotaz). */
@@ -1085,7 +1089,8 @@ export const UKAZEK_DELKY = 5
  * `smiMimoFrontu(trvaniMs)`: smí ještě začít práce mimo frontu (seznam
  * míst), která potrvá nejvýš `trvaniMs`? Volající ji pustí nejpozději
  * se stejným koncem jako frontu (po něm zbývá rezerva na odpověď
- * a zápis) a v úloze jen tehdy, když se celá vejde do dílu připojení.
+ * a zápis) a v úloze jen tehdy, když nezdrží další připojení
+ * (`smiSeznamMist` v lib/rezervace-choice-sync.ts).
  *
  * `mapaHned`: napojení stoly používá (minulý běh je viděl) — seznam míst
  * se začne načítat hned na začátku běhu, souběžně s prvním dotazem, ne
@@ -1131,8 +1136,10 @@ export async function probehnoutChoice(v: {
   const neznameId = new Set<string>()
 
   /**
-   * Seznam míst nejvýš jednou za běh, a jen když ho nějaká rezervace
-   * potřebuje. MIMO frontu (hlavička modulu: místo ve frontě by vzalo
+   * Seznam míst nejvýš jednou za běh: u první stránky, kde ho nějaká
+   * rezervace potřebuje, nebo hned na začátku (`'hned'`, `mapaHned`).
+   * Když se na začátku nevejde, nic se nezamyká — zkusí to první stránka
+   * se stoly. MIMO frontu (hlavička modulu: místo ve frontě by vzalo
    * dotaz průchodu „okno“), ale jen dokud `smiMimoFrontu` — se stejným
    * koncem jako fronta, takže se oblasti i stoly (`CASOVY_LIMIT_MIST_MS`)
    * vejdou do rezervy běhu. Selhání nic dalšího nezastaví.

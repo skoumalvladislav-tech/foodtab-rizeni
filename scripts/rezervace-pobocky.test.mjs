@@ -701,6 +701,14 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
   // ukáže s poznámkou „doplněno z Choice“).
   okMk('místo krátce: zdroj doplnil přání a host ho v Choice smazal — staré přání se neukáže (bez stolů nic, se stoly jen stoly)',
     () => mk('Patro', '', '', true) === '[]' && mk('Patro', 'Terasa: L7', '', true) === '["Terasa: L7"]')
+  // 5. kolo: u AKCE prostor patří obsluze a import ho nemění — když host
+  // přání smazal, ukáže se prostor z formuláře (kuchyně o místo nepřijde).
+  // Se stoly nebo s aktuálním přáním dál jako u rezervace.
+  const mkAkce = (prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje) =>
+    JSON.stringify(mistoKratce({ prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje, druh: 'akce' }))
+  okMk('místo krátce: AKCE, zdroj doplnil přání a host ho v Choice smazal — bez stolů prostor z formuláře, se stoly jen stoly, s novým přáním přání',
+    () => mkAkce('Salonek', '', '', true) === '["Salonek"]' && mkAkce('Salonek', 'Terasa: L7', '', true) === '["Terasa: L7"]'
+      && mkAkce('Salonek', '', 'Zahrada', true) === '["Zahrada"]' && mkAkce('', '', '', true) === '[]')
   okMk('místo krátce: příznak „obsluha“ a text stejný jako přání — prostor se ukáže vedle stolů (nepřebije ho shoda s přáním)',
     () => mk('Patro', 'Terasa: L7', 'Patro', false) === '["Patro","Terasa: L7"]' && mk('patro', 'Terasa: L7', 'Patro', false) === '["patro","Terasa: L7"]' && mk('Patro', '', 'Patro', false) === '["Patro"]')
   okMk('místo krátce: obsluha bez stolů — její text, ne přání hosta (s příznakem i bez něj)',
