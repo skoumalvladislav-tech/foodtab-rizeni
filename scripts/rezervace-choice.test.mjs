@@ -3357,8 +3357,8 @@ for (const [dilMs, smi] of [[250 + CASOVY_LIMIT_MIST_MS + 1, false], [250 + NEJD
   // < 0) — smí i bez „posledního připojení“; tu větev hlídá (A) níž
   // (5. kolo: komentář dřív tvrdil, že tady jde o poslední připojení).
   const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
-  await beh('úloha, poslední připojení', () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, posledniDotazMs: s.START + 5_000, dilMs: 4_000, uloha: true, prostredi: s.prostredi }), [
-    [`úloha: poslední připojení (díl do posledního dotazu v 5 s) — seznam míst ve 250 ms SMÍ, i když ${NEJDELE_MAPA_MS} ms do 5 s nevejde`, (v) => {
+  await beh('úloha, díl dočítá a je za hranicí', () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, posledniDotazMs: s.START + 5_000, dilMs: 4_000, uloha: true, prostredi: s.prostredi }), [
+    [`úloha: díl dočítá do posledního dotazu v 5 s a už je za hranicí dalšího připojení — seznam míst ve 250 ms SMÍ, i když ${NEJDELE_MAPA_MS} ms do 5 s nevejde`, (v) => {
       const radky = s.db.rpcVolani.filter((x) => x.jmeno === 'rezervace_importovat_zdroj').flatMap((x) => x.args.p_radky)
       const mist = s.dotazy.filter((d) => jeSeznamMist(d.url))
       const konecDilu = v.konecDiluMs === null ? null : v.konecDiluMs - s.START
