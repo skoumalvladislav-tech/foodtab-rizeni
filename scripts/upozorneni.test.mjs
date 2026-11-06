@@ -613,7 +613,15 @@ ma('výpis: prázdná pobočka jako v kalendáři („Nic zapsaného“)',
 // 4. kolo kontroly kódu (4. 11.): u akce z Choice ukazoval souhrn holý
 // prostor — přání hosta, které se do něj doplnilo kdysi —, i když kalendář
 // ukazuje stoly. Místo teď skládá totéž mistoKratce jako kalendář.
-const akceSouhrnu = (a) => popisSouhrnuDne(souhrn({ ...PERLA, akci: 1, akce: [{ cas: '18:00', nazev: 'Raut', ...a }] }))[0].akce[0]
+// Výjimka (třeba `.trim` nad číslem z poškozeného těla) je CHYBA té jedné
+// kontroly, ne pád celého souboru — jinak by schovala všechny za ní.
+const akceSouhrnu = (a) => {
+  try {
+    return popisSouhrnuDne(souhrn({ ...PERLA, akci: 1, akce: [{ cas: '18:00', nazev: 'Raut', ...a }] }))[0].akce[0]
+  } catch (e) {
+    return `VÝJIMKA: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
 ma('výpis: akce z Choice — stoly, ne přání hosta doplněné do prostoru (příznak „ze zdroje“)',
   akceSouhrnu({ prostor: 'Patro', stoly: 'Terasa: L7', prani: 'Zahrada', prostor_ze_zdroje: true }), '18:00 Raut · Terasa: L7')
 ma('výpis: přání se v Choice změnilo a stoly nejsou — aktuální přání, ne staré',

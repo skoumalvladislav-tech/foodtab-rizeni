@@ -1566,6 +1566,39 @@ for (const [n, behu, nejdelePauza] of [[3, 6, 2], [5, 10, 3]]) {
     zabraniFronty(s).length === 0 && zabraniUlohy(s).length >= 3)
 }
 
+{
+  // 4. kolo kontroly kódu (A): úloha řekne synchronizaci, které připojení
+  // je opravdu poslední (`posledniPripojeni`) — jen tomu smí seznam míst
+  // začít i pozdě (`smiSeznamMist`). Ostatní hlídají hranici, za kterou
+  // by další připojení už nezačalo. Synchronizace je tu podstrčená: jde
+  // jen o to, co úloha předá.
+  const volani = []
+  const puvodniNow = Date.now
+  const T0 = Date.parse('2026-11-06T10:00:00Z')
+  Date.now = () => T0
+  try {
+    for (const ids of [['a', 'b', 'c'], ['jen']]) {
+      globalThis.__uloha = {
+        SYNC: {
+          ...SYNC,
+          choiceKSynchronizaci: async () => ids,
+          synchronizovatChoice: async (id, m) => {
+            volani.push(`${id}:${m.posledniPripojeni === true ? 'poslední' : m.posledniPripojeni === false ? 'další' : String(m.posledniPripojeni)}`)
+            return { stav: 'ok', duvod: null, omezeno: false, pokracovani: false, dotazu: 3, nacteno: 0, konecDiluMs: null }
+          },
+        },
+        prostredi: undefined,
+      }
+      await ROUTE_ULOHY.GET(new Request('https://x/api/uloha/rezervace-choice', { headers: { authorization: 'Bearer x' } }))
+    }
+  } finally {
+    Date.now = puvodniNow
+    globalThis.__uloha = { SYNC }
+  }
+  ok(`úloha: „poslední připojení“ dostane jen poslední připojení v úloze (a:další, b:další, c:poslední, jen:poslední — vyšlo ${volani.join(', ')})`,
+    volani.join(', ') === 'a:další, b:další, c:poslední, jen:poslední')
+}
+
 /**
  * SKUTEČNÁ úloha (route.ts) v plánovači virtuálního času z oddílu 6a,
  * vedle ní tlačítka (`{ p, druh, za }`: připojení, druh jako
@@ -3180,6 +3213,9 @@ const apiSDeji = (ch, deje) => ({
   // (J) Výjimka z fronty, zatímco BĚŽÍ zápis stránky (ne jen čeká na
   // seznam míst): běh spadne až po tom, co ten zápis doběhne. Dřívější
   // test měl zápis rychlý — čekání na seznam místo na zápisy prošlo.
+  // Za běžícím zápisem čeká ve frontě zápis DRUHÉ stránky: ten už začít
+  // nesmí (jinak by „další zápis nezačne“ nemohlo spadnout — schválné
+  // rozbití to ukázalo).
   const deje = []
   let pustit
   const brana = new Promise((hotovo) => { pustit = hotovo })
@@ -3187,14 +3223,15 @@ const apiSDeji = (ch, deje) => ({
   let zapisBezi
   const zapisZacal = new Promise((hotovo) => { zapisBezi = hotovo })
   let cekani = 0
+  let stranek = 0
   const api = {
-    async nacistStranku() { return { stav: 'ok', rezervace: [r105] } },
+    async nacistStranku() { stranek += 1; return { stav: 'ok', rezervace: [r105] } },
     async nacistOblasti() { await brana; return { stav: 'ok', oblasti: OBLASTI_CHOICE } },
     async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
   }
   const pockatNaDotaz = async () => {
     cekani += 1
-    if (cekani === 2) {
+    if (cekani === 3) {
       pustit()
       await zapisZacal
       throw new Error('Fronta dotazů spadla.')
@@ -3218,6 +3255,8 @@ const apiSDeji = (ch, deje) => ({
   clearTimeout(pojistka)
   kontrola('výjimka z fronty, zatímco běží zápis stránky: běh spadne s ní až po tom, co ten zápis doběhne, a další zápis nezačne', () =>
     [chyba?.message === 'Fronta dotazů spadla.' && deje.join(' → ') === 'zápis začal → zápis doběhl → běh spadl', deje.join(' → ')])
+  kontrola('… ve frontě zápisů opravdu čekala druhá stránka (načtené 2 stránky se stoly, výjimka u 3. dotazu)', () =>
+    [stranek === 2 && cekani === 3, `${stranek} stránek, ${cekani}. čekání na frontu`])
 }
 
 {
