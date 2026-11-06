@@ -3175,6 +3175,23 @@ const apiSDeji = (ch, deje) => ({
 }
 
 {
+  // (6. kolo) Odmítnutí u stránky nic nezamyká: smiSeznamMist s časem
+  // i povoluje (díl, který dočítá úlohu, je za hranicí dalšího připojení).
+  // Dřív první odmítnutá stránka se stoly zamkla seznam na celý běh.
+  const deje = []
+  const ch = apiSeStoly({ rezervace: [r105] })
+  const z = zapisDoPameti()
+  let ptalSe = 0
+  await beh('seznam míst u stránky se nevešel, u další ano', () => probehnoutChoice(behStoly({ api: apiSDeji(ch, deje) }, { zapsat: z.fn, smiMimoFrontu: () => { ptalSe += 1; return ptalSe > 2 } })), [
+    ['odmítnutí u 1. a 2. stránky se stoly seznam nezamkne: 3. stránka (smí) ho načte — jednou, stoly má jen ona, stav „ok“', (v) =>
+      [ptalSe === 3 && ch.volani.oblasti === 1 && v.mista.stav === 'ok' && z.zapsane.length === 3
+        && !('misto_zdroje' in z.zapsane[0]) && !('misto_zdroje' in z.zapsane[1]) && z.zapsane[2].misto_zdroje === 'Patro: S1–S12',
+      `smiMimoFrontu ${ptalSe}×, oblasti ${ch.volani.oblasti}×, ${v.mista.stav}, stoly ${z.zapsane.map((r) => r.misto_zdroje ?? '—').join(' | ')}`]],
+    ['… rezervace zapsaná bez seznamu se počítá do „bez stolů“ (zůstaly z minula)', (v) => [v.mista.bezStolu === 1, String(v.mista.bezStolu)]],
+  ])
+}
+
+{
   // (C) Zápis selže, ZATÍMCO se čeká na frontu: seznam míst se dočte během
   // čekání na 2. dotaz a zápis 1. stránky po něm selže. Kontrola chyby
   // zápisu PŘED čekáním ji ještě neviděla — dotaz, na který se čekalo,
@@ -3396,6 +3413,12 @@ const ZAPIS_PO_SEZNAMU_OCEKAVANO_MS = 3_000
   kontrola('smiSeznamMist: před prvním dotazem úlohy — díl dočte konec úlohy: hranice dalšího připojení jako potom, poslední připojení smí', () =>
     smi(prah - T - Z, T, P, { ms: P, konecMs: null }) === true && smi(prah - T - Z + 1, T, P, { ms: P, konecMs: null }) === false
     && smi(prah - T - Z + 1, T, P, { ms: P, konecMs: null, posledni: true }) === true)
+  // 6. kolo: díl sám do konce úlohy nesahá, ale po něm by nezbyl nejmenší
+  // díl — `konecDiluUlohy` ho natáhne do posledního dotazu a platí hranice
+  // dalšího připojení. (Odhad jen `ted + díl` by tu seznam pustil.)
+  kontrola('smiSeznamMist: před prvním dotazem úlohy — díl končí méně než nejmenší díl před koncem úlohy: dočte ji, hranice dalšího připojení', () =>
+    smi(prah - T - Z + 1, T, P, { ms: NEJMENE_NA_PRIPOJENI_MS, konecMs: null }) === false
+    && smi(prah - T - Z, T, P, { ms: NEJMENE_NA_PRIPOJENI_MS, konecMs: null }) === true)
   kontrola('smiSeznamMist: díl končí před koncem úlohy — jen když se seznam celý vejde do dílu', () =>
     smi(1000, T, P, { ms: 1, konecMs: 1000 + T }) === true && smi(1001, T, P, { ms: 1, konecMs: 1000 + T }) === false)
   // 5. kolo: těsně před posledním dotazem je i jiné připojení za hranicí
@@ -3407,6 +3430,46 @@ const ZAPIS_PO_SEZNAMU_OCEKAVANO_MS = 3_000
     smi(prah - T - Z, T, P, dalsi) === true && smi(prah - T - Z + 1, T, P, dalsi) === false && smi(prah - T - Z + 1, T, P, { ...dalsi, posledni: false }) === false)
   kontrola('smiSeznamMist: … a ano, když už je za tou hranicí (další připojení by nezačalo tak jako tak), těsně před ní ne', () =>
     smi(prah, T, P, dalsi) === true && smi(prah - 1, T, P, dalsi) === false)
+}
+
+{
+  // 6. kolo: odhad konce dílu před prvním dotazem (`konecMs: null`) nesmí
+  // pustit seznam, který by skutečný konec zakázal. Skutečný konec je
+  // stejný nebo pozdější (první dotaz čeká na frontu) a pozdější konec umí
+  // díl přepnout do přísnější větve „dočítá úlohu“. Dnes to drží jen
+  // nerovnost díl ≥ NEJMENE_NA_PRIPOJENI_MS ≥ seznam + zápis — tahle
+  // kontrola ji hlídá s konstantami z KÓDU, ne s očekávanými (kdyby někdo
+  // časový limit seznamu zvedl, musí spadnout tady).
+  const smi = SYNC.smiSeznamMist
+  const N = NEJMENE_NA_PRIPOJENI_MS
+  const T = NEJDELE_MAPA_MS
+  let protipriklad = null
+  let zkouseno = 0
+  for (const P of [37_000, 60_000]) {
+    for (let ms = N; ms <= P && !protipriklad; ms += 500) {
+      // Mřížka po 500 ms by nejhorší chvíli minula: větev „končí dřív“
+      // platí do `ted = P − N − díl`; přesně tam (a o 1 ms vedle) je
+      // rezerva nejmenší. A první dotaz o 1 ms později už díl přepne.
+      const kraj = P - N - ms
+      const casy = [...Array.from({ length: Math.floor(P / 500) + 1 }, (_, i) => i * 500), kraj - 1, kraj, kraj + 1].filter((t) => t >= 0 && t <= P)
+      for (const ted of casy) {
+        if (protipriklad) break
+        if (!smi(ted, T, P, { ms, konecMs: null })) continue
+        const prvniCasy = [ted, ted + 1, ...Array.from({ length: Math.floor((P - ted) / 500) + 1 }, (_, i) => ted + i * 500)].filter((t) => t <= P)
+        for (const prvni of prvniCasy) {
+          zkouseno += 1
+          const konecMs = SYNC.konecDiluUlohy(prvni, ms, P)
+          if (!smi(ted, T, P, { ms, konecMs })) {
+            protipriklad = `P ${P}, teď ${ted}, díl ${ms}, první dotaz ${prvni}, skutečný konec ${konecMs}`
+            break
+          }
+        }
+      }
+    }
+  }
+  kontrola(`smiSeznamMist: odhad konce dílu před prvním dotazem nepustí nic, co by skutečný (stejný nebo pozdější) konec zakázal — díl ≥ nejmenší díl ≥ seznam + zápis (${NEJMENE_NA_PRIPOJENI_MS} ≥ ${NEJDELE_MAPA_MS} + ${SYNC.ZAPIS_PO_SEZNAMU_MS})`, () =>
+    protipriklad === null && zkouseno > 1000 && NEJMENE_NA_PRIPOJENI_MS >= NEJDELE_MAPA_MS + SYNC.ZAPIS_PO_SEZNAMU_MS)
+  if (protipriklad) console.log(`    protipříklad: ${protipriklad}`)
 }
 
 // (A) Díl dočítá zbytek úlohy (`konecDiluUlohy` ho natáhl do posledního
@@ -3439,7 +3502,9 @@ for (const [posledniMs, posledniPripojeni, smi] of [[HRANICE_A - 1, false, false
 // dílu ještě není a dřív to stačilo na „smí“ — seznam načtený hned obešel
 // pravidlo (A) a posunul konec běhu za hranici dalšího připojení. Teď se
 // konec dílu odhadne od chvíle, kdy se ptá (0 ms): hranice je o 250 ms
-// dřív než u stránky. Když se hned nevejde, nevejde se ani u stránky.
+// dřív než u stránky. Tady se, když se hned nevejde, nevejde ani u žádné
+// stránky (všechny jsou před hranicí). Obecně to neplatí: stránka už za
+// hranicí smí (test 6. kola níž).
 const HRANICE_HNED = NEJDELE_MAPA_OCEKAVANO_MS + ZAPIS_PO_SEZNAMU_OCEKAVANO_MS + NEJMENE_NA_PRIPOJENI_MS
 for (const [posledniMs, posledniPripojeni, smi] of [[HRANICE_HNED - 1, false, false], [HRANICE_HNED, false, true], [HRANICE_HNED - 1, true, true]]) {
   const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
@@ -3459,6 +3524,31 @@ for (const [posledniMs, posledniPripojeni, smi] of [[HRANICE_HNED - 1, false, fa
         ? prvni === 0 && mist === 5 && radky.every((x) => x.misto_zdroje === 'Patro: S1–S12')
         : mist === 0 && radky.every((x) => !('misto_zdroje' in x))
       return [ok1 && radky.length > 0 && v.stav !== 'chyba', `seznam míst jako ${prvni + 1}. dotaz, ${mist}×, ${radky.length} řádků, ${v.stav}`]
+    }],
+  ])
+}
+
+{
+  // (6. kolo) Prostřední připojení úlohy: díl dočítá zbytek úlohy, za ním
+  // je další připojení. U 1. stránky (250 ms) je před hranicí a seznam se
+  // i se zápisem nevejde → NESMÍ. U 2. stránky (po rozestupu fronty) už je za hranicí
+  // (další připojení by nezačalo tak jako tak) → SMÍ. Dřív první odmítnutí
+  // seznam zamklo a připojení nemělo stoly celý běh.
+  const PRAH = 5_000
+  const posledniMs = PRAH + NEJMENE_NA_PRIPOJENI_MS
+  const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
+  const nazev = 'úloha, díl dočítá a za ním další připojení: seznam míst u 1. stránky před hranicí NESMÍ, u 2. stránky za hranicí SMÍ — odmítnutí nezamyká'
+  await beh(nazev, () => SYNC.synchronizovatChoice(ID_PRIPOJENI, {
+    konecMs: s.START + 57_000, posledniDotazMs: s.START + posledniMs, dilMs: posledniMs, posledniPripojeni: false, uloha: true, prostredi: s.prostredi,
+  }), [
+    [nazev, (v) => {
+      const volani = s.db.rpcVolani.filter((x) => x.jmeno === 'rezervace_importovat_zdroj').map((x) => x.args.p_radky)
+      const mist = s.dotazy.filter((d) => jeSeznamMist(d.url))
+      const prvniMista = mist[0] ? mist[0].cas - s.START : null
+      const ok1 = mist.length === 5 && prvniMista !== null && prvniMista >= PRAH
+        && volani.length === 3 && volani[0].every((x) => !('misto_zdroje' in x))
+        && volani.slice(1).every((radky) => radky.length > 0 && radky.every((x) => x.misto_zdroje === 'Patro: S1–S12'))
+      return [ok1 && v.stav !== 'chyba', `${mist.length} dotazů na místa (první v ${prvniMista} ms), stoly po stránkách ${volani.map((r) => r.map((x) => x.misto_zdroje ?? '—').join(',')).join(' | ')}, ${v.stav}`]
     }],
   ])
 }

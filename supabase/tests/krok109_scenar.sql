@@ -53,14 +53,18 @@
 --      ať import upozornění posílat SMÍ — „0 upozornění“ by jinak prošlo
 --      i s rozbitým kódem (první den připojení se nehlásí nic), a kontrola
 --      naproti to dokládá změnou počtu osob z importu. (Že doplnění při
---      změně řádku příznak NASTAVÍ, a nenechá ho, jak byl, hlídá až a2r
---      v oddílu 8 — u f5 by false zařídila i spoušť, 5. kolo.)
+--      změně řádku příznak NASTAVÍ, a nenechá ho, jak byl, hlídají
+--      kontroly, které po doplnění přáním čekají true: první spadne p1
+--      v oddílu 6, pak f3 a a2r — u f5 by false zařídila i spoušť;
+--      5. a 6. kolo.)
 --  11. 5. kolo kontroly kódu: příznak false se při načtení se stejným
 --      přáním nepřepíše na true (obsluha napsala přesně přání hosta);
 --      starý řádek (null) s prázdným prostorem a prázdným přáním zůstane
 --      null a zápis nespadne (true bez prostoru by kontrola databáze
 --      odmítla a s ní celou dávku); zdroj BEZ přání (příjmové API se
 --      stolem, starý kód) doplní prázdný prostor i akci jako dřív.
+--  12. 6. kolo: u akce rozhoduje klíč přání, ne klíč stolů — Choice bez
+--      načteného seznamu míst pošle přání bez misto_zdroje (a2c).
 --
 -- Data rezervací jsou v roce 2099 (spoušť upozornění minulý den nehlásí).
 --
@@ -582,8 +586,9 @@ select pg_temp.check(format('… další stejné načtení je „beze změny“ 
 -- vložení) textem, který není přání hosta → false. Řádek má null — ale
 -- false by tu zařídila i spoušť `trg_rezervace_prostor_od_obsluhy`
 -- (prostor se mění, příznak ne), takže rozbití, které by v UPDATE příznak
--- nechalo, jak byl, tahle kontrola nepozná; chytí ho a2r v oddílu 8
--- (prostor = přání → true). Kontrola kódu 4. 11., 5. kolo.
+-- nechalo, jak byl, tahle kontrola nepozná; chytí ho kontroly, které po
+-- doplnění přáním čekají true (p1 v oddílu 6 jako první, f3, a2r).
+-- Kontrola kódu 4. 11., 5. a 6. kolo.
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
   '[{"externi_id":"krok109-f5","zacatek":"2099-11-27T11:00:00.000Z","jmeno_hosta":"Doplněný jinak Krok109","pocet_osob":"2","prostor":null,"prani_zdroje":""}]'::jsonb)::text as imp_f5 \gset
 update public.rezervace set prostor_ze_zdroje = null where poskytovatel = 'krok109-choice' and externi_id = 'krok109-f5';
@@ -731,6 +736,28 @@ select pg_temp.check(format('akce bez prostoru, host si v Choice přidá přán�
   and pg_temp.prani('krok109-choice', 'krok109-a2') = 'Patro'
   and pg_temp.priznak('krok109-choice', 'krok109-a2') = 'false'
   and pg_temp.upozorneni('krok109-choice', 'krok109-a2') = 0);
+-- 6. kolo: výjimku u akce rozhoduje klíč PŘÁNÍ, ne klíč stolů. Když se
+-- seznam míst v běhu nenačte, Choice pošle přání bez klíče misto_zdroje
+-- (lib/rezervace-choice.ts, `radekZChoice`) — v provozu běžné u připojení,
+-- které v úloze není poslední. Řádky výš posílají oba klíče, takže by
+-- záměnu v_ma_prani za v_ma_misto nepoznaly.
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  '[{"externi_id":"krok109-a2c","zacatek":"2099-11-26T19:15:00.000Z","jmeno_hosta":"Akce bez stolů Krok109","pocet_osob":"20","prostor":null,"prani_zdroje":"","misto_zdroje":""}]'::jsonb)::text as imp_a2c \gset
+update public.rezervace set druh = 'akce', typ_akce = 'Oslava Krok109'
+ where poskytovatel = 'krok109-choice' and externi_id = 'krok109-a2c';
+delete from public.notifikace_doruceni
+ where notification_id in (select n.id from public.notifications n where n.zdroj_typ = 'rezervace'
+                             and n.zdroj_id = (select id from public.rezervace where poskytovatel = 'krok109-choice' and externi_id = 'krok109-a2c'));
+delete from public.notifications
+ where zdroj_typ = 'rezervace'
+   and zdroj_id = (select id from public.rezervace where poskytovatel = 'krok109-choice' and externi_id = 'krok109-a2c');
+select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',
+  '[{"externi_id":"krok109-a2c","zacatek":"2099-11-26T19:15:00.000Z","jmeno_hosta":"Akce bez stolů Krok109","pocet_osob":"20","prostor":"Patro","prani_zdroje":"Patro"}]'::jsonb)::text as imp_a2c2 \gset
+select pg_temp.check(format('akce bez prostoru, Choice pošle přání BEZ klíče stolů (seznam míst se nenačetl): prostor zůstane prázdný, přání se uloží, 0 upozornění (%s, %s, přání %s, upozornění %s)', :'imp_a2c2', pg_temp.udaje('krok109-choice', 'krok109-a2c'), pg_temp.prani('krok109-choice', 'krok109-a2c'), pg_temp.upozorneni('krok109-choice', 'krok109-a2c')),
+  (:'imp_a2c2'::jsonb ->> 'zmenene')::int = 1
+  and pg_temp.udaje('krok109-choice', 'krok109-a2c') = '||'
+  and pg_temp.prani('krok109-choice', 'krok109-a2c') = 'Patro'
+  and pg_temp.upozorneni('krok109-choice', 'krok109-a2c') = 0);
 -- Kontrola naproti pro obyčejnou rezervaci: tam se prázdný prostor
 -- přáním doplní dál (#f3 výš doplnil starý řádek; tady řádek s false).
 select pg_temp.zapsat(:'tenant', :'perla', 'externi', 'krok109-choice', :'choice',

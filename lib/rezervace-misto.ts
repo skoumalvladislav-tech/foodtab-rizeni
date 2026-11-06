@@ -25,7 +25,7 @@ export type MistoRadku = {
    * db push) — `prostorZeZdroje` pak rozhodne podle shody s přáním.
    */
   prostor_ze_zdroje?: boolean | null
-  /** `'akce'` = prostor patří obsluze, import ho nemění (`mistoKratce`). */
+  /** `'akce'` = u akce bez přání se ukáže i prostor, který doplnil zdroj (`mistoKratce`). */
   druh?: string
 }
 
@@ -63,10 +63,12 @@ const RE_JEN_BEZ_NAZVU = /^\d+ (?:stůl|stoly|stolů) bez názvu$/
  *     místo něj ukáže AKTUÁLNÍ přání (`prani_zdroje`), ne to, které se
  *     do prostoru doplnilo kdysi — a když ho host v Choice smazal,
  *     neukáže se nic (detail řekne „doplněno z Choice“; 4. kolo).
- *     U AKCE se pak ukáže prostor: akce patří obsluze, import její prostor
- *     nemění (migrace 20261107100000, `v_doplnit_prostor`) a ve formuláři
- *     pořád stojí — kuchyně by o místo akce přišla, i když ho akce má
- *     (kontrola kódu 4. 11., 5. kolo).
+ *     U AKCE se pak ukáže prostor (doplnil ho zdroj ještě u rezervace,
+ *     než z ní obsluha udělala akci): neprázdný prostor import nemění
+ *     u žádného zdroje a prázdný u akce nedoplní Choice (migrace
+ *     20261107100000, `v_doplnit_prostor`), takže ve formuláři pořád
+ *     stojí — kuchyně by o místo akce přišla, i když ho akce má (kontrola
+ *     kódu 4. 11., 5. kolo). Stejně vedle stolů jen „bez názvu“ (6. kolo).
  *   * Prostor od obsluhy se ukáže vždy, kromě případu, kdy je to PŘESNĚ
  *     jméno části podniku ze stolů („Patro“) nebo celý text stolů. Kus
  *     jména nestačí: „S1“ od obsluhy vedle „Patro: S12“ je jiný stůl
@@ -80,10 +82,13 @@ export function mistoKratce(r: MistoRadku): string[] {
   const zeZdroje = prostorZeZdroje(r)
   const odObsluhy = zeZdroje ? '' : prostor
   const prani = (r.prani_zdroje ?? '').trim()
-  if (!stoly) return odObsluhy ? [odObsluhy] : prani ? [prani] : r.druh === 'akce' && prostor ? [prostor] : []
+  // Kde host sedí, když obsluha nic nenapsala: aktuální přání hosta,
+  // u akce bez přání její prostor (doplněný zdrojem).
+  const nahrada = prani || (r.druh === 'akce' ? prostor : '')
+  if (!stoly) return odObsluhy ? [odObsluhy] : nahrada ? [nahrada] : []
   if (odObsluhy) {
     if (male(odObsluhy) === male(stoly) || ` · ${male(stoly)}`.includes(` · ${male(odObsluhy)}: `)) return [stoly]
     return [odObsluhy, stoly]
   }
-  return prani && RE_JEN_BEZ_NAZVU.test(stoly) ? [prani, stoly] : [stoly]
+  return nahrada && RE_JEN_BEZ_NAZVU.test(stoly) ? [nahrada, stoly] : [stoly]
 }

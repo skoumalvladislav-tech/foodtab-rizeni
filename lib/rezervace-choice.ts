@@ -1137,9 +1137,15 @@ export async function probehnoutChoice(v: {
 
   /**
    * Seznam míst nejvýš jednou za běh: u první stránky, kde ho nějaká
-   * rezervace potřebuje, nebo hned na začátku (`'hned'`, `mapaHned`).
-   * Když se na začátku nevejde, nic se nezamyká — zkusí to první stránka
-   * se stoly. MIMO frontu (hlavička modulu: místo ve frontě by vzalo
+   * rezervace potřebuje a kde se smí, nebo hned na začátku (`'hned'`,
+   * `mapaHned`). Odmítnutí nic nezamyká — ani na začátku, ani u stránky:
+   * zkusí to každá další stránka se stoly. Pravidlo `smiSeznamMist` totiž
+   * s časem nejen ubírá: díl, který dočítá úlohu, smí zase, když je za
+   * hranicí dalšího připojení. Kontrola kódu 4. 11. (6. kolo): zámek po
+   * prvním odmítnutí nechal prostřední připojení úlohy bez stolů celý
+   * běh, i když by je pozdější stránka smět načíst. Rezervace stránek,
+   * které se zapsaly bez seznamu, mají stoly z minula (`bezStolu`).
+   * MIMO frontu (hlavička modulu: místo ve frontě by vzalo
    * dotaz průchodu „okno“), ale jen dokud `smiMimoFrontu` — se stejným
    * koncem jako fronta, takže se oblasti i stoly (`CASOVY_LIMIT_MIST_MS`)
    * vejdou do rezervy běhu. Selhání nic dalšího nezastaví.
@@ -1157,11 +1163,11 @@ export async function probehnoutChoice(v: {
     const hned = rezervace === 'hned'
     if (!hned && !rezervace.some(maStoly)) return Promise.resolve(null)
     if (!v.smiMimoFrontu(NEJDELE_MAPA_MS)) {
-      // Na začátku běhu se nevešel — zkusí to první stránka se stoly.
-      if (hned) return Promise.resolve(null)
+      // Teď se nevejde — tahle stránka se zapíše bez stolů (na začátku
+      // běhu žádná) a zkusí to další stránka se stoly. Když se seznam
+      // načte později, stav přepíše na „ok“.
       vysledek.mista.stav = 'cas'
-      mapa = Promise.resolve(null)
-      return mapa
+      return Promise.resolve(null)
     }
     mapaSeNacita = true
     mapa = (async () => {

@@ -270,8 +270,15 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   (`mapaHned`). I tehdy platí pravidlo výš: před prvním dotazem
   připojení konec dílu ještě není (`dil.konecMs`), tak se odhadne, jako
   by první dotaz odcházel hned (5. kolo — dřív tu platilo „smí“ a seznam
-  načtený hned pravidlo obešel). Nevejde-li se, nic se nezamyká a zkusí
-  to první stránka se stoly jako dřív. Časový limit 6 s na dotaz
+  načtený hned pravidlo obešel). Odhad nepustí nic, co by skutečný
+  (stejný nebo pozdější) konec zakázal, dokud díl ≥
+  `NEJMENE_NA_PRIPOJENI_MS` ≥ seznam + zápis — hlídá to test (6. kolo).
+  Nevejde-li se seznam (na začátku ani u stránky), nic se nezamyká:
+  zkusí to každá další stránka se stoly. Pravidlo totiž s časem i
+  povoluje — díl, který dočítá úlohu, smí, jakmile je za hranicí
+  dalšího připojení. Dřív první odmítnutá stránka seznam zamkla na celý
+  běh a prostřední připojení úlohy nemělo stoly vůbec (6. kolo).
+  Rezervace stránek zapsaných bez seznamu mají stoly z minula. Časový limit 6 s na dotaz
   (`CASOVY_LIMIT_MIST_MS`), oblasti, pak stoly souběžně — dva limity se
   vejdou do rezervy úlohy (20 s). Seznam se načítá SOUBĚŽNĚ s dalšími
   dotazy na rezervace: na něj čeká jen zápis stránky (řada `zapisy`

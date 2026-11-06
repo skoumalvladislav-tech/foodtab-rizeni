@@ -653,6 +653,11 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
     zmenenePrani: rez(BERNARD, '2026-10-30', '20:00', { jmeno_hosta: 'Zmenene Prani', zdroj: 'api', prostor: 'Patro', prani_zdroje: 'Zahrada', prostor_ze_zdroje: true, misto_zdroje: 'Terasa: L7' }),
     // Obsluha napsala „Patro“ — stejně jako přání hosta, ale je to její text.
     obsluhaJakoPrani: rez(BERNARD, '2026-10-30', '20:15', { jmeno_hosta: 'Obsluha Jako Prani', zdroj: 'api', prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: false, misto_zdroje: 'Terasa: L7' }),
+    // 6. kolo: zdroj doplnil přání ještě u rezervace, obsluha z ní udělala
+    // akci a host pak přání v Choice smazal. U akce se ukáže prostor
+    // z formuláře, u rezervace téhož tvaru nic (staré přání).
+    akceBezPrani: rez(PERLA, '2026-10-30', '19:45', { druh: 'akce', nazev: 'Raut Bez Prani', jmeno_hosta: 'Akce Bez Prani', zdroj: 'api', prostor: 'Salonek', prani_zdroje: '', prostor_ze_zdroje: true, misto_zdroje: '' }),
+    rezBezPrani: rez(PERLA, '2026-10-30', '19:50', { jmeno_hosta: 'Rez Bez Prani', zdroj: 'api', prostor: 'Zahrada', prani_zdroje: '', prostor_ze_zdroje: true, misto_zdroje: '' }),
   }
   const VSE = Object.values(T).sort((x, y) => x.zacatek.localeCompare(y.zacatek))
   // mistoKratce a prostorZeZdroje jsou od 4. kola v lib/rezervace-misto.ts
@@ -701,14 +706,27 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
   // ukáže s poznámkou „doplněno z Choice“).
   okMk('místo krátce: zdroj doplnil přání a host ho v Choice smazal — staré přání se neukáže (bez stolů nic, se stoly jen stoly)',
     () => mk('Patro', '', '', true) === '[]' && mk('Patro', 'Terasa: L7', '', true) === '["Terasa: L7"]')
-  // 5. kolo: u AKCE prostor patří obsluze a import ho nemění — když host
-  // přání smazal, ukáže se prostor z formuláře (kuchyně o místo nepřijde).
-  // Se stoly nebo s aktuálním přáním dál jako u rezervace.
+  // 5. kolo: u AKCE se prostor, který zdroj doplnil ještě u rezervace,
+  // ve formuláři drží (neprázdný import nemění, prázdný u akce Choice
+  // nedoplní) — když host přání smazal, ukáže se prostor z formuláře
+  // (kuchyně o místo nepřijde). Se stoly nebo s aktuálním přáním dál
+  // jako u rezervace.
   const mkAkce = (prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje) =>
     JSON.stringify(mistoKratce({ prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje, druh: 'akce' }))
   okMk('místo krátce: AKCE, zdroj doplnil přání a host ho v Choice smazal — bez stolů prostor z formuláře, se stoly jen stoly, s novým přáním přání',
     () => mkAkce('Salonek', '', '', true) === '["Salonek"]' && mkAkce('Salonek', 'Terasa: L7', '', true) === '["Terasa: L7"]'
       && mkAkce('Salonek', '', 'Zahrada', true) === '["Zahrada"]' && mkAkce('', '', '', true) === '[]')
+  // 6. kolo: stoly jen „bez názvu“ neřeknou, kde host sedí — u akce bez
+  // přání se před ně dá prostor z formuláře (jako přání u rezervace).
+  okMk('místo krátce: AKCE, host přání smazal a stoly jsou jen „2 stoly bez názvu“ — prostor z formuláře před nimi; s přáním přání',
+    () => mkAkce('Salonek', '2 stoly bez názvu', '', true) === '["Salonek","2 stoly bez názvu"]'
+      && mkAkce('Salonek', '2 stoly bez názvu', 'Zahrada', true) === '["Zahrada","2 stoly bez názvu"]')
+  // Kalendář posílá celý řádek, i s `druh: 'rezervace'` — `mk` výš klíč
+  // vynechává. Rezervace se smazaným přáním neukáže nic ani tak.
+  const mkRez = (prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje) =>
+    JSON.stringify(mistoKratce({ prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje, druh: 'rezervace' }))
+  okMk('místo krátce: REZERVACE (druh „rezervace“ jako z kalendáře), host přání smazal — bez stolů nic, se stoly „bez názvu“ jen stoly',
+    () => mkRez('Patro', '', '', true) === '[]' && mkRez('Patro', '2 stoly bez názvu', '', true) === '["2 stoly bez názvu"]')
   okMk('místo krátce: příznak „obsluha“ a text stejný jako přání — prostor se ukáže vedle stolů (nepřebije ho shoda s přáním)',
     () => mk('Patro', 'Terasa: L7', 'Patro', false) === '["Patro","Terasa: L7"]' && mk('patro', 'Terasa: L7', 'Patro', false) === '["patro","Terasa: L7"]' && mk('Patro', '', 'Patro', false) === '["Patro"]')
   okMk('místo krátce: obsluha bez stolů — její text, ne přání hosta (s příznakem i bez něj)',
@@ -755,6 +773,8 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
     ok('týden: řádek místa je uvnitř odkazu karty (klik na stoly otevře rezervaci)', karta(T.choice).includes('ds-rez-polozka-misto'))
     ok(`týden: příznak z databáze dojde až do karty — prostor ze zdroje vedle stolů ne (${JSON.stringify(misto(T.zmenenePrani))}), obsluha se stejným textem jako přání ano (${JSON.stringify(misto(T.obsluhaJakoPrani))})`,
       misto(T.zmenenePrani)?.text === 'Terasa: L7' && misto(T.obsluhaJakoPrani)?.text === 'Patro · Terasa: L7')
+    ok(`týden: akce se smazaným přáním ukáže prostor z formuláře „Salonek“ (${JSON.stringify(misto(T.akceBezPrani))}), rezervace téhož tvaru nic (${JSON.stringify(misto(T.rezBezPrani))})`,
+      misto(T.akceBezPrani)?.text === 'Salonek' && misto(T.rezBezPrani) === null && karta(T.rezBezPrani) !== '')
   } catch (e) {
     ok(`týden se stoly se vykreslí — výjimka: ${e.message}`, false)
   }
@@ -777,6 +797,8 @@ console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené
       meta(T.jenProstor) === '2 osoby · Salonek' && meta(T.nic) === '2 osoby' && meta(T.stary) === '2 osoby · Bar')
     ok(`den: příznak z databáze — „${meta(T.zmenenePrani)}“ a „${meta(T.obsluhaJakoPrani)}“`,
       meta(T.zmenenePrani) === '2 osoby · Terasa: L7' && meta(T.obsluhaJakoPrani) === '2 osoby · Patro · Terasa: L7')
+    ok(`den: akce se smazaným přáním „${meta(T.akceBezPrani)}“ (prostor z formuláře), rezervace téhož tvaru „${meta(T.rezBezPrani)}“`,
+      meta(T.akceBezPrani) === '2 osoby · Salonek · Akce · objednal Akce Bez Prani' && meta(T.rezBezPrani) === '2 osoby')
   } catch (e) {
     ok(`den se stoly se vykreslí — výjimka: ${e.message}`, false)
   }

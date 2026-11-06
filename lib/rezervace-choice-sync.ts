@@ -255,8 +255,13 @@ export const ZAPIS_PO_SEZNAMU_MS = 3_000
  *     není): konec dílu se odhadne, jako by první dotaz odcházel teď —
  *     skutečný konec je stejný nebo pozdější. Dřív tu platilo „ano“,
  *     a seznam načtený hned na začátku tak obešel obě pravidla níž
- *     (kontrola kódu 4. 11., 5. kolo). Když se nevejde, zkusí to první
- *     stránka se stoly (lib/rezervace-choice.ts, `mapaPro`).
+ *     (kontrola kódu 4. 11., 5. kolo). Pozdější konec umí díl přepnout
+ *     z větve „končí dřív“ do přísnější „dočítá úlohu“; odhad přesto
+ *     nepustí nic, co by skutečný konec zakázal, dokud díl ≥
+ *     `NEJMENE_NA_PRIPOJENI_MS` ≥ `trvaniMs` + `ZAPIS_PO_SEZNAMU_MS`
+ *     (route dává díl nejméně `NEJMENE_NA_PRIPOJENI_MS`; nerovnost hlídá
+ *     test, 6. kolo). Když se nevejde, zkusí to každá další stránka se
+ *     stoly (lib/rezervace-choice.ts, `mapaPro`).
  *   * Díl končí dřív než úloha: jen když se CELÝ vejde do dílu — na jeho
  *     konec čeká zápis stránek a konec běhu, a route by další připojení
  *     začala pozdě (kontrola kódu 4. 11., 3. kolo).
