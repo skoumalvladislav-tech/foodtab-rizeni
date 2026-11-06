@@ -3000,9 +3000,14 @@ for (const [popis, nastaveni] of [
     async nacistMistaOblasti(_t, id) { return { stav: 'ok', mista: MISTA_CHOICE[id] ?? [] } },
   }
   const zapsat = async () => ({ stav: 'chyba', duvod: 'Databáze řádky nepřijala.' })
-  await beh('zápis selže bez seznamu míst', () => probehnoutChoice(behStoly({ api }, { zapsat })), [
+  const fronta = pockatVzdy()
+  await beh('zápis selže bez seznamu míst', () => probehnoutChoice(behStoly({ api }, { zapsat, pockatNaDotaz: fronta.fn })), [
     ['chyba zápisu bez seznamu míst: po 1. stránce už žádný další dotaz na rezervace, běh „chyba“', (v) =>
       [stranek === 1 && v.konec === 'chyba' && v.dotazu === 1, `${stranek} dotazů na stránky, ${v.konec}, dotazu ${v.dotazu}`]],
+    // V úloze čekání na frontu bere místo (5,5 s) jiné pobočce. Pojistka
+    // je dvakrát (před čekáním a po něm); bez té první by se dotaz sice
+    // neposlal, ale fronta by místo spotřebovala (schválné rozbití 7. kola).
+    ['… a na frontu dotazů už nečeká — čekal jen 1. dotaz', () => [fronta.n === 1, `čekání na frontu ${fronta.n}×`]],
   ])
 }
 
