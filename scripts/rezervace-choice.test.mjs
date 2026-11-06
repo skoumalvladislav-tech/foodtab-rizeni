@@ -3144,8 +3144,14 @@ for (const [posledniPo, smi] of [[100, false], [300, true]]) {
   ])
 }
 
-for (const [dilMs, smi] of [[250 + NEJDELE_MAPA_MS - 1, false], [250 + NEJDELE_MAPA_MS, true]]) {
-  // Úloha: seznam míst smí začít jen tehdy, když se CELÝ (NEJDELE_MAPA_MS)
+// Nejdelší seznam míst = DVA časové limity za sebou: oblasti, a teprve po
+// nich stoly všech oblastí (souběžně). Hranice se tu počítá z časového
+// limitu dotazu, ne z NEJDELE_MAPA_MS — kdyby se počítala z ní, test by
+// s chybnou konstantou (třeba jen jeden limit) posunul hranici s ní
+// a prošel (schválné rozbití „nejdelší mapa = jeden dotaz“, 3. kolo).
+const NEJDELE_MAPA_OCEKAVANO_MS = 2 * CASOVY_LIMIT_MIST_MS
+for (const [dilMs, smi] of [[250 + CASOVY_LIMIT_MIST_MS + 1, false], [250 + NEJDELE_MAPA_OCEKAVANO_MS - 1, false], [250 + NEJDELE_MAPA_OCEKAVANO_MS, true]]) {
+  // Úloha: seznam míst smí začít jen tehdy, když se CELÝ (oblasti + stoly)
   // vejde do DÍLU připojení (dil.konecMs), i když poslední dotaz běhu je až
   // ve 30 s — na jeho konec čeká konec běhu, a pozdě začatý pomalý seznam
   // ukousl čas dalšímu připojení (3. kolo kontroly kódu; dřív stačilo, aby
@@ -3154,7 +3160,7 @@ for (const [dilMs, smi] of [[250 + NEJDELE_MAPA_MS - 1, false], [250 + NEJDELE_M
   // než NEJMENE_NA_PRIPOJENI_MS, takže konec dílu opravdu platí.)
   const s = svetSynchronizace({ choice: (url) => odpovedMist(url) ?? odpoved(200, [r105]) })
   await beh(`úloha, díl ${dilMs} ms`, () => SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, posledniDotazMs: s.START + 30_000, dilMs, uloha: true, prostredi: s.prostredi }), [
-    [`úloha: díl připojení končí ${dilMs} ms po prvním dotazu (poslední dotaz běhu až ve 30 s), seznam míst (nejvýš ${NEJDELE_MAPA_MS} ms) by začal ve 250 ms → ${smi ? 'vejde se celý, SMÍ (načte se)' : 'nevejde se celý, NESMÍ (nenačte se, stoly zůstanou z minula)'}`, (v) => {
+    [`úloha: díl připojení končí ${dilMs} ms po prvním dotazu (poslední dotaz běhu až ve 30 s), seznam míst (oblasti + stoly, nejvýš 2 × ${CASOVY_LIMIT_MIST_MS} ms) by začal ve 250 ms → ${smi ? 'vejde se celý, SMÍ (načte se)' : 'nevejde se celý, NESMÍ (nenačte se, stoly zůstanou z minula)'}`, (v) => {
       const radky = s.db.rpcVolani.filter((x) => x.jmeno === 'rezervace_importovat_zdroj').flatMap((x) => x.args.p_radky)
       const mist = s.dotazy.filter((d) => jeSeznamMist(d.url))
       const ok1 = smi
