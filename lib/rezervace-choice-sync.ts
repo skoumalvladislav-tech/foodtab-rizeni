@@ -668,11 +668,20 @@ export async function synchronizovatChoice(
         dil,
       ),
       // Seznam míst jde mimo frontu (limit 1 za 5 s má Choice jen
-      // u /bookings/list), ale odejít smí jen do chvíle, do které smí
-      // odejít dotaz z fronty: do konce dílu úlohy (`dil.konecMs`, zná
-      // se po prvním dotazu), jinak do `posledniDotazMs`. Po ní zbývá
-      // rezerva na odpověď a zápis.
-      smiMimoFrontu: () => p.ted() <= Math.min(posledniDotazMs, dil?.konecMs ?? Infinity),
+      // u /bookings/list), ale začít smí nejpozději v `posledniDotazMs`
+      // (po něm zbývá rezerva na odpověď a zápis). V úloze, po jejímž
+      // dílu přijde další připojení (`dil.konecMs` před `posledniDotazMs`;
+      // zná se po prvním dotazu), se navíc musí CELÝ (`trvaniMs`) vejít
+      // do dílu: na jeho konec čeká zápis stránek a konec běhu, a route
+      // by další připojení začala pozdě nebo vůbec (kontrola kódu
+      // 4. 11., 3. kolo). Poslední připojení úlohy a tlačítka mají
+      // rezervu `REZERVA_DOTAZU_MS`, ta seznam pojme.
+      smiMimoFrontu: (trvaniMs) => {
+        const ted = p.ted()
+        if (ted > posledniDotazMs) return false
+        const konecDilu = dil?.konecMs ?? null
+        return konecDilu === null || konecDilu >= posledniDotazMs || ted + trvaniMs <= konecDilu
+      },
       zapsat: zapisDoFoodtabu(sluzba, pripojeni.id),
     })
   } catch (e) {

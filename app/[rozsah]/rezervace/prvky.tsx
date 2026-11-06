@@ -67,6 +67,12 @@ export type RezervaceRadek = {
   misto_zdroje: string
   /** Část podniku, kterou si přál host v rezervačním systému („Patro“); `''` = žádné přání. Patří zdroji. */
   prani_zdroje?: string
+  /**
+   * Kdo napsal `prostor`: `true` = zdroj (přání hosta), `false` = obsluha,
+   * `null`/chybí = neví se (řádek starší než sloupec, nebo databáze před
+   * db push) — `prostorZeZdroje` pak rozhodne podle shody s přáním.
+   */
+  prostor_ze_zdroje?: boolean | null
   /** Pásmo pobočky rezervace — časy se ukazují v něm (lib/cas.ts). */
   zona: string
 }
@@ -189,29 +195,62 @@ function osobyText(n: number | null): string {
   return `${n} ${n === 1 ? 'osoba' : n >= 2 && n <= 4 ? 'osoby' : 'osob'}`
 }
 
+const male = (s: string) => s.trim().toLocaleLowerCase('cs')
+
+type MistoRadku = Pick<RezervaceRadek, 'prostor'> & { misto_zdroje?: string; prani_zdroje?: string; prostor_ze_zdroje?: boolean | null }
+
+/**
+ * Napsal „Stůl nebo prostor“ zdroj (přání hosta doplněné při načtení),
+ * ne obsluha? Podle příznaku z databáze (`prostor_ze_zdroje`, migrace
+ * 20261107100000). U řádku z doby před ním (`null`) podle shody
+ * s přáním hosta — tak to dělalo 2. kolo pro všechny řádky, jenže text
+ * od obsluhy, který zněl stejně jako přání, se pak schoval, a přání,
+ * které se v Choice změnilo, se zase ukázalo (kontrola kódu 4. 11.,
+ * 3. kolo). Bez příznaku i bez přání (databáze před db push) `false`:
+ * prostor se ukáže jako dřív.
+ */
+export function prostorZeZdroje(r: MistoRadku): boolean {
+  const prostor = (r.prostor ?? '').trim()
+  if (!prostor) return false
+  if (typeof r.prostor_ze_zdroje === 'boolean') return r.prostor_ze_zdroje
+  const prani = (r.prani_zdroje ?? '').trim()
+  return prani !== '' && male(prostor) === male(prani)
+}
+
+/**
+ * Text stolů bez jediné části podniku: jen stoly, které v seznamu míst
+ * zdroje nejsou (lib/rezervace-choice.ts, `mistoZChoice`). Vedle něj se
+ * přání hosta ukáže — řekne aspoň, kde host sedí.
+ */
+const RE_JEN_BEZ_NAZVU = /^\d+ (?:stůl|stoly|stolů) bez názvu$/
+
 /**
  * Kde host sedí, do krátkého řádku: „Stůl nebo prostor“ od obsluhy
- * a stoly z rezervačního systému („Patro: S1–S12“). Vedle stolů se
- * prostor nepíše, když:
- *   * je to přání hosta ze zdroje (`prani_zdroje`) — dokud rezervace
- *     stoly neměla, zdroj ho do prázdného prostoru doplnil, a „Patro“
- *     vedle „Terasa: L7“ by se četlo, jako by host měl obojí (kontrola
- *     kódu 4. 11., 2. kolo),
- *   * je to PŘESNĚ jméno části podniku ze stolů („Patro“) nebo celý
- *     text stolů. Kus jména nestačí: „S1“ od obsluhy vedle „Patro: S12“
- *     je jiný stůl a musí být vidět (kontrola kódu 4. 11.). Jméno
- *     oblasti se hledá jako „ · Patro: “ v celém textu, ne rozdělením
- *     textu — jméno oblasti může mít „: “ i „ · “ v sobě.
+ * a stoly z rezervačního systému („Patro: S1–S12“).
+ *   * Prostor, který doplnil zdroj (přání hosta, `prostorZeZdroje`), se
+ *     vedle stolů nepíše: „Patro“ vedle „Terasa: L7“ by se četlo, jako
+ *     by host měl obojí (kontrola kódu 4. 11., 2. kolo). Bez stolů se
+ *     místo něj ukáže AKTUÁLNÍ přání (`prani_zdroje`), ne to, které se
+ *     do prostoru doplnilo kdysi.
+ *   * Prostor od obsluhy se ukáže vždy, kromě případu, kdy je to PŘESNĚ
+ *     jméno části podniku ze stolů („Patro“) nebo celý text stolů. Kus
+ *     jména nestačí: „S1“ od obsluhy vedle „Patro: S12“ je jiný stůl
+ *     a musí být vidět (kontrola kódu 4. 11.). Jméno oblasti se hledá
+ *     jako „ · Patro: “ v celém textu, ne rozdělením textu — jméno
+ *     oblasti může mít „: “ i „ · “ v sobě.
  */
-export function mistoKratce(r: Pick<RezervaceRadek, 'prostor'> & { misto_zdroje?: string; prani_zdroje?: string }): string[] {
+export function mistoKratce(r: MistoRadku): string[] {
   const stoly = (r.misto_zdroje ?? '').trim()
   const prostor = (r.prostor ?? '').trim()
-  if (!stoly) return prostor ? [prostor] : []
-  if (!prostor) return [stoly]
-  const male = (s: string) => s.trim().toLocaleLowerCase('cs')
-  if (male(prostor) === male(r.prani_zdroje ?? '')) return [stoly]
-  if (male(prostor) === male(stoly) || ` · ${male(stoly)}`.includes(` · ${male(prostor)}: `)) return [stoly]
-  return [prostor, stoly]
+  const zeZdroje = prostorZeZdroje(r)
+  const odObsluhy = zeZdroje ? '' : prostor
+  const prani = (r.prani_zdroje ?? '').trim() || (zeZdroje ? prostor : '')
+  if (!stoly) return odObsluhy ? [odObsluhy] : prani ? [prani] : []
+  if (odObsluhy) {
+    if (male(odObsluhy) === male(stoly) || ` · ${male(stoly)}`.includes(` · ${male(odObsluhy)}: `)) return [stoly]
+    return [odObsluhy, stoly]
+  }
+  return prani && RE_JEN_BEZ_NAZVU.test(stoly) ? [prani, stoly] : [stoly]
 }
 
 /** „3 rez. · 1 akce · 12 hostů“ do úzkého sloupce; bez zrušených. */
@@ -682,11 +721,15 @@ export function UdajeRezervace({
   nazevSystemu?: string | null
 }) {
   const stoly = (r.misto_zdroje ?? '').trim()
-  // Přání hosta ze zdroje: u „Stůl / prostor“, když je to totéž (zdroj ho
-  // tam doplnil, dokud stoly nebyly), jinak samostatný řádek.
+  // Prostor, který doplnil zdroj (`prostorZeZdroje`), má u sebe, odkud je:
+  // „(přání hosta v Choice)“, když je to pořád aktuální přání, jinak
+  // „(doplněno z Choice)“ a aktuální přání je na vlastním řádku. Text od
+  // obsluhy poznámku nemá nikdy, ani když zní stejně jako přání.
   const prani = (r.prani_zdroje ?? '').trim()
-  const praniJeProstor = prani !== '' && prani.toLocaleLowerCase('cs') === (r.prostor ?? '').trim().toLocaleLowerCase('cs')
+  const zeZdroje = prostorZeZdroje(r)
+  const praniJeProstor = zeZdroje && prani !== '' && male(prani) === male(r.prostor)
   const praniKde = nazevSystemu ? `přání hosta v ${nazevSystemu}` : 'přání hosta v rezervačním systému'
+  const doplnenoKde = `doplněno z ${nazevSystemu ?? 'rezervačního systému'}`
   const zalohaText =
     zaloha.stav === 'zadna' && !zaloha.haleru
       ? 'bez zálohy'
@@ -710,7 +753,7 @@ export function UdajeRezervace({
         </>
       ) : null}
       <dt>Stůl / prostor</dt>
-      <dd>{praniJeProstor ? `${r.prostor} (${praniKde})` : r.prostor || '—'}</dd>
+      <dd>{zeZdroje ? `${r.prostor} (${praniJeProstor ? praniKde : doplnenoKde})` : r.prostor || '—'}</dd>
       {prani && !praniJeProstor ? (
         <>
           <dt>{praniKde.charAt(0).toUpperCase() + praniKde.slice(1)}</dt>

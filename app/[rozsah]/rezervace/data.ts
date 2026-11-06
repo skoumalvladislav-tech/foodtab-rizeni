@@ -25,18 +25,30 @@ const SLOUPCE_REZERVACE =
  * Stoly a číslo rezervace ze zdroje (migrace 20261107100000). Vercel
  * nasadí kód dřív, než proběhne db push — do té doby sloupce nejsou
  * a dotaz se zopakuje bez nich (`sloupecNeexistuje`): rezervace se
- * ukážou bez stolů, ne chybou.
+ * ukážou bez stolů, ne chybou. `prostor_ze_zdroje` (kdo napsal prostor)
+ * je ze stejné migrace; bez něj (`null`) rozhodne shoda s přáním.
  */
-const SLOUPCE_ZDROJE = { kalendar: ', misto_zdroje, prani_zdroje', detail: ', misto_zdroje, cislo_zdroje, prani_zdroje' } as const
+const SLOUPCE_ZDROJE = {
+  kalendar: ', misto_zdroje, prani_zdroje, prostor_ze_zdroje',
+  detail: ', misto_zdroje, cislo_zdroje, prani_zdroje, prostor_ze_zdroje',
+} as const
 
-type RadekDb = Omit<RezervaceRadek, 'zona' | 'misto_zdroje' | 'prani_zdroje'> & { misto_zdroje?: unknown; prani_zdroje?: unknown }
+type RadekDb = Omit<RezervaceRadek, 'zona' | 'misto_zdroje' | 'prani_zdroje' | 'prostor_ze_zdroje'> & {
+  misto_zdroje?: unknown
+  prani_zdroje?: unknown
+  prostor_ze_zdroje?: unknown
+}
 
-function sZonou<T extends RadekDb>(radky: T[], pobocky: PobockaRezervaci[]): (T & { zona: string; misto_zdroje: string; prani_zdroje: string })[] {
+function sZonou<T extends RadekDb>(
+  radky: T[],
+  pobocky: PobockaRezervaci[],
+): (T & { zona: string; misto_zdroje: string; prani_zdroje: string; prostor_ze_zdroje: boolean | null })[] {
   const zony = new Map(pobocky.map((p) => [p.id, p.zona]))
   return radky.map((r) => ({
     ...r,
     misto_zdroje: typeof r.misto_zdroje === 'string' ? r.misto_zdroje : '',
     prani_zdroje: typeof r.prani_zdroje === 'string' ? r.prani_zdroje : '',
+    prostor_ze_zdroje: typeof r.prostor_ze_zdroje === 'boolean' ? r.prostor_ze_zdroje : null,
     zona: zony.get(r.branch_id) ?? 'Europe/Prague',
   }))
 }

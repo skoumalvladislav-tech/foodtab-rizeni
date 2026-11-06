@@ -20,12 +20,20 @@
 --   * `rezervace.cislo_zdroje` — číslo rezervace, jak ho ukazuje zdroj
 --     („#105"), ať se obsluha domluví s Choice. Patří zdroji.
 --   * `rezervace.prani_zdroje` — část podniku, kterou si přál HOST
---     (Choice `preferArea`). Patří zdroji. Dokud rezervace z Choice
---     stoly neměly, přání se doplnilo do prázdného `prostor` — a tam
---     zůstane (patří Foodtabu, zdroj ho nepřepíše). Podle tohohle
---     sloupce appka pozná, že „Patro" v prostoru je přání, a vedle
---     přidělených stolů („Terasa: L7") ho neukáže (kontrola kódu 4. 11.,
---     2. kolo). Nic se tím v `prostor` nemaže.
+--     (Choice `preferArea`). Patří zdroji, přepisuje se pokaždé.
+--   * `rezervace.prostor_ze_zdroje` — KDO napsal `prostor`: `true` =
+--     zdroj (přání hosta, které zdroj doplnil do prázdného prostoru),
+--     `false` = obsluha (nebo zdroj, který přání neposílá), `null` =
+--     neví se (řádek z doby před tímhle sloupcem). Choice přání do
+--     prázdného prostoru doplňuje jako dřív a tam zůstane; appka podle
+--     příznaku pozná, že „Patro" v prostoru je přání, a vedle stolů
+--     („Terasa: L7") ho neukáže — ani když se přání v Choice mezitím
+--     změnilo. Text, který obsluha napíše, se neschová nikdy, i kdyby
+--     zněl stejně jako přání (kontrola kódu 4. 11., 3. kolo: podle
+--     shody textu se to poznat nedalo). Příznak shodí spoušť
+--     `trg_rezervace_prostor_od_obsluhy`, kdykoli prostor změní kdokoli
+--     jiný než zdroj — `rezervace_ulozit` se proto měnit nemusí.
+--     Nic se tím v `prostor` nemaže.
 --   * `app.rezervace_zapsat_radky` znovu (kopie z 20261027100000 se
 --     záplatami, nic jiného se nemění): nové klíče řádku `misto_zdroje`,
 --     `cislo_zdroje` a `prani_zdroje`. Klíč CHYBÍ = zdroj údaj tentokrát nezná a uložená
@@ -38,19 +46,27 @@
 -- Bezpečnost: tabulka se dál píše jen přes funkce (`revoke all`, zpátky
 -- jen `select` — 20261027100000), nové sloupce jsou tím čitelné pro
 -- `authenticated` pod stejnou RLS jako zbytek řádku. Ruční uložení
--- (`rezervace_ulozit`) bere jen vyjmenované klíče, nové sloupce
--- nezmění. Stoly ani číslo nejsou osobní údaj hosta.
+-- (`rezervace_ulozit`) bere jen vyjmenované klíče: stoly, číslo ani
+-- přání nezmění, `prostor_ze_zdroje` jen shodí (spouští), když obsluha
+-- prostor přepíše. Stoly ani číslo nejsou osobní údaj hosta.
 --
 -- Upozornění: změna stolů ze zdroje upozornění NEPOŠLE, ani u akce.
 -- Spoušť `trg_rezervace_upozornit_zmena` (20261106100000) hlídá `prostor`
 -- (co zapíše obsluha), ne `misto_zdroje`, a tahle migrace ji schválně
 -- nemění: přesazení v Choice by jinak poslalo upozornění vybraným lidem
 -- při každém přeskupení stolů. Jestli to u akcí chtít, je otázka 87
--- (docs/hlaseni/otazky.md).
+-- (docs/hlaseni/otazky.md). Proto Choice přání do prostoru doplňuje
+-- hned při prvním načtení, i u rezervace se stoly: kdyby čekal, až stoly
+-- nebudou, doplnil by ho ve chvíli, kdy je Choice odebere — a u akce by
+-- to jako změna prostoru upozornění poslalo (3. kolo kontroly).
 --
--- Pořadí s kódem: Vercel nasadí kód dřív, než proběhne db push. Appka
--- proto sloupce čte s náhradou (chybí-li, ukáže se bez stolů) a do
--- staré funkce posílané klíče navíc nevadí (jsonb, nečtou se).
+-- Pořadí s kódem: Vercel nasadí kód dřív, než proběhne db push. Stará
+-- funkce nové klíče nečte (jsonb, nevadí) — stoly, číslo ani přání se
+-- do db push neuloží, ale přání se doplní do prostoru jako dřív, takže
+-- kalendář ukáže aspoň část podniku. Appka nové sloupce čte s náhradou
+-- (chybí-li, ukáže se jako dřív). Rezervace, které v té mezeře odejdou
+-- z okna načítání (36 h zpátky), stoly už nedostanou — db push proto
+-- brzy po sloučení.
 -- =====================================================================
 
 alter table public.rezervace
@@ -65,7 +81,41 @@ comment on column public.rezervace.cislo_zdroje is
   'Číslo rezervace, jak ho ukazuje rezervační systém (Choice „#105"). Patří zdroji.';
 comment on column public.rezervace.prani_zdroje is
   'Část podniku, kterou si host přál v rezervačním systému (Choice preferArea). '
-  'Patří zdroji. Stejný text v prostor appka vedle přidělených stolů neukazuje.';
+  'Patří zdroji — každé načtení, které ho nese, ho přepíše.';
+
+-- Kdo napsal `prostor`. Řádky z doby před sloupcem zůstanou `null`
+-- (neví se — appka je posoudí podle shody s přáním jako 2. kolo), nové
+-- dostanou `false`, pokud je nevyplní zdroj.
+alter table public.rezervace
+  add column prostor_ze_zdroje boolean,
+  add constraint rezervace_prostor_ze_zdroje_neprazdny check (prostor_ze_zdroje is not true or prostor <> '');
+alter table public.rezervace alter column prostor_ze_zdroje set default false;
+
+comment on column public.rezervace.prostor_ze_zdroje is
+  'true = prostor vyplnil zdroj (přání hosta, Choice preferArea), false = obsluha, '
+  'null = neví se (řádek starší než sloupec). Vedle stolů ze zdroje appka '
+  'prostor od zdroje neukazuje. Shodí ho spoušť, když prostor změní kdokoli jiný.';
+
+-- Prostor změnil někdo jiný než zdroj (zdroj si příznak při doplnění
+-- nastaví sám, ve stejném UPDATE) → patří obsluze. Jen tady, ne
+-- v `rezervace_ulozit`: každý zápis prostoru mimo import tím projde.
+create function app.rezervace_prostor_od_obsluhy()
+returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  new.prostor_ze_zdroje := false;
+  return new;
+end $$;
+
+revoke all on function app.rezervace_prostor_od_obsluhy() from public, anon, authenticated;
+
+create trigger trg_rezervace_prostor_od_obsluhy
+  before update on public.rezervace
+  for each row
+  when (old.prostor is distinct from new.prostor
+        and old.prostor_ze_zdroje is not distinct from new.prostor_ze_zdroje)
+  execute function app.rezervace_prostor_od_obsluhy();
 
 
 create or replace function app.rezervace_zapsat_radky(
@@ -103,6 +153,7 @@ declare
   v_cislo      text;
   v_ma_prani   boolean;
   v_prani      text;
+  v_prostor_je_prani boolean;
   v_zmeneno    timestamptz;
   v_id         uuid;
   v_nove       integer := 0;
@@ -163,6 +214,10 @@ begin
     v_cislo    := case when v_ma_cislo then left(coalesce(btrim(v_radek ->> 'cislo_zdroje'), ''), 40) else '' end;
     v_ma_prani := p_zdroj = 'externi' and v_radek ? 'prani_zdroje';
     v_prani    := case when v_ma_prani then left(coalesce(btrim(v_radek ->> 'prani_zdroje'), ''), 120) else '' end;
+    -- Prostor, který zdroj posílá, je přání hosta (Choice posílá oboje
+    -- stejně) — doplní-li ho, poznamená si to (`prostor_ze_zdroje`).
+    -- Zdroj bez přání (soubor, příjmové API) ho doplní jako text obsluhy.
+    v_prostor_je_prani := v_ma_prani and v_prostor <> '' and v_prostor = v_prani;
     v_zmeneno  := app.rezervace_okamzik_zdroje(v_radek ->> 'zmeneno_kdy', 'změněno');
 
     select * into v_r from public.rezervace
@@ -174,12 +229,12 @@ begin
       insert into public.rezervace (
         tenant_id, branch_id, druh, stav, stav_zdroje, jmeno_hosta, zacatek, konec, den, pocet_osob,
         prostor, poznamka_zdroje, zdroj, poskytovatel, pripojeni_id, externi_id,
-        externi_zmeneno_kdy, importovano_kdy, misto_zdroje, cislo_zdroje, prani_zdroje
+        externi_zmeneno_kdy, importovano_kdy, misto_zdroje, cislo_zdroje, prani_zdroje, prostor_ze_zdroje
       ) values (
         p_tenant, p_branch, 'rezervace', v_stav, v_stav_zdr, v_jmeno, v_zacatek, v_konec,
         app.business_date(p_branch, v_zacatek), v_pocet,
         v_prostor, v_poznamka, p_zdroj, p_poskytovatel, p_pripojeni, v_ext,
-        v_zmeneno, now(), v_misto, v_cislo, v_prani
+        v_zmeneno, now(), v_misto, v_cislo, v_prani, v_prostor_je_prani
       )
       returning id into v_id;
 
@@ -214,8 +269,10 @@ begin
 
     -- Údaje zdroje se přepíšou; to, co patří Foodtabu (druh, název, typ
     -- akce, menu, záloha, poznámky, přílohy), se nedotkne. Prostor jen
-    -- doplní, když ho ve Foodtabu nikdo nevyplnil. Stoly a číslo ze zdroje
-    -- přepíše, jen když je řádek nese.
+    -- doplní, když ho ve Foodtabu nikdo nevyplnil — a příznak, kdo ho
+    -- napsal, nastaví ve stejném UPDATE (spoušť
+    -- `trg_rezervace_prostor_od_obsluhy` ho pak nechá). Stoly, číslo
+    -- a přání ze zdroje přepíše, jen když je řádek nese.
     update public.rezervace set
       stav                = v_stav,
       stav_zdroje         = v_stav_zdr,
@@ -225,6 +282,7 @@ begin
       jmeno_hosta         = v_jmeno,
       poznamka_zdroje     = v_poznamka,
       prostor             = case when prostor = '' then v_prostor else prostor end,
+      prostor_ze_zdroje   = case when prostor = '' and v_prostor <> '' then v_prostor_je_prani else prostor_ze_zdroje end,
       misto_zdroje        = case when v_ma_misto then v_misto else misto_zdroje end,
       cislo_zdroje        = case when v_ma_cislo then v_cislo else cislo_zdroje end,
       prani_zdroje        = case when v_ma_prani then v_prani else prani_zdroje end,
