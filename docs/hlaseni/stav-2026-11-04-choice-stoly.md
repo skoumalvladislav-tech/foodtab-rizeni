@@ -93,7 +93,8 @@
 - **Schválná rozbití:** ze 184 starších jich nad stavem po 5. kole
   spadlo na své kontrole 180; zbylá čtyři vysvětlená níž, jedno z nich
   ukázalo chybějící kontrolu (doplněná, `aca1ddf`). Rozbití na opravy
-  6. a 7. kola: 17 ze 17 a 11 ze 11.
+  6. a 7. kola: 17 ze 17 a 11 ze 11. **Celé přejetí všech 200 nad
+  konečnou verzí (`aca1ddf`): 200 ze 200 spadlo na své kontrole.**
 
 ## Co je hotové
 
@@ -401,9 +402,11 @@ přibyla rozbití na jeho opravy — dnes jich je **200**.
 - **7. kolo: 11 rozbití** (6 nových, 5 starších) — **11 ze 11**. Navíc
   ruční rozbití testu vlastnosti (skrytá funkce odhadu): spadla
   jmenovaná kontrola a doběhlo všech 495 dalších.
-- **Celé přejetí všech 200 nad konečnou verzí** (`aca1ddf`): **běží**
-  (spuštěno 6. 11. ve 22:25, potrvá kolem pěti hodin). Všech 200 vzorů
-  na konečný kód sedí (zkouška nanečisto). Výsledek doplním sem a do PR.
+- **Celé přejetí všech 200 nad konečnou verzí** (`aca1ddf`, 6. 11.
+  22:25 – 7. 11. 12:22; počítač v noci spal, proto tak dlouho):
+  **200 ze 200 spadlo na své kontrole**, žádné nespadlo jinde, žádné
+  neprošlo. Po každém rozbití skript ověřil proti gitu, že je soubor
+  vrácený; pracovní kopie na konci čistá.
 
 **1. kolo podrobně — 53 rozbití:**
 
@@ -614,11 +617,10 @@ Zbývá:
 3. **Otázky 87 a 88** čekají na odpověď. Dokud nepřijde, platí
    opatrnější varianta: přesazení bez upozornění, konec rezervace se
    nehádá.
-4. **Celé přejetí všech 200 rozbití nad konečnou verzí** ještě běží —
-   výsledek doplním do oddílu „Schválná rozbití“ a do PR. Sloučení na
-   něm nestojí: rozbití míst, kterých se dotkla 6. a 7. kola, už
-   spadla na svých kontrolách (výš).
-5. Úklid mých pracovních kopií (mimo repozitář, na sloučení nemá vliv).
+4. Úklid mých pracovních kopií (mimo repozitář, na sloučení nemá vliv).
+
+Celé přejetí všech 200 rozbití nad konečnou verzí doběhlo 7. 11.
+ve 12:22: 200 ze 200 na své kontrole (oddíl „Schválná rozbití“).
 
 ## Nenasazoval jsem
 
