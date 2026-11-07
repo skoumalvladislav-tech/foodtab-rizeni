@@ -1,11 +1,25 @@
-# Stav k 4.–6. 11. 2026 — stoly a číslo rezervace z Choice
+# Stav k 4.–7. 11. 2026 — stoly a číslo rezervace z Choice (7. 11. sloučeno a nasazeno)
 
 ## Nejdřív to podstatné
 
+- **7. 11.: sloučeno a nasazeno** na „sluč 176 a db push“: PR #176
+  (`63bd158`), Vercel „Ready“ v 16:27:54, `db push` `20261107100000`
+  v 16:33. Ověření v databázi sedí s předpovědí (oddíl „Nasazení
+  7. 11.“ na konci).
+- **Z Choice se ale od 3. 11. 19:41 nic nenačítá.** Obě napojení
+  (Bernard Bar i Černá Perla) dostala v tomtéž běhu od Choice jednou
+  **403** a náš kód je tím přepnul na „vyžaduje pozornost“ — od té doby
+  se Choice vůbec neptá. Jestli Choice odmítá i dnes, nikdo neví.
+  Nesouvisí to s touto PR (3. 11. se nic nenasazovalo), ale stoly ani
+  číslo rezervace se proto zatím neukážou nikde. **Šéfík: u obou
+  poboček v Rezervace → Napojení „Ověřit znovu“.** Kdyby neprošlo ani
+  u jedné, je spíš něco u aplikace Foodtab v Choice a nové připojení
+  může skončit stejně — pak napřed napsat Choice (api@choiceqr.com).
+  Podrobně v oddílu „Nasazení 7. 11.“.
 - **Šéfík:** „u načítání informací (rezervací) z choice nenačítá všechny
   informace, chybí například umístění a obsazení stolů“ (se snímkem
   rezervace #105 v Choice: Patro, stoly S1–S12).
-- **Hotovo v PR do `main`, nesloučené.** Foodtab z Choice nově načítá:
+- **Hotovo v PR #176, 7. 11. sloučené a nasazené.** Foodtab z Choice nově načítá:
   - **přidělené stoly** — v kalendáři (týden: vlastní řádek karty pod počtem osob, den:
     u počtu osob) a v detailu jako „Stoly v Choice: Patro: S1–S12“,
   - **číslo rezervace** — v detailu „Převzato z rezervačního systému
@@ -16,10 +30,10 @@
   - **přání hosta** (část podniku, kterou si host v Choice vybral) —
     zvlášť, ať se nemíchá se stoly, které mu restaurace přidělila.
 - **Má migraci** (`20261107100000_rezervace_misto_zdroje.sql`: čtyři
-  nové sloupce, spoušť, úprava zápisu rezervací a ranního souhrnu). Je
-  potřeba **„sluč 176 a db push“** — a **pořadí je důležité: `db push` až
-  po tom, co je nasazení na Vercelu „Ready“** (a pár minut po něm, ať
-  doběhne načítání, které ještě začal starý kód). Kdyby databáze byla
+  nové sloupce, spoušť, úprava zápisu rezervací a ranního souhrnu).
+  **Nasazená 7. 11. v tomhle pořadí:** `db push` až po tom, co bylo
+  nasazení na Vercelu „Ready“ (a pět minut po něm, ať doběhne
+  načítání, které ještě mohl začít starý kód). Kdyby databáze byla
   nová dřív než kód, starý kód by u rezervací, kterým doplní „Stůl /
   prostor“, zapsal, že ho napsala obsluha — a kalendář by pak přání
   hosta ukazoval vedle stolů napořád (4. kolo, nález 18). Opačně to
@@ -34,7 +48,8 @@
 - **„Obsazení stolů v čase“ zatím ne.** Choice posílá délku návštěvy
   bez jednotky (minuty? milisekundy?), takže Foodtab nezná konec
   rezervace. Nehádá ho. Každé načtení si ale uloží až 5 ukázek, podle
-  kterých se jednotka po nasazení pozná jistě (otázka 88).
+  kterých se jednotka po prvním načtení pozná jistě (otázka 88; čeká,
+  až Choice zase načítá).
 - **Přesazení v Choice upozornění nepošle**, ani u akce (otázka 87).
 - Nezávislá kontrola kódu našla **23 nálezů**. **18 je opravených**,
   4 čekají na Šéfíkovo rozhodnutí (otázky 87 a 88) a u jednoho změna
@@ -98,9 +113,9 @@
 
 ## Co je hotové
 
-| Co | Commit | Čeká na db push |
+| Co | Commit | Migrace |
 |---|---|---|
-| Stoly, číslo rezervace, důvod zrušení: převod v adaptéru, nové sloupce, zápis, kalendář a detail, testy, scénář `krok109` | `3a09279` | ano, `20261107100000` |
+| Stoly, číslo rezervace, důvod zrušení: převod v adaptéru, nové sloupce, zápis, kalendář a detail, testy, scénář `krok109` | `3a09279` | `20261107100000`, **nasazeno 7. 11.** |
 | Návod, text u napojení, načtení v testu s vlastní ochranou | `c068777` | — |
 | Týden: dlouhé stoly se zalomí na dva řádky, neuseknou se | `42359be` | — |
 | Sloučení `main` (#175) do větve | `28f4de0` | — |
@@ -437,13 +452,21 @@ přibyla rozbití na jeho opravy — dnes jich je **200**.
 
 ## Co čeká na Šéfíka
 
-1. **„sluč 176 a db push“** — PR má migraci. **`db push` až po tom, co
-   je nasazení na Vercelu „Ready“**, ne dřív (viz nahoře).
-2. Po nasazení se podívat na první rezervaci se stoly (např. #105):
-   ukáže „Patro: S1–S12“? Kdyby u ní bylo „stoly bez názvu“, je
+1. ~~„sluč 176 a db push“~~ — hotovo 7. 11.
+2. **Choice znovu rozběhnout** (3. 11. v 19:41 jednou odmítl přístup,
+   403, a Foodtab se ho od té doby neptá): u Bernard Baru i Černé Perly
+   v Rezervace → Napojení **„Ověřit znovu“**. Projde-li, napojení je
+   zase „připojeno“ a jde „Načíst teď“ (proč Choice 3. 11. odmítl, se
+   tím ale nedozvíme). Neprojde-li u jednoho podniku, připojit ho znovu
+   (odkaz z administrace Choice + ChoiceQR token právě toho podniku, jako
+   26.–27. 10.). Neprojde-li u obou, je spíš chyba u aplikace Foodtab
+   v Choice — napřed napsat na api@choiceqr.com (koncept připravím)
+   a připojovat až po jejich odpovědi.
+3. Až Choice zase načítá, podívat se na rezervaci se stoly s termínem
+   od dneška (např. #105, je-li ještě před námi): ukáže „Patro: S1–S12“? Kdyby u ní bylo „stoly bez názvu“, je
    špatně předpoklad o id stolů (viz výš) a stačí mi poslat hlášku
    u napojení.
-3. Otázky **87** (upozornění při přesazení u akce) a **88** (délka
+4. Otázky **87** (upozornění při přesazení u akce) a **88** (délka
    návštěvy).
 
 ## Otázky
@@ -451,14 +474,15 @@ přibyla rozbití na jeho opravy — dnes jich je **200**.
 V `docs/hlaseni/otazky.md`:
 
 - **87** — přesazení v Choice u akce: dnes bez upozornění.
-- **88** — délka návštěvy: po nasazení přečtu uložené ukázky a porovnám
-  s Choice.
+- **88** — délka návštěvy: až Choice zase načítá (po „Ověřit znovu“),
+  přečtu uložené ukázky a porovnám s Choice. Zatím se žádná neuložila.
 
 ## Na co jsem narazil a nešlo to
 
 - **Id stolů jsem neověřil proti živému Choice.** K údajům z Choice se
   nedostanu jinak než přes token, který leží zašifrovaný na serveru,
-  a ten nečtu. Ověří to první načtení po nasazení. Pozná se to podle
+  a ten nečtu. Ověří to první načtení novým kódem — po nasazení 7. 11.
+  zatím neproběhlo, čeká na „Ověřit znovu“ u Choice. Pozná se to podle
   hlášky.
 - **Délku návštěvy nepřevádím.** Dokumentace neříká jednotku a špatný
   konec rezervace by nikdo nepoznal. Proto ukázky a otázka 88.
@@ -594,9 +618,26 @@ V `docs/hlaseni/otazky.md`:
   akci se stoly jen „bez názvu“ hlídá test funkce, která místo skládá.
   V prohlížeči jsem nic z 6. kola **neviděl**.
 
+### Při nasazení 7. 11.
+
+- **Rezervaci #105 jsem ověřit nemohl.** Choice 3. 11. odmítl
+  přístup a od té doby se nenačítá (oddíl „Nasazení 7. 11.“), takže nový
+  kód zatím nic nenačetl. Že stoly z Choice v provozu sedí, je pořád neověřené —
+  ověřené je jen to, že databáze je připravená a kód nasazený.
+- **Stav Vercelu jsem neviděl přímo**: nástroj Vercelu vrátil 403 (chybí
+  přístup k týmu). „Ready“ jsem vzal ze stavu nasazení, který Vercel
+  hlásí GitHubu (`success`, odkaz na nasazení), jako u #173.
+- **Dokumentaci Choice k 403/429 se nepodařilo přečíst** (stránka bez
+  obsahu bez prohlížeče, soubor se specifikací 403/404).
+- **Že napojení čtyři dny stojí, jsem zjistil náhodou** — ověřovacím
+  dotazem po `db push`. Upozornění nepřijde nikomu; kromě stránky
+  napojení je štítek „Vyžaduje pozornost“ vidět jen v přehledu Financí
+  (Stav integrací), kam se při práci s rezervacemi nikdo nedívá (návrh
+  v „Kde jsem skončil“, bod 4).
+
 ## Kde jsem skončil a co zbývá
 
-Skončil jsem na hranici „hotovo, čeká na sloučení“: sedm kol kontroly,
+Práci na kódu jsem uzavřel před sloučením: sedm kol kontroly,
 všechny platné nálezy opravené kromě čtyř z 1. kola, které čekají na
 otázky 87 a 88; testy a rozbití výš. Hlášení a text PR na konci ještě
 prošla kontrola proti kódu a commitům (tři nezávislé pohledy):
@@ -605,24 +646,94 @@ prošla kontrola proti kódu a commitům (tři nezávislé pohledy):
 o stolech „bez názvu“, která neseděla na kód, a chybějící commit
 v tabulce. Jedno zastaralé číslo jsem při tom našel sám (souběh 89,
 dnes 85). Všechno opravené v textu; kód se neměnil. PR **#176**
-do `main` je otevřený a nesloučený.
+je 7. 11. sloučená a nasazená (oddíl níž).
+
+Celé přejetí všech 200 rozbití nad konečnou verzí doběhlo 7. 11.
+ve 12:22: 200 ze 200 na své kontrole (oddíl „Schválná rozbití“).
+Pracovní kopie jsou uklizené.
 
 Zbývá:
 
-1. **Šéfík:** „sluč 176 a db push“ — `db push` až po tom, co je
-   nasazení na Vercelu „Ready“.
-2. **Po nasazení:** rezervace #105 v kalendáři — ověří, že id stolů
-   v rezervaci sedí na seznam míst Choice (jediný neověřený
+1. **Šéfík: Choice znovu rozběhnout** — „Ověřit znovu“, případně
+   znovu připojit nebo napsat Choice (oddíl „Co čeká na Šéfíka“, bod 2).
+   Bez toho se nic z této PR v provozu neukáže.
+2. **Až Choice načítá:** rezervace se stoly (např. #105) v kalendáři — ověří, že id
+   stolů v rezervaci sedí na seznam míst Choice (jediný neověřený
    předpoklad). Pak přečtu uložené ukázky délky návštěvy (otázka 88).
 3. **Otázky 87 a 88** čekají na odpověď. Dokud nepřijde, platí
    opatrnější varianta: přesazení bez upozornění, konec rezervace se
    nehádá.
-4. Úklid mých pracovních kopií (mimo repozitář, na sloučení nemá vliv).
+4. **Návrh na samostatnou práci:** když napojení Choice spadne na
+   „vyžaduje pozornost“, nikomu nic nepřijde — hláška je jen na stránce
+   napojení (štítek i v přehledu Financí). Tentokrát to tak čtyři dny
+   nikdo neviděl. A jediná 403 vypne načítání napořád, i kdyby Choice
+   odmítl jen chvíli — stálo by za to po čase zkusit test sám. Upozornění
+   majiteli (a správci napojení) by to chytilo hned.
 
-Celé přejetí všech 200 rozbití nad konečnou verzí doběhlo 7. 11.
-ve 12:22: 200 ze 200 na své kontrole (oddíl „Schválná rozbití“).
+## Nasazení 7. 11.
 
-## Nenasazoval jsem
+Na Šéfíkovo „sluč 176 a db push“, postup podle `nasazeni`:
 
-Nic nesloučeno, žádný `db push`, žádný zápis do produkce ani do
-Choice. Foodtab do Choice nikdy nepíše, jen čte.
+1. **Před sloučením:** CI 5/5 zelená, PR „MERGEABLE / CLEAN“, `main`
+   od otevření PR nepohnutý (`1a61131`). CLI napojené na
+   `spekntcsuroqhehmjssv` / `foodtab-test`. `migration list` (pracovní
+   složka nasazení byla ještě na starém `main`) i čtecí dotaz: databáze
+   končí `20261106110000`, nic navíc v ní není. Že jediná čekající je
+   `20261107100000`, ukázal až `db push`.
+2. **Sloučeno** v 16:26 (`63bd158`, merge commit).
+3. **Vercel produkce:** stav nasazení na GitHubu `success`
+   v 16:27:54 (`/prihlaseni` vrací 200). Pak pět minut čekání na běhy
+   starého kódu (jeden běh úlohy i tlačítka smí trvat nejvýš 60 s,
+   plánovač mu dává 90 s — pět minut je s velkou rezervou).
+4. **Výchozí stav (čtecí dotaz před `db push`):** 142 rezervací, žádný
+   z nových sloupců, poslední migrace `20261106110000`.
+5. **`db push`** v 16:33:25–16:33:35:
+
+   ```
+   Do you want to push these migrations to the remote database?
+    • 20261107100000_rezervace_misto_zdroje.sql
+   Applying migration 20261107100000_rezervace_misto_zdroje.sql...
+   Finished supabase db push.
+   ```
+
+6. **Ověření čtecím dotazem** (všechno sedí s předpovědí):
+
+   | Co | Výsledek |
+   |---|---|
+   | Migrace | `20261106110000, 20261107100000` |
+   | Sloupce | `misto_zdroje`, `cislo_zdroje`, `prani_zdroje`: text, not null, výchozí `''`; `prostor_ze_zdroje`: boolean, smí být null, výchozí `false` |
+   | Omezení | délky ≤ 300 / 40 / 120 a `prostor_ze_zdroje is not true or prostor <> ''` |
+   | Spoušť | `trg_rezervace_prostor_od_obsluhy` BEFORE UPDATE, zapnutá, podmínka jako v migraci |
+   | Funkce | `rezervace_zapsat_radky` a `rezervace_souhrn_dne`: definer, `search_path=""`, nové klíče v těle; žádná z nich ani funkce spouště nejde volat jako `anon`, `authenticated` ani `public` |
+   | Práva na sloupce | nové sloupce stejně jako `prostor`: `authenticated` jen čte, `anon` nic |
+   | Data | 142 rezervací, příznak u všech `null`, stoly / číslo / přání zatím u žádné (správně — žádné načtení ještě neproběhlo) |
+
+7. **První načtení novým kódem neproběhlo — a zatím neproběhne.**
+   Dotaz na napojení ukázal, že obě napojení Choice jsou od **3. 11.
+   19:41** „vyžaduje pozornost“ s hláškou *„Choice odmítl přístup
+   (403). Připojte podnik znovu“*. Historie běhů:
+   - 3. 11. se u obou poboček načítalo každých 15 minut („hotovo“) až
+     do 19:26, s výjimkou dvou běhů:
+   - v 18:26 (Bernard) a 18:41 (Perla) Choice omezil počet dotazů
+     (**429**); tři další běhy (18:56, 19:11, 19:26) zase prošly;
+   - v běhu **19:41 vrátil Choice 403 u obou podniků naráz**. Kód
+     odmítnutý přístup bere jako neplatný token: napojení přepne na
+     „vyžaduje pozornost“ a úloha ho od té doby přeskakuje. Žádný další
+     běh od té doby.
+   - 3. 11. se do produkce nic nenasazovalo (sloučení 2. 11. 23:03,
+     další až 4. 11. 14:42), takže to nezpůsobila změna v našem kódu.
+
+   Proč Choice 403 vrátil, nevím. Dva různé tokeny ve stejné minutě
+   spíš ukazují na něco společného (aplikace Foodtab v Choice), než že
+   by oba tokeny přestaly platit samy (platí 5 let a každý vznikl
+   jindy). Blokace po 429 sedí časově slabě — mezi poslední 429 a 403
+   prošly tři běhy. Dokumentace Choice se automaticky přečíst nedala
+   (stránka se vykresluje až v prohlížeči), význam 403 a 429 tedy
+   neověřený.
+
+   Choice odmítl **jednou** (jeden dotaz u každé pobočky); čtyřdenní
+   výpadek je hlavně tím, že se ho náš kód po jediné 403 už nezeptal.
+   „Ověřit znovu“ ukáže, jestli odmítá i dnes. Projde-li, stačilo to.
+   Neprojde-li u obou, nové připojení jde přes tutéž aplikaci a může
+   skončit stejně (a „Odpojit“ smaže uložený token) — napřed napsat
+   Choice.
