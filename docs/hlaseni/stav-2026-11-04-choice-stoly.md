@@ -17,7 +17,7 @@
     zvlášť, ať se nemíchá se stoly, které mu restaurace přidělila.
 - **Má migraci** (`20261107100000_rezervace_misto_zdroje.sql`: čtyři
   nové sloupce, spoušť, úprava zápisu rezervací a ranního souhrnu). Je
-  potřeba **„sluč N a db push“** — a **pořadí je důležité: `db push` až
+  potřeba **„sluč 176 a db push“** — a **pořadí je důležité: `db push` až
   po tom, co je nasazení na Vercelu „Ready“** (a pár minut po něm, ať
   doběhne načítání, které ještě začal starý kód). Kdyby databáze byla
   nová dřív než kód, starý kód by u rezervací, kterým doplní „Stůl /
@@ -434,7 +434,7 @@ přibyla rozbití na jeho opravy — dnes jich je **200**.
 
 ## Co čeká na Šéfíka
 
-1. **„sluč N a db push“** — PR má migraci. **`db push` až po tom, co
+1. **„sluč 176 a db push“** — PR má migraci. **`db push` až po tom, co
    je nasazení na Vercelu „Ready“**, ne dřív (viz nahoře).
 2. Po nasazení se podívat na první rezervaci se stoly (např. #105):
    ukáže „Patro: S1–S12“? Kdyby u ní bylo „stoly bez názvu“, je
@@ -601,12 +601,12 @@ prošla kontrola proti kódu a commitům (tři nezávislé pohledy):
 6. a 7. kole, špatný počet různých nálezů 4. kola (12 místo 13), věta
 o stolech „bez názvu“, která neseděla na kód, a chybějící commit
 v tabulce. Jedno zastaralé číslo jsem při tom našel sám (souběh 89,
-dnes 85). Všechno opravené v textu; kód se neměnil. PR **#CISLO_PR**
+dnes 85). Všechno opravené v textu; kód se neměnil. PR **#176**
 do `main` je otevřený a nesloučený.
 
 Zbývá:
 
-1. **Šéfík:** „sluč CISLO_PR a db push“ — `db push` až po tom, co je
+1. **Šéfík:** „sluč 176 a db push“ — `db push` až po tom, co je
    nasazení na Vercelu „Ready“.
 2. **Po nasazení:** rezervace #105 v kalendáři — ověří, že id stolů
    v rezervaci sedí na seznam míst Choice (jediný neověřený
