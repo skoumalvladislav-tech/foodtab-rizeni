@@ -7,10 +7,12 @@ import {
   chybaBehu,
   KLIC_CHOICE,
   NEJMENE_NA_PRIPOJENI_MS,
+  OPAKOVAT_TEST_PO_MS,
   poradiSynchronizace,
   precistKurzor,
   probehnoutChoice,
   ROZESTUP_DOTAZU_MS,
+  VETA_OPAKOVANI,
   vytvoritChoice,
   type ChybaChoice,
   type FetchFn,
@@ -49,6 +51,11 @@ import { klientUlohy } from './supabase/uloha.ts'
  * „PŘIPOJENO“ zapisuje v celém modulu JEDINÁ funkce, `zapsatVysledekTestu`,
  * a jen po úspěšném živém testu (`GET /bookings/list?perPage=1`). Databáze
  * to hlídá podruhé (`integrace_pripojeni_rezervace_overeno`).
+ *
+ * Napojení, které stojí (Choice odmítl přístup), zkouší naplánovaná úloha
+ * znovu sama — `opakovatTestChoice`, nejvýš jedno za běh a jednou za
+ * `OPAKOVAT_TEST_PO_MS` (migrace 20261108100000). Upozornění, že napojení
+ * spadlo, posílá databáze (spoušť na přechodu stavu), ne tenhle kód.
  */
 
 /**
@@ -522,32 +529,157 @@ export async function overitZnovu(
 }
 
 /**
- * Výsledek živého testu do registru — pod PŘIHLÁŠENÝM (RLS: integrace.manage).
+ * Stavy napojení Choice, které naplánovaná úloha zkouší znovu
+ * (`opakovatTestChoice`): odmítnutý přístup v běhu načítání
+ * (`vyzaduje_pozornost`) a neúspěšné „Ověřit znovu“ nebo test po
+ * připojení (`chyba`). Ne `pripojuje_se` (člověk je zrovna v Choice)
+ * ani `nepripojeno`.
+ */
+export const STAVY_K_OPAKOVANI = ['vyzaduje_pozornost', 'chyba'] as const
+
+/**
+ * Výsledek živého testu do registru — pod PŘIHLÁŠENÝM (RLS: integrace.manage),
+ * u opakovaného testu pod `service_role`.
  *
  * JEDINÉ místo v modulu, které zapisuje „připojeno“, a jen v téže změně
  * s `posledni_test_ok: true`. Odmítnutý přístup nebo nesmyslná odpověď =
  * „chyba“; dočasná nedostupnost, 429 a fronta stav nemění (připojené
  * připojení kvůli výpadku Choice nespadne), jen zapíšou důvod.
+ *
+ * `opakovany` (jen `opakovatTestChoice`): zapisuje se, JEN DOKUD napojení
+ * stojí (`STAVY_K_OPAKOVANI`) a je to tentýž podnik (`varSymbol`) —
+ * souběžné „Ověřit znovu“ ani nové připojení se nepřepíše. Neúspěch stav
+ * NEMĚNÍ (napojení stojí dál; ze `vyzaduje_pozornost` se nestane `chyba`)
+ * a k důvodu přidá, že to Foodtab zkusí znovu. Dočasná nedostupnost a 429
+ * nezapíšou nic — o přístupu nic neříkají a důvod výpadku má zůstat.
  */
-export async function zapsatVysledekTestu(supabase: SupabaseClient, pripojeniId: string, test: VysledekTestu): Promise<boolean> {
+export async function zapsatVysledekTestu(
+  supabase: SupabaseClient,
+  pripojeniId: string,
+  test: VysledekTestu,
+  opakovany?: { varSymbol: string },
+): Promise<boolean> {
   const ted = new Date().toISOString()
   let zmena: Record<string, unknown>
   if (test.stav === 'ok') {
     zmena = { stav: 'pripojeno', posledni_test_ok: true, posledni_test_kdy: ted, posledni_chyba: null }
   } else if (test.druh === 'pristup' || test.druh === 'data') {
-    zmena = { stav: 'chyba', posledni_test_ok: false, posledni_test_kdy: ted, posledni_chyba: test.duvod }
+    zmena = opakovany
+      ? { posledni_test_ok: false, posledni_test_kdy: ted, posledni_chyba: `${test.duvod} ${VETA_OPAKOVANI}` }
+      : { stav: 'chyba', posledni_test_ok: false, posledni_test_kdy: ted, posledni_chyba: test.duvod }
+  } else if (opakovany) {
+    return false
   } else {
     zmena = { posledni_chyba: test.duvod }
   }
-  const { data, error } = await supabase
+  let dotaz = supabase
     .from('integrace_pripojeni')
     .update(zmena)
     .eq('id', pripojeniId)
     .eq('oblast', 'rezervace')
     .eq('poskytovatel', KLIC_CHOICE)
     .is('odpojeno_kdy', null)
-    .select('id')
+  if (opakovany) dotaz = dotaz.in('stav', [...STAVY_K_OPAKOVANI]).eq('externi_ucet->>var_symbol', opakovany.varSymbol)
+  const { data, error } = await dotaz.select('id')
   return !error && (data ?? []).length === 1
+}
+
+export type VysledekOpakovanehoTestu = {
+  /**
+   *   `nic`       — nic nestojí, nic není na řadě, nebo se test nevešel do
+   *                 fronty (zkusí se příští běh); na Choice nic neodešlo,
+   *   `obnoveno`  — test prošel, napojení je zase `pripojeno`,
+   *   `dal_nejde` — Choice dál odmítá (přístup, nesmysl); stav se nemění,
+   *   `nevyslo`   — Choice neodpověděl nebo vrátil 429; nic se nezapsalo.
+   */
+  stav: 'nic' | 'obnoveno' | 'dal_nejde' | 'nevyslo'
+  /** Choice vrátil 429 — v tomhle běhu se ho už neptat. */
+  omezeno: boolean
+  dotazu: number
+}
+
+/**
+ * Opakovaný test napojení Choice, které stojí — volá JEN naplánovaná úloha
+ * (app/api/uloha/rezervace-choice), na začátku běhu.
+ *
+ * Proč (3. 11. 2026): jediná 403 přepnula obě napojení na „vyžaduje
+ * pozornost“ a úloha je pak přeskakovala, dokud někdo neklikne „Ověřit
+ * znovu“ — čtyři dny se nenačetlo nic. Jestli Choice odmítl jen chvíli,
+ * to jedna odpověď neřekne; test po čase to řekne.
+ *
+ *   * Tentýž dotaz jako „Ověřit znovu“ (`GET /bookings/list?page=1&perPage=1`)
+ *     — do Choice nic nepíše.
+ *   * Nejvýš JEDEN test za běh úlohy: jeden dotaz ve frontě (5,5 s) ubere
+ *     z načítání ostatních málo; víc stojících napojení se vystřídá po
+ *     čtvrthodinách (nejdéle nezkoušené první).
+ *   * Jednou za `OPAKOVAT_TEST_PO_MS` na napojení, od pozdějšího
+ *     z posledního ověření a běhu načítání — hlídá databáze
+ *     (`rezervace_choice_zabrat_opakovany_test`) spolu se zabráním fronty,
+ *     jedním voláním: kdo není na řadě, frontu nezabere; kdo se do fronty
+ *     nevejde, odstup nespotřebuje.
+ *   * Ve frontě čeká nejvýš jako tlačítko (dva rozestupy) — běh úlohy
+ *     kvůli testu nečeká na frontu celý svůj čas.
+ *   * Bez tokenu (chybí, nejde rozšifrovat) se nezkouší — to spraví jen
+ *     nové připojení.
+ *   * Projde-li, zapíše `pripojeno` `zapsatVysledekTestu` (jediné místo)
+ *     — úloha napojení načte hned v tomtéž běhu. Databáze pak nepřečtené
+ *     upozornění na výpadek nahradí tichým „zase načítá“.
+ *
+ * Databáze před migrací 20261108100000 funkci nemá — pak se nezkouší nic
+ * (žádný dotaz na Choice), jako dřív.
+ */
+export async function opakovatTestChoice(moznosti: { posledniDotazMs: number; prostredi?: ProstrediChoice }): Promise<VysledekOpakovanehoTestu> {
+  const p = moznosti.prostredi ?? SKUTECNE
+  const nic: VysledekOpakovanehoTestu = { stav: 'nic', omezeno: false, dotazu: 0 }
+  const sluzba = klientUlohy()
+  if (!sluzba) return nic
+
+  const { data } = await sluzba
+    .from('integrace_pripojeni')
+    .select('id, stav, externi_ucet, posledni_test_kdy')
+    .eq('oblast', 'rezervace')
+    .eq('poskytovatel', KLIC_CHOICE)
+    .in('stav', [...STAVY_K_OPAKOVANI])
+    .is('odpojeno_kdy', null)
+  // Nejdéle nezkoušené první (`posledni_test_kdy` jen řadí — kdy smí test
+  // odejít, rozhoduje odstup v databázi, ne tenhle sloupec, který si
+  // správce napojení může přepsat).
+  const kandidati = ((data ?? []) as { id: string; externi_ucet: Record<string, unknown> | null; posledni_test_kdy: string | null }[])
+    .sort((a, b) => (a.posledni_test_kdy ?? '').localeCompare(b.posledni_test_kdy ?? '') || a.id.localeCompare(b.id))
+
+  for (const k of kandidati) {
+    const vs = k.externi_ucet?.var_symbol
+    const varSymbol = typeof vs === 'string' ? vs : ''
+    if (!varSymbol) continue
+    const token = await nacistToken(sluzba, k.id)
+    if (!token) continue
+
+    const nejdele = nejdeleCekat(moznosti.posledniDotazMs, 'tlacitko', p)
+    if (nejdele === null) return nic
+    const { data: z, error } = await sluzba.rpc('rezervace_choice_zabrat_opakovany_test', {
+      p_pripojeni: k.id,
+      p_odstup_ms: OPAKOVAT_TEST_PO_MS,
+      p_rozestup_ms: ROZESTUP_DOTAZU_MS,
+      p_nejdele_cekat_ms: nejdele,
+    })
+    if (error) {
+      if (!funkceNeexistuje(error)) console.error('[rezervace-choice] opakovaný test: fronta selhala', error.code ?? '')
+      return nic
+    }
+    // -1 = ještě není na řadě (odstup); zkusí se další napojení.
+    if (z === -1) continue
+    // NULL = do fronty se nevešel. Cokoli jiného než ms je nesmysl
+    // z databáze — pak se neposílá nic (ne „pošli hned“).
+    if (typeof z !== 'number' || !Number.isInteger(z) || z < 0) return nic
+
+    await pockat(z, p)
+    const test = await poslatTest(token, p)
+    await zapsatVysledekTestu(sluzba, k.id, test, { varSymbol })
+    if (test.stav === 'ok') return { stav: 'obnoveno', omezeno: false, dotazu: 1 }
+    if (test.druh === 'pristup' || test.druh === 'data') return { stav: 'dal_nejde', omezeno: false, dotazu: 1 }
+    return { stav: 'nevyslo', omezeno: test.druh === 'limit', dotazu: 1 }
+  }
+  return nic
 }
 
 /**

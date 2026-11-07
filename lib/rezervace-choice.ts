@@ -101,6 +101,34 @@ export const CASOVY_LIMIT_MS = 15_000
 export const PLATNOST_POKUSU_S = 10 * 60
 
 const HODINA_MS = 3_600_000
+
+/**
+ * Jak často naplánovaná úloha zkouší napojení, které stojí (Choice
+ * odmítl přístup — `vyzaduje_pozornost` — nebo neprošlo „Ověřit znovu“
+ * — `chyba`): tentýž `GET /bookings/list?page=1&perPage=1` jako „Ověřit
+ * znovu“, přes frontu dotazů. Měří se od pozdějšího z posledního ověření
+ * a posledního běhu načítání (migrace 20261108100000), takže první
+ * opakovaný test přijde tolik po výpadku. Rozhodnutí: otázka 89
+ * v docs/hlaseni/otazky.md.
+ *
+ * Proč ne čtvrt hodiny (každý běh úlohy): Choice 3. 11. odmítl přístup
+ * hodinu po dvou 429 — kdyby šlo o blokaci za příliš mnoho dotazů,
+ * dotaz každých 15 minut by ji mohl držet pořád. Proč ne den: výpadek
+ * se pak spraví nejdřív druhý den a rezervace z večera chybí.
+ * Databáze pustí 30 min až 24 h.
+ */
+// ROZHODNOUT: otázka 89 — 2 h bez konce; jinak jen tahle konstanta.
+export const OPAKOVAT_TEST_PO_MS = 2 * HODINA_MS
+
+/** „každou hodinu“, „každé 2 hodiny“, „každých 6 hodin“. */
+export function kazdychHodin(ms: number): string {
+  const h = Math.max(1, Math.round(ms / HODINA_MS))
+  if (h === 1) return 'každou hodinu'
+  return h <= 4 ? `každé ${h} hodiny` : `každých ${h} hodin`
+}
+
+/** Věta k odmítnutému přístupu: co Foodtab udělá sám a co jde hned. */
+export const VETA_OPAKOVANI = `Foodtab přístup zkouší znovu sám ${kazdychHodin(OPAKOVAT_TEST_PO_MS)}; hned to jde tlačítkem „Ověřit znovu“.`
 const DEN_MS = 24 * HODINA_MS
 /** Pravidelné procházení: od včerejška (36 h — „včera“ v jakémkoli pásmu) do +180 dní podle data rezervace. */
 export const OKNO_ZPET_MS = 36 * HODINA_MS
@@ -1503,7 +1531,10 @@ const POPIS_PRESKOCENI: Record<DuvodPreskoceni, string> = {
 export function chybaBehu(v: VysledekBehuChoice): string | null {
   const casti: string[] = []
   if (v.konec === 'limit') casti.push('Choice omezil počet dotazů (429) — načítání pokračuje při dalším běhu.')
-  else if (v.konec === 'pristup') casti.push(`${v.duvod ?? 'Choice odmítl přístup.'} Připojte podnik znovu (Odpojit → Připojit podnik v Choice).`)
+  // Ne „připojte znovu“: 3. 11. odmítl Choice jedinkrát a „Odpojit“
+  // smaže uložený token. Napojení stojí, dokud test neprojde — opakovaný
+  // (lib/rezervace-choice-sync.ts, `opakovatTestChoice`), nebo ruční.
+  else if (v.konec === 'pristup') casti.push(`${v.duvod ?? 'Choice odmítl přístup.'} Načítání stojí, dokud přístup neprojde testem. ${VETA_OPAKOVANI}`)
   else if (v.konec === 'chyba') casti.push(v.duvod ?? 'Načítání z Choice selhalo.')
   if (v.chybaZapisu && (v.konec === 'limit' || v.konec === 'pristup')) casti.push(v.chybaZapisu)
 

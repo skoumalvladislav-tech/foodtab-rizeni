@@ -44,6 +44,8 @@ import {
   popisSouhrnuDne,
   popisRezervace,
   jeUpozorneniKRezervaci,
+  popisNapojeni,
+  jeUpozorneniNapojeni,
 } from '../lib/upozorneni-text.ts'
 import { odkazUpozorneni } from '../lib/upozorneni-odkaz.ts'
 import { slozitPush } from '../lib/komunikace/push-zprava.ts'
@@ -759,6 +761,63 @@ console.log('\n== Akce a rezervace ==')
 
   ma('stránka Upozornění kreslí větu pod nadpisem z popisRezervace (podle jeUpozorneniKRezervaci)',
     stranka.includes('popisRezervace(z.druh, z.telo)') && stranka.includes('jeUpozorneniKRezervaci(z.druh)'), true)
+}
+
+/* =====================================================================
+   VÝPADEK NAPOJENÍ (7. 11. 2026, migrace 20261108100000)
+
+   3. 11. Choice jedinkrát odmítl přístup a čtyři dny se nenačetla žádná
+   rezervace, aniž by o tom kdo věděl. Komu upozornění chodí a že jen
+   jednou na výpadek, hlídá scénář krok110. Tady text, push a odkaz:
+   nadpis jde do PUSH — jen kdo a kde, důvod až ve větě v aplikaci.
+   ===================================================================== */
+console.log('\n== Výpadek napojení ==')
+{
+  const ID = '11111111-2222-4333-8444-555555555555'
+  const DUVOD = 'Choice odmítl přístup (403). Načítání stojí, dokud přístup neprojde testem.'
+  const VYPADEK = { pripojeni: ID, oblast: 'rezervace', poskytovatel: 'choice', pobocka: 'Bernard Bar Tábor', pobocka_slug: 'bernard-bar', duvod: DUVOD }
+  const OBNOVENO = { pripojeni: ID, oblast: 'rezervace', poskytovatel: 'choice', pobocka: 'Bernard Bar Tábor', pobocka_slug: 'bernard-bar' }
+
+  ma('výpadek: kdo, co a kde', nadpisUpozorneni('integrace.vypadek', VYPADEK, obdobi), 'Choice nenačítá rezervace — Bernard Bar Tábor')
+  ma('obnovení', nadpisUpozorneni('integrace.obnoveno', OBNOVENO, obdobi), 'Choice zase načítá rezervace — Bernard Bar Tábor')
+  ma('nadpis (a push) NENESE důvod', nadpisUpozorneni('integrace.vypadek', VYPADEK, obdobi).includes('403'), false)
+  ma('push nese nadpis',
+    slozitPush({ typ: 'jedna', pocet: 1, druh: 'integrace.vypadek', telo: VYPADEK, priorita: 'important' }).body,
+    'Choice nenačítá rezervace — Bernard Bar Tábor')
+  ma('neznámý poskytovatel a oblast z těla se nevypíšou',
+    nadpisUpozorneni('integrace.vypadek', { poskytovatel: '<b>zly</b>', oblast: 'cokoli' }, obdobi), 'Napojení nenačítá data')
+  ma('bez pobočky bez pomlčky', nadpisUpozorneni('integrace.vypadek', { poskytovatel: 'choice', oblast: 'rezervace' }, obdobi), 'Choice nenačítá rezervace')
+
+  ma('pod nadpisem výpadku: co to znamená a důvod z napojení', popisNapojeni('integrace.vypadek', VYPADEK),
+    `Nové a změněné rezervace teď do Foodtabu nechodí. ${DUVOD}`)
+  ma('… bez důvodu jen první věta', popisNapojeni('integrace.vypadek', { ...VYPADEK, duvod: '  ' }), 'Nové a změněné rezervace teď do Foodtabu nechodí.')
+  ma('pod nadpisem obnovení', popisNapojeni('integrace.obnoveno', OBNOVENO), 'Rezervace se zase načítají.')
+  ma('jiný druh nic', popisNapojeni('rezervace.nova', VYPADEK), '')
+
+  ma('klepnutí → Napojení v rozsahu POBOČKY napojení (tam je „Ověřit znovu“)', cil('integrace.vypadek', VYPADEK), '/bernard-bar/rezervace/napojeni')
+  ma('… i u obnovení', cil('integrace.obnoveno', OBNOVENO), '/bernard-bar/rezervace/napojeni')
+  ma('podvržený slug → rozsah, kde člověk je', cil('integrace.vypadek', { ...VYPADEK, pobocka_slug: '//zly.example' }), '/perla/rezervace/napojeni')
+  ma('jiná oblast než rezervace → obecná stránka Upozornění', cil('integrace.vypadek', { ...VYPADEK, oblast: 'pokladna' }), '/perla/upozorneni')
+  ma('jeUpozorneniNapojeni: oba druhy a nic jiného',
+    jeUpozorneniNapojeni('integrace.vypadek') && jeUpozorneniNapojeni('integrace.obnoveno') && !jeUpozorneniNapojeni('rezervace.nova') && !jeUpozorneniNapojeni('integrace'), true)
+
+  const migrace = fs.readFileSync('supabase/migrations/20261108100000_rezervace_choice_vypadek.sql', 'utf8')
+  const spoust = migrace.slice(migrace.indexOf('create function app.integrace_vypadek_upozornit()'),
+    migrace.indexOf('revoke all on function app.integrace_vypadek_upozornit()'))
+  ma('vyříznutí spouště z migrace něco našlo (kontrola nečte prázdno)', spoust.length > 1000 && spoust.includes('app.notifikovat('), true)
+  // Druh je třetí argument app.notifikovat (za příjemcem) — 'integrace.manage' je právo, ne druh.
+  const druhy = [...new Set([...spoust.matchAll(/v_u\.user_id,\s*'([a-z_]+\.[a-z_]+)'/g)].map((m) => m[1]))].sort()
+  ma(`spoušť posílá dva druhy (${druhy.join(', ')})`, druhy.join(','), 'integrace.obnoveno,integrace.vypadek')
+  ma('… každý má vlastní nadpis a vede na Napojení',
+    druhy.every((d) => nadpisUpozorneni(d, VYPADEK, obdobi) !== 'Upozornění' && cil(d, VYPADEK) === '/bernard-bar/rezervace/napojeni'), true)
+  ma('výpadek je „important“ (push, odznak), obnovení „low“ (tiše, bez odznaku)',
+    /'integrace\.vypadek', v_telo, 'important'/.test(spoust) && /'integrace\.obnoveno', v_telo, 'low'/.test(spoust)
+    && pocitaSeDoOdznaku('important') && !pocitaSeDoOdznaku('low'), true)
+  ma('tělo nenese token, tajemství ani externí účet', /tajemstvi|token|externi_ucet|sifra/.test(spoust), false)
+  ma('sám sobě se nepíše (auth.uid())', /v_ja\s+uuid := auth\.uid\(\)/.test(spoust) && /if v_u\.user_id is distinct from v_ja then/.test(spoust), true)
+
+  ma('stránka Upozornění kreslí větu z popisNapojeni a odkaz (podle jeUpozorneniNapojeni)',
+    stranka.includes('popisNapojeni(z.druh, z.telo)') && stranka.includes('jeUpozorneniNapojeni(z.druh)') && stranka.includes('Otevřít napojení'), true)
 }
 
 console.log(`\n${chyb === 0 ? 'VŠECHNO PROŠLO' : `CHYB: ${chyb}`}`)

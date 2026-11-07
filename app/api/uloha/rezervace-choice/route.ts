@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { tajemstviSedi, uzBezi } from '@/lib/supabase/uloha'
 import { NEJMENE_NA_PRIPOJENI_MS, ROZESTUP_DOTAZU_MS } from '@/lib/rezervace-choice'
-import { choiceKSynchronizaci, REZERVA_DOTAZU_MS, synchronizovatChoice } from '@/lib/rezervace-choice-sync'
+import { choiceKSynchronizaci, opakovatTestChoice, REZERVA_DOTAZU_MS, synchronizovatChoice } from '@/lib/rezervace-choice-sync'
 
 /**
  * Naplánovaná úloha: načtení rezervací z Choice (choiceqr.com) do
@@ -31,6 +31,14 @@ import { choiceKSynchronizaci, REZERVA_DOTAZU_MS, synchronizovatChoice } from '@
  * nejmenší díl, dočte zbytek úlohy (`konecDiluUlohy`, nezávislé ověření
  * PR #163). Tlačítka vedle úlohy ji tak stojí nejvýš místa ve frontě,
  * která sama zabrala.
+ *
+ * NAPOJENÍ, KTERÉ STOJÍ (migrace 20261108100000): na začátku běhu
+ * nejvýš JEDEN opakovaný test napojení, u kterého Choice odmítl přístup
+ * (`opakovatTestChoice`, jednou za 2 hodiny na napojení). Před načítáním,
+ * ne po něm: když projde, `choiceKSynchronizaci` napojení už vidí, a protože
+ * se nejdéle nenačítalo, jde v pořadí dopředu (`poradiSynchronizace`) —
+ * načte se hned v tomtéž běhu. Po načítání by na test nezbyl čas (poslední
+ * připojení dočítá zbytek úlohy). Stojí to nejvýš jedno místo ve frontě.
  */
 
 export const dynamic = 'force-dynamic'
@@ -55,6 +63,11 @@ export async function GET(request: Request): Promise<NextResponse> {
   // rezerva na odpověď a zápis. (Až tady, ne nahoře v modulu: import se
   // nesmí číst při načtení adresy.)
   const posledniDotazUlohy = konecUlohy - REZERVA_DOTAZU_MS
+  // Bez id napojení a bez textů (veřejný log GitHub Actions, viz níž).
+  const opakovanyTest = await opakovatTestChoice({ posledniDotazMs: posledniDotazUlohy })
+  if (opakovanyTest.omezeno) {
+    return NextResponse.json({ pripojeni: 0, zpracovano: 0, ok: 0, chyby: 0, preskoceno: 0, omezeno: true, opakovany_test: opakovanyTest.stav, vysledky: [] })
+  }
   const pripojeni = await choiceKSynchronizaci()
 
   // Bez id připojení a bez textů chyb: odpověď končí ve veřejném logu
@@ -110,6 +123,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     chyby: vysledky.filter((v) => v.stav === 'chyba').length,
     preskoceno: vysledky.filter((v) => v.stav === 'preskoceno').length,
     omezeno,
+    opakovany_test: opakovanyTest.stav,
     vysledky,
   })
 }

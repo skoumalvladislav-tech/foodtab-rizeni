@@ -51,7 +51,9 @@ import {
   NEJMENE_NA_PRIPOJENI_MS,
   OKNO_DOPREDU_MS,
   OKNO_ZPET_MS,
+  OPAKOVAT_TEST_PO_MS,
   PLATNOST_POKUSU_S,
+  VETA_OPAKOVANI,
   ROZESTUP_DOTAZU_MS,
   STAVY_CHOICE,
   UKAZEK_DELKY,
@@ -61,6 +63,7 @@ import {
   casZChoice,
   chybaBehu,
   cisloZChoice,
+  kazdychHodin,
   mapaMist,
   mistoZChoice,
   nacistMapuMist,
@@ -374,7 +377,7 @@ function hodinyAFronta(start) {
  * `uloha: false` = databáze před migrací 20261102100000 (funkce úlohy
  * chybí, tlačítka dostávají NULL místo „zkusit znovu“).
  */
-function funkceFronty(db, h, { uloha = true, overeni = 'ano' } = {}) {
+function funkceFronty(db, h, { uloha = true, overeni = 'ano', opakovany = uloha } = {}) {
   // Jako SQL: bez firmy 22023 (funkce dotaz bez firmy odmítne).
   const bezFirmy = { data: null, error: { code: '22023', message: 'Dotaz na Choice musí patřit firmě.' } }
   const tlacitko = (rozestup, nejdele, firma) => {
@@ -406,6 +409,26 @@ function funkceFronty(db, h, { uloha = true, overeni = 'ano' } = {}) {
     }
   } else if (overeni === 'chyba') {
     db.rpc.rezervace_choice_zabrat_overeni = () => ({ data: null, error: { code: 'XX000', message: 'odstup spadl' } })
+  }
+  if (opakovany) {
+    // Jako SQL (20261108100000): odstup od POZDĚJŠÍHO z posledního ověření
+    // (sdílené s „Ověřit znovu“) a posledního běhu načítání; -1 = ještě
+    // ne (fronty se nedotkne); pak vstup ÚLOHY do fronty — NULL = nevešel
+    // se (odstup se nespotřeboval), jinak ms do odchodu testu.
+    db.rpc.rezervace_choice_zabrat_opakovany_test = ({ p_pripojeni, p_odstup_ms, p_rozestup_ms, p_nejdele_cekat_ms }) => {
+      if (typeof p_pripojeni !== 'string' || !p_pripojeni) return { data: null, error: { code: '22023', message: 'Opakovaný test Choice musí patřit připojení.' } }
+      if (!Number.isInteger(p_odstup_ms) || p_odstup_ms < 1_800_000 || p_odstup_ms > 86_400_000) {
+        return { data: null, error: { code: '22023', message: 'Opakovaný test Choice smí jít nejčastěji po 30 minutách a nejméně jednou za 24 hodin.' } }
+      }
+      const beh = Math.max(-Infinity, ...(db.tabulky.synchronizace_behy ?? [])
+        .filter((b) => b.integrace_pripojeni_id === p_pripojeni).map((b) => Date.parse(b.zahajeno_kdy)))
+      const naposledy = Math.max(h.overeni.get(p_pripojeni) ?? -Infinity, beh)
+      if (naposledy > h.ted - p_odstup_ms) return { data: -1, error: null }
+      const cekat = h.zabratUlohou(p_rozestup_ms, p_nejdele_cekat_ms)
+      if (cekat === null) return { data: null, error: null }
+      h.overeni.set(p_pripojeni, h.ted)
+      return { data: cekat, error: null }
+    }
   }
 }
 
@@ -529,7 +552,10 @@ const zapisDoPameti = () => {
   const ch2 = choiceSRezervacemi({ chyby: { 1: { stav: 'chyba', druh: 'pristup', duvod: 'Choice odmítl přístup (401).', http: 401 } } }, h2)
   const v2 = await probehnoutChoice({ api: ch2.api, token: TOKEN, varSymbol: '1', kurzor: {}, tedMs: START,
     pockatNaDotaz: async () => true, smiMimoFrontu: () => true, zapsat: zapisDoPameti().fn })
-  ok('401 → konec „pristup“ a výzva připojit znovu', v2.konec === 'pristup' && /Připojte podnik znovu/.test(chybaBehu(v2)))
+  // Do 7. 11. tu stálo „Připojte podnik znovu“ — jenže Odpojit smaže token
+  // a 3. 11. odmítl Choice jedinkrát. Teď: stojí, zkusí se samo, nebo tlačítkem.
+  ok('401 → konec „pristup“, načítání stojí a Foodtab to zkusí znovu sám', v2.konec === 'pristup'
+    && chybaBehu(v2).includes(VETA_OPAKOVANI) && /Načítání stojí/.test(chybaBehu(v2)) && !/Připojte podnik znovu|Odpojit/.test(chybaBehu(v2)))
 }
 
 {
@@ -583,6 +609,7 @@ function databaze(tabulky = {}, ted = () => Date.now()) {
   // Chybějící sloupec je v databázi NULL (`not … is null` ho nepustí).
   const sedi = (radek, filtry) => filtry.every(([op, s, v]) =>
     op === 'eq' ? hodnota(radek, s) === v : op === 'neq' ? hodnota(radek, s) !== v : op === 'is' ? hodnota(radek, s) === v
+      : op === 'in' ? v.includes(hodnota(radek, s))
       : op === 'not-is' ? (hodnota(radek, s) ?? null) !== v : (() => { throw new Error(`podstrčená databáze neumí filtr ${op}`) })())
   const zpracovat = (q) => {
     const t = (svet.tabulky[q.tabulka] ??= [])
@@ -615,6 +642,7 @@ function databaze(tabulky = {}, ted = () => Date.now()) {
       eq: (s, v) => (q.filtry.push(['eq', s, v]), b),
       neq: (s, v) => (q.filtry.push(['neq', s, v]), b),
       is: (s, v) => (q.filtry.push(['is', s, v]), b),
+      in: (s, v) => (q.filtry.push(['in', s, [...v]]), b),
       not: (s, op, v) => (q.filtry.push([`not-${op}`, s, v]), b),
       order: (s) => ((q.razeni = s), b),
       limit: (n) => ((q.limit = n), b),
@@ -652,7 +680,7 @@ function pripojeni(id, x = {}) {
  * Svět pro synchronizaci: databáze, fronta se stejnou aritmetikou jako SQL, Choice s rezervacemi, virtuální hodiny.
  * `fronta: false` = databáze bez front vůbec (před 20261031100000), `uloha: false` = před 20261102100000.
  */
-function svetSynchronizace({ pripojeniRadky, sifry = { [ID_PRIPOJENI]: 'sifra-ok' }, choice = () => odpoved(200, []), fronta = true, uloha = true, overeni = fronta ? 'ano' : 'ne', zapis } = {}) {
+function svetSynchronizace({ pripojeniRadky, sifry = { [ID_PRIPOJENI]: 'sifra-ok' }, choice = () => odpoved(200, []), fronta = true, uloha = true, overeni = fronta ? 'ano' : 'ne', opakovany = uloha, zapis } = {}) {
   const START = Date.UTC(2026, 9, 25, 18, 0, 0)
   const h = hodinyAFronta(START)
   const db = databaze({
@@ -660,7 +688,7 @@ function svetSynchronizace({ pripojeniRadky, sifry = { [ID_PRIPOJENI]: 'sifra-ok
     integrace_tajemstvi: Object.entries(sifry).map(([pripojeni_id, sifra]) => ({ pripojeni_id, sifra })),
     synchronizace_behy: [],
   }, () => h.ted)
-  if (fronta) funkceFronty(db, h, { uloha, overeni })
+  if (fronta) funkceFronty(db, h, { uloha, overeni, opakovany })
   else if (overeni === 'chyba') db.rpc.rezervace_choice_zabrat_overeni = () => ({ data: null, error: { code: 'XX000', message: 'odstup spadl' } })
   db.rpc.rezervace_importovat_zdroj = zapis ?? (({ p_radky }) => ({ data: { nove: p_radky.length, zmenene: 0, beze_zmeny: 0, zastarale: 0 }, error: null }))
   const dotazy = []
@@ -765,7 +793,8 @@ async function sVypisy(fn) {
   const s = svetSynchronizace({ choice: () => odpoved(401, {}) })
   await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: s.START + 57_000, prostredi: s.prostredi })
   const p = s.db.tabulky.integrace_pripojeni[0]
-  ok('401 → „vyžaduje pozornost“, test neplatí, výzva připojit znovu', p.stav === 'vyzaduje_pozornost' && p.posledni_test_ok === false && /Připojte podnik znovu/.test(p.posledni_chyba))
+  ok('401 → „vyžaduje pozornost“, test neplatí, u napojení že to Foodtab zkusí znovu sám', p.stav === 'vyzaduje_pozornost' && p.posledni_test_ok === false
+    && (p.posledni_chyba ?? '').includes(VETA_OPAKOVANI))
 
   const bezTokenu = svetSynchronizace({ sifry: {} })
   await SYNC.synchronizovatChoice(ID_PRIPOJENI, { konecMs: bezTokenu.START + 57_000, prostredi: bezTokenu.prostredi })
@@ -1420,11 +1449,12 @@ const ROUTE_ULOHY = await nactiModul('app/api/uloha/rezervace-choice/route.ts', 
   ['@/lib/supabase/uloha', js('export function tajemstviSedi() { return true }\nexport async function uzBezi() { return null }')],
   ['@/lib/rezervace-choice-sync', js(`
 export const REZERVA_DOTAZU_MS = globalThis.__uloha.SYNC.REZERVA_DOTAZU_MS
+export function opakovatTestChoice(m) { return globalThis.__uloha.SYNC.opakovatTestChoice({ ...m, prostredi: globalThis.__uloha.prostredi }) }
 export function choiceKSynchronizaci() { return globalThis.__uloha.SYNC.choiceKSynchronizaci() }
 export function synchronizovatChoice(id, m) { return globalThis.__uloha.SYNC.synchronizovatChoice(id, { ...m, prostredi: globalThis.__uloha.prostredi }) }`)],
 ])
 
-async function simulovatUlohu({ pripojeniRadky, behu, pred = () => {}, choice429 = null }) {
+async function simulovatUlohu({ pripojeniRadky, behu, pred = () => {}, choice429 = null, odmita = null }) {
   const s = svetSynchronizace({
     pripojeniRadky,
     sifry: Object.fromEntries(pripojeniRadky.map((p) => [p.id, `tok-${p.id}`])),
@@ -1445,9 +1475,11 @@ async function simulovatUlohu({ pripojeniRadky, behu, pred = () => {}, choice429
     const okno = u.searchParams.get('periodField') === 'bookingDt' && Date.parse(u.searchParams.get('till')) - s.h.ted > 100 * 86_400_000
     const druh = u.searchParams.get('periodField') === 'createdDt' ? 'nove' : okno ? 'okno' : 'blizko'
     const stranka = Number(u.searchParams.get('page'))
-    zaznam.push({ cas: s.h.ted, kdo, druh, stranka })
+    zaznam.push({ cas: s.h.ted, kdo, druh, stranka, test: String(url) === ADRESA_TESTU })
     s.h.ted += 400
     if (choice429 && choice429(zaznam.length)) return odpoved(429, {})
+    // Napojení, kterému Choice odmítá přístup (oddíl 12).
+    if (odmita && odmita(kdo)) return odpoved(403, {})
     const celkem = druh === 'okno' ? 250 : 3
     const n = Math.max(0, Math.min(100, celkem - (stranka - 1) * 100))
     return odpoved(200, Array.from({ length: n }, (_, i) => rezervace(`${kdo.slice(0, 2)}${stranka}${i}`, { locationPoints: stolyPatra(1 + (i % 12)) })))
@@ -1581,6 +1613,8 @@ for (const [n, behu, nejdelePauza] of [[3, 6, 2], [5, 10, 3]]) {
       globalThis.__uloha = {
         SYNC: {
           ...SYNC,
+          // Bez podstrčeného prostředí by test šel na opravdový Choice.
+          opakovatTestChoice: async () => ({ stav: 'nic', omezeno: false, dotazu: 0 }),
           choiceKSynchronizaci: async () => ids,
           synchronizovatChoice: async (id, m) => {
             volani.push(`${id}:${m.posledniPripojeni === true ? 'poslední' : m.posledniPripojeni === false ? 'další' : String(m.posledniPripojeni)}`)
@@ -3037,9 +3071,9 @@ for (const druh of ['limit', 'pristup']) {
   await beh(`zápis selže a Choice vrátí ${druh}`, () => probehnoutChoice(behStoly({ api }, { zapsat })), [
     [`chyba zápisu nepřebije „${druh}“ z dotazu, který opravdu odešel; v chybaZapisu zůstane`, (v) =>
       [stranek === 2 && v.konec === druh && v.chybaZapisu === 'Databáze řádky nepřijala.' && v.uspesnych === 0, `${stranek} dotazy, ${v.konec}, chyba zápisu „${v.chybaZapisu}“`]],
-    [`… hláška u napojení má obojí (${druh === 'limit' ? '429' : 'připojit znovu'} i chybu zápisu)`, (v) => {
+    [`… hláška u napojení má obojí (${druh === 'limit' ? '429' : 'odmítnutý přístup'} i chybu zápisu)`, (v) => {
       const c = chybaBehu(v) ?? ''
-      const choice = druh === 'limit' ? c.startsWith('Choice omezil počet dotazů (429)') : c.startsWith('Choice odmítl přístup (401). Připojte podnik znovu')
+      const choice = druh === 'limit' ? c.startsWith('Choice omezil počet dotazů (429)') : c.startsWith('Choice odmítl přístup (401). Načítání stojí') && c.includes(VETA_OPAKOVANI)
       return [choice && c.includes('Databáze řádky nepřijala.'), `„${c}“`]
     }],
   ])
@@ -3694,6 +3728,293 @@ for (const [posledniMs, posledniPripojeni, smi] of [[HRANICE_HNED - 1, false, fa
       const radky = s.db.rpcVolani.filter((x) => x.jmeno === 'rezervace_importovat_zdroj').flatMap((x) => x.args.p_radky)
       return [radky.length > 0 && radky.every((x) => !('misto_zdroje' in x)), `${radky.length} řádků`]
     }],
+  ])
+}
+
+/* ===================================================================== */
+console.log('\n== 12. Napojení, které stojí: opakovaný test (7. 11. 2026) ==\n')
+
+/*
+ * 3. 11. 2026 v 19:41 odmítl Choice jedinkrát přístup (403) a obě
+ * napojení pak stála čtyři dny: úloha napojení ve „vyžaduje pozornost“
+ * přeskakovala a „Ověřit znovu“ nikdo nezmáčkl. Teď je úloha zkouší sama
+ * (`opakovatTestChoice`, migrace 20261108100000). SKUTEČNÝ
+ * lib/rezervace-choice-sync.ts; databáze podstrčená, funkce opakovaného
+ * testu se stejnou aritmetikou jako SQL (`funkceFronty`; skutečné SQL
+ * zkouší krok110).
+ */
+const STOJI = { stav: 'vyzaduje_pozornost', posledni_test_ok: false, posledni_test_kdy: '2026-11-03T18:41:00.000Z', posledni_chyba: 'Choice odmítl přístup (403). Načítání stojí.' }
+const stojici = (id = ID_PRIPOJENI, x = {}) => pripojeni(id, { ...STOJI, ...x })
+const zkusitZnovu = (s, x = {}) => SYNC.opakovatTestChoice({ posledniDotazMs: s.h.ted + 37_000, prostredi: s.prostredi, ...x })
+const zabraniTestu = (s) => s.db.rpcVolani.filter((r) => r.jmeno === 'rezervace_choice_zabrat_opakovany_test')
+const napojeniV = (s, id = ID_PRIPOJENI) => s.db.tabulky.integrace_pripojeni.find((p) => p.id === id)
+const beze = (p) => `${p.stav}, test ${p.posledni_test_ok}, „${String(p.posledni_chyba).slice(0, 50)}“`
+
+{
+  kontrola('kazdychHodin: 1, 2, 4, 5, 6, 24 h česky', () => {
+    const x = [1, 2, 4, 5, 6, 24].map((h) => kazdychHodin(h * 3_600_000)).join(' | ')
+    return [x === 'každou hodinu | každé 2 hodiny | každé 4 hodiny | každých 5 hodin | každých 6 hodin | každých 24 hodin', x]
+  })
+  kontrola('věta u napojení říká, jak často (podle konstanty) a že hned to jde „Ověřit znovu“', () =>
+    [VETA_OPAKOVANI.includes(`zkouší znovu sám ${kazdychHodin(OPAKOVAT_TEST_PO_MS)}`) && VETA_OPAKOVANI.includes('„Ověřit znovu“'), VETA_OPAKOVANI])
+  kontrola('odstup v kódu je v mezích, které pustí databáze (migrace 20261108100000)', () => {
+    const sql = cti('supabase/migrations/20261108100000_rezervace_choice_vypadek.sql')
+    const m = /p_odstup_ms < (\d+) or p_odstup_ms > (\d+)/.exec(sql)
+    return [Boolean(m) && OPAKOVAT_TEST_PO_MS >= Number(m[1]) && OPAKOVAT_TEST_PO_MS <= Number(m[2]),
+      m ? `${m[1]}–${m[2]} ms, kód ${OPAKOVAT_TEST_PO_MS}` : 'meze v migraci nenalezeny']
+  })
+}
+
+{
+  // Choice zase pustí → „pripojeno“. Fronta zabraná 4 s dopředu: test na své místo počká.
+  const s = svetSynchronizace({ pripojeniRadky: [stojici()], choice: () => odpoved(200, []) })
+  s.h.dalsi = s.START + 4_000
+  await beh('opakovaný test, Choice zase pustí', () => zkusitZnovu(s), [
+    ['test prošel → „obnoveno“, jeden dotaz', (v) => [v.stav === 'obnoveno' && v.dotazu === 1 && !v.omezeno, JSON.stringify(v)]],
+    ['… napojení zase „pripojeno“ s posledni_test_ok = true a bez chyby', () => {
+      const p = napojeniV(s)
+      return [p.stav === 'pripojeno' && p.posledni_test_ok === true && p.posledni_chyba === null, beze(p)]
+    }],
+    ['… tentýž dotaz jako „Ověřit znovu“: jediný GET ?page=1&perPage=1 s tokenem napojení', () => [
+      s.dotazy.length === 1 && s.dotazy[0].url === ADRESA_TESTU && s.dotazy[0].init.method === 'GET' && s.dotazy[0].init.headers.authorization === `Bearer ${TOKEN}`,
+      s.dotazy.map((d) => `${d.init.method} ${d.url}`).join(', ')]],
+    ['… přes frontu: odstup OPAKOVAT_TEST_PO_MS, rozestup 5,5 s, čeká nejvýš jako tlačítko', () => {
+      const z = zabraniTestu(s).map((x) => x.args)
+      return [z.length === 1 && z[0].p_pripojeni === ID_PRIPOJENI && z[0].p_odstup_ms === OPAKOVAT_TEST_PO_MS
+        && z[0].p_rozestup_ms === ROZESTUP_DOTAZU_MS && z[0].p_nejdele_cekat_ms === 2 * ROZESTUP_DOTAZU_MS, JSON.stringify(z)]
+    }],
+    ['… dotaz odešel až na svém místě ve frontě (za 4 s)', () => [s.dotazy[0]?.cas >= s.START + 4_000, `${(s.dotazy[0]?.cas ?? NaN) - s.START} ms`]],
+  ])
+}
+
+{
+  // Choice dál odmítá: stav se nemění, důvod s větou, odstup 2 h.
+  const s = svetSynchronizace({ pripojeniRadky: [stojici()], choice: () => odpoved(403, {}) })
+  await beh('opakovaný test, Choice dál odmítá', async () => {
+    const prvni = await sVypisy(() => zkusitZnovu(s))
+    const po1 = s.dotazy.length
+    const hned = await zkusitZnovu(s)
+    const po2 = s.dotazy.length
+    s.h.ted = s.START + OPAKOVAT_TEST_PO_MS - 60_000
+    const skoro = await zkusitZnovu(s)
+    const po3 = s.dotazy.length
+    s.h.ted = s.START + OPAKOVAT_TEST_PO_MS + 1
+    const pak = await zkusitZnovu(s)
+    return { prvni, hned, skoro, pak, dotazu: [po1, po2, po3, s.dotazy.length] }
+  }, [
+    ['Choice dál odmítá → „dal_nejde“', (r) => [r.prvni.vysledek.stav === 'dal_nejde' && r.dotazu[0] === 1, JSON.stringify(r.prvni.vysledek)]],
+    ['… stav zůstane „vyžaduje pozornost“ (ne „chyba“), test false, čas testu nový', () => {
+      const p = napojeniV(s)
+      return [p.stav === 'vyzaduje_pozornost' && p.posledni_test_ok === false && p.posledni_test_kdy !== STOJI.posledni_test_kdy, `${beze(p)}, ${p.posledni_test_kdy}`]
+    }],
+    ['… u napojení důvod (403) a že to Foodtab zkusí znovu sám', () => {
+      const c = napojeniV(s).posledni_chyba ?? ''
+      return [/403/.test(c) && c.includes(VETA_OPAKOVANI), c]
+    }],
+    ['… token není ve výpisu ani u napojení', (r) => [!r.prvni.vypisy.some((x) => x.includes(TOKEN)) && !JSON.stringify(s.db.tabulky).includes(TOKEN), `${r.prvni.vypisy.length} výpisů`]],
+    ['hned znovu → nic, žádný další dotaz (odstup)', (r) => [r.hned.stav === 'nic' && r.dotazu[1] === 1, `${r.hned.stav}, ${r.dotazu[1]} dotazů`]],
+    ['za 1 h 59 min → pořád nic', (r) => [r.skoro.stav === 'nic' && r.dotazu[2] === 1, `${r.skoro.stav}, ${r.dotazu[2]} dotazů`]],
+    ['po 2 h → test jde znovu', (r) => [r.pak.stav === 'dal_nejde' && r.dotazu[3] === 2, `${r.pak.stav}, ${r.dotazu[3]} dotazů`]],
+  ])
+}
+
+{
+  // Odstup se měří i od posledního běhu načítání a od ručního „Ověřit znovu“.
+  const zkus = async (nastavit) => {
+    const s = svetSynchronizace({ pripojeniRadky: [stojici()], choice: () => odpoved(200, []) })
+    nastavit(s)
+    const v = await zkusitZnovu(s)
+    return { v, dotazu: s.dotazy.length }
+  }
+  const beh_ = (s, predMs) => s.db.tabulky.synchronizace_behy.push({ id: `b-${predMs}`, integrace_pripojeni_id: ID_PRIPOJENI, stav: 'chyba', zahajeno_kdy: new Date(s.h.ted - predMs).toISOString() })
+  await beh('odstup od běhu a ručního ověření', async () => ({
+    behPredHodinou: await zkus((s) => beh_(s, 3_600_000)),
+    behPred3h: await zkus((s) => beh_(s, 3 * 3_600_000)),
+    rucnePredHodinou: await zkus((s) => s.h.overeni.set(ID_PRIPOJENI, s.h.ted - 3_600_000)),
+    cizi: await zkus((s) => s.db.tabulky.synchronizace_behy.push({ id: 'b-cizi', integrace_pripojeni_id: '99999999-2222-3333-4444-555555555555', stav: 'hotovo', zahajeno_kdy: new Date(s.h.ted - 60_000).toISOString() })),
+  }), [
+    ['běh načítání před hodinou (ten, kterému Choice odmítl) → test ještě ne', (r) => [r.behPredHodinou.v.stav === 'nic' && r.behPredHodinou.dotazu === 0, r.behPredHodinou.v.stav]],
+    ['běh načítání před 3 h → test jde', (r) => [r.behPred3h.v.stav === 'obnoveno' && r.behPred3h.dotazu === 1, r.behPred3h.v.stav]],
+    ['ruční „Ověřit znovu“ před hodinou → opakovaný test ještě ne (sdílený odstup)', (r) => [r.rucnePredHodinou.v.stav === 'nic' && r.rucnePredHodinou.dotazu === 0, r.rucnePredHodinou.v.stav]],
+    ['běh JINÉHO napojení před minutou test nezdrží', (r) => [r.cizi.v.stav === 'obnoveno', r.cizi.v.stav]],
+  ])
+}
+
+{
+  // Co se NEZKOUŠÍ — každé zvlášť, ať rozbití jednoho filtru shodí svou kontrolu.
+  const NEZKOUSI = [
+    ['zdravé napojení („pripojeno“)', [pripojeni(ID_PRIPOJENI)]],
+    ['odpojené napojení', [stojici(ID_PRIPOJENI, { odpojeno_kdy: '2026-11-04T10:00:00.000Z' })]],
+    ['napojení pokladny ve „vyžaduje pozornost“', [stojici(ID_PRIPOJENI, { oblast: 'pokladna' })]],
+    ['jiný poskytovatel rezervací', [stojici(ID_PRIPOJENI, { poskytovatel: 'jiny' })]],
+    ['„pripojuje_se“ (člověk je zrovna v Choice)', [stojici(ID_PRIPOJENI, { stav: 'pripojuje_se' })]],
+    ['„nepripojeno“', [stojici(ID_PRIPOJENI, { stav: 'nepripojeno' })]],
+    ['bez uloženého tokenu', [stojici()], {}],
+    ['bez var_symbol', [stojici(ID_PRIPOJENI, { externi_ucet: { domena: 'cerna-perla.choiceqr.com' } })]],
+  ]
+  for (const [popis, radky, sifry] of NEZKOUSI) {
+    const s = svetSynchronizace({ pripojeniRadky: radky, sifry, choice: () => odpoved(200, []) })
+    const pred = JSON.stringify(s.db.tabulky.integrace_pripojeni)
+    await beh(popis, () => zkusitZnovu(s), [
+      [`${popis} se nezkouší (žádné zabrání fronty, žádný dotaz, beze změny)`, (v) => [
+        v.stav === 'nic' && zabraniTestu(s).length === 0 && s.dotazy.length === 0 && JSON.stringify(s.db.tabulky.integrace_pripojeni) === pred,
+        `${v.stav}, ${zabraniTestu(s).length} zabrání, ${s.dotazy.length} dotazů`]],
+    ])
+  }
+  const s = svetSynchronizace({ pripojeniRadky: [stojici(ID_PRIPOJENI, { stav: 'chyba' })], choice: () => odpoved(200, []) })
+  await beh('„chyba“', () => zkusitZnovu(s), [
+    ['„chyba“ (neprošlo „Ověřit znovu“) se zkouší taky', (v) => [v.stav === 'obnoveno' && napojeniV(s).stav === 'pripojeno', `${v.stav}, ${napojeniV(s).stav}`]],
+  ])
+}
+
+{
+  // Jeden test za volání; nejdéle nezkoušené první; napojení v odstupu nezdrží další.
+  const DRUHE = '99999999-2222-3333-4444-555555555555'
+  const s = svetSynchronizace({
+    pripojeniRadky: [stojici(ID_PRIPOJENI), stojici(DRUHE, { posledni_test_kdy: null, branch_id: 'bbbbbbbb-0000-0000-0000-000000000099', externi_ucet: { var_symbol: '777' } })],
+    sifry: { [ID_PRIPOJENI]: 'sifra-ok', [DRUHE]: 'sifra-ok-2' },
+    choice: () => odpoved(403, {}),
+  })
+  await beh('dvě stojící napojení', async () => {
+    const v1 = await zkusitZnovu(s)
+    const t1 = s.dotazy.map((d) => d.init.headers.authorization)
+    const v2 = await zkusitZnovu(s)
+    const t2 = s.dotazy.map((d) => d.init.headers.authorization)
+    const v3 = await zkusitZnovu(s)
+    return { v1, v2, v3, t1, t2, po3: s.dotazy.length }
+  }, [
+    ['jeden test za volání (dvě stojící napojení, jeden dotaz)', (r) => [r.v1.dotazu === 1 && r.t1.length === 1, `${r.t1.length} dotazů`]],
+    ['… nejdéle nezkoušené první (bez testu před testem z 3. 11.)', (r) => [r.t1[0] === `Bearer ${TOKEN}-2`, r.t1[0] === `Bearer ${TOKEN}` ? 'to s testem z 3. 11.' : String(r.t1[0]).slice(0, 12)]],
+    ['… napojení v odstupu nezdrží další: druhé volání zkusí to druhé', (r) => [r.t2.length === 2 && r.t2[1] === `Bearer ${TOKEN}`, `${r.t2.length} dotazů`]],
+    ['… obě v odstupu → nic', (r) => [r.v3.stav === 'nic' && r.po3 === 2, `${r.v3.stav}, ${r.po3} dotazů`]],
+  ])
+}
+
+{
+  // Plná fronta: nic se neposlalo a odstup se nespotřeboval.
+  const s = svetSynchronizace({ pripojeniRadky: [stojici()], choice: () => odpoved(200, []) })
+  s.h.dalsi = s.START + 60_000
+  await beh('plná fronta', async () => {
+    const plna = await zkusitZnovu(s)
+    const dotazuPlna = s.dotazy.length
+    s.h.ted = s.START + 60_000
+    const volna = await zkusitZnovu(s)
+    return { plna, dotazuPlna, volna }
+  }, [
+    ['fronta plná (místo za minutu) → nic, žádný dotaz', (r) => [r.plna.stav === 'nic' && r.dotazuPlna === 0, `${r.plna.stav}, ${r.dotazuPlna} dotazů`]],
+    ['… odstup se nespotřeboval: když se fronta uvolní, test jde hned (ne za 2 h)', (r) => [r.volna.stav === 'obnoveno', r.volna.stav]],
+  ])
+
+  const s2 = svetSynchronizace({ pripojeniRadky: [stojici()], choice: () => odpoved(200, []) })
+  await beh('úloze nezbývá čas', () => zkusitZnovu(s2, { posledniDotazMs: s2.h.ted - 1 }), [
+    ['úloze nezbývá čas → frontu ani nezabere', (v) => [v.stav === 'nic' && zabraniTestu(s2).length === 0 && s2.dotazy.length === 0, `${v.stav}, ${zabraniTestu(s2).length} zabrání`]],
+  ])
+}
+
+{
+  // Databáze bez funkce, chyba funkce, nesmysl z funkce.
+  const s = svetSynchronizace({ pripojeniRadky: [stojici()], opakovany: false })
+  await beh('databáze před migrací', () => sVypisy(() => zkusitZnovu(s)), [
+    ['databáze před migrací 20261108100000 → nic, žádný dotaz, nic do logu', (r) => [
+      r.vysledek.stav === 'nic' && s.dotazy.length === 0 && r.vypisy.length === 0 && napojeniV(s).stav === 'vyzaduje_pozornost', `${r.vysledek.stav}, ${r.vypisy.length} výpisů`]],
+  ])
+  const s2 = svetSynchronizace({ pripojeniRadky: [stojici()] })
+  s2.db.rpc.rezervace_choice_zabrat_opakovany_test = () => ({ data: null, error: { code: 'XX000', message: `spadlo ${TOKEN}` } })
+  await beh('chyba funkce', () => sVypisy(() => zkusitZnovu(s2)), [
+    ['chyba fronty → nic, žádný dotaz; do logu jen kód, ne text chyby', (r) => [
+      r.vysledek.stav === 'nic' && s2.dotazy.length === 0 && r.vypisy.length === 1 && r.vypisy[0].includes('XX000') && !r.vypisy[0].includes('spadlo'),
+      r.vypisy.join(' | ')]],
+  ])
+  const nesmysly = []
+  for (const data of [-5, 'x', 1.5]) {
+    const s3 = svetSynchronizace({ pripojeniRadky: [stojici()] })
+    s3.db.rpc.rezervace_choice_zabrat_opakovany_test = () => ({ data, error: null })
+    const v = await zkusitZnovu(s3)
+    nesmysly.push(`${JSON.stringify(data)}→${v.stav}/${s3.dotazy.length}`)
+  }
+  kontrola('nesmysl z databáze (-5, „x“, 1,5) → nic, žádný dotaz (ne „pošli hned“)', () => [nesmysly.every((x) => x.endsWith('→nic/0')), nesmysly.join(', ')])
+}
+
+{
+  // 429 a výpadek Choice: nic se nezapíše (důvod výpadku zůstane).
+  for (const [kod, omezeno] of [[429, true], [502, false]]) {
+    const s = svetSynchronizace({ pripojeniRadky: [stojici()], choice: () => odpoved(kod, {}) })
+    const pred = JSON.stringify(napojeniV(s))
+    await beh(`opakovaný test, ${kod}`, () => zkusitZnovu(s), [
+      [`${kod} → „nevyslo“${omezeno ? ' a omezeno' : ' bez omezení'}; u napojení nic nezměněno`, (v) => [
+        v.stav === 'nevyslo' && v.omezeno === omezeno && JSON.stringify(napojeniV(s)) === pred, `${v.stav}, omezeno ${v.omezeno}, ${beze(napojeniV(s))}`]],
+    ])
+  }
+}
+
+{
+  // Souběh: mezi zabráním fronty a zápisem se napojení změnilo.
+  const s = svetSynchronizace({
+    pripojeniRadky: [stojici()],
+    choice: () => { Object.assign(napojeniV(s), { stav: 'pripojeno', posledni_test_ok: true, posledni_chyba: null }); return odpoved(403, {}) },
+  })
+  await beh('souběh s ručním ověřením', () => zkusitZnovu(s), [
+    ['souběžné ruční ověření (už „pripojeno“) opakovaný test s 403 nepřepíše', () => {
+      const p = napojeniV(s)
+      return [p.stav === 'pripojeno' && p.posledni_test_ok === true && p.posledni_chyba === null, beze(p)]
+    }],
+  ])
+  const s2 = svetSynchronizace({
+    pripojeniRadky: [stojici()],
+    choice: () => { napojeniV(s2).externi_ucet = { var_symbol: '999' }; return odpoved(200, []) },
+  })
+  await beh('souběh s jiným podnikem', () => zkusitZnovu(s2), [
+    ['mezitím jiný podnik Choice (jiný var_symbol): úspěch starého tokenu ho na „pripojeno“ nepřepne', () => [napojeniV(s2).stav === 'vyzaduje_pozornost', beze(napojeniV(s2))]],
+  ])
+}
+
+{
+  // SKUTEČNÁ úloha: test na začátku běhu, obnovené se načte hned.
+  // Jako 7. 11.: zdravé napojení se načetlo před čtvrt hodinou, stojící
+  // naposledy 3. 11. — nejdéle nenačtené jde v pořadí dopředu
+  // (`poradiSynchronizace`), a tak se načte hned v tomtéž běhu.
+  const STOJICI_ID = idPripojeni(1)
+  const radky = () => pripojeniUlohy(2, (i) => (i === 1 ? STOJI : {}))
+  const jako7listopadu = (s, b) => {
+    if (b > 0) return
+    s.db.tabulky.synchronizace_behy.push(
+      { id: 'b-zdrave', integrace_pripojeni_id: idPripojeni(0), stav: 'hotovo', pocet_novych_radku: 3, zahajeno_kdy: new Date(s.START - 15 * 60_000).toISOString() },
+      { id: 'b-stoji', integrace_pripojeni_id: STOJICI_ID, stav: 'chyba', pocet_novych_radku: 0, zahajeno_kdy: new Date(s.START - 4 * 86_400_000).toISOString() },
+    )
+  }
+  await beh('úloha, Choice zase pustí', () => simulovatUlohu({ pripojeniRadky: radky(), behu: 1, pred: jako7listopadu }), [
+    ['úloha: opakovaný test prošel („obnoveno“)', (r) => [r.behy[0].telo.opakovany_test === 'obnoveno', r.behy[0].telo.opakovany_test]],
+    ['… test šel první, jediný a za stojící napojení', (r) => {
+      const t = r.behy[0].dotazy.filter((d) => d.test)
+      return [t.length === 1 && r.behy[0].dotazy[0].test && t[0].kdo === STOJICI_ID, `${t.length} testů`]
+    }],
+    ['… obnovené napojení se načetlo HNED v tomtéž běhu (i „nové“)', (r) => [r.behy[0].telo.pripojeni === 2 && r.behy[0].po[STOJICI_ID].filter((x) => x === 'nove').length === 1,
+      r.behy[0].po[STOJICI_ID].join(',')]],
+    ['… rozestup mezi všemi dotazy ≥ 5 s', (r) => [r.nejmensiRozestup >= 5000, `${r.nejmensiRozestup} ms`]],
+    ['… běh se vešel do času úlohy', (r) => [vCase(r.behy[0]), `${r.behy[0].trval} ms`]],
+    ['… v odpovědi úlohy (veřejný log) není id napojení', (r) => [!JSON.stringify(r.behy[0].telo).includes(STOJICI_ID), JSON.stringify(r.behy[0].telo).slice(0, 80)]],
+  ])
+
+  await beh('úloha, Choice dál odmítá', () => simulovatUlohu({ pripojeniRadky: radky(), behu: 10, odmita: (kdo) => kdo === STOJICI_ID }), [
+    ['úloha: test jen v běhu 0 a 8 (jednou za 2 h, běh po 15 min)', (r) => {
+      const kde = r.behy.map((b, i) => (b.dotazy.some((d) => d.test) ? i : null)).filter((x) => x !== null)
+      return [kde.join(',') === '0,8', kde.join(',')]
+    }],
+    ['… výsledek „dal_nejde“ a napojení dál „vyžaduje pozornost“', (r) => [r.behy[0].telo.opakovany_test === 'dal_nejde' && napojeniV(r.s, STOJICI_ID).stav === 'vyzaduje_pozornost',
+      `${r.behy[0].telo.opakovany_test}, ${napojeniV(r.s, STOJICI_ID).stav}`]],
+    ['… stojící napojení se mimo test na nic neptá', (r) => [r.zaznam.filter((d) => d.kdo === STOJICI_ID && !d.test).length === 0, `${r.zaznam.filter((d) => d.kdo === STOJICI_ID && !d.test).length} dotazů`]],
+    ['… zdravé napojení se načítá v každém běhu', (r) => [r.behy.every((b) => b.po[idPripojeni(0)].length > 0), r.behy.map((b) => b.po[idPripojeni(0)].length).join(',')]],
+    ['… rozestup mezi všemi dotazy ≥ 5 s', (r) => [r.nejmensiRozestup >= 5000, `${r.nejmensiRozestup} ms`]],
+  ])
+
+  await beh('úloha, 429 na opakovaný test', () => simulovatUlohu({ pripojeniRadky: radky(), behu: 1, choice429: (n) => n === 1 }), [
+    ['úloha: 429 na opakovaný test → běh končí, na Choice už nic dalšího', (r) => [
+      r.behy[0].telo.omezeno === true && r.behy[0].telo.opakovany_test === 'nevyslo' && r.behy[0].dotazy.length === 1, `${r.behy[0].telo.opakovany_test}, ${r.behy[0].dotazy.length} dotazů`]],
+  ])
+
+  await beh('úloha, nic nestojí', () => simulovatUlohu({ pripojeniRadky: pripojeniUlohy(2), behu: 1 }), [
+    ['úloha bez stojících napojení: opakovaný test „nic“, frontu nezabírá', (r) => [r.behy[0].telo.opakovany_test === 'nic' && zabraniTestu(r.s).length === 0,
+      `${r.behy[0].telo.opakovany_test}, ${zabraniTestu(r.s).length} zabrání`]],
   ])
 }
 
