@@ -41,26 +41,46 @@
 -- najde už stojící, nic neposílá. Souběžné zápisy téhož řádku řadí zámek
 -- řádku — druhý `update` vidí `old.stav = 'vyzaduje_pozornost'`
 -- a upozornění nepošle. Výpadek = `pripojeno` → `vyzaduje_pozornost`.
--- U Choice tenhle přechod dělá JEN automat (lib/rezervace-choice-sync.ts:
--- odmítnutý přístup v běhu načítání a chybějící token); „Ověřit znovu“
--- a callback po neúspěchu zapisují `chyba` — to vidí ten, kdo klikl,
--- a upozornění nedostane nikdo. Opakovaný test, který neprojde, stav
--- nemění, takže další upozornění nepřijde, dokud napojení znovu
--- nenačítá a znovu nespadne.
+-- „Ověřit znovu“ a callback po neúspěchu zapisují `chyba` — to vidí ten,
+-- kdo klikl, a upozornění nedostane nikdo. Opakovaný test, který
+-- neprojde, stav nemění, takže další upozornění nepřijde, dokud
+-- napojení znovu nenačítá a znovu nespadne.
+--
+-- VÝPADEK HLÁSÍ JEN SERVER (`auth.uid()` je NULL). U Choice ho zapisuje
+-- jen automat klientem služby (lib/rezervace-choice-sync.ts: odmítnutý
+-- přístup v běhu načítání a chybějící token). Správce s `integrace.
+-- manage` smí řádek napojení měnit i přímo přes API (politika FOR ALL,
+-- 20261007110000) — kdyby stav přepnul sám, upozornění nepošle nikomu:
+-- výpadek, který si člověk udělal sám, není co hlásit, a majiteli by
+-- jinak psal vlastním textem (`posledni_chyba`) s push (nezávislá
+-- kontrola 7. 11., nález 3).
 --
 -- KOMU: majitel (employees.je_majitel) A `app.kdo_ma_pravo_na_pobocce
 -- (… 'integrace.manage', pobočka napojení)`. Majitel zvlášť, protože
 -- `integrace.manage` patří modulu Finance (20261007110000) — firma bez
 -- Financí by jinak nedostala upozornění vůbec. Kdo je platný příjemce
 -- (aktivní členství, nesmazaný), rozhoduje jen app.notifikovat — tady
--- se to podruhé nefiltruje. Sám sobě se nepíše (`auth.uid()`): automat
--- žádného přihlášeného nemá, správce, který by stav přepnul sám přes
--- API, upozornění o vlastním kroku nedostane.
+-- se to podruhé nefiltruje.
 --
 -- PRIORITA `important`: majitel dostane push hned (obchází frontu,
 -- 20260922120000), ostatním počká na příchod do práce — výpadek
--- v noci nebudí správce. Kategorie k vypnutí NENÍ: výpadek je vzácný,
--- upozornění jedno a bez něj stálo načítání čtyři dny.
+-- v noci nebudí správce. Kategorie k vypnutí NENÍ: bez upozornění
+-- stálo načítání čtyři dny.
+--
+-- ZVONÍ NEJVÝŠ JEDNOU ZA 24 HODIN NA NAPOJENÍ. Když napojení kolísá
+-- (opakovaný test projde, další běh dostane zase 403), byl by to výpadek
+-- každé 2 hodiny i v noci — a kdo dostane push každé 2 hodiny, vypne si
+-- upozornění úplně (nezávislá kontrola 7. 11., nález 1). Další výpadek
+-- do 24 h od posledního, který zvonil, přijde tiše (`low`: bez push,
+-- mimo odznak), ale přijde — v seznamu upozornění nahradí nepřečtené
+-- „zase načítá“, takže tam je, co platí teď. Kdy naposledy zvonilo,
+-- drží `app.integrace_vypadek_zvoneni` (upozornění samo to neudrží:
+-- nepřečtené se při obnovení maže).
+--
+-- ODPOJENÍ: kdo napojení odpojí, tomu i ostatním se nepřečtené
+-- upozornění k němu stáhne, i s push, který ještě čeká na směnu —
+-- o napojení, které už není, se nemá zvonit při příchodu do práce
+-- (nezávislá kontrola 7. 11., nález 4). Přečtené zůstane.
 --
 -- TĚLO: id napojení, oblast, poskytovatel, pobočka (název a slug)
 -- a důvod (`posledni_chyba`, max 300 znaků — píše ho náš kód, token
@@ -125,7 +145,8 @@
 --     `poskytovatel = 'choice'` ve spoušti nahradit seznamem.
 --   * Podmínka „jen Choice“ je JEN v `when` spouště (každý filtr
 --     jednou) — tělo o oblasti nerozhoduje.
---   * Žádná nová tabulka: výpadek nese stav v registru, odstup
+--   * Jediná nová tabulka je `app.integrace_vypadek_zvoneni` (kdy
+--     naposledy zvonil výpadek). Výpadek nese stav v registru, odstup
 --     `app.rezervace_choice_overeni`, příjemce `notifications`.
 --   * Opakovaný test do Choice nic nepíše (jen GET), jako všechno
 --     v napojení Choice.
@@ -149,6 +170,20 @@
 -- k obnovení se hledají podle klíče s id napojení v téže firmě.
 -- ---------------------------------------------------------------------
 
+-- Kdy naposledy zvonil výpadek napojení (push). Píše jen spoušť, nikdo
+-- jiný ji nečte; mimo API (schéma app), jako app.rezervace_choice_overeni.
+create table app.integrace_vypadek_zvoneni (
+  pripojeni_id  uuid primary key references public.integrace_pripojeni(id) on delete cascade,
+  zvonilo       timestamptz not null
+);
+
+comment on table app.integrace_vypadek_zvoneni is
+  'Kdy naposledy zvonilo (important, push) upozornění na výpadek napojení. '
+  'Další výpadek do 24 h přijde tiše (low). Píše jen app.integrace_vypadek_upozornit.';
+
+alter table app.integrace_vypadek_zvoneni enable row level security;
+revoke all on app.integrace_vypadek_zvoneni from public, anon, authenticated, service_role;
+
 create function app.integrace_vypadek_upozornit()
 returns trigger
 language plpgsql volatile security definer set search_path = ''
@@ -158,6 +193,7 @@ declare
   v_klic  text := 'integrace.vypadek:' || new.id::text;
   v_telo  jsonb;
   v_u     record;
+  v_tise  boolean;
 begin
   begin
     v_telo := jsonb_build_object(
@@ -170,8 +206,32 @@ begin
        where b.id = new.branch_id
     ), '{}'::jsonb);
 
-    if old.stav = 'pripojeno' and new.stav = 'vyzaduje_pozornost' then
+    if new.odpojeno_kdy is not null then
+      -- Odpojené: nepřečtené upozornění k němu stáhnout všem (i s push,
+      -- který čeká na směnu). Přečtené nechá app.zrusit_neprectene samo
+      -- (bere jen nepřečtené) — tady se to podruhé nefiltruje.
+      for v_u in
+        select distinct n.user_id
+          from public.notifications n
+         where n.tenant_id  = new.tenant_id
+           and n.dedupe_key = v_klic
+      loop
+        perform app.zrusit_neprectene(new.tenant_id, v_u.user_id, v_klic);
+      end loop;
+
+    elsif old.stav = 'pripojeno' and new.stav = 'vyzaduje_pozornost' and v_ja is null then
       v_telo := v_telo || jsonb_build_object('duvod', left(coalesce(new.posledni_chyba, ''), 300));
+
+      -- Zvonilo za posledních 24 h? Pak tiše; jinak zvoní a zapíše se.
+      v_tise := coalesce((
+        select z.zvonilo > now() - interval '24 hours'
+          from app.integrace_vypadek_zvoneni z
+         where z.pripojeni_id = new.id), false);
+      if not v_tise then
+        insert into app.integrace_vypadek_zvoneni (pripojeni_id, zvonilo)
+        values (new.id, now())
+        on conflict (pripojeni_id) do update set zvonilo = excluded.zvonilo;
+      end if;
 
       for v_u in
         select e.user_id
@@ -183,11 +243,10 @@ begin
         select x.user_id
           from app.kdo_ma_pravo_na_pobocce(new.tenant_id, 'integrace.manage', new.branch_id) x
       loop
-        if v_u.user_id is distinct from v_ja then
-          perform app.notifikovat(
-            new.tenant_id, v_u.user_id, 'integrace.vypadek', v_telo, 'important',
-            new.branch_id, null, 'integrace_pripojeni', new.id, v_klic);
-        end if;
+        perform app.notifikovat(
+          new.tenant_id, v_u.user_id, 'integrace.vypadek', v_telo,
+          case when v_tise then 'low' else 'important' end,
+          new.branch_id, null, 'integrace_pripojeni', new.id, v_klic);
       end loop;
 
     elsif new.stav = 'pripojeno' then
@@ -214,21 +273,21 @@ begin
   return null;
 end $$;
 
-revoke all on function app.integrace_vypadek_upozornit() from public, anon, authenticated, service_role;
+revoke all on function app.integrace_vypadek_upozornit() from public, anon, authenticated;
 
 comment on function app.integrace_vypadek_upozornit() is
-  'Spoušť: napojení Choice přešlo z „připojeno“ na „vyžaduje pozornost“ → upozornění majiteli '
-  'a správcům napojení pobočky (jedno na výpadek). Zase „připojeno“ → nepřečtené upozornění '
-  'se nahradí tichým „zase načítá“. Selhání upozornění zápis stavu nezastaví.';
+  'Spoušť: napojení Choice přešlo z „připojeno“ na „vyžaduje pozornost“ (zapsal server) → upozornění '
+  'majiteli a správcům napojení pobočky (jedno na výpadek; push nejvýš jednou za 24 h, jinak tiše). '
+  'Zase „připojeno“ → nepřečtené upozornění se nahradí tichým „zase načítá“. Odpojení → nepřečtené '
+  'se stáhne. Selhání upozornění zápis stavu nezastaví.';
 
 -- ROZHODNOUT: otázka 90 — jen Choice (rezervace); banka a pokladna zatím ne.
 create trigger trg_integrace_vypadek_upozornit
-  after update of stav on public.integrace_pripojeni
+  after update of stav, odpojeno_kdy on public.integrace_pripojeni
   for each row
-  when (old.stav is distinct from new.stav
+  when ((old.stav is distinct from new.stav or old.odpojeno_kdy is distinct from new.odpojeno_kdy)
         and new.oblast = 'rezervace'
-        and new.poskytovatel = 'choice'
-        and new.odpojeno_kdy is null)
+        and new.poskytovatel = 'choice')
   execute function app.integrace_vypadek_upozornit();
 
 

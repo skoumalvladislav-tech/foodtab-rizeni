@@ -3885,8 +3885,29 @@ const beze = (p) => `${p.stav}, test ${p.posledni_test_ok}, „${String(p.posled
   }, [
     ['jeden test za volání (dvě stojící napojení, jeden dotaz)', (r) => [r.v1.dotazu === 1 && r.t1.length === 1, `${r.t1.length} dotazů`]],
     ['… nejdéle nezkoušené první (bez testu před testem z 3. 11.)', (r) => [r.t1[0] === `Bearer ${TOKEN}-2`, r.t1[0] === `Bearer ${TOKEN}` ? 'to s testem z 3. 11.' : String(r.t1[0]).slice(0, 12)]],
-    ['… napojení v odstupu nezdrží další: druhé volání zkusí to druhé', (r) => [r.t2.length === 2 && r.t2[1] === `Bearer ${TOKEN}`, `${r.t2.length} dotazů`]],
+    ['… druhé volání zkusí to druhé (první má teď čerstvý test)', (r) => [r.t2.length === 2 && r.t2[1] === `Bearer ${TOKEN}`, `${r.t2.length} dotazů`]],
     ['… obě v odstupu → nic', (r) => [r.v3.stav === 'nic' && r.po3 === 2, `${r.v3.stav}, ${r.po3} dotazů`]],
+  ])
+}
+
+{
+  // Napojení, které je první na řadě (bez testu), ale v odstupu: běh
+  // načítání před hodinou — ten, kterému Choice odmítl; posledni_test_kdy
+  // ten běh nepíše, takže řazení o odstupu neví. Nesmí zdržet další:
+  // v TOMTÉŽ volání se zkusí to druhé. (Rozbití 7. 11.: s „return“ místo
+  // „continue“ výš uvedené kontroly prošly — tahle ne.)
+  const DRUHE = '99999999-2222-3333-4444-555555555555'
+  const s = svetSynchronizace({
+    pripojeniRadky: [stojici(ID_PRIPOJENI), stojici(DRUHE, { posledni_test_kdy: null, branch_id: 'bbbbbbbb-0000-0000-0000-000000000099', externi_ucet: { var_symbol: '777' } })],
+    sifry: { [ID_PRIPOJENI]: 'sifra-ok', [DRUHE]: 'sifra-ok-2' },
+    choice: () => odpoved(403, {}),
+  })
+  s.db.tabulky.synchronizace_behy.push({ id: 'b-druhe', integrace_pripojeni_id: DRUHE, stav: 'chyba', zahajeno_kdy: new Date(s.h.ted - 3_600_000).toISOString() })
+  await beh('první na řadě je v odstupu', () => zkusitZnovu(s), [
+    ['první na řadě v odstupu (běh před hodinou) → v tomtéž volání se zkusí další', (v) => [
+      v.stav === 'dal_nejde' && s.dotazy.length === 1 && s.dotazy[0].init.headers.authorization === `Bearer ${TOKEN}`
+        && zabraniTestu(s).map((z) => z.args.p_pripojeni).join() === `${DRUHE},${ID_PRIPOJENI}`,
+      `${v.stav}, ${s.dotazy.length} dotazů, zabrání ${zabraniTestu(s).map((z) => z.args.p_pripojeni.slice(0, 4)).join()}`]],
   ])
 }
 

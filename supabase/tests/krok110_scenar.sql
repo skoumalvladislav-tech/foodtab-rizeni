@@ -19,7 +19,8 @@
 --
 --   0. příprava: kdo má kde integrace.manage (a že ve firmě bez Financí
 --      nikdo — ani majitel);
---   1. granty: spoušť nezavolá nikdo, opakovaný test jen service_role;
+--   1. granty: spoušť nezavolá nikdo, opakovaný test jen service_role,
+--      tabulka zvonění mimo API;
 --   2. výpadek (pripojeno → vyzaduje_pozornost): majitel a kdo má
 --      integrace.manage NA TÉ pobočce (i za celou firmu) jedno upozornění
 --      „important“; správkyně jiné pobočky, čtenář rezervací, pozastavený
@@ -30,14 +31,19 @@
 --   4. obnovení (→ pripojeno): nepřečtený výpadek nahradí tiché „zase
 --      načítá“ (low, bez push), nevyřízený push výpadku se zruší;
 --      přečtenému nic; druhé obnovení bez výpadku nic;
---   5. sám sobě ne: kdo stav přepnul (auth.uid()), upozornění nedostane;
---      kdo napojení obnovil, tomu se výpadek stáhne bez náhrady; dlouhý
---      důvod se zkrátí;
+--   4b. kolísání: další výpadek do 24 h od zvonění přijde tiše (low, bez
+--      push) a nahradí „zase načítá“; 24 h se počítá od posledního
+--      zvonění, ne od tichého výpadku;
+--   4c. odpojení: nepřečtený výpadek i čekající push se stáhnou,
+--      přečtený zůstane;
+--   5. výpadek hlásí jen server: stav přepnutý člověkem přes API nic
+--      nepošle; kdo napojení obnovil, tomu se výpadek stáhne bez
+--      náhrady; dlouhý důvod se zkrátí;
 --   6. jen Choice a jen rezervace: pokladna (i od „choice“), jiný
 --      poskytovatel rezervací a odpojené napojení nic;
 --   7. firma bez Financí: majitel upozornění dostane i tak, správce se
---      zařazením integrace.manage ne;
---   8. selhání upozornění zápis stavu nezastaví;
+--      zařazením integrace.manage ne; odpojení i bez změny stavu;
+--   8. selhání upozornění zápis stavu nezastaví (a nezvonilo);
 --   9. opakovaný test v databázi: meze odstupu; odstup od posledního
 --      běhu načítání i od ručního „Ověřit znovu“; kdo není na řadě,
 --      frontu nezabere; kdo se do fronty nevejde, odstup nespotřebuje.
@@ -308,6 +314,10 @@ select pg_temp.check('opakovaný test zabírá jen úloha (service_role); přihl
   has_function_privilege('service_role', 'public.rezervace_choice_zabrat_opakovany_test(uuid, integer, integer, integer)', 'execute')
   and not has_function_privilege('authenticated', 'public.rezervace_choice_zabrat_opakovany_test(uuid, integer, integer, integer)', 'execute')
   and not has_function_privilege('anon', 'public.rezervace_choice_zabrat_opakovany_test(uuid, integer, integer, integer)', 'execute'));
+select pg_temp.check('tabulka zvonění výpadku je mimo API: přihlášený, anon ani úloha ji nečtou ani nepíšou',
+  not has_table_privilege('authenticated', 'app.integrace_vypadek_zvoneni', 'select, insert, update, delete')
+  and not has_table_privilege('anon', 'app.integrace_vypadek_zvoneni', 'select, insert, update, delete')
+  and not has_table_privilege('service_role', 'app.integrace_vypadek_zvoneni', 'select, insert, update, delete'));
 
 
 \echo ''
@@ -422,21 +432,99 @@ select pg_temp.check('druhé obnovení bez výpadku nic nového (tiché „zase 
 
 
 \echo ''
-\echo '== 5. Sám sobě ne ========================================'
+\echo '== 4b. Napojení kolísá: další výpadek do 24 h tiše ========'
 
--- Sabina (integrace.manage na A2) přepne stav sama.
+-- První výpadek (oddíl 2) zvonil „před 13 h“. Opakovaný test prošel
+-- (oddíl 4) a další běh dostal od Choice zase 403.
+update app.integrace_vypadek_zvoneni set zvonilo = zvonilo - interval '13 hours' where pripojeni_id = :'ch_a1';
+update public.integrace_pripojeni
+   set stav = 'vyzaduje_pozornost', posledni_test_ok = false, posledni_test_kdy = now(),
+       posledni_chyba = 'Choice odmítl přístup (403). Zase.'
+ where id = :'ch_a1';
+
+select pg_temp.posledni(:'maj_a', 'integrace.vypadek', :'ch_a1') as alarm2_maj \gset
+select pg_temp.posledni(:'spr1', 'integrace.vypadek', :'ch_a1') as alarm2_spr1 \gset
+select pg_temp.posledni(:'firemni', 'integrace.vypadek', :'ch_a1') as alarm2_firemni \gset
+
+select pg_temp.check('kolísá: výpadek do 24 h přijde zas majitelce, Sáře i Filipovi (nový záznam)',
+  :'alarm2_maj' <> '' and :'alarm2_spr1' <> ''
+  and :'alarm2_firemni' <> '' and :'alarm2_firemni' <> :'alarm_firemni');
+select pg_temp.check('kolísá: tentokrát tiše — low a bez push (zvonilo před 13 h)',
+  (select bool_and(n.priorita = 'low') and count(*) = 3 from public.notifications n
+    where n.id in (:'alarm2_maj'::uuid, :'alarm2_spr1'::uuid, :'alarm2_firemni'::uuid))
+  and pg_temp.push(:'alarm2_maj') = '' and pg_temp.push(:'alarm2_spr1') = '' and pg_temp.push(:'alarm2_firemni') = '');
+select pg_temp.check('kolísá: nepřečtené „zase načítá“ nahradil výpadek (v seznamu je, co platí teď)',
+  pg_temp.ma(:'maj_a', 'integrace.obnoveno', :'ch_a1') = 0
+  and pg_temp.ma(:'spr1', 'integrace.obnoveno', :'ch_a1') = 0);
+
+-- Dalších 12 h: od zvonění je to 25 h, od tichého výpadku 12 h.
+update app.integrace_vypadek_zvoneni set zvonilo = zvonilo - interval '12 hours' where pripojeni_id = :'ch_a1';
+update public.integrace_pripojeni
+   set stav = 'pripojeno', posledni_test_ok = true, posledni_test_kdy = now(), posledni_chyba = null
+ where id = :'ch_a1';
+update public.integrace_pripojeni
+   set stav = 'vyzaduje_pozornost', posledni_test_ok = false, posledni_test_kdy = now(),
+       posledni_chyba = 'Choice odmítl přístup (403). Za den.'
+ where id = :'ch_a1';
+
+select pg_temp.posledni(:'maj_a', 'integrace.vypadek', :'ch_a1') as alarm3_maj \gset
+select pg_temp.posledni(:'spr1', 'integrace.vypadek', :'ch_a1') as alarm3_spr1 \gset
+
+select pg_temp.check('24 h od zvonění (ne od tichého výpadku) → zvoní znovu: important, majitelce push hned, Sáře na směnu',
+  :'alarm3_maj' not in ('', :'alarm2_maj') and :'alarm3_spr1' not in ('', :'alarm2_spr1')
+  and (select bool_and(n.priorita = 'important') and count(*) = 2 from public.notifications n
+        where n.id in (:'alarm3_maj'::uuid, :'alarm3_spr1'::uuid))
+  and pg_temp.push(:'alarm3_maj') = 'k_odeslani' and pg_temp.push(:'alarm3_spr1') = 'ceka_na_smenu');
+
+
+\echo ''
+\echo '== 4c. Odpojení ==========================================='
+
+-- Správce napojení odpojí (jako odpojitNapojeni: odpojeno_kdy i stav).
+update public.integrace_pripojeni set odpojeno_kdy = now(), stav = 'odpojeno' where id = :'ch_a1';
+
+select pg_temp.check('odpojení: nepřečtený výpadek zmizel majitelce, Sáře i Filipovi',
+  pg_temp.ma(:'maj_a', 'integrace.vypadek', :'ch_a1') = 0
+  and pg_temp.ma(:'spr1', 'integrace.vypadek', :'ch_a1') = 0
+  and pg_temp.posledni(:'firemni', 'integrace.vypadek', :'ch_a1') = :'alarm_firemni');
+select pg_temp.check('… i push, který čekal (majitelce k odeslání, Sáře na směnu)',
+  not exists (select 1 from public.notifikace_doruceni d
+               where d.tenant_id = :'firma_a' and d.user_id in (:'maj_a', :'spr1')
+                 and d.stav in ('k_odeslani', 'ceka_na_smenu')));
+select pg_temp.check('… přečtený výpadek (Filip) zůstal',
+  exists (select 1 from public.notifications n where n.id = :'alarm_firemni'::uuid and n.read_at is not null));
+
+
+\echo ''
+\echo '== 5. Výpadek hlásí jen server; sám sobě ne ==============='
+
+-- Sabina (integrace.manage na A2) přepne stav sama přes API — a s vlastním
+-- textem důvodu (politika napojení jí zápis dovolí).
 select set_config('test.user_id', :'spr2', false);
 update public.integrace_pripojeni
-   set stav = 'vyzaduje_pozornost', posledni_test_ok = false, posledni_chyba = repeat('x', 400)
+   set stav = 'vyzaduje_pozornost', posledni_test_ok = false, posledni_chyba = 'Napsala Sabina.'
  where id = :'ch_a2';
 select set_config('test.user_id', '', false);
 
-select pg_temp.check('kdo stav přepnul sám (Sabina), upozornění nedostane',
-  pg_temp.k_napojeni(:'spr2', :'ch_a2') = 0);
-select pg_temp.check('… majitelka a Filip ano',
+select pg_temp.check('stav přepnutý člověkem (Sabina přes API) nepošle nic nikomu — výpadek hlásí jen server',
+  pg_temp.komukoli(:'ch_a2') = 0);
+select pg_temp.check('… a nezvonilo (výpadek ze serveru pak zazvoní)',
+  not exists (select 1 from app.integrace_vypadek_zvoneni where pripojeni_id = :'ch_a2'));
+
+-- Sabina to vrátí, pak spadne doopravdy (server, s dlouhým důvodem).
+select set_config('test.user_id', :'spr2', false);
+update public.integrace_pripojeni set stav = 'pripojeno', posledni_test_ok = true, posledni_chyba = null
+ where id = :'ch_a2';
+select set_config('test.user_id', '', false);
+update public.integrace_pripojeni
+   set stav = 'vyzaduje_pozornost', posledni_test_ok = false, posledni_chyba = repeat('x', 400)
+ where id = :'ch_a2';
+
+select pg_temp.check('výpadek ze serveru: majitelka, Filip i Sabina (A2) jedno',
   pg_temp.ma(:'maj_a', 'integrace.vypadek', :'ch_a2') = 1
   and pg_temp.ma(:'firemni', 'integrace.vypadek', :'ch_a2') = 1
-  and pg_temp.komukoli(:'ch_a2') = 2);
+  and pg_temp.ma(:'spr2', 'integrace.vypadek', :'ch_a2') = 1
+  and pg_temp.komukoli(:'ch_a2') = 3);
 select pg_temp.check('dlouhý důvod se do těla zkrátí na 300 znaků',
   (select length(n.telo ->> 'duvod') = 300 from public.notifications n
     where n.id = pg_temp.posledni(:'maj_a', 'integrace.vypadek', :'ch_a2')::uuid));
@@ -450,9 +538,11 @@ select set_config('test.user_id', '', false);
 
 select pg_temp.check('kdo napojení obnovil (majitelka), tomu výpadek zmizí bez „zase načítá“',
   pg_temp.k_napojeni(:'maj_a', :'ch_a2') = 0);
-select pg_temp.check('… Filip dostane „zase načítá“ místo výpadku',
+select pg_temp.check('… Filip i Sabina dostanou „zase načítá“ místo výpadku',
   pg_temp.ma(:'firemni', 'integrace.obnoveno', :'ch_a2') = 1
-  and pg_temp.ma(:'firemni', 'integrace.vypadek', :'ch_a2') = 0);
+  and pg_temp.ma(:'firemni', 'integrace.vypadek', :'ch_a2') = 0
+  and pg_temp.ma(:'spr2', 'integrace.obnoveno', :'ch_a2') = 1
+  and pg_temp.ma(:'spr2', 'integrace.vypadek', :'ch_a2') = 0);
 
 
 \echo ''
@@ -488,6 +578,12 @@ select pg_temp.check('… správkyně se zařazením integrace.manage ne (modul 
   pg_temp.k_napojeni(:'spr_c', :'ch_c') = 0
   and pg_temp.komukoli(:'ch_c') = 1);
 
+-- Odpojení, které stav nezmění (jen odpojeno_kdy) — výpadek se stáhne taky.
+update public.integrace_pripojeni set odpojeno_kdy = now() where id = :'ch_c';
+select pg_temp.check('odpojení i bez změny stavu (jen odpojeno_kdy): majitelův nepřečtený výpadek zmizel',
+  pg_temp.ma(:'maj_c', 'integrace.vypadek', :'ch_c') = 0
+  and pg_temp.komukoli(:'ch_c') = 0);
+
 
 \echo ''
 \echo '== 8. Selhání upozornění zápis nezastaví =================='
@@ -514,8 +610,9 @@ drop function public.krok110_upozorneni_spadne();
 select pg_temp.check('když upozornění selže, zápis stavu stejně projde',
   :'zapis_prosel'::boolean
   and (select stav = 'vyzaduje_pozornost' from public.integrace_pripojeni where id = :'ch_b'));
-select pg_temp.check('… a upozornění nevzniklo (spadlo celé, ne napůl)',
-  pg_temp.komukoli(:'ch_b') = 0);
+select pg_temp.check('… a upozornění nevzniklo (spadlo celé, ne napůl — ani „zvonilo“ se nezapsalo)',
+  pg_temp.komukoli(:'ch_b') = 0
+  and not exists (select 1 from app.integrace_vypadek_zvoneni where pripojeni_id = :'ch_b'));
 
 
 \echo ''
@@ -607,9 +704,10 @@ delete from public.employees where id in (:'e_spr1', :'e_spr2', :'e_firemni', :'
 delete from public.position_permissions where position_id in (:'z_napojeni_a', :'z_cteni_a', :'z_napojeni_c');
 delete from public.positions where id in (:'z_napojeni_a', :'z_cteni_a', :'z_napojeni_c');
 
-select pg_temp.check('úklid: upozornění, push a napojení kroku 110 pryč',
+select pg_temp.check('úklid: upozornění, push, napojení a zvonění kroku 110 pryč',
   not exists (select 1 from public.notifications where tenant_id in (:'firma_a', :'firma_b', :'firma_c'))
   and not exists (select 1 from public.integrace_pripojeni where tenant_id in (:'firma_a', :'firma_b', :'firma_c'))
+  and not exists (select 1 from app.integrace_vypadek_zvoneni z where z.pripojeni_id in (:'ch_a1', :'ch_a2', :'ch_b', :'ch_c'))
   and not exists (select 1 from public.push_odbery where user_id in (:'maj_a', :'spr1')));
 select pg_temp.check('úklid: fronta dotazů Choice vrácená, jak byla',
   (select dalsi_volny = :'fronta_puvodne'::timestamptz from app.rezervace_choice_fronta where jediny));

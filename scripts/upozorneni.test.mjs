@@ -799,7 +799,8 @@ console.log('\n== Výpadek napojení ==')
   ma('podvržený slug → rozsah, kde člověk je', cil('integrace.vypadek', { ...VYPADEK, pobocka_slug: '//zly.example' }), '/perla/rezervace/napojeni')
   ma('jiná oblast než rezervace → obecná stránka Upozornění', cil('integrace.vypadek', { ...VYPADEK, oblast: 'pokladna' }), '/perla/upozorneni')
   ma('jeUpozorneniNapojeni: oba druhy a nic jiného',
-    jeUpozorneniNapojeni('integrace.vypadek') && jeUpozorneniNapojeni('integrace.obnoveno') && !jeUpozorneniNapojeni('rezervace.nova') && !jeUpozorneniNapojeni('integrace'), true)
+    jeUpozorneniNapojeni('integrace.vypadek') && jeUpozorneniNapojeni('integrace.obnoveno') && !jeUpozorneniNapojeni('rezervace.nova') && !jeUpozorneniNapojeni('integrace')
+    && !jeUpozorneniNapojeni('integrace.manage') && !jeUpozorneniNapojeni('integrace.vypadek_x'), true)
 
   const migrace = fs.readFileSync('supabase/migrations/20261108100000_rezervace_choice_vypadek.sql', 'utf8')
   const spoust = migrace.slice(migrace.indexOf('create function app.integrace_vypadek_upozornit()'),
@@ -810,11 +811,15 @@ console.log('\n== Výpadek napojení ==')
   ma(`spoušť posílá dva druhy (${druhy.join(', ')})`, druhy.join(','), 'integrace.obnoveno,integrace.vypadek')
   ma('… každý má vlastní nadpis a vede na Napojení',
     druhy.every((d) => nadpisUpozorneni(d, VYPADEK, obdobi) !== 'Upozornění' && cil(d, VYPADEK) === '/bernard-bar/rezervace/napojeni'), true)
-  ma('výpadek je „important“ (push, odznak), obnovení „low“ (tiše, bez odznaku)',
-    /'integrace\.vypadek', v_telo, 'important'/.test(spoust) && /'integrace\.obnoveno', v_telo, 'low'/.test(spoust)
+  // Kdy je výpadek tichý (do 24 h od zvonění), hlídá scénář krok110 (4b).
+  ma('výpadek je „important“ (push, odznak), opakovaný do 24 h a obnovení „low“ (tiše, bez odznaku)',
+    /'integrace\.vypadek', v_telo,\s*case when v_tise then 'low' else 'important' end/.test(spoust)
+    && /'integrace\.obnoveno', v_telo, 'low'/.test(spoust)
     && pocitaSeDoOdznaku('important') && !pocitaSeDoOdznaku('low'), true)
   ma('tělo nenese token, tajemství ani externí účet', /tajemstvi|token|externi_ucet|sifra/.test(spoust), false)
-  ma('sám sobě se nepíše (auth.uid())', /v_ja\s+uuid := auth\.uid\(\)/.test(spoust) && /if v_u\.user_id is distinct from v_ja then/.test(spoust), true)
+  ma('výpadek hlásí jen server (auth.uid() je NULL); kdo obnovil, tomu se jen stáhne',
+    /v_ja\s+uuid := auth\.uid\(\)/.test(spoust) && /new\.stav = 'vyzaduje_pozornost' and v_ja is null then/.test(spoust)
+    && /if v_u\.user_id = v_ja then\s+perform app\.zrusit_neprectene\(/.test(spoust), true)
 
   ma('stránka Upozornění kreslí větu z popisNapojeni a odkaz (podle jeUpozorneniNapojeni)',
     stranka.includes('popisNapojeni(z.druh, z.telo)') && stranka.includes('jeUpozorneniNapojeni(z.druh)') && stranka.includes('Otevřít napojení'), true)
