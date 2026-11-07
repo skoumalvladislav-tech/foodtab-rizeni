@@ -2018,6 +2018,13 @@ znovu“).
   nejdřív druhý den a rezervace z večera by chyběly. 2 hodiny jsou
   12 dotazů denně na napojení navíc — u dvou podniků 24 proti stovkám,
   které dělá samo načítání.
+- **Co to stojí:** běh úlohy, ve kterém test jde (jeden z osmi), začne
+  načítat o jedno místo ve frontě (5,5 s) později. Se dvěma zdravými
+  napojeními se v takovém běhu může druhé nevejít a načte se až za
+  15 minut (nezávislá kontrola 7. 11., nález 6). Jedno stojící napojení
+  to nevadí; kdyby jich stálo mnoho (8+), zkoušelo by se v každém běhu
+  — pak by stálo za to zkoušet je řidčeji (prodlužovat odstup po
+  každém neúspěchu, bez migrace).
 - **Proč bez konce:** když přístup opravdu vzali (zrušená aplikace
   v Choice), test 12× denně nic nerozbije — jen dostane zase 403.
   Konec po N dnech by znamenal, že výpadek, který Choice spraví za
@@ -2052,3 +2059,22 @@ ale nerozšiřuj rozsah bez důvodu“).
   `new.poskytovatel = 'choice'` pro vybrané oblasti, plus texty a odkaz
   v `lib/upozorneni-text.ts` a `lib/upozorneni-odkaz.ts`. Opakovaný
   test pro pokladnu by byl zvláštní práce v `lib/pokladna-sync.ts`.
+
+## 91. Výpadek napojení zvoní nejvýš jednou za 24 hodin — stačí?
+
+**Vzniklo:** 7. 11. 2026 (nezávislá kontrola PR s upozorněním na
+výpadek, nález 1: když napojení kolísá — opakovaný test projde a další
+běh dostane od Choice zase 403 — přišel by výpadek každé 2 hodiny,
+majiteli jako push i v noci).
+
+- **Teď:** první výpadek napojení zvoní (push majiteli hned, ostatním
+  na začátku směny). Další výpadek **téhož napojení do 24 hodin od
+  toho, co zvonilo**, přijde **tiše** — v seznamu upozornění je (a
+  nahradí nepřečtené „zase načítá“, takže tam je, co platí teď), ale
+  bez push a mimo odznak. Po 24 hodinách zvoní zase.
+- **Proč:** kdo dostane push každé 2 hodiny, vypne si upozornění úplně
+  — a pak nepřijde ani to, na kterém záleží. Jednou za den stačí, aby
+  o výpadku někdo věděl; stav je vždycky vidět v Rezervace → Napojení.
+- **Když to má být jinak:** jedno číslo v migraci 20261108100000
+  (`interval '24 hours'` ve spoušti `app.integrace_vypadek_upozornit`).
+  Před `db push` stačí přepsat; po něm nová migrace.

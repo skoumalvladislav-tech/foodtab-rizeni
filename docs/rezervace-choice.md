@@ -95,8 +95,10 @@ U pobočky na kartě Choice:
   a hned se načte. Hned to jde tlačítkem **Ověřit znovu**. Majitel
   a kdo na pobočce spravuje napojení (`integrace.manage`) dostanou
   upozornění „Choice nenačítá rezervace — pobočka“ (jedno na výpadek,
-  majitel i jako push); po obnovení se nepřečtené nahradí tichým „Choice
-  zase načítá rezervace“. Teprve když to nepomůže ani po dni, token
+  majitel i jako push; když napojení kolísá, zvoní nejvýš jednou za
+  24 hodin, další výpadky ten den přijdou tiše); po obnovení se
+  nepřečtené nahradí tichým „Choice zase načítá rezervace“, po odpojení
+  se stáhne. Teprve když to nepomůže ani po dni, token
   opravdu přestal platit — pak Odpojit → Připojit podnik v Choice
   (Odpojit uložený token smaže). Proč 2 hodiny: otázka 89;
 - *Nezapsaly se 2 rezervace z Choice (čas bez časového pásma)* — Choice
@@ -241,9 +243,15 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
     stavu napojení Choice `pripojeno` → `vyzaduje_pozornost` (jen ten
     přechod — jedno upozornění na výpadek) pošle `integrace.vypadek`
     (important) majiteli a `app.kdo_ma_pravo_na_pobocce(…,
-    'integrace.manage', pobočka)`; sám sobě ne (`auth.uid()`). Zpátky na
-    `pripojeno` → nepřečtené nahradí `integrace.obnoveno` (low). Selhání
-    upozornění zápis stavu nezastaví. Banka a pokladna ne (otázka 90).
+    'integrace.manage', pobočka)`. Výpadek hlásí jen server (`auth.uid()`
+    je NULL) — správce, který stav přepne přes API sám, nepošle nic.
+    Zvoní (important) nejvýš jednou za 24 h na napojení
+    (`app.integrace_vypadek_zvoneni`), další výpadek do 24 h je `low`
+    (otázka 91). Zpátky na `pripojeno` → nepřečtené nahradí
+    `integrace.obnoveno` (low); kdo obnovil sám, tomu se jen stáhne.
+    Odpojení (`odpojeno_kdy`) stáhne nepřečtené i s čekajícím push.
+    Selhání upozornění zápis stavu nezastaví. Banka a pokladna ne
+    (otázka 90).
     Texty `lib/upozorneni-text.ts`, odkaz na Napojení
     `lib/upozorneni-odkaz.ts`, scénář `krok110`.
   - **Opakovaný test:** úloha na začátku běhu (`opakovatTestChoice`)

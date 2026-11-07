@@ -223,6 +223,7 @@ begin
       v_telo := v_telo || jsonb_build_object('duvod', left(coalesce(new.posledni_chyba, ''), 300));
 
       -- Zvonilo za posledních 24 h? Pak tiše; jinak zvoní a zapíše se.
+      -- ROZHODNOUT: otázka 91 — nejvýš jednou za 24 h na napojení.
       v_tise := coalesce((
         select z.zvonilo > now() - interval '24 hours'
           from app.integrace_vypadek_zvoneni z
