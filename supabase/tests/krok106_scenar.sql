@@ -245,10 +245,13 @@ select pg_temp.check('Perla: 3 rezervace (R1, R2, R5), 1 akce, 36 hostů rezerva
   and (:'m1_perla'::jsonb ->> 'akci')::int = 1
   and (:'m1_perla'::jsonb ->> 'hostu')::int = 36
   and (:'m1_perla'::jsonb ->> 'bez_poctu')::int = 1);
+-- Od 20261107100000 (stoly z Choice) nese akce i `prostor_ze_zdroje`;
+-- `stoly` a `prani` tu nejsou, protože prázdné hodnoty souhrn vynechá
+-- (jsonb_strip_nulls). Ručně založená akce má příznak false.
 select pg_temp.check('akce: jedna (zrušená ne) — 18:00, název, 30 os., Salonek',
   (:'m1_perla'::jsonb ->> 'akci')::int = 1
   and jsonb_array_length(:'m1_perla'::jsonb -> 'akce') = 1
-  and :'m1_perla'::jsonb -> 'akce' -> 0 = '{"cas":"18:00","nazev":"Firemní večírek Krok106","osob":30,"prostor":"Salonek"}'::jsonb);
+  and :'m1_perla'::jsonb -> 'akce' -> 0 = '{"cas":"18:00","nazev":"Firemní večírek Krok106","osob":30,"prostor":"Salonek","prostor_ze_zdroje":false}'::jsonb);
 select pg_temp.check('Bar: 1 rezervace, 5 hostů, žádná akce',
   (:'m1_bar'::jsonb ->> 'rezervaci')::int = 1 and (:'m1_bar'::jsonb ->> 'hostu')::int = 5
   and (:'m1_bar'::jsonb ->> 'akci')::int = 0 and :'m1_bar'::jsonb -> 'akce' = '[]'::jsonb);

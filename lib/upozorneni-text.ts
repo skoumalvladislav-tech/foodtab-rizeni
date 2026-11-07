@@ -27,6 +27,7 @@
  */
 
 import { koruny } from './mzdy.ts'
+import { mistoKratce } from './rezervace-misto.ts'
 import { souhrnText } from './rezervace-pobocky.ts'
 import { zkratkyPobocek } from './rozpis-desktop.ts'
 
@@ -36,6 +37,12 @@ export type AkceSouhrnu = {
   nazev?: string
   osob?: number
   prostor?: string
+  // Stoly a přání hosta ze zdroje (Choice) a kdo napsal prostor — migrace
+  // 20261107100000. Chybí u souhrnu z databáze před ní; místo se pak
+  // ukáže jen z `prostor` jako dřív.
+  stoly?: string
+  prani?: string
+  prostor_ze_zdroje?: boolean
 }
 
 /** Jedna pobočka v ranním souhrnu — holá čísla, věta se skládá tady. */
@@ -494,7 +501,16 @@ export function popisSouhrnuDne(telo: TeloUpozorneni): RadekSouhrnuDne[] {
       [
         [a.cas, a.nazev?.trim() || 'Akce'].filter(Boolean).join(' '),
         pocetZTela(a.osob) > 0 ? `${pocetZTela(a.osob)} os.` : null,
-        a.prostor?.trim() || null,
+        // Stejně jako kalendář (lib/rezervace-misto.ts): u akce z Choice
+        // stoly, ne přání hosta, které se do prostoru doplnilo kdysi
+        // (kontrola kódu 4. 11., 4. kolo).
+        mistoKratce({
+          prostor: typeof a.prostor === 'string' ? a.prostor : '',
+          misto_zdroje: typeof a.stoly === 'string' ? a.stoly : '',
+          prani_zdroje: typeof a.prani === 'string' ? a.prani : '',
+          prostor_ze_zdroje: typeof a.prostor_ze_zdroje === 'boolean' ? a.prostor_ze_zdroje : null,
+          druh: 'akce',
+        }).join(' · ') || null,
       ]
         .filter(Boolean)
         .join(' · '),

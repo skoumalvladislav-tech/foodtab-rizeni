@@ -39,8 +39,9 @@ import {
   souhrnyPobocek,
   vzhledPobocek,
 } from '../lib/rezervace-pobocky.ts'
+import { mistoKratce, prostorZeZdroje } from '../lib/rezervace-misto.ts'
 import { zpatkyZKalendare } from '../lib/rezervace-typy.ts'
-import { nactiModul } from './vykreslit.mjs'
+import { adresaModulu, nactiModul } from './vykreslit.mjs'
 
 const KOREN = path.join(import.meta.dirname, '..')
 const cti = (p) => fs.readFileSync(path.join(KOREN, p), 'utf8')
@@ -629,6 +630,333 @@ console.log('\n== 6. Dokumenty u rezervací — vykreslené (3. 11. 2026) ==\n')
     ok(`den → náhled Wordu → „Zpět na den“ na tenhle den (je „${zDne?.text}“ na ${zDne?.href})`, stejne(zDne, { href: zpet, text: 'Zpět na den' }))
   } catch (e) {
     ok(`den s dokumenty se vykreslí — výjimka: ${e.message}`, false)
+  }
+}
+
+console.log('\n== 7. Stoly z rezervačního systému — vykreslené i načtené (4. 11. 2026) ==\n')
+
+{
+  // Zadání Šéfíka 4. 11.: z Choice se nenačítá „umístění a obsazení
+  // stolů“ (Booking #105: Patro, S1–S12). Stoly patří zdroji
+  // (`misto_zdroje`), „Stůl / prostor“ dál obsluze — tady se kontroluje,
+  // že se obojí ukáže tam, kde se na rezervaci kouká, a nic se nezdvojí.
+  const stejneObj = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  const T = {
+    choice: rez(BERNARD, '2026-10-30', '17:30', { jmeno_hosta: 'Choice Patro', pocet_osob: 2, zdroj: 'api', prostor: 'Patro', misto_zdroje: 'Patro: S1–S12' }),
+    obsluha: rez(BERNARD, '2026-10-30', '18:15', { jmeno_hosta: 'Obsluha Okno', zdroj: 'api', prostor: 'u okna', misto_zdroje: 'Terasa: L7' }),
+    jenProstor: rez(BERNARD, '2026-10-30', '19:15', { jmeno_hosta: 'Jen Prostor', prostor: 'Salonek' }),
+    nic: rez(PERLA, '2026-10-30', '20:30', { jmeno_hosta: 'Bez Místa' }),
+    // Řádek ze staré databáze (před 20261107100000) klíč vůbec nemá.
+    stary: rez(PERLA, '2026-10-30', '21:30', { jmeno_hosta: 'Starý Řádek', prostor: 'Bar' }),
+    // 3. kolo kontroly kódu: kdo napsal prostor, říká příznak z databáze.
+    // Zdroj doplnil „Patro“, host si pak v Choice přání změnil na „Zahrada“.
+    zmenenePrani: rez(BERNARD, '2026-10-30', '20:00', { jmeno_hosta: 'Zmenene Prani', zdroj: 'api', prostor: 'Patro', prani_zdroje: 'Zahrada', prostor_ze_zdroje: true, misto_zdroje: 'Terasa: L7' }),
+    // Obsluha napsala „Patro“ — stejně jako přání hosta, ale je to její text.
+    obsluhaJakoPrani: rez(BERNARD, '2026-10-30', '20:15', { jmeno_hosta: 'Obsluha Jako Prani', zdroj: 'api', prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: false, misto_zdroje: 'Terasa: L7' }),
+    // 6. kolo: zdroj doplnil přání ještě u rezervace, obsluha z ní udělala
+    // akci a host pak přání v Choice smazal. U akce se ukáže prostor
+    // z formuláře, u rezervace téhož tvaru nic (staré přání).
+    akceBezPrani: rez(PERLA, '2026-10-30', '19:45', { druh: 'akce', nazev: 'Raut Bez Prani', jmeno_hosta: 'Akce Bez Prani', zdroj: 'api', prostor: 'Salonek', prani_zdroje: '', prostor_ze_zdroje: true, misto_zdroje: '' }),
+    rezBezPrani: rez(PERLA, '2026-10-30', '19:50', { jmeno_hosta: 'Rez Bez Prani', zdroj: 'api', prostor: 'Zahrada', prani_zdroje: '', prostor_ze_zdroje: true, misto_zdroje: '' }),
+  }
+  const VSE = Object.values(T).sort((x, y) => x.zacatek.localeCompare(y.zacatek))
+  // mistoKratce a prostorZeZdroje jsou od 4. kola v lib/rezervace-misto.ts
+  // (sdílí je ranní souhrn); kalendář je bere odtamtud — vykreslení níž
+  // (týden, den, detail) jde přes skutečný prvky.tsx.
+  // Čtvrtý argument je příznak `prostor_ze_zdroje`; vynechaný = klíč chybí
+  // (řádek z doby před migrací), rozhodne shoda s přáním.
+  const mk = (prostor, misto_zdroje, prani_zdroje, ...priznak) =>
+    JSON.stringify(mistoKratce({ prostor, misto_zdroje, prani_zdroje, ...(priznak.length ? { prostor_ze_zdroje: priznak[0] } : {}) }))
+  // Každá kontrola zvlášť: výjimka shodí jen ji, ne zbytek oddílu (2. kolo kontroly kódu).
+  const okMk = (popis, fn) => {
+    let x
+    try { x = fn() } catch (e) { ok(`${popis} — výjimka: ${e?.message}`, false); return }
+    ok(popis, x)
+  }
+  okMk('místo krátce: prostor obsažený ve stolech se nezdvojí (i jinou velikostí písmen)', () => mk('Patro', 'Patro: S1–S12') === '["Patro: S1–S12"]' && mk('patro', 'Patro: S1–S12') === '["Patro: S1–S12"]')
+  okMk('místo krátce: jiný prostor od obsluhy zůstane před stoly', () => mk('u okna', 'Terasa: L7') === '["u okna","Terasa: L7"]')
+  okMk('místo krátce: jen jedno z nich, nic, chybějící klíč, mezery', () => mk('Salonek', '') === '["Salonek"]' && mk('', 'Bar: 1–7') === '["Bar: 1–7"]' && mk('', '') === '[]' && mk('Bar', undefined) === '["Bar"]' && mk('  ', '  ') === '[]')
+  // Kontrola kódu 4. 11.: prostor, který je jen KUSEM textu stolů, se
+  // schovával — „S1“ od obsluhy vedle stolu „S12“ zmizel, a obsluha by
+  // si myslela, že host sedí u S12 jen proto, že tam Choice přesadil.
+  // Schová se jen celý text stolů nebo celé jméno oblasti.
+  okMk('místo krátce: prostor „S1“ od obsluhy vedle stolu „Patro: S12“ zůstane (není to tentýž stůl)', () => mk('S1', 'Patro: S12') === '["S1","Patro: S12"]')
+  okMk('místo krátce: „1“ vedle „Patro: S10, S11“ zůstane, „Pat“ vedle „Patro: S1“ taky', () => mk('1', 'Patro: S10, S11') === '["1","Patro: S10, S11"]' && mk('Pat', 'Patro: S1') === '["Pat","Patro: S1"]')
+  okMk('místo krátce: jméno druhé oblasti („Terasa“ v „Patro: S1 · Terasa: L7“) se nezdvojí, celý text stolů taky ne',
+    () => mk('Terasa', 'Patro: S1 · Terasa: L7') === '["Patro: S1 · Terasa: L7"]' && mk('patro: s1–s12', 'Patro: S1–S12') === '["Patro: S1–S12"]' && mk(' Patro ', 'Patro: S1–S12') === '["Patro: S1–S12"]')
+  okMk('místo krátce: stoly bez jména oblasti („3 stoly bez názvu“) a prostor „stoly“ — oba zůstanou', () => mk('stoly', '3 stoly bez názvu') === '["stoly","3 stoly bez názvu"]')
+  // 2. kolo kontroly kódu: jméno oblasti s „: “ nebo „ · “ uvnitř se dřív
+  // rozdělilo špatně a prostor se ukázal dvakrát.
+  okMk('místo krátce: jméno oblasti s „: “ („Zahrada: vzadu“) i s „ · “ („Bar · Restaurace“) se pozná a nezdvojí',
+    () => mk('Zahrada: vzadu', 'Zahrada: vzadu: S1') === '["Zahrada: vzadu: S1"]' && mk('Bar · Restaurace', 'Patro: S1 · Bar · Restaurace: 1–3') === '["Patro: S1 · Bar · Restaurace: 1–3"]')
+  // 2. kolo kontroly kódu: přání hosta („Patro“), které zdroj doplnil do
+  // prostoru, dokud stoly nebyly, se vedle stolů „Terasa: L7“ četlo jako
+  // druhé místo. Podle `prani_zdroje` se vedle stolů neukáže.
+  okMk('místo krátce: prostor = přání hosta ze zdroje („Patro“) se vedle stolů „Terasa: L7“ neukáže (i jinou velikostí písmen)',
+    () => mk('Patro', 'Terasa: L7', 'Patro') === '["Terasa: L7"]' && mk('patro', 'Terasa: L7', 'Patro') === '["Terasa: L7"]')
+  okMk('místo krátce: přání bez stolů zůstane; jiný prostor obsluhy vedle přání i stolů zůstane; prázdné přání nic neschová',
+    () => mk('Patro', '', 'Patro') === '["Patro"]' && mk('u okna', 'Terasa: L7', 'Patro') === '["u okna","Terasa: L7"]' && mk('u okna', 'Terasa: L7', '') === '["u okna","Terasa: L7"]')
+  // 3. kolo kontroly kódu (#4, #6–#10): kdo prostor napsal, neříká shoda
+  // textu, ale příznak `prostor_ze_zdroje` z databáze. Shoda textu platí
+  // jen pro řádek bez příznaku (null / chybějící klíč).
+  okMk('místo krátce: příznak „ze zdroje“ a přání se v Choice změnilo — vedle stolů jen stoly, bez stolů AKTUÁLNÍ přání (ne staré „Patro“)',
+    () => mk('Patro', 'Terasa: L7', 'Zahrada', true) === '["Terasa: L7"]' && mk('Patro', '', 'Zahrada', true) === '["Zahrada"]')
+  // 4. kolo (#12): host přání v Choice smazal. Staré „Patro“ v prostoru
+  // je přání, ne text obsluhy — v krátkém řádku se neukáže (detail ho
+  // ukáže s poznámkou „doplněno z Choice“).
+  okMk('místo krátce: zdroj doplnil přání a host ho v Choice smazal — staré přání se neukáže (bez stolů nic, se stoly jen stoly)',
+    () => mk('Patro', '', '', true) === '[]' && mk('Patro', 'Terasa: L7', '', true) === '["Terasa: L7"]')
+  // 5. kolo: u AKCE se prostor, který zdroj doplnil ještě u rezervace,
+  // ve formuláři drží (neprázdný import nemění, prázdný u akce Choice
+  // nedoplní) — když host přání smazal, ukáže se prostor z formuláře
+  // (kuchyně o místo nepřijde). Se stoly nebo s aktuálním přáním dál
+  // jako u rezervace.
+  const mkAkce = (prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje) =>
+    JSON.stringify(mistoKratce({ prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje, druh: 'akce' }))
+  okMk('místo krátce: AKCE, zdroj doplnil přání a host ho v Choice smazal — bez stolů prostor z formuláře, se stoly jen stoly, s novým přáním přání',
+    () => mkAkce('Salonek', '', '', true) === '["Salonek"]' && mkAkce('Salonek', 'Terasa: L7', '', true) === '["Terasa: L7"]'
+      && mkAkce('Salonek', '', 'Zahrada', true) === '["Zahrada"]' && mkAkce('', '', '', true) === '[]')
+  // 6. kolo: stoly jen „bez názvu“ neřeknou, kde host sedí — u akce bez
+  // přání se před ně dá prostor z formuláře (jako přání u rezervace).
+  okMk('místo krátce: AKCE, host přání smazal a stoly jsou jen „2 stoly bez názvu“ — prostor z formuláře před nimi; s přáním přání',
+    () => mkAkce('Salonek', '2 stoly bez názvu', '', true) === '["Salonek","2 stoly bez názvu"]'
+      && mkAkce('Salonek', '2 stoly bez názvu', 'Zahrada', true) === '["Zahrada","2 stoly bez názvu"]')
+  // Kalendář posílá celý řádek, i s `druh: 'rezervace'` — `mk` výš klíč
+  // vynechává. Rezervace se smazaným přáním neukáže nic ani tak.
+  const mkRez = (prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje) =>
+    JSON.stringify(mistoKratce({ prostor, misto_zdroje, prani_zdroje, prostor_ze_zdroje, druh: 'rezervace' }))
+  okMk('místo krátce: REZERVACE (druh „rezervace“ jako z kalendáře), host přání smazal — bez stolů nic, se stoly „bez názvu“ jen stoly',
+    () => mkRez('Patro', '', '', true) === '[]' && mkRez('Patro', '2 stoly bez názvu', '', true) === '["2 stoly bez názvu"]')
+  okMk('místo krátce: příznak „obsluha“ a text stejný jako přání — prostor se ukáže vedle stolů (nepřebije ho shoda s přáním)',
+    () => mk('Patro', 'Terasa: L7', 'Patro', false) === '["Patro","Terasa: L7"]' && mk('patro', 'Terasa: L7', 'Patro', false) === '["patro","Terasa: L7"]' && mk('Patro', '', 'Patro', false) === '["Patro"]')
+  okMk('místo krátce: obsluha bez stolů — její text, ne přání hosta (s příznakem i bez něj)',
+    () => mk('u okna', '', 'Patro', false) === '["u okna"]' && mk('u okna', '', 'Patro') === '["u okna"]' && mk('u okna', '', 'Patro', null) === '["u okna"]')
+  okMk('místo krátce: příznak „obsluha“ = jméno oblasti ve stolech se dál nezdvojí',
+    () => mk('Patro', 'Patro: S1', 'Patro', false) === '["Patro: S1"]' && mk('Patro', 'Patro: S1', '', false) === '["Patro: S1"]')
+  okMk('místo krátce: příznak null = jako bez klíče (shoda s přáním)',
+    () => mk('Patro', 'Terasa: L7', 'Patro', null) === '["Terasa: L7"]' && mk('u okna', 'Terasa: L7', 'Patro', null) === '["u okna","Terasa: L7"]')
+  okMk('místo krátce: příznak true u prázdného prostoru nic nevymyslí',
+    () => mk('', 'Terasa: L7', 'Patro', true) === '["Terasa: L7"]' && mk('  ', '', 'Patro', true) === '["Patro"]' && mk('', '', '', true) === '[]')
+  // 3. kolo (#10): stoly, které v seznamu míst nejsou, jdou jako „N stolů
+  // bez názvu“; samy o sobě neřeknou, kde host sedí — přidá se přání.
+  okMk('místo krátce: jen „2 stoly bez názvu“ → přání hosta před nimi (ze zdroje i ze starého řádku); „1 stůl“ i „5 stolů“ taky',
+    () => mk('Patro', '2 stoly bez názvu', 'Patro', true) === '["Patro","2 stoly bez názvu"]' && mk('Patro', '1 stůl bez názvu', 'Patro') === '["Patro","1 stůl bez názvu"]'
+      && mk('', '5 stolů bez názvu', 'Zahrada') === '["Zahrada","5 stolů bez názvu"]' && mk('Patro', '12 stolů bez názvu', 'Zahrada', true) === '["Zahrada","12 stolů bez názvu"]')
+  okMk('místo krátce: stoly s jménem oblasti a „bez názvu“ jen na konci — přání se nepřidá; bez přání se nic nepřidá',
+    () => mk('Patro', 'Patro: S1, 2 stoly bez názvu', 'Patro', true) === '["Patro: S1, 2 stoly bez názvu"]' && mk('Patro', 'Patro: 2 stoly bez názvu', 'Patro', true) === '["Patro: 2 stoly bez názvu"]'
+      && mk('', '2 stoly bez názvu', '') === '["2 stoly bez názvu"]' && mk('Patro', 'Terasa: L1 · 1 stůl bez názvu', 'Patro', true) === '["Terasa: L1 · 1 stůl bez názvu"]')
+  okMk('místo krátce: obsluha vedle „2 stoly bez názvu“ — její text, ne přání',
+    () => mk('u okna', '2 stoly bez názvu', 'Patro', false) === '["u okna","2 stoly bez názvu"]')
+  okMk('prostor ze zdroje: příznak rozhoduje, bez něj shoda s přáním (i jinou velikostí písmen a s mezerami), prázdný prostor nikdy',
+    () => prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Zahrada', prostor_ze_zdroje: true }) === true
+      && prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: false }) === false
+      && prostorZeZdroje({ prostor: ' patro ', prani_zdroje: 'Patro' }) === true
+      && prostorZeZdroje({ prostor: 'Patro', prani_zdroje: 'Patro', prostor_ze_zdroje: null }) === true
+      && prostorZeZdroje({ prostor: 'Patro', prani_zdroje: '' }) === false
+      && prostorZeZdroje({ prostor: '', prani_zdroje: '', prostor_ze_zdroje: true }) === false)
+
+  // --- týden ---
+  try {
+    const html = renderToStaticMarkup(
+      createElement(obsah.KalendarObsah, { rozsah: 'firma', pohled: 'tyden', datum: '2026-10-30', dnes: '2026-10-30', pobocky: POBOCKY, rezervace: VSE, znacky: new Map() }),
+    )
+    const karta = (r) => html.match(new RegExp(`<a href="/firma/rezervace/${r.id}" class="ds-rez-polozka-odkaz">([\\s\\S]*?)</a>`))?.[1] ?? ''
+    const misto = (r) => {
+      const m = karta(r).match(/<small class="ds-rez-polozka-misto" title="([^"]*)">([^<]*)<\/small>/)
+      return m ? { title: m[1], text: m[2] } : null
+    }
+    ok(`týden: karta z Choice má druhý řádek „Patro: S1–S12“, prostor podruhé ne (${JSON.stringify(misto(T.choice))})`,
+      stejneObj(misto(T.choice), { title: 'Patro: S1–S12', text: 'Patro: S1–S12' }) && !karta(T.choice).includes('Patro · Patro'))
+    ok(`týden: prostor od obsluhy i stoly (${JSON.stringify(misto(T.obsluha))})`, stejneObj(misto(T.obsluha), { title: 'u okna · Terasa: L7', text: 'u okna · Terasa: L7' }))
+    ok('týden: jen prostor obsluhy → řádek s prostorem; bez místa → žádný řádek; starý řádek bez klíče → prostor',
+      misto(T.jenProstor)?.text === 'Salonek' && misto(T.nic) === null && karta(T.nic) !== '' && misto(T.stary)?.text === 'Bar')
+    ok('týden: řádek místa je uvnitř odkazu karty (klik na stoly otevře rezervaci)', karta(T.choice).includes('ds-rez-polozka-misto'))
+    ok(`týden: příznak z databáze dojde až do karty — prostor ze zdroje vedle stolů ne (${JSON.stringify(misto(T.zmenenePrani))}), obsluha se stejným textem jako přání ano (${JSON.stringify(misto(T.obsluhaJakoPrani))})`,
+      misto(T.zmenenePrani)?.text === 'Terasa: L7' && misto(T.obsluhaJakoPrani)?.text === 'Patro · Terasa: L7')
+    ok(`týden: akce se smazaným přáním ukáže prostor z formuláře „Salonek“ (${JSON.stringify(misto(T.akceBezPrani))}), rezervace téhož tvaru nic (${JSON.stringify(misto(T.rezBezPrani))})`,
+      misto(T.akceBezPrani)?.text === 'Salonek' && misto(T.rezBezPrani) === null && karta(T.rezBezPrani) !== '')
+  } catch (e) {
+    ok(`týden se stoly se vykreslí — výjimka: ${e.message}`, false)
+  }
+
+  // --- den ---
+  try {
+    const html = renderToStaticMarkup(
+      createElement(obsah.DenObsah, {
+        rozsah: 'firma',
+        datum: '2026-10-30',
+        dnes: '2026-10-30',
+        tenantId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        kDnu: POBOCKY.map((p) => ({ pobocka: p, rezervace: VSE.filter((r) => r.branch_id === p.id), poznamky: [], prilohy: [] })),
+      }),
+    )
+    const meta = (r) => html.match(new RegExp(`<a href="/firma/rezervace/${r.id}" class="ds-rez-radek"[\\s\\S]*?<p class="ds-rez-meta">([^<]*)</p>`))?.[1] ?? null
+    ok(`den: Choice „2 osoby · Patro: S1–S12“ (je „${meta(T.choice)}“)`, meta(T.choice) === '2 osoby · Patro: S1–S12')
+    ok(`den: obsluha a stoly „2 osoby · u okna · Terasa: L7“ (je „${meta(T.obsluha)}“)`, meta(T.obsluha) === '2 osoby · u okna · Terasa: L7')
+    ok(`den: jen prostor, bez místa, starý řádek (${[T.jenProstor, T.nic, T.stary].map((r) => `„${meta(r)}“`).join(', ')})`,
+      meta(T.jenProstor) === '2 osoby · Salonek' && meta(T.nic) === '2 osoby' && meta(T.stary) === '2 osoby · Bar')
+    ok(`den: příznak z databáze — „${meta(T.zmenenePrani)}“ a „${meta(T.obsluhaJakoPrani)}“`,
+      meta(T.zmenenePrani) === '2 osoby · Terasa: L7' && meta(T.obsluhaJakoPrani) === '2 osoby · Patro · Terasa: L7')
+    ok(`den: akce se smazaným přáním „${meta(T.akceBezPrani)}“ (prostor z formuláře), rezervace téhož tvaru „${meta(T.rezBezPrani)}“`,
+      meta(T.akceBezPrani) === '2 osoby · Salonek · Akce · objednal Akce Bez Prani' && meta(T.rezBezPrani) === '2 osoby')
+  } catch (e) {
+    ok(`den se stoly se vykreslí — výjimka: ${e.message}`, false)
+  }
+
+  // --- detail ---
+  const detail = (radek, o = {}) =>
+    renderToStaticMarkup(
+      createElement(obsah.DetailObsah, {
+        rozsah: 'bernard-bar',
+        tenantId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        detail: { radek, menu: '', zaloha: { haleru: null, stav: 'zadna' }, poznamkaZdroje: '', stavZdroje: '', poskytovatel: 'choice', importovanoKdy: null, cisloZdroje: '', ...o },
+        pobocka: PB,
+        poznamky: [],
+        prilohy: [],
+        kontakt: null,
+      }),
+    )
+  const udaje = (html) => Object.fromEntries([...html.matchAll(/<dt>([^<]*)<\/dt><dd>([^<]*)<\/dd>/g)].map((m) => [m[1], m[2]]))
+  try {
+    const html = detail(T.choice, { cisloZdroje: '105' })
+    const u = udaje(html)
+    ok(`detail: „Stoly v Choice: Patro: S1–S12“ a „Stůl / prostor: Patro“ zvlášť (${JSON.stringify({ stoly: u['Stoly v Choice'], prostor: u['Stůl / prostor'] })})`,
+      u['Stoly v Choice'] === 'Patro: S1–S12' && u['Stůl / prostor'] === 'Patro')
+    const zdroj = html.match(/<p class="ds-rez-zdroj"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? ''
+    ok(`detail: původ s číslem rezervace „(Choice, č. 105)“ a stoly ve výčtu převzatého (${text(zdroj).slice(0, 120)}…)`,
+      text(zdroj).startsWith('Převzato z rezervačního systému (Choice, č. 105)') && text(zdroj).includes('kontakt a stoly se mění tam'))
+    const bez = detail(T.jenProstor, { poskytovatel: null })
+    const ub = udaje(bez)
+    ok('detail ručně zapsané: bez řádku stolů, bez čísla', !('Stoly v Choice' in ub) && !('Stoly v rezervačním systému' in ub) && ub['Stůl / prostor'] === 'Salonek' && !bez.includes('č. '))
+    const stary = udaje(detail(T.stary, { poskytovatel: 'choice' }))
+    ok('detail starého řádku (bez klíče misto_zdroje): vykreslí se, bez řádku stolů', !('Stoly v Choice' in stary) && stary['Stůl / prostor'] === 'Bar')
+    const neznamy = udaje(detail(T.obsluha, { poskytovatel: 'neznamy-system' }))
+    ok(`detail z neznámého systému: obecný nadpis „Stoly v rezervačním systému“ (${JSON.stringify(Object.keys(neznamy))})`, neznamy['Stoly v rezervačním systému'] === 'Terasa: L7')
+  } catch (e) {
+    ok(`detail se stoly se vykreslí — výjimka: ${e.message}`, false)
+  }
+  try {
+    // Přání hosta (2. kolo kontroly kódu): v detailu je vidět, odkud se vzalo.
+    const stejne = udaje(detail({ ...T.choice, prostor: 'Patro', prani_zdroje: 'Patro', misto_zdroje: 'Terasa: L7' }))
+    ok(`detail: prostor, který je přáním hosta, má poznámku „(přání hosta v Choice)“ a samostatný řádek přání není (${JSON.stringify(stejne)})`,
+      stejne['Stůl / prostor'] === 'Patro (přání hosta v Choice)' && !('Přání hosta v Choice' in stejne) && stejne['Stoly v Choice'] === 'Terasa: L7')
+    const jine = udaje(detail({ ...T.obsluha, prani_zdroje: 'Patro' }))
+    ok(`detail: jiný prostor od obsluhy zůstane, přání hosta má vlastní řádek „Přání hosta v Choice: Patro“ (${JSON.stringify(jine)})`,
+      jine['Stůl / prostor'] === 'u okna' && jine['Přání hosta v Choice'] === 'Patro')
+    const bezPrani = udaje(detail(T.choice))
+    ok('detail bez přání (starý řádek nebo host nic nechtěl): žádná poznámka ani řádek přání', bezPrani['Stůl / prostor'] === 'Patro' && !Object.keys(bezPrani).some((k) => k.startsWith('Přání')))
+  } catch (e) {
+    ok(`detail s přáním hosta se vykreslí — výjimka: ${e.message}`, false)
+  }
+  // 3. kolo kontroly kódu (#6–#9, #16): poznámka u prostoru podle příznaku.
+  const detailUdaje = (popis, radek, o, fn) => {
+    let u
+    try { u = udaje(detail(radek, o)) } catch (e) { ok(`${popis} — výjimka: ${e.message}`, false); return }
+    ok(`${popis} (${JSON.stringify(Object.fromEntries(Object.entries(u).filter(([k]) => k.startsWith('Stůl') || k.startsWith('Přání') || k.startsWith('Stoly'))))})`, fn(u))
+  }
+  detailUdaje('detail: prostor ze zdroje, přání se v Choice změnilo → „Patro (doplněno z Choice)“ a aktuální přání na vlastním řádku',
+    T.zmenenePrani, {}, (u) => u['Stůl / prostor'] === 'Patro (doplněno z Choice)' && u['Přání hosta v Choice'] === 'Zahrada' && u['Stoly v Choice'] === 'Terasa: L7')
+  detailUdaje('detail: prostor ze zdroje a pořád stejné přání → „(přání hosta v Choice)“, bez řádku přání',
+    { ...T.zmenenePrani, prani_zdroje: 'patro' }, {}, (u) => u['Stůl / prostor'] === 'Patro (přání hosta v Choice)' && !('Přání hosta v Choice' in u))
+  detailUdaje('detail: obsluha napsala totéž co přání → prostor bez poznámky, přání na vlastním řádku',
+    T.obsluhaJakoPrani, {}, (u) => u['Stůl / prostor'] === 'Patro' && u['Přání hosta v Choice'] === 'Patro')
+  detailUdaje('detail: prostor ze zdroje a přání v Choice smazané → „(doplněno z Choice)“, žádný řádek přání',
+    { ...T.zmenenePrani, prani_zdroje: '' }, {}, (u) => u['Stůl / prostor'] === 'Patro (doplněno z Choice)' && !Object.keys(u).some((k) => k.startsWith('Přání')))
+  detailUdaje('detail: neznámý systém → „(doplněno z rezervačního systému)“ a „Přání hosta v rezervačním systému“',
+    T.zmenenePrani, { poskytovatel: 'neznamy-system' }, (u) => u['Stůl / prostor'] === 'Patro (doplněno z rezervačního systému)' && u['Přání hosta v rezervačním systému'] === 'Zahrada')
+  detailUdaje('detail: řádek bez příznaku (null) a prostor = přání → jako ve 2. kole „(přání hosta v Choice)“',
+    { ...T.zmenenePrani, prani_zdroje: 'Patro', prostor_ze_zdroje: null }, {}, (u) => u['Stůl / prostor'] === 'Patro (přání hosta v Choice)' && !('Přání hosta v Choice' in u))
+
+  // --- načtení: nová i stará databáze (data.ts naostro, databáze podstrčená) ---
+  // Vercel nasadí kód dřív než db push: do té doby sloupce nejsou a kalendář
+  // nesmí spadnout. Podstrčená je jen odpověď databáze, rozhoduje skutečné
+  // data.ts a skutečné `sloupecNeexistuje` z lib/supabase/dotaz.ts.
+  const PRAZDNY = js('')
+  const DOTAZ = adresaModulu('lib/supabase/dotaz.ts', [['server-only', PRAZDNY]])
+  const data = await nactiModul('app/[rozsah]/rezervace/data.ts', [
+    ['server-only', PRAZDNY],
+    ['@/lib/supabase/dotaz', DOTAZ],
+    ['@/lib/supabase/server', js('export async function getServerSupabase() { return globalThis.__rezDb }')],
+    ['@/lib/provozni-den', js('export async function provozniDen() { return null }')],
+  ])
+  /** Databáze, která na každý dotaz odpoví `odpoved(dotaz)` a zapamatuje si ho. */
+  const falesna = (odpoved) => {
+    const dotazy = []
+    return {
+      dotazy,
+      from(tabulka) {
+        const d = { tabulka, select: '', filtry: [] }
+        dotazy.push(d)
+        const b = {
+          select: (s) => ((d.select = s), b),
+          maybeSingle: () => ((d.jeden = true), b),
+          then: (a, c) => Promise.resolve(odpoved(d)).then(a, c),
+        }
+        for (const f of ['eq', 'in', 'gte', 'lte', 'order', 'limit']) b[f] = (...x) => (d.filtry.push([f, ...x]), b)
+        return b
+      },
+    }
+  }
+  const TEN = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+  const PBR = { id: BERNARD.id, nazev: BERNARD.name, slug: 'bernard-bar', zona: 'Europe/Prague', zapis: true }
+  const radekDb = (o = {}) => ({ id: T.choice.id, branch_id: BERNARD.id, den: '2026-10-30', druh: 'rezervace', stav: 'potvrzeno', nazev: '', jmeno_hosta: 'Choice Patro', zacatek: T.choice.zacatek, konec: null, pocet_osob: 2, prostor: 'Patro', typ_akce: '', zdroj: 'api', ...o })
+  const filtry = (d) => JSON.stringify(d.filtry)
+  const nemaSloupec = (kod) => (d) =>
+    d.select.includes('misto_zdroje') || d.select.includes('cislo_zdroje')
+      ? { data: null, error: { code: kod, message: 'column rezervace.misto_zdroje does not exist' } }
+      : { data: d.jeden ? radekDb({ menu: '', zaloha_hosta_haleru: null, zaloha_hosta_stav: 'zadna', poznamka_zdroje: '', stav_zdroje: '', poskytovatel: 'choice', importovano_kdy: null, externi_zmeneno_kdy: null }) : [{ ...radekDb(), rezervace_prilohy: [] }], error: null }
+
+  /** Načtení nad podstrčenou databází; výjimka se vrátí, ať shodí svou kontrolu, ne všechny další. */
+  const nacti = async (db, fn) => {
+    globalThis.__rezDb = db
+    try {
+      return { v: await fn(), dotazy: db.dotazy, e: null }
+    } catch (e) {
+      return { v: null, dotazy: db.dotazy, e }
+    } finally {
+      delete globalThis.__rezDb
+    }
+  }
+  const kalendar = (db) => nacti(db, () => data.nacistRezervace(TEN, [PBR], '2026-10-26', '2026-11-01'))
+  const detailDb = (db) => nacti(db, () => data.nacistRezervaci(TEN, T.choice.id, [PBR]))
+  const proc = (r) => (r.e ? `, výjimka: ${r.e.message}` : '')
+  const detailRadek = (o = {}) => radekDb({ menu: '', zaloha_hosta_haleru: null, zaloha_hosta_stav: 'zadna', poznamka_zdroje: '', stav_zdroje: '', poskytovatel: 'choice', importovano_kdy: null, externi_zmeneno_kdy: null, ...o })
+
+  {
+    const r = await kalendar(falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: 'Patro: S1–S12', prani_zdroje: 'Patro', prostor_ze_zdroje: true }), rezervace_prilohy: [] }], error: null })))
+    ok(`načtení kalendáře (nová DB): jeden dotaz se stoly, přáním hosta, příznakem a vnořenými dokumenty; vše v řádku (${r.dotazy.length} dotaz, „${r.v?.[0]?.misto_zdroje}“, přání „${r.v?.[0]?.prani_zdroje}“, příznak ${r.v?.[0]?.prostor_ze_zdroje}${proc(r)})`,
+      !r.e && r.dotazy.length === 1 && r.dotazy[0].select.endsWith(', misto_zdroje, prani_zdroje, prostor_ze_zdroje, rezervace_prilohy(id, nazev, mime, nahrano)') && r.v[0]?.misto_zdroje === 'Patro: S1–S12' && r.v[0]?.prani_zdroje === 'Patro' && r.v[0]?.prostor_ze_zdroje === true && stejneObj(r.v[0]?.dokumenty, []))
+  }
+  {
+    // Příznak jinak než boolean (null z legacy řádku, nebo nečekaný tvar) → null.
+    const r = await kalendar(falesna(() => ({ data: [false, null, 't', 1].map((p, i) => ({ ...radekDb({ id: `${T.choice.id.slice(0, -1)}${i}`, prostor_ze_zdroje: p }), rezervace_prilohy: [] })), error: null })))
+    ok(`načtení kalendáře: příznak false zůstane false, null / 't' / 1 → null (${JSON.stringify(r.v?.map((x) => x.prostor_ze_zdroje))}${proc(r)})`,
+      !r.e && JSON.stringify(r.v?.map((x) => x.prostor_ze_zdroje)) === '[false,null,null,null]')
+  }
+  for (const kod of ['42703', 'PGRST204']) {
+    const r = await kalendar(falesna(nemaSloupec(kod)))
+    const [a, b] = r.dotazy
+    ok(`načtení kalendáře (stará DB, ${kod}): druhý dotaz bez stolů, se stejnými filtry a dokumenty; řádek má stoly '' (${r.dotazy.length} dotazy${proc(r)})`,
+      !r.e && r.dotazy.length === 2 && !b.select.includes('misto_zdroje') && !b.select.includes('prani_zdroje') && b.select.endsWith(', zdroj, rezervace_prilohy(id, nazev, mime, nahrano)') && filtry(a) === filtry(b) && filtry(b).includes(TEN) && r.v[0]?.misto_zdroje === '' && r.v[0]?.prani_zdroje === '' && r.v[0]?.prostor === 'Patro' && r.v[0]?.prostor_ze_zdroje === null && !b.select.includes('prostor_ze_zdroje'))
+  }
+  {
+    const r = await kalendar(falesna(() => ({ data: null, error: { code: '42501', message: 'permission denied for table rezervace' } })))
+    ok(`načtení kalendáře: jiná chyba se neopakuje a vyhodí se (${r.dotazy.length} dotaz, ${r.e?.name})`,
+      r.dotazy.length === 1 && r.e?.name === 'DotazSelhal' && r.e.message.includes('42501'))
+  }
+  {
+    const r = await detailDb(falesna(() => ({ data: detailRadek({ misto_zdroje: 'Patro: S1–S12', cislo_zdroje: '105', prani_zdroje: 'Patro', prostor_ze_zdroje: false }), error: null })))
+    ok(`načtení detailu (nová DB): stoly, číslo, přání hosta i příznak (${r.v?.radek.misto_zdroje}, č. ${r.v?.cisloZdroje}, přání ${r.v?.radek.prani_zdroje}, příznak ${r.v?.radek.prostor_ze_zdroje}${proc(r)})`,
+      !r.e && r.dotazy.length === 1 && r.dotazy[0].select.endsWith('externi_zmeneno_kdy, misto_zdroje, cislo_zdroje, prani_zdroje, prostor_ze_zdroje') && r.v?.radek.misto_zdroje === 'Patro: S1–S12' && r.v?.cisloZdroje === '105' && r.v?.radek.prani_zdroje === 'Patro' && r.v?.radek.prostor_ze_zdroje === false)
+  }
+  {
+    const r = await detailDb(falesna(nemaSloupec('42703')))
+    ok(`načtení detailu (stará DB): druhý dotaz bez sloupců zdroje, stoly '', číslo '' i přání '' (${r.dotazy.length} dotazy${proc(r)})`,
+      !r.e && r.dotazy.length === 2 && r.dotazy[1].select.endsWith('externi_zmeneno_kdy') && r.v?.radek.misto_zdroje === '' && r.v?.cisloZdroje === '' && r.v?.radek.prani_zdroje === '' && r.v?.radek.prostor_ze_zdroje === null)
+  }
+  {
+    const r = await kalendar(falesna(() => ({ data: [{ ...radekDb({ misto_zdroje: null }), rezervace_prilohy: null }], error: null })))
+    ok(`načtení kalendáře: stoly null → '' (do vykreslení nejde nic jiného než text)${proc(r)}`, !r.e && r.v[0]?.misto_zdroje === '')
   }
 }
 

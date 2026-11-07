@@ -234,9 +234,55 @@ export function cekatNaFrontu(
  * rezervace-choice). `ms` = délka dílu od route; `konecMs` doplní
  * `cekatNaFrontu`, až odejde první dotaz připojení: do kdy smějí odcházet
  * další. Route podle něj počítá, kolik času zbývá dalším připojením
- * (`synchronizovatChoice` ho vrací jako `konecDiluMs`).
+ * (`synchronizovatChoice` ho vrací jako `konecDiluMs`). `posledni` =
+ * za tímhle připojením v úloze žádné další není (`smiSeznamMist`).
  */
-export type DilUlohy = { ms: number; konecMs: number | null }
+export type DilUlohy = { ms: number; konecMs: number | null; posledni?: boolean }
+
+/**
+ * Kolik po seznamu míst zabere zápis stránek, které na něj čekaly —
+ * rezerva v `smiSeznamMist`, když připojení dočítá zbytek úlohy.
+ */
+export const ZAPIS_PO_SEZNAMU_MS = 3_000
+
+/**
+ * Smí seznam míst (práce mimo frontu, nejvýš `trvaniMs`) začít v `ted`?
+ *   * Nikdy po `posledniDotazMs` — po něm zbývá jen rezerva na odpověď
+ *     a zápis.
+ *   * Bez dílu (tlačítko, callback): ano, rezerva `REZERVA_DOTAZU_MS` ho
+ *     pojme.
+ *   * Úloha před prvním dotazem připojení (`mapaHned`, `dil.konecMs` ještě
+ *     není): konec dílu se odhadne, jako by první dotaz odcházel teď —
+ *     skutečný konec je stejný nebo pozdější. Dřív tu platilo „ano“,
+ *     a seznam načtený hned na začátku tak obešel obě pravidla níž
+ *     (kontrola kódu 4. 11., 5. kolo). Pozdější konec umí díl přepnout
+ *     z větve „končí dřív“ do přísnější „dočítá úlohu“; odhad přesto
+ *     nepustí nic, co by skutečný konec zakázal, dokud díl ≥
+ *     `NEJMENE_NA_PRIPOJENI_MS` ≥ `trvaniMs` + `ZAPIS_PO_SEZNAMU_MS`
+ *     (route dává díl nejméně `NEJMENE_NA_PRIPOJENI_MS`; nerovnost hlídá
+ *     test, 6. kolo). Když se nevejde, zkusí to každá další stránka se
+ *     stoly (lib/rezervace-choice.ts, `mapaPro`).
+ *   * Díl končí dřív než úloha: jen když se CELÝ vejde do dílu — na jeho
+ *     konec čeká zápis stránek a konec běhu, a route by další připojení
+ *     začala pozdě (kontrola kódu 4. 11., 3. kolo).
+ *   * Díl dočítá zbytek úlohy (`konecDiluUlohy`, po něm by na další díl
+ *     nezbylo): poslední připojení úlohy ano. Jinak route další připojení
+ *     přece začne, když tohle doběhne brzy (počítá od skutečného konce,
+ *     ne od konce dílu) — seznam míst, který by konec běhu posunul za
+ *     `posledniDotazMs - NEJMENE_NA_PRIPOJENI_MS`, by ho připravil
+ *     o celý běh. Smí tedy, když se i se zápisem po něm vejde před tu
+ *     hranici, nebo když už teď za ní je (další připojení by nezačalo
+ *     tak jako tak). Kontrola kódu 4. 11., 4. kolo.
+ */
+export function smiSeznamMist(ted: number, trvaniMs: number, posledniDotazMs: number, dil: DilUlohy | undefined): boolean {
+  if (ted > posledniDotazMs) return false
+  if (!dil) return true
+  const konecDilu = dil.konecMs ?? konecDiluUlohy(ted, dil.ms, posledniDotazMs)
+  if (konecDilu < posledniDotazMs) return ted + trvaniMs <= konecDilu
+  if (dil.posledni === true) return true
+  const prah = posledniDotazMs - NEJMENE_NA_PRIPOJENI_MS
+  return ted >= prah || ted + trvaniMs + ZAPIS_PO_SEZNAMU_MS <= prah
+}
 
 /**
  * Do kdy smějí odcházet dotazy připojení úlohy, když jeho první dotaz
@@ -602,14 +648,17 @@ async function nacistToken(sluzba: SupabaseClient, pripojeniId: string): Promise
  * `dilMs` (jen s `uloha: true`): díl času připojení, který se počítá až
  * od odchodu jeho prvního dotazu (`DilUlohy`, `konecDiluUlohy`);
  * `posledniDotazMs` je pak konec celé úlohy. Do kdy díl doopravdy sahá,
- * vrací `konecDiluMs`.
+ * vrací `konecDiluMs`. `posledniPripojeni`: za tímhle připojením v úloze
+ * žádné další není (`smiSeznamMist`).
  */
 export async function synchronizovatChoice(
   pripojeniId: string,
-  moznosti: { konecMs: number; posledniDotazMs?: number; dilMs?: number; nejmeneOdMinulehoMs?: number; uloha?: boolean; prostredi?: ProstrediChoice },
+  moznosti: { konecMs: number; posledniDotazMs?: number; dilMs?: number; posledniPripojeni?: boolean; nejmeneOdMinulehoMs?: number; uloha?: boolean; prostredi?: ProstrediChoice },
 ): Promise<VysledekSynchronizaceChoice> {
   const p = moznosti.prostredi ?? SKUTECNE
-  const dil: DilUlohy | undefined = moznosti.uloha === true && moznosti.dilMs !== undefined ? { ms: moznosti.dilMs, konecMs: null } : undefined
+  const dil: DilUlohy | undefined = moznosti.uloha === true && moznosti.dilMs !== undefined
+    ? { ms: moznosti.dilMs, konecMs: null, posledni: moznosti.posledniPripojeni === true }
+    : undefined
   const vysledek = (stav: VysledekSynchronizaceChoice['stav'], duvod: string | null, x: Partial<VysledekSynchronizaceChoice> = {}): VysledekSynchronizaceChoice =>
     ({ stav, duvod, omezeno: false, pokracovani: false, dotazu: 0, nacteno: 0, konecDiluMs: dil?.konecMs ?? null, ...x })
 
@@ -650,6 +699,7 @@ export async function synchronizovatChoice(
     return vysledek('chyba', duvod)
   }
 
+  const posledniDotazMs = Math.min(moznosti.konecMs - REZERVA_DOTAZU_MS, moznosti.posledniDotazMs ?? Infinity)
   let beh
   try {
     beh = await probehnoutChoice({
@@ -661,11 +711,17 @@ export async function synchronizovatChoice(
       pockatNaDotaz: cekatNaFrontu(
         sluzba,
         pripojeni.tenant_id,
-        Math.min(moznosti.konecMs - REZERVA_DOTAZU_MS, moznosti.posledniDotazMs ?? Infinity),
+        posledniDotazMs,
         moznosti.uloha === true ? 'uloha' : 'tlacitko',
         p,
         dil,
       ),
+      // Seznam míst jde mimo frontu (limit 1 za 5 s má Choice jen
+      // u /bookings/list); kdy smí začít, říká `smiSeznamMist`.
+      smiMimoFrontu: (trvaniMs) => smiSeznamMist(p.ted(), trvaniMs, posledniDotazMs, dil),
+      // Napojení stoly používá (minulý běh je viděl) — seznam míst hned
+      // na začátku běhu (kontrola kódu 4. 11., 4. kolo).
+      mapaHned: ucet.ma_stoly === true,
       zapsat: zapisDoFoodtabu(sluzba, pripojeni.id),
     })
   } catch (e) {
@@ -680,7 +736,17 @@ export async function synchronizovatChoice(
 
   const chyba = chybaBehu(beh)
   const zmena: Record<string, unknown> = {
-    externi_ucet: { ...ucet, kurzor: beh.kurzor },
+    // `ukazka_delky`: visitDuration s číslem rezervace, jak ho Choice
+    // poslal — podle něj se pozná jednotka délky (lib/rezervace-choice.ts).
+    // `ma_stoly`: aspoň jedna rezervace měla stoly — příští běhy načtou
+    // seznam míst hned na začátku (`mapaHned`). Zůstane, i když další běh
+    // žádnou se stoly nepotká.
+    externi_ucet: {
+      ...ucet,
+      kurzor: beh.kurzor,
+      ...(beh.ukazkaDelky.length > 0 ? { ukazka_delky: beh.ukazkaDelky } : {}),
+      ...(beh.mista.videnyStoly ? { ma_stoly: true } : {}),
+    },
     posledni_chyba: chyba,
   }
   if (beh.uspesnych > 0) {

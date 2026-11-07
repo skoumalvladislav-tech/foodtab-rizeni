@@ -260,6 +260,8 @@ export type DetailRezervace = {
   stavZdroje: string
   poskytovatel: string | null
   importovanoKdy: string | null
+  /** Číslo rezervace ve zdroji (Choice „#105“); `''` = neznámé. */
+  cisloZdroje: string
 }
 
 export function DetailObsah({
@@ -291,6 +293,8 @@ export function DetailObsah({
   const zacatek = datetimeLocalVPasmu(r.zacatek, r.zona)
   const konec = r.konec ? datetimeLocalVPasmu(r.konec, r.zona) : ''
   const system = detail.poskytovatel ? najitSystem(detail.poskytovatel) : null
+  // „(Choice, č. 105)“ — číslo, pod kterým rezervaci najde obsluha v Choice.
+  const puvod = [system?.nazev ?? detail.poskytovatel, detail.cisloZdroje ? `č. ${detail.cisloZdroje}` : null].filter(Boolean).join(', ')
 
   return (
     <>
@@ -327,13 +331,15 @@ export function DetailObsah({
                 menu={detail.menu}
                 poznamkaZdroje={detail.poznamkaZdroje}
                 kontakt={kontakt}
+                nazevSystemu={system?.nazev ?? null}
               />
               {zRezervacnihoSystemu ? (
                 <p className="ds-rez-zdroj" style={{ marginTop: '14px' }}>
                   {r.zdroj === 'csv' ? 'Načteno ze souboru' : 'Převzato z rezervačního systému'}
-                  {system ? ` (${system.nazev})` : detail.poskytovatel ? ` (${detail.poskytovatel})` : ''}
+                  {puvod ? ` (${puvod})` : ''}
                   {detail.importovanoKdy ? `, naposledy ${datumACasSRokemVPasmu(detail.importovanoKdy, r.zona)}` : ''}.
-                  {detail.stavZdroje ? ` Stav ve zdroji: „${detail.stavZdroje}“.` : ''} Čas, počet osob, stav, jméno a kontakt se mění
+                  {detail.stavZdroje ? ` Stav ve zdroji: „${detail.stavZdroje}“.` : ''}{' '}
+                  {r.misto_zdroje ? 'Čas, počet osob, stav, jméno, kontakt a stoly' : 'Čas, počet osob, stav, jméno a kontakt'} se mění
                   tam; poznámky, dokumenty, prostor, menu a záloha patří Foodtabu a příští načtení je nepřepíše.
                 </p>
               ) : null}

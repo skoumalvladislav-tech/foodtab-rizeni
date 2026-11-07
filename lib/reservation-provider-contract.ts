@@ -82,6 +82,22 @@ export type RadekRezervace = {
   prostor: string | null
   /** Čas poslední změny U POSKYTOVATELE (s pásmem), nebo `null`. Podle něj se starší data nepustí přes novější. */
   zmenenoKdy: string | null
+  /**
+   * Stoly, které rezervaci přidělil poskytovatel, jako text („Patro: S1–S12“).
+   * PATŘÍ ZDROJI — každé načtení, které je nese, je přepíše (na rozdíl od
+   * `prostor`). `''` = žádné stoly; `undefined` = poskytovatel je tentokrát
+   * nezná a ve Foodtabu zůstane uložené (migrace 20261107100000).
+   */
+  misto?: string
+  /** Číslo rezervace, jak ho ukazuje poskytovatel (Choice „#105“). `undefined` = neposílá. */
+  cisloZdroje?: string
+  /**
+   * Část podniku, kterou si přál HOST (Choice `preferArea`). Patří zdroji
+   * jako `misto`; `''` = žádné přání. Podle ní appka pozná, že „Stůl nebo
+   * prostor“ doplnil zdroj z přání, a vedle přidělených stolů ho neukáže
+   * (migrace 20261107100000). `undefined` = poskytovatel přání nezná.
+   */
+  praniZdroje?: string
 }
 
 export type VysledekRezervaci = { stav: 'ok'; radky: RadekRezervace[] } | { stav: 'chyba'; duvod: string }

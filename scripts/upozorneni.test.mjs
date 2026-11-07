@@ -610,6 +610,34 @@ ma('výpis v aplikaci: akce i s názvem a prostorem', popisBar[0].akce.join(' | 
 ma('výpis: pobočka bez akcí nemá seznam', popisBar[1].akce.length, 0)
 ma('výpis: prázdná pobočka jako v kalendáři („Nic zapsaného“)',
   popisSouhrnuDne(souhrn({ ...PERLA, rezervaci: 0, hostu: 0 }))[0].pocty, 'Nic zapsaného')
+// 4. kolo kontroly kódu (4. 11.): u akce z Choice ukazoval souhrn holý
+// prostor — přání hosta, které se do něj doplnilo kdysi —, i když kalendář
+// ukazuje stoly. Místo teď skládá totéž mistoKratce jako kalendář.
+// Výjimka (třeba `.trim` nad číslem z poškozeného těla) je CHYBA té jedné
+// kontroly, ne pád celého souboru — jinak by schovala všechny za ní.
+const akceSouhrnu = (a) => {
+  try {
+    return popisSouhrnuDne(souhrn({ ...PERLA, akci: 1, akce: [{ cas: '18:00', nazev: 'Raut', ...a }] }))[0].akce[0]
+  } catch (e) {
+    return `VÝJIMKA: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+ma('výpis: akce z Choice — stoly, ne přání hosta doplněné do prostoru (příznak „ze zdroje“)',
+  akceSouhrnu({ prostor: 'Patro', stoly: 'Terasa: L7', prani: 'Zahrada', prostor_ze_zdroje: true }), '18:00 Raut · Terasa: L7')
+ma('výpis: přání se v Choice změnilo a stoly nejsou — aktuální přání, ne staré',
+  akceSouhrnu({ prostor: 'Patro', prani: 'Zahrada', prostor_ze_zdroje: true }), '18:00 Raut · Zahrada')
+// 5. kolo: host přání smazal, akce bez stolů — prostor z formuláře akce
+// (na main ho souhrn ukazoval; kuchyně by o místo akce přišla).
+ma('výpis: akce, host přání v Choice smazal a stoly nejsou — prostor z formuláře akce',
+  akceSouhrnu({ prostor: 'Salonek', prani: '', prostor_ze_zdroje: true }), '18:00 Raut · Salonek')
+ma('výpis: prostor od obsluhy se ukáže vedle stolů',
+  akceSouhrnu({ prostor: 'u okna', stoly: 'Terasa: L7', prani: 'Patro', prostor_ze_zdroje: false }), '18:00 Raut · u okna · Terasa: L7')
+ma('výpis: bez příznaku (null se z těla vypustí) rozhodne shoda s přáním jako v kalendáři',
+  akceSouhrnu({ prostor: 'Patro', stoly: 'Terasa: L7', prani: 'Patro' }), '18:00 Raut · Terasa: L7')
+ma('výpis: souhrn ze staré databáze (bez nových klíčů) — prostor jako dřív',
+  akceSouhrnu({ prostor: 'Salonek' }), '18:00 Raut · Salonek')
+ma('výpis: poškozené klíče místa nespadnou a nic nevymyslí',
+  akceSouhrnu({ prostor: 7, stoly: ['x'], prani: {}, prostor_ze_zdroje: 'ano' }), '18:00 Raut')
 ma('výpis: akce nad 20 v těle nejsou — řekne se, kolik jich zbývá',
   popisSouhrnuDne(souhrn({ ...PERLA, akci: 23, akce: Array.from({ length: 20 }, () => ({ cas: '18:00' })) }))[0].akce.at(-1),
   '… a 3 další v kalendáři')
@@ -628,7 +656,7 @@ ma('push nese nadpis, ne název akce',
   // Každá migrace, která souhrn (pře)definuje — i ta poslední, která poběží.
   const definice = fs.readdirSync('supabase/migrations').filter((m) => m.endsWith('.sql')).sort()
     .filter((m) => /function app\.rezervace_souhrn_dne\(/.test(fs.readFileSync(`supabase/migrations/${m}`, 'utf8')))
-  ma('souhrn definují dvě migrace (20261103100000 a přepis příjemců 20261106100000)', definice.length, 2)
+  ma('souhrn definují tři migrace (20261103100000, přepis příjemců 20261106100000 a stoly u akcí 20261107100000)', definice.length, 3)
   const podleAppky = STAVY.filter((s) => !pocitaSeDoHostu(s)).sort().join(',')
   for (const m of definice) {
     const migrace = fs.readFileSync(`supabase/migrations/${m}`, 'utf8')

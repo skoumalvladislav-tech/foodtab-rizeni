@@ -17,6 +17,7 @@ import {
   type Pohled,
   type SouhrnDne,
 } from '@/lib/rezervace-kalendar'
+import { mistoKratce, prostorZeZdroje } from '@/lib/rezervace-misto'
 import { poPobockach, souhrnText, type PobockaKalendare } from '@/lib/rezervace-pobocky'
 import { adresaPrilohy, otevritVProhlizeci, rozdelitNazev, velikostText, jeObrazek, type DokumentRezervace } from '@/lib/rezervace-prilohy'
 import {
@@ -63,6 +64,16 @@ export type RezervaceRadek = {
   prostor: string
   typ_akce: string
   zdroj: ZdrojRezervace
+  /** Stoly přidělené v rezervačním systému („Patro: S1–S12“); `''` = žádné nebo neznámé. Patří zdroji. */
+  misto_zdroje: string
+  /** Část podniku, kterou si přál host v rezervačním systému („Patro“); `''` = žádné přání. Patří zdroji. */
+  prani_zdroje?: string
+  /**
+   * Kdo napsal `prostor`: `true` = zdroj (přání hosta), `false` = obsluha,
+   * `null`/chybí = neví se (řádek starší než sloupec, nebo databáze před
+   * db push) — `prostorZeZdroje` pak rozhodne podle shody s přáním.
+   */
+  prostor_ze_zdroje?: boolean | null
   /** Pásmo pobočky rezervace — časy se ukazují v něm (lib/cas.ts). */
   zona: string
 }
@@ -184,6 +195,8 @@ function osobyText(n: number | null): string {
   if (n === null) return 'počet neuveden'
   return `${n} ${n === 1 ? 'osoba' : n >= 2 && n <= 4 ? 'osoby' : 'osob'}`
 }
+
+const male = (s: string) => s.trim().toLocaleLowerCase('cs')
 
 /** „3 rez. · 1 akce · 12 hostů“ do úzkého sloupce; bez zrušených. */
 function souhrnKratce(s: SouhrnDne): string {
@@ -344,6 +357,7 @@ export type DenTydne = {
 }
 
 function PolozkaTydne({ rozsah, r, zpet }: { rozsah: string; r: RezervaceSDokumenty; zpet: string }) {
+  const misto = mistoKratce(r).join(' · ')
   return (
     <div className="ds-rez-polozka" data-druh={r.druh} data-neplati={pocitaSeDoHostu(r.stav) ? undefined : ''}>
       <Link href={`/${rozsah}/rezervace/${r.id}`} className="ds-rez-polozka-odkaz">
@@ -359,6 +373,12 @@ function PolozkaTydne({ rozsah, r, zpet }: { rozsah: string; r: RezervaceSDokume
             .filter(Boolean)
             .join(' · ')}
         </small>
+        {/* Stoly vlastním řádkem — v úzkém sloupci by jinak odsunuly stav za okraj. Celé v title. */}
+        {misto ? (
+          <small className="ds-rez-polozka-misto" title={misto}>
+            {misto}
+          </small>
+        ) : null}
       </Link>
       <DokumentyRezervace rozsah={rozsah} r={r} zpet={zpet} nejvic={DOKUMENTU_V_KARTE} />
     </div>
@@ -603,7 +623,7 @@ export function SeznamRezervaci({
               <p className="ds-rez-meta">
                 {[
                   osobyText(r.pocet_osob),
-                  r.prostor || null,
+                  ...mistoKratce(r),
                   r.druh === 'akce' ? r.typ_akce || 'Akce' : null,
                   r.druh === 'akce' && r.jmeno_hosta && r.nazev ? `objednal ${r.jmeno_hosta}` : null,
                 ]
@@ -633,6 +653,7 @@ export function UdajeRezervace({
   menu,
   poznamkaZdroje,
   kontakt,
+  nazevSystemu = null,
 }: {
   r: RezervaceRadek
   nazevPobocky: string
@@ -641,7 +662,19 @@ export function UdajeRezervace({
   poznamkaZdroje: string
   /** `null` = člověk kontakt vidět nesmí (nemá `rezervace.manage`). */
   kontakt: { telefon: string; email: string } | null
+  /** Jméno rezervačního systému („Choice“) k řádku se stoly; `null` = obecně. */
+  nazevSystemu?: string | null
 }) {
+  const stoly = (r.misto_zdroje ?? '').trim()
+  // Prostor, který doplnil zdroj (`prostorZeZdroje`), má u sebe, odkud je:
+  // „(přání hosta v Choice)“, když je to pořád aktuální přání, jinak
+  // „(doplněno z Choice)“ a aktuální přání je na vlastním řádku. Text od
+  // obsluhy poznámku nemá nikdy, ani když zní stejně jako přání.
+  const prani = (r.prani_zdroje ?? '').trim()
+  const zeZdroje = prostorZeZdroje(r)
+  const praniJeProstor = zeZdroje && prani !== '' && male(prani) === male(r.prostor)
+  const praniKde = nazevSystemu ? `přání hosta v ${nazevSystemu}` : 'přání hosta v rezervačním systému'
+  const doplnenoKde = `doplněno z ${nazevSystemu ?? 'rezervačního systému'}`
   const zalohaText =
     zaloha.stav === 'zadna' && !zaloha.haleru
       ? 'bez zálohy'
@@ -665,7 +698,19 @@ export function UdajeRezervace({
         </>
       ) : null}
       <dt>Stůl / prostor</dt>
-      <dd>{r.prostor || '—'}</dd>
+      <dd>{zeZdroje ? `${r.prostor} (${praniJeProstor ? praniKde : doplnenoKde})` : r.prostor || '—'}</dd>
+      {prani && !praniJeProstor ? (
+        <>
+          <dt>{praniKde.charAt(0).toUpperCase() + praniKde.slice(1)}</dt>
+          <dd>{prani}</dd>
+        </>
+      ) : null}
+      {stoly ? (
+        <>
+          <dt>{nazevSystemu ? `Stoly v ${nazevSystemu}` : 'Stoly v rezervačním systému'}</dt>
+          <dd>{stoly}</dd>
+        </>
+      ) : null}
       <dt>Pobočka</dt>
       <dd>{nazevPobocky}</dd>
       <dt>Záloha od hosta</dt>

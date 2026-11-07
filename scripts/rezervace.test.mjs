@@ -502,6 +502,23 @@ console.log('\n== 9. Univerzální příjmové API ==\n')
   chybna('prázdné pole se odmítne', { rezervace: [] }, 'prázdné')
   chybna(`víc než ${MAX_REZERVACI_V_DAVCE} rezervací se odmítne`, { rezervace: Array.from({ length: MAX_REZERVACI_V_DAVCE + 1 }, (_, i) => ({ ...zaklad, id: `R-${i}` })) }, 'po částech')
 
+  {
+    // Kontrola kódu 4. 11. (2. kolo): `.slice` rozpůlil emoji na hranici
+    // pole a PostgREST pak odmítne CELOU dávku (PGRST102).
+    const pulznak = (s) => [...String(s)].some((z) => z.length === 1 && z.charCodeAt(0) >= 0xd800 && z.charCodeAt(0) <= 0xdfff)
+    const naHranici = (n) => `${'x'.repeat(n - 1)}😀`
+    try {
+      const r = overitDavkuRezervaci({ rezervace: [{ ...zaklad, jmeno: naHranici(120), poznamka: naHranici(4000), stul: naHranici(120) }] })
+      const spatne = r.stav === 'ok' ? ['jmeno_hosta', 'poznamka', 'prostor'].filter((k) => pulznak(r.radky[0][k]) || r.radky[0][k] !== 'x'.repeat(k === 'poznamka' ? 3999 : 119)) : [`dávka odmítnuta: ${r.duvod}`]
+      ok(`příjmové API: emoji přes hranici pole (jméno 120, poznámka 4000, stůl 120) se nerozpůlí, zkrátí se před ním (${spatne.join(', ') || 'všechna tři v pořádku'})`, spatne.length === 0)
+      const osamela = overitDavkuRezervaci({ rezervace: [{ ...zaklad, poznamka: `a${String.fromCharCode(0xd800)}b` }] })
+      ok('příjmové API: osamělá půlka znaku v poznámce → náhradní znak, ne půlznak do databáze',
+        osamela.stav === 'ok' && !pulznak(osamela.radky[0].poznamka) && osamela.radky[0].poznamka === `a${String.fromCharCode(0xfffd)}b`)
+    } catch (e) {
+      ok(`příjmové API: půlznaky — výjimka: ${e?.message}`, false)
+    }
+  }
+
   const adresa = cti('app/api/rezervace/prijem/route.ts')
   const overeniKlice = adresa.indexOf('tajemstviSedi(klic, ulozenyKlic)')
   ok('adresa: klíč se porovná dřív, než se cokoli zapíše',
@@ -1631,9 +1648,12 @@ console.log('\n== 12. Dokumenty u rezervací v kalendáři (3. 11. 2026) ==\n')
   // Vnořeně = stejný dotaz uživatelským klientem, takže dokumenty hlídá
   // i RLS `rezervace_prilohy_cist`; přílohy ke dni mají rezervace_id null
   // a do vnoření se nedostanou.
+  // `${navic}` jsou sloupce stolů (20261107100000); bez nich se dotaz
+  // zopakuje, vnoření dokumentů zůstává v obou podobách — chování
+  // ověřuje scripts/rezervace-pobocky.test.mjs, oddíl 7.
   ok('kalendář: dokumenty vnořeně v dotazu na rezervace, uživatelským klientem',
     nacist.includes('const supabase = await getServerSupabase()')
-    && nacist.includes('.select(`${SLOUPCE_REZERVACE}, rezervace_prilohy(id, nazev, mime, nahrano)`)')
+    && nacist.includes('.select(`${SLOUPCE_REZERVACE}${navic}, rezervace_prilohy(id, nazev, mime, nahrano)`)')
     && nacist.includes('dokumenty: dokumentyRezervace(rezervace_prilohy)'))
   // Vnoření bez jména vazby funguje, jen dokud mezi tabulkami vede
   // jediný cizí klíč. Druhý (třeba „přesunuto z rezervace“) a PostgREST

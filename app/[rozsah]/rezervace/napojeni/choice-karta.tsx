@@ -52,7 +52,8 @@ export function ChoiceKarta({
       <PanelHlava ikona="kalendar" nadpis="Choice — rezervace načítané přímo" />
       <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--muted)', lineHeight: 1.5 }}>
         Foodtab se Choice ptá na rezervace sám, každých 15 minut (Choice je neumí poslat). Do Choice nic nezapisuje. Čas,
-        počet osob, stav, jméno a kontakt patří Choice; poznámky, dokumenty, záloha od hosta a stůl zůstávají ve Foodtabu.
+        počet osob, stav, jméno, kontakt a přidělené stoly patří Choice; poznámky, dokumenty, záloha od hosta a „Stůl
+        / prostor“ zůstávají ve Foodtabu.
       </p>
 
       {!nastaveno ? (
