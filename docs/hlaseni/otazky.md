@@ -1989,8 +1989,9 @@ docs/rezervace-navrh.md, oddíl 1.
 - **Proč:** odhadnutý konec by mohl být špatně o celé řády (120 minut
   proti 120 milisekundám) a z konce by se počítala obsazenost. Prázdný
   konec je poznat, špatný ne.
-- **Co je potřeba:** po nasazení uložené ukázky přečtu (jen čtení)
-  a porovnám je s Choice. Když u #105 vyjde 120, jsou to minuty. Pak
+- **Co je potřeba:** uložené ukázky přečtu (jen čtení) a porovnám je
+  s Choice. Kód je nasazený od 7. 11., ale ukázky se uloží až prvním
+  načtením — Choice od 3. 11. nenačítá (403), čeká na „Ověřit znovu“. Když u #105 vyjde 120, jsou to minuty. Pak
   stačí převod v `radekZChoice` (`lib/rezervace-choice.ts`) a konec se
   začne vyplňovat, bez migrace. S koncem by šla i obsazenost stolů
   v čase.
