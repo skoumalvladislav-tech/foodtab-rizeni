@@ -6,7 +6,7 @@
   napojení (Bernard Bar i Černá Perla) se tím přepnula na „vyžaduje
   pozornost“ a úloha je od té doby přeskakovala. Čtyři dny se nenačetla
   jediná rezervace a **nikdo o tom nevěděl**.
-- **Hotovo v PR #PR (nesloučená):**
+- **Hotovo v PR #178 (nesloučená):**
   1. **Upozornění, když napojení spadne.** Když napojení Choice přejde
      z „připojeno“ na „vyžaduje pozornost“, přijde **jedno** upozornění
      „Choice nenačítá rezervace — Bernard Bar Tábor“ majiteli a každému,
@@ -23,7 +23,7 @@
      společnou frontu dotazů (limit Choice 1 dotaz / 5 s). Když projde,
      napojení je zase „připojeno“ a **načte se hned v tomtéž běhu**.
      Když ne, stav zůstane a zkusí se za 2 hodiny.
-- **Je potřeba „sluč #PR a db push“.** Migrace
+- **Je potřeba „sluč #178 a db push“.** Migrace
   `20261108100000_rezervace_choice_vypadek.sql` je jen napsaná, nic
   jsem nenasazoval. Pořadí: nejdřív sloučit (Vercel „Ready“), pak
   `db push` — a **brzy po sobě**: nový kód u napojení píše, že to
@@ -131,7 +131,7 @@ Jedno kolo (agent četl jen commit `a3034d6` přes git). **Vážný nález
 
 ## Co čeká na Šéfíka
 
-- **„sluč #PR a db push“** (pořadí výš).
+- **„sluč #178 a db push“** (pořadí výš).
 - Po nasazení: v Rezervace → Napojení se do půl hodiny ukáže, jestli
   Choice zase pouští. Když ne, hláška u napojení řekne proč; pak napsat
   Choice (api@choiceqr.com) nebo napojení připojit znovu.
@@ -182,7 +182,7 @@ Podrobně v `docs/hlaseni/otazky.md`.
 ## Kde jsem skončil a co zbývá
 
 Obě části zadání jsou hotové v jedné PR, nesloučené. Zbývá jen
-„sluč #PR a db push“ a po nasazení se podívat na Napojení.
+„sluč #178 a db push“ a po nasazení se podívat na Napojení.
 
 Navazující věci mimo zadání (nedělal jsem):
 
