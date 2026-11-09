@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 import Ikona from "@/app/[rozsah]/ikona";
+import { naPosuvniku, umisteniNabidky } from "@/lib/nabidka-v-okne";
 import {
   FILTR_DESKTOP_PRAZDNY,
   POPIS_PUNTIKU,
@@ -115,6 +116,9 @@ export default function Nastroje({
   // Obě nabídky se zavírají klikem mimo a Escapem; fokus se vrací na tlačítko.
   useZavirani(otevrene, setOtevrene, tlacitko, panel);
   useZavirani(zobrazitOtevrene, setZobrazitOtevrene, zobrazitTlacitko, zobrazitPanel);
+  // A obě se vejdou celé do okna, ať je tlačítko kdekoli.
+  useVOkne(otevrene, panel);
+  useVOkne(zobrazitOtevrene, zobrazitPanel);
 
   const nazevUseku = (klic: string) =>
     klic === BEZ_USEKU ? "Bez úseku" : (moznosti.useky.find((u) => u.klic === klic)?.nazev ?? klic);
@@ -502,6 +506,13 @@ export default function Nastroje({
 /**
  * Nabídka se zavírá klikem mimo a Escapem; po Escapu se fokus vrací na
  * tlačítko, které ji otevřelo.
+ *
+ * „Klik mimo“ je jen klik levým tlačítkem, který neleží na posuvníku.
+ * Chrome hlásí klik na posuvník stránky jako `mousedown` na `<html>` a
+ * prostřední tlačítko spouští ve Windows posun kolečkem — obojí je
+ * posouvání a nabídka po něm musí zůstat (Šéfík 9. 11. 2026: chtěl
+ * panel Filtry posunout doprava a ten se mu zavřel). Kolečko, touchpad
+ * ani posun prstem `mousedown` nevyvolají vůbec.
  */
 function useZavirani(
   otevrene: boolean,
@@ -512,8 +523,10 @@ function useZavirani(
   useEffect(() => {
     if (!otevrene) return;
     function naKlik(e: MouseEvent) {
+      if (e.button !== 0) return;
       const cil = e.target as Node;
       if (panel.current?.contains(cil) || tlacitko.current?.contains(cil)) return;
+      if (posuvnikPodKlikem(e)) return;
       nastavit(false);
     }
     function naKlavesu(e: KeyboardEvent) {
@@ -529,4 +542,96 @@ function useZavirani(
       document.removeEventListener("keydown", naKlavesu);
     };
   }, [otevrene, nastavit, tlacitko, panel]);
+}
+
+/** Klik na posuvník stránky, nebo prvku, na který se kliklo (třeba mřížky)? */
+function posuvnikPodKlikem(e: MouseEvent): boolean {
+  const okno = document.documentElement;
+  const prvek = e.target instanceof HTMLElement && e.target !== okno ? e.target : null;
+  let rozmery = null;
+  if (prvek) {
+    const r = prvek.getBoundingClientRect();
+    const s = getComputedStyle(prvek);
+    const ramy = {
+      levy: parseFloat(s.borderLeftWidth) || 0,
+      pravy: parseFloat(s.borderRightWidth) || 0,
+      horni: parseFloat(s.borderTopWidth) || 0,
+      dolni: parseFloat(s.borderBottomWidth) || 0,
+    };
+    rozmery = {
+      vlevo: r.left,
+      nahore: r.top,
+      ramLevy: ramy.levy,
+      ramHorni: ramy.horni,
+      sirkaVnitrku: prvek.clientWidth,
+      vyskaVnitrku: prvek.clientHeight,
+      posuvnikSvisly: Math.max(0, Math.round(prvek.offsetWidth - ramy.levy - ramy.pravy - prvek.clientWidth)),
+      posuvnikVodorovny: Math.max(0, Math.round(prvek.offsetHeight - ramy.horni - ramy.dolni - prvek.clientHeight)),
+    };
+  }
+  return naPosuvniku({ x: e.clientX, y: e.clientY }, { sirka: okno.clientWidth, vyska: okno.clientHeight }, rozmery);
+}
+
+/**
+ * Nabídka visí pod svým tlačítkem, ale vždycky celá v okně: vpravo se
+ * přisune ke kraji okna, dolů je vysoká jen tak, kolik je pod tlačítkem
+ * místa, a zbytek se posouvá uvnitř ní. Dřív stála natvrdo levým okrajem
+ * pod tlačítkem a vysoká `100dvh − 200 px` — na notebooku se zvětšením
+ * 125 % přetekla o 100 px doprava a stránka dostala vodorovný posuvník.
+ *
+ * Měří se po každém vykreslení (volba v nabídce umí tlačítko posunout:
+ * vybraný úsek prodlouží tlačítko „Zobrazit“, které stojí před Filtry),
+ * při změně velikosti okna a když se přeskládá řádek nástrojů. Hned po
+ * otevření se navíc stránka posune, kdyby nabídka dole nebyla vidět
+ * (nízké okno, telefon na šířku); později už ne — to by člověku cukalo
+ * stránkou, kterou si sám posunul.
+ */
+function useVOkne(otevrene: boolean, panel: RefObject<HTMLDivElement | null>) {
+  const poOtevreni = useRef(true);
+
+  // Bez seznamu závislostí: po každém vykreslení, ještě než se nakreslí.
+  useLayoutEffect(() => {
+    if (!otevrene) {
+      poOtevreni.current = true;
+      return;
+    }
+    umistit(panel.current, poOtevreni.current);
+    poOtevreni.current = false;
+  });
+
+  useEffect(() => {
+    if (!otevrene) return;
+    const znovu = () => umistit(panel.current, false);
+    window.addEventListener("resize", znovu);
+    const lista = panel.current?.closest(".ds-smd-lista") ?? null;
+    const pozorovatel = lista && typeof ResizeObserver !== "undefined" ? new ResizeObserver(znovu) : null;
+    if (lista) pozorovatel?.observe(lista);
+    return () => {
+      window.removeEventListener("resize", znovu);
+      pozorovatel?.disconnect();
+    };
+  }, [otevrene, panel]);
+}
+
+function umistit(nabidka: HTMLDivElement | null, ukazat: boolean) {
+  // Obal (`.ds-smd-filtry-obal`, position: relative) je to, k čemu se `left` vztahuje.
+  const obal = nabidka?.offsetParent;
+  if (!nabidka || !(obal instanceof HTMLElement)) return;
+  const okno = document.documentElement;
+  const zmerit = () => {
+    const u = umisteniNabidky({
+      kotva: obal.getBoundingClientRect().left,
+      sirka: nabidka.offsetWidth,
+      nahore: nabidka.getBoundingClientRect().top,
+      oknoSirka: okno.clientWidth,
+      oknoVyska: okno.clientHeight,
+    });
+    nabidka.style.left = `${u.vlevo}px`;
+    nabidka.style.maxHeight = `${u.maxVyska}px`;
+  };
+  zmerit();
+  if (ukazat && nabidka.getBoundingClientRect().bottom > okno.clientHeight) {
+    nabidka.scrollIntoView({ block: "nearest", inline: "nearest" });
+    zmerit();
+  }
 }

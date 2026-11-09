@@ -1217,9 +1217,15 @@ span.ds-sm-dl { cursor: default; }
 }
 
 .ds-smd-filtry-obal { position: relative; }
+/* `left` a `max-height` přepisuje po otevření nastroje.tsx (useVOkne), aby
+   byla nabídka celá v okně; hodnoty tady platí jen do prvního změření.
+   `overscroll-behavior`: kolečko na konci seznamu nerozjede stránku pod ním.
+   `scroll-margin`: když se stránka po otevření posune, ať nabídka nekončí
+   natěsno u kraje okna (stejných 8 px jako OKRAJ_NABIDKY). */
 .ds-smd-filtry {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
   width: 440px; max-width: calc(100vw - 32px); max-height: calc(100dvh - 200px); overflow: auto;
+  overscroll-behavior: contain; scroll-margin: 8px;
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px;
   padding: 14px 16px; background: var(--card); border: 1px solid var(--line);
   border-radius: 12px; box-shadow: var(--shadow-lg);
