@@ -1,4 +1,4 @@
-# Stav k 7. 11. 2026 — výpadek napojení Choice: upozornění a opakovaný test
+# Stav k 7.–10. 11. 2026 — výpadek napojení Choice: upozornění a opakovaný test (10. 11. sloučeno a nasazeno)
 
 ## Nejdřív to podstatné
 
@@ -6,7 +6,8 @@
   napojení (Bernard Bar i Černá Perla) se tím přepnula na „vyžaduje
   pozornost“ a úloha je od té doby přeskakovala. Čtyři dny se nenačetla
   jediná rezervace a **nikdo o tom nevěděl**.
-- **Hotovo v PR #178 (nesloučená):**
+- **Hotovo v PR #178 — 10. 11. sloučená a nasazená** (`8f4b16b`,
+  migrace `20261108100000`, podrobně oddíl „Nasazení 10. 11.“ na konci):
   1. **Upozornění, když napojení spadne.** Když napojení Choice přejde
      z „připojeno“ na „vyžaduje pozornost“, přijde **jedno** upozornění
      „Choice nenačítá rezervace — Bernard Bar Tábor“ majiteli a každému,
@@ -23,18 +24,19 @@
      společnou frontu dotazů (limit Choice 1 dotaz / 5 s). Když projde,
      napojení je zase „připojeno“ a **načte se hned v tomtéž běhu**.
      Když ne, stav zůstane a zkusí se za 2 hodiny.
-- **Je potřeba „sluč #178 a db push“.** Migrace
-  `20261108100000_rezervace_choice_vypadek.sql` je jen napsaná, nic
-  jsem nenasazoval. Pořadí: nejdřív sloučit (Vercel „Ready“), pak
-  `db push` — a **brzy po sobě**: nový kód u napojení píše, že to
-  Foodtab zkouší znovu sám, a to platí až s migrací. Obráceně by
-  databáze poslala upozornění, které stará aplikace neumí pojmenovat
-  (nadpis by byl jen „Upozornění“).
-- **Hned po nasazení s napojeními, která stojí od 3. 11.:** upozornění
-  na výpadek **nedostanou** (spadla dřív, než spoušť existovala), ale
-  **první běhy úlohy po `db push` je otestují** (jedno za běh, úloha
-  běží po 15 minutách — obě tedy do půl hodiny). Když Choice zase
-  pouští, začnou se načítat samy, bez „Ověřit znovu“.
+- **Nasazeno 10. 11. 2026** na pokyn „sluč 178 a db push“: sloučeno
+  ve 22:39. První pokus Vercelu postavit novou verzi aplikace
+  **selhal** na chybě u písma z Google Fonts v souboru, který tato PR
+  nemění. Ostrá aplikace mezitím běžela dál na předchozí verzi a nic
+  nevypadlo. Druhý pokus s týmž kódem prošel ve 23:01,
+  `db push` ve 23:03. Ověřeno čtecím dotazem a prvním během úlohy
+  ve 23:11 — obě pobočky bez chyby. Pořadí kód → migrace dodržené.
+- **Napojení, která stála od 3. 11., už v době nasazení nestála:**
+  poslední test napojení u obou poboček prošel 7. 11. v 17:21 (Bernard
+  Bar) a 17:26 (Černá Perla), nejspíš přes „Ověřit znovu“. Od té doby
+  se rezervace zase načítají.
+  Opakovaný test i upozornění na výpadek proto **zatím naostro neběžely**
+  — ukážou se, až Choice příště odmítne přístup.
 - **Kdo kdy dostane push:** majitel hned, ostatní až na začátku své
   směny (stávající pravidlo upozornění pro prioritu „important“).
   **Zvoní nejvýš jednou za 24 hodin na napojení** — když napojení
@@ -45,14 +47,14 @@
 
 ## Co je hotové
 
-| Co | Commit | Čeká na db push |
+| Co | Commit | Nasazeno |
 |---|---|---|
-| Spoušť upozornění na výpadek a obnovení napojení Choice (migrace 20261108100000) | `a3034d6` | ano |
-| Funkce pro opakovaný test (odstup + místo ve frontě naráz, jen úloha) | `a3034d6` | ano |
-| Opakovaný test v úloze `rezervace-choice` (jednou za 2 h, jeden za běh) | `a3034d6` | bez migrace nic nedělá |
-| Texty upozornění, odkaz na Napojení, věta a tlačítko na stránce Upozornění | `a3034d6` | bez migrace nikdo upozornění nedostane |
-| Hláška u napojení: „Foodtab přístup zkouší znovu sám každé 2 hodiny…“ | `a3034d6` | platí až s migrací |
-| Opravy po nezávislé kontrole: zvonění nejvýš 1× za 24 h, výpadek hlásí jen server, odpojení stáhne upozornění | `ebe143a` | ano |
+| Spoušť upozornění na výpadek a obnovení napojení Choice (migrace 20261108100000) | `a3034d6` | 10. 11. (`db push`) |
+| Funkce pro opakovaný test (odstup + místo ve frontě naráz, jen úloha) | `a3034d6` | 10. 11. (`db push`) |
+| Opakovaný test v úloze `rezervace-choice` (jednou za 2 h, jeden za běh) | `a3034d6` | 10. 11. (kód + migrace) |
+| Texty upozornění, odkaz na Napojení, věta a tlačítko na stránce Upozornění | `a3034d6` | 10. 11. (kód) |
+| Hláška u napojení: „Foodtab přístup zkouší znovu sám každé 2 hodiny…“ | `a3034d6` | 10. 11. (kód + migrace) |
+| Opravy po nezávislé kontrole: zvonění nejvýš 1× za 24 h, výpadek hlásí jen server, odpojení stáhne upozornění | `ebe143a` | 10. 11. (`db push`) |
 | Testy, scénář krok110, CI (`run.sh`, `databaze.yml`), otázky 89–91, `docs/rezervace-choice.md`, toto hlášení | `a3034d6`, `ebe143a` a commit s tímto hlášením | — |
 
 ## Čísla — a z čeho jsou
@@ -131,10 +133,11 @@ Jedno kolo (agent četl jen commit `a3034d6` přes git). **Vážný nález
 
 ## Co čeká na Šéfíka
 
-- **„sluč #178 a db push“** (pořadí výš).
-- Po nasazení: v Rezervace → Napojení se do půl hodiny ukáže, jestli
-  Choice zase pouští. Když ne, hláška u napojení řekne proč; pak napsat
-  Choice (api@choiceqr.com) nebo napojení připojit znovu.
+- Nic k nasazení — #178 je od 10. 11. v provozu.
+- Až přijde upozornění „Choice nenačítá rezervace — pobočka“: otevřít
+  ho (vede na Rezervace → Napojení). Foodtab to pak sám zkouší znovu
+  každé 2 hodiny; když to nepomůže ani „Ověřit znovu“, napsat Choice
+  (api@choiceqr.com) nebo napojení připojit znovu.
 - Otázky 89, 90, 91.
 
 ## Otázky
@@ -154,10 +157,16 @@ Podrobně v `docs/hlaseni/otazky.md`.
   ze zdrojáku (test, že stránka volá `popisNapojeni` a
   `jeUpozorneniNapojeni`) a texty čistými funkcemi. Push na telefonu
   taky ne. Přihlášená stránka s upozorněním by potřebovala databázi
-  s migrací — ta před `db push` nikde není.
+  s migrací — ta před `db push` nikde není. **Po nasazení 10. 11.
+  pořád neviděno:** migrace v ostré databázi je, ale žádné upozornění
+  na výpadek zatím nevzniklo (nic nespadlo).
 - **Proti živému Choice jsem nic nezkoušel** — na Choice jsem se
   neptal vůbec. Opakovaný test je tentýž GET jako „Ověřit znovu“, které
   funguje; jestli Choice dnes pouští, ukáže až první běh po nasazení.
+  **Doplněno 10. 11.:** Choice pouští od 7. 11. (poslední test
+  napojení prošel, nejspíš přes „Ověřit znovu“), první běh
+  po nasazení (23:11) u obou poboček bez chyby.
+  Samotný opakovaný test se naostro nespustil — nebylo co zkoušet.
 - **Obnovené napojení se načte „hned“, jen když má starší běh než
   zdravé.** Úloha řadí napojení podle posledního běhu; stojící napojení
   ho má staré (3. 11.), takže jde první. Test to nejdřív neukazoval —
@@ -181,8 +190,9 @@ Podrobně v `docs/hlaseni/otazky.md`.
 
 ## Kde jsem skončil a co zbývá
 
-Obě části zadání jsou hotové v jedné PR, nesloučené. Zbývá jen
-„sluč #178 a db push“ a po nasazení se podívat na Napojení.
+Obě části zadání jsou hotové v jedné PR, 10. 11. sloučené a nasazené
+(oddíl „Nasazení 10. 11.“). Naostro se ukážou až při dalším
+odmítnutí od Choice.
 
 Navazující věci mimo zadání (nedělal jsem):
 
@@ -195,6 +205,72 @@ Navazující věci mimo zadání (nedělal jsem):
   „KROK 109 HOTOV“ — kdyby scénář skončil v půlce bez chyby, CI to
   nepozná. KROK 110 ji má.
 
-## Nenasazoval jsem
+## Nasazení 10. 11.
 
-Nic. Žádný `db push`, nic sloučené, na Choice jsem se neptal.
+Při práci na PR (7. 11.) jsem nic nenasazoval ani neslučoval a na
+Choice se neptal. Nasazení proběhlo 10. 11. na pokyn Šéfíka „sluč 178
+a db push“ (časy místní, UTC+1):
+
+1. **Před sloučením:**
+   - CI #178 zelené (Testy aplikace, Migrace a scénáře, Migrace jen
+     přibývají), `MERGEABLE` / `CLEAN`.
+   - CLI napojené na `spekntcsuroqhehmjssv` / `foodtab-test`.
+   - `migration list`: databáze i repozitář končí na `20261107100000`,
+     nic dalšího nenasazeného.
+   - Čtecí dotaz: 203 rezervací. Choice Bernard Bar i Černá Perla
+     `pripojeno`, poslední test 7. 11. 17:21 / 17:26 úspěšný. Nová
+     tabulka ani funkce zatím neexistují.
+2. **Sloučeno ve 22:39** (`8f4b16b`).
+3. **První produkční sestavení na Vercelu selhalo ve 22:40.** Z build
+   logu:
+   - Turbopack build failed with 12 errors;
+   - `next/font/google` (písmo Archivo) v `app/layout.tsx`: „Module not
+     found: Can't resolve '@vercel/turbopack-next/internal/font/google/
+     font'“ a „next/font/google queries have exactly one entry“.
+
+   Kód #178 písma ani `layout.tsx` nemění. Poslední úspěšné sestavení
+   (9. 11., #179) běželo na stejném Node 26 a Next.js 16.2.6. Z údajů,
+   které jsem porovnal, se lišila verze sestavovacího nástroje Vercelu
+   (CLI 65.11.0 → 65.14.0) a obě sestavení vycházela z jiné
+   mezipaměti. Jakou verzi nástroje a jakou mezipaměť použilo
+   opakované sestavení, které prošlo, v záznamech nemám. Adresy písem,
+   které Google Fonts vrací, byly při ruční kontrole po selhání běžné
+   (bez `?` a `&`). Co dostalo samotné sestavení ve 22:40, nevím.
+   Ostrá aplikace mezitím běžela dál na verzi #179, nic nespadlo.
+4. **Opakované sestavení téhož commitu** (redeploy přes Vercel API,
+   `dpl_9H9s86otEcZWjbbsuRh5JPtfkT4W`) **prošlo ve 23:01**:
+   - produkční adresa `foodtab-rizeni.vercel.app` převedená;
+   - `/prihlaseni` vrací 200.
+
+   Stejný commit napodruhé prošel, takže chyba nebyla v kódu #178.
+   Co přesně první sestavení shodilo (nástroj, nebo mezipaměť
+   Vercelu), z dostupných údajů nevím. Build log šel přečíst
+   až poté, co Šéfík povolil Vercel MCP přístup k týmu.
+5. **`db push` ve 23:03**, výstup doslovně:
+
+   ```
+   Initialising login role...
+   Connecting to remote database...
+   Do you want to push these migrations to the remote database?
+    • 20261108100000_rezervace_choice_vypadek.sql
+    [Y/n] y
+   Applying migration 20261108100000_rezervace_choice_vypadek.sql...
+   {"upToDate":false,"dryRun":false,"migrations":["20261108100000_rezervace_choice_vypadek.sql"],"seeds":[],"roles":[],"message":"Finished supabase db push."}
+   ```
+
+   (exit 0)
+6. **Ověřeno čtecím dotazem** (dotaz, který v databázi nic nemění).
+   Všechno je tak, jak to po migraci má být:
+
+   | Co | Výsledek |
+   |---|---|
+   | Poslední migrace | `20261107100000`, `20261108100000` |
+   | `app.integrace_vypadek_zvoneni` | existuje, RLS zapnuté, sloupce `pripojeni_id uuid not null`, `zvonilo timestamptz not null`; `anon`, `authenticated` ani `service_role` nemají select/insert/update/delete/truncate; 0 řádků |
+   | `app.integrace_vypadek_upozornit()` | security definer, `search_path=""`; spustit nesmí `anon`, `authenticated`, `public` ani `service_role` |
+   | `public.rezervace_choice_zabrat_opakovany_test(…)` | security definer, `search_path=""`; spustit smí jen `service_role` (`anon`, `authenticated`, `public` ne) |
+   | Spoušť `trg_integrace_vypadek_upozornit` | zapnutá; `AFTER UPDATE OF stav, odpojeno_kdy`, jen `oblast = 'rezervace'` a `poskytovatel = 'choice'` |
+   | Upozornění `integrace.vypadek` / `integrace.obnoveno` | 0 |
+7. **První běh úlohy po `db push` (23:11):** obě pobočky `hotovo`, bez
+   chyby (0 nových rezervací — v tu chvíli nic nového), Choice u obou
+   dál `pripojeno`. Tabulka zvonění dál prázdná a upozornění
+   na výpadek či obnovení dál žádné.
