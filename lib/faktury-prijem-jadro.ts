@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto'
 
 import {
   AI_LIMIT_ZA_DEN,
+  lzeZkusitZnovu,
   MAX_POKUSU,
   nacistNastaveni,
   type DruhPrilohy,
@@ -82,6 +83,9 @@ export type NovyZaznam = {
 export type Zaznam = NovyZaznam & {
   id: string
   pokusu: number
+  /** Z předchozího pokusu (select '*'); chyba účtu je vrací, ať denní strop AI nezapomene dřívější útratu. */
+  zdroj_vytezeni?: 'isdoc' | 'ai' | null
+  zpracovano_kdy?: string | null
 }
 
 export type ZmenaZaznamu = {
@@ -145,6 +149,13 @@ export type Repozitar = {
   doplnitFakturu(id: string, fakturaId: string): Promise<void>
   pocetCekajicich(pripojeniId: string): Promise<number>
   pocetAiDnes(tenantId: string, dnes: string): Promise<number>
+  /** VŠECHNY řádky schránky v ruční kontrole (bez stropu na počet) — pro „Přečíst znovu". */
+  nactiKeKontrole(pripojeniId: string): Promise<{ id: string; duvod: string | null; soubor_cesta: string | null }[]>
+  /**
+   * Vrátí řádky do fronty (stav 'ceka', pokusy od nuly) — jen ty, které jsou
+   * pořád v ruční kontrole a patří téhle schránce. Vrací, kolik se jich změnilo.
+   */
+  vratitDoFronty(pripojeniId: string, ids: string[], duvod: string): Promise<number>
   nahratSoubor(cesta: string, data: Uint8Array, mime: string): Promise<void>
   stahnoutSoubor(cesta: string): Promise<Uint8Array | null>
 }
@@ -542,6 +553,7 @@ async function fazeVytezeni(
 ): Promise<void> {
   let aiDostupne = nastaveni.ai.povoleno && sluzby.aiNastaveno()
   if (nastaveni.ai.povoleno && !sluzby.aiNastaveno()) {
+    vysledek.aiNedostupne = true
     vysledek.duvod ??= 'Čtení přes AI je zapnuté, ale chybí klíč (ANTHROPIC_API_KEY) — PDF a fotky čekají.'
   }
   const dnes = dnesniDatum(sluzby.ted())
@@ -656,9 +668,19 @@ async function zpracovatZaznam(
       // Volání musí doběhnout v čase běhu — jinak ho platforma zabije uprostřed a útrata je zbytečná.
       { casovyLimitMs: Math.max(5_000, konecMs - sluzby.ted() - 3_000) },
     )
-    if (ai.stav === 'bez_klice') {
-      // K volání nedošlo — pokus se nepočítá.
-      await ulozitZmenu(repo, zaznam.id, { stav: zaznam.stav, pokusu: zaznam.pokusu, zdroj_vytezeni: null, zpracovano_kdy: null })
+    if (ai.stav === 'bez_klice' || ai.stav === 'ucet') {
+      // Doklad nepřečetla chyba ÚČTU (klíč, kredit, oprávnění), ne vada
+      // dokladu: pokus se nepočítá, řádek zůstane ve frontě a v dalším běhu
+      // se zkusí znovu. Nikdy ruční kontrola — tak 9.–25. 10. 2026 skončilo
+      // 1 011 příloh, které AI nikdy nepřečetla.
+      await ulozitZmenu(repo, zaznam.id, {
+        stav: zaznam.stav,
+        pokusu: zaznam.pokusu,
+        zdroj_vytezeni: zaznam.zdroj_vytezeni ?? null,
+        zpracovano_kdy: zaznam.zpracovano_kdy ?? null,
+      })
+      vysledek.aiNedostupne = true
+      vysledek.duvod ??= ai.stav === 'ucet' ? ai.duvod : 'Čtení přes AI je zapnuté, ale chybí klíč (ANTHROPIC_API_KEY) — PDF a fotky čekají.'
       return 'zastavit_ai'
     }
     if (ai.stav === 'chyba') {
@@ -755,6 +777,30 @@ export async function overitUcetDodavatele(doklad: VytezenyDoklad, faktury: Pick
     ? 'Účet dodavatele zatím není ověřený žádnou schválenou fakturou — ověřte číslo účtu, než zaplatíte.'
     : 'Číslo účtu se liší od dřívějších schválených faktur tohoto dodavatele — ověřte ho přímo u dodavatele, než zaplatíte (častý podvod).'
   return { ...doklad, vyzadujeKontrolu: true, duvodyKontroly: [...doklad.duvodyKontroly, duvod] }
+}
+
+export const DUVOD_VRACENI = 'Vráceno k novému přečtení — dřív to nepřečetla chyba účtu AI nebo zápisu do Faktur, ne vada dokladu.'
+
+/**
+ * „Přečíst znovu": přílohy, které skončily v ruční kontrole jen kvůli
+ * chybě účtu AI nebo zápisu (lzeZkusitZnovu), vrátí do fronty. Přečte je
+ * pak běžná úloha — v jejím denním stropu AI a od nejnovějších e-mailů.
+ * Vadné doklady (heslo v PDF, moc velké, nepodporovaný formát) zůstanou
+ * v ruční kontrole. Firma se kontroluje proti řádku schránky.
+ */
+export async function vratitDoFrontyJadro(
+  repo: Repozitar,
+  pripojeniId: string,
+  tenantId: string,
+): Promise<{ vraceno: number; duvod: string | null }> {
+  const pripojeni = await repo.nactiPripojeni(pripojeniId)
+  if (!pripojeni || pripojeni.odpojeno || pripojeni.tenantId !== tenantId) return { vraceno: 0, duvod: 'Schránka neexistuje nebo je odpojená.' }
+  if (!(await repo.fakturyProFirmu(tenantId))) return { vraceno: 0, duvod: 'Faktury jsou pro tuto firmu zavřené (stěhují se, nebo nejsou zapnuté).' }
+  const ids = (await repo.nactiKeKontrole(pripojeniId))
+    .filter((r) => r.soubor_cesta !== null && lzeZkusitZnovu(r.duvod))
+    .map((r) => r.id)
+  if (ids.length === 0) return { vraceno: 0, duvod: null }
+  return { vraceno: await repo.vratitDoFronty(pripojeniId, ids, DUVOD_VRACENI), duvod: null }
 }
 
 /**

@@ -26,9 +26,17 @@ export type PodkladAI = {
   odesilatel: string | null
 }
 
+/**
+ * `ucet` = AI teď nejde použít kvůli ÚČTU u Anthropicu (neplatný klíč, došlý
+ * kredit, chybějící oprávnění, vyčerpaný limit útraty) — vada účtu, ne
+ * dokladu. Doklad se nesmí poslat do ruční kontroly: počká a přečte se sám,
+ * až se účet spraví. (9.–25. 10. 2026 takhle skončilo v ruční kontrole
+ * 1 011 příloh, které AI nikdy nepřečetla.)
+ */
 export type VysledekAI =
   | { stav: 'ok'; doklad: VytezenyDoklad; model: string; verze: string }
   | { stav: 'bez_klice' }
+  | { stav: 'ucet'; duvod: string }
   | { stav: 'chyba'; duvod: string; docasna: boolean }
 
 export const MODEL = 'claude-opus-5-5'
@@ -151,9 +159,39 @@ function docasna(duvod: string): ChybaAI {
   return { stav: 'chyba', duvod, docasna: true }
 }
 
-function chyba(e: unknown): ChybaAI {
+type ChybaUctu = Extract<VysledekAI, { stav: 'ucet' }>
+
+function ucet(duvod: string): ChybaUctu {
+  return { stav: 'ucet', duvod }
+}
+
+/**
+ * Chyba účtu podle odpovědi API. Došlý kredit a vyčerpaný limit útraty
+ * vrací API jako 400 (invalid_request_error) — rozezná je jen text; nový
+ * typ `billing_error` a 402 se berou podle typu a kódu.
+ */
+export function chybaUctuZOdpovedi(status: number | undefined, typ: unknown, zprava: unknown): string | null {
+  const text = typeof zprava === 'string' ? zprava : ''
+  if (status === 402 || typ === 'billing_error' || /credit balance|billing/i.test(text)) {
+    return 'AI teď nejde použít: na účtu u Anthropicu došel kredit (Plans & Billing). Doklady počkají a přečtou se samy, až se kredit doplní.'
+  }
+  if (/usage limit|spend(ing)? limit/i.test(text)) {
+    return 'AI teď nejde použít: účet u Anthropicu vyčerpal nastavený limit útraty. Doklady počkají a přečtou se samy, až limit znovu pustí.'
+  }
+  return null
+}
+
+function chyba(e: unknown): ChybaAI | ChybaUctu {
   if (e instanceof Anthropic.AuthenticationError) {
-    return trvala('Klíč k AI neplatí — zkontrolujte ANTHROPIC_API_KEY na serveru.')
+    return ucet('Klíč k AI neplatí — zkontrolujte ANTHROPIC_API_KEY na serveru. Doklady počkají a přečtou se samy, až bude klíč v pořádku.')
+  }
+  if (e instanceof Anthropic.PermissionDeniedError) {
+    return ucet('Klíč k AI nemá oprávnění (chyba 403) — zkontrolujte účet u Anthropicu. Doklady počkají a přečtou se samy.')
+  }
+  if (e instanceof Anthropic.APIError) {
+    const telo = e.error as { error?: { type?: unknown; message?: unknown } } | undefined
+    const duvodUctu = chybaUctuZOdpovedi(e.status, telo?.error?.type, telo?.error?.message)
+    if (duvodUctu) return ucet(duvodUctu)
   }
   if (e instanceof Anthropic.RateLimitError) {
     return docasna('AI je právě přetížená (limit požadavků). Zkusí se to znovu.')

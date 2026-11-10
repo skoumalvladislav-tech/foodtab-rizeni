@@ -246,6 +246,110 @@ export const zpracovatPrijem = globalThis.__kanarek('zpracovatPrijem')`)],
   ok('faktury: doběhne 200 a zámek uvolní až po zabrání', r.stav === 200 && zabrat >= 0 && uvolnit > zabrat)
 }
 
+/* --- faktury: poplach, když AI nejde ------------------------------------- */
+
+// 9.–25. 10. 2026 AI nečetla (došlý kredit, pak neplatný klíč), úloha i hlídač
+// hlásily 200 a nikdo o tom nevěděl. Teď adresa vrátí `ai_nedostupne` a
+// workflow faktury-z-emailu.yml spadne — GitHub o tom pošle e-mail.
+console.log('\nFaktury: poplach, když AI nejde')
+{
+  const soubor = 'app/api/uloha/faktury-z-emailu/route.ts'
+  const vysledek = (navic) => js(`export async function vsechnaPripojeniSPrijmem() { return [{ id: 'p1', tenantId: 't1' }, { id: 'p2', tenantId: 't1' }] }
+let n = 0
+export async function zpracovatPrijem() {
+  n++
+  return { stav: 'ok', nalezeno: 0, zapsano: 0, existuje: 0, kontrola: 0, zbyva: 3, schrankaDoctena: true, ...(n === 2 ? ${navic} : {}) }
+}`)
+  const zavolatFaktury = async (navic) => {
+    const { GET } = await nactiModul(soubor, [
+      ['next/server', NEXT],
+      ['@/lib/supabase/uloha', ULOHA],
+      ['@/lib/faktury-prijem-sync', vysledek(navic)],
+      ['@/lib/finance-automaticke-parovani', js(`export const automatickyParovatPlatby = globalThis.__kanarek('automatickyParovatPlatby')`)],
+    ])
+    process.env.CRON_SECRET = SPRAVNE
+    const r = await zavolat(GET, 'Bearer ' + SPRAVNE)
+    let telo = null
+    try { telo = JSON.parse(r.telo) } catch { /* zůstane null */ }
+    return { ...r, telo }
+  }
+  const nejde = await zavolatFaktury(`{ aiNedostupne: true, duvod: 'TAJNY-DUVOD-SCHRANKY' }`)
+  ok('faktury: jedna schránka z dvou hlásí, že AI nejde → 200 a ai_nedostupne: true', nejde.stav === 200 && nejde.telo?.ai_nedostupne === true)
+  ok('… důvod schránky v odpovědi není (log GitHubu je veřejný)', !nejde.telo || !JSON.stringify(nejde.telo).includes('TAJNY-DUVOD'))
+  const jde = await zavolatFaktury('{}')
+  ok('faktury: AI v pořádku → ai_nedostupne: false', jde.stav === 200 && jde.telo?.ai_nedostupne === false)
+}
+
+// Blok `run:` workflow faktury-z-emailu.yml se SPUSTÍ (bash, podstrčený curl).
+// Poplach čte grep, ne jq — běží tedy i lokálně bez jq.
+{
+  const t = readFileSync('.github/workflows/faktury-z-emailu.yml', 'utf8')
+  const radky = t.replace(/\r\n/g, '\n').split('\n')
+  const iRun = radky.findIndex((r) => /^\s*run:\s*\|\s*$/.test(r))
+  const odsazeniKlice = iRun >= 0 ? radky[iRun].match(/^\s*/)[0].length : 0
+  const blok = []
+  for (const r of iRun >= 0 ? radky.slice(iRun + 1) : []) {
+    if (r.trim() === '') { blok.push(''); continue }
+    if (r.match(/^\s*/)[0].length <= odsazeniKlice) break
+    blok.push(r)
+  }
+  const spolecne = Math.min(...blok.filter((r) => r.trim()).map((r) => r.match(/^\s*/)[0].length))
+  const skript = blok.map((r) => r.slice(spolecne)).join('\n')
+  ok('blok run: faktur se našel a volá curl ve smyčce', skript.includes('curl ') && /for \w+ in \$\(seq/.test(skript))
+
+  const { spawnSync } = await import('node:child_process')
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const maBash = spawnSync('bash', ['-c', 'command -v grep'], { encoding: 'utf8' }).status === 0
+  if (!maBash && !process.env.CI) {
+    console.log('  PŘESKOČENO spuštění bloku run: faktur (lokálně chybí bash — v CI běží vždy)')
+  } else {
+    // Každé kolo dostane své tělo (FALESNE_TELO_1, _2, …); počítadlo v souboru,
+    // protože curl běží v $(…) — proměnná by se ztratila.
+    const FALESNY_CURL = String.raw`curl() {
+  local ven=""
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "-o" ]; then ven="$2"; shift; fi
+    shift
+  done
+  local kolo=$(( $(cat kolo.txt 2>/dev/null || echo 0) + 1 ))
+  echo "$kolo" > kolo.txt
+  local promenna="FALESNE_TELO_$kolo"
+  local telo='{"pokracovat":false}'
+  if [ -n "${'$'}{!promenna:-}" ]; then telo="${'$'}{!promenna}"; fi
+  printf '%s' "$telo" > "$ven"
+  printf '%s' "200"
+}
+`
+    const spustit = (tela) => {
+      const slozka = mkdtempSync(join(tmpdir(), 'faktury-'))
+      const env = { ...process.env, ADRESA: 'https://foodtab.test', TAJEMSTVI: SPRAVNE, GITHUB_STEP_SUMMARY: join(slozka, 'souhrn.md') }
+      tela.forEach((telo, i) => { env[`FALESNE_TELO_${i + 1}`] = JSON.stringify(telo) })
+      const r = spawnSync('bash', ['-c', FALESNY_CURL + skript], { cwd: slozka, encoding: 'utf8', env })
+      const kol = existsSync(join(slozka, 'kolo.txt')) ? Number(readFileSync(join(slozka, 'kolo.txt'), 'utf8').trim()) : 0
+      rmSync(slozka, { recursive: true, force: true })
+      return { status: r.status, vystup: r.stdout + r.stderr, kol }
+    }
+    const POPLACH = '::error::Čtení faktur přes AI nejde'
+
+    const a = spustit([{ schranek: 3, pokracovat: false, ai_nedostupne: false }])
+    ok('workflow faktur: AI v pořádku → zelený, jedno kolo', a.status === 0 && a.kol === 1 && !a.vystup.includes(POPLACH))
+
+    const b = spustit([{ schranek: 3, pokracovat: false, ai_nedostupne: true }])
+    ok('workflow faktur: AI nejde → červený s ::error:: o AI', b.status === 1 && b.vystup.includes(POPLACH))
+
+    const c = spustit([{ pokracovat: true, ai_nedostupne: true }, { pokracovat: false, ai_nedostupne: false }])
+    ok('workflow faktur: AI nejde jen v 1. kole → obě kola proběhnou a běh je i tak červený', c.status === 1 && c.kol === 2 && c.vystup.includes(POPLACH))
+
+    const d = spustit([{ pokracovat: true, ai_nedostupne: false }, { pokracovat: false, ai_nedostupne: true }])
+    ok('workflow faktur: AI nejde až v posledním kole → červený', d.status === 1 && d.kol === 2 && d.vystup.includes(POPLACH))
+
+    const e = spustit([{ schranek: 3, pokracovat: false }])
+    ok('workflow faktur: odpověď bez pole (stará verze aplikace) → zelený', e.status === 0 && !e.vystup.includes(POPLACH))
+  }
+}
+
 /* --- jména a plány: migrace × adresy × workflow ------------------------ */
 
 console.log('\nJména a plány')

@@ -7,8 +7,8 @@
  * Pusť: node scripts/faktury-prijem-jadro.test.mjs   (Node 24, běží i v CI)
  */
 
-import { zpracovatPrijemJadro, zapsatNavrhyJadro, LIMIT_ZPRAV } from '../lib/faktury-prijem-jadro.ts'
-import { AI_LIMIT_ZA_DEN, MAX_POKUSU } from '../lib/faktury-prijem-typy.ts'
+import { zpracovatPrijemJadro, zapsatNavrhyJadro, vratitDoFrontyJadro, DUVOD_VRACENI, LIMIT_ZPRAV } from '../lib/faktury-prijem-jadro.ts'
+import { AI_LIMIT_ZA_DEN, MAX_POKUSU, lzeZkusitZnovu } from '../lib/faktury-prijem-typy.ts'
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -112,6 +112,7 @@ function svet({
     // Účty dodavatele ze schválených faktur (navíc k těm v s.faktury).
     overeneUcty: { [ICO_DODAVATELE]: ['CZ65 0800 0000 1920 0014 5399'] },
     mrtveSchranky: new Set(),
+    vraceni: [],
   }
   let idZaznamu = 0
   let idFaktury = 0
@@ -225,6 +226,21 @@ function svet({
       s.soubory.set(cesta, data) // stejná cesta = stejný obsah (otisk) — přepsání nevadí
     },
     async stahnoutSoubor(cesta) { return s.soubory.get(cesta) ?? null },
+    async nactiKeKontrole(pripojeniId) {
+      return s.zaznamy.filter((z) => z.pripojeni_id === pripojeniId && z.stav === 'vyzaduje_kontrolu')
+        .map((z) => ({ id: z.id, duvod: z.duvod ?? null, soubor_cesta: z.soubor_cesta ?? null }))
+    },
+    // Jako skutečný update: jen řádky TÉHLE schránky, které jsou pořád v ruční kontrole.
+    async vratitDoFronty(pripojeniId, ids, duvod) {
+      s.vraceni.push({ pripojeniId, ids: [...ids], duvod })
+      let n = 0
+      for (const z of s.zaznamy) {
+        if (z.pripojeni_id !== pripojeniId || z.stav !== 'vyzaduje_kontrolu' || !ids.includes(z.id)) continue
+        Object.assign(z, { stav: 'ceka', pokusu: 0, duvod, typ_dokladu: null, vysledek: null, zdroj_vytezeni: null, model: null, zpracovano_kdy: null })
+        n++
+      }
+      return n
+    },
   }
 
   const sluzby = {
@@ -480,6 +496,135 @@ console.log('\n== Chyby AI: přechodná, trvalá, bez klíče, strop, čas ==')
   const w8 = svet({ zpravy: [zprava(1, [pdf('newsletter.pdf', 'A')])], ai: () => ({ stav: 'ok', doklad: dokladAI(null, null, { typ: 'neni_doklad' }), model: 'm', verze: 'v' }) })
   await beh(w8)
   ok('AI pozná, že to není doklad → není doklad, do Faktur nic', w8.s.zaznamy[0].stav === 'neni_doklad' && w8.s.faktury.length === 0)
+}
+
+console.log('\n== Chyba ÚČTU AI (kredit, klíč) není vada dokladu ==')
+{
+  // 9.–25. 10. 2026: AI vracela „credit balance is too low" a „Klíč k AI neplatí"
+  // a kód každou přílohu poslal do ruční kontroly — 1 011 příloh, které nikdo neviděl.
+  const KREDIT = 'AI teď nejde použít: na účtu u Anthropicu došel kredit (Plans & Billing). Doklady počkají a přečtou se samy, až se kredit doplní.'
+  const w = svet({ zpravy: [zprava(1, [pdf('a.pdf', 'A')]), zprava(2, [pdf('b.pdf', 'B')])], ai: () => ({ stav: 'ucet', duvod: KREDIT }) })
+  const v = await beh(w)
+  ok('chyba účtu → AI se v běhu zavolá jen jednou', w.s.ai.volani.length === 1)
+  ok('…obě přílohy dál čekají ve frontě, pokus se nepočítá', w.s.zaznamy.length === 2 && w.s.zaznamy.every((z) => z.stav === 'ceka' && z.pokusu === 0))
+  ok('…běh hlásí aiNedostupne a důvod o kreditu', v.aiNedostupne === true && /kredit/.test(v.duvod ?? ''))
+  ok('…důvod je u schránky (Integrace → E-mail)', w.s.pripojeniZmeny.some((z) => /kredit/.test(z.posledni_chyba ?? '')))
+  ok('…nezapočítá se do denního stropu AI', (await w.repo.pocetAiDnes(FIRMA, '2026-10-08')) === 0)
+  for (let i = 0; i < 2 * MAX_POKUSU + 4; i++) await beh(w)
+  ok(`ani po ${2 * MAX_POKUSU + 5} bězích nic nespadne do ruční kontroly`, w.s.zaznamy.every((z) => z.stav === 'ceka' && z.pokusu === 0) && w.s.faktury.length === 0)
+  ok('…a každý běh zkusí AI jen jednou (nevolá ji pro každou přílohu)', w.s.ai.volani.length === 2 * MAX_POKUSU + 5)
+  w.s.ai.fn = (podklad, n) => ({ stav: 'ok', doklad: dokladAI(`AI-${n}`, 1000 + n), model: 'claude-opus-5-5', verze: 'faktura-v1' })
+  const v2 = await beh(w)
+  ok('kredit se doplní → další běh obě přílohy přečte a zapíše', w.s.zaznamy.every((z) => z.stav === 'zapsano') && w.s.faktury.length === 2)
+  ok('…a už nehlásí aiNedostupne', v2.aiNedostupne !== true)
+
+  // Řádek s dřívějším přechodným pokusem (dnes, už zaplacený): chyba účtu mu ho nesmaže.
+  let n = 0
+  const w2 = svet({
+    zpravy: [zprava(1, [pdf('a.pdf', 'A')])],
+    ai: () => (++n === 1 ? { stav: 'chyba', duvod: 'AI je přetížená.', docasna: true } : { stav: 'ucet', duvod: KREDIT }),
+  })
+  await beh(w2)
+  ok('přechodná chyba → pokus 1, počítá se do stropu', w2.s.zaznamy[0].pokusu === 1 && (await w2.repo.pocetAiDnes(FIRMA, '2026-10-08')) === 1)
+  await beh(w2)
+  ok('pak chyba účtu → pořád pokus 1, stav chyba (ve frontě)', w2.s.zaznamy[0].stav === 'chyba' && w2.s.zaznamy[0].pokusu === 1)
+  ok('…a dřívější útrata zůstane v denním stropu', (await w2.repo.pocetAiDnes(FIRMA, '2026-10-08')) === 1)
+
+  const w3 = svet({ aiKlic: false, zpravy: [zprava(1, [pdf('a.pdf', 'A')])] })
+  const v3 = await beh(w3)
+  ok('AI povolená, ale bez klíče → aiNedostupne', v3.aiNedostupne === true)
+
+  const w4 = svet({ prijem: { zapnuto: true, ai: { povoleno: false } }, aiKlic: false, zpravy: [zprava(1, [pdf('a.pdf', 'A')])] })
+  const v4 = await beh(w4)
+  ok('AI u schránky vypnutá (jen ISDOC) → žádný poplach', v4.aiNedostupne !== true)
+
+  const w5 = svet({ zpravy: [zprava(1, [pdf('a.pdf', 'A')])] })
+  const v5 = await beh(w5)
+  ok('všechno v pořádku → žádný poplach', v5.aiNedostupne !== true && w5.s.zaznamy[0].stav === 'zapsano')
+
+  const w6 = svet({ zpravy: [zprava(1, [pdf('a.pdf', 'A')])], ai: () => ({ stav: 'chyba', duvod: 'Soubor je poškozený.', docasna: false }) })
+  const v6 = await beh(w6)
+  ok('vadný doklad (trvalá chyba) → ruční kontrola, ale ne poplach o AI', w6.s.zaznamy[0].stav === 'vyzaduje_kontrolu' && v6.aiNedostupne !== true)
+}
+
+console.log('\n== Přečíst znovu: jen přílohy, které nepřečetla chyba účtu nebo zápisu ==')
+{
+  // Přesně texty z produkce (10. 11. 2026), ne přepsané.
+  const HIST = {
+    kredit: 'AI soubor nepřijala (chyba 400): Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+    klic: 'Klíč k AI neplatí — zkontrolujte ANTHROPIC_API_KEY na serveru.',
+    zapis: 'Zápis do Faktur se nepodařil: Faktury (zápis): cannot insert a non-DEFAULT value into column "needs_review"',
+    heslo: 'AI soubor nepřijala (chyba 400): messages.0.content.0.pdf.source.base64.data: The PDF specified is password protected.',
+  }
+  const zpravy = [1, 2, 3, 4, 5, 6].map((uid) => zprava(uid, [pdf(`f${uid}.pdf`, `obsah-${uid}`)]))
+  const w = svet({ zpravy, aiTrvani: 100, ai: () => ({ stav: 'chyba', duvod: 'docasne', docasna: false }) })
+  await beh(w)
+  ok('příprava: šest příloh v ruční kontrole, všechny se souborem', w.s.zaznamy.length === 6 && w.s.zaznamy.every((z) => z.stav === 'vyzaduje_kontrolu' && z.soubor_cesta))
+  const [zKredit, zKlic, zZapis, zHeslo, zBezSouboru, zCizi] = w.s.zaznamy
+  zKredit.duvod = HIST.kredit
+  zKlic.duvod = HIST.klic
+  zZapis.duvod = HIST.zapis
+  zHeslo.duvod = HIST.heslo
+  zBezSouboru.duvod = HIST.kredit
+  zBezSouboru.soubor_cesta = null
+  zCizi.duvod = HIST.kredit
+  zCizi.pripojeni_id = 'p2'
+
+  const cizi = await vratitDoFrontyJadro(w.repo, 'p1', CIZI_FIRMA)
+  ok('cizí firma nic nevrátí a dostane důvod', cizi.vraceno === 0 && cizi.duvod !== null && w.s.vraceni.length === 0)
+  w.s.pripojeni.odpojeno = true
+  const odpojena = await vratitDoFrontyJadro(w.repo, 'p1', FIRMA)
+  w.s.pripojeni.odpojeno = false
+  ok('odpojená schránka nic nevrátí', odpojena.vraceno === 0 && w.s.vraceni.length === 0)
+  w.s.vlastni = false
+  const zavrene = await vratitDoFrontyJadro(w.repo, 'p1', FIRMA)
+  w.s.vlastni = true
+  ok('Faktury firmy zavřené → nic nevrátí', zavrene.vraceno === 0 && /zavřené/.test(zavrene.duvod ?? '') && w.s.vraceni.length === 0)
+
+  const r = await vratitDoFrontyJadro(w.repo, 'p1', FIRMA)
+  ok('vrátí přesně 3 (kredit, klíč, zápis)', r.vraceno === 3 && r.duvod === null)
+  ok('…do úložiště jdou jen jejich id', JSON.stringify(w.s.vraceni.at(-1)?.ids) === JSON.stringify([zKredit.id, zKlic.id, zZapis.id]))
+  ok('…jsou zpátky ve frontě s nulou pokusů a novým důvodem', [zKredit, zKlic, zZapis].every((z) => z.stav === 'ceka' && z.pokusu === 0 && z.duvod === DUVOD_VRACENI && z.zdroj_vytezeni === null))
+  ok('PDF s heslem zůstane v ruční kontrole s původním důvodem', zHeslo.stav === 'vyzaduje_kontrolu' && zHeslo.duvod === HIST.heslo)
+  ok('příloha bez uloženého souboru zůstane (nebylo by co číst)', zBezSouboru.stav === 'vyzaduje_kontrolu')
+  ok('příloha jiné schránky zůstane', zCizi.stav === 'vyzaduje_kontrolu')
+
+  const znovu = await vratitDoFrontyJadro(w.repo, 'p1', FIRMA)
+  ok('druhé kliknutí nic dalšího nevrátí', znovu.vraceno === 0 && znovu.duvod === null)
+
+  w.s.ai.fn = (podklad, n) => ({ stav: 'ok', doklad: dokladAI(`ZNOVU-${n}`, 2000 + n), model: 'claude-opus-5-5', verze: 'faktura-v1' })
+  const pred = w.s.ai.volani.length
+  await beh(w)
+  ok('další běh vrácené přečte a zapíše do Faktur', [zKredit, zKlic, zZapis].every((z) => z.stav === 'zapsano') && w.s.faktury.length === 3)
+  ok('…a ostatní nečte (AI jen pro 3 vrácené)', w.s.ai.volani.length - pred === 3 && zHeslo.stav === 'vyzaduje_kontrolu')
+}
+
+console.log('\n== lzeZkusitZnovu: produkční texty ==')
+{
+  for (const [popis, duvod] of [
+    ['kredit (400, 9.–13. 10.)', 'AI soubor nepřijala (chyba 400): Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'],
+    ['neplatný klíč (14.–25. 10.)', 'Klíč k AI neplatí — zkontrolujte ANTHROPIC_API_KEY na serveru.'],
+    ['nový text: klíč', 'Klíč k AI neplatí — zkontrolujte ANTHROPIC_API_KEY na serveru. Doklady počkají a přečtou se samy, až bude klíč v pořádku.'],
+    ['nový text: oprávnění', 'Klíč k AI nemá oprávnění (chyba 403) — zkontrolujte účet u Anthropicu. Doklady počkají a přečtou se samy.'],
+    ['nový text: kredit', 'AI teď nejde použít: na účtu u Anthropicu došel kredit (Plans & Billing). Doklady počkají a přečtou se samy, až se kredit doplní.'],
+    ['starý 403', 'AI soubor nepřijala (chyba 403): forbidden'],
+    ['limit útraty (400)', 'AI soubor nepřijala (chyba 400): You have reached your specified API usage limits.'],
+    ['zápis do Faktur (9. 10.)', 'Zápis do Faktur se nepodařil: Faktury (zápis): cannot insert a non-DEFAULT value into column "needs_review"'],
+  ]) ok(`ano — ${popis}`, lzeZkusitZnovu(duvod) === true)
+
+  for (const [popis, duvod] of [
+    ['PDF s heslem', 'AI soubor nepřijala (chyba 400): messages.0.content.0.pdf.source.base64.data: The PDF specified is password protected.'],
+    ['vadné PDF', 'AI soubor nepřijala (chyba 400): The PDF specified was not valid.'],
+    ['„billing" v textu chyby o souboru', 'AI soubor nepřijala (chyba 400): The image mentions a billing address and was rejected.'],
+    ['ISDOCX', 'Formát ISDOCX (zabalené ISDOC) appka zatím neumí přečíst — zkontrolujte přílohu ručně.'],
+    ['moc velká příloha', 'Příloha má 17,1 MB, appka stahuje nejvýš 10,0 MB — zkontrolujte ji ručně.'],
+    ['opakovaně nedoběhlo', 'Zpracování se opakovaně nedokončilo (vypršel čas nebo výpadek) — zkontrolujte přílohu ručně.'],
+    ['přetížení po 3 pokusech', 'AI je přetížená.'],
+    ['text uprostřed (ne na začátku)', 'Poznámka: Klíč k AI neplatí'],
+    ['prázdný text', ''],
+    ['null', null],
+    ['undefined', undefined],
+  ]) ok(`ne — ${popis}`, lzeZkusitZnovu(duvod) === false)
 }
 
 console.log('\n== Výpadek databáze Faktur při zápisu ==')

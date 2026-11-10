@@ -43,6 +43,7 @@ jobs:
             exit 1
           fi
 
+          AI_NEDOSTUPNE=0
           for KOLO in $(seq 1 15); do
             KOD=$(curl -sS -o telo.json -w '%{http_code}' \
               --max-time 120 \
@@ -50,7 +51,7 @@ jobs:
               "${ADRESA}/api/uloha/faktury-z-emailu")
 
             # Jen souhrnná čísla — repozitář je veřejný, log vidí kdokoli.
-            SOUHRN=$(jq -c '{schranek, nalezeno, zapsano, uhrazeno, kontrola, zbyva, pokracovat}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
+            SOUHRN=$(jq -c '{schranek, nalezeno, zapsano, uhrazeno, kontrola, zbyva, pokracovat, ai_nedostupne}' telo.json 2>/dev/null || echo '(odpověď není JSON)')
             echo "Kolo ${KOLO}: HTTP ${KOD} ${SOUHRN}"
 
             case "$KOD" in
@@ -65,7 +66,19 @@ jobs:
 
             echo "Kolo ${KOLO}: ${SOUHRN}" >> "$GITHUB_STEP_SUMMARY" || true
 
+            if grep -q '"ai_nedostupne":true' telo.json; then
+              AI_NEDOSTUPNE=1
+            fi
+
             if ! grep -q '"pokracovat":true' telo.json; then
               break
             fi
           done
+
+          # Čtení přes AI je u schránky povolené, ale nejde (klíč, kredit,
+          # oprávnění u Anthropicu). Doklady čekají — neztratí se — ale někdo
+          # to musí spravit. Spadnutím pošle GitHub e-mail.
+          if [ "$AI_NEDOSTUPNE" -eq 1 ]; then
+            echo "::error::Čtení faktur přes AI nejde (klíč, kredit nebo oprávnění u Anthropicu). PDF a fotky čekají. Důvod je u schránky ve Finance → Integrace → E-mail."
+            exit 1
+          fi

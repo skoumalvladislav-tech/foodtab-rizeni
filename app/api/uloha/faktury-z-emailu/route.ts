@@ -76,6 +76,11 @@ export async function GET(request: Request): Promise<NextResponse> {
     // Volat znovu má smysl, jen když se v tomhle běhu něco pohnulo a práce zbývá —
     // jinak by workflow točil donekonečna nad tím, co čeká na člověka nebo na AI.
     pokracovat: zbyvaPrace && (pokrok || neprobehla > 0),
+    // AI je u schránky povolená, ale nejde použít (klíč, kredit, oprávnění).
+    // Workflow pak spadne — GitHub o tom pošle e-mail; 9.–27. 10. 2026 to
+    // nevěděl nikdo a přes tisíc příloh skončilo v ruční kontrole. Jen
+    // ano/ne, důvod je u schránky v Integracích → E-mail (log je veřejný).
+    ai_nedostupne: vysledky.some((v) => v.aiNedostupne === true),
     // Bez id schránek a bez textů chyb: odpověď končí v logu GitHub Actions a
     // repozitář je veřejný. Důvod chyby je u schránky v Integracích → E-mail.
     vysledky: vysledky.map((v) => ({ stav: v.stav, nalezeno: v.nalezeno, zapsano: v.zapsano, existuje: v.existuje, kontrola: v.kontrola, zbyva: v.zbyva, schrankaDoctena: v.schrankaDoctena })),

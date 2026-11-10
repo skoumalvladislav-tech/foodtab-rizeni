@@ -2,8 +2,8 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 
 import { getServerSupabase } from '@/lib/supabase/server'
-import { AI_LIMIT_ZA_DEN, nacistNastaveni, VYCHOZI_OD, type NastaveniPrijmu } from '@/lib/faktury-prijem-typy'
-import { nastavitPrijemFaktur, spustitPrijemTed, zapsatNavrhyAkce } from './akce'
+import { AI_LIMIT_ZA_DEN, lzeZkusitZnovu, nacistNastaveni, VYCHOZI_OD, type NastaveniPrijmu } from '@/lib/faktury-prijem-typy'
+import { nastavitPrijemFaktur, spustitPrijemTed, vratitDoFrontyAkce, zapsatNavrhyAkce } from './akce'
 
 /**
  * Panel „Příjem faktur" u jedné schránky (Integrace → E-mail).
@@ -76,6 +76,27 @@ function Akce({ rozsah, id, akce, text, hlavni = false, children }: { rozsah: st
   )
 }
 
+/**
+ * Kolik příloh v ruční kontrole má smysl přečíst znovu (lzeZkusitZnovu —
+ * nepřečetla je chyba účtu AI nebo zápisu, ne vada dokladu). Po stránkách:
+ * PostgREST vrátí nejvýš 1000 řádků na dotaz a jedna schránka jich měla
+ * přes 500. Rozhoduje stejná funkce jako akce, ať číslo na tlačítku sedí.
+ */
+async function pocetKZopakovani(supabase: Awaited<ReturnType<typeof getServerSupabase>>, pripojeniId: string): Promise<number> {
+  const STRANKA = 1000
+  let pocet = 0
+  for (let od = 0; od < 20 * STRANKA; od += STRANKA) {
+    const { data, error } = await supabase.from('faktury_prijem').select('id, duvod, soubor_cesta')
+      .eq('pripojeni_id', pripojeniId).eq('stav', 'vyzaduje_kontrolu')
+      .order('id', { ascending: true }).range(od, od + STRANKA - 1)
+    if (error) return pocet
+    const stranka = (data ?? []) as { duvod: string | null; soubor_cesta: string | null }[]
+    pocet += stranka.filter((r) => r.soubor_cesta !== null && lzeZkusitZnovu(r.duvod)).length
+    if (stranka.length < STRANKA) break
+  }
+  return pocet
+}
+
 export default async function PrijemFaktur({
   rozsah,
   pripojeniId,
@@ -95,7 +116,7 @@ export default async function PrijemFaktur({
 }) {
   const supabase = await getServerSupabase()
 
-  const [pocty, keKontrole, navrhy] = await Promise.all([
+  const [pocty, keKontrole, navrhy, kZopakovani] = await Promise.all([
     Promise.all(SKUPINY.map(async (s) => {
       const { count } = await supabase.from('faktury_prijem').select('id', { count: 'exact', head: true })
         .eq('pripojeni_id', pripojeniId).in('stav', s.stavy)
@@ -111,6 +132,7 @@ export default async function PrijemFaktur({
       .eq('pripojeni_id', pripojeniId).eq('stav', 'navrh')
       .order('prijato_kdy', { ascending: true, nullsFirst: false }).limit(50)
       .then(({ data }) => ((data ?? []) as { id: string; priloha_nazev: string; vysledek: unknown }[]).map(navrhZRadku)),
+    pocetKZopakovani(supabase, pripojeniId),
   ])
 
   return (
@@ -121,6 +143,7 @@ export default async function PrijemFaktur({
       pocty={Object.fromEntries(pocty.map((p) => [p.klic, p.pocet]))}
       keKontrole={keKontrole}
       navrhy={navrhy}
+      kZopakovani={kZopakovani}
       posledniBeh={posledniBeh}
       smiMenit={smiMenit}
       databazeFakturOk={databazeFakturOk}
@@ -137,6 +160,7 @@ export function PrijemFakturPanel({
   pocty: poctyPodleKlice,
   keKontrole,
   navrhy = [],
+  kZopakovani = 0,
   posledniBeh,
   smiMenit,
   databazeFakturOk,
@@ -148,6 +172,8 @@ export function PrijemFakturPanel({
   pocty: Record<string, number>
   keKontrole: PolozkaKeKontrole[]
   navrhy?: NavrhKPotvrzeni[]
+  /** Přílohy v ruční kontrole, které nepřečetla chyba účtu AI nebo zápisu (lzeZkusitZnovu). */
+  kZopakovani?: number
   posledniBeh: string | null
   smiMenit: boolean
   databazeFakturOk: boolean
@@ -211,6 +237,15 @@ export function PrijemFakturPanel({
         </details>
       ) : null}
 
+      {kZopakovani > 0 ? (
+        <p style={{ ...drobne, color: 'var(--pozor)' }}>
+          {kZopakovani} z příloh v ruční kontrole appka nepřečetla kvůli výpadku AI (došlý kredit nebo neplatný klíč) nebo chybě zápisu do Faktur — ne kvůli dokladu samotnému.
+          {smiMenit && databazeFakturOk && nastaveni.zapnuto
+            ? ` Tlačítkem „Přečíst znovu“ je vrátíte do fronty. AI jich přečte nejvýš ${AI_LIMIT_ZA_DEN} denně a nové e-maily mají přednost, takže to může trvat několik dní.`
+            : ''}
+        </p>
+      ) : null}
+
       {navrhy.length > 0 ? (
         <details open>
           <summary style={{ fontSize: '12.5px', cursor: 'pointer' }}>
@@ -249,6 +284,13 @@ export function PrijemFakturPanel({
                   <input type="hidden" name="rozsah" value={rozsah} />
                   <input type="hidden" name="id" value={pripojeniId} />
                   <button type="submit" className="ft-tl ft-tl-hlavni">Zapsat návrhy do Faktur ({navrhu})</button>
+                </form>
+              ) : null}
+              {kZopakovani > 0 ? (
+                <form action={vratitDoFrontyAkce}>
+                  <input type="hidden" name="rozsah" value={rozsah} />
+                  <input type="hidden" name="id" value={pripojeniId} />
+                  <button type="submit" className="ft-tl">Přečíst znovu ({kZopakovani})</button>
                 </form>
               ) : null}
               {nastaveni.ai.povoleno
