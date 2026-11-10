@@ -570,8 +570,12 @@ console.log('\n== Přečíst znovu: jen přílohy, které nepřečetla chyba ú�
   zCizi.duvod = HIST.kredit
   zCizi.pripojeni_id = 'p2'
 
+  // Brána Faktur pustí každou firmu — jinak by cizí firmu odchytila ona
+  // a kontrola vlastníka schránky by se neověřila (rozbití to ukázalo).
+  w.s.vlastni = 'kazdy'
   const cizi = await vratitDoFrontyJadro(w.repo, 'p1', CIZI_FIRMA)
-  ok('cizí firma nic nevrátí a dostane důvod', cizi.vraceno === 0 && cizi.duvod !== null && w.s.vraceni.length === 0)
+  w.s.vlastni = true
+  ok('cizí firma nic nevrátí a dostane důvod (i když jí brána Faktur pustí)', cizi.vraceno === 0 && /neexistuje|odpojená/.test(cizi.duvod ?? '') && w.s.vraceni.length === 0)
   w.s.pripojeni.odpojeno = true
   const odpojena = await vratitDoFrontyJadro(w.repo, 'p1', FIRMA)
   w.s.pripojeni.odpojeno = false
