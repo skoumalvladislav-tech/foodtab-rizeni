@@ -1990,8 +1990,11 @@ docs/rezervace-navrh.md, oddíl 1.
   proti 120 milisekundám) a z konce by se počítala obsazenost. Prázdný
   konec je poznat, špatný ne.
 - **Co je potřeba:** uložené ukázky přečtu (jen čtení) a porovnám je
-  s Choice. Kód je nasazený od 7. 11., ale ukázky se uloží až prvním
-  načtením — Choice od 3. 11. nenačítá (403), čeká na „Ověřit znovu“. Když u #105 vyjde 120, jsou to minuty. Pak
+  s Choice. Kód je nasazený od 7. 11. a ukázky se ukládají při
+  načtení. Choice od 3. 11. do 7. 11. nenačítal (403). Poslední test
+  napojení prošel 7. 11. (17:21 / 17:26), nejspíš přes „Ověřit znovu“,
+  a od té doby se rezervace zase načítají, takže ukázky už se mohly
+  uložit. Zbývá je přečíst. Když u #105 vyjde 120, jsou to minuty. Pak
   stačí převod v `radekZChoice` (`lib/rezervace-choice.ts`) a konec se
   začne vyplňovat, bez migrace. S koncem by šla i obsazenost stolů
   v čase.
@@ -2077,4 +2080,5 @@ majiteli jako push i v noci).
   o výpadku někdo věděl; stav je vždycky vidět v Rezervace → Napojení.
 - **Když to má být jinak:** jedno číslo v migraci 20261108100000
   (`interval '24 hours'` ve spoušti `app.integrace_vypadek_upozornit`).
-  Před `db push` stačí přepsat; po něm nová migrace.
+  Migrace je od 10. 11. 2026 v ostré databázi, takže změna = nová
+  migrace.
