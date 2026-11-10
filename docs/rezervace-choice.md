@@ -88,8 +88,19 @@ U pobočky na kartě Choice:
 
 - *Choice omezil počet dotazů (429)* — nic se neděje, pokračuje se při
   dalším běhu;
-- *Choice odmítl přístup (401/403)* — token přestal platit, připojte
-  podnik znovu (Odpojit → Připojit podnik v Choice);
+- *Choice odmítl přístup (401/403). Načítání stojí, dokud přístup
+  neprojde testem.* — napojení je „Vyžaduje pozornost“ a nic se
+  nenačítá. Foodtab přístup **zkouší znovu sám každé 2 hodiny** (tentýž
+  dotaz jako „Ověřit znovu“); když projde, napojení je zase „Připojeno“
+  a hned se načte. Hned to jde tlačítkem **Ověřit znovu**. Majitel
+  a kdo na pobočce spravuje napojení (`integrace.manage`) dostanou
+  upozornění „Choice nenačítá rezervace — pobočka“ (jedno na výpadek,
+  majitel i jako push; když napojení kolísá, zvoní nejvýš jednou za
+  24 hodin, další výpadky ten den přijdou tiše); po obnovení se
+  nepřečtené nahradí tichým „Choice zase načítá rezervace“, po odpojení
+  se stáhne. Teprve když to nepomůže ani po dni, token
+  opravdu přestal platit — pak Odpojit → Připojit podnik v Choice
+  (Odpojit uložený token smaže). Proč 2 hodiny: otázka 89;
 - *Nezapsaly se 2 rezervace z Choice (čas bez časového pásma)* — Choice
   poslal čas, ze kterého nejde poznat, kdy rezervace je. Foodtab si ho
   nedomýšlí (posunula by se o hodinu či dvě). Pošlete prosím tu hlášku
@@ -226,6 +237,36 @@ Se čtyřmi pobočkami se tedy každá načte zhruba každou půlhodinu.
   bere záporné číslo jako chybu fronty); nový kód se starou databází
   jede jako dřív. Souběh ve virtuálním čase: `scripts/rezervace-choice.test.mjs`,
   oddíl 6a.
+- Migrace `20261108100000_rezervace_choice_vypadek.sql` (3. 11. 2026
+  jediná 403 zastavila načítání na 4 dny a nikdo nevěděl):
+  - **Upozornění:** spoušť `app.integrace_vypadek_upozornit` na přechodu
+    stavu napojení Choice `pripojeno` → `vyzaduje_pozornost` (jen ten
+    přechod — jedno upozornění na výpadek) pošle `integrace.vypadek`
+    (important) majiteli a `app.kdo_ma_pravo_na_pobocce(…,
+    'integrace.manage', pobočka)`. Výpadek hlásí jen server (`auth.uid()`
+    je NULL) — správce, který stav přepne přes API sám, nepošle nic.
+    Zvoní (important) nejvýš jednou za 24 h na napojení
+    (`app.integrace_vypadek_zvoneni`), další výpadek do 24 h je `low`
+    (otázka 91). Zpátky na `pripojeno` → nepřečtené nahradí
+    `integrace.obnoveno` (low); kdo obnovil sám, tomu se jen stáhne.
+    Odpojení (`odpojeno_kdy`) stáhne nepřečtené i s čekajícím push.
+    Selhání upozornění zápis stavu nezastaví. Banka a pokladna ne
+    (otázka 90).
+    Texty `lib/upozorneni-text.ts`, odkaz na Napojení
+    `lib/upozorneni-odkaz.ts`, scénář `krok110`.
+  - **Opakovaný test:** úloha na začátku běhu (`opakovatTestChoice`)
+    zkusí nejvýš JEDNO stojící napojení (`vyzaduje_pozornost` nebo
+    `chyba`, s tokenem), nejdéle nezkoušené první. Odstup
+    `OPAKOVAT_TEST_PO_MS` (2 h) a místo ve frontě vstupem úlohy dává
+    naráz `rezervace_choice_zabrat_opakovany_test` (jen service_role):
+    -1 = ještě ne (fronty se nedotkne), NULL = nevešel se (odstup se
+    nespotřeboval). Odstup se měří od pozdějšího z posledního ověření
+    (tabulka sdílená s „Ověřit znovu“) a běhu načítání. Ve frontě čeká
+    jako tlačítko (11 s). Úspěch zapíše `pripojeno` přes
+    `zapsatVysledekTestu` (jediné místo) jen dokud napojení stojí a je
+    to týž podnik (`var_symbol`); neúspěch stav nemění, 429 a výpadek
+    Choice nezapíšou nic. Testy `scripts/rezervace-choice.test.mjs`,
+    oddíl 12. Bez migrace (starý stav databáze) se nezkouší nic.
 - Úloha dělí čas: rezerva 20 s se odečte jednou za úlohu, zbytek po
   dílech nejméně na tři dotazy; pořadí `poradiSynchronizace` (firmy se
   střídají, podle `synchronizace_behy`, tentýž podnik u firmy jednou).

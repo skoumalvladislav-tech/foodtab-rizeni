@@ -128,6 +128,12 @@ export type TeloUpozorneni = {
   cas?: string
   osob?: number
   co_se_zmenilo?: string[]
+  // integrace.vypadek / integrace.obnoveno (20261108100000) — id napojení,
+  // oblast a poskytovatel z registru; pobocka, pobocka_slug a duvod (jen
+  // u výpadku, `posledni_chyba`) sdílí pole výš.
+  pripojeni?: string
+  oblast?: string
+  poskytovatel?: string
 }
 
 /**
@@ -332,9 +338,62 @@ export function nadpisUpozorneni(
       return `Změna rezervace${kdeAKdyRezervace(telo)}`
     case 'rezervace.zrusena':
       return `Zrušená rezervace${kdeAKdyRezervace(telo)}`
+    /*
+      VÝPADEK NAPOJENÍ (7. 11. 2026, migrace 20261108100000). Choice 3. 11.
+      odmítl přístup a čtyři dny se nenačetla jediná rezervace, aniž by
+      o tom kdo věděl. Nadpis jde do push: jen kdo a kde, důvod je až
+      ve větě pod ním (popisNapojeni).
+    */
+    case 'integrace.vypadek':
+      return `${jmenoNapojeni(telo)} nenačítá ${coNapojeniNacita(telo)}${pobockaZaPomlckou(telo)}`
+    case 'integrace.obnoveno':
+      return `${jmenoNapojeni(telo)} zase načítá ${coNapojeniNacita(telo)}${pobockaZaPomlckou(telo)}`
     default:
       return 'Upozornění'
   }
+}
+
+/* ---------------------------------------------------------------------
+ * Výpadek napojení (integrace.vypadek, integrace.obnoveno)
+ * ------------------------------------------------------------------ */
+
+// Jméno poskytovatele z klíče v registru; neznámý klíč se nevypíše
+// (do push nemá jít, co tělo přineslo, bez kontroly).
+const JMENA_NAPOJENI: Record<string, string> = { choice: 'Choice' }
+const CO_NACITA: Record<string, string> = { rezervace: 'rezervace' }
+
+function jmenoNapojeni(telo: TeloUpozorneni): string {
+  return (typeof telo.poskytovatel === 'string' && JMENA_NAPOJENI[telo.poskytovatel]) || 'Napojení'
+}
+
+function coNapojeniNacita(telo: TeloUpozorneni): string {
+  return (typeof telo.oblast === 'string' && CO_NACITA[telo.oblast]) || 'data'
+}
+
+function pobockaZaPomlckou(telo: TeloUpozorneni): string {
+  return typeof telo.pobocka === 'string' && telo.pobocka.trim() ? ` — ${telo.pobocka.trim()}` : ''
+}
+
+/**
+ * Věta pod nadpisem u výpadku a obnovení napojení — jen v aplikaci.
+ *
+ *   výpadek   „Nové a změněné rezervace teď do Foodtabu nechodí.“ + důvod
+ *             z napojení (co se stalo a co Foodtab udělá sám, píše ho
+ *             náš kód — lib/rezervace-choice.ts, chybaBehu)
+ *   obnovení  „Rezervace se zase načítají.“
+ */
+export function popisNapojeni(druh: string, telo: TeloUpozorneni): string {
+  const co = coNapojeniNacita(telo)
+  const Co = co.charAt(0).toUpperCase() + co.slice(1)
+  if (druh === 'integrace.obnoveno') return `${Co} se zase načítají.`
+  if (druh !== 'integrace.vypadek') return ''
+  const duvod = typeof telo.duvod === 'string' ? telo.duvod.trim() : ''
+  return [`Nové a změněné ${co} teď do Foodtabu nechodí.`, duvod].filter(Boolean).join(' ')
+}
+
+/** Upozornění na výpadek nebo obnovení napojení (odkaz „Otevřít napojení“). */
+export function jeUpozorneniNapojeni(druh: string): boolean {
+  return druh === 'integrace.vypadek' || druh === 'integrace.obnoveno'
 }
 
 /**

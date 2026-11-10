@@ -9,9 +9,11 @@ import {
   denZkraceny,
   kartaZmenySmeny,
   jeUpozorneniKRezervaci,
+  jeUpozorneniNapojeni,
   nadpisUpozorneni,
   obdobiRozpisu,
   popisMarketingu,
+  popisNapojeni,
   popisOpravneni,
   popisPinu,
   popisRezervace,
@@ -473,6 +475,27 @@ export default async function Upozorneni({
                         {z.druh === 'rezervace.nova' && pocetUpozorneni(z.telo) > 1
                           ? 'Otevřít rezervace'
                           : z.druh.startsWith('akce.') ? 'Otevřít akci' : 'Otevřít rezervaci'}
+                      </Link>
+                    </p>
+                  </>
+                ) : null}
+
+                {/*
+                  VÝPADEK NAPOJENÍ (7. 11. 2026). Nadpis jde i mimo aplikaci
+                  (jen kdo a kde); důvod a co Foodtab udělá sám je až tady.
+                  Tlačítko vede tam, kde je „Ověřit znovu“.
+                */}
+                {jeUpozorneniNapojeni(z.druh) ? (
+                  <>
+                    {popisNapojeni(z.druh, z.telo) ? (
+                      <p style={{ margin: '6px 0 0' }}>{popisNapojeni(z.druh, z.telo)}</p>
+                    ) : null}
+                    <p style={{ margin: '10px 0 0' }}>
+                      <Link
+                        href={odkazUpozorneni(rozsah, { druh: z.druh, telo: z.telo })}
+                        className={z.druh === 'integrace.vypadek' ? 'ft-tl ft-tl-hlavni ft-tl-male' : 'ft-tl ft-tl-vedlejsi ft-tl-male'}
+                      >
+                        Otevřít napojení
                       </Link>
                     </p>
                   </>

@@ -31,6 +31,7 @@
 
 import {
   jeUpozorneniKRezervaci,
+  jeUpozorneniNapojeni,
   odkazNaChecklist,
   odkazNaSmenu,
   odkazNaZalohu,
@@ -132,6 +133,17 @@ export function odkazUpozorneni(rozsah: string, z: RadekUpozorneni, konverzace?:
     const kde = jeSlug(telo.pobocka_slug) ? telo.pobocka_slug : rozsah
     if (z.druh === 'rezervace.nova' && pocetUpozorneni(telo) > 1) return `/${kde}/rezervace`
     return jeUuid(telo.rezervace_id) ? `/${kde}/rezervace/${telo.rezervace_id}` : `/${kde}/rezervace`
+  }
+
+  /*
+    Výpadek a obnovení napojení (7. 11. 2026): na Napojení v rozsahu
+    POBOČKY napojení — tam je „Ověřit znovu“. Jiná oblast než rezervace
+    zatím upozornění neposílá; kdyby přišla, vede na obecnou stránku.
+  */
+  if (jeUpozorneniNapojeni(z.druh)) {
+    if (telo.oblast !== 'rezervace') return vychozi
+    const kde = jeSlug(telo.pobocka_slug) ? telo.pobocka_slug : rozsah
+    return `/${kde}/rezervace/napojeni`
   }
 
   if (z.druh === 'oznameni.nova') return `/${rozsah}/vzkazy?zalozka=nastenka`
