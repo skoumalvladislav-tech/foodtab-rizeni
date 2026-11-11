@@ -146,6 +146,32 @@ export function nacistNastaveni(surove: unknown): NastaveniPrijmu {
   }
 }
 
+/**
+ * Důvody ruční kontroly, které NEJSOU vadou dokladu — přílohu nepřečetla
+ * chyba účtu AI (klíč, kredit, oprávnění, limit útraty) nebo se nepovedl
+ * zápis do Faktur. Takovou přílohu má smysl zkusit znovu („Přečíst znovu").
+ *
+ * Texty jsou přesně ty, které zapisoval kód (lib/faktury-prijem-ai.ts,
+ * lib/faktury-prijem-jadro.ts) a API Anthropicu; naměřeno v produkci
+ * 10. 11. 2026: 918× „credit balance is too low", 93× „Klíč k AI neplatí",
+ * 6× „Zápis do Faktur se nepodařil". Vadný doklad (PDF s heslem, moc velký,
+ * ISDOCX, opakovaně nedoběhlé čtení) sem nepatří — zůstane v ruční kontrole.
+ */
+const DUVODY_K_OPAKOVANI: readonly RegExp[] = [
+  /^Klíč k AI neplatí/,
+  /^Klíč k AI nemá oprávnění/,
+  /^AI teď nejde použít/,
+  // Jen věty, které píše API o účtu — ne holé „billing", to by chytlo i „billing address".
+  /^AI soubor nepřijala \(chyba 40[0-3]\): .*(credit balance is too low|Plans & Billing|usage limits?|spend(ing)? limit)/i,
+  /^AI soubor nepřijala \(chyba 40[13]\)/,
+  /^Zápis do Faktur se nepodařil/,
+]
+
+export function lzeZkusitZnovu(duvod: string | null | undefined): boolean {
+  if (typeof duvod !== 'string') return false
+  return DUVODY_K_OPAKOVANI.some((v) => v.test(duvod))
+}
+
 /** Platné „Číst od": skutečné datum, ne v budoucnu, ne před rokem 2000. */
 export function platneOd(od: unknown, dnes: string): od is string {
   if (typeof od !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(od)) return false

@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto'
 
 import {
   AI_LIMIT_ZA_DEN,
+  lzeZkusitZnovu,
   MAX_POKUSU,
   nacistNastaveni,
   type DruhPrilohy,
@@ -82,6 +83,10 @@ export type NovyZaznam = {
 export type Zaznam = NovyZaznam & {
   id: string
   pokusu: number
+  /** Z předchozího pokusu (select '*'); chyba účtu je vrací, ať denní strop AI nezapomene dřívější útratu. */
+  zdroj_vytezeni?: 'isdoc' | 'ai' | null
+  zpracovano_kdy?: string | null
+  model?: string | null
 }
 
 export type ZmenaZaznamu = {
@@ -145,6 +150,13 @@ export type Repozitar = {
   doplnitFakturu(id: string, fakturaId: string): Promise<void>
   pocetCekajicich(pripojeniId: string): Promise<number>
   pocetAiDnes(tenantId: string, dnes: string): Promise<number>
+  /** VŠECHNY řádky schránky v ruční kontrole (bez stropu na počet) — pro „Přečíst znovu". */
+  nactiKeKontrole(pripojeniId: string): Promise<{ id: string; duvod: string | null; soubor_cesta: string | null }[]>
+  /**
+   * Vrátí řádky do fronty (stav 'ceka', pokusy od nuly) — jen ty, které jsou
+   * pořád v ruční kontrole a patří téhle schránce. Vrací, kolik se jich změnilo.
+   */
+  vratitDoFronty(pripojeniId: string, ids: string[], duvod: string): Promise<number>
   nahratSoubor(cesta: string, data: Uint8Array, mime: string): Promise<void>
   stahnoutSoubor(cesta: string): Promise<Uint8Array | null>
 }
@@ -251,6 +263,49 @@ function prazdnyVysledek(stav: VysledekPrijmu['stav'], duvod: string | null): Vy
 
 function dnesniDatum(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10)
+}
+
+/**
+ * Nefunkční AI má u schránky přednost: workflow na GitHubu při poplachu
+ * odkazuje právě sem. Dřívější důvod z téhož běhu (třeba nedostupná
+ * schránka) zůstane za ním — nezmizí ani jeden.
+ */
+function nahlasitNedostupnouAi(vysledek: VysledekPrijmu, duvod: string): void {
+  vysledek.aiNedostupne = true
+  vysledek.duvod = vysledek.duvod && !vysledek.duvod.startsWith(duvod)
+    ? `${duvod} Také: ${vysledek.duvod}`.slice(0, 1000)
+    : duvod
+}
+
+/** Vrácená tlačítkem „Přečíst znovu" — značka v důvodu, a po prvním pokusu i ve výsledku (důvod se pak přepíše). */
+function jeVraceny(zaznam: Zaznam): boolean {
+  return zaznam.duvod === DUVOD_VRACENI || (zaznam.vysledek as { vraceno?: unknown } | null)?.vraceno === true
+}
+
+/** Doklad, který AI už přečetla (pak se nepovedl jen zápis do Faktur) — číst znovu by stálo peníze mimo denní strop. */
+function ulozenyDoklad(zaznam: Zaznam): VytezenyDoklad | null {
+  if (zaznam.zdroj_vytezeni !== 'ai') return null
+  const d = (zaznam.vysledek as { doklad?: unknown } | null)?.doklad as Partial<VytezenyDoklad> | undefined
+  return d && typeof d === 'object' && typeof d.typ === 'string' && Array.isArray(d.duvodyKontroly) ? d as VytezenyDoklad : null
+}
+
+/**
+ * Stav jednoho běhu napříč přílohami. `podezreni` = příloha, kterou API
+ * odmítlo (4xx) z důvodu, který tu nikdo nepředvídal. Jestli jde o vadu
+ * dokladu, nebo o změnu u Anthropicu (vyřazený model, nový tvar dotazu),
+ * ukáže až další příloha: odmítnutá úplně stejně → AI se zastaví a hlásí
+ * poplach; přečtená (nebo odmítnutá jinak) → podezřelá jde do ruční
+ * kontroly. Bez toho by jedna taková změna poslala do ruční kontroly
+ * celou frontu, jako 9.–25. 10. 2026 došlý kredit.
+ */
+type Beh = { podezreni: { id: string; pokusu: number; odmitnuti: string; duvod: string; vraceno: boolean } | null }
+
+async function podezrelaJeVadna(repo: Repozitar, beh: Beh, vysledek: VysledekPrijmu, kdy: string): Promise<void> {
+  const p = beh.podezreni
+  if (!p) return
+  beh.podezreni = null
+  await ulozitZmenu(repo, p.id, { stav: 'vyzaduje_kontrolu', pokusu: p.pokusu, duvod: p.duvod, zdroj_vytezeni: 'ai', zpracovano_kdy: kdy })
+  vysledek.kontrola++
 }
 
 /**
@@ -542,7 +597,7 @@ async function fazeVytezeni(
 ): Promise<void> {
   let aiDostupne = nastaveni.ai.povoleno && sluzby.aiNastaveno()
   if (nastaveni.ai.povoleno && !sluzby.aiNastaveno()) {
-    vysledek.duvod ??= 'Čtení přes AI je zapnuté, ale chybí klíč (ANTHROPIC_API_KEY) — PDF a fotky čekají.'
+    nahlasitNedostupnouAi(vysledek, DUVOD_BEZ_KLICE)
   }
   const dnes = dnesniDatum(sluzby.ted())
   if (aiDostupne && (await repo.pocetAiDnes(pripojeni.tenantId, dnes)) >= AI_LIMIT_ZA_DEN) {
@@ -551,6 +606,7 @@ async function fazeVytezeni(
   }
 
   const hotove = new Set<string>()
+  const beh: Beh = { podezreni: null }
   while (sluzby.ted() < moznosti.konecMs) {
     const fronta = (await repo.nactiKeZpracovani(pripojeni.id, 20, !aiDostupne)).filter((z) => !hotove.has(z.id))
     if (fronta.length === 0) break
@@ -565,7 +621,7 @@ async function fazeVytezeni(
         continue
       }
       hotove.add(zaznam.id)
-      const pokracovat = await zpracovatZaznam(repo, sluzby, zaznam, nastaveni, ico, faktury, vysledek, moznosti.konecMs)
+      const pokracovat = await zpracovatZaznam(repo, sluzby, zaznam, nastaveni, ico, faktury, vysledek, moznosti.konecMs, beh)
       if (pokracovat === 'zastavit_ai') aiDostupne = false
     }
   }
@@ -580,8 +636,12 @@ async function zpracovatZaznam(
   faktury: FakturyDb,
   vysledek: VysledekPrijmu,
   konecMs: number,
+  beh: Beh,
 ): Promise<'dal' | 'zastavit_ai'> {
   const ted = () => new Date(sluzby.ted()).toISOString()
+  // Vrácená příloha nese značku i přes další pokusy (chyba přepíše důvod).
+  const vraceno = jeVraceny(zaznam)
+  const znacka = vraceno ? { vraceno: true } : {}
   const ukoncit = async (zmena: ZmenaZaznamu) => {
     await ulozitZmenu(repo, zaznam.id, { zpracovano_kdy: ted(), ...zmena })
     if (zmena.stav === 'vyzaduje_kontrolu') vysledek.kontrola++
@@ -641,6 +701,13 @@ async function zpracovatZaznam(
       parovePdfId = pdf.id
       pdfUrl = odkazNaPrilohu(pdf.id, sluzby.zakladOdkazu ?? null)
     }
+  } else if ((zaznam.druh === 'pdf' || zaznam.druh === 'obrazek') && ulozenyDoklad(zaznam)) {
+    // AI doklad už přečetla, nepovedl se jen zápis do Faktur: zapisuje se
+    // znovu ten přečtený. Další čtení by se platilo a denní strop by ho
+    // nepočítal (počítá řádky, ne volání).
+    doklad = ulozenyDoklad(zaznam) as VytezenyDoklad
+    zdroj = 'ai'
+    model = zaznam.model ?? null
   } else if (zaznam.druh === 'pdf' || zaznam.druh === 'obrazek') {
     const mime = MIME_PRO_AI[priponaProUlozeni({ druh: zaznam.druh, mime: zaznam.priloha_typ, nazev: zaznam.priloha_nazev })]
     if (!mime) {
@@ -656,19 +723,53 @@ async function zpracovatZaznam(
       // Volání musí doběhnout v čase běhu — jinak ho platforma zabije uprostřed a útrata je zbytečná.
       { casovyLimitMs: Math.max(5_000, konecMs - sluzby.ted() - 3_000) },
     )
-    if (ai.stav === 'bez_klice') {
-      // K volání nedošlo — pokus se nepočítá.
-      await ulozitZmenu(repo, zaznam.id, { stav: zaznam.stav, pokusu: zaznam.pokusu, zdroj_vytezeni: null, zpracovano_kdy: null })
+    // Pokus se nepočítá a řádek zůstane ve frontě, jak byl (včetně dřívější
+    // útraty pro denní strop) — v dalším běhu se zkusí znovu.
+    const vratitPokus = () => ulozitZmenu(repo, zaznam.id, {
+      stav: zaznam.stav,
+      pokusu: zaznam.pokusu,
+      zdroj_vytezeni: zaznam.zdroj_vytezeni ?? null,
+      zpracovano_kdy: zaznam.zpracovano_kdy ?? null,
+    })
+    if (ai.stav === 'bez_klice' || ai.stav === 'ucet') {
+      // Doklad nepřečetla chyba ÚČTU (klíč, kredit, oprávnění), ne vada
+      // dokladu. Nikdy ruční kontrola — tak 9.–25. 10. 2026 skončilo
+      // 1 011 příloh, které AI nikdy nepřečetla.
+      await vratitPokus()
+      nahlasitNedostupnouAi(vysledek, ai.stav === 'ucet' ? ai.duvod : DUVOD_BEZ_KLICE)
       return 'zastavit_ai'
     }
     if (ai.stav === 'chyba') {
+      if (ai.odmitnuti && !ai.docasna) {
+        if (beh.podezreni && beh.podezreni.odmitnuti === ai.odmitnuti && beh.podezreni.id !== zaznam.id) {
+          // Druhá příloha za sebou odmítnutá úplně stejně: vadou není doklad,
+          // ale něco u Anthropicu. Tahle se nepočítá; ta první si svůj pokus
+          // nechá — kdyby šlo o dvě stejně vadné přílohy, po MAX_POKUSU
+          // skončí v ruční kontrole a fronta se nezasekne navždy.
+          await vratitPokus()
+          beh.podezreni = null
+          nahlasitNedostupnouAi(vysledek, `AI odmítá každý soubor stejně (${ai.duvod.slice(0, 300)}) — nejspíš změna u Anthropicu, ne vada dokladů. PDF a fotky čekají; je potřeba upravit aplikaci.`)
+          return 'zastavit_ai'
+        }
+        await podezrelaJeVadna(repo, beh, vysledek, ted())
+        if (pokusu < MAX_POKUSU) {
+          await ulozitZmenu(repo, zaznam.id, { stav: 'chyba', pokusu, duvod: ai.duvod, zdroj_vytezeni: 'ai', ...(vraceno ? { vysledek: znacka } : {}) })
+          beh.podezreni = { id: zaznam.id, pokusu, odmitnuti: ai.odmitnuti, duvod: ai.duvod, vraceno }
+          return 'dal'
+        }
+      } else if (!ai.docasna) {
+        // AI jiný soubor přijala, jen tenhle nepřečetla — podezřelá příloha byla vadná sama.
+        await podezrelaJeVadna(repo, beh, vysledek, ted())
+      }
       if (ai.docasna && pokusu < MAX_POKUSU) {
-        await ulozitZmenu(repo, zaznam.id, { stav: 'chyba', pokusu, duvod: ai.duvod, zdroj_vytezeni: 'ai' })
+        await ulozitZmenu(repo, zaznam.id, { stav: 'chyba', pokusu, duvod: ai.duvod, zdroj_vytezeni: 'ai', ...(vraceno ? { vysledek: znacka } : {}) })
         return 'zastavit_ai'
       }
       await ukoncit({ stav: 'vyzaduje_kontrolu', pokusu, duvod: ai.duvod, zdroj_vytezeni: 'ai' })
       return 'dal'
     }
+    // AI soubor přečetla — podezřelá příloha z dřívějška byla vadná sama.
+    await podezrelaJeVadna(repo, beh, vysledek, ted())
     doklad = ai.doklad
     zdroj = 'ai'
     model = ai.model
@@ -678,6 +779,12 @@ async function zpracovatZaznam(
   }
 
   doklad = zkontrolovatVytezeni(doklad, { icoFirmy: ico, dnes: dnesniDatum(sluzby.ted()) })
+  if (vraceno && doklad.typ !== 'neni_doklad') {
+    // Ležela v ruční kontrole týdny — mezitím ji mohl někdo zadat ručně
+    // (jiný název dodavatele, bez čísla: shoda níž ji pak nepozná). Nikdy
+    // rovnou k úhradě, jen ke schválení s důvodem.
+    doklad = { ...doklad, vyzadujeKontrolu: true, duvodyKontroly: [...doklad.duvodyKontroly, DUVOD_KONTROLY_VRACENI] }
+  }
 
   if (doklad.cisloDokladu && doklad.typ !== 'neni_doklad') {
     for (const radek of await faktury.podleCisla(doklad.cisloDokladu)) {
@@ -727,8 +834,8 @@ async function zpracovatZaznam(
     const pokusu = zaznam.pokusu + 1
     const duvod = `Zápis do Faktur se nepodařil: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500)
     await ulozitZmenu(repo, zaznam.id, pokusu < MAX_POKUSU
-      ? { stav: 'chyba', pokusu, duvod, typ_dokladu: doklad.typ, zdroj_vytezeni: zdroj, model, vysledek: { doklad } }
-      : { stav: 'vyzaduje_kontrolu', pokusu, duvod, typ_dokladu: doklad.typ, zdroj_vytezeni: zdroj, model, vysledek: { doklad }, zpracovano_kdy: ted() })
+      ? { stav: 'chyba', pokusu, duvod, typ_dokladu: doklad.typ, zdroj_vytezeni: zdroj, model, vysledek: { doklad, ...znacka } }
+      : { stav: 'vyzaduje_kontrolu', pokusu, duvod, typ_dokladu: doklad.typ, zdroj_vytezeni: zdroj, model, vysledek: { doklad, ...znacka }, zpracovano_kdy: ted() })
   }
   return 'dal'
 }
@@ -755,6 +862,40 @@ export async function overitUcetDodavatele(doklad: VytezenyDoklad, faktury: Pick
     ? 'Účet dodavatele zatím není ověřený žádnou schválenou fakturou — ověřte číslo účtu, než zaplatíte.'
     : 'Číslo účtu se liší od dřívějších schválených faktur tohoto dodavatele — ověřte ho přímo u dodavatele, než zaplatíte (častý podvod).'
   return { ...doklad, vyzadujeKontrolu: true, duvodyKontroly: [...doklad.duvodyKontroly, duvod] }
+}
+
+export const DUVOD_VRACENI = 'Vráceno k novému přečtení — dřív to nepřečetla chyba účtu AI nebo zápisu do Faktur, ne vada dokladu.'
+
+/** Do poznámky faktury z vrácené přílohy — proto jde ke schválení, ne rovnou k úhradě. */
+export const DUVOD_KONTROLY_VRACENI = 'Příloha čekala v ruční kontrole po výpadku AI — ověřte, že tuhle fakturu mezitím nikdo nezadal ručně (jinak by se zaplatila dvakrát).'
+
+const DUVOD_BEZ_KLICE = 'Čtení přes AI je zapnuté, ale chybí klíč (ANTHROPIC_API_KEY) — PDF a fotky čekají.'
+
+/**
+ * „Přečíst znovu": přílohy, které skončily v ruční kontrole jen kvůli
+ * chybě účtu AI nebo zápisu (lzeZkusitZnovu), vrátí do fronty. Přečte je
+ * pak běžná úloha — v jejím denním stropu AI a od nejnovějších e-mailů.
+ * Vadné doklady (heslo v PDF, moc velké, nepodporovaný formát) zůstanou
+ * v ruční kontrole. Firma se kontroluje proti řádku schránky. Faktura
+ * z vrácené přílohy jde do Faktur vždy KE SCHVÁLENÍ (DUVOD_KONTROLY_VRACENI):
+ * mezitím ji mohl někdo zadat ručně.
+ *
+ * ROZHODNOUT: spouští to člověk tlačítkem, ne úloha sama — přečíst přes
+ * tisíc příloh stojí peníze za AI (otázka 92).
+ */
+export async function vratitDoFrontyJadro(
+  repo: Repozitar,
+  pripojeniId: string,
+  tenantId: string,
+): Promise<{ vraceno: number; duvod: string | null }> {
+  const pripojeni = await repo.nactiPripojeni(pripojeniId)
+  if (!pripojeni || pripojeni.odpojeno || pripojeni.tenantId !== tenantId) return { vraceno: 0, duvod: 'Schránka neexistuje nebo je odpojená.' }
+  if (!(await repo.fakturyProFirmu(tenantId))) return { vraceno: 0, duvod: 'Faktury jsou pro tuto firmu zavřené (stěhují se, nebo nejsou zapnuté).' }
+  const ids = (await repo.nactiKeKontrole(pripojeniId))
+    .filter((r) => r.soubor_cesta !== null && lzeZkusitZnovu(r.duvod))
+    .map((r) => r.id)
+  if (ids.length === 0) return { vraceno: 0, duvod: null }
+  return { vraceno: await repo.vratitDoFronty(pripojeniId, ids, DUVOD_VRACENI), duvod: null }
 }
 
 /**
