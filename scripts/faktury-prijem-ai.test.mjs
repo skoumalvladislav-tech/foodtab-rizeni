@@ -317,6 +317,22 @@ console.log('\n== Chyby API: co se zkusí znovu a co ne ==')
   ok('chybaUctuZOdpovedi: vadné PDF (400) není chyba účtu', chybaUctuZOdpovedi(400, 'invalid_request_error', 'The PDF specified was not valid.') === null)
   ok('chybaUctuZOdpovedi: heslem chráněné PDF není chyba účtu', chybaUctuZOdpovedi(400, 'invalid_request_error', 'The PDF specified is password protected.') === null)
   ok('chybaUctuZOdpovedi: zpráva, která není text, nespadne', chybaUctuZOdpovedi(400, undefined, { x: 1 }) === null)
+  // Samotné „billing" chybou účtu není: chyba účtu drží přílohu ve frontě
+  // bez počítání pokusů — vadný doklad by tak zastavil AI pro celou frontu.
+  ok('chybaUctuZOdpovedi: „billing address" ve zprávě o souboru NENÍ chyba účtu',
+    chybaUctuZOdpovedi(400, 'invalid_request_error', 'The image mentions a billing address and was rejected.') === null)
+
+  // Chyby účtu, které 10. 11. 2026 našla nezávislá kontrola: dřív končily jako vada dokladu.
+  const model = await sOdpovedi(chybaHttp(404, `model: ${MODEL}`, 'not_found_error'))
+  ok('404 (model vyřazený / bez přístupu) → ucet', model.vysledek.stav === 'ucet' && /404/.test(model.vysledek.duvod))
+  const organizace = await sOdpovedi(chybaHttp(400, 'This organization has been disabled.', 'invalid_request_error'))
+  ok('400 „organization has been disabled“ → ucet', organizace.vysledek.stav === 'ucet' && /zablokovan/.test(organizace.vysledek.duvod))
+
+  // Odmítnutí, které nikdo nepředvídal (nový tvar dotazu po změně API): trvalá
+  // chyba, ale s podpisem — jádro podle něj pozná, že AI odmítá každý soubor stejně.
+  const tvar = await sOdpovedi(chybaHttp(400, 'output_config.effort: Extra inputs are not permitted', 'invalid_request_error'))
+  ok('jiné 400 → trvalá chyba s podpisem odmítnutí (kód + text)',
+    tvar.vysledek.stav === 'chyba' && tvar.vysledek.docasna === false && tvar.vysledek.odmitnuti === '400: output_config.effort: Extra inputs are not permitted')
 
   for (const [status, popis] of [[429, 'limit požadavků'], [500, 'chyba serveru'], [529, 'přetížení'], [408, 'timeout požadavku']]) {
     const r = await sOdpovedi(chybaHttp(status))
@@ -325,6 +341,8 @@ console.log('\n== Chyby API: co se zkusí znovu a co ne ==')
 
   const vadne = await sOdpovedi(chybaHttp(400, 'The PDF specified was not valid.'))
   ok('400 → trvalá a řekne proč', vadne.vysledek.stav === 'chyba' && vadne.vysledek.docasna === false && /PDF specified was not valid/.test(vadne.vysledek.duvod))
+  ok('dočasná chyba ani chyba odpovědi podpis odmítnutí nemá (nejsou to odmítnutí souboru)',
+    (await sOdpovedi(chybaHttp(529))).vysledek.odmitnuti === undefined && (await sOdpovedi(zpravaModelu(null))).vysledek.odmitnuti === undefined)
 
   const heslo = await sOdpovedi(chybaHttp(400, 'The PDF specified is password protected.', 'invalid_request_error'))
   ok('400 heslem chráněné PDF → pořád trvalá chyba dokladu', heslo.vysledek.stav === 'chyba' && heslo.vysledek.docasna === false)

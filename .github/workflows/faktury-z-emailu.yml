@@ -79,6 +79,6 @@ jobs:
           # oprávnění u Anthropicu). Doklady čekají — neztratí se — ale někdo
           # to musí spravit. Spadnutím pošle GitHub e-mail.
           if [ "$AI_NEDOSTUPNE" -eq 1 ]; then
-            echo "::error::Čtení faktur přes AI nejde (klíč, kredit nebo oprávnění u Anthropicu). PDF a fotky čekají. Důvod je u schránky ve Finance → Integrace → E-mail."
+            echo "::error::Čtení faktur přes AI nejde (klíč, kredit, oprávnění nebo změna u Anthropicu). PDF a fotky čekají. Důvod je u schránky ve Finance → Integrace → E-mail."
             exit 1
           fi

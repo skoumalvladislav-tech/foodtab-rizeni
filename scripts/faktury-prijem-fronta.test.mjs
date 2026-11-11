@@ -119,8 +119,13 @@ console.log('\n== Přečíst znovu: přes 1000 řádků, po stránkách a dávk�
   ok('každá dávka: jen schránka p1 a jen pořád v ruční kontrole (souběh s člověkem)',
     zmeny.every((d) => maEq(d, 'pripojeni_id', 'p1') && maEq(d, 'stav', 'vyzaduje_kontrolu')))
   const zmena = krok(zmeny[0] ?? { kroky: [] }, 'update')[0]?.[1] ?? {}
-  ok('zpátky do fronty: čeká, 0 pokusů, nový důvod, bez stopy po AI (nezapočítá se do stropu)',
-    zmena.stav === 'ceka' && zmena.pokusu === 0 && zmena.duvod === DUVOD_VRACENI && zmena.zdroj_vytezeni === null && zmena.zpracovano_kdy === null && zmena.vysledek === null)
+  ok('zpátky do fronty: čeká, 0 pokusů, důvod = značka vrácení', zmena.stav === 'ceka' && zmena.pokusu === 0 && zmena.duvod === DUVOD_VRACENI)
+  // Mění JEN tyhle tři sloupce: vymazaný zdroj_vytezeni / zpracovano_kdy by
+  // vynuloval denní strop AI (každé kliknutí = dalších 300 placených čtení),
+  // vymazaný vysledek by zahodil přečtený doklad (po chybě zápisu by se
+  // platilo za nové čtení).
+  ok('nic jiného nemaže — přečtený doklad ani útrata do denního stropu nezmizí',
+    JSON.stringify(Object.keys(zmena).sort()) === JSON.stringify(['duvod', 'pokusu', 'stav']))
   ok('zápis vrátí řádky (select), ať je vidět, kolik opravdu prošlo', zmeny.every((d) => krok(d, 'select').length === 1))
 }
 
@@ -179,6 +184,12 @@ console.log('\n== Pořadí fronty: nejnovější e-mail první (ze zdroje) ==')
   ok('první řazení: prijato_kdy sestupně, prázdné na konec',
     razeni[0]?.[0] === 'prijato_kdy' && /ascending: false/.test(razeni[0]?.[1] ?? '') && /nullsFirst: false/.test(razeni[0]?.[1] ?? ''))
   ok('a teprve pak limit', telo.indexOf(".order('prijato_kdy'") >= 0 && telo.indexOf(".order('prijato_kdy'") < telo.indexOf('.limit(limit)'))
+
+  // Řádek 'chyba' s vyčerpanými pokusy (běh zabitý při posledním pokusu)
+  // dřív fronta nebrala — visel navždy, ani ruční kontrola ho neviděla.
+  const fronta = /const FRONTA = '([^']*)'/.exec(zdroj)?.[1] ?? ''
+  ok('fronta bere čekající i VŠECHNY s chybou (bez omezení pokusů)',
+    fronta.split(',').sort().join(',') === 'stav.eq.ceka,stav.eq.chyba')
 }
 
 console.log(chyb === 0 ? '\nVŠECHNY KONTROLY PROŠLY\n' : `\n${chyb} KONTROL SPADLO\n`)

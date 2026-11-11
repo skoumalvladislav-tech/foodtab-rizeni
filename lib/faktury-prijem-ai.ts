@@ -32,12 +32,16 @@ export type PodkladAI = {
  * dokladu. Doklad se nesmí poslat do ruční kontroly: počká a přečte se sám,
  * až se účet spraví. (9.–25. 10. 2026 takhle skončilo v ruční kontrole
  * 1 011 příloh, které AI nikdy nepřečetla.)
+ *
+ * `odmitnuti` u trvalé chyby = API soubor odmítlo (4xx) — kód a text
+ * chyby. Jádro podle něj pozná, že AI odmítá KAŽDÝ soubor stejně (změna
+ * na straně Anthropicu, kterou tu nikdo nepředvídal), a zastaví se.
  */
 export type VysledekAI =
   | { stav: 'ok'; doklad: VytezenyDoklad; model: string; verze: string }
   | { stav: 'bez_klice' }
   | { stav: 'ucet'; duvod: string }
-  | { stav: 'chyba'; duvod: string; docasna: boolean }
+  | { stav: 'chyba'; duvod: string; docasna: boolean; odmitnuti?: string }
 
 export const MODEL = 'claude-opus-5-5'
 export const VERZE_ZADANI = 'faktura-v1'
@@ -168,15 +172,24 @@ function ucet(duvod: string): ChybaUctu {
 /**
  * Chyba účtu podle odpovědi API. Došlý kredit a vyčerpaný limit útraty
  * vrací API jako 400 (invalid_request_error) — rozezná je jen text; nový
- * typ `billing_error` a 402 se berou podle typu a kódu.
+ * typ `billing_error` a 402 se berou podle typu a kódu. Samotné slovo
+ * „billing" nestačí: „billing address" ve zprávě o souboru je vada
+ * dokladu, a chyba účtu by ho držela ve frontě navždy.
  */
 export function chybaUctuZOdpovedi(status: number | undefined, typ: unknown, zprava: unknown): string | null {
   const text = typeof zprava === 'string' ? zprava : ''
-  if (status === 402 || typ === 'billing_error' || /credit balance|billing/i.test(text)) {
+  if (status === 402 || typ === 'billing_error' || /credit balance|plans (&|and) billing/i.test(text)) {
     return 'AI teď nejde použít: na účtu u Anthropicu došel kredit (Plans & Billing). Doklady počkají a přečtou se samy, až se kredit doplní.'
   }
-  if (/usage limit|spend(ing)? limit/i.test(text)) {
+  if (/usage limits?|spend(ing)? limit/i.test(text)) {
     return 'AI teď nejde použít: účet u Anthropicu vyčerpal nastavený limit útraty. Doklady počkají a přečtou se samy, až limit znovu pustí.'
+  }
+  if (/organization (has been |is )?disabled/i.test(text)) {
+    return 'AI teď nejde použít: organizace u Anthropicu je zablokovaná. Doklady počkají a přečtou se samy, až se účet odblokuje.'
+  }
+  if (status === 404) {
+    // Na adrese pro čtení dokladů znamená 404 jen „takový model není" (Anthropic ho vyřadil, nebo k němu klíč nemá přístup) — nikdy vadu souboru.
+    return `AI teď nejde použít: model ${MODEL} u Anthropicu není k dispozici (chyba 404). Doklady počkají — je potřeba v aplikaci nastavit novější model.`
   }
   return null
 }
@@ -210,7 +223,7 @@ function chyba(e: unknown): ChybaAI | ChybaUctu {
     }
     const telo = e.error as { error?: { message?: unknown } } | undefined
     const zprava = typeof telo?.error?.message === 'string' ? `: ${telo.error.message.slice(0, 200)}` : ''
-    return trvala(`AI soubor nepřijala (chyba ${status ?? 'bez kódu'})${zprava}`)
+    return { ...trvala(`AI soubor nepřijala (chyba ${status ?? 'bez kódu'})${zprava}`), odmitnuti: `${status ?? '-'}${zprava}` }
   }
   // Zbylé chyby SDK jsou hlavně nepřečtená strukturovaná odpověď; její text (kus dokladu) se do důvodu nekopíruje.
   if (e instanceof Anthropic.AnthropicError) {

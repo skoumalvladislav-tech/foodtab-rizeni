@@ -2078,3 +2078,60 @@ majiteli jako push i v noci).
 - **Když to má být jinak:** jedno číslo v migraci 20261108100000
   (`interval '24 hours'` ve spoušti `app.integrace_vypadek_upozornit`).
   Před `db push` stačí přepsat; po něm nová migrace.
+
+## 92. Přílohy, které nepřečetl výpadek AI — vrátit samy, nebo tlačítkem?
+
+**Vzniklo:** 10. 11. 2026 (oprava příjmu faktur z e-mailu: 9.–25. 10.
+došel u Anthropicu kredit, pak neplatil klíč, a kód každou přílohu
+odložil do ruční kontroly jako vadný doklad — 1 017 příloh).
+
+- **Teď:** nic se nevrací samo. U každé schránky v Integracích → E-mail
+  je tlačítko **„Přečíst znovu (N)“** a vrátí do fronty jen přílohy,
+  které nepřečetla chyba účtu AI (kredit, klíč, oprávnění, limit útraty)
+  nebo nepovedený zápis do Faktur — a jen ty, které mají uložený soubor.
+  PDF s heslem, moc velké přílohy a ISDOCX zůstanou v ruční kontrole.
+  Vrácené přečte běžná úloha: nejvýš 300 přes AI denně (strop se
+  neměnil), **nové e-maily mají přednost** (fronta teď bere nejnovější
+  e-mail první). Faktura z vrácené přílohy jde do Faktur vždy **ke
+  schválení** s poznámkou „ověřte, že ji mezitím nikdo nezadal ručně“ —
+  ležela týdny v ruční kontrole a dvojí platbě musí zabránit člověk.
+- **Proč tlačítko:** přečíst přes tisíc příloh stojí peníze za AI
+  (zhruba jako 2–3 měsíce běžného příjmu) a zabere několik dní stropu.
+  Utrácet to bez výslovného souhlasu se mi nezdálo správné. Jedno
+  kliknutí u schránky je ten souhlas.
+- **Vedlejší účinek pořadí „nejnovější první“:** dokud chodí nové
+  e-maily, staré vrácené se čtou až po nich. Při 300 denně a běžném
+  přítoku to nevadí; kdyby nových bylo přes 300 denně, staré by čekaly.
+- **Když to má být jinak:** „vrátit samo“ = zavolat
+  `vratitDoFrontyJadro` z úlohy (`lib/faktury-prijem-jadro.ts`), bez
+  migrace. Pořadí fronty je jedno `.order(…)` v `nactiKeZpracovani`
+  (`lib/faktury-prijem-sync.ts`).
+
+## 93. Poplach o nefunkční AI jen přes GitHub — stačí?
+
+**Vzniklo:** 10. 11. 2026 (tamtéž: 9.–25. 10. úloha i hlídač hlásily
+„v pořádku“, protože úloha doběhla s HTTP 200 — o výpadku AI nevěděl
+nikdo).
+
+- **Teď:** když je u schránky AI povolená, ale nejde (klíč, kredit,
+  oprávnění, vyřazený model, zablokovaná organizace — nebo AI odmítne
+  dvě přílohy za sebou úplně stejnou chybou, kterou nikdo nepředvídal),
+  úloha vrátí `ai_nedostupne: true` a **workflow „Faktury —
+  příjem z e-mailu“ na GitHubu skončí červeně** — GitHub o tom pošle
+  e-mail (u plánovaných běhů tomu účtu, který plán workflow založil nebo
+  naposledy změnil, a jen když má v GitHubu zapnutá upozornění na
+  Actions). Důvod je u schránky v Integracích → E-mail.
+  Úloha sama dál vrací 200 a pokračuje (ISDOC a ostatní schránky se
+  zpracují, PDF a fotky počkají ve frontě).
+- **Proč ne chybový kód úlohy:** kdyby úloha při výpadku AI vrátila
+  chybu, hlídač plánovače by to viděl, ale workflow by po prvním kole
+  přestal dočítat i to, co jde bez AI. Červený workflow stačí a nic
+  nezastaví.
+- **Slabina:** GitHub plánované běhy zpožďuje a některé vynechá, a
+  e-mail jde jen na jeden účet GitHubu. Běh z GitHubu, který se potká
+  s během z pg_cron (oba v :09 a :39), dostane „už běží jinde“ a poplach
+  v tom kole nevyhlásí — zachytí ho až další. Upozornění v aplikaci
+  (zvonek) to zatím **neposílá**.
+- **Když to má být jinak:** upozornění v aplikaci by šlo po vzoru
+  výpadku Choice (PR #178, spoušť na stavu napojení) — nová migrace
+  a texty v `lib/upozorneni-text.ts`.

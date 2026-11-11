@@ -23,7 +23,7 @@ import { castkaNaHalere } from './faktury-prevod.ts'
 import { rozsifrovat } from './integrace-klice.ts'
 import { nactiDavkuZprav } from './faktury-prijem-imap.ts'
 import { cteniAiJeNastavene, vytezitDokladAI } from './faktury-prijem-ai.ts'
-import { MAX_POKUSU, nacistNastaveni, type RadekFaktury, type StavPrijmu } from './faktury-prijem-typy.ts'
+import { nacistNastaveni, type RadekFaktury, type StavPrijmu } from './faktury-prijem-typy.ts'
 import { STAV_CASTECNE, STAV_KE_KONTROLE, STAV_NEUHRAZENO, STAV_UHRAZENO } from './faktury-types.ts'
 import {
   vratitDoFrontyJadro,
@@ -58,7 +58,13 @@ export type VysledekPrijmu = {
 
 const KBELIK = 'faktury-prilohy'
 const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
-const FRONTA = `stav.eq.ceka,and(stav.eq.chyba,pokusu.lt.${MAX_POKUSU})`
+/**
+ * Ke zpracování: čekající a s chybou — i ty, které už vyčerpaly pokusy
+ * (MAX_POKUSU): běh zabitý uprostřed posledního pokusu nechal řádek
+ * v 'chyba' a dřív ho nevzal nikdo, ani ruční kontrola. Jádro je teď
+ * hned na začátku pošle do ruční kontroly.
+ */
+const FRONTA = 'stav.eq.ceka,stav.eq.chyba'
 /** Řádků na jeden dotaz — PostgREST víc než 1000 nevrátí (max-rows). */
 const STRANKA = 1000
 
@@ -353,8 +359,12 @@ function repozitar(supabase: SupabaseClient): Repozitar {
     async vratitDoFronty(pripojeniId, ids, duvod) {
       let vraceno = 0
       for (let i = 0; i < ids.length; i += 100) {
+        // Jen stav, pokusy a důvod (= značka vrácení). Přečtený doklad
+        // (vysledek, model) zůstává — po nepovedeném zápisu se jen znovu
+        // zapíše, bez dalšího placeného čtení. zdroj_vytezeni a zpracovano_kdy
+        // taky: denní strop AI počítá řádky, a vrácení ho nesmí vynulovat.
         const { data, error } = await supabase.from('faktury_prijem')
-          .update({ stav: 'ceka', pokusu: 0, duvod, typ_dokladu: null, vysledek: null, zdroj_vytezeni: null, model: null, zpracovano_kdy: null })
+          .update({ stav: 'ceka', pokusu: 0, duvod })
           .eq('pripojeni_id', pripojeniId).eq('stav', 'vyzaduje_kontrolu').in('id', ids.slice(i, i + 100))
           .select('id')
         hodit(error, 'Evidence příjmu (vrácení do fronty)')

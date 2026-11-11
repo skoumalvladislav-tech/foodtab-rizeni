@@ -80,6 +80,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     // Workflow pak spadne — GitHub o tom pošle e-mail; 9.–27. 10. 2026 to
     // nevěděl nikdo a přes tisíc příloh skončilo v ruční kontrole. Jen
     // ano/ne, důvod je u schránky v Integracích → E-mail (log je veřejný).
+    // ROZHODNOUT: poplach jen přes GitHub, úloha dál vrací 200 (otázka 93).
     ai_nedostupne: vysledky.some((v) => v.aiNedostupne === true),
     // Bez id schránek a bez textů chyb: odpověď končí v logu GitHub Actions a
     // repozitář je veřejný. Důvod chyby je u schránky v Integracích → E-mail.
