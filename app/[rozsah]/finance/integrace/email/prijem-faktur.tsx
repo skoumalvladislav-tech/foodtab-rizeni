@@ -241,7 +241,7 @@ export function PrijemFakturPanel({
         <p style={{ ...drobne, color: 'var(--pozor)' }}>
           {kZopakovani} z příloh v ruční kontrole appka nepřečetla kvůli výpadku AI (došlý kredit nebo neplatný klíč) nebo chybě zápisu do Faktur — ne kvůli dokladu samotnému.
           {smiMenit && databazeFakturOk && nastaveni.zapnuto
-            ? ` Tlačítkem „Přečíst znovu“ je vrátíte do fronty. AI jich přečte nejvýš ${AI_LIMIT_ZA_DEN} denně a nové e-maily mají přednost, takže to může trvat několik dní.`
+            ? ` Tlačítkem „Přečíst znovu“ je vrátíte do fronty. AI jich přečte nejvýš ${AI_LIMIT_ZA_DEN} denně a nové e-maily mají přednost, takže to může trvat několik dní. Faktury z nich přijdou ke schválení — mezitím jste je mohli zadat ručně.`
             : ''}
         </p>
       ) : null}
