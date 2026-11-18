@@ -9,8 +9,8 @@ import { TENANT_SCOPE_SEGMENT } from '@/lib/authz'
 import { zasifrovat } from '@/lib/integrace-klice'
 import { overitPripojeniImap } from '@/lib/integrace-mail-imap'
 import type { ZabezpeceniImap } from '@/lib/integrace-mail-imap-moznosti'
-import { upravitNastaveni, type ZmenaPrijmu } from '@/lib/faktury-prijem-typy'
-import { zapsatNavrhy, zpracovatPrijem } from '@/lib/faktury-prijem-sync'
+import { AI_LIMIT_ZA_DEN, upravitNastaveni, type ZmenaPrijmu } from '@/lib/faktury-prijem-typy'
+import { vratitDoFronty, zapsatNavrhy, zpracovatPrijem } from '@/lib/faktury-prijem-sync'
 
 async function pripravit(rozsah: string) {
   const tenantId = await getCurrentTenantId()
@@ -194,6 +194,25 @@ export async function spustitPrijemTed(formData: FormData): Promise<void> {
   if (v.zbyva > 0 || !v.schrankaDoctena) casti.push('Další část se zpracuje v příštím běhu automaticky.')
   if (v.duvod) casti.push(`Pozor: ${v.duvod}`)
   zpet(rozsah, 'zprava', casti.join(' '))
+}
+
+/**
+ * „Přečíst znovu": přílohy, které skončily v ruční kontrole jen kvůli
+ * chybě účtu AI (došlý kredit, neplatný klíč) nebo zápisu, vrátí do fronty.
+ * Přečte je běžná úloha — v denním stropu AI, nejnovější e-maily napřed.
+ * Kliknutí je vědomý souhlas s tím, že je AI přečte (útrata jako běžné faktury).
+ */
+export async function vratitDoFrontyAkce(formData: FormData): Promise<void> {
+  const rozsah = String(formData.get('rozsah') ?? '')
+  const id = String(formData.get('id') ?? '')
+  const { tenantId, pripojeni } = await pripravitPrijem(rozsah, id)
+
+  const r = await vratitDoFronty(pripojeni.id, tenantId)
+  revalidatePath(`/${rozsah}/finance/integrace/email`)
+  if (r.duvod) zpet(rozsah, 'chyba', r.duvod)
+  zpet(rozsah, 'zprava', r.vraceno > 0
+    ? `Vráceno ke čtení: ${r.vraceno}. Appka je přečte postupně při dalších bězích (každých 30 minut, nejvýš ${AI_LIMIT_ZA_DEN} přes AI denně, nové e-maily mají přednost).`
+    : 'Nic k novému přečtení — v ruční kontrole zůstaly jen přílohy, které appka opravdu sama nepřečte.')
 }
 
 /** Režim náhled: člověk potvrdil návrhy — zapsat je do Faktur. */

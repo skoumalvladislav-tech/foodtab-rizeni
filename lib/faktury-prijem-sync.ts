@@ -23,9 +23,10 @@ import { castkaNaHalere } from './faktury-prevod.ts'
 import { rozsifrovat } from './integrace-klice.ts'
 import { nactiDavkuZprav } from './faktury-prijem-imap.ts'
 import { cteniAiJeNastavene, vytezitDokladAI } from './faktury-prijem-ai.ts'
-import { MAX_POKUSU, nacistNastaveni, type RadekFaktury, type StavPrijmu } from './faktury-prijem-typy.ts'
+import { nacistNastaveni, type RadekFaktury, type StavPrijmu } from './faktury-prijem-typy.ts'
 import { STAV_CASTECNE, STAV_KE_KONTROLE, STAV_NEUHRAZENO, STAV_UHRAZENO } from './faktury-types.ts'
 import {
+  vratitDoFrontyJadro,
   zapsatNavrhyJadro,
   zpracovatPrijemJadro,
   type FakturyDb,
@@ -47,11 +48,25 @@ export type VysledekPrijmu = {
   zbyva: number
   /** true = schránka je přečtená až do konce (kurzor na hlavě). */
   schrankaDoctena: boolean
+  /**
+   * true = AI je u schránky povolená, ale nejde použít (chybí klíč, neplatí,
+   * došel kredit…). Doklady čekají; úloha to hlásí nahoru, ať se to někdo
+   * dozví (9.–27. 10. 2026 to nevěděl nikdo).
+   */
+  aiNedostupne?: boolean
 }
 
 const KBELIK = 'faktury-prilohy'
 const MINUT_NEZ_JE_BEH_ZASEKNUTY = 10
-const FRONTA = `stav.eq.ceka,and(stav.eq.chyba,pokusu.lt.${MAX_POKUSU})`
+/**
+ * Ke zpracování: čekající a s chybou — i ty, které už vyčerpaly pokusy
+ * (MAX_POKUSU): běh zabitý uprostřed posledního pokusu nechal řádek
+ * v 'chyba' a dřív ho nevzal nikdo, ani ruční kontrola. Jádro je teď
+ * hned na začátku pošle do ruční kontroly.
+ */
+const FRONTA = 'stav.eq.ceka,stav.eq.chyba'
+/** Řádků na jeden dotaz — PostgREST víc než 1000 nevrátí (max-rows). */
+const STRANKA = 1000
 
 /** Původ adresy appky z NEXT_PUBLIC_APP_URL (jen schéma + host), jinak null. */
 function zakladOdkazu(): string | null {
@@ -285,7 +300,14 @@ function repozitar(supabase: SupabaseClient): Repozitar {
     async nactiKeZpracovani(pripojeniId, limit, jenIsdoc) {
       let dotaz = supabase.from('faktury_prijem').select('*').eq('pripojeni_id', pripojeniId).or(FRONTA)
       if (jenIsdoc) dotaz = dotaz.eq('druh', 'isdoc')
-      const { data, error } = await dotaz.order('vytvoreno_kdy', { ascending: true }).order('uid', { ascending: true }).limit(limit)
+      // NEJNOVĚJŠÍ E-MAIL PRVNÍ: nová faktura nesmí čekat za starým dočtem
+      // (vrácené přílohy z „Přečíst znovu" mají vytvoreno_kdy z 9. 10. 2026
+      // a bylo jich přes tisíc — staré pořadí by nové faktury odsunulo o dny).
+      const { data, error } = await dotaz
+        .order('prijato_kdy', { ascending: false, nullsFirst: false })
+        .order('vytvoreno_kdy', { ascending: true })
+        .order('uid', { ascending: true })
+        .limit(limit)
       hodit(error, 'Fronta příjmu')
       return (data ?? []) as Zaznam[]
     },
@@ -317,6 +339,38 @@ function repozitar(supabase: SupabaseClient): Repozitar {
       const { count } = await supabase.from('faktury_prijem').select('id', { count: 'exact', head: true })
         .eq('pripojeni_id', pripojeniId).or(FRONTA)
       return count ?? 0
+    },
+
+    async nactiKeKontrole(pripojeniId) {
+      // Po stránkách: PostgREST vrátí nejvýš 1000 řádků na dotaz (max-rows),
+      // víc by tiše uřízl. Pořadí podle id, ať se stránky nepřekrývají.
+      const radky: { id: string; duvod: string | null; soubor_cesta: string | null }[] = []
+      for (let od = 0; ; od += STRANKA) {
+        const { data, error } = await supabase.from('faktury_prijem').select('id, duvod, soubor_cesta')
+          .eq('pripojeni_id', pripojeniId).eq('stav', 'vyzaduje_kontrolu')
+          .order('id', { ascending: true }).range(od, od + STRANKA - 1)
+        hodit(error, 'Evidence příjmu (ruční kontrola)')
+        const stranka = (data ?? []) as { id: string; duvod: string | null; soubor_cesta: string | null }[]
+        radky.push(...stranka)
+        if (stranka.length < STRANKA) return radky
+      }
+    },
+
+    async vratitDoFronty(pripojeniId, ids, duvod) {
+      let vraceno = 0
+      for (let i = 0; i < ids.length; i += 100) {
+        // Jen stav, pokusy a důvod (= značka vrácení). Přečtený doklad
+        // (vysledek, model) zůstává — po nepovedeném zápisu se jen znovu
+        // zapíše, bez dalšího placeného čtení. zdroj_vytezeni a zpracovano_kdy
+        // taky: denní strop AI počítá řádky, a vrácení ho nesmí vynulovat.
+        const { data, error } = await supabase.from('faktury_prijem')
+          .update({ stav: 'ceka', pokusu: 0, duvod })
+          .eq('pripojeni_id', pripojeniId).eq('stav', 'vyzaduje_kontrolu').in('id', ids.slice(i, i + 100))
+          .select('id')
+        hodit(error, 'Evidence příjmu (vrácení do fronty)')
+        vraceno += (data ?? []).length
+      }
+      return vraceno
     },
 
     async pocetAiDnes(tenantId, dnes) {
@@ -361,6 +415,24 @@ export async function vsechnaPripojeniSPrijmem(): Promise<{ id: string; tenantId
   return ((data ?? []) as { id: string; tenant_id: string; externi_ucet: Record<string, unknown> | null }[])
     .filter((p) => nacistNastaveni(p.externi_ucet?.prijem_dokladu).zapnuto)
     .map((p) => ({ id: p.id, tenantId: p.tenant_id }))
+}
+
+/**
+ * „Přečíst znovu": vrátí do fronty přílohy, které skončily v ruční kontrole
+ * jen kvůli chybě účtu AI nebo zápisu (lzeZkusitZnovu). Volá se až po
+ * kontrole práv v akci (integrace.manage + faktury.manage za celou firmu);
+ * firma z akce se tu ověří znovu proti řádku schránky.
+ */
+export async function vratitDoFronty(pripojeniId: string, tenantId: string): Promise<{ vraceno: number; duvod: string | null }> {
+  const supabase = klientUlohy()
+  if (!supabase) return { vraceno: 0, duvod: 'Úloha není nastavená — chybí SUPABASE_SERVICE_ROLE_KEY.' }
+  try {
+    return await vratitDoFrontyJadro(repozitar(supabase), pripojeniId, tenantId)
+  } catch (e) {
+    // Výpadek uprostřed: část dávek už mohla projít. Druhé kliknutí je
+    // bezpečné — vrací jen to, co je pořád v ruční kontrole.
+    return { vraceno: 0, duvod: `Vrácení do fronty se nepovedlo celé (${e instanceof Error ? e.message : String(e)}) — zkuste to znovu.` }
+  }
 }
 
 /** Režim náhled: zapíše čekající návrhy (stav 'navrh') dané schránky do Faktur, nejdéle do `konecMs`. */

@@ -3,7 +3,7 @@
  * Vytěžení faktury přes AI (lib/faktury-prijem-ai.ts) — bez volání modelu.
  *
  * Pusť:
- *   node --experimental-strip-types --conditions=react-server scripts/faktury-prijem-ai.test.mjs
+ *   node scripts/faktury-prijem-ai.test.mjs
  *
  * `fetch` je nahrazený zástupcem, který si zapíše požadavek a vrátí
  * připravenou odpověď. Díky tomu se ověřuje, co by OPRAVDU odešlo do
@@ -15,6 +15,9 @@
  */
 
 import { readFileSync } from 'node:fs'
+
+import { adresaModulu } from './vykreslit.mjs'
+import { lzeZkusitZnovu } from '../lib/faktury-prijem-typy.ts'
 
 let chyb = 0
 const ok = (popis, podminka) => {
@@ -34,7 +37,16 @@ globalThis.fetch = async (url, init) => {
   return odpovedet()
 }
 
-const { vytezitDokladAI, cteniAiJeNastavene, MODEL, VERZE_ZADANI } = await import('../lib/faktury-prijem-ai.ts')
+// lib/faktury-prijem-ai.ts začíná `import 'server-only'`, které mimo Next
+// spadne — vykreslit.mjs ho přeloží s prázdným server-only a SKUTEČNÝM SDK
+// (stejně jako jine-platby-ai.test.mjs), takže CI ho pouští prostým node.
+const js = (kod) => 'data:text/javascript,' + encodeURIComponent(kod)
+const { vytezitDokladAI, cteniAiJeNastavene, chybaUctuZOdpovedi, MODEL, VERZE_ZADANI } = await import(adresaModulu('lib/faktury-prijem-ai.ts', [
+  ['server-only', js('')],
+  ['@anthropic-ai/sdk/helpers/zod', import.meta.resolve('@anthropic-ai/sdk/helpers/zod')],
+  ['@anthropic-ai/sdk', import.meta.resolve('@anthropic-ai/sdk')],
+  ['zod', import.meta.resolve('zod')],
+]))
 
 const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a])
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -88,8 +100,8 @@ const zpravaModelu = (vystup, jine = {}) => () =>
   )
 
 // x-should-retry: false — SDK by jinak čekalo a zkoušelo znovu.
-const chybaHttp = (status, zprava = 'chyba') => () =>
-  new Response(JSON.stringify({ type: 'error', error: { type: 'test_error', message: zprava } }), {
+const chybaHttp = (status, zprava = 'chyba', typ = 'test_error') => () =>
+  new Response(JSON.stringify({ type: 'error', error: { type: typ, message: zprava } }), {
     status,
     headers: { 'content-type': 'application/json', 'x-should-retry': 'false' },
   })
@@ -281,9 +293,46 @@ console.log('\n== Když model odmítne, usekne nebo vrátí nesmysl ==')
 
 console.log('\n== Chyby API: co se zkusí znovu a co ne ==')
 {
-  const klic = await sOdpovedi(chybaHttp(401, 'invalid x-api-key'))
-  ok('401 → trvalá, hláška o klíči', klic.vysledek.stav === 'chyba' && klic.vysledek.docasna === false && /ANTHROPIC_API_KEY/.test(klic.vysledek.duvod))
-  ok('a klíč sám v hlášce není', klic.vysledek.stav === 'chyba' && !klic.vysledek.duvod.includes(FALESNY_KLIC))
+  // Chyba ÚČTU (klíč, kredit, oprávnění) není vada dokladu: 9.–25. 10. 2026
+  // takhle skončilo v ruční kontrole přes tisíc příloh, které by jinak
+  // prošly. Stav 'ucet' = doklad počká a nepočítá se mu pokus.
+  const klic = await sOdpovedi(chybaHttp(401, 'invalid x-api-key', 'authentication_error'))
+  ok('401 → ucet, hláška o klíči', klic.vysledek.stav === 'ucet' && /ANTHROPIC_API_KEY/.test(klic.vysledek.duvod))
+  ok('a klíč sám v hlášce není', klic.vysledek.stav === 'ucet' && !klic.vysledek.duvod.includes(FALESNY_KLIC))
+
+  // Přesně to, co Anthropic vrátil 9.–13. 10. 2026 (918 příloh): HTTP 400, invalid_request_error.
+  const kredit = await sOdpovedi(chybaHttp(400, 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.', 'invalid_request_error'))
+  ok('400 „credit balance is too low“ → ucet (ne vada dokladu)', kredit.vysledek.stav === 'ucet' && /kredit/.test(kredit.vysledek.duvod))
+  const billing = await sOdpovedi(chybaHttp(400, 'Something about the account.', 'billing_error'))
+  ok('typ billing_error → ucet', billing.vysledek.stav === 'ucet')
+  const plat = await sOdpovedi(chybaHttp(402, 'Payment required.'))
+  ok('402 → ucet', plat.vysledek.stav === 'ucet')
+  const strop = await sOdpovedi(chybaHttp(400, 'You have reached your specified API usage limits. You will regain access on 2026-12-01 at 00:00 UTC.', 'invalid_request_error'))
+  ok('400 „usage limits“ → ucet, hláška o limitu útraty', strop.vysledek.stav === 'ucet' && /limit útraty/.test(strop.vysledek.duvod))
+  ok('a text od Anthropicu se do důvodu nekopíruje (jen naše věta)', strop.vysledek.stav === 'ucet' && !strop.vysledek.duvod.includes('2026-12-01'))
+
+  // Kdyby se chyba účtu přece jen dostala do ruční kontroly, „Přečíst znovu“ ji musí poznat.
+  ok('všechny hlášky účtu projdou lzeZkusitZnovu', [klic, kredit, billing, plat, strop].every((r) => r.vysledek.stav === 'ucet' && lzeZkusitZnovu(r.vysledek.duvod)))
+
+  ok('chybaUctuZOdpovedi: vadné PDF (400) není chyba účtu', chybaUctuZOdpovedi(400, 'invalid_request_error', 'The PDF specified was not valid.') === null)
+  ok('chybaUctuZOdpovedi: heslem chráněné PDF není chyba účtu', chybaUctuZOdpovedi(400, 'invalid_request_error', 'The PDF specified is password protected.') === null)
+  ok('chybaUctuZOdpovedi: zpráva, která není text, nespadne', chybaUctuZOdpovedi(400, undefined, { x: 1 }) === null)
+  // Samotné „billing" chybou účtu není: chyba účtu drží přílohu ve frontě
+  // bez počítání pokusů — vadný doklad by tak zastavil AI pro celou frontu.
+  ok('chybaUctuZOdpovedi: „billing address" ve zprávě o souboru NENÍ chyba účtu',
+    chybaUctuZOdpovedi(400, 'invalid_request_error', 'The image mentions a billing address and was rejected.') === null)
+
+  // Chyby účtu, které 10. 11. 2026 našla nezávislá kontrola: dřív končily jako vada dokladu.
+  const model = await sOdpovedi(chybaHttp(404, `model: ${MODEL}`, 'not_found_error'))
+  ok('404 (model vyřazený / bez přístupu) → ucet', model.vysledek.stav === 'ucet' && /404/.test(model.vysledek.duvod))
+  const organizace = await sOdpovedi(chybaHttp(400, 'This organization has been disabled.', 'invalid_request_error'))
+  ok('400 „organization has been disabled“ → ucet', organizace.vysledek.stav === 'ucet' && /zablokovan/.test(organizace.vysledek.duvod))
+
+  // Odmítnutí, které nikdo nepředvídal (nový tvar dotazu po změně API): trvalá
+  // chyba, ale s podpisem — jádro podle něj pozná, že AI odmítá každý soubor stejně.
+  const tvar = await sOdpovedi(chybaHttp(400, 'output_config.effort: Extra inputs are not permitted', 'invalid_request_error'))
+  ok('jiné 400 → trvalá chyba s podpisem odmítnutí (kód + text)',
+    tvar.vysledek.stav === 'chyba' && tvar.vysledek.docasna === false && tvar.vysledek.odmitnuti === '400: output_config.effort: Extra inputs are not permitted')
 
   for (const [status, popis] of [[429, 'limit požadavků'], [500, 'chyba serveru'], [529, 'přetížení'], [408, 'timeout požadavku']]) {
     const r = await sOdpovedi(chybaHttp(status))
@@ -292,9 +341,15 @@ console.log('\n== Chyby API: co se zkusí znovu a co ne ==')
 
   const vadne = await sOdpovedi(chybaHttp(400, 'The PDF specified was not valid.'))
   ok('400 → trvalá a řekne proč', vadne.vysledek.stav === 'chyba' && vadne.vysledek.docasna === false && /PDF specified was not valid/.test(vadne.vysledek.duvod))
+  ok('dočasná chyba ani chyba odpovědi podpis odmítnutí nemá (nejsou to odmítnutí souboru)',
+    (await sOdpovedi(chybaHttp(529))).vysledek.odmitnuti === undefined && (await sOdpovedi(zpravaModelu(null))).vysledek.odmitnuti === undefined)
 
-  const zakazano = await sOdpovedi(chybaHttp(403))
-  ok('403 → trvalá', zakazano.vysledek.stav === 'chyba' && zakazano.vysledek.docasna === false)
+  const heslo = await sOdpovedi(chybaHttp(400, 'The PDF specified is password protected.', 'invalid_request_error'))
+  ok('400 heslem chráněné PDF → pořád trvalá chyba dokladu', heslo.vysledek.stav === 'chyba' && heslo.vysledek.docasna === false)
+
+  const zakazano = await sOdpovedi(chybaHttp(403, 'forbidden', 'permission_error'))
+  ok('403 → ucet (oprávnění klíče, ne doklad)', zakazano.vysledek.stav === 'ucet' && /403/.test(zakazano.vysledek.duvod))
+  ok('… a i ta projde lzeZkusitZnovu', zakazano.vysledek.stav === 'ucet' && lzeZkusitZnovu(zakazano.vysledek.duvod))
 
   const spojeni = await sOdpovedi(() => {
     throw new TypeError('fetch failed')
