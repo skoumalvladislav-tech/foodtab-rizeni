@@ -1,5 +1,11 @@
 # Stav k 11. 11. 2026 — příjem faktur z e-mailu: proč stál a oprava
 
+> **Doplněno 18. 11.:** PR #181 je na pokyn „sluč 181“ sloučená do
+> `main` (`ca5d439`) a Vercel z ní ve 13:57 postavil produkci (stav
+> „Ready“). Bez migrace, takže žádný `db push`. Teď je řada na
+> krocích v aplikaci v „Co čeká na Šéfíka“ (body 2–6) — bez nich se
+> 1 017 starých příloh samo nevrátí.
+
 ## Nejdřív to podstatné
 
 - **Příjem z e-mailu běží, ale přes tisíc faktur se ztratilo v ruční
@@ -14,7 +20,7 @@
   čeká na kliknutí.** Obě schránky Černé Perly jsou v režimu „Jen
   návrhy“ (nejstarší návrh z 18. 10.). Přečtené jsou, do Faktur je pustí
   až „Zapsat návrhy do Faktur“. Rovnou zapisuje jen schránka FoodTabu.
-- **Hotovo v PR #181 (nesloučená, bez migrace):**
+- **Hotovo v PR #181 (sloučená 18. 11. jako `ca5d439`, bez migrace):**
   1. **Výpadek účtu AI už nikdy nepošle doklad do ruční kontroly.**
      Neplatný klíč, došlý kredit, chybějící oprávnění, limit útraty,
      zablokovaná organizace i vyřazený model: příloha počká ve frontě
@@ -38,8 +44,8 @@
      doklad (AI se neplatí znovu), nové e-maily mají ve frontě přednost
      před starými, a příloha, jejíž běh platforma zabila při posledním
      pokusu, už nevisí navždy jako „čeká“.
-- **Je potřeba jen „sluč 181“** — žádná migrace, žádný `db push`. Pak
-  ale **tři kroky v aplikaci** (níž v „Co čeká na Šéfíka“), jinak se
+- **„Sluč 181“ je hotové (18. 11.)** — žádná migrace, žádný `db push`.
+  Teď ale **tři kroky v aplikaci** (níž v „Co čeká na Šéfíka“), jinak se
   1 017 starých příloh samo nevrátí.
 
 ## Co je hotové
@@ -139,7 +145,7 @@ si pustil ve vlastní rozbalené kopii). **Vážný nález žádný**, 2 středn
 
 ## Co čeká na Šéfíka
 
-1. **„sluč 181“** (bez `db push`).
+1. ~~„sluč 181“~~ — **hotovo 18. 11.** (`ca5d439`, bez `db push`).
 2. **Než kliknete „Přečíst znovu“: zkontrolujte kredit u Anthropicu**
    (v konzoli Anthropicu, část Billing; ideálně zapnout automatické
    dobití). Přes tisíc příloh stojí zhruba tolik jako 2–3 měsíce běžného
@@ -212,7 +218,7 @@ Podrobně v `docs/hlaseni/otazky.md`.
 
 ## Kde jsem skončil a co zbývá
 
-Všechny body zadání jsou hotové v jedné PR, nesloučené: diagnóza
+Všechny body zadání jsou hotové v jedné PR, sloučené 18. 11.: diagnóza
 s čísly z produkce, oprava s testy (ověřenými schválným rozbitím),
 nezávislá kontrola a opravy po ní, seznam kroků pro Šéfíka.
 
@@ -227,5 +233,9 @@ Navazující věci mimo zadání (nedělal jsem):
 
 ## Nenasazoval jsem
 
-Nic. Nic sloučené, žádný `db push` (ani není potřeba), na AI ani do
-schránek jsem se z vývoje nepřipojoval, v produkci jen čtecí dotazy.
+Do 11. 11. nic. 18. 11. jsem na výslovné „sluč 181“ sloučil PR #181
+(`ca5d439`); produkci z toho postavil Vercel sám. Žádný `db push`
+(není potřeba), na AI ani do schránek jsem se z vývoje nepřipojoval,
+v produkci jen čtecí dotazy. Jestli nová verze opravdu běží, ukáže
+první běh úlohy po sloučení — **neověřoval jsem ho**, kliknutí
+v aplikaci jsou na Šéfíkovi.
