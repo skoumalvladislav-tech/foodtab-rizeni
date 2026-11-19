@@ -43,15 +43,15 @@ values (:'cizi', 'Krok91 cizí účet', 'banka')
 returning id as ucet_cizi \gset
 
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj)
-values (:'tenant', :'ucet', 'vydaj', 500000, current_date, '2026091', 'fio_api') returning id as t_ok \gset
+values (:'tenant', :'ucet', 'vydaj', 500000, current_date, '2026091', 'banka_api') returning id as t_ok \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj)
-values (:'tenant', :'ucet', 'vydaj', 500000, current_date, '2026091', 'fio_api') returning id as t_druha \gset
+values (:'tenant', :'ucet', 'vydaj', 500000, current_date, '2026091', 'banka_api') returning id as t_druha \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj)
-values (:'tenant', :'ucet', 'prijem', 70000, current_date, '2026092', 'fio_api') returning id as t_prijem \gset
+values (:'tenant', :'ucet', 'prijem', 70000, current_date, '2026092', 'banka_api') returning id as t_prijem \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj)
-values (:'tenant', :'ucet', 'vydaj', 30000, current_date, '2026093', 'fio_api') returning id as t_mala \gset
+values (:'tenant', :'ucet', 'vydaj', 30000, current_date, '2026093', 'banka_api') returning id as t_mala \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj)
-values (:'cizi', :'ucet_cizi', 'vydaj', 90000, current_date, '2026094', 'fio_api') returning id as t_cizi \gset
+values (:'cizi', :'ucet_cizi', 'vydaj', 90000, current_date, '2026094', 'banka_api') returning id as t_cizi \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj)
 values (:'tenant', :'ucet', 'vydaj', 60000, current_date, '2026095', 'rucni') returning id as t_rucni \gset
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj)
@@ -81,17 +81,22 @@ reset role;
 \echo '== 1b. Platbu „z banky přes API" nezapíše přihlášený uživatel ============'
 
 set role authenticated;
-select pg_temp.check('přihlášený nezapíše platbu se zdrojem fio_api',
+-- Od migrace 20261119100000 má platba z bankovního API jediný zdroj
+-- `banka_api` (dřív `fio_api` a `bankovni_agregator`, ty už CHECK
+-- nepustí vůbec — hlídá krok111).
+select pg_temp.check('přihlášený nezapíše platbu se zdrojem banka_api',
   pg_temp.spadne_hlaskou(format(
     'insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj) values (%L, %L, %L, %s, current_date, %L, %L)',
-    :'tenant', :'ucet', 'vydaj', 12345, '2026099', 'fio_api'), '42501', 'synchronizace'));
-select pg_temp.check('… ani se zdrojem bankovni_agregator',
-  pg_temp.spadne_hlaskou(format(
-    'insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj) values (%L, %L, %L, %s, current_date, %L, %L)',
-    :'tenant', :'ucet', 'vydaj', 12345, '2026099', 'bankovni_agregator'), '42501', 'synchronizace'));
+    :'tenant', :'ucet', 'vydaj', 12345, '2026099', 'banka_api'), '42501', 'synchronizace'));
 reset role;
+-- Mimo roli authenticated: omezení platí pro každého (pod authenticated
+-- by na PostgreSQL dřív spadla politika než CHECK).
+select pg_temp.check('starý zdroj fio_api nezapíše nikdo (omezení zdroje, 23514)',
+  pg_temp.spadne_hlaskou(format(
+    'insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, vs, zdroj) values (%L, %L, %L, %s, current_date, %L, %L)',
+    :'tenant', :'ucet', 'vydaj', 12345, '2026099', 'fio_api'), '23514', 'transakce_zdroj_check'));
 select pg_temp.check('synchronizace (mimo roli authenticated) zapsat smí',
-  exists (select 1 from public.transakce where id = :'t_ok' and zdroj = 'fio_api'));
+  exists (select 1 from public.transakce where id = :'t_ok' and zdroj = 'banka_api'));
 
 
 \echo ''

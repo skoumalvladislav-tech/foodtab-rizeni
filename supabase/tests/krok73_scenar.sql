@@ -134,21 +134,30 @@ select pg_temp.check('přímý UPDATE na integrace_tajemstvi spadne na chybějí
 
 select app.integrace_uloz_tajemstvi(:'pripojeni', 'sifrovany-text-v1', 'otisk-abc') as ulozeno \gset
 
-select pg_temp.check('po uložení RPC vrátí stejnou šifru',
-  app.integrace_precti_tajemstvi(:'pripojeni') = 'sifrovany-text-v1');
+-- Přístupové údaje k BANCE od migrace 20261119100000 RPC přihlášenému
+-- nevydá (čte je jen server přes integrace_overit_spravu, krok111).
+-- Uložená šifra se proto ověřuje přímo v tabulce, mimo roli authenticated.
+select pg_temp.check('RPC přihlášenému majiteli šifru k bance nevydá (42501)',
+  pg_temp.spadne_hlaskou(
+    format('select app.integrace_precti_tajemstvi(%L)', :'pripojeni'),
+    '42501', 'server'));
+reset role;
+select pg_temp.check('po uložení je v tabulce stejná šifra',
+  (select sifra from public.integrace_tajemstvi where pripojeni_id = :'pripojeni') = 'sifrovany-text-v1');
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
 
 -- Druhé uložení (rotace) zvýší verzi a přepíše šifru/otisk, ne vloží
 -- druhý řádek (on conflict do update, stejný vzor jako marketing).
 select app.integrace_uloz_tajemstvi(:'pripojeni', 'sifrovany-text-v2', 'otisk-xyz') as ulozeno2 \gset
-
-select pg_temp.check('rotace tajemství: nový obsah se čte, ne starý',
-  app.integrace_precti_tajemstvi(:'pripojeni') = 'sifrovany-text-v2');
 
 -- `integrace_tajemstvi` má pro `authenticated` politiku `using (false)`
 -- (vidí nulu řádků vždy, viz oddíl 2) — na ověření SKUTEČNÉHO stavu
 -- řádku (ne skrz RPC, co vrací jen šifru) je nutné dočasně `reset role`,
 -- stejný vzor jako jinde v projektu u tabulek bez SELECT pro authenticated.
 reset role;
+select pg_temp.check('rotace tajemství: nový obsah je v tabulce, ne starý',
+  (select sifra from public.integrace_tajemstvi where pripojeni_id = :'pripojeni') = 'sifrovany-text-v2');
 select pg_temp.check('rotace tajemství: jen jeden řádek na pripojeni_id (žádná duplicita)',
   (select count(*) from public.integrace_tajemstvi where pripojeni_id = :'pripojeni') = 1);
 
@@ -192,8 +201,11 @@ select set_config('test.user_id', '', false);
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
+reset role;
 select pg_temp.check('po útoku cizí firmy je naše tajemství beze změny',
-  app.integrace_precti_tajemstvi(:'pripojeni') = 'sifrovany-text-v2');
+  (select sifra from public.integrace_tajemstvi where pripojeni_id = :'pripojeni') = 'sifrovany-text-v2');
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
 
 
 \echo ''

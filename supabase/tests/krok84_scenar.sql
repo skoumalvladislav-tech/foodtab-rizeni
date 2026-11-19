@@ -78,7 +78,7 @@ values (:'tenant', 'banka', 'fio-krok84', 'zakaznicky', 'Krok84 Fio', :'ucet')
 returning id as pripojeni \gset
 
 insert into public.bankovni_zustatky (tenant_id, platebni_ucet_id, typ, castka_haleru, platny_k, zdroj, integrace_pripojeni_id)
-values (:'tenant', :'ucet', 'knihovni', 42000, now(), 'fio_api', :'pripojeni')
+values (:'tenant', :'ucet', 'knihovni', 42000, now(), 'banka_api', :'pripojeni')
 returning id as zustatek \gset
 
 -- `authenticated` má na synchronizace_behy jen SELECT (zápis spouští

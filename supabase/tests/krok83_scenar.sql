@@ -91,11 +91,11 @@ select pg_temp.check('platebni_ucet_id cizí firmy spadne (druhá linie, integra
 \echo '== 2. Bankovní zůstatky — append-only snapshoty, NE odvozené ===='
 
 insert into public.bankovni_zustatky (tenant_id, platebni_ucet_id, typ, castka_haleru, platny_k, zdroj, integrace_pripojeni_id)
-values (:'tenant', :'ucet', 'knihovni', 50000, now() - interval '1 hour', 'fio_api', :'pripojeni')
+values (:'tenant', :'ucet', 'knihovni', 50000, now() - interval '1 hour', 'banka_api', :'pripojeni')
 returning id as zustatek_1 \gset
 
 insert into public.bankovni_zustatky (tenant_id, platebni_ucet_id, typ, castka_haleru, platny_k, zdroj, integrace_pripojeni_id)
-values (:'tenant', :'ucet', 'disponibilni', 45000, now() - interval '1 hour', 'fio_api', :'pripojeni')
+values (:'tenant', :'ucet', 'disponibilni', 45000, now() - interval '1 hour', 'banka_api', :'pripojeni')
 returning id as zustatek_2 \gset
 
 select pg_temp.check('oba typy (knihovní i disponibilní) se zapsaly jako SAMOSTATNÉ řádky',
@@ -121,7 +121,7 @@ select pg_temp.check('platebni_ucet_id cizí firmy spadne (druhá linie, bankovn
 -- Nejnovější snapshot podle `platny_k`, ne podle vložení — appka
 -- NEPŘEDPOKLÁDÁ, že poslední vložený řádek je nejnovější platný.
 insert into public.bankovni_zustatky (tenant_id, platebni_ucet_id, typ, castka_haleru, platny_k, zdroj, integrace_pripojeni_id)
-values (:'tenant', :'ucet', 'knihovni', 70000, now(), 'fio_api', :'pripojeni')
+values (:'tenant', :'ucet', 'knihovni', 70000, now(), 'banka_api', :'pripojeni')
 returning id as zustatek_novejsi \gset
 
 select id as nejnovejsi_id from public.bankovni_zustatky
@@ -164,7 +164,7 @@ select set_config('test.user_id', :'majitel', false);
 -- hlida_zdroj_transakce). Proto mimo roli authenticated.
 reset role;
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
-values (:'tenant', :'ucet', 'vydaj', 15000, current_date, 'ABC s.r.o.', '20260099', 'fio_api', 'fio-83-001')
+values (:'tenant', :'ucet', 'vydaj', 15000, current_date, 'ABC s.r.o.', '20260099', 'banka_api', 'fio-83-001')
 returning id as transakce_api \gset
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);

@@ -396,12 +396,15 @@ select pg_temp.check('jen Perla: přehled počítá PŘESNĚ pobočky, které RL
 select pg_temp.check('jen Perla: platby a způsoby jen z Perly',
   jsonb_array_length(:'perla_json'::jsonb -> 'zpusoby') = 1
   and not exists (select 1 from jsonb_array_elements(:'perla_json'::jsonb -> 'platby') e where e ->> 'branch_id' <> :'perla'));
-select pg_temp.check('jen Perla: banka = součet, který dá RLS přímým dotazem (účet Perly 2000 + firemní 300)',
+-- Od 20261119100000 (krok111) firemní účet bez pobočky vidí jen rozsah
+-- celé firmy — člen jedné pobočky jen účty své pobočky (dřív i firemní 300).
+select pg_temp.check('jen Perla: banka = součet, který dá RLS přímým dotazem (jen účet Perly 2000, firemní účet ne)',
   (select sum((e ->> 'prijmy_haleru')::bigint) from jsonb_array_elements(:'perla_json'::jsonb -> 'banka') e)
   = (select sum(t.castka_haleru) from public.transakce t join public.platebni_ucty u on u.id = t.ucet_id
       where t.tenant_id = :'tenant' and u.typ = 'banka' and t.smer = 'prijem' and t.mena = 'CZK'
         and t.datum between '2031-03-01' and '2031-03-31')
-  and (select sum((e ->> 'prijmy_haleru')::bigint) from jsonb_array_elements(:'perla_json'::jsonb -> 'banka') e) = 2300);
+  and (select sum((e ->> 'prijmy_haleru')::bigint) from jsonb_array_elements(:'perla_json'::jsonb -> 'banka') e) = 2000
+  and not exists (select 1 from jsonb_array_elements(:'perla_json'::jsonb -> 'banka') e where e ->> 'branch_id' is null));
 
 -- Člen firmy bez finance.read: nic — a RLS mu přímo také nic neukáže.
 select set_config('test.user_id', '95950000-0000-0000-0000-000000000003', false);

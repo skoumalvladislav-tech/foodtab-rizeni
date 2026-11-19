@@ -53,8 +53,11 @@ on conflict (tenant_id, module_key) do nothing;
 set role authenticated;
 select set_config('test.user_id', :'majitel', false);
 
+-- Oblast účetnictví, ne banka: přístupové údaje k BANCE od migrace
+-- 20261119100000 RPC přihlášenému nevydá vůbec (čte je jen server,
+-- hlídá krok111). Tady se ověřuje jen přeposílání public → app.
 insert into public.integrace_pripojeni (tenant_id, oblast, poskytovatel, rezim, nazev)
-values (:'tenant', 'banka', 'csv_import', 'csv', 'Krok75 testovací banka')
+values (:'tenant', 'ucetnictvi', 'csv_import', 'csv', 'Krok75 testovací účetnictví')
 returning id as pripojeni \gset
 
 select public.integrace_uloz_tajemstvi(:'pripojeni', 'sifra-krok75', 'otisk-krok75');
