@@ -57,11 +57,34 @@ exception when others then
   return false;
 end $$;
 
--- Import výpisu, vrací počet NOVÝCH pohybů.
+-- Import výpisu, vrací počet NOVÝCH pohybů. Když import spadne, vrátí -1
+-- a vypíše proč — kontrola za ním pak spadne SVÝM jménem, ne syrovou
+-- chybou uprostřed přípravy (schválné rozbití dedupu to dřív schovalo).
 create or replace function pg_temp.importovat(p_tenant uuid, p_ucet uuid, p_zdroj text, p_hash text, p_radky jsonb)
-returns integer language sql as $$
-  select v.pocet_novych from public.importovat_vypis(p_tenant, p_ucet, p_zdroj, 'krok111.csv', p_hash, p_radky) v
-$$;
+returns integer language plpgsql as $$
+declare
+  v_pocet integer;
+begin
+  select v.pocet_novych into v_pocet
+    from public.importovat_vypis(p_tenant, p_ucet, p_zdroj, 'krok111.csv', p_hash, p_radky) v;
+  return v_pocet;
+exception when others then
+  raise notice '  (import spadl: % %)', sqlstate, sqlerrm;
+  return -1;
+end $$;
+
+-- Výsledek dotazu jako text, nebo NULL, když dotaz spadne (vypíše proč).
+create or replace function pg_temp.hodnota(p_sql text)
+returns text language plpgsql as $$
+declare
+  v text;
+begin
+  execute p_sql into v;
+  return v;
+exception when others then
+  raise notice '  (dotaz spadl: % %)', sqlstate, sqlerrm;
+  return null;
+end $$;
 
 reset role;
 select set_config('test.user_id', '', false);
@@ -357,8 +380,13 @@ select pg_temp.check('pobočka P1: zůstatek firemního účtu nezapíše (42501
   pg_temp.spadne_hlaskou(format('insert into public.bankovni_zustatky (tenant_id, platebni_ucet_id, typ, castka_haleru, platny_k, zdroj) values (%L, %L, %L, 1, now(), %L)',
     :'firma_a', :'u_firma', 'knihovni', 'rucni'), '42501', ''));
 
--- Pavla: jen čtení na P2.
+-- Pavla: jen čtení na P2. Účet P1 Petr vidí i přes politiku zápisu
+-- (platebni_ucty_write je `for all`), proto čtecí politiku pobočky
+-- hlídá až Pavla bez finance.manage.
 select set_config('test.user_id', :'pob2', false);
+select pg_temp.check('jen čtení na P2: vidí svůj účet P2 (ne firemní, ne P1, ne cizí)',
+  coalesce((select array_agg(id order by id) from public.platebni_ucty
+    where id in (:'u_firma', :'u_p1', :'u_p2', :'u_cizi')) = array[:'u_p2'::uuid], false));
 select pg_temp.check('jiná pobočka (P2): nevidí účet ani pohyby P1, vidí svoje',
   (select array_agg(distinct ucet_id) from public.transakce
     where ucet_id in (:'u_firma', :'u_p1', :'u_p2', :'u_cizi')) = array[:'u_p2'::uuid]
@@ -441,7 +469,7 @@ select public.integrace_overit_spravu(:'pr_banka') as sprava \gset
 select pg_temp.check('integrace_overit_spravu vrátí jen firmu připojení — ne šifru',
   :'sprava' = :'firma_a' and :'sprava' <> 'krok111-sifra-banky');
 select pg_temp.check('jiné oblasti (rezervace) RPC šifru vydává dál — přepnutí mimo Finance',
-  public.integrace_precti_tajemstvi(:'pr_rez') = 'krok111-sifra-rezervace');
+  coalesce(pg_temp.hodnota(format('select public.integrace_precti_tajemstvi(%L)', :'pr_rez')) = 'krok111-sifra-rezervace', false));
 
 select set_config('test.user_id', :'pob1', false);
 select pg_temp.check('bez integrace.manage: integrace_overit_spravu odmítne (42501)',
