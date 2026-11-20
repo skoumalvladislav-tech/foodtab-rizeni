@@ -7,7 +7,7 @@ Nic jsem neměnil, nic neslučoval a nic nenasazoval. Do ostré databáze jsem p
 - **Úplný seznam nálezů** (asi 300 položek, každá se souborem a řádkem) je v příloze
   [`audit-finance-faze0-nalezy.md`](audit-finance-faze0-nalezy.md).
 - **Čtecí dotazy**, ze kterých jsou čísla, jsou v [`audit-finance-faze0-sql.sql`](audit-finance-faze0-sql.sql).
-- **Otázky** jsou v `docs/hlaseni/otazky.md` jako č. 94–107. Na nic jsem nečekal. U každé jsem zvolil
+- **Otázky** jsou v `docs/hlaseni/otazky.md` jako č. 94–109. Na nic jsem nečekal. U každé jsem zvolil
   nejopatrnější variantu a napsal, co se změní, když to má být jinak.
 
 ---

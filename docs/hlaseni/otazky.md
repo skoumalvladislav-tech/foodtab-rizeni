@@ -2304,3 +2304,26 @@ od 25. 6. 2025; automatické párování sahá 180 dní zpět).
 - **Proč:** zavřít fakturu bez důkazu platby je přesně ten falešný stav „zaplaceno“, který Fáze 0 odstraňuje.
 - **Když to má být jinak:** uzavření podle seznamu od účetní by šlo jako ruční „Uhrazeno“ s důvodem
   „podle účetní k datu …“, po jedné faktuře nebo jako dávka se souhlasem majitele.
+
+## 108. Koeficient odvodů zaměstnavatele (pro Fázi 1)
+
+**Vzniklo:** 20. 11. 2026 (zadání Fáze 0, oddíl 7 — patří do otázek, ve Fázi 0 se nepoužije).
+
+- **Teď:** nic. Fáze 0 mzdy nepočítá a v kódu Financí žádný koeficient není.
+- **Proč se ptám teď:** Fáze 1 bude počítat mzdové náklady pobočky z výdělků a bez koeficientu odvodů
+  (sociální + zdravotní pojištění placené zaměstnavatelem, u DPP/DPČ jinak) by byly podhodnocené.
+- **Když to má být jinak:** napište koeficient (např. 1,338 pro HPP) a jestli se u DPP/DPČ počítá jinak.
+  Uloží se jako nastavení firmy, ne napevno v kódu.
+
+## 109. Zkouška 11 — migrace „na kopii ostrých dat“
+
+**Vzniklo:** 20. 11. 2026 (zadání Fáze 0, oddíl 5, zkouška 11).
+
+- **Teď:** migrace Fáze 0 zkouším na čisté databázi se zkušebními daty (PGlite a PostgreSQL 16 na CI)
+  a scénáře kontrolují, že po migraci zůstanou všechny faktury, párování i pohyby. **Kopii ostrých dat jsem
+  si na tenhle počítač nestahoval.**
+- **Proč:** kopie ostré databáze znamená stáhnout faktury, dodavatele a čísla účtů na lokální disk.
+  Do ostré DB smím jen čtecími dotazy a stahovat celé tabulky bez souhlasu mi nepřišlo správné.
+- **Když to má být jinak:** nejbezpečnější je větev databáze v Supabase (kopie projektu) nebo `pg_dump`
+  spuštěný majitelem; na ní pak pustit migrace a porovnat počty faktur před a po. Postup připravím, spustí ho
+  majitel.
