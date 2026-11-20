@@ -715,7 +715,7 @@ create policy transakce_read on public.transakce for select to authenticated
 -- účtu (storno_of) nebo podstrčit zůstatek, který vypadá jako od banky
 -- (kontrola kroku 1, 20. 11.). Proto nejopatrnější varianta.
 -- ROZHODNOUT: smí člověk s rozsahem jen pobočky zapisovat ruční platby
--- (a zůstatky) na účet své pobočky? Dnes ne.
+-- (a zůstatky) na účet své pobočky? Dnes ne. Otázka 113 (docs/hlaseni/otazky.md).
 
 drop policy bankovni_zustatky_select on public.bankovni_zustatky;
 create policy bankovni_zustatky_select on public.bankovni_zustatky for select to authenticated
@@ -1034,7 +1034,7 @@ create trigger trg_hlida_oblast_banky
 -- (lib/banka/tajemstvi.ts). Ostatní oblasti (rezervace — Choice) RPC
 -- používají dál; jejich přepnutí je mimo Finance.
 -- ROZHODNOUT: odebrat RPC i pro ostatní oblasti (přepnout rezervace na
--- stejnou serverovou cestu)?
+-- stejnou serverovou cestu)? Otázka 115 (docs/hlaseni/otazky.md).
 -- ---------------------------------------------------------------------
 
 create or replace function app.integrace_precti_tajemstvi(p_pripojeni uuid)

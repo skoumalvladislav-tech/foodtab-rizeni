@@ -2328,3 +2328,160 @@ od 25. 6. 2025; automatické párování sahá 180 dní zpět).
 - **Když to má být jinak:** nejbezpečnější je větev databáze v Supabase (kopie projektu) nebo `pg_dump`
   spuštěný majitelem; na ní pak pustit migrace a porovnat počty faktur před a po. Postup připravím, spustí ho
   majitel.
+
+## 110. Které IČO je vlastní IČO firmy?
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, příprava kroků 5–7; navazuje na otázku 103).
+
+- **Co jsem zjistil:** na 23 fakturách od 7 různých dodavatelů je jako IČO dodavatele 21249946. Audit ho bral
+  jako vlastní IČO firmy (otázka 103). Firma má ale ve Foodtabu v nastavení vyplněné **jiné** IČO (ověřeno
+  čtecím dotazem nad ostrou databází 20. 11.). K tomu je 13 IČO, pod kterými jsou faktury od dvou a více
+  různě napsaných dodavatelů (466 faktur). Většinou jde o různé zápisy téhož dodavatele, u 21249946 ale
+  o různé firmy.
+- **Teď:** vlastní IČO se bere z nastavení firmy, nikdy natvrdo z kódu. K tomu pojistka, která na nastavení
+  nezávisí: IČO, pod kterým fakturuje víc různě pojmenovaných dodavatelů, se nepoužije k ničemu
+  automatickému (dědění kategorie, klíč duplicity, sloučení v registru dodavatelů). Jen k návrhu se
+  zřetelným upozorněním pro člověka.
+- **Když to má být jinak:** když je 21249946 IČO provozovatele (třeba jiné společnosti, pod kterou se
+  nakupuje), doplní se jako další vlastní IČO a faktury s ním se budou řadit podle názvu dodavatele. Když je
+  správně to v nastavení a 21249946 je chyba čtení faktur, opraví se těch 23 faktur ručně.
+
+## 111. Faktury bez měny
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, příprava kroku 2 — párování).
+
+- **Co jsem zjistil:** 284 faktur v ostré databázi má měnu prázdnou, zbytek (2 848) je v Kč, jiná měna tam
+  dnes není. Aplikace bere prázdnou měnu jako Kč, databázová funkce, která počítá stav úhrady, ji jako Kč
+  nebere (stav pak nedopočítá). Obě místa se chovají jinak.
+- **Teď:** jedna společná definice. Prázdná měna se počítá jako Kč pro součty a pro stav po párování, které
+  potvrdí člověk. Sama (bez člověka) se ale faktura bez měny nikdy nespáruje, vznikne jen návrh.
+- **Když to má být jinak:** když je jisté, že prázdná měna vždy znamená Kč, můžou se i tyhle faktury párovat
+  samy. Lepší je ale měnu u těch 284 faktur jednorázově doplnit (jen po vašem souhlasu).
+
+## 112. Formát výpisu z KB pro import
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1; rozhodnutí 6 zadání).
+
+- **Teď:** import výpisu (CSV) bere jen vlastní šablonu Foodtabu: sloupce Datum, Částka, Protistrana,
+  Protiúčet, případně Kód banky, VS, Poznámka a Externí ID. Nativní export KB jsem nehádal. Kdo má jiný
+  soubor, přejmenuje sloupce v hlavičce.
+- **Proč:** formát exportu KB internetbanky jsem neviděl. Hádaný formát by se tvářil, že funguje, a zapsal
+  by platby se špatným znaménkem nebo datem.
+- **Když to má být jinak:** pošlete pár anonymizovaných řádků exportu z KB (stačí hlavička a dva řádky
+  s vymyšlenými částkami) a doplním rozpoznání jeho sloupců.
+
+## 113. Smí pobočka zapisovat platby a zůstatky na účet své pobočky?
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1). V migraci `20261119100000` označené `ROZHODNOUT`.
+
+- **Teď:** nejopatrnější varianta, jako před krokem 1. Pohyby i zůstatky na účtech zapisuje jen člověk
+  s právem na Finance za **celou firmu**. Člověk s rozsahem jen pobočky nezapíše nic, ani ruční platbu.
+- **Proč:** první verze kroku 1 pobočce ruční zápis povolila. Kontrola pak ukázala, že se tím dalo zabránit
+  zapsání skutečné platby z banky (obsadit její číslo), stornovat platbu firemního účtu nebo podvrhnout
+  „bankovní“ zůstatek. Appka Finance na pobočce stejně chce právo za celou firmu (otázka 47), takže se nikomu
+  nic nemění.
+- **Když to má být jinak:** pobočce jde povolit jen ruční platbu na účet její pobočky, bez čísla od banky,
+  dávky importu a storna (databáze už první tři věci hlídá), a u zůstatků jen ruční zůstatek. K tomu by se
+  Finance musely otevřít pobočkám i v appce.
+
+## 114. Které platební účty patří kterým pobočkám?
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1).
+
+- **Teď:** účet bez pobočky je firemní a od kroku 1 ho vidí jen lidé s rozsahem celé firmy. Dřív ho viděl
+  každý s právem číst Finance. V ostré databázi je dnes jeden účet a pobočku nemá.
+- **Když to má být jinak:** napište, který účet patří které pobočce. Nastaví se v Platbách u účtu a uvidí
+  ho i lidé té pobočky.
+
+## 115. Zrušit čtení přístupových údajů přes databázi i u rezervací?
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1, zkouška 6). V migraci `20261119100000` označené
+`ROZHODNOUT`.
+
+- **Teď:** přístupové údaje k bance databáze přihlášenému nevydá. Server je přečte sám až po ověření práva
+  a oblast bankovního připojení nejde přepnout na jinou. Rezervace (Choice) čtou své údaje dál starou
+  cestou, protože jsou mimo Finance a do cizího modulu jsem nesahal.
+- **Když to má být jinak:** samostatný krok přepne rezervace na stejnou serverovou cestu a starou funkci
+  zruší úplně.
+
+## 116. Enable Banking v nabídce bank
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1).
+
+- **Teď:** dlaždice v Integracích bere nabídku z jednoho seznamu bank. Ukáže Import výpisu (CSV), Fio,
+  Komerční banku a Enable Banking. KB a Enable Banking jen tehdy, když jsou nastavené na serveru. Salt Edge
+  je ukončený. Enable Banking jsem v nabídce nechal jako dřív, i když ho noční stahování pohybů nestahuje
+  (to tak bylo i před krokem 1).
+- **Když to má být jinak:** jeden řádek v `lib/banka/konektory.ts` ho schová, dokud nebude mít stahování.
+
+## 117. Pořadí nasazení kroku 1
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1).
+
+- **Teď:** migrace kroku 1 a aplikace musí jít do provozu hned po sobě: sloučit a hned `db push`. Stará
+  appka zapisuje označení zdroje, které nová databáze odmítne, a nová appka volá funkci, kterou má jen nová
+  databáze. Dokud se nenasadí obojí, stahování z banky by padalo. (Dnes je v ostré databázi jedno bankovní
+  připojení bez účtu a žádný pohyb, takže by to v praxi nic nezastavilo.)
+- **Když to má být jinak:** jde vložit přechodnou migraci, která chvíli pustí staré i nové označení, za
+  cenu dalšího kroku úklidu.
+
+## 118. Částka „1.234“ ve výpisu
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1).
+
+- **Teď:** tečka, za kterou následují přesně tři číslice, je oddělovač tisíců (1 234 Kč), protože koruna má
+  nejvýš dvě desetinná místa. Nejednoznačné zápisy jako „1,234.50“ nebo „12,345“ jsou chyba řádku a import
+  ukáže, který řádek to je.
+- **Když to má být jinak:** odmítat i „1.234“ jako nejednoznačné (jedna podmínka v importu).
+
+## 119. Počáteční zůstatek účtu
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1).
+
+- **Teď:** nic se nedopočítává. Zůstatek je jen ten, který pošle banka přes napojení. U účtu, kam chodí jen
+  import výpisů, zůstatek není.
+- **Když to má být jinak:** pole „počáteční zůstatek k datu“ u účtu. Navrhuji ho do kroku 3 (účty
+  poboček).
+
+## 120. Táž platba z výpisu i z napojení banky
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1, po kontrole).
+
+- **Teď:** pohyb z nahraného výpisu a tentýž pohyb stažený přes napojení banky se navzájem poznají a zapíšou
+  se jen jednou. Dvě opravdu stejné platby téhož dne (stejná částka, protistrana, VS) se zapíšou obě.
+- **Kde to nestačí:** když banka mezi dvěma staženími přehází pořadí dvou úplně stejných plateb téhož dne
+  a potom se nahraje výpis téhož dne, druhá z nich se zapíše podruhé. Zvolil jsem viditelnou dvojici (dá se
+  stornovat) místo tiše zahozené platby.
+- **Když to má být jinak:** výpis by místo toho zapisoval jen rozdíl v počtu stejných plateb. Pak by se ale
+  ztratila opravdová další stejná platba, kterou banka ještě neposlala.
+
+## 121. Co vidí pobočka u zakázek a párování plateb
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1, po kontrole).
+
+- **Teď:** člověk s rozsahem pobočky vidí párování plateb s fakturami a „uhrazeno“ u zakázky jen z účtů své
+  pobočky. Záloha zaplacená na firemní účet se mu do „uhrazeno“ nezapočte. Appka to dnes na pobočce stejně
+  neukazuje, Finance chtějí rozsah celé firmy.
+- **Když to má být jinak:** pro pobočku spočítat „uhrazeno“ ze všech účtů jako jedno číslo bez detailu
+  plateb.
+
+## 122. „Bankovní“ zůstatek zapsaný správcem Financí
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1, po kontrole).
+
+- **Teď:** zůstatek označený „od banky“ smí dál zapsat i člověk s právem spravovat Finance za celou firmu,
+  jako před krokem 1. Appka to sama dělá pod jeho přihlášením při připojení Fio a Enable Banking. Je to role,
+  které věříme: smí připojit banku i nahrát výpis.
+- **Když to má být jinak:** zápis zůstatku při připojení banky se přesune na server a databáze pak pustí
+  „bankovní“ zůstatek jen stahování z banky.
+
+## 123. Variabilní symbol s nulami na začátku
+
+**Vzniklo:** 20. 11. 2026 (Finance Fáze 0, krok 1, po kontrole).
+
+- **Teď:** pro rozpoznání téže platby se VS bere bez úvodních nul (0012345 = 12345). Excel totiž při uložení
+  výpisu nuly smaže a výpis by se jinak zapsal podruhé. Uložený VS se nemění.
+- **Riziko:** dvě různé platby téhož dne se stejnou částkou, protistranou a účtem, lišící se jen nulami ve
+  VS, by se vzaly jako jedna. Je to krajně nepravděpodobné.
+- **Když to má být jinak:** brát VS doslova a smířit se s tím, že výpis uložený v Excelu vedle výpisu
+  z banky zapíše platby znovu.
