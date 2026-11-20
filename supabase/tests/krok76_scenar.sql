@@ -163,12 +163,24 @@ returning id as ucet_cizi \gset
 
 select set_config('test.user_id', :'majitel', false);
 
+-- Přihlášeného zastaví už import sám: na účet, jehož platby nevidí,
+-- nenahraje nic (20261119100000 — kontrola dvojího zápisu čte pod RLS).
+select pg_temp.check('přihlášený: import na účet cizí firmy import sám odmítne (42501)',
+  pg_temp.spadne_hlaskou(
+    format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
+      :'tenant', :'ucet_cizi', :'davka', 'csv_pokladna',
+      '[{"datum":"2026-10-05","smer":"prijem","castka_haleru":999,"externi_id":"k76-utok-1"}]'),
+    '42501', 'vidíte'));
+
+-- Druhá linie (spoušť) proto pod službou — tam import účet nehlídá.
+reset role;
 select pg_temp.check('p_ucet cizí firmy spadne celý příkaz, nic se nevloží',
   pg_temp.spadne_hlaskou(
     format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
       :'tenant', :'ucet_cizi', :'davka', 'csv_pokladna',
       '[{"datum":"2026-10-05","smer":"prijem","castka_haleru":999,"externi_id":"k76-utok-1"}]'),
-    '23514', ''));
+    '23514', 'Platební účet nepatří'));
+set role authenticated;
 
 select pg_temp.check('po pokusu s cizím účtem se žádný útočný řádek nevložil',
   not exists (select 1 from public.transakce where externi_id = 'k76-utok-1'));

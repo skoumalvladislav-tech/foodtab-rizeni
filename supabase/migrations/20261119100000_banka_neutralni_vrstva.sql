@@ -25,14 +25,13 @@
 --      v `integrace_pripojeni.poskytovatel` a v kódu konektorů.
 --   2. `transakce.protiucet` — účet protistrany zvlášť od jména
 --      (normalizuje appka: lib/banka/ucet.ts).
---   3. `transakce.otisk` — idempotence importu i bez id pohybu od
---      banky: sha256 z účtu, data, směru, částky, měny, VS, protiúčtu,
---      protistrany a POŘADÍ stejného řádku v jednom výpisu (dvě stejné
---      platby v jednom výpisu zůstanou dvě). Počítá ho jen databáze
---      (app.otisk_pohybu), jedna implementace pro všechny cesty. Má ho
---      KAŽDÝ importovaný pohyb (i s id od banky), aby se poznal týž
---      pohyb z výpisu (bez id) a ze stažení přes API (s id) — zadání:
---      „stejný pohyb se nikdy nezapíše dvakrát".
+--   3. `transakce.otisk` — OBSAHOVÝ KLÍČ pohybu: sha256 z účtu, data,
+--      směru, částky, měny, VS, protiúčtu a protistrany (bez pořadí, bez
+--      poznámky). Má ho KAŽDÝ pohyb z importu (výpis, stažení z banky,
+--      pokladní uzávěrka), ruční nikdy. NENÍ unikátní — dvě stejné platby
+--      mají stejný klíč a import je POČÍTÁ (oddíl DVOJÍ ZÁPIS níž).
+--      Počítá ho jen databáze (app.otisk_pohybu), jedna implementace pro
+--      všechny cesty. Zadání: „stejný pohyb se nikdy nezapíše dvakrát".
 --   4. `public.importovat_vypis` — dávka a pohyby v JEDNÉ transakci.
 --      Dřív appka založila dávku a teprve potom zapsala řádky; když
 --      zápis spadl, dávka zůstala a blokovala opakovaný import téhož
@@ -52,7 +51,49 @@
 --      bankovního připojení se nedá přepnout (jinak by RPC šifru vydala).
 --   7. Připojení pobočky smí synchronizovat jen do účtu TÉ pobočky
 --      (synchronizace zapisuje jako služba a pohybům z banky věří
---      párování faktur).
+--      párování faktur) — a účet, na který takové připojení míří, se
+--      nedá přestěhovat jinam.
+--   8. Id pohybu od banky je unikátní jen v rámci ZDROJE
+--      (`ucet_id, zdroj, externi_id`): řádek výpisu s „Externí ID" nebo
+--      z pokladny se stejným textem pohyb z banky nezablokuje. Přímým
+--      zápisem smí přihlášený jen ruční platbu (`rucni`); výpis
+--      a pokladní uzávěrku jen přes import, stažení z banky jen
+--      synchronizace (app.hlida_zdroj_transakce).
+--
+-- DVOJÍ ZÁPIS: VÝPIS A STAŽENÍ Z BANKY
+--
+-- Zásada: pohyb stažený z banky (`banka_api`, s id od banky) se NIKDY
+-- nezahodí kvůli obsahu jiného řádku. Viditelná dvojice je přijatelná
+-- (dá se stornovat), ztracená platba ne. Dřívější verze téhle migrace
+-- (porovnání otisku s pořadím stejného řádku v jednom volání) platbu
+-- uměla trvale zahodit: banka stahuje po stránkách nebo od poledne,
+-- pořadí se pak počítalo jinak než ve výpisu (kontrola kroku 1, 20. 11.).
+--
+--   * Důvěryhodná sada účtu = pohyby téhož účtu ze stažení (`banka_api`)
+--     a z výpisu (`csv_banka`), které přišly importem (mají dávku)
+--     a nejsou stornované. Pokladní uzávěrka (`csv_pokladna`), pokladna
+--     (`pos_adapter`) a ruční zápis se do ní nepočítají NIKDY — výpis
+--     omylem nahraný jako pokladní uzávěrka pohyb z banky nezablokuje.
+--   * Řádek bez id (výpis; stažení bez id): za každý obsahový klíč se
+--     zapíše tolik řádků, o kolik jich má import víc než sada účtu. Dvě
+--     stejné platby ve výpisu zůstanou dvě, opakovaný nebo překrývající
+--     se výpis nic nepřidá. Pokladní uzávěrka se počítá jen proti
+--     pokladním uzávěrkám téhož účtu.
+--   * Řádek s id ze stažení: přeskočí se, když účet to id už má (řádek
+--     `banka_api` nebo potvrzení); jinak si „nárokuje" nenárokovaný řádek
+--     výpisu se stejným klíčem — zapíše se jen POTVRZENÍ
+--     (`transakce_potvrzeni_banky`), že ten řádek výpisu banka potvrdila;
+--     jinak se zapíše jako nový pohyb.
+--   * Výsledek pro každý klíč: řádků = víc z (výpisů, stažených), a každé
+--     id ze stažení je buď řádek `banka_api`, nebo potvrzení — žádné se
+--     neztratí, ani když banka stahuje po stránkách nebo okno začíná
+--     uprostřed dne.
+--   * Mez (ROZHODNOUT, otázka 120): výpis jen ČÁSTI dne, ve kterém je
+--     jen druhá ze dvou stejných plateb, ji nepřidá (klíč už na účtu
+--     je). Banky exportují po celých dnech; s napojenou bankou ji
+--     doplní stažení (má vlastní id).
+--   * Souběh (synchronizace a import výpisu téhož účtu najednou) řadí
+--     zámek na účet — druhý počká a uvidí, co zapsal první.
 --
 -- POŘADÍ NASAZENÍ (narazil, nepřehlédnout)
 --
@@ -102,22 +143,46 @@ alter table public.bankovni_zustatky add constraint bankovni_zustatky_zdroj_chec
 comment on column public.transakce.zdroj is
   'Odkud pohyb přišel: rucni, csv_banka (import výpisu), csv_pokladna, '
   'pos_adapter, banka_api (stažení z banky — kterou, říká připojení, ne '
-  'tenhle sloupec). banka_api smí zapsat jen synchronizace (app.hlida_zdroj_transakce).';
+  'tenhle sloupec). Přihlášený smí přímo zapsat jen rucni; csv_banka '
+  'a csv_pokladna jen přes public.importovat_transakce, banka_api jen '
+  'synchronizace (app.hlida_zdroj_transakce).';
 
 
--- Platbu „z banky přes API" smí zapsat jen synchronizace (service_role).
--- Stejné pravidlo jako v 20261008120000, jen s neutrální hodnotou.
+-- Kdo smí zapsat který zdroj. Přihlášený (authenticated/anon) PŘÍMÝM
+-- zápisem jen ruční platbu. Výpis a pokladní uzávěrku jen přes
+-- public.importovat_transakce — ta si na dobu zápisu nastaví příznak
+-- `foodtab.import_transakci` (jen pro svou transakci) a hned ho vrátí.
+-- Pohyb „z banky přes API" jen synchronizace (service_role), pokladnu
+-- (`pos_adapter`) dnes nezapisuje nikdo jiný než služba.
+--
+-- Proč: řádek výpisu nebo pokladny s vymyšleným id pohybu a obsahem by
+-- se jinak počítal do kontroly dvojího zápisu a falešný „výpis" by
+-- párování faktur bralo jako platbu z banky.
+--
+-- SECURITY INVOKER schválně — rozhoduje role, která zapisuje
+-- (current_user), ne vlastník funkce.
 create or replace function app.hlida_zdroj_transakce()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  if current_user in ('authenticated', 'anon') and new.zdroj = 'banka_api' then
+  if current_user not in ('authenticated', 'anon') or new.zdroj = 'rucni' then
+    return new;
+  end if;
+
+  if new.zdroj = 'banka_api' then
     raise exception 'Platbu ze zdroje „%" zapisuje jen synchronizace banky.', new.zdroj
       using errcode = 'insufficient_privilege';
   end if;
-  return new;
+
+  if new.zdroj in ('csv_banka', 'csv_pokladna')
+     and current_setting('foodtab.import_transakci', true) = '1' then
+    return new;
+  end if;
+
+  raise exception 'Platbu ze zdroje „%" zapisuje jen import výpisu, ne přímý zápis.', new.zdroj
+    using errcode = 'insufficient_privilege';
 end
 $$;
 
@@ -360,7 +425,7 @@ grant execute on function public.jine_platby_evidovat_uhradu(uuid, uuid, integer
 
 
 -- ---------------------------------------------------------------------
--- 2. PROTIÚČET A OTISK
+-- 2. PROTIÚČET, OBSAHOVÝ KLÍČ (OTISK) A POTVRZENÍ Z BANKY
 -- ---------------------------------------------------------------------
 
 alter table public.transakce add column protiucet text not null default '';
@@ -371,54 +436,64 @@ comment on column public.transakce.protiucet is
   'písmeny bez mezer, český tvar předčíslí-číslo/kód banky převedený na IBAN, '
   'jinak očištěný text. Jméno protistrany je v `protistrana`.';
 comment on column public.transakce.otisk is
-  'U každého importovaného pohybu: sha256 z app.otisk_pohybu. Pohyb bez id '
-  'od banky ho má unikátní na účtu (opakovaný nebo překrývající se výpis '
-  'pohyb nezdvojí); u pohybu s id slouží k poznání téhož pohybu z výpisu.';
+  'Obsahový klíč pohybu z importu (app.otisk_pohybu): účet, datum, směr, '
+  'částka, měna, VS, protiúčet, protistrana. NENÍ unikátní — dvě stejné '
+  'platby mají stejný klíč a import je počítá (public.importovat_transakce). '
+  'Ruční zápis ho nemá.';
 
 -- Otisk jen u pohybu z importu (dávka).
 alter table public.transakce add constraint transakce_otisk_jen_z_importu
   check (otisk is null or import_davka_id is not null);
 
 -- Ruční zápis nemá nic z importu: id od banky ani dávku (a tím ani
--- otisk). Jinak by si ho někdo s právem zápisu „zabral" dopředu —
--- skutečný pohyb se stejným id nebo otiskem by import přeskočil jako
--- už zapsaný a v knize by zůstal jen ruční řádek, kterému párování
--- faktur ani úhrady Jiných plateb nevěří (kontrola kroku 1, 20. 11.).
--- Appka ruční platbu bez id i dávky zapisuje vždycky (platby/akce.ts,
--- zakazky/akce.ts); kdyby takový řádek v databázi byl, migrace spadne
--- nahlas — chyba dat, kterou je potřeba vidět (19. 11. žádný pohyb).
+-- otisk). Kontrola dvojího zápisu ruční řádky nepočítá (podle zdroje)
+-- a id od banky se porovnává jen v rámci zdroje — ruční řádek s dávkou
+-- nebo id by se ale v knize tvářil jako importovaný. Appka ruční platbu
+-- bez id i dávky zapisuje vždycky (platby/akce.ts, zakazky/akce.ts);
+-- kdyby takový řádek v databázi byl, migrace spadne nahlas — chyba dat,
+-- kterou je potřeba vidět (19. 11. žádný pohyb).
 alter table public.transakce add constraint transakce_rucni_bez_importu
   check (zdroj <> 'rucni' or (externi_id is null and import_davka_id is null));
 
--- Unikátní jen u pohybů BEZ id (u nich je otisk jediná ochrana před
--- dvojím zápisem, i při souběhu dvou importů). Pohyby s id hlídá id —
--- dva různé pohyby od banky smí mít shodný otisk (banka u dvou stejných
--- plateb změní pořadí mezi staženími).
-create unique index transakce_otisk
-  on public.transakce (ucet_id, otisk)
-  where otisk is not null and externi_id is null;
-create index transakce_otisk_hledani
+-- Obyčejný index, NE unikátní: podle klíče import počítá, kolik stejných
+-- pohybů účet už má. Dvě stejné platby téhož dne jsou dvě.
+create index transakce_otisk
   on public.transakce (ucet_id, otisk)
   where otisk is not null;
 
+-- Id pohybu od banky je unikátní jen v rámci ZDROJE. Dřív (ucet_id,
+-- externi_id) napříč zdroji: řádek výpisu s „Externí ID" nebo pokladní
+-- uzávěrka se stejným textem jako budoucí id od banky by synchronizaci
+-- účtu zablokoval (23505 při každém dalším stažení) a pohyb z banky by se
+-- nezapsal nikdy (kontrola kroku 1, 20. 11.). Volnější index — co
+-- prošlo dřív, projde i teď.
+drop index public.transakce_externi_id;
+create unique index transakce_externi_id
+  on public.transakce (ucet_id, zdroj, externi_id)
+  where externi_id is not null;
+
+-- Složené klíče pro potvrzení níž (firma i účet řádku musí sedět s tím,
+-- na co potvrzení ukazuje — stejná druhá linie jako app.hlida_firmu_transakce).
+alter table public.transakce
+  add constraint transakce_firma_ucet_id unique (tenant_id, ucet_id, id);
+alter table public.import_davky
+  add constraint import_davky_firma_id unique (tenant_id, id);
+
 
 /*
-  OTISK POHYBU. Jediná implementace — volá ji import i dopočet níž.
-  Pořadí (1, 2, …) odliší dvě stejné platby v jednom výpisu: obě
-  zůstanou, a opakovaný výpis je pozná obě.
+  OBSAHOVÝ KLÍČ POHYBU. Jediná implementace — volá ji import i dopočet níž.
 
   Normalizace jen lehká (mezery, velikost písmen) — protiúčet už
-  normalizuje appka. Poznámka do otisku nepatří (zadání, rozhodnutí 3):
-  banky ji u téhož pohybu mezi exporty mění.
+  normalizuje appka. Poznámka do klíče nepatří (zadání, rozhodnutí 3):
+  banky ji u téhož pohybu mezi exporty mění. Pořadí řádku taky ne:
+  banka stahuje po stránkách nebo od poledne a pořadí stejných řádků se
+  pak počítá jinak než ve výpisu.
 
   Datum přes to_char, ne `::text` — převod data na text řídí nastavení
   relace (DateStyle), takže by týž pohyb dal v jiném klientovi jiný
-  otisk. VS jen číslice bez úvodních nul (jako normalizovatVs
+  klíč. VS jen číslice bez úvodních nul (jako normalizovatVs
   v lib/finance-parovani.ts): Excel při uložení výpisu nuly smaže
   („0012345" → „12345") a týž výpis by se zapsal podruhé.
-
-  Pořadí 0 = otisk OBSAHU (bez pořadí) — podle něj se stejné řádky
-  číslují; stejná funkce, takže číslování a otisk normalizují stejně.
 */
 create function app.otisk_pohybu(
   p_ucet          uuid,
@@ -428,8 +503,7 @@ create function app.otisk_pohybu(
   p_mena          text,
   p_vs            text,
   p_protiucet     text,
-  p_protistrana   text,
-  p_poradi        bigint
+  p_protistrana   text
 )
 returns text
 language sql stable set search_path = ''
@@ -442,82 +516,253 @@ as $$
     upper(btrim(coalesce(p_mena, 'CZK'))),
     ltrim(regexp_replace(coalesce(p_vs, ''), '\D', '', 'g'), '0'),
     upper(regexp_replace(coalesce(p_protiucet, ''), '\s', '', 'g')),
-    lower(regexp_replace(btrim(coalesce(p_protistrana, '')), '\s+', ' ', 'g')),
-    p_poradi::text
+    lower(regexp_replace(btrim(coalesce(p_protistrana, '')), '\s+', ' ', 'g'))
   ), 'UTF8')), 'hex')
 $$;
 
-comment on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text, bigint) is
-  'Otisk importovaného pohybu (transakce.otisk). Pořadí = kolikátý stejný '
-  'řádek v jednom výpisu; 0 = otisk obsahu bez pořadí (klíč číslování).';
+comment on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text) is
+  'Obsahový klíč importovaného pohybu (transakce.otisk) — bez pořadí '
+  'a bez poznámky. Stejný klíč mají i dvě různé stejné platby.';
 
-revoke all on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text, bigint) from public, anon;
-grant execute on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text, bigint) to authenticated, service_role;
+revoke all on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text) from public, anon;
+grant execute on function app.otisk_pohybu(uuid, date, text, integer, text, text, text, text) to authenticated, service_role;
 
 
--- Dopočet otisku u pohybů, které už z importu přišly (19. 11. 2026 v ostré
--- databázi žádné nejsou — ale migrace má sedět i nad daty). Pořadí v
--- původním souboru se neuložilo; u STEJNÝCH řádků na pořadí nezáleží,
--- vyjde stejná sada otisků. Dřív se ale řádky bez id nehlídaly vůbec, takže
--- dvakrát importovaný výpis má stejný otisk dvakrát — u pohybů bez id ho
--- dostane jen první (distinct on), ostatní zůstanou bez otisku (unikátní
--- index by jinak migraci shodil). Pohyby s id dostanou otisk všechny
--- (hlídá je id, otisk u nich není unikátní). Jméno protistrany staré
+-- Dopočet klíče u pohybů, které už z importu přišly (19. 11. 2026 v ostré
+-- databázi žádné nejsou — ale migrace má sedět i nad daty). Klíč není
+-- unikátní, takže ho dostanou VŠECHNY importované pohyby (výpis, stažení,
+-- pokladní uzávěrka), i dvakrát importovaný starý výpis — další import
+-- pak počítá i s nimi. Ruční a pokladní (`pos_adapter`) pohyby klíč
+-- nedostanou, do kontroly dvojího zápisu nepatří. Jméno protistrany staré
 -- importy občas plnily číslem účtu — takový řádek se s novým importem
 -- téhož výpisu nepozná (narazil).
 drop rule transakce_no_update on public.transakce;
-with ocislovane as (
-  select t.id, t.ucet_id, t.externi_id,
-         app.otisk_pohybu(t.ucet_id, t.datum, t.smer, t.castka_haleru, t.mena, t.vs, t.protiucet, t.protistrana,
-           row_number() over (
-             partition by t.import_davka_id,
-                          app.otisk_pohybu(t.ucet_id, t.datum, t.smer, t.castka_haleru, t.mena, t.vs, t.protiucet, t.protistrana, 0)
-             order by t.created_at, t.id)) as otisk
-    from public.transakce t
-   where t.import_davka_id is not null
-     and t.otisk is null
-),
-k_zapisu as (
-  (select distinct on (o.ucet_id, o.otisk) o.id, o.otisk
-     from ocislovane o
-    where o.externi_id is null
-    order by o.ucet_id, o.otisk, o.id)
-  union all
-  select o.id, o.otisk
-    from ocislovane o
-   where o.externi_id is not null
-)
-update public.transakce t set otisk = k.otisk from k_zapisu k where t.id = k.id;
+update public.transakce t
+   set otisk = app.otisk_pohybu(t.ucet_id, t.datum, t.smer, t.castka_haleru, t.mena, t.vs, t.protiucet, t.protistrana)
+ where t.import_davka_id is not null
+   and t.zdroj in ('banka_api', 'csv_banka', 'csv_pokladna')
+   and t.otisk is null;
 create rule transakce_no_update as
   on update to public.transakce do instead nothing;
 
 
+/*
+  POTVRZENÍ Z BANKY. Když stažení z banky přinese pohyb (s id od banky),
+  který na účtu už je z nahraného výpisu (`csv_banka`), nezapíše se
+  podruhé — zapíše se jen tohle potvrzení: „tenhle řádek výpisu banka
+  potvrdila, její id je X". Párování faktur pak řádek výpisu bere jako
+  ověřený bankou (lib/finance-automaticke-parovani.ts) a příští stažení
+  téhož id ho přeskočí.
+
+  Jen přidávání (žádná úprava, žádné mazání mimo kaskádu účtu nebo
+  firmy). Zapisuje JEN public.importovat_transakce pod službou
+  (synchronizace) — přihlášený tabulku jen čte, a to jen u účtů, jejichž
+  platby vidí.
+*/
+create table public.transakce_potvrzeni_banky (
+  id              uuid primary key default gen_random_uuid(),
+  tenant_id       uuid not null references public.tenants(id) on delete cascade,
+  ucet_id         uuid not null,
+  transakce_id    uuid not null,
+  externi_id      text not null check (btrim(externi_id) <> ''),
+  import_davka_id uuid not null,
+  created_at      timestamptz not null default now(),
+  -- Jedno id od banky = jeden pohyb (řádek `banka_api` nebo tohle potvrzení).
+  constraint transakce_potvrzeni_banky_id_od_banky unique (ucet_id, externi_id),
+  -- Jeden řádek výpisu potvrdí banka nejvýš jednou.
+  constraint transakce_potvrzeni_banky_jednou unique (transakce_id),
+  constraint transakce_potvrzeni_banky_transakce
+    foreign key (tenant_id, ucet_id, transakce_id)
+    references public.transakce (tenant_id, ucet_id, id) on delete cascade,
+  constraint transakce_potvrzeni_banky_davka
+    foreign key (tenant_id, import_davka_id)
+    references public.import_davky (tenant_id, id)
+);
+
+comment on table public.transakce_potvrzeni_banky is
+  'Řádek výpisu (csv_banka), který stažení z banky potvrdilo (id od banky). '
+  'Zapisuje jen public.importovat_transakce pod službou; jen přidávání.';
+
+create index transakce_potvrzeni_banky_davka on public.transakce_potvrzeni_banky (import_davka_id);
+create index transakce_potvrzeni_banky_firma on public.transakce_potvrzeni_banky (tenant_id);
+
+create rule transakce_potvrzeni_banky_no_update as
+  on update to public.transakce_potvrzeni_banky do instead nothing;
+
+alter table public.transakce_potvrzeni_banky enable row level security;
+
+-- Výchozí práva Supabase by authenticated/anon dala všechno — nejdřív vše
+-- odebrat, pak vypsat, co kdo smí. Přihlášený jen čte (politika v oddílu 4),
+-- služba čte a přidává (synchronizace).
+revoke all on public.transakce_potvrzeni_banky from public, anon, authenticated;
+grant select on public.transakce_potvrzeni_banky to authenticated;
+grant select, insert on public.transakce_potvrzeni_banky to service_role;
+
+create trigger trg_audit_transakce_potvrzeni_banky
+  after insert on public.transakce_potvrzeni_banky
+  for each row execute function app.audit_zmenu('transakce_potvrzeni_banky');
+
+
 -- ---------------------------------------------------------------------
--- 3. IMPORT: DEDUP PODLE ID, JINAK PODLE OTISKU; DÁVKA ATOMICKY
+-- 3. IMPORT: DVOJÍ ZÁPIS PODLE OBSAHU A ID; DÁVKA ATOMICKY
 -- ---------------------------------------------------------------------
 
 /*
+  Roztřídění řádků importu (pravidla v hlavičce, oddíl DVOJÍ ZÁPIS).
+  Vrací řádky, které se mají zapsat: `narok_na` prázdné = nový pohyb,
+  jinak id řádku výpisu, který stažení z banky jen potvrdí.
+
+    * Totéž id dvakrát v jednom volání = jeden pohyb (první výskyt).
+    * Id už známé = přeskočit: řádek téhož ZDROJE s tím id; u stažení
+      z banky i potvrzení s tím id.
+    * Řádek bez id, a každý řádek výpisu či pokladní uzávěrky: za každý
+      klíč nejvýš (kolik jich je v importu) − (kolik jich má důvěryhodná
+      sada účtu). Známé id se do „v importu" počítá, zapíše se ale jen
+      neznámé.
+    * Řádek s id ze stažení: k-tý takový řádek s daným klíčem si nárokuje
+      k-tý nenárokovaný řádek výpisu (podle času zápisu); na co nezbude,
+      zapíše se jako nový pohyb.
+
+  Důvěryhodná sada = pohyby účtu z importu (mají dávku), nestornované,
+  samy nejsou storno; pro pokladní uzávěrku jen pokladní uzávěrky, jinak
+  jen stažení z banky a výpisy. Ruční zápis a pokladna nikdy.
+
+  SECURITY INVOKER: u přihlášeného čte pod RLS (importovat_transakce proto
+  pustí jen na účet, jehož platby vidí). Jen čte — zapisuje volající.
+*/
+create function app.import_roztridit(p_ucet uuid, p_zdroj text, p_radky jsonb)
+returns table (
+  poradi_v_poli bigint,
+  datum         date,
+  smer          text,
+  castka_haleru integer,
+  mena          text,
+  protistrana   text,
+  protiucet     text,
+  vs            text,
+  poznamka      text,
+  externi_id    text,
+  klic          text,
+  narok_na      uuid
+)
+language sql stable security invoker set search_path = ''
+as $$
+  with radky as (
+    select x.poradi_v_poli,
+           r.datum::date as datum, r.smer, r.castka_haleru, coalesce(r.mena, 'CZK') as mena,
+           coalesce(r.protistrana, '') as protistrana, coalesce(r.protiucet, '') as protiucet,
+           coalesce(r.vs, '') as vs, coalesce(r.poznamka, '') as poznamka,
+           -- Prázdný text = bez id. Jinak id přesně, jak přišlo (dřív uložené
+           -- řádky se s ním musí shodovat znak po znaku).
+           case when btrim(r.externi_id) = '' then null else r.externi_id end as externi_id
+      from jsonb_array_elements(p_radky) with ordinality as x(radek, poradi_v_poli)
+      cross join lateral jsonb_to_record(x.radek) as r(
+        datum text, smer text, castka_haleru integer, mena text,
+        protistrana text, protiucet text, vs text, poznamka text, externi_id text
+      )
+  ),
+  s_klicem as (
+    select r.*,
+           app.otisk_pohybu(p_ucet, r.datum, r.smer, r.castka_haleru, r.mena, r.vs, r.protiucet, r.protistrana) as klic,
+           row_number() over (partition by r.externi_id order by r.poradi_v_poli) as vyskyt_id
+      from radky r
+  ),
+  jednou as (
+    select k.* from s_klicem k
+     where k.externi_id is null or k.vyskyt_id = 1
+  ),
+  s_id as (
+    select j.*,
+           (j.externi_id is not null and (
+              exists (select 1 from public.transakce t
+                       where t.ucet_id = p_ucet and t.zdroj = p_zdroj and t.externi_id = j.externi_id)
+              or (p_zdroj = 'banka_api' and exists (
+                    select 1 from public.transakce_potvrzeni_banky b
+                     where b.ucet_id = p_ucet and b.externi_id = j.externi_id))
+           )) as zname_id
+      from jednou j
+  ),
+  sada as (
+    select t.id, t.otisk, t.zdroj, t.created_at
+      from public.transakce t
+     where t.ucet_id = p_ucet
+       and t.otisk in (select s.klic from s_id s)
+       and t.import_davka_id is not null
+       and t.storno_of is null
+       and not exists (select 1 from public.transakce x where x.storno_of = t.id)
+       and case when p_zdroj = 'csv_pokladna' then t.zdroj = 'csv_pokladna'
+                else t.zdroj in ('banka_api', 'csv_banka') end
+  ),
+  pocitane as (
+    select s.* from s_id s
+     where p_zdroj <> 'banka_api' or s.externi_id is null
+  ),
+  pocty as (
+    select p.klic,
+           count(*) as v_importu,
+           (select count(*) from sada a where a.otisk = p.klic) as na_uctu
+      from pocitane p
+     group by p.klic
+  ),
+  nove_pocitane as (
+    select p.*
+      from (select p0.*,
+                   row_number() over (partition by p0.klic order by p0.poradi_v_poli) as poradi_klice
+              from pocitane p0
+             where not p0.zname_id) p
+      join pocty c on c.klic = p.klic
+     where p.poradi_klice <= c.v_importu - c.na_uctu
+  ),
+  stazene as (
+    select s.*,
+           row_number() over (partition by s.klic order by s.poradi_v_poli) as poradi_klice
+      from s_id s
+     where p_zdroj = 'banka_api' and s.externi_id is not null and not s.zname_id
+  ),
+  volne_vypisy as (
+    select a.id, a.otisk,
+           row_number() over (partition by a.otisk order by a.created_at, a.id) as poradi_klice
+      from sada a
+     where a.zdroj = 'csv_banka'
+       and not exists (select 1 from public.transakce_potvrzeni_banky b where b.transakce_id = a.id)
+  )
+  select n.poradi_v_poli, n.datum, n.smer, n.castka_haleru, n.mena, n.protistrana, n.protiucet,
+         n.vs, n.poznamka, n.externi_id, n.klic, null::uuid
+    from nove_pocitane n
+  union all
+  select s.poradi_v_poli, s.datum, s.smer, s.castka_haleru, s.mena, s.protistrana, s.protiucet,
+         s.vs, s.poznamka, s.externi_id, s.klic, v.id
+    from stazene s
+    left join volne_vypisy v on v.otisk = s.klic and v.poradi_klice = s.poradi_klice
+$$;
+
+comment on function app.import_roztridit(uuid, text, jsonb) is
+  'Které řádky importu zapsat (narok_na null) a které jen potvrdit jako '
+  'řádek výpisu ověřený bankou (narok_na = id řádku výpisu). Jen čte; '
+  'volá ji public.importovat_transakce pod zámkem účtu.';
+
+revoke all on function app.import_roztridit(uuid, text, jsonb) from public, anon;
+grant execute on function app.import_roztridit(uuid, text, jsonb) to authenticated, service_role;
+
+
+/*
   Stávající podpis zůstává (volá ho stará appka během nasazení
-  a scénář krok76). Nově:
-    * jen zdroje importu (výpis, stažení z banky, pokladna) — ruční
-      zápis importem nevzniká (jinak by dostal otisk a dávku);
-    * `protiucet` v řádku (chybí-li, je prázdný),
-    * každý řádek dostane otisk; pořadí = kolikátý stejný řádek
-      v tomhle volání (pořadí v poli = pořadí ve výpisu);
-    * řádek BEZ id od banky (`externi_id`, prázdný text = bez id) se
-      přeskočí, když na účtu už je pohyb se stejným otiskem — z výpisu
-      i ze stažení přes API;
-    * řádek S id se přeskočí, když na účtu už je pohyb s tím id, nebo
-      pohyb BEZ id se stejným otiskem (týž pohyb dřív z výpisu). Proti
-      pohybům s id se otisk neporovnává: dva stejné pohyby od banky
-      s různým id jsou dva (banka mezi staženími mění pořadí stejných
-      řádků — porovnání otisků by druhý zahodilo).
-  Mez (narazil): když banka mezi staženími přehází dvě stejné platby
-  a teprve potom přijde výpis téhož dne, druhá platba z výpisu se zapíše
-  podruhé. Dvojí zápis je vidět a dá se stornovat; zahozená platba ne.
+  a scénář krok76). Pravidla dvojího zápisu: app.import_roztridit.
+    * jen zdroje importu (výpis, stažení z banky, pokladní uzávěrka) —
+      ruční zápis importem nevzniká;
+    * stažení z banky jen služba (synchronizace); přihlášený jen na účet,
+      jehož platby vidí — jinak by pod RLS nepoznal už zapsané pohyby
+      a zapsal by je podruhé;
+    * zámek na účet PŘED roztříděním (samostatný příkaz — další příkaz
+      už vidí, co mezitím zapsal souběžný import);
+    * na dobu zápisu příznak `foodtab.import_transakci` (jen pro tuhle
+      transakci, hned se vrací) — app.hlida_zdroj_transakce podle něj
+      pustí přihlášenému výpis a pokladní uzávěrku, přímý zápis ne.
+  Stažení z banky a ostatní zdroje jsou dva různé příkazy: zápis
+  potvrzení (jen služba) by u přihlášeného shodil i import výpisu —
+  PostgreSQL kontroluje právo zápisu i u příkazu, který nic nezapíše.
   Anti-join, ne ON CONFLICT: `transakce` má pravidlo na UPDATE
   a PostgreSQL proto ON CONFLICT na ní odmítá (20261003170000).
-  SECURITY INVOKER — politiky platí jako u přímého zápisu.
 */
 create or replace function public.importovat_transakce(
   p_tenant uuid,
@@ -530,61 +775,78 @@ returns integer
 language plpgsql security invoker set search_path = ''
 as $$
 declare
-  v_pocet integer;
+  v_pocet   integer;
+  v_priznak text;
 begin
   if p_zdroj is null or p_zdroj not in ('banka_api', 'csv_banka', 'csv_pokladna') then
     raise exception 'Import tohohle zdroje neexistuje.' using errcode = 'check_violation';
   end if;
 
-  with radky as (
-    select x.poradi_v_poli,
-           r.datum::date as datum, r.smer, r.castka_haleru, coalesce(r.mena, 'CZK') as mena,
-           coalesce(r.protistrana, '') as protistrana, coalesce(r.protiucet, '') as protiucet,
-           coalesce(r.vs, '') as vs, coalesce(r.poznamka, '') as poznamka,
-           -- Prázdný text = bez id (hlídá otisk). Jinak id přesně, jak přišlo
-           -- (dřív uložené řádky se s ním musí shodovat znak po znaku).
-           case when btrim(r.externi_id) = '' then null else r.externi_id end as externi_id
-      from jsonb_array_elements(p_radky) with ordinality as x(radek, poradi_v_poli)
-      cross join lateral jsonb_to_record(x.radek) as r(
-        datum text, smer text, castka_haleru integer, mena text,
-        protistrana text, protiucet text, vs text, poznamka text, externi_id text
+  if current_user in ('authenticated', 'anon') then
+    if p_zdroj = 'banka_api' then
+      raise exception 'Platbu ze zdroje „%" zapisuje jen synchronizace banky.', p_zdroj
+        using errcode = 'insufficient_privilege';
+    end if;
+    if p_ucet is null or p_ucet not in (select app.platebni_ucty_s_pravem('finance.read')) then
+      raise exception 'Výpis jde nahrát jen na účet, jehož platby vidíte.'
+        using errcode = 'insufficient_privilege';
+    end if;
+  end if;
+
+  -- Souběh dvou importů téhož účtu (synchronizace a nahraný výpis): druhý
+  -- počká, až první skončí, a teprve pak počítá, co účet už má.
+  perform pg_advisory_xact_lock(hashtextextended('transakce:' || p_ucet::text, 0));
+
+  v_priznak := current_setting('foodtab.import_transakci', true);
+  perform set_config('foodtab.import_transakci', '1', true);
+
+  if p_zdroj = 'banka_api' then
+    with r as materialized (
+      select * from app.import_roztridit(p_ucet, p_zdroj, p_radky)
+    ),
+    vlozene as (
+      insert into public.transakce (
+        tenant_id, ucet_id, smer, castka_haleru, mena, datum,
+        protistrana, protiucet, vs, poznamka, zdroj, externi_id, otisk, import_davka_id
       )
-  ),
-  s_klicem as (
-    select r.*,
-           app.otisk_pohybu(p_ucet, r.datum, r.smer, r.castka_haleru, r.mena, r.vs, r.protiucet, r.protistrana, 0) as klic
-      from radky r
-  ),
-  s_otiskem as (
-    select k.*,
-           app.otisk_pohybu(p_ucet, k.datum, k.smer, k.castka_haleru, k.mena, k.vs, k.protiucet, k.protistrana,
-             row_number() over (partition by k.klic order by k.poradi_v_poli)) as otisk
-      from s_klicem k
-  ),
-  nove as (
-    select s.* from s_otiskem s
-     where not exists (
-             select 1 from public.transakce t
-              where t.ucet_id = p_ucet and t.otisk = s.otisk
-                and (s.externi_id is null or t.externi_id is null))
-       and (s.externi_id is null or not exists (
-             select 1 from public.transakce t
-              where t.ucet_id = p_ucet and t.externi_id = s.externi_id))
-  ),
-  vlozene as (
-    insert into public.transakce (
-      tenant_id, ucet_id, smer, castka_haleru, mena, datum,
-      protistrana, protiucet, vs, poznamka, zdroj, externi_id, otisk, import_davka_id
+      select p_tenant, p_ucet, r.smer, r.castka_haleru, r.mena, r.datum,
+             r.protistrana, r.protiucet, r.vs, r.poznamka,
+             p_zdroj, r.externi_id, r.klic, p_davka
+        from r
+       where r.narok_na is null
+       order by r.poradi_v_poli
+      returning 1
+    ),
+    potvrzene as (
+      insert into public.transakce_potvrzeni_banky (tenant_id, ucet_id, transakce_id, externi_id, import_davka_id)
+      select p_tenant, p_ucet, r.narok_na, r.externi_id, p_davka
+        from r
+       where r.narok_na is not null
+       order by r.poradi_v_poli
+      returning 1
     )
-    select
-      p_tenant, p_ucet, n.smer, n.castka_haleru, n.mena, n.datum,
-      n.protistrana, n.protiucet, n.vs, n.poznamka,
-      p_zdroj, n.externi_id, n.otisk, p_davka
-    from nove n
-    order by n.poradi_v_poli
-    returning 1
-  )
-  select count(*)::integer into v_pocet from vlozene;
+    select (select count(*) from vlozene)::integer into v_pocet;
+  else
+    with r as materialized (
+      select * from app.import_roztridit(p_ucet, p_zdroj, p_radky)
+    ),
+    vlozene as (
+      insert into public.transakce (
+        tenant_id, ucet_id, smer, castka_haleru, mena, datum,
+        protistrana, protiucet, vs, poznamka, zdroj, externi_id, otisk, import_davka_id
+      )
+      select p_tenant, p_ucet, r.smer, r.castka_haleru, r.mena, r.datum,
+             r.protistrana, r.protiucet, r.vs, r.poznamka,
+             p_zdroj, r.externi_id, r.klic, p_davka
+        from r
+       where r.narok_na is null
+       order by r.poradi_v_poli
+      returning 1
+    )
+    select count(*)::integer into v_pocet from vlozene;
+  end if;
+
+  perform set_config('foodtab.import_transakci', coalesce(v_priznak, ''), true);
 
   update public.import_davky set pocet_novych = v_pocet where id = p_davka;
 
@@ -592,13 +854,13 @@ begin
 end $$;
 
 comment on function public.importovat_transakce(uuid, uuid, uuid, text, jsonb) is
-  'Hromadný zápis importu do existující dávky (jen zdroje importu). Dedup: '
-  'řádek bez id podle (ucet_id, otisk) proti všem pohybům účtu; řádek s id '
-  'podle (ucet_id, externi_id) a proti pohybům BEZ id podle otisku (týž '
-  'pohyb z výpisu i ze stažení). Otisk počítá app.otisk_pohybu i s pořadím '
-  'stejného řádku ve výpisu. Anti-join, ne ON CONFLICT (pravidlo na UPDATE). '
-  'Zapisuje import_davky.pocet_novych. Nová appka volá importovat_vypis '
-  '(dávka i řádky v jedné transakci).';
+  'Hromadný zápis importu do existující dávky (jen zdroje importu). Dvojí '
+  'zápis hlídá app.import_roztridit (počty podle obsahového klíče proti '
+  'důvěryhodné sadě účtu, id jen v rámci zdroje, stažení z banky si '
+  'nárokuje řádek výpisu potvrzením). Pod zámkem účtu. Anti-join, ne ON '
+  'CONFLICT (pravidlo na UPDATE). Zapisuje import_davky.pocet_novych = '
+  'počet nových pohybů (potvrzení se nepočítají). Nová appka volá '
+  'importovat_vypis (dávka i řádky v jedné transakci).';
 
 revoke all on function public.importovat_transakce(uuid, uuid, uuid, text, jsonb) from public, anon;
 grant execute on function public.importovat_transakce(uuid, uuid, uuid, text, jsonb) to authenticated, service_role;
@@ -703,6 +965,11 @@ drop policy transakce_read on public.transakce;
 create policy transakce_read on public.transakce for select to authenticated
   using (ucet_id in (select app.platebni_ucty_s_pravem('finance.read')));
 
+-- Potvrzení z banky (oddíl 2) vidí, kdo vidí platby účtu. Jiná politika
+-- není: zápis jen služba (grant), úprava ani mazání nikdo.
+create policy transakce_potvrzeni_banky_read on public.transakce_potvrzeni_banky for select to authenticated
+  using (ucet_id in (select app.platebni_ucty_s_pravem('finance.read')));
+
 -- ZÁPIS se tu NEMĚNÍ: `transakce_insert` (20261003120000) i
 -- `bankovni_zustatky_insert` (20261004100000) zůstávají jen pro rozsah
 -- celé firmy — `app.has_access(tenant_id, 'finance.manage', null)`. To je
@@ -711,9 +978,10 @@ create policy transakce_read on public.transakce for select to authenticated
 -- pobočku (ruční platba na účet své pobočky) by otevřelo zápis lidem,
 -- kterým ho appka nedává — Finance na pobočce chtějí finance.read za
 -- celou firmu (lib/finance-pristup.ts, otázka 47) — a s ním cesty, jak
--- „zabrat" id nebo otisk pohybu z banky, stornovat platbu firemního
--- účtu (storno_of) nebo podstrčit zůstatek, který vypadá jako od banky
--- (kontrola kroku 1, 20. 11.). Proto nejopatrnější varianta.
+-- stornovat platbu firemního účtu (storno_of) nebo podstrčit zůstatek,
+-- který vypadá jako od banky (kontrola kroku 1, 20. 11.). Proto
+-- nejopatrnější varianta. Zdroj přímého zápisu hlídá i tak
+-- app.hlida_zdroj_transakce (přímo jen `rucni`).
 -- ROZHODNOUT: smí člověk s rozsahem jen pobočky zapisovat ruční platby
 -- (a zůstatky) na účet své pobočky? Dnes ne. Otázka 113 (docs/hlaseni/otazky.md).
 
@@ -912,6 +1180,14 @@ grant execute on function public.pokladna_prehled_trzeb(uuid, date, date, text) 
 -- přestěhováním účtu ukázal celou historii pohybů firmy A lidem firmy B
 -- (kontrola kroku 1, 20. 11.). Pohyby i zůstatky nesou firmu účtu
 -- (app.hlida_firmu_transakce), účet jiné firmy = nový účet.
+--
+-- Účet, na který míří připojení POBOČKY, se nestěhuje na jinou pobočku
+-- ani na firmu: spoušť u připojení (níž) hlídá jen změnu připojení, ne
+-- účtu. Bez toho by se účet pobočky přesunul a připojení té pobočky by
+-- dál synchronizovalo do účtu, který jí už nepatří (kontrola kroku 1,
+-- 20. 11.). Připojení se počítá, dokud není odpojené ÚPLNĚ (stav
+-- `odpojeno` i čas odpojení — appka nastavuje obojí; synchronizace se
+-- ptá na čas). Připojení za celou firmu (bez pobočky) stěhování nebrání.
 create function app.hlida_firmu_platebniho_uctu()
 returns trigger
 language plpgsql security definer set search_path = ''
@@ -926,12 +1202,22 @@ begin
   ) then
     raise exception 'Pobočka nepatří této firmě.' using errcode = 'check_violation';
   end if;
+  if tg_op = 'UPDATE' and new.branch_id is distinct from old.branch_id and exists (
+    select 1 from public.integrace_pripojeni c
+     where c.platebni_ucet_id = new.id
+       and c.branch_id is not null
+       and c.branch_id is distinct from new.branch_id
+       and (c.odpojeno_kdy is null or c.stav <> 'odpojeno')
+  ) then
+    raise exception 'Na účet míří připojení jiné pobočky — nejdřív ho odpojte, pak účet přesuňte.'
+      using errcode = 'check_violation';
+  end if;
   return new;
 end $$;
 
 comment on function app.hlida_firmu_platebniho_uctu() is
-  'Spoušť: platebni_ucty.branch_id musí být pobočka téže firmy a účet se '
-  'nepřevádí do jiné firmy.';
+  'Spoušť: platebni_ucty.branch_id musí být pobočka téže firmy, účet se '
+  'nepřevádí do jiné firmy a nepřesouvá od pobočky, jejíž připojení na něj míří.';
 
 revoke all on function app.hlida_firmu_platebniho_uctu() from public, anon, authenticated;
 

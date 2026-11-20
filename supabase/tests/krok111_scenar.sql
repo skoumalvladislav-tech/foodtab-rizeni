@@ -6,28 +6,38 @@
 -- Pokrývá:
 --   1. Zkouška 1 — idempotence importu:
 --      * dvojí import téhož stažení s id pohybu od banky nic nepřidá;
---      * dvojí import výpisu BEZ id nic nepřidá (otisk);
---      * dvě stejné platby v jednom výpisu zůstanou dvě;
+--      * dvojí import výpisu BEZ id nic nepřidá (obsahový klíč);
+--      * dvě stejné platby v jednom výpisu zůstanou dvě (klíč není
+--        unikátní, import počítá);
 --      * překrývající se druhý výpis přidá jen nové řádky;
---      * týž pohyb z výpisu (bez id) a ze stažení (s id) jen jednou,
---        v obou pořadích; dva stejné pohyby od banky s různým id dva;
 --      * výpis uložený v Excelu (VS bez úvodních nul) nic nepřidá;
---        otisk nezávisí na DateStyle relace;
+--        klíč nezávisí na DateStyle relace;
 --      * spadlý import nezanechá dávku — opakování projde;
---      * otisk = app.otisk_pohybu i s pořadím, protiúčet se ukládá;
+--      * klíč = app.otisk_pohybu (bez pořadí), protiúčet se ukládá;
 --      * ruční zápis si nezabere id ani dávku importu;
---   2. Zkouška 6 — pobočky:
---      * člověk jiné pobočky nevidí cizí účty, pohyby ani zůstatky;
+--   2. Dvojí zápis výpis × stažení z banky (kontrola kroku 1, 20. 11.):
+--      * stránky stažení zvlášť (B1, B2), okno od poledne (B3), výpis
+--        → stažení, stažení → výpis, opakování nic nepřidá;
+--      * výpis omylem jako pokladní uzávěrka, stornovaný řádek výpisu,
+--        pokladna nebo výpis s vymyšleným id pohyb z banky nezablokují;
+--      * každé id ze stažení je na účtu právě jednou: řádek `banka_api`,
+--        nebo potvrzení řádku výpisu;
+--      * přihlášený přímo zapíše jen ruční platbu; potvrzení nezapíše;
+--      * import se řadí zámkem účtu;
+--   3. Zkouška 6 — pobočky:
+--      * člověk jiné pobočky nevidí cizí účty, pohyby, zůstatky ani
+--        potvrzení z banky;
 --      * člověk pobočky nevidí pohyby firemního účtu (bez pobočky),
 --        jejich párování s fakturami ani zálohy na zakázku;
 --      * zápis pohybů i zůstatků jen za celou firmu; dávky taky;
 --      * přehled tržeb (definer) počítá banku stejně;
 --      * druhá linie: účet nejde dát pod pobočku cizí firmy ani převést
---        do jiné firmy; připojení pobočky jen k účtu té pobočky;
---   3. přístupové údaje k bance se přihlášenému nevydají (RPC ani select,
+--        do jiné firmy; připojení pobočky jen k účtu té pobočky; účet
+--        s připojením pobočky se nepřestěhuje;
+--   4. přístupové údaje k bance se přihlášenému nevydají (RPC ani select,
 --      ani po přepnutí oblasti připojení), server ověří právo bez šifry
 --      (integrace_overit_spravu);
---   4. v omezeních zdroje není jméno banky, `banka_api` projde, staré
+--   5. v omezeních zdroje není jméno banky, `banka_api` projde, staré
 --      hodnoty ne.
 --
 -- Vlastní firmy a vlastní id — CI pouští všechny scénáře v jedné
@@ -79,6 +89,30 @@ exception when others then
   raise notice '  (import spadl: % %)', sqlstate, sqlerrm;
   return -1;
 end $$;
+
+-- Každé id, které kdy přišlo ze stažení z banky — pro kontrolu „žádné id
+-- se neztratí" na konci oddílu 2b. Stažení v tomhle scénáři jde JEN přes
+-- pg_temp.stahnout.
+create temp table k111_stazena_id (ucet_id uuid not null, externi_id text not null);
+
+create or replace function pg_temp.stahnout(p_tenant uuid, p_ucet uuid, p_hash text, p_radky jsonb)
+returns integer language plpgsql as $$
+begin
+  insert into k111_stazena_id (ucet_id, externi_id)
+  select p_ucet, x ->> 'externi_id'
+    from jsonb_array_elements(p_radky) x
+   where nullif(btrim(x ->> 'externi_id'), '') is not null;
+  return pg_temp.importovat(p_tenant, p_ucet, 'banka_api', p_hash, p_radky);
+end $$;
+
+-- Řádek ve tvaru, jaký dává banka (Salt Edge: protiúčet i VS prázdné).
+-- Bez id = řádek výpisu.
+create or replace function pg_temp.r(p_datum text, p_id text default null, p_castka integer default 500)
+returns jsonb language sql as $$
+  select jsonb_strip_nulls(jsonb_build_object(
+    'datum', p_datum, 'smer', 'vydaj', 'castka_haleru', p_castka, 'mena', 'CZK',
+    'protistrana', 'Poplatek', 'protiucet', '', 'vs', '', 'poznamka', '', 'externi_id', p_id))
+$$;
 
 -- Výsledek dotazu jako text, nebo NULL, když dotaz spadne (vypíše proč).
 create or replace function pg_temp.hodnota(p_sql text)
@@ -180,6 +214,27 @@ values (:'firma_a', :'p2', 'Krok111 účet P2', 'banka') returning id as u_p2 \g
 insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
 values (:'firma_b', :'b1', 'Krok111 cizí účet', 'banka') returning id as u_cizi \gset
 
+-- Účty firmy A bez pobočky jen na dvojí zápis (oddíl 2b) — každý případ
+-- na vlastním účtu, počty se neplétou.
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 B1', 'banka') returning id as u_b1 \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 B2', 'banka') returning id as u_b2 \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 B3', 'banka') returning id as u_b3 \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 výpis-stažení', 'banka') returning id as u_vs \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 stažení-výpis', 'banka') returning id as u_sv \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 omylem pokladna', 'banka') returning id as u_pokl \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 storno', 'banka') returning id as u_storno \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 vymyšlené id', 'banka') returning id as u_podvrh \gset
+insert into public.platebni_ucty (tenant_id, branch_id, nazev, typ)
+values (:'firma_a', null, 'Krok111 dvě od banky', 'banka') returning id as u_dve \gset
+
 
 \echo ''
 \echo '== 1. Zkouška 1: s id pohybu od banky ===================================='
@@ -187,21 +242,21 @@ values (:'firma_b', :'b1', 'Krok111 cizí účet', 'banka') returning id as u_ci
 -- Synchronizace běží jako úloha (service_role obchází RLS). Tady jako
 -- vlastník databáze: čistý harness nemá výchozí práva Supabase, která
 -- service_role dávají zápis do transakce.
-select pg_temp.importovat(:'firma_a', :'u_p1', 'banka_api', 'krok111-api-1',
+select pg_temp.stahnout(:'firma_a', :'u_p1', 'krok111-api-1',
   '[{"datum":"2033-01-05","smer":"prijem","castka_haleru":50000,"mena":"CZK","protistrana":"Host A","protiucet":"CZ6508000000192000145399","vs":"1","poznamka":"","externi_id":"krok111-x1"},
     {"datum":"2033-01-06","smer":"vydaj","castka_haleru":7000,"mena":"CZK","protistrana":"Dodavatel","protiucet":"","vs":"2","poznamka":"","externi_id":"krok111-x2"}]'::jsonb) as api_prvni \gset
 select pg_temp.check('první stažení zapíše dva pohyby', :'api_prvni'::int = 2);
 
-select pg_temp.importovat(:'firma_a', :'u_p1', 'banka_api', 'krok111-api-2',
+select pg_temp.stahnout(:'firma_a', :'u_p1', 'krok111-api-2',
   '[{"datum":"2033-01-05","smer":"prijem","castka_haleru":50000,"mena":"CZK","protistrana":"Host A","protiucet":"CZ6508000000192000145399","vs":"1","poznamka":"","externi_id":"krok111-x1"},
     {"datum":"2033-01-06","smer":"vydaj","castka_haleru":7000,"mena":"CZK","protistrana":"Dodavatel","protiucet":"","vs":"2","poznamka":"","externi_id":"krok111-x2"},
     {"datum":"2033-01-07","smer":"prijem","castka_haleru":800,"mena":"CZK","protistrana":"","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-x3"}]'::jsonb) as api_druhe \gset
 select pg_temp.check('druhé stažení se stejnými pohyby přidá jen ten nový (1)', :'api_druhe'::int = 1);
 select pg_temp.check('… a pohybů s id x1, x2 je na účtu pořád po jednom',
   (select count(*) from public.transakce where ucet_id = :'u_p1' and externi_id in ('krok111-x1', 'krok111-x2')) = 2);
-select pg_temp.check('pohyb s id od banky má otisk i s pořadím (pozná ho výpis bez id)',
+select pg_temp.check('pohyb s id od banky má obsahový klíč (pozná ho výpis bez id)',
   coalesce((select otisk = app.otisk_pohybu(:'u_p1', '2033-01-05', 'prijem', 50000, 'CZK', '1',
-                                            'CZ6508000000192000145399', 'Host A', 1)
+                                            'CZ6508000000192000145399', 'Host A')
               from public.transakce where ucet_id = :'u_p1' and externi_id = 'krok111-x1'), false));
 select pg_temp.check('protiúčet se uloží zvlášť od jména protistrany',
   (select protiucet = 'CZ6508000000192000145399' and protistrana = 'Host A'
@@ -209,10 +264,16 @@ select pg_temp.check('protiúčet se uloží zvlášť od jména protistrany',
 select pg_temp.check('dávka stažení má typ banka_api a počet nových',
   (select typ = 'banka_api' and pocet_novych = 1 and pocet_radku = 3
      from public.import_davky where tenant_id = :'firma_a' and soubor_hash = 'krok111-api-2'));
+select pg_temp.stahnout(:'firma_a', :'u_p1', 'krok111-api-3',
+  '[{"datum":"2033-01-08","smer":"prijem","castka_haleru":900,"mena":"CZK","protistrana":"Dvakrát","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-x4"},
+    {"datum":"2033-01-08","smer":"prijem","castka_haleru":900,"mena":"CZK","protistrana":"Dvakrát","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-x4"}]'::jsonb) as api_dvakrat \gset
+select pg_temp.check('totéž id dvakrát v jednom stažení (dvě stránky) = jeden pohyb (1)',
+  :'api_dvakrat'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_p1' and externi_id = 'krok111-x4') = 1);
 
 
 \echo ''
-\echo '== 2. Zkouška 1: výpis bez id (otisk) ===================================='
+\echo '== 2. Zkouška 1: výpis bez id (obsahový klíč) ============================'
 
 -- Výpis V1: A, B, B (dvě STEJNÉ platby v jednom výpisu).
 select pg_temp.importovat(:'firma_a', :'u_p2', 'csv_banka', 'krok111-v1',
@@ -222,24 +283,22 @@ select pg_temp.importovat(:'firma_a', :'u_p2', 'csv_banka', 'krok111-v1',
 select pg_temp.check('výpis V1 zapíše tři pohyby', :'v1'::int = 3);
 select pg_temp.check('dvě stejné platby v jednom výpisu zůstanou dvě',
   (select count(*) from public.transakce where ucet_id = :'u_p2' and datum = '2033-01-11' and castka_haleru = 9900) = 2);
-select pg_temp.check('… s různým otiskem (pořadí 1 a 2)',
-  (select count(distinct otisk) from public.transakce
-    where ucet_id = :'u_p2' and datum = '2033-01-11' and castka_haleru = 9900 and otisk is not null) = 2);
-select pg_temp.check('otisk = app.otisk_pohybu s pořadím 1 (jedna implementace)',
+select pg_temp.check('… se STEJNÝM obsahovým klíčem (klíč není unikátní, import počítá)',
+  (select count(distinct otisk) = 1 and count(*) = 2 from public.transakce
+    where ucet_id = :'u_p2' and datum = '2033-01-11' and castka_haleru = 9900 and otisk is not null));
+select pg_temp.check('klíč = app.otisk_pohybu (jedna implementace)',
   (select otisk = app.otisk_pohybu(:'u_p2', '2033-01-10', 'vydaj', 12345, 'CZK', '111',
-                                   'CZ6508000000192000145399', 'Dodavatel A', 1)
+                                   'CZ6508000000192000145399', 'Dodavatel A')
      from public.transakce where ucet_id = :'u_p2' and datum = '2033-01-10'));
-select pg_temp.check('otisky stejných plateb jsou přesně pořadí 1 a 2',
-  (select array_agg(otisk order by otisk) from public.transakce
-    where ucet_id = :'u_p2' and datum = '2033-01-11' and castka_haleru = 9900)
-  = (select array_agg(o order by o) from (values
-       (app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'Káva s.r.o.', 1)),
-       (app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'Káva s.r.o.', 2))) x(o)));
-select pg_temp.check('poznámka do otisku nepatří, mezery a velikost písmen protistrany ano jen normalizovaně',
-  app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'czk', ' ', ' ', '  KÁVA   s.r.o. ', 1)
-  = app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'káva s.r.o.', 1)
-  and app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'Káva s.r.o.', 1)
-   <> app.otisk_pohybu(:'u_p1', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'Káva s.r.o.', 1));
+select pg_temp.check('poznámka do klíče nepatří, mezery a velikost písmen protistrany ano jen normalizovaně',
+  app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'czk', ' ', ' ', '  KÁVA   s.r.o. ')
+  = app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'káva s.r.o.')
+  and app.otisk_pohybu(:'u_p2', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'Káva s.r.o.')
+   <> app.otisk_pohybu(:'u_p1', '2033-01-11', 'vydaj', 9900, 'CZK', '', '', 'Káva s.r.o.'));
+select pg_temp.check('index klíče není unikátní (dvě stejné platby smí mít stejný klíč)',
+  exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'transakce_otisk')
+  and not exists (select 1 from pg_index i join pg_class c on c.oid = i.indexrelid
+                   where c.relname = 'transakce_otisk' and i.indisunique));
 
 -- Týž výpis podruhé (jiný soubor, stejný obsah — třeba znovu stažený export).
 select pg_temp.importovat(:'firma_a', :'u_p2', 'csv_banka', 'krok111-v1-znovu',
@@ -269,12 +328,12 @@ select pg_temp.check('výpis se třemi stejnými platbami (dvě už jsou) přid�
 -- Stejný obsah na JINÉM účtu je jiný pohyb.
 select pg_temp.importovat(:'firma_a', :'u_firma', 'csv_banka', 'krok111-v1-firma',
   '[{"datum":"2033-01-10","smer":"vydaj","castka_haleru":12345,"mena":"CZK","protistrana":"Dodavatel A","protiucet":"CZ6508000000192000145399","vs":"111","poznamka":"faktura"}]'::jsonb) as v1_firma \gset
-select pg_temp.check('týž řádek na jiném účtu se zapíše (otisk je i z účtu)', :'v1_firma'::int = 1);
+select pg_temp.check('týž řádek na jiném účtu se zapíše (klíč je i z účtu)', :'v1_firma'::int = 1);
 
 -- Prázdné id = bez id.
 select pg_temp.importovat(:'firma_a', :'u_p2', 'csv_banka', 'krok111-v4',
   '[{"datum":"2033-01-13","smer":"prijem","castka_haleru":100,"mena":"CZK","protistrana":"Prázdné id","protiucet":"","vs":"","poznamka":"","externi_id":"  "}]'::jsonb) as v4 \gset
-select pg_temp.check('prázdné id od banky se bere jako žádné (dostane otisk)',
+select pg_temp.check('prázdné id od banky se bere jako žádné (dostane klíč)',
   (select externi_id is null and otisk is not null from public.transakce
     where ucet_id = :'u_p2' and protistrana = 'Prázdné id'));
 
@@ -284,57 +343,156 @@ values (:'firma_a', 'banka_csv', 'stary.csv', 'krok111-stary', 'zpracovano') ret
 select coalesce(pg_temp.hodnota(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
   :'firma_a', :'u_p2', :'d_stary', 'csv_banka',
   '[{"datum":"2033-01-14","smer":"vydaj","castka_haleru":321,"protistrana":"Bez protiúčtu","vs":"","poznamka":""}]')), '-1') as stary \gset
-select pg_temp.check('starý podpis importovat_transakce: řádek bez protiúčtu projde (prázdný protiúčet, otisk)',
+select pg_temp.check('starý podpis importovat_transakce: řádek bez protiúčtu projde (prázdný protiúčet, klíč)',
   :'stary'::int = 1
   and (select protiucet = '' and otisk is not null from public.transakce where ucet_id = :'u_p2' and protistrana = 'Bez protiúčtu'));
 
 
 \echo ''
-\echo '== 2b. Zkouška 1: týž pohyb z výpisu i ze stažení ======================='
+\echo '== 2b. Dvojí zápis: výpis a stažení z banky ============================='
 
--- Zadání: „stejný pohyb se nikdy nezapíše dvakrát". Podnik nahraje výpis
--- (bez id pohybu) a potom připojí banku přes API (s id) — nebo naopak.
--- Firemní účet, květen 2033 (přehled tržeb níž počítá březen).
+-- Zásada: pohyb stažený z banky (s id od banky) se NIKDY nezahodí kvůli
+-- obsahu jiného řádku. Viditelná dvojice je přijatelná, ztracená platba
+-- ne. Dvě stejné platby téhož dne (500 Kč „Poplatek"): banka stahuje po
+-- stránkách nebo od poledne, výpis je celodenní nebo z půlky dne.
 
--- a) Stažení s id, potom výpis bez id.
-select pg_temp.importovat(:'firma_a', :'u_firma', 'banka_api', 'krok111-k-api',
-  '[{"datum":"2033-05-02","smer":"vydaj","castka_haleru":8900,"mena":"CZK","protistrana":"Kavárna","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-k1"},
-    {"datum":"2033-05-02","smer":"vydaj","castka_haleru":8900,"mena":"CZK","protistrana":"Kavárna","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-k2"}]'::jsonb) as k_api \gset
-select pg_temp.check('stažení zapíše dvě stejné platby s různým id (2)', :'k_api'::int = 2);
-select pg_temp.importovat(:'firma_a', :'u_firma', 'csv_banka', 'krok111-k-csv',
-  '[{"datum":"2033-05-02","smer":"vydaj","castka_haleru":8900,"mena":"CZK","protistrana":"Kavárna","protiucet":"","vs":"","poznamka":"z výpisu"},
-    {"datum":"2033-05-02","smer":"vydaj","castka_haleru":8900,"mena":"CZK","protistrana":"  kavárna ","protiucet":"","vs":"","poznamka":""},
-    {"datum":"2033-05-03","smer":"vydaj","castka_haleru":4500,"mena":"CZK","protistrana":"Kavárna","protiucet":"","vs":"","poznamka":""}]'::jsonb) as k_csv \gset
-select pg_temp.check('výpis bez id po stažení s id: tytéž dvě platby znovu nezapíše, jen novou (1)', :'k_csv'::int = 1);
-select pg_temp.check('… a stejných plateb z 2. 5. je na účtu pořád dvě',
-  (select count(*) from public.transakce where ucet_id = :'u_firma' and datum = '2033-05-02' and castka_haleru = 8900) = 2);
+-- B1: stránky stažení zvlášť (Salt Edge), potom celodenní výpis bez id.
+select pg_temp.stahnout(:'firma_a', :'u_b1', 'krok111-b1-s1', jsonb_build_array(pg_temp.r('2033-06-01', 'krok111-b1-x'))) as b1_s1 \gset
+select pg_temp.stahnout(:'firma_a', :'u_b1', 'krok111-b1-s2', jsonb_build_array(pg_temp.r('2033-06-01', 'krok111-b1-y'))) as b1_s2 \gset
+select pg_temp.importovat(:'firma_a', :'u_b1', 'csv_banka', 'krok111-b1-v',
+  jsonb_build_array(pg_temp.r('2033-06-01'), pg_temp.r('2033-06-01'))) as b1_v \gset
+select pg_temp.check('B1: stránky stažení zvlášť zapíšou obě platby, celodenní výpis potom nic (1/1/0, na účtu 2)',
+  :'b1_s1'::int = 1 and :'b1_s2'::int = 1 and :'b1_v'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_b1') = 2);
 
--- b) Výpis bez id, potom stažení s id.
-select pg_temp.importovat(:'firma_a', :'u_firma', 'csv_banka', 'krok111-m-csv',
-  '[{"datum":"2033-05-06","smer":"vydaj","castka_haleru":1200,"mena":"CZK","protistrana":"Pekárna","protiucet":"CZ6508000000192000145399","vs":"77","poznamka":""},
-    {"datum":"2033-05-06","smer":"vydaj","castka_haleru":1200,"mena":"CZK","protistrana":"Pekárna","protiucet":"CZ6508000000192000145399","vs":"77","poznamka":""}]'::jsonb) as m_csv \gset
-select pg_temp.check('výpis zapíše dvě stejné platby (2)', :'m_csv'::int = 2);
-select pg_temp.importovat(:'firma_a', :'u_firma', 'banka_api', 'krok111-m-api',
-  '[{"datum":"2033-05-06","smer":"vydaj","castka_haleru":1200,"mena":"CZK","protistrana":"Pekárna","protiucet":"CZ6508000000192000145399","vs":"77","poznamka":"","externi_id":"krok111-m1"},
-    {"datum":"2033-05-06","smer":"vydaj","castka_haleru":1200,"mena":"CZK","protistrana":"Pekárna","protiucet":"CZ6508000000192000145399","vs":"77","poznamka":"","externi_id":"krok111-m2"},
-    {"datum":"2033-05-07","smer":"vydaj","castka_haleru":1300,"mena":"CZK","protistrana":"Pekárna","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-m3"}]'::jsonb) as m_api \gset
-select pg_temp.check('stažení s id po výpisu bez id: tytéž dvě platby znovu nezapíše, jen novou (1)', :'m_api'::int = 1);
-select pg_temp.check('… a stejných plateb ze 6. 5. je na účtu pořád dvě',
-  (select count(*) from public.transakce where ucet_id = :'u_firma' and datum = '2033-05-06' and castka_haleru = 1200) = 2);
+-- B2: výpis z půlky dne (jen první platba), potom stránky stažení
+-- (první, druhá) a znovu totéž.
+select pg_temp.importovat(:'firma_a', :'u_b2', 'csv_banka', 'krok111-b2-v',
+  jsonb_build_array(pg_temp.r('2033-06-02'))) as b2_v \gset
+select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s1', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-x'))) as b2_s1 \gset
+select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s2', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-y'))) as b2_s2 \gset
+select pg_temp.check('B2: výpis z půlky dne, pak stránky stažení — druhá platba se zapíše (1/0/1, na účtu 2)',
+  :'b2_v'::int = 1 and :'b2_s1'::int = 0 and :'b2_s2'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_b2') = 2
+  and exists (select 1 from public.transakce where ucet_id = :'u_b2' and zdroj = 'banka_api' and externi_id = 'krok111-b2-y'));
+select pg_temp.check('B2: první stránka jen POTVRDÍ řádek výpisu (potvrzení s id banky, ne nový pohyb)',
+  (select count(*) from public.transakce_potvrzeni_banky b
+     join public.transakce t on t.id = b.transakce_id
+    where b.ucet_id = :'u_b2' and b.externi_id = 'krok111-b2-x' and t.zdroj = 'csv_banka') = 1);
+select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s1b', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-x'))) as b2_s1b \gset
+select pg_temp.stahnout(:'firma_a', :'u_b2', 'krok111-b2-s2b', jsonb_build_array(pg_temp.r('2033-06-02', 'krok111-b2-y'))) as b2_s2b \gset
+select pg_temp.check('B2: opakované stránky stažení nic nepřidají (0/0, na účtu 2, potvrzení 1)',
+  :'b2_s1b'::int = 0 and :'b2_s2b'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_b2') = 2
+  and (select count(*) from public.transakce_potvrzeni_banky where ucet_id = :'u_b2') = 1);
 
--- c) Dva stejné pohyby od banky s různým id: banka je mezi staženími
--- pošle v jiném pořadí — druhý má pak pořadí 1, stejný otisk jako první.
-select pg_temp.importovat(:'firma_a', :'u_firma', 'banka_api', 'krok111-z1',
-  '[{"datum":"2033-05-09","smer":"vydaj","castka_haleru":3300,"mena":"CZK","protistrana":"Trafika","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-z1"}]'::jsonb) as z1 \gset
-select pg_temp.importovat(:'firma_a', :'u_firma', 'banka_api', 'krok111-z2',
-  '[{"datum":"2033-05-09","smer":"vydaj","castka_haleru":3300,"mena":"CZK","protistrana":"Trafika","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-z2"},
-    {"datum":"2033-05-09","smer":"vydaj","castka_haleru":3300,"mena":"CZK","protistrana":"Trafika","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-z1"}]'::jsonb) as z2 \gset
-select pg_temp.check('druhá stejná platba od banky (jiné id) se zapíše, i když přijde první (1)',
-  :'z1'::int = 1 and :'z2'::int = 1);
-select pg_temp.check('… a na účtu jsou obě (z1, z2)',
-  (select count(*) from public.transakce where ucet_id = :'u_firma' and externi_id in ('krok111-z1', 'krok111-z2')) = 2);
+-- B3: KB, okno od poledne. Poledne: X. Celodenní výpis: X, Y. Běh
+-- s celým dnem: X, Y. Další běh od poledne: jen Y.
+select pg_temp.stahnout(:'firma_a', :'u_b3', 'krok111-b3-1', jsonb_build_array(pg_temp.r('2033-06-03', 'krok111-b3-x'))) as b3_1 \gset
+select pg_temp.importovat(:'firma_a', :'u_b3', 'csv_banka', 'krok111-b3-v',
+  jsonb_build_array(pg_temp.r('2033-06-03'), pg_temp.r('2033-06-03'))) as b3_v \gset
+select pg_temp.stahnout(:'firma_a', :'u_b3', 'krok111-b3-2',
+  jsonb_build_array(pg_temp.r('2033-06-03', 'krok111-b3-x'), pg_temp.r('2033-06-03', 'krok111-b3-y'))) as b3_2 \gset
+select pg_temp.stahnout(:'firma_a', :'u_b3', 'krok111-b3-3', jsonb_build_array(pg_temp.r('2033-06-03', 'krok111-b3-y'))) as b3_3 \gset
+select pg_temp.check('B3: stažení od poledne, celodenní výpis, další stažení — na účtu 2, ne 3 (1/1/0/0)',
+  :'b3_1'::int = 1 and :'b3_v'::int = 1 and :'b3_2'::int = 0 and :'b3_3'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_b3') = 2);
+select pg_temp.check('B3: druhou platbu (Y) banka jen potvrdila u řádku výpisu',
+  exists (select 1 from public.transakce_potvrzeni_banky where ucet_id = :'u_b3' and externi_id = 'krok111-b3-y'));
 
--- d) Výpis uložený v Excelu: úvodní nuly VS zmizí („0012345" → „12345").
+-- Výpis → stažení: výpis se dvěma stejnými platbami, potom jedno stažení
+-- s oběma; pak všechno znovu.
+select pg_temp.importovat(:'firma_a', :'u_vs', 'csv_banka', 'krok111-vs-v',
+  jsonb_build_array(pg_temp.r('2033-06-04'), pg_temp.r('2033-06-04'), pg_temp.r('2033-06-05', null, 700))) as vs_v \gset
+select pg_temp.stahnout(:'firma_a', :'u_vs', 'krok111-vs-s',
+  jsonb_build_array(pg_temp.r('2033-06-04', 'krok111-vs-a'), pg_temp.r('2033-06-04', 'krok111-vs-b'),
+                    pg_temp.r('2033-06-06', 'krok111-vs-c', 800))) as vs_s \gset
+select pg_temp.check('výpis → stažení: tytéž dvě platby se nezapíšou znovu, jen nová (3/1, na účtu 4)',
+  :'vs_v'::int = 3 and :'vs_s'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_vs') = 4);
+select pg_temp.check('výpis → stažení: oba řádky výpisu s 2. 6. mají potvrzení banky, každý jiné id',
+  (select count(distinct b.externi_id) from public.transakce t
+     join public.transakce_potvrzeni_banky b on b.transakce_id = t.id
+    where t.ucet_id = :'u_vs' and t.datum = '2033-06-04' and t.zdroj = 'csv_banka') = 2);
+select pg_temp.stahnout(:'firma_a', :'u_vs', 'krok111-vs-s2',
+  jsonb_build_array(pg_temp.r('2033-06-04', 'krok111-vs-a'), pg_temp.r('2033-06-04', 'krok111-vs-b'),
+                    pg_temp.r('2033-06-06', 'krok111-vs-c', 800))) as vs_s2 \gset
+select pg_temp.importovat(:'firma_a', :'u_vs', 'csv_banka', 'krok111-vs-v2',
+  jsonb_build_array(pg_temp.r('2033-06-04'), pg_temp.r('2033-06-04'), pg_temp.r('2033-06-05', null, 700),
+                    pg_temp.r('2033-06-06', null, 800))) as vs_v2 \gset
+select pg_temp.check('opakované stažení i výpis nic nepřidají (0/0, na účtu 4, potvrzení 2)',
+  :'vs_s2'::int = 0 and :'vs_v2'::int = 0
+  and (select count(*) from public.transakce where ucet_id = :'u_vs') = 4
+  and (select count(*) from public.transakce_potvrzeni_banky where ucet_id = :'u_vs') = 2);
+
+-- Stažení → výpis: dvě stejné platby s různým id, potom výpis s oběma.
+select pg_temp.stahnout(:'firma_a', :'u_sv', 'krok111-sv-s',
+  jsonb_build_array(pg_temp.r('2033-06-07', 'krok111-sv-a'), pg_temp.r('2033-06-07', 'krok111-sv-b'))) as sv_s \gset
+select pg_temp.importovat(:'firma_a', :'u_sv', 'csv_banka', 'krok111-sv-v',
+  jsonb_build_array(pg_temp.r('2033-06-07'), pg_temp.r('2033-06-07'), pg_temp.r('2033-06-08'))) as sv_v \gset
+select pg_temp.check('stažení → výpis: tytéž dvě platby výpis znovu nezapíše, jen novou (2/1, na účtu 3)',
+  :'sv_s'::int = 2 and :'sv_v'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_sv') = 3);
+
+-- Dvě stejné platby od banky s různým id, každá v jiném stažení (banka je
+-- mezi staženími pošle v jiném pořadí).
+select pg_temp.stahnout(:'firma_a', :'u_dve', 'krok111-dve-1', jsonb_build_array(pg_temp.r('2033-06-09', 'krok111-dve-a'))) as dve_1 \gset
+select pg_temp.stahnout(:'firma_a', :'u_dve', 'krok111-dve-2',
+  jsonb_build_array(pg_temp.r('2033-06-09', 'krok111-dve-b'), pg_temp.r('2033-06-09', 'krok111-dve-a'))) as dve_2 \gset
+select pg_temp.check('dvě stejné platby od banky s různým id jsou dvě (1/1, na účtu 2)',
+  :'dve_1'::int = 1 and :'dve_2'::int = 1
+  and (select count(*) from public.transakce where ucet_id = :'u_dve' and zdroj = 'banka_api') = 2);
+
+-- Výpis omylem nahraný jako pokladní uzávěrka: pokladní řádky se do
+-- kontroly dvojího zápisu banky nepočítají — pohyb z banky se zapíše.
+select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-v',
+  jsonb_build_array(pg_temp.r('2033-06-10'))) as pokl_v \gset
+select pg_temp.stahnout(:'firma_a', :'u_pokl', 'krok111-pokl-s', jsonb_build_array(pg_temp.r('2033-06-10', 'krok111-pokl-a'))) as pokl_s \gset
+select pg_temp.check('výpis omylem jako pokladní uzávěrka, pak stažení: pohyb z banky se zapíše (1/1)',
+  :'pokl_v'::int = 1 and :'pokl_s'::int = 1
+  and exists (select 1 from public.transakce where ucet_id = :'u_pokl' and zdroj = 'banka_api' and externi_id = 'krok111-pokl-a'));
+select pg_temp.importovat(:'firma_a', :'u_pokl', 'csv_pokladna', 'krok111-pokl-v2',
+  jsonb_build_array(pg_temp.r('2033-06-10'))) as pokl_v2 \gset
+select pg_temp.check('… a pokladní uzávěrka se počítá jen proti pokladním: znovu nahraná nic nepřidá (0)',
+  :'pokl_v2'::int = 0);
+
+-- Stornovaný řádek výpisu pohyb z banky nezablokuje.
+select pg_temp.importovat(:'firma_a', :'u_storno', 'csv_banka', 'krok111-storno-v',
+  jsonb_build_array(pg_temp.r('2033-06-11'))) as storno_v \gset
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, storno_of)
+select :'firma_a', :'u_storno', 'vydaj', 500, '2033-06-11', 'rucni', t.id
+  from public.transakce t where t.ucet_id = :'u_storno' and t.zdroj = 'csv_banka';
+select pg_temp.stahnout(:'firma_a', :'u_storno', 'krok111-storno-s', jsonb_build_array(pg_temp.r('2033-06-11', 'krok111-storno-a'))) as storno_s \gset
+select pg_temp.check('stornovaný řádek výpisu, pak stažení: pohyb z banky se zapíše (1/1)',
+  :'storno_v'::int = 1 and :'storno_s'::int = 1
+  and exists (select 1 from public.transakce where ucet_id = :'u_storno' and zdroj = 'banka_api' and externi_id = 'krok111-storno-a'));
+
+-- Pokladna (`pos_adapter`) a výpis se sloupcem „Externí ID" s id, které
+-- banka teprve pošle: pohyb z banky se zapíše (id jen v rámci zdroje).
+insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, externi_id, protistrana)
+values (:'firma_a', :'u_podvrh', 'vydaj', 500, '2033-06-12', 'pos_adapter', 'krok111-pv-a', 'Poplatek');
+select pg_temp.importovat(:'firma_a', :'u_podvrh', 'csv_banka', 'krok111-pv-v',
+  jsonb_build_array(pg_temp.r('2033-06-13', 'krok111-pv-b', 999))) as pv_v \gset
+select pg_temp.stahnout(:'firma_a', :'u_podvrh', 'krok111-pv-s',
+  jsonb_build_array(pg_temp.r('2033-06-12', 'krok111-pv-a'), pg_temp.r('2033-06-13', 'krok111-pv-b'))) as pv_s \gset
+select pg_temp.check('pokladna a výpis s vymyšleným id, pak stažení: oba pohyby z banky se zapíšou (1/2)',
+  :'pv_v'::int = 1 and :'pv_s'::int = 2
+  and (select count(*) from public.transakce
+        where ucet_id = :'u_podvrh' and zdroj = 'banka_api' and externi_id in ('krok111-pv-a', 'krok111-pv-b')) = 2);
+select pg_temp.check('id od banky je unikátní v rámci zdroje (ucet_id, zdroj, externi_id)',
+  (select pg_get_indexdef(c.oid) like '%(ucet_id, zdroj, externi_id)%' and i.indisunique
+     from pg_class c join pg_index i on i.indexrelid = c.oid
+    where c.relname = 'transakce_externi_id'));
+
+-- Starý výpis z doby PŘED touhle migrací (bez klíče) dostal klíč dopočtem
+-- — tady se jen ověří, že každý pohyb z importu klíč má.
+select pg_temp.check('každý pohyb z importu (výpis, stažení, pokladní uzávěrka) má klíč, ruční a pokladna ne',
+  not exists (select 1 from public.transakce
+               where tenant_id = :'firma_a'
+                 and ((zdroj in ('banka_api', 'csv_banka', 'csv_pokladna') and otisk is null)
+                   or (zdroj in ('rucni', 'pos_adapter') and otisk is not null))));
+
+-- Výpis uložený v Excelu: úvodní nuly VS zmizí („0012345" → „12345").
 select pg_temp.importovat(:'firma_a', :'u_firma', 'csv_banka', 'krok111-e1',
   '[{"datum":"2033-05-12","smer":"vydaj","castka_haleru":2500,"mena":"CZK","protistrana":"Dodavatel E","protiucet":"CZ6508000000192000145399","vs":"0012345","poznamka":""}]'::jsonb) as e1 \gset
 select pg_temp.importovat(:'firma_a', :'u_firma', 'csv_banka', 'krok111-e2',
@@ -342,12 +500,20 @@ select pg_temp.importovat(:'firma_a', :'u_firma', 'csv_banka', 'krok111-e2',
 select pg_temp.check('týž výpis po uložení v Excelu (VS bez úvodních nul) nic nepřidá',
   :'e1'::int = 1 and :'e2'::int = 0);
 
--- e) Otisk nesmí záviset na nastavení relace (jiný klient, ruční skript).
-select app.otisk_pohybu(:'u_firma', '2033-05-02', 'vydaj', 1, 'CZK', '', '', 'x', 1) as otisk_iso \gset
+-- Klíč nesmí záviset na nastavení relace (jiný klient, ruční skript).
+select app.otisk_pohybu(:'u_firma', '2033-05-02', 'vydaj', 1, 'CZK', '', '', 'x') as otisk_iso \gset
 set datestyle = 'SQL, DMY';
-select pg_temp.check('otisk nezávisí na DateStyle relace (datum přes to_char)',
-  app.otisk_pohybu(:'u_firma', '2033-05-02', 'vydaj', 1, 'CZK', '', '', 'x', 1) = :'otisk_iso');
+select pg_temp.check('klíč nezávisí na DateStyle relace (datum přes to_char)',
+  app.otisk_pohybu(:'u_firma', '2033-05-02', 'vydaj', 1, 'CZK', '', '', 'x') = :'otisk_iso');
 reset datestyle;
+
+-- Souběh: import se řadí zámkem na účet, a to SAMOSTATNÝM příkazem před
+-- roztříděním (další příkaz už vidí, co zapsal souběžný import).
+select pg_temp.check('importovat_transakce: zámek účtu samostatným příkazem PŘED roztříděním řádků',
+  (select position(z in d) > 0 and position(z in d) < position('app.import_roztridit(' in d)
+     from (select pg_get_functiondef('public.importovat_transakce(uuid, uuid, uuid, text, jsonb)'::regprocedure) as d,
+                  'perform pg_advisory_xact_lock(hashtextextended(''transakce:'' || p_ucet::text, 0));' as z) x));
+
 
 
 \echo ''
@@ -378,8 +544,7 @@ select pg_temp.check('otisk bez dávky databáze nepustí (23514)',
     'insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, otisk) values (%L, %L, %L, 1, %L, %L, %L)',
     :'firma_a', :'u_p1', 'prijem', '2033-02-02', 'csv_banka', 'podvrzeny-otisk'), '23514', 'transakce_otisk_jen_z_importu'));
 
--- Ruční zápis si nesmí „zabrat" id ani otisk pohybu z banky — import by
--- skutečný pohyb přeskočil jako už zapsaný.
+-- Ruční zápis nemá nic z importu (id od banky, dávku, klíč).
 select pg_temp.check('importovat_transakce ruční zdroj odmítne (23514)',
   pg_temp.spadne_hlaskou(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
     :'firma_a', :'u_p1', :'d_stary', 'rucni',
@@ -394,9 +559,25 @@ select pg_temp.check('ruční zápis s dávkou importu databáze nepustí (23514
     'insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, import_davka_id) values (%L, %L, %L, 1, %L, %L, %L)',
     :'firma_a', :'u_p1', 'prijem', '2033-02-02', 'rucni', :'d_stary'), '23514', 'transakce_rucni_bez_importu'));
 
+-- Dávka cizí firmy: import ani potvrzení z banky ji nepřijmou.
+insert into public.import_davky (tenant_id, typ, soubor_nazev, soubor_hash, stav)
+values (:'firma_b', 'banka_csv', 'cizi.csv', 'krok111-cizi', 'zpracovano') returning id as d_cizi \gset
+select pg_temp.check('import do dávky cizí firmy spadne (spoušť, 23514)',
+  pg_temp.spadne_hlaskou(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
+    :'firma_a', :'u_p1', :'d_cizi', 'csv_banka',
+    '[{"datum":"2033-02-05","smer":"prijem","castka_haleru":5,"protistrana":"Cizí dávka","vs":"","poznamka":""}]'),
+    '23514', 'Importní dávka nepatří'));
+select id as t_sv_volny from public.transakce where ucet_id = :'u_sv' and zdroj = 'csv_banka' \gset
+select pg_temp.check('potvrzení z banky k řádku jiného účtu databáze nepustí (složený cizí klíč, 23503)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce_potvrzeni_banky (tenant_id, ucet_id, transakce_id, externi_id, import_davka_id) values (%L, %L, %L, %L, %L)',
+    :'firma_a', :'u_b1', :'t_sv_volny', 'krok111-fk-1', :'d_stary'), '23503', ''));
+select pg_temp.check('potvrzení z banky s dávkou cizí firmy databáze nepustí (23503)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce_potvrzeni_banky (tenant_id, ucet_id, transakce_id, externi_id, import_davka_id) values (%L, %L, %L, %L, %L)',
+    :'firma_a', :'u_sv', :'t_sv_volny', 'krok111-fk-2', :'d_cizi'), '23503', ''));
+
 
 \echo ''
-\echo '== 4. Import přihlášeného ==============================================='
+\echo '== 4. Import a přímý zápis přihlášeného ================================='
 
 set role authenticated;
 select set_config('test.user_id', :'maj', false);
@@ -408,14 +589,90 @@ select pg_temp.check('… ale zdroj banka_api přihlášený nezapíše (42501, 
     :'firma_a', :'u_p1', 'banka_api', 'x', 'krok111-maj-api',
     '[{"datum":"2033-02-03","smer":"prijem","castka_haleru":700,"mena":"CZK","protistrana":"x","protiucet":"","vs":"","poznamka":"","externi_id":"krok111-maj-x"}]'),
     '42501', 'synchronizace'));
+-- Řádek výpisu bez potvrzení na u_sv existuje — „stažení" přihlášeného by
+-- zapsalo jen potvrzení (žádný nový pohyb).
+select pg_temp.check('… ani stažení, které by jen potvrdilo řádek výpisu (42501, potvrzení zapíše jen služba)',
+  pg_temp.spadne_hlaskou(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
+    :'firma_a', :'u_sv', :'d_stary', 'banka_api', jsonb_build_array(pg_temp.r('2033-06-08', 'krok111-maj-potvrzeni'))::text),
+    '42501', 'synchronizace'));
+select pg_temp.check('majitel nezapíše potvrzení z banky přímo (42501, bez práva zápisu)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce_potvrzeni_banky (tenant_id, ucet_id, transakce_id, externi_id, import_davka_id) values (%L, %L, %L, %L, %L)',
+    :'firma_a', :'u_sv', :'t_sv_volny', 'krok111-maj-potvrzeni', :'d_stary'), '42501', 'permission denied'));
+-- Přímý zápis (REST) jen ruční platby. Výpis a pokladní uzávěrka jen přes
+-- import — řádek „výpisu" s vymyšleným obsahem a id by jinak párování
+-- faktur bralo jako platbu z banky.
+select pg_temp.check('majitel: „výpis" (csv_banka) přímým zápisem nezapíše (42501, jen import)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, externi_id) values (%L, %L, %L, 1, %L, %L, %L)',
+    :'firma_a', :'u_p1', 'prijem', '2033-02-04', 'csv_banka', 'krok111-budouci-id'), '42501', 'import výpisu'));
+select pg_temp.check('majitel: pokladní uzávěrku (csv_pokladna) přímým zápisem nezapíše (42501)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj) values (%L, %L, %L, 1, %L, %L)',
+    :'firma_a', :'u_p1', 'prijem', '2033-02-04', 'csv_pokladna'), '42501', 'import výpisu'));
+select pg_temp.check('majitel: pokladnu (pos_adapter) přímým zápisem nezapíše (42501)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, externi_id) values (%L, %L, %L, 1, %L, %L, %L)',
+    :'firma_a', :'u_p1', 'prijem', '2033-02-04', 'pos_adapter', 'krok111-budouci-id'), '42501', 'import výpisu'));
+select pg_temp.check('majitel: pohyb „z banky" (banka_api) přímým zápisem nezapíše (42501)',
+  pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj) values (%L, %L, %L, 1, %L, %L)',
+    :'firma_a', :'u_p1', 'prijem', '2033-02-04', 'banka_api'), '42501', 'synchronizace'));
+select pg_temp.check('majitel: ruční platbu přímým zápisem zapíše',
+  pg_temp.projde(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, protistrana) values (%L, %L, %L, 1, %L, %L, %L)',
+    :'firma_a', :'u_p1', 'prijem', '2033-02-04', 'rucni', 'Krok111 ruční od majitelky')));
+-- Příznak importu platí jen během importu: přímý zápis hned po něm (v téže
+-- transakci) už neprojde.
+select pg_temp.check('příznak importu se hned vrací: přímý zápis výpisu po importu v téže transakci neprojde (42501)',
+  pg_temp.spadne_hlaskou(format(
+    'with i as (select pg_temp.importovat(%L, %L, %L, %L, %L::jsonb) as n)
+     insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, protistrana)
+     select %L, %L, %L, 1, %L, %L, %L from i where i.n = 1',
+    :'firma_a', :'u_p1', 'csv_banka', 'krok111-priznak',
+    '[{"datum":"2033-02-06","smer":"prijem","castka_haleru":61,"mena":"CZK","protistrana":"Před přímým zápisem","protiucet":"","vs":"","poznamka":""}]',
+    :'firma_a', :'u_p1', 'prijem', '2033-02-06', 'csv_banka', 'Krok111 po importu'),
+    '42501', 'import výpisu'));
+-- Výpis se sloupcem „Externí ID" smí id mít — pohyb z banky se stejným id
+-- ho přesto zapíše (níž, po návratu do role služby).
+select pg_temp.check('majitel importuje výpis s „Externí ID", které banka teprve pošle',
+  pg_temp.importovat(:'firma_a', :'u_podvrh', 'csv_banka', 'krok111-pv-maj',
+    jsonb_build_array(pg_temp.r('2033-06-14', 'krok111-pv-c', 999))) = 1);
+
 select set_config('test.user_id', :'pob1', false);
 select pg_temp.check('člověk jedné pobočky výpis neimportuje (dávka jen za celou firmu, 42501)',
   pg_temp.spadne_hlaskou(format('select * from public.importovat_vypis(%L, %L, %L, %L, %L, %L::jsonb)',
     :'firma_a', :'u_p1', 'csv_banka', 'x', 'krok111-pob1',
     '[{"datum":"2033-02-03","smer":"prijem","castka_haleru":1,"mena":"CZK","protistrana":"x","protiucet":"","vs":"","poznamka":""}]'),
     '42501', ''));
+-- Kontrola dvojího zápisu čte pohyby účtu pod RLS — kdo účet nevidí, by
+-- je nepoznal a zapsal podruhé. Import takový účet odmítne rovnou.
+select pg_temp.check('import na účet, jehož platby přihlášený nevidí, odmítne (42501)',
+  pg_temp.spadne_hlaskou(format('select public.importovat_transakce(%L, %L, %L, %L, %L::jsonb)',
+    :'firma_a', :'u_firma', :'d_stary', 'csv_banka',
+    '[{"datum":"2033-02-03","smer":"prijem","castka_haleru":1,"protistrana":"x","vs":"","poznamka":""}]'),
+    '42501', 'vidíte'));
 reset role;
 select set_config('test.user_id', '', false);
+
+select pg_temp.stahnout(:'firma_a', :'u_podvrh', 'krok111-pv-s2',
+  jsonb_build_array(pg_temp.r('2033-06-14', 'krok111-pv-c'))) as pv_s2 \gset
+select pg_temp.check('… stažení s tím id pohyb z banky zapíše (1)',
+  :'pv_s2'::int = 1
+  and exists (select 1 from public.transakce where ucet_id = :'u_podvrh' and zdroj = 'banka_api' and externi_id = 'krok111-pv-c'));
+
+-- Každé id ze stažení (všechna stažení scénáře jdou přes pg_temp.stahnout)
+-- je na účtu PRÁVĚ JEDNOU: řádek `banka_api`, nebo potvrzení řádku výpisu.
+select pg_temp.check('žádné id ze stažení se neztratí ani nezdvojí: každé je řádek banka_api, nebo potvrzení (právě jednou)',
+  (select count(*) from k111_stazena_id) > 0
+  and not exists (
+    select 1 from (select distinct ucet_id, externi_id from k111_stazena_id) s
+     where (select count(*) from public.transakce t
+             where t.ucet_id = s.ucet_id and t.zdroj = 'banka_api' and t.externi_id = s.externi_id)
+         + (select count(*) from public.transakce_potvrzeni_banky b
+             where b.ucet_id = s.ucet_id and b.externi_id = s.externi_id) <> 1));
+select pg_temp.check('každé potvrzení ukazuje na nestornovaný řádek výpisu (csv_banka) téhož účtu',
+  (select count(*) from public.transakce_potvrzeni_banky where tenant_id = :'firma_a') > 0
+  and not exists (
+    select 1 from public.transakce_potvrzeni_banky b
+      join public.transakce t on t.id = b.transakce_id
+     where b.tenant_id = :'firma_a'
+       and (t.zdroj <> 'csv_banka' or t.ucet_id <> b.ucet_id
+            or exists (select 1 from public.transakce s where s.storno_of = t.id))));
 
 
 \echo ''
@@ -468,9 +725,11 @@ select pg_temp.check('pobočka P1: dávky importu nevidí (jsou za celou firmu)'
 select pg_temp.check('pobočka P1: app.platebni_ucty_s_pravem(finance.read) = jen účet P1',
   (select array_agg(x) from app.platebni_ucty_s_pravem('finance.read') x
     where x in (:'u_firma', :'u_p1', :'u_p2', :'u_cizi')) = array[:'u_p1'::uuid]);
+select pg_temp.check('pobočka P1: potvrzení z banky u firemních účtů nevidí',
+  not exists (select 1 from public.transakce_potvrzeni_banky where ucet_id in (:'u_b2', :'u_b3', :'u_vs')));
 -- Zápis pohybů a zůstatků jen za celou firmu (ROZHODNOUT v migraci): ani
--- ruční platbu na účet vlastní pobočky — jinak by si pobočka zabrala id
--- pohybu z banky nebo stornovala platbu, kterou nevidí.
+-- ruční platbu na účet vlastní pobočky — jinak by pobočka stornovala
+-- platbu, kterou nevidí, nebo podstrčila zůstatek.
 select pg_temp.check('pobočka P1: ani ruční platbu na účet své pobočky nezapíše (zápis jen za celou firmu, 42501)',
   pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, protistrana) values (%L, %L, %L, 1, %L, %L, %L)',
     :'firma_a', :'u_p1', 'prijem', '2033-03-06', 'rucni', 'Krok111 zápis P1'), '42501', ''));
@@ -527,13 +786,16 @@ select pg_temp.check('rozsah celé firmy: vidí zůstatek firemního účtu',
   exists (select 1 from public.bankovni_zustatky where platebni_ucet_id = :'u_firma'));
 select pg_temp.check('rozsah celé firmy (jen čtení): vidí párování plateb firemního účtu i P2',
   (select count(*) from public.platby_faktury where faktura_id like 'krok111-faktura-%') = 2);
+select pg_temp.check('rozsah celé firmy (jen čtení): vidí potvrzení z banky firemních účtů (4)',
+  (select count(*) from public.transakce_potvrzeni_banky where ucet_id in (:'u_b2', :'u_b3', :'u_vs')) = 4);
 
 -- Bohdan: cizí firma.
 select set_config('test.user_id', :'cizi', false);
 select pg_temp.check('cizí firma: nevidí žádný účet, pohyb ani zůstatek firmy A',
   not exists (select 1 from public.platebni_ucty where id in (:'u_firma', :'u_p1', :'u_p2'))
   and not exists (select 1 from public.transakce where ucet_id in (:'u_firma', :'u_p1', :'u_p2'))
-  and not exists (select 1 from public.bankovni_zustatky where platebni_ucet_id in (:'u_firma', :'u_p1', :'u_p2')));
+  and not exists (select 1 from public.bankovni_zustatky where platebni_ucet_id in (:'u_firma', :'u_p1', :'u_p2'))
+  and not exists (select 1 from public.transakce_potvrzeni_banky where tenant_id = :'firma_a'));
 select pg_temp.check('cizí firma: na účet firmy A nezapíše (42501)',
   pg_temp.spadne_hlaskou(format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj) values (%L, %L, %L, 1, %L, %L)',
     :'firma_a', :'u_p1', 'prijem', '2033-03-06', 'rucni'), '42501', ''));
@@ -635,13 +897,54 @@ select pg_temp.check('cizí firma: integrace_overit_spravu odmítne (42501)',
   pg_temp.spadne_hlaskou(format('select public.integrace_overit_spravu(%L)', :'pr_banka'), '42501', 'oprávnění'));
 select pg_temp.check('cizí firma: ani číst šifru banky (42501)',
   pg_temp.spadne_hlaskou(format('select public.integrace_precti_tajemstvi(%L)', :'pr_banka'), '42501', 'oprávnění'));
+
+-- Účet, na který míří připojení POBOČKY, se nepřestěhuje: spoušť u připojení
+-- hlídá jen změnu připojení. Majitelka projde politikou — zastavit to musí
+-- spoušť účtu.
+select set_config('test.user_id', :'maj', false);
+select pg_temp.check('účet s připojením pobočky P1 nejde přesunout na pobočku P2 (23514)',
+  pg_temp.spadne_hlaskou(format('update public.platebni_ucty set branch_id = %L where id = %L', :'p2', :'u_p1'),
+    '23514', 'připojení jiné pobočky'));
+select pg_temp.check('… ani na celou firmu (23514)',
+  pg_temp.spadne_hlaskou(format('update public.platebni_ucty set branch_id = null where id = %L', :'u_p1'),
+    '23514', 'připojení jiné pobočky'));
+reset role;
+update public.integrace_pripojeni set stav = 'odpojeno'
+ where tenant_id = :'firma_a' and poskytovatel = 'krok111-banka-p1';
+set role authenticated;
+select pg_temp.check('… ani když má připojení jen stav odpojeno, bez času odpojení (23514)',
+  pg_temp.spadne_hlaskou(format('update public.platebni_ucty set branch_id = %L where id = %L', :'p2', :'u_p1'),
+    '23514', 'připojení jiné pobočky'));
+reset role;
+update public.integrace_pripojeni set stav = 'pripojeno', odpojeno_kdy = now()
+ where tenant_id = :'firma_a' and poskytovatel = 'krok111-banka-p1';
+set role authenticated;
+select pg_temp.check('… ani když má jen čas odpojení, stav ne (23514)',
+  pg_temp.spadne_hlaskou(format('update public.platebni_ucty set branch_id = %L where id = %L', :'p2', :'u_p1'),
+    '23514', 'připojení jiné pobočky'));
+reset role;
+update public.integrace_pripojeni set stav = 'odpojeno'
+ where tenant_id = :'firma_a' and poskytovatel = 'krok111-banka-p1';
+-- Připojení za celou firmu (bez pobočky) smí ke kterémukoli účtu firmy.
+update public.integrace_pripojeni set platebni_ucet_id = :'u_p2' where id = :'pr_banka';
+set role authenticated;
+select pg_temp.check('úplně odpojené připojení pobočky přesun nebrání (P2 a zpět)',
+  pg_temp.projde(format('update public.platebni_ucty set branch_id = %L where id = %L', :'p2', :'u_p1'))
+  and pg_temp.projde(format('update public.platebni_ucty set branch_id = %L where id = %L', :'p1', :'u_p1')));
+select pg_temp.check('připojení za celou firmu přesun účtu nebrání (P2 → P1 a zpět)',
+  pg_temp.projde(format('update public.platebni_ucty set branch_id = %L where id = %L', :'p1', :'u_p2'))
+  and pg_temp.projde(format('update public.platebni_ucty set branch_id = %L where id = %L', :'p2', :'u_p2')));
 reset role;
 select set_config('test.user_id', '', false);
+select pg_temp.check('účty P1 a P2 po zkouškách pořád pod svou pobočkou',
+  (select branch_id = :'p1'::uuid from public.platebni_ucty where id = :'u_p1')
+  and (select branch_id = :'p2'::uuid from public.platebni_ucty where id = :'u_p2'));
 
-select pg_temp.check('anon nemá integrace_overit_spravu, importovat_vypis ani otisk; authenticated ano',
+select pg_temp.check('anon nemá integrace_overit_spravu, importovat_vypis, klíč ani roztřídění; authenticated ano',
   not has_function_privilege('anon', 'public.integrace_overit_spravu(uuid)', 'execute')
   and not has_function_privilege('anon', 'public.importovat_vypis(uuid, uuid, text, text, text, jsonb)', 'execute')
-  and not has_function_privilege('anon', 'app.otisk_pohybu(uuid, date, text, integer, text, text, text, text, bigint)', 'execute')
+  and not has_function_privilege('anon', 'app.otisk_pohybu(uuid, date, text, integer, text, text, text, text)', 'execute')
+  and not has_function_privilege('anon', 'app.import_roztridit(uuid, text, jsonb)', 'execute')
   and has_function_privilege('authenticated', 'public.integrace_overit_spravu(uuid)', 'execute')
   and has_function_privilege('authenticated', 'public.importovat_vypis(uuid, uuid, text, text, text, jsonb)', 'execute'));
 select pg_temp.check('spoušť pobočky účtu a výběr účtů nezavolá přihlášený přímo jako spoušť (bez execute)',
@@ -681,6 +984,24 @@ select pg_temp.check('starý typ dávky fio_api neprojde (23514)',
   pg_temp.spadne_hlaskou(format('insert into public.import_davky (tenant_id, typ, soubor_hash, stav) values (%L, %L, %L, %L)',
     :'firma_a', 'fio_api', 'krok111-stary-typ', 'zpracovano'), '23514', 'import_davky_typ_check'));
 
+-- Potvrzení z banky: jen přidávání, zapisuje jen služba.
+select pg_temp.check('potvrzení z banky: přihlášený jen čte, anon nic, služba čte a přidává, úpravu ani mazání nikdo',
+  has_table_privilege('authenticated', 'public.transakce_potvrzeni_banky', 'select')
+  and not has_table_privilege('authenticated', 'public.transakce_potvrzeni_banky', 'insert')
+  and not has_table_privilege('authenticated', 'public.transakce_potvrzeni_banky', 'update')
+  and not has_table_privilege('authenticated', 'public.transakce_potvrzeni_banky', 'delete')
+  and not has_table_privilege('authenticated', 'public.transakce_potvrzeni_banky', 'truncate')
+  and not has_table_privilege('anon', 'public.transakce_potvrzeni_banky', 'select')
+  and not has_table_privilege('anon', 'public.transakce_potvrzeni_banky', 'insert')
+  and has_table_privilege('service_role', 'public.transakce_potvrzeni_banky', 'insert')
+  and not has_table_privilege('service_role', 'public.transakce_potvrzeni_banky', 'update')
+  and not has_table_privilege('service_role', 'public.transakce_potvrzeni_banky', 'delete')
+  and not has_table_privilege('service_role', 'public.transakce_potvrzeni_banky', 'truncate'));
+select pg_temp.check('potvrzení z banky: RLS zapnuté, jediná politika je čtení',
+  (select relrowsecurity from pg_class where oid = 'public.transakce_potvrzeni_banky'::regclass)
+  and (select array_agg(cmd::text) from pg_policies
+        where schemaname = 'public' and tablename = 'transakce_potvrzeni_banky') = array['SELECT']);
+
 
 \echo ''
 \echo '== Úklid ================================================================'
@@ -689,11 +1010,13 @@ delete from public.integrace_tajemstvi where pripojeni_id in (:'pr_banka', :'pr_
 delete from public.integrace_pripojeni where tenant_id = :'firma_a' and poskytovatel like 'krok111-%';
 delete from public.bankovni_zustatky where platebni_ucet_id in (:'u_firma', :'u_p1', :'u_p2', :'u_cizi');
 delete from public.platby_faktury where transakce_id in (:'t_par_firma', :'t_par_p2');
-delete from public.transakce where ucet_id in (:'u_firma', :'u_p1', :'u_p2', :'u_cizi');
+delete from public.transakce_potvrzeni_banky where tenant_id in (:'firma_a', :'firma_b');
+delete from public.transakce where tenant_id in (:'firma_a', :'firma_b');
 delete from public.zakazky where id = :'zakazka';
 delete from public.kontakty where id = :'kontakt';
 delete from public.import_davky where tenant_id in (:'firma_a', :'firma_b');
-delete from public.platebni_ucty where id in (:'u_firma', :'u_p1', :'u_p2', :'u_cizi');
+delete from public.platebni_ucty where tenant_id in (:'firma_a', :'firma_b');
+drop table k111_stazena_id;
 -- Majitelé a jejich firmy zůstávají (jako v krocích 103 až 110): posledního
 -- majitele firmy pojistka smazat nedovolí. Ostatní lidé pryč.
 delete from public.membership_branches
@@ -704,8 +1027,9 @@ delete from public.employees where id in (:'e_pob1', :'e_pob2', :'e_firemni');
 delete from public.position_permissions where position_id in (:'z_fin', :'z_cteni');
 delete from public.positions where id in (:'z_fin', :'z_cteni');
 
-select pg_temp.check('úklid: účty, pohyby, zůstatky, dávky, párování, zakázka a připojení kroku 111 pryč',
+select pg_temp.check('úklid: účty, pohyby, potvrzení, zůstatky, dávky, párování, zakázka a připojení kroku 111 pryč',
   not exists (select 1 from public.platebni_ucty where tenant_id in (:'firma_a', :'firma_b'))
+  and not exists (select 1 from public.transakce_potvrzeni_banky where tenant_id in (:'firma_a', :'firma_b'))
   and not exists (select 1 from public.platby_faktury where tenant_id in (:'firma_a', :'firma_b'))
   and not exists (select 1 from public.zakazky where tenant_id in (:'firma_a', :'firma_b'))
   and not exists (select 1 from public.transakce where tenant_id in (:'firma_a', :'firma_b'))

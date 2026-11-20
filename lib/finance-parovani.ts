@@ -133,7 +133,8 @@ export function navrhnoutParovani(
  * všechno najednou (pravidla zpřísněná po dvou kolech kontroly kódu):
  *   - platba přišla Z BANKY přes API (zdroj `banka_api`) — ty zapisuje jen
  *     synchronizace (pojistka v databázi). Výpis CSV jen z dávky, kterou
- *     nahrál člověk s právem spravovat Faktury (volající ji předá);
+ *     nahrál člověk s právem spravovat Faktury (volající ji předá), nebo
+ *     řádek výpisu, který potvrdilo stažení z banky (`platbaZBanky`);
  *     ruční zápis ani pokladna nikdy;
  *   - stejný variabilní symbol (přesně) A přesně stejná částka, obojí
  *     v Kč (párování se vede v haléřích); jméno protistrany musí sedět
@@ -163,6 +164,13 @@ export type AutoTransakce = KandidatTransakce & {
   mena: string
   smer: 'vydaj' | 'prijem'
   davkaId: string | null
+  /**
+   * Řádek výpisu (`csv_banka`), který potvrdilo stažení z banky — banka
+   * k němu poslala id pohybu (tabulka `transakce_potvrzeni_banky`, zapisuje
+   * ji jen import pod službou). Stažení se pak podruhé nezapíše, takže
+   * tenhle řádek je ta platba z banky.
+   */
+  potvrzenoBankou?: boolean
 }
 
 /** Řádek `transakce` tak, jak ho čte automatické párování. */
@@ -177,14 +185,30 @@ export type RadekTransakceParovani = {
  * jak to pravidla níž dostávala před rozdělením na dva sloupce: pohyb
  * bez jména s cizím účtem se dodavateli sám nespáruje a vrácená platba
  * bez VS z téhož účtu se pozná.
+ *
+ * `potvrzeneBankou` = id řádků výpisu, které potvrdilo stažení z banky
+ * (`transakce_potvrzeni_banky.transakce_id`).
  */
-export function autoTransakceZRadku(t: RadekTransakceParovani): AutoTransakce {
+export function autoTransakceZRadku(t: RadekTransakceParovani, potvrzeneBankou?: ReadonlySet<string>): AutoTransakce {
   return {
     id: t.id, vs: t.vs ?? '', castkaHaleru: t.castka_haleru,
     protistrana: protistranaNeboUcet(t.protistrana, t.protiucet), protiucet: t.protiucet ?? '',
     datum: t.datum, alokovanoHaleru: 0, zdroj: t.zdroj, mena: t.mena ?? 'CZK',
     smer: t.smer === 'prijem' ? 'prijem' : 'vydaj', davkaId: t.import_davka_id,
+    potvrzenoBankou: t.zdroj === 'csv_banka' && (potvrzeneBankou?.has(t.id) ?? false),
   }
+}
+
+/**
+ * Věří se platbě jako platbě Z BANKY? Stažení přes API (zapisuje jen
+ * synchronizace), řádek výpisu potvrzený stažením z banky, nebo řádek
+ * výpisu z dávky, kterou právě nahrál člověk s právem spravovat Faktury.
+ * Ruční zápis ani pokladna nikdy.
+ */
+export function platbaZBanky(t: Pick<AutoTransakce, 'zdroj' | 'davkaId' | 'potvrzenoBankou'>, duveryhodneDavky: ReadonlySet<string>): boolean {
+  if (ZDROJE_Z_API.includes(t.zdroj)) return true
+  if (t.zdroj !== 'csv_banka') return false
+  return t.potvrzenoBankou === true || (t.davkaId !== null && duveryhodneDavky.has(t.davkaId))
 }
 export type AutoFaktura = KandidatFaktura & {
   stav: string | null
@@ -350,8 +374,7 @@ export function vybratAutomatickaParovani(
   for (const t of vydaje) {
     const v = normalizovatVs(t.vs)
     if (!v || t.castkaHaleru <= 0 || t.alokovanoHaleru !== 0) continue
-    const zBanky = ZDROJE_Z_API.includes(t.zdroj) || (t.zdroj === 'csv_banka' && t.davkaId !== null && duveryhodneDavky.has(t.davkaId))
-    if (!zBanky) continue
+    if (!platbaZBanky(t, duveryhodneDavky)) continue
     if (vydajePodleKlice.get(`${v}|${t.castkaHaleru}`) !== 1) continue
 
     // Soupeři: stejný VS a stejná částka — nebo částka, kterou příjem nepřečetl.

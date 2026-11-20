@@ -56,6 +56,8 @@ export type VysledekParovani = {
 const DNI_ZPET = 180
 const STRANKA = 1000
 const MAX_STRANEK = 20
+/** Kolik id řádků výpisu se ptá na potvrzení banky v jednom dotazu (délka adresy). */
+const POTVRZENI_NAJEDNOU = 100
 
 type RadekTransakce = RadekTransakceParovani
 type RadekAlokace = { transakce_id: string; faktura: string | null; faktura_id: string; castka_haleru: number; stav: string; zpusob: string }
@@ -139,9 +141,21 @@ export async function automatickyParovatPlatby(
       if (!error && count === d.pocet) duveryhodneDavky.add(d.id)
     }
 
+    // Řádky výpisu, které potvrdilo stažení z banky (transakce_potvrzeni_banky):
+    // stažení je podruhé nezapsalo, platba z banky je tedy ten řádek výpisu.
+    // Ptá se jen na řádky výpisu načtené výš, po kouscích.
+    const potvrzeneBankou = new Set<string>()
+    const radkyVypisu = transakce.filter((t) => t.zdroj === 'csv_banka').map((t) => t.id)
+    for (let i = 0; i < radkyVypisu.length; i += POTVRZENI_NAJEDNOU) {
+      const { data, error } = await supabase.from('transakce_potvrzeni_banky').select('transakce_id')
+        .eq('tenant_id', tenantId).in('transakce_id', radkyVypisu.slice(i, i + POTVRZENI_NAJEDNOU))
+      if (error) throw new Error(`Potvrzení z banky: ${error.message}`)
+      for (const r of (data ?? []) as { transakce_id: string }[]) potvrzeneBankou.add(r.transakce_id)
+    }
+
     // Protistrana = jméno, jinak číslo účtu (autoTransakceZRadku) — pravidla
     // párování stojí na neprázdné protistraně.
-    const autoTransakce: AutoTransakce[] = transakce.map(autoTransakceZRadku)
+    const autoTransakce: AutoTransakce[] = transakce.map((t) => autoTransakceZRadku(t, potvrzeneBankou))
     // I faktury bez přečtené částky (castkaHaleru 0) — pravidlo je počítá jako soupeře.
     const autoFaktury: AutoFaktura[] = fakturyRadky.map((f) => ({
       id: String(f.id), vs: f.variabilni_symbol,

@@ -168,6 +168,12 @@ select pg_temp.check('DELETE na transakci spadne na chybějící grant',
 \echo ''
 \echo '-- idempotentní import --'
 
+-- Řádky výpisu (csv_banka) zapisuje import (public.importovat_transakce)
+-- nebo služba — přímým zápisem přihlášeného jen ruční platba
+-- (app.hlida_zdroj_transakce, 20261119100000). Unikátní index se tu proto
+-- zkouší jako vlastník databáze.
+reset role;
+
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, externi_id)
 values (:'tenant', :'ucet', 'vydaj', 10000, current_date, 'csv_banka', 'csv-radek-001')
 returning id as transakce_csv \gset
@@ -186,6 +192,8 @@ select pg_temp.check('STEJNÉ externi_id na JINÝ účet je v pořádku (unikát
     format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, externi_id) values (%L, %L, %L, %L, current_date, %L, %L)',
       :'tenant', :'ucet_firemni', 'vydaj', 10000, 'csv_banka', 'csv-radek-001')))
 ;
+
+set role authenticated;
 
 \echo ''
 \echo '-- druhá linie obrany: cizí ucet_id / import_davka_id --'
@@ -210,11 +218,14 @@ select pg_temp.check('transakce s tenant_id=naše firma, ale ucet_id cizí firmy
       :'tenant', :'ucet_cizi', 'prijem', 1000, 'rucni'),
     '23514', ''));
 
+-- Řádek výpisu (csv_banka), ne ruční: ruční zápis s dávkou odmítne už
+-- CHECK transakce_rucni_bez_importu (20261119100000) a tahle kontrola by
+-- pak prošla, i kdyby spoušť dávku nehlídala. Hláška je spouště.
 select pg_temp.check('transakce s import_davka_id cizí firmy spadne (druhá linie)',
   pg_temp.spadne_hlaskou(
     format('insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, import_davka_id) values (%L, %L, %L, %L, current_date, %L, %L)',
-      :'tenant', :'ucet', 'prijem', 1000, 'rucni', :'davka_cizi'),
-    '23514', ''));
+      :'tenant', :'ucet', 'prijem', 1000, 'csv_banka', :'davka_cizi'),
+    '23514', 'Importní dávka nepatří'));
 
 \echo ''
 \echo '-- import_davky: opakovaný upload stejného souboru se pozná --'
@@ -233,7 +244,9 @@ select pg_temp.check('druhý upload STEJNÉHO hashe stejné firmy spadne na unik
 \echo '-- import_davky: dávku referencovanou transakcí nelze smazat (restrict) --'
 -- NE `on delete set null` — viz komentář u sloupce v migraci. Dávka
 -- referencovaná transakcí musí RESTRICTovat smazání, ne tiše osirotět.
+-- Řádek výpisu zapisuje import nebo služba (viz „idempotentní import" výš).
 
+reset role;
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, zdroj, import_davka_id)
 values (:'tenant', :'ucet', 'prijem', 7700, current_date, 'csv_banka', :'davka_vlastni')
 returning id as transakce_s_davkou \gset
@@ -241,7 +254,6 @@ returning id as transakce_s_davkou \gset
 select pg_temp.check('transakce s vlastní dávkou se zapsala',
   exists (select 1 from public.transakce where id = :'transakce_s_davkou'));
 
-reset role;
 -- Viz pg_temp.spadne_fk_restrict výš — PGlite a reálný PostgreSQL se
 -- v přesném kódu RESTRICT porušení rozcházejí, kontrola přijímá oba.
 select pg_temp.check('smazání dávky, na kterou transakce odkazuje, spadne (restrict, ne set null)',

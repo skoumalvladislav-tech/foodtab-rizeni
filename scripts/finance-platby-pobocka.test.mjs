@@ -22,7 +22,7 @@
 
 import { readFileSync } from 'node:fs'
 
-const { pobockaUctu, ucetPatriRozsahu, nazevPobockyUctu, volbyPobockyUctu, CELA_FIRMA } =
+const { pobockaUctu, ucetPatriRozsahu, nazevPobockyUctu, volbyPobockyUctu, hlaskaZmenyPobockyUctu, CELA_FIRMA } =
   await import('../lib/finance-platby-pobocka.ts')
 
 let chyb = 0
@@ -138,6 +138,20 @@ ok('zapsatTransakci: na pobočce ověřuje účet přes ucetPatriRozsahu',
 const zmenit = telo(akce, 'zmenitPobockuUctu')
 ok('zmenitPobockuUctu: ověří pobočku firmy a kontroluje vrácený řádek (.select)',
   /pobockaUctu\(null,/.test(zmenit) && /aktivniPobockaFirmy\(/.test(zmenit) && /\.select\('id'\)/.test(zmenit) && /\.length !== 1/.test(zmenit))
+ok('zmenitPobockuUctu: odmítnutí databáze (připojení jiné pobočky) řekne přes hlaskaZmenyPobockyUctu(error)',
+  /chyba=\$\{encodeURIComponent\(hlaskaZmenyPobockyUctu\(error\)\)\}/.test(zmenit))
+
+console.log('\n== Přesun účtu, na který míří připojení pobočky ==')
+const hlaskaPripojeni = hlaskaZmenyPobockyUctu({ code: '23514', message: 'Na účet míří připojení jiné pobočky — nejdřív ho odpojte, pak účet přesuňte.' })
+ok('spoušť odmítla kvůli připojení → věta o odpojení připojení', /odpojte/.test(hlaskaPripojeni) && /připojení/.test(hlaskaPripojeni))
+ok('jiná chyba (i 23514 bez připojení, i žádná) → obecná věta',
+  hlaskaZmenyPobockyUctu({ code: '23514', message: 'Pobočka nepatří této firmě.' }) === 'Pobočku účtu se nepodařilo změnit.'
+    && hlaskaZmenyPobockyUctu(null) === 'Pobočku účtu se nepodařilo změnit.'
+    && hlaskaZmenyPobockyUctu({ code: '42501', message: 'připojení' }) === 'Pobočku účtu se nepodařilo změnit.')
+// Text hlášky spouště v migraci a vzor v lib se musí potkat — jinak by
+// appka hlásila jen obecnou větu.
+ok('migrace 20261119100000: hláška spouště obsahuje „připojení" (vzor hlaskaZmenyPobockyUctu)',
+  /raise exception 'Na účet míří připojení jiné pobočky/.test(zdroj('supabase/migrations/20261119100000_banka_neutralni_vrstva.sql')))
 
 for (const soubor of ['app/[rozsah]/finance/platby/import/akce.ts', 'app/[rozsah]/finance/platby/import/akce-nahled.ts']) {
   const t = zdroj(soubor)

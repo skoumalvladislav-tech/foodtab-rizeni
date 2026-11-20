@@ -10,7 +10,7 @@ import { pristupKFakturam } from '@/lib/faktury-pristup'
 import { hlaskaBrany } from '@/lib/faktury-brana'
 import { naHalere } from '@/lib/mzdy'
 import { pobockaFinanci } from '@/lib/finance-rozsah'
-import { pobockaUctu, ucetPatriRozsahu } from '@/lib/finance-platby-pobocka'
+import { hlaskaZmenyPobockyUctu, pobockaUctu, ucetPatriRozsahu } from '@/lib/finance-platby-pobocka'
 import { overitCisloUctu } from '@/lib/banka/ucet'
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>
@@ -213,7 +213,9 @@ export async function zmenitPobockuUctu(formData: FormData): Promise<void> {
     .eq('tenant_id', tenantId)
     .select('id')
   if (error || (zmenene ?? []).length !== 1) {
-    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent('Pobočku účtu se nepodařilo změnit.')}`)
+    // Účet, na který míří připojení banky jiné pobočky, databáze
+    // nepřestěhuje — řekne se proč, ne jen „nepodařilo".
+    redirect(`/${rozsah}/finance/platby?chyba=${encodeURIComponent(hlaskaZmenyPobockyUctu(error))}`)
   }
 
   revalidatePath(`/${rozsah}/finance/platby`)

@@ -94,3 +94,17 @@ export function volbyPobockyUctu(
   }
   return volby
 }
+
+/**
+ * Hláška, když databáze přesun účtu na jinou pobočku odmítla. Na účet
+ * může mířit připojení banky POBOČKY (synchronizace zapisuje do účtu té
+ * pobočky) — takový účet databáze nepřestěhuje, dokud se připojení
+ * neodpojí (spoušť app.hlida_firmu_platebniho_uctu, 20261119100000).
+ * Jinak obecná věta.
+ */
+export function hlaskaZmenyPobockyUctu(chyba: { code?: string | null; message?: string | null } | null | undefined): string {
+  if (chyba?.code === '23514' && /připojení/i.test(chyba.message ?? '')) {
+    return 'Na účet míří připojení banky jiné pobočky. Nejdřív ho v Integracích odpojte, pak účet přesuňte.'
+  }
+  return 'Pobočku účtu se nepodařilo změnit.'
+}

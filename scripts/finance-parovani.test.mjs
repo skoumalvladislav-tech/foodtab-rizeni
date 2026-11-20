@@ -10,7 +10,7 @@
  * nabídla jako jistou a někdo by klikl potvrdit bez přečtení.
  */
 
-const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach, autoTransakceZRadku } = await import('../lib/finance-parovani.ts')
+const { jistotaShody, navrhnoutParovani, PRAH_NAVRHU, vybratAutomatickaParovani, dorovnatStavy, smiOznacitUhrazenou, stavPoVraceni, protistranaSedi, normalizovatVs, jeVracena, kandidatiProNavrhy, jeVKorunach, autoTransakceZRadku, platbaZBanky } = await import('../lib/finance-parovani.ts')
 const { readFileSync } = await import('node:fs')
 
 let chyb = 0
@@ -141,6 +141,27 @@ console.log('\n== Automatické párování: jen jednoznačná shoda ==')
   ok('výpis CSV bez důvěryhodné dávky → nic (CSV si může napsat kdokoli)', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)]).length === 0)
   ok('výpis CSV z dávky, kterou nahrál správce Faktur → smí', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd1' })], [f('f1', '1', 100)], { duveryhodneDavky: new Set(['d1']) }).length === 1)
   ok('… ale jen ta dávka', auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd2' })], [f('f1', '1', 100)], { duveryhodneDavky: new Set(['d1']) }).length === 0)
+  // Výpis nahraný dřív, potom stažení z banky: stažení se podruhé nezapíše
+  // a jen potvrdí řádek výpisu (transakce_potvrzeni_banky). Ten řádek je
+  // pak ta platba z banky — i v dalších bězích, ne jen při nahrání výpisu.
+  ok('výpis CSV potvrzený stažením z banky → smí (i bez důvěryhodné dávky)',
+    auto([t('t1', '1', 100, '2026-10-05', { zdroj: 'csv_banka', davkaId: 'd-stara', potvrzenoBankou: true })], [f('f1', '1', 100)]).length === 1)
+  ok('potvrzení banky u ručního zápisu nebo pokladny nic nemění → nic',
+    ['rucni', 'csv_pokladna', 'pos_adapter'].every((zdroj) =>
+      auto([t('t1', '1', 100, '2026-10-05', { zdroj, potvrzenoBankou: true })], [f('f1', '1', 100)]).length === 0))
+  {
+    const radekVypisu = { id: 'v1', vs: '1', castka_haleru: 100, protistrana: 'Dodavatel s.r.o.', protiucet: '', datum: '2026-10-05', zdroj: 'csv_banka', mena: 'CZK', smer: 'vydaj', import_davka_id: 'd-stara' }
+    ok('autoTransakceZRadku: řádek výpisu s potvrzením banky je potvrzený, bez něj ne, ruční nikdy',
+      autoTransakceZRadku(radekVypisu, new Set(['v1'])).potvrzenoBankou === true
+        && autoTransakceZRadku(radekVypisu, new Set(['jiny'])).potvrzenoBankou === false
+        && autoTransakceZRadku(radekVypisu).potvrzenoBankou === false
+        && autoTransakceZRadku({ ...radekVypisu, zdroj: 'rucni' }, new Set(['v1'])).potvrzenoBankou === false)
+    ok('platbaZBanky: potvrzený řádek výpisu ano, nepotvrzený bez dávky ne, banka_api ano, ruční ne',
+      platbaZBanky({ zdroj: 'csv_banka', davkaId: 'd-stara', potvrzenoBankou: true }, new Set())
+        && !platbaZBanky({ zdroj: 'csv_banka', davkaId: 'd-stara', potvrzenoBankou: false }, new Set())
+        && platbaZBanky({ zdroj: 'banka_api', davkaId: null }, new Set())
+        && !platbaZBanky({ zdroj: 'rucni', davkaId: null, potvrzenoBankou: true }, new Set()))
+  }
 
   ok('faktura v EUR, platba v CZK (stejné číslo) → nic', auto([t('t1', '1', 100)], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { mena: 'EUR' })]).length === 0)
   ok('platba i faktura v EUR → nic (automaticky jen Kč)', auto([t('t1', '1', 100, '2026-10-05', { mena: 'EUR' })], [f('f1', '1', 100, 'Ke kontrole úhrady', '2026-09-20', { mena: 'EUR' })]).length === 0)
@@ -216,7 +237,11 @@ console.log('\n== Protiúčet ve vlastním sloupci (Finance Fáze 0, krok 1): pr
   const uloha = readFileSync('lib/finance-automaticke-parovani.ts', 'utf8')
   const dotazUlohy = /from\('transakce'\)\s*\.select\('([^']*)'\)/.exec(uloha)?.[1] ?? ''
   ok('úloha párování: dotaz na pohyby nalezen a čte protiucet', dotazUlohy.includes('protistrana') && /\bprotiucet\b/.test(dotazUlohy))
-  ok('úloha párování: pohyby převádí autoTransakceZRadku', /transakce\.map\(autoTransakceZRadku\)/.test(uloha))
+  ok('úloha párování: pohyby převádí autoTransakceZRadku i s potvrzeními banky',
+    /transakce\.map\(\(t\) => autoTransakceZRadku\(t, potvrzeneBankou\)\)/.test(uloha))
+  ok('úloha párování: potvrzení čte z transakce_potvrzeni_banky (transakce_id) své firmy',
+    /from\('transakce_potvrzeni_banky'\)\.select\('transakce_id'\)\s*\.eq\('tenant_id', tenantId\)/.test(uloha)
+      && /potvrzeneBankou\.add\(r\.transakce_id\)/.test(uloha))
   const strankaPlateb = readFileSync('app/[rozsah]/finance/platby/page.tsx', 'utf8')
   ok('Platby: vrácení a seznam čtou protiucet a protistranu doplní číslem účtu',
     (strankaPlateb.match(/protistranaNeboUcet\(/g) ?? []).length >= 3 &&

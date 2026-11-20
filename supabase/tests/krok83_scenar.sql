@@ -166,12 +166,14 @@ reset role;
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
 values (:'tenant', :'ucet', 'vydaj', 15000, current_date, 'ABC s.r.o.', '20260099', 'banka_api', 'fio-83-001')
 returning id as transakce_api \gset
-set role authenticated;
-select set_config('test.user_id', :'majitel', false);
 
+-- Řádek výpisu (csv_banka) zapisuje import nebo služba — přímým zápisem
+-- přihlášeného jen ruční platba (20261119100000). Taky mimo authenticated.
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
 values (:'tenant', :'ucet', 'vydaj', 15000, current_date, 'ABC s.r.o.', '20260099', 'csv_banka', 'csv-radek-83-001')
 returning id as transakce_csv \gset
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
 
 select transakce_a, transakce_b from public.mozne_duplicity_transakci(:'tenant')
   where transakce_a in (:'transakce_api', :'transakce_csv') or transakce_b in (:'transakce_api', :'transakce_csv') \gset
@@ -183,9 +185,12 @@ select pg_temp.check('stejné datum/částka/směr/VS z JINÉHO zdroje se označ
 -- slučovat — zadání: „shodná částka, den a VS samy nesmí smazat dvě
 -- skutečně různé platby" — a obráceně, bez VS appka nemá signál dost
 -- silný, aby to vůbec zkoušela.
+reset role;
 insert into public.transakce (tenant_id, ucet_id, smer, castka_haleru, datum, protistrana, vs, zdroj, externi_id)
 values (:'tenant', :'ucet', 'vydaj', 15000, current_date, 'Jiná firma', '', 'csv_banka', 'csv-radek-83-002')
 returning id as transakce_jina \gset
+set role authenticated;
+select set_config('test.user_id', :'majitel', false);
 
 select pg_temp.check('transakce bez VS se do detekce duplicit NEpromítne (slabý signál, appka ho nepoužije)',
   not exists (
